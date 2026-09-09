@@ -68,3 +68,12 @@ func TestOfficialKimiK3KeepsMaxCompletionTokens(t *testing.T) {
 		t.Fatalf("official Kimi K3 wire = max_tokens %d max_completion_tokens %d", req.MaxTokens, req.MaxCompletionTokens)
 	}
 }
+
+func TestSharedWindowInputPolicyCountsReplayedReasoning(t *testing.T) {
+	if !(&client{deepseek: true}).SharedWindowInputPolicy().ReplaysOrdinaryReasoning {
+		t.Fatal("DeepSeek replays reasoning_content on every assistant turn that carries it; admission must count it")
+	}
+	if (&client{}).SharedWindowInputPolicy().ReplaysOrdinaryReasoning {
+		t.Fatal("ordinary OpenAI mode strips history reasoning and must not count it")
+	}
+}

@@ -24,6 +24,7 @@ type ProviderDescriptor struct {
 	InputPerMillion                float64  `json:"inputPerMillion,omitempty" validate:"min=0"`
 	OutputPerMillion               float64  `json:"outputPerMillion,omitempty" validate:"min=0"`
 	Vision                         bool     `json:"vision,omitempty"`
+	InputModalities                []string `json:"inputModalities,omitempty"`
 	Tools                          bool     `json:"tools,omitempty"`
 	Reasoning                      bool     `json:"reasoning,omitempty"`
 	Efforts                        []string `json:"efforts,omitempty"`

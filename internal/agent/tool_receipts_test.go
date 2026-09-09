@@ -68,8 +68,8 @@ func TestTodoResultPreviewPreservesSingleProviderOrderedTerminalResult(t *testin
 	case <-time.After(2 * time.Second):
 		t.Fatal("todo result preview did not arrive while the later tool was running")
 	}
-	if results := sink.kinds(event.ToolResult); len(results) != 0 {
-		t.Fatalf("terminal ToolResult published before the batch completed: %+v", results)
+	if results := sink.kinds(event.ToolResult); len(results) != 1 || results[0].Tool.Name != "todo_write" {
+		t.Fatalf("completed todo result must be checkpointed before the next tool: %+v", results)
 	}
 
 	close(release)

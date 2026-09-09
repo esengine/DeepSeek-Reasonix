@@ -10,6 +10,34 @@ Reasonix 提供 CLI 与桌面端 **设置 → 诊断** 共用的只读能力诊�
 Commands、Hooks、插件包、MCP 服务器，以及指令文件（`AGENTS.md` /
 `REASONIX.md` / `CLAUDE.md`）。
 
+## 技能工具引用
+
+`doctor` 和 `doctor capabilities` 使用相同的自定义路径、排除路径、禁用名单和来源
+优先级，仅检查实际生效技能的 `allowed-tools`。工具清单包含编译期内置工具和宿主
+管理的工具身份。即使没有 MCP 服务器，`use_capability` 也是已知宿主工具，无需禁用
+或覆盖内置评审技能。
+
+识别出工具名称，不代表每个会话都已注册、授权或准备好执行该工具。通过代理可调用
+但未直接展示给模型的工具也包含在清单中。MCP 依赖配置仍单独检查。
+
+| 能力诊断代码 | 含义 |
+| --- | --- |
+| `skill.tool_reference_unknown` | 普通名称不在已知清单中，应检查拼写 |
+| `skill.tool_reference_invalid` | 通配符语法错误或 MCP 引用不完整 |
+| `skill.tool_reference_ambiguous` | 提供的 MCP 绑定将一个具体引用解析到多个工具 |
+| `skill.tool_reference_unverified` | 离线无法验证的动态引用或尚未匹配的通配符 |
+| `skill.mcp_dependency_missing` | 必须自动使用的技能依赖未配置的 MCP 服务器 |
+| `skill.mcp_dependency_failed` | 必需的服务器已有宿主确认的失败状态 |
+
+“未验证”在能力诊断中属于提示信息。普通 doctor 保留现有警告列表格式，并在文本中
+明确标记未验证。这些结果不授予工具权限，也不能证明服务器损坏。静态检查不会启动
+MCP 服务器或调用模型供应商。
+现有运行时宿主或显式 `--live` 探测提供 MCP 工具列表时，能力诊断会使用这些已观察到
+的工具解析可移植别名。
+别名解析沿用运行时的插件归属规则：插件技能可使用所属包的别名，普通本地技能则需
+引用具体的可调用工具名或 capability ID。诊断保留适配器的原始名称和可见名称，
+包括配置的前缀移除结果。
+
 **写入策略**
 
 | 模式 | 配置文件 | MCP stats / schema cache | 网络 / MCP 进程 |

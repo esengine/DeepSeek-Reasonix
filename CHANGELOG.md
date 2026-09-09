@@ -44,6 +44,23 @@ branch.
 
 ### Fixed
 
+- **Relay image input:** ID-only or invalid model metadata now stays unknown.
+  Both Desktop model editors expose per-model Auto / On / Off overrides, with
+  official protocol limits retained. A separate V2 discovery cache rejects stale
+  results; saved settings and runtime image serialization share one resolver and
+  apply at Controller rebuild boundaries. Legacy configuration remains readable.
+- **中转站图片输入：** 缺失或无效的模型能力显示“图片能力未识别”，两个编辑入口
+  均可逐模型选择“自动 / 开启 / 关闭”。独立 V2 缓存隔离旧错误声明并防止陈旧结果
+  覆盖；保存设置与实际图片请求统一解析，在 Controller 重建边界生效，兼容旧配置。
+
+- **Deterministic natural-turn completion:** removed the extra completion
+  validator model request. Clean model stops now finish from provider/tool state;
+  true zero-content responses retry the frozen request at the Agent step
+  boundary, while explicit host-owned readiness and safety gates remain active.
+  Legacy completion-validator configuration and `completion_uncertain` event
+  values remain readable for compatibility but are no longer produced by the
+  validator path.
+
 - **serve Host-header allowlist:** `reasonix serve` now rejects requests whose
   `Host` is neither loopback nor the actual listen address (HTTP 421), closing
   the DNS-rebinding bypass of the JSON content-type CSRF guard — a rebind page

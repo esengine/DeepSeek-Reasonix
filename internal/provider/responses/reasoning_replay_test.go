@@ -43,3 +43,27 @@ func TestStatelessRequestReplaysToolPairWithoutFabricatingReasoning(t *testing.T
 		}
 	}
 }
+
+func TestExplicitGatewayReplayContractWithoutModelGuess(t *testing.T) {
+	message := provider.Message{Role: provider.RoleAssistant, ToolCalls: []provider.ToolCall{{ID: "c", Name: "echo", Arguments: `{}`}}}
+	history := []provider.Message{{Role: provider.RoleUser, Content: "go"}, message, {Role: provider.RoleTool, Name: "echo", ToolCallID: "c", Content: "done"}}
+	for _, explicit := range []bool{false, true} {
+		cfg := Config{BaseURL: "https://gateway.example/v1", Model: "deepseek-v4-flash", Mode: "stateless", Effort: "high"}
+		if explicit {
+			cfg.Extra = map[string]any{"reasoning_protocol": "deepseek"}
+		}
+		p := New(cfg)
+		if provider.RequiresToolCallReasoning(p) != explicit {
+			t.Fatal("explicit contract not honored or model name inferred strictness")
+		}
+		if explicit {
+			if !provider.CanReplayAssistantMessage(p, message) {
+				t.Fatal("healthy missing-item fallback changed")
+			}
+			projected, changed := provider.ProjectReasoningStrippedMessages(p, history)
+			if !changed || len(projected) != 1 {
+				t.Fatalf("rejected missing proof cannot recover: %+v", projected)
+			}
+		}
+	}
+}

@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"reasonix/internal/event"
+	"reasonix/internal/i18n"
 )
 
 const (
@@ -51,7 +52,7 @@ func (a *Agent) applySoftBudget(outcomes []toolOutcome) intervention {
 		return intervention{
 			verdict:  verdictRedirect,
 			guidance: "Host budget check: this read-only planning/analysis task exceeded its soft round or elapsed-time budget. Stop expanding scope. Summarize the evidence you already have, state the remaining real blocker if any, and do not open new exploration paths unless the user asks.",
-			notice:   noticeFor(event.NoticeCodeLoopGuard, event.LevelInfo, "Converging a long read-only investigation.", "soft budget after "+trigger),
+			notice:   noticeFor(event.NoticeCodeLoopGuard, event.LevelInfo, i18n.M.SoftBudgetConverge, "soft budget after "+trigger),
 		}
 	}
 	if nudgedAt := a.turn.loop.softBudgetNudgedAt(); nudgedAt > 0 && rounds >= nudgedAt+softBudgetHardFollowup {

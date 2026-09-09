@@ -6,10 +6,13 @@ import (
 	"reasonix/internal/provider"
 )
 
-// RequiresAssistantReasoningReplay narrows GLM's broad preservation policy to
-// reasoning the endpoint actually emitted. GLM may omit reasoning on valid
-// thinking-enabled tool turns; those turns remain replayable without inventing
-// an empty chain. Kimi K3 still requires every complete assistant message.
+func hasReasoningOrToolCall(m provider.Message) bool {
+	return len(m.ToolCalls) > 0 || m.ReasoningContent != ""
+}
+
+// RequiresAssistantReasoningReplay keeps provider-issued reasoning replayable
+// on every DeepSeek-style assistant turn that carries it. Tool turns remain
+// required even when reasoning was lost because the wire accepts an empty key.
 func (c *client) RequiresAssistantReasoningReplay(m provider.Message) bool {
 	if c == nil {
 		return false
@@ -20,5 +23,12 @@ func (c *client) RequiresAssistantReasoningReplay(m provider.Message) bool {
 	if c.zhipu {
 		return strings.TrimSpace(m.ReasoningContent) != ""
 	}
-	return len(m.ToolCalls) > 0 && c.RequiresToolCallReasoning()
+	if c.deepseek {
+		return strings.TrimSpace(m.ReasoningContent) != "" ||
+			(len(m.ToolCalls) > 0 && c.RequiresToolCallReasoning())
+	}
+	if c.RequiresToolCallReasoning() {
+		return len(m.ToolCalls) > 0 || strings.TrimSpace(m.ReasoningContent) != ""
+	}
+	return false
 }

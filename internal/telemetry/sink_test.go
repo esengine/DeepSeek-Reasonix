@@ -19,6 +19,12 @@ type readinessSink struct {
 	recovery int
 }
 
+func TestIncompleteReadIsPausedNotProviderError(t *testing.T) {
+	if got := exitBucket(event.Event{Outcome: event.TurnOutcomeIncompleteRead, Err: errors.New("incomplete read")}); got != "incomplete_read" {
+		t.Fatalf("exit bucket = %q", got)
+	}
+}
+
 func (s *readinessSink) Emit(event.Event) { s.events++ }
 func (s *readinessSink) RecordReadinessAudit(evidence.ReadinessAudit) {
 	s.audits++

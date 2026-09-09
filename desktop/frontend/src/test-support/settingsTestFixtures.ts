@@ -32,6 +32,7 @@ export async function waitFor(label: string, predicate: () => boolean) {
 
 export function baseSettings(displayMode: "standard" | "compact" = "standard"): SettingsView {
   return {
+    modelSettingsFingerprint: "test-model-settings-revision",
     defaultModel: "",
     plannerModel: "",
     visionModel: "",

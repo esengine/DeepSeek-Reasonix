@@ -102,14 +102,14 @@ headers = { X-Route = "official-custom" }
 	if !ok {
 		t.Fatal("deepseek provider not saved")
 	}
-	if p.Kind != "openai" || p.BaseURL != "https://api.deepseek.com/v1" || p.APIKeyEnv != "MY_DEEPSEEK_KEY" || p.Headers["X-Route"] != "official-custom" {
+	if p.Kind != "openai" || p.BaseURL != "https://api.deepseek.com/v1" || p.APIKeyEnv == "MY_DEEPSEEK_KEY" || p.Headers["X-Route"] != "official-custom" {
 		t.Fatalf("official transport customization was overwritten: %+v", p)
 	}
 	if got := p.ModelList(); len(got) != 3 || got[0] != "deepseek-v4-flash" || got[1] != "deepseek-v4-pro" || got[2] != "deepseek-v4-flash-vision-exp" {
 		t.Fatalf("repaired model catalog = %v, want official Flash/Pro/vision models", got)
 	}
-	if !config.CredentialStored("MY_DEEPSEEK_KEY") || config.CredentialStored("DEEPSEEK_API_KEY") {
-		t.Fatal("credential was not saved exclusively under the preserved api_key_env")
+	if !config.CredentialStored(p.APIKeyEnv) || config.CredentialStored("MY_DEEPSEEK_KEY") || config.CredentialStored("DEEPSEEK_API_KEY") {
+		t.Fatal("credential was not saved exclusively under the new connection reference")
 	}
 }
 

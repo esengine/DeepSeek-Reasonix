@@ -151,7 +151,7 @@ func (m chatTUI) elicitKey(msg tea.KeyPressMsg, cmds []tea.Cmd) (tea.Model, tea.
 		switch msg.String() {
 		case "enter":
 			val := strings.TrimSpace(m.input.Value())
-			m.input.Reset()
+			m.resetComposerInput()
 			c.typing = false
 			m.refreshInputPlaceholder()
 			if val != "" {
@@ -161,7 +161,7 @@ func (m chatTUI) elicitKey(msg tea.KeyPressMsg, cmds []tea.Cmd) (tea.Model, tea.
 			return m, finalize(m, cmds), true
 		case "esc":
 			c.typing = false
-			m.input.Reset()
+			m.resetComposerInput()
 			m.refreshInputPlaceholder()
 			return m, finalize(m, cmds), true
 		}
@@ -222,7 +222,7 @@ func (m chatTUI) elicitFieldKey(key string) (tea.Model, tea.Cmd) {
 		}
 	case len(f.Enum) == 0 && f.Type != "boolean" && key == "enter":
 		c.typing = true
-		m.input.Reset()
+		m.resetComposerInput()
 		m.input.SetHeight(1)
 		m.refreshInputPlaceholder()
 	}

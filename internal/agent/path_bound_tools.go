@@ -35,6 +35,12 @@ func (p pathBoundCapabilityProxy) bindToolResultSession(session func() *Session)
 	}
 }
 
+func (p pathBoundCapabilityProxy) bindReadStrategyState(state func() *incompleteReadState) {
+	if binder, ok := p.inner.(readStrategyStateBinder); ok {
+		binder.bindReadStrategyState(state)
+	}
+}
+
 func (p pathBoundCapabilityProxy) bindMCPListObserver(observer func(mcpListObservation)) {
 	if binder, ok := p.inner.(mcpListObserverBinder); ok {
 		binder.bindMCPListObserver(observer)
@@ -114,6 +120,22 @@ func (w pathBoundWriter) DeclareWriteAccess(args json.RawMessage) (tool.WriteAcc
 		return d.DeclareWriteAccess(args)
 	}
 	return tool.WriteAccessDeclaration{}, nil
+}
+
+func (w pathBoundWriter) DeclareEvidenceTarget(ctx context.Context, args json.RawMessage) (tool.EvidenceTargetInfo, error) {
+	paths, err := extractWritePathsFromArgs(w.inner.Name(), w.workDir, args)
+	if err != nil {
+		return tool.EvidenceTargetInfo{}, err
+	}
+	for _, path := range paths {
+		if !w.claims.AllowsPath(path) {
+			return tool.EvidenceTargetInfo{}, fmt.Errorf("write target is outside declared write_paths")
+		}
+	}
+	if declarer, ok := w.inner.(tool.EvidenceDeclarer); ok {
+		return declarer.DeclareEvidenceTarget(ctx, args)
+	}
+	return tool.EvidenceTargetInfo{}, fmt.Errorf("writer does not declare evidence")
 }
 
 func (w pathBoundWriter) ResolveAnchoredTextTarget(ctx context.Context, args json.RawMessage) (tool.AnchoredTextTargetInfo, error) {

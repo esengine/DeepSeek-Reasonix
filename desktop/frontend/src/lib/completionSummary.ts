@@ -1,5 +1,6 @@
 import type { Translator } from "./i18n";
 import type { WireCompletionSummary } from "./types";
+import { normalizeCompletionReceipt, turnChangeText, turnCheckText, turnResultHasContent } from "./turnResult";
 
 function count(value: number): number {
   return Number.isFinite(value) ? Math.max(0, Math.trunc(value)) : 0;
@@ -7,14 +8,20 @@ function count(value: number): number {
 
 export function normalizeCompletionSummary(summary: WireCompletionSummary): WireCompletionSummary {
   return {
+    receipt: normalizeCompletionReceipt(summary.receipt),
+    turnId: summary.turnId,
+    checkpointTurn: Number.isSafeInteger(summary.checkpointTurn) && summary.checkpointTurn! >= 0 ? summary.checkpointTurn : undefined,
+    checking: summary.checking === true,
+    liveChecks: Array.isArray(summary.liveChecks) ? summary.liveChecks : undefined,
     preset: String(summary.preset ?? "").trim().toLowerCase(),
     verdict: String(summary.verdict ?? "").trim().toLowerCase(),
     mutations: count(summary.mutations),
+    changed_files: summary.changed_files === undefined ? undefined : count(summary.changed_files),
     checks_passed: count(summary.checks_passed),
     checks_failed: count(summary.checks_failed),
     checks_suppressed: count(summary.checks_suppressed),
     review: String(summary.review ?? "").trim().toLowerCase(),
-    gap_kinds: [...new Set((summary.gap_kinds ?? []).map((gap) => String(gap).trim().toLowerCase()).filter(Boolean))].slice(0, 8),
+    gap_kinds: [...new Set((Array.isArray(summary.gap_kinds) ? summary.gap_kinds : []).map((gap) => String(gap).trim().toLowerCase()).filter(Boolean))].slice(0, 8),
     constraint_degraded: Boolean(summary.constraint_degraded),
     floor: String(summary.floor ?? "").trim().toLowerCase(),
     attention: Boolean(summary.attention),
@@ -44,37 +51,16 @@ export function completionSummaryNeedsAttention(
   return false;
 }
 
-export function completionSummaryNotice(summary: WireCompletionSummary, t: Translator): { title: string; body: string } {
-  const kinds = new Set((summary.gap_kinds ?? []).map((gap) => gap.trim().toLowerCase()).filter(Boolean));
-  if (summary.verdict === "blocked") {
-    return { title: t("completion.verdictBlocked"), body: t("notice.completionGapsBody") };
-  }
-  if (kinds.has("failed_verification") || summary.checks_failed > 0) {
-    return { title: t("notice.completionFailedTitle"), body: t("notice.completionFailedBody") };
-  }
-  if (summary.checks_suppressed > 0 || kinds.has("suppressed") || kinds.has("suppressed_requirement")) {
-    return { title: t("notice.completionAttentionTitle"), body: t("notice.completionGapsBody") };
-  }
-  return { title: t("notice.completionDeliveryTitle"), body: t("notice.completionDeliveryBody") };
-}
-
-export function completionSummaryChangeNotice(summary: WireCompletionSummary, t: Translator): { title: string; body: string } {
-  return {
-    title: t("notice.completionChangesTitle"),
-    body: t("notice.completionChangesBody", { count: String(summary.mutations) }),
-  };
-}
 
 export function completionSummaryPresentation(
   summary: WireCompletionSummary,
   fallbackFloor: "standard" | "delivery",
   t: Translator,
 ): { level: "info" | "warn"; title: string; body: string } | undefined {
-  if (completionSummaryNeedsAttention(summary, fallbackFloor)) {
-    return { level: "warn", ...completionSummaryNotice(summary, t) };
-  }
-  if (summary.mutations > 0) {
-    return { level: "info", ...completionSummaryChangeNotice(summary, t) };
-  }
-  return undefined;
+  if (!turnResultHasContent(summary)) return undefined;
+  return {
+    level: completionSummaryNeedsAttention(summary, fallbackFloor) ? "warn" : "info",
+    title: t("notice.completionChangesTitle"),
+    body: `${turnChangeText(summary, t)}\n${turnCheckText(summary, t)}`,
+  };
 }

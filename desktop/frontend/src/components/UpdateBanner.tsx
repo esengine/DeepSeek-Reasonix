@@ -3,9 +3,27 @@ import { useT } from "../lib/i18n";
 import { useUpdater } from "../lib/useUpdater";
 
 const MB = 1024 * 1024;
+const UPDATE_REFRESH_INTERVAL_MS = 60 * 60 * 1000;
 const mb = (n: number) => (n / MB).toFixed(1);
 
-// UpdateBanner checks for an update once on mount and, when one is available,
+export function subscribeToUpdateRefresh(
+  refresh: () => void,
+  intervalMs = UPDATE_REFRESH_INTERVAL_MS,
+): () => void {
+  const refreshVisible = () => {
+    if (document.visibilityState === "visible") refresh();
+  };
+  const interval = window.setInterval(refreshVisible, intervalMs);
+  window.addEventListener("focus", refreshVisible);
+  document.addEventListener("visibilitychange", refreshVisible);
+  return () => {
+    window.clearInterval(interval);
+    window.removeEventListener("focus", refreshVisible);
+    document.removeEventListener("visibilitychange", refreshVisible);
+  };
+}
+
+// UpdateBanner checks on mount and while the app remains open and, when one is available,
 // shows a dismissible top banner with a single "update and restart" action
 // (or, on macOS manual builds, links out to the download page). It renders
 // nothing while idle, checking, or already current. A failed check can be
@@ -18,13 +36,20 @@ export function UpdateBanner({
   onShowReleaseNotes?: (version: string) => void;
 }) {
   const t = useT();
-  const { status, check, apply, openDownload, abandonPending, reset } = useUpdater();
+  const { status, check, refresh, apply, openDownload, abandonPending, reset } = useUpdater();
   const [dismissed, setDismissed] = useState<string | null>(null);
 
   useEffect(() => {
     if (!enabled) return;
     void check();
   }, [check, enabled]);
+
+  useEffect(() => {
+    if (!enabled) return;
+    return subscribeToUpdateRefresh(() => {
+      void refresh();
+    });
+  }, [enabled, refresh]);
 
   if (!enabled) return null;
 

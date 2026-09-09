@@ -151,6 +151,9 @@ func writeACPFixture(t *testing.T, dir string) {
 	if err := os.WriteFile(filepath.Join(dir, "reasonix.toml"), []byte(`
 default_model = "local/fake-model"
 
+[agent]
+completion_validation = "off"
+
 [environment]
 enabled = false
 

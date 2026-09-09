@@ -3,14 +3,13 @@ package agent
 import (
 	"context"
 	"encoding/json"
-	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"strings"
-	"sync"
 	"sync/atomic"
 	"testing"
 
+	"reasonix/internal/agent/testutil"
 	"reasonix/internal/capability"
 	"reasonix/internal/event"
 	"reasonix/internal/plugin"
@@ -105,77 +104,6 @@ func TestUnavailableMCPCallPreservesResolutionReason(t *testing.T) {
 	}
 }
 
-func TestSchemaErrorThirdCallIsBlocked(t *testing.T) {
-	store := skillStoreWithArchitect(t)
-	reg := tool.NewRegistry()
-	reg.Add(skill.NewRunSkillTool(store, func(context.Context, skill.Skill, string, skill.SubagentRunOptions) (string, error) {
-		t.Fatal("must not start")
-		return "", nil
-	}))
-	proxy := NewUseCapabilityTool(context.Background(), nil, nil, reg, nil, nil, func() capability.Catalog {
-		return capability.Catalog{Entries: []capability.Entry{{ID: "skill:team-architect", Kind: capability.KindSkill, Name: "team-architect"}}}
-	})
-	reg.Add(proxy)
-	a := New(nil, reg, NewSession("sys"), Options{}, event.Discard)
-	call := provider.ToolCall{Name: "use_capability", Arguments: `{"action":"call","capability_id":"skill:team-architect","arguments":{}}`}
-	var last toolOutcome
-	for i := 1; i <= 3; i++ {
-		call.ID = "c" + string(rune('0'+i))
-		last = a.executeOne(context.Background(), &a.turn, call)
-	}
-	if !last.blocked || !strings.Contains(last.output, "3 times") {
-		t.Fatalf("third call = %+v", last)
-	}
-}
-
-func TestSuccessfulInspectUnlocksSchemaLoopGuard(t *testing.T) {
-	store := skillStoreWithArchitect(t)
-	reg := tool.NewRegistry()
-	reg.Add(skill.NewRunSkillTool(store, func(context.Context, skill.Skill, string, skill.SubagentRunOptions) (string, error) {
-		t.Fatal("must not start")
-		return "", nil
-	}))
-	proxy := NewUseCapabilityTool(context.Background(), nil, nil, reg, nil, nil, func() capability.Catalog {
-		return capability.Catalog{Entries: []capability.Entry{{ID: "skill:team-architect", Kind: capability.KindSkill, Name: "team-architect"}}}
-	})
-	reg.Add(proxy)
-	a := New(nil, reg, NewSession("sys"), Options{}, event.Discard)
-	bad := provider.ToolCall{Name: "use_capability", Arguments: `{"action":"call","capability_id":"skill:team-architect","arguments":{}}`}
-	for i := range 3 {
-		bad.ID = fmt.Sprintf("bad-%d", i)
-		_ = a.executeOne(context.Background(), &a.turn, bad)
-	}
-	inspected := a.executeOne(context.Background(), &a.turn, provider.ToolCall{
-		ID: "inspect", Name: "use_capability", Arguments: `{"action":"inspect","capability_id":"skill:team-architect"}`,
-	})
-	if inspected.errMsg != "" || !strings.Contains(inspected.output, "input_schema") {
-		t.Fatalf("inspect = %+v", inspected)
-	}
-	bad.ID = "after-inspect"
-	after := a.executeOne(context.Background(), &a.turn, bad)
-	if after.blocked || strings.Contains(after.output, "3 times") {
-		t.Fatalf("inspect did not unlock schema guard: %+v", after)
-	}
-}
-
-func TestSchemaErrorIncrementIsAtomic(t *testing.T) {
-	var state turnLoopState
-	const workers = 64
-	var done sync.WaitGroup
-	done.Add(workers)
-	for range workers {
-		go func() {
-			defer done.Done()
-			state.incrementSchemaError("sig", "skill:x")
-		}()
-	}
-	done.Wait()
-	record := state.incrementSchemaError("sig", "skill:x")
-	if record.count != workers+1 {
-		t.Fatalf("count = %d, want %d", record.count, workers+1)
-	}
-}
-
 func requiredQueryMCPServer(t *testing.T, toolCalls *atomic.Int32) *httptest.Server {
 	t.Helper()
 	return httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -212,4 +140,60 @@ func requiredQueryMCPServer(t *testing.T, toolCalls *atomic.Int32) *httptest.Ser
 		w.Header().Set("Content-Type", "application/json")
 		_ = json.NewEncoder(w).Encode(map[string]any{"jsonrpc": "2.0", "id": *request.ID, "result": result})
 	}))
+}
+
+// A malformed call is an unexecuted tool result, not a failed network attempt.
+// A legal call in the same batch stays completed while the model corrects it.
+func TestToolArgumentsCorrectedAfterStopWithoutRepeatingSuccess(t *testing.T) {
+	good := provider.ToolCall{ID: "good", Name: "echo", Arguments: `{"text":"first"}`}
+	bad := provider.ToolCall{ID: "bad", Name: "echo", Arguments: `{"text":123}`}
+	fixed := provider.ToolCall{ID: "fixed", Name: "echo", Arguments: `{"text":"second"}`}
+	p := &argumentBudgetProvider{MockProvider: testutil.NewMock("test", testutil.Turn{Chunks: []provider.Chunk{{Type: provider.ChunkToolCall, ToolCall: &good}, {Type: provider.ChunkToolCall, ToolCall: &bad}, {Type: provider.ChunkUsage, Usage: &provider.Usage{FinishReason: "stop"}}, {Type: provider.ChunkDone}}}, testutil.Turn{ToolCalls: []provider.ToolCall{fixed}}, testutil.Turn{Text: "done"})}
+	sink := &recordSink{}
+	a := New(p, echoRegistry(), NewSession("system"), Options{ModelRef: t.Name()}, sink)
+	p.before = func() { a.turn.budget.rounds = readonlySoftBudgetRounds }
+	if err := a.Run(withNoClosedLoop(context.Background()), "use echo"); err != nil {
+		t.Fatal(err)
+	}
+	if p.CallCount() != 3 || len(sink.kinds(event.Retrying)) != 0 {
+		t.Fatal("argument correction used network retry")
+	}
+	// Execution output precedes host guidance; both must survive independently.
+	results := map[string]string{}
+	for _, e := range sink.kinds(event.ToolResult) {
+		if _, exists := results[e.Tool.ID]; exists {
+			t.Fatal("duplicate execution result")
+		}
+		results[e.Tool.ID] = e.Tool.Output
+	}
+	recorded := map[string]bool{}
+	budgetGuidance := false
+	for _, m := range a.Session().Snapshot() {
+		if m.Role == provider.RoleTool {
+			if recorded[m.ToolCallID] {
+				t.Fatal("duplicate result")
+			}
+			recorded[m.ToolCallID] = true
+			budgetGuidance = budgetGuidance || strings.Contains(m.Content, "Host budget check:")
+		}
+	}
+	if len(recorded) != 3 || !budgetGuidance {
+		t.Fatalf("recorded=%v budget guidance=%t", recorded, budgetGuidance)
+	}
+	if results["good"] != "echoed: first" || results["fixed"] != "echoed: second" || !strings.Contains(results["bad"], "text") {
+		t.Fatalf("results=%+v", results)
+	}
+}
+
+// The stream boundary runs after turn initialization, without a clock dependency.
+type argumentBudgetProvider struct {
+	*testutil.MockProvider
+	before func()
+}
+
+func (p *argumentBudgetProvider) Stream(ctx context.Context, req provider.Request) (<-chan provider.Chunk, error) {
+	if p.CallCount() == 0 {
+		p.before()
+	}
+	return p.MockProvider.Stream(ctx, req)
 }

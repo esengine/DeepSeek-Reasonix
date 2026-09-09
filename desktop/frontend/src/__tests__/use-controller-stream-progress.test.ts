@@ -78,7 +78,7 @@ function ev(s: typeof initialState, e: WireEvent) {
       attention: true,
     },
   });
-  eq(after.items.length, complete.items.length + 1, "actionable completion summary adds one compact transcript notice");
+  eq(after.items.length, complete.items.length, "summary refresh replaces the same result notice");
   const notice = after.items[after.items.length - 1];
   eq(notice?.kind === "notice" ? notice.variant : "", "completion", "quality gap uses the completion notice variant");
   eq(notice?.kind === "notice" ? notice.action : "", "open_changes", "quality gap links to the change panel");
@@ -114,7 +114,7 @@ function ev(s: typeof initialState, e: WireEvent) {
     },
   });
   const suppressedNotice = suppressed.items[suppressed.items.length - 1];
-  eq(suppressedNotice?.kind === "notice" ? suppressedNotice.title : "", "This turn still needs attention", "required suppression uses a generic attention notice");
+  eq(suppressedNotice?.kind === "notice" ? suppressedNotice.title : "", "Turn result", "required suppression retains the fixed result title");
 
   const restarted = ev(after, { kind: "turn_started" });
   eq(restarted.completionSummary, undefined, "a new turn clears the previous turn's quality details");
@@ -375,6 +375,11 @@ function ev(s: typeof initialState, e: WireEvent) {
   s = ev(s, { kind: "retrying", retryAttempt: 3, retryMax: 10 } as WireEvent);
   eq(s.retry?.attempt, 3, "retry status keeps the current attempt");
   eq(s.retry?.max, 10, "retry status keeps the retry budget");
+  const recovery = { phase: "headers", next_attempt_at: Date.now() + 60_000, waited_ms: 14_000, waiting: true };
+  s = ev(s, { kind: "retrying", retryAttempt: 4, retryMax: 3, recovery } as WireEvent);
+  eq(s.retry?.recovery?.waiting, true, "continuous wait survives the controller projection");
+  eq(s.retry?.recovery?.next_attempt_at, recovery.next_attempt_at, "countdown uses the provider recovery deadline");
+
   eq(s.running, true, "retry event restores the active turn");
   eq(s.turnActive, true, "retry event restores the turn epoch");
   eq(s.cancellable, true, "retry event keeps Stop and Escape cancellation available");
@@ -417,6 +422,27 @@ function ev(s: typeof initialState, e: WireEvent) {
   });
   eq(s.running, false, "fresh idle snapshot can reconcile a missed turn_done");
   eq(s.retry, undefined, "fresh idle snapshot clears the retry indicator");
+}
+
+// --- 4b. runtime status sequence is monotonic within a controller epoch ---
+{
+  let s = { ...initialState, running: true, turnActive: true };
+  s = reducer(s, {
+    type: "backend_status", running: true, turnId: "turn-new", runtimeEpoch: "epoch-a", turnEventSeq: 12,
+  });
+  const stale = reducer(s, {
+    type: "backend_status", running: false, runtimeEpoch: "epoch-a", turnEventSeq: 11,
+  });
+  eq(stale.running, true, "older idle runtime snapshot cannot hide a newer running turn");
+  eq(stale.activeTurnId, "turn-new", "older runtime snapshot cannot clear the active turn");
+  const duplicate = reducer(s, {
+    type: "backend_status", running: false, runtimeEpoch: "epoch-a", turnEventSeq: 12,
+  });
+  eq(duplicate.running, true, "duplicate runtime sequence cannot mutate turn state");
+  const rebuilt = reducer(stale, {
+    type: "backend_status", running: false, runtimeEpoch: "epoch-b", turnEventSeq: 1,
+  });
+  eq(rebuilt.running, false, "a new controller epoch may settle from its first snapshot");
 }
 
 // --- 5. TPS telemetry excludes tool gaps and preserves fallback estimates ---

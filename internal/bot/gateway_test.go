@@ -881,7 +881,7 @@ func TestGatewayNewSessionRemembersRotatedSessionPath(t *testing.T) {
 
 func TestGatewayRecoveryRebindsLeaseAndRemembersSessionPath(t *testing.T) {
 	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
-	dir := t.TempDir()
+	dir := schemaOneTempDir(t)
 	originalPath := filepath.Join(dir, "session.jsonl")
 
 	disk := agent.NewSession("sys")

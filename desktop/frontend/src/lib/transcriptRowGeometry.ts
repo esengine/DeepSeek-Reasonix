@@ -1,4 +1,5 @@
 import type { ResolvedReasoningDisplayMode } from "./reasoningDisplayPreference";
+import type { SessionExperience, WorkProcessPresentation } from "./sessionExperience";
 import { estimateTranscriptTextHeight } from "./transcriptRowEstimates";
 import type { TranscriptRow, ToolItem } from "./transcriptRows";
 
@@ -54,9 +55,12 @@ export const TRANSCRIPT_COMPACT_HEIGHTS = {
 const EXPANDED_TEXT_HEIGHT_CAP = 6_000;
 
 export function resolveReasoningLayoutVariant(
-  mode: ResolvedReasoningDisplayMode,
+  mode: ResolvedReasoningDisplayMode | SessionExperience,
   running: boolean,
 ): Extract<TranscriptRowLayoutVariant, `reasoning-${string}`> | null {
+  if (mode === "standard" || mode === "deep") {
+    return mode === "deep" || running ? "reasoning-expanded" : "reasoning-summary";
+  }
   if (mode === "hidden" || mode === "pending") return null;
   if (mode === "expanded" || (mode === "auto" && running)) return "reasoning-expanded";
   if (mode === "legacy-collapsed") return "reasoning-heading-only";
@@ -67,11 +71,19 @@ export function resolveReasoningLayoutVariant(
 export function resolveToolCardDefaultOpen(
   item: ToolItem,
   nestedCount: number,
-  reasoningDisplayMode: ResolvedReasoningDisplayMode,
+  reasoningDisplayMode: ResolvedReasoningDisplayMode | SessionExperience | WorkProcessPresentation,
 ): boolean {
+  const experience = typeof reasoningDisplayMode === "object"
+    ? reasoningDisplayMode.experience
+    : reasoningDisplayMode === "deep" || reasoningDisplayMode === "expanded"
+      ? "deep"
+      : "standard";
   const subagentReasoningRunning = item.subagentProgress?.phase === "reasoning";
-  const liveFollow = reasoningDisplayMode === "auto" || reasoningDisplayMode === "expanded";
-  const keepSubagentReasoningExpanded = reasoningDisplayMode === "expanded" && Boolean(item.subagentProgress?.reasoning);
+  const liveFollow = true;
+  // Deep mode exposes the complete tool process by default. Cards without a
+  // body remain visually unchanged, while body-bearing cards/groups can still
+  // be manually collapsed by the user.
+  const keepSubagentReasoningExpanded = experience === "deep";
   return (nestedCount > 0 && item.status === "running")
     || (liveFollow && Boolean(item.subagentProgress) && item.status === "running")
     || (liveFollow && subagentReasoningRunning)

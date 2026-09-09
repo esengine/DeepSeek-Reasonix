@@ -16,7 +16,7 @@ import { fileURLToPath } from "node:url";
 const testDir = dirname(fileURLToPath(import.meta.url));
 // Strip comments so declaration parsing never matches prose inside them.
 const styles = readFileSync(resolve(testDir, "../styles.css"), "utf8").replace(/\/\*[\s\S]*?\*\//g, "");
-const appSource = readFileSync(resolve(testDir, "../App.tsx"), "utf8");
+const appSource = readFileSync(resolve(testDir, "../app-shell/AppRuntimeView.tsx"), "utf8");
 const composerSource = readFileSync(resolve(testDir, "../components/Composer.tsx"), "utf8");
 
 let passed = 0;

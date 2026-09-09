@@ -29,7 +29,7 @@ func NewParallelTasksTool(taskTool *TaskTool, reg *tool.Registry) *ParallelTasks
 	return &ParallelTasksTool{taskTool: taskTool}
 }
 
-func (p *ParallelTasksTool) Name() string { return "parallel_tasks" }
+func (p *ParallelTasksTool) Name() string { return tool.HostParallelTasks }
 
 func (p *ParallelTasksTool) Description() string {
 	return "Dispatch multiple read-only sub-agent tasks concurrently. Blocks until all complete, then returns a bounded preview and a stable Subagent reference for every completed persisted child; use read_subagent_result to page through any full answer without combined-result truncation."

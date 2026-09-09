@@ -182,6 +182,12 @@ func TestEmitProjectTreeChangedDoesNotBlockOnRuntimeEventsEmit(t *testing.T) {
 			} else if event, ok := payload[0].(ProjectTreeRuntimeSnapshot); !ok || event.Topics == nil || event.Revision == 0 {
 				t.Errorf("runtime payload = %#v, want a versioned snapshot with [] topics", payload[0])
 			}
+		case "runtime-state:changed":
+			if len(payload) != 1 {
+				t.Errorf("unified runtime payload count = %d", len(payload))
+			} else if snapshot, ok := payload[0].(RuntimeStateProjection); !ok || snapshot.Sessions == nil || snapshot.Revision == 0 {
+				t.Errorf("invalid unified runtime snapshot: %#v", payload[0])
+			}
 		case "project-tree:changed":
 			legacyCalls.Add(1)
 			if len(payload) != 0 {

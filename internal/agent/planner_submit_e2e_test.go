@@ -170,9 +170,9 @@ func TestSubmittedPlanWithoutApprovalRunsStraightThrough(t *testing.T) {
 	}
 }
 
-// A planner that ignores submit_plan must still work: the text path is the
-// fallback, not a broken state.
-func TestPlannerThatWritesProseStillReachesTheExecutor(t *testing.T) {
+// A planner that ignores submit_plan fails the turn as a protocol error: the
+// prose path is gone, and its text never reaches the executor.
+func TestPlannerWithoutSubmitPlanFailsAsProtocolError(t *testing.T) {
 	planner := &mockProvider{name: "planner", chunks: []provider.Chunk{
 		{Type: provider.ChunkText, Text: "1. edit the cache key\n2. run the tests"},
 		{Type: provider.ChunkDone},
@@ -183,14 +183,12 @@ func TestPlannerThatWritesProseStillReachesTheExecutor(t *testing.T) {
 	}}
 	coord, _ := submitPlanCoordinator(t, planner, exec, event.Discard)
 
-	if err := coord.Run(withNoClosedLoop(context.Background()), "fix the cache key"); err != nil {
-		t.Fatalf("Run: %v", err)
+	err := coord.Run(withNoClosedLoop(context.Background()), "fix the cache key")
+	if err == nil || !strings.Contains(err.Error(), plannerProtocolError) {
+		t.Fatalf("Run = %v, want the planner protocol error", err)
 	}
-	if len(exec.requests) == 0 {
-		t.Fatal("executor never ran on the prose fallback")
-	}
-	if got := lastUser(exec.requests[0]); !strings.Contains(got, "edit the cache key") {
-		t.Errorf("executor handoff = %q, want the planner's prose plan", got)
+	if len(exec.requests) != 0 {
+		t.Fatal("executor ran on planner prose without a submitted plan")
 	}
 }
 

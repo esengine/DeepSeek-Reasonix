@@ -248,13 +248,13 @@ func TestCredentialProxyReconnectRegistersTrackedWorkspaces(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	otherToken, err := app.credentialProxyModelToken("box", "~/other", cfg.DefaultModel)
+	other, err := app.applyCredentialProxyModel("box", "~/other", cfg.DefaultModel)
 	if err != nil {
 		t.Fatal(err)
 	}
 	app.credProxy.mu.Lock()
 	defer app.credProxy.mu.Unlock()
-	if info.token == "" || app.credProxy.routes[info.token] == nil || app.credProxy.routes[otherToken] == nil {
+	if info.token == "" || app.credProxy.routes[info.token] == nil || app.credProxy.routes[other.token] == nil {
 		t.Fatalf("tracked routes were not registered together: current=%q count=%d", info.token, len(app.credProxy.routes))
 	}
 }
@@ -430,11 +430,8 @@ func TestCredentialModeConfigRoundTrip(t *testing.T) {
 	}
 }
 
-// TestSaveProviderCredentialRefreshesEveryModelRoute: old model tokens can
-// remain active in detached/background controllers, so rotating a provider key
-// must update all registered routes rather than only the workspace's latest
-// model.
-func TestSaveProviderCredentialRefreshesEveryModelRoute(t *testing.T) {
+// Detached/background controllers retain the connection captured at admission.
+func TestSaveProviderCredentialPreservesEveryOldModelRoute(t *testing.T) {
 	isolateDesktopUserDirs(t)
 	const keyEnv = "TEST_PROXY_REFRESH_KEY"
 	setDesktopTestCredential(t, keyEnv, "sk-before-rotation")
@@ -464,17 +461,26 @@ func TestSaveProviderCredentialRefreshesEveryModelRoute(t *testing.T) {
 	}
 	for _, route := range []credentialProxyRouteInfo{first, second} {
 		requestCredentialProxy(t, route.port, route.token)
-		if got := <-auth; got != "Bearer sk-after-rotation" {
-			t.Fatalf("refreshed upstream auth = %q, want rotated credential", got)
+		if got := <-auth; got != "Bearer sk-before-rotation" {
+			t.Fatalf("old route changed credential: %q", got)
 		}
+	}
+	latest, err := a.applyCredentialProxyModel("box", "~/app", firstRef)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if latest.token == first.token {
+		t.Fatal("rotated credential reused an old token")
+	}
+	requestCredentialProxy(t, latest.port, latest.token)
+	if got := <-auth; got != "Bearer sk-after-rotation" {
+		t.Fatalf("new route credential: %q", got)
 	}
 }
 
-// TestCredentialProxySerializesResolveAndPublish pins the latest-save-wins
-// boundary: a newer route update queued while an older credential resolution
-// is in progress must publish last. Channel gates make the overlap exact and
-// avoid scheduler sleeps.
-func TestCredentialProxySerializesResolveAndPublish(t *testing.T) {
+// Registration is serialized and a published token remains immutable even if
+// a competing caller tries to reuse it with a different connection.
+func TestCredentialProxyRejectsRouteReplacementDuringRegistration(t *testing.T) {
 	auth := make(chan string, 1)
 	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		auth <- r.Header.Get("Authorization")
@@ -525,8 +531,8 @@ func TestCredentialProxySerializesResolveAndPublish(t *testing.T) {
 	if recorder.Code != http.StatusOK {
 		t.Fatalf("status = %d, want 200", recorder.Code)
 	}
-	if got := <-auth; got != "Bearer sk-newer" {
-		t.Fatalf("final upstream auth = %q, want the newer credential", got)
+	if got := <-auth; got != "Bearer sk-older" {
+		t.Fatalf("published token changed credential: %q", got)
 	}
 }
 

@@ -21,6 +21,7 @@ export function useComposerInboxRefresh(
   applyQueue: (items: PendingGuidance[]) => void,
   collapse: () => void,
   bump: () => void,
+  runtimeRevision?: number,
 ) {
   const inboxSessionKeyRef = useRef(inboxSessionKey);
   const appliedRevisionRef = useRef<{ scope: string; revision: number }>({ scope: inboxSessionKey, revision: -1 });
@@ -66,5 +67,5 @@ export function useComposerInboxRefresh(
       if (live) applyQueue(localGuidanceFallback(previewKey));
     });
     return () => { live = false; };
-  }, [draftKey, guidanceDraftKey, previewKey, running, tabId, retryNonce, inboxSessionKey, applyQueue, collapse]);
+  }, [draftKey, guidanceDraftKey, previewKey, running, tabId, retryNonce, inboxSessionKey, applyQueue, collapse, runtimeRevision]);
 }

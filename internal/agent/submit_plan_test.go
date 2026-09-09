@@ -122,22 +122,17 @@ func TestSubmitPlanIsReadOnlyAndInThePlannerRegistry(t *testing.T) {
 }
 
 func TestPlannerOutcomeReadsApprovalFromTheFieldWhenStructured(t *testing.T) {
-	// The prose fallback would gate on the phrase; the structured plan must not.
-	prose := "The plan is ready. Waiting for approval before I continue."
+	// requires_approval is the only approval source; rendered prose never gates.
 	structured := plannerOutcome{
-		text:       prose,
-		structured: true,
-		plan:       plancontract.Plan{Objective: "o", Steps: []plancontract.Step{{Title: "do it"}}},
+		text: "The plan is ready. Waiting for approval before I continue.",
+		plan: plancontract.Plan{Objective: "o", Steps: []plancontract.Step{{Title: "do it"}}},
 	}
 	if structured.requestsApproval() {
-		t.Fatal("a structured plan must gate on requires_approval, not on its rendered prose")
+		t.Fatal("approval prose must not gate a plan whose requires_approval is false")
 	}
 	structured.plan.RequiresApproval = true
 	if !structured.requestsApproval() {
 		t.Fatal("requires_approval must gate execution")
-	}
-	if fallback := (plannerOutcome{text: prose}).requestsApproval(); !fallback {
-		t.Fatal("the unstructured path must keep its phrase fallback")
 	}
 }
 

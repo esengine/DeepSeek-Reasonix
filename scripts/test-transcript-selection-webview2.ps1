@@ -6,7 +6,8 @@ param(
     [string]$PreviewFrontendRoot = "",
     [string]$Commit = "",
     [int]$Width = 1200,
-    [int]$Height = 800
+    [int]$Height = 800,
+    [int]$TimeoutSeconds = 180
 )
 
 $ErrorActionPreference = "Stop"
@@ -33,6 +34,7 @@ New-Item -ItemType Directory -Path $artifactRoot -Force | Out-Null
 $previewOut = Join-Path $artifactRoot "preview.stdout.log"
 $previewErr = Join-Path $artifactRoot "preview.stderr.log"
 $nativeLog = Join-Path $artifactRoot "native.log"
+$nativeErrorLog = Join-Path $artifactRoot "native.stderr.log"
 $resultPath = Join-Path $artifactRoot "result.json"
 $testedCommit = if ($Commit) { $Commit } elseif ($env:GITHUB_SHA) { $env:GITHUB_SHA } else { "local" }
 $url = "http://127.0.0.1:$Port/?mock=bench&bench=1"
@@ -72,25 +74,44 @@ try {
     }
 
     Push-Location $desktopRoot
+    $smoke = $null
     try {
-        $nativeErrorPreference = $ErrorActionPreference
-        $ErrorActionPreference = "Continue"
-        & go run -tags reasonix_transcript_smoke ./cmd/transcript-selection-smoke `
-            -url $url `
-            -script "transcript_selection_smoke_contract.js" `
-            -artifacts $artifactRoot `
-            -result-file $resultPath `
-            -iterations $Iterations `
-            -width $Width `
-            -height $Height `
-            -commit $testedCommit 2>&1 | Tee-Object -FilePath $nativeLog
-        $nativeExitCode = $LASTEXITCODE
-        $ErrorActionPreference = $nativeErrorPreference
-        if ($nativeExitCode -ne 0) {
-            throw "native transcript selection smoke failed with exit code $nativeExitCode"
+        # Start-Process owns the whole native tree (go -> smoke binary ->
+        # msedgewebview2) so a hung child can be killed by PID. A hung child
+        # outlives the step's own timeout on Windows and keeps the job, and
+        # the workflow's concurrency group, alive.
+        $smoke = Start-Process -FilePath "go" -NoNewWindow -PassThru `
+            -WorkingDirectory $desktopRoot `
+            -RedirectStandardOutput $nativeLog `
+            -RedirectStandardError $nativeErrorLog `
+            -ArgumentList @(
+                "run", "-tags", "reasonix_transcript_smoke", "./cmd/transcript-selection-smoke",
+                "-url", "`"$url`"",
+                "-script", "transcript_selection_smoke_contract.js",
+                "-artifacts", "`"$artifactRoot`"",
+                "-result-file", "`"$resultPath`"",
+                "-iterations", "$Iterations",
+                "-width", "$Width",
+                "-height", "$Height",
+                "-commit", "$testedCommit")
+        if (-not $smoke.WaitForExit($TimeoutSeconds * 1000)) {
+            & taskkill.exe /PID $smoke.Id /T /F 2>$null | Out-Null
+            $smoke.WaitForExit(30000) | Out-Null
+            throw "native transcript selection smoke exceeded $TimeoutSeconds seconds and was killed"
+        }
+        if ($smoke.ExitCode -ne 0) {
+            throw "native transcript selection smoke failed with exit code $($smoke.ExitCode)"
         }
     }
     finally {
+        if ($null -ne $smoke -and -not $smoke.HasExited) {
+            & taskkill.exe /PID $smoke.Id /T /F 2>$null | Out-Null
+        }
+        foreach ($logPath in @($nativeLog, $nativeErrorLog)) {
+            if (Test-Path -LiteralPath $logPath) {
+                Get-Content -LiteralPath $logPath | Write-Host
+            }
+        }
         Pop-Location
     }
 }

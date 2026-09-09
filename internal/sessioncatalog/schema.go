@@ -196,6 +196,48 @@ CREATE INDEX IF NOT EXISTS idx_catalog_sessions_workspace_ordinary
 ON catalog_sessions(scope, workspace_root_key, ordinary_visible, last_activity_at DESC);
 `
 
+// v11 persists repair scheduling in the disposable projection. A source or
+// engine generation change resets a deferred/blocked row through the normal
+// upsert path; otherwise restart preserves its retry budget.
+const migrationV11 = `
+ALTER TABLE catalog_sessions ADD COLUMN repair_state TEXT NOT NULL DEFAULT 'pending';
+ALTER TABLE catalog_sessions ADD COLUMN repair_attempts INTEGER NOT NULL DEFAULT 0;
+ALTER TABLE catalog_sessions ADD COLUMN repair_retry_at INTEGER NOT NULL DEFAULT 0;
+ALTER TABLE catalog_sessions ADD COLUMN repair_error_kind TEXT NOT NULL DEFAULT '';
+ALTER TABLE catalog_sessions ADD COLUMN repair_source_fingerprint TEXT NOT NULL DEFAULT '';
+ALTER TABLE catalog_sessions ADD COLUMN repair_engine_version INTEGER NOT NULL DEFAULT 0;
+
+UPDATE catalog_sessions SET repair_state=CASE WHEN turns_state='unknown' THEN 'pending' ELSE 'complete' END;
+CREATE INDEX IF NOT EXISTS idx_catalog_sessions_repair_due
+ON catalog_sessions(repair_state, repair_retry_at, last_activity_at DESC, path_key);
+`
+
+// migrationV12 adds the schema-2 head projection. The generation file moved
+// to v8.sqlite, and clearing the directory scans forces a rescan so every
+// existing row learns its log format.
+const migrationV12 = `
+ALTER TABLE catalog_sessions ADD COLUMN log_format INTEGER NOT NULL DEFAULT 1;
+ALTER TABLE catalog_sessions ADD COLUMN head_count INTEGER NOT NULL DEFAULT 0;
+ALTER TABLE catalog_sessions ADD COLUMN selected_head_id TEXT NOT NULL DEFAULT '';
+CREATE TABLE IF NOT EXISTS catalog_heads (
+    path_key TEXT NOT NULL,
+    head_id TEXT NOT NULL,
+    parent_head_id TEXT NOT NULL DEFAULT '',
+    kind TEXT NOT NULL DEFAULT 'main',
+    name TEXT NOT NULL DEFAULT '',
+    leaf_message_id TEXT NOT NULL DEFAULT '',
+    writer_id TEXT NOT NULL DEFAULT '',
+    last_activity_at INTEGER NOT NULL DEFAULT 0,
+    turns INTEGER NOT NULL DEFAULT 0,
+    preview TEXT NOT NULL DEFAULT '',
+    retired INTEGER NOT NULL DEFAULT 0,
+    selected INTEGER NOT NULL DEFAULT 0,
+    PRIMARY KEY(path_key, head_id)
+);
+CREATE INDEX IF NOT EXISTS idx_catalog_heads_activity ON catalog_heads(path_key, retired, last_activity_at DESC);
+DELETE FROM catalog_directories;
+`
+
 func sessionMigrations() []projectiondb.Migration {
 	return []projectiondb.Migration{
 		{Version: 1, Apply: func(ctx context.Context, tx *sql.Tx) error {
@@ -236,6 +278,14 @@ func sessionMigrations() []projectiondb.Migration {
 		}},
 		{Version: 10, Apply: func(ctx context.Context, tx *sql.Tx) error {
 			_, err := tx.ExecContext(ctx, migrationV10)
+			return err
+		}},
+		{Version: 11, Apply: func(ctx context.Context, tx *sql.Tx) error {
+			_, err := tx.ExecContext(ctx, migrationV11)
+			return err
+		}},
+		{Version: 12, Apply: func(ctx context.Context, tx *sql.Tx) error {
+			_, err := tx.ExecContext(ctx, migrationV12)
 			return err
 		}},
 	}

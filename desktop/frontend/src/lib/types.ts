@@ -1,3 +1,9 @@
+import type { ProviderCatalog } from "./providerCatalogTypes";
+export type { SettingsView } from "./settingsViewTypes";
+export type { ProviderProtocolEndpoint, ProviderCatalog, ProviderPresetView } from "./providerCatalogTypes";
+import type { WireReadStatus } from "./readStatus";
+export type { WireReadStatus } from "./readStatus";
+import type { RecoveryEventFields } from "./recoveryStatus";
 // Wire contract — mirrors desktop/wire.go (itself mirroring internal/serve/wire.go).
 // One event channel carries every kind; `kind` discriminates the payload.
 import type { HistoryServerSearch } from "./searchSources";
@@ -5,6 +11,8 @@ import type { Todo } from "./tools";
 import type { ContextBudgetInfo, ContextMaintenanceInfo, WireContextMaintenance } from "./contextMaintenanceTypes";
 import type { WireApproval } from "./approvalTypes";
 import type { RemoteProjectNodeFields, RemoteSessionMetaFields, RemoteTabMetaFields } from "./remoteTypes";
+import type { PinnedFileInfo } from "./pinnedContextBridge";
+import type { RecoveryLineageView } from "./sessionRecoveryTypes";
 export * from "./remoteTypes";
 export type { ContextBudgetInfo, ContextMaintenanceInfo, ContextMaintenanceReceipt, WireContextMaintenance } from "./contextMaintenanceTypes";
 export type { ProjectGroupsSnapshot, ProjectRuntimeTopic, ProjectTopicKey, ProjectTopicPage, ProjectTopicPageRequest, ProjectTreeChangedV2, ProjectTreeOrganizationBindings, ProjectTreeRuntimeSnapshot, ProjectTreeSnapshot, SessionCatalogBindings, SessionCatalogStatus, SessionGroup, SessionReference } from "./sessionCatalogTypes";
@@ -39,6 +47,7 @@ export type EventKind =
   | "workspace_changed"
   | "turn_phase"
   | "completion_summary"
+  | "read_status"
   | "provider_unreachable";
 export type StreamAttemptAction = "begin" | "discard" | "commit";
 export type TurnStatus = "queued" | "in_progress" | "waiting_user" | "cancelling" | "completed" | "interrupted" | "failed" | "protocol_failed";
@@ -98,6 +107,7 @@ export interface WireShellExecution {
 }
 
 export interface WireTool {
+	verifying?: boolean;
   id?: string;
   name: string;
   args?: string;
@@ -111,12 +121,12 @@ export interface WireTool {
   partial?: boolean; // an early dispatch (name only) — a full one with args follows
   argChars?: number; // partial only: cumulative argument chars streamed so far
   refreshed?: boolean; // same-ID full dispatch with a preview recomputed after an earlier write
-  parentId?: string; // set on a sub-agent's calls — the parent `task` call's id
+	parentId?: string; // set on a sub-agent's calls — the parent `task` call's id
   /** Host-local stream_attempt id for speculative parent partials only. */
   attemptId?: string;
   diff?: string;
   added?: number;
-  removed?: number;
+  removed?: number; subagentRef?: string; subagentStatus?: string; subagentErrorCode?: string; subagentRetryable?: boolean;
   profile?: WireProfile; // subagent model/effort resolved for this call
   execution?: WireShellExecution; // local shell metadata; never provider-visible
 }
@@ -131,8 +141,8 @@ export interface WireCacheDiagnostics {
   toolSchemaTokens: number;
   cacheMissTokens: number;
   cacheHitTokens: number;
+  sessionContext?: import("./sessionContextTypes").WireSessionContextDiagnostics;
 }
-
 export interface WireUsage {
   promptTokens: number;
   completionTokens: number;
@@ -245,6 +255,20 @@ export interface WireAskOption {
   description?: string;
 }
 
+export type PromptKind = "ask" | "approval" | "plan" | "recovery" | "mcp";
+export interface PromptIdentity {
+  promptId: string;
+  turnId?: string;
+  runtimeEpoch?: string;
+  kind: PromptKind;
+}
+export type PromptLifecycle = "pending" | "submitting" | "resolved" | "expired";
+export interface DecisionCardState {
+  identity: PromptIdentity;
+  lifecycle: PromptLifecycle;
+  failureNoticeShown?: boolean;
+}
+
 export interface WireAskQuestion {
   id: string;
   header?: string;
@@ -256,6 +280,8 @@ export interface WireAskQuestion {
 export interface WireAsk {
   id: string;
   questions: WireAskQuestion[];
+  turnId?: string;
+  runtimeEpoch?: string;
 }
 
 export type { MCPAppInstanceView, MCPAppPresentation } from "./mcpAppProtocol";
@@ -270,6 +296,8 @@ export interface WireMCPInteraction {
   requestedSchema?: unknown;
   url?: string;
   elicitationId?: string;
+  turnId?: string;
+  runtimeEpoch?: string;
 }
 
 // Extension UI surfaces (stage 8a) — structured-only documents published by
@@ -359,8 +387,16 @@ export interface MemoryCitation {
   kind?: string;
 }
 
-export interface WireEvent {
+export interface WireEvent extends RecoveryEventFields {
+	receipt?: WireCompletionReceipt;
+	readPause?: import("./readPause").WireReadPause;
   kind: EventKind;
+  readStatus?: WireReadStatus;
+  /** session_changed: the transcript was replaced under the same path (head switch, clear). */
+  sessionReset?: boolean;
+  promptId?: string;
+  promptKind?: "ask" | "approval" | "plan" | "recovery" | "mcp" | string;
+  promptLegacy?: boolean;
   turnId?: string;
   seq?: number;
   status?: TurnStatus;
@@ -384,10 +420,10 @@ export interface WireEvent {
   err?: string;
   checkpointTurn?: number; // Authoritative TurnDone rewind target; zero is valid.
   submissionId?: string; // Opaque correlation for the exact optimistic user submission.
-  outcome?: "completed" | "partial" | "blocked" | "final_readiness" | "recovery_paused";
+  outcome?: "completed" | "partial" | "blocked" | "final_readiness" | "recovery_paused" | "completion_uncertain" | "incomplete_read";
   readiness?: WireFinalReadiness;
-  retryAttempt?: number;
-  retryMax?: number;
+  protocolRecovery?: { id: string };
+  diagnostic?: { kind: string; status?: number; traceId?: string; providerId?: string; providerDisplayName?: string; protocol?: string; requestPath?: string };
   /** Optional: "headers" | "stream". Older clients ignore unknown fields. */
   retryScope?: "headers" | "stream" | "protocol";
   streamAttempt?: WireStreamAttempt;
@@ -400,7 +436,7 @@ export interface WireEvent {
   /** completion_summary: content-free quality summary for role settings */
   completion?: WireCompletionSummary;
   tabId?: string; // Go's tabEventSink tags events for the correct per-tab reducer.
-  runtimeEpoch?: string;
+  runtimeEpoch?: string; sessionGeneration?: number;
   /** Unix milliseconds recorded by the desktop host when this turn began. */
   turnStartedAt?: number;
   sessionHitTokens?: number;
@@ -412,9 +448,16 @@ export interface WireEvent {
 }
 
 export interface WireCompletionSummary {
+	/** Local projection fields, preserved with the historical result card. */
+	receipt?: WireCompletionReceipt;
+	turnId?: string;
+	checkpointTurn?: number;
+	checking?: boolean;
+	liveChecks?: { toolCallId: string; command: string; output?: string }[];
   preset: string;
   verdict: string;
-  mutations: number;
+	mutations: number;
+	changed_files?: number;
   checks_passed: number;
   checks_failed: number;
   checks_suppressed: number;
@@ -426,6 +469,9 @@ export interface WireCompletionSummary {
   /** Backend decision; authoritative when floor is present. */
   attention?: boolean;
 }
+
+export type { TurnFileChange, TurnChanges, WireCompletionReceipt } from "./turnResultTypes";
+import type { WireCompletionReceipt } from "./turnResultTypes";
 
 export type WorkspaceWatchState = "active" | "degraded" | "unavailable";
 export type WorkspaceChangeOp = "create" | "write" | "remove" | "rename" | "unknown";
@@ -469,6 +515,19 @@ export interface SessionRuntimeView {
   issue?: SessionRuntimeIssue;
 }
 
+/** Occupancy report for a session a local serve holds; drives the takeover dialog. */
+export interface SessionTakeoverView {
+  available: boolean;
+  reason?: string;
+  sessionPath?: string;
+  holder?: "serve" | "external" | "other" | "free";
+  remoteAttached?: boolean;
+  running?: boolean;
+  mirrored?: boolean;
+  holderPid?: number;
+  holderHost?: string;
+}
+
 export interface WireFinalReadiness {
   attempts?: number;
   missing?: string[];
@@ -491,6 +550,8 @@ export interface TabMeta extends RemoteTabMetaFields {
   sessionDigest?: string;
   sessionGeneration?: number;
   readOnly?: boolean;
+  /** Remote tab whose session a local runtime on the serve host took over. */
+  takenOver?: boolean;
   filePath?: string;
   projectColor?: string;
   label: string;
@@ -520,6 +581,9 @@ export interface TabMeta extends RemoteTabMetaFields {
   recoveryReason?: string;
   recoveryDigest?: string;
   recoveryParentId?: string;
+  versionKind?: "normal" | "recovery" | "subagent" | string;
+  versionState?: "active" | "pending" | "resolved" | "trashed" | string;
+  parentVersionId?: string;
   startupErr?: string;
   active: boolean;
   cwd: string;
@@ -554,6 +618,7 @@ export interface ProjectNode extends RemoteProjectNodeFields {
   label: string;
   root?: string;
   topicId?: string;
+  recoveryPath?: string;
   sessionPath?: string;
   preview?: string;
   projectColor?: string;
@@ -575,29 +640,13 @@ export interface ProjectNode extends RemoteProjectNodeFields {
   recoveryBranchCount?: number;
   recoveryUnresolvedCount?: number;
   recoveryCleanupEligibleCount?: number;
-  recoveryCopyCount?: number; // folded recovery copies behind this row (badge only)
+  recoveryCopyCount?: number; // Deprecated: ordinary trees hide physical copies.
   isolatedWorktree?: boolean;
   runtimeOnly?: boolean;
   children?: ProjectNode[];
 }
 
-export interface RecoveryLineageMember {
-  path: string;
-  role: "normal" | "covered_copy" | "adopted" | "preferred" | "diverged" | string;
-  canonical: boolean;
-  turns: number;
-  open: boolean;
-  running: boolean;
-}
-
-export interface RecoveryLineageView {
-  groupId: string;
-  state: string;
-  branchCount: number;
-  unresolved: number;
-  cleanupEligible: number;
-  members: RecoveryLineageMember[];
-}
+export type { RecoveryLineageMember, RecoveryLineageView } from "./sessionRecoveryTypes";
 
 export interface RecoveryCleanupRequest {
   scope: string;
@@ -611,6 +660,8 @@ export interface RecoveryPreferenceRequest {
   workspaceRoot?: string;
   topicId: string;
   path: string;
+  /** Head inside a schema-2 log; empty for file-based recovery versions. */
+  headId?: string;
 }
 
 export interface RecoveryCleanupItem {
@@ -640,12 +691,17 @@ export interface DeliveryWorktreeOpenResult {
   workspaceRoot: string;
   worktreeRoot: string;
   sourceRoot: string;
-  branch: string;
-  sourceDirty: boolean;
-  tab: TabMeta;
+	branch: string;
+	sourceDirty: boolean;
+	sourceRevision?: string;
+	taskId?: string;
+	conversationId?: string;
+	tab: TabMeta;
 }
 
-export type ProjectTopicStatus = "thinking" | "streaming" | "waiting_confirmation" | "background_job" | "paused" | "awaiting_delivery" | "error" | "diverged_recovery";
+export * from "./worktreeMergeTypes";
+
+export type ProjectTopicStatus = "thinking" | "streaming" | "finishing" | "cancelling" | "unknown" | "waiting_confirmation" | "background_job" | "paused" | "awaiting_delivery" | "error" | "diverged_recovery";
 
 export interface TopicMeta {
   id: string;
@@ -654,6 +710,9 @@ export interface TopicMeta {
 }
 
 export interface SessionRecoveryEvent {
+	conversationId?: string;
+	activeVersionId?: string;
+	recoveryVersionId?: string;
   originalPath?: string;
   recoveryPath: string;
   scope?: string;
@@ -663,11 +722,31 @@ export interface SessionRecoveryEvent {
   recoveryReason?: string;
   recoveryDigest?: string;
   recoveryParentId?: string;
-  existing?: boolean;
+	existing?: boolean;
+	baseRevision?: number;
+	diskRevision?: number;
+	canContinue?: boolean;
+	requiresChoice?: boolean;
+}
+
+export interface SessionVersionStateView {
+  conversationId?: string;
+  activeVersionId?: string;
+  activePath?: string;
+  recoveryVersionId?: string;
+  canContinue: boolean;
+  requiresChoice: boolean;
+  lineage: RecoveryLineageView;
 }
 
 export interface SessionRecoveryFailedEvent {
   reason?: "lease_held" | "lease_unavailable" | string;
+  conversationId?: string;
+  topicId?: string;
+  canContinue?: boolean;
+  recoveryPending?: boolean;
+  recoveryPath?: string;
+  workspaceRoot?: string;
 }
 
 export interface ContextPanelInfo {
@@ -736,6 +815,10 @@ export interface ChangedFileInfo {
 
 // Bound-method payloads (desktop/app.go).
 export interface HistoryMessage {
+	completionReceipt?: WireCompletionReceipt;
+	completionSummary?: WireCompletionSummary;
+	turnId?: string;
+	readPause?: import("./readPause").WireReadPause;
   role: string;
   content: string;
   detail?: string;
@@ -760,6 +843,8 @@ export interface HistoryMessage {
   archive?: string;
   decisionReceipt?: WireDecisionReceipt;
   readiness?: WireFinalReadiness;
+  protocolRecovery?: { id: string };
+  diagnostic?: { kind: string; status?: number; traceId?: string; providerId?: string; providerDisplayName?: string; protocol?: string; requestPath?: string };
   serverSearch?: HistoryServerSearch[];
 }
 
@@ -990,9 +1075,8 @@ export interface Meta extends RemoteSessionMetaFields {
   goal?: string;
   goalStatus?: GoalStatus;
   goalRuntime?: GoalRuntime;
-  canonicalTodos?: Todo[]; dismissedTodoBatches?: string[];
+  canonicalTodos?: Todo[]; dismissedTodoBatches?: string[]; pinnedFiles?: PinnedFileInfo[];
 }
-
 export type CollaborationMode = "normal" | "plan" | "goal";
 export type ToolApprovalMode = "ask" | "auto" | "yolo";
 // TokenMode is the dual-write wire value for the session quality floor.
@@ -1419,15 +1503,21 @@ export interface MCPMarketplaceView {
 }
 
 export interface ModelInfo {
+  displayName?: string;
   ref: string; // "provider/model" — pass to SetModel
   provider: string;
   model: string;
   current: boolean;
+  contextWindow?: number;
+  vision?: boolean;
 }
 
 export interface EffortInfo {
+  options?: { id: string; name: string; description?: string }[];
   supported: boolean;
-  current: string; // "auto" | "low" | "medium" | "high" | "xhigh" | "max"
+  current: string; // adapter-owned ID; "auto" inherits the configured default
+  pending?: string; // accepted selection for the next run; current stays truthful
+  canDefer?: boolean; // absent on older/remote runtimes: keep the running guard
   default: string;
   levels: string[];
 }
@@ -1564,7 +1654,7 @@ export interface MemoryView {
 }
 
 // SettingsTab is the top-level navigation item in the Settings Centre modal.
-export type SettingsTab = "general" | "models" | "providers" | "bots" | "mcp" | "remote" | "skills" | "subagents" | "plugins" | "memory" | "hooks" | "diagnostics" | "shortcuts" | "permissions" | "sandbox" | "network" | "appearance" | "storage" | "updates";
+export type SettingsTab = "general" | "models" | "model-stats" | "providers" | "bots" | "mcp" | "remote" | "skills" | "subagents" | "plugins" | "memory" | "hooks" | "diagnostics" | "shortcuts" | "permissions" | "sandbox" | "network" | "appearance" | "storage" | "updates";
 
 /** Extension runtime doctor report from App.RuntimeDoctor. */
 export interface RuntimeDoctorReport {
@@ -1681,7 +1771,10 @@ export interface CapabilityIssue {
 }
 // Settings panel payloads (desktop/settings_app.go).
 export interface ProviderView {
+  displayName?: string;
   name: string;
+  presetId?: string; // stable curated identity; read-only in the connection editor
+  catalog?: ProviderCatalog; // protocol routes for this installed connection, including hidden legacy presets
   builtIn: boolean;
   added: boolean;
   kind: string;
@@ -1689,8 +1782,8 @@ export interface ProviderView {
   chatUrl?: string; // legacy OpenAI chat endpoint override; preserved for old-config compatibility
   requestUrl?: string; // exact provider request URL written by the current settings UI
   models: string[];
-  visionModels: string[]; // subset of models that accepts image input
-  visionModelsConfigured: boolean; // true when an empty list is an explicit choice
+  visionModels: string[]; // legacy subset; new UI derives capability from modelOverrides
+  visionModelsConfigured: boolean; // legacy explicit-list marker retained for old configs
   visionCapability?: "configurable" | "unsupported"; // backend authority; absent on older Wails payloads
   modelsUrl: string; // optional override for model discovery; empty derives from baseUrl
   default: string;
@@ -1713,6 +1806,7 @@ export interface ProviderView {
   supportedEfforts: string[]; // custom /effort levels; empty = use built-in Kind/BaseURL default
   defaultEffort: string; // /effort level when user picks "auto" or unset; "" = supportedEfforts[0]
   modelOverrides?: ProviderModelOverrideView[] | null;
+  modelCapabilities?: ProviderModelCapabilityView[] | null;
   recommendedUpgradeAvailable?: boolean; // official legacy OpenAI entry can switch to recommended Anthropic access
   modelCatalogFingerprint?: string; // opaque compare-and-apply token for background model discovery
 }
@@ -1723,33 +1817,26 @@ export interface ProviderModelCatalogUpdate {
   models: string[];
   default: string;
   visionModels: string[];
+  modelCapabilities?: ProviderModelCapabilityUpdate[];
 }
 
-export interface ProviderPresetView {
-  id: string;
-  label: string;
-  description: string;
-  keyEnv: string;
-  recommended?: boolean;
-  billingMode?: string;
-  displayGroup?: string;
-  displaySection?: string;
-  displayTier?: "primary" | "advanced" | "compatibility" | string;
-  routeKind?: string;
-  optional?: boolean;
-  displayOrder?: number;
-  providerNames: string[];
-  models: string[];
-  added: boolean;
-  status?: "available" | "installed" | "installed_modified" | "partial" | "name_conflict" | "similar_existing";
-  statusProviderNames?: string[];
-  missingProviderNames?: string[];
-  keySet: boolean;
-  requiresKey?: boolean;
-  configured?: boolean;
-  keySource?: string;
-  keySourcePath?: string;
+export interface ProviderModelCapabilityView {
+	automaticState?: string;
+	automaticSource?: string;
+	imageInputEnableAllowed?: boolean;
+	imageInputBlockReason?: string;
+  model: string;
+  inputModalities: string[];
+  state: "supported" | "unsupported" | "unknown" | string;
+  source: string;
 }
+
+export interface ProviderModelCapabilityUpdate {
+  model: string;
+  inputModalities: string[];
+}
+
+
 
 export interface ProviderModelOverrideView {
   model: string;
@@ -2181,43 +2268,7 @@ export interface BotConnectionDiagnostic {
   occurredAt: string;
 }
 
-export interface SettingsView {
-  defaultModel: string;
-  plannerModel: string;
-  visionModel: string;
-  subagentModel: string;
-  subagentEffort: string;
-  autoPlan: string;
-  providers: ProviderView[];
-  officialProviders: ProviderView[];
-  providerPresets: ProviderPresetView[];
-  permissions: PermissionsView;
-  sandbox: SandboxView;
-  network: NetworkView;
-  agent: AgentView;
-  bot: BotSettingsView;
-  desktopLanguage: string; // "" | "en" | "zh"; empty = auto
-  desktopCurrency?: string; // "" | "CNY" | "USD"; absent/empty = follow language
-  desktopLayoutStyle: string; // "classic" | "workbench" | "creation"
-  desktopTheme: string; // "auto" | "dark" | "light"
-  desktopThemeStyle: string;
-  desktopTerminalTheme: string; // "auto" follows app | "dark" | "light"
-  closeBehavior: string; // "background" | "quit"
-  displayMode: string; reasoningDisplayMode: string; reasoningDisplayModeExplicit?: boolean;
-  statusBarStyle: string; // "icon" | "text"
-  statusBarItems: string[]; // ordered visible status bar item ids
-  defaultToolApprovalMode: ToolApprovalMode | string; // default for newly-created sessions
-  checkUpdates: boolean; // check for new versions on startup
-  updateChannel: string; // compatibility field; always "stable"
-  telemetry: boolean; // anonymous launch ping + scrubbed next-launch native crash diagnostics
-  metrics: boolean; // aggregate quality/lifecycle metrics (anonymous signal/bucket counts)
-  configPath: string;
-  shadowedByPath?: string; // workspace reasonix.toml that outranks configPath, when one exists
-  providerKinds: string[]; // provider implementations the kernel registered (for the kind picker)
-  autoApproveTools: boolean;
-  bypass: boolean; // legacy JSON key for live YOLO/full-access tool auto-approval
-  conversationWidth?: string; // "standard" | "full"; absent from older Wails payloads
-}
+export type { ModelSettingsChange, ModelSettingsResult } from "./modelSettingsTypes";
 
 export interface DesktopStartupSettingsView {
   bot: BotSettingsView;
@@ -2226,7 +2277,7 @@ export interface DesktopStartupSettingsView {
   desktopTheme: string; // "auto" | "dark" | "light"
   desktopThemeStyle: string;
   desktopTerminalTheme: string; // "auto" follows app | "dark" | "light"
-  displayMode: string; reasoningDisplayMode: string; reasoningDisplayModeExplicit?: boolean;
+  displayMode: string; sessionExperience?: "standard" | "deep"; reasoningDisplayMode: string; reasoningDisplayModeExplicit?: boolean;
   statusBarStyle: string; // "icon" | "text"
   statusBarItems: string[]; // ordered visible status bar item ids
   checkUpdates: boolean; // check for new versions on startup

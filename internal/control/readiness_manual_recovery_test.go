@@ -75,11 +75,11 @@ func TestStandardStartReplyContinuesCurrentTodoInsideVisibleTurn(t *testing.T) {
 	if err := newTurnOrchestrator(c).runGoalLoopWithRawDisplay(context.Background(), "开始", "开始", "开始"); err != nil {
 		t.Fatalf("standard start reply returned %v", err)
 	}
-	if prov.call != 4 {
-		t.Fatalf("provider calls = %d, want Todo stop repaired inside the same visible turn", prov.call)
+	if prov.call != 2 {
+		t.Fatalf("provider calls = %d, want a clean final with no ordinary todo continuation", prov.call)
 	}
-	if got := syntheticUserTurnCount(c.executor.Session().Snapshot()); got != 1 {
-		t.Fatalf("synthetic user turns = %d, want one hidden Todo continuation", got)
+	if got := syntheticUserTurnCount(c.executor.Session().Snapshot()); got != 0 {
+		t.Fatalf("synthetic user turns = %d, want none on the ordinary Agent path", got)
 	}
 }
 

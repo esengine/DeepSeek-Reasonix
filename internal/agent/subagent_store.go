@@ -37,6 +37,9 @@ type SubagentMeta struct {
 	CreatedAt        time.Time      `json:"createdAt"`
 	UpdatedAt        time.Time      `json:"updatedAt"`
 	Status           SubagentStatus `json:"status"`
+	Outcome          string         `json:"outcome,omitempty"`
+	Retryable        bool           `json:"retryable,omitempty"`
+	ErrorCode        string         `json:"errorCode,omitempty"`
 	Kind             string         `json:"kind"` // task | skill
 	Name             string         `json:"name"`
 	WorkspaceRoot    string         `json:"workspaceRoot"`
@@ -97,8 +100,9 @@ type SubagentRun struct {
 	Meta       SubagentMeta
 	ForkedFrom string
 
-	store   *SubagentStore
-	release func()
+	store             *SubagentStore
+	release           func()
+	terminalPersisted bool
 }
 
 // SubagentArtifact is a persisted sub-agent transcript and metadata pair owned
@@ -434,6 +438,18 @@ func (s *SubagentStore) PrepareContinue(ref string, spec SubagentSpec) (*Subagen
 	}
 	meta.ParentSession = spec.ParentSession
 	meta.ParentToolCallID = spec.ParentToolCallID
+	// Re-acquire the running state while holding the per-ref lease so a resumed
+	// transcript is visible as active and stale cleanup cannot mark it
+	// interrupted while the continuation is executing.
+	meta.Status = SubagentRunning
+	meta.Outcome = ""
+	meta.Retryable = false
+	meta.ErrorCode = ""
+	meta.UpdatedAt = time.Now().UTC()
+	if err := s.saveMeta(meta); err != nil {
+		release()
+		return nil, fmt.Errorf("mark resumed subagent %q running: %w", ref, err)
+	}
 	return &SubagentRun{Ref: ref, Session: sess, Meta: meta, store: s, release: release}, nil
 }
 
@@ -670,47 +686,6 @@ func (s *SubagentStore) MarkRunning(run *SubagentRun) error {
 	return s.saveMeta(meta)
 }
 
-func (s *SubagentStore) SaveCompleted(run *SubagentRun) error {
-	if s == nil || run == nil || run.Ref == "" {
-		return nil
-	}
-	if s.parentDestroyed(run) {
-		return nil
-	}
-	if err := s.ensureBranchCreatedAt(run); err != nil {
-		return err
-	}
-	if err := run.Session.Save(s.sessionPath(run.Ref)); err != nil {
-		return err
-	}
-	meta := run.Meta
-	meta.Status = SubagentCompleted
-	meta.UpdatedAt = time.Now().UTC()
-	run.Meta = meta
-	return s.saveMeta(meta)
-}
-
-func (s *SubagentStore) SaveFailed(run *SubagentRun) error {
-	if s == nil || run == nil || run.Ref == "" {
-		return nil
-	}
-	if s.parentDestroyed(run) {
-		return nil
-	}
-	// Terminal status is independent from transcript persistence. Keep going so
-	// a sidecar failure cannot leave a failed run marked as running on disk.
-	branchErr := s.ensureBranchCreatedAt(run)
-	var sessionErr error
-	if run.Session != nil {
-		sessionErr = run.Session.Save(s.sessionPath(run.Ref))
-	}
-	meta := run.Meta
-	meta.Status = SubagentFailed
-	meta.UpdatedAt = time.Now().UTC()
-	run.Meta = meta
-	return errors.Join(branchErr, sessionErr, s.saveMeta(meta))
-}
-
 // ensureBranchCreatedAt seeds the session list sidecar before the first
 // transcript save. Subagent transcripts are written only on completion, so
 // Session.Save would otherwise backfill BranchMeta.CreatedAt with the save
@@ -754,7 +729,7 @@ func validateMeta(meta SubagentMeta, spec SubagentSpec) error {
 	if meta.Status == SubagentRunning {
 		return fmt.Errorf("subagent reference %q is still in progress", meta.Ref)
 	}
-	if meta.Status == SubagentFailed {
+	if meta.Status == SubagentFailed && !meta.Retryable && meta.Outcome != string(SubagentOutcomePartial) {
 		return fmt.Errorf("subagent reference %q failed and cannot be continued", meta.Ref)
 	}
 	if meta.Status == SubagentInterrupted {

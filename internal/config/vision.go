@@ -13,9 +13,21 @@ var mimoVisionModels = map[string]bool{
 	"mimo-v2-omni": true,
 }
 
+// VisionCapability is the model-level image-input fact used by settings and
+// turn preparation. Unknown is deliberately distinct from unsupported: an
+// unknown model is kept safe by the text-only path without claiming that the
+// provider can never accept images.
+type VisionCapability string
+
+const (
+	VisionCapabilityUnknown     VisionCapability = "unknown"
+	VisionCapabilitySupported   VisionCapability = "supported"
+	VisionCapabilityUnsupported VisionCapability = "unsupported"
+)
+
 // InferVisionModels returns model IDs that look like chat models with image-input
-// support. It is intentionally conservative and meant for Settings defaults; an
-// explicit provider vision_models list remains the source of truth.
+// support. It is intentionally conservative and meant for Settings hints; an
+// explicit capability declaration remains the runtime source of truth.
 func InferVisionModels(models []string) []string {
 	out := make([]string, 0, len(models))
 	seen := map[string]bool{}
@@ -59,9 +71,9 @@ func modelTokenSeparator(r rune) bool {
 	return r == '-' || r == '_' || r == '.' || r == '/' || r == ':'
 }
 
-// CanConfigureVision reports whether Settings may expose per-model image-input
-// checkboxes. Official DeepSeek uses the same editor as other providers; the
-// wire layer still refuses Flash/Pro image payloads.
+// CanConfigureVision is retained for the Wails payload contract. Capability
+// choices are now derived from model metadata; the wire layer still refuses
+// unsupported official DeepSeek Flash/Pro image payloads.
 func CanConfigureVision(e *ProviderEntry) bool {
 	return e != nil
 }
@@ -75,19 +87,42 @@ func CanConfigureVision(e *ProviderEntry) bool {
 // deliberately limited to known MiMo endpoints so arbitrary OpenAI-compatible
 // proxies do not get image payloads unexpectedly.
 func EffectiveVision(e *ProviderEntry) bool {
+	return VisionCapabilityForModel(e) == VisionCapabilitySupported
+}
+
+// VisionCapabilityForModel resolves the selected model's image-input
+// capability without requiring a user-maintained provider-level list. Legacy
+// Vision/VisionModels values remain valid fallbacks while model overrides take
+// precedence after ResolveModel applies them.
+func VisionCapabilityForModel(e *ProviderEntry) VisionCapability {
 	if e == nil {
-		return false
+		return VisionCapabilityUnknown
 	}
 	if openai.IsDeepSeek(e.BaseURL) {
-		return officialDeepSeekEffectiveVision(e)
+		if officialDeepSeekEffectiveVision(e) {
+			return VisionCapabilitySupported
+		}
+		return VisionCapabilityUnsupported
 	}
-	if enabled, explicit := explicitModelVision(e); explicit {
-		return enabled
+	if e.visionOverride != nil {
+		if *e.visionOverride {
+			return VisionCapabilitySupported
+		}
+		return VisionCapabilityUnsupported
 	}
 	if e.Vision {
-		return true
+		return VisionCapabilitySupported
 	}
-	return isOfficialMimoVisionEntry(e)
+	if e.HasVisionModel(e.Model) {
+		return VisionCapabilitySupported
+	}
+	if isOfficialMimoVisionEntry(e) {
+		return VisionCapabilitySupported
+	}
+	if e.VisionModels != nil {
+		return VisionCapabilityUnsupported
+	}
+	return VisionCapabilityUnknown
 }
 
 // ExplicitModelVision reports whether the selected model has an explicit,
@@ -106,11 +141,14 @@ func ExplicitModelVision(e *ProviderEntry) bool {
 }
 
 func officialDeepSeekEffectiveVision(e *ProviderEntry) bool {
-	if e == nil || !openai.IsOfficialDeepSeekVisionModel(e.Model) {
+	if e == nil || openai.IsOfficialDeepSeekTextModel(e.Model) {
 		return false
 	}
 	if enabled, explicit := explicitModelVision(e); explicit {
 		return enabled
+	}
+	if !openai.IsOfficialDeepSeekVisionModel(e.Model) {
+		return false
 	}
 	if e.Vision {
 		return true
@@ -137,7 +175,7 @@ func (e *ProviderEntry) HasVisionModel(model string) bool {
 		return false
 	}
 	for _, candidate := range e.VisionModels {
-		if strings.EqualFold(strings.TrimSpace(candidate), model) {
+		if strings.TrimSpace(candidate) == model {
 			return true
 		}
 	}

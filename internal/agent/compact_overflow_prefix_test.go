@@ -34,7 +34,7 @@ func TestOverflowSummarizesLargestAdmissibleContiguousPrefix(t *testing.T) {
 	prov := &overflowSummaryProvider{}
 	a := agentOverForceWindow(t, prov, sess, 60_000)
 	msgs := sess.Snapshot()
-	head, plannedEnd, ok := a.planFoldRegion(msgs, true)
+	head, plannedEnd, ok := a.planFoldRegion(msgs, true, false)
 	if !ok {
 		t.Fatal("fixture has no foldable prefix")
 	}
@@ -130,7 +130,7 @@ func TestPressureSummaryCappedByLearnedWindowAfterSessionReset(t *testing.T) {
 	}
 
 	msgs := sess.Snapshot()
-	head, plannedEnd, ok := a.planFoldRegion(msgs, true)
+	head, plannedEnd, ok := a.planFoldRegion(msgs, true, false)
 	if !ok {
 		t.Fatal("fixture has no foldable prefix")
 	}

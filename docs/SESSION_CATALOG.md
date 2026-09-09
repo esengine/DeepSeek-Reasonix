@@ -3,7 +3,7 @@
 Reasonix keeps session transcripts, event logs, metadata sidecars, and
 `desktop-projects.json` as the only authoritative session data. The desktop
 project tree reads a disposable SQLite projection from
-`<cache root>/session-catalog/v6.sqlite`; deleting that database never deletes
+`<cache root>/session-catalog/v8.sqlite`; deleting that database never deletes
 or changes a conversation. The earlier `v1.sqlite` through `v5.sqlite` caches
 are left in place so a concurrent or downgraded process cannot cross-write the
 projection. v6 introduces filesystem-aware path identity and is rebuilt from
@@ -26,6 +26,9 @@ of the previous index.
   and projects on case-sensitive volumes remain separate.
 - Missing legacy counts are represented as `unknown`. The session is visible
   immediately, then a single repair worker decodes it in the background.
+- A stale projection (a save interrupted before its listing stamp) is also
+  `unknown`, but it keeps its last-known preview and turn count as uncertified
+  hints so the row stays in the sidebar while repair recomputes it.
 - A missing file is marked degraded on the first scan. It is removed from the
   projection only after a second scan and the missing-file grace period.
 - Runtime state (`open`, `running`, and live status) comes only from in-memory
@@ -57,7 +60,10 @@ The catalog stores only query projections:
 - topic ordering, aggregate counts, activity, recovery, health state, and
   workspace-root identity key; and
 - session access path plus path, directory, and workspace-root identity keys,
-  preview, counts, fingerprints, recovery, and health state.
+  preview, counts, fingerprints, recovery, and health state; and
+- for schema-2 event logs, the log format, the selected head, and one
+  `catalog_heads` row per head, taken from the kernel's head index sidecar and
+  the `BranchMeta` mirror rather than from replaying the log.
 
 Topic pages use a `(pinned, last_activity_at, topic_id)` keyset cursor. The
 default page size is 50 and the maximum is 200. Directory reconciliation commits

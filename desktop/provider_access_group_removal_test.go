@@ -94,9 +94,9 @@ func TestRemoveProviderAccessesRemovesGroupedOpenCodeGoRoutesAtomically(t *testi
 	if got.Bot.Model != wantFallback || got.Bot.QQ.Model != wantFallback || got.Bot.Dingtalk.Model != wantFallback || len(got.Bot.Routes) != 1 || got.Bot.Routes[0].Model != wantFallback || len(got.Bot.Connections) != 2 || got.Bot.Connections[0].Model != wantFallback || got.Bot.Connections[1].Model != "mimo-pro/mimo-v2.5-pro" {
 		t.Fatalf("bot refs were not retargeted selectively: model=%q qq=%q dingtalk=%q routes=%+v connections=%+v", got.Bot.Model, got.Bot.QQ.Model, got.Bot.Dingtalk.Model, got.Bot.Routes, got.Bot.Connections)
 	}
-	for _, tab := range tabs {
-		if tab.model != "mimo-pro/mimo-v2.5-pro" {
-			t.Fatalf("tab %q model = %q, want mimo-pro/mimo-v2.5-pro", tab.ID, tab.model)
+	for index, tab := range tabs {
+		if tab.model != []string{cfg.DefaultModel, cfg.Agent.PlannerModel, cfg.Agent.SubagentModel}[index] {
+			t.Fatalf("saving grouped removal changed tab %q model = %q", tab.ID, tab.model)
 		}
 	}
 }

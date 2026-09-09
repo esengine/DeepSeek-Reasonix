@@ -181,6 +181,11 @@ func (a *App) CreateTerminalForTab(tabID, rel, shellID string) (TerminalSessionV
 	if err != nil {
 		return TerminalSessionView{}, err
 	}
+	releaseAdmission, err := a.beginWorkspaceRuntimeAdmission(target.workspaceRoot)
+	if err != nil {
+		return TerminalSessionView{}, err
+	}
+	defer releaseAdmission()
 	available, reason := terminalPlatformAvailable()
 	if !available {
 		return TerminalSessionView{}, errors.New(reason)
@@ -200,17 +205,6 @@ func (a *App) CreateTerminalForTab(tabID, rel, shellID string) (TerminalSessionV
 		return TerminalSessionView{}, errTerminalManagerOff
 	}
 	return a.terminals.create(target.tabID, target.workspaceKey, dir, command)
-}
-
-func (a *App) WriteTerminalForTab(tabID, sessionID, data string) error {
-	target, err := a.terminalTargetForTab(tabID, true)
-	if err != nil {
-		return err
-	}
-	if a.terminals == nil {
-		return errTerminalManagerOff
-	}
-	return a.terminals.write(target.workspaceKey, sessionID, []byte(data))
 }
 
 func (a *App) ResizeTerminalForTab(tabID, sessionID string, cols, rows int) error {

@@ -1,9 +1,5 @@
-// transcriptRows — the block-level virtual row model behind the transcript
-// (Phase D of the session-switch/history refactor). The transcript renders as
-// a flat list of virtual rows (user message, process-fold header, tool batch,
-// answer, notice, turn actions, …) instead of the old hot/warm/cold turn
-// layers. Everything here is pure: Transcript.tsx feeds items + fold state in
-// and gets rows out, which keeps the model testable without a DOM.
+// Pure presentation rows grouped into stable semantic-turn blocks for
+// windowing and logical anchoring.
 //
 // Fold semantics are hoisted out of the old per-instance TurnCollapse state
 // into an explicit FoldMap keyed by segment: auto-open while running,
@@ -15,8 +11,10 @@ import { stableStringHash } from "./stableStringHash";
 import { isBatchedReadOnlyTool, isSteerNoticeText, type ExtensionItem, type Item } from "./useController";
 import { appendTurnActionCopyText } from "./turnActionCopy";
 import { isCreationGroupableTool, toolGroupKind, type ToolGroupKind } from "../components/ToolGroup";
+import type { SessionExperience } from "./sessionExperience";
 import type { ProcessFoldPreference } from "./processFoldPreference";
 import type { ResolvedReasoningDisplayMode } from "./reasoningDisplayPreference";
+import type { TimelineBlock } from "./transcriptTimeline";
 import {
   estimateTranscriptRowGeometry,
   resolveReasoningLayoutVariant,
@@ -32,7 +30,6 @@ export type NoticeItem = Extract<Item, { kind: "notice" }>;
 export type PhaseItem = Extract<Item, { kind: "phase" }>;
 export type CompactionItem = Extract<Item, { kind: "compaction" }>;
 
-// ── Live presence flags ───────────────────────────────────────────────────────
 // The model only depends on PRESENCE of live text/reasoning (which rows exist
 // and whether folds auto-open), never on the streaming content itself — the
 // row components read the stream through LiveStreamContext. That keeps token
@@ -76,6 +73,7 @@ export function partitionTurnItems(items: readonly Item[], live: TranscriptLiveF
   const segments: TurnDisplayParts[] = [];
   let current: TurnDisplayParts = { processItems: [], outsideItems: [] };
   let currentHasConversation = false;
+  const results: NoticeItem[] = [];
   const flushSegment = () => {
     if (current.processItems.length === 0 && current.outsideItems.length === 0) return;
     segments.push(current);
@@ -89,13 +87,17 @@ export function partitionTurnItems(items: readonly Item[], live: TranscriptLiveF
   for (const item of items) {
     if (item.kind === "user") continue;
     if (item.kind === "notice") {
+      if (item.variant === "completion") {
+        results.push(item);
+        continue;
+      }
       if (isHostRecoveryGuidance(item.text)) {
         continue;
       }
       if (isSteerNoticeText(item.text)) {
         current.outsideItems.push(item);
         currentHasConversation = true;
-      } else if (item.level === "warn" || item.variant === "delivery") {
+      } else if (item.level === "warn" || item.variant === "delivery" || Boolean(item.action) || item.code === "search_sources_not_provided" || item.code === "incomplete_read") {
         current.outsideItems.push(item);
       } else {
         pushProcess(item);
@@ -122,6 +124,9 @@ export function partitionTurnItems(items: readonly Item[], live: TranscriptLiveF
     }
     if (hasReasoning) pushProcess(item);
   }
+  // Display-side history attaches metadata to the user turn. Its result stays
+  // after that turn's answer in both full and windowed presentation.
+  current.outsideItems.push(...results);
   flushSegment();
   return segments;
 }
@@ -177,10 +182,13 @@ export interface TurnModel {
   actionText: string;
 }
 
-function turnStableIdentity(model: TurnModel): string {
+export function turnStableIdentity(model: TurnModel): string {
   if (model.user) {
     const user = model.user;
-    return JSON.stringify([user.id, user.submissionId ?? "", user.createdAt ?? null, user.text, user.submitText ?? "", user.historyTurn ?? null, user.checkpointTurn ?? null]);
+    // A block's identity must survive streaming patches, prompt edits, history
+    // renumbering, and checkpoint hydration. The backend user id is the
+    // durable turn identity; every other field is mutable presentation data.
+    return JSON.stringify(["user", user.id]);
   }
   const first = model.turnItems[0];
   return JSON.stringify(["prelude", first?.kind ?? "", first?.id ?? ""]);
@@ -306,11 +314,18 @@ export type FoldMap = ReadonlyMap<string, FoldEntry>;
 
 export const EMPTY_FOLDS: FoldMap = new Map();
 
+type ExperienceInput = SessionExperience | ProcessFoldPreference | ResolvedReasoningDisplayMode;
+
+function normalizeExperience(value: ExperienceInput): SessionExperience {
+  return value === "deep" || value === "expanded" ? "deep" : "standard";
+}
+
 export function defaultFoldOpen(
   segment: { hasOutsideContent: boolean; hasRunningWork: boolean; foldActive?: boolean; keepReasoningExpanded?: boolean },
-  preference: ProcessFoldPreference,
+  experience: ExperienceInput,
 ): boolean {
-  return preference === "expanded" || segment.keepReasoningExpanded === true || !segment.hasOutsideContent || segment.foldActive === true || segment.hasRunningWork;
+  const normalized = normalizeExperience(experience);
+  return normalized === "deep" || segment.keepReasoningExpanded === true || !segment.hasOutsideContent || segment.foldActive === true || segment.hasRunningWork;
 }
 
 export interface FoldSegmentState {
@@ -347,9 +362,10 @@ export function foldSegmentStates(models: readonly TurnModel[], keepReasoningExp
 export function reconcileFoldEntries(
   prev: FoldMap,
   segments: readonly FoldSegmentState[],
-  preference: ProcessFoldPreference,
+  experience: ExperienceInput,
   preferenceChanged: boolean,
 ): Map<string, FoldEntry> | null {
+  const normalizedExperience = normalizeExperience(experience);
   let next: Map<string, FoldEntry> | null = null;
   const write = (key: string, entry: FoldEntry) => {
     if (!next) next = new Map(prev);
@@ -361,7 +377,7 @@ export function reconcileFoldEntries(
     const entry = prev.get(segment.key);
     if (!entry) {
       write(segment.key, {
-        open: defaultFoldOpen(segment, preference),
+        open: defaultFoldOpen(segment, normalizedExperience),
         userOverridden: false,
         running: segment.hasRunningWork,
         keepReasoningExpanded: segment.keepReasoningExpanded,
@@ -370,7 +386,7 @@ export function reconcileFoldEntries(
     }
     const reasoningPinChanged = Boolean(entry.keepReasoningExpanded) !== segment.keepReasoningExpanded;
     if (preferenceChanged || reasoningPinChanged) {
-      const open = preference === "expanded" || segment.keepReasoningExpanded
+      const open = normalizedExperience === "deep" || segment.keepReasoningExpanded
         ? true
         : !segment.hasRunningWork && segment.hasOutsideContent
           ? false
@@ -396,7 +412,7 @@ export function reconcileFoldEntries(
       continue;
     }
     if (entry.running) {
-      const open = !entry.userOverridden && segment.hasOutsideContent && preference !== "expanded" && !segment.keepReasoningExpanded ? false : entry.open;
+      const open = !entry.userOverridden && segment.hasOutsideContent && normalizedExperience !== "deep" && !segment.keepReasoningExpanded ? false : entry.open;
       write(segment.key, {
         open,
         userOverridden: entry.userOverridden,
@@ -507,13 +523,13 @@ function itemMeasurementVersion(item: Item): string {
       parts.push(String(item.text ?? ""));
       break;
     case "notice":
-      parts.push(String(item.text ?? ""), String(item.detail ?? ""), String(item.title ?? ""), String(item.level ?? ""), String(item.variant ?? ""), String(item.action ?? ""), JSON.stringify(item.completionSummary ?? {}));
+      parts.push(String(item.text ?? ""), String(item.detail ?? ""), String(item.title ?? ""), String(item.level ?? ""), String(item.variant ?? ""), String(item.action ?? ""), String(item.recoveryId ?? ""), JSON.stringify(item.completionSummary ?? {}));
       break;
     case "compaction":
       parts.push(item.pending ? "1" : "0", String(item.trigger ?? ""), String(item.messages ?? ""), String(item.summary ?? ""), String(item.archive ?? ""));
       break;
     case "tool":
-      parts.push(String(item.name ?? ""), String(item.args ?? ""), String(item.output ?? ""), String(item.error ?? ""), String(item.status ?? ""), String(item.subject ?? ""), String(item.summary ?? ""), item.truncated ? "1" : "0", item.dataArchived ? "1" : "0", JSON.stringify(item.fileDiff ?? {}), JSON.stringify(item.execution ?? {}), item.subagentProgress ? JSON.stringify(item.subagentProgress) : "");
+      parts.push(String(item.name ?? ""), String(item.args ?? ""), String(item.output ?? ""), String(item.error ?? ""), String(item.status ?? ""), String(item.subject ?? ""), String(item.summary ?? ""), String(item.searchSourcesStatus ?? ""), String(item.searchSummary ?? ""), item.truncated ? "1" : "0", item.dataArchived ? "1" : "0", JSON.stringify(item.fileDiff ?? {}), JSON.stringify(item.execution ?? {}), item.subagentProgress ? JSON.stringify(item.subagentProgress) : "");
       break;
     case "extension":
       parts.push(String(item.surfaceKey ?? ""), String(item.pluginId ?? ""), String(item.surfaceId ?? ""), String(item.generation ?? ""), JSON.stringify(item.card ?? null));
@@ -552,7 +568,7 @@ export function userRowKey(itemId: string): string {
 function processBodyRows(
   segment: SegmentModel,
   creationMode: boolean,
-  reasoningDisplayMode: ResolvedReasoningDisplayMode,
+  sessionExperience: SessionExperience,
   subcallsByParent: ReadonlyMap<string, readonly ToolItem[]>,
 ): TranscriptRowWithLayout[] {
   const rows: TranscriptRowWithLayout[] = [];
@@ -567,19 +583,19 @@ function processBodyRows(
       layoutVariant: resolveToolCardDefaultOpen(
         item,
         subcallsByParent.get(item.id)?.length ?? 0,
-        reasoningDisplayMode,
+        sessionExperience,
       ) ? "tool-expanded" : "tool-collapsed",
     });
   };
   const flushRO = () => {
     if (roBatch.length === 0) return;
-    rows.push({ kind: "tool-batch", key: `tb:${roBatch[0].id}`, items: [...roBatch], layoutVariant: "tool-batch-collapsed" });
+      rows.push({ kind: "tool-batch", key: `tb:${roBatch[0].id}`, items: [...roBatch], layoutVariant: sessionExperience === "deep" ? "tool-batch-expanded" : "tool-batch-collapsed" });
     roBatch = [];
   };
   const flushToolBatch = () => {
     if (!toolBatchKind || toolBatch.length === 0) return;
     if (creationMode || toolBatch.length >= 2) {
-      rows.push({ kind: "tool-group", key: `tg:${toolBatch[0].id}`, items: [...toolBatch], groupKind: toolBatchKind, layoutVariant: "tool-group-collapsed" });
+      rows.push({ kind: "tool-group", key: `tg:${toolBatch[0].id}`, items: [...toolBatch], groupKind: toolBatchKind, layoutVariant: sessionExperience === "deep" ? "tool-group-expanded" : "tool-group-collapsed" });
     } else {
       pushToolRow(toolBatch[0]);
     }
@@ -649,7 +665,7 @@ function processBodyRows(
           segmentKey: segment.key,
           autoFollowActive: segment.foldActive,
           layoutVariant: resolveReasoningLayoutVariant(
-            reasoningDisplayMode,
+            sessionExperience,
             segment.foldActive,
           ) ?? "reasoning-summary",
         });
@@ -663,7 +679,9 @@ function processBodyRows(
 
 export interface BuildRowsOptions {
   folds: FoldMap;
-  foldPreference: ProcessFoldPreference;
+  sessionExperience?: SessionExperience;
+  /** @deprecated Compatibility for non-production row-model callers. */
+  foldPreference?: ProcessFoldPreference;
   hasOlderHistory: boolean;
   creationMode: boolean;
   /** Checkpoint-aware turn number for a user item (questionTurnsById). */
@@ -674,11 +692,18 @@ export interface BuildRowsOptions {
   subcallsByParent?: ReadonlyMap<string, readonly ToolItem[]>;
 }
 
-export function buildTranscriptRows(models: readonly TurnModel[], options: BuildRowsOptions): TranscriptRowWithLayout[] {
-  const rows: TranscriptRowWithLayout[] = [];
-  const rowGroups: TranscriptRowWithLayout[][] = [];
+function numericRevision(value: string): number { return Number.parseInt(stableStringHash(value), 36) >>> 0; }
+
+/** Builds stable complete-turn units for windowing and logical anchoring. */
+export function buildTranscriptRowBlocks(models: readonly TurnModel[], options: BuildRowsOptions): TimelineBlock[] {
+  const reversedBlocks: TimelineBlock[] = [];
   const usedKeys = new Set<string>();
-  const reasoningDisplayMode = options.reasoningDisplayMode ?? "auto";
+  const foldExperience = options.sessionExperience
+    ?? (options.foldPreference === "expanded" ? "deep" : "standard");
+  // The deprecated row-model option represented only the parent process fold.
+  // Keep its old geometry expectations for compatibility callers; production
+  // Transcript always supplies the canonical sessionExperience.
+  const renderExperience = options.sessionExperience ?? "standard";
   const subcallsByParent = options.subcallsByParent ?? new Map<string, readonly ToolItem[]>();
   for (let modelIndex = models.length - 1; modelIndex >= 0; modelIndex -= 1) {
     const model = models[modelIndex];
@@ -692,9 +717,9 @@ export function buildTranscriptRows(models: readonly TurnModel[], options: Build
     }
     for (const segment of model.segments) {
       if (segment.displayItems.length > 0) {
-        const open = options.folds.get(segment.key)?.open ?? defaultFoldOpen(segment, options.foldPreference);
+        const open = options.folds.get(segment.key)?.open ?? defaultFoldOpen(segment, foldExperience);
         modelRows.push({ kind: "process-header", key: `ph:${segment.key}`, segment, open, layoutVariant: "static" });
-        if (open) modelRows.push(...processBodyRows(segment, options.creationMode, reasoningDisplayMode, subcallsByParent));
+        if (open) modelRows.push(...processBodyRows(segment, options.creationMode, renderExperience, subcallsByParent));
       }
       for (const item of segment.outsideItems) {
         if (item.kind === "extension") {
@@ -722,47 +747,34 @@ export function buildTranscriptRows(models: readonly TurnModel[], options: Build
       if (usedKeys.has(row.key)) modelRows[index] = { ...row, key: `${row.key}@${stableStringHash(`${turnStableIdentity(model)}|${row.kind}|${row.key}`)}` };
       usedKeys.add(modelRows[index].key);
     }
-    rowGroups.push(modelRows);
+    const identity = turnStableIdentity(model);
+    const revisions = modelRows.map((row) => transcriptRowMeasurementVersion(row));
+    reversedBlocks.push({
+      key: `turn:${model.user?.id ?? "prelude"}@${stableStringHash(identity)}`,
+      turn,
+      phase: model.isActive ? "active" : "completed",
+      rows: modelRows,
+      contentRevision: numericRevision(modelRows.map((row, index) => `${row.key}:${revisions[index]}`).join("\u0001")),
+      measurementRevision: hashGeometryParts(revisions),
+      questionAnchor: user ? userRowKey(user.id) : undefined,
+    });
   }
-  for (let index = rowGroups.length - 1; index >= 0; index -= 1) rows.push(...rowGroups[index]);
+  reversedBlocks.reverse();
+  return reversedBlocks;
+}
+
+export function buildTranscriptRows(models: readonly TurnModel[], options: BuildRowsOptions): TranscriptRowWithLayout[] {
+  const rows = buildTranscriptRowBlocks(models, options).flatMap((block) => block.rows);
   if (options.hasOlderHistory) rows.unshift({ kind: "older-history", key: OLDER_HISTORY_ROW_KEY, layoutVariant: "static" });
   return rows;
 }
 
 // ── Measurement / identity helpers ────────────────────────────────────────────
 
-/** Ballpark row heights; Virtuoso replaces them with real measurements on mount. */
+/** Ballpark row heights; the window adapter replaces them with measurements on mount. */
 export function estimateTranscriptRowSize(row: TranscriptRow | undefined, contentWidth?: number): number {
   const environment: TranscriptGeometryEnvironment = { contentWidth, typographySignature: "default" };
   return estimateTranscriptRowGeometry(row, environment);
 }
 
-/**
- * History-backed items carry ids derived from their backend entry
- * (`he:<entryId>`, tool calls `he:<entryId>:tc<index>`, or a bare toolCallId).
- * Returns the entryId for rows that may carry unresolved lazy-content refs.
- */
-export function historyEntryIdForItemId(id: string | undefined): string | undefined {
-  if (!id || !id.startsWith("he:")) return undefined;
-  return id.slice(3).replace(/:tc\d+$/, "");
-}
-
-/** The entry a row can trigger lazy full-content resolution for, if any. */
-export function historyEntryIdForRow(row: TranscriptRow): string | undefined {
-  switch (row.kind) {
-    case "user":
-    case "reasoning":
-    case "tool":
-    case "phase":
-    case "process-notice":
-    case "compaction":
-    case "answer":
-    case "notice":
-      return historyEntryIdForItemId(row.item.id);
-    case "tool-batch":
-    case "tool-group":
-      return historyEntryIdForItemId(row.items[0]?.id);
-    default:
-      return undefined;
-  }
-}
+export { historyEntryIdForItemId, historyEntryIdForRow } from "./transcriptHistoryEntry";

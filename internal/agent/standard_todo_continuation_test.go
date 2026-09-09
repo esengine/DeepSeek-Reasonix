@@ -26,7 +26,23 @@ func standardTodoTestAgent(t *testing.T, turns [][]provider.Chunk) (*Agent, *scr
 }
 
 func standardTodoContext() context.Context {
-	return WithStandardTodoContinuation(context.Background(), StandardTodoContinuationPolicy{ExecutionExpected: true})
+	ctx := WithContinuationPolicy(context.Background(), ContinuationExplicitFlow)
+	return WithStandardTodoContinuation(ctx, StandardTodoContinuationPolicy{ExecutionExpected: true})
+}
+
+func TestStandardTodoContinuationDisabledByDefault(t *testing.T) {
+	a, prov := standardTodoTestAgent(t, [][]provider.Chunk{
+		{toolCallChunk("todo-1", "todo_write", `{"todos":[{"content":"Edit code","status":"in_progress"}]}`), {Type: provider.ChunkDone}},
+		{{Type: provider.ChunkText, Text: "I will edit it next."}, {Type: provider.ChunkDone}},
+		{{Type: provider.ChunkText, Text: "must not be consumed"}, {Type: provider.ChunkDone}},
+	})
+
+	if err := a.Run(WithStandardTodoContinuation(context.Background(), StandardTodoContinuationPolicy{ExecutionExpected: true}), "实施这个修改"); err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+	if prov.call != 2 {
+		t.Fatalf("provider calls = %d, want 2 (todo + clean final, no continuation)", prov.call)
+	}
 }
 
 func TestStandardTodoContinuationCompletesInsideSameRun(t *testing.T) {

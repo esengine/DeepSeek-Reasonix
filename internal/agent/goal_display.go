@@ -18,12 +18,6 @@ func StripGoalMarkers(text string) string {
 		if trimmed == "[goal:complete]" || trimmed == "[goal:continue]" {
 			continue
 		}
-		// Planner conclusion markers are coordinator protocol, not prose: the
-		// relay path trusts them (isNoOpPlan / plan approval) but users should
-		// see the planner's words, not the contract.
-		if lower := strings.ToLower(trimmed); lower == "[no_changes]" || lower == "[planner_requires_approval]" {
-			continue
-		}
 		if strings.HasPrefix(trimmed, "[goal:blocked:") && strings.HasSuffix(trimmed, "]") {
 			reason := strings.TrimPrefix(trimmed, "[goal:blocked:")
 			reason = strings.TrimSuffix(reason, "]")

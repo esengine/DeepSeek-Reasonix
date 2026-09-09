@@ -511,7 +511,7 @@ func TestConcurrentSnapshotSaversNeverConflict(t *testing.T) {
 // the up-to-date path and must heal the ledger — record the revision and
 // digest the interrupted save deferred — instead of skipping it forever.
 func TestSameContentSaveHealsStaleLedgerDigest(t *testing.T) {
-	path := filepath.Join(t.TempDir(), "session.jsonl")
+	path := schemaOneSessionPath(t, "session.jsonl")
 	metaPath := BranchMetaPath(path)
 	s := NewSession("sys")
 	s.Add(provider.Message{Role: provider.RoleUser, Content: "first"})
@@ -577,7 +577,7 @@ func TestSameContentSaveHealsStaleLedgerDigest(t *testing.T) {
 // failed save returned before markPersisted — heals through the same
 // up-to-date path on its autosave retry of the identical snapshot.
 func TestSameContentRetryHealsLedgerForSurvivingSaver(t *testing.T) {
-	path := filepath.Join(t.TempDir(), "session.jsonl")
+	path := schemaOneSessionPath(t, "session.jsonl")
 	metaPath := BranchMetaPath(path)
 	s := NewSession("sys")
 	s.Add(provider.Message{Role: provider.RoleUser, Content: "first"})

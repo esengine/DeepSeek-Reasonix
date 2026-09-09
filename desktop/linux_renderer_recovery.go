@@ -7,6 +7,7 @@ import (
 	"path/filepath"
 	goruntime "runtime"
 	"strconv"
+	"strings"
 	"sync"
 	"time"
 
@@ -58,9 +59,43 @@ func linuxRendererCompatibilityMode() bool {
 
 func prepareLinuxRendererCompatibilityEnvironment() {
 	waitForLinuxRendererRecoveryParent()
-	if linuxRendererCompatibilityMode() {
+	if linuxRendererCompatibilityMode() || linuxVMwareGPU() {
 		_ = os.Setenv(linuxDisableCompositingEnv, "1")
+		if linuxRendererCompatibilityMode() {
+			slog.Info("linux renderer: compositing disabled (crash-recovery restart)")
+		} else {
+			slog.Info("linux renderer: compositing disabled (VMware virtual GPU)")
+		}
 	}
+}
+
+// linuxVMwareGPU reports whether the primary graphics device is VMware's
+// virtual adapter (vmwgfx). WebKitGTK's compositing mode allocates and
+// destroys EGL surfaces aggressively; under vmwgfx that races the driver's
+// surface bookkeeping and floods the log with "context mismatch in
+// svga_surface_destroy" while destabilizing the UI — the same failure the
+// crash-recovery restart heals by disabling compositing. Inside a VM every
+// frame is software-blitted by the host anyway, so disable compositing up
+// front instead of waiting for the crash.
+func linuxVMwareGPU() bool {
+	if goruntime.GOOS != "linux" {
+		return false
+	}
+	devices, err := filepath.Glob("/sys/bus/pci/devices/*/vendor")
+	if err != nil {
+		return false
+	}
+	for _, vendorFile := range devices {
+		data, err := os.ReadFile(vendorFile)
+		if err != nil || strings.TrimSpace(string(data)) != "0x15ad" {
+			continue
+		}
+		driver, err := os.Readlink(filepath.Join(filepath.Dir(vendorFile), "driver"))
+		if err == nil && filepath.Base(driver) == "vmwgfx" {
+			return true
+		}
+	}
+	return false
 }
 
 func waitForLinuxRendererRecoveryParent() {

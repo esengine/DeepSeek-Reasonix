@@ -74,6 +74,7 @@ func probeLiveMCP(rep *MCPReport, cfg *config.Config, root, home, reasonixHome s
 
 	connected := map[string]bool{}
 	for _, s := range host.Servers() {
+		rep.bindings = append(rep.bindings, s.ToolBindings...)
 		connected[s.Name] = true
 		tools := make([]MCPToolInfo, 0, len(s.ToolList))
 		for _, t := range s.ToolList {

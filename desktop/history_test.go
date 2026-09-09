@@ -553,7 +553,7 @@ func TestHistoryForTabRestoresPlannerDisplayWhenCancelledBeforeExecutorStarts(t 
 	executorSession := agent.NewSession("system")
 	executor := agent.New(stubProvider{}, tool.NewRegistry(), executorSession, agent.Options{}, tab.sink)
 	planner := &blockingPlannerProvider{started: make(chan struct{})}
-	runner := agent.NewCoordinator(planner, agent.NewSession("planner system"), nil, nil, agent.Options{}, executor, 0, tab.sink, nil)
+	runner := agent.NewCoordinator(planner, agent.NewSession("planner system"), nil, agent.PlannerToolRegistry(tool.NewRegistry()), agent.Options{}, executor, 0, tab.sink, nil)
 	ctrl := control.New(control.Options{Runner: runner, Executor: executor, SessionDir: dir, SessionPath: path, Sink: tab.sink})
 	defer ctrl.Close()
 	ctrl.SetPlanMode(true)

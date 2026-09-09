@@ -136,6 +136,8 @@ const (
 	MCPInteractionRequest
 	// SessionChanged is a content-free Serve routing barrier for all-session clients.
 	SessionChanged
+	// ReadStatus upserts one logical read's delivery state instead of per page.
+	ReadStatus
 	// KindCount is a sentinel one past the last real Kind. New event kinds must
 	// be inserted above it so completeness tests cover them automatically.
 	KindCount
@@ -158,6 +160,7 @@ type CompletionSummaryInfo struct {
 	Preset             string // deprecated wire-compat label; pinned to "balanced"
 	Verdict            string // complete | partial | blocked | continue
 	Mutations          int
+	ChangedFiles       int
 	ChecksPassed       int
 	ChecksFailed       int
 	ChecksSuppressed   int
@@ -177,17 +180,6 @@ const (
 	StreamAttemptCommit  StreamAttemptAction = "commit"
 )
 
-// RetryScope distinguishes connection+header retries, body-phase stream
-// retries, and host-classified protocol recovery. Older clients ignore an
-// unknown value and still render the generic retry state.
-type RetryScope string
-
-const (
-	RetryScopeHeaders  RetryScope = "headers"
-	RetryScopeStream   RetryScope = "stream"
-	RetryScopeProtocol RetryScope = "protocol"
-)
-
 // StreamAttemptInfo carries host-local bookkeeping for one sampling attempt.
 // Reason is a fixed enum (connection_reset | premature_eof | idle_timeout).
 type StreamAttemptInfo struct {
@@ -197,13 +189,6 @@ type StreamAttemptInfo struct {
 	Max     int // total attempts including the first (typically 6)
 	Reason  string
 }
-
-const TurnOutcomeFinalReadiness = "final_readiness"
-
-// TurnOutcomeRecoveryPaused marks an Auto recovery Episode budget stop. New
-// clients show an informational status (not send-failed); older clients still
-// read Err text and ignore the unknown outcome.
-const TurnOutcomeRecoveryPaused = "recovery_paused"
 
 // Level classifies a Notice so sinks can style or filter it.
 type Level int
@@ -236,9 +221,11 @@ type Profile struct {
 // Output/Err/Truncated are filled in. Args is the raw JSON arguments — a sink
 // compacts it for display.
 type Tool struct {
-	ID   string
-	Name string
-	Args string
+	// Verifying is emitted only once an authorized check actually enters execution.
+	Verifying bool
+	ID        string
+	Name      string
+	Args      string
 	// ResolvedName/CapabilityID describe the real target behind a stable proxy
 	// while Name/Args remain the provider-visible call. They are optional local
 	// display metadata and never enter provider requests.
@@ -277,6 +264,11 @@ type Tool struct {
 	AttemptID string
 	FileDiff
 	Profile *Profile // ToolDispatch: subagent model/effort (set for task/skill calls)
+	// Subagent outcome metadata is host/UI-only and never enters provider requests.
+	SubagentRef       string
+	SubagentStatus    string
+	SubagentErrorCode string
+	SubagentRetryable bool
 	// Execution is optional local shell metadata (ToolResult). Never sent to
 	// model providers; omitempty keeps old wire readers compatible.
 	Execution *ShellExecution
@@ -333,6 +325,7 @@ type AskQuestion struct {
 type Ask struct {
 	ID        string
 	Questions []AskQuestion
+	TurnID    string
 }
 
 // MCPInteraction carries one MCPInteractionRequest: a server-initiated
@@ -347,6 +340,7 @@ type MCPInteraction struct {
 	RequestedSchema json.RawMessage
 	URL             string
 	ElicitationID   string
+	TurnID          string
 }
 
 // Extension surface kind values carried by ExtensionSurfacePayload.Kind. They
@@ -488,21 +482,6 @@ type AskAnswer struct {
 	Selected   []string
 }
 
-// CacheDiagnostics describes whether and why the cacheable prefix changed since
-// the last turn. It rides on the Usage event so every frontend can show
-// cache-churn attribution.
-type CacheDiagnostics struct {
-	PrefixHash          string
-	PrefixChanged       bool
-	PrefixChangeReasons []string // "system", "tools", "log_rewrite"
-	SystemHash          string
-	ToolsHash           string
-	LogRewriteVersion   int
-	ToolSchemaTokens    int
-	CacheMissTokens     int
-	CacheHitTokens      int
-}
-
 // FinalReadiness carries machine-readable recovery requirements on TurnDone.
 // Missing values are stable category ids; user-facing detail stays localized in
 // the frontend instead of scraping the diagnostic error string.
@@ -527,6 +506,7 @@ const (
 // for Kind; the others are zero.
 type Event struct {
 	Kind             Kind
+	PromptKind       string                    // interactive prompt kind for lifecycle events
 	TurnID           string                    // stable id of the owning top-level turn
 	Sequence         uint64                    // monotonic session-local event sequence
 	Status           TurnStatus                // lifecycle state after this event
@@ -547,32 +527,39 @@ type Event struct {
 	// session (Usage events only), so a frontend can show the aggregate hit-rate
 	// — which doesn't crater on a short turn or after compaction — alongside
 	// Usage's single-turn numbers.
-	SessionHit      int                      // Usage: cumulative cache-hit prompt tokens this session
-	SessionMiss     int                      // Usage: cumulative cache-miss prompt tokens this session
-	Level           Level                    // Notice
-	Audience        NoticeAudience           // Notice: empty = ordinary frontend delivery; operator = no end-user chat forwarding
-	Approval        Approval                 // ApprovalRequest
-	Ask             Ask                      // AskRequest
-	MCPInteraction  MCPInteraction           // MCPInteractionRequest
-	Extension       *ExtensionSurfacePayload // ExtensionSurface / ExtensionStatus (nil for every other kind)
-	Err             error                    // TurnDone: non-nil on failure
-	Cancelled       bool                     // TurnDone: Cancel was requested while the turn was active
-	Outcome         string                   // TurnDone: optional machine-readable recoverable outcome
-	Readiness       *FinalReadiness          // TurnDone: structured final-readiness recovery state
-	Receipt         *CompletionReceipt       // TurnDone: what the host verified, and what it could not
-	CheckpointTurn  *int                     // TurnDone: authoritative checkpoint for this turn's visible user message
-	Compaction      Compaction               // Compaction
-	Maintenance     *ContextMaintenance      // ContextMaintenanceEvent
-	Guardian        GuardianResult
-	DecisionReceipt *provider.DecisionReceipt // Notice: durable user decision receipt
-	RetryAttempt    int                       // Retrying: 1-based attempt about to be made
-	RetryMax        int                       // Retrying: total attempts before giving up
-	RetryScope      RetryScope                // Retrying: optional "headers" | "stream"; empty for older emitters
-	StreamAttempt   StreamAttemptInfo         // StreamAttempt lifecycle
-	ItemID          string                    // correlates durable inbox events
-	SessionPath     string                    // routes Serve frames
-	SessionReset    bool                      // SessionChanged came from /new or /clear, not resume/recovery
-	Workspace       *WorkspaceChangedPayload  // WorkspaceChanged (host-local)
+	SessionHit         int                      // Usage: cumulative cache-hit prompt tokens this session
+	SessionMiss        int                      // Usage: cumulative cache-miss prompt tokens this session
+	Level              Level                    // Notice
+	Audience           NoticeAudience           // Notice: empty = ordinary frontend delivery; operator = no end-user chat forwarding
+	Approval           Approval                 // ApprovalRequest
+	Ask                Ask                      // AskRequest
+	MCPInteraction     MCPInteraction           // MCPInteractionRequest
+	Extension          *ExtensionSurfacePayload // ExtensionSurface / ExtensionStatus (nil for every other kind)
+	Err                error                    // TurnDone: non-nil on failure
+	Cancelled          bool                     // TurnDone: Cancel was requested while the turn was active
+	Outcome            string                   // TurnDone: optional machine-readable recoverable outcome
+	Readiness          *FinalReadiness          // TurnDone: structured final-readiness recovery state
+	ProtocolRecovery   *provider.ProtocolRecoveryAction
+	Diagnostic         *provider.FailureDiagnostic
+	RecoveryCheckpoint bool                // local durable recovery checkpoint, not a notice
+	Receipt            *CompletionReceipt  // TurnDone: what the host verified, and what it could not
+	CheckpointTurn     *int                // TurnDone: authoritative checkpoint for this turn's visible user message
+	Compaction         Compaction          // Compaction
+	Maintenance        *ContextMaintenance // ContextMaintenanceEvent
+	Guardian           GuardianResult
+	DecisionReceipt    *provider.DecisionReceipt // Notice: durable user decision receipt
+	WriteIntent        bool                      // local write-ahead checkpoint, not a user notice
+	Recovery           *RecoveryStatus           // optional local recovery details
+	RetryAttempt       int                       // Retrying: 1-based attempt about to be made
+	RetryMax           int                       // Retrying: total attempts before giving up
+	RetryScope         RetryScope                // Retrying: optional "headers" | "stream"; empty for older emitters
+	StreamAttempt      StreamAttemptInfo         // StreamAttempt lifecycle
+	ReadStatus         *ReadStatusPayload        // ReadStatus: one logical read's delivery state
+	ReadPause          *provider.ReadPause       // TurnDone: durable display-only pause receipt
+	ItemID             string                    // correlates durable inbox events
+	SessionPath        string                    // routes Serve frames
+	SessionReset       bool                      // SessionChanged came from /new or /clear, not resume/recovery
+	Workspace          *WorkspaceChangedPayload  // WorkspaceChanged (host-local)
 	// PhaseName is set on TurnPhase events (working|checking|verifying|reviewing).
 	PhaseName TurnPhaseName
 	// Completion is set on CompletionSummary events.
@@ -688,6 +675,8 @@ const (
 	ProtocolRecoveryClientToolRejected              ProtocolRecoveryKind = "client_tool_rejected_unreplayable_reasoning"
 	ProtocolRecoveryServerSearchSalvaged            ProtocolRecoveryKind = "server_search_history_salvaged"
 	ProtocolRecoveryHistoryRepaired                 ProtocolRecoveryKind = "unreplayable_history_repaired"
+	ProtocolRecoveryReasoningReplay400Detected      ProtocolRecoveryKind = "reasoning_replay_400_detected"
+	ProtocolRecoveryReasoningReplay400Recovered     ProtocolRecoveryKind = "reasoning_replay_400_recovered"
 )
 
 type ProtocolRecoveryAudit struct {

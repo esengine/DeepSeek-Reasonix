@@ -20,7 +20,8 @@ const (
 	compactionStateSchemaV1      = 1
 	compactionStateSchemaV2      = 2
 	compactionStateSchemaV3      = 3
-	compactionStateSchemaCurrent = compactionStateSchemaV3
+	compactionStateSchemaV4      = 4
+	compactionStateSchemaCurrent = compactionStateSchemaV4
 )
 
 // Cache state labels for resume/preflight telemetry. They never enter the
@@ -44,6 +45,7 @@ const (
 const (
 	CompactionModeNative     = "native"
 	CompactionModeSummarized = "summarized"
+	CompactionModeChunked    = "chunked"
 	CompactionModeDegraded   = "degraded"
 	CompactionModeSnip       = "snip"
 )
@@ -52,6 +54,8 @@ const (
 	SummaryInputCachePrefix        = "cache_prefix"
 	SummaryInputExtensionRewritten = "extension_rewritten"
 	SummaryInputNonPrefix          = "non_prefix"
+	SummaryInputChunked            = "chunked"
+	SummaryInputSlim               = "slim"
 )
 
 // ContextProjection is the model-visible view of a session. The canonical
@@ -66,6 +70,10 @@ type ContextProjection struct {
 	// CoveredPrefixHash fingerprints provider-visible canonical[:CoveredCount]
 	// so append-only growth can be distinguished from prefix edits/rewrites.
 	CoveredPrefixHash string `json:"covered_prefix_hash,omitempty"`
+	// PinnedContextHash authenticates host-origin provenance inside the covered
+	// canonical prefix. Provider bytes omit Origin, so CoveredPrefixHash alone
+	// cannot detect provenance edits that change checkpoint reconstruction.
+	PinnedContextHash string `json:"pinned_context_hash,omitempty"`
 	SummaryHash       string `json:"summary_hash,omitempty"`
 	SourceTokens      int    `json:"source_tokens,omitempty"`
 	ProjectionTokens  int    `json:"projection_tokens,omitempty"`
@@ -83,7 +91,7 @@ type ContextProjection struct {
 type ContextMaintenanceReceipt struct {
 	OperationID         string    `json:"operation_id,omitempty"`
 	Status              string    `json:"status,omitempty"` // planned|applied|noop|blocked|failed
-	Action              string    `json:"action,omitempty"` // snip|prune|summary|native_tool_clear|noop
+	Action              string    `json:"action,omitempty"` // snip|prune|summary|truncate|native_tool_clear|noop
 	Trigger             string    `json:"trigger,omitempty"`
 	SourceProjection    uint64    `json:"source_projection,omitempty"`
 	ProjectionVersion   uint64    `json:"projection_version,omitempty"`
@@ -184,7 +192,8 @@ func LoadCompactionState(sessionPath string) (CompactionState, bool, error) {
 	if err := json.Unmarshal(b, &st); err != nil {
 		return CompactionState{}, false, fmt.Errorf("decode context state %s: %w", path, err)
 	}
-	if st.SchemaVersion != 0 && st.SchemaVersion != compactionStateSchemaV1 && st.SchemaVersion != compactionStateSchemaV2 && st.SchemaVersion != compactionStateSchemaV3 {
+	if st.SchemaVersion != 0 && st.SchemaVersion != compactionStateSchemaV1 && st.SchemaVersion != compactionStateSchemaV2 &&
+		st.SchemaVersion != compactionStateSchemaV3 && st.SchemaVersion != compactionStateSchemaV4 {
 		return CompactionState{}, false, fmt.Errorf("unsupported context schema version %d", st.SchemaVersion)
 	}
 	if st.SchemaVersion == 0 {
@@ -203,8 +212,8 @@ func SaveCompactionState(sessionPath string, st CompactionState) error {
 	if path == "" {
 		return fmt.Errorf("empty session path")
 	}
-	// V3 keeps logical user-turn boundaries; previous readers fall back to
-	// canonical history rather than misreading the V1 coalesced invariant.
+	// V4 adds a canonical-coverage pinned-context checkpoint. Previous readers
+	// fail closed on the unknown schema and replay canonical history.
 	st.SchemaVersion = compactionStateSchemaCurrent
 	if st.UpdatedAt.IsZero() {
 		st.UpdatedAt = time.Now().UTC()
@@ -419,6 +428,7 @@ func providerVisibleFingerprint(msgs []provider.Message) string {
 		ToolCallID         string                      `json:"tid,omitempty"`
 		Name               string                      `json:"n,omitempty"`
 		ToolCalls          []wireCall                  `json:"tc,omitempty"`
+		ThinkingBlocks     []provider.ThinkingBlock    `json:"tb,omitempty"`
 		ResponsesItems     []json.RawMessage           `json:"ri,omitempty"`
 		ServerSearch       []provider.ServerSearchCall `json:"ss,omitempty"`
 	}
@@ -432,6 +442,7 @@ func providerVisibleFingerprint(msgs []provider.Message) string {
 			ReasoningID:        m.ReasoningID,
 			ReasoningStatus:    m.ReasoningStatus,
 			ReasoningSignature: m.ReasoningSignature,
+			ThinkingBlocks:     m.ThinkingBlocks,
 			ToolCallID:         m.ToolCallID,
 			Name:               m.Name,
 		}
@@ -476,8 +487,9 @@ func projectionValid(st CompactionState, msgs []provider.Message, cacheKey strin
 }
 
 // projectionContentValid reports whether st's projection body still matches the
-// canonical transcript, independent of provider/model lineage. LoadProjectionSidecar
-// uses it to rebind across upgrade/model/workspace key changes.
+// canonical transcript, independent of provider/model lineage. The covered hash
+// is authoritative, except for leading system messages: those live outside the
+// folded region and may be refreshed independently after a compaction.
 func projectionContentValid(st CompactionState, msgs []provider.Message) bool {
 	if len(st.Projection.Messages) == 0 {
 		return false
@@ -490,13 +502,44 @@ func projectionContentValid(st CompactionState, msgs []provider.Message) bool {
 	if st.Projection.CoveredPrefixHash == "" {
 		return false
 	}
-	if coveredPrefixHash(msgs, n) != st.Projection.CoveredPrefixHash {
+	// Readers before v4 did not authenticate pinned revision provenance. Their
+	// projections may summarize or omit active pinned state, so fail closed and
+	// rebuild a v4 checkpoint from the canonical transcript.
+	if st.SchemaVersion < compactionStateSchemaV4 && containsPinnedContextRevision(msgs[:n]) {
 		return false
 	}
-	// TranscriptVersion is a process-local CAS generation that resets on load.
-	// The covered prefix hash is the durable identity across append-only growth
-	// and exact tail truncation.
-	return true
+	if st.SchemaVersion >= compactionStateSchemaV4 &&
+		st.Projection.PinnedContextHash != pinnedContextCoverageHash(msgs, n) {
+		return false
+	}
+	if coveredPrefixHash(msgs, n) == st.Projection.CoveredPrefixHash {
+		return true
+	}
+	return projectionMatchesAfterSystemRefresh(st, msgs, n)
+}
+
+// projectionMatchesAfterSystemRefresh verifies a covered-prefix mismatch by
+// substituting the projection's previous leading system messages into the
+// current canonical prefix. A match proves that only the dynamic system prompt
+// changed; any user, assistant, tool, image, or signed-reasoning edit still
+// fails closed.
+func projectionMatchesAfterSystemRefresh(st CompactionState, msgs []provider.Message, n int) bool {
+	if n <= 0 || n > len(msgs) || len(st.Projection.Messages) == 0 {
+		return false
+	}
+	candidate := append([]provider.Message(nil), msgs[:n]...)
+	systems := 0
+	for systems < len(candidate) && candidate[systems].Role == provider.RoleSystem {
+		if systems >= len(st.Projection.Messages) || st.Projection.Messages[systems].Role != provider.RoleSystem {
+			return false
+		}
+		candidate[systems] = st.Projection.Messages[systems]
+		systems++
+	}
+	if systems == 0 || (systems < len(st.Projection.Messages) && st.Projection.Messages[systems].Role == provider.RoleSystem) {
+		return false
+	}
+	return coveredPrefixHash(candidate, len(candidate)) == st.Projection.CoveredPrefixHash
 }
 
 // modelVisibleFromProjection splices the projection with any messages appended
@@ -506,6 +549,12 @@ func modelVisibleFromProjection(proj ContextProjection, canonical []provider.Mes
 		return nil
 	}
 	out := append([]provider.Message(nil), proj.Messages...)
+	// Leading system messages are outside every fold. Refresh them from canonical
+	// so memory/tool/environment prompt updates do not serve a stale prefix or
+	// force a full-history replay.
+	for i := 0; i < len(canonical) && i < len(out) && canonical[i].Role == provider.RoleSystem && out[i].Role == provider.RoleSystem; i++ {
+		out[i] = canonical[i]
+	}
 	if proj.CoveredCount >= 0 && proj.CoveredCount < len(canonical) {
 		out = append(out, canonical[proj.CoveredCount:]...)
 	}
@@ -549,7 +598,7 @@ func coalesceProjectionUserRuns(msgs []provider.Message) []provider.Message {
 // formatSummaryMessage builds the stable user-turn wrapper around a digest.
 func formatSummaryMessage(summary string) provider.Message {
 	return provider.Message{
-		Role: provider.RoleUser,
+		Role: provider.RoleUser, Origin: provider.MessageOriginHost,
 		Content: summaryTagOpen + "\n" +
 			"Summary of earlier conversation (older messages were compacted to save context):\n" +
 			summary + "\n" +

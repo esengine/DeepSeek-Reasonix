@@ -4,6 +4,7 @@ import (
 	"strings"
 	"unicode/utf8"
 
+	"reasonix/internal/agent"
 	"reasonix/internal/provider"
 	"reasonix/internal/retrieval"
 )
@@ -56,6 +57,9 @@ func documents(messages []provider.Message) []indexedDocument {
 		out = append(out, indexedDocument{message: message, part: part, role: role, kind: kind, tool: tool, terms: strings.Join(terms, " "), count: len(terms)})
 	}
 	for i, msg := range messages {
+		if agent.IsPinnedContextRevision(msg) {
+			continue
+		}
 		switch msg.Role {
 		case provider.RoleUser:
 			appendDoc(i, 0, string(msg.Role), "user_text", "", msg.Content)

@@ -1,5 +1,5 @@
 import { asArray } from "./array";
-import { isRuntimeSessionNode, isTopicNode, projectTreeTopicRecoveryCopyCount } from "./projectTreeTopic";
+import { isRuntimeSessionNode, isTopicNode } from "./projectTreeTopic";
 import type { ProjectNode } from "./types";
 
 export type ProjectTreeSessionDiagnosticSummary = {
@@ -69,11 +69,6 @@ function collectCounters(
       if (isRuntimeSessionNode(node)) counters.runtimeSessions += 1;
       if (node.runtimeOnly) counters.runtimeOnlySessions += 1;
       if (node.recoveryState === "recovery_only") counters.recoveryOnlySessions += 1;
-      const recoveryCopies = projectTreeTopicRecoveryCopyCount(node);
-      if (recoveryCopies > 0) {
-        counters.recoveryCopySessions += 1;
-        counters.recoveryCopies += recoveryCopies;
-      }
       if (node.running) counters.runningSessions += 1;
       if (isUnread(node)) counters.unreadSessions += 1;
       if (node.pinned) counters.pinnedSessions += 1;

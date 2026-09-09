@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 
 	fileenc "reasonix/internal/fileutil/encoding"
 	"reasonix/internal/sandbox"
@@ -51,6 +52,45 @@ func (w writeFile) DeclareWriteAccess(args json.RawMessage) (tool.WriteAccessDec
 	return declareFilePathWriteAccess(w.workDir, args)
 }
 
+// DeclareEvidenceTarget requires whole-file evidence only when the write would
+// replace existing content; creating a new file has no prior content to see.
+func (w writeFile) DeclareEvidenceTarget(ctx context.Context, args json.RawMessage) (tool.EvidenceTargetInfo, error) {
+	var p struct {
+		Path string `json:"path"`
+	}
+	if err := json.Unmarshal(args, &p); err != nil {
+		return tool.EvidenceTargetInfo{}, fmt.Errorf("invalid args: %w", err)
+	}
+	if strings.TrimSpace(p.Path) == "" {
+		return tool.EvidenceTargetInfo{}, fmt.Errorf("path is required")
+	}
+	path := resolveIn(w.workDir, p.Path)
+	if err := confinePreview(effectiveWriteRoots(ctx, w.rootSet, w.roots), w.guard, w.managed, path); err != nil {
+		return tool.EvidenceTargetInfo{}, err
+	}
+	src, err := readEditSource(ctx, w.overlay, path)
+	if os.IsNotExist(err) {
+		return tool.EvidenceTargetInfo{Path: path}, nil
+	}
+	if err != nil {
+		return tool.EvidenceTargetInfo{}, err
+	}
+	if err := src.assertUnchanged(ctx, w.overlay, path); err != nil {
+		return tool.EvidenceTargetInfo{}, err
+	}
+	info := tool.EvidenceTargetInfo{Path: path, WholeFile: true, Snapshot: src.readSnapshot(path), SourceTextDigest: digestText(src.content)}
+	if src.content == "" {
+		info.WholeFile = false
+		return info, nil
+	}
+	lines := strings.Split(strings.TrimSuffix(strings.ReplaceAll(src.content, "\r\n", "\n"), "\n"), "\n")
+	info.Ranges = []tool.ReadRange{{Start: 0, End: len(lines)}}
+	for _, line := range lines {
+		info.Hashes = append(info.Hashes, digestText(line))
+	}
+	return info, nil
+}
+
 func (w writeFile) Execute(ctx context.Context, args json.RawMessage) (string, error) {
 	var p struct {
 		Path    string `json:"path"`
@@ -84,8 +124,17 @@ func (w writeFile) Execute(ctx context.Context, args json.RawMessage) (string, e
 	// one step. Text-only, so it handles plain UTF-8 targets (and new files);
 	// non-UTF-8 files stay on the local encoding-preserving path below.
 	if w.overlay != nil && filepath.IsAbs(p.Path) && (rerr != nil || src.enc == fileenc.UTF8) {
+		if err := src.recordWrite(ctx, p.Path, p.Content, "overlay", w.overlay); err != nil {
+			return "", err
+		}
+		if err := src.assertUnchanged(ctx, w.overlay, p.Path); err != nil {
+			return "", err
+		}
 		if ok, werr := w.overlay.WriteTextFile(ctx, p.Path, p.Content); ok {
 			if werr != nil {
+				if tool.HasWriteIntentHook(ctx) {
+					return "", fmt.Errorf("write outcome unknown: %w", werr)
+				}
 				return "", fmt.Errorf("write %s: %w", p.Path, werr)
 			}
 			if w.receipt != nil {
@@ -93,6 +142,15 @@ func (w writeFile) Execute(ctx context.Context, args json.RawMessage) (string, e
 			}
 			return fmt.Sprintf("wrote %d bytes to %s", len(p.Content), p.Path), nil
 		}
+		if tool.HasWriteIntentHook(ctx) {
+			return "", fmt.Errorf("write outcome unknown: original overlay did not confirm the write")
+		}
+	}
+	if err := src.recordWrite(ctx, p.Path, p.Content, "disk", w.overlay); err != nil {
+		return "", err
+	}
+	if err := src.assertUnchanged(ctx, w.overlay, p.Path); err != nil {
+		return "", err
 	}
 	if dir := filepath.Dir(p.Path); dir != "" && dir != "." {
 		if err := os.MkdirAll(dir, 0o755); err != nil {

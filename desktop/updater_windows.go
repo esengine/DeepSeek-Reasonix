@@ -21,6 +21,8 @@ import (
 
 	"golang.org/x/sys/windows"
 
+	"reasonix/desktop/internal/instanceidentity"
+	"reasonix/internal/config"
 	"reasonix/internal/installlayout"
 	"reasonix/internal/proc"
 	"reasonix/internal/repair"
@@ -76,6 +78,7 @@ func startWindowsVersionedUpdateHandoff(installerPath, installerSHA256, installD
 		cmd := proc.Command(helperPath, windowsVersionedUpdateHandoffArgs(
 			os.Getpid(), installerPath, installerSHA256, installDir, relaunchPath, targetVersion,
 		)...)
+		cmd.Env = instanceidentity.UpdateEnvironment(os.Environ(), config.ReasonixHomeDir())
 		return cmd.Start()
 	})
 	if err != nil {
@@ -112,6 +115,7 @@ func startWindowsUpdateHelper(installerPath, installerSHA256, installDir, relaun
 			prepared.CreatedAt,
 			repair.UpdateTransactionID(prepared),
 		)...)
+		cmd.Env = instanceidentity.UpdateEnvironment(os.Environ(), config.ReasonixHomeDir())
 		return cmd.Start()
 	})
 	if err != nil {

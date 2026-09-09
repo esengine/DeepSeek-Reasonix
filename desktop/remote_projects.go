@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"reasonix/internal/config"
+	"reasonix/internal/event"
 )
 
 // remoteTabModelSeq stamps every remote-tab model assignment; the credential
@@ -73,6 +74,7 @@ type remoteTab struct {
 	// modelSeq orders concurrent writes for deterministic proxy registration.
 	model    string
 	modelSeq uint64
+	settings remoteModelApplicationState // guarded by remoteTabMu
 
 	// Bridge fields are protected by App.remoteTabMu. gen fences old pumps;
 	// client preserves cookies and token permits a new handshake.
@@ -90,7 +92,10 @@ type remoteTab struct {
 
 	// Transient runtime state is projected into TabMeta even while this tab is
 	// inactive, matching the local tab strip's running/prompt/job indicators.
-	runtime remoteTabRuntimeState
+	runtime          remoteTabRuntimeState
+	runtimeStates    map[string]event.RuntimeStateSnapshot
+	runtimeUnknown   map[string]uint64
+	runtimeConflicts map[string]event.RuntimeStateSnapshot
 	// routing fences all-session SSE and retains background project-tree state.
 	routing remoteTabSessionRouting
 	// selectionRevision fences async OpenRemoteProjectTab resumes so an older
@@ -100,6 +105,8 @@ type remoteTab struct {
 }
 
 type remoteTabRuntimeState struct {
+	syncFailed bool
+	snapshot   event.RuntimeStateSnapshot
 	// revision orders asynchronous /status snapshots against newer requests
 	// and SSE-derived runtime mutations within the same connection generation.
 	revision        uint64
@@ -121,6 +128,9 @@ type remoteTabSessionState struct {
 	name       string
 	path       string
 	reset      bool
+	// takenOver marks a session a local runtime on the serve host took over:
+	// this tab is a read-only spectator until it reclaims the session.
+	takenOver bool
 	// instanceID identifies the Serve process that owns this session. A
 	// changed id requires explicit /new or /resume re-entry before ready.
 	instanceID string
@@ -229,6 +239,8 @@ func (a *App) commitRemoteTabOpenRegistration(registration *remoteTabOpenRegistr
 		return true
 	}
 	defer existing.selectionMu.Unlock()
+	existing.routeEventMu.Lock()
+	defer existing.routeEventMu.Unlock()
 	a.remoteTabMu.Lock()
 	defer a.remoteTabMu.Unlock()
 	if a.remoteTabs[registration.reuseID] != existing {
@@ -561,6 +573,8 @@ func remoteTabMetaLocked(tab *remoteTab) TabMeta {
 		BackgroundJobs:  tab.runtime.backgroundJobs,
 		CancelRequested: tab.runtime.cancelRequested,
 		Cancellable:     tab.runtime.cancellable,
+		ReadOnly:        tab.session.takenOver,
+		TakenOver:       tab.session.takenOver,
 	}
 }
 
@@ -724,19 +738,6 @@ func waitForRemoteHost(rt remoteKernel, hostID string, timeout time.Duration) er
 		}
 		time.Sleep(250 * time.Millisecond)
 	}
-}
-
-func (a *App) emitRemoteTabState(tabID, state, errMsg string) {
-	a.remoteTabMu.Lock()
-	tab := a.remoteTabs[tabID]
-	if tab == nil {
-		a.remoteTabMu.Unlock()
-		return
-	}
-	tab.state = state
-	tab.err = errMsg
-	a.remoteTabMu.Unlock()
-	a.emitRemoteEvent(fmt.Sprintf("remote-tab:%s:state", tabID), RemoteTabStateView{State: state, Error: errMsg})
 }
 
 // remoteWorkspaceName is posix-safe (remote paths on a Windows host must not

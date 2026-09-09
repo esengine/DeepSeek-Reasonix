@@ -3,6 +3,7 @@ package agent
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"strings"
 
@@ -23,9 +24,13 @@ import (
 // — the caller emits ToolDispatch/ToolResult — so it is safe to invoke fromparallel goroutines. Stages:
 // parse → policy → prepare → finish.
 func (a *Agent) executeOne(ctx context.Context, turn *turnRuntime, call provider.ToolCall) (out toolOutcome) {
+	defer func() { out.runState = outcomeRunState(out) }()
 	ctx = withTurnState(a.withAgentContext(ctx), turn)
 	plan := &toolCallPlan{call: call}
 	defer func() {
+		out.readTaskID = plan.readTaskID
+		out.readEnvelope = plan.readEnvelope
+		out.readActiveMillis = plan.readActiveMillis
 		if plan.mutationObserved && !plan.mutationAfterDone {
 			a.observeAfterMutation(plan)
 		}
@@ -41,6 +46,7 @@ func (a *Agent) executeOne(ctx context.Context, turn *turnRuntime, call provider
 		if plan.resolvedMeta == nil {
 			return
 		}
+		out.readTaskID = plan.readTaskID
 		out.resolved = true
 		out.resolvedName = plan.resolvedMeta.TargetName
 		out.capabilityID = plan.resolvedMeta.CapabilityID
@@ -48,7 +54,7 @@ func (a *Agent) executeOne(ctx context.Context, turn *turnRuntime, call provider
 	}()
 	defer finalizeWorkspaceMutationOutcome(&out, plan)
 
-	if blocked, early := a.parseToolCall(ctx, plan); early {
+	if blocked, early := a.parseToolCall(ctx, turn, plan); early {
 		return blocked
 	}
 	if blocked, early := a.resolveToolPolicy(ctx, turn, plan); early {
@@ -58,75 +64,6 @@ func (a *Agent) executeOne(ctx context.Context, turn *turnRuntime, call provider
 		return blocked
 	}
 	return a.finishToolExecution(ctx, plan)
-}
-
-// parseToolCall resolves the canonical tool, rejects ambiguity/unknown tools,
-// and applies repeat-success and stale-anchor guards.
-func (a *Agent) parseToolCall(ctx context.Context, plan *toolCallPlan) (toolOutcome, bool) {
-	t, canonicalName, ambiguous := a.svc.tools.ResolveCall(plan.call.Name)
-	if len(ambiguous) > 0 {
-		msg := fmt.Sprintf("ambiguous MCP tool reference %q; use one of: %s", plan.call.Name, strings.Join(ambiguous, ", "))
-		return toolOutcome{
-			output: "error: " + msg,
-			errMsg: msg,
-		}, true
-	}
-	if t == nil {
-		if server, ok := completedMCPConnect(a.svc.tools, plan.call.Name); ok {
-			return toolOutcome{
-				output: fmt.Sprintf("MCP server %q is connected; its real tools are now available", server),
-			}, true
-		}
-		return toolOutcome{
-			output: fmt.Sprintf("error: unknown tool %q", plan.call.Name),
-			errMsg: fmt.Sprintf("unknown tool %q", plan.call.Name),
-		}, true
-	}
-	if out, blocked := a.repeatedSuccessBlock(plan.call, t); blocked {
-		return toolOutcome{
-			output:  out,
-			blocked: true,
-			errMsg:  loopGuardBlockErrMsg,
-		}, true
-	}
-	if out, blocked := a.repeatedFailureBlock(ctx, plan.call, t); blocked {
-		return toolOutcome{
-			output:  out,
-			blocked: true,
-			errMsg:  loopGuardBlockErrMsg,
-		}, true
-	}
-	if out, blocked := a.staleAnchorEditBlock(ctx, plan.call); blocked {
-		return toolOutcome{
-			output:  out,
-			blocked: true,
-			errMsg:  "blocked: fresh read required",
-		}, true
-	}
-	plan.tool = t
-	plan.canonicalName = canonicalName
-	plan.permName = canonicalName
-	plan.permArgs = json.RawMessage(plan.call.Arguments)
-	plan.execTool = t
-	plan.execArgs = json.RawMessage(plan.call.Arguments)
-	plan.evidenceName = canonicalName
-	plan.evidenceArgs = json.RawMessage(plan.call.Arguments)
-	plan.readOnly = t.ReadOnly()
-	if canonicalName == "bash" {
-		var permissionReader bool
-		plan.effects, permissionReader = evidence.ClassifyBashToolCall(plan.execArgs)
-		if permissionReader {
-			// Bash is schema-level writer-capable,
-			// butthehostcanresolveaconcreteinvocationtoread-onlyafterparsingitsarguments.
-			// Carrythatfactthroughpermission, mutation accounting, evidence,
-			// andtherefreshedlocaltoolreceiptwithoutchanging the provider schema.
-			plan.readOnly = true
-			plan.resolvedMeta = &tool.ResolvedCall{TargetName: canonicalName, ReadOnly: true}
-		}
-	} else {
-		plan.effects = evidence.ClassifyToolCall(plan.evidenceName, plan.evidenceArgs, plan.readOnly)
-	}
-	return toolOutcome{}, false
 }
 
 // resolveToolPolicy applies Plan mode, proxy resolution, delivery gates, Auto
@@ -148,7 +85,7 @@ func (a *Agent) resolveToolPolicy(ctx context.Context, turn *turnRuntime, plan *
 	if plan.call.Name != originalName || plan.call.Arguments != originalArgs {
 		replacement := plan.call
 		*plan = toolCallPlan{call: replacement}
-		if blocked, early := a.parseToolCall(ctx, plan); early {
+		if blocked, early := a.parseToolCall(ctx, turn, plan); early {
 			return blocked, true
 		}
 		if blocked, early := a.applyPlanModeAndProxy(ctx, plan); early {
@@ -166,6 +103,12 @@ func (a *Agent) resolveToolPolicy(ctx context.Context, turn *turnRuntime, plan *
 	}
 	if blocked, early := a.applyExecutionPreflight(turn, plan); early {
 		return blocked, true
+	}
+	if blocked, early := a.applyEvidenceGates(ctx, plan); early {
+		return blocked, true
+	}
+	if msg, blocked := a.gateReadOperation(ctx, plan); blocked {
+		return toolOutcome{output: msg, blocked: true, errMsg: firstLine(msg)}, true
 	}
 	if blocked, early := a.applyDeliveryPolicyGates(turn, plan); early {
 		return blocked, true
@@ -280,10 +223,7 @@ func (a *Agent) applyPlanModeAndProxy(ctx context.Context, plan *toolCallPlan) (
 	if resolver, ok := t.(tool.CallResolver); ok {
 		rc, rerr := resolver.ResolveCall(ctx, json.RawMessage(call.Arguments))
 		if rerr != nil {
-			return toolOutcome{
-				output: fmt.Sprintf("error: %v", rerr),
-				errMsg: firstLine(rerr.Error()),
-			}, true
+			return a.proxyResolutionError(plan, rerr), true
 		}
 		plan.resolved = rc
 		plan.resolvedMeta = &plan.resolved
@@ -426,6 +366,16 @@ func (a *Agent) applyDeliveryPolicyGates(turn *turnRuntime, plan *toolCallPlan) 
 	}
 
 	return toolOutcome{}, false
+}
+
+// proxyResolutionError preserves non-input resolver failures while diagnosing
+// only the private, repairable envelope errors marked by the resolver.
+func (a *Agent) proxyResolutionError(plan *toolCallPlan, err error) toolOutcome {
+	var inputErr *capabilityInputError
+	if errors.As(err, &inputErr) {
+		return a.diagnoseCapabilityInputFailure(plan, err)
+	}
+	return toolOutcome{output: fmt.Sprintf("error: %v", err), errMsg: firstLine(err.Error())}
 }
 
 // applyRecoveryAndPermission runs Auto Guard then ordinary permission. Neitheracquires a write lease;
@@ -637,7 +587,10 @@ func (a *Agent) prepareToolExecution(ctx context.Context, plan *toolCallPlan) (t
 // and truncates the model-facing result.
 func (a *Agent) finishToolExecution(ctx context.Context, plan *toolCallPlan) toolOutcome {
 	plan.executed = true
-	cctx := plan.cctx
+	cctx := a.withWriteRecovery(plan.cctx, plan.call)
+	if plan.expectedWriteSource.Path != "" {
+		cctx = tool.WithExpectedWriteSource(cctx, plan.expectedWriteSource)
+	}
 	runTool := plan.runTool
 	call := plan.call
 	t := plan.tool
@@ -668,6 +621,9 @@ func (a *Agent) finishToolExecution(ctx context.Context, plan *toolCallPlan) too
 	}
 	plan.cctx = cctx
 	var execution *tool.ShellExecution
+	if plan.verification && a.svc.sink != nil {
+		a.svc.sink.Emit(event.Event{Kind: event.ToolProgress, Tool: event.Tool{ID: call.ID, Verifying: true}})
+	}
 	result, images, execution, err = a.dispatchResolvedTool(cctx, plan)
 	// tool.after: extensions rule on the executed result (success or error)
 	// before evidence, hooks, and recovery observation, so every downstreamconsumer sees the final
@@ -692,9 +648,6 @@ func (a *Agent) finishToolExecution(ctx context.Context, plan *toolCallPlan) too
 	// partialwritesandhooksideeffectscanchangethepreviewedpathevenwhentheconcrete tool returned an error.
 	a.finalizeObservedToolReceipts(plan, result, execution, err)
 	result = a.withRecoveryObservation(ctx, evidenceName, evidenceArgs, readOnly, mutates, result, err, recoveryGen)
-	if err == nil && readOnly {
-		a.recordModelTextObservation(plan, result)
-	}
 	if err != nil {
 		detail := result
 		// Malformed-args failures are a transient model JSON glitch (e.g. optionswritten as ["a":"b"] →
@@ -707,8 +660,9 @@ func (a *Agent) finishToolExecution(ctx context.Context, plan *toolCallPlan) too
 		rawErr := fmt.Sprintf("error: %v\n%s", err, detail)
 		body, truncMsg, original := a.boundProviderVisibleResult(rawErr, call.Name, call.ID)
 		out := toolOutcome{
-			output: body, errMsg: firstLine(err.Error()), truncated: truncMsg != "" || original != "", truncMsg: truncMsg,
-			execution: execution, mcpApp: toProviderMCPApp(plan.mcpApp), recoveryGeneration: recoveryGen,
+			runState: outcomeRunState(toolOutcome{executed: true, output: rawErr}),
+			output:   body, errMsg: firstLine(err.Error()), truncated: truncMsg != "" || original != "", truncMsg: truncMsg,
+			execution: execution, mcpApp: toProviderMCPApp(plan.mcpApp), recoveryGeneration: recoveryGen, subagentOutcome: subagentOutcomeFromError(err),
 		}
 		if original != "" {
 			out.rawOutput = original
@@ -725,19 +679,25 @@ func (a *Agent) finishToolExecution(ctx context.Context, plan *toolCallPlan) too
 	if a.svc.hooks != nil && call.Name == "task" && !isBackgroundTaskCall(call.Arguments) {
 		a.svc.hooks.SubagentStop(ctx, result)
 	}
-	body, truncMsg, original := a.boundProviderVisibleResult(result, call.Name, call.ID)
+	runState := outcomeRunState(toolOutcome{executed: true, output: result})
+	var visionSummary *provider.VisionSummary
+	if runState == provider.ToolRunCompleted {
+		processed := a.processToolImages(cctx, result, images)
+		result, visionSummary = processed.text, processed.summary
+	}
+	body, truncMsg, original, readObserver := a.boundIncompleteReadAwareResult(plan, result)
 	out := toolOutcome{
-		output: body, images: images, truncated: truncMsg != "" || original != "", truncMsg: truncMsg,
+		runState: runState, output: body, images: images, visionSummary: visionSummary, truncated: truncMsg != "" || original != "", truncMsg: truncMsg,
 		execution: execution, mcpApp: toProviderMCPApp(plan.mcpApp), recoveryGeneration: recoveryGen,
 	}
 	if original != "" {
 		out.rawOutput = original
 	}
+	out.incompleteRead = deferredIncompleteReadOutcome(plan, result, readObserver, original == "" && truncMsg == "")
 	return out
 }
 
-// observeBeforeMutation captures preimages for Previewable writers and recordsexplicit coverage gaps forbash
-// / opaque MCP tools. Host-internal only.
+// observeBeforeMutation captures writer preimages and opaque-tool coverage gaps.
 func (a *Agent) observeBeforeMutation(ctx context.Context, plan *toolCallPlan) {
 	if a == nil || plan == nil {
 		return

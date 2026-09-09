@@ -1,6 +1,6 @@
 import { useCallback, useContext, useEffect, useRef, useState } from "react";
 import { ChevronRight } from "lucide-react";
-import { useReasoningDisplayMode } from "../lib/reasoningDisplayPreference";
+import { useWorkProcessPresentation } from "../lib/sessionExperience";
 import type { AssistantItem } from "../lib/transcriptRows";
 import { useT } from "../lib/i18n";
 import { LiveStreamContext } from "./LiveStreamContext";
@@ -24,32 +24,32 @@ export function InlineAssistantReasoning({
   const t = useT();
   const beginUserResize = useTranscriptUserResizeIntent();
   const live = useContext(LiveStreamContext);
-  const displayMode = useReasoningDisplayMode();
+  const presentation = useWorkProcessPresentation();
   const shown = live?.id === item.id ? { reasoning: live.reasoning, streaming: true, reasoningComplete: live.reasoningComplete } : item;
   const running = shown.streaming && !shown.reasoningComplete;
   const followActive = autoFollowActive ?? shown.streaming;
-  const [open, setOpen] = useState(displayMode === "expanded" || (displayMode === "auto" && followActive));
+  const [open, setOpen] = useState(presentation.keepExpandedAfterCompletion || (presentation.showWhileRunning && followActive));
   const userOverridden = useRef(false);
   const previousRunning = useRef(running);
   const previousFollowActive = useRef(followActive);
-  const previousMode = useRef(displayMode);
+  const previousExperience = useRef(presentation.experience);
   useEffect(() => {
-    const modeChanged = previousMode.current !== displayMode;
+    const modeChanged = previousExperience.current !== presentation.experience;
     const wasRunning = previousRunning.current;
     const wasFollowActive = previousFollowActive.current;
-    previousMode.current = displayMode;
+    previousExperience.current = presentation.experience;
     previousRunning.current = running;
     previousFollowActive.current = followActive;
     if (modeChanged) {
       userOverridden.current = false;
-      setOpen(displayMode === "expanded" || (displayMode === "auto" && followActive));
-    } else if (running && !wasRunning && (displayMode === "auto" || displayMode === "expanded")) {
+      setOpen(presentation.keepExpandedAfterCompletion || (presentation.showWhileRunning && followActive));
+    } else if (running && !wasRunning && presentation.showWhileRunning) {
       userOverridden.current = false;
       setOpen(true);
-    } else if (displayMode === "auto" && !followActive && wasFollowActive && !userOverridden.current) {
+    } else if (!presentation.keepExpandedAfterCompletion && !followActive && wasFollowActive && !userOverridden.current) {
       setOpen(false);
     }
-  }, [displayMode, followActive, running]);
+  }, [followActive, presentation, running]);
   const toggle = useCallback(() => {
     beginUserResize();
     userOverridden.current = true;
@@ -61,7 +61,7 @@ export function InlineAssistantReasoning({
   if (!reasoning) return null;
   const layoutVariant = open
     ? "reasoning-expanded"
-    : resolveReasoningLayoutVariant(displayMode, followActive) ?? "reasoning-heading-only";
+    : resolveReasoningLayoutVariant(presentation.keepExpandedAfterCompletion ? "expanded" : "summary", followActive) ?? "reasoning-heading-only";
   return (
     <div
       className={`turn-collapse__reasoning-phase${open ? " turn-collapse__reasoning-phase--open" : ""}`}

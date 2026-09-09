@@ -246,7 +246,7 @@ func (c *catalog) identityLine() string {
 	return fmt.Sprintf("version=%s revision=%s digest=%s", m.Version, m.Revision, m.Digest)
 }
 
-func (*docsTool) Name() string { return "docs" }
+func (*docsTool) Name() string { return tool.HostDocs }
 
 func (*docsTool) Description() string {
 	return "Search and read the official documentation embedded in this exact Reasonix build. " +

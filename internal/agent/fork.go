@@ -84,6 +84,13 @@ type forkCaptureProvider struct {
 	a     *Agent
 }
 
+func (p *forkCaptureProvider) ReasoningCapability() provider.ReasoningCapability {
+	if owner, ok := p.inner.(provider.ReasoningProvider); ok {
+		return owner.ReasoningCapability()
+	}
+	return provider.ReasoningOptions("")
+}
+
 func (p *forkCaptureProvider) Name() string { return p.inner.Name() }
 
 func (p *forkCaptureProvider) OutputBudget() int { return outputBudgetOf(p.inner) }
@@ -126,7 +133,7 @@ func (p *forkCaptureProvider) Stream(ctx context.Context, req provider.Request) 
 // one turn per task); multi-turn capture would need the active turn's index.
 func forkTurnInput(messages []provider.Message) string {
 	for _, m := range messages {
-		if m.Role == provider.RoleUser {
+		if IsUserAuthoredTurnMessage(m) {
 			if m.RawContent != "" {
 				return m.RawContent
 			}

@@ -496,11 +496,11 @@ type UseCapabilityTool struct {
 	ledger   *capability.Ledger
 	audit    *capability.Audit
 	catalog  func() capability.Catalog
-	// toolResultSession is bound by Agent.New to that frontend's own session.
-	// CloneForAgent intentionally leaves it empty so parent transcripts cannot
+	// toolResultSession is bound by Agent.New; clones leave it empty so parent transcripts cannot
 	// leak into planner or child frontends before their Agent binds them.
 	toolResultMu      sync.RWMutex
 	toolResultSession func() *Session
+	readStrategyState func() *incompleteReadState
 	mcpListMu         sync.RWMutex
 	mcpListObserver   func(mcpListObservation)
 	// state is session-shared connection observation when built via
@@ -612,7 +612,7 @@ func (t *UseCapabilityTool) CloneForAgent(ledger *capability.Ledger, audit *capa
 	return clone
 }
 
-func (*UseCapabilityTool) Name() string { return "use_capability" }
+func (*UseCapabilityTool) Name() string { return tool.HostUseCapability }
 
 func (*UseCapabilityTool) Description() string {
 	return "Fixed-schema capability proxy. Prefer search(query, limit<=8), then inspect one exact capability, then call it. list is a compact diagnostic inventory only. Supports stable ids such as tool:grep, skill:review, mcp-tool:server/tool, task:subagent, workflow:name, and web:/lsp:/session:/memory: namespaces. memory:remember saves facts (description+body required; activation=\"relevant\" on create; omit activation on update; \"pinned\" only if user asks); memory:forget(name); tool:memory(operation=search|read|list). decline records a reason for a prefer capability. Independent list/search/inspect calls are read-only and may be issued together. Calls keep the provider-visible schema fixed; real writers still pass permission, plan mode, sandbox, write-path, and workspace-lease checks."
@@ -645,7 +645,7 @@ func (*UseCapabilityTool) Schema() json.RawMessage {
 func (t *UseCapabilityTool) ResolveCall(ctx context.Context, args json.RawMessage) (tool.ResolvedCall, error) {
 	p, action, id, err := parseUseCapabilityArgs(args)
 	if err != nil {
-		return tool.ResolvedCall{}, err
+		return tool.ResolvedCall{}, &capabilityInputError{err}
 	}
 	base := tool.ResolvedCall{
 		DisplayName:  "use_capability",
@@ -658,11 +658,11 @@ func (t *UseCapabilityTool) ResolveCall(ctx context.Context, args json.RawMessag
 		return t.resolveDiscovery(ctx, p, action, id, base)
 	case "decline":
 		if id == "" {
-			return tool.ResolvedCall{}, fmt.Errorf("capability_id is required for action=decline")
+			return tool.ResolvedCall{}, capabilityInputErrorf("capability_id is required for action=decline")
 		}
 		reason := strings.TrimSpace(p.Reason)
 		if reason == "" {
-			return tool.ResolvedCall{}, fmt.Errorf("reason is required for action=decline")
+			return tool.ResolvedCall{}, capabilityInputErrorf("reason is required for action=decline")
 		}
 		// Decline must not skip require. The mutation itself is delayed until the
 		// agent has applied its post-resolution host boundary.
@@ -688,14 +688,14 @@ func (t *UseCapabilityTool) ResolveCall(ctx context.Context, args json.RawMessag
 		return base, nil
 	case "call":
 		if id == "" {
-			return tool.ResolvedCall{}, fmt.Errorf("capability_id is required for action=call")
+			return tool.ResolvedCall{}, capabilityInputErrorf("capability_id is required for action=call")
 		}
-		if id == sessionToolResultCapabilityID {
-			return t.resolveSessionToolResult(p.Arguments, base)
+		if id == sessionToolResultCapabilityID || id == sessionReadStrategyReceiptCapabilityID {
+			return t.resolveSessionCapability(id, p.Arguments, base)
 		}
 		return t.resolveCall(ctx, id, p.Arguments, base)
 	default:
-		return tool.ResolvedCall{}, fmt.Errorf("unknown action %q; use list, search, inspect, call, or decline", p.Action)
+		return tool.ResolvedCall{}, capabilityInputErrorf("unknown action %q; use list, search, inspect, call, or decline", p.Action)
 	}
 }
 
@@ -1069,7 +1069,7 @@ func (o *onDemandMCPTool) executeWithImages(ctx context.Context, args json.RawMe
 			return "", nil, fmt.Errorf("MCP server %q changed the authorization or destructive classification for tool %q; the call was blocked before dispatch — retry so Reasonix can re-apply the current Planner MCP safety boundary", o.server, o.raw)
 		}
 	}
-	if blocked, msg := hostValidateBeforeDispatch(target, args); blocked {
+	if blocked, msg := hostValidateBeforeDispatch(target, args, "mcp-tool:"+o.server+"/"+o.raw); blocked {
 		return "", nil, fmt.Errorf("%s", msg)
 	}
 	if imageTool, ok := target.(tool.ImageTool); ok {
@@ -1451,7 +1451,7 @@ func EmitProxyAudit(sink event.Sink, resolved tool.ResolvedCall) {
 	sink.Emit(event.Event{
 		Kind:   event.Notice,
 		Level:  event.LevelInfo,
-		Text:   fmt.Sprintf("capability proxy: %s → %s", resolved.DisplayName, resolved.TargetName),
+		Text:   capabilityProxyNoticeText(resolved.DisplayName, resolved.TargetName),
 		Detail: resolved.CapabilityID,
 	})
 }

@@ -56,7 +56,7 @@ func TestSaveSnapshotStreamingAppendDoesNotDiverge(t *testing.T) {
 
 // Authority + same revision authorizes rewrite when the shared prefix was reshaped (#8294).
 func TestSaveSnapshotLeaseHeldSameRevisionAllowsReshapedPrefix(t *testing.T) {
-	dir := t.TempDir()
+	dir := schemaOneTempDir(t)
 	path := filepath.Join(dir, "session.jsonl")
 	s := NewSession("sys")
 	s.Add(provider.Message{Role: provider.RoleUser, Content: "edit"})
@@ -166,7 +166,7 @@ func TestSaveSnapshotChainAfterRecoveryForkDoesNotCascade(t *testing.T) {
 
 // Without a lease, foreign bytes at the same revision still conflict.
 func TestSaveSnapshotRejectsInterruptedForeignWriteWithoutLease(t *testing.T) {
-	path := filepath.Join(t.TempDir(), "session.jsonl")
+	path := schemaOneSessionPath(t, "session.jsonl")
 	base := NewSession("sys")
 	base.Add(provider.Message{Role: provider.RoleUser, Content: "base"})
 	if err := base.Save(path); err != nil {

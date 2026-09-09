@@ -93,6 +93,7 @@ func NewSession(prov provider.Provider, readOnlyReg *tool.Registry, policyPrompt
 		MaxSteps:            6, // guardian reviews: enough for a few read-only tool calls
 		Temperature:         temperature,
 		RequireVisibleFinal: true, // each review must produce its own parseable verdict
+		ContinuationPolicy:  agent.ContinuationExplicitFlow,
 		// Use the shared context window so the guardian session can compact
 		// itself when it grows too large across many reviews.
 		ContextWindow:          100_000,

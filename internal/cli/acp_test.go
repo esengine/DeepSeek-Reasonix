@@ -20,6 +20,9 @@ import (
 const acpTestProviderKind = "acp-test-provider"
 
 func init() {
+	provider.RegisterReasoning(acpTestProviderKind, func(cfg provider.Config) provider.ReasoningCapability {
+		return provider.DeclaredReasoning(cfg, provider.ReasoningOptions(""))
+	})
 	provider.Register(acpTestProviderKind, func(cfg provider.Config) (provider.Provider, error) {
 		return &acpTestProvider{cfg: cfg}, nil
 	})
@@ -350,7 +353,7 @@ func TestACPSubagentProviderResolverHonorsProfile(t *testing.T) {
 	}
 
 	resolve := newACPSubagentProviderResolver(cfg, parent, netclient.ProxySpec{})
-	prov, _, ctxWin, err := resolve("sub/sub-model", "HIGH")
+	prov, _, ctxWin, err := resolve("sub/sub-model", "high")
 	if err != nil {
 		t.Fatalf("resolve sub profile: %v", err)
 	}

@@ -12,6 +12,7 @@ import (
 
 	"reasonix/internal/agent"
 	"reasonix/internal/boot"
+	"reasonix/internal/config"
 	"reasonix/internal/control"
 	"reasonix/internal/event"
 	"reasonix/internal/plugin"
@@ -22,15 +23,17 @@ import (
 // turns alive without sending a background session's frames to the foreground
 // browser.
 type sessionTagSink struct {
-	bc      *Broadcaster
-	mu      sync.Mutex
-	path    string
-	active  bool
-	pending []event.Event
+	pendingRuntimeState *event.RuntimeStateSnapshot
+	bc                  *Broadcaster
+	mu                  sync.Mutex
+	path                string
+	active              bool
+	runtimeActive       bool
+	pending             []event.Event
 }
 
 func newSessionTagSink(bc *Broadcaster) *sessionTagSink {
-	return &sessionTagSink{bc: bc}
+	return &sessionTagSink{bc: bc, runtimeActive: true}
 }
 
 // SessionTagSink is exported for the CLI, which builds Serve's initial
@@ -43,6 +46,9 @@ func NewSessionTagSink(bc *Broadcaster) *SessionTagSink {
 
 func (s *sessionTagSink) SetPath(path string) {
 	s.mu.Lock()
+	if s.path != "" && s.path != canonicalSessionPath(path) {
+		s.runtimeActive = false
+	}
 	s.path = canonicalSessionPath(path)
 	s.activateLocked()
 	s.mu.Unlock()
@@ -53,6 +59,7 @@ func (s *sessionTagSink) SetPath(path string) {
 func (s *sessionTagSink) PrimePath(path string) {
 	s.mu.Lock()
 	s.path = canonicalSessionPath(path)
+	s.runtimeActive = s.bc.CurrentSession() == s.path
 	s.mu.Unlock()
 }
 
@@ -63,6 +70,7 @@ func (s *sessionTagSink) BufferPath(path string) {
 	s.mu.Lock()
 	s.path = canonicalSessionPath(path)
 	s.active = false
+	s.runtimeActive = false
 	s.mu.Unlock()
 }
 
@@ -84,6 +92,10 @@ func (s *sessionTagSink) activateLocked() {
 		return
 	}
 	s.active = true
+	if s.runtimeActive && s.pendingRuntimeState != nil {
+		s.bc.publishRuntimeState(s.path, *s.pendingRuntimeState)
+		s.pendingRuntimeState = nil
+	}
 	for _, e := range s.pending {
 		if s.path != "" {
 			e.SessionPath = s.path
@@ -113,14 +125,18 @@ func (s *sessionTagSink) Emit(e event.Event) {
 }
 
 type detachedSession struct {
-	path     string
-	ctrl     control.SessionAPI
-	keeper   *control.SessionLeaseKeeper
-	tag      *sessionTagSink
-	retiring bool // guarded by Server.detachedMu; blocks reattach during Close
-	force    chan struct{}
-	reattach chan struct{}
-	done     chan struct{}
+	admissionMu          sync.Mutex // new-run refresh and close-on-idle ownership
+	modelSettings        *config.ModelRuntimeSettings
+	modelSettingsOfferID string
+	buildOptions         boot.Options
+	path                 string
+	ctrl                 control.SessionAPI
+	keeper               *control.SessionLeaseKeeper
+	tag                  *sessionTagSink
+	retiring             bool // guarded by Server.detachedMu; blocks reattach during Close
+	force                chan struct{}
+	reattach             chan struct{}
+	done                 chan struct{}
 }
 
 // RegisterSessionTag associates a controller built outside Server with its
@@ -180,7 +196,11 @@ func (s *Server) setControllerPath(ctrl *control.Controller, path string) {
 func (s *Server) buildTagged(ctx context.Context, ref string, inheritTemp bool) (*control.Controller, *sessionTagSink, error) {
 	tag := newSessionTagSink(s.bc)
 	opts := s.buildOptions
+	if s.managedModels != nil {
+		opts.ModelSettings = s.managedModels
+	}
 	opts.Model = ref
+	opts.BeforeInboxDispatch = s.beforeInboxDispatch
 	opts.Sink = tag
 	if opts.Stderr == nil {
 		opts.Stderr = os.Stderr
@@ -266,6 +286,7 @@ func (s *Server) registerDetached(ctrl control.SessionAPI, keeper *control.Sessi
 	}
 	d := &detachedSession{
 		ctrl: ctrl, keeper: keeper, tag: tag,
+		modelSettings: s.managedModels, modelSettingsOfferID: s.modelSettingsOfferID, buildOptions: s.buildOptions,
 		force: make(chan struct{}), reattach: make(chan struct{}), done: make(chan struct{}),
 	}
 	s.detachedMu.Lock()
@@ -286,13 +307,16 @@ func (s *Server) registerDetached(ctrl control.SessionAPI, keeper *control.Sessi
 	s.detachedMu.Unlock()
 	slog.Info("serve: session detached", "session", path, "running", controllerHasActiveRuntimeWork(ctrl))
 	go s.watchDetached(d)
+	if concrete, ok := ctrl.(*control.Controller); ok {
+		concrete.NotifyInboxRuntimeReady()
+	}
 	return d, nil
 }
 
 func (s *Server) watchDetached(d *detachedSession) {
 	interval := 200 * time.Millisecond
 	forced := false
-	for controllerHasActiveRuntimeWork(d.ctrl) && !forced {
+	for s.detachedHasPendingWork(d) && !forced {
 		timer := time.NewTimer(interval)
 		select {
 		case <-d.reattach:
@@ -316,12 +340,14 @@ func (s *Server) watchDetached(d *detachedSession) {
 	// Claim close ownership only while the registry still points at d. Keep the
 	// retiring entry visible until Close and lease release finish so deletion
 	// cannot race final controller writes. takeDetached refuses retiring entries.
+	d.admissionMu.Lock()
 	s.detachedMu.Lock()
 	owns := s.detached[d.path] == d
 	if owns {
 		d.retiring = true
 	}
 	s.detachedMu.Unlock()
+	d.admissionMu.Unlock()
 	if !owns {
 		close(d.done)
 		return
@@ -449,6 +475,23 @@ func (s *Server) busyDetach(ctx context.Context, cur *control.Controller, target
 
 func (s *Server) announceSessionChanged(path string, reset bool) {
 	s.bc.Emit(event.Event{Kind: event.SessionChanged, SessionPath: path, SessionReset: reset})
+	if ctrl, ok := s.ctl().(*control.Controller); ok {
+		if tag := s.tagFor(ctrl); tag != nil {
+			tag.ActivateRuntime()
+		}
+	}
+}
+
+// The routing barrier precedes the new instance's runtime projection. Content
+// boot notices retain their historical order relative to session_changed.
+func (s *sessionTagSink) ActivateRuntime() {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.runtimeActive = true
+	if s.active && s.pendingRuntimeState != nil {
+		s.bc.publishRuntimeState(s.path, *s.pendingRuntimeState)
+		s.pendingRuntimeState = nil
+	}
 }
 
 var errReplacedDuringBind = &replacedDuringBindError{}
@@ -556,6 +599,8 @@ func (s *Server) reattachDetached(cur control.SessionAPI, detached *detachedSess
 			demoted.Release()
 		}
 	}
+	s.managedModels, s.modelSettingsOfferID = detached.modelSettings, detached.modelSettingsOfferID
+	s.buildOptions = detached.buildOptions
 	slog.Info("serve: background session re-attached", "session", detached.path, "running", controllerHasActiveRuntimeWork(detached.ctrl))
 	return nil
 }
@@ -581,6 +626,10 @@ func (s *Server) publishControllerSwap(expect, next control.SessionAPI, path str
 	}
 	s.ctrl = next
 	s.bc.SetCurrentSession(path)
+	if ctrl, ok := next.(*control.Controller); ok {
+		ctrl.SetBeforeInboxDispatch(s.beforeInboxDispatch)
+		ctrl.NotifyInboxRuntimeReady()
+	}
 	return true
 }
 

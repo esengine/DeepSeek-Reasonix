@@ -61,6 +61,8 @@ type Envelope struct {
 	Status             event.TurnStatus `json:"status"`
 	TranscriptRevision int64            `json:"transcriptRevision,omitempty"`
 	TranscriptDigest   string           `json:"transcriptDigest,omitempty"`
+	HeadID             string           `json:"headId,omitempty"`
+	LeafMessageID      string           `json:"leafMessageId,omitempty"`
 	CreatedAt          int64            `json:"createdAt"`
 	Event              eventwire.Event  `json:"event"`
 }
@@ -78,6 +80,8 @@ type TerminalSummary struct {
 	DurationMs         int64            `json:"durationMs,omitempty"`
 	TranscriptRevision int64            `json:"transcriptRevision,omitempty"`
 	TranscriptDigest   string           `json:"transcriptDigest,omitempty"`
+	HeadID             string           `json:"headId,omitempty"`
+	LeafMessageID      string           `json:"leafMessageId,omitempty"`
 }
 
 // ReplayView is a bounded page plus the retained-history contract a frontend
@@ -91,6 +95,8 @@ type ReplayView struct {
 	ResetRequired      bool       `json:"resetRequired"`
 	TranscriptRevision int64      `json:"transcriptRevision,omitempty"`
 	TranscriptDigest   string     `json:"transcriptDigest,omitempty"`
+	HeadID             string     `json:"headId,omitempty"`
+	LeafMessageID      string     `json:"leafMessageId,omitempty"`
 	RuntimeEpoch       string     `json:"runtimeEpoch,omitempty"`
 }
 
@@ -125,17 +131,14 @@ type checkpointRecord struct {
 	LastStatus                 event.TurnStatus  `json:"lastStatus,omitempty"`
 	TranscriptRevision         int64             `json:"transcriptRevision,omitempty"`
 	TranscriptDigest           string            `json:"transcriptDigest,omitempty"`
+	HeadID                     string            `json:"headId,omitempty"`
+	LeafMessageID              string            `json:"leafMessageId,omitempty"`
 	TerminalSummaries          []TerminalSummary `json:"terminalSummaries"`
 }
 
 type routingMetadata struct {
 	runtimeEpoch string
 	submissionID string
-}
-
-type transcriptSnapshot struct {
-	revision int64
-	digest   string
 }
 
 // MetricsSnapshot contains counters only; no event content, ids or paths leave
@@ -255,7 +258,7 @@ func Open(sessionPath, sessionID string) (*Ledger, error) {
 			if rec.SubmissionID != "" {
 				l.submissionTurns[rec.SubmissionID] = rec.TurnID
 			}
-			l.transcript = transcriptSnapshot{revision: rec.TranscriptRevision, digest: rec.TranscriptDigest}
+			l.transcript = transcriptSnapshot{revision: rec.TranscriptRevision, digest: rec.TranscriptDigest, headID: rec.HeadID, leafID: rec.LeafMessageID}
 		}
 		if rec.Event.Tool != nil && rec.Event.Tool.ID != "" {
 			switch rec.Kind {
@@ -387,15 +390,6 @@ func (l *Ledger) TurnIDForSubmission(submissionID string) string {
 	return l.submissionTurns[submissionID]
 }
 
-func (l *Ledger) SetTranscriptSnapshot(revision int64, digest string) {
-	if l == nil {
-		return
-	}
-	l.mu.Lock()
-	l.transcript = transcriptSnapshot{revision: revision, digest: digest}
-	l.mu.Unlock()
-}
-
 // ObserveRawEvent counts provider stream pressure before the coalescer. It
 // intentionally records no content or routing identity.
 func (l *Ledger) ObserveRawEvent(e event.Event) {
@@ -504,7 +498,8 @@ func (l *Ledger) appendLocked(e event.Event, status event.TurnStatus) (event.Eve
 		RuntimeEpoch: l.routing.runtimeEpoch, SubmissionID: l.routing.submissionID,
 		Source: e.Source,
 		Kind:   kind, Status: status, TranscriptRevision: l.transcript.revision,
-		TranscriptDigest: l.transcript.digest, CreatedAt: time.Now().UnixMilli(), Event: w,
+		TranscriptDigest: l.transcript.digest, HeadID: l.transcript.headID, LeafMessageID: l.transcript.leafID,
+		CreatedAt: time.Now().UnixMilli(), Event: w,
 	}
 	var line []byte
 	if l.writeVersion == legacySchemaVersion {
@@ -664,18 +659,7 @@ func (l *Ledger) terminalSequenceLocked(turnID string) uint64 {
 }
 
 func (l *Ledger) addSummaryLocked(rec Envelope, outcome string) {
-	started := l.turnStarted
-	finished := rec.CreatedAt
-	summary := TerminalSummary{
-		TurnID: rec.TurnID, TerminalSequence: rec.Sequence, Status: rec.Status, Outcome: outcome,
-		RuntimeEpoch: rec.RuntimeEpoch, SubmissionID: rec.SubmissionID,
-		StartedAt: started, FinishedAt: finished, TranscriptRevision: rec.TranscriptRevision,
-		TranscriptDigest: rec.TranscriptDigest,
-	}
-	if started > 0 && finished >= started {
-		summary.DurationMs = finished - started
-	}
-	l.summaries = appendTerminalSummary(l.summaries, summary)
+	l.summaries = appendTerminalSummary(l.summaries, terminalSummaryFor(rec, outcome, l.turnStarted))
 }
 
 // Replay returns a bounded page without rereading the whole sidecar. Open owns
@@ -704,6 +688,7 @@ func (l *Ledger) Replay(after uint64) (ReplayView, error) {
 	}
 	view.TranscriptRevision = l.transcript.revision
 	view.TranscriptDigest = l.transcript.digest
+	view.HeadID, view.LeafMessageID = l.transcript.headID, l.transcript.leafID
 	view.RuntimeEpoch = l.routing.runtimeEpoch
 	effective := after
 	if effective < l.compactedThrough || effective > latest {
@@ -856,6 +841,7 @@ func (l *Ledger) compactLocked(force bool) error {
 		CompactedThroughSequence: cutoff, ProjectionCommittedThrough: cutoff,
 		LastTurnID: last.TurnID, LastStatus: last.Status,
 		TranscriptRevision: last.TranscriptRevision, TranscriptDigest: last.TranscriptDigest,
+		HeadID: last.HeadID, LeafMessageID: last.LeafMessageID,
 		TerminalSummaries: append([]TerminalSummary(nil), l.summaries...),
 	}
 	if checkpoint.TerminalSummaries == nil {
@@ -1026,7 +1012,7 @@ func (l *Ledger) readAndRepairLocked() (parsedLedger, error) {
 				}
 				result.compactedThrough = checkpoint.CompactedThroughSequence
 				result.projectionCommitted = checkpoint.ProjectionCommittedThrough
-				result.checkpoint = transcriptSnapshot{revision: checkpoint.TranscriptRevision, digest: checkpoint.TranscriptDigest}
+				result.checkpoint = transcriptSnapshot{revision: checkpoint.TranscriptRevision, digest: checkpoint.TranscriptDigest, headID: checkpoint.HeadID, leafID: checkpoint.LeafMessageID}
 				result.summaries = append(result.summaries, checkpoint.TerminalSummaries...)
 				expectedSeq = checkpoint.CompactedThroughSequence + 1
 			case "event":
@@ -1071,18 +1057,7 @@ damaged:
 		if !rec.Status.Terminal() {
 			continue
 		}
-		started := startedByTurn[rec.TurnID]
-		summary := TerminalSummary{
-			TurnID: rec.TurnID, TerminalSequence: rec.Sequence, Status: rec.Status,
-			Outcome:      rec.Event.Outcome,
-			RuntimeEpoch: rec.RuntimeEpoch, SubmissionID: rec.SubmissionID,
-			StartedAt: started, FinishedAt: rec.CreatedAt, TranscriptRevision: rec.TranscriptRevision,
-			TranscriptDigest: rec.TranscriptDigest,
-		}
-		if started > 0 && rec.CreatedAt >= started {
-			summary.DurationMs = rec.CreatedAt - started
-		}
-		result.summaries = appendTerminalSummary(result.summaries, summary)
+		result.summaries = appendTerminalSummary(result.summaries, terminalSummaryFor(rec, rec.Event.Outcome, startedByTurn[rec.TurnID]))
 	}
 	return result, nil
 }

@@ -35,7 +35,7 @@ func TestResponsesToolTurnWithoutReasoningContinuesSafely(t *testing.T) {
 		wantReasoningRetries         int
 	}{
 		{name: "deepseek flash", baseURL: "https://api.deepseek.com", model: "deepseek-v4-flash", effort: "high", wantRequests: 2},
-		{name: "deepseek pro", baseURL: "https://api.deepseek.com", model: "deepseek-v4-pro", effort: "high", wantRequests: 3, wantReasoningRetries: 1},
+		{name: "deepseek pro", baseURL: "https://api.deepseek.com", model: "deepseek-v4-pro", effort: "high", wantRequests: 2},
 		{name: "deepseek pro reasoning disabled", baseURL: "https://api.deepseek.com", model: "deepseek-v4-pro", effort: "none", wantRequests: 2},
 		{name: "mimo", baseURL: "https://api.xiaomimimo.com/v1", model: "mimo-v2.5-pro", effort: "high", wantRequests: 2},
 	}

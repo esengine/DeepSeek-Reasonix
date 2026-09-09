@@ -9,11 +9,23 @@ import (
 
 	"reasonix/internal/config"
 	"reasonix/internal/control"
+	"reasonix/internal/stats"
 )
 
 func newListenerTestServer(t *testing.T) *Server {
 	t.Helper()
+	// Server construction starts the process-wide usage projection, even with
+	// a mock controller. Fence it on both sides of this test's home override.
+	closeUsage := func() {
+		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
+		if err := stats.CloseUsageCatalogs(ctx); err != nil {
+			t.Fatalf("close usage catalog: %v", err)
+		}
+	}
+	closeUsage()
 	t.Setenv("REASONIX_HOME", t.TempDir())
+	t.Cleanup(closeUsage)
 	bc := NewBroadcaster()
 	ctrl := control.New(control.Options{
 		Sink:       bc,

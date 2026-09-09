@@ -306,10 +306,12 @@ func (t *sdkSessionTransport) build(ctx context.Context, generation uint64) (*ma
 	var closeOnce sync.Once
 	endpoint.close = func() {
 		closeOnce.Do(func() {
-			cancelSession()
+			// Let the endpoint deliver EOF and reap its child before cancelling
+			// the command context, which otherwise kills it before the grace period.
 			if closeEndpoint != nil {
 				closeEndpoint()
 			}
+			cancelSession()
 		})
 	}
 
@@ -646,9 +648,9 @@ func (t *sdkSessionTransport) close() {
 	t.current = nil
 	t.mu.Unlock()
 
-	t.cancel()
 	t.progress.clear()
 	closeManagedSession(current)
+	t.cancel()
 	waitWithBudget(t.wg.Wait, closeWaitBudget)
 }
 

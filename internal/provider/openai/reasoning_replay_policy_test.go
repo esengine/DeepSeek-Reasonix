@@ -6,6 +6,46 @@ import (
 	"reasonix/internal/provider"
 )
 
+func TestDeepSeekReplaysEveryReasoningCarryingAssistantTurn(t *testing.T) {
+	p, err := New(provider.Config{
+		Name: "deepseek", BaseURL: "https://api.deepseek.com", Model: "deepseek-v4-pro", APIKey: "k",
+		Extra: map[string]any{"reasoning_protocol": "deepseek", "thinking": "enabled"},
+	})
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+	if !provider.RequiresAssistantReasoningReplay(p, provider.Message{
+		Role: provider.RoleAssistant, Content: "plain", ReasoningContent: "provider reasoning",
+	}) {
+		t.Fatal("DeepSeek plain assistant reasoning must be replay-required")
+	}
+	if provider.RequiresAssistantReasoningReplay(p, provider.Message{
+		Role: provider.RoleAssistant, Content: "plain",
+	}) {
+		t.Fatal("DeepSeek plain assistant without reasoning must not invent a replay requirement")
+	}
+	if !provider.RequiresAssistantReasoningReplay(p, provider.Message{
+		Role:      provider.RoleAssistant,
+		ToolCalls: []provider.ToolCall{{ID: "call_1", Name: "read_file"}},
+	}) {
+		t.Fatal("DeepSeek tool turn must remain replay-required when reasoning is missing")
+	}
+
+	disabled := p.(*client)
+	disabled.thinkingType = "disabled"
+	if !provider.RequiresAssistantReasoningReplay(disabled, provider.Message{
+		Role: provider.RoleAssistant, Content: "plain", ReasoningContent: "previous reasoning",
+	}) {
+		t.Fatal("thinking-disabled DeepSeek must still replay stored reasoning")
+	}
+	if provider.RequiresAssistantReasoningReplay(disabled, provider.Message{
+		Role:      provider.RoleAssistant,
+		ToolCalls: []provider.ToolCall{{ID: "call_2", Name: "read_file"}},
+	}) {
+		t.Fatal("thinking-disabled DeepSeek must not require missing tool reasoning")
+	}
+}
+
 func TestGLMPreservesIssuedReasoningAndAllowsEmptyToolFallback(t *testing.T) {
 	p, err := New(provider.Config{
 		Name: "glm", BaseURL: "https://open.bigmodel.cn/api/coding/paas/v4", Model: "glm-5.2", APIKey: "k",

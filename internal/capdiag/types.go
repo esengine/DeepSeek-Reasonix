@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"reasonix/internal/plugin"
+	"reasonix/internal/tool"
 )
 
 // SchemaVersion is the JSON report version. Bump only on breaking shape changes.
@@ -174,7 +175,8 @@ type PluginPackageInfo struct {
 
 // MCPReport covers merged MCP server configuration and optional live/runtime state.
 type MCPReport struct {
-	Servers []MCPServerInfo `json:"servers"`
+	bindings []tool.MCPBinding
+	Servers  []MCPServerInfo `json:"servers"`
 }
 
 // MCPServerInfo is one merged MCP server.

@@ -179,6 +179,28 @@ func TestRunSkillSubagentRuns(t *testing.T) {
 	}
 }
 
+type subagentOutputError struct{}
+
+func (subagentOutputError) Error() string { return "subagent paused" }
+
+func (subagentOutputError) SubagentOutput() string { return "status=partial ref=sa_test\nlast output" }
+
+func TestRunSkillSubagentPreservesOutputWhenRunnerReturnsTypedFailure(t *testing.T) {
+	home := t.TempDir()
+	writeSkill(t, home, ".reasonix/skills/dig.md", "---\ndescription: dig\nrunAs: subagent\n---\nbody")
+	runner := func(context.Context, Skill, string, SubagentRunOptions) (string, error) {
+		return "status=partial ref=sa_test\nlast output", subagentOutputError{}
+	}
+	tl := NewRunSkillTool(New(Options{HomeDir: home, DisableBuiltins: true}), runner)
+	out, err := tl.Execute(context.Background(), json.RawMessage(`{"name":"dig","arguments":"find X"}`))
+	if err == nil {
+		t.Fatal("expected typed subagent failure")
+	}
+	if !strings.Contains(out, "ref=sa_test") {
+		t.Fatalf("typed failure output was discarded: %q", out)
+	}
+}
+
 func TestRunSkillSubagentResultWarnsOnHostDecisionLanguage(t *testing.T) {
 	home := t.TempDir()
 	writeSkill(t, home, ".reasonix/skills/dig.md", "---\ndescription: dig\nrunAs: subagent\n---\nbody")

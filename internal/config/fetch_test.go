@@ -332,3 +332,24 @@ func TestProviderFetchModelsFiltersOfficialOpenCodeGoCatalogByWireFormat(t *test
 		t.Fatalf("models = %v, want %v", got, want)
 	}
 }
+
+func TestProviderFetchModelsKeepsOpenCodeGoVisionModelOnChatRoute(t *testing.T) {
+	// This guards the DeepSeek vision catalog integration from #9717.
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_ = json.NewEncoder(w).Encode(map[string]any{"data": []map[string]string{
+			{"id": "deepseek-v4-flash"},
+			{"id": "deepseek-v4-flash-vision-exp"},
+		}})
+	}))
+	defer srv.Close()
+
+	p := ProviderEntry{Name: "opencode-go", Kind: "openai", BaseURL: "https://opencode.ai/zen/go/v1", ModelsURL: srv.URL}
+	got, err := p.FetchModels(context.Background())
+	if err != nil {
+		t.Fatalf("FetchModels: %v", err)
+	}
+	want := []string{"deepseek-v4-flash", "deepseek-v4-flash-vision-exp"}
+	if !slices.Equal(got, want) {
+		t.Fatalf("models = %v, want %v", got, want)
+	}
+}

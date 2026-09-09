@@ -233,26 +233,9 @@ func loadForRoot(root string, opts loadForRootOptions) (*Config, error) {
 		cfg.mergeMCPJSON(loadLegacyMCP(legacyConfigPath()))
 	}
 	_ = mergeInstalledPluginPackages(cfg, root)
-	normalizePluginCommandLines(cfg)
-	normalizeLegacyEffort(cfg)
-	cfg.ignoredLegacyStepLimits = normalizeLegacyAgentStepLimits(cfg)
-	normalizeRetiredAutoPlan(cfg)
-	normalizeLegacyMCPTiers(cfg)
-	normalizeLegacyStepFunBaseURLs(cfg)
-	normalizeLegacyLongCatContextWindows(cfg)
-	normalizeLegacyQwenContextWindows(cfg)
-	normalizeLegacyKimiK3Catalog(cfg)
-	normalizeLegacyOpenCodeGoInstalls(cfg)
-	normalizeLegacyMimoCustomProviders(cfg)
-	normalizeLegacyProviderModels(cfg)
-	normalizeDesktopOfficialProviderAccess(cfg)
-	normalizeOfficialDeepSeekModels(cfg)
-	migrateBillingDisplayCurrency(cfg)
-	freezeProviderBillingCurrencies(cfg)
-	applyDeepSeekOfficialDefaultPricing(cfg)
-	backfillDeepSeekOfficialPrices(cfg)
-	normalizeEffortConfig(cfg)
-	backfillDeepSeekPro(cfg)
+	if err := normalizeLoadedConfig(cfg); err != nil {
+		return nil, err
+	}
 	if userDefaultModelExplicit {
 		restoreUnresolvableProjectDefaultModel(cfg, userDefaultModel)
 	}
@@ -349,27 +332,6 @@ func tomlFileDefinesKey(path string, key ...string) bool {
 		return false
 	}
 	return meta.IsDefined(key...)
-}
-
-// ConfigFileDefinesCompactRatio reports whether path explicitly overrides the
-// automatic compaction threshold. It is used by config surfaces that need to
-// explain whether the effective value came from defaults, user config, or the
-// current project.
-func ConfigFileDefinesCompactRatio(path string) bool {
-	return tomlFileDefinesKey(path, "agent", "compact_ratio")
-}
-
-// ConfigFileDefinesSkillKey reports whether a project or user TOML file
-// explicitly owns one of the supported [skills] settings. Desktop settings use
-// this narrow provenance check to edit the file that wins at runtime instead
-// of persisting a shadowed value to the global config.
-func ConfigFileDefinesSkillKey(path, key string) bool {
-	switch strings.TrimSpace(key) {
-	case "paths", "excluded_paths", "disabled_skills", "disable_implicit_invocation", "max_depth":
-		return tomlFileDefinesKey(path, "skills", key)
-	default:
-		return false
-	}
 }
 
 // backfillDeepSeekPro restores deepseek-pro for configs the pre-fix setup wizard
@@ -1185,6 +1147,19 @@ func migrateLegacyMCPTiersFile(path string) error {
 	return err
 }
 
+// MigrateLegacyMCPTiersForRoot keeps boot's historical on-disk migration
+// separate from immutable snapshots, whose freshness checks must be read-only.
+func MigrateLegacyMCPTiersForRoot(root string) {
+	for _, path := range []string{userConfigLoadPath(), filepath.Join(resolveRoot(root), "reasonix.toml")} {
+		if path == "" {
+			continue
+		}
+		if err := migrateLegacyMCPTiersFile(path); err != nil {
+			slog.Warn("config: legacy mcp tier migration failed", "path", path, "err", err)
+		}
+	}
+}
+
 func stripLegacyMCPTierLines(raw string) (string, bool) {
 	return stripTOMLKeyLines(raw, "plugins", "tier")
 }
@@ -1573,6 +1548,61 @@ func normalizeLegacyOpenCodeGoKimiK3Catalog(c *Config) (changed bool) {
 	return changed
 }
 
+// normalizeLegacyOpenCodeGoVisionCatalog upgrades only the untouched Chat
+// catalog that predates OpenCode Go's DeepSeek vision SKU. Custom model lists
+// and explicit image-input choices remain user-owned.
+func normalizeLegacyOpenCodeGoVisionCatalog(c *Config) (changed bool) {
+	if c == nil {
+		return false
+	}
+	for i := range c.Providers {
+		p := &c.Providers[i]
+		presetID := strings.TrimSpace(p.PresetID)
+		if (presetID != "opencode-go" && (presetID != "" || strings.TrimSpace(p.Name) != "opencode-go")) ||
+			!strings.EqualFold(strings.TrimSpace(p.Kind), "openai") ||
+			normalizedBaseURLForMigration(p.BaseURL) != "https://opencode.ai/zen/go/v1" ||
+			!stringSlicesEqual(p.Models, preVisionOpenCodeGoModels) ||
+			strings.TrimSpace(p.Model) != "" {
+			continue
+		}
+		p.Models = append([]string(nil), opencodeGoModels...)
+		if p.VisionModels == nil || stringSlicesEqual(p.VisionModels, preVisionOpenCodeGoVisionModels) {
+			p.VisionModels = append([]string(nil), opencodeGoVisionModels...)
+		}
+		mergeMissingOpenCodeGoVisionOverride(p)
+		changed = true
+	}
+	return changed
+}
+
+func mergeMissingOpenCodeGoVisionOverride(p *ProviderEntry) {
+	if p.ModelOverrides == nil {
+		p.ModelOverrides = map[string]ProviderModelOverride{}
+	}
+	const model = "deepseek-v4-flash-vision-exp"
+	key := model
+	for candidate := range p.ModelOverrides {
+		if strings.EqualFold(strings.TrimSpace(candidate), model) {
+			key = candidate
+			break
+		}
+	}
+	override := p.ModelOverrides[key]
+	if strings.TrimSpace(override.ReasoningProtocol) == "" {
+		override.ReasoningProtocol = ReasoningProtocolDeepSeek
+	}
+	if override.SupportedEfforts == nil {
+		override.SupportedEfforts = []string{"disabled", "low", "high", "max"}
+	}
+	if strings.TrimSpace(override.DefaultEffort) == "" && containsString(normalizedEffortLevels(override.SupportedEfforts), "high") {
+		override.DefaultEffort = "high"
+	}
+	if override.ContextWindow <= 0 {
+		override.ContextWindow = 1_000_000
+	}
+	p.ModelOverrides[key] = override
+}
+
 func normalizeLegacyMimoProviderCatalogs(c *Config) bool {
 	if c == nil {
 		return false
@@ -1778,6 +1808,7 @@ func legacyMimoConfigRefs(c *Config) []string {
 		c.DefaultModel,
 		c.Agent.PlannerModel,
 		c.Agent.VisionModel,
+		c.Agent.WebSearchModel,
 		c.Agent.SubagentModel,
 		c.Bot.Model,
 	}
@@ -1939,6 +1970,7 @@ func NormalizeLegacyDesktopProviderAccess(c *Config) {
 	addRef(c.DefaultModel)
 	addRef(c.Agent.PlannerModel)
 	addRef(c.Agent.VisionModel)
+	addRef(c.Agent.WebSearchModel)
 	addRef(c.Agent.SubagentModel)
 	for _, ref := range c.Agent.SubagentModels {
 		addRef(ref)
@@ -2454,7 +2486,7 @@ func mergeProviderModelOverride(dst *ProviderModelOverride, src ProviderModelOve
 
 func mergeModelLists(primary, extra []string) []string {
 	seen := map[string]bool{}
-	out := make([]string, 0, len(primary)+len(extra))
+	out := make([]string, 0, len(primary))
 	for _, list := range [][]string{primary, extra} {
 		for _, model := range list {
 			model = strings.TrimSpace(model)

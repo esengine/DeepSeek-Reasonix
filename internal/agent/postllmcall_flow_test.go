@@ -42,6 +42,14 @@ type reasoningRoundTripScriptedProvider struct {
 
 func (reasoningRoundTripScriptedProvider) RequiresReasoningRoundTrip() bool { return true }
 
+type assistantReasoningReplayScriptedProvider struct {
+	*scriptedProvider
+}
+
+func (assistantReasoningReplayScriptedProvider) RequiresAssistantReasoningReplay(m provider.Message) bool {
+	return m.ReasoningContent != ""
+}
+
 // TestPostLLMCallAbsentStreamsReasoningLive is the regression guard: with no
 // PostLLMCall hook, reasoning must still stream chunk-by-chunk (one Reasoning
 // event per delta) so the live "thinking…" display keeps working.
@@ -102,6 +110,19 @@ func TestPostLLMCallKeepsOriginalForReasoningRoundTripProvider(t *testing.T) {
 	}
 	if got := assistantReasoning(a.sess.conversation.Messages); got != "think A think B" {
 		t.Fatalf("stored reasoning = %q, want raw provider reasoning for replay", got)
+	}
+}
+
+func TestPostLLMCallKeepsOriginalForPlainReasoningReplayProvider(t *testing.T) {
+	prov := assistantReasoningReplayScriptedProvider{&scriptedProvider{name: "p", turns: reasoningTurn()}}
+	h := &stubHooks{hasPostLLM: true, postLLMOut: "TRANSLATED"}
+	a := New(prov, tool.NewRegistry(), NewSession(""), Options{Hooks: h}, event.Discard)
+
+	if err := a.Run(context.Background(), "go"); err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+	if got := assistantReasoning(a.sess.conversation.Messages); got != "think A think B" {
+		t.Fatalf("stored reasoning = %q, want original provider reasoning", got)
 	}
 }
 

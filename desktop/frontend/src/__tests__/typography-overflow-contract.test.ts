@@ -8,6 +8,7 @@ import { TEXT_SIZES } from "../lib/textSize";
 
 const testDir = dirname(fileURLToPath(import.meta.url));
 const styles = [
+  readFileSync(resolve(testDir, "../components/ProviderCatalogPicker.css"), "utf8"),
   readFileSync(resolve(testDir, "../styles.css"), "utf8"),
   readFileSync(resolve(testDir, "../components/CompactRatioSettings.css"), "utf8"),
 ].join("\n").replace(/\/\*[\s\S]*?\*\//g, "");
@@ -128,13 +129,13 @@ for (const block of matchingBlocks(".transcript")) {
     const sides = paddingSides(shorthand[1]);
     ok(
       isZeroPad(sides.left) && isZeroPad(sides.right),
-      `Virtuoso scroller padding stays vertical-only (${shorthand[1].trim()})`,
+      `transcript scroller padding stays vertical-only (${shorthand[1].trim()})`,
     );
   }
   const padLeft = /(?:^|;)\s*padding-left\s*:\s*([^;]+)/.exec(block);
   const padRight = /(?:^|;)\s*padding-right\s*:\s*([^;]+)/.exec(block);
-  ok(isZeroPad(padLeft?.[1].trim()), "Virtuoso scroller does not set padding-left");
-  ok(isZeroPad(padRight?.[1].trim()), "Virtuoso scroller does not set padding-right");
+  ok(isZeroPad(padLeft?.[1].trim()), "transcript scroller does not set padding-left");
+  ok(isZeroPad(padRight?.[1].trim()), "transcript scroller does not set padding-right");
 }
 ok(hasDeclaration(".transcript", "--transcript-inline-pad", "32px"), "default transcript inline inset is 32px");
 ok(hasDeclaration(".transcript", "--transcript-inline-pad", "16px"), "narrow viewports tighten the transcript inline inset");
@@ -180,18 +181,18 @@ eq(
   "var(--statusbar-dock-height)",
   "status bar min-height follows the scaled dock token",
 );
-eq(finalDeclaration(".provider-template-grid", "grid-auto-rows"), "92px", "provider preset cards use compact equal-height grid rows");
-eq(finalDeclaration(".provider-template-card", "height"), "100%", "provider preset cards stretch to the grid row height");
-eq(finalDeclaration(".provider-template-card strong", "-webkit-line-clamp"), "1", "provider preset card titles clamp to one line");
-eq(finalDeclaration(".provider-template-card span", "-webkit-line-clamp"), "2", "provider preset card descriptions clamp to two lines");
+eq(finalDeclaration(".provider-catalog__brands", "overflow-y"), "auto", "brand list scrolls independently");
+eq(finalDeclaration(".provider-catalog__detail", "min-width"), "0", "provider detail can shrink within its column");
+eq(finalDeclaration(".provider-catalog__models", "overflow-wrap"), "anywhere", "long model IDs wrap within the detail");
+
 eq(finalDeclaration(".provider-model-draft__list", "grid-auto-rows"), "min-content", "provider model rows grow with their content");
 eq(finalDeclaration(".provider-model-draft__option", "min-height"), undefined, "provider model cards do not force undersized rows");
 eq(finalDeclaration(".provider-model-draft__option", "overflow"), "hidden", "provider model cards contain overflowing controls");
-eq(finalDeclaration(".compact-ratio-presets", "width"), "100%", "compaction presets use the full settings control width");
-eq(finalDeclaration(".compact-ratio-presets .set-seg__btn", "flex"), "1 1 0", "three compaction presets share the available width equally");
-eq(finalDeclaration(".compact-ratio-presets .set-seg__btn", "flex-direction"), "column", "compaction presets place percentage and strategy on separate lines");
-eq(finalDeclaration(".compact-ratio-presets .set-seg__btn", "min-height"), "44px", "two-line compaction presets keep a stable target height");
-eq(finalDeclaration(".compact-ratio-presets .set-seg__btn", "white-space"), "normal", "compaction labels do not depend on ellipsis for their meaning");
+eq(finalDeclaration(".compact-ratio-choice-list", "width"), "100%", "compaction choices fit the settings control width");
+eq(finalDeclaration(".compact-ratio-choice__row", "display"), "grid", "compaction rows align radio, label, percentage and explanation");
+eq(finalDeclaration(".compact-ratio-choice__row", "min-height"), "40px", "compaction rows retain a stable click target");
+eq(finalDeclaration(".compact-ratio-choice__effect", "min-width"), "0", "compaction explanations can shrink and wrap");
+eq(finalDeclaration(".compact-ratio-choice__inline-input > span", "flex"), "0 0 auto", "percentage suffix remains visible beside the editable value");
 
 eq(finalDeclaration(".statusbar", "white-space"), "nowrap", "status bar keeps metrics on one row");
 eq(finalDeclaration(".statusbar", "overflow-y"), "hidden", "status bar hides vertical overflow");

@@ -38,6 +38,18 @@ func NewSessionLeaseKeeper() *SessionLeaseKeeper {
 // lease and must not bind path for writing. A held path surfaces as an error
 // wrapping agent.ErrSessionLeaseHeld; format it with SessionInUseMessage.
 func (k *SessionLeaseKeeper) Rebind(path string) error {
+	return k.rebindWith(path, agent.TryAcquireSessionLease)
+}
+
+// RebindWithHandoff consumes an explicit cross-process lease reservation. It
+// has the same failure-atomic ownership semantics as Rebind.
+func (k *SessionLeaseKeeper) RebindWithHandoff(path, sourceWriterID, handoffID string) error {
+	return k.rebindWith(path, func(target string) (*agent.SessionLease, error) {
+		return agent.TryAcquireSessionLeaseWithHandoff(target, sourceWriterID, handoffID)
+	})
+}
+
+func (k *SessionLeaseKeeper) rebindWith(path string, acquire func(string) (*agent.SessionLease, error)) error {
 	if k == nil {
 		return nil
 	}
@@ -50,12 +62,113 @@ func (k *SessionLeaseKeeper) Rebind(path string) error {
 	if k.lease != nil && k.lease.Path() == agent.CanonicalSessionPath(path) {
 		return nil
 	}
-	lease, err := agent.TryAcquireSessionLease(path)
+	lease, err := acquire(path)
 	if err != nil {
 		return err
 	}
 	k.releaseLocked()
 	k.lease = lease
+	return nil
+}
+
+// ReleaseForHandoff drops the keeper's current ownership into a reservation
+// for targetWriterID. The controller loses write authority only after the
+// reservation is durably published.
+func (k *SessionLeaseKeeper) ReleaseForHandoff(targetWriterID, handoffID string) error {
+	if k == nil {
+		return nil
+	}
+	k.mu.Lock()
+	defer k.mu.Unlock()
+	if k.lease == nil {
+		return fmt.Errorf("no session lease held")
+	}
+	if err := k.lease.ReleaseForHandoff(targetWriterID, handoffID); err != nil {
+		return err
+	}
+	k.lease = nil
+	k.unbindControllerLocked()
+	return nil
+}
+
+// RebindReturningCurrent acquires path before returning the currently held
+// session through its reverse reservation. It is the failure-atomic switch
+// primitive for an external writer that wants to leave a mirrored session:
+// if either the target acquire or reservation publication fails, the keeper
+// remains bound to the current session.
+func (k *SessionLeaseKeeper) RebindReturningCurrent(path, targetWriterID, handoffID string) error {
+	return k.rebindReturningCurrentWith(path, targetWriterID, handoffID, agent.TryAcquireSessionLease)
+}
+
+// RebindWithHandoffReturningCurrent is the two-sided handoff variant: acquire
+// the new session through its forward reservation, then return the current
+// session through its reverse reservation as one keeper transaction. If both
+// the source return and the target rollback reservation fail, the source is
+// restored and pending retains the live target lease for retry. Callers must
+// keep pending until RetireDetachedForHandoff succeeds.
+func (k *SessionLeaseKeeper) RebindWithHandoffReturningCurrent(
+	path, sourceWriterID, acquireHandoffID, acquiredReturnHandoffID, targetWriterID, returnHandoffID string,
+) (pending *SessionLeaseKeeper, err error) {
+	return k.rebindWithHandoffReturningCurrentWith(
+		path,
+		func(target string) (*agent.SessionLease, error) {
+			return agent.TryAcquireSessionLeaseWithHandoff(target, sourceWriterID, acquireHandoffID)
+		},
+		func(previous *SessionLeaseKeeper) error {
+			return previous.RetireDetachedForHandoff(targetWriterID, returnHandoffID)
+		},
+		func(target *agent.SessionLease) error {
+			return target.ReleaseForHandoff(sourceWriterID, acquiredReturnHandoffID)
+		},
+	)
+}
+
+func (k *SessionLeaseKeeper) rebindWithHandoffReturningCurrentWith(
+	path string,
+	acquire func(string) (*agent.SessionLease, error),
+	returnPrevious func(*SessionLeaseKeeper) error,
+	returnTarget func(*agent.SessionLease) error,
+) (*SessionLeaseKeeper, error) {
+	previous, err := k.rebindDetachingWith(path, acquire)
+	if err != nil || previous == nil {
+		return nil, err
+	}
+	if err := returnPrevious(previous); err != nil {
+		pending, rollbackErr := k.restoreDetachedReturningCurrentWith(previous, returnTarget)
+		if rollbackErr != nil {
+			return pending, errors.Join(err, fmt.Errorf("return acquired target: %w", rollbackErr))
+		}
+		return nil, err
+	}
+	return nil, nil
+}
+
+func (k *SessionLeaseKeeper) rebindReturningCurrentWith(path, targetWriterID, handoffID string, acquire func(string) (*agent.SessionLease, error)) error {
+	if k == nil {
+		return nil
+	}
+	k.mu.Lock()
+	defer k.mu.Unlock()
+	if k.lease == nil {
+		return fmt.Errorf("no session lease held")
+	}
+	canonical := agent.CanonicalSessionPath(path)
+	if strings.TrimSpace(canonical) == "" {
+		return fmt.Errorf("target session path is empty")
+	}
+	if k.lease.Path() == canonical {
+		return nil
+	}
+	next, err := acquire(canonical)
+	if err != nil {
+		return err
+	}
+	if err := k.lease.ReleaseForHandoff(targetWriterID, handoffID); err != nil {
+		next.Release()
+		return err
+	}
+	k.lease = next
+	k.unbindControllerLocked()
 	return nil
 }
 
@@ -133,6 +246,18 @@ func (k *SessionLeaseKeeper) handleSessionRecovered(c *Controller, requireOwner 
 // before the controller swaps Sessions. Acquisition is failure-atomic: the old
 // lease remains held unless the target lease and candidate authority are ready.
 func (k *SessionLeaseKeeper) HandleSessionTransition(info SessionTransitionInfo) error {
+	return k.handleSessionTransitionWith(info, agent.TryAcquireSessionLease)
+}
+
+// HandleSessionTransitionWithHandoff binds a private transition candidate with
+// an explicitly reserved lease before the controller publishes it.
+func (k *SessionLeaseKeeper) HandleSessionTransitionWithHandoff(info SessionTransitionInfo, sourceWriterID, handoffID string) error {
+	return k.handleSessionTransitionWith(info, func(path string) (*agent.SessionLease, error) {
+		return agent.TryAcquireSessionLeaseWithHandoff(path, sourceWriterID, handoffID)
+	})
+}
+
+func (k *SessionLeaseKeeper) handleSessionTransitionWith(info SessionTransitionInfo, acquire func(string) (*agent.SessionLease, error)) error {
 	targetPath := strings.TrimSpace(info.TargetPath)
 	if k == nil || targetPath == "" {
 		return nil
@@ -144,7 +269,7 @@ func (k *SessionLeaseKeeper) HandleSessionTransition(info SessionTransitionInfo)
 		k.mu.Unlock()
 		return err
 	}
-	lease, err := agent.TryAcquireSessionLease(targetPath)
+	lease, err := acquire(targetPath)
 	if err == nil {
 		err = info.BindWriteAuthority(lease)
 	}
@@ -312,6 +437,117 @@ func (k *SessionLeaseKeeper) Split() *SessionLeaseKeeper {
 // RebindDetaching acquires path and returns the previous binding in a separate
 // keeper. Acquisition is failure-atomic: on error the receiver is unchanged.
 func (k *SessionLeaseKeeper) RebindDetaching(path string) (*SessionLeaseKeeper, error) {
+	return k.rebindDetachingWith(path, agent.TryAcquireSessionLease)
+}
+
+// RebindDetachingWithHandoff is RebindDetaching for a targeted reservation.
+func (k *SessionLeaseKeeper) RebindDetachingWithHandoff(path, sourceWriterID, handoffID string) (*SessionLeaseKeeper, error) {
+	return k.rebindDetachingWith(path, func(target string) (*agent.SessionLease, error) {
+		return agent.TryAcquireSessionLeaseWithHandoff(target, sourceWriterID, handoffID)
+	})
+}
+
+// RetireDetached releases a keeper returned by RebindDetaching after the
+// caller has authorized the replacement session. Unlike Release, it does not
+// clear the shared controller's authority or callbacks: the receiving keeper
+// binds those immediately after publishing the replacement session.
+func (k *SessionLeaseKeeper) RetireDetached() {
+	if k == nil {
+		return
+	}
+	k.mu.Lock()
+	if k.lease != nil {
+		k.lease.Release()
+		k.lease = nil
+	}
+	k.controller = nil
+	retired := append([]<-chan struct{}(nil), k.retired...)
+	k.retired = nil
+	k.mu.Unlock()
+	for _, done := range retired {
+		<-done
+	}
+}
+
+// RetireDetachedForHandoff is RetireDetached with a durable target-writer
+// reservation. A persistence failure leaves the detached keeper unchanged.
+func (k *SessionLeaseKeeper) RetireDetachedForHandoff(targetWriterID, handoffID string) error {
+	if k == nil {
+		return fmt.Errorf("no detached session lease held")
+	}
+	k.mu.Lock()
+	if k.lease == nil {
+		k.mu.Unlock()
+		return fmt.Errorf("no detached session lease held")
+	}
+	if err := k.lease.ReleaseForHandoff(targetWriterID, handoffID); err != nil {
+		k.mu.Unlock()
+		return err
+	}
+	k.lease = nil
+	k.controller = nil
+	retired := append([]<-chan struct{}(nil), k.retired...)
+	k.retired = nil
+	k.mu.Unlock()
+	for _, done := range retired {
+		<-done
+	}
+	return nil
+}
+
+// RestoreDetachedReturningCurrent rolls a RebindDetaching transaction back to
+// previous while returning the receiver's newly acquired lease through a
+// reverse reservation. The old binding is restored even when publishing that
+// reservation fails. In that case the returned detached keeper still owns the
+// target lease and must be retained and retried with RetireDetachedForHandoff;
+// releasing it while the process remains alive would reopen a third-writer
+// race before the intended owner can consume the reservation.
+//
+// Callers use this before publishing a controller for the receiver's target.
+func (k *SessionLeaseKeeper) RestoreDetachedReturningCurrent(previous *SessionLeaseKeeper, targetWriterID, handoffID string) (*SessionLeaseKeeper, error) {
+	return k.restoreDetachedReturningCurrentWith(previous, func(lease *agent.SessionLease) error {
+		return lease.ReleaseForHandoff(targetWriterID, handoffID)
+	})
+}
+
+func (k *SessionLeaseKeeper) restoreDetachedReturningCurrentWith(previous *SessionLeaseKeeper, release func(*agent.SessionLease) error) (*SessionLeaseKeeper, error) {
+	if k == nil || previous == nil || k == previous {
+		return nil, fmt.Errorf("invalid detached session rollback")
+	}
+	k.mu.Lock()
+	previous.mu.Lock()
+	defer previous.mu.Unlock()
+	defer k.mu.Unlock()
+	if k.lease == nil {
+		return nil, fmt.Errorf("no current session lease held")
+	}
+	if previous.lease == nil && previous.controller == nil && len(previous.retired) == 0 {
+		return nil, fmt.Errorf("no previous session binding held")
+	}
+	if k.controller != nil || len(k.retired) != 0 {
+		return nil, fmt.Errorf("current session binding was already published")
+	}
+
+	current := k.lease
+	releaseErr := release(current)
+	var pending *SessionLeaseKeeper
+	if releaseErr != nil {
+		pending = &SessionLeaseKeeper{lease: current, ownershipBinder: k.ownershipBinder}
+	}
+
+	inLease, inCtrl, inRetired, inBinder := previous.lease, previous.controller, previous.retired, previous.ownershipBinder
+	previous.lease, previous.controller, previous.retired = nil, nil, nil
+	if k.ownershipBinder == nil {
+		k.ownershipBinder = inBinder
+	}
+	k.lease, k.controller, k.retired = inLease, inCtrl, inRetired
+	if inCtrl != nil {
+		k.bindTransferredController(inCtrl)
+	}
+	return pending, releaseErr
+}
+
+func (k *SessionLeaseKeeper) rebindDetachingWith(path string, acquire func(string) (*agent.SessionLease, error)) (*SessionLeaseKeeper, error) {
 	if k == nil {
 		return nil, nil
 	}
@@ -324,7 +560,7 @@ func (k *SessionLeaseKeeper) RebindDetaching(path string) (*SessionLeaseKeeper, 
 		k.mu.Unlock()
 		return nil, nil
 	}
-	lease, err := agent.TryAcquireSessionLease(path)
+	lease, err := acquire(path)
 	if err != nil {
 		k.mu.Unlock()
 		return nil, err
@@ -333,7 +569,9 @@ func (k *SessionLeaseKeeper) RebindDetaching(path string) (*SessionLeaseKeeper, 
 	if k.lease != nil || k.controller != nil || len(k.retired) > 0 {
 		dst = &SessionLeaseKeeper{lease: k.lease, controller: k.controller, retired: k.retired, ownershipBinder: k.ownershipBinder}
 	}
-	if dst.controller != nil {
+	// dst stays nil when the keeper holds nothing at all (e.g. its lease was
+	// released by a session handoff); there is no controller to rebind then.
+	if dst != nil && dst.controller != nil {
 		dst.bindTransferredController(dst.controller)
 	}
 	k.lease, k.controller, k.retired = lease, nil, nil
@@ -368,6 +606,10 @@ func (k *SessionLeaseKeeper) releaseLocked() {
 		k.lease.Release()
 		k.lease = nil
 	}
+	k.unbindControllerLocked()
+}
+
+func (k *SessionLeaseKeeper) unbindControllerLocked() {
 	if k.controller != nil {
 		k.controller.SetOnSessionTransition(nil)
 		k.controller.SetOnSessionRecovered(nil)

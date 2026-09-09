@@ -233,15 +233,15 @@ func TestOfficialDeepSeekProviderStillGetsItsDefaults(t *testing.T) {
 	}
 }
 
-func TestMissingCanonicalDeepSeekUsesAnthropicDefault(t *testing.T) {
+func TestMissingCanonicalDeepSeekUsesChatDefault(t *testing.T) {
 	cfg := Default()
 	ensureDeepSeekOfficialProvider(cfg)
 	p, ok := cfg.Provider("deepseek")
 	if !ok {
 		t.Fatal("canonical DeepSeek provider missing after load")
 	}
-	if p.Kind != "anthropic" || p.BaseURL != deepSeekAnthropicBaseURL || !EffectiveWebSearch(p) {
-		t.Fatalf("canonical DeepSeek provider = kind:%q base_url:%q web_search:%t, want Anthropic-compatible with web search", p.Kind, p.BaseURL, EffectiveWebSearch(p))
+	if p.Kind != "openai" || p.BaseURL != "https://api.deepseek.com" || !EffectiveIndependentWebSearch(p) {
+		t.Fatalf("canonical DeepSeek provider = kind:%q base_url:%q web_search:%t, want Chat Completions with independent search", p.Kind, p.BaseURL, EffectiveIndependentWebSearch(p))
 	}
 }
 

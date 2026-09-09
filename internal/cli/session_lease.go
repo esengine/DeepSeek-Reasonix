@@ -9,6 +9,27 @@ import (
 	"reasonix/internal/control"
 )
 
+// bindAndLoadCLIResume acquires the single-writer lease before reading the
+// transcript. Loading first leaves a race where the previous writer can append
+// and release between the read and Rebind, giving the new CLI ownership of a
+// newer file while its controller resumes an older in-memory snapshot.
+func bindAndLoadCLIResume(leases *control.SessionLeaseKeeper, path string, load func(string) (*agent.Session, error)) (*agent.Session, error) {
+	if leases != nil {
+		if err := leases.Rebind(path); err != nil {
+			return nil, err
+		}
+	}
+	return load(path)
+}
+
+func cliControllerHasActiveRuntimeWork(ctrl control.SessionAPI) bool {
+	if ctrl == nil {
+		return false
+	}
+	status := ctrl.RuntimeStatus()
+	return status.Running || status.PendingPrompt || status.BackgroundJobs > 0
+}
+
 // sessionLeaseResumeRefusal is the startup-time refusal for `reasonix
 // [--resume|--continue]` and `reasonix run --resume/--continue`: it names the
 // holder and offers the two ways out (close the holder, or continue in a
@@ -31,9 +52,55 @@ func (m *chatTUI) rebindSessionLease(path string) error {
 	if m.leases == nil {
 		return nil
 	}
-	if err := m.leases.Rebind(path); err != nil {
+	handled := false
+	var err error
+	if m.takeover != nil {
+		handled, err = m.takeover.RebindAway(path)
+	}
+	if err != nil {
 		return err
 	}
+	if !handled {
+		err = m.leases.Rebind(path)
+	}
+	if err != nil {
+		return err
+	}
+	return bindChatTUIAuthority(m)
+}
+
+// commitSessionSwitch acquires the target lease before loading its transcript
+// while retaining the source keeper. This is the ordinary counterpart of
+// /takeover's targeted transaction and also lets a mirrored CLI leave for a
+// free session without dropping its source before the candidate is authorized.
+func (m *chatTUI) commitSessionSwitch(path string) error {
+	return m.commitSessionSwitchWithLoader(path, loadResumableSession)
+}
+
+func (m *chatTUI) commitSessionSwitchWithLoader(path string, load func(string) (*agent.Session, error)) error {
+	if m == nil {
+		return fmt.Errorf("resume candidate unavailable")
+	}
+	binding, err := cliAcquireFreeSession(path, m.leases, m.takeover)
+	if err != nil {
+		return err
+	}
+	loaded, err := load(path)
+	if err != nil {
+		_ = cliReturnFailedTakeover(binding, m.leases, m.takeover)
+		return err
+	}
+	if m.leases != nil {
+		if err := m.leases.BindSessionAuthority(loaded); err != nil {
+			_ = cliReturnFailedTakeover(binding, m.leases, m.takeover)
+			return err
+		}
+	}
+	if err := binding.commitPrevious(m.takeover); err != nil {
+		_ = cliReturnFailedTakeover(binding, m.leases, m.takeover)
+		return err
+	}
+	m.ctrl.Resume(loaded, path)
 	return bindChatTUIAuthority(m)
 }
 

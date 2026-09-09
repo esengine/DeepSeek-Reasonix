@@ -43,7 +43,8 @@ func (m *chatTUI) inboxQueuedCount() int {
 	return len(m.inboxSnap().Items)
 }
 
-// enqueueFollowup persists a follow-up. Only clears the composer on success.
+// enqueueFollowup persists a follow-up and kicks dispatch if the controller is
+// already idle. Only clears the composer on success.
 func (m *chatTUI) enqueueFollowup(display, submit string) (sessioninbox.InboxReceipt, error) {
 	if m.ctrl == nil {
 		return sessioninbox.InboxReceipt{}, sessioninbox.ErrClosed
@@ -51,7 +52,7 @@ func (m *chatTUI) enqueueFollowup(display, submit string) (sessioninbox.InboxRec
 	if ensurer, ok := m.ctrl.(interface{ EnsureSessionPath() }); ok {
 		ensurer.EnsureSessionPath()
 	}
-	return m.ctrl.EnqueueInbox(control.InboxRequest{
+	return m.ctrl.TryEnqueueFollowup(control.InboxRequest{
 		Intent:  sessioninbox.IntentFollowup,
 		Display: display,
 		Raw:     submit,

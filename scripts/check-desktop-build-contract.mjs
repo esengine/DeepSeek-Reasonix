@@ -39,7 +39,7 @@ assert.equal(
   "pnpm install --config.confirmModulesPurge=false",
 );
 
-for (const jobName of ["desktop", "desktop-windows"]) {
+for (const jobName of ["desktop-prepare", "desktop-go", "desktop-frontend", "desktop-browser", "desktop-macos", "desktop-windows"]) {
   assert.deepEqual(nodeVersions(jobBody(ciWorkflow, jobName)), ["24"]);
 }
 

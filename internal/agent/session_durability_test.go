@@ -268,6 +268,7 @@ func TestDurabilityTornWALTailReplaysToLastCommit(t *testing.T) {
 }
 
 func TestDurabilityStaleWriterCannotClobber(t *testing.T) {
+	useSchemaOneLog(t)
 	d := newDurabilityRun(t)
 	_, _ = d.buildSaved(1)
 
@@ -313,6 +314,7 @@ func TestDurabilityStaleWriterCannotClobber(t *testing.T) {
 }
 
 func TestDurabilityBareSaveBootstrapsWAL(t *testing.T) {
+	useSchemaOneLog(t)
 	d := newDurabilityRun(t)
 	s := NewSession("system prompt")
 	s.Add(provider.Message{Role: provider.RoleUser, Content: "bare save"})
@@ -339,6 +341,7 @@ func TestDurabilityBareSaveBootstrapsWAL(t *testing.T) {
 }
 
 func TestDurabilityCrossWriterIDCannotClobber(t *testing.T) {
+	useSchemaOneLog(t)
 	originalWriterID := sessionWriterID
 	t.Cleanup(func() { sessionWriterID = originalWriterID })
 
@@ -419,6 +422,7 @@ func TestDurabilityStaleCompactRewriteCannotClobber(t *testing.T) {
 }
 
 func TestDurabilityRewindSuffixDoesNotResurrect(t *testing.T) {
+	useSchemaOneLog(t)
 	d := newDurabilityRun(t)
 	_, _ = d.buildSaved(3)
 

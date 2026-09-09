@@ -25,6 +25,29 @@ func TestParseContextLimitErrorNumericJSON(t *testing.T) {
 	}
 }
 
+func TestParseContextLimitErrorGLMUnnumbered1261(t *testing.T) {
+	// Zhipu GLM reports a bare overflow with no token numbers. It must be
+	// trusted as a context-limit error with an unknown window rather than
+	// failing the same oversized request on every retry.
+	body := `{"error":{"code":"1261","message":"Prompt exceeds max length"}}`
+	got := ParseContextLimitError(&APIError{Status: 400, Body: body})
+	if got == nil {
+		t.Fatal("GLM 1261 must be trusted as a context-limit error")
+	}
+	if got.WindowTokens != 0 || got.RequestedTokens != 0 || got.PromptTokens != 0 || got.CompletionTokens != 0 {
+		t.Fatalf("unnumbered overflow must carry zero token fields, got %+v", got)
+	}
+	if errors.Unwrap(got) == nil {
+		t.Fatal("Unwrap must return the original APIError")
+	}
+	if ParseContextLimitError(&APIError{Status: 400, Body: `{"error":{"message":"prompt exceeds max length"}}`}) == nil {
+		t.Fatal("case-insensitive message variant must be trusted")
+	}
+	if ParseContextLimitError(&APIError{Status: 401, Body: `{"error":{"code":"1261","message":"Prompt exceeds max length"}}`}) != nil {
+		t.Fatal("401 must not be treated as a context limit")
+	}
+}
+
 func TestParseContextLimitErrorRejectsMalformedAndNonContext(t *testing.T) {
 	if ParseContextLimitError(&APIError{Status: 400, Body: `{"error":{"message":"unpaired tool_calls"}}`}) != nil {
 		t.Fatal("non-context 400 must stay unparsed")

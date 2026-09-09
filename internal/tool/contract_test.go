@@ -70,6 +70,7 @@ var acceptsDefaultSnip = map[string]bool{
 	"notebook_edit": true,
 	"todo_write":    true,
 	"update_goal":   true,
+	"view_image":    true, // short metadata only; image bytes travel outside text snipping
 	"wait":          true,
 	"write_file":    true,
 }

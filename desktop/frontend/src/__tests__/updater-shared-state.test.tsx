@@ -4,6 +4,7 @@ import { JSDOM } from "jsdom";
 import React from "react";
 import { act } from "react";
 import { createRoot } from "react-dom/client";
+import { subscribeToUpdateRefresh } from "../components/UpdateBanner";
 import { __emitMockUpdater, type AppBindings } from "../lib/bridge";
 import { classifyUpdateError, UpdaterProvider, useUpdater } from "../lib/useUpdater";
 
@@ -52,6 +53,9 @@ function Consumer({ id, checking = false }: { id: string; checking?: boolean }) 
       <button id={`${id}-force-check`} type="button" onClick={() => void updater.check()}>
         ForceCheck
       </button>
+      <button id={`${id}-refresh`} type="button" onClick={() => void updater.refresh()}>
+        Refresh
+      </button>
       <button id={`${id}-reset`} type="button" onClick={() => updater.reset()}>Reset</button>
       <button
         id={`${id}-abandon`}
@@ -90,6 +94,17 @@ globalThis.Element = dom.window.Element;
 globalThis.HTMLElement = dom.window.HTMLElement;
 globalThis.Event = dom.window.Event;
 globalThis.MouseEvent = dom.window.MouseEvent;
+
+let scheduledRefreshes = 0;
+const unsubscribeRefresh = subscribeToUpdateRefresh(() => {
+  scheduledRefreshes += 1;
+}, 60_000);
+window.dispatchEvent(new Event("focus"));
+document.dispatchEvent(new Event("visibilitychange"));
+ok(scheduledRefreshes === 2, "visible focus and visibility changes schedule update refreshes");
+unsubscribeRefresh();
+window.dispatchEvent(new Event("focus"));
+ok(scheduledRefreshes === 2, "update refresh listeners are removed on cleanup");
 
 const root = createRoot(document.getElementById("root")!);
 await act(async () => {
@@ -172,6 +187,13 @@ await act(async () => {
 });
 ok(document.getElementById("banner-status")?.textContent === "authorizing", "deb apply starts authorizing");
 ok(document.getElementById("settings-status")?.textContent === "authorizing", "authorizing state is shared");
+
+const checksBeforeBusyRefresh = checkedChannels.length;
+await act(async () => {
+  (document.getElementById("banner-refresh") as HTMLButtonElement).click();
+  await new Promise((resolve) => setTimeout(resolve, 0));
+});
+ok(checkedChannels.length === checksBeforeBusyRefresh, "background refresh cannot supersede an active update");
 
 await act(async () => {
   __emitMockUpdater({

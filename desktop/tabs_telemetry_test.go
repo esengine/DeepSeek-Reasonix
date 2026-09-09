@@ -722,6 +722,7 @@ func TestNewSessionResetsTabUsageTelemetry(t *testing.T) {
 }
 
 func TestSnapshotConflictRecoveryCarriesTelemetryToFork(t *testing.T) {
+	t.Setenv(agent.SessionLogSchemaEnv, "v1")
 	isolateDesktopUserDirs(t)
 
 	root := globalTabWorkspaceRoot()

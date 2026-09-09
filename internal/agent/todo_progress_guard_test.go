@@ -49,7 +49,8 @@ func TestTodoProgressGuardNeverPausesARun(t *testing.T) {
 	}{
 		{"chat", context.Background},
 		{"goal", func() context.Context {
-			return WithDeliveryExecutionScope(context.Background(), DeliveryExecutionScope{ID: "goal-1"})
+			ctx := WithDeliveryExecutionScope(context.Background(), DeliveryExecutionScope{ID: "goal-1"})
+			return WithContinuationPolicy(ctx, ContinuationExplicitFlow)
 		}},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
@@ -71,8 +72,13 @@ func TestTodoProgressGuardNeverPausesARun(t *testing.T) {
 			if got, want := mp.CallCount(), len(turns); got != want {
 				t.Fatalf("provider calls = %d, want all %d turns to run past the old threshold", got, want)
 			}
-			if !sessionContains(a, "Host progress check") {
-				t.Fatal("the reassessment nudge went missing; only the pause was meant to go")
+			nudged := sessionContains(a, "Host progress check")
+			if tc.name == "chat" {
+				if nudged {
+					t.Fatal("ordinary chat must not inject a todo stall continuation")
+				}
+			} else if !nudged {
+				t.Fatal("the Goal reassessment nudge went missing; only the pause was meant to go")
 			}
 		})
 	}
@@ -96,7 +102,7 @@ func TestGoalTodoProgressGuardReplansWithoutPausing(t *testing.T) {
 	reg.Add(fakeTool{name: "inspect", readOnly: true})
 	reg.Add(mustBuiltinTool(t, "todo_write"))
 	mp := testutil.NewMock("m", turns...)
-	a := New(mp, reg, NewSession(""), Options{}, event.Discard)
+	a := New(mp, reg, NewSession(""), Options{ContinuationPolicy: ContinuationExplicitFlow}, event.Discard)
 	ctx := WithDeliveryExecutionScope(context.Background(), DeliveryExecutionScope{ID: "goal-1", TaskText: "finish the task"})
 	if err := a.Run(ctx, "work until the todo is complete"); err != nil {
 		t.Fatalf("Goal todo stall must redirect, not pause: %v", err)

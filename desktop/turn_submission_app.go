@@ -27,16 +27,43 @@ func (t *WorkspaceTab) turnStartedAt() int64 {
 
 // setBinding reroutes the sink while invalidating correlations that were
 // created for a different frontend tab.
-func (s *tabEventSink) setBinding(tabID string, app *App) {
+func (s *tabEventSink) setBinding(tabID string, app *App, generation ...uint64) {
 	s.mu.Lock()
 	if s.tabID != tabID {
 		s.turn.submissionID = ""
 	}
 	s.tabID = tabID
+	if len(generation) > 0 {
+		if s.sessionGeneration != generation[0] {
+			s.turn.submissionID = ""
+		}
+		s.sessionGeneration = generation[0]
+	}
 	if app != nil {
 		s.app = app
 	}
 	s.mu.Unlock()
+}
+
+func (s *tabEventSink) setSessionGeneration(generation uint64) {
+	if s == nil {
+		return
+	}
+	s.mu.Lock()
+	if s.sessionGeneration != generation {
+		s.turn.submissionID = ""
+	}
+	s.sessionGeneration = generation
+	s.mu.Unlock()
+}
+
+func (s *tabEventSink) sessionGenerationSnapshot() uint64 {
+	if s == nil {
+		return 0
+	}
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	return s.sessionGeneration
 }
 
 func (s *tabEventSink) setRuntimeEpoch(epoch string) {
@@ -80,8 +107,11 @@ type correlatedWireEventTab struct {
 	SubmissionID string `json:"submissionId,omitempty"`
 }
 
-func toWireTabWithSubmission(e event.Event, tabID, runtimeEpoch, submissionID string, turnStartedAt int64) any {
+func toWireTabWithSubmission(e event.Event, tabID, runtimeEpoch, submissionID string, turnStartedAt int64, sessionGeneration ...uint64) any {
 	wire := toWireTab(e, tabID, runtimeEpoch)
+	if len(sessionGeneration) > 0 {
+		wire.SessionGeneration = sessionGeneration[0]
+	}
 	if e.Kind == event.TurnStarted {
 		wire.TurnStartedAt = turnStartedAt
 	}

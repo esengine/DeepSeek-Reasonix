@@ -7,6 +7,7 @@ import (
 	"log/slog"
 	"sync/atomic"
 
+	"reasonix/internal/agent"
 	"reasonix/internal/checkpoint"
 	"reasonix/internal/diff"
 	"reasonix/internal/event"
@@ -146,6 +147,17 @@ func (c *Controller) PrepareRewind(turn int, scope RewindScope) (checkpoint.Rewi
 // Conversation forks are returned detached so multi-tab frontends can keep the
 // parent controller; single-session frontends must activate result.Branch.
 func (c *Controller) CommitRewind(planID string) (checkpoint.RewindResult, error) {
+	return c.commitRewind(planID, false)
+}
+
+// CommitRewindInPlace commits a prepared plan and moves this controller onto
+// the rewound conversation: a new head of the same schema-2 log, or the fork
+// file for a schema-1 session. Desktop tabs use it so the tab stays put.
+func (c *Controller) CommitRewindInPlace(planID string) (checkpoint.RewindResult, error) {
+	return c.commitRewind(planID, true)
+}
+
+func (c *Controller) commitRewind(planID string, switchToFork bool) (checkpoint.RewindResult, error) {
 	if !c.checkpoints.enabled() || c.executor == nil {
 		return checkpoint.RewindResult{}, c.rewindFail(fmt.Errorf("checkpoints unavailable"))
 	}
@@ -171,7 +183,7 @@ func (c *Controller) CommitRewind(planID string) (checkpoint.RewindResult, error
 		return checkpoint.RewindResult{}, c.rewindFail(err)
 	}
 
-	result, err := c.commitRewindReady(store, planID, forward, false, false)
+	result, err := c.commitRewindReady(store, planID, forward, false, switchToFork)
 	if err != nil {
 		return result, c.rewindFail(err)
 	}
@@ -180,7 +192,7 @@ func (c *Controller) CommitRewind(planID string) (checkpoint.RewindResult, error
 			c.sink.Emit(event.Event{Kind: event.Notice, Level: event.LevelInfo,
 				Text: fmt.Sprintf("rewound code — %d file(s) restored, %d removed", len(result.Written), len(result.Deleted))})
 		}
-		if result.ConversationForked {
+		if result.ConversationForked && !switchToFork {
 			c.sink.Emit(event.Event{Kind: event.Notice, Level: event.LevelInfo,
 				Text: "forked conversation; parent session is unchanged"})
 		}
@@ -217,7 +229,7 @@ func (c *Controller) commitRewindReady(store *checkpoint.Store, planID string, f
 	wantConv := !filesOnly && (plan.Scope == checkpoint.RewindConversation || plan.Scope == checkpoint.RewindBoth)
 	wantFiles := plan.Scope == checkpoint.RewindCode || plan.Scope == checkpoint.RewindBoth
 	if wantConv {
-		path, err := c.forkNamedReady(plan.Turn, "", switchToFork)
+		path, err := c.forkNamedReady(plan.Turn, "", switchToFork, agent.HeadKindRewind)
 		if err != nil {
 			return result, err
 		}
@@ -274,6 +286,9 @@ func (c *Controller) UndoRewind(transactionID string) (checkpoint.RewindResult, 
 		return result, c.rewindFail(err)
 	}
 	if result.OK {
+		if c.undoHeadRewind() {
+			result.ConversationOK = true
+		}
 		atomic.AddInt64(&c.sessionRevision, 1)
 		c.sink.Emit(event.Event{Kind: event.Notice, Level: event.LevelInfo, Text: "undid last rewind"})
 	}

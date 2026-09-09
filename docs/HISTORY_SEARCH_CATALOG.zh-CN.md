@@ -12,7 +12,9 @@ Catalog 的 FTS5 只保存规范化检索 token，不保存完整消息正文。
 权威会话提交成功且文件锁释放后，保存路径只发送非阻塞、按 path 合并的索引提示。
 连续 append 只读取 display index 的新增范围；rewrite、通知丢失、外部进程写入或指纹
 不一致会在后台重建单个 source。完整 transcript decoder 始终单并发，checkpoint 按
-source 持久化，单个坏会话不会阻断其他历史。
+source 持久化，单个坏会话不会阻断其他历史。格式 2 的会话日志通过其选中 head 的
+派生 transcript 建立索引；切换 head 会改写该 transcript，投影把它当作普通 rewrite
+在后台重建。其他 head 在被设为当前之前不可搜索。
 
 Agent 的 `history` 工具与 Desktop 历史管理器共享该投影。搜索不会同步扫描目录；首次
 索引未完成时立即返回已有结果和明确进度。open、running、current 等运行态只从内存

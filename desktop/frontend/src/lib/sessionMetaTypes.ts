@@ -28,4 +28,7 @@ export interface SessionMeta {
   recoveryGroupId?: string;
   recoveryRole?: string; // normal|covered_copy|adopted|diverged
   recoveryCanonical?: boolean;
+  versionKind?: "normal" | "recovery" | "subagent" | string;
+  versionState?: "active" | "pending" | "resolved" | "trashed" | string;
+  parentVersionId?: string;
 }

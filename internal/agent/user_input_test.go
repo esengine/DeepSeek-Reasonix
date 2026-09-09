@@ -47,13 +47,16 @@ func TestRunPersistsRawUserInputSeparatelyFromProviderContext(t *testing.T) {
 	if got := stored[1].RawContent; got != raw {
 		t.Fatalf("stored raw content = %q, want raw %q", got, raw)
 	}
+	if stored[1].Origin != provider.MessageOriginUser {
+		t.Fatalf("stored origin = %q, want user", stored[1].Origin)
+	}
 	if stored[1].ProviderContent != "" {
 		t.Fatalf("stored transitional provider content was not cleared: %+v", stored[1])
 	}
 	if len(prov.request.Messages) < 2 || !strings.HasPrefix(prov.request.Messages[1].Content, composed) {
 		t.Fatalf("provider request did not receive composed context: %+v", prov.request.Messages)
 	}
-	if prov.request.Messages[1].RawContent != "" || prov.request.Messages[1].ProviderContent != "" {
+	if prov.request.Messages[1].RawContent != "" || prov.request.Messages[1].ProviderContent != "" || prov.request.Messages[1].Origin != "" {
 		t.Fatalf("provider request leaked display metadata: %+v", prov.request.Messages[1])
 	}
 

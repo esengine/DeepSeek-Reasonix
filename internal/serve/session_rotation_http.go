@@ -52,7 +52,14 @@ func (s *Server) clearSessionCommand(w http.ResponseWriter, r *http.Request, emi
 	// one binding lock so remote clients never observe split ownership.
 	s.bindMu.Lock()
 	defer s.bindMu.Unlock()
-	if !s.validateExpectedSessionLocked(w, r) {
+	if !s.validateSwitchExpectedLocked(w, r) {
+		return
+	}
+	// A mirrored foreground cannot rotate in place (its write authority is
+	// gone and its artifacts belong to the local writer). Publish a fresh
+	// replacement instead, and keep the mirrored transcript on disk.
+	if s.foregroundMirroredLocked() {
+		s.mirroredForegroundReplacement(w, r, emitNotice, "cleared (mirrored session kept)")
 		return
 	}
 	if err := s.ctl().ClearSession(); err != nil {
@@ -81,6 +88,32 @@ func (s *Server) clearSessionCommand(w http.ResponseWriter, r *http.Request, emi
 	w.WriteHeader(http.StatusNoContent)
 }
 
+// mirroredForegroundReplacement swaps the open-but-released foreground
+// controller for a fresh session. Used by /new and /clear when the current
+// session was handed to a local writer: the outgoing controller cannot
+// snapshot or rotate (its write authority is gone), so publish a replacement
+// the same way a busy switch does and retire the old controller in the
+// background. The mirrored transcript stays untouched on disk. Callers hold
+// bindMu and pass the notice text for the newly created session.
+func (s *Server) mirroredForegroundReplacement(w http.ResponseWriter, r *http.Request, emitNotice bool, noticeText string) {
+	curCtrl, ok := s.ctl().(*control.Controller)
+	if !ok {
+		http.Error(w, "cannot rotate a mirrored session for this controller implementation", http.StatusConflict)
+		return
+	}
+	if err := s.busyDetach(r.Context(), curCtrl, "", nil); err != nil {
+		s.renderBindError(w, err)
+		return
+	}
+	path := s.ctl().SessionPath()
+	w.Header().Set(sessionPathHeader, path)
+	s.announceSessionChanged(path, true)
+	if emitNotice {
+		s.bc.Emit(event.Event{Kind: event.Notice, Text: noticeText, SessionPath: path})
+	}
+	w.WriteHeader(http.StatusNoContent)
+}
+
 func (s *Server) newSession(w http.ResponseWriter, r *http.Request) {
 	s.newSessionCommand(w, r, false)
 }
@@ -92,7 +125,7 @@ func (s *Server) newSessionFromSubmit(w http.ResponseWriter, r *http.Request) {
 func (s *Server) newSessionCommand(w http.ResponseWriter, r *http.Request, emitNotice bool) {
 	s.bindMu.Lock()
 	defer s.bindMu.Unlock()
-	if !s.validateExpectedSessionLocked(w, r) {
+	if !s.validateSwitchExpectedLocked(w, r) {
 		return
 	}
 	cur := s.ctl()
@@ -113,6 +146,13 @@ func (s *Server) newSessionCommand(w http.ResponseWriter, r *http.Request, emitN
 			s.bc.Emit(event.Event{Kind: event.Notice, Text: "new session", SessionPath: path})
 		}
 		w.WriteHeader(http.StatusNoContent)
+		return
+	}
+	// A mirrored foreground cannot NewSession() in place — the rotation
+	// snapshots the old session first, which fails closed without write
+	// authority. Publish a fresh replacement controller instead.
+	if s.foregroundMirroredLocked() {
+		s.mirroredForegroundReplacement(w, r, emitNotice, "new session")
 		return
 	}
 	if err := cur.NewSession(); err != nil {

@@ -62,8 +62,8 @@ func TestRemoveProviderAccessesRemovesGroupedOfficialAliasesAtomically(t *testin
 	if got.DefaultModel != fallback || got.Agent.PlannerModel != fallback || got.Agent.SubagentModel != fallback || got.Agent.SubagentModels["review"] != fallback {
 		t.Fatalf("grouped provider refs were not retargeted: default=%q planner=%q subagent=%q skills=%+v", got.DefaultModel, got.Agent.PlannerModel, got.Agent.SubagentModel, got.Agent.SubagentModels)
 	}
-	if flashTab.model != fallback || proTab.model != fallback {
-		t.Fatalf("grouped provider tabs = %q, %q; want %q", flashTab.model, proTab.model, fallback)
+	if flashTab.model != "deepseek-flash/deepseek-v4-flash" || proTab.model != "deepseek-pro/deepseek-v4-pro" {
+		t.Fatalf("saving grouped removal changed current tab models: %q, %q", flashTab.model, proTab.model)
 	}
 	flash, flashOK := got.Provider("deepseek-flash")
 	pro, proOK := got.Provider("deepseek-pro")
@@ -72,7 +72,7 @@ func TestRemoveProviderAccessesRemovesGroupedOfficialAliasesAtomically(t *testin
 	}
 }
 
-func TestDeleteProviderKeepsOldControllerWhenFallbackBuildFails(t *testing.T) {
+func TestDeleteProviderSavesWithoutBuildingInvalidFallback(t *testing.T) {
 	isolateDesktopUserDirs(t)
 	setDesktopTestCredential(t, "REASONIX_TEST_KEY", "sk-test")
 
@@ -103,8 +103,8 @@ func TestDeleteProviderKeepsOldControllerWhenFallbackBuildFails(t *testing.T) {
 	})
 
 	err := app.DeleteProvider("prov-a")
-	if err == nil || !strings.Contains(err.Error(), "missing-provider-kind") {
-		t.Fatalf("DeleteProvider error = %v, want replacement build failure", err)
+	if err != nil {
+		t.Fatalf("DeleteProvider tried to apply the fallback during save: %v", err)
 	}
 	if tab.Ctrl != ctrl || ctrl.closeCount.Load() != 0 {
 		t.Fatalf("failed replacement closed or replaced the old controller: ctrl=%T closes=%d", tab.Ctrl, ctrl.closeCount.Load())
@@ -114,77 +114,7 @@ func TestDeleteProviderKeepsOldControllerWhenFallbackBuildFails(t *testing.T) {
 	}
 }
 
-func TestProviderRemovalContinuesRebuildingSiblingTabsAfterOneFails(t *testing.T) {
-	isolateDesktopUserDirs(t)
-	setDesktopTestCredential(t, "REASONIX_TEST_KEY", "sk-test")
-
-	cfg := config.Default()
-	cfg.DefaultModel = "good/model-b"
-	cfg.Desktop.ProviderAccess = []string{"good"}
-	cfg.Providers = []config.ProviderEntry{
-		{Name: "good", Kind: "openai", BaseURL: "https://good.example.invalid/v1", Model: "model-b", APIKeyEnv: "REASONIX_TEST_KEY"},
-	}
-	if err := cfg.SaveTo(config.UserConfigPath()); err != nil {
-		t.Fatalf("save config: %v", err)
-	}
-
-	brokenRoot := t.TempDir()
-	brokenProject := `[agent]
-system_prompt_file = "/outside-workspace/system.md"
-`
-	if err := os.WriteFile(filepath.Join(brokenRoot, "reasonix.toml"), []byte(brokenProject), 0o600); err != nil {
-		t.Fatalf("write project config: %v", err)
-	}
-	workingRoot := t.TempDir()
-
-	newOld := func(label string) *blockingSnapshotCtrl {
-		wrapped := newBlockingSnapshotCtrl(control.New(control.Options{Label: label, Sink: event.Discard}))
-		close(wrapped.releaseSnapshot)
-		return wrapped
-	}
-	oldBroken := newOld("removed/model-a")
-	oldWorking := newOld("removed/model-a")
-	app := NewApp()
-	app.ctx = context.Background()
-	app.readyHook = func() {}
-	broken := &WorkspaceTab{
-		ID: "a-broken", Scope: "project", WorkspaceRoot: brokenRoot, Ready: true,
-		Ctrl: oldBroken, model: "removed/model-a", sink: &tabEventSink{tabID: "a-broken", app: app},
-		disabledMCP: map[string]ServerView{},
-	}
-	working := &WorkspaceTab{
-		ID: "b-working", Scope: "project", WorkspaceRoot: workingRoot, Ready: true,
-		Ctrl: oldWorking, model: "removed/model-a", sink: &tabEventSink{tabID: "b-working", app: app},
-		disabledMCP: map[string]ServerView{},
-	}
-	app.tabs = map[string]*WorkspaceTab{broken.ID: broken, working.ID: working}
-	app.tabOrder = []string{broken.ID, working.ID}
-	app.activeTabID = broken.ID
-	t.Cleanup(func() {
-		for _, tab := range []*WorkspaceTab{broken, working} {
-			if tab.Ctrl != nil {
-				tab.Ctrl.Close()
-			}
-			tab.releaseSessionLease()
-		}
-	})
-
-	err := app.applyProviderRemovalRuntime([]providerRemovalTab{
-		{id: broken.ID, ctrl: oldBroken, retargetModel: true},
-		{id: working.ID, ctrl: oldWorking, retargetModel: true},
-	}, "good/model-b", "provider")
-	if err == nil || !strings.Contains(err.Error(), "relative path within the workspace") {
-		t.Fatalf("applyProviderRemovalRuntime error = %v, want first tab build failure", err)
-	}
-	if broken.Ctrl != oldBroken || oldBroken.closeCount.Load() != 0 || broken.model != "removed/model-a" {
-		t.Fatalf("failed tab was not failure-atomic: ctrl=%T closes=%d model=%q", broken.Ctrl, oldBroken.closeCount.Load(), broken.model)
-	}
-	if working.Ctrl == oldWorking || oldWorking.closeCount.Load() != 1 || working.model != "good/model-b" {
-		t.Fatalf("working sibling was not rebuilt: ctrl=%T closes=%d model=%q", working.Ctrl, oldWorking.closeCount.Load(), working.model)
-	}
-}
-
-func TestRemoveOfficialProviderAccessRetargetsLiveTabAfterReplacementBuild(t *testing.T) {
+func TestRemoveOfficialProviderAccessPreservesLiveTabUntilNextRun(t *testing.T) {
 	isolateDesktopUserDirs(t)
 	setDesktopTestCredential(t, "DEEPSEEK_API_KEY", "sk-test")
 	setDesktopTestCredential(t, "GOOD_KEY", "sk-test")
@@ -226,8 +156,8 @@ func TestRemoveOfficialProviderAccessRetargetsLiveTabAfterReplacementBuild(t *te
 	if err := app.RemoveProviderAccess("deepseek"); err != nil {
 		t.Fatalf("RemoveProviderAccess: %v", err)
 	}
-	if tab.model != "good/good-model" || tab.Ctrl == old || old.closeCount.Load() != 1 {
-		t.Fatalf("live tab after removal: model=%q ctrl=%T old closes=%d; want fallback replacement", tab.model, tab.Ctrl, old.closeCount.Load())
+	if tab.model != cfg.DefaultModel || tab.Ctrl != old || old.closeCount.Load() != 0 {
+		t.Fatalf("saving removal changed the live tab: model=%q ctrl=%T old closes=%d", tab.model, tab.Ctrl, old.closeCount.Load())
 	}
 	got := config.LoadForEdit(config.UserConfigPath())
 	if providerAccessSet(got.Desktop.ProviderAccess)["deepseek"] {
@@ -235,7 +165,7 @@ func TestRemoveOfficialProviderAccessRetargetsLiveTabAfterReplacementBuild(t *te
 	}
 }
 
-func TestDeleteProviderRebuildsEveryVisibleRuntimeUsingAuxiliaryProvider(t *testing.T) {
+func TestDeleteProviderPreservesEveryVisibleRuntimeUsingAuxiliaryProvider(t *testing.T) {
 	isolateDesktopUserDirs(t)
 	setDesktopTestCredential(t, "REMOVED_KEY", "sk-test")
 	setDesktopTestCredential(t, "GOOD_KEY", "sk-test")
@@ -282,8 +212,8 @@ func TestDeleteProviderRebuildsEveryVisibleRuntimeUsingAuxiliaryProvider(t *test
 	if err := app.DeleteProvider("removed"); err != nil {
 		t.Fatalf("DeleteProvider: %v", err)
 	}
-	if first.Ctrl == oldFirst || second.Ctrl == oldSecond || oldFirst.closeCount.Load() != 1 || oldSecond.closeCount.Load() != 1 {
-		t.Fatalf("auxiliary-provider refresh: first=%T/%d second=%T/%d; want both replaced once", first.Ctrl, oldFirst.closeCount.Load(), second.Ctrl, oldSecond.closeCount.Load())
+	if first.Ctrl != oldFirst || second.Ctrl != oldSecond || oldFirst.closeCount.Load() != 0 || oldSecond.closeCount.Load() != 0 {
+		t.Fatalf("saving auxiliary-provider removal replaced a runtime: first=%T/%d second=%T/%d", first.Ctrl, oldFirst.closeCount.Load(), second.Ctrl, oldSecond.closeCount.Load())
 	}
 	if first.model != cfg.DefaultModel || second.model != cfg.DefaultModel {
 		t.Fatalf("unaffected chat models changed: first=%q second=%q", first.model, second.model)
@@ -297,7 +227,7 @@ func TestDeleteProviderRebuildsEveryVisibleRuntimeUsingAuxiliaryProvider(t *test
 	}
 }
 
-func TestDeleteProviderRebuildsNonActiveWorkspaceWithProjectAuxiliaryProvider(t *testing.T) {
+func TestDeleteProviderPreservesNonActiveWorkspaceAndProjectAuxiliaryReference(t *testing.T) {
 	isolateDesktopUserDirs(t)
 	setDesktopTestCredential(t, "REMOVED_KEY", "sk-test")
 	setDesktopTestCredential(t, "GOOD_KEY", "sk-test")
@@ -348,8 +278,8 @@ func TestDeleteProviderRebuildsNonActiveWorkspaceWithProjectAuxiliaryProvider(t 
 	if err := app.DeleteProvider("removed"); err != nil {
 		t.Fatalf("DeleteProvider: %v", err)
 	}
-	if active.Ctrl == oldActive || background.Ctrl == oldBackground || oldActive.closeCount.Load() != 1 || oldBackground.closeCount.Load() != 1 {
-		t.Fatalf("workspace provider refresh: active=%T/%d background=%T/%d; want both replaced once", active.Ctrl, oldActive.closeCount.Load(), background.Ctrl, oldBackground.closeCount.Load())
+	if active.Ctrl != oldActive || background.Ctrl != oldBackground || oldActive.closeCount.Load() != 0 || oldBackground.closeCount.Load() != 0 {
+		t.Fatalf("saving provider removal replaced a workspace runtime: active=%T/%d background=%T/%d", active.Ctrl, oldActive.closeCount.Load(), background.Ctrl, oldBackground.closeCount.Load())
 	}
 	projectRaw, err := os.ReadFile(filepath.Join(backgroundRoot, "reasonix.toml"))
 	if err != nil {
@@ -360,7 +290,7 @@ func TestDeleteProviderRebuildsNonActiveWorkspaceWithProjectAuxiliaryProvider(t 
 	}
 }
 
-func TestDeleteProviderRejectsDetachedRuntimeUsingAuxiliaryProvider(t *testing.T) {
+func TestDeleteProviderPreservesDetachedRuntimeUsingAuxiliaryProvider(t *testing.T) {
 	isolateDesktopUserDirs(t)
 	setDesktopTestCredential(t, "REMOVED_KEY", "sk-test")
 	setDesktopTestCredential(t, "GOOD_KEY", "sk-test")
@@ -385,16 +315,16 @@ func TestDeleteProviderRejectsDetachedRuntimeUsingAuxiliaryProvider(t *testing.T
 	t.Cleanup(detachedCtrl.Close)
 
 	err := app.DeleteProvider("removed")
-	if err == nil || !strings.Contains(err.Error(), "background session is still using") {
-		t.Fatalf("DeleteProvider error = %v, want detached auxiliary-runtime guard", err)
+	if err != nil || detached.Ctrl != detachedCtrl {
+		t.Fatalf("DeleteProvider interrupted detached runtime: %v", err)
 	}
 	got := config.LoadForEdit(config.UserConfigPath())
-	if _, ok := got.Provider("removed"); !ok || got.Agent.SubagentModel != "removed/vision-model" {
-		t.Fatalf("rejected removal mutated config: provider=%v subagent_model=%q", ok, got.Agent.SubagentModel)
+	if _, ok := got.Provider("removed"); ok || got.Agent.SubagentModel != "good" {
+		t.Fatalf("removal was not committed: provider=%v subagent_model=%q", ok, got.Agent.SubagentModel)
 	}
 }
 
-func TestDeleteProviderRebuildsLiveTabAndReusesSharedHost(t *testing.T) {
+func TestDeleteProviderPreservesLiveHistoryAndSharedHost(t *testing.T) {
 	isolateDesktopUserDirs(t)
 	setDesktopTestCredential(t, "REASONIX_TEST_KEY", "sk-test")
 
@@ -445,11 +375,11 @@ func TestDeleteProviderRebuildsLiveTabAndReusesSharedHost(t *testing.T) {
 	if err := app.DeleteProvider("prov-a"); err != nil {
 		t.Fatalf("DeleteProvider: %v", err)
 	}
-	if tab.Ctrl == nil || tab.Ctrl == old || old.closeCount.Load() != 1 {
-		t.Fatalf("controller swap = %T, old closes = %d; want one successful replacement", tab.Ctrl, old.closeCount.Load())
+	if tab.Ctrl != old || old.closeCount.Load() != 0 {
+		t.Fatalf("saving removal replaced current controller = %T, old closes = %d", tab.Ctrl, old.closeCount.Load())
 	}
-	if tab.model != "prov-b/model-b" || tab.Label != "model-b" {
-		t.Fatalf("replacement identity = model:%q label:%q, want prov-b/model-b and model-b", tab.model, tab.Label)
+	if tab.model != cfg.DefaultModel || tab.Label != cfg.DefaultModel {
+		t.Fatalf("saving removal changed current identity = model:%q label:%q", tab.model, tab.Label)
 	}
 	if !sameDesktopPath(tab.Ctrl.SessionPath(), path) || !sameDesktopPath(tab.SessionPath, path) {
 		t.Fatalf("replacement session path = ctrl:%q tab:%q, want %q", tab.Ctrl.SessionPath(), tab.SessionPath, path)
@@ -470,7 +400,7 @@ func TestDeleteProviderRebuildsLiveTabAndReusesSharedHost(t *testing.T) {
 	}
 }
 
-func TestRemoveProviderAccessRejectsDetachedRuntimeBeforeMutation(t *testing.T) {
+func TestRemoveProviderAccessSavesWhilePreservingDetachedRuntime(t *testing.T) {
 	isolateDesktopUserDirs(t)
 	setDesktopTestCredential(t, "DEEPSEEK_API_KEY", "sk-test")
 	setDesktopTestCredential(t, "MIMO_API_KEY", "sk-test")
@@ -492,12 +422,12 @@ func TestRemoveProviderAccessRejectsDetachedRuntimeBeforeMutation(t *testing.T) 
 	t.Cleanup(detachedCtrl.Close)
 
 	err := app.RemoveProviderAccess("deepseek")
-	if err == nil || !strings.Contains(err.Error(), "background session is still using") {
-		t.Fatalf("RemoveProviderAccess error = %v, want detached-runtime guard", err)
+	if err != nil {
+		t.Fatalf("RemoveProviderAccess rejected detached runtime: %v", err)
 	}
 	got := config.LoadForEdit(config.UserConfigPath())
-	if !providerAccessSet(got.Desktop.ProviderAccess)["deepseek"] {
-		t.Fatalf("provider access changed after detached-runtime rejection: %+v", got.Desktop.ProviderAccess)
+	if providerAccessSet(got.Desktop.ProviderAccess)["deepseek"] {
+		t.Fatalf("provider access removal was not committed: %+v", got.Desktop.ProviderAccess)
 	}
 	if detached.Ctrl != detachedCtrl || detached.model != "deepseek/deepseek-v4-flash" {
 		t.Fatalf("detached runtime changed after rejection: ctrl=%T model=%q", detached.Ctrl, detached.model)
@@ -610,7 +540,7 @@ func TestDeleteProviderPersistsVisibleFallbackInsteadOfHiddenConfiguredProvider(
 	}
 }
 
-func TestDeleteProviderRejectsDefaultWhenOnlyHiddenProviderRemains(t *testing.T) {
+func TestDeleteProviderSavesAndBlocksNewRunWhenOnlyHiddenProviderRemains(t *testing.T) {
 	isolateDesktopUserDirs(t)
 	cfg := config.Default()
 	cfg.DefaultModel = "removed/removed-model"
@@ -624,26 +554,29 @@ func TestDeleteProviderRejectsDefaultWhenOnlyHiddenProviderRemains(t *testing.T)
 	}
 
 	err := NewApp().DeleteProvider("removed")
-	if err == nil || !strings.Contains(err.Error(), "no other configured provider exists") {
-		t.Fatalf("DeleteProvider error = %v, want no visible fallback", err)
+	if err != nil {
+		t.Fatalf("DeleteProvider should save even without a visible fallback: %v", err)
 	}
 
 	got := config.LoadForEdit(config.UserConfigPath())
-	if got.DefaultModel != cfg.DefaultModel {
-		t.Fatalf("default model = %q, want unchanged %q", got.DefaultModel, cfg.DefaultModel)
+	if got.DefaultModel != "" {
+		t.Fatalf("default model = %q, want no hidden fallback", got.DefaultModel)
 	}
-	if len(got.Desktop.ProviderAccess) != 1 || got.Desktop.ProviderAccess[0] != "removed" {
-		t.Fatalf("provider access = %+v, want unchanged removed entry", got.Desktop.ProviderAccess)
+	if len(got.Desktop.ProviderAccess) != 0 {
+		t.Fatalf("provider access = %+v, want empty", got.Desktop.ProviderAccess)
 	}
-	if _, ok := got.Provider("removed"); !ok {
-		t.Fatal("default provider was deleted despite the rejected operation")
+	if _, ok := got.Provider("removed"); ok {
+		t.Fatal("provider was not deleted")
 	}
 	if _, ok := got.Provider("hidden"); !ok {
 		t.Fatal("hidden provider changed despite the rejected operation")
 	}
+	if _, err := resolveModelSettingsRuntime(got, cfg.DefaultModel); err == nil {
+		t.Fatal("new run was allowed to use a hidden fallback")
+	}
 }
 
-func TestRemoveProviderAccessesRejectsInUseProviderWithoutConfiguredFallback(t *testing.T) {
+func TestRemoveProviderAccessesSavesAndBlocksNewRunWithoutConfiguredFallback(t *testing.T) {
 	isolateDesktopUserDirs(t)
 	setDesktopTestCredential(t, "DEEPSEEK_API_KEY", "sk-test")
 
@@ -661,20 +594,23 @@ func TestRemoveProviderAccessesRejectsInUseProviderWithoutConfiguredFallback(t *
 	app.activeTabID = tab.ID
 
 	err := app.RemoveProviderAccess("deepseek")
-	if err == nil || !strings.Contains(err.Error(), "no other configured provider exists") {
-		t.Fatalf("RemoveProviderAccess error = %v, want no configured fallback", err)
+	if err != nil {
+		t.Fatalf("RemoveProviderAccess should save without a fallback: %v", err)
 	}
 	got := config.LoadForEdit(config.UserConfigPath())
 	access := providerAccessSet(got.Desktop.ProviderAccess)
-	if !access["deepseek"] || !access["mimo-pro"] {
-		t.Fatalf("provider access changed after rejected removal: %+v", got.Desktop.ProviderAccess)
+	if access["deepseek"] || !access["mimo-pro"] {
+		t.Fatalf("provider access was not committed: %+v", got.Desktop.ProviderAccess)
 	}
-	if got.DefaultModel != cfg.DefaultModel || tab.model != cfg.DefaultModel {
-		t.Fatalf("model refs changed after rejected removal: config=%q tab=%q", got.DefaultModel, tab.model)
+	if got.DefaultModel != "" || tab.model != cfg.DefaultModel {
+		t.Fatalf("saved/current models are incorrect: config=%q tab=%q", got.DefaultModel, tab.model)
+	}
+	if _, err := resolveModelSettingsRuntime(got, tab.model); err == nil {
+		t.Fatal("new run was allowed without a configured fallback")
 	}
 }
 
-func TestRemoveProviderAccessesRejectsOfficialProviderChangedDuringSnapshot(t *testing.T) {
+func TestRemoveProviderAccessesRejectsOfficialProviderChangedBeforeCommit(t *testing.T) {
 	isolateDesktopUserDirs(t)
 	setDesktopTestCredential(t, "DEEPSEEK_API_KEY", "sk-test")
 	setDesktopTestCredential(t, "MIMO_API_KEY", "sk-test")
@@ -693,9 +629,7 @@ func TestRemoveProviderAccessesRejectsOfficialProviderChangedDuringSnapshot(t *t
 	app.tabOrder = []string{tab.ID}
 	app.activeTabID = tab.ID
 
-	done := make(chan error, 1)
-	go func() { done <- app.RemoveProviderAccess("deepseek") }()
-	<-ctrl.firstSnapshotStarted
+	fingerprint := app.Settings().ModelSettingsFingerprint
 
 	unlock := config.LockUserConfigEdits()
 	changed := config.LoadForEdit(config.UserConfigPath())
@@ -710,10 +644,9 @@ func TestRemoveProviderAccessesRejectsOfficialProviderChangedDuringSnapshot(t *t
 		t.Fatalf("save overlapping config edit: %v", err)
 	}
 	unlock()
-	close(ctrl.releaseSnapshot)
-
-	if err := <-done; err == nil {
-		t.Fatal("RemoveProviderAccess accepted an official provider changed during snapshot")
+	result := app.ApplyModelSettings(ModelSettingsChange{Kind: "access_remove", Names: []string{"deepseek"}, RequestID: "remove", ExpectedFingerprint: fingerprint})
+	if result.Persisted || len(result.Issues) == 0 {
+		t.Fatal("RemoveProviderAccess accepted an official provider changed before commit")
 	}
 	got := config.LoadForEdit(config.UserConfigPath())
 	access := providerAccessSet(got.Desktop.ProviderAccess)
@@ -725,7 +658,7 @@ func TestRemoveProviderAccessesRejectsOfficialProviderChangedDuringSnapshot(t *t
 	}
 }
 
-func TestRemoveProviderAccessesRejectsCredentialChangeDuringSnapshot(t *testing.T) {
+func TestRemoveProviderAccessesRejectsCredentialChangeBeforeCommit(t *testing.T) {
 	isolateDesktopUserDirs(t)
 	setDesktopTestCredential(t, "DEEPSEEK_API_KEY", "sk-test")
 	setDesktopTestCredential(t, "MIMO_API_KEY", "old-key")
@@ -744,14 +677,11 @@ func TestRemoveProviderAccessesRejectsCredentialChangeDuringSnapshot(t *testing.
 	app.tabOrder = []string{tab.ID}
 	app.activeTabID = tab.ID
 
-	done := make(chan error, 1)
-	go func() { done <- app.RemoveProviderAccess("deepseek") }()
-	<-ctrl.firstSnapshotStarted
+	fingerprint := app.Settings().ModelSettingsFingerprint
 	setDesktopTestCredential(t, "MIMO_API_KEY", "new-key")
-	close(ctrl.releaseSnapshot)
-
-	if err := <-done; err == nil {
-		t.Fatal("RemoveProviderAccess accepted credentials changed during snapshot")
+	result := app.ApplyModelSettings(ModelSettingsChange{Kind: "access_remove", Names: []string{"deepseek"}, RequestID: "remove", ExpectedFingerprint: fingerprint})
+	if result.Persisted || len(result.Issues) == 0 {
+		t.Fatal("RemoveProviderAccess accepted credentials changed before commit")
 	}
 	got := config.LoadForEdit(config.UserConfigPath())
 	access := providerAccessSet(got.Desktop.ProviderAccess)

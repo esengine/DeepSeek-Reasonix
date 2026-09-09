@@ -58,6 +58,16 @@ jobs:
         env:
           CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
         run: npm run migrate:firebase-crash
+      - name: Apply dashboard performance indexes
+        working-directory: workers/crash-report
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+        run: npm run migrate:dashboard-indexes
+      - name: Apply registry performance indexes and install rollup
+        working-directory: workers/crash-report
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+        run: npm run migrate:registry-indexes
       - name: Sync Firebase crash secrets
         working-directory: workers/crash-report
         env:

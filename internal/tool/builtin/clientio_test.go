@@ -71,6 +71,55 @@ func TestReadFileOverlayFallsBackToDisk(t *testing.T) {
 	}
 }
 
+func TestGrepOverlayServesUnsavedBufferContent(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "overlay-only.go")
+	overlay := &fakeOverlay{files: map[string]string{
+		path: "package overlay\n// BUFFER_NEEDLE exists only in the unsaved buffer\n",
+	}}
+	grep := byName(Workspace{
+		Dir: dir,
+		// Overlay-backed single-file searches must not delegate to ripgrep,
+		// which can only see the disk snapshot.
+		Search:      SearchSpec{RgPath: filepath.Join(dir, "must-not-run-rg")},
+		FileOverlay: overlay,
+	}.Tools("grep"))["grep"]
+
+	out, err := grep.Execute(context.Background(), json.RawMessage(`{"pattern":"BUFFER_NEEDLE","path":"overlay-only.go"}`))
+	if err != nil {
+		t.Fatalf("Execute: %v", err)
+	}
+	if !strings.Contains(out, "BUFFER_NEEDLE") || !strings.Contains(out, ":2:") {
+		t.Fatalf("grep did not search the unsaved overlay content:\n%s", out)
+	}
+}
+
+func TestGrepOverlayDoesNotBypassReadConfinement(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "secret.txt")
+	overlay := &fakeOverlay{files: map[string]string{path: "OVERLAY_SECRET\n"}}
+	grep := grepTool{workDir: dir, forbidRoots: realRoots([]string{dir}), overlay: overlay}
+
+	out, err := grep.Execute(context.Background(), json.RawMessage(`{"pattern":"OVERLAY_SECRET","path":"secret.txt"}`))
+	if err == nil && strings.Contains(out, "OVERLAY_SECRET") {
+		t.Fatalf("forbidden overlay content escaped confinement: %q", out)
+	}
+}
+
+func TestGrepOverlayFallsBackToDisk(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "disk-only.txt")
+	if err := os.WriteFile(path, []byte("DISK_NEEDLE\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	grep := byName(Workspace{Dir: dir, FileOverlay: &fakeOverlay{files: map[string]string{}}}.Tools("grep"))["grep"]
+
+	out, err := grep.Execute(context.Background(), json.RawMessage(`{"pattern":"DISK_NEEDLE","path":"disk-only.txt"}`))
+	if err != nil || !strings.Contains(out, "DISK_NEEDLE") {
+		t.Fatalf("overlay miss did not fall back to disk: out=%q err=%v", out, err)
+	}
+}
+
 func TestWriteFileOverlayAppliesWrite(t *testing.T) {
 	dir := t.TempDir()
 	path := filepath.Join(dir, "c.go")

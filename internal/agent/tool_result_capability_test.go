@@ -205,6 +205,16 @@ func TestSessionToolResultValidatesLegacyAndPagingErrors(t *testing.T) {
 	}
 }
 
+func TestSessionToolResultRejectsSubagentReferences(t *testing.T) {
+	_, proxy := newToolResultCapabilityAgent(t, &Session{})
+	if _, _, err := executeToolResultPage(t, proxy, "sa_child", "", 0, 32); err == nil || !strings.Contains(err.Error(), "read_subagent_result") {
+		t.Fatalf("subagent tool call id error = %v, want dedicated reader guidance", err)
+	}
+	if _, _, err := executeToolResultPage(t, proxy, "tool-call", "sa_child", 0, 32); err == nil || !strings.Contains(err.Error(), "read_subagent_result") {
+		t.Fatalf("subagent result ref error = %v, want dedicated reader guidance", err)
+	}
+}
+
 func TestSessionToolResultBindingTracksSetSessionAndCloneIsIsolated(t *testing.T) {
 	parent := &Session{Messages: []provider.Message{{Role: provider.RoleTool, ToolCallID: "call", Name: "bash", Content: "parent"}}}
 	a, proxy := newToolResultCapabilityAgent(t, parent)

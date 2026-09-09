@@ -1,10 +1,11 @@
-import { memo, useRef, useState } from "react";
+import { memo, useEffect, useRef, useState } from "react";
 import { ChevronRight } from "lucide-react";
 import { useT } from "../lib/i18n";
 import { useCollapseAnimation } from "../lib/useCollapseAnimation";
 import type { Item } from "../lib/useController";
 import { ToolCard } from "./ToolCard";
 import { useTranscriptUserResizeIntent } from "./TranscriptLayoutIntentContext";
+import { useWorkProcessPresentation } from "../lib/sessionExperience";
 
 type ToolItem = Extract<Item, { kind: "tool" }>;
 
@@ -122,7 +123,14 @@ export const ToolGroup = memo(function ToolGroup({
 }) {
   const t = useT();
   const beginUserResize = useTranscriptUserResizeIntent();
-  const [open, setOpen] = useState(false);
+  const presentation = useWorkProcessPresentation();
+  const [open, setOpen] = useState(presentation.keepExpandedAfterCompletion);
+  const previousExperience = useRef(presentation.experience);
+  useEffect(() => {
+    if (previousExperience.current === presentation.experience) return;
+    previousExperience.current = presentation.experience;
+    setOpen(presentation.keepExpandedAfterCompletion);
+  }, [presentation.experience, presentation.keepExpandedAfterCompletion]);
   const bodyRef = useRef<HTMLDivElement>(null);
   useCollapseAnimation(bodyRef, open);
 

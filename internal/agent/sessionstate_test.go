@@ -19,10 +19,14 @@ var sessionReset = map[string]bool{
 	"cacheHit":         true,
 	"cacheMiss":        true,
 	"missingReasoning": true,
-	"compactionMu":     true,
-	"compactionState":  true,
-	"cacheState":       true,
-	"compaction":       true,
+	// A strong-projection repair belongs to the corrupted conversation; a new
+	// conversation starts without it.
+	"reasoningReplayStrongProjection":       true,
+	"reasoningReplayStrongProjectionAnchor": true,
+	"compactionMu":                          true,
+	"compactionState":                       true,
+	"cacheState":                            true,
+	"compaction":                            true,
 }
 
 // sessionCarryOver names the fields reset deliberately leaves alone, each with
@@ -135,6 +139,8 @@ func TestSetSessionRestartsTheConversationState(t *testing.T) {
 	a.sess.cacheHit.Store(11)
 	a.sess.cacheMiss.Store(7)
 	a.sess.missingReasoning = missingReasoningWatch{active: true, stateRecorded: true, healthyStreak: 2}
+	a.sess.reasoningReplayStrongProjection = 7
+	a.sess.reasoningReplayStrongProjectionAnchor = "anchor"
 	a.sess.compaction.stuck = true
 	a.sess.compaction.stuckInputHash = "old-input"
 	a.sess.compaction.consecutive = 3
@@ -154,6 +160,12 @@ func TestSetSessionRestartsTheConversationState(t *testing.T) {
 	}
 	if a.sess.missingReasoning != (missingReasoningWatch{}) {
 		t.Errorf("missingReasoning = %+v, want the incident to end with its conversation", a.sess.missingReasoning)
+	}
+	if a.sess.reasoningReplayStrongProjection != 0 {
+		t.Errorf("reasoningReplayStrongProjection = %d, want it restarted", a.sess.reasoningReplayStrongProjection)
+	}
+	if a.sess.reasoningReplayStrongProjectionAnchor != "" {
+		t.Errorf("reasoningReplayStrongProjectionAnchor = %q, want it restarted", a.sess.reasoningReplayStrongProjectionAnchor)
 	}
 	if a.sess.compaction.stuck || a.sess.compaction.stuckInputHash != "" || a.sess.compaction.consecutive != 0 ||
 		a.sess.compaction.failedTurn.Load() != 0 || a.sess.compaction.lastTurn.Load() != 0 {

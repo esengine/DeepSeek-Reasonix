@@ -2,6 +2,7 @@ package agent
 
 import (
 	"context"
+	"errors"
 	"sync/atomic"
 
 	"reasonix/internal/agent/testutil"
@@ -19,7 +20,7 @@ type configuredToolCallReasoningProvider struct {
 }
 
 func (p configuredToolCallReasoningProvider) RequiresToolCallReasoning() bool    { return true }
-func (p configuredToolCallReasoningProvider) AllowsEmptyReasoningFallback() bool { return true }
+func (p configuredToolCallReasoningProvider) AllowsEmptyReasoningFallback() bool { return false }
 func (p configuredToolCallReasoningProvider) MissingToolCallReasoningWarningIdentity() string {
 	return p.identity
 }
@@ -33,7 +34,7 @@ func (p *cancelMissingReasoningRetryProvider) Name() string { return "deepseek-c
 func (p *cancelMissingReasoningRetryProvider) RequiresToolCallReasoning() bool {
 	return true
 }
-func (p *cancelMissingReasoningRetryProvider) AllowsEmptyReasoningFallback() bool { return true }
+func (p *cancelMissingReasoningRetryProvider) AllowsEmptyReasoningFallback() bool { return false }
 
 func (p *cancelMissingReasoningRetryProvider) Stream(ctx context.Context, _ provider.Request) (<-chan provider.Chunk, error) {
 	call := p.calls.Add(1)
@@ -66,4 +67,14 @@ func (p *cancelMissingReasoningRetryProvider) Stream(ctx context.Context, _ prov
 		<-ctx.Done()
 	}()
 	return ch, nil
+}
+
+type strictToolCallReasoningProvider struct{ *testutil.MockProvider }
+
+func (strictToolCallReasoningProvider) RequiresToolCallReasoning() bool    { return true }
+func (strictToolCallReasoningProvider) AllowsEmptyReasoningFallback() bool { return false }
+
+func isReplayFailureForTest(err error) bool {
+	var target *ReasoningReplayError
+	return errors.As(err, &target)
 }

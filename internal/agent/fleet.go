@@ -14,6 +14,7 @@ import (
 	"reasonix/internal/event"
 	"reasonix/internal/evidence"
 	"reasonix/internal/jobs"
+	"reasonix/internal/tool"
 )
 
 const (
@@ -33,7 +34,7 @@ func NewFleetTool(taskTool *TaskTool) *FleetTool {
 	return &FleetTool{taskTool: taskTool}
 }
 
-func (*FleetTool) Name() string { return "fleet" }
+func (*FleetTool) Name() string { return tool.HostFleet }
 
 func (*FleetTool) Description() string {
 	return "Dispatch 2–64 sub-agent tasks as a small dependency graph and return bounded previews plus stable Subagent references for full-result retrieval from completed persisted children with read_subagent_result. Each item may select a profile, model, effort, tools, write_paths, or read_only, and may declare depends_on to run after other items (research → implement → review). Tasks with no dependency between them run in parallel and must declare non-overlapping write_paths; ordered tasks may share paths. Omitted write_paths claim the whole workspace, so two or more concurrent writers without paths fail preflight before any task starts. A failed task's dependents are skipped; independent branches keep going unless fail_fast is set. Background mode returns a fleet job id collectable with wait."

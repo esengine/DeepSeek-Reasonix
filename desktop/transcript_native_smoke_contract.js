@@ -40,9 +40,12 @@
     phase: "waiting-topic",
     writes: [],
     wheelEvents: 0,
+    lastWheelAt: Number.NEGATIVE_INFINITY,
     wheelDelta: 0,
     wheelInsideTranscript: 0,
     wheelMaxDelta: 0,
+    programmaticReaderWrites: 0,
+    staleGenerationWrites: 0,
     reachableTailResidual: 0,
     composer: {
       enabled: false,
@@ -63,18 +66,23 @@
     const previousWrite = state.writes.at(-1);
     state.writes.push(write);
     if (state.writes.length > 80) state.writes.shift();
-    if (write.kind !== "pinTail" || write.rejectedReason || !Number.isFinite(write.top)) return;
-    const repeatedClamp = previousWrite?.kind === "pinTail"
+    const accepted = !write.rejectedReason && (write.outcome === "accepted" || write.outcome === "native-clamp");
+    const surfaceGeneration = Number.parseInt(state.transcript?.dataset.transcriptGeneration ?? "0", 10);
+    if (accepted && state.active && performance.now() - state.lastWheelAt <= 250) {
+      state.programmaticReaderWrites += 1;
+    }
+    if (accepted && Number.isFinite(surfaceGeneration) && surfaceGeneration > 0 && write.generation !== surfaceGeneration) {
+      state.staleGenerationWrites += 1;
+    }
+    if (write.owner !== "tail-follow" || !accepted || !Number.isFinite(write.acceptedOffset)) return;
+    const repeatedClamp = previousWrite?.owner === "tail-follow"
       && !previousWrite.rejectedReason
-      && Math.abs(previousWrite.top - write.top) <= 1
+      && Math.abs(previousWrite.acceptedOffset - write.acceptedOffset) <= 1
       && Math.abs(previousWrite.scrollHeight - write.scrollHeight) <= 1
       && Math.abs(previousWrite.clientHeight - write.clientHeight) <= 1
       && Math.abs(previousWrite.scrollTop - write.scrollTop) <= 0.5;
     const reportedResidual = write.scrollHeight - write.clientHeight - write.scrollTop;
-    const learnedClamp = previousWrite?.kind === "pinTail"
-      && previousWrite.top >= write.scrollHeight - write.clientHeight - 4
-      && Math.abs(write.top - write.scrollTop) <= 1;
-    if ((repeatedClamp || learnedClamp) && reportedResidual > 4 && reportedResidual <= 64) {
+    if (repeatedClamp && reportedResidual > 4 && reportedResidual <= 64) {
       state.reachableTailResidual = reportedResidual;
     }
     requestAnimationFrame(() => {
@@ -86,7 +94,7 @@
         && Math.abs(element.clientHeight - write.clientHeight) <= 1;
       if (
         sameGeometry
-        && write.top >= theoreticalTop - 4
+        && Math.abs(write.acceptedOffset - write.scrollTop) <= 1
         && Math.abs(element.scrollTop - write.scrollTop) <= 0.5
         && residual > 4
         && residual <= 64
@@ -97,15 +105,16 @@
   };
   window.addEventListener("wheel", (event) => {
     if (!state.active) return;
+    state.lastWheelAt = performance.now();
     state.wheelEvents += 1;
     state.wheelDelta += event.deltaY;
     if (event.target instanceof Node && state.transcript?.contains(event.target)) state.wheelInsideTranscript += 1;
     state.wheelMaxDelta = Math.max(state.wheelMaxDelta, Math.abs(event.deltaY));
   }, { capture: true, passive: true });
 
-  // WebView2 can expose a stable Virtuoso scrollHeight with a small terminal
-  // range that scrollTop cannot reach. Accept it only after an explicit native
-  // tail write is synchronously clamped at unchanged geometry.
+  // WebView2 can expose a stable native scrollHeight with a small terminal
+  // range that scrollTop cannot reach. Accept it only after repeated writer
+  // observations prove the clamp at unchanged geometry.
   const tailDistance = (element) => {
     const theoreticalTop = Math.max(0, element.scrollHeight - element.clientHeight);
     const observedTop = theoreticalTop - state.reachableTailResidual;
@@ -150,23 +159,59 @@
     const element = state.transcript;
     const viewport = element.getBoundingClientRect();
     const rows = visibleRows(element);
-    const mounted = [...element.querySelectorAll(".transcript__row[data-index]")]
-      .map((row) => Number.parseInt(row.dataset.index ?? "", 10))
+    const projection = element.querySelector(".transcript__projection");
+    const mounted = [...element.querySelectorAll(".transcript__window-item[data-index]")]
+      .map((block) => Number.parseInt(block.dataset.index ?? "", 10))
       .filter(Number.isFinite);
+    const mountedCount = Number.parseInt(
+      projection?.getAttribute("data-transcript-mounted-blocks") ?? "0",
+      10,
+    );
+    const visible = [...element.querySelectorAll("[data-transcript-block-key]")]
+      .filter((block) => {
+        const rect = block.getBoundingClientRect();
+        return rect.bottom > viewport.top && rect.top < viewport.bottom;
+      }).map((block) => {
+        const item = block.closest(".transcript__window-item[data-index]");
+        return {
+          index: block.dataset.transcriptBlockKey ?? "",
+          itemIndex: Number.parseInt(item?.dataset.index ?? "", 10),
+          top: block.getBoundingClientRect().top - viewport.top,
+        };
+      });
+    const blankGeometry = rows.length === 0 ? {
+      viewportTop: viewport.top,
+      viewportBottom: viewport.bottom,
+      coldTop: element.querySelector(".transcript__window")?.getBoundingClientRect().top ?? null,
+      coldBottom: element.querySelector(".transcript__window")?.getBoundingClientRect().bottom ?? null,
+      items: [...element.querySelectorAll(".transcript__window-item[data-index]")].map((item) => {
+        const rect = item.getBoundingClientRect();
+        const block = item;
+        const blockRect = block?.getBoundingClientRect();
+        return {
+          index: Number.parseInt(item.dataset.index ?? "", 10),
+          modelTop: Number.parseFloat(item.style.top || "0"),
+          top: rect.top - viewport.top,
+          bottom: rect.bottom - viewport.top,
+          height: rect.height,
+          blockTop: blockRect ? blockRect.top - viewport.top : null,
+          blockBottom: blockRect ? blockRect.bottom - viewport.top : null,
+          blockHeight: blockRect?.height ?? null,
+        };
+      }),
+    } : undefined;
     state.frames.push({
       top: element.scrollTop,
       height: element.scrollHeight,
       occupied: rows.length > 0,
       mode: element.dataset.scrollMode ?? "missing",
-      readerIntent: element.dataset.transcriptReaderIntent ?? "missing",
-      readerLayoutLease: element.dataset.transcriptReaderLayoutLease ?? "missing",
+      readerIntent: element.dataset.transcriptIntent ?? "missing",
+      rangeSource: projection?.getAttribute("data-transcript-range-source") ?? "none",
       mountedFirst: mounted.length > 0 ? Math.min(...mounted) : null,
       mountedLast: mounted.length > 0 ? Math.max(...mounted) : null,
-      mountedCount: mounted.length,
-      visible: rows.map((row) => ({
-        index: row.dataset.index ?? "",
-        top: row.getBoundingClientRect().top - viewport.top,
-      })),
+      mountedCount,
+      visible,
+      blankGeometry,
     });
     // ResizeObserver is delivered after rAF layout work but before paint.
     // Sample from the following task so the contract measures the geometry a
@@ -450,6 +495,9 @@
       if (rowCount() >= minimumRows) return;
       const beforeRows = rowCount();
       const beforeTurn = earliestLoadedTurn();
+      const beforeJumpTransaction = Math.max(0, ...state.writes
+        .filter((write) => write.owner === "question-jump")
+        .map((write) => Number(write.transactionId ?? write.transaction ?? 0)));
       const rect = rail.getBoundingClientRect();
       rail.dispatchEvent(new MouseEvent("mousedown", {
         button: 0,
@@ -458,10 +506,18 @@
         bubbles: true,
         cancelable: true,
       }));
-      // The combined signal-then-mask budget of the original contract gave a
-      // native WebView up to 45s to finish a targeted history jump; keep the
-      // mask gate itself just as forgiving instead of failing a slow landing.
-      await waitFor(() => !document.querySelector(".transcript-navigation-overlay"), 30000)
+      // Data may commit before React paints the loading mask, so absence of
+      // the mask is not a completion signal. Wait for the kernel's physical
+      // landing transaction, then require the UI mask to be gone.
+      await waitFor(() => state.writes.some((write) => (
+        write.owner === "question-jump"
+          && Number(write.transactionId ?? write.transaction ?? 0) > beforeJumpTransaction
+          && ["accepted", "native-clamp", "no-op"].includes(write.outcome)
+      )), 30000)
+        .catch(() => {
+          throw new Error(`native transcript fixture question jump did not land at ratio ${ratio}: ${describeTranscriptState(element)}`);
+        });
+      await waitFor(() => !document.querySelector(".transcript-navigation-overlay"), 15000)
         .catch(() => {
           throw new Error(`native transcript fixture question jump surface stuck at ratio ${ratio}: ${describeTranscriptState(element)}`);
         });
@@ -482,12 +538,12 @@
 
   const start = async () => {
     const topic = await waitFor(() => [...document.querySelectorAll(".project-tree__topic-main")]
-      .find((candidate) => candidate.textContent?.includes("bench:tools-38t")));
+      .find((candidate) => candidate.textContent?.includes("bench:windowed-1000t")));
     topic.click();
     state.phase = "waiting-topic-selection";
     await waitFor(() => (
-      document.querySelector(".project-tree__topic--active .project-tree__topic-label")?.textContent?.includes("bench:tools-38t")
-        && document.querySelector(".transcript")?.textContent?.includes("pkg-41/mod.go")
+      document.querySelector(".project-tree__topic--active .project-tree__topic-label")?.textContent?.includes("bench:windowed-1000t")
+        && document.querySelector(".transcript")?.textContent?.includes("Windowed turn 1000")
     ), 30000);
     state.phase = "waiting-navigation-surface";
     await waitFor(() => !document.querySelector(".transcript-navigation-overlay"), 15000);
@@ -502,8 +558,8 @@
     state.phase = "waiting-initial-tail";
     await waitForStableTail(element, 2, 10000);
     state.phase = "waiting-initial-stability";
-    // WebView2 can revisit its first 64-row Virtuoso estimate while pending
-    // markdown resolves. Two painted stable frames are sufficient before the
+    // WebView2 can revisit the first block estimates while pending Markdown
+    // resolves. Two painted stable frames are sufficient before the
     // idempotent history-navigation setup; the loaded 400+ row surface still
     // has to satisfy the stricter tail and geometry gates below before native
     // sampling starts.
@@ -515,9 +571,9 @@
     // jump-bottom control. When the initial window already has enough rows,
     // the control is correctly absent and the product must preserve its
     // physical tail without a fixture-owned scroll write.
-    let jumpBottom = document.querySelector(".transcript__jump-bottom");
+    let jumpBottom = document.querySelector(".transcript__jump-bottom:not([hidden])");
     if (!jumpBottom && element.dataset.scrollMode !== "tail-follow") {
-      jumpBottom = await waitFor(() => document.querySelector(".transcript__jump-bottom"), 10000)
+      jumpBottom = await waitFor(() => document.querySelector(".transcript__jump-bottom:not([hidden])"), 10000)
         .catch(() => null);
     }
     if (jumpBottom instanceof HTMLElement) {
@@ -531,16 +587,15 @@
       || tailDistance(element) > 4) {
       throw new Error(`native transcript fixture could not establish the loaded tail: ${describeTranscriptState(element)}`);
     }
-    // The initial tools page can keep settling its Virtuoso estimates after a
+    // The initial history page can keep settling block estimates after a
     // couple of visually stable frames on a slower hosted WebView2. Run the
     // composer regression only after the long loaded surface has held both
     // its tail and geometry across a stricter painted-frame window, so the
     // samples isolate keyboard-driven layout from first-load measurement.
     await waitForStableViewport(element, 12, 15000);
     await runNativeComposer(element);
-    // Position through the product's indexed question navigator. Directly
-    // assigning scrollTop while LAST is mounted lets Virtuoso's pending tail
-    // range replace the requested history window on WKWebView.
+    // Position through the product's indexed question navigator so every
+    // physical write remains owned by TranscriptViewportWriter.
     const rail = await waitFor(() => document.querySelector(".jump-scroll"), 10000);
     state.phase = "waiting-reader-stability";
     for (const ratio of [0.35, 0.2, 0]) {
@@ -568,36 +623,34 @@
     // The navigator is programmatic setup only. Claim manual reader ownership
     // before the host begins the platform-native downward traversal.
     element.dispatchEvent(new WheelEvent("wheel", { deltaY: -1, bubbles: true, cancelable: true }));
-    await waitFor(() => element.dataset.scrollMode === "reader-gesture" || element.dataset.scrollMode === "manual", 5000);
+    await waitFor(() => element.dataset.scrollMode === "manual", 5000);
     state.phase = "waiting-reader-geometry";
-    // A bounded manual-reading window may deliberately mount every row in the
-    // current history page. Do not classify that first estimate-to-measurement
-    // pass as a stable native extent: wait until the whole bounded page is
-    // mounted and the painted extent is quiet before establishing the smoke
-    // baseline. Pending Markdown remains part of the streamed test itself; a
-    // later collapse during native input still fails against the unchanged
-    // max-extent gate.
-    const logicalRows = Number.parseInt(element.dataset.transcriptRowCount ?? "0", 10);
+    // Establish the baseline only after the turn window is populated and
+    // bounded. Pending Markdown remains part of the streamed test itself.
     await waitFor(() => (
-      element.querySelectorAll(".transcript__row[data-index]").length >= logicalRows
+      document.querySelector("[data-transcript-render-mode='windowed']")
+        && Number(document.querySelector(".transcript__projection")?.getAttribute("data-transcript-mounted-blocks")) > 0
+        && Number(document.querySelector(".transcript__projection")?.getAttribute("data-transcript-mounted-blocks")) <= 40
     ), 30000);
     await waitForStableViewport(element, 8, 15000);
-    const virtualList = element.querySelector(".transcript__virtual-sizer");
-    const footer = virtualList?.nextElementSibling;
-    if (!(footer instanceof HTMLElement)) throw new Error("native transcript fixture footer is unavailable");
+    const residentTail = element.querySelector(".transcript__resident-tail");
+    if (!(residentTail instanceof HTMLElement)) throw new Error("native transcript resident tail is unavailable");
     const growthSurface = document.createElement("div");
     growthSurface.setAttribute("aria-hidden", "true");
     growthSurface.style.cssText = "height:0;width:100%;pointer-events:none;";
-    footer.append(growthSurface);
+    residentTail.append(growthSurface);
     state.transcript = element;
     state.frames = [];
     state.active = true;
+    state.lastWheelAt = Number.NEGATIVE_INFINITY;
     state.growthTicks = 0;
     state.growthSurface = growthSurface;
     state.wheelEvents = 0;
     state.wheelDelta = 0;
     state.wheelInsideTranscript = 0;
     state.wheelMaxDelta = 0;
+    state.programmaticReaderWrites = 0;
+    state.staleGenerationWrites = 0;
     state.phase = "ready";
     state.growthTimer = window.setInterval(growFooter, 16);
     scheduleSample();
@@ -661,11 +714,14 @@
       type: "result",
       passed: frames.length >= 20
         && lastTop > firstTop + 96
-        && maxReverse <= 96
+        && maxReverse <= 4
         && frames.every((frame) => frame.occupied)
         && state.initialDistance >= (element?.clientHeight ?? Number.POSITIVE_INFINITY) * 2
         && distance <= 4
         && element?.dataset.scrollMode === "tail-follow"
+        && frames.every((frame) => frame.mountedCount <= 40)
+        && state.programmaticReaderWrites === 0
+        && state.staleGenerationWrites === 0
         && finalScrollHeight >= maxScrollHeight - collapseTolerance
         && (!state.composer.enabled || state.composer.result?.passed === true),
       rows: Number.parseInt(element?.dataset.transcriptRowCount ?? "0", 10),
@@ -697,6 +753,8 @@
       wheelDelta: state.wheelDelta,
       wheelInsideTranscript: state.wheelInsideTranscript,
       wheelMaxDelta: state.wheelMaxDelta,
+      programmaticReaderWrites: state.programmaticReaderWrites,
+      staleGenerationWrites: state.staleGenerationWrites,
       paddingBottom: element instanceof HTMLElement ? Number.parseFloat(getComputedStyle(element).paddingBottom) : null,
       footerBottomDistance: viewportRect && footerRect ? footerRect.bottom - viewportRect.bottom : null,
       composerEnabled: state.composer.enabled,
@@ -746,7 +804,16 @@
     return result;
   };
 
-  window.__reasonixNativeTranscriptSmoke = { start, finish, finishMicro, finishComposer };
+  const reportTail = () => {
+    const element = state.transcript;
+    post({
+      type: "tail-status",
+      distance: element instanceof HTMLElement ? tailDistance(element) : Number.MAX_SAFE_INTEGER,
+      mode: element?.dataset.scrollMode ?? "missing",
+    });
+  };
+
+  window.__reasonixNativeTranscriptSmoke = { start, finish, finishMicro, finishComposer, reportTail };
   start().catch((error) => {
     const message = String(error?.message ?? error);
     post({ type: "error", message: `${message} (${state.phase})`, phase: state.phase });

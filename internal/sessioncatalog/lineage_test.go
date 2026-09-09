@@ -145,6 +145,22 @@ func TestOrdinaryContinuePathFollowsParentOnly(t *testing.T) {
 	}
 }
 
+func TestPromoteCanonicalLeavesHonorsPreferredOriginalMember(t *testing.T) {
+	root := "/s/root.jsonl"
+	branch := "/s/branch.jsonl"
+	records := []SessionRecord{
+		{Path: root, RecoveryRole: RecoveryRoleNormal, RecoveryPreferred: true, TurnsState: TurnsValid},
+		{Path: branch, Recovered: true, ParentID: "root", RecoveryGroupID: "root", RecoveryRole: RecoveryRoleDiverged, TurnsState: TurnsValid},
+	}
+	got := promoteCanonicalLeaves(records)
+	if got[0].RecoveryRole != RecoveryRolePreferred || !got[0].RecoveryCanonical {
+		t.Fatalf("preferred original = %+v, want preferred canonical", got[0])
+	}
+	if got[1].RecoveryCanonical {
+		t.Fatalf("recovery leaf stayed canonical after choosing original: %+v", got[1])
+	}
+}
+
 func TestOrdinaryContinuePathFollowsUniqueLinearCompactedLeaf(t *testing.T) {
 	root := filepath.Join("/s", "root.jsonl")
 	parentID := "root"
@@ -428,9 +444,9 @@ func TestUpgradeMatrixV4RebuildKeepsSingleLogicalRowAndAuthority(t *testing.T) {
 			t.Fatalf("authority file mutated during catalog rebuild: %s", path)
 		}
 	}
-	// v6 path is independent of all older disposable caches.
-	if !strings.HasSuffix(filepath.ToSlash(DefaultPath()), "session-catalog/v6.sqlite") && DefaultPath() != "" {
-		t.Fatalf("DefaultPath = %q, want v6.sqlite", DefaultPath())
+	// v7 isolates the persistent v11 repair scheduler from older writers.
+	if !strings.HasSuffix(filepath.ToSlash(DefaultPath()), "session-catalog/v8.sqlite") && DefaultPath() != "" {
+		t.Fatalf("DefaultPath = %q, want v8.sqlite", DefaultPath())
 	}
 }
 

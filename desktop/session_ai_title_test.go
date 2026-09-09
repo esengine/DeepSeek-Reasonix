@@ -184,7 +184,7 @@ func TestDelayedTitleCallbackProjectsCurrentCanonicalTitle(t *testing.T) {
 	}
 }
 
-func TestSessionCustomTitleSurvivesTopicMetadataSync(t *testing.T) {
+func TestSessionVersionNoteDoesNotReplaceTopicTitle(t *testing.T) {
 	isolateDesktopUserDirs(t)
 	dir := t.TempDir()
 	topicID := "metadata-title"
@@ -211,8 +211,11 @@ func TestSessionCustomTitleSurvivesTopicMetadataSync(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(page.Items) != 1 || page.Items[0].Label != "AI session title" {
-		t.Fatalf("metadata sync replaced custom title: %+v", page.Items)
+	if len(page.Items) != 1 || page.Items[0].Label != "Original topic" {
+		t.Fatalf("version note replaced topic title: %+v", page.Items)
+	}
+	if meta, ok, err := agent.LoadBranchMeta(path); err != nil || !ok || meta.CustomTitle != "AI session title" {
+		t.Fatalf("version note was not preserved: meta=%+v ok=%v err=%v", meta, ok, err)
 	}
 }
 

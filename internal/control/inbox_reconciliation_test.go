@@ -46,6 +46,10 @@ func TestSteerEventFollowsDurableConsumedTransition(t *testing.T) {
 		SessionDir:  dir,
 		SessionPath: filepath.Join(dir, "s.jsonl"),
 	})
+	t.Cleanup(func() {
+		c.Close()
+		c.autosaveWG.Wait()
+	})
 	c.Submit("initial turn")
 	select {
 	case <-prov.started:

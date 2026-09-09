@@ -42,7 +42,9 @@ import {
 const testDir = dirname(fileURLToPath(import.meta.url));
 const packSource = readFileSync(resolve(testDir, "../lib/themePack.ts"), "utf8");
 const stylesSource = readFileSync(resolve(testDir, "../styles.css"), "utf8");
-const appSource = readFileSync(resolve(testDir, "../App.tsx"), "utf8");
+const appViewSource = readFileSync(resolve(testDir, "../app-shell/AppRuntimeView.tsx"), "utf8");
+const exportOwnerSource = readFileSync(resolve(testDir, "../app-runtime/useSessionExportCommands.ts"), "utf8");
+const composerRouterSource = readFileSync(resolve(testDir, "../app-runtime/useComposerRouter.ts"), "utf8");
 const librarySource = readFileSync(resolve(testDir, "../components/ThemeLibrary.tsx"), "utf8");
 const gallerySource = readFileSync(resolve(testDir, "../components/ThemeGallery.tsx"), "utf8");
 const previewSurfaceSource = readFileSync(resolve(testDir, "../components/ThemePreviewSurface.tsx"), "utf8");
@@ -526,10 +528,9 @@ ok(
   "theme pack CSS does not apply backdrop-filter",
 );
 ok(themeBgSlice.includes(".theme-bg__overlay"), "overlay wash element styled");
-ok(appSource.includes("applyThemeScene"), "App wires scene from session content");
-ok(appSource.includes("ThemeBackground"), "App mounts background layer");
-ok(appSource.includes("applyConfiguredBaseAppearance"), "App applies configured appearance without replacing an active pack");
-ok(appSource.includes("ResetThemePack") || appSource.includes("theme reset") || appSource.includes('arg === "reset"'), "reset entry exists");
+ok(exportOwnerSource.includes("applyThemeScene"), "session export owner wires scene from session content");
+ok(appViewSource.includes("ThemeBackground"), "App mounts background layer");
+ok(composerRouterSource.includes("ResetThemePack") || composerRouterSource.includes("theme reset") || composerRouterSource.includes('arg === "reset"'), "reset entry exists");
 
 console.log("\nofficial themes (kind/grouping/i18n)");
 
@@ -544,12 +545,13 @@ ok(themePackKind({ builtin: false }) === "user", "legacy builtin=false falls bac
 ok(overviewSource.includes("appearance-overview"), "appearance overview present");
 ok(overviewSource.includes("settings.themeGallery.browse"), "overview has browse themes");
 ok(overviewSource.includes("settings.themeGallery.disable") || overviewSource.includes("handleDisable"), "overview can disable pack");
-ok(settingsSource.includes('tab !== "appearance"'), "appearance renders a single page header");
+const settingsPageShell = settingsSource.slice(settingsSource.indexOf("function SettingsPageShell"), settingsSource.indexOf("export function settingsPageLayout"));
+ok(settingsPageShell.includes("aria-label={settingsTabPageTitle(tab, t)}") && !settingsPageShell.includes("settings-page__header"), "settings pages retain accessible names without a duplicate visual header");
 ok(overviewSource.includes("initialCreateBaseStyle"), "base-style copy opens a prefilled theme editor");
 ok(overviewSource.includes('role="radiogroup"') && overviewSource.includes("aria-checked"), "overview segmented controls expose selection semantics");
-ok(overviewSource.includes("appearance-overview__segmented--theme"), "theme-mode control uses compact settings width");
-ok(overviewSource.includes("appearance-overview__segmented--text-size"), "text-size control uses its wider compact settings width");
-ok(stylesSource.includes("--appearance-segmented-width: 300px") && stylesSource.includes("--appearance-segmented-width: 420px"), "overview segmented controls use intentional widths");
+ok(/<SettingsOptions\s+layout="field"/.test(overviewSource), "overview choices use the shared field-width control");
+ok(!overviewSource.includes('<div\n            className="set-seg'), "overview does not retain standalone segmented controls");
+ok(/settings-options--field\s*\{\s*width: 424px;\s*max-width: 100%/.test(readFileSync(resolve(testDir, "../components/SettingsOptions.css"), "utf8")), "overview choices share the bounded responsive field width");
 ok(stylesSource.includes(".appearance-overview__segmented { justify-self: stretch; width: 100%; }"), "overview segmented controls expand on narrow screens");
 const creationCardSwatchRule =
   stylesSource.match(/:root\[data-theme-style\] \.app--creation \.theme-card \.theme-card__swatches \{([^}]*)\}/)?.[1] ?? "";

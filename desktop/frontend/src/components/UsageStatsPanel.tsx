@@ -1,3 +1,4 @@
+import { SettingsOptions } from "./SettingsOptions";
 // UsageStatsPanel renders the "usage statistics" subtab inside the Models
 // settings page. It reads aggregated stats from the Go backend (App.UsageStats)
 // and draws three charts by hand in SVG — a GitHub-style activity heatmap, a
@@ -319,8 +320,8 @@ export function UsageStatsPanel() {
   return (
     <div className="usage-stats">
       {/* Section 1: range + source pickers, each in its own framed group */}
-      <div className="usage-stats__toolbar">
-        <div className="usage-stats__group" role="group" aria-label={t("settings.stats.range")}>
+      <div className="usage-stats__toolbar settings-toolbar">
+        <SettingsOptions className="usage-stats__group" role="group" aria-label={t("settings.stats.range")}>
           {RANGE_PRESETS.map((r) => (
             <button
               key={r}
@@ -340,7 +341,7 @@ export function UsageStatsPanel() {
           >
             {t("settings.stats.rangeCustom")}
           </button>
-        </div>
+        </SettingsOptions>
         {range === "custom" && (
           <div className="usage-stats__custom">
             <input
@@ -363,7 +364,7 @@ export function UsageStatsPanel() {
             />
           </div>
         )}
-        <div className="usage-stats__group" role="group" aria-label={t("settings.stats.source")}>
+        <SettingsOptions className="usage-stats__group" role="group" aria-label={t("settings.stats.source")}>
           {SOURCES.map((s) => (
             <button
               key={s}
@@ -375,7 +376,7 @@ export function UsageStatsPanel() {
               {t(`settings.stats.source.${s}`)}
             </button>
           ))}
-        </div>
+        </SettingsOptions>
         <button type="button" className="usage-stats__refresh" onClick={() => { void load(); void loadHeat(); }} disabled={loading} aria-label={t("settings.stats.refresh")}>
           {t("settings.stats.refresh")}
         </button>

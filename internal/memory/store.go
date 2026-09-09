@@ -450,7 +450,7 @@ func flushIndexIn(dir string, lines map[string]string) error {
 		result += "\n"
 	}
 	// The index is derived state, but a torn write would still hide facts
-	// from the next session's prefix until the next reindex.
+	// from the next real turn's session-context until the next reindex.
 	return fileutil.AtomicWriteFile(path, []byte(result), 0o644)
 }
 
@@ -465,7 +465,7 @@ func reindexIn(dir, name string, m Memory) error {
 func renderIndexLine(name string, m Memory) string {
 	marker := ""
 	if ResolveActivation(m) == ActivationPinned {
-		marker = " pinned" // the body already rides the prefix; no need to read it
+		marker = " pinned" // the body already rides session-context; no need to read it
 	}
 	return fmt.Sprintf("- [%s](%s.md) — [%s/%s%s] %s",
 		displayTitle(m.Title, name), name,
@@ -551,16 +551,16 @@ func (s Store) ListAll() []Memory {
 	return out
 }
 
-// PinnedGuidanceBudgetChars caps the total pinned-body runes the stable prefix
+// PinnedGuidanceBudgetChars caps the total pinned-body runes session-context
 // carries. Guidance that must always hold belongs in REASONIX.md/AGENTS.md
 // instructions; pinned memory is the bounded middle tier between instructions
 // and retrieval-only facts, and the cap is enforced at write time so the
-// prefix always equals exactly what the user curated.
+// snapshot always equals exactly what the user curated.
 const PinnedGuidanceBudgetChars = 1500
 
 // pinnedGuidance snapshots explicitly pinned facts (plus legacy global
 // user/feedback, which ResolveActivation keeps pinned for compatibility) for
-// the stable session prefix, most recently updated first.
+// session-context, most recently updated first.
 func (s Store) pinnedGuidance() []Memory {
 	var out []Memory
 	for _, dir := range s.dirs() {

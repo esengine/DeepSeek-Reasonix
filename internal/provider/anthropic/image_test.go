@@ -28,6 +28,24 @@ func TestBuildRequestEmbedsImageBlockForVisionModel(t *testing.T) {
 	}
 }
 
+func TestModelInfoEnablesImageWireSerialization(t *testing.T) {
+	p, err := New(provider.Config{
+		Name: "catalog", BaseURL: "https://example.test", Model: "vision",
+		ModelInfo: &provider.ModelInfo{ID: "vision", InputModalities: []provider.ModelModality{provider.ModalityText, provider.ModalityImage}},
+	})
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+	c := p.(*client)
+	if !c.vision {
+		t.Fatal("model metadata should enable image wire serialization")
+	}
+	req := c.buildRequest(context.Background(), provider.Request{Messages: []provider.Message{{Role: provider.RoleUser, Content: "describe", Images: []string{"data:image/png;base64,AAAA"}}}})
+	if len(req.Messages[0].Content) != 2 || req.Messages[0].Content[1].Type != "image" {
+		t.Fatalf("content = %#v, want text + image blocks", req.Messages[0].Content)
+	}
+}
+
 func TestBuildRequestSkipsImageBlockWithoutVision(t *testing.T) {
 	c := &client{model: "claude-opus-4-8"} // vision unset
 	req := c.buildRequest(context.Background(), provider.Request{
@@ -68,6 +86,31 @@ func TestOfficialDeepSeekVisionSKUEmbedsUserImages(t *testing.T) {
 	}
 }
 
+func TestOfficialRequestURLImageHardLimit(t *testing.T) {
+	p, err := New(provider.Config{BaseURL: "https://relay.test", Model: "deepseek-v4-flash", Extra: map[string]any{"request_url": "https://api.deepseek.com/anthropic/v1/messages", "vision": true}, ModelInfo: &provider.ModelInfo{InputModalities: []provider.ModelModality{provider.ModalityText, provider.ModalityImage}}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	body, err := json.Marshal(p.(*client).buildRequest(context.Background(), provider.Request{Messages: []provider.Message{{Role: provider.RoleUser, Content: "describe", Images: []string{"data:image/png;base64,AAAA"}}}}))
+	if err != nil || strings.Contains(string(body), "AAAA") {
+		t.Fatalf("official request URL leaked image: %s %v", body, err)
+	}
+}
+
+func TestOfficialVisionExplicitOffRespectsResolvedMetadata(t *testing.T) {
+	p, err := New(provider.Config{BaseURL: "https://api.deepseek.com/anthropic", Model: openai.OfficialDeepSeekVisionModel, Extra: map[string]any{"vision": true}, ModelInfo: &provider.ModelInfo{InputModalities: []provider.ModelModality{provider.ModalityText}}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	body, err := json.Marshal(p.(*client).buildRequest(context.Background(), provider.Request{Messages: []provider.Message{{Role: provider.RoleUser, Content: "describe", Images: []string{"data:image/png;base64,AAAA"}}}}))
+	if err != nil || strings.Contains(string(body), "AAAA") {
+		t.Fatalf("explicit off leaked image: %s %v", body, err)
+	}
+	if p.(provider.ModelInfoProvider).ModelInfo().SupportsInput(provider.ModalityImage) {
+		t.Fatal("metadata disagrees with serializer")
+	}
+}
+
 func TestOfficialDeepSeekVisionSKUEmbedsURLAndFileID(t *testing.T) {
 	p, err := New(provider.Config{
 		Name:    "deepseek-anthropic",
@@ -98,7 +141,7 @@ func TestOfficialDeepSeekVisionSKUEmbedsURLAndFileID(t *testing.T) {
 	}
 }
 
-func TestOfficialDeepSeekVisionSKUOmitsToolImages(t *testing.T) {
+func TestOfficialDeepSeekVisionSKUEmbedsToolImages(t *testing.T) {
 	p, err := New(provider.Config{
 		Name:    "deepseek-anthropic",
 		BaseURL: "https://api.deepseek.com/anthropic",
@@ -109,13 +152,19 @@ func TestOfficialDeepSeekVisionSKUOmitsToolImages(t *testing.T) {
 		t.Fatalf("New: %v", err)
 	}
 	c := p.(*client)
-	req := c.buildRequest(context.Background(), provider.Request{Messages: toolMessages([]string{"data:image/png;base64,QUFB"})})
+	messages := toolMessages([]string{"data:image/png;base64,QUFB"})
+	messages[1].ReasoningContent = "Inspect the requested image."
+	req := c.buildRequest(context.Background(), provider.Request{Messages: messages})
 	body, err := json.Marshal(req)
 	if err != nil {
 		t.Fatalf("marshal: %v", err)
 	}
-	if strings.Contains(string(body), `"type":"image"`) || strings.Contains(string(body), "QUFB") {
-		t.Fatalf("official DeepSeek vision SKU leaked tool image payload: %s", body)
+	if !strings.Contains(string(body), `"type":"image"`) || !strings.Contains(string(body), "QUFB") {
+		t.Fatalf("official DeepSeek vision SKU omitted tool image payload: %s", body)
+	}
+	last := req.Messages[len(req.Messages)-1]
+	if len(last.Content) != 2 || last.Content[0].Type != "tool_result" || last.Content[1].Type != "image" {
+		t.Fatalf("expected tool result then top-level image: %+v", last)
 	}
 }
 

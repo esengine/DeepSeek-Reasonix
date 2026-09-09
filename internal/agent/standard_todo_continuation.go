@@ -5,7 +5,6 @@ import (
 	"strings"
 
 	"reasonix/internal/evidence"
-	"reasonix/internal/provider"
 	"reasonix/internal/taskcontract"
 )
 
@@ -41,6 +40,9 @@ func standardTodoContinuationPolicyFromContext(ctx context.Context) (StandardTod
 }
 
 func (a *Agent) continueStandardTodo(ctx context.Context, state *turnRuntime) bool {
+	if !a.hostContinuationEnabled(ctx) {
+		return false
+	}
 	policy, ok := standardTodoContinuationPolicyFromContext(ctx)
 	if !ok || !policy.ExecutionExpected || !a.standardTodoContinuationEligible(state) {
 		return false
@@ -55,10 +57,7 @@ func (a *Agent) continueStandardTodo(ctx context.Context, state *turnRuntime) bo
 	}
 	state.standardTodoContinuations++
 	state.standardTodoProgress = progress
-	a.sess.conversation.Add(provider.Message{
-		Role:    provider.RoleUser,
-		Content: a.withTurnPreferences(standardTodoContinuationMessage()),
-	})
+	a.sess.conversation.Add(HostGeneratedUserMessage(a.withTurnPreferences(standardTodoContinuationMessage())))
 	return true
 }
 

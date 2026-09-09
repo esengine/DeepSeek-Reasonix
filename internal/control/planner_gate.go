@@ -119,7 +119,9 @@ func DecidePlannerRoute(ctx context.Context, input string) agent.PlannerDecision
 	if meta.ExplicitPlanMode || strings.HasPrefix(composedText, PlanModeMarker) {
 		return plannerExecutorDecision(plannerReasonExplicitPlanMode)
 	}
-	if meta.Synthetic || IsSyntheticUserMessage(text) {
+	// Current turns carry trusted origin metadata. Text recognition is only a
+	// compatibility fallback for direct/legacy callers that have no metadata.
+	if meta.Synthetic || (!hasMeta && IsSyntheticUserMessage(text)) {
 		return plannerExecutorDecision(plannerReasonSynthetic)
 	}
 	if text == "" {

@@ -92,6 +92,7 @@ let setActiveCalls: string[] = [];
 window.go = {
   main: {
     App: {
+      RegisterNavigationIntent: async () => {},
       ListTabs: async () => {
         const tabs = [localTab, remoteTab].map((tab) => ({ ...tab, active: tab.id === backendActiveId }));
         return tabs;

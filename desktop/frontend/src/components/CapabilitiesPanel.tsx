@@ -1,3 +1,5 @@
+import { SettingsOptions } from "./SettingsOptions";
+import { SettingsSelect } from "./SettingsSelect";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { ArrowLeft, ChevronDown, ChevronRight, CircleAlert, Folder, Plus, RefreshCw, Search, Server as ServerIcon } from "lucide-react";
 import { asArray } from "../lib/array";
@@ -225,7 +227,7 @@ export function CapabilitiesPanel({
                 )}
                 {serverGroups.active.length > 0 && (
                   <div className="cap-server-section">
-                    <div className="cap-server-section__head">
+                    <div className="cap-server-section__head settings-toolbar">
                       <div className="cap-server-section__title">{t("caps.availableServers")}</div>
                       <button
                         className="btn btn--small"
@@ -271,7 +273,7 @@ export function CapabilitiesPanel({
               </section>
             ) : (
               <section className="mem-section">
-                <div className="cap-search">
+                <div className="cap-search settings-toolbar">
                   <input
                     className="mem-input"
                     type="search"
@@ -290,7 +292,7 @@ export function CapabilitiesPanel({
                   onRefresh={() => mutate(() => app.RefreshSkills())}
                   onToggle={(path, enabled) => mutate(() => app.SetSkillPathEnabled(path, enabled))}
                 />
-                <div className="cap-skills-head">
+                <div className="cap-skills-head settings-toolbar">
                   <div className="cap-skills-head__copy">
                     <div className="cap-skills-head__title">{t("caps.skills")}</div>
                     <div className="cap-skills-head__summary">{skillSummary}</div>
@@ -432,7 +434,7 @@ function SkillSources({
   const t = useT();
   // Sources are a core part of the Skills page, so expose them on first visit.
   // Users can still collapse the section when they need more room for the list.
-  const [expanded, setExpanded] = useState(true);
+  const [expanded, setExpanded] = useState(false);
   const [expandedRootSkills, setExpandedRootSkills] = useState<Set<string>>(() => new Set());
   const [fullRootSkills, setFullRootSkills] = useState<Set<string>>(() => new Set());
   const primaryRoots = roots.filter(isPrimarySkillRoot);
@@ -1184,11 +1186,11 @@ function EditServerForm({
         </div>
         <label className="cap-detail cap-detail--select">
           <span className="cap-detail__label">{t("caps.transport")}</span>
-          <select className="mem-select" value={transport} disabled={busy} onChange={(e) => setTransport(e.target.value)}>
+          <SettingsSelect className="mem-select" value={transport} disabled={busy} onValueChange={(value) => setTransport(value)}>
             <option value="stdio">stdio</option>
             <option value="http">http</option>
             <option value="sse">sse</option>
-          </select>
+          </SettingsSelect>
         </label>
         {isStdio ? (
           <label className="cap-detail cap-detail--wide">
@@ -1683,6 +1685,7 @@ type PluginInstallMode = "local" | "git";
 // rows below, and diagnostics/details only when a row is expanded.
 export function PluginsSettingsPage() {
 	const t = useT();
+	const [installOpen, setInstallOpen] = useState(false);
 	const [snapshotKey, setSnapshotKey] = useState("");
 	const [plugins, setPlugins] = useState<PluginView[] | null>(null);
 	const [busy, setBusy] = useState(false);
@@ -1803,7 +1806,13 @@ export function PluginsSettingsPage() {
 		<section className="mem-section">
 			{err && <div className="banner banner--error">{err}</div>}
 			{notice && !err && <div className="banner banner--success">{notice}</div>}
-			<div className="cap-plugin-installer">
+			<div className="settings-toolbar">
+              <div><strong>{t("caps.installedPlugins")}</strong>{plugins && plugins.length > 0 && <div className="drawer__summary">{summary}</div>}</div>
+              <div className="settings-toolbar__actions"><button className="btn btn--small" disabled={actionBusy} onClick={() => void reload()}>{t("caps.pluginRefresh")}</button>
+              <button className="btn btn--primary" aria-expanded={installOpen} aria-controls="settings-plugin-install" disabled={actionBusy} onClick={() => setInstallOpen(!installOpen)}>{installOpen ? t("common.cancel") : t("caps.pluginInstall")}</button></div>
+            </div>
+            <div id="settings-plugin-install" hidden={!installOpen}>
+            <div className="cap-plugin-installer">
 				<div className="cap-plugin-installer__head">
 					<div className="cap-plugin-installer__copy">
 						<div className="cap-plugin-installer__title">{t("caps.pluginInstallTitle")}</div>
@@ -1893,16 +1902,9 @@ export function PluginsSettingsPage() {
 				</div>
 			</div>
 			{plan && <PluginPlanPreview plan={plan} />}
+            </div>
 			<div className="cap-server-section cap-plugin-section">
-				<div className="cap-server-section__head">
-					<div className="cap-server-section__copy">
-						<div className="cap-server-section__title">{t("caps.installedPlugins")}</div>
-						{plugins && plugins.length > 0 && <div className="drawer__summary">{summary}</div>}
-					</div>
-					<button className="btn btn--small" disabled={actionBusy} type="button" onClick={() => void reload()}>
-						{t("caps.pluginRefresh")}
-					</button>
-				</div>
+
 				{!plugins ? (
 					<div className="mem-empty">{t("caps.loading")}</div>
 				) : plugins.length === 0 ? (
@@ -2935,7 +2937,7 @@ function MCPServerSettingsEditor({
 
 	return (
 		<div className="cap-mcp-editor">
-			<div className="cap-mcp-editor__mode set-seg" role="tablist" aria-label={t("caps.editorMode")}>
+			<SettingsOptions className="cap-mcp-editor__mode set-seg" role="tablist" aria-label={t("caps.editorMode")}>
 				{!server && (
 					<button className={`set-seg__btn${mode === "quick" ? " set-seg__btn--on" : ""}`} type="button" role="tab" aria-selected={mode === "quick"} onClick={() => switchMode("quick")}>
 						{t("caps.quickMode")}
@@ -2947,7 +2949,7 @@ function MCPServerSettingsEditor({
 				<button className={`set-seg__btn${mode === "json" ? " set-seg__btn--on" : ""}`} type="button" role="tab" aria-selected={mode === "json"} onClick={() => switchMode("json")}>
 					{t("caps.jsonMode")}
 				</button>
-			</div>
+			</SettingsOptions>
 			{mode === "quick" ? (
 				<div className="cap-mcp-quick">
 					<label className="cap-mcp-field">
@@ -2977,11 +2979,11 @@ function MCPServerSettingsEditor({
 					</label>
 					<label className="cap-mcp-field cap-mcp-field--transport">
 						<span>{t("caps.transport")}</span>
-						<select className="mem-select" value={draft.transport} disabled={busy} onChange={(event) => updateDraft({ transport: normalizeTransportValue(event.target.value) })}>
+						<SettingsSelect className="mem-select" value={draft.transport} disabled={busy} onValueChange={(value) => updateDraft({ transport: normalizeTransportValue(value) })}>
 							<option value="stdio">stdio</option>
 							<option value="http">http</option>
 							<option value="sse">sse</option>
-						</select>
+						</SettingsSelect>
 					</label>
 					{isStdio ? (
 						<label className="cap-mcp-field cap-mcp-field--wide">
@@ -3147,7 +3149,7 @@ export function MCPServersSettingsPage() {
 			{err && <div className="banner banner--error" role="alert">{err}</div>}
 			{screen.kind === "list" && (
 				<>
-					<div className="cap-mcp-list-toolbar">
+					<div className="cap-mcp-list-toolbar settings-toolbar">
 						{servers && servers.length > 0 ? <div className="drawer__summary">{summary}</div> : <span />}
 						<div className="cap-mcp-list-toolbar__actions">
 							<Tooltip label={t("caps.refresh")}>
@@ -3379,7 +3381,7 @@ export function SkillsSettingsPage({ activeWorkspaceKey = "" }: { activeWorkspac
 	return (
 		<section className="mem-section">
 			{err && <div className="banner banner--error">{err}</div>}
-			<div className="cap-search">
+			<div className="cap-search settings-toolbar">
 				<input
 					className="mem-input"
 					type="search"
@@ -3412,7 +3414,7 @@ export function SkillsSettingsPage({ activeWorkspaceKey = "" }: { activeWorkspac
 				onRefresh={() => mutate(() => app.RefreshSkills())}
 				onToggle={(path, enabled) => mutate(() => app.SetSkillPathEnabled(path, enabled))}
 			/>
-			<div className="cap-skills-head">
+			<div className="cap-skills-head settings-toolbar">
 				<div className="cap-skills-head__copy">
 					<div className="cap-skills-head__title">{t("caps.skills")}</div>
 					<div className="cap-skills-head__summary">{skillSummary}</div>

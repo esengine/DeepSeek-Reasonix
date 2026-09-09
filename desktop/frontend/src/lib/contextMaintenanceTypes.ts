@@ -1,8 +1,8 @@
 import type { Translator } from "./i18n";
 
 export type ContextMaintenanceStatus = "planned" | "applied" | "noop" | "blocked" | "failed";
-/** New writers only emit summary | noop. snip/prune/native are legacy restore-only. */
-export type ContextMaintenanceAction = "summary" | "noop" | "snip" | "prune" | "native_tool_clear";
+/** New writers emit summary | noop | truncate (the lossy ceiling rescue). snip/prune/native are legacy restore-only. */
+export type ContextMaintenanceAction = "summary" | "noop" | "truncate" | "snip" | "prune" | "native_tool_clear";
 
 export interface WireContextMaintenance {
   status?: ContextMaintenanceStatus;
@@ -77,7 +77,9 @@ export interface ContextBudgetInfo {
 export function formatContextMaintenanceNotice(m: WireContextMaintenance, t: Translator): string {
   switch (m.status) {
     case "applied":
-      return t("context.maintenanceAppliedSummary");
+      return m.action === "truncate"
+        ? t("context.maintenanceTruncatedSummary")
+        : t("context.maintenanceAppliedSummary");
     case "blocked":
       return t("context.maintenanceBlockedSummary");
     case "failed":

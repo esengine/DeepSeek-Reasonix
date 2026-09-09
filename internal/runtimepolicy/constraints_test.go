@@ -60,3 +60,24 @@ func TestParseConstraintsScopesMutationBans(t *testing.T) {
 		})
 	}
 }
+
+// TestParseConstraintsRecognizesAnExplicitRebuild keeps the rebuild waiver tied
+// to the user's own explicit phrasing; nothing else may set it.
+func TestParseConstraintsRecognizesAnExplicitRebuild(t *testing.T) {
+	cases := []struct {
+		text string
+		want bool
+	}{
+		{"Please rewrite notes.md from scratch.", true},
+		{"把 notes.md 完全重写一遍", true},
+		{"rewrite the whole file", true},
+		{"add a section to notes.md", false},
+		{"read notes.md and fix the typo", false},
+		{"", false},
+	}
+	for _, tc := range cases {
+		if got := ParseConstraints(tc.text).AllowRebuild; got != tc.want {
+			t.Fatalf("ParseConstraints(%q).AllowRebuild = %v, want %v", tc.text, got, tc.want)
+		}
+	}
+}

@@ -1,0 +1,4 @@
+AMD icon: Simple Icons, CC0-1.0.
+Source: https://github.com/simple-icons/simple-icons/blob/develop/icons/amd.svg
+License: https://github.com/simple-icons/simple-icons/blob/develop/LICENSE.md
+AMD trademark belongs to its respective owner.

@@ -104,7 +104,7 @@ func RenderTOMLForScope(c *Config, scope RenderScope) string {
 		if currency := c.DesktopCurrency(); currency != "" {
 			fmt.Fprintf(&b, "currency = %q   # legacy display currency; prefer [billing].display_currency\n", currency)
 		}
-		fmt.Fprintf(&b, "layout_style = %q   # desktop layout: classic|workbench|creation\n", c.DesktopLayoutStyle())
+		fmt.Fprintf(&b, "layout_style = %q   # desktop layout: workbench|creation; legacy classic migrates to workbench\n", c.DesktopLayoutStyle())
 		fmt.Fprintf(&b, "theme = %q   # desktop only: auto|dark|light\n", c.DesktopTheme())
 		fmt.Fprintf(&b, "terminal_theme = %q   # integrated terminal: auto|dark|light; auto follows the desktop app\n", c.DesktopTerminalTheme())
 		if style := c.DesktopThemeStyle(); style != "" {
@@ -119,6 +119,7 @@ func RenderTOMLForScope(c *Config, scope RenderScope) string {
 		}
 		fmt.Fprintf(&b, "close_behavior = %q   # desktop: quit|background when the window close button is clicked\n", c.DesktopCloseBehavior())
 		fmt.Fprintf(&b, "status_bar_style = %q   # desktop: icon|text metric labels in the bottom status bar\n", c.DesktopStatusBarStyle())
+		b.WriteString("status_bar_style_initialized = true   # icon default upgrade applied; preserve later user choices\n")
 		fmt.Fprintf(&b, "status_bar_items = %s   # desktop: ordered visible bottom status bar items\n", renderStringArray(c.DesktopStatusBarItems()))
 		fmt.Fprintf(&b, "default_tool_approval_mode = %q   # desktop: Ask/Auto/YOLO default for newly-created sessions\n", c.DesktopDefaultToolApprovalMode())
 		fmt.Fprintf(&b, "check_updates = %v   # desktop: check for new versions on startup\n", c.DesktopCheckUpdates())
@@ -130,13 +131,13 @@ func RenderTOMLForScope(c *Config, scope RenderScope) string {
 		if c.Desktop.ProviderAccess != nil {
 			fmt.Fprintf(&b, "provider_access = %s   # desktop settings: providers shown on Settings > Model > Access\n", renderStringArray(c.Desktop.ProviderAccess))
 		}
+		renderDesktopSessionExperience(&b, c)
 		renderDesktopReasoningDisplayMode(&b, c)
 		fmt.Fprintf(&b, "display_mode = %q   # desktop: standard|compact transcript display mode\n", c.DesktopDisplayMode())
 		if width := c.DesktopConversationWidth(); width == "full" {
 			fmt.Fprintf(&b, "conversation_width = %q   # desktop: standard|full transcript width; empty = standard\n", width)
 		}
 		b.WriteString("\n")
-
 		b.WriteString("[billing]\n")
 		if pref := c.DisplayCurrencyPref(); pref != "" {
 			fmt.Fprintf(&b, "display_currency = %q   # auto|CNY|USD; display only — does not rewrite provider list prices\n", pref)
@@ -226,11 +227,7 @@ func RenderTOMLForScope(c *Config, scope RenderScope) string {
 		b.WriteString("# system_prompt_file = \"prompts/system.md\"   # project paths stay in <workspace>; user paths may fall back to <reasonix home>\n")
 	}
 	fmt.Fprintf(&b, "temperature       = %s\n", formatFloat(c.Agent.Temperature))
-	if strings.TrimSpace(c.Agent.RecoveryModel) != "" {
-		fmt.Fprintf(&b, "recovery_model = %q   # optional independent reviewer for low-risk automatic recovery\n", c.Agent.RecoveryModel)
-	} else {
-		b.WriteString("# recovery_model = \"deepseek-pro\"   # optional; falls back to guardian then main model\n")
-	}
+	renderRecoveryAndCompletionValidation(&b, c)
 	if lang := c.ReasoningLanguage(); lang != "auto" {
 		fmt.Fprintf(&b, "reasoning_language = %q   # visible reasoning language: auto|zh|en\n", lang)
 	} else {
@@ -248,26 +245,7 @@ func RenderTOMLForScope(c *Config, scope RenderScope) string {
 		b.WriteString("# recent_keep         = 2   # deprecated compatibility field; ignored at runtime\n")
 	}
 	renderAgentSafetyControls(&b, c, scope)
-	if c.Agent.PlannerModel != "" {
-		fmt.Fprintf(&b, "planner_model = %q   # low-frequency planner (two-model collaboration)\n", c.Agent.PlannerModel)
-	} else {
-		b.WriteString("# planner_model = \"deepseek-pro\"   # optional: enable two-model collaboration\n")
-	}
-	if c.Agent.VisionModel != "" {
-		fmt.Fprintf(&b, "vision_model = %q   # image understanding fallback: auto or provider/model\n", c.Agent.VisionModel)
-	} else {
-		b.WriteString("# vision_model = \"auto\"   # optional: summarize images for text-only models\n")
-	}
-	if c.Agent.SubagentModel != "" {
-		fmt.Fprintf(&b, "subagent_model = %q   # default model for runAs=subagent skills\n", c.Agent.SubagentModel)
-	} else {
-		b.WriteString("# subagent_model = \"deepseek-pro\"   # optional default for runAs=subagent skills\n")
-	}
-	if len(c.Agent.SubagentModels) > 0 {
-		fmt.Fprintf(&b, "subagent_models = %s   # per-skill overrides\n", renderStringMap(c.Agent.SubagentModels))
-	} else {
-		b.WriteString("# subagent_models = { review = \"deepseek-pro\", security_review = \"deepseek-pro\" }   # per-skill overrides\n")
-	}
+	renderAgentModelAssignments(&b, c)
 	if c.Agent.SubagentEffort != "" {
 		fmt.Fprintf(&b, "subagent_effort = %q   # default effort for subagent entry points\n", c.Agent.SubagentEffort)
 	} else {
@@ -323,7 +301,7 @@ func RenderTOMLForScope(c *Config, scope RenderScope) string {
 			if p.ModelsURL != "" {
 				fmt.Fprintf(&b, "models_url  = %q   # auto-fetch models from this URL on startup\n", p.ModelsURL)
 			}
-			fmt.Fprintf(&b, "api_key_env = %q\n", p.APIKeyEnv)
+			renderProviderIdentity(&b, p.APIKeyEnv, p.DisplayName)
 			if p.PresetID != "" {
 				fmt.Fprintf(&b, "preset_id   = %q   # curated preset identity; settings UI uses it to avoid duplicate installs\n", p.PresetID)
 			}
@@ -387,7 +365,7 @@ func RenderTOMLForScope(c *Config, scope RenderScope) string {
 				fmt.Fprintf(&b, "vision_detail = %q   # openai image detail hint: low|high; empty = auto\n", p.VisionDetail)
 			}
 			if p.WebSearch != nil {
-				fmt.Fprintf(&b, "web_search  = %t   # provider-executed web_search tool; omitted defaults on for supported official DeepSeek APIs\n", *p.WebSearch)
+				fmt.Fprintf(&b, "web_search  = %t   # independent web_search tool; omitted defaults on for supported official DeepSeek APIs\n", *p.WebSearch)
 			}
 			if p.ReasoningProtocol != "" {
 				fmt.Fprintf(&b, "reasoning_protocol = %q   # auto|deepseek|glm|kimi-k3|openai|none; overrides model/endpoint reasoning detection\n", p.ReasoningProtocol)
@@ -916,10 +894,7 @@ func RenderTOMLProjectDelta(c *Config) string {
 		fmt.Fprintf(&agentBuf, "temperature = %s\n", formatFloat(c.Agent.Temperature))
 		anyAgent = true
 	}
-	if c.Agent.RecoveryModel != "" && c.Agent.RecoveryModel != d.Agent.RecoveryModel {
-		fmt.Fprintf(&agentBuf, "recovery_model = %q\n", c.Agent.RecoveryModel)
-		anyAgent = true
-	}
+	diffRecoveryAndCompletionValidation(&agentBuf, *c, *d, &anyAgent)
 	if c.Agent.ReasoningLanguage != d.Agent.ReasoningLanguage {
 		if l := c.ReasoningLanguage(); l != "auto" {
 			fmt.Fprintf(&agentBuf, "reasoning_language = %q\n", l)
@@ -942,22 +917,7 @@ func RenderTOMLProjectDelta(c *Config) string {
 		fmt.Fprintf(&agentBuf, "plan_mode_read_only_commands = %s\n", renderStringArray(c.Agent.PlanModeReadOnlyCommands))
 		anyAgent = true
 	}
-	if c.Agent.PlannerModel != "" && c.Agent.PlannerModel != d.Agent.PlannerModel {
-		fmt.Fprintf(&agentBuf, "planner_model = %q\n", c.Agent.PlannerModel)
-		anyAgent = true
-	}
-	if c.Agent.VisionModel != d.Agent.VisionModel {
-		fmt.Fprintf(&agentBuf, "vision_model = %q\n", c.Agent.VisionModel)
-		anyAgent = true
-	}
-	if c.Agent.SubagentModel != "" && c.Agent.SubagentModel != d.Agent.SubagentModel {
-		fmt.Fprintf(&agentBuf, "subagent_model = %q\n", c.Agent.SubagentModel)
-		anyAgent = true
-	}
-	if len(c.Agent.SubagentModels) > 0 && !reflect.DeepEqual(c.Agent.SubagentModels, d.Agent.SubagentModels) {
-		fmt.Fprintf(&agentBuf, "subagent_models = %s\n", renderStringMap(c.Agent.SubagentModels))
-		anyAgent = true
-	}
+	renderAgentModelAssignmentDelta(&agentBuf, c, d, &anyAgent)
 	if c.Agent.SubagentEffort != "" && c.Agent.SubagentEffort != d.Agent.SubagentEffort {
 		fmt.Fprintf(&agentBuf, "subagent_effort = %q\n", c.Agent.SubagentEffort)
 		anyAgent = true
@@ -1006,7 +966,7 @@ func RenderTOMLProjectDelta(c *Config) string {
 			if p.ModelsURL != "" {
 				fmt.Fprintf(&b, "models_url  = %q\n", p.ModelsURL)
 			}
-			fmt.Fprintf(&b, "api_key_env = %q\n", p.APIKeyEnv)
+			renderProviderIdentity(&b, p.APIKeyEnv, p.DisplayName)
 			if p.PresetID != "" {
 				fmt.Fprintf(&b, "preset_id   = %q\n", p.PresetID)
 			}
@@ -1354,7 +1314,7 @@ func projectScopedConfigForRender(c *Config) *Config {
 		return c
 	}
 	cp := *c
-	cp.Providers = make([]ProviderEntry, 0, len(c.Providers)+len(c.shadowedProjectProviders))
+	cp.Providers = make([]ProviderEntry, 0, len(c.Providers))
 	for _, p := range c.Providers {
 		if c.providerSources[providerMergeKey(p)] == providerSourceUser {
 			continue

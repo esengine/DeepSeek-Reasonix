@@ -242,6 +242,10 @@ func (r *Recorder) RecordRunBudget(sample event.RunBudgetSample) {
 	event.RecordRunBudget(r.inner, sample)
 }
 
+func (r *Recorder) RecordSubagentLifecycle(info event.SubagentLifecycleInfo) {
+	event.RecordSubagentLifecycle(r.inner, info)
+}
+
 func (r *Recorder) recordUsage(e event.Event) {
 	r.recordProviderUsage(e.ModelRef, e.Usage, e.CostQuote, e.UsageSource)
 }

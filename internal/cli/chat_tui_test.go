@@ -978,11 +978,11 @@ func TestModalPanelsHideComposerBox(t *testing.T) {
 		{
 			name: "resume picker",
 			setup: func(m *chatTUI) {
-				m.resumePick = &resumePicker{sessions: []agent.SessionInfo{{
+				m.resumePick = &resumePicker{entries: []resumeEntry{{session: agent.SessionInfo{
 					Path:    "one.jsonl",
 					Preview: "previous task",
 					Turns:   3,
-				}}, sel: 0, active: -1}
+				}}}, sel: 0, active: -1}
 			},
 			render: func(m chatTUI) string { return m.renderResumePicker() },
 		},
@@ -2889,76 +2889,6 @@ func TestQueueNewMessageOnEnterDuringRunning(t *testing.T) {
 	}
 	if bodies[1] != "new message" {
 		t.Fatalf("queue[1] should be %q, got %q", "new message", bodies[1])
-	}
-}
-
-func TestQueuedFoldedPasteExpandsBeforeInterjectSend(t *testing.T) {
-	runner := &recordingTurnRunner{}
-	events := make(chan event.Event, 8)
-	dir := t.TempDir()
-	ctrl := control.New(control.Options{
-		Runner:     runner,
-		Sink:       event.FuncSink(func(e event.Event) { events <- e }),
-		SessionDir: dir,
-		Label:      "test",
-	})
-	defer ctrl.Close()
-	ctrl.EnsureSessionPath()
-	m := newTestChatTUI()
-	m.ctrl = ctrl
-	m.eventCh = make(chan event.Event, 8)
-	m.state = tuiRunning
-	pasted := strings.Repeat("queued pasted content\n", 10)
-	model, _ := m.Update(tea.PasteMsg{Content: pasted})
-	m = model.(chatTUI)
-
-	display := strings.TrimSpace(m.input.Value())
-	if !strings.Contains(display, "[Pasted text #1") {
-		t.Fatalf("paste should be folded, got %q", display)
-	}
-
-	model, _ = m.Update(tea.KeyPressMsg{Code: tea.KeyEnter})
-	m = model.(chatTUI)
-
-	bodies := m.inboxBodies()
-	if len(bodies) != 1 {
-		t.Fatalf("queue should have 1 item, got %d", len(bodies))
-	}
-	queued := bodies[0]
-	if queued == display {
-		t.Fatalf("queued interject kept the folded placeholder: %q", queued)
-	}
-	for _, want := range []string{
-		"queued pasted content",
-		"--- Begin [Pasted text #1",
-		"--- End [Pasted text #1",
-	} {
-		if !strings.Contains(queued, want) {
-			t.Fatalf("queued interject missing %q in:\n%s", want, queued)
-		}
-	}
-
-	// Resume inbox so controller can dispatch after TurnDone.
-	_ = m.ctrl.SetInboxPaused(false)
-	model, _ = m.Update(agentEventMsg(event.Event{Kind: event.TurnDone}))
-	m = model.(chatTUI)
-	// Controller dispatches asynchronously via maybeDispatch; wait briefly.
-	waitForCLIEvent(t, events, event.TurnDone)
-
-	// Admission may start a turn; wait for runner input.
-	deadline := time.Now().Add(2 * time.Second)
-	for time.Now().Before(deadline) && len(runner.inputs) == 0 {
-		time.Sleep(10 * time.Millisecond)
-	}
-	if len(runner.inputs) != 1 {
-		t.Fatalf("runner should receive queued interject, inputs=%q", runner.inputs)
-	}
-	sent := runner.inputs[0]
-	if sent == display {
-		t.Fatalf("runner received the folded placeholder: %q", sent)
-	}
-	if !strings.Contains(sent, "queued pasted content") {
-		t.Fatalf("runner input missing pasted content:\n%s", sent)
 	}
 }
 

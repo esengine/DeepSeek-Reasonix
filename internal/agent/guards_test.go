@@ -457,8 +457,8 @@ func TestExecuteBatchPublishesWorkspaceMutationBeforeLaterToolCompletes(t *testi
 	case <-time.After(2 * time.Second):
 		t.Fatal("writer completion did not publish before the later tool completed")
 	}
-	if results := sink.kinds(event.ToolResult); len(results) != 0 {
-		t.Fatalf("provider-ordered ToolResult events published before the batch completed: %+v", results)
+	if results := sink.kinds(event.ToolResult); len(results) != 1 || results[0].Tool.Name != "write_file" {
+		t.Fatalf("completed writer must be checkpointed before the next tool: %+v", results)
 	}
 	close(release)
 	select {

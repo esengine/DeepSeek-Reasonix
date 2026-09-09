@@ -11,6 +11,7 @@ import (
 	"github.com/BurntSushi/toml"
 
 	"reasonix/internal/provider"
+	"reasonix/internal/provider/openai"
 )
 
 func hasModel(c *Config, model string) *ProviderEntry {
@@ -1918,5 +1919,30 @@ func TestNormalizeOfficialDeepSeekModelsSkipsExplicitModelList(t *testing.T) {
 	}
 	if p.HasModel("deepseek-v4-pro") {
 		t.Fatal("normalizeOfficialDeepSeekModels must not add pro when Models is explicitly set")
+	}
+}
+
+func TestNormalizeLegacyOpenCodeGoVisionCatalogMigratesOnlyUntouchedPreset(t *testing.T) {
+	base := ProviderEntry{
+		Name: "opencode-go", Kind: "openai", BaseURL: "https://opencode.ai/zen/go/v1",
+		Models: append([]string(nil), preVisionOpenCodeGoModels...), VisionModels: []string{"kimi-k3"},
+		Default: "glm-5.2", PresetID: "opencode-go",
+	}
+	custom := base
+	custom.Models = append(custom.Models, "private-model")
+	explicit := base
+	explicit.VisionModels = []string{}
+	c := &Config{Providers: []ProviderEntry{base, custom, explicit}}
+	if !normalizeLegacyOpenCodeGoVisionCatalog(c) {
+		t.Fatal("untouched OpenCode Go catalog was not migrated")
+	}
+	if !c.Providers[0].HasModel(openai.OfficialDeepSeekVisionModel) || !c.Providers[0].HasVisionModel(openai.OfficialDeepSeekVisionModel) {
+		t.Fatalf("migrated catalog = %+v", c.Providers[0])
+	}
+	if c.Providers[1].HasModel(openai.OfficialDeepSeekVisionModel) {
+		t.Fatal("custom model catalog was unexpectedly migrated")
+	}
+	if !c.Providers[2].HasModel(openai.OfficialDeepSeekVisionModel) || len(c.Providers[2].VisionModels) != 0 {
+		t.Fatalf("explicit no-vision catalog = %+v", c.Providers[2])
 	}
 }

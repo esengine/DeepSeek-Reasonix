@@ -1,14 +1,12 @@
 package serve
 
 import (
-	"encoding/json"
 	"net/http"
 	"net/http/httptest"
 	"path/filepath"
 	"strconv"
 	"strings"
 	"testing"
-	"time"
 
 	"reasonix/internal/agent"
 	"reasonix/internal/config"
@@ -55,15 +53,11 @@ func TestServeSilentRotationsPublishSessionChanged(t *testing.T) {
 			if resp.StatusCode != http.StatusNoContent {
 				t.Fatalf("%s status = %d, want 204", endpoint, resp.StatusCode)
 			}
-			var frame eventwire.Event
-			select {
-			case data := <-all:
-				if err := json.Unmarshal(data, &frame); err != nil {
-					t.Fatal(err)
+			frame := nextServeProtocolFrame(t, all, func(state eventwire.Event) {
+				if state.SessionPath != agent.CanonicalSessionPath(oldPath) {
+					t.Fatalf("new runtime state preceded session_changed routing barrier: %+v", state)
 				}
-			default:
-				t.Fatalf("%s emitted no routing barrier", endpoint)
-			}
+			})
 			if frame.Kind != "session_changed" || !frame.SessionCurrent || !frame.SessionReset || frame.SessionPath == "" || frame.SessionPath == oldPath {
 				t.Fatalf("%s routing frame = %+v, old path %q", endpoint, frame, oldPath)
 			}
@@ -106,17 +100,13 @@ func TestServeResumeBuffersSynchronousEventsUntilRoutePublication(t *testing.T) 
 
 	canonicalTarget := agent.CanonicalSessionPath(target)
 	for _, wantKind := range []string{"notice", "session_changed"} {
-		select {
-		case data := <-all:
-			var frame eventwire.Event
-			if err := json.Unmarshal(data, &frame); err != nil {
-				t.Fatal(err)
+		frame := nextServeProtocolFrame(t, all, func(state eventwire.Event) {
+			if state.SessionPath != agent.CanonicalSessionPath(active) {
+				t.Fatalf("resumed runtime state preceded session_changed routing barrier: %+v", state)
 			}
-			if frame.Kind != wantKind || frame.SessionPath != canonicalTarget || !frame.SessionCurrent {
-				t.Fatalf("resumed %s frame = %+v, want target-tagged foreground frame", wantKind, frame)
-			}
-		case <-time.After(time.Second):
-			t.Fatalf("resume emitted no %s frame", wantKind)
+		})
+		if frame.Kind != wantKind || frame.SessionPath != canonicalTarget || !frame.SessionCurrent {
+			t.Fatalf("resumed %s frame = %+v, want target-tagged foreground frame", wantKind, frame)
 		}
 	}
 }

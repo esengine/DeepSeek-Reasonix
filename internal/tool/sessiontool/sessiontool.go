@@ -15,6 +15,7 @@ import (
 	"reasonix/internal/agent"
 	"reasonix/internal/provider"
 	"reasonix/internal/textutil"
+	"reasonix/internal/tool"
 )
 
 // list_sessions tool
@@ -28,7 +29,7 @@ func NewListSessionsTool(sessionDir string) *listSessionsTool {
 	return &listSessionsTool{sessionDir: sessionDir}
 }
 
-func (t *listSessionsTool) Name() string   { return "list_sessions" }
+func (t *listSessionsTool) Name() string   { return tool.HostListSessions }
 func (t *listSessionsTool) ReadOnly() bool { return true }
 
 func (t *listSessionsTool) Description() string {
@@ -74,7 +75,7 @@ func NewReadSessionTool(sessionDir string) *readSessionTool {
 	return &readSessionTool{sessionDir: sessionDir}
 }
 
-func (t *readSessionTool) Name() string   { return "read_session" }
+func (t *readSessionTool) Name() string   { return tool.HostReadSession }
 func (t *readSessionTool) ReadOnly() bool { return true }
 
 func (t *readSessionTool) Description() string {
@@ -158,6 +159,9 @@ func (t *readSessionTool) Execute(_ context.Context, args json.RawMessage) (stri
 	turnCount := 0
 loop:
 	for _, m := range msgs {
+		if agent.IsPinnedContextRevision(m) {
+			continue
+		}
 		switch m.Role {
 		case provider.RoleSystem:
 			// System prompts excluded for privacy (matching history tool).

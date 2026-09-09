@@ -92,8 +92,9 @@ type ReasonixGoalRuntime struct {
 }
 
 type ReasonixTurnOutcome struct {
-	Kind   string `json:"kind"`
-	Reason string `json:"reason,omitempty"`
+	Diagnostic *provider.FailureDiagnostic `json:"diagnostic,omitempty"`
+	Kind       string                      `json:"kind"`
+	Reason     string                      `json:"reason,omitempty"`
 }
 
 type ReasonixFinalReadiness struct {
@@ -105,21 +106,22 @@ type ReasonixFinalReadiness struct {
 // ReasonixSessionStatus is the stable schemaVersion=1 recovery snapshot.
 // Reasoning text and unbounded terminal output are intentionally absent.
 type ReasonixSessionStatus struct {
-	SchemaVersion  int                    `json:"schemaVersion"`
-	Sequence       uint64                 `json:"sequence"`
-	SessionID      string                 `json:"sessionId"`
-	State          string                 `json:"state"`
-	Model          string                 `json:"model"`
-	Effort         string                 `json:"effort"`
-	Mode           string                 `json:"mode"`
-	WorkMode       string                 `json:"workMode"`
-	PlannerMode    string                 `json:"plannerMode"`
-	Goal           ReasonixStatusGoal     `json:"goal"`
-	Phase          string                 `json:"phase"`
-	TurnOutcome    ReasonixTurnOutcome    `json:"turnOutcome"`
-	FinalReadiness ReasonixFinalReadiness `json:"finalReadiness"`
-	Sandbox        SessionSandboxState    `json:"sandbox"`
-	Usage          ReasonixStatusUsage    `json:"usage"`
+	ProtocolRecovery *provider.ProtocolRecoveryAction `json:"protocolRecovery,omitempty"`
+	SchemaVersion    int                              `json:"schemaVersion"`
+	Sequence         uint64                           `json:"sequence"`
+	SessionID        string                           `json:"sessionId"`
+	State            string                           `json:"state"`
+	Model            string                           `json:"model"`
+	Effort           string                           `json:"effort"`
+	Mode             string                           `json:"mode"`
+	WorkMode         string                           `json:"workMode"`
+	PlannerMode      string                           `json:"plannerMode"`
+	Goal             ReasonixStatusGoal               `json:"goal"`
+	Phase            string                           `json:"phase"`
+	TurnOutcome      ReasonixTurnOutcome              `json:"turnOutcome"`
+	FinalReadiness   ReasonixFinalReadiness           `json:"finalReadiness"`
+	Sandbox          SessionSandboxState              `json:"sandbox"`
+	Usage            ReasonixStatusUsage              `json:"usage"`
 }
 
 type ReasonixStatusUpdate struct {
@@ -358,6 +360,7 @@ func (t *statusTelemetry) finishTurn(runErr error, cancelled bool, goalStatus, s
 		default:
 			var readinessErr *agent.FinalReadinessError
 			var recoveryPause *agent.RecoveryPauseError
+			var completionPause *agent.CompletionUncertainError
 			_, runPause := agent.InspectRunPause(runErr)
 			switch {
 			case errors.As(runErr, &readinessErr):
@@ -369,13 +372,17 @@ func (t *statusTelemetry) finishTurn(runErr error, cancelled bool, goalStatus, s
 				t.phase = "recovery_paused"
 				t.turnOutcome = ReasonixTurnOutcome{Kind: "paused", Reason: clipStatusText(recoveryPause.Error(), 2_048)}
 				eventName = "pause"
+			case errors.As(runErr, &completionPause):
+				t.phase = "completion_uncertain"
+				t.turnOutcome = ReasonixTurnOutcome{Kind: "paused", Reason: clipStatusText(completionPause.Error(), 2_048)}
+				eventName = "pause"
 			case runPause:
 				t.phase = "paused"
 				t.turnOutcome = ReasonixTurnOutcome{Kind: "paused", Reason: clipStatusError(runErr, 2_048)}
 				eventName = "pause"
 			case runErr != nil:
 				t.phase = "error"
-				t.turnOutcome = ReasonixTurnOutcome{Kind: "error", Reason: clipStatusError(runErr, 2_048)}
+				t.turnOutcome = ReasonixTurnOutcome{Kind: "error", Reason: clipStatusError(runErr, 2_048), Diagnostic: provider.DiagnoseFailure(runErr)}
 				t.goalOverride = "failed"
 				eventName = "error"
 			default:
@@ -514,7 +521,7 @@ func (t *statusTelemetry) snapshot() statusTelemetrySnapshot {
 		state:    t.state,
 		phase:    t.phase,
 		turnOutcome: ReasonixTurnOutcome{
-			Kind: t.turnOutcome.Kind, Reason: clipStatusCredentialText(t.turnOutcome.Reason, 2_048),
+			Kind: t.turnOutcome.Kind, Reason: clipStatusCredentialText(t.turnOutcome.Reason, 2_048), Diagnostic: t.turnOutcome.Diagnostic,
 		},
 		finalReadiness: ReasonixFinalReadiness{
 			ReadyForReview: t.finalReadiness.ReadyForReview,
@@ -721,16 +728,23 @@ func (s *acpSession) statusSnapshot() ReasonixSessionStatus {
 	if state != "running" {
 		state = "idle"
 	}
+	var protocolRecovery *provider.ProtocolRecoveryAction
+	if pending, ok := ctrl.(interface {
+		PendingProtocolRecovery() *provider.ProtocolRecoveryAction
+	}); ok {
+		protocolRecovery = pending.PendingProtocolRecovery()
+	}
 	return ReasonixSessionStatus{
-		SchemaVersion: reasonixStatusSchemaVersion,
-		Sequence:      t.sequence,
-		SessionID:     id,
-		State:         state,
-		Model:         strings.TrimSpace(model),
-		Effort:        normalizeStatusEffort(effort),
-		Mode:          mode,
-		WorkMode:      workMode,
-		PlannerMode:   runtimeState.PlannerMode,
+		ProtocolRecovery: protocolRecovery,
+		SchemaVersion:    reasonixStatusSchemaVersion,
+		Sequence:         t.sequence,
+		SessionID:        id,
+		State:            state,
+		Model:            strings.TrimSpace(model),
+		Effort:           normalizeStatusEffort(effort),
+		Mode:             mode,
+		WorkMode:         workMode,
+		PlannerMode:      runtimeState.PlannerMode,
 		Goal: ReasonixStatusGoal{
 			Status:    goalStatus,
 			Objective: goalObjective,

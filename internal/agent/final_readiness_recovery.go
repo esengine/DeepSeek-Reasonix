@@ -46,7 +46,7 @@ func (a *Agent) pendingFinalReadinessRecovery() *provider.FinalReadinessRecovery
 			copy.Checkpoint = append(json.RawMessage(nil), copy.Checkpoint...)
 			return &copy
 		}
-		if message.Role == provider.RoleUser && IsUserAuthoredTurn(message.Content) {
+		if IsUserAuthoredTurnMessage(message) {
 			return nil
 		}
 	}

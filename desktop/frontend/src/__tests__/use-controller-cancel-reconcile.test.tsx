@@ -106,6 +106,8 @@ let cancelCalls = 0;
 let cancelInboxCalls = 0;
 let cancelInboxError: Error | null = null;
 let cancelDiscardedItemIDs: string[] = [];
+let interruptCalls = 0;
+let interruptError: Error | null = null;
 let effortCalls = 0;
 let checkpointHistoryCalls = 0;
 let historyLoads = 0;
@@ -193,6 +195,11 @@ window.go = {
         if (cancelInboxError) throw cancelInboxError;
         backendRunning = false;
         return { discardedItemIds: [...cancelDiscardedItemIDs] };
+      },
+      InterruptTurnForTab: async () => {
+        interruptCalls += 1;
+        if (interruptError) throw interruptError;
+        backendRunning = false;
       },
     } as Partial<AppBindings> as AppBindings,
   },
@@ -341,6 +348,43 @@ const inboxCancelNotice = controller?.state.items.find((item) =>
 eq(cancelInboxCalls, 2, "receipt-capable cancellation is called for durable guidance");
 ok(Boolean(inboxCancelNotice), "cancel failure formats the stable inbox code for the active locale");
 ok(inboxCancelNotice?.kind === "notice" && !inboxCancelNotice.text.includes("reasonix_error:"), "cancel failure never renders the stable transport code");
+
+// Stop is a session-level request: an exact-turn fence rejection (stale or
+// replaced turn id) must fall back to the unconditional cancel instead of
+// leaving the user with a "Cancel failed" notice and a running turn.
+const noticesBefore = controller?.state.items.filter((item) => item.kind === "notice").length ?? 0;
+const cancelCallsBefore = cancelCalls;
+backendRunning = true;
+interruptError = new Error('turn "turn-live" is not the active turn for tab "tab-a"');
+await act(async () => {
+  for (const handler of eventHandlers) handler({ kind: "turn_started", tabId: "tab-a", turnId: "turn-live" });
+  await flushPromises();
+});
+eq(controller?.state.activeTurnId, "turn-live", "turn_started with a turn id records the active turn");
+await act(async () => {
+  await controller?.cancel();
+  await flushPromises();
+});
+eq(interruptCalls, 1, "exact-turn stop is attempted first");
+eq(cancelCalls, cancelCallsBefore + 1, "fence rejection falls back to the unconditional CancelTab");
+eq(controller?.state.items.filter((item) => item.kind === "notice").length, noticesBefore, "fence rejection does not surface a Cancel failed notice");
+await waitFor("fallback cancel reconciliation", () => controller?.state.running === false);
+
+// An idle backend answers with a stable code; the UI reconciles quietly.
+backendRunning = false;
+interruptError = new Error("reasonix_error:turn_not_running");
+await act(async () => {
+  for (const handler of eventHandlers) handler({ kind: "turn_started", tabId: "tab-a", turnId: "turn-idle" });
+  await flushPromises();
+});
+await act(async () => {
+  await controller?.cancel();
+  await flushPromises();
+});
+eq(interruptCalls, 2, "idle stop still asks the backend once");
+eq(cancelCalls, cancelCallsBefore + 1, "idle stop does not retry through CancelTab");
+eq(controller?.state.items.filter((item) => item.kind === "notice").length, noticesBefore, "idle stop does not surface a Cancel failed notice");
+await waitFor("idle stop reconciliation", () => controller?.state.running === false);
 
 await act(async () => {
   root.unmount();

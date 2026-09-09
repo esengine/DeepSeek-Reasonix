@@ -268,6 +268,7 @@ func TestRewindConversationSucceedsWithLiveBoundary(t *testing.T) {
 }
 
 func TestCompatibilityRewindTransfersLeaseBeforeForkSwitch(t *testing.T) {
+	t.Setenv(agent.SessionLogSchemaEnv, "v1")
 	c, ag, _ := runTwoTurns(t)
 	originalPath := c.SessionPath()
 	keeper := NewSessionLeaseKeeper()

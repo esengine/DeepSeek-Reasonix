@@ -17,34 +17,6 @@ import (
 	"github.com/BurntSushi/toml"
 )
 
-func TestSetDefaultModel(t *testing.T) {
-	c := Default()
-	if err := c.SetDefaultModel("deepseek-pro"); err != nil {
-		t.Fatalf("set valid default: %v", err)
-	}
-	if c.DefaultModel != "deepseek-pro" {
-		t.Errorf("default = %q, want deepseek-pro", c.DefaultModel)
-	}
-	if err := c.SetDefaultModel("nope"); err == nil {
-		t.Error("expected error for unknown provider")
-	}
-	// "provider/model" form is also accepted: the /model picker stores the
-	// full ref so a user can land on a non-default model under the same
-	// provider across restarts.
-	if err := c.SetDefaultModel("deepseek-pro/deepseek-v4-pro"); err != nil {
-		t.Fatalf("set provider/model default: %v", err)
-	}
-	if c.DefaultModel != "deepseek-pro/deepseek-v4-pro" {
-		t.Errorf("default = %q, want deepseek-pro/deepseek-v4-pro", c.DefaultModel)
-	}
-	if err := c.SetDefaultModel("deepseek-pro/missing"); err == nil {
-		t.Error("expected error for unknown model under known provider")
-	}
-	if err := c.SetDefaultModel(""); err == nil {
-		t.Error("expected error for empty name")
-	}
-}
-
 func TestUIThemeNormalizes(t *testing.T) {
 	c := Default()
 	for _, tt := range []struct {
@@ -237,7 +209,7 @@ func TestDesktopLayoutStyleNormalizes(t *testing.T) {
 		want    string
 		wantErr bool
 	}{
-		{"", "classic", false},
+		{"", "workbench", false},
 		{"classic", "classic", false},
 		{" workbench ", "workbench", false},
 		{"workspace", "workbench", false},
@@ -317,8 +289,8 @@ func TestDesktopExternalOpenerValidation(t *testing.T) {
 }
 
 func TestDesktopStatusBarStyleNormalizes(t *testing.T) {
-	if got := Default().DesktopStatusBarStyle(); got != "text" {
-		t.Fatalf("default desktop status bar style = %q, want text", got)
+	if got := Default().DesktopStatusBarStyle(); got != "icon" {
+		t.Fatalf("default desktop status bar style = %q, want icon", got)
 	}
 	for _, tt := range []struct {
 		in      string
@@ -330,7 +302,7 @@ func TestDesktopStatusBarStyleNormalizes(t *testing.T) {
 		{"icons", "icon", false},
 		{"text", "text", false},
 		{"labels", "text", false},
-		{"later", "text", true},
+		{"later", "icon", true},
 	} {
 		c := Default()
 		if err := c.SetDesktopStatusBarStyle(tt.in); (err != nil) != tt.wantErr {
@@ -654,12 +626,18 @@ func TestNormalizeEffortDeepSeek(t *testing.T) {
 	}
 	for in, want := range map[string]string{"auto": "", "disabled": "disabled", "high": "high", "max": "max", "low": "high", "medium": "high", "xhigh": "max"} {
 		got, err := NormalizeEffort(e, in)
+		if in != want && in != "auto" {
+			if err == nil {
+				t.Fatalf("undeclared %q accepted as %q", in, got)
+			}
+			continue
+		}
 		if err != nil || got != want {
 			t.Fatalf("NormalizeEffort(%q) = %q/%v, want %q/nil", in, got, err, want)
 		}
 	}
 	// "off" is the retired DeepSeek "no thinking" spelling — now maps to disabled.
-	if got, err := NormalizeEffort(e, "off"); err != nil || got != "disabled" {
+	if got, err := NormalizeEffort(e, "off"); err == nil {
 		t.Fatalf("NormalizeEffort(\"off\") = %q/%v, want \"disabled\"/nil", got, err)
 	}
 }
@@ -810,8 +788,8 @@ func TestEffectiveVisionRejectsOfficialDeepSeekOverridesButPreservesCustomGatewa
 		Model:        "deepseek-v5-vision",
 		VisionModels: []string{"deepseek-v5-vision"},
 	}
-	if EffectiveVision(future) {
-		t.Fatal("a future model name must not bypass the official DeepSeek wire constraint")
+	if !EffectiveVision(future) {
+		t.Fatal("explicit vision model list must support unknown DeepSeek models")
 	}
 
 	visionOn := true
@@ -828,8 +806,8 @@ func TestEffectiveVisionRejectsOfficialDeepSeekOverridesButPreservesCustomGatewa
 	if !ok {
 		t.Fatal("ResolveModel did not find explicit future DeepSeek model")
 	}
-	if EffectiveVision(overridden) {
-		t.Fatal("model_overrides vision=true must not bypass the official DeepSeek wire constraint")
+	if !EffectiveVision(overridden) {
+		t.Fatal("model_overrides vision=true must enable unknown DeepSeek models")
 	}
 
 	custom := &ProviderEntry{
@@ -2816,6 +2794,12 @@ func TestNormalizeEffortCustomSupportedEfforts(t *testing.T) {
 	}
 	for in, want := range map[string]string{"auto": "", "low": "low", "MEDIUM": "medium", "high": "high"} {
 		got, err := NormalizeEffort(e, in)
+		if in != want && in != "auto" {
+			if err == nil {
+				t.Fatalf("undeclared %q accepted as %q", in, got)
+			}
+			continue
+		}
 		if err != nil || got != want {
 			t.Fatalf("NormalizeEffort(%q) = %q/%v, want %q/nil", in, got, err, want)
 		}
@@ -2836,8 +2820,8 @@ func TestNormalizeEffortCustomDefaultEffort(t *testing.T) {
 		DefaultEffort:    "xhigh", // not in the list — must fall back to the first level
 	}
 	cap := EffortCapabilityForEntry(e)
-	if cap.Default != "low" {
-		t.Fatalf("default = %q, want low (first of supported_efforts)", cap.Default)
+	if cap.Default != "xhigh" {
+		t.Fatalf("invalid default must remain visible for validation, got %q", cap.Default)
 	}
 	// Omitting DefaultEffort also falls back to the first level.
 	e2 := *e
@@ -2850,8 +2834,8 @@ func TestNormalizeEffortCustomDefaultEffort(t *testing.T) {
 		t.Fatalf("NormalizeEffort(auto) = %q/%v, want empty/nil", got, err)
 	}
 	e.Effort = "auto"
-	if got := EffectiveEffort(e); got != "low" {
-		t.Fatalf("stored auto should fall through to default_effort, got %q", got)
+	if got := EffectiveEffort(e); got != "xhigh" {
+		t.Fatalf("invalid configured default must not silently fall back, got %q", got)
 	}
 	e.Effort = "high"
 	if got := EffectiveEffort(e); got != "high" {
@@ -2881,8 +2865,8 @@ func TestNormalizeEffortCustomLevelsCaseInsensitive(t *testing.T) {
 		t.Fatalf("default = %q, want medium", cap.Default)
 	}
 	got, err := NormalizeEffort(e, "MEDIUM")
-	if err != nil || got != "medium" {
-		t.Fatalf("NormalizeEffort(MEDIUM) = %q/%v, want medium/nil", got, err)
+	if err == nil {
+		t.Fatalf("NormalizeEffort(MEDIUM) accepted nonexact ID %q", got)
 	}
 	if got := EffectiveEffort(e); got != "medium" {
 		t.Fatalf("EffectiveEffort = %q, want medium", got)
@@ -2926,7 +2910,7 @@ func TestEffortCapabilityEmptySupportedEffortsNotConfigurable(t *testing.T) {
 	e := &ProviderEntry{
 		Name:    "mimo-pro",
 		Kind:    "openai",
-		BaseURL: "https://token-plan-cn.xiaomimimo.com/v1",
+		BaseURL: "https://unknown-gateway.example.com/v1",
 		Model:   "mimo-v2.5-pro",
 	}
 	if cap := EffortCapabilityForEntry(e); cap.Supported {

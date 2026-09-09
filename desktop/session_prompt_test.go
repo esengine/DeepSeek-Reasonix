@@ -52,6 +52,9 @@ func TestSessionWithFreshSystemPromptPreservesLoadedRewriteBaseline(t *testing.T
 		t.Fatalf("LoadSession: %v", err)
 	}
 	resumed := sessionWithFreshSystemPrompt(loaded, "new sys")
+	if reasons := resumed.DrainContentRewriteReasons(); len(reasons) != 1 || reasons[0] != "legacy_pinned_system_migration" {
+		t.Fatalf("content rewrite reasons = %v, want legacy migration", reasons)
+	}
 	msgs := resumed.Snapshot()
 	msgs[3].Content = "[elided tool result]"
 	resumed.Replace(msgs)
@@ -298,6 +301,9 @@ func TestResumeWithFreshSystemPromptPreservesLoadedRewriteBaseline(t *testing.T)
 	if ctrl.resumed == nil {
 		t.Fatalf("Resume was not called")
 	}
+	if reasons := ctrl.resumed.DrainContentRewriteReasons(); len(reasons) != 1 || reasons[0] != "legacy_pinned_system_migration" {
+		t.Fatalf("content rewrite reasons = %v, want legacy migration", reasons)
+	}
 
 	msgs := ctrl.resumed.Snapshot()
 	msgs[3].Content = "[elided tool result]"
@@ -325,6 +331,7 @@ func TestResumeWithFreshSystemPromptPreservesLoadedRewriteBaseline(t *testing.T)
 }
 
 func TestResumeWithFreshSystemPromptRejectsStaleCarriedHistoryBaseline(t *testing.T) {
+	t.Setenv(agent.SessionLogSchemaEnv, "v1")
 	path := filepath.Join(t.TempDir(), "session.jsonl")
 	current := agent.NewSession("old sys")
 	current.Add(provider.Message{Role: provider.RoleUser, Content: "first"})

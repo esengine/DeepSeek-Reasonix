@@ -159,7 +159,7 @@ func TestNormalizeLegacyOpenCodeGoRouteCatalogSplitsAggregateModelsAndRetargetsH
 		t.Fatal("aggregate OpenCode Go route migration did not report a change")
 	}
 	chat, ok := c.Provider("opencode-go")
-	if !ok || !chat.HasModel("glm-5.2") || !chat.HasModel("private-model") || chat.HasModel("grok-4.5") || chat.HasModel("qwen3.7-plus") {
+	if !ok || !chat.HasModel("glm-5.2") || !chat.HasModel("private-model") || chat.HasModel("grok-4.5") {
 		t.Fatalf("chat provider after split = %+v", chat)
 	}
 	if chat.BillingMode != "subscription_equivalent" || chat.Headers["X-User"] != "keep" {
@@ -169,18 +169,14 @@ func TestNormalizeLegacyOpenCodeGoRouteCatalogSplitsAggregateModelsAndRetargetsH
 	if !ok || responses.Kind != "responses" || responses.DefaultModel() != "grok-4.5" || !responses.HasModel("grok-4.5") || responses.HasModel("qwen3.7-plus") {
 		t.Fatalf("responses provider after split = %+v", responses)
 	}
-	anthropic, ok := c.Provider("opencode-go-anthropic")
-	if !ok || anthropic.Kind != "anthropic" || !anthropic.HasModel("qwen3.7-plus") || anthropic.HasModel("grok-4.5") {
-		t.Fatalf("anthropic provider after split = %+v", anthropic)
-	}
-	if c.DefaultModel != "opencode-go-responses/grok-4.5" || c.Agent.PlannerModel != "opencode-go-responses/grok-4.5" || c.Agent.VisionModel != "opencode-go-responses/grok-4.5" || c.Agent.SubagentModel != "opencode-go-anthropic/qwen3.7-plus" || c.Bot.Model != "opencode-go-responses/grok-4.5" {
+	if c.DefaultModel != "opencode-go-responses/grok-4.5" || c.Agent.PlannerModel != "opencode-go-responses/grok-4.5" || c.Agent.VisionModel != "opencode-go-responses/grok-4.5" || c.Agent.SubagentModel != "opencode-go/qwen3.7-plus" || c.Bot.Model != "opencode-go-responses/grok-4.5" {
 		t.Fatalf("historical model refs = default:%q planner:%q vision:%q subagent:%q bot:%q", c.DefaultModel, c.Agent.PlannerModel, c.Agent.VisionModel, c.Agent.SubagentModel, c.Bot.Model)
 	}
 	if len(c.Agent.SubagentModels) != 2 || c.Agent.SubagentModels["review"] != "opencode-go-responses/grok-4.5" || c.Agent.SubagentModels["local"] != "private-model" {
 		t.Fatalf("historical subagent refs = %v", c.Agent.SubagentModels)
 	}
 	access := desktopProviderAccessMap(c.Desktop.ProviderAccess)
-	if !access["opencode-go"] || !access["opencode-go-anthropic"] || !access["opencode-go-responses"] {
+	if !access["opencode-go"] || !access["opencode-go-responses"] {
 		t.Fatalf("provider access after split = %v", c.Desktop.ProviderAccess)
 	}
 	if normalizeLegacyOpenCodeGoInstalls(c) {

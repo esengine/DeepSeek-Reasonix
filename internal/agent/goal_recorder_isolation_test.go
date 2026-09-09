@@ -72,14 +72,14 @@ func TestCoordinatorPlannerCannotReportExecutorGoalDisposition(t *testing.T) {
 	reg.Add(goalTool)
 	planner := &mockProvider{name: "planner", streams: [][]provider.Chunk{
 		{toolCallChunk("planner-goal", "update_goal", `{"status":"complete"}`), {Type: provider.ChunkDone}},
-		{{Type: provider.ChunkText, Text: "1. inspect the implementation\n2. apply and verify the fix"}, {Type: provider.ChunkDone}},
+		{toolCallChunk("plan-1", "submit_plan", `{"objective":"inspect the implementation","steps":[{"title":"apply and verify the fix"}]}`), {Type: provider.ChunkDone}},
 	}}
 	exec := &mockProvider{name: "executor", chunks: []provider.Chunk{{Type: provider.ChunkText, Text: "Implemented and verified."}, {Type: provider.ChunkDone}}}
 	plannerSess := NewSession("planner-sys")
 	executor := New(exec, reg, NewSession("exec-sys"), Options{}, event.Discard)
 	customPlannerReg := tool.NewRegistry()
 	customPlannerReg.Add(goalTool)
-	coord := NewCoordinator(planner, plannerSess, nil, customPlannerReg, Options{}, executor, 0, event.Discard, nil)
+	coord := NewCoordinator(planner, plannerSess, nil, PlannerToolRegistry(customPlannerReg), Options{}, executor, 0, event.Discard, nil)
 	recorder := &coordinatorGoalRecorder{}
 	ctx := withNoClosedLoop(tool.WithGoalTurnRecorder(context.Background(), recorder))
 	if err := coord.Run(ctx, "fix the goal bug"); err != nil {

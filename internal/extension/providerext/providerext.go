@@ -285,6 +285,14 @@ func (r *Resolver) Resolve(selection provider.Selection) (provider.Provider, err
 	if !ok {
 		return nil, fmt.Errorf("unknown provider ref %q: extension plugin %q does not declare it", ref, pluginID)
 	}
+	effort := descriptor.DefaultEffort
+	if selection.Effort != nil {
+		effort = *selection.Effort
+	}
+	if err := provider.ReasoningOptions(descriptor.DefaultEffort, descriptor.Efforts...).Validate(descriptor.Model, effort); err != nil {
+		return nil, err
+	}
+	selection.Effort = &effort
 	return &Provider{
 		resolver:   r,
 		client:     client,

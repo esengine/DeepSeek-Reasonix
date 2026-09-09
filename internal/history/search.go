@@ -256,6 +256,9 @@ func (s *Searcher) Around(ctx context.Context, req AroundRequest) ([]MessageCont
 	}
 	out := make([]MessageContext, 0, end-start)
 	for i := start; i < end; i++ {
+		if agent.IsPinnedContextRevision(msgs[i]) {
+			continue
+		}
 		out = append(out, MessageContext{Index: i, Text: renderMessage(i, msgs[i])})
 	}
 	return out, nil
@@ -379,6 +382,9 @@ func loadMessages(path string) ([]provider.Message, error) {
 func extractDocuments(src sourceFile, msgs []provider.Message, kinds map[Kind]bool, toolName string) []document {
 	var docs []document
 	for i, msg := range msgs {
+		if agent.IsPinnedContextRevision(msg) {
+			continue
+		}
 		switch msg.Role {
 		case provider.RoleUser:
 			if kinds[KindUserText] && strings.TrimSpace(msg.Content) != "" {

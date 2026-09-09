@@ -94,6 +94,56 @@ func TestActivateVersionedWindowsFromStaging(t *testing.T) {
 	}
 }
 
+func TestPreferRelaunchPathIgnoresStaleVersionedDesktop(t *testing.T) {
+	installDir := t.TempDir()
+	oldSrc := t.TempDir()
+	newSrc := t.TempDir()
+	writeVersionedPayload := func(dir, prefix string) {
+		t.Helper()
+		for _, name := range []string{
+			"reasonix-desktop.exe",
+			"reasonix-cli.exe",
+			"reasonix-update-helper.exe",
+			"reasonix-launcher.exe",
+		} {
+			if err := os.WriteFile(filepath.Join(dir, name), []byte(prefix+name), 0o700); err != nil {
+				t.Fatal(err)
+			}
+		}
+	}
+	writeVersionedPayload(oldSrc, "old-")
+	if err := activateVersionedWindowsFromStaging(&repair.UpdateTransaction{
+		SchemaVersion: 1,
+		ToVersion:     "v1.24.0",
+		TargetKind:    "file",
+		TargetPath:    filepath.Join(installDir, "reasonix-desktop.exe"),
+		CreatedAt:     "2026-01-01T00:00:00Z",
+	}, oldSrc); err != nil {
+		t.Fatal(err)
+	}
+	oldDesktop, err := installlayout.ActiveDesktopPath(installDir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	writeVersionedPayload(newSrc, "new-")
+	if err := activateVersionedWindowsFromStaging(&repair.UpdateTransaction{
+		SchemaVersion: 1,
+		ToVersion:     "v1.24.1",
+		TargetKind:    "file",
+		TargetPath:    filepath.Join(installDir, "reasonix-desktop.exe"),
+		CreatedAt:     "2026-01-01T00:00:01Z",
+	}, newSrc); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := os.Stat(oldDesktop); err != nil {
+		t.Fatalf("previous desktop should remain: %v", err)
+	}
+	got := preferRelaunchPath(oldDesktop, installDir)
+	if filepath.Base(got) != "reasonix-launcher.exe" {
+		t.Fatalf("preferRelaunchPath(%s) = %s, want install-root launcher", oldDesktop, got)
+	}
+}
+
 func TestInstallStagedWindowsReleaseUnitPrefersVersioned(t *testing.T) {
 	installDir := t.TempDir()
 	staging := t.TempDir()

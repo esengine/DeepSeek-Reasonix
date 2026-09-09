@@ -33,4 +33,22 @@ type agentConfig struct {
 	recentKeep             int
 	archiveDir             string
 	legacyAnchorSafetyGate bool
+	// readCoordinatorShadow fixes the internal read-coordinator rollout switch
+	// for the whole run; see Options.ReadPipeline.
+	readCoordinatorShadow bool
+	// legacyImplicitFullReads restores the pre-intent read default for rollback.
+	legacyImplicitFullReads bool
+}
+
+// ReadPipelineOptions carries the internal read-pipeline rollback switches. The
+// new behavior is the default; each switch exists so an operator can fall back
+// for diagnosis, is host-local, and is fixed for the whole run.
+type ReadPipelineOptions struct {
+	// LegacyCoordinator restores the legacy incomplete-read execution owner.
+	LegacyCoordinator bool
+	// LegacyEvidenceGates turns the writer-declared evidence check off.
+	LegacyEvidenceGates bool
+	// LegacyImplicitFullReads restores the old rule that a read with no window
+	// promised the whole file. It exists for diagnosis and rollback only.
+	LegacyImplicitFullReads bool
 }

@@ -47,6 +47,8 @@ func (c *mutationBarrierCause) message() string {
 // form the model sees; rawOutput is the full original when truncation applied
 // (empty when identical so we avoid double storage). images ride outside text.
 type toolOutcome struct {
+	runState                   provider.ToolRunState
+	visionSummary              *provider.VisionSummary
 	output                     string
 	rawOutput                  string // full original when different from output
 	images                     []string
@@ -72,6 +74,13 @@ type toolOutcome struct {
 	// recoveryStopTurn is set when Auto Episode budgets are exhausted.
 	recoveryStopTurn   bool
 	recoveryStopReason string
+	readTaskID         string
+	readEnvelope       *tool.ReadResultEnvelope
+	finalReadEnvelope  *tool.ReadResultEnvelope
+	readReference      *readDelivery
+	readActiveMillis   int64
+	incompleteRead     *incompleteReadDeferred
+	subagentOutcome    *SubagentOutcome
 }
 
 // batchExecution is the result of one provider tool-call batch.
@@ -88,8 +97,8 @@ type batchExecution struct {
 // executeBatch dispatches one model turn's tool calls. ToolDispatch events are
 // emitted up front in call order; contiguous known ReadOnly calls fan out
 // across goroutines while unknown and writer calls run serially so write/read
-// ordering stays provider-ordered. ToolResult events are emitted after the
-// batch in call order. Images are aligned by index with results.
+// ordering stays provider-ordered. Each completed serial call (or read-only
+// group) is checkpointed before the next group starts.
 func (a *Agent) executeBatch(ctx context.Context, turn *turnRuntime, calls []provider.ToolCall) batchExecution {
 	// The assistant message already stored this slice in Session. Keep execution
 	// state separate so refreshing a dependent preview never mutates shared
@@ -102,10 +111,12 @@ func (a *Agent) executeBatch(ctx context.Context, turn *turnRuntime, calls []pro
 		ctx = withObservationBoundary(ctx, a.task.ledger.ObservationBoundary())
 	}
 
-	results := make([]string, len(calls))
-	outcomes := make([]toolOutcome, len(calls))
-	durations := make([]int64, len(calls))
-	startedAt := make([]int64, len(calls))
+	slots := newBatchSlots(calls)
+	// Evidence is evaluated once for the whole batch, before anything runs: a
+	// call whose writer cannot prove what it replaces never starts, and a read
+	// from this same batch can never satisfy it.
+	evidenceBlocked := a.preflightEvidenceBatch(ctx, calls)
+	results, outcomes, durations, startedAt := slots.results, slots.outcomes, slots.durations, slots.startedAt
 	ranParallel := make([]bool, len(calls))
 	batchStart := time.Now()
 	// Snapshot the receipt count before the batch runs: if a loop guard fires
@@ -119,48 +130,62 @@ func (a *Agent) executeBatch(ctx context.Context, turn *turnRuntime, calls []pro
 	// (even a failed one — disk may have mutated), refresh dependent writer
 	// previews. The first writer stays on the single-preview fast path.
 	earlierWriterRan := false
-	surfaceWriters := make([]bool, len(calls))
+	surfaceWriters := slots.surfaceWriters
 	var batchErr error
 	var batchErrOnce sync.Once
-	run := func(i int) {
-		t, _, ambiguous := a.svc.tools.ResolveCall(calls[i].Name)
+	run := func(s *batchSlots, i int) {
+		if pre, blocked := evidenceBlocked[i]; blocked {
+			s.outcomes[i] = pre
+			s.results[i] = pre.output
+			return
+		}
+		t, _, ambiguous := a.svc.tools.ResolveCall(s.calls[i].Name)
 		known := t != nil && len(ambiguous) == 0
 		writer := known && !t.ReadOnly()
-		surfaceWriters[i] = writer
+		s.surfaceWriters[i] = writer
 		if earlierWriterRan && writer {
-			if refreshed, changed := refreshCurrentFileDiff(ctx, t, calls[i]); changed {
-				calls[i] = refreshed
+			if refreshed, changed := refreshCurrentFileDiff(ctx, t, s.calls[i]); changed {
+				s.calls[i] = refreshed
 				a.sess.conversation.UpdateToolCallPreview(refreshed)
 				if err := a.emitFullToolDispatch(ctx, refreshed, true); err != nil {
 					wrapped := fmt.Errorf("persist refreshed tool dispatch %s: %w", refreshed.ID, err)
 					batchErrOnce.Do(func() { batchErr = wrapped })
-					outcomes[i] = toolOutcome{output: "cancelled: tool dispatch was not durable", errMsg: wrapped.Error()}
-					results[i] = outcomes[i].output
+					s.outcomes[i] = toolOutcome{output: "cancelled: tool dispatch was not durable", errMsg: wrapped.Error()}
+					s.results[i] = s.outcomes[i].output
 					return
 				}
 			}
 		}
 		start := time.Now()
-		startedAt[i] = start.UnixMilli()
-		outcomes[i] = a.executeOne(ctx, turn, calls[i])
-		recordWorkspaceMutation(a.svc.sink, outcomes[i].workspaceMutation)
-		if outcomes[i].executed {
-			surfaceWriters[i] = outcomes[i].workspaceMutation != nil
+		s.startedAt[i] = start.UnixMilli()
+		s.outcomes[i] = a.executeOne(ctx, turn, s.calls[i])
+		recordWorkspaceMutation(a.svc.sink, s.outcomes[i].workspaceMutation)
+		if s.outcomes[i].executed {
+			s.surfaceWriters[i] = s.outcomes[i].workspaceMutation != nil
 		}
-		if outcomes[i].resolved {
-			readOnly := outcomes[i].resolvedReadOnly
-			calls[i].ResolvedName = outcomes[i].resolvedName
-			calls[i].CapabilityID = outcomes[i].capabilityID
-			calls[i].ResolvedReadOnly = &readOnly
-			surfaceWriters[i] = !readOnly
+		if s.outcomes[i].resolved {
+			readOnly := s.outcomes[i].resolvedReadOnly
+			s.calls[i].ResolvedName = s.outcomes[i].resolvedName
+			s.calls[i].CapabilityID = s.outcomes[i].capabilityID
+			s.calls[i].ResolvedReadOnly = &readOnly
+			s.surfaceWriters[i] = !readOnly
 		}
-		durations[i] = time.Since(start).Milliseconds()
-		results[i] = outcomes[i].output
+		s.durations[i] = time.Since(start).Milliseconds()
+		s.results[i] = s.outcomes[i].output
 	}
+	committed := make([]bool, len(calls))
 	finalize := func(i int) {
-		if calls[i].ResolvedReadOnly != nil {
-			a.sess.conversation.UpdateToolCallResolution(calls[i])
-			a.emitResolvedToolDispatch(calls[i])
+		if committed[i] {
+			return
+		}
+		committed[i] = true
+		a.finalizeIncompleteReadOutcome(ctx, outcomes[i].incompleteRead, &outcomes[i])
+		a.finalizeReadDelivery(ctx, calls[i], &outcomes[i])
+		results[i] = outcomes[i].output
+		a.commitBatchCallResolution(calls[i])
+		a.storeBatchToolResult(ctx, calls[i], outcomes[i])
+		if err := a.emitBatchToolResult(calls[i], outcomes[i], durations[i], startedAt[i], ranParallel[i], batchStart); err != nil {
+			batchErrOnce.Do(func() { batchErr = fmt.Errorf("persist tool result %s: %w", calls[i].ID, err) })
 		}
 		if surfaceWriters[i] || (outcomes[i].resolved && !outcomes[i].resolvedReadOnly) {
 			earlierWriterRan = true
@@ -211,59 +236,12 @@ func (a *Agent) executeBatch(ctx context.Context, turn *turnRuntime, calls []pro
 	mutationBatchStop := false
 	a.mutationDependencyBarrier.Store(nil)
 	markDependencySkipped := func(start int, cause *mutationBarrierCause) {
-		if cause != nil {
-			a.mutationDependencyBarrier.CompareAndSwap(nil, cause)
-		}
-		cause = a.mutationDependencyBarrier.Load()
-		for j := start; j < len(calls); j++ {
-			if results[j] != "" {
-				continue
-			}
-			// Pre-classify when statically certain. Proxies and ambiguous
-			// targets fall through to run() so executeOne can resolve the real
-			// target and re-apply the barrier before Commit/Execute.
-			if !batchCallStaticallySkippable(a, calls[j]) {
-				continue
-			}
-			isVerification := calls[j].Name == "bash" && evidence.IsVerificationCommand(bashCommandFromArgs(json.RawMessage(calls[j].Arguments)))
-			msg := cause.message()
-			var ex *tool.ShellExecution
-			if calls[j].Name == "bash" {
-				ex = &tool.ShellExecution{
-					Kind:         "shell",
-					State:        tool.ShellStateNotRun,
-					FailurePhase: tool.ShellPhaseDependency,
-					MutationRisk: tool.ShellMutationNotStarted,
-					Verification: tool.ShellVerificationNotVerification,
-				}
-				if isVerification {
-					ex.Verification = tool.ShellVerificationNotRun
-				}
-				if t, _, amb := a.svc.tools.ResolveCall(calls[j].Name); t != nil && len(amb) == 0 {
-					if bt, ok := t.(tool.DetailedExecutor); ok {
-						if desc := bt.ExecutionDescriptor(json.RawMessage(calls[j].Arguments)); desc != nil {
-							ex.Shell = desc.Shell
-							ex.ShellVersion = desc.ShellVersion
-							ex.Platform = desc.Platform
-							ex.SupportsAndAnd = desc.SupportsAndAnd
-						}
-					}
-				}
-			}
-			results[j] = msg
-			outcomes[j] = toolOutcome{
-				output:    msg,
-				blocked:   true,
-				errMsg:    firstLine(msg),
-				execution: ex,
-			}
-			durations[j] = 0
-		}
+		a.markDependencySkipped(calls, outcomes, results, durations, start, cause)
 		mutationBatchStop = true
 	}
 
 	for _, batch := range a.toolCallBatches(calls) {
-		if ctx.Err() != nil {
+		if ctx.Err() != nil || batchErr != nil {
 			markCancelled(batch.start)
 			break
 		}
@@ -273,8 +251,18 @@ func (a *Agent) executeBatch(ctx context.Context, turn *turnRuntime, calls []pro
 		}
 		if batch.parallel && batch.end-batch.start > 1 {
 			// Parallel segments are read-only by construction; no mutation barrier.
-			ranUntil := runParallel(ctx, batch.start, batch.end, run)
+			private := slots.fork()
+			ranUntil, finished := runParallel(ctx, batch.start, batch.end, func(i int) {
+				a.stragglers.enter()
+				defer a.stragglers.leave()
+				run(private, i)
+			})
 			for i := batch.start; i < ranUntil; i++ {
+				if finished[i] {
+					slots.adopt(private, i)
+				} else {
+					slots.abandon(i)
+				}
 				ranParallel[i] = true
 				finalize(i)
 			}
@@ -302,7 +290,7 @@ func (a *Agent) executeBatch(ctx context.Context, turn *turnRuntime, calls []pro
 			// Before executing the next tool, check if context was cancelled.
 			// This prevents starting new tools when a previous tool's execution
 			// triggered cancellation.
-			if ctx.Err() != nil {
+			if ctx.Err() != nil || batchErr != nil {
 				markCancelled(i)
 				break
 			}
@@ -314,12 +302,14 @@ func (a *Agent) executeBatch(ctx context.Context, turn *turnRuntime, calls []pro
 				// Fill dependency skips for remaining mutating/verify calls, then
 				// allow any residual read-only diagnosis to run individually.
 				if results[i] != "" {
+					finalize(i)
 					continue
 				}
 				if batchCallStaticallySkippable(a, calls[i]) {
 					markDependencySkipped(i, nil)
 					// markDependencySkipped fills this index; move on.
 					if results[i] != "" {
+						finalize(i)
 						continue
 					}
 				}
@@ -329,7 +319,7 @@ func (a *Agent) executeBatch(ctx context.Context, turn *turnRuntime, calls []pro
 				finalize(i)
 				continue
 			}
-			run(i)
+			run(slots, i)
 			finalize(i)
 			if outcomes[i].recoveryStopTurn {
 				recoveryBatchStop = true
@@ -355,8 +345,11 @@ func (a *Agent) executeBatch(ctx context.Context, turn *turnRuntime, calls []pro
 		}
 	}
 
-	a.emitBatchToolResults(calls, outcomes, durations, startedAt, ranParallel, batchStart)
+	for i := range calls {
+		finalize(i)
+	}
 	a.applyBatchGuards(ctx, cancelled, calls, outcomes, results, receiptMark)
+	a.storeBatchGuardResults(calls, results)
 	images := make([][]string, len(calls))
 	executions := make([]*tool.ShellExecution, len(calls))
 	for i := range outcomes {
@@ -378,6 +371,14 @@ func (a *Agent) executeBatch(ctx context.Context, turn *turnRuntime, calls []pro
 		recoveryStopTurn:   recoveryBatchStop,
 		recoveryStopReason: recoveryStopReason,
 	}
+}
+
+func (a *Agent) commitBatchCallResolution(call provider.ToolCall) {
+	if call.ResolvedReadOnly == nil {
+		return
+	}
+	a.sess.conversation.UpdateToolCallResolution(call)
+	a.emitResolvedToolDispatch(call)
 }
 
 // batchCallMutationFailureCause returns a sanitized effect description when a
@@ -515,10 +516,19 @@ func parallelisableCall(r *tool.Registry, call provider.ToolCall) bool {
 	return target.ReadOnly()
 }
 
-func runParallel(ctx context.Context, start, end int, run func(int)) int {
+// parallelStragglerGrace bounds how long a cancelled parallel segment waits for
+// tools that have not returned. Tool owners kill their own processes within
+// their WaitDelay; past this the batch reports the effect as unknown instead
+// of keeping the whole turn wedged behind one call that ignores its context.
+var parallelStragglerGrace = 15 * time.Second
+
+// runParallel returns the launched prefix and which of those calls finished.
+// An unfinished index belongs to a straggler that still owns its private slot.
+func runParallel(ctx context.Context, start, end int, run func(int)) (int, []bool) {
 	const maxParallel = 8
 	sem := make(chan struct{}, maxParallel)
 	var wg sync.WaitGroup
+	completed := make(chan int, end-start)
 	ranUntil := start
 launch:
 	for i := start; i < end; i++ {
@@ -541,8 +551,65 @@ launch:
 			defer wg.Done()
 			defer func() { <-sem }()
 			run(i)
+			completed <- i
 		}()
 	}
-	wg.Wait()
-	return ranUntil
+	allDone := make(chan struct{})
+	go func() {
+		wg.Wait()
+		close(allDone)
+	}()
+	select {
+	case <-allDone:
+	case <-ctx.Done():
+		select {
+		case <-allDone:
+		case <-time.After(parallelStragglerGrace):
+		}
+	}
+	finished := make([]bool, end)
+	for {
+		select {
+		case i := <-completed:
+			finished[i] = true
+		default:
+			return ranUntil, finished
+		}
+	}
+}
+
+// batchSlots is one batch's per-call execution state. Parallel segments run
+// against a fork so a tool that outlives cancellation writes only into slots
+// the batch has already stopped reading.
+type batchSlots struct {
+	calls          []provider.ToolCall
+	outcomes       []toolOutcome
+	results        []string
+	durations      []int64
+	startedAt      []int64
+	surfaceWriters []bool
+}
+
+func newBatchSlots(calls []provider.ToolCall) *batchSlots {
+	n := len(calls)
+	return &batchSlots{
+		calls: calls, outcomes: make([]toolOutcome, n), results: make([]string, n),
+		durations: make([]int64, n), startedAt: make([]int64, n), surfaceWriters: make([]bool, n),
+	}
+}
+
+func (s *batchSlots) fork() *batchSlots {
+	return newBatchSlots(append([]provider.ToolCall(nil), s.calls...))
+}
+
+func (s *batchSlots) adopt(from *batchSlots, i int) {
+	s.calls[i], s.outcomes[i], s.results[i] = from.calls[i], from.outcomes[i], from.results[i]
+	s.durations[i], s.startedAt[i], s.surfaceWriters[i] = from.durations[i], from.startedAt[i], from.surfaceWriters[i]
+}
+
+const abandonedToolOutput = "interrupted: the tool did not stop after cancellation; its effect is unknown"
+
+func (s *batchSlots) abandon(i int) {
+	s.outcomes[i] = toolOutcome{output: abandonedToolOutput, errMsg: abandonedToolOutput, executed: true}
+	s.results[i] = abandonedToolOutput
 }

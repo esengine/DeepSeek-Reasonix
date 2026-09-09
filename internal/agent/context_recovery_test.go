@@ -146,6 +146,43 @@ func TestContextLimitRecoveryChangesOnlyOutputField(t *testing.T) {
 	}
 }
 
+// An overflow without token numbers (Zhipu GLM 1261) must not be answered
+// with the same prompt under a clipped output cap: the estimate that admitted
+// the request is exactly what the provider rejected, so recovery goes straight
+// to overflow compaction and retries the rebuilt request.
+func TestUnnumberedContextLimitSkipsIdenticalRetry(t *testing.T) {
+	prov := &scriptedBudgetProvider{
+		policy: provider.ContextBudgetPolicy{
+			WindowMode: provider.ContextWindowShared, AutoOutputTokens: 384_000,
+			MaxOutputTokens: 384_000, LimitMode: provider.OutputLimitOmitWhenSafe,
+		},
+		errs: []error{&provider.ContextLimitError{APIError: &provider.APIError{
+			Provider: "glm", Status: 400, Body: `{"error":{"code":"1261","message":"Prompt exceeds max length"}}`,
+		}}},
+	}
+	a := newBudgetAgent(t, prov)
+	a.sess.conversation.Replace(foldableSessionOverForce(6).Messages)
+
+	got := a.streamWithSamplingRecovery(context.Background(), 1)
+	if got.err != nil {
+		t.Fatalf("recovery failed: %v", got.err)
+	}
+	prov.mu.Lock()
+	defer prov.mu.Unlock()
+	if len(prov.reqs) != 3 {
+		t.Fatalf("requests = %d, want rejected sampling, one summary, and the rebuilt sampling", len(prov.reqs))
+	}
+	if !requestContains(prov.reqs[1], "Compact the preceding conversation prefix") {
+		t.Fatal("second request must be the overflow compaction summary, not a retry of the rejected prompt")
+	}
+	if sameProviderRequestExceptMaxTokens(prov.reqs[0], prov.reqs[2]) {
+		t.Fatal("the retried request must be rebuilt on the compacted view, not the rejected prompt")
+	}
+	if a.lastAdmission().LastRecovery != contextRecoveryCompacted {
+		t.Fatalf("last recovery = %s, want compacted", a.lastAdmission().LastRecovery)
+	}
+}
+
 func TestContextLimitRecoveryPublishesUnknownGatewayBudget(t *testing.T) {
 	limit := &provider.ContextLimitError{
 		APIError:         &provider.APIError{Provider: "compatible", Status: 400, Body: "context"},

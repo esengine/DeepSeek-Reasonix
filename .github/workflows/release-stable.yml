@@ -192,6 +192,7 @@ jobs:
       approved_sha: ${{ needs.authorize.outputs.sha }}
       orchestrated: true
       signing_preflight_verified: true
+      preflight_artifact_prefix: ${{ needs.signpath-preflight.outputs.artifact_prefix }}
     secrets: inherit
 
   postflight:

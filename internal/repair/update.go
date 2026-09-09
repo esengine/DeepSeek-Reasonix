@@ -1100,7 +1100,7 @@ func readInstalledFileUpdateState(tx *UpdateTransaction) (*installedFileUpdateSt
 	if !repairNodeInsideResolvedRoot(filepath.Join(config.MemoryUserDir(), "repair"), path) {
 		return nil, fmt.Errorf("installed release-unit state resolves outside the repair directory")
 	}
-	b, err := os.ReadFile(path)
+	b, err := readRepairRegularFile(path)
 	if err != nil {
 		return nil, err
 	}
@@ -1881,7 +1881,7 @@ func quarantinePendingUpdate(reason string) (string, error) {
 }
 
 func pendingUpdateMarkerDigest(path string) (string, error) {
-	body, err := os.ReadFile(path)
+	body, err := readRepairRegularFile(path)
 	if err != nil {
 		return "", err
 	}
@@ -1956,7 +1956,7 @@ func readPendingUpdateUnchecked() (*UpdateTransaction, error) {
 	if path == "" {
 		return nil, os.ErrNotExist
 	}
-	b, err := os.ReadFile(path)
+	b, err := readRepairRegularFile(path)
 	if err != nil {
 		return nil, err
 	}

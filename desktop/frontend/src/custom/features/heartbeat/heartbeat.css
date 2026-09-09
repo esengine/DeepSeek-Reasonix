@@ -26,6 +26,7 @@
   overflow: hidden;
   background: var(--bg);
   position: relative;
+  container: heartbeat-page / inline-size;
 }
 
 /* ── split layout ─────────────────────────────────────────────── */
@@ -290,6 +291,21 @@
   flex-direction: column;
   overflow: hidden;
   background: var(--heartbeat-split-bg);
+}
+
+/* Use the actual task-page width, not the app viewport. At narrow widths the
+   existing editor fills the page without remounting or changing split prefs. */
+@container heartbeat-page (max-width: 559px) {
+  .heartbeat-split--detail-open .heartbeat-split__left,
+  .heartbeat-split--detail-open .heartbeat-split__divider {
+    display: none;
+  }
+
+  .heartbeat-split--detail-open .heartbeat-split__right {
+    flex: 1 1 100%;
+    width: 100%;
+    min-width: 0;
+  }
 }
 
 .heartbeat-split__right .heartbeat-editor {
@@ -1877,3 +1893,30 @@
 .heartbeat-task-menu__item--danger {
   color: var(--danger);
 }
+
+/* Management surfaces retain their own list/detail layout at every theme. */
+.management-screen .heartbeat-page { flex: 1; min-height: 0; }
+.management-screen .heartbeat-split { background: var(--bg); }
+.management-screen .heartbeat-split__left { min-width: 280px; }
+.management-screen .heartbeat-page[data-detail="true"] .heartbeat-split__left { max-width: calc(100% - 425px); }
+.management-screen .heartbeat-split__right { min-width: 420px; display: flex; flex-direction: column; min-height: 0; }
+.management-screen .heartbeat-toolbar { flex-wrap: wrap; gap: 8px; }
+.management-screen .heartbeat-editor { flex: 1; min-height: 0; }
+.automation-fields { border: 0; padding: 0; margin: 0; min-width: 0; display: flex; flex-direction: column; gap: 20px; }
+.automation-fields[hidden], .heartbeat-run-history[hidden] { display: none; }
+.heartbeat-detail-tabs { display: flex; gap: 8px; padding: 8px 20px; border-bottom: 1px solid var(--border); }
+.heartbeat-detail-tabs button { border: 0; padding: 8px 12px; background: transparent; color: var(--fg-dim); border-radius: 8px; cursor: pointer; }
+.heartbeat-detail-tabs button[aria-selected="true"] { background: var(--bg-soft); color: var(--fg); }
+.automation-draft-list { display: flex; flex-direction: column; gap: 4px; padding: 8px 16px; }
+.automation-draft-list h3 { font-size: 12px; color: var(--fg-dim); }
+.automation-draft-list button { justify-content: space-between; white-space: normal; text-align: left; }
+.automation-dirty { color: var(--fg-dim); font-weight: normal; }
+@media (max-width: 959px) {
+ .management-screen .heartbeat-page[data-detail="true"] .heartbeat-split__left, .management-screen .heartbeat-split__divider { display: none; }
+ .management-screen .heartbeat-split__right { min-width: 0; width: 100%; flex: 1; }
+ .management-screen .heartbeat-split__left { min-width: 0; width: 100%; }
+}
+.automation-task-select { background: transparent; border: 0; color: inherit; padding: 0; text-align: left; font: inherit; cursor: pointer; }
+.automation-task-select:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+
+.automation-save-status { margin-right: auto; color: var(--fg-dim); font-size: 12px; }

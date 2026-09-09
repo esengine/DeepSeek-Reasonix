@@ -61,6 +61,10 @@ func (a *Agent) InvalidateProjection() {
 	if a == nil {
 		return
 	}
+	// A strong reasoning-replay overlay is indexed against the old canonical
+	// history. Clear it together with the compaction projection so rewind,
+	// branch, and model/system lineage changes cannot reuse a stale anchor.
+	a.sess.clearReasoningReplayStrongProjection()
 	a.sess.compactionMu.Lock()
 	path := a.sess.path
 	a.sess.compactionState = CompactionState{}
@@ -84,6 +88,10 @@ func (a *Agent) InvalidateProjectionIfStale() {
 	if a == nil {
 		return
 	}
+	// This helper is called after a history rewrite even when the existing
+	// compaction fold remains valid (for example a tail-only rewind). The
+	// reasoning-replay overlay still belongs to the pre-rewrite shape.
+	a.sess.clearReasoningReplayStrongProjection()
 	a.sess.compactionMu.Lock()
 	st := a.sess.compactionState
 	if len(st.Projection.Messages) > 0 && a.sess.conversation != nil {

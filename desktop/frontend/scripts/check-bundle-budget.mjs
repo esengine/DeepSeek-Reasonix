@@ -160,10 +160,54 @@ console.log("\nbundle budgets");
 // then absorbs a second post-quiet extent without an unbounded write loop.
 // The combined path measures 456.316 KiB; retain 0.084 KiB with the smallest
 // one-decimal ratchet.
-// The right-sidebar branch's dock surface (tab container, launcher, context
-// menus) plus the rebase-merged App.tsx additions sit on top of this baseline,
-// so keep the ratchet at the larger upstream value.
-const initialJSBudgetKiB = process.env.REASONIX_CHANNEL === "test" ? 458.0 : 458.0;
+// The generation-bound history-prepend lease adds stable-key reader anchoring,
+// full mounted coverage, and one final arbiter-owned correction. The measured
+// path is 457.406 KiB after extracting the lease owner to satisfy repolint.
+// Latest-base transcript settle ownership measures 457.523 KiB with this UX.
+// Isolated conversation forks and their extracted browser mock adapter bring
+// the combined tree to 458.158 KiB; completion uncertainty adds a terminal
+// outcome and notice without exposing evaluator audits to the frontend,
+// measuring 458.287 KiB gzip.
+// Transactional Ask resolution and authoritative rejected-submit recovery add
+// 0.3 KiB gzip to the initial controller path. Retain the exact turn fence,
+// bounded ListTabs retry, and stale-prompt guard.
+// Session-catalog repair presentation stays in the lazy project-tree chunk;
+// compact shared helpers keep the combined initial path within the same gate.
+// Merge-Back adds identity-bound inspection, navigation, and retained-recovery
+// orchestration on top. The merged stable build measures 461.338 KiB and the
+// test channel measures 461.323 KiB. Deferring selection ownership until a
+// real range exists (#9703/#9711) and adding the session takeover banners
+// move the combined path to 462.2 KiB. Local spectator reclaim adds the
+// desktop-vs-remote command branch. Sticky Context's session-scoped file chips
+// bring the merged stable path to 462.587 KiB. Windows' embedded build metadata
+// lands just above the rounded 462.6 KiB boundary; retain one cross-platform
+// decimal step without widening any chunk or raw gate.
+// Reading the applied item-list transform (instead of the remembered offset)
+// keeps the reader/anchor visual guards from compounding under reduced-motion
+// WebView2; the merged path measures 462.827 KiB. Retain one decimal step.
+// Generation-bound native-thumb transactions and the rebased custom-scrollbar
+// drag add 0.3 KiB gzip; the merged path measures 463.102 KiB.
+// Absorbing content-preserving block-window prepends into the active reader
+// transaction adds 0.2 KiB gzip on top; the merged path measures 463.292 KiB,
+// 8 bytes under the next decimal. Retain one cross-platform decimal step.
+// The subagent outcome envelope, partial-state card, and history hydration add
+// 0.5 KiB gzip on the initial path. The model-capability resolver and its
+// read-only provider badges add a measured 0.2 KiB including gzip/toolchain
+// rounding. The integrated management shell, image capability controls, and
+// upstream updater refresh measure 465.4 KiB gzip (base: 464.7 KiB).
+// Keep the next decimal ceiling and leave feature editors lazy.
+// Durable protocol recovery controls and search-source status add 1.2 KiB
+// over the same-environment main-v2 build (465.4 -> 466.6 KiB gzip).
+// Keep one decimal of cross-platform headroom for this measured shell change.
+// Integrating main-v2 rich-link menus measures 466.905 KiB combined.
+// The AskCard session-draft wiring adds a bounded 30-byte gzip drift on the
+// initial route. The session-runtime ordering fence adds 56 bytes and
+// cross-platform zlib rounding reaches the same startup path; retain the
+// explicit budget rather than failing on a rounded 467.0 KiB display value.
+// The latest main-v2 session-runtime fence and exact prompt protocol measure
+// 468.2 KiB here; retain a 0.1 KiB ceiling for platform zlib rounding.
+// Mainline provider/settings integration measures 469.230 KiB gzip.
+const initialJSBudgetKiB = 469.3;
 assertBudget("initial JavaScript gzip", initialJSGzip, initialJSBudgetKiB * 1024);
 assertBudget("largest initial JavaScript chunk gzip", largestInitialJS, 280 * 1024);
 // Render-blocking CSS is intentionally absent: styles.css loads deferred via
@@ -182,9 +226,13 @@ if (initialCSS.length > 0) {
 // the retained-transcript navigation allowance; keep the ratchet explicit.
 // The navigation mask's stable composer footprint and remote tab/surface
 // states bring the merged shell to roughly 115.7 KiB gzip.
-// The dock close-button reveal rule and shared 3% hover/selected fill push
-// the shell to 116.0 KiB; keep 0.2 KiB of headroom.
-assertBudget("deferred app-shell CSS gzip", appShellCSSGzip, 117.5 * 1024);
+// The one-row model configuration list, responsive stacking, Automation's
+// shared title-safe shell, and the shared harness decision surface measure
+// 116.9 KiB gzip while reusing existing layout primitives. Retain a bounded
+// 0.1 KiB headroom ratchet.
+// Workbench welcome and recovery styles measure 122869 B gzip on main-v2.
+// Turn result styles add 388 B after removing obsolete metrics (123257 B).
+assertBudget("deferred app-shell CSS gzip", appShellCSSGzip, 120.4 * 1024);
 if (localeChunks.length !== 2) {
   throw new Error(`expected 2 on-demand Chinese locale chunks, found ${localeChunks.length}`);
 }
@@ -218,9 +266,56 @@ for (const path of localeChunks) {
   // retain roughly 0.13 KiB of platform headroom for each.
   // Stream-failure diagnostics add five strings per dialect. Together with the
   // reachable-tail recovery copy, the merged chunks measure 58.923 KiB zh and
-  // 59.710 KiB zh-TW. Retain the complete copy with the smallest one-decimal
-  // ratchet for each dialect.
-  const budget = name.startsWith("zh-TW-") ? 59.8 * 1024 : 59.0 * 1024;
+  // 59.710 KiB zh-TW. The isolated-fork guidance brings the measured chunks
+  // to 59.1 KiB zh and 59.9 KiB zh-TW; retain a narrow one-decimal ratchet.
+  // Merge-Back lifecycle and recovery guidance measure 59.819 KiB zh and
+  // 60.612 KiB zh-TW; retain only the next one-decimal ceiling for each.
+  // The retained-recovery receipt and copy action move zh to 59.911 KiB;
+  // session-catalog recovery guidance on the merged base moves zh-TW to
+  // 60.757 KiB; retain only its exact one-decimal ceiling.
+  // Session takeover adds ~20 locale keys per dialect (banners, dialog,
+  // reclaim), while Sticky Context adds file-state and limit diagnostics. The
+  // merged stable chunks measure 60.395 KiB zh and 61.232 KiB zh-TW; retain
+  // only the next one-decimal ceiling for each dialect.
+  // The outcome card adds one short localized status label per dialect. CI's
+  // Windows zlib measured zh at 60.4 KiB exactly; capability-status copy adds
+  // a small 0.1 KiB ratchet, so retain the next decimal ceiling rather than
+  // dropping the unknown-state explanation.
+  // Image input mode, provenance and unknown-state guidance measure 60.724 KiB
+  // zh and 61.570 KiB zh-TW. Keep the next decimal ceiling per locale.
+  // Protocol recovery and source-availability copy measure 60.927 KiB zh
+  // and 61.789 KiB zh-TW (base: 60.8 / 61.6 rounded).
+  // Rich-link action copy on the current base brings these to
+  // 61.027/61.881 KiB; retain bounded cross-platform headroom.
+  // Recovery retry copy reaches the rounded 61.1 KiB boundary on Node/zlib
+  // toolchains; keep the next one-decimal ceiling for cross-platform CI.
+  // The #9889/#9890 series adds recovery-wait, dialog-failure, and stall copy:
+  // zh-TW measures 63492 B (62.004 KiB) with the four PRs merged together.
+  // Integrated settings and ownership copy measures 61.415 / 62.212 KiB.
+  // Session-log head versions (head kinds, current/covered wording, and the
+  // three head notices) measure 61.7 / 62.4 KiB; keep the next one-decimal
+  // ceiling for cross-platform CI.
+  // Search assignment copy adds 239 / 231 B over main-v2 (63147 / 63920 B).
+  // Measured result: 63386 / 64151 B; retain bounded cross-platform headroom.
+  // Saved/pending/apply-failure guidance adds 233 / 245 B: 63619 / 64396 B
+  // with gzip level 9. Keep the next decimal ceiling for these four keys.
+  // Session recovery guidance adds 173 / 156 B over main-v2, measuring
+  // 62.173 / 62.887 KiB. Keep only the next one-decimal ceiling.
+  // Combined recovery and model-application copy measures 63791 / 64557 B.
+  // Turn result copy adds 554 / 566 B to the latest-base chunks, measuring
+  // 64219 / 64964 B with recovery guidance included. Round to the next tenth.
+  // Combined turn-result and model-application copy measures 64342 / 65119 B.
+  // Runtime/receipt confirmation copy adds 89 / 99 B to the integrated
+  // turn-result base (64219 / 64964 B). Measured: 64308 / 65063 B.
+  // Read-pause copy merges on top of that base: the combined chunks measure
+  // 64606 / 65349 B, so both dialect ceilings ratchet to the next tenth.
+  // Model-application copy on the read-pause base measures 64734 / 65499 B,
+  // adding 128 / 150 B. Retain only the next one-decimal ceiling.
+  // The session-change notice adds 65 / 50 B over fa018e410 (64734 /
+  // 65499 B), measuring 64799 / 65549 B. Only zh-TW needs one tenth.
+  // The pending-effort next-turn hint adds 16 / 23 B, measuring 64815 /
+  // 65572 B; zh now needs the next one-decimal ceiling for CI headroom.
+  const budget = name.startsWith("zh-TW-") ? 64.1 * 1024 : 63.4 * 1024;
   assertBudget(`${name} gzip`, gzipBytes(path), budget);
 }
 
@@ -284,6 +379,82 @@ const rawInitialBytes = [...initialJS, ...initialCSS, ...appShellCSS]
 // The stranded-tail recovery transition plus the WebView2 reachable-tail clamp
 // bring the measured initial payload to 2447.953 KiB. Retain 0.047 KiB with
 // the smallest one-decimal ratchet.
-const rawInitialBudgetKiB = process.env.REASONIX_CHANNEL === "test" ? 2_465.0 : 2_465.0;
+// The extracted history-prepend owner adds 3.953 KiB of bounded transaction
+// state and stable-key coverage checks. Together with the compact
+// session-version host, they measure 2452.7 KiB; the recovery coordinator and
+// dialog remain lazy. Completion uncertainty adds a distinct terminal notice
+// and localized startup copy without collapsing into recovery-paused UX.
+// 2454.719 KiB on the release toolchain. Completion uncertainty brings the
+// final merged payload to 2455.154 KiB.
+// Ask turn fencing, rejection reconciliation, and the localized submit-failure
+// notice measure 2456.044 KiB raw; retain 0.056 KiB of one-decimal headroom.
+// Merge-Back's startup ownership and failure-atomic navigation fence add the
+// remaining bounded payload. The retained recovery receipt makes the stable
+// path 2465.105 KiB raw; the merged test channel measures 2464.979 KiB.
+// Session takeover banners and #9703/#9711's provisional-selection handoff
+// combine with Sticky Context's pinned-file state at 2469.125 KiB raw on the
+// merged stable path. Retain only the next one-decimal ceiling.
+// The passive reader-anchor lease for delayed WebView2 range commits measures
+// 2469.347 KiB raw (+0.222 KiB, +0.009%). Retain only the next one-decimal
+// ceiling; gzip and largest-chunk budgets remain unchanged.
+// Reading the applied item-list transform for the reader/anchor visual guards
+// adds 0.5 KiB raw on top; the merged path measures 2469.815 KiB.
+// The scrollbar generation fence and drag rebase add 1.1 KiB raw; the merged
+// path measures 2470.932 KiB.
+// The reader-transaction offset absorption adds 0.8 KiB raw on top; the merged
+// path measures 2471.741 KiB. Controller-owned management dispositions and
+// optimistic management settlement add 0.6 KiB raw; retain the smallest
+// one-decimal ceiling with bounded headroom.
+// The outcome card and history hydration add 2.3 KiB raw on the initial path
+// (2474.0 KiB measured in CI). Keep this narrowly attributable ratchet rather
+// than removing persisted-result visibility or changing chunk ownership.
+// On the current main-v2 base, the combined measured path is 2474.6 KiB;
+// the model-capability helper and localized status copy add 0.9 KiB; retain
+// the smallest bounded cross-platform ceiling.
+// Retain the upstream updater ceiling and independent chunk gates.
+// Recovery controls add 3.6 KiB raw over the measured 2480.9 KiB base;
+// current payload is 2484.509 KiB. Retain only bounded toolchain headroom.
+// With the current-base rich-link menus: 2485.715 KiB raw.
+// The shared harness decision surface adds a bounded startup stylesheet
+// payload. The current base plus exact prompt identity and stale-card recovery
+// measure 2496.4 KiB locally; retain the smallest bounded ceiling.
+// The context truncation-rescue notice and its three locale strings measure
+// 2496.6 KiB; retain the smallest bounded ceiling.
+// Deferred presentation measured 2381.4 KiB before first-materialization
+// preloading. Mainline Stop brings the payload to 2381.8 KiB;
+// Mainline recovery UI brings it to 2384.5 KiB, and tool elapsed/liveness
+// UI to 2384.9 KiB. Retain 0.2 KiB headroom.
+// Mainline provider/settings integration measures 2398.2 KiB in the
+// extracted shell. Retain the same bounded 0.2 KiB build headroom.
+// The head-version dialog copy and its covered-version cleanup control
+// measure 2399.2 KiB; retain the same bounded 0.2 KiB build headroom.
+// Search-assignment bridge and metadata add 1.0 KiB over the measured
+// main-v2 baseline (2399.3 KiB); result 2400.3 KiB plus 0.2 KiB headroom.
+// Workbench welcome plus toolbar-refresh integration measures 2401.108 KiB
+// against the 2398.0 KiB base; retain only the next one-decimal ceiling.
+// Shared availability, visible recovery and retry controls measure 2407.215 KiB
+// (+6.107 KiB, 0.25% over the prior welcome head). Retain the next tenth.
+// Integrated model settings and bounded receipt mock measure 2468523 B
+// (2410.667 KiB); retain 0.2 KiB headroom on the combined startup payload.
+// Turn results add 12585 B (0.51%) over main-v2's 2464923 B: bounded receipt
+// projection, status presentation and view bindings. Result: 2477508 B.
+// Combined turn-result and model-settings startup payload is 2481108 B
+// (2422.957 KiB), retaining the same bounded 0.2 KiB build headroom.
+// The integrated turn-result base measures 2477492 B. Runtime state and
+// session-bound receipt confirmation and its mock session contract add
+// 5944 B (0.240%): 2483436 B total.
+// Durable session isolation and missed-completion reconciliation add 1232 B
+// (0.050% over that head), measuring 2484668 B total.
+// The read-status line, read-pause card and their host wiring merge on top and
+// measure 2488853 B. Keep the next tenth; gzip, CSS, and chunk limits unchanged.
+// Combined model-settings and read-evidence integration measures 2492541 B,
+// adding 3688 B (0.148%) over the base. Retain the next one-decimal ceiling.
+// Session-scoped effort ordering, content guards, and mock parity add 1733 B
+// (0.070%) over the same-toolchain fa018e410 build (2492623 B).
+// Measured total: 2494356 B; retain the next one-decimal ceiling.
+// The pending-effort next-turn hint adds 144 B (2494356 -> 2494500 B): one
+// English locale string plus its trigger-title plumbing. Retain the next
+// one-decimal ceiling.
+const rawInitialBudgetKiB = 2_436.1;
 assertBudget("initial raw JavaScript and CSS", rawInitialBytes, rawInitialBudgetKiB * 1024);
 assertBudget("largest initial JavaScript chunk raw", largestInitialJSRaw, 1_000 * 1024);

@@ -92,7 +92,7 @@ func TestMigrateBlankRemoteSessionTitleOverride(t *testing.T) {
 	}
 }
 
-func TestRemoteProxyModelCatalogCannotCrossProviderProtocols(t *testing.T) {
+func TestRemoteProxyModelCatalogOffersProtocolsForSnapshotSwitch(t *testing.T) {
 	isolateDesktopUserDirs(t)
 	setDesktopTestCredential(t, "OPENAI_TEST_KEY", "sk-openai")
 	setDesktopTestCredential(t, "ANTHROPIC_TEST_KEY", "sk-anthropic")
@@ -112,11 +112,11 @@ func TestRemoteProxyModelCatalogCannotCrossProviderProtocols(t *testing.T) {
 		"remote": {id: "remote", ref: RemoteTabRef{HostID: "box", Workspace: "~/app"}, state: "ready", model: "chat/gpt-test"},
 	}}
 	models := a.ModelsForTab("remote")
-	if len(models) != 2 || slices.ContainsFunc(models, func(model ModelInfo) bool { return model.Provider == "claude" }) {
-		t.Fatalf("local-proxy catalog crossed protocols: %+v", models)
+	if len(models) != 3 || !slices.ContainsFunc(models, func(model ModelInfo) bool { return model.Provider == "claude" }) {
+		t.Fatalf("local-proxy catalog omitted an available protocol: %+v", models)
 	}
 	err := a.SetRemoteTabModel("remote", "claude/claude-test")
-	if err == nil || !strings.Contains(err.Error(), "must be restarted to change protocol") {
+	if err == nil || !strings.Contains(err.Error(), "not connected") {
 		t.Fatalf("cross-protocol switch error = %v", err)
 	}
 }

@@ -8,9 +8,9 @@ import (
 	"reasonix/internal/provider"
 )
 
-// Adapted from #7763: a generic gateway explicitly configured with
-// thinking=enabled inherits DeepSeek's empty-key replay fallback.
-func TestBuildRequestThinkingEnabledGatewayRoundTripsToolCallReasoning(t *testing.T) {
+// A generic gateway explicitly configured with thinking=enabled inherits the
+// DeepSeek reasoning replay contract for every reasoning-carrying turn.
+func TestBuildRequestThinkingEnabledGatewayRoundTripsAllReasoning(t *testing.T) {
 	p, err := New(provider.Config{
 		Name: "custom", BaseURL: "https://gateway.example/v1", Model: "ds4-flash", APIKey: "k",
 		Extra: map[string]any{"thinking": "enabled"},
@@ -38,7 +38,10 @@ func TestBuildRequestThinkingEnabledGatewayRoundTripsToolCallReasoning(t *testin
 	if err != nil {
 		t.Fatal(err)
 	}
-	if strings.Contains(string(body), "do not replay") {
-		t.Fatalf("plain assistant reasoning leaked: %s", body)
+	if got := req.Messages[4].ReasoningContent; got == nil || *got != "do not replay" {
+		t.Fatalf("plain assistant reasoning = %v, want it replayed", got)
+	}
+	if !strings.Contains(string(body), "do not replay") {
+		t.Fatalf("plain assistant reasoning missing from wire body: %s", body)
 	}
 }

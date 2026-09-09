@@ -47,7 +47,10 @@ func (s *Server) commitLoadedResume(w http.ResponseWriter, cur control.SessionAP
 		}
 	}
 	if tag == nil {
-		s.setControllerPath(ctrl, realPath)
+		if !s.publishControllerPathIfCurrent(ctrl, realPath) {
+			http.Error(w, "session changed during resume", http.StatusConflict)
+			return false
+		}
 		return true
 	}
 	// Publish current-only routing before releasing buffered Resume events so

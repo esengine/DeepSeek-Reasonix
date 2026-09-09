@@ -177,6 +177,13 @@ An explicit model-round limit (`max_steps`) sends a `[warning]`, returns
 `max_turn_requests`, and records a paused vendor outcome. A host task-time,
 token, or cost budget also sends a `[warning]` and records a paused outcome,
 but returns `end_turn` because ACP v1 has no task-budget-specific stop reason.
+The completion validator has been removed. A clean model stop without tool
+calls returns `end_turn`; a response with tool calls continues through the
+agent loop, and a truly empty response is retried at the frozen-request
+boundary. Legacy `completion_validation`, `completion_evaluator_model`, and
+`REASONIX_COMPLETION_VALIDATION_MODE` settings remain readable but are ignored
+and are no longer emitted. Host-owned readiness, budget, tool-safety, and
+recovery boundaries remain active.
 Client cancellation returns `cancelled`, even when the interrupted runner exits
 without an error. Other provider, tool, or runtime failures return a JSON-RPC
 `-32603 InternalError` whose message contains a bounded, credential-redacted

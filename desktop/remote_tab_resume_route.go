@@ -7,12 +7,14 @@ import (
 )
 
 type remoteTabProvisionalResume struct {
-	targetPath      string
-	previousPath    string
-	pathRevision    uint64
-	previousPending map[string]json.RawMessage
-	previousRuntime remoteTabRuntimeState
-	active          bool
+	targetPath        string
+	previousPath      string
+	pathRevision      uint64
+	previousPending   map[string]json.RawMessage
+	previousRuntime   remoteTabRuntimeState
+	active            bool
+	selectionRevision uint64
+	previousSelection *remoteTabOpenSelection
 }
 
 func probeRemoteTabFrame(frame string) (kind, path string, current, reset bool) {
@@ -39,6 +41,7 @@ func (a *App) beginRemoteTabProvisionalResume(tabID string, tab *remoteTab, clie
 	if current != tab || current.client != client || current.gen != gen || current.state != "ready" {
 		return route
 	}
+	route.selectionRevision = current.selectionRevision
 	route.previousPath = current.routing.currentPath
 	route.pathRevision = current.routing.pathRevision
 	if route.targetPath == route.previousPath {
@@ -65,6 +68,7 @@ func (a *App) rollbackRemoteTabProvisionalResume(tabID string, tab *remoteTab, c
 	defer a.remoteTabMu.Unlock()
 	current := a.remoteTabs[tabID]
 	if current != tab || current.client != client || current.gen != gen || current.state != "ready" ||
+		current.selectionRevision != route.selectionRevision ||
 		current.routing.currentPath != route.targetPath {
 		return false
 	}
@@ -77,6 +81,11 @@ func (a *App) rollbackRemoteTabProvisionalResume(tabID string, tab *remoteTab, c
 	if current.routing.rehydratingPath != route.targetPath {
 		return false
 	}
+	restoreRemoteTabProvisionalRouteLocked(current, route)
+	return true
+}
+
+func restoreRemoteTabProvisionalRouteLocked(current *remoteTab, route remoteTabProvisionalResume) {
 	current.routing.currentPath = route.previousPath
 	current.routing.pathRevision++
 	current.routing.rehydratingPath = ""
@@ -86,32 +95,24 @@ func (a *App) rollbackRemoteTabProvisionalResume(tabID string, tab *remoteTab, c
 	restoredRuntime := route.previousRuntime
 	restoredRuntime.revision = max(current.runtime.revision, route.previousRuntime.revision) + 1
 	current.runtime = restoredRuntime
-	return true
 }
 
 // reconcileRemoteTabRejectedResume installs the route Serve reports after an
 // ambiguous transport failure. The common unchanged case restores the exact
 // preflight snapshot; an externally changed route drops controller-local state
 // and publishes the authoritative identity behind a new ready barrier. It
-// returns false only when the caller must also restore the pre-open selection.
+// commits rejection and any pre-open restoration before publishing its error.
 func (a *App) reconcileRemoteTabRejectedResume(tabID string, tab *remoteTab, client *http.Client, gen uint64, route remoteTabProvisionalResume, authoritative serveSessionEntry, resumeErr error) bool {
 	authoritative.Path = strings.TrimSpace(authoritative.Path)
-	if authoritative.Path == route.previousPath {
-		if a.rollbackRemoteTabProvisionalResume(tabID, tab, client, gen, route) {
-			a.transitionRemoteTabState(tabID, gen, "ready", "ready", resumeErr.Error())
-			// Serve stayed on the previous route, so the caller should restore
-			// the rest of the pre-open selection snapshot too.
-			return false
-		}
-		// A newer route superseded the failed request while it was being
-		// reconciled. Preserve that newer authority.
-		return true
+	if authoritative.Path == route.previousPath || route.previousSelection != nil && authoritative.Path == route.previousSelection.currentPath {
+		return a.completeRemoteTabResumeFailure(tabID, tab, client, gen, route, resumeErr.Error())
 	}
 	tab.routeEventMu.Lock()
 	defer tab.routeEventMu.Unlock()
 	a.remoteTabMu.Lock()
 	current := a.remoteTabs[tabID]
 	if current != tab || current.client != client || current.gen != gen || current.state != "ready" ||
+		current.selectionRevision != route.selectionRevision ||
 		current.routing.currentPath != route.targetPath ||
 		route.active && current.routing.rehydratingPath != route.targetPath ||
 		!route.active && current.routing.pathRevision != route.pathRevision {
@@ -124,6 +125,7 @@ func (a *App) reconcileRemoteTabRejectedResume(tabID string, tab *remoteTab, cli
 	}
 	current.session.name = strings.TrimSpace(authoritative.Name)
 	current.session.path = authoritative.Path
+	current.session.takenOver = authoritative.TakenOver
 	current.session.newSession = false
 	current.session.reset = false
 	current.runtime.running = authoritative.Running || current.routing.running[authoritative.Path]
@@ -140,7 +142,7 @@ func (a *App) reconcileRemoteTabRejectedResume(tabID string, tab *remoteTab, cli
 	a.remoteTabMu.Unlock()
 	a.emitRemoteEvent("remote-tab:updated", meta)
 	a.saveTabsFromRemote()
-	a.transitionRemoteTabState(tabID, gen, "ready", "ready", resumeErr.Error())
+	a.transitionRemoteTabStateLocked(tab, gen, "ready", "ready", resumeErr.Error())
 	// The probed third path is Serve-authoritative. The generic open-selection
 	// rollback must not replace it with the preflight route.
 	return true
@@ -161,6 +163,7 @@ func (a *App) commitRemoteTabResume(tabID string, tab *remoteTab, client *http.C
 	current.session.newSession = false
 	current.session.name = strings.TrimSpace(target.Name)
 	current.session.path = target.Path
+	current.session.takenOver = target.TakenOver
 	current.routing.currentPath = target.Path
 	// Close the provisional routing epoch so a listing that began while
 	// /resume was in flight cannot publish its pre-switch snapshot afterward.
@@ -202,7 +205,7 @@ func (a *App) publishRemoteTabResumeReady(tabID string, tab *remoteTab, client *
 
 // publishRemoteTabResumeReadyLocked publishes while tab.routeEventMu is held.
 func (a *App) publishRemoteTabResumeReadyLocked(tabID string, tab *remoteTab, client *http.Client, gen uint64, route remoteTabProvisionalResume) {
-	if !a.transitionRemoteTabState(tabID, gen, "ready", "ready", "") {
+	if !a.transitionRemoteTabStateLocked(tab, gen, "ready", "ready", "") {
 		return
 	}
 	for {

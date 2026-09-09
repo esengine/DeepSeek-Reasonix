@@ -37,4 +37,5 @@ jobs:
           pnpm install --frozen-lockfile
           pnpm test
           pnpm typecheck
+          npx wrangler d1 execute reasonix-forum --remote --file=migrate-performance-indexes.sql
           npx wrangler deploy

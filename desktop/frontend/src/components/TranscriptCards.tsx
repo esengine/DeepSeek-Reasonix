@@ -6,6 +6,7 @@ import { CheckCheck, ChevronRight, CirclePlay, ClipboardCheck, FileSearch, Info,
 import { useT } from "../lib/i18n";
 import type { CompactionItem, NoticeItem } from "../lib/transcriptRows";
 import type { WireCompletionSummary } from "../lib/types";
+import { TurnResultSummary } from "./TurnResultSummary";
 import { STEER_NOTICE_PREFIX } from "../lib/useController";
 import { ProcessCompactIcon, ProcessPhaseIcon } from "./ProcessCard";
 import { useTranscriptUserResizeIntent } from "./TranscriptLayoutIntentContext";
@@ -70,12 +71,13 @@ export function NoticeCard({ item, onAction, onAccept, onOpenVerification, actio
   const StatusIcon = item.level === "warn" ? TriangleAlert : Info;
   const ActionIcon = item.action === "open_changes" ? FileSearch : CirclePlay;
   const showVerification = item.variant === "completion" && Boolean(item.completionSummary && onOpenVerification);
+  const result = item.variant === "completion" ? item.completionSummary : undefined;
   const showActions = Boolean((item.action && onAction) || onAccept || showVerification);
   return (
-    <div className={`notice-line notice-line--${item.level}${item.variant ? ` notice-line--${item.variant}` : ""}`} data-entrance={item.id}>
-      <StatusIcon className="notice-line__icon" size={14} aria-hidden="true" />
+    <div className={`notice-line notice-line--${item.level}${item.variant ? ` notice-line--${item.variant}` : ""}`} data-entrance={item.id} role={item.code === "incomplete_read" ? "status" : undefined}>
+      {!result && <StatusIcon className="notice-line__icon" size={14} aria-hidden="true" />}
       <div className="notice-line__text">
-        {item.decisionReceipt ? (
+        {result ? <><div className="notice-line__title">{t("notice.completionChangesTitle")}</div><TurnResultSummary summary={result} /></> : item.decisionReceipt ? (
           <DecisionReceiptLine receipt={item.decisionReceipt} />
         ) : (
           <>
@@ -88,7 +90,7 @@ export function NoticeCard({ item, onAction, onAccept, onOpenVerification, actio
             {item.action && onAction ? (
               <button className="btn btn--small" type="button" onClick={onAction} disabled={actionDisabled}>
                 <ActionIcon size={13} aria-hidden="true" />
-                <span>{item.action === "open_changes" ? t("notice.completionViewChanges") : t("notice.deliveryIncompleteContinue")}</span>
+                <span>{item.action === "recover_context" ? t("notice.protocolRecoveryAction") : item.action === "open_changes" ? t("notice.completionViewChanges") : t("notice.deliveryIncompleteContinue")}</span>
               </button>
             ) : null}
             {showVerification ? (

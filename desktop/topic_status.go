@@ -11,6 +11,10 @@ func topicStatusFromTurnDone(outcome string) (string, bool) {
 		return topicStatusAwaitingDelivery, true
 	case event.TurnOutcomeRecoveryPaused:
 		return topicStatusPaused, true
+	case event.TurnOutcomeIncompleteRead:
+		return topicStatusPaused, true
+	case event.TurnOutcomeCompletionUncertain:
+		return topicStatusPaused, true
 	default:
 		return "", false
 	}

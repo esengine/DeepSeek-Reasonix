@@ -35,8 +35,18 @@ func TestDeliveryExecutionScopeDoesNotChangeProviderRequestBytes(t *testing.T) {
 		t.Fatalf("request counts = (%d, %d), want one each", len(unscopedProvider.requests), len(scopedProvider.requests))
 	}
 	left, right := unscopedProvider.requests[0], scopedProvider.requests[0]
-	if !reflect.DeepEqual(left.Messages, right.Messages) {
-		t.Fatalf("Delivery scope changed provider-visible messages:\nunscoped=%+v\nscoped=%+v", left.Messages, right.Messages)
+	// Message ids are minted per session and never reach the wire; compare
+	// the provider-visible identity instead of the raw structs.
+	leftMsgs := make([]provider.Message, len(left.Messages))
+	rightMsgs := make([]provider.Message, len(right.Messages))
+	for i, m := range left.Messages {
+		leftMsgs[i] = messageForSessionIdentity(m)
+	}
+	for i, m := range right.Messages {
+		rightMsgs[i] = messageForSessionIdentity(m)
+	}
+	if !reflect.DeepEqual(leftMsgs, rightMsgs) {
+		t.Fatalf("Delivery scope changed provider-visible messages:\nunscoped=%+v\nscoped=%+v", leftMsgs, rightMsgs)
 	}
 	if !reflect.DeepEqual(left.Tools, right.Tools) {
 		t.Fatal("Delivery scope changed provider-visible tool schemas")

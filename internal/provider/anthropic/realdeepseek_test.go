@@ -154,50 +154,6 @@ func TestRealDeepSeekAnthropicToolLoop(t *testing.T) {
 		len(second.text), len(second.reasoning), second.promptTokens, second.cacheHitTokens)
 }
 
-// TestRealDeepSeekAnthropicMissingReasoningFallbackToolLoop verifies the exact
-// adaptive recovery mode used by the agent: a provider configured for thinking
-// can regenerate one tool loop with thinking.type=disabled, then replay that
-// no-reasoning tool turn without the HTTP 400 that motivated #8952.
-func TestRealDeepSeekAnthropicMissingReasoningFallbackToolLoop(t *testing.T) {
-	key := os.Getenv("DEEPSEEK_API_KEY")
-	if key == "" {
-		t.Skip("DEEPSEEK_API_KEY not set — skipping live probe")
-	}
-	p, err := New(provider.Config{
-		Name: "deepseek-anthropic", BaseURL: "https://api.deepseek.com/anthropic", Model: "deepseek-v4-flash", APIKey: key,
-		Extra: map[string]any{"api_key_env": "DEEPSEEK_API_KEY", "thinking": "enabled", "effort": "high"},
-	})
-	if err != nil {
-		t.Fatalf("New: %v", err)
-	}
-	if !provider.SupportsMissingReasoningFallback(p) {
-		t.Fatal("official DeepSeek Anthropic provider did not declare fallback support")
-	}
-	tools := []provider.ToolSchema{{
-		Name: "get_marker", Description: "Return a fixed integration-test marker. Always call this tool when asked.",
-		Parameters: json.RawMessage(`{"type":"object","properties":{},"additionalProperties":false}`),
-	}}
-	messages := []provider.Message{
-		{Role: provider.RoleSystem, Content: "Call the requested tool before answering."},
-		{Role: provider.RoleUser, Content: "Call get_marker, then report its result."},
-	}
-	ctx := provider.WithMissingReasoningFallback(context.Background())
-	first := collectLiveDeepSeekTurnContext(t, ctx, p, provider.Request{Messages: messages, Tools: tools, MaxTokens: 512})
-	if len(first.calls) == 0 {
-		t.Fatalf("disabled-thinking fallback returned no tool call; text=%q reasoning_len=%d", first.text, len(first.reasoning))
-	}
-	messages = append(messages,
-		provider.Message{Role: provider.RoleAssistant, Content: first.text, ToolCalls: first.calls},
-		provider.Message{Role: provider.RoleTool, ToolCallID: first.calls[0].ID, Name: first.calls[0].Name, Content: "protocol-fallback-ok"},
-	)
-	second := collectLiveDeepSeekTurnContext(t, ctx, p, provider.Request{Messages: messages, Tools: tools, MaxTokens: 512})
-	if strings.TrimSpace(second.text) == "" {
-		t.Fatalf("fallback continuation returned no text; reasoning_len=%d calls=%d", len(second.reasoning), len(second.calls))
-	}
-	t.Logf("missing-reasoning fallback: calls=%d reasoning=%d second_text=%d prompt=%d cache_hit=%d",
-		len(first.calls), len(first.reasoning), len(second.text), second.promptTokens, second.cacheHitTokens)
-}
-
 // TestRealDeepSeekAnthropicProjectsMissingThinkingHistory reproduces the
 // malformed persisted-history shape behind DeepSeek's
 // "content[].thinking must be passed back" HTTP 400. The provider boundary

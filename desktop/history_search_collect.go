@@ -44,8 +44,21 @@ func (a *App) historyHitFromCandidate(
 	overlays map[string]catalogRuntimeOverlay,
 	queryTerms []string,
 	loaded map[string][]provider.Message,
+	recoveryChecked map[string]bool,
+	recoveryCovered map[string]bool,
 	catalog *historycatalog.Catalog,
 ) (HistorySearchHit, bool) {
+	if !recoveryChecked[candidate.SessionPath] {
+		recoveryChecked[candidate.SessionPath] = true
+		if sessions := a.sessionCatalog.Load(); sessions != nil {
+			if record, ok, err := sessions.GetSession(a.bootContext(), candidate.SessionPath); err == nil && ok {
+				recoveryCovered[candidate.SessionPath] = record.RecoveryCopy
+			}
+		}
+	}
+	if recoveryCovered[candidate.SessionPath] {
+		return HistorySearchHit{}, false
+	}
 	overlay := overlays[sessionRuntimeKey(candidate.SessionPath)]
 	current := candidate.SessionPath == active
 	if !historyStatusMatches(req.Status, overlay.open, current) {
@@ -98,6 +111,8 @@ func (a *App) collectHistorySearchItems(
 	active := a.activeSessionPath(a.activeSessionDir())
 	queryTerms, _ := retrieval.QueryTerms(req.Query)
 	loaded := map[string][]provider.Message{}
+	recoveryChecked := map[string]bool{}
+	recoveryCovered := map[string]bool{}
 	items := []HistorySearchHit{}
 	var cursorCandidate historycatalog.Candidate
 	for len(items) < need {
@@ -112,7 +127,7 @@ func (a *App) collectHistorySearchItems(
 			break
 		}
 		for _, candidate := range result.Items {
-			hit, ok := a.historyHitFromCandidate(req, candidate, active, overlays, queryTerms, loaded, catalog)
+			hit, ok := a.historyHitFromCandidate(req, candidate, active, overlays, queryTerms, loaded, recoveryChecked, recoveryCovered, catalog)
 			if !ok {
 				continue
 			}

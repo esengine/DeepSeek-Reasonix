@@ -1,9 +1,11 @@
 package agent
 
 import (
+	"encoding/json"
 	"errors"
 	"os"
 	"path/filepath"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -58,6 +60,135 @@ func TestSessionLeaseRejectsConcurrentWriterAndReleases(t *testing.T) {
 		t.Fatalf("third TryAcquireSessionLease after release: %v", err)
 	}
 	third.Release()
+}
+
+func TestSessionLeaseHandoffTargetsWriterAndGeneration(t *testing.T) {
+	userPath, _ := leaseTestPath(t)
+	originalWriterID := sessionWriterID
+	t.Cleanup(func() { sessionWriterID = originalWriterID })
+	sessionWriterID = "source-writer"
+	source, err := TryAcquireSessionLease(userPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := source.ReleaseForHandoff("target-writer", "handoff-1"); err != nil {
+		t.Fatalf("ReleaseForHandoff: %v", err)
+	}
+	if lease, err := TryAcquireSessionLease(userPath); !errors.Is(err, ErrSessionLeaseHeld) {
+		if lease != nil {
+			lease.Release()
+		}
+		t.Fatalf("plain acquire during reservation = %v, want held", err)
+	}
+	sessionWriterID = "wrong-target"
+	if lease, err := TryAcquireSessionLeaseWithHandoff(userPath, "source-writer", "handoff-1"); !errors.Is(err, ErrSessionLeaseHeld) {
+		if lease != nil {
+			lease.Release()
+		}
+		t.Fatalf("wrong writer acquire = %v, want held", err)
+	}
+	sessionWriterID = "target-writer"
+	if lease, err := TryAcquireSessionLeaseWithHandoff(userPath, "wrong-source", "handoff-1"); !errors.Is(err, ErrSessionLeaseHeld) {
+		if lease != nil {
+			lease.Release()
+		}
+		t.Fatalf("wrong source acquire = %v, want held", err)
+	}
+	if lease, err := TryAcquireSessionLeaseWithHandoff(userPath, "source-writer", "stale-generation"); !errors.Is(err, ErrSessionLeaseHeld) {
+		if lease != nil {
+			lease.Release()
+		}
+		t.Fatalf("stale generation acquire = %v, want held", err)
+	}
+	target, err := TryAcquireSessionLeaseWithHandoff(userPath, "source-writer", "handoff-1")
+	if err != nil {
+		t.Fatalf("targeted acquire: %v", err)
+	}
+	info, err := LoadSessionLeaseInfo(userPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if info.WriterID != "target-writer" || info.HandoffTo != "" || info.HandoffID != "" {
+		t.Fatalf("published owner = %+v, want target without reservation", info)
+	}
+	target.Release()
+}
+
+func TestSessionLeaseHandoffPersistenceFailureKeepsOwner(t *testing.T) {
+	userPath, _ := leaseTestPath(t)
+	lease, err := TryAcquireSessionLease(userPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer lease.Release()
+	want := errors.New("disk full")
+	lease.beforeHandoffWrite = func() error { return want }
+	if err := lease.ReleaseForHandoff("target", "generation"); !errors.Is(err, want) {
+		t.Fatalf("ReleaseForHandoff = %v, want %v", err, want)
+	}
+	if !SessionLeaseHeldByCurrentRuntime(userPath) {
+		t.Fatal("failed handoff revoked the current owner")
+	}
+	if other, err := TryAcquireSessionLease(userPath); !errors.Is(err, ErrSessionLeaseHeld) {
+		if other != nil {
+			other.Release()
+		}
+		t.Fatalf("outside acquire after failed handoff = %v, want held", err)
+	}
+}
+
+func TestSessionLeaseExpiredHandoffAllowsPlainAcquire(t *testing.T) {
+	userPath, key := leaseTestPath(t)
+	lock, err := tryTakeSessionLeaseLock(key)
+	if err != nil {
+		t.Fatal(err)
+	}
+	info := newSessionLeaseInfo(key)
+	info.HandoffTo = "expired-target"
+	info.HandoffID = "expired-generation"
+	info.HandoffExpiresAt = time.Now().UTC().Add(-time.Second)
+	if err := writeSessionLeaseInfo(lock, info); err != nil {
+		lock.Unlock()
+		t.Fatal(err)
+	}
+	lock.Unlock()
+	lease, err := TryAcquireSessionLease(userPath)
+	if err != nil {
+		t.Fatalf("plain acquire after expiry: %v", err)
+	}
+	lease.Release()
+}
+
+func TestSessionLeaseLegacyMetadataDefaultsHandoffFields(t *testing.T) {
+	info, err := decodeSessionLeaseInfo([]byte(`{"session_path":"x","writer_id":"legacy","pid":1,"acquired_at":"2026-01-01T00:00:00Z"}`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if info.HandoffTo != "" || info.HandoffID != "" || !info.HandoffExpiresAt.IsZero() {
+		t.Fatalf("legacy metadata decoded with reservation: %+v", info)
+	}
+}
+
+func TestSessionLeaseMetadataOmitsEmptyHandoffAndIgnoresUnknownFields(t *testing.T) {
+	encoded, err := json.Marshal(SessionLeaseInfo{
+		SessionPath: "x", WriterID: "writer", PID: 1, AcquiredAt: time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC),
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	text := string(encoded)
+	for _, field := range []string{"handoff_to", "handoff_id", "handoff_expires_at"} {
+		if strings.Contains(text, field) {
+			t.Fatalf("empty %s was serialized: %s", field, text)
+		}
+	}
+	info, err := decodeSessionLeaseInfo([]byte(`{"session_path":"x","writer_id":"legacy","pid":1,"acquired_at":"2026-01-01T00:00:00Z","future_field":{"nested":true}}`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if info.WriterID != "legacy" || info.HandoffTo != "" || info.HandoffID != "" || !info.HandoffExpiresAt.IsZero() {
+		t.Fatalf("unknown-field metadata decoded incorrectly: %+v", info)
+	}
 }
 
 func TestSessionLeaseReclaimsCurrentProcessStaleOwner(t *testing.T) {

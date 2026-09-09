@@ -17,7 +17,7 @@ import (
 )
 
 func TestDesktopRewindCommitAndUndoUseAuthoritativeControllerState(t *testing.T) {
-	isolateDesktopUserDirs(t)
+	isolateDesktopUserDirsSchemaOne(t)
 	dir := t.TempDir()
 	root := t.TempDir()
 	sessionPath := filepath.Join(dir, "s.jsonl")

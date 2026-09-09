@@ -693,11 +693,11 @@ func (t plannerUnsafeReadTool) Execute(context.Context, json.RawMessage) (string
 
 func TestApplyModePropagatesPlanToCoordinatorPlannerAndKeepsYolo(t *testing.T) {
 	plannerCalls := 0
-	plannerTools := tool.NewRegistry()
+	plannerTools := agent.PlannerToolRegistry(tool.NewRegistry())
 	plannerTools.Add(plannerUnsafeReadTool{calls: &plannerCalls})
 	planner := &scriptedTurns{turns: [][]provider.Chunk{
 		toolCallTurn("planner-tool", "planner_phase_only", `{}`),
-		textTurn("1. inspect the current behavior\n2. implement the fix"),
+		planTurn("1. inspect the current behavior\n2. implement the fix"),
 	}}
 	execProvider := &scriptedTurns{turns: [][]provider.Chunk{textTurn("executor done")}}
 	executor := agent.New(execProvider, tool.NewRegistry(), agent.NewSession("exec"), agent.Options{}, event.Discard)

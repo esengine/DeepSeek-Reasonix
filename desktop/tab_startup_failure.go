@@ -45,7 +45,7 @@ func (a *App) markTabStartupFailureLocked(tab *WorkspaceTab, err error, policy s
 
 func (a *App) writeTabsSaveRequest(req *tabsSaveRequest) {
 	if req != nil {
-		a.saveTabsWrite(req.dir, req.entries, req.activeID, req.version)
+		_ = a.saveTabsWrite(req.dir, req.entries, req.activeID, req.version)
 	}
 }
 

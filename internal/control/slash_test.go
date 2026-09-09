@@ -39,6 +39,7 @@ func TestSlashArgItems(t *testing.T) {
 		DisconnectedMCP: []string{"optional"},
 		ModelRefs:       []string{"deepseek-flash/deepseek-v4-flash", "deepseek-pro/deepseek-v4-pro"},
 		CurrentModel:    "deepseek-flash/deepseek-v4-flash",
+		EffortLevels:    []string{"auto", "disabled", "high", "max"},
 		ProviderNames:   []string{"deepseek-flash", "deepseek-pro", "custom"},
 		CurrentProvider: "deepseek-flash",
 		PluginNames:     []string{"superpowers", "workflow-kit"},
@@ -203,6 +204,14 @@ func TestSlashArgItems(t *testing.T) {
 	items, _ = SlashArgItems("/memory recover ", data)
 	if !has(items, "/tmp/memory archive/cache-first.md") {
 		t.Errorf("/memory recover should offer archive paths; got %v", labelsOf(items))
+	}
+}
+
+func TestSlashArgItemsEffortUsesProvidedSnapshot(t *testing.T) {
+	data := ArgData{EffortLevels: []string{"auto", "snapshot-level"}}
+	items, _ := SlashArgItems("/effort ", data)
+	if got := labelsOf(items); len(got) != 2 || got[0] != "auto" || got[1] != "snapshot-level" {
+		t.Fatalf("/effort labels = %v, want provided snapshot levels", got)
 	}
 }
 

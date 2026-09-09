@@ -48,7 +48,7 @@ func (a *App) SetQualityFloorForTab(tabID, floor string) error {
 	}
 	a.mu.Lock()
 	if a.tabs[tabIDForSave] == tab {
-		a.saveTabsLocked()
+		_ = a.saveTabsLocked()
 	}
 	a.mu.Unlock()
 	return nil

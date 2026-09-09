@@ -121,7 +121,7 @@ func NewTool(opts Options) tool.Tool {
 	}
 }
 
-func (*installSourceTool) Name() string   { return "install_source" }
+func (*installSourceTool) Name() string   { return tool.HostInstallSource }
 func (*installSourceTool) ReadOnly() bool { return false }
 
 func (*installSourceTool) Description() string {

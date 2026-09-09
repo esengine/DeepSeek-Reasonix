@@ -7,7 +7,8 @@ import { createRoot } from "react-dom/client";
 import { LocaleProvider } from "../lib/i18n";
 import { AssistantMessage } from "../components/Message";
 import { setReasoningSummaryEnabled } from "../lib/reasoningSummaryPreference";
-import { applyReasoningDisplayMode, hydrateReasoningDisplayMode } from "../lib/reasoningDisplayPreference";
+import { applyReasoningDisplayMode } from "../lib/reasoningDisplayPreference";
+import { applySessionExperience, hydrateSessionExperience } from "../lib/sessionExperience";
 
 registerHooks({
   resolve(specifier, context, nextResolve) {
@@ -55,9 +56,7 @@ const rootEl = document.getElementById("root");
 if (!rootEl) throw new Error("missing root");
 const root = createRoot(rootEl);
 
-// Most assertions in this file exercise the summary-mode disclosure behavior.
-// Select it explicitly so the test remains independent from the product default.
-hydrateReasoningDisplayMode("summary", true);
+hydrateSessionExperience("standard");
 
 type ReasoningItem = React.ComponentProps<typeof AssistantMessage>["item"];
 
@@ -113,8 +112,7 @@ ok(!document.querySelector(".reasoning__body"), "clicking the header collapses t
 await click(document.querySelector(".reasoning__head"));
 ok(document.querySelector(".reasoning__body")?.textContent?.includes("line two") ?? false, "clicking the header expands the reasoning body");
 
-// Streaming reasoning: also collapsed by default, summary tracks the newest
-// tail even after the current line exceeds the summary budget.
+// Standard shows the complete process while it is running.
 const streamingLine = "a".repeat(220);
 await render({
   kind: "assistant",
@@ -124,10 +122,9 @@ await render({
   streaming: true,
   reasoningComplete: false,
 });
-const streamingSummary = document.querySelector<HTMLButtonElement>(".reasoning-summary");
-ok(!document.querySelector(".reasoning__body"), "streaming reasoning is collapsed by default");
-ok(streamingSummary?.textContent?.endsWith("LATEST_TOKEN") ?? false, "streaming summary retains the newest tail of a long line");
-ok(streamingSummary?.hasAttribute("data-follow-end") ?? false, "streaming summary follows the line tail");
+ok(Boolean(document.querySelector(".reasoning__body")), "standard experience expands reasoning while it streams");
+ok(!document.querySelector(".reasoning-summary"), "running reasoning never substitutes a collapsed summary");
+ok(document.querySelector(".reasoning__body")?.textContent?.endsWith("LATEST_TOKEN") ?? false, "streaming body retains the newest tail of a long line");
 ok(document.querySelector(".reasoning__head")?.hasAttribute("data-running") ?? false, "header keeps the running state");
 
 await render({
@@ -139,8 +136,8 @@ await render({
   reasoningComplete: false,
 });
 ok(
-  document.querySelector(".reasoning-summary")?.textContent?.endsWith("LATEST_TOKEN_NEXT") ?? false,
-  "streaming summary updates when more text reaches the same long line",
+  document.querySelector(".reasoning__body")?.textContent?.endsWith("LATEST_TOKEN_NEXT") ?? false,
+  "streaming body updates when more text reaches the same long line",
 );
 
 // defaultExpanded keeps the previous always-open behavior.
@@ -155,31 +152,11 @@ await render({
 ok(document.querySelector(".reasoning__body strong")?.textContent === "important trace", "defaultExpanded renders the full Markdown directly");
 ok(!document.querySelector(".reasoning-summary"), "defaultExpanded skips the summary");
 
-// The settings switch can disable the preview without mounting Markdown until
-// the user opens the reasoning heading.
+// The removed summary preference remains a compatibility surface, but cannot
+// override the canonical Standard experience.
 await act(async () => {
   setReasoningSummaryEnabled(false);
 });
-const guardedReasoning = new Proxy(new String("guarded reasoning"), {
-  get(target, property, receiver) {
-    if (property === "length") throw new Error("summary text should not be derived while summaries are disabled");
-    return Reflect.get(target, property, receiver);
-  },
-}) as unknown as string;
-let disabledDerivationSkipped = true;
-try {
-  await render({
-    kind: "assistant",
-    id: "a-disabled-derivation",
-    text: "",
-    reasoning: guardedReasoning,
-    streaming: true,
-    reasoningComplete: false,
-  });
-} catch {
-  disabledDerivationSkipped = false;
-}
-ok(disabledDerivationSkipped, "disabling reasoning summaries skips summary derivation");
 await render({
   kind: "assistant",
   id: "a4",
@@ -188,10 +165,10 @@ await render({
   streaming: false,
   reasoningComplete: true,
 });
-ok(!document.querySelector(".reasoning-summary"), "disabling reasoning summaries hides the collapsed preview");
-ok(!document.querySelector(".reasoning__body"), "disabling reasoning summaries keeps Markdown lazy");
+ok(Boolean(document.querySelector(".reasoning-summary")), "legacy summary toggle cannot hide the Standard completion summary");
+ok(!document.querySelector(".reasoning__body"), "legacy summary toggle keeps completed Markdown lazy");
 await click(document.querySelector(".reasoning__head"));
-ok(document.querySelector(".reasoning__body strong")?.textContent === "important trace", "the heading still opens full Markdown when summaries are disabled");
+ok(document.querySelector(".reasoning__body strong")?.textContent === "important trace", "the heading still opens full Markdown after a legacy toggle");
 await act(async () => {
   setReasoningSummaryEnabled(true);
 });
@@ -203,10 +180,10 @@ await render({
   streaming: false,
   reasoningComplete: true,
 });
-ok(Boolean(document.querySelector(".reasoning-summary")), "reenabling reasoning summaries restores the preview");
+ok(Boolean(document.querySelector(".reasoning-summary")), "legacy summary enable leaves the canonical preview intact");
 
 await act(async () => {
-  hydrateReasoningDisplayMode("auto", true);
+  hydrateSessionExperience("standard");
 });
 await render({
   kind: "assistant",
@@ -216,7 +193,7 @@ await render({
   streaming: true,
   reasoningComplete: false,
 });
-ok(Boolean(document.querySelector(".reasoning__body")), "auto mode opens reasoning while it streams");
+ok(Boolean(document.querySelector(".reasoning__body")), "standard mode opens reasoning while it streams");
 
 await render({
   kind: "assistant",
@@ -226,7 +203,7 @@ await render({
   streaming: true,
   reasoningComplete: true,
 });
-ok(Boolean(document.querySelector(".reasoning__body")), "auto mode keeps reasoning open after its first answer token while the turn streams");
+ok(Boolean(document.querySelector(".reasoning__body")), "standard mode keeps reasoning open after its first answer token while the turn streams");
 ok(!document.querySelector(".reasoning-summary"), "active turn does not replace full reasoning with a summary");
 
 await render({
@@ -237,8 +214,8 @@ await render({
   streaming: false,
   reasoningComplete: true,
 });
-ok(!document.querySelector(".reasoning__body"), "auto mode closes untouched reasoning after completion");
-ok(Boolean(document.querySelector(".reasoning-summary")), "auto mode leaves a summary after completion");
+ok(!document.querySelector(".reasoning__body"), "standard mode closes untouched reasoning after completion");
+ok(Boolean(document.querySelector(".reasoning-summary")), "standard mode leaves a summary after completion");
 
 await render({
   kind: "assistant",
@@ -258,10 +235,10 @@ await render({
   streaming: false,
   reasoningComplete: true,
 });
-ok(Boolean(document.querySelector(".reasoning__body")), "manual reasoning expansion survives auto completion");
+ok(Boolean(document.querySelector(".reasoning__body")), "manual reasoning expansion survives standard completion");
 
 await act(async () => {
-  applyReasoningDisplayMode("expanded");
+  applySessionExperience("deep");
 });
 await render({
   kind: "assistant",
@@ -271,10 +248,10 @@ await render({
   streaming: false,
   reasoningComplete: true,
 });
-ok(Boolean(document.querySelector(".reasoning__body")), "expanded mode keeps completed reasoning open");
-ok(!document.querySelector(".reasoning-summary"), "expanded mode never falls back to a summary");
+ok(Boolean(document.querySelector(".reasoning__body")), "deep mode keeps completed reasoning open");
+ok(!document.querySelector(".reasoning-summary"), "deep mode never falls back to a summary");
 await click(document.querySelector(".reasoning__head"));
-ok(!document.querySelector(".reasoning__body"), "a manual collapse still wins inside expanded mode");
+ok(!document.querySelector(".reasoning__body"), "a manual collapse still wins inside deep mode");
 
 await act(async () => {
   applyReasoningDisplayMode("hidden");
@@ -287,7 +264,7 @@ await render({
   streaming: false,
   reasoningComplete: true,
 });
-ok(!document.querySelector(".reasoning"), "hidden mode removes the reasoning panel");
+ok(Boolean(document.querySelector(".reasoning")), "legacy hidden mode maps to Standard instead of removing reasoning");
 await render({
   kind: "assistant",
   id: "a-hidden-only",
@@ -296,9 +273,9 @@ await render({
   streaming: false,
   reasoningComplete: true,
 });
-ok(!document.querySelector(".msg"), "hidden mode removes reasoning-only message shells");
+ok(Boolean(document.querySelector(".msg")), "legacy hidden mode keeps reasoning-only work reachable");
 await act(async () => {
-  applyReasoningDisplayMode("summary");
+  applySessionExperience("standard");
 });
 
 await act(async () => {

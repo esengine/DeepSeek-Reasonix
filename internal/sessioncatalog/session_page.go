@@ -21,7 +21,7 @@ const sessionSelectColumns = `path,path_key,directory,scope,workspace_root,topic
     custom_title,created_at,last_activity_at,preview,turns,turns_state,recovered,
     recovery_reason,recovery_digest,parent_id,recovery_copy,recovery_group_id,
     recovery_role,recovery_canonical,logical_topic_id,ordinary_visible,content_fingerprint,
-    meta_fingerprint,health,missing_since`
+    meta_fingerprint,health,missing_since,log_format,head_count,selected_head_id`
 
 func scanSession(scanner interface{ Scan(...any) error }) (SessionRecord, error) {
 	var record SessionRecord
@@ -32,7 +32,7 @@ func scanSession(scanner interface{ Scan(...any) error }) (SessionRecord, error)
 		&record.Recovered, &record.RecoveryReason, &record.RecoveryDigest,
 		&record.ParentID, &recoveryCopy, &record.RecoveryGroupID, &record.RecoveryRole,
 		&recoveryCanonical, &record.LogicalTopicID, &ordinaryVisible, &record.ContentFingerprint, &record.MetaFingerprint,
-		&record.Health, &record.MissingSince)
+		&record.Health, &record.MissingSince, &record.LogFormat, &record.HeadCount, &record.SelectedHeadID)
 	record.RecoveryCopy = recoveryCopy != 0
 	record.RecoveryCanonical = recoveryCanonical != 0
 	record.OrdinaryVisible = ordinaryVisible != 0

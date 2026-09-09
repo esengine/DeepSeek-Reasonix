@@ -99,6 +99,25 @@ try {
   const removedExitSubscription = registerTerminalSink("removed-exit", (bytes) => removedExit.push(...bytes));
   removedExitSubscription.dispose();
   check(removedExit.length === 0, "removed terminal exit discards terminal history");
+
+  __resetTerminalEventBus();
+  const releaseApp = startTerminalEventBridge();
+  const releaseView = startTerminalEventBridge();
+  const received: number[] = [];
+  const shared = registerTerminalSink("shared", (bytes) => received.push(...bytes));
+  releaseApp();
+  __emitMockTerminalOutput({ id: "shared", data: base64(new Uint8Array([1])) });
+  check(received.length === 1, "one owner release cannot stop a still-mounted terminal view");
+  releaseView();
+  __emitMockTerminalOutput({ id: "shared", data: base64(new Uint8Array([2])) });
+  check(received.length === 1, "the final owner release detaches terminal event delivery");
+  const releaseReplacement = startTerminalEventBridge();
+  releaseApp();
+  releaseView();
+  __emitMockTerminalOutput({ id: "shared", data: base64(new Uint8Array([3])) });
+  check(JSON.stringify(received) === JSON.stringify([1, 3]), "old cleanups cannot release a replacement bridge");
+  releaseReplacement();
+  shared.dispose();
 } finally {
   __resetTerminalEventBus();
   if (previousWindow) globalThis.window = previousWindow;

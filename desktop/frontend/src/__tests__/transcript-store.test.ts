@@ -243,6 +243,21 @@ async function drainOlder(store: TranscriptStore, tabId: string, path: string, t
 
 console.log("\ntranscript store");
 
+{
+  const messages: HistoryMessage[] = [
+    { role: "user", content: "read all" },
+    { role: "assistant", content: "candidate answer" },
+    { role: "notice", content: "", code: "incomplete_read", readPause: { id: "run", reads: [{ readId: "r", path: "fixture.txt", reason: "no_progress" }] } },
+  ];
+  const store = new TranscriptStore(new FakeBackend(messages));
+  const first = await store.loadLatest("read", "/read.jsonl", { turns: 12 });
+  const expected = historyMessagesToItems(messages, "history").items.find(i => i.kind === "notice");
+  const actual = first?.items.find(i => i.kind === "notice");
+  eq(JSON.stringify(actual), JSON.stringify(expected), "paged read pause equals live and legacy history presentation");
+  const replay = await store.loadLatest("read", "/read.jsonl", { turns: 12 });
+  eq(replay?.items.filter(i => i.kind === "notice").length, 1, "reloading a pause does not duplicate its card");
+}
+
 // ── page concatenation equals single-shot conversion ────────────────────────
 {
   const messages = bigTranscript(46);

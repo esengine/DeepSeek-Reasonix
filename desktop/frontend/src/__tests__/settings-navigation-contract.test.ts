@@ -23,10 +23,16 @@ function ok(condition: boolean, label: string) {
 
 console.log("\nsettings navigation contract");
 
-ok(panel.includes('["workbench", "classic", "creation"] as const'), "desktop styles prioritize workbench before classic and creation");
+ok(panel.includes('["workbench", "creation"] as const'), "desktop settings expose only workbench and creation");
+ok(!panel.includes('["workbench", "classic", "creation"] as const'), "desktop settings no longer offer classic");
 ok(/useEffect\(\(\) => \{[\s\S]*?content\.scrollTop = 0;[\s\S]*?content\.scrollLeft = 0;[\s\S]*?\}, \[tab\]\);/.test(panel), "switching settings pages resets both content scroll axes");
 ok(navigation.includes('aria-current={activeTab === id ? "page" : undefined}'), "the active settings page is exposed semantically");
-ok(navigation.includes('item.meta && (activeTab === id || query.trim())'), "navigation metadata stays limited to the active or searched items");
+ok(navigation.includes('item.meta && query.trim()'), "navigation metadata appears only in search results");
+
+ok(navigation.includes('tabs: ["models", "providers", "model-stats"]'), "model pages share one dedicated navigation group");
+ok(panel.includes('key="model-pages"'), "model page navigation retains shared editor ownership");
+ok(panel.includes('hidden={subtab !== "access"}'), "leaving model services hides rather than unmounts its drafts");
+ok(!panel.includes('setSubtab('), "model page routing has one navigation owner");
 
 console.log(`\n${passed} passed, ${failed} failed, ${passed + failed} total`);
 if (failed > 0) process.exit(1);

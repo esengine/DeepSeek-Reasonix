@@ -13,59 +13,6 @@ import (
 	"reasonix/internal/provider"
 )
 
-func TestDefaultStreamIdleTimeoutIsFiveMinutes(t *testing.T) {
-	if defaultStreamIdleTimeout != 300*time.Second {
-		t.Fatalf("default stream idle timeout = %s, want 5m", defaultStreamIdleTimeout)
-	}
-}
-
-// openTestStream resolves the demo ref and opens a stream, returning the
-// chunk channel and the stream ID the sidecar would address.
-func openTestStream(t *testing.T, r *Resolver, fc *fakeClient, effort *string) (<-chan provider.Chunk, string) {
-	t.Helper()
-	p, err := r.Resolve(provider.Selection{Ref: "plugin/demo/fake/x", Effort: effort})
-	if err != nil {
-		t.Fatalf("Resolve: %v", err)
-	}
-	out, err := p.Stream(context.Background(), provider.Request{
-		Messages:  []provider.Message{{Role: provider.RoleUser, Content: "hi"}},
-		MaxTokens: 16,
-	})
-	if err != nil {
-		t.Fatalf("Stream: %v", err)
-	}
-	return out, fc.openedParams(t).StreamID
-}
-
-func textChunk(text string) protocol.ProviderChunk {
-	return protocol.ProviderChunk{Type: protocol.ChunkText, Text: text}
-}
-
-// collectChunks drains the channel until it closes, failing on a wedge.
-func collectChunks(t *testing.T, out <-chan provider.Chunk) []provider.Chunk {
-	t.Helper()
-	var chunks []provider.Chunk
-	for {
-		select {
-		case chunk, ok := <-out:
-			if !ok {
-				return chunks
-			}
-			chunks = append(chunks, chunk)
-		case <-time.After(testBudget):
-			t.Fatal("stream channel did not close")
-		}
-	}
-}
-
-func texts(chunks []provider.Chunk) []string {
-	var out []string
-	for _, c := range chunks {
-		out = append(out, c.Text)
-	}
-	return out
-}
-
 func TestStreamDeliversOutOfOrderChunksInOrder(t *testing.T) {
 	fc := newFakeClient("demo", demoDescriptor())
 	r := testResolver(t, baseCatalog(), nil, fc)
@@ -495,7 +442,9 @@ func TestStreamOpenGenericErrorPassesThrough(t *testing.T) {
 }
 
 func TestStreamOpenCarriesRequestEffortAndSeqBase(t *testing.T) {
-	fc := newFakeClient("demo", demoDescriptor())
+	descriptor := demoDescriptor()
+	descriptor.Efforts = []string{"low", "high"}
+	fc := newFakeClient("demo", descriptor)
 	r := testResolver(t, baseCatalog(), nil, fc)
 
 	effort := "high"
@@ -780,5 +729,31 @@ func TestStreamPendingWindowOverflowInterrupts(t *testing.T) {
 	last := chunks[len(chunks)-1]
 	if last.Type != provider.ChunkError || !provider.IsStreamInterrupted(last.Err) {
 		t.Fatalf("terminal chunk = %+v, want interrupted error", last)
+	}
+}
+
+func TestReasoningSelectionRejectsUndeclaredBeforeSidecarIO(t *testing.T) {
+	descriptor := demoDescriptor()
+	descriptor.Efforts = []string{"low", "high"}
+	fc := newFakeClient("demo", descriptor)
+	r := testResolver(t, baseCatalog(), nil, fc)
+	bad := "medium"
+	_, err := r.Resolve(provider.Selection{Ref: "plugin/demo/fake/x", Effort: &bad})
+	var unsupported *provider.UnsupportedReasoningEffort
+	if !errors.As(err, &unsupported) {
+		t.Fatalf("selection error=%v", err)
+	}
+	p, err := r.Resolve(provider.Selection{Ref: "plugin/demo/fake/x"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, err = p.Stream(context.Background(), provider.Request{EffortOverride: bad})
+	if !errors.As(err, &unsupported) {
+		t.Fatalf("override error=%v", err)
+	}
+	fc.mu.Lock()
+	defer fc.mu.Unlock()
+	if len(fc.opened) != 0 {
+		t.Fatal("invalid effort reached sidecar")
 	}
 }

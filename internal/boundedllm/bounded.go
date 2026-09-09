@@ -49,7 +49,7 @@ type Config struct {
 	// MaxTokens caps the completion. Zero uses DefaultMaxTokens.
 	MaxTokens int
 	// EffortOverride optionally requests a lower or higher reasoning depth for
-	// this independent call. Provider adapters ignore unsupported values.
+	// this independent call. Provider adapters reject unsupported values.
 	EffortOverride string
 	// MaxOutputBytes aborts the stream once exceeded. Zero uses DefaultMaxOutputBytes.
 	MaxOutputBytes int

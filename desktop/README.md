@@ -1,5 +1,7 @@
 # Reasonix Desktop (Wails shell)
 
+Model/provider setup: [English guide](../docs/MODEL_SETTINGS.md) · [中文指南](../docs/MODEL_SETTINGS.zh-CN.md).
+
 A native desktop window around the Reasonix Go kernel. The same
 transport-agnostic `control.Controller` that backs the chat TUI and the HTTP/SSE
 server is bound **directly** to a React webview — Go methods in, typed events

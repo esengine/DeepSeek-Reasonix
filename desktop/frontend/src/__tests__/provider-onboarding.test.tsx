@@ -1,0 +1,27 @@
+import assert from 'node:assert/strict';
+import React from 'react';
+import { renderToStaticMarkup } from 'react-dom/server';
+import { ProvidersSection } from '../components/SettingsPanel';
+import { LocaleProvider } from '../lib/i18n';
+import { baseSettings } from '../test-support/settingsTestFixtures';
+import type { ProviderView } from '../lib/types';
+import { shouldOpenOnboarding, dismissOnboarding } from '../lib/onboarding';
+
+const provider = {name:'my-connection',displayName:'My connection',added:true,builtIn:false,kind:'openai',baseUrl:'https://example.test/v1',models:['model'],default:'model',keySet:false,apiKeyEnv:'TEST_KEY',visionModels:[],supportedEfforts:[],modelCapabilities:[]} as unknown as ProviderView;
+const render = (providers: ProviderView[], onboarding = true) => renderToStaticMarkup(<LocaleProvider><ProvidersSection s={{...baseSettings(),providers}} busy={false} apply={async()=>true} onboarding={onboarding}/></LocaleProvider>);
+assert.match(render([]), /class="provider-catalog"/);
+assert.match(render([]), /id="provider-onboarding"/);
+assert.doesNotMatch(render([],false), /id="provider-onboarding"/);
+assert.doesNotMatch(render([provider]), /class="provider-catalog"/);
+assert.match(render([provider]), /My connection/);
+assert.doesNotMatch(render([provider]), />Start using<|>开始使用</);
+assert.match(render([{...provider,keySet:true}]), /开始使用|Start using/);
+assert.doesNotMatch(render([{...provider,keySet:true,models:[]}]), /<button[^>]*>开始使用|<button[^>]*>Start using/);
+assert.doesNotMatch(render([],false), /class="provider-catalog"/);
+const map = new Map<string,string>();
+const storage = {getItem:(key:string)=>map.get(key)??null,setItem:(key:string,value:string)=>map.set(key,value)} as Storage;
+assert.equal(shouldOpenOnboarding(true,storage),true);
+assert.equal(shouldOpenOnboarding(false,storage),false);
+dismissOnboarding(storage);
+assert.equal(shouldOpenOnboarding(true,storage),false);
+console.log('Provider onboarding: fresh setup, existing connection, ready state, ordinary settings and dismissal passed.');

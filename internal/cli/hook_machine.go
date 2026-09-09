@@ -1,6 +1,7 @@
 package cli
 
 import (
+	"fmt"
 	"io"
 	"os"
 	"sort"
@@ -54,7 +55,7 @@ func runHookCommand(args []string, out io.Writer) int {
 	operation := args[0]
 	command = "hook." + operation
 	if operation != "list" && operation != "status" {
-		return writeMachineError(out, command, "unknown_command", "unknown hook operation")
+		return writeMachineError(out, command, "unknown_command", fmt.Sprintf("unknown hook operation %q; expected list or status", operation))
 	}
 	options, code, message := parseHookMachineOptions(args[1:])
 	if code != "" {

@@ -39,12 +39,14 @@ func (c *Controller) runSynchronousTurn(
 	c.running = true
 	c.canceling = false
 	c.mu.Unlock()
+	c.refreshRuntimeState(event.Event{})
 	finish := func() {
 		c.mu.Lock()
 		c.running = false
 		c.cancel = nil
 		c.canceling = false
 		c.mu.Unlock()
+		c.refreshRuntimeState(event.Event{})
 		cancel()
 	}
 	if onAdmitted != nil {

@@ -123,7 +123,7 @@ func MemoryCommandText(api MemoryControl, input string) string {
 
 // setMemoryActivation flips a fact between pinned and relevant through the
 // same save path the model uses, so revisioning and the pinned budget apply.
-// The stable prefix picks the change up at the next session start.
+// The next real user turn publishes the changed background snapshot.
 func setMemoryActivation(api MemoryControl, ref string, pin bool) string {
 	set := api.Memory()
 	if set == nil {
@@ -144,7 +144,7 @@ func setMemoryActivation(api MemoryControl, ref string, pin bool) string {
 	if _, err := api.SaveMemory(fact); err != nil {
 		return "memory activation: " + err.Error()
 	}
-	return fmt.Sprintf("%s is now %s (takes effect in the stable prefix at the next session)", fact.Name, activation)
+	return fmt.Sprintf("%s is now %s (takes effect in session-context on the next real user turn)", fact.Name, activation)
 }
 
 // verifyMemory stamps last_verified_at through the normal save path: the

@@ -46,7 +46,7 @@ func (c *Controller) GenerateSessionTitle(ctx context.Context, transcript string
 		UsageSource:    event.UsageSourceTitle,
 		Timeout:        sessionTitleTimeout,
 		MaxTokens:      sessionTitleMaxTokens,
-		EffortOverride: "low",
+		EffortOverride: provider.PreferredReasoning(prov, "low"),
 		MaxOutputBytes: 1024,
 	}, sessionTitleSystemPrompt, transcript)
 	if err != nil {

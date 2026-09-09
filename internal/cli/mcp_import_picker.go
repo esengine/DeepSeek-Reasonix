@@ -33,7 +33,7 @@ func (m *chatTUI) openMCPImportPicker() {
 		m.notice("mcp import: no candidates found")
 		return
 	}
-	m.completion = completion{}
+	m.dismissCompletion()
 	m.mcpImport = newMCPImportPicker(candidates)
 }
 

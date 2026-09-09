@@ -1,6 +1,7 @@
 package cli
 
 import (
+	"fmt"
 	"io"
 	"os"
 	"sort"
@@ -49,7 +50,7 @@ func runTaskCommand(args []string, out io.Writer) int {
 	operation := args[0]
 	command = "task." + operation
 	if operation != "list" && operation != "show" {
-		return writeMachineError(out, command, "unknown_command", "unknown task operation")
+		return writeMachineError(out, command, "unknown_command", fmt.Sprintf("unknown task operation %q; expected list or show", operation))
 	}
 	options, code, message := parseTaskMachineOptions(args[1:], operation)
 	if code != "" {

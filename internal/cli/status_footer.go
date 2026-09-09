@@ -7,6 +7,7 @@ import (
 	"github.com/charmbracelet/x/ansi"
 
 	"reasonix/internal/billing"
+	"reasonix/internal/control"
 	"reasonix/internal/event"
 	"reasonix/internal/i18n"
 	"reasonix/internal/provider"
@@ -221,6 +222,17 @@ func (m chatTUI) primaryStatusLine(modeTag string, shellMode, cancelRequested bo
 	return status
 }
 
+// presetTag mirrors the desktop's preset chips in the status line: the default
+// standard posture stays quiet, delivery is always visible so a /preset switch
+// reads back from the UI.
+func (m chatTUI) presetTag() string {
+	if m.ctrl == nil || m.ctrl.QualityFloor() != control.QualityFloorDelivery {
+		return ""
+	}
+	value := themeStyle(activeCLITheme.info).Bold(true).Render(control.QualityFloorDelivery)
+	return footerMetric(i18n.M.ChatStatusPresetLabel, value)
+}
+
 // statusModelWorkGroup is the bounded, session-level group placed at the right
 // edge of the first footer row. A custom statusline still replaces every
 // built-in data field, matching its existing configuration contract.
@@ -234,9 +246,12 @@ func (m chatTUI) statusModelWorkGroup(maxWidth int) string {
 	}
 
 	const separator = "   "
-	tail := make([]string, 0, 2)
+	tail := make([]string, 0, 3)
 	if effort := m.effortTag(); effort != "" {
 		tail = append(tail, effort)
+	}
+	if preset := m.presetTag(); preset != "" {
+		tail = append(tail, preset)
 	}
 	if model == "" && len(tail) == 0 {
 		return ""

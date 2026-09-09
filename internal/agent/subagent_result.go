@@ -10,6 +10,7 @@ import (
 	"unicode/utf8"
 
 	"reasonix/internal/provider"
+	"reasonix/internal/tool"
 )
 
 const (
@@ -21,9 +22,10 @@ const (
 	subagentResultMaxBytes       = 24 * 1024
 )
 
-// SubagentResultTool pages through the final answer of a completed persisted
-// sub-agent. Parallel/fleet aggregates use this stable reader instead of
-// forcing every child answer through one fixed-size tool result.
+// SubagentResultTool pages through the retained answer of a persisted
+// sub-agent, including partial and retryable failures. Parallel/fleet
+// aggregates use this stable reader instead of forcing every child answer
+// through one fixed-size tool result.
 type SubagentResultTool struct {
 	store         *SubagentStore
 	workspaceRoot string
@@ -36,10 +38,10 @@ func NewSubagentResultTool(task *TaskTool) *SubagentResultTool {
 	return &SubagentResultTool{store: task.transcripts, workspaceRoot: task.workspaceRoot}
 }
 
-func (*SubagentResultTool) Name() string { return "read_subagent_result" }
+func (*SubagentResultTool) Name() string { return tool.HostReadSubagentResult }
 
 func (*SubagentResultTool) Description() string {
-	return "Read a completed sub-agent's full final answer by the Subagent reference returned from task, parallel_tasks, or fleet. Results are scoped to the current conversation lineage and paged by UTF-8 byte offset so large answers remain lossless without overflowing one tool result."
+	return "Read a completed or partial sub-agent's retained answer by the Subagent reference returned from task, parallel_tasks, or fleet. Failed runs may expose their last useful output and an explicit retryability status. Results are scoped to the current conversation lineage and paged by UTF-8 byte offset so large answers remain lossless without overflowing one tool result."
 }
 
 func (*SubagentResultTool) Schema() json.RawMessage {
@@ -143,8 +145,11 @@ func (s *SubagentStore) ReadFinalAnswer(ref, parentSession, workspaceRoot string
 	if want := strings.TrimSpace(workspaceRoot); want != "" && strings.TrimSpace(meta.WorkspaceRoot) != want {
 		return "", meta.Status, fmt.Errorf("subagent reference %q belongs to a different workspace", ref)
 	}
-	if meta.Status != SubagentCompleted {
-		return "", meta.Status, fmt.Errorf("subagent reference %q is %s; only completed results can be read", ref, meta.Status)
+	if meta.Status == SubagentRunning {
+		return "", meta.Status, fmt.Errorf("subagent reference %q is still in progress", ref)
+	}
+	if meta.Status == SubagentInterrupted && meta.Outcome != string(SubagentOutcomeCancelled) {
+		return "", meta.Status, fmt.Errorf("subagent reference %q was interrupted; only completed or retained partial results can be read", ref)
 	}
 
 	sess, err := LoadSession(s.sessionPath(ref))
@@ -154,7 +159,11 @@ func (s *SubagentStore) ReadFinalAnswer(ref, parentSession, workspaceRoot string
 	msgs := sess.Snapshot()
 	for _, v := range slices.Backward(msgs) {
 		if v.Role == provider.RoleAssistant && strings.TrimSpace(v.Content) != "" {
-			return v.Content, meta.Status, nil
+			status := meta.Status
+			if meta.Outcome != "" {
+				status = SubagentStatus(meta.Outcome)
+			}
+			return v.Content, status, nil
 		}
 	}
 	return "", meta.Status, fmt.Errorf("subagent reference %q has no final assistant answer", ref)

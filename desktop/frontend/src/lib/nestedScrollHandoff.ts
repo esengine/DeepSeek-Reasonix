@@ -22,6 +22,8 @@ export type NestedScrollHandoffOptions = {
   parent: HTMLElement;
   /** Called with normalized deltaY when a nested edge wheel is promoted. */
   onParentScrollIntent?: (deltaY: number) => void;
+  /** Route the final native offset through TranscriptViewportWriter. */
+  writeParentOffset: (top: number) => boolean;
   /** Latch to the parent after the first edge handoff until this many ms of silence. */
   latchHoldMs?: number;
   now?: () => number;
@@ -30,11 +32,6 @@ export type NestedScrollHandoffOptions = {
 export type NestedScrollHandoff = {
   detach: () => void;
 };
-
-/** Inner reasoning scrollports are independent of transcript ownership. */
-export function scrollReasoningToBottom(element: HTMLElement): void {
-  element.scrollTop = element.scrollHeight;
-}
 
 /** Normalize WheelEvent line/page deltas before applying them to scrollTop. */
 export function normalizeWheelDelta(event: Pick<WheelEvent, "deltaX" | "deltaY" | "deltaMode">, viewport: HTMLElement) {
@@ -135,6 +132,7 @@ export function attachNestedScrollHandoff(options: NestedScrollHandoffOptions): 
   const {
     parent,
     onParentScrollIntent,
+    writeParentOffset,
     latchHoldMs = 220,
     now = () => Date.now(),
   } = options;
@@ -156,7 +154,7 @@ export function attachNestedScrollHandoff(options: NestedScrollHandoffOptions): 
     if (latched) {
       event.preventDefault();
       onParentScrollIntent?.(delta.y);
-      parent.scrollTop += delta.y;
+      writeParentOffset(parent.scrollTop + delta.y);
       latchUntil = t + latchHoldMs;
       return;
     }
@@ -168,7 +166,7 @@ export function attachNestedScrollHandoff(options: NestedScrollHandoffOptions): 
 
     event.preventDefault();
     onParentScrollIntent?.(delta.y);
-    parent.scrollTop += delta.y;
+    writeParentOffset(parent.scrollTop + delta.y);
     latchUntil = t + latchHoldMs;
   };
 

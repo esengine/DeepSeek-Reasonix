@@ -162,16 +162,12 @@ await act(async () => {
   root.render(renderEditor(customProvider));
   await flushPromises();
 });
-const existingNameInput = rootEl.querySelector<HTMLInputElement>('input[placeholder="e.g. my-proxy"]');
-ok(existingNameInput?.disabled === true, "existing custom provider name is locked");
-ok(existingNameInput?.classList.contains("mem-input") === true, "locked provider name keeps mem-input base styling");
-ok(existingNameInput?.classList.contains("provider-name-input") === true, "locked provider name carries the scoped provider-name-input class");
-eq(rootEl.querySelector<HTMLLabelElement>(`label[for="${existingNameInput?.id}"]`)?.textContent, en["settings.customProviderName"], "locked provider name has a programmatic label");
-const existingNameHint = nameHint(rootEl);
-eq(existingNameHint?.textContent, en["settings.customProviderNameReadonlyHint"], "existing custom provider editor shows the rename hint");
-ok(existingNameHint?.classList.contains("provider-name-readonly-hint") === true, "rename hint carries the stronger contrast class");
-ok(Boolean(existingNameHint?.id), "rename hint has a stable id");
-eq(existingNameInput?.getAttribute("aria-describedby"), existingNameHint?.id, "locked provider name references the rename hint");
+const existingNameInput = rootEl.querySelector<HTMLInputElement>(".provider-name-input");
+ok(existingNameInput?.disabled === false, "existing connection label is editable");
+ok(existingNameInput?.classList.contains("mem-input") === true, "connection label retains base styling");
+eq(rootEl.querySelector<HTMLLabelElement>(`label[for="${existingNameInput?.id}"]`)?.textContent, en["settings.connections.name"], "connection label has a programmatic label");
+eq(rootEl.querySelector("details code")?.textContent, customProvider.name, "stable identity is shown separately");
+ok(nameHint(rootEl) === null, "obsolete rename restriction is absent");
 
 await act(async () => {
   root.unmount();

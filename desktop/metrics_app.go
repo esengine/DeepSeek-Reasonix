@@ -329,7 +329,7 @@ func (m *metricsAggregator) observe(e event.Event) {
 		}
 	case event.TurnDone:
 		m.inc("turns", "total")
-		if e.Err != nil && e.Outcome != event.TurnOutcomeRecoveryPaused {
+		if e.Err != nil && e.Outcome != event.TurnOutcomeRecoveryPaused && e.Outcome != event.TurnOutcomeCompletionUncertain && e.Outcome != event.TurnOutcomeIncompleteRead {
 			m.inc("provider_error", errorClass(e.Err.Error()))
 		}
 	case event.ToolResult:
@@ -339,10 +339,28 @@ func (m *metricsAggregator) observe(e event.Event) {
 	case event.CompactionDone:
 		m.inc("compaction", "total")
 	case event.Notice:
-		if e.Text == "No visible answer was produced; asking the assistant to respond again." || strings.HasPrefix(e.Detail, "empty final answer blocked") {
+		if e.Code == event.NoticeCodeEmptyFinal || strings.HasPrefix(e.Detail, "empty final answer blocked") {
 			m.inc("empty_final", "total")
 		}
 	}
+}
+
+func (m *metricsAggregator) observeSubagentLifecycle(info event.SubagentLifecycleInfo) {
+	phase := knownBucket(info.Phase, "child_created", "child_running", "child_completed", "child_partial", "child_failed", "child_cancelled", "child_resume")
+	status := knownBucket(info.Status, "queued", "running", "completed", "partial", "failed", "cancelled")
+	m.inc("subagent_lifecycle", phase+"_"+status)
+	if info.ErrorCode != "" {
+		m.inc("subagent_error", knownBucket(info.ErrorCode, "completion_uncertain", "final_readiness", "review_unavailable", "max_steps", "incomplete_read", "provider_connection", "subagent_error"))
+	}
+	if info.Retryable {
+		m.inc("subagent_retryable", "yes")
+	} else {
+		m.inc("subagent_retryable", "no")
+	}
+}
+
+func metricsEventRequiresPersist(e event.Event) bool {
+	return e.Kind == event.TurnDone
 }
 
 func cacheBucket(hit, miss int) string {

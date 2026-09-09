@@ -6,6 +6,8 @@
 
 本文说明 rewind 快照机制。关于自主运行期间智能体何时应暂停并询问用户，参见[任务合约与暂停策略](./TASK_CONTRACT.zh-CN.md)。
 
+基于这些快照展示的本轮差异与检查记录，参见[本轮结果](./TURN_RESULTS.zh-CN.md)。
+
 ## 目标
 
 让用户把会话回退到之前的节点，并恢复**代码**、**会话**或**两者**，且不改动 git 历史。对话回溯改为显式分叉，父会话永不截断。详见 [会话所有权](./SESSION_OWNERSHIP.zh-CN.md)。CLI 与桌面端采用同一套机制。
@@ -71,12 +73,21 @@ type RewindScope int // Code | Conversation | Both
 func (c *Controller) Checkpoints() []CheckpointMeta
 func (c *Controller) PrepareRewind(turn int, scope RewindScope) (RewindPlan, error)
 func (c *Controller) CommitRewind(planID string) (RewindResult, error)
+func (c *Controller) CommitRewindInPlace(planID string) (RewindResult, error)
+func (c *Controller) UndoRewind(transactionID string) (RewindResult, error)
 ```
 
 - **Code**：遍历从 `turn` 到最新的所有 checkpoint，按路径选取最早的 `FileSnap`，把文件恢复到对应内容；若为 `nil` 则删除。也就是撤销 `turn` 及之后的全部编辑。恢复前会再次按当前工作区根目录检查路径逃逸。
-- **Conversation**：在该回合边界创建新会话分支。父会话 transcript 永不截断。详见 [会话所有权](./SESSION_OWNERSHIP.zh-CN.md)。
-- **Both**：先创建新会话分支，再恢复代码；如果文件校验冲突，保留分支并返回
+- **Conversation**：在该回合边界于同一会话日志内分叉出 `rewind` head；格式 1
+  会话则仍创建新的会话文件。原有链永不截断。详见 [会话所有权](./SESSION_OWNERSHIP.zh-CN.md)。
+- **Both**：先分叉，再恢复代码；如果文件校验冲突，保留新 head 并返回
   `partial=true`。
+- `CommitRewind` 让 Controller 留在原处，并在 `Branch` 中返回新 head（或分叉
+  文件路径）；`CommitRewindInPlace` 则把 Controller 移到回溯后的对话上。桌面
+  标签页和终端都使用就地形式，同一个标签页或屏幕直接显示回溯后的 transcript。
+- `UndoRewind` 恢复文件 after-image。若 Controller 正位于一个此后没有新增内容
+  的回溯 head 上，则回到父 head 并退役这个空 head；已继续对话的回溯 head 作为
+  版本保留。
 
 统一的 `Rewound` 事件（或复用 history-replace 事件）让所有前端以相同方式重绘。
 
@@ -84,12 +95,16 @@ func (c *Controller) CommitRewind(planID string) (RewindResult, error)
 
 - 输入框为空时按两次 **`Esc`**，或执行 **`/rewind`**，打开用户回合列表，显示时间和每个回合改动的文件。`chat_tui` 已跟踪双 Esc 的时间窗口。
 - 选择一个回合后显示子菜单：**`[code+conversation] [conversation] [code] [cancel]`**。
-- 恢复 conversation 或 both 时，把所选提示回填到输入框。
+- 恢复 conversation 或 both 时，终端就地重放回溯后的 head，并把所选提示回填到
+  输入框；原有链仍列在 `/branch` 中。
 
 ## 桌面端体验（与 VS Code 扩展对齐）
 
 - Transcript 中每条用户消息悬停时显示 **rewind** 控件，并提供：恢复代码、恢复会话、同时恢复、从此处分叉。
 - 前端通过 Wails binding 调用同一个 prepare / commit rewind API；Controller 事件流推送恢复结果，React 负责重绘。前端不包含独立 rewind 逻辑。
+- 对话回溯和“从此处分叉”保留当前标签页并把它切到新 head，原有链留在“查看
+  版本”中。只有隔离 worktree 分叉才会打开新标签页，因为它要把会话复制到新的
+  工作区。
 
 ## 非目标与边界情况
 

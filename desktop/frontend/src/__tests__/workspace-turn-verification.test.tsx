@@ -5,6 +5,8 @@ import { registerHooks } from "node:module";
 import React, { act } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { WORKSPACE_TURN_VERIFICATION_ID, WorkspacePanel } from "../components/WorkspacePanel";
+import { WorkspaceTurnResult } from "../components/WorkspaceTurnResult";
+import { TurnCheckDetails } from "../components/TurnCheckDetails";
 import { LocaleProvider } from "../lib/i18n";
 import type { AppBindings } from "../lib/bridge";
 import type { WireCompletionSummary } from "../lib/types";
@@ -96,6 +98,9 @@ async function createHarness(props: Partial<WorkspaceProps>) {
         WorkspaceGitHistory: async () => [],
         WorkspaceChanges: async () => ({ files: [], gitAvailable: true }),
         WorkspaceChangeDetail: async () => ({}),
+        WorkspaceTurnChanges: async () => ({ turn: 0, coverage: "unknown", files: [], added: 0, removed: 0, reasons: [] }),
+        WorkspaceTurnChangeDetail: async () => null,
+        TurnCheckLog: async () => null,
         ReadFileForTab: async (_tabID, path) => ({ path, body: "", size: 0, truncated: false, binary: false }),
       } as Partial<AppBindings> as AppBindings,
     },
@@ -145,72 +150,72 @@ console.log("\nworkspace turn verification");
 {
   const current = summary(3);
   const { dom, root } = await createHarness({ initialViewMode: "changed", completionSummary: current });
-  await waitFor("turn verification summary", () => document.getElementById(WORKSPACE_TURN_VERIFICATION_ID) !== null);
-  const text = document.querySelector(".workspace-completion-summary")?.textContent ?? "";
-  ok(text.includes("Partially complete") && text.includes("3 changes"), "summary renders localized verdict and metrics");
-  ok(text.includes("stale checks") && text.includes("Other"), "summary safely labels known and unknown gaps");
-  ok(text.includes("Turn verification limited"), "summary explains constrained verification");
-  ok(!text.includes("balanced") && !text.includes("partial") && !text.includes("stale_check"), "summary exposes no raw enum values");
-  const title = document.getElementById(`${WORKSPACE_TURN_VERIFICATION_ID}-title`);
-  ok(title?.tagName === "H3", "turn verification title is a heading, not a button");
-  ok(document.querySelector(`#${WORKSPACE_TURN_VERIFICATION_ID} button`) === null, "summary does not expose a clickable control");
-  await closeHarness(dom, root);
-}
-
-{
-  const legacyDeliverySummary: WireCompletionSummary = {
-    preset: "balanced",
-    verdict: "partial",
-    mutations: 1,
-    checks_passed: 0,
-    checks_failed: 0,
-    checks_suppressed: 0,
-    review: "passed",
-    gap_kinds: ["unverified_change"],
-    constraint_degraded: false,
-  };
-  const { dom, root, rerender } = await createHarness({
-    initialViewMode: "changed",
-    completionSummary: legacyDeliverySummary,
-    qualityFloor: "delivery",
-  });
-  await waitFor("delivery attention styling", () => document.querySelector(".workspace-completion-summary") !== null);
-  ok(document.querySelector(".workspace-completion-summary")?.classList.contains("workspace-completion-summary--attention"), "legacy delivery summary uses delivery-floor attention styling");
-  await rerender({ qualityFloor: "standard" });
-  ok(!document.querySelector(".workspace-completion-summary")?.classList.contains("workspace-completion-summary--attention"), "legacy standard summary remains neutral");
+  ok(document.querySelector(".workspace-turn-result") === null, "workspace overview does not imply the current turn covers all changes");
   await closeHarness(dom, root);
 }
 
 {
   const current = summary(2);
-  const historical = summary(7);
-  const { dom, root, rerender } = await createHarness({ initialViewMode: "changed", completionSummary: current });
-  await waitFor("current summary", () => document.body.textContent?.includes("2 changes") === true);
-  let scrolled = 0;
-  Object.defineProperty(HTMLElement.prototype, "scrollIntoView", { configurable: true, value: () => { scrolled += 1; } });
-  const request = { id: 1, summary: historical, tabId: "tab-a", turnStartAt: 100, currentSummary: current };
-  await rerender({ verificationRevealRequest: request, turnStartAt: 100 } as Partial<WorkspaceProps>);
-  await waitFor("same-view scroll", () => scrolled > 0);
-  ok(document.body.textContent?.includes("7 changes"), "same-view reveal displays the requested historical summary");
-  ok(scrolled === 1, "same-view reveal scrolls exactly once");
-
-  await rerender({ completionSummary: undefined, turnStartAt: 200 } as Partial<WorkspaceProps>);
-  await waitFor("stale summary cleared", () => document.getElementById(WORKSPACE_TURN_VERIFICATION_ID) === null);
-  ok(!document.body.textContent?.includes("7 changes"), "a new turn clears the historical reveal");
+  const historical = { ...summary(7), receipt: { verdict: "partial", verifications: [{ command: "go test ./...", passed: false, exitCode: 1, toolCallId: "check-old", stale: true }] } };
+  const request = { id: 1, summary: historical, tabId: "tab-a", turnStartAt: 100, currentSummary: current, sessionPath: "/old.json", view: "checks" as const };
+  const { dom, root, rerender } = await createHarness({ initialViewMode: "changed", completionSummary: current, sessionPath: "/old.json", verificationRevealRequest: request, turnStartAt: 100 });
+  await waitFor("historical check", () => document.body.textContent?.includes("go test ./...") === true);
+  const text = document.body.textContent ?? "";
+  ok(text.includes("Exit code: 1"), "actual exit code appears with the historical command");
+  ok(!text.includes("7 files") && !text.includes("7 changes"), "mutation receipts are not presented as a diff inventory");
+  ok(text.includes("stale") || text.includes("Stale"), "later changes mark checks stale");
+  ok(!Array.from(document.querySelectorAll("button")).some(b => /Run|Retry|Continue verification/.test(b.textContent ?? "")), "result panel has only view actions");
+  await rerender({ sessionPath: "/new.json" });
+  ok(document.querySelector(".workspace-turn-result") === null, "session switch immediately fences a historical request");
   await closeHarness(dom, root);
 }
 
 {
-  const current = summary(4);
-  const historical = summary(9);
-  const { dom, root, rerender } = await createHarness({ initialViewMode: "files", completionSummary: current });
-  let scrolled = 0;
-  Object.defineProperty(HTMLElement.prototype, "scrollIntoView", { configurable: true, value: () => { scrolled += 1; } });
-  const request = { id: 2, summary: historical, tabId: "tab-a", turnStartAt: 300, currentSummary: current };
-  await rerender({ initialViewMode: "changed", verificationRevealRequest: request, turnStartAt: 300 } as Partial<WorkspaceProps>);
-  await waitFor("navigation reveal", () => document.body.textContent?.includes("9 changes") === true && scrolled > 0);
-  ok(document.getElementById(WORKSPACE_TURN_VERIFICATION_ID) !== null, "reveal navigates from Files to the change overview");
-  ok(scrolled === 1, "navigation reveal scrolls after the overview mounts");
+  const current = summary(0);
+  const historical = { ...summary(9), turnId: "turn-old", receipt: { verdict: "complete", diff: { id: "0:42", turn: 0, coverage: "complete" as const, files: [{ path: "src/old.ts", kind: "modify", added: 2, removed: 1 }], added: 2, removed: 1, reasons: [] }, verifications: [] } };
+  const request = { id: 2, summary: historical, tabId: "tab-a", turnStartAt: 300, currentSummary: current, sessionPath: "/history.json", view: "changes" as const };
+  const { dom, root, rerender } = await createHarness({ initialViewMode: "changed", completionSummary: current, verificationRevealRequest: request, sessionPath: "/history.json", turnStartAt: 300 });
+  await waitFor("frozen result", () => document.body.textContent?.includes("src/old.ts") === true);
+  ok(document.body.textContent?.includes("+2"), "historical counts come from the frozen receipt");
+  await rerender({ completionSummary: summary(42) });
+  ok(document.body.textContent?.includes("src/old.ts"), "a current summary refresh preserves the selected historical result");
+  await rerender({ turnStartAt: 301 });
+  ok(document.querySelector(".workspace-turn-result") === null, "a new turn fences the old reveal");
+  await closeHarness(dom, root);
+}
+
+{
+  const dom = installDom();
+  const root = createRoot(document.getElementById("root")!);
+  const pending = new Map<string, (value: unknown) => void>();
+  const deferred = (key: string) => new Promise(resolve => pending.set(key, resolve));
+  window.go = { main: { App: {
+    WorkspaceTurnChanges: (_tab, session) => deferred(`files:${session}`),
+    WorkspaceTurnChangeDetail: (_tab, session) => deferred(`detail:${session}`),
+    TurnCheckLog: (_tab, session) => deferred(`log:${session}`),
+  } as Partial<AppBindings> as AppBindings } };
+  const diff = { id: "frozen", turn: 0, coverage: "complete" as const, files: [{ path: "f.ts", kind: "modify", added: 1, removed: 1 }], added: 1, removed: 1, reasons: [] };
+  const result = { ...summary(1), receipt: { verdict: "partial", diff, verifications: [{ command: "test", passed: false, toolCallId: "check", toolResultId: "entry" }] } };
+  const paint = (session: string) => act(async () => root.render(<LocaleProvider><WorkspaceTurnResult summary={result} tabId="a" sessionPath={session} initialView="changes" onAllChanges={() => {}} /></LocaleProvider>));
+  await paint("old");
+  await paint("new");
+  await act(async () => pending.get("files:old")!(diff));
+  ok(document.querySelector<HTMLButtonElement>(".turn-file-list__entry")?.disabled, "old session response cannot enable the new session file list");
+  await act(async () => pending.get("files:new")!(diff));
+  await act(async () => document.querySelector<HTMLButtonElement>(".turn-file-list__entry")!.click());
+  await paint("replacement");
+  await act(async () => pending.get("detail:new")!({ ...diff.files[0], patch: "stale private patch" }));
+  ok(!document.body.textContent?.includes("stale private patch"), "late diff response is discarded after session replacement");
+  const logs = (session: string) => act(async () => root.render(<LocaleProvider><TurnCheckDetails summary={result} tabId="a" sessionPath={session} /></LocaleProvider>));
+  await logs("old");
+  await act(async () => { const details = document.querySelector<HTMLDetailsElement>("details")!; details.open = true; details.dispatchEvent(new Event("toggle")); });
+  await waitFor("old log request", () => pending.has("log:old"));
+  await logs("new");
+  await waitFor("new log request", () => pending.has("log:new"));
+  await act(async () => pending.get("log:old")!({ output: "stale private log" }));
+  ok(!document.body.textContent?.includes("stale private log"), "late log response is discarded after session replacement");
+  await act(async () => pending.get("log:new")!(null));
+  ok(document.body.textContent?.includes("Logs have not arrived, were cleared, or cannot be linked."), "cleared logs remain explicitly unavailable");
   await closeHarness(dom, root);
 }
 

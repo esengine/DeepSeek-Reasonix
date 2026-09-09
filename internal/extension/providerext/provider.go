@@ -41,6 +41,24 @@ func (p *Provider) Name() string {
 	return p.ref
 }
 
+// ModelInfo exposes the sidecar adapter's exact model capability metadata.
+// Older sidecars only provide the legacy vision bit, which is projected into
+// the canonical modality list for compatibility.
+func (p *Provider) ModelInfo() provider.ModelInfo {
+	if p == nil {
+		return provider.ModelInfo{}
+	}
+	info := provider.ModelInfo{ID: p.descriptor.Model, InputModalities: append([]provider.ModelModality(nil), p.descriptor.InputModalities...)}
+	if info.InputModalities == nil {
+		if p.descriptor.Vision {
+			info.InputModalities = []provider.ModelModality{provider.ModalityText, provider.ModalityImage}
+		} else {
+			info.InputModalities = []provider.ModelModality{provider.ModalityText}
+		}
+	}
+	return info
+}
+
 // SupportsTools binds the agent's structured-tool path to the extension's
 // declared provider capability. A text-only extension receives no schemas and
 // keeps the legacy visible-text completion contract.
@@ -82,7 +100,14 @@ func (p *Provider) MissingToolCallReasoningWarningIdentity() string {
 
 // Stream opens one sidecar stream. Each call re-resolves the live backend so
 // rolling replacement keeps the same provider-visible ref (cache-stable).
+func (p *Provider) ReasoningCapability() provider.ReasoningCapability {
+	return provider.ReasoningOptions(p.descriptor.DefaultEffort, p.descriptor.Efforts...)
+}
+
 func (p *Provider) Stream(ctx context.Context, request provider.Request) (<-chan provider.Chunk, error) {
+	if err := p.ReasoningCapability().Validate(p.descriptor.Model, request.EffortOverride); err != nil {
+		return nil, err
+	}
 	if p == nil || p.resolver == nil {
 		return nil, fmt.Errorf("extension provider is unavailable")
 	}
@@ -137,9 +162,12 @@ func (r *Resolver) open(ctx context.Context, p *Provider, client ProviderClient,
 	})
 	r.installDrainCancel(id, stream, unregisterDrainCancel)
 
-	effort := ""
+	effort := p.descriptor.DefaultEffort
 	if p.effort != nil {
 		effort = *p.effort
+	}
+	if request.EffortOverride != "" {
+		effort = request.EffortOverride
 	}
 	idleTimeout := r.idleTimeout
 	if idleTimeout <= 0 {

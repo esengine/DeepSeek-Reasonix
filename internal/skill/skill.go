@@ -65,7 +65,7 @@ const (
 // Skill is a loaded playbook.
 type Skill struct {
 	Name        string // canonical identifier; matches the directory / filename stem
-	Description string // one-liner shown in the pinned index
+	Description string // one-liner shown in the session-context catalog
 	Body        string // full markdown body (post-frontmatter), loaded eagerly
 	Scope       Scope  // where it came from
 	Path        string // absolute path to the SKILL.md / <name>.md, or "(builtin)"
@@ -89,14 +89,14 @@ type Skill struct {
 	// tool-boundary contract, not a prompt promise.
 	ReadOnly bool
 	Color    string // optional display tag for UI surfaces (frontmatter `color:`); no runtime effect
-	// Invocation gates whether this skill enters the pinned Skills index the
+	// Invocation gates whether this skill enters the Skills catalog the
 	// model reads every turn. "auto" (default) behaves like every skill always
 	// has. "manual" keeps the skill invocable by name (/<name>, run_skill) but
 	// invisible to model-initiated discovery — for user-authored subagent
 	// profiles meant to be triggered deliberately, not autonomously.
 	Invocation string // auto | manual (frontmatter `invocation:`)
-	// Routing metadata is intentionally kept out of the cache-stable Skills
-	// index; it feeds per-turn capability hints only.
+	// Routing metadata is intentionally kept out of the session-context Skills
+	// catalog; it feeds per-turn capability hints only.
 	Triggers         []string
 	NegativeTriggers []string
 	AutoUse          string // off | suggest | prefer | require

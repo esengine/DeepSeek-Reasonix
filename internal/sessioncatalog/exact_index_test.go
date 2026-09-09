@@ -118,7 +118,10 @@ func TestExactIndexDoesNotDowngradeKnownCounts(t *testing.T) {
 	}
 }
 
-func TestRecordFromOrderRejectsPreviousGenerationListingProjection(t *testing.T) {
+// A previous-generation projection is never certified, but its counts stay as
+// hints: a session whose save was interrupted must not disappear from the
+// sidebar while the repair worker recomputes it (#9890).
+func TestRecordFromOrderKeepsPreviousGenerationCountsAsUncertifiedHints(t *testing.T) {
 	record := recordFromOrder(DirectoryTarget{Path: "/sessions", Scope: "global"}, agent.SessionOrderInfo{
 		Path:                 "/sessions/chat.jsonl",
 		Scope:                "global",
@@ -130,8 +133,70 @@ func TestRecordFromOrderRejectsPreviousGenerationListingProjection(t *testing.T)
 		ListingRevision:      1,
 		ListingContentDigest: "old-digest",
 	})
-	if record.TurnsState != TurnsUnknown || record.Turns != 0 || record.Preview != "" {
-		t.Fatalf("stale listing projection remained visible: %+v", record)
+	if record.TurnsState != TurnsUnknown {
+		t.Fatalf("stale listing projection was certified: %+v", record)
+	}
+	if record.Turns != 7 || record.Preview != "stale preview" {
+		t.Fatalf("stale listing projection lost its last-known hints: %+v", record)
+	}
+}
+
+func TestExactIndexKeepsKnownCountsAsHintsWhenTranscriptChanged(t *testing.T) {
+	t.Parallel()
+	ctx := context.Background()
+	catalog, err := Open(ctx, Options{InMemory: true, DisableRepair: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = catalog.Close(ctx) })
+	record := SessionRecord{Path: "/sessions/chat.jsonl", Directory: "/sessions", Scope: "global", TopicID: "topic", CreatedAt: 1, LastActivityAt: 2, Preview: "hi", Turns: 1, TurnsState: TurnsValid, ContentFingerprint: "10:1", MetaFingerprint: "20:1", Health: HealthOK}
+	if err := catalog.UpsertSession(ctx, record); err != nil {
+		t.Fatal(err)
+	}
+	record.Preview, record.Turns, record.TurnsState, record.ContentFingerprint, record.MetaFingerprint = "", 0, TurnsUnknown, "11:2", "20:2"
+	if err := catalog.UpsertSession(ctx, record); err != nil {
+		t.Fatal(err)
+	}
+	got, ok, err := catalog.GetSession(ctx, record.Path)
+	if err != nil || !ok {
+		t.Fatalf("GetSession: ok=%v err=%v", ok, err)
+	}
+	if got.TurnsState != TurnsUnknown {
+		t.Fatalf("changed transcript kept a certified count: %+v", got)
+	}
+	if got.Turns != 1 || got.Preview != "hi" {
+		t.Fatalf("changed transcript lost its last-known hints: %+v", got)
+	}
+}
+
+func TestPreserveKnownSourceStatesKeepsHintsAcrossFingerprintChange(t *testing.T) {
+	t.Parallel()
+	ctx := context.Background()
+	catalog, err := Open(ctx, Options{InMemory: true, DisableRepair: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = catalog.Close(ctx) })
+	known := SessionRecord{Path: "/sessions/chat.jsonl", Directory: "/sessions", Scope: "global", TopicID: "topic", CreatedAt: 1, LastActivityAt: 2, Preview: "hi", Turns: 1, TurnsState: TurnsValid, ContentFingerprint: "10:1", MetaFingerprint: "20:1", Health: HealthOK}
+	if err := catalog.UpsertSession(ctx, known); err != nil {
+		t.Fatal(err)
+	}
+	changed := SessionRecord{Path: known.Path, Directory: known.Directory, Scope: "global", TurnsState: TurnsUnknown, ContentFingerprint: "11:2", Health: HealthOK}
+	records, err := catalog.preserveKnownSourceStates(ctx, known.Directory, []SessionRecord{changed})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := records[0]; got.TurnsState != TurnsUnknown || got.Turns != 1 || got.Preview != "hi" {
+		t.Fatalf("changed fingerprint = %+v, want unknown state with last-known hints", got)
+	}
+	same := changed
+	same.ContentFingerprint = known.ContentFingerprint
+	records, err = catalog.preserveKnownSourceStates(ctx, known.Directory, []SessionRecord{same})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := records[0]; got.TurnsState != TurnsValid || got.Turns != 1 || got.Preview != "hi" {
+		t.Fatalf("unchanged fingerprint = %+v, want the certified state restored", got)
 	}
 }
 

@@ -1,6 +1,7 @@
 package agent
 
 import (
+	"encoding/json"
 	"os"
 	"path/filepath"
 	"testing"
@@ -10,6 +11,7 @@ import (
 )
 
 func TestMigrateLegacySessionsRehomesNativeWALAheadOfCheckpoint(t *testing.T) {
+	useSchemaOneLog(t)
 	src := t.TempDir()
 	global := t.TempDir()
 	workspace := t.TempDir()
@@ -37,6 +39,14 @@ func TestMigrateLegacySessionsRehomesNativeWALAheadOfCheckpoint(t *testing.T) {
 	if err := loaded.SaveSnapshot(flat); err != nil {
 		t.Fatalf("append native flat session: %v", err)
 	}
+	pinned := map[string]any{"schemaVersion": 1, "sessionId": "chat-1", "files": []string{"README.md"}}
+	pinnedRaw, err := json.Marshal(pinned)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(store.SessionPinnedContext(flat), pinnedRaw, 0o600); err != nil {
+		t.Fatal(err)
+	}
 	info, err := os.Stat(srcLog)
 	if err != nil {
 		t.Fatalf("legacy source log: %v", err)
@@ -62,5 +72,43 @@ func TestMigrateLegacySessionsRehomesNativeWALAheadOfCheckpoint(t *testing.T) {
 	}
 	if _, err := os.Stat(store.SessionEventLog(flat)); !os.IsNotExist(err) {
 		t.Errorf("native flat WAL should be retired: %v", err)
+	}
+	migratedPinnedRaw, err := os.ReadFile(store.SessionPinnedContext(dest))
+	if err != nil {
+		t.Fatalf("read migrated pinned sidecar: %v", err)
+	}
+	var migratedPinned map[string]any
+	if err := json.Unmarshal(migratedPinnedRaw, &migratedPinned); err != nil {
+		t.Fatal(err)
+	}
+	if migratedPinned["sessionId"] != "chat-1" {
+		t.Fatalf("migrated pinned sessionId = %v", migratedPinned["sessionId"])
+	}
+}
+
+func TestMigratePinnedContextSidecarRewritesSessionIDAndPreservesFields(t *testing.T) {
+	dir := t.TempDir()
+	oldPath := filepath.Join(dir, "old.jsonl")
+	newPath := filepath.Join(dir, "new.jsonl")
+	raw := []byte(`{"schemaVersion":1,"sessionId":"old","files":["README.md"],"future":{"keep":true}}`)
+	if err := os.WriteFile(store.SessionPinnedContext(oldPath), raw, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := migratePinnedContextSidecar(oldPath, newPath, "new"); err != nil {
+		t.Fatal(err)
+	}
+	migratedRaw, err := os.ReadFile(store.SessionPinnedContext(newPath))
+	if err != nil {
+		t.Fatal(err)
+	}
+	var migrated map[string]any
+	if err := json.Unmarshal(migratedRaw, &migrated); err != nil {
+		t.Fatal(err)
+	}
+	if migrated["sessionId"] != "new" || migrated["future"] == nil {
+		t.Fatalf("migrated sidecar = %v", migrated)
+	}
+	if _, err := os.Stat(store.SessionPinnedContext(oldPath)); !os.IsNotExist(err) {
+		t.Fatalf("old sidecar survived migration: %v", err)
 	}
 }

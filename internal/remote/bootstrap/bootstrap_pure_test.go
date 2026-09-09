@@ -202,3 +202,102 @@ func TestSupportsRequiredServeCapabilitiesCommand(t *testing.T) {
 		t.Fatalf("capability probe must not execute a replaced pathname reported by ps:\n%s", cmd)
 	}
 }
+
+func TestTomlAssignmentString(t *testing.T) {
+	cases := []struct {
+		line  string
+		key   string
+		value string
+		ok    bool
+	}{
+		{`name = "proxy-1"`, "name", "proxy-1", true},
+		{`name="proxy-1"`, "name", "proxy-1", true},
+		{`name     =     "proxy-1"`, "name", "proxy-1", true},
+		{`name        = "proxy-1"`, "name", "proxy-1", true},
+		{`name = "proxy-1"   # aligned by a config normalizer`, "name", "proxy-1", true},
+		{`name = "proxy-2"`, "name", "proxy-2", true},
+		{`names = "proxy-1"`, "name", "proxy-1", false},
+		{`name = proxy-1`, "name", "proxy-1", false},
+		{`base_url = "http://127.0.0.1:41333"`, "base_url", "http://127.0.0.1:41333", true},
+		{`kind        = "openai"`, "kind", "openai", true},
+		{`model       = "deepseek-v4-flash"`, "model", "deepseek-v4-flash", true},
+		{`max_output_tokens = 131072`, "model", "131072", false},
+	}
+	for _, c := range cases {
+		got, ok := tomlAssignmentString(c.line, c.key)
+		if ok != c.ok || (ok && got != c.value) {
+			t.Errorf("tomlAssignmentString(%q, %q) = %q, %v; want %q, %v", c.line, c.key, got, ok, c.value, c.ok)
+		}
+	}
+}
+
+// staleAlignedProxyConfig reproduces a remote config observed in the wild: an
+// older heal installed the provider with aligned assignments and no marker
+// comment, a later heal failed to find that block (exact-match parser) and
+// appended a duplicate, and the loader resolved the name to the stale first
+// block — leaving the serve dialing a dead tunnel port.
+const staleAlignedProxyConfig = `# Reasonix configuration.
+default_model = "deepseek/deepseek-v4-flash"
+
+[[providers]]
+name        = "reasonix-desktop-proxy-bc965691ed1e10b8"
+kind        = "openai"
+base_url    = "http://127.0.0.1:46407"
+model       = "deepseek-v4-pro"
+api_key_env = "REASONIX_PROXY_TOKEN_BC965691ED1E10B8"
+
+[[providers]]
+# managed by the Reasonix desktop credential proxy — safe to delete
+name = "reasonix-desktop-proxy-bc965691ed1e10b8"
+kind = "openai"
+base_url = "http://127.0.0.1:41333"
+model = "deepseek-v4-pro"
+api_key_env = "REASONIX_PROXY_TOKEN_BC965691ED1E10B8"
+
+[[providers]]
+name = "mine"
+kind = "openai"
+base_url = "https://api.deepseek.com"
+api_key_env = "MY_KEY"
+`
+
+func TestProviderBlockIndexFindsAlignedBlock(t *testing.T) {
+	if idx := providerBlockIndex(staleAlignedProxyConfig, "reasonix-desktop-proxy-bc965691ed1e10b8"); idx < 0 {
+		t.Fatal("aligned provider block not found")
+	}
+	if idx := providerBlockIndex(staleAlignedProxyConfig, "mine"); idx < 0 {
+		t.Fatal("user provider block not found")
+	}
+	if idx := providerBlockIndex(staleAlignedProxyConfig, "absent"); idx >= 0 {
+		t.Fatalf("absent provider reported at %d", idx)
+	}
+}
+
+func TestDropDuplicateProviderBlocks(t *testing.T) {
+	deduped, changed := dropDuplicateProviderBlocks(staleAlignedProxyConfig, "reasonix-desktop-proxy-bc965691ed1e10b8")
+	if !changed {
+		t.Fatal("duplicate blocks were not dropped")
+	}
+	if got := strings.Count(deduped, `"reasonix-desktop-proxy-bc965691ed1e10b8"`); got != 1 {
+		t.Fatalf("want exactly one provider block, got %d:\n%s", got, deduped)
+	}
+	if !strings.Contains(deduped, `name = "mine"`) {
+		t.Fatalf("unrelated provider block lost:\n%s", deduped)
+	}
+	if unchanged, changed := dropDuplicateProviderBlocks(deduped, "reasonix-desktop-proxy-bc965691ed1e10b8"); changed {
+		t.Fatalf("second dedup rewrote an already-clean config:\n%s", unchanged)
+	}
+}
+
+func TestRewriteManagedProviderBaseURLsHealsAlignedBlocks(t *testing.T) {
+	rewritten, changed := rewriteManagedProviderBaseURLs(staleAlignedProxyConfig, "http://127.0.0.1:41333")
+	if !changed {
+		t.Fatal("stale aligned base_url was not rewritten")
+	}
+	if got := strings.Count(rewritten, `base_url = "http://127.0.0.1:41333"`); got != 2 {
+		t.Fatalf("both managed blocks must follow the tunnel port, got %d:\n%s", got, rewritten)
+	}
+	if !strings.Contains(rewritten, `base_url = "https://api.deepseek.com"`) {
+		t.Fatalf("user provider base_url was rewritten:\n%s", rewritten)
+	}
+}

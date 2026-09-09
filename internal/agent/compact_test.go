@@ -26,11 +26,13 @@ func prepareForObservedUsage(a *Agent, ctx context.Context, usage *provider.Usag
 // fakeProvider returns a fixed reply and records the messages it was asked to
 // complete, so tests can drive summarization without a network call.
 type fakeProvider struct {
-	reply        string
-	promptTokens int
-	got          []provider.Message
-	streamErr    error // when set, Stream emits a ChunkError instead of the reply
-	hang         bool  // when true, Stream returns a channel that never sends or closes
+	reply          string
+	reasoningReply string // set (with empty reply) to emit ChunkReasoning: thinking-model shape
+	reasoningTool  bool   // with reasoningReply: also open a tool call, the shape that stays rejected
+	promptTokens   int
+	got            []provider.Message
+	streamErr      error // when set, Stream emits a ChunkError instead of the reply
+	hang           bool  // when true, Stream returns a channel that never sends or closes
 }
 
 func (f *fakeProvider) Name() string { return "fake" }
@@ -50,7 +52,17 @@ func (f *fakeProvider) Stream(_ context.Context, req provider.Request) (<-chan p
 		close(ch)
 		return ch, nil
 	}
-	ch <- provider.Chunk{Type: provider.ChunkText, Text: f.reply}
+	// Default stays byte-identical to the historical shape: always emit
+	// ChunkText (even empty). Only an explicit reasoningReply with no reply
+	// switches to the thinking-model reasoning-only shape.
+	if f.reply == "" && f.reasoningReply != "" {
+		ch <- provider.Chunk{Type: provider.ChunkReasoning, Text: f.reasoningReply}
+		if f.reasoningTool {
+			ch <- provider.Chunk{Type: provider.ChunkToolCallStart, ToolCall: &provider.ToolCall{ID: "call-1", Name: "read_file"}}
+		}
+	} else {
+		ch <- provider.Chunk{Type: provider.ChunkText, Text: f.reply}
+	}
 	if f.promptTokens > 0 {
 		ch <- provider.Chunk{Type: provider.ChunkUsage, Usage: &provider.Usage{PromptTokens: f.promptTokens, TotalTokens: f.promptTokens}}
 	}

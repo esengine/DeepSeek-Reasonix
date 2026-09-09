@@ -53,9 +53,12 @@ type Change struct {
 // means it last ran before the newest mutation, so it proves nothing about
 // the current tree.
 type Verification struct {
-	Command string
-	Passed  bool
-	Stale   bool
+	Command     string
+	Passed      bool
+	Stale       bool
+	ToolCallID  string
+	Interrupted bool
+	ExitCode    *int
 }
 
 // GapKind classifies one thing the report refuses to present as verified.
@@ -223,15 +226,18 @@ func verificationsOf(receipts []evidence.Receipt, workspaceRoot string, scratchR
 	at := map[string]int{}
 	for i, r := range receipts {
 		command := strings.TrimSpace(r.Command)
-		if command == "" || !evidence.IsVerificationCommand(command) {
+		if command == "" || r.Verification == evidence.VerificationNotVerification || r.Verification == evidence.VerificationNotRun || !evidence.IsVerificationCommand(command) {
 			continue
 		}
 		if _, seen := at[command]; !seen {
 			at[command] = len(out)
 			out = append(out, Verification{Command: command})
 		}
-		out[at[command]].Passed = r.Success
+		out[at[command]].Passed = r.Success && (r.ExitCode == nil || *r.ExitCode == 0) && r.Verification != evidence.VerificationFailed
 		out[at[command]].Stale = i < lastMutation
+		out[at[command]].ToolCallID = r.ToolCallID
+		out[at[command]].Interrupted = r.Interrupted
+		out[at[command]].ExitCode = r.ExitCode
 	}
 	return out
 }

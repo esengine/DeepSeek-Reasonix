@@ -100,6 +100,23 @@ function installContextPanelMock(fn: (tabId: string) => Promise<ContextPanelInfo
   };
 }
 
+async function checkSeparateDurations() {
+  const dom = installDom();
+  installContextPanelMock(async () => ({ ...contextPanelInfo(12), elapsedMs: 120_000 }));
+  const { root } = await renderRing({ turnMetrics: { elapsed: "20s", tokens: "104 tokens", tps: "12 tokens/s" } });
+  await act(async () => {
+    (document.querySelector(".context-ring") as HTMLButtonElement).click();
+    await wait();
+  });
+  const rows = [...document.querySelectorAll(".context-ring-popover__row")];
+  const value = (label: string) => rows.find(row => row.querySelector(".context-ring-popover__label")?.textContent === label)
+    ?.querySelector(".context-ring-popover__value")?.textContent;
+  eq(value("Turn time"), "20s", "turn duration has its own stable label");
+  ok(Boolean(value("Session time")) && value("Session time") !== "20s", "session duration stays separate from turn duration");
+  await act(async () => { root.unmount(); });
+  dom.window.close();
+}
+
 async function renderRing(props: Partial<Parameters<typeof ContextWindowRing>[0]> = {}) {
   const rootEl = document.getElementById("root");
   if (!rootEl) throw new Error("missing root");
@@ -126,6 +143,23 @@ async function renderRing(props: Partial<Parameters<typeof ContextWindowRing>[0]
 }
 
 console.log("\ncontext window ring");
+
+{
+  const dom = installDom();
+  installContextPanelMock(async () => contextPanelInfo(2));
+  const { root } = await renderRing();
+  const trigger = document.querySelector<HTMLButtonElement>(".context-ring")!;
+  eq(trigger.textContent, "10%", "ring exposes its percentage outside Creation layout");
+  await act(async () => { trigger.focus(); trigger.click(); await wait(); });
+  eq(trigger.getAttribute("aria-expanded"), "true", "keyboard activation opens usage details");
+  await act(async () => {
+    document.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true }));
+    await wait(230);
+  });
+  eq(trigger.getAttribute("aria-expanded"), "false", "Escape cancels pending hover timers without reopening");
+  await act(async () => { root.unmount(); });
+  dom.window.close();
+}
 
 {
   const dom = installDom();
@@ -251,5 +285,6 @@ console.log("\ncontext window ring");
   dom.window.close();
 }
 
+await checkSeparateDurations();
 console.log(`\n${passed} passed, ${failed} failed`);
 if (failed > 0) process.exit(1);

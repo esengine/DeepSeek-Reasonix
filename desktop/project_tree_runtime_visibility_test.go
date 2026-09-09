@@ -43,8 +43,8 @@ func TestProjectTreeRuntimeSnapshotFindsRestoredTabBeforeFirstEvent(t *testing.T
 		Ready:       true,
 	}
 	snapshot := app.GetProjectTreeRuntimeSnapshot()
-	if snapshot.Revision != 0 || len(snapshot.Topics) != 1 {
-		t.Fatalf("initial runtime snapshot = %+v, want one topic at revision 0", snapshot)
+	if snapshot.Revision == 0 || len(snapshot.Topics) != 1 {
+		t.Fatalf("initial runtime snapshot = %+v, want one committed topic with a revision", snapshot)
 	}
 	topic := snapshot.Topics[0]
 	if topic.Node.TopicID != "topic-restored" || !topic.Node.Open || !topic.Node.Running {

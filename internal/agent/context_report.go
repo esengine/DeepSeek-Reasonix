@@ -55,7 +55,7 @@ func (a *Agent) ContextReport() ContextReport {
 
 	if a.contextWindow > 0 {
 		rep.FoldThreshold = a.compactTrigger()
-		if _, reason := a.contextMaintenanceBlocked(a.contextMaintenanceInputHash(visible)); reason != "" {
+		if _, reason := a.contextMaintenanceBlocked(a.contextMaintenanceInputHash(visible), 0); reason != "" {
 			rep.BlockedReason = reason
 		}
 	}

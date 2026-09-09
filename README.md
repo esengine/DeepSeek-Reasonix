@@ -124,7 +124,7 @@ cd DeepSeek-Reasonix
 
 #### CLI
 
-The CLI build requires **Go 1.25+**. The module pins a `toolchain` directive;
+The CLI build requires **Go 1.26+**. The module pins a `toolchain` directive;
 keep `GOTOOLCHAIN=auto` so Go downloads the pinned toolchain, or install it.
 
 ```sh

@@ -174,6 +174,7 @@ func TestAutosaveFailureRetriesAndRecoversOnNextTurnDone(t *testing.T) {
 }
 
 func TestDesktopSnapshotConflictRecoveryUpdatesTabAndProjectTree(t *testing.T) {
+	t.Setenv(agent.SessionLogSchemaEnv, "v1")
 	isolateDesktopUserDirs(t)
 
 	root := globalTabWorkspaceRoot()
@@ -289,6 +290,7 @@ func TestDesktopSnapshotConflictRecoveryUpdatesTabAndProjectTree(t *testing.T) {
 }
 
 func TestDesktopSnapshotConflictRecoveryRequiresRecoveryLease(t *testing.T) {
+	t.Setenv(agent.SessionLogSchemaEnv, "v1")
 	isolateDesktopUserDirs(t)
 
 	root := globalTabWorkspaceRoot()

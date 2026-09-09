@@ -9,6 +9,8 @@ import (
 
 	"reasonix/internal/event"
 	"reasonix/internal/evidence"
+	"reasonix/internal/i18n"
+	"reasonix/internal/provider"
 )
 
 // governorEnabled gates enforcement for the A/B experiment; eligibility is
@@ -17,7 +19,7 @@ import (
 var governorEnabled = os.Getenv("REASONIX_EXPERIMENT_GOVERNOR") == "1"
 
 // governorEffort is the reduced depth the engaged governor asks of the
-// provider; endpoints whose vocabulary lacks it silently keep their default.
+// provider, only when that adapter explicitly declares the level.
 const governorEffort = "low"
 
 type governorState struct {
@@ -44,6 +46,10 @@ func governorExit(sample evidence.OutcomeSample) bool {
 // experiment arm, toggles the per-request depth override.
 func (a *Agent) applyGovernor(sample *evidence.OutcomeSample) {
 	sample.GovernorEligible = governorTrigger(*sample, a.turn.lastReasoning)
+	if provider.PreferredReasoning(a.svc.prov, governorEffort) == "" {
+		a.task.governor.engaged = false
+		return
+	}
 	if !governorEnabled {
 		return
 	}
@@ -55,7 +61,7 @@ func (a *Agent) applyGovernor(sample *evidence.OutcomeSample) {
 		if !a.task.governor.noticed {
 			a.task.governor.noticed = true
 			a.svc.sink.Emit(event.Event{Kind: event.Notice, Level: event.LevelInfo, Code: event.NoticeCodeReasoningGovernor,
-				Text:   "Exploration phase with expensive thinking; riding reduced reasoning depth until evidence work starts.",
+				Text:   i18n.M.ReasoningGovernor,
 				Detail: "reasoning governor engaged: no verification debt, no local execution, previous round over the reasoning threshold"})
 		}
 	}

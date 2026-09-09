@@ -472,7 +472,7 @@ func (a *App) liveHistorySliceSource(ctrl control.SessionAPI, sessionPath string
 			roles := make([]provider.Role, n)
 			for i, e := range idx.Entries {
 				turns[i] = e.AuthoredTurn
-				roles[i] = e.Role
+				roles[i] = historyPersistedUserRole(e.Role, e.PinnedContextRevision)
 			}
 			turn := idx.AuthoredTurns
 			if idx.MessageCount < n {
@@ -482,7 +482,7 @@ func (a *App) liveHistorySliceSource(ctrl control.SessionAPI, sessionPath string
 						turn++
 					}
 					turns[idx.MessageCount+j] = turn
-					roles[idx.MessageCount+j] = m.Role
+					roles[idx.MessageCount+j] = historyPersistedUserRole(m.Role, agent.IsPinnedContextRevision(m))
 				}
 			}
 			src := &historySliceSource{
@@ -532,7 +532,7 @@ func newInMemoryHistorySliceSource(sessionID string, msgs []provider.Message, re
 			turn++
 		}
 		turns[i] = turn
-		roles[i] = m.Role
+		roles[i] = historyPersistedUserRole(m.Role, agent.IsPinnedContextRevision(m))
 	}
 	src := &historySliceSource{
 		sessionID:  sessionID,
@@ -740,7 +740,7 @@ func coldHistorySliceSource(sessionPath string, idx *agent.SessionDisplayIndex) 
 	roles := make([]provider.Role, n)
 	for i, e := range idx.Entries {
 		turns[i] = e.AuthoredTurn
-		roles[i] = e.Role
+		roles[i] = historyPersistedUserRole(e.Role, e.PinnedContextRevision)
 	}
 	revision := idx.Revision
 	if !idx.RevisionKnown {
@@ -1205,7 +1205,7 @@ func historyWindowWithPersistedTimes(msgs []provider.Message, sessionPath string
 	}
 	needsPersistedTime := false
 	for _, msg := range msgs {
-		if msg.Role == provider.RoleUser && msg.CreatedAt <= 0 && agent.IsUserAuthoredTurn(agent.UserMessageText(msg)) {
+		if msg.CreatedAt <= 0 && agent.IsUserAuthoredTurnMessage(msg) {
 			needsPersistedTime = true
 			break
 		}
@@ -1220,7 +1220,7 @@ func historyWindowWithPersistedTimes(msgs []provider.Message, sessionPath string
 	out := append([]provider.Message(nil), msgs...)
 	userIndex := userOffset
 	for i := range out {
-		if out[i].Role != provider.RoleUser {
+		if out[i].Role != provider.RoleUser || agent.IsPinnedContextRevision(out[i]) {
 			continue
 		}
 		if userIndex >= len(users) {
@@ -1629,100 +1629,6 @@ func (a *App) legacyHistoryFieldValue(sessionPath, sessionDir string, row int, r
 		return "", false
 	}
 	return historyEntryFieldValue(&messages[row], ref.Field, ref.ToolCallID)
-}
-
-// --- Background index maintenance ------------------------------------------
-
-// kickHistoryIndexRebuild single-flight schedules a background display-index
-// rebuild for a live session whose on-disk index did not validate. It never
-// blocks the request path.
-func (a *App) kickHistoryIndexRebuild(sessionPath string) {
-	if strings.TrimSpace(sessionPath) == "" {
-		return
-	}
-	a.historySliceMu.Lock()
-	if a.historyIndexRebuilds == nil {
-		a.historyIndexRebuilds = map[string]struct{}{}
-	}
-	if _, ok := a.historyIndexRebuilds[sessionPath]; ok {
-		a.historySliceMu.Unlock()
-		return
-	}
-	a.historyIndexRebuilds[sessionPath] = struct{}{}
-	a.historySliceMu.Unlock()
-	a.goSafe("historyIndexRebuild", func() {
-		defer func() {
-			a.historySliceMu.Lock()
-			delete(a.historyIndexRebuilds, sessionPath)
-			a.historySliceMu.Unlock()
-		}()
-		a.rebuildHistoryIndexForLiveSession(sessionPath)
-	})
-}
-
-// kickHistoryReadModelRepair single-flights the stronger cold-session repair:
-// replay the authoritative event log under the save lock, atomically refresh
-// the JSONL random-read model, then publish matching offsets. The cold request
-// already returned from its in-memory recovery source before this work starts.
-func (a *App) kickHistoryReadModelRepair(sessionPath string) {
-	if strings.TrimSpace(sessionPath) == "" {
-		return
-	}
-	key := "read-model:" + agent.CanonicalSessionPath(sessionPath)
-	a.historySliceMu.Lock()
-	if a.historyIndexRebuilds == nil {
-		a.historyIndexRebuilds = map[string]struct{}{}
-	}
-	if _, ok := a.historyIndexRebuilds[key]; ok {
-		a.historySliceMu.Unlock()
-		return
-	}
-	a.historyIndexRebuilds[key] = struct{}{}
-	a.historySliceMu.Unlock()
-	a.goSafe("historyReadModelRepair", func() {
-		defer func() {
-			a.historySliceMu.Lock()
-			delete(a.historyIndexRebuilds, key)
-			a.historySliceMu.Unlock()
-		}()
-		if err := agent.RepairSessionDisplayReadModel(sessionPath); err != nil {
-			slog.Debug("desktop: history read-model repair failed", "path", sessionPath, "err", err)
-		}
-	})
-}
-
-// rebuildHistoryIndexForLiveSession republishes the display index for a live
-// session, but only when the in-memory log is exactly the persisted
-// transcript — an append-only tail means the next save will publish a
-// covering index anyway, and a scanned .jsonl anchor cannot describe the
-// event-log tail.
-func (a *App) rebuildHistoryIndexForLiveSession(sessionPath string) {
-	a.mu.RLock()
-	ctrls := make([]control.SessionAPI, 0, len(a.tabs))
-	for _, tab := range a.tabs {
-		if tab != nil && tab.Ctrl != nil {
-			ctrls = append(ctrls, tab.Ctrl)
-		}
-	}
-	a.mu.RUnlock()
-	var ctrl control.SessionAPI
-	for _, c := range ctrls {
-		if c.SessionPath() == sessionPath {
-			ctrl = c
-			break
-		}
-	}
-	wc, ok := ctrl.(historyWindowController)
-	if !ok {
-		return
-	}
-	ps, ok := wc.SessionPersistedState()
-	if !ok || !ps.UnchangedSincePersisted {
-		return
-	}
-	if err := agent.RepairSessionDisplayReadModel(sessionPath); err != nil {
-		slog.Debug("desktop: live history read-model rebuild failed", "path", sessionPath, "err", err)
-	}
 }
 
 // startHistoryIndexMigration arms the startup background worker that builds

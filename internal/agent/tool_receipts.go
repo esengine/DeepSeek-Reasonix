@@ -58,8 +58,10 @@ func (a *Agent) recordToolReceipts(plan *toolCallPlan, result string, execution 
 		}
 	case plan.evidenceName != call.Name:
 		proxy := evidence.ReceiptFromToolCall(call.Name, args, err == nil, true)
+		proxy.ToolCallID = call.ID
 		a.task.ledger.Record(proxy)
 		rec := evidence.ReceiptFromToolCall(plan.evidenceName, plan.evidenceArgs, err == nil, plan.readOnly)
+		rec.ToolCallID = call.ID
 		rec.Mutation = plan.effects.ContentMutation
 		a.stampReceiptDeliveryScope(&rec)
 		rec.PolicyFloor = floorStamp
@@ -68,6 +70,7 @@ func (a *Agent) recordToolReceipts(plan *toolCallPlan, result string, execution 
 		a.commitToolReceipt(rec)
 	default:
 		rec := evidence.ReceiptFromToolCall(call.Name, args, err == nil, plan.tool.ReadOnly())
+		rec.ToolCallID = call.ID
 		rec.Mutation = plan.effects.ContentMutation
 		a.stampReceiptDeliveryScope(&rec)
 		rec.PolicyFloor = floorStamp

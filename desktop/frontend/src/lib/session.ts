@@ -1,11 +1,17 @@
-import type { ProjectNode, SessionMeta } from "./types";
+import type { HistorySearchHit, ProjectNode, SessionMeta } from "./types";
 
 export function sessionActivityTime(session: SessionMeta): number {
   return session.lastActivityAt ?? session.modTime;
 }
 
 export function historySessionDisplayTitle(session: Pick<SessionMeta, "preview" | "title" | "topicTitle">, fallback: string): string {
-  return session.title?.trim() || session.topicTitle?.trim() || session.preview?.trim() || fallback;
+  return session.topicTitle?.trim() || session.title?.trim() || session.preview?.trim() || fallback;
+}
+
+export function historySearchHitDisplayTitle(
+  hit: Pick<HistorySearchHit, "sessionPath" | "sessionTitle" | "topicTitle">,
+): string {
+  return hit.topicTitle?.trim() || hit.sessionTitle?.trim() || hit.sessionPath;
 }
 
 export function paletteSessionDisplayTitle(session: Pick<SessionMeta, "preview" | "title" | "topicTitle">, fallback: string): string {
@@ -13,19 +19,21 @@ export function paletteSessionDisplayTitle(session: Pick<SessionMeta, "preview" 
 }
 
 export function paletteSessionHint(
-  session: Pick<SessionMeta, "preview" | "title" | "topicTitle" | "workspaceRoot">,
+  session: Pick<SessionMeta, "preview" | "title" | "topicTitle" | "topicId" | "workspaceRoot">,
 ): string | undefined {
   const primary = paletteSessionDisplayTitle(session, "");
   const title = session.title?.trim();
   const preview = session.preview?.trim();
   const workspace = session.workspaceRoot?.trim();
-  const secondary = title && title !== primary ? title : preview && preview !== primary ? preview : "";
+  const secondary = session.topicId
+    ? preview && preview !== primary ? preview : ""
+    : title && title !== primary ? title : preview && preview !== primary ? preview : "";
   const hint = [secondary, workspace].filter(Boolean).join(" · ");
   return hint || undefined;
 }
 
-export function paletteSessionKeywords(session: Pick<SessionMeta, "preview" | "title">): string[] {
-  return [session.title?.trim(), session.preview?.trim()].filter((value): value is string => Boolean(value));
+export function paletteSessionKeywords(session: Pick<SessionMeta, "preview" | "title" | "topicId">): string[] {
+  return [session.topicId ? undefined : session.title?.trim(), session.preview?.trim()].filter((value): value is string => Boolean(value));
 }
 
 // topicActivityTime returns the last-activity timestamp for a sidebar topic

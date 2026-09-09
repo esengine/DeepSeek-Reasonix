@@ -31,7 +31,14 @@ type toolCallPlan struct {
 	recoveryGen                     uint64
 	runTool                         tool.Tool
 	runArgs                         json.RawMessage
-	cctx                            context.Context
+	// readTaskID is the logical read a continuation call joined, empty for a
+	// fresh read.
+	readTaskID          string
+	readEnvelope        *tool.ReadResultEnvelope
+	readActiveMillis    int64
+	readSnapshot        string
+	expectedWriteSource tool.EvidenceTargetInfo
+	cctx                context.Context
 	// mcpApp collects the call's Apps presentation from the executing tool.
 	mcpApp                                                 *tool.MCPAppResult
 	releaseParentWrite, releaseMutationWrite, releaseLease func()
@@ -40,6 +47,10 @@ type toolCallPlan struct {
 	hooksMayMutateWorkspace                                bool
 	perCallWriteRoots                                      []string
 	skipOrdinaryGate                                       bool
+	// incompleteReadRoot binds an exact host-requested source/result page to
+	// the read chain it advances. Empty means an independent tool call.
+	incompleteReadRoot   string
+	incompleteReadAction incompleteReadAction
 }
 
 func (p *toolCallPlan) classifyEffects() {

@@ -25,6 +25,7 @@ function finalDeclaration(selector: string, property: string): string | undefine
 }
 
 const windowsPreviewSelector = ".app--windows-frameless:has(.image-viewer-backdrop) > .windows-window-controls";
+const windowsAutomationSelector = ".app--windows-frameless.app--automation > .windows-window-controls";
 
 assert.equal(finalDeclaration(".image-viewer__close", "right"), "16px");
 assert.equal(finalDeclaration(".app--windows-frameless .image-viewer__close", "right"), undefined);
@@ -32,4 +33,10 @@ assert.equal(finalDeclaration(windowsPreviewSelector, "opacity"), "0");
 assert.equal(finalDeclaration(windowsPreviewSelector, "visibility"), "hidden");
 assert.equal(finalDeclaration(windowsPreviewSelector, "pointer-events"), "none");
 
-console.log("image viewer window controls: 5 passed");
+// Management pages reserve caption space; unlike image previews, they retain
+// native window controls, including while the automation editor is open.
+assert.equal(finalDeclaration(windowsAutomationSelector, "opacity"), undefined);
+assert.equal(finalDeclaration(windowsAutomationSelector, "visibility"), undefined);
+assert.equal(finalDeclaration(windowsAutomationSelector, "pointer-events"), undefined);
+
+console.log("image viewer and automation window controls: 8 passed");

@@ -1,7 +1,6 @@
 package main
 
 import (
-	"reasonix/internal/agent"
 	"reasonix/internal/event"
 	"reasonix/internal/provider"
 )
@@ -9,6 +8,15 @@ import (
 func historyLocalOnlyRows(m provider.Message) ([]HistoryMessage, bool) {
 	if !m.LocalOnly {
 		return nil, false
+	}
+	if m.ReadPause != nil {
+		return []HistoryMessage{{Role: "notice", Code: event.TurnOutcomeIncompleteRead, Level: "info", ReadPause: m.ReadPause}}, true
+	}
+	if len(m.ProtocolRecovery) > 0 {
+		if r, ok := provider.DecodeProtocolRecovery(m.ProtocolRecovery); ok && r.State == "pending" {
+			return []HistoryMessage{{Role: "notice", Code: "protocol_recovery", Level: "info", Pending: true, ProtocolRecovery: &provider.ProtocolRecoveryAction{ID: r.ID}}}, true
+		}
+		return nil, true
 	}
 	if recovery := m.FinalReadinessRecovery; recovery != nil && recovery.Pending {
 		return []HistoryMessage{{
@@ -20,5 +28,5 @@ func historyLocalOnlyRows(m provider.Message) ([]HistoryMessage, bool) {
 			},
 		}}, true
 	}
-	return historySteerRows(agent.UserMessageText(m), true)
+	return historySteerRows(m.Content, true)
 }

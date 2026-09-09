@@ -38,7 +38,7 @@ type rememberRequest struct {
 // dropping saves.
 func NewRememberTool(store Store) tool.Tool { return rememberTool{store: store} }
 
-func (rememberTool) Name() string { return "remember" }
+func (rememberTool) Name() string { return tool.HostRemember }
 
 func (rememberTool) Description() string {
 	return "Save a durable background fact so it survives across sessions. " +

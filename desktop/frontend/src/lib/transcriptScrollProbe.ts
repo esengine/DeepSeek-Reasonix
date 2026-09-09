@@ -1,19 +1,21 @@
 /**
  * Observability probe for every imperative scroll write against the
- * transcript Virtuoso handle. The single-writer contract (only the scroll
- * arbiter may call `virtuosoRef.current.scroll*`) is enforced statically by
+ * transcript viewport. The single-writer contract is enforced statically by
  * scripts/check-single-scroll-writer.mjs; this probe is the runtime mirror:
  * tests and diagnostics can observe who wrote, what kind of write, and where
  * it landed, without intercepting the DOM.
  */
 import { isFrontendDiagnosticsBuild } from "./frontendDiagnosticsBuild";
 import { recordFrontendDiagnostic } from "./frontendDiagnosticBridge";
-import { isStableCompactTranscriptVariant, isTranscriptRowLayoutVariant } from "./transcriptRowGeometry";
 
 export type TranscriptScrollWriteRecord = {
-  /** Logical writer, e.g. "tail-follow", "jump", "recovery", or a
-   *  TranscriptScrollOwner such as "selection-edge-scroll". */
+  session?: string;
+  transaction?: number;
   owner: string;
+  intent?: string;
+  requestedOffset?: number;
+  acceptedOffset?: number;
+  outcome?: string;
   kind: "scrollTo" | "scrollBy" | "scrollToIndex" | "pinTail";
   top?: number;
   index?: number | "LAST";
@@ -52,8 +54,7 @@ export function setTranscriptScrollDiagnosticSink(sink: DiagnosticSink): void {
 
 export function recordTranscriptScrollDiagnostic(type: string, fields: Record<string, unknown> = {}): void {
   diagnosticSink?.(type, fields);
-  // Keep the legacy scroll trace intact while forwarding the same content-free
-  // geometry into the broader frontend interaction timeline.
+  // Forward the same content-free geometry into the broader frontend timeline.
   recordFrontendDiagnostic("transcript", `transcript.${type}`, fields);
   // The bench harness (desktop/frontend/bench) installs this page-side hook to
   // attach the diagnostic stream to replay failure output.
@@ -70,7 +71,13 @@ declare global {
 export function noteTranscriptScrollWrite(write: TranscriptScrollWriteRecord): void {
   if (CAPTURE_SCROLL_DIAGNOSTIC_DETAILS) {
     recordTranscriptScrollDiagnostic("scroll-write", {
+      session: write.session,
+      transaction: write.transaction,
       owner: write.owner,
+      intent: write.intent,
+      requestedOffset: write.requestedOffset,
+      acceptedOffset: write.acceptedOffset,
+      outcome: write.outcome,
       writeKind: write.kind,
       targetTop: write.top,
       targetIndex: write.index,
@@ -93,76 +100,4 @@ export function noteTranscriptScrollWrite(write: TranscriptScrollWriteRecord): v
     });
   }
   window.__REASONIX_TRANSCRIPT_SCROLL_WRITE__?.(write);
-}
-
-function finiteDatasetNumber(value: string | undefined): number | undefined {
-  const parsed = Number.parseFloat(value ?? "");
-  return Number.isFinite(parsed) ? parsed : undefined;
-}
-
-function rowFoldState(element: HTMLElement): { foldState: "none" | "open" | "closed" | "mixed"; disclosureCount: number } {
-  const disclosures = Array.from(element.querySelectorAll<HTMLElement>("[aria-expanded]"));
-  const layoutElement = element.querySelector<HTMLElement>("[data-transcript-layout-variant]");
-  const layoutVariant = layoutElement?.dataset.transcriptLayoutVariant ?? element.dataset.transcriptLayoutVariant;
-  if (isTranscriptRowLayoutVariant(layoutVariant)) {
-    if (layoutVariant.endsWith("-expanded")) return { foldState: "open", disclosureCount: disclosures.length };
-    if (layoutVariant !== "static" && layoutVariant !== "text-flow") return { foldState: "closed", disclosureCount: disclosures.length };
-  }
-  if (disclosures.length === 0) return { foldState: "none", disclosureCount: 0 };
-  const states = new Set(disclosures.map((node) => node.getAttribute("aria-expanded") === "true"));
-  return {
-    foldState: states.size > 1 ? "mixed" : states.has(true) ? "open" : "closed",
-    disclosureCount: disclosures.length,
-  };
-}
-
-/** Records only geometry and fixed row classifications; text and row keys never leave the DOM. */
-export function noteTranscriptRowMeasurement(element: HTMLElement, field: "offsetHeight" | "offsetWidth", measuredSize: number): void {
-  if (field !== "offsetHeight") return;
-  // A physical Virtuoso row can be rebound to a different logical row before
-  // its known size is refreshed. Treat that size as recycled-node metadata,
-  // not as the current row's geometry contract.
-  const previousSize = element.dataset.transcriptRecycled === "true"
-    ? undefined
-    : finiteDatasetNumber(element.dataset.knownSize);
-  const estimatedSize = finiteDatasetNumber(element.dataset.estimatedSize);
-  const comparisonSize = previousSize ?? estimatedSize;
-  if (comparisonSize !== undefined && Math.abs(measuredSize - comparisonSize) <= 0.5) return;
-  const rowIndex = finiteDatasetNumber(element.dataset.logicalIndex) ?? finiteDatasetNumber(element.dataset.index);
-  const contentRevision = finiteDatasetNumber(element.dataset.contentRevision);
-  const layoutVersion = element.dataset.layoutVersion;
-  const layoutElement = element.querySelector<HTMLElement>("[data-transcript-layout-variant]");
-  const layoutVariant = layoutElement?.dataset.transcriptLayoutVariant ?? element.dataset.transcriptLayoutVariant;
-  const estimateSource = element.dataset.estimateSource;
-  const { foldState, disclosureCount } = rowFoldState(element);
-  recordTranscriptScrollDiagnostic("row-measure", {
-    rowIndex,
-    rowKind: element.dataset.rowKind,
-    estimatedSize,
-    previousSize,
-    measuredSize,
-    sizeDelta: comparisonSize === undefined ? undefined : measuredSize - comparisonSize,
-    contentRevision,
-    ...(layoutVersion ? { layoutVersion } : {}),
-    ...(isTranscriptRowLayoutVariant(layoutVariant) ? { layoutVariant } : {}),
-    ...(estimateSource ? { estimateSource } : {}),
-    foldState,
-    disclosureCount,
-  });
-  if (comparisonSize !== undefined && isTranscriptRowLayoutVariant(layoutVariant) && isStableCompactTranscriptVariant(layoutVariant)) {
-    const absoluteError = Math.abs(measuredSize - comparisonSize);
-    const relativeError = comparisonSize > 0 ? absoluteError / comparisonSize : 0;
-    if (absoluteError > 8 || relativeError > 0.2) {
-      recordTranscriptScrollDiagnostic("geometry-contract-violation", {
-        rowIndex,
-        rowKind: element.dataset.rowKind,
-        estimatedSize: comparisonSize,
-        measuredSize,
-        sizeDelta: measuredSize - comparisonSize,
-        relativeError,
-        layoutVariant,
-        ...(estimateSource ? { estimateSource } : {}),
-      });
-    }
-  }
 }

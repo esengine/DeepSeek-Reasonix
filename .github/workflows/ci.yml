@@ -72,6 +72,10 @@ jobs:
   test:
     needs: changes
     if: always()
+    # Backstop against a wedged step holding the workflow's concurrency group:
+    # the Windows full-suite step has outlived its own timeout and kept the job
+    # alive. Normal full-suite wall time is 8-12 minutes per platform.
+    timeout-minutes: 45
     strategy:
       fail-fast: false
       matrix:
@@ -163,6 +167,13 @@ jobs:
         if: env.RUN_STEPS == 'true' && runner.os == 'Windows' && github.event_name == 'pull_request'
         timeout-minutes: 3
         run: go test -timeout=2m -run '^TestBashSharesSessionTempAcrossCalls$' ./internal/tool/builtin
+
+      # Serve and taskmonitor are outside the general Windows PR smoke list.
+      # Cover runtime identities and snapshot publication before mainline push.
+      - name: test (Windows runtime status and task snapshots)
+        if: env.RUN_STEPS == 'true' && runner.os == 'Windows' && github.event_name == 'pull_request'
+        timeout-minutes: 5
+        run: go test -timeout=2m -run '^TestRuntimeStateHTTP|^TestFileStoreSaveTaskWaitsForTransientSnapshotReader$' ./internal/serve ./internal/taskmonitor
 
       # Shell execution contract: PowerShell identity, Chinese workspace paths,
       # UTF-8 output, and ExitCode retention must gate PRs on native Windows.
@@ -322,8 +333,95 @@ jobs:
         run: go test -race ./...
 
   desktop:
+    needs: [changes, desktop-prepare, desktop-go, desktop-frontend, desktop-browser]
+    if: always()
+    runs-on: ubuntu-latest
+    steps:
+      - name: Verify desktop validation jobs
+        env:
+          CHANGES_RESULT: ${{ needs.changes.result }}
+          SHOULD_RUN: ${{ github.event_name != 'pull_request' || needs.changes.outputs.desktop != 'false' }}
+          PREPARE_RESULT: ${{ needs.desktop-prepare.result }}
+          GO_RESULT: ${{ needs.desktop-go.result }}
+          FRONTEND_RESULT: ${{ needs.desktop-frontend.result }}
+          BROWSER_RESULT: ${{ needs.desktop-browser.result }}
+        run: |
+          test "$CHANGES_RESULT" = success
+          expected=skipped
+          if [ "$SHOULD_RUN" = true ]; then expected=success; fi
+          test "$PREPARE_RESULT" = "$expected"
+          test "$GO_RESULT" = "$expected"
+          test "$FRONTEND_RESULT" = "$expected"
+          test "$BROWSER_RESULT" = "$expected"
+
+  desktop-frontend:
+    needs: [changes, desktop-prepare]
+    if: always() && needs.desktop-prepare.result == 'success' && (github.event_name != 'pull_request' || needs.changes.outputs.desktop != 'false')
+    runs-on: ubuntu-22.04
+    defaults:
+      run:
+        working-directory: desktop
+    steps:
+      - uses: actions/checkout@v7
+      - uses: pnpm/action-setup@v6.0.9
+        with:
+          version: 10
+          run_install: false
+      - uses: actions/setup-node@v7
+        with:
+          node-version: "24"
+          cache: pnpm
+          cache-dependency-path: desktop/frontend/pnpm-lock.yaml
+      - run: pnpm --dir frontend install --frozen-lockfile
+      - uses: actions/download-artifact@v8
+        with:
+          name: ${{ needs.desktop-prepare.outputs.artifact_name }}
+          path: desktop/frontend
+      - name: Verify CI test coverage and runner
+        run: node --test frontend/scripts/ci-test-plan.test.mjs
+      - name: Test desktop frontend once per suite
+        env:
+          REASONIX_TEST_CONCURRENCY: "2"
+        run: node frontend/scripts/run-ci-tests.mjs
+
+  desktop-browser:
+    needs: [changes, desktop-prepare]
+    if: always() && needs.desktop-prepare.result == 'success' && (github.event_name != 'pull_request' || needs.changes.outputs.desktop != 'false')
+    runs-on: ubuntu-22.04
+    defaults:
+      run:
+        working-directory: desktop
+    steps:
+      - uses: actions/checkout@v7
+      - uses: pnpm/action-setup@v6.0.9
+        with:
+          version: 10
+          run_install: false
+      - uses: actions/setup-node@v7
+        with:
+          node-version: "24"
+          cache: pnpm
+          cache-dependency-path: desktop/frontend/pnpm-lock.yaml
+      - run: pnpm --dir frontend install --frozen-lockfile
+      - uses: actions/download-artifact@v8
+        with:
+          name: ${{ needs.desktop-prepare.outputs.artifact_name }}
+          path: desktop/frontend
+      - name: Install browser runtimes
+        run: PLAYWRIGHT_BROWSERS_PATH=.pw-browsers pnpm --dir frontend exec playwright install --with-deps chromium webkit
+      - name: Test desktop browser contracts
+        run: |
+          pnpm --dir frontend test:motion-browser
+          PLAYWRIGHT_BROWSERS_PATH=.pw-browsers pnpm --dir frontend test:app-browser
+          PLAYWRIGHT_BROWSERS_PATH=.pw-browsers REASONIX_SETTINGS_BROWSERS=chromium,webkit pnpm --dir frontend test:settings-browser
+          xvfb-run -a env REASONIX_TRANSCRIPT_NATIVE_THUMB=1 pnpm --dir frontend test:transcript-browser
+          PLAYWRIGHT_BROWSERS_PATH=.pw-browsers pnpm --dir frontend test:transcript-reader-browser
+
+  desktop-prepare:
     needs: changes
     if: always() && (github.event_name != 'pull_request' || needs.changes.outputs.desktop != 'false')
+    outputs:
+      artifact_name: desktop-frontend-${{ github.run_id }}-${{ github.run_attempt }}
     runs-on: ubuntu-22.04
     defaults:
       run:
@@ -381,23 +479,55 @@ jobs:
         run: |
           wails generate module
           pnpm --dir frontend install --frozen-lockfile
-          PLAYWRIGHT_BROWSERS_PATH=.pw-browsers pnpm --dir frontend exec playwright install --with-deps chromium webkit
           pnpm --dir frontend build
 
-      - name: Test desktop frontend
+      - uses: actions/upload-artifact@v7
+        with:
+          name: desktop-frontend-${{ github.run_id }}-${{ github.run_attempt }}
+          path: |
+            desktop/frontend/dist
+            desktop/frontend/wailsjs
+          if-no-files-found: error
+          retention-days: 3
+
+  desktop-go:
+    needs: [changes, desktop-prepare]
+    if: always() && needs.desktop-prepare.result == 'success' && (github.event_name != 'pull_request' || needs.changes.outputs.desktop != 'false')
+    runs-on: ubuntu-22.04
+    defaults:
+      run:
+        working-directory: desktop
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/setup-go@v7
+        with:
+          go-version-file: desktop/go.mod
+          cache: true
+          cache-dependency-path: desktop/go.sum
+
+      - uses: pnpm/action-setup@v6.0.9
+        with:
+          version: 10
+          run_install: false
+
+      - uses: actions/setup-node@v7
+        with:
+          node-version: "24"
+          cache: pnpm
+          cache-dependency-path: desktop/frontend/pnpm-lock.yaml
+
+      - uses: actions/download-artifact@v8
+        with:
+          name: ${{ needs.desktop-prepare.outputs.artifact_name }}
+          path: desktop/frontend
+      - run: pnpm --dir frontend install --frozen-lockfile
+
+      # WebKitGTK 4.0 toolchain (pinned to ubuntu-22.04; no webkit2_41 tag).
+      - name: Install Linux build deps
         run: |
-          pnpm --dir frontend test:terminal
-          pnpm --dir frontend test:task-monitor
-          pnpm --dir frontend test:mcp-app
-          pnpm --dir frontend test:workspace
-          pnpm --dir frontend test:stream
-          pnpm --dir frontend test:motion
-          pnpm --dir frontend test:motion-browser
-          pnpm --dir frontend test:composer
-          pnpm --dir frontend test:todo-visibility
-          pnpm --dir frontend test:transcript
-          xvfb-run -a env REASONIX_TRANSCRIPT_NATIVE_THUMB=1 pnpm --dir frontend test:transcript-browser
-          PLAYWRIGHT_BROWSERS_PATH=.pw-browsers pnpm --dir frontend test:transcript-reader-browser
+          sudo apt-get update
+          sudo apt-get install -y dbus-daemon gcc libgtk-3-dev libwebkit2gtk-4.0-dev xvfb
 
       - name: Test WebKitGTK native transcript scrolling
         timeout-minutes: 5
@@ -412,9 +542,6 @@ jobs:
           xvfb-run -a env WEBKIT_DISABLE_COMPOSITING_MODE=1 go run -tags reasonix_transcript_smoke ./cmd/transcript-native-smoke \
             -url 'http://127.0.0.1:4173/?mock=bench&bench=1' \
             -script transcript_native_smoke_contract.js
-
-      - name: Test usage statistics frontend
-        run: pnpm --dir frontend test:usage-stats
 
       - name: vet
         run: go vet ./...
@@ -552,6 +679,9 @@ jobs:
     needs: changes
     if: always() && (github.event_name != 'pull_request' || needs.changes.outputs.desktop != 'false')
     runs-on: windows-latest
+    # A hung native step must not hold the workflow's concurrency group for the
+    # six-hour default. Normal runs finish in ~25 minutes.
+    timeout-minutes: 45
     defaults:
       run:
         shell: bash
@@ -604,6 +734,12 @@ jobs:
           pnpm --dir frontend exec playwright install chromium
           pnpm --dir frontend test:transcript-browser
 
+      - name: Test settings layout on Windows
+        timeout-minutes: 5
+        env:
+          PLAYWRIGHT_BROWSERS_PATH: ${{ github.workspace }}/desktop/frontend/.pw-browsers
+        run: pnpm --dir frontend test:settings-browser
+
       - name: Test WebView2 native transcript and composer scrolling
         timeout-minutes: 5
         run: |
@@ -654,8 +790,15 @@ jobs:
             -HealthySeconds 5
 
       - name: test (Windows desktop and update helper)
-        timeout-minutes: 15
+        # Normal wall time is 6-7 minutes; a loaded runner has exceeded 15 with
+        # every package still passing. Keep the budget above that load spike so
+        # the job-level timeout, not this step, ends a real hang.
+        timeout-minutes: 25
         run: go test ./...
+
+      - name: test (vendored systray identity)
+        timeout-minutes: 2
+        run: go test -timeout=60s fyne.io/systray
 
       # A cold nested-module cache can spend several minutes compiling the
       # real WebView2 cookie integration test. Keep its budget independent of
@@ -757,6 +900,7 @@ jobs:
             .github/workflows/docs-impact.yml \
             .github/workflows/transcript-native-smoke.yml \
             .github/workflows/ci.yml
+          node --test scripts/desktop-release-artifacts.test.mjs scripts/ci-workflow.test.mjs
           bash scripts/release-workflows.test.sh
           node scripts/check-single-release-public-contract.mjs
 

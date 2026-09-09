@@ -15,6 +15,7 @@ const messages: Partial<Record<DictKey, string>> = {
   "context.maintenanceAppliedSummary": "已生成短视图",
   "context.maintenanceBlockedSummary": "摘要未形成短视图 · 已停重试",
   "context.maintenanceFailedSummary": "摘要失败 · 已停重试",
+  "context.maintenanceTruncatedSummary": "已裁剪上下文视图",
   "context.tokensValue": "{value} tokens",
   "summary.detail": "摘要",
 };
@@ -38,6 +39,9 @@ ok(blocked === "摘要未形成短视图 · 已停重试", `unexpected blocked n
 
 const failed = formatContextMaintenanceNotice({ status: "failed" }, translate);
 ok(failed === "摘要失败 · 已停重试", `unexpected failed notice: ${failed}`);
+
+const truncated = formatContextMaintenanceNotice({ status: "applied", action: "truncate" }, translate);
+ok(truncated === "已裁剪上下文视图", `unexpected truncated notice: ${truncated}`);
 
 const contextPanelSource = readFileSync(new URL("../components/ContextPanel.tsx", import.meta.url), "utf8");
 ok(

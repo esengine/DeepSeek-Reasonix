@@ -210,6 +210,12 @@ reasonix run "运行测试" --output-format stream-json
 执行失败时使用 `subtype: "error_during_execution"` 和 `is_error: true`。
 结构化模式会把运行时错误保留在 JSON 中，不再额外重复输出一份人类可读错误。
 
+完成校验器已移除。模型正常结束且没有工具调用时，当前轮次直接结束；包含工具调用时，
+继续进入工具循环；真正的空响应会在 frozen request 边界重试。旧的
+`completion_validation`、`completion_evaluator_model` 和
+`REASONIX_COMPLETION_VALIDATION_MODE` 设置仍可读取，但会被忽略，配置渲染器也不再生成；
+主机侧的就绪检查、预算、工具安全边界和恢复边界仍然有效。
+
 ### 脱敏机器接口
 
 自动化只需要生命周期遥测、不能接收 prompt、reasoning、工具参数/输出或审批文本时，
@@ -386,8 +392,9 @@ SSH 下远端进程无法读取本机剪贴板，请使用终端粘贴快捷键�
 | `/theme [auto\|light\|dark\|style]` | 查看或切换 CLI 背景模式和强调色。 |
 | `/currency [auto\|CNY\|USD]` | 查看或切换用户全局费用展示币种，并刷新当前运行时。 |
 | `/paste-image` | 读取剪贴板图片并插入可编辑的附件标记。 |
-| `/mouse` | 切换应用内鼠标选区、滚动条和滚轮处理。 |
+| `/mouse` | 切换应用内鼠标选区、滚动条和滚轮处理；SSH 会话默认关闭接管，保证终端原生选区可用。 |
 | `/effort` | 查看或切换 reasoning effort。 |
+| `/preset [standard\|delivery]` | 切换会话质量底线；delivery 开启交付级完成门槛，并在状态栏显示 PRESET 标记。 |
 | `/output-style` | 选择回答风格。 |
 | `/verbose` | 切换详细 reasoning 显示。 |
 | `/sandbox` | 查看沙盒状态。 |

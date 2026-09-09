@@ -2,6 +2,7 @@ package agent
 
 import (
 	"bufio"
+	"context"
 	"crypto/sha256"
 	"encoding/json"
 	"errors"
@@ -10,7 +11,6 @@ import (
 	"os"
 	"time"
 
-	"reasonix/internal/fileutil"
 	fileencoding "reasonix/internal/fileutil/encoding"
 	"reasonix/internal/provider"
 	"reasonix/internal/store"
@@ -28,30 +28,24 @@ const SessionDisplayIndexSchemaVersion = 1
 // it can exhaust the desktop process.
 const sessionDisplayIndexMaxLineBytes = 16 << 20
 
-// SessionDisplayIndex is the per-session paging sidecar
-// (<id>.display-index.json). It lets a reader page through a huge history
-// without parsing whole session files: every entry carries the byte range of
-// one message line plus the metadata a listing needs. Content fidelity is a
-// hard constraint — the index never copies message bodies, only derived
-// metadata.
-//
-// Offset semantics: Offset/Length describe the canonical transcript encoding —
-// exactly the bytes writeSessionMessages writes for the same message slice
-// (json.Marshal(msg) + '\n', with the real CreatedAt, not the zeroed form the
-// content digest hashes). The .jsonl file is maintained as a random-read model
-// of the authoritative event log, so published ranges are file-exact. A crash
-// or an older Reasonix build may leave that model behind; consumers compare
-// TranscriptSize and identity before reading and rebuild it on mismatch.
+// SessionDisplayIndex pages history by exact canonical JSONL byte ranges.
+// Consumers validate TranscriptSize and content identity before using it.
 type SessionDisplayIndex struct {
-	SchemaVersion  int                 `json:"schema_version"`
-	Revision       int64               `json:"revision"`
-	RevisionKnown  bool                `json:"revision_known"`
-	ContentDigest  string              `json:"content_digest"`
-	TranscriptSize int64               `json:"transcript_size"`
-	MessageCount   int                 `json:"message_count"`
-	AuthoredTurns  int                 `json:"authored_turns"`
-	Entries        []DisplayIndexEntry `json:"entries"`
-	UpdatedAt      time.Time           `json:"updated_at"`
+	SchemaVersion  int    `json:"schema_version"`
+	Revision       int64  `json:"revision"`
+	RevisionKnown  bool   `json:"revision_known"`
+	ContentDigest  string `json:"content_digest"`
+	TranscriptSize int64  `json:"transcript_size"`
+	MessageCount   int    `json:"message_count"`
+	AuthoredTurns  int    `json:"authored_turns"`
+	// ListingPreview is derived from the same transcript generation as
+	// AuthoredTurns. The explicit known bit keeps old v1 indexes compatible:
+	// an empty preview may be authoritative, while an omitted preview must
+	// still fall back to a repair scan.
+	ListingPreview      string              `json:"listing_preview,omitempty"`
+	ListingPreviewKnown bool                `json:"listing_preview_known,omitempty"`
+	Entries             []DisplayIndexEntry `json:"entries"`
+	UpdatedAt           time.Time           `json:"updated_at"`
 }
 
 // DisplayIndexEntry is one message's metadata. AuthoredTurn is the absolute
@@ -69,13 +63,12 @@ type DisplayIndexEntry struct {
 	HasToolCalls bool          `json:"has_tool_calls,omitempty"`
 	LocalOnly    bool          `json:"local_only,omitempty"`
 	ToolResult   bool          `json:"tool_result,omitempty"`
-	// Synthetic and Steer classify user messages the way the desktop visible-
-	// turn rule does, but on UserMessageText (the raw authored content): the
-	// desktop additionally resolves @file references through a display
-	// callback before testing, which a pure metadata pass cannot reproduce.
-	// The predicates themselves are equivalent — control.IsSyntheticUserMessage
-	// adds only a planApprovedMessage equality check that SyntheticUserPrefixes
-	// already covers via its "Plan approved — plan mode is off" prefix.
+	// PinnedContextRevision distinguishes the hidden host revision from other
+	// user-role records. History paging needs this bit to keep legacy persisted
+	// user timestamps aligned without decoding the entire transcript prefix.
+	PinnedContextRevision bool `json:"pinned_context_revision,omitempty"`
+	// Synthetic and Steer use raw authored text; desktop may first resolve
+	// @file references for display, but the control-message predicates match.
 	Synthetic bool `json:"synthetic,omitempty"`
 	Steer     bool `json:"steer,omitempty"`
 }
@@ -86,19 +79,27 @@ type DisplayIndexEntry struct {
 // digestAndSizeSessionMessages, so save-path callers can treat nil as a
 // warn-only failure.
 func BuildSessionDisplayIndex(messages []provider.Message, revision int64, revisionKnown bool, digest [sha256.Size]byte) *SessionDisplayIndex {
-	idx := &SessionDisplayIndex{
-		SchemaVersion: SessionDisplayIndexSchemaVersion,
-		Revision:      revision,
-		RevisionKnown: revisionKnown,
-		ContentDigest: digestString(digest),
-		MessageCount:  len(messages),
-		Entries:       make([]DisplayIndexEntry, 0, len(messages)),
-		UpdatedAt:     time.Now().UTC(),
-	}
-	if _, _, err := encodeDisplayIndexEntries(idx, messages, 0, 0, 0); err != nil {
-		return nil
-	}
+	idx, _ := BuildSessionDisplayIndexContext(context.Background(), messages, revision, revisionKnown, digest)
 	return idx
+}
+
+func BuildSessionDisplayIndexContext(ctx context.Context, messages []provider.Message, revision int64, revisionKnown bool, digest [sha256.Size]byte) (*SessionDisplayIndex, error) {
+	preview, _ := SessionPreviewFromMessages(messages)
+	idx := &SessionDisplayIndex{
+		SchemaVersion:       SessionDisplayIndexSchemaVersion,
+		Revision:            revision,
+		RevisionKnown:       revisionKnown,
+		ContentDigest:       digestString(digest),
+		MessageCount:        len(messages),
+		ListingPreview:      preview,
+		ListingPreviewKnown: true,
+		Entries:             make([]DisplayIndexEntry, 0, len(messages)),
+		UpdatedAt:           time.Now().UTC(),
+	}
+	if _, _, err := encodeDisplayIndexEntriesContext(ctx, idx, messages, 0, 0, 0); err != nil {
+		return nil, err
+	}
+	return idx, nil
 }
 
 // encodeDisplayIndexEntries appends the entries for msgs[startIndex:] to idx,
@@ -107,8 +108,12 @@ func BuildSessionDisplayIndex(messages []provider.Message, revision int64, revis
 // digest encoding: the digest zeroes CreatedAt while the transcript file
 // stores the real bytes, and the offsets describe the file.
 func encodeDisplayIndexEntries(idx *SessionDisplayIndex, msgs []provider.Message, startIndex int, offset int64, turn int) (int64, int, error) {
+	return encodeDisplayIndexEntriesContext(context.Background(), idx, msgs, startIndex, offset, turn)
+}
+
+func encodeDisplayIndexEntriesContext(ctx context.Context, idx *SessionDisplayIndex, msgs []provider.Message, startIndex int, offset int64, turn int) (int64, int, error) {
 	for i := startIndex; i < len(msgs); i++ {
-		b, err := json.Marshal(msgs[i])
+		b, err := marshalJSONContext(ctx, msgs[i])
 		if err != nil {
 			return 0, 0, fmt.Errorf("encode message %d: %w", i, err)
 		}
@@ -127,28 +132,28 @@ func encodeDisplayIndexEntries(idx *SessionDisplayIndex, msgs []provider.Message
 // counter.
 func classifyDisplayIndexMessage(m provider.Message, index int, offset, length int64, turn int) (DisplayIndexEntry, int) {
 	entry := DisplayIndexEntry{
-		Index:        index,
-		Offset:       offset,
-		Length:       length,
-		Role:         m.Role,
-		AuthoredTurn: turn,
-		HasImages:    len(m.Images) > 0,
-		HasToolCalls: len(m.ToolCalls) > 0,
-		LocalOnly:    m.LocalOnly,
-		ToolResult:   m.Role == provider.RoleTool,
+		Index:                 index,
+		Offset:                offset,
+		Length:                length,
+		Role:                  m.Role,
+		AuthoredTurn:          turn,
+		HasImages:             len(m.Images) > 0,
+		HasToolCalls:          len(m.ToolCalls) > 0,
+		LocalOnly:             m.LocalOnly,
+		ToolResult:            m.Role == provider.RoleTool,
+		PinnedContextRevision: IsPinnedContextRevision(m),
 	}
 	if m.Role == provider.RoleUser {
-		content := UserMessageText(m)
 		switch {
-		case IsUserAuthoredTurn(content):
+		case IsUserAuthoredTurnMessage(m):
 			turn++
 			entry.AuthoredTurn = turn
 			entry.StartsTurn = true
+		case IsHostGeneratedUserMessage(m):
+			entry.Synthetic = true
 		default:
-			if _, isSteer := SteerText(content); isSteer {
+			if _, isSteer := SteerText(m.Content); isSteer {
 				entry.Steer = true
-			} else if IsSyntheticUserText(content) {
-				entry.Synthetic = true
 			}
 		}
 	}
@@ -170,14 +175,17 @@ func extendSessionDisplayIndex(indexPath string, msgs []provider.Message, digest
 	if prev.MessageCount != appendFrom || !prev.RevisionKnown || prev.Revision != revision-1 {
 		return nil
 	}
+	preview, _ := SessionPreviewFromMessages(msgs)
 	idx := &SessionDisplayIndex{
-		SchemaVersion: SessionDisplayIndexSchemaVersion,
-		Revision:      revision,
-		RevisionKnown: true,
-		ContentDigest: digestString(digest),
-		MessageCount:  len(msgs),
-		Entries:       make([]DisplayIndexEntry, 0, len(msgs)),
-		UpdatedAt:     time.Now().UTC(),
+		SchemaVersion:       SessionDisplayIndexSchemaVersion,
+		Revision:            revision,
+		RevisionKnown:       true,
+		ContentDigest:       digestString(digest),
+		MessageCount:        len(msgs),
+		ListingPreview:      preview,
+		ListingPreviewKnown: true,
+		Entries:             make([]DisplayIndexEntry, 0, len(msgs)),
+		UpdatedAt:           time.Now().UTC(),
 	}
 	idx.Entries = append(idx.Entries, prev.Entries...)
 	if _, _, err := encodeDisplayIndexEntries(idx, msgs, appendFrom, prev.TranscriptSize, prev.AuthoredTurns); err != nil {
@@ -212,15 +220,19 @@ func refreshSessionDisplayIndex(path string, msgs []provider.Message, digest [sh
 // WriteSessionDisplayIndex publishes the index atomically (tmp + fsync +
 // rename) with 0600 permissions, matching the other session sidecars.
 func WriteSessionDisplayIndex(path string, idx *SessionDisplayIndex) error {
+	return WriteSessionDisplayIndexContext(context.Background(), path, idx)
+}
+
+func WriteSessionDisplayIndexContext(ctx context.Context, path string, idx *SessionDisplayIndex) error {
 	if path == "" {
 		return fmt.Errorf("empty session display index path")
 	}
-	b, err := json.MarshalIndent(idx, "", "  ")
+	b, err := marshalJSONIndentContext(ctx, idx)
 	if err != nil {
 		return fmt.Errorf("encode session display index: %w", err)
 	}
 	b = append(b, '\n')
-	if err := fileutil.AtomicWriteFile(path, b, 0o600); err != nil {
+	if err := atomicWriteFileContext(ctx, path, ".session-display-index.*.tmp", "atomic-write", b, 0o600, true); err != nil {
 		return fmt.Errorf("write session display index: %w", err)
 	}
 	return nil
@@ -321,6 +333,13 @@ func ScanSessionDisplayIndex(transcriptPath string) (*SessionDisplayIndex, error
 			h.Write([]byte{'\n'})
 			var entry DisplayIndexEntry
 			entry, turn = classifyDisplayIndexMessage(m, len(idx.Entries), offset, int64(len(line)), turn)
+			if entry.StartsTurn && !idx.ListingPreviewKnown {
+				preview := truncatePreview(previewProse(UserMessageText(m)))
+				if preview != "" {
+					idx.ListingPreview = preview
+					idx.ListingPreviewKnown = true
+				}
+			}
 			idx.Entries = append(idx.Entries, entry)
 			offset += int64(len(line))
 		}
@@ -333,6 +352,9 @@ func ScanSessionDisplayIndex(transcriptPath string) (*SessionDisplayIndex, error
 	}
 	idx.MessageCount = len(idx.Entries)
 	idx.AuthoredTurns = turn
+	if !idx.ListingPreviewKnown {
+		idx.ListingPreviewKnown = true
+	}
 	idx.TranscriptSize = offset
 	var digest [sha256.Size]byte
 	copy(digest[:], h.Sum(nil))

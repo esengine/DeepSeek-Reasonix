@@ -61,6 +61,16 @@ func TestTruncateToolTextKeepsRuneBoundary(t *testing.T) {
 	}
 }
 
+func TestDocumentsExcludePinnedContextRevisions(t *testing.T) {
+	docs := documents([]provider.Message{
+		{Role: provider.RoleUser, Origin: provider.MessageOriginHost, Content: "<pinned_context_revision>private pinned body</pinned_context_revision>"},
+		{Role: provider.RoleUser, Content: "visible question"},
+	})
+	if len(docs) != 1 || docs[0].kind != "user_text" || strings.Contains(docs[0].terms, "private") {
+		t.Fatalf("documents() = %#v, want only visible user text", docs)
+	}
+}
+
 func TestDocumentsTruncateToolPayloadsOnly(t *testing.T) {
 	t.Parallel()
 	filler := strings.Repeat("filler ", 4000) // 28KB

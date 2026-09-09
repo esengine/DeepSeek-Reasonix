@@ -17,7 +17,7 @@ show_turn_usage = true   # CLI/TUI: show per-request token and cost receipts in 
 [desktop]
 # language = "auto"   # auto|en|zh; auto follows the browser/OS locale
 # currency = "auto"   # legacy display currency; prefer [billing].display_currency
-layout_style = "classic"   # classic|workbench|creation; desktop layout style
+layout_style = "workbench"   # workbench|creation; legacy classic migrates to workbench
 # theme = "auto"   # desktop only: auto|dark|light
 # terminal_theme = "auto"   # integrated terminal: auto|dark|light; auto follows the desktop app
 # theme_style = "graphite"   # graphite|aurora|slate|carbon|nocturne|amber and legacy aliases
@@ -38,7 +38,7 @@ ask_request = true   # notify when a question is waiting
 # system_prompt = "You are ..."   # custom persona/prompt; unset or empty = built-in default
 # system_prompt_file = "prompts/system.md"   # project paths stay in <workspace>; user paths may fall back to <reasonix home>
 temperature       = 0.0
-# recovery_model = ""               # optional reviewer for low-risk automatic recovery; falls back to guardian_model then main model
+# recovery_model = ""               # optional reviewer for low-risk automatic recovery; empty leaves rule-only recovery
 # reasoning_language = "auto"   # visible reasoning text: auto|zh|en
 # plan_mode_read_only_commands = ["gh issue view"]   # legacy compatibility only; Plan bash uses Permissions
 compact_ratio       = 0.80  # sole auto trigger; presets 0.70 (active) / 0.80 (recommended default) / 0.85 (late)
@@ -58,7 +58,7 @@ compact_ratio       = 0.80  # sole auto trigger; presets 0.70 (active) / 0.80 (r
 # and Anthropic/token-plan regions, MiniMax CN/Global API and Anthropic routes,
 # GLM/Z.AI CN/Global API and coding-plan routes, OpenCode Go/Zen, Qwen/DashScope
 # CN/Global API and coding-plan routes, Token Rhythm (基元律动), StepFun,
-# NovitaAI, GMI, Vercel AI Gateway, HuggingFace, NVIDIA, KiloCode, and Ollama Cloud.
+# NovitaAI, GMI, Vercel AI Gateway, HuggingFace, ModelScope, NVIDIA, KiloCode, and Ollama Cloud.
 [[providers]]
 name        = "deepseek"
 kind        = "openai"

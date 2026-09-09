@@ -37,6 +37,10 @@ func (r *sessionTitleResolverStub) Resolve(selection provider.Selection) (provid
 	return r.provider, nil
 }
 
+func (p *sessionTitleProviderStub) ReasoningCapability() provider.ReasoningCapability {
+	return provider.ReasoningOptions("", "low", "high")
+}
+
 func (p *sessionTitleProviderStub) Name() string { return "session-title-stub" }
 
 func (p *sessionTitleProviderStub) Stream(_ context.Context, req provider.Request) (<-chan provider.Chunk, error) {

@@ -1,3 +1,4 @@
+import { SettingsSelect } from "./SettingsSelect";
 import { useLayoutEffect, useMemo, useRef, useState } from "react";
 import { ArrowLeft, ChevronDown, ChevronRight, Minus, Plus, RotateCcw, Sparkles, Undo2, UserRound } from "lucide-react";
 import { useT } from "../lib/i18n";
@@ -142,13 +143,13 @@ export function TypographySettings({ onBack }: { onBack: () => void }) {
           <div className={preference.followGlobal ? "typography-settings__controls typography-settings__controls--disabled" : "typography-settings__controls"}>
             <label className="typography-settings__field">
               <span>{t("settings.typography.font")}</span>
-              <select
+              <SettingsSelect
                 value={preference.fontFamily}
                 disabled={preference.followGlobal}
-                onChange={(event) => updateSelected({ fontFamily: event.target.value as RegionFontFamily })}
+                onValueChange={(value) => updateSelected({ fontFamily: value as RegionFontFamily })}
               >
                 {FONT_OPTIONS.map((option) => <option key={option.value} value={option.value}>{t(option.key)}</option>)}
-              </select>
+              </SettingsSelect>
             </label>
             {preference.fontFamily === "custom" && !preference.followGlobal ? (
               <label className="typography-settings__field">

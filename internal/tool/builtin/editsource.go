@@ -2,10 +2,12 @@ package builtin
 
 import (
 	"context"
+	"fmt"
 	"os"
 	"path/filepath"
 
 	fileenc "reasonix/internal/fileutil/encoding"
+	"reasonix/internal/tool"
 )
 
 // editSource is the file state a read-modify-write tool works against, plus the
@@ -24,7 +26,17 @@ type editSource struct {
 // decoded disk content. A non-UTF-8 file always stays on the disk route — the
 // overlay contract is text-only, so routing GBK or UTF-16 through it would
 // rewrite the file as UTF-8.
-func readEditSource(ctx context.Context, overlay FileOverlay, path string) (editSource, error) {
+func readEditSource(ctx context.Context, overlay FileOverlay, path string) (source editSource, readErr error) {
+	defer func() {
+		if readErr != nil {
+			return
+		}
+		if expected, ok := tool.ExpectedWriteSource(ctx); ok && expected.Path == path {
+			if (expected.SourceTextDigest != "" && expected.SourceTextDigest != digestText(source.content)) || (expected.Snapshot != "" && expected.Snapshot != source.readSnapshot(path)) {
+				readErr = fmt.Errorf("%w: source differs from the read-evidence preflight", ErrFileChanged)
+			}
+		}
+	}()
 	id, err := diskIdentity(path)
 	if err != nil {
 		return editSource{}, err
@@ -49,17 +61,43 @@ func readEditSource(ctx context.Context, overlay FileOverlay, path string) (edit
 	return editSource{content: content, enc: enc, id: id}, nil
 }
 
+func (s editSource) readSnapshot(path string) string {
+	kind, prefix := tool.ReadSourceDisk, "raw-sha256:"
+	if s.overlay {
+		kind, prefix = tool.ReadSourceOverlay, "overlay:"
+	}
+	return tool.SourceSnapshot(kind, path, fmt.Sprintf("%s%x", prefix, s.id.sum))
+}
+
 // write persists content on the same route the source was read from. An overlay
-// that declines the write (ok=false) falls back to disk, which is safe because
-// the content already carries whatever the buffer held.
+// that declines a managed write leaves its outcome unknown. Standalone calls
+// without durable recovery retain the legacy disk fallback.
 func (s editSource) write(ctx context.Context, overlay FileOverlay, path, content string) error {
 	if err := s.assertUnchanged(ctx, overlay, path); err != nil {
 		return err
 	}
 	if s.overlay && overlay != nil {
-		if ok, err := overlay.WriteTextFile(ctx, path, content); ok {
+		if err := s.recordWrite(ctx, path, content, "overlay", overlay); err != nil {
 			return err
 		}
+		if err := s.assertUnchanged(ctx, overlay, path); err != nil {
+			return err
+		}
+		if ok, err := overlay.WriteTextFile(ctx, path, content); ok {
+			if err != nil && tool.HasWriteIntentHook(ctx) {
+				return fmt.Errorf("write outcome unknown: %w", err)
+			}
+			return err
+		}
+		if tool.HasWriteIntentHook(ctx) {
+			return fmt.Errorf("write outcome unknown: original overlay did not confirm the write")
+		}
+	}
+	if err := s.recordWrite(ctx, path, content, "disk", overlay); err != nil {
+		return err
+	}
+	if err := s.assertUnchanged(ctx, overlay, path); err != nil {
+		return err
 	}
 	return writeFileEncoded(path, content, s.enc)
 }

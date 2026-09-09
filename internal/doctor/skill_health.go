@@ -7,13 +7,15 @@ import (
 	"reasonix/internal/config"
 	"reasonix/internal/skill"
 	"reasonix/internal/tool"
+	_ "reasonix/internal/tool/builtin" // Initialize compile-time tool identities.
 )
 
 // SkillHealthOptions configures skill/MCP capability diagnostics for doctor.
 type SkillHealthOptions struct {
-	Skills  []skill.Skill
-	Tools   []tool.ContractEntry
-	Plugins []config.PluginEntry
+	Skills   []skill.Skill
+	Tools    []tool.ContractEntry
+	Bindings []tool.MCPBinding
+	Plugins  []config.PluginEntry
 	// FailedServers maps MCP server name → host-proven failure reason.
 	FailedServers map[string]string
 	// CacheMismatch lists MCP servers whose schema cache fingerprint mismatched.
@@ -23,13 +25,11 @@ type SkillHealthOptions struct {
 // CollectSkillHealthWarnings returns human-readable skill/MCP health warnings.
 func CollectSkillHealthWarnings(opts SkillHealthOptions) []string {
 	var out []string
-	toolNames := map[string]bool{}
-	for _, t := range opts.Tools {
-		toolNames[t.Name] = true
+	for _, diagnostic := range skill.CheckToolReferences(opts.Skills, skill.ToolReferenceOptions{Known: tool.KnownToolNames(), Registered: opts.Tools, Bindings: opts.Bindings}) {
+		out = append(out, diagnostic.Message)
 	}
-	pluginNames := map[string]bool{}
-	for _, p := range opts.Plugins {
-		pluginNames[strings.TrimSpace(p.Name)] = true
+	for _, d := range skill.CheckMCPRequirements(opts.Skills, opts.Plugins, opts.FailedServers) {
+		out = append(out, d.Message)
 	}
 
 	// Detect require skills with identical trigger sets (ambiguous conflicts).
@@ -53,34 +53,9 @@ func CollectSkillHealthWarnings(opts SkillHealthOptions) []string {
 		}
 		// auto-use require with missing dependencies.
 		if strings.EqualFold(sk.AutoUse, "require") {
-			for _, dep := range sk.Requires {
-				dep = strings.TrimSpace(dep)
-				if dep == "" {
-					continue
-				}
-				if after, ok := strings.CutPrefix(dep, "mcp-server:"); ok {
-					srv := after
-					if !pluginNames[srv] {
-						out = append(out, fmt.Sprintf("skill %q requires %s but that MCP server is not configured", name, dep))
-					} else if reason, ok := opts.FailedServers[srv]; ok && reason != "" {
-						out = append(out, fmt.Sprintf("skill %q requires %s which is host-failed: %s", name, dep, reason))
-					}
-				}
-			}
 			key := strings.Join(normalizedTriggers(sk.Triggers), "|")
 			if key != "" {
 				requireTriggers[key] = append(requireTriggers[key], name)
-			}
-		}
-		// allowed-tools references unavailable tools.
-		for _, at := range sk.AllowedTools {
-			at = strings.TrimSpace(at)
-			if at == "" {
-				continue
-			}
-			if !toolNames[at] && !isBuiltinOrMetaTool(at) {
-				// Soft: only warn when the name looks concrete and missing.
-				out = append(out, fmt.Sprintf("skill %q allowed-tools references %q which is not in the current registry", name, at))
 			}
 		}
 		// The parser drops illegal profiles values from Profiles but preserves
@@ -122,18 +97,4 @@ func normalizedTriggers(in []string) []string {
 		}
 	}
 	return out
-}
-
-func isBuiltinOrMetaTool(name string) bool {
-	switch name {
-	case "bash", "read_file", "write_file", "edit_file", "grep", "glob", "ls",
-		"todo_write", "complete_step", "ask", "task", "read_only_task",
-		"parallel_tasks", "fleet",
-		"run_skill", "read_skill", "read_only_skill", "explore", "research",
-		"review", "security_review", "web_fetch", "multi_edit", "move_file",
-		"code_index", "wait", "bash_output", "kill_shell":
-		return true
-	default:
-		return strings.HasPrefix(name, "mcp__") || strings.HasPrefix(name, "lsp_")
-	}
 }

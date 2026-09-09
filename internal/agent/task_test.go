@@ -707,8 +707,8 @@ func TestTaskToolBackgroundPanicPersistsFailedMetadata(t *testing.T) {
 	if len(res) != 1 || res[0].Status != jobs.Failed {
 		t.Fatalf("background job result = %+v, want failed", res)
 	}
-	if !strings.Contains(res[0].Output, "Subagent reference (failed): "+ref) {
-		t.Fatalf("job output = %q, want failed subagent ref %s", res[0].Output, ref)
+	if !strings.Contains(res[0].Output, "Subagent reference: "+ref) || !strings.Contains(res[0].Output, "status=failed") {
+		t.Fatalf("job output = %q, want failed subagent outcome for %s", res[0].Output, ref)
 	}
 	meta, err := store.LoadMeta(ref)
 	if err != nil {

@@ -10,6 +10,7 @@ import (
 	"sync"
 	"time"
 
+	"reasonix/internal/agent"
 	"reasonix/internal/event"
 	"reasonix/internal/sessioninbox"
 )
@@ -30,15 +31,16 @@ const (
 
 // InboxRequest is the frontend-facing enqueue payload.
 type InboxRequest struct {
-	Intent      sessioninbox.InboxIntent
-	Display     string
-	Raw         string
-	Submit      string
-	Format      string
-	Source      string
-	Idempotency string
-	Invocations []InvocationRequest
-	Extra       map[string]string
+	ExpectedSessionPath string // optional exact-session fence; never persisted
+	Intent              sessioninbox.InboxIntent
+	Display             string
+	Raw                 string
+	Submit              string
+	Format              string
+	Source              string
+	Idempotency         string
+	Invocations         []InvocationRequest
+	Extra               map[string]string
 	// FreezeRefs lists workspace-relative paths to freeze at enqueue time.
 	FreezeRefs []string
 }
@@ -72,8 +74,12 @@ type inboxState struct {
 	// admissionMu serializes competing admission state machines. Snapshot
 	// recovery and completion never hold it across Store I/O.
 	admissionMu sync.Mutex
-	mu          sync.Mutex
-	store       *sessioninbox.Store
+	// scanMu joins autonomous sidecar reads at shutdown without waiting for a
+	// dispatcher that may itself retire this controller during host admission.
+	scanMu sync.Mutex
+	mu     sync.Mutex
+	store  *sessioninbox.Store
+	closed bool // seals new sidecar opens when controller teardown starts
 	// activeItemIDs includes the running follow-up and every accepted steer.
 	// TurnDone durable-acks the set so multi-steer rounds leave no orphans.
 	activeItemIDs map[string]struct{}
@@ -202,6 +208,9 @@ func (c *Controller) ensureInbox() (*sessioninbox.Store, error) {
 	if c.inbox.store != nil && c.inbox.store.SessionPath() == path {
 		return c.inbox.store, nil
 	}
+	if c.inbox.closed {
+		return nil, fmt.Errorf("controller inbox is closed")
+	}
 	if c.inbox.store != nil {
 		c.inbox.store.Close()
 		c.inbox.store = nil
@@ -231,6 +240,9 @@ func (c *Controller) rebindInbox() {
 	path := c.SessionPath()
 	c.inbox.mu.Lock()
 	defer c.inbox.mu.Unlock()
+	if c.inbox.closed {
+		return
+	}
 	if c.inbox.store != nil {
 		if path != "" && c.inbox.store.SessionPath() == path {
 			return
@@ -282,6 +294,9 @@ func (c *Controller) EnqueueInbox(req InboxRequest) (sessioninbox.InboxReceipt, 
 	if err != nil {
 		return sessioninbox.InboxReceipt{}, err
 	}
+	if req.ExpectedSessionPath != "" && st.SessionPath() != req.ExpectedSessionPath {
+		return sessioninbox.InboxReceipt{}, ErrInboxSessionChanged
+	}
 	submit := strings.TrimSpace(firstNonEmptyStr(req.Submit, req.Raw))
 	if submit == "" && len(req.Invocations) == 0 {
 		submit = strings.TrimSpace(req.Display)
@@ -312,7 +327,7 @@ func (c *Controller) EnqueueInbox(req InboxRequest) (sessioninbox.InboxReceipt, 
 		Envelope:    env,
 		Source:      req.Source,
 		Idempotency: req.Idempotency,
-		SessionID:   c.parentSessionID(),
+		SessionID:   agent.BranchID(st.SessionPath()),
 	})
 	if err != nil {
 		if errors.Is(err, sessioninbox.ErrCapacityItems) || errors.Is(err, sessioninbox.ErrCapacityBytes) || errors.Is(err, sessioninbox.ErrItemTooLarge) {
@@ -554,6 +569,18 @@ func (c *Controller) RefreshInboxReferences(id string) error {
 
 // TrySubmitInboxItem admits a queued item as a new turn when the session is idle.
 func (c *Controller) TrySubmitInboxItem(id string) (sessioninbox.InboxReceipt, error) {
+	c.mu.Lock()
+	beforeDispatch := c.modelSettings.beforeInboxDispatch
+	c.mu.Unlock()
+	if beforeDispatch != nil {
+		release, err := beforeDispatch(c)
+		if err != nil {
+			return sessioninbox.InboxReceipt{}, err
+		}
+		if release != nil {
+			defer release()
+		}
+	}
 	c.inbox.admissionMu.Lock()
 	defer c.inbox.admissionMu.Unlock()
 	st, err := c.ensureInbox()

@@ -14,12 +14,20 @@ import (
 
 // LocalProviderResolver preserves the historical config-backed provider path.
 type LocalProviderResolver struct {
-	cfg   *config.Config
-	proxy netclient.ProxySpec
+	cfg          *config.Config
+	proxy        netclient.ProxySpec
+	capabilities *config.ModelCapabilityResolver
 }
 
 func NewLocalProviderResolver(cfg *config.Config, proxy netclient.ProxySpec) *LocalProviderResolver {
-	return &LocalProviderResolver{cfg: cfg, proxy: proxy}
+	return NewLocalProviderResolverWithCapabilities(cfg, proxy, nil)
+}
+
+func NewLocalProviderResolverWithCapabilities(cfg *config.Config, proxy netclient.ProxySpec, capabilities *config.ModelCapabilityResolver) *LocalProviderResolver {
+	if capabilities == nil {
+		capabilities = config.NewModelCapabilityResolver()
+	}
+	return &LocalProviderResolver{cfg: cfg, proxy: proxy, capabilities: capabilities}
 }
 
 func (r *LocalProviderResolver) Catalog() []provider.Descriptor {
@@ -28,28 +36,53 @@ func (r *LocalProviderResolver) Catalog() []provider.Descriptor {
 	}
 	out := make([]provider.Descriptor, 0, len(r.cfg.Providers))
 	for i := range r.cfg.Providers {
-		e := &r.cfg.Providers[i]
-		ref := modelRefFromEntry(e)
-		d := provider.Descriptor{
-			Ref: ref, DisplayName: e.Name, Model: e.Model,
-			ContextWindow: e.ContextWindow, Vision: config.EffectiveVision(e),
-			Tools: true, DefaultEffort: config.EffectiveEffort(e),
+		base := &r.cfg.Providers[i]
+		models := base.ModelList()
+		if len(models) == 0 {
+			models = []string{base.Model}
 		}
-		if price := e.PriceForModel(e.Model); price != nil {
-			d.PricingCurrency = price.Currency
-			d.CacheHitPerMillion = price.CacheHit
-			d.InputPerMillion = price.Input
-			d.OutputPerMillion = price.Output
+		for _, model := range models {
+			entry := *base
+			entry.Model = model
+			if selected, ok := r.cfg.ResolveModel(base.Name + "/" + model); ok {
+				entry = *selected
+			}
+			ref := modelRefFromEntry(&entry)
+			if resolved, ok := r.cfg.ResolveModel(ref); ok {
+				entry = *resolved
+			}
+			capability := config.ResolvedModelCapability{State: config.CapabilityUnknown}
+			if r.capabilities != nil {
+				capability = r.capabilities.Resolve(&entry)
+			}
+			d := provider.Descriptor{
+				Ref: ref, DisplayName: entry.Name, Model: entry.Model,
+				ContextWindow: entry.ContextWindow, Vision: capability.State == config.CapabilitySupported,
+				InputModalities: append([]provider.ModelModality(nil), capability.InputModalities...),
+				Tools:           true, DefaultEffort: config.EffectiveEffort(&entry),
+			}
+			if capability.ModelInfo.ContextWindow > 0 && d.ContextWindow == 0 {
+				d.ContextWindow = capability.ModelInfo.ContextWindow
+			}
+			if capability.ModelInfo.Reasoning {
+				d.Reasoning = true
+			}
+			if price := entry.PriceForModel(entry.Model); price != nil {
+				d.PricingCurrency = price.Currency
+				d.CacheHitPerMillion = price.CacheHit
+				d.InputPerMillion = price.Input
+				d.OutputPerMillion = price.Output
+			}
+			if reasoning := config.ReasoningCapabilityForEntry(&entry); len(reasoning.Options) > 0 {
+				d.Efforts = reasoning.IDs()
+				d.Reasoning = true
+			}
+			if config.ReasoningProtocolForEntry(&entry) == config.ReasoningProtocolDeepSeek {
+				d.ToolCallReasoning = true
+				d.Reasoning = true
+			}
+			out = append(out, d)
 		}
-		if len(e.SupportedEfforts) > 0 {
-			d.Efforts = append([]string(nil), e.SupportedEfforts...)
-			d.Reasoning = true
-		}
-		if config.ReasoningProtocolForEntry(e) == config.ReasoningProtocolDeepSeek {
-			d.ToolCallReasoning = true
-			d.Reasoning = true
-		}
-		out = append(out, d)
 	}
 	return out
 }
@@ -67,9 +100,23 @@ func (r *LocalProviderResolver) Resolve(selection provider.Selection) (provider.
 		return nil, fmt.Errorf("%w %q", ErrUnknownModel, ref)
 	}
 	if selection.Effort != nil {
+		if *selection.Effort != "" {
+			if _, err := config.NormalizeEffort(entry, *selection.Effort); err != nil {
+				return nil, err
+			}
+		}
 		entry.Effort = *selection.Effort
 	}
-	return NewProviderWithProxy(entry, r.proxy)
+	var modelInfo *provider.ModelInfo
+	if r.capabilities != nil {
+		resolved := r.capabilities.Resolve(entry)
+		info := resolved.ModelInfo
+		if info.ID == "" {
+			info = provider.ModelInfo{ID: resolved.Model, InputModalities: resolved.InputModalities}
+		}
+		modelInfo = &info
+	}
+	return NewProviderWithProxyAndModelInfo(entry, r.proxy, modelInfo)
 }
 
 func resolveProvider(resolver provider.Resolver, cfg *config.Config, proxy netclient.ProxySpec, selection provider.Selection) (provider.Provider, error) {

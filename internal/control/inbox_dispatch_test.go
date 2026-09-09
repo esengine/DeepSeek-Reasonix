@@ -3,6 +3,7 @@ package control
 import (
 	"context"
 	"errors"
+	"os"
 	"path/filepath"
 	"sort"
 	"sync"
@@ -14,6 +15,27 @@ import (
 )
 
 const inboxDispatchTestTimeout = 15 * time.Second
+
+func TestClosedControllerCannotOpenInboxFromLateDispatch(t *testing.T) {
+	dir := t.TempDir()
+	c := New(Options{})
+	// Model the dispatcher having a persisted path but no opened sidecar yet.
+	c.mu.Lock()
+	c.sessionPath = filepath.Join(dir, "session.jsonl")
+	c.mu.Unlock()
+	c.SetBeforeInboxDispatch(func(*Controller) (func(), error) { t.Error("closed controller entered admission"); return nil, nil })
+	c.Close()
+	c.NotifyInboxRuntimeReady()
+	if _, err := c.ensureInbox(); err == nil {
+		t.Fatal("closed controller opened an inbox")
+	}
+	c.rebindInbox()
+	c.autosaveWG.Wait()
+	entries, err := os.ReadDir(dir)
+	if err != nil || len(entries) != 0 {
+		t.Fatalf("late dispatch created sidecars: %v %v", entries, err)
+	}
+}
 
 type inboxDispatchRunner struct {
 	inputs chan string

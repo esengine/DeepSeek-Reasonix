@@ -53,7 +53,7 @@ func NewSlashCommandTool(entries []SlashEntry) tool.Tool {
 	return &slashCommandTool{entries: m, names: names}
 }
 
-func (*slashCommandTool) Name() string { return "slash_command" }
+func (*slashCommandTool) Name() string { return tool.HostSlashCommand }
 
 func (*slashCommandTool) ReadOnly() bool { return true }
 

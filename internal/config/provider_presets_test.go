@@ -5,9 +5,10 @@ import (
 	"testing"
 
 	"reasonix/internal/provider"
+	"reasonix/internal/provider/openai"
 )
 
-func TestCurrentBuiltInAnthropicCompatibleProvidersRemainLocalByCapability(t *testing.T) {
+func TestAnthropicPresetsDoNotImplicitlyEnableServerTools(t *testing.T) {
 	var entries []ProviderEntry
 	entries = append(entries, Default().Providers...)
 	for _, preset := range CuratedProviderPresets() {
@@ -19,7 +20,9 @@ func TestCurrentBuiltInAnthropicCompatibleProvidersRemainLocalByCapability(t *te
 		}
 		root := strings.TrimSuffix(strings.TrimRight(entry.BaseURL, "/"), "/v1")
 		if strings.EqualFold(root, "https://api.anthropic.com") {
-			t.Fatalf("built-in provider %q unexpectedly targets official Anthropic; add an explicit native-capability UX before enabling it", entry.Name)
+			if entry.Name != "anthropic" || entry.WebSearch == nil || *entry.WebSearch || entry.AuthHeader {
+				t.Fatalf("official Anthropic preset must explicitly use API-key auth without native server tools: %q", entry.Name)
+			}
 		}
 	}
 }
@@ -147,6 +150,25 @@ func TestOpenCodeGoContextWindowPresetsMatchModelsDev(t *testing.T) {
 	dsResp, _ := CuratedProviderPreset("opencode-go-deepseek-responses")
 	if dsResp.Entries[0].ContextWindow != 1_000_000 {
 		t.Fatalf("deepseek responses window = %d", dsResp.Entries[0].ContextWindow)
+	}
+}
+
+func TestOpenCodeGoChatPresetsExposeDeepSeekVisionModel(t *testing.T) {
+	for _, presetID := range []string{"opencode-go", "opencode-go-recommended"} {
+		preset, ok := CuratedProviderPreset(presetID)
+		if !ok {
+			t.Fatalf("missing %s preset", presetID)
+		}
+		var entry *ProviderEntry
+		for i := range preset.Entries {
+			if preset.Entries[i].Name == "opencode-go" {
+				entry = &preset.Entries[i]
+				break
+			}
+		}
+		if entry == nil || !entry.HasModel(openai.OfficialDeepSeekVisionModel) || !entry.HasVisionModel(openai.OfficialDeepSeekVisionModel) {
+			t.Fatalf("%s Chat entry = %+v, want DeepSeek vision SKU", presetID, entry)
+		}
 	}
 }
 
@@ -932,43 +954,5 @@ func TestCuratedProviderPresetCapabilities(t *testing.T) {
 	}
 	if cap := EffortCapabilityForEntry(ollama); !cap.Supported || cap.Default != "auto" || !containsString(cap.Levels, "max") || !containsString(cap.Levels, "none") {
 		t.Fatalf("ollama-cloud effort capability = %+v, want none/max", cap)
-	}
-}
-
-func TestCuratedProviderPresetDeepSeekReasoningProtocolScope(t *testing.T) {
-	var cfg Config
-	for _, preset := range CuratedProviderPresets() {
-		for _, entry := range preset.Entries {
-			if err := cfg.UpsertProvider(entry); err != nil {
-				t.Fatalf("upsert preset %q: %v", preset.ID, err)
-			}
-		}
-	}
-
-	tests := []struct {
-		ref  string
-		want string
-	}{
-		{ref: "opencode-go/deepseek-v4-pro", want: ReasoningProtocolDeepSeek},
-		{ref: "opencode-go/deepseek-v4-flash", want: ReasoningProtocolDeepSeek},
-		{ref: "ollama-cloud/deepseek-v4-pro", want: ReasoningProtocolDeepSeek},
-		{ref: "ollama-cloud/deepseek-v4-flash", want: ReasoningProtocolDeepSeek},
-		{ref: "novita/deepseek/deepseek-v4-pro"},
-		{ref: "novita/deepseek/deepseek-v4-flash"},
-		{ref: "gmi/deepseek-ai/DeepSeek-V4-Pro"},
-		{ref: "gmi/deepseek-ai/DeepSeek-V4-Flash"},
-		{ref: "nvidia/deepseek-ai/deepseek-v4-pro"},
-		{ref: "vercel-ai-gateway/deepseek/deepseek-v4-pro"},
-	}
-	for _, tc := range tests {
-		t.Run(tc.ref, func(t *testing.T) {
-			entry, ok := cfg.ResolveModel(tc.ref)
-			if !ok {
-				t.Fatalf("ResolveModel(%q) failed", tc.ref)
-			}
-			if got := ReasoningProtocolForEntry(entry); got != tc.want {
-				t.Fatalf("ReasoningProtocolForEntry(%q) = %q, want %q", tc.ref, got, tc.want)
-			}
-		})
 	}
 }

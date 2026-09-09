@@ -1,3 +1,5 @@
+import { SettingsOptions } from "./SettingsOptions";
+import { SettingsSelect } from "./SettingsSelect";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { Check, Copy, Images, LockKeyhole, Minus, Plus, RotateCcw } from "lucide-react";
 import { app } from "../lib/bridge";
@@ -291,10 +293,7 @@ export function AppearanceOverview({
 
   return (
     <div className="appearance-overview">
-      <header className="appearance-overview__header">
-        <h2 className="appearance-overview__title">{t("settings.appearance")}</h2>
-        <p className="appearance-overview__sub">{t("settings.appearanceMeta")}</p>
-      </header>
+
 
       <section className="appearance-overview__current" aria-labelledby="appearance-current-label">
         <h3 id="appearance-current-label" className="appearance-overview__section-label">
@@ -347,7 +346,8 @@ export function AppearanceOverview({
       <div className="appearance-overview__rows">
         <div className="appearance-overview__row">
           <div id="appearance-theme-mode-label" className="appearance-overview__row-label">{t("settings.theme")}</div>
-          <div
+          <SettingsOptions
+            layout="field"
             className="set-seg appearance-overview__segmented appearance-overview__segmented--theme"
             role="radiogroup"
             aria-labelledby="appearance-theme-mode-label"
@@ -364,12 +364,13 @@ export function AppearanceOverview({
                 {opt === "auto" ? t("settings.themeAuto") : opt === "light" ? t("settings.themeLight") : t("settings.themeDark")}
               </button>
             ))}
-          </div>
+          </SettingsOptions>
         </div>
 
         <div className="appearance-overview__row">
           <div id="appearance-terminal-theme-label" className="appearance-overview__row-label">{t("settings.terminalTheme")}</div>
-          <div
+          <SettingsOptions
+            layout="field"
             className="set-seg appearance-overview__segmented appearance-overview__segmented--theme"
             role="radiogroup"
             aria-labelledby="appearance-terminal-theme-label"
@@ -390,26 +391,26 @@ export function AppearanceOverview({
                     : t("settings.terminalThemeDark")}
               </button>
             ))}
-          </div>
+          </SettingsOptions>
         </div>
 
         <div className="appearance-overview__row">
           <div id="appearance-base-style-label" className="appearance-overview__row-label">{t("settings.themeGallery.baseStyle")}</div>
           <div className="appearance-overview__control-stack">
-            <select
+            <SettingsSelect
               className="appearance-overview__select"
               value={baseStyle}
               disabled={busy || !!pack}
               aria-labelledby="appearance-base-style-label"
               aria-describedby={pack ? "appearance-base-style-help" : undefined}
-              onChange={(e) => void handleBaseChange(e.target.value as ThemeStyle)}
+              onValueChange={(value) => void handleBaseChange(value as ThemeStyle)}
             >
               {THEME_STYLES.map((s) => (
                 <option key={s} value={s}>
                   {t(STYLE_NAME_KEY[s])}
                 </option>
               ))}
-            </select>
+            </SettingsSelect>
             {pack ? (
               <span id="appearance-base-style-help" className="appearance-overview__lock-note">
                 <LockKeyhole size={12} aria-hidden="true" />
@@ -423,7 +424,8 @@ export function AppearanceOverview({
           <div id="appearance-conversation-width-label" className="appearance-overview__row-label">
             {t("settings.conversationWidth")}
           </div>
-          <div
+          <SettingsOptions
+            layout="field"
             className="set-seg appearance-overview__segmented"
             role="radiogroup"
             aria-labelledby="appearance-conversation-width-label"
@@ -446,12 +448,13 @@ export function AppearanceOverview({
             >
               {t("settings.conversationWidthFull")} (90%)
             </button>
-          </div>
+          </SettingsOptions>
         </div>
 
         <div className="appearance-overview__row">
           <div id="appearance-text-size-label" className="appearance-overview__row-label">{t("settings.textSize")}</div>
-          <div
+          <SettingsOptions
+            layout="field"
             className="set-seg appearance-overview__segmented appearance-overview__segmented--text-size"
             role="radiogroup"
             aria-labelledby="appearance-text-size-label"
@@ -468,23 +471,23 @@ export function AppearanceOverview({
                 {textSizeLabel(size, t)}
               </button>
             ))}
-          </div>
+          </SettingsOptions>
         </div>
 
         <div className="appearance-overview__row">
           <div id="appearance-font-family-label" className="appearance-overview__row-label">{t("settings.fontFamily")}</div>
-          <select
+          <SettingsSelect
             className="appearance-overview__select"
             value={fontFamily}
             aria-labelledby="appearance-font-family-label"
-            onChange={(e) => onFontFamily(e.target.value as FontFamily)}
+            onValueChange={(value) => onFontFamily(value as FontFamily)}
           >
             {availableFontFamilies.map((f) => (
               <option key={f} value={f}>
                 {fontFamilyLabel(f, t)}
               </option>
             ))}
-          </select>
+          </SettingsSelect>
         </div>
 
         {fontFamily === "custom" ? (
@@ -505,18 +508,18 @@ export function AppearanceOverview({
 
         <div className="appearance-overview__row">
           <div id="appearance-mono-font-family-label" className="appearance-overview__row-label">{t("settings.monoFontFamily")}</div>
-          <select
+          <SettingsSelect
             className="appearance-overview__select"
             value={monoFontFamily}
             aria-labelledby="appearance-mono-font-family-label"
-            onChange={(e) => onMonoFontFamily(e.target.value as MonoFontFamily)}
+            onValueChange={(value) => onMonoFontFamily(value as MonoFontFamily)}
           >
             {availableMonoFontFamilies.map((f) => (
               <option key={f} value={f}>
                 {monoFontFamilyLabel(f, t)}
               </option>
             ))}
-          </select>
+          </SettingsSelect>
         </div>
 
         {monoFontFamily === "custom" ? (

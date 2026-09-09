@@ -119,7 +119,9 @@ func TestCoordinatorToolPlannerRetriesReasoningOnlyStopForVisiblePlan(t *testing
 			{Type: provider.ChunkDone},
 		},
 		{
-			{Type: provider.ChunkText, Text: "1. apply the verified fix"},
+			{Type: provider.ChunkReasoning, Text: "Submitting the plan now."},
+			toolCallChunk("call-2", "submit_plan", `{"objective":"apply the fix","steps":[{"title":"apply the verified fix"}]}`),
+			{Type: provider.ChunkUsage, Usage: &provider.Usage{FinishReason: "tool_calls", TotalTokens: 10}},
 			{Type: provider.ChunkDone},
 		},
 	}}
@@ -132,7 +134,7 @@ func TestCoordinatorToolPlannerRetriesReasoningOnlyStopForVisiblePlan(t *testing
 	executor := New(exec, tool.NewRegistry(), NewSession("exec-sys"), Options{}, event.Discard)
 	coord := NewCoordinator(
 		deepseekThinkingProvider{plannerScript}, NewSession("planner-sys"), nil,
-		plannerTools, Options{}, executor, 0, event.Discard, nil,
+		PlannerToolRegistry(plannerTools), Options{}, executor, 0, event.Discard, nil,
 	)
 
 	if err := coord.Run(withNoClosedLoop(context.Background()), "fix the bug"); err != nil {
@@ -145,7 +147,7 @@ func TestCoordinatorToolPlannerRetriesReasoningOnlyStopForVisiblePlan(t *testing
 		t.Fatal("executor received no handoff request")
 	}
 	got := lastUser(exec.requests[0])
-	if !strings.Contains(got, "1. apply the verified fix") || !strings.Contains(got, executorHandoffMarker) {
+	if !strings.Contains(got, "apply the verified fix") || !strings.Contains(got, executorHandoffMarker) {
 		t.Fatalf("executor input = %q, want visible plan and handoff marker", got)
 	}
 	if strings.Contains(got, "I'll inspect first.") {

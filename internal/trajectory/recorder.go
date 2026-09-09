@@ -35,6 +35,27 @@ type Record struct {
 	OutcomeProgress     *OutcomeProgress     `json:"outcome_progress,omitempty"`
 	DelegationAdmission *DelegationAdmission `json:"delegation_admission,omitempty"`
 	MemoryRecall        *MemoryRecall        `json:"memory_recall,omitempty"`
+	SubagentLifecycle   *SubagentLifecycle   `json:"subagent_lifecycle,omitempty"`
+}
+
+// SubagentLifecycle mirrors the content-free child lifecycle audit.
+type SubagentLifecycle struct {
+	Phase             string `json:"phase"`
+	Ref               string `json:"ref,omitempty"`
+	ParentToolCallID  string `json:"parent_tool_call_id,omitempty"`
+	Skill             string `json:"skill,omitempty"`
+	Model             string `json:"model,omitempty"`
+	Effort            string `json:"effort,omitempty"`
+	Status            string `json:"status,omitempty"`
+	ErrorCode         string `json:"error_code,omitempty"`
+	Retryable         bool   `json:"retryable,omitempty"`
+	OutputBytes       int    `json:"output_bytes,omitempty"`
+	StartUnixMs       int64  `json:"start_unix_ms,omitempty"`
+	EndUnixMs         int64  `json:"end_unix_ms,omitempty"`
+	ValidatorMode     string `json:"validator_mode,omitempty"`
+	ValidatorOutcome  string `json:"validator_outcome,omitempty"`
+	ValidatorAttempt  int    `json:"validator_attempt,omitempty"`
+	ProviderRequestID string `json:"provider_request_id,omitempty"`
 }
 
 // MemoryRecall mirrors event.MemoryRecallAudit with stable snake_case keys.
@@ -337,6 +358,18 @@ func (r *Recorder) RecordWorkspaceMutation(m event.WorkspaceMutation) {
 
 func (r *Recorder) RecordRunBudget(sample event.RunBudgetSample) {
 	event.RecordRunBudget(r.inner, sample)
+}
+
+func (r *Recorder) RecordSubagentLifecycle(info event.SubagentLifecycleInfo) {
+	r.append(Record{SubagentLifecycle: &SubagentLifecycle{
+		Phase: info.Phase, Ref: info.Ref, ParentToolCallID: info.ParentToolCallID,
+		Skill: info.Skill, Model: info.Model, Effort: info.Effort, Status: info.Status,
+		ErrorCode: info.ErrorCode, Retryable: info.Retryable, OutputBytes: info.OutputBytes,
+		StartUnixMs: info.StartUnixMs, EndUnixMs: info.EndUnixMs, ValidatorMode: info.ValidatorMode,
+		ValidatorOutcome: info.ValidatorOutcome, ValidatorAttempt: info.ValidatorAttempt,
+		ProviderRequestID: info.ProviderRequestID,
+	}})
+	event.RecordSubagentLifecycle(r.inner, info)
 }
 
 // Close flushes and closes the file, returning the first error seen. Events

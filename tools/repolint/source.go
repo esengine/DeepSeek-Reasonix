@@ -61,7 +61,7 @@ func collect(root string) ([]string, error) {
 			if path == root {
 				return nil
 			}
-			if skipDirs[name] || strings.HasPrefix(name, ".") {
+			if skipDirs[name] || strings.HasPrefix(name, ".") || strings.HasSuffix(name, ".root_bak") || strings.HasSuffix(name, ".bak") {
 				return filepath.SkipDir
 			}
 			return nil

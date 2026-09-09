@@ -178,7 +178,7 @@ func TestSaveLeavesLegacyEventTranscriptUntouched(t *testing.T) {
 // an out-of-order record, the dual-writer shape — must be salvaged to the
 // .damaged sidecar instead of discarded forever.
 func TestRepairPreservesDamagedTailBytes(t *testing.T) {
-	path := filepath.Join(t.TempDir(), "session.jsonl")
+	path := schemaOneSessionPath(t, "session.jsonl")
 	sessionWithTurns(t, path, 2)
 
 	logPath := store.SessionEventLog(path)
@@ -259,7 +259,7 @@ func TestRepairPreservesDamagedTailBytes(t *testing.T) {
 }
 
 func TestReplayStopsAtBrokenAppendChain(t *testing.T) {
-	path := filepath.Join(t.TempDir(), "session.jsonl")
+	path := schemaOneSessionPath(t, "session.jsonl")
 	sessionWithTurns(t, path, 1)
 	logPath := store.SessionEventLog(path)
 	// Append an event whose MessageIndex does not chain onto the transcript.
@@ -532,7 +532,7 @@ func TestDefaultSaveBootstrapsEventLog(t *testing.T) {
 }
 
 func TestDefaultSaveRejectsDivergedOverwrite(t *testing.T) {
-	path := filepath.Join(t.TempDir(), "session.jsonl")
+	path := schemaOneSessionPath(t, "session.jsonl")
 	winner := sessionWithTurns(t, path, 3).Snapshot()
 
 	stale := NewSession("sys")
@@ -550,7 +550,7 @@ func TestDefaultSaveRejectsDivergedOverwrite(t *testing.T) {
 }
 
 func TestEventLogCompactionBoundsGrowth(t *testing.T) {
-	path := filepath.Join(t.TempDir(), "session.jsonl")
+	path := schemaOneSessionPath(t, "session.jsonl")
 	s := NewSession("sys")
 	filler := strings.Repeat("y", 8<<10)
 	// Repeated rewrites (each a full replace event) must not grow the log
@@ -705,7 +705,7 @@ func TestLoadSessionUserMessagesSeesEventLogTurns(t *testing.T) {
 	if err != nil {
 		t.Fatalf("LoadSessionUserMessages: %v", err)
 	}
-	if len(users) != 2 || users[0].Text != "first prompt" || users[1].Text != "second prompt" {
+	if len(users) != 2 || users[0].Message.Content != "first prompt" || users[1].Message.Content != "second prompt" {
 		t.Fatalf("user messages = %+v, want both prompts", users)
 	}
 	if users[1].At.IsZero() {

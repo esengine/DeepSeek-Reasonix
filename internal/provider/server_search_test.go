@@ -88,3 +88,21 @@ func TestServerSearchFromResponsesItem(t *testing.T) {
 		t.Fatal("non-search item should be ignored")
 	}
 }
+
+func TestServerSearchFromResponsesVisitedPages(t *testing.T) {
+	for _, action := range []string{"open_page", "find_in_page"} {
+		raw := json.RawMessage(`{"id":"ws_page","type":"web_search_call","status":"completed","action":{"type":"` + action + `","url":"https://api-docs.deepseek.com/guides/thinking_mode"}}`)
+		got := ServerSearchFromResponsesItem(raw)
+		if got == nil || len(got.Results) != 1 || got.Results[0].URL != "https://api-docs.deepseek.com/guides/thinking_mode" || string(got.Raw) != string(raw) {
+			t.Fatalf("lost visited source or replay: %+v", got)
+		}
+	}
+	got := ServerSearchFromResponsesItem(json.RawMessage(`{"id":"ws_search","type":"web_search_call","status":"completed","action":{"type":"search","queries":["first query","second query"]}}`))
+	if got == nil || got.Query != "first query\nsecond query" || len(got.Results) != 0 {
+		t.Fatalf("unexpected search: %+v", got)
+	}
+	got = ServerSearchFromResponsesItem(json.RawMessage(`{"id":"ws_failed","type":"web_search_call","status":"failed","action":{"type":"open_page","url":"https://example.com"}}`))
+	if got == nil || len(got.Results) != 0 {
+		t.Fatalf("failed page counted as source: %+v", got)
+	}
+}

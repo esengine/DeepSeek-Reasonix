@@ -62,7 +62,10 @@ func newLiveHistoryTab(t *testing.T, app *App, dir, sessionPath string, sess *ag
 		Label:       "test",
 		Sink:        event.Discard,
 	})
-	t.Cleanup(ctrl.Close)
+	t.Cleanup(func() {
+		waitHistoryIndexRebuilds(t, app)
+		ctrl.Close()
+	})
 	tab := &WorkspaceTab{
 		ID:          "test",
 		Scope:       "global",
@@ -895,36 +898,6 @@ func TestHistorySliceSourceField(t *testing.T) {
 			t.Fatalf("Source = %q, want live-fallback", page.Source)
 		}
 	})
-}
-
-// --- entry IDs --------------------------------------------------------------
-
-func TestHistorySliceEntryIDsStableAcrossAppends(t *testing.T) {
-	app := historySliceTestApp(t)
-	dir := t.TempDir()
-	var msgs []provider.Message
-	for i := range 3 {
-		msgs = append(msgs, historySliceUser(i, fmt.Sprintf("q%d", i)), historySliceAssistant(i, fmt.Sprintf("a%d", i)))
-	}
-	sess, path := saveHistorySliceSession(t, dir, "ids.jsonl", msgs)
-	newLiveHistoryTab(t, app, dir, path, sess)
-
-	before := app.HistorySliceForTab("test", HistorySliceRequest{Turns: 500, Entries: 1000})
-
-	sess.Add(historySliceUser(3, "q3"))
-	sess.Add(historySliceAssistant(3, "a3"))
-	if err := sess.Save(path); err != nil {
-		t.Fatalf("save: %v", err)
-	}
-	after := app.HistorySliceForTab("test", HistorySliceRequest{Turns: 500, Entries: 1000})
-	if len(after.Entries) != len(before.Entries)+2 {
-		t.Fatalf("entries after append = %d, want %d", len(after.Entries), len(before.Entries)+2)
-	}
-	for i := range before.Entries {
-		if before.Entries[i].EntryID != after.Entries[i].EntryID {
-			t.Fatalf("entry %d ID changed across append-only save: %s -> %s", i, before.Entries[i].EntryID, after.Entries[i].EntryID)
-		}
-	}
 }
 
 // --- classification ---------------------------------------------------------

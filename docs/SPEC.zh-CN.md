@@ -121,7 +121,8 @@ type Tool interface {
 
 ### 3.5 双模型协作（`Coordinator`）
 
-当 `agent.planner_model` 与 executor 不同时，planner 与 executor 使用独立 session：
+当配置了 `agent.planner_model` 时，planner 与 executor 使用独立 session。未配置时保持
+executor-only；已配置但模型不可用是配置错误，不会静默改走 executor：
 
 图片理解兜底由 `agent.vision_model` 控制：空值保持现有行为，`auto` 只在当前执行器
 服务商内选择视觉模型，显式 `provider/model` 可跨服务商选择。视觉执行器先生成版本化的
@@ -137,9 +138,9 @@ type Tool interface {
   短回复和普通请求一律直达 Executor；
 - Planner 使用同一个稳定 system prompt，单轮只追加很小的 `<planner-turn>` 标明显式
   路由。计划应区分已验证与候选触点，并在证据支持时补充非目标、风险、验收标准和
-  命令级验证；若 Planner 在有界调研和最终总结轮后仍未收敛，普通 plan-and-execute
-  用原始任务降级到 Executor，plan-only 与 plan-for-approval 仍保持 fail-closed；
-  不完整的 Planner 回合会被回滚，不暴露成无法继续的手动续跑；
+  命令级验证。`submit_plan` 是唯一交付通道，没有提交计划的普通文本视为 planner
+  协议错误；若 Planner 在有界调研和最终总结轮后仍未收敛，所有路由都 fail-closed，
+  不会降级到 Executor；不完整的 Planner 回合会被回滚，不暴露成无法继续的手动续跑；
 - 普通“先规划”在计划完成后直接交接 Executor；plan-for-approval 只用于明确要求等待
   确认的请求，由宿主强制审批边界，批准后交接 Executor；headless 场景会保存计划供后续
   回合继续；明确 plan-only 会保存计划并结束当前回合；上述两种执行边界下 Planner 失败
@@ -163,10 +164,20 @@ transcript，仅在唯一自动阈值被跨越时安装 provider 可见的短 **
   若已解除压力则不调摘要模型；否则将连续旧前缀摘要，并仅原样保留最近
   **16%** 窗口，边界不拆分 assistant tool-call/tool-result 组。
 - 摘要请求复用原 system、选中消息前缀和普通请求的 tools schema，只在最后追加
-  user compaction instruction，以复用 provider KV Cache。输出上限为 **8192 tokens**。
+  user compaction instruction，以复用 provider KV Cache。输出上限为 **8192 tokens**，
+  前缀规划另在其下预留窗口的 **5%**（至少 256 tokens）作为估算余量。
   pressure 最多两次成功摘要，overflow 最多一次摘要且原请求最多重试一次。
+  overflow 救援可折叠当前 turn 已完成的轮次，最新两轮原样保留。
+- 每次摘要回复（成功或 provider 超窗）都把真实 prompt 数回灌估算器。摘要请求
+  本身被 provider 拒绝时，先按修正后的估算重新规划更小前缀（最多两次），再以
+  有界转录形式发送一次（工具结果截到 2000 字符、不带 tools schema）；手动压缩
+  随后可走分片路径。自动尝试失败后，同一 turn 内暂停重试，直到视图较该次尝试
+  再增长窗口的 5%，因此单个 turn 的重试次数有界。
 - 候选必须严格小于被替换请求。摘要 timeout/error/空输出/token cap 都不会伪造
-  机械 digest；硬上限或 overflow 下 prune 仍不足时返回 `ErrCompactionRequired`。
+  机械 digest；硬上限以下沿用最近的持久投影。硬上限或 overflow 下摘要无法形成时，
+  改为有损的 `truncate` 投影：先抹去最旧的工具结果，再丢弃最旧的回放单元，
+  留下明确标记，直到视图回到阈值以下；只有连这样也回收不够时才返回
+  `ErrCompactionRequired`。
 - 用户可用 `reasonix config compact-ratio [--local] [VALUE]` 查看或修改阈值。
   项目配置优先于桌面与新 CLI 会话共用的用户全局配置。UI 始终展示**实际生效**值。
 - `max_output_tokens` 是独立的**本轮**输出上限，**绝不**改变 `triggerTokens` / `compact_ratio`。
@@ -407,7 +418,7 @@ base_url       = "https://api.deepseek.com/anthropic"
 # request_url  = "https://proxy.example.com/anthropic/v1/messages" # 可选：完整请求地址
 models         = ["deepseek-v4-flash", "deepseek-v4-pro", "deepseek-v4-flash-vision-exp"]
 default        = "deepseek-v4-flash"
-# vision_models = ["deepseek-v4-flash-vision-exp"]  # 设置里的「图片输入」勾选；线上仍只有这一枚 SKU 会发图
+# vision_models = ["deepseek-v4-flash-vision-exp"]  # 旧配置兼容；设置页根据模型能力元数据展示图片支持
 # 官方 DeepSeek 视觉支持内联 base64、http(s) 图片 URL、以及 Files API file_id。
 api_key_env    = "DEEPSEEK_API_KEY"
 web_search     = true

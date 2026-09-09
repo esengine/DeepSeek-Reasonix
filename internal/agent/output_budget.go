@@ -13,7 +13,10 @@ import (
 	"reasonix/internal/provider"
 )
 
-const outputBudgetReserve = 8 * 1024
+const (
+	outputBudgetReserve    = 8 * 1024
+	minOutputBudgetReserve = protocolReserveTokens
+)
 
 const learnedOutputBudgetTTL = 24 * time.Hour
 
@@ -479,7 +482,18 @@ func (a *Agent) effectiveOutputBudget(req provider.Request) (int, bool, error) {
 }
 
 func (a *Agent) admitOutputBudget(req provider.Request) (contextAdmission, error) {
-	return a.admitOutputBudgetWithReserve(req, outputBudgetReserve, false)
+	return a.admitOutputBudgetWithReserve(req, outputBudgetReserveForWindow(a.effectiveContextWindow()), false)
+}
+
+// outputBudgetReserveForWindow preserves the original safety ratio: the 8K
+// tokenizer/protocol cushion was chosen for a 1M-token window, so smaller
+// windows reserve roughly the same 1/128 share. A 256-token floor covers
+// framing, while the 8K cap keeps larger windows byte-stable.
+func outputBudgetReserveForWindow(window int) int {
+	if window <= 0 {
+		return outputBudgetReserve
+	}
+	return min(outputBudgetReserve, max(minOutputBudgetReserve, window/128))
 }
 
 // admitSummaryOutputBudget uses the summary request's dedicated protocol

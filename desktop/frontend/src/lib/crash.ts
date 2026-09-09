@@ -757,7 +757,7 @@ function paintPerformancePrompt(payload: CrashPayload, snapshot: PerformanceSnap
   host.replaceChildren(title, body, actions, note);
 }
 
-function paint(payload: CrashPayload) {
+export function paintCrashOverlay(payload: CrashPayload) {
   let host = document.getElementById("crash-overlay");
   if (!host) {
     host = document.createElement("div");
@@ -783,7 +783,7 @@ function paint(payload: CrashPayload) {
 }
 
 export function reportCrash(label: string, err: unknown, extra?: string) {
-  paint(buildCrashPayload(label, err, extra));
+  paintCrashOverlay(buildCrashPayload(label, err, extra));
 }
 
 type GlobalCrashEventLike = Pick<Event, "defaultPrevented"> & {
@@ -1010,16 +1010,4 @@ export function installPerformancePressureMonitor() {
     }
     maybePromptForHeapPressure();
   }, 1000);
-}
-
-export function installGlobalCrashHandlers() {
-  window.addEventListener("error", (e) => {
-    if (!shouldReportGlobalCrashEvent(e)) return;
-    const payload = buildCrashPayload("window.error", globalCrashReportReason(e));
-    if (isOpaqueScriptErrorEvent(e)) payload.fingerprintHint = opaqueScriptFingerprintHint();
-    paint(payload);
-  });
-  window.addEventListener("unhandledrejection", (e) => {
-    if (shouldReportGlobalCrashEvent(e)) reportCrash("unhandledrejection", e.reason);
-  });
 }

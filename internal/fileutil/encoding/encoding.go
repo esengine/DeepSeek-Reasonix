@@ -11,6 +11,7 @@ import (
 	"unicode/utf8"
 
 	"golang.org/x/text/encoding/simplifiedchinese"
+	"golang.org/x/text/encoding/unicode"
 	"golang.org/x/text/transform"
 )
 
@@ -172,10 +173,16 @@ func Decoder(enc Kind) transform.Transformer {
 		return nil
 	case GB18030:
 		return simplifiedchinese.GB18030.NewDecoder()
+	case UTF16LE:
+		return unicode.UTF16(unicode.LittleEndian, unicode.ExpectBOM).NewDecoder()
+	case UTF16BE:
+		return unicode.UTF16(unicode.BigEndian, unicode.ExpectBOM).NewDecoder()
+	case UTF16LENoBOM:
+		return unicode.UTF16(unicode.LittleEndian, unicode.IgnoreBOM).NewDecoder()
+	case UTF16BENoBOM:
+		return unicode.UTF16(unicode.BigEndian, unicode.IgnoreBOM).NewDecoder()
 	}
-	// UTF16LE/BE are not self-synchronising and cannot be streamed
-	// line-by-line without full-file buffering. Callers must handle
-	// them separately. UTF8 and LossyUTF8 need no transformation.
+	// UTF8 and LossyUTF8 need no transformation.
 	return nil
 }
 

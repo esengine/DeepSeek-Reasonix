@@ -413,7 +413,7 @@ func firstTokenProfileRequest(t *testing.T, tokenMode string) provider.Request {
 	if err := ctrl.Run(context.Background(), "capture request prefix"); err != nil {
 		t.Fatalf("Run(%q): %v", tokenMode, err)
 	}
-	reqs := prov.Requests()
+	reqs := mainConversationRequests(prov.Requests())
 	if len(reqs) != 1 {
 		t.Fatalf("requests(%q) = %d, want 1", tokenMode, len(reqs))
 	}
@@ -438,7 +438,7 @@ func captureTokenProfileSurface(t *testing.T, tokenMode string) (provider.Reques
 	if err := ctrl.Run(context.Background(), "capture contract"); err != nil {
 		t.Fatalf("Run(%q): %v", tokenMode, err)
 	}
-	reqs := prov.Requests()
+	reqs := mainConversationRequests(prov.Requests())
 	if len(reqs) != 1 {
 		t.Fatalf("requests(%q) = %d, want 1", tokenMode, len(reqs))
 	}
@@ -917,9 +917,9 @@ func TestBuildRunSkillSubagentRegistryHonorsReadOnlyFlag(t *testing.T) {
 	setBootTokenProfileTestProvider(t, prov)
 	writeFile(t, dir, "reasonix.toml", `
 default_model = "test-model"
-
 [agent]
 system_prompt = "BASE"
+completion_validation = "off"
 
 [[providers]]
 name = "test-model"
@@ -1679,7 +1679,7 @@ func TestNewProviderBuildsDeepSeekAnthropicPreset(t *testing.T) {
 	}
 }
 
-func TestNewProviderRejectsExplicitOfficialDeepSeekVisionModel(t *testing.T) {
+func TestNewProviderAllowsExplicitUnknownDeepSeekVisionModel(t *testing.T) {
 	var gotReq map[string]any
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if err := json.NewDecoder(r.Body).Decode(&gotReq); err != nil {
@@ -1724,15 +1724,15 @@ func TestNewProviderRejectsExplicitOfficialDeepSeekVisionModel(t *testing.T) {
 	if !ok {
 		t.Fatalf("message = %#v, want object", messages[0])
 	}
-	if got, ok := message["content"].(string); !ok || got != "describe" {
-		t.Fatalf("content = %#v, want plain text despite stale explicit vision metadata", message["content"])
+	if got, ok := message["content"].([]any); !ok || len(got) != 2 {
+		t.Fatalf("content = %#v, want text and explicitly enabled image", message["content"])
 	}
 	encoded, err := json.Marshal(gotReq)
 	if err != nil {
 		t.Fatalf("marshal captured request: %v", err)
 	}
-	if bytes.Contains(encoded, []byte("image_url")) || bytes.Contains(encoded, []byte("base64,AAAA")) {
-		t.Fatalf("official DeepSeek request leaked image payload: %s", encoded)
+	if !bytes.Contains(encoded, []byte("image_url")) || !bytes.Contains(encoded, []byte("base64,AAAA")) {
+		t.Fatalf("explicitly enabled image missing: %s", encoded)
 	}
 }
 
@@ -1764,14 +1764,17 @@ api_key_env = "REASONIX_TEST_KEY_UNSET"
 }
 
 // TestBuildDiscoversSkills proves the skill wiring end-to-end: a project skill
-// is discovered at boot, surfaced via Controller.Skills(), and its name folds
-// into the cache-stable system prompt's "# Skills" index alongside a built-in.
+// is discovered at boot, surfaced via Controller.Skills(), and its name enters
+// the first session-context while only invocation policy remains in system.
 func TestBuildDiscoversSkills(t *testing.T) {
 	dir := robustTempDir(t)
 	home := robustTempDir(t)
 	t.Setenv("HOME", home)
 	t.Setenv("XDG_CONFIG_HOME", filepath.Join(home, ".config"))
 	t.Chdir(dir)
+	registerBootTokenProfileTestProvider()
+	prov := testutil.NewMock("skills-context", testutil.Turn{Text: "done"})
+	setBootTokenProfileTestProvider(t, prov)
 	writeFile(t, dir, "reasonix.toml", `
 default_model = "test-model"
 
@@ -1780,10 +1783,8 @@ system_prompt = "BASE"
 
 [[providers]]
 name = "test-model"
-kind = "openai"
-base_url = "https://example.invalid"
+kind = "boot-token-profile-test"
 model = "x"
-api_key_env = "REASONIX_TEST_KEY_UNSET"
 `)
 	writeFile(t, dir, ".reasonix/skills/projskill.md", "---\ndescription: a project skill\n---\nplaybook")
 
@@ -1808,10 +1809,21 @@ api_key_env = "REASONIX_TEST_KEY_UNSET"
 
 	sys := systemMessage(ctrl.History())
 	if !strings.Contains(sys, "# Skills") {
-		t.Fatalf("skills index missing from system prompt:\n%s", sys)
+		t.Fatalf("skills invocation policy missing from system prompt:\n%s", sys)
 	}
-	if !strings.Contains(sys, "projskill") || !strings.Contains(sys, "explore") {
-		t.Fatalf("skill names missing from index:\n%s", sys)
+	if strings.Contains(sys, "projskill") || strings.Contains(sys, "explore") {
+		t.Fatalf("dynamic skill names leaked into system prompt:\n%s", sys)
+	}
+	// The one-turn mock may fail final-readiness because the discovered skill was
+	// intentionally not invoked; the provider request and persisted context are
+	// committed before that policy check.
+	_ = ctrl.Run(context.Background(), "inspect skills")
+	if prov.LastRequest() == nil {
+		t.Fatal("provider received no request")
+	}
+	contextBlock := sessionContextMessage(ctrl.History())
+	if !strings.Contains(contextBlock, "projskill") || !strings.Contains(contextBlock, "explore") {
+		t.Fatalf("skill names missing from session context:\n%s", contextBlock)
 	}
 }
 
@@ -1845,6 +1857,9 @@ func TestBuildKeepsPluginSkillModelNameBareAndSlashNameQualified(t *testing.T) {
 	t.Setenv("XDG_CONFIG_HOME", filepath.Join(home, ".config"))
 	t.Setenv("REASONIX_HOME", reasonixHome)
 	t.Chdir(dir)
+	registerBootTokenProfileTestProvider()
+	prov := testutil.NewMock("plugin-skills-context", testutil.Turn{Text: "done"})
+	setBootTokenProfileTestProvider(t, prov)
 	writeFile(t, dir, "reasonix.toml", `
 default_model = "test-model"
 
@@ -1853,10 +1868,8 @@ system_prompt = "BASE"
 
 [[providers]]
 name = "test-model"
-kind = "openai"
-base_url = "https://example.invalid"
+kind = "boot-token-profile-test"
 model = "x"
-api_key_env = "REASONIX_TEST_KEY_UNSET"
 `)
 	pluginRoot := filepath.Join(reasonixHome, "plugins", "superpowers")
 	writeFile(t, pluginRoot, pluginpkg.CodexManifest, `{"name":"superpowers","skills":"skills"}`)
@@ -1894,9 +1907,13 @@ api_key_env = "REASONIX_TEST_KEY_UNSET"
 	if sent, ok := ctrl.RunSkill("/superpowers:plan now"); !ok || !strings.Contains(sent, "Plugin body") {
 		t.Fatalf("qualified RunSkill = %q, %v", sent, ok)
 	}
-	sys := systemMessage(ctrl.History())
-	if !strings.Contains(sys, "- plan") || strings.Contains(sys, "superpowers:plan") {
-		t.Fatalf("model skill index changed identifiers:\n%s", sys)
+	_ = ctrl.Run(context.Background(), "capture request prefix")
+	if prov.LastRequest() == nil {
+		t.Fatal("provider received no request")
+	}
+	contextBlock := sessionContextMessage(ctrl.History())
+	if !strings.Contains(contextBlock, "- plan") || strings.Contains(contextBlock, "superpowers:plan") {
+		t.Fatalf("model skills catalog changed identifiers:\n%s", contextBlock)
 	}
 	var slashDescription string
 	for _, entry := range ctrl.AllToolContractEntries() {
@@ -1944,8 +1961,11 @@ model = "x"
 	if strings.Contains(systemMessage(fullReq.Messages), tokenEconomyPrompt) {
 		t.Fatalf("full mode system prompt should not include token economy prompt:\n%s", systemMessage(fullReq.Messages))
 	}
-	if !strings.Contains(systemMessage(fullReq.Messages), "# Skills") || !strings.Contains(systemMessage(fullReq.Messages), "projskill") {
-		t.Fatalf("full mode should preserve the skills index in the system prompt:\n%s", systemMessage(fullReq.Messages))
+	if !strings.Contains(systemMessage(fullReq.Messages), "# Skills") || strings.Contains(systemMessage(fullReq.Messages), "projskill") {
+		t.Fatalf("full mode should keep only skills policy in system:\n%s", systemMessage(fullReq.Messages))
+	}
+	if contextBlock := sessionContextMessage(fullReq.Messages); !strings.Contains(contextBlock, "projskill") {
+		t.Fatalf("full mode should publish the skills catalog in session context:\n%s", contextBlock)
 	}
 	if got, want := toolSchemaNames(fullReq.Tools), toolSchemaNames(defaultReq.Tools); !reflect.DeepEqual(got, want) {
 		t.Fatalf("explicit full mode changed tool schema order\nfull=%v\ndefault=%v", got, want)
@@ -1977,7 +1997,7 @@ model = "x"
 
 	defaultReq := firstTokenProfileRequest(t, "")
 	balancedReq := firstTokenProfileRequest(t, "balanced")
-	if !reflect.DeepEqual(balancedReq.Messages, defaultReq.Messages) {
+	if !reflect.DeepEqual(withoutMessageIDs(balancedReq.Messages), withoutMessageIDs(defaultReq.Messages)) {
 		t.Fatal("balanced alias changed provider-visible messages")
 	}
 	if !reflect.DeepEqual(balancedReq.Tools, defaultReq.Tools) {
@@ -2128,7 +2148,7 @@ model = "executor-model"%s
 	}
 }
 
-func TestBuildInjectsEnvironmentBlockByDefaultAndEconomy(t *testing.T) {
+func TestBuildInjectsEnvironmentBlockIntoSessionContextByDefaultAndEconomy(t *testing.T) {
 	for _, tokenMode := range []string{"", "economy"} {
 		t.Run(firstNonEmpty(tokenMode, "default"), func(t *testing.T) {
 			isolateConfigHome(t)
@@ -2148,11 +2168,12 @@ model = "x"
 
 			req, _ := captureTokenProfileSurface(t, tokenMode)
 			sys := systemMessage(req.Messages)
-			if !strings.Contains(sys, "## Environment") {
-				t.Fatalf("environment block missing in tokenMode=%q:\n%s", tokenMode, sys)
+			if strings.Contains(sys, "## Environment") || strings.Contains(sys, "Detected tools:") {
+				t.Fatalf("environment block leaked into system in tokenMode=%q:\n%s", tokenMode, sys)
 			}
-			if !strings.Contains(sys, "- OS:") || !strings.Contains(sys, "Detected tools:") {
-				t.Fatalf("environment block missing stable fields in tokenMode=%q:\n%s", tokenMode, sys)
+			contextBlock := sessionContextMessage(req.Messages)
+			if !strings.Contains(contextBlock, "## Environment") || !strings.Contains(contextBlock, "- OS:") || !strings.Contains(contextBlock, "Detected tools:") {
+				t.Fatalf("environment block missing from session context in tokenMode=%q:\n%s", tokenMode, contextBlock)
 			}
 		})
 	}
@@ -2179,7 +2200,10 @@ model = "x"
 
 	req, _ := captureTokenProfileSurface(t, "")
 	if sys := systemMessage(req.Messages); strings.Contains(sys, "## Environment") {
-		t.Fatalf("environment block should be disabled:\n%s", sys)
+		t.Fatalf("environment block leaked into system:\n%s", sys)
+	}
+	if contextBlock := sessionContextMessage(req.Messages); strings.Contains(contextBlock, "## Environment") {
+		t.Fatalf("environment block should be disabled:\n%s", contextBlock)
 	}
 }
 
@@ -2216,8 +2240,8 @@ model = "x"
 	if _, err := os.Stat(ranPath); !os.IsNotExist(err) {
 		t.Fatalf("workspace environment override was executed; stat err=%v", err)
 	}
-	if sys := systemMessage(req.Messages); !strings.Contains(sys, "- go: not trusted") {
-		t.Fatalf("environment block should mark workspace override untrusted:\n%s", sys)
+	if contextBlock := sessionContextMessage(req.Messages); !strings.Contains(contextBlock, "- go: not trusted") {
+		t.Fatalf("environment block should mark workspace override untrusted:\n%s", contextBlock)
 	}
 }
 
@@ -2287,6 +2311,7 @@ func unifiedBootToolNames() []string {
 		"todo_write",
 		"update_goal",
 		"use_capability",
+		"view_image",
 		"wait",
 		"write_file",
 	}
@@ -2327,7 +2352,7 @@ command = "reasonix-missing-mockmcp"
 	if err := ctrl.Run(context.Background(), "use the lean surface"); err != nil {
 		t.Fatalf("Run: %v", err)
 	}
-	reqs := prov.Requests()
+	reqs := mainConversationRequests(prov.Requests())
 	if len(reqs) != 1 {
 		t.Fatalf("requests = %d, want 1", len(reqs))
 	}
@@ -2420,7 +2445,7 @@ model = "x"
 			if err := ctrl.Run(context.Background(), "use optional tool"); err != nil {
 				t.Fatalf("Run: %v", err)
 			}
-			for _, req := range prov.Requests() {
+			for _, req := range mainConversationRequests(prov.Requests()) {
 				if requestHasTool(req, "connect_tool_source") {
 					t.Fatalf("connect_tool_source must not appear: %v", toolSchemaNames(req.Tools))
 				}
@@ -2656,20 +2681,18 @@ api_key_env = "REASONIX_TEST_KEY_UNSET"
 	if !allHasProj {
 		t.Fatalf("AllSkills should include disabled skills for management: %v", ctrl.AllSkills())
 	}
-	sys := systemMessage(ctrl.History())
-	if strings.Contains(sys, "projskill") || strings.Contains(sys, "- review ") {
-		t.Fatalf("disabled skill names should be omitted from system prompt:\n%s", sys)
+	catalog := skill.CatalogBlock(ctrl.Skills())
+	if strings.Contains(catalog, "projskill") || strings.Contains(catalog, "- review ") {
+		t.Fatalf("disabled skill names should be omitted from session catalog:\n%s", catalog)
 	}
 }
 
-func TestBuildOmitsExcludedSkillRootsFromPromptAndRuntimeList(t *testing.T) {
+func TestBuildOmitsExcludedSkillRootsFromContextAndRuntimeList(t *testing.T) {
 	dir := robustTempDir(t)
-	home := robustTempDir(t)
-	t.Setenv("HOME", home)
-	t.Setenv("XDG_CONFIG_HOME", filepath.Join(home, ".config"))
+	home := isolateConfigHome(t)
 	t.Chdir(dir)
 	excluded := filepath.Join(home, ".agents", "skills")
-	writeFile(t, home, ".reasonix/skills/keep.md", "---\ndescription: keep\n---\nplaybook")
+	writeFile(t, config.ReasonixHomeDir(), "skills/keep.md", "---\ndescription: keep\n---\nplaybook")
 	writeFile(t, home, ".agents/skills/noisy.md", "---\ndescription: noisy\n---\nplaybook")
 	writeFile(t, dir, "reasonix.toml", fmt.Sprintf(`
 default_model = "test-model"
@@ -2699,19 +2722,18 @@ api_key_env = "REASONIX_TEST_KEY_UNSET"
 			t.Fatalf("excluded skill should not be executable: %v", ctrl.Skills())
 		}
 	}
-	sys := systemMessage(ctrl.History())
-	if strings.Contains(sys, "noisy") {
-		t.Fatalf("excluded skill name should be omitted from system prompt:\n%s", sys)
+	catalog := skill.CatalogBlock(ctrl.Skills())
+	if strings.Contains(catalog, "noisy") {
+		t.Fatalf("excluded skill name should be omitted from session catalog:\n%s", catalog)
 	}
-	if !strings.Contains(sys, "keep") {
-		t.Fatalf("non-excluded skill should remain in system prompt:\n%s", sys)
+	if !strings.Contains(catalog, "keep") {
+		t.Fatalf("non-excluded skill should remain in session catalog:\n%s", catalog)
 	}
 }
 
-// TestBuildWithoutMemoryLeavesPromptUnchanged is the inverse invariant: with no
-// memory files, the system prompt is exactly the configured base — the cache
-// prefix is untouched by the memory feature.
-func TestBuildWithoutMemoryLeavesPromptUnchanged(t *testing.T) {
+// TestBuildWithoutMemoryLeavesNoDynamicMemoryInSystem is the inverse invariant:
+// an empty store contributes no fact body or background index to system.
+func TestBuildWithoutMemoryLeavesNoDynamicMemoryInSystem(t *testing.T) {
 	dir := robustTempDir(t)
 	home := robustTempDir(t)
 	t.Setenv("HOME", home)
@@ -2739,27 +2761,17 @@ api_key_env = "REASONIX_TEST_KEY_UNSET"
 	defer ctrl.Close()
 
 	sys := systemMessage(ctrl.History())
-	// The built-in skills always append a "# Skills" index to the prefix; this
-	// test is about memory, so strip that and assert the remaining base is exactly
-	// the configured prompt — i.e. no *project/ancestor* memory leaked in. (A
-	// user-global REASONIX.md in the real config dir could append; the test
-	// environment has none, so the base stands alone.)
-	base := sys
-	if before, _, ok := strings.Cut(sys, "\n\n# Skills"); ok {
-		base = before
+	if !strings.HasPrefix(sys, "JUST THE BASE") {
+		t.Fatalf("configured base prompt missing:\n%s", sys)
 	}
-	// The language policy, user-decision policy, and current-workspace line are
-	// always appended at boot; strip them so this assertion is purely about
-	// whether project/ancestor memory leaked into the base.
-	base = stripEnvironmentBlock(base)
-	base = stripCurrentWorkspaceLine(base)
-	base = stripLanguagePolicy(base)
-	if base != "JUST THE BASE" {
-		t.Fatalf("expected untouched base prompt, got:\n%s", sys)
+	for _, unwanted := range []string{"Background memory index", "Pinned preferences and feedback"} {
+		if strings.Contains(sys, unwanted) {
+			t.Fatalf("empty memory leaked %q into system:\n%s", unwanted, sys)
+		}
 	}
 }
 
-func TestBuildAddsCurrentWorkspaceToSystemPrompt(t *testing.T) {
+func TestBuildAddsCurrentWorkspaceToSessionContext(t *testing.T) {
 	isolateConfigHome(t)
 	projectA := robustTempDir(t)
 	projectB := robustTempDir(t)
@@ -2772,10 +2784,8 @@ system_prompt = "BASE"
 
 [[providers]]
 name = "test-model"
-kind = "openai"
-base_url = "https://example.invalid"
+kind = "boot-token-profile-test"
 model = "x"
-api_key_env = "REASONIX_TEST_KEY_UNSET"
 `)
 	}
 
@@ -2789,24 +2799,29 @@ api_key_env = "REASONIX_TEST_KEY_UNSET"
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
+			registerBootTokenProfileTestProvider()
+			prov := testutil.NewMock("workspace-context", testutil.Turn{Text: "done"})
+			setBootTokenProfileTestProvider(t, prov)
 			ctrl, err := Build(context.Background(), Options{WorkspaceRoot: tt.root})
 			if err != nil {
 				t.Fatalf("Build: %v", err)
 			}
 			defer ctrl.Close()
 
+			if err := ctrl.Run(context.Background(), "inspect workspace"); err != nil {
+				t.Fatal(err)
+			}
 			sys := systemMessage(ctrl.History())
+			contextBlock := sessionContextMessage(ctrl.History())
 			want := "Current workspace: " + strconv.Quote(tt.root)
-			if !strings.Contains(sys, want) {
-				t.Fatalf("workspace line missing %q from system prompt:\n%s", want, sys)
+			if strings.Contains(sys, want) {
+				t.Fatalf("workspace line leaked into system prompt:\n%s", sys)
 			}
-			if strings.Contains(sys, "Current workspace: "+strconv.Quote(tt.other)) {
-				t.Fatalf("system prompt used the other project root %q:\n%s", tt.other, sys)
+			if !strings.Contains(contextBlock, want) {
+				t.Fatalf("workspace line missing %q from session context:\n%s", want, contextBlock)
 			}
-			languageIdx := strings.Index(sys, config.LanguagePolicy)
-			workspaceIdx := strings.Index(sys, want)
-			if languageIdx < 0 || workspaceIdx < 0 || workspaceIdx < languageIdx {
-				t.Fatalf("workspace line should follow language policy:\n%s", sys)
+			if strings.Contains(contextBlock, "Current workspace: "+strconv.Quote(tt.other)) {
+				t.Fatalf("session context used the other project root %q:\n%s", tt.other, contextBlock)
 			}
 		})
 	}
@@ -2895,31 +2910,6 @@ func systemMessage(msgs []provider.Message) string {
 		}
 	}
 	return ""
-}
-
-func stripLanguagePolicy(s string) string {
-	s = strings.TrimSpace(s)
-	for _, policy := range []string{
-		config.LanguagePolicy, config.WorkPracticePolicy,
-		config.UserDecisionPolicy,
-	} {
-		s = strings.TrimSpace(strings.TrimSuffix(s, policy))
-	}
-	return s
-}
-
-func stripEnvironmentBlock(s string) string {
-	if before, _, ok := strings.Cut(s, "\n\n## Environment"); ok {
-		return before
-	}
-	return s
-}
-
-func stripCurrentWorkspaceLine(s string) string {
-	if i := strings.LastIndex(s, "\n\nCurrent workspace: "); i >= 0 {
-		return s[:i]
-	}
-	return s
 }
 
 func writeFile(t *testing.T, dir, name, body string) {
@@ -3486,72 +3476,6 @@ func TestBuildMigratesLegacyConfigEndToEnd(t *testing.T) {
 	migratedSession := filepath.Join(config.SessionDir(), "chat-1.jsonl")
 	if _, err := os.Stat(migratedSession); err != nil {
 		t.Errorf("legacy session not imported to %s: %v", migratedSession, err)
-	}
-}
-
-func TestBuildMigratesLegacyDeepSeekProtocolWithOneNotice(t *testing.T) {
-	home := isolateConfigHome(t)
-	t.Setenv("REASONIX_HOME", filepath.Join(home, "reasonix-home"))
-	userPath := config.UserConfigPath()
-	if err := os.MkdirAll(filepath.Dir(userPath), 0o700); err != nil {
-		t.Fatal(err)
-	}
-	if err := os.WriteFile(userPath, []byte(`default_model = "deepseek-flash/deepseek-v4-flash"
-
-[[providers]]
-name = "deepseek-flash"
-kind = "openai"
-base_url = "https://api.deepseek.com"
-model = "deepseek-v4-flash"
-api_key_env = "DEEPSEEK_API_KEY"
-`), 0o600); err != nil {
-		t.Fatal(err)
-	}
-
-	var notices []event.Event
-	sink := event.FuncSink(func(e event.Event) {
-		if e.Kind == event.Notice {
-			notices = append(notices, e)
-		}
-	})
-	build := func() {
-		t.Helper()
-		ctrl, err := Build(context.Background(), Options{Sink: sink, WorkspaceRoot: t.TempDir()})
-		if err != nil {
-			t.Fatalf("Build: %v", err)
-		}
-		ctrl.Close()
-	}
-
-	build()
-	migrationNotices := 0
-	for _, notice := range notices {
-		if notice.Text != "DeepSeek official access was upgraded to Anthropic Messages." {
-			continue
-		}
-		migrationNotices++
-		if notice.Level != event.LevelInfo || !strings.Contains(notice.Detail, "prefix-cache") {
-			t.Fatalf("migration notice = %+v", notice)
-		}
-	}
-	if migrationNotices != 1 {
-		t.Fatalf("migration notices = %d, want 1; got %+v", migrationNotices, notices)
-	}
-	raw, err := os.ReadFile(userPath)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if !strings.Contains(string(raw), `kind = "anthropic"`) ||
-		!strings.Contains(string(raw), `base_url = "https://api.deepseek.com/anthropic"`) {
-		t.Fatalf("legacy DeepSeek protocol remained on disk:\n%s", raw)
-	}
-
-	notices = nil
-	build()
-	for _, notice := range notices {
-		if strings.Contains(notice.Text, "DeepSeek official access was upgraded") {
-			t.Fatalf("second boot repeated migration notice: %+v", notice)
-		}
 	}
 }
 
@@ -4245,7 +4169,7 @@ model = "x"
 			t.Fatalf("Run: %v", err)
 		}
 		ctrl.Close()
-		reqs := prov.Requests()
+		reqs := mainConversationRequests(prov.Requests())
 		if len(reqs) != 1 {
 			t.Fatalf("requests = %d, want 1", len(reqs))
 		}

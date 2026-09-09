@@ -34,6 +34,10 @@ func (c *rewindConfirmationController) CommitRewind(planID string) (checkpoint.R
 	return checkpoint.RewindResult{OK: true}, nil
 }
 
+func (c *rewindConfirmationController) CommitRewindInPlace(planID string) (checkpoint.RewindResult, error) {
+	return c.CommitRewind(planID)
+}
+
 func (c *rewindConfirmationController) SwitchBranch(ref string) (agent.BranchInfo, error) {
 	c.switches = append(c.switches, ref)
 	return agent.BranchInfo{Path: ref}, nil
@@ -165,7 +169,7 @@ func TestApplyRewindDoesNotCommitPartialCoverageBeforeConfirmation(t *testing.T)
 	}
 }
 
-func TestConversationRewindActivatesReturnedFork(t *testing.T) {
+func TestConversationRewindReplaysTheRewoundConversation(t *testing.T) {
 	plan := checkpoint.RewindPlan{
 		PlanID: "plan-conversation", Scope: checkpoint.RewindConversation,
 		CanConversation: true,
@@ -186,10 +190,13 @@ func TestConversationRewindActivatesReturnedFork(t *testing.T) {
 
 	next, _ := m.commitPreparedRewind()
 	m = next.(chatTUI)
-	if len(ctrl.switches) != 1 || ctrl.switches[0] != ctrl.result.Branch {
-		t.Fatalf("rewind fork switches = %v, want %q", ctrl.switches, ctrl.result.Branch)
+	if len(ctrl.commits) != 1 || ctrl.commits[0] != plan.PlanID {
+		t.Fatalf("rewind commits = %v, want the prepared plan once", ctrl.commits)
+	}
+	if len(ctrl.switches) != 0 {
+		t.Fatalf("rewind switched explicitly to %v; the in-place commit already moved the controller", ctrl.switches)
 	}
 	if !m.sessionSwitch {
-		t.Fatal("conversation rewind did not replay the forked session")
+		t.Fatal("conversation rewind did not replay the rewound conversation")
 	}
 }

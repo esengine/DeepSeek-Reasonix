@@ -532,6 +532,12 @@ func (r *Registry) ResolveCall(name string) (resolved Tool, canonical string, ca
 	return nil, "", candidates
 }
 
+// MCPBindingOf snapshots the canonical identity metadata of an MCP adapter.
+// It does not call the tool or connect to its server.
+func MCPBindingOf(t Tool) (MCPBinding, bool) {
+	return mcpBinding(t)
+}
+
 func mcpBinding(t Tool) (MCPBinding, bool) {
 	meta, ok := t.(MCPMetadata)
 	if !ok {

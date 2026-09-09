@@ -29,7 +29,7 @@ func bindTabWriteAuthority(tab *WorkspaceTab, ctrl control.SessionAPI) error {
 // authorizeTabReplacementLocked validates and binds a replacement before it
 // is published. App.mu must be held by the caller.
 func (a *App) authorizeTabReplacementLocked(tab *WorkspaceTab, ctrl control.SessionAPI, action, authority string) error {
-	if current := a.tabs[tab.ID]; current != tab {
+	if !a.ownsRuntimeTabLocked(tab) {
 		return fmt.Errorf("tab %q changed while %s; retry", tab.ID, action)
 	}
 	if err := bindTabWriteAuthority(tab, ctrl); err != nil {

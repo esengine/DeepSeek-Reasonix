@@ -1,6 +1,6 @@
 import { t, type DictKey } from "./i18n";
 import { errorMessage } from "./controllerNotices";
-import type { MessageActionScope } from "./useController";
+import type { MessageActionScope } from "./messageActions";
 import { app } from "./bridge";
 import type { TabMeta } from "./types";
 
@@ -24,7 +24,8 @@ export async function restoreNavigationBackend(sourceTabId: string, targetTabId:
 
 export function messageActionBusyText(scope: MessageActionScope): string {
   switch (scope) {
-    case "fork": return t("rewind.busyFork");
+    case "fork":
+    case "fork-worktree": return t("rewind.busyFork");
     case "summ-from": return t("rewind.busySummFrom");
     case "summ-upto": return t("rewind.busySummUpto");
     case "conversation": return t("rewind.busyConversation");

@@ -286,10 +286,23 @@
   },
   {
     "Name": "read_file",
-    "Description": "Read a text file with optional line offset/limit. Output prefixes each line with its 1-based number (e.g. `   42→...`) so subsequent edit_file calls can target exact lines. Use `offset` and `limit` to page through large files; the tool reports total length and pagination hints in a trailer. Independent reads with no data dependency should be issued in the same round.",
+    "Description": "Read a text file with optional line offset/limit. Output prefixes each line with its 1-based number (e.g. `   42→...`) so subsequent edit_file calls can target exact lines. Use `offset` and `limit` to page through large files; the tool reports total length and pagination hints in a trailer. Set `intent` to state why you are reading: inspect (default, a bounded preview), range (an explicit window), or full (scan the whole file). Independent reads with no data dependency should be issued in the same round.",
     "ReadOnly": true,
     "Schema": {
       "properties": {
+        "cursor": {
+          "description": "Continuation cursor returned by a previous read_file result. It names the exact next position; pass it back unchanged instead of computing an offset.",
+          "type": "string"
+        },
+        "intent": {
+          "description": "Why you are reading. inspect (default): a bounded preview; one page is a complete answer. range (default when offset or limit is given): an explicit window. full: scan the whole file, paging until every line has been delivered.",
+          "enum": [
+            "inspect",
+            "range",
+            "full"
+          ],
+          "type": "string"
+        },
         "limit": {
           "description": "Maximum lines to return (default 2000)",
           "minimum": 1,
@@ -467,6 +480,23 @@
       },
       "required": [
         "action"
+      ],
+      "type": "object"
+    }
+  },
+  {
+    "Name": "view_image",
+    "Description": "Read a local PNG, JPEG, GIF, or WebP image by path and return visual content through native vision or the configured image-understanding model. Use this for image paths instead of read_file. Maximum file size: 3 MiB; maximum dimensions: 40 million pixels.",
+    "ReadOnly": true,
+    "Schema": {
+      "properties": {
+        "path": {
+          "description": "Image file path",
+          "type": "string"
+        }
+      },
+      "required": [
+        "path"
       ],
       "type": "object"
     }

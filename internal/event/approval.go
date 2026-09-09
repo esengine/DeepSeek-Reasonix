@@ -18,6 +18,7 @@ type Approval struct {
 	Kind        string
 	Recovery    *RecoveryApproval
 	WriteAccess *WriteAccessApproval
+	TurnID      string
 }
 
 // ApprovalKindWriteAccess is the Approval.Kind value for directory expansion.

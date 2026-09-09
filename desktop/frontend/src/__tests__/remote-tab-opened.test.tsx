@@ -51,14 +51,9 @@ const remoteMeta: TabMeta = {
 };
 
 function Harness() {
-  const activeTabIdRef = useRef<string | undefined>("local-1");
   useRemoteTabOpened(
-    activeTabIdRef,
     (meta) => seeded.push(meta.id),
     (meta) => updated.push(meta.id),
-    async (meta) => {
-      switched.push(meta.id);
-    },
   );
   return null;
 }
@@ -67,17 +62,19 @@ const root = createRoot(document.getElementById("root")!);
 await act(async () => root.render(<Harness />));
 await act(async () => __emitMockRemoteTabOpened(remoteMeta));
 eq(seeded.join(","), "remote-1", "opened events seed the new remote tab metadata");
-eq(switched.join(","), "remote-1", "opened events activate through the dedicated remote switch");
+eq(switched.join(","), "", "opened notifications cannot acquire navigation ownership");
 
 await act(async () => __emitMockRemoteTabUpdated({ ...remoteMeta, topicTitle: "Background title" }));
 eq(updated.join(","), "remote-1", "metadata updates patch the remote tab");
-eq(switched.join(","), "remote-1", "metadata updates never steal focus");
+eq(switched.join(","), "", "metadata updates never steal focus");
 
 await act(async () => root.unmount());
 
 let directSwitch: ((meta: TabMeta) => Promise<void>) | undefined;
 let historyCalls = 0;
 let activeCalls = 0;
+let releaseNavigationRegistration: (() => void) | undefined;
+let navigationRegistration = new Promise<void>((resolve) => { releaseNavigationRegistration = resolve; });
 const originalHistory = app.HistorySliceForTab;
 const previousGo = window.go;
 window.go = { main: { App: {
@@ -96,6 +93,7 @@ function SwitchHarness() {
     activeTabIdRef: activeIdRef,
     setActiveTabId: setActiveId,
     beginNavigation: () => 1,
+    requireRegisteredNavigation: () => navigationRegistration,
     navigationCanComplete: () => true,
     navigationIsCurrent: () => true,
     confirmBackendActiveTab: () => undefined,
@@ -106,11 +104,19 @@ function SwitchHarness() {
 
 const switchRoot = createRoot(document.getElementById("root")!);
 await act(async () => switchRoot.render(<SwitchHarness />));
-await act(async () => directSwitch?.(remoteMeta));
+let directSwitchPromise: Promise<void> | undefined;
+await act(async () => {
+  directSwitchPromise = directSwitch?.(remoteMeta);
+  await Promise.resolve();
+});
+eq(activeCalls, 0, "remote activation waits for navigation registration before backend focus");
+releaseNavigationRegistration?.();
+await act(async () => directSwitchPromise);
 eq(document.querySelector("span")?.getAttribute("data-active-id"), "remote-1", "remote activation updates the selected tab");
 eq(activeCalls, 1, "remote activation still binds backend focus");
 eq(historyCalls, 0, "remote activation bypasses local history hydration");
 await act(async () => switchRoot.unmount());
+navigationRegistration = Promise.resolve();
 
 let terminalProbe: RemoteSessionApi | undefined;
 window.go = { main: { App: {

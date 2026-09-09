@@ -24,7 +24,7 @@ function ok(cond: boolean, label: string) {
 }
 
 const here = dirname(fileURLToPath(import.meta.url));
-const appSource = readFileSync(resolve(here, "../App.tsx"), "utf8");
+const paletteSource = readFileSync(resolve(here, "../app-runtime/usePaletteCommands.tsx"), "utf8");
 const bridgeSource = readFileSync(resolve(here, "../lib/bridge.ts"), "utf8");
 const configWarningsSource = readFileSync(resolve(here, "../lib/useConfigLoadWarnings.ts"), "utf8");
 const settingsSource = readFileSync(resolve(here, "../components/SettingsPanel.tsx"), "utf8");
@@ -43,39 +43,13 @@ ok(
   "bridge exposes a lightweight desktop startup settings call",
 );
 ok(
-  appSource.includes("app.DesktopStartupSettings()"),
-  "App loads startup chrome preferences through the lightweight settings call",
-);
-ok(
-  configWarningsSource.includes('EventsOn("config:load-warnings"') &&
-    appSource.includes("useConfigLoadWarnings()") &&
-    appSource.includes("settings.configWarningsRevision"),
-  "runtime config warnings update the persistent desktop banner",
-);
-ok(
   configWarningsSource.includes("revision < latestRevision.current") &&
     configWarningsSource.includes("seenKeys.current.has(key)"),
   "startup and reload barriers reject stale events while repeated session builds stay deduplicated",
 );
 ok(
-  appSource.includes('hydrateReasoningDisplayMode("auto", false);'),
-  "startup failure preserves legacy reasoning-display migration precedence",
-);
-ok(
-  bridgeSource.includes('displayMode: "standard", reasoningDisplayMode: "auto", reasoningDisplayModeExplicit: false'),
-  "browser startup defaults match the classic standard/live-follow experience",
-);
-ok(
-  !/const\s+reloadSidebarImConnections[\s\S]*?app\.Settings\(\)[\s\S]*?\}, \[t\]\);/.test(appSource),
-  "sidebar IM refresh avoids rebuilding the full Settings payload",
-);
-ok(
-  !/const\s+syncDesktopPreferences[\s\S]*?app\.Settings\(\)[\s\S]*?\};/.test(appSource),
-  "startup preference sync avoids rebuilding the full Settings payload",
-);
-ok(
-  /onChooseProvider=\{\(\) => \{[\s\S]*?setSettingsFocus\(\{ target: "model-access" \}\);[\s\S]*?setSettingsTarget\("models"\);/.test(appSource),
-  "onboarding opens the model access flow instead of model usage",
+  bridgeSource.includes('displayMode: "standard", sessionExperience: "standard", reasoningDisplayMode: "auto", reasoningDisplayModeExplicit: false'),
+  "browser startup defaults include the canonical standard session experience",
 );
 ok(
   /initialFocus\?\.target === "model-access"[\s\S]*?initialFocus\?\.target === "model-stats"[\s\S]*?"usage"/.test(settingsSource),
@@ -86,63 +60,18 @@ ok(
   "each fresh model focus object can re-target the same subtab again",
 );
 ok(
-  /setSettingsFocus\(\(current\) => \(\{[\s\S]*?target: "model-stats",[\s\S]*?requestId: \(current\?\.requestId \?\? 0\) \+ 1,[\s\S]*?\}\)\)/.test(appSource) &&
+  /setSettingsFocus\(\(current\) => \(\{[\s\S]*?target: "model-stats",[\s\S]*?requestId: \(current\?\.requestId \?\? 0\) \+ 1,[\s\S]*?\}\)\)/.test(paletteSource) &&
     /initialFocus\?\.requestId/.test(settingsSource),
   "usage statistics commands derive a monotonic request id from the shared focus state",
 );
 ok(
-  /case "deepseek-responses":\s*return t\("settings\.addProvider\.preset\.deepseekResponsesDesc"\)/.test(settingsSource),
-  "DeepSeek Responses preset uses a localized description",
+  settingsSource.includes("ProviderCatalogPicker") && !settingsSource.includes("function providerPresetDescription"),
+  "provider setup uses the brand catalog instead of the former flat preset cards",
 );
 ok(
-  !/case "deepseek-anthropic":\s*return t\("settings\.addProvider\.preset\.deepseekAnthropicDesc"\)/.test(settingsSource),
-  "redundant DeepSeek Anthropic preset is not separately localized in the provider list",
-);
-ok(
-  /case "token-rhythm":\s*return t\("settings\.addProvider\.preset\.tokenRhythmDesc"\)/.test(settingsSource) &&
-    /case "deepseek-responses":\s*return t\("settings\.addProvider\.preset\.deepseekResponsesLabel"\)/.test(settingsSource) &&
-    !/case "deepseek-anthropic":\s*return t\("settings\.addProvider\.preset\.deepseekAnthropicLabel"\)/.test(settingsSource) &&
-    /case "token-rhythm":\s*return t\("settings\.addProvider\.preset\.tokenRhythmLabel"\)/.test(settingsSource),
-  "visible official protocol presets and Token Rhythm localize their display names",
-);
-ok(
-  [enLocaleSource, zhLocaleSource, zhTWLocaleSource].every((source) =>
-    source.includes('"settings.addProvider.preset.deepseekResponsesDesc"') &&
-    source.includes('"settings.addProvider.preset.deepseekResponsesLabel"') &&
-    !source.includes('"settings.addProvider.preset.deepseekAnthropicDesc"') &&
-    !source.includes('"settings.addProvider.preset.deepseekAnthropicLabel"') &&
-    source.includes('"settings.addProvider.preset.tokenRhythmLabel"') &&
-    source.includes('"settings.addProvider.preset.tokenRhythmDesc"'),
-  ),
-  "provider preset localization is present in every supported locale",
-);
-ok(
-  [enLocaleSource, zhLocaleSource, zhTWLocaleSource].every((source) =>
-    source.includes('"settings.addProvider.preset.stepfunLabel"') &&
-    source.includes('"settings.addProvider.preset.stepfunAnthropicLabel"') &&
-    source.includes('"settings.addProvider.preset.stepfunResponsesLabel"') &&
-    source.includes('"settings.addProvider.preset.stepfunResponsesDesc"') &&
-    source.includes('"settings.addProvider.preset.stepfunApiLabel"') &&
-    source.includes('"settings.addProvider.preset.stepfunApiAnthropicLabel"'),
-  ),
-  "every StepFun preset localizes its display name and description",
-);
-ok(
-  enLocaleSource.includes('"settings.addProvider.preset.stepfunLabel": "StepFun Coding Plan"') &&
-    zhLocaleSource.includes('"settings.addProvider.preset.stepfunLabel": "阶跃星辰 Coding Plan"') &&
-    zhTWLocaleSource.includes('"settings.addProvider.preset.stepfunLabel": "階躍星辰 Coding Plan"'),
-  "StepFun preset names the subscription channel in every locale",
-);
-ok(
-  /case "stepfun-responses":\s*return t\("settings\.addProvider\.preset\.stepfunResponsesDesc"\)/.test(settingsSource) &&
-    /case "stepfun-responses":\s*return t\("settings\.addProvider\.preset\.stepfunResponsesLabel"\)/.test(settingsSource),
-  "StepFun Responses preset localizes through the settings panel",
-);
-ok(
-  enLocaleSource.includes('"settings.addProvider.preset.tokenRhythmLabel": "Token Rhythm"') &&
-    zhLocaleSource.includes('"settings.addProvider.preset.tokenRhythmLabel": "基元律动"') &&
-    zhTWLocaleSource.includes('"settings.addProvider.preset.tokenRhythmLabel": "基元律动"'),
-  "Token Rhythm preset uses the official English and Chinese brand names",
+  [enLocaleSource, zhLocaleSource, zhTWLocaleSource].every(source =>
+    ["settings.catalog.region", "settings.catalog.product", "settings.catalog.productCoding", "settings.providerProtocol"].every(key => source.includes(`"${key}"`))),
+  "account platform, plan and API format labels exist in every locale",
 );
 ok(
   [enLocaleSource, zhLocaleSource, zhTWLocaleSource].every((source) =>
@@ -151,30 +80,13 @@ ok(
   "GLM reasoning protocol is localized in every supported locale",
 );
 ok(
-  settingsSource.includes('settings.general.sectionConversation') &&
-    settingsSource.includes('settings.displayMode') &&
-    settingsSource.includes('["standard", "compact"]') &&
-    settingsSource.includes('settings.reasoningDisplay') &&
-    settingsSource.includes('["hidden", "summary", "auto", "expanded"]') &&
-    settingsSource.includes('settings.processFold') &&
-    settingsSource.includes('["auto", "expanded"]') &&
-    settingsSource.includes('setProcessFoldPreference(pref)') &&
-    settingsSource.includes('app.SetReasoningDisplayMode(mode)'),
-  "General settings presents transcript density, reasoning display, and completed-work folding in one conversation section",
-);
-ok(
   [enLocaleSource, zhLocaleSource, zhTWLocaleSource].every((source) =>
-    source.includes('"settings.sessionContentDisplay"') &&
-    source.includes('"settings.sessionContentDisplayHint"') &&
-    source.includes('"settings.displayMode"') &&
-    source.includes('"settings.reasoningDisplay"') &&
-    source.includes('"settings.reasoningDisplay.hidden"') &&
-    source.includes('"settings.reasoningDisplay.summary"') &&
-    source.includes('"settings.reasoningDisplay.auto"') &&
-    source.includes('"settings.reasoningDisplay.expanded"') &&
-    source.includes('"settings.processFold"'),
+    source.includes('"settings.sessionExperience"') &&
+    source.includes('"settings.sessionExperienceHint"') &&
+    source.includes('"settings.sessionExperience.standard"') &&
+    source.includes('"settings.sessionExperience.deep"'),
   ),
-  "conversation-content display group labels are localized in every supported locale",
+  "session experience labels are localized in every supported locale",
 );
 ok(
   stylesSource.includes(".settings-page--general .settings-section") &&
@@ -233,9 +145,9 @@ ok(
 );
 ok(
   bridgeSource.includes('value === "deepseek-upgrade"') &&
-    bridgeSource.includes('recommendedUpgradeAvailable: deepSeekUpgradeMock') &&
+    bridgeSource.includes('recommendedUpgradeAvailable: false') &&
     bridgeSource.includes('headers: deepSeekUpgradeMock ? { "X-Route": "official-custom" } : undefined'),
-  "browser mock can preview the customized legacy DeepSeek upgrade flow",
+  "browser mock preserves custom DeepSeek headers without proposing the retired protocol upgrade",
 );
 ok(
   /async ConnectKey\(apiKey: string\)[\s\S]*?await this\.AddOfficialProviderAccess\("deepseek", apiKey\)/.test(bridgeSource),
@@ -243,12 +155,12 @@ ok(
 );
 ok(
   settingsSource.includes("officialProviders={s.officialProviders}") &&
-    settingsSource.includes("added: Boolean(state?.added)") &&
-    settingsSource.includes("keySet: Boolean(state?.keySet)"),
-  "official provider templates honor the backend installed state",
+    settingsSource.includes('canAdd: true, status: "available"') &&
+    settingsSource.includes("keySet: Boolean(provider?.keySet)"),
+  "official templates allow separate connections while preserving credential status",
 );
 ok(
-  /onUpgradeRecommended=\{\(name\) => \{[\s\S]*?cancelGroupFetch\(group\.id\);[\s\S]*?return apply\(\(\) => app\.UpgradeDeepSeekProviderAccess\(name\)\)/.test(settingsSource) &&
+  /onUpgradeRecommended=\{\(name\) => \{[\s\S]*?cancelGroupFetch\(group\.id\);[\s\S]*?return apply\(\(\) => saveModelSettings\(s, \{kind: "protocol_upgrade", name\}\)\)/.test(settingsSource) &&
     settingsSource.includes("onConfirm={() => onUpgradeRecommended(canonicalOfficialProviderName(upgradeProvider.name))}") &&
     settingsSource.includes('className="provider-protocol-upgrade"') &&
     settingsSource.includes('t("settings.providerProtocol")}: OpenAI Chat Completions') &&
@@ -257,12 +169,12 @@ ok(
 );
 ok(
   settingsSource.includes("const providerNames = group.providers.map((provider) => provider.name)") &&
-    settingsSource.includes("app.SetProviderWebSearch(providerNames, enabled)") &&
+    settingsSource.includes('kind: "web_search_capability", names: providerNames, enabled') &&
     !settingsSource.includes("app.SaveProvider({ ...provider, webSearch: enabled })"),
   "grouped DeepSeek profiles update server-side web search through one atomic backend call",
 );
 ok(
-  /<div className="provider-access-card__actions">[\s\S]*?<ProviderAccessMoreMenu[\s\S]*?<\/div>\s*<\/div>\s*\{group\.description && <div className="provider-access-card__desc">[\s\S]*?\{upgradeProvider && \(/.test(settingsSource) &&
+  /<div className="provider-access-card__actions">[\s\S]*?<ProviderAccessMoreMenu[\s\S]*?<\/div>\s*<\/div>\s*\{group\.description && !editingProvider && <div className="provider-access-card__desc">[\s\S]*?\{upgradeProvider && \(/.test(settingsSource) &&
     settingsSource.includes('className="provider-access-more__menu"') &&
     settingsSource.includes('buttonRole="menuitem"') &&
     stylesSource.includes(".provider-protocol-upgrade") &&

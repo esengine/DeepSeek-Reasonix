@@ -157,7 +157,7 @@ func (c *Controller) validatedCheckpointTurn(completion *guardedTurnCompletion) 
 	}
 	message := messages[candidate.messageIndex]
 	if message.Role != provider.RoleUser || message.LocalOnly ||
-		!agent.IsUserAuthoredTurn(agent.UserMessageText(message)) ||
+		!agent.IsUserAuthoredTurnMessage(message) ||
 		(message.CreatedAt > 0 && candidate.openedAt > 0 && message.CreatedAt < candidate.openedAt) {
 		return nil
 	}
@@ -216,6 +216,11 @@ func (m *checkpointManager) fileState(path string) (checkpoint.FileState, bool) 
 		return checkpoint.FileState{}, false
 	}
 	return store.FileState(path)
+}
+
+// CheckpointTurnChanges is read-only and never computes from the current tree.
+func (c *Controller) CheckpointTurnChanges(turn int) *checkpoint.TurnChanges {
+	return c.checkpoints.storeRef().TurnChanges(turn)
 }
 
 // snapshot records a pre-edit file change into the open checkpoint — the

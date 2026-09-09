@@ -51,6 +51,17 @@ func SessionContext(sessionPath string) string {
 	return sessionStem(sessionPath) + ".context.json"
 }
 
+// SessionPinnedContext is the optional desktop pinned-workspace-context
+// sidecar (<id>.pinned-context.json). Older versions ignore it while keeping
+// the primary transcript fully readable.
+func SessionPinnedContext(sessionPath string) string {
+	sessionPath = strings.TrimSpace(sessionPath)
+	if sessionPath == "" {
+		return ""
+	}
+	return sessionStem(sessionPath) + ".pinned-context.json"
+}
+
 // sessionStem strips the .jsonl suffix so a sidecar sits beside the session as
 // <id>.<kind> rather than <id>.jsonl.<kind>.
 func sessionStem(sessionPath string) string {
@@ -93,6 +104,16 @@ func SessionEventLogDamaged(sessionPath string) string {
 		return ""
 	}
 	return SessionEventLog(sessionPath) + ".damaged"
+}
+
+// SessionEventLogRotating marks a schema-2 log whose rotation is between
+// reading the old file and publishing the new one; unlocked appenders wait
+// for it to clear before trusting that their bytes reached the current log.
+func SessionEventLogRotating(sessionPath string) string {
+	if sessionPath == "" {
+		return ""
+	}
+	return SessionEventLog(sessionPath) + ".rotating"
 }
 
 // SessionTurnEventLog is the append-only local runtime lifecycle ledger
@@ -207,7 +228,8 @@ func SessionCleanupPending(sessionPath string) string {
 }
 
 // SessionSidecarFiles returns every regular-file sidecar owned by a session
-// transcript: branch meta, goal state, event/index logs, and diagnostic logs.
+// transcript: branch meta, goal state, event/index logs, pinned context, and
+// diagnostic logs.
 // Every surface that deletes a session (desktop trash, /clear, serve, ACP)
 // must remove all of these — the event log is the authoritative transcript, so
 // leaving it behind both leaks the "deleted" conversation and lets LoadSession
@@ -223,6 +245,7 @@ func SessionSidecarFiles(sessionPath string) []string {
 		SessionGoalState(sessionPath),
 		SessionEventLog(sessionPath),
 		SessionEventLogDamaged(sessionPath),
+		SessionEventLogRotating(sessionPath),
 		SessionTurnEventLog(sessionPath),
 		SessionTurnEventLogDamaged(sessionPath),
 		SessionEventIndex(sessionPath),
@@ -230,5 +253,6 @@ func SessionSidecarFiles(sessionPath string) []string {
 		SessionConflictLog(sessionPath),
 		SessionRecoveryState(sessionPath),
 		SessionContext(sessionPath),
+		SessionPinnedContext(sessionPath),
 	}
 }

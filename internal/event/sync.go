@@ -121,3 +121,9 @@ func (s *syncSink) RecordRunBudget(sample RunBudgetSample) {
 	defer s.mu.Unlock()
 	RecordRunBudget(s.inner, sample)
 }
+
+func (s *syncSink) RecordSubagentLifecycle(info SubagentLifecycleInfo) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	RecordSubagentLifecycle(s.inner, info)
+}

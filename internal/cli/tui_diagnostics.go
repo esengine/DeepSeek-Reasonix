@@ -23,6 +23,13 @@ const (
 	tuiWatchdogCancelGrace    = 2 * time.Second
 )
 
+// watchdogKillFallbackDelay bounds how long a watchdog kill waits after
+// requesting a graceful shutdown before the hard kill fires. The final
+// snapshot may legitimately spend five seconds waiting for a compatibility
+// file lock before writing a recovery branch, so this grace must exceed that
+// bounded recovery path rather than turning a successful save into Kill.
+const watchdogKillFallbackDelay = 12 * time.Second
+
 // Watchdog lifecycle phases. Only booting (no first Update) and running
 // (active turn / shell with no event-loop heartbeat) can escalate to kill.
 // Idle never terminates the process — that was the #7809 false-kill path.
@@ -50,6 +57,21 @@ func (p tuiWatchdogPhase) String() string {
 	}
 }
 
+// watchdogEscalation is the dump/cancel/grace/hard-kill bookkeeping for the
+// generation currently stalling; grouping it keeps the guarded scalar count
+// flat and the lifecycle explicit.
+type watchdogEscalation struct {
+	// generation is the one inside dump/cancel/grace (0 = none); a heartbeat
+	// clears it so a later stall can re-enter escalation for hard-kill only.
+	generation uint64
+	// cancelIssued is sticky for the Turn: Cancel() runs at most once per
+	// generation even if the grace window is aborted and the turn stalls again.
+	cancelIssued   uint64
+	cancelDeadline time.Time // zero until escalated for current generation
+	hardKillIssued bool
+	hardKilledGen  uint64
+}
+
 // tuiDiagnostics owns diagnostics for the interactive terminal UI. Logs and
 // plugin stderr use a private file; typed notices remain user-facing if it
 // cannot be created. The watchdog uses booting/idle/running/closed: idle never
@@ -72,18 +94,8 @@ type tuiDiagnostics struct {
 	generation          uint64 // increments on each idle→running transition
 	lastHeartbeat       time.Time
 	lastHeartbeatSource string
-	// escalatedGeneration is the generation currently inside dump/cancel/grace
-	// (0 means none). Cleared when a heartbeat aborts the grace window so a
-	// later stall can re-enter escalation for hard-kill only.
-	escalatedGeneration uint64
-	// cancelIssuedGeneration is sticky for the Turn: Cancel() runs at most once
-	// per generation even if the grace window is aborted and the turn stalls
-	// again.
-	cancelIssuedGeneration uint64
-	cancelDeadline         time.Time // zero until escalated for current generation
-	// hardKillIssued is true after a hard-kill for hardKilledGen.
-	hardKillIssued bool
-	hardKilledGen  uint64
+	// escalation groups the per-generation kill-escalation state by lifetime.
+	escalation watchdogEscalation
 
 	// cancelFn is the non-blocking controller cancel for the active generation.
 	// Cleared on idle/closed. Invoked under mu after a generation check.
@@ -91,12 +103,19 @@ type tuiDiagnostics struct {
 	// statusFn optionally returns Controller RuntimeStatus text for dumps.
 	statusFn func() string
 
+	// tickLastSeen is the previous onTick time: consecutive ~1s ticks at least
+	// a stall apart mean suspend/starvation, not a wedged loop, so the
+	// first such tick refreshes instead of escalating (#9233).
+	tickLastSeen time.Time
+
 	// Injectable seams for deterministic tests (nil = production defaults).
-	nowFn     func() time.Time
-	newTicker func(d time.Duration) watchdogTicker
-	dumpFn    func(reason string)
-	killFn    func()
-	logFn     func(format string, args ...any)
+	nowFn      func() time.Time
+	newTicker  func(d time.Duration) watchdogTicker
+	afterFunc  func(delay time.Duration, fn func())
+	dumpFn     func(reason string)
+	killFn     func()
+	logFn      func(format string, args ...any)
+	shutdownFn func(*tuiShutdownCompletion)
 
 	// Test observation counters (safe under mu).
 	cancelCalls atomic.Int32
@@ -208,7 +227,7 @@ func (d *tuiDiagnostics) NoteRunning(cancel func()) {
 	d.lastHeartbeat = d.now()
 	d.lastHeartbeatSource = "enter_running"
 	d.cancelFn = cancel
-	d.cancelDeadline = time.Time{}
+	d.escalation.cancelDeadline = time.Time{}
 	d.logfLocked("watchdog_state phase=%s gen=%d source=enter_running", d.phase, d.generation)
 }
 
@@ -227,7 +246,7 @@ func (d *tuiDiagnostics) NoteIdle() {
 	prev := d.phase
 	d.phase = watchdogIdle
 	d.cancelFn = nil
-	d.cancelDeadline = time.Time{}
+	d.escalation.cancelDeadline = time.Time{}
 	d.lastHeartbeat = d.now()
 	d.lastHeartbeatSource = "enter_idle"
 	d.logfLocked("watchdog_state phase=%s gen=%d prev=%s source=enter_idle", d.phase, d.generation, prev)
@@ -254,11 +273,11 @@ func (d *tuiDiagnostics) NoteActiveHeartbeat(source string) {
 	// Fresh heartbeat aborts the in-flight grace window for this gen so a later
 	// stall may re-enter dump/grace/hard-kill. Cancel stays sticky via
 	// cancelIssuedGeneration (at most one Cancel per Turn).
-	if d.escalatedGeneration == d.generation && d.generation != 0 && !d.cancelDeadline.IsZero() {
-		d.cancelDeadline = time.Time{}
-		d.escalatedGeneration = 0
+	if d.escalation.generation == d.generation && d.generation != 0 && !d.escalation.cancelDeadline.IsZero() {
+		d.escalation.cancelDeadline = time.Time{}
+		d.escalation.generation = 0
 		d.logfLocked("watchdog_escalation_aborted phase=%s gen=%d source=%s reason=heartbeat cancel_issued=%v",
-			d.phase, d.generation, d.lastHeartbeatSource, d.cancelIssuedGeneration == d.generation)
+			d.phase, d.generation, d.lastHeartbeatSource, d.escalation.cancelIssued == d.generation)
 	}
 }
 
@@ -284,9 +303,16 @@ func (d *tuiDiagnostics) StartWatchdog(p *tea.Program) {
 		if d.killFn == nil && p != nil {
 			d.killFn = p.Kill
 		}
+		if d.shutdownFn == nil && p != nil {
+			d.shutdownFn = func(completion *tuiShutdownCompletion) {
+				p.Send(tuiShutdownMsg{completion: completion})
+			}
+		}
 		d.mu.Lock()
+		armedAt := d.now()
+		d.tickLastSeen = armedAt
 		if d.phase == watchdogBooting {
-			d.lastHeartbeat = d.now()
+			d.lastHeartbeat = armedAt
 			d.lastHeartbeatSource = "watchdog_armed"
 		}
 		d.mu.Unlock()
@@ -315,6 +341,31 @@ func (d *tuiDiagnostics) watch() {
 	}
 }
 
+// logHeartbeatLocked records the per-tick heartbeat line in a stable format.
+func (d *tuiDiagnostics) logHeartbeatLocked(now time.Time, phase tuiWatchdogPhase, gen uint64, age time.Duration, source string, escalated, hardKilled bool) {
+	d.logfLocked("heartbeat t=%s phase=%s gen=%d last_progress_age=%s last_source=%s cancel_requested=%v hard_kill_phase=%v",
+		now.UTC().Format(time.RFC3339Nano), phase, gen, age.Round(time.Millisecond), source, escalated, hardKilled)
+}
+
+// absorbClockJumpLocked treats a >=stall gap between consecutive ~1s ticks as
+// suspend/resume or scheduler starvation: the loop is alive on this tick, so
+// the stale age must not dump/cancel/kill a healthy turn (#9233).
+func (d *tuiDiagnostics) absorbClockJumpLocked(now time.Time) {
+	gap := now.Sub(d.tickLastSeen)
+	if d.tickLastSeen.IsZero() || gap < tuiWatchdogStall {
+		d.tickLastSeen = now
+		return
+	}
+	if d.phase == watchdogRunning {
+		d.escalation.generation = 0
+		d.escalation.cancelDeadline = time.Time{}
+	}
+	d.lastHeartbeat = now
+	d.lastHeartbeatSource = "clock_jump"
+	d.logfLocked("watchdog_clock_jump gap=%s phase=%s gen=%d", gap.Round(time.Millisecond), d.phase, d.generation)
+	d.tickLastSeen = now
+}
+
 // onTick is the pure escalation step. Tests drive it directly with a fake clock
 // so no real sleeps are required.
 func (d *tuiDiagnostics) onTick(now time.Time) {
@@ -328,6 +379,7 @@ func (d *tuiDiagnostics) onTick(now time.Time) {
 		d.mu.Unlock()
 		return
 	}
+	d.absorbClockJumpLocked(now)
 	gen := d.generation
 	last := d.lastHeartbeat
 	if last.IsZero() {
@@ -335,21 +387,15 @@ func (d *tuiDiagnostics) onTick(now time.Time) {
 	}
 	age := now.Sub(last)
 	source := d.lastHeartbeatSource
-	cancelDeadline := d.cancelDeadline
-	escalatedGen := d.escalatedGeneration
-	hardKillIssued := d.hardKillIssued
-	hardKilledGen := d.hardKilledGen
+	cancelDeadline := d.escalation.cancelDeadline
+	escalatedGen := d.escalation.generation
+	hardKillIssued := d.escalation.hardKillIssued
+	hardKilledGen := d.escalation.hardKilledGen
 	statusFn := d.statusFn
 	cancelFn := d.cancelFn
-	d.logfLocked("heartbeat t=%s phase=%s gen=%d last_progress_age=%s last_source=%s cancel_requested=%v hard_kill_phase=%v",
-		now.UTC().Format(time.RFC3339Nano),
-		phase,
-		gen,
-		age.Round(time.Millisecond),
-		source,
+	d.logHeartbeatLocked(now, phase, gen, age, source,
 		escalatedGen == gen && gen != 0 && !cancelDeadline.IsZero(),
-		hardKillIssued && hardKilledGen == gen,
-	)
+		hardKillIssued && hardKilledGen == gen)
 	d.Sync()
 
 	// Idle: never dump/cancel/kill. Heartbeat log above is the only activity.
@@ -366,10 +412,10 @@ func (d *tuiDiagnostics) onTick(now time.Time) {
 			return
 		}
 		// Deadline reached. Re-check heartbeat under the same lock before kill.
-		if now.Sub(d.lastHeartbeat) >= tuiWatchdogStall && !(d.hardKillIssued && d.hardKilledGen == gen) {
-			d.hardKillIssued = true
-			d.hardKilledGen = gen
-			d.cancelDeadline = time.Time{}
+		if now.Sub(d.lastHeartbeat) >= tuiWatchdogStall && !(d.escalation.hardKillIssued && d.escalation.hardKilledGen == gen) {
+			d.escalation.hardKillIssued = true
+			d.escalation.hardKilledGen = gen
+			d.escalation.cancelDeadline = time.Time{}
 			diag := d.formatDiagLocked(now, "watchdog_hard_kill")
 			d.mu.Unlock()
 			d.killCalls.Add(1)
@@ -380,7 +426,7 @@ func (d *tuiDiagnostics) onTick(now time.Time) {
 			return
 		}
 		// Heartbeat recovered (or phase raced) before hard-kill — clear grace.
-		d.cancelDeadline = time.Time{}
+		d.escalation.cancelDeadline = time.Time{}
 		d.mu.Unlock()
 		return
 	}
@@ -410,13 +456,13 @@ func (d *tuiDiagnostics) onTick(now time.Time) {
 	// First escalation for this stall (or re-entry after a grace abort).
 	diag := d.formatDiagLocked(now, "watchdog_stall")
 	if phase == watchdogRunning {
-		d.escalatedGeneration = gen
-		d.cancelDeadline = now.Add(tuiWatchdogCancelGrace)
+		d.escalation.generation = gen
+		d.escalation.cancelDeadline = now.Add(tuiWatchdogCancelGrace)
 		// Cancel at most once per generation; re-stalls after recovery still
 		// get dump + grace + hard-kill, but not a second Cancel().
-		issueCancel := cancelFn != nil && d.cancelIssuedGeneration != gen
+		issueCancel := cancelFn != nil && d.escalation.cancelIssued != gen
 		if issueCancel {
-			d.cancelIssuedGeneration = gen
+			d.escalation.cancelIssued = gen
 		}
 		// Snapshot cancel under lock; invoke after the dump outside this critical
 		// section, with a second generation check immediately before the call.
@@ -437,8 +483,8 @@ func (d *tuiDiagnostics) onTick(now time.Time) {
 	}
 
 	// Booting stall: dump + hard-kill (no controller turn to cancel).
-	d.hardKillIssued = true
-	d.hardKilledGen = gen
+	d.escalation.hardKillIssued = true
+	d.escalation.hardKilledGen = gen
 	d.mu.Unlock()
 	d.dumpCalls.Add(1)
 	d.killCalls.Add(1)
@@ -454,7 +500,7 @@ func (d *tuiDiagnostics) cancelCurrentGeneration(gen uint64, cancelFn func()) {
 	}
 	d.mu.Lock()
 	defer d.mu.Unlock()
-	if d.phase != watchdogRunning || d.generation != gen || d.cancelIssuedGeneration != gen {
+	if d.phase != watchdogRunning || d.generation != gen || d.escalation.cancelIssued != gen {
 		return
 	}
 	d.cancelCalls.Add(1)
@@ -473,8 +519,8 @@ func (d *tuiDiagnostics) formatDiagLocked(now time.Time, reason string) string {
 		d.generation,
 		age.Round(time.Millisecond),
 		d.lastHeartbeatSource,
-		d.escalatedGeneration == d.generation && d.generation != 0 && !d.cancelDeadline.IsZero(),
-		d.hardKillIssued && d.hardKilledGen == d.generation,
+		d.escalation.generation == d.generation && d.generation != 0 && !d.escalation.cancelDeadline.IsZero(),
+		d.escalation.hardKillIssued && d.escalation.hardKilledGen == d.generation,
 	)
 }
 
@@ -491,6 +537,26 @@ func (d *tuiDiagnostics) doDump(reason string) {
 
 func (d *tuiDiagnostics) doKill() {
 	if d == nil {
+		return
+	}
+	if d.shutdownFn != nil {
+		// Graceful first — the SIGHUP path snapshots and quits cleanly; a
+		// wedged loop can block Program.Send, so register the fallback before
+		// making the graceful request (#9233).
+		kill := d.killFn
+		afterFunc := d.afterFunc
+		if afterFunc == nil {
+			afterFunc = func(delay time.Duration, fn func()) {
+				time.AfterFunc(delay, fn)
+			}
+		}
+		completion := newTUIShutdownCompletion()
+		afterFunc(watchdogKillFallbackDelay, func() {
+			if completion.claimFallback() && kill != nil {
+				kill()
+			}
+		})
+		d.shutdownFn(completion)
 		return
 	}
 	if d.killFn != nil {
@@ -558,7 +624,7 @@ func (d *tuiDiagnostics) Close() {
 		d.mu.Lock()
 		d.phase = watchdogClosed
 		d.cancelFn = nil
-		d.cancelDeadline = time.Time{}
+		d.escalation.cancelDeadline = time.Time{}
 		d.logfLocked("watchdog_state phase=%s gen=%d source=closed", d.phase, d.generation)
 		d.mu.Unlock()
 

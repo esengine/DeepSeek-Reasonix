@@ -578,7 +578,7 @@ func waitFinishedWithinBudget(wait func(), budget time.Duration) bool {
 func (t *stdioTransport) close() {
 	t.closeOnce.Do(func() {
 		if t.releaseSlot != nil {
-			t.releaseSlot()
+			defer t.releaseSlot()
 		}
 		if t.stdin != nil {
 			_ = t.stdin.Close()
@@ -593,6 +593,7 @@ func (t *stdioTransport) close() {
 		// clean up resources they launched outside the process group. Hard-kill
 		// after the bounded grace period so teardown cannot wedge.
 		if waitFinishedWithinBudget(t.wait, gracefulCloseWaitBudget) {
+			proc.FinishTracked(t.job)
 			return
 		}
 		proc.KillTracked(t.cmd, t.job)

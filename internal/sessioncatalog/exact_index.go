@@ -78,11 +78,14 @@ func (c *Catalog) prepareExactPathProjection(ctx context.Context, raw SessionRec
 		existing.LastActivityAt > record.LastActivityAt {
 		record.LastActivityAt = existing.LastActivityAt
 	}
-	if existing.TurnsState != TurnsUnknown && record.TurnsState == TurnsUnknown &&
-		existing.ContentFingerprint == record.ContentFingerprint {
-		record.Preview = existing.Preview
-		record.Turns = existing.Turns
-		record.TurnsState = existing.TurnsState
+	if existing.TurnsState != TurnsUnknown && record.TurnsState == TurnsUnknown {
+		if existing.ContentFingerprint == record.ContentFingerprint {
+			record.Preview = existing.Preview
+			record.Turns = existing.Turns
+			record.TurnsState = existing.TurnsState
+		} else {
+			fillKnownCountHints(&record, existing.Preview, existing.Turns)
+		}
 	}
 	return record, false, projectionDirty, nil
 }

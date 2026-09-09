@@ -94,7 +94,7 @@ func (a *App) keepOnlyRemoteVisibleTab(tabID string) (TabMeta, error) {
 		for _, tab := range removedLocal {
 			a.removeVisibleTabRuntimeAdmissionHeld(tab)
 		}
-		a.saveTabsWrite(dir, entries, activeID, version)
+		_ = a.saveTabsWrite(dir, entries, activeID, version)
 		return meta, remoteCancels, nil
 	}()
 	if err != nil {

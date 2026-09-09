@@ -95,6 +95,7 @@ func TestSessionSidecarFiles(t *testing.T) {
 		"/home/u/.reasonix/sessions/abc.goal-state.json",
 		"/home/u/.reasonix/sessions/abc.events.jsonl",
 		"/home/u/.reasonix/sessions/abc.events.jsonl.damaged",
+		"/home/u/.reasonix/sessions/abc.events.jsonl.rotating",
 		"/home/u/.reasonix/sessions/abc.turns.jsonl",
 		"/home/u/.reasonix/sessions/abc.turns.jsonl.damaged",
 		"/home/u/.reasonix/sessions/abc.event-index.json",
@@ -102,6 +103,7 @@ func TestSessionSidecarFiles(t *testing.T) {
 		"/home/u/.reasonix/sessions/abc.conflicts.jsonl",
 		"/home/u/.reasonix/sessions/abc.recovery.json",
 		"/home/u/.reasonix/sessions/abc.context.json",
+		"/home/u/.reasonix/sessions/abc.pinned-context.json",
 	}
 	if len(got) != len(want) {
 		t.Fatalf("SessionSidecarFiles = %v, want %v", got, want)

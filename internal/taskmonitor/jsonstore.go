@@ -419,7 +419,9 @@ func (s *FileStore) SaveTask(ctx context.Context, projectDir string, snap TaskSn
 		os.Remove(tmpName)
 		return fmt.Errorf("save task: %w", err)
 	}
-	if err := os.Rename(tmpName, target); err != nil {
+	// Keep the CAS lock across bounded retries for Windows readers or filter
+	// drivers. Publication must remain an atomic rename, never a copy fallback.
+	if err := fileutil.ClaimRename(tmpName, target); err != nil {
 		os.Remove(tmpName)
 		return fmt.Errorf("save task: %w", err)
 	}

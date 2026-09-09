@@ -17,7 +17,9 @@ export function EffortSwitcher({
   const [closing, setClosing] = useState(false);
   const triggerRef = useRef<HTMLButtonElement>(null);
   const closeTimerRef = useRef<number | null>(null);
-  const levels = asArray(effort?.levels);
+  const options = asArray(effort?.options);
+  const label = (id: string) => options.find((option) => option.id === id)?.name || id;
+  const levels = effort?.options ? ["auto", ...options.map((option) => option.id)] : asArray(effort?.levels);
   const current = effort?.current || "auto";
 
   const clearCloseTimer = useCallback(() => {
@@ -65,7 +67,7 @@ export function EffortSwitcher({
         onClick={() => (open || closing ? closeMenu() : openMenu())}
       >
         <Gauge size={14} className="modelsw__kind" />
-        <span className="modelsw__label">{current}</span>
+        <span className="modelsw__label">{label(current)}</span>
         <ChevronsUpDown size={11} />
       </button>
       <AnchoredPopover
@@ -86,7 +88,7 @@ export function EffortSwitcher({
               className={`modelsw__item ${level === current ? "modelsw__item--current" : ""}`}
               onClick={() => pick(level)}
             >
-              <span className="modelsw__model">{level}</span>
+              <span className="modelsw__model">{label(level)}</span>
               {level === current && <Check size={13} className="modelsw__check" />}
             </button>
           ))}

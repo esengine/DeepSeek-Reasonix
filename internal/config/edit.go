@@ -99,7 +99,7 @@ func (c *Config) SetVisionModel(name string) error {
 	if !ok {
 		return fmt.Errorf("set vision model: no such model %q (configured: %s)", name, c.providerNames())
 	}
-	if !EffectiveVision(entry) {
+	if NewModelCapabilityResolver().Resolve(entry).State != CapabilitySupported {
 		return fmt.Errorf("set vision model: %q does not support image input", name)
 	}
 	if !entry.Configured() {
@@ -307,9 +307,9 @@ func (c *Config) SetDesktopTerminalTheme(theme string) error {
 // affect CLI output or provider-visible request data.
 func (c *Config) SetDesktopLayoutStyle(style string) error {
 	switch strings.ToLower(strings.TrimSpace(style)) {
-	case "", "classic":
+	case "classic":
 		c.Desktop.LayoutStyle = "classic"
-	case "workbench", "workspace":
+	case "", "workbench", "workspace":
 		c.Desktop.LayoutStyle = "workbench"
 	case "creation":
 		c.Desktop.LayoutStyle = "creation"
@@ -374,6 +374,7 @@ func (c *Config) SetDesktopStatusBarStyle(style string) error {
 	default:
 		return fmt.Errorf("status bar style %q: must be icon|text", style)
 	}
+	c.Desktop.StatusBarStyleInitialized = true
 	return nil
 }
 

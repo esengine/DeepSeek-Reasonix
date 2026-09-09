@@ -1,3 +1,4 @@
+import { selectSettingsValue } from "./settingsSelectTestUtils";
 // Run: tsx src/__tests__/remote-hosts-page.test.tsx
 
 import React from "react";
@@ -29,7 +30,7 @@ async function flush() {
 
 function button(label: string, root: ParentNode = document): HTMLButtonElement | undefined {
   return Array.from(root.querySelectorAll<HTMLButtonElement>("button"))
-    .find((candidate) => candidate.textContent?.trim() === label);
+    .find((candidate) => (candidate.getAttribute("aria-label") || candidate.textContent?.trim()) === label);
 }
 
 console.log("\nRemote SSH host settings");
@@ -89,6 +90,7 @@ const bindings = {
 } as unknown as AppBindings;
 window.go = { main: { App: bindings } };
 
+window.matchMedia = (() => ({matches: true, addEventListener(){}, removeEventListener(){}})) as any;
 const rootElement = document.getElementById("root");
 if (!rootElement) throw new Error("missing root");
 const root = createRoot(rootElement);
@@ -130,15 +132,9 @@ ok(document.body.textContent?.includes("saved password will be removed") === tru
 // Credential mode: the host form offers remote | local-proxy and the choice
 // rides the UpdateRemoteHost payload.
 {
-  const modeSelect = Array.from(document.querySelectorAll<HTMLSelectElement>("select"))
-    .find((sel) => Array.from(sel.options).some((opt) => opt.value === "local-proxy"));
+  const modeSelect = Array.from(document.querySelectorAll<HTMLButtonElement>("button.settings-select")).find(sel => sel.value === "remote");
   ok(Boolean(modeSelect), "edit form offers the credential-mode select");
-  const setter = Object.getOwnPropertyDescriptor(dom.window.HTMLSelectElement.prototype, "value")?.set;
-  await act(async () => {
-    setter?.call(modeSelect, "local-proxy");
-    modeSelect?.dispatchEvent(new dom.window.Event("change", { bubbles: true }));
-    await flush();
-  });
+  if (modeSelect) await selectSettingsValue(modeSelect, "local-proxy");
   await act(async () => {
     button("Save")?.click();
     await flush();

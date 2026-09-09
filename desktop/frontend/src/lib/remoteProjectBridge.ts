@@ -16,6 +16,7 @@ export interface RemoteProjectBindings {
   SubmitRemoteTab(tabId: string, text: string): Promise<void>;
   ClearRemoteTabSession(tabId: string): Promise<void>;
   CancelRemoteTab(tabId: string): Promise<void>;
+  ReclaimRemoteTabSession(tabId: string): Promise<void>;
   ApproveRemoteTab(tabId: string, callId: string, decision: string): Promise<void>;
   ResolveRemoteTabPlanDecision(tabId: string, callId: string, action: "start_execution" | "revise_plan" | "exit_plan", feedback: string): Promise<void>;
   AnswerRemoteTab(tabId: string, callId: string, answers: RemoteAskAnswer[]): Promise<void>;

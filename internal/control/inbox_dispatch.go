@@ -1,6 +1,7 @@
 package control
 
 import (
+	"errors"
 	"log/slog"
 	"time"
 
@@ -8,6 +9,19 @@ import (
 )
 
 const maxInboxDispatchRetryAttempts = 3
+
+// ErrInboxRuntimeUnpublished means the host owns the next dispatch kick:
+// either this runtime is a candidate or it was replaced before admission.
+var ErrInboxRuntimeUnpublished = errors.New("inbox runtime is not published")
+
+// NotifyInboxRuntimeReady is called after a host publishes a complete runtime.
+func (c *Controller) NotifyInboxRuntimeReady() { c.maybeDispatchInbox() }
+
+func (c *Controller) SetBeforeInboxDispatch(before func(*Controller) (func(), error)) {
+	c.mu.Lock()
+	c.modelSettings.beforeInboxDispatch = before
+	c.mu.Unlock()
+}
 
 type inboxDispatchResult int
 
@@ -32,6 +46,10 @@ func (c *Controller) endRotation() {
 // rejection can never disappear in the handoff window.
 func (c *Controller) maybeDispatchInbox() {
 	c.inbox.mu.Lock()
+	if c.inbox.closed {
+		c.inbox.mu.Unlock()
+		return
+	}
 	c.inbox.dispatchPending = true
 	if c.inbox.dispatching {
 		c.inbox.mu.Unlock()
@@ -39,7 +57,19 @@ func (c *Controller) maybeDispatchInbox() {
 	}
 	c.inbox.dispatching = true
 	c.inbox.mu.Unlock()
+	c.mu.Lock()
+	hostAdmission := c.modelSettings.beforeInboxDispatch != nil
+	c.mu.Unlock()
+	if hostAdmission {
+		// Enqueue/resume can be called with the host's publication lock held.
+		// Never synchronously reenter that lock through its admission callback.
+		c.autosaveWG.Go(c.drainInboxDispatch)
+		return
+	}
+	c.drainInboxDispatch()
+}
 
+func (c *Controller) drainInboxDispatch() {
 	for {
 		c.inbox.mu.Lock()
 		if !c.inbox.dispatchPending {
@@ -78,19 +108,14 @@ func (c *Controller) dispatchInboxOnce() inboxDispatchResult {
 	if c.SessionPath() == "" {
 		return inboxDispatchIdle
 	}
-	st, err := c.ensureInbox()
+	meta, ok, err := c.nextInboxDispatchItem()
 	if err != nil {
 		slog.Warn("controller: open inbox for dispatch", "err", err)
 		return inboxDispatchRetry
 	}
-	meta, ok := st.NextQueued()
 	c.inbox.mu.Lock()
-	afterScan := c.inbox.afterDispatchScan
 	beforeSubmit := c.inbox.beforeDispatchSubmit
 	c.inbox.mu.Unlock()
-	if afterScan != nil {
-		afterScan(ok)
-	}
 	if !ok {
 		return inboxDispatchIdle
 	}
@@ -102,6 +127,9 @@ func (c *Controller) dispatchInboxOnce() inboxDispatchResult {
 	}
 	receipt, err := c.TrySubmitInboxItem(meta.ID)
 	if err != nil {
+		if errors.Is(err, ErrInboxRuntimeUnpublished) || errors.Is(err, ErrTurnRunning) {
+			return inboxDispatchIdle
+		}
 		slog.Warn("controller: dispatch inbox item", "err", err, "id", meta.ID)
 		return inboxDispatchRetry
 	}
@@ -110,6 +138,29 @@ func (c *Controller) dispatchInboxOnce() inboxDispatchResult {
 	}
 	// A competing turn or rotation owns the next kick when its gate releases.
 	return inboxDispatchIdle
+}
+
+func (c *Controller) nextInboxDispatchItem() (sessioninbox.InboxItemMeta, bool, error) {
+	c.inbox.scanMu.Lock()
+	defer c.inbox.scanMu.Unlock()
+	c.inbox.mu.Lock()
+	closed := c.inbox.closed
+	afterScan := c.inbox.afterDispatchScan
+	c.inbox.mu.Unlock()
+	if closed {
+		return sessioninbox.InboxItemMeta{}, false, nil
+	}
+	st, err := c.ensureInbox()
+	if err != nil {
+		return sessioninbox.InboxItemMeta{}, false, err
+	}
+	// NextQueued refreshes disk state and may create its transaction-lock
+	// directory. Keep that access inside the same shutdown boundary as Open.
+	meta, ok := st.NextQueued()
+	if afterScan != nil {
+		afterScan(ok)
+	}
+	return meta, ok, nil
 }
 
 func (c *Controller) scheduleInboxDispatchRetry() {

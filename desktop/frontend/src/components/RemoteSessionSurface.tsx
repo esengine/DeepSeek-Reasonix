@@ -1,11 +1,12 @@
-import { CloudOff, Loader2, RotateCw, TriangleAlert } from "lucide-react";
 import { useEffect, useState } from "react";
-import { useT } from "../lib/i18n";
 import { app } from "../lib/bridge";
-import { Transcript } from "./Transcript";
+import { useRemoteNavigationCommand } from "../lib/remoteNavigationCommands";
+import { Transcript, type TranscriptProps } from "./Transcript";
 import { AskCard } from "./AskCard";
 import { ApprovalModal } from "./ApprovalModal";
 import { ExtensionFormDialog } from "./ExtensionFormDialog";
+import { SessionRecoveryBanner, SessionRecoveryPlaceholder } from "./SessionRecoveryBanner";
+import { projectSessionAvailability } from "../lib/sessionAvailability";
 import type { RemoteSessionApi } from "../lib/useRemoteSession";
 export { hydrateRemoteTelemetry, loadRemoteStatusSnapshot } from "../lib/remoteTelemetry";
 import type { TabMeta, WireApproval, WireAsk } from "../lib/types";
@@ -18,17 +19,27 @@ import type { TabMeta, WireApproval, WireAsk } from "../lib/types";
  * the approval/ask cards are remote-specific; the composer lives in the
  * app shell, shared with local tabs.
  */
-export function RemoteSessionSurface({ tab, session }: { tab: TabMeta; session: RemoteSessionApi }) {
-  const t = useT();
+export function RemoteSessionSurface({ tab, session, surfaceCommitToken, onSurfacePaintReady }: {
+  tab: TabMeta; session: RemoteSessionApi;
+} & Pick<TranscriptProps, "surfaceCommitToken" | "onSurfacePaintReady">) {
+  const navigateRemote = useRemoteNavigationCommand();
+  const availability = projectSessionAvailability({ remote: session });
+  const ready = availability.kind === "ready";
+  const hasContent = session.transcript.items.length > 0 || Boolean(session.transcript.live?.text || session.transcript.live?.reasoning);
   const approval = session.transcript.approval as WireApproval | undefined;
   const ask = session.transcript.ask as WireAsk | undefined;
   const extensionForm = session.transcript.extensionForm;
   const [actionError, setActionError] = useState("");
   const [extensionFormBusy, setExtensionFormBusy] = useState(false);
   useEffect(() => { setActionError(""); setExtensionFormBusy(false); }, [session.state, tab.id]);
-  const runAction = (action: () => Promise<unknown>) => {
+  const runAction = async (action: () => Promise<unknown>, propagate = false): Promise<void> => {
     setActionError("");
-    void action().catch((error) => setActionError(error instanceof Error ? error.message : String(error)));
+    try {
+      await action();
+    } catch (error) {
+      setActionError(error instanceof Error ? error.message : String(error));
+      if (propagate) throw error;
+    }
   };
   const submitExtensionForm = (values: Record<string, unknown>) => {
     if (!extensionForm || extensionFormBusy) return;
@@ -39,73 +50,32 @@ export function RemoteSessionSurface({ tab, session }: { tab: TabMeta; session: 
   };
   if (!tab.remote) return null;
 
-  if (session.state === "serve_down") {
-    const retry = () => {
-      // With no explicit target, the backend preserves the parked tab's
-      // current named/fresh-session intent instead of silently starting over.
-      runAction(() => app.OpenRemoteProjectTab(tab.remote!.hostId, tab.remote!.workspace, {}));
-    };
-    return (
-      <div className="remote-surface remote-surface--warning" role="alert">
-        <TriangleAlert size={18} aria-hidden="true" />
-        <span>{t("remoteSurface.serveDown")}</span>
-        {actionError || session.error ? <span className="remote-surface__detail">{actionError || session.error}</span> : null}
-        <button type="button" className="btn btn--ghost" onClick={retry}>
-          <RotateCw size={14} aria-hidden="true" />
-          {t("remoteSurface.reconnect")}
-        </button>
-      </div>
-    );
-  }
-
-  if (session.state === "error") {
-    return (
-      <div className="remote-surface remote-surface--error" role="alert">
-        <CloudOff size={18} aria-hidden="true" />
-        <span>{t("remoteSurface.error")}</span>
-        {session.error ? <span className="remote-surface__detail">{session.error}</span> : null}
-      </div>
-    );
-  }
-
-  if (!session.hydrated && session.error) {
-    return (
-      <div className="remote-surface remote-surface--error" role="alert">
-        <TriangleAlert size={18} aria-hidden="true" />
-        <span>{t("remoteSurface.error")}</span>
-        <span className="remote-surface__detail">{session.error}</span>
-        <button type="button" className="btn btn--ghost" onClick={() => runAction(session.retryHydration)}>
-          <RotateCw size={14} aria-hidden="true" />
-          {t("common.retry")}
-        </button>
-      </div>
-    );
-  }
-
-  if (!session.hydrated && (session.state === "connecting" || session.state === "reconnecting")) {
-    return (
-      <div className="remote-surface remote-surface--waiting" role="status">
-        <Loader2 size={18} className="remote-surface__spinner" aria-hidden="true" />
-        <span>{t(session.state === "connecting" ? "remoteSurface.connecting" : "remoteSurface.reconnecting")}</span>
-      </div>
-    );
-  }
-
   return (
+    <>
+    <SessionRecoveryBanner key={`${tab.id}:${session.surfaceGeneration}`} availability={availability} onRetry={async () => {
+      if (availability.source === "history") { await session.retryHydration(); return; }
+      // No new-session target: preserve the parked session when reconnecting.
+      const outcome = await navigateRemote(tab.remote!, {});
+      if (outcome.status === "failed") throw outcome.error;
+    }} />
+    <main className="main">
     <div className="remote-surface remote-surface--ready">
-      <Transcript
+      {!ready && !hasContent ? <SessionRecoveryPlaceholder availability={availability} /> : <Transcript
         items={session.transcript.items}
         live={session.transcript.live}
         tabId={tab.id}
         revealSignal={session.surfaceGeneration}
+        hydrating={!session.hydrated && !hasContent}
+        surfaceCommitToken={surfaceCommitToken}
+        onSurfacePaintReady={onSurfacePaintReady}
         running={session.transcript.running}
         checkpoints={session.transcript.checkpoints}
         onPrompt={(prompt) => runAction(() => session.submit(prompt))}
         onRewind={(turn, scope) => runAction(() => session.rewind(turn, scope))}
-        rewindDisabled={session.running || !session.hydrated}
-      />
+        rewindDisabled={session.running || !ready}
+      />}
 
-      {approval ? (
+      {ready && approval ? (
         <div className="remote-surface__approval">
           <ApprovalModal
             key={`${tab.id}:${approval.id}`}
@@ -126,19 +96,20 @@ export function RemoteSessionSurface({ tab, session }: { tab: TabMeta; session: 
         </div>
       ) : null}
 
-      {ask?.questions?.length ? (
+      {ready && ask?.questions?.length ? (
         <AskCard
           key={`${tab.id}:${ask.id}`}
           ask={ask}
+          draftScope={tab.id}
           onAnswer={(id, answers) => runAction(() => session.answer(id, answers.map((answer) => ({
             QuestionID: answer.questionId,
             Selected: answer.selected,
-          }))))}
-          onDismiss={() => runAction(() => session.answer(ask.id, []))}
+          }))), true)}
+          onDismiss={() => runAction(() => session.answer(ask.id, []), true)}
           onStop={() => runAction(() => session.cancelTurn())}
         />
       ) : null}
-      {extensionForm ? (
+      {ready && extensionForm ? (
         <ExtensionFormDialog
           key={`${tab.id}:${extensionForm.pluginId}:${extensionForm.surfaceId}`}
           surface={extensionForm}
@@ -147,9 +118,11 @@ export function RemoteSessionSurface({ tab, session }: { tab: TabMeta; session: 
           onCancel={() => submitExtensionForm({ cancelled: true })}
         />
       ) : null}
-      {actionError || session.promptError || (session.state === "ready" && session.error) ? (
+      {ready && (actionError || session.promptError || session.error) ? (
         <div className="remote-surface__detail" role="alert">{actionError || session.promptError || session.error}</div>
       ) : null}
     </div>
+    </main>
+    </>
   );
 }

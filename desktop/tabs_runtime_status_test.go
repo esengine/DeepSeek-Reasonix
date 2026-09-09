@@ -78,7 +78,12 @@ func TestProjectTreeSplitsMultipleRuntimeSessionsInSameTopic(t *testing.T) {
 	app := NewApp()
 	runnerA := &blockingRunner{started: make(chan struct{}), release: make(chan struct{})}
 	runnerB := &blockingRunner{started: make(chan struct{}), release: make(chan struct{})}
-	ctrlA := control.New(control.Options{Runner: runnerA, SessionDir: dir, SessionPath: sessionA, Label: "a", Sink: event.Discard})
+	asks := make(chan struct{}, 1)
+	ctrlA := control.New(control.Options{Runner: runnerA, SessionDir: dir, SessionPath: sessionA, Label: "a", Sink: event.FuncSink(func(e event.Event) {
+		if e.Kind == event.AskRequest {
+			asks <- struct{}{}
+		}
+	})})
 	ctrlB := control.New(control.Options{Runner: runnerB, SessionDir: dir, SessionPath: sessionB, Label: "b", Sink: event.Discard})
 	defer ctrlA.Close()
 	defer ctrlB.Close()
@@ -116,6 +121,18 @@ func TestProjectTreeSplitsMultipleRuntimeSessionsInSameTopic(t *testing.T) {
 	ctrlB.Submit("block B")
 	<-runnerA.started
 	<-runnerB.started
+	askCtx, cancelAsk := context.WithCancel(t.Context())
+	askDone := make(chan struct{})
+	go func() {
+		defer close(askDone)
+		_, _ = ctrlA.Ask(askCtx, []event.AskQuestion{{ID: "choice", Prompt: "Choose"}})
+	}()
+	defer func() { cancelAsk(); <-askDone }()
+	select {
+	case <-asks:
+	case <-time.After(3 * time.Second):
+		t.Fatal("waiting prompt was not committed")
+	}
 
 	nodes := app.ListProjectTree()
 	if len(nodes) != 1 || len(nodes[0].Children) != 1 {
@@ -141,6 +158,7 @@ func TestProjectTreeSplitsMultipleRuntimeSessionsInSameTopic(t *testing.T) {
 
 	close(runnerA.release)
 	close(runnerB.release)
+	cancelAsk()
 	waitNotRunning(t, ctrlA)
 	waitNotRunning(t, ctrlB)
 }

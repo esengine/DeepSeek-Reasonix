@@ -2180,10 +2180,8 @@ func (gw *BotGateway) runTurnItem(ctx context.Context, adapter Adapter, key stri
 	gw.logger.Info("bot turn started", "platform", msg.Platform, "chat_type", msg.ChatType, "chat", hashID(msg.ChatID), "session", key[:8])
 	defer gw.finishTurnItem(ctx, adapter, key, msg, cleanup)
 
-	// 获取或创建 Controller
-	state := gw.getOrCreateSession(ctx, key, msg)
-	if state == nil || state.ctrl == nil {
-		_ = gw.sendText(ctx, adapter, msg, "内部错误：无法创建会话。")
+	state := gw.sessionForNewTurn(ctx, adapter, key, msg)
+	if state == nil {
 		return
 	}
 	gw.rememberSessionReady(msg, state.ctrl)

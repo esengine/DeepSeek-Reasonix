@@ -139,11 +139,14 @@ type Goals interface {
 type SessionHistory interface {
 	Checkpoints() []checkpoint.Meta
 	CheckpointFileState(path string) (checkpoint.FileState, bool)
+	CheckpointTurnChanges(turn int) *checkpoint.TurnChanges
 	CheckpointTurnsByMessageIndex() map[int]int
 	CheckpointHasBoundary(turn int) bool
 	Rewind(turn int, scope RewindScope) error
 	PrepareRewind(turn int, scope RewindScope) (checkpoint.RewindPlan, error)
 	CommitRewind(planID string) (checkpoint.RewindResult, error)
+	CommitRewindInPlace(planID string) (checkpoint.RewindResult, error)
+	SessionHead() (agent.HeadRef, bool)
 	UndoRewind(transactionID string) (checkpoint.RewindResult, error)
 	PrepareFileRevert(path string) (checkpoint.RewindPlan, error)
 	CommitFileRevert(planID string, resolution checkpoint.ConflictResolution) (checkpoint.RewindResult, error)
@@ -153,6 +156,7 @@ type SessionHistory interface {
 	Branch(name string) (string, error)
 	Branches() ([]agent.BranchInfo, error)
 	BranchTreeText() string
+	CurrentBranchID() string
 	SwitchBranch(ref string) (agent.BranchInfo, error)
 	Compact(ctx context.Context, instructions string) error
 	CompactRatio() float64
@@ -268,6 +272,7 @@ type Settings interface {
 	SetReasoningLanguage(lang string)
 	SetDisplayRecorder(fn func(content, display string))
 	ApplyComposerProfile(plan bool, toolApprovalMode, goal string) ([]string, error)
+	SystemPrompt() string
 }
 
 // SessionAPI is the full driving port — the composition of every sub-port. A

@@ -149,8 +149,8 @@ You are a focused code reviewer. Inspect the requested changes and return only
 actionable findings, ordered by severity.
 ```
 
-`invocation: manual` prevents automatic discovery in the model's pinned Skill
-index; users can still invoke the profile explicitly. `allowed-tools` is a
+`invocation: manual` prevents automatic discovery in the model's
+`session-context` Skills catalog; users can still invoke the profile explicitly. `allowed-tools` is a
 profile-level allowlist, not a way to bypass permissions. `read-only: true`
 forces the read-only tool registry (writer tools stripped); omitted/`false`
 keeps the legacy writable default.

@@ -1,7 +1,9 @@
 package main
 
 import (
+	"errors"
 	"fmt"
+	"log/slog"
 	"strings"
 
 	"reasonix/internal/control"
@@ -12,10 +14,46 @@ import (
 // TurnStartView is the synchronous admission receipt for the new Wails turn
 // API. Events remain the streaming authority after admission.
 type TurnStartView struct {
-	TurnID       string           `json:"turnId"`
-	Status       event.TurnStatus `json:"status"`
-	RuntimeEpoch string           `json:"runtimeEpoch,omitempty"`
-	SubmissionID string           `json:"submissionId,omitempty"`
+	TurnID       string                    `json:"turnId"`
+	Status       event.TurnStatus          `json:"status"`
+	Disposition  control.SubmitDisposition `json:"disposition"`
+	RuntimeEpoch string                    `json:"runtimeEpoch,omitempty"`
+	SubmissionID string                    `json:"submissionId,omitempty"`
+}
+
+// validatePromptIdentity fences a decision to the runtime and turn that
+// rendered its card. It is intentionally shared by every decision surface;
+// callers must still resolve the prompt on the same controller instance.
+func (a *App) validatePromptIdentity(tabID, turnID, runtimeEpoch string) (control.SessionAPI, error) {
+	tab, ctrl := a.tabAndCtrlByID(tabID)
+	if ctrl == nil {
+		return nil, a.workspaceNotReadyErr(tab)
+	}
+	status := ctrl.RuntimeStatus()
+	if strings.TrimSpace(turnID) == "" || status.TurnID != strings.TrimSpace(turnID) {
+		return nil, fmt.Errorf("turn %q is not the active turn for tab %q", turnID, tabID)
+	}
+	if epoch := strings.TrimSpace(runtimeEpoch); epoch != "" && tab != nil && tab.sink != nil && tab.sink.runtimeEpochSnapshot() != epoch {
+		return nil, fmt.Errorf("runtime changed while resolving prompt for tab %q", tabID)
+	}
+	return ctrl, nil
+}
+
+// stoppableCtrl resolves the controller a Stop request targets. Only an idle
+// tab is rejected; a stale turn id is logged and the active work still stops.
+func (a *App) stoppableCtrl(tabID, turnID string) (control.SessionAPI, error) {
+	tab, ctrl := a.tabAndCtrlByID(tabID)
+	if ctrl == nil {
+		return nil, a.workspaceNotReadyErr(tab)
+	}
+	status := ctrl.RuntimeStatus()
+	if !status.Running && !status.Cancellable {
+		return nil, errTurnNotRunning
+	}
+	if turnID = strings.TrimSpace(turnID); turnID != status.TurnID {
+		slog.Info("desktop: stop targeted a stale turn id; interrupting the active turn", "tab", tabID, "requested", turnID, "active", status.TurnID)
+	}
+	return ctrl, nil
 }
 
 // StartTurnForTab is the turn-id-aware replacement for SubmitToTab. Existing
@@ -24,8 +62,12 @@ func (a *App) StartTurnForTab(tabID, input, submissionID string) (TurnStartView,
 	if strings.TrimSpace(submissionID) == "" {
 		return TurnStartView{}, fmt.Errorf("submissionId is required")
 	}
-	if err := a.SubmitToTabWithID(tabID, input, submissionID); err != nil {
+	result, err := a.submitToTabResult(tabID, input, false, true, submissionID)
+	if err != nil {
 		return TurnStartView{}, err
+	}
+	if result.Disposition == control.SubmitManagementHandled {
+		return TurnStartView{Disposition: result.Disposition, SubmissionID: submissionID}, nil
 	}
 	tab, ctrl := a.tabAndCtrlByID(tabID)
 	if ctrl == nil {
@@ -45,40 +87,32 @@ func (a *App) StartTurnForTab(tabID, input, submissionID string) (TurnStartView,
 	// This is an admission receipt, not a potentially raced runtime snapshot.
 	// Ordered events carry every later transition, including a provider that
 	// completed before the Wails Promise was delivered.
-	return TurnStartView{TurnID: turnID, Status: event.TurnQueued, RuntimeEpoch: epoch, SubmissionID: submissionID}, nil
+	return TurnStartView{TurnID: turnID, Status: event.TurnQueued, Disposition: control.SubmitTurnStarted, RuntimeEpoch: epoch, SubmissionID: submissionID}, nil
 }
 
-// InterruptTurnForTab cancels only the exact active turn. A stale Stop button
-// can no longer cancel a replacement turn admitted in the same tab.
+// errTurnNotRunning tells the frontend the tab is already idle so it can
+// reconcile its runtime view instead of reporting a failed Stop.
+var errTurnNotRunning = &inboxCodedError{code: "turn_not_running", cause: errors.New("no turn is running")}
+
+// InterruptTurnForTab stops the tab's active work. Stop is a session-level
+// request: a turn id from a stale button still interrupts whatever is running
+// now, because an unstoppable turn is worse than stopping its replacement.
 func (a *App) InterruptTurnForTab(tabID, turnID string) error {
-	turnID = strings.TrimSpace(turnID)
-	if turnID == "" {
-		return fmt.Errorf("turnId is required")
-	}
-	tab, ctrl := a.tabAndCtrlByID(tabID)
-	if ctrl == nil {
-		return a.workspaceNotReadyErr(tab)
-	}
-	status := ctrl.RuntimeStatus()
-	if status.TurnID != turnID || !status.Running {
-		return fmt.Errorf("turn %q is not the active turn for tab %q", turnID, tabID)
+	ctrl, err := a.stoppableCtrl(tabID, turnID)
+	if err != nil {
+		return err
 	}
 	ctrl.Cancel()
 	return nil
 }
 
-// InterruptTurnWithInboxItemsForTab is the receipt-capable exact-turn Stop
-// used by the Composer when it also discards queued follow-ups.
+// InterruptTurnWithInboxItemsForTab is the receipt-capable Stop used by the
+// Composer when it also discards queued follow-ups.
 func (a *App) InterruptTurnWithInboxItemsForTab(tabID, turnID string, itemIDs []string) (InboxCancelResultView, error) {
 	view := InboxCancelResultView{DiscardedItemIDs: []string{}}
-	turnID = strings.TrimSpace(turnID)
-	tab, ctrl := a.tabAndCtrlByID(tabID)
-	if ctrl == nil {
-		return view, a.workspaceNotReadyErr(tab)
-	}
-	status := ctrl.RuntimeStatus()
-	if turnID == "" || status.TurnID != turnID || !status.Running {
-		return view, fmt.Errorf("turn %q is not the active turn for tab %q", turnID, tabID)
+	ctrl, err := a.stoppableCtrl(tabID, turnID)
+	if err != nil {
+		return view, err
 	}
 	result, err := ctrl.CancelWithInboxItemsResult(itemIDs, "desktop")
 	if err != nil {
@@ -130,6 +164,8 @@ type TurnEventReplayView struct {
 	ResetRequired      bool                 `json:"resetRequired"`
 	TranscriptRevision int64                `json:"transcriptRevision,omitempty"`
 	TranscriptDigest   string               `json:"transcriptDigest,omitempty"`
+	HeadID             string               `json:"headId,omitempty"`
+	LeafMessageID      string               `json:"leafMessageId,omitempty"`
 	RuntimeEpoch       string               `json:"runtimeEpoch,omitempty"`
 }
 
@@ -167,6 +203,7 @@ func (a *App) TurnEventsForTab(tabID string, afterSeq uint64) (TurnEventReplayVi
 		LatestSequence: replay.LatestSequence, NextAfterSequence: replay.NextAfterSequence,
 		HasMore: replay.HasMore, ResetRequired: replay.ResetRequired,
 		TranscriptRevision: replay.TranscriptRevision, TranscriptDigest: replay.TranscriptDigest,
+		HeadID: replay.HeadID, LeafMessageID: replay.LeafMessageID,
 		RuntimeEpoch: epoch,
 	}, err
 }

@@ -8,11 +8,11 @@ import { useI18n, type Locale, type Translator } from "../lib/i18n";
 import { formatMoneyLocalized } from "../lib/money";
 import { formatTokens, formatOptionalTokens } from "../lib/format";
 import { appendRateBand, normalizeRateBand, rateBandLabel, type DisplayRateBand } from "../lib/costRateBand";
-import type { DictKey } from "../locales/en";
 import type { BalanceInfo, ContextInfo, ContextPanelInfo, UsageSourceStats, WireUsage } from "../lib/types";
 import { contextSessionCache } from "../lib/contextSessionCache";
 import { ContextBudgetCard, resolveContextBudget } from "./ContextBudgetCard";
 import type { Item } from "../lib/useController";
+import { contextWindowStatus, formatCacheHitRate } from "../lib/contextPanelUtils";
 export { contextSessionCache } from "../lib/contextSessionCache";
 const McpListLayers = lazy(() => import("./McpListLayers").then((module) => ({ default: module.McpListLayers })));
 interface ContextPanelProps {
@@ -72,11 +72,7 @@ function fmtUsageCacheRate(usage?: WireUsage): string {
   return `${((usage.cacheHitTokens / denom) * 100).toFixed(2)}%`;
 }
 
-export function formatCacheHitRate(hitTokens: number, missTokens: number): string {
-  const denom = hitTokens + missTokens;
-  if (denom <= 0) return "-";
-  return `${((hitTokens / denom) * 100).toFixed(2)}%`;
-}
+export { formatCacheHitRate } from "../lib/contextPanelUtils";
 
 type MetricTone = "accent" | "good" | "notice" | "warn";
 type UsageAnalysisView = "source" | "type";
@@ -111,11 +107,6 @@ export function formatSharePercent(value: number, total: number): string {
   const pct = (value / total) * 100;
   if (pct > 0 && pct < 1) return "<1%";
   return `${Math.round(pct)}%`;
-}
-
-interface ContextWindowStatus {
-  tone: "good" | "notice" | "warn";
-  key: DictKey;
 }
 
 export function contextCostDisplay({
@@ -293,14 +284,7 @@ export function contextBreakdown(
   };
 }
 
-export function contextWindowStatus(rawUsagePct: number, compactPct: number): ContextWindowStatus {
-  if (rawUsagePct > 100) return { tone: "warn", key: "context.windowStatusOverLimit" };
-  const usagePct = Math.min(100, Math.max(0, rawUsagePct));
-  if (usagePct >= 90) return { tone: "warn", key: "context.windowStatusNearLimit" };
-  if (compactPct > 0 && usagePct >= compactPct) return { tone: "warn", key: "context.windowStatusPastCompact" };
-  if (compactPct > 0 && usagePct >= Math.max(0, compactPct - 10)) return { tone: "notice", key: "context.windowStatusWatch" };
-  return { tone: "good", key: "context.windowStatusHealthy" };
-}
+export { contextWindowStatus } from "../lib/contextPanelUtils";
 
 const SOURCE_ORDER = ["executor", "planner", "subagent", "compaction", "classifier", "title"];
 

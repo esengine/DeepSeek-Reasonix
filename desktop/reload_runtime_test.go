@@ -268,7 +268,8 @@ func TestReloadRuntimeBusyQueuesDeferred(t *testing.T) {
 		t.Fatalf("second busy ReloadRuntime returned %v, want nil", err)
 	}
 	app.deferredRebuild.mu.Lock()
-	label, ok := app.deferredRebuild.pending[tab.ID]
+	request, ok := app.deferredRebuild.pending[tab.ID]
+	label := request.label
 	count := len(app.deferredRebuild.pending)
 	app.deferredRebuild.mu.Unlock()
 	if !ok || label != deferredRuntimeReloadLabel {

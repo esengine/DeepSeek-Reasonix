@@ -52,8 +52,15 @@ func (p *capturingProvider) lastRequestMessages(t *testing.T) []provider.Message
 	return msgs
 }
 
+// marshalMessages drops message ids first: they are local transcript identity
+// that provider adapters never copy to the wire, and a freshly composed
+// follow-up legitimately mints a new one on every run.
 func marshalMessages(t *testing.T, msgs []provider.Message) []byte {
 	t.Helper()
+	msgs = append([]provider.Message(nil), msgs...)
+	for i := range msgs {
+		msgs[i].ID = ""
+	}
 	b, err := json.Marshal(msgs)
 	if err != nil {
 		t.Fatalf("marshal messages: %v", err)

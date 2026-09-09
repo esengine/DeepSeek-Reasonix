@@ -3,10 +3,10 @@ package agent
 import (
 	"context"
 	"encoding/json"
-	"errors"
 	"strings"
 	"testing"
 
+	"reasonix/internal/event"
 	"reasonix/internal/extension"
 	"reasonix/internal/extension/dispatch"
 	"reasonix/internal/extension/protocol"
@@ -53,15 +53,26 @@ func TestCompactionPrepareCannotExpandAutomaticSummaryPastWindow(t *testing.T) {
 			a := agentOverForceWindow(t, prov, foldableSessionOverForce(120), window)
 			a.svc.extensions = newExtDispatcher(client, true, nil, extension.PointCompactionPrepare)
 
-			if err := prepareContext(context.Background(), a, CompactionTriggerPressure); !errors.Is(err, ErrCompactionRequired) {
-				t.Fatalf("pressure maintenance error = %v, want fail-closed ErrCompactionRequired", err)
+			var rejected *ContextMaintenanceReceipt
+			a.svc.sink = event.FuncSink(func(e event.Event) {
+				if e.Kind == event.ContextMaintenanceEvent && e.Maintenance != nil && e.Maintenance.Status == "blocked" {
+					rejected = &ContextMaintenanceReceipt{Status: e.Maintenance.Status, Reason: e.Maintenance.Reason}
+				}
+			})
+
+			// The oversized replacement is never sent; over the ceiling the
+			// truncation rescue then stands in for the rejected summary.
+			if err := prepareContext(context.Background(), a, CompactionTriggerPressure); err != nil {
+				t.Fatalf("pressure maintenance error = %v, want the truncation rescue after the rejection", err)
 			}
 			if len(prov.requests) != 0 {
 				t.Fatalf("summary requests = %d, want none for an oversized extension replacement", len(prov.requests))
 			}
-			receipt := a.sess.compactionState.LastReceipt
-			if receipt == nil || receipt.Status != "blocked" || !strings.Contains(receipt.Reason, "prepared summary request") {
-				t.Fatalf("receipt = %+v, want the final summary-budget rejection", receipt)
+			if rejected == nil || !strings.Contains(rejected.Reason, "prepared summary request") {
+				t.Fatalf("blocked receipt = %+v, want the final summary-budget rejection", rejected)
+			}
+			if receipt := a.sess.compactionState.LastReceipt; receipt == nil || receipt.Action != maintenanceActionTruncate {
+				t.Fatalf("receipt = %+v, want the truncation rescue installed", receipt)
 			}
 		})
 	}

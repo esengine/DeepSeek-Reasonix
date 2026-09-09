@@ -18,7 +18,11 @@ the authoritative commit and after file locks have been released. Continuous
 appends read only the new display-index range. Rewrites, missed notifications,
 external writers, or fingerprint mismatches rebuild that source in the
 background. Only one full transcript decoder runs at once, checkpoints are
-persisted per source, and one corrupt source cannot stop other histories.
+persisted per source, and one corrupt source cannot stop other histories. A
+format-2 session log is indexed through the derived transcript of its selected
+head; switching heads rewrites that transcript, which the projection treats
+like any other rewrite and rebuilds in the background. Other heads are not
+searchable until they are made current.
 
 The Agent `history` tool and Desktop history manager share the projection.
 Search never starts a synchronous directory scan. While indexing is incomplete,

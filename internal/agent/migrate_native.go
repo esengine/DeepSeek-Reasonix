@@ -87,6 +87,9 @@ func moveNativeFlatImport(oldPath, newPath string) (moved, decided bool) {
 			return false, true
 		}
 	}
+	if err := migratePinnedContextSidecar(oldPath, newPath, BranchID(newPath)); err != nil {
+		return false, true
+	}
 	for _, artifact := range store.SessionSidecarFiles(oldPath) {
 		if err := os.Remove(artifact); err != nil && !os.IsNotExist(err) {
 			return false, true

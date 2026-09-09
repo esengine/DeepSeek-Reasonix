@@ -26,6 +26,7 @@ func TestSessionTransitionPublishesRouteOnlyAfterControllerCommit(t *testing.T) 
 	bc.SetCurrentSession(oldPath)
 
 	srv := New(ctrl, bc, config.ServeConfig{})
+	defer srv.Close()
 	srv.RegisterSessionTag(ctrl, tag)
 	handler := srv.sessionTransitionHandler(ctrl, nil)
 	ctrl.SetOnSessionTransition(func(info control.SessionTransitionInfo) error {

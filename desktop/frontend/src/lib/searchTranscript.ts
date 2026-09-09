@@ -1,4 +1,4 @@
-import { mergeSearchSources, parseSearchSources, searchSourcesFromHistory, type SearchSource } from "./searchSources";
+import { mergeSearchSources, parseSearchSources, searchSourcesFromHistory, searchOutputMetadata, type SearchSource } from "./searchSources";
 import type { Item } from "./useController";
 
 type SearchState = {
@@ -8,7 +8,7 @@ type SearchState = {
 };
 
 export function historySearchCards(
-  searches: { id?: string; query?: string; results?: { title?: string; url?: string }[] }[] | undefined,
+  searches: { id?: string; query?: string; sources_status?: "available" | "not_provided"; results?: { title?: string; url?: string }[] }[] | undefined,
 ): Extract<Item, { kind: "tool" }>[] {
   const cards: Extract<Item, { kind: "tool" }>[] = [];
   for (const search of searches ?? []) {
@@ -21,6 +21,7 @@ export function historySearchCards(
       args: search.query ? JSON.stringify({ query: search.query }) : "",
       readOnly: true,
       status: "done",
+      searchSourcesStatus: search.sources_status,
       searchSources: (search.results ?? []).map((hit) => ({ title: hit.title, url: hit.url })),
       output: lines.join("\n"),
     });
@@ -37,7 +38,7 @@ export function historySearchSources(
 
 export function historySearchAndAnswer(
   id: string,
-  m: { content: string; reasoning?: string; workDurationMs?: number; memoryCitations?: Extract<Item, { kind: "assistant" }>["memoryCitations"]; serverSearch?: { id?: string; query?: string; results?: { title?: string; url?: string }[] }[] },
+  m: { content: string; reasoning?: string; workDurationMs?: number; memoryCitations?: Extract<Item, { kind: "assistant" }>["memoryCitations"]; serverSearch?: { id?: string; query?: string; sources_status?: "available" | "not_provided"; results?: { title?: string; url?: string }[] }[] },
 ): Item[] {
   const out: Item[] = historySearchCards(m.serverSearch);
   const searchSources = historySearchSources(m.serverSearch);
@@ -88,7 +89,7 @@ export function attachWebSearchOutput<T extends SearchState>(s: T, name: string,
         ...s,
         items: s.items.map((it) =>
           it.kind === "tool" && it.id === toolId
-            ? { ...it, searchSources: mergeSearchSources(it.searchSources, sources) }
+            ? { ...it, searchSources: mergeSearchSources(it.searchSources, sources), searchSourcesStatus: searchOutputMetadata(output).status, searchSummary: searchOutputMetadata(output).summary }
             : it,
         ),
       }

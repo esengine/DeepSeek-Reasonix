@@ -1,6 +1,16 @@
 import { asArray } from "./array";
 import { t, type DictKey } from "./i18n";
-import type { WireFinalReadiness } from "./types";
+import type { HistoryMessage, WireFinalReadiness, WireDecisionReceipt } from "./types";
+import type { Item } from "./useController";
+import { readPauseItem } from "./readPause";
+
+export function appendNoticeItem(items: Item[], seq: number, id: string, level: "info" | "warn", rawText: string, detail?: string, code?: string, decisionReceipt?: WireDecisionReceipt): { items: Item[]; seq: number } {
+  if (quietTranscriptNoticeKey(rawText, code)) return { items, seq };
+  const text = localizedNoticeText(rawText, code);
+  if (quietTranscriptNoticeKey(text, code)) return { items, seq };
+  const trimmedDetail = detail?.trim();
+  return { items: [...items, { kind: "notice", id, level, text, ...(trimmedDetail ? { detail: trimmedDetail } : {}), ...(code ? { code } : {}), ...(decisionReceipt ? { decisionReceipt } : {}) }], seq: seq + 1 };
+}
 
 export function errorMessage(err: unknown): string {
   if (err instanceof Error) return err.message;
@@ -9,7 +19,9 @@ export function errorMessage(err: unknown): string {
 }
 
 const noticeCodeKeys: Record<string, DictKey> = {
+  effort_selection_cleared: "composer.effortSelectionCleared",
   final_readiness: "notice.finalReadiness",
+  search_sources_not_provided: "sources.notProvided",
   empty_final: "notice.emptyFinal",
   executor_handoff: "notice.executorHandoff",
   tool_budget: "notice.toolBudget",
@@ -22,8 +34,12 @@ const noticeCodeKeys: Record<string, DictKey> = {
   session_recovery_adopted_covered: "recovery.noticeAdoptedCovered",
   session_recovery_depth_cap: "recovery.noticeKeptCurrent",
   session_shutdown_recovery_forked: "recovery.noticeSavedCopy",
+  session_concurrent_writer: "recovery.noticeConcurrentWriter",
+  session_head_switched: "recovery.noticeHeadSwitched",
+  session_head_selected: "recovery.noticeHeadSelected",
   decision_receipt: "notice.decisionReceiptTitle",
   context_editing_fallback: "notice.contextEditingFallback",
+  turn_stalled: "notice.turnStalled",
 };
 
 const streamInterruptReasonCodeKeys: Record<string, DictKey> = {
@@ -158,4 +174,16 @@ export function quietTranscriptNoticeKey(text: string, code?: string): string {
   if (/^plugin ".+" has been slow \d+ startups in a row \(last \d+ms, budget \d+ms\); demoting to background startup this session$/i.test(msg)) return "startup:plugin-demote";
   if (/^.+ applied: session refreshed after the lease was released$/i.test(msg)) return "settings:deferred-refresh-applied";
   return "";
+}
+// Windowed history and live read pauses share presentation without growing
+// the transcript record store's unrelated paging and cache responsibilities.
+export function historyNoticeItems(m: HistoryMessage, id: string): Item[] {
+  if (m.code === "incomplete_read") return [readPauseItem(m.readPause, id)];
+  if (m.content.trim() === "" && !m.decisionReceipt) return [];
+  if (quietTranscriptNoticeKey(m.content, m.code)) return [];
+  const text = localizedNoticeText(m.content, m.code);
+  if (quietTranscriptNoticeKey(text, m.code)) return [];
+  const detail = m.detail?.trim();
+  return [{ kind: "notice", id, level: m.level === "warn" ? "warn" : "info", text,
+    ...(detail ? { detail } : {}), ...(m.decisionReceipt ? { decisionReceipt: m.decisionReceipt } : {}) }];
 }

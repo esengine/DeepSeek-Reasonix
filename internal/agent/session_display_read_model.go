@@ -1,6 +1,7 @@
 package agent
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -26,8 +27,12 @@ func LoadSessionDisplayMessages(path string) ([]provider.Message, PersistedState
 }
 
 func loadSessionDisplayMessagesUnlocked(path string) ([]provider.Message, PersistedState, bool, error) {
+	return loadSessionDisplayMessagesContextUnlocked(context.Background(), path)
+}
+
+func loadSessionDisplayMessagesContextUnlocked(ctx context.Context, path string) ([]provider.Message, PersistedState, bool, error) {
 	hasher := newSessionTranscriptHasher()
-	msgs, _, damaged, err := loadSessionMessagesWithLimits(path, defaultSessionReplayLimits, hasher)
+	msgs, _, damaged, err := loadSessionMessagesWithContext(ctx, path, defaultSessionReplayLimits, hasher)
 	if err != nil {
 		return nil, PersistedState{}, false, err
 	}
@@ -107,7 +112,7 @@ func appendSessionDisplayReadModel(path string, msgs []provider.Message, appendF
 		return false, nil
 	}
 	indexInfo, err := os.Stat(indexPath)
-	if err != nil || indexInfo.IsDir() || indexInfo.ModTime().Before(info.ModTime()) {
+	if err != nil || indexInfo.IsDir() || !indexInfo.ModTime().After(info.ModTime()) {
 		return false, nil
 	}
 

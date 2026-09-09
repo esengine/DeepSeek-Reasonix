@@ -238,9 +238,18 @@ func installCoveringLeafTopicCatalog(t *testing.T, app *App) (parent, leaf, live
 	save(leaf, "legacy-leaf-topic", q, a,
 		provider.Message{Role: provider.RoleUser, Content: "next"},
 		provider.Message{Role: provider.RoleAssistant, Content: "done"})
+	leafSession, err := agent.LoadSession(leaf)
+	if err != nil {
+		t.Fatal(err)
+	}
+	leafDigest, err := agent.ContentDigestForMessages(leafSession.Snapshot())
+	if err != nil {
+		t.Fatal(err)
+	}
 	if err := agent.SaveBranchMetaPreserveUpdated(leaf, agent.BranchMeta{
 		ID: "leaf", Scope: "global", TopicID: "legacy-leaf-topic",
 		Recovered: true, ParentID: "root", RecoveryDepth: 1,
+		Revision: 1, ContentDigest: leafDigest, RecoveryDigest: leafDigest,
 	}); err != nil {
 		t.Fatal(err)
 	}

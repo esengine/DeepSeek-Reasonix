@@ -12,9 +12,10 @@ import (
 )
 
 const (
-	SchemaVersion = 10
-	DefaultLimit  = 50
-	MaxLimit      = 200
+	SchemaVersion       = 12
+	repairEngineVersion = 1
+	DefaultLimit        = 50
+	MaxLimit            = 200
 )
 
 type TurnsState string
@@ -52,19 +53,25 @@ const (
 )
 
 type Status struct {
-	State            State  `json:"state"`
-	Mode             Mode   `json:"mode"`
-	Path             string `json:"path,omitempty"`
-	Revision         uint64 `json:"revision"`
-	Indexed          int64  `json:"indexed"`
-	Total            int64  `json:"total"`
-	RepairPending    int64  `json:"repairPending"`
-	PhysicalSessions int64  `json:"physicalSessions"`
-	LogicalSessions  int64  `json:"logicalSessions"`
-	RecoveryGroups   int64  `json:"recoveryGroups"`
-	RecoveryBranches int64  `json:"recoveryBranches"`
-	RecoveryDiverged int64  `json:"recoveryDiverged"`
-	CleanupEligible  int64  `json:"cleanupEligible"`
+	State                State            `json:"state"`
+	Mode                 Mode             `json:"mode"`
+	Path                 string           `json:"path,omitempty"`
+	Revision             uint64           `json:"revision"`
+	Indexed              int64            `json:"indexed"`
+	Total                int64            `json:"total"`
+	RepairPending        int64            `json:"repairPending"`
+	RepairActive         int64            `json:"repairActive"`
+	RepairDeferred       int64            `json:"repairDeferred"`
+	RepairBlocked        int64            `json:"repairBlocked"`
+	NextRepairAt         int64            `json:"nextRepairAt,omitempty"`
+	RepairErrorKinds     map[string]int64 `json:"repairErrorKinds,omitempty"`
+	LastRepairDurationMS int64            `json:"lastRepairDurationMs,omitempty"`
+	PhysicalSessions     int64            `json:"physicalSessions"`
+	LogicalSessions      int64            `json:"logicalSessions"`
+	RecoveryGroups       int64            `json:"recoveryGroups"`
+	RecoveryBranches     int64            `json:"recoveryBranches"`
+	RecoveryDiverged     int64            `json:"recoveryDiverged"`
+	CleanupEligible      int64            `json:"cleanupEligible"`
 	// RepairReason records the last integrity condition that caused a
 	// directory to be scanned instead of trusting its persisted projection.
 	// It is diagnostic-only; the transcript and sidecars remain authoritative.
@@ -148,7 +155,13 @@ type SessionRecord struct {
 	LogicalTopicID string `json:"logicalTopicId,omitempty"`
 	// OrdinaryVisible is true only for the single logical representative that
 	// may appear in the ordinary project tree.
-	OrdinaryVisible    bool   `json:"ordinaryVisible,omitempty"`
+	OrdinaryVisible bool `json:"ordinaryVisible,omitempty"`
+	// LogFormat is 2 for sessions whose event log is the append-only DAG; the
+	// head fields mirror its selected head and are zero for schema 1.
+	LogFormat          int    `json:"logFormat,omitempty"`
+	HeadCount          int    `json:"headCount,omitempty"`
+	SelectedHeadID     string `json:"selectedHeadId,omitempty"`
+	heads              []HeadRecord
 	ContentFingerprint string `json:"contentFingerprint,omitempty"`
 	MetaFingerprint    string `json:"metaFingerprint,omitempty"`
 	Health             Health `json:"health"`
@@ -231,8 +244,7 @@ type SessionPage struct {
 }
 
 // DefaultPath is the disposable cache file under CacheDir ("" when unavailable).
-// v6.sqlite is independent of all older caches so a new build never trusts a
-// path-case-split projection produced by an older desktop or CLI.
+// v8.sqlite isolates the v12 head projection from v11 writers.
 // Session JSONL/WAL/sidecars remain authoritative and older binaries may keep
 // using their own disposable cache without cross-writing this one.
 func DefaultPath() string {
@@ -240,5 +252,5 @@ func DefaultPath() string {
 	if cache == "" {
 		return ""
 	}
-	return filepath.Join(cache, "session-catalog", "v6.sqlite")
+	return filepath.Join(cache, "session-catalog", "v8.sqlite")
 }

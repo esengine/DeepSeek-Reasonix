@@ -203,7 +203,22 @@ func (s *Server) providersReload(w http.ResponseWriter, r *http.Request) {
 	s.bindMu.Lock()
 	defer s.bindMu.Unlock()
 	ref := s.ctl().ModelRef()
-	if err := s.switchModelLocked(r.Context(), ref); err != nil {
+	err := s.switchModelLocked(r.Context(), ref)
+	if err != nil {
+		// A credential heal can update the managed provider's default model
+		// while the running controller still carries the old explicit ref
+		// ("proxy/deepseek-v4-flash" after the block moved to v4-pro); that
+		// ref no longer resolves and would fail every reload forever. Fall
+		// back to the provider-only ref — the same form the serve launches
+		// with — so the rebuild adopts the provider's current default.
+		if provider, _, ok := strings.Cut(ref, "/"); ok {
+			if perr := s.switchModelLocked(r.Context(), provider); perr == nil {
+				err = nil
+				ref = provider
+			}
+		}
+	}
+	if err != nil {
 		http.Error(w, err.Error(), http.StatusConflict)
 		return
 	}

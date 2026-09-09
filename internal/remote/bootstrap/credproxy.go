@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"os"
 	"path"
+	"strconv"
 	"strings"
 
 	"reasonix/internal/config"
@@ -16,6 +17,59 @@ import (
 const TokenEnvName = "REASONIX_PROXY_TOKEN"
 
 const managedProviderComment = "# managed by the Reasonix desktop credential proxy — safe to delete"
+
+// managedProviderNamePrefix is the provider-name prefix every desktop proxy
+// provider carries (desktop/cred_proxy.go credentialProxyProviderName + "-").
+const managedProviderNamePrefix = "reasonix-desktop-proxy-"
+
+// tomlAssignmentString parses trimmed as a TOML `key = "value"` line and
+// returns the unquoted string value. Whitespace around the equals sign and an
+// optional trailing comment are tolerated: generated blocks use "key = value"
+// but config normalizers realign to "key   = value", and an exact-match parser
+// would miss those lines and append duplicate provider blocks.
+func tomlAssignmentString(trimmed, key string) (string, bool) {
+	if !strings.HasPrefix(trimmed, key) {
+		return "", false
+	}
+	rest := strings.TrimLeft(trimmed[len(key):], " \t")
+	if !strings.HasPrefix(rest, "=") {
+		return "", false
+	}
+	rest = strings.TrimLeft(rest[1:], " \t")
+	if !strings.HasPrefix(rest, `"`) {
+		return "", false
+	}
+	i := 1
+	for i < len(rest) {
+		if rest[i] == '\\' {
+			i += 2
+			continue
+		}
+		if rest[i] == '"' {
+			break
+		}
+		i++
+	}
+	if i >= len(rest) {
+		return "", false
+	}
+	quoted := rest[:i+1]
+	tail := strings.TrimLeft(rest[i+1:], " \t")
+	if tail != "" && !strings.HasPrefix(tail, "#") {
+		return "", false
+	}
+	value, err := strconv.Unquote(quoted)
+	if err != nil {
+		return "", false
+	}
+	return value, true
+}
+
+// tomlAssignmentIs reports whether trimmed assigns exactly value to key.
+func tomlAssignmentIs(trimmed, key, value string) bool {
+	got, ok := tomlAssignmentString(trimmed, key)
+	return ok && got == value
+}
 
 // isRemoteMissing reports whether err is the SFTP "no such file" condition
 // (pkg/sftp maps it onto os.ErrNotExist; the text match covers older wraps).
@@ -151,6 +205,12 @@ func ensureCredentialProvider(ctx context.Context, fs *sftpfs.FS, home string, o
 	// An explicit providers table replaces built-ins, so materialize a built-in
 	// default before appending ours without rewriting default_model itself.
 	existing := materializeDefaultProvider(original)
+	// Remove duplicate same-name blocks first: the loader resolves duplicates
+	// to the first entry, so an appended copy can never heal the block the
+	// serve actually reads.
+	if deduped, changed := dropDuplicateProviderBlocks(existing, opts.Provider); changed {
+		existing = deduped
+	}
 	existing, _ = rewriteManagedProviderBaseURLs(existing, opts.BaseURL)
 	configChanged := existing != original
 	if idx := providerBlockIndex(existing, opts.Provider); idx >= 0 {
@@ -229,6 +289,13 @@ func rewriteManagedProviderBaseURLs(text, baseURL string) (string, bool) {
 			managed = true
 			continue
 		}
+		// Providers this desktop installed carry the proxy name prefix even
+		// when an older heal wrote the block without the marker comment; both
+		// forms are managed and must follow the tunnel port.
+		if name, ok := tomlAssignmentString(trimmed, "name"); ok && strings.HasPrefix(name, managedProviderNamePrefix) {
+			managed = true
+			continue
+		}
 		if managed && strings.HasPrefix(trimmed, "base_url") && strings.Contains(trimmed, "=") {
 			want := "base_url = " + tomlString(baseURL)
 			if trimmed != want {
@@ -279,7 +346,6 @@ func ensureCredentialToken(ctx context.Context, fs *sftpfs.FS, home, envName, to
 // equals provider, or -1. Blocks are scanned line-wise; a block ends at the
 // next table header.
 func providerBlockIndex(text, provider string) int {
-	want := "name = " + tomlString(provider)
 	lines := strings.Split(text, "\n")
 	offset := 0
 	inBlock := false
@@ -287,7 +353,7 @@ func providerBlockIndex(text, provider string) int {
 		trimmed := strings.TrimSpace(line)
 		if strings.HasPrefix(trimmed, "[[") || strings.HasPrefix(trimmed, "[") {
 			inBlock = strings.HasPrefix(trimmed, "[[providers]]")
-		} else if inBlock && trimmed == want {
+		} else if inBlock && tomlAssignmentIs(trimmed, "name", provider) {
 			return offset
 		}
 		offset += len(line) + 1
@@ -295,16 +361,76 @@ func providerBlockIndex(text, provider string) int {
 	return -1
 }
 
+// dropDuplicateProviderBlocks removes every [[providers]] block after the
+// first whose name equals provider. Duplicates arise when an older heal
+// appended a fresh block instead of updating an aligned-format existing one;
+// the config loader resolves duplicate names to the first entry, so later
+// copies are dead weight that must not survive a heal.
+func dropDuplicateProviderBlocks(text, provider string) (string, bool) {
+	lines := strings.Split(text, "\n")
+	var matchedHeaders []int
+	inProvider := false
+	curHeader := -1
+	curMatched := false
+	closeBlock := func() {
+		if inProvider && curMatched {
+			matchedHeaders = append(matchedHeaders, curHeader)
+		}
+	}
+	for i, line := range lines {
+		trimmed := strings.TrimSpace(line)
+		if strings.HasPrefix(trimmed, "[") {
+			closeBlock()
+			inProvider = trimmed == "[[providers]]"
+			curHeader = i
+			curMatched = false
+			continue
+		}
+		if !inProvider {
+			continue
+		}
+		if tomlAssignmentIs(trimmed, "name", provider) {
+			curMatched = true
+		}
+	}
+	closeBlock()
+	if len(matchedHeaders) <= 1 {
+		return text, false
+	}
+	drop := make(map[int]bool)
+	for index, header := range matchedHeaders {
+		if index == 0 {
+			continue
+		}
+		end := len(lines) - 1
+		for i := header + 1; i < len(lines); i++ {
+			if strings.HasPrefix(strings.TrimSpace(lines[i]), "[") {
+				end = i - 1
+				break
+			}
+		}
+		for i := header; i <= end; i++ {
+			drop[i] = true
+		}
+	}
+	out := make([]string, 0, len(lines))
+	for i, line := range lines {
+		if !drop[i] {
+			out = append(out, line)
+		}
+	}
+	return strings.Join(out, "\n"), true
+}
+
 // providerBlockHasBaseURL reports whether the block starting at idx contains
 // the given base_url assignment before its next table header.
 func providerBlockHasBaseURL(block, baseURL string) bool {
-	want := "base_url = " + tomlString(baseURL)
 	for line := range strings.SplitSeq(block, "\n") {
 		trimmed := strings.TrimSpace(line)
 		if strings.HasPrefix(trimmed, "[") {
 			return false
 		}
-		if trimmed == want {
+		if tomlAssignmentIs(trimmed, "base_url", baseURL) {
 			return true
 		}
 	}
@@ -333,13 +459,12 @@ func replaceProviderBaseURL(text string, idx int, baseURL string) (string, bool)
 // providerBlockHasKind reports whether the block starting at idx contains the
 // given kind assignment before its next table header.
 func providerBlockHasKind(block, kind string) bool {
-	want := "kind = " + tomlString(kind)
 	for line := range strings.SplitSeq(block, "\n") {
 		trimmed := strings.TrimSpace(line)
 		if strings.HasPrefix(trimmed, "[") {
 			return false
 		}
-		if trimmed == want {
+		if tomlAssignmentIs(trimmed, "kind", kind) {
 			return true
 		}
 	}
@@ -366,13 +491,12 @@ func replaceProviderKind(text string, idx int, kind string) (string, bool) {
 }
 
 func providerBlockHasModel(block, model string) bool {
-	want := "model = " + tomlString(model)
 	for line := range strings.SplitSeq(block, "\n") {
 		trimmed := strings.TrimSpace(line)
 		if strings.HasPrefix(trimmed, "[") {
 			return false
 		}
-		if trimmed == want {
+		if tomlAssignmentIs(trimmed, "model", model) {
 			return true
 		}
 	}

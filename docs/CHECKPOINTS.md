@@ -11,6 +11,9 @@ This document describes rewind snapshots. For the autonomous-run rule about when
 the agent should pause and ask the user, see
 [`TASK_CONTRACT.md`](TASK_CONTRACT.md).
 
+For the read-only per-turn diff and check results built on these snapshots, see
+[Turn results](TURN_RESULTS.md).
+
 ## Goal
 
 Let a user rewind a session to a previous point and restore **code**,
@@ -103,16 +106,26 @@ type RewindScope int // Code | Conversation | Both
 func (c *Controller) Checkpoints() []CheckpointMeta
 func (c *Controller) PrepareRewind(turn int, scope RewindScope) (RewindPlan, error)
 func (c *Controller) CommitRewind(planID string) (RewindResult, error)
+func (c *Controller) CommitRewindInPlace(planID string) (RewindResult, error)
+func (c *Controller) UndoRewind(transactionID string) (RewindResult, error)
 ```
 
 - **Code**: for every checkpoint from `turn` to the latest, take the earliest
   `FileSnap` per path and restore each file to that content (delete if `nil`) —
   i.e. undo all edits made at or after `turn`. Path-escape re-checked against the
   live workspace root.
-- **Conversation**: fork a new session at the turn boundary. The parent
-  transcript is never truncated. See [`SESSION_OWNERSHIP.md`](SESSION_OWNERSHIP.md).
+- **Conversation**: fork a `rewind` head of the same session log at the turn
+  boundary; a format-1 session forks a new session file instead. The previous
+  chain is never truncated. See [`SESSION_OWNERSHIP.md`](SESSION_OWNERSHIP.md).
 - **Both**: fork first, then restore files. A file conflict keeps the new
-  branch and reports `partial=true`.
+  head and reports `partial=true`.
+- `CommitRewind` leaves the controller where it was and returns the new head
+  (or fork path) in `Branch`; `CommitRewindInPlace` moves the controller onto
+  the rewound conversation. Desktop tabs and the terminal use the in-place
+  form, so the same tab or screen shows the rewound transcript.
+- `UndoRewind` restores the file after-images. When the controller sits on a
+  rewind head that received nothing since, it returns to the parent head and
+  retires the empty rewind head; a continued rewind head stays as a version.
 
 A `Rewound` event (or reuse of a history-replace event) lets every frontend
 re-render uniformly.
@@ -123,8 +136,9 @@ re-render uniformly.
   each user turn (time + which files it changed). `chat_tui` already tracks the
   double-Esc timing.
 - Select a turn → sub-menu: **`[code+conversation] [conversation] [code] [cancel]`**.
-- On a conversation/both restore, the selected prompt is prefilled into the
-  composer.
+- On a conversation/both restore, the terminal replays the rewound head in
+  place and prefills the selected prompt into the composer; the previous chain
+  stays listed under `/branch`.
 
 ## Desktop UX (aligned with the VS Code extension)
 
@@ -133,6 +147,10 @@ re-render uniformly.
 - It calls the same prepare/commit rewind API over the Wails binding; the controller's
   event stream pushes the restored state and React re-renders. No rewind logic in
   the frontend.
+- Conversation rewind and fork-from-here keep the current tab and switch it to
+  the new head; the previous chain remains under *View versions*. Only an
+  isolated-worktree fork opens a new tab, because it copies the session into
+  the new workspace.
 
 ## Non-goals & edge cases
 

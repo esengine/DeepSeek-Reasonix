@@ -8,6 +8,7 @@ import (
 	"os"
 	"strings"
 
+	"reasonix/internal/agent"
 	"reasonix/internal/config"
 	"reasonix/internal/doctor"
 	"reasonix/internal/repair"
@@ -120,6 +121,14 @@ func doctorSessionsCommand(args []string) int {
 	fmt.Printf("  physical sessions: %d\n", status.PhysicalSessions)
 	fmt.Printf("  logical sessions: %d\n", status.LogicalSessions)
 	fmt.Printf("  repair pending: %d\n", status.RepairPending)
+	fmt.Printf("  repair: %d active, %d deferred, %d blocked\n",
+		status.RepairActive, status.RepairDeferred, status.RepairBlocked)
+	if len(status.RepairErrorKinds) > 0 {
+		fmt.Printf("  repair error kinds: %v\n", status.RepairErrorKinds)
+	}
+	if status.LastRepairDurationMS > 0 {
+		fmt.Printf("  last repair wave: %dms\n", status.LastRepairDurationMS)
+	}
 	fmt.Printf("  recovery: %d groups, %d branches, %d diverged, %d safe cleanup\n",
 		status.RecoveryGroups, status.RecoveryBranches, status.RecoveryDiverged, status.CleanupEligible)
 	if status.LastError != "" {
@@ -289,16 +298,26 @@ func doctorRedactSessionsCommand(args []string) int {
 func doctorSessionCommand(args []string, version string) int {
 	ref := ""
 	outPath := ""
+	exportPath := ""
 	for i := 0; i < len(args); i++ {
 		arg := args[i]
 		switch arg {
 		case "-h", "--help":
-			fmt.Fprintln(os.Stdout, "usage: reasonix doctor session <branch-id-or-path> [--zip] [--out PATH]")
+			fmt.Fprintln(os.Stdout, "usage: reasonix doctor session <branch-id-or-path> [--zip] [--out PATH] [--export-v1 PATH.jsonl]")
 			fmt.Fprintln(os.Stdout, "")
 			fmt.Fprintln(os.Stdout, "Bundles the session transcript, persistence sidecars, conflict diagnostics,")
 			fmt.Fprintln(os.Stdout, "and the recovery parent chain into a zip for support. Unlike `reasonix doctor`,")
 			fmt.Fprintln(os.Stdout, "bundled transcripts are NOT redacted; share only with a trusted support channel.")
+			fmt.Fprintln(os.Stdout, "--export-v1 instead writes the session's current version as a schema-1 session")
+			fmt.Fprintln(os.Stdout, "that releases before v1.39.0 can open.")
 			return 0
+		case "--export-v1":
+			i++
+			if i >= len(args) {
+				fmt.Fprintln(os.Stderr, "error: --export-v1 requires a destination .jsonl path")
+				return 2
+			}
+			exportPath = args[i]
 		case "--zip":
 			// The subcommand currently writes a zip by default. Keep --zip as an
 			// explicit, script-friendly marker so support replies can say exactly
@@ -331,8 +350,21 @@ func doctorSessionCommand(args []string, version string) int {
 		}
 	}
 	if ref == "" {
-		fmt.Fprintln(os.Stderr, "usage: reasonix doctor session <branch-id-or-path> [--zip] [--out PATH]")
+		fmt.Fprintln(os.Stderr, "usage: reasonix doctor session <branch-id-or-path> [--zip] [--out PATH] [--export-v1 PATH.jsonl]")
 		return 2
+	}
+	if exportPath != "" {
+		src, err := doctor.ResolveSessionRef(ref)
+		if err != nil {
+			fmt.Fprintln(os.Stderr, "error:", err)
+			return 1
+		}
+		if err := agent.ExportSessionSchemaOne(src, exportPath); err != nil {
+			fmt.Fprintln(os.Stderr, "error:", err)
+			return 1
+		}
+		fmt.Println(exportPath)
+		return 0
 	}
 	result, err := doctor.WriteSessionBundle(doctor.SessionBundleOptions{
 		Version:    version,

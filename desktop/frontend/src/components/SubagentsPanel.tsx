@@ -1,5 +1,6 @@
+import { SettingsOptions } from "./SettingsOptions";
+import { SettingsSelect } from "./SettingsSelect";
 import { useCallback, useEffect, useMemo, useRef, useState, type CSSProperties } from "react";
-import { Check, ChevronDown } from "lucide-react";
 
 import { app } from "../lib/bridge";
 import { asArray } from "../lib/array";
@@ -9,7 +10,6 @@ import { PROJECT_COLOR_OPTIONS, projectColorValue, type ProjectColorKey } from "
 import type { MCPToolView, SettingsView, SkillView, SubagentProfileInput } from "../lib/types";
 
 import { InlineConfirmButton } from "./InlineConfirmButton";
-import { AnchoredPopover } from "./AnchoredPopover";
 import { CopyButton } from "./CopyButton";
 import { allRefs, EFFORT_PRESETS, ModelPicker, toRef } from "./SettingsPanel";
 import { Tooltip } from "./Tooltip";
@@ -127,7 +127,7 @@ export function SubagentsSettingsPage({ s, onUseInChat }: { s: SettingsView; onU
     <section className="mem-section">
       {err && <div className="banner banner--error">{err}</div>}
       {!formOpen && (
-        <div className="cap-search subagents-toolbar">
+        <div className="cap-search subagents-toolbar settings-toolbar">
           <input
             className="mem-input"
             type="search"
@@ -275,75 +275,15 @@ function EffortPicker({
   onPick: (level: string) => void;
 }) {
   const t = useT();
-  const [open, setOpen] = useState(false);
-  const triggerRef = useRef<HTMLButtonElement>(null);
-  const selectedLabel = value || t("subagents.inheritDefault");
-  const effectiveValue = value || inheritedValue;
-  const pick = (level: string) => {
-    setOpen(false);
-    if (level !== value) onPick(level);
-  };
-
-  return (
-    <div className="settings-model-picker subagents-effort-picker">
-      <button
-        ref={triggerRef}
-        type="button"
-        className="settings-model-picker__trigger"
-        disabled={disabled}
-        aria-label={ariaLabel}
-        aria-haspopup="listbox"
-        aria-expanded={open}
-        onClick={() => setOpen((next) => !next)}
-      >
-        <span className="settings-model-picker__selected">
-          <span>{selectedLabel}</span>
-          <small>{t("subagents.effectiveValue", { value: effectiveValue })}</small>
-        </span>
-        <ChevronDown size={16} className={`settings-model-picker__chev${open ? " settings-model-picker__chev--open" : ""}`} />
-      </button>
-      <AnchoredPopover
-        open={open && !disabled}
-        anchorRef={triggerRef}
-        onClose={() => setOpen(false)}
-        className="settings-model-picker__menu subagents-effort-picker__menu"
-        placement="bottom"
-        style={{ width: triggerRef.current?.getBoundingClientRect().width }}
-      >
-        <div className="settings-model-picker__list" role="listbox">
-          <button
-            type="button"
-            role="option"
-            aria-selected={value === ""}
-            className={`settings-model-picker__option settings-model-picker__option--pinned${value === "" ? " settings-model-picker__option--selected" : ""}`}
-            onClick={() => pick("")}
-          >
-            <span>
-              <strong>{t("subagents.inheritDefault")}</strong>
-              <small>{t("subagents.effectiveValue", { value: inheritedValue })}</small>
-            </span>
-            {value === "" && <Check size={14} />}
-          </button>
-          {EFFORT_PRESETS.map((level) => (
-            <button
-              key={level}
-              type="button"
-              role="option"
-              aria-selected={level === value}
-              className={`settings-model-picker__option${level === value ? " settings-model-picker__option--selected" : ""}`}
-              onClick={() => pick(level)}
-            >
-              <span>
-                <strong>{level}</strong>
-                <small>{t("subagents.effectiveValue", { value: level })}</small>
-              </span>
-              {level === value && <Check size={14} />}
-            </button>
-          ))}
-        </div>
-      </AnchoredPopover>
-    </div>
-  );
+  return <div className="settings-model-picker subagents-effort-picker">
+    <SettingsSelect value={value} disabled={disabled} aria-label={ariaLabel}
+      title={t("subagents.effectiveValue", { value: value || inheritedValue })}
+      onValueChange={onPick}
+      options={[
+        { value: "", label: t("subagents.inheritDefault"), hint: t("subagents.effectiveValue", { value: inheritedValue }) },
+        ...EFFORT_PRESETS.map(level => ({ value: level, label: level })),
+      ]} />
+  </div>;
 }
 
 function BuiltinSubagentRow({
@@ -669,14 +609,14 @@ function SubagentProfileForm({
       />
 
       <label className="set-label">{t("settings.subagentEffort")}</label>
-      <select className="mem-select set-grow" value={effort} disabled={busy} onChange={(e) => setEffort(e.target.value)}>
+      <SettingsSelect className="mem-select set-grow" value={effort} disabled={busy} onValueChange={(value) => setEffort(value)}>
         <option value="">{t("settings.subagentEffortDefault")}</option>
         {EFFORT_PRESETS.map((level) => (
           <option key={level} value={level}>
             {level}
           </option>
         ))}
-      </select>
+      </SettingsSelect>
 
       <label className="set-label">{t("subagents.description")}</label>
       <input
@@ -688,12 +628,12 @@ function SubagentProfileForm({
 
       <label className="set-label">{t("subagents.tools")}</label>
       <div className="subagents-tool-scope-row">
-        <select
+        <SettingsSelect
           className="mem-select"
           value={toolMode}
           disabled={busy}
-          onChange={(e) => {
-            const nextMode = e.target.value === "custom" ? "custom" : "all";
+          onValueChange={(value) => {
+            const nextMode = value === "custom" ? "custom" : "all";
             if (nextMode === "custom") {
               setSelectedTools(selectToolsOnFirstCustomUse(selectedTools, tools, hasUsedCustomMode.current));
               hasUsedCustomMode.current = true;
@@ -703,14 +643,14 @@ function SubagentProfileForm({
         >
           <option value="all">{t("subagents.allToolsOption")}</option>
           <option value="custom">{t("subagents.customToolsOption")}</option>
-        </select>
+        </SettingsSelect>
         <span>{t(toolMode === "all" ? "subagents.allToolsHint" : "subagents.customToolsHint")}</span>
       </div>
       {toolMode === "custom" && <ToolMultiSelect tools={tools} selected={selectedTools} onChange={setSelectedTools} />}
       {toolMode === "custom" && !toolsReady && <div className="subagents-field-error">{t("subagents.selectAtLeastOneTool")}</div>}
 
       <label className="set-label">{t("subagents.readOnly")}</label>
-      <div className="set-seg" role="group" aria-label={t("subagents.readOnly")}>
+      <SettingsOptions className="set-seg" role="group" aria-label={t("subagents.readOnly")}>
         <button
           type="button"
           className={`set-seg__btn${!readOnly ? " set-seg__btn--on" : ""}`}
@@ -727,7 +667,7 @@ function SubagentProfileForm({
         >
           {t("subagents.readOnlyOn")}
         </button>
-      </div>
+      </SettingsOptions>
       <div className="set-hint">{t("subagents.readOnlyHint")}</div>
 
       <label className="set-label">{t("subagents.systemPrompt")}</label>
@@ -761,15 +701,15 @@ function SubagentProfileForm({
       {tryResult && <pre className="subagents-tryit-result">{tryResult}</pre>}
 
       <label className="set-label">{t("subagents.scope")}</label>
-      <select
+      <SettingsSelect
         className="mem-select set-grow"
         value={scope}
         disabled={busy || isEditing}
-        onChange={(e) => setScope(e.target.value === "project" ? "project" : "global")}
+        onValueChange={(value) => setScope(value === "project" ? "project" : "global")}
       >
         <option value="global">{t("caps.skillScopeGlobal")}</option>
         <option value="project">{t("caps.skillScopeProject")}</option>
-      </select>
+      </SettingsSelect>
 
       <div className="subagents-hint">{t("subagents.manualInvocationHint", { name: trimmedName || "…" })}</div>
 

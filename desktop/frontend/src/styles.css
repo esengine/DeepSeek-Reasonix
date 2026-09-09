@@ -1,3 +1,5 @@
+@import "./components/ProviderConnections.css";
+@import "./components/ProviderCatalogPicker.css";
 /*
 /*
  * Reasonix desktop — single-column, developer-dense, terminal-flavored chat UI.
@@ -250,8 +252,8 @@
   /* motion — shared timing + easing tokens. Durations mirror the values
    * already used across the app (0.12 / 0.18 / 0.34 / 0.42s); easings reuse the
    * existing curves. The global prefers-reduced-motion block at EOF collapses
-   * every animation/transition to ~0ms, so these tokens are safe to reuse
-   * freely without per-rule reduce overrides. */
+   * every animation to ~0ms and removes transitions, so these tokens are safe
+   * to reuse freely without per-rule reduce overrides. */
   --dur-fast: 120ms; /* color/border hovers, tooltips */
   --dur-base: 180ms; /* popovers, menus, small enters */
   --dur-slow: 340ms; /* drawers, modals, panel slides */
@@ -2111,6 +2113,9 @@ a[href] {
   --statusbar-height: 0px;
 }
 
+/* Automation is a focused main page. These rules only remove presentation
+   rows; workspace and terminal preferences remain in their stores. */
+
 .app--darwin .layout {
   --app-chrome-height: 44px;
   --chrome-toggle-size: 36px;
@@ -3446,15 +3451,12 @@ a[href] {
   }
 }
 .transcript {
-  /* Virtuoso sizes rows from the scroller clientWidth (padding included) but
-     lays them out in the content box. Horizontal padding here therefore makes
-     right-aligned bubbles extend under the workspace dock. Keep only vertical
-     inset on the scroller; rows own --transcript-inline-pad. */
+  /* Keep horizontal inset on blocks so the native scroller's geometry is
+     independent of readable content width. */
   --transcript-inline-pad: 32px;
   position: relative;
-  /* Virtuoso owns the logical anchor. Browser scroll anchoring reacts to
-     asynchronous Markdown boxes before Virtuoso receives their size and can
-     move the scroller in the opposite direction during an upward gesture. */
+  /* TranscriptKernel owns logical anchors and applies at most one structural
+     correction per geometry revision. */
   overflow-anchor: none;
   height: 100%;
   overflow-y: auto;
@@ -3513,29 +3515,6 @@ a[href] {
 @media (prefers-reduced-motion: reduce) {
   .transcript-navigation-overlay__spinner { animation: none; }
 }
-/* The active turn streams as the virtual list's in-flow Footer: inside the
-   scroller, right after the last history row, but outside Virtuoso's
-   measured size tree — unbounded growth never reaches the list's anchors or
-   recovery machinery (#8657/#8688). */
-.transcript__live-region {
-  position: relative;
-  width: 100%;
-}
-.transcript__live-region--overlay {
-  position: absolute;
-  inset-inline: 0;
-  bottom: 0;
-  z-index: var(--z-local-raised);
-  pointer-events: none;
-}
-.transcript__live-content {
-  position: relative;
-  width: 100%;
-}
-.transcript[data-transcript-reader-visual-guard="true"] [data-testid="virtuoso-item-list"] {
-  transform: translateY(var(--transcript-reader-visual-offset, 0));
-  will-change: transform;
-}
 .transcript__live-status {
   display: flex;
   align-items: center;
@@ -3555,42 +3534,28 @@ a[href] {
   margin-right: auto;
 }
 
-/* ── Virtual transcript rows ─────────────────────────────────────── */
-/* React Virtuoso owns list offsets and row measurement. Rows stay in normal
-/* React Virtuoso owns list offsets and row measurement. Rows stay in normal
-   flow; flow-root contains child margins so ResizeObserver sees the complete
-   dynamic height instead of a collapsed margin outside the measured item. */
-.transcript__virtual-sizer {
+/* ── Transcript projection and window adapter ───────────────────── */
+.transcript__projection,
+.transcript__block,
+.transcript__resident-tail {
   position: relative;
+}
+.transcript > .transcript__projection {
+  max-width: none;
+  margin-left: 0;
+  margin-right: 0;
+}
+.transcript__block {
+  display: flow-root;
+}
+.transcript__window-item {
+  box-sizing: border-box;
   width: 100%;
-}
-.transcript > .transcript__virtual-sizer {
-  max-width: none;
-  margin-left: 0;
-  margin-right: 0;
-}
-.transcript > [data-viewport-type="element"] {
-  max-width: none;
-  margin-left: 0;
-  margin-right: 0;
-  /* Virtuoso's inline style pins only top (position:absolute; top:0;
-     width:100%). With the scroller's horizontal padding, width:100%
-     resolves against the padding box and starts at padding-left, so the
-     right edge overflows past the content box and gets clipped by
-     overflow-x:hidden. Pin left/right to the content box edges instead
-     (following --transcript-pad-x) so rows keep the scroller's padding
-     on both sides and never overflow. */
-  left: var(--transcript-pad-x, 32px);
-  right: var(--transcript-pad-x, 32px);
-  /* Virtuoso sets width:100% inline; without !important the inline width
-     wins over left/right and right-edge clipping returns. */
-  width: auto !important;
 }
 .transcript__row {
   position: relative;
   display: flow-root;
   box-sizing: border-box;
-  width: 100%;
   padding-left: var(--transcript-inline-pad, 32px);
   padding-right: var(--transcript-inline-pad, 32px);
 }
@@ -3646,7 +3611,7 @@ a[href] {
 .history-preview__body .transcript__row > * {
   max-width: none;
 }
-/* Keep the lazy Markdown source readable while Virtuoso waits for the real
+/* Keep the lazy Markdown source readable while the parser resolves the real
    parser result. The row itself remains free to measure once the marker is
    removed; no manual-scroll path writes a forced row height. */
 .transcript__row .msg--assistant .msg__body > .md[data-transcript-geometry-pending] {
@@ -3654,8 +3619,7 @@ a[href] {
   height: max(0px, calc(var(--transcript-row-estimate) - 32px));
   overflow: hidden;
 }
-/* Offscreen rows are unmounted by the virtualizer, so content-visibility
-/* Offscreen rows are unmounted by the virtualizer, so content-visibility
+/* Offscreen blocks are unmounted by the window adapter, so content-visibility
    culling is redundant inside rows — and skipping it keeps offsetHeight
    measurements exact instead of contain-intrinsic-size placeholders. */
 .transcript__row .msg,
@@ -3668,7 +3632,7 @@ a[href] {
   content-visibility: visible;
   contain-intrinsic-size: none;
 }
-.transcript__jump-bottom {
+.transcript__jump-bottom:not([hidden]) {
   --wails-draggable: no-drag;
   position: absolute;
   left: 50%;
@@ -3783,6 +3747,7 @@ a[href] {
   color: var(--accent);
   background: color-mix(in srgb, var(--accent) 8%, transparent);
 }
+.notice-line--completion,
 .notice-line--delivery {
   gap: 9px;
   padding: 10px 12px;
@@ -4303,13 +4268,9 @@ a[href] {
   content-visibility: auto;
   contain-intrinsic-size: 1px 60px;
 }
-/* Virtuoso already owns transcript virtualization. A second content-visibility
-/* Virtuoso already owns transcript virtualization. A second content-visibility
- * viewport inside each mounted row gives the browser a 60px intrinsic box and
- * then expands it when the row crosses the viewport, which makes Virtuoso's
- * upward compensation write a large reverse frame during manual reading. Keep
- * content-visibility for non-transcript message lists, but let the transcript
- * size tree see the real row geometry from its first mount. */
+/* The transcript window adapter already bounds mounted blocks. A second
+ * content-visibility viewport would replace real measurements with an
+ * intrinsic placeholder, so keep it only for non-transcript message lists. */
 .transcript__row .msg {
   content-visibility: visible;
   contain-intrinsic-size: auto;
@@ -6516,9 +6477,8 @@ body > .mermaid-diagram--fullscreen {
   white-space: nowrap;
   min-width: 0;
 }
-/* Sub-agent progress chip: phase + running elapsed + recent activity. The dot
-/* Sub-agent progress chip: phase + running elapsed + recent activity. The dot
- * carries the phase color; the chip never grows the head beyond one line. */
+/* The compact phase chip is structural header chrome. Expanded sub-agent
+ * details load with their own presentation component. */
 .tool__subagent-chip {
   display: inline-flex;
   align-items: center;
@@ -6552,9 +6512,7 @@ body > .mermaid-diagram--fullscreen {
   animation: subagent-pulse 1.4s ease-in-out infinite;
 }
 .tool__subagent-chip--reasoning .tool__subagent-dot,
-.tool__subagent-chip--responding .tool__subagent-dot {
-  background: var(--accent);
-}
+.tool__subagent-chip--responding .tool__subagent-dot,
 .tool__subagent-chip--tool .tool__subagent-dot,
 .tool__subagent-chip--retrying .tool__subagent-dot {
   background: var(--accent);
@@ -6569,60 +6527,8 @@ body > .mermaid-diagram--fullscreen {
   0%, 100% { opacity: 1; }
   50% { opacity: 0.35; }
 }
-
-/* Expanded sub-agent preview: reasoning / response preview / notices live in
-/* Expanded sub-agent preview: reasoning / response preview / notices live in
- * their own block and never mix with ordinary tool output. Long text wraps;
- * it must not widen the chat column. */
-.tool__subagent-preview {
-  display: flex;
-  flex-direction: column;
-  gap: 8px;
-  margin: 4px 0 8px;
-  padding: 8px 10px;
-  border: 1px solid var(--border);
-  border-radius: 8px;
-  background: var(--bg-soft);
-  min-width: 0;
-}
-.tool__subagent-preview-label {
-  font-family: var(--font-code-family);
-  font-size: var(--font-caption);
-  font-weight: 600;
-  color: var(--fg-dim);
-  margin-bottom: 2px;
-}
-.tool__subagent-preview-label--toggle {
-  padding: 0;
-  border: none;
-  background: none;
-  text-align: left;
-  cursor: pointer;
-  -webkit-app-region: no-drag;
-}
-.tool__subagent-preview-label--toggle:hover {
-  color: var(--fg);
-}
-/* The collapsed reasoning preview matches the plain-text preview blocks. */
-.tool__subagent-preview .reasoning-summary {
-  margin: 0;
-  border-left: none;
-  padding-left: 0;
-  font-family: var(--font-code-family);
-  font-size: var(--font-caption);
-  line-height: 1.5;
-}
-.tool__subagent-preview-text {
-  margin: 0;
-  font-family: var(--font-code-family);
-  font-size: var(--font-caption);
-  line-height: 1.5;
-  white-space: pre-wrap;
-  word-break: break-word;
-  overflow-wrap: anywhere;
-  max-height: 260px;
-  overflow-y: auto;
-  color: inherit;
+@media (prefers-reduced-motion: reduce) {
+  .tool__subagent-chip--running .tool__subagent-dot { animation: none; }
 }
 .tool__nested-count {
   display: inline-flex;
@@ -6907,6 +6813,40 @@ body > .mermaid-diagram--fullscreen {
   display: flex;
   flex-direction: column;
 }
+/* Ported from studio's glowring: a constant-speed trace along the perimeter.
+   Mounted only during active work, so idle/waiting cards consume no frames. */
+.composer-glowring {
+  position: absolute;
+  inset: -1px;
+  border-radius: inherit;
+  padding: 1.5px;
+  pointer-events: none;
+  overflow: hidden;
+  -webkit-mask: linear-gradient(#000 0 0) content-box, linear-gradient(#000 0 0);
+  mask: linear-gradient(#000 0 0) content-box, linear-gradient(#000 0 0);
+  -webkit-mask-composite: xor;
+  mask-composite: exclude;
+}
+.composer-glowring i {
+  position: absolute;
+  width: 150px;
+  height: 150px;
+  background: radial-gradient(circle closest-side, var(--accent) 0%,
+    color-mix(in srgb, var(--accent) 42%, transparent) 38%, transparent 72%);
+  offset-path: border-box;
+  animation: composer-border-trace 3.4s linear infinite;
+}
+@keyframes composer-border-trace {
+  to { offset-distance: 100%; }
+}
+@supports not (offset-path: border-box) {
+  .composer-glowring { background: var(--accent); }
+  .composer-glowring i { display: none; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .composer-glowring { background: color-mix(in srgb, var(--accent) 60%, transparent); }
+  .composer-glowring i { display: none; animation: none; }
+}
 .composer-card:focus-within {
   border-color: var(--fg-faint);
 }
@@ -6953,6 +6893,55 @@ body > .mermaid-diagram--fullscreen {
    drops the accent running tint and takes a calm warn edge instead. */
 .composer-card--waiting {
   border-color: color-mix(in srgb, var(--warn) 30%, var(--border));
+}
+/* Provider-recovery wait: a card above the composer so a minute-scale wait is
+   never mistaken for model work (#9890). */
+.recovery-wait-banner {
+  display: flex;
+  align-items: flex-start;
+  gap: 12px;
+  margin-bottom: 8px;
+  padding: 10px 14px;
+  border: 1px solid color-mix(in srgb, var(--warn) 45%, var(--border));
+  border-radius: 12px;
+  background: color-mix(in srgb, var(--warn) 10%, var(--bg-elev));
+  font: 12px var(--sans);
+}
+.recovery-wait-banner__body {
+  display: grid;
+  flex: 1;
+  gap: 4px;
+  min-width: 0;
+}
+.recovery-wait-banner__title {
+  font-weight: 600;
+  color: color-mix(in srgb, var(--warn) 74%, var(--fg));
+}
+.recovery-wait-banner__meta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 12px;
+  color: var(--fg-dim);
+  font-variant-numeric: tabular-nums;
+}
+.recovery-wait-banner__hint {
+  color: var(--fg-faint);
+}
+.recovery-wait-banner__stop {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 10px;
+  border: 1px solid currentColor;
+  border-radius: 8px;
+  background: none;
+  color: inherit;
+  font: inherit;
+  cursor: pointer;
+}
+.recovery-wait-banner__stop:disabled {
+  opacity: 0.6;
+  cursor: default;
 }
 .composer-resize-handle {
   --wails-draggable: no-drag;
@@ -7791,82 +7780,6 @@ body > .mermaid-diagram--fullscreen {
   transform: none;
 }
 
-.composer-profile-trigger {
-  --wails-draggable: no-drag;
-  --composer-profile-accent: var(--fg-dim);
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  gap: 6px;
-  width: 100%;
-  min-width: 0;
-  height: var(--composer-control-height);
-  padding: 0 8px;
-  border: 1px solid var(--border);
-  border-radius: var(--composer-control-radius);
-  background: var(--surface-2);
-  color: var(--fg-dim);
-  box-shadow: var(--app-graphite-shadow);
-  font: inherit;
-  font-size: var(--composer-control-font-size);
-  font-weight: var(--composer-control-font-weight);
-  transition: border-color 0.14s, background 0.14s, color 0.14s, transform 0.14s var(--ease-out);
-}
-
-.composer-profile-trigger[data-profile="economy"] {
-  --composer-profile-accent: #3b82f6;
-}
-
-.composer-profile-trigger[data-profile="delivery"] {
-  --composer-profile-accent: #f97316;
-}
-
-.composer-profile-trigger > svg:first-child {
-  flex: 0 0 auto;
-  color: var(--composer-profile-accent);
-}
-
-.composer-profile-trigger > svg:last-child {
-  flex: 0 0 auto;
-  color: var(--fg-faint);
-}
-
-.composer-profile-trigger__label {
-  display: inline-flex;
-  align-items: center;
-  gap: 6px;
-  min-width: 0;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.composer-profile-trigger__value {
-  color: var(--fg);
-  font-weight: var(--composer-control-font-weight);
-}
-
-.composer-profile-trigger:hover:not(:disabled),
-.composer-profile-trigger:focus-visible,
-.composer-profile-trigger--open {
-  outline: none;
-  color: var(--fg);
-  border-color: var(--border-soft);
-  background: var(--bg-soft);
-  transform: none;
-}
-
-.composer-profile-trigger:disabled {
-  cursor: not-allowed;
-  opacity: 0.55;
-  transform: none;
-}
-
-.composer-profile-trigger:focus-visible {
-  box-shadow: var(--focus-ring);
-  transform: none;
-}
-
 .composer-more-trigger {
   --wails-draggable: no-drag;
   display: inline-flex;
@@ -8259,22 +8172,11 @@ body > .mermaid-diagram--fullscreen {
   overflow-wrap: anywhere;
 }
 
-.composer-intent-menu,
-.composer-profile-menu {
+.composer-intent-menu {
   width: min(284px, calc(100vw - 16px));
 }
 
-.composer-profile-menu .composer-access-menu__desc {
-  color: var(--fg-dim);
-  font-size: 12px;
-  line-height: 18px;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.composer-intent-menu__item,
-.composer-profile-menu__item {
+.composer-intent-menu__item {
   height: auto;
   min-height: 58px;
   padding-block: 8px;
@@ -8284,6 +8186,49 @@ body > .mermaid-diagram--fullscreen {
 .composer-intent-menu__check {
   flex: 0 0 auto;
   color: var(--accent);
+}
+
+:root[data-theme-style] .app .composer-meta--unified .composer-task-mode-trigger--removable {
+  border: 0;
+  background: transparent;
+  box-shadow: none;
+  border-radius: 16px;
+  gap: 6px;
+  padding: 5px 8px;
+  color: var(--fg-dim);
+}
+:root[data-theme-style] .app .composer-meta--unified .composer-task-mode-trigger--removable:hover {
+  background: var(--bg-elev-2);
+}
+.composer-task-mode-trigger--removable .composer-task-mode-trigger__value {
+  font-weight: 400;
+}
+.composer-task-mode-trigger__icon {
+  display: grid;
+  place-items: center;
+  width: 16px;
+  height: 16px;
+}
+.composer-task-mode-trigger__icon > svg {
+  grid-area: 1 / 1;
+}
+.composer-task-mode-trigger__remove {
+  visibility: hidden;
+}
+.composer-task-mode-trigger--removable:is(:hover, :focus-visible) .composer-task-mode-trigger__icon > svg:first-child {
+  visibility: hidden;
+}
+.composer-task-mode-trigger--removable:is(:hover, :focus-visible) .composer-task-mode-trigger__remove {
+  visibility: visible;
+}
+
+.composer-content-menu .composer-access-menu__item > svg {
+  width: 18px;
+  height: 18px;
+}
+.composer-content-menu .composer-content-menu__trigger-icon {
+  flex-basis: 18px;
+  width: 18px;
 }
 
 .composer-modebar__inferred {
@@ -9123,10 +9068,75 @@ body > .mermaid-diagram--fullscreen {
   display: none;
 }
 
+/* Shared harness-style decision surface. Ask adds its own fields and pager;
+   every other PromptShelf keeps its domain controls inside this same visual
+   frame so approvals, forms, and MCP interactions read as one product. */
+.prompt-shelf--harness .prompt-shelf__card {
+  border-radius: 20px;
+  padding: 8px 12px 10px;
+  background: var(--bg-elev);
+  border-color: color-mix(in srgb, var(--accent) 34%, var(--border-soft));
+}
+.prompt-shelf--harness .prompt-shelf__header {
+  align-items: center;
+  gap: 16px;
+  padding: 10px 4px 12px;
+}
+.prompt-shelf--harness .prompt-shelf__heading {
+  font-size: 16px;
+  font-weight: 650;
+}
+.prompt-shelf--harness .prompt-shelf__meta {
+  font-size: 14px;
+}
+.prompt-shelf--harness .prompt-shelf__header-actions {
+  gap: 8px;
+}
+.prompt-shelf--harness .prompt-shelf__header-button {
+  min-height: 32px;
+  border-radius: 999px;
+  padding: 0 10px;
+}
+.prompt-shelf--harness.prompt-shelf--decision .prompt-shelf__actions {
+  gap: 6px;
+}
+.prompt-shelf--harness.prompt-shelf--decision .prompt-action {
+  min-height: 38px;
+  height: 38px;
+  border-radius: 10px;
+  padding: 5px 10px;
+}
+.prompt-shelf--harness .prompt-shelf__footer {
+  padding-top: 10px;
+  margin-top: 4px;
+}
+.prompt-shelf--harness .decision-confirm-bar {
+  gap: 10px;
+}
+
 /* Todo shelf: header actions (collapse/close) appear on card hover/focus. */
 .prompt-shelf--todo .prompt-shelf__header-actions {
   opacity: 0;
   transition: opacity 0.12s ease;
+}
+.prompt-shelf--todo .prompt-shelf__card--collapsed {
+  height: 48px;
+  min-height: 48px;
+  padding: 4px 10px;
+  border-radius: 14px;
+  box-sizing: border-box;
+}
+.prompt-shelf--todo .prompt-shelf__card--collapsed .prompt-shelf__header {
+  gap: 10px;
+  padding: 4px 2px;
+}
+.prompt-shelf--todo .prompt-shelf__card--collapsed .prompt-shelf__heading,
+.prompt-shelf--todo .prompt-shelf__card--collapsed .prompt-shelf__meta {
+  font-size: 12px;
+}
+.prompt-shelf--todo .prompt-shelf__card--collapsed .prompt-shelf__header-button {
+  min-height: 26px;
+  padding: 0 8px;
 }
 
 .prompt-shelf--todo:hover .prompt-shelf__header-actions,
@@ -10107,6 +10117,62 @@ body > .mermaid-diagram--fullscreen {
   padding: 4px 12px;
   border-radius: 999px;
 }
+.prompt-shelf--ask .prompt-shelf__card {
+  border-radius: 20px;
+  padding: 0 12px 10px;
+  background: var(--bg-elev);
+  border-color: color-mix(in srgb, var(--accent) 48%, var(--border-soft));
+}
+.prompt-shelf--ask .prompt-shelf__card--collapsed .prompt-shelf__content > :not(.prompt-shelf__header),
+.prompt-shelf--ask .prompt-shelf__card--collapsed > .prompt-shelf__footer {
+  display: none !important;
+}
+.prompt-shelf--ask .prompt-shelf__content { gap: 0; padding: 0 2px; }
+.prompt-shelf--ask .prompt-shelf__header { align-items: center; padding: 18px 4px 14px; gap: 16px; }
+.prompt-shelf--ask .prompt-shelf__heading { font-size: 16px; font-weight: 650; }
+.prompt-shelf--ask .prompt-shelf__header-actions { gap: 8px; }
+.prompt-shelf--ask .prompt-shelf__header-button {
+  width: 32px; height: 32px; min-height: 32px; padding: 0; border: 0; background: var(--bg-soft);
+}
+.prompt-shelf--ask .prompt-shelf__meta { font-size: 15px; }
+.prompt-shelf--ask .prompt-shelf__actions { gap: 6px; padding: 0 0 8px; }
+.prompt-shelf--ask .prompt-action { min-height: 46px; border-radius: 12px; padding: 9px 14px; background: var(--bg-soft); }
+.prompt-shelf--ask .prompt-action:hover,
+.prompt-shelf--ask .prompt-action--active,
+.prompt-shelf--ask .prompt-action--selected { background: color-mix(in srgb, var(--accent) 15%, var(--bg-soft)); }
+.prompt-shelf--ask .prompt-action__key { min-width: 28px; height: 28px; border-radius: 8px; font-size: 14px; }
+.prompt-shelf--ask .ask-shelf__custom-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  height: 38px;
+  min-height: 38px;
+  flex: 0 0 38px;
+  margin-top: 2px;
+  padding: 5px 14px;
+  border: 1px solid var(--border-soft);
+  border-radius: 12px;
+  background: var(--bg-soft);
+  overflow: hidden;
+  box-sizing: border-box;
+}
+.prompt-shelf--ask .ask-shelf__custom-row:focus-within,
+.prompt-shelf--ask .ask-shelf__custom-row--active { border-color: var(--accent); }
+.ask-shelf__custom-indicator { display: grid; place-items: center; flex: 0 0 24px; width: 24px; height: 24px; color: var(--fg-dim); font-size: 16px; line-height: 1; }
+.prompt-shelf--ask .ask-shelf__custom { height: 24px; min-height: 24px; border: 0; padding: 0; background: transparent; font-size: 14px; line-height: 24px; }
+.ask-shelf__footer-layout { display: flex; align-items: center; justify-content: space-between; gap: 16px; }
+.ask-shelf__pager { display: flex; align-items: center; gap: 8px; color: var(--fg-dim); font-size: 15px; white-space: nowrap; }
+.ask-shelf__pager-button { display: grid; place-items: center; width: 30px; height: 30px; border: 0; border-radius: 999px; background: transparent; color: var(--fg-dim); cursor: pointer; }
+.ask-shelf__pager-button:hover:not(:disabled) { background: var(--bg-soft); color: var(--fg); }
+.ask-shelf__pager-button:disabled { color: var(--fg-faint); cursor: default; }
+.prompt-shelf--ask .prompt-shelf__footer { padding: 12px 0 0; margin-top: 0; }
+.prompt-shelf--ask .decision-confirm-bar { justify-content: flex-end; gap: 10px; }
+.prompt-shelf--ask .decision-confirm-bar__hint { display: none; }
+@media (max-width: 680px) {
+  .ask-shelf__footer-layout { align-items: stretch; flex-direction: column; }
+  .ask-shelf__pager { justify-content: center; }
+  .prompt-shelf--ask .decision-confirm-bar { justify-content: space-between; }
+}
 .prompt-shelf__footnote {
   min-width: 0;
 }
@@ -10159,13 +10225,24 @@ body > .mermaid-diagram--fullscreen {
   overflow-wrap: anywhere;
 }
 .prompt-shelf--ask .ask-shelf__custom-row {
-  margin-top: 4px;
-  display: grid;
-  gap: 4px;
+  margin-top: 2px;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  height: 38px;
+  min-height: 38px;
+  flex: 0 0 38px;
+  box-sizing: border-box;
+  overflow: hidden;
 }
 .prompt-shelf--ask .ask-shelf__custom {
-  height: 30px;
-  padding: 0 9px;
+  height: 24px;
+  min-height: 24px;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  font-size: 14px;
+  line-height: 24px;
 }
 .prompt-shelf--runtime-decision .prompt-shelf__note {
   overflow: hidden;
@@ -10757,7 +10834,6 @@ body > .mermaid-diagram--fullscreen {
   cursor: default;
 }
 .workspace-completion-summary__head,
-.workspace-completion-summary__metrics,
 .workspace-completion-summary__details {
   display: flex;
   flex-wrap: wrap;
@@ -10769,16 +10845,39 @@ body > .mermaid-diagram--fullscreen {
   font: inherit;
   font-weight: 650;
 }
-.workspace-completion-summary__metrics {
-  margin-top: 6px;
-  color: var(--fg);
-}
 .workspace-completion-summary__details {
   margin-top: 4px;
 }
-.workspace-completion-summary__metric--attention {
-  color: var(--warn);
-}
+.turn-result-summary { display: grid; gap: 6px; margin-top: 6px; color: var(--fg); }
+.turn-result-summary__checks { display: flex; align-items: center; gap: 6px; color: var(--fg-dim); }
+.turn-result-summary__checks svg { flex: 0 0 auto; }
+.turn-result-added, .turn-result-summary__checks--passed { color: var(--ok); }
+.turn-result-removed, .turn-result-summary__checks--failed { color: var(--danger); }
+.turn-result-warning, .turn-result-summary__checks--stale, .turn-result-summary__checks--interrupted { color: var(--warn); }
+.workspace-turn-result { min-width: 0; padding: 16px; color: var(--fg); font-size: 12px; }
+.workspace-turn-result__head, .workspace-turn-result__tabs { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; }
+.workspace-turn-result__head { justify-content: space-between; }
+.workspace-turn-result__tabs [aria-pressed="true"] { background: var(--bg-soft); color: var(--accent); }
+.workspace-turn-result__label, .turn-check-details__footnote { color: var(--fg-dim); }
+.turn-file-list { margin-top: 14px; border: 1px solid var(--border-soft); border-radius: 6px; overflow: hidden; }
+.turn-file-list:empty { display: none; }
+.turn-file-list__entry { display: flex; width: 100%; gap: 12px; justify-content: space-between; padding: 10px; border: 0; border-bottom: 1px solid var(--border-soft); background: transparent; color: var(--fg); text-align: left; font: inherit; cursor: pointer; }
+.turn-file-list__entry:last-child { border-bottom: 0; }
+.turn-file-list__entry > span:first-child { min-width: 0; overflow-wrap: anywhere; }
+.turn-file-list__entry > span:last-child { flex-shrink: 0; }
+.turn-file-list__entry[aria-pressed="true"] { background: var(--bg-soft); }
+.turn-file-list__entry:disabled { color: var(--fg-dim); cursor: default; }
+.turn-file-diff { min-width: 0; margin-top: 16px; }
+.turn-file-diff h4 { overflow-wrap: anywhere; margin: 0 0 8px; }
+.turn-check-details { min-width: 0; width: 100%; }
+.turn-check-details__status { color: var(--fg); }
+.turn-check-details__entry { border: 1px solid var(--border-soft); border-radius: 6px; padding: 10px; margin: 8px 0; }
+.turn-check-details__head { display: flex; flex-wrap: wrap; gap: 6px 12px; justify-content: space-between; color: var(--fg); }
+.turn-check-details__head code { min-width: 0; overflow-wrap: anywhere; }
+.turn-check-details__gaps { padding-left: 18px; overflow-wrap: anywhere; }
+.turn-check-log { margin-top: 8px; }
+.turn-check-log summary { width: fit-content; cursor: pointer; color: var(--accent); }
+.turn-check-log pre { max-height: 320px; overflow: auto; white-space: pre-wrap; overflow-wrap: anywhere; padding: 10px; background: var(--bg-soft); border-radius: 4px; color: var(--fg); }
 .floating-menu {
   --wails-draggable: no-drag;
   position: fixed;
@@ -12286,6 +12385,26 @@ body > .mermaid-diagram--fullscreen {
   font-size: 10px;
   letter-spacing: 0;
   font-weight: 600;
+}
+.history-system-recovery {
+  margin-top: 12px;
+  border-top: 1px solid var(--border);
+  padding-top: 12px;
+}
+.history-system-recovery__toggle {
+  width: 100%;
+  border: 0;
+  background: transparent;
+  cursor: pointer;
+  justify-content: space-between;
+  text-align: left;
+}
+.history-system-recovery__toggle:hover {
+  color: var(--fg);
+}
+.history-system-recovery__items {
+  display: grid;
+  gap: 2px;
 }
 .mem-section__row .mem-section__title {
   margin-bottom: 3px;}
@@ -15411,6 +15530,27 @@ body > .mermaid-diagram--fullscreen {
   animation: backdrop-in var(--dur-base) var(--ease-out) both;
 }
 
+.topicbar__worktree-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  border: 0;
+  padding: 0;
+  background: transparent;
+  color: inherit;
+  cursor: pointer;
+}
+.topicbar__worktree-btn span {
+  font-size: 11px;
+  opacity: 0.9;
+  text-decoration: underline dotted;
+}
+.topicbar__worktree-btn:focus-visible {
+  border-radius: 3px;
+  outline: none;
+  box-shadow: var(--focus-ring);
+}
+
 .management-modal {
   display: flex;
   flex-direction: column;
@@ -15476,40 +15616,76 @@ body > .mermaid-diagram--fullscreen {
   padding: 12px 18px;
 }
 .recovery-lineage-dialog__member {
-  padding: 10px 2px;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 18px;
+  padding: 14px 2px;
   border-bottom: 1px solid var(--border);
 }
+.recovery-lineage-dialog__member-copy {
+  min-width: 0;
+}
 .recovery-lineage-dialog__member-name {
+  display: flex;
+  align-items: center;
+  gap: 8px;
   color: var(--fg);
   font-size: var(--text-sm);
-  font-family: var(--font-mono);
+  font-weight: 650;
+}
+.recovery-lineage-dialog__member-meta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  margin-top: 6px;
+  color: var(--fg-faint);
+  font-size: var(--text-xs);
+}
+.recovery-lineage-dialog__preview {
+  margin-top: 7px;
+  color: var(--fg-dim);
+  font-size: var(--text-sm);
+  line-height: 1.45;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
-.recovery-lineage-dialog__member-meta {
-  display: flex;
-  gap: 10px;
-  margin-top: 4px;
-  color: var(--fg-faint);
-  font-size: var(--text-xs);
-}
-.recovery-lineage-dialog__choose {
+.recovery-lineage-dialog__version-note {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  margin-top: 5px;
   border: 0;
   padding: 0;
   background: transparent;
-  color: var(--accent);
-  cursor: pointer;
-  font: inherit;
-}
-.recovery-lineage-dialog__choose:disabled { opacity: 0.5; cursor: default; }
-.recovery-lineage-dialog__notice {
-  margin-top: 12px;
-  padding: 10px 12px;
-  border-radius: 8px;
-  background: var(--bg-elev);
   color: var(--fg-faint);
-  font-size: var(--text-sm);
+  cursor: pointer;
+  font-size: var(--text-xs);
+}
+.recovery-lineage-dialog__version-note:hover { color: var(--fg); }
+.recovery-lineage-dialog__version-note:disabled { opacity: 0.5; cursor: default; }
+.recovery-lineage-dialog__note-editor {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-top: 7px;
+}
+.recovery-lineage-dialog__note-editor input {
+  min-width: 0;
+  flex: 1 1 220px;
+  height: 30px;
+  border: 1px solid var(--border);
+  border-radius: 7px;
+  background: var(--bg-soft);
+  color: var(--fg);
+  padding: 0 9px;
+}
+.recovery-lineage-dialog__member-actions {
+  display: flex;
+  flex-direction: column;
+  align-items: stretch;
+  gap: 7px;
 }
 .recovery-lineage-dialog__actions {
   padding: 12px 18px;
@@ -15889,7 +16065,6 @@ body > .mermaid-diagram--fullscreen {
   border-right: 1px solid var(--border);
   background: var(--bg-soft);
   padding: 10px;
-  overflow-y: auto;
 }
 
 .settings-center__navitem {
@@ -16697,99 +16872,6 @@ body > .mermaid-diagram--fullscreen {
   flex: 0 0 160px;
 }
 
-.sound-select__trigger {
-  --wails-draggable: no-drag;
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 8px;
-  flex: 1;
-  min-height: 30px;
-  padding: 2px 8px;
-  border: 1px solid var(--border);
-  border-radius: 7px;
-  background: var(--bg);
-  color: var(--fg);
-  font: inherit;
-  font-size: var(--font-control);
-  text-align: left;
-  cursor: pointer;
-}
-
-.sound-select__trigger:hover {
-  border-color: var(--border-2);
-  background: var(--bg-elev);
-}
-
-.sound-select__trigger:focus-visible {
-  outline: none;
-  border-color: var(--accent);
-  box-shadow: 0 0 0 2px var(--accent-soft);
-}
-
-.sound-select__label {
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.sound-select__chev {
-  flex: 0 0 auto;
-  color: var(--fg-dim);
-  transition: transform 120ms ease;
-}
-
-.sound-select__chev--open {
-  transform: rotate(180deg);
-}
-
-.sound-select__menu {
-  min-width: 180px;
-  max-height: min(320px, calc(100vh - 24px));
-  overflow: hidden;
-  border-radius: 8px;
-  border: 1px solid var(--border);
-  box-shadow: 0 18px 42px rgba(0,0,0,0.46);
-  isolation: isolate;
-}
-
-.sound-select__list {
-  padding: 6px;
-  overflow-y: auto;
-  max-height: 300px;
-}
-
-.sound-select__option {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 8px;
-  width: 100%;
-  padding: 8px 9px;
-  border: 1px solid transparent;
-  border-radius: 7px;
-  background: transparent;
-  color: var(--fg);
-  font: inherit;
-  font-size: var(--font-control);
-  text-align: left;
-  cursor: pointer;
-}
-
-.sound-select__option:hover {
-  background: var(--button-bg-hover);
-}
-
-.sound-select__option--selected {
-  border-color: color-mix(in srgb, var(--accent) 30%, transparent);
-  background: color-mix(in srgb, var(--accent) 8%, transparent);
-}
-
-.sound-select__check {
-  flex: 0 0 auto;
-  color: var(--accent);
-}
-
 .settings-page .prov-card,
 .settings-page .cap-server-entry,
 .settings-page .cap-source,
@@ -17251,192 +17333,7 @@ body > .mermaid-diagram--fullscreen {
 .settings-model-picker {
   min-width: 0;
 }
-.settings-model-picker__trigger {
-  --wails-draggable: no-drag;
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 12px;
-  width: 100%;
-  min-height: 44px;
-  padding: 7px 10px 7px 12px;
-  border: 1px solid var(--border);
-  border-radius: 8px;
-  background: var(--bg);
-  color: var(--fg);
-  font: inherit;
-  text-align: left;
-  cursor: pointer;
-}
-.settings-model-picker__trigger:hover:not(:disabled) {
-  border-color: var(--border-2);
-  background: var(--bg-elev);
-}
-.settings-model-picker__trigger:focus-visible {
-  outline: none;
-  border-color: var(--accent);
-  box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent) 24%, transparent);
-}
-.settings-model-picker__trigger:disabled {
-  cursor: not-allowed;
-  opacity: 0.58;
-}
-.settings-model-picker__selected {
-  display: flex;
-  flex-direction: column;
-  gap: 2px;
-  min-width: 0;
-}
-.settings-model-picker__selected span,
-.settings-model-picker__selected small {
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-.settings-model-picker__selected span {
-  color: var(--fg);
-  font-family: inherit;
-  font-size: var(--font-control);
-  font-weight: 650;
-}
-.settings-model-picker__selected small {
-  color: var(--fg-dim);
-  font-size: var(--text-2xs);
-}
-.settings-model-picker__chev {
-  flex: 0 0 auto;
-  color: var(--fg-dim);
-  transition: transform 120ms ease, color 120ms ease;
-}
-.settings-model-picker__trigger:hover:not(:disabled) .settings-model-picker__chev {
-  color: var(--fg);
-}
-.settings-model-picker__chev--open {
-  transform: rotate(180deg);
-}
-.settings-model-picker__menu {
-  display: flex;
-  flex-direction: column;
-  max-height: min(420px, calc(100vh - 24px));
-  overflow: hidden;
-  border-radius: 8px;
-  border: 1px solid var(--border);
-  box-shadow: 0 18px 42px rgba(0, 0, 0, 0.46);
-  isolation: isolate;
-}
-.settings-model-picker__search {
-  flex: 0 0 auto;
-  padding: 8px;
-  border-bottom: 1px solid var(--border-soft);
-  background: transparent;
-}
-.settings-model-picker__search input {
-  width: 100%;
-  height: 32px;
-  padding: 0 10px;
-  border: 1px solid var(--border);
-  border-radius: 7px;
-  background: var(--bg);
-  color: var(--fg);
-  font: inherit;
-  font-size: var(--font-control-small);
-}
-.settings-model-picker__search input:focus {
-  outline: none;
-  border-color: var(--accent);
-}
-.settings-model-picker__list {
-  min-height: 0;
-  flex: 1 1 auto;
-  max-height: 330px;
-  overflow-y: auto;
-  overscroll-behavior: contain;
-  padding: 6px;
-  background: var(--bg-elev);
-}
-.settings-model-picker__group + .settings-model-picker__group {
-  margin-top: 6px;
-}
-.settings-model-picker__group-title {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 8px;
-  padding: 6px 7px 4px;
-  color: var(--fg-dim);
-  font-size: var(--text-2xs);
-}
-.settings-model-picker__group-title span {
-  min-width: 0;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-  font-family: var(--mono);
-  text-transform: none;
-}
-.settings-model-picker__group-title small {
-  flex: 0 0 auto;
-  color: var(--fg-faint);
-}
-.settings-model-picker__option {
-  --wails-draggable: no-drag;
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 10px;
-  width: 100%;
-  min-width: 0;
-  padding: 8px 9px;
-  border: 1px solid transparent;
-  border-radius: 7px;
-  background: transparent;
-  color: var(--fg);
-  font: inherit;
-  text-align: left;
-  cursor: pointer;
-}
-.settings-model-picker__option:hover {
-  background: var(--button-bg-hover);
-}
-.settings-model-picker__option--selected {
-  border-color: color-mix(in srgb, var(--accent) 40%, var(--border));
-  background: color-mix(in srgb, var(--accent) 16%, var(--bg-elev-2));
-}
-.settings-model-picker__option--pinned {
-  margin-bottom: 6px;
-  background: var(--bg-elev);
-}
-.settings-model-picker__option > span {
-  display: flex;
-  flex-direction: column;
-  gap: 3px;
-  min-width: 0;
-}
-.settings-model-picker__option strong,
-.settings-model-picker__option small {
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-.settings-model-picker__option strong {
-  color: var(--fg);
-  font-size: var(--font-control-small);
-  font-weight: 700;
-}
-.settings-model-picker__option small {
-  color: var(--fg-dim);
-  font-size: var(--text-2xs);
-}
-.settings-model-picker__option svg {
-  flex: 0 0 auto;
-  color: var(--accent);
-}
-.settings-model-picker__empty {
-  padding: 20px 10px;
-  color: var(--fg-dim);
-  font-size: var(--font-control-small);
-  text-align: center;
-}
+
 .set-row {
   display: flex;
   align-items: center;
@@ -17560,38 +17457,6 @@ body > .mermaid-diagram--fullscreen {
   font-size: var(--font-control-small);
   line-height: 1.45;
 }
-.provider-quick-setup {
-  display: flex;
-  flex-direction: column;
-  gap: 12px;
-  padding: 18px;
-  border: 1px solid color-mix(in srgb, var(--accent) 28%, var(--border));
-  border-radius: 10px;
-  background: color-mix(in srgb, var(--accent) 5%, var(--bg-elev));
-}
-.provider-quick-setup__intro {
-  display: flex;
-  flex-direction: column;
-  gap: 5px;
-}
-.provider-quick-setup__intro strong {
-  color: var(--fg);
-  font-size: var(--text-xl);
-}
-.provider-quick-setup__intro span {
-  max-width: 64ch;
-  color: var(--fg-dim);
-  font-size: var(--font-control-small);
-  line-height: 1.5;
-}
-.provider-quick-setup__key {
-  min-height: 42px;
-}
-.provider-quick-setup__actions {
-  display: flex;
-  justify-content: space-between;
-  gap: 8px;
-}
 .provider-add-segmented {
   width: fit-content;
   display: inline-flex;
@@ -17616,171 +17481,10 @@ body > .mermaid-diagram--fullscreen {
 .provider-add-segmented__item:hover:not(:disabled) {
   color: var(--fg);
 }
-.provider-add-segmented__item--active {
+.provider-add-segmented__item[aria-selected="true"] {
   background: var(--bg-elev-2);
   color: var(--fg);
   box-shadow: 0 0 0 1px var(--border-soft);
-}
-.provider-template-grid {
-  display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(min(260px, 100%), 1fr));
-  grid-auto-rows: 92px;
-  align-items: stretch;
-  gap: 8px;
-}
-.provider-featured-picker {
-  display: flex;
-  flex-direction: column;
-  gap: 8px;
-}
-.provider-featured-picker__label {
-  color: var(--fg-dim);
-  font-size: var(--font-control-small);
-  font-weight: 650;
-}
-.provider-featured-grid {
-  display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
-  gap: 8px;
-}
-.provider-featured-grid .provider-template-card {
-  min-height: 84px;
-}
-.provider-preset-group {
-  display: flex;
-  flex-direction: column;
-  gap: 10px;
-  padding: 10px;
-  border: 1px solid var(--border-soft);
-  border-radius: 10px;
-  background: color-mix(in srgb, var(--bg) 55%, var(--bg-elev-2) 45%);
-}
-.provider-preset-group > h4,
-.provider-preset-section > h5 {
-  margin: 0;
-  color: var(--fg);
-}
-.provider-preset-group > h4 {
-  font-size: var(--text-lg);
-}
-.provider-preset-section {
-  display: flex;
-  flex-direction: column;
-  gap: 8px;
-}
-.provider-preset-section > h5 {
-  font-size: var(--font-control);
-}
-.provider-preset-section__hint {
-  margin: -2px 0 0;
-  color: var(--fg-dim);
-  font-size: var(--font-control-small);
-}
-.provider-preset-details {
-  display: flex;
-  flex-direction: column;
-  gap: 8px;
-  padding-top: 2px;
-}
-.provider-preset-details > summary {
-  color: var(--fg-dim);
-  font-size: var(--font-control-small);
-  font-weight: 650;
-  cursor: pointer;
-}
-.provider-template-card {
-  display: flex;
-  flex-direction: column;
-  align-items: flex-start;
-  gap: 4px;
-  height: 100%;
-  min-width: 0;
-  padding: 10px 12px;
-  border: 1px solid var(--border);
-  border-radius: 8px;
-  background: var(--bg-elev);
-  color: var(--fg);
-  text-align: left;
-  cursor: pointer;
-}
-.provider-template-card:hover:not(:disabled) {
-  border-color: color-mix(in srgb, var(--accent) 42%, var(--border));
-}
-.provider-template-card:disabled {
-  cursor: default;
-  opacity: 0.68;
-}
-.provider-template-card--added,
-.provider-template-card--installed,
-.provider-template-card--installed-modified,
-.provider-template-card--name-conflict {
-  background: color-mix(in srgb, var(--bg-elev) 82%, var(--bg) 18%);
-}
-.provider-template-card--installed-modified,
-.provider-template-card--name-conflict {
-  cursor: default;
-}
-.provider-template-card--similar-existing {
-  border-color: color-mix(in srgb, var(--warning, #b7791f) 34%, var(--border));
-  background: color-mix(in srgb, var(--warning-soft, #fff7ed) 24%, var(--bg-elev) 76%);
-}
-.provider-template-card--active {
-  border-color: color-mix(in srgb, var(--accent) 58%, var(--border));
-  background: var(--bg-elev-2);
-  box-shadow:
-    inset 3px 0 0 var(--accent),
-    0 0 0 2px color-mix(in srgb, var(--accent) 18%, transparent);
-}
-.provider-template-card strong {
-  display: -webkit-box;
-  max-width: 100%;
-  overflow: hidden;
-  line-height: 1.2;
-  font-size: var(--font-control);
-  overflow-wrap: anywhere;
-  -webkit-box-orient: vertical;
-  -webkit-line-clamp: 1;
-}
-.provider-template-card span {
-  display: -webkit-box;
-  max-width: 100%;
-  overflow: hidden;
-  color: var(--fg-dim);
-  font-size: var(--font-control-small);
-  line-height: 1.35;
-  overflow-wrap: anywhere;
-  -webkit-box-orient: vertical;
-  -webkit-line-clamp: 2;
-}
-.provider-template-card--installed-modified > span,
-.provider-template-card--name-conflict > span {
-  -webkit-line-clamp: 1;
-}
-.provider-template-card__actions {
-  display: flex;
-  align-items: center;
-  gap: 4px;
-  width: 100%;
-  margin-top: auto;
-  min-width: 0;
-}
-.provider-template-card__actions .btn {
-  height: 24px;
-  min-width: 0;
-  padding: 0 7px;
-  font-size: var(--text-2xs);
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-.provider-template-card__actions .inline-confirm {
-  display: inline-flex;
-  flex: 0 1 auto;
-  gap: 4px;
-  max-width: none;
-  overflow: visible;
-  -webkit-line-clamp: unset;
-  -webkit-box-orient: initial;
 }
 .provider-access-card {
   display: flex;
@@ -17932,26 +17636,40 @@ body > .mermaid-diagram--fullscreen {
 }
 .provider-model-draft__list {
   display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(190px, 1fr));
-  gap: 6px;
-  max-height: 220px;
+  grid-template-columns: minmax(0, 1fr);
+  gap: 0;
+  max-height: 320px;
   overflow: auto;
-  padding: 0 2px 6px 0;
+  padding: 0;
+  border: 1px solid var(--border-soft);
+  border-radius: 8px;
+  background: var(--bg);
   grid-auto-rows: min-content;
+  container: provider-model-list / inline-size;
 }
 .provider-model-draft__option {
   min-width: 0;
-  display: flex;
-  flex-direction: column;
-  gap: 4px;
-  padding: 5px 7px;
-  border: 1px solid var(--border-soft);
-  border-radius: 7px;
-  background: color-mix(in srgb, var(--bg) 70%, transparent);
+  display: grid;
+  grid-template-columns: minmax(160px, 0.75fr) minmax(280px, 1.25fr);
+  align-items: start;
+  gap: 16px;
+  padding: 12px 14px;
+  border: none;
+  background: transparent;
   color: var(--fg);
   font-family: var(--mono);
   font-size: var(--text-2xs);
   overflow: hidden;
+  transition: background-color 120ms ease;
+}
+.provider-model-draft__option + .provider-model-draft__option {
+  border-top: 1px solid var(--border-soft);
+}
+.provider-model-draft__option:hover {
+  background: var(--bg-soft);
+}
+.provider-model-draft__option--with-context {
+  grid-template-columns: minmax(145px, 0.7fr) minmax(270px, 1.3fr) minmax(150px, 0.75fr);
 }
 .provider-model-draft__model,
 .provider-model-draft__vision {
@@ -17960,6 +17678,17 @@ body > .mermaid-diagram--fullscreen {
   grid-template-columns: auto minmax(0, 1fr);
   align-items: center;
   gap: 7px;
+}
+.provider-model-draft__model {
+  min-height: 32px;
+  padding: 1px 0;
+  color: var(--fg);
+  font-size: var(--font-control-small);
+  font-weight: 600;
+  line-height: 1.35;
+}
+.provider-model-draft__model input {
+  accent-color: var(--accent);
 }
 .provider-model-draft__context {
   min-width: 0;
@@ -18016,6 +17745,28 @@ body > .mermaid-diagram--fullscreen {
 .provider-model-draft__option span {
   min-width: 0;
   overflow-wrap: anywhere;
+}
+@container provider-model-list (max-width: 690px) {
+  .provider-model-draft__option,
+  .provider-model-draft__option--with-context {
+    grid-template-columns: minmax(130px, 0.65fr) minmax(240px, 1.35fr);
+    gap: 12px;
+  }
+  .provider-model-draft__option--with-context .provider-model-draft__context-field {
+    grid-column: 1 / -1;
+    padding-top: 8px;
+    border-top: 1px solid var(--border-soft);
+  }
+}
+@container provider-model-list (max-width: 460px) {
+  .provider-model-draft__option,
+  .provider-model-draft__option--with-context {
+    grid-template-columns: minmax(0, 1fr);
+    gap: 9px;
+  }
+  .provider-model-draft__option--with-context .provider-model-draft__context-field {
+    grid-column: auto;
+  }
 }
 .provider-model-draft__empty {
   color: var(--fg-faint);
@@ -18456,6 +18207,9 @@ body > .mermaid-diagram--fullscreen {
   display: flex;
   align-items: center;
   gap: 6px;
+}
+.set-key .btn {
+  flex: 0 0 auto;
 }
 .set-rules {
   margin-bottom: 10px;
@@ -21458,15 +21212,6 @@ body > .mermaid-diagram--fullscreen {
   .provider-access-card__actions {
     flex-wrap: wrap;
   }
-  .provider-quick-setup__actions {
-    flex-direction: column-reverse;
-  }
-  .provider-quick-setup__actions .btn {
-    width: 100%;
-  }
-  .provider-featured-grid {
-    grid-template-columns: 1fr;
-  }
   .provider-profile-row {
     grid-template-columns: repeat(2, minmax(0, 1fr));
     grid-template-areas:
@@ -22980,10 +22725,8 @@ body > .mermaid-diagram--fullscreen {
   transition: opacity var(--dur-base) ease;
 }
 
-/* The image viewer is an app-level fullscreen surface. Hide the custom
-/* The image viewer is an app-level fullscreen surface. Hide the custom
-   Windows caption controls while it is open so the preview owns the only
-   visible close affordance; native shortcuts such as Alt+F4 remain intact. */
+/* Full-window image previews own their close affordance. Management pages
+   reserve caption space and retain native window controls. */
 .app--windows-frameless:has(.image-viewer-backdrop) > .windows-window-controls {
   opacity: 0;
   visibility: hidden;
@@ -23876,20 +23619,13 @@ body > .mermaid-diagram--fullscreen {
   background: var(--button-bg);
 }
 
-/* ── Topic bar "More" overflow menu ──────────────────────────────── */
-.topicbar__more {
-  position: relative;
-  display: inline-flex;
-}
-
-/* Borderless icon-only entries: file opener, More menu, workspace toggle,
-/* Borderless icon-only entries: file opener, More menu, workspace toggle,
-   and the utility (search) button. Default state has no background/border —
+/* Borderless icon-only entries: file opener, session actions, workspace toggle,
+/* Borderless icon-only entries: file opener, session actions, workspace toggle,
+   and search. Default state has no background/border —
    hover/focus still highlight so the controls stay discoverable. */
 .topicbar__actions .external-opener,
 .topicbar__actions .external-opener__primary,
 .topicbar__actions .external-opener__menu-trigger,
-.topicbar__actions .topicbar__more .topicbar__action-btn,
 .topicbar__actions .topicbar__chrome-btn,
 .topicbar__actions .topicbar__action-btn--utility {
   border: none !important;
@@ -23901,8 +23637,6 @@ body > .mermaid-diagram--fullscreen {
   border-left: none !important;
 }
 
-.topicbar__actions .topicbar__more .topicbar__action-btn:hover:not(:disabled),
-.topicbar__actions .topicbar__more .topicbar__action-btn:focus-visible:not(:disabled),
 .topicbar__actions .external-opener__primary:hover:not(:disabled),
 .topicbar__actions .external-opener__primary:focus-visible:not(:disabled),
 .topicbar__actions .external-opener__menu-trigger:hover:not(:disabled),
@@ -25290,22 +25024,6 @@ body > .mermaid-diagram--fullscreen {
   border-radius: 5px;
   background: color-mix(in srgb, var(--project-accent, var(--accent)) 11%, transparent);
   color: color-mix(in srgb, var(--project-accent, var(--accent)) 72%, var(--fg-dim));
-  font-size: 10.5px;
-  font-weight: 620;
-  line-height: 1;
-  white-space: nowrap;
-}
-
-.project-tree__topic-recovery-copies {
-  flex: 0 0 auto;
-  height: 17px;
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  padding: 0 5px;
-  border-radius: 5px;
-  background: color-mix(in srgb, var(--fg-faint) 10%, transparent);
-  color: var(--fg-faint);
   font-size: 10.5px;
   font-weight: 620;
   line-height: 1;
@@ -27800,15 +27518,17 @@ body > .mermaid-diagram--fullscreen {
 }
 
 /* Respect the OS reduced-motion preference: squash all animations and force
-/* Respect the OS reduced-motion preference: squash all animations and force
-   instant scrolling so the UI feels immediate rather than web-like. */
+   instant scrolling so the UI feels immediate rather than web-like. Transitions
+   go to `none`, not 0.01ms: a near-zero `transition: all` still starts from the
+   old value, so transform/padding writes stay invisible to same-frame geometry
+   reads and the transcript scroll guards compound their compensation. */
 @media (prefers-reduced-motion: reduce) {
   *,
   *::before,
   *::after {
     animation-duration: 0.01ms !important;
     animation-iteration-count: 1 !important;
-    transition-duration: 0.01ms !important;
+    transition: none !important;
     scroll-behavior: auto !important;
   }
 }
@@ -29827,7 +29547,7 @@ body > .mermaid-diagram--fullscreen {
   border-radius: 10px;
 }
 
-:root[data-theme-style] .composer__btn--send {
+:root[data-theme-style] .composer__btn--send:not(:disabled) {
   color: var(--accent-fg);
   background: linear-gradient(120deg, var(--accent), var(--accent-strong));
   box-shadow: 0 6px 16px -8px var(--accent);
@@ -30219,7 +29939,7 @@ body > .mermaid-diagram--fullscreen {
 :root[data-theme-style] .settings-subtab--active,
 :root[data-theme-style] .memory-suggestion-tab--active,
 :root[data-theme-style] .set-seg__btn--on,
-:root[data-theme-style] .provider-add-segmented__item--active,
+:root[data-theme-style] .provider-add-segmented__item[aria-selected="true"],
 :root[data-theme-style] .cap-tab--active {
   background: var(--bg-elev);
   color: var(--accent);
@@ -30229,7 +29949,6 @@ body > .mermaid-diagram--fullscreen {
 :root[data-theme-style] .prov-card,
 :root[data-theme-style] .provider-add-panel,
 :root[data-theme-style] .provider-access-card,
-:root[data-theme-style] .provider-template-card,
 :root[data-theme-style] .provider-editor,
 :root[data-theme-style] .set-rules-grid .set-rules {
   border-color: var(--border);
@@ -30238,11 +29957,6 @@ body > .mermaid-diagram--fullscreen {
   box-shadow: var(--app-graphite-shadow);
 }
 
-:root[data-theme-style] .provider-template-card--active {
-  border-color: color-mix(in srgb, var(--accent) 42%, var(--border));
-  background: var(--accent-soft);
-  box-shadow: inset 3px 0 0 var(--accent);
-}
 
 :root[data-theme-style] .sidebar-resizer::after {
   background: var(--border-soft);
@@ -32285,8 +31999,7 @@ body > .mermaid-diagram--fullscreen {
   display: none;
 }
 
-.app--creation .settings-field,
-:root[data-theme-style] .app--creation .settings-field {
+:where(.app--creation) .settings-field {
   grid-template-columns: minmax(150px, 200px) minmax(260px, 1fr);
   gap: 18px;
   padding: 10px 0;
@@ -32294,15 +32007,13 @@ body > .mermaid-diagram--fullscreen {
 }
 
 /* 机器人详情卡片内 settings-field 不受 Creation 全局覆盖 — 保持紧凑布局（仅复位溢出相关的 grid 属性） */
-.app--creation .bot-detail-card .settings-field,
-:root[data-theme-style] .app--creation .bot-detail-card .settings-field {
+:where(.app--creation) .bot-detail-card .settings-field {
   grid-template-columns: minmax(112px, 138px) minmax(0, 1fr);
   gap: 12px;
 }
 
 @media (max-width: 980px) {
-  .app--creation .bot-detail-card .settings-field,
-  :root[data-theme-style] .app--creation .bot-detail-card .settings-field {
+  :where(.app--creation) .bot-detail-card .settings-field {
     grid-template-columns: 1fr;
     gap: 8px;
   }
@@ -32525,8 +32236,7 @@ body > .mermaid-diagram--fullscreen {
     padding: 24px 22px;
   }
 
-  .app--creation .settings-field,
-  :root[data-theme-style] .app--creation .settings-field {
+  :where(.app--creation) .settings-field {
     grid-template-columns: 1fr;
     gap: 8px;
   }
@@ -32799,14 +32509,14 @@ body > .mermaid-diagram--fullscreen {
   transition: padding 0.4s cubic-bezier(0.22, 1, 0.36, 1);
 }
 
-/* Empty Creation: headline + composer share one footer stack, centered in chat. */
-.app--creation .chat-pane--creation-empty {
+/* Empty session: Creation and Workbench share a centered headline/composer stack. */
+:is(.app--creation, .app--workbench) .chat-pane--creation-empty {
   --creation-hero-col: min(100%, 720px);
   --creation-hero-inline: clamp(16px, 4vw, 56px);
   --creation-hero-stack-gap: clamp(14px, 2.2vh, 22px);
 }
 
-.app--creation .chat-pane--creation-empty > .main {
+:is(.app--creation, .app--workbench) .chat-pane--creation-empty > .main {
   flex: 0 0 0;
   height: 0;
   min-height: 0;
@@ -32814,7 +32524,7 @@ body > .mermaid-diagram--fullscreen {
   pointer-events: none;
 }
 
-.app--creation .chat-pane--creation-empty > .footer {
+:is(.app--creation, .app--workbench) .chat-pane--creation-empty > .footer {
   flex: 1 1 auto;
   min-height: 0;
   display: flex;
@@ -32826,7 +32536,7 @@ body > .mermaid-diagram--fullscreen {
   border-top: 0;
 }
 
-.app--creation .composer-decision-host--creation-hero {
+:is(.app--creation, .app--workbench) .composer-decision-host--creation-hero {
   display: flex;
   flex-direction: column;
   align-items: stretch;
@@ -32836,12 +32546,12 @@ body > .mermaid-diagram--fullscreen {
   margin-inline: auto;
 }
 
-.app--creation .composer-decision-host--creation-hero .welcome-creation__headline {
+:is(.app--creation, .app--workbench) .composer-decision-host--creation-hero .welcome-creation__headline {
   width: 100%;
   margin: 0;
 }
 
-.app--creation .composer-decision-host--creation-hero .composer-wrap {
+:is(.app--creation, .app--workbench) .composer-decision-host--creation-hero .composer-wrap {
   width: 100%;
   max-width: none;
   margin-inline: 0;
@@ -33024,7 +32734,6 @@ body > .mermaid-diagram--fullscreen {
 
 .app--creation .composer-card::before,
 :root[data-theme-style] .app--creation .composer-card::before {
-  --creation-run-angle: 0deg;
   content: "";
   position: absolute;
   inset: -1px;
@@ -33113,53 +32822,13 @@ body > .mermaid-diagram--fullscreen {
 
 .app--creation .composer-card--running::before,
 :root[data-theme-style] .app--creation .composer-card--running::before {
-  opacity: 1;
-  background: conic-gradient(
-    from var(--creation-run-angle),
-    transparent 0deg,
-    transparent 42deg,
-    color-mix(in srgb, var(--accent) 28%, transparent) 62deg,
-    color-mix(in srgb, var(--accent) 96%, #fff 16%) 82deg,
-    color-mix(in srgb, var(--accent) 28%, transparent) 104deg,
-    transparent 126deg,
-    transparent 220deg,
-    color-mix(in srgb, var(--accent) 24%, transparent) 238deg,
-    color-mix(in srgb, var(--accent) 82%, #fff 14%) 258deg,
-    color-mix(in srgb, var(--accent) 24%, transparent) 280deg,
-    transparent 304deg,
-    transparent 360deg
-  );
-  filter: drop-shadow(0 0 12px color-mix(in srgb, var(--accent) 52%, transparent));
-  animation: creation-composer-border-run 3.2s linear infinite;
-}
-
-@property --creation-run-angle {
-  syntax: "<angle>";
-  inherits: false;
-  initial-value: 0deg;
+  opacity: 0;
 }
 
 @property --creation-hover-angle {
   syntax: "<angle>";
   inherits: false;
   initial-value: 0deg;
-}
-
-@keyframes creation-composer-border-run {
-  0% {
-    --creation-run-angle: 0deg;
-    opacity: 0.76;
-  }
-  42% {
-    opacity: 1;
-  }
-  58% {
-    opacity: 0.88;
-  }
-  100% {
-    --creation-run-angle: 360deg;
-    opacity: 0.76;
-  }
 }
 
 @keyframes creation-composer-border-settle {
@@ -33271,8 +32940,8 @@ body > .mermaid-diagram--fullscreen {
   border-radius: 999px;
 }
 
-.app--creation .composer__btn--send,
-:root[data-theme-style] .app--creation .composer__btn--send {
+.app--creation .composer__btn--send:not(:disabled),
+:root[data-theme-style] .app--creation .composer__btn--send:not(:disabled) {
   background: color-mix(in srgb, var(--accent) 90%, #fff 6%);
   color: #fff;
   box-shadow: 0 4px 10px color-mix(in srgb, var(--accent) 12%, transparent);
@@ -33299,7 +32968,7 @@ body > .mermaid-diagram--fullscreen {
   background: color-mix(in srgb, var(--accent) 18%, var(--bg-elev));
 }
 
-:root[data-theme="dark"][data-theme-style] .app--creation .composer__btn--send {
+:root[data-theme="dark"][data-theme-style] .app--creation .composer__btn--send:not(:disabled) {
   background: color-mix(in srgb, var(--accent) 56%, var(--bg-elev) 44%);
   color: color-mix(in srgb, #fff 88%, var(--accent) 12%);
   box-shadow: 0 3px 8px color-mix(in srgb, var(--accent) 10%, transparent);
@@ -33310,7 +32979,7 @@ body > .mermaid-diagram--fullscreen {
 }
 
 @media (prefers-color-scheme: dark) {
-  :root[data-theme-style]:not([data-theme]) .app--creation .composer__btn--send {
+  :root[data-theme-style]:not([data-theme]) .app--creation .composer__btn--send:not(:disabled) {
     background: color-mix(in srgb, var(--accent) 56%, var(--bg-elev) 44%);
     color: color-mix(in srgb, #fff 88%, var(--accent) 12%);
     box-shadow: 0 3px 8px color-mix(in srgb, var(--accent) 10%, transparent);
@@ -33622,88 +33291,61 @@ body > .mermaid-diagram--fullscreen {
 
 /* —— Creation 上下文窗口环形进度 —— */
 
-.context-ring {
-  display: none;
-}
-.app--creation .context-ring,
-:root[data-theme-style] .app--creation .context-ring {
+.context-ring,
+:root[data-theme-style] .context-ring {
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  width: 22px;
-  height: 22px;
+  width: auto;
+  min-width: 30px;
+  height: 30px;
   padding: 0;
   border: none;
   background: transparent;
   cursor: pointer;
-  border-radius: 50%;
+  border-radius: 6px;
   flex-shrink: 0;
-  margin-right: 10px;
+  margin-right: 8px;
+  gap: 6px;
   transition: background 0.16s var(--ease-out);
 }
-.app--creation .context-ring:hover,
-:root[data-theme-style] .app--creation .context-ring:hover {
+.context-ring:hover,
+:root[data-theme-style] .context-ring:hover {
   background: color-mix(in srgb, var(--fg-faint) 8%, transparent);
 }
-.app--creation .context-ring__svg {
+.context-ring__svg {
   display: block;
-  width: 20px;
-  height: 20px;
+  width: 18px;
+  height: 18px;
 }
-.app--creation .context-ring__track {
-  stroke: color-mix(in srgb, var(--fg-faint) 18%, transparent);
+.context-ring__track {
+  stroke: color-mix(in srgb, var(--context-ring-color, var(--fg-faint)) 25%, transparent);
 }
-.app--creation .context-ring__arc {
+.context-ring--good { --context-ring-color: var(--ok); }
+.context-ring--notice { --context-ring-color: var(--warn); }
+.context-ring--warn { --context-ring-color: var(--err); }
+.context-ring__arc {
   transition: stroke-dashoffset 0.4s var(--ease-out), stroke 0.4s var(--ease-out);
 }
-.app--creation .context-ring--good .context-ring__arc {
-  stroke: var(--accent);
+.context-ring--good .context-ring__arc {
+  stroke: var(--ok);
 }
-.app--creation .context-ring--notice .context-ring__arc {
+.context-ring--notice .context-ring__arc {
   stroke: var(--warn);
 }
-.app--creation .context-ring--warn .context-ring__arc {
+.context-ring--warn .context-ring__arc {
   stroke: var(--err);
 }
 
 /* popover 卡片 —— 对齐 context-panel__capacity-card 风格（portal 到 body，无 .app--creation 前缀） */
 /*
-/*
- * NOTE (font-scale): this popover is portaled to <body>, so it has no
- * .app--creation prefix, yet it is ONLY rendered in creation layout
- * (Composer gates it behind showContextWindowRing = sidebarCreation =
- * desktopLayoutStyle === "creation"). Font sizes here intentionally use
- * calc(<px> * var(--font-scale)) to match the rest of creation and follow
+ * NOTE (font-scale): this shared popover is portaled to <body>, so it has no
+ * layout-specific prefix. Font sizes here intentionally use
+ * calc(<px> * var(--font-scale)) to match the composer and follow
  * the interface text-size setting. Keep the calc(); do NOT revert to bare px.
  * The typography-overflow-contract test asserts no bare-px font-size remains
  * in .context-ring-popover rules, so a plain "12px" here will fail CI.
  */
-.context-ring-popover,
-:root[data-theme-style] .context-ring-popover {
-  min-width: 220px;
-  max-width: 270px;
-  padding: 0;
-  border-radius: 8px;
-  border: 1px solid color-mix(in srgb, var(--accent) 12%, var(--border-soft));
-  background:
-    linear-gradient(180deg, color-mix(in srgb, var(--accent) 5%, var(--bg)) 0%, var(--bg) 100%);
-  box-shadow: 0 14px 34px rgba(0, 0, 0, 0.28);
-  font-size: calc(12px * var(--font-scale));
-  line-height: 1.5;
-}
-/* 警告/注意态 tinted border + gradient */
-.context-ring-popover--notice,
-:root[data-theme-style] .context-ring-popover--notice {
-  border-color: color-mix(in srgb, var(--warn) 26%, var(--border-soft));
-  background:
-    linear-gradient(180deg, color-mix(in srgb, var(--warn) 6%, var(--bg)) 0%, var(--bg) 100%);
-}
-.context-ring-popover--warn,
-:root[data-theme-style] .context-ring-popover--warn {
-  border-color: color-mix(in srgb, var(--err) 28%, var(--border-soft));
-  background:
-    linear-gradient(180deg, color-mix(in srgb, var(--err) 6%, var(--bg)) 0%, var(--bg) 100%);
-}
 .context-ring-popover__inner {
   padding: 10px;
 }
@@ -33965,8 +33607,10 @@ body > .mermaid-diagram--fullscreen {
 
 .app--creation .sidebar-feature-zone__item:hover,
 .app--creation .sidebar-feature-zone__item:focus-visible,
+.app--creation .sidebar-feature-zone__item--active,
 :root[data-theme-style] .app--creation .sidebar-feature-zone__item:hover,
-:root[data-theme-style] .app--creation .sidebar-feature-zone__item:focus-visible {
+:root[data-theme-style] .app--creation .sidebar-feature-zone__item:focus-visible,
+:root[data-theme-style] .app--creation .sidebar-feature-zone__item--active {
   border-color: color-mix(in srgb, var(--accent) 12%, transparent);
   background: color-mix(in srgb, var(--accent) 6%, transparent);
   color: var(--fg);
@@ -35342,7 +34986,7 @@ body > .mermaid-diagram--fullscreen {
   overflow: visible;
 }
 
-.app--creation .welcome-creation__headline {
+:is(.app--creation, .app--workbench) .welcome-creation__headline {
   display: block;
   margin: 0;
   width: 100%;
@@ -35368,15 +35012,41 @@ body > .mermaid-diagram--fullscreen {
 }
 
 @media (max-height: 640px) {
-  .app--creation .welcome-creation__headline {
+  :is(.app--creation, .app--workbench) .welcome-creation__headline {
     font-size: clamp(calc(24px * var(--font-scale)), 3.6vw, calc(36px * var(--font-scale)));
   }
 }
 
 @media (max-width: 760px) {
-  .app--creation .chat-pane--creation-empty {
+  :is(.app--creation, .app--workbench) .chat-pane--creation-empty {
     --creation-hero-col: min(100%, 520px);
   }
+}
+
+/* Workbench welcome responds to the chat column, including open side docks. */
+.app--workbench .chat-pane--creation-empty {
+  container: workbench-welcome / inline-size;
+}
+
+.app--workbench .chat-pane--creation-empty > .footer {
+  padding: clamp(16px, 4vh, 32px) clamp(16px, 5cqw, 56px);
+  justify-content: flex-start;
+}
+
+.app--workbench .composer-decision-host--creation-hero {
+  flex: 0 0 auto;
+  width: min(100%, 720px);
+  max-width: 720px;
+  margin-block: auto;
+  gap: clamp(18px, 3cqw, 28px);
+}
+
+.app--workbench .composer-decision-host--creation-hero .welcome-creation__headline {
+  font-size: clamp(calc(24px * var(--font-scale)), 5cqw, calc(48px * var(--font-scale)));
+  line-height: 1.25;
+  letter-spacing: -0.035em;
+  text-wrap: balance;
+  overflow-wrap: anywhere;
 }
 
 .app--creation .context-panel__body {
@@ -36405,6 +36075,39 @@ body > .mermaid-diagram--fullscreen {
   pointer-events: none;
 }
 
+/* macOS keeps dock tabs and the fixed workspace toggle in one title row. The
+   toggle stays anchored to the window edge while this row reserves its hit
+   area; the four tabs share the remaining width instead of sliding under it. */
+.app--darwin.app--workbench .workbench-dock__tools,
+:root[data-theme-style] .app--darwin.app--workbench .workbench-dock__tools {
+  padding-right: 48px;
+}
+
+.app--darwin.app--workbench .workbench-dock__tabs,
+:root[data-theme-style] .app--darwin.app--workbench .workbench-dock__tabs {
+  flex: 1 1 auto;
+  width: 100%;
+  min-width: 0;
+  gap: 2px;
+}
+
+.app--darwin.app--workbench .workbench-dock__tab,
+:root[data-theme-style] .app--darwin.app--workbench .workbench-dock__tab {
+  flex: 1 1 0;
+  min-width: 0;
+  max-width: none;
+  padding: 0 5px;
+  gap: 4px;
+  justify-content: center;
+}
+
+.app--darwin.app--workbench .workbench-dock__tab-label,
+:root[data-theme-style] .app--darwin.app--workbench .workbench-dock__tab-label {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
 /* Workbench keeps its workspace toggle in the fixed top-right dock-toggle
 /* Workbench keeps its workspace toggle in the fixed top-right dock-toggle
    instead of an AppChrome rail; shift it left of the Windows caption strip
@@ -36497,6 +36200,8 @@ body > .mermaid-diagram--fullscreen {
     grid-column: 1 !important;
     min-width: 0;
   }
+
+
 }
 
 /* ============================================================================
@@ -37021,7 +36726,7 @@ body > .mermaid-diagram--fullscreen {
 }
 
 /* Home: child elements — preserve original colors */
-:root[data-theme-pack][data-theme-has-bg="true"][data-theme-scene="home"] .app:not(.app--creation) .composer__btn--send {
+:root[data-theme-pack][data-theme-has-bg="true"][data-theme-scene="home"] .app:not(.app--creation) .composer__btn--send:not(:disabled) {
   background: color-mix(in srgb, var(--control-primary-bg) var(--theme-pane-child-pct, 80%), transparent) !important;
 }
 :root[data-theme-pack][data-theme-has-bg="true"][data-theme-scene="home"] .app:not(.app--creation) .composer__btn--stop {
@@ -37146,7 +36851,7 @@ body > .mermaid-diagram--fullscreen {
 }
 
 /* Task: child elements — preserve original colors */
-:root[data-theme-pack][data-theme-has-bg="true"][data-theme-scene="task"] .app:not(.app--creation) .composer__btn--send {
+:root[data-theme-pack][data-theme-has-bg="true"][data-theme-scene="task"] .app:not(.app--creation) .composer__btn--send:not(:disabled) {
   background: color-mix(in srgb, var(--control-primary-bg) var(--theme-pane-task-child-pct, 98%), transparent) !important;
 }
 :root[data-theme-pack][data-theme-has-bg="true"][data-theme-scene="task"] .app:not(.app--creation) .composer__btn--stop {
@@ -37270,7 +36975,7 @@ body > .mermaid-diagram--fullscreen {
 }
 
 /* Fallback: child elements — preserve original colors */
-:root[data-theme-pack][data-theme-has-bg="true"] .app:not(.app--creation) .composer__btn--send {
+:root[data-theme-pack][data-theme-has-bg="true"] .app:not(.app--creation) .composer__btn--send:not(:disabled) {
   background: color-mix(in srgb, var(--control-primary-bg) 80%, transparent) !important;
 }
 :root[data-theme-pack][data-theme-has-bg="true"] .app:not(.app--creation) .composer__btn--stop {
@@ -37713,14 +37418,9 @@ body > .mermaid-diagram--fullscreen {
 }
 .appearance-overview__segmented {
   justify-self: end;
-  width: min(100%, var(--appearance-segmented-width));
+  width: 424px;
+  max-width: 100%;
   min-width: 0;
-}
-.appearance-overview__segmented--theme {
-  --appearance-segmented-width: 300px;
-}
-.appearance-overview__segmented--text-size {
-  --appearance-segmented-width: 420px;
 }
 .appearance-overview__segmented .set-seg__btn {
   flex: 1;
@@ -38980,8 +38680,7 @@ body > .mermaid-diagram--fullscreen {
 .floating-menu,
 .mem-ws-select__menu,
 .menu,
-.sound-select__menu,
-.settings-model-picker__menu,
+.settings-select-menu,
 .external-opener__menu,
 .context-menu,
 .theme-gallery__menu,
@@ -38990,8 +38689,7 @@ body > .mermaid-diagram--fullscreen {
 .theme-editor__live,
 .theme-gallery__editor > .theme-editor__actions,
 .provider-access-more__menu,
-.topicbar__more-menu,
-.topicbar__more-export-menu,
+.topicbar__export-menu,
 .heartbeat-filter-menu,
 .heartbeat-project-menu,
 .heartbeat-task-menu {
@@ -40053,6 +39751,60 @@ body > .mermaid-diagram--fullscreen {
 }
 
 /* ── Remote session surface (remote tab content area) ─────────────── */
+.session-recovery {
+  flex: 0 0 auto;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 12px;
+  padding: 16px 28px;
+  border-bottom: 1px solid color-mix(in srgb, var(--accent) 24%, var(--border-soft));
+  background: color-mix(in srgb, var(--accent) 7%, var(--chat-bg));
+  color: var(--accent);
+}
+.session-recovery__copy {
+  flex: 1 1 180px;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+.session-recovery__copy strong { font-size: var(--text-lg); }
+.session-recovery__copy span { color: var(--fg-dim); font-size: var(--text-sm); overflow-wrap: anywhere; }
+.session-recovery > .btn { flex: 0 0 auto; min-height: 38px; padding-inline: 16px; font-size: var(--text-base); }
+.session-recovery > .btn--ghost { background: transparent; border-color: transparent; box-shadow: none; }
+.app .session-recovery ~ .footer { padding: 24px 28px 32px; }
+.composer-toolbar-send--unavailable { flex-direction: column; align-items: flex-end; }
+.composer-toolbar-send__hint { color: var(--fg-dim); font-size: var(--text-xs); white-space: nowrap; }
+.session-recovery__detail {
+  flex: 1 0 100%;
+  min-width: 0;
+  max-height: 160px;
+  margin: 0;
+  overflow: auto;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  color: var(--fg-dim);
+  font-size: var(--text-sm);
+}
+.session-recovery--loading { color: var(--fg-dim); background: var(--chat-bg); }
+.session-recovery-placeholder {
+  display: flex;
+  flex: 1;
+  min-height: 100%;
+  align-items: center;
+  justify-content: center;
+  flex-direction: column;
+  gap: 12px;
+  padding: 24px;
+  color: var(--fg-faint);
+  font-size: var(--text-base);
+  text-align: center;
+}
+.session-recovery__spinner { animation: remote-surface-spin 1s linear infinite; }
+@media (prefers-reduced-motion: reduce) {
+  .session-recovery__spinner { animation: none; }
+}
 .remote-surface {
   display: flex;
   flex-direction: column;
@@ -40061,25 +39813,12 @@ body > .mermaid-diagram--fullscreen {
   padding: 16px;
   overflow-y: auto;
 }
-.remote-surface--waiting,
-.remote-surface--warning,
-.remote-surface--error,
-.remote-surface--disconnected {
-  align-items: center;
-  justify-content: center;
-  gap: 10px;
-  color: var(--fg-dim);
-  font-size: var(--text-md);
-}
-.remote-surface--warning { color: var(--warn, var(--fg)); }
-.remote-surface--error { color: var(--danger, var(--fg)); }
 .remote-surface__detail {
   max-width: 60%;
   color: var(--fg-faint);
   font-size: var(--text-sm);
   overflow-wrap: anywhere;
 }
-.remote-surface__spinner { animation: remote-surface-spin 1s linear infinite; }
 @keyframes remote-surface-spin { to { transform: rotate(360deg); } }
 .remote-surface__approval,
 .remote-surface__ask {
@@ -40142,3 +39881,181 @@ body > .mermaid-diagram--fullscreen {
 .tool__mcp-app-open:hover {
   filter: brightness(0.95);
 }
+
+/* Shared composer toolbar: context and permissions left, model controls right. */
+:root[data-theme-style] .composer-meta.composer-meta--unified .composer-meta__params,
+.composer-meta.composer-meta--unified .composer-meta__params {
+  display: flex;
+  flex-wrap: wrap;
+  width: 100%;
+  min-width: 0;
+  gap: 6px;
+  align-items: center;
+}
+.composer-meta--unified { container-type: inline-size; }
+:root[data-theme-style] .composer-meta--unified .composer-meta__control,
+.composer-meta--unified .composer-meta__control {
+  display: inline-flex;
+  flex: 0 0 auto;
+  width: auto;
+  min-width: 0;
+  max-width: none;
+}
+.composer-meta--unified .composer-meta__control--content { order: 0; }
+.composer-meta--unified .composer-meta__control--approval { order: 1; }
+.composer-meta--unified .composer-meta__control--intent { order: 2; }
+.composer-meta--unified .composer-meta__control--delivery { order: 3; }
+:root[data-theme-style] .composer-meta--unified .composer-meta__control--model,
+.composer-meta--unified .composer-meta__control--model {
+  order: 4;
+  flex: 0 1 auto;
+  max-width: 48%;
+}
+.composer-toolbar-send { order: 5; display: flex; gap: 6px; flex-shrink: 0; margin-left: auto; }
+:root[data-theme-style] .composer-meta--unified .modelsw__trigger,
+:root[data-theme-style] .composer-meta--unified .composer-content-trigger,
+.composer-meta--unified .modelsw__trigger,
+.composer-meta--unified .composer-content-trigger,
+.composer-choice {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  padding: 6px;
+  border: 0;
+  background: transparent;
+  box-shadow: none;
+  color: var(--fg);
+  font: inherit;
+  cursor: pointer;
+}
+.composer-choice { white-space: nowrap; border-radius: 6px; }
+.composer-choice:hover { background: var(--bg-soft); }
+.composer-choice:disabled { opacity: 0.5; cursor: default; }
+.composer-choice--warning { color: var(--accent); }
+.composer-choice:focus-visible, .context-ring:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+.composer-meta--unified .modelsw { min-width: 0; }
+.composer-meta--unified .composer-effort-control { flex: 0 0 auto; }
+.composer-meta--unified .composer-meta__control--model { gap: 4px; }
+.composer-meta--unified .context-ring__svg { transform: translateY(1px); }
+:root[data-theme-style] .composer-meta--unified .context-ring,
+.composer-meta--unified .context-ring { margin-right: 0; }
+:root[data-theme-style] .composer-meta--unified .composer-meta__control--approval,
+.composer-meta--unified .composer-meta__control--approval { margin-left: 0; }
+:root[data-theme-style] .composer-meta--unified .composer-meta__control--model { margin-left: auto; }
+.composer-meta--unified .modelsw__kind,
+.composer-meta--unified .context-ring__percent { display: none; }
+.composer-meta--unified .composer-toolbar-send { margin-left: 2px; }
+.composer-meta--unified .modelsw__label { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.modelsw__detail, .context-ring__percent { color: var(--fg-dim); }
+.context-ring__percent { font-size: calc(12px * var(--font-scale)); }
+@container (max-width: 650px) {
+  :root[data-theme-style] .composer-meta--unified .composer-meta__control--model,
+  .composer-meta--unified .composer-meta__control--model { max-width: 55%; flex: 0 1 auto; }
+  .composer-meta--unified .modelsw__kind { display: none; }
+}
+@container (max-width: 520px) {
+  :root[data-theme-style] .composer-meta.composer-meta--unified .composer-meta__params,
+  .composer-meta.composer-meta--unified .composer-meta__params {
+    flex-wrap: nowrap;
+    gap: 4px;
+  }
+  .composer-meta--unified .composer-meta__control--model { gap: 4px; }
+  .composer-meta--unified .composer-choice > span,
+  .composer-meta--unified .composer-task-mode-trigger__value,
+  .composer-meta--unified .modelsw__label,
+  .composer-meta--unified .modelsw__trigger > svg:last-child,
+  .composer-meta--unified .context-ring__percent { display: none; }
+  :root[data-theme-style] .composer-meta--unified .composer-meta__control--model {
+    flex: 0 0 auto;
+    max-width: none;
+  }
+  .composer-meta--unified .modelsw__kind { display: inline-flex; }
+  .composer-meta--unified .composer-effort-control .composer-choice > svg:last-child,
+  .composer-meta--unified .composer-meta__control--approval .composer-choice > svg:last-child { display: none; }
+  .composer-meta--unified .composer-toolbar-send { margin-left: 0; }
+}
+
+/* Composer popovers share one surface and row rhythm across all menus. */
+:root .composer-menu-surface,
+:root[data-theme-style] .composer-menu-surface {
+  --composer-menu-radius: 20px;
+  --composer-menu-row-radius: 18px;
+  --composer-menu-row-height: 34px;
+  width: max-content;
+  min-width: min(128px, calc(100vw - 16px));
+  max-width: min(320px, calc(100vw - 16px));
+  padding: 10px 6px;
+  border: 1px solid var(--border);
+  border-radius: var(--composer-menu-radius);
+  background: var(--bg-elev);
+  box-shadow: 0 14px 34px rgba(0, 0, 0, 0.28);
+  color: var(--fg);
+  font-size: calc(14px * var(--font-scale));
+  line-height: 22px;
+}
+:root .composer-menu-surface :is(.composer-access-menu__item, .modelsw__item) {
+  height: auto;
+  min-height: var(--composer-menu-row-height);
+  padding: 6px 10px;
+  gap: 10px;
+  border-radius: var(--composer-menu-row-radius);
+  color: var(--fg);
+  font-size: inherit;
+  font-weight: 400;
+  line-height: 22px;
+}
+:root .composer-menu-surface .composer-access-menu__title {
+  font-size: inherit;
+  font-weight: 400;
+  line-height: 22px;
+}
+:root .composer-menu-surface :is(.composer-access-menu__label, .modelsw__group-label) {
+  padding: 2px 10px 6px;
+  color: var(--fg-faint);
+  font-size: calc(13px * var(--font-scale));
+  line-height: 20px;
+  font-weight: 500;
+  text-transform: none;
+  letter-spacing: normal;
+}
+:root .composer-menu-surface .composer-access-menu__section { gap: 0; }
+:root .composer-menu-surface :is(.composer-access-menu__section + .composer-access-menu__section, .modelsw__group + .modelsw__group, .modelsw__manage) {
+  margin-top: 12px;
+  border-top: 0;
+}
+:root .composer-menu-surface .composer-access-menu__section + .composer-access-menu__section { padding-top: 0; }
+:root .composer-menu-surface :is(.composer-access-menu__desc, .modelsw__empty) {
+  font-size: calc(12px * var(--font-scale));
+  line-height: 18px;
+  color: var(--fg-dim);
+}
+:root .composer-menu-surface :is(.composer-access-menu__item, .modelsw__item):is(:hover, :focus-visible),
+:root .composer-menu-surface :is(.composer-access-menu__item--active, .modelsw__item--current) {
+  background: var(--bg-elev-2);
+  color: var(--fg);
+}
+:root .composer-menu-surface :is(.composer-access-menu__item, .modelsw__item):focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: -2px;
+}
+:root .composer-menu-surface button:disabled { opacity: 0.45; cursor: default; }
+:root .composer-menu-surface :is(.modelsw__check, .composer-intent-menu__check, .composer-access-menu__item > svg:last-child) { color: var(--accent); }
+:root .composer-menu-surface .modelsw__search {
+  min-height: 34px;
+  margin: 0 4px 12px;
+  padding: 6px 10px;
+  border-radius: 14px;
+}
+:root .composer-menu-surface .modelsw__search-input { font-size: inherit; }
+:root .composer-menu-surface .context-ring-popover__inner { padding: 6px 10px; }
+:root .composer-menu-surface.modelsw__menu { min-width: min(240px, calc(100vw - 16px)); }
+:root .composer-menu-surface.context-ring-popover { min-width: min(260px, calc(100vw - 16px)); }
+:root .composer-menu-surface .composer-access-menu__title { overflow-wrap: anywhere; }
+:root .composer-choice--permission-auto { color: var(--ok); }
+:root { --composer-permission-ask: #60a5fa; }
+:root[data-theme="light"] { --composer-permission-ask: #2563eb; }
+@media (prefers-color-scheme: light) {
+  :root:not([data-theme="dark"]) { --composer-permission-ask: #2563eb; }
+}
+:root .composer-choice--permission-ask { color: var(--composer-permission-ask); }
+:root .composer-choice--permission-yolo { color: var(--err); }

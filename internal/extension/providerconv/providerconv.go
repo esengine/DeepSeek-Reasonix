@@ -179,6 +179,7 @@ func DescriptorFromProtocol(d protocol.ProviderDescriptor) provider.Descriptor {
 		InputPerMillion:                d.InputPerMillion,
 		OutputPerMillion:               d.OutputPerMillion,
 		Vision:                         d.Vision,
+		InputModalities:                stringModalities(d.InputModalities),
 		Tools:                          d.Tools,
 		Reasoning:                      d.Reasoning,
 		Efforts:                        append([]string(nil), d.Efforts...),
@@ -187,6 +188,17 @@ func DescriptorFromProtocol(d protocol.ProviderDescriptor) provider.Descriptor {
 		ReasoningRoundTrip:             d.ReasoningRoundTrip,
 		WarnOnMissingToolCallReasoning: d.WarnOnMissingToolCallReasoning,
 	}
+}
+
+func stringModalities(values []string) []provider.ModelModality {
+	if values == nil {
+		return nil
+	}
+	out := make([]provider.ModelModality, 0, len(values))
+	for _, value := range values {
+		out = append(out, provider.ModelModality(value))
+	}
+	return out
 }
 
 // ChunkFromProtocol converts one inbound extension stream chunk. The protocol

@@ -5,6 +5,14 @@
 
 import type { HistoryMessage, HistoryToolCall } from "./types";
 
+// Soak tests need async hydration, but not simulated backend latency per cycle.
+// Geometry/browser fixtures keep their delayed expansion contract by default.
+export function benchHydrationDelay(search = window.location.search): number {
+  const params = new URLSearchParams(search);
+  return params.get("mock") === "bench" && params.get("bench") === "1"
+    && params.get("app-lifecycle-probe") === "1" && params.get("bench-hydration") === "soak" ? 0 : 1_500;
+}
+
 // ── Benchmark fixtures (?mock=bench, Phase F) ─────────────────────────────
 // Fixed diagnostic sessions for the real-DOM performance harness
 // (desktop/frontend/bench). Content is deterministic and generated once per
@@ -130,6 +138,23 @@ const benchGiantTurnHistory = (): HistoryMessage[] => {
   return benchToolTurn(1, 1000, "Single-turn sweep complete.");
 };
 
+const benchWindowedHistory = (): HistoryMessage[] => {
+  const messages: HistoryMessage[] = [];
+  for (let turn = 1; turn <= 1_000; turn += 1) {
+    messages.push(
+      { role: "user", content: `windowed turn ${turn}: verify the stable block anchor.` },
+      {
+        role: "assistant",
+        reasoning: turn === 950 ? Array.from({ length: 40 }, (_, line) => `Reasoning paragraph ${line + 1}: verify expanded cold history geometry.`).join("\n\n") : undefined,
+        content: turn % 25 === 0
+          ? `## Windowed turn ${turn}\n\n中文 English emoji ✅\n\n| turn | status |\n| ---: | --- |\n| ${turn} | stable |\n\n\`\`\`ts\nconst turn = ${turn};\n\`\`\``
+          : `Windowed result ${turn}: the block identity and native viewport geometry remain stable.`,
+      },
+    );
+  }
+  return messages;
+};
+
 const benchReportedLongTurnHistory = (): HistoryMessage[] => {
   // Sanitized reproduction of the reported shape: one user turn, 70 tool
   // results, and 44 separately measured assistant blocks. Keeping the height
@@ -176,11 +201,8 @@ const benchReportedLongTurnHistory = (): HistoryMessage[] => {
 };
 
 const benchGeometryContractHistory = (): HistoryMessage[] => {
-  // Sanitized WebView2 regression fixture shaped like the field report: about
-  // 229 virtual rows, exactly 31 completed reasoning bodies, mixed CJK/ASCII,
-  // code, answers, and tool cards. The hidden reasoning lengths deliberately
-  // span the old 96–3584px estimate range while every completed reasoning row
-  // initially renders as the same one-line summary.
+  // One semantic turn with many heterogeneous rows. This verifies that row
+  // density does not change the block-level anchoring and mounting contract.
   const messages: HistoryMessage[] = [
     { role: "user", content: "验证首次向上遍历未访问的折叠过程行，记录逐帧几何和滚动方向。" },
   ];
@@ -336,6 +358,8 @@ export function benchTopicHistory(topicId: string): HistoryMessage[] | undefined
       return benchFixture("small", benchSmallHistory);
     case "topic_bench_giant_turn":
       return benchFixture("giant", benchGiantTurnHistory);
+    case "topic_bench_windowed":
+      return benchFixture("windowed", benchWindowedHistory);
     case "topic_bench_reported_long_turn":
       return benchFixture("reported-long-turn", benchReportedLongTurnHistory);
     case "topic_bench_geometry_contract":

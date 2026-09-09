@@ -1,6 +1,9 @@
 package main
 
-import "reasonix/internal/control"
+import (
+	"reasonix/internal/agent"
+	"reasonix/internal/control"
+)
 
 // stubSessionAPI supplies port defaults for the test controllers that only
 // override the few methods their scenario exercises. Embedding the bare
@@ -11,5 +14,6 @@ type stubSessionAPI struct {
 	control.SessionAPI
 }
 
-func (stubSessionAPI) QualityFloor() string         { return control.QualityFloorStandard }
-func (stubSessionAPI) SetQualityFloor(string) error { return nil }
+func (stubSessionAPI) SessionHead() (agent.HeadRef, bool) { return agent.HeadRef{}, false }
+func (stubSessionAPI) QualityFloor() string               { return control.QualityFloorStandard }
+func (stubSessionAPI) SetQualityFloor(string) error       { return nil }

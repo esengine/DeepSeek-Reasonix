@@ -114,7 +114,7 @@ func (a *App) removeTopicRuntimeBindingsIfUnchanged(topicID string, captured []r
 	fallback.needs = len(captured) > 0 && len(a.tabs) == 0
 	dir, entries, activeID, version := a.saveTabsCollectLocked()
 	a.mu.Unlock()
-	a.saveTabsWrite(dir, entries, activeID, version)
+	_ = a.saveTabsWrite(dir, entries, activeID, version)
 	return fallback, true
 }
 

@@ -10,6 +10,12 @@ import (
 	"reasonix/internal/tool"
 )
 
+type governorProvider struct{ provider.Provider }
+
+func (p governorProvider) ReasoningCapability() provider.ReasoningCapability {
+	return provider.ReasoningOptions("", "low", "high")
+}
+
 func TestApplyGovernorStampsEligibilityWithoutEngagingByDefault(t *testing.T) {
 	a := &Agent{svc: agentServices{sink: &ebmSink{}}, turn: turnRuntime{lastReasoning: govReasoningThreshold}}
 	sample := evidence.OutcomeSample{}
@@ -28,7 +34,7 @@ func TestApplyGovernorEngagesAndExitsWhenEnabled(t *testing.T) {
 	defer func() { governorEnabled = old }()
 
 	sink := &ebmSink{}
-	a := &Agent{svc: agentServices{sink: sink}, turn: turnRuntime{lastReasoning: govReasoningThreshold}}
+	a := &Agent{svc: agentServices{sink: sink, prov: governorProvider{}}, turn: turnRuntime{lastReasoning: govReasoningThreshold}}
 
 	cheap := evidence.OutcomeSample{}
 	a.turn.lastReasoning = govReasoningThreshold - 1
@@ -98,7 +104,7 @@ func TestGovernorOverrideReachesProviderRequest(t *testing.T) {
 		{toolCallChunk("c1", "ask", `{"questions":["q":1]}`), expensive, {Type: provider.ChunkDone}},
 		{{Type: provider.ChunkText, Text: "done"}, {Type: provider.ChunkDone}},
 	}}
-	a := New(prov, reg, NewSession(""), Options{}, event.Discard)
+	a := New(governorProvider{prov}, reg, NewSession(""), Options{}, event.Discard)
 	if err := a.Run(context.Background(), "explore"); err != nil {
 		t.Fatalf("Run: %v", err)
 	}
@@ -123,5 +129,17 @@ func TestGovernorOverrideReachesProviderRequest(t *testing.T) {
 		if req.EffortOverride != "" {
 			t.Fatalf("baseline arm request %d carries override %q", i, req.EffortOverride)
 		}
+	}
+}
+
+func TestGovernorDoesNotInventEffortForUnknownProvider(t *testing.T) {
+	old := governorEnabled
+	governorEnabled = true
+	defer func() { governorEnabled = old }()
+	a := &Agent{svc: agentServices{sink: &ebmSink{}}, turn: turnRuntime{lastReasoning: govReasoningThreshold}}
+	sample := evidence.OutcomeSample{}
+	a.applyGovernor(&sample)
+	if a.governorOverride() != "" || sample.GovernorEngaged {
+		t.Fatal("unknown capability must not receive an automatic low override")
 	}
 }

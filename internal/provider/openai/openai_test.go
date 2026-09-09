@@ -963,12 +963,10 @@ func TestNormaliseUsageMiMoShape(t *testing.T) {
 	}
 }
 
-// TestBuildRequestDropsReasoningContent guards the cache/cost fix: an assistant
-// turn's reasoning_content is a response-only signal and must never be echoed
-// back in the outgoing request. DeepSeek otherwise counts it as paid prompt
-// input (~500 tok/turn on a reasoner chain). The session keeps it for
-// display/archive; the wire request must not carry it.
-func TestBuildRequestDropsReasoningOnPlainAssistantTurn(t *testing.T) {
+// TestBuildRequestReplaysReasoningOnPlainAssistantTurn guards the DeepSeek
+// replay contract: a reasoning-bearing assistant turn must keep its exact
+// reasoning_content in later requests even when it made no tool call.
+func TestBuildRequestReplaysReasoningOnPlainAssistantTurn(t *testing.T) {
 	c := &client{model: "deepseek-reasoner", deepseek: true}
 	req := c.buildRequest(provider.Request{
 		Messages: []provider.Message{
@@ -981,11 +979,11 @@ func TestBuildRequestDropsReasoningOnPlainAssistantTurn(t *testing.T) {
 	if err != nil {
 		t.Fatalf("marshal: %v", err)
 	}
-	if strings.Contains(string(b), "reasoning_content") {
-		t.Errorf("a no-tool-calls assistant turn must not carry reasoning_content: %s", b)
+	if !strings.Contains(string(b), "reasoning_content") {
+		t.Errorf("a reasoning-bearing assistant turn must carry reasoning_content: %s", b)
 	}
-	if strings.Contains(string(b), "SECRET-CHAIN-OF-THOUGHT") {
-		t.Errorf("the assistant chain-of-thought leaked into the request: %s", b)
+	if !strings.Contains(string(b), "SECRET-CHAIN-OF-THOUGHT") {
+		t.Errorf("the assistant chain-of-thought was dropped from the request: %s", b)
 	}
 	if !strings.Contains(string(b), "the answer") {
 		t.Errorf("assistant content was dropped along with reasoning: %s", b)
@@ -1114,17 +1112,12 @@ func TestNewDeepSeekV4FlashForwardsLowEffort(t *testing.T) {
 	}
 }
 
-func TestDeepSeekV4EffortAliasesSerializeAsHigh(t *testing.T) {
+func TestDeepSeekV4EffortAliasesRejected(t *testing.T) {
 	for _, model := range []string{"deepseek-v4-flash", "deepseek-v4-pro", OfficialDeepSeekVisionModel} {
 		for _, alias := range []string{"medium", "xhigh"} {
-			p, err := New(provider.Config{Name: "deepseek", BaseURL: "https://api.deepseek.com", Model: model, APIKey: "test", Extra: map[string]any{
-				"effort": alias, "reasoning_protocol": "deepseek",
-			}})
-			if err != nil {
-				t.Fatalf("%s/%s: %v", model, alias, err)
-			}
-			if got := p.(*client).buildRequest(provider.Request{}).ReasoningEffort; got != "high" {
-				t.Fatalf("%s/%s reasoning_effort = %q", model, alias, got)
+			_, err := New(provider.Config{BaseURL: "https://api.deepseek.com", Model: model, Extra: map[string]any{"effort": alias}})
+			if err == nil {
+				t.Fatalf("%s accepted undeclared %s", model, alias)
 			}
 		}
 	}
@@ -1641,11 +1634,9 @@ func TestNewThinkingConfigParsing(t *testing.T) {
 
 // TestBuildRequestDeepSeekDisabled covers both user-facing ways to turn
 // DeepSeek thinking off. Either input must route to thinking.type=disabled,
-// drop reasoning_effort, and keep the pre-fix tool-call history bytes: a
-// tool_calls turn with no reasoning omits the reasoning_content key entirely
-// (only thinking mode requires it), while reasoning left over from a
-// thinking-mode round still round-trips so the prompt-cache prefix of a mixed
-// thinking-on→off session stays stable.
+// drop reasoning_effort, and preserve provider-issued reasoning from earlier
+// assistant turns while still omitting an empty key for a reasoning-less tool
+// turn.
 func TestBuildRequestDeepSeekDisabled(t *testing.T) {
 	base := provider.Config{Name: "ds", BaseURL: "https://api.deepseek.com", Model: "deepseek-v4", APIKey: "k"}
 	for _, tc := range []struct {
@@ -1688,6 +1679,7 @@ func TestBuildRequestDeepSeekDisabled(t *testing.T) {
 						ID: "call_2", Name: "read_file", Arguments: `{"path":"go.mod"}`,
 					}}},
 					{Role: provider.RoleTool, ToolCallID: "call_2", Name: "read_file", Content: "module demo"},
+					{Role: provider.RoleAssistant, Content: "plain answer", ReasoningContent: "plain reasoning"},
 				},
 			})
 			if req.Thinking == nil || req.Thinking.Type != "disabled" {
@@ -1701,6 +1693,9 @@ func TestBuildRequestDeepSeekDisabled(t *testing.T) {
 			}
 			if rc := req.Messages[3].ReasoningContent; rc == nil || *rc != "from a thinking round" {
 				t.Fatalf("disabled mode must keep round-tripping thinking-round reasoning, got %v", rc)
+			}
+			if rc := req.Messages[5].ReasoningContent; rc == nil || *rc != "plain reasoning" {
+				t.Fatalf("disabled mode must keep round-tripping plain-turn reasoning, got %v", rc)
 			}
 		})
 	}
@@ -1793,7 +1788,7 @@ func TestNewReadsEffortFromConfig(t *testing.T) {
 		Name:    "mimo",
 		BaseURL: "https://api.example.com",
 		Model:   "mimo-v2",
-		Extra:   map[string]any{"effort": "medium"},
+		Extra:   map[string]any{"effort": "medium", "supported_efforts": []string{"low", "medium", "high"}},
 	})
 	if err != nil {
 		t.Fatalf("New: %v", err)
@@ -1873,8 +1868,8 @@ func TestStreamReasoningContentTakesPrecedenceOverFallback(t *testing.T) {
 // assistant tool_calls turn whose reasoning_content KEY is missing from the
 // request JSON, but accepts an empty string. A turn whose reasoning was lost
 // upstream (gateway renamed/dropped the field, legacy session, model switch)
-// must therefore still serialize the key — while plain assistant text turns
-// keep omitting it.
+// must therefore still serialize the key, while plain assistant text turns
+// carrying reasoning are replayed too.
 func TestBuildRequestAlwaysSendsReasoningKeyOnDeepSeekToolCalls(t *testing.T) {
 	p, err := New(provider.Config{
 		Name:    "deepseek-proxy",
@@ -1893,7 +1888,7 @@ func TestBuildRequestAlwaysSendsReasoningKeyOnDeepSeekToolCalls(t *testing.T) {
 				ID: "call_1", Name: "read_file", Arguments: `{"path":"main.go"}`,
 			}}},
 			{Role: provider.RoleTool, ToolCallID: "call_1", Name: "read_file", Content: "package main"},
-			{Role: provider.RoleAssistant, Content: "plain text turn"},
+			{Role: provider.RoleAssistant, Content: "plain text turn", ReasoningContent: "plain reasoning"},
 		},
 	}))
 	if err != nil {
@@ -1915,8 +1910,8 @@ func TestBuildRequestAlwaysSendsReasoningKeyOnDeepSeekToolCalls(t *testing.T) {
 	if string(rc) != `""` {
 		t.Fatalf("reasoning_content = %s, want empty string", rc)
 	}
-	if _, ok := req.Messages[3]["reasoning_content"]; ok {
-		t.Fatal("plain assistant text turn must keep omitting reasoning_content")
+	if got, ok := req.Messages[3]["reasoning_content"]; !ok || string(got) != `"plain reasoning"` {
+		t.Fatalf("plain assistant text turn reasoning_content = %s, want plain reasoning", got)
 	}
 }
 

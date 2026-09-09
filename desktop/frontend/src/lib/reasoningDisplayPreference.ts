@@ -1,4 +1,5 @@
 import { useSyncExternalStore } from "react";
+import { applySessionExperience } from "./sessionExperience";
 
 export type ReasoningDisplayMode = "hidden" | "summary" | "auto" | "expanded";
 export type ResolvedReasoningDisplayMode = ReasoningDisplayMode | "legacy-collapsed" | "pending";
@@ -15,38 +16,31 @@ function emit(): void {
   if (typeof window !== "undefined") window.dispatchEvent(new CustomEvent(DISPLAY_EVENT, { detail: currentMode }));
 }
 
-function normalizeMode(value: unknown): ReasoningDisplayMode | undefined {
+function validMode(value: unknown): ReasoningDisplayMode | undefined {
   return value === "hidden" || value === "summary" || value === "auto" || value === "expanded" ? value : undefined;
 }
 
-function legacySummaryValue(): "on" | "off" | undefined {
+function legacyValue(): boolean | undefined {
   if (typeof localStorage === "undefined") return undefined;
   const stored = localStorage.getItem(LEGACY_SUMMARY_KEY);
-  if (stored === "1") return "on";
-  if (stored === "0") return "off";
-  return undefined;
+  return stored === "1" ? true : stored === "0" ? false : undefined;
 }
 
 export function resolveReasoningDisplayMode(
   configuredMode: unknown,
   explicit: boolean,
 ): ResolvedReasoningDisplayMode {
-  const normalized = normalizeMode(configuredMode);
+  const normalized = validMode(configuredMode);
   if (explicit && normalized) return normalized;
-  switch (legacySummaryValue()) {
-    case "off":
-      return "legacy-collapsed";
-    case "on":
-      return "summary";
-  }
+  const legacy = legacyValue();
+  if (legacy !== undefined) return legacy ? "summary" : "legacy-collapsed";
   return normalized ?? "auto";
 }
 
 export function getReasoningDisplayMode(): ResolvedReasoningDisplayMode {
   if (!currentModeExplicit && currentMode !== "pending") {
-    const legacy = legacySummaryValue();
-    if (legacy === "off") return "legacy-collapsed";
-    if (legacy === "on") return "summary";
+    const legacy = legacyValue();
+    if (legacy !== undefined) return legacy ? "summary" : "legacy-collapsed";
   }
   return currentMode;
 }
@@ -61,6 +55,12 @@ export function setReasoningDisplayPending(): void {
 /** Hydrates the frontend mirror from the authoritative Wails startup payload. */
 export function hydrateReasoningDisplayMode(configuredMode: unknown, explicit = false): void {
   const next = resolveReasoningDisplayMode(configuredMode, explicit);
+  // Compatibility callers still participate in the canonical two-state
+  // model. Historical configuration is intentionally normalized to Standard;
+  // only an explicit legacy "expanded" selection maps to Deep.
+  if (explicit) {
+    applySessionExperience(next === "expanded" ? "deep" : "standard");
+  }
   if (next === currentMode && currentModeExplicit === explicit) return;
   currentMode = next;
   currentModeExplicit = explicit;
@@ -69,6 +69,7 @@ export function hydrateReasoningDisplayMode(configuredMode: unknown, explicit = 
 
 /** Applies a successfully persisted user selection and completes legacy migration. */
 export function applyReasoningDisplayMode(mode: ReasoningDisplayMode): void {
+  applySessionExperience(mode === "expanded" ? "deep" : "standard");
   if (typeof localStorage !== "undefined") localStorage.removeItem(LEGACY_SUMMARY_KEY);
   if (mode === currentMode && currentModeExplicit) return;
   currentMode = mode;

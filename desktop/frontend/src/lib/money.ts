@@ -48,6 +48,7 @@ export function formatMoneyAmount(amount?: string, currency?: string, empty: "ze
 interface MoneyFormatOptions {
   locale?: string;
   empty?: "zero" | "dash";
+  fractionDigits?: 2 | 4;
 }
 
 function isoCurrencyCode(currency?: string): string | null {
@@ -65,13 +66,15 @@ function isoCurrencyCode(currency?: string): string | null {
 export function formatMoneyLocalized(amount?: number, currency?: string, options: MoneyFormatOptions = {}): string {
   const empty = options.empty ?? "zero";
   if (typeof amount !== "number" || amount <= 0) {
-    return empty === "dash" ? "-" : formatMoney(0, currency, empty);
+    return empty === "dash" ? "-" : options.fractionDigits === undefined
+      ? formatMoney(0, currency, empty) : `${currencySymbol(currency)}${(0).toFixed(options.fractionDigits)}`;
   }
 
   const code = isoCurrencyCode(currency);
-  if (!code) return formatMoney(amount, currency, empty);
+  if (!code) return options.fractionDigits === undefined ? formatMoney(amount, currency, empty)
+    : `${currencySymbol(currency)}${amount.toFixed(options.fractionDigits)}`;
 
-  const digits = amount < 1 ? 4 : 2;
+  const digits = options.fractionDigits ?? (amount < 1 ? 4 : 2);
   return new Intl.NumberFormat(options.locale, {
     style: "currency",
     currency: code,

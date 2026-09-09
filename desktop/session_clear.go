@@ -1,7 +1,10 @@
 package main
 
 import (
+	"fmt"
+
 	"reasonix/internal/agent"
+	"reasonix/internal/control"
 )
 
 // SessionClearResult is the post-clear session identity the frontend must apply
@@ -11,6 +14,16 @@ type SessionClearResult struct {
 	SessionRevision   int64  `json:"sessionRevision,omitempty"`
 	SessionDigest     string `json:"sessionDigest,omitempty"`
 	SessionGeneration uint64 `json:"sessionGeneration"`
+}
+
+func initClearedPins(path string, newCtrl, oldCtrl control.SessionAPI, tab *WorkspaceTab) error {
+	if err := savePinnedContextState(path, []string{}); err != nil {
+		newCtrl.Close()
+		tab.releaseSessionLease()
+		oldCtrl.CloseAfterDestroy()
+		return fmt.Errorf("initialize empty pinned context for cleared session: %w", err)
+	}
+	return nil
 }
 
 // ClearSession discards the current conversation and rotates to a fresh unsaved one.
@@ -43,6 +56,12 @@ func (a *App) ClearSessionForTab(tabID string) (SessionClearResult, error) {
 	if err := ctrl.ClearSession(); err != nil {
 		return SessionClearResult{}, err
 	}
+	if path := ctrl.SessionPath(); path != "" {
+		if err := savePinnedContextState(path, []string{}); err != nil {
+			return SessionClearResult{}, fmt.Errorf("initialize empty pinned context for cleared session: %w", err)
+		}
+	}
+	tab.setPinnedFiles(nil)
 	if err := a.ensureTabSessionLeaseForRebuild(tab, ctrl.SessionPath(), ""); err != nil {
 		// Wails bridge return: a raw lease error would carry the session path
 		// and holder id across to the frontend.
@@ -60,9 +79,13 @@ func (a *App) bumpAndSnapshotSessionClear(tab *WorkspaceTab) SessionClearResult 
 	if tab == nil {
 		return SessionClearResult{}
 	}
+	a.discardPendingTabEffort(tab)
 	a.mu.Lock()
 	tab.SessionGeneration++
 	gen := tab.SessionGeneration
+	if tab.sink != nil {
+		tab.sink.setSessionGeneration(gen)
+	}
 	path := tab.currentSessionPath()
 	if path == "" && tab.Ctrl != nil {
 		path = tab.Ctrl.SessionPath()
@@ -88,7 +111,7 @@ func (a *App) clearTabGoal(tab *WorkspaceTab) {
 	a.mu.Lock()
 	tab.goal = ""
 	if current := a.tabs[tab.ID]; current == tab {
-		a.saveTabsLocked()
+		_ = a.saveTabsLocked()
 	}
 	a.mu.Unlock()
 }

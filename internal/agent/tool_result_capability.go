@@ -28,10 +28,10 @@ type sessionToolResultTool struct {
 	session func() *Session
 }
 
-func (*sessionToolResultTool) Name() string { return "session_tool_result" }
+func (*sessionToolResultTool) Name() string { return tool.HostSessionToolResult }
 
 func (*sessionToolResultTool) Description() string {
-	return "Read one bounded UTF-8 page from a complete tool result retained in the current agent session."
+	return "Read one bounded UTF-8 page from a complete tool result retained in the current agent session. This uses tr-... result references; for a sa_... subagent reference, use read_subagent_result instead."
 }
 
 func (*sessionToolResultTool) ReadOnly() bool { return true }
@@ -90,6 +90,28 @@ func toolOutputRecoveryMarker(toolName, toolCallID, resultRef string, originalBy
 	)
 }
 
+// toolOutputRecoveryMarkerAt builds the recoverable provider-visible marker.
+// recoverOffset is the first byte the model has not seen. It is intentionally
+// read_file-only; generic head/tail previews retain their byte-compatible marker
+// above and continue to recover from zero.
+func toolOutputRecoveryMarkerAt(toolName, toolCallID, resultRef string, originalBytes, keptBytes, recoverOffset int) string {
+	namePart := boundedMarkerField(toolName, 128, "tool")
+	idPart := boundedMarkerField(toolCallID, 128, "-")
+	exampleID := toolCallID
+	if len(exampleID) > 256 {
+		exampleID = "<full tool_call_id from this tool result>"
+	}
+	args, _ := json.Marshal(struct {
+		ToolCallID string `json:"tool_call_id"`
+		ResultRef  string `json:"result_ref"`
+		Offset     int    `json:"offset"`
+	}{ToolCallID: exampleID, ResultRef: resultRef, Offset: recoverOffset})
+	return fmt.Sprintf(
+		"\n\n…[truncated tool=%s call_id=%s result_ref=%s original_bytes=%d kept_bytes=%d next_offset=%d — full original retained locally; recover with use_capability(action=\"call\", capability_id=\"session:tool_result\", arguments=%s). INCOMPLETE READ: only a contiguous prefix is visible; do not answer, modify state, or finish until recovery reaches complete=true. If use_capability is unavailable, re-run the original tool with narrower arguments]…\n\n",
+		namePart, idPart, resultRef, originalBytes, keptBytes, recoverOffset, args,
+	)
+}
+
 func boundedMarkerField(value string, maxBytes int, fallback string) string {
 	if value == "" {
 		return fallback
@@ -107,6 +129,9 @@ func (t *sessionToolResultTool) Execute(_ context.Context, args json.RawMessage)
 	}
 	p.ToolCallID = strings.TrimSpace(p.ToolCallID)
 	p.ResultRef = strings.TrimSpace(p.ResultRef)
+	if strings.HasPrefix(p.ToolCallID, "sa_") || strings.HasPrefix(p.ResultRef, "sa_") {
+		return "", fmt.Errorf("session tool result: %q is a subagent reference; use read_subagent_result with ref", firstNonEmpty(p.ResultRef, p.ToolCallID))
+	}
 	if p.ToolCallID == "" {
 		return "", fmt.Errorf("session tool result: tool_call_id is required")
 	}

@@ -298,5 +298,26 @@ console.log("\nsubagent progress reducer");
   ok(archived.subagentProgress !== undefined, "subagentProgress survives result archiving");
 }
 
+// --- 11. Terminal outcome metadata survives output archiving ---------------
+
+{
+  let s = initialState;
+  s = dispatch(s, { id: "outcome-1", name: "task", args: "{}", readOnly: true });
+  s = progress(s, progressTool("outcome-1", SUBAGENT_PROGRESS_STATUS, "partial"));
+  s = result(s, {
+    id: "outcome-1",
+    name: "task",
+    readOnly: true,
+    output: "Subagent reference: sa_child\nSubagent outcome: status=partial retryable=true error_code=completion_uncertain",
+    subagentRef: "sa_child",
+    subagentStatus: "partial",
+    subagentErrorCode: "completion_uncertain",
+    subagentRetryable: true,
+  });
+  const archived = toolById(s, "outcome-1");
+  eq(JSON.stringify(archived.subagentOutcome), JSON.stringify(["sa_child", "partial", "completion_uncertain", true]), "terminal outcome is normalized once at the result boundary");
+  eq(archived.output, undefined, "outcome metadata survives without retaining archived tool output");
+}
+
 console.log(`\nsubagent progress: ${passed} passed, ${failed} failed`);
 if (failed > 0) process.exit(1);

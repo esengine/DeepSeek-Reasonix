@@ -13,6 +13,7 @@ import (
 	"fmt"
 	"io"
 	"net"
+	"net/http"
 	"slices"
 	"sort"
 	"strings"
@@ -43,6 +44,12 @@ const (
 // Message is a single conversation message.
 type Message struct {
 	Role Role `json:"role"`
+	// ID is local transcript identity (stable across saves, reloads, and log
+	// branches). Adapters never copy it to the wire; older readers ignore it.
+	ID string `json:"id,omitempty"`
+	// Origin distinguishes real user input from host-generated user-role protocol
+	// messages. omitempty keeps legacy sessions readable by previous releases.
+	Origin MessageOrigin `json:"origin,omitempty"`
 	// Content is the provider-visible conversation content.
 	// Keepingthislegacyfieldprovider-visiblepreservesreplay for older CLI/Desktop releases.
 	Content string `json:"content,omitempty"`
@@ -66,8 +73,10 @@ type Message struct {
 	// ReasoningSignature is an opaque, provider-issued proof that ReasoningContentis genuine model output.
 	// Anthropic requires the signed thinking block be replayed on the next turn when a toolcallfollowedthinking;
 	// providers without signed reasoning (e.g. the openai-compatible ones) leave it empty.
-	ReasoningSignature string     `json:"reasoning_signature,omitempty"`
-	ToolCalls          []ToolCall `json:"tool_calls,omitempty"` // set by assistant
+	ReasoningSignature string          `json:"reasoning_signature,omitempty"`
+	ReasoningState     ReasoningState  `json:"reasoning_state,omitempty"`
+	ThinkingBlocks     []ThinkingBlock `json:"thinking_blocks,omitempty"`
+	ToolCalls          []ToolCall      `json:"tool_calls,omitempty"` // set by assistant
 	// ResponsesItems preserves provider-issued Responses API output items forstateless replay.
 	// omitemptykeepsoldsession files byte-compatible.
 	ResponsesItems  []json.RawMessage  `json:"responses_items,omitempty"`
@@ -91,10 +100,16 @@ type Message struct {
 	// FinalReadinessRecovery is durable host state on a LocalOnly sentinel.
 	// ModelMessages removes it before provider serialization.
 	FinalReadinessRecovery *FinalReadinessRecovery `json:"final_readiness_recovery,omitempty"`
+	ProtocolRecovery       json.RawMessage         `json:"protocol_recovery,omitempty"`
+	ReadPause              *ReadPause              `json:"read_pause,omitempty"`
 	// ToolExecution is local shell UI metadata on tool-result messages. It ispersisted for
 	// Desktop/CLI/Servecards and stripped by
 	// ModelMessagesbeforeanyproviderrequestsotoolschemasandprompt-cacheprefixes stay stable.
 	ToolExecution *ToolExecution `json:"tool_execution,omitempty"`
+	ToolRunState  ToolRunState   `json:"tool_run_state,omitempty"`
+	// ReadResult is a persisted, host-only reader delivery envelope for diagnostics.
+	// ModelMessages strips it; provider serializers must never emit it on the wire.
+	ReadResult json.RawMessage `json:"read_result,omitempty"`
 	// MCPApp is the local MCP Apps presentation for results from App-capableservers. Persisted for
 	// Desktopcardsand stripped by ModelMessages;
 	// provider serializers must never emit it on the wire.
@@ -143,28 +158,6 @@ type DecisionReceipt struct {
 	Outcome string `json:"outcome"`
 }
 
-// InterruptedTurnRecovery is the durable,
-// provider-excludedhandoffforaturnthatstoppedbeforeproducingacleanfinal answer.
-// Itcontainsonlyboundedstructural facts; raw partial reasoning remains on the LocalOnly
-// Messagefordisplayandisnevercopiedintotherecovery prompt.
-type InterruptedTurnRecovery struct {
-	Pending                 bool                     `json:"pending,omitempty"`
-	CompletedTools          []InterruptedToolSummary `json:"completed_tools,omitempty"`
-	InterruptedTools        []string                 `json:"interrupted_tools,omitempty"`
-	DroppedPartialText      bool                     `json:"dropped_partial_text,omitempty"`
-	DroppedPartialReasoning bool                     `json:"dropped_partial_reasoning,omitempty"`
-}
-
-// InterruptedToolSummary records a completed, fully paired tool call withoutduplicatingitsargumentsorresult.
-// The canonical assistant/tool messagesimmediately before the recovery record remain the source of truth.
-type InterruptedToolSummary struct {
-	ID      string   `json:"id,omitempty"`
-	Name    string   `json:"name"`
-	Files   []string `json:"files,omitempty"`
-	Added   int      `json:"added,omitempty"`
-	Removed int      `json:"removed,omitempty"`
-}
-
 // MemoryCitation is local display metadata for memories that influenced anassistant turn.
 // Providerimplementations must not forward it to model APIs.
 type MemoryCitation struct {
@@ -197,9 +190,10 @@ func ParseImageDataURL(dataURL string) (mediaType, base64Data string, ok bool) {
 
 // ToolCall is a tool invocation requested by the model. Arguments is raw JSON.
 type ToolCall struct {
-	ID        string `json:"id"`
-	Name      string `json:"name"`
-	Arguments string `json:"arguments"`
+	WriteIntents []json.RawMessage `json:"write_intents,omitempty"` // local versioned evidence, stripped from model input
+	ID           string            `json:"id"`
+	Name         string            `json:"name"`
+	Arguments    string            `json:"arguments"`
 	// ThoughtSignature is an opaque Gemini-issued proof attached to a functioncall. OpenAI-compatible
 	// Geminiendpoints require it on message replay.
 	ThoughtSignature string `json:"thought_signature,omitempty"`
@@ -698,6 +692,7 @@ const (
 // Estimated marks counts reconstructed locally because the provider's terminalusage record did not arrive;
 // exact provider usage leaves it false.
 type Usage struct {
+	Unknown                bool `json:"unknown,omitempty"` // at least one request had no provider usage
 	PromptTokens           int
 	CompletionTokens       int
 	TotalTokens            int
@@ -838,9 +833,11 @@ func isThreeLetterCurrencyCode(value string) bool {
 
 // Chunk is a single streamed event. Read the field matching Type.
 type Chunk struct {
-	Type      ChunkType
-	Text      string // ChunkText, ChunkReasoning
-	Signature string // ChunkReasoning: opaque proof for the reasoning (Anthropic thinking signature), when issued
+	ThinkingBlock  *ThinkingBlock
+	ReasoningState ReasoningState
+	Type           ChunkType
+	Text           string // ChunkText, ChunkReasoning
+	Signature      string // ChunkReasoning: opaque proof for the reasoning (Anthropic thinking signature), when issued
 	// ReasoningID/ReasoningStatus ride the final ChunkReasoning of a turn
 	// (empty Text): the provider-issued reasoning item id/status capturedfrom the SSE stream, so the
 	// Agentcanpersist them into the sessionand the next turn's input reasoning item round-trips them (review
@@ -1030,11 +1027,18 @@ func MissingToolCallReasoningWarningFingerprint(p Provider) string {
 
 // Config is a resolved provider instance configuration.
 type Config struct {
-	Name    string         // instance name, e.g. "deepseek"
-	BaseURL string         // OpenAI-compatible endpoint
-	Model   string         // model id
-	APIKey  string         // resolved from api_key_env
-	Extra   map[string]any // kind-specific options
+	// HTTPClient supplies immutable credential-proxy transport without changing serialization or vendor identity.
+	HTTPClient  *http.Client
+	Name        string         // stable instance id, e.g. "deepseek-anthropic"
+	DisplayName string         // user-editable label; empty falls back to Name
+	Protocol    string         // configured wire adapter id
+	BaseURL     string         // OpenAI-compatible endpoint
+	Model       string         // model id
+	APIKey      string         // resolved from api_key_env
+	Extra       map[string]any // kind-specific options
+	// ModelInfo is adapter-owned metadata for the exact model instance. It is
+	// optional so existing third-party factories remain source-compatible.
+	ModelInfo *ModelInfo
 }
 
 // AuthError reports that a provider rejected the API key (HTTP 401/403).
@@ -1047,12 +1051,14 @@ type Config struct {
 // Body and extract it themselves. Providersshould return this (rather than a generic status error)
 // forauthfailures.
 type AuthError struct {
-	Provider  string // the provider instance name, e.g. "deepseek"
-	KeyEnv    string // the api_key_env the key is read from, when known
-	KeySource string // human-readable source of KeyEnv, when known
-	Status    int    // the HTTP status (401 or 403)
-	HasKey    bool   // a non-empty key was sent — the server rejected it, vs. no key configured at all
-	Body      string // trimmed response-body snippet, the server's verbatim reason when it gave one
+	Provider            string // stable provider instance id, e.g. "deepseek"
+	ProviderDisplayName string // user-editable display label
+	Protocol            string // configured wire adapter id
+	KeyEnv              string // the api_key_env the key is read from, when known
+	KeySource           string // human-readable source of KeyEnv, when known
+	Status              int    // the HTTP status (401 or 403)
+	HasKey              bool   // a non-empty key was sent — the server rejected it, vs. no key configured at all
+	Body                string // trimmed response-body snippet, the server's verbatim reason when it gave one
 }
 
 func (e *AuthError) Error() string {
@@ -1064,7 +1070,7 @@ func (e *AuthError) Error() string {
 		key += " from " + e.KeySource
 	}
 	return fmt.Sprintf("authentication failed for provider %q (HTTP %d): %s is invalid or expired — update it (in .env or your environment) and retry, or run `reasonix setup`",
-		e.Provider, e.Status, key)
+		ProviderDisplayLabel(e.Provider, e.ProviderDisplayName, e.Protocol), e.Status, key)
 }
 
 // Factory builds a Provider from a resolved Config.

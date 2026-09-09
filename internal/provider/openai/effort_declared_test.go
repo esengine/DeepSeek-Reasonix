@@ -32,8 +32,8 @@ func TestDeepSeekThinkingHonorsDeclaredEffortVocabulary(t *testing.T) {
 
 // V4 compatibility aliases normalize at the provider boundary even when a
 // caller bypasses config.NormalizeEffort.
-func TestDeepSeekThinkingNormalizesUndeclaredV4Alias(t *testing.T) {
-	p, err := New(provider.Config{
+func TestDeepSeekThinkingRejectsUndeclaredV4Alias(t *testing.T) {
+	_, err := New(provider.Config{
 		Name:    "official",
 		BaseURL: "https://api.deepseek.com",
 		Model:   "deepseek-v4-flash",
@@ -43,11 +43,8 @@ func TestDeepSeekThinkingNormalizesUndeclaredV4Alias(t *testing.T) {
 			"reasoning_protocol": "deepseek",
 		},
 	})
-	if err != nil {
-		t.Fatalf("New with V4 alias: %v", err)
-	}
-	if got := p.(*client).buildRequest(provider.Request{}).ReasoningEffort; got != "high" {
-		t.Fatalf("reasoning_effort = %q, want high", got)
+	if err == nil {
+		t.Fatal("undeclared alias must be rejected")
 	}
 }
 

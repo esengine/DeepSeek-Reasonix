@@ -28,10 +28,9 @@ import (
 const remoteProviderReloadTimeout = jobs.DefaultTeardownGrace + 15*time.Second
 
 // SwitchCredentialProxyModel stages an immutable desktop proxy route and a
-// matching remote provider credential, then asks Serve to perform its ordinary
-// active-work-gated controller switch. The outgoing controller keeps its old
-// virtual token and route throughout; if Serve refuses or cannot rebuild, the
-// on-disk provider is rolled back and the live controller remains coherent.
+// a complete resolver bundle, then asks a capable Serve to publish it at the
+// existing active-work/session boundary. An unknown outcome is read back; the
+// write is never replayed or rolled back against a possibly newer controller.
 func (m *desktopRemoteManager) SwitchCredentialProxyModel(ctx context.Context, hostID, workspace, currentRef, nextRef, expectedPath string) error {
 	hostID, workspace = strings.TrimSpace(hostID), strings.TrimSpace(workspace)
 	currentRef, nextRef = strings.TrimSpace(currentRef), strings.TrimSpace(nextRef)
@@ -60,53 +59,66 @@ func (m *desktopRemoteManager) SwitchCredentialProxyModel(ctx context.Context, h
 	if !ok || app == nil {
 		return fmt.Errorf("credential proxy: app unavailable")
 	}
-	oldRoute, err := app.applyCredentialProxyModel(hostID, workspace, currentRef)
+	client, err := newServeHTTPClient(serve.view.LocalURL)
 	if err != nil {
 		return err
 	}
-	newRoute, err := app.applyCredentialProxyModel(hostID, workspace, nextRef)
+	if err := serveHandshake(ctx, client, serve.view.LocalURL, serve.token); err != nil {
+		return err
+	}
+	status, err := remoteModelSettingsRequest(ctx, client, serve.view.LocalURL, expectedPath, nil)
 	if err != nil {
 		return err
 	}
-	remotePort, err := ensureCredentialProxyForward(mh.client, hostID, newRoute.port)
+	cfg, err := config.LoadModelRuntimeSnapshot(".")
+	if err != nil {
+		return err
+	}
+	port, err := app.credentialProxyPort()
+	if err != nil {
+		return err
+	}
+	if !m.pinModelSettingsOwnership(app, hostID, workspace, mh, status) {
+		return fmt.Errorf("remote Serve must support ordered model settings ownership")
+	}
+	remotePort, err := ensureCredentialProxyForward(mh.client, hostID, port)
 	if err != nil {
 		return fmt.Errorf("credential proxy: reverse tunnel: %w", err)
 	}
-	oldOptions := credentialProxyBootstrapOptions(workspace, remotePort, oldRoute)
-	newOptions := credentialProxyBootstrapOptions(workspace, remotePort, newRoute)
-	if _, err := bootstrap.EnsureCredentialProvider(ctx, mh.client, newOptions); err != nil {
+	bundle, remoteRef, err := app.buildRemoteModelSettings(hostID, workspace, nextRef, remotePort, cfg)
+	if err != nil {
 		return err
 	}
-	rollback := func(cause error) error {
-		rollbackCtx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
-		defer cancel()
-		_, rollbackErr := bootstrap.EnsureCredentialProvider(rollbackCtx, mh.client, oldOptions)
-		if rollbackErr != nil {
-			return errors.Join(cause, fmt.Errorf("restore previous credential proxy model: %w", rollbackErr))
-		}
-		return cause
-	}
-	client, err := newServeHTTPClient(serve.view.LocalURL)
+	_, err = app.installRemoteModelSettingsSnapshot(ctx, client, serve.view.LocalURL, hostID, workspace, expectedPath, remoteRef, bundle, status)
 	if err != nil {
-		return rollback(err)
+		return err
 	}
-	if err := serveHandshake(ctx, client, serve.view.LocalURL, serve.token); err != nil {
-		return rollback(err)
+	if !m.isCurrent(hostID, mh) {
+		return fmt.Errorf("remote connection changed while applying model settings")
 	}
-	body, _ := json.Marshal(map[string]string{"ref": newOptions.Provider + "/" + newOptions.Model})
-	if err := servePostForSession(ctx, client, serveURL(serve.view.LocalURL, "/model"), body, expectedPath); err != nil {
-		return rollback(err)
+	app.remoteTabMu.Lock()
+	for _, tab := range app.remoteTabs {
+		if tab != nil && tab.ref.HostID == hostID && tab.ref.Workspace == workspace && tab.routing.currentPath == expectedPath {
+			tab.settings.revision = bundle.Revision
+			tab.settings.failure = ""
+			tab.settings.generation = tab.gen
+			tab.settings.sessionPath = expectedPath
+		}
 	}
+	app.remoteTabMu.Unlock()
 	return nil
 }
 
 func credentialProxyBootstrapOptions(workspace string, remotePort int, info credentialProxyRouteInfo) *bootstrap.CredentialProxyOptions {
 	slug := store.RemoteWorkspaceSlug(workspace)
 	suffix := slug[len(slug)-16:]
+	if info.revision != "" {
+		suffix += "-" + info.revision[:16]
+	}
 	return &bootstrap.CredentialProxyOptions{
 		BaseURL:  fmt.Sprintf("http://127.0.0.1:%d", remotePort),
 		Token:    info.token,
-		TokenEnv: "REASONIX_PROXY_TOKEN_" + strings.ToUpper(suffix),
+		TokenEnv: "REASONIX_PROXY_TOKEN_" + strings.ToUpper(strings.ReplaceAll(suffix, "-", "_")),
 		Provider: credentialProxyProviderName + "-" + suffix,
 		Model:    info.model,
 		Kind:     info.kind,
@@ -287,23 +299,31 @@ func (m *desktopRemoteManager) healCredentialChannel(ctx context.Context, c desk
 	if !has {
 		return fmt.Errorf("credential proxy: reverse tunnel is not available")
 	}
+	// The tunnel secret rotates on every SSH reconnection even when the remote
+	// port is reused, and a running serve keeps validating the previous token
+	// until its providers are rebuilt from the healed disk config. So heal the
+	// tracked configs and reload unconditionally: both steps are idempotent,
+	// and skipping the config heal on a same-port rebind leaves every model
+	// call failing with "invalid credential proxy token".
 	if int(mh.credPort.Load()) != port || res.CredentialConfigChanged {
-		log.Printf("[remote] EnsureServer: cred port drift host=%s old=%d new=%d configChanged=%v -> reloading serve providers", hostID, mh.credPort.Load(), port, res.CredentialConfigChanged)
-		workspaces := m.trackedCredentialWorkspaces(hostID, workspace)
-		// base+token covers the Serve ensured by this round even if it has not
-		// reached the registry yet; tracked peers are reloaded alongside it.
-		if err := healCredentialConfigsBeforeReload(ctx, workspaces,
-			func(workspace string) (*bootstrap.CredentialProxyOptions, error) {
-				return m.credentialProxySetup(c, hostID, workspace)
-			},
-			func(ctx context.Context, opts *bootstrap.CredentialProxyOptions) error {
-				_, err := bootstrap.HealCredentialProvider(ctx, c, opts)
-				return err
-			},
-			func() bool { return m.reloadServeProviders(ctx, mh, hostID, workspace, base, token) },
-		); err != nil {
+		log.Printf("[remote] EnsureServer: cred port drift host=%s old=%d new=%d configChanged=%v -> healing serve credentials", hostID, mh.credPort.Load(), port, res.CredentialConfigChanged)
+	} else {
+		log.Printf("[remote] EnsureServer: same cred port %d -> healing serve credentials (fresh tunnel secret)", port)
+	}
+	workspaces := m.trackedCredentialWorkspaces(hostID, workspace)
+	// base+token covers the Serve ensured by this round even if it has not
+	// reached the registry yet; tracked peers are reloaded alongside it.
+	if err := healCredentialConfigsBeforeReload(ctx, workspaces,
+		func(workspace string) (*bootstrap.CredentialProxyOptions, error) {
+			return m.credentialProxySetup(c, hostID, workspace)
+		},
+		func(ctx context.Context, opts *bootstrap.CredentialProxyOptions) error {
+			_, err := bootstrap.HealCredentialProvider(ctx, c, opts)
 			return err
-		}
+		},
+		func() bool { return m.reloadServeProviders(ctx, mh, hostID, workspace, base, token) },
+	); err != nil {
+		return err
 	}
 	if perr := probeReverseTunnel(c, port); perr != nil {
 		log.Printf("[remote] EnsureServer: reverse probe FAILED host=%s ws=%s port=%d err=%v", hostID, workspace, port, perr)
@@ -445,16 +465,7 @@ func (m *desktopRemoteManager) credentialProxySetup(c desktopSSHClient, hostID, 
 	if err != nil {
 		return nil, fmt.Errorf("credential proxy: reverse tunnel: %w", err)
 	}
-	slug := store.RemoteWorkspaceSlug(workspace)
-	suffix := slug[len(slug)-16:]
-	return &bootstrap.CredentialProxyOptions{
-		BaseURL:  fmt.Sprintf("http://127.0.0.1:%d", remotePort),
-		Token:    info.token,
-		TokenEnv: "REASONIX_PROXY_TOKEN_" + strings.ToUpper(suffix),
-		Provider: credentialProxyProviderName + "-" + suffix,
-		Model:    info.model,
-		Kind:     info.kind,
-	}, nil
+	return credentialProxyBootstrapOptions(workspace, remotePort, info), nil
 }
 
 func (m *desktopRemoteManager) registerTrackedCredentialRoutes(app *App, hostID, workspace string) (credentialProxyRouteInfo, error) {

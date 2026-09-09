@@ -27,7 +27,7 @@ func (a *App) tabBuildResultForController(tab *WorkspaceTab, ctrl *control.Contr
 	}
 	a.mu.RLock()
 	defer a.mu.RUnlock()
-	if tab.ID != "" && a.tabs[tab.ID] != tab {
+	if tab.ID != "" && !a.ownsRuntimeTabLocked(tab) {
 		return nil
 	}
 	res := tab.lastBuildResult
@@ -43,7 +43,7 @@ func (a *App) setTabLastBuildResult(tab *WorkspaceTab, res *boot.BuildResult) {
 	}
 	a.mu.Lock()
 	defer a.mu.Unlock()
-	if tab.ID != "" && a.tabs[tab.ID] != tab {
+	if tab.ID != "" && !a.ownsRuntimeTabLocked(tab) {
 		return
 	}
 	tab.lastBuildResult = res

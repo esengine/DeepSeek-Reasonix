@@ -1399,7 +1399,7 @@ status_bar_items = ["model", "cache", "balance"]
 	if got.ConfigPath != config.UserConfigPath() {
 		t.Fatalf("Settings configPath = %q, want user config %q", got.ConfigPath, config.UserConfigPath())
 	}
-	if got.DefaultModel != "legacy-provider/legacy-model" || got.DesktopLanguage != "zh" || got.DesktopLayoutStyle != "workbench" || got.DesktopTheme != "light" || got.DesktopThemeStyle != "glacier" || got.CloseBehavior != "quit" || got.StatusBarStyle != "text" {
+	if got.DefaultModel != "legacy-provider/legacy-model" || got.DesktopLanguage != "zh" || got.DesktopLayoutStyle != "workbench" || got.DesktopTheme != "light" || got.DesktopThemeStyle != "glacier" || got.CloseBehavior != "quit" || got.StatusBarStyle != "icon" {
 		t.Fatalf("Settings did not seed from legacy project config: %+v", got)
 	}
 	if want := []string{"model", "cache", "balance"}; !reflect.DeepEqual(got.StatusBarItems, want) {
@@ -1412,7 +1412,7 @@ status_bar_items = ["model", "cache", "balance"]
 		t.Fatalf("SetDesktopLanguage: %v", err)
 	}
 	userCfg := config.LoadForEdit(config.UserConfigPath())
-	if userCfg.DesktopLanguage() != "en" || userCfg.DesktopLayoutStyle() != "workbench" || userCfg.DesktopTheme() != "light" || userCfg.DesktopThemeStyle() != "glacier" || userCfg.DesktopCloseBehavior() != "quit" || userCfg.DesktopStatusBarStyle() != "text" {
+	if userCfg.DesktopLanguage() != "en" || userCfg.DesktopLayoutStyle() != "workbench" || userCfg.DesktopTheme() != "light" || userCfg.DesktopThemeStyle() != "glacier" || userCfg.DesktopCloseBehavior() != "quit" || userCfg.DesktopStatusBarStyle() != "icon" {
 		t.Fatalf("saved user config did not preserve seeded desktop prefs: lang:%q layout:%q theme:%q style:%q close:%q status:%q", userCfg.DesktopLanguage(), userCfg.DesktopLayoutStyle(), userCfg.DesktopTheme(), userCfg.DesktopThemeStyle(), userCfg.DesktopCloseBehavior(), userCfg.DesktopStatusBarStyle())
 	}
 	if want := []string{"model", "cache", "balance"}; !reflect.DeepEqual(userCfg.DesktopStatusBarItems(), want) {
@@ -1951,8 +1951,8 @@ func TestAddProviderPresetAccessSavesEditableProviderAndKey(t *testing.T) {
 	if err != nil {
 		t.Fatalf("read saved credentials: %v", err)
 	}
-	if !strings.Contains(string(data), "MIMO_API_KEY=sk-mimo") {
-		t.Fatalf("saved credentials missing MiMo key:\n%s", data)
+	if p.APIKeyEnv == "MIMO_API_KEY" || !strings.Contains(string(data), p.APIKeyEnv+"=sk-mimo") {
+		t.Fatal("saved credentials missing the isolated MiMo key reference")
 	}
 
 	view := NewApp().Settings()
@@ -2111,7 +2111,7 @@ func TestAddEveryProviderPresetAccessInstallsTemplate(t *testing.T) {
 				if !access[entry.Name] {
 					t.Fatalf("provider_access for preset %q missing %q: %+v", preset.ID, entry.Name, cfg.Desktop.ProviderAccess)
 				}
-				if got.Kind != entry.Kind || got.BaseURL != entry.BaseURL || got.DefaultModel() != entry.DefaultModel() || got.APIKeyEnv != entry.APIKeyEnv || got.AuthHeader != entry.AuthHeader || got.NoProxy != entry.NoProxy {
+				if got.Kind != entry.Kind || got.BaseURL != entry.BaseURL || got.DefaultModel() != entry.DefaultModel() || got.APIKeyEnv == entry.APIKeyEnv || !config.CredentialStored(got.APIKeyEnv) || got.AuthHeader != entry.AuthHeader || got.NoProxy != entry.NoProxy {
 					t.Fatalf("provider %q core fields = %+v, want template %+v", entry.Name, got, entry)
 				}
 				if got.PresetID != preset.ID || got.PresetVersion != config.ProviderPresetVersion {
@@ -2182,8 +2182,11 @@ func TestAddOpenCodeGoRecommendedPresetCompletesMissingRoutes(t *testing.T) {
 	if err != nil {
 		t.Fatalf("read saved credentials: %v", err)
 	}
-	if !strings.Contains(string(data), "OPENCODE_GO_API_KEY=sk-opencode") {
-		t.Fatalf("saved credentials missing Go key: %s", data)
+	for _, route := range preset.Entries {
+		entry, _ := cfg.Provider(route.Name)
+		if entry.APIKeyEnv == "OPENCODE_GO_API_KEY" || !strings.Contains(string(data), entry.APIKeyEnv+"=sk-opencode") {
+			t.Fatalf("route %s did not receive an isolated credential reference", route.Name)
+		}
 	}
 }
 
@@ -2317,7 +2320,7 @@ func TestAddOpenCodeGoRecommendedPresetRejectsConflictAtomically(t *testing.T) {
 	}
 }
 
-func TestAddOfficialProviderAccessRejectsBackgroundJobsBeforeSavingKey(t *testing.T) {
+func TestAddOfficialProviderAccessPreservesBackgroundJobsWhenSavingKey(t *testing.T) {
 	isolateDesktopUserDirs(t)
 	t.Setenv("DEEPSEEK_API_KEY", "")
 	os.Unsetenv("DEEPSEEK_API_KEY")
@@ -2327,11 +2330,12 @@ func TestAddOfficialProviderAccessRejectsBackgroundJobsBeforeSavingKey(t *testin
 	app.setTestCtrl(newBackgroundJobController(t, "provider-access-job"), "deepseek-flash/deepseek-v4-flash")
 
 	_, err := app.AddOfficialProviderAccess("deepseek", "sk-test")
-	if err == nil || !strings.Contains(err.Error(), "stop background jobs") {
-		t.Fatalf("AddOfficialProviderAccess with background job error = %v, want active-work guard", err)
+	if err != nil || !controllerHasActiveRuntimeWork(app.activeCtrl()) {
+		t.Fatalf("AddOfficialProviderAccess interrupted background work: %v", err)
 	}
-	if data, readErr := os.ReadFile(config.UserCredentialsPath()); readErr == nil && strings.Contains(string(data), "DEEPSEEK_API_KEY") {
-		t.Fatalf("provider key should not be saved after rejected add access:\n%s", data)
+	p, _ := config.LoadForEdit(config.UserConfigPath()).Provider("deepseek")
+	if !config.CredentialStored(p.APIKeyEnv) || p.APIKeyEnv == "DEEPSEEK_API_KEY" {
+		t.Fatal("official key was not committed to a new reference")
 	}
 }
 
@@ -2467,8 +2471,8 @@ func TestSetProviderKeyLeaseHeldKeepsCurrentController(t *testing.T) {
 	if err != nil {
 		t.Fatalf("SetProviderKey: %v", err)
 	}
-	if !strings.Contains(warning, "current session could not refresh yet") || !strings.Contains(warning, "another Reasonix window") {
-		t.Fatalf("SetProviderKey warning = %q, want deferred rebuild warning", warning)
+	if warning != "" {
+		t.Fatalf("SetProviderKey warning = %q; saving does not acquire the session lease", warning)
 	}
 	if strings.Contains(warning, sessionPath) || strings.Contains(warning, "held by") {
 		t.Fatalf("SetProviderKey surfaced raw lease details: %v", warning)
@@ -2487,7 +2491,7 @@ func TestSetProviderKeyLeaseHeldKeepsCurrentController(t *testing.T) {
 	}
 }
 
-func TestSetProviderKeyRebuildSupersedesInFlightStartupBuild(t *testing.T) {
+func TestSetProviderKeyPreservesInFlightStartupBuild(t *testing.T) {
 	isolateDesktopUserDirs(t)
 
 	cfg := config.Default()
@@ -2538,12 +2542,10 @@ func TestSetProviderKeyRebuildSupersedesInFlightStartupBuild(t *testing.T) {
 	if _, err := app.SetProviderKey("OLD_MODEL_KEY", "sk-new"); err != nil {
 		t.Fatalf("SetProviderKey: %v", err)
 	}
-	if tab.Ctrl == nil {
-		t.Fatal("provider-key rebuild did not install a controller")
+	if tab.Ctrl != nil || tab.buildGeneration != startupGeneration || buildCtx.Err() != nil {
+		t.Fatal("saving a key published or cancelled an in-flight startup; publication owns its version check")
 	}
-	defer tab.Ctrl.Close()
-
-	assertTabBuildSuperseded(t, app, tab, startupGeneration, buildCtx)
+	buildCancel()
 }
 
 func TestSaveProviderWithKeyLeaseHeldPersistsCustomProvider(t *testing.T) {
@@ -2611,8 +2613,8 @@ func TestSaveProviderWithKeyLeaseHeldPersistsCustomProvider(t *testing.T) {
 	if err != nil {
 		t.Fatalf("SaveProviderWithKey: %v", err)
 	}
-	if !strings.Contains(warning, "current session could not refresh yet") || !strings.Contains(warning, "another Reasonix window") {
-		t.Fatalf("SaveProviderWithKey warning = %q, want deferred rebuild warning", warning)
+	if warning != "" {
+		t.Fatalf("SaveProviderWithKey warning = %q; saving does not acquire the session lease", warning)
 	}
 	if strings.Contains(warning, sessionPath) || strings.Contains(warning, "held by") {
 		t.Fatalf("SaveProviderWithKey surfaced raw lease details: %v", warning)
@@ -2635,8 +2637,8 @@ func TestSaveProviderWithKeyLeaseHeldPersistsCustomProvider(t *testing.T) {
 	if err != nil {
 		t.Fatalf("read credentials: %v", err)
 	}
-	if !strings.Contains(string(data), "PROXY_API_KEY=sk-proxy") {
-		t.Fatalf("provider key was not saved:\n%s", data)
+	if got.APIKeyEnv == "PROXY_API_KEY" || !strings.Contains(string(data), got.APIKeyEnv+"=sk-proxy") {
+		t.Fatal("provider key was not saved with an isolated reference")
 	}
 }
 
@@ -2708,10 +2710,6 @@ func TestDeferredRebuildRetryAppliesAfterLeaseRelease(t *testing.T) {
 	isolateDesktopUserDirs(t)
 	setDesktopTestCredential(t, "OLD_MODEL_KEY", "sk-test")
 
-	prevInterval := deferredRebuildRetryInterval
-	deferredRebuildRetryInterval = 20 * time.Millisecond
-	t.Cleanup(func() { deferredRebuildRetryInterval = prevInterval })
-
 	cfg := config.Default()
 	cfg.DefaultModel = "old/old-model"
 	cfg.Desktop.ProviderAccess = []string{"old"}
@@ -2752,8 +2750,6 @@ func TestDeferredRebuildRetryAppliesAfterLeaseRelease(t *testing.T) {
 	app := NewApp()
 	app.ctx = context.Background()
 	app.readyHook = func() {}
-	app.enableDeferredRebuildRetry()
-	t.Cleanup(app.stopDeferredRebuildRetry)
 	tab := &WorkspaceTab{
 		ID:          "tab_deferred_retry",
 		Scope:       "global",
@@ -2775,8 +2771,8 @@ func TestDeferredRebuildRetryAppliesAfterLeaseRelease(t *testing.T) {
 		tab.releaseSessionLease()
 	})
 
-	if err := app.SetMaxSubagentDepth(1); err != nil {
-		t.Fatalf("SetMaxSubagentDepth: %v", err)
+	if err := app.SetAgentParams(0.2, 0, 0, "updated prompt"); err != nil {
+		t.Fatalf("SetAgentParams: %v", err)
 	}
 	if !app.deferredRebuildPending(tab.ID) {
 		t.Fatal("deferred rebuild was not scheduled while the lease is held")
@@ -2788,13 +2784,7 @@ func TestDeferredRebuildRetryAppliesAfterLeaseRelease(t *testing.T) {
 	externalLease.Release()
 	released = true
 
-	deadline := time.Now().Add(10 * time.Second)
-	for time.Now().Before(deadline) {
-		if !app.deferredRebuildPending(tab.ID) && app.controllerForTab(tab) != oldCtrl {
-			break
-		}
-		time.Sleep(10 * time.Millisecond)
-	}
+	app.deferredRebuildTick(false)
 	if app.deferredRebuildPending(tab.ID) {
 		t.Fatal("deferred rebuild is still pending after the lease was released")
 	}
@@ -2812,13 +2802,9 @@ func TestDeferredRebuildScheduleAfterStopIsNoop(t *testing.T) {
 	}
 }
 
-func TestDeferredRebuildWaitsForTabToBecomeActive(t *testing.T) {
+func TestDeferredRebuildAppliesToItsInactiveTarget(t *testing.T) {
 	isolateDesktopUserDirs(t)
 	setDesktopTestCredential(t, "OLD_MODEL_KEY", "sk-test")
-
-	prevInterval := deferredRebuildRetryInterval
-	deferredRebuildRetryInterval = 20 * time.Millisecond
-	t.Cleanup(func() { deferredRebuildRetryInterval = prevInterval })
 
 	cfg := config.Default()
 	cfg.DefaultModel = "old/old-model"
@@ -2863,8 +2849,6 @@ func TestDeferredRebuildWaitsForTabToBecomeActive(t *testing.T) {
 	app := NewApp()
 	app.ctx = context.Background()
 	app.readyHook = func() {}
-	app.enableDeferredRebuildRetry()
-	t.Cleanup(app.stopDeferredRebuildRetry)
 	tab := &WorkspaceTab{
 		ID:          "tab_pending",
 		Scope:       "global",
@@ -2895,50 +2879,25 @@ func TestDeferredRebuildWaitsForTabToBecomeActive(t *testing.T) {
 		tab.releaseSessionLease()
 	})
 
-	if err := app.SetMaxSubagentDepth(1); err != nil {
-		t.Fatalf("SetMaxSubagentDepth: %v", err)
+	if err := app.SetAgentParams(0.2, 0, 0, "updated prompt"); err != nil {
+		t.Fatalf("SetAgentParams: %v", err)
 	}
 	if !app.deferredRebuildPending(tab.ID) {
 		t.Fatal("deferred rebuild was not scheduled while the lease is held")
 	}
 
-	// Focus another tab, then release the lease: the retry must not rebuild
-	// while the pending tab is inactive (rebuildSettingLocked acts on the
-	// active tab), and must not touch the focused tab's runtime either.
+	// A concrete target retains its rebuild ownership when focus moves.
 	app.mu.Lock()
 	app.activeTabID = other.ID
 	app.mu.Unlock()
 	externalLease.Release()
 	released = true
-
-	time.Sleep(150 * time.Millisecond)
-	if !app.deferredRebuildPending(tab.ID) {
-		t.Fatal("pending entry was consumed while its tab was inactive")
-	}
-	if app.controllerForTab(tab) != oldCtrl {
-		t.Fatal("inactive pending tab was rebuilt")
+	app.deferredRebuildTick(false)
+	if app.deferredRebuildPending(tab.ID) || app.controllerForTab(tab) == oldCtrl {
+		t.Fatal("inactive target was not rebuilt")
 	}
 	if app.controllerForTab(other) != otherCtrl {
-		t.Fatal("focused tab was rebuilt by another tab's deferred retry")
-	}
-
-	// Switch back: the retry should now refresh the pending tab.
-	app.mu.Lock()
-	app.activeTabID = tab.ID
-	app.mu.Unlock()
-
-	deadline := time.Now().Add(10 * time.Second)
-	for time.Now().Before(deadline) {
-		if !app.deferredRebuildPending(tab.ID) && app.controllerForTab(tab) != oldCtrl {
-			break
-		}
-		time.Sleep(10 * time.Millisecond)
-	}
-	if app.deferredRebuildPending(tab.ID) {
-		t.Fatal("deferred rebuild still pending after its tab became active again")
-	}
-	if c := app.controllerForTab(tab); c == nil || c == oldCtrl {
-		t.Fatalf("controller was not rebuilt after tab reactivation: got %p", c)
+		t.Fatal("retry rebuilt the focused sibling")
 	}
 }
 
@@ -3032,7 +2991,7 @@ func TestSetEffortForTabLeaseHeldKeepsOldControllerAlive(t *testing.T) {
 }
 
 func TestSetEffortForTabReanchorsDepthCapRecoveryBranch(t *testing.T) {
-	isolateDesktopUserDirs(t)
+	isolateDesktopUserDirsSchemaOne(t)
 	setDesktopTestCredential(t, "OLD_MODEL_KEY", "sk-test")
 
 	cfg := config.Default()
@@ -3694,7 +3653,7 @@ func TestRebuildSettingLockedRestoresSessionAuthorizations(t *testing.T) {
 }
 
 func TestSetModelForTabContinuesRecoveryPathAfterSnapshotConflict(t *testing.T) {
-	isolateDesktopUserDirs(t)
+	isolateDesktopUserDirsSchemaOne(t)
 	setDesktopTestCredential(t, "OLD_MODEL_KEY", "sk-test")
 	setDesktopTestCredential(t, "NEW_MODEL_KEY", "sk-test")
 
@@ -4467,7 +4426,7 @@ reasoning_protocol = "none"
 	}
 }
 
-func TestClassicLayoutQuickClicksSerializeWorkspaceRebuild(t *testing.T) {
+func TestLegacyClassicLayoutQuickClicksSerializeWorkspaceRebuild(t *testing.T) {
 	runQuickClickWorkspaceReconcileTest(t, "classic")
 }
 
@@ -4679,7 +4638,7 @@ func TestSaveProviderPersistsReasoningProtocol(t *testing.T) {
 	t.Fatalf("Settings() missing saved provider: %+v", view.Providers)
 }
 
-func TestDeleteProviderMigratesConfigAndOpenTabs(t *testing.T) {
+func TestDeleteProviderMigratesConfigAndPreservesOpenTabs(t *testing.T) {
 	isolateDesktopUserDirs(t)
 	setDesktopTestCredential(t, "REASONIX_TEST_KEY", "sk-test")
 
@@ -4717,11 +4676,11 @@ func TestDeleteProviderMigratesConfigAndOpenTabs(t *testing.T) {
 	if providerAccessSet(got.Desktop.ProviderAccess)["prov-a"] {
 		t.Fatalf("provider access still contains prov-a: %+v", got.Desktop.ProviderAccess)
 	}
-	if tab.model != "prov-b/model-b1" || tab.Label != "prov-b/model-b1" {
-		t.Fatalf("tab model after delete = model:%q label:%q, want prov-b/model-b1", tab.model, tab.Label)
+	if tab.model != "prov-a/model-a1" || tab.Label != "prov-a/model-a1" {
+		t.Fatalf("saving deletion changed current identity: model:%q label:%q", tab.model, tab.Label)
 	}
-	if tab.Ctrl != nil {
-		t.Fatal("tab controller should be closed and cleared when retargeted without a running app context")
+	if tab.Ctrl != ctrl {
+		t.Fatal("saving deletion closed the current controller")
 	}
 }
 
@@ -4746,7 +4705,7 @@ func assertTabBuildSuperseded(t *testing.T, app *App, tab *WorkspaceTab, generat
 	}
 }
 
-func TestDeleteProviderSupersedesInFlightStartupBuild(t *testing.T) {
+func TestDeleteProviderLeavesStartupPublicationToVersionFence(t *testing.T) {
 	isolateDesktopUserDirs(t)
 	setDesktopTestCredential(t, "REASONIX_TEST_KEY", "sk-test")
 
@@ -4779,13 +4738,13 @@ func TestDeleteProviderSupersedesInFlightStartupBuild(t *testing.T) {
 	if err := app.DeleteProvider("prov-a"); err != nil {
 		t.Fatalf("DeleteProvider: %v", err)
 	}
-	assertTabBuildSuperseded(t, app, tab, 1, buildCtx)
-	if tab.model != "prov-b/model-b1" {
-		t.Fatalf("tab model after delete = %q, want prov-b/model-b1", tab.model)
+	if tab.buildGeneration != 1 || buildCtx.Err() != nil || tab.model != "prov-a/model-a1" {
+		t.Fatal("saving deletion changed an in-flight startup before its publication fence")
 	}
+	buildCancel()
 }
 
-func TestRemoveBuiltInProviderAccessSupersedesInFlightStartupBuild(t *testing.T) {
+func TestRemoveBuiltInProviderAccessLeavesStartupPublicationToVersionFence(t *testing.T) {
 	isolateDesktopUserDirs(t)
 	setDesktopTestCredential(t, "REASONIX_TEST_KEY", "sk-test")
 
@@ -4816,10 +4775,10 @@ func TestRemoveBuiltInProviderAccessSupersedesInFlightStartupBuild(t *testing.T)
 	if err := app.RemoveProviderAccess("deepseek"); err != nil {
 		t.Fatalf("RemoveProviderAccess: %v", err)
 	}
-	assertTabBuildSuperseded(t, app, tab, 1, buildCtx)
-	if tab.model != "prov-b/model-b1" {
-		t.Fatalf("tab model after access removal = %q, want prov-b/model-b1", tab.model)
+	if tab.buildGeneration != 1 || buildCtx.Err() != nil || tab.model != "deepseek/deepseek-chat" {
+		t.Fatal("saving access removal changed an in-flight startup before its publication fence")
 	}
+	buildCancel()
 }
 
 func TestClearActiveSessionRuntimeSupersedesInFlightStartupBuild(t *testing.T) {
@@ -4953,7 +4912,7 @@ func TestClearActiveSessionRuntimeReleasesResourcesWhenTabReplaced(t *testing.T)
 	}
 }
 
-func TestDeleteProviderRejectsRunningAffectedTab(t *testing.T) {
+func TestDeleteProviderPreservesRunningAffectedTab(t *testing.T) {
 	isolateDesktopUserDirs(t)
 	setDesktopTestCredential(t, "REASONIX_TEST_KEY", "sk-test")
 
@@ -4975,11 +4934,11 @@ func TestDeleteProviderRejectsRunningAffectedTab(t *testing.T) {
 	<-runner.started
 
 	err := app.DeleteProvider("prov-a")
-	if err == nil || !strings.Contains(err.Error(), "finish or cancel") {
-		t.Fatalf("DeleteProvider while running error = %v, want finish/cancel guard", err)
+	if err != nil || app.activeCtrl() != ctrl || !ctrl.RuntimeStatus().Running {
+		t.Fatalf("DeleteProvider interrupted accepted work: %v", err)
 	}
-	if _, ok := config.LoadForEdit(config.UserConfigPath()).Provider("prov-a"); !ok {
-		t.Fatal("provider should remain after rejected deletion")
+	if _, ok := config.LoadForEdit(config.UserConfigPath()).Provider("prov-a"); ok {
+		t.Fatal("provider deletion was not persisted during the run")
 	}
 
 	close(runner.release)
@@ -4987,7 +4946,7 @@ func TestDeleteProviderRejectsRunningAffectedTab(t *testing.T) {
 	ctrl.Close()
 }
 
-func TestDeleteProviderRechecksWorkAfterWaitingForRuntimeMutation(t *testing.T) {
+func TestDeleteProviderDoesNotWaitForRuntimeReconstruction(t *testing.T) {
 	isolateDesktopUserDirs(t)
 	setDesktopTestCredential(t, "REASONIX_TEST_KEY", "sk-test")
 	cfg := config.Default()
@@ -5005,53 +4964,31 @@ func TestDeleteProviderRechecksWorkAfterWaitingForRuntimeMutation(t *testing.T) 
 	app.setTestCtrl(control.New(control.Options{Runner: runner}), "prov-a/model-a1")
 	ctrl := app.activeCtrl()
 	app.runtimeRebuildMu.Lock()
-	rebuildHeld := true
-	defer func() {
-		if rebuildHeld {
-			app.runtimeRebuildMu.Unlock()
-		}
-	}()
-	deleteEntered := make(chan struct{})
-	var enteredOnce sync.Once
-	app.runtimeMutationBeforeLockHook = func(operation string) {
-		if operation == "delete-provider" {
-			enteredOnce.Do(func() { close(deleteEntered) })
-		}
-	}
-	deleteDone := make(chan error, 1)
-	go func() { deleteDone <- app.DeleteProvider("prov-a") }()
-	select {
-	case <-deleteEntered:
-	case <-time.After(5 * time.Second):
-		t.Fatal("provider deletion did not reach the runtime lifecycle lock")
-	}
-
+	defer app.runtimeRebuildMu.Unlock()
 	ctrl.Submit("work")
+	<-runner.started
+	done := make(chan error, 1)
+	go func() { done <- app.DeleteProvider("prov-a") }()
 	select {
-	case <-runner.started:
-	case <-time.After(5 * time.Second):
-		t.Fatal("turn did not start while provider deletion waited for the lifecycle lock")
-	}
-	app.runtimeRebuildMu.Unlock()
-	rebuildHeld = false
-	select {
-	case err := <-deleteDone:
-		if err == nil || !strings.Contains(err.Error(), "active work") {
-			t.Fatalf("DeleteProvider after late turn error = %v, want active-work guard", err)
+	case err := <-done:
+		if err != nil {
+			t.Fatal(err)
 		}
 	case <-time.After(5 * time.Second):
-		t.Fatal("provider deletion did not re-check runtime work after acquiring the lock")
+		t.Fatal("saving provider deletion waited for runtime reconstruction")
 	}
-	if _, ok := config.LoadForEdit(config.UserConfigPath()).Provider("prov-a"); !ok {
-		t.Fatal("provider was deleted after a turn started while deletion waited")
+	if app.activeCtrl() != ctrl || !ctrl.RuntimeStatus().Running {
+		t.Fatal("saving deletion interrupted accepted work")
 	}
-
+	if _, ok := config.LoadForEdit(config.UserConfigPath()).Provider("prov-a"); ok {
+		t.Fatal("deletion was not committed")
+	}
 	close(runner.release)
 	waitNotRunning(t, ctrl)
 	ctrl.Close()
 }
 
-func TestDeleteProviderReleasesAffectedTabSharedHostReference(t *testing.T) {
+func TestDeleteProviderPreservesAffectedTabSharedHostReference(t *testing.T) {
 	isolateDesktopUserDirs(t)
 	setDesktopTestCredential(t, "REASONIX_TEST_KEY", "sk-test")
 	cfg := config.Default()
@@ -5079,18 +5016,20 @@ func TestDeleteProviderReleasesAffectedTabSharedHostReference(t *testing.T) {
 	if err := app.DeleteProvider("prov-a"); err != nil {
 		t.Fatalf("DeleteProvider: %v", err)
 	}
-	if tab.SharedHostKey != "" {
-		t.Fatalf("affected tab retained shared host key %q", tab.SharedHostKey)
+	if tab.SharedHostKey != hostKey || tab.Ctrl != ctrl {
+		t.Fatal("saving deletion released the current runtime's shared host")
 	}
 	app.sharedHostsMu.Lock()
 	_, retained := app.sharedHosts[hostKey]
 	app.sharedHostsMu.Unlock()
-	if retained {
-		t.Fatal("provider deletion leaked the affected tab's shared host reference")
+	if !retained {
+		t.Fatal("provider deletion released an owned shared host reference")
 	}
+	ctrl.Close()
+	app.releaseSharedHost(hostKey)
 }
 
-func TestRemoveBuiltInProviderAccessReleasesAffectedTabSharedHostReference(t *testing.T) {
+func TestRemoveBuiltInProviderAccessPreservesAffectedTabSharedHostReference(t *testing.T) {
 	isolateDesktopUserDirs(t)
 	setDesktopTestCredential(t, "REASONIX_TEST_KEY", "sk-test")
 	cfg := config.Default()
@@ -5119,18 +5058,20 @@ func TestRemoveBuiltInProviderAccessReleasesAffectedTabSharedHostReference(t *te
 	if err := app.RemoveProviderAccess("deepseek"); err != nil {
 		t.Fatalf("RemoveProviderAccess: %v", err)
 	}
-	if tab.SharedHostKey != "" {
-		t.Fatalf("affected tab retained shared host key %q", tab.SharedHostKey)
+	if tab.SharedHostKey != hostKey || tab.Ctrl != ctrl {
+		t.Fatal("saving access removal released the current runtime's shared host")
 	}
 	app.sharedHostsMu.Lock()
 	_, retained := app.sharedHosts[hostKey]
 	app.sharedHostsMu.Unlock()
-	if retained {
-		t.Fatal("provider access removal leaked the affected tab's shared host reference")
+	if !retained {
+		t.Fatal("provider access removal released an owned shared host reference")
 	}
+	ctrl.Close()
+	app.releaseSharedHost(hostKey)
 }
 
-func TestDeleteProviderRejectsAffectedBackgroundJobs(t *testing.T) {
+func TestDeleteProviderPreservesAffectedBackgroundJobs(t *testing.T) {
 	isolateDesktopUserDirs(t)
 	setDesktopTestCredential(t, "REASONIX_TEST_KEY", "sk-test")
 
@@ -5160,15 +5101,15 @@ func TestDeleteProviderRejectsAffectedBackgroundJobs(t *testing.T) {
 	})
 
 	err := app.DeleteProvider("prov-a")
-	if err == nil || !strings.Contains(err.Error(), "active work") {
-		t.Fatalf("DeleteProvider with background job error = %v, want active-work guard", err)
+	if err != nil || !controllerHasActiveRuntimeWork(ctrl) {
+		t.Fatalf("DeleteProvider interrupted background work: %v", err)
 	}
-	if _, ok := config.LoadForEdit(config.UserConfigPath()).Provider("prov-a"); !ok {
-		t.Fatal("provider should remain after rejected deletion")
+	if _, ok := config.LoadForEdit(config.UserConfigPath()).Provider("prov-a"); ok {
+		t.Fatal("provider deletion was not persisted")
 	}
 }
 
-func TestDeleteProviderRejectsUnaffectedBackgroundJobsBeforeSavingConfig(t *testing.T) {
+func TestDeleteProviderPreservesUnaffectedBackgroundJobsWhenSavingConfig(t *testing.T) {
 	isolateDesktopUserDirs(t)
 	setDesktopTestCredential(t, "REASONIX_TEST_KEY", "sk-test")
 
@@ -5187,15 +5128,15 @@ func TestDeleteProviderRejectsUnaffectedBackgroundJobsBeforeSavingConfig(t *test
 	app.setTestCtrl(newBackgroundJobController(t, "provider-unaffected-job"), "prov-b/model-b1")
 
 	err := app.DeleteProvider("prov-a")
-	if err == nil || !strings.Contains(err.Error(), "stop background jobs") {
-		t.Fatalf("DeleteProvider with unaffected background job error = %v, want active-work guard", err)
+	if err != nil || !controllerHasActiveRuntimeWork(app.activeCtrl()) {
+		t.Fatalf("DeleteProvider interrupted unrelated background work: %v", err)
 	}
-	if _, ok := config.LoadForEdit(config.UserConfigPath()).Provider("prov-a"); !ok {
-		t.Fatal("unaffected provider should remain after rejected deletion")
+	if _, ok := config.LoadForEdit(config.UserConfigPath()).Provider("prov-a"); ok {
+		t.Fatal("provider deletion was not persisted")
 	}
 }
 
-func TestRemoveBuiltInProviderAccessRejectsBackgroundJobsBeforeSavingConfig(t *testing.T) {
+func TestRemoveBuiltInProviderAccessPreservesBackgroundJobsWhenSavingConfig(t *testing.T) {
 	isolateDesktopUserDirs(t)
 	if err := os.MkdirAll(filepath.Dir(config.UserConfigPath()), 0o755); err != nil {
 		t.Fatalf("mkdir config dir: %v", err)
@@ -5229,31 +5170,38 @@ api_key_env = "MIMO_API_KEY"
 	app.setTestCtrl(newBackgroundJobController(t, "provider-access-unaffected-job"), "mimo-token-plan/mimo-v2.5-pro")
 
 	err := app.RemoveProviderAccess("deepseek")
-	if err == nil || !strings.Contains(err.Error(), "stop background jobs") {
-		t.Fatalf("RemoveProviderAccess with background job error = %v, want active-work guard", err)
+	if err != nil || !controllerHasActiveRuntimeWork(app.activeCtrl()) {
+		t.Fatalf("RemoveProviderAccess interrupted background work: %v", err)
 	}
 	cfg := config.LoadForEdit(config.UserConfigPath())
 	access := providerAccessSet(cfg.Desktop.ProviderAccess)
-	if !access["deepseek"] && !access["deepseek-flash"] {
-		t.Fatalf("provider_access should still contain deepseek after rejected removal: %+v", cfg.Desktop.ProviderAccess)
+	if access["deepseek"] || access["deepseek-flash"] {
+		t.Fatalf("provider access removal was not persisted: %+v", cfg.Desktop.ProviderAccess)
 	}
 }
 
-func TestConnectKeyRejectsBackgroundJobsBeforeSavingKey(t *testing.T) {
+func TestConnectKeySavesWhileBackgroundJobKeepsItsController(t *testing.T) {
 	isolateDesktopUserDirs(t)
 	t.Setenv("DEEPSEEK_API_KEY", "")
 	os.Unsetenv("DEEPSEEK_API_KEY")
+	oldFetch := connectKeyBalanceFetch
+	connectKeyBalanceFetch = func(context.Context, *http.Client, string, string) (*billing.Balance, error) {
+		return &billing.Balance{Available: true}, nil
+	}
+	t.Cleanup(func() { connectKeyBalanceFetch = oldFetch })
 
 	app := NewApp()
 	app.ctx = context.Background()
 	app.setTestCtrl(newBackgroundJobController(t, "connect-key-job"), "deepseek-flash/deepseek-v4-flash")
+	oldCtrl := app.activeCtrl()
 
 	_, err := app.ConnectKey("sk-test")
-	if err == nil || !strings.Contains(err.Error(), "stop background jobs") {
-		t.Fatalf("ConnectKey with background job error = %v, want active-work guard", err)
+	if err != nil {
+		t.Fatalf("ConnectKey with background job: %v", err)
 	}
-	if data, readErr := os.ReadFile(config.UserCredentialsPath()); readErr == nil && strings.Contains(string(data), "DEEPSEEK_API_KEY") {
-		t.Fatalf("onboarding key should not be saved after rejected connect:\n%s", data)
+	p, ok := config.LoadForEdit(config.UserConfigPath()).Provider("deepseek")
+	if !ok || !p.Configured() || app.activeCtrl() != oldCtrl {
+		t.Fatal("key save must configure the connection and preserve the background runtime")
 	}
 }
 
@@ -5301,7 +5249,7 @@ func TestConnectKeyRestoresDeepSeekProviderAccess(t *testing.T) {
 	}
 }
 
-func TestConnectKeyFreshInstallUsesDeepSeekAnthropicDefaults(t *testing.T) {
+func TestConnectKeyFreshInstallUsesDeepSeekChatAndIndependentSearchDefaults(t *testing.T) {
 	isolateDesktopUserDirs(t)
 	oldFetch := connectKeyBalanceFetch
 	connectKeyBalanceFetch = func(context.Context, *http.Client, string, string) (*billing.Balance, error) {
@@ -5332,9 +5280,9 @@ func TestConnectKeyFreshInstallUsesDeepSeekAnthropicDefaults(t *testing.T) {
 	if !ok {
 		t.Fatalf("default model %q did not resolve", cfg.DefaultModel)
 	}
-	if entry.Kind != "anthropic" || entry.BaseURL != "https://api.deepseek.com/anthropic" ||
-		entry.Thinking != "enabled" || !config.EffectiveWebSearch(entry) || config.EffectiveVision(entry) {
-		t.Fatalf("fresh-install DeepSeek entry = %+v; want Anthropic, thinking, web search, and text-only vision", entry)
+	if entry.Kind != "openai" || entry.BaseURL != "https://api.deepseek.com" ||
+		entry.Thinking != "enabled" || !config.EffectiveIndependentWebSearch(entry) || config.EffectiveVision(entry) {
+		t.Fatalf("fresh-install DeepSeek entry = %+v; want Chat Completions, thinking, independent search, and text-only vision", entry)
 	}
 	if app.NeedsOnboarding() {
 		t.Fatal("fresh-install onboarding should close after the validated DeepSeek key is stored")
@@ -5433,8 +5381,8 @@ func TestConnectKeyRebuildLeaseHeldKeepsCurrentController(t *testing.T) {
 	if err != nil {
 		t.Fatalf("ConnectKey: %v", err)
 	}
-	if !strings.Contains(warning, "another Reasonix window") {
-		t.Fatalf("ConnectKey warning = %q, want user-facing lease warning", warning)
+	if warning != "" {
+		t.Fatalf("ConnectKey warning = %q; saving does not acquire a runtime lease", warning)
 	}
 	if tab.Ctrl != oldCtrl {
 		t.Fatalf("tab controller changed after failed connect-key rebuild")
@@ -5442,8 +5390,9 @@ func TestConnectKeyRebuildLeaseHeldKeepsCurrentController(t *testing.T) {
 	if tab.StartupErr != "" {
 		t.Fatalf("tab startup error = %q, want unchanged current session", tab.StartupErr)
 	}
-	if !config.CredentialStored(onboardingKeyEnv) {
-		t.Fatal("onboarding key should be persisted even when hot rebuild is deferred")
+	p, ok := config.LoadForEdit(config.UserConfigPath()).Provider("deepseek")
+	if !ok || !p.Configured() {
+		t.Fatal("onboarding key should be persisted under the new connection reference")
 	}
 }
 
@@ -5945,7 +5894,7 @@ func TestSetTokenModeKeepsControllerWhenRebuildFails(t *testing.T) {
 	assertDeprecatedExecutionModeNoop(t, app, tab, old, *notices)
 }
 
-func TestSetEffortRejectsRunningTurn(t *testing.T) {
+func TestSetEffortDefersRunningTurn(t *testing.T) {
 	isolateDesktopUserDirs(t)
 
 	runner := &blockingRunner{started: make(chan struct{}), release: make(chan struct{})}
@@ -5955,8 +5904,12 @@ func TestSetEffortRejectsRunningTurn(t *testing.T) {
 	<-runner.started
 
 	err := app.SetEffort("max")
-	if err == nil || !strings.Contains(err.Error(), "finish or cancel") {
-		t.Fatalf("SetEffort while running error = %v, want finish/cancel guard", err)
+	if err != nil {
+		t.Fatalf("SetEffort while running: %v", err)
+	}
+	info := app.Effort()
+	if info.Current != "auto" || info.Pending == nil || *info.Pending != "max" || !info.CanDefer {
+		t.Fatalf("running effort = %+v, want auto with max pending", info)
 	}
 
 	close(runner.release)
@@ -7579,56 +7532,8 @@ func (r *appendingDesktopRunner) Run(_ context.Context, input string) error {
 	return nil
 }
 
-func TestSubmitToTabHistoryDisplaysRawInputAfterMemoryCompose(t *testing.T) {
-	isolateDesktopUserDirs(t)
-	dir := config.SessionDir()
-	if err := os.MkdirAll(dir, 0o755); err != nil {
-		t.Fatal(err)
-	}
-
-	path := filepath.Join(dir, "memory-display.jsonl")
-	sess := agent.NewSession("sys")
-	exec := agent.New(nil, nil, sess, agent.Options{}, event.Discard)
-	runner := &appendingDesktopRunner{session: sess, started: make(chan string, 1)}
-	ctrl := control.New(control.Options{
-		Runner:      runner,
-		Executor:    exec,
-		Sink:        event.Discard,
-		SessionDir:  dir,
-		SessionPath: path,
-		Label:       "test",
-	})
-	defer ctrl.Close()
-
-	app := NewApp()
-	app.setTestCtrl(ctrl, "deepseek/test")
-	ctrl.QueueMemory(`Saved memory "reasonix-contributions": contribution count updated`)
-
-	const prompt = "不要，删了"
-	app.SubmitToTab("test", prompt)
-	composed := <-runner.started
-	waitNotRunning(t, ctrl)
-
-	if !strings.Contains(composed, "<memory-update>") || !strings.HasSuffix(composed, prompt) {
-		t.Fatalf("model input should include memory update followed by prompt, got %q", composed)
-	}
-	got := app.HistoryForTab("test")
-	if len(got) < 2 {
-		t.Fatalf("history length = %d, want user + assistant", len(got))
-	}
-	if got[0].Role != "system" || got[1].Role != "user" {
-		t.Fatalf("history roles = %+v, want system then user", got[:min(len(got), 2)])
-	}
-	if got[1].Content != prompt {
-		t.Fatalf("displayed user content = %q, want %q", got[1].Content, prompt)
-	}
-	if strings.Contains(got[1].Content, "<memory-update>") {
-		t.Fatalf("displayed user content leaked memory update: %q", got[1].Content)
-	}
-}
-
 func TestForkCreatesActiveTabWithoutSwitchingSourceController(t *testing.T) {
-	isolateDesktopUserDirs(t)
+	isolateDesktopUserDirsSchemaOne(t)
 
 	workspace := robustTempDir(t)
 	if err := os.WriteFile(filepath.Join(workspace, "reasonix.toml"), []byte(""), 0o644); err != nil {

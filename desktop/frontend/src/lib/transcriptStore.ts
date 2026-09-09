@@ -30,6 +30,7 @@
 // Rendering consumes the store through TranscriptProjection (items + paging
 // state); useController dispatches projections into per-tab reducer state.
 import { asArray } from "./array";
+import { historicalResultNotice } from "./completionResultState";
 import { app } from "./bridge";
 import { noteHistoryPage, registerTranscriptCacheDiagnostics } from "./sessionDiagnostics";
 import { TranscriptMarkdownCache, type ParsedMarkdownValue } from "./transcriptMarkdownCache";
@@ -41,7 +42,7 @@ import {
   isReadOnlyTool,
   type Item,
 } from "./useController";
-import { localizedNoticeText, quietTranscriptNoticeKey } from "./controllerNotices";
+import { historyNoticeItems } from "./controllerNotices";
 import type {
   HistoryContentChunk,
   HistoryContentRef,
@@ -171,32 +172,7 @@ function compareRecords(a: Pick<TranscriptRecord, "order" | "entryId">, b: Pick<
   return a.entryId < b.entryId ? -1 : a.entryId > b.entryId ? 1 : 0;
 }
 
-// recordBytes approximates the retained UTF-16 size of a record's inline text
-// (the same fields the Go side counts for its slice byte budget).
-function recordBytes(m: HistoryMessage): number {
-  let chars =
-    (m.content?.length ?? 0) +
-    (m.reasoning?.length ?? 0) +
-    (m.submitText?.length ?? 0) +
-    (m.detail?.length ?? 0) +
-    (m.code?.length ?? 0) +
-    (m.summary?.length ?? 0) +
-    (m.archive?.length ?? 0) +
-    (m.toolResultError?.length ?? 0) +
-    (m.toolCallId?.length ?? 0) +
-    (m.toolName?.length ?? 0) +
-    (m.role?.length ?? 0);
-  for (const tc of m.toolCalls ?? []) {
-    chars +=
-      (tc.arguments?.length ?? 0) +
-      (tc.subject?.length ?? 0) +
-      (tc.summary?.length ?? 0) +
-      (tc.diff?.length ?? 0) +
-      (tc.id?.length ?? 0) +
-      (tc.name?.length ?? 0);
-  }
-  return chars * 2;
-}
+import { recordBytes } from "./transcriptRecordBytes";
 
 function entryToRecord(entry: HistoryEntry): TranscriptRecord {
   return {
@@ -240,23 +216,12 @@ function convertRecord(
     return { items, claims, unresolvedIds, pendingPositional, matches };
   }
   if (m.role === "notice") {
-    if (m.content.trim() !== "" || m.decisionReceipt) {
-      if (!quietTranscriptNoticeKey(m.content, m.code)) {
-        const text = localizedNoticeText(m.content, m.code);
-        if (!quietTranscriptNoticeKey(text, m.code)) {
-          const trimmedDetail = m.detail?.trim();
-          items.push({
-            kind: "notice",
-            id,
-            level: m.level === "warn" ? "warn" : "info",
-            text,
-            ...(trimmedDetail ? { detail: trimmedDetail } : {}),
-            ...(m.decisionReceipt ? { decisionReceipt: m.decisionReceipt } : {}),
-          });
-        }
-      }
+    if (m.completionReceipt || m.completionSummary) {
+      const result = historicalResultNotice(m, id);
+      if (result) items.push(result);
+      return { items, claims, unresolvedIds, pendingPositional, matches };
     }
-    return { items, claims, unresolvedIds, pendingPositional, matches };
+    return { items: historyNoticeItems(m, id), claims, unresolvedIds, pendingPositional, matches };
   }
   if (m.role === "compaction") {
     items.push({

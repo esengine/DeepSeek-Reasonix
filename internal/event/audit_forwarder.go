@@ -16,6 +16,7 @@ type AuditForwarder struct{ Inner Sink }
 // wrappers use compile-time assertions instead of maintaining partial lists in
 // tests that silently drift when a new capability is added.
 type OptionalSinkCapabilities interface {
+	RuntimeStateSink
 	DelegationAuditSink
 	ReadinessAuditSink
 	AnchorSafetyAuditSink
@@ -28,6 +29,7 @@ type OptionalSinkCapabilities interface {
 	TurnCompletionSink
 	WorkspaceMutationSink
 	RunBudgetSink
+	SubagentLifecycleAuditSink
 }
 
 var _ OptionalSinkCapabilities = AuditForwarder{}
@@ -76,6 +78,10 @@ func (f AuditForwarder) RecordWorkspaceMutation(m WorkspaceMutation) {
 
 func (f AuditForwarder) RecordRunBudget(s RunBudgetSample) {
 	RecordRunBudget(f.Inner, s)
+}
+
+func (f AuditForwarder) RecordSubagentLifecycle(info SubagentLifecycleInfo) {
+	RecordSubagentLifecycle(f.Inner, info)
 }
 
 // DelegationAuditSink receives one receipt per completed sub-agent run.

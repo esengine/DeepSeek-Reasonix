@@ -65,13 +65,11 @@ console.log("\nworkspace changes git errors");
       },
     },
   );
-  await waitFor("turn verification summary", () => document.body.textContent?.includes("Turn verification") === true);
-  const text = document.querySelector(".workspace-completion-summary")?.textContent ?? "";
-  ok(text.includes("Partially complete"), "change panel localizes the completion verdict");
-  ok(text.includes("1 checks failed") && text.includes("2 checks skipped"), "change panel shows detailed check counts on demand");
-  ok(text.includes("stale checks") && text.includes("Other"), "change panel uses safe labels for known and unknown gaps");
-  ok(text.includes("Turn verification limited"), "change panel explains constrained verification without exposing an internal flag");
-  ok(!text.includes("balanced") && !text.includes("partial") && !text.includes("stale_check") && !text.includes("future_internal_value"), "change panel exposes no raw enum values");
+  await waitFor("workspace changes without a turn request", () => document.body.textContent?.includes("No changed files") === true);
+  ok(document.querySelector(".workspace-completion-summary") === null, "whole workspace does not imply that the latest turn verifies all files");
+  ok(document.querySelector(".workspace-turn-result") === null, "turn inspection requires its explicit view request");
+  const text = document.body.textContent ?? "";
+  ok(!text.includes("balanced") && !text.includes("stale_check") && !text.includes("future_internal_value"), "whole workspace exposes no completion enum values");
   await act(async () => {
     root.unmount();
   });

@@ -31,7 +31,7 @@ func NewIndexedTool(opts Options) tool.Tool {
 	return historyTool{searcher: NewIndexedSearcher(opts)}
 }
 
-func (historyTool) Name() string { return "history" }
+func (historyTool) Name() string { return tool.HostHistory }
 
 func (historyTool) Description() string {
 	return "Search saved local session history with lightweight BM25 retrieval, then read messages around a hit. " +

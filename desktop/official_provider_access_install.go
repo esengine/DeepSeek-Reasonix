@@ -12,51 +12,34 @@ import (
 // Settings > Model > Access list. The runtime default providers still exist
 // independently; this only records the user's explicit access setup.
 func (a *App) AddOfficialProviderAccess(kind, key string) (string, error) {
-	if err := a.ensureActiveTabRebuildAllowed("provider access"); err != nil {
-		return "", err
+	return a.applyModelConfigChangeWithWarning("provider access", func(c *config.Config) error { return addOfficialProviderAccessConfig(c, kind, key) })
+}
+
+func addOfficialProviderAccessConfig(c *config.Config, kind, key string) error {
+	entries, keyEnv, err := officialProviderTemplate(kind, c.DeepSeekOfficialPricingLanguage())
+	if err != nil {
+		return err
 	}
-	keyWarning := ""
-	if err := func() error {
-		// Keep conflict validation, credential selection, and the config mutation
-		// under one config revision. The lock order is config -> credentials.
-		unlock := config.LockUserConfigEdits()
-		defer unlock()
-		cfg, path, err := a.loadDesktopUserConfigForEdit()
+	if _, err := validateOfficialProviderAccessInstall(c, kind, entries, keyEnv); err != nil {
+		return err
+	}
+	names, err := installOfficialProviderAccess(c, kind, entries)
+	if err != nil {
+		return err
+	}
+	if strings.TrimSpace(key) != "" {
+		env, err := c.StageModelCredentialLocked(key)
 		if err != nil {
 			return err
 		}
-		entries, keyEnv, err := officialProviderTemplate(kind, cfg.DeepSeekOfficialPricingLanguage())
-		if err != nil {
-			return err
-		}
-		keyEnv, err = validateOfficialProviderAccessInstall(cfg, kind, entries, keyEnv)
-		if err != nil {
-			return err
-		}
-		if strings.TrimSpace(key) != "" && keyEnv != "" {
-			keyWarning, err = a.saveProviderCredential(keyEnv, key)
-			if err != nil {
-				return err
+		for i := range c.Providers {
+			if slices.Contains(names, c.Providers[i].Name) {
+				c.Providers[i].APIKeyEnv = env
 			}
 		}
-		names, err := installOfficialProviderAccess(cfg, kind, entries)
-		if err != nil {
-			return err
-		}
-		addProviderAccess(cfg, names...)
-		return cfg.SaveTo(path)
-	}(); err != nil {
-		return "", err
 	}
-	rebuildWarning := ""
-	if err := a.rebuildSetting("provider access"); err != nil {
-		var deferred bool
-		rebuildWarning, deferred = a.deferredRebuildWarning("provider access", err)
-		if !deferred {
-			return "", err
-		}
-	}
-	return appendSettingsWarning(keyWarning, rebuildWarning), nil
+	addProviderAccess(c, names...)
+	return nil
 }
 
 func validateOfficialProviderAccessInstall(c *config.Config, kind string, entries []config.ProviderEntry, fallbackKeyEnv string) (string, error) {

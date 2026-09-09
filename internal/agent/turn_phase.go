@@ -77,7 +77,7 @@ func (a *Agent) emitCompletionSummary(c *taskcontract.Contract, report completio
 		Floor:              floor,
 		RequiredSuppressed: c.HasSuppressed(),
 	})
-	if mutations == 0 && !attention {
+	if mutations == 0 && !attention && len(report.Verifications) == 0 {
 		return
 	}
 	review := "none"

@@ -21,10 +21,15 @@ const (
 	defaultCompactRatio    = 0.80 // sole automatic maintenance trigger (new configs)
 	recentTailBudgetRatio  = 0.16 // recent verbatim tail as a fraction of the window
 	summaryOutputMaxTokens = 8192 // max digest output; further clipped by remaining candidate space
-	minRecentKeep          = 2    // never keep fewer recent messages than this
-	minCompactMessages     = 2    // skip compaction below this many compactable messages
-	fallbackTokPerChar     = 0.25 // ~4 chars/token, used before any usage is available to calibrate
-	protocolReserveTokens  = 256  // provider framing and control fields not represented by message estimates
+
+	// summaryReasoningMaxBytes clamps a surfaced reasoning-only summary
+	// (~8k tokens of bytes), matching the summaryOutputMaxTokens envelope.
+	summaryReasoningMaxBytes = 32768
+
+	minRecentKeep         = 2    // never keep fewer recent messages than this
+	minCompactMessages    = 2    // skip compaction below this many compactable messages
+	fallbackTokPerChar    = 0.25 // ~4 chars/token, used before any usage is available to calibrate
+	protocolReserveTokens = 256  // provider framing and control fields not represented by message estimates
 )
 
 var (
@@ -72,6 +77,23 @@ Rules: be terse — bullet points and fragments, not prose. Preserve identifiers
 // budgets are intentionally absent: they are clipped against the final request
 // at send time and must never make compaction happen earlier than the user's
 // configured compact_ratio.
+func (a *Agent) compact(ctx context.Context, trigger, instructions string, force bool) error {
+	_, err := a.compactToProjectionWithChunked(ctx, trigger, instructions, foldRequest{
+		force: force, allowChunked: trigger == CompactionTriggerManual,
+	})
+	return err
+}
+
+func (a *Agent) compactToProjection(ctx context.Context, trigger, instructions string, force, mustFree bool) (CompactionOutcome, error) {
+	return a.compactToProjectionWithChunked(ctx, trigger, instructions, foldRequest{force: force, mustFree: mustFree})
+}
+
+func (a *Agent) compactToProjectionWithChunked(ctx context.Context, trigger, instructions string, req foldRequest) (CompactionOutcome, error) {
+	a.sess.compactionRunMu.Lock()
+	defer a.sess.compactionRunMu.Unlock()
+	return a.compactToProjectionLocked(ctx, trigger, instructions, req)
+}
+
 func (a *Agent) compactTrigger() int {
 	window := a.effectiveContextWindow()
 	if a == nil || window <= 0 {
@@ -119,7 +141,7 @@ func foldEconomics(region []provider.Message) bool {
 func estimateMessagesTokens(msgs []provider.Message) int {
 	total := 0
 	for _, m := range msgs {
-		if m.LocalOnly {
+		if m.LocalOnly || IsPinnedContextRevision(m) {
 			continue
 		}
 		total += 4 // chat-message framing overhead
@@ -372,7 +394,7 @@ func (a *Agent) summaryRequest(region []provider.Message, instructions string) p
 		}
 	}
 	messages := a.normalizeModelRequestMessages(prefix)
-	messages = append(messages, provider.Message{Role: provider.RoleUser, Content: compactionInstructionWithFocus(instructions)})
+	messages = append(messages, HostGeneratedUserMessage(compactionInstructionWithFocus(instructions)))
 	var schemas []provider.ToolSchema
 	if a.svc.tools != nil {
 		schemas = a.providerToolSchemas()
@@ -387,8 +409,16 @@ func (a *Agent) summaryRequest(region []provider.Message, instructions string) p
 
 // summarize asks the executor's own provider to distill a replayed prefix into
 // a briefing. instructions is optional /compact focus + PreCompact text.
+func (a *Agent) summarize(ctx context.Context, region []provider.Message, instructions string) (string, *provider.Usage, error) {
+	req := a.summaryRequest(region, instructions)
+	summary, usage, err := a.runSummaryRequest(ctx, req)
+	a.observeSummaryOutcome(req, usage, err)
+	return summary, usage, err
+}
+
+// runSummaryRequest admits, sends, and drains one summary request.
 // Named returns so defer can attach RequestCount and still return usage.
-func (a *Agent) summarize(ctx context.Context, region []provider.Message, instructions string) (summary string, usage *provider.Usage, err error) {
+func (a *Agent) runSummaryRequest(ctx context.Context, req provider.Request) (summary string, usage *provider.Usage, err error) {
 	ctx, cancel := context.WithCancel(ctx)
 	defer cancel()
 	ctx = provider.WithRequestAttemptCounter(ctx)
@@ -399,7 +429,6 @@ func (a *Agent) summarize(ctx context.Context, region []provider.Message, instru
 		}
 	}()
 	defer trackPublishedHostStream(ctx, cancel)()
-	req := a.summaryRequest(region, instructions)
 	if err := a.applySummaryAdmissionToRequest(&req); err != nil {
 		return "", usage, err
 	}
@@ -412,13 +441,15 @@ func (a *Agent) summarize(ctx context.Context, region []provider.Message, instru
 	if a.svc.prov == nil {
 		return "", usage, fmt.Errorf("summary unavailable")
 	}
-	ch, err := a.svc.prov.Stream(ctx, req)
+	ch, err := provider.StreamAuxiliary(provider.WithRecoverySleeper(ctx, recoverySleep), a.svc.prov, req)
 	if err != nil {
 		return "", usage, err
 	}
 
 	// Unblock on timeout if the stream stalls while open.
 	var b strings.Builder
+	var reasoning strings.Builder
+	toolCalls := 0
 	for {
 		select {
 		case <-ctx.Done():
@@ -430,13 +461,24 @@ func (a *Agent) summarize(ctx context.Context, region []provider.Message, instru
 				}
 				s := strings.TrimSpace(b.String())
 				if s == "" {
-					return "", usage, fmt.Errorf("summarizer returned empty output")
+					// Thinking providers may answer with reasoning_content only. Surface
+					// it as the briefing unless the turn also reached for tools: that
+					// reasoning is private chain-of-thought, not digest material.
+					r := strings.TrimSpace(reasoning.String())
+					if r == "" || toolCalls > 0 {
+						return "", usage, fmt.Errorf("summarizer returned empty output")
+					}
+					return truncateUTF8Bytes(r, summaryReasoningMaxBytes), usage, nil
 				}
 				return s, usage, nil
 			}
 			switch chunk.Type {
 			case provider.ChunkText:
 				b.WriteString(chunk.Text)
+			case provider.ChunkReasoning:
+				reasoning.WriteString(chunk.Text)
+			case provider.ChunkToolCall, provider.ChunkToolCallStart:
+				toolCalls++
 			case provider.ChunkUsage:
 				usage = chunk.Usage
 			case provider.ChunkError:
@@ -453,7 +495,9 @@ func (a *Agent) summarizeOnce(ctx context.Context, fold []provider.Message, inst
 	return a.summarize(ctx, fold, instructions)
 }
 
-// renderTranscript flattens messages into a readable transcript for summarization.
+// renderTranscript flattens messages into a bounded transcript for the
+// transcript-form summary request. Tool bodies are the provider-visible
+// Content cut to slimToolResultRunes; RawContent never enters a summary.
 func renderTranscript(msgs []provider.Message) string {
 	var b strings.Builder
 	for _, m := range msgs {
@@ -472,11 +516,7 @@ func renderTranscript(msgs []provider.Message) string {
 			}
 			b.WriteString("\n")
 		case provider.RoleTool:
-			body := m.Content
-			if m.RawContent != "" {
-				body = m.RawContent
-			}
-			fmt.Fprintf(&b, "[tool %s result]\n%s\n\n", m.Name, body)
+			fmt.Fprintf(&b, "[tool %s result]\n%s\n\n", m.Name, slimToolResult(m.Content))
 		case provider.RoleSystem:
 			fmt.Fprintf(&b, "[system]\n%s\n\n", m.Content)
 		}

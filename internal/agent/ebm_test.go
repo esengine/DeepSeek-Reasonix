@@ -43,7 +43,7 @@ func TestApplyEBMFiresOncePerTurnWhenEnabled(t *testing.T) {
 	defer func() { ebmEnabled = old }()
 
 	sink := &ebmSink{}
-	a := &Agent{svc: agentServices{sink: sink}}
+	a := &Agent{svc: agentServices{sink: sink}, continuationPolicy: ContinuationExplicitFlow}
 
 	below := evidence.OutcomeSample{DebtAge: 1, BlindMutations: 2}
 	results, outcomes := ebmRound()

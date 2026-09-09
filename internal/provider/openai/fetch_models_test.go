@@ -10,6 +10,7 @@ import (
 	"testing"
 
 	"reasonix/internal/netclient"
+	"reasonix/internal/provider"
 )
 
 func TestFetchModels(t *testing.T) {
@@ -41,6 +42,115 @@ func TestFetchModels(t *testing.T) {
 	}
 	if models[0] != "model-a" || models[1] != "model-b" {
 		t.Errorf("want sorted [model-a model-b], got %v", models)
+	}
+}
+
+func TestDiscoveryUnknownAndConflictingDuplicates(t *testing.T) {
+	cases := []struct {
+		name    string
+		entries []string
+		state   string
+	}{
+		{"missing", []string{`{"id":"x"}`}, "unknown"},
+		{"invalid standard blocks positive alias", []string{`{"id":"x","input_modalities":null,"vision":true}`}, "unknown"},
+		{"invalid array", []string{`{"id":"x","input_modalities":["text",42],"supports_vision":true}`}, "unknown"},
+		{"invalid bool", []string{`{"id":"x","vision":null}`}, "unknown"},
+		{"empty capabilities", []string{`{"id":"x","capabilities":{},"vision":true}`}, "unknown"},
+		{"conflict sticky", []string{`{"id":"x","vision":true}`, `{"id":"x","vision":false}`, `{"id":"x","vision":true}`, `{"id":"x"}`}, "unknown"},
+		{"unknown does not override known", []string{`{"id":"x"}`, `{"id":"x","vision":true}`}, "supported"},
+		{"unknown does not erase negative", []string{`{"id":"x"}`, `{"id":"x","vision":false}`}, "unsupported"},
+		{"standard wins", []string{`{"id":"x","input_modalities":["text"],"vision":true}`}, "unsupported"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			var permutations func([]string, int)
+			permutations = func(entries []string, i int) {
+				if i < len(entries) {
+					for j := i; j < len(entries); j++ {
+						entries[i], entries[j] = entries[j], entries[i]
+						permutations(entries, i+1)
+						entries[i], entries[j] = entries[j], entries[i]
+					}
+					return
+				}
+				srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+					fmt.Fprint(w, `{"data":[`+strings.Join(entries, ",")+`]}`)
+				}))
+				catalog, err := FetchModelCatalog(context.Background(), srv.URL, "", nil)
+				srv.Close()
+				if err != nil || len(catalog) != 1 {
+					t.Fatalf("catalog=%+v err=%v", catalog, err)
+				}
+				state := "unsupported"
+				if catalog[0].InputModalities == nil {
+					state = "unknown"
+				} else if catalog[0].SupportsInput(provider.ModalityImage) {
+					state = "supported"
+				}
+				if state != tc.state {
+					t.Fatalf("entries %v: got %s want %s", entries, state, tc.state)
+				}
+			}
+			permutations(append([]string(nil), tc.entries...), 0)
+		})
+	}
+}
+
+func TestFetchModelCatalogParsesInputModalitiesAndAliases(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_ = json.NewEncoder(w).Encode(map[string]any{"data": []any{
+			map[string]any{"id": "canonical", "input_modalities": []string{"text", "image"}},
+			map[string]any{"id": "nested", "modalities": map[string]any{"input": []string{"text", "image"}}},
+			map[string]any{"id": "vision-bool", "supports_vision": true},
+			map[string]any{"id": "text-only", "capabilities": map[string]any{"vision": false}},
+			map[string]any{"id": "missing"},
+		}})
+	}))
+	defer srv.Close()
+
+	got, err := FetchModelCatalog(context.Background(), srv.URL, "key", nil)
+	if err != nil {
+		t.Fatalf("FetchModelCatalog: %v", err)
+	}
+	byID := map[string][]string{}
+	for _, model := range got {
+		modalities := make([]string, len(model.InputModalities))
+		for i, modality := range model.InputModalities {
+			modalities[i] = string(modality)
+		}
+		byID[model.ID] = modalities
+	}
+	if got := byID["canonical"]; len(got) != 2 || got[1] != "image" {
+		t.Fatalf("canonical modalities = %v", got)
+	}
+	if got := byID["nested"]; len(got) != 2 || got[1] != "image" {
+		t.Fatalf("nested modalities = %v", got)
+	}
+	if got := byID["vision-bool"]; len(got) != 2 || got[1] != "image" {
+		t.Fatalf("vision bool modalities = %v", got)
+	}
+	if got := byID["text-only"]; len(got) != 1 || got[0] != "text" {
+		t.Fatalf("text-only modalities = %v", got)
+	}
+	if got := byID["missing"]; len(got) != 0 {
+		t.Fatalf("missing modalities = %v, want unknown", got)
+	}
+}
+
+func TestFetchModelCatalogCanonicalFieldWinsOverAlias(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_ = json.NewEncoder(w).Encode(map[string]any{"data": []any{
+			map[string]any{"id": "model", "input_modalities": []string{"text"}, "supports_vision": true},
+		}})
+	}))
+	defer srv.Close()
+
+	got, err := FetchModelCatalog(context.Background(), srv.URL, "key", nil)
+	if err != nil {
+		t.Fatalf("FetchModelCatalog: %v", err)
+	}
+	if len(got) != 1 || len(got[0].InputModalities) != 1 || got[0].InputModalities[0] != "text" {
+		t.Fatalf("catalog = %+v, canonical field should win", got)
 	}
 }
 

@@ -46,7 +46,7 @@ func (c *Catalog) DirectoryStatus(ctx context.Context, path string) DirectorySca
 }
 
 // DirectoryScanReady reports whether this directory has finished at least one
-// catalog scan. An opened-but-unscanned v6 cache is not ready: ListTopics would
+// catalog scan. An opened-but-unscanned current cache is not ready: ListTopics would
 // otherwise treat "no rows yet" as "the user has no conversations".
 func (c *Catalog) DirectoryScanReady(ctx context.Context, path string) bool {
 	return c.DirectoryStatus(ctx, path).State == "ready"
@@ -54,7 +54,7 @@ func (c *Catalog) DirectoryScanReady(ctx context.Context, path string) bool {
 
 // HasWorkspaceRecords reports whether any non-missing session is already
 // projected for this workspace. Used so an in-progress scan that has written
-// rows stays authoritative, while a brand-new empty v6 cache does not.
+// rows stays authoritative, while a brand-new empty cache does not.
 func (c *Catalog) HasWorkspaceRecords(ctx context.Context, scope, workspaceRoot string) bool {
 	if c == nil || c.db == nil {
 		return false

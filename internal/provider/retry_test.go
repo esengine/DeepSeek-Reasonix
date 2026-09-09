@@ -7,6 +7,7 @@ import (
 	"io"
 	"net"
 	"net/http"
+	"net/http/httptest"
 	"strings"
 	"sync"
 	"syscall"
@@ -40,6 +41,28 @@ func TestRetryableStatus(t *testing.T) {
 		if RetryableStatus(s) {
 			t.Errorf("status %d should not be retryable", s)
 		}
+	}
+}
+
+func TestSendWithRetryCarriesDisplayIdentityAndSanitizedRequestPath(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		http.NotFound(w, r)
+	}))
+	defer server.Close()
+	_, err := SendWithRetry(context.Background(), server.Client(), SendOptions{
+		Provider: "deepseek-anthropic", ProviderDisplayName: "Deepseek2", Protocol: "openai",
+	}, func(ctx context.Context) (*http.Request, error) {
+		return http.NewRequestWithContext(ctx, http.MethodPost, server.URL+"/anthropic/v1/chat/completions?token=secret", nil)
+	})
+	var apiErr *APIError
+	if !errors.As(err, &apiErr) {
+		t.Fatalf("error = %T %v", err, err)
+	}
+	if apiErr.Provider != "deepseek-anthropic" || apiErr.ProviderDisplayName != "Deepseek2" || apiErr.Protocol != "openai" || apiErr.RequestPath != "/anthropic/v1/chat/completions" {
+		t.Fatalf("API error identity = %+v", apiErr)
+	}
+	if strings.Contains(apiErr.RequestPath, "secret") {
+		t.Fatalf("query leaked into request path: %q", apiErr.RequestPath)
 	}
 }
 
@@ -305,5 +328,16 @@ func TestRequestAttemptCountSurvivesRetriesThenTerminalFailure(t *testing.T) {
 	usage := UsageWithRequestAttemptCount(ctx, nil)
 	if usage == nil || usage.TotalTokens != 0 || usage.RequestCount != 3 {
 		t.Fatalf("failed request usage = %+v, want tokens=0 requests=3", usage)
+	}
+}
+
+func TestIndependentRequestAttemptCounter(t *testing.T) {
+	parent := WithRequestAttemptCounter(context.Background())
+	recordRequestAttempt(parent)
+	child := WithIndependentRequestAttemptCounter(parent)
+	recordRequestAttempt(child)
+	recordRequestAttempt(child)
+	if RequestAttemptCount(parent) != 1 || RequestAttemptCount(child) != 2 {
+		t.Fatalf("auxiliary and main request counts leaked: parent=%d child=%d", RequestAttemptCount(parent), RequestAttemptCount(child))
 	}
 }

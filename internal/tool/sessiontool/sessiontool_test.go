@@ -115,6 +115,7 @@ func TestReadSession_ValidSession(t *testing.T) {
 	dir := t.TempDir()
 	sessionPath := filepath.Join(dir, "session.jsonl")
 	writeSessionJSONL(t, sessionPath, []provider.Message{
+		{Role: provider.RoleUser, Origin: provider.MessageOriginHost, Content: "<pinned_context_revision>private pinned body</pinned_context_revision>"},
 		{Role: provider.RoleUser, Content: "user hello"},
 		{Role: provider.RoleAssistant, Content: "assistant response"},
 	})
@@ -127,6 +128,9 @@ func TestReadSession_ValidSession(t *testing.T) {
 	}
 	if !strings.Contains(out, "assistant response") {
 		t.Errorf("expected assistant content, got: %s", out)
+	}
+	if strings.Contains(out, "private pinned body") || strings.Contains(out, "turn 2") {
+		t.Errorf("pinned revision should be excluded from content and turn counts, got: %s", out)
 	}
 }
 

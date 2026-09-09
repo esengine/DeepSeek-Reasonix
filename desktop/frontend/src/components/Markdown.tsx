@@ -6,7 +6,15 @@ async function loadMarkdownView<T>(component: Promise<T>): Promise<T> {
 }
 
 const MarkdownRenderer = lazy(() => loadMarkdownView(import("./MarkdownRenderer")));
-const MarkdownHistory = lazy(() => loadMarkdownView(import("./MarkdownHistory")));
+let historyView: typeof import("./MarkdownHistory").default | undefined;
+let historyViewPromise: Promise<typeof import("./MarkdownHistory")> | undefined;
+export function preloadMarkdownHistory(): Promise<typeof import("./MarkdownHistory")> {
+  return historyViewPromise ??= loadMarkdownView(import("./MarkdownHistory")).then(module => {
+    historyView = module.default;
+    return module;
+  });
+}
+const LazyMarkdownHistory = lazy(preloadMarkdownHistory);
 const STREAMING_TAIL_THRESHOLD = 8_000;
 const FINALIZE_SETTLE_MS = 50;
 const FINALIZE_IDLE_TIMEOUT_MS = 1_000;
@@ -453,6 +461,7 @@ export const Markdown = memo(function Markdown({
 
   if (streaming || legacyMode) return committedView;
 
+  const MarkdownHistory = historyView ?? LazyMarkdownHistory;
   const historyFallback = wasStreamingRef.current
     ? committedView
     : <div className="md" data-transcript-geometry-pending data-transcript-selection-source-fallback>{text}</div>;

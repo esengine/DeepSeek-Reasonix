@@ -36,6 +36,10 @@ on:
         default: false
         type: boolean
   workflow_call:
+    outputs:
+      artifact_prefix:
+        description: "Same-run signed artifacts produced by this invocation"
+        value: ${{ jobs.resolve.outputs.artifact_prefix }}
     inputs:
       channel:
         description: "Release channel selected by the approved orchestrator"
@@ -84,6 +88,11 @@ on:
         required: false
         default: false
         type: boolean
+      preflight_artifact_prefix:
+        description: "Signed artifact set returned by the successful same-run preflight"
+        required: false
+        default: ""
+        type: string
 
 concurrency:
   # A channel pointer is a monotonic public state machine. Serialize every
@@ -107,6 +116,7 @@ jobs:
       prerelease: ${{ steps.release.outputs.prerelease }}
       notes_version: ${{ steps.release.outputs.notes_version }}
       sha: ${{ steps.candidate.outputs.sha }}
+      artifact_prefix: desktop-${{ github.run_id }}-${{ github.run_attempt }}-${{ inputs.signing_preflight && 'preflight' || 'release' }}
     steps:
       - uses: actions/checkout@v7
         with:
@@ -211,6 +221,8 @@ jobs:
           cache: true
 
       - name: Validate signing mode
+        env:
+          PREFLIGHT_ARTIFACT_PREFIX: ${{ inputs.preflight_artifact_prefix }}
         run: |
           if [ "${{ inputs.production_signing_smoke }}" = "true" ] && [ "${{ inputs.signing_preflight }}" = "true" ]; then
             echo "::error::production_signing_smoke and signing_preflight are mutually exclusive"
@@ -219,6 +231,13 @@ jobs:
           if [ "${{ inputs.signing_preflight_verified }}" = "true" ] && [ "${{ inputs.orchestrated }}" != "true" ]; then
             echo "::error::only the approved stable orchestrator can assert signing_preflight_verified"
             exit 1
+          fi
+          if [ -n "$PREFLIGHT_ARTIFACT_PREFIX" ]; then
+            if [ "${{ inputs.orchestrated }}" != "true" ] || [ "${{ inputs.signing_preflight_verified }}" != "true" ] || [ "${{ inputs.signing_preflight }}" = "true" ] || [ "${{ inputs.channel }}" != "stable" ]; then
+              echo "::error::artifact reuse requires a verified stable orchestrator preflight"
+              exit 1
+            fi
+            [[ "$PREFLIGHT_ARTIFACT_PREFIX" =~ ^desktop-${GITHUB_RUN_ID}-[1-9][0-9]*-preflight$ ]] || exit 1
           fi
 
       - name: Validate and fingerprint SignPath contract
@@ -274,8 +293,8 @@ jobs:
 
   build:
     name: build (${{ matrix.name }})
-    needs: [resolve, cache-guard]
-    if: ${{ always() && !cancelled() && needs.resolve.result == 'success' && needs.cache-guard.result == 'success' }}
+    needs: [resolve, cache-guard, signing-contract]
+    if: ${{ always() && !cancelled() && needs.resolve.result == 'success' && needs.cache-guard.result == 'success' && inputs.preflight_artifact_prefix == '' }}
     permissions:
       contents: read # checkout only; the publish job holds contents: write
       actions: read # SignPath reads run details + downloads the unsigned artifact
@@ -308,12 +327,15 @@ jobs:
           cache: true
           cache-dependency-path: desktop/go.sum
 
-      - uses: actions/setup-node@v7
-        with:
-          node-version: "24"
       - uses: pnpm/action-setup@v6.0.9
         with:
           version: 10
+          run_install: false
+      - uses: actions/setup-node@v7
+        with:
+          node-version: "24"
+          cache: pnpm
+          cache-dependency-path: desktop/frontend/pnpm-lock.yaml
 
       # Linux: WebKitGTK 4.1 toolchain (-tags webkit2_41 in desktop-build.sh).
       # 4.1 ships from ubuntu-22.04 on and is the only one present on 24.04+/Fedora 40+.
@@ -399,7 +421,6 @@ jobs:
       # protected workflow control plane. Reuse this sparse checkout later for
       # Authenticode verification rather than trusting a candidate-owned test.
       - name: Checkout protected release verifier
-        if: runner.os == 'Windows' && (matrix.platform == 'windows/amd64' || env.HAS_SIGNPATH == 'true')
         uses: actions/checkout@v7
         with:
           ref: ${{ github.workflow_sha }}
@@ -407,6 +428,7 @@ jobs:
           sparse-checkout: |
             scripts/test-webview2-native-smoke.ps1
             scripts/verify-windows-authenticode.ps1
+            scripts/desktop-release-artifacts.mjs
           sparse-checkout-cone-mode: false
           persist-credentials: false
 
@@ -548,18 +570,32 @@ jobs:
           MINISIGN_PASSWORD: ${{ secrets.MINISIGN_PASSWORD }}
         run: go run ./cmd/sign sign ../dist/*
 
+      - name: Bind signed artifacts to candidate and workflow
+        env:
+          RELEASE_SOURCE_SHA: ${{ needs.resolve.outputs.sha }}
+          RELEASE_CONTROL_SHA: ${{ github.workflow_sha }}
+          RELEASE_TAG: ${{ needs.resolve.outputs.tag }}
+          RELEASE_VERSION: ${{ needs.resolve.outputs.version }}
+          RELEASE_CHANNEL: ${{ needs.resolve.outputs.channel }}
+          RELEASE_SIGNING_FINGERPRINT: ${{ needs.signing-contract.outputs.fingerprint }}
+          RELEASE_ARTIFACT_PREFIX: ${{ needs.resolve.outputs.artifact_prefix }}
+        run: node release-control/scripts/desktop-release-artifacts.mjs pack dist "$RUNNER_TEMP/desktop-bundle" "${{ matrix.name }}"
+
       - uses: actions/upload-artifact@v7
         with:
-          name: dist-${{ matrix.name }}
-          path: dist/*
+          name: ${{ needs.resolve.outputs.artifact_prefix }}-${{ matrix.name }}
+          path: ${{ runner.temp }}/desktop-bundle
+          # A failed-job retry replaces only this fully revalidated platform.
+          # The resolved invocation prefix remains stable across that retry.
+          overwrite: true
           if-no-files-found: error
           # Same-run handoff to the publish job only; 7 days covers debugging.
           retention-days: 7
 
   publish:
     name: publish release
-    needs: [resolve, build]
-    if: ${{ always() && !cancelled() && needs.resolve.result == 'success' && needs.build.result == 'success' && !inputs.production_signing_smoke && !inputs.signing_preflight }}
+    needs: [resolve, signing-contract, cache-guard, build]
+    if: ${{ always() && !cancelled() && needs.resolve.result == 'success' && (needs.build.result == 'success' || (needs.build.result == 'skipped' && inputs.preflight_artifact_prefix != '' && inputs.orchestrated && inputs.signing_preflight_verified)) && needs.signing-contract.result == 'success' && needs.cache-guard.result == 'success' && !inputs.production_signing_smoke && !inputs.signing_preflight }}
     runs-on: ubuntu-latest
     permissions:
       contents: write
@@ -610,9 +646,19 @@ jobs:
 
       - uses: actions/download-artifact@v8
         with:
-          path: dist
-          pattern: dist-*
-          merge-multiple: true
+          path: ${{ runner.temp }}/desktop-bundles
+          pattern: ${{ inputs.preflight_artifact_prefix || needs.resolve.outputs.artifact_prefix }}-*
+
+      - name: Verify complete signed artifact handoff
+        env:
+          RELEASE_SOURCE_SHA: ${{ needs.resolve.outputs.sha }}
+          RELEASE_CONTROL_SHA: ${{ github.workflow_sha }}
+          RELEASE_TAG: ${{ needs.resolve.outputs.tag }}
+          RELEASE_VERSION: ${{ needs.resolve.outputs.version }}
+          RELEASE_CHANNEL: ${{ needs.resolve.outputs.channel }}
+          RELEASE_SIGNING_FINGERPRINT: ${{ needs.signing-contract.outputs.fingerprint }}
+          RELEASE_ARTIFACT_PREFIX: ${{ inputs.preflight_artifact_prefix || needs.resolve.outputs.artifact_prefix }}
+        run: node release-control/scripts/desktop-release-artifacts.mjs collect "$RUNNER_TEMP/desktop-bundles" dist
 
       # Generate latest.json with GitHub release download URLs; the mirror step
       # rewrites them to R2 afterwards. GITHUB_REPOSITORY is provided by the runner.

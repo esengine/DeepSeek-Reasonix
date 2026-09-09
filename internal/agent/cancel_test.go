@@ -656,3 +656,18 @@ func toolMessagesByID(msgs []provider.Message) map[string]string {
 	}
 	return out
 }
+
+func TestMissingTerminalUsageRemainsUnknownAfterEstimationAndMerge(t *testing.T) {
+	estimated := bestEffortStreamUsage(nil, 20, 40, "interrupted")
+	if estimated == nil || !estimated.Unknown || !estimated.Estimated {
+		t.Fatalf("estimated=%+v", estimated)
+	}
+	exact := &provider.Usage{PromptTokens: 10, CompletionTokens: 20, TotalTokens: 30, RequestCount: 1}
+	combined := finalizeSamplingUsage(mergeSamplingUsage(estimated, exact), exact)
+	if !combined.Unknown || combined.RequestCount != 2 {
+		t.Fatalf("combined=%+v", combined)
+	}
+	if exact.Unknown {
+		t.Fatal("mutated exact usage")
+	}
+}

@@ -1,7 +1,11 @@
 package agent
 
 import (
+	"slices"
+	"sync"
+
 	"reasonix/internal/completion"
+	"reasonix/internal/provider"
 	"reasonix/internal/runtimepolicy"
 )
 
@@ -10,13 +14,12 @@ import (
 // State an external caller arms before a Run lives in pendingTurn; state that
 // outlives the Run lives in taskRuntime or sessionRuntime.
 type turnRuntime struct {
+	writeRecovery  map[string]provider.ToolCall // unresolved prior effects; reverified before reuse
 	runMaxSteps    int
 	runMaxStepsKey string
 
-	emptyFinalBlocks   int
-	handoffNudges      int
+	terminal           terminalProtocolState
 	usedAnyTool        bool
-	contextToolRepairs int
 	graceRound         bool
 	recoveryGraceRound bool
 
@@ -99,7 +102,96 @@ type turnRuntime struct {
 	// read by the governor trigger (live policy and fork capture alike).
 	lastReasoning int
 
+	// incompleteReads tracks unread read_file results within one Agent.Run; a
+	// fresh user turn may choose a different strategy, but this run cannot write
+	// or finish from a silent partial read.
+	incompleteReads incompleteReadState
+
+	// readShadow owns read obligations unless the legacy rollback is selected.
+	readShadow readShadowState
+
+	// evidenceBlocked records paths whose writer was blocked for missing
+	// evidence this turn. While it is non-empty an unknown-scope writer may not
+	// route around the block. Parallel tool calls write it, so it is guarded.
+	evidenceBlocked evidenceBlockState
+
 	phase phaseClock
+
+	// sessionContext is the content-free diagnostic for the snapshot selected
+	// before this real user turn. It is attached to Usage events only.
+	sessionContext turnContextDiagnostics
+}
+
+// evidenceBlockState is the mutex-guarded set of paths whose writer was blocked
+// for missing evidence in this turn.
+type evidenceBlockState struct {
+	mu    sync.Mutex
+	paths map[string]struct{}
+	calls map[string]provider.ToolCall
+	// checks memoizes the batch preflight verdict per call id. Evidence is
+	// evaluated once per batch by design, so the per-call gate reuses that
+	// verdict instead of re-reading the writer's target.
+	checks map[string]evidenceCheck
+}
+
+func (s *evidenceBlockState) memoCheck(id string, check evidenceCheck) {
+	if id == "" {
+		return
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.checks == nil {
+		s.checks = map[string]evidenceCheck{}
+	}
+	s.checks[id] = check
+}
+
+func (s *evidenceBlockState) memoizedCheck(id string) (evidenceCheck, bool) {
+	if id == "" {
+		return evidenceCheck{}, false
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	check, ok := s.checks[id]
+	return check, ok
+}
+
+func (s *evidenceBlockState) record(path string, calls ...provider.ToolCall) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.paths == nil {
+		s.paths = map[string]struct{}{}
+	}
+	s.paths[path] = struct{}{}
+	if len(calls) > 0 {
+		if s.calls == nil {
+			s.calls = map[string]provider.ToolCall{}
+		}
+		s.calls[path] = calls[0]
+	}
+}
+
+func (s *evidenceBlockState) snapshot() []string {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	out := make([]string, 0, len(s.paths))
+	for path := range s.paths {
+		out = append(out, path)
+	}
+	slices.Sort(out)
+	return out
+}
+
+// terminalProtocolState groups the run's terminal-protocol bookkeeping: the
+type terminalProtocolState struct {
+	// emptyFinalBlocks counts consecutive reasoning-only stops retried for a
+	// visible final answer.
+	emptyFinalBlocks int
+	// handoffNudges counts executor-handoff repairs sent this run.
+	handoffNudges int
+	// contextToolRepairs counts contextual-tool repair rounds; a second
+	// violation after a repair ends the run in a recoverable pause.
+	contextToolRepairs int
 }
 
 // pendingTurn is what someone outside the Run arms for the next one: a

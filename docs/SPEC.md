@@ -57,7 +57,8 @@ self-register; parents never import children. The Remote-SSH module layers
 `cli → remote/bootstrap → remote → {remote/forward, remote/sftpfs, config,
 netclient}`; `remote` and its subpackages never import `cli`, `agent`, or
 `serve`, and all interactivity flows through callbacks (host-key / secret
-prompts) so the desktop module consumes the same surface. See §Remote below.
+prompts) so the desktop module consumes the same surface. See the
+[Remote sessions](./REMOTE_SESSIONS.md) guide.
 
 ## 3. Core Abstractions
 
@@ -221,9 +222,11 @@ and resources.
 
 ### 3.5 Two-model collaboration (`Coordinator`)
 
-When `agent.planner_model` names a provider different from the executor, a
-`Coordinator` runs two models in **separate sessions** to keep each one's prompt
-prefix cache-stable:
+When `agent.planner_model` is set, a `Coordinator` runs two models in
+**separate sessions** to keep each one's prompt prefix cache-stable. An empty
+`planner_model` leaves the session executor-only. A configured but unusable
+planner model is a configuration error and does not silently continue on the
+executor:
 
 - The **planner** (low-frequency) runs in its own session with the same standing
   memory context plus a filtered read-only research tool set, then produces a
@@ -240,11 +243,12 @@ prefix cache-stable:
 - The planner uses one stable system prompt. Only a small host-authored
   `<planner-turn>` block names the explicit route. The plan distinguishes
   verified from candidate touchpoints and records non-goals, risks, acceptance
-  criteria, and command-level verification when the evidence supports them. If
-  the planner still does not finalize after the bounded research and grace
-  round, plan-and-execute falls back to the executor with the pristine task;
-  plan-only and plan-for-approval remain fail-closed. The incomplete planner
-  turn is rolled back rather than exposed as a broken manual continuation.
+  criteria, and command-level verification when the evidence supports them.
+  `submit_plan` is the only delivery channel; a prose reply without a submitted
+  plan is a planner protocol error. If the planner still does not finalize after
+  the bounded research and grace round, every route fails closed and the
+  executor is not started. The incomplete planner turn is rolled back rather
+  than exposed as a broken manual continuation.
 - A bare plan-first route hands the completed plan directly to the executor.
   Plan-for-approval is reserved for an explicit request to wait for
   confirmation; the host enforces that boundary even if the planner omits its
@@ -284,13 +288,26 @@ when the sole automatic threshold is crossed.
 - The summary request replays the original system message, the selected message
   prefix, and the ordinary request's tool schemas, then appends one final user
   compaction instruction. This shape can reuse provider KV cache. Output is capped
-  at **8192 tokens**. A pressure run may make one additional convergence summary
-  (at most two successful summaries total); overflow makes at most one summary and
-  retries the original request at most once after projection-version progress.
+  at **8192 tokens**, and prefix planning keeps **5%** of the window (at least 256
+  tokens) below that cap as estimator headroom. A pressure run may make one
+  additional convergence summary (at most two successful summaries total);
+  overflow makes at most one summary and retries the original request at most
+  once after projection-version progress. An overflow rescue may also fold the
+  active turn's completed rounds, keeping its newest two rounds verbatim.
+- Every summary reply, success or provider overflow, feeds its real prompt count
+  back into the estimator. When the provider rejects the summary request itself,
+  the fold is re-planned on the corrected estimate (at most twice), then sent once
+  as a bounded transcript (tool results cut to 2000 characters, no tool schemas);
+  a manual compact may then take the fragment path. A failed automatic attempt
+  backs off further attempts on the same turn until the view has grown by 5% of
+  the window since that attempt, which bounds the retries one turn can pay.
 - A checkpoint must be strictly smaller than the replaced full request. Summary
   timeout/error/empty/max-token results never produce a mechanical digest. Below
-  the hard ceiling the latest durable projection continues; at overflow or the
-  hard ceiling an insufficient prune returns `ErrCompactionRequired`.
+  the hard ceiling the latest durable projection continues. At overflow or the
+  hard ceiling, when no summary can form, a lossy `truncate` projection elides the
+  oldest tool results and then drops the oldest replay units behind an explicit
+  marker until the view fits under the trigger; `ErrCompactionRequired` is
+  returned only when even that cannot reclaim enough.
 - Users inspect or change the threshold with
   `reasonix config compact-ratio [--local] [VALUE]`. Project config overrides the
   user-global value used by desktop and new CLI sessions. UI always shows the
@@ -651,7 +668,8 @@ resolved and prepended to the message as a tagged block the model can read.
 A subagent profile is a Skill with `runAs: subagent` and, for profiles managed
 by the desktop or CLI editors, `invocation: manual`. Profiles reuse the existing
 project/global Skill files; they do not introduce another state format or
-database. Manual invocation excludes a profile from the pinned Skill index so
+database. Manual invocation excludes a profile from the `session-context`
+Skills catalog so
 the model cannot discover it implicitly, while explicit `/<name> <task>`
 invocation remains available.
 
@@ -1041,7 +1059,7 @@ base_url       = "https://api.deepseek.com/anthropic"
 # models_url   = "https://proxy.example.com/v1/models"             # optional model discovery URL
 models         = ["deepseek-v4-flash", "deepseek-v4-pro", "deepseek-v4-flash-vision-exp"]
 default        = "deepseek-v4-flash"   # optional; defaults to models[0]
-# vision_models = ["deepseek-v4-flash-vision-exp"]  # Settings image-input checkbox; only this SKU is sent on the wire
+# vision_models = ["deepseek-v4-flash-vision-exp"]  # legacy compatibility; Settings derives image support from model metadata
 # Official DeepSeek vision accepts inline base64, http(s) image URLs, and Files API file_id.
 api_key_env    = "DEEPSEEK_API_KEY"
 web_search     = true

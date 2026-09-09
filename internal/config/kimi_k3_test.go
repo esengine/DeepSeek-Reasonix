@@ -33,11 +33,11 @@ func TestKimiK3ReasoningProtocolControlsEffortCapability(t *testing.T) {
 	if _, err := NormalizeEffort(e, "ultra"); err == nil {
 		t.Fatal("Kimi K3 reasoning_protocol should ignore custom supported_efforts")
 	}
-	if got := EffortDisplay(e); got != "auto" {
-		t.Fatalf("invalid stored Kimi K3 effort display = %q, want auto", got)
+	if got := EffortDisplay(e); got != "ultra" {
+		t.Fatalf("invalid stored Kimi K3 effort display = %q, want explicit invalid value", got)
 	}
-	if got := EffectiveEffort(e); got != "" {
-		t.Fatalf("invalid stored Kimi K3 effective effort = %q, want provider default", got)
+	if got := EffectiveEffort(e); got != "ultra" {
+		t.Fatalf("invalid stored Kimi K3 effective effort = %q, want invalid value for request validation", got)
 	}
 	e.Effort = "high"
 	if got := EffortDisplay(e); got != "high" {

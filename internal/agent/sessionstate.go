@@ -25,6 +25,12 @@ type sessionRuntime struct {
 
 	missingReasoning missingReasoningWatch
 
+	// reasoningReplayStrongProjection records the provider-visible history cutoff
+	// after thinking-400 repair; later messages use normal replay. Its anchor
+	// resolves the cutoff after old tool-result messages are removed.
+	reasoningReplayStrongProjection       int
+	reasoningReplayStrongProjectionAnchor string
+
 	// compactionMu guards projection snapshots/install and the in-memory sidecar
 	// generation. Network summarization never runs while this lock is held.
 	compactionMu sync.Mutex
@@ -65,6 +71,8 @@ func (r *sessionRuntime) reset(s *Session) {
 	r.cacheMiss.Store(0)
 	r.output.reset()
 	r.missingReasoning = missingReasoningWatch{}
+	r.reasoningReplayStrongProjection = 0
+	r.reasoningReplayStrongProjectionAnchor = ""
 	r.compactionMu.Lock()
 	r.compactionState = CompactionState{} // lineage change; disk reloaded on Resume
 	r.cacheState = CacheStateUnknown
@@ -74,6 +82,17 @@ func (r *sessionRuntime) reset(s *Session) {
 	r.compaction.consecutive = 0
 	r.compaction.failedTurn.Store(0)
 	r.compaction.lastTurn.Store(0)
+}
+
+// clearReasoningReplayStrongProjection drops the process-local repair overlay.
+// The overlay is tied to one canonical history shape; any rewind, branch, or
+// other lineage rewrite must not let an old cutoff/anchor govern the new view.
+func (r *sessionRuntime) clearReasoningReplayStrongProjection() {
+	if r == nil {
+		return
+	}
+	r.reasoningReplayStrongProjection = 0
+	r.reasoningReplayStrongProjectionAnchor = ""
 }
 
 // session returns the bound conversation under the lock that guards the

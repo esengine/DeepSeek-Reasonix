@@ -12,6 +12,7 @@ import (
 
 func (s *Server) registerInboxRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("GET /inbox", s.inboxList)
+	mux.HandleFunc("GET /inbox/receipt", s.inboxReceipt)
 	mux.HandleFunc("POST /inbox/items", s.foregroundMutation(s.inboxEnqueue))
 	mux.HandleFunc("GET /inbox/items/{id}", s.inboxGet)
 	mux.HandleFunc("PATCH /inbox/items/{id}", s.foregroundMutation(s.inboxUpdate))
@@ -33,7 +34,7 @@ func writeInboxError(w http.ResponseWriter, err error) {
 		http.Error(w, err.Error(), http.StatusRequestEntityTooLarge) // 413
 	case errors.Is(err, sessioninbox.ErrCapacityItems), errors.Is(err, sessioninbox.ErrCapacityBytes),
 		errors.Is(err, sessioninbox.ErrInvalidState), errors.Is(err, sessioninbox.ErrPaused),
-		errors.Is(err, sessioninbox.ErrNotFound):
+		errors.Is(err, sessioninbox.ErrNotFound), errors.Is(err, sessioninbox.ErrIdempotencyConflict):
 		http.Error(w, err.Error(), http.StatusConflict) // 409
 	case errors.Is(err, sessioninbox.ErrEmpty):
 		http.Error(w, err.Error(), http.StatusBadRequest)
@@ -43,17 +44,36 @@ func writeInboxError(w http.ResponseWriter, err error) {
 }
 
 func (s *Server) inboxList(w http.ResponseWriter, r *http.Request) {
-	_ = r
+	s.bindMu.Lock()
+	defer s.bindMu.Unlock()
+	if !s.validateInboxReadSessionLocked(w, r) {
+		return
+	}
 	snap := s.inboxAPI().InboxSnapshot()
 	w.Header().Set("Content-Type", "application/json")
 	_ = json.NewEncoder(w).Encode(snap)
 }
 
+// validateInboxReadSessionLocked keeps legacy unscoped reads compatible while
+// fencing modern Desktop reads against a concurrent foreground replacement.
+func (s *Server) validateInboxReadSessionLocked(w http.ResponseWriter, r *http.Request) bool {
+	if !s.validateExpectedSessionLocked(w, r) {
+		return false
+	}
+	if err := s.expectedSessionPathErrorLocked(r.URL.Query().Get("session")); err != nil {
+		http.Error(w, err.Error(), http.StatusConflict)
+		return false
+	}
+	return true
+}
+
 func (s *Server) inboxEnqueue(w http.ResponseWriter, r *http.Request) {
 	var body struct {
-		Input          string `json:"input"`
-		Intent         string `json:"intent"`
-		IdempotencyKey string `json:"idempotencyKey"`
+		Input          string                      `json:"input"`
+		Display        string                      `json:"display"`
+		Invocations    []control.InvocationRequest `json:"invocations"`
+		Intent         string                      `json:"intent"`
+		IdempotencyKey string                      `json:"idempotencyKey"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&body); err != nil || strings.TrimSpace(body.Input) == "" {
 		http.Error(w, "missing input", http.StatusBadRequest)
@@ -69,11 +89,15 @@ func (s *Server) inboxEnqueue(w http.ResponseWriter, r *http.Request) {
 	}
 	req := control.InboxRequest{
 		Intent:      intent,
-		Display:     body.Input,
+		Display:     body.Display,
 		Raw:         body.Input,
 		Submit:      body.Input,
 		Source:      "http",
 		Idempotency: body.IdempotencyKey,
+		Invocations: body.Invocations,
+	}
+	if req.Display == "" {
+		req.Display = body.Input
 	}
 	var rec sessioninbox.InboxReceipt
 	var err error
@@ -89,6 +113,32 @@ func (s *Server) inboxEnqueue(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusAccepted)
 	_ = json.NewEncoder(w).Encode(rec)
+}
+
+func (s *Server) inboxReceipt(w http.ResponseWriter, r *http.Request) {
+	s.bindMu.Lock()
+	defer s.bindMu.Unlock()
+	if !s.validateInboxReadSessionLocked(w, r) {
+		return
+	}
+	ctrl := s.ctl()
+	reader, ok := ctrl.(interface {
+		LookupInboxReceipt(string) (sessioninbox.InboxReceipt, bool, error)
+	})
+	if !ok {
+		http.NotFound(w, r)
+		return
+	}
+	receipt, found, err := reader.LookupInboxReceipt(r.URL.Query().Get("key"))
+	if err != nil {
+		writeInboxError(w, err)
+		return
+	}
+	if !found {
+		http.NotFound(w, r)
+		return
+	}
+	writeJSON(w, receipt)
 }
 
 func (s *Server) inboxGet(w http.ResponseWriter, r *http.Request) {

@@ -426,7 +426,7 @@ func TestServeIndexReportsSessionDeleteFailures(t *testing.T) {
 func TestServeIndexHandlesRetryingEvents(t *testing.T) {
 	html := string(indexHTML)
 	for _, want := range []string{
-		"case 'retrying': setRetrying(e.retryAttempt,e.retryMax); break;",
+		"case 'retrying': setRetrying(e.retryAttempt,e.retryMax,e.recovery); break;",
 		"if(e.kind!=='retrying')clearRetrying();",
 		"'retrying_status': 'Retrying ({attempt}/{max})...'",
 		"'retrying_status': '正在重试 ({attempt}/{max})...'",
@@ -639,45 +639,6 @@ func TestServeExtensionReloadPublishesOnlySuccessfulReplacement(t *testing.T) {
 	}
 	if s.ctl() != replacement {
 		t.Fatal("successful reload did not publish the replacement")
-	}
-}
-
-func TestServeSwitchEffortUsesModelRefForDuplicateModelNames(t *testing.T) {
-	writeServeModelConfig(t)
-
-	bc := NewBroadcaster()
-	ctrl := control.New(control.Options{
-		Sink:       bc,
-		Label:      "shared-chat",
-		ModelRef:   "alternate/shared-chat",
-		SessionDir: t.TempDir(),
-	})
-	server := New(ctrl, bc, config.ServeConfig{})
-	var builtRef string
-	server.buildController = func(_ context.Context, ref string) (*control.Controller, error) {
-		builtRef = ref
-		return control.New(control.Options{
-			Sink:       bc,
-			Label:      "shared-chat",
-			ModelRef:   ref,
-			SessionDir: t.TempDir(),
-		}), nil
-	}
-
-	if err := server.switchEffort(context.Background(), "high"); err != nil {
-		t.Fatalf("switchEffort: %v", err)
-	}
-	if builtRef != "alternate/shared-chat" {
-		t.Fatalf("rebuilt model ref = %q, want alternate/shared-chat", builtRef)
-	}
-	edit := config.LoadForEdit(config.UserConfigPath())
-	def, _ := edit.Provider("default")
-	if def.Effort != "" {
-		t.Fatalf("default effort = %q, want unchanged", def.Effort)
-	}
-	alt, _ := edit.Provider("alternate")
-	if alt.Effort != "high" {
-		t.Fatalf("alternate effort = %q, want high", alt.Effort)
 	}
 }
 
@@ -1000,13 +961,8 @@ func TestServeEventsReplaysPendingAskOnAttach(t *testing.T) {
 		askDone <- err
 	}()
 
-	select {
-	case data := <-firstSub:
-		if !strings.Contains(string(data), `"kind":"ask_request"`) {
-			t.Fatalf("initial subscriber got %s, want ask_request", data)
-		}
-	case <-time.After(2 * time.Second):
-		t.Fatal("timed out waiting for initial ask_request")
+	if frame := nextServeProtocolFrame(t, firstSub, nil); frame.Kind != "ask_request" {
+		t.Fatalf("initial subscriber got %+v, want ask_request", frame)
 	}
 
 	resp, err := http.Get(srv.URL + "/events")
@@ -1051,11 +1007,7 @@ func TestServeEventsReplaysPendingAskOnAttach(t *testing.T) {
 
 	// Reconnect recovery must be connection-local: the existing subscriber
 	// must not receive the same prompt a second time.
-	select {
-	case data := <-firstSub:
-		t.Fatalf("existing subscriber got duplicate replay: %s", data)
-	default:
-	}
+	assertNoServeProtocolFrames(t, firstSub)
 
 	cancelAsk()
 	select {
@@ -1090,19 +1042,10 @@ func TestServeEventsReplayHandoffSerializesPromptEmission(t *testing.T) {
 	})
 	defer cancelSub()
 
-	select {
-	case data := <-sub:
-		if !strings.Contains(string(data), `"kind":"ask_request"`) {
-			t.Fatalf("handoff subscriber got %s, want ask_request", data)
-		}
-	case <-time.After(2 * time.Second):
-		t.Fatal("handoff subscriber never received ask_request")
+	if frame := nextServeProtocolFrame(t, sub, nil); frame.Kind != "ask_request" {
+		t.Fatalf("handoff subscriber got %+v, want ask_request", frame)
 	}
-	select {
-	case data := <-sub:
-		t.Fatalf("handoff subscriber got duplicate ask_request: %s", data)
-	default:
-	}
+	assertNoServeProtocolFrames(t, sub)
 
 	cancelAsk()
 	select {

@@ -23,4 +23,9 @@ export default defineConfig([
       "react-hooks/rules-of-hooks": "error",
     },
   },
+  {
+    files: ["src/app-runtime/**/*.{ts,tsx}", "src/app-shell/**/*.{ts,tsx}",
+      "src/app-features/**/*.{ts,tsx}", "src/app-domain/**/*.{ts,tsx}", "src/lib/useCommitted*.ts"],
+    rules: { "react-hooks/exhaustive-deps": "error" },
+  },
 ]);

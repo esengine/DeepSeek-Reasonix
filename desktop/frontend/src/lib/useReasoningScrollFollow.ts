@@ -1,5 +1,4 @@
 import { useLayoutEffect, useRef } from "react";
-import { scrollReasoningToBottom } from "./nestedScrollHandoff";
 
 /** Keeps a running reasoning pane at its own tail until the reader scrolls up. */
 export function useReasoningScrollFollow(
@@ -18,7 +17,8 @@ export function useReasoningScrollFollow(
     if (!active || !followRef.current) return;
     const element = elementRef.current;
     if (!element) return;
-    scrollReasoningToBottom(element);
+    // This is the reasoning pane's own nested scroller, not the transcript.
+    element.scrollTop = element.scrollHeight;
   }, [active, content]);
 
   return [elementRef, onScroll] as const;

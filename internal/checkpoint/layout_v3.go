@@ -45,6 +45,7 @@ func (s *Store) persistV3(c *Checkpoint) error {
 	// so their NextTurn remains monotonic across a downgrade; write it first so
 	// a crash can leave reduced rewind visibility, never an invisible turn.
 	marker := *c
+	marker.Result = nil
 	marker.SchemaVersion = SchemaV2
 	marker.Files = []FileSnap{}
 	marker.Coverage = CoverageNone
@@ -168,7 +169,8 @@ func (s *Store) loadV3Turns() []*Checkpoint {
 }
 
 func (s *Store) v3PayloadSize(turn int) (int64, error) {
-	root := filepath.Join(s.turnDir(turn), "files")
+	// Metadata also holds the bounded frozen result patches.
+	root := s.turnDir(turn)
 	var total int64
 	err := filepath.WalkDir(root, func(_ string, d os.DirEntry, err error) error {
 		if err != nil {

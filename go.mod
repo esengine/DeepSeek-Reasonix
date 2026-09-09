@@ -1,6 +1,6 @@
 module reasonix
 
-go 1.25.0
+go 1.26.0
 
 toolchain go1.26.6
 
@@ -27,6 +27,7 @@ require (
 	github.com/rivo/uniseg v0.4.7
 	github.com/sabhiram/go-gitignore v0.0.0-20210923224102-525f6e181f06
 	github.com/santhosh-tekuri/jsonschema/v6 v6.0.3
+	github.com/sky-valley/pi v0.84.20
 	github.com/spf13/pflag v1.0.10
 	github.com/tree-sitter/go-tree-sitter v0.25.0
 	github.com/tree-sitter/tree-sitter-javascript v0.25.0
@@ -36,7 +37,7 @@ require (
 	github.com/yuin/goldmark v1.8.5
 	github.com/zalando/go-keyring v0.2.8
 	go.uber.org/goleak v1.3.0
-	golang.org/x/crypto v0.55.0
+	golang.org/x/crypto v0.56.0
 	golang.org/x/image v0.45.0
 	golang.org/x/mod v0.40.0
 	golang.org/x/net v0.58.0

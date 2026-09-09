@@ -6,6 +6,7 @@ import (
 	"strings"
 
 	"reasonix/internal/event"
+	"reasonix/internal/i18n"
 	"reasonix/internal/provider"
 	"reasonix/internal/tool"
 )
@@ -111,7 +112,7 @@ func (c landCause) nudge(state *turnRuntime, submitPlan bool) string {
 
 func (c landCause) noticeText() string {
 	if c.kind == "task_budget" {
-		return "This task reached its spend budget; asking for a final answer."
+		return i18n.M.TaskBudget
 	}
 	return toolBudgetNoticeText()
 }
@@ -127,7 +128,7 @@ func (a *Agent) armFinalizationRound(ctx context.Context, state *turnRuntime, ca
 	state.graceRound = true
 	state.landCause = cause
 	_, canSubmitPlan := planSubmissionFromContext(ctx)
-	a.sess.conversation.Add(provider.Message{Role: provider.RoleUser, Content: a.withTurnPreferences(cause.nudge(state, canSubmitPlan))})
+	a.sess.conversation.Add(HostGeneratedUserMessage(a.withTurnPreferences(cause.nudge(state, canSubmitPlan))))
 	a.svc.sink.Emit(event.Event{Kind: event.Notice, Level: event.LevelInfo, Code: event.NoticeCodeToolBudget,
 		Text: cause.noticeText(), Detail: cause.detail})
 }

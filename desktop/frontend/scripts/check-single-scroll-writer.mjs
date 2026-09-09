@@ -1,19 +1,18 @@
 #!/usr/bin/env node
 
 /**
- * Single-scroll-writer contract for the transcript Virtuoso handle.
+ * Single-scroll-writer contract for the native transcript viewport.
  *
  * Only the files in ALLOWED_WRITERS may issue imperative scroll calls
- * (scrollTo / scrollBy / scrollToIndex) against the transcript Virtuoso
- * handle: the generation-aware writer gateway owned by the arbiter.
- * Every other module must route through the scroll coordinator's
+ * (scrollTop / scrollTo / scrollBy / virtualizer scroll APIs) against the
+ * transcript: the generation-aware TranscriptViewportWriter.
+ * Every other module must route through TranscriptKernel's
  * dispatch/writeOffset API. This guards the "one writer owns scrollTop"
  * invariant that keeps user scrolls, tail-follow, and anchor recovery from
  * fighting each other (#8657).
  *
  * Other virtualized surfaces (WorkspacePanel, VirtualMenu, LineNumberCode)
- * use @tanstack/react-virtual `virtualizer` instances, not the transcript
- * Virtuoso handle, and are out of scope.
+ * own independent scrollers and are out of scope.
  */
 
 import { readdirSync, readFileSync } from "node:fs";
@@ -22,16 +21,15 @@ import { fileURLToPath } from "node:url";
 
 const SOURCE_ROOT = fileURLToPath(new URL("../src", import.meta.url));
 
-// Every arbiter/controller command routes through this one gateway.
+// Every kernel/adapter command routes through this one gateway.
 const ALLOWED_WRITERS = new Set([
-  "lib/transcriptScrollWriter.ts",
+  "lib/transcriptViewportWriter.ts",
 ]);
 
-// Raw `.scrollTop` writes bypass the Virtuoso handle entirely. The allowed
+// Raw `.scrollTop` writes bypass the kernel entirely. The allowed
 // set is deliberate: the Transcript writer is the sole fenced gateway; all
 // remaining entries are non-transcript (or natively paired with the arbiter):
-// - lib/nestedScrollHandoff.ts: the trackpad handoff lane; every write is
-//   paired with onParentScrollIntent so the arbiter sees the gesture.
+// - lib/useReasoningScrollFollow.ts: an inner reasoning pane, not Transcript.
 // - components/SettingsPanel.tsx: the settings overlay's own scroller.
 // - components/WorkspacePanel.tsx: the project tree's own scroller.
 // - components/editors/LineNumberCode.tsx: the file viewer's own scroller —
@@ -39,18 +37,17 @@ const ALLOWED_WRITERS = new Set([
 // - custom/features/heartbeat/HeartbeatPanel.tsx: the heartbeat list's custom
 //   scrollbar thumb drag, mapped to its own scroller.
 const ALLOWED_RAW_SCROLLTOP = new Set([
-  "lib/transcriptScrollWriter.ts",
-  "lib/nestedScrollHandoff.ts",
+  "lib/transcriptViewportWriter.ts",
+  "lib/useReasoningScrollFollow.ts",
   "components/SettingsPanel.tsx",
   "components/RemoteConnectWizard.tsx",
   "components/WorkspacePanel.tsx",
   "components/editors/LineNumberCode.tsx",
   "custom/features/heartbeat/HeartbeatPanel.tsx",
 ]);
-// Matches imperative scroll calls on the transcript Virtuoso handle, whether
-// reached through `virtuosoRef.current` directly or a local `handle` alias.
-const VIRTUOSO_SCROLL_RE = /(?:virtuoso[A-Za-z]*\.current|\bhandle)\??\.\s*scroll(?:To|By|ToIndex)\s*\(/;
+const IMPERATIVE_SCROLL_RE = /\.scroll(?:To|By)\s*\(|\.scrollTo(?:Offset|Index)\s*\(/;
 const RAW_SCROLLTOP_WRITE_RE = /\.scrollTop\s*=(?!=)/;
+const TRANSCRIPT_SURFACE_RE = /(?:^|\/)(?:transcript[^/]*|useTranscript[^/]*|Transcript[^/]*|MarkdownHistory)\.(?:ts|tsx)$/;
 
 function sourceFiles(root) {
   const files = [];
@@ -73,12 +70,12 @@ for (const file of sourceFiles(SOURCE_ROOT)) {
   const relative = file.slice(SOURCE_ROOT.length + 1).replaceAll("\\", "/");
   const lines = readFileSync(file, "utf8").split("\n");
   lines.forEach((line, index) => {
-    if (VIRTUOSO_SCROLL_RE.test(line) && !ALLOWED_WRITERS.has(relative)) {
+    if (TRANSCRIPT_SURFACE_RE.test(relative) && IMPERATIVE_SCROLL_RE.test(line) && !ALLOWED_WRITERS.has(relative)) {
       failures += 1;
       console.error(
-        `check-single-scroll-writer: ${relative}:${index + 1} issues an imperative Virtuoso scroll call outside the allowed writer modules.\n` +
+        `check-single-scroll-writer: ${relative}:${index + 1} issues an imperative Transcript scroll call outside the writer.\n` +
         `  ${line.trim()}\n` +
-        "  Route the write through the transcript scroll coordinator instead (see #8657 scroll-arbiter refactor).",
+        "  Route the write through TranscriptKernel and TranscriptViewportWriter.",
       );
     }
     if (RAW_SCROLLTOP_WRITE_RE.test(line) && !ALLOWED_RAW_SCROLLTOP.has(relative)) {
@@ -86,7 +83,7 @@ for (const file of sourceFiles(SOURCE_ROOT)) {
       console.error(
         `check-single-scroll-writer: ${relative}:${index + 1} writes scrollTop outside an explicitly non-Transcript surface.\n` +
         `  ${line.trim()}\n` +
-        "  Transcript writes must route through transcriptScrollWriter.ts.",
+        "  Transcript writes must route through transcriptViewportWriter.ts.",
       );
     }
   });

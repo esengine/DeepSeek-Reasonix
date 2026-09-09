@@ -12,6 +12,8 @@ import (
 	"path/filepath"
 	"regexp"
 	"runtime"
+	"slices"
+	"strconv"
 	"strings"
 	"sync/atomic"
 	"time"
@@ -25,10 +27,30 @@ const maxFileAttachmentBytes = 25 * 1024 * 1024
 const maxAttachmentCreateAttempts = 1000
 
 // ErrNoClipboardImage reports that the clipboard was read successfully but holds
-// no image. It is distinct from a missing clipboard tool: callers offering an
-// image-first paste shortcut use it to fall back to text instead of surfacing a
-// failure the user cannot act on.
+// no supported image. It is distinct from a missing clipboard tool: callers
+// offering an image-first paste shortcut use it to fall back to text before
+// surfacing an image-specific diagnostic.
 var ErrNoClipboardImage = errors.New("clipboard does not contain an image")
+
+// ErrUnsupportedClipboardImage marks the more specific no-pasteable-image case
+// where the clipboard advertised only image formats Reasonix cannot save.
+var ErrUnsupportedClipboardImage = errors.New("clipboard image type is not supported")
+
+type unsupportedClipboardImageError struct {
+	tool  string
+	types []string
+}
+
+func (e unsupportedClipboardImageError) Error() string {
+	return fmt.Sprintf("%s offers unsupported image types: %s", e.tool, strings.Join(e.types, ", "))
+}
+
+// Unsupported image formats still mean there is no image Reasonix can paste.
+// Wrapping the sentinel lets image-first shortcuts try their normal text
+// fallback before surfacing the more specific diagnostic.
+func (e unsupportedClipboardImageError) Unwrap() []error {
+	return []error{ErrNoClipboardImage, ErrUnsupportedClipboardImage}
+}
 
 var (
 	lookClipboardTool = exec.LookPath
@@ -283,15 +305,25 @@ $img.Save($ms, [System.Drawing.Imaging.ImageFormat]::Png)
 	return SaveImageBytes("", raw)
 }
 
+// clipboardImageTypes lists the image mimes we can save, most preferred
+// first; Wayland compositors and screenshot apps offer any of these.
+var clipboardImageTypes = []string{"image/png", "image/jpeg", "image/gif", "image/webp"}
+
+func clipboardImageReadArgs(tool, mime string) []string {
+	if tool == "wl-paste" {
+		return []string{"--type", mime, "--no-newline"}
+	}
+	return []string{"-selection", "clipboard", "-t", mime, "-o"}
+}
+
 func saveLinuxClipboardImage() (string, error) {
 	type clipboardTool struct {
 		name      string
 		typesArgs []string
-		imageArgs []string
 	}
 	tools := []clipboardTool{
-		{name: "wl-paste", typesArgs: []string{"--list-types"}, imageArgs: []string{"--type", "image/png", "--no-newline"}},
-		{name: "xclip", typesArgs: []string{"-selection", "clipboard", "-t", "TARGETS", "-o"}, imageArgs: []string{"-selection", "clipboard", "-t", "image/png", "-o"}},
+		{name: "wl-paste", typesArgs: []string{"--list-types"}},
+		{name: "xclip", typesArgs: []string{"-selection", "clipboard", "-t", "TARGETS", "-o"}},
 	}
 	foundTool := false
 	confirmedNoImage := false
@@ -311,11 +343,22 @@ func saveLinuxClipboardImage() (string, error) {
 			probeFailures = append(probeFailures, fmt.Errorf("probe %s clipboard types: %w", tool.name, err))
 			continue
 		}
-		if !clipboardTypeListed(types, "image/png") {
+		mime := ""
+		for _, want := range clipboardImageTypes {
+			if clipboardTypeListed(types, want) {
+				mime = want
+				break
+			}
+		}
+		if mime == "" {
+			if offered := offeredImageTypes(types); len(offered) > 0 {
+				readFailures = append(readFailures, unsupportedClipboardImageError{tool: tool.name, types: offered})
+				continue
+			}
 			confirmedNoImage = true
 			continue
 		}
-		out, _, err := runClipboardTool(path, tool.imageArgs...)
+		out, _, err := runClipboardTool(path, clipboardImageReadArgs(tool.name, mime)...)
 		if err != nil {
 			readFailures = append(readFailures, fmt.Errorf("read clipboard image with %s: %w", tool.name, err))
 			continue
@@ -350,6 +393,20 @@ func clipboardTypeListed(raw []byte, want string) bool {
 		}
 	}
 	return false
+}
+
+// offeredImageTypes returns safely quoted image/* MIME names that Reasonix
+// cannot save. Clipboard owners control these strings, so errors must never
+// contain their terminal control sequences verbatim.
+func offeredImageTypes(raw []byte) []string {
+	var offered []string
+	for field := range strings.FieldsSeq(string(raw)) {
+		lower := strings.ToLower(field)
+		if strings.HasPrefix(lower, "image/") && !slices.Contains(clipboardImageTypes, lower) {
+			offered = append(offered, strconv.QuoteToASCII(field))
+		}
+	}
+	return offered
 }
 
 func clipboardProbeMeansNoImage(tool string, stderr []byte) bool {

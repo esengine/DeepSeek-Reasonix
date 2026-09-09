@@ -9,6 +9,7 @@ import (
 
 	"reasonix/internal/agent"
 	"reasonix/internal/store"
+	"reasonix/internal/tool"
 )
 
 // TitleChangedFunc projects a successful canonical title write into optional
@@ -35,7 +36,7 @@ func NewSetSessionTitleTool(sessionDir string, currentSessionPath func() string,
 	}
 }
 
-func (t *setSessionTitleTool) Name() string   { return "set_session_title" }
+func (t *setSessionTitleTool) Name() string   { return tool.HostSetSessionTitle }
 func (t *setSessionTitleTool) ReadOnly() bool { return false }
 func (t *setSessionTitleTool) Description() string {
 	return "Set or clear the current conversation's saved title. Pass an empty title to fall back to the topic title or first-message preview. The host binds the current session; this tool cannot rename other sessions."

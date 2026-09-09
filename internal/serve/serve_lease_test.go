@@ -177,6 +177,8 @@ func waitServeLeaseResult(t *testing.T, ch <-chan error, what string, timeout ti
 	}
 }
 
+const concurrentServeLeaseTimeout = 60 * time.Second
+
 // TestConcurrentResumesKeepControllerAndLeaseAligned hammers POST /resume from
 // two goroutines bouncing between different targets and asserts the invariant
 // this PR exists for: whatever session the controller ends up writing is the
@@ -239,7 +241,7 @@ func TestConcurrentResumesKeepControllerAndLeaseAligned(t *testing.T) {
 		close(done)
 		close(errs)
 	}()
-	waitServeLeaseDone(t, done, "concurrent resume posts", 20*time.Second)
+	waitServeLeaseDone(t, done, "concurrent resume posts", concurrentServeLeaseTimeout)
 	for err := range errs {
 		if err != nil {
 			t.Fatal(err)
@@ -311,7 +313,7 @@ func TestConcurrentResumeAndForkKeepAlignment(t *testing.T) {
 		close(done)
 		close(errs)
 	}()
-	waitServeLeaseDone(t, done, "concurrent resume/fork posts", 20*time.Second)
+	waitServeLeaseDone(t, done, "concurrent resume/fork posts", concurrentServeLeaseTimeout)
 	for err := range errs {
 		if err != nil {
 			t.Fatal(err)

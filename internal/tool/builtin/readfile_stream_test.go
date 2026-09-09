@@ -10,6 +10,8 @@ import (
 	"testing"
 
 	"golang.org/x/text/encoding/simplifiedchinese"
+
+	fileenc "reasonix/internal/fileutil/encoding"
 )
 
 // TestReadFileStreamsLargeGB18030 proves GB18030 content far past the 256KB
@@ -66,5 +68,43 @@ func TestReadFileLargeBoundedMemory(t *testing.T) {
 	}
 	if !strings.Contains(out, "1→a line") {
 		t.Fatalf("unexpected output: %q", out[:min(80, len(out))])
+	}
+}
+
+func TestReadFileLargeUTF16UsesStreamingDecoder(t *testing.T) {
+	var sb strings.Builder
+	for range 100000 {
+		sb.WriteString("a line of ordinary UTF-16 text with a searchable marker\n")
+	}
+	content := sb.String()
+	cases := []struct {
+		name string
+		kind fileenc.Kind
+	}{
+		{"le-bom", fileenc.UTF16LE}, {"be-bom", fileenc.UTF16BE},
+		{"le-no-bom", fileenc.UTF16LENoBOM}, {"be-no-bom", fileenc.UTF16BENoBOM},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			path := filepath.Join(t.TempDir(), "big-utf16.txt")
+			if err := os.WriteFile(path, fileenc.Encode(content, tc.kind), 0o644); err != nil {
+				t.Fatal(err)
+			}
+			args, _ := json.Marshal(map[string]any{"path": path, "limit": 5})
+			runtime.GC()
+			var m0, m1 runtime.MemStats
+			runtime.ReadMemStats(&m0)
+			out, err := readFile{}.Execute(context.Background(), args)
+			runtime.ReadMemStats(&m1)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if alloc := m1.TotalAlloc - m0.TotalAlloc; alloc > 4<<20 {
+				t.Fatalf("UTF-16 read allocated %d bytes for a five-line window", alloc)
+			}
+			if !strings.Contains(out, "UTF-16 text") || strings.Contains(out, "\x00") {
+				t.Fatalf("unexpected streamed UTF-16 output: %q", out)
+			}
+		})
 	}
 }

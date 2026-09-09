@@ -32,13 +32,45 @@ packages, MCP servers, and instruction docs (`AGENTS.md` / `REASONIX.md` /
 **Default is static and safe:** no network, no MCP child processes. Use `--live`
 only when you explicitly want to start automatic MCP servers.
 
-Related (unchanged) doctor commands:
+Related doctor commands:
 
 ```bash
 reasonix doctor                  # env / providers / sandbox snapshot
 reasonix doctor session <id>     # support session bundle
 reasonix doctor redact-sessions  # redact secrets in session files
 ```
+
+## Skill tool references
+
+Both `doctor` and `doctor capabilities` check `allowed-tools` on effective
+skills using the same configured paths, exclusions, disabled names, and source
+precedence. The inventory combines compile-time tools with host-managed tool
+identities. `use_capability` is a known host tool even with no MCP servers;
+there is no need to disable or override the built-in review skills.
+
+Recognition means the reference names a known tool, not that the tool is
+registered, permitted, or ready in every session. Hidden tools callable through
+the proxy are included. MCP dependency configuration remains a separate check.
+
+| Capability issue code | Meaning |
+| --- | --- |
+| `skill.tool_reference_unknown` | An ordinary name is not in the known inventory; check spelling |
+| `skill.tool_reference_invalid` | Invalid glob syntax or an incomplete MCP reference |
+| `skill.tool_reference_ambiguous` | Supplied MCP bindings resolve a literal to multiple tools |
+| `skill.tool_reference_unverified` | A dynamic reference or unmatched pattern cannot be verified offline |
+| `skill.mcp_dependency_missing` | An auto-use required skill depends on an unconfigured MCP server |
+| `skill.mcp_dependency_failed` | The required server has an observed host failure |
+
+Unverified references are informational in capability diagnostics. Ordinary
+doctor retains its warning-list format and explicitly labels these references
+as unverified. Neither result grants tool access or proves a server is broken.
+Static checks do not start MCP servers or call a model provider.
+When an existing runtime host or an explicit `--live` probe supplies MCP tools,
+capability diagnostics use that observed inventory to resolve portable aliases.
+Alias resolution follows runtime plugin ownership: a plugin skill can use aliases
+from its own package, while an ordinary local skill needs a concrete callable
+name or capability ID. Diagnostics preserve the adapter's original and visible
+names, including configured prefix stripping.
 
 ## Everyday workflows
 
@@ -262,6 +294,6 @@ config files.
 
 ## Cache impact
 
-Adding the built-in `reasonix-guide` skill appends **one stable index line** to
-the system-prompt skills index after upgrade. The skill body is loaded only on
-invocation. Diagnostics itself is not part of the provider prompt.
+Adding the built-in `reasonix-guide` skill appends one line to the next changed
+`session-context` Skills catalog. The skill body is loaded only on invocation.
+Diagnostics itself is not part of the provider prompt.

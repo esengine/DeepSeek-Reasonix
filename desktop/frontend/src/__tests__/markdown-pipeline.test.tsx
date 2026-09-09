@@ -111,6 +111,21 @@ for (const [name, text] of Object.entries(fixtures)) {
   eq(sliced, expected, `${name}: sliced blocks render identically (${blocks.length} blocks)`);
 }
 
+// Empty fenced blocks are formatting placeholders. They must not create a
+// bordered CodeViewer, while comment-only and whitespace-adjacent blocks stay
+// visible as real code content.
+{
+  const emptyFences = "Before\n\n```\n\n```\n\nAfter\n\n```ts\n   \n```";
+  const html = renderCurrent(emptyFences);
+  ok(!html.includes("code-block"), "empty fenced blocks do not render phantom code cards");
+  ok(html.includes("Before") && html.includes("After"), "text around empty fenced blocks remains visible");
+
+  const comments = "```ts\n// keep this comment\nconst stable = true;\n```";
+  const commentHtml = renderCurrent(comments);
+  ok(commentHtml.includes("keep this comment"), "non-empty comment code blocks remain visible");
+  ok(commentHtml.includes("code-block"), "non-empty comment code keeps its code-block surface");
+}
+
 // Block keys are stable top-level indexes.
 {
   const blocks = parseMarkdownToBlocks("one\n\ntwo\n\nthree");

@@ -44,7 +44,8 @@ var logoWordmarkSVG []byte
 // Server wires a controller to its HTTP surface. The Broadcaster must be the
 // same sink the controller was constructed with, so events reach SSE clients.
 type Server struct {
-	mu sync.RWMutex // guards ctrl, which rebuild paths swap at runtime
+	runtimeProjection serveRuntimeProjection
+	mu                sync.RWMutex // guards ctrl, which rebuild paths swap at runtime
 	// bindMu serializes every entry point that changes the active session
 	// path or controller generation — /resume, /new, /fork, switchModel, and
 	// extension reload. net/http runs handlers
@@ -66,7 +67,10 @@ type Server struct {
 	buildControllerWithOptions func(ctx context.Context, ref string, opts boot.Options) (*control.Controller, error)
 	// buildOptions preserves process-local CLI knobs when multi-session Serve
 	// creates a foreground replacement after detaching a busy controller.
-	buildOptions boot.Options
+	buildOptions           boot.Options
+	managedModels          *config.ModelRuntimeSettings  // bindMu; immutable once accepted
+	modelSettingsOfferID   string                        // bindMu; unacknowledged source route reservation
+	modelSettingsOwnership config.ModelSettingsOwnership // bindMu; all foreground and detached owners
 	// rebuildController rebuilds the same model/runtime generation for an
 	// extension reload. Tests inject it to exercise publication and failure
 	// paths without starting real providers or sidecars.
@@ -92,6 +96,11 @@ type Server struct {
 	tagsMu        sync.Mutex
 	tags          map[*control.Controller]*sessionTagSink
 	hostGate      hostGateState // hostGuard allowlist state; see hostguard.go
+	// mirroredMu guards mirrored: sessions whose lease was handed to a local
+	// runtime via POST /handoff. Serve answers reads from the transcript file
+	// and mirrors the writer's frames, but holds no write authority.
+	mirrorMu sync.Mutex
+	mirrored map[string]mirroredSession
 }
 
 // SetControllerBuildOptions records the process-local options used to build
@@ -99,6 +108,9 @@ type Server struct {
 // that necessarily change with their session tag and active model.
 func (s *Server) SetControllerBuildOptions(opts boot.Options) {
 	s.buildOptions = opts
+	if opts.ModelSettings != nil {
+		s.managedModels = opts.ModelSettings
+	}
 }
 
 // New builds a Server. bc must be the controller's event sink.
@@ -115,12 +127,16 @@ func New(ctrl control.SessionAPI, bc *Broadcaster, serveCfg config.ServeConfig) 
 		detached:    map[string]*detachedSession{},
 		tags:        map[*control.Controller]*sessionTagSink{},
 		leaseOwners: map[*control.Controller]*control.SessionLeaseKeeper{},
+		mirrored:    map[string]mirroredSession{},
 	}
 	bc.SetCurrentSession(agent.CanonicalSessionPath(ctrl.SessionPath()))
 	if cfg, err := config.Load(); err == nil {
 		bc.SetDisplayCurrency(cfg.ExplicitDisplayCurrency())
 	}
 	s.initTitleProvider()
+	if concrete, ok := ctrl.(*control.Controller); ok {
+		concrete.SetBeforeInboxDispatch(s.beforeInboxDispatch)
+	}
 	return s
 }
 
@@ -231,9 +247,7 @@ func (s *Server) switchModelLocked(ctx context.Context, ref string) error {
 
 	// Off-lock: snapshot, carry history, and build the replacement. None of these
 	// touch s.mu, so concurrent handlers keep reading the live controller.
-	if err := cur.Snapshot(); err != nil {
-		slog.Warn("serve: snapshot before model switch", "err", err)
-	}
+	s.snapshotForeground(cur)
 	// Capture the continue path and history only after Snapshot: a snapshot
 	// conflict can retarget cur to a recovery branch (or adopt the newer disk
 	// transcript), and a pre-snapshot capture would bind the rebuilt controller
@@ -270,6 +284,7 @@ func (s *Server) switchModelLocked(ctx context.Context, ref string) error {
 	// this session.
 	if prev, ok := cur.(*control.Controller); ok {
 		newCtrl.RestoreSessionAuthorizations(prev.SessionAuthorizations())
+		newCtrl.InheritLifecycleFrom(prev)
 	}
 	// Persist before publishing the replacement. A failed write leaves cur and
 	// the on-disk transcript coherent and lets the caller retry; publishing first
@@ -344,10 +359,7 @@ func (s *Server) reloadExtensions(ctx context.Context) error {
 	if !ok {
 		return fmt.Errorf("cannot reload extensions for this controller implementation")
 	}
-	if err := cur.Snapshot(); err != nil {
-		slog.Warn("serve: snapshot before extension reload", "err", err)
-	}
-
+	s.snapshotForeground(cur)
 	ref := currentModelRef(cur)
 	newCtrl, err := s.rebuild(ctx, cur, ref)
 	if err != nil {
@@ -399,15 +411,18 @@ func (s *Server) reloadExtensions(ctx context.Context) error {
 func (s *Server) rebuild(ctx context.Context, old *control.Controller, ref string) (*control.Controller, error) {
 	tag := newSessionTagSink(s.bc)
 	tag.PrimePath(old.SessionPath())
-	opts := boot.Options{
-		Model:          ref,
-		Sink:           tag,
-		Stderr:         os.Stderr,
-		StatsSource:    "serve",
-		SessionDir:     old.SessionDir(),
-		WorkspaceRoot:  old.WorkspaceRoot(),
-		MCPHostProfile: plugin.HostProfileInteractive,
+	opts := s.buildOptions
+	opts.Model, opts.Sink, opts.Stderr = ref, tag, os.Stderr
+	opts.StatsSource, opts.SessionDir, opts.WorkspaceRoot = "serve", old.SessionDir(), old.WorkspaceRoot()
+	opts.MCPHostProfile = plugin.HostProfileInteractive
+	opts.BeforeInboxDispatch = s.beforeInboxDispatch
+	if s.managedModels != nil {
+		opts.ModelSettings = s.managedModels
 	}
+	return s.rebuildWithOptions(ctx, old, ref, opts, tag)
+}
+
+func (s *Server) rebuildWithOptions(ctx context.Context, old *control.Controller, ref string, opts boot.Options, tag *sessionTagSink) (*control.Controller, error) {
 	if s.rebuildControllerWithOptions != nil {
 		ctrl, err := s.rebuildControllerWithOptions(ctx, old, ref, opts)
 		if err == nil {
@@ -422,15 +437,7 @@ func (s *Server) rebuild(ctx context.Context, old *control.Controller, ref strin
 		}
 		return ctrl, err
 	}
-	res, err := boot.Rebuild(ctx, old, boot.Options{
-		Model:          ref,
-		Sink:           tag,
-		Stderr:         os.Stderr,
-		StatsSource:    "serve",
-		SessionDir:     old.SessionDir(),
-		WorkspaceRoot:  old.WorkspaceRoot(),
-		MCPHostProfile: plugin.HostProfileInteractive,
-	})
+	res, err := boot.Rebuild(ctx, old, opts)
 	if err != nil {
 		return nil, err
 	}
@@ -458,6 +465,11 @@ func (s *Server) switchEffortExpected(ctx context.Context, level, expectedPath s
 	if err != nil {
 		return fmt.Errorf("load config: %w", err)
 	}
+	if s.managedModels != nil {
+		if err := s.managedModels.Apply(cfg, cur.WorkspaceRoot()); err != nil {
+			return err
+		}
+	}
 	ref := currentModelRef(cur)
 	entry, ok := cfg.ResolveModel(ref)
 	if !ok {
@@ -469,6 +481,17 @@ func (s *Server) switchEffortExpected(ctx context.Context, level, expectedPath s
 	effort, err := config.NormalizeEffort(entry, level)
 	if err != nil {
 		return err
+	}
+	if s.managedModels != nil {
+		// Managed providers are transient tunnel identities. Keep an explicit
+		// session effort override in memory instead of persisting virtual keys.
+		previous := s.buildOptions.EffortOverride
+		s.buildOptions.EffortOverride = &effort
+		if err := s.switchModelLocked(ctx, ref); err != nil {
+			s.buildOptions.EffortOverride = previous
+			return err
+		}
+		return nil
 	}
 	editPath := config.UserConfigPath()
 	if editPath == "" {
@@ -540,6 +563,7 @@ func (s *Server) handler() http.Handler {
 	mux.HandleFunc("GET /provider-setup", s.providerSetupStatus)
 	mux.HandleFunc("POST /provider-setup", s.providerSetupSave)
 	mux.HandleFunc("GET /events", s.events)
+	mux.HandleFunc("GET /runtime-states", s.runtimeStates)
 	mux.HandleFunc("GET /history", s.history)
 	mux.HandleFunc("GET /context", s.context)
 	mux.HandleFunc("POST /submit", s.submit)
@@ -571,12 +595,20 @@ func (s *Server) handler() http.Handler {
 	mux.HandleFunc("GET /branches", s.branches)
 	mux.HandleFunc("GET /models", s.models)
 	mux.HandleFunc("POST /model", s.modelSwitch)
+	mux.HandleFunc("GET /model-settings", s.modelSettingsStatus)
+	mux.HandleFunc("POST /model-settings", s.applyModelSettings)
 	mux.HandleFunc("POST /effort", s.effortSwitch)
 	mux.HandleFunc("POST /quality-floor", s.qualityFloorSwitch)
 	mux.HandleFunc("POST /extensions/reload", s.reloadExtensionsHTTP)
 	mux.HandleFunc("POST /extension-form", s.foregroundMutation(s.submitExtensionForm))
 	mux.HandleFunc("GET /status", s.status)
 	mux.HandleFunc("GET /sessions", s.sessions)
+	mux.HandleFunc("GET /ownership", s.ownership)
+	mux.HandleFunc("POST /handoff", s.handoff)
+	mux.HandleFunc("POST /external/frames", s.externalFrames)
+	mux.HandleFunc("POST /adopt", s.adopt)
+	mux.HandleFunc("POST /reclaim", s.reclaim)
+	mux.HandleFunc("POST /mirror-end", s.mirrorEnd)
 	mux.HandleFunc("GET /commands", s.commands)
 	mux.HandleFunc("GET /pending-prompts", s.pendingPrompts)
 	mux.HandleFunc("GET /skills", s.skills)
@@ -679,16 +711,21 @@ func (s *Server) logoWordmark(w http.ResponseWriter, _ *http.Request) {
 // on this turn (text.format on the wire).
 func (s *Server) submit(w http.ResponseWriter, r *http.Request) {
 	var body struct {
-		Input  string `json:"input"`
-		Format string `json:"format"`
-		Action string `json:"action"`
+		Input      string `json:"input"`
+		Format     string `json:"format"`
+		Action     string `json:"action"`
+		RecoveryID string `json:"recoveryId"`
 	}
-	if err := json.NewDecoder(r.Body).Decode(&body); err != nil || body.Input == "" {
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil || (body.Input == "" && body.Action != control.ProtocolRecoveryAction) {
 		http.Error(w, "missing input", http.StatusBadRequest)
 		return
 	}
 	body.Format = strings.TrimSpace(body.Format)
 	body.Action = strings.TrimSpace(body.Action)
+	if body.Action == control.ProtocolRecoveryAction && strings.TrimSpace(body.RecoveryID) == "" {
+		http.Error(w, "missing recoveryId", http.StatusBadRequest)
+		return
+	}
 	switch body.Format {
 	case "", "json_object":
 		// Supported: empty = default text output, json_object = structured.
@@ -701,6 +738,10 @@ func (s *Server) submit(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	trimmed := strings.TrimSpace(body.Input)
+	// Typed recovery guidance is never dispatched as a management command.
+	if body.Action != "" {
+		trimmed = ""
+	}
 	if strings.HasPrefix(trimmed, "!") {
 		http.Error(w, "shell commands are unavailable over HTTP", http.StatusForbidden)
 		return
@@ -739,7 +780,7 @@ func (s *Server) submit(w http.ResponseWriter, r *http.Request) {
 	// published replacement. This closes the check/build/swap race where a
 	// request could otherwise start on cur after reload's initial busy check.
 	s.bindMu.Lock()
-	if !s.validateExpectedSessionLocked(w, r) {
+	if !s.admitModelSettingsRunLocked(w, r) {
 		s.bindMu.Unlock()
 		return
 	}
@@ -751,7 +792,21 @@ func (s *Server) submit(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "session is busy; use POST /inbox/items for durable follow-up", http.StatusConflict)
 		return
 	}
-	submitWithAction(ctrl, body.Input, body.Format, body.Action)
+	if body.Action == control.ProtocolRecoveryAction {
+		pending, ok := ctrl.(interface {
+			PendingProtocolRecovery() *provider.ProtocolRecoveryAction
+		})
+		var action *provider.ProtocolRecoveryAction
+		if ok {
+			action = pending.PendingProtocolRecovery()
+		}
+		if action == nil || action.ID != body.RecoveryID {
+			s.bindMu.Unlock()
+			http.Error(w, "protocol recovery is unavailable or stale", http.StatusConflict)
+			return
+		}
+	}
+	submitWithAction(ctrl, body.Input, body.Format, body.Action, body.RecoveryID)
 	if isServeManagementCommand(trimmed) && !ctrl.Running() && !ctrl.RuntimeStatus().PendingPrompt {
 		// Management notices/status are successful non-turn operations.
 		s.bindMu.Unlock()
@@ -803,65 +858,32 @@ func (s *Server) approve(w http.ResponseWriter, r *http.Request) {
 	w.WriteHeader(http.StatusNoContent)
 }
 
-type historyToolCall struct {
-	ID        string `json:"id"`
-	Name      string `json:"name"`
-	Arguments string `json:"arguments"`
-}
-
-type historyMessage struct {
-	Role       string            `json:"role"`
-	Content    string            `json:"content"`
-	Missing    []string          `json:"missing,omitempty"`
-	Reasoning  string            `json:"reasoning,omitempty"`
-	ToolCalls  []historyToolCall `json:"toolCalls,omitempty"`
-	ToolCallID string            `json:"toolCallId,omitempty"`
-	ToolName   string            `json:"toolName,omitempty"`
-}
-
-func historyMessages(msgs []provider.Message) []historyMessage {
-	out := make([]historyMessage, 0, len(msgs))
-	for _, m := range msgs {
-		if recovered, handled := finalReadinessHistoryMessage(m); handled {
-			out = append(out, recovered...)
-			continue
-		}
-		// Steer messages are surfaced as a notice, not a user message.
-		if m.Role == provider.RoleUser {
-			if text, handled := agent.ReplaySteerText(m.Content); handled {
-				if text != "" {
-					out = append(out, historyMessage{Role: "notice", Content: "↪ " + text})
-				}
-				continue
-			}
-		}
-		hm := historyMessage{Role: string(m.Role), Content: historyMessageContent(m)}
-		if m.Role == provider.RoleAssistant {
-			hm.Reasoning = m.ReasoningContent
-			if len(m.ToolCalls) > 0 {
-				hm.ToolCalls = make([]historyToolCall, len(m.ToolCalls))
-				for i, tc := range m.ToolCalls {
-					hm.ToolCalls[i] = historyToolCall{ID: tc.ID, Name: tc.Name, Arguments: tc.Arguments}
-				}
-			}
-		}
-		if m.Role == provider.RoleTool {
-			hm.ToolCallID = m.ToolCallID
-			hm.ToolName = m.Name
-		}
-		out = append(out, hm)
-	}
-	return out
-}
-
 // history returns the session's message log so a reconnecting client can
-// repopulate its transcript, including historical tool cards. Supports ETag caching:
+// repopulate its transcript, including historical tool cards. For a session
+// mirrored to a local writer it reads the transcript file — the writer's
+// turns never enter Serve's in-memory history. Supports ETag caching:
 // if the client sends If-None-Match with the current ETag, the server returns
 // 304 Not Modified with no body, saving bandwidth on reconnects.
 func (s *Server) history(w http.ResponseWriter, r *http.Request) {
+	// A read-only surface can select a specific session a local runtime owns
+	// (spectator attach): serve the local writer's transcript from the file.
+	if raw := r.URL.Query().Get("session"); raw != "" {
+		if path, msgs, ok := s.externalReadView(raw); ok {
+			writeJSONCached(w, r, historyMessages(msgs))
+			_ = path
+			return
+		}
+	}
 	s.bindMu.Lock()
 	defer s.bindMu.Unlock()
-	writeJSONCached(w, r, historyMessages(s.ctl().History()))
+	ctrl := s.ctl()
+	if path := agent.CanonicalSessionPath(ctrl.SessionPath()); s.sessionMirrored(path) {
+		if msgs, ok := s.mirroredHistory(path); ok {
+			writeJSONCached(w, r, historyMessages(msgs))
+			return
+		}
+	}
+	writeJSONCached(w, r, historyMessages(ctrl.History()))
 }
 
 // context returns the prompt-vs-window gauge numbers. Supports ETag caching
@@ -974,6 +996,11 @@ func (s *Server) fork(w http.ResponseWriter, r *http.Request) {
 	if !s.validateExpectedSessionLocked(w, r) {
 		return
 	}
+	// Forking a mirrored foreground would branch from Serve's stale in-memory
+	// copy; the local writer owns the live transcript.
+	if s.rejectMirroredForegroundLocked(w) {
+		return
+	}
 	path, err := s.ctl().ForkNamed(body.Turn, body.Name)
 	if err != nil {
 		if control.IsSessionRotationBusy(err) {
@@ -992,7 +1019,9 @@ func (s *Server) fork(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, sessionInUseError(err), http.StatusConflict)
 		return
 	}
-	writeJSON(w, map[string]string{"path": path})
+	// path is the session the controller is on now; branch is what the fork
+	// created: the same path for a file fork, a head id inside a schema-2 log.
+	writeJSON(w, map[string]string{"path": s.ctl().SessionPath(), "branch": path})
 }
 
 // summarize runs summarize-from or summarize-up-to on a turn.
@@ -1091,52 +1120,50 @@ func (s *Server) resume(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "missing path", http.StatusBadRequest)
 		return
 	}
-	dir := s.ctl().SessionDir()
-	if dir == "" {
-		http.Error(w, "sessions disabled", http.StatusBadRequest)
-		return
-	}
-	absDir, err := filepath.Abs(dir)
+	realPath, err := s.resolveSessionPath(body.Path)
 	if err != nil {
-		http.Error(w, "invalid session dir", http.StatusBadRequest)
+		http.Error(w, err.Error(), resolveSessionPathStatus(err))
 		return
 	}
-	realDir, err := filepath.EvalSymlinks(absDir)
-	if err != nil {
-		http.Error(w, "invalid session dir", http.StatusBadRequest)
-		return
-	}
-	absPath, err := filepath.Abs(strings.TrimSpace(body.Path))
-	if err != nil || !store.IsSessionTranscriptName(filepath.Base(absPath)) {
-		http.Error(w, "invalid session path", http.StatusBadRequest)
-		return
-	}
-	realPath, err := filepath.EvalSymlinks(absPath)
-	if err != nil {
-		http.Error(w, "invalid session path", http.StatusBadRequest)
-		return
-	}
-	if realPath == realDir || !strings.HasPrefix(realPath, realDir+string(os.PathSeparator)) {
-		http.Error(w, "path outside session dir", http.StatusForbidden)
-		return
-	}
-	if agent.IsCleanupPending(realPath) {
-		http.Error(w, "session is pending cleanup", http.StatusBadRequest)
+	// A mirrored session belongs to a local runtime; switching the foreground
+	// onto it would render Serve's frozen in-memory copy and silently strand
+	// the writer. Instead of refusing the attach, mount the client as a
+	// read-only spectator: Serve does NOT take ownership, the remote tab
+	// renders the file-backed /history?session view, /status?session reports
+	// takenOver, and reclaim returns the session through POST /reclaim. This
+	// keeps every client version (no special attach branch) working.
+	// Covers both mirrored sessions (adopted/handed off) and sessions merely
+	// held by another local process (e.g. a .9 desktop tab without adopt).
+	if s.sessionMirrored(realPath) || leaseHeldByForeignRuntime(realPath) {
+		w.Header().Set(sessionPathHeader, agent.CanonicalSessionPath(realPath))
+		w.WriteHeader(http.StatusNoContent)
 		return
 	}
 	// Serialize with /new, /fork, and switchModel so the controller and lease
 	// cannot land on different sessions. Validate first to avoid slow holders.
 	s.bindMu.Lock()
 	defer s.bindMu.Unlock()
+	s.resumeSession(w, r, realPath)
+}
+
+// resolveSessionPathStatus keeps resume's historical status codes for the
+// shared validation helper.
+func resolveSessionPathStatus(err error) int {
+	if err != nil && err.Error() == "path outside session dir" {
+		return http.StatusForbidden
+	}
+	return http.StatusBadRequest
+}
+
+// resumeSession moves the foreground to realPath. Callers hold bindMu.
+func (s *Server) resumeSession(w http.ResponseWriter, r *http.Request, realPath string) {
 	cur := s.ctl()
 	if s.resumeActiveSession(w, r, cur, realPath) {
 		return
 	}
 	// Snapshot the current session before switching away — while this process
-	// still holds its lease.
-	if err := cur.Snapshot(); err != nil {
-		slog.Warn("serve: snapshot before resume", "err", err)
-	}
+	// still holds its lease (skipped when a local writer owns it).
+	s.snapshotForeground(cur)
 	// Refuse to bind a session another runtime is writing (a desktop window,
 	// another CLI); on success the lease now guards the resume target.
 	if s.leases != nil {
@@ -1294,17 +1321,28 @@ func (s *Server) models(w http.ResponseWriter, _ *http.Request) {
 	writeJSON(w, map[string]any{"current": current, "label": label, "default": cfg.DefaultModel, "models": out})
 }
 
-func currentModelRef(c control.SessionAPI) string {
-	ref := strings.TrimSpace(c.ModelRef())
-	if ref != "" {
-		return ref
-	}
-	return strings.TrimSpace(c.Label())
-}
-
 // status returns a combined status snapshot. The desktop's runtime-only path
 // skips provider balance IO while retaining all reconciliation fields.
 func (s *Server) status(w http.ResponseWriter, r *http.Request) {
+	// A spectator watching a session a local runtime owns selects it
+	// explicitly; report the file-backed read-only view instead of the
+	// foreground controller's.
+	if raw := r.URL.Query().Get("session"); raw != "" {
+		if path, err := s.resolveSessionPath(raw); err == nil {
+			held := s.sessionMirrored(path) || leaseHeldByForeignRuntime(path)
+			if !held {
+				if view, ok := s.ownedRuntimeStatusView(path); ok {
+					writeJSON(w, view)
+					return
+				}
+			}
+			writeJSON(w, s.statusViewForPath(path, held))
+			if s.sessionMirrored(path) {
+				s.maybeAutoReclaimMirrored(path)
+			}
+			return
+		}
+	}
 	// Session rotations publish the controller path and executor Session while
 	// holding bindMu. Read the combined snapshot in that same binding epoch so
 	// callers can never pair a newly published path with the outgoing history.
@@ -1313,8 +1351,9 @@ func (s *Server) status(w http.ResponseWriter, r *http.Request) {
 	ctrl := s.ctl()
 	used, window := ctrl.ContextSnapshot()
 	hit, miss := ctrl.SessionCache()
-	rs := ctrl.RuntimeStatus()
+	state, rs := runtimeStateAndStatus(ctrl)
 	sess := map[string]any{
+		"runtimeState":     state,
 		"label":            ctrl.Label(),
 		"running":          rs.Running,
 		"plan":             ctrl.PlanMode(),
@@ -1360,6 +1399,22 @@ func (s *Server) status(w http.ResponseWriter, r *http.Request) {
 	sess["backgroundJobs"] = rs.BackgroundJobs
 	sess["cancelRequested"] = rs.CancelRequested
 	sess["cancellable"] = rs.Cancellable
+	if canonical := agent.CanonicalSessionPath(sessionPath); canonical != "" && s.sessionMirrored(canonical) {
+		// A local runtime owns the session: nothing here can run, and the
+		// remote surface must render read-only. This field is the
+		// authoritative ownership signal — notices can be dropped by a slow
+		// subscriber, the status poll cannot.
+		sess["running"] = false
+		sess["pendingPrompt"] = false
+		sess["takenOver"] = true
+		if m, ok := s.mirroredEntry(canonical); ok {
+			sess["reclaimRequested"] = m.reclaimRequested
+		}
+		s.bindMu.Unlock()
+		s.maybeAutoReclaimMirrored(canonical)
+		writeJSON(w, sess)
+		return
+	}
 	if u := ctrl.LastUsage(); u != nil {
 		sess["lastUsage"] = u
 	}
@@ -1509,6 +1564,12 @@ func (s *Server) deleteSession(w http.ResponseWriter, r *http.Request) {
 	}
 	if s.detachedBusy(filepath.Clean(abs)) {
 		http.Error(w, "session is running in the background; switch to it and stop the turn first", http.StatusConflict)
+		return
+	}
+	if s.sessionMirrored(abs) {
+		// A local runtime is writing this transcript; deleting it here would
+		// pull the file out from under the writer.
+		http.Error(w, "session is taken over by a local Reasonix window", http.StatusConflict)
 		return
 	}
 	destroy := s.ctl().BeginDestroySession(abs)

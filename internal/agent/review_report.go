@@ -18,7 +18,7 @@ type ReviewReportTool struct{}
 
 func NewReviewReportTool() *ReviewReportTool { return &ReviewReportTool{} }
 
-func (*ReviewReportTool) Name() string { return "review_report" }
+func (*ReviewReportTool) Name() string { return tool.HostReviewReport }
 
 func (*ReviewReportTool) Description() string {
 	return "Submit a structured review result for the parent delivery gate. Call once when the review is complete. kind is review or security; verdict is pass, warn, or block; reviewed_paths must cover the production paths you inspected; findings list severity/summary/path/line."

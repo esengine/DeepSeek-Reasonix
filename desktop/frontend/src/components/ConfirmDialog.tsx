@@ -91,6 +91,7 @@ function ConfirmDialog({ request, onResolve }: { request: ConfirmDialogRequest; 
 export function useConfirmDialog(): {
   confirm: (request: ConfirmDialogRequest) => Promise<boolean>;
   dialog: ReactNode;
+  dismiss: () => void;
 } {
   const [pending, setPending] = useState<PendingConfirmation | null>(null);
   const pendingRef = useRef<PendingConfirmation | null>(null);
@@ -115,8 +116,9 @@ export function useConfirmDialog(): {
     pendingRef.current = null;
   }, []);
 
+  const dismiss = useCallback(() => resolvePending(false), [resolvePending]);
   return {
-    confirm,
+    confirm, dismiss,
     dialog: pending ? <ConfirmDialog request={pending} onResolve={resolvePending} /> : null,
   };
 }

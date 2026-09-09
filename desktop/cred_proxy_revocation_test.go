@@ -11,7 +11,7 @@ import (
 	"reasonix/internal/config"
 )
 
-func TestClearProviderKeyRevokesCredentialProxyRoute(t *testing.T) {
+func TestClearProviderKeyPreservesOldRouteAndRejectsNewRoute(t *testing.T) {
 	isolateDesktopUserDirs(t)
 	const keyEnv = "TEST_PROXY_CLEAR_KEY"
 	setDesktopTestCredential(t, keyEnv, "sk-before-clear")
@@ -35,15 +35,18 @@ func TestClearProviderKeyRevokesCredentialProxyRoute(t *testing.T) {
 	if err := a.ClearProviderKey(keyEnv); err != nil {
 		t.Fatal(err)
 	}
-	if status := credentialProxyStatus(t, route.port, route.token); status != http.StatusUnauthorized {
-		t.Fatalf("cleared route status = %d, want 401", status)
+	if status := credentialProxyStatus(t, route.port, route.token); status != http.StatusOK {
+		t.Fatalf("old route interrupted: status = %d", status)
 	}
-	if got := upstreamCalls.Load(); got != 1 {
-		t.Fatalf("revoked token reached upstream: calls=%d, want 1", got)
+	if got := upstreamCalls.Load(); got != 2 {
+		t.Fatalf("upstream calls=%d, want 2", got)
+	}
+	if _, err := a.applyCredentialProxyModel("box", "~/app", firstRef); err == nil {
+		t.Fatal("cleared credential admitted a new route")
 	}
 }
 
-func TestDeleteProviderRevokesOnlyItsCredentialProxyRoutes(t *testing.T) {
+func TestDeleteProviderPreservesOldRoutesAndRejectsNewRoute(t *testing.T) {
 	isolateDesktopUserDirs(t)
 	const keyEnv = "TEST_PROXY_PROVIDER_DELETE_KEY"
 	setDesktopTestCredential(t, keyEnv, "sk-shared")
@@ -78,14 +81,17 @@ func TestDeleteProviderRevokesOnlyItsCredentialProxyRoutes(t *testing.T) {
 	if err := a.DeleteProvider("proxy-first"); err != nil {
 		t.Fatal(err)
 	}
-	if status := credentialProxyStatus(t, first.port, first.token); status != http.StatusUnauthorized {
-		t.Fatalf("deleted provider route status = %d, want 401", status)
+	if status := credentialProxyStatus(t, first.port, first.token); status != http.StatusOK {
+		t.Fatalf("old deleted-provider route interrupted: status = %d", status)
 	}
 	if status := credentialProxyStatus(t, second.port, second.token); status != http.StatusOK {
 		t.Fatalf("remaining provider route status = %d, want 200", status)
 	}
-	if got := upstreamCalls.Load(); got != 3 {
-		t.Fatalf("upstream calls = %d, want 3", got)
+	if got := upstreamCalls.Load(); got != 4 {
+		t.Fatalf("upstream calls = %d, want 4", got)
+	}
+	if _, err := a.applyCredentialProxyModel("box", "~/app", firstRef); err == nil {
+		t.Fatal("removed provider admitted a new route")
 	}
 }
 

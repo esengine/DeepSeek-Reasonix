@@ -126,8 +126,7 @@ var (
 	qwenAPIVisionModels  = []string{"qwen3.7-plus", "qwen3.6-plus", "qwen3.5-plus", "kimi-k2.5"}
 	qwenPlanModels       = []string{"qwen3.7-plus", "qwen3.6-plus", "kimi-k2.5", "glm-5", "MiniMax-M2.5", "qwen3.5-plus", "qwen3-max-2026-01-23", "qwen3-coder-next", "qwen3-coder-plus", "glm-4.7"}
 	qwenPlanVisionModels = []string{"qwen3.7-plus", "qwen3.6-plus", "qwen3.5-plus", "kimi-k2.5"}
-
-	stepfunPlanModels = []string{"step-3.7-flash", "step-3.5-flash", "step-3.5-flash-2603"}
+	stepfunPlanModels    = []string{"step-3.7-flash", "step-3.5-flash", "step-3.5-flash-2603"}
 
 	// Only step-3.7-flash is enabled server-side on the Responses API
 	// ("this model is not enabled for the Responses API" for 3.5 SKUs).
@@ -140,8 +139,10 @@ var (
 	stepfunAPIVisionModels = []string{"step-3.7-flash"}
 
 	legacyOpenCodeGoModels           = []string{"glm-5.2", "glm-5.1", "kimi-k2.7-code", "kimi-k2.6", "deepseek-v4-pro", "deepseek-v4-flash", "mimo-v2.5-pro", "mimo-v2.5"}
-	opencodeGoModels                 = []string{"glm-5.3", "glm-5.2", "glm-5.1", "kimi-k3", "kimi-k2.7-code", "kimi-k2.6", "deepseek-v4-pro", "deepseek-v4-flash", "mimo-v2.5-pro", "mimo-v2.5", "hy3"}
-	opencodeGoVisionModels           = []string{"kimi-k3"}
+	preVisionOpenCodeGoModels        = []string{"glm-5.3", "glm-5.2", "glm-5.1", "kimi-k3", "kimi-k2.7-code", "kimi-k2.6", "deepseek-v4-pro", "deepseek-v4-flash", "mimo-v2.5-pro", "mimo-v2.5", "hy3"}
+	preVisionOpenCodeGoVisionModels  = []string{"kimi-k3"}
+	opencodeGoModels                 = provider.OpenCodeGoModelIDs(provider.OpenCodeGoRouteChat)
+	opencodeGoVisionModels           = provider.OpenCodeGoVisionModelIDs(provider.OpenCodeGoRouteChat)
 	opencodeZenAnthropicModels       = []string{"claude-sonnet-4-6", "claude-opus-4-8", "claude-haiku-4-5", "qwen3.6-plus", "qwen3.5-plus", "qwen3.6-plus-free"}
 	opencodeZenAnthropicVisionModels = []string{"claude-sonnet-4-6", "claude-opus-4-8", "claude-haiku-4-5"}
 
@@ -1058,6 +1059,7 @@ var curatedProviderPresets = []ProviderPreset{
 			APIKeyEnv: "KILOCODE_API_KEY",
 		}},
 	},
+	modelscopePreset,
 	{
 		ID:          "ollama-cloud",
 		Label:       "Ollama Cloud",

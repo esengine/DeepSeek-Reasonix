@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState, type DragEvent, type HTMLAttributes, type ReactNode } from "react";
+import { useCallback, useEffect, useRef, useState, lazy, Suspense, type DragEvent, type HTMLAttributes, type ReactNode } from "react";
 import { Archive, FolderMinus, Pencil } from "lucide-react";
 import { app } from "../lib/bridge";
 import { asArray } from "../lib/array";
@@ -419,7 +419,7 @@ export function projectTreeFolderHasActiveRuntime(folder: ProjectNode): boolean 
   return asArray(folder.children).some(projectTreeTopicArchiveBlocked);
 }
 
+const FolderActivity = lazy(() => import("./ProjectTreeFolderActivity"));
 export function ProjectTreeFolderActivity({ folder }: { folder: ProjectNode }) {
-  if (!projectTreeFolderHasActiveRuntime(folder)) return null;
-  return <span className="project-tree__folder-active-indicator" aria-hidden="true" />;
+  return <Suspense fallback={null}><FolderActivity folder={folder} /></Suspense>;
 }

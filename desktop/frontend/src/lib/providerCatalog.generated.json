@@ -1,0 +1,2011 @@
+{
+  "catalogs": {
+    "amd-gpu-cloud": {
+      "brandId": "amd",
+      "brandLabel": "AMD GPU Cloud",
+      "region": "cn",
+      "product": "api",
+      "format": "openai",
+      "baseUrl": "https://developer.amd.com.cn/radeon/api/v1",
+      "protocols": {
+        "openai": {
+          "baseUrl": "https://developer.amd.com.cn/radeon/api/v1",
+          "source": "https://amd-aim.github.io/radeon-cloud-docs/quickstart/",
+          "checkedOn": "2026-09-07"
+        }
+      }
+    },
+    "anthropic": {
+      "brandId": "anthropic",
+      "brandLabel": "Anthropic",
+      "region": "global",
+      "product": "api",
+      "format": "anthropic",
+      "baseUrl": "https://api.anthropic.com",
+      "protocols": {
+        "anthropic": {
+          "baseUrl": "https://api.anthropic.com",
+          "source": "https://platform.claude.com/docs/en/api/messages/create",
+          "checkedOn": "2026-09-07"
+        }
+      }
+    },
+    "baidu-cloud": {
+      "brandId": "baidu",
+      "brandLabel": "百度智能云 / 千帆",
+      "region": "cn",
+      "product": "api",
+      "format": "openai",
+      "baseUrl": "https://qianfan.baidubce.com/v2",
+      "protocols": {
+        "anthropic": {
+          "baseUrl": "https://qianfan.baidubce.com/anthropic",
+          "source": "https://cloud.baidu.com/doc/qianfan/s/Smoghsq3g",
+          "checkedOn": "2026-09-07",
+          "authHeader": true
+        },
+        "openai": {
+          "baseUrl": "https://qianfan.baidubce.com/v2",
+          "source": "https://cloud.baidu.com/doc/qianfan/s/Smoghsq3g",
+          "checkedOn": "2026-09-07"
+        }
+      }
+    },
+    "cerebras": {
+      "brandId": "cerebras",
+      "brandLabel": "Cerebras",
+      "region": "global",
+      "product": "api",
+      "format": "openai",
+      "baseUrl": "https://api.cerebras.ai/v1",
+      "protocols": {
+        "openai": {
+          "baseUrl": "https://api.cerebras.ai/v1",
+          "source": "https://inference-docs.cerebras.ai/resources/openai",
+          "checkedOn": "2026-09-07"
+        }
+      }
+    },
+    "deepseek-chat": {
+      "brandId": "deepseek",
+      "brandLabel": "DeepSeek",
+      "region": "global",
+      "product": "api",
+      "format": "openai",
+      "baseUrl": "https://api.deepseek.com/v1",
+      "protocols": {
+        "anthropic": {
+          "baseUrl": "https://api.deepseek.com/anthropic",
+          "source": "https://api-docs.deepseek.com/guides/anthropic_api",
+          "checkedOn": "2026-09-08"
+        },
+        "openai": {
+          "baseUrl": "https://api.deepseek.com/v1",
+          "source": "https://api-docs.deepseek.com/",
+          "checkedOn": "2026-09-07"
+        },
+        "responses": {
+          "baseUrl": "https://api.deepseek.com",
+          "source": "https://api-docs.deepseek.com/",
+          "checkedOn": "2026-09-07"
+        }
+      }
+    },
+    "deepseek-responses": {
+      "brandId": "deepseek",
+      "brandLabel": "DeepSeek",
+      "region": "global",
+      "product": "api",
+      "format": "responses",
+      "baseUrl": "https://api.deepseek.com",
+      "protocols": {
+        "anthropic": {
+          "baseUrl": "https://api.deepseek.com/anthropic",
+          "source": "https://api-docs.deepseek.com/guides/anthropic_api",
+          "checkedOn": "2026-09-08"
+        },
+        "openai": {
+          "baseUrl": "https://api.deepseek.com/v1",
+          "source": "https://api-docs.deepseek.com/",
+          "checkedOn": "2026-09-07"
+        },
+        "responses": {
+          "baseUrl": "https://api.deepseek.com",
+          "source": "https://api-docs.deepseek.com/",
+          "checkedOn": "2026-09-07"
+        }
+      }
+    },
+    "doubao-chat": {
+      "brandId": "doubao",
+      "brandLabel": "火山引擎 / 豆包",
+      "region": "cn",
+      "product": "api",
+      "format": "openai",
+      "baseUrl": "https://ark.cn-beijing.volces.com/api/v3",
+      "protocols": {
+        "openai": {
+          "baseUrl": "https://ark.cn-beijing.volces.com/api/v3",
+          "source": "https://www.volcengine.com/docs/82379/1795150",
+          "checkedOn": "2026-09-07"
+        },
+        "responses": {
+          "baseUrl": "https://ark.cn-beijing.volces.com/api/v3",
+          "source": "https://www.volcengine.com/docs/82379/1795150",
+          "checkedOn": "2026-09-07"
+        }
+      }
+    },
+    "doubao-responses": {
+      "brandId": "doubao",
+      "brandLabel": "火山引擎 / 豆包",
+      "region": "cn",
+      "product": "api",
+      "format": "responses",
+      "baseUrl": "https://ark.cn-beijing.volces.com/api/v3",
+      "protocols": {
+        "openai": {
+          "baseUrl": "https://ark.cn-beijing.volces.com/api/v3",
+          "source": "https://www.volcengine.com/docs/82379/1795150",
+          "checkedOn": "2026-09-07"
+        },
+        "responses": {
+          "baseUrl": "https://ark.cn-beijing.volces.com/api/v3",
+          "source": "https://www.volcengine.com/docs/82379/1795150",
+          "checkedOn": "2026-09-07"
+        }
+      }
+    },
+    "fireworks-anthropic": {
+      "brandId": "fireworks",
+      "brandLabel": "Fireworks AI",
+      "region": "global",
+      "product": "api",
+      "format": "anthropic",
+      "baseUrl": "https://api.fireworks.ai/inference",
+      "protocols": {
+        "anthropic": {
+          "baseUrl": "https://api.fireworks.ai/inference",
+          "source": "https://docs.fireworks.ai/getting-started/quickstart",
+          "checkedOn": "2026-09-07"
+        },
+        "openai": {
+          "baseUrl": "https://api.fireworks.ai/inference/v1",
+          "source": "https://docs.fireworks.ai/getting-started/quickstart",
+          "checkedOn": "2026-09-07"
+        },
+        "responses": {
+          "baseUrl": "https://api.fireworks.ai/inference/v1",
+          "source": "https://docs.fireworks.ai/guides/response-api",
+          "checkedOn": "2026-09-07"
+        }
+      }
+    },
+    "fireworks-chat": {
+      "brandId": "fireworks",
+      "brandLabel": "Fireworks AI",
+      "region": "global",
+      "product": "api",
+      "format": "openai",
+      "baseUrl": "https://api.fireworks.ai/inference/v1",
+      "protocols": {
+        "anthropic": {
+          "baseUrl": "https://api.fireworks.ai/inference",
+          "source": "https://docs.fireworks.ai/getting-started/quickstart",
+          "checkedOn": "2026-09-07"
+        },
+        "openai": {
+          "baseUrl": "https://api.fireworks.ai/inference/v1",
+          "source": "https://docs.fireworks.ai/getting-started/quickstart",
+          "checkedOn": "2026-09-07"
+        },
+        "responses": {
+          "baseUrl": "https://api.fireworks.ai/inference/v1",
+          "source": "https://docs.fireworks.ai/guides/response-api",
+          "checkedOn": "2026-09-07"
+        }
+      }
+    },
+    "fireworks-responses": {
+      "brandId": "fireworks",
+      "brandLabel": "Fireworks AI",
+      "region": "global",
+      "product": "api",
+      "format": "responses",
+      "baseUrl": "https://api.fireworks.ai/inference/v1",
+      "protocols": {
+        "anthropic": {
+          "baseUrl": "https://api.fireworks.ai/inference",
+          "source": "https://docs.fireworks.ai/getting-started/quickstart",
+          "checkedOn": "2026-09-07"
+        },
+        "openai": {
+          "baseUrl": "https://api.fireworks.ai/inference/v1",
+          "source": "https://docs.fireworks.ai/getting-started/quickstart",
+          "checkedOn": "2026-09-07"
+        },
+        "responses": {
+          "baseUrl": "https://api.fireworks.ai/inference/v1",
+          "source": "https://docs.fireworks.ai/guides/response-api",
+          "checkedOn": "2026-09-07"
+        }
+      }
+    },
+    "gemini": {
+      "brandId": "gemini",
+      "brandLabel": "Google Gemini",
+      "region": "global",
+      "product": "api",
+      "format": "openai",
+      "baseUrl": "https://generativelanguage.googleapis.com/v1beta/openai",
+      "protocols": {
+        "openai": {
+          "baseUrl": "https://generativelanguage.googleapis.com/v1beta/openai",
+          "source": "https://ai.google.dev/gemini-api/docs/openai",
+          "checkedOn": "2026-09-07"
+        }
+      }
+    },
+    "glm-cn": {
+      "brandId": "zai",
+      "brandLabel": "智谱 / Z.AI",
+      "region": "cn",
+      "product": "api",
+      "format": "openai",
+      "baseUrl": "https://open.bigmodel.cn/api/paas/v4",
+      "protocols": {
+        "anthropic": {
+          "baseUrl": "https://open.bigmodel.cn/api/anthropic",
+          "source": "https://docs.bigmodel.cn/cn/guide/develop/claude/introduction",
+          "checkedOn": "2026-09-07"
+        },
+        "openai": {
+          "baseUrl": "https://open.bigmodel.cn/api/paas/v4",
+          "source": "https://docs.bigmodel.cn/cn/guide/develop/claude/introduction",
+          "checkedOn": "2026-09-07"
+        }
+      }
+    },
+    "glm-coding-plan-cn": {
+      "brandId": "zai",
+      "brandLabel": "智谱 / Z.AI",
+      "region": "cn",
+      "product": "coding",
+      "format": "openai",
+      "baseUrl": "https://open.bigmodel.cn/api/coding/paas/v4",
+      "protocols": {
+        "anthropic": {
+          "baseUrl": "https://open.bigmodel.cn/api/anthropic",
+          "source": "https://docs.bigmodel.cn/cn/coding-plan/quick-start",
+          "checkedOn": "2026-09-07"
+        },
+        "openai": {
+          "baseUrl": "https://open.bigmodel.cn/api/coding/paas/v4",
+          "source": "https://docs.bigmodel.cn/cn/coding-plan/quick-start",
+          "checkedOn": "2026-09-07"
+        }
+      }
+    },
+    "glm-coding-plan-cn-anthropic": {
+      "brandId": "zai",
+      "brandLabel": "智谱 / Z.AI",
+      "region": "cn",
+      "product": "coding",
+      "format": "anthropic",
+      "baseUrl": "https://open.bigmodel.cn/api/anthropic",
+      "protocols": {
+        "anthropic": {
+          "baseUrl": "https://open.bigmodel.cn/api/anthropic",
+          "source": "https://docs.bigmodel.cn/cn/coding-plan/quick-start",
+          "checkedOn": "2026-09-07"
+        },
+        "openai": {
+          "baseUrl": "https://open.bigmodel.cn/api/coding/paas/v4",
+          "source": "https://docs.bigmodel.cn/cn/coding-plan/quick-start",
+          "checkedOn": "2026-09-07"
+        }
+      }
+    },
+    "gmi": {
+      "brandId": "gmi",
+      "brandLabel": "GMI Cloud",
+      "region": "global",
+      "product": "api",
+      "format": "openai",
+      "baseUrl": "https://api.gmi-serving.com/v1",
+      "protocols": {
+        "openai": {
+          "baseUrl": "https://api.gmi-serving.com/v1",
+          "source": "https://docs.gmicloud.ai/inference-engine/api-reference/llm-api-reference",
+          "checkedOn": "2026-09-07"
+        }
+      }
+    },
+    "groq": {
+      "brandId": "groq",
+      "brandLabel": "Groq",
+      "region": "global",
+      "product": "api",
+      "format": "openai",
+      "baseUrl": "https://api.groq.com/openai/v1",
+      "protocols": {
+        "openai": {
+          "baseUrl": "https://api.groq.com/openai/v1",
+          "source": "https://console.groq.com/docs/responses-api",
+          "checkedOn": "2026-09-07"
+        },
+        "responses": {
+          "baseUrl": "https://api.groq.com/openai/v1",
+          "source": "https://console.groq.com/docs/responses-api",
+          "checkedOn": "2026-09-07"
+        }
+      }
+    },
+    "huggingface": {
+      "brandId": "huggingface",
+      "brandLabel": "HuggingFace Router",
+      "region": "global",
+      "product": "api",
+      "format": "openai",
+      "baseUrl": "https://router.huggingface.co/v1",
+      "protocols": {
+        "openai": {
+          "baseUrl": "https://router.huggingface.co/v1",
+          "source": "https://huggingface.co/docs/inference-providers/en/guides/responses-api",
+          "checkedOn": "2026-09-07"
+        },
+        "responses": {
+          "baseUrl": "https://router.huggingface.co/v1",
+          "source": "https://huggingface.co/docs/inference-providers/en/guides/responses-api",
+          "checkedOn": "2026-09-07"
+        }
+      }
+    },
+    "kilocode": {
+      "brandId": "kilocode",
+      "brandLabel": "KiloCode",
+      "region": "global",
+      "product": "api",
+      "format": "openai",
+      "baseUrl": "https://api.kilo.ai/api/gateway",
+      "protocols": {
+        "openai": {
+          "baseUrl": "https://api.kilo.ai/api/gateway",
+          "source": "https://kilo.ai/docs/gateway/api-reference",
+          "checkedOn": "2026-09-07"
+        }
+      }
+    },
+    "kimi-cn": {
+      "brandId": "kimi",
+      "brandLabel": "Moonshot / Kimi",
+      "region": "cn",
+      "product": "api",
+      "format": "openai",
+      "baseUrl": "https://api.moonshot.cn/v1",
+      "protocols": {
+        "openai": {
+          "baseUrl": "https://api.moonshot.cn/v1",
+          "source": "https://www.kimi.com/code/docs/en/",
+          "checkedOn": "2026-09-07"
+        }
+      }
+    },
+    "kimi-coding-plan": {
+      "brandId": "kimi",
+      "brandLabel": "Moonshot / Kimi",
+      "region": "global",
+      "product": "coding",
+      "format": "anthropic",
+      "baseUrl": "https://api.kimi.com/coding/",
+      "protocols": {
+        "anthropic": {
+          "baseUrl": "https://api.kimi.com/coding/",
+          "source": "https://www.kimi.com/code/docs/en/",
+          "checkedOn": "2026-09-07"
+        },
+        "openai": {
+          "baseUrl": "https://api.kimi.com/coding/v1",
+          "source": "https://www.kimi.com/code/docs/en/",
+          "checkedOn": "2026-09-07"
+        }
+      }
+    },
+    "kimi-global": {
+      "brandId": "kimi",
+      "brandLabel": "Moonshot / Kimi",
+      "region": "global",
+      "product": "api",
+      "format": "openai",
+      "baseUrl": "https://api.moonshot.ai/v1",
+      "protocols": {
+        "openai": {
+          "baseUrl": "https://api.moonshot.ai/v1",
+          "source": "https://platform.kimi.ai/docs/api/overview",
+          "checkedOn": "2026-09-07"
+        }
+      }
+    },
+    "lmstudio": {
+      "brandId": "lmstudio",
+      "brandLabel": "LM Studio",
+      "region": "local",
+      "product": "local",
+      "format": "openai",
+      "baseUrl": "http://localhost:1234/v1",
+      "protocols": {
+        "anthropic": {
+          "baseUrl": "http://localhost:1234",
+          "source": "https://lmstudio.ai/docs/developer/anthropic-compat",
+          "checkedOn": "2026-09-07",
+          "authHeader": true
+        },
+        "openai": {
+          "baseUrl": "http://localhost:1234/v1",
+          "source": "https://lmstudio.ai/docs/developer/openai-compat",
+          "checkedOn": "2026-09-07"
+        },
+        "responses": {
+          "baseUrl": "http://localhost:1234/v1",
+          "source": "https://lmstudio.ai/docs/developer/openai-compat",
+          "checkedOn": "2026-09-07"
+        }
+      }
+    },
+    "longcat-anthropic": {
+      "brandId": "longcat",
+      "brandLabel": "LongCat",
+      "region": "global",
+      "product": "api",
+      "format": "anthropic",
+      "baseUrl": "https://api.longcat.chat/anthropic",
+      "protocols": {
+        "anthropic": {
+          "baseUrl": "https://api.longcat.chat/anthropic",
+          "source": "https://longcat.chat/platform/docs/APIDocs.html",
+          "checkedOn": "2026-09-07"
+        },
+        "openai": {
+          "baseUrl": "https://api.longcat.chat/openai/v1",
+          "source": "https://longcat.chat/platform/docs/APIDocs.html",
+          "checkedOn": "2026-09-07"
+        }
+      }
+    },
+    "longcat-openai": {
+      "brandId": "longcat",
+      "brandLabel": "LongCat",
+      "region": "global",
+      "product": "api",
+      "format": "openai",
+      "baseUrl": "https://api.longcat.chat/openai/v1",
+      "protocols": {
+        "anthropic": {
+          "baseUrl": "https://api.longcat.chat/anthropic",
+          "source": "https://longcat.chat/platform/docs/APIDocs.html",
+          "checkedOn": "2026-09-07"
+        },
+        "openai": {
+          "baseUrl": "https://api.longcat.chat/openai/v1",
+          "source": "https://longcat.chat/platform/docs/APIDocs.html",
+          "checkedOn": "2026-09-07"
+        }
+      }
+    },
+    "mimo-anthropic": {
+      "brandId": "mimo",
+      "brandLabel": "MiMo",
+      "region": "global",
+      "product": "api",
+      "format": "anthropic",
+      "baseUrl": "https://api.xiaomimimo.com/anthropic",
+      "protocols": {
+        "anthropic": {
+          "baseUrl": "https://api.xiaomimimo.com/anthropic",
+          "source": "https://mimo.mi.com/docs/en-US/tokenplan/integration/tools-overview",
+          "checkedOn": "2026-09-07"
+        },
+        "openai": {
+          "baseUrl": "https://api.xiaomimimo.com/v1",
+          "source": "https://mimo.mi.com/docs/en-US/tokenplan/integration/tools-overview",
+          "checkedOn": "2026-09-07"
+        },
+        "responses": {
+          "baseUrl": "https://api.xiaomimimo.com/v1",
+          "source": "https://mimo.mi.com/docs/en-US/api/chat/responses",
+          "checkedOn": "2026-09-07",
+          "responsesMode": "stateless"
+        }
+      }
+    },
+    "mimo-api": {
+      "brandId": "mimo",
+      "brandLabel": "MiMo",
+      "region": "global",
+      "product": "api",
+      "format": "openai",
+      "baseUrl": "https://api.xiaomimimo.com/v1",
+      "protocols": {
+        "anthropic": {
+          "baseUrl": "https://api.xiaomimimo.com/anthropic",
+          "source": "https://mimo.mi.com/docs/en-US/tokenplan/integration/tools-overview",
+          "checkedOn": "2026-09-07"
+        },
+        "openai": {
+          "baseUrl": "https://api.xiaomimimo.com/v1",
+          "source": "https://mimo.mi.com/docs/en-US/tokenplan/integration/tools-overview",
+          "checkedOn": "2026-09-07"
+        },
+        "responses": {
+          "baseUrl": "https://api.xiaomimimo.com/v1",
+          "source": "https://mimo.mi.com/docs/en-US/api/chat/responses",
+          "checkedOn": "2026-09-07",
+          "responsesMode": "stateless"
+        }
+      }
+    },
+    "mimo-token-plan-ams": {
+      "brandId": "mimo",
+      "brandLabel": "MiMo",
+      "region": "ams",
+      "product": "token",
+      "format": "openai",
+      "baseUrl": "https://token-plan-ams.xiaomimimo.com/v1",
+      "protocols": {
+        "anthropic": {
+          "baseUrl": "https://token-plan-ams.xiaomimimo.com/anthropic",
+          "source": "https://mimo.mi.com/docs/en-US/tokenplan/Token%20Plan/quick-access",
+          "checkedOn": "2026-09-07"
+        },
+        "openai": {
+          "baseUrl": "https://token-plan-ams.xiaomimimo.com/v1",
+          "source": "https://mimo.mi.com/docs/en-US/tokenplan/Token%20Plan/quick-access",
+          "checkedOn": "2026-09-07"
+        }
+      }
+    },
+    "mimo-token-plan-ams-anthropic": {
+      "brandId": "mimo",
+      "brandLabel": "MiMo",
+      "region": "ams",
+      "product": "token",
+      "format": "anthropic",
+      "baseUrl": "https://token-plan-ams.xiaomimimo.com/anthropic",
+      "protocols": {
+        "anthropic": {
+          "baseUrl": "https://token-plan-ams.xiaomimimo.com/anthropic",
+          "source": "https://mimo.mi.com/docs/en-US/tokenplan/Token%20Plan/quick-access",
+          "checkedOn": "2026-09-07"
+        },
+        "openai": {
+          "baseUrl": "https://token-plan-ams.xiaomimimo.com/v1",
+          "source": "https://mimo.mi.com/docs/en-US/tokenplan/Token%20Plan/quick-access",
+          "checkedOn": "2026-09-07"
+        }
+      }
+    },
+    "mimo-token-plan-cn": {
+      "brandId": "mimo",
+      "brandLabel": "MiMo",
+      "region": "cn",
+      "product": "token",
+      "format": "openai",
+      "baseUrl": "https://token-plan-cn.xiaomimimo.com/v1",
+      "protocols": {
+        "anthropic": {
+          "baseUrl": "https://token-plan-cn.xiaomimimo.com/anthropic",
+          "source": "https://mimo.mi.com/docs/en-US/tokenplan/Token%20Plan/quick-access",
+          "checkedOn": "2026-09-07"
+        },
+        "openai": {
+          "baseUrl": "https://token-plan-cn.xiaomimimo.com/v1",
+          "source": "https://mimo.mi.com/docs/en-US/tokenplan/Token%20Plan/quick-access",
+          "checkedOn": "2026-09-07"
+        },
+        "responses": {
+          "baseUrl": "https://token-plan-cn.xiaomimimo.com/v1",
+          "source": "https://mimo.mi.com/docs/en-US/tokenplan/integration/codex-configuration",
+          "checkedOn": "2026-09-07",
+          "responsesMode": "stateless"
+        }
+      }
+    },
+    "mimo-token-plan-cn-anthropic": {
+      "brandId": "mimo",
+      "brandLabel": "MiMo",
+      "region": "cn",
+      "product": "token",
+      "format": "anthropic",
+      "baseUrl": "https://token-plan-cn.xiaomimimo.com/anthropic",
+      "protocols": {
+        "anthropic": {
+          "baseUrl": "https://token-plan-cn.xiaomimimo.com/anthropic",
+          "source": "https://mimo.mi.com/docs/en-US/tokenplan/Token%20Plan/quick-access",
+          "checkedOn": "2026-09-07"
+        },
+        "openai": {
+          "baseUrl": "https://token-plan-cn.xiaomimimo.com/v1",
+          "source": "https://mimo.mi.com/docs/en-US/tokenplan/Token%20Plan/quick-access",
+          "checkedOn": "2026-09-07"
+        },
+        "responses": {
+          "baseUrl": "https://token-plan-cn.xiaomimimo.com/v1",
+          "source": "https://mimo.mi.com/docs/en-US/tokenplan/integration/codex-configuration",
+          "checkedOn": "2026-09-07",
+          "responsesMode": "stateless"
+        }
+      }
+    },
+    "mimo-token-plan-sgp": {
+      "brandId": "mimo",
+      "brandLabel": "MiMo",
+      "region": "sgp",
+      "product": "token",
+      "format": "openai",
+      "baseUrl": "https://token-plan-sgp.xiaomimimo.com/v1",
+      "protocols": {
+        "anthropic": {
+          "baseUrl": "https://token-plan-sgp.xiaomimimo.com/anthropic",
+          "source": "https://mimo.mi.com/docs/en-US/tokenplan/Token%20Plan/quick-access",
+          "checkedOn": "2026-09-07"
+        },
+        "openai": {
+          "baseUrl": "https://token-plan-sgp.xiaomimimo.com/v1",
+          "source": "https://mimo.mi.com/docs/en-US/tokenplan/Token%20Plan/quick-access",
+          "checkedOn": "2026-09-07"
+        }
+      }
+    },
+    "mimo-token-plan-sgp-anthropic": {
+      "brandId": "mimo",
+      "brandLabel": "MiMo",
+      "region": "sgp",
+      "product": "token",
+      "format": "anthropic",
+      "baseUrl": "https://token-plan-sgp.xiaomimimo.com/anthropic",
+      "protocols": {
+        "anthropic": {
+          "baseUrl": "https://token-plan-sgp.xiaomimimo.com/anthropic",
+          "source": "https://mimo.mi.com/docs/en-US/tokenplan/Token%20Plan/quick-access",
+          "checkedOn": "2026-09-07"
+        },
+        "openai": {
+          "baseUrl": "https://token-plan-sgp.xiaomimimo.com/v1",
+          "source": "https://mimo.mi.com/docs/en-US/tokenplan/Token%20Plan/quick-access",
+          "checkedOn": "2026-09-07"
+        }
+      }
+    },
+    "minimax-cn-anthropic": {
+      "brandId": "minimax",
+      "brandLabel": "MiniMax",
+      "region": "cn",
+      "product": "api",
+      "format": "anthropic",
+      "baseUrl": "https://api.minimaxi.com/anthropic",
+      "protocols": {
+        "anthropic": {
+          "baseUrl": "https://api.minimaxi.com/anthropic",
+          "source": "https://platform.minimaxi.com/docs/guides/text-generation",
+          "checkedOn": "2026-09-07"
+        },
+        "openai": {
+          "baseUrl": "https://api.minimaxi.com/v1",
+          "source": "https://platform.minimaxi.com/docs/guides/text-generation",
+          "checkedOn": "2026-09-07"
+        }
+      }
+    },
+    "minimax-cn-api": {
+      "brandId": "minimax",
+      "brandLabel": "MiniMax",
+      "region": "cn",
+      "product": "api",
+      "format": "openai",
+      "baseUrl": "https://api.minimaxi.com/v1",
+      "protocols": {
+        "anthropic": {
+          "baseUrl": "https://api.minimaxi.com/anthropic",
+          "source": "https://platform.minimaxi.com/docs/guides/text-generation",
+          "checkedOn": "2026-09-07"
+        },
+        "openai": {
+          "baseUrl": "https://api.minimaxi.com/v1",
+          "source": "https://platform.minimaxi.com/docs/guides/text-generation",
+          "checkedOn": "2026-09-07"
+        }
+      }
+    },
+    "minimax-global-anthropic": {
+      "brandId": "minimax",
+      "brandLabel": "MiniMax",
+      "region": "global",
+      "product": "api",
+      "format": "anthropic",
+      "baseUrl": "https://api.minimax.io/anthropic",
+      "protocols": {
+        "anthropic": {
+          "baseUrl": "https://api.minimax.io/anthropic",
+          "source": "https://platform.minimax.io/docs/api-reference/text-anthropic-api",
+          "checkedOn": "2026-09-07"
+        },
+        "openai": {
+          "baseUrl": "https://api.minimax.io/v1",
+          "source": "https://platform.minimax.io/docs/api-reference/text-openai-api",
+          "checkedOn": "2026-09-07"
+        }
+      }
+    },
+    "minimax-global-api": {
+      "brandId": "minimax",
+      "brandLabel": "MiniMax",
+      "region": "global",
+      "product": "api",
+      "format": "openai",
+      "baseUrl": "https://api.minimax.io/v1",
+      "protocols": {
+        "anthropic": {
+          "baseUrl": "https://api.minimax.io/anthropic",
+          "source": "https://platform.minimax.io/docs/api-reference/text-anthropic-api",
+          "checkedOn": "2026-09-07"
+        },
+        "openai": {
+          "baseUrl": "https://api.minimax.io/v1",
+          "source": "https://platform.minimax.io/docs/api-reference/text-openai-api",
+          "checkedOn": "2026-09-07"
+        }
+      }
+    },
+    "mistral": {
+      "brandId": "mistral",
+      "brandLabel": "Mistral AI",
+      "region": "global",
+      "product": "api",
+      "format": "openai",
+      "baseUrl": "https://api.mistral.ai/v1",
+      "protocols": {
+        "openai": {
+          "baseUrl": "https://api.mistral.ai/v1",
+          "source": "https://docs.mistral.ai/api/endpoint/chat",
+          "checkedOn": "2026-09-07"
+        }
+      }
+    },
+    "modelscope": {
+      "brandId": "modelscope",
+      "brandLabel": "ModelScope",
+      "region": "global",
+      "product": "api",
+      "format": "openai",
+      "baseUrl": "https://api-inference.modelscope.cn/v1",
+      "protocols": {
+        "openai": {
+          "baseUrl": "https://api-inference.modelscope.cn/v1",
+          "source": "https://modelscope.cn/models/Qwen/Qwen3.5-397B-A17B",
+          "checkedOn": "2026-09-07"
+        }
+      }
+    },
+    "novita": {
+      "brandId": "novita",
+      "brandLabel": "NovitaAI",
+      "region": "global",
+      "product": "api",
+      "format": "openai",
+      "baseUrl": "https://api.novita.ai/openai/v1",
+      "protocols": {
+        "anthropic": {
+          "baseUrl": "https://api.novita.ai/anthropic",
+          "source": "https://novita.ai/docs/guides/llm-anthropic-compatibility",
+          "checkedOn": "2026-09-07"
+        },
+        "openai": {
+          "baseUrl": "https://api.novita.ai/openai/v1",
+          "source": "https://novita.ai/docs/api-reference/model-apis-llm-create-chat-completion",
+          "checkedOn": "2026-09-07"
+        }
+      }
+    },
+    "nvidia": {
+      "brandId": "nvidia",
+      "brandLabel": "NVIDIA NIM",
+      "region": "global",
+      "product": "api",
+      "format": "openai",
+      "baseUrl": "https://integrate.api.nvidia.com/v1",
+      "protocols": {
+        "openai": {
+          "baseUrl": "https://integrate.api.nvidia.com/v1",
+          "source": "https://docs.api.nvidia.com/nim/reference/meta-llama2-70b-infer",
+          "checkedOn": "2026-09-07"
+        }
+      }
+    },
+    "ollama-cloud": {
+      "brandId": "ollama",
+      "brandLabel": "Ollama",
+      "region": "global",
+      "product": "api",
+      "format": "openai",
+      "baseUrl": "https://ollama.com/v1",
+      "protocols": {
+        "openai": {
+          "baseUrl": "https://ollama.com/v1",
+          "source": "https://docs.ollama.com/integrations/droid",
+          "checkedOn": "2026-09-07"
+        }
+      }
+    },
+    "ollama-local": {
+      "brandId": "ollama",
+      "brandLabel": "Ollama",
+      "region": "local",
+      "product": "local",
+      "format": "openai",
+      "baseUrl": "http://localhost:11434/v1",
+      "protocols": {
+        "anthropic": {
+          "baseUrl": "http://localhost:11434",
+          "source": "https://docs.ollama.com/api/anthropic-compatibility",
+          "checkedOn": "2026-09-07",
+          "authHeader": true
+        },
+        "openai": {
+          "baseUrl": "http://localhost:11434/v1",
+          "source": "https://docs.ollama.com/api/openai-compatibility",
+          "checkedOn": "2026-09-07"
+        },
+        "responses": {
+          "baseUrl": "http://localhost:11434/v1",
+          "source": "https://docs.ollama.com/api/openai-compatibility",
+          "checkedOn": "2026-09-07",
+          "responsesMode": "stateless"
+        }
+      }
+    },
+    "openai-chat": {
+      "brandId": "openai",
+      "brandLabel": "OpenAI",
+      "region": "global",
+      "product": "api",
+      "format": "openai",
+      "baseUrl": "https://api.openai.com/v1",
+      "protocols": {
+        "openai": {
+          "baseUrl": "https://api.openai.com/v1",
+          "source": "https://platform.openai.com/docs/api-reference/responses",
+          "checkedOn": "2026-09-07"
+        },
+        "responses": {
+          "baseUrl": "https://api.openai.com/v1",
+          "source": "https://platform.openai.com/docs/api-reference/responses",
+          "checkedOn": "2026-09-07"
+        }
+      }
+    },
+    "openai-responses": {
+      "brandId": "openai",
+      "brandLabel": "OpenAI",
+      "region": "global",
+      "product": "api",
+      "format": "responses",
+      "baseUrl": "https://api.openai.com/v1",
+      "protocols": {
+        "openai": {
+          "baseUrl": "https://api.openai.com/v1",
+          "source": "https://platform.openai.com/docs/api-reference/responses",
+          "checkedOn": "2026-09-07"
+        },
+        "responses": {
+          "baseUrl": "https://api.openai.com/v1",
+          "source": "https://platform.openai.com/docs/api-reference/responses",
+          "checkedOn": "2026-09-07"
+        }
+      }
+    },
+    "opencode-go": {
+      "brandId": "opencode",
+      "brandLabel": "OpenCode",
+      "region": "global",
+      "product": "go",
+      "format": "openai",
+      "baseUrl": "https://opencode.ai/zen/go/v1",
+      "protocols": {
+        "anthropic": {
+          "baseUrl": "https://opencode.ai/zen/go",
+          "source": "https://opencode.ai/docs/go/",
+          "checkedOn": "2026-09-07"
+        },
+        "openai": {
+          "baseUrl": "https://opencode.ai/zen/go/v1",
+          "source": "https://opencode.ai/docs/go/",
+          "checkedOn": "2026-09-07"
+        },
+        "responses": {
+          "baseUrl": "https://opencode.ai/zen/go/v1",
+          "source": "https://opencode.ai/docs/go/",
+          "checkedOn": "2026-09-07"
+        }
+      }
+    },
+    "opencode-go-anthropic": {
+      "brandId": "opencode",
+      "brandLabel": "OpenCode",
+      "region": "global",
+      "product": "go",
+      "format": "anthropic",
+      "baseUrl": "https://opencode.ai/zen/go",
+      "protocols": {
+        "anthropic": {
+          "baseUrl": "https://opencode.ai/zen/go",
+          "source": "https://opencode.ai/docs/go/",
+          "checkedOn": "2026-09-07"
+        },
+        "openai": {
+          "baseUrl": "https://opencode.ai/zen/go/v1",
+          "source": "https://opencode.ai/docs/go/",
+          "checkedOn": "2026-09-07"
+        },
+        "responses": {
+          "baseUrl": "https://opencode.ai/zen/go/v1",
+          "source": "https://opencode.ai/docs/go/",
+          "checkedOn": "2026-09-07"
+        }
+      }
+    },
+    "opencode-go-deepseek-anthropic": {
+      "brandId": "opencode",
+      "brandLabel": "OpenCode",
+      "region": "global",
+      "product": "go",
+      "format": "anthropic",
+      "baseUrl": "https://opencode.ai/zen/go",
+      "protocols": {
+        "anthropic": {
+          "baseUrl": "https://opencode.ai/zen/go",
+          "source": "https://opencode.ai/docs/go/",
+          "checkedOn": "2026-09-07"
+        },
+        "openai": {
+          "baseUrl": "https://opencode.ai/zen/go/v1",
+          "source": "https://opencode.ai/docs/go/",
+          "checkedOn": "2026-09-07"
+        },
+        "responses": {
+          "baseUrl": "https://opencode.ai/zen/go/v1",
+          "source": "https://opencode.ai/docs/go/",
+          "checkedOn": "2026-09-07"
+        }
+      }
+    },
+    "opencode-go-deepseek-responses": {
+      "brandId": "opencode",
+      "brandLabel": "OpenCode",
+      "region": "global",
+      "product": "go",
+      "format": "responses",
+      "baseUrl": "https://opencode.ai/zen/go/v1",
+      "protocols": {
+        "anthropic": {
+          "baseUrl": "https://opencode.ai/zen/go",
+          "source": "https://opencode.ai/docs/go/",
+          "checkedOn": "2026-09-07"
+        },
+        "openai": {
+          "baseUrl": "https://opencode.ai/zen/go/v1",
+          "source": "https://opencode.ai/docs/go/",
+          "checkedOn": "2026-09-07"
+        },
+        "responses": {
+          "baseUrl": "https://opencode.ai/zen/go/v1",
+          "source": "https://opencode.ai/docs/go/",
+          "checkedOn": "2026-09-07"
+        }
+      }
+    },
+    "opencode-go-recommended": {
+      "brandId": "opencode",
+      "brandLabel": "OpenCode",
+      "region": "global",
+      "product": "go",
+      "format": "bundle",
+      "baseUrl": "",
+      "protocols": {
+        "anthropic": {
+          "baseUrl": "https://opencode.ai/zen/go",
+          "source": "https://opencode.ai/docs/go/",
+          "checkedOn": "2026-09-07"
+        },
+        "openai": {
+          "baseUrl": "https://opencode.ai/zen/go/v1",
+          "source": "https://opencode.ai/docs/go/",
+          "checkedOn": "2026-09-07"
+        },
+        "responses": {
+          "baseUrl": "https://opencode.ai/zen/go/v1",
+          "source": "https://opencode.ai/docs/go/",
+          "checkedOn": "2026-09-07"
+        }
+      }
+    },
+    "opencode-go-responses": {
+      "brandId": "opencode",
+      "brandLabel": "OpenCode",
+      "region": "global",
+      "product": "go",
+      "format": "responses",
+      "baseUrl": "https://opencode.ai/zen/go/v1",
+      "protocols": {
+        "anthropic": {
+          "baseUrl": "https://opencode.ai/zen/go",
+          "source": "https://opencode.ai/docs/go/",
+          "checkedOn": "2026-09-07"
+        },
+        "openai": {
+          "baseUrl": "https://opencode.ai/zen/go/v1",
+          "source": "https://opencode.ai/docs/go/",
+          "checkedOn": "2026-09-07"
+        },
+        "responses": {
+          "baseUrl": "https://opencode.ai/zen/go/v1",
+          "source": "https://opencode.ai/docs/go/",
+          "checkedOn": "2026-09-07"
+        }
+      }
+    },
+    "opencode-zen-anthropic": {
+      "brandId": "opencode",
+      "brandLabel": "OpenCode",
+      "region": "global",
+      "product": "zen",
+      "format": "anthropic",
+      "baseUrl": "https://opencode.ai/zen",
+      "protocols": {
+        "anthropic": {
+          "baseUrl": "https://opencode.ai/zen",
+          "source": "https://opencode.ai/docs/zen/",
+          "checkedOn": "2026-09-07"
+        },
+        "openai": {
+          "baseUrl": "https://opencode.ai/zen/v1",
+          "source": "https://opencode.ai/docs/zen/",
+          "checkedOn": "2026-09-07"
+        },
+        "responses": {
+          "baseUrl": "https://opencode.ai/zen/v1",
+          "source": "https://opencode.ai/docs/zen/",
+          "checkedOn": "2026-09-07"
+        }
+      }
+    },
+    "openrouter": {
+      "brandId": "openrouter",
+      "brandLabel": "OpenRouter",
+      "region": "global",
+      "product": "api",
+      "format": "openai",
+      "baseUrl": "https://openrouter.ai/api/v1",
+      "protocols": {
+        "anthropic": {
+          "baseUrl": "https://openrouter.ai/api",
+          "source": "https://openrouter.ai/docs/api/api-reference/anthropic-messages/create-messages",
+          "checkedOn": "2026-09-07",
+          "authHeader": true
+        },
+        "openai": {
+          "baseUrl": "https://openrouter.ai/api/v1",
+          "source": "https://openrouter.ai/docs/api/api-reference/responses/create-responses",
+          "checkedOn": "2026-09-07"
+        },
+        "responses": {
+          "baseUrl": "https://openrouter.ai/api/v1",
+          "source": "https://openrouter.ai/docs/api/api-reference/responses/create-responses",
+          "checkedOn": "2026-09-07"
+        }
+      }
+    },
+    "ppio": {
+      "brandId": "ppio",
+      "brandLabel": "PPIO / 派欧云",
+      "region": "cn",
+      "product": "api",
+      "format": "openai",
+      "baseUrl": "https://api.ppio.com/openai",
+      "protocols": {
+        "anthropic": {
+          "baseUrl": "https://api.ppio.com/anthropic",
+          "source": "https://resource.ppio.com/docs/model/llm-anthropic-compatibility",
+          "checkedOn": "2026-09-07",
+          "authHeader": true
+        },
+        "openai": {
+          "baseUrl": "https://api.ppio.com/openai",
+          "source": "https://ppio.com/docs/third-party/OpenAI-Agents-SDK",
+          "checkedOn": "2026-09-07"
+        }
+      }
+    },
+    "qiniu": {
+      "brandId": "qiniu",
+      "brandLabel": "七牛云",
+      "region": "cn",
+      "product": "api",
+      "format": "openai",
+      "baseUrl": "https://api.qnaigc.com/v1",
+      "protocols": {
+        "anthropic": {
+          "baseUrl": "https://api.qnaigc.com",
+          "source": "https://developer.qiniu.com/aitokenapi/13379/real-time-ai-interface-api",
+          "checkedOn": "2026-09-07",
+          "authHeader": true
+        },
+        "openai": {
+          "baseUrl": "https://api.qnaigc.com/v1",
+          "source": "https://developer.qiniu.com/aitokenapi/13379/real-time-ai-interface-api",
+          "checkedOn": "2026-09-07"
+        }
+      }
+    },
+    "qwen-cn": {
+      "brandId": "qwen",
+      "brandLabel": "阿里云百炼 / Qwen",
+      "region": "cn",
+      "product": "api",
+      "format": "openai",
+      "baseUrl": "https://dashscope.aliyuncs.com/compatible-mode/v1",
+      "protocols": {
+        "anthropic": {
+          "baseUrl": "https://dashscope.aliyuncs.com/apps/anthropic",
+          "source": "https://help.aliyun.com/zh/model-studio/claude-code",
+          "checkedOn": "2026-09-07",
+          "authHeader": true
+        },
+        "openai": {
+          "baseUrl": "https://dashscope.aliyuncs.com/compatible-mode/v1",
+          "source": "https://help.aliyun.com/zh/model-studio/compatibility-of-openai-with-dashscope",
+          "checkedOn": "2026-09-07"
+        },
+        "responses": {
+          "baseUrl": "https://dashscope.aliyuncs.com/compatible-mode/v1",
+          "source": "https://help.aliyun.com/zh/model-studio/compatibility-with-openai-responses-api",
+          "checkedOn": "2026-09-07"
+        }
+      }
+    },
+    "qwen-coding-plan-cn": {
+      "brandId": "qwen",
+      "brandLabel": "阿里云百炼 / Qwen",
+      "region": "cn",
+      "product": "coding",
+      "format": "openai",
+      "baseUrl": "https://coding.dashscope.aliyuncs.com/v1",
+      "protocols": {
+        "anthropic": {
+          "baseUrl": "https://coding.dashscope.aliyuncs.com/apps/anthropic",
+          "source": "https://help.aliyun.com/zh/model-studio/coding-plan-faq",
+          "checkedOn": "2026-09-07"
+        },
+        "openai": {
+          "baseUrl": "https://coding.dashscope.aliyuncs.com/v1",
+          "source": "https://help.aliyun.com/zh/model-studio/coding-plan-faq",
+          "checkedOn": "2026-09-07"
+        }
+      }
+    },
+    "qwen-coding-plan-cn-anthropic": {
+      "brandId": "qwen",
+      "brandLabel": "阿里云百炼 / Qwen",
+      "region": "cn",
+      "product": "coding",
+      "format": "anthropic",
+      "baseUrl": "https://coding.dashscope.aliyuncs.com/apps/anthropic",
+      "protocols": {
+        "anthropic": {
+          "baseUrl": "https://coding.dashscope.aliyuncs.com/apps/anthropic",
+          "source": "https://help.aliyun.com/zh/model-studio/coding-plan-faq",
+          "checkedOn": "2026-09-07"
+        },
+        "openai": {
+          "baseUrl": "https://coding.dashscope.aliyuncs.com/v1",
+          "source": "https://help.aliyun.com/zh/model-studio/coding-plan-faq",
+          "checkedOn": "2026-09-07"
+        }
+      }
+    },
+    "qwen-coding-plan-global": {
+      "brandId": "qwen",
+      "brandLabel": "阿里云百炼 / Qwen",
+      "region": "global",
+      "product": "coding",
+      "format": "openai",
+      "baseUrl": "https://coding-intl.dashscope.aliyuncs.com/v1",
+      "protocols": {
+        "anthropic": {
+          "baseUrl": "https://coding-intl.dashscope.aliyuncs.com/apps/anthropic",
+          "source": "https://help.aliyun.com/zh/model-studio/coding-plan-faq",
+          "checkedOn": "2026-09-07"
+        },
+        "openai": {
+          "baseUrl": "https://coding-intl.dashscope.aliyuncs.com/v1",
+          "source": "https://help.aliyun.com/zh/model-studio/coding-plan-faq",
+          "checkedOn": "2026-09-07"
+        }
+      }
+    },
+    "qwen-coding-plan-global-anthropic": {
+      "brandId": "qwen",
+      "brandLabel": "阿里云百炼 / Qwen",
+      "region": "global",
+      "product": "coding",
+      "format": "anthropic",
+      "baseUrl": "https://coding-intl.dashscope.aliyuncs.com/apps/anthropic",
+      "protocols": {
+        "anthropic": {
+          "baseUrl": "https://coding-intl.dashscope.aliyuncs.com/apps/anthropic",
+          "source": "https://help.aliyun.com/zh/model-studio/coding-plan-faq",
+          "checkedOn": "2026-09-07"
+        },
+        "openai": {
+          "baseUrl": "https://coding-intl.dashscope.aliyuncs.com/v1",
+          "source": "https://help.aliyun.com/zh/model-studio/coding-plan-faq",
+          "checkedOn": "2026-09-07"
+        }
+      }
+    },
+    "qwen-global": {
+      "brandId": "qwen",
+      "brandLabel": "阿里云百炼 / Qwen",
+      "region": "global",
+      "product": "api",
+      "format": "openai",
+      "baseUrl": "https://dashscope-intl.aliyuncs.com/compatible-mode/v1",
+      "protocols": {
+        "openai": {
+          "baseUrl": "https://dashscope-intl.aliyuncs.com/compatible-mode/v1",
+          "source": "https://help.aliyun.com/zh/model-studio/compatibility-of-openai-with-dashscope",
+          "checkedOn": "2026-09-07"
+        },
+        "responses": {
+          "baseUrl": "https://dashscope-intl.aliyuncs.com/compatible-mode/v1",
+          "source": "https://help.aliyun.com/zh/model-studio/compatibility-with-openai-responses-api",
+          "checkedOn": "2026-09-07"
+        }
+      }
+    },
+    "scnet": {
+      "brandId": "scnet",
+      "brandLabel": "SCNet",
+      "region": "global",
+      "product": "token",
+      "format": "openai",
+      "baseUrl": "https://api.scnet.cn/api/llm/v1",
+      "protocols": {
+        "anthropic": {
+          "baseUrl": "https://api.scnet.cn/api/llm/anthropic",
+          "source": "https://www2.scnet.cn/ac/openapi/doc/2.0/moduleapi/tutorial/quickstart.html",
+          "checkedOn": "2026-09-07"
+        },
+        "openai": {
+          "baseUrl": "https://api.scnet.cn/api/llm/v1",
+          "source": "https://www2.scnet.cn/ac/openapi/doc/2.0/moduleapi/tutorial/quickstart.html",
+          "checkedOn": "2026-09-07"
+        }
+      }
+    },
+    "scnet-anthropic": {
+      "brandId": "scnet",
+      "brandLabel": "SCNet",
+      "region": "global",
+      "product": "token",
+      "format": "anthropic",
+      "baseUrl": "https://api.scnet.cn/api/llm/anthropic",
+      "protocols": {
+        "anthropic": {
+          "baseUrl": "https://api.scnet.cn/api/llm/anthropic",
+          "source": "https://www2.scnet.cn/ac/openapi/doc/2.0/moduleapi/tutorial/quickstart.html",
+          "checkedOn": "2026-09-07"
+        },
+        "openai": {
+          "baseUrl": "https://api.scnet.cn/api/llm/v1",
+          "source": "https://www2.scnet.cn/ac/openapi/doc/2.0/moduleapi/tutorial/quickstart.html",
+          "checkedOn": "2026-09-07"
+        }
+      }
+    },
+    "siliconflow": {
+      "brandId": "siliconflow",
+      "brandLabel": "SiliconFlow",
+      "region": "cn",
+      "product": "api",
+      "format": "openai",
+      "baseUrl": "https://api.siliconflow.cn/v1",
+      "protocols": {
+        "anthropic": {
+          "baseUrl": "https://api.siliconflow.cn",
+          "source": "https://docs.siliconflow.cn/cn/api-reference/chat-completions/messages",
+          "checkedOn": "2026-09-07",
+          "authHeader": true
+        },
+        "openai": {
+          "baseUrl": "https://api.siliconflow.cn/v1",
+          "source": "https://docs.siliconflow.cn/docs/api/chat-completions-post",
+          "checkedOn": "2026-09-07"
+        }
+      }
+    },
+    "stepfun": {
+      "brandId": "stepfun",
+      "brandLabel": "StepFun",
+      "region": "global",
+      "product": "coding",
+      "format": "openai",
+      "baseUrl": "https://api.stepfun.com/step_plan/v1",
+      "protocols": {
+        "anthropic": {
+          "baseUrl": "https://api.stepfun.com/step_plan",
+          "source": "https://platform.stepfun.com/docs/zh/step-plan/quick-start",
+          "checkedOn": "2026-09-07"
+        },
+        "openai": {
+          "baseUrl": "https://api.stepfun.com/step_plan/v1",
+          "source": "https://platform.stepfun.com/docs/zh/step-plan/quick-start",
+          "checkedOn": "2026-09-07"
+        }
+      }
+    },
+    "stepfun-anthropic": {
+      "brandId": "stepfun",
+      "brandLabel": "StepFun",
+      "region": "global",
+      "product": "coding",
+      "format": "anthropic",
+      "baseUrl": "https://api.stepfun.com/step_plan",
+      "protocols": {
+        "anthropic": {
+          "baseUrl": "https://api.stepfun.com/step_plan",
+          "source": "https://platform.stepfun.com/docs/zh/step-plan/quick-start",
+          "checkedOn": "2026-09-07"
+        },
+        "openai": {
+          "baseUrl": "https://api.stepfun.com/step_plan/v1",
+          "source": "https://platform.stepfun.com/docs/zh/step-plan/quick-start",
+          "checkedOn": "2026-09-07"
+        }
+      }
+    },
+    "stepfun-api": {
+      "brandId": "stepfun",
+      "brandLabel": "StepFun",
+      "region": "global",
+      "product": "api",
+      "format": "openai",
+      "baseUrl": "https://api.stepfun.com/v1",
+      "protocols": {
+        "anthropic": {
+          "baseUrl": "https://api.stepfun.com",
+          "source": "https://platform.stepfun.com/docs/zh/api-reference/chat/messages-create",
+          "checkedOn": "2026-09-07"
+        },
+        "openai": {
+          "baseUrl": "https://api.stepfun.com/v1",
+          "source": "https://platform.stepfun.com/docs/zh/api-reference/chat/chat-completion-create",
+          "checkedOn": "2026-09-07"
+        }
+      }
+    },
+    "stepfun-api-anthropic": {
+      "brandId": "stepfun",
+      "brandLabel": "StepFun",
+      "region": "global",
+      "product": "api",
+      "format": "anthropic",
+      "baseUrl": "https://api.stepfun.com",
+      "protocols": {
+        "anthropic": {
+          "baseUrl": "https://api.stepfun.com",
+          "source": "https://platform.stepfun.com/docs/zh/api-reference/chat/messages-create",
+          "checkedOn": "2026-09-07"
+        },
+        "openai": {
+          "baseUrl": "https://api.stepfun.com/v1",
+          "source": "https://platform.stepfun.com/docs/zh/api-reference/chat/chat-completion-create",
+          "checkedOn": "2026-09-07"
+        }
+      }
+    },
+    "stepfun-responses": {
+      "brandId": "stepfun",
+      "brandLabel": "StepFun",
+      "region": "global",
+      "product": "api",
+      "format": "responses",
+      "baseUrl": "https://api.stepfun.com/v1",
+      "protocols": {
+        "anthropic": {
+          "baseUrl": "https://api.stepfun.com",
+          "source": "https://platform.stepfun.com/docs/zh/api-reference/chat/messages-create",
+          "checkedOn": "2026-09-07"
+        },
+        "openai": {
+          "baseUrl": "https://api.stepfun.com/v1",
+          "source": "https://platform.stepfun.com/docs/zh/api-reference/chat/chat-completion-create",
+          "checkedOn": "2026-09-07"
+        }
+      }
+    },
+    "together": {
+      "brandId": "together",
+      "brandLabel": "Together AI",
+      "region": "global",
+      "product": "api",
+      "format": "openai",
+      "baseUrl": "https://api.together.ai/v1",
+      "protocols": {
+        "openai": {
+          "baseUrl": "https://api.together.ai/v1",
+          "source": "https://docs.together.ai/docs/inference/openai-compatibility",
+          "checkedOn": "2026-09-07"
+        }
+      }
+    },
+    "token-rhythm": {
+      "brandId": "token-rhythm",
+      "brandLabel": "Token Rhythm",
+      "region": "global",
+      "product": "api",
+      "format": "openai",
+      "baseUrl": "https://tokenrhythm.studio/v1",
+      "protocols": {
+        "anthropic": {
+          "baseUrl": "https://tokenrhythm.studio",
+          "source": "https://tokenrhythm.studio/docs/api-integration",
+          "checkedOn": "2026-09-07",
+          "authHeader": true
+        },
+        "openai": {
+          "baseUrl": "https://tokenrhythm.studio/v1",
+          "source": "https://tokenrhythm.studio/docs/api-integration",
+          "checkedOn": "2026-09-07"
+        }
+      }
+    },
+    "vercel-ai-gateway": {
+      "brandId": "vercel-ai-gateway",
+      "brandLabel": "Vercel AI Gateway",
+      "region": "global",
+      "product": "api",
+      "format": "anthropic",
+      "baseUrl": "https://ai-gateway.vercel.sh",
+      "protocols": {
+        "anthropic": {
+          "baseUrl": "https://ai-gateway.vercel.sh",
+          "source": "https://vercel.com/docs/ai-gateway/sdks-and-apis",
+          "checkedOn": "2026-09-07"
+        },
+        "openai": {
+          "baseUrl": "https://ai-gateway.vercel.sh/v1",
+          "source": "https://vercel.com/docs/ai-gateway/sdks-and-apis",
+          "checkedOn": "2026-09-07"
+        },
+        "responses": {
+          "baseUrl": "https://ai-gateway.vercel.sh/v1",
+          "source": "https://vercel.com/docs/ai-gateway/sdks-and-apis",
+          "checkedOn": "2026-09-07"
+        }
+      }
+    },
+    "xai-chat": {
+      "brandId": "xai",
+      "brandLabel": "xAI / Grok",
+      "region": "global",
+      "product": "api",
+      "format": "openai",
+      "baseUrl": "https://api.x.ai/v1",
+      "protocols": {
+        "openai": {
+          "baseUrl": "https://api.x.ai/v1",
+          "source": "https://docs.x.ai/developers/model-capabilities/text/comparison",
+          "checkedOn": "2026-09-07"
+        },
+        "responses": {
+          "baseUrl": "https://api.x.ai/v1",
+          "source": "https://docs.x.ai/developers/model-capabilities/text/comparison",
+          "checkedOn": "2026-09-07"
+        }
+      }
+    },
+    "xai-responses": {
+      "brandId": "xai",
+      "brandLabel": "xAI / Grok",
+      "region": "global",
+      "product": "api",
+      "format": "responses",
+      "baseUrl": "https://api.x.ai/v1",
+      "protocols": {
+        "openai": {
+          "baseUrl": "https://api.x.ai/v1",
+          "source": "https://docs.x.ai/developers/model-capabilities/text/comparison",
+          "checkedOn": "2026-09-07"
+        },
+        "responses": {
+          "baseUrl": "https://api.x.ai/v1",
+          "source": "https://docs.x.ai/developers/model-capabilities/text/comparison",
+          "checkedOn": "2026-09-07"
+        }
+      }
+    },
+    "zai-coding-plan-global": {
+      "brandId": "zai",
+      "brandLabel": "智谱 / Z.AI",
+      "region": "global",
+      "product": "coding",
+      "format": "openai",
+      "baseUrl": "https://api.z.ai/api/coding/paas/v4",
+      "protocols": {
+        "anthropic": {
+          "baseUrl": "https://api.z.ai/api/anthropic",
+          "source": "https://docs.z.ai/devpack/tool/others",
+          "checkedOn": "2026-09-07"
+        },
+        "openai": {
+          "baseUrl": "https://api.z.ai/api/coding/paas/v4",
+          "source": "https://docs.z.ai/devpack/tool/others",
+          "checkedOn": "2026-09-07"
+        }
+      }
+    },
+    "zai-coding-plan-global-anthropic": {
+      "brandId": "zai",
+      "brandLabel": "智谱 / Z.AI",
+      "region": "global",
+      "product": "coding",
+      "format": "anthropic",
+      "baseUrl": "https://api.z.ai/api/anthropic",
+      "protocols": {
+        "anthropic": {
+          "baseUrl": "https://api.z.ai/api/anthropic",
+          "source": "https://docs.z.ai/devpack/tool/others",
+          "checkedOn": "2026-09-07"
+        },
+        "openai": {
+          "baseUrl": "https://api.z.ai/api/coding/paas/v4",
+          "source": "https://docs.z.ai/devpack/tool/others",
+          "checkedOn": "2026-09-07"
+        }
+      }
+    },
+    "zai-global": {
+      "brandId": "zai",
+      "brandLabel": "智谱 / Z.AI",
+      "region": "global",
+      "product": "api",
+      "format": "openai",
+      "baseUrl": "https://api.z.ai/api/paas/v4",
+      "protocols": {
+        "openai": {
+          "baseUrl": "https://api.z.ai/api/paas/v4",
+          "source": "https://docs.z.ai/guides/overview/quick-start",
+          "checkedOn": "2026-09-07"
+        }
+      }
+    }
+  },
+  "templates": [
+    {
+      "description": "火山引擎 / 豆包 API. Fetch or edit models for your account after connecting.",
+      "id": "doubao-chat",
+      "keyEnv": "DOUBAO_API_KEY",
+      "label": "火山引擎 / 豆包",
+      "provider": {
+        "apiKeyEnv": "DOUBAO_API_KEY",
+        "baseUrl": "https://ark.cn-beijing.volces.com/api/v3",
+        "default": "doubao-seed-2-1-pro-260628",
+        "kind": "openai",
+        "models": [
+          "doubao-seed-2-1-pro-260628"
+        ],
+        "name": "doubao-chat",
+        "webSearch": false
+      }
+    },
+    {
+      "description": "火山引擎 / 豆包 API. Fetch or edit models for your account after connecting.",
+      "id": "doubao-responses",
+      "keyEnv": "DOUBAO_API_KEY",
+      "label": "火山引擎 / 豆包",
+      "provider": {
+        "apiKeyEnv": "DOUBAO_API_KEY",
+        "baseUrl": "https://ark.cn-beijing.volces.com/api/v3",
+        "default": "doubao-seed-2-1-pro-260628",
+        "kind": "responses",
+        "models": [
+          "doubao-seed-2-1-pro-260628"
+        ],
+        "name": "doubao-responses",
+        "webSearch": false
+      }
+    },
+    {
+      "description": "百度智能云 / 千帆 API. Fetch or edit models for your account after connecting.",
+      "id": "baidu-cloud",
+      "keyEnv": "BAIDU_API_KEY",
+      "label": "百度智能云 / 千帆",
+      "provider": {
+        "apiKeyEnv": "BAIDU_API_KEY",
+        "baseUrl": "https://qianfan.baidubce.com/v2",
+        "default": "ernie-4.5-turbo-128k",
+        "kind": "openai",
+        "models": [
+          "ernie-4.5-turbo-128k"
+        ],
+        "name": "baidu-cloud",
+        "webSearch": false
+      }
+    },
+    {
+      "description": "PPIO / 派欧云 API. Fetch or edit models for your account after connecting.",
+      "id": "ppio",
+      "keyEnv": "PPIO_API_KEY",
+      "label": "PPIO / 派欧云",
+      "provider": {
+        "apiKeyEnv": "PPIO_API_KEY",
+        "baseUrl": "https://api.ppio.com/openai",
+        "default": "deepseek/deepseek-v3.2",
+        "kind": "openai",
+        "models": [
+          "deepseek/deepseek-v3.2"
+        ],
+        "name": "ppio",
+        "webSearch": false
+      }
+    },
+    {
+      "description": "七牛云 API. Fetch or edit models for your account after connecting.",
+      "id": "qiniu",
+      "keyEnv": "QINIU_API_KEY",
+      "label": "七牛云",
+      "provider": {
+        "apiKeyEnv": "QINIU_API_KEY",
+        "baseUrl": "https://api.qnaigc.com/v1",
+        "default": "deepseek-v3",
+        "kind": "openai",
+        "models": [
+          "deepseek-v3"
+        ],
+        "name": "qiniu",
+        "webSearch": false
+      }
+    },
+    {
+      "description": "xAI / Grok API. Fetch or edit models for your account after connecting.",
+      "id": "xai-chat",
+      "keyEnv": "XAI_API_KEY",
+      "label": "xAI / Grok",
+      "provider": {
+        "apiKeyEnv": "XAI_API_KEY",
+        "baseUrl": "https://api.x.ai/v1",
+        "default": "grok-4.3",
+        "kind": "openai",
+        "models": [
+          "grok-4.3"
+        ],
+        "name": "xai-chat",
+        "webSearch": false
+      }
+    },
+    {
+      "description": "xAI / Grok API. Fetch or edit models for your account after connecting.",
+      "id": "xai-responses",
+      "keyEnv": "XAI_API_KEY",
+      "label": "xAI / Grok",
+      "provider": {
+        "apiKeyEnv": "XAI_API_KEY",
+        "baseUrl": "https://api.x.ai/v1",
+        "default": "grok-4.3",
+        "kind": "responses",
+        "models": [
+          "grok-4.3"
+        ],
+        "name": "xai-responses",
+        "webSearch": false
+      }
+    },
+    {
+      "description": "Cerebras API. Fetch or edit models for your account after connecting.",
+      "id": "cerebras",
+      "keyEnv": "CEREBRAS_API_KEY",
+      "label": "Cerebras",
+      "provider": {
+        "apiKeyEnv": "CEREBRAS_API_KEY",
+        "baseUrl": "https://api.cerebras.ai/v1",
+        "default": "gpt-oss-120b",
+        "kind": "openai",
+        "models": [
+          "gpt-oss-120b"
+        ],
+        "name": "cerebras",
+        "webSearch": false
+      }
+    },
+    {
+      "description": "Together AI API. Fetch or edit models for your account after connecting.",
+      "id": "together",
+      "keyEnv": "TOGETHER_API_KEY",
+      "label": "Together AI",
+      "provider": {
+        "apiKeyEnv": "TOGETHER_API_KEY",
+        "baseUrl": "https://api.together.ai/v1",
+        "default": "moonshotai/Kimi-K2.6",
+        "kind": "openai",
+        "models": [
+          "moonshotai/Kimi-K2.6"
+        ],
+        "name": "together",
+        "webSearch": false
+      }
+    },
+    {
+      "description": "Fireworks AI API. Fetch or edit models for your account after connecting.",
+      "id": "fireworks-chat",
+      "keyEnv": "FIREWORKS_API_KEY",
+      "label": "Fireworks AI",
+      "provider": {
+        "apiKeyEnv": "FIREWORKS_API_KEY",
+        "baseUrl": "https://api.fireworks.ai/inference/v1",
+        "default": "accounts/fireworks/models/deepseek-v3p1",
+        "kind": "openai",
+        "models": [
+          "accounts/fireworks/models/deepseek-v3p1"
+        ],
+        "name": "fireworks-chat",
+        "webSearch": false
+      }
+    },
+    {
+      "description": "Fireworks AI API. Fetch or edit models for your account after connecting.",
+      "id": "fireworks-anthropic",
+      "keyEnv": "FIREWORKS_API_KEY",
+      "label": "Fireworks AI",
+      "provider": {
+        "apiKeyEnv": "FIREWORKS_API_KEY",
+        "baseUrl": "https://api.fireworks.ai/inference",
+        "default": "accounts/fireworks/models/deepseek-v3p1",
+        "kind": "anthropic",
+        "models": [
+          "accounts/fireworks/models/deepseek-v3p1"
+        ],
+        "name": "fireworks-anthropic",
+        "webSearch": false
+      }
+    },
+    {
+      "description": "Fireworks AI API. Fetch or edit models for your account after connecting.",
+      "id": "fireworks-responses",
+      "keyEnv": "FIREWORKS_API_KEY",
+      "label": "Fireworks AI",
+      "provider": {
+        "apiKeyEnv": "FIREWORKS_API_KEY",
+        "baseUrl": "https://api.fireworks.ai/inference/v1",
+        "default": "accounts/fireworks/models/qwen3-235b-a22b",
+        "kind": "responses",
+        "models": [
+          "accounts/fireworks/models/qwen3-235b-a22b"
+        ],
+        "name": "fireworks-responses",
+        "webSearch": false
+      }
+    },
+    {
+      "description": "AMD GPU Cloud API. Fetch or edit models for your account after connecting.",
+      "id": "amd-gpu-cloud",
+      "keyEnv": "AMD_GPU_CLOUD_API_KEY",
+      "label": "AMD GPU Cloud",
+      "provider": {
+        "apiKeyEnv": "AMD_GPU_CLOUD_API_KEY",
+        "baseUrl": "https://developer.amd.com.cn/radeon/api/v1",
+        "default": "DeepSeek-V4-Flash",
+        "kind": "openai",
+        "models": [
+          "DeepSeek-V4-Flash",
+          "DeepSeek-V4-Pro",
+          "Qwen3.6-35B-A3B",
+          "GLM-5.1",
+          "GLM-5.2",
+          "gpt-oss-120b",
+          "Kimi-K2.6"
+        ],
+        "name": "amd-gpu-cloud",
+        "webSearch": false
+      }
+    },
+    {
+      "description": "Official DeepSeek Chat Completions API.",
+      "id": "deepseek-chat",
+      "keyEnv": "DEEPSEEK_API_KEY",
+      "label": "DeepSeek Chat Completions",
+      "provider": {
+        "apiKeyEnv": "DEEPSEEK_API_KEY",
+        "baseUrl": "https://api.deepseek.com/v1",
+        "default": "deepseek-v4-flash",
+        "kind": "openai",
+        "models": [
+          "deepseek-v4-flash",
+          "deepseek-v4-pro",
+          "deepseek-v4-flash-vision-exp"
+        ],
+        "name": "deepseek-chat",
+        "webSearch": false
+      }
+    },
+    {
+      "description": "OpenAI API. Fetch or edit models for your account after connecting.",
+      "id": "openai-responses",
+      "keyEnv": "OPENAI_API_KEY",
+      "label": "OpenAI",
+      "provider": {
+        "apiKeyEnv": "OPENAI_API_KEY",
+        "baseUrl": "https://api.openai.com/v1",
+        "default": "gpt-4.1",
+        "kind": "responses",
+        "models": [
+          "gpt-4.1"
+        ],
+        "name": "openai-responses",
+        "webSearch": false
+      }
+    },
+    {
+      "description": "OpenAI API. Fetch or edit models for your account after connecting.",
+      "id": "openai-chat",
+      "keyEnv": "OPENAI_API_KEY",
+      "label": "OpenAI",
+      "provider": {
+        "apiKeyEnv": "OPENAI_API_KEY",
+        "baseUrl": "https://api.openai.com/v1",
+        "default": "gpt-4.1",
+        "kind": "openai",
+        "models": [
+          "gpt-4.1"
+        ],
+        "name": "openai-chat",
+        "webSearch": false
+      }
+    },
+    {
+      "description": "Anthropic API. Fetch or edit models for your account after connecting.",
+      "id": "anthropic",
+      "keyEnv": "ANTHROPIC_API_KEY",
+      "label": "Anthropic",
+      "provider": {
+        "apiKeyEnv": "ANTHROPIC_API_KEY",
+        "baseUrl": "https://api.anthropic.com",
+        "default": "claude-sonnet-4-5",
+        "kind": "anthropic",
+        "models": [
+          "claude-sonnet-4-5"
+        ],
+        "name": "anthropic",
+        "webSearch": false
+      }
+    },
+    {
+      "description": "Google Gemini API. Fetch or edit models for your account after connecting.",
+      "id": "gemini",
+      "keyEnv": "GEMINI_API_KEY",
+      "label": "Google Gemini",
+      "provider": {
+        "apiKeyEnv": "GEMINI_API_KEY",
+        "baseUrl": "https://generativelanguage.googleapis.com/v1beta/openai",
+        "default": "gemini-2.5-flash",
+        "kind": "openai",
+        "models": [
+          "gemini-2.5-flash"
+        ],
+        "name": "gemini",
+        "webSearch": false
+      }
+    },
+    {
+      "description": "SiliconFlow API. Fetch or edit models for your account after connecting.",
+      "id": "siliconflow",
+      "keyEnv": "SILICONFLOW_API_KEY",
+      "label": "SiliconFlow",
+      "provider": {
+        "apiKeyEnv": "SILICONFLOW_API_KEY",
+        "baseUrl": "https://api.siliconflow.cn/v1",
+        "default": "deepseek-ai/DeepSeek-V3.2",
+        "kind": "openai",
+        "models": [
+          "deepseek-ai/DeepSeek-V3.2"
+        ],
+        "name": "siliconflow",
+        "webSearch": false
+      }
+    },
+    {
+      "description": "OpenRouter API. Fetch or edit models for your account after connecting.",
+      "id": "openrouter",
+      "keyEnv": "OPENROUTER_API_KEY",
+      "label": "OpenRouter",
+      "provider": {
+        "apiKeyEnv": "OPENROUTER_API_KEY",
+        "baseUrl": "https://openrouter.ai/api/v1",
+        "default": "openai/gpt-4.1",
+        "kind": "openai",
+        "models": [
+          "openai/gpt-4.1"
+        ],
+        "name": "openrouter",
+        "webSearch": false
+      }
+    },
+    {
+      "description": "Groq API. Fetch or edit models for your account after connecting.",
+      "id": "groq",
+      "keyEnv": "GROQ_API_KEY",
+      "label": "Groq",
+      "provider": {
+        "apiKeyEnv": "GROQ_API_KEY",
+        "baseUrl": "https://api.groq.com/openai/v1",
+        "default": "llama-3.3-70b-versatile",
+        "kind": "openai",
+        "models": [
+          "llama-3.3-70b-versatile"
+        ],
+        "name": "groq",
+        "webSearch": false
+      }
+    },
+    {
+      "description": "Mistral AI API. Fetch or edit models for your account after connecting.",
+      "id": "mistral",
+      "keyEnv": "MISTRAL_API_KEY",
+      "label": "Mistral AI",
+      "provider": {
+        "apiKeyEnv": "MISTRAL_API_KEY",
+        "baseUrl": "https://api.mistral.ai/v1",
+        "default": "mistral-small-latest",
+        "kind": "openai",
+        "models": [
+          "mistral-small-latest"
+        ],
+        "name": "mistral",
+        "webSearch": false
+      }
+    },
+    {
+      "description": "Ollama API. Fetch or edit models for your account after connecting.",
+      "id": "ollama-local",
+      "keyEnv": "OLLAMA_LOCAL_API_KEY",
+      "label": "Ollama",
+      "provider": {
+        "apiKeyEnv": "OLLAMA_LOCAL_API_KEY",
+        "baseUrl": "http://localhost:11434/v1",
+        "default": "qwen3:8b",
+        "kind": "openai",
+        "models": [
+          "qwen3:8b"
+        ],
+        "name": "ollama-local",
+        "webSearch": false
+      }
+    },
+    {
+      "description": "LM Studio API. Fetch or edit models for your account after connecting.",
+      "id": "lmstudio",
+      "keyEnv": "LM_STUDIO_API_KEY",
+      "label": "LM Studio",
+      "provider": {
+        "apiKeyEnv": "LM_STUDIO_API_KEY",
+        "baseUrl": "http://localhost:1234/v1",
+        "default": "qwen3-8b",
+        "kind": "openai",
+        "models": [
+          "qwen3-8b"
+        ],
+        "name": "lmstudio",
+        "webSearch": false
+      }
+    }
+  ]
+}

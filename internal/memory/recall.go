@@ -23,7 +23,7 @@ type recallTool struct{ store Store }
 // NewRecallTool returns the read-only `memory` tool for searching saved facts.
 func NewRecallTool(store Store) tool.Tool { return recallTool{store: store} }
 
-func (recallTool) Name() string { return "memory" }
+func (recallTool) Name() string { return tool.HostMemory }
 
 func (recallTool) Description() string {
 	return "Search, list, and read saved background memories for this project, including explicitly global facts. " +

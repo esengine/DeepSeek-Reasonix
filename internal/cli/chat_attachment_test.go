@@ -127,6 +127,17 @@ func TestRecoverOrphanedPasteLabelLeavesUnverifiedTextUnchanged(t *testing.T) {
 	}
 }
 
+func TestRecoverOrphanedPasteLabelIgnoresPinnedRevision(t *testing.T) {
+	block := pastedBlock{label: "[Pasted text #9 · 2 lines]", text: "private\nbody"}
+	history := []provider.Message{{
+		Role: provider.RoleUser, Origin: provider.MessageOriginHost,
+		Content: "<pinned_context_revision>" + renderFoldedPasteBlock(block) + "</pinned_context_revision>",
+	}}
+	if got := recoverOrphanedPasteLabelsFromHistory(block.label, nil, history); got != block.label {
+		t.Fatalf("pinned revision recovered paste body: %q", got)
+	}
+}
+
 func TestRecoverOrphanedPasteLabelDoesNotReexpandRenderedBlock(t *testing.T) {
 	block := pastedBlock{label: "[Pasted text #4 · 2 lines]", text: "old\nbody"}
 	rendered := renderFoldedPasteBlock(block)

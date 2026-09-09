@@ -53,6 +53,7 @@ CREATE TABLE IF NOT EXISTS reports (
 );
 
 CREATE INDEX IF NOT EXISTS reports_fingerprint ON reports (fingerprint);
+CREATE INDEX IF NOT EXISTS reports_fingerprint_id ON reports (fingerprint, id DESC);
 
 -- Firebase Spark delivery is coordinated through D1 so an unavailable or
 -- quota-limited Realtime Database never loses a sanitized report. The payload
@@ -70,6 +71,8 @@ CREATE TABLE IF NOT EXISTS firebase_crash_outbox (
 
 CREATE INDEX IF NOT EXISTS firebase_crash_outbox_retry
   ON firebase_crash_outbox (state, next_attempt_at, created_at);
+CREATE INDEX IF NOT EXISTS firebase_crash_outbox_fingerprint
+  ON firebase_crash_outbox (fingerprint);
 
 CREATE TABLE IF NOT EXISTS firebase_crash_receipts (
   event_id TEXT PRIMARY KEY,
@@ -201,6 +204,8 @@ CREATE TABLE IF NOT EXISTS report_daily (
   identified_events INTEGER NOT NULL DEFAULT 0,
   PRIMARY KEY (date, fingerprint)
 );
+CREATE INDEX IF NOT EXISTS report_daily_fingerprint_date
+  ON report_daily (fingerprint, date);
 
 CREATE TABLE IF NOT EXISTS report_installations (
   date TEXT NOT NULL,

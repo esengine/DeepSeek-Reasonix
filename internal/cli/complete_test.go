@@ -50,7 +50,7 @@ func TestSlashCompletionFilterAndAccept(t *testing.T) {
 	}
 	// The common commands keep their stable order; explicit readiness recovery
 	// is discoverable after them and fails safely when no card is pending.
-	want := []string{"/compact", "/context", "/copy", "/continue-checks"}
+	want := []string{"/compact", "/context", "/copy", "/continue-checks", "/recover-context"}
 	if got := labels(m.completion.items); !slices.Equal(got, want) {
 		t.Fatalf("filter = %v, want %v", got, want)
 	}

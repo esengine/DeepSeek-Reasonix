@@ -49,6 +49,95 @@ func TestProjectionValidRejectsEditedPrefix(t *testing.T) {
 	}
 }
 
+func TestProjectionSurvivesDynamicSystemRefresh(t *testing.T) {
+	canonical := []provider.Message{
+		{Role: provider.RoleSystem, Content: "system-v1"},
+		{Role: provider.RoleUser, Content: "task"},
+		{Role: provider.RoleAssistant, Content: "done"},
+		{Role: provider.RoleUser, Content: "next"},
+	}
+	const key = "ws|session|model"
+	st := CompactionState{
+		TranscriptVersion: 4,
+		PromptCacheKey:    key,
+		Projection: ContextProjection{
+			Messages: []provider.Message{
+				{Role: provider.RoleSystem, Content: "system-v1"},
+				formatSummaryMessage("earlier task completed"),
+			},
+			TranscriptVersion: 4,
+			CoveredCount:      3,
+			CoveredPrefixHash: coveredPrefixHash(canonical, 3),
+		},
+	}
+
+	if !projectionValid(st, canonical, key) {
+		t.Fatal("matching projection should be valid")
+	}
+
+	refreshed := append([]provider.Message(nil), canonical...)
+	refreshed[0].Content = "system-v2"
+	if !projectionValid(st, refreshed, key) {
+		t.Fatal("dynamic system-only refresh invalidated the projection")
+	}
+	visible := modelVisibleFromProjection(st.Projection, refreshed)
+	if len(visible) == 0 || visible[0].Content != "system-v2" {
+		t.Fatalf("visible system = %+v, want refreshed system-v2", visible)
+	}
+	if len(visible) < 2 || !isCompactionSummary(visible[1]) {
+		t.Fatalf("projection summary was not retained: %+v", visible)
+	}
+
+	edited := append([]provider.Message(nil), refreshed...)
+	edited[1].Content = "different task"
+	if projectionValid(st, edited, key) {
+		t.Fatal("covered user edit was mistaken for a system-only refresh")
+	}
+}
+
+func TestLoadProjectionSidecarRestoresAfterDynamicSystemRefresh(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "s.jsonl")
+	original := []provider.Message{
+		{Role: provider.RoleSystem, Content: "system-v1"},
+		{Role: provider.RoleUser, Content: "task"},
+		{Role: provider.RoleAssistant, Content: "done"},
+		{Role: provider.RoleUser, Content: "next"},
+	}
+	key := promptCacheKey("ws", BranchID(path), "m")
+	if err := SaveCompactionState(path, CompactionState{
+		PromptCacheKey: key,
+		Projection: ContextProjection{
+			Messages: []provider.Message{
+				{Role: provider.RoleSystem, Content: "system-v1"},
+				formatSummaryMessage("earlier task completed"),
+			},
+			CoveredCount:      3,
+			CoveredPrefixHash: coveredPrefixHash(original, 3),
+		},
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	sess := NewSession("system-v2")
+	sess.Add(provider.Message{Role: provider.RoleUser, Content: "task"})
+	sess.Add(provider.Message{Role: provider.RoleAssistant, Content: "done"})
+	sess.Add(provider.Message{Role: provider.RoleUser, Content: "next"})
+	a := New(nil, nil, sess, Options{
+		SessionPath: path,
+		WorkspaceID: "ws",
+		ModelRef:    "m",
+	}, event.Discard)
+
+	if a.sess.checkpointState != "restored" {
+		t.Fatalf("checkpointState = %q, want restored", a.sess.checkpointState)
+	}
+	visible := a.modelVisibleMessages()
+	if len(visible) != 3 || visible[0].Content != "system-v2" || !isCompactionSummary(visible[1]) || visible[2].Content != "next" {
+		t.Fatalf("restored visible projection = %+v", visible)
+	}
+}
+
 func TestProjectionValidRejectsCacheKeyMismatch(t *testing.T) {
 	msgs := []provider.Message{
 		{Role: provider.RoleSystem, Content: "sys"},

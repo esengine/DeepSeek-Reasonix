@@ -16,7 +16,7 @@ type CompleteSubtaskTool struct{}
 
 func NewCompleteSubtaskTool() *CompleteSubtaskTool { return &CompleteSubtaskTool{} }
 
-func (*CompleteSubtaskTool) Name() string { return "complete_subtask" }
+func (*CompleteSubtaskTool) Name() string { return tool.HostCompleteSubtask }
 
 func (*CompleteSubtaskTool) Description() string {
 	return "Close out this delegated sub-task with a structured result the parent can verify. Call once, last. status is complete, partial, blocked, or failed; summary states what is now true; acceptance_criteria lists each condition with the evidence for it; unresolved lists what you did not finish. The host checks every cited command and path against what it actually observed you do, and lowers any claim it cannot back."

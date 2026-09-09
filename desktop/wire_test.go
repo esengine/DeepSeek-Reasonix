@@ -47,3 +47,13 @@ func TestWireEventTabCarriesAuthoritativeTurnStart(t *testing.T) {
 		}
 	}
 }
+
+func TestWireEventTabCarriesSessionGeneration(t *testing.T) {
+	b, err := json.Marshal(toWireTabWithSubmission(event.Event{Kind: event.TurnDone}, "tab-1", "runtime-1", "", 0, 7))
+	if err != nil {
+		t.Fatalf("marshal: %v", err)
+	}
+	if !strings.Contains(string(b), `"sessionGeneration":7`) {
+		t.Fatalf("tab event JSON = %s, want session generation", b)
+	}
+}

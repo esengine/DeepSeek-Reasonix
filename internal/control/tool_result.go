@@ -3,8 +3,34 @@ package control
 import (
 	"slices"
 
+	"reasonix/internal/event"
 	"reasonix/internal/provider"
 )
+
+// Bind stable local message IDs before publishing a result. Provider call IDs
+// can be reused in later turns; an ambiguous source stays unavailable.
+func bindCompletionLogSources(receipt *event.CompletionReceipt, messages []provider.Message) *event.CompletionReceipt {
+	if receipt == nil {
+		return nil
+	}
+	out := *receipt
+	out.Verifications = append([]event.ReceiptVerification(nil), receipt.Verifications...)
+	sources := make(map[string]string)
+	for _, message := range messages {
+		if message.Role != provider.RoleTool || message.ToolCallID == "" {
+			continue
+		}
+		if _, exists := sources[message.ToolCallID]; exists {
+			sources[message.ToolCallID] = ""
+		} else {
+			sources[message.ToolCallID] = message.ID
+		}
+	}
+	for i := range out.Verifications {
+		out.Verifications[i].ToolResultID = sources[out.Verifications[i].ToolCallID]
+	}
+	return &out
+}
 
 // ToolResultData holds the full arguments and output for one tool call, loaded
 // on demand when a frontend expands a collapsed tool card.
@@ -67,7 +93,7 @@ func lookupToolResult(msgs []provider.Message, toolID string) *ToolResultData {
 			}
 			return &ToolResultData{
 				Args:   provider.FormatServerSearchArgs(search.Query),
-				Output: provider.FormatServerSearchOutput(search.Results),
+				Output: provider.ServerSearchDisplayOutput(search),
 			}
 		}
 	}

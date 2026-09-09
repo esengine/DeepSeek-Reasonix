@@ -145,7 +145,6 @@ func TestReadyTabRapidSelectionsRollbackToServeAuthoritativeSnapshot(t *testing.
 	if handled := a.resumeRemoteTabSessionPathForOpenSelection(tab.id, "second", secondPath, "Second", second.selection.revision, second.previousSelection); handled {
 		t.Fatal("rejected second selection was treated as committed")
 	}
-	a.restoreRejectedRemoteTabOpenSelection(tab.id, second.previousSelection)
 	if requests != 1 || tab.routing.currentPath != oldPath || tab.session.path != oldPath || tab.topicTitle != "Old" {
 		t.Fatalf("rejected rapid selection left requests/route/session/title = %d/%q/%q/%q", requests, tab.routing.currentPath, tab.session.path, tab.topicTitle)
 	}

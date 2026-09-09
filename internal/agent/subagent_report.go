@@ -69,6 +69,7 @@ func decorateExecutionReceipt(rec *evidence.Receipt, result string, ex *tool.She
 		rec.ExitCode = &code
 	}
 	rec.Verification = ex.Verification
+	rec.Interrupted = ex.State == tool.ShellStateCancelled
 }
 
 // composeSubagentAnswer assembles everything the parent is shown for one child

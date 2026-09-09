@@ -6,6 +6,7 @@ import (
 
 	"reasonix/internal/event"
 	"reasonix/internal/evidence"
+	"reasonix/internal/i18n"
 	"reasonix/internal/provider"
 )
 
@@ -168,7 +169,7 @@ func (a *Agent) applyProgressGuard(outcomes []toolOutcome, receiptMark int, goal
 }
 
 func progressGuardNoticeText() string {
-	return "The assistant keeps repeating work without new evidence; asking it to change approach."
+	return i18n.M.ProgressGuard
 }
 
 // armLoopGuardPass records that a loop guard fired this user turn.

@@ -103,14 +103,13 @@ func TestDeepSeekProLowUsesResponsesReasoningShape(t *testing.T) {
 	}
 }
 
-func TestDeepSeekV4ResponsesEffortAliasesNormalizeToHigh(t *testing.T) {
+func TestDeepSeekV4ResponsesEffortAliasesRejected(t *testing.T) {
 	for _, model := range []string{"deepseek-v4-flash", "deepseek-v4-pro"} {
 		for _, alias := range []string{"medium", "xhigh"} {
-			client := New(Config{Name: "deepseek", BaseURL: "https://api.deepseek.com", Model: model, Effort: alias}).(*client)
-			body, _, _ := client.buildRequestBody(provider.Request{Messages: []provider.Message{{Role: provider.RoleUser, Content: "hi"}}})
-			reasoning, _ := body["reasoning"].(map[string]any)
-			if got, _ := reasoning["effort"].(string); got != "high" {
-				t.Fatalf("%s/%s effort = %q", model, alias, got)
+			p := New(Config{Name: "deepseek", BaseURL: "https://api.deepseek.com", Model: model, Effort: alias})
+			_, err := p.Stream(context.Background(), provider.Request{})
+			if err == nil || !strings.Contains(err.Error(), "UNSUPPORTED_REASONING_EFFORT") {
+				t.Fatalf("%s/%s: %v", model, alias, err)
 			}
 		}
 	}
@@ -190,7 +189,7 @@ func TestFactoryPropagatesWebSearch(t *testing.T) {
 	if err != nil {
 		t.Fatalf("newFromConfig: %v", err)
 	}
-	if !p.(*client).webSearch {
+	if !p.(*client).search.NativeEnabled {
 		t.Fatal("web_search was not propagated to the Responses client")
 	}
 }
@@ -226,7 +225,7 @@ func TestStatelessRequestReplaysReasoningContentAndToolPair(t *testing.T) {
 	}))
 	defer server.Close()
 
-	p := New(Config{Name: "deepseek", APIKey: "key", BaseURL: server.URL, Model: "deepseek-v4-flash", Mode: "stateless", Effort: "high"})
+	p := New(Config{Name: "deepseek", APIKey: "key", BaseURL: server.URL, Model: "deepseek-v4-flash", Mode: "stateless", Effort: "high", Extra: map[string]any{"supported_efforts": []string{"high"}}})
 	collect(t, p, provider.Request{Messages: []provider.Message{
 		{Role: provider.RoleSystem, Content: "system"},
 		{Role: provider.RoleUser, Content: "weather"},

@@ -6,6 +6,7 @@ import (
 	"fmt"
 
 	"reasonix/internal/plancontract"
+	"reasonix/internal/tool"
 )
 
 // SubmitPlanTool is the planner's structured exit: it hands the host a plan as
@@ -21,7 +22,7 @@ func (*SubmitPlanTool) finalizesTurn() {}
 
 func NewSubmitPlanTool() *SubmitPlanTool { return &SubmitPlanTool{} }
 
-func (*SubmitPlanTool) Name() string { return "submit_plan" }
+func (*SubmitPlanTool) Name() string { return tool.HostSubmitPlan }
 
 func (*SubmitPlanTool) Description() string {
 	return "Submit your finished plan as structured data. This is how a plan reaches the host — the host renders it for the user and hands it to the executor, so do NOT also restate the plan in prose. Every step needs a `title`; a step with a `parent_id` is a sub-step of that phase (two levels, keep phases few). Record what you actually READ as `verified_files` and what you only INFERRED as `candidate_files` — never present a guess as a verified path. Attach `acceptance` criteria and command-level `verification` to the steps they belong to, mark must-keep-passing behavior with `regression`, and label anything unproven in `assumptions`. Set `requires_approval` when execution should stop for the user first; the host decides whether it actually gates."

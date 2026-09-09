@@ -7,6 +7,7 @@ import (
 	"log/slog"
 	"sync"
 	"sync/atomic"
+	"time"
 
 	"reasonix/internal/agent"
 	"reasonix/internal/event"
@@ -57,11 +58,7 @@ func (s *turnEventSink) Emit(e event.Event) {
 	if s == nil {
 		return
 	}
-	if s.c != nil {
-		if ledger := s.c.turnEventLedger(); ledger != nil {
-			ledger.ObserveRawEvent(e)
-		}
-	}
+	s.observe(e)
 	if turnEventSynchronousBarrier(e.Kind) {
 		if err := event.EmitChecked(s.stream, e); err != nil {
 			s.fail(err)
@@ -69,6 +66,18 @@ func (s *turnEventSink) Emit(e event.Event) {
 		return
 	}
 	s.stream.Emit(e)
+}
+
+// observe feeds every raw event to the ledger's routing and to the liveness
+// tracker before ordering, so silence is measured from real emission time.
+func (s *turnEventSink) observe(e event.Event) {
+	if s.c == nil {
+		return
+	}
+	if ledger := s.c.turnEventLedger(); ledger != nil {
+		ledger.ObserveRawEvent(e)
+	}
+	s.c.liveness.observe(e, time.Now())
 }
 
 func turnEventSynchronousBarrier(kind event.Kind) bool {
@@ -86,11 +95,7 @@ func (s *turnEventSink) EmitChecked(e event.Event) error {
 	if s == nil {
 		return nil
 	}
-	if s.c != nil {
-		if ledger := s.c.turnEventLedger(); ledger != nil {
-			ledger.ObserveRawEvent(e)
-		}
-	}
+	s.observe(e)
 	var err error
 	if s.publish.Load() > 0 && e.Kind == event.PromptAnswered {
 		// A frontend may answer during prompt publication, so the coalescer cannot
@@ -148,14 +153,22 @@ func (s *turnEventSink) persistAndPublish(e event.Event) error {
 	if s == nil || s.c == nil {
 		return nil
 	}
+	if e.RecoveryCheckpoint {
+		return s.c.checkpointToolTranscript()
+	}
 	ledger := s.c.turnEventLedger()
 	if ledger == nil {
+		s.c.refreshRuntimeState(e)
 		s.publishInner(e)
+		return nil
+	}
+	if staleTurnStatus(e, ledger) {
 		return nil
 	}
 	// Outside-turn notices are not lifecycle records and must pass through after
 	// bootstrap or a terminal event.
 	if ledger.ActiveTurnID() == "" {
+		s.c.refreshRuntimeState(e)
 		s.publishInner(e)
 		return nil
 	}
@@ -181,9 +194,22 @@ func (s *turnEventSink) persistAndPublish(e event.Event) error {
 			} else {
 				ledger.SetTranscriptSnapshot(int64(session.TranscriptVersion()), digest)
 			}
+			if ref, ok := session.Head(); ok {
+				ledger.SetTranscriptHead(ref.HeadID, session.LeafID())
+			} else {
+				ledger.SetTranscriptHead("", "")
+			}
 		}
 	case event.TurnStatusChanged:
 		// The emitter supplied the exact transition in e.Status.
+	}
+	if e.WriteIntent || e.Kind == event.ToolResult || (e.Kind == event.ToolDispatch && !e.Tool.Partial && !e.Tool.ReadOnly) {
+		if err := s.c.checkpointToolTranscript(); err != nil {
+			return fmt.Errorf("checkpoint tool transcript: %w", err)
+		}
+	}
+	if e.WriteIntent {
+		return nil
 	}
 	stamped, ok, err := ledger.Append(e, status)
 	if err != nil {
@@ -192,6 +218,7 @@ func (s *turnEventSink) persistAndPublish(e event.Event) error {
 	if !ok {
 		return nil
 	}
+	s.c.refreshRuntimeState(stamped)
 	s.publishInner(stamped)
 	if e.Kind == event.TurnDone && !ledger.ProjectionAckRequired() {
 		if err := ledger.AcknowledgeProjection(stamped.TurnID); err != nil {
@@ -270,6 +297,9 @@ func (s *turnEventDurableSink) RecordWorkspaceMutation(a event.WorkspaceMutation
 func (s *turnEventDurableSink) RecordRunBudget(a event.RunBudgetSample) {
 	event.RecordRunBudget(s.inner(), a)
 }
+func (s *turnEventDurableSink) RecordSubagentLifecycle(a event.SubagentLifecycleInfo) {
+	event.RecordSubagentLifecycle(s.inner(), a)
+}
 
 func terminalTurnStatus(e event.Event) event.TurnStatus {
 	if e.Cancelled || errors.Is(e.Err, context.Canceled) {
@@ -336,6 +366,7 @@ func (c *Controller) turnEventRuntimeStatus() (string, event.TurnStatus, uint64,
 }
 
 func (c *Controller) rebindTurnEvents(sessionPath string) {
+	defer c.refreshRuntimeState(event.Event{})
 	if c == nil {
 		return
 	}
@@ -365,6 +396,7 @@ func (c *Controller) rebindTurnEvents(sessionPath string) {
 }
 
 func (c *Controller) failTurnEventLedger(err error) {
+	defer c.refreshRuntimeState(event.Event{})
 	if c == nil || err == nil {
 		return
 	}
@@ -380,16 +412,28 @@ func (c *Controller) failTurnEventLedger(err error) {
 	}
 	c.mu.Unlock()
 	if cancel != nil {
+		// Cancel and prompt resolvers may hold promptResolveMu while this
+		// synchronous failure callback runs. Use the owners' internal locks to
+		// invalidate pending resolutions without reentering the submission lock.
+		c.promptOwner.CancelAll()
 		c.approval.clearAll()
 		cancel()
 	}
 }
 
-func (c *Controller) emitTurnStatus(status event.TurnStatus) {
+// staleTurnStatus reports a status stamped for a turn that has since reached
+// its terminal event; cancelling is sticky, so it must not reach the next turn.
+func staleTurnStatus(e event.Event, ledger *turnevent.Ledger) bool {
+	return e.Kind == event.TurnStatusChanged && e.TurnID != "" && e.TurnID != ledger.ActiveTurnID()
+}
+
+// emitTurnStatus stamps the transition with the turn that requested it so the
+// ledger can drop it if that turn already reached its terminal event.
+func (c *Controller) emitTurnStatus(status event.TurnStatus, turnID string) {
 	if c == nil || status == "" {
 		return
 	}
-	c.sink.Emit(event.Event{Kind: event.TurnStatusChanged, Status: status})
+	c.sink.Emit(event.Event{Kind: event.TurnStatusChanged, Status: status, TurnID: turnID})
 }
 
 // emitTurnEventChecked reaches the lifecycle sink below the inbox observer so
@@ -399,12 +443,25 @@ func (c *Controller) emitTurnEventChecked(e event.Event) error {
 	if c == nil {
 		return nil
 	}
+	if e.ItemID != "" && e.TurnID == "" {
+		if identity, ok := c.promptOwner.Identity(e.ItemID); ok {
+			e.TurnID = identity.TurnID
+			e.PromptKind = string(identity.Kind)
+		}
+	} else if e.ItemID != "" && e.PromptKind == "" {
+		if identity, ok := c.promptOwner.Identity(e.ItemID); ok {
+			e.PromptKind = string(identity.Kind)
+		}
+	}
 	return event.EmitChecked(c.sink, e)
 }
 
 // SetTurnEventRoutingMetadata attaches desktop routing identity to lifecycle
 // envelopes only. It never changes provider-visible prompts or tool schemas.
 func (c *Controller) SetTurnEventRoutingMetadata(runtimeEpoch, submissionID string) {
+	c.promptResolveMu.Lock()
+	c.promptRuntimeEpoch = runtimeEpoch
+	c.promptResolveMu.Unlock()
 	if ledger := c.turnEventLedger(); ledger != nil {
 		ledger.RequireProjectionAck(true)
 		ledger.SetRoutingMetadata(runtimeEpoch, submissionID)

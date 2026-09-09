@@ -78,9 +78,6 @@ func TestCoordinatorEmergencyBoundedPlannerCanSubmitPlanInFinalizationRound(t *t
 	sawTruncation := false
 	for _, notice := range notices {
 		sawTruncation = sawTruncation || strings.HasPrefix(notice.Text, "tool output truncated:")
-		if notice.Text == plannerSafetyFallbackNotice {
-			t.Fatalf("valid terminal plan incorrectly fell back: %+v", notice)
-		}
 	}
 	if !sawTruncation {
 		t.Fatal("test setup did not reproduce truncated planner research")
@@ -127,11 +124,6 @@ func TestCoordinatorTaskBudgetLetsPlannerSubmitTerminalPlan(t *testing.T) {
 	}
 	if got := lastUser(planner.requests[1]); !strings.Contains(got, "reached its token budget") || !strings.Contains(got, "call submit_plan now") {
 		t.Fatalf("task-budget finalization did not request terminal plan: %q", got)
-	}
-	for _, notice := range notices {
-		if notice.Text == plannerSafetyFallbackNotice {
-			t.Fatalf("successful terminal plan incorrectly triggered fallback: %+v", notice)
-		}
 	}
 	if len(exec.requests) == 0 || !strings.Contains(lastUser(exec.requests[0]), "finish within the safety envelope") {
 		t.Fatal("executor did not receive the task-budget terminal plan")

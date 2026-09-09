@@ -165,6 +165,60 @@ func TestFlushPendingAggregatesAndDeletesOnlyAfterSuccess(t *testing.T) {
 	}
 }
 
+func TestFlushPendingUploadsCompletionMetricsWithoutContent(t *testing.T) {
+	home := t.TempDir()
+	const secret = "PRIVATE_TASK_ANSWER_REASON_PATH_MODEL"
+	want := map[string]string{
+		"completion_validation_outcome":      "enforce_continue",
+		"completion_validation_latency":      "s_5_15",
+		"completion_validation_error":        "timeout",
+		"completion_validation_attempt":      "repair",
+		"completion_evaluator_finish_reason": "stop",
+		"completion_evaluator_cache_hit":     "90_100",
+	}
+	counters := make([]Counter, 0, len(want)+1)
+	for signal, bucket := range want {
+		counters = append(counters, Counter{Signal: signal, Bucket: bucket, Count: 1})
+	}
+	// Even a syntactically safe bucket must be discarded when its signal could
+	// carry user content.
+	counters = append(counters, Counter{Signal: "task_text", Bucket: strings.ToLower(secret), Count: 1})
+	if err := appendPending(home, pendingPayload{Version: "v1.34.0", OS: "linux", Counters: counters}); err != nil {
+		t.Fatal(err)
+	}
+
+	client := testClient(home, roundTripFunc(func(req *http.Request) (*http.Response, error) {
+		body, err := io.ReadAll(req.Body)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if strings.Contains(strings.ToUpper(string(body)), secret) {
+			t.Fatalf("completion metrics upload leaked private content: %s", body)
+		}
+		var payload metricsPayload
+		if err := json.Unmarshal(body, &payload); err != nil {
+			t.Fatal(err)
+		}
+		got := map[string]string{}
+		for _, counter := range payload.Counters {
+			got[counter.Signal] = counter.Bucket
+		}
+		if len(got) != len(want) {
+			t.Fatalf("uploaded completion signals = %#v, want %#v", got, want)
+		}
+		for signal, bucket := range want {
+			if got[signal] != bucket {
+				t.Errorf("%s bucket = %q, want %q", signal, got[signal], bucket)
+			}
+		}
+		return telemetryResponse(http.StatusAccepted), nil
+	}))
+	client.version = "v1.34.0"
+	if err := client.flushPending(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+}
+
 func TestFailedFlushRestoresClaimsForRetry(t *testing.T) {
 	home := t.TempDir()
 	if err := appendPending(home, pendingPayload{

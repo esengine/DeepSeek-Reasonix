@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import { ChevronRight } from "lucide-react";
-import { useReasoningDisplayMode } from "../lib/reasoningDisplayPreference";
+import { useWorkProcessPresentation } from "../lib/sessionExperience";
 import { useCollapseAnimation } from "../lib/useCollapseAnimation";
 import { useT } from "../lib/i18n";
 import type { Item } from "../lib/useController";
@@ -26,25 +26,25 @@ export function AssistantReasoningPanel({
   expandWhileStreaming: boolean;
 }) {
   const t = useT();
-  const displayMode = useReasoningDisplayMode();
+  const presentation = useWorkProcessPresentation();
   const running = item.streaming && !item.reasoningComplete;
-  const followsWhileStreaming = displayMode === "auto" || displayMode === "expanded" || expandWhileStreaming;
-  const keepExpanded = displayMode === "expanded";
+  const followsWhileStreaming = presentation.showWhileRunning || expandWhileStreaming;
+  const keepExpanded = presentation.keepExpandedAfterCompletion;
   const [open, setOpen] = useState(defaultExpanded || keepExpanded || (followsWhileStreaming && item.streaming));
   const bodyRef = useRef<HTMLDivElement>(null);
   const userOverridden = useRef(false);
   const previousStreaming = useRef(item.streaming);
   const previousComplete = useRef(item.reasoningComplete ?? false);
-  const previousMode = useRef(displayMode);
+  const previousExperience = useRef(presentation.experience);
 
   useEffect(() => {
     const wasStreaming = previousStreaming.current;
     const wasComplete = previousComplete.current;
     const complete = item.reasoningComplete ?? false;
-    const modeChanged = previousMode.current !== displayMode;
+    const modeChanged = previousExperience.current !== presentation.experience;
     previousStreaming.current = item.streaming;
     previousComplete.current = complete;
-    previousMode.current = displayMode;
+    previousExperience.current = presentation.experience;
     if (modeChanged) {
       userOverridden.current = false;
       setOpen(defaultExpanded || keepExpanded || (followsWhileStreaming && item.streaming));
@@ -55,14 +55,13 @@ export function AssistantReasoningPanel({
     } else if ((complete && !wasComplete) || wasStreaming) {
       if (!defaultExpanded && !keepExpanded && !userOverridden.current) setOpen(false);
     }
-  }, [defaultExpanded, displayMode, followsWhileStreaming, keepExpanded, item.reasoningComplete, item.streaming]);
+  }, [defaultExpanded, followsWhileStreaming, keepExpanded, item.reasoningComplete, item.streaming, presentation.experience]);
 
   const toggle = () => {
     userOverridden.current = true;
     setOpen((value) => !value);
   };
   useCollapseAnimation(bodyRef, open);
-  if (displayMode === "hidden" || displayMode === "pending") return null;
   const meta = running ? "" : reasoningDurationLabel(item.reasoningDurationMs, t);
   return (
     <div className="reasoning">

@@ -17,6 +17,7 @@ type sessionListEntry struct {
 	Turns      int    `json:"turns,omitempty"`
 	Current    bool   `json:"current,omitempty"`
 	Running    bool   `json:"running,omitempty"`
+	TakenOver  bool   `json:"takenOver,omitempty"`
 	MtimeMilli int64  `json:"mtimeMilli"`
 }
 
@@ -51,9 +52,16 @@ func (s *Server) sessions(w http.ResponseWriter, r *http.Request) {
 		}
 		mtime := agent.SessionContentModTime(path)
 		cleanPath := agent.CanonicalSessionPath(path)
-		row := sessionListEntry{Name: strings.TrimSuffix(entry.Name(), ".jsonl"), Path: path, Current: cleanPath == current, Running: running[cleanPath], MtimeMilli: mtime.UnixMilli()}
+		row := sessionListEntry{
+			Name:       strings.TrimSuffix(entry.Name(), ".jsonl"),
+			Path:       path,
+			Current:    cleanPath == current,
+			Running:    running[cleanPath],
+			TakenOver:  s.sessionMirrored(cleanPath) || leaseHeldByForeignRuntime(cleanPath),
+			MtimeMilli: mtime.UnixMilli(),
+		}
 		if row.Current {
-			row.Running = controllerHasActiveRuntimeWork(ctrl)
+			row.Running = controllerHasActiveRuntimeWork(ctrl) && !row.TakenOver
 		}
 		first, turns, cached := agent.SessionPreviewCached(path)
 		if !cached {

@@ -148,38 +148,10 @@ func (a *App) resumeRemoteTabOpenAsync(tabID, name, sessionPath, sessionTitle st
 		func() {
 			tab.selectionMu.Lock()
 			defer tab.selectionMu.Unlock()
-			handled := a.resumeRemoteTabSessionPathForOpenSelection(tabID, name, sessionPath, sessionTitle, revision, selection)
-			if !handled {
-				a.restoreRejectedRemoteTabOpenSelection(tabID, selection)
-			}
+			a.resumeRemoteTabSessionPathForOpenSelection(tabID, name, sessionPath, sessionTitle, revision, selection)
 		}()
 		a.applyPendingRemoteTabOpenSelection(tabID)
 	})
-}
-
-func (a *App) restoreRejectedRemoteTabOpenSelection(tabID string, previous *remoteTabOpenSelection) {
-	if previous == nil {
-		return
-	}
-	a.remoteTabMu.Lock()
-	tab := a.remoteTabs[tabID]
-	a.remoteTabMu.Unlock()
-	if tab == nil {
-		return
-	}
-	tab.routeEventMu.Lock()
-	defer tab.routeEventMu.Unlock()
-	a.remoteTabMu.Lock()
-	current := a.remoteTabs[tabID]
-	if current != tab || current.selectionRevision != previous.revision || current.state != "ready" || strings.TrimSpace(current.err) == "" {
-		a.remoteTabMu.Unlock()
-		return
-	}
-	restoreRemoteTabOpenSelectionLocked(current, previous)
-	meta := remoteTabMetaLocked(current)
-	a.remoteTabMu.Unlock()
-	a.emitRemoteEvent("remote-tab:updated", meta)
-	a.saveTabsFromRemote()
 }
 
 func restoreRemoteTabOpenSelectionLocked(current *remoteTab, previous *remoteTabOpenSelection) {

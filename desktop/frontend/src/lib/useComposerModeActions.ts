@@ -1,117 +1,66 @@
-import { useCallback, type MutableRefObject } from "react";
-import { app } from "./bridge";
-import {
-  composerProfileWithMode,
-  updateUserPlanModeIntent,
-  type ComposerProfile,
-  type ComposerProfileField,
-  type UserPlanModeIntents,
-} from "./composerProfile";
-import { restorableToolApprovalMode, type RestorableToolApprovalMode } from "./toolApprovalMode";
-import { modeHasPlan, type CollaborationMode, type Mode, type ToolApprovalMode } from "./types";
-
-type PatchProfile = (
-  patch: Partial<Omit<ComposerProfile, "pending">>,
-  pendingFields: ComposerProfileField[],
-) => void;
+import { useCommittedCommand } from "./useCommittedCommand";
+import { executeComposerMode, type ComposerModePorts, type ComposerModeRequest } from "../app-runtime/composerModeOwner";
+import { restorableToolApprovalMode, toggleYoloToolApprovalMode, type RestorableToolApprovalMode } from "./toolApprovalMode";
+import { updateUserPlanModeIntent, type UserPlanModeIntents } from "./composerProfile";
+import type { SessionResource, useSessionOperations } from "../app-runtime/useSessionOperations";
+import type { CollaborationMode, Mode, ToolApprovalMode } from "./types";
 
 type ComposerModeActionsOptions = {
-  activeTabId?: string;
+  target: SessionResource;
   remote: boolean;
   collaborationMode: CollaborationMode;
   toolApprovalMode: ToolApprovalMode;
   goal: string;
-  planIntentRef: MutableRefObject<UserPlanModeIntents>;
-  yoloRestoreRef: MutableRefObject<Record<string, RestorableToolApprovalMode>>;
-  patchProfile: PatchProfile;
-  setControllerMode: (mode: Mode) => Promise<void> | void;
-  setControllerCollaborationMode: (mode: CollaborationMode) => Promise<void>;
-  setControllerToolApprovalMode: (mode: ToolApprovalMode) => Promise<void> | void;
-  clearControllerGoal: () => Promise<void>;
-  drainRemoteApprovals: (ids: string[]) => void;
+  operations: ReturnType<typeof useSessionOperations>;
+  ports: Omit<ComposerModePorts, "rememberPlan" | "rememberApproval">;
+  planIntentsRef: { current: UserPlanModeIntents };
+  yoloRestoreRef: { current: Record<string, RestorableToolApprovalMode> };
   showError: (message: string) => void;
 };
 
+/** Display inputs commit here; source-bound execution lives outside React. */
 export function useComposerModeActions(options: ComposerModeActionsOptions) {
-  const {
-    activeTabId, remote, collaborationMode, toolApprovalMode, goal,
-    planIntentRef, yoloRestoreRef, patchProfile, setControllerMode,
-    setControllerCollaborationMode, setControllerToolApprovalMode,
-    clearControllerGoal, drainRemoteApprovals, showError,
-  } = options;
-  const rememberPlanMode = useCallback((enabled: boolean) => {
-    planIntentRef.current = updateUserPlanModeIntent(planIntentRef.current, activeTabId, enabled);
-  }, [activeTabId, planIntentRef]);
+  const notePlanModeForTab = useCommittedCommand((tabId: string, enabled: boolean) => {
+    options.planIntentsRef.current = updateUserPlanModeIntent(options.planIntentsRef.current, tabId, enabled);
+  });
+  const rememberApprovalForTab = useCommittedCommand((tabId: string, previous: ToolApprovalMode, next: ToolApprovalMode) => {
+    if (next !== "yolo") options.yoloRestoreRef.current[tabId] = restorableToolApprovalMode(next);
+    else if (previous !== "yolo") options.yoloRestoreRef.current[tabId] = restorableToolApprovalMode(previous);
+  });
 
-  const applyMode = useCallback((mode: Mode) => {
-    if (remote && activeTabId) {
-      const next = composerProfileWithMode(mode);
-      void (async () => {
-        try {
-          const drained = await app.SetRemoteTabComposerProfile(
-            activeTabId,
-            next.collaborationMode ?? "normal",
-            next.toolApprovalMode ?? "ask",
-            "",
-          );
-          drainRemoteApprovals(drained);
-          rememberPlanMode(modeHasPlan(mode));
-          patchProfile(next, ["collaborationMode", "toolApprovalMode", "goal"]);
-        } catch (error) {
-          showError(error instanceof Error ? error.message : String(error));
-        }
-      })();
-      return;
-    }
-    rememberPlanMode(modeHasPlan(mode));
-    patchProfile(composerProfileWithMode(mode), ["collaborationMode", "toolApprovalMode", "goal"]);
-    void setControllerMode(mode);
-  }, [activeTabId, drainRemoteApprovals, patchProfile, rememberPlanMode, remote, setControllerMode, showError]);
-
-  const applyCollaborationMode = useCallback(async (mode: CollaborationMode): Promise<void> => {
-    if (remote && activeTabId) {
-      const controllerMode = mode === "goal" ? "normal" : mode;
-      const drained = await app.SetRemoteTabComposerProfile(activeTabId, controllerMode, toolApprovalMode, "");
-      drainRemoteApprovals(drained);
-      rememberPlanMode(mode === "plan");
-      patchProfile(mode === "goal"
-        ? { collaborationMode: "normal", goalDraftMode: true, goal: "" }
-        : { collaborationMode: mode, goalDraftMode: false, goal: "" }, ["collaborationMode", "goal"]);
-      return;
-    }
-    if (mode === "goal") {
-      rememberPlanMode(false);
-      patchProfile({ collaborationMode: "normal", goalDraftMode: true, goal: "" }, ["collaborationMode", "goal"]);
-      return setControllerCollaborationMode("normal");
-    }
-    if (goal.trim()) await clearControllerGoal();
-    await setControllerCollaborationMode(mode);
-    rememberPlanMode(mode === "plan");
-    patchProfile({ collaborationMode: mode, goalDraftMode: false, goal: "" }, ["collaborationMode", "goal"]);
-  }, [activeTabId, clearControllerGoal, drainRemoteApprovals, patchProfile, rememberPlanMode, remote, setControllerCollaborationMode, toolApprovalMode]);
-
-  const applyToolApprovalMode = useCallback((mode: ToolApprovalMode) => {
-    if (!activeTabId) return;
-    const rememberRestoreMode = () => {
-      if (mode === "yolo" && toolApprovalMode !== "yolo") {
-        yoloRestoreRef.current[activeTabId] = restorableToolApprovalMode(toolApprovalMode);
-      } else if (mode !== "yolo") {
-        yoloRestoreRef.current[activeTabId] = restorableToolApprovalMode(mode);
-      }
+  const run = useCommittedCommand(async (request: ComposerModeRequest): Promise<void> => {
+    const { target, remote, collaborationMode, toolApprovalMode, goal, operations } = options;
+    // All axes share the backend profile transaction; stop/send have other channels.
+    const ports: ComposerModePorts = {
+      ...options.ports,
+      rememberPlan: notePlanModeForTab,
+      rememberApproval: rememberApprovalForTab,
     };
-    if (remote) {
-      const controllerMode = goal.trim() ? "goal" : collaborationMode === "plan" ? "plan" : "normal";
-      void app.SetRemoteTabComposerProfile(activeTabId, controllerMode, mode, goal).then((drained) => {
-        drainRemoteApprovals(drained);
-        rememberRestoreMode();
-        patchProfile({ toolApprovalMode: mode }, ["toolApprovalMode"]);
-      }).catch((error) => showError(error instanceof Error ? error.message : String(error)));
-      return;
-    }
-    rememberRestoreMode();
-    patchProfile({ toolApprovalMode: mode }, ["toolApprovalMode"]);
-    void setControllerToolApprovalMode(mode);
-  }, [activeTabId, collaborationMode, drainRemoteApprovals, goal, patchProfile, remote, setControllerToolApprovalMode, showError, toolApprovalMode, yoloRestoreRef]);
+    const result = await operations(target, "composer-profile", {
+      target, remote, collaborationMode, toolApprovalMode, goal, ports, request,
+    }, executeComposerMode);
+    if (result.status === "failed") throw result.error;
+  });
+  const report = useCommittedCommand((error: unknown) => {
+    options.showError(error instanceof Error ? error.message : String(error));
+  });
+  const applyMode = useCommittedCommand((mode: Mode) => { void run({ kind: "mode", mode }).catch(report); });
+  const applyCollaborationMode = useCommittedCommand((mode: CollaborationMode) => run({ kind: "collaboration", mode }));
+  const applyToolApprovalMode = useCommittedCommand((mode: ToolApprovalMode) => { void run({ kind: "approval", mode }).catch(report); });
 
-  return { applyMode, applyCollaborationMode, applyToolApprovalMode };
+  // Shift+Tab toggles only the collaboration axis; Ctrl/Cmd+Y toggles YOLO on the
+  // tool-permission axis while preserving the Ask/Auto base mode.
+  const toggleYoloApprovalMode = useCommittedCommand(() => {
+    const tabId = options.target.tabId;
+    if (!tabId) return;
+    const next = toggleYoloToolApprovalMode(
+      options.toolApprovalMode,
+      options.yoloRestoreRef.current[tabId],
+    );
+    if (next.restore) {
+      options.yoloRestoreRef.current[tabId] = next.restore;
+    }
+    applyToolApprovalMode(next.mode);
+  });
+  return { applyMode, applyCollaborationMode, applyToolApprovalMode, notePlanModeForTab, rememberApprovalForTab, toggleYoloApprovalMode };
 }

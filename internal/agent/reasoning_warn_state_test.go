@@ -22,7 +22,6 @@ func warningFingerprint(label string) string {
 	digest := sha256.Sum256([]byte(label))
 	return hex.EncodeToString(digest[:])
 }
-
 func missingReasoningTestNow() time.Time {
 	return time.Now().Add(-time.Hour).Truncate(time.Millisecond)
 }
@@ -50,191 +49,6 @@ func TestMissingReasoningWarnStatePersistsCurrentIncidentAcrossInstances(t *test
 	}
 	if strings.Contains(string(b), "deepseek") || strings.Contains(string(b), "v4-pro") {
 		t.Fatalf("state file exposed raw provider configuration: %s", b)
-	}
-}
-
-func TestMissingReasoningWarnStateFallbackWaitsThenAdmitsOneProbe(t *testing.T) {
-	dir := t.TempDir()
-	s := newMissingReasoningWarnState(dir)
-	fingerprint := warningFingerprint("deepseek-anthropic\x00v4-pro")
-	now := missingReasoningTestNow()
-	if s.activeAt(fingerprint, now) {
-		t.Fatal("fresh configuration unexpectedly has an active circuit")
-	}
-	if !s.claimAt(fingerprint, now) || !s.activeAt(fingerprint, now.Add(time.Minute)) {
-		t.Fatal("claimed incident did not open the circuit")
-	}
-	if s.fallbackActiveAt(fingerprint, now.Add(time.Minute)) {
-		t.Fatal("first omission must not open the fallback circuit")
-	}
-	if !s.openFallbackAt(fingerprint, now.Add(90*time.Second)) || !s.fallbackActiveAt(fingerprint, now.Add(2*time.Minute)) {
-		t.Fatal("second omission did not open the fallback circuit")
-	}
-	before, err := os.ReadFile(filepath.Join(dir, missingReasoningWarnStateFilename))
-	if err != nil {
-		t.Fatal(err)
-	}
-	if got := s.claimRecoveryModeAt(fingerprint, now.Add(2*time.Minute)).Mode; got != missingReasoningRecoveryFallback {
-		t.Fatalf("recovery mode inside initial backoff = %v, want fallback", got)
-	}
-	after, err := os.ReadFile(filepath.Join(dir, missingReasoningWarnStateFilename))
-	if err != nil {
-		t.Fatal(err)
-	}
-	if string(before) != string(after) {
-		t.Fatal("activeAt mutated the persisted incident")
-	}
-	probeAt := now.Add(90*time.Second + missingReasoningFallbackBackoffs[0])
-	decision := s.claimRecoveryModeAt(fingerprint, probeAt)
-	if decision.Mode != missingReasoningRecoveryProbe || !decision.ProbeClaimedAt.Equal(probeAt) {
-		t.Fatalf("first due recovery decision = %+v, want one probe", decision)
-	}
-	if got := s.claimRecoveryModeAt(fingerprint, probeAt).Mode; got != missingReasoningRecoveryFallback {
-		t.Fatalf("concurrent recovery decision = %v, want fallback behind probe owner", got)
-	}
-	if s.activeAt(fingerprint, probeAt.Add(missingReasoningFallbackRetention)) {
-		t.Fatal("abandoned adaptive circuit remained after its retention boundary")
-	}
-}
-
-func TestMissingReasoningWarnStateProbeFailuresBackOffToBoundedCeiling(t *testing.T) {
-	s := newMissingReasoningWarnState(t.TempDir())
-	fingerprint := warningFingerprint("adaptive-backoff")
-	openedAt := missingReasoningTestNow()
-	if !s.claimAt(fingerprint, openedAt) || !s.openFallbackAt(fingerprint, openedAt.Add(time.Second)) {
-		t.Fatal("failed to seed fallback circuit")
-	}
-	nextProbeAt := openedAt.Add(time.Second + missingReasoningFallbackBackoffs[0])
-	for wantLevel := 2; wantLevel <= len(missingReasoningFallbackBackoffs); wantLevel++ {
-		decision := s.claimRecoveryModeAt(fingerprint, nextProbeAt)
-		if decision.Mode != missingReasoningRecoveryProbe {
-			t.Fatalf("level %d decision = %+v, want probe", wantLevel-1, decision)
-		}
-		failedAt := nextProbeAt.Add(time.Second)
-		if !s.failProbeAt(fingerprint, decision.ProbeClaimedAt, failedAt) {
-			t.Fatalf("level %d probe failure was not recorded", wantLevel-1)
-		}
-		incidents, err := s.load(missingReasoningTransactionNow(failedAt))
-		if err != nil {
-			t.Fatal(err)
-		}
-		incident := incidents[fingerprint]
-		if incident.FallbackLevel != wantLevel {
-			t.Fatalf("fallback level = %d, want %d", incident.FallbackLevel, wantLevel)
-		}
-		wantDelay := missingReasoningFallbackBackoff(wantLevel)
-		if got := time.Unix(0, incident.NextProbeAtUnixNano).Sub(failedAt); got != wantDelay {
-			t.Fatalf("level %d delay = %v, want %v", wantLevel, got, wantDelay)
-		}
-		if got := s.claimRecoveryModeAt(fingerprint, failedAt.Add(wantDelay-time.Nanosecond)).Mode; got != missingReasoningRecoveryFallback {
-			t.Fatalf("level %d admitted an early probe: %v", wantLevel, got)
-		}
-		nextProbeAt = failedAt.Add(wantDelay)
-	}
-
-	decision := s.claimRecoveryModeAt(fingerprint, nextProbeAt)
-	if decision.Mode != missingReasoningRecoveryProbe {
-		t.Fatalf("ceiling decision = %+v, want probe", decision)
-	}
-	failedAt := nextProbeAt.Add(time.Second)
-	if !s.failProbeAt(fingerprint, decision.ProbeClaimedAt, failedAt) {
-		t.Fatal("ceiling probe failure was not recorded")
-	}
-	incidents, err := s.load(missingReasoningTransactionNow(failedAt))
-	if err != nil {
-		t.Fatal(err)
-	}
-	incident := incidents[fingerprint]
-	if incident.FallbackLevel != len(missingReasoningFallbackBackoffs) ||
-		time.Unix(0, incident.NextProbeAtUnixNano).Sub(failedAt) != 24*time.Hour {
-		t.Fatalf("ceiling incident = %+v, want level %d and 24h", incident, len(missingReasoningFallbackBackoffs))
-	}
-}
-
-func TestMissingReasoningWarnStateProbeHealthClosesCircuit(t *testing.T) {
-	s := newMissingReasoningWarnState(t.TempDir())
-	fingerprint := warningFingerprint("healthy-probe")
-	openedAt := missingReasoningTestNow()
-	if !s.claimAt(fingerprint, openedAt) || !s.openFallbackAt(fingerprint, openedAt.Add(time.Second)) {
-		t.Fatal("failed to seed fallback circuit")
-	}
-	probeAt := openedAt.Add(time.Second + missingReasoningFallbackBackoffs[0])
-	decision := s.claimRecoveryModeAt(fingerprint, probeAt)
-	if decision.Mode != missingReasoningRecoveryProbe {
-		t.Fatalf("decision = %+v, want probe", decision)
-	}
-	probeClaimedAt := decision.ProbeClaimedAt
-	for healthy := 1; healthy <= missingReasoningHealthyResolveStreak; healthy++ {
-		result := s.resolveProbeAt(fingerprint, probeClaimedAt, probeAt.Add(time.Duration(healthy)*time.Second))
-		if !result.Recorded || result.Resolved != (healthy == missingReasoningHealthyResolveStreak) {
-			t.Fatalf("healthy probe %d = %+v", healthy, result)
-		}
-		if !result.ProbeClaimedAt.IsZero() {
-			probeClaimedAt = result.ProbeClaimedAt
-		}
-	}
-	if got := s.claimRecoveryModeAt(fingerprint, probeAt.Add(time.Minute)).Mode; got != missingReasoningRecoveryNormal {
-		t.Fatalf("resolved recovery mode = %v, want normal", got)
-	}
-	if s.failProbeAt(fingerprint, decision.ProbeClaimedAt, probeAt.Add(2*time.Minute)) {
-		t.Fatal("stale probe failure reopened a resolved circuit")
-	}
-}
-
-func TestMissingReasoningWarnStateProbeLeaseIsSingleFlightAndReplaceable(t *testing.T) {
-	s := newMissingReasoningWarnState(t.TempDir())
-	fingerprint := warningFingerprint("probe-lease")
-	openedAt := missingReasoningTestNow()
-	if !s.claimAt(fingerprint, openedAt) || !s.openFallbackAt(fingerprint, openedAt.Add(time.Second)) {
-		t.Fatal("failed to seed fallback circuit")
-	}
-	probeAt := openedAt.Add(time.Second + missingReasoningFallbackBackoffs[0])
-	first := s.claimRecoveryModeAt(fingerprint, probeAt)
-	if first.Mode != missingReasoningRecoveryProbe {
-		t.Fatalf("first decision = %+v, want probe", first)
-	}
-	if got := s.claimRecoveryModeAt(fingerprint, probeAt.Add(missingReasoningFallbackProbeLease-time.Nanosecond)).Mode; got != missingReasoningRecoveryFallback {
-		t.Fatalf("decision inside lease = %v, want fallback", got)
-	}
-	secondAt := probeAt.Add(missingReasoningFallbackProbeLease)
-	second := s.claimRecoveryModeAt(fingerprint, secondAt)
-	if second.Mode != missingReasoningRecoveryProbe || second.ProbeClaimedAt.Equal(first.ProbeClaimedAt) {
-		t.Fatalf("replacement decision = %+v, want a new probe token", second)
-	}
-	if result := s.resolveProbeAt(fingerprint, first.ProbeClaimedAt, secondAt.Add(time.Second)); !result.Recorded || result.Resolved {
-		t.Fatalf("stale probe health = %+v, want ignored recorded observation", result)
-	}
-	if result := s.resolveProbeAt(fingerprint, second.ProbeClaimedAt, secondAt.Add(2*time.Second)); !result.Recorded || result.Resolved {
-		t.Fatalf("current probe health = %+v, want first healthy observation", result)
-	}
-}
-
-func TestMissingReasoningWarnStateStaleProbeHealthCannotUndoNewerFailure(t *testing.T) {
-	s := newMissingReasoningWarnState(t.TempDir())
-	fingerprint := warningFingerprint("stale-probe-health")
-	openedAt := missingReasoningTestNow()
-	if !s.claimAt(fingerprint, openedAt) || !s.openFallbackAt(fingerprint, openedAt.Add(time.Second)) {
-		t.Fatal("failed to seed fallback circuit")
-	}
-	probeAt := openedAt.Add(time.Second + missingReasoningFallbackBackoffs[0])
-	decision := s.claimRecoveryModeAt(fingerprint, probeAt)
-	if decision.Mode != missingReasoningRecoveryProbe {
-		t.Fatalf("decision = %+v, want probe", decision)
-	}
-	failedAt := probeAt.Add(2 * time.Second)
-	if !s.failProbeAt(fingerprint, decision.ProbeClaimedAt, failedAt) {
-		t.Fatal("current probe failure was not recorded")
-	}
-	if result := s.resolveProbeAt(fingerprint, decision.ProbeClaimedAt, probeAt.Add(time.Second)); !result.Recorded || result.Resolved {
-		t.Fatalf("delayed healthy completion = %+v, want ignored observation", result)
-	}
-	incidents, err := s.load(missingReasoningTransactionNow(failedAt))
-	if err != nil {
-		t.Fatal(err)
-	}
-	incident := incidents[fingerprint]
-	if incident.FallbackLevel != 2 || incident.ResolveStreak != 0 || incident.LastHealthyAtUnixNano != 0 {
-		t.Fatalf("stale health changed reopened incident: %+v", incident)
 	}
 }
 
@@ -386,27 +200,6 @@ func TestMissingReasoningWarnStateDelayedFailureCannotReviveResolvedIncident(t *
 	}
 	if !s.claimAt(fingerprint, now) {
 		t.Fatal("healthy result did not re-arm a later regression")
-	}
-}
-
-func TestMissingReasoningWarnStateDelayedFallbackCannotReviveResolvedIncident(t *testing.T) {
-	s := newMissingReasoningWarnState(t.TempDir())
-	fingerprint := warningFingerprint("delayed-fallback")
-	now := missingReasoningTestNow()
-	if !s.claimAt(fingerprint, now) {
-		t.Fatal("fresh incident was not claimed")
-	}
-	for healthy := 1; healthy <= missingReasoningHealthyResolveStreak; healthy++ {
-		result := s.resolveAt(fingerprint, now.Add(time.Duration(healthy)*time.Minute))
-		if !result.Recorded {
-			t.Fatalf("healthy observation %d was not recorded", healthy)
-		}
-	}
-	if s.openFallbackAt(fingerprint, now.Add(time.Minute)) {
-		t.Fatal("stale fallback observation revived a resolved incident")
-	}
-	if s.fallbackActiveAt(fingerprint, now.Add(4*time.Minute)) {
-		t.Fatal("resolved incident became fallback-active after stale completion")
 	}
 }
 
@@ -626,42 +419,6 @@ func TestMissingReasoningWarnStateConcurrentSameIncidentWarnsOnce(t *testing.T) 
 	}
 }
 
-func TestMissingReasoningWarnStateConcurrentHalfOpenAdmitsOneProbe(t *testing.T) {
-	dir := t.TempDir()
-	s := newMissingReasoningWarnState(dir)
-	fingerprint := warningFingerprint("shared-half-open")
-	openedAt := missingReasoningTestNow()
-	if !s.claimAt(fingerprint, openedAt) || !s.openFallbackAt(fingerprint, openedAt.Add(time.Second)) {
-		t.Fatal("failed to seed fallback circuit")
-	}
-	probeAt := openedAt.Add(time.Second + missingReasoningFallbackBackoffs[0])
-	start := make(chan struct{})
-	var probes atomic.Int64
-	var fallbacks atomic.Int64
-	var wg sync.WaitGroup
-	for range 8 {
-		wg.Go(func() {
-			<-start
-			switch newMissingReasoningWarnState(dir).claimRecoveryModeAt(fingerprint, probeAt).Mode {
-			case missingReasoningRecoveryProbe:
-				probes.Add(1)
-			case missingReasoningRecoveryFallback:
-				fallbacks.Add(1)
-			default:
-				t.Error("open circuit unexpectedly returned normal mode")
-			}
-		})
-	}
-	close(start)
-	wg.Wait()
-	if got := probes.Load(); got != 1 {
-		t.Fatalf("concurrent half-open probes = %d, want 1", got)
-	}
-	if got := fallbacks.Load(); got != 7 {
-		t.Fatalf("concurrent fallback decisions = %d, want 7", got)
-	}
-}
-
 func TestMissingReasoningWarnStateConcurrentFollowerPersistsLatestObservation(t *testing.T) {
 	dir := t.TempDir()
 	s := newMissingReasoningWarnState(dir)
@@ -745,38 +502,5 @@ func TestMissingReasoningWarnStateConcurrentClaimsKeepEveryConfiguration(t *test
 		if fresh.claimAt(warningFingerprint(label), now.Add(time.Minute)) {
 			t.Errorf("configuration %q was lost after concurrent claims", label)
 		}
-	}
-}
-
-func TestMissingReasoningWarnStateConcurrentFallbackOpenKeepsNewestObservation(t *testing.T) {
-	dir := t.TempDir()
-	fingerprint := warningFingerprint("deepseek-anthropic\x00concurrent-fallback")
-	base := missingReasoningTestNow()
-	const workers = 12
-	start := make(chan struct{})
-	var wg sync.WaitGroup
-	for i := range workers {
-		wg.Add(1)
-		go func(offset int) {
-			defer wg.Done()
-			<-start
-			newMissingReasoningWarnState(dir).openFallbackAt(fingerprint, base.Add(time.Duration(offset)*time.Millisecond))
-		}(i)
-	}
-	close(start)
-	wg.Wait()
-
-	s := newMissingReasoningWarnState(dir)
-	latest := base.Add((workers - 1) * time.Millisecond)
-	if !s.fallbackActiveAt(fingerprint, latest.Add(time.Millisecond)) {
-		t.Fatal("concurrent opens did not leave the fallback circuit active")
-	}
-	incidents, err := s.load(latest.Add(time.Millisecond))
-	if err != nil {
-		t.Fatal(err)
-	}
-	incident := incidents[fingerprint]
-	if incident.LastMissingUnixNano != latest.UnixNano() || incident.FallbackAtUnixNano != latest.UnixNano() {
-		t.Fatalf("concurrent fallback watermark = missing:%d fallback:%d, want %d", incident.LastMissingUnixNano, incident.FallbackAtUnixNano, latest.UnixNano())
 	}
 }

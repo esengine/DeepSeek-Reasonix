@@ -1,10 +1,20 @@
 import { asArray } from "./array";
+import { runtimeStateStore } from "./runtimeStateStore";
 import type { ProjectNode, ProjectRuntimeTopic, ProjectTreeRuntimeSnapshot } from "./types";
 
 const noExcludedTopicIds: ReadonlySet<string> = new Set();
 
 function withoutRuntimeState(node: ProjectNode): ProjectNode {
   return { ...node, open: undefined, running: undefined, status: undefined, children: [] };
+}
+
+function runtimeChildren(runtime: ProjectNode, catalog?: ProjectNode): ProjectNode[] {
+  const known = new Map(asArray(catalog?.children).map(child => [child.key, child]));
+  return asArray(runtime.children).map(child => {
+    const metadata = known.get(child.key);
+    return metadata ? { ...metadata, open: child.open, running: child.running, status: child.status,
+      children: runtimeChildren(child, metadata) } : child;
+  });
 }
 
 function runtimeTopicKey(scope: string, workspaceRoot: string, topicId: string): string {
@@ -47,7 +57,7 @@ function rememberResidentTopics(
       if (topic.runtimeOnly || !topic.topicId || excludedTopicIds.has(topic.topicId)) continue;
       const key = runtimeTopicKey(scope, root, topic.topicId);
       catalogKeys.add(key);
-      residentTopics.set(key, withoutRuntimeState(topic));
+      residentTopics.set(key, { ...withoutRuntimeState(topic), children: asArray(topic.children) });
     }
   }
   return catalogKeys;
@@ -106,7 +116,7 @@ export function projectTreeApplyRuntimeTopics(
         open: runtime.node.open,
         running: runtime.node.running,
         status: runtime.node.status,
-        children: asArray(runtime.node.children),
+        children: runtimeChildren(runtime.node, node),
       } : withoutRuntimeState(node);
       base.push(reconcileNode(node, next));
     }
@@ -128,7 +138,7 @@ export function projectTreeApplyRuntimeTopics(
         running: topic.node.running,
         status: topic.node.status,
         runtimeOnly: true,
-        children: asArray(topic.node.children),
+        children: runtimeChildren(topic.node, resident ?? current),
       }));
     }
     return reconcileNode(project, { ...project, children: [...runtimeOnly, ...base] });
@@ -177,13 +187,24 @@ export function bindProjectTreeRuntime(
     snapshot = next;
     setTree(apply);
   };
-  const stop = onProjectTreeRuntimeChanged(accept);
-  void getSnapshot()?.then(accept).catch(() => {});
+  const unified = () => {
+    const current = runtimeStateStore.getSnapshot();
+    if (current) {
+      const topics = runtimeStateStore.getFailed() ? current.topics.map(topic => ({ ...topic, node: { ...topic.node, running: false, status: "unknown" as const } })) : current.topics;
+      snapshot = null;
+      accept({ revision: current.revision, topics });
+    }
+  };
+  const stopUnified = runtimeStateStore.subscribe(unified);
+  const stop = onProjectTreeRuntimeChanged(next => { if (!runtimeStateStore.getSnapshot()) accept(next); });
+  unified();
+  if (!runtimeStateStore.getSnapshot()) void getSnapshot()?.then(next => { if (!runtimeStateStore.getSnapshot()) accept(next); }).catch(() => {});
   return {
     apply,
     dispose() {
       active = false;
       stop();
+      stopUnified();
     },
   };
 }

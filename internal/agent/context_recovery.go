@@ -5,6 +5,7 @@ import (
 	"fmt"
 
 	"reasonix/internal/event"
+	"reasonix/internal/i18n"
 	"reasonix/internal/provider"
 )
 
@@ -34,6 +35,11 @@ func (a *Agent) recoverContextLimit(ctx context.Context, frozen samplingRequest,
 		prompt = a.estimatedRequestTokens(frozen.req)
 	}
 	physical := window - prompt - outputBudgetReserve
+	// An overflow without token numbers cannot size a retry: the estimate that
+	// admitted the request is the number the provider just rejected.
+	if limit.PromptTokens <= 0 && limit.WindowTokens <= 0 {
+		physical = 0
+	}
 	if physical > 0 && budget.retries == 0 {
 		next := freezeProviderRequest(frozen.req)
 		next.MaxTokens = physical
@@ -102,9 +108,9 @@ func (a *Agent) emitContextRecoveryNotice(kind string, limit *provider.ContextLi
 	if a == nil || a.svc.sink == nil {
 		return
 	}
-	text := "Adjusted the output budget to fit the shared context window."
+	text := i18n.M.ContextRecoveryAdjustBudget
 	if kind == contextRecoveryCompacted {
-		text = "Compacted context after a shared-window overflow and retried."
+		text = i18n.M.ContextRecoveryCompacted
 	}
 	detail := fmt.Sprintf("recovery=%s next_output=%d", kind, nextOutput)
 	if limit != nil {

@@ -374,7 +374,7 @@ func candidateText(messages []provider.Message, candidate historycatalog.Candida
 	msg := messages[candidate.MessageIndex]
 	switch Kind(candidate.Kind) {
 	case KindUserText:
-		return stripComposePrefixes(msg.Content), msg.Role == provider.RoleUser
+		return stripComposePrefixes(msg.Content), msg.Role == provider.RoleUser && !agent.IsPinnedContextRevision(msg)
 	case KindAssistantText:
 		return msg.Content, msg.Role == provider.RoleAssistant
 	case KindToolInput:

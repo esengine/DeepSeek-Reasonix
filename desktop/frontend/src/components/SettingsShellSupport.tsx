@@ -1,3 +1,4 @@
+import { SettingsSelect } from "./SettingsSelect";
 import { CircleAlert, CircleCheck, ExternalLink, RefreshCw } from "lucide-react";
 import { openExternal } from "../lib/bridge";
 import { useT } from "../lib/i18n";
@@ -142,12 +143,12 @@ export function ShellInterpreterFields({
   return (
     <>
       {field(t("settings.shellInterpreter"),
-        <select className="mem-select set-grow" value={sb.shell || "auto"} disabled={busy} onChange={(e) => setShell(e.target.value)}>
+        <SettingsSelect className="mem-select set-grow" value={sb.shell || "auto"} disabled={busy} onValueChange={(value) => setShell(value)}>
           <option value="auto">{windows ? t("settings.shellAutoWindows") : t("settings.shellAuto")}</option>
           <option value="bash">{t("settings.shellBash")}</option>
           <option value="powershell">{t("settings.shellPowershell")}</option>
           <option value="pwsh">{t("settings.shellPwsh")}</option>
-        </select>)}
+        </SettingsSelect>)}
       {field(t("settings.effectiveShell"),
         <div className="settings-readonly-field">{effectiveShellLabel(String(sb.effectiveShell || sb.shell || ""), t)}</div>)}
       {field(t("settings.resolvedShell"),

@@ -1,7 +1,8 @@
 package openai
 
 import (
-	"strings"
+	"context"
+	"errors"
 	"testing"
 
 	"reasonix/internal/provider"
@@ -25,19 +26,16 @@ func TestEffortOverrideDeepSeekFlash(t *testing.T) {
 	if got := c.buildRequest(provider.Request{EffortOverride: "low"}).ReasoningEffort; got != "low" {
 		t.Fatalf("override low: reasoning_effort = %q, want low", got)
 	}
-	if got := c.buildRequest(provider.Request{EffortOverride: "medium"}).ReasoningEffort; got != "high" {
-		t.Fatalf("override outside DeepSeek vocabulary must keep the default, got %q", got)
-	}
-	if got := c.buildRequest(provider.Request{EffortOverride: "disabled"}).ReasoningEffort; got != "high" {
-		t.Fatalf("override must never toggle thinking off, got %q", got)
+	assertRejectedEffort(t, c, "medium")
+	request := c.buildRequest(provider.Request{EffortOverride: "disabled"})
+	if request.ReasoningEffort != "" || request.Thinking == nil || request.Thinking.Type != "disabled" {
+		t.Fatalf("disabled override = thinking:%#v effort:%q, want thinking disabled and no effort", request.Thinking, request.ReasoningEffort)
 	}
 }
 
 func TestEffortOverrideDeepSeekNonFlashRejectsLow(t *testing.T) {
 	c := newTestClient(t, "deepseek-v4", map[string]any{"reasoning_protocol": "deepseek"})
-	if got := c.buildRequest(provider.Request{EffortOverride: "low"}).ReasoningEffort; got != "high" {
-		t.Fatalf("low is flash-only; reasoning_effort = %q, want high", got)
-	}
+	assertRejectedEffort(t, c, "low")
 	if got := c.buildRequest(provider.Request{EffortOverride: "max"}).ReasoningEffort; got != "max" {
 		t.Fatalf("max is in the official DeepSeek vocabulary, got %q", got)
 	}
@@ -59,40 +57,38 @@ func TestEffortOverrideHonorsSupportedEfforts(t *testing.T) {
 	if got := c.buildRequest(provider.Request{EffortOverride: "low"}).ReasoningEffort; got != "low" {
 		t.Fatalf("declared vocabulary must admit low, got %q", got)
 	}
-	if got := c.buildRequest(provider.Request{EffortOverride: "max"}).ReasoningEffort; got != "high" {
-		t.Fatalf("undeclared level must keep the default, got %q", got)
-	}
-	if got := c.buildRequest(provider.Request{EffortOverride: "disabled"}).ReasoningEffort; got != "high" {
-		t.Fatalf("disabled is a thinking toggle, not a depth; got %q", got)
-	}
-}
-
-func TestEffortOverrideIgnoredByBinaryThinkingKnobs(t *testing.T) {
-	for _, c := range []*client{
-		{model: "MiniMax-M3", minimax: true},
-		{model: "glm-4.5-air", zhipu: true},
-		{model: "LongCat-Flash", longcat: true},
-	} {
-		out := c.buildRequest(provider.Request{EffortOverride: "low"})
-		if out.ReasoningEffort != "" {
-			t.Errorf("%s: reasoning_effort = %q, want omitted", c.model, out.ReasoningEffort)
-		}
-		if out.Thinking != nil && strings.Contains(out.Thinking.Type, "low") {
-			t.Errorf("%s: override leaked into thinking.type %q", c.model, out.Thinking.Type)
-		}
+	assertRejectedEffort(t, c, "max")
+	request := c.buildRequest(provider.Request{EffortOverride: "disabled"})
+	if request.ReasoningEffort != "" || request.Thinking == nil || request.Thinking.Type != "disabled" {
+		t.Fatalf("disabled override = thinking:%#v effort:%q, want thinking disabled and no effort", request.Thinking, request.ReasoningEffort)
 	}
 }
 
-func TestEffortOverrideIgnoredWithoutDepthVocabulary(t *testing.T) {
-	// A generic gateway with no configured effort and no supported_efforts has
-	// no evidence of a depth scale — the override must not invent wire fields.
-	c := &client{model: "mimo-v2"}
-	if got := c.buildRequest(provider.Request{EffortOverride: "low"}).ReasoningEffort; got != "" {
-		t.Fatalf("reasoning_effort = %q, want omitted", got)
+func assertRejectedEffort(t *testing.T, c *client, id string) {
+	t.Helper()
+	_, err := c.Stream(context.Background(), provider.Request{EffortOverride: id})
+	var unsupported *provider.UnsupportedReasoningEffort
+	if !errors.As(err, &unsupported) {
+		t.Fatalf("expected rejection before I/O for %q, got %v", id, err)
 	}
-
+}
+func TestEffortOverrideRejectedByBinaryThinkingKnobs(t *testing.T) {
+	for _, url := range []string{"https://api.minimaxi.com/v1", "https://open.bigmodel.cn/api/paas/v4", "https://api.longcat.chat/v1"} {
+		p, err := New(provider.Config{Name: "test", BaseURL: url, Model: "model"})
+		if err != nil {
+			t.Fatal(err)
+		}
+		c := p.(*client)
+		assertRejectedEffort(t, c, "low")
+		out := c.buildRequest(provider.Request{EffortOverride: "disabled"})
+		if out.Thinking == nil || out.Thinking.Type != "disabled" || out.ReasoningEffort != "" {
+			t.Fatalf("disabled wire: %+v", out)
+		}
+	}
+}
+func TestEffortOverrideRejectedWithoutDepthVocabulary(t *testing.T) {
+	c := &client{model: "unknown"}
+	assertRejectedEffort(t, c, "low")
 	disabled := newTestClient(t, "deepseek-v4", map[string]any{"reasoning_protocol": "deepseek", "thinking": "disabled"})
-	if got := disabled.buildRequest(provider.Request{EffortOverride: "high"}).ReasoningEffort; got != "" {
-		t.Fatalf("thinking-disabled provider must ignore overrides, got %q", got)
-	}
+	assertRejectedEffort(t, disabled, "high")
 }

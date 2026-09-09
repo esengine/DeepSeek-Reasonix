@@ -1,5 +1,7 @@
 import { esc, page } from "./shell";
 import { type User, userNav } from "./auth";
+import { clip, reportGroups, statusPill, type CrashRow } from "./stats_reports";
+export { clip, statusPill } from "./stats_reports";
 
 type Daily = { date: string; users: number; opens: number };
 type MetricRow = { signal: string; bucket: string; total: number };
@@ -489,43 +491,6 @@ ${healthCard(
 </div>`;
 }
 
-export function statusPill(status: string): string {
-  if (status === "resolved") return `<span class="pill resolved">resolved</span>`;
-  if (status === "ignored") return `<span class="pill ignored">ignored</span>`;
-  return "";
-}
-
-type CrashRow = {
-  fingerprint: string;
-  kind: string;
-  count: number;
-  first_version: string;
-  last_version: string;
-  seen: string;
-  status: string;
-  title: string;
-  source: string;
-  label: string;
-  error_type: string;
-  top_frame: string;
-  severity: string;
-  last_os: string;
-  last_arch: string;
-  last_channel: string;
-  regressed_at: string;
-  development?: boolean;
-  affected_installs?: number;
-  window_events?: number;
-  identified_events?: number;
-  identity_coverage?: number;
-  dimension_coverage?: number;
-  impact_rate?: number | null;
-};
-
-export function clip(s: string, n: number): string {
-  return s.length > n ? `${s.slice(0, n - 1)}…` : s;
-}
-
 function filterTab(label: string, zhLabel: string, href: string, active: boolean): string {
   return `<a class="filter-tab${active ? " active" : ""}" href="${esc(href)}">${i18n(label, zhLabel)}</a>`;
 }
@@ -565,25 +530,6 @@ function topSeverityTone(openReports: number, regressedReports: number, critical
 
 function navLink(href: string, label: { en: string; zh: string }, active = false): string {
   return `<a${active ? ` class="active" aria-current="page"` : ""} href="${esc(href)}">${i18n(label.en, label.zh)}</a>`;
-}
-
-function reportGroups(rows: CrashRow[], compact = false): string {
-  if (!rows.length) return `<div class="empty">${i18n("No diagnostic reports yet — that's the good kind of empty", "还没有诊断报告，这是好消息")}</div>`;
-  return `<div class="crash-list${compact ? " compact" : ""}"><div class="crash-head"><span>${i18n("summary", "摘要")}</span><span>${i18n("scope", "范围")}</span><span>${i18n("health", "状态")}</span><span title="${i18n("Window events and affected installs; lifetime count remains visible for historical context", "窗口事件数和受影响安装数；同时保留全生命周期累计次数")}">${i18n("window / lifetime", "窗口 / 累计")}</span></div>${rows
-    .map((c) => {
-      const platform = [c.last_os, c.last_arch].filter(Boolean).join("/");
-      const versions = `${c.first_version || "?"} → ${c.last_version || "?"}`;
-      const title = c.title || c.error_type || c.top_frame || c.fingerprint;
-      return `<a class="crash-item" href="/stats/group/${esc(c.fingerprint)}" title="${esc(title)}">
-<span class="crash-summary"><span>${c.title ? esc(clip(c.title, compact ? 88 : 120)) : `<span class="muted">${i18n("No summary captured", "暂无摘要")}</span>`}</span><small>${esc(c.fingerprint.slice(0, 8))} · ${esc(c.seen)}</small>${
-        c.regressed_at ? `<em>${i18nHTML(`regressed ${esc(c.regressed_at.slice(0, 10))}`, `回归 ${esc(c.regressed_at.slice(0, 10))}`)}</em>` : ""
-      }</span>
-<span class="crash-scope"><small>${esc(c.source || "legacy")}</small><small>${esc(versions)}</small><small>${platform ? esc(platform) : "unknown platform"}</small>${c.last_channel && c.last_channel !== "stable" ? `<small>${esc(c.last_channel)}</small>` : ""}</span>
-<span class="crash-health"><span class="pill">${esc(c.severity || "medium")}</span><span class="pill ${c.kind === "crash" ? "crash" : ""}">${esc(c.kind)}</span>${statusPill(c.status)}</span>
-<span class="crash-count"><b>${Number(c.affected_installs ?? 0)} ${i18n("installs", "安装")}</b><small>${Number(c.window_events ?? 0)} ${i18n("events", "事件")} · ${Number(c.identity_coverage ?? 0) >= 0.9 && Number(c.dimension_coverage ?? 1) >= 0.9 ? `${Math.round(Number(c.identity_coverage) * 100)}% ${i18n("identified", "已关联")}${c.impact_rate !== null && c.impact_rate !== undefined ? ` · ${(c.impact_rate * 100).toFixed(1)}% ${i18n("impact", "影响率")}` : ""}` : i18n("sample incomplete", "样本不完整")}</small><small>${c.count} ${i18n("lifetime", "累计")}</small></span>
-</a>`;
-    })
-    .join("")}</div>`;
 }
 
 export function renderStats(
@@ -806,11 +752,11 @@ ${anyPing ? dailyChart(days) : `<div class="empty">${i18n("No pings yet — data
   const diagnosticsModule = `<section id="diagnostics" class="card full module-card"><div class="module-head"><div><span>${i18n("Module", "模块")}</span><h2>${i18n("Diagnostic triage", "诊断分诊")}</h2></div><a class="module-action" href="#top">${i18n("Back to overview", "回到概览")}</a></div>
 <p class="sub">${i18n("Installation-linked data is available only from the diagnostics-v2 deployment date; historical device counts are not backfilled.", "可关联安装的数据仅从 diagnostics-v2 部署日起提供；历史设备数不回填。")}</p>
 ${firebaseStorage}
-<section class="module-panel"><h3>${i18nHTML("Needs attention <b>— top 10 release crashes and exceptions</b>", "优先处理 <b>— 正式版崩溃与异常 Top 10</b>")}</h3>${reportGroups(releaseCrashes.slice(0, 10), true)}</section>
-${performanceDiagnostics.length ? `<section class="module-panel"><h3>${i18nHTML("Performance signals <b>— tracked separately from crashes</b>", "性能信号 <b>— 与崩溃分开统计</b>")}</h3>${reportGroups(performanceDiagnostics.slice(0, 5), true)}</section>` : ""}
-${developmentDiagnostics.length ? `<section class="module-panel"><h3>${i18nHTML("Development diagnostics <b>— excluded from release priority</b>", "开发版诊断 <b>— 不计入正式版优先级</b>")}</h3>${reportGroups(developmentDiagnostics.slice(0, 5), true)}</section>` : ""}
+<section class="module-panel"><div class="panel-title"><h3>${i18nHTML("Needs attention <b>— top 10 release crashes and exceptions</b>", "优先处理 <b>— 正式版崩溃与异常 Top 10</b>")}</h3><span class="panel-context">${i18n(`Past ${range} days · ranked by affected installs`, `过去${range}天 · 按受影响安装降序`)}</span></div>${reportGroups(releaseCrashes.slice(0, 10), true, range)}</section>
+${performanceDiagnostics.length ? `<section class="module-panel"><div class="panel-title"><h3>${i18nHTML("Performance signals <b>— tracked separately from crashes</b>", "性能信号 <b>— 与崩溃分开统计</b>")}</h3><span class="panel-context">${i18n(`Past ${range} days · ranked by affected installs`, `过去${range}天 · 按受影响安装降序`)}</span></div>${reportGroups(performanceDiagnostics.slice(0, 5), true, range)}</section>` : ""}
+${developmentDiagnostics.length ? `<section class="module-panel"><div class="panel-title"><h3>${i18nHTML("Development diagnostics <b>— excluded from release priority</b>", "开发版诊断 <b>— 不计入正式版优先级</b>")}</h3><span class="panel-context">${i18n(`Past ${range} days · ranked by affected installs`, `过去${range}天 · 按受影响安装降序`)}</span></div>${reportGroups(developmentDiagnostics.slice(0, 5), true, range)}</section>` : ""}
 ${filters}
-<section class="module-panel"><h3>${i18nHTML("All report groups <b>— open, regression, severity, count, recency</b>", "全部诊断分组 <b>— 未处理、回归、严重性、次数和最近出现</b>")}</h3>${reportGroups(data.crashes)}</section>
+<section class="module-panel"><h3>${i18nHTML("All report groups <b>— open, regression, severity, count, recency</b>", "全部诊断分组 <b>— 未处理、回归、严重性、次数和最近出现</b>")}</h3>${reportGroups(data.crashes, false, range)}</section>
 </section>`;
   const preferencesModule = `<section id="preferences" class="card full module-card"><div class="module-head"><div><span>${i18n("Module", "模块")}</span><h2>${i18n("Settings preferences", "设置偏好")}</h2></div></div>
 <section class="module-panel"><h3>${i18nHTML(`Launch/open snapshots <b>— ${rangeText}</b>`, `启动/开启快照 <b>— ${rangeText}</b>`)}</h3>${settingsDashboard(settingsMetrics, { collapseSections: true })}</section></section>`;

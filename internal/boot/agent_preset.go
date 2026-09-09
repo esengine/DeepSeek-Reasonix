@@ -62,10 +62,12 @@ func CoreProviderToolNames() []string {
 		"kill_shell",
 		"wait",
 		"read_file",
+		"view_image",
 		"edit_file",
 		"write_file",
 		"compress",
 		"use_capability",
+		"web_search",
 	}
 }
 

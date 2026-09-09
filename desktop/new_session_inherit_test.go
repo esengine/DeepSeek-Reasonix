@@ -605,7 +605,7 @@ func TestDesktopNewSessionDefaultsUsesProjectDefaultAndSkipsItsKeylessProvider(t
 	}
 }
 
-func TestSetDefaultModelPersistsSessionSidecar(t *testing.T) {
+func TestSetDefaultModelPreservesExistingSession(t *testing.T) {
 	isolateDesktopUserDirs(t)
 	oldRef, newRef := configureSwitchableDefaultModels(t)
 	cfg := config.LoadForEdit(config.UserConfigPath())
@@ -646,11 +646,11 @@ func TestSetDefaultModelPersistsSessionSidecar(t *testing.T) {
 	if got := config.LoadForEdit(config.UserConfigPath()).DefaultModel; got != newRef {
 		t.Fatalf("default_model = %q, want %q", got, newRef)
 	}
-	if tab.model != newRef {
-		t.Fatalf("tab model = %q, want %q", tab.model, newRef)
+	if tab.model != oldRef {
+		t.Fatalf("tab model = %q, want %q", tab.model, oldRef)
 	}
-	if stored, ok := agent.LoadSessionModel(path); !ok || stored != newRef {
-		t.Fatalf("stored session model = %q, %v, want %q", stored, ok, newRef)
+	if stored, ok := agent.LoadSessionModel(path); !ok || stored != oldRef {
+		t.Fatalf("stored session model = %q, %v, want %q", stored, ok, oldRef)
 	}
 }
 

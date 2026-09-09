@@ -217,10 +217,13 @@ func TestBatchDependencyBarrierDoesNotOpenForFailedBranchListing(t *testing.T) {
 		reg.Add(tl)
 	}
 	a := New(nil, reg, NewSession(""), Options{}, event.Discard)
-	batch := a.executeBatch(context.Background(), &a.turn, []provider.ToolCall{
+	calls := []provider.ToolCall{
 		{ID: "r1", Name: "bash", Arguments: `{"command":"git branch -a"}`},
 		{ID: "e1", Name: "edit_file", Arguments: `{"path":"x.txt","old_string":"a","new_string":"b"}`},
-	})
+	}
+	seedPriorRead(t, a, filepath.Join(dir, "x.txt"))
+	a.sess.conversation.Add(provider.Message{Role: provider.RoleAssistant, ToolCalls: calls})
+	batch := a.executeBatch(context.Background(), &a.turn, calls)
 	if got := batch.results[1]; strings.Contains(got, "earlier") || strings.HasPrefix(strings.TrimSpace(got), "blocked:") {
 		t.Fatalf("edit was dependency-blocked after reader failure: %q", got)
 	}
@@ -249,7 +252,9 @@ func TestBatchDependencyBarrierIgnoresFailedNonMutationMetaTool(t *testing.T) {
 		reg.Add(tl)
 	}
 	reg.Add(fakeTool{name: "todo_write", readOnly: false, err: fmt.Errorf("todo store unavailable")})
+	reg.Add(incompleteReadBuiltin(t))
 	prov := &scriptedProvider{name: "p", turns: [][]provider.Chunk{
+		{toolCallChunk("prior-read", "read_file", fmt.Sprintf(`{"path":%q}`, path)), {Type: provider.ChunkDone}},
 		{
 			toolCallChunk("t1", "todo_write", `{"todos":[]}`),
 			toolCallChunk("e1", "edit_file", `{"path":"x.txt","old_string":"a","new_string":"b"}`),

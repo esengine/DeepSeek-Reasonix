@@ -17,7 +17,7 @@ type forgetTool struct{ store Store }
 // NewForgetTool returns the `forget` tool bound to store.
 func NewForgetTool(store Store) tool.Tool { return forgetTool{store: store} }
 
-func (forgetTool) Name() string { return "forget" }
+func (forgetTool) Name() string { return tool.HostForget }
 
 func (forgetTool) Description() string {
 	return "Delete a saved memory by name when it is wrong, stale, or superseded, so it stops loading into future sessions. " +

@@ -1,3 +1,5 @@
+import { isTurnNotRunning } from "./inboxError";
+
 export type InboxCancelReceipt = {
   discardedItemIds: string[];
   warning?: string;
@@ -14,6 +16,24 @@ type InboxCancelBridge = {
   InterruptTurnForTab?(tabId: string, turnId: string): Promise<void>;
   InterruptTurnWithInboxItemsForTab?(tabId: string, turnId: string, itemIds: string[]): Promise<InboxCancelReceipt>;
 };
+
+// Stop is a session-level request: a turn-id fence rejection (stale or
+// replaced turn) still stops whatever is running now, and an idle backend is
+// not a failure. Only the unconditional path's own error reaches the caller.
+export async function requestSessionCancel(
+  app: InboxCancelBridge,
+  tabId: string,
+  itemIds: string[],
+  turnId?: string,
+): Promise<InboxCancelReceipt> {
+  try {
+    return await requestInboxCancel(app, tabId, itemIds, turnId);
+  } catch (error) {
+    if (isTurnNotRunning(error)) return { discardedItemIds: [] };
+    if (!turnId) throw error;
+    return requestInboxCancel(app, tabId, itemIds, undefined);
+  }
+}
 
 export async function requestInboxCancel(
   app: InboxCancelBridge,

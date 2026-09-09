@@ -247,3 +247,7 @@ func (c *coalescer) RecordWorkspaceMutation(m WorkspaceMutation) {
 func (c *coalescer) RecordRunBudget(sample RunBudgetSample) {
 	c.enqueueCapability(func() { RecordRunBudget(c.inner, sample) })
 }
+
+func (c *coalescer) RecordSubagentLifecycle(info SubagentLifecycleInfo) {
+	c.enqueueCapability(func() { RecordSubagentLifecycle(c.inner, info) })
+}

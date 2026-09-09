@@ -1,0 +1,2 @@
+// Bundled LobeHub icons (MIT), plus AMD from Simple Icons (CC0); see public/provider-icons license files.
+export const providerBrandIcons = new Set(["doubao","baidu","ppio","qiniu","xai","cerebras","together","fireworks","amd", "deepseek", "zai", "qwen", "kimi", "minimax", "longcat", "stepfun", "opencode", "openai", "anthropic", "gemini", "siliconflow", "openrouter", "groq", "mistral", "ollama", "lmstudio", "novita", "vercel-ai-gateway", "huggingface", "nvidia", "kilocode", "modelscope"]);

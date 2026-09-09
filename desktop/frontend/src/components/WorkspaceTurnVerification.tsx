@@ -3,18 +3,20 @@ import { completionSummaryNeedsAttention } from "../lib/completionSummary";
 import {
   completionGapLabel,
   completionReviewLabel,
-  completionVerdictLabel,
 } from "../lib/completionSummaryDisplay";
 import { useT } from "../lib/i18n";
 import type { WireCompletionSummary } from "../lib/types";
+import { TurnCheckDetails } from "./TurnCheckDetails";
 
 export const WORKSPACE_TURN_VERIFICATION_ID = "workspace-turn-verification";
 
 export const WorkspaceTurnVerification = forwardRef<HTMLElement, {
   summary: WireCompletionSummary;
   qualityFloor?: "standard" | "delivery";
+  tabId?: string;
+  sessionPath?: string;
 }>(
-  function WorkspaceTurnVerification({ summary, qualityFloor = "standard" }, ref) {
+  function WorkspaceTurnVerification({ summary, qualityFloor = "standard", tabId, sessionPath }, ref) {
     const t = useT();
     return (
       <section
@@ -25,18 +27,8 @@ export const WorkspaceTurnVerification = forwardRef<HTMLElement, {
       >
         <div className="workspace-completion-summary__head">
           <h3 id={`${WORKSPACE_TURN_VERIFICATION_ID}-title`} className="workspace-completion-summary__title">{t("completion.panelTitle")}</h3>
-          <span>{completionVerdictLabel(summary.verdict, t)}</span>
         </div>
-        <div className="workspace-completion-summary__metrics">
-          <span>{t("completion.mutations", { count: summary.mutations })}</span>
-          <span>{t("completion.checksPassed", { count: summary.checks_passed })}</span>
-          <span className={summary.checks_failed > 0 ? "workspace-completion-summary__metric--attention" : undefined}>
-            {t("completion.checksFailed", { count: summary.checks_failed })}
-          </span>
-          <span className={summary.checks_suppressed > 0 ? "workspace-completion-summary__metric--attention" : undefined}>
-            {t("completion.checksSkipped", { count: summary.checks_suppressed })}
-          </span>
-        </div>
+        <TurnCheckDetails summary={summary} tabId={tabId} sessionPath={sessionPath} />
         <div className="workspace-completion-summary__details">
           <span>{t("completion.review", { status: completionReviewLabel(summary.review, t) })}</span>
           {(summary.gap_kinds?.length ?? 0) > 0 && (

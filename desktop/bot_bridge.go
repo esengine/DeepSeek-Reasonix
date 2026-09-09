@@ -361,9 +361,18 @@ func (h *botBridgeHub) askNotification(tabID string, ask event.Ask) desktopBridg
 
 func (h *botBridgeHub) turnDoneNotification(tabID string, e event.Event) desktopBridgeNotification {
 	label := h.tabLabel(tabID)
+	if e.Outcome == event.TurnOutcomeIncompleteRead {
+		return desktopBridgeNotification{text: constText(fmt.Sprintf("⏸️ 桌面会话「%s」的读取任务尚未完成，已保留当前结果。请补充读取范围后继续。", label))}
+	}
 	if e.Outcome == event.TurnOutcomeRecoveryPaused {
 		return desktopBridgeNotification{text: constText(fmt.Sprintf(
 			"⏸️ 桌面会话「%s」已暂停自动重试。已完成的工作会保留；发送“继续”即可开始新一轮，也可以补充要求调整方向。",
+			label,
+		))}
+	}
+	if e.Outcome == event.TurnOutcomeCompletionUncertain {
+		return desktopBridgeNotification{text: constText(fmt.Sprintf(
+			"⏸️ 桌面会话「%s」本轮完成状态未确认。当前结果和已完成工作均已保留；发送“继续”可接着完成，也可以补充说明需要调整的内容。",
 			label,
 		))}
 	}

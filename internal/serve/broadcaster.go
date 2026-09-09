@@ -294,12 +294,60 @@ drain:
 }
 
 func wireFrameMustReachSubscriber(data []byte) bool {
-	var frame eventwire.Event
-	if json.Unmarshal(data, &frame) != nil {
-		return false
+	return eventwire.FrameMustReachMirror(data)
+}
+
+// EmitWire publishes an externally authored wire frame (same JSON contract as
+// locally emitted events) to every subscriber. The local-takeover mirror uses
+// it: a desktop writer that owns the session file pushes its frames through
+// Serve so the remote tab keeps rendering the conversation live without any
+// change to its own pipeline.
+func (b *Broadcaster) EmitWire(wired eventwire.Event) {
+	if wired.SessionPath != "" {
+		wired.SessionPath = agent.CanonicalSessionPath(wired.SessionPath)
 	}
-	return frame.Kind == "turn_done" || frame.Kind == "session_changed" ||
-		frame.Kind == "notice" && frame.Code == event.NoticeCodeBackgroundJobFinished
+	b.mu.Lock()
+	observedCurrent := b.current
+	b.mu.Unlock()
+	wired.SessionCurrent = wired.SessionPath != "" && wired.SessionPath == observedCurrent
+	data, err := json.Marshal(wired)
+	if err != nil {
+		return
+	}
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	if b.current != observedCurrent {
+		wired.SessionCurrent = wired.SessionPath != "" && wired.SessionPath == b.current
+		data, err = json.Marshal(wired)
+		if err != nil {
+			return
+		}
+	}
+	for ch := range b.subs {
+		enqueueSubscriberWireFrame(ch, data, wired.Kind)
+	}
+}
+
+// wireKindIsPriority mirrors eventIsPriority for externally supplied frames,
+// which arrive as wire kind strings rather than typed event.Kind values.
+func wireKindIsPriority(kind string) bool {
+	return !eventwire.WireKindIsRecoverable(kind)
+}
+
+func enqueueSubscriberWireFrame(ch chan []byte, data []byte, kind string) {
+	priority := wireKindIsPriority(kind)
+	if !priority && len(ch) >= cap(ch)-subscriberPriorityReserve {
+		return
+	}
+	select {
+	case ch <- data:
+		return
+	default:
+		if !wireFrameMustReachSubscriber(data) || !evictRecoverableSubscriberFrame(ch) {
+			return
+		}
+	}
+	ch <- data
 }
 
 // Subscribe registers a new SSE client and returns its channel plus an

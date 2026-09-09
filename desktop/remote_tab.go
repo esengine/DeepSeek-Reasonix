@@ -8,10 +8,14 @@ import (
 	"fmt"
 	"io"
 	"log"
+	"log/slog"
 	"net/http"
 	"strconv"
 	"strings"
 	"time"
+
+	"reasonix/internal/agent"
+	"reasonix/internal/event"
 )
 
 // The remote-tab bridge exchanges its pre-shared token for an HttpOnly
@@ -66,28 +70,10 @@ func (a *App) attachRemoteTabServe(ctx context.Context, tabID, base, token, inst
 		}
 	}
 
-	a.remoteTabMu.Lock()
-	if a.remoteTabs[tabID] != tab {
-		a.remoteTabMu.Unlock()
-		return false, fmt.Errorf("remote tab %q closed during bootstrap", tabID)
+	pumpCtx, gen, attachPathRevision, err := a.installRemoteTabAttachPump(ctx, tabID, tab, client, base, token, target.Path, !opts.NewSession)
+	if err != nil {
+		return false, err
 	}
-	// Retire any pump installed by a concurrent reconnect so exactly one
-	// generation owns the event stream.
-	tab.gen++
-	if tab.cancel != nil {
-		tab.cancel()
-	}
-	tab.client = client
-	tab.base = base
-	tab.token = token
-	if !opts.NewSession {
-		commitRemoteTabAttachRoute(tab, target.Path, false)
-	}
-	attachPathRevision := tab.routing.pathRevision
-	gen := tab.gen
-	pumpCtx, cancelPump := context.WithCancel(ctx)
-	tab.cancel = cancelPump
-	a.remoteTabMu.Unlock()
 
 	opened := make(chan error, 1)
 	a.goRemoteTabSafe("remoteTabPump", func() { a.remoteTabPump(pumpCtx, tabID, gen, opened) })
@@ -117,6 +103,19 @@ func (a *App) attachRemoteTabServe(ctx context.Context, tabID, base, token, inst
 			log.Printf("[remote] attachRemoteTabServe: enterRemoteSession BUSY (attached to current session) tab=%s err=%v", tabID, err)
 			entered = false
 			target, _ = serveCurrentSession(callCtx, client, base)
+		} else if remoteSessionTakenOver(err) {
+			// A local runtime on the serve host owns the session. Pin the tab to
+			// the requested session as a read-only spectator: the mirror's frames
+			// route here, /history and /status serve the file-backed view, and
+			// the take-back banner drives /reclaim. No serve-frontend transition
+			// ran, but the tab must stay attached to render the mirror.
+			log.Printf("[remote] attachRemoteTabServe: enterRemoteSession TAKEN OVER (read-only spectator) tab=%s session=%q err=%v", tabID, target.Path, err)
+			entered = false
+			if strings.TrimSpace(target.Path) == "" {
+				current, _ := serveCurrentSession(callCtx, client, base)
+				target = current
+			}
+			target.TakenOver = true
 		} else {
 			log.Printf("[remote] attachRemoteTabServe: enterRemoteSession FAILED tab=%s err=%v", tabID, err)
 			a.retireRemoteTabGeneration(tabID, gen)
@@ -143,6 +142,102 @@ func (a *App) attachRemoteTabServe(ctx context.Context, tabID, base, token, inst
 	return entered, nil
 }
 
+// markRemoteTabSpectatorIfLocalOwned reconciles ownership when a mid-view
+// status/notice needs an authoritative probe, or when an older Serve omitted
+// the synchronous ownership header used by attach and resume responses.
+func (a *App) markRemoteTabSpectatorIfLocalOwned(ctx context.Context, tabID string, client *http.Client, base string, gen uint64) {
+	a.remoteTabMu.Lock()
+	tab := a.remoteTabs[tabID]
+	path := ""
+	selectionRevision := uint64(0)
+	if tab != nil && tab.gen == gen {
+		path = strings.TrimSpace(tab.routing.currentPath)
+		selectionRevision = tab.selectionRevision
+	}
+	a.remoteTabMu.Unlock()
+	if path == "" {
+		return
+	}
+	probeCtx, probeCancel := context.WithTimeout(ctx, 15*time.Second)
+	view, probeErr := takeoverOwnership(probeCtx, client, base, path)
+	probeCancel()
+	// A transport failure says nothing about ownership. Preserve the current
+	// spectator pin and let the next status/notice probe retry instead of
+	// briefly reopening input against an ownership state we could not prove.
+	if probeErr != nil {
+		return
+	}
+	// "external" = a mirrored local writer; "other" = a local runtime holds
+	// the lease without a registered mirror (adopter absent). Serve mounts
+	// both as read-only spectator surfaces, so the banner and the take-back
+	// button must appear for either — otherwise the tab unlocks its composer
+	// against a transcript it cannot write.
+	locallyOwned := takeoverViewLocallyOwned(view)
+	a.remoteTabMu.Lock()
+	current := a.remoteTabs[tabID]
+	if current != tab || current == nil || current.gen != gen || current.client != client ||
+		current.selectionRevision != selectionRevision ||
+		agent.CanonicalSessionPath(current.routing.currentPath) != agent.CanonicalSessionPath(path) {
+		a.remoteTabMu.Unlock()
+		return
+	}
+	if !locallyOwned {
+		// The probed session is not locally owned (e.g. a fresh /new or a
+		// free session). Clear any stale spectator pin left over from the
+		// previous session so the banner and read-only composer go away.
+		current.session.takenOver = false
+		a.remoteTabMu.Unlock()
+		return
+	}
+	current.session.takenOver = true
+	a.remoteTabMu.Unlock()
+	// No remote-tab:updated emit: the async probe racing with hydration
+	// causes the frontend to re-render mid-fetch, appearing as a retry
+	// loop. The periodic /status poll (recordRemoteTabSessionStatus)
+	// naturally picks up takenOver and emits a meta update.
+	slog.Info("desktop: remote tab switched to spectator on local-owned session",
+		"tab", tabID, "session", path, "holder", view.Holder)
+}
+
+// probeSpectatorAfterNotice re-probes spectator state when Serve broadcasts a
+// takeover or reclaim notice for a session. The entry-time probe cannot see
+// mid-view transitions, so without this the banner and the composer lock
+// drift from the real ownership until the next session switch.
+func (a *App) probeSpectatorAfterNotice(tabID string, gen uint64, client *http.Client, base, framePath string) {
+	a.remoteTabMu.Lock()
+	tab := a.remoteTabs[tabID]
+	viewing := tab != nil && tab.gen == gen && tab.routing.currentPath != "" &&
+		agent.CanonicalSessionPath(tab.routing.currentPath) == agent.CanonicalSessionPath(framePath)
+	a.remoteTabMu.Unlock()
+	if !viewing {
+		return
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+	defer cancel()
+	a.markRemoteTabSpectatorIfLocalOwned(ctx, tabID, client, base, gen)
+}
+
+// clearRemoteTabSpectator drops the read-only spectator pin when the route it
+// was pinned to lost the publication fence (or after reclaim lands the
+// foreground on the session).
+func (a *App) clearRemoteTabSpectator(tabID string, gen uint64) {
+	a.remoteTabMu.Lock()
+	current := a.remoteTabs[tabID]
+	// gen 0 means "any generation" — used by failure cleanups where the
+	// caller doesn't track the exact generation.
+	if current == nil || (gen != 0 && current.gen != gen) {
+		a.remoteTabMu.Unlock()
+		return
+	}
+	if !current.session.takenOver {
+		a.remoteTabMu.Unlock()
+		return
+	}
+	current.session.takenOver = false
+	a.remoteTabMu.Unlock()
+	// No emit: let the /status poll propagate the change.
+}
+
 // commitRemoteTabAttachResponse applies an attach response only while it still
 // owns the foreground route. A session_changed frame for a newer adoption is
 // authoritative even when the older /new or /resume response arrives later.
@@ -163,6 +258,7 @@ func (a *App) commitRemoteTabAttachResponse(tabID string, tab *remoteTab, gen, r
 	if !alreadyAdopted {
 		commitRemoteTabAttachRoute(current, target.Path, reset)
 	}
+	current.session.takenOver = target.TakenOver
 	if name := strings.TrimSpace(target.Name); name != "" {
 		current.session.name = name
 	}
@@ -198,10 +294,14 @@ func (a *App) markRemoteTabAttached(tabID string, gen uint64) bool {
 }
 
 func (a *App) publishRemoteTabAttachedReady(tabID string, gen uint64) bool {
+	tab := a.lockRemoteTabPublication(tabID)
+	if tab == nil {
+		return false
+	}
 	a.remoteTabMu.Lock()
-	tab := a.remoteTabs[tabID]
-	if tab == nil || tab.gen != gen || tab.attachedGen != gen || tab.state != "connecting" {
+	if a.remoteTabs[tabID] != tab || tab.gen != gen || tab.attachedGen != gen || tab.state != "connecting" {
 		a.remoteTabMu.Unlock()
+		tab.routeEventMu.Unlock()
 		return false
 	}
 	tab.attachedGen = 0
@@ -209,6 +309,7 @@ func (a *App) publishRemoteTabAttachedReady(tabID string, gen uint64) bool {
 	tab.err = ""
 	a.remoteTabMu.Unlock()
 	a.emitRemoteEvent(fmt.Sprintf("remote-tab:%s:state", tabID), RemoteTabStateView{State: "ready"})
+	tab.routeEventMu.Unlock()
 	a.applyPendingRemoteTabOpenSelection(tabID)
 	return true
 }
@@ -218,83 +319,6 @@ func (a *App) remoteTabGenerationCurrent(tabID string, gen uint64) bool {
 	defer a.remoteTabMu.Unlock()
 	tab := a.remoteTabs[tabID]
 	return tab != nil && tab.gen == gen
-}
-
-func (a *App) retireRemoteTabGeneration(tabID string, gen uint64) {
-	a.remoteTabMu.Lock()
-	tab := a.remoteTabs[tabID]
-	if tab == nil || tab.gen != gen {
-		a.remoteTabMu.Unlock()
-		return
-	}
-	cancel := tab.cancel
-	tab.gen++
-	tab.attachedGen = 0
-	tab.cancel = nil
-	tab.client = nil
-	tab.base = ""
-	tab.token = ""
-	a.remoteTabMu.Unlock()
-	if cancel != nil {
-		cancel()
-	}
-}
-
-// reconnectRemoteTabGeneration retires a dead pump and atomically parks its
-// tab in reconnecting. The bool reports whether this pump should start the
-// retry loop; a pump opened by an existing retry loop leaves retries to its
-// caller so two loops cannot race each other.
-func (a *App) reconnectRemoteTabGeneration(tabID string, gen uint64) bool {
-	a.remoteTabMu.Lock()
-	tab := a.remoteTabs[tabID]
-	if tab == nil || tab.gen != gen {
-		a.remoteTabMu.Unlock()
-		return false
-	}
-	startRetry := tab.state != "reconnecting"
-	cancel := tab.cancel
-	tab.gen++
-	tab.attachedGen = 0
-	tab.cancel = nil
-	tab.client = nil
-	tab.base = ""
-	tab.token = ""
-	tab.state = "reconnecting"
-	tab.err = ""
-	a.remoteTabMu.Unlock()
-	if cancel != nil {
-		cancel()
-	}
-	a.emitRemoteEvent(fmt.Sprintf("remote-tab:%s:state", tabID), RemoteTabStateView{State: "reconnecting"})
-	return startRetry
-}
-
-func (a *App) emitRemoteTabStateForGeneration(tabID string, gen uint64, state, errMsg string) bool {
-	a.remoteTabMu.Lock()
-	tab := a.remoteTabs[tabID]
-	if tab == nil || tab.gen != gen {
-		a.remoteTabMu.Unlock()
-		return false
-	}
-	tab.state = state
-	tab.err = errMsg
-	a.remoteTabMu.Unlock()
-	a.emitRemoteEvent(fmt.Sprintf("remote-tab:%s:state", tabID), RemoteTabStateView{State: state, Error: errMsg})
-	return true
-}
-
-func (a *App) transitionRemoteTabState(tabID string, gen uint64, from, state, errMsg string) bool {
-	a.remoteTabMu.Lock()
-	tab := a.remoteTabs[tabID]
-	if tab == nil || tab.gen != gen || tab.state != from {
-		a.remoteTabMu.Unlock()
-		return false
-	}
-	tab.state = state
-	tab.err = errMsg
-	a.remoteTabMu.Unlock()
-	a.emitRemoteEvent(fmt.Sprintf("remote-tab:%s:state", tabID), RemoteTabStateView{State: state, Error: errMsg})
-	return true
 }
 
 // remoteTabPump forwards Serve events for one tab generation. Cancellation,
@@ -366,6 +390,21 @@ func (a *App) remoteTabPump(ctx context.Context, tabID string, gen uint64, opene
 			return
 		}
 		kind, framePath, current, reset := probeRemoteTabFrame(frame)
+		if kind == "runtime_state" {
+			a.acceptRemoteRuntimeFrame(tabID, gen, framePath, json.RawMessage(frame))
+			continue
+		}
+		// A takeover notice for the session this tab is viewing flips the
+		// spectator pin live: the entry-time probe only runs when the tab
+		// enters a session, so a mid-view takeover (or its reversal) would
+		// otherwise leave the banner and the composer locked to stale state.
+		if kind == "notice" && framePath != "" &&
+			(strings.Contains(frame, event.NoticeCodeSessionTakenOver) ||
+				strings.Contains(frame, event.NoticeCodeSessionReclaimed)) {
+			a.goRemoteTabSafe("remoteTabTakeoverNoticeProbe", func() {
+				a.probeSpectatorAfterNotice(tabID, gen, client, base, framePath)
+			})
+		}
 		if !a.routeRemoteTabWireFrame(tabID, gen, framePath, kind, current, reset) {
 			continue
 		}
@@ -381,6 +420,7 @@ func (a *App) remoteTabPump(ctx context.Context, tabID string, gen uint64, opene
 	// Reattach now; the host status hook also retries on connection recovery.
 	if ctx.Err() == nil {
 		if startRetry := a.reconnectRemoteTabGeneration(tabID, gen); startRetry {
+			log.Printf("[remote] remoteTabPump: DIED tab=%s gen=%d — reattaching", tabID, gen)
 			a.goRemoteTabSafe("remoteTabReattach", func() { a.reattachRemoteTab(tabID) })
 		}
 	}
@@ -527,7 +567,6 @@ func (a *App) remoteTabCommandTarget(tabID string) (*http.Client, string, string
 	}
 	a.remoteTabMu.Unlock()
 	if !usable {
-		log.Printf("[remote] remoteTabCommandClient: REFUSED tab=%q (tab=%v client=%v)", tabID, tab != nil, tab != nil && tab.client != nil)
 		return nil, "", "", fmt.Errorf("remote tab %q is not connected", tabID)
 	}
 	return client, base, expectedPath, nil
@@ -568,7 +607,98 @@ func (a *App) remoteTabCurrentModel(tabID string) (string, bool) {
 	return cur, true
 }
 
+// ReclaimRemoteTabSession takes a mirrored session back from the local
+// runtime that took it over. Serve long-polls until the local writer yields,
+// so this call can outlast a normal command timeout.
+func (a *App) ReclaimRemoteTabSession(tabID string) error {
+	client, base, expectedPath, err := a.remoteTabCommandTarget(tabID)
+	if err != nil {
+		return err
+	}
+	if strings.TrimSpace(expectedPath) == "" {
+		return fmt.Errorf("remote tab %q has no active session", tabID)
+	}
+	a.remoteTabMu.Lock()
+	observedTab := a.remoteTabs[tabID]
+	observedGen, observedRuntimeRevision, observedSelectionRevision := uint64(0), uint64(0), uint64(0)
+	if observedTab != nil {
+		observedGen = observedTab.gen
+		observedRuntimeRevision = observedTab.runtime.revision
+		observedSelectionRevision = observedTab.selectionRevision
+	}
+	a.remoteTabMu.Unlock()
+	stillCurrent := func(tab *remoteTab) bool {
+		return tab != nil && tab == observedTab && tab.client == client && tab.gen == observedGen &&
+			tab.runtime.revision == observedRuntimeRevision && tab.selectionRevision == observedSelectionRevision &&
+			agent.CanonicalSessionPath(tab.routing.currentPath) == agent.CanonicalSessionPath(expectedPath)
+	}
+	reconcileOwnership := func() { a.reconcileRemoteTabReclaimOwnership(tabID, client, base, expectedPath, stillCurrent) }
+	// Short timeout: the serve caps un-mirrored reclaims at 10s and mirrored
+	// ones use the writer's cooperative heartbeat (seconds, not minutes). A
+	// long client-side timeout only hangs the UI button.
+	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
+	defer cancel()
+	body, _ := json.Marshal(map[string]any{
+		"sessionPath": expectedPath,
+		"mode":        "wait",
+		"timeoutMs":   15000,
+	})
+	resp, err := serveDo(ctx, client, http.MethodPost, serveURL(base, "/reclaim"), body)
+	if err != nil {
+		reconcileOwnership()
+		return fmt.Errorf("reclaim session: %w", err)
+	}
+	defer resp.Body.Close()
+	respBody, _ := io.ReadAll(io.LimitReader(resp.Body, 1<<16))
+	if resp.StatusCode != http.StatusNoContent {
+		errMsg := strings.TrimSpace(string(respBody))
+		// A failed reclaim is not proof that ownership changed. Keep the
+		// spectator pin until a fenced ownership probe proves this exact tab,
+		// route, runtime, and selection generation is no longer locally owned.
+		// This covers generation conflicts and transient 5xx responses without
+		// reopening input against an ambiguous writer.
+		reconcileOwnership()
+		return fmt.Errorf("reclaim session: %s", errMsg)
+	}
+	// Reclaim succeeded: Serve now owns the session again. Clear the spectator
+	// pin immediately so the composer un-locks without waiting for the next
+	// status poll to observe takenOver=false.
+	a.remoteTabMu.Lock()
+	if tab := a.remoteTabs[tabID]; stillCurrent(tab) {
+		tab.session.takenOver = false
+		meta := remoteTabMetaLocked(tab)
+		a.remoteTabMu.Unlock()
+		a.emitRemoteEvent("remote-tab:updated", meta)
+	} else {
+		a.remoteTabMu.Unlock()
+	}
+	a.goRemoteTabSafe("reclaimStatusRefresh", func() { _, _ = a.RemoteTabStatus(tabID) })
+	return nil
+}
+
+// remoteSessionTakenOver reports whether a session-entry refusal means the
+// session is owned by a local runtime on the serve host. The tab then
+// attaches as a read-only spectator instead of dying with the 409. Both
+// refusal shapes match: the explicit takeover wording (mirrored session) and
+// the plain lease wording ("in use by another Reasonix process" — the holder
+// is a local window/CLI whose transcript the file-backed /history serves
+// anyway, and whose lease /reclaim can take back).
+func remoteSessionTakenOver(err error) bool {
+	if err == nil {
+		return false
+	}
+	msg := err.Error()
+	if strings.Contains(msg, "taken over by a local Reasonix") {
+		return true
+	}
+	return strings.Contains(msg, "in use by another Reasonix process")
+}
+
 func (a *App) SubmitRemoteTab(tabID, text string) error {
+	revision, err := a.ensureRemoteModelSettings(tabID)
+	if err != nil {
+		return err
+	}
 	client, base, expectedPath, err := a.remoteTabCommandTarget(tabID)
 	if err != nil {
 		return err
@@ -576,12 +706,7 @@ func (a *App) SubmitRemoteTab(tabID, text string) error {
 	ctx, cancel := commandContext(a)
 	defer cancel()
 	body, _ := json.Marshal(map[string]string{"input": text})
-	started := time.Now()
-	err = servePostForSession(ctx, client, serveURL(base, "/submit"), body, expectedPath)
-	if err != nil {
-		log.Printf("[remote] submit failed tab=%s dur=%s err=%v", tabID, time.Since(started).Round(time.Millisecond), err)
-	}
-	return err
+	return servePostForSession(ctx, client, serveURL(base, "/submit"), body, expectedPath, revision)
 }
 
 func (a *App) CancelRemoteTab(tabID string) error {

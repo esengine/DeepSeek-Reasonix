@@ -132,7 +132,7 @@ func TestForkCaptureRefusesTreatedState(t *testing.T) {
 	dir := t.TempDir()
 	t.Setenv("REASONIX_EXPERIMENT_FORK_CAPTURE_DIR", dir)
 	prov := &scriptedProvider{name: "p", turns: forkScriptTurns()}
-	a := New(prov, forkRegistry(), NewSession("sys"), Options{}, event.Discard)
+	a := New(prov, forkRegistry(), NewSession("sys"), Options{ContinuationPolicy: ContinuationExplicitFlow}, event.Discard)
 	if err := a.Run(withNoClosedLoop(context.Background()), "fix the widget"); err != nil {
 		t.Fatalf("Run: %v", err)
 	}

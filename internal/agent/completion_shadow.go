@@ -60,7 +60,7 @@ func completionReceipt(rep completion.Report) *event.CompletionReceipt {
 		out.Changes = append(out.Changes, event.ReceiptChange{Path: change.Path, Reviewed: change.Reviewed})
 	}
 	for _, v := range rep.Verifications {
-		out.Verifications = append(out.Verifications, event.ReceiptVerification{Command: v.Command, Passed: v.Passed, Stale: v.Stale})
+		out.Verifications = append(out.Verifications, event.ReceiptVerification{Command: v.Command, Passed: v.Passed, Stale: v.Stale, ToolCallID: v.ToolCallID, ExitCode: v.ExitCode, Interrupted: v.Interrupted})
 	}
 	for _, gap := range rep.Gaps {
 		out.Gaps = append(out.Gaps, event.ReceiptGap{Kind: gap.Kind.String(), Detail: gap.Detail})

@@ -79,7 +79,7 @@ func messageCount(t *testing.T, s *Session) int {
 // save replays the append without duplicating or losing messages.
 // (Message counts include the leading system message.)
 func TestCrashAtWALAppendKeepsPreviousCheckpointUsable(t *testing.T) {
-	path := filepath.Join(t.TempDir(), "session.jsonl")
+	path := schemaOneSessionPath(t, "session.jsonl")
 	s := NewSession("system")
 	s.Add(userMessage("first"))
 	if err := s.SaveSnapshot(path); err != nil {
@@ -125,7 +125,7 @@ func TestCrashAtWALAppendKeepsPreviousCheckpointUsable(t *testing.T) {
 // rename still exposes the full transcript on reload, because the event log
 // is authoritative. The compatibility checkpoint never comes to exist.
 func TestCrashAtCheckpointWriteLeavesEventLogAuthoritative(t *testing.T) {
-	path := filepath.Join(t.TempDir(), "session.jsonl")
+	path := schemaOneSessionPath(t, "session.jsonl")
 	s := NewSession("system")
 	s.Add(userMessage("first"))
 	s.Add(userMessage("second"))
@@ -168,7 +168,7 @@ func TestCrashAtCheckpointWriteLeavesEventLogAuthoritative(t *testing.T) {
 // the new digest leaves a stale ledger. The next same-content save must heal
 // the ledger via the ledgerStale path instead of appending new events.
 func TestCrashAtRevisionLedgerHealsOnNextSave(t *testing.T) {
-	path := filepath.Join(t.TempDir(), "session.jsonl")
+	path := schemaOneSessionPath(t, "session.jsonl")
 	s := NewSession("system")
 	s.Add(userMessage("first"))
 	if err := s.SaveSnapshot(path); err != nil {
@@ -230,7 +230,7 @@ func TestCrashAtRevisionLedgerHealsOnNextSave(t *testing.T) {
 // authoritative. A reload observes the new transcript and the next save
 // succeeds without event-log duplication.
 func TestCrashAtEventIndexKeepsSaveDurable(t *testing.T) {
-	path := filepath.Join(t.TempDir(), "session.jsonl")
+	path := schemaOneSessionPath(t, "session.jsonl")
 	s := NewSession("system")
 	s.Add(userMessage("first"))
 	if err := s.SaveSnapshot(path); err != nil {

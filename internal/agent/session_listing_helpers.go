@@ -9,20 +9,24 @@ import (
 // SessionOrderInfo is the lightweight sidecar/mtime ordering record shared by
 // session pickers and prompt-history navigation. It intentionally avoids JSONL.
 type SessionOrderInfo struct {
-	Path              string
-	CreatedAt         time.Time
-	LastActivityAt    time.Time
-	ModTime           time.Time // compatibility alias for LastActivityAt
-	Scope             string
-	WorkspaceRoot     string
-	TopicID           string
-	TopicTitle        string
-	CustomTitle       string
-	Recovered         bool
-	RecoveryReason    string
-	RecoveryDigest    string
-	ParentID          string
-	RecoveryPreferred bool
+	Path                 string
+	CreatedAt            time.Time
+	LastActivityAt       time.Time
+	ModTime              time.Time // compatibility alias for LastActivityAt
+	Scope                string
+	WorkspaceRoot        string
+	TopicID              string
+	TopicTitle           string
+	CustomTitle          string
+	Recovered            bool
+	VersionKind          SessionVersionKind
+	VersionState         SessionVersionState
+	ParentConversationID string
+	ParentVersionID      string
+	RecoveryReason       string
+	RecoveryDigest       string
+	ParentID             string
+	RecoveryPreferred    bool
 	// Counts are trusted only when their listing identity matches the transcript.
 	Turns         int
 	Preview       string
@@ -32,7 +36,16 @@ type SessionOrderInfo struct {
 	ContentDigest        string
 	ListingRevision      int64
 	ListingContentDigest string
+	// Schema-2 sessions mirror their selected head here so listings never
+	// replay the log; LogSchema is 0 for schema-1 sidecars.
+	HeadID    string
+	HeadCount int
+	LogSchema int
 }
+
+// RecoveryPreferenceResolver validates one explicit recovery preference while
+// ListSessionOrder is assembling its metadata-only result.
+type RecoveryPreferenceResolver func(path string, meta BranchMeta) bool
 
 // ListingProjectionFresh reports whether Turns/Preview describe this record's
 // current transcript generation. Legacy sidecars that predate the content
@@ -43,22 +56,26 @@ func (s SessionOrderInfo) ListingProjectionFresh() bool {
 
 func sessionInfoFromOrder(session SessionOrderInfo, preview string, turns int, countsKnown bool) SessionInfo {
 	return SessionInfo{
-		Path:           session.Path,
-		CreatedAt:      session.CreatedAt,
-		LastActivityAt: session.LastActivityAt,
-		ModTime:        session.ModTime,
-		Preview:        preview,
-		Turns:          turns,
-		CountsKnown:    countsKnown,
-		Scope:          session.Scope,
-		WorkspaceRoot:  session.WorkspaceRoot,
-		TopicID:        session.TopicID,
-		TopicTitle:     session.TopicTitle,
-		CustomTitle:    session.CustomTitle,
-		Recovered:      session.Recovered,
-		RecoveryReason: session.RecoveryReason,
-		RecoveryDigest: session.RecoveryDigest,
-		ParentID:       session.ParentID,
+		Path:                 session.Path,
+		CreatedAt:            session.CreatedAt,
+		LastActivityAt:       session.LastActivityAt,
+		ModTime:              session.ModTime,
+		Preview:              preview,
+		Turns:                turns,
+		CountsKnown:          countsKnown,
+		Scope:                session.Scope,
+		WorkspaceRoot:        session.WorkspaceRoot,
+		TopicID:              session.TopicID,
+		TopicTitle:           session.TopicTitle,
+		CustomTitle:          session.CustomTitle,
+		Recovered:            session.Recovered,
+		VersionKind:          session.VersionKind,
+		VersionState:         session.VersionState,
+		ParentConversationID: session.ParentConversationID,
+		ParentVersionID:      session.ParentVersionID,
+		RecoveryReason:       session.RecoveryReason,
+		RecoveryDigest:       session.RecoveryDigest,
+		ParentID:             session.ParentID,
 	}
 }
 

@@ -191,7 +191,11 @@ func TestDeliveryDurableMemoryRequiresRememberWithoutCodeCeremony(t *testing.T) 
 	}
 }
 
-func TestNonGoalUpdateGoalWithVisibleTextDoesNotSpendRepairRound(t *testing.T) {
+// Same-turn answer text streams before the host error, so a non-Goal
+// update_goal batch must spend its repair round regardless of the co-streamed
+// text. The placeholder wording is non-semantic on purpose: behavior must be
+// independent of any keyword, Chinese or English.
+func TestNonGoalUpdateGoalWithVisibleTextSpendsRepairRound(t *testing.T) {
 	goalTool, ok := tool.LookupBuiltin("update_goal")
 	if !ok {
 		t.Fatal("update_goal builtin not registered")
@@ -199,15 +203,15 @@ func TestNonGoalUpdateGoalWithVisibleTextDoesNotSpendRepairRound(t *testing.T) {
 	reg := tool.NewRegistry()
 	reg.Add(goalTool)
 	prov := &scriptedProvider{name: "p", turns: [][]provider.Chunk{
-		{{Type: provider.ChunkText, Text: "Here is the answer."}, toolCallChunk("goal", "update_goal", `{"status":"complete"}`), {Type: provider.ChunkDone}},
-		{{Type: provider.ChunkText, Text: "unexpected repair"}, {Type: provider.ChunkDone}},
+		{{Type: provider.ChunkText, Text: "占位 lorem ipsum 占位."}, toolCallChunk("goal", "update_goal", `{"status":"complete"}`), {Type: provider.ChunkDone}},
+		{{Type: provider.ChunkText, Text: "Here is the answer."}, {Type: provider.ChunkDone}},
 	}}
 	a := New(prov, reg, NewSession("sys"), Options{}, event.Discard)
 	if err := a.Run(context.Background(), "answer normally"); err != nil {
 		t.Fatalf("non-Goal update_goal with text: %v", err)
 	}
-	if prov.call != 1 {
-		t.Fatalf("provider calls = %d, want no repair round", prov.call)
+	if prov.call != 2 {
+		t.Fatalf("provider calls = %d, want one repair round before accepting an answer", prov.call)
 	}
 	if got := lastAssistantContent(a.Session()); got != "Here is the answer." {
 		t.Fatalf("last assistant text = %q", got)
@@ -231,8 +235,9 @@ func TestNonGoalToolOnlyUpdateGoalGetsAtMostOneRepairRound(t *testing.T) {
 	}}
 	a := New(prov, reg, NewSession("sys"), Options{}, event.Discard)
 	err := a.Run(context.Background(), "answer normally")
-	if err == nil || !strings.Contains(err.Error(), "repeatedly called update_goal outside Goal mode") {
-		t.Fatalf("repeated tool-only misuse error = %v", err)
+	var pause *CompletionUncertainError
+	if err == nil || !errors.As(err, &pause) || pause.Cause != CompletionUncertainContextTool {
+		t.Fatalf("repeated tool-only misuse error = %v, want completion pause", err)
 	}
 	if prov.call != 2 {
 		t.Fatalf("provider calls = %d, want one repair round", prov.call)

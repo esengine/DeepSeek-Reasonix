@@ -1,0 +1,59 @@
+:root .settings-options {
+  display: inline-flex;
+  max-width: 100%;
+  min-width: 0;
+  padding: 0;
+  gap: 0;
+  border: 1px solid var(--border);
+  border-radius: 7px;
+  background: var(--bg);
+  overflow: hidden;
+}
+
+:root .settings-options.settings-options--field {
+  width: 424px;
+  max-width: 100%;
+}
+
+:root .settings-options.settings-options--fill {
+  width: 100%;
+}
+
+:root .settings-options > button {
+  flex: 1 1 0;
+  min-width: 0;
+  min-height: 34px;
+  padding: 6px 13px;
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+  color: var(--fg-dim);
+  font: inherit;
+  font-size: var(--font-control-small);
+  font-weight: 500;
+  text-transform: none;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  cursor: pointer;
+}
+
+:root .settings-options > button[data-selected="true"] {
+  background: var(--accent-soft);
+  color: var(--accent);
+  font-weight: 650;
+}
+
+:root .settings-options > button:hover:not(:disabled):not([data-selected="true"]) {
+  background: var(--bg-hover, var(--accent-soft));
+}
+
+:root .settings-options > button:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: -3px;
+}
+
+:root .settings-options > button:disabled {
+  opacity: .5;
+  cursor: not-allowed;
+}

@@ -224,6 +224,20 @@ export const ListQuerySchema = z.object({
   offset: z.coerce.number().int().min(0).max(10000).default(0),
 });
 
+// Package version history is keyset-paginated by (created_at, id). The id tie
+// breaker keeps pages stable when several versions share one publish timestamp.
+export const VersionQuerySchema = z
+  .object({
+    limit: z.coerce.number().int().min(1).max(100).default(50),
+    before: z.string().trim().min(1).max(64).optional(),
+    beforeId: z.coerce.number().int().positive().optional(),
+  })
+  .superRefine((value, ctx) => {
+    if ((value.before === undefined) !== (value.beforeId === undefined)) {
+      ctx.addIssue({ code: z.ZodIssueCode.custom, path: ["before"], message: "before and beforeId must be provided together" });
+    }
+  });
+
 function firstIssue(error: z.ZodError): string {
   const issue = error.issues[0];
   if (!issue) return "Some fields are invalid.";

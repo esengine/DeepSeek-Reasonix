@@ -125,6 +125,9 @@ func (n notebookEdit) Preview(ctx context.Context, raw json.RawMessage) (diff.Ch
 		return diff.Change{}, err
 	}
 	a.Path = resolveIn(n.workDir, a.Path)
+	if err := confinePreview(effectiveWriteRoots(ctx, n.rootSet, n.roots), n.guard, n.managed, a.Path); err != nil {
+		return diff.Change{}, err
+	}
 	src, err := readEditSource(ctx, n.overlay, a.Path)
 	if err != nil {
 		return diff.Change{}, fmt.Errorf("read %s: %w", a.Path, err)

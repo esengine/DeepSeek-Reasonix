@@ -33,6 +33,43 @@ func TestOfficialDeepSeekVisionSKUEmbedsUserImages(t *testing.T) {
 	}
 }
 
+func TestOfficialRequestURLImageHardLimit(t *testing.T) {
+	c := New(Config{BaseURL: "https://relay.test", RequestURL: "https://api.deepseek.com/responses", Model: "deepseek-v4-flash", Extra: map[string]any{"vision": true}, ModelInfo: &provider.ModelInfo{InputModalities: []provider.ModelModality{provider.ModalityText, provider.ModalityImage}}}).(*client)
+	req, _, _ := c.buildRequestBody(provider.Request{Messages: []provider.Message{{Role: provider.RoleUser, Content: "describe", Images: []string{"data:image/png;base64,AAAA"}}}})
+	body, err := json.Marshal(req)
+	if err != nil || strings.Contains(string(body), "AAAA") {
+		t.Fatalf("official request URL leaked image: %s %v", body, err)
+	}
+}
+
+func TestOfficialVisionExplicitOffRespectsResolvedMetadata(t *testing.T) {
+	c := New(Config{BaseURL: "https://api.deepseek.com", Model: "deepseek-v4-flash-vision-exp", Extra: map[string]any{"vision": true}, ModelInfo: &provider.ModelInfo{InputModalities: []provider.ModelModality{provider.ModalityText}}}).(*client)
+	req, _, _ := c.buildRequestBody(provider.Request{Messages: []provider.Message{{Role: provider.RoleUser, Content: "describe", Images: []string{"data:image/png;base64,AAAA"}}}})
+	body, err := json.Marshal(req)
+	if err != nil || strings.Contains(string(body), "AAAA") {
+		t.Fatalf("explicit off leaked image: %s %v", body, err)
+	}
+	if c.ModelInfo().SupportsInput(provider.ModalityImage) {
+		t.Fatal("metadata disagrees with serializer")
+	}
+}
+
+func TestModelInfoEnablesImageWireSerialization(t *testing.T) {
+	c := New(Config{
+		Name: "catalog", BaseURL: "https://example.test/v1", Model: "vision",
+		ModelInfo: &provider.ModelInfo{ID: "vision", InputModalities: []provider.ModelModality{provider.ModalityText, provider.ModalityImage}},
+	}).(*client)
+	if !c.vision {
+		t.Fatal("model metadata should enable image wire serialization")
+	}
+	body, _, _ := c.buildRequestBody(provider.Request{Messages: []provider.Message{{Role: provider.RoleUser, Content: "describe", Images: []string{"data:image/png;base64,AAAA"}}}})
+	items := body["input"].([]map[string]any)
+	parts := items[0]["content"].([]map[string]string)
+	if len(parts) != 2 || parts[1]["type"] != "input_image" {
+		t.Fatalf("content = %#v, want text + input_image parts", parts)
+	}
+}
+
 func TestOfficialDeepSeekVisionSKUEmbedsURLAndFileID(t *testing.T) {
 	c := New(Config{
 		Name: "deepseek", BaseURL: "https://api.deepseek.com", Model: "deepseek-v4-flash-vision-exp",
@@ -96,7 +133,7 @@ func TestStatefulContinuationDoesNotDropUserImages(t *testing.T) {
 	}
 }
 
-func TestOfficialDeepSeekVisionSKUOmitsToolImages(t *testing.T) {
+func TestOfficialDeepSeekVisionSKUEmbedsToolImages(t *testing.T) {
 	c := New(Config{
 		Name: "deepseek", BaseURL: "https://api.deepseek.com", Model: "deepseek-v4-flash-vision-exp",
 		Extra: map[string]any{"vision": true},
@@ -116,10 +153,10 @@ func TestOfficialDeepSeekVisionSKUOmitsToolImages(t *testing.T) {
 	if err != nil {
 		t.Fatalf("marshal image: %v", err)
 	}
-	if strings.Contains(string(imageBody), "VE9PTA") {
-		t.Fatalf("official DeepSeek vision SKU leaked tool image payload: %s", imageBody)
+	if !strings.Contains(string(imageBody), "VE9PTA") {
+		t.Fatalf("official DeepSeek vision SKU omitted tool image payload: %s", imageBody)
 	}
-	if !bytes.Equal(imageBody, plainBody) {
+	if bytes.Equal(imageBody, plainBody) {
 		t.Fatalf("tool images changed official DeepSeek vision SKU bytes:\nplain: %s\nimage: %s", plainBody, imageBody)
 	}
 }
@@ -156,5 +193,48 @@ func TestOfficialDeepSeekResponsesImageMetadataMatchesTextOnlyWireBytes(t *testi
 	}
 	if !bytes.Equal(imageBody, plainBody) {
 		t.Fatalf("official DeepSeek Responses image metadata changed provider-visible bytes:\nplain: %s\nimage: %s", plainBody, imageBody)
+	}
+}
+
+func TestToolImagesFollowCompleteToolRun(t *testing.T) {
+	for _, trailing := range []bool{false, true} {
+		for _, vision := range []bool{false, true} {
+			messages := []provider.Message{
+				{Role: provider.RoleAssistant, ToolCalls: []provider.ToolCall{{ID: "a", Name: "view_image", Arguments: "{}"}, {ID: "b", Name: "other", Arguments: "{}"}}},
+				{Role: provider.RoleTool, ToolCallID: "a", Content: "picture", Images: []string{"data:image/png;base64,AAAA", "invalid"}},
+				{Role: provider.RoleTool, ToolCallID: "b", Content: "done"},
+			}
+			if trailing {
+				messages = append(messages, provider.Message{Role: provider.RoleUser, Content: "next"})
+			}
+			items := messagesToInput(messages, vision, false, false)
+			want := 4
+			if vision {
+				want++
+			}
+			if trailing {
+				want++
+			}
+			if len(items) != want {
+				t.Fatalf("vision=%v trailing=%v: %#v", vision, trailing, items)
+			}
+			if items[2]["type"] != "function_call_output" || items[3]["call_id"] != "b" {
+				t.Fatalf("tool ordering: %#v", items)
+			}
+			if vision {
+				parts := items[4]["content"].([]map[string]string)
+				if items[4]["role"] != "user" || len(parts) != 2 || parts[1]["image_url"] != "data:image/png;base64,AAAA" {
+					t.Fatalf("image injection: %#v", items[4])
+				}
+			} else {
+				encoded, _ := json.Marshal(items)
+				if bytes.Contains(encoded, []byte("AAAA")) {
+					t.Fatalf("image leaked to text model")
+				}
+			}
+			if trailing && items[len(items)-1]["content"] != "next" {
+				t.Fatal("displaced user message")
+			}
+		}
 	}
 }

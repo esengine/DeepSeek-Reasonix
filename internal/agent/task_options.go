@@ -5,8 +5,10 @@ import (
 
 	"reasonix/internal/checkpoint"
 	"reasonix/internal/event"
+	"reasonix/internal/imageinput"
 	"reasonix/internal/provider"
 	"reasonix/internal/runtimepolicy"
+	"reasonix/internal/tool"
 )
 
 // subagentOptions is the single construction point for the run options every
@@ -15,6 +17,7 @@ import (
 // must stay uniform across those paths — add new fields here, not at call sites.
 func (t *TaskTool) subagentOptions(ctx context.Context, maxSteps int, pricing *provider.Pricing, ctxWin, childDepth int, recoveryTaskID string, mutationObserver *checkpoint.MutationObserver) Options {
 	opts := Options{
+		ImageInput:               t.imageInput,
 		MaxSteps:                 maxSteps,
 		MaxOutputTokens:          childOutputBudgetFrom(ctx),
 		Temperature:              t.temperature,
@@ -51,4 +54,29 @@ func (t *TaskTool) subagentOptions(ctx context.Context, maxSteps int, pricing *p
 		opts.InheritedExecution = &runtimepolicy.InheritedExecutionContext{Constraints: constraints}
 	}
 	return opts
+}
+
+// TaskToolOptions holds the construction parameters for a TaskTool.
+// Prefer NewTaskToolWithOptions for new call sites; the positional NewTaskTool
+// remains as a compatibility wrapper for one full iteration cycle.
+type TaskToolOptions struct {
+	ImageInput                            *imageinput.Config
+	Provider                              provider.Provider
+	Pricing                               *provider.Pricing
+	QuoteContext                          *event.QuoteContext
+	ParentRegistry                        *tool.Registry
+	MaxSteps                              int
+	ContextWindow                         int
+	RecentKeep                            int
+	SoftCompactRatio                      float64
+	ToolResultSnipRatio                   float64
+	CompactRatio                          float64
+	CompactForceRatio                     float64
+	Temperature                           float64
+	ContextEditing, ArchiveDir, SysPrompt string
+	Gate                                  Gate
+	KeepPolicy                            KeepPolicy
+	SubagentModel                         string
+	SubagentEffort                        string
+	ResolveProvider                       func(string, string) (provider.Provider, *provider.Pricing, int, error)
 }

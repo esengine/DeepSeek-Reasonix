@@ -7,7 +7,7 @@ import (
 	"reasonix/internal/control"
 )
 
-func TestRemoveProviderAccessRejectsCustomProviderThatBecameOfficialDuringSnapshot(t *testing.T) {
+func TestRemoveProviderAccessRejectsCustomProviderThatBecameOfficialBeforeCommit(t *testing.T) {
 	isolateDesktopUserDirs(t)
 	setDesktopTestCredential(t, "DEEPSEEK_API_KEY", "sk-test")
 	setDesktopTestCredential(t, "MIMO_API_KEY", "sk-test")
@@ -30,9 +30,7 @@ func TestRemoveProviderAccessRejectsCustomProviderThatBecameOfficialDuringSnapsh
 	app.tabOrder = []string{tab.ID}
 	app.activeTabID = tab.ID
 
-	done := make(chan error, 1)
-	go func() { done <- app.RemoveProviderAccess("deepseek-flash") }()
-	<-ctrl.firstSnapshotStarted
+	fingerprint := app.Settings().ModelSettingsFingerprint
 
 	unlock := config.LockUserConfigEdits()
 	changed := config.LoadForEdit(config.UserConfigPath())
@@ -48,10 +46,9 @@ func TestRemoveProviderAccessRejectsCustomProviderThatBecameOfficialDuringSnapsh
 		t.Fatalf("save overlapping config edit: %v", err)
 	}
 	unlock()
-	close(ctrl.releaseSnapshot)
-
-	if err := <-done; err == nil {
-		t.Fatal("RemoveProviderAccess deleted a custom provider that became official during snapshot")
+	result := app.ApplyModelSettings(ModelSettingsChange{Kind: "provider_remove", Names: []string{"deepseek-flash"}, RequestID: "remove", ExpectedFingerprint: fingerprint})
+	if result.Persisted || len(result.Issues) == 0 {
+		t.Fatal("stale removal deleted a custom provider that became official before commit")
 	}
 	got := config.LoadForEdit(config.UserConfigPath())
 	provider, ok = got.Provider("deepseek-flash")

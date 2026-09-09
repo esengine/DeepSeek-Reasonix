@@ -91,35 +91,35 @@ await act(async () => {
   await flush();
 });
 
-ok(document.body.textContent?.includes("Shown · 16") === true, "expanded editor labels the visible zone with its count");
+ok(document.body.textContent?.includes(`Shown · ${DEFAULT_STATUS_BAR_ITEMS.length}`) === true, "expanded editor labels the visible zone with its count");
 ok(document.body.textContent?.includes("Hidden · 0") === true, "expanded editor labels the hidden zone with its count");
 ok(document.querySelectorAll('[data-statusbar-drop-zone="hidden"]').length === 1, "hidden zone is an explicit drag target");
 
-const modelRow = document.querySelector<HTMLElement>('[data-statusbar-setting-item="model"]');
-const modelToggle = modelRow?.querySelector<HTMLInputElement>('input[type="checkbox"]');
+const balanceRow = document.querySelector<HTMLElement>('[data-statusbar-setting-item="balance"]');
+const balanceToggle = balanceRow?.querySelector<HTMLInputElement>('input[type="checkbox"]');
 await act(async () => {
-  modelToggle?.click();
+  balanceToggle?.click();
   await flush();
 });
 
-ok(latestItems.length === 15 && !latestItems.includes("model"), "clearing a visible item removes it from the persisted order");
-ok(document.body.textContent?.includes("Shown · 15") === true, "visible count updates after hiding an item");
+ok(latestItems.length === DEFAULT_STATUS_BAR_ITEMS.length - 1 && !latestItems.includes("balance"), "clearing a visible item removes it from the persisted order");
+ok(document.body.textContent?.includes(`Shown · ${DEFAULT_STATUS_BAR_ITEMS.length - 1}`) === true, "visible count updates after hiding an item");
 ok(document.body.textContent?.includes("Hidden · 1") === true, "hidden count updates after hiding an item");
-ok(document.querySelector('[data-statusbar-drop-zone="hidden"] [data-statusbar-setting-item="model"]') != null, "hidden item moves into the hidden zone");
+ok(document.querySelector('[data-statusbar-drop-zone="hidden"] [data-statusbar-setting-item="balance"]') != null, "hidden item moves into the hidden zone");
 
 const showAll = Array.from(document.querySelectorAll<HTMLButtonElement>("button")).find((button) => button.textContent === "Show all");
 await act(async () => {
   showAll?.click();
   await flush();
 });
-ok(latestItems.length === 16 && latestItems.at(-1) === "model", "show all restores hidden items without discarding the current visible order");
+ok(latestItems.length === DEFAULT_STATUS_BAR_ITEMS.length && latestItems.at(-1) === "balance", "show all restores hidden items without discarding the current visible order");
 
 const moveWorkspaceDown = document.querySelector<HTMLButtonElement>('button[aria-label="Move workspace down"]');
 await act(async () => {
   moveWorkspaceDown?.click();
   await flush();
 });
-ok(latestItems[0] === "git_branch" && latestItems[1] === "workspace", "keyboard order controls update the visible order");
+ok(latestItems[0] === "cache" && latestItems[1] === "workspace", "keyboard order controls update the visible order");
 
 const restoreDefault = Array.from(document.querySelectorAll<HTMLButtonElement>("button")).find((button) => button.textContent === "Restore default");
 await act(async () => {

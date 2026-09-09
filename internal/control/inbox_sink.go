@@ -164,3 +164,10 @@ func (s *inboxEventSink) RecordRunBudget(sample event.RunBudgetSample) {
 	}
 	event.RecordRunBudget(s.inner, sample)
 }
+
+func (s *inboxEventSink) RecordSubagentLifecycle(info event.SubagentLifecycleInfo) {
+	if s == nil {
+		return
+	}
+	event.RecordSubagentLifecycle(s.inner, info)
+}

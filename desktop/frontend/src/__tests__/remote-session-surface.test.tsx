@@ -1,25 +1,16 @@
-// Run: tsx src/__tests__/remote-session-surface.test.tsx
-
-import React from "react";
+import React, { act } from "react";
+import { RemoteNavigationHarness } from "./helpers/RemoteNavigationHarness";
 import { JSDOM } from "jsdom";
-import { act } from "react";
-
 import type { AppBindings } from "../lib/bridge";
 import type { TabMeta } from "../lib/types";
 import type { RemoteSessionApi } from "../lib/useRemoteSession";
-
 let passed = 0;
 let failed = 0;
 function ok(value: boolean, label: string) {
-  if (value) {
-    process.stdout.write(`  PASS  ${label}\n`);
-    passed += 1;
-  } else {
-    process.stdout.write(`  FAIL  ${label}\n`);
-    failed += 1;
-  }
+  process.stdout.write(`  ${value ? "PASS" : "FAIL"}  ${label}\n`);
+  if (value) passed += 1;
+  else failed += 1;
 }
-
 console.log("\nRemote session surface + hook");
 const dom = new JSDOM("<!doctype html><html><body><div id=\"root\"></div></body></html>", {
   pretendToBeVisual: true,
@@ -60,8 +51,6 @@ globalThis.requestAnimationFrame = dom.window.requestAnimationFrame?.bind(dom.wi
 globalThis.cancelAnimationFrame = dom.window.cancelAnimationFrame?.bind(dom.window) ?? ((handle: number) => clearTimeout(handle));
 Object.defineProperty(elementProto, "detachEvent", { configurable: true, value: () => {} });
 
-globalThis.getComputedStyle = dom.window.getComputedStyle.bind(dom.window);
-
 const tape: string[] = [];
 let failApproval = false;
 let failOpen = false;
@@ -74,13 +63,14 @@ let statusPendingPrompt = false, replayedPrompts: unknown[] = [];
 let snapshotHistory: unknown[] = [];
 let blockApproval = false;
 let releaseApproval: (() => void) | undefined;
-let blockAnswer = false;
+let blockAnswer = false, failAnswer = false;
 let releaseAnswer: (() => void) | undefined;
 let resolveRaceSnapshot: ((value: { history: unknown[]; status: unknown }) => void) | undefined;
 const resolveStateRaceSnapshots: Array<(value: { history: unknown[]; status: unknown }) => void> = [];
 let rotationSnapshotCalls = 0;
 let resolveRotationReconcile: ((value: { history: unknown[]; status: unknown }) => void) | undefined;
 window.go = { main: { App: {
+  async RegisterNavigationIntent(token: string) { tape.push(`navigation:${token}`); },
   async RemoteTabSnapshot(tabId: string) {
     tape.push(`snapshot:${tabId}`);
 		if (tabId === "tab-hydration-failure" && failHydration) throw new Error("history exceeds bridge limit");
@@ -208,9 +198,9 @@ window.go = { main: { App: {
 		tape.push(`plan-decision:${tabId}:${callId}:${action}:${feedback}`);
 	},
 	async AnswerRemoteTab(tabId: string, callId: string, answers: Array<{ QuestionID: string; Selected: string[] }>) {
-		tape.push(`answer:${tabId}:${callId}:${JSON.stringify(answers)}`);
+		tape.push(`answer:${tabId}:${callId}:${JSON.stringify(answers)}`); if (failAnswer) throw new Error("remote answer failed");
 		if (blockAnswer) await new Promise<void>((resolve) => { releaseAnswer = resolve; });
-  },
+	},
   async SubmitRemoteTabExtensionForm(tabId: string, pluginId: string, surfaceId: string, values: Record<string, unknown>) {
     tape.push(`extension-form:${tabId}:${pluginId}:${surfaceId}:${JSON.stringify(values)}`);
   },
@@ -259,7 +249,7 @@ async function flush(ticks = 4) {
 // in the shell).
 function RemoteSurfaceHarness({ tab }: { tab: TabMeta }) {
   const session = useRemoteSession(tab.id);
-  return <RemoteSessionSurface tab={tab} session={session} />;
+  return <RemoteNavigationHarness><RemoteSessionSurface tab={tab} session={session} /></RemoteNavigationHarness>;
 }
 
 // ── Surface: shared Transcript renders reducer-driven items ──
@@ -391,11 +381,11 @@ await act(async () => {
 		await flush();
 	});
 	ok(!tape.some((entry) => entry.startsWith("answer:tab-remote-1:ask-7")), "selecting an option keeps the ask open until explicit submit");
-	await act(async () => {
+	failAnswer = true; await act(async () => {
 		[...document.querySelectorAll<HTMLButtonElement>("button")].find((b) => b.textContent?.trim() === "Submit")?.click();
 		await flush();
 	});
-	ok(tape.includes('answer:tab-remote-1:ask-7:[{"QuestionID":"q1","Selected":["yes"]}]'), "submit forwards the question id and complete selection batch");
+	ok(Boolean(document.querySelector(".prompt-shelf--ask")) && document.body.textContent?.includes("remote answer failed") === true && document.querySelector<HTMLButtonElement>(".prompt-shelf--ask .decision-confirm-bar__confirm")?.disabled === false, "a failed remote Ask answer preserves the card, surfaces the error, and re-enables retry"); failAnswer = false; await act(async () => { document.querySelector<HTMLButtonElement>(".prompt-shelf--ask .decision-confirm-bar__confirm")?.click(); await flush(); }); ok(tape.filter((entry) => entry.startsWith("answer:tab-remote-1:ask-7:")).length === 2 && !document.querySelector(".prompt-shelf--ask"), "a successful remote Ask retry resubmits the complete answer and clears the card");
 }
 
 await act(async () => {
@@ -403,14 +393,14 @@ await act(async () => {
   await flush();
 });
 await act(async () => {
-  [...document.querySelectorAll<HTMLButtonElement>("button")].find((button) => button.textContent?.trim() === "Other answer")?.click();
+  document.querySelector<HTMLElement>(".ask-shelf__custom-row")?.click();
   await flush();
 });
 await act(async () => {
   const input = document.querySelector<HTMLInputElement>(".ask-shelf__custom");
   if (input) {
-    Object.getOwnPropertyDescriptor(dom.window.HTMLInputElement.prototype, "value")?.set?.call(input, "canary");
-    input.dispatchEvent(new dom.window.Event("input", { bubbles: true }));
+    const propsKey = Object.keys(input).find((key) => key.startsWith("__reactProps")); const props = propsKey ? (input as unknown as Record<string, { onChange?: (event: { target: { value: string } }) => void }>)[propsKey] : undefined;
+    props?.onChange?.({ target: { value: "canary" } });
   }
   await flush();
 });
@@ -444,18 +434,29 @@ await act(async () => {
 }
 
 await act(async () => {
+  __emitMockRemoteTab("tab-remote-1", "event", { kind: "text", text: "retain this partial answer across disconnect" });
+  await flush();
+});
+ok(document.querySelector("main .transcript")?.textContent?.includes("retain this partial answer across disconnect") === true,
+  "disconnect fixture has visible transcript content before connection loss");
+await act(async () => {
   __emitMockRemoteTab("tab-remote-1", "state", { state: "serve_down", error: "tunnel closed" });
   await flush();
 });
 {
-  const warning = document.querySelector(".remote-surface--warning");
+  const warning = document.querySelector(".session-recovery[role=alert]");
   ok(Boolean(warning), "serve_down renders the warning state");
+  ok(!warning?.closest("main"), "recovery controls are outside the collapsible transcript main");
+  ok(document.querySelector("main .transcript")?.textContent?.includes("retain this partial answer across disconnect") === true,
+    "disconnect retains the already loaded transcript");
+  await act(async () => { warning?.querySelector<HTMLButtonElement>("button[aria-controls]")?.click(); });
   ok(warning?.textContent?.includes("tunnel closed") === true, "serve error detail renders");
   await act(async () => {
     warning?.querySelector<HTMLButtonElement>("button")?.click();
     await flush();
   });
   ok(tape.includes("open:gpu-box:~/app:"), "serve_down retry preserves the backend's parked session target");
+  const reconnectNavigation = tape.findIndex((entry) => entry.startsWith("navigation:nav-")); ok(reconnectNavigation >= 0 && reconnectNavigation < tape.indexOf("open:gpu-box:~/app:"), "serve_down retry registers navigation before reopening the remote tab");
   failOpen = true;
   await act(async () => {
     warning?.querySelector<HTMLButtonElement>("button")?.click();
@@ -464,12 +465,11 @@ await act(async () => {
   ok(warning?.textContent?.includes("reconnect failed") === true, "serve_down retry failures render on the surface");
   failOpen = false;
 }
-
 // Mid-flight disconnected events also refuse the placeholder.
 await act(async () => { __emitMockRemoteTab("tab-remote-1", "state", { state: "disconnected" }); await flush(); });
 {
   ok(!document.querySelector(".remote-surface--disconnected"), "live disconnected events do not render the placeholder");
-  ok(Boolean(document.querySelector(".remote-surface--waiting")), "live disconnected events show connecting instead");
+  ok(Boolean(document.querySelector(".session-recovery[role=status]")), "live disconnected events show connecting instead");
   ok(tape.includes("setActive:tab-remote-1"), "live disconnected events trigger backend revival");
 }
 
@@ -632,7 +632,6 @@ for (const want of [
 ]) {
   ok(tape.includes(want), `command forwarded: ${want}`);
 }
-
 await act(async () => {
   probeRoot.render(<LocaleProvider><HookProbe tabId="tab-pending-model" /></LocaleProvider>);
   await Promise.resolve();
@@ -795,6 +794,7 @@ ok(replayProbe?.transcript.approval?.id === "replayed-approval", "a remote mode 
 await act(async () => { replayProbe?.drainApprovals(["replayed-approval"]); await flush(); });
 ok(replayProbe?.transcript.approval === undefined, "a remote mode transaction clears the exact approval it auto-allowed");
 await act(async () => replayRoot.unmount());
+await (await import("./helpers/remoteRuntimeReconciliationCases")).runRemoteRuntimeCases({ remoteTab, ok, tape, flush, setSnapshotHistory: value => { snapshotHistory = value; } });
 dom.window.close();
 process.stdout.write(`\n${passed} passed, ${failed} failed\n`);
 if (failed > 0) process.exit(1);

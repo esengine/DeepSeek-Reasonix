@@ -1,6 +1,7 @@
 package runtimepolicy
 
 import (
+	"path/filepath"
 	"regexp"
 	"strings"
 
@@ -16,7 +17,15 @@ type Constraints struct {
 	AllowedChecks           []string
 	ForbidExternal          bool
 	RequireFullVerification bool
-	PlanModeReadOnly        bool
+	// AllowRebuild records that the user explicitly asked to rewrite a file
+	// completely. It only ever waives the read-before-overwrite requirement for
+	// a file the same instruction names; the model can never set it.
+	AllowRebuild bool
+	// RebuildPaths are the resolved files an AllowRebuild instruction named.
+	// The waiver is a membership test over this host-recorded set, never a
+	// re-parse of instruction text at write time.
+	RebuildPaths     []string
+	PlanModeReadOnly bool
 	// PolicyFloor is the session quality floor, set from session state only —
 	// never parsed from user text. It stamps receipts at write time.
 	PolicyFloor taskcontract.PolicyFloor
@@ -46,6 +55,15 @@ func ParseConstraints(instruction string) Constraints {
 	}) {
 		c.RequireFullVerification = true
 		c.Notes = append(c.Notes, "user_require_full_verification")
+	}
+	if matchesAny(lower, []string{
+		"完全重写", "从头重写", "整个重写", "直接重写", "覆盖重写", "整个文件重写",
+		"from scratch", "rewrite it completely", "rewrite the file completely",
+		"overwrite it completely", "replace it entirely", "rebuild the file",
+		"rewrite this file", "rewrite the whole file",
+	}) {
+		c.AllowRebuild = true
+		c.Notes = append(c.Notes, "user_allow_rebuild")
 	}
 	if cmds := parseAllowedChecks(instruction); len(cmds) > 0 {
 		c.AllowedChecks = cmds
@@ -249,6 +267,39 @@ func StripQuotedConstraints(raw string) string {
 	s = stripQuoted(s, '“', '”')
 	s = stripQuoted(s, '「', '」')
 	return strings.TrimSpace(s)
+}
+
+// rebuildPathPattern extracts candidate file tokens from one instruction clause.
+var rebuildPathPattern = regexp.MustCompile("`[^`]+`|\"[^\"]+\"|'[^']+'|[A-Za-z0-9_./\\\\:-]+")
+
+// ParseRebuildPaths resolves the files an instruction names in a clause that
+// itself grants AllowRebuild. Callers record the result once per turn and
+// authorize a rebuild by membership, so model-authored text can never grant the
+// waiver at write time.
+func ParseRebuildPaths(instruction, baseDir string) []string {
+	var paths []string
+	for _, clause := range strings.FieldsFunc(instruction, func(r rune) bool {
+		return strings.ContainsRune("\n;；。!?！？", r)
+	}) {
+		if !ParseConstraints(clause).AllowRebuild {
+			continue
+		}
+		lower := strings.ToLower(clause)
+		if matchesAny(lower, []string{"不要", "别", "not ", "don't", "禁止"}) {
+			continue
+		}
+		for _, token := range rebuildPathPattern.FindAllString(clause, -1) {
+			token = strings.Trim(token, "`\"'")
+			if token == "" {
+				continue
+			}
+			if !filepath.IsAbs(token) {
+				token = filepath.Join(baseDir, token)
+			}
+			paths = append(paths, filepath.Clean(token))
+		}
+	}
+	return paths
 }
 
 func (c Constraints) AllowsMutation() bool {

@@ -112,7 +112,7 @@ export function DiagnosticsSettingsPage({
 
   return (
     <div className="diag-page">
-      <div className="diag-page__toolbar">
+      <div className="diag-page__toolbar settings-toolbar">
         <label className="diag-page__runtime">
           <input
             type="checkbox"

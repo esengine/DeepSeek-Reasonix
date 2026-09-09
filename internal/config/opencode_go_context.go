@@ -15,6 +15,7 @@ const (
 
 func normalizeLegacyOpenCodeGoInstalls(c *Config) bool {
 	changed := normalizeLegacyOpenCodeGoKimiK3Catalog(c)
+	changed = normalizeLegacyOpenCodeGoVisionCatalog(c) || changed
 	changed = normalizeLegacyOpenCodeGoRouteCatalog(c) || changed
 	changed = normalizeLegacyOpenCodeGoContextWindows(c) || changed
 	changed = normalizeLegacyOpenCodeGoBilling(c) || changed

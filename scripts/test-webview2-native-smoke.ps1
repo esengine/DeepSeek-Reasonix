@@ -85,6 +85,37 @@ function Get-WebViewAutomationState {
     }
 }
 
+function Exit-ProviderOnboarding {
+    param([IntPtr]$WindowHandle)
+
+    if ($WindowHandle -eq [IntPtr]::Zero) { return $false }
+    $root = [System.Windows.Automation.AutomationElement]::FromHandle($WindowHandle)
+    if ($null -eq $root) { return $false }
+    $onboardingCondition = [System.Windows.Automation.PropertyCondition]::new(
+        [System.Windows.Automation.AutomationElement]::AutomationIdProperty, "provider-onboarding"
+    )
+    if ($null -eq $root.FindFirst([System.Windows.Automation.TreeScope]::Descendants, $onboardingCondition)) {
+        return $false
+    }
+    $backCondition = [System.Windows.Automation.AndCondition]::new(
+        [System.Windows.Automation.Condition[]]@(
+            [System.Windows.Automation.PropertyCondition]::new(
+                [System.Windows.Automation.AutomationElement]::AutomationIdProperty, "management-back"
+            ),
+            [System.Windows.Automation.PropertyCondition]::new(
+                [System.Windows.Automation.AutomationElement]::ControlTypeProperty,
+                [System.Windows.Automation.ControlType]::Button
+            )
+        )
+    )
+    $back = $root.FindFirst([System.Windows.Automation.TreeScope]::Descendants, $backCondition)
+    if ($null -eq $back -or -not $back.Current.IsEnabled) { return $false }
+    $invoke = $back.GetCurrentPattern([System.Windows.Automation.InvokePattern]::Pattern)
+    $invoke.Invoke()
+    Write-Host "Provider onboarding detected; returning to workspace before checking composer health"
+    return $true
+}
+
 function Get-NativeSmokeState {
     param([System.Diagnostics.Process]$Process)
 
@@ -326,12 +357,16 @@ try {
     $deadline = [DateTime]::UtcNow.AddSeconds($TimeoutSeconds)
     $tracker = @{ HealthySince = $null }
     $readyState = $null
+    $onboardingExited = $false
     $lastState = $null
     while ([DateTime]::UtcNow -lt $deadline) {
         $state = Get-NativeSmokeState -Process $process
         $lastState = $state
         if ($state.Exited) {
             throw "Reasonix exited before the native window became healthy (exit code $($process.ExitCode))"
+        }
+        if (-not $onboardingExited -and $state.DocumentReady -and -not $state.ComposerReady) {
+            $onboardingExited = Exit-ProviderOnboarding -WindowHandle $state.WindowHandle
         }
         $stability = Update-NativeSmokeStability -Tracker $tracker -State $state -Now ([DateTime]::UtcNow) -RequiredHealthySeconds $HealthySeconds
         if ($stability -eq "Ready") {

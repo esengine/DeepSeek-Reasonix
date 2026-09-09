@@ -8,6 +8,8 @@
 #include <math.h>
 #include <unistd.h>
 
+static const int32_t ReasonixFinishWheelDelta = -1440;
+
 @interface ReasonixTranscriptSmokeHost : NSObject <WKNavigationDelegate, WKScriptMessageHandler>
 @property(nonatomic, strong) WKWebView *webView;
 @property(nonatomic, strong) NSWindow *window;
@@ -99,8 +101,8 @@
     });
     return;
   }
-  // The deterministic native workload is about 62 seconds at ideal timer
-  // cadence (1200 * 40ms, a 2s drain, and the bounded 240 * 50ms tail phase).
+  // The sustained workload takes at least 48 seconds, followed by a drain
+  // and geometry-driven batches until the native tail is stably reached.
   // The measured hosted-runner path is already about 149 seconds. Retaining
   // the reader handoff mount window adds WebContent work, so keep the complete
   // native workload and leave bounded room below the workflow's 5-minute cap.
@@ -159,7 +161,7 @@
     self.transcriptPoint = NSMakePoint(x, self.webView.isFlipped ? y : NSHeight(self.webView.bounds) - y);
     [self.window makeFirstResponder:self.webView];
     [self ensureInteractionFocus];
-    // The contract waits for settled Virtuoso geometry before posting ready.
+    // The contract waits for settled block-window geometry before posting ready.
     // Re-establish native focus at that boundary instead of relying on the
     // workflow's earlier best-effort app activation.
     dispatch_after(dispatch_time(DISPATCH_TIME_NOW, 200 * NSEC_PER_MSEC), dispatch_get_main_queue(), ^{
@@ -264,20 +266,19 @@
       return;
     }
     self.finishTailStableChecks = 0;
-    if (self.finishWheelEvents >= 240) {
-      dispatch_after(dispatch_time(DISPATCH_TIME_NOW, 700 * NSEC_PER_MSEC), dispatch_get_main_queue(), ^{
-        [self.webView evaluateJavaScript:@"window.__reasonixNativeTranscriptSmoke.finish()" completionHandler:nil];
-      });
-      return;
-    }
-    [self finishWheelBurst:MIN(8, 240 - self.finishWheelEvents)];
+    // Native geometry determines completion; the interaction watchdog keeps
+    // a stalled tail bounded without assuming a platform-specific distance.
+    [self finishWheelBurst:8];
   }];
 }
 
 - (void)finishWheelBurst:(NSInteger)remaining {
   if (self.done) return;
   if (remaining > 0) {
-    [self dispatchWheelDelta:-120];
+    // The block ledger is taller than the retired row surface. Keep the same
+    // native event/time bound while giving the finishing phase enough physical
+    // wheel travel to reach the measured tail without a JavaScript scroll.
+    [self dispatchWheelDelta:ReasonixFinishWheelDelta];
     self.finishWheelEvents += 1;
     dispatch_after(dispatch_time(DISPATCH_TIME_NOW, 50 * NSEC_PER_MSEC), dispatch_get_main_queue(), ^{
       [self finishWheelBurst:remaining - 1];
@@ -289,7 +290,7 @@
 
 - (void)sendWheel:(NSTimer *)timer {
   // Sustain small high-resolution trackpad deltas without outrunning
-  // Virtuoso's mount window on a loaded hosted WebView.
+  // the block mount window on a loaded hosted WebView.
   const NSInteger totalTicks = self.localMicro ? 40 : 1200;
   if (self.wheelTick >= totalTicks) {
     [timer invalidate];
@@ -300,7 +301,7 @@
       });
       return;
     }
-    // Hosted WebKit can coalesce events while Virtuoso commits its last range.
+    // Hosted WebKit can coalesce events while the block window commits its last range.
     // After an idle boundary, keep sending bounded ordinary wheel events until
     // the native extent is stably at the tail. This remains native input; the
     // JavaScript probe only decides when the platform-specific fixture stops.

@@ -11,9 +11,10 @@ import (
 )
 
 const (
-	sessionPathHeader         = "X-Reasonix-Session-Path"
-	expectedSessionPathHeader = "X-Reasonix-Expected-Session-Path"
-	foregroundMutationMaxBody = 8 << 20
+	sessionPathHeader           = "X-Reasonix-Session-Path"
+	expectedSessionPathHeader   = "X-Reasonix-Expected-Session-Path"
+	expectedModelSettingsHeader = "X-Reasonix-Expected-Model-Settings"
+	foregroundMutationMaxBody   = 8 << 20
 )
 
 var errExpectedSessionChanged = errors.New("active session changed; retry on the current session")
@@ -38,8 +39,46 @@ func (s *Server) expectedSessionPathErrorLocked(rawExpected string) error {
 	return nil
 }
 
+// expectedSessionIsSpectatorPinLocked reports whether the caller's expected
+// session is one a local runtime owns (a spectator pin). Such a caller is
+// deliberately viewing a non-foreground session; write commands to it must be
+// refused with the takeover wording, while foreground-switch commands may pass
+// (validated by validateSwitchExpectedLocked).
+func (s *Server) expectedSessionIsSpectatorPinLocked(r *http.Request) bool {
+	return s.sessionMirrored(r.Header.Get(expectedSessionPathHeader))
+}
+
 func (s *Server) validateExpectedSessionLocked(w http.ResponseWriter, r *http.Request) bool {
+	if expected := r.Header.Get(expectedModelSettingsHeader); expected != "" {
+		snapshot, ok := s.ctl().(interface{ ModelSettingsSourceRevision() string })
+		if !ok || snapshot.ModelSettingsSourceRevision() != expected {
+			http.Error(w, "session model settings changed; apply the latest saved settings before starting this run", http.StatusConflict)
+			return false
+		}
+	}
 	if err := s.expectedSessionErrorLocked(r); err != nil {
+		// A spectator pinned to a local-owned session is not misrouted — it is
+		// read-only by ownership. Answer with the takeover wording instead of
+		// the generic "active session changed".
+		if s.expectedSessionIsSpectatorPinLocked(r) {
+			http.Error(w, errSessionTakenOver, http.StatusConflict)
+			return false
+		}
+		http.Error(w, err.Error(), http.StatusConflict)
+		return false
+	}
+	return true
+}
+
+// validateSwitchExpectedLocked is the fence for foreground-switch commands
+// (/new, /clear, /resume). A spectator pinned to a local-owned session is
+// allowed to switch: it is leaving its read-only pin for a real foreground
+// session, which is the only way "the remote" regains the ability to act.
+func (s *Server) validateSwitchExpectedLocked(w http.ResponseWriter, r *http.Request) bool {
+	if err := s.expectedSessionErrorLocked(r); err != nil {
+		if s.expectedSessionIsSpectatorPinLocked(r) {
+			return true
+		}
 		http.Error(w, err.Error(), http.StatusConflict)
 		return false
 	}
@@ -55,6 +94,22 @@ func (s *Server) foregroundMutation(next http.HandlerFunc) http.HandlerFunc {
 		defer s.bindMu.Unlock()
 		if !s.validateExpectedSessionLocked(w, r) {
 			return
+		}
+		// A mirrored foreground is owned by a local runtime; every mutation
+		// (submit-adjacent commands, inbox, approvals) is read-only-refused
+		// until the remote side reclaims the session.
+		if s.rejectMirroredForegroundLocked(w) {
+			return
+		}
+		switch r.URL.Path {
+		case "/goal/resume", "/compact", "/summarize":
+			if err := s.refreshRunModelSettingsLocked(r.Context()); err != nil {
+				http.Error(w, err.Error(), http.StatusConflict)
+				return
+			}
+			if !s.validateExpectedSessionLocked(w, r) {
+				return
+			}
 		}
 		next(w, r)
 	}

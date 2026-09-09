@@ -40,12 +40,23 @@ func (s *Session) writeRecoveryBranchAtPath(
 			return RecoveryBranchInfo{}, false, digestErr
 		}
 		if bytes.Equal(existingDigest[:], digest[:]) {
+			unlockMeta, lockErr := LockSessionMetaPath(path)
+			if lockErr != nil {
+				return RecoveryBranchInfo{}, false, lockErr
+			}
+			defer unlockMeta()
 			if _, err := copyValidContextProjection(opts.OriginalPath, path, msgs); err != nil {
 				slog.Warn("session: recovery branch did not inherit context projection", "path", path, "err", err)
 			}
-			meta, err := s.saveRecoveryBranchMeta(path, opts, preview, turns, digestText, recoveryDepth)
+			meta, err := s.saveRecoveryBranchMetaLocked(path, opts, preview, turns, digestText, recoveryDepth, true)
 			if err != nil {
 				return RecoveryBranchInfo{}, false, err
+			}
+			if err := writeSessionEventIndex(path, msgs, digest, meta.Revision); err != nil {
+				slog.Warn("session: keeping recovery branch after event index write failure", "path", path, "err", err)
+			}
+			if err := refreshSessionDisplayIndex(path, msgs, digest, meta.Revision, -1); err != nil {
+				slog.Warn("session: keeping recovery branch after display index write failure", "path", path, "err", err)
 			}
 			s.markPersisted(path, digest, version, meta.Revision, rewriteVersion)
 			return RecoveryBranchInfo{Path: path, Digest: digestText, Existing: true, Meta: meta, Preview: preview, Turns: turns}, false, nil
@@ -61,12 +72,21 @@ func (s *Session) writeRecoveryBranchAtPath(
 	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
 		return RecoveryBranchInfo{}, false, fmt.Errorf("create recovery session dir: %w", err)
 	}
+	unlockMeta, err := LockSessionMetaPath(path)
+	if err != nil {
+		return RecoveryBranchInfo{}, false, err
+	}
+	defer unlockMeta()
+	meta, err := s.prepareRecoveryBranchMetaLocked(path, opts, preview, turns, digestText, recoveryDepth, false)
+	if err != nil {
+		return RecoveryBranchInfo{}, false, err
+	}
 	probe, err := probeSessionEventLog(path)
 	if err != nil {
 		return RecoveryBranchInfo{}, false, err
 	}
 	if probe.native {
-		if err := writeRecoveryEventLog(path, msgs, digest, shutdown); err != nil {
+		if err := writeRecoveryEventLog(path, msgs, digest, meta.Revision, shutdown); err != nil {
 			return RecoveryBranchInfo{}, false, err
 		}
 	}
@@ -76,12 +96,14 @@ func (s *Session) writeRecoveryBranchAtPath(
 	if _, err := copyValidContextProjection(opts.OriginalPath, path, msgs); err != nil {
 		slog.Warn("session: recovery branch did not inherit context projection", "path", path, "err", err)
 	}
-	meta, err := s.saveRecoveryBranchMeta(path, opts, preview, turns, digestText, recoveryDepth)
-	if err != nil {
+	if err := saveBranchMeta(path, meta, true); err != nil {
 		return RecoveryBranchInfo{}, false, err
 	}
 	if err := writeSessionEventIndex(path, msgs, digest, meta.Revision); err != nil {
 		slog.Warn("session: keeping recovery branch after event index write failure", "path", path, "err", err)
+	}
+	if err := refreshSessionDisplayIndex(path, msgs, digest, meta.Revision, -1); err != nil {
+		slog.Warn("session: keeping recovery branch after display index write failure", "path", path, "err", err)
 	}
 	s.markPersisted(path, digest, version, meta.Revision, rewriteVersion)
 	return RecoveryBranchInfo{Path: path, Digest: digestText, Meta: meta, Preview: preview, Turns: turns}, false, nil

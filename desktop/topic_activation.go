@@ -421,6 +421,8 @@ func (a *App) refreshTabMetaExtras(tab *WorkspaceTab) {
 	}
 	root := tab.WorkspaceRoot
 	model := tab.model
+	ctrl := tab.Ctrl
+	snapshotModel, snapshotRoot := model, root
 	a.mu.RUnlock()
 	if root == "" {
 		root, _ = os.Getwd()
@@ -441,9 +443,14 @@ func (a *App) refreshTabMetaExtras(tab *WorkspaceTab) {
 		}
 		visionFallbackEnabled = strings.TrimSpace(cfg.Agent.VisionModel) != ""
 	}
+	if snapshot, ok := ctrl.(interface{ ImageInputSnapshot() (bool, bool, bool) }); ok {
+		if enabled, fallback, available := snapshot.ImageInputSnapshot(); available {
+			imageInputEnabled, visionFallbackEnabled = enabled, fallback
+		}
+	}
 
 	a.mu.Lock()
-	if a.tabs[tab.ID] != tab {
+	if a.tabs[tab.ID] != tab || tab.Ctrl != ctrl || tab.model != snapshotModel || tab.WorkspaceRoot != snapshotRoot {
 		a.mu.Unlock()
 		return
 	}

@@ -8,7 +8,7 @@ import (
 	"reasonix/internal/config"
 )
 
-func TestSaveProviderCredentialRefreshesRouteWhileConfigEditLocked(t *testing.T) {
+func TestSaveProviderCredentialPreservesRouteWhileConfigEditLocked(t *testing.T) {
 	isolateDesktopUserDirs(t)
 	const keyEnv = "TEST_PROXY_CONFIG_LOCK_KEY"
 	setDesktopTestCredential(t, keyEnv, "sk-before-lock")
@@ -36,7 +36,7 @@ func TestSaveProviderCredentialRefreshesRouteWhileConfigEditLocked(t *testing.T)
 		t.Fatal(err)
 	}
 	requestCredentialProxy(t, route.port, route.token)
-	if got := <-auth; got != "Bearer sk-after-lock" {
-		t.Fatalf("refreshed upstream auth = %q, want rotated credential", got)
+	if got := <-auth; got != "Bearer sk-before-lock" {
+		t.Fatalf("existing route changed credential: %q", got)
 	}
 }

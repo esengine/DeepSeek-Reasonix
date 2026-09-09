@@ -178,6 +178,10 @@ func (a *App) removeRemoteTabsForHost(hostID string) error {
 // already hold singleSurfaceMu use allowEmpty only to roll back a tab whose
 // open transaction failed before it became a usable surface.
 func (a *App) closeRemoteTabRegistration(tabID string, allowEmpty bool) error {
+	publicationTab := a.lockRemoteTabPublication(tabID)
+	if publicationTab != nil {
+		defer publicationTab.routeEventMu.Unlock()
+	}
 	if !allowEmpty {
 		a.mu.RLock()
 		localCount := len(a.tabs)
@@ -192,6 +196,10 @@ func (a *App) closeRemoteTabRegistration(tabID string, allowEmpty bool) error {
 		a.remoteTabMu.Lock()
 	}
 	tab := a.remoteTabs[tabID]
+	if tab != publicationTab {
+		a.remoteTabMu.Unlock()
+		return nil
+	}
 	closingActive := a.remoteTabLayout.activeID == tabID
 	nextLocalID := ""
 	closingIndex := -1
@@ -252,28 +260,37 @@ func (a *App) remoteTabsHostStatus(hostID, state, errText string) {
 	}
 }
 
-func (a *App) suspendRemoteTabPumps(hostID, state, errText string) {
+func (a *App) remoteTabsForHost(hostID string) []*remoteTab {
 	a.remoteTabMu.Lock()
-	affected := make([]string, 0, 2)
+	defer a.remoteTabMu.Unlock()
+	tabs := make([]*remoteTab, 0, 2)
 	for _, tab := range a.remoteTabs {
-		if tab.ref.HostID != hostID || tab.state == "disconnected" || (tab.state == "connecting" && tab.client == nil) {
-			// A restored shell was never connected this run: host status
-			// transitions must not flip it into a runtime state. The same is
-			// true for a first bootstrap that is still waiting for that host.
+		if tab.ref.HostID == hostID {
+			tabs = append(tabs, tab)
+		}
+	}
+	return tabs
+}
+
+func (a *App) suspendRemoteTabPumps(hostID, state, errText string) {
+	for _, tab := range a.remoteTabsForHost(hostID) {
+		tab.routeEventMu.Lock()
+		a.remoteTabMu.Lock()
+		if a.remoteTabs[tab.id] != tab || tab.ref.HostID != hostID || tab.state == "disconnected" || tab.state == "connecting" && tab.client == nil {
+			a.remoteTabMu.Unlock()
+			tab.routeEventMu.Unlock()
 			continue
 		}
 		tab.gen++
-		if tab.cancel != nil {
-			tab.cancel()
-			tab.cancel = nil
+		cancel := tab.cancel
+		tab.cancel = nil
+		tab.state, tab.err = state, errText
+		a.remoteTabMu.Unlock()
+		if cancel != nil {
+			cancel()
 		}
-		tab.state = state
-		tab.err = errText
-		affected = append(affected, tab.id)
-	}
-	a.remoteTabMu.Unlock()
-	for _, tabID := range affected {
-		a.emitRemoteEvent(fmt.Sprintf("remote-tab:%s:state", tabID), RemoteTabStateView{State: state, Error: errText})
+		a.emitRemoteEvent(fmt.Sprintf("remote-tab:%s:state", tab.id), RemoteTabStateView{State: state, Error: errText})
+		tab.routeEventMu.Unlock()
 	}
 }
 
@@ -281,27 +298,27 @@ func (a *App) suspendRemoteTabPumps(hostID, state, errText string) {
 // Cancelling generations before StopServer prevents their EOF path from
 // interpreting an explicit stop as an unexpected disconnect and restarting it.
 func (a *App) parkRemoteTabsForServer(hostID, workspace, state, errText string) []string {
-	a.remoteTabMu.Lock()
 	affected := make([]string, 0, 2)
-	for _, tab := range a.remoteTabs {
-		if tab.ref.HostID != hostID || tab.ref.Workspace != workspace {
+	for _, tab := range a.remoteTabsForHost(hostID) {
+		tab.routeEventMu.Lock()
+		a.remoteTabMu.Lock()
+		if a.remoteTabs[tab.id] != tab || tab.ref.HostID != hostID || tab.ref.Workspace != workspace {
+			a.remoteTabMu.Unlock()
+			tab.routeEventMu.Unlock()
 			continue
 		}
 		tab.gen++
-		if tab.cancel != nil {
-			tab.cancel()
-		}
-		tab.cancel = nil
-		tab.client = nil
-		tab.base = ""
-		tab.token = ""
-		tab.state = state
-		tab.err = errText
+		cancel := tab.cancel
+		tab.cancel, tab.client = nil, nil
+		tab.base, tab.token = "", ""
+		tab.state, tab.err = state, errText
 		affected = append(affected, tab.id)
-	}
-	a.remoteTabMu.Unlock()
-	for _, tabID := range affected {
-		a.emitRemoteEvent(fmt.Sprintf("remote-tab:%s:state", tabID), RemoteTabStateView{State: state, Error: errText})
+		a.remoteTabMu.Unlock()
+		if cancel != nil {
+			cancel()
+		}
+		a.emitRemoteEvent(fmt.Sprintf("remote-tab:%s:state", tab.id), RemoteTabStateView{State: state, Error: errText})
+		tab.routeEventMu.Unlock()
 	}
 	return affected
 }
@@ -404,9 +421,11 @@ func (a *App) reattachRemoteTabOnce(tabID string) bool {
 		return false
 	}
 
+	tab.routeEventMu.Lock()
 	a.remoteTabMu.Lock()
 	if cur := a.remoteTabs[tabID]; cur != tab || tab.state != "reconnecting" {
 		a.remoteTabMu.Unlock()
+		tab.routeEventMu.Unlock()
 		return true
 	}
 	tab.gen++
@@ -420,6 +439,7 @@ func (a *App) reattachRemoteTabOnce(tabID string) bool {
 	pumpCtx, cancelPump := context.WithCancel(ctx)
 	tab.cancel = cancelPump
 	a.remoteTabMu.Unlock()
+	tab.routeEventMu.Unlock()
 
 	opened := make(chan error, 1)
 	a.goRemoteTabSafe("remoteTabPump", func() { a.remoteTabPump(pumpCtx, tabID, gen, opened) })

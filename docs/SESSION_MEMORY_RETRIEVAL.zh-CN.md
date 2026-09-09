@@ -99,14 +99,14 @@ subject key 是知识冲突模型：同一 scope 内每个 subject 至多一个 
 `/memory` 仍展示两者，并解释覆盖关系，而不是删除或隐藏任何来源。
 
 第三个维度 `activation` 与前两者正交：`relevant`（默认）表示事实只走检索；`pinned`
-表示正文在会话开始时快照进低优先级稳定指导区。pin 必须是用户显式选择（`/memory pin
+表示正文在下一真实用户回合前快照进低优先级 `session-context`。pin 必须是用户显式选择（`/memory pin
 <id-or-name>`，或明确要求助手），且 pinned 正文总量上限 1,500 字符——在 pin 时强制
 执行，超限会提示把"永远必须遵守的规则"移入 REASONIX.md/AGENTS.md instructions。
-一个事实要么 pinned（在前缀里）、要么 relevant（可被召回）：不会两者皆是，也不会
+一个事实要么 pinned（在 `session-context` 里）、要么 relevant（可被召回）：不会两者皆是，也不会
 两者皆非。
 
 为兼容旧数据，早于该字段的全局 `user`/`feedback` 事实保持 pinned，直到显式 unpin。
-存在等价项目事实时，它会在稳定前缀构建前屏蔽对应的全局 pinned 指导，因此"项目覆盖
+存在等价项目事实时，它会在背景快照构建前屏蔽对应的全局 pinned 指导，因此"项目覆盖
 全局"不依赖后续查询是否恰好触发召回。
 
 ## 自动召回

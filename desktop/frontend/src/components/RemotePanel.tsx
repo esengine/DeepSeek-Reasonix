@@ -1,10 +1,11 @@
+import { useAppNavigationStore } from "../store/appNavigation";
 import { useCallback, useEffect, useRef, useState, type ReactNode } from "react";
 
 import { app } from "../lib/bridge";
 import { useT } from "../lib/i18n";
 import { isRemoteDegradedWarning, isRemoteTerminalFailure, remoteConnectionErrorSummaryKey } from "../lib/remoteErrors";
 import { resolveRemoteWorkspace } from "../lib/remoteWorkspace";
-import { useOverlayStore } from "../store/overlays";
+import { publishNavigationIntent } from "../lib/useNavigationIntentFence";
 import { useRemoteStore, type RemoteExplorerTab } from "../store/remote";
 import type { RemoteDirEntry, RemoteForwardView } from "../lib/types";
 import { CodeViewer } from "./CodeViewer";
@@ -21,7 +22,7 @@ export function RemotePanel({ onClose }: { onClose: () => void }) {
   const tab = useRemoteStore((s) => s.explorerTab);
   const setTab = useRemoteStore((s) => s.setExplorerTab);
   const status = useRemoteStore((s) => (hostId ? s.statuses[hostId] : undefined));
-  const setSettingsTarget = useOverlayStore((s) => s.setSettingsTarget);
+  const setSettingsTarget = useAppNavigationStore((s) => s.setSettingsTarget);
 
   if (!hostId) return null;
   const connected = status?.state === "connected" || status?.state === "degraded";
@@ -385,6 +386,7 @@ function RemoteServerTab({ hostId, connected, defaultWorkspace }: { hostId: stri
   const start = async () => {
     try {
       setActionErr("");
+      await publishNavigationIntent("remote-workspace");
       await app.OpenRemoteWorkspace(hostId, workspace);
     } catch (e) {
       setActionErr(String(e));

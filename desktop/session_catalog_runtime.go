@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"reasonix/internal/control"
+	"reasonix/internal/event"
 	"reasonix/internal/sessioncatalog"
 )
 
@@ -29,6 +30,7 @@ type catalogRuntimeSnapshot struct {
 	topicTitle       string
 	topicTitleSource string
 	ctrl             control.SessionAPI
+	state            *event.RuntimeStateSnapshot
 	open             bool
 }
 
@@ -62,16 +64,13 @@ func (a *App) catalogRuntimeOverlays() (map[string]catalogRuntimeOverlay, map[st
 	topics := map[string]catalogRuntimeOverlay{}
 	sessions := map[string]catalogRuntimeOverlay{}
 	for _, snap := range a.catalogRuntimeSnapshots() {
-		runtimeStatus := control.RuntimeStatus{}
 		path := strings.TrimSpace(snap.sessionPath)
 		if snap.ctrl != nil {
-			runtimeStatus = snap.ctrl.RuntimeStatus()
 			if path == "" {
 				path = snap.ctrl.SessionPath()
 			}
 		}
-		status := catalogRuntimeStatus(snap.activity, runtimeStatus)
-		running := status != "" || runtimeStatus.Running || runtimeStatus.PendingPrompt || runtimeStatus.BackgroundJobs > 0
+		status, running := catalogControllerStatus(snap.ctrl, snap.activity)
 		overlay := catalogRuntimeOverlay{open: snap.open, running: running, status: status}
 		key := topicSummaryKey(snap.scope, snap.workspaceRoot, snap.topicID)
 		current := topics[key]
@@ -190,10 +189,10 @@ func (a *App) runtimeOnlyProjectTopicsWithSessions(scope, workspaceRoot string) 
 		}
 		snapshots = append(snapshots, snapshot)
 	}
-	return a.runtimeProjectTopicNodes(scope, workspaceRoot, snapshots)
+	return a.runtimeProjectTopicNodes(scope, workspaceRoot, snapshots, true)
 }
 
-func (a *App) runtimeProjectTopicNodes(scope, workspaceRoot string, snapshots []catalogRuntimeSnapshot) ([]ProjectNode, map[string][]string) {
+func (a *App) runtimeProjectTopicNodes(scope, workspaceRoot string, snapshots []catalogRuntimeSnapshot, previews bool) ([]ProjectNode, map[string][]string) {
 	byTopic := map[string][]catalogRuntimeSnapshot{}
 	sessionsByTopic := map[string][]string{}
 	for _, snapshot := range snapshots {
@@ -213,6 +212,7 @@ func (a *App) runtimeProjectTopicNodes(scope, workspaceRoot string, snapshots []
 	out := []ProjectNode{}
 	for _, topicID := range topicIDs {
 		sessions := byTopic[topicID]
+		sort.Slice(sessions, func(i, j int) bool { return sessions[i].sessionPath < sessions[j].sessionPath })
 		kind := "topic"
 		sessionKind := "session"
 		if scope != "project" {
@@ -229,12 +229,10 @@ func (a *App) runtimeProjectTopicNodes(scope, workspaceRoot string, snapshots []
 			Health: string(sessioncatalog.HealthOK), Children: []ProjectNode{},
 		}
 		for _, session := range sessions {
-			runtimeStatus := control.RuntimeStatus{}
-			if session.ctrl != nil {
-				runtimeStatus = session.ctrl.RuntimeStatus()
+			status, running := catalogControllerStatus(session.ctrl, session.activity)
+			if session.state != nil {
+				status, running = catalogStateStatus(*session.state, session.activity)
 			}
-			status := catalogRuntimeStatus(session.activity, runtimeStatus)
-			running := status != "" || runtimeStatus.Running || runtimeStatus.PendingPrompt || runtimeStatus.BackgroundJobs > 0
 			if len(sessions) == 1 {
 				node.Open = session.open
 				node.Running = running
@@ -246,9 +244,13 @@ func (a *App) runtimeProjectTopicNodes(scope, workspaceRoot string, snapshots []
 			if sessionLabel == "" || sessionLabel == "." {
 				sessionLabel = label
 			}
+			preview := ""
+			if previews {
+				preview = sessionPreviewForPath(path)
+			}
 			node.Children = append(node.Children, ProjectNode{
 				Key: projectSessionNodeKey(scope, path), Kind: sessionKind, Label: sessionLabel,
-				Root: workspaceRoot, TopicID: topicID, SessionPath: path, Preview: sessionPreviewForPath(path),
+				Root: workspaceRoot, TopicID: topicID, SessionPath: path, Preview: preview,
 				Open: session.open, Running: running, Status: status,
 				TurnsState: string(sessioncatalog.TurnsUnknown), Health: string(sessioncatalog.HealthOK),
 				Children: []ProjectNode{},
@@ -384,9 +386,6 @@ func (a *App) projectNodeFromCatalogTopic(topic sessioncatalog.TopicRecord, topi
 		// preferred conflict forks. Open/running recovery is still not a
 		// second row — status is already aggregated above.
 		if !sessioncatalog.OrdinaryTreeSession(session, false, false, localPreferred) {
-			if session.Recovered || session.RecoveryCopy {
-				node.RecoveryCopyCount++
-			}
 			continue
 		}
 		visible = append(visible, session)
@@ -486,7 +485,7 @@ func (a *App) listProjectTopics(req ProjectTopicPageRequest) (ProjectTopicPage, 
 	}
 	availability := a.catalogWorkspaceAvailability(catalog, req.Scope, req.WorkspaceRoot)
 	if !availability.usable {
-		// A freshly opened v6 cache is live but empty until the first directory
+		// A freshly opened catalog cache is live but empty until the first directory
 		// scan. Treat that the same as "catalog unavailable" so upgrade does
 		// not blank the sidebar that desktop-projects.json still knows about.
 		page := a.metadataTopicPage(req)

@@ -1,6 +1,7 @@
 import { useMemo, useState, type ReactNode } from "react";
 import {
   Activity,
+  ChartNoAxesColumn,
   Bot,
   Box,
   Cable,
@@ -26,18 +27,19 @@ import { useT, type DictKey } from "../lib/i18n";
 import type { SettingsTab } from "../lib/types";
 
 export const SETTINGS_NAV_TABS: SettingsTab[] = [
-  "general", "models", "bots", "mcp", "remote", "skills", "subagents", "plugins", "memory",
+  "general", "bots", "models", "providers", "model-stats", "mcp", "remote", "skills", "subagents", "plugins", "memory",
   "hooks", "diagnostics", "shortcuts", "permissions", "sandbox", "network", "appearance", "storage", "updates",
 ];
 
 const SETTINGS_TAB_GROUPS: { labelKey: DictKey; tabs: SettingsTab[] }[] = [
-  { labelKey: "settings.navGroup.preferences", tabs: ["general", "models", "bots"] },
-  { labelKey: "settings.navGroup.connections", tabs: ["mcp", "remote"] },
+  { labelKey: "settings.navGroup.preferences", tabs: ["general"] },
+  { labelKey: "settings.tab.models", tabs: ["models", "providers", "model-stats"] },
+  { labelKey: "settings.navGroup.connections", tabs: ["bots", "mcp", "remote"] },
   { labelKey: "settings.navGroup.capabilities", tabs: ["skills", "subagents", "plugins"] },
   { labelKey: "settings.navGroup.context", tabs: ["memory"] },
-  { labelKey: "settings.navGroup.automation", tabs: ["hooks", "diagnostics", "shortcuts"] },
+  { labelKey: "settings.navGroup.automation", tabs: ["hooks", "diagnostics"] },
   { labelKey: "settings.navGroup.security", tabs: ["permissions", "sandbox", "network"] },
-  { labelKey: "settings.navGroup.application", tabs: ["appearance", "storage", "updates"] },
+  { labelKey: "settings.navGroup.application", tabs: ["appearance", "shortcuts", "storage", "updates"] },
 ];
 
 export type SettingsNavigationItem = {
@@ -102,13 +104,14 @@ export function SettingsNavigation({
                     key={id}
                     className={`settings-center__navitem${activeTab === id ? " settings-center__navitem--active" : ""}`}
                     aria-current={activeTab === id ? "page" : undefined}
+                    title={item.meta ? `${item.label} · ${item.meta}` : item.label}
                     onClick={() => onSelect(id)}
                   >
                     <span className="settings-center__navitem-main">
                       {settingsTabIcon(id)}
                       <span>{item.label}</span>
                     </span>
-                    {item.meta && (activeTab === id || query.trim()) && <small>{item.meta}</small>}
+                    {item.meta && query.trim() && <small>{item.meta}</small>}
                   </button>
                 );
               })}
@@ -128,6 +131,7 @@ function settingsTabIcon(id: SettingsTab): ReactNode {
   switch (id) {
     case "general": return <Settings2 {...props} />;
     case "models": return <Box {...props} />;
+    case "model-stats": return <ChartNoAxesColumn {...props} />;
     case "providers": return <Cable {...props} />;
     case "bots": return <Bot {...props} />;
     case "mcp": return <Plug {...props} />;

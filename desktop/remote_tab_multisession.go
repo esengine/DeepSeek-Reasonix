@@ -71,10 +71,14 @@ func enterRemoteSessionTarget(ctx context.Context, client *http.Client, base str
 		if err != nil {
 			return serveSessionEntry{}, err
 		}
-		if err := servePost(ctx, client, serveURL(base, "/resume"), body); err != nil {
+		mountedPath, err := servePostSessionPath(ctx, client, serveURL(base, "/resume"), body)
+		if err != nil {
 			return serveSessionEntry{}, err
 		}
-		return serveSessionEntry{Name: name, Path: sessionPath, Title: strings.TrimSpace(opts.SessionTitle), Current: true}, nil
+		return serveSessionEntry{
+			Name: name, Path: sessionPath, Title: strings.TrimSpace(opts.SessionTitle), Current: true,
+			TakenOver: strings.TrimSpace(mountedPath) != "",
+		}, nil
 	}
 	// Focus-only attaches retain the current session; only explicit NewSession
 	// may abandon it.
@@ -94,10 +98,12 @@ func enterRemoteSessionTarget(ctx context.Context, client *http.Client, base str
 		if err != nil {
 			return serveSessionEntry{}, err
 		}
-		if err := servePost(ctx, client, serveURL(base, "/resume"), body); err != nil {
+		mountedPath, err := servePostSessionPath(ctx, client, serveURL(base, "/resume"), body)
+		if err != nil {
 			return serveSessionEntry{}, err
 		}
 		session.Current = true
+		session.TakenOver = strings.TrimSpace(mountedPath) != ""
 		return session, nil
 	}
 	return serveSessionEntry{}, fmt.Errorf("remote session %q not found", name)
@@ -199,7 +205,20 @@ func (a *App) adoptRemoteTabFrameCurrent(tabID string, gen uint64, sessionPath s
 	}
 	a.remoteTabMu.Lock()
 	current := a.remoteTabs[tabID]
-	if current != tab || current.gen != gen || !adoptRemoteTabSessionPathLocked(current, sessionPath) {
+	if current != tab || current.gen != gen {
+		a.remoteTabMu.Unlock()
+		return
+	}
+	// A spectator watches the session it explicitly selected; the serve's
+	// foreground keeps emitting current markers for other sessions, and
+	// adopting one silently re-routes the tab while the spectator banner
+	// (takenOver) stays pinned to the old session — reclaim and submit then
+	// target a session the tab is not displaying.
+	if sessionPath != current.routing.currentPath && current.session.takenOver {
+		a.remoteTabMu.Unlock()
+		return
+	}
+	if !adoptRemoteTabSessionPathLocked(current, sessionPath) {
 		a.remoteTabMu.Unlock()
 		return
 	}

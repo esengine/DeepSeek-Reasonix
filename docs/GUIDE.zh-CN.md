@@ -1,5 +1,8 @@
 # Reasonix 使用指南
 
+Provider 模型能力元数据见
+[`MODEL_CAPABILITIES.zh-CN.md`](./MODEL_CAPABILITIES.zh-CN.md)。
+
 <a href="../README.zh-CN.md">README</a>
 &nbsp;·&nbsp;
 <a href="./GUIDE.md">English</a>
@@ -268,67 +271,10 @@ Remote-SSH 式的体验。它在远端主机上引导一个常驻的 headless `r
 回环端口转发过去,再经隧道打开现有的 serve Web 客户端。agent、工具与文件全部原生运行在远端
 主机上,保真度 100%,不经过有损的文件代理。V1 支持 Linux 与 macOS 远端主机。
 
-主机保存在 `config.toml` 的用户级 `[remote]` 段。与 `[secrets]` 一样,项目级
-`reasonix.toml` 无法注入或覆盖远程主机 —— 克隆的仓库永远无法左右 Reasonix 向何处发起 SSH
-连接。凭据沿用 provider 惯例:主机只记录环境变量名(`passphrase_env`、`password_env`),其值
-存放在 Reasonix 全局 `.env` 中;私钥内容本身从不存储 —— `identity_file` 只是路径。
-
-```toml
-[remote]
-[[remote.hosts]]
-name          = "gpu-box"
-host          = "203.0.113.7"
-user          = "dev"
-identity_file = "~/.ssh/id_ed25519"
-workspace     = "~/projects/app"
-serve_install = "auto"            # 远端 CLI：auto | npm | upload | never
-
-[[remote.hosts.forwards]]
-type   = "local"                  # local (-L) | remote (-R)
-bind   = "127.0.0.1:5432"
-target = "127.0.0.1:5432"
-```
-
-命令行:
-
-```bash
-reasonix remote add gpu-box dev@203.0.113.7 --workspace '~/projects/app'
-reasonix remote import --all              # 导入别名；连接时通过 ssh -G 解析 Include/Match 等规则
-reasonix remote test gpu-box              # 拨号 + 认证 + 主机密钥确认
-reasonix remote connect gpu-box --open    # 引导 serve、建隧道、打开 URL
-reasonix remote serve status gpu-box
-reasonix remote fs ls gpu-box:'~/projects/app'
-```
-
-启用 `use_ssh_config` 的主机会通过本机 OpenSSH `ssh -G` 获取最终有效配置，因此支持
-`Include`、通配 `Host`、`Match`（包括 `Match exec`）、多个 `IdentityFile`、`ProxyJump` 和
-`IdentitiesOnly`。导入时只保存原始别名，不复制一份容易过期的解析结果。
-
-`connect` 是前台守护(相当于 `ssh -N` 加上 serve 引导):它保持隧道与已配置的转发存活,断线时
-以指数退避自动重连,并在重连后重新挂载转发。Ctrl-C 只断开本地一侧 —— 远端 serve 继续运行,
-下次 `connect` 会复用它。V1 无后台守护进程。
-
-主机密钥会对照你的 OpenSSH `~/.ssh/known_hosts`(只读)以及 Reasonix 托管的
-`~/.reasonix/remote/known_hosts` 校验。首次见到的密钥会提示 TOFU 确认并记入托管文件;与已记录
-密钥冲突的密钥会硬失败并指明出错的行,绝不自动接受。
-
-远端侧状态位于远端主机的 `~/.reasonix/remote/`:`serve-<工作区 slug>.json`(pid、绑定的回环
-地址、工作区)、`serve-<slug>.token`(0600;认证 token,经 `--token-file` 传给 serve,因此不会
-出现在 `ps` 中)、`serve-<slug>.log`。
-
-在桌面端，于 **设置 -> 远程 SSH** 管理主机。要从项目树添加远程项目，请打开“添加项目”菜单并
-选择 **远程连接**。三步向导会保存或复用 SSH 主机、连接并确认远端操作系统受支持，然后让你浏览
-并选择工作区，再在应用内打开远程会话标签页。密钥文件按钮使用原生文件选择器，因此保存的身份文件
-始终是桌面端绝对路径。也可以通过状态栏徽标或主机行的 **远程浏览器** 按钮经 SFTP 浏览与编辑
-文件、管理端口转发、启动/打开远程工作区。
-
-项目树会列出该工作区的远程会话。点击会话行会在共用的 Transcript 与 Composer 界面恢复这一
-精确会话；新建或恢复其他会话时，正在执行的远端回合会继续在后台运行，项目树会显示其运行状态。
-桌面端持有 SSH 隧道，并且不会把本地对话会话混入远程标签页。在 `remote` 凭据模式下，远端
-Serve 使用**远端**主机上的 Provider 配置与 API Key；在 `local-proxy` 模式下，Key 留在
-桌面本机，模型调用经带认证的反向转发返回，凭据 watchdog 会在转发短暂故障后修复该通道。短暂的
-SSH 中断会保留标签页，桌面端在后台重连并重新挂载转发；认证失败或主机密钥错误属于终止性故障，
-此时远程工作区会标记为不可用。
+独立的 **[远程会话系统](./REMOTE_SESSIONS.zh-CN.md)** 文档集中说明主机配置(`config.toml`
+的 `[remote]` 段)、`ssh -G` 解析与别名导入、`reasonix remote` CLI、远端 serve 引导与
+安装阶梯、远程会话生命周期与接管、桌面端远程工作、`remote` 与 `local-proxy` 凭据模式、
+连接故障语义与故障排查。
 
 ## 自定义 OpenAI-compatible provider
 
@@ -351,20 +297,23 @@ OpenCode Zen Anthropic、Qwen/DashScope CN/Global、
 Qwen Coding Plan
 CN/Global 的 OpenAI-compatible 与 Anthropic-compatible 端点、StepFun
 OpenAI-compatible 与 Anthropic-compatible 端点、NovitaAI、GMI Cloud、Vercel AI
-Gateway、HuggingFace Router、NVIDIA NIM、KiloCode 和 Ollama Cloud。Plan 表示
+Gateway、HuggingFace Router、ModelScope、NVIDIA NIM、KiloCode 和 Ollama Cloud。Plan 表示
 访问/付费形态；只有服务商确实提供不同区域端点时，预设名才同时带 CN/Global。
 因此 Kimi Coding Plan 是独立 plan 端点，Kimi 直连 API 才拆成 CN 和 Global。
 预设路径通常只需要填写服务商 API Key：真实 key 会写入 Reasonix home `.env`，
-`config.toml` 只保存端点、模型列表、key 环境变量名、上下文窗口、视觉模型元数据、
+`config.toml` 只保存端点、模型列表、key 环境变量名、上下文窗口、模型能力元数据、
 中国区端点直连、MiniMax `reasoning_split`、GLM/MiniMax thinking heuristic、
 Anthropic-compatible 网关需要的 Bearer 认证、Ollama Cloud max-effort 支持，
 以及 OpenCode Go 的每模型 reasoning 覆盖。官方 DeepSeek 的 Anthropic、Responses 与
-Chat Completions 目录还会带上 `deepseek-v4-flash-vision-exp`。在设置里和其他供应商
-一样勾选该模型的「图片输入」，再选中这一枚 SKU。composer/`@` 用户图片会按官方文档的三种方式发出：本地小图走内联 base64 `data:` URL；
+Chat Completions 目录还会带上 `deepseek-v4-flash-vision-exp`。设置页会按模型能力元数据
+展示支持图片的模型，也提供逐模型“图片输入：自动 / 开启 / 关闭”。中转站只返回
+模型 ID 时会显示“图片能力未识别”；向服务商确认支持后，选择开启并保存即可。
+详见[图片输入指南](MODEL_CAPABILITIES.zh-CN.md#中转站模型使用指南)。
+composer/`@` 用户图片会按官方文档的三种方式发出：本地小图走内联 base64 `data:` URL；
 `http(s)` 图片链接原样作为 URL 传入；`file-api-` 引用走 Files API（官方 DeepSeek 上
 超过 32 MiB 的本地图会自动上传）。Chat Completions 用 `image_url` 或 `file`，Anthropic
-用 `image`+`source.base64|url|file`，Responses 用 `input_image`。Flash/Pro 即使勾了
-「图片输入」线上仍是纯文本，工具截图也不会作为图片块转发。
+用 `image`+`source.base64|url|file`，Responses 用 `input_image`。Flash/Pro 即使旧配置列出
+为视觉模型，线上仍是纯文本，工具截图也不会作为图片块转发。
 视觉 SKU 使用 Flash 价卡。专用的 OpenCode Go DeepSeek Anthropic 与
 DeepSeek Responses 预设接入已验证的 Flash 线路，并默认启用 provider 侧 `web_search`；
 Responses 变体使用无状态上下文回放。原有混合 OpenCode Go Anthropic 预设仍只包含 Qwen
@@ -535,7 +484,7 @@ CLI/TUI 文本输入可通过 `[ui].cursor_shape` 设置光标形状，支持 `u
 | transcript 文本选择 | 复制 transcript 文本 | 应用内拖选松开后，本地会话通过可验证的系统剪贴板路径写入（macOS `pbcopy`、Linux 可用的 Wayland/X11 工具、Windows 系统剪贴板）；SSH 才回退到 OSC 52，并明确标记为回退而不是宣称原生复制成功。`Ctrl+C`/`Super+C`/`Meta+C` 或右键当前选区可再次复制。 |
 | 输入框文本选择 | 选中、复制或替换草稿文本 | 应用内拖选松开后，会通过与 transcript 相同的可验证剪贴板路径复制；输入或粘贴会替换选区，方向键会收起选区。 |
 | 没有活动选区时右键 | 在本地会话粘贴剪贴板文本 | 本地会话开启鼠标接管时，Reasonix 只读取文本并交给正常的 bracketed-paste 处理。SSH 下远端进程无法读取本机剪贴板，请使用终端粘贴快捷键；`/mouse` 可恢复终端原生右键菜单。存在活动选区时，右键仍优先复制该选区。 |
-| `/mouse` | 切换应用内鼠标接管 | 关闭后由终端处理原生拖选和右键菜单，但会失去应用内选区、滚动条和滚轮。可用 `REASONIX_DISABLE_MOUSE=1` 让每次会话默认关闭。 |
+| `/mouse` | 切换应用内鼠标接管 | 关闭后由终端处理原生拖选和右键菜单，但会失去应用内选区、滚动条和滚轮。可用 `REASONIX_DISABLE_MOUSE=1` 让每次会话默认关闭。SSH 远程会话默认即关闭，保证原生拖选/复制可用；`REASONIX_DISABLE_MOUSE=0` 可强制全局开启。SSH 下 TUI 还会开启同步输出（mode 2026）避免远端回传时整帧重绘闪烁；如需关闭可设置 `REASONIX_DISABLE_SYNC_OUTPUT=1`。 |
 | `Ctrl+C` | 复制、取消、清空或退出 | 有 transcript 或输入框活动选区时优先复制；否则取消运行中的 turn、清空非空输入，或在空输入下连按两次退出。 |
 | `Ctrl+D` | 退出 TUI | 立即退出。 |
 | 终端的文本粘贴快捷键 | 粘贴文本 | 文本保持终端原生 bracketed-paste 路径：macOS 通常是 `Cmd+V`，Linux 通常是 `Ctrl+Shift+V`，其它环境使用终端自身配置。Reasonix 只消费收到的文本粘贴事件，不会先探测图片。 |
@@ -990,13 +939,14 @@ Reasonix 会用确定性规则路由每一轮，不再调用额外的 classifier
 Planner 使用同一个稳定的 system prompt，单轮只追加很小的 `<planner-turn>` 标明
 显式路由，因此除本次 prompt 升级的一次缓存未命中外，不会持续破坏 Planner prefix
 cache。计划应区分已验证与候选触点，并在证据支持时补充非目标、风险、验收标准和
-命令级验证。若 Planner 在有界调研和最终总结轮后仍未给出最终计划，普通
-plan-and-execute 会用原始任务直接交给 Executor 继续；plan-only 与等待批准请求仍
-保持 fail-closed，并回滚不完整的 Planner 回合，避免留下无法继续的会话尾部。
+命令级验证。Planner 必须调用 `submit_plan`，没有提交计划的普通文本视为协议错误。
+若 Planner 在有界调研和最终总结轮后仍未给出最终计划，所有路由都 fail-closed，
+不会降级到 Executor，并回滚不完整的 Planner 回合，避免留下无法继续的会话尾部。
 
-Reasonix 会自动管理正常执行：活跃 Todo 连续 8 个工具调用轮次没有新的完成项、唯一读取、
-命令或修改时，宿主会要求执行器重新评估；Goal 到达后续阈值时会强制重新规划并继续，而不会因
-计数暂停。完全重复的操作不算进展，新的宿主可观测工作会自动续期。两级任务
+普通 clean final 即结束回合。Goal、review、guardian 仍保留各自的 continuation
+约束。Goal 中活跃 Todo 超过停滞阈值仍没有新的完成项、唯一读取、命令或修改时，
+宿主会强制缩小步骤、换工具/方法、聚焦委派或报告真实阻塞，然后继续执行。完全重复
+的操作不算进展，新的宿主可观测工作会自动续期。两级任务
 列表保持同一"唯一当前项"契约：唯一的 `in_progress` 是活跃的 level-1 子步骤，其 level-0
 阶段保持 `pending`；子步骤按顺序推进并签核，全部完成后阶段本身转为 `in_progress` 做
 最后签核。
@@ -1066,6 +1016,11 @@ destructive MCP 目标、来自未授权 server 的 reader，以及一切会改�
 可用 `read_subagent_result` 按 `offset_bytes` 分页读取该引用对应的完整答案；读取范围受当前
 会话 lineage 与工作区约束。没有持久化父会话的 headless 运行仍保持 ephemeral，只返回公平
 分配的有界预览，不能生成持久引用。
+
+已持久化的子 Agent 结果还会带有 `status`（`completed`、`partial`、`failed` 或
+`cancelled`）和 `retryable`。部分完成或可重试的失败会保留最后一条可见回答与引用，父 Agent
+可以用 `read_subagent_result` 查看，或通过 `task` / `run_skill` 的 `continue_from` 继续同一条
+transcript。
 
 交互式双模型 Planner 使用专用构造路径（`NewPlannerAgent`）：仍阻止 bash、文件写入与普通
 writer，但可通过固定的 `use_capability` 代理调用已授权、非 destructive 的 MCP，不再要求

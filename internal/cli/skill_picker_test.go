@@ -787,9 +787,9 @@ func TestBottomRowsIncludesResumePicker(t *testing.T) {
 	m.width = 80
 	m.height = 40
 	m.resumePick = &resumePicker{
-		sessions: nil,
-		sel:      0,
-		active:   -1,
+		entries: nil,
+		sel:     0,
+		active:  -1,
 	}
 
 	// Not testing exact row count (resumePicker needs sessions for rendering),

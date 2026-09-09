@@ -564,38 +564,6 @@ func TestRemoteRejectedResumeReconcilesReselectedCurrentSession(t *testing.T) {
 	}
 }
 
-func TestRemoteRejectedResumePreservesProbedAuthoritativeSelection(t *testing.T) {
-	isolateDesktopUserDirs(t)
-	const previousPath = "/sessions/previous.jsonl"
-	const targetPath = "/sessions/target.jsonl"
-	const authoritativePath = "/sessions/authoritative.jsonl"
-	client := &http.Client{}
-	tab := &remoteTab{
-		id: "remote-1", state: "ready", client: client, gen: 7, selectionRevision: 11,
-		session: remoteTabSessionState{name: "previous", path: previousPath}, topicTitle: "Previous",
-		routing: remoteTabSessionRouting{currentPath: previousPath, running: map[string]bool{}},
-	}
-	a := &App{remoteTabs: map[string]*remoteTab{tab.id: tab}}
-	previous := &remoteTabOpenSelection{
-		session: tab.session, topicTitle: tab.topicTitle, currentPath: previousPath, revision: tab.selectionRevision,
-	}
-	route := a.beginRemoteTabProvisionalResume(tab.id, tab, client, tab.gen, targetPath)
-	handled := a.reconcileRemoteTabRejectedResume(
-		tab.id, tab, client, tab.gen, route,
-		serveSessionEntry{Name: "authoritative", Path: authoritativePath, Title: "Authoritative"},
-		errors.New("resume response lost"),
-	)
-	if !handled {
-		a.restoreRejectedRemoteTabOpenSelection(tab.id, previous)
-	}
-	a.remoteTabMu.Lock()
-	gotPath, gotSession, gotTitle := tab.routing.currentPath, tab.session.path, tab.topicTitle
-	a.remoteTabMu.Unlock()
-	if gotPath != authoritativePath || gotSession != authoritativePath || gotTitle != "Authoritative" {
-		t.Fatalf("ambiguous resume restored stale selection: route/session/title = %q/%q/%q", gotPath, gotSession, gotTitle)
-	}
-}
-
 func TestRemoteRejectedResumeRollbackCannotMarkNewerRouteErrored(t *testing.T) {
 	const previousPath = "/sessions/previous.jsonl"
 	const targetPath = "/sessions/target.jsonl"
@@ -791,5 +759,49 @@ func TestRevivedSessionSelectionWaitsForVisibilityCommit(t *testing.T) {
 	a.remoteTabMu.Unlock()
 	if state != "disconnected" || name != "old" || sessionPath != oldPath || route != oldPath || title != "Old title" {
 		t.Fatalf("failed visibility commit changed revived shell: state=%q name=%q session=%q route=%q title=%q", state, name, sessionPath, route, title)
+	}
+}
+
+// TestSpectatorRouteResistsForegroundCurrentMarker pins the regression where
+// the serve foreground's sessionCurrent marker re-routed a spectator tab that
+// had explicitly selected a mirrored session: the banner stayed on the watched
+// session while routing (and every reclaim/submit) silently moved to the
+// foreground, so reclaim looked successful and messages landed in the wrong
+// transcript.
+func TestSpectatorRouteResistsForegroundCurrentMarker(t *testing.T) {
+	const watched = "/sessions/watched.jsonl"
+	const foreground = "/sessions/foreground.jsonl"
+	client := &http.Client{}
+	tab := &remoteTab{
+		id: "remote-1", state: "ready", client: client, gen: 3,
+		session: remoteTabSessionState{path: watched, takenOver: true},
+		routing: remoteTabSessionRouting{currentPath: watched, running: map[string]bool{}},
+	}
+	log := &eventLog{}
+	a := &App{remoteTabs: map[string]*remoteTab{tab.id: tab}, remoteEventHook: log.add}
+	eventsBefore := len(log.recorded())
+
+	a.adoptRemoteTabFrameCurrent(tab.id, tab.gen, foreground, false)
+	a.remoteTabMu.Lock()
+	path, taken := tab.routing.currentPath, tab.session.takenOver
+	a.remoteTabMu.Unlock()
+	if path != watched || !taken {
+		t.Fatalf("foreground marker stole the spectator route: path=%q takenOver=%v", path, taken)
+	}
+	if eventsAfter := len(log.recorded()); eventsAfter != eventsBefore {
+		t.Fatalf("blocked adoption emitted %d events, want 0", eventsAfter-eventsBefore)
+	}
+
+	// Once the spectator pin lifts (reclaim landed or the probe cleared it),
+	// foreground rotation frames adopt again.
+	a.remoteTabMu.Lock()
+	tab.session.takenOver = false
+	a.remoteTabMu.Unlock()
+	a.adoptRemoteTabFrameCurrent(tab.id, tab.gen, foreground, false)
+	a.remoteTabMu.Lock()
+	path = tab.routing.currentPath
+	a.remoteTabMu.Unlock()
+	if path != foreground {
+		t.Fatalf("foreground adoption after the spectator pin lifted was blocked: %q", path)
 	}
 }

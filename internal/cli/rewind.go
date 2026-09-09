@@ -139,7 +139,7 @@ func (m chatTUI) applyRewind() (tea.Model, tea.Cmd) {
 			m.followSessionLease()
 			m.replayActiveBranch(fmt.Sprintf("branched from turn %d", meta.Turn+1))
 		}
-		return m, nil // the branch is a new session
+		return m, nil // the controller is on the fork now
 	case "summ-from":
 		m.rewind = nil
 		_ = m.ctrl.SummarizeFrom(context.Background(), meta.Turn)
@@ -194,21 +194,16 @@ func (m chatTUI) commitPreparedRewind() (tea.Model, tea.Cmd) {
 	scope := control.RewindScope(r.pendingPlan.Scope)
 	planID := r.pendingPlan.PlanID
 	m.rewind = nil
-	result, err := m.ctrl.CommitRewind(planID)
+	result, err := m.ctrl.CommitRewindInPlace(planID)
 	if err != nil || !result.OK {
 		return m, nil
 	}
 	if result.ConversationForked {
-		if strings.TrimSpace(result.Branch) == "" {
-			m.notice("rewind: conversation fork path is unavailable")
-			return m, nil
-		}
-		if _, err := m.ctrl.SwitchBranch(result.Branch); err != nil {
-			m.followSessionLease()
-			return m, nil
-		}
+		// The controller is already on the rewound conversation: a head of the
+		// same log, or the fork file of a schema-1 session. Only the lease and
+		// the transcript view still follow it.
 		m.followSessionLease()
-		m.replayActiveBranch(fmt.Sprintf("rewound to turn %d in a new branch", meta.Turn+1))
+		m.replayActiveBranch(fmt.Sprintf("rewound to turn %d", meta.Turn+1))
 	}
 	// Conversation rewind activates the fork and prefills the selected prompt
 	// for editing. Code-only rewind keeps the current transcript on screen.

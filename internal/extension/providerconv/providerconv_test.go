@@ -124,7 +124,7 @@ func TestDescriptorFromProtocolCopiesFields(t *testing.T) {
 		Ref: "plugin/demo/fake/x", DisplayName: "Demo", Model: "x",
 		ContextWindow: 128_000, PricingCurrency: "$",
 		CacheHitPerMillion: 0.1, InputPerMillion: 1.0, OutputPerMillion: 2.0,
-		Vision: true, Tools: true, Reasoning: true,
+		Vision: true, InputModalities: []string{"text", "image"}, Tools: true, Reasoning: true,
 		Efforts: []string{"low", "high"}, DefaultEffort: "low",
 		ToolCallReasoning: true, ReasoningRoundTrip: true, WarnOnMissingToolCallReasoning: true,
 	}
@@ -132,7 +132,7 @@ func TestDescriptorFromProtocolCopiesFields(t *testing.T) {
 	if d.Ref != wire.Ref || d.DisplayName != wire.DisplayName || d.Model != wire.Model ||
 		d.ContextWindow != wire.ContextWindow || d.PricingCurrency != wire.PricingCurrency ||
 		d.CacheHitPerMillion != wire.CacheHitPerMillion || d.InputPerMillion != wire.InputPerMillion ||
-		d.OutputPerMillion != wire.OutputPerMillion || d.Vision != wire.Vision || d.Tools != wire.Tools ||
+		d.OutputPerMillion != wire.OutputPerMillion || d.Vision != wire.Vision || len(d.InputModalities) != 2 || d.InputModalities[1] != "image" || d.Tools != wire.Tools ||
 		d.Reasoning != wire.Reasoning || d.DefaultEffort != wire.DefaultEffort ||
 		d.ToolCallReasoning != wire.ToolCallReasoning || d.ReasoningRoundTrip != wire.ReasoningRoundTrip ||
 		d.WarnOnMissingToolCallReasoning != wire.WarnOnMissingToolCallReasoning ||

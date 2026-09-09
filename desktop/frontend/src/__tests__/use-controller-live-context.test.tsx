@@ -177,6 +177,7 @@ window.runtime = {
 window.go = {
   main: {
     App: {
+      RegisterNavigationIntent: async () => {},
       ListTabs: async () => [tabMeta()],
       MetaForTab: async () => meta(),
       ContextUsageForTab: async () => {

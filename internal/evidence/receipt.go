@@ -10,19 +10,22 @@ import (
 // Receipt is the host-runtime record of one tool call. It stays in memory for
 // the current agent turn and is not serialized into prompts or session state.
 type Receipt struct {
-	Sequence  uint64          `json:"-"`
-	ToolName  string          `json:"tool_name"`
-	Args      json.RawMessage `json:"args,omitempty"`
-	Profile   string          `json:"profile,omitempty"`
-	Success   bool            `json:"success"`
-	Command   string          `json:"command,omitempty"`
-	Step      string          `json:"step,omitempty"`
-	StepProof bool            `json:"step_proof,omitempty"`
-	TodoStep  *TodoStepMatch  `json:"todo_step,omitempty"`
-	Paths     []string        `json:"paths,omitempty"`
-	Read      bool            `json:"read,omitempty"`
-	Write     bool            `json:"write,omitempty"`
-	Mutation  bool            `json:"mutation,omitempty"`
+	// ToolCallID links UI inspection to the source call without entering prompts.
+	ToolCallID  string          `json:"-"`
+	Interrupted bool            `json:"-"`
+	Sequence    uint64          `json:"-"`
+	ToolName    string          `json:"tool_name"`
+	Args        json.RawMessage `json:"args,omitempty"`
+	Profile     string          `json:"profile,omitempty"`
+	Success     bool            `json:"success"`
+	Command     string          `json:"command,omitempty"`
+	Step        string          `json:"step,omitempty"`
+	StepProof   bool            `json:"step_proof,omitempty"`
+	TodoStep    *TodoStepMatch  `json:"todo_step,omitempty"`
+	Paths       []string        `json:"paths,omitempty"`
+	Read        bool            `json:"read,omitempty"`
+	Write       bool            `json:"write,omitempty"`
+	Mutation    bool            `json:"mutation,omitempty"`
 	// DeliveryScope separates scratch-only execution from project delivery debt.
 	// It is turn-local evidence and is never persisted or provider-visible.
 	DeliveryScope WriteScope `json:"-"`

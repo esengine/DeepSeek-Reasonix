@@ -160,6 +160,11 @@ agent 会发送带 `[warning]` 的消息 chunk 并返回 `end_turn`；厂商状�
 的 runner 没有返回 error。显式模型轮数上限（`max_steps`）会发送 `[warning]`、返回
 `max_turn_requests`，并记录 paused 厂商状态；host 的任务时间、token 或成本预算也会发送
 `[warning]` 并记录 paused 状态，但因 ACP v1 没有任务预算专用停止原因而返回 `end_turn`。
+完成校验器已移除。模型正常结束且没有工具调用时返回 `end_turn`；包含工具调用时继续进入
+Agent 循环；真正的空响应会在 frozen request 边界重试。旧的
+`completion_validation`、`completion_evaluator_model` 和
+`REASONIX_COMPLETION_VALIDATION_MODE` 设置仍可读取，但会被忽略且不再由配置渲染器生成。
+主机侧的就绪检查、预算、工具安全边界和恢复边界仍然有效。
 其他 provider、工具或运行时失败会返回 JSON-RPC
 `-32603 InternalError`，消息携带长度受限且已脱敏的原因；不会再用协议外的
 `stopReason` 构造成功结果。

@@ -36,6 +36,7 @@ type ArgData struct {
 	DisconnectedMCP []string
 	ModelRefs       []string
 	CurrentModel    string
+	EffortLevels    []string
 	ProviderNames   []string
 	CurrentProvider string
 	PluginNames     []string
@@ -51,29 +52,47 @@ type ArgData struct {
 // /theme /language /currency /memory);
 // others yield nil. Single source of truth for CLI + desktop.
 func SlashArgItems(line string, d ArgData) ([]SlashItem, int) {
+	items, from, _ := SlashArgItemsLazy(line, func() ArgData { return d })
+	return items, from
+}
+
+// SlashArgItemsLazy is SlashArgItems with deferred dynamic data resolution.
+// The resolver is called only for a supported command whose suggestions depend
+// on ArgData, so free-form and static argument commands stay allocation-only.
+// The final result reports whether the command supports structured arguments,
+// even when filtering leaves no visible suggestions.
+func SlashArgItemsLazy(line string, resolve func() ArgData) ([]SlashItem, int, bool) {
 	cmdEnd := strings.IndexAny(line, " \t")
 	if cmdEnd < 0 {
-		return nil, 0
+		return nil, 0, false
 	}
 	from := strings.LastIndexAny(line, " \t") + 1
 	cur := line[from:]
 	prior := strings.Fields(line[:from]) // committed tokens, including the command word
+	data := func() ArgData {
+		if resolve == nil {
+			return ArgData{}
+		}
+		return resolve()
+	}
 	var raw []SlashItem
 	switch line[:cmdEnd] {
 	case "/mcp":
-		raw = mcpArgItems(prior, cur, d)
+		raw = mcpArgItems(prior, cur, data())
 	case "/model":
-		raw = modelArgItems(prior, d)
+		raw = modelArgItems(prior, data())
 	case "/provider":
-		raw = providerArgItems(prior, d)
+		raw = providerArgItems(prior, data())
 	case "/skill", "/skills":
-		raw = skillArgItems(prior, d)
+		raw = skillArgItems(prior, data())
 	case "/plugin", "/plugins":
-		raw = pluginArgItems(prior, d)
+		raw = pluginArgItems(prior, data())
 	case "/hooks":
 		raw = hooksArgItems(prior)
 	case "/effort":
-		raw = effortArgItems(prior, d)
+		raw = effortArgItems(prior, data())
+	case "/preset":
+		raw = presetArgItems(prior)
 	case "/goal":
 		raw = goalArgItems(prior)
 	case "/reasoning-language":
@@ -85,11 +104,11 @@ func SlashArgItems(line string, d ArgData) ([]SlashItem, int) {
 	case "/currency":
 		raw = currencyArgItems(prior)
 	case "/memory":
-		raw = memoryArgItems(prior, d)
+		raw = memoryArgItems(prior, data())
 	default:
-		return nil, from
+		return nil, from, false
 	}
-	return filterSlash(raw, line, from, cur), from
+	return filterSlash(raw, line, from, cur), from, true
 }
 
 func memoryArgItems(prior []string, d ArgData) []SlashItem {
@@ -199,12 +218,22 @@ func themeArgItems(prior []string) []SlashItem {
 	return items
 }
 
+// presetArgItems offers the two quality-floor postures; the floor labels are
+// protocol tokens, so both stay untranslated.
+func presetArgItems(prior []string) []SlashItem {
+	if len(prior) > 1 {
+		return nil
+	}
+	return []SlashItem{
+		{Label: "standard", Insert: "standard", Hint: i18n.M.ArgPresetStandard},
+		{Label: "delivery", Insert: "delivery", Hint: i18n.M.ArgPresetDelivery},
+	}
+}
+
 func effortArgItems(prior []string, d ArgData) []SlashItem {
 	if len(prior) <= 1 {
-		entry := currentEffortEntry(d)
-		cap := config.EffortCapabilityForEntry(entry)
 		var out []SlashItem
-		for _, level := range cap.Levels {
+		for _, level := range d.EffortLevels {
 			hint := ""
 			switch level {
 			case "auto":
@@ -225,18 +254,6 @@ func effortArgItems(prior []string, d ArgData) []SlashItem {
 		return out
 	}
 	return nil
-}
-
-func currentEffortEntry(d ArgData) *config.ProviderEntry {
-	if strings.TrimSpace(d.CurrentModel) == "" {
-		return nil
-	}
-	cfg, err := config.Load()
-	if err != nil {
-		return nil
-	}
-	entry, _ := cfg.ResolveModel(d.CurrentModel)
-	return entry
 }
 
 func mcpArgItems(prior []string, cur string, d ArgData) []SlashItem {
@@ -613,7 +630,7 @@ func (c *Controller) providerSwitchText(name string) string {
 }
 
 func (c *Controller) skillListText() string {
-	skills := c.skills.discovered()
+	skills := c.skills.list()
 	if len(skills) == 0 {
 		return i18n.M.ListSkillsNone
 	}

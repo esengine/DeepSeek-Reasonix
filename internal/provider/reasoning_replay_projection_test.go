@@ -74,3 +74,66 @@ func TestProjectReplaySafeMessagesKeepsStableBacking(t *testing.T) {
 		t.Fatal("empty-reasoning fallback history must retain its backing slice")
 	}
 }
+
+func TestProjectReasoningStrippedMessagesBypassesEmptyFallbackAfter400(t *testing.T) {
+	p := replayProjectionProvider{allowEmpty: true}
+	msgs := []Message{
+		{Role: RoleUser, Content: "inspect"},
+		{
+			Role:               RoleAssistant,
+			Content:            "visible answer",
+			ReasoningContent:   "stale reasoning",
+			ToolCalls:          []ToolCall{{ID: "call-1", Name: "read_file"}},
+			ReasoningSignature: "stale signature",
+		},
+		{Role: RoleTool, ToolCallID: "call-1", Name: "read_file", Content: "result"},
+		{Role: RoleUser, Content: "continue"},
+	}
+
+	got, changed := ProjectReasoningStrippedMessages(p, msgs)
+	if !changed {
+		t.Fatal("stale reasoning history was not changed")
+	}
+	if len(got) != 3 || got[1].Role != RoleAssistant || got[1].Content != "visible answer" {
+		t.Fatalf("projection = %#v, want user/plain assistant/user", got)
+	}
+	if got[1].ReasoningContent != "" || got[1].ReasoningSignature != "" || len(got[1].ToolCalls) != 0 {
+		t.Fatalf("stale assistant metadata survived projection: %#v", got[1])
+	}
+	if msgs[1].ReasoningContent != "stale reasoning" || len(msgs[1].ToolCalls) != 1 || len(msgs[2].Content) == 0 {
+		t.Fatal("strong projection mutated canonical history")
+	}
+}
+
+func TestProjectReasoningStrippedMessagesPrefixKeepsAppendedToolRound(t *testing.T) {
+	p := replayProjectionProvider{}
+	msgs := []Message{
+		{Role: RoleUser, Content: "inspect"},
+		{
+			Role:             RoleAssistant,
+			Content:          "old answer",
+			ReasoningContent: "stale reasoning",
+		},
+		{Role: RoleUser, Content: "continue"},
+		{
+			Role:             RoleAssistant,
+			ReasoningContent: "fresh reasoning",
+			ToolCalls:        []ToolCall{{ID: "fresh", Name: "read_file"}},
+		},
+		{Role: RoleTool, ToolCallID: "fresh", Name: "read_file", Content: "fresh result"},
+	}
+
+	got, changed := ProjectReasoningStrippedMessagesPrefix(p, msgs, 3)
+	if !changed {
+		t.Fatal("stale prefix was not projected")
+	}
+	if len(got) != len(msgs) {
+		t.Fatalf("projection length = %d, want %d", len(got), len(msgs))
+	}
+	if got[1].ReasoningContent != "" {
+		t.Fatalf("stale prefix reasoning survived: %#v", got[1])
+	}
+	if got[3].ReasoningContent != "fresh reasoning" || len(got[3].ToolCalls) != 1 || got[4].Role != RoleTool {
+		t.Fatalf("appended tool round changed: %#v", got)
+	}
+}

@@ -65,7 +65,7 @@ func Collect(opts Options) Report {
 	disp := func(p string) string { return displayPath(p, root, home, reasonixHome) }
 
 	instr, instructionIssues := collectInstructions(root, home, disp)
-	skillsR, skillIssues := collectSkills(root, home, reasonixHome, cfg, disp)
+	skillsR, skillIssues, skillStore := collectSkills(root, home, reasonixHome, cfg, disp)
 	cmdsR, cmdIssues := collectCommands(root, disp)
 	hooksR, hookIssues := collectHooks(root, home, reasonixHome, cfg, disp)
 	pluginsR, pluginIssues := collectPlugins(reasonixHome, disp)
@@ -86,6 +86,9 @@ func Collect(opts Options) Report {
 		mergeRuntimeHost(&mcpR, opts.RuntimeHost, root, home, reasonixHome, &issues)
 	}
 
+	issues = append(issues, skillToolIssues(skillStore, cfg, mcpR, func(message string) string {
+		return sanitizeErrTextWithPaths(message, root, home, reasonixHome)
+	})...)
 	sortIssues(issues)
 	report := Report{
 		SchemaVersion: SchemaVersion,
@@ -179,18 +182,9 @@ func collectInstructions(root, home string, disp func(string) string) (Instructi
 	return out, issues
 }
 
-func collectSkills(root, home, reasonixHome string, cfg *config.Config, disp func(string) string) (AssetReport, []Issue) {
+func collectSkills(root, home, reasonixHome string, cfg *config.Config, disp func(string) string) (AssetReport, []Issue, *skill.Store) {
 	var issues []Issue
-	store := skill.New(skill.Options{
-		HomeDir:         home,
-		ReasonixHomeDir: reasonixHome,
-		ProjectRoot:     root,
-		CustomPaths:     cfg.SkillCustomPaths(),
-		ExcludedPaths:   cfg.SkillExcludedPaths(),
-		DisabledNames:   cfg.DisabledSkillNames(),
-		MaxDepth:        cfg.SkillMaxDepth(),
-		Stderr:          ioDiscard(),
-	})
+	store := skill.DiagnosticStore(root, home, reasonixHome, cfg)
 	insp := store.Inspect()
 	rep := AssetReport{Roots: []RootInfo{}, Entries: []AssetEntry{}}
 	for _, r := range insp.Roots {
@@ -239,7 +233,7 @@ func collectSkills(root, home, reasonixHome string, cfg *config.Config, disp fun
 			})
 		}
 	}
-	return rep, issues
+	return rep, issues, store
 }
 
 func collectCommands(root string, disp func(string) string) (AssetReport, []Issue) {
@@ -586,6 +580,7 @@ func mergeRuntimeHost(rep *MCPReport, host *plugin.Host, root, home, reasonixHom
 		byName[s.Name] = i
 	}
 	for _, s := range host.Servers() {
+		rep.bindings = append(rep.bindings, s.ToolBindings...)
 		tools := make([]MCPToolInfo, 0, len(s.ToolList))
 		for _, t := range s.ToolList {
 			tools = append(tools, MCPToolInfo{Name: t.Name, ReadOnlyHint: t.ReadOnlyHint, DestructiveHint: t.DestructiveHint})
@@ -802,13 +797,6 @@ func redactCommandDisplay(cmd, root, home, reasonixHome string) string {
 	}
 	return displayPath(fields[0], root, home, reasonixHome)
 }
-
-// ioDiscard avoids importing io in every call site for skill.Options.Stderr.
-func ioDiscard() *discardWriter { return &discardWriter{} }
-
-type discardWriter struct{}
-
-func (d *discardWriter) Write(p []byte) (int, error) { return len(p), nil }
 
 // DefaultLiveTimeout is used when --live is set without --timeout.
 const DefaultLiveTimeout = 5 * time.Second

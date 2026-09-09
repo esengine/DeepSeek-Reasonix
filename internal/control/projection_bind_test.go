@@ -111,7 +111,7 @@ func TestClearSessionRebindsProjectionSidecarPath(t *testing.T) {
 }
 
 func TestBranchRebindsProjectionSidecarPath(t *testing.T) {
-	dir := t.TempDir()
+	dir := schemaOneTempDir(t)
 	path := agent.NewSessionPath(dir, "main")
 	sess := agent.NewSession("sys")
 	sess.Add(provider.Message{Role: provider.RoleUser, Content: "task"})
