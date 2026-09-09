@@ -79,13 +79,46 @@ func ProxyFunc(spec ProxySpec) (func(*http.Request) (*url.URL, error), error) {
 	return proxyFunc(spec)
 }
 
-// NewHTTPClient returns an HTTP client with Reasonix proxy settings applied.
+// UserAgent is the default User-Agent injected into outbound requests that do
+// not already carry one. Entry points (cmd/reasonix, desktop) set it once at
+// startup from their ldflags-injected build version, so the wire identity
+// tracks `reasonix --version`; the dev default keeps local builds honest.
+// Requests with an explicit User-Agent — from user-configured headers or
+// provider presets such as kimi-coding-plan's claude-code/0.1.0 — are never
+// rewritten.
+var UserAgent = "Reasonix/dev"
+
+// NewUserAgentRoundTripper wraps base and injects UserAgent into requests that
+// lack a User-Agent header. It never overwrites an explicit value, and it
+// clones the request before mutating headers so callers' requests are left
+// untouched (http.RoundTripper contract).
+func NewUserAgentRoundTripper(base http.RoundTripper) http.RoundTripper {
+	return &userAgentRoundTripper{base: base, ua: UserAgent}
+}
+
+type userAgentRoundTripper struct {
+	base http.RoundTripper
+	ua   string
+}
+
+func (rt *userAgentRoundTripper) RoundTrip(req *http.Request) (*http.Response, error) {
+	if req.Header.Get("User-Agent") != "" {
+		return rt.base.RoundTrip(req)
+	}
+	cloned := req.Clone(req.Context())
+	cloned.Header.Set("User-Agent", rt.ua)
+	return rt.base.RoundTrip(cloned)
+}
+
+// NewHTTPClient returns an HTTP client with Reasonix proxy settings applied
+// and the default User-Agent injected into requests that don't already carry
+// one (user-configured headers and provider presets always win).
 func NewHTTPClient(spec ProxySpec, opts TransportOptions) (*http.Client, error) {
 	tr, err := NewTransport(spec, opts)
 	if err != nil {
 		return nil, err
 	}
-	return &http.Client{Transport: tr}, nil
+	return &http.Client{Transport: NewUserAgentRoundTripper(tr)}, nil
 }
 
 // NewTransport clones net/http's default transport and overlays the requested

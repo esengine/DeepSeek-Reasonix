@@ -587,3 +587,60 @@ func TestForceIPv4Dials(t *testing.T) {
 		t.Error("forced-IPv4 dial should reject an IPv6 address")
 	}
 }
+
+func TestUserAgentInjectedWhenAbsent(t *testing.T) {
+	var got atomic.Value // string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		got.Store(r.Header.Get("User-Agent"))
+	}))
+	defer srv.Close()
+
+	prev := UserAgent
+	UserAgent = "Reasonix/v1.35.0"
+	defer func() { UserAgent = prev }()
+
+	client, err := NewHTTPClient(ProxySpec{Mode: ModeOff}, TransportOptions{})
+	if err != nil {
+		t.Fatalf("NewHTTPClient: %v", err)
+	}
+	resp, err := client.Get(srv.URL)
+	if err != nil {
+		t.Fatalf("GET: %v", err)
+	}
+	resp.Body.Close()
+
+	if ua, _ := got.Load().(string); ua != "Reasonix/v1.35.0" {
+		t.Fatalf("User-Agent = %q, want %q", ua, "Reasonix/v1.35.0")
+	}
+}
+
+func TestUserAgentNotOverwritten(t *testing.T) {
+	var got atomic.Value // string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		got.Store(r.Header.Get("User-Agent"))
+	}))
+	defer srv.Close()
+
+	prev := UserAgent
+	UserAgent = "Reasonix/v1.35.0"
+	defer func() { UserAgent = prev }()
+
+	client, err := NewHTTPClient(ProxySpec{Mode: ModeOff}, TransportOptions{})
+	if err != nil {
+		t.Fatalf("NewHTTPClient: %v", err)
+	}
+	req, err := http.NewRequest(http.MethodGet, srv.URL, nil)
+	if err != nil {
+		t.Fatalf("NewRequest: %v", err)
+	}
+	req.Header.Set("User-Agent", "claude-code/0.1.0")
+	resp, err := client.Do(req)
+	if err != nil {
+		t.Fatalf("Do: %v", err)
+	}
+	resp.Body.Close()
+
+	if ua, _ := got.Load().(string); ua != "claude-code/0.1.0" {
+		t.Fatalf("User-Agent = %q, want explicit value preserved %q", ua, "claude-code/0.1.0")
+	}
+}
