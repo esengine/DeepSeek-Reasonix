@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"reflect"
+	"slices"
 	"strings"
 	"testing"
 )
@@ -740,6 +741,58 @@ func TestRepairSerialTodoUpdateOnlyNormalizesSafeCompletionTransition(t *testing
 				t.Fatal("unsafe todo update was repaired")
 			}
 		})
+	}
+}
+
+func TestRepairSerialTodoUpdateReportsOnlySafeDeferredCompletions(t *testing.T) {
+	previous := []TodoItem{
+		{Content: "A", Status: "in_progress", StepID: "a"},
+		{Content: "B", Status: "pending", StepID: "b"},
+		{Content: "C", Status: "pending", StepID: "c"},
+		{Content: "D", Status: "pending", StepID: "d"},
+	}
+	next := []TodoItem{
+		{Content: "A", Status: "in_progress", StepID: "a"},
+		{Content: "B", Status: "completed", StepID: "b"},
+		{Content: "C", Status: "completed", StepID: "c"},
+		{Content: "D", Status: "pending", StepID: "d"},
+	}
+	canonical, deferred, ok := RepairSerialTodoUpdateWithDeferred(previous, next)
+	if !ok {
+		t.Fatal("safe out-of-order completion should be repaired")
+	}
+	if err := ValidateSerialTodos(canonical); err != nil {
+		t.Fatalf("canonical list is not serial: %v", err)
+	}
+	if got := TodoStepIDs(deferred); !slices.Equal(got, []string{"b", "c"}) {
+		t.Fatalf("deferred ids = %v, want [b c]", got)
+	}
+	if canonical[1].Status != "pending" || canonical[2].Status != "pending" {
+		t.Fatalf("deferred completions leaked into canonical list: %+v", canonical)
+	}
+
+	currentOnly := []TodoItem{
+		{Content: "A", Status: "completed", StepID: "a"},
+		{Content: "B", Status: "pending", StepID: "b"},
+		{Content: "C", Status: "pending", StepID: "c"},
+	}
+	canonical, deferred, ok = RepairSerialTodoUpdateWithDeferred(previous[:3], currentOnly)
+	if !ok || len(deferred) != 0 || canonical[0].Status != "completed" || canonical[1].Status != "in_progress" {
+		t.Fatalf("current completion repair = canonical=%+v deferred=%+v repaired=%v; current completion must not become deferred", canonical, deferred, ok)
+	}
+
+	unsafe := append([]TodoItem(nil), next...)
+	unsafe[2].StepID = "b"
+	if _, deferred, ok := RepairSerialTodoUpdateWithDeferred(previous, unsafe); ok || len(deferred) != 0 {
+		t.Fatalf("duplicate identity must not produce deferred state: repaired=%v deferred=%v", ok, deferred)
+	}
+
+	duplicateLegacy := append([]TodoItem(nil), next...)
+	duplicateLegacy[2].StepID = ""
+	duplicateLegacy[2].Content = duplicateLegacy[1].Content
+	duplicateLegacy[2].ActiveForm = duplicateLegacy[1].ActiveForm
+	if _, deferred, ok := RepairSerialTodoUpdateWithDeferred(previous, duplicateLegacy); ok || len(deferred) != 0 {
+		t.Fatalf("duplicate legacy identity must not be repaired: repaired=%v deferred=%v", ok, deferred)
 	}
 }
 

@@ -90,6 +90,9 @@ func (a *Agent) recordToolExecutionAudit(readOnly, parallel bool, startedAt, dur
 func (a *Agent) storeBatchToolResult(ctx context.Context, call provider.ToolCall, o toolOutcome) {
 	state := outcomeRunState(o)
 	msg := provider.Message{Role: provider.RoleTool, Content: o.output, Images: o.images, VisionSummary: o.visionSummary, ToolCallID: call.ID, Name: call.Name, ToolRunState: state, ToolExecution: toProviderToolExecution(o.execution)}
+	if o.deferredTodoState != nil && state == provider.ToolRunCompleted && (call.Name == "todo_write" || call.Name == "complete_step") {
+		msg.DeferredTodoCompletions = cloneDeferredTodoState(o.deferredTodoState)
+	}
 	if o.rawOutput != "" && o.rawOutput != o.output {
 		msg.RawContent = o.rawOutput
 	}

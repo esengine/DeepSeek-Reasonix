@@ -9,29 +9,29 @@ import "slices"
 // ModelMessages removes durable display-only records before a request is
 // handed to any provider. Healthy sessions without such records keep their
 // original backing slice, preserving the allocation and prompt-cache fast path.
-func ModelMessages(msgs []Message) []Message { return projectMessages(msgs, false, false) }
+func ModelMessages(msgs []Message) []Message { return projectMessages(msgs, false, false, false) }
 
 // ProjectionMessages is ModelMessages for a stored projection, except that
 // ToolExecution and Origin survive: a projection is also the next compaction's
 // input, and those records classify tool failures and host-authored protocol
 // messages. Stripping belongs at the provider boundary, which every request
 // path already crosses.
-func ProjectionMessages(msgs []Message) []Message { return projectMessages(msgs, true, true) }
+func ProjectionMessages(msgs []Message) []Message { return projectMessages(msgs, true, true, true) }
 
-func messagesNeedProjection(msgs []Message, keepExecution, keepOrigin bool) bool {
+func messagesNeedProjection(msgs []Message, keepExecution, keepOrigin, keepDeferred bool) bool {
 	for _, m := range msgs {
 		if m.ReadPause != nil {
 			return true
 		}
-		if slices.ContainsFunc(m.ServerSearch, func(s ServerSearchCall) bool { return s.SourcesStatus != "" }) || len(m.ProtocolRecovery) > 0 || (!keepExecution && slices.ContainsFunc(m.ToolCalls, func(c ToolCall) bool { return len(c.WriteIntents) > 0 })) || m.LocalOnly || (!keepOrigin && m.Origin != "") || m.RawContent != "" || m.ProviderContent != "" || m.DecisionReceipt != nil || len(m.DecisionReceipts) > 0 || m.VisionSummary != nil || m.MCPApp != nil || len(m.ReadResult) > 0 || ((m.ToolExecution != nil || m.ToolRunState != "") && !keepExecution) {
+		if slices.ContainsFunc(m.ServerSearch, func(s ServerSearchCall) bool { return s.SourcesStatus != "" }) || len(m.ProtocolRecovery) > 0 || (!keepExecution && slices.ContainsFunc(m.ToolCalls, func(c ToolCall) bool { return len(c.WriteIntents) > 0 })) || m.LocalOnly || (!keepOrigin && m.Origin != "") || m.RawContent != "" || m.ProviderContent != "" || m.DecisionReceipt != nil || len(m.DecisionReceipts) > 0 || m.VisionSummary != nil || m.MCPApp != nil || len(m.ReadResult) > 0 || (!keepDeferred && m.DeferredTodoCompletions != nil) || ((m.ToolExecution != nil || m.ToolRunState != "") && !keepExecution) {
 			return true
 		}
 	}
 	return false
 }
 
-func projectMessages(msgs []Message, keepExecution, keepOrigin bool) []Message {
-	if !messagesNeedProjection(msgs, keepExecution, keepOrigin) {
+func projectMessages(msgs []Message, keepExecution, keepOrigin, keepDeferred bool) []Message {
+	if !messagesNeedProjection(msgs, keepExecution, keepOrigin, keepDeferred) {
 		return msgs
 	}
 	out := make([]Message, 0, len(msgs))
@@ -63,6 +63,9 @@ func projectMessages(msgs []Message, keepExecution, keepOrigin bool) []Message {
 		candidate.VisionSummary = nil
 		// Apps presentation stays local; it must never change provider bytes.
 		candidate.MCPApp = nil
+		if !keepDeferred {
+			candidate.DeferredTodoCompletions = nil
+		}
 		if !keepExecution {
 			// Local shell metadata must never enter provider request bytes.
 			candidate.ToolExecution = nil

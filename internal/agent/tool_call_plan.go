@@ -48,8 +48,12 @@ type toolCallPlan struct {
 	perCallWriteRoots                                      []string
 	skipOrdinaryGate                                       bool
 	// normalizedArgs carries the canonical todo_write arguments when the host
-	// repaired a safe out-of-order completion update.
+	// repaired a safe out-of-order completion update or auto-applied deferred
+	// completions.
 	normalizedArgs string
+	// deferredTodoState is the durable snapshot attached to a successful todo
+	// result so session reload can restore the completion facts.
+	deferredTodoState *provider.DeferredTodoCompletionState
 	// incompleteReadRoot binds an exact host-requested source/result page to
 	// the read chain it advances. Empty means an independent tool call.
 	incompleteReadRoot   string

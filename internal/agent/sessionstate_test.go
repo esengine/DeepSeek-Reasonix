@@ -27,6 +27,7 @@ var sessionReset = map[string]bool{
 	"compactionState":                       true,
 	"cacheState":                            true,
 	"compaction":                            true,
+	"deferredTodoCompletions":               true,
 }
 
 // sessionCarryOver names the fields reset deliberately leaves alone, each with

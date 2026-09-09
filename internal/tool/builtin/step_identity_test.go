@@ -102,6 +102,19 @@ func TestTodoWriteRejectsDroppingAnExistingStepID(t *testing.T) {
 	}
 }
 
+func TestTodoWriteRejectsChangingAnExistingStepID(t *testing.T) {
+	ctx, _ := ledgerWithTodos([]evidence.TodoItem{
+		{Content: "Change the DB", Status: "in_progress", StepID: "plan_step_01"},
+	})
+	args := todoWriteArgs(t, []evidence.TodoItem{
+		{Content: "Change the DB", Status: "in_progress", StepID: "plan_step_99"},
+	})
+	_, err := (todoWrite{}).Execute(ctx, args)
+	if err == nil || !strings.Contains(err.Error(), "changed or dropped") || !strings.Contains(err.Error(), "plan_step_01") {
+		t.Fatalf("changed step_id error = %v", err)
+	}
+}
+
 func TestTodoWriteAcceptsARetitleThatKeepsTheStepID(t *testing.T) {
 	ctx, _ := ledgerWithTodos([]evidence.TodoItem{
 		{Content: "Fix authentication", Status: "in_progress", StepID: "plan_step_01"},

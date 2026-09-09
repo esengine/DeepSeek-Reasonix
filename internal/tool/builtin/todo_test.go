@@ -98,6 +98,11 @@ func TestTodoWriteRepairsOutOfOrderCompletionAgainstBaseline(t *testing.T) {
 	if err != nil {
 		t.Fatalf("safe out-of-order completion should be accepted: %v", err)
 	}
+	for _, phrase := range []string{"recorded", "deferred", "not an error", "do not submit", "applied automatically"} {
+		if !strings.Contains(strings.ToLower(out), phrase) {
+			t.Fatalf("todo_write output = %q, want phrase %q", out, phrase)
+		}
+	}
 	if !strings.Contains(out, "remain pending") || !strings.Contains(out, "1 pending") {
 		t.Fatalf("todo_write output = %q, want normalization guidance and pending count", out)
 	}

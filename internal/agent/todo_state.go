@@ -17,13 +17,13 @@ func (a *Agent) SeedTodoState(todos []evidence.TodoItem) {
 	if len(todos) == 0 {
 		return
 	}
-	a.setTodoState(todos)
+	replaceCanonicalTodoState(a, todos)
 }
 
 // ReplaceTodoState mirrors a host-generated todo list into the canonical state.
 // It is used when the host, rather than the model, owns the full state transition.
 func (a *Agent) ReplaceTodoState(todos []evidence.TodoItem) {
-	a.setTodoState(todos)
+	replaceCanonicalTodoState(a, todos)
 	a.recordTodoState(a.CanonicalTodoState())
 }
 

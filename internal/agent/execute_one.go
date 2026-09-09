@@ -32,6 +32,7 @@ func (a *Agent) executeOne(ctx context.Context, turn *turnRuntime, call provider
 		out.readEnvelope = plan.readEnvelope
 		out.readActiveMillis = plan.readActiveMillis
 		out.normalizedArgs = plan.normalizedArgs
+		out.deferredTodoState = plan.deferredTodoState
 		if plan.mutationObserved && !plan.mutationAfterDone {
 			a.observeAfterMutation(plan)
 		}
@@ -647,7 +648,7 @@ func (a *Agent) finishToolExecution(ctx context.Context, plan *toolCallPlan) too
 	}
 	// Always re-read after post hooks —
 	// partialwritesandhooksideeffectscanchangethepreviewedpathevenwhentheconcrete tool returned an error.
-	a.finalizeObservedToolReceipts(plan, result, execution, err)
+	result = a.finalizeObservedToolReceipts(plan, result, execution, err)
 	result = a.withRecoveryObservation(ctx, evidenceName, evidenceArgs, readOnly, mutates, result, err, recoveryGen)
 	if err != nil {
 		detail := result

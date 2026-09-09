@@ -82,8 +82,10 @@ type toolOutcome struct {
 	incompleteRead     *incompleteReadDeferred
 	subagentOutcome    *SubagentOutcome
 	// normalizedArgs is set when a successful todo_write was repaired into the
-	// strict canonical serial state. The caller uses it for session/UI parity.
-	normalizedArgs string
+	// strict canonical serial state or when deferred completions were applied.
+	// The caller uses it for session/UI parity.
+	normalizedArgs    string
+	deferredTodoState *provider.DeferredTodoCompletionState
 }
 
 // batchExecution is the result of one provider tool-call batch.

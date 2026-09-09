@@ -3,6 +3,8 @@ package agent
 import (
 	"context"
 	"encoding/json"
+	"slices"
+	"strings"
 
 	"reasonix/internal/event"
 	"reasonix/internal/evidence"
@@ -14,10 +16,10 @@ import (
 // recordToolReceipts files the turn-scoped evidence for one executed call:
 // always the model-visible call for audit, plus the real target's attributes
 // for mutation/read classification when a proxy resolved elsewhere.
-func (a *Agent) finalizeObservedToolReceipts(plan *toolCallPlan, result string, execution *tool.ShellExecution, err error) {
+func (a *Agent) finalizeObservedToolReceipts(plan *toolCallPlan, result string, execution *tool.ShellExecution, err error) string {
 	a.observeAfterMutation(plan)
 	plan.mutationAfterDone = true
-	a.recordToolReceipts(plan, result, execution, err)
+	return a.recordToolReceipts(plan, result, execution, err)
 }
 
 // emitTodoResultPreview flips the todo_write card to done the moment the call
@@ -34,18 +36,20 @@ func (a *Agent) emitTodoResultPreview(call provider.ToolCall, output string) {
 	})
 }
 
-func (a *Agent) recordToolReceipts(plan *toolCallPlan, result string, execution *tool.ShellExecution, err error) {
+func (a *Agent) recordToolReceipts(plan *toolCallPlan, result string, execution *tool.ShellExecution, err error) string {
 	if a.task.ledger == nil {
-		return
+		return result
 	}
 	call := plan.call
 	args := json.RawMessage(call.Arguments)
+	var repairedDeferred []evidence.TodoItem
 	if err == nil && call.Name == "todo_write" {
-		if normalized, ok := normalizeRepairedTodoArgs(plan.cctx, args); ok {
+		if normalized, deferred, ok := normalizeRepairedTodoArgs(plan.cctx, args); ok {
 			call.Arguments = normalized
 			args = json.RawMessage(normalized)
 			plan.call = call
 			plan.normalizedArgs = normalized
+			repairedDeferred = deferred
 		}
 	}
 	// The session floor in force at write time is a fact of the write: it
@@ -63,7 +67,11 @@ func (a *Agent) recordToolReceipts(plan *toolCallPlan, result string, execution 
 		a.task.ledger.Record(rec)
 		a.commitToolReceipt(rec)
 		if err == nil {
-			a.advanceCanonicalTodo(rec.Step)
+			transition := a.advanceCanonicalTodo(rec.Step)
+			if len(transition.consumed) > 0 {
+				result = appendDeferredAppliedFeedback(result, transition.consumed, transition.todos)
+			}
+			plan.deferredTodoState = a.deferredTodoStateSnapshot(false)
 		}
 	case plan.evidenceName != call.Name:
 		proxy := evidence.ReceiptFromToolCall(call.Name, args, err == nil, true)
@@ -84,30 +92,48 @@ func (a *Agent) recordToolReceipts(plan *toolCallPlan, result string, execution 
 		a.stampReceiptDeliveryScope(&rec)
 		rec.PolicyFloor = floorStamp
 		decorateExecutionReceipt(&rec, result, execution)
-		a.task.ledger.Record(rec)
-		a.commitToolReceipt(rec)
 		if err == nil && call.Name == "todo_write" {
-			a.setTodoState(rec.Todos)
+			transition := a.acceptTodoUpdate(rec.Todos, repairedDeferred, plan.planReplacementAuthorized || a.planMode.Load())
+			rec.Todos = transition.todos
+			if normalized, changed := canonicalTodoArgs(args, transition.todos); changed {
+				call.Arguments = normalized
+				args = json.RawMessage(normalized)
+				plan.call = call
+				plan.normalizedArgs = normalized
+				rec.Args = args
+			}
+			plan.deferredTodoState = a.deferredTodoStateSnapshot(true)
+			if len(transition.added) > 0 && !strings.Contains(strings.ToLower(result), "recorded") {
+				result = appendDeferredRecordedFeedback(result, transition.added, transition.todos)
+			}
+			if len(transition.consumed) > 0 {
+				result = appendDeferredAppliedFeedback(result, transition.consumed, transition.todos)
+			}
 			if len(rec.Todos) > 0 {
 				a.turn.deliveryCriteriaEstablished = true
 			}
+		}
+		a.task.ledger.Record(rec)
+		a.commitToolReceipt(rec)
+		if err == nil && call.Name == "todo_write" {
 			a.emitTodoResultPreview(call, result)
 		}
 	}
+	return result
 }
 
-func normalizeRepairedTodoArgs(ctx context.Context, args json.RawMessage) (string, bool) {
+func normalizeRepairedTodoArgs(ctx context.Context, args json.RawMessage) (string, []evidence.TodoItem, bool) {
 	var fields map[string]json.RawMessage
 	if err := json.Unmarshal(args, &fields); err != nil {
-		return "", false
+		return "", nil, false
 	}
 	rawTodos, ok := fields["todos"]
 	if !ok {
-		return "", false
+		return "", nil, false
 	}
 	var next []evidence.TodoItem
 	if err := json.Unmarshal(rawTodos, &next); err != nil {
-		return "", false
+		return "", nil, false
 	}
 	previous := []evidence.TodoItem(nil)
 	if ledger, ok := evidence.FromContext(ctx); ok {
@@ -118,11 +144,40 @@ func normalizeRepairedTodoArgs(ctx context.Context, args json.RawMessage) (strin
 	if len(previous) == 0 {
 		previous, _ = evidence.TodoStateFromContext(ctx)
 	}
-	canonical, repaired := evidence.RepairSerialTodoUpdate(previous, next)
+	canonical, deferred, repaired := evidence.RepairSerialTodoUpdateWithDeferred(previous, next)
 	if !repaired {
+		return "", nil, false
+	}
+	normalized, ok := marshalTodoArgs(fields, canonical)
+	if !ok {
+		return "", nil, false
+	}
+	return normalized, deferred, true
+}
+
+func canonicalTodoArgs(args json.RawMessage, todos []evidence.TodoItem) (string, bool) {
+	var fields map[string]json.RawMessage
+	if err := json.Unmarshal(args, &fields); err != nil {
 		return "", false
 	}
-	canonicalTodos, err := json.Marshal(canonical)
+	rawTodos, ok := fields["todos"]
+	if !ok {
+		return "", false
+	}
+	var current []evidence.TodoItem
+	if err := json.Unmarshal(rawTodos, &current); err != nil {
+		return "", false
+	}
+	current = evidence.ReceiptFromToolCall("todo_write", args, true, true).Todos
+	if slices.Equal(current, todos) {
+		return string(args), false
+	}
+	normalized, ok := marshalTodoArgs(fields, todos)
+	return normalized, ok
+}
+
+func marshalTodoArgs(fields map[string]json.RawMessage, todos []evidence.TodoItem) (string, bool) {
+	canonicalTodos, err := json.Marshal(todos)
 	if err != nil {
 		return "", false
 	}
@@ -132,4 +187,20 @@ func normalizeRepairedTodoArgs(ctx context.Context, args json.RawMessage) (strin
 		return "", false
 	}
 	return string(normalized), true
+}
+
+func appendDeferredRecordedFeedback(result string, ids []string, todos []evidence.TodoItem) string {
+	names := todoNamesForKeys(ids, todos)
+	if names == "" {
+		names = "the later task(s)"
+	}
+	return strings.TrimRight(result, "\n") + " The completion report for " + names + " was recorded and deferred while an earlier serial task remains in progress. This is not an error. Do not submit again; it will be applied automatically after the preceding tasks complete."
+}
+
+func appendDeferredAppliedFeedback(result string, ids []string, todos []evidence.TodoItem) string {
+	names := todoNamesForKeys(ids, todos)
+	if names == "" {
+		names = "the previously deferred task(s)"
+	}
+	return strings.TrimRight(result, "\n") + " Todo list updated. Previously deferred completions for " + names + " were applied automatically. No additional todo update is needed for these tasks."
 }

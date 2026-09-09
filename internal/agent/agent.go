@@ -1145,6 +1145,9 @@ func New(prov provider.Provider, tools *tool.Registry, session *Session, opts Op
 		strictAlternatingRoles: opts.StrictAlternatingRoles,
 	}
 	a.sess.output.outputBudget = outputBudgetOf(prov)
+	if session != nil {
+		a.rebuildTodoState(session.Snapshot())
+	}
 	if a.sess.path != "" {
 		a.LoadProjectionSidecar(a.sess.path)
 	}
@@ -1416,6 +1419,7 @@ func (a *Agent) deliveryMutationCheckpointReady() bool {
 func (a *Agent) setTodoState(todos []evidence.TodoItem) {
 	a.sess.todoMu.Lock()
 	a.sess.todoState = evidence.NormalizeSerialTodos(todos)
+	a.pruneDeferredTodoCompletionsLocked()
 	a.sess.todoMu.Unlock()
 }
 
@@ -1463,24 +1467,62 @@ func registryHasWriterTools(reg *tool.Registry) bool {
 }
 
 // advanceCanonicalTodo flips the canonical todo matching a signed-off step to
-// completed (promoting the next pending item to in_progress) and emits a
-// synthetic todo_write so the task panel reflects it without the model
-// re-sending the whole list. No-op when nothing matches or it is already done.
-func (a *Agent) advanceCanonicalTodo(step string) {
+// completed (promoting the next pending item to in_progress), consumes only a
+// contiguous deferred prefix, and emits a synthetic todo_write so the task
+// panel reflects it without the model re-sending the whole list. No-op when
+// nothing matches or it is already done.
+func (a *Agent) advanceCanonicalTodo(step string) todoStateTransition {
 	a.sess.todoMu.Lock()
 	if len(a.sess.todoState) == 0 {
 		a.sess.todoMu.Unlock()
-		return
+		return todoStateTransition{}
 	}
 	m, ok := evidence.MatchStep(step, a.sess.todoState)
 	if !ok || !evidence.AdvanceSerialTodo(a.sess.todoState, m.Index-1) {
 		a.sess.todoMu.Unlock()
-		return
+		return todoStateTransition{}
 	}
+	consumed := a.consumeDeferredCompletionsLocked()
 	snapshot := append([]evidence.TodoItem(nil), a.sess.todoState...)
+	deferred := deferredTodoIDsLocked(a.sess.deferredTodoCompletions)
 	a.sess.todoMu.Unlock()
+	a.persistCanonicalTodoArguments(snapshot)
 	a.recordTodoState(snapshot)
 	a.emitTodoState(snapshot, m.Index)
+	return todoStateTransition{todos: snapshot, deferred: deferred, consumed: consumed}
+}
+
+// persistCanonicalTodoArguments keeps the latest successful todo_write in the
+// session aligned with a host-side complete_step advance. Without this write,
+// a reload would replay the older pending suffix because the synthetic ledger
+// receipt is intentionally turn-local.
+func (a *Agent) persistCanonicalTodoArguments(todos []evidence.TodoItem) {
+	if a == nil || a.sess.conversation == nil || len(todos) == 0 {
+		return
+	}
+	msgs := a.sess.conversation.Snapshot()
+	successful := successfulToolCallIDs(msgs)
+	for i := len(msgs) - 1; i >= 0; i-- {
+		if msgs[i].Role != provider.RoleAssistant {
+			continue
+		}
+		for j := len(msgs[i].ToolCalls) - 1; j >= 0; j-- {
+			call := msgs[i].ToolCalls[j]
+			if call.Name != "todo_write" || !successful[call.ID] {
+				continue
+			}
+			var fields map[string]json.RawMessage
+			if err := json.Unmarshal([]byte(call.Arguments), &fields); err != nil {
+				return
+			}
+			normalized, ok := marshalTodoArgs(fields, todos)
+			if !ok {
+				return
+			}
+			a.sess.conversation.UpdateToolCallArguments(provider.ToolCall{ID: call.ID, Arguments: normalized})
+			return
+		}
+	}
 }
 
 // emitTodoState emits a synthetic todo_write event so the frontend task panel
@@ -1527,10 +1569,14 @@ func (a *Agent) rebuildTodoState(msgs []provider.Message) {
 		}
 	}
 	if baseIdx < 0 {
-		a.setTodoState(nil)
+		a.restoreTodoState(nil, nil)
 		return
 	}
+	var persistedDeferred *provider.DeferredTodoCompletionState
 	for i := baseIdx; i < len(msgs); i++ {
+		if msgs[i].Role == provider.RoleTool && successful[msgs[i].ToolCallID] && msgs[i].DeferredTodoCompletions != nil && (msgs[i].Name == "todo_write" || msgs[i].Name == "complete_step") {
+			persistedDeferred = cloneDeferredTodoState(msgs[i].DeferredTodoCompletions)
+		}
 		for _, tc := range msgs[i].ToolCalls {
 			if tc.Name != "complete_step" || !successful[tc.ID] {
 				continue
@@ -1541,7 +1587,7 @@ func (a *Agent) rebuildTodoState(msgs []provider.Message) {
 			}
 		}
 	}
-	a.setTodoState(todos)
+	a.restoreTodoState(todos, persistedDeferred)
 	a.consumeTodoOnlyReadinessMarkerIfResolved()
 }
 

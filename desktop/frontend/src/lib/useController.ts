@@ -1734,7 +1734,7 @@ function applyEvent(s: State, e: WireEvent, preserveToolPayloads = false): State
           // retaining the raw dispatch arguments indefinitely. In particular,
           // todo_write can be normalized from an out-of-order completed state
           // to the serial canonical state before its result is emitted.
-          const args = t.args ? t.args : existing.args;
+          const args = t.args ?? existing.args;
           const summary = t.err ? undefined : existing.summary || summarize(existing.name, args, t.output);
           let status: ToolStatus = t.err ? "error" : "done";
           if (existing.subagentProgress) {

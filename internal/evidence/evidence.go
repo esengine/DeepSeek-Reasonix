@@ -247,53 +247,148 @@ func NormalizeSerialTodos(todos []TodoItem) []TodoItem {
 // A list without a prior baseline is also refused so initial malformed plans
 // keep the original validation behavior.
 func RepairSerialTodoUpdate(previous, next []TodoItem) ([]TodoItem, bool) {
+	canonical, _, repaired := RepairSerialTodoUpdateWithDeferred(previous, next)
+	return canonical, repaired
+}
+
+// RepairSerialTodoUpdateWithDeferred is RepairSerialTodoUpdate plus the
+// completion facts that were deliberately lowered back to pending. The
+// returned items are only the safe out-of-order completions: they were pending
+// in a valid baseline, occur after the baseline's current serial position, and
+// remain pending in the repaired canonical list. The strict validator remains
+// authoritative; this helper never accepts a malformed list by itself.
+func RepairSerialTodoUpdateWithDeferred(previous, next []TodoItem) (canonical, deferred []TodoItem, repaired bool) {
 	previous = normalizeTodos(previous)
 	next = normalizeTodos(next)
 	if len(previous) == 0 || len(next) < len(previous) {
-		return nil, false
+		return nil, nil, false
 	}
 	if ValidateSerialTodos(next) == nil {
-		return nil, false
+		return nil, nil, false
+	}
+	if !uniqueTodoIdentityKeys(previous) || !uniqueTodoIdentityKeys(next) {
+		return nil, nil, false
 	}
 
 	changedCompletion := false
 	for i, prior := range previous {
 		candidate := next[i]
 		if prior.Level != candidate.Level {
-			return nil, false
+			return nil, nil, false
+		}
+		if priorID, priorHasID := nonEmptyTodoID(prior); priorHasID {
+			candidateID, candidateHasID := nonEmptyTodoID(candidate)
+			if !candidateHasID || candidateID != priorID {
+				return nil, nil, false
+			}
 		}
 		match, found := MatchTodoIdentity(prior, next)
 		if !found || match.Index != i+1 {
-			return nil, false
+			return nil, nil, false
 		}
 		before, after := todoStatus(prior.Status), todoStatus(candidate.Status)
 		switch {
 		case before == "completed" && after != "completed":
-			return nil, false
+			return nil, nil, false
 		case before == after:
 			continue
 		case after == "completed":
 			changedCompletion = true
 		default:
-			return nil, false
+			return nil, nil, false
 		}
 	}
 	for _, candidate := range next[len(previous):] {
 		// Appending untouched work is compatible with the existing plan contract;
 		// an appended completed/current item would be an unverified mutation.
 		if todoStatus(candidate.Status) != "pending" {
-			return nil, false
+			return nil, nil, false
 		}
 	}
 	if !changedCompletion {
-		return nil, false
+		return nil, nil, false
 	}
 
-	canonical := NormalizeSerialTodos(next)
+	canonical = NormalizeSerialTodos(next)
 	if err := ValidateSerialTodos(canonical); err != nil {
-		return nil, false
+		return nil, nil, false
 	}
-	return canonical, true
+
+	active := firstSerialWorkIndex(previous)
+	seenKeys := make(map[string]bool, len(next))
+	for i, prior := range previous {
+		candidate := next[i]
+		// A current item being marked completed without promoting its successor
+		// is an existing compatibility repair, not a deferred completion. Only a
+		// later item that was pending in the valid baseline is safe to remember.
+		if active < 0 || i <= active || todoStatus(prior.Status) != "pending" || todoStatus(candidate.Status) != "completed" || todoStatus(canonical[i].Status) != "pending" {
+			continue
+		}
+		key, ok := TodoIdentityKey(candidate)
+		if !ok || seenKeys[key] {
+			continue
+		}
+		// Duplicate identities make attribution ambiguous. Do not create a
+		// deferred fact that could later be applied to the wrong item.
+		duplicate := false
+		for j, other := range next {
+			if j == i {
+				continue
+			}
+			otherKey, otherOK := TodoIdentityKey(other)
+			if otherOK && otherKey == key {
+				duplicate = true
+				break
+			}
+		}
+		if duplicate {
+			continue
+		}
+		seenKeys[key] = true
+		deferred = append(deferred, candidate)
+	}
+	return canonical, deferred, true
+}
+
+func uniqueTodoIdentityKeys(todos []TodoItem) bool {
+	seen := make(map[string]struct{}, len(todos))
+	for _, todo := range todos {
+		key, ok := TodoIdentityKey(todo)
+		if !ok {
+			continue
+		}
+		if _, exists := seen[key]; exists {
+			return false
+		}
+		seen[key] = struct{}{}
+	}
+	return true
+}
+
+func nonEmptyTodoID(todo TodoItem) (string, bool) {
+	id := strings.TrimSpace(todo.StepID)
+	return id, id != ""
+}
+
+// firstSerialWorkIndex returns the first actionable item in a valid serial
+// list. For a phase it points at the first unfinished sub-step, or the phase
+// header when all sub-steps are complete and the header is ready to sign off.
+func firstSerialWorkIndex(todos []TodoItem) int {
+	for _, seg := range serialTodoSegments(todos) {
+		if serialSegmentCompleted(todos, seg) {
+			continue
+		}
+		if seg.end == seg.head+1 {
+			return seg.head
+		}
+		for i := seg.head + 1; i < seg.end; i++ {
+			if todoStatus(todos[i].Status) != "completed" {
+				return i
+			}
+		}
+		return seg.head
+	}
+	return -1
 }
 
 func serialSegmentCompleted(todos []TodoItem, seg todoSegment) bool {

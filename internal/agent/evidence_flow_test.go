@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"reflect"
+	"slices"
 	"strings"
 	"testing"
 
@@ -1324,6 +1325,9 @@ func TestEvidenceFlowRepairsOutOfOrderTodoAndPersistsCanonicalList(t *testing.T)
 	if len(canonical) != 2 || canonical[0].Status != "in_progress" || canonical[1].Status != "pending" {
 		t.Fatalf("canonical todos = %+v, want serial repair", canonical)
 	}
+	if got := a.DeferredTodoCompletions(); !slices.Equal(got, []string{"second"}) {
+		t.Fatalf("deferred completions = %v, want [second]", got)
+	}
 
 	var persisted provider.ToolCall
 	for _, message := range a.sess.conversation.Snapshot() {
@@ -1344,5 +1348,96 @@ func TestEvidenceFlowRepairsOutOfOrderTodoAndPersistsCanonicalList(t *testing.T)
 	}
 	if len(payload.Todos) != 2 || payload.Todos[1].Status != "pending" {
 		t.Fatalf("persisted repaired args = %+v, want second item pending", payload.Todos)
+	}
+	for _, message := range a.sess.conversation.Snapshot() {
+		if message.Role == provider.RoleTool && message.ToolCallID == "c2" {
+			if message.DeferredTodoCompletions == nil || len(message.DeferredTodoCompletions.Items) != 1 || message.DeferredTodoCompletions.Items[0].ID != "second" {
+				t.Fatalf("persisted deferred metadata = %+v, want second", message.DeferredTodoCompletions)
+			}
+		}
+	}
+	a.rebuildTodoState(a.sess.conversation.Snapshot())
+	if got := a.DeferredTodoCompletions(); !slices.Equal(got, []string{"second"}) {
+		t.Fatalf("reloaded deferred completions = %v, want [second]", got)
+	}
+}
+
+func TestEvidenceFlowConsumesDeferredTodoAfterCurrentSignoff(t *testing.T) {
+	todoWrite, ok := tool.LookupBuiltin("todo_write")
+	if !ok {
+		t.Fatal("todo_write builtin not registered")
+	}
+	completeStep, ok := tool.LookupBuiltin("complete_step")
+	if !ok {
+		t.Fatal("complete_step builtin not registered")
+	}
+	reg := tool.NewRegistry()
+	reg.Add(todoWrite)
+	reg.Add(completeStep)
+	prov := &scriptedProvider{name: "p", turns: [][]provider.Chunk{
+		{
+			toolCallChunk("base", "todo_write", `{"todos":[
+				{"content":"A","status":"in_progress","step_id":"a"},
+				{"content":"B","status":"pending","step_id":"b"},
+				{"content":"C","status":"pending","step_id":"c"},
+				{"content":"D","status":"pending","step_id":"d"}
+			]}`),
+			{Type: provider.ChunkDone},
+		},
+		{
+			toolCallChunk("early", "todo_write", `{"todos":[
+				{"content":"A","status":"in_progress","step_id":"a"},
+				{"content":"B","status":"completed","step_id":"b"},
+				{"content":"C","status":"completed","step_id":"c"},
+				{"content":"D","status":"pending","step_id":"d"}
+			]}`),
+			{Type: provider.ChunkDone},
+		},
+		{
+			toolCallChunk("signoff", "complete_step", `{"step_id":"a","result":"A finished","evidence":[{"kind":"manual","summary":"confirmed A"}]}`),
+			{Type: provider.ChunkDone},
+		},
+		{{Type: provider.ChunkText, Text: "done"}, {Type: provider.ChunkDone}},
+	}}
+	a := New(prov, reg, NewSession(""), Options{}, event.Discard)
+	if err := a.Run(withNoClosedLoop(context.Background()), "finish the serial plan"); err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+	if got := a.DeferredTodoCompletions(); len(got) != 0 {
+		t.Fatalf("deferred completions after current signoff = %v, want empty", got)
+	}
+	canonical := a.CanonicalTodoState()
+	if got := todoStatuses(canonical); !slices.Equal(got, []string{"completed", "completed", "completed", "in_progress"}) {
+		t.Fatalf("canonical after current signoff = %v, want A/B/C completed and D current", got)
+	}
+	if err := evidence.ValidateSerialTodos(canonical); err != nil {
+		t.Fatalf("canonical after current signoff is invalid: %v", err)
+	}
+	if result := toolResultByID(a.sess.conversation, "signoff"); !strings.Contains(result, "applied automatically") || !strings.Contains(result, "b") || !strings.Contains(result, "c") {
+		t.Fatalf("complete_step result = %q, want automatic deferred completion feedback", result)
+	}
+	var latestTodo provider.ToolCall
+	for _, message := range a.sess.conversation.Snapshot() {
+		if message.Role != provider.RoleAssistant {
+			continue
+		}
+		for _, call := range message.ToolCalls {
+			if call.Name == "todo_write" {
+				latestTodo = call
+			}
+		}
+	}
+	var persisted struct {
+		Todos []evidence.TodoItem `json:"todos"`
+	}
+	if err := json.Unmarshal([]byte(latestTodo.Arguments), &persisted); err != nil {
+		t.Fatalf("latest canonical todo args are invalid JSON: %v", err)
+	}
+	if got := todoStatuses(persisted.Todos); !slices.Equal(got, []string{"completed", "completed", "completed", "in_progress"}) {
+		t.Fatalf("latest persisted todo args = %v, want final canonical statuses", got)
+	}
+	a.RebuildTodoState()
+	if got := todoStatuses(a.CanonicalTodoState()); !slices.Equal(got, []string{"completed", "completed", "completed", "in_progress"}) {
+		t.Fatalf("canonical after transcript rebuild = %v, want auto-consumed B/C preserved", got)
 	}
 }
