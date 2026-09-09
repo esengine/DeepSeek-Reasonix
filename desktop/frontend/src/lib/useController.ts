@@ -1729,7 +1729,13 @@ function applyEvent(s: State, e: WireEvent, preserveToolPayloads = false): State
           // subject (from args). Drop output entirely; full data is loaded on
           // demand via app.ToolResultForTab when the card is expanded.
           const existing = it;
-          const summary = t.err ? undefined : existing.summary || summarize(existing.name, existing.args, t.output);
+          // A successful tool result may carry host-normalized arguments. Keep
+          // the card in sync with that authoritative payload instead of
+          // retaining the raw dispatch arguments indefinitely. In particular,
+          // todo_write can be normalized from an out-of-order completed state
+          // to the serial canonical state before its result is emitted.
+          const args = t.args ? t.args : existing.args;
+          const summary = t.err ? undefined : existing.summary || summarize(existing.name, args, t.output);
           let status: ToolStatus = t.err ? "error" : "done";
           if (existing.subagentProgress) {
             // Sub-agent progress owns the card's final visual: a background
@@ -1758,6 +1764,7 @@ function applyEvent(s: State, e: WireEvent, preserveToolPayloads = false): State
             readOnly: t.readOnly,
             resolvedName: t.resolvedName ?? existing.resolvedName,
             capabilityId: t.capabilityId ?? existing.capabilityId,
+            args,
             status,
             output: t.output,
             error: t.err,
