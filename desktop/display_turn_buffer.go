@@ -151,12 +151,23 @@ func recordHistoryDisplayEvent(buffer *displayTurnBuffer, e event.Event) {
 		}
 	case event.ToolDispatch:
 		recordHistoryToolDispatch(buffer, e)
-	case event.ToolResult:
+	case event.ToolResultPreview, event.ToolResult:
 		callID := strings.TrimSpace(e.Tool.ID)
 		content := firstNonEmpty(e.Tool.Output, e.Tool.Err)
 		display, errPreview := plannerToolResultDisplay(content, e.Tool.Err != "")
 		if callID != "" {
+			// A successful todo_write may be repaired by the host before its
+			// provider-ordered terminal result is emitted. Keep the display-only
+			// history on that canonical argument payload as well as the live UI;
+			// otherwise a tab switch or recovery reload can resurrect the raw
+			// out-of-order completion state.
+			updateBufferedHistoryToolCallArguments(buffer.messages, callID, e.Tool.Args)
 			updateBufferedHistoryToolCallSummary(buffer.messages, callID, content)
+		}
+		if e.Kind == event.ToolResultPreview {
+			// Previews are upserts for stateful frontends, not an additional
+			// append-only tool result row.
+			break
 		}
 		toolName := e.Tool.Name
 		if toolName == "" && buffer.tools != nil {
@@ -204,6 +215,8 @@ func displayEventFromEnvelope(envelope turnevent.Envelope) (event.Event, bool) {
 		e.Kind = event.Message
 	case "tool_dispatch":
 		e.Kind = event.ToolDispatch
+	case "tool_result_preview":
+		e.Kind = event.ToolResultPreview
 	case "tool_result":
 		e.Kind = event.ToolResult
 	case "notice":

@@ -51,6 +51,29 @@ func TestDisplayTurnBufferPreservesStreamingReplacementAndTools(t *testing.T) {
 	}
 }
 
+func TestDisplayTurnBufferUsesNormalizedTodoResultArguments(t *testing.T) {
+	rawArgs := `{"todos":[{"content":"A","status":"in_progress"},{"content":"B","status":"completed"},{"content":"C","status":"pending"}]}`
+	canonicalArgs := `{"todos":[{"content":"A","status":"in_progress"},{"content":"B","status":"pending"},{"content":"C","status":"pending"}]}`
+	var buffer displayTurnBuffer
+	recordHistoryDisplayEvent(&buffer, event.Event{Kind: event.ToolDispatch, Tool: event.Tool{
+		ID: "todo-1", Name: "todo_write", Args: rawArgs, ReadOnly: true,
+	}})
+	recordHistoryDisplayEvent(&buffer, event.Event{Kind: event.ToolResultPreview, Tool: event.Tool{
+		ID: "todo-1", Name: "todo_write", Args: canonicalArgs, ReadOnly: true, Output: "Todos updated",
+	}})
+	recordHistoryDisplayEvent(&buffer, event.Event{Kind: event.ToolResult, Tool: event.Tool{
+		ID: "todo-1", Name: "todo_write", Args: canonicalArgs, ReadOnly: true, Output: "Todos updated",
+	}})
+
+	got := buffer.materialize()
+	if len(got) != 2 || len(got[0].ToolCalls) != 1 {
+		t.Fatalf("display messages = %+v, want one todo call and one result", got)
+	}
+	if got[0].ToolCalls[0].Arguments != canonicalArgs {
+		t.Fatalf("display todo arguments = %q, want canonical %q", got[0].ToolCalls[0].Arguments, canonicalArgs)
+	}
+}
+
 func TestDisplayTurnBufferStreamingAllocationsStayNearLinear(t *testing.T) {
 	const (
 		chunks    = 2_000
@@ -138,13 +161,15 @@ func TestPendingDisplayWriteRetriesWithoutDroppingTurn(t *testing.T) {
 
 func TestDisplayMessagesFromInterruptedProjectionKeepsPartialOutput(t *testing.T) {
 	textEvent := event.Event{Kind: event.Text, Source: event.UsageSourceExecutor, Text: "partial answer"}
-	toolEvent := event.Event{Kind: event.ToolDispatch, Source: event.UsageSourceExecutor, Tool: event.Tool{ID: "call-1", Name: "read_file", Args: `{"path":"notes.txt"}`}}
+	toolEvent := event.Event{Kind: event.ToolDispatch, Source: event.UsageSourceExecutor, Tool: event.Tool{ID: "call-1", Name: "todo_write", Args: `{"todos":[{"content":"A","status":"in_progress"},{"content":"B","status":"completed"}]}`}}
+	previewEvent := event.Event{Kind: event.ToolResultPreview, Source: event.UsageSourceExecutor, Tool: event.Tool{ID: "call-1", Name: "todo_write", Args: `{"todos":[{"content":"A","status":"in_progress"},{"content":"B","status":"pending"}]}`, Output: "Todos updated"}}
 	projection := turnevent.PendingProjection{
 		TurnID: "turn-1", Status: event.TurnInterrupted,
 		Events: []turnevent.Envelope{
 			{TurnID: "turn-1", Sequence: 1, Kind: "text", Source: textEvent.Source, Event: eventwire.ToWire(textEvent)},
 			{TurnID: "turn-1", Sequence: 2, Kind: "tool_dispatch", Source: toolEvent.Source, Event: eventwire.ToWire(toolEvent)},
-			{TurnID: "turn-1", Sequence: 3, Kind: "turn_done", Status: event.TurnInterrupted, Event: eventwire.ToWire(event.Event{Kind: event.TurnDone})},
+			{TurnID: "turn-1", Sequence: 3, Kind: "tool_result_preview", Source: previewEvent.Source, Event: eventwire.ToWire(previewEvent)},
+			{TurnID: "turn-1", Sequence: 4, Kind: "turn_done", Status: event.TurnInterrupted, Event: eventwire.ToWire(event.Event{Kind: event.TurnDone})},
 		},
 	}
 
@@ -157,6 +182,9 @@ func TestDisplayMessagesFromInterruptedProjectionKeepsPartialOutput(t *testing.T
 	}
 	if got[1].Role != "assistant" || len(got[1].ToolCalls) != 1 || got[1].ToolCalls[0].ID != "call-1" {
 		t.Fatalf("tool dispatch projection changed: %+v", got[1])
+	}
+	if got[1].ToolCalls[0].Arguments != previewEvent.Tool.Args {
+		t.Fatalf("recovered todo arguments = %q, want canonical %q", got[1].ToolCalls[0].Arguments, previewEvent.Tool.Args)
 	}
 	if got[2].Role != "notice" || got[2].Code != event.NoticeCodeCancelledTurn {
 		t.Fatalf("interruption notice missing: %+v", got[2])
