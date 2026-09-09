@@ -2,6 +2,7 @@ package agent
 
 import (
 	"context"
+	"encoding/json"
 	"reflect"
 	"strings"
 	"testing"
@@ -1283,5 +1284,65 @@ func TestEvidenceFlowRejectsReorderedTodoAndRecoversSerially(t *testing.T) {
 		if todo.Status != "completed" {
 			t.Fatalf("canonical todo %d = %+v, want completed after serial recovery", i+1, todo)
 		}
+	}
+}
+
+func TestEvidenceFlowRepairsOutOfOrderTodoAndPersistsCanonicalList(t *testing.T) {
+	todoWrite, ok := tool.LookupBuiltin("todo_write")
+	if !ok {
+		t.Fatal("todo_write builtin not registered")
+	}
+	reg := tool.NewRegistry()
+	reg.Add(todoWrite)
+	prov := &scriptedProvider{name: "p", turns: [][]provider.Chunk{
+		{
+			toolCallChunk("c1", "todo_write", `{"todos":[
+				{"content":"first","status":"in_progress","step_id":"first"},
+				{"content":"parallel second","status":"pending","step_id":"second"}
+			]}`),
+			{Type: provider.ChunkDone},
+		},
+		{
+			toolCallChunk("c2", "todo_write", `{"todos":[
+				{"content":"first","status":"in_progress","step_id":"first"},
+				{"content":"parallel second","status":"completed","step_id":"second"}
+			]}`),
+			{Type: provider.ChunkDone},
+		},
+		{{Type: provider.ChunkText, Text: "continue"}, {Type: provider.ChunkDone}},
+	}}
+
+	a := New(prov, reg, NewSession(""), Options{}, event.Discard)
+	if err := a.Run(withNoClosedLoop(context.Background()), "track parallel work"); err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+	results := toolResults(a.sess.conversation, "todo_write")
+	if len(results) != 2 || strings.Contains(results[1], "error:") || !strings.Contains(results[1], "remain pending") {
+		t.Fatalf("todo_write results = %v, want repaired success", results)
+	}
+	canonical := a.CanonicalTodoState()
+	if len(canonical) != 2 || canonical[0].Status != "in_progress" || canonical[1].Status != "pending" {
+		t.Fatalf("canonical todos = %+v, want serial repair", canonical)
+	}
+
+	var persisted provider.ToolCall
+	for _, message := range a.sess.conversation.Snapshot() {
+		if message.Role != provider.RoleAssistant {
+			continue
+		}
+		for _, call := range message.ToolCalls {
+			if call.ID == "c2" {
+				persisted = call
+			}
+		}
+	}
+	var payload struct {
+		Todos []evidence.TodoItem `json:"todos"`
+	}
+	if err := json.Unmarshal([]byte(persisted.Arguments), &payload); err != nil {
+		t.Fatalf("canonical tool args are invalid JSON: %v", err)
+	}
+	if len(payload.Todos) != 2 || payload.Todos[1].Status != "pending" {
+		t.Fatalf("persisted repaired args = %+v, want second item pending", payload.Todos)
 	}
 }

@@ -69,7 +69,6 @@ func (todoWrite) Execute(ctx context.Context, args json.RawMessage) (string, err
 	if err := json.Unmarshal(args, &p); err != nil {
 		return "", fmt.Errorf("invalid args: %w", err)
 	}
-	var done, active, pending int
 	for i, t := range p.Todos {
 		if t.Content == "" {
 			return "", fmt.Errorf("todo %d: content is required", i+1)
@@ -78,18 +77,19 @@ func (todoWrite) Execute(ctx context.Context, args json.RawMessage) (string, err
 			return "", fmt.Errorf("todo %d: invalid level %d (want 0 phase | 1 sub-step)", i+1, t.Level)
 		}
 		switch t.Status {
-		case "completed":
-			done++
-		case "in_progress":
-			active++
-		case "pending", "":
-			pending++
+		case "completed", "in_progress", "pending", "":
 		default:
 			return "", fmt.Errorf("todo %d: invalid status %q (want pending|in_progress|completed)", i+1, t.Status)
 		}
 	}
+	repaired := false
 	if err := evidence.ValidateSerialTodos(toEvidenceTodos(p.Todos)); err != nil {
-		return "", err
+		if canonical, ok := evidence.RepairSerialTodoUpdate(todoBaseline(ctx), toEvidenceTodos(p.Todos)); ok {
+			p.Todos = fromEvidenceTodos(canonical)
+			repaired = true
+		} else {
+			return "", err
+		}
 	}
 	if err := verifyUniqueStepIDs(p.Todos); err != nil {
 		return "", err
@@ -105,8 +105,27 @@ func (todoWrite) Execute(ctx context.Context, args json.RawMessage) (string, err
 	if err := verifyCompletedTodoPositions(ctx, p.Todos); err != nil {
 		return "", err
 	}
-	return fmt.Sprintf("Todos updated: %d total — %d completed, %d in progress, %d pending.",
-		len(p.Todos), done, active, pending), nil
+	done, active, pending := countTodoStatuses(p.Todos)
+	message := fmt.Sprintf("Todos updated: %d total — %d completed, %d in progress, %d pending.",
+		len(p.Todos), done, active, pending)
+	if repaired {
+		message += " The list was normalized to serial order; later completed items remain pending until earlier work is complete."
+	}
+	return message, nil
+}
+
+func countTodoStatuses(todos []todoItem) (done, active, pending int) {
+	for _, todo := range todos {
+		switch todo.Status {
+		case "completed":
+			done++
+		case "in_progress":
+			active++
+		default:
+			pending++
+		}
+	}
+	return done, active, pending
 }
 
 // verifyUniqueStepIDs keeps a step id an identity: two items claiming the same
@@ -210,6 +229,20 @@ func toEvidenceTodos(todos []todoItem) []evidence.TodoItem {
 	out := make([]evidence.TodoItem, 0, len(todos))
 	for _, t := range todos {
 		out = append(out, toEvidenceTodo(t))
+	}
+	return out
+}
+
+func fromEvidenceTodos(todos []evidence.TodoItem) []todoItem {
+	out := make([]todoItem, 0, len(todos))
+	for _, todo := range todos {
+		out = append(out, todoItem{
+			Content:    todo.Content,
+			Status:     todo.Status,
+			ActiveForm: todo.ActiveForm,
+			Level:      todo.Level,
+			StepID:     todo.StepID,
+		})
 	}
 	return out
 }

@@ -676,6 +676,73 @@ func TestNormalizeSerialTodosRepairsLegacyOutOfOrderState(t *testing.T) {
 	}
 }
 
+func TestRepairSerialTodoUpdateOnlyNormalizesSafeCompletionTransition(t *testing.T) {
+	previous := []TodoItem{
+		{Content: "first", Status: "in_progress", StepID: "first"},
+		{Content: "second", Status: "pending", StepID: "second"},
+		{Content: "later", Status: "pending", StepID: "later"},
+	}
+	next := []TodoItem{
+		{Content: "first", Status: "in_progress", StepID: "first"},
+		{Content: "second", Status: "completed", StepID: "second"},
+		{Content: "later", Status: "pending", StepID: "later"},
+	}
+	got, ok := RepairSerialTodoUpdate(previous, next)
+	if !ok {
+		t.Fatal("same-shape out-of-order completion should be repaired")
+	}
+	if err := ValidateSerialTodos(got); err != nil {
+		t.Fatalf("repaired list is not serial: %v", err)
+	}
+	if got[1].Status != "pending" {
+		t.Fatalf("repaired later completion = %q, want pending: %+v", got[1].Status, got)
+	}
+
+	promoted, ok := RepairSerialTodoUpdate(
+		previous[:2],
+		[]TodoItem{
+			{Content: "first", Status: "completed", StepID: "first"},
+			{Content: "second", Status: "pending", StepID: "second"},
+		},
+	)
+	if !ok || promoted[0].Status != "completed" || promoted[1].Status != "in_progress" {
+		t.Fatalf("completion without promotion = %+v, repaired=%v; want next item current", promoted, ok)
+	}
+
+	for _, tc := range []struct {
+		name string
+		prev []TodoItem
+		next []TodoItem
+	}{
+		{
+			name: "no baseline",
+			next: next,
+		},
+		{
+			name: "reordered items",
+			prev: previous,
+			next: []TodoItem{
+				{Content: "second", Status: "completed", StepID: "second"},
+				{Content: "first", Status: "in_progress", StepID: "first"},
+			},
+		},
+		{
+			name: "different invalid state",
+			prev: previous,
+			next: []TodoItem{
+				{Content: "first", Status: "in_progress", StepID: "first"},
+				{Content: "second", Status: "in_progress", StepID: "second"},
+			},
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			if _, ok := RepairSerialTodoUpdate(tc.prev, tc.next); ok {
+				t.Fatal("unsafe todo update was repaired")
+			}
+		})
+	}
+}
+
 func TestValidateSerialTodosAcceptsPhaseChains(t *testing.T) {
 	tests := []struct {
 		name  string

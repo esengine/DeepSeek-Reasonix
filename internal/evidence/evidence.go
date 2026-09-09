@@ -233,6 +233,69 @@ func NormalizeSerialTodos(todos []TodoItem) []TodoItem {
 	return out
 }
 
+// RepairSerialTodoUpdate recognizes the narrow legacy/interoperability case
+// where a previously valid list keeps its order and identities but advances one
+// or more items to completed without preserving a valid serial current item.
+// This can happen when independent sub-agents finish out of order, or when a
+// model marks the current item complete without promoting the next one. The
+// serial validator remains strict; callers may use the returned canonical list
+// as the safe replacement so the host state can continue advancing without
+// claiming an unverified completion.
+//
+// The repair deliberately refuses reorders, removals, new completed items,
+// status regressions, hierarchy changes, and every other validation failure.
+// A list without a prior baseline is also refused so initial malformed plans
+// keep the original validation behavior.
+func RepairSerialTodoUpdate(previous, next []TodoItem) ([]TodoItem, bool) {
+	previous = normalizeTodos(previous)
+	next = normalizeTodos(next)
+	if len(previous) == 0 || len(next) < len(previous) {
+		return nil, false
+	}
+	if ValidateSerialTodos(next) == nil {
+		return nil, false
+	}
+
+	changedCompletion := false
+	for i, prior := range previous {
+		candidate := next[i]
+		if prior.Level != candidate.Level {
+			return nil, false
+		}
+		match, found := MatchTodoIdentity(prior, next)
+		if !found || match.Index != i+1 {
+			return nil, false
+		}
+		before, after := todoStatus(prior.Status), todoStatus(candidate.Status)
+		switch {
+		case before == "completed" && after != "completed":
+			return nil, false
+		case before == after:
+			continue
+		case after == "completed":
+			changedCompletion = true
+		default:
+			return nil, false
+		}
+	}
+	for _, candidate := range next[len(previous):] {
+		// Appending untouched work is compatible with the existing plan contract;
+		// an appended completed/current item would be an unverified mutation.
+		if todoStatus(candidate.Status) != "pending" {
+			return nil, false
+		}
+	}
+	if !changedCompletion {
+		return nil, false
+	}
+
+	canonical := NormalizeSerialTodos(next)
+	if err := ValidateSerialTodos(canonical); err != nil {
+		return nil, false
+	}
+	return canonical, true
+}
+
 func serialSegmentCompleted(todos []TodoItem, seg todoSegment) bool {
 	for i := seg.head; i < seg.end; i++ {
 		if todoStatus(todos[i].Status) != "completed" {

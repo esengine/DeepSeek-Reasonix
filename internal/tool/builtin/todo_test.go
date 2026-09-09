@@ -78,6 +78,31 @@ func TestTodoWriteAcceptsNewCompletedWithoutCompleteStepReceipt(t *testing.T) {
 	}
 }
 
+func TestTodoWriteRepairsOutOfOrderCompletionAgainstBaseline(t *testing.T) {
+	ledger := evidence.NewLedger()
+	ledger.Record(evidence.Receipt{
+		ToolName: "todo_write",
+		Success:  true,
+		Todos: []evidence.TodoItem{
+			{Content: "first", Status: "in_progress", StepID: "first"},
+			{Content: "second", Status: "pending", StepID: "second"},
+		},
+	})
+	ctx := evidence.WithLedger(context.Background(), ledger)
+	args := json.RawMessage(`{"todos":[
+		{"content":"first","status":"in_progress","step_id":"first"},
+		{"content":"second","status":"completed","step_id":"second"}
+	]}`)
+
+	out, err := (todoWrite{}).Execute(ctx, args)
+	if err != nil {
+		t.Fatalf("safe out-of-order completion should be accepted: %v", err)
+	}
+	if !strings.Contains(out, "remain pending") || !strings.Contains(out, "1 pending") {
+		t.Fatalf("todo_write output = %q, want normalization guidance and pending count", out)
+	}
+}
+
 func TestTodoWriteAcceptsNewCompletedWithCompleteStepReceipt(t *testing.T) {
 	ledger := evidence.NewLedger()
 	ledger.Record(evidence.Receipt{

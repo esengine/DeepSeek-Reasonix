@@ -1,6 +1,7 @@
 package agent
 
 import (
+	"context"
 	"encoding/json"
 
 	"reasonix/internal/event"
@@ -39,6 +40,14 @@ func (a *Agent) recordToolReceipts(plan *toolCallPlan, result string, execution 
 	}
 	call := plan.call
 	args := json.RawMessage(call.Arguments)
+	if err == nil && call.Name == "todo_write" {
+		if normalized, ok := normalizeRepairedTodoArgs(plan.cctx, args); ok {
+			call.Arguments = normalized
+			args = json.RawMessage(normalized)
+			plan.call = call
+			plan.normalizedArgs = normalized
+		}
+	}
 	// The session floor in force at write time is a fact of the write: it
 	// rides the receipt so the per-turn contract replay re-derives the same
 	// floor obligations even after the floor changes.
@@ -85,4 +94,42 @@ func (a *Agent) recordToolReceipts(plan *toolCallPlan, result string, execution 
 			a.emitTodoResultPreview(call, result)
 		}
 	}
+}
+
+func normalizeRepairedTodoArgs(ctx context.Context, args json.RawMessage) (string, bool) {
+	var fields map[string]json.RawMessage
+	if err := json.Unmarshal(args, &fields); err != nil {
+		return "", false
+	}
+	rawTodos, ok := fields["todos"]
+	if !ok {
+		return "", false
+	}
+	var next []evidence.TodoItem
+	if err := json.Unmarshal(rawTodos, &next); err != nil {
+		return "", false
+	}
+	previous := []evidence.TodoItem(nil)
+	if ledger, ok := evidence.FromContext(ctx); ok {
+		if prior, found := ledger.LatestTodos(); found && len(prior) > 0 {
+			previous = prior
+		}
+	}
+	if len(previous) == 0 {
+		previous, _ = evidence.TodoStateFromContext(ctx)
+	}
+	canonical, repaired := evidence.RepairSerialTodoUpdate(previous, next)
+	if !repaired {
+		return "", false
+	}
+	canonicalTodos, err := json.Marshal(canonical)
+	if err != nil {
+		return "", false
+	}
+	fields["todos"] = canonicalTodos
+	normalized, err := json.Marshal(fields)
+	if err != nil {
+		return "", false
+	}
+	return string(normalized), true
 }
