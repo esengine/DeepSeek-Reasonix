@@ -50,6 +50,13 @@ eq(declaration(caption, "background"), "var(--bg-soft)", "caption controls blend
 eq(declaration(caption, "border"), "0", "workspace borders do not leak into the settings caption");
 const settingsCenter = ruleBlock(panelStyles, ".settings-center");
 eq(declaration(settingsCenter, "grid-template-columns"), "clamp(220px, 20.5vw, 304px) minmax(0, 1fr)", "settings navigation remains readable without consuming the content pane");
+const desktopSettingsCenter = ruleBlock(panelStyles, ".settings-screen .settings-center");
+eq(declaration(desktopSettingsCenter, "gap"), "8px", "desktop settings panes have a visible gutter");
+eq(declaration(desktopSettingsCenter, "padding"), "0 8px 8px", "desktop settings panes keep an outer gutter");
+const settingsSidebar = ruleBlock(panelStyles, ".settings-screen__sidebar");
+eq(declaration(settingsSidebar, "border-radius"), "16px", "desktop navigation matches the content pane corners");
+const settingsBack = ruleBlock(panelStyles, ".settings-screen .management-screen__back");
+eq(declaration(settingsBack, "background"), "var(--bg-elev)", "return-to-workspace control has a visible background");
 
 const generalPage = ruleBlock(panelStyles, ".settings-page--general");
 eq(declaration(generalPage, "container"), "settings-general / inline-size", "general settings respond to their available content width");
@@ -109,6 +116,8 @@ const compactNav = ruleBlock(compactPanel, ".settings-center__nav,\n  :root[data
 eq(declaration(compactNav, "width"), "100%", "minimum-width navigation spans the settings panel");
 eq(declaration(compactNav, "overflow-x"), "auto", "minimum-width navigation scrolls horizontally");
 eq(declaration(compactNav, "overflow-y"), "hidden", "minimum-width navigation does not create a second vertical scroller");
+const compactSettingsCenter = ruleBlock(compactPanel, ".settings-screen .settings-center");
+eq(declaration(compactSettingsCenter, "gap"), "0", "minimum-width settings return to one continuous surface");
 
 console.log(`\n${passed} passed, ${failed} failed, ${passed + failed} total`);
 if (failed > 0) process.exit(1);

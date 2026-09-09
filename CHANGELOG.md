@@ -44,6 +44,9 @@ branch.
 
 ### Fixed
 
+- **Desktop settings workspace:** navigation and content panes now have a shared
+  outer gutter, matched rounded boundaries, and a visible return-to-workspace
+  control; the compact layout remains a continuous single-column surface.
 - **Relay image input:** ID-only or invalid model metadata now stays unknown.
   Both Desktop model editors expose per-model Auto / On / Off overrides, with
   official protocol limits retained. A separate V2 discovery cache rejects stale
