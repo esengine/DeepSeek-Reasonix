@@ -11,14 +11,18 @@
   flex-direction: column;
   min-height: 0;
   overflow: hidden;
-  background: var(--bg-soft);
+  border: 1px solid var(--border);
+  border-radius: 16px;
+  background: var(--bg);
 }
 
 .settings-screen .settings-center__nav { flex: 1; min-height: 0; border-right: 0; }
-.settings-screen .settings-center__content { margin: 0 8px 8px 0; border: 1px solid var(--border); border-radius: 16px; background: var(--bg); }
+.settings-screen .management-screen__back { margin: 8px; border: 1px solid var(--border); border-radius: 12px; background: var(--bg-elev); }
+.settings-screen .settings-center__content { margin: 0; border: 1px solid var(--border); border-radius: 16px; background: var(--bg); }
 .settings-center {
   grid-template-columns: clamp(220px, 20.5vw, 304px) minmax(0, 1fr);
 }
+.settings-screen .settings-center { gap: 8px; padding: 0 8px 8px; }
 
 .settings-center__nav {
   display: flex;
@@ -515,6 +519,9 @@
   }
 
   .management-screen__back { margin: 0 10px; padding: 8px; }
+  .settings-screen .settings-center { gap: 0; padding: 0; }
+  .settings-screen__sidebar { border: 0; border-radius: 0; background: var(--bg-soft); }
+  .settings-screen .management-screen__back { margin: 0 10px; border: 0; border-radius: 8px; background: transparent; }
   .settings-screen .settings-center__content { margin: 0; border-radius: 0; border-inline: 0; border-bottom: 0; }
 
   .settings-center,
