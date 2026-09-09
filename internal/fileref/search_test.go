@@ -1,6 +1,7 @@
 package fileref
 
 import (
+	"fmt"
 	"os"
 	"path/filepath"
 	"testing"
@@ -150,5 +151,57 @@ func TestSearchSkipsNoiseStillWorks(t *testing.T) {
 	}
 	if !containsPath(got, "src/planind/index.tsx") {
 		t.Fatalf("Search should still return legitimate hit, got %v", resultPaths(got))
+	}
+}
+
+// TestSearchSurfacesHiddenEntries guards the removal of the showHidden gate:
+// dot-prefixed directories and files must appear in search results even when
+// the query itself does not start with a dot.
+func TestSearchSurfacesHiddenEntries(t *testing.T) {
+	root := t.TempDir()
+	writeFile(t, filepath.Join(root, ".vscode", "settings.json"))
+
+	// A plain query (no leading dot) must surface hidden files/dirs that are
+	// NOT worktree copies (those are outside the file-list scope).
+	got := Search(root, "settings", 50)
+	if !containsPath(got, ".vscode/settings.json") {
+		t.Fatalf("Search(%q) should surface hidden file, got %v", "settings", resultPaths(got))
+	}
+}
+
+// TestSearchSurfacesReadmesUnderHiddenDirs verifies that README files living
+// under dot-prefixed worktree dirs (.worktrees, .cindy-worktrees) surface for
+// a plain "README" query — worktree copies are in scope, not excluded.
+func TestSearchSurfacesReadmesUnderHiddenDirs(t *testing.T) {
+	root := t.TempDir()
+	writeFile(t, filepath.Join(root, "README.md"))
+	writeFile(t, filepath.Join(root, ".worktrees", "feature-x", "README.md"))
+	writeFile(t, filepath.Join(root, ".cindy-worktrees", "branch-a", "README.md"))
+
+	got := Search(root, "README", 50)
+	for _, want := range []string{
+		"README.md",
+		".worktrees/feature-x/README.md",
+		".cindy-worktrees/branch-a/README.md",
+	} {
+		if !containsPath(got, want) {
+			t.Fatalf("Search(%q) should surface %q, got %v", "README", want, resultPaths(got))
+		}
+	}
+}
+
+// TestSearchLimitTruncatesReadmes reproduces the real repo: many worktree
+// copies under dot-prefixed dirs each carry a README, and a small result
+// limit truncates the alphabetically later ones (e.g. .worktrees/...).
+func TestSearchLimitTruncatesReadmes(t *testing.T) {
+	root := t.TempDir()
+	writeFile(t, filepath.Join(root, "README.md"))
+	writeFile(t, filepath.Join(root, ".worktrees", "chat-history-sidebar", "README.md"))
+	for i := 0; i < 25; i++ {
+		writeFile(t, filepath.Join(root, ".cindy-worktrees", fmt.Sprintf("branch-%02d", i), "README.md"))
+	}
+	got := Search(root, "README", 100)
+	if !containsPath(got, ".worktrees/chat-history-sidebar/README.md") {
+		t.Fatalf("Search(limit=100) truncated .worktrees README: %v", resultPaths(got))
 	}
 }

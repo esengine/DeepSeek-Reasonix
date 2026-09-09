@@ -27,8 +27,10 @@ export const CREATION_SIDEBAR_DEFAULT_WIDTH = CREATION_SIDEBAR_MIN_WIDTH;
 export const SIDEBAR_MAX_WIDTH = 300;
 const SIDEBAR_VIEWPORT_RATIO = 0.18;
 
-const RIGHT_DOCK_TREE_DEFAULT_WIDTH = 300;
-export const RIGHT_DOCK_TREE_MIN_WIDTH = 300;
+// Default/min tree width is 200 so the preview pane gets the extra room
+// when a file is open.
+const RIGHT_DOCK_TREE_DEFAULT_WIDTH = 200;
+export const RIGHT_DOCK_TREE_MIN_WIDTH = 200;
 // Creation file-tree dock stays tighter than classic 300. With Creation's
 // narrower Windows caption strip (~108px), 252 is enough for icon+label tabs.
 export const CREATION_RIGHT_DOCK_TREE_MIN_WIDTH = 252;

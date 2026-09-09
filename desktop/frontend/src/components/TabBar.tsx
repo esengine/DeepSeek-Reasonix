@@ -247,7 +247,17 @@ export function TabBar({ tabs, activeTabId, onTabChange, onTabClose, onTabsClose
               onDragStart={(event) => handleDragStart(event, tab.id)}
               onDragOver={(event) => handleDragOver(event, tab.id)}
               onDrop={(event) => handleDrop(event, tab.id)}
-              onDragEnd={clearDragState}
+              onDragEnd={() => {
+                clearDragState();
+                // handleDrop sets suppressClickRef to swallow the click that
+                // can trail a drop; HTML5 DnD fires dragend without any click,
+                // so a flag set there would otherwise swallow the user's next
+                // real click. Clear it on the next tick — any trailing click
+                // (if the webview dispatches one) is consumed first.
+                window.setTimeout(() => {
+                  suppressClickRef.current = false;
+                }, 0);
+              }}
             >
               {tab.tabType === "file" || tab.scope === "file" ? (
                 <FileText size={12} className="tabbar__file-icon" />
