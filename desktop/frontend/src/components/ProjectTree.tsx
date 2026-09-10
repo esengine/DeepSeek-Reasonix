@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import type { CSSProperties, DragEvent as ReactDragEvent, KeyboardEvent as ReactKeyboardEvent, MouseEvent as ReactMouseEvent } from "react";
-import { Archive, ArrowDown, Pencil, Plus, Folder, FolderPlus, Search, BriefcaseBusiness, Copy, FolderOpen, XCircle, Check, ListCollapse, ListRestart, MessageSquare, Clock, Pin, MoreHorizontal, Minimize2, Maximize2, GitBranch, Sparkles, Cloud } from "lucide-react";
+import { Archive, ArrowDown, Pencil, Plus, Folder, FolderPlus, FolderInput, Search, BriefcaseBusiness, Copy, FolderOpen, XCircle, Check, ListCollapse, ListRestart, MessageSquare, Clock, Pin, MoreHorizontal, Minimize2, Maximize2, GitBranch, Sparkles, Cloud } from "lucide-react";
 import { asArray } from "../lib/array";
 import { useToast } from "../lib/toast";
 import { app } from "../lib/bridge";
@@ -21,6 +21,12 @@ import { ContextMenu, contextMenuPointFromEvent, type ContextMenuItem, type Cont
 import { Tooltip } from "./Tooltip";
 import { WorktreeBadge } from "./WorktreeBadge";
 import { useProjectCreation } from "./useProjectCreation";
+import { MoveToGroupPanel } from "./MoveToGroupPanel";
+import { NewGroupPanel } from "./NewGroupPanel";
+import {
+  addProjectGroup, deleteProjectGroup, groupForProject, loadProjectGroupAssign, loadProjectGroups,
+  moveProjectToGroup, renameProjectGroup, type ProjectGroup,
+} from "../lib/projectGroups";
 import { useProjectTreeRuntimeProjection } from "../lib/useProjectTreeRuntimeProjection";
 import { useProjectTreeFrontendDiagnostics, type ProjectTreeDiagnosticSnapshot } from "../lib/useProjectTreeFrontendDiagnostics";
 import { summarizeProjectTreeSessions } from "../lib/projectTreeDiagnostics";
@@ -263,6 +269,42 @@ export function ProjectTree({
   const [workbenchHeaderMenu, setWorkbenchHeaderMenu] = useState<WorkbenchHeaderMenu>(null);
   const [workbenchOrganizeMode, setWorkbenchOrganizeMode] = useState<WorkbenchOrganizeMode>(loadWorkbenchOrganizeMode);
   const [workbenchSortMode, setWorkbenchSortMode] = useState<WorkbenchSortMode>(loadWorkbenchSortMode);
+  // Project grouping (#9222): groups + project→group assignment, both local.
+  const [groups, setGroups] = useState<ProjectGroup[]>(loadProjectGroups);
+  const [assign, setAssign] = useState<Record<string, string>>(loadProjectGroupAssign);
+  const [groupTarget, setGroupTarget] = useState<ProjectNode | null>(null);
+  const [newGroupOpen, setNewGroupOpen] = useState(false);
+  const [collapsedGroups, setCollapsedGroups] = useState<ReadonlySet<string>>(new Set());
+
+  const groupForProjectRoot = useCallback((root?: string): ProjectGroup | null => {
+    const id = groupForProject(assign, root);
+    return id ? groups.find((g) => g.id === id) ?? null : null;
+  }, [assign, groups]);
+
+  const handleAddGroup = useCallback((title: string) => {
+    const res = addProjectGroup(title, groups);
+    setGroups(res.groups);
+    setNewGroupOpen(false);
+    void Promise.resolve(); // keep callback async-agnostic
+  }, [groups]);
+
+  const handleRenameGroup = useCallback((id: string, title: string) => {
+    if (!title.trim()) return;
+    setGroups(renameProjectGroup(groups, id, title));
+  }, [groups]);
+
+  const handleMoveToGroup = useCallback((root: string, groupId: string | null) => {
+    setAssign(moveProjectToGroup(assign, root, groupId));
+  }, [assign]);
+
+  const toggleGroup = useCallback((id: string) => {
+    setCollapsedGroups((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id); else next.add(id);
+      return next;
+    });
+  }, []);
+
   const workbenchSortModeRef = useRef(workbenchSortMode);
   const [readActivity, setReadActivity] = useState<ProjectTreeReadActivity>(loadReadActivity);
   const [readBaselineAt] = useState(loadReadActivityBaselineAt);
@@ -954,6 +996,23 @@ export function ProjectTree({
     return map;
   }, [tree]);
 
+  // Delete a group (#9222): the user chooses whether to also delete the projects
+  // inside; choosing "no" leaves them ungrouped (assignments cleared).
+  const handleDeleteGroupWithOption = useCallback((group: ProjectGroup) => {
+    const members = pinnedTreeSections.projects.filter((p) => groupForProjectRoot(p.root)?.id === group.id);
+    const alsoDelete = window.confirm(
+      `删除分组「${group.title}」？\n\n选「确定」= 同时删除组内 ${members.length} 个项目；选「取消」= 仅移出分组，项目保留。`,
+    );
+    const res = deleteProjectGroup(groups, assign, group.id);
+    setGroups(res.groups);
+    setAssign(res.assign);
+    if (alsoDelete) {
+      for (const member of members) {
+        if (member.root) void removeProject(member.root);
+      }
+    }
+  }, [groups, assign, groupForProjectRoot, pinnedTreeSections.projects, removeProject]);
+
   const scheduleHoverCard = useCallback((element: HTMLElement, rowKey: string, node: ProjectNode) => {
     if (hoverCardTimerRef.current !== null) window.clearTimeout(hoverCardTimerRef.current);
     hoverCardTimerRef.current = window.setTimeout(() => {
@@ -1499,6 +1558,17 @@ export function ProjectTree({
         label: t("projectTree.renameProject"),
         onSelect: () => startRenameProject(key, projectRoot, projectLabel),
       },
+      { type: "separator" as const, key: "project-group-separator" },
+      {
+        key: "move-to-project-group",
+        icon: <FolderInput size={13} />,
+        label: t("projectGroup.moveInto"),
+        disabled: !projectRoot,
+        onSelect: () => {
+          setGroupTarget({ ...node, root: projectRoot });
+          closeMenu();
+        },
+      },
       { type: "separator" as const, key: "color-separator" },
       ...PROJECT_COLOR_OPTIONS.map((option): ContextMenuItem => ({
         key: `color-${option.key || "default"}`,
@@ -1573,6 +1643,16 @@ export function ProjectTree({
         icon: <Pencil size={13} />,
         label: t("projectTree.renameProjectWorkbench"),
         onSelect: () => startRenameProject(key, projectRoot, projectLabel),
+      },
+      {
+        key: "move-to-project-group",
+        icon: <FolderInput size={13} />,
+        label: t("projectGroup.moveInto"),
+        disabled: !projectRoot,
+        onSelect: () => {
+          setGroupTarget({ ...node, root: projectRoot });
+          closeMenu();
+        },
       },
       {
         key: "archive-active-topic",
@@ -2017,6 +2097,74 @@ export function ProjectTree({
     );
   };
 
+  // Render projects grouped into user-defined groups (organize-by-project view).
+  // Ungrouped projects stay at the bottom. Group title has collapse, rename, and
+  // delete controls. #9222
+  const renderGroupedProjects = (projects: ProjectNode[]) => {
+    const byGroup = new Map<string, ProjectNode[]>();
+    const ungrouped: ProjectNode[] = [];
+    for (const project of projects) {
+      const gid = groupForProject(assign, project.root);
+      if (gid) {
+        const list = byGroup.get(gid) ?? [];
+        list.push(project);
+        byGroup.set(gid, list);
+      } else {
+        ungrouped.push(project);
+      }
+    }
+    const orderedGroups = [...groups].sort((a, b) => a.sortOrder - b.sortOrder);
+    return (
+      <>
+        {orderedGroups.map((group) => {
+          const members = byGroup.get(group.id) ?? [];
+          const collapsed = collapsedGroups.has(group.id);
+          return (
+            <div className="project-tree__group" key={group.id}>
+              <div className="project-tree__group-title" onClick={() => toggleGroup(group.id)} role="button" tabIndex={0} aria-expanded={!collapsed}>
+                <span className="project-tree__group-caret">{collapsed ? "▸" : "▾"}</span>
+                <FolderInput className="project-tree__group-icon" size={12} aria-hidden="true" />
+                <span className="project-tree__group-name">{group.title}</span>
+                <span className="project-tree__group-count">{members.length}</span>
+                <span className="project-tree__group-actions" onClick={(e) => e.stopPropagation()}>
+                  <button
+                    type="button"
+                    className="project-tree__group-act"
+                    aria-label={t("projectGroup.rename")}
+                    onClick={() => {
+                      const name = window.prompt(t("projectGroup.renamePrompt", { title: group.title }), group.title);
+                      if (name && name.trim()) handleRenameGroup(group.id, name);
+                    }}
+                  >
+                    <Pencil size={11} />
+                  </button>
+                  <button
+                    type="button"
+                    className="project-tree__group-act project-tree__group-act--danger"
+                    aria-label={t("projectGroup.delete")}
+                    onClick={() => handleDeleteGroupWithOption(group)}
+                  >
+                    <XCircle size={11} />
+                  </button>
+                </span>
+              </div>
+              {!collapsed && members.map((node) => renderNode(node, 0, "projects"))}
+            </div>
+          );
+        })}
+        {ungrouped.length > 0 && (
+          <div className="project-tree__group project-tree__group--ungrouped">
+            <div className="project-tree__group-title project-tree__group-title--section" role="presentation">
+              <span className="project-tree__group-name">{t("projectGroup.ungrouped")}</span>
+              <span className="project-tree__group-count">{ungrouped.length}</span>
+            </div>
+            {ungrouped.map((node) => renderNode(node, 0, "projects"))}
+          </div>
+        )}
+      </>
+    );
+  };
+
   const renderProjectHeader = (mode: "classic" | "workbench") => (
     <div className="project-tree__header">
       <span className="project-tree__header-title">
@@ -2062,6 +2210,16 @@ export function ProjectTree({
                 onClose={closeMenu}
               />
             </span>
+            <Tooltip label={t("projectGroup.createNew")} className="project-tree__header-action-slot project-tree__action-slot--group">
+              <button
+                type="button"
+                className="project-tree__header-icon-btn"
+                aria-label={t("projectGroup.createNew")}
+                onClick={() => { setWorkbenchHeaderMenu(null); setMenuPoint(null); setNewGroupOpen(true); }}
+              >
+                <FolderInput size={16} aria-hidden="true" />
+              </button>
+            </Tooltip>
             <span className="project-tree__header-menu-wrap">
               <Tooltip label={t("projectTree.addProjectTooltip")} className="project-tree__header-action-slot">
                 <button
@@ -2101,6 +2259,16 @@ export function ProjectTree({
                 onClick={toggleCollapsedView}
               >
                 {canRestoreCollapsedView ? <ListRestart size={14} /> : <ListCollapse size={14} />}
+              </button>
+            </Tooltip>
+            <Tooltip label={t("projectGroup.createNew")} className="project-tree__action-slot project-tree__header-action-slot project-tree__action-slot--group">
+              <button
+                type="button"
+                className="project-tree__add-project"
+                aria-label={t("projectGroup.createNew")}
+                onClick={() => { setWorkbenchHeaderMenu(null); setMenuPoint(null); setNewGroupOpen(true); }}
+              >
+                <FolderInput size={14} />
               </button>
             </Tooltip>
             <ProjectTreeHeaderAddControl
@@ -2210,7 +2378,7 @@ export function ProjectTree({
                   </div>
                 )}
                 <div className="project-tree__section project-tree__section--projects">
-                  {pinnedTreeSections.projects.map((node) => renderNode(node, 0, "projects"))}
+                  {renderGroupedProjects(pinnedTreeSections.projects)}
                 </div>
               </>
             )}
@@ -2231,7 +2399,14 @@ export function ProjectTree({
                   </div>
                 )}
                 <div className="project-tree__section project-tree__section--projects">
-                  {pinnedTreeSections.projects.map((node) => renderNode(node, 0, "projects"))}
+                  {/* #9222: project groups were rendered only by the
+                      workbench branch, so classic/creation users could create
+                      groups and assign projects without ever seeing them.
+                      Render the same grouped structure here; with no groups
+                      defined the plain flat list is kept verbatim. */}
+                  {groups.length > 0
+                    ? renderGroupedProjects(pinnedTreeSections.projects)
+                    : pinnedTreeSections.projects.map((node) => renderNode(node, 0, "projects"))}
                 </div>
               </>
             )}
@@ -2262,6 +2437,22 @@ export function ProjectTree({
       )}
       {blankProjectFlow}
       {remoteConnectFlow}
+      <MoveToGroupPanel
+        open={groupTarget !== null}
+        onClose={() => setGroupTarget(null)}
+        projectLabel={groupTarget?.label ?? ""}
+        groups={groups}
+        currentGroupId={groupForProjectRoot(groupTarget?.root)?.id ?? null}
+        onMove={(groupId) => {
+          if (groupTarget?.root) handleMoveToGroup(groupTarget.root, groupId);
+        }}
+        onCreateGroup={handleAddGroup}
+      />
+      <NewGroupPanel
+        open={newGroupOpen}
+        onClose={() => setNewGroupOpen(false)}
+        onConfirm={handleAddGroup}
+      />
     </div>
   );
 }
