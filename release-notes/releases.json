@@ -7,33 +7,120 @@
       "channel": "stable",
       "targetingVersion": 1,
       "title": {
-        "en": "Reasonix Desktop 1.38.5",
-        "zh": "Reasonix 桌面版 1.38.5"
+        "en": "Reasonix v1.38.5",
+        "zh": "Reasonix v1.38.5"
       },
       "summary": {
-        "en": "Fixes macOS app signing and notarization for the Desktop release.",
-        "zh": "修复桌面版 macOS 应用签名与公证问题。"
+        "en": "Reasonix moves Desktop to Electron and adds DeepSeek V4.1 Flash image input, OpenCode Go provider presets, durable tool recovery, and independent dock tabs. This release includes the changes since v1.38.3 plus the macOS signing and notarization fixes; v1.38.4 was not published.",
+        "zh": "Reasonix 桌面端迁移至 Electron，新增 DeepSeek V4.1 Flash 图片输入、OpenCode Go 提供商预设、持久工具恢复和独立 dock 标签。本版本包含 v1.38.3 以来的改动及 macOS 签名、公证修复；v1.38.4 未公开发布。"
       },
       "surfaces": [
-        "desktop"
+        "desktop",
+        "cli"
       ],
-      "guides": [],
+      "guides": [
+        {
+          "title": {
+            "en": "Tool Recovery",
+            "zh": "工具恢复"
+          },
+          "body": {
+            "en": "Learn how to recover interrupted tool executions in desktop and remote sessions.",
+            "zh": "了解如何在桌面和远程会话中恢复中断的工具执行。"
+          },
+          "href": "https://github.com/esengine/DeepSeek-Reasonix/blob/645c156cdc14d577b9c9592e468e1d1530f29d5d/docs/TOOL_RECOVERY.md"
+        },
+        {
+          "title": {
+            "en": "Read Evidence Lifecycle",
+            "zh": "读取证据生命周期"
+          },
+          "body": {
+            "en": "Understand how read coverage and write guards are decoupled to avoid repeated work.",
+            "zh": "了解读取覆盖与写入守卫如何解耦，以避免重复工作。"
+          },
+          "href": "https://github.com/esengine/DeepSeek-Reasonix/blob/645c156cdc14d577b9c9592e468e1d1530f29d5d/docs/READ_EVIDENCE_LIFECYCLE.md"
+        },
+        {
+          "title": {
+            "en": "Composer Controls",
+            "zh": "输入区控件"
+          },
+          "body": {
+            "en": "Details on live composer readings and turn metric accuracy improvements.",
+            "zh": "关于输入区实时读数和回合指标准确性改进的详细信息。"
+          },
+          "href": "https://github.com/esengine/DeepSeek-Reasonix/blob/645c156cdc14d577b9c9592e468e1d1530f29d5d/docs/COMPOSER_CONTROLS.md"
+        }
+      ],
       "highlights": [
         {
-          "kind": "fixed",
+          "kind": "new",
           "targets": [
             "desktop"
           ],
           "title": {
-            "en": "macOS app now signs all nested binaries correctly",
-            "zh": "macOS 应用现在正确签名所有嵌套二进制文件"
+            "en": "Electron desktop shell",
+            "zh": "Electron 桌面壳"
           },
           "body": {
-            "en": "The Electron app bundle now signs all nested executables and libraries, including Go sidecars and framework dylibs, before sealing the outer bundle. This fixes Apple notarization rejections.",
-            "zh": "Electron 应用包现在会在封装外层包之前签名所有嵌套可执行文件和库，包括 Go 辅助程序和框架动态库。这修复了 Apple 公证被拒的问题。"
+            "en": "Desktop now runs on Electron in place of Wails, with shell-owned window lifecycle, zoom, and browser panels.",
+            "zh": "桌面端改用 Electron 替代 Wails，由桌面壳管理窗口生命周期、缩放和浏览器面板。"
           },
           "refs": [
-            10072
+            9988
+          ]
+        },
+        {
+          "kind": "new",
+          "targets": [
+            "desktop",
+            "cli"
+          ],
+          "title": {
+            "en": "DeepSeek V4.1 Flash native image input",
+            "zh": "DeepSeek V4.1 Flash 原生图片输入"
+          },
+          "body": {
+            "en": "The official DeepSeek provider now supports V4.1 Flash native image input and the 2026-09-10 price schedule. The model list correctly reports image capability, and cost quotes use the new prices.",
+            "zh": "官方 DeepSeek 提供商现支持 V4.1 Flash 原生图片输入及 2026-09-10 价格表。模型列表正确报告图片能力，成本报价使用新价格。"
+          },
+          "refs": [
+            10062
+          ]
+        },
+        {
+          "kind": "new",
+          "targets": [
+            "desktop"
+          ],
+          "title": {
+            "en": "Durable tool recovery",
+            "zh": "持久工具恢复"
+          },
+          "body": {
+            "en": "Interrupted tool executions can now be recovered in desktop and remote sessions through evidence-backed actions, including inspection, confirmation, rejection, and optional safe retry.",
+            "zh": "中断的工具执行现在可以在桌面和远程会话中通过证据支持的操作进行恢复，包括检查、确认、拒绝和可选的安全重试。"
+          },
+          "refs": [
+            10039
+          ]
+        },
+        {
+          "kind": "new",
+          "targets": [
+            "desktop"
+          ],
+          "title": {
+            "en": "Workspace-isolated launcher with independent view tabs",
+            "zh": "工作区隔离启动器与独立视图标签"
+          },
+          "body": {
+            "en": "The right dock now supports repeatable view tabs for Files, Changes, Context, and host panels, each restoring its own state, with a full-width title bar.",
+            "zh": "右侧 dock 现支持文件、改动、上下文和宿主面板的可重复视图标签，每个视图独立恢复状态，并采用全宽标题栏。"
+          },
+          "refs": [
+            10041
           ]
         },
         {
@@ -42,33 +129,282 @@
             "desktop"
           ],
           "title": {
-            "en": "macOS signing order corrected for notarization",
-            "zh": "修正 macOS 签名顺序以通过公证"
+            "en": "Fixed legacy remote Serve send failures",
+            "zh": "修复旧版远程 Serve 发送失败"
           },
           "body": {
-            "en": "The main executable is now signed last, after all other code objects, preventing an unsigned adjacent service from invalidating the bundle signature.",
-            "zh": "主可执行文件现在最后签名，在所有其他代码对象之后，防止未签名的相邻服务使包签名失效。"
+            "en": "Remote sessions connecting to older Serve versions no longer fail; the status probe now correctly handles HTML index responses.",
+            "zh": "远程会话连接旧版 Serve 时不再失败；状态探测现在能正确处理 HTML 索引响应。"
           },
           "refs": [
-            10078
+            10027
+          ]
+        },
+        {
+          "kind": "fixed",
+          "targets": [
+            "desktop",
+            "cli"
+          ],
+          "title": {
+            "en": "Evidence gates stop repeating work",
+            "zh": "证据门禁不再重复工作"
+          },
+          "body": {
+            "en": "Operations are now host-owned, preventing the agent from repeating work due to evidence or verification mismatches.",
+            "zh": "操作现在由宿主拥有，防止代理因证据或验证不匹配而重复工作。"
+          },
+          "refs": [
+            10049
+          ]
+        },
+        {
+          "kind": "improved",
+          "targets": [
+            "desktop"
+          ],
+          "title": {
+            "en": "Accurate turn metrics and live composer readings",
+            "zh": "准确的回合指标与输入区实时读数"
+          },
+          "body": {
+            "en": "Turn metric readings now come from a single source, token estimates are more accurate for Han characters, and live readings appear in the composer run strip.",
+            "zh": "回合指标读数现在来自单一来源，对汉字字符的令牌估算更准确，并在输入区运行条中显示实时读数。"
+          },
+          "refs": [
+            10059
+          ]
+        },
+        {
+          "kind": "new",
+          "targets": [
+            "desktop"
+          ],
+          "title": {
+            "en": "Hardware acceleration setting",
+            "zh": "硬件加速设置"
+          },
+          "body": {
+            "en": "A new persistent Electron hardware acceleration setting with recovery overrides for blank screens and rendering failures.",
+            "zh": "新增持久化的 Electron 硬件加速设置，并提供针对黑屏和渲染故障的恢复覆盖。"
+          },
+          "refs": [
+            10040
           ]
         }
       ],
       "changes": {
-        "new": [],
-        "improved": [],
+        "new": [
+          {
+            "targets": [
+              "desktop",
+              "cli"
+            ],
+            "title": {
+              "en": "DeepSeek V4.1 Flash support",
+              "zh": "DeepSeek V4.1 Flash 支持"
+            },
+            "body": {
+              "en": "Official DeepSeek provider now supports V4.1 Flash native image input and the 2026-09-10 price schedule.",
+              "zh": "官方 DeepSeek 提供商现支持 V4.1 Flash 原生图片输入及 2026-09-10 价格表。"
+            },
+            "refs": [
+              10062
+            ]
+          },
+          {
+            "targets": [
+              "desktop"
+            ],
+            "title": {
+              "en": "Durable tool recovery",
+              "zh": "持久工具恢复"
+            },
+            "body": {
+              "en": "Interrupted tool executions can be recovered in desktop and remote sessions with evidence-backed actions.",
+              "zh": "中断的工具执行可以在桌面和远程会话中通过证据支持的操作进行恢复。"
+            },
+            "refs": [
+              10039
+            ]
+          },
+          {
+            "targets": [
+              "desktop"
+            ],
+            "title": {
+              "en": "Workspace-isolated launcher with independent view tabs",
+              "zh": "工作区隔离启动器与独立视图标签"
+            },
+            "body": {
+              "en": "Right dock supports repeatable view tabs for Files, Changes, Context, and host panels with independent state restoration.",
+              "zh": "右侧 dock 支持文件、改动、上下文和宿主面板的可重复视图标签，每个视图独立恢复状态。"
+            },
+            "refs": [
+              10041
+            ]
+          },
+          {
+            "targets": [
+              "desktop"
+            ],
+            "title": {
+              "en": "Hardware acceleration setting",
+              "zh": "硬件加速设置"
+            },
+            "body": {
+              "en": "Persistent Electron hardware acceleration setting with recovery overrides.",
+              "zh": "持久化的 Electron 硬件加速设置，并提供恢复覆盖。"
+            },
+            "refs": [
+              10040
+            ]
+          },
+          {
+            "targets": [
+              "desktop"
+            ],
+            "title": {
+              "en": "Electron desktop shell",
+              "zh": "Electron 桌面壳"
+            },
+            "body": {
+              "en": "Desktop now runs on Electron in place of Wails, with shell-owned window lifecycle, zoom, and browser panels.",
+              "zh": "桌面端改用 Electron 替代 Wails，由桌面壳管理窗口生命周期、缩放和浏览器面板。"
+            },
+            "refs": [
+              9988
+            ]
+          },
+          {
+            "targets": [
+              "desktop",
+              "cli"
+            ],
+            "title": {
+              "en": "OpenCode Go provider preset",
+              "zh": "OpenCode Go 提供商预设"
+            },
+            "body": {
+              "en": "The OpenCode Go curated provider preset is available, with its routing, reasoning, and search contracts carried onto the current kernel.",
+              "zh": "新增 OpenCode Go curated 提供商预设，其路由、推理与搜索契约已迁移到当前内核。"
+            },
+            "refs": [
+              10015
+            ]
+          }
+        ],
+        "improved": [
+          {
+            "targets": [
+              "desktop"
+            ],
+            "title": {
+              "en": "Turn metric accuracy and live composer readings",
+              "zh": "回合指标准确性与输入区实时读数"
+            },
+            "body": {
+              "en": "Turn metrics now use a single definition, better Han character token estimates, and live readings in the composer run strip.",
+              "zh": "回合指标现在使用单一来源，汉字令牌估算更准确，并在输入区运行条中显示实时读数。"
+            },
+            "refs": [
+              10059
+            ]
+          },
+          {
+            "targets": [
+              "desktop"
+            ],
+            "title": {
+              "en": "Electron zoom ownership and legacy migration",
+              "zh": "Electron 缩放归属与旧配置迁移"
+            },
+            "body": {
+              "en": "App zoom uses a versioned Electron store and imports explicitly user-selected legacy zoom once.",
+              "zh": "应用缩放使用版本化的 Electron 存储，并一次性导入旧版中由用户明确设置的缩放比例。"
+            },
+            "refs": [
+              10014
+            ]
+          },
+          {
+            "targets": [
+              "desktop"
+            ],
+            "title": {
+              "en": "External URL protocol restriction",
+              "zh": "外部链接协议限制"
+            },
+            "body": {
+              "en": "Only http, https, and mailto protocols are allowed for external links.",
+              "zh": "外部链接仅允许 http、https 和 mailto 协议。"
+            },
+            "refs": [
+              10005
+            ]
+          }
+        ],
         "fixed": [
           {
             "targets": [
               "desktop"
             ],
             "title": {
-              "en": "Complete macOS bundle signing",
-              "zh": "完整的 macOS 包签名"
+              "en": "Legacy remote Serve send failures",
+              "zh": "旧版远程 Serve 发送失败"
             },
             "body": {
-              "en": "Signs all nested binaries and libraries in the Electron app bundle, including Go sidecars and framework dylibs, with Developer ID and hardened runtime.",
-              "zh": "使用 Developer ID 和强化运行时签名 Electron 应用包中的所有嵌套二进制文件和库，包括 Go 辅助程序和框架动态库。"
+              "en": "Remote sessions connecting to older Serve versions no longer fail; status probe handles HTML index responses.",
+              "zh": "远程会话连接旧版 Serve 时不再失败；状态探测能正确处理 HTML 索引响应。"
+            },
+            "refs": [
+              10027
+            ]
+          },
+          {
+            "targets": [
+              "desktop",
+              "cli"
+            ],
+            "title": {
+              "en": "Evidence gates stop repeating work",
+              "zh": "证据门禁不再重复工作"
+            },
+            "body": {
+              "en": "Operations are host-owned, preventing repeated work due to evidence or verification mismatches.",
+              "zh": "操作由宿主拥有，防止因证据或验证不匹配而重复工作。"
+            },
+            "refs": [
+              10049
+            ]
+          },
+          {
+            "targets": [
+              "desktop"
+            ],
+            "title": {
+              "en": "macOS app signing order",
+              "zh": "macOS 应用签名顺序"
+            },
+            "body": {
+              "en": "Signs the adjacent Go service before sealing the main executable and outer app bundle, fixing the observed notarization failure.",
+              "zh": "在主程序与外层应用包完成签名前，先签名相邻的 Go 服务，修复本次发现的公证失败。"
+            },
+            "refs": [
+              10078
+            ]
+          },
+          {
+            "targets": [
+              "desktop"
+            ],
+            "title": {
+              "en": "Complete Electron macOS bundle signing",
+              "zh": "完整的 Electron macOS 包签名"
+            },
+            "body": {
+              "en": "Signs all nested code objects in the Electron bundle, including Go sidecars and frameworks, to pass notarization.",
+              "zh": "对 Electron 包中的所有嵌套代码对象（包括 Go 侧车和框架）进行签名，以通过公证。"
             },
             "refs": [
               10072
@@ -76,18 +412,67 @@
           },
           {
             "targets": [
+              "desktop",
+              "cli"
+            ],
+            "title": {
+              "en": "Decouple read coverage and write guards",
+              "zh": "解耦读取覆盖与写入守卫"
+            },
+            "body": {
+              "en": "Partial file reads no longer freeze independent tools and final answers.",
+              "zh": "部分文件读取不再冻结独立工具和最终答案。"
+            },
+            "refs": [
+              10038
+            ]
+          },
+          {
+            "targets": [
               "desktop"
             ],
             "title": {
-              "en": "Correct signing order for macOS app",
-              "zh": "macOS 应用的正确签名顺序"
+              "en": "Restore 104px composer default",
+              "zh": "恢复 104px 输入框默认高度"
             },
             "body": {
-              "en": "Defers signing of the main executable until after all other code objects are signed, ensuring the adjacent Go service is signed before the bundle is sealed.",
-              "zh": "将主可执行文件的签名推迟到所有其他代码对象签名之后，确保相邻的 Go 服务在包封装之前已签名。"
+              "en": "Fresh profiles now use the compact 104px composer height again.",
+              "zh": "新配置文件现在再次使用紧凑的 104px 输入框高度。"
             },
             "refs": [
-              10078
+              9990
+            ]
+          },
+          {
+            "targets": [
+              "desktop"
+            ],
+            "title": {
+              "en": "Keep running composer controls usable",
+              "zh": "修复运行中输入控件可用性"
+            },
+            "body": {
+              "en": "Running local desktop tasks can now add attachments and references through existing composer controls.",
+              "zh": "运行中的本地桌面任务现在可以通过现有输入控件添加附件和引用。"
+            },
+            "refs": [
+              9984
+            ]
+          },
+          {
+            "targets": [
+              "desktop"
+            ],
+            "title": {
+              "en": "Cancel status refresh during catalog shutdown",
+              "zh": "修复 catalog 关闭时状态刷新超时"
+            },
+            "body": {
+              "en": "Catalog shutdown cancels in-flight status refreshes so they do not outlive the catalog worker.",
+              "zh": "历史目录关闭时会取消进行中的状态刷新，避免刷新工作超过目录工作线程的生命周期。"
+            },
+            "refs": [
+              10013
             ]
           }
         ]
@@ -95,17 +480,19 @@
       "upgrade": [],
       "risks": [],
       "contributors": [
-        "SivanCola"
+        "SivanCola",
+        "XTLine",
+        "dependabot[bot]"
       ],
       "links": {
         "github": "https://github.com/esengine/DeepSeek-Reasonix/releases/tag/desktop-v1.38.5",
-        "compare": "https://github.com/esengine/DeepSeek-Reasonix/compare/desktop-v1.38.4...desktop-v1.38.5",
+        "compare": "https://github.com/esengine/DeepSeek-Reasonix/compare/desktop-v1.38.3...desktop-v1.38.5",
         "download": "https://reasonix.io/?download=desktop&channel=stable#start"
       },
       "releaseId": "1.38.5",
       "baseVersion": "1.38.5",
       "status": "reviewed",
-      "previousRelease": "1.38.4",
+      "previousRelease": "1.38.3",
       "builds": {
         "cli": "v1.38.5",
         "desktop": "v1.38.5",
