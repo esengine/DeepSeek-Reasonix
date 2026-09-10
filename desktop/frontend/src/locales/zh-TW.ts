@@ -5,6 +5,19 @@
 import type { DictKey } from "./en";
 
 export const zhTW: Record<DictKey, string> = {
+  "toolRecovery.title": "中斷的工具需要核實",
+  "toolRecovery.unknown": "結果尚未確認",
+  "toolRecovery.details": "查看操作詳情",
+  "toolRecovery.inspect": "檢查目前狀態",
+  "toolRecovery.confirm": "我已核實操作生效",
+  "toolRecovery.reject": "不重試",
+  "toolRecovery.retry": "安全重試",
+  "toolRecovery.resume": "繼續任務",
+  "toolRecovery.resumePrompt": "繼續中斷的任務，保留已完成工作，並在進一步寫入前核實未知效果。",
+  "toolRecovery.present": "目前效果或檔案後置條件已存在，但這不能證明原呼叫的執行結果。",
+  "toolRecovery.absent": "工具已核實效果不存在，且舊嘗試已無法再提交。",
+  "toolRecovery.unproven": "自動檢查無法確認結果。請核實受影響的工作區或外部服務後再確認。",
+  "toolRecovery.rejected": "已拒絕重試。未知效果仍被記錄，並繼續阻止後續寫入。",
   "settings.providerProtocolMismatch": "API 位址與所選協定不一致。",
   "settings.imageInputLabel": "圖片輸入",
   "settings.imageInputModeAria": "{model} 的圖片輸入模式",

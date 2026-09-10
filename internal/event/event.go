@@ -138,9 +138,8 @@ const (
 	SessionChanged
 	// ReadStatus upserts one logical read's delivery state instead of per page.
 	ReadStatus
-	// KindCount is a sentinel one past the last real Kind. New event kinds must
-	// be inserted above it so completeness tests cover them automatically.
-	KindCount
+	ToolStarted // Persisted after policy/validation and before execution.
+	KindCount   // Follows all real event kinds.
 )
 
 // TurnPhaseName is the machine-readable phase on TurnPhase events.
@@ -221,6 +220,7 @@ type Profile struct {
 // Output/Err/Truncated are filled in. Args is the raw JSON arguments — a sink
 // compacts it for display.
 type Tool struct {
+	RunState   provider.ToolRunState
 	Diagnostic json.RawMessage `json:"diagnostic,omitempty"`
 	// Verifying is emitted only once an authorized check actually enters execution.
 	Verifying bool

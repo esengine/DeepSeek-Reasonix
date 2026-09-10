@@ -108,8 +108,8 @@ func TestCancelledTurnDoneCarriesRetainedUserCheckpoint(t *testing.T) {
 	}
 	controller.Cancel()
 	done := receiveCheckpointTurnDone(t, events)
-	if !done.Cancelled || done.Err != nil || done.Status != event.TurnInterrupted {
-		t.Fatalf("cancelled TurnDone = %+v, want interrupted terminal without send error", done)
+	if !done.Cancelled || done.Err != nil || done.Status != event.TurnRecoveryRequired || done.Recovery == nil || done.Recovery.Reason != "silent_interruption" {
+		t.Fatalf("cancelled TurnDone = %+v, want silent recovery terminal without send error", done)
 	}
 	requireCheckpointTurn(t, done, 0)
 }

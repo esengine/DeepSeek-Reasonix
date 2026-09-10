@@ -283,10 +283,11 @@ func displayMessagesFromProjection(projection turnevent.PendingProjection) []His
 		recordHistoryDisplayEvent(buffer, e)
 	}
 	out := planner.materialize()
-	if projection.Status != event.TurnInterrupted {
+	interrupted := projection.Status == event.TurnInterrupted || projection.Status == event.TurnRecoveryRequired
+	if !interrupted {
 		out = append(out, executor.resultMessages()...)
 	}
-	if projection.Status == event.TurnInterrupted {
+	if interrupted {
 		out = append(out, executor.materialize()...)
 		if len(out) > 0 {
 			out = append(out, HistoryMessage{

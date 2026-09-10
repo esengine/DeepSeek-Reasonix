@@ -207,7 +207,7 @@ func (a *Agent) canWaitSampling(ctx context.Context, s *samplingRecoveryState, f
 	if role == turnContextPlanner {
 		return false
 	}
-	if SubagentDepth(ctx) != 0 || a.turn.graceRound || a.turn.recoveryGraceRound || s.partial || len(a.turn.writeRecovery) > 0 {
+	if SubagentDepth(ctx) != 0 || a.turn.graceRound || a.turn.recoveryGraceRound || s.partial || len(a.turn.writeRecovery) > 0 || len(a.turn.unknownRecovery) > 0 {
 		return false
 	}
 	return f.Retryable && (f.Phase == "connect" || (f.Phase == "headers" && (f.Status == 408 || f.Status == 429 || f.Status >= 500)))

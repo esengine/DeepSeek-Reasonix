@@ -110,7 +110,7 @@ func ToWire(e event.Event) Event {
 		w.applyNotice(e)
 	case event.ReadStatus:
 		w.ReadStatus = toWireReadStatus(e.ReadStatus)
-	case event.ToolDispatch, event.ToolResult, event.ToolProgress, event.ToolResultPreview:
+	case event.ToolDispatch, event.ToolStarted, event.ToolResult, event.ToolProgress, event.ToolResultPreview:
 		w.Tool = toWireTool(e.Tool)
 	case event.WorkspaceChanged:
 		ws := e.Workspace
@@ -154,6 +154,7 @@ func ToWire(e event.Event) Event {
 	case event.ExtensionSurface, event.ExtensionStatus:
 		w.Extension = ToWireExtensionSurface(e.Extension)
 	case event.TurnDone:
+		w.Recovery = e.Recovery
 		w.Outcome = e.Outcome
 		w.ReadPause = e.ReadPause
 		w.CheckpointTurn = e.CheckpointTurn
@@ -554,6 +555,7 @@ var kindNames = map[event.Kind]string{
 	event.Text:                    "text",
 	event.Message:                 "message",
 	event.ToolDispatch:            "tool_dispatch",
+	event.ToolStarted:             "tool_started",
 	event.ToolResult:              "tool_result",
 	event.Usage:                   "usage",
 	event.Notice:                  "notice",

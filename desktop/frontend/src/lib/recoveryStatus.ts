@@ -1,6 +1,11 @@
 import type { Translator } from "./i18n";
 
 export interface RecoveryStatus {
+  state?: "recovery_required" | string;
+  call_id?: string;
+  attempt_id?: string;
+  requires_user_decision?: boolean;
+  read_only?: boolean;
   phase?: string;
   reason?: string;
   next_attempt_at?: number;

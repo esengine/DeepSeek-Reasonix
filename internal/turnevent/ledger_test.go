@@ -253,8 +253,8 @@ func TestLedgerRecoveryClosesRunningToolsWithoutReplay(t *testing.T) {
 	if result.Event.Tool.Args != "" || result.Event.Tool.Output != "" {
 		t.Fatalf("synthetic result must not replay tool input/output: %#v", result.Event.Tool)
 	}
-	if recs[3].Kind != "turn_done" || recs[3].Status != event.TurnInterrupted {
-		t.Fatalf("terminal = %#v, want interrupted turn_done", recs[3])
+	if recs[3].Kind != "turn_done" || recs[3].Status != event.TurnRecoveryRequired || result.Event.Tool.RunState != "unknown" {
+		t.Fatalf("terminal = %#v, want recovery_required for a legacy unproven write", recs[3])
 	}
 }
 

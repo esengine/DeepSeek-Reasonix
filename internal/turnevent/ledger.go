@@ -262,7 +262,7 @@ func Open(sessionPath, sessionID string) (*Ledger, error) {
 		}
 		if rec.Event.Tool != nil && rec.Event.Tool.ID != "" {
 			switch rec.Kind {
-			case "tool_dispatch":
+			case "tool_dispatch", "tool_started":
 				if _, exists := pendingTools[rec.Event.Tool.ID]; !exists {
 					pendingToolOrder = append(pendingToolOrder, rec.Event.Tool.ID)
 				}
@@ -297,25 +297,8 @@ func Open(sessionPath, sessionID string) (*Ledger, error) {
 			return nil, fmt.Errorf("bootstrap legacy session %s: terminal append rejected", sessionID)
 		}
 	}
-	if l.active != "" && !l.terminal {
-		for _, id := range pendingToolOrder {
-			tool, ok := pendingTools[id]
-			if !ok {
-				continue
-			}
-			result := event.Event{Kind: event.ToolResult, TurnID: l.active, Tool: event.Tool{
-				ID: tool.ID, Name: tool.Name, ResolvedName: tool.ResolvedName,
-				CapabilityID: tool.CapabilityID, ReadOnly: tool.ReadOnly, ParentID: tool.ParentID,
-				Err: "interrupted: runtime restarted before the tool completed",
-			}}
-			if _, ok, appendErr := l.appendLocked(result, l.status); appendErr != nil || !ok {
-				return nil, fmt.Errorf("recover orphaned tool %s in turn %s: %w", id, l.active, appendErr)
-			}
-		}
-		e := event.Event{Kind: event.TurnDone, TurnID: l.active, Status: event.TurnInterrupted, Err: errors.New("runtime restarted before the turn reached a terminal event")}
-		if _, ok, appendErr := l.appendLocked(e, event.TurnInterrupted); appendErr != nil || !ok {
-			return nil, fmt.Errorf("recover orphaned turn %s: %w", l.active, appendErr)
-		}
+	if err := l.recoverToolEffects(pendingTools, pendingToolOrder); err != nil {
+		return nil, err
 	}
 	return l, nil
 }
@@ -514,6 +497,12 @@ func (l *Ledger) appendLocked(e event.Event, status event.TurnStatus) (event.Eve
 	terminal := status.Terminal()
 	if err := l.appendLineLocked(line, terminal); err != nil {
 		return e, false, err
+	}
+	if e.Kind == event.ToolStarted && !terminal {
+		if err := l.writer.Sync(); err != nil {
+			return e, false, l.poisonLocked(err)
+		}
+		l.metrics.SyncCount++
 	}
 	l.records = append(l.records, rec)
 	if e.Kind == event.Text || e.Kind == event.Reasoning {

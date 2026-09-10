@@ -4356,6 +4356,32 @@
     },
     {
       "cancellation": "before-dispatch",
+      "domain": "desktop/tool_recovery.go",
+      "name": "GetToolRecoveryForTab",
+      "owner": "App.GetToolRecoveryForTab",
+      "params": [
+        {
+          "kind": "string"
+        }
+      ],
+      "result": {
+        "kind": "object",
+        "ref": "control.ToolRecoverySnapshot"
+      },
+      "returnsError": true,
+      "scope": {
+        "inputs": [
+          "tabID"
+        ],
+        "kind": "owner-inputs",
+        "resolver": "App.GetToolRecoveryForTab"
+      },
+      "sources": [
+        "desktop/tool_recovery.go"
+      ]
+    },
+    {
+      "cancellation": "before-dispatch",
       "domain": "desktop/session_catalog_runtime.go",
       "name": "GetTopicSummary",
       "owner": "App.GetTopicSummary",
@@ -9381,6 +9407,37 @@
       },
       "sources": [
         "desktop/remote_tab.go"
+      ]
+    },
+    {
+      "cancellation": "before-dispatch",
+      "domain": "desktop/tool_recovery.go",
+      "name": "ResolveToolRecoveryForTab",
+      "owner": "App.ResolveToolRecoveryForTab",
+      "params": [
+        {
+          "kind": "string"
+        },
+        {
+          "kind": "object",
+          "ref": "control.ToolRecoveryRequest"
+        }
+      ],
+      "result": {
+        "kind": "object",
+        "ref": "control.ToolRecoverySnapshot"
+      },
+      "returnsError": true,
+      "scope": {
+        "inputs": [
+          "tabID",
+          "req"
+        ],
+        "kind": "owner-inputs",
+        "resolver": "App.ResolveToolRecoveryForTab"
+      },
+      "sources": [
+        "desktop/tool_recovery.go"
       ]
     },
     {
@@ -15216,6 +15273,40 @@
   ],
   "protocolVersion": 1,
   "types": {
+    "agent.ToolRecoveryStatistics": {
+      "fields": [
+        {
+          "name": "unknown",
+          "type": {
+            "kind": "integer"
+          }
+        },
+        {
+          "name": "confirmed",
+          "type": {
+            "kind": "integer"
+          }
+        },
+        {
+          "name": "retried",
+          "type": {
+            "kind": "integer"
+          }
+        },
+        {
+          "name": "rejected",
+          "type": {
+            "kind": "integer"
+          }
+        },
+        {
+          "name": "blocked",
+          "type": {
+            "kind": "integer"
+          }
+        }
+      ]
+    },
     "billing.CostQuote": {
       "fields": [
         {
@@ -16482,6 +16573,97 @@
         }
       ]
     },
+    "control.ToolRecoveryRequest": {
+      "fields": [
+        {
+          "name": "sessionPath",
+          "type": {
+            "kind": "string"
+          }
+        },
+        {
+          "name": "runtimeEpoch",
+          "type": {
+            "kind": "string"
+          }
+        },
+        {
+          "name": "revision",
+          "type": {
+            "kind": "string"
+          }
+        },
+        {
+          "name": "attemptId",
+          "type": {
+            "kind": "string"
+          }
+        },
+        {
+          "name": "inspectionId",
+          "type": {
+            "kind": "string"
+          }
+        },
+        {
+          "name": "action",
+          "type": {
+            "kind": "string"
+          }
+        }
+      ]
+    },
+    "control.ToolRecoverySnapshot": {
+      "fields": [
+        {
+          "name": "silent",
+          "type": {
+            "kind": "boolean"
+          }
+        },
+        {
+          "name": "statistics",
+          "type": {
+            "kind": "object",
+            "ref": "agent.ToolRecoveryStatistics"
+          }
+        },
+        {
+          "name": "sessionPath",
+          "type": {
+            "kind": "string"
+          }
+        },
+        {
+          "name": "runtimeEpoch",
+          "type": {
+            "kind": "string"
+          }
+        },
+        {
+          "name": "revision",
+          "type": {
+            "kind": "string"
+          }
+        },
+        {
+          "name": "calls",
+          "type": {
+            "elem": {
+              "kind": "object",
+              "ref": "provider.ToolCallRecord"
+            },
+            "kind": "array"
+          }
+        },
+        {
+          "name": "retryEnabled",
+          "type": {
+            "kind": "boolean"
+          }
+        }
+      ]
+    },
     "control.ToolResultData": {
       "fields": [
         {
@@ -16543,6 +16725,41 @@
     },
     "event.RecoveryStatus": {
       "fields": [
+        {
+          "name": "state",
+          "optional": true,
+          "type": {
+            "kind": "string"
+          }
+        },
+        {
+          "name": "call_id",
+          "optional": true,
+          "type": {
+            "kind": "string"
+          }
+        },
+        {
+          "name": "attempt_id",
+          "optional": true,
+          "type": {
+            "kind": "string"
+          }
+        },
+        {
+          "name": "requires_user_decision",
+          "optional": true,
+          "type": {
+            "kind": "boolean"
+          }
+        },
+        {
+          "name": "read_only",
+          "optional": true,
+          "type": {
+            "kind": "boolean"
+          }
+        },
         {
           "name": "phase",
           "optional": true,
@@ -18656,6 +18873,13 @@
     },
     "eventwire.Tool": {
       "fields": [
+        {
+          "name": "runState",
+          "optional": true,
+          "type": {
+            "kind": "string"
+          }
+        },
         {
           "name": "diagnostic",
           "optional": true,
@@ -32898,6 +33122,59 @@
         }
       ]
     },
+    "provider.ActionIdentity": {
+      "fields": [
+        {
+          "name": "session_id",
+          "optional": true,
+          "type": {
+            "kind": "string"
+          }
+        },
+        {
+          "name": "turn_id",
+          "optional": true,
+          "type": {
+            "kind": "string"
+          }
+        },
+        {
+          "name": "attempt_id",
+          "optional": true,
+          "type": {
+            "kind": "string"
+          }
+        },
+        {
+          "name": "call_id",
+          "optional": true,
+          "type": {
+            "kind": "string"
+          }
+        },
+        {
+          "name": "canonical_tool",
+          "optional": true,
+          "type": {
+            "kind": "string"
+          }
+        },
+        {
+          "name": "argument_digest",
+          "optional": true,
+          "type": {
+            "kind": "string"
+          }
+        },
+        {
+          "name": "resource_scope",
+          "optional": true,
+          "type": {
+            "kind": "string"
+          }
+        }
+      ]
+    },
     "provider.CompletedRead": {
       "fields": [
         {
@@ -33356,6 +33633,113 @@
         },
         {
           "name": "url",
+          "optional": true,
+          "type": {
+            "kind": "string"
+          }
+        }
+      ]
+    },
+    "provider.ToolCallRecord": {
+      "fields": [
+        {
+          "name": "identity",
+          "type": {
+            "kind": "object",
+            "ref": "provider.ActionIdentity"
+          }
+        },
+        {
+          "name": "arguments",
+          "optional": true,
+          "type": {
+            "kind": "any"
+          }
+        },
+        {
+          "name": "state",
+          "type": {
+            "kind": "string"
+          }
+        },
+        {
+          "name": "read_only",
+          "type": {
+            "kind": "boolean"
+          }
+        },
+        {
+          "name": "idempotency_key",
+          "optional": true,
+          "type": {
+            "kind": "string"
+          }
+        },
+        {
+          "name": "started_at",
+          "optional": true,
+          "type": {
+            "kind": "integer"
+          }
+        },
+        {
+          "name": "finished_at",
+          "optional": true,
+          "type": {
+            "kind": "integer"
+          }
+        },
+        {
+          "name": "result_digest",
+          "optional": true,
+          "type": {
+            "kind": "string"
+          }
+        },
+        {
+          "name": "effect_summary",
+          "optional": true,
+          "type": {
+            "kind": "string"
+          }
+        },
+        {
+          "name": "resolution",
+          "optional": true,
+          "type": {
+            "kind": "string"
+          }
+        },
+        {
+          "name": "resolved_at",
+          "optional": true,
+          "type": {
+            "kind": "integer"
+          }
+        },
+        {
+          "name": "resolution_source",
+          "optional": true,
+          "type": {
+            "kind": "string"
+          }
+        },
+        {
+          "name": "inspection_id",
+          "optional": true,
+          "type": {
+            "kind": "string"
+          }
+        },
+        {
+          "name": "inspection_state",
+          "optional": true,
+          "type": {
+            "kind": "string"
+          }
+        },
+        {
+          "name": "superseded_by",
           "optional": true,
           "type": {
             "kind": "string"

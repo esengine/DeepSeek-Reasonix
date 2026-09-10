@@ -235,8 +235,8 @@ func ParseImageDataURL(dataURL string) (mediaType, base64Data string, ok bool) {
 	return mt, payload, true
 }
 
-// ToolCall is a tool invocation requested by the model. Arguments is raw JSON.
 type ToolCall struct {
+	Recovery     *ToolCallRecord   `json:"tool_recovery,omitempty"` // local execution evidence; stripped from model input
 	WriteIntents []json.RawMessage `json:"write_intents,omitempty"` // local versioned evidence, stripped from model input
 	ID           string            `json:"id"`
 	Name         string            `json:"name"`

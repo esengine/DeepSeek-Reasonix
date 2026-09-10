@@ -26,6 +26,23 @@ type readShadowState struct {
 	strategyMu *sync.Mutex
 }
 
+var readShadowStrategyInitMu sync.Mutex
+
+func (s *readShadowState) lockStrategy() bool {
+	if s == nil {
+		return false
+	}
+	if s.strategyMu == nil {
+		readShadowStrategyInitMu.Lock()
+		if s.strategyMu == nil {
+			s.strategyMu = &sync.Mutex{}
+		}
+		readShadowStrategyInitMu.Unlock()
+	}
+	s.strategyMu.Lock()
+	return true
+}
+
 func newReadShadowState(enabled bool) readShadowState {
 	s := readShadowState{enabled: enabled, strategyMu: &sync.Mutex{}}
 	if enabled {
@@ -112,13 +129,9 @@ func (a *Agent) armDefaultReadStrategy(key string, env tool.ReadResultEnvelope) 
 }
 
 func (s *readShadowState) strategyPending(key string) bool {
-	if s == nil {
+	if !s.lockStrategy() {
 		return false
 	}
-	if s.strategyMu == nil {
-		s.strategyMu = &sync.Mutex{}
-	}
-	s.strategyMu.Lock()
 	defer s.strategyMu.Unlock()
 	if s.strategies == nil {
 		return false
@@ -128,10 +141,9 @@ func (s *readShadowState) strategyPending(key string) bool {
 }
 
 func (s *readShadowState) markStrategy(key string, resolved bool) {
-	if s.strategyMu == nil {
-		s.strategyMu = &sync.Mutex{}
+	if !s.lockStrategy() {
+		return
 	}
-	s.strategyMu.Lock()
 	defer s.strategyMu.Unlock()
 	if s.strategies == nil {
 		s.strategies = map[string]bool{}

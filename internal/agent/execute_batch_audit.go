@@ -20,6 +20,7 @@ func (a *Agent) emitBatchToolResult(c provider.ToolCall, o toolOutcome, duration
 		readOnly = *c.ResolvedReadOnly
 	}
 	tr := event.Tool{
+		RunState:     outcomeRunState(o),
 		ID:           c.ID,
 		Name:         c.Name,
 		Args:         c.Arguments,

@@ -604,7 +604,7 @@ func (s *Server) handler() http.Handler {
 	mux.HandleFunc("POST /quality-floor", s.qualityFloorSwitch)
 	mux.HandleFunc("POST /extensions/reload", s.reloadExtensionsHTTP)
 	mux.HandleFunc("POST /extension-form", s.foregroundMutation(s.submitExtensionForm))
-	mux.HandleFunc("GET /status", s.status)
+	s.registerRuntimeRecoveryRoutes(mux)
 	mux.HandleFunc("GET /sessions", s.sessions)
 	mux.HandleFunc("GET /ownership", s.ownership)
 	mux.HandleFunc("POST /handoff", s.handoff)

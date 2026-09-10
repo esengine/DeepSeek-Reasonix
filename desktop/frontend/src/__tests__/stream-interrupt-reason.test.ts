@@ -87,5 +87,11 @@ console.log("\ninterrupted turn surfaces the last stream failure reason (#9560)"
   ok(!notices.some((n) => n.text.includes("raw upstream")), "duplicate raw turn error is suppressed", notices);
 }
 
+{
+  const started = reducer(initialState, { type: "event", e: { kind: "turn_started" } });
+  const recovered = reducer(started, { type: "event", e: { kind: "turn_done", status: "recovery_required", recovery: { state: "recovery_required" } } });
+  ok(!recovered.running, "recovery-required is terminal and frees the composer");
+  ok(noticeTexts(recovered).some(n => n.level === "info"), "recovery-required keeps the interrupted display notice");
+}
 process.stdout.write(`\n${passed} passed, ${failed} failed\n`);
 if (failed > 0) process.exit(1);

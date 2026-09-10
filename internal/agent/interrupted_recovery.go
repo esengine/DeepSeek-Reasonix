@@ -20,7 +20,7 @@ const (
 // pendingInterruptedRecovery returns the newest unconsumed recovery handoff.
 // A later real user turn consumes older handoffs implicitly, so the persisted
 // LocalOnly record never needs an in-place mutation that could churn history.
-func (a *Agent) pendingInterruptedRecovery() *provider.InterruptedTurnRecovery {
+func (a *Agent) transcriptInterruptedRecovery() *provider.InterruptedTurnRecovery {
 	if a == nil || a.sess.conversation == nil {
 		return nil
 	}
@@ -56,7 +56,11 @@ func interruptedRecoveryBlock(r *provider.InterruptedTurnRecovery) string {
 	}
 	var b strings.Builder
 	fmt.Fprintf(&b, "<%s>\n", interruptedRecoveryTag)
-	b.WriteString("The previous turn was interrupted. Treat these as host-verified recovery facts, not as a new task.\n")
+	if len(r.UserConfirmedTools) > 0 {
+		b.WriteString("The previous turn was interrupted. Preserve the stated provenance: user-confirmed effects are attestations, not tool results.\n")
+	} else {
+		b.WriteString("The previous turn was interrupted. Treat these as host-verified recovery facts, not as a new task.\n")
+	}
 	if len(r.CompletedTools) == 0 {
 		b.WriteString("completed_tools: none\n")
 	} else {
@@ -104,6 +108,8 @@ func interruptedRecoveryBlock(r *provider.InterruptedTurnRecovery) string {
 	writeRecoveryCalls(&b, "write_postconditions_satisfied_do_not_repeat", r.SatisfiedWrites)
 	writeRecoveryCalls(&b, "not_started_tools", r.NotStartedTools)
 	writeRecoveryCalls(&b, "outcome_unknown_tools", r.UnknownTools)
+	writeRecoveryCalls(&b, "failed_tools", r.FailedTools)
+	writeRecoveryCalls(&b, "user_confirmed_effects_do_not_repeat", r.UserConfirmedTools)
 	if r.DroppedPartialText || r.DroppedPartialReasoning {
 		b.WriteString("unsafe_partial_output: excluded from model context")
 		if r.DroppedPartialText && r.DroppedPartialReasoning {

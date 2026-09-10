@@ -68,6 +68,7 @@ type FileState struct {
 // conversation-rewind boundary — persisted so a resumed session can rewind the
 // conversation and fork, not just the code.
 type Checkpoint struct {
+	Recovery *RecoveryIdentity `json:"recovery,omitempty"`
 	// Result is a bounded, immutable view of this turn's confirmed net changes.
 	// Missing on older checkpoints; never reconstructed from today's workspace.
 	Result             *TurnChanges   `json:"result,omitempty"`

@@ -1965,7 +1965,7 @@ function applyEvent(s: State, e: WireEvent, preserveToolPayloads = false): State
         }];
       } else if (e.outcome === "completion_uncertain") {
         items = [...finalized, { kind: "notice", id: `e${s.seq}`, level: "info", title: t("notice.completionUncertainTitle"), text: t("notice.completionUncertainBody") }];
-      } else if (e.status === "interrupted") {
+      } else if (e.status === "interrupted" || e.status === "recovery_required") {
         const interruptItems: Item[] = [{
           kind: "notice",
           id: `e${s.seq}`,

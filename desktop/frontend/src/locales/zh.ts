@@ -5,6 +5,19 @@
 import type { DictKey } from "./en";
 
 export const zh: Record<DictKey, string> = {
+  "toolRecovery.title": "中断的工具需要核实",
+  "toolRecovery.unknown": "结果尚未确认",
+  "toolRecovery.details": "查看操作详情",
+  "toolRecovery.inspect": "检查当前状态",
+  "toolRecovery.confirm": "我已核实操作生效",
+  "toolRecovery.reject": "不重试",
+  "toolRecovery.retry": "安全重试",
+  "toolRecovery.resume": "继续任务",
+  "toolRecovery.resumePrompt": "继续中断的任务，保留已完成工作，并在进一步写入前核实未知效果。",
+  "toolRecovery.present": "当前效果或文件后置条件已存在，但这不能证明原调用的执行结果。",
+  "toolRecovery.absent": "工具已核实效果不存在，且旧尝试已无法再提交。",
+  "toolRecovery.unproven": "自动检查无法确认结果。请核实受影响的工作区或外部服务后再确认。",
+  "toolRecovery.rejected": "已拒绝重试。未知效果仍被记录，并继续阻止后续写入。",
   // 通用动词 / 框架
   "common.close": "关闭",
   "settings.providerProtocolMismatch": "API 地址与所选协议不一致。",

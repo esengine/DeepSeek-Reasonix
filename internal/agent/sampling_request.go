@@ -34,7 +34,7 @@ func modelInputMessages(msgs []provider.Message) []provider.Message {
 // replay so their cacheable prefix has the same role projection and metadata
 // cleanup. Interceptors deliberately remain outside this helper.
 func (a *Agent) normalizeModelRequestMessages(msgs []provider.Message) []provider.Message {
-	requestMessages := a.providerProjectionMessages(modelInputMessages(msgs))
+	requestMessages := a.providerProjectionMessages(modelInputMessages(provider.RepairRejectedArguments(msgs)))
 	// ModelMessages intentionally has a zero-copy fast path for clean input.
 	// Detach before removing local metadata from the request-only representation.
 	requestMessages = append([]provider.Message(nil), requestMessages...)
@@ -48,6 +48,9 @@ func (a *Agent) normalizeModelRequestMessages(msgs []provider.Message) []provide
 }
 
 func (a *Agent) streamProviderRequest(ctx context.Context, req provider.Request) (<-chan provider.Chunk, error) {
+	if err := provider.ValidateModelTranscript(req.Messages); err != nil {
+		return nil, err
+	}
 	ch, err := a.svc.prov.Stream(ctx, req)
 	if err != nil {
 		if limit := provider.AsOutputLimitError(err); !provider.ManagedRecovery(ctx) && limit != nil && req.MaxTokens > limit.MaxOutputTokens {
@@ -131,6 +134,9 @@ func (a *Agent) buildSamplingRequest(ctx context.Context, trigger string) (sampl
 	// (revalidated by the payload registry) before it goes on the wire.
 	req, err = a.interceptProviderRequest(ctx, req)
 	if err != nil {
+		return samplingRequest{}, err
+	}
+	if err := provider.ValidateModelTranscript(req.Messages); err != nil {
 		return samplingRequest{}, err
 	}
 	return samplingRequest{req: req}, nil

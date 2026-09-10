@@ -1307,6 +1307,14 @@
     },
     {
       "kind": "command",
+      "name": "GetToolRecoveryForTab",
+      "detail": "(tabID string) (control.ToolRecoverySnapshot, error)",
+      "location": "desktop/tool_recovery.go:19",
+      "class": "keep-business",
+      "owner": "hostrpc desktop/invoke"
+    },
+    {
+      "kind": "command",
       "name": "GetTopicSummary",
       "detail": "(key ProjectTopicKey) (ProjectNode, error)",
       "location": "desktop/session_catalog_runtime.go:662",
@@ -2854,6 +2862,14 @@
       "name": "ResolveRemoteTabPlanDecision",
       "detail": "(tabID string, callID string, action string, feedback string) error",
       "location": "desktop/remote_tab.go:758",
+      "class": "keep-business",
+      "owner": "hostrpc desktop/invoke"
+    },
+    {
+      "kind": "command",
+      "name": "ResolveToolRecoveryForTab",
+      "detail": "(tabID string, req control.ToolRecoveryRequest) (control.ToolRecoverySnapshot, error)",
+      "location": "desktop/tool_recovery.go:30",
       "class": "keep-business",
       "owner": "hostrpc desktop/invoke"
     },

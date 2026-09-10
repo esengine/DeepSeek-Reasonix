@@ -46,6 +46,7 @@ func (a *Agent) withWriteRecovery(ctx context.Context, call provider.ToolCall) c
 
 func (a *Agent) verifyInterruptedWrites(ctx context.Context, r *provider.InterruptedTurnRecovery) *provider.InterruptedTurnRecovery {
 	a.turn.writeRecovery = make(map[string]provider.ToolCall)
+	a.turn.unknownRecovery = make(map[string]provider.ToolCall)
 	if r == nil || len(r.UnknownTools) == 0 {
 		return r
 	}
@@ -66,6 +67,7 @@ func (a *Agent) verifyInterruptedWrites(ctx context.Context, r *provider.Interru
 				keyCall.Name = name
 			}
 			a.turn.writeRecovery[writeRecoveryKey(keyCall)] = *call
+			a.turn.unknownRecovery[writeRecoveryKey(keyCall)] = *call
 		}
 		if call == nil || len(call.WriteIntents) == 0 {
 			continue
@@ -82,6 +84,17 @@ func (a *Agent) verifyInterruptedWrites(ctx context.Context, r *provider.Interru
 		r.UnknownTools = slices.DeleteFunc(r.UnknownTools, func(c provider.InterruptedToolSummary) bool { return c.ID == summary.ID })
 	}
 	return r
+}
+
+func recoverPreviousUnknown(turn *turnRuntime, call provider.ToolCall, t tool.Tool) (toolOutcome, bool) {
+	if t.ReadOnly() {
+		return toolOutcome{}, false
+	}
+	if _, exists := turn.unknownRecovery[writeRecoveryKey(call)]; !exists {
+		return toolOutcome{}, false
+	}
+	message := "The previous side-effecting tool call has an unknown outcome. Do not repeat it; inspect its effects with read-only tools first."
+	return toolOutcome{output: message, errMsg: message, blocked: true}, true
 }
 
 // A terminal length limit can leave syntactically valid but incomplete args.

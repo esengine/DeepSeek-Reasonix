@@ -189,4 +189,9 @@ func TestDisplayMessagesFromInterruptedProjectionKeepsPartialOutput(t *testing.T
 	if got[2].Role != "notice" || got[2].Code != event.NoticeCodeCancelledTurn {
 		t.Fatalf("interruption notice missing: %+v", got[2])
 	}
+	projection.Status = event.TurnRecoveryRequired
+	recovered := displayMessagesFromProjection(projection)
+	if len(recovered) != len(got) || recovered[0].Content != "partial answer" || recovered[2].Code != event.NoticeCodeCancelledTurn {
+		t.Fatalf("recovery-required projection lost partial display: %+v", recovered)
+	}
 }

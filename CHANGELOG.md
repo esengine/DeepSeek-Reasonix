@@ -8,6 +8,11 @@ branch.
 
 ### Added
 
+- **Durable tool recovery:** fsynced tool-start barriers, persistent attempt
+  identities, restart-safe unknown-effect handling, and a shared Electron/Remote
+  inspection and confirmation panel. Explicit retries remain disabled by default
+  and require read-only execution or a fenced, authoritative absence check.
+
 - **MCP 2026-07-28 protocol:** multi-round-trip form/URL elicitation across
   Desktop, CLI TUI, and serve; headless entries stay on the core surface and
   cancel unanswered requests instead of guessing.

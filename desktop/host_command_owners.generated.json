@@ -2340,6 +2340,20 @@
       "inputs": []
     }
   },
+  "GetToolRecoveryForTab": {
+    "domain": "desktop/tool_recovery.go",
+    "owner": "App.GetToolRecoveryForTab",
+    "sources": [
+      "desktop/tool_recovery.go"
+    ],
+    "scope": {
+      "kind": "owner-inputs",
+      "resolver": "App.GetToolRecoveryForTab",
+      "inputs": [
+        "tabID"
+      ]
+    }
+  },
   "GetTopicSummary": {
     "domain": "desktop/session_catalog_runtime.go",
     "owner": "App.GetTopicSummary",
@@ -5076,6 +5090,21 @@
         "callID",
         "action",
         "feedback"
+      ]
+    }
+  },
+  "ResolveToolRecoveryForTab": {
+    "domain": "desktop/tool_recovery.go",
+    "owner": "App.ResolveToolRecoveryForTab",
+    "sources": [
+      "desktop/tool_recovery.go"
+    ],
+    "scope": {
+      "kind": "owner-inputs",
+      "resolver": "App.ResolveToolRecoveryForTab",
+      "inputs": [
+        "tabID",
+        "req"
       ]
     }
   },

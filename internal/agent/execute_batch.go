@@ -192,6 +192,7 @@ func (a *Agent) executeBatch(ctx context.Context, turn *turnRuntime, calls []pro
 		a.finalizeReadDelivery(ctx, calls[i], &outcomes[i])
 		results[i] = outcomes[i].output
 		a.commitBatchCallResolution(calls[i])
+		a.finishToolRecovery(calls[i], outcomes[i])
 		a.storeBatchToolResult(ctx, calls[i], outcomes[i])
 		if err := a.emitBatchToolResult(calls[i], outcomes[i], durations[i], startedAt[i], ranParallel[i], batchStart); err != nil {
 			batchErrOnce.Do(func() { batchErr = fmt.Errorf("persist tool result %s: %w", calls[i].ID, err) })
@@ -394,7 +395,7 @@ func (a *Agent) commitBatchCallResolution(call provider.ToolCall) {
 // durable-state mutation failed or was blocked. Verification failures alone do
 // not open the dependency barrier.
 func batchCallMutationFailureCause(a *Agent, call provider.ToolCall, o toolOutcome) *mutationBarrierCause {
-	if o.errMsg == "" && !o.blocked {
+	if o.errMsg == "" && !o.blocked && outcomeRunState(o) != provider.ToolRunUnknown {
 		return nil
 	}
 	readOnly := false
