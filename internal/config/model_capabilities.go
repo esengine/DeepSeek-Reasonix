@@ -17,7 +17,6 @@ import (
 
 	"reasonix/internal/fileutil"
 	"reasonix/internal/provider"
-	"reasonix/internal/provider/openai"
 )
 
 type CapabilityState string
@@ -139,13 +138,12 @@ func (r *ModelCapabilityResolver) resolveWithCredentialRevision(entry *ProviderE
 	if requestURL == "" && entry.Kind == "openai" {
 		requestURL = entry.ChatURL
 	}
-	if (openai.IsDeepSeek(entry.BaseURL) || openai.IsDeepSeek(requestURL)) && openai.IsOfficialDeepSeekTextModel(entry.Model) {
-		resolved.State, resolved.Source = CapabilityUnsupported, CapabilitySourceProtocol
-		resolved.InputModalities = []provider.ModelModality{provider.ModalityText}
-		resolved.AutomaticState, resolved.AutomaticSource = CapabilityUnsupported, CapabilitySourceProtocol
-		resolved.ImageInputEnableAllowed = false
-		resolved.ImageInputBlockReason = "official_deepseek_text_model"
-	}
+	// No official-DeepSeek SKU hard-gating here (#9993): capability is
+	// resolved from the automatic probe and the user's per-model override
+	// only. The one real hard limit — known text-only SKUs (flash/pro) can
+	// never accept images on official endpoints — stays enforced at the wire
+	// gate (openai.DeepSeekImageInputAllowed), a single decision point, so
+	// future official SKUs added after a desktop release are not locked out.
 	resolved.ModelInfo.ID = resolved.Model
 	resolved.ModelInfo.InputModalities = append([]provider.ModelModality(nil), resolved.InputModalities...)
 	return resolved

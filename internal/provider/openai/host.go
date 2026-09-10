@@ -56,8 +56,11 @@ func IsOfficialDeepSeekTextModel(model string) bool {
 	return false
 }
 
-// DeepSeekImageInputAllowed applies the official endpoint hard limit after a
-// provider has resolved its configured or catalog-derived image capability.
+// DeepSeekImageInputAllowed applies the fork-trusted capability gate: known
+// text-only SKUs (flash/pro) stay hard-banned on official endpoints, the
+// pinned vision SKU keeps its no-metadata fallback, and every other model —
+// including future official SKUs the desktop build may not know yet — trusts
+// the resolved capability metadata and the user's per-model override.
 func DeepSeekImageInputAllowed(officialBase bool, requestURL, model string, metadataProvided, enabled bool) bool {
 	if !officialBase && !IsDeepSeek(requestURL) {
 		return enabled

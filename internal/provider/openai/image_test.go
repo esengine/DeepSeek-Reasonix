@@ -97,6 +97,8 @@ func TestOfficialDeepSeekProviderWideVisionInputMatchesTextOnlyRequest(t *testin
 		t.Fatalf("New: %v", err)
 	}
 	c := p.(*client)
+	// deepseek-v4-pro is a known text-only SKU: a stale provider-wide
+	// vision=true is correctly ignored even under fork allowlist semantics.
 	if c.vision {
 		t.Fatal("official DeepSeek endpoint must ignore stale vision=true config")
 	}

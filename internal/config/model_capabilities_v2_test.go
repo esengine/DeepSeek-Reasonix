@@ -47,17 +47,21 @@ func TestCapabilityOverrideDirectCatalogResolution(t *testing.T) {
 	}
 }
 
-func TestCapabilityOfficialHardLimitAndExplicitOff(t *testing.T) {
+func TestCapabilityOverrideWinsNoOfficialHardLimit(t *testing.T) {
 	r := &ModelCapabilityResolver{}
 	for _, kind := range []string{"openai", "anthropic", "responses"} {
+		// Fork: no official-DeepSeek SKU hard limit — the user's per-model
+		// override decides, so future official SKUs can enable image input.
 		e := ProviderEntry{Name: "deepseek", Kind: kind, BaseURL: "https://api.deepseek.com", Model: "deepseek-v4-flash", Vision: true, ModelOverrides: map[string]ProviderModelOverride{"deepseek-v4-flash": {Vision: capabilityBoolPtr(true)}}}
-		if got := r.Resolve(&e); got.State != CapabilityUnsupported || got.ImageInputEnableAllowed || got.ImageInputBlockReason == "" {
-			t.Fatalf("%s hard limit: %+v", kind, got)
+		if got := r.Resolve(&e); got.State != CapabilitySupported || !got.ImageInputEnableAllowed || got.ImageInputBlockReason != "" {
+			t.Fatalf("%s override wins: %+v", kind, got)
 		}
 		e.BaseURL, e.RequestURL = "https://relay.test", "https://api.deepseek.com/v1/messages"
-		if got := r.Resolve(&e); got.State != CapabilityUnsupported || got.ImageInputEnableAllowed {
-			t.Fatalf("%s exact request URL bypassed hard limit: %+v", kind, got)
+		if got := r.Resolve(&e); got.State != CapabilitySupported || !got.ImageInputEnableAllowed {
+			t.Fatalf("%s request URL override wins: %+v", kind, got)
 		}
+		// Explicit off is still respected (unsupported state), but the control
+		// stays enabled so the user can turn it back on.
 		e.Model = "deepseek-v4-flash-vision-exp"
 		e.ModelOverrides[e.Model] = ProviderModelOverride{Vision: capabilityBoolPtr(false)}
 		if got := r.Resolve(&e); got.State != CapabilityUnsupported || !got.ImageInputEnableAllowed || got.Source != CapabilitySourceOverride {

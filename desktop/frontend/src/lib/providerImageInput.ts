@@ -3,14 +3,13 @@ import type { ProviderModelCapabilityView, ProviderModelOverrideView } from "./t
 export type ImageInputMode = "auto" | "on" | "off";
 
 // A negative-only guard for manually typed models before a backend preview
-// exists. Mirrors openai.IsDeepSeek / IsOfficialDeepSeekTextModel; it never
-// infers positive capabilities from a model name.
+// exists. The fork deliberately keeps no SKU hard-list here: capability comes
+// from the backend preview when present, otherwise the user's override wins.
 export function imageInputHardBlocked(baseURL: string | undefined, model: string, capability?: ProviderModelCapabilityView): boolean {
   if (capability?.imageInputEnableAllowed !== undefined) return !capability.imageInputEnableAllowed;
-  try {
-    return new URL(baseURL ?? "").hostname.toLowerCase().endsWith(".deepseek.com")
-      && ["deepseek-v4-flash", "deepseek-v4-pro"].includes(model.trim().toLowerCase());
-  } catch { return false; }
+  void baseURL;
+  void model;
+  return false;
 }
 
 export function imageInputModes(overrides?: ProviderModelOverrideView[] | null): Record<string, ImageInputMode> {
