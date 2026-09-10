@@ -59,6 +59,33 @@ func TestTodoWriteRejectsNonSerialStates(t *testing.T) {
 	}
 }
 
+func TestTodoWriteRepairsLaterCompletionsAndDefersThem(t *testing.T) {
+	ledger := evidence.NewLedger()
+	ledger.Record(evidence.Receipt{
+		ToolName: "todo_write",
+		Success:  true,
+		Todos: []evidence.TodoItem{
+			{Content: "A", Status: "in_progress", StepID: "a"},
+			{Content: "B", Status: "pending", StepID: "b"},
+			{Content: "C", Status: "pending", StepID: "c"},
+		},
+	})
+	ctx := evidence.WithLedger(context.Background(), ledger)
+	args := json.RawMessage(`{"todos":[` +
+		`{"content":"A","status":"in_progress","step_id":"a"},` +
+		`{"content":"B","status":"completed","step_id":"b"},` +
+		`{"content":"C","status":"completed","step_id":"c"}]}`)
+
+	out, err := (todoWrite{}).Execute(ctx, args)
+	if err != nil {
+		t.Fatalf("later pending completions should be repaired: %v", err)
+	}
+	if !strings.Contains(out, "1 in progress") || !strings.Contains(out, "2 pending") ||
+		!strings.Contains(out, "recorded and deferred") {
+		t.Fatalf("todo_write repair acknowledgement = %q", out)
+	}
+}
+
 func TestTodoWriteAcceptsNewCompletedWithoutCompleteStepReceipt(t *testing.T) {
 	ledger := evidence.NewLedger()
 	ledger.Record(evidence.Receipt{
@@ -75,36 +102,6 @@ func TestTodoWriteAcceptsNewCompletedWithoutCompleteStepReceipt(t *testing.T) {
 	}
 	if !strings.Contains(out, "1 completed") {
 		t.Fatalf("todo_write output = %q, want 1 completed", out)
-	}
-}
-
-func TestTodoWriteRepairsOutOfOrderCompletionAgainstBaseline(t *testing.T) {
-	ledger := evidence.NewLedger()
-	ledger.Record(evidence.Receipt{
-		ToolName: "todo_write",
-		Success:  true,
-		Todos: []evidence.TodoItem{
-			{Content: "first", Status: "in_progress", StepID: "first"},
-			{Content: "second", Status: "pending", StepID: "second"},
-		},
-	})
-	ctx := evidence.WithLedger(context.Background(), ledger)
-	args := json.RawMessage(`{"todos":[
-		{"content":"first","status":"in_progress","step_id":"first"},
-		{"content":"second","status":"completed","step_id":"second"}
-	]}`)
-
-	out, err := (todoWrite{}).Execute(ctx, args)
-	if err != nil {
-		t.Fatalf("safe out-of-order completion should be accepted: %v", err)
-	}
-	for _, phrase := range []string{"recorded", "deferred", "not an error", "do not submit", "applied automatically"} {
-		if !strings.Contains(strings.ToLower(out), phrase) {
-			t.Fatalf("todo_write output = %q, want phrase %q", out, phrase)
-		}
-	}
-	if !strings.Contains(out, "remain pending") || !strings.Contains(out, "1 pending") {
-		t.Fatalf("todo_write output = %q, want normalization guidance and pending count", out)
 	}
 }
 

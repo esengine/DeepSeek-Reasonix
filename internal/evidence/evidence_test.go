@@ -4,25 +4,9 @@ import (
 	"context"
 	"encoding/json"
 	"reflect"
-	"slices"
 	"strings"
 	"testing"
 )
-
-func TestTodoIdentityKeyIgnoresActiveFormForLegacyItems(t *testing.T) {
-	base := TodoItem{Content: "Run tests", Status: "pending", ActiveForm: "Running tests", Level: 1}
-	updated := base
-	updated.ActiveForm = "Executing tests"
-
-	baseKey, baseOK := TodoIdentityKey(base)
-	updatedKey, updatedOK := TodoIdentityKey(updated)
-	if !baseOK || !updatedOK {
-		t.Fatal("legacy todo identity should be available")
-	}
-	if baseKey != updatedKey {
-		t.Fatalf("activeForm-only edit changed identity: %q != %q", baseKey, updatedKey)
-	}
-}
 
 func TestLedgerRecordsSuccessAndFailureReceipts(t *testing.T) {
 	ledger := NewLedger()
@@ -692,122 +676,108 @@ func TestNormalizeSerialTodosRepairsLegacyOutOfOrderState(t *testing.T) {
 	}
 }
 
-func TestRepairSerialTodoUpdateOnlyNormalizesSafeCompletionTransition(t *testing.T) {
-	previous := []TodoItem{
-		{Content: "first", Status: "in_progress", StepID: "first"},
-		{Content: "second", Status: "pending", StepID: "second"},
-		{Content: "later", Status: "pending", StepID: "later"},
-	}
-	next := []TodoItem{
-		{Content: "first", Status: "in_progress", StepID: "first"},
-		{Content: "second", Status: "completed", StepID: "second"},
-		{Content: "later", Status: "pending", StepID: "later"},
-	}
-	got, ok := RepairSerialTodoUpdate(previous, next)
-	if !ok {
-		t.Fatal("same-shape out-of-order completion should be repaired")
-	}
-	if err := ValidateSerialTodos(got); err != nil {
-		t.Fatalf("repaired list is not serial: %v", err)
-	}
-	if got[1].Status != "pending" {
-		t.Fatalf("repaired later completion = %q, want pending: %+v", got[1].Status, got)
-	}
-
-	promoted, ok := RepairSerialTodoUpdate(
-		previous[:2],
-		[]TodoItem{
-			{Content: "first", Status: "completed", StepID: "first"},
-			{Content: "second", Status: "pending", StepID: "second"},
-		},
-	)
-	if !ok || promoted[0].Status != "completed" || promoted[1].Status != "in_progress" {
-		t.Fatalf("completion without promotion = %+v, repaired=%v; want next item current", promoted, ok)
-	}
-
-	for _, tc := range []struct {
-		name string
-		prev []TodoItem
-		next []TodoItem
-	}{
-		{
-			name: "no baseline",
-			next: next,
-		},
-		{
-			name: "reordered items",
-			prev: previous,
-			next: []TodoItem{
-				{Content: "second", Status: "completed", StepID: "second"},
-				{Content: "first", Status: "in_progress", StepID: "first"},
-			},
-		},
-		{
-			name: "different invalid state",
-			prev: previous,
-			next: []TodoItem{
-				{Content: "first", Status: "in_progress", StepID: "first"},
-				{Content: "second", Status: "in_progress", StepID: "second"},
-			},
-		},
-	} {
-		t.Run(tc.name, func(t *testing.T) {
-			if _, ok := RepairSerialTodoUpdate(tc.prev, tc.next); ok {
-				t.Fatal("unsafe todo update was repaired")
-			}
-		})
-	}
-}
-
-func TestRepairSerialTodoUpdateReportsOnlySafeDeferredCompletions(t *testing.T) {
+func TestRepairSerialTodoUpdateWithDeferredKeepsStrictValidatorNarrow(t *testing.T) {
 	previous := []TodoItem{
 		{Content: "A", Status: "in_progress", StepID: "a"},
 		{Content: "B", Status: "pending", StepID: "b"},
 		{Content: "C", Status: "pending", StepID: "c"},
-		{Content: "D", Status: "pending", StepID: "d"},
 	}
 	next := []TodoItem{
 		{Content: "A", Status: "in_progress", StepID: "a"},
 		{Content: "B", Status: "completed", StepID: "b"},
 		{Content: "C", Status: "completed", StepID: "c"},
-		{Content: "D", Status: "pending", StepID: "d"},
 	}
-	canonical, deferred, ok := RepairSerialTodoUpdateWithDeferred(previous, next)
-	if !ok {
-		t.Fatal("safe out-of-order completion should be repaired")
-	}
-	if err := ValidateSerialTodos(canonical); err != nil {
-		t.Fatalf("canonical list is not serial: %v", err)
-	}
-	if got := TodoStepIDs(deferred); !slices.Equal(got, []string{"b", "c"}) {
-		t.Fatalf("deferred ids = %v, want [b c]", got)
-	}
-	if canonical[1].Status != "pending" || canonical[2].Status != "pending" {
-		t.Fatalf("deferred completions leaked into canonical list: %+v", canonical)
+	if err := ValidateSerialTodos(next); err == nil {
+		t.Fatal("the strict validator unexpectedly accepted out-of-order completions")
 	}
 
-	currentOnly := []TodoItem{
-		{Content: "A", Status: "completed", StepID: "a"},
+	canonical, deferred, repaired := RepairSerialTodoUpdateWithDeferred(previous, next)
+	if !repaired {
+		t.Fatal("the narrow pending-completion repair was not applied")
+	}
+	wantCanonical := []TodoItem{
+		{Content: "A", Status: "in_progress", StepID: "a"},
 		{Content: "B", Status: "pending", StepID: "b"},
 		{Content: "C", Status: "pending", StepID: "c"},
 	}
-	canonical, deferred, ok = RepairSerialTodoUpdateWithDeferred(previous[:3], currentOnly)
-	if !ok || len(deferred) != 0 || canonical[0].Status != "completed" || canonical[1].Status != "in_progress" {
-		t.Fatalf("current completion repair = canonical=%+v deferred=%+v repaired=%v; current completion must not become deferred", canonical, deferred, ok)
+	if !reflect.DeepEqual(canonical, wantCanonical) {
+		t.Fatalf("canonical = %+v, want %+v", canonical, wantCanonical)
+	}
+	if got := []string{deferred[0].StepID, deferred[1].StepID}; !reflect.DeepEqual(got, []string{"b", "c"}) {
+		t.Fatalf("deferred identities = %v, want [b c]", got)
+	}
+	if err := ValidateSerialTodos(canonical); err != nil {
+		t.Fatalf("repaired canonical list is not strict serial state: %v", err)
 	}
 
-	unsafe := append([]TodoItem(nil), next...)
-	unsafe[2].StepID = "b"
-	if _, deferred, ok := RepairSerialTodoUpdateWithDeferred(previous, unsafe); ok || len(deferred) != 0 {
-		t.Fatalf("duplicate identity must not produce deferred state: repaired=%v deferred=%v", ok, deferred)
+	for _, tc := range []struct {
+		name     string
+		previous []TodoItem
+		next     []TodoItem
+	}{
+		{
+			name:     "reorder",
+			previous: previous,
+			next: []TodoItem{
+				{Content: "A", Status: "in_progress", StepID: "a"},
+				{Content: "C", Status: "completed", StepID: "c"},
+				{Content: "B", Status: "completed", StepID: "b"},
+			},
+		},
+		{
+			name:     "remove",
+			previous: previous,
+			next: []TodoItem{
+				{Content: "A", Status: "in_progress", StepID: "a"},
+				{Content: "B", Status: "completed", StepID: "b"},
+			},
+		},
+		{
+			name:     "duplicate identity",
+			previous: previous,
+			next: []TodoItem{
+				{Content: "A", Status: "in_progress", StepID: "a"},
+				{Content: "B", Status: "completed", StepID: "b"},
+				{Content: "B again", Status: "completed", StepID: "b"},
+			},
+		},
+		{
+			name: "completed regression",
+			previous: []TodoItem{
+				{Content: "done", Status: "completed", StepID: "done"},
+				{Content: "A", Status: "in_progress", StepID: "a"},
+				{Content: "B", Status: "pending", StepID: "b"},
+			},
+			next: []TodoItem{
+				{Content: "done", Status: "pending", StepID: "done"},
+				{Content: "A", Status: "in_progress", StepID: "a"},
+				{Content: "B", Status: "completed", StepID: "b"},
+			},
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			if _, _, repaired := RepairSerialTodoUpdateWithDeferred(tc.previous, tc.next); repaired {
+				t.Fatalf("invalid %s update was repaired", tc.name)
+			}
+		})
 	}
+}
 
-	duplicateLegacy := append([]TodoItem(nil), next...)
-	duplicateLegacy[2].StepID = ""
-	duplicateLegacy[2].Content = duplicateLegacy[1].Content
-	duplicateLegacy[2].ActiveForm = duplicateLegacy[1].ActiveForm
-	if _, deferred, ok := RepairSerialTodoUpdateWithDeferred(previous, duplicateLegacy); ok || len(deferred) != 0 {
-		t.Fatalf("duplicate legacy identity must not be repaired: repaired=%v deferred=%v", ok, deferred)
+func TestRepairSerialTodoUpdateUsesNormalizedTextFallback(t *testing.T) {
+	previous := []TodoItem{
+		{Content: "A", Status: "in_progress"},
+		{Content: "Run   Tests", Status: "pending"},
+	}
+	next := []TodoItem{
+		{Content: "A", Status: "in_progress"},
+		{Content: "run tests", Status: "completed"},
+	}
+	canonical, deferred, repaired := RepairSerialTodoUpdateWithDeferred(previous, next)
+	if !repaired || len(deferred) != 1 || deferred[0].Content != "run tests" {
+		t.Fatalf("normalized text fallback = canonical:%+v deferred:%+v repaired:%t", canonical, deferred, repaired)
+	}
+	if canonical[1].Status != "pending" {
+		t.Fatalf("fallback-matched completion was not restored to pending: %+v", canonical)
 	}
 }
 

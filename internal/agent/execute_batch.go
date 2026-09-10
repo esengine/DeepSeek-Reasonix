@@ -84,10 +84,6 @@ type toolOutcome struct {
 	readActiveMillis   int64
 	incompleteRead     *incompleteReadDeferred
 	subagentOutcome    *SubagentOutcome
-	// hostTodoState is the durable host-only snapshot produced by a successful
-	// todo transition. It is stored with the tool result; the original assistant
-	// tool-call arguments stay immutable.
-	hostTodoState *provider.HostTodoState
 }
 
 // batchExecution is the result of one provider tool-call batch.

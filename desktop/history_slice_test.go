@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -336,6 +337,65 @@ func TestHistorySliceGiantTurnSpansPages(t *testing.T) {
 		}
 	}
 	assertPagesMatchReference(t, pages, referenceHistoryRows(t, dir, path))
+}
+
+func TestHistorySliceCachesTodoDerivationAcrossPages(t *testing.T) {
+	app := historySliceTestApp(t)
+	msgs := []provider.Message{historySliceUser(0, "large todo turn")}
+	for i := range 300 {
+		msgs = append(msgs, historySliceAssistant(i, fmt.Sprintf("progress-%d", i)))
+	}
+	msgs = append(msgs,
+		provider.Message{Role: provider.RoleAssistant, ToolCalls: []provider.ToolCall{{
+			ID: "todo-1", Name: "todo_write", Arguments: `{"todos":[{"content":"ship","status":"in_progress"}]}`,
+		}}},
+		provider.Message{Role: provider.RoleTool, ToolCallID: "todo-1", Name: "todo_write", Content: "Todos updated"},
+	)
+	src := newInMemoryHistorySliceSource("todo-cache", msgs, func(s string) string { return s }, agent.PersistedState{}, false)
+	src.digest = "todo-cache-digest"
+	src.cacheKey = "todo-cache-key"
+	originalFetch := src.fetch
+	fetches := 0
+	src.fetch = func(lo, hi int) ([]provider.Message, error) {
+		fetches++
+		return originalFetch(lo, hi)
+	}
+	req := HistorySliceRequest{Turns: 12, Entries: 1000, Bytes: 8 << 20}
+	if page, err := app.pageHistorySliceSource(src, req, func(s string) string { return s }, nil, nil, ""); err != nil || len(page.Entries) == 0 {
+		t.Fatalf("first todo page = entries:%d err:%v", len(page.Entries), err)
+	}
+	firstFetches := fetches
+	if firstFetches < 5 {
+		t.Fatalf("first todo derivation used %d fetches, want a full two-pass scan", firstFetches)
+	}
+	if _, err := app.pageHistorySliceSource(src, req, func(s string) string { return s }, nil, nil, ""); err != nil {
+		t.Fatalf("second todo page: %v", err)
+	}
+	if delta := fetches - firstFetches; delta != 1 {
+		t.Fatalf("cached page added %d fetches, want only its page window", delta)
+	}
+}
+
+func TestHistoryDerivedCacheRetriesAfterTransientFailure(t *testing.T) {
+	var cache historyDerivedCache
+	calls := 0
+	compute := func() (map[string]string, error) {
+		calls++
+		if calls == 1 {
+			return nil, errors.New("temporary read failure")
+		}
+		return map[string]string{"todo-1": `{"todos":[]}`}, nil
+	}
+	if _, err := cache.todoArgs("session-identity", compute); err == nil {
+		t.Fatal("first derivation error = nil, want transient failure")
+	}
+	got, err := cache.todoArgs("session-identity", compute)
+	if err != nil {
+		t.Fatalf("retry derivation: %v", err)
+	}
+	if calls != 2 || got["todo-1"] == "" {
+		t.Fatalf("retry result = %+v after %d calls, want successful recompute", got, calls)
+	}
 }
 
 // --- content refs + chunks --------------------------------------------------

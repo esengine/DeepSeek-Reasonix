@@ -47,9 +47,6 @@ type toolCallPlan struct {
 	hooksMayMutateWorkspace                                bool
 	perCallWriteRoots                                      []string
 	skipOrdinaryGate                                       bool
-	// hostTodoState is the durable host-only snapshot attached to a successful
-	// todo result. Historical assistant tool-call arguments remain untouched.
-	hostTodoState *provider.HostTodoState
 	// incompleteReadRoot binds an exact host-requested source/result page to
 	// the read chain it advances. Empty means an independent tool call.
 	incompleteReadRoot   string

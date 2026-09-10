@@ -446,13 +446,13 @@ eq(sameMeta(meta({ collaborationMode: "normal" }), meta({ collaborationMode: "pl
   const staleMeta = meta({
     canonicalTodos: [
       { content: "Inspect the report", status: "in_progress" },
-      { content: "Ship the fix", status: "pending" },
+      { content: "Ship the fix", status: "completed" },
     ],
   });
   const rawLiveArgs = JSON.stringify({
     todos: [
       { content: "Inspect the report", status: "completed" },
-      { content: "Ship the fix", status: "in_progress" },
+      { content: "Ship the fix", status: "completed" },
     ],
   });
   const canonicalLiveArgs = JSON.stringify({
@@ -476,43 +476,16 @@ eq(sameMeta(meta({ collaborationMode: "normal" }), meta({ collaborationMode: "pl
   eq(
     JSON.stringify(resolveTodoPanelTodos(liveState.meta?.canonicalTodos, liveTodo ? parseTodos(liveTodo.args) : undefined)),
     JSON.stringify(JSON.parse(canonicalLiveArgs).todos),
-    "panel switches to the host-normalized todo_write snapshot when its result preview arrives",
+    "panel uses canonical todo args when the repaired result preview arrives",
   );
   liveState = reducer(liveState, {
     type: "event",
     e: { kind: "tool_result", tool: { id: "todo-live", name: "todo_write", args: canonicalLiveArgs, readOnly: true, output: "Todos updated", durationMs: 4 } },
   });
-  const terminalLiveTodo = liveState.items.find(
-    (item): item is Extract<Item, { kind: "tool" }> => item.kind === "tool" && item.name === "todo_write",
-  );
-  eq(
-    JSON.stringify(terminalLiveTodo ? parseTodos(terminalLiveTodo.args) : undefined),
-    JSON.stringify(JSON.parse(canonicalLiveArgs).todos),
-    "terminal todo_write result keeps the host-normalized arguments",
-  );
   eq(
     liveState.items.filter((item) => item.kind === "tool" && item.id === "todo-live").length,
     1,
     "provider-ordered terminal result upserts the preview instead of duplicating the card",
-  );
-  liveState = reducer(liveState, {
-    type: "event",
-    e: { kind: "tool_dispatch", tool: { id: "host-advance-1-1", name: "todo_write", args: canonicalLiveArgs, readOnly: true } },
-  });
-  liveState = reducer(liveState, {
-    type: "event",
-    e: { kind: "tool_result", tool: { id: "host-advance-1-1", name: "todo_write", args: JSON.stringify({ todos: [
-      { content: "Inspect the report", status: "completed" },
-      { content: "Ship the fix", status: "completed" },
-    ] }), readOnly: true, output: "task list advanced by complete_step" } },
-  });
-  const advancedTodo = liveState.items.find(
-    (item): item is Extract<Item, { kind: "tool" }> => item.kind === "tool" && item.id === "host-advance-1-1",
-  );
-  eq(
-    advancedTodo?.kind === "tool" && parseTodos(advancedTodo.args)[1]?.status,
-    "completed",
-    "host complete_step advance updates the Todo panel to the next canonical state",
   );
 }
 

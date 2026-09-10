@@ -1145,9 +1145,6 @@ func New(prov provider.Provider, tools *tool.Registry, session *Session, opts Op
 		strictAlternatingRoles: opts.StrictAlternatingRoles,
 	}
 	a.sess.output.outputBudget = outputBudgetOf(prov)
-	if session != nil {
-		a.rebuildTodoState(session.Snapshot())
-	}
 	if a.sess.path != "" {
 		a.LoadProjectionSidecar(a.sess.path)
 	}
@@ -1419,7 +1416,6 @@ func (a *Agent) deliveryMutationCheckpointReady() bool {
 func (a *Agent) setTodoState(todos []evidence.TodoItem) {
 	a.sess.todoMu.Lock()
 	a.sess.todoState = evidence.NormalizeSerialTodos(todos)
-	a.pruneDeferredTodoCompletionsLocked()
 	a.sess.todoMu.Unlock()
 }
 
@@ -1467,28 +1463,25 @@ func registryHasWriterTools(reg *tool.Registry) bool {
 }
 
 // advanceCanonicalTodo flips the canonical todo matching a signed-off step to
-// completed (promoting the next pending item to in_progress), consumes only a
-// contiguous deferred prefix, and emits a synthetic todo_write so the task
-// panel reflects it without the model re-sending the whole list. No-op when
-// nothing matches or it is already done.
-func (a *Agent) advanceCanonicalTodo(step string) todoStateTransition {
+// completed (promoting the next pending item to in_progress) and emits a
+// synthetic todo_write so the task panel reflects it without the model
+// re-sending the whole list. No-op when nothing matches or it is already done.
+func (a *Agent) advanceCanonicalTodo(step string) {
 	a.sess.todoMu.Lock()
 	if len(a.sess.todoState) == 0 {
 		a.sess.todoMu.Unlock()
-		return todoStateTransition{}
+		return
 	}
 	m, ok := evidence.MatchStep(step, a.sess.todoState)
 	if !ok || !evidence.AdvanceSerialTodo(a.sess.todoState, m.Index-1) {
 		a.sess.todoMu.Unlock()
-		return todoStateTransition{}
+		return
 	}
-	consumed := a.consumeDeferredCompletionsLocked()
+	a.consumeDeferredTodoCompletionsLocked()
 	snapshot := append([]evidence.TodoItem(nil), a.sess.todoState...)
-	deferred := deferredTodoIDsLocked(a.sess.deferredTodoCompletions)
 	a.sess.todoMu.Unlock()
 	a.recordTodoState(snapshot)
 	a.emitTodoState(snapshot, m.Index)
-	return todoStateTransition{todos: snapshot, deferred: deferred, consumed: consumed}
 }
 
 // emitTodoState emits a synthetic todo_write event so the frontend task panel
@@ -1513,108 +1506,57 @@ func (a *Agent) RebuildTodoState() {
 	a.rebuildTodoState(a.Session().Snapshot())
 }
 
-// rebuildTodoState restores the latest durable host snapshot when available.
-// Older transcripts have no snapshot, so they retain the legacy behavior of
-// taking the latest successful todo_write as a base and replaying complete_step
-// calls after it.
+// rebuildTodoState reconstructs the canonical task list from a transcript: the
+// latest successful todo_write is the base, then every complete_step after it
+// advances an item. Deterministic from persisted messages, so it survives a
+// fresh load or a rewind (the truncated history yields the historical state).
+// Empty after compaction drops the todo_write — no worse than no canonical list.
 func (a *Agent) rebuildTodoState(msgs []provider.Message) {
-	pairs := successfulToolCallResults(msgs)
-	var persistedHost *provider.HostTodoState
-	var persistedDeferred *provider.DeferredTodoCompletionState
-	var latestTodo *successfulToolCallResult
-	for i := range pairs {
-		pair := &pairs[i]
-		if pair.call.Name != "todo_write" && pair.call.Name != "complete_step" {
-			continue
-		}
-		// A host snapshot is authoritative only when it belongs to the latest
-		// valid Todo transition. An older snapshot must not win merely because
-		// a stale/orphan tool result was appended after the real transition.
-		latestTodo = pair
-		persistedHost = nil
-		if pair.result.HostTodoState != nil {
-			persistedHost = cloneHostTodoState(pair.result.HostTodoState)
-		}
-		if pair.result.DeferredTodoCompletions != nil {
-			persistedDeferred = cloneDeferredTodoState(pair.result.DeferredTodoCompletions)
-		}
-	}
-	if latestTodo != nil && persistedHost != nil {
-		a.restoreTodoState(persistedHost)
-		a.consumeTodoOnlyReadinessMarkerIfResolved()
-		return
-	}
-
+	successful := successfulToolCallIDs(msgs)
 	var todos []evidence.TodoItem
 	baseIdx := -1
-	for _, pair := range pairs {
-		if pair.call.Name != "todo_write" {
-			continue
+	for i, msg := range msgs {
+		for _, tc := range msg.ToolCalls {
+			if tc.Name != "todo_write" || !successful[tc.ID] {
+				continue
+			}
+			rec := evidence.ReceiptFromToolCall(tc.Name, json.RawMessage(tc.Arguments), true, true)
+			// A successful empty todo_write is an explicit clear. Preserve it as the
+			// latest base so history reloads do not resurrect an older non-empty list.
+			todos = evidence.NormalizeSerialTodos(rec.Todos)
+			baseIdx = i
 		}
-		rec := evidence.ReceiptFromToolCall(pair.call.Name, json.RawMessage(pair.call.Arguments), true, true)
-		// A successful empty todo_write is an explicit clear. Preserve it as the
-		// latest base so history reloads do not resurrect an older non-empty list.
-		todos = evidence.NormalizeSerialTodos(rec.Todos)
-		baseIdx = pair.assistantIndex
 	}
 	if baseIdx < 0 {
-		a.restoreLegacyTodoState(nil, persistedDeferred)
+		a.setTodoState(nil)
 		return
 	}
-	for _, pair := range pairs {
-		if pair.assistantIndex < baseIdx || pair.call.Name != "complete_step" {
-			continue
-		}
-		rec := evidence.ReceiptFromToolCall(pair.call.Name, json.RawMessage(pair.call.Arguments), true, true)
-		if m, ok := evidence.MatchStep(rec.Step, todos); ok {
-			evidence.AdvanceSerialTodo(todos, m.Index-1)
+	for i := baseIdx; i < len(msgs); i++ {
+		for _, tc := range msgs[i].ToolCalls {
+			if tc.Name != "complete_step" || !successful[tc.ID] {
+				continue
+			}
+			rec := evidence.ReceiptFromToolCall(tc.Name, json.RawMessage(tc.Arguments), true, true)
+			if m, ok := evidence.MatchStep(rec.Step, todos); ok {
+				evidence.AdvanceSerialTodo(todos, m.Index-1)
+			}
 		}
 	}
-	a.restoreLegacyTodoState(todos, persistedDeferred)
+	a.setTodoState(todos)
 	a.consumeTodoOnlyReadinessMarkerIfResolved()
 }
 
-type successfulToolCallResult struct {
-	call           provider.ToolCall
-	result         provider.Message
-	assistantIndex int
-}
-
-// successfulToolCallResults pairs results with the assistant turn that
-// requested them. It intentionally ignores orphan/late results and uses the
-// first matching result for a call, so an appended stale result cannot replace
-// the durable state produced by the original pair. Older transcripts omitted
-// the result name, so an empty result name is accepted as a legacy wildcard;
-// a recorded non-empty name must still match exactly.
-func successfulToolCallResults(msgs []provider.Message) []successfulToolCallResult {
-	var pairs []successfulToolCallResult
-	for assistantIndex, msg := range msgs {
-		if msg.Role != provider.RoleAssistant || len(msg.ToolCalls) == 0 {
+func successfulToolCallIDs(msgs []provider.Message) map[string]bool {
+	successful := map[string]bool{}
+	for _, msg := range msgs {
+		if msg.Role != provider.RoleTool || msg.ToolCallID == "" {
 			continue
 		}
-		resultEnd := assistantIndex + 1
-		for resultEnd < len(msgs) && msgs[resultEnd].Role == provider.RoleTool && !msgs[resultEnd].LocalOnly {
-			resultEnd++
-		}
-		used := make([]bool, resultEnd-assistantIndex-1)
-		for _, call := range msg.ToolCalls {
-			if call.ID == "" {
-				continue
-			}
-			for resultIndex := assistantIndex + 1; resultIndex < resultEnd; resultIndex++ {
-				result := msgs[resultIndex]
-				if used[resultIndex-assistantIndex-1] || result.ToolCallID != call.ID || (result.Name != "" && result.Name != call.Name) {
-					continue
-				}
-				used[resultIndex-assistantIndex-1] = true
-				if !toolResultFailed(result.Content) {
-					pairs = append(pairs, successfulToolCallResult{call: call, result: result, assistantIndex: assistantIndex})
-				}
-				break
-			}
+		if !toolResultFailed(msg.Content) {
+			successful[msg.ToolCallID] = true
 		}
 	}
-	return pairs
+	return successful
 }
 
 func toolResultFailed(content string) bool {

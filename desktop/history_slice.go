@@ -14,6 +14,7 @@ import (
 	"slices"
 	"sort"
 	"strings"
+	"sync"
 	"time"
 	"unicode/utf8"
 
@@ -82,8 +83,9 @@ const (
 	// reading unbounded file spans.
 	historySliceColdWindowBytes = 32 << 20
 	// historyLookupChunkMessages bounds the number of decoded messages retained
-	// while priming cross-page planner state.
+	// while deriving cross-page planner/todo state.
 	historyLookupChunkMessages = 128
+	historyDerivedCacheEntries = 4
 )
 
 // HistorySliceRequest is one page request. Cursor empty = latest page.
@@ -264,6 +266,10 @@ type historySliceSource struct {
 	revKnown   bool
 	digest     string
 	epoch      int
+	// cacheKey is non-empty only when revision+digest describe the complete
+	// source (no unsaved live tail). Derived cross-page state may then be reused
+	// without risking a stale completion against newly appended messages.
+	cacheKey string
 	// fetch returns messages [lo, hi). Implementations must copy or freshly
 	// decode; callers never mutate but may retain across budget checks. Decode
 	// errors are propagated all the way to the cold read instead of being
@@ -272,6 +278,98 @@ type historySliceSource struct {
 	// windowBytes estimates the raw transcript span of [lo, hi); 0 means
 	// unbounded-but-cheap (in-memory). Used to cap cold-path reads.
 	windowBytes func(lo, hi int) int64
+}
+
+type historyDerivedCacheEntry struct {
+	ready    chan struct{}
+	todoArgs map[string]string
+	err      error
+}
+
+// historyDerivedCache prevents every older-page request from replaying a huge
+// transcript twice to derive the same todo state. Entries are identity-bound,
+// single-flight, and deliberately few; transcript bodies are never retained.
+type historyDerivedCache struct {
+	mu      sync.Mutex
+	entries map[string]*historyDerivedCacheEntry
+	order   []string
+}
+
+func (c *historyDerivedCache) todoArgs(key string, compute func() (map[string]string, error)) (map[string]string, error) {
+	if key == "" {
+		return compute()
+	}
+	c.mu.Lock()
+	if entry := c.entries[key]; entry != nil {
+		c.touchLocked(key)
+		ready := entry.ready
+		c.mu.Unlock()
+		<-ready
+		return entry.todoArgs, entry.err
+	}
+	if c.entries == nil {
+		c.entries = map[string]*historyDerivedCacheEntry{}
+	}
+	entry := &historyDerivedCacheEntry{ready: make(chan struct{})}
+	c.entries[key] = entry
+	c.order = append(c.order, key)
+	c.pruneLocked()
+	c.mu.Unlock()
+
+	entry.todoArgs, entry.err = compute()
+	close(entry.ready)
+	c.mu.Lock()
+	if entry.err != nil && c.entries[key] == entry {
+		// Do not retain transient I/O or decode failures. A later page request
+		// should be able to retry after the underlying read model is repaired.
+		delete(c.entries, key)
+		for i, candidate := range c.order {
+			if candidate == key {
+				c.order = append(c.order[:i], c.order[i+1:]...)
+				break
+			}
+		}
+	}
+	c.pruneLocked()
+	c.mu.Unlock()
+	return entry.todoArgs, entry.err
+}
+
+func (c *historyDerivedCache) touchLocked(key string) {
+	for i, candidate := range c.order {
+		if candidate == key {
+			c.order = append(c.order[:i], c.order[i+1:]...)
+			break
+		}
+	}
+	c.order = append(c.order, key)
+}
+
+func (c *historyDerivedCache) pruneLocked() {
+	for len(c.entries) > historyDerivedCacheEntries {
+		removed := false
+		for i, key := range c.order {
+			entry := c.entries[key]
+			if entry == nil {
+				c.order = append(c.order[:i], c.order[i+1:]...)
+				removed = true
+				break
+			}
+			select {
+			case <-entry.ready:
+				delete(c.entries, key)
+				c.order = append(c.order[:i], c.order[i+1:]...)
+				removed = true
+			default:
+			}
+			if removed {
+				break
+			}
+		}
+		if !removed {
+			return
+		}
+	}
 }
 
 // identityMatches reports whether the cursor/ref identity describes the same
@@ -401,6 +499,9 @@ func (a *App) liveHistorySliceSource(ctrl control.SessionAPI, sessionPath string
 					return wc.HistoryWindow(lo, hi), nil
 				},
 			}
+			if ps.UnchangedSincePersisted && idx.MessageCount == n {
+				src.cacheKey = historyDerivedSourceKey(sessionPath, src)
+			}
 			return src, true
 		}
 	}
@@ -413,6 +514,9 @@ func (a *App) liveHistorySliceSource(ctrl control.SessionAPI, sessionPath string
 		state = ps
 	}
 	src := newInMemoryHistorySliceSource(sessionID, msgs, resolver, state, psOK)
+	if psOK && ps.UnchangedSincePersisted {
+		src.cacheKey = historyDerivedSourceKey(sessionPath, src)
+	}
 	return src, false
 }
 
@@ -456,6 +560,13 @@ func newInMemoryHistorySliceSource(sessionID string, msgs []provider.Message, re
 		src.epoch = ps.RewriteEpoch
 	}
 	return src
+}
+
+func historyDerivedSourceKey(sessionPath string, src *historySliceSource) string {
+	if src == nil || strings.TrimSpace(sessionPath) == "" || strings.TrimSpace(src.digest) == "" {
+		return ""
+	}
+	return fmt.Sprintf("%s|%t|%d|%s|%d", agent.CanonicalSessionPath(sessionPath), src.revKnown, src.revision, src.digest, src.total)
 }
 
 // coldHistorySlice pages a session file with no running controller. It never
@@ -541,6 +652,7 @@ func (a *App) coldHistorySlice(sessionDir, path string, req HistorySliceRequest)
 			return emptyHistorySlice(), loadErr
 		}
 		src := newInMemoryHistorySliceSource(strings.TrimSuffix(filepath.Base(sessionPath), ".jsonl"), messages, resolver, state, true)
+		src.cacheKey = historyDerivedSourceKey(sessionPath, src)
 		slice, pageErr := a.pageHistorySliceSource(src, req, resolver, sessionPlannerDisplayTurns(sessionDir, sessionPath), nil, sessionPath)
 		if pageErr != nil {
 			return emptyHistorySlice(), pageErr
@@ -565,6 +677,7 @@ func (a *App) coldHistorySlice(sessionDir, path string, req HistorySliceRequest)
 			return emptyHistorySlice(), errors.Join(scanErr, loadErr)
 		}
 		src := newInMemoryHistorySliceSource(strings.TrimSuffix(filepath.Base(sessionPath), ".jsonl"), messages, resolver, state, true)
+		src.cacheKey = historyDerivedSourceKey(sessionPath, src)
 		slice, pageErr := a.pageHistorySliceSource(src, req, resolver, sessionPlannerDisplayTurns(sessionDir, sessionPath), nil, sessionPath)
 		if pageErr != nil {
 			return emptyHistorySlice(), pageErr
@@ -661,6 +774,7 @@ func coldHistorySliceSource(sessionPath string, idx *agent.SessionDisplayIndex) 
 			return last.Offset + last.Length - idx.Entries[lo].Offset
 		},
 	}
+	src.cacheKey = historyDerivedSourceKey(sessionPath, src)
 	return src
 }
 
@@ -800,6 +914,16 @@ func (a *App) pageHistorySliceSource(src *historySliceSource, req HistorySliceRe
 		return emptyHistorySlice(), fmt.Errorf("history window length %d, want %d", len(window), hi-candidateLo)
 	}
 	window = historyWindowWithPersistedTimes(window, sessionPath, countRoleBefore(src.roles, candidateLo, provider.RoleUser))
+	todoArgs := map[string]string{}
+	if historyWindowContainsTodoWrite(window) {
+		var todoErr error
+		todoArgs, todoErr = a.historyDerived.todoArgs(src.cacheKey, func() (map[string]string, error) {
+			return historyTodoArgsForSource(src)
+		})
+		if todoErr != nil {
+			return emptyHistorySlice(), todoErr
+		}
+	}
 	toolResults := historyToolResultsByID(window)
 	if err := extendHistoryToolResults(src, window, hi, toolResults); err != nil {
 		return emptyHistorySlice(), err
@@ -818,7 +942,7 @@ func (a *App) pageHistorySliceSource(src *historySliceSource, req HistorySliceRe
 	}
 	for i := candidateLo; i < hi; i++ {
 		m := window[i-candidateLo]
-		rows := state.convertHistoryMessage(i, m, resolver, checkpointTurns, toolResults)
+		rows := state.convertHistoryMessage(i, m, resolver, checkpointTurns, todoArgs, toolResults)
 		if len(rows) == 0 {
 			continue
 		}
@@ -869,6 +993,17 @@ func (a *App) pageHistorySliceSource(src *historySliceSource, req HistorySliceRe
 		})
 	}
 	return page, nil
+}
+
+func historyWindowContainsTodoWrite(msgs []provider.Message) bool {
+	for _, msg := range msgs {
+		for _, call := range msg.ToolCalls {
+			if call.Name == "todo_write" {
+				return true
+			}
+		}
+	}
+	return false
 }
 
 // countRoleBefore counts messages with role in [0, lo).
@@ -931,8 +1066,8 @@ func extendHistoryToolResults(src *historySliceSource, window []provider.Message
 }
 
 // forEachHistorySourceChunk decodes a bounded contiguous message window at a
-// time while priming cross-page planner state; callers retain only that state,
-// never the full transcript.
+// time. It is the common primitive for the cross-page lookups below; callers
+// retain only their derived state, never the full transcript.
 func forEachHistorySourceChunk(src *historySliceSource, end int, visit func([]provider.Message) error) error {
 	if end > src.total {
 		end = src.total
@@ -951,6 +1086,34 @@ func forEachHistorySourceChunk(src *historySliceSource, end int, visit func([]pr
 		}
 	}
 	return nil
+}
+
+// historyTodoArgsForSource derives completed todo state in two bounded passes:
+// first discover successful calls anywhere in the transcript, then replay the
+// todo stream. The legacy converter does the same work over an in-memory
+// slice; doing it here prevents a page cut from displaying stale todo items.
+func historyTodoArgsForSource(src *historySliceSource) (map[string]string, error) {
+	successful := map[string]bool{}
+	if err := forEachHistorySourceChunk(src, src.total, func(msgs []provider.Message) error {
+		for _, msg := range msgs {
+			if msg.Role == provider.RoleTool && msg.ToolCallID != "" && !historyToolResultFailed(msg.Content) {
+				successful[msg.ToolCallID] = true
+			}
+		}
+		return nil
+	}); err != nil {
+		return nil, err
+	}
+	state := newHistoryTodoArgsState(successful)
+	if err := forEachHistorySourceChunk(src, src.total, func(msgs []provider.Message) error {
+		for _, msg := range msgs {
+			state.consume(msg)
+		}
+		return nil
+	}); err != nil {
+		return nil, err
+	}
+	return state.out, nil
 }
 
 // primeHistoryPlannerState consumes the non-rendered prefix so planner
@@ -1280,6 +1443,7 @@ func (a *App) coldHistoryFieldValue(sessionDir, sessionPath string, msgIndex, su
 			return "", false, true
 		}
 		src = newInMemoryHistorySliceSource(strings.TrimSuffix(filepath.Base(absPath), ".jsonl"), messages, resolver, state, true)
+		src.cacheKey = historyDerivedSourceKey(absPath, src)
 		if repairable {
 			a.kickHistoryReadModelRepair(absPath)
 		}
@@ -1299,11 +1463,20 @@ func (a *App) historyFieldValueForSource(src *historySliceSource, msgIndex, sub 
 	if err := extendHistoryToolResults(src, msgs, msgIndex+1, toolResults); err != nil {
 		return "", false, true
 	}
+	todoArgs := map[string]string{}
+	if historyWindowContainsTodoWrite(msgs) {
+		todoArgs, err = a.historyDerived.todoArgs(src.cacheKey, func() (map[string]string, error) {
+			return historyTodoArgsForSource(src)
+		})
+		if err != nil {
+			return "", false, true
+		}
+	}
 	state := newHistoryMessageConvertState(plannerTurns)
 	if err := primeHistoryPlannerState(src, state, msgIndex, resolver); err != nil {
 		return "", false, true
 	}
-	rows := state.convertHistoryMessage(msgIndex, msgs[0], resolver, checkpointTurns, toolResults)
+	rows := state.convertHistoryMessage(msgIndex, msgs[0], resolver, checkpointTurns, todoArgs, toolResults)
 	if sub < 0 || sub >= len(rows) {
 		return "", false, true
 	}

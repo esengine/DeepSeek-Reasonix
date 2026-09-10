@@ -6,6 +6,7 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -277,9 +278,24 @@ func (a *App) serveModelSettingsSource(w http.ResponseWriter, r *http.Request, r
 	_ = json.NewEncoder(w).Encode(response)
 }
 
-type remoteModelSettingsRejection struct{ message string }
+const remoteModelSettingsUpgradeHint = "saved model settings require a newer remote Serve; upgrade or safely reconnect after its current work finishes"
+
+type remoteModelSettingsRejection struct {
+	message string
+	// unsupported marks rejections that mean the remote Serve predates the
+	// model-settings protocol entirely (no /model-settings route at all).
+	unsupported bool
+}
 
 func (e *remoteModelSettingsRejection) Error() string { return e.message }
+
+// isRemoteModelSettingsUnsupported reports whether err means the remote Serve
+// cannot speak the model-settings protocol, as opposed to refusing a specific
+// snapshot (ownership conflicts, busy turns, and other transient rejections).
+func isRemoteModelSettingsUnsupported(err error) bool {
+	var rejected *remoteModelSettingsRejection
+	return errors.As(err, &rejected) && rejected.unsupported
+}
 
 func remoteModelSettingsRequest(ctx context.Context, client *http.Client, base, expectedPath string, body any) (remoteModelSettingsStatus, error) {
 	var result remoteModelSettingsStatus
@@ -307,14 +323,23 @@ func remoteModelSettingsRequest(ctx context.Context, client *http.Client, base, 
 	}
 	defer resp.Body.Close()
 	if resp.StatusCode == http.StatusNotFound || resp.StatusCode == http.StatusMethodNotAllowed {
-		return result, &remoteModelSettingsRejection{message: "saved model settings require a newer remote Serve; upgrade or safely reconnect after its current work finishes"}
+		return result, &remoteModelSettingsRejection{message: remoteModelSettingsUpgradeHint, unsupported: true}
 	}
 	if resp.StatusCode != http.StatusOK {
 		detail, _ := io.ReadAll(io.LimitReader(resp.Body, 2048))
 		return result, &remoteModelSettingsRejection{message: fmt.Sprintf("remote model settings status %d: %s", resp.StatusCode, strings.TrimSpace(string(detail)))}
 	}
-	if err := json.NewDecoder(io.LimitReader(resp.Body, 1<<20)).Decode(&result); err != nil {
+	payload, err := io.ReadAll(io.LimitReader(resp.Body, 1<<20))
+	if err != nil {
 		return result, err
+	}
+	if err := json.Unmarshal(payload, &result); err != nil {
+		// Older Serves answer unknown routes with the HTML index; classify that
+		// document response as an unsupported model-settings protocol.
+		if trimmed := bytes.TrimSpace(payload); len(trimmed) > 0 && trimmed[0] == '<' {
+			return result, &remoteModelSettingsRejection{message: remoteModelSettingsUpgradeHint, unsupported: true}
+		}
+		return result, fmt.Errorf("decode remote model settings status: %w", err)
 	}
 	if result.Version != 1 {
 		return result, fmt.Errorf("remote Serve does not support immutable model settings")
@@ -324,49 +349,75 @@ func remoteModelSettingsRequest(ctx context.Context, client *http.Client, base, 
 
 // ensureRemoteModelSettings is the Desktop remote run-admission boundary.
 // Approval/ask/steer replies bypass it because they belong to the accepted run.
-func (a *App) ensureRemoteModelSettings(tabID string) (string, error) {
+// The returned generation scopes the admission (revision or legacy skip) to one
+// tab generation; callers must re-admit before a target that no longer runs it.
+func (a *App) ensureRemoteModelSettings(tabID string) (string, uint64, error) {
 	if !a.remoteTabLocalProxy(tabID) {
-		return "", nil
+		return "", 0, nil
 	}
 	for {
 		cfg, err := config.LoadModelRuntimeSnapshot(".")
 		if err != nil {
-			return "", err
+			return "", 0, err
 		}
 		a.remoteTabMu.Lock()
 		tab := a.remoteTabs[tabID]
 		if tab == nil {
 			a.remoteTabMu.Unlock()
-			return "", fmt.Errorf("remote session is no longer available")
+			return "", 0, fmt.Errorf("remote session is no longer available")
 		}
 		model, applied, generation, path := tab.model, tab.settings.revision, tab.gen, tab.routing.currentPath
 		valid := tab.settings.generation == generation && tab.settings.sessionPath == path
+		// Generation 0 is an unrecorded verdict, not a legacy one: fresh and
+		// restored tabs run generation 0 before their first attachment.
+		unsupported := tab.settings.unsupportedGen != 0 && tab.settings.unsupportedGen == generation
 		a.remoteTabMu.Unlock()
+		if unsupported {
+			return "", generation, nil
+		}
 		if model == "" {
 			model = resolveNewSessionModel(cfg)
 		}
 		desired := cfg.ModelRuntimeFingerprint(model)
 		if valid && applied == desired {
-			return applied, nil
+			return applied, generation, nil
 		}
 		next, err := resolveModelSettingsRuntime(cfg, model)
 		if err == nil {
 			err = a.SetRemoteTabModel(tabID, next)
 		}
 		if err != nil {
+			if isRemoteModelSettingsUnsupported(err) {
+				// A legacy Serve cannot apply snapshots; admit without a revision
+				// only when the verdict belongs to the current connection.
+				a.remoteTabMu.Lock()
+				current := a.remoteTabs[tabID]
+				recorded := current == tab && current.gen == generation && current.routing.currentPath == path
+				if recorded {
+					current.settings.unsupportedGen = generation
+				}
+				a.remoteTabMu.Unlock()
+				if !recorded {
+					// A reconnect replaced the probe's target mid-flight; the
+					// replacement Serve may speak the protocol, so re-probe it
+					// instead of admitting against the retired fence.
+					continue
+				}
+				return "", generation, nil
+			}
 			a.remoteTabMu.Lock()
 			if current := a.remoteTabs[tabID]; current == tab && current.gen == generation && current.routing.currentPath == path {
 				current.settings.failure = modelSettingsIssue("apply_failed", err).Message
 				current.settings.failureRevision = desired
 			}
 			a.remoteTabMu.Unlock()
-			return "", fmt.Errorf("model settings were saved but the remote session could not apply them: %w", err)
+			return "", 0, fmt.Errorf("model settings were saved but the remote session could not apply them: %w", err)
 		}
 		a.remoteTabMu.Lock()
 		acknowledged := tab.settings.revision != "" && tab.settings.generation == tab.gen && tab.settings.sessionPath == tab.routing.currentPath
 		a.remoteTabMu.Unlock()
 		if !acknowledged {
-			return "", fmt.Errorf("remote session did not acknowledge the saved model settings")
+			return "", 0, fmt.Errorf("remote session did not acknowledge the saved model settings")
 		}
 		// Read the current file again: another save may have won during the
 		// remote build. Never admit a new request with that stale completion.
@@ -393,6 +444,14 @@ func (a *App) appendRemoteModelSettingsStatus(result *ModelSettingsResult) {
 			model = resolveNewSessionModel(cfg)
 		}
 		desired := cfg.ModelRuntimeFingerprint(model)
+		// Generation 0 is an unrecorded verdict: a not-yet-attached tab has not
+		// probed any Serve and must stay pending, not claim not_required.
+		if tab.settings.unsupportedGen != 0 && tab.settings.unsupportedGen == tab.gen {
+			// Legacy targets never apply snapshots, so report them as not required
+			// instead of leaving the settings receipt pending indefinitely.
+			result.Targets = append(result.Targets, ModelSettingsTarget{TabID: tab.id, Title: tab.topicTitle, Application: "not_required", AppliedRevision: tab.settings.revision, DesiredRevision: desired})
+			continue
+		}
 		state := "applied"
 		if tab.settings.revision != desired || tab.settings.generation != tab.gen || tab.settings.sessionPath != tab.routing.currentPath {
 			state = "pending"
@@ -415,6 +474,9 @@ type remoteModelApplicationState struct {
 	failureRevision string
 	generation      uint64
 	sessionPath     string
+	// unsupportedGen records a generation whose Serve predates model-settings;
+	// a reconnect or replacement generation probes the protocol again.
+	unsupportedGen uint64
 }
 
 func applyRemoteModelSettingsSnapshot(ctx context.Context, client *http.Client, base, expectedPath, remoteRef string, bundle *config.ModelRuntimeSettings, status remoteModelSettingsStatus) (remoteModelSettingsStatus, error) {

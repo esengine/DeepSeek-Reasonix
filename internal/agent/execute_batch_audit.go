@@ -19,15 +19,14 @@ func (a *Agent) emitBatchToolResult(c provider.ToolCall, o toolOutcome, duration
 	if c.ResolvedReadOnly != nil {
 		readOnly = *c.ResolvedReadOnly
 	}
-	state := outcomeRunState(o)
 	args := c.Arguments
-	if c.Name == "todo_write" && state == provider.ToolRunCompleted {
-		if canonical, ok := hostTodoArgs(o.hostTodoState); ok {
+	if c.Name == "todo_write" && o.errMsg == "" && !o.blocked {
+		if canonical := canonicalTodoArgs(a.CanonicalTodoState()); canonical != "" {
 			args = canonical
 		}
 	}
 	tr := event.Tool{
-		RunState:     state,
+		RunState:     outcomeRunState(o),
 		ID:           c.ID,
 		Name:         c.Name,
 		Args:         args,
@@ -106,12 +105,6 @@ func (a *Agent) storeBatchToolResult(ctx context.Context, call provider.ToolCall
 	}
 	state := outcomeRunState(o)
 	msg := provider.Message{Role: provider.RoleTool, Content: o.output, Images: o.images, VisionSummary: o.visionSummary, ToolCallID: call.ID, Name: call.Name, ToolRunState: state, ToolExecution: toProviderToolExecution(o.execution)}
-	if o.hostTodoState != nil && state == provider.ToolRunCompleted && (call.Name == "todo_write" || call.Name == "complete_step") {
-		msg.HostTodoState = cloneHostTodoState(o.hostTodoState)
-		// Keep the original sidecar for transcripts written by older readers.
-		// New readers prefer HostTodoState, which also carries the canonical list.
-		msg.DeferredTodoCompletions = deferredTodoStateFromHost(o.hostTodoState)
-	}
 	if o.diagnostic != nil {
 		msg.ToolDiagnostic, _ = json.Marshal(o.diagnostic)
 		if o.diagnostic.Code == tool.WriteTargetAbsent && a.task.ledger != nil {

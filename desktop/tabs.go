@@ -1266,26 +1266,6 @@ func updateBufferedHistoryToolCallSummary(messages []*bufferedHistoryMessage, ca
 	}
 }
 
-func updateBufferedHistoryToolCallArguments(messages []*bufferedHistoryMessage, callID, args string) {
-	if callID == "" || args == "" {
-		return
-	}
-	for _, v := range slices.Backward(messages) {
-		for j := range v.message.ToolCalls {
-			call := &v.message.ToolCalls[j]
-			if call.ID != callID {
-				continue
-			}
-			call.Arguments = args
-			call.Subject = historyToolSubject(call.Name, args)
-			if call.Summary == "" {
-				call.Summary = historyToolSummary(call.Name, args, "")
-			}
-			return
-		}
-	}
-}
-
 func plannerToolResultDisplay(content string, failed bool) (display, errPreview string) {
 	if strings.TrimSpace(content) == "" {
 		return "", ""

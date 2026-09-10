@@ -102,7 +102,6 @@ Use `go test ./path/to/target/` to detect cycles **before** pushing. A `[setup f
 - **One force-push per round of review feedback.** Multiple force-pushes destroy review history and confuse reviewers.
 - **Keep the PR diff minimal.** Only the files relevant to the PR's purpose — no stray changes from other branches.
 - **Amend, don't add commits, for review feedback** — keeps the commit history clean.
-- **Name fix branches descriptively without a `codex/` prefix.** Use `fix/...` or another user-specified prefix; never add `codex` automatically.
 
 ## PR metadata gates
 

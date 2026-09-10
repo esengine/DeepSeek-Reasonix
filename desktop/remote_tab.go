@@ -572,6 +572,21 @@ func (a *App) remoteTabCommandTarget(tabID string) (*http.Client, string, string
 	return client, base, expectedPath, nil
 }
 
+// remoteTabAdmissionCurrent reports whether the tab still runs the generation
+// a run-admission decision (model-settings revision or legacy skip) was made
+// for. Generation 0 marks an ungated decision; any other replaced generation
+// must be re-admitted so a reconnect's newer Serve never receives an unfenced
+// request that was approved against the retired connection.
+func (a *App) remoteTabAdmissionCurrent(tabID string, generation uint64) bool {
+	if generation == 0 {
+		return true
+	}
+	a.remoteTabMu.Lock()
+	defer a.remoteTabMu.Unlock()
+	tab := a.remoteTabs[tabID]
+	return tab != nil && tab.gen == generation
+}
+
 func (a *App) isRemoteTab(tabID string) bool {
 	if strings.TrimSpace(tabID) == "" {
 		return false
@@ -695,18 +710,24 @@ func remoteSessionTakenOver(err error) bool {
 }
 
 func (a *App) SubmitRemoteTab(tabID, text string) error {
-	revision, err := a.ensureRemoteModelSettings(tabID)
-	if err != nil {
+	for {
+		revision, admittedGen, err := a.ensureRemoteModelSettings(tabID)
+		if err != nil {
+			return err
+		}
+		client, base, expectedPath, err := a.remoteTabCommandTarget(tabID)
+		if err != nil {
+			return err
+		}
+		if !a.remoteTabAdmissionCurrent(tabID, admittedGen) {
+			continue
+		}
+		ctx, cancel := commandContext(a)
+		body, _ := json.Marshal(map[string]string{"input": text})
+		err = servePostForSession(ctx, client, serveURL(base, "/submit"), body, expectedPath, revision)
+		cancel()
 		return err
 	}
-	client, base, expectedPath, err := a.remoteTabCommandTarget(tabID)
-	if err != nil {
-		return err
-	}
-	ctx, cancel := commandContext(a)
-	defer cancel()
-	body, _ := json.Marshal(map[string]string{"input": text})
-	return servePostForSession(ctx, client, serveURL(base, "/submit"), body, expectedPath, revision)
 }
 
 func (a *App) CancelRemoteTab(tabID string) error {

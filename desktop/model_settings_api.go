@@ -500,7 +500,7 @@ func (a *App) RetryModelSettingsApplication(tabID string) ModelSettingsResult {
 	remote := a.remoteTabs[tabID] != nil
 	a.remoteTabMu.Unlock()
 	if remote {
-		_, err := a.ensureRemoteModelSettings(tabID)
+		_, _, err := a.ensureRemoteModelSettings(tabID)
 		result := a.GetModelSettingsApplication()
 		if err != nil {
 			result.Application = "failed"

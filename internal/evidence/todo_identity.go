@@ -6,28 +6,22 @@ package evidence
 
 import (
 	"context"
-	"crypto/sha256"
-	"encoding/hex"
 	"strconv"
 	"strings"
 )
 
-// TodoIdentityKey returns the durable key used by host-side deferred
-// completion state. A supplied step_id is the authority and survives title
-// edits. Lists written without ids use a deterministic level+content fallback;
-// changing the content deliberately stops an old deferred completion from
-// being applied to a new task. ActiveForm is presentation text and is not part
-// of identity, so a progress-label edit cannot orphan a deferred completion.
-func TodoIdentityKey(todo TodoItem) (string, bool) {
+// todoUpdateIdentityKey is deliberately a small, in-memory identity used only
+// while repairing one todo update. It is not a transcript or provider field:
+// step_id wins, and id-less items use level plus normalized content.
+func todoUpdateIdentityKey(todo TodoItem) (string, bool) {
 	if id := strings.TrimSpace(todo.StepID); id != "" {
-		return id, true
+		return "id:" + id, true
 	}
 	content := normalizeStepText(todo.Content)
 	if content == "" {
 		return "", false
 	}
-	sum := sha256.Sum256([]byte(strconv.Itoa(todo.Level) + "\x00" + content))
-	return "legacy:" + hex.EncodeToString(sum[:]), true
+	return "text:" + strconv.Itoa(todo.Level) + ":" + content, true
 }
 
 // todoMatchAt is the one place a positive match is built, so every path reports

@@ -84,7 +84,6 @@ func (r *sessionRuntime) reset(s *Session) {
 	r.compaction.failedTurn.Store(0)
 	r.compaction.lastTurn.Store(0)
 	r.todoMu.Lock()
-	r.todoState = nil
 	r.deferredTodoCompletions = nil
 	r.todoMu.Unlock()
 }

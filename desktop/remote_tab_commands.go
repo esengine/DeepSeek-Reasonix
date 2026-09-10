@@ -251,25 +251,32 @@ func (a *App) DeleteRemoteProjectSession(hostID, workspace, name string) error {
 }
 
 func (a *App) remoteTabPost(tabID, path string, body map[string]any) error {
-	revision := ""
-	if path == "/goal/resume" || path == "/compact" || path == "/summarize" {
-		var err error
-		revision, err = a.ensureRemoteModelSettings(tabID)
+	gated := path == "/goal/resume" || path == "/compact" || path == "/summarize"
+	for {
+		revision, admittedGen := "", uint64(0)
+		if gated {
+			var err error
+			revision, admittedGen, err = a.ensureRemoteModelSettings(tabID)
+			if err != nil {
+				return err
+			}
+		}
+		client, base, expectedPath, err := a.remoteTabCommandTarget(tabID)
 		if err != nil {
 			return err
 		}
-	}
-	client, base, expectedPath, err := a.remoteTabCommandTarget(tabID)
-	if err != nil {
+		if !a.remoteTabAdmissionCurrent(tabID, admittedGen) {
+			continue
+		}
+		ctx, cancel := commandContext(a)
+		var payload []byte
+		if body != nil {
+			payload, _ = json.Marshal(body)
+		}
+		err = servePostForSession(ctx, client, serveURL(base, path), payload, expectedPath, revision)
+		cancel()
 		return err
 	}
-	ctx, cancel := commandContext(a)
-	defer cancel()
-	var payload []byte
-	if body != nil {
-		payload, _ = json.Marshal(body)
-	}
-	return servePostForSession(ctx, client, serveURL(base, path), payload, expectedPath, revision)
 }
 
 func (a *App) remoteTabGet(tabID, path string) (json.RawMessage, error) {

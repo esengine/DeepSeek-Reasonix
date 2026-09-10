@@ -194,54 +194,6 @@ func TestRebuildTodoStateHonorsEmptyTodoWriteClear(t *testing.T) {
 	}
 }
 
-func TestRebuildTodoStateIgnoresAppendedStaleHostSnapshot(t *testing.T) {
-	bKey, ok := evidence.TodoIdentityKey(evidence.TodoItem{Content: "B"})
-	if !ok {
-		t.Fatal("missing legacy identity key for B")
-	}
-	newState := &provider.HostTodoState{
-		Todos: []provider.HostTodoItem{
-			{Content: "A", Status: "in_progress"},
-			{Content: "B", Status: "pending"},
-		},
-		Deferred: []provider.DeferredTodoCompletion{{ID: bKey, Level: 0}},
-	}
-	oldState := &provider.HostTodoState{
-		Todos: []provider.HostTodoItem{{Content: "A", Status: "in_progress"}},
-	}
-	msgs := []provider.Message{
-		{Role: provider.RoleAssistant, ToolCalls: []provider.ToolCall{{
-			ID: "new-1", Name: "todo_write",
-			Arguments: `{"todos":[{"content":"A","status":"in_progress"},{"content":"B","status":"completed"}]}`,
-		}}},
-		{Role: provider.RoleTool, ToolCallID: "new-1", Name: "todo_write", Content: "Todos updated", HostTodoState: newState},
-		// This is a late duplicate from an older session view. It is not allowed
-		// to replace the first valid result for the same assistant call.
-		{Role: provider.RoleTool, ToolCallID: "new-1", Name: "todo_write", Content: "Todos updated", HostTodoState: oldState},
-	}
-	a := &Agent{}
-	a.rebuildTodoState(msgs)
-	if got := a.CanonicalTodoState(); len(got) != 2 || got[1].Status != "pending" {
-		t.Fatalf("appended stale host snapshot regressed canonical state: %+v", got)
-	}
-	if got := a.DeferredTodoCompletions(); len(got) != 1 || got[0] != bKey {
-		t.Fatalf("appended stale host snapshot changed deferred completion: %v", got)
-	}
-
-	// A later restored copy is still a valid latest Todo transition and remains
-	// authoritative after the stale append.
-	msgs = append(msgs,
-		provider.Message{Role: provider.RoleAssistant, ToolCalls: []provider.ToolCall{{
-			ID: "new-2", Name: "todo_write", Arguments: `{"todos":[{"content":"A","status":"in_progress"},{"content":"B","status":"completed"}]}`,
-		}}},
-		provider.Message{Role: provider.RoleTool, ToolCallID: "new-2", Name: "todo_write", Content: "Todos updated", HostTodoState: newState},
-	)
-	a.rebuildTodoState(msgs)
-	if got := a.CanonicalTodoState(); len(got) != 2 || got[1].Status != "pending" {
-		t.Fatalf("restored host snapshot did not remain authoritative: %+v", got)
-	}
-}
-
 func TestSeedTodoState(t *testing.T) {
 	a := &Agent{svc: agentServices{sink: event.Discard}}
 	todos := []evidence.TodoItem{
@@ -311,5 +263,76 @@ func TestAdvanceCanonicalTodoWalksPhaseChain(t *testing.T) {
 	a.advanceCanonicalTodo("Port the parser")
 	if a.sess.todoState[0].Status != "completed" || a.sess.todoState[3].Status != "pending" || a.sess.todoState[4].Status != "in_progress" {
 		t.Fatalf("phase sign-off should promote the next phase's first sub-step: %+v", a.sess.todoState)
+	}
+}
+
+func TestAcceptTodoWriteDefersAndConsumesContiguousCompletions(t *testing.T) {
+	a := &Agent{
+		svc: agentServices{sink: event.Discard},
+		sess: sessionRuntime{todoState: []evidence.TodoItem{
+			{Content: "A", Status: "in_progress", StepID: "a"},
+			{Content: "B", Status: "pending", StepID: "b"},
+			{Content: "C", Status: "pending", StepID: "c"},
+		}},
+	}
+	early := []evidence.TodoItem{
+		{Content: "A", Status: "in_progress", StepID: "a"},
+		{Content: "B", Status: "completed", StepID: "b"},
+		{Content: "C", Status: "completed", StepID: "c"},
+	}
+
+	got := a.acceptTodoWrite(early)
+	if got[0].Status != "in_progress" || got[1].Status != "pending" || got[2].Status != "pending" {
+		t.Fatalf("early completion was not canonicalized: %+v", got)
+	}
+	if len(a.sess.deferredTodoCompletions) != 2 {
+		t.Fatalf("deferred completions = %v, want two entries", a.sess.deferredTodoCompletions)
+	}
+
+	// Replaying the same model update must not create duplicate facts.
+	a.acceptTodoWrite(early)
+	if len(a.sess.deferredTodoCompletions) != 2 {
+		t.Fatalf("replayed update changed deferred cardinality: %v", a.sess.deferredTodoCompletions)
+	}
+
+	a.advanceCanonicalTodo("A")
+	for i, todo := range a.sess.todoState {
+		if todo.Status != "completed" {
+			t.Fatalf("todo %d after boundary consumption = %+v, want completed", i+1, todo)
+		}
+	}
+	if len(a.sess.deferredTodoCompletions) != 0 {
+		t.Fatalf("deferred completions remained after contiguous consumption: %v", a.sess.deferredTodoCompletions)
+	}
+}
+
+func TestAcceptTodoWriteDoesNotSkipAnUnfinishedTodo(t *testing.T) {
+	a := &Agent{
+		svc: agentServices{sink: event.Discard},
+		sess: sessionRuntime{todoState: []evidence.TodoItem{
+			{Content: "A", Status: "in_progress", StepID: "a"},
+			{Content: "B", Status: "pending", StepID: "b"},
+			{Content: "D", Status: "pending", StepID: "d"},
+			{Content: "E", Status: "pending", StepID: "e"},
+		}},
+	}
+	a.acceptTodoWrite([]evidence.TodoItem{
+		{Content: "A", Status: "in_progress", StepID: "a"},
+		{Content: "B", Status: "completed", StepID: "b"},
+		{Content: "D", Status: "pending", StepID: "d"},
+		{Content: "E", Status: "completed", StepID: "e"},
+	})
+
+	a.advanceCanonicalTodo("A")
+	if a.sess.todoState[1].Status != "completed" || a.sess.todoState[2].Status != "in_progress" || a.sess.todoState[3].Status != "pending" {
+		t.Fatalf("consumption crossed unfinished D: %+v", a.sess.todoState)
+	}
+	if len(a.sess.deferredTodoCompletions) != 1 {
+		t.Fatalf("deferred E was lost after B: %v", a.sess.deferredTodoCompletions)
+	}
+
+	a.advanceCanonicalTodo("D")
+	if a.sess.todoState[3].Status != "completed" || len(a.sess.deferredTodoCompletions) != 0 {
+		t.Fatalf("deferred E was not consumed at its boundary: todos=%+v deferred=%v", a.sess.todoState, a.sess.deferredTodoCompletions)
 	}
 }
