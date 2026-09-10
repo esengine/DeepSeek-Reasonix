@@ -84,11 +84,10 @@ type toolOutcome struct {
 	readActiveMillis   int64
 	incompleteRead     *incompleteReadDeferred
 	subagentOutcome    *SubagentOutcome
-	// normalizedArgs is set when a successful todo_write was repaired into the
-	// strict canonical serial state or when deferred completions were applied.
-	// The caller uses it for session/UI parity.
-	normalizedArgs    string
-	deferredTodoState *provider.DeferredTodoCompletionState
+	// hostTodoState is the durable host-only snapshot produced by a successful
+	// todo transition. It is stored with the tool result; the original assistant
+	// tool-call arguments stay immutable.
+	hostTodoState *provider.HostTodoState
 }
 
 // batchExecution is the result of one provider tool-call batch.
@@ -169,10 +168,6 @@ func (a *Agent) executeBatch(ctx context.Context, turn *turnRuntime, calls []pro
 		start := time.Now()
 		s.startedAt[i] = start.UnixMilli()
 		s.outcomes[i] = a.executeOne(ctx, turn, s.calls[i])
-		if normalized := s.outcomes[i].normalizedArgs; normalized != "" {
-			s.calls[i].Arguments = normalized
-			a.sess.conversation.UpdateToolCallArguments(s.calls[i])
-		}
 		recordWorkspaceMutation(a.svc.sink, s.outcomes[i].workspaceMutation)
 		if s.outcomes[i].executed {
 			s.surfaceWriters[i] = s.outcomes[i].workspaceMutation != nil

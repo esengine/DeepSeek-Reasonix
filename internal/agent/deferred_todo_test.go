@@ -26,6 +26,17 @@ func todoStatuses(todos []evidence.TodoItem) []string {
 	return statuses
 }
 
+func hostTodoStatuses(state *provider.HostTodoState) []string {
+	if state == nil {
+		return nil
+	}
+	statuses := make([]string, 0, len(state.Todos))
+	for _, todo := range state.Todos {
+		statuses = append(statuses, todo.Status)
+	}
+	return statuses
+}
+
 func TestDeferredTodoUpdateIsIdempotentAndKeepsCanonicalSerial(t *testing.T) {
 	previous := deferredTodoTestList("in_progress", "pending", "pending", "pending")
 	next := deferredTodoTestList("in_progress", "completed", "completed", "pending")
@@ -194,6 +205,64 @@ func TestDeferredTodoStateSurvivesSessionSaveAndReload(t *testing.T) {
 	}
 	if err := evidence.ValidateSerialTodos(transition.todos); err != nil {
 		t.Fatalf("post-reload canonical invalid: %v", err)
+	}
+}
+
+func TestHostTodoStateRestoresCanonicalSnapshotWithoutReplayingOldArguments(t *testing.T) {
+	oldArgs := `{"todos":[{"content":"A","status":"in_progress","step_id":"a"},{"content":"B","status":"pending","step_id":"b"}]}`
+	finalState := &provider.HostTodoState{
+		Todos: []provider.HostTodoItem{
+			{Content: "A", Status: "completed", StepID: "a"},
+			{Content: "B", Status: "in_progress", StepID: "b"},
+		},
+		Deferred: []provider.DeferredTodoCompletion{},
+	}
+	msgs := []provider.Message{
+		{Role: provider.RoleAssistant, ToolCalls: []provider.ToolCall{{ID: "t1", Name: "todo_write", Arguments: oldArgs}}},
+		{Role: provider.RoleTool, ToolCallID: "t1", Name: "todo_write", Content: "Todos updated", HostTodoState: finalState},
+		{Role: provider.RoleAssistant, ToolCalls: []provider.ToolCall{{ID: "c1", Name: "complete_step", Arguments: `{"step":"A"}`}}},
+		{Role: provider.RoleTool, ToolCallID: "c1", Name: "complete_step", Content: "signed off", HostTodoState: finalState},
+	}
+	a := &Agent{}
+	a.rebuildTodoState(msgs)
+	if got := todoStatuses(a.CanonicalTodoState()); !slices.Equal(got, []string{"completed", "in_progress"}) {
+		t.Fatalf("host snapshot was not restored directly: %v", got)
+	}
+	if got := a.DeferredTodoCompletions(); len(got) != 0 {
+		t.Fatalf("host snapshot deferred state = %v, want empty", got)
+	}
+	if got := msgs[0].ToolCalls[0].Arguments; got != oldArgs {
+		t.Fatalf("rebuild mutated historical todo_write arguments: %q", got)
+	}
+}
+
+func TestHostTodoStateSurvivesSessionSaveAndReload(t *testing.T) {
+	oldArgs := `{"todos":[{"content":"A","status":"in_progress","step_id":"a"},{"content":"B","status":"pending","step_id":"b"}]}`
+	state := &provider.HostTodoState{
+		Todos: []provider.HostTodoItem{
+			{Content: "A", Status: "completed", StepID: "a"},
+			{Content: "B", Status: "in_progress", StepID: "b"},
+		},
+		Deferred: []provider.DeferredTodoCompletion{},
+	}
+	session := NewSession("")
+	session.Add(provider.Message{Role: provider.RoleAssistant, ToolCalls: []provider.ToolCall{{ID: "t1", Name: "todo_write", Arguments: oldArgs}}})
+	session.Add(provider.Message{Role: provider.RoleTool, ToolCallID: "t1", Name: "todo_write", Content: "Todos updated", HostTodoState: state})
+	path := filepath.Join(t.TempDir(), "host-todo.jsonl")
+	if err := session.Save(path); err != nil {
+		t.Fatalf("save session: %v", err)
+	}
+	reloaded, err := LoadSession(path)
+	if err != nil {
+		t.Fatalf("load session: %v", err)
+	}
+	a := &Agent{sess: sessionRuntime{conversation: reloaded}}
+	a.rebuildTodoState(reloaded.Snapshot())
+	if got := todoStatuses(a.CanonicalTodoState()); !slices.Equal(got, []string{"completed", "in_progress"}) {
+		t.Fatalf("reloaded host canonical state = %v", got)
+	}
+	if got := reloaded.Snapshot()[0].ToolCalls[0].Arguments; got != oldArgs {
+		t.Fatalf("session reload changed historical todo_write arguments: %q", got)
 	}
 }
 

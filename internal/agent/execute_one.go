@@ -32,8 +32,7 @@ func (a *Agent) executeOne(ctx context.Context, turn *turnRuntime, call provider
 		out.readTaskID = plan.readTaskID
 		out.readEnvelope = plan.readEnvelope
 		out.readActiveMillis = plan.readActiveMillis
-		out.normalizedArgs = plan.normalizedArgs
-		out.deferredTodoState = plan.deferredTodoState
+		out.hostTodoState = plan.hostTodoState
 		if plan.mutationObserved && !plan.mutationAfterDone {
 			a.observeAfterMutation(plan)
 		}

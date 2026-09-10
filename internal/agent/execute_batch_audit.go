@@ -98,8 +98,11 @@ func (a *Agent) storeBatchToolResult(ctx context.Context, call provider.ToolCall
 	}
 	state := outcomeRunState(o)
 	msg := provider.Message{Role: provider.RoleTool, Content: o.output, Images: o.images, VisionSummary: o.visionSummary, ToolCallID: call.ID, Name: call.Name, ToolRunState: state, ToolExecution: toProviderToolExecution(o.execution)}
-	if o.deferredTodoState != nil && state == provider.ToolRunCompleted && (call.Name == "todo_write" || call.Name == "complete_step") {
-		msg.DeferredTodoCompletions = cloneDeferredTodoState(o.deferredTodoState)
+	if o.hostTodoState != nil && state == provider.ToolRunCompleted && (call.Name == "todo_write" || call.Name == "complete_step") {
+		msg.HostTodoState = cloneHostTodoState(o.hostTodoState)
+		// Keep the original sidecar for transcripts written by older readers.
+		// New readers prefer HostTodoState, which also carries the canonical list.
+		msg.DeferredTodoCompletions = deferredTodoStateFromHost(o.hostTodoState)
 	}
 	if o.diagnostic != nil {
 		msg.ToolDiagnostic, _ = json.Marshal(o.diagnostic)

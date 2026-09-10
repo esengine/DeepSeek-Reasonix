@@ -257,37 +257,6 @@ func (s *Session) UpdateToolCallPreview(call provider.ToolCall) bool {
 	return false
 }
 
-// UpdateToolCallArguments persists host-canonicalized arguments for the newest
-// matching assistant tool call. todo_write uses this after a compatibility
-// repair so reload/replay sees the same serial list that the successful result
-// and task panel display.
-func (s *Session) UpdateToolCallArguments(call provider.ToolCall) bool {
-	if call.ID == "" {
-		return false
-	}
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	//nolint:modernize // slices.Backward yields element copies; this body writes through the index.
-	for i := len(s.Messages) - 1; i >= 0; i-- {
-		if s.Messages[i].Role != provider.RoleAssistant {
-			continue
-		}
-		calls := s.Messages[i].ToolCalls
-		for j := range calls {
-			if calls[j].ID != call.ID {
-				continue
-			}
-			cloned := append([]provider.ToolCall(nil), calls...)
-			cloned[j].Arguments = call.Arguments
-			s.Messages[i].ToolCalls = cloned
-			s.rewriteVersion++
-			s.version++
-			return true
-		}
-	}
-	return false
-}
-
 // UpdateToolCallResolution persists the host-resolved target metadata for the
 // newest matching stable proxy call. The model-visible Name/Arguments remain
 // unchanged; this metadata exists only so live and reloaded frontends classify

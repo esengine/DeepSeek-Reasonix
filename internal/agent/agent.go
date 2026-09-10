@@ -1486,43 +1486,9 @@ func (a *Agent) advanceCanonicalTodo(step string) todoStateTransition {
 	snapshot := append([]evidence.TodoItem(nil), a.sess.todoState...)
 	deferred := deferredTodoIDsLocked(a.sess.deferredTodoCompletions)
 	a.sess.todoMu.Unlock()
-	a.persistCanonicalTodoArguments(snapshot)
 	a.recordTodoState(snapshot)
 	a.emitTodoState(snapshot, m.Index)
 	return todoStateTransition{todos: snapshot, deferred: deferred, consumed: consumed}
-}
-
-// persistCanonicalTodoArguments keeps the latest successful todo_write in the
-// session aligned with a host-side complete_step advance. Without this write,
-// a reload would replay the older pending suffix because the synthetic ledger
-// receipt is intentionally turn-local.
-func (a *Agent) persistCanonicalTodoArguments(todos []evidence.TodoItem) {
-	if a == nil || a.sess.conversation == nil || len(todos) == 0 {
-		return
-	}
-	msgs := a.sess.conversation.Snapshot()
-	successful := successfulToolCallIDs(msgs)
-	for i := len(msgs) - 1; i >= 0; i-- {
-		if msgs[i].Role != provider.RoleAssistant {
-			continue
-		}
-		for j := len(msgs[i].ToolCalls) - 1; j >= 0; j-- {
-			call := msgs[i].ToolCalls[j]
-			if call.Name != "todo_write" || !successful[call.ID] {
-				continue
-			}
-			var fields map[string]json.RawMessage
-			if err := json.Unmarshal([]byte(call.Arguments), &fields); err != nil {
-				return
-			}
-			normalized, ok := marshalTodoArgs(fields, todos)
-			if !ok {
-				return
-			}
-			a.sess.conversation.UpdateToolCallArguments(provider.ToolCall{ID: call.ID, Arguments: normalized})
-			return
-		}
-	}
 }
 
 // emitTodoState emits a synthetic todo_write event so the frontend task panel
@@ -1547,13 +1513,31 @@ func (a *Agent) RebuildTodoState() {
 	a.rebuildTodoState(a.Session().Snapshot())
 }
 
-// rebuildTodoState reconstructs the canonical task list from a transcript: the
-// latest successful todo_write is the base, then every complete_step after it
-// advances an item. Deterministic from persisted messages, so it survives a
-// fresh load or a rewind (the truncated history yields the historical state).
-// Empty after compaction drops the todo_write — no worse than no canonical list.
+// rebuildTodoState restores the latest durable host snapshot when available.
+// Older transcripts have no snapshot, so they retain the legacy behavior of
+// taking the latest successful todo_write as a base and replaying complete_step
+// calls after it.
 func (a *Agent) rebuildTodoState(msgs []provider.Message) {
 	successful := successfulToolCallIDs(msgs)
+	var persistedHost *provider.HostTodoState
+	var persistedDeferred *provider.DeferredTodoCompletionState
+	for _, msg := range msgs {
+		if msg.Role != provider.RoleTool || !successful[msg.ToolCallID] || (msg.Name != "todo_write" && msg.Name != "complete_step") {
+			continue
+		}
+		if msg.HostTodoState != nil {
+			persistedHost = cloneHostTodoState(msg.HostTodoState)
+		}
+		if msg.DeferredTodoCompletions != nil {
+			persistedDeferred = cloneDeferredTodoState(msg.DeferredTodoCompletions)
+		}
+	}
+	if persistedHost != nil {
+		a.restoreTodoState(persistedHost)
+		a.consumeTodoOnlyReadinessMarkerIfResolved()
+		return
+	}
+
 	var todos []evidence.TodoItem
 	baseIdx := -1
 	for i, msg := range msgs {
@@ -1569,14 +1553,10 @@ func (a *Agent) rebuildTodoState(msgs []provider.Message) {
 		}
 	}
 	if baseIdx < 0 {
-		a.restoreTodoState(nil, nil)
+		a.restoreLegacyTodoState(nil, persistedDeferred)
 		return
 	}
-	var persistedDeferred *provider.DeferredTodoCompletionState
 	for i := baseIdx; i < len(msgs); i++ {
-		if msgs[i].Role == provider.RoleTool && successful[msgs[i].ToolCallID] && msgs[i].DeferredTodoCompletions != nil && (msgs[i].Name == "todo_write" || msgs[i].Name == "complete_step") {
-			persistedDeferred = cloneDeferredTodoState(msgs[i].DeferredTodoCompletions)
-		}
 		for _, tc := range msgs[i].ToolCalls {
 			if tc.Name != "complete_step" || !successful[tc.ID] {
 				continue
@@ -1587,7 +1567,7 @@ func (a *Agent) rebuildTodoState(msgs []provider.Message) {
 			}
 		}
 	}
-	a.restoreTodoState(todos, persistedDeferred)
+	a.restoreLegacyTodoState(todos, persistedDeferred)
 	a.consumeTodoOnlyReadinessMarkerIfResolved()
 }
 

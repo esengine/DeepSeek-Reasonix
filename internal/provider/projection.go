@@ -3,8 +3,8 @@ package provider
 import "slices"
 
 // Two copies of a transcript are derived from the stored one: the bytes a
-// provider receives, and the projection compaction writes back. They differ in
-// exactly one field, and that difference is load-bearing.
+// provider receives, and the projection compaction writes back. The projection
+// retains host-only metadata needed for recovery; the provider copy strips it.
 
 // ModelMessages removes durable display-only records before a request is
 // handed to any provider. Healthy sessions without such records keep their
@@ -23,7 +23,7 @@ func messagesNeedProjection(msgs []Message, keepExecution, keepOrigin, keepDefer
 		if m.ReadPause != nil || m.ReadCompletion != nil || len(m.ToolDiagnostic) > 0 {
 			return true
 		}
-		if slices.ContainsFunc(m.ServerSearch, func(s ServerSearchCall) bool { return s.SourcesStatus != "" }) || len(m.ProtocolRecovery) > 0 || (!keepExecution && slices.ContainsFunc(m.ToolCalls, func(c ToolCall) bool { return len(c.WriteIntents) > 0 })) || m.LocalOnly || (!keepOrigin && m.Origin != "") || m.RawContent != "" || m.ProviderContent != "" || m.DecisionReceipt != nil || len(m.DecisionReceipts) > 0 || m.VisionSummary != nil || m.MCPApp != nil || len(m.ReadResult) > 0 || (!keepDeferred && m.DeferredTodoCompletions != nil) || ((m.ToolExecution != nil || m.ToolRunState != "") && !keepExecution) {
+		if slices.ContainsFunc(m.ServerSearch, func(s ServerSearchCall) bool { return s.SourcesStatus != "" }) || len(m.ProtocolRecovery) > 0 || (!keepExecution && slices.ContainsFunc(m.ToolCalls, func(c ToolCall) bool { return len(c.WriteIntents) > 0 })) || m.LocalOnly || (!keepOrigin && m.Origin != "") || m.RawContent != "" || m.ProviderContent != "" || m.DecisionReceipt != nil || len(m.DecisionReceipts) > 0 || m.VisionSummary != nil || m.MCPApp != nil || len(m.ReadResult) > 0 || (!keepDeferred && (m.DeferredTodoCompletions != nil || m.HostTodoState != nil)) || ((m.ToolExecution != nil || m.ToolRunState != "") && !keepExecution) {
 			return true
 		}
 	}
@@ -67,6 +67,7 @@ func projectMessages(msgs []Message, keepExecution, keepOrigin, keepDeferred boo
 		candidate.MCPApp = nil
 		if !keepDeferred {
 			candidate.DeferredTodoCompletions = nil
+			candidate.HostTodoState = nil
 		}
 		if !keepExecution {
 			// Local shell metadata must never enter provider request bytes.

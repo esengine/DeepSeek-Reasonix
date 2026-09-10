@@ -9,6 +9,21 @@ import (
 	"testing"
 )
 
+func TestTodoIdentityKeyIgnoresActiveFormForLegacyItems(t *testing.T) {
+	base := TodoItem{Content: "Run tests", Status: "pending", ActiveForm: "Running tests", Level: 1}
+	updated := base
+	updated.ActiveForm = "Executing tests"
+
+	baseKey, baseOK := TodoIdentityKey(base)
+	updatedKey, updatedOK := TodoIdentityKey(updated)
+	if !baseOK || !updatedOK {
+		t.Fatal("legacy todo identity should be available")
+	}
+	if baseKey != updatedKey {
+		t.Fatalf("activeForm-only edit changed identity: %q != %q", baseKey, updatedKey)
+	}
+}
+
 func TestLedgerRecordsSuccessAndFailureReceipts(t *testing.T) {
 	ledger := NewLedger()
 	ledger.Record(Receipt{

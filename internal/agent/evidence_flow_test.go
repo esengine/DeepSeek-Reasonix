@@ -1346,13 +1346,16 @@ func TestEvidenceFlowRepairsOutOfOrderTodoAndPersistsCanonicalList(t *testing.T)
 	if err := json.Unmarshal([]byte(persisted.Arguments), &payload); err != nil {
 		t.Fatalf("canonical tool args are invalid JSON: %v", err)
 	}
-	if len(payload.Todos) != 2 || payload.Todos[1].Status != "pending" {
-		t.Fatalf("persisted repaired args = %+v, want second item pending", payload.Todos)
+	if len(payload.Todos) != 2 || payload.Todos[1].Status != "completed" {
+		t.Fatalf("historical repaired args = %+v, want original second item completed", payload.Todos)
 	}
 	for _, message := range a.sess.conversation.Snapshot() {
 		if message.Role == provider.RoleTool && message.ToolCallID == "c2" {
 			if message.DeferredTodoCompletions == nil || len(message.DeferredTodoCompletions.Items) != 1 || message.DeferredTodoCompletions.Items[0].ID != "second" {
 				t.Fatalf("persisted deferred metadata = %+v, want second", message.DeferredTodoCompletions)
+			}
+			if message.HostTodoState == nil || len(message.HostTodoState.Todos) != 2 || message.HostTodoState.Todos[1].Status != "pending" {
+				t.Fatalf("persisted host todo state = %+v, want canonical second item pending", message.HostTodoState)
 			}
 		}
 	}
@@ -1433,8 +1436,15 @@ func TestEvidenceFlowConsumesDeferredTodoAfterCurrentSignoff(t *testing.T) {
 	if err := json.Unmarshal([]byte(latestTodo.Arguments), &persisted); err != nil {
 		t.Fatalf("latest canonical todo args are invalid JSON: %v", err)
 	}
-	if got := todoStatuses(persisted.Todos); !slices.Equal(got, []string{"completed", "completed", "completed", "in_progress"}) {
-		t.Fatalf("latest persisted todo args = %v, want final canonical statuses", got)
+	if got := todoStatuses(persisted.Todos); !slices.Equal(got, []string{"in_progress", "completed", "completed", "pending"}) {
+		t.Fatalf("latest historical todo args = %v, want original early-update statuses", got)
+	}
+	for _, message := range a.sess.conversation.Snapshot() {
+		if message.Role == provider.RoleTool && message.ToolCallID == "signoff" {
+			if message.HostTodoState == nil || !slices.Equal(hostTodoStatuses(message.HostTodoState), []string{"completed", "completed", "completed", "in_progress"}) {
+				t.Fatalf("signoff host todo state = %+v, want final canonical statuses", message.HostTodoState)
+			}
+		}
 	}
 	a.RebuildTodoState()
 	if got := todoStatuses(a.CanonicalTodoState()); !slices.Equal(got, []string{"completed", "completed", "completed", "in_progress"}) {

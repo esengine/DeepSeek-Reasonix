@@ -284,7 +284,6 @@ type App struct {
 	historySliceMu              sync.Mutex
 	historyIndexRebuilds        map[string]chan struct{}
 	historyIndexMigrationCancel context.CancelFunc
-	historyDerived              historyDerivedCache
 
 	// detachedSessions keeps live session runtimes whose visible tab was closed.
 	// It is process-local by design: shutdown closes every detached controller.
@@ -5368,9 +5367,8 @@ func historyCheckpointTurns(msgs []provider.Message, resolveUserContent func(str
 }
 
 func historyMessagesWithPlannerDisplays(msgs []provider.Message, resolveUserContent func(string) string, plannerTurns []plannerDisplayTurn, checkpointTurns map[int]int) []HistoryMessage {
-	replayedTodoArgs := historyTodoArgsWithCompleteSteps(msgs)
 	toolResults := historyToolResultsByID(msgs)
-	return historyMessagesWithPlannerDisplaysAndLookups(msgs, resolveUserContent, plannerTurns, checkpointTurns, replayedTodoArgs, toolResults)
+	return historyMessagesWithPlannerDisplaysAndLookups(msgs, resolveUserContent, plannerTurns, checkpointTurns, toolResults)
 }
 
 // historyMessageConvertState carries the cross-message state of a provider→
@@ -5392,13 +5390,12 @@ func historyMessagesWithPlannerDisplaysAndLookups(
 	resolveUserContent func(string) string,
 	plannerTurns []plannerDisplayTurn,
 	checkpointTurns map[int]int,
-	replayedTodoArgs map[string]string,
 	toolResults map[string]provider.Message,
 ) []HistoryMessage {
 	out := make([]HistoryMessage, 0, len(msgs))
 	state := newHistoryMessageConvertState(plannerTurns)
 	for index, m := range msgs {
-		out = append(out, state.convertHistoryMessage(index, m, resolveUserContent, checkpointTurns, replayedTodoArgs, toolResults)...)
+		out = append(out, state.convertHistoryMessage(index, m, resolveUserContent, checkpointTurns, toolResults)...)
 	}
 	return out
 }
@@ -5412,7 +5409,6 @@ func (state *historyMessageConvertState) convertHistoryMessage(
 	m provider.Message,
 	resolveUserContent func(string) string,
 	checkpointTurns map[int]int,
-	replayedTodoArgs map[string]string,
 	toolResults map[string]provider.Message,
 ) []HistoryMessage {
 	var out []HistoryMessage
@@ -5483,13 +5479,7 @@ func (state *historyMessageConvertState) convertHistoryMessage(
 	if (m.Role == provider.RoleAssistant || m.LocalOnly) && len(m.ToolCalls) > 0 {
 		hm.ToolCalls = make([]HistoryToolCall, len(m.ToolCalls))
 		for i, tc := range m.ToolCalls {
-			args := tc.Arguments
-			if tc.Name == "todo_write" {
-				if replayed, ok := replayedTodoArgs[tc.ID]; ok {
-					args = replayed
-				}
-			}
-			hm.ToolCalls[i] = historyToolCall(tc, args, toolResults[tc.ID])
+			hm.ToolCalls[i] = historyToolCall(tc, tc.Arguments, toolResults[tc.ID])
 		}
 	}
 	if m.Role == provider.RoleTool && !m.LocalOnly {
@@ -5607,7 +5597,6 @@ func historyPageFromProviderMessages(
 		resolveUserContent,
 		plannerTurns,
 		checkpointTurnsForProviderWindow(checkpointTurns, originalIndexes),
-		historyTodoArgsWithCompleteSteps(msgs),
 		historyToolResultsByID(msgs),
 	)
 	return page
@@ -5901,88 +5890,12 @@ func clipStringBytes(s string, max int) string {
 	return s[:max]
 }
 
-func historyTodoArgsWithCompleteSteps(msgs []provider.Message) map[string]string {
-	successful := successfulHistoryToolCallIDs(msgs)
-	state := newHistoryTodoArgsState(successful)
-	for _, m := range msgs {
-		state.consume(m)
-	}
-	return state.out
-}
-
-// historyTodoArgsState retains only the derived todo state needed to render a
-// todo_write call. It lets windowed history compute the same result as the
-// legacy full conversion while streaming messages in bounded chunks.
-type historyTodoArgsState struct {
-	successful   map[string]bool
-	out          map[string]string
-	todos        []evidence.TodoItem
-	latestTodoID string
-}
-
-func newHistoryTodoArgsState(successful map[string]bool) *historyTodoArgsState {
-	return &historyTodoArgsState{successful: successful, out: map[string]string{}}
-}
-
-func (state *historyTodoArgsState) consume(m provider.Message) {
-	for _, tc := range m.ToolCalls {
-		if tc.ID == "" || !state.successful[tc.ID] {
-			continue
-		}
-		switch tc.Name {
-		case "todo_write":
-			rec := evidence.ReceiptFromToolCall(tc.Name, json.RawMessage(tc.Arguments), true, true)
-			if len(rec.Todos) == 0 {
-				continue
-			}
-			state.todos = evidence.NormalizeSerialTodos(rec.Todos)
-			state.latestTodoID = tc.ID
-			if args, ok := todoArgsJSON(state.todos); ok {
-				state.out[state.latestTodoID] = args
-			}
-		case "complete_step":
-			if state.latestTodoID == "" || len(state.todos) == 0 {
-				continue
-			}
-			rec := evidence.ReceiptFromToolCall(tc.Name, json.RawMessage(tc.Arguments), true, true)
-			match, ok := evidence.MatchStep(rec.Step, state.todos)
-			if !ok || !evidence.AdvanceSerialTodo(state.todos, match.Index-1) {
-				continue
-			}
-			if args, ok := todoArgsJSON(state.todos); ok {
-				state.out[state.latestTodoID] = args
-			}
-		}
-	}
-}
-
-func successfulHistoryToolCallIDs(msgs []provider.Message) map[string]bool {
-	successful := map[string]bool{}
-	for _, msg := range msgs {
-		if msg.Role != provider.RoleTool || msg.ToolCallID == "" {
-			continue
-		}
-		if !historyToolResultFailed(msg.Content) {
-			successful[msg.ToolCallID] = true
-		}
-	}
-	return successful
-}
-
 func historyToolResultFailed(content string) bool {
 	content = strings.TrimSpace(content)
 	return strings.HasPrefix(content, "error:") ||
 		strings.HasPrefix(content, "blocked:") ||
 		strings.HasPrefix(content, "Error:") ||
 		strings.HasPrefix(content, "[error")
-}
-
-func todoArgsJSON(todos []evidence.TodoItem) (string, bool) {
-	b, err := json.Marshal(map[string]any{"todos": todos})
-	if err != nil {
-		return "", false
-	}
-	return string(b), true
 }
 
 func previewSessionMessages(sessionDir, path string) ([]HistoryMessage, error) {

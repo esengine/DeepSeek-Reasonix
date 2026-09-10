@@ -126,6 +126,28 @@ type Message struct {
 	// todo tool result. It records out-of-order completion facts without making
 	// them provider-visible or changing the canonical serial Todo list.
 	DeferredTodoCompletions *DeferredTodoCompletionState `json:"deferred_todo_completions,omitempty"`
+	// HostTodoState is the authoritative host-side Todo snapshot after a
+	// successful todo_write or complete_step. It is persisted with the result
+	// that caused the transition, but stripped before any provider request.
+	HostTodoState *HostTodoState `json:"host_todo_state,omitempty"`
+}
+
+// HostTodoItem is the provider-independent representation of one canonical
+// Todo item. It intentionally mirrors the fields the host needs to render and
+// match a task without importing the evidence package into provider.
+type HostTodoItem struct {
+	Content    string `json:"content"`
+	Status     string `json:"status"`
+	ActiveForm string `json:"activeForm,omitempty"`
+	Level      int    `json:"level,omitempty"`
+	StepID     string `json:"step_id,omitempty"`
+}
+
+// HostTodoState is durable host-only task state. An empty Todos or Deferred
+// slice is meaningful: it clears an older snapshot during transcript replay.
+type HostTodoState struct {
+	Todos    []HostTodoItem           `json:"todos"`
+	Deferred []DeferredTodoCompletion `json:"deferred"`
 }
 
 // DeferredTodoCompletion identifies one Todo whose completion was reported

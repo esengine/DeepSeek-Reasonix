@@ -3,7 +3,6 @@ package agent
 import (
 	"context"
 	"encoding/json"
-	"slices"
 	"strings"
 
 	"reasonix/internal/event"
@@ -44,11 +43,7 @@ func (a *Agent) recordToolReceipts(plan *toolCallPlan, result string, execution 
 	args := json.RawMessage(call.Arguments)
 	var repairedDeferred []evidence.TodoItem
 	if err == nil && call.Name == "todo_write" {
-		if normalized, deferred, ok := normalizeRepairedTodoArgs(plan.cctx, args); ok {
-			call.Arguments = normalized
-			args = json.RawMessage(normalized)
-			plan.call = call
-			plan.normalizedArgs = normalized
+		if deferred, ok := normalizeRepairedTodoArgs(plan.cctx, args); ok {
 			repairedDeferred = deferred
 		}
 	}
@@ -71,7 +66,7 @@ func (a *Agent) recordToolReceipts(plan *toolCallPlan, result string, execution 
 			if len(transition.consumed) > 0 {
 				result = appendDeferredAppliedFeedback(result, transition.consumed, transition.todos)
 			}
-			plan.deferredTodoState = a.deferredTodoStateSnapshot(false)
+			plan.hostTodoState = a.hostTodoStateSnapshot(false)
 		}
 	case plan.evidenceName != call.Name:
 		proxy := evidence.ReceiptFromToolCall(call.Name, args, err == nil, true)
@@ -95,14 +90,7 @@ func (a *Agent) recordToolReceipts(plan *toolCallPlan, result string, execution 
 		if err == nil && call.Name == "todo_write" {
 			transition := a.acceptTodoUpdate(rec.Todos, repairedDeferred, plan.planReplacementAuthorized || a.planMode.Load())
 			rec.Todos = transition.todos
-			if normalized, changed := canonicalTodoArgs(args, transition.todos); changed {
-				call.Arguments = normalized
-				args = json.RawMessage(normalized)
-				plan.call = call
-				plan.normalizedArgs = normalized
-				rec.Args = args
-			}
-			plan.deferredTodoState = a.deferredTodoStateSnapshot(true)
+			plan.hostTodoState = a.hostTodoStateSnapshot(true)
 			if len(transition.added) > 0 && !strings.Contains(strings.ToLower(result), "recorded") {
 				result = appendDeferredRecordedFeedback(result, transition.added, transition.todos)
 			}
@@ -122,18 +110,18 @@ func (a *Agent) recordToolReceipts(plan *toolCallPlan, result string, execution 
 	return result
 }
 
-func normalizeRepairedTodoArgs(ctx context.Context, args json.RawMessage) (string, []evidence.TodoItem, bool) {
+func normalizeRepairedTodoArgs(ctx context.Context, args json.RawMessage) ([]evidence.TodoItem, bool) {
 	var fields map[string]json.RawMessage
 	if err := json.Unmarshal(args, &fields); err != nil {
-		return "", nil, false
+		return nil, false
 	}
 	rawTodos, ok := fields["todos"]
 	if !ok {
-		return "", nil, false
+		return nil, false
 	}
 	var next []evidence.TodoItem
 	if err := json.Unmarshal(rawTodos, &next); err != nil {
-		return "", nil, false
+		return nil, false
 	}
 	previous := []evidence.TodoItem(nil)
 	if ledger, ok := evidence.FromContext(ctx); ok {
@@ -144,49 +132,11 @@ func normalizeRepairedTodoArgs(ctx context.Context, args json.RawMessage) (strin
 	if len(previous) == 0 {
 		previous, _ = evidence.TodoStateFromContext(ctx)
 	}
-	canonical, deferred, repaired := evidence.RepairSerialTodoUpdateWithDeferred(previous, next)
+	_, deferred, repaired := evidence.RepairSerialTodoUpdateWithDeferred(previous, next)
 	if !repaired {
-		return "", nil, false
+		return nil, false
 	}
-	normalized, ok := marshalTodoArgs(fields, canonical)
-	if !ok {
-		return "", nil, false
-	}
-	return normalized, deferred, true
-}
-
-func canonicalTodoArgs(args json.RawMessage, todos []evidence.TodoItem) (string, bool) {
-	var fields map[string]json.RawMessage
-	if err := json.Unmarshal(args, &fields); err != nil {
-		return "", false
-	}
-	rawTodos, ok := fields["todos"]
-	if !ok {
-		return "", false
-	}
-	var current []evidence.TodoItem
-	if err := json.Unmarshal(rawTodos, &current); err != nil {
-		return "", false
-	}
-	current = evidence.ReceiptFromToolCall("todo_write", args, true, true).Todos
-	if slices.Equal(current, todos) {
-		return string(args), false
-	}
-	normalized, ok := marshalTodoArgs(fields, todos)
-	return normalized, ok
-}
-
-func marshalTodoArgs(fields map[string]json.RawMessage, todos []evidence.TodoItem) (string, bool) {
-	canonicalTodos, err := json.Marshal(todos)
-	if err != nil {
-		return "", false
-	}
-	fields["todos"] = canonicalTodos
-	normalized, err := json.Marshal(fields)
-	if err != nil {
-		return "", false
-	}
-	return string(normalized), true
+	return deferred, true
 }
 
 func appendDeferredRecordedFeedback(result string, ids []string, todos []evidence.TodoItem) string {

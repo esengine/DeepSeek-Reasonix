@@ -43,14 +43,6 @@ func deferredTodoIDsLocked(state map[string]deferredTodoCompletion) []string {
 	return ids
 }
 
-func deferredTodoStateLocked(state map[string]deferredTodoCompletion) *provider.DeferredTodoCompletionState {
-	items := make([]provider.DeferredTodoCompletion, 0, len(state))
-	for _, id := range deferredTodoIDsLocked(state) {
-		items = append(items, provider.DeferredTodoCompletion{ID: id, Level: state[id].level})
-	}
-	return &provider.DeferredTodoCompletionState{Items: items}
-}
-
 func cloneDeferredTodoState(state *provider.DeferredTodoCompletionState) *provider.DeferredTodoCompletionState {
 	if state == nil {
 		return nil
@@ -58,7 +50,47 @@ func cloneDeferredTodoState(state *provider.DeferredTodoCompletionState) *provid
 	return &provider.DeferredTodoCompletionState{Items: append([]provider.DeferredTodoCompletion(nil), state.Items...)}
 }
 
-func (a *Agent) deferredTodoStateSnapshot(force bool) *provider.DeferredTodoCompletionState {
+func hostTodoStateLocked(todos []evidence.TodoItem, deferred map[string]deferredTodoCompletion) *provider.HostTodoState {
+	hostTodos := make([]provider.HostTodoItem, len(todos))
+	for i, todo := range todos {
+		hostTodos[i] = provider.HostTodoItem{
+			Content:    todo.Content,
+			Status:     todo.Status,
+			ActiveForm: todo.ActiveForm,
+			Level:      todo.Level,
+			StepID:     todo.StepID,
+		}
+	}
+	hostDeferred := make([]provider.DeferredTodoCompletion, 0, len(deferred))
+	for _, id := range deferredTodoIDsLocked(deferred) {
+		hostDeferred = append(hostDeferred, provider.DeferredTodoCompletion{ID: id, Level: deferred[id].level})
+	}
+	return &provider.HostTodoState{Todos: hostTodos, Deferred: hostDeferred}
+}
+
+func cloneHostTodoState(state *provider.HostTodoState) *provider.HostTodoState {
+	if state == nil {
+		return nil
+	}
+	clone := &provider.HostTodoState{
+		Todos:    make([]provider.HostTodoItem, len(state.Todos)),
+		Deferred: make([]provider.DeferredTodoCompletion, len(state.Deferred)),
+	}
+	copy(clone.Todos, state.Todos)
+	copy(clone.Deferred, state.Deferred)
+	return clone
+}
+
+func deferredTodoStateFromHost(state *provider.HostTodoState) *provider.DeferredTodoCompletionState {
+	if state == nil {
+		return nil
+	}
+	items := make([]provider.DeferredTodoCompletion, len(state.Deferred))
+	copy(items, state.Deferred)
+	return &provider.DeferredTodoCompletionState{Items: items}
+}
+
+func (a *Agent) hostTodoStateSnapshot(force bool) *provider.HostTodoState {
 	if a == nil {
 		return nil
 	}
@@ -67,7 +99,7 @@ func (a *Agent) deferredTodoStateSnapshot(force bool) *provider.DeferredTodoComp
 	if !force && len(a.sess.todoState) == 0 && len(a.sess.deferredTodoCompletions) == 0 {
 		return nil
 	}
-	return deferredTodoStateLocked(a.sess.deferredTodoCompletions)
+	return hostTodoStateLocked(a.sess.todoState, a.sess.deferredTodoCompletions)
 }
 
 func todoIdentityIndex(todos []evidence.TodoItem) (map[string]int, map[string]bool) {
@@ -120,7 +152,52 @@ func replaceCanonicalTodoState(a *Agent, todos []evidence.TodoItem) {
 	a.sess.todoMu.Unlock()
 }
 
-func (a *Agent) restoreTodoState(todos []evidence.TodoItem, persisted *provider.DeferredTodoCompletionState) {
+func hostTodoItemsToEvidence(items []provider.HostTodoItem) []evidence.TodoItem {
+	todos := make([]evidence.TodoItem, len(items))
+	for i, item := range items {
+		todos[i] = evidence.TodoItem{
+			Content:    item.Content,
+			Status:     item.Status,
+			ActiveForm: item.ActiveForm,
+			Level:      item.Level,
+			StepID:     item.StepID,
+		}
+	}
+	return todos
+}
+
+func (a *Agent) restoreTodoState(state *provider.HostTodoState) {
+	if a == nil {
+		return
+	}
+	a.sess.todoMu.Lock()
+	if state == nil {
+		a.sess.todoState = nil
+	} else {
+		// A host snapshot is already canonical. Keep it byte-for-byte equivalent
+		// to the in-memory state; recovery must not replay old tool calls or run a
+		// second normalization/consumption transition.
+		a.sess.todoState = hostTodoItemsToEvidence(state.Todos)
+	}
+	a.sess.deferredTodoCompletions = nil
+	if state != nil {
+		for _, item := range state.Deferred {
+			if strings.TrimSpace(item.ID) == "" {
+				continue
+			}
+			if a.sess.deferredTodoCompletions == nil {
+				a.sess.deferredTodoCompletions = make(map[string]deferredTodoCompletion)
+			}
+			if _, exists := a.sess.deferredTodoCompletions[item.ID]; !exists {
+				a.sess.deferredTodoCompletions[item.ID] = deferredTodoCompletion{level: item.Level}
+			}
+		}
+	}
+	a.pruneDeferredTodoCompletionsLocked()
+	a.sess.todoMu.Unlock()
+}
+
+func (a *Agent) restoreLegacyTodoState(todos []evidence.TodoItem, persisted *provider.DeferredTodoCompletionState) {
 	if a == nil {
 		return
 	}
