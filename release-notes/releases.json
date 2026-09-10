@@ -3,19 +3,20 @@
   "releases": [
     {
       "version": "1.38.6",
-      "date": "2026-09-10",
+      "date": "2026-09-11",
       "channel": "stable",
       "targetingVersion": 1,
       "title": {
-        "en": "Desktop startup identity fix",
-        "zh": "桌面启动身份修复"
+        "en": "Restore Desktop startup",
+        "zh": "修复桌面端无法启动"
       },
       "summary": {
         "en": "Fixes a build mismatch that prevented official Desktop packages from starting.",
         "zh": "修复了导致官方桌面安装包无法启动的构建不匹配问题。"
       },
       "surfaces": [
-        "desktop"
+        "desktop",
+        "cli"
       ],
       "guides": [],
       "highlights": [
@@ -29,8 +30,8 @@
             "zh": "官方桌面安装包可正常启动"
           },
           "body": {
-            "en": "The packaged app now reads its version, channel, and commit from build.json, preventing the build_mismatch error that stopped v1.38.5 packages from launching.",
-            "zh": "打包后的应用现在从 build.json 读取版本、渠道和提交信息，避免了导致 v1.38.5 安装包无法启动的 build_mismatch 错误。"
+            "en": "Fixes the build_mismatch error that prevented v1.38.5 from opening after a fresh install or upgrade. The desktop shell and bundled service now use the same release identity.",
+            "zh": "修复 v1.38.5 在全新安装或升级后出现 build_mismatch、无法打开的问题。桌面壳与内置服务现在使用一致的发布版本信息。"
           },
           "refs": [
             10089
@@ -46,12 +47,12 @@
               "desktop"
             ],
             "title": {
-              "en": "Packaged startup identity restored",
-              "zh": "恢复打包启动身份"
+              "en": "Verify production startup before publication",
+              "zh": "发布前验证正式包启动"
             },
             "body": {
-              "en": "The shell now reads packaged version, channel, and commit from build.json and fails closed on missing or invalid metadata, while preserving unpackaged development behavior.",
-              "zh": "外壳现在从 build.json 读取打包版本、渠道和提交信息，并在元数据缺失或无效时安全失败，同时保留未打包的开发行为。"
+              "en": "Windows, macOS, and Linux release checks now launch the packaged app in production mode and require a successful service handshake, a renderer-to-service call, and clean shutdown. Missing or invalid build metadata remains an error.",
+              "zh": "Windows、macOS 和 Linux 发布检查现在以正式模式启动打包应用，要求服务握手、界面到服务的实际调用及正常退出全部成功。构建信息缺失或无效时仍会报错。"
             },
             "refs": [
               10089
@@ -59,8 +60,35 @@
           }
         ]
       },
-      "upgrade": [],
-      "risks": [],
+      "upgrade": [
+        {
+          "level": "warning",
+          "targets": ["desktop"],
+          "title": {
+            "en": "Install the full package to recover startup",
+            "zh": "安装完整包恢复启动"
+          },
+          "body": {
+            "en": "If v1.38.5 cannot open, download and install the v1.38.6 full package. Do not clear your configuration or session data. Users moving from v1.38.3 or an older Wails release must also install the full package manually for the first Electron upgrade; the old updater cannot install the new layout.",
+            "zh": "如果 v1.38.5 无法打开，请下载并安装 v1.38.6 完整包，无需清理配置或会话数据。从 v1.38.3 或更早 Wails 版本首次升级到 Electron 时，也需要手动安装完整包；旧版更新器无法安装新的目录结构。"
+          },
+          "refs": [10089]
+        }
+      ],
+      "risks": [
+        {
+          "targets": ["desktop", "cli"],
+          "title": {
+            "en": "OpenCode Go Responses search limitation remains",
+            "zh": "OpenCode Go Responses 搜索限制仍然存在"
+          },
+          "body": {
+            "en": "This startup hotfix does not change the previously reported OpenCode Go Responses native-search limitation. Use the Anthropic search route verified for v1.38.5 when web search is needed.",
+            "zh": "本次启动修复未改变此前已报告的 OpenCode Go Responses 原生搜索限制。需要联网搜索时，请使用 v1.38.5 已验证的 Anthropic 搜索路径。"
+          },
+          "refs": [10015, 10081]
+        }
+      ],
       "contributors": [
         "SivanCola"
       ],
