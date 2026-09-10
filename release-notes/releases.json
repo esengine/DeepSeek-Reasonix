@@ -2,6 +2,117 @@
   "schemaVersion": 1,
   "releases": [
     {
+      "version": "1.38.5",
+      "date": "2026-09-10",
+      "channel": "stable",
+      "targetingVersion": 1,
+      "title": {
+        "en": "Reasonix Desktop 1.38.5",
+        "zh": "Reasonix 桌面版 1.38.5"
+      },
+      "summary": {
+        "en": "Fixes macOS app signing and notarization for the Desktop release.",
+        "zh": "修复桌面版 macOS 应用签名与公证问题。"
+      },
+      "surfaces": [
+        "desktop"
+      ],
+      "guides": [],
+      "highlights": [
+        {
+          "kind": "fixed",
+          "targets": [
+            "desktop"
+          ],
+          "title": {
+            "en": "macOS app now signs all nested binaries correctly",
+            "zh": "macOS 应用现在正确签名所有嵌套二进制文件"
+          },
+          "body": {
+            "en": "The Electron app bundle now signs all nested executables and libraries, including Go sidecars and framework dylibs, before sealing the outer bundle. This fixes Apple notarization rejections.",
+            "zh": "Electron 应用包现在会在封装外层包之前签名所有嵌套可执行文件和库，包括 Go 辅助程序和框架动态库。这修复了 Apple 公证被拒的问题。"
+          },
+          "refs": [
+            10072
+          ]
+        },
+        {
+          "kind": "fixed",
+          "targets": [
+            "desktop"
+          ],
+          "title": {
+            "en": "macOS signing order corrected for notarization",
+            "zh": "修正 macOS 签名顺序以通过公证"
+          },
+          "body": {
+            "en": "The main executable is now signed last, after all other code objects, preventing an unsigned adjacent service from invalidating the bundle signature.",
+            "zh": "主可执行文件现在最后签名，在所有其他代码对象之后，防止未签名的相邻服务使包签名失效。"
+          },
+          "refs": [
+            10078
+          ]
+        }
+      ],
+      "changes": {
+        "new": [],
+        "improved": [],
+        "fixed": [
+          {
+            "targets": [
+              "desktop"
+            ],
+            "title": {
+              "en": "Complete macOS bundle signing",
+              "zh": "完整的 macOS 包签名"
+            },
+            "body": {
+              "en": "Signs all nested binaries and libraries in the Electron app bundle, including Go sidecars and framework dylibs, with Developer ID and hardened runtime.",
+              "zh": "使用 Developer ID 和强化运行时签名 Electron 应用包中的所有嵌套二进制文件和库，包括 Go 辅助程序和框架动态库。"
+            },
+            "refs": [
+              10072
+            ]
+          },
+          {
+            "targets": [
+              "desktop"
+            ],
+            "title": {
+              "en": "Correct signing order for macOS app",
+              "zh": "macOS 应用的正确签名顺序"
+            },
+            "body": {
+              "en": "Defers signing of the main executable until after all other code objects are signed, ensuring the adjacent Go service is signed before the bundle is sealed.",
+              "zh": "将主可执行文件的签名推迟到所有其他代码对象签名之后，确保相邻的 Go 服务在包封装之前已签名。"
+            },
+            "refs": [
+              10078
+            ]
+          }
+        ]
+      },
+      "upgrade": [],
+      "risks": [],
+      "contributors": [
+        "SivanCola"
+      ],
+      "links": {
+        "github": "https://github.com/esengine/DeepSeek-Reasonix/releases/tag/desktop-v1.38.5",
+        "compare": "https://github.com/esengine/DeepSeek-Reasonix/compare/desktop-v1.38.4...desktop-v1.38.5",
+        "download": "https://reasonix.io/?download=desktop&channel=stable#start"
+      },
+      "releaseId": "1.38.5",
+      "baseVersion": "1.38.5",
+      "status": "reviewed",
+      "previousRelease": "1.38.4",
+      "builds": {
+        "cli": "v1.38.5",
+        "desktop": "v1.38.5",
+        "npm": "1.38.5"
+      }
+    },
+    {
       "version": "1.38.4",
       "date": "2026-09-10",
       "channel": "stable",
