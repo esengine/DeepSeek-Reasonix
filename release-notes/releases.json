@@ -2,6 +2,84 @@
   "schemaVersion": 1,
   "releases": [
     {
+      "version": "1.38.6",
+      "date": "2026-09-10",
+      "channel": "stable",
+      "targetingVersion": 1,
+      "title": {
+        "en": "Desktop startup identity fix",
+        "zh": "桌面启动身份修复"
+      },
+      "summary": {
+        "en": "Fixes a build mismatch that prevented official Desktop packages from starting.",
+        "zh": "修复了导致官方桌面安装包无法启动的构建不匹配问题。"
+      },
+      "surfaces": [
+        "desktop"
+      ],
+      "guides": [],
+      "highlights": [
+        {
+          "kind": "fixed",
+          "targets": [
+            "desktop"
+          ],
+          "title": {
+            "en": "Official Desktop packages start correctly",
+            "zh": "官方桌面安装包可正常启动"
+          },
+          "body": {
+            "en": "The packaged app now reads its version, channel, and commit from build.json, preventing the build_mismatch error that stopped v1.38.5 packages from launching.",
+            "zh": "打包后的应用现在从 build.json 读取版本、渠道和提交信息，避免了导致 v1.38.5 安装包无法启动的 build_mismatch 错误。"
+          },
+          "refs": [
+            10089
+          ]
+        }
+      ],
+      "changes": {
+        "new": [],
+        "improved": [],
+        "fixed": [
+          {
+            "targets": [
+              "desktop"
+            ],
+            "title": {
+              "en": "Packaged startup identity restored",
+              "zh": "恢复打包启动身份"
+            },
+            "body": {
+              "en": "The shell now reads packaged version, channel, and commit from build.json and fails closed on missing or invalid metadata, while preserving unpackaged development behavior.",
+              "zh": "外壳现在从 build.json 读取打包版本、渠道和提交信息，并在元数据缺失或无效时安全失败，同时保留未打包的开发行为。"
+            },
+            "refs": [
+              10089
+            ]
+          }
+        ]
+      },
+      "upgrade": [],
+      "risks": [],
+      "contributors": [
+        "SivanCola"
+      ],
+      "links": {
+        "github": "https://github.com/esengine/DeepSeek-Reasonix/releases/tag/desktop-v1.38.6",
+        "compare": "https://github.com/esengine/DeepSeek-Reasonix/compare/desktop-v1.38.5...desktop-v1.38.6",
+        "download": "https://reasonix.io/?download=desktop&channel=stable#start"
+      },
+      "releaseId": "1.38.6",
+      "baseVersion": "1.38.6",
+      "status": "reviewed",
+      "previousRelease": "1.38.5",
+      "builds": {
+        "cli": "v1.38.6",
+        "desktop": "v1.38.6",
+        "npm": "1.38.6"
+      }
+    },
+    {
       "version": "1.38.5",
       "date": "2026-09-11",
       "channel": "stable",
@@ -346,7 +424,10 @@
         ],
         "fixed": [
           {
-            "targets": ["desktop", "cli"],
+            "targets": [
+              "desktop",
+              "cli"
+            ],
             "title": {
               "en": "Windows extension shutdown stability",
               "zh": "Windows 扩展关闭稳定性"
@@ -355,7 +436,9 @@
               "en": "Forced extension shutdown and normal process cleanup now release the Windows process-tracking handle exactly once, preventing later cleanup from closing an unrelated reused handle.",
               "zh": "强制关闭扩展与正常进程回收现在只释放一次 Windows 进程跟踪句柄，避免后续清理误关已被其他对象复用的句柄。"
             },
-            "refs": [10082]
+            "refs": [
+              10082
+            ]
           },
           {
             "targets": [
