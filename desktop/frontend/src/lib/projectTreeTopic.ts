@@ -4,7 +4,7 @@ import type { ProjectNode, ProjectTopicStatus } from "./types";
 
 export type ProjectTreeVariant = "classic" | "workbench" | "creation";
 export type WorkbenchOrganizeMode = "project" | "recent" | "time";
-export type WorkbenchSortMode = "created" | "updated";
+export type WorkbenchSortMode = "created" | "updated" | "color";
 
 export const WORKBENCH_ORGANIZE_KEY = "projectTree:workbenchOrganize";
 // Shared by classic and workbench; key string kept for existing saved choices.
@@ -24,6 +24,7 @@ export function loadWorkbenchSortMode(): WorkbenchSortMode {
   try {
     const value = localStorage.getItem(WORKBENCH_SORT_KEY);
     if (value === "created") return "created";
+    if (value === "color") return "color";
   } catch {
     /* localStorage unavailable */
   }
