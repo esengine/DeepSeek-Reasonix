@@ -24,14 +24,19 @@ func (a *Agent) finalizeObservedToolReceipts(plan *toolCallPlan, result string, 
 // emitTodoResultPreview flips the todo_write card to done the moment the call
 // executes without publishing a second terminal result. Batch ToolResult
 // events still wait for the whole provider batch and remain the only terminal
-// events observed by append-only sinks.
-func (a *Agent) emitTodoResultPreview(call provider.ToolCall, output string) {
+// events observed by append-only sinks. The event gets the host-normalized
+// arguments, while the provider call remains byte-for-byte unchanged.
+func (a *Agent) emitTodoResultPreview(call provider.ToolCall, output string, hostState *provider.HostTodoState) {
 	if a == nil || a.svc.sink == nil {
 		return
 	}
+	args := call.Arguments
+	if canonical, ok := hostTodoArgs(hostState); ok {
+		args = canonical
+	}
 	a.svc.sink.Emit(event.Event{
 		Kind: event.ToolResultPreview,
-		Tool: event.Tool{ID: call.ID, Name: call.Name, Args: call.Arguments, ReadOnly: true, Output: output},
+		Tool: event.Tool{ID: call.ID, Name: call.Name, Args: args, ReadOnly: true, Output: output},
 	})
 }
 
@@ -104,7 +109,7 @@ func (a *Agent) recordToolReceipts(plan *toolCallPlan, result string, execution 
 		a.task.ledger.Record(rec)
 		a.commitToolReceipt(rec)
 		if err == nil && call.Name == "todo_write" {
-			a.emitTodoResultPreview(call, result)
+			a.emitTodoResultPreview(call, result, plan.hostTodoState)
 		}
 	}
 	return result

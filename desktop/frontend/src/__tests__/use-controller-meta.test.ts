@@ -495,6 +495,25 @@ eq(sameMeta(meta({ collaborationMode: "normal" }), meta({ collaborationMode: "pl
     1,
     "provider-ordered terminal result upserts the preview instead of duplicating the card",
   );
+  liveState = reducer(liveState, {
+    type: "event",
+    e: { kind: "tool_dispatch", tool: { id: "host-advance-1-1", name: "todo_write", args: canonicalLiveArgs, readOnly: true } },
+  });
+  liveState = reducer(liveState, {
+    type: "event",
+    e: { kind: "tool_result", tool: { id: "host-advance-1-1", name: "todo_write", args: JSON.stringify({ todos: [
+      { content: "Inspect the report", status: "completed" },
+      { content: "Ship the fix", status: "completed" },
+    ] }), readOnly: true, output: "task list advanced by complete_step" } },
+  });
+  const advancedTodo = liveState.items.find(
+    (item): item is Extract<Item, { kind: "tool" }> => item.kind === "tool" && item.id === "host-advance-1-1",
+  );
+  eq(
+    advancedTodo?.kind === "tool" && parseTodos(advancedTodo.args)[1]?.status,
+    "completed",
+    "host complete_step advance updates the Todo panel to the next canonical state",
+  );
 }
 
 {

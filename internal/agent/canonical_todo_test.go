@@ -194,6 +194,54 @@ func TestRebuildTodoStateHonorsEmptyTodoWriteClear(t *testing.T) {
 	}
 }
 
+func TestRebuildTodoStateIgnoresAppendedStaleHostSnapshot(t *testing.T) {
+	bKey, ok := evidence.TodoIdentityKey(evidence.TodoItem{Content: "B"})
+	if !ok {
+		t.Fatal("missing legacy identity key for B")
+	}
+	newState := &provider.HostTodoState{
+		Todos: []provider.HostTodoItem{
+			{Content: "A", Status: "in_progress"},
+			{Content: "B", Status: "pending"},
+		},
+		Deferred: []provider.DeferredTodoCompletion{{ID: bKey, Level: 0}},
+	}
+	oldState := &provider.HostTodoState{
+		Todos: []provider.HostTodoItem{{Content: "A", Status: "in_progress"}},
+	}
+	msgs := []provider.Message{
+		{Role: provider.RoleAssistant, ToolCalls: []provider.ToolCall{{
+			ID: "new-1", Name: "todo_write",
+			Arguments: `{"todos":[{"content":"A","status":"in_progress"},{"content":"B","status":"completed"}]}`,
+		}}},
+		{Role: provider.RoleTool, ToolCallID: "new-1", Name: "todo_write", Content: "Todos updated", HostTodoState: newState},
+		// This is a late duplicate from an older session view. It is not allowed
+		// to replace the first valid result for the same assistant call.
+		{Role: provider.RoleTool, ToolCallID: "new-1", Name: "todo_write", Content: "Todos updated", HostTodoState: oldState},
+	}
+	a := &Agent{}
+	a.rebuildTodoState(msgs)
+	if got := a.CanonicalTodoState(); len(got) != 2 || got[1].Status != "pending" {
+		t.Fatalf("appended stale host snapshot regressed canonical state: %+v", got)
+	}
+	if got := a.DeferredTodoCompletions(); len(got) != 1 || got[0] != bKey {
+		t.Fatalf("appended stale host snapshot changed deferred completion: %v", got)
+	}
+
+	// A later restored copy is still a valid latest Todo transition and remains
+	// authoritative after the stale append.
+	msgs = append(msgs,
+		provider.Message{Role: provider.RoleAssistant, ToolCalls: []provider.ToolCall{{
+			ID: "new-2", Name: "todo_write", Arguments: `{"todos":[{"content":"A","status":"in_progress"},{"content":"B","status":"completed"}]}`,
+		}}},
+		provider.Message{Role: provider.RoleTool, ToolCallID: "new-2", Name: "todo_write", Content: "Todos updated", HostTodoState: newState},
+	)
+	a.rebuildTodoState(msgs)
+	if got := a.CanonicalTodoState(); len(got) != 2 || got[1].Status != "pending" {
+		t.Fatalf("restored host snapshot did not remain authoritative: %+v", got)
+	}
+}
+
 func TestSeedTodoState(t *testing.T) {
 	a := &Agent{svc: agentServices{sink: event.Discard}}
 	todos := []evidence.TodoItem{

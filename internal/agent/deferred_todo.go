@@ -1,6 +1,7 @@
 package agent
 
 import (
+	"encoding/json"
 	"sort"
 	"strings"
 
@@ -79,6 +80,23 @@ func cloneHostTodoState(state *provider.HostTodoState) *provider.HostTodoState {
 	copy(clone.Todos, state.Todos)
 	copy(clone.Deferred, state.Deferred)
 	return clone
+}
+
+// hostTodoArgs returns the canonical Todo payload used by local UI events.
+// HostTodoState is deliberately not copied into the provider transcript; this
+// conversion keeps the event projection authoritative without rewriting the
+// historical assistant ToolCall.Arguments.
+func hostTodoArgs(state *provider.HostTodoState) (string, bool) {
+	if state == nil {
+		return "", false
+	}
+	payload, err := json.Marshal(struct {
+		Todos []provider.HostTodoItem `json:"todos"`
+	}{Todos: state.Todos})
+	if err != nil {
+		return "", false
+	}
+	return string(payload), true
 }
 
 func deferredTodoStateFromHost(state *provider.HostTodoState) *provider.DeferredTodoCompletionState {

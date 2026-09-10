@@ -19,11 +19,18 @@ func (a *Agent) emitBatchToolResult(c provider.ToolCall, o toolOutcome, duration
 	if c.ResolvedReadOnly != nil {
 		readOnly = *c.ResolvedReadOnly
 	}
+	state := outcomeRunState(o)
+	args := c.Arguments
+	if c.Name == "todo_write" && state == provider.ToolRunCompleted {
+		if canonical, ok := hostTodoArgs(o.hostTodoState); ok {
+			args = canonical
+		}
+	}
 	tr := event.Tool{
-		RunState:     outcomeRunState(o),
+		RunState:     state,
 		ID:           c.ID,
 		Name:         c.Name,
-		Args:         c.Arguments,
+		Args:         args,
 		ResolvedName: c.ResolvedName,
 		CapabilityID: c.CapabilityID,
 		Output:       o.output,
