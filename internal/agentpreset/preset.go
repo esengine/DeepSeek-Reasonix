@@ -34,12 +34,6 @@ func Normalize(raw string) (AgentPreset, error) {
 	}
 }
 
-// IsValid reports whether raw is an exact canonical preset label.
-func IsValid(raw string) bool {
-	p, err := Normalize(raw)
-	return err == nil && p != ""
-}
-
 // LegacyTokenMode returns the deprecated dual-write tokenMode value older
 // clients expect next to a persisted preset. It is a wire-compat mapping only.
 func LegacyTokenMode(p AgentPreset) string {

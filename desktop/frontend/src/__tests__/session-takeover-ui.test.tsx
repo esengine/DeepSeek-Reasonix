@@ -6,6 +6,7 @@ import { act } from "react";
 import type { AppBindings } from "../lib/bridge";
 import { activeLeaseBlockedTab } from "../lib/tabMetaRefresh";
 import type { TabMeta } from "../lib/types";
+import { installDesktopHostStub } from "./desktopHostStub";
 
 let passed = 0;
 let failed = 0;
@@ -42,14 +43,14 @@ globalThis.MouseEvent = dom.window.MouseEvent;
 Object.defineProperty(globalThis, "navigator", { configurable: true, value: dom.window.navigator });
 
 let rejectTakeover: ((reason?: unknown) => void) | null = null;
-window.go = { main: { App: {
+installDesktopHostStub(({ main: { App: {
   async QuerySessionTakeover() {
     return { available: true, sessionPath: "/session.jsonl", holder: "serve", remoteAttached: true, running: true, mirrored: false };
   },
   TakeoverSession() {
     return new Promise<void>((_resolve, reject) => { rejectTakeover = reject; });
   },
-} as Partial<AppBindings> as AppBindings } };
+} as Partial<AppBindings> as AppBindings } }).main.App);
 
 const [{ createRoot }, { LocaleProvider }, { RemoteReclaimBanner }, { SessionTakeoverDialog }] = await Promise.all([
   import("react-dom/client"),

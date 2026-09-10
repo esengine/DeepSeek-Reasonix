@@ -6,6 +6,7 @@ import { DiagnosticsSettingsPage } from "../components/DiagnosticsSettingsPage";
 import type { AppBindings } from "../lib/bridge";
 import { LocaleProvider } from "../lib/i18n";
 import type { CapabilityDiagnosticsReport, SettingsTab } from "../lib/types";
+import { installDesktopHostStub } from "./desktopHostStub";
 
 function ok(value: unknown, message: string) {
   if (!value) throw new Error(message);
@@ -126,7 +127,7 @@ console.log("diagnostics settings page");
   // Prefer English labels for stable button text assertions.
   window.localStorage.setItem("reasonix-lang", "en");
 
-  window.go = {
+  const desktopStub = installDesktopHostStub(({
     main: {
       App: {
         CapabilityDiagnostics: async (includeSessionRuntime: boolean) => {
@@ -135,7 +136,7 @@ console.log("diagnostics settings page");
         },
       } as Partial<AppBindings> as AppBindings,
     },
-  };
+  }).main.App);
 
   const rootEl = document.getElementById("root");
   if (!rootEl) throw new Error("missing root");
@@ -216,13 +217,13 @@ console.log("diagnostics settings page");
   nullArrays.plugins = { packages: null };
   nullArrays.mcp = { servers: null };
 
-  window.go = {
+  const desktopStub = installDesktopHostStub(({
     main: {
       App: {
         CapabilityDiagnostics: async () => nullArrays as unknown as CapabilityDiagnosticsReport,
       } as Partial<AppBindings> as AppBindings,
     },
-  };
+  }).main.App);
 
   const rootEl = document.getElementById("root");
   if (!rootEl) throw new Error("missing root");

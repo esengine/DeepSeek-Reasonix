@@ -4,6 +4,7 @@ import { createRoot } from "react-dom/client";
 import { JSDOM } from "jsdom";
 import { syncMainWindowMaximised, useWindowsMaximisedSync } from "../app-runtime/useNativeWindowController";
 import { useWindowChromeStore } from "../store/windowChrome";
+import { installDesktopHostStub } from "./desktopHostStub";
 
 const dom = new JSDOM("<div id='root'></div>", { pretendToBeVisual: true });
 Object.assign(globalThis, { window: dom.window, document: dom.window.document, IS_REACT_ACT_ENVIRONMENT: true });
@@ -19,7 +20,7 @@ function deferred<T>() {
 const bridgeCalls: string[] = [];
 let maximisedValue = false;
 let maximisedGate: ReturnType<typeof deferred<boolean>> | null = null;
-window.go = {
+installDesktopHostStub(({
   main: {
     App: {
       IsMainWindowMaximised: async () => {
@@ -29,7 +30,7 @@ window.go = {
       },
     },
   },
-} as unknown as typeof window.go;
+}).main.App);
 
 function Probe({ enabled }: { enabled: boolean }) {
   useWindowsMaximisedSync(enabled);

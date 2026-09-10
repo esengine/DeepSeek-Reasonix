@@ -412,7 +412,7 @@ func TestHeartbeatExecuteTaskPersistsFreshConversationTopicID(t *testing.T) {
 		}
 	}()
 
-	got := engine.executeTask(seed)
+	got := engine.executeTaskWithLease(seed, nil)
 
 	if got.TopicID == "" {
 		t.Fatal("fresh conversation task should return the newly created topic ID")
@@ -498,7 +498,7 @@ func TestHeartbeatExecuteTaskSkipsPendingPrompt(t *testing.T) {
 		}
 	}()
 
-	got := engine.executeTask(seed)
+	got := engine.executeTaskWithLease(seed, nil)
 
 	if got.LastRunAt != 0 {
 		t.Fatalf("pending prompt should not mark heartbeat run complete, LastRunAt=%d", got.LastRunAt)

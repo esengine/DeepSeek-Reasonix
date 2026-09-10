@@ -12,6 +12,7 @@ import {
   subscribeConfigLoadWarnings,
   useConfigLoadWarnings,
 } from "../lib/useConfigLoadWarnings";
+import { installDesktopHostStub } from "./desktopHostStub";
 
 let passed = 0;
 let failed = 0;
@@ -31,7 +32,7 @@ console.log("\nconfig load warnings");
 equal(
   normalizeConfigLoadWarnings([" warning one ", "", 42, "warning one", "warning two"]),
   ["warning one", "warning two"],
-  "Wails payload normalization keeps unique non-empty strings",
+  "bridge payload normalization keeps unique non-empty strings",
 );
 equal(configLoadWarningsKey(["a", "b"]), '["a","b"]', "warning fingerprints are stable");
 equal(configLoadWarningsKey([]), "", "empty warning lists have no fingerprint");
@@ -40,7 +41,7 @@ equal(normalizeConfigLoadWarningsRevision(Number.MAX_SAFE_INTEGER + 1), 0, "unsa
 equal(
   normalizeConfigLoadWarningsEvent({ warnings: [" current warning ", null, "current warning"], revision: 7 }),
   { warnings: ["current warning"], revision: 7 },
-  "versioned Wails event payloads are normalized",
+  "versioned bridge event payloads are normalized",
 );
 equal(
   normalizeConfigLoadWarningsEvent(["versioned warning"], 8),
@@ -48,39 +49,23 @@ equal(
   "array event payloads accept an additive revision argument",
 );
 
-let runtimeHandler: ((...payload: unknown[]) => void) | undefined;
-let unsubscribed = false;
-const runtimeHandlers = new Set<(...payload: unknown[]) => void>();
 const dom = new JSDOM('<!doctype html><html><body><div id="root"></div></body></html>', { url: "http://localhost/" });
 (globalThis as typeof globalThis & { IS_REACT_ACT_ENVIRONMENT: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
 globalThis.window = dom.window as unknown as Window & typeof globalThis;
 globalThis.document = dom.window.document;
-window.runtime = {
-  EventsOn: (name: string, cb: (...data: unknown[]) => void) => {
-    if (name === "config:load-warnings") {
-      runtimeHandler = cb;
-      runtimeHandlers.add(cb);
-    }
-    return () => {
-      runtimeHandlers.delete(cb);
-      unsubscribed = true;
-    };
-  },
-  BrowserOpenURL: () => {},
-};
-window.go = { main: { App: {} as AppBindings } };
+const desktopStub = installDesktopHostStub(({ main: { App: {} as AppBindings } }).main.App);
 
 function emitWarnings(payload: unknown, revision: number) {
-  runtimeHandlers.forEach((handler) => handler(payload, revision));
+  desktopStub.emit("config:load-warnings", payload, revision);
 }
 
 const received: Array<{ warnings: string[]; revision: number }> = [];
 const stop = subscribeConfigLoadWarnings((snapshot) => received.push(snapshot));
-runtimeHandler?.([" current warning ", null, "current warning"], 7);
-runtimeHandler?.([], 8);
+desktopStub.emit("config:load-warnings", [" current warning ", null, "current warning"], 7);
+desktopStub.emit("config:load-warnings", [], 8);
 equal(received, [{ warnings: ["current warning"], revision: 7 }], "runtime bridge forwards normalized non-empty warnings");
 stop();
-equal(unsubscribed, true, "runtime warning subscription is disposable");
+equal(desktopStub.events.get("config:load-warnings")?.size ?? 0, 0, "runtime warning subscription is disposable");
 
 type WarningHook = ReturnType<typeof useConfigLoadWarnings>;
 let warningHook: WarningHook | undefined;

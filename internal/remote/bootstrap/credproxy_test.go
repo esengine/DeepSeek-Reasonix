@@ -125,7 +125,7 @@ func TestLaunchCommandCredentialInjection(t *testing.T) {
 	paths := StatePaths{Dir: "/d", TokenFile: "/d/t", PortFile: "/d/p", PidFile: "/d/i", LogFile: "/d/l"}
 	cmd := LaunchCommand("/usr/bin/reasonix", "/ws", paths, &CredentialProxyOptions{
 		BaseURL: "http://127.0.0.1:18999", Token: "to'ken $x", Provider: "reasonix-desktop-proxy", Model: "m",
-	})
+	}, nil)
 	for _, want := range []string{
 		`--model 'reasonix-desktop-proxy'`,
 		`nohup '/usr/bin/reasonix' serve`,

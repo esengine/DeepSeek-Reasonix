@@ -40,8 +40,8 @@ price = { cache_hit = 0.0028, input = 0.14, output = 0.28, currency = "$" }
 		t.Fatal(err)
 	}
 	text := string(raw)
-	if !strings.Contains(text, "config_version = 9") {
-		t.Fatalf("missing v9:\n%s", text)
+	if !strings.Contains(text, "config_version = 10") {
+		t.Fatalf("missing v10:\n%s", text)
 	}
 	if !strings.Contains(text, "display_currency") && !strings.Contains(text, `currency = "CNY"`) {
 		t.Fatalf("display currency not migrated:\n%s", text)

@@ -25,9 +25,6 @@ func (a *App) shutdownBody() {
 	if a.topicState != nil {
 		defer a.topicState.close()
 	}
-	if a.desktopShell.linuxRecovery != nil {
-		a.desktopShell.linuxRecovery.stop()
-	}
 	if a.desktopShell.coordinator != nil {
 		a.desktopShell.coordinator.stop()
 	}
@@ -52,7 +49,6 @@ func (a *App) shutdownBody() {
 	// remote tabs instead of waiting out the stale-mirror timeout.
 	a.stopTakeoverMirrors()
 	a.stopHistoryIndexMigration()
-	a.stopMainThreadWatchdog()
 	if a.heartbeat != nil {
 		a.heartbeat.Stop()
 	}
@@ -61,7 +57,7 @@ func (a *App) shutdownBody() {
 	a.stopTray()
 	// Terminal process shutdown is independent from controller teardown. Do it
 	// before acquiring runtime lifecycle locks so a slow PTY cannot delay while
-	// holding locks used by Wails-bound chat calls.
+	// holding locks used by bridge-bound chat calls.
 	if a.terminals != nil {
 		a.terminals.closeAll()
 	}
@@ -111,7 +107,7 @@ func (a *App) shutdownBody() {
 	// their remote tabs.
 	a.endTakeoverMirrors()
 	if a.startupReady.Load() {
-		// A stable React + Wails heartbeat is sufficient health evidence even if
+		// A stable React + bridge heartbeat is sufficient health evidence even if
 		// the user closes before the delayed commit task runs.
 		if err := a.commitPendingUpdateHealth(); err != nil {
 			slog.Warn("desktop: commit healthy update during shutdown", "err", err)

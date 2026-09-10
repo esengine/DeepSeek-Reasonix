@@ -8,6 +8,7 @@
 // are covered by local-path-click-e2e.test.tsx.
 
 import { JSDOM } from "jsdom";
+import { installDesktopHostStub } from "./desktopHostStub";
 
 const dom = new JSDOM("<!doctype html><html><body></body></html>", { url: "https://reasonix.local/" });
 const { window } = dom;
@@ -27,17 +28,11 @@ const { window } = dom;
 const browsed: string[] = [];
 const clipboardWrites: string[] = [];
 let clipboardSucceeds = true;
-(window as unknown as Record<string, unknown>).go = { main: { App: {} } };
-(window as unknown as Record<string, unknown>).runtime = {
-  BrowserOpenURL: (url: string) => {
-    browsed.push(url);
-  },
-  ClipboardSetText: async (value: string) => {
-    if (!clipboardSucceeds) return false;
-    clipboardWrites.push(value);
-    return true;
-  },
-};
+installDesktopHostStub(({ main: { App: {} } }).main.App, {
+  externalOpens: browsed,
+  clipboardWrites,
+  clipboardWriteResult: () => clipboardSucceeds,
+});
 
 let passed = 0;
 let failed = 0;

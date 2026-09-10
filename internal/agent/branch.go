@@ -37,6 +37,7 @@ type BranchMeta struct {
 	TopicTitle       string    `json:"topic_title,omitempty"`
 	CustomTitle      string    `json:"custom_title,omitempty"`
 	Model            string    `json:"model,omitempty"`
+	ModelIdentity    string    `json:"model_identity,omitempty"`
 	// TokenMode and AgentPreset are deprecated dual-write fields derived from
 	// QualityFloor; delivery writes "delivery", standard writes "full"/"".
 	TokenMode   string `json:"token_mode,omitempty"`
@@ -660,20 +661,37 @@ func renameSession(sessionPath string, expectedTitle *string, title string) erro
 // LoadSessionModel reads the canonical provider/model ref saved beside a
 // session transcript.
 func LoadSessionModel(sessionPath string) (string, bool) {
+	model, _, ok := LoadSessionModelSelection(sessionPath)
+	return model, ok
+}
+
+// LoadSessionModelSelection reads model and identity from the same sidecar
+// generation. Missing identity denotes a legacy, unacknowledged selection.
+func LoadSessionModelSelection(sessionPath string) (string, string, bool) {
 	meta, ok, err := LoadBranchMeta(sessionPath)
 	if err != nil || !ok {
-		return "", false
+		return "", "", false
 	}
 	model := strings.TrimSpace(meta.Model)
 	if model == "" {
-		return "", false
+		return "", "", false
 	}
-	return model, true
+	return model, meta.ModelIdentity, true
 }
 
 // SetBranchModelPreserveUpdated stores the canonical provider/model ref without
 // changing the session activity timestamp.
 func SetBranchModelPreserveUpdated(sessionPath, model string) error {
+	return setBranchModelSelection(sessionPath, model, nil)
+}
+
+// SetBranchModelSelectionPreserveUpdated atomically acknowledges the selected
+// connection without changing the session's activity timestamp.
+func SetBranchModelSelectionPreserveUpdated(sessionPath, model, identity string) error {
+	return setBranchModelSelection(sessionPath, model, &identity)
+}
+
+func setBranchModelSelection(sessionPath, model string, identity *string) error {
 	if sessionPath == "" {
 		return fmt.Errorf("empty session path")
 	}
@@ -686,8 +704,19 @@ func SetBranchModelPreserveUpdated(sessionPath, model string) error {
 	if err != nil {
 		return err
 	}
-	meta.Model = strings.TrimSpace(model)
+	setMetaModelSelection(&meta, model, identity)
 	return saveBranchMeta(sessionPath, meta, false)
+}
+
+func setMetaModelSelection(meta *BranchMeta, model string, identity *string) {
+	model = strings.TrimSpace(model)
+	if meta.Model != model {
+		meta.ModelIdentity = ""
+	}
+	meta.Model = model
+	if identity != nil {
+		meta.ModelIdentity = *identity
+	}
 }
 
 // UpdateSessionMeta refreshes the listing-only sidecar fields (model, preview,
@@ -709,7 +738,7 @@ func UpdateSessionMeta(sessionPath, model, preview string, turns int, markActivi
 		return err
 	}
 	if strings.TrimSpace(model) != "" {
-		m.Model = strings.TrimSpace(model)
+		setMetaModelSelection(&m, model, nil)
 	}
 	m.Preview = preview
 	m.Turns = turns

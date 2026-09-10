@@ -15,13 +15,25 @@ type signPathArtifactConfiguration struct {
 }
 
 type signPathZip struct {
-	Files []signPathPEFile `xml:"pe-file"`
+	Files    []signPathPEFile    `xml:"pe-file"`
+	FileSets []signPathPEFileSet `xml:"pe-file-set"`
 }
 
 type signPathPEFile struct {
 	Path   string    `xml:"path,attr"`
 	Sign   *struct{} `xml:"authenticode-sign"`
 	Verify *struct{} `xml:"authenticode-verify"`
+}
+
+type signPathPEFileSet struct {
+	Includes []struct {
+		Path       string `xml:"path,attr"`
+		MinMatches string `xml:"min-matches,attr"`
+	} `xml:"include"`
+	ForEach struct {
+		Sign   *struct{} `xml:"authenticode-sign"`
+		Verify *struct{} `xml:"authenticode-verify"`
+	} `xml:"for-each"`
 }
 
 func readTestFile(t *testing.T, path string) string {
@@ -46,57 +58,12 @@ func parseSignPathConfiguration(t *testing.T, name string) signPathArtifactConfi
 	return config
 }
 
-func TestWindowsWebView2SmokeUsesExternalProductionBinaryContract(t *testing.T) {
-	script := readTestFile(t, "../scripts/test-webview2-native-smoke.ps1")
-	for _, want := range []string{
-		`Resolve-Path $ExecutablePath`,
-		`$env:REASONIX_HOME = $smokeHome`,
-		`$env:REASONIX_STATE_HOME = $smokeState`,
-		`$env:REASONIX_CACHE_HOME = $smokeCache`,
-		`close_behavior = "quit"`,
-		`$Process.MainWindowHandle`,
-		`$_.Name -ieq "msedgewebview2.exe"`,
-		`$_.CommandLine -match "--type=renderer"`,
-		`UIAutomationClient`,
-		`[System.Windows.Automation.ControlType]::Document`,
-		`[System.Windows.Automation.ControlType]::Edit`,
-		`[System.Windows.Automation.AutomationElement]::AutomationIdProperty`,
-		`"composer-input"`,
-		`[System.Windows.Automation.AndCondition]::new`,
-		`[System.Windows.Automation.Condition[]]@($composerTypeCondition, $composerIdCondition)`,
-		`$root.FindFirst([System.Windows.Automation.TreeScope]::Descendants, $composerCondition)`,
-		`Update-NativeSmokeStability`,
-		`a transient renderer handoff must reset without failing`,
-		`$HealthySeconds consecutive seconds`,
-		`$process.CloseMainWindow()`,
-		`$process.WaitForExit(10000)`,
-		`taskkill.exe /PID $process.Id /T /F`,
-		`[IO.Directory]::Delete($deletePath, $true)`,
-		`cleanup must remove a tree beyond MAX_PATH`,
-	} {
-		if !strings.Contains(script, want) {
-			t.Errorf("Windows WebView2 smoke is missing production-binary contract %q", want)
-		}
-	}
-	for _, forbidden := range []string{
-		"REASONIX_WEBVIEW2_APPROVAL_SMOKE",
-		"mock-tool-approval",
-		"Element.prototype.animate",
-		"WebView2ApprovalSmokeBridge",
-		"Reasonix lost its main window or WebView2 renderer during the health window",
-	} {
-		if strings.Contains(script, forbidden) {
-			t.Errorf("Windows WebView2 smoke still contains production instrumentation %q", forbidden)
-		}
-	}
-}
-
 func TestWindowsReleaseSignsPayloadBeforeRepackaging(t *testing.T) {
 	workflow := readTestFile(t, "../.github/workflows/release-desktop.yml")
 	orderedSteps := []string{
 		"name: Build and package",
 		"name: Checkout protected release verifier",
-		"name: Smoke-test Wails/WebView2 native startup",
+		"name: Smoke-test packaged Electron startup",
 		"name: Upload unsigned Windows payload for SignPath",
 		"name: Submit Windows payload for Authenticode signing",
 		"name: Approve and download signed Windows payload",
@@ -123,8 +90,8 @@ func TestWindowsReleaseSignsPayloadBeforeRepackaging(t *testing.T) {
 	for _, want := range []string{
 		`artifact-configuration-slug: windows-payload`,
 		`artifact-configuration-slug: windows-installer-v2`,
-		`path: desktop/build/windows/signing-payload/*.exe`,
-		`path: desktop/build/windows/installer-signing-bundle/*.exe`,
+		`path: desktop/build/windows/signing-payload`,
+		`path: desktop/build/windows/installer-signing-bundle`,
 		`github.repository == 'esengine/DeepSeek-Reasonix'`,
 		`SIGNPATH_API_TOKEN is required for public Windows Preview and Stable releases`,
 		`SIGNPATH_RELEASE_SIGNING_ATTESTATION does not match the current protected signing contract`,
@@ -143,7 +110,7 @@ func TestWindowsReleaseSignsPayloadBeforeRepackaging(t *testing.T) {
 		`REASONIX_REQUIRE_PAYLOAD_MANIFEST: "1"`,
 		`ref: ${{ github.workflow_sha }}`,
 		`path: release-control`,
-		`./release-control/scripts/test-webview2-native-smoke.ps1`,
+		`node desktop/packaging/smoke.mjs`,
 		`./release-control/scripts/verify-windows-authenticode.ps1`,
 	} {
 		if !strings.Contains(workflow, want) {
@@ -151,8 +118,11 @@ func TestWindowsReleaseSignsPayloadBeforeRepackaging(t *testing.T) {
 		}
 	}
 	ciWorkflow := readTestFile(t, "../.github/workflows/ci.yml")
-	if !strings.Contains(ciWorkflow, `../scripts/test-webview2-native-smoke.ps1 -SelfTest`) {
-		t.Error("Windows CI must run the deterministic native smoke state-machine self-test")
+	if !strings.Contains(ciWorkflow, `node packaging/smoke.mjs build/electron/windows-amd64/app`) {
+		t.Error("Windows CI must smoke the packaged Electron shell startup")
+	}
+	if strings.Contains(ciWorkflow, "webview2") || strings.Contains(ciWorkflow, "WebView2") {
+		t.Error("Windows CI must not reference the retired WebView2 smoke harness")
 	}
 	for _, forbidden := range []string{
 		`signing-policy-slug: test-signing`,
@@ -165,7 +135,7 @@ func TestWindowsReleaseSignsPayloadBeforeRepackaging(t *testing.T) {
 	}
 
 	packager := readTestFile(t, "../scripts/package-windows-desktop.sh")
-	copyMain := strings.Index(packager, `cp "$PAYLOAD/$BINNAME.exe" "$BIN_DIR/$BINNAME.exe"`)
+	copyMain := strings.Index(packager, `cp "$PAYLOAD/$BINNAME.exe" "$INSTALLER_DIR/$BINNAME.exe"`)
 	makeNSIS := strings.Index(packager, "makensis \\\n")
 	portable := strings.Index(packager, `cp "$PAYLOAD/$BINNAME.exe" "$portable_staging/versions/$version_label/$BINNAME.exe"`)
 	bundle := strings.Index(packager, `installer_bundle="$DESKTOP/build/windows/installer-signing-bundle"`)
@@ -176,17 +146,21 @@ func TestWindowsReleaseSignsPayloadBeforeRepackaging(t *testing.T) {
 		t.Fatalf("Windows package order must be payload copy -> NSIS -> portable -> signing bundle (copy=%d nsis=%d portable=%d bundle=%d)", copyMain, makeNSIS, portable, bundle)
 	}
 	for _, want := range []string{
+		`node "$DESKTOP/packaging/signing-files.mjs" "$PAYLOAD" --check`,
 		`cp "$PAYLOAD/$GUARDNAME.exe" "$INSTALLER_DIR/$GUARDNAME.exe"`,
 		`cp "$PAYLOAD/$LAUNCHERNAME.exe" "$INSTALLER_DIR/$LAUNCHERNAME.exe"`,
 		`cp "$PAYLOAD/$UPDATE_HELPER" "$INSTALLER_DIR/$UPDATE_HELPER"`,
 		`cp "$PAYLOAD/$WINDOWS_CLINAME.exe" "$INSTALLER_DIR/$WINDOWS_CLINAME.exe"`,
+		`cp -R "$PAYLOAD/app" "$INSTALLER_DIR/app"`,
 		`rm -f -- "$INSTALLER_DIR/$PAYLOAD_MANIFEST" "$INSTALLER_DIR/$PAYLOAD_SIGNATURE"`,
 		`cp "$PAYLOAD/$PAYLOAD_MANIFEST" "$INSTALLER_DIR/$PAYLOAD_MANIFEST"`,
 		`cp "$PAYLOAD/$PAYLOAD_SIGNATURE" "$INSTALLER_DIR/$PAYLOAD_SIGNATURE"`,
 		`REASONIX_REQUIRE_PAYLOAD_MANIFEST`,
 		`"-DARG_REASONIX_SIGNED_UNINSTALLER=${uninstaller_path}"`,
 		`cp "$PAYLOAD/$LAUNCHERNAME.exe" "$portable_staging/$APPNAME.exe"`,
+		`cp -R "$PAYLOAD/app" "$portable_staging/versions/$version_label/app"`,
 		`"$ROOT/scripts/verify-windows-portable.sh" "$portable_staging"`,
+		`cp -R "$PAYLOAD/app" "$installer_bundle/app"`,
 	} {
 		if !strings.Contains(packager, want) {
 			t.Errorf("Windows packager is missing payload contract %q", want)
@@ -202,8 +176,8 @@ func TestWindowsReleaseSignsPayloadBeforeRepackaging(t *testing.T) {
 		`Get-ChildItem -LiteralPath $extractRoot -Recurse -File -Filter "*.exe"`,
 		`$activeDir.Replace("\", "/") -ne "versions/$activeVersion"`,
 		`Portable = (Join-Path $activeDir "reasonix-desktop.exe")`,
-		`Portable = "reasonix-desktop.exe"`,
-		"Portable archive must contain exactly 6 executables",
+		`Portable = "Reasonix.exe"; Payload = "reasonix-launcher.exe"`,
+		"6 release unit + $appExeCount Electron app tree",
 		"Get-FileHash -Algorithm SHA256",
 	} {
 		if !strings.Contains(verifier, want) {
@@ -256,6 +230,18 @@ func TestWindowsPackagerRejectsMissingOrPartialRequiredPayloadManifest(t *testin
 				if err := os.WriteFile(filepath.Join(payload, name), []byte(name), 0o600); err != nil {
 					t.Fatal(err)
 				}
+			}
+			// The packager validates the Electron app/ tree and signing-files.txt
+			// before the manifest gate, so the fixture must carry both.
+			if err := os.MkdirAll(filepath.Join(payload, "app"), 0o700); err != nil {
+				t.Fatal(err)
+			}
+			if err := os.WriteFile(filepath.Join(payload, "app", "Reasonix.exe"), []byte("shell"), 0o600); err != nil {
+				t.Fatal(err)
+			}
+			signingList := "app/Reasonix.exe\nreasonix-cli.exe\nreasonix-desktop.exe\nreasonix-guard.exe\nreasonix-launcher.exe\nreasonix-uninstall.exe\nreasonix-update-helper.exe\n"
+			if err := os.WriteFile(filepath.Join(payload, "signing-files.txt"), []byte(signingList), 0o600); err != nil {
+				t.Fatal(err)
 			}
 			if tc.manifest {
 				if err := os.WriteFile(filepath.Join(payload, "reasonix-payload.json"), []byte("{}"), 0o600); err != nil {
@@ -324,7 +310,7 @@ func TestProductionSigningRunsOnlyFromProtectedControlPlane(t *testing.T) {
 }
 
 func TestSignPathConfigurationsCoverExactWindowsPayload(t *testing.T) {
-	expected := map[string]bool{
+	flatPayload := map[string]bool{
 		"reasonix-desktop.exe":       true,
 		"reasonix-guard.exe":         true,
 		"reasonix-launcher.exe":      true,
@@ -334,21 +320,41 @@ func TestSignPathConfigurationsCoverExactWindowsPayload(t *testing.T) {
 	}
 
 	payload := parseSignPathConfiguration(t, "windows-payload.xml")
-	if len(payload.Zip.Files) != len(expected) {
-		t.Fatalf("windows-payload.xml files = %d, want %d", len(payload.Zip.Files), len(expected))
+	// The signed unit is the flat Go payload plus every PE file in the Electron
+	// app/ tree: Reasonix.exe is explicit, the rest ride the pe-file-set glob.
+	if len(payload.Zip.Files) != len(flatPayload)+1 {
+		t.Fatalf("windows-payload.xml files = %d, want %d", len(payload.Zip.Files), len(flatPayload)+1)
 	}
 	for _, file := range payload.Zip.Files {
-		if !expected[file.Path] {
+		if !flatPayload[file.Path] && file.Path != "app/Reasonix.exe" {
 			t.Errorf("windows-payload.xml contains unexpected path %q", file.Path)
 		}
 		if file.Sign == nil || file.Verify != nil {
 			t.Errorf("windows-payload.xml %q must sign, not verify", file.Path)
 		}
 	}
+	if len(payload.Zip.FileSets) != 1 {
+		t.Fatalf("windows-payload.xml pe-file-sets = %d, want 1", len(payload.Zip.FileSets))
+	}
+	payloadSet := payload.Zip.FileSets[0]
+	if payloadSet.ForEach.Sign == nil || payloadSet.ForEach.Verify != nil {
+		t.Error("windows-payload.xml pe-file-set must sign every app/ PE file")
+	}
+	for _, want := range []string{"app/**/*.exe", "app/**/*.dll"} {
+		found := false
+		for _, include := range payloadSet.Includes {
+			if include.Path == want && include.MinMatches == "1" {
+				found = true
+			}
+		}
+		if !found {
+			t.Errorf("windows-payload.xml pe-file-set must include %s with min-matches=1", want)
+		}
+	}
 
 	installer := parseSignPathConfiguration(t, "windows-installer-v2.xml")
-	if len(installer.Zip.Files) != len(expected)+1 {
-		t.Fatalf("windows-installer.xml files = %d, want %d", len(installer.Zip.Files), len(expected)+1)
+	if len(installer.Zip.Files) != len(flatPayload)+1 {
+		t.Fatalf("windows-installer.xml files = %d, want %d", len(installer.Zip.Files), len(flatPayload)+1)
 	}
 	verified := 0
 	signedInstaller := 0
@@ -359,7 +365,7 @@ func TestSignPathConfigurationsCoverExactWindowsPayload(t *testing.T) {
 				t.Error("windows-installer.xml must sign the outer installer")
 			}
 			signedInstaller++
-		case expected[file.Path]:
+		case flatPayload[file.Path]:
 			if file.Verify == nil || file.Sign != nil {
 				t.Errorf("windows-installer.xml %q must verify, not re-sign", file.Path)
 			}
@@ -368,8 +374,26 @@ func TestSignPathConfigurationsCoverExactWindowsPayload(t *testing.T) {
 			t.Errorf("windows-installer.xml contains unexpected path %q", file.Path)
 		}
 	}
-	if signedInstaller != 1 || verified != len(expected) {
+	if signedInstaller != 1 || verified != len(flatPayload) {
 		t.Fatalf("windows-installer.xml signed installers=%d verified payload=%d", signedInstaller, verified)
+	}
+	if len(installer.Zip.FileSets) != 1 {
+		t.Fatalf("windows-installer.xml pe-file-sets = %d, want 1", len(installer.Zip.FileSets))
+	}
+	installerSet := installer.Zip.FileSets[0]
+	if installerSet.ForEach.Verify == nil || installerSet.ForEach.Sign != nil {
+		t.Error("windows-installer.xml pe-file-set must verify, not re-sign, the app/ tree")
+	}
+	for _, want := range []string{"app/**/*.exe", "app/**/*.dll"} {
+		found := false
+		for _, include := range installerSet.Includes {
+			if include.Path == want {
+				found = true
+			}
+		}
+		if !found {
+			t.Errorf("windows-installer.xml pe-file-set must include %s", want)
+		}
 	}
 
 	testInstaller := parseSignPathConfiguration(t, "windows-installer-test-v2.xml")

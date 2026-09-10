@@ -235,7 +235,7 @@ func TestOpenCodeGoDeepSeekAlternativeProtocolPresets(t *testing.T) {
 	if !EffectiveWebSearch(&responses) || !HasServerWebSearchCapability(&responses) {
 		t.Fatalf("opencode-go-deepseek-responses web search = effective:%t capability:%t", EffectiveWebSearch(&responses), HasServerWebSearchCapability(&responses))
 	}
-	if cap := EffortCapabilityForEntry(&responses); !cap.Supported || cap.Default != "high" || !containsString(cap.Levels, "disabled") || !containsString(cap.Levels, "max") {
+	if cap := EffortCapabilityForEntry(&responses); !cap.Supported || cap.Default != "high" || !containsString(cap.Levels, "none") || !containsString(cap.Levels, "low") || !containsString(cap.Levels, "max") {
 		t.Fatalf("opencode-go-deepseek-responses effort capability = %+v", cap)
 	}
 

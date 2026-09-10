@@ -1,14 +1,15 @@
-// useWindowStatePersistence polls the Wails runtime for window geometry and
+// useWindowStatePersistence polls the desktop host for window geometry and
 // persists it via SaveWindowState so the next launch restores the same size and
-// position. No-op in browser dev (no window.runtime).
+// position. No-op in browser dev (no host).
 //
 // The frontend is the sole source of geometry: resize (debounced), a 5s poll,
-// and beforeunload. Go never reads WindowGetSize/Position/IsMaximised during
+// and beforeunload. Go never reads the native window geometry during
 // beforeClose or shutdown (those paths can panic on Windows when DPI reports
 // 0). The Go shutdown hook only re-persists the last frontend-reported state.
 
 import { useEffect } from "react";
 import { app } from "./bridge";
+import { desktopHost } from "./desktopHost";
 
 export interface WindowStateSnapshot {
   width: number;
@@ -19,13 +20,11 @@ export interface WindowStateSnapshot {
 }
 
 interface WindowStateRuntime {
-  WindowGetSize(): Promise<{ w: number; h: number }>;
-  WindowGetPosition(): Promise<{ x: number; y: number }>;
-  WindowIsMaximised(): Promise<boolean>;
+  getWindowBounds(): Promise<WindowStateSnapshot> | undefined;
 }
 
 // Serialize capture + persistence as one operation. Resize, polling, and
-// beforeunload can all request a save while an earlier Wails call is still in
+// beforeunload can all request a save while an earlier host call is still in
 // flight; a queue prevents an older completion from overwriting a newer
 // observation. A queued request captures geometry only when it reaches the
 // front, so it observes the latest native state instead of replaying a stale
@@ -40,16 +39,15 @@ export function createWindowStateSaver(
   return () => {
     queue = queue.then(async () => {
       try {
-        const size = await runtime.WindowGetSize();
-        const pos = await runtime.WindowGetPosition();
-        const maximised = await runtime.WindowIsMaximised();
-        const state = { width: size.w, height: size.h, x: pos.x, y: pos.y, maximised };
+        const bounds = await runtime.getWindowBounds();
+        if (!bounds) return;
+        const state = { width: bounds.width, height: bounds.height, x: bounds.x, y: bounds.y, maximised: bounds.maximised };
         const json = JSON.stringify(state);
         if (json === lastState) return;
         await persist(state);
         lastState = json;
       } catch {
-        /* runtime not ready yet — a later request will retry */
+        /* host not ready yet — a later request will retry */
       }
     });
     return queue;
@@ -58,13 +56,11 @@ export function createWindowStateSaver(
 
 export function useWindowStatePersistence() {
   useEffect(() => {
-    const runtime = typeof window !== "undefined" ? window.runtime : undefined;
-    if (!runtime?.WindowGetSize || !runtime.WindowGetPosition || !runtime.WindowIsMaximised) return;
-    const { WindowGetSize, WindowGetPosition, WindowIsMaximised } = runtime;
+    if (desktopHost().kind === "none") return;
 
     let timer: ReturnType<typeof setInterval>;
     const save = createWindowStateSaver(
-      { WindowGetSize, WindowGetPosition, WindowIsMaximised },
+      { getWindowBounds: () => desktopHost().native.getWindowBounds() },
       (state) => app.SaveWindowState(state),
     );
 

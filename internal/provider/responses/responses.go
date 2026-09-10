@@ -13,6 +13,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"maps"
 	"net/http"
 	"strings"
 	"sync"
@@ -111,6 +112,15 @@ type client struct {
 
 // New creates a Responses API provider.
 func New(cfg Config) provider.Provider {
+	cfg.Extra = maps.Clone(cfg.Extra)
+	if cfg.Extra == nil {
+		cfg.Extra = map[string]any{}
+	}
+	if cfg.RequestURL != "" {
+		cfg.Extra["request_url"] = cfg.RequestURL
+	}
+	resolved := provider.ApplyOpenCodeGoContract("responses", provider.Config{BaseURL: cfg.BaseURL, Model: cfg.Model, Extra: cfg.Extra})
+	cfg.Extra = resolved.Extra
 	vendor := DetectVendor(cfg.BaseURL)
 	cap := capabilitiesFor(vendor)
 	// Explicit replay contracts apply to compatible gateways as well as exact

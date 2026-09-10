@@ -1,3 +1,4 @@
+import { desktopHost } from "./desktopHost";
 import { asArray } from "./array";
 import { runtimeStateStore } from "./runtimeStateStore";
 import type { ProjectNode, ProjectRuntimeTopic, ProjectTreeRuntimeSnapshot } from "./types";
@@ -167,10 +168,9 @@ export function normalizeProjectTreeRuntimeSnapshot(payload: unknown): ProjectTr
 }
 
 export function onProjectTreeRuntimeChanged(cb: (event: ProjectTreeRuntimeSnapshot) => void): () => void {
-  if (typeof window !== "undefined" && window.runtime) {
-    return window.runtime.EventsOn("project-tree:runtime-changed", (payload?: unknown) => cb(normalizeProjectTreeRuntimeSnapshot(payload)));
-  }
-  return () => {};
+  const host = desktopHost();
+  if (host.kind === "none") return () => {};
+  return host.events.on("project-tree:runtime-changed", (payload?: unknown) => cb(normalizeProjectTreeRuntimeSnapshot(payload)));
 }
 
 export function bindProjectTreeRuntime(

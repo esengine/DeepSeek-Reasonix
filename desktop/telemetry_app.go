@@ -24,6 +24,11 @@ import (
 
 var pingEndpoint = "https://crash.reasonix.io/v1/ping"
 
+// desktopRendererEngine is the one renderer the desktop ships now: the
+// Electron shell's Chromium. Kept as a telemetry dimension so dashboards do
+// not lose the field; the shell owns the exact Chromium version.
+const desktopRendererEngine = "chromium"
+
 var installIDPattern = regexp.MustCompile(`^[0-9a-f]{32}$`)
 
 var installIDRandRead = rand.Read
@@ -92,14 +97,12 @@ func (a *App) sendStartupPing() {
 		return
 	}
 	device := collectDeviceInfo()
-	runtimeContext := webRuntimeContextForTelemetry(500 * time.Millisecond)
 	_ = postStartupPing(a.bootContext(), c, pingEndpoint, startupPing{
 		InstallID: id, Version: version, OS: runtime.GOOS, Arch: runtime.GOARCH, Channel: channel,
 		OSVersion: device.OSVersion, OSBuild: device.OSBuild, OSRevision: device.OSRevision,
 		DistroID: device.DistroID, DistroVersion: device.DistroVersion,
 		KernelVersion: device.KernelVersion, SessionType: device.SessionType,
-		RuntimeEngine: runtimeContext.Engine, RuntimeVersion: runtimeContext.RuntimeVersion,
-		GPUMode: runtimeContext.GPUMode,
+		RuntimeEngine: desktopRendererEngine,
 	})
 }
 

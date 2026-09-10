@@ -3,9 +3,10 @@ import React, { act, useState } from "react";
 import { createRoot } from "react-dom/client";
 import { JSDOM } from "jsdom";
 import { SessionExperienceSettings } from "../components/SessionExperienceSettings";
-import { LocaleProvider } from "../lib/i18n";
+import { LocaleProvider, t } from "../lib/i18n";
 import { getSessionExperience } from "../lib/sessionExperience";
 import type { SettingsView } from "../lib/types";
+import { installDesktopHostStub } from "./desktopHostStub";
 
 const dom = new JSDOM("<div id='root'></div>", { url: "http://localhost" });
 Object.assign(globalThis, { window: dom.window, document: dom.window.document, localStorage: dom.window.localStorage,
@@ -14,12 +15,12 @@ let backend: SettingsView = { sessionExperience: "standard" } as SettingsView;
 let release!: () => void;
 let failed = false;
 const writes: string[] = [];
-Object.assign(window, { go: { main: { App: { SetSessionExperience: async (mode: string) => {
+installDesktopHostStub({ SetSessionExperience: async (mode: string) => {
   writes.push(mode);
   await new Promise<void>(resolve => { release = resolve; });
   if (failed) throw new Error("write failed");
   backend = { ...backend, sessionExperience: mode as "deep" | "standard" };
-} } } } });
+} });
 let completion: Promise<boolean>;
 let reload!: () => void;
 function SettingsHost() {
@@ -38,14 +39,23 @@ function SettingsHost() {
   return <SessionExperienceSettings snapshot={snapshot} busy={busy} apply={apply} />;
 }
 const root = createRoot(document.getElementById("root")!);
-const buttons = () => [...document.querySelectorAll<HTMLButtonElement>("[role=radio]")];
+const groupButtons = (label: string) => {
+  const group = [...document.querySelectorAll<HTMLElement>("[role=radiogroup]")]
+    .find(candidate => candidate.getAttribute("aria-label") === label);
+  assert.ok(group, `missing radio group: ${label}`);
+  return [...group.querySelectorAll<HTMLButtonElement>("[role=radio]")];
+};
+const buttons = () => groupButtons(t("settings.sessionExperience"));
+const approvalButtons = () => groupButtons(t("settings.defaultToolApprovalMode"));
 try {
   await act(async () => root.render(<LocaleProvider><SettingsHost /></LocaleProvider>));
   assert.equal(buttons().length, 2);
+  assert.equal(approvalButtons().length, 3, "approval choices remain a separate group");
   assert.equal(buttons()[0].getAttribute("aria-checked"), "true");
   await act(async () => buttons()[1].click());
   assert.equal(getSessionExperience(), "deep");
   assert.ok(buttons().every(button => button.disabled));
+  assert.ok(approvalButtons().every(button => button.disabled), "shared busy state also protects approval choices");
   await act(async () => { release(); await completion; });
   assert.equal(buttons()[1].getAttribute("aria-checked"), "true");
 

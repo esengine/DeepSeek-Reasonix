@@ -64,6 +64,33 @@ type crashBreadcrumb struct {
 	Msg string `json:"msg,omitempty"`
 }
 
+// webRuntimeDiagnostic and webView2Diagnostic are decode-only: pending reports
+// written by the retired WebView2/WebKitGTK shell must still decode and forward
+// after upgrade. No producer remains under the Electron shell.
+type webRuntimeDiagnostic struct {
+	Engine              string `json:"engine"`
+	Kind                string `json:"kind"`
+	Reason              string `json:"reason"`
+	ExitCode            *int32 `json:"exitCode,omitempty"`
+	ProcessDescription  string `json:"processDescription,omitempty"`
+	FailureSourceModule string `json:"failureSourceModule,omitempty"`
+	RuntimeVersion      string `json:"runtimeVersion"`
+	GPUMode             string `json:"gpuMode"`
+	CompatibilityMode   bool   `json:"compatibilityMode,omitempty"`
+	Recovery            string `json:"recovery"`
+}
+
+type webView2Diagnostic struct {
+	Kind                string `json:"kind"`
+	Reason              string `json:"reason"`
+	ExitCode            *int32 `json:"exitCode,omitempty"`
+	ProcessDescription  string `json:"processDescription,omitempty"`
+	FailureSourceModule string `json:"failureSourceModule,omitempty"`
+	RuntimeVersion      string `json:"runtimeVersion"`
+	GPUDisabled         bool   `json:"gpuDisabled"`
+	Recovery            string `json:"recovery"`
+}
+
 type crashReport struct {
 	EventID         string                `json:"eventId,omitempty"`
 	DedupKey        string                `json:"dedupKey,omitempty"`
@@ -90,8 +117,8 @@ type crashReport struct {
 	Breadcrumbs     []crashBreadcrumb     `json:"breadcrumbs,omitempty"`
 	OccurredAt      string                `json:"occurredAt,omitempty"`
 	WebRuntime      *webRuntimeDiagnostic `json:"webRuntime,omitempty"`
-	// WebView2 is retained only so pending reports written by preview builds can
-	// still be decoded and forwarded after upgrade. New reports use WebRuntime.
+	// WebView2 is retained only so pending reports written by the retired
+	// WebView2 shell can still be decoded and forwarded after upgrade.
 	WebView2 *webView2Diagnostic `json:"webview2,omitempty"`
 }
 

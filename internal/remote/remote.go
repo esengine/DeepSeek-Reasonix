@@ -9,7 +9,7 @@
 //
 // The package is frontend-agnostic: all interactivity flows through callbacks
 // (HostKeyPrompt, SecretPrompt) and status subscriptions, so the CLI, chat
-// TUI, and the Wails desktop consume the same surface.
+// TUI, and the desktop app consume the same surface.
 package remote
 
 import (

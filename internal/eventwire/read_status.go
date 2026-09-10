@@ -4,6 +4,7 @@ import "reasonix/internal/event"
 
 // ReadStatus is the JSON form of event.ReadStatusPayload.
 type ReadStatus struct {
+	Verdict    string   `json:"verdict,omitempty"`
 	ReadID     string   `json:"readId"`
 	Generation uint64   `json:"generation,omitempty"`
 	Sequence   uint64   `json:"seq,omitempty"`
@@ -24,7 +25,8 @@ func toWireReadStatus(in *event.ReadStatusPayload) *ReadStatus {
 		return nil
 	}
 	return &ReadStatus{
-		ReadID: in.ReadID, Generation: in.Generation, Sequence: in.Sequence,
+		Verdict: in.Verdict,
+		ReadID:  in.ReadID, Generation: in.Generation, Sequence: in.Sequence,
 		Path: in.Path, Intent: in.Intent, State: in.State,
 		Covered: in.Covered, Missing: in.Missing, SourceEnd: in.SourceEnd,
 		HasMore: in.HasMore, Reason: in.Reason, Recovery: in.Recovery, Active: in.Active,

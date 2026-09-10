@@ -5,6 +5,7 @@ import { createRoot } from "react-dom/client";
 import { Composer } from "../components/Composer";
 import { LocaleProvider } from "../lib/i18n";
 import { ToastProvider } from "../lib/toast";
+import { installDesktopHostStub } from "./desktopHostStub";
 import type { CollaborationMode, ToolApprovalMode } from "../lib/types";
 
 const flushTimers = () => new Promise<void>(resolve => setTimeout(resolve, 0));
@@ -60,9 +61,7 @@ export function installDom(language = "en-US") {
 }
 
 export function installBridgeApp(methods: Record<string, unknown>) {
-  (window as unknown as { go: { main: { App: Record<string, unknown> } } }).go = {
-    main: {
-      App: {
+  installDesktopHostStub({
         Commands: async () => [],
         Models: async () => [],
         ModelsForTab: async () => [],
@@ -71,9 +70,7 @@ export function installBridgeApp(methods: Record<string, unknown>) {
         SearchFileRefs: async () => [],
         SearchFileRefsForTab: async () => [],
         ...methods,
-      },
-    },
-  };
+  });
 }
 
 export async function renderComposer(props: Partial<Parameters<typeof Composer>[0]> = {}, strictMode = false) {

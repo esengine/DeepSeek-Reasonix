@@ -716,7 +716,7 @@ func (l *Ledger) Replay(after uint64) (ReplayView, error) {
 	return view, nil
 }
 
-// EventsAfter is retained for non-Wails callers and compatibility tests.
+// EventsAfter is retained for non-desktop callers and compatibility tests.
 func (l *Ledger) EventsAfter(after uint64) ([]Envelope, error) {
 	if l == nil {
 		return []Envelope{}, nil

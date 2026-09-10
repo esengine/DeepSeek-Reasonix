@@ -9,6 +9,7 @@ import { activeFileReferenceToken, pickInlineFileReference } from "../components
 import { LocaleProvider, preloadDetectedLocale } from "../lib/i18n";
 import type { AppBindings } from "../lib/bridge";
 import type { WireApproval } from "../lib/types";
+import { installDesktopHostStub } from "./desktopHostStub";
 
 let passed = 0;
 let failed = 0;
@@ -71,7 +72,7 @@ function installDom(language = "en-US") {
 }
 
 function mockApp(methods: Partial<AppBindings>) {
-  window.go = {
+  installDesktopHostStub(({
     main: {
       App: {
         ...methods,
@@ -79,7 +80,7 @@ function mockApp(methods: Partial<AppBindings>) {
         SearchFileRefsForTab: methods.SearchFileRefsForTab ?? (async (_tabId: string, query: string) => methods.SearchFileRefs?.(query) ?? []),
       } as Partial<AppBindings> as AppBindings,
     },
-  };
+  }).main.App);
 }
 
 async function renderApproval(props: Partial<Parameters<typeof ApprovalModal>[0]> = {}) {

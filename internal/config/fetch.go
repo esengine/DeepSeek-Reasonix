@@ -77,7 +77,7 @@ func (e *ProviderEntry) FetchModelCatalogWithProxy(ctx context.Context, proxy ne
 			Proxy:    proxy,
 		})
 		if err == nil {
-			allowed := provider.FilterOfficialOpenCodeGoModels(e.Kind, e.BaseURL, modelInfoIDs(models))
+			allowed := provider.FilterOpenCodeGoRequestModels(e.Kind, e.BaseURL, e.RequestURL, e.ChatURL, modelInfoIDs(models))
 			keep := make(map[string]bool, len(allowed))
 			for _, id := range allowed {
 				keep[id] = true

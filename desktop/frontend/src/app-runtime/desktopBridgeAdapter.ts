@@ -1,6 +1,6 @@
 import { app } from "../lib/bridge";
 
-/** Runtime-only bridge ports used by App owners; presentation never imports Wails directly. */
+/** Runtime-only bridge ports used by App owners; presentation never imports the desktop bridge directly. */
 export const desktopBridge = {
   setRemoteTabComposerProfile: (tabId: string, mode: string, approvalMode: string, goal: string) =>
     app.SetRemoteTabComposerProfile(tabId, mode, approvalMode, goal),

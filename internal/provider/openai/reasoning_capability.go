@@ -7,6 +7,7 @@ import (
 // ReasoningForConfig is pure: capability discovery never reads credentials or
 // performs I/O. It shares the adapter's endpoint and protocol predicates.
 func ReasoningForConfig(cfg provider.Config) provider.ReasoningCapability {
+	cfg = provider.ApplyOpenCodeGoContract("openai", cfg)
 	protocol, _ := cfg.Extra["reasoning_protocol"].(string)
 	protocol = normalizeReasoningProtocol(protocol)
 	if protocol == "none" {

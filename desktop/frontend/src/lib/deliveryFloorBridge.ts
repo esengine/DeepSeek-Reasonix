@@ -13,7 +13,7 @@ export function normalizeQualityFloor(floor: string): QualityFloor {
 }
 
 // The mock stores the floor on the tab list so the browser shell reflects the
-// toggle the way the Wails host does; the host derives it from the session.
+// toggle the way the desktop host does; the host derives it from the session.
 export function makeMockQualityFloorBindings(
   tabs: () => TabMeta[],
   setTabs: (next: TabMeta[]) => void,

@@ -586,19 +586,6 @@ func (a *App) worktreeRuntimeReferenced(worktreeRoot string) bool {
 	return a.runtimeReferencesCanonicalLocked(key)
 }
 
-func pathWithinWorktree(path, worktreeRoot string) bool {
-	pathKey := canonicalRuntimeRoot(path)
-	rootKey := canonicalRuntimeRoot(worktreeRoot)
-	if pathKey == "" || rootKey == "" {
-		return false
-	}
-	if pathKey == rootKey {
-		return true
-	}
-	rel, err := filepath.Rel(rootKey, pathKey)
-	return err == nil && rel != "." && rel != ".." && !strings.HasPrefix(rel, ".."+string(filepath.Separator))
-}
-
 func canonicalRuntimeRoot(root string) string {
 	canonical, _ := canonicalRuntimeRootErr(root)
 	return canonical

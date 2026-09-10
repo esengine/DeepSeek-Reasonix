@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import { managementDom } from "../test-support/managementDom";
 import type { HeartbeatTask } from "../custom/features/heartbeat/heartbeat.types";
+import { installDesktopHostStub } from "./desktopHostStub";
 const dom = managementDom();
 const { default: React, act } = await import("react");
 const { createRoot } = await import("react-dom/client");
@@ -13,7 +14,7 @@ let tasks: HeartbeatTask[] = [
 ];
 let release: (() => void) | undefined;
 let failSave = false;
-Object.assign(window, { go: { main: { App: {
+installDesktopHostStub({
   async HeartbeatReloadConfig() { return { revision: 1, etag: "a", tasks }; },
   async HeartbeatSaveConfig(value: { tasks: HeartbeatTask[] }) {
     if (failSave) throw new Error("failed");
@@ -21,7 +22,7 @@ Object.assign(window, { go: { main: { App: {
     tasks = value.tasks; return { revision: 2, etag: "b", tasks };
   },
   async ListWorkspaces() { return []; }, async HeartbeatGenerateID() { return "draft-new"; },
-} } } });
+});
 const root = createRoot(document.getElementById("root")!);
 const render = (active = true) => <LocaleProvider><HeartbeatView active={active} /></LocaleProvider>;
 const button = (text: string) => Array.from(document.querySelectorAll<HTMLButtonElement>("button")).find((node) => node.textContent?.trim() === text)!;

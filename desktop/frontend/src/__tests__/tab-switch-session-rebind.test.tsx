@@ -17,6 +17,7 @@ import type {
   Meta,
   TabMeta,
 } from "../lib/types";
+import { installDesktopHostStub } from "./desktopHostStub";
 
 let passed = 0;
 let failed = 0;
@@ -138,11 +139,7 @@ function currentTabs(): TabMeta[] {
   return Array.from(tabsById.values()).map((tab) => ({ ...tab, active: tab.id === backendActiveId }));
 }
 
-window.runtime = {
-  EventsOn: () => () => {},
-  BrowserOpenURL: () => {},
-};
-window.go = {
+const appStubTable = ({
   main: {
     App: {
       RegisterNavigationIntent: async () => {},
@@ -171,7 +168,7 @@ window.go = {
         return [userMessage(tabID === "tab-o" ? `history O generation ${generation}` : "history A")];
       },
       HistorySliceForTab: async (tabID: string, request: HistorySliceRequest) => {
-        const messages = await window.go.main.App.HistoryForTab(tabID);
+        const messages = await appStubTable.HistoryForTab(tabID);
         return historySliceFromMessages(tabID, messages, request);
       },
       HistoryCheckpointTurnsForTab: async () => [],
@@ -184,7 +181,8 @@ window.go = {
       },
     } as Partial<AppBindings> as AppBindings,
   },
-};
+}).main.App;
+const desktopStub = installDesktopHostStub(appStubTable);
 
 type Controller = ReturnType<typeof useController>;
 let controller: Controller | undefined;

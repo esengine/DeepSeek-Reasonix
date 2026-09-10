@@ -28,6 +28,7 @@ func (a *Agent) executeOne(ctx context.Context, turn *turnRuntime, call provider
 	ctx = withTurnState(a.withAgentContext(ctx), turn)
 	plan := &toolCallPlan{call: call}
 	defer func() {
+		out.evidenceSource = cloneEvidenceTarget(plan.expectedWriteSource)
 		out.readTaskID = plan.readTaskID
 		out.readEnvelope = plan.readEnvelope
 		out.readActiveMillis = plan.readActiveMillis
@@ -166,6 +167,9 @@ func (a *Agent) applyMutationDependencyBarrier(plan *toolCallPlan) (toolOutcome,
 	}
 	cause := a.mutationDependencyBarrier.Load()
 	if cause == nil {
+		return toolOutcome{}, false
+	}
+	if cause.evidenceOnly && a.independentEvidenceWriter(plan.call) {
 		return toolOutcome{}, false
 	}
 	verification := plan.evidenceName == "bash" && evidence.IsVerificationCommand(bashCommandFromArgs(plan.evidenceArgs))
@@ -663,6 +667,12 @@ func (a *Agent) finishToolExecution(ctx context.Context, plan *toolCallPlan) too
 			runState: outcomeRunState(toolOutcome{executed: true, output: rawErr}),
 			output:   body, errMsg: firstLine(err.Error()), truncated: truncMsg != "" || original != "", truncMsg: truncMsg,
 			execution: execution, mcpApp: toProviderMCPApp(plan.mcpApp), recoveryGeneration: recoveryGen, subagentOutcome: subagentOutcomeFromError(err),
+		}
+		var operationErr *tool.OperationError
+		if errors.As(err, &operationErr) {
+			d := operationErr.Diagnostic
+			d.OperationID = call.ID
+			out.diagnostic = &d
 		}
 		if original != "" {
 			out.rawOutput = original

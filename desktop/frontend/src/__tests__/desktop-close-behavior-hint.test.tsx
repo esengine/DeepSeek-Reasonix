@@ -4,6 +4,7 @@ import { act } from "react";
 import { createRoot } from "react-dom/client";
 import { DesktopCloseBehaviorHint } from "../components/DesktopCloseBehaviorHint";
 import type { AppBindings } from "../lib/bridge";
+import { installDesktopHostStub } from "./desktopHostStub";
 
 const dom = new JSDOM("<!doctype html><html><body><div id=\"root\"></div></body></html>", {
   pretendToBeVisual: true,
@@ -12,7 +13,7 @@ const dom = new JSDOM("<!doctype html><html><body><div id=\"root\"></div></body>
 globalThis.window = dom.window as unknown as Window & typeof globalThis;
 globalThis.document = dom.window.document;
 globalThis.IS_REACT_ACT_ENVIRONMENT = true;
-window.go = {
+installDesktopHostStub(({
   main: {
     App: {
       GetDesktopShellStatus: async () => ({
@@ -22,7 +23,7 @@ window.go = {
       }),
     } as Partial<AppBindings> as AppBindings,
   },
-};
+}).main.App);
 
 const rootElement = document.getElementById("root");
 if (!rootElement) throw new Error("missing root");

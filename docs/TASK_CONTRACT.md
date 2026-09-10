@@ -95,7 +95,7 @@ Output format:
 After implementation, summarize changed files and verification results.
 
 Constraints:
-Do not change the Wails JSON contract.
+Do not change the desktop host JSON contract.
 Do not refactor unrelated composer state.
 If browser verification cannot run, say why.
 

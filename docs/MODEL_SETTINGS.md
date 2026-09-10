@@ -63,6 +63,6 @@ Windows settings keeps the minimize, maximize/restore, and close-window buttons 
 
 - Reference: ZCode for Windows.
 - Installed application code confirms native Windows caption buttons, a transparent title-bar overlay with a 48px baseline updated with UI zoom, a full-page settings component, separate return and window-close actions, and configurable close-to-tray behavior.
-- Reasonix retains Wails window controls and applies shared caption geometry and colors to settings; it does not introduce Electron window code.
+- Reasonix applies the same shared caption geometry and colors to settings through the Electron shell's window controls.
 - Reasonix's Windows browser preview was checked for caption geometry, colors, and Workbench/Creation transitions. Settings navigation and child-dialog tests also passed.
 - Native Windows dragging, system scaling, maximize, and tray acceptance checks remain unverified. Installed-code inspection does not replace those checks.

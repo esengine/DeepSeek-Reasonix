@@ -14,7 +14,7 @@ prompt 请求和生命周期事件会暴露 `promptId`、`promptKind` 和 `turnI
 Desktop 事件 envelope 会携带 tab 的 runtime epoch。缺少 turn identity 的旧
 事件会标记为 `promptLegacy`，只能通过兼容路径处理。
 
-`AnswerQuestionForTab`、`ApproveTab` 和 `ResolveRecoveryTab` 等旧 Wails 方法
+`AnswerQuestionForTab`、`ApproveTab` 和 `ResolveRecoveryTab` 等旧 host 方法
 仍为旧客户端保留。新前端统一使用 `ResolvePromptForTab`，不会静默降级到
 没有 fence 的方法。收到 stale 响应后，旧卡片会从当前决策面移除，并按 tab
 请求一次 prompt replay；只有新的 pending identity 才能重新显示卡片。

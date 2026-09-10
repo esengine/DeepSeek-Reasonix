@@ -79,6 +79,7 @@ export function BlankProjectDialog({
 
   return createPortal(
     <div
+      data-app-overlay=""
       className="modal-backdrop blank-project-backdrop"
       role="presentation"
       onMouseDown={(event) => {

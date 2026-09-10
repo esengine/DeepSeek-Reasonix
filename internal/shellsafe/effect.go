@@ -302,8 +302,16 @@ func classifyGit(args []string) CommandEffect {
 }
 
 func skipGitGlobalArgs(args []string) []string {
-	for len(args) >= 2 && (args[0] == "-C" || args[0] == "--git-dir" || args[0] == "--work-tree") {
-		args = args[2:]
+	for len(args) > 0 {
+		if args[0] == "--no-pager" {
+			args = args[1:]
+			continue
+		}
+		if len(args) >= 2 && (args[0] == "-C" || args[0] == "--git-dir" || args[0] == "--work-tree") {
+			args = args[2:]
+			continue
+		}
+		break
 	}
 	return args
 }

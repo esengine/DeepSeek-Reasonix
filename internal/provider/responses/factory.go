@@ -6,6 +6,7 @@ import (
 )
 
 func newFromConfig(cfg provider.Config) (provider.Provider, error) {
+	cfg = provider.ApplyOpenCodeGoContract("responses", cfg)
 	effort, _ := cfg.Extra["effort"].(string)
 	mode, _ := cfg.Extra["mode"].(string)
 	webSearch, _ := cfg.Extra["web_search"].(bool)

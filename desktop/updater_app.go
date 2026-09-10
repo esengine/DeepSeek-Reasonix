@@ -5,12 +5,9 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
-	"os"
 	"regexp"
 	"runtime"
 	"strings"
-
-	wruntime "github.com/wailsapp/wails/v2/pkg/runtime"
 
 	"reasonix/desktop/internal/update"
 	"reasonix/internal/installlayout"
@@ -142,7 +139,7 @@ func (a *App) openDownloadPage(selectedChannel string) {
 		}
 	}
 	if a.ctx != nil {
-		wruntime.BrowserOpenURL(a.ctx, page)
+		a.nativeHost().OpenExternal(a.ctx, page)
 	}
 }
 
@@ -369,9 +366,7 @@ func (a *App) installDebUpdate(requestID string, meta *cachedUpdate) error {
 	// Ensure installing was shown even if a phase line was missed (older helper).
 	a.emitProgress(requestID, meta.Channel, meta.Version, "installing", meta.Size, meta.Size, "")
 	a.emitProgress(requestID, meta.Channel, meta.Version, "done", meta.Size, meta.Size, "")
-	a.shutdown(a.ctx)
-	_ = relaunchThroughLauncher()
-	os.Exit(0)
+	a.relaunchDesktop(true)
 	return nil
 }
 
@@ -379,7 +374,7 @@ func (a *App) installPortableUpdate(requestID string, meta *cachedUpdate, data [
 	a.emitProgress(requestID, meta.Channel, meta.Version, "installing", meta.Size, meta.Size, "")
 	var preparedUpdate *repair.UpdateTransaction
 	versionedPortable := (runtime.GOOS == "windows" || runtime.GOOS == "linux") && installlayout.HasCurrent(currentInstallDir())
-	if (runtime.GOOS == "windows" || runtime.GOOS == "linux") && !versionedPortable {
+	if runtime.GOOS == "windows" && !versionedPortable {
 		// Back up the complete legacy release unit (main binary plus launcher
 		// and migration siblings) so rollback never leaves a mixed-version
 		// install. Deb installs deliberately skip this because package-manager
@@ -395,13 +390,9 @@ func (a *App) installPortableUpdate(requestID string, meta *cachedUpdate, data [
 	case "windows":
 		err = applyWindowsFile(meta.Path, meta.SHA256, meta.Version, preparedUpdate)
 	case "darwin":
-		err = applyMac(meta.Path, meta.Version)
+		err = applyMac(meta.Path, meta.Version, a.updateHandoffOwnerPID())
 	case "linux":
-		if versionedPortable {
-			err = applyLinuxVersioned(data, meta.Version)
-		} else {
-			err = applyLinux(data, preparedUpdate)
-		}
+		err = applyLinuxVersioned(data, meta.Version)
 	default:
 		err = fmt.Errorf("self-update unsupported on %s", runtime.GOOS)
 	}
@@ -441,11 +432,7 @@ func (a *App) installPortableUpdate(requestID string, meta *cachedUpdate, data [
 	// Persist the conversation and stop subprocesses before handing off (same as
 	// shutdown). On Linux the binary is now replaced, so relaunch it; on Windows and
 	// macOS the installer/helper we launched takes over once we exit.
-	a.shutdown(a.ctx)
-	if runtime.GOOS == "linux" {
-		_ = relaunchThroughLauncher()
-	}
-	os.Exit(0)
+	a.relaunchAfterPortableUpdate()
 	return nil
 }
 
@@ -529,10 +516,7 @@ func (a *App) reqCtx() context.Context {
 }
 
 func (a *App) emitProgress(requestID, selectedChannel, expectedVersion, phase string, received, total int64, errMsg string) {
-	if a.ctx == nil {
-		return
-	}
-	wruntime.EventsEmit(a.ctx, "updater:progress", updateProgress{
+	a.emitRuntimeEvent("updater:progress", updateProgress{
 		RequestID: requestID,
 		Version:   expectedVersion,
 		Channel:   normalizeUpdateChannel(selectedChannel),

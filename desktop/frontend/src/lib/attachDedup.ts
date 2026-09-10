@@ -18,7 +18,7 @@ function bytesToHex(bytes: Uint8Array): string {
 }
 
 // sha256 returns the hex SHA-256 of `blob`. The Web Crypto Subtle API
-// is available in Wails' WebView (Chromium / WebKitGTK 4.1+); we
+// is available in the Chromium shell; we
 // don't fall back to a JS implementation because a no-op (returning
 // "") would silently disable dedup, which is worse than no dedup
 // at all. The caller checks the empty-string return and skips the

@@ -6,7 +6,8 @@ Object.assign(globalThis,{window:dom.window,document:dom.window.document,localSt
 const {createRoot}=await import('react-dom/client');
 const {ProviderEditor}=await import('../components/SettingsPanel');
 const {LocaleProvider}=await import('../lib/i18n');
-(window as any).go={main:{App:{FetchProviderModelCatalog:async()=>[{model:'new-model',inputModalities:['text']}]}}};
+const {installDesktopHostStub}=await import('./desktopHostStub');
+installDesktopHostStub({FetchProviderModelCatalog:async()=>[{model:'new-model',inputModalities:['text']}]});
 const p={name:'custom',kind:'openai',baseUrl:'https://example.com/v1',models:['manual-model'],default:'manual-model',apiKeyEnv:'TEST_KEY',keySet:true,added:true,builtIn:false,visionModels:[],supportedEfforts:[],modelsUrl:'',balanceUrl:'',contextWindow:128000};
 const root=createRoot(document.getElementById('root')!);
 await act(async()=>root.render(<LocaleProvider><ProviderEditor initial={p as any} kinds={['openai']} busy={false} onCancel={()=>{}} onSave={()=>{}} onSaveKey={async()=>{}}/></LocaleProvider>));

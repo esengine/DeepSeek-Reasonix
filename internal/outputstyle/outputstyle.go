@@ -6,7 +6,6 @@
 package outputstyle
 
 import (
-	"fmt"
 	"os"
 	"path/filepath"
 	"slices"
@@ -182,21 +181,4 @@ func isFalse(s string) bool {
 		return true
 	}
 	return false
-}
-
-// DescribeList renders the available styles as a short listing for /output-style.
-func DescribeList(styles []OutputStyle, active string) string {
-	var b strings.Builder
-	for _, st := range styles {
-		marker := "  "
-		if strings.EqualFold(st.Name, active) {
-			marker = "* "
-		}
-		scope := "builtin"
-		if !st.Builtin {
-			scope = "custom"
-		}
-		fmt.Fprintf(&b, "%s%s (%s) — %s\n", marker, st.Name, scope, st.Description)
-	}
-	return strings.TrimRight(b.String(), "\n")
 }

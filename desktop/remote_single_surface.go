@@ -67,6 +67,7 @@ func (a *App) keepOnlyRemoteVisibleTab(tabID string) (TabMeta, error) {
 				remoteCancels = append(remoteCancels, tab.cancel)
 			}
 			delete(a.remoteTabs, id)
+			a.forgetRemoteBrowserExecutor(id)
 		}
 		a.remoteTabLayout.activeID = tabID
 		a.remoteTabLayout.order = []string{tabID}

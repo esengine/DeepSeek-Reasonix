@@ -9,7 +9,7 @@ agent. It is the Reasonix analog of Claude Code's CLAUDE.md.
 - Go kernel under `internal/`; each package owns one concern. A package's long
   explanation belongs in its `doc.go`, not spread across implementation files.
 - One transport-agnostic `control.Controller` sits behind every frontend (chat
-  TUI, HTTP/SSE serve, Wails desktop). Add behavior to the controller, not a
+  TUI, HTTP/SSE serve, Electron desktop). Add behavior to the controller, not a
   frontend, so all three inherit it.
 - Layering (enforced): utility packages import nothing under `reasonix/`; only
   the frontends `cli`, `serve`, `acp`, `bot`, `botruntime`, `boot` and the hosts

@@ -22,11 +22,3 @@ func main() {
 func run(args []string) int {
 	return desktoplauncher.Run(args, version)
 }
-
-func resolveDesktopPath(installRoot string) (string, error) {
-	return desktoplauncher.ResolveDesktopPath(installRoot)
-}
-
-func stripLegacyLaunchArgs(args []string) []string {
-	return desktoplauncher.StripLegacyLaunchArgs(args)
-}

@@ -4,7 +4,7 @@
 
 ## Desktop PR 检查
 
-`desktop-prepare` 统一生成 Wails 绑定并构建一次 Linux 前端，产物供
+`desktop-prepare` 统一重新生成桌面宿主契约（有漂移即失败）并构建一次 Linux 前端，产物供
 `desktop-frontend`、`desktop-browser`、`desktop-go` 三个独立 job 使用。
 原有 required check `desktop` 汇总这四项结果，拒绝失败、取消和意外跳过；
 只有路径检测成功且判定无关时，才接受各分组跳过。其他原生系统检查保持独立。

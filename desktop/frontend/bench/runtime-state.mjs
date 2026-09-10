@@ -25,14 +25,16 @@ try {
     const { app, onRemoteTabOpened, onRemoteTabUpdated } = await import("/src/lib/bridge.ts");
     const { runtimeStateStore } = await import("/src/lib/runtimeStateStore.ts");
     const { acceptRuntimeState } = await import("/src/lib/runtimeStateReducer.ts");
+    const { installDesktopHostStub } = await import("/src/__tests__/desktopHostStub.ts");
+    const { DESKTOP_COMMANDS } = await import("/src/generated/desktopContract.generated.ts");
+    const fallback = Object.fromEntries(DESKTOP_COMMANDS.map(key => [key, app[key]]));
     const tabs = await app.ListTabs();
     const tree = { topics: [] };
     const selected = tabs.find(tab => tab.sessionPath?.includes("small")) ?? tabs[0];
     window.__runtimeFixture = { tab: selected, revision: 0, calls: [], queries: [], fail: true, accept: (...args) => acceptRuntimeState(runtimeStateStore, ...args), topics: tree.topics };
     onRemoteTabOpened(tab => { window.__runtimeFixture.tab = tab; });
     onRemoteTabUpdated(tab => { window.__runtimeFixture.tab = tab; });
-    const original = window.go;
-    window.go = { main: { App: new Proxy({}, { get(_target, key) {
+    const host = installDesktopHostStub(new Proxy(fallback, { get(_target, key) {
       if (key === "CaptureInboxTarget") return async (tabId, sessionPath) => {
         if (!sessionPath || sessionPath !== window.__runtimeFixture.tab.sessionPath) throw new Error("Composer did not bind its selected session path: " + JSON.stringify({ tabId, sessionPath, expected: window.__runtimeFixture.tab.sessionPath }));
         const remote = window.__runtimeFixture.tab.remote;
@@ -48,11 +50,11 @@ try {
         if (window.__runtimeFixture.fail) throw new Error("fixture enqueue unavailable");
         return { itemId: "runtime-queued", disposition: "queued", position: 1, paused: false };
       };
-      const installed = window.go; window.go = original;
-      const value = app[key]; window.go = installed;
+      const value = fallback[key];
       if (key === "OpenRemoteProjectTab") return async (...args) => { const tab = await value(...args); window.__runtimeFixture.tab = tab; return tab; };
       return value;
-    } }) } };
+    } }));
+    window.__runtimeFixture.emit = (tabId, channel, payload) => host.emit(`remote-tab:${tabId}:${channel}`, payload);
   });
   const publish = async (phase, extra = {}, remote = false) => page.evaluate(({ phase, extra, remote }) => {
     const f = window.__runtimeFixture;
@@ -109,7 +111,7 @@ try {
   await page.locator(".composer__btn--stop").waitFor();
   check(!(await input.isDisabled()), "remote reconnect restores authoritative execution controls");
   await page.evaluate(async () => {
-    const { __emitMockRemoteTab } = await import("/src/lib/bridge.ts");
+    const __emitMockRemoteTab = window.__runtimeFixture.emit;
     const tabId = window.__runtimeFixture.tab.id;
     __emitMockRemoteTab(tabId, "event", { kind: "turn_started", turnId: "fixture-turn" });
     __emitMockRemoteTab(tabId, "event", { kind: "text", text: "runtime missing completion fixture" });

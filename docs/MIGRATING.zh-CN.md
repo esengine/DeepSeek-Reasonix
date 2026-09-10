@@ -127,7 +127,7 @@ agent 核心延续了原有能力：循环、读写编辑与 glob/grep/bash 等�
 - 使用 `read_only_task` / `read_only_skill` 创建技术上只读的子智能体；普通 `task` / `run_skill` 仍可写入，并受权限与 Sandbox 控制。未声明 `readOnlyHint` 的 MCP 工具仍按 writer 处理。
 - `default_tools_approval_mode`、`tools.<raw>.approval_mode` 和 `approvals_reviewer` 已停用，加载时忽略并在下次保存时移除；安装或通过项目配置声明 server 后，其所有工具直接可用。
 - **Web Dashboard 仍然可用，桌面端更推荐**：需要浏览器访问时，可运行
-  `reasonix serve` 启动本地 Web UI；日常可视化使用优先选择 Wails 桌面端，
+  `reasonix serve` 启动本地 Web UI；日常可视化使用优先选择 Electron 桌面端，
   终端工作流继续使用 CLI/TUI。
 - 一些细粒度 v1 工具被合并，例如文件管理操作改由 `bash` 完成；少数工具尚未移植，进度在 Discussions 中跟踪。
 

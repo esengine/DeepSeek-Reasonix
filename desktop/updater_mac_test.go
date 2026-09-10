@@ -114,9 +114,9 @@ func installMacHandoffTestDeps(
 
 func macHandoffConfigFor(tx *repair.UpdateTransaction) macUpdateHandoffConfig {
 	return macUpdateHandoffConfig{
-		ToVersion:     tx.ToVersion,
-		CreatedAt:     tx.CreatedAt,
+		ToVersion: tx.ToVersion, CreatedAt: tx.CreatedAt,
 		TransactionID: repair.UpdateTransactionID(tx),
+		OwnerPID:      tx.HandoffOwnerPID,
 	}
 }
 
@@ -1009,7 +1009,7 @@ func TestMacUpdateHandoffParserRequiresCompletePipePair(t *testing.T) {
 	_, err := parseMacUpdateHandoffArgs([]string{
 		"-to-version", "v2",
 		"-created-at", "2026-07-28T00:00:00Z",
-		"-transaction-id", strings.Repeat("a", 64),
+		"-transaction-id", strings.Repeat("a", 64), "-owner-pid", "4242",
 		"-ready-fd", "3",
 	})
 	if err == nil || !strings.Contains(err.Error(), "pipe arguments") {

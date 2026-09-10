@@ -107,6 +107,7 @@ export interface WireShellExecution {
 }
 
 export interface WireTool {
+  diagnostic?: import("./readStatus").OperationDiagnostic;
 	verifying?: boolean;
   id?: string;
   name: string;
@@ -817,6 +818,7 @@ export interface ChangedFileInfo {
 export interface HistoryMessage {
 	completionReceipt?: WireCompletionReceipt;
 	completionSummary?: WireCompletionSummary;
+	readCompletion?: import("../generated/desktopContract.generated").ReadCompletion;
 	turnId?: string;
 	readPause?: import("./readPause").WireReadPause;
   role: string;
@@ -1782,7 +1784,7 @@ export interface ProviderView {
   models: string[];
   visionModels: string[]; // legacy subset; new UI derives capability from modelOverrides
   visionModelsConfigured: boolean; // legacy explicit-list marker retained for old configs
-  visionCapability?: "configurable" | "unsupported"; // backend authority; absent on older Wails payloads
+  visionCapability?: "configurable" | "unsupported"; // backend authority; absent on older desktop payloads
   modelsUrl: string; // optional override for model discovery; empty derives from baseUrl
   default: string;
   apiKeyEnv: string;
@@ -1800,7 +1802,7 @@ export interface ProviderView {
   reasoningProtocol: string; // auto|deepseek|glm|kimi-k3|openai|none; empty = auto/model registry
   thinking: string; // provider-specific thinking override: ""|enabled|disabled|adaptive
   webSearch?: boolean; // expose a provider-executed web search tool when supported
-  serverWebSearchCapability?: boolean; // backend-verified provider capability; absent on older Wails payloads
+  serverWebSearchCapability?: boolean; // backend-verified provider capability; absent on older desktop payloads
   supportedEfforts: string[]; // custom /effort levels; empty = use built-in Kind/BaseURL default
   defaultEffort: string; // /effort level when user picks "auto" or unset; "" = supportedEfforts[0]
   modelOverrides?: ProviderModelOverrideView[] | null;
@@ -2280,7 +2282,7 @@ export interface DesktopStartupSettingsView {
   statusBarItems: string[]; // ordered visible status bar item ids
   checkUpdates: boolean; // check for new versions on startup
   updateChannel: string; // compatibility field; always "stable"
-  conversationWidth?: string; // "standard" | "full"; absent from older Wails payloads
+  conversationWidth?: string; // "standard" | "full"; absent from older desktop payloads
   configWarnings?: string[]; configWarningsRevision?: number; // load recovery notices and async delivery barrier
   configPath?: string;
 }

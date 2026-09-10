@@ -202,6 +202,7 @@ func (s *Server) buildTagged(ctx context.Context, ref string, inheritTemp bool) 
 	opts.Model = ref
 	opts.BeforeInboxDispatch = s.beforeInboxDispatch
 	opts.Sink = tag
+	opts.BrowserExecutor = s.sessionBrowserExecutor(tag)
 	if opts.Stderr == nil {
 		opts.Stderr = os.Stderr
 	}

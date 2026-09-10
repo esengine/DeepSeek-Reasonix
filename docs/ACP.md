@@ -84,6 +84,34 @@ text-only, so it stays on the local encoding-preserving path and keeps its
 original charset. Without those client capabilities, the normal workspace
 tools run locally inside the Reasonix process.
 
+## Opt-in MCP interaction extension
+
+Hosts supporting MCP elicitation advertise this in `initialize.clientCapabilities`:
+
+```json
+{"_meta":{"reasonix.io":{"mcpInteraction":{"supported":true,"schemaVersion":1}}}}
+```
+
+Reasonix advertises the matching capability under
+`agentCapabilities._meta.reasonix.io.mcpInteraction`, including the method
+`_reasonix.io/mcp/request_interaction`. Negotiated sessions use the interactive
+MCP host profile. Clients without this exact opt-in keep the core profile and
+receive no new reverse requests. This applies to new, loaded and rebuilt sessions.
+
+The reverse request contains `sessionId`, `promptId`, `turnId`, `server`, `mode`
+and `message`, plus `requestedSchema` for a form or `url` and `elicitationId` for
+URL mode. Respond with `{"action":"accept","content":{}}`,
+`{"action":"decline"}` or `{"action":"cancel"}`. Validate the requested form;
+URL flows require user interaction and must not send credentials as form content.
+Hosts that cannot render a requested interaction should cancel it.
+
+Replies belong to the originating controller and turn. Cancellation, malformed
+replies and rejected URLs cancel the interaction; content is ignored unless the
+action is `accept`. Reasonix persists the decision through the controller before
+releasing its MCP waiter. This does not replace standard
+`session/request_permission` or change tool permission policy. The negotiated
+host profile affects MCP capability/cache identity; transcript schema is unchanged.
+
 ## Session lifecycle
 
 Each ACP session owns an independent Reasonix controller, workspace root, model,

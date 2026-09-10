@@ -76,7 +76,7 @@ func startWindowsVersionedUpdateHandoff(installerPath, installerSHA256, installD
 	defer releaseExecution()
 	err = retryWindowsUpdateHelperStart(func() error {
 		cmd := proc.Command(helperPath, windowsVersionedUpdateHandoffArgs(
-			os.Getpid(), installerPath, installerSHA256, installDir, relaunchPath, targetVersion,
+			windowsUpdateOwnerPID(), installerPath, installerSHA256, installDir, relaunchPath, targetVersion,
 		)...)
 		cmd.Env = instanceidentity.UpdateEnvironment(os.Environ(), config.ReasonixHomeDir())
 		return cmd.Start()
@@ -106,7 +106,7 @@ func startWindowsUpdateHelper(installerPath, installerSHA256, installDir, relaun
 	defer releaseExecution()
 	err = retryWindowsUpdateHelperStart(func() error {
 		cmd := proc.Command(helperPath, windowsUpdateHandoffArgs(
-			os.Getpid(),
+			windowsUpdateOwnerPID(),
 			installerPath,
 			installerSHA256,
 			installDir,

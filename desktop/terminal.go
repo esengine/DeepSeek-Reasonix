@@ -57,7 +57,7 @@ type TerminalShellView struct {
 }
 
 // TerminalWorkspaceView describes terminal capability for the active tab. All
-// slices are initialized so Wails serializes empty values as [] rather than null.
+// slices are initialized so the desktop bridge encodes empty values as [] rather than null.
 type TerminalWorkspaceView struct {
 	Available bool                  `json:"available"`
 	ReadOnly  bool                  `json:"readOnly"`

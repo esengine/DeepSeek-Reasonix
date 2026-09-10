@@ -6,6 +6,7 @@ import (
 )
 
 func ReasoningForConfig(cfg provider.Config) provider.ReasoningCapability {
+	cfg = provider.ApplyOpenCodeGoContract("anthropic", cfg)
 	protocol, _ := cfg.Extra["reasoning_protocol"].(string)
 	if protocol == "none" {
 		return provider.ReasoningOptions("")

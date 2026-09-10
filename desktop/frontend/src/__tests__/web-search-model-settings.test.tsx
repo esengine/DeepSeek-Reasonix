@@ -6,6 +6,7 @@ import { ModelsSection } from "../components/SettingsPanel";
 import { LocaleProvider } from "../lib/i18n";
 import type { AppBindings } from "../lib/bridge";
 import { baseSettings, installCanvasMock } from "../test-support/settingsTestFixtures";
+import { installDesktopHostStub } from "./desktopHostStub";
 const dom = new JSDOM("<!doctype html><html><body><div id=\"root\"></div></body></html>", {
   pretendToBeVisual: true,
   url: "http://localhost/",
@@ -37,11 +38,11 @@ localStorage.clear();
 
 
 let selected = "";
-window.go = {main:{App:{ApplyModelSettings:async(change)=>{
+installDesktopHostStub({ApplyModelSettings:async(change)=>{
   assert.equal(change.kind,"preference");
   if(change.kind === "preference" && change.field === "search") selected=change.ref;
   return {requestId:change.requestId,persisted:true,revision:"saved",application:"not_required",targets:[],issues:[],appliedCatalogs:[]};
-}} as Partial<AppBindings> as AppBindings}};
+}} as Partial<AppBindings> as AppBindings);
 const host=document.getElementById("root")!;
 const root=createRoot(host);
 const settings=baseSettings();

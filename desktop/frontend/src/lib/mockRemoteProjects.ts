@@ -1,5 +1,6 @@
 import type { ProjectNode, RemoteProjectView, RemoteSessionView, TabMeta } from "./types";
 import type { RemoteProjectBindings } from "./remoteProjectBridge";
+import { desktopHost } from "./desktopHost";
 import { __emitMockRemoteTab, __emitMockRemoteTabOpened } from "./remoteTabEvents";
 
 export type MockRemoteTabCatalog = {
@@ -13,7 +14,7 @@ export function createMockRemoteProjects(tabs: MockRemoteTabCatalog): {
   appendToTree: (tree: ProjectNode[]) => ProjectNode[];
 } {
   // Browser-only fault fixtures exercise the real remote hook and recovery commands.
-  const recoveryScenario = typeof window !== "undefined" && !window.runtime
+  const recoveryScenario = typeof window !== "undefined" && desktopHost().kind === "none"
     ? new URLSearchParams(window.location.search).get("session-recovery") : null;
   let recoveryInjected = false;
   let disconnectedTab = "";

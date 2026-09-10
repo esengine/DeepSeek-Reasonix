@@ -458,7 +458,7 @@ func TestRebindInvalidatesInFlightAsyncBuildBeforeSnapshot(t *testing.T) {
 		}
 	})
 
-	// startTabControllerBuild only backgrounds the build when a Wails context
+	// startTabControllerBuild only backgrounds the build when a host context
 	// exists; expand its goroutine branch by hand so a.ctx can stay nil (the
 	// nil-ctx emit guards are what every other build test relies on too).
 	buildCtx, cancel := context.WithCancel(context.Background())

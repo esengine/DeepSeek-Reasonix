@@ -7,6 +7,7 @@ import type { AppBindings } from "../lib/bridge";
 import { useController } from "../lib/useController";
 import { historySliceFromMessages } from "./mockHistorySlice";
 import type { HistorySlice, Meta, TabMeta, WireEvent } from "../lib/types";
+import { installDesktopHostStub } from "./desktopHostStub";
 
 let passed = 0;
 let failed = 0;
@@ -99,17 +100,9 @@ const meta: Meta = {
   goalStatus: "stopped",
 };
 const historyGate = deferred<HistorySlice>();
-const eventHandlers: Array<(event: WireEvent) => void> = [];
 let historyStarted = false;
 
-window.runtime = {
-  EventsOn: (name: string, callback: (...data: unknown[]) => void) => {
-    if (name === "agent:event") eventHandlers.push(callback as (event: WireEvent) => void);
-    return () => {};
-  },
-  BrowserOpenURL: () => {},
-};
-window.go = {
+const desktopStub = installDesktopHostStub(({
   main: {
     App: {
       ListTabs: async () => [tab],
@@ -127,7 +120,7 @@ window.go = {
       ReplayPendingPrompts: async () => {},
     } as Partial<AppBindings> as AppBindings,
   },
-};
+}).main.App);
 
 type Controller = ReturnType<typeof useController>;
 let controller: Controller | undefined;
@@ -143,10 +136,10 @@ await act(async () => {
   root.render(<Probe />);
   await flushPromises();
 });
-await waitFor("history request", () => historyStarted && eventHandlers.length > 0);
+await waitFor("history request", () => historyStarted && (desktopStub.events.get("agent:event")?.size ?? 0) > 0);
 
 await act(async () => {
-  for (const handler of eventHandlers) handler({ kind: "turn_started", tabId: tab.id });
+  desktopStub.emit("agent:event", { kind: "turn_started", tabId: tab.id });
   await flushPromises();
 });
 ok(controller?.state.items.some((item) => item.kind === "assistant" && item.streaming) ?? false, "turn starts while history is pending");

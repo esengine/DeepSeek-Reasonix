@@ -104,13 +104,13 @@ func (a *Agent) resolveReadCursor(plan *toolCallPlan) (toolOutcome, bool) {
 	}
 	cursor, ok := tool.DecodeReadCursor(token)
 	if !ok {
-		return readCursorRejected("the read continuation cursor is malformed; re-read the file with read_file")
+		return readCursorRejected("the read continuation cursor is malformed; re-read the file with read_file", plan)
 	}
 	path := readPathArg(plan.execArgs)
 	if resolver, ok := plan.execTool.(tool.ReadPathResolver); ok {
 		resolved, err := resolver.ResolveReadPath(plan.execArgs)
 		if err != nil {
-			return readCursorRejected(err.Error())
+			return readCursorRejected(err.Error(), plan)
 		}
 		path = resolved
 	}
@@ -119,11 +119,11 @@ func (a *Agent) resolveReadCursor(plan *toolCallPlan) (toolOutcome, bool) {
 	}
 	path = filepath.Clean(path)
 	if !a.reads.tasks.accept(cursor, path) {
-		return readCursorRejected("the read continuation cursor is not valid for this file or session; re-read the file with read_file")
+		return readCursorRejected("the read continuation cursor is not valid for this file or session; re-read the file with read_file", plan)
 	}
 	rewritten, err := withResolvedReadWindow(plan.execArgs, cursor)
 	if err != nil {
-		return readCursorRejected(err.Error())
+		return readCursorRejected(err.Error(), plan)
 	}
 	plan.execArgs = rewritten
 	plan.permArgs = rewritten
@@ -133,8 +133,9 @@ func (a *Agent) resolveReadCursor(plan *toolCallPlan) (toolOutcome, bool) {
 	return toolOutcome{}, false
 }
 
-func readCursorRejected(msg string) (toolOutcome, bool) {
-	return toolOutcome{output: "error: " + msg, errMsg: msg, blocked: true}, true
+func readCursorRejected(msg string, plan *toolCallPlan) (toolOutcome, bool) {
+	d := &tool.OperationDiagnostic{Code: tool.ReadCursorInvalid, OperationID: plan.call.ID, Path: readPathArg(plan.execArgs), Recovery: "inspect a fresh explicit range; do not reuse the rejected cursor"}
+	return toolOutcome{output: "error: " + msg, errMsg: msg, blocked: true, diagnostic: d}, true
 }
 
 func readCursorArg(args json.RawMessage) string {

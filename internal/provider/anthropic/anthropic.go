@@ -62,6 +62,7 @@ func init() {
 
 // New builds an Anthropic provider from a resolved config.
 func New(cfg provider.Config) (provider.Provider, error) {
+	cfg = provider.ApplyOpenCodeGoContract("anthropic", cfg)
 	if cfg.Model == "" {
 		return nil, fmt.Errorf("anthropic: model is required for provider %q", cfg.Name)
 	}

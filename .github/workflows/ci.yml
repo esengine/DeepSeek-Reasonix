@@ -295,7 +295,7 @@ jobs:
         uses: actions/checkout@v7
 
       - if: env.RUN_STEPS == 'true'
-        uses: actions/setup-go@v6
+        uses: actions/setup-go@v7
         with:
           go-version-file: sdk/go/go.mod
 
@@ -363,7 +363,7 @@ jobs:
         working-directory: desktop
     steps:
       - uses: actions/checkout@v7
-      - uses: pnpm/action-setup@v6.0.9
+      - uses: pnpm/action-setup@v6.1.0
         with:
           version: 10
           run_install: false
@@ -371,14 +371,22 @@ jobs:
         with:
           node-version: "24"
           cache: pnpm
-          cache-dependency-path: desktop/frontend/pnpm-lock.yaml
+          cache-dependency-path: desktop/pnpm-lock.yaml
       - run: pnpm --dir frontend install --frozen-lockfile
       - uses: actions/download-artifact@v8
         with:
           name: ${{ needs.desktop-prepare.outputs.artifact_name }}
-          path: desktop/frontend
+          path: desktop/frontend/dist
+      - name: Verify frontend artifact layout
+        run: test -f frontend/dist/index.html
       - name: Verify CI test coverage and runner
         run: node --test frontend/scripts/ci-test-plan.test.mjs
+      - name: Check the Electron shell
+        run: |
+          pnpm --dir electron typecheck
+          pnpm --dir electron test
+          node --test packaging/*.test.mjs
+          pnpm --dir electron build
       - name: Test desktop frontend once per suite
         env:
           REASONIX_TEST_CONCURRENCY: "2"
@@ -393,7 +401,7 @@ jobs:
         working-directory: desktop
     steps:
       - uses: actions/checkout@v7
-      - uses: pnpm/action-setup@v6.0.9
+      - uses: pnpm/action-setup@v6.1.0
         with:
           version: 10
           run_install: false
@@ -401,21 +409,23 @@ jobs:
         with:
           node-version: "24"
           cache: pnpm
-          cache-dependency-path: desktop/frontend/pnpm-lock.yaml
+          cache-dependency-path: desktop/pnpm-lock.yaml
       - run: pnpm --dir frontend install --frozen-lockfile
       - uses: actions/download-artifact@v8
         with:
           name: ${{ needs.desktop-prepare.outputs.artifact_name }}
-          path: desktop/frontend
+          path: desktop/frontend/dist
+      - name: Verify frontend artifact layout
+        run: test -f frontend/dist/index.html
       - name: Install browser runtimes
-        run: PLAYWRIGHT_BROWSERS_PATH=.pw-browsers pnpm --dir frontend exec playwright install --with-deps chromium webkit
+        run: PLAYWRIGHT_BROWSERS_PATH=.pw-browsers pnpm --dir frontend exec playwright install --with-deps chromium
       - name: Test desktop browser contracts
         run: |
           pnpm --dir frontend test:motion-browser
           PLAYWRIGHT_BROWSERS_PATH=.pw-browsers pnpm --dir frontend test:app-browser
-          PLAYWRIGHT_BROWSERS_PATH=.pw-browsers REASONIX_SETTINGS_BROWSERS=chromium,webkit pnpm --dir frontend test:settings-browser
+          PLAYWRIGHT_BROWSERS_PATH=.pw-browsers REASONIX_SETTINGS_BROWSERS=chromium pnpm --dir frontend test:settings-browser
           xvfb-run -a env REASONIX_TRANSCRIPT_NATIVE_THUMB=1 pnpm --dir frontend test:transcript-browser
-          PLAYWRIGHT_BROWSERS_PATH=.pw-browsers pnpm --dir frontend test:transcript-reader-browser
+          REASONIX_TRANSCRIPT_READER_BROWSERS=chromium PLAYWRIGHT_BROWSERS_PATH=.pw-browsers pnpm --dir frontend test:transcript-reader-browser
 
   desktop-prepare:
     needs: changes
@@ -435,7 +445,7 @@ jobs:
           cache: true
           cache-dependency-path: desktop/go.sum
 
-      - uses: pnpm/action-setup@v6.0.9
+      - uses: pnpm/action-setup@v6.1.0
         with:
           version: 10
           run_install: false
@@ -444,12 +454,7 @@ jobs:
         with:
           node-version: "24"
           cache: pnpm
-          cache-dependency-path: desktop/frontend/pnpm-lock.yaml
-
-      - name: Install Wails CLI
-        run: |
-          echo "$(go env GOPATH)/bin" >> "$GITHUB_PATH"
-          go install "github.com/wailsapp/wails/v2/cmd/wails@$(cat "$GITHUB_WORKSPACE/.wails-version")"
+          cache-dependency-path: desktop/pnpm-lock.yaml
 
       - name: gofmt
         run: |
@@ -469,24 +474,26 @@ jobs:
             exit 1
           fi
 
-      # WebKitGTK 4.0 toolchain (pinned to ubuntu-22.04; no webkit2_41 tag).
-      - name: Install Linux build deps
+      # The packaged Electron shell embeds desktopContract.json; a stale
+      # frontend/src/generated would ship a shell/service protocol mismatch.
+      - name: Check desktop host contract drift
         run: |
-          sudo apt-get update
-          sudo apt-get install -y dbus-daemon gcc libgtk-3-dev libwebkit2gtk-4.0-dev xvfb
+          go run . -emit-contract frontend/src/generated
+          if ! git diff --exit-code -- frontend/src/generated; then
+            echo "desktop contract is stale - run 'cd desktop && go run . -emit-contract frontend/src/generated' and commit."
+            exit 1
+          fi
 
       - name: Build frontend
         run: |
-          wails generate module
           pnpm --dir frontend install --frozen-lockfile
-          pnpm --dir frontend build
+          pnpm --dir frontend build:electron
 
       - uses: actions/upload-artifact@v7
         with:
           name: desktop-frontend-${{ github.run_id }}-${{ github.run_attempt }}
           path: |
             desktop/frontend/dist
-            desktop/frontend/wailsjs
           if-no-files-found: error
           retention-days: 3
 
@@ -506,7 +513,7 @@ jobs:
           cache: true
           cache-dependency-path: desktop/go.sum
 
-      - uses: pnpm/action-setup@v6.0.9
+      - uses: pnpm/action-setup@v6.1.0
         with:
           version: 10
           run_install: false
@@ -515,33 +522,15 @@ jobs:
         with:
           node-version: "24"
           cache: pnpm
-          cache-dependency-path: desktop/frontend/pnpm-lock.yaml
+          cache-dependency-path: desktop/pnpm-lock.yaml
 
       - uses: actions/download-artifact@v8
         with:
           name: ${{ needs.desktop-prepare.outputs.artifact_name }}
-          path: desktop/frontend
+          path: desktop/frontend/dist
+      - name: Verify frontend artifact layout
+        run: test -f frontend/dist/index.html
       - run: pnpm --dir frontend install --frozen-lockfile
-
-      # WebKitGTK 4.0 toolchain (pinned to ubuntu-22.04; no webkit2_41 tag).
-      - name: Install Linux build deps
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y dbus-daemon gcc libgtk-3-dev libwebkit2gtk-4.0-dev xvfb
-
-      - name: Test WebKitGTK native transcript scrolling
-        timeout-minutes: 5
-        run: |
-          pnpm --dir frontend exec vite preview --host 127.0.0.1 --port 4173 --strictPort >/tmp/reasonix-transcript-preview.log 2>&1 &
-          preview_pid=$!
-          trap 'kill "$preview_pid" 2>/dev/null || true' EXIT
-          for _ in $(seq 1 100); do
-            curl -fsS http://127.0.0.1:4173/ >/dev/null && break
-            sleep 0.1
-          done
-          xvfb-run -a env WEBKIT_DISABLE_COMPOSITING_MODE=1 go run -tags reasonix_transcript_smoke ./cmd/transcript-native-smoke \
-            -url 'http://127.0.0.1:4173/?mock=bench&bench=1' \
-            -script transcript_native_smoke_contract.js
 
       - name: vet
         run: go vet ./...
@@ -559,43 +548,11 @@ jobs:
       - name: test
         run: go test ./...
 
-      - name: WebKitGTK 4.0 native recovery smoke
-        run: xvfb-run -a env WEBKIT_DISABLE_COMPOSITING_MODE=1 go test -tags reasonix_webkit_smoke . -run '^TestWebKitNativeRecoverySmoke$'
-
       # The extension work added new shared-state paths to the desktop
       # runtime (tab/rebuild fences, extension UI). Race-sweep the module so
       # regressions are CI-blocked, not just author-verified locally.
       - name: test -race
         run: go test -race ./...
-
-  # Ubuntu 24.04 ships WebKitGTK 4.1 only. Keep this capability build separate
-  # from the 22.04/4.0 leg so neither runtime becomes a distro whitelist.
-  desktop-linux-webkit41:
-    needs: changes
-    if: always() && (github.event_name != 'pull_request' || needs.changes.outputs.desktop != 'false')
-    runs-on: ubuntu-24.04
-    defaults:
-      run:
-        working-directory: desktop
-    steps:
-      - uses: actions/checkout@v7
-
-      - uses: actions/setup-go@v7
-        with:
-          go-version-file: desktop/go.mod
-          cache: true
-          cache-dependency-path: desktop/go.sum
-
-      - name: Install WebKitGTK 4.1 build dependencies
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y dbus-daemon gcc libgtk-3-dev libwebkit2gtk-4.1-dev xvfb
-
-      - name: Build and test WebKitGTK 4.1 observer
-        run: go test -tags webkit2_41 ./...
-
-      - name: WebKitGTK 4.1 native recovery smoke
-        run: xvfb-run -a env WEBKIT_DISABLE_COMPOSITING_MODE=1 go test -tags 'webkit2_41 reasonix_webkit_smoke' . -run '^TestWebKitNativeRecoverySmoke$'
 
   # desktop/ is a separate module, so the root macOS matrix above does not
   # compile or exercise the native PTY and FSEvents implementations.
@@ -615,7 +572,7 @@ jobs:
           cache: true
           cache-dependency-path: desktop/go.sum
 
-      - uses: pnpm/action-setup@v6.0.9
+      - uses: pnpm/action-setup@v6.1.0
         with:
           version: 10
           run_install: false
@@ -624,36 +581,17 @@ jobs:
         with:
           node-version: "24"
           cache: pnpm
-          cache-dependency-path: desktop/frontend/pnpm-lock.yaml
+          cache-dependency-path: desktop/pnpm-lock.yaml
 
-      - name: Install Wails CLI and build frontend
+      - name: Build frontend
         run: |
-          echo "$(go env GOPATH)/bin" >> "$GITHUB_PATH"
-          go install "github.com/wailsapp/wails/v2/cmd/wails@$(cat "$GITHUB_WORKSPACE/.wails-version")"
-          wails generate module
           pnpm --dir frontend install --frozen-lockfile
           pnpm --dir frontend build
-
-      - name: Test WKWebView native transcript scrolling
-        timeout-minutes: 5
-        env:
-          REASONIX_NATIVE_SMOKE_ISOLATED_CI: "1"
-        run: |
-          pnpm --dir frontend exec vite preview --host 127.0.0.1 --port 4173 --strictPort >/tmp/reasonix-transcript-preview.log 2>&1 &
-          preview_pid=$!
-          trap 'kill "$preview_pid" 2>/dev/null || true' EXIT
-          for _ in $(seq 1 100); do
-            curl -fsS http://127.0.0.1:4173/ >/dev/null && break
-            sleep 0.1
-          done
-          go run -tags reasonix_transcript_smoke ./cmd/transcript-native-smoke \
-            -url 'http://127.0.0.1:4173/?mock=bench&bench=1' \
-            -script transcript_native_smoke_contract.js
 
       - name: Test integrated terminal, PTY, and FSEvents lifecycle
         run: go test -race -run 'Test(DarwinWorkspaceWatcher|WorkspaceChangeHub|ResolveTerminal|Terminal|EmptyTerminal|UnixTerminalProcess)' .
 
-      # The production Wails build uses CGO. Keep the explicit unavailable
+      # The production desktop build uses CGO. Keep the explicit unavailable
       # backend buildable as a fail-closed portability contract instead of
       # silently falling back to kqueue's per-file descriptor usage.
       - name: Test macOS build without CGO
@@ -670,6 +608,19 @@ jobs:
           version: v2.12.2
           working-directory: desktop
           args: --timeout=5m
+
+      # Packaging validation, not a code gate: run it on pushes to main-v2 (the
+      # release pipeline packages again anyway), and let pull requests stop
+      # after the lint step. Ad-hoc signs (no Apple secrets in CI) and skips
+      # the DMG.
+      - name: Package Electron app and verify bundle members
+        if: github.event_name != 'pull_request'
+        timeout-minutes: 25
+        env:
+          DESKTOP_BUILD_SKIP_DMG: "1"
+        run: |
+          ../scripts/desktop-build.sh darwin/arm64 v0.0.0-ci canary
+          node packaging/verify.mjs ../dist/Reasonix-darwin-arm64.zip
 
   # Desktop project-root matching is case-insensitive only on Windows
   # (sameDesktopPath folds case when os.PathSeparator is '\'), so the
@@ -695,7 +646,7 @@ jobs:
           cache: true
           cache-dependency-path: desktop/go.sum
 
-      - uses: pnpm/action-setup@v6.0.9
+      - uses: pnpm/action-setup@v6.1.0
         with:
           version: 10
           run_install: false
@@ -704,28 +655,21 @@ jobs:
         with:
           node-version: "24"
           cache: pnpm
-          cache-dependency-path: desktop/frontend/pnpm-lock.yaml
-
-      - name: Install Wails CLI
-        run: |
-          echo "$(go env GOPATH)/bin" >> "$GITHUB_PATH"
-          go install "github.com/wailsapp/wails/v2/cmd/wails@$(cat "$GITHUB_WORKSPACE/.wails-version")"
+          cache-dependency-path: desktop/pnpm-lock.yaml
 
       # go:embed of frontend/dist needs a built frontend before the package
       # compiles, same as the ubuntu desktop leg.
       - name: Build frontend
         run: |
-          wails generate module
           pnpm --dir frontend install --frozen-lockfile
           pnpm --dir frontend build
 
       - name: Test native motion contracts
         run: pnpm --dir frontend test:motion
 
-      # Chromium is the closest deterministic browser replay available on the
-      # Windows runner; the native smoke below separately exercises the actual
-      # installed WebView2 runtime. Keep both paths so transcript geometry is
-      # covered before the shell-level smoke starts.
+      # Chromium is the deterministic browser replay on the Windows runner; the
+      # shell-level Electron startup smoke below separately exercises the real
+      # packaged runtime.
       - name: Test transcript browser replay on Windows
         timeout-minutes: 10
         env:
@@ -740,54 +684,19 @@ jobs:
           PLAYWRIGHT_BROWSERS_PATH: ${{ github.workspace }}/desktop/frontend/.pw-browsers
         run: pnpm --dir frontend test:settings-browser
 
-      - name: Test WebView2 native transcript and composer scrolling
-        timeout-minutes: 5
+      # Package the real Electron shell on every desktop PR and exercise the
+      # production startup path (shell -> Go service handshake) in the packaged
+      # layout. package.mjs builds the frontend itself (build:electron flavor).
+      - name: Package Electron shell for native startup smoke
+        timeout-minutes: 15
         run: |
-          pnpm --dir frontend exec vite preview --host 127.0.0.1 --port 4173 --strictPort > "$RUNNER_TEMP/reasonix-transcript-preview.log" 2>&1 &
-          preview_pid=$!
-          trap 'kill "$preview_pid" 2>/dev/null || true' EXIT
-          for _ in $(seq 1 100); do
-            curl -fsS http://127.0.0.1:4173/ >/dev/null && break
-            sleep 0.1
-          done
-          go run -tags reasonix_transcript_smoke ./cmd/transcript-native-smoke \
-            -url 'http://127.0.0.1:4173/?mock=bench&bench=1&nativeComposer=1' \
-            -script transcript_native_smoke_contract.js
+          pnpm install --frozen-lockfile
+          go build -trimpath -ldflags "-s -w" -o build/bin/reasonix-desktop.exe .
+          node packaging/package.mjs windows/amd64 v0.0.0-ci canary
 
-      - name: Test WebView2 native smoke state machine
-        shell: pwsh
-        run: ../scripts/test-webview2-native-smoke.ps1 -SelfTest
-
-      - name: Test WebView2 transcript selection compositor
-        shell: pwsh
-        timeout-minutes: 5
-        run: ../scripts/test-transcript-selection-webview2.ps1 -Iterations 3
-
-      - name: Upload WebView2 transcript selection evidence
-        if: failure()
-        uses: actions/upload-artifact@v7
-        with:
-          name: webview2-transcript-selection-${{ github.run_id }}-${{ github.run_attempt }}
-          path: ${{ runner.temp }}/reasonix-transcript-selection-smoke
-          if-no-files-found: warn
-          retention-days: 14
-
-      # Build the real Wails executable on every desktop PR and exercise the
-      # exact production startup path in Microsoft's installed WebView2 runtime.
-      # The frontend and bindings were already built above, so this skips only
-      # duplicate build work, not the native shell.
-      - name: Build Wails executable for native startup smoke
-        timeout-minutes: 10
-        run: wails build -clean -s -skipbindings -nopackage -platform windows/amd64 -webview2 embed
-
-      - name: Smoke-test Wails/WebView2 native startup
-        shell: pwsh
-        timeout-minutes: 2
-        run: |
-          ../scripts/test-webview2-native-smoke.ps1 `
-            -ExecutablePath "build/bin/reasonix-desktop.exe" `
-            -TimeoutSeconds 60 `
-            -HealthySeconds 5
+      - name: Smoke-test Electron native startup
+        timeout-minutes: 3
+        run: node packaging/smoke.mjs build/electron/windows-amd64/app --service build/bin/reasonix-desktop.exe
 
       - name: test (Windows desktop and update helper)
         # Normal wall time is 6-7 minutes; a loaded runner has exceeded 15 with
@@ -800,13 +709,6 @@ jobs:
         timeout-minutes: 2
         run: go test -timeout=60s fyne.io/systray
 
-      # A cold nested-module cache can spend several minutes compiling the
-      # real WebView2 cookie integration test. Keep its budget independent of
-      # the already-complete desktop suite and retain a Go timeout stack dump.
-      - name: test (vendored WebView2 edge)
-        timeout-minutes: 10
-        run: (cd third_party/go-webview2 && go test -timeout=8m ./pkg/edge)
-
       # Installer packaging is packaging validation, not a code gate: run it
       # on pushes to main-v2 (the release pipeline builds installers again
       # anyway), but let pull requests stop after the test step.
@@ -818,6 +720,12 @@ jobs:
         if: github.event_name != 'pull_request'
         timeout-minutes: 20
         run: ../scripts/desktop-build.sh windows/amd64 v0.0.0-ci canary
+
+      - name: Verify packaged Windows artifacts
+        if: github.event_name != 'pull_request'
+        run: |
+          node packaging/verify.mjs ../dist/Reasonix-windows-amd64.zip
+          node packaging/signing-files.mjs build/windows/signing-payload --check
 
   # repolint scans desktop/ and sdk/ too, so this job also runs for diffs the
   # `code` filter would otherwise skip.
@@ -834,7 +742,7 @@ jobs:
           cache: true
 
       - if: github.event_name != 'pull_request' || needs.changes.outputs.desktop != 'false'
-        uses: pnpm/action-setup@v6.0.9
+        uses: pnpm/action-setup@v6.1.0
         with:
           version: 10
           run_install: false
@@ -844,7 +752,7 @@ jobs:
         with:
           node-version: "24"
           cache: pnpm
-          cache-dependency-path: desktop/frontend/pnpm-lock.yaml
+          cache-dependency-path: desktop/pnpm-lock.yaml
 
       - name: required native motion contracts
         if: github.event_name != 'pull_request' || needs.changes.outputs.desktop != 'false'
@@ -854,11 +762,6 @@ jobs:
 
       - name: repo standards
         run: go run ./tools/repolint
-
-      - name: wails version pin
-        run: |
-          bash scripts/check-wails-pin.sh
-          bash scripts/check-wails-pin.test.sh
 
       # `make lint-install` reads the same file, so a local run and this job
       # cannot drift onto different linter versions.
@@ -874,7 +777,8 @@ jobs:
       # The step above only type-checks the linux/amd64 build, so every
       # //go:build windows and //go:build darwin file in the tree went unlinted.
       # Both modules cross-check without a toolchain; desktop under darwin does
-      # not, because its watchdog is cgo, so that leg lives in desktop-macos.
+      # not, because its bundle icon repair is cgo, so that leg lives in
+      # desktop-macos.
       - name: golangci-lint (cross-platform build tags)
         run: |
           set -euo pipefail
@@ -898,7 +802,6 @@ jobs:
             .github/workflows/release-desktop.yml \
             .github/workflows/release-verify-issues.yml \
             .github/workflows/docs-impact.yml \
-            .github/workflows/transcript-native-smoke.yml \
             .github/workflows/ci.yml
           node --test scripts/desktop-release-artifacts.test.mjs scripts/ci-workflow.test.mjs
           bash scripts/release-workflows.test.sh
@@ -927,7 +830,7 @@ jobs:
 
   govulncheck:
     needs: changes
-    if: always() && (github.event_name != 'pull_request' || needs.changes.outputs.code != 'false')
+    if: github.event_name != 'pull_request'
     runs-on: ubuntu-latest
     continue-on-error: true # informational — stdlib vulns need a Go patch release
     steps:
@@ -946,7 +849,7 @@ jobs:
 
   coverage:
     needs: changes
-    if: always() && (github.event_name != 'pull_request' || needs.changes.outputs.code != 'false')
+    if: github.event_name != 'pull_request'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7

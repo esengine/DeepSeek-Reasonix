@@ -134,19 +134,15 @@ make cross      # -> dist/ (darwin|linux|windows × amd64|arm64)
 
 #### Desktop
 
-The desktop build additionally requires:
-
-- **Node 24+ and pnpm 10** (`npm install -g pnpm@10`) for the frontend
-- **Wails CLI** matching the shared `.wails-version` pin
+The desktop build additionally requires **Node 24+ and pnpm 10**
+(`npm install -g pnpm@10`) for the frontend and the Electron shell:
 
 ```sh
-make wails-install
-cd desktop
-wails build
+scripts/desktop-build.sh darwin/arm64 v0.0.0-dev   # one platform per run
 ```
 
-See the [desktop build guide](desktop/README.md#prerequisites) for platform
-webview dependencies and Linux build tags.
+No platform webview dependencies are needed — the shell ships its own
+Chromium. See the [desktop build guide](desktop/README.md#prerequisites).
 
 ## Quick start
 

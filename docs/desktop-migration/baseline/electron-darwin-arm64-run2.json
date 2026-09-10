@@ -1,0 +1,37 @@
+{
+  "label": "electron-darwin-arm64-run2",
+  "executable": "desktop/electron/scripts/metrics-launch.sh",
+  "measuredAt": "2026-09-08T18:24:41.009452+00:00",
+  "machine": {
+    "platform": "macOS-26.6.2-arm64-arm-64bit",
+    "machine": "arm64"
+  },
+  "startup": {
+    "readyMs": 313,
+    "healthyMs": 3742
+  },
+  "samples": [
+    {
+      "afterHealthySeconds": 2,
+      "rssKiB": 681200,
+      "processCount": 5,
+      "processes": "Electron;Electron Helper;Electron Helper (Renderer);reasonix-desktop-service-versioned"
+    },
+    {
+      "afterHealthySeconds": 10,
+      "rssKiB": 684656,
+      "processCount": 5,
+      "processes": "Electron;Electron Helper;Electron Helper (Renderer);reasonix-desktop-service-versioned"
+    },
+    {
+      "afterHealthySeconds": 30,
+      "rssKiB": 714640,
+      "processCount": 5,
+      "processes": "Electron;Electron Helper;Electron Helper (Renderer);reasonix-desktop-service-versioned"
+    }
+  ],
+  "exit": {
+    "terminatedWithinMs": 239,
+    "clean": true
+  }
+}

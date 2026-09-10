@@ -18,7 +18,7 @@ type RecoveryGroup struct {
 }
 
 // ListRecoveryGroups returns every indexed recovery lineage in directory. All
-// slices are initialized for stable CLI/Wails JSON contracts.
+// slices are initialized for stable CLI/desktop JSON contracts.
 func (c *Catalog) ListRecoveryGroups(ctx context.Context, directory string) ([]RecoveryGroup, error) {
 	out := []RecoveryGroup{}
 	if c == nil || c.db == nil {

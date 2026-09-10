@@ -54,6 +54,7 @@ function ConfirmDialog({ request, onResolve }: { request: ConfirmDialogRequest; 
 
   return createPortal(
     <div
+      data-app-overlay=""
       className="modal-backdrop reasonix-confirm-backdrop"
       role="presentation"
       onMouseDown={(event) => {

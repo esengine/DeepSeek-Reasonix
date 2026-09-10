@@ -30,7 +30,7 @@ const deferredRuntimeReloadLabel = "__reload__"
 // runtime could not refresh, plus tabs whose initial startup failed, because
 // the session lease was held by another Reasonix process. A single background
 // loop probes the lease and replays the rebuild once the other side releases
-// it. The loop only runs after enableDeferredRebuildRetry (the wails startup
+// it. The loop only runs after enableDeferredRebuildRetry (the startup
 // hook); tests that never call it get the pending bookkeeping without a
 // background goroutine.
 type deferredRebuildState struct {

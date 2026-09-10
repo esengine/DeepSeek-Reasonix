@@ -11,6 +11,33 @@ import (
 	"reasonix/internal/repair"
 )
 
+func writeVersionedWindowsStaging(t *testing.T, dir, prefix, version string, names ...string) {
+	t.Helper()
+	if len(names) == 0 {
+		names = []string{"reasonix-desktop.exe", "reasonix-cli.exe", "reasonix-update-helper.exe", "reasonix-launcher.exe"}
+	}
+	for _, name := range names {
+		path := filepath.Join(dir, filepath.FromSlash(name))
+		if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(path, []byte(prefix+name), 0o700); err != nil {
+			t.Fatal(err)
+		}
+	}
+	writeWindowsPayloadManifestForTest(t, dir, version)
+}
+
+func versionedWindowsTransaction(installDir, version, createdAt string) *repair.UpdateTransaction {
+	return &repair.UpdateTransaction{
+		SchemaVersion: 1,
+		ToVersion:     version,
+		TargetKind:    "file",
+		TargetPath:    filepath.Join(installDir, "reasonix-desktop.exe"),
+		CreatedAt:     createdAt,
+	}
+}
+
 func TestPreferVersionedWindowsActivation(t *testing.T) {
 	staging := t.TempDir()
 	if preferVersionedWindowsActivation(staging) {
@@ -32,19 +59,16 @@ func TestPreferVersionedWindowsActivation(t *testing.T) {
 }
 
 func TestActivateVersionedWindowsFromStaging(t *testing.T) {
+	acceptWindowsPayloadManifestForTest(t)
 	installDir := t.TempDir()
 	staging := t.TempDir()
-	for _, name := range []string{
+	writeVersionedWindowsStaging(t, staging, "payload:", "v1.20.0",
 		"reasonix-desktop.exe",
 		"reasonix-cli.exe",
 		"reasonix-update-helper.exe",
 		"reasonix-launcher.exe",
 		"reasonix-guard.exe",
-	} {
-		if err := os.WriteFile(filepath.Join(staging, name), []byte("payload:"+name), 0o700); err != nil {
-			t.Fatal(err)
-		}
-	}
+	)
 	// Seed a flat desktop so cleanup is observable.
 	if err := os.WriteFile(filepath.Join(installDir, "reasonix-desktop.exe"), []byte("old"), 0o700); err != nil {
 		t.Fatal(err)
@@ -53,13 +77,7 @@ func TestActivateVersionedWindowsFromStaging(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	claimed := &repair.UpdateTransaction{
-		SchemaVersion: 1,
-		ToVersion:     "v1.20.0",
-		TargetKind:    "file",
-		TargetPath:    filepath.Join(installDir, "reasonix-desktop.exe"),
-		CreatedAt:     "2026-01-01T00:00:00Z",
-	}
+	claimed := versionedWindowsTransaction(installDir, "v1.20.0", "2026-01-01T00:00:00Z")
 	if err := activateVersionedWindowsFromStaging(claimed, staging); err != nil {
 		t.Fatal(err)
 	}
@@ -94,45 +112,75 @@ func TestActivateVersionedWindowsFromStaging(t *testing.T) {
 	}
 }
 
+func TestActivateVersionedWindowsFromStagingPublishesShellTree(t *testing.T) {
+	acceptWindowsPayloadManifestForTest(t)
+	installDir := t.TempDir()
+	staging := t.TempDir()
+	tree := []string{"app/Reasonix.exe", "app/resources/app.asar", "app/locales/en-US.pak"}
+	writeVersionedWindowsStaging(t, staging, "payload:", "v1.30.0", append([]string{
+		"reasonix-desktop.exe",
+		"reasonix-cli.exe",
+		"reasonix-update-helper.exe",
+		"reasonix-launcher.exe",
+	}, tree...)...)
+	if err := activateVersionedWindowsFromStaging(versionedWindowsTransaction(installDir, "v1.30.0", "2026-01-01T00:00:00Z"), staging); err != nil {
+		t.Fatal(err)
+	}
+	versionDir := filepath.Join(installDir, installlayout.VersionsDirName, "v1.30.0")
+	for _, name := range tree {
+		raw, err := os.ReadFile(filepath.Join(versionDir, filepath.FromSlash(name)))
+		if err != nil || string(raw) != "payload:"+name {
+			t.Fatalf("tree member %s = %q err=%v", name, raw, err)
+		}
+	}
+	if _, err := os.Stat(filepath.Join(installDir, "app")); !os.IsNotExist(err) {
+		t.Fatalf("shell tree leaked into the install root: %v", err)
+	}
+}
+
+func TestActivateVersionedWindowsFromStagingRejectsManifestDrift(t *testing.T) {
+	acceptWindowsPayloadManifestForTest(t)
+	installDir := t.TempDir()
+	staging := t.TempDir()
+	writeVersionedWindowsStaging(t, staging, "payload:", "v1.30.0",
+		"reasonix-desktop.exe",
+		"reasonix-cli.exe",
+		"reasonix-update-helper.exe",
+		"reasonix-launcher.exe",
+		"app/Reasonix.exe",
+	)
+	if err := os.WriteFile(filepath.Join(staging, "app", "Reasonix.exe"), []byte("tampered"), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := activateVersionedWindowsFromStaging(versionedWindowsTransaction(installDir, "v1.30.0", "2026-01-01T00:00:00Z"), staging); err == nil {
+		t.Fatal("staged tree member that differs from the signed manifest was activated")
+	}
+	if installlayout.HasCurrent(installDir) {
+		t.Fatal("current.json was written after a rejected payload")
+	}
+	if err := os.Remove(filepath.Join(staging, "reasonix-payload.json")); err != nil {
+		t.Fatal(err)
+	}
+	if err := activateVersionedWindowsFromStaging(versionedWindowsTransaction(installDir, "v1.30.0", "2026-01-01T00:00:00Z"), staging); err == nil {
+		t.Fatal("staged payload without a signed manifest was activated")
+	}
+}
+
 func TestPreferRelaunchPathIgnoresStaleVersionedDesktop(t *testing.T) {
+	acceptWindowsPayloadManifestForTest(t)
 	installDir := t.TempDir()
 	oldSrc := t.TempDir()
 	newSrc := t.TempDir()
-	writeVersionedPayload := func(dir, prefix string) {
-		t.Helper()
-		for _, name := range []string{
-			"reasonix-desktop.exe",
-			"reasonix-cli.exe",
-			"reasonix-update-helper.exe",
-			"reasonix-launcher.exe",
-		} {
-			if err := os.WriteFile(filepath.Join(dir, name), []byte(prefix+name), 0o700); err != nil {
-				t.Fatal(err)
-			}
-		}
-	}
-	writeVersionedPayload(oldSrc, "old-")
-	if err := activateVersionedWindowsFromStaging(&repair.UpdateTransaction{
-		SchemaVersion: 1,
-		ToVersion:     "v1.24.0",
-		TargetKind:    "file",
-		TargetPath:    filepath.Join(installDir, "reasonix-desktop.exe"),
-		CreatedAt:     "2026-01-01T00:00:00Z",
-	}, oldSrc); err != nil {
+	writeVersionedWindowsStaging(t, oldSrc, "old-", "v1.24.0")
+	if err := activateVersionedWindowsFromStaging(versionedWindowsTransaction(installDir, "v1.24.0", "2026-01-01T00:00:00Z"), oldSrc); err != nil {
 		t.Fatal(err)
 	}
 	oldDesktop, err := installlayout.ActiveDesktopPath(installDir)
 	if err != nil {
 		t.Fatal(err)
 	}
-	writeVersionedPayload(newSrc, "new-")
-	if err := activateVersionedWindowsFromStaging(&repair.UpdateTransaction{
-		SchemaVersion: 1,
-		ToVersion:     "v1.24.1",
-		TargetKind:    "file",
-		TargetPath:    filepath.Join(installDir, "reasonix-desktop.exe"),
-		CreatedAt:     "2026-01-01T00:00:01Z",
-	}, newSrc); err != nil {
+	writeVersionedWindowsStaging(t, newSrc, "new-", "v1.24.1")
+	if err := activateVersionedWindowsFromStaging(versionedWindowsTransaction(installDir, "v1.24.1", "2026-01-01T00:00:01Z"), newSrc); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := os.Stat(oldDesktop); err != nil {
@@ -145,27 +193,18 @@ func TestPreferRelaunchPathIgnoresStaleVersionedDesktop(t *testing.T) {
 }
 
 func TestInstallStagedWindowsReleaseUnitPrefersVersioned(t *testing.T) {
+	acceptWindowsPayloadManifestForTest(t)
 	installDir := t.TempDir()
 	staging := t.TempDir()
-	for _, name := range []string{
+	writeVersionedWindowsStaging(t, staging, "p:", "v1.20.0",
 		"reasonix-desktop.exe",
 		"reasonix-cli.exe",
 		"reasonix-update-helper.exe",
 		"reasonix-launcher.exe",
 		"reasonix-guard.exe",
-	} {
-		if err := os.WriteFile(filepath.Join(staging, name), []byte("p:"+name), 0o700); err != nil {
-			t.Fatal(err)
-		}
-	}
+	)
 	// Minimal claimed unit (versioned path does not need full flat file list).
-	claimed := &repair.UpdateTransaction{
-		SchemaVersion: 1,
-		ToVersion:     "v1.20.0",
-		TargetKind:    "file",
-		TargetPath:    filepath.Join(installDir, "reasonix-desktop.exe"),
-		CreatedAt:     "2026-01-01T00:00:00Z",
-	}
+	claimed := versionedWindowsTransaction(installDir, "v1.20.0", "2026-01-01T00:00:00Z")
 	started, receipts, err := installStagedWindowsReleaseUnit(claimed, staging)
 	if err != nil {
 		t.Fatal(err)

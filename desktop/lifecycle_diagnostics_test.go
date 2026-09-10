@@ -111,13 +111,6 @@ func TestDesktopDiagnosticsSkipsNonPrimaryLaunchModes(t *testing.T) {
 		version = oldVersion
 	})
 
-	remote := NewApp()
-	remote.remoteWindowTicket = "remote"
-	prepareDesktopDiagnostics(remote)
-	if remote.diagnosticsOwner {
-		t.Fatal("remote window claimed diagnostics ownership")
-	}
-
 	version = "dev"
 	dev := NewApp()
 	prepareDesktopDiagnostics(dev)

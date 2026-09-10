@@ -217,7 +217,7 @@ func (a *App) stopRemoteRuntime() {
 	if rt != nil {
 		_ = rt.Close()
 	}
-	a.closeCredentialProxy()
+	a.closeRemoteBrokers()
 }
 
 // remoteEventSink implementation on *App.

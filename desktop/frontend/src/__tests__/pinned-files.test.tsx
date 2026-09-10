@@ -10,6 +10,7 @@ import { LocaleProvider } from "../lib/i18n";
 import { ToastProvider } from "../lib/toast";
 import type { AppBindings } from "../lib/bridge";
 import type { PinnedFileInfo } from "../lib/pinnedContextBridge";
+import { installDesktopHostStub } from "./desktopHostStub";
 
 let passed = 0;
 let failed = 0;
@@ -60,7 +61,7 @@ async function run() {
   let pinnedViaMenu = "";
   let shouldFailPin = false;
 
-  (window as unknown as { go: { main: { App: Partial<AppBindings> } } }).go = {
+installDesktopHostStub(({
     main: {
       App: {
         UnpinFileForTab: async (_tabId: string, path: string) => {
@@ -85,7 +86,7 @@ async function run() {
         RevealWorkspacePathForTab: async () => {},
       },
     },
-  };
+  }).main.App);
 
   // Test 1: PinnedFilesShelf empty rendering
   await act(async () => {

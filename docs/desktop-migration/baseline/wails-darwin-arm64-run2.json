@@ -1,0 +1,37 @@
+{
+  "label": "wails-darwin-arm64-run2",
+  "executable": "desktop/build/bin/reasonix-desktop.app/Contents/MacOS/reasonix-desktop",
+  "measuredAt": "2026-09-08T17:05:29.166914+00:00",
+  "machine": {
+    "platform": "macOS-26.6.2-arm64-arm-64bit",
+    "machine": "arm64"
+  },
+  "startup": {
+    "readyMs": 332,
+    "healthyMs": 3692
+  },
+  "samples": [
+    {
+      "afterHealthySeconds": 2,
+      "rssKiB": 401488,
+      "processCount": 4,
+      "processes": "com.apple.WebKit.GPU;com.apple.WebKit.Networking;com.apple.WebKit.WebContent;reasonix-desktop"
+    },
+    {
+      "afterHealthySeconds": 10,
+      "rssKiB": 398048,
+      "processCount": 4,
+      "processes": "com.apple.WebKit.GPU;com.apple.WebKit.Networking;com.apple.WebKit.WebContent;reasonix-desktop"
+    },
+    {
+      "afterHealthySeconds": 30,
+      "rssKiB": 422304,
+      "processCount": 4,
+      "processes": "com.apple.WebKit.GPU;com.apple.WebKit.Networking;com.apple.WebKit.WebContent;reasonix-desktop"
+    }
+  ],
+  "exit": {
+    "terminatedWithinMs": 10714,
+    "clean": false
+  }
+}

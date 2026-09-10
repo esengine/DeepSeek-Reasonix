@@ -8,6 +8,7 @@ import { Composer } from "../components/Composer";
 import { LocaleProvider } from "../lib/i18n";
 import { ToastProvider } from "../lib/toast";
 import type { CollaborationMode, ToolApprovalMode } from "../lib/types";
+import { installDesktopHostStub } from "./desktopHostStub";
 
 let passed = 0;
 let failed = 0;
@@ -88,7 +89,7 @@ function installDom() {
 }
 
 function installBridgeApp(methods: Record<string, unknown>) {
-  (window as unknown as { go: { main: { App: Record<string, unknown> } } }).go = {
+installDesktopHostStub(({
     main: {
       App: {
         Commands: async () => [],
@@ -101,7 +102,7 @@ function installBridgeApp(methods: Record<string, unknown>) {
         ...methods,
       },
     },
-  };
+  }).main.App);
 }
 
 async function renderComposer(props: Partial<Parameters<typeof Composer>[0]> = {}) {
@@ -155,7 +156,7 @@ async function renderComposer(props: Partial<Parameters<typeof Composer>[0]> = {
 console.log("\ncomposer inbox interleaving");
 
 {
-  // A fast tool boundary may consume a newly accepted steer before the Wails
+  // A fast tool boundary may consume a newly accepted steer before the bridge
   // enqueue promise resolves. The late receipt must not resurrect the chip.
   const dom = installDom();
   const enqueueStarted = deferred<void>();

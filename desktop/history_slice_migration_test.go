@@ -14,7 +14,7 @@ import (
 )
 
 // TestHistoryIndexMigrationLoop covers the startup worker directly (the
-// goroutine itself only arms from the Wails startup hook): it builds missing
+// goroutine itself only arms from the startup hook): it builds missing
 // indexes, leaves valid ones untouched, and skips legacy event-format files.
 func TestHistoryIndexMigrationLoop(t *testing.T) {
 	app := historySliceTestApp(t)

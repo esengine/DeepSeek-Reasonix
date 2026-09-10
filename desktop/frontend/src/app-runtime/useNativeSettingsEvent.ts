@@ -1,4 +1,5 @@
 import { useEffect } from "react";
+import { desktopHost } from "../lib/desktopHost";
 import { useAppNavigationStore } from "../store/appNavigation";
 
 export function useNativeSettingsEvent(input: {
@@ -7,8 +8,9 @@ export function useNativeSettingsEvent(input: {
 }) {
   const { closeTransientOverlays, setSettingsTarget } = input;
   useEffect(() => {
-    if (typeof window === "undefined" || !window.runtime) return;
-    return window.runtime.EventsOn("app:open-settings", () => {
+    const host = desktopHost();
+    if (host.kind === "none") return;
+    return host.events.on("app:open-settings", () => {
       closeTransientOverlays();
       setSettingsTarget(useAppNavigationStore.getState().lastSettingsTarget);
     });

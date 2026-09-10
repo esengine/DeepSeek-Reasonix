@@ -3,6 +3,7 @@ import { errorMessage } from "./controllerNotices";
 import type { MessageActionScope } from "./messageActions";
 import { app } from "./bridge";
 import type { TabMeta } from "./types";
+export { settleForkConversationForTab } from "./forkWorktree";
 
 export async function restoreNavigationBackend(sourceTabId: string, targetTabId: string, sourceTab?: TabMeta): Promise<{
   restoredTabId: string;

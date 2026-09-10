@@ -23,8 +23,9 @@ build request
   guardian, and typed-report flows keep their own constraints.
 - Compaction defaults to a single summary; chunked/tree-reduce recovery is
   explicit only (manual `/compact` and marked recovery workflows).
-- Final readiness, tool safety, cancellation, budgets, and incomplete-read
-  stay as hard boundaries.
+- Final readiness, tool safety, cancellation, budgets, and explicit whole-file
+  read pauses stay as hard boundaries. Ordinary partial reads do not freeze
+  independent work; see [Read evidence lifecycle](READ_EVIDENCE_LIFECYCLE.md).
 - Old configs and old session state stay readable for one release; the new
   runtime never executes the old fallbacks.
 

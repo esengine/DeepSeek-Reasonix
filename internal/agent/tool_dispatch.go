@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"os"
 	"strings"
 	"time"
 
@@ -44,7 +45,10 @@ func (a *Agent) invokeResolvedTool(ctx context.Context, plan *toolCallPlan) (res
 		}
 		plan.readActiveMillis += max(1, time.Since(start).Milliseconds())
 		if err == nil && plan.readSnapshot != "" && env.Source.Snapshot != plan.readSnapshot {
-			return "", nil, nil, fmt.Errorf("read source changed; restart the read with a fresh snapshot")
+			return "", nil, nil, &tool.OperationError{Diagnostic: tool.OperationDiagnostic{Code: tool.ReadSourceChanged, Path: env.Source.CanonicalPath, ExpectedSnapshot: plan.readSnapshot, ActualSnapshot: env.Source.Snapshot, Recovery: "restart the read with a fresh explicit range"}, Cause: fmt.Errorf("read source changed")}
+		}
+		if errors.Is(err, context.DeadlineExceeded) {
+			err = &tool.OperationError{Diagnostic: tool.OperationDiagnostic{Code: tool.ReadHardStop, Path: readPathArg(runArgs), Recovery: "automatic read time exhausted; inspect a bounded range"}, Cause: err}
 		}
 		if err == nil {
 			plan.readEnvelope = &env
@@ -76,6 +80,10 @@ func (a *Agent) invokeResolvedTool(ctx context.Context, plan *toolCallPlan) (res
 		return result, images, execution, err
 	}
 	result, err = runTool.Execute(ctx, runArgs)
+	var missing *os.PathError
+	if errors.Is(err, os.ErrNotExist) && errors.As(err, &missing) {
+		err = &tool.OperationError{Diagnostic: tool.OperationDiagnostic{Code: tool.WriteTargetAbsent, Path: missing.Path, Recovery: "read the target at its current path, or create a new file when required"}, Cause: err}
+	}
 	return result, images, execution, err
 }
 

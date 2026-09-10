@@ -6,6 +6,7 @@ import { fileURLToPath } from "node:url";
 import { JSDOM } from "jsdom";
 import React, { act } from "react";
 import type { AppBindings } from "../lib/bridge";
+import { installDesktopHostStub } from "./desktopHostStub";
 
 let passed = 0;
 let failed = 0;
@@ -106,7 +107,7 @@ ok(/lazy\(\(\) => import\("\.\/BlankProjectFlow"\)/.test(creationSource), "the c
 await act(async () => root.unmount());
 
 const bridgeCalls: string[] = [];
-window.go = { main: { App: {
+installDesktopHostStub(({ main: { App: {
   async PickBlankProjectParent() {
     bridgeCalls.push("pick");
     return "/Users/test/Projects";
@@ -115,7 +116,7 @@ window.go = { main: { App: {
     bridgeCalls.push(`create:${parentDirectory}:${projectName}`);
     return `${parentDirectory}/${projectName}`;
   },
-} as Partial<AppBindings> as AppBindings } };
+} as Partial<AppBindings> as AppBindings } }).main.App);
 const flowRoot = createRoot(rootElement);
 await act(async () => {
   flowRoot.render(

@@ -7,6 +7,7 @@ import { createRoot } from "react-dom/client";
 import { ContextPanel } from "../components/ContextPanel";
 import { LocaleProvider } from "../lib/i18n";
 import type { ContextPanelInfo } from "../lib/types";
+import { installDesktopHostStub } from "./desktopHostStub";
 
 let passed = 0;
 let failed = 0;
@@ -75,9 +76,9 @@ function emptyPanelInfo(): ContextPanelInfo {
 console.log("\ncontext panel capacity");
 
 const dom = installDom();
-(window as unknown as { go: { main: { App: { ContextPanel: () => Promise<ContextPanelInfo> } } } }).go = {
+installDesktopHostStub(({
   main: { App: { ContextPanel: async () => emptyPanelInfo() } },
-};
+}).main.App);
 const rootEl = document.getElementById("root");
 if (!rootEl) throw new Error("missing root");
 const root = createRoot(rootEl);

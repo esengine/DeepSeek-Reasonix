@@ -11,6 +11,7 @@ import { fileURLToPath } from "node:url";
 
 import type { AppBindings } from "../lib/bridge";
 import type { RemoteDirEntry, RemoteHostView } from "../lib/types";
+import { installDesktopHostStub } from "./desktopHostStub";
 
 let passed = 0;
 let failed = 0;
@@ -94,7 +95,7 @@ let connectAttempts = 0;
 let platformAttempts = 0;
 // Last AddRemoteHost payload, for credential-mode assertions.
 let lastAddInput: RemoteHostInput | undefined;
-window.go = { main: { App: {
+installDesktopHostStub(({ main: { App: {
   async RegisterNavigationIntent(token: string) {
     tape.push(`RegisterNavigationIntent:${token}`);
   },
@@ -169,7 +170,7 @@ window.go = { main: { App: {
     tape.push(`AddRemoteProject:${hostId}:${workspace}`);
     return { hostId, workspace: mergedWorkspace || workspace, merged: Boolean(mergedWorkspace) };
   },
-} as Partial<AppBindings> as AppBindings } };
+} as Partial<AppBindings> as AppBindings } }).main.App);
 
 function WizardHarness() {
   return (

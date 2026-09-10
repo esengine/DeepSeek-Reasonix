@@ -89,6 +89,7 @@ export function SessionTakeoverDialog({ tabId, onClose }: { tabId: string; onClo
 
   return createPortal(
     <div
+      data-app-overlay=""
       className="modal-backdrop reasonix-confirm-backdrop"
       role="presentation"
       onMouseDown={(event) => {

@@ -858,7 +858,7 @@ func TestWorkspaceImageRefsAlsoAttachAsModelImages(t *testing.T) {
 	}
 
 	writeVisionTestConfig(t, workspace)
-	c := &Controller{workspaceRoot: workspace, modelRef: "custom/vision-pro"}
+	c := &Controller{workspaceRoot: workspace, selection: modelSelection{ref: "custom/vision-pro"}}
 	refs := c.detectRefs("see @" + diagram + " @" + attachment)
 	if len(refs) != 2 {
 		t.Fatalf("detectRefs = %+v, want two refs", refs)

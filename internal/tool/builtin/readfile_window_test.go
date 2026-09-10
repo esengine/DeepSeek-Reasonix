@@ -45,7 +45,7 @@ func TestScanWindowedReadDoesNotConsumeWholeFile(t *testing.T) {
 	if strings.Contains(out, "line 4") {
 		t.Fatalf("window leaked line 4:\n%s", out)
 	}
-	if !strings.Contains(out, "more lines below") {
+	if !strings.Contains(out, "PARTIAL view:") || !strings.Contains(out, "of at least 4") {
 		t.Fatalf("pagination trailer missing:\n%s", out)
 	}
 	if cr.n > 100*1024 {

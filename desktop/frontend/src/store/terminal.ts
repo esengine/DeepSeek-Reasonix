@@ -2,7 +2,8 @@ import { create } from "zustand";
 
 import { app } from "../lib/bridge";
 import type { TerminalSessionView, TerminalWorkspaceView } from "../lib/types";
-import { forgetTerminalSession, registerTerminalExitListener } from "../lib/terminalEvents";
+import { forgetTerminalSession, registerTerminalExitListener, registerTerminalGapListener } from "../lib/terminalEvents";
+import { t } from "../lib/i18n";
 
 type TerminalState = {
   tabId: string;
@@ -175,6 +176,11 @@ registerTerminalExitListener((event) => {
       : session);
     return { workspace: { ...state.workspace, sessions } };
   });
+});
+
+registerTerminalGapListener(ids => {
+  useTerminalStore.setState(state => state.workspace?.sessions.some(session => ids.length === 0 || ids.includes(session.id))
+    ? { error: t("terminal.outputIncomplete") } : {});
 });
 
 export function resetTerminalStoreForTests(): void {

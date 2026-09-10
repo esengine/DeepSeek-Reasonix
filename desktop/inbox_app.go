@@ -9,20 +9,20 @@ import (
 	"reasonix/internal/sessioninbox"
 )
 
-const inboxWailsErrorPrefix = "reasonix_error:"
+const inboxBridgeErrorPrefix = "reasonix_error:"
 
 type inboxCodedError struct {
 	code  string
 	cause error
 }
 
-func (e *inboxCodedError) Error() string { return inboxWailsErrorPrefix + e.code }
+func (e *inboxCodedError) Error() string { return inboxBridgeErrorPrefix + e.code }
 func (e *inboxCodedError) Unwrap() error { return e.cause }
 
-// inboxWailsError keeps backend errors machine-stable across the Wails boundary.
+// inboxBridgeError keeps backend errors machine-stable across the desktop bridge.
 // The frontend translates known product states at display time; unknown errors
 // stay untouched so useful diagnostic details are not discarded.
-func inboxWailsError(err error) error {
+func inboxBridgeError(err error) error {
 	if err == nil {
 		return nil
 	}
@@ -59,7 +59,7 @@ func inboxWailsError(err error) error {
 	}
 }
 
-// InboxItemView is the Wails-facing metadata row (never full body).
+// InboxItemView is the bridge-facing metadata row (never full body).
 type InboxItemView struct {
 	ID          string `json:"id"`
 	Intent      string `json:"intent"`
@@ -72,7 +72,7 @@ type InboxItemView struct {
 	Position    int    `json:"position"`
 }
 
-// InboxSnapshotView is the Wails-facing queue snapshot.
+// InboxSnapshotView is the bridge-facing queue snapshot.
 type InboxSnapshotView struct {
 	Revision    int64           `json:"revision"`
 	Paused      bool            `json:"paused"`
@@ -149,10 +149,10 @@ func inboxSnapshotView(snap sessioninbox.InboxSnapshot) InboxSnapshotView {
 func (a *App) inboxCtrl(tabID string) (control.SessionAPI, error) {
 	tab, ctrl := a.tabAndCtrlByID(tabID)
 	if a.tabIsReadOnly(tab) {
-		return nil, inboxWailsError(readOnlyChannelErr())
+		return nil, inboxBridgeError(readOnlyChannelErr())
 	}
 	if ctrl == nil {
-		return nil, inboxWailsError(a.workspaceNotReadyErr(tab))
+		return nil, inboxBridgeError(a.workspaceNotReadyErr(tab))
 	}
 	return ctrl, nil
 }
@@ -214,7 +214,7 @@ func (a *App) SteerInboxItem(tabID, itemID string) (InboxReceiptView, error) {
 	}
 	rec, err := ctrl.TrySteerInboxItem(strings.TrimSpace(itemID))
 	if err != nil {
-		err = inboxWailsError(err)
+		err = inboxBridgeError(err)
 		return InboxReceiptView{Error: err.Error()}, err
 	}
 	a.emitInboxChanged(tabID)
@@ -250,7 +250,7 @@ func (a *App) SteerInboxItemForTurn(tabID, turnID, itemID string) (InboxReceiptV
 	}
 	rec, err := exact.TrySteerInboxItemForTurn(turnID, strings.TrimSpace(itemID))
 	if err != nil {
-		err = inboxWailsError(err)
+		err = inboxBridgeError(err)
 		return InboxReceiptView{Error: err.Error()}, err
 	}
 	a.emitInboxChanged(tabID)
@@ -268,7 +268,7 @@ func (a *App) CancelTabWithInboxItems(tabID string, itemIDs []string) error {
 		return err
 	}
 	if err := ctrl.CancelWithInboxItems(itemIDs, "desktop"); err != nil {
-		return inboxWailsError(err)
+		return inboxBridgeError(err)
 	}
 	a.emitInboxChanged(tabID)
 	return nil
@@ -284,7 +284,7 @@ func (a *App) CancelTabWithInboxItemsResult(tabID string, itemIDs []string) (Inb
 	}
 	result, err := ctrl.CancelWithInboxItemsResult(itemIDs, "desktop")
 	if err != nil {
-		return view, inboxWailsError(err)
+		return view, inboxBridgeError(err)
 	}
 	view.DiscardedItemIDs = append(view.DiscardedItemIDs, result.DiscardedItemIDs...)
 	view.Warning = result.Warning
@@ -348,7 +348,7 @@ func (a *App) enqueueInboxWithController(tabID string, ctrl control.SessionAPI, 
 		rec, err = ctrl.TryEnqueueFollowup(req)
 	}
 	if err != nil {
-		err = inboxWailsError(err)
+		err = inboxBridgeError(err)
 		return InboxReceiptView{Error: err.Error()}, err
 	}
 	a.emitInboxChanged(tabID)
@@ -369,7 +369,7 @@ func (a *App) ReadInboxItem(tabID, id string) (InboxEnvelopeView, error) {
 	}
 	meta, env, err := ctrl.ReadInboxItem(id)
 	if err != nil {
-		return InboxEnvelopeView{}, inboxWailsError(err)
+		return InboxEnvelopeView{}, inboxBridgeError(err)
 	}
 	return InboxEnvelopeView{
 		ID:          meta.ID,
@@ -386,7 +386,7 @@ func (a *App) UpdateInboxItem(tabID, id, display, submit string) error {
 		return err
 	}
 	if _, err := ctrl.UpdateInboxItem(id, display, submit, submit); err != nil {
-		return inboxWailsError(err)
+		return inboxBridgeError(err)
 	}
 	a.emitInboxChanged(tabID)
 	return nil
@@ -399,7 +399,7 @@ func (a *App) DeleteInboxItem(tabID, id string) error {
 		return err
 	}
 	if err := ctrl.DeleteInboxItem(id); err != nil {
-		return inboxWailsError(err)
+		return inboxBridgeError(err)
 	}
 	a.emitInboxChanged(tabID)
 	return nil
@@ -412,7 +412,7 @@ func (a *App) MoveInboxItem(tabID, id string, toIndex int) error {
 		return err
 	}
 	if err := ctrl.MoveInboxItem(id, toIndex); err != nil {
-		return inboxWailsError(err)
+		return inboxBridgeError(err)
 	}
 	a.emitInboxChanged(tabID)
 	return nil
@@ -425,7 +425,7 @@ func (a *App) SetInboxPaused(tabID string, paused bool) error {
 		return err
 	}
 	if err := ctrl.SetInboxPaused(paused); err != nil {
-		return inboxWailsError(err)
+		return inboxBridgeError(err)
 	}
 	a.emitInboxChanged(tabID)
 	return nil
@@ -438,7 +438,7 @@ func (a *App) RetryInboxItem(tabID, id string) error {
 		return err
 	}
 	if err := ctrl.RetryInboxItem(id); err != nil {
-		return inboxWailsError(err)
+		return inboxBridgeError(err)
 	}
 	a.emitInboxChanged(tabID)
 	return nil
@@ -451,7 +451,7 @@ func (a *App) RefreshInboxItem(tabID, id string) error {
 		return err
 	}
 	if err := ctrl.RefreshInboxReferences(id); err != nil {
-		return inboxWailsError(err)
+		return inboxBridgeError(err)
 	}
 	a.emitInboxChanged(tabID)
 	return nil
@@ -473,12 +473,4 @@ func (a *App) InboxHasItems(tabID string) (bool, error) {
 		return false, err
 	}
 	return len(ctrl.InboxSnapshot().Items) > 0, nil
-}
-
-// FormatInboxRecoveryNotice builds the recovery banner text.
-func FormatInboxRecoveryNotice(n int) string {
-	if n <= 0 {
-		return ""
-	}
-	return fmt.Sprintf("Recovered %d pending instruction(s). Inbox is paused — review before resuming.", n)
 }

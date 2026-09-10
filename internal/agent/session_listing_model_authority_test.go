@@ -24,7 +24,7 @@ func TestListingProjectionCannotOverwriteModelAfterAuthorityReplacement(t *testi
 		t.Fatal("missing saved transcript identity")
 	}
 	oldAuthority := old.WriteAuthority()
-	if applied, err := UpdateOwnedSessionListingProjectionIfCurrent(path, "connection-one/same-model", "keep this conversation", 1, false, expected, oldAuthority); err != nil || !applied {
+	if applied, err := UpdateOwnedSessionListingProjectionIfCurrent(path, "connection-one/same-model", "", "keep this conversation", 1, false, expected, oldAuthority); err != nil || !applied {
 		t.Fatalf("initial listing: applied=%v err=%v", applied, err)
 	}
 
@@ -44,7 +44,7 @@ func TestListingProjectionCannotOverwriteModelAfterAuthorityReplacement(t *testi
 
 	// The retired snapshot's transcript has already been committed. Its delayed
 	// listing publication must not undo the subsequently committed model choice.
-	_, err := UpdateOwnedSessionListingProjectionIfCurrent(path, "connection-one/same-model", "keep this conversation", 1, false, expected, oldAuthority)
+	_, err := UpdateOwnedSessionListingProjectionIfCurrent(path, "connection-one/same-model", "", "keep this conversation", 1, false, expected, oldAuthority)
 	if !errors.Is(err, ErrSessionWriteAuthorityStale) {
 		t.Fatalf("retired publication error = %v, want stale authority", err)
 	}
@@ -115,7 +115,7 @@ func TestOwnedListingRejectsMissingAuthority(t *testing.T) {
 	if err := SetBranchModelPreserveUpdated(path, "selected/model"); err != nil {
 		t.Fatal(err)
 	}
-	applied, err := UpdateOwnedSessionListingProjectionIfCurrent(path, "stale/model", "question", 1, false, expected, nil)
+	applied, err := UpdateOwnedSessionListingProjectionIfCurrent(path, "stale/model", "", "question", 1, false, expected, nil)
 	if applied || !errors.Is(err, ErrSessionWriteAuthorityMissing) {
 		t.Fatalf("missing authority publication: applied=%v err=%v", applied, err)
 	}

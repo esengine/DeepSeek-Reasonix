@@ -67,7 +67,7 @@ func (a *Agent) finalizeReadDelivery(ctx context.Context, call provider.ToolCall
 	// A reference cannot create coverage. Only already covered windows can
 	// be omitted, and only when their original text was in this model request.
 	ob, known := a.turn.readShadow.coord.Get(env.ReadID)
-	if known && ob.Version == env.Source.Snapshot && len(env.DeliveredRanges) > 0 && readcoord.Covers(ob.Covered, env.DeliveredRanges) {
+	if known && ob.Version == env.Source.Snapshot && len(env.DeliveredRanges) > 0 && readcoord.Covers(ob.Covered, env.DeliveredRanges) && a.readReferenceHasCurrentEvidence(env, o.output) {
 		ids := make([]string, 0, len(a.reads.visible))
 		for id := range a.reads.visible {
 			ids = append(ids, id)
@@ -99,4 +99,27 @@ func (a *Agent) finalizeReadDelivery(ctx context.Context, call provider.ToolCall
 	}
 	a.reads.tasks.remember(env.ReadID, env, readPathArg([]byte(call.Arguments)))
 	o.finalReadEnvelope = &env
+}
+
+// Read coverage survives writes, but edit evidence must follow the last write
+// and reach a provider boundary. Re-deliver when deduplication would otherwise
+// suppress the fresh observation needed to repair a rejected edit.
+func (a *Agent) readReferenceHasCurrentEvidence(env tool.ReadResultEnvelope, output string) bool {
+	if a.task.ledger == nil {
+		return true
+	}
+	if _, written := a.task.ledger.LatestSuccessfulWriteIndex([]string{env.Source.CanonicalPath}); !written {
+		return true
+	}
+	w, ok := tool.ParseReadWindow(output)
+	if !ok {
+		return false
+	}
+	target := tool.EvidenceTargetInfo{Path: env.Source.CanonicalPath, Snapshot: env.Source.Snapshot, Ranges: env.DeliveredRanges}
+	for _, line := range w.Lines {
+		target.Hashes = append(target.Hashes, hashLine(line))
+	}
+	observations := a.eligibleObservations(target.Path, a.task.ledger.ObservationBoundary())
+	satisfied, _ := evidenceCoversTarget(observations, target)
+	return satisfied
 }

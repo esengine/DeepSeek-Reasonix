@@ -3,6 +3,7 @@ registerHooks({ resolve(specifier, context, nextResolve) { return specifier.ends
 import assert from "node:assert/strict";
 import { managementDom } from "../test-support/managementDom";
 import type { SessionMeta } from "../lib/types";
+import { installDesktopHostStub } from "./desktopHostStub";
 const dom = managementDom();
 const { default: React, act } = await import("react");
 const { createRoot } = await import("react-dom/client");
@@ -11,7 +12,7 @@ const { TrashPage } = await import("../components/TrashPage");
 const session = (id: string, recoveryCopy = false): SessionMeta => ({ path: id, title: id, preview: id, turns: 0, createdAt: 1, lastActivityAt: 1, modTime: 1, deletedAt: Date.now(), current: false, open: false, recoveryCopy });
 let sessions = [session("a"), session("b"), session("protected", true)];
 let latePreview!: () => void;
-Object.assign(window, { go: { main: { App: { PreviewSession: (path: string) => path === "a" ? new Promise<never[]>((resolve) => { latePreview = () => resolve([]); }) : Promise.resolve([]) } } } });
+installDesktopHostStub({ PreviewSession: (path: string) => path === "a" ? new Promise<never[]>((resolve) => { latePreview = () => resolve([]); }) : Promise.resolve([]) });
 const calls: string[] = [];
 let listFails = false;
 const list = async () => { if (listFails) throw new Error("read failure"); return sessions; };

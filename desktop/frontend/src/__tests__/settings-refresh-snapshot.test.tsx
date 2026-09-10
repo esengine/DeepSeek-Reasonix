@@ -22,6 +22,7 @@ import {
   installCanvasMock,
   waitFor,
 } from "../test-support/settingsTestFixtures";
+import { installDesktopHostStub } from "./desktopHostStub";
 
 let passed = 0;
 let failed = 0;
@@ -95,7 +96,7 @@ let setSessionExperienceCalls = 0;
 let rejectSessionExperience = false;
 let onChangedSettings: SettingsView | undefined;
 
-window.go = {
+const desktopStub = installDesktopHostStub(({
   main: {
     App: {
       Settings: async () => settingsSnapshots[Math.min(settingsCalls++, settingsSnapshots.length - 1)],
@@ -107,8 +108,7 @@ window.go = {
         if (rejectSessionExperience) throw new Error("session experience persistence failed");
       },
     } as Partial<AppBindings> as AppBindings,
-  },
-};
+  }}).main.App);
 
 const rootEl = document.getElementById("root");
 if (!rootEl) throw new Error("missing root");
@@ -209,7 +209,7 @@ compactSettings.providers = [{
   modelOverrides: [],
 }];
 let compactRatioCalls: number[] = [];
-window.go = {
+desktopStub.replaceCommands(({
   main: {
     App: {
       Settings: async () => compactSettings,
@@ -220,7 +220,7 @@ window.go = {
       },
     } as Partial<AppBindings> as AppBindings,
   },
-};
+}).main.App);
 
 await act(async () => {
   compactRoot.render(
@@ -302,7 +302,7 @@ ok(activeCompactButton.checked, "saved compact ratio is selected after Settings 
 
 // Model native mousedown -> blur -> click with a deliberately slow bridge.
 let finishCompactSave: (() => void) | undefined;
-window.go.main.App.SetCompactRatio = async (ratio: number) => {
+(desktopStub.commands as AppBindings).SetCompactRatio = async (ratio: number) => {
   compactRatioCalls.push(ratio);
   await new Promise<void>((resolve) => { finishCompactSave = resolve; });
   compactSettings = { ...compactSettings, agent: { ...compactSettings.agent, compactRatio: ratio } };
@@ -342,7 +342,7 @@ ok(customCompactButton.checked, "ordinary blur selects the saved custom threshol
 
 // A rejected save retains the draft for retry while selection stays authoritative.
 let rejectCompactSave = true;
-window.go.main.App.SetCompactRatio = async (ratio: number) => {
+(desktopStub.commands as AppBindings).SetCompactRatio = async (ratio: number) => {
   compactRatioCalls.push(ratio);
   if (rejectCompactSave) throw new Error("Compaction save rejected");
   compactSettings = { ...compactSettings, agent: { ...compactSettings.agent, compactRatio: ratio } };
@@ -384,7 +384,7 @@ const retryRootEl = document.createElement("div");
 document.body.appendChild(retryRootEl);
 const retryRoot = createRoot(retryRootEl);
 let failingSettingsCalls = 0;
-window.go = {
+desktopStub.replaceCommands(({
   main: {
     App: {
       Settings: async () => {
@@ -394,7 +394,7 @@ window.go = {
       },
     } as Partial<AppBindings> as AppBindings,
   },
-};
+}).main.App);
 
 await act(async () => {
   retryRoot.render(
@@ -434,7 +434,7 @@ const windowsSandboxRootEl = document.createElement("div");
 document.body.appendChild(windowsSandboxRootEl);
 const windowsSandboxRoot = createRoot(windowsSandboxRootEl);
 let windowsSetSandboxCalls = 0;
-window.go = {
+desktopStub.replaceCommands(({
   main: {
     App: {
       // Deliberately return a stale enforce value: the Windows UI must still
@@ -445,7 +445,7 @@ window.go = {
       },
     } as Partial<AppBindings> as AppBindings,
   },
-};
+}).main.App);
 
 await act(async () => {
   windowsSandboxRoot.render(
@@ -478,7 +478,7 @@ document.body.appendChild(zoomRootEl);
 const zoomRoot = createRoot(zoomRootEl);
 let persistedZoom = 0.5;
 const savedZoomFactors: number[] = [];
-window.go = {
+desktopStub.replaceCommands(({
   main: {
     App: {
       Settings: async () => baseSettings("standard"),
@@ -489,7 +489,7 @@ window.go = {
       },
     } as Partial<AppBindings> as AppBindings,
   },
-};
+}).main.App);
 
 localStorage.setItem("reasonix-zoom-restart", "1");
 await act(async () => {
@@ -567,13 +567,13 @@ botsSettings.bot.connections = [
 	    access: { enabled: true, allowAll: false, pairingEnabled: true, users: ["ou_mock_user_001"], groups: [], approvers: [], admins: [] },
 	  },
 	];
-window.go = {
+desktopStub.replaceCommands(({
   main: {
     App: {
       Settings: async () => botsSettings,
     } as Partial<AppBindings> as AppBindings,
   },
-};
+}).main.App);
 
 await act(async () => {
   botsRoot.render(
@@ -638,7 +638,7 @@ const persistedDingtalkSettings = () => {
 };
 let dingtalkSettings = persistedDingtalkSettings();
 let dingtalkTestCalls = 0;
-window.go = {
+desktopStub.replaceCommands(({
   main: {
     App: {
       Settings: async () => dingtalkSettings,
@@ -652,7 +652,7 @@ window.go = {
       },
     } as Partial<AppBindings> as AppBindings,
   },
-};
+}).main.App);
 const dingtalkTab = Array.from(botsRootEl.querySelectorAll(".bot-channel-tabs [role=\"tab\"]")).find((button) => button.textContent?.includes("DingTalk")) as HTMLButtonElement | undefined;
 if (!dingtalkTab) throw new Error("DingTalk channel tab did not render");
 await act(async () => {
@@ -695,9 +695,9 @@ notEnabledSettings.bot.dingtalk = {
   botName: "",
   requireMention: true,
 };
-window.go = {
+desktopStub.replaceCommands(({
   main: { App: { Settings: async () => notEnabledSettings } } as Partial<AppBindings> as AppBindings,
-};
+}).main.App);
 await act(async () => {
   notEnabledRoot.render(
     <LocaleProvider>
@@ -720,9 +720,9 @@ await waitFor("DingTalk setup panel instead of detail card when not enabled", ()
 await act(async () => {
   notEnabledRoot.unmount();
 });
-window.go = {
+desktopStub.replaceCommands(({
   main: { App: { Settings: async () => botsSettings } } as Partial<AppBindings> as AppBindings,
-};
+}).main.App);
 
 await act(async () => {
   botsRoot.unmount();
@@ -772,7 +772,7 @@ const providerBatch = new Promise<Record<string, ProviderModelCapabilityView[]>>
 });
 let providerBatchCalls = 0;
 let providerCatalogSaveCalls = 0;
-window.go = {
+desktopStub.replaceCommands(({
   main: {
     App: {
       Settings: async () => providerRaceSettings,
@@ -786,7 +786,7 @@ window.go = {
       },
     } as Partial<AppBindings> as AppBindings,
   },
-};
+}).main.App);
 
 await act(async () => {
   providerRaceRoot.render(
@@ -852,7 +852,7 @@ providerRefreshCancelSettings.providers = [{
   supportedEfforts: [],
   defaultEffort: "",
 }];
-window.go = {
+desktopStub.replaceCommands(({
   main: {
     App: {
       Settings: async () => providerRefreshCancelSettings,
@@ -860,7 +860,7 @@ window.go = {
       FetchProviderModelCatalog: async () => ["deepseek-v4-flash", "deepseek-v4-pro"].map((model) => ({ model, inputModalities: ["text"], state: "unsupported", source: "adapter" })),
     } as Partial<AppBindings> as AppBindings,
   },
-};
+}).main.App);
 
 await act(async () => {
   providerRefreshCancelRoot.render(
@@ -933,7 +933,7 @@ upgradeFailureSettings.providers = [{
 let upgradeFailureSettingsCalls = 0;
 let upgradeFailureMutationCalls = 0;
 let upgradeFailureChanged: SettingsView | undefined;
-window.go = {
+desktopStub.replaceCommands(({
   main: {
     App: {
       Settings: async () => {
@@ -959,7 +959,7 @@ window.go = {
       },
     } as Partial<AppBindings> as AppBindings,
   },
-};
+}).main.App);
 
 await act(async () => {
   upgradeFailureRoot.render(

@@ -10,6 +10,8 @@ process.env.PLAYWRIGHT_BROWSERS_PATH = !process.env.PLAYWRIGHT_BROWSERS_PATH || 
   ? path.join(frontendDir, ".pw-browsers")
   : process.env.PLAYWRIGHT_BROWSERS_PATH;
 const { chromium, webkit } = await import("playwright");
+const browsers = (process.env.REASONIX_TRANSCRIPT_READER_BROWSERS ?? "chromium,webkit")
+  .split(",").map((name) => name.trim()).filter(Boolean);
 const port = Number(process.env.REASONIX_TRANSCRIPT_READER_PORT ?? 4621);
 const iterations = Number(process.env.REASONIX_TRANSCRIPT_READER_ITERATIONS ?? 6);
 const url = `http://127.0.0.1:${port}/?mock=bench&bench=1`;
@@ -479,8 +481,8 @@ async function runBrowser(browserType, label) {
 const preview = await startPreviewServer(frontendDir, port);
 try {
   await waitForServer();
-  await runBrowser(chromium, "Chromium");
-  await runBrowser(webkit, "WebKit");
+  if (browsers.includes("chromium")) await runBrowser(chromium, "Chromium");
+  if (browsers.includes("webkit")) await runBrowser(webkit, "WebKit");
   process.stdout.write("transcript reader transaction browser replay passed\n");
 } finally {
   await preview.close();

@@ -4,6 +4,7 @@ import { createRoot } from "react-dom/client";
 import { SkillsSettingsPage } from "../components/CapabilitiesPanel";
 import { LocaleProvider } from "../lib/i18n";
 import type { AppBindings } from "../lib/bridge";
+import { installDesktopHostStub } from "./desktopHostStub";
 
 const dom = new JSDOM("<!doctype html><html><body><div id=\"root\"></div></body></html>", {
   pretendToBeVisual: true,
@@ -61,7 +62,7 @@ const appBindings = {
   }),
 } as unknown as AppBindings;
 
-window.go = { main: { App: appBindings } };
+installDesktopHostStub(({ main: { App: appBindings } }).main.App);
 
 const rootEl = document.getElementById("root");
 if (!rootEl) throw new Error("missing root");

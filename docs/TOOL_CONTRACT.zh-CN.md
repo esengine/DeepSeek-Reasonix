@@ -1,5 +1,9 @@
 # 工具合约
 
+读取覆盖、源版本观察和操作级写入守卫各自独立。普通 `inspect`/`range` 部分读取
+不阻塞终答；显式 `intent=full` 和 host Stop 仍保留有界完成约束。恢复及兼容说明见
+[读取证据生命周期](READ_EVIDENCE_LIFECYCLE.zh-CN.md)。
+
 <a href="./TOOL_CONTRACT.md">English</a>
 
 本文记录 Reasonix 编译期内置工具的 provider-visible 合约。运行时 registry 使用同一条 canonical schema 路径；测试会校验这里列出的工具名、read-only 标记和 schema 快照不会漂移。

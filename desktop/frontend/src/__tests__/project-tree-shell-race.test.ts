@@ -31,7 +31,7 @@ assert.match(
   /onProjectTreeChangedV2[\s\S]*projectTreeRevisionIsFresh\(latestRevisionRef\.current, event\.revision\)/,
   "equal-revision catalog events use the shared freshness contract",
 );
-assert.match(runtime, /onProjectTreeRuntimeChanged/, "runtime projection has a dedicated Wails subscription");
+assert.match(runtime, /onProjectTreeRuntimeChanged/, "runtime projection has a dedicated bridge subscription");
 assert.match(runtimeHook, /bindProjectTreeRuntime/, "ProjectTree binds the runtime projection after mount");
 assert.match(runtimeHook, /GetProjectTreeRuntimeSnapshot/, "runtime subscription reconciles with a post-subscribe snapshot");
 assert.match(bridge, /reason !== "runtime"/, "current frontend ignores tagged legacy runtime invalidations");

@@ -5,10 +5,11 @@
 // pipeline (remarkLocalPathLinks + urlTransform + RichMarkdownLink), the
 // anchor is clicked in a JSDOM document, and the native OpenLocalPath binding
 // must receive the decoded local path. A plain http link must instead go to
-// the system browser. No UI is involved — the Wails bridge is stubbed via
-// window.go.main.App / window.runtime.
+// the system browser. No UI is involved — the desktop bridge is stubbed via
+// the desktop host stub.
 
 import { JSDOM } from "jsdom";
+import { installDesktopHostStub } from "./desktopHostStub";
 
 const dom = new JSDOM("<!doctype html><html><body></body></html>", { url: "https://reasonix.local/" });
 const { window } = dom;
@@ -34,7 +35,7 @@ type MockOpeners = {
 let openerRaceMode = false;
 let openerRaceCalls = 0;
 let resolveStaleOpeners: ((value: MockOpeners) => void) | undefined;
-(window as unknown as Record<string, unknown>).go = {
+installDesktopHostStub(({
   main: {
     App: {
       OpenLocalPath: async (path: string) => {
@@ -67,12 +68,7 @@ let resolveStaleOpeners: ((value: MockOpeners) => void) | undefined;
       RevealPath: async () => {},
     },
   },
-};
-(window as unknown as Record<string, unknown>).runtime = {
-  BrowserOpenURL: (url: string) => {
-    browsed.push(url);
-  },
-};
+}).main.App, { externalOpens: browsed });
 
 let passed = 0;
 let failed = 0;

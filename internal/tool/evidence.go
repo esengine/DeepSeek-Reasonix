@@ -14,6 +14,12 @@ type EvidenceTargetInfo struct {
 	Path             string
 	Snapshot         string
 	SourceTextDigest string
+	// Absent binds create to a confirmed missing source, so a raced creation
+	// cannot be overwritten using a preflight that saw no file.
+	Absent bool
+	// PreservesContent requires a host-captured source identity but no text
+	// coverage. A byte-preserving move must continue to support binary files.
+	PreservesContent bool
 	// WholeFile marks a requirement that covers the file's entire current
 	// content, so paged evidence may be stitched only within one snapshot.
 	WholeFile bool

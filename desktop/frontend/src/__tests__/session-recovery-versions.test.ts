@@ -24,7 +24,7 @@ const view = (overrides: Partial<RecoveryLineageView> = {}): RecoveryLineageView
   ...overrides,
 });
 
-assert.deepEqual(normalizeRecoveryLineageView({ members: null }).members, [], "null Wails arrays normalize to []");
+assert.deepEqual(normalizeRecoveryLineageView({ members: null }).members, [], "null bridge arrays normalize to []");
 assert.equal(userVisibleRecoveryVersions(view()).length, 2, "covered copies never enter the user-facing version list");
 assert.equal(userVisibleRecoveryVersions(view({ members: [
   { path: "/s/root.jsonl", role: "normal", versionKind: "normal", canonical: true, turns: 3, open: true, running: false },

@@ -741,7 +741,7 @@ export function HistoryPanel({
       </div>
     </>);
   if (presentation === "page") return <div className="history-page" aria-busy={busy}>{content}</div>;
-  return <div className="management-modal-backdrop history-modal-backdrop" data-state={status} onMouseDown={(e) => { if (e.target === e.currentTarget) requestClose(); }}>
+  return <div className="management-modal-backdrop history-modal-backdrop" data-app-overlay="" data-state={status} onMouseDown={(e) => { if (e.target === e.currentTarget) requestClose(); }}>
     <section className="management-modal history-modal" data-state={status} aria-label={tr(isTrash ? "history.trashTitle" : "history.title")} onClick={(e) => e.stopPropagation()}>{content}</section>
   </div>;
 }

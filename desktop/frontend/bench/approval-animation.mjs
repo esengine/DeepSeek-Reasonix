@@ -1,9 +1,8 @@
 #!/usr/bin/env node
 
-import { spawn } from "node:child_process";
-import http from "node:http";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
+import { startPreviewServer } from "./vite-preview-server.mjs";
 
 const frontendDir = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 process.env.PLAYWRIGHT_BROWSERS_PATH = !process.env.PLAYWRIGHT_BROWSERS_PATH || process.env.PLAYWRIGHT_BROWSERS_PATH === ".pw-browsers"
@@ -18,30 +17,10 @@ function assert(condition, message) {
   process.stdout.write(`  PASS  ${message}\n`);
 }
 
-async function waitForServer() {
-  const deadline = Date.now() + 30_000;
-  while (Date.now() < deadline) {
-    const ready = await new Promise((resolve) => {
-      const request = http.get(url, (response) => {
-        response.resume();
-        resolve((response.statusCode ?? 500) < 500);
-      });
-      request.on("error", () => resolve(false));
-    });
-    if (ready) return;
-    await new Promise((resolve) => setTimeout(resolve, 150));
-  }
-  throw new Error("approval browser preview did not become ready");
-}
-
-const preview = spawn("pnpm", ["exec", "vite", "preview", "--port", String(port), "--strictPort", "--host", "127.0.0.1"], {
-  cwd: frontendDir,
-  stdio: "ignore",
-});
+const preview = await startPreviewServer(frontendDir, port);
 
 let browser;
 try {
-  await waitForServer();
   browser = await chromium.launch({ headless: true });
   const page = await browser.newPage({ viewport: { width: 1280, height: 800 } });
   const pageErrors = [];
@@ -59,7 +38,8 @@ try {
     };
   });
 
-  await page.goto(url, { waitUntil: "domcontentloaded" });
+  const response = await page.goto(url, { waitUntil: "domcontentloaded" });
+  assert(response?.ok(), `approval preview serves the frontend (HTTP ${response?.status()})`);
   await page.waitForFunction(() => !document.querySelector(".startup-splash"), undefined, { timeout: 30_000 });
   const composer = page.locator("#composer-input");
   await composer.waitFor({ state: "visible", timeout: 30_000 });
@@ -79,5 +59,5 @@ try {
   process.stdout.write("\napproval animation browser gate passed\n");
 } finally {
   await browser?.close();
-  preview.kill("SIGTERM");
+  await new Promise((resolve) => preview.httpServer.close(resolve));
 }

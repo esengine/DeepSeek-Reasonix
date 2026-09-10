@@ -8,7 +8,7 @@ import (
 
 func TestEmitConfigLoadWarningsRequiresContextAndOwnsPayload(t *testing.T) {
 	if (&App{}).emitConfigLoadWarnings(1, []string{"warning"}) {
-		t.Fatal("handler accepted warnings without a Wails context")
+		t.Fatal("handler accepted warnings without a host context")
 	}
 	if (&App{ctx: context.Background()}).emitConfigLoadWarnings(1, nil) {
 		t.Fatal("handler accepted an empty warning list")
@@ -33,7 +33,7 @@ func TestEmitConfigLoadWarningsRequiresContextAndOwnsPayload(t *testing.T) {
 
 	warnings := []string{"user config is invalid"}
 	if !app.emitConfigLoadWarnings(42, warnings) {
-		t.Fatal("handler rejected warnings with a Wails context")
+		t.Fatal("handler rejected warnings with a host context")
 	}
 	select {
 	case <-started:

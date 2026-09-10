@@ -210,6 +210,7 @@ func (a *App) closeRemoteTabRegistration(tabID string, allowEmpty bool) error {
 		}
 	}
 	delete(a.remoteTabs, tabID)
+	a.forgetRemoteBrowserExecutor(tabID)
 	a.remoteTabLayout.order = removeRemoteTabOrderID(a.remoteTabLayout.order, tabID)
 	if closingActive {
 		a.remoteTabLayout.activeID = ""

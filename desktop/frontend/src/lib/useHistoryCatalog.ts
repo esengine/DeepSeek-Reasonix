@@ -1,3 +1,4 @@
+import { desktopHost } from "./desktopHost";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { app } from "./bridge";
 import type { HistorySearchHit, SessionMeta } from "./types";
@@ -92,7 +93,7 @@ export function useHistoryCatalog({
   }, [query, scope, status, timeFilter, workspaceRoot]);
 
   useEffect(() => {
-    if (isTrash || typeof window === "undefined" || !window.runtime) return;
+    if (isTrash || typeof window === "undefined" || desktopHost().kind === "none") return;
     const seq = ++requestSeq.current;
     const timer = window.setTimeout(() => {
       void fetchPage("", "", false, seq).catch(() => {
@@ -107,8 +108,9 @@ export function useHistoryCatalog({
   }, [fetchPage, isTrash, query, refreshNonce, suppliedSessions]);
 
   useEffect(() => {
-    if (isTrash || typeof window === "undefined" || !window.runtime) return;
-    const unsubscribe = window.runtime.EventsOn("history-index:changed-v1", (payload?: unknown) => {
+    const host = desktopHost();
+    if (isTrash || typeof window === "undefined" || host.kind === "none") return;
+    const unsubscribe = host.events.on("history-index:changed-v1", (payload?: unknown) => {
       if (!payload || typeof payload !== "object") return;
       const event = payload as { revision?: number; indexed?: number; total?: number; pending?: number };
       const nextRevision = typeof event.revision === "number" ? event.revision : 0;

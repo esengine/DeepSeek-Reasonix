@@ -1,6 +1,12 @@
+import { access } from "node:fs/promises";
+import path from "node:path";
 import { preview } from "vite";
 
-export function startPreviewServer(root, port) {
+export async function startPreviewServer(root, port) {
+  const entry = path.join(root, "dist", "index.html");
+  await access(entry).catch((cause) => {
+    throw new Error(`Browser gate requires the built frontend at ${entry}; build it or download the frontend artifact into dist.`, { cause });
+  });
   return preview({
     root,
     logLevel: "silent",

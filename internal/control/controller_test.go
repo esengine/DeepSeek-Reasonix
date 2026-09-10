@@ -5421,7 +5421,7 @@ func TestCacheColdAfterFailureFallsBackTo24h(t *testing.T) {
 	}
 	// 未知模型同样 24h
 	c2 := New(Options{})
-	c2.modelRef = "definitely-not-a-real-model-xyz"
+	c2.selection.ref = "definitely-not-a-real-model-xyz"
 	if got := c2.cacheColdAfter(); got != 24*time.Hour {
 		t.Fatalf("ResolveModel failure must fall back to 24h, got %v", got)
 	}

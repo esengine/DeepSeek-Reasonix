@@ -1,0 +1,31 @@
+{
+  "name": "reasonix-desktop-shell",
+  "private": true,
+  "version": "0.0.0",
+  "description": "Electron shell hosting the Reasonix Desktop UI over the desktop host protocol",
+  "type": "module",
+  "main": "dist/main.cjs",
+  "packageManager": "pnpm@10.34.5",
+  "scripts": {
+    "build": "node scripts/build.mjs",
+    "typecheck": "tsc -p tsconfig.json && tsc -p tsconfig.preload.json",
+    "test": "node --import tsx --test \"src/**/*.test.ts\"",
+    "start": "node scripts/build.mjs && node scripts/start.mjs",
+    "dev": "node scripts/build.mjs && node scripts/start.mjs --dev",
+    "smoke": "node scripts/build.mjs && node scripts/smoke.mjs"
+  },
+  "devDependencies": {
+    "@types/jsdom": "30.0.0",
+    "@types/node": "^26.1.2",
+    "electron": "44.2.0",
+    "esbuild": "^0.28.1",
+    "jsdom": "30.0.1",
+    "playwright": "^1.62.1",
+    "tsx": "^4.23.8",
+    "typescript": "^6.0.3"
+  },
+  "engines": {
+    "node": ">=24",
+    "pnpm": ">=10 <11"
+  }
+}

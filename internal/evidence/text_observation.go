@@ -13,6 +13,9 @@ type TextObservation struct {
 	Version    string
 	Snapshot   string
 	LineHashes []string
+	// Absent is a confirmed reader result, never an inference from an error
+	// message or directory listing. It retires obsolete operations only.
+	Absent bool
 }
 
 // ObservationBoundary freezes the ledger sequence at the start of a provider
@@ -28,7 +31,7 @@ func (l *Ledger) ObservationBoundary() uint64 {
 }
 
 func (l *Ledger) RecordTextObservation(o TextObservation) {
-	if l == nil || o.Path == "" || o.StartLine < 1 || len(o.LineHashes) == 0 {
+	if l == nil || o.Path == "" || (!o.Absent && (o.StartLine < 1 || len(o.LineHashes) == 0)) {
 		return
 	}
 	o.LineHashes = append([]string(nil), o.LineHashes...)

@@ -12,13 +12,13 @@
     "db:migrate:performance": "wrangler d1 execute reasonix-forum --remote --file=migrate-performance-indexes.sql"
   },
   "dependencies": {
-    "hono": "^4.12.34",
+    "hono": "^4.13.5",
     "zod": "^3.25.0"
   },
   "devDependencies": {
     "@cloudflare/workers-types": "^5.20260724.1",
     "typescript": "^5.8.0",
-    "vitest": "^3.2.0",
+    "vitest": "^4.1.11",
     "wrangler": "^4.114.0"
   },
   "overrides": {
@@ -26,7 +26,8 @@
   },
   "pnpm": {
     "overrides": {
-      "undici": "7.29.0"
+      "undici": "7.29.0",
+      "sharp": "0.35.4"
     }
   }
 }

@@ -8,6 +8,7 @@ import React from "react";
 import { JSDOM } from "jsdom";
 
 import type { AppBindings } from "../lib/bridge";
+import { installDesktopHostStub } from "./desktopHostStub";
 
 let passed = 0;
 let failed = 0;
@@ -53,7 +54,7 @@ const openCalls: Array<{ hostId: string; workspace: string }> = [];
 const navigationCalls: string[] = [];
 const stopCalls: Array<{ hostId: string; workspace: string }> = [];
 const statusCalls: Array<{ hostId: string; workspace: string }> = [];
-window.go = { main: { App: {
+installDesktopHostStub(({ main: { App: {
   async RegisterNavigationIntent(token: string) {
     navigationCalls.push(token);
   },
@@ -76,7 +77,7 @@ window.go = { main: { App: {
   async StopRemoteServer(hostId: string, workspace: string) {
     stopCalls.push({ hostId, workspace });
   },
-} as Partial<AppBindings> as AppBindings } };
+} as Partial<AppBindings> as AppBindings } }).main.App);
 
 const host = { id: "box", label: "box", host: "box.test", port: 22, user: "dev", identityFile: "", proxyJump: "", defaultWorkspace: "/srv/app", serveInstall: "auto", credentialMode: "remote", useSSHConfig: false };
 useRemoteStore.getState().setHosts([host]);

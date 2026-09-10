@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import type { AppBindings } from "../lib/bridge";
 import type { TurnEventReplayView } from "../lib/types";
+import { installDesktopHostStub } from "./desktopHostStub";
 
 let resetEntered!: () => void;
 const resetStarted = new Promise<void>((resolve) => { resetEntered = resolve; });
@@ -37,8 +38,9 @@ const binding: Partial<AppBindings> = {
 };
 Object.defineProperty(globalThis, "window", {
   configurable: true,
-  value: { go: { main: { App: binding as AppBindings } } } as Window,
+  value: {} as Window,
 });
+installDesktopHostStub(binding);
 
 const [{ TurnEventProjector }, { initialState, reducer }] = await Promise.all([
   import("../lib/turnEventProjection"),

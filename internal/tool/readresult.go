@@ -195,10 +195,16 @@ func ParseReadTrailer(output string) ReadTrailer {
 	}
 	const prefix = "\n[more lines below; pass offset="
 	start := strings.LastIndex(output, prefix)
+	valueStart := start + len(prefix)
+	if partial := strings.LastIndex(output, "\n[PARTIAL view:"); partial >= 0 {
+		if field := strings.Index(output[partial:], "pass offset="); field >= 0 {
+			start, valueStart = partial, partial+field+len("pass offset=")
+		}
+	}
 	if start < 0 || !strings.HasSuffix(output, "]\n") {
 		return ReadTrailer{}
 	}
-	value := output[start+len(prefix):]
+	value := output[valueStart:]
 	if end := strings.IndexAny(value, " ]\r\n"); end >= 0 {
 		value = value[:end]
 	}

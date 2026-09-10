@@ -50,6 +50,7 @@ export function FloatingMenu({
   // Rendering at the body root keeps fixed positioning relative to the viewport.
   return createPortal(
     <div
+      data-app-overlay=""
       className={`floating-menu${className ? ` ${className}` : ""}`}
       style={{ left: pos.left, top: pos.top }}
       onMouseDown={(e) => {

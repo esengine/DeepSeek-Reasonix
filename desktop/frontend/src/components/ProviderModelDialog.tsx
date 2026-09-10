@@ -29,7 +29,7 @@ export default function ProviderModelDialog({ initial, candidates, contextDefaul
   const validation = modelDraftError({model, context, output, vision: "auto"}, candidates, initial?.model);
   const imageBlocked = imageInputHardBlocked(baseURL, model, capability);
   const imageState = imageBlocked ? "unsupported" : imageInputState(vision === "auto" ? "auto" : vision === "true" ? "on" : "off", capability);
-  return createPortal(<dialog ref={dialog} className="provider-model-dialog" aria-labelledby={titleId}
+  return createPortal(<dialog ref={dialog} className="provider-model-dialog" data-app-overlay="" aria-labelledby={titleId}
     onCancel={event => { event.preventDefault(); if (!busy) onClose(); }}>
     <form onSubmit={event => { event.preventDefault(); if (validation) { setError(true); return; } onApply({ model:model.trim(), contextWindow:context.trim(), maxOutputTokens:Number(output) || 0, vision:vision === "auto" ? null : !imageBlocked && vision === "true" }); }}>
       <header><h2 id={titleId}>{t(initial ? "settings.modelDialog.edit" : "settings.models.add")}</h2><ModalCloseButton label={t("common.close")} disabled={busy} onClick={onClose}/></header>

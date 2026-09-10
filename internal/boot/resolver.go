@@ -187,6 +187,9 @@ func modelRefFromEntry(e *config.ProviderEntry) string {
 // ref. The unknown-model error names every ref the session could have used,
 // including plugin-namespaced refs a merged extension resolver serves.
 func resolveModelEntry(resolver provider.Resolver, cfg *config.Config, modelName string) (*config.ProviderEntry, string, error) {
+	if err := cfg.ModelReferenceError(modelName); err != nil {
+		return nil, "", err
+	}
 	if resolver != nil {
 		entry := syntheticEntryFromResolver(resolver, modelName)
 		if strings.TrimSpace(entry.Name) != "" {

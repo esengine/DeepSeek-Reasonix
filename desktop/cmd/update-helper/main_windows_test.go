@@ -148,12 +148,9 @@ func TestRunVersionedLayoutDoesNotReadOrClaimLegacyPending(t *testing.T) {
 		reconciledVersion = targetVersion
 		return true, nil
 	}
+	acceptWindowsPayloadManifestForTest(t)
 	runInstallerFn = func(_ string, staging string) error {
-		for _, name := range []string{"reasonix-desktop.exe", "reasonix-cli.exe", "reasonix-update-helper.exe", "reasonix-launcher.exe"} {
-			if err := os.WriteFile(filepath.Join(staging, name), []byte("new-"+name), 0o700); err != nil {
-				return err
-			}
-		}
+		writeVersionedWindowsStaging(t, staging, "new-", "v1.20.1")
 		return nil
 	}
 	relaunched := false
@@ -188,18 +185,9 @@ func TestRunVersionedUpdateRelaunchesLauncherNotOldDesktop(t *testing.T) {
 	stubDesktopHandoff(t)
 	installDir := t.TempDir()
 	seed := t.TempDir()
-	for _, name := range []string{"reasonix-desktop.exe", "reasonix-cli.exe", "reasonix-update-helper.exe", "reasonix-launcher.exe"} {
-		if err := os.WriteFile(filepath.Join(seed, name), []byte("old-"+name), 0o700); err != nil {
-			t.Fatal(err)
-		}
-	}
-	if err := activateVersionedWindowsFromStaging(&repair.UpdateTransaction{
-		SchemaVersion: 1,
-		ToVersion:     "v1.24.0",
-		TargetKind:    "file",
-		TargetPath:    filepath.Join(installDir, "reasonix-desktop.exe"),
-		CreatedAt:     "2026-01-01T00:00:00Z",
-	}, seed); err != nil {
+	acceptWindowsPayloadManifestForTest(t)
+	writeVersionedWindowsStaging(t, seed, "old-", "v1.24.0")
+	if err := activateVersionedWindowsFromStaging(versionedWindowsTransaction(installDir, "v1.24.0", "2026-01-01T00:00:00Z"), seed); err != nil {
 		t.Fatal(err)
 	}
 	oldDesktop, err := installlayout.ActiveDesktopPath(installDir)
@@ -227,11 +215,7 @@ func TestRunVersionedUpdateRelaunchesLauncherNotOldDesktop(t *testing.T) {
 	claimInstallerExecutionFn = func(string, string) (func(), error) { return func() {}, nil }
 	reconcileWindowsUninstallRegistrationFn = func(string, string) (bool, error) { return true, nil }
 	runInstallerFn = func(_ string, staging string) error {
-		for _, name := range []string{"reasonix-desktop.exe", "reasonix-cli.exe", "reasonix-update-helper.exe", "reasonix-launcher.exe"} {
-			if err := os.WriteFile(filepath.Join(staging, name), []byte("new-"+name), 0o700); err != nil {
-				return err
-			}
-		}
+		writeVersionedWindowsStaging(t, staging, "new-", "v1.24.1")
 		return nil
 	}
 	verified := false

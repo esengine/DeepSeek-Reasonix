@@ -30,7 +30,7 @@ export function ProviderDialog({ title, children, onClose }: { title: string; ch
     window.addEventListener("keydown", keydown, true);
     return () => window.removeEventListener("keydown", keydown, true);
   }, []);
-  return createPortal(<div className="modal-backdrop provider-dialog-backdrop" onMouseDown={(e) => { if (e.target === e.currentTarget) onClose(); }}>
+  return createPortal(<div className="modal-backdrop provider-dialog-backdrop" data-app-overlay="" onMouseDown={(e) => { if (e.target === e.currentTarget) onClose(); }}>
     <div ref={ref} className="modal provider-dialog" role="dialog" aria-modal="true" aria-labelledby={id}>
       <header><h3 id={id}>{title}</h3><ModalCloseButton label={t("common.close")} onClick={onClose} /></header>
       {children}

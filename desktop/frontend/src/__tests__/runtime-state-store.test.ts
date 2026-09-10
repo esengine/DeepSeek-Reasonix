@@ -76,3 +76,26 @@ const final = synced.getSnapshot();
 stop(); receive(projection(6)); focus();
 assert.equal(synced.getSnapshot(), final); assert.equal(unsubscribed, true); assert.equal(timers.size, 0);
 console.log("runtime state: immutable revisions, selectors, GET/SSE ordering, recovery, singleflight and disposal passed");
+
+{
+  const restored = createRuntimeStateStore();
+  let recover!: () => void;
+  const replies: Array<(value: RuntimeProjection) => void> = [];
+  const dispose = startRuntimeStateSync({
+    subscribe: () => () => {},
+    recover: callback => { recover = callback; return () => {}; },
+    read: () => new Promise(resolve => replies.push(resolve)),
+    timer: () => 1,
+    clearTimer: () => {},
+    focus: () => () => {},
+  }, restored);
+  recover(); recover();
+  assert.equal(restored.getFailed(), true, "a gap marks runtime state unknown until an authoritative read");
+  replies.shift()!(projection(99)); await Promise.resolve(); await Promise.resolve();
+  assert.equal(restored.getSnapshot(), undefined, "a pre-gap async reply cannot repair the new generation");
+  assert.equal(replies.length, 1, "recovery queued during an in-flight read is not lost");
+  replies.shift()!({ ...projection(1), epoch: "new-app" }); await Promise.resolve(); await Promise.resolve();
+  assert.equal(restored.getSnapshot()?.epoch, "new-app");
+  assert.equal(restored.getFailed(), false);
+  dispose();
+}

@@ -11,14 +11,14 @@ import {
   XCircle,
 } from "lucide-react";
 import { app } from "../lib/bridge";
+import { desktopHost } from "../lib/desktopHost";
 import { useT } from "../lib/i18n";
 import type { TaskEvent, TaskSnapshot } from "../lib/types";
 
 type CatalogTask = TaskSnapshot & { __projectKey: string; __projectLabel: string; __catalogKey: string };
 
 function hasTaskCatalogBinding(): boolean {
-  const bound = (window as unknown as { go?: { main?: { App?: { ListTaskPage?: unknown } } } }).go?.main?.App?.ListTaskPage;
-  return typeof bound === "function";
+  return typeof desktopHost().app?.ListTaskPage === "function";
 }
 
 // --- helpers ---

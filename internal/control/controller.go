@@ -128,7 +128,8 @@ type Controller struct {
 	subagentGate *SharedHeadlessGate
 
 	label                   string
-	modelRef                string
+	selection               modelSelection
+	resolveSessionModel     func(string, string) (string, error)
 	visionModel             string
 	visionProviderResolver  func(string) (provider.Provider, error)
 	visionModelSelector     func(string, string) (string, bool)
@@ -496,9 +497,11 @@ type Options struct {
 	// SetToolApprovalMode and ApplyHeadlessApprovalMode call Update on it so a
 	// runtime approval-mode switch reaches sub-agents, not just the parent
 	// executor's own gate.
-	SubagentGate *SharedHeadlessGate
-	Label        string
-	ModelRef     string
+	SubagentGate        *SharedHeadlessGate
+	Label               string
+	ModelRef            string
+	ModelIdentity       string
+	ResolveSessionModel func(string, string) (string, error)
 	// VisionModel is empty (off), "auto", or a canonical provider/model ref.
 	// The resolver and selector are assembled by boot so the controller remains
 	// transport-agnostic and tests can inject deterministic fake providers.
@@ -701,7 +704,8 @@ func New(opts Options) *Controller {
 		policy:                            opts.Policy,
 		subagentGate:                      opts.SubagentGate,
 		label:                             opts.Label,
-		modelRef:                          opts.ModelRef,
+		selection:                         modelSelection{ref: opts.ModelRef, identity: opts.ModelIdentity},
+		resolveSessionModel:               opts.ResolveSessionModel,
 		visionModel:                       strings.TrimSpace(opts.VisionModel),
 		visionProviderResolver:            opts.VisionProviderResolver,
 		visionModelSelector:               opts.VisionModelSelector,
@@ -3484,7 +3488,7 @@ func (c *Controller) cacheColdAfter() time.Duration {
 	if err != nil {
 		return 24 * time.Hour
 	}
-	ref := c.modelRef
+	ref := c.selection.ref
 	if ref == "" {
 		ref = cfg.DefaultModel
 	}
@@ -3543,7 +3547,7 @@ func (c *Controller) snapshotWithDurability(markActivity, forceRewrite, shutdown
 
 	c.mu.Lock()
 	path := c.sessionPath
-	modelRef := c.modelRef
+	modelRef := c.selection.ref
 	c.mu.Unlock()
 	if c.executor == nil {
 		return false, nil
@@ -3657,23 +3661,23 @@ func (c *Controller) snapshotWithDurability(markActivity, forceRewrite, shutdown
 	// like SetBranchModelPreserveUpdated. The single write subsumes the old
 	// EnsureBranchMeta / SetBranchModel / TouchBranchMeta sequence.
 	preview, turns := agent.SessionPreviewFromMessages(s.Snapshot())
-	if err := updateSessionListingProjection(s, path, modelRef, preview, turns, markActivity); err != nil && !listingDeferredAfterUnlockedAppend(s, path, err) {
+	if err := updateSessionModelProjection(s, path, modelRef, c.selection.identity, preview, turns, markActivity); err != nil && !listingDeferredAfterUnlockedAppend(s, path, err) {
 		return transcriptDurable, err
 	}
 	c.extensionSessionPayloadEvent(extension.PointSessionSave, savePayload)
 	return transcriptDurable, nil
 }
 
-func updateSessionListingProjection(s *agent.Session, path, modelRef, preview string, turns int, markActivity bool) error {
+func updateSessionModelProjection(s *agent.Session, path, modelRef, identity, preview string, turns int, markActivity bool) error {
 	persisted, ok := s.PersistedState(path)
 	if !ok {
 		return fmt.Errorf("session persistence baseline missing after save")
 	}
 	var err error
 	if s.WriteAuthorityRequired() {
-		_, err = agent.UpdateOwnedSessionListingProjectionIfCurrent(path, modelRef, preview, turns, markActivity, persisted, s.WriteAuthority())
+		_, err = agent.UpdateOwnedSessionListingProjectionIfCurrent(path, modelRef, identity, preview, turns, markActivity, persisted, s.WriteAuthority())
 	} else {
-		_, err = agent.UpdateSessionListingProjectionIfCurrent(path, modelRef, preview, turns, markActivity, persisted)
+		_, err = agent.UpdateSessionListingProjectionIfCurrent(path, modelRef, identity, preview, turns, markActivity, persisted)
 	}
 	return err
 }
@@ -4919,7 +4923,10 @@ func (c *Controller) UnregisterMCPServerTools(name string) bool {
 func (c *Controller) Label() string { return c.label }
 
 // ModelRef returns the canonical provider/model reference for the session.
-func (c *Controller) ModelRef() string { return c.modelRef }
+func (c *Controller) ModelRef() string { return c.selection.ref }
+
+// ModelSelectionIdentity is frozen with the provider assembled for this runtime.
+func (c *Controller) ModelSelectionIdentity() string { return c.selection.identity }
 
 // WorkspaceRoot returns the workspace root for this controller's session
 // (the directory that file-writers and @-references are scoped to).
@@ -4930,7 +4937,7 @@ func (c *Controller) imageInputEnabled() bool {
 	if c.frozenImageInput != nil {
 		return *c.frozenImageInput
 	}
-	ref := c.modelRef
+	ref := c.selection.ref
 	cfg, err := config.LoadForRoot(c.workspaceRoot)
 	if err == nil && ref == "" {
 		ref = cfg.DefaultModel

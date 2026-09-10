@@ -4,8 +4,9 @@ import { JSDOM } from "jsdom";
 import type { AppBindings } from "../lib/bridge";
 import type { TabMeta } from "../lib/types";
 import type { RemoteSessionApi } from "../lib/useRemoteSession";
-let passed = 0;
-let failed = 0;
+import { installDesktopHostStub } from "./desktopHostStub";
+
+let passed = 0, failed = 0;
 function ok(value: boolean, label: string) {
   process.stdout.write(`  ${value ? "PASS" : "FAIL"}  ${label}\n`);
   if (value) passed += 1;
@@ -45,8 +46,7 @@ Object.defineProperty(elementProto, "clientWidth", { configurable: true, get: ()
 ) {
   this.scrollTop = typeof arg === "number" ? arg : arg?.top ?? this.scrollTop;
 };
-// Transcript's virtualization calls the global rAF; jsdom only exposes it on
-// the (visual) window.
+// Transcript calls global rAF; jsdom exposes it only on the visual window.
 globalThis.requestAnimationFrame = dom.window.requestAnimationFrame?.bind(dom.window) ?? ((cb: FrameRequestCallback) => setTimeout(() => cb(Date.now()), 16) as unknown as number);
 globalThis.cancelAnimationFrame = dom.window.cancelAnimationFrame?.bind(dom.window) ?? ((handle: number) => clearTimeout(handle));
 Object.defineProperty(elementProto, "detachEvent", { configurable: true, value: () => {} });
@@ -69,7 +69,7 @@ let resolveRaceSnapshot: ((value: { history: unknown[]; status: unknown }) => vo
 const resolveStateRaceSnapshots: Array<(value: { history: unknown[]; status: unknown }) => void> = [];
 let rotationSnapshotCalls = 0;
 let resolveRotationReconcile: ((value: { history: unknown[]; status: unknown }) => void) | undefined;
-window.go = { main: { App: {
+const desktopStub = installDesktopHostStub(({ main: { App: {
   async RegisterNavigationIntent(token: string) { tape.push(`navigation:${token}`); },
   async RemoteTabSnapshot(tabId: string) {
     tape.push(`snapshot:${tabId}`);
@@ -212,14 +212,14 @@ window.go = { main: { App: {
   async SetActiveTab(tabID: string) {
     tape.push(`setActive:${tabID}`);
   },
-} as Partial<AppBindings> as AppBindings } };
+} as Partial<AppBindings> as AppBindings } }).main.App);
 
-const [{ createRoot }, { RemoteSessionSurface }, { LocaleProvider }, { useRemoteSession }, { __emitMockRemoteTab }, { remoteRuntimeCommand }] = await Promise.all([
+const __emitMockRemoteTab = (tabId: string, channel: "state" | "event", payload: unknown) => desktopStub.emit(`remote-tab:${tabId}:${channel}`, payload);
+const [{ createRoot }, { RemoteSessionSurface }, { LocaleProvider }, { useRemoteSession }, { remoteRuntimeCommand }] = await Promise.all([
   import("react-dom/client"),
   import("../components/RemoteSessionSurface"),
   import("../lib/i18n"),
   import("../lib/useRemoteSession"),
-  import("../lib/bridge"),
   import("../lib/useRemoteComposerIntegration"),
 ]);
 
@@ -794,7 +794,7 @@ ok(replayProbe?.transcript.approval?.id === "replayed-approval", "a remote mode 
 await act(async () => { replayProbe?.drainApprovals(["replayed-approval"]); await flush(); });
 ok(replayProbe?.transcript.approval === undefined, "a remote mode transaction clears the exact approval it auto-allowed");
 await act(async () => replayRoot.unmount());
-await (await import("./helpers/remoteRuntimeReconciliationCases")).runRemoteRuntimeCases({ remoteTab, ok, tape, flush, setSnapshotHistory: value => { snapshotHistory = value; } });
+await (await import("./helpers/remoteRuntimeReconciliationCases")).runRemoteRuntimeCases({ commands: desktopStub.commands as unknown as AppBindings, emitRemote: __emitMockRemoteTab, remoteTab, ok, tape, flush, setSnapshotHistory: value => { snapshotHistory = value; } });
 dom.window.close();
 process.stdout.write(`\n${passed} passed, ${failed} failed\n`);
 if (failed > 0) process.exit(1);

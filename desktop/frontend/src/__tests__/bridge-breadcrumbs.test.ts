@@ -2,6 +2,7 @@
 
 import { snapshotBreadcrumbs } from "../lib/breadcrumbs";
 import { app } from "../lib/bridge";
+import { installDesktopHostStub } from "./desktopHostStub";
 
 let passed = 0;
 let failed = 0;
@@ -36,8 +37,7 @@ let now = 0;
 (globalThis as Record<string, unknown>).performance = { now: () => now };
 
 ensureWindow();
-const previousGo = window.go;
-window.go = {
+const desktopStub = installDesktopHostStub(({
   main: {
     App: {
       async IsMainWindowMaximised() {
@@ -50,7 +50,7 @@ window.go = {
       },
     } as never,
   },
-};
+}).main.App);
 
 const successStart = snapshotBreadcrumbs().length;
 now = 10;
@@ -74,7 +74,7 @@ const bridgeErrors = newBreadcrumbMessages(errorStart, "bridge.error");
 ok(errorBridge.includes("update CheckUpdate"), "records bridge start breadcrumb before failed calls");
 ok(bridgeErrors.includes("CheckUpdate ms=25"), "records bridge failure timing breadcrumbs");
 
-window.go = previousGo;
+desktopStub.uninstall();
 if (previousPerformance) {
   (globalThis as Record<string, unknown>).performance = previousPerformance;
 } else {

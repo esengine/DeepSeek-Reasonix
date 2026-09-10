@@ -7,6 +7,7 @@ import { ThemeGallery } from "../components/ThemeGallery";
 import { LocaleProvider } from "../lib/i18n";
 import type { ThemeExperienceView } from "../lib/themeExperience";
 import type { ThemePackView } from "../lib/themePack";
+import { installDesktopHostStub } from "./desktopHostStub";
 
 let passed = 0;
 let failed = 0;
@@ -70,14 +71,14 @@ let resolveSave: ((pack: ThemePackView) => void) | null = null;
 const pendingSave = new Promise<ThemePackView>((resolve) => {
   resolveSave = resolve;
 });
-window.go = {
+installDesktopHostStub(({
   main: {
     App: {
       ListThemePacks: async () => [],
       SaveThemePack: async () => pendingSave,
     },
   },
-};
+}).main.App);
 
 const rootElement = document.getElementById("root");
 const opener = document.getElementById("opener") as HTMLButtonElement | null;

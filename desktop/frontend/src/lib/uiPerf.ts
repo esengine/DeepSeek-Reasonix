@@ -237,7 +237,7 @@ export const uiPerfTracker: UIPerfTracker = createUIPerfTracker((signals) => {
   try {
     void Promise.resolve(app.RecordUIPerf(signals)).catch(() => {});
   } catch {
-    // A partially initialized Wails binding can still throw synchronously.
+    // A partially initialized desktop binding can still throw synchronously.
   }
 });
 

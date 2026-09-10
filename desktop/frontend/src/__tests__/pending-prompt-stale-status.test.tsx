@@ -23,6 +23,7 @@ import {
 } from "../lib/useController";
 import type { AppBindings } from "../lib/bridge";
 import type { ContextInfo, EffortInfo, Meta, TabMeta, WireEvent } from "../lib/types";
+import { installDesktopHostStub } from "./desktopHostStub";
 
 let passed = 0;
 let failed = 0;
@@ -402,8 +403,6 @@ function metaForTab(): Meta {
 
 const context: ContextInfo = { used: 0, window: 100, sessionTokens: 0 };
 const effortInfo: EffortInfo = { supported: true, current: "auto", default: "auto", levels: ["auto"] };
-const eventHandlers: Array<(e: WireEvent) => void> = [];
-const rebuiltHandlers: Array<(tabId?: string, runtimeEpoch?: string) => void> = [];
 let holdNextListTabs: Promise<void> | undefined;
 let modeDrain: ReturnType<typeof deferred<string[]>> | undefined;
 let toolApprovalModeDrain: ReturnType<typeof deferred<string[]>> | undefined;
@@ -411,15 +410,7 @@ let composerProfileDrain: ReturnType<typeof deferred<string[]>> | undefined;
 let composerProfileCalls = 0;
 let rejectNextComposerProfile = false;
 
-window.runtime = {
-  EventsOn: (name: string, cb: (payload: unknown) => void) => {
-    if (name === "agent:event") eventHandlers.push(cb as (e: WireEvent) => void);
-    if (name === "runtime:rebuilt") rebuiltHandlers.push(cb as (tabId?: string, runtimeEpoch?: string) => void);
-    return () => {};
-  },
-  BrowserOpenURL: () => {},
-};
-window.go = {
+const desktopStub = installDesktopHostStub(({
   main: {
     App: {
       RegisterNavigationIntent: async () => {},
@@ -454,7 +445,7 @@ window.go = {
       },
     } as Partial<AppBindings> as AppBindings,
   },
-};
+}).main.App);
 
 type Controller = ReturnType<typeof useController>;
 let controller: Controller | undefined;
@@ -489,19 +480,19 @@ const remoteEpochApproval = {
   approval: { id: "remote-epoch-1", tool: "bash", subject: "Remote epoch prompt" },
 } as WireEvent;
 await act(async () => {
-  for (const handler of eventHandlers) handler(remoteEpochApproval);
+  desktopStub.emit("agent:event", remoteEpochApproval);
   await flushPromises();
 });
 eq(controller?.state.approval, undefined, "a Remote event is fenced while the Local epoch is still authoritative");
 await act(async () => {
   projectedRuntimeEpoch = "runtime-remote";
-  for (const handler of rebuiltHandlers) handler("tab-a", "runtime-remote");
-  for (const handler of eventHandlers) handler(remoteEpochApproval);
+  desktopStub.emit("runtime:rebuilt", "tab-a", "runtime-remote");
+  desktopStub.emit("agent:event", remoteEpochApproval);
   await flushPromises();
 });
 eq(controller?.state.approval?.id, "remote-epoch-1", "the projected Remote epoch admits tagged Host events");
 await act(async () => {
-  for (const handler of eventHandlers) handler({ kind: "turn_done", tabId: "tab-a", runtimeEpoch: "runtime-remote" } as WireEvent);
+  desktopStub.emit("agent:event", { kind: "turn_done", tabId: "tab-a", runtimeEpoch: "runtime-remote" } as WireEvent);
   await flushPromises();
 });
 eq(controller?.state.approval, undefined, "the Remote epoch regression fixture resets cleanly");
@@ -516,9 +507,7 @@ await act(async () => {
   await flushPromises();
 });
 await act(async () => {
-  for (const handler of eventHandlers) {
-    handler({ kind: "approval_request", tabId: "tab-a", approval: { id: "plan-live", tool: "exit_plan_mode", subject: "Approve plan" } } as WireEvent);
-  }
+  desktopStub.emit("agent:event", { kind: "approval_request", tabId: "tab-a", approval: { id: "plan-live", tool: "exit_plan_mode", subject: "Approve plan" } } as WireEvent);
   await flushPromises();
 });
 eq(controller?.state.approval?.id, "plan-live", "replayed plan approval renders while a snapshot fetch is in flight");
@@ -558,9 +547,7 @@ eq(controller?.state.running, false, "fresh idle snapshot releases the blocked s
     await flushPromises();
   });
   await act(async () => {
-    for (const handler of eventHandlers) {
-      handler({ kind: "approval_request", tabId: "tab-a", approval: { id: "plan-zombie", tool: "exit_plan_mode", subject: "Approve plan" } } as WireEvent);
-    }
+    desktopStub.emit("agent:event", { kind: "approval_request", tabId: "tab-a", approval: { id: "plan-zombie", tool: "exit_plan_mode", subject: "Approve plan" } } as WireEvent);
     await flushPromises();
   });
   eq(controller?.state.approval?.id, "plan-zombie", "zombie approval is armed after the snapshot fetch started");
@@ -586,9 +573,7 @@ eq(controller?.state.running, false, "fresh idle snapshot releases the blocked s
 {
   const approvalID = "mode-drain-1";
   await act(async () => {
-    for (const handler of eventHandlers) {
-      handler({ kind: "approval_request", tabId: "tab-a", approval: { id: approvalID, tool: "bash", subject: "old controller mode prompt" } } as WireEvent);
-    }
+    desktopStub.emit("agent:event", { kind: "approval_request", tabId: "tab-a", approval: { id: approvalID, tool: "bash", subject: "old controller mode prompt" } } as WireEvent);
     await flushPromises();
   });
   modeDrain = deferred<string[]>();
@@ -598,10 +583,8 @@ eq(controller?.state.running, false, "fresh idle snapshot releases the blocked s
     await flushPromises();
   });
   await act(async () => {
-    for (const handler of rebuiltHandlers) handler("tab-a");
-    for (const handler of eventHandlers) {
-      handler({ kind: "approval_request", tabId: "tab-a", approval: { id: approvalID, tool: "bash", subject: "new controller mode prompt" } } as WireEvent);
-    }
+    desktopStub.emit("runtime:rebuilt", "tab-a");
+    desktopStub.emit("agent:event", { kind: "approval_request", tabId: "tab-a", approval: { id: approvalID, tool: "bash", subject: "new controller mode prompt" } } as WireEvent);
     await flushPromises();
   });
   await act(async () => {
@@ -613,9 +596,7 @@ eq(controller?.state.running, false, "fresh idle snapshot releases the blocked s
 
   const toolApprovalID = "tool-mode-drain-1";
   await act(async () => {
-    for (const handler of eventHandlers) {
-      handler({ kind: "approval_request", tabId: "tab-a", approval: { id: toolApprovalID, tool: "bash", subject: "old tool-approval prompt" } } as WireEvent);
-    }
+    desktopStub.emit("agent:event", { kind: "approval_request", tabId: "tab-a", approval: { id: toolApprovalID, tool: "bash", subject: "old tool-approval prompt" } } as WireEvent);
     await flushPromises();
   });
   toolApprovalModeDrain = deferred<string[]>();
@@ -625,10 +606,8 @@ eq(controller?.state.running, false, "fresh idle snapshot releases the blocked s
     await flushPromises();
   });
   await act(async () => {
-    for (const handler of rebuiltHandlers) handler("tab-a");
-    for (const handler of eventHandlers) {
-      handler({ kind: "approval_request", tabId: "tab-a", approval: { id: toolApprovalID, tool: "bash", subject: "new tool-approval prompt" } } as WireEvent);
-    }
+    desktopStub.emit("runtime:rebuilt", "tab-a");
+    desktopStub.emit("agent:event", { kind: "approval_request", tabId: "tab-a", approval: { id: toolApprovalID, tool: "bash", subject: "new tool-approval prompt" } } as WireEvent);
     await flushPromises();
   });
   await act(async () => {
@@ -640,9 +619,7 @@ eq(controller?.state.running, false, "fresh idle snapshot releases the blocked s
 
   const profileApprovalID = "profile-drain-1";
   await act(async () => {
-    for (const handler of eventHandlers) {
-      handler({ kind: "approval_request", tabId: "tab-a", approval: { id: profileApprovalID, tool: "bash", subject: "old composer-profile prompt" } } as WireEvent);
-    }
+    desktopStub.emit("agent:event", { kind: "approval_request", tabId: "tab-a", approval: { id: profileApprovalID, tool: "bash", subject: "old composer-profile prompt" } } as WireEvent);
     await flushPromises();
   });
   composerProfileDrain = deferred<string[]>();
@@ -654,10 +631,8 @@ eq(controller?.state.running, false, "fresh idle snapshot releases the blocked s
   });
   eq(composerProfileCalls, profileCallsBefore + 1, "one composer-profile sync uses one atomic backend call");
   await act(async () => {
-    for (const handler of rebuiltHandlers) handler("tab-a");
-    for (const handler of eventHandlers) {
-      handler({ kind: "approval_request", tabId: "tab-a", approval: { id: profileApprovalID, tool: "bash", subject: "new composer-profile prompt" } } as WireEvent);
-    }
+    desktopStub.emit("runtime:rebuilt", "tab-a");
+    desktopStub.emit("agent:event", { kind: "approval_request", tabId: "tab-a", approval: { id: profileApprovalID, tool: "bash", subject: "new composer-profile prompt" } } as WireEvent);
     await flushPromises();
   });
   await act(async () => {
@@ -679,7 +654,7 @@ eq(controller?.state.running, false, "fresh idle snapshot releases the blocked s
   const rebuiltProfileCallsBefore = composerProfileCalls;
   await act(async () => {
     projectedRuntimeEpoch = "runtime-next";
-    for (const handler of rebuiltHandlers) handler("tab-a", "runtime-next");
+    desktopStub.emit("runtime:rebuilt", "tab-a", "runtime-next");
     await controller?.setComposerProfileForTab("tab-a", "plan", "auto", "");
     await controller?.setComposerProfileForTab("tab-a", "plan", "auto", "");
     await flushPromises();

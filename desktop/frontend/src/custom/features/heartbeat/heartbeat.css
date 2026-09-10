@@ -49,26 +49,26 @@
   right: 0;
   height: 32px;
   z-index: 3;
-  --wails-draggable: drag;
+  --reasonix-draggable: drag;
   user-select: none;
 }
 
 /* 列表/详情内容区保持可交互，不参与窗口拖拽 */
 .heartbeat-split__left,
 .heartbeat-split__right {
-  --wails-draggable: no-drag;
+  --reasonix-draggable: no-drag;
 }
 
 /* 自定义滚动条可拖拽滑块不参与窗口拖拽 */
 .heartbeat-scrollbar,
 .heartbeat-scrollbar__thumb {
-  --wails-draggable: no-drag;
+  --reasonix-draggable: no-drag;
 }
 
 /* 分割线本身必须 no-drag——否则继承 .heartbeat-split 的 drag，
-   鼠标按下会被 Wails 当成拖窗口，React 收不到 mousedown 无法拖动分栏 */
+   鼠标按下会被桌面壳当成拖窗口，React 收不到 mousedown 无法拖动分栏 */
 .heartbeat-split__divider {
-  --wails-draggable: no-drag;
+  --reasonix-draggable: no-drag;
 }
 
 .heartbeat-split__left {
@@ -838,18 +838,18 @@
 
 /* ── 状态筛选 tab（全部/已开启/已暂停） ────────────────────────── */
 
-/* 列表区与详情区头部支持拖拽窗口（Wails --wails-draggable），
+/* 列表区与详情区头部支持拖拽窗口（--reasonix-draggable 标记），
    交互元素（按钮/输入框）保持 no-drag 可点击 */
 .heartbeat-toolbar,
 .heartbeat-editor__header {
-  --wails-draggable: drag;
+  --reasonix-draggable: drag;
   user-select: none;
 }
 
 .heartbeat-toolbar button,
 .heartbeat-toolbar input,
 .heartbeat-editor__header button {
-  --wails-draggable: no-drag;
+  --reasonix-draggable: no-drag;
 }
 
 .heartbeat-status-tabs {

@@ -5,6 +5,11 @@
   font-size: var(--text-2xs);
   line-height: 1.45;
 }
+.settings-graphics-label { display: inline-flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+.settings-graphics-status { color: var(--accent); font-size: var(--text-2xs); font-weight: 600; }
+.settings-graphics-status--warning { color: var(--fg-dim); font-weight: 500; }
+.settings-graphics-status--error { color: var(--danger, #b42318); font-weight: 500; }
+.settings-graphics-control { display: flex; flex-direction: column; align-items: flex-end; gap: 6px; }
 
 .settings-screen__sidebar {
   display: flex;
@@ -59,7 +64,7 @@
 }
 
 .settings-center__search {
-  --wails-draggable: no-drag;
+  --reasonix-draggable: no-drag;
   flex-shrink: 0;
   display: grid;
   grid-template-columns: auto minmax(0, 1fr) auto;

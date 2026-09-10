@@ -10,6 +10,7 @@ import { RemoteHostsPage } from "../components/RemoteHostsPage";
 import type { AppBindings } from "../lib/bridge";
 import { LocaleProvider } from "../lib/i18n";
 import type { RemoteHostInput, RemoteHostView } from "../lib/types";
+import { installDesktopHostStub } from "./desktopHostStub";
 
 let passed = 0;
 let failed = 0;
@@ -88,7 +89,7 @@ const bindings = {
     legacyView = { mirrorCount: 0, mirrorBytes: 0, trustFile: false };
   },
 } as unknown as AppBindings;
-window.go = { main: { App: bindings } };
+installDesktopHostStub(({ main: { App: bindings } }).main.App);
 
 window.matchMedia = (() => ({matches: true, addEventListener(){}, removeEventListener(){}})) as any;
 const rootElement = document.getElementById("root");

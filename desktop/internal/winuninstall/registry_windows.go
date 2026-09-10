@@ -17,7 +17,7 @@ const (
 	legacyProductRegistryPath = `Software\reasonix\Reasonix`
 )
 
-// Reconcile refreshes the current Wails per-user registration after a
+// Reconcile refreshes the current desktop per-user registration after a
 // successful version activation. It intentionally refuses legacy-only and
 // portable trees; those require the full signed installer to establish a
 // trustworthy uninstaller first.

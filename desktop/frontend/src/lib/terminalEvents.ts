@@ -1,5 +1,6 @@
 import { onTerminalExit, onTerminalOutput, type TerminalExitEvent, type TerminalOutputEvent } from "./bridge";
 import { createSubscriptionScope } from "./subscriptionScope";
+import { desktopHost } from "./desktopHost";
 
 const MAX_HISTORY_BYTES = 1024 * 1024;
 
@@ -7,6 +8,7 @@ type SequencedTerminalSink = (data: Uint8Array, sequence: number) => void;
 
 const sinks = new Map<string, SequencedTerminalSink>();
 const exitListeners = new Set<(event: TerminalExitEvent) => void>();
+const gapListeners = new Set<(ids: string[]) => void>();
 const history = new Map<string, Uint8Array[]>();
 const historyBytes = new Map<string, number>();
 const nextSequence = new Map<string, number>();
@@ -46,6 +48,12 @@ export function startTerminalEventBridge(): () => void {
     const scope = createSubscriptionScope();
     scope.listen(onTerminalOutput, deliverOutput);
     scope.listen(onTerminalExit, deliverExit);
+    scope.listen(callback => desktopHost().events.on("desktop:resync", callback), (event: unknown) => {
+      const reason = (event as { reason?: string } | undefined)?.reason;
+      if (history.size || reason === "gap" || reason === "subscription") {
+        for (const listener of gapListeners) listener(reason === "generation" ? [...history.keys()] : []);
+      }
+    });
     bridge = { users: 0, scope };
   }
   const owned = bridge;
@@ -83,6 +91,11 @@ export function forgetTerminalSession(id: string): void {
 export function registerTerminalExitListener(listener: (event: TerminalExitEvent) => void): () => void {
   exitListeners.add(listener);
   return () => exitListeners.delete(listener);
+}
+
+export function registerTerminalGapListener(listener: (ids: string[]) => void): () => void {
+  gapListeners.add(listener);
+  return () => gapListeners.delete(listener);
 }
 
 export function __resetTerminalEventBus(): void {

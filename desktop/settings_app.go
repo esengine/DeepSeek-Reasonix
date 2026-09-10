@@ -472,7 +472,7 @@ func providerModelCatalogFingerprint(p config.ProviderEntry) string {
 }
 
 func providerModelCatalogFingerprintForCredentials(p config.ProviderEntry, credentialsRevision string) string {
-	// This token crosses the Wails boundary, so key the digest instead of exposing
+	// This token crosses the bridge boundary, so key the digest instead of exposing
 	// a reusable hash of header or credential-store metadata to the frontend.
 	h := hmac.New(sha256.New, providerStateFingerprintKey)
 	write := func(value string) {
@@ -723,7 +723,7 @@ func providerViewFromEntryForRootWithResolverAndCredentials(p config.ProviderEnt
 		DefaultEffort:               p.DefaultEffort,
 		ModelOverrides:              providerModelOverridesForView(p.ModelOverrides, models),
 		ModelCapabilities:           modelCapabilities,
-		RecommendedUpgradeAvailable: false, // Chat Completions is the default again; retain the legacy Wails field.
+		RecommendedUpgradeAvailable: false, // Chat Completions is the default again; retain the legacy bridge field.
 		ModelCatalogFingerprint:     providerModelCatalogFingerprintForCredentials(p, credentialsRevision),
 	}
 }
@@ -2029,15 +2029,15 @@ func (a *App) rebuildSettingTurnLockedWithModel(setting string, tab *WorkspaceTa
 func (a *App) buildSettingReplacementController(tab *WorkspaceTab, snap tabRuntimeSnapshot, runtime normalizedTabRuntime, model, prevPath, setting string, oldCtrl control.SessionAPI, carried []provider.Message, reload bool) (control.SessionAPI, normalizedTabRuntime, string, error) {
 	opts := boot.Options{
 		Model: model, RequireKey: false,
-		RuntimeReload:            boot.RuntimeReload{ForceFullRebuild: reload},
-		StatsSource:              "desktop",
-		TaskStore:                a.taskStore(),
-		OnConfigLoadWarnings:     a.configLoadWarningsHandler(),
-		Sink:                     snap.sink,
-		WorkspaceRoot:            snap.workspaceRoot,
-		SessionDir:               sessionDirForSnapshot(snap),
-		EffortOverride:           cloneStringPtr(snap.effort),
-		SharedHost:               a.lookupSharedHost(snap.sharedHostKey),
+		RuntimeReload:        boot.RuntimeReload{ForceFullRebuild: reload},
+		StatsSource:          "desktop",
+		TaskStore:            a.taskStore(),
+		OnConfigLoadWarnings: a.configLoadWarningsHandler(),
+		Sink:                 snap.sink,
+		WorkspaceRoot:        snap.workspaceRoot,
+		SessionDir:           sessionDirForSnapshot(snap),
+		EffortOverride:       cloneStringPtr(snap.effort),
+		SharedHost:           a.lookupSharedHost(snap.sharedHostKey), BrowserExecutor: a.browserExecutorForTab(tab),
 		CleanupPendingReconciler: reconcileDesktopCleanupPending,
 		SubagentParentLive:       a.subagentParentProbeForBuild(tab),
 		SessionRecoveryMeta:      a.tabSessionRecoveryMeta(tab),
@@ -2286,7 +2286,7 @@ func (a *App) SetDefaultToolApprovalMode(mode string) error {
 	})
 }
 
-// SetDefaultAutoRecoveryCheckpoint is retained as a no-op Wails surface for
+// SetDefaultAutoRecoveryCheckpoint is retained as a no-op bridge surface for
 // older generated frontends. Auto Guard is always built into Auto.
 func (a *App) SetDefaultAutoRecoveryCheckpoint(_ bool) error { return nil }
 
@@ -3217,7 +3217,7 @@ func (a *App) ClearBotSecret(envName string) error {
 }
 
 // SetAgentParams updates sampling temperature and the base system prompt. The
-// step arguments remain in the Wails contract for older frontends, but are
+// step arguments remain in the desktop contract for older frontends, but are
 // retired and deliberately normalized to automatic execution.
 func (a *App) SetAgentParams(temperature float64, maxSteps int, plannerMaxSteps int, systemPrompt string) error {
 	return a.applyConfigChange(func(c *config.Config) error {

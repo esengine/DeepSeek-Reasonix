@@ -11,7 +11,7 @@ reasonix doctor repair
 reasonix crash report   # 视构建是否包含而定
 ```
 
-- **doctor**：检查配置、桌面派生状态与常见安装问题，不加载 Wails。
+- **doctor**：检查配置、桌面派生状态与常见安装问题，不加载 Electron 壳。
 - **doctor repair**：在用户明确选择后做安全修复。
 - 崩溃上报仍为用户授权后发送，且不会改变下次启动模式。
 
@@ -64,7 +64,7 @@ InstallRoot/
 
 ## macOS
 
-macOS 仍由 LaunchServices 直接启动 Wails App 包；更新原子替换签名 `.app`，无
+macOS 仍由 LaunchServices 直接启动 Electron App 包；更新原子替换签名 `.app`，无
 Guard 进程。
 
 替换后的窗口真正显示后，Reasonix 只会提交启动前捕获的精确 pending 事务。对于缺少

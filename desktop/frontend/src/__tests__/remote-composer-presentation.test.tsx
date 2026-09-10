@@ -7,6 +7,7 @@ import { LocaleProvider } from "../lib/i18n";
 import { ToastProvider } from "../lib/toast";
 import { projectConversation } from "../app-runtime/conversationProjection";
 import { initialState } from "../lib/useController";
+import { installDesktopHostStub } from "./desktopHostStub";
 
 const dom = new JSDOM("<div id='root'></div>", { url: "http://localhost/", pretendToBeVisual: true });
 Object.assign(globalThis, { window: dom.window, document: dom.window.document, localStorage: dom.window.localStorage,
@@ -23,11 +24,11 @@ Object.defineProperty(dom.window.HTMLElement.prototype, "detachEvent", { value()
 const calls: string[] = [];
 let localWrites = 0;
 const forbidden = async () => { localWrites++; throw new Error("remote surface called local file/inbox mutation"); };
-Object.assign(window, { go: { main: { App: { SavePastedFile: forbidden, SavePastedImage: forbidden,
+installDesktopHostStub({ SavePastedFile: forbidden, SavePastedImage: forbidden,
   ModelsForTab: async () => [], ListInboxItems: async () => [],
   EnqueueInboxFollowup: forbidden, EnqueueInboxSteer: forbidden, EnqueueInboxSteerForTurn: forbidden,
   EnqueueInboxFollowupWithInvocations: forbidden,
-} } } });
+});
 const root = createRoot(document.getElementById("root")!);
 const noop = () => {};
 const view = projectConversation({ local: initialState, remote: { transcript: initialState, running: true,
@@ -42,7 +43,7 @@ try {
   /></ToastProvider></LocaleProvider>));
   const input = document.querySelector<HTMLInputElement>("input[type=file]")!;
   assert.equal(input.disabled, true);
-  assert.equal(document.querySelector<HTMLElement>(".composer-wrap")!.style.getPropertyValue("--wails-drop-target"), "");
+  assert.equal(document.querySelector<HTMLElement>(".composer-wrap")!.hasAttribute("data-native-drop-target"), false);
   await act(async () => {
     Object.defineProperty(input, "files", { value: [new File(["fixture"], "fixture.txt")] });
     input.dispatchEvent(new Event("change", { bubbles: true }));

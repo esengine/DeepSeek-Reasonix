@@ -8,6 +8,7 @@ import type { RemoteSessionApi } from "../lib/useRemoteSession";
 import { useRemoteNavigationCommand } from "../lib/remoteNavigationCommands";
 import { RemoteNavigationHarness } from "./helpers/RemoteNavigationHarness";
 import { LocaleProvider } from "../lib/i18n";
+import { installDesktopHostStub } from "./desktopHostStub";
 
 const dom = new JSDOM("<div id='root'></div>");
 Object.assign(globalThis, { window: dom.window, document: dom.window.document, IS_REACT_ACT_ENVIRONMENT: true });
@@ -15,10 +16,10 @@ const root = createRoot(document.getElementById("root")!);
 function deferred() { let resolve!: () => void; const promise = new Promise<void>(done => { resolve = done; }); return { promise, resolve }; }
 let gate = deferred();
 const calls: string[] = [];
-Object.assign(window, { go: { main: { App: {
+installDesktopHostStub({
   RegisterNavigationIntent: async () => { calls.push("navigation-intent"); },
   OpenRemoteProjectTab: async (host: string, workspace: string, options: { newSession?: boolean }) => { calls.push(`new:${host}:${workspace}:${options.newSession}`); },
-} } } });
+});
 const session = {
   setModel: async (value: string) => { calls.push(`model:${value}`); },
   setEffort: async (value: string) => { calls.push(`effort:${value}`); },

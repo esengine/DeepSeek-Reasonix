@@ -39,7 +39,7 @@ func TestUpdateSessionListingProjectionIfCurrentRejectsAdvancedGeneration(t *tes
 	}); err != nil {
 		t.Fatal(err)
 	}
-	applied, err := UpdateSessionListingProjectionIfCurrent(path, "", "old question", 1, false, oldState)
+	applied, err := UpdateSessionListingProjectionIfCurrent(path, "", "", "old question", 1, false, oldState)
 	if err != nil || applied {
 		t.Fatalf("stale projection applied=%v err=%v", applied, err)
 	}
@@ -60,7 +60,7 @@ func TestUpdateSessionListingProjectionIfCurrentRepairsMatchingLegacySession(t *
 	if err != nil || state.RevisionKnown {
 		t.Fatalf("load legacy state = %+v err=%v", state, err)
 	}
-	applied, err := UpdateSessionListingProjectionIfCurrent(path, "", "legacy question", 1, false, state)
+	applied, err := UpdateSessionListingProjectionIfCurrent(path, "", "", "legacy question", 1, false, state)
 	if err != nil || !applied {
 		t.Fatalf("legacy projection applied=%v err=%v", applied, err)
 	}
@@ -85,7 +85,7 @@ func TestUpdateSessionListingProjectionIfCurrentStampsMatchingGeneration(t *test
 	if err != nil || !state.RevisionKnown {
 		t.Fatalf("load current state = %+v err=%v", state, err)
 	}
-	applied, err := UpdateSessionListingProjectionIfCurrent(path, "", "current question", 1, false, state)
+	applied, err := UpdateSessionListingProjectionIfCurrent(path, "", "", "current question", 1, false, state)
 	if err != nil || !applied {
 		t.Fatalf("matching projection applied=%v err=%v", applied, err)
 	}

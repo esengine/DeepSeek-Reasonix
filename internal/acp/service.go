@@ -44,6 +44,8 @@ import (
 // agent to connect for this session. The path hooks keep service bookkeeping
 // aligned; factories must wire both into the controller they build.
 type SessionParams struct {
+	// MCPInteractions enables interactive MCP only after explicit client negotiation.
+	MCPInteractions     bool
 	Cwd                 string
 	MCPServers          []plugin.Spec
 	Sink                event.Sink
@@ -232,6 +234,7 @@ func clientExtensionSurfaceSupported(caps ClientCapabilities) bool {
 // declared capabilities. The nil checks keep absent capabilities as nil
 // interface fields (a typed-nil *clientIO must never reach the interface).
 func (s *service) bindClientIO(p *SessionParams, sessionID string) {
+	p.MCPInteractions = clientMCPInteractionSupported(s.clientCapabilities())
 	io := newClientIO(s.conn, sessionID, s.clientCapabilities())
 	if !io.hasAny() {
 		return
@@ -588,7 +591,8 @@ func (s *service) initialize(_ context.Context, raw json.RawMessage) (any, error
 			MCPCapabilities: MCPCapabilities{HTTP: true, SSE: false},
 			Meta: map[string]any{
 				"reasonix.io": ReasonixExtensionCapabilities{
-					SessionSteer: &SessionSteerCapability{Method: sessionSteerMethod},
+					MCPInteraction: &MCPInteractionCapability{Supported: true, SchemaVersion: 1, Method: mcpInteractionMethod},
+					SessionSteer:   &SessionSteerCapability{Method: sessionSteerMethod},
 					SessionInbox: &SessionInboxCapability{
 						SchemaVersion: sessionInboxSchemaVersion,
 						Methods: map[string]string{
@@ -690,8 +694,7 @@ func (s *service) sessionNew(ctx context.Context, raw json.RawMessage) (any, err
 		return nil, &RPCError{Code: ErrInternal, Message: "session/new: " + err.Error()}
 	}
 	ctrl.EnableInteractiveApproval()
-	sink.bindApprove(ctrl.Approve)
-	sink.bindAnswer(ctrl.AnswerQuestion)
+	sink.bindControllerPrompts(ctrl, sessionParams.MCPInteractions)
 
 	now := time.Now().UTC()
 	sess := &acpSession{
@@ -993,8 +996,7 @@ func (s *service) openExistingSession(ctx context.Context, method, id, cwdParam 
 		return SessionConfigState{}, &RPCError{Code: ErrInternal, Message: method + ": " + err.Error()}
 	}
 	ctrl.EnableInteractiveApproval()
-	sink.bindApprove(ctrl.Approve)
-	sink.bindAnswer(ctrl.AnswerQuestion)
+	sink.bindControllerPrompts(ctrl, sessionParams.MCPInteractions)
 
 	dir := ctrl.SessionDir()
 	if dir == "" {
@@ -1453,8 +1455,7 @@ func (s *service) reloadSessionExtensionsLocked(ctx context.Context, sess *acpSe
 		_ = saveACPMeta(sess.transcript, sess.metaLocked())
 	}
 	sess.mu.Unlock()
-	sink.bindApprove(newCtrl.Approve)
-	sink.bindAnswer(newCtrl.AnswerQuestion)
+	sink.bindControllerPrompts(newCtrl, rebuildParams.MCPInteractions)
 
 	// Release the outgoing controller only after the swap published the
 	// replacement. ReleaseResources (not Close): the session logically
@@ -1964,8 +1965,7 @@ func (s *service) rebuildSessionLocked(ctx context.Context, sess *acpSession, cf
 		_ = saveACPMeta(sess.transcript, sess.metaLocked())
 	}
 	sess.mu.Unlock()
-	sink.bindApprove(newCtrl.Approve)
-	sink.bindAnswer(newCtrl.AnswerQuestion)
+	sink.bindControllerPrompts(newCtrl, rebuildParams.MCPInteractions)
 
 	cur.ReleaseResources()
 	s.sendAvailableCommands(sess)

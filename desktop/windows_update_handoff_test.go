@@ -140,9 +140,9 @@ func TestWindowsInstallerScriptWaitsBeforeCopyingExecutable(t *testing.T) {
 		t.Fatalf("update-only finish page hook must be attached to MUI_PAGE_FINISH (hook=%d page=%d)", finishPageHook, finishPage)
 	}
 	wait := strings.Index(script, "Call reasonix.waitForExecutableUnlock")
-	copyFiles := strings.Index(script, "!insertmacro wails.files")
+	copyFiles := strings.Index(script, "reasonix_normal_install:")
 	if wait < 0 || copyFiles < 0 || wait > copyFiles {
-		t.Fatalf("installer must wait for the running exe to unlock before wails.files (wait=%d copy=%d)", wait, copyFiles)
+		t.Fatalf("installer must wait for the running exe to unlock before the normal-install payload extraction (wait=%d copy=%d)", wait, copyFiles)
 	}
 	stageBranch := strings.Index(script, "StrCmp $ReasonixStageMode \"1\" reasonix_stage_payload")
 	if stageBranch < 0 || stageBranch > copyFiles {
@@ -212,9 +212,10 @@ func TestDesktopBuildScriptCompilesAndPackagesWindowsUpdateHelper(t *testing.T) 
 		`go build -trimpath -o "$windows_resource_tool" ./cmd/windows-resource`,
 		`GOOS=windows GOARCH="$arch" go build`,
 		`./cmd/update-helper`,
-		`build/windows/installer/$UPDATE_HELPER`,
-		`stamp_windows_executable "build/windows/installer/$UPDATE_HELPER"`,
-		`cp "build/windows/installer/$UPDATE_HELPER" "$payload_dir/$UPDATE_HELPER"`,
+		`"$installer_dir/$UPDATE_HELPER"`,
+		`stamp_windows_executable "$installer_dir/$UPDATE_HELPER" "Reasonix Update Helper"`,
+		`for name in "$BINNAME.exe" "$GUARDNAME.exe" "$LAUNCHERNAME.exe" "$UPDATE_HELPER" "$WINDOWS_CLINAME.exe" "reasonix-uninstall.exe"; do`,
+		`cp "$installer_dir/$name" "$payload_dir/$name"`,
 	} {
 		if !strings.Contains(script, want) {
 			t.Fatalf("desktop-build.sh missing %q", want)

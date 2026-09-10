@@ -11,8 +11,6 @@ import (
 	"sync"
 	"time"
 
-	"github.com/wailsapp/wails/v2/pkg/runtime"
-
 	"reasonix/internal/config"
 )
 
@@ -210,12 +208,6 @@ func (a *App) SetPreferredExternalOpener(id string) error {
 	})
 }
 
-// OpenWorkspaceInExternalOpener opens the active workspace using either the
-// requested installed app or the persisted/fallback selection when id is empty.
-func (a *App) OpenWorkspaceInExternalOpener(id string) error {
-	return a.OpenWorkspaceInExternalOpenerForTab("", id)
-}
-
 // OpenWorkspaceInExternalOpenerForTab is tab-scoped so a rapid tab switch cannot
 // send the wrong project to an external application.
 func (a *App) OpenWorkspaceInExternalOpenerForTab(tabID, id string) error {
@@ -312,7 +304,7 @@ func (a *App) SaveLocalPathAs(path string) (string, error) {
 	if a.ctx == nil {
 		return "", nil
 	}
-	target, err := runtime.SaveFileDialog(a.ctx, runtime.SaveDialogOptions{
+	target, err := a.nativeHost().SaveFileDialog(a.ctx, nativeDialogOptions{
 		Title:                "Save file as",
 		DefaultDirectory:     filepath.Dir(path),
 		DefaultFilename:      filepath.Base(path),

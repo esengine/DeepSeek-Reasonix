@@ -116,7 +116,7 @@ const sessionCompositionSource = readFileSync(new URL("../app-runtime/useAppSess
 const surfaceHookSource = readFileSync(new URL("../lib/useNavigationSurface.ts", import.meta.url), "utf8");
 const tabBarSource = readFileSync(new URL("../app-runtime/useTabBarCommands.ts", import.meta.url), "utf8");
 const stylesSource = readFileSync(new URL("../styles.css", import.meta.url), "utf8");
-ok(surfaceHookSource.includes("flushSync(() => {"), "navigation masking commits synchronously before the Wails await");
+ok(surfaceHookSource.includes("flushSync(() => {"), "navigation masking commits synchronously before the bridge await");
 ok(surfaceHookSource.includes("setPreserved(rendered?.items.length ? rendered : null)"), "the last stable transcript is retained during navigation");
 ok(sessionCompositionSource.includes("visibleTranscriptItems,") && appViewSource.includes("items: session.transcript.visibleTranscriptItems"), "the visible transcript is decoupled from the hydrating target");
 ok(chatPaneSource.includes("transcript-navigation-overlay"), "navigation renders a blocking transcript overlay");

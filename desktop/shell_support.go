@@ -22,7 +22,7 @@ const shellInstallActionGitForWindows = "git-for-windows"
 // GitForWindowsManualURL is the official download page handed to Windows users.
 const GitForWindowsManualURL = "https://git-scm.com/download/win"
 
-// Structured outcomes retained by the Wails contract. Invalid action ids remain
+// Structured outcomes retained by the desktop bridge contract. Invalid action ids remain
 // errors; supported Windows requests always return manual_required.
 const (
 	shellInstallStatusManualRequired = "manual_required"
@@ -50,7 +50,7 @@ type ShellCapabilityView struct {
 }
 
 // ShellInstallActionView describes Windows manual repair guidance. It remains
-// shaped as an action for Wails compatibility, but Available is false and Mode
+// shaped as an action for bridge compatibility, but Available is false and Mode
 // is always "manual". Nil on macOS and Linux, which use repair guidance.
 type ShellInstallActionView struct {
 	ID        string `json:"id"`
@@ -81,7 +81,7 @@ type SandboxView struct {
 	GitRepairGuidance      *RepairGuidanceView     `json:"gitRepairGuidance,omitempty"`
 }
 
-// InstallShellSupport retains the existing Wails method while enforcing the
+// InstallShellSupport retains the existing bridge method while enforcing the
 // manual-only policy. It never probes for or launches a package manager.
 func (a *App) InstallShellSupport(id string) (ShellInstallResult, error) {
 	return installShellSupportForGOOS(runtime.GOOS, id)
@@ -199,7 +199,7 @@ func gitCapabilityView(prefer, configPath string) *ShellCapabilityView {
 }
 
 // sandboxCapabilityViews projects the discovered shell inventory for the
-// settings surface. The slice is never nil so the Wails binding always
+// settings surface. The slice is never nil so the desktop binding always
 // encodes a JSON array, not null.
 func sandboxCapabilityViews(prefer, configPath string) []ShellCapabilityView {
 	caps := sandbox.ShellCapabilitiesForConfig(prefer, configPath)

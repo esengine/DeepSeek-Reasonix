@@ -29,11 +29,15 @@ type editSource struct {
 func readEditSource(ctx context.Context, overlay FileOverlay, path string) (source editSource, readErr error) {
 	defer func() {
 		if readErr != nil {
+			if expected, ok := tool.ExpectedWriteSource(ctx); ok && expected.Path == path && !expected.Absent && os.IsNotExist(readErr) {
+				readErr = &tool.OperationError{Diagnostic: tool.OperationDiagnostic{Code: tool.WriteEvidenceStale, Path: path, ExpectedSnapshot: expected.Snapshot, Recovery: "the expected source disappeared; re-read before retrying"}, Cause: ErrFileChanged}
+				return
+			}
 			return
 		}
 		if expected, ok := tool.ExpectedWriteSource(ctx); ok && expected.Path == path {
-			if (expected.SourceTextDigest != "" && expected.SourceTextDigest != digestText(source.content)) || (expected.Snapshot != "" && expected.Snapshot != source.readSnapshot(path)) {
-				readErr = fmt.Errorf("%w: source differs from the read-evidence preflight", ErrFileChanged)
+			if expected.Absent || (expected.SourceTextDigest != "" && expected.SourceTextDigest != digestText(source.content)) || (expected.Snapshot != "" && expected.Snapshot != source.readSnapshot(path)) {
+				readErr = &tool.OperationError{Diagnostic: tool.OperationDiagnostic{Code: tool.WriteEvidenceStale, Path: path, ExpectedSnapshot: expected.Snapshot, ActualSnapshot: source.readSnapshot(path), RequiredRanges: expected.Ranges, Recovery: "re-read the file, then retry this operation"}, Cause: fmt.Errorf("%w: source differs from the read-evidence preflight", ErrFileChanged)}
 			}
 		}
 	}()
@@ -47,7 +51,7 @@ func readEditSource(ctx context.Context, overlay FileOverlay, path string) (sour
 				return editSource{content: buffered, enc: fileenc.UTF8, overlay: true, id: overlayIdentity(buffered)}, nil
 			}
 		}
-		return editSource{enc: fileenc.UTF8, id: id}, os.ErrNotExist
+		return editSource{enc: fileenc.UTF8, id: id}, &os.PathError{Op: "read", Path: path, Err: os.ErrNotExist}
 	}
 	content, enc, err := readFileEncoded(path)
 	if err != nil {

@@ -55,7 +55,7 @@ console.log("\nproject tree runtime sessions");
 eq(
   normalizeProjectTreeRuntimeSnapshot({ revision: 0, topics: null }),
   { revision: 0, topics: [] },
-  "runtime bridge normalizes a legacy/null Wails topic array",
+  "runtime bridge normalizes a legacy/null topic array",
 );
 
 const noTrashingTopics = new Set<string>();

@@ -87,6 +87,9 @@ func TestValidateAssetInstallLayout(t *testing.T) {
 	if err := validateAssetInstallLayout("versioned-v1"); err != nil {
 		t.Fatalf("versioned-v1 must be accepted: %v", err)
 	}
+	if err := validateAssetInstallLayout(update.ElectronInstallLayout); err != nil {
+		t.Fatal(err)
+	}
 	if err := validateAssetInstallLayout("unknown-layout"); err == nil {
 		t.Fatal("unknown install_layout must be rejected")
 	}
@@ -1094,7 +1097,8 @@ func TestExtractLinuxReleaseUnitRejectsAmbiguousMembers(t *testing.T) {
 func TestApplyLinuxVersionedActivatesWithoutPersistingGuard(t *testing.T) {
 	root := robustTempDir(t)
 	source := robustTempDir(t)
-	for _, name := range []string{installlayout.DesktopBinaryName(), installlayout.CLIBinaryName()} {
+	// This fixture describes a Linux release even when the test host is Windows.
+	for _, name := range []string{"reasonix-desktop", "reasonix"} {
 		if err := os.WriteFile(filepath.Join(source, name), []byte("old-"+name), 0o700); err != nil {
 			t.Fatal(err)
 		}
@@ -1104,10 +1108,10 @@ func TestApplyLinuxVersionedActivatesWithoutPersistingGuard(t *testing.T) {
 		Version:     "v1.20.0",
 		RequestID:   "seed-linux",
 		Members: []installlayout.Member{
-			{Name: installlayout.DesktopBinaryName(), Path: filepath.Join(source, installlayout.DesktopBinaryName())},
-			{Name: installlayout.CLIBinaryName(), Path: filepath.Join(source, installlayout.CLIBinaryName())},
+			{Name: "reasonix-desktop", Path: filepath.Join(source, "reasonix-desktop")},
+			{Name: "reasonix", Path: filepath.Join(source, "reasonix")},
 		},
-		RequiredNames: []string{installlayout.DesktopBinaryName(), installlayout.CLIBinaryName()},
+		RequiredNames: []string{"reasonix-desktop", "reasonix"},
 	}); err != nil {
 		t.Fatal(err)
 	}
@@ -1116,36 +1120,15 @@ func TestApplyLinuxVersionedActivatesWithoutPersistingGuard(t *testing.T) {
 	currentInstallDirForLinuxUpdate = func() string { return root }
 	t.Cleanup(func() { currentInstallDirForLinuxUpdate = originalRoot })
 
-	var archive bytes.Buffer
-	gz := gzip.NewWriter(&archive)
-	tw := tar.NewWriter(gz)
-	for _, name := range []string{"reasonix-desktop", "reasonix-guard", "reasonix"} {
-		body := []byte("new-" + name)
-		if err := tw.WriteHeader(&tar.Header{Name: name, Mode: 0o755, Size: int64(len(body)), Typeflag: tar.TypeReg}); err != nil {
-			t.Fatal(err)
-		}
-		if _, err := tw.Write(body); err != nil {
-			t.Fatal(err)
-		}
-	}
-	if err := tw.Close(); err != nil {
-		t.Fatal(err)
-	}
-	if err := gz.Close(); err != nil {
+	if err := applyLinuxVersioned(linuxShellArchive(t, nil, ""), "1.20.1"); err != nil {
 		t.Fatal(err)
 	}
 
-	if err := applyLinuxVersioned(archive.Bytes(), "1.20.1"); err != nil {
-		t.Fatal(err)
-	}
 	ptr, err := installlayout.ReadCurrent(root)
 	if err != nil || ptr.ActiveVersion != "v1.20.1" {
 		t.Fatalf("pointer=%+v err=%v", ptr, err)
 	}
-	activeDesktop, err := installlayout.ActiveDesktopPath(root)
-	if err != nil {
-		t.Fatal(err)
-	}
+	activeDesktop := filepath.Join(root, filepath.FromSlash(ptr.ActiveDir), "reasonix-desktop")
 	data, err := os.ReadFile(activeDesktop)
 	if err != nil || string(data) != "new-reasonix-desktop" {
 		t.Fatalf("active desktop=%q err=%v", data, err)

@@ -523,7 +523,7 @@ Plugin hooks receive these environment variables:
 
 ## Desktop Backend Methods
 
-Desktop exposes plugin package operations through Wails methods:
+Desktop exposes plugin package operations through host commands:
 
 - `Plugins`
 - `PlanPluginInstall`

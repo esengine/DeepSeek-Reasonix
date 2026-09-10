@@ -43,7 +43,7 @@ ok(storagePage.includes('className="mem-input"') && !storagePage.includes('class
 ok(storagePage.includes("readOnly"), "Every storage path input is explicitly read-only");
 
 const mutations = ["PickStorageFolder", "MigrateStorage", "SetDefaultWorkspace"];
-ok(mutations.every((name) => !storagePage.includes(name) && !bridge.includes(name) && !backend.includes(name)), "Storage mutation methods are absent from UI and Wails surfaces");
+ok(mutations.every((name) => !storagePage.includes(name) && !bridge.includes(name) && !backend.includes(name)), "Storage mutation methods are absent from UI and desktop bridge surfaces");
 ok(!styles.includes("settings-path-control"), "Storage page contains no migration-only styling");
 ok(!storagePage.includes("storageReadOnlyHint") && locales.every((locale) => !locale.includes("settings.storageReadOnlyHint")), "Storage page omits the redundant read-only notice");
 ok(locales.every((locale) => !/Windows.*(?:迁移|移動|migrat)/i.test(locale.match(/"settings\.pageDesc\.storage":\s*"[^"]*"/)?.[0] ?? "")), "Storage page descriptions do not advertise Windows migration");

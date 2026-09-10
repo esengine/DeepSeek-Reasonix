@@ -70,7 +70,7 @@ func (w writeFile) DeclareEvidenceTarget(ctx context.Context, args json.RawMessa
 	}
 	src, err := readEditSource(ctx, w.overlay, path)
 	if os.IsNotExist(err) {
-		return tool.EvidenceTargetInfo{Path: path}, nil
+		return tool.EvidenceTargetInfo{Path: path, Absent: true}, nil
 	}
 	if err != nil {
 		return tool.EvidenceTargetInfo{}, err

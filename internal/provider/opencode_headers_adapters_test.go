@@ -11,7 +11,7 @@ import (
 	"testing"
 )
 
-func TestOpenCodeGoHeadersAllAdapters(t *testing.T) {
+func TestOpenCodeGoHeadersDoNotLeakToCustomRequestURLAllAdapters(t *testing.T) {
 	for _, kind := range []string{"chat", "anthropic", "responses"} {
 		t.Run(kind, func(t *testing.T) {
 			var headers []http.Header
@@ -54,13 +54,9 @@ func TestOpenCodeGoHeadersAllAdapters(t *testing.T) {
 				t.Fatalf("requests=%d", len(headers))
 			}
 			for _, h := range headers {
-				if h.Get("User-Agent") != "Reasonix" || h.Get("x-opencode-session") == "" {
-					t.Fatalf("missing identity headers: %v", h)
+				if h.Get("x-opencode-session") != "" {
+					t.Fatalf("official connection identity leaked to custom endpoint: %v", h)
 				}
-			}
-			id := func(i int) string { return headers[i].Get("x-opencode-session") }
-			if id(0) != id(1) || id(2) != id(3) || id(0) == id(2) {
-				t.Fatal("client/session header lifetime is incorrect")
 			}
 		})
 	}

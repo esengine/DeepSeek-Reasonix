@@ -125,6 +125,9 @@ type authGate struct {
 	sessKey      []byte     // HMAC key for session signing (password mode, generated at startup)
 	behindProxy  bool       // trust X-Forwarded-For / X-Forwarded-Proto headers
 	rateLimit    *rateLimit // per-IP rate limiter for /login
+	// capabilities reports what this serve advertises on the token handshake
+	// (e.g. the browser broker); nil means no capability header.
+	capabilities func() []string
 }
 
 // newAuthGate creates the auth middleware from the serve config. For token mode
@@ -294,6 +297,11 @@ func (ag *authGate) handleTokenBootstrap(w http.ResponseWriter, r *http.Request)
 		SameSite: http.SameSiteLaxMode,
 		MaxAge:   int(sessionDuration.Seconds()),
 	})
+	if ag.capabilities != nil {
+		if caps := ag.capabilities(); len(caps) > 0 {
+			w.Header().Set(capabilitiesHeader, strings.Join(caps, ","))
+		}
+	}
 	w.Header().Set("Cache-Control", "no-store")
 	w.WriteHeader(http.StatusNoContent)
 }

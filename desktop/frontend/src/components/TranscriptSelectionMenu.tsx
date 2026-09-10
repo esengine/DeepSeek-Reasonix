@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useLayoutEffect, useMemo, useReducer, useRef, useState, useSyncExternalStore } from "react";
+import { desktopHost } from "../lib/desktopHost";
 import { createPortal } from "react-dom";
 import { MessageSquare } from "lucide-react";
 import { ContextMenu, type ContextMenuPoint } from "./ContextMenu";
@@ -253,7 +254,7 @@ export function TranscriptSelectionMenu({
 
   useEffect(() => {
     const onContextMenu = (event: MouseEvent) => {
-      if (!enabled || typeof window === "undefined" || !window.runtime) return;
+      if (!enabled || desktopHost().kind === "none") return;
       const snapshot = transcriptSelectionStore.getSnapshot();
       const rowKey = rowKeyForNode(event.target instanceof Node ? event.target : null);
       if (

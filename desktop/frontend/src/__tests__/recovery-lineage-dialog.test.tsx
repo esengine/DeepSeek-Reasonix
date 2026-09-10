@@ -3,6 +3,7 @@ import React, { act } from "react";
 import { createRoot } from "react-dom/client";
 import type { AppBindings } from "../lib/bridge";
 import type { RecoveryLineageView } from "../lib/types";
+import { installDesktopHostStub } from "./desktopHostStub";
 
 const dom = new JSDOM("<!doctype html><html><body><div id=\"root\"></div></body></html>", { pretendToBeVisual: true, url: "http://localhost/" });
 (globalThis as typeof globalThis & { IS_REACT_ACT_ENVIRONMENT: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
@@ -74,14 +75,14 @@ const onProcessRejection = (reason: unknown) => { rejections.push(reason); };
 process.on("unhandledRejection", onProcessRejection);
 const diagnostics: string[] = [];
 setFrontendDiagnosticSink((_source, type) => { diagnostics.push(type); });
-window.go = {
+installDesktopHostStub(({
   main: {
     App: {
       ChooseRecoveryBranch: () => Promise.reject("selected branch is outside the recovery lineage"),
       GetRecoveryLineage: async () => initial,
     } as Partial<AppBindings> as AppBindings,
   },
-};
+}).main.App);
 
 let closed = false;
 const failing = createRoot(document.getElementById("root")!);

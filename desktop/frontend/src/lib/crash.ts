@@ -3,9 +3,9 @@
 
 import { addBreadcrumb, dumpBreadcrumbs, snapshotBreadcrumbs, type Breadcrumb } from "./breadcrumbs";
 import { writeClipboardText } from "./clipboard";
+import { desktopHost } from "./desktopHost";
 import { t } from "./i18n";
 import { sessionPipelineDiagnostics, type SessionPipelineDiagnostics } from "./sessionDiagnostics";
-import { isWailsRuntimeOnlyCrashEvent } from "./wailsRuntimeCrash";
 declare const __BUILD_COMMIT__: string;
 declare const __BUILD_CHANNEL__: string;
 
@@ -274,7 +274,7 @@ export function topFrameFromStack(stack?: string): string {
     .split("\n")
     .map((l) => l.trim())
     .filter(Boolean);
-  return lines.find((l) => /\b(src|assets|wails|frontend)\b|\.tsx?:|\.jsx?:/.test(l)) ?? lines[1] ?? lines[0] ?? "";
+  return lines.find((l) => /\b(src|assets|frontend)\b|\.tsx?:|\.jsx?:/.test(l)) ?? lines[1] ?? lines[0] ?? "";
 }
 
 function currentView(): string {
@@ -673,9 +673,9 @@ function sendButton(
   className = "crash-overlay__send",
   onSent?: () => void,
 ): HTMLButtonElement | null {
-  // Resolved at click time via window.go, not the bridge module: this overlay must
-  // stay usable even when the rest of the app (and its imports) is broken.
-  const report = window.go?.main?.App?.ReportCrash;
+  // Resolved at click time through the host adapter, not the bridge module: this
+  // overlay must stay usable even when the rest of the app (and its imports) is broken.
+  const report = desktopHost().app?.ReportCrash;
   if (!report) return null;
   const send = document.createElement("button");
   send.className = className;
@@ -817,7 +817,6 @@ export function shouldReportGlobalCrashEvent(e: GlobalCrashEventLike): boolean {
   if (e.defaultPrevented) return false;
   if (globalCrashEventMessages(e).some((message) => RESIZE_OBSERVER_LOOP_MESSAGE_RE.test(message) ||
     /Minified React error #520\b/.test(message) || message.includes("status was superseded by"))) return false;
-  if (isWailsRuntimeOnlyCrashEvent(e)) return false;
   return true;
 }
 
@@ -905,7 +904,7 @@ function maybePromptForHeapPressure(): void {
 
 export function installPerformancePressureMonitor() {
   if (performanceMonitorInstalled || typeof window === "undefined" || typeof performance === "undefined") return;
-  if (!window.runtime) return;
+  if (desktopHost().kind === "none") return;
   performanceMonitorInstalled = true;
   const startedAt = performance.now();
   const graceUntil = startedAt + STARTUP_GRACE_MS;

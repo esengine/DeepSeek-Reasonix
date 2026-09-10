@@ -1,12 +1,12 @@
 // Run: tsx src/__tests__/transcript-selection-menu.test.tsx
 //
 // Regression coverage for transcript selection actions. Selected message text
-// exposes Add to Chat after pointer/keyboard selection, while the Wails shell
+// exposes Add to Chat after pointer/keyboard selection, while the desktop shell
 // also keeps its app-drawn right-click Copy menu:
 // - a non-collapsed selection inside .msg__body opens the menu and Copy
 //   writes the selection through the runtime clipboard bridge
 // - collapsed selections, non-message selections, editable targets, and
-//   plain-browser sessions (no window.runtime) never open the menu
+//   plain-browser sessions (no desktop shell) never open the menu
 // - a surviving message selection does not hijack right-clicks landing
 //   outside message bodies (project tree, tab bar, ... own those menus)
 // - the target message must itself touch the selection: selecting message A
@@ -28,6 +28,7 @@ import {
   transcriptSelectionStore,
   type TranscriptSelectableRow,
 } from "../lib/transcriptSelectionStore";
+import { installDesktopHostStub } from "./desktopHostStub";
 
 let passed = 0;
 let failed = 0;
@@ -112,12 +113,7 @@ console.log("\ntranscript selection menu");
   const dom = installDom();
   const clipboard: string[] = [];
   const additions: string[] = [];
-  (window as unknown as { runtime: { ClipboardSetText: (text: string) => Promise<boolean> } }).runtime = {
-    ClipboardSetText: async (text: string) => {
-      clipboard.push(text);
-      return true;
-    },
-  };
+  installDesktopHostStub({}, { clipboardWrites: clipboard });
 
   document.body.insertAdjacentHTML(
     "beforeend",
@@ -418,7 +414,7 @@ console.log("\ntranscript selection menu");
 }
 
 {
-  // Plain browser (no window.runtime): the native menu owns right-click.
+  // Plain browser (no desktop shell): the browser context menu owns right-click.
   const dom = installDom();
   document.body.insertAdjacentHTML("beforeend", "<div class=\"msg__body\">browser text</div>");
   const msgBody = document.querySelector(".msg__body") as HTMLElement;
@@ -448,12 +444,7 @@ console.log("\ntranscript selection menu");
   const dom = installDom();
   const clipboard: string[] = [];
   const additions: string[] = [];
-  (window as unknown as { runtime: { ClipboardSetText: (text: string) => Promise<boolean> } }).runtime = {
-    ClipboardSetText: async (text: string) => {
-      clipboard.push(text);
-      return true;
-    },
-  };
+  installDesktopHostStub({}, { clipboardWrites: clipboard });
   document.body.insertAdjacentHTML(
     "beforeend",
     '<div class="transcript__row" data-row-key="row-a"><div class="msg__body" data-transcript-selectable="message">alpha</div></div>' +

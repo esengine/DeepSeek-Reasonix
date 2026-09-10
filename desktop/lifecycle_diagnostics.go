@@ -92,7 +92,7 @@ func newDesktopLifecycleTracker(root, appVersion, appChannel string) *desktopLif
 }
 
 func prepareDesktopDiagnostics(app *App) {
-	if app == nil || app.remoteWindowTicket != "" || version == "dev" {
+	if app == nil || version == "dev" {
 		return
 	}
 	root := config.MemoryUserDir()
@@ -137,13 +137,9 @@ func (a *App) releaseDesktopDiagnosticsOwnership() {
 }
 
 func initializeLifecycleDiagnostics(app *App) {
-	if app == nil || app.remoteWindowTicket != "" {
+	if app == nil {
 		return
 	}
-	// Native WebKit recovery is a reliability mechanism, not telemetry. Always
-	// install it; the flag only controls whether sanitized diagnostics upload.
-	telemetry := app.diagnosticsOwner && app.diagnosticsConfigLoaded && version != "dev" && app.diagnosticsTelemetry
-	installWebKitProcessObserver(app, telemetry)
 	if !app.diagnosticsOwner {
 		return
 	}
@@ -160,9 +156,6 @@ func initializeLifecycleDiagnostics(app *App) {
 		app.lifecycle.previousRun = legacy
 	}
 	app.lifecycle.previousRuns = tracker.consumePrevious(enabled)
-	if enabled {
-		refreshWebRuntimeContext()
-	}
 }
 
 func (a *App) markDesktopHealthy() {

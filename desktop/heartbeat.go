@@ -248,14 +248,6 @@ func heartbeatControllerBusy(ctrl heartbeatRuntimeStatus) bool {
 	return status.Running || status.PendingPrompt
 }
 
-// executeTask runs one heartbeat: creates/opens topic, submits prompt.
-// Returns the updated task (topicId and LastRunAt may change).
-// On controller failure the task is returned WITHOUT updating LastRunAt,
-// so it will be retried on the next tick.
-func (e *HeartbeatEngine) executeTask(t HeartbeatTask) HeartbeatTask {
-	return e.executeTaskWithLease(t, nil)
-}
-
 func (e *HeartbeatEngine) executeScheduledTask(t HeartbeatTask, dueAt time.Time) HeartbeatTask {
 	return e.executeTaskWithLease(t, func(task HeartbeatTask) (HeartbeatTask, bool) {
 		snapshot, err := e.readConfigSnapshot()
@@ -272,6 +264,10 @@ func (e *HeartbeatEngine) executeScheduledTask(t HeartbeatTask, dueAt time.Time)
 	})
 }
 
+// executeTaskWithLease runs one heartbeat: creates/opens topic, submits prompt.
+// Returns the updated task (topicId and LastRunAt may change).
+// On controller failure the task is returned WITHOUT updating LastRunAt,
+// so it will be retried on the next tick.
 func (e *HeartbeatEngine) executeTaskWithLease(t HeartbeatTask, prepare func(HeartbeatTask) (HeartbeatTask, bool)) HeartbeatTask {
 	if !e.claimTask(t.ID) {
 		log.Printf("[heartbeat] task %q is already running, skipping overlapping trigger", t.Title)

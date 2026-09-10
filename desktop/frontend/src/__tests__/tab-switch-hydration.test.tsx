@@ -8,6 +8,7 @@ import { useController } from "../lib/useController";
 import { verifyDeferredHistoryCloseRace, verifyStaleHistoryFingerprint } from "./deferred-history-close-race";
 import { historySliceFromMessages } from "./mockHistorySlice";
 import type { BalanceInfo, CheckpointMeta, ContextInfo, EffortInfo, HistoryMessage, HistorySlice, HistorySliceRequest, JobView, Meta, TabMeta, TopicActivationEvent, TopicActivationRequest, WireEvent } from "../lib/types";
+import { installDesktopHostStub } from "./desktopHostStub";
 
 let passed = 0;
 let failed = 0;
@@ -189,9 +190,6 @@ let holdStaleForkReassertG = false;
 let staleForkReassertGStarted = false;
 const runningTabs = new Set<string>();
 const tabsById = new Map([tabA, tabB, tabC, tabD, tabE, tabF, tabG, tabH, tabI, tabK, tabL, tabM, tabN, tabO].map((tab) => [tab.id, tab]));
-const eventHandlers: Array<(e: WireEvent) => void> = [];
-const readyHandlers: Array<(tabId?: string) => void> = [];
-const topicActivationHandlers: Array<(e: TopicActivationEvent) => void> = [];
 
 function currentTabs(): TabMeta[] {
   return Array.from(tabsById.values()).map((tab) => {
@@ -200,16 +198,7 @@ function currentTabs(): TabMeta[] {
   });
 }
 
-window.runtime = {
-  EventsOn: (name: string, cb: (...data: unknown[]) => void) => {
-    if (name === "agent:event") eventHandlers.push(cb as (e: WireEvent) => void);
-    if (name === "agent:ready") readyHandlers.push(cb as (tabId?: string) => void);
-    if (name === "topic:activation") topicActivationHandlers.push(cb as (e: TopicActivationEvent) => void);
-    return () => {};
-  },
-  BrowserOpenURL: () => {},
-};
-window.go = {
+const appStubTable = ({
   main: {
     App: {
       RegisterNavigationIntent: async () => {},
@@ -223,7 +212,7 @@ window.go = {
         if (tabID === "tab-n" && startTabNDuringMeta) {
           startTabNDuringMeta = false;
           runningTabs.add(tabID);
-          for (const handler of eventHandlers) handler({ kind: "turn_started", tabId: tabID });
+          desktopStub.emit("agent:event", { kind: "turn_started", tabId: tabID });
         }
         return metaFor(tabsById.get(tabID) ?? tabA);
       },
@@ -261,7 +250,7 @@ window.go = {
         return [userMessage("cached A")];
       },
       HistoryPageForTab: async (tabID: string) => {
-        const messages = await window.go.main.App.HistoryForTab(tabID);
+        const messages = await appStubTable.HistoryForTab(tabID);
         const tab = tabsById.get(tabID);
         return { messages, startTurn: 0, endTurn: messages.filter((message) => message.role === "user").length, totalTurns: messages.filter((message) => message.role === "user").length, hasOlder: false, revision: tab?.sessionRevision, digest: tab?.sessionDigest };
       },
@@ -292,7 +281,7 @@ window.go = {
             nextCursor: btoa(JSON.stringify({ v: 1, before: 3 })),
           };
         }
-        const messages = await window.go.main.App.HistoryForTab(tabID);
+        const messages = await appStubTable.HistoryForTab(tabID);
         const tab = tabsById.get(tabID);
         return historySliceFromMessages(tabID, messages, req, { revision: tab?.sessionRevision, digest: tab?.sessionDigest });
       },
@@ -312,8 +301,8 @@ window.go = {
         backendActiveId = target.id;
         const requestId = req.requestId || "mock-activation";
         window.setTimeout(() => {
-          for (const handler of topicActivationHandlers) handler({ requestId, tabId: target.id, phase: "starting" });
-          for (const handler of topicActivationHandlers) handler({ requestId, tabId: target.id, phase: "ready" });
+          desktopStub.emit("topic:activation", { requestId, tabId: target.id, phase: "starting" });
+          desktopStub.emit("topic:activation", { requestId, tabId: target.id, phase: "ready" });
         }, 0);
         return { requestId, tabId: target.id, meta: { ...target, active: true } };
       },
@@ -351,13 +340,11 @@ window.go = {
         replayPendingPromptCalls += 1;
         const active = tabsById.get(backendActiveId);
         if (!active?.pendingPrompt) return;
-        for (const handler of eventHandlers) {
-          handler({
+        desktopStub.emit("agent:event", {
             kind: "approval_request",
             tabId: backendActiveId,
             approval: { id: `pending-${backendActiveId}`, tool: "bash", subject: `pending ${backendActiveId}` },
           });
-        }
       },
       SetActiveTab: async (tabID: string) => {
         setActiveCalls += 1;
@@ -407,7 +394,8 @@ window.go = {
       },
     } as Partial<AppBindings> as AppBindings,
   },
-};
+}).main.App;
+const desktopStub = installDesktopHostStub(appStubTable);
 
 type Controller = ReturnType<typeof useController>;
 let controller: Controller | undefined;
@@ -428,9 +416,7 @@ await act(async () => {
 await waitFor("initial active tab", () => controller?.activeTabId === "tab-a" && controller.state.items.length === 1);
 
 await act(async () => {
-  for (const handler of eventHandlers) {
-    handler({ kind: "approval_request", tabId: "tab-b", approval: { id: "stale-tab-b", tool: "bash", subject: "stale tab B" } });
-  }
+  desktopStub.emit("agent:event", { kind: "approval_request", tabId: "tab-b", approval: { id: "stale-tab-b", tool: "bash", subject: "stale tab B" } });
   await flushPromises();
 });
 
@@ -451,9 +437,7 @@ eq(controller?.state.approval?.id, undefined, "tab activation clears a stale app
 eq(controller?.state.running, false, "tab activation clears the stale prompt lifecycle before backend status arrives");
 
 await act(async () => {
-  for (const handler of eventHandlers) {
-    handler({ kind: "approval_request", approval: { id: "old-backend-approval", tool: "bash", subject: "old backend approval" } });
-  }
+  desktopStub.emit("agent:event", { kind: "approval_request", approval: { id: "old-backend-approval", tool: "bash", subject: "old backend approval" } });
   await flushPromises();
 });
 eq(controller?.state.approval?.id, undefined, "tab-less events stay with the confirmed backend tab during optimistic activation");
@@ -495,7 +479,7 @@ ok(!(controller?.state.items.some((item) => item.kind === "user" && item.text ==
 
 const historyCallsBeforeFallbackSync = historyCalls.length;
 await act(async () => {
-  for (const handler of eventHandlers) handler({ kind: "approval_request", tabId: "tab-b", approval: { id: "stale-fallback-approval", tool: "bash", subject: "stale fallback approval" } });
+  desktopStub.emit("agent:event", { kind: "approval_request", tabId: "tab-b", approval: { id: "stale-fallback-approval", tool: "bash", subject: "stale fallback approval" } });
   await flushPromises();
 });
 backendActiveId = "tab-b";
@@ -554,7 +538,7 @@ eq(controller?.state.running, true, "a genuine pending approval keeps the target
 tabsById.set("tab-i", { ...tabI, pendingPrompt: false, running: false, cancellable: false });
 runningTabs.delete("tab-i");
 await act(async () => {
-  for (const handler of eventHandlers) handler({ kind: "turn_done", tabId: "tab-i" });
+  desktopStub.emit("agent:event", { kind: "turn_done", tabId: "tab-i" });
   await controller?.switchTab("tab-a", tabA);
   await flushPromises();
 });
@@ -609,8 +593,8 @@ await act(async () => { await controller?.switchTab("tab-a", tabA); await flushP
 await waitFor("tab-a restored after failed source rebind", () => controller?.activeTabId === "tab-a");
 
 await act(async () => {
-  for (const handler of eventHandlers) handler({ kind: "phase", text: "Planner is thinking", tabId: "tab-a" });
-  for (const handler of eventHandlers) handler({ kind: "message", text: "Planner kept", reasoning: "Planner notes", tabId: "tab-a" });
+  desktopStub.emit("agent:event", { kind: "phase", text: "Planner is thinking", tabId: "tab-a" });
+  desktopStub.emit("agent:event", { kind: "message", text: "Planner kept", reasoning: "Planner notes", tabId: "tab-a" });
   await flushPromises();
 });
 await waitFor("cached planner transcript", () =>
@@ -618,7 +602,7 @@ await waitFor("cached planner transcript", () =>
 );
 const historyCallsBeforeReady = historyCalls.length;
 await act(async () => {
-  for (const handler of readyHandlers) handler();
+  desktopStub.emit("agent:ready", );
   await flushPromises();
 });
 await waitFor("ready hydration settled", () => controller?.state.hydrating === false);
@@ -642,7 +626,7 @@ await act(async () => {
 eq(controller?.activeTabId, "tab-c", "switching to a cached running tab still updates the active tab");
 ok(controller?.state.items.some((item) => item.kind === "user" && item.text === "streaming C") ?? false, "cached running tab keeps its optimistic transcript");
 const tabCUser = controller?.state.items.find((item) => item.kind === "user" && item.text === "streaming C");
-eq(tabCUser?.kind === "user" && tabCUser.submissionId, tabCSubmissionId, "Wails receives the same opaque correlation stored on the optimistic user");
+eq(tabCUser?.kind === "user" && tabCUser.submissionId, tabCSubmissionId, "the backend receives the same opaque correlation stored on the optimistic user");
 ok(Boolean(tabCSubmissionId) && tabCSubmissionId !== tabCUser?.id, "opaque submission correlation is distinct from the render item id");
 ok(historyCalls.includes("tab-c"), "a running tab with no history page of its own still hydrates one");
 await act(async () => {
@@ -670,11 +654,9 @@ await waitFor("open topic phase 2 started", () => contextDCalls === 1);
 const contextCallsBeforeReadyD = contextDCalls;
 const historyCallsBeforeReadyD = historyCalls.length;
 await act(async () => {
-  for (const handler of readyHandlers) {
-    handler("tab-b");
-    handler("tab-d");
-    handler();
-  }
+  desktopStub.emit("agent:ready", "tab-b");
+desktopStub.emit("agent:ready", "tab-d");
+desktopStub.emit("agent:ready", );
   await flushPromises();
 });
 eq(contextDCalls, contextCallsBeforeReadyD, "agent ready reuses in-flight open-topic hydration for the active tab");
@@ -690,7 +672,7 @@ eq(controller?.state.hydratePlaceholderItems?.length ?? 0, 0, "topic history cle
 
 const historyCallsBeforeReopenD = historyCalls.length;
 await act(async () => {
-  for (const handler of eventHandlers) handler({ kind: "approval_request", tabId: "tab-d", approval: { id: "stale-approval", tool: "bash", subject: "stale approval" } });
+  desktopStub.emit("agent:event", { kind: "approval_request", tabId: "tab-d", approval: { id: "stale-approval", tool: "bash", subject: "stale approval" } });
   await controller?.switchTab("tab-a", tabA);
   await flushPromises();
 });

@@ -64,7 +64,7 @@ Output format:
 完成后按“改了什么 / 验证结果 / 剩余风险”汇报。
 
 Constraints:
-不要改变 Wails JSON 合约。
+不要改变桌面 host JSON 合约。
 不要顺手重构无关的 composer 状态。
 如果无法跑浏览器验证，请说明原因。
 

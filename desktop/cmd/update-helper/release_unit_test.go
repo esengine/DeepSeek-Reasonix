@@ -337,6 +337,27 @@ func writeWindowsPayloadManifestForTest(t *testing.T, staging, version string) {
 		}
 		hashes[name] = update.WindowsPayloadSHA256(content)
 	}
+	treeRoot := filepath.Join(staging, "app")
+	if _, err := os.Lstat(treeRoot); err == nil {
+		err := filepath.WalkDir(treeRoot, func(path string, d os.DirEntry, err error) error {
+			if err != nil || d.IsDir() {
+				return err
+			}
+			content, err := os.ReadFile(path)
+			if err != nil {
+				return err
+			}
+			rel, err := filepath.Rel(staging, path)
+			if err != nil {
+				return err
+			}
+			hashes[filepath.ToSlash(rel)] = update.WindowsPayloadSHA256(content)
+			return nil
+		})
+		if err != nil {
+			t.Fatal(err)
+		}
+	}
 	manifest, err := update.EncodeWindowsPayloadManifest(version, hashes)
 	if err != nil {
 		t.Fatal(err)

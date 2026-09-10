@@ -26,7 +26,7 @@ type ContextInfo struct {
 	ContextBudget       *ContextBudgetInfo          `json:"contextBudget,omitempty"`
 }
 
-// ContextMaintenanceInfo is the Wails-safe current-view snapshot. Optional
+// ContextMaintenanceInfo is the bridge-safe current-view snapshot. Optional
 // fields preserve compatibility with older desktop/front-end combinations.
 type ContextMaintenanceInfo struct {
 	CanonicalTokens   int                            `json:"canonicalTokens,omitempty"`

@@ -223,15 +223,6 @@ func shouldMigrateLegacyConfigForCLI(cmd string) bool {
 	}
 }
 
-func migrateLegacyConfigForCLI() {
-	if _, err := config.MigrateLegacyIfNeeded(); err != nil {
-		fmt.Fprintln(os.Stderr, "warning: config migration failed:", err)
-	}
-	if _, err := config.ApplyUserConfigUpgradesOnStartup(config.UserConfigPath()); err != nil {
-		fmt.Fprintln(os.Stderr, "warning: config upgrade failed:", err)
-	}
-}
-
 func migrateMCPConfigForCLIWorkspace() {
 	if wd, err := os.Getwd(); err == nil {
 		if _, err := config.MigrateMCPToUserConfigOnUpgrade([]string{wd}); err != nil {
@@ -443,23 +434,6 @@ func workspaceRootForDir(dir string) (string, error) {
 	return wd, nil
 }
 
-func modelForResumePath(modelName, resumePath string, cfg *config.Config) string {
-	if strings.TrimSpace(modelName) != "" || strings.TrimSpace(resumePath) == "" {
-		return modelName
-	}
-	sessionModel, ok := agent.LoadSessionModel(resumePath)
-	if !ok {
-		return modelName
-	}
-	if cfg == nil {
-		return sessionModel
-	}
-	if _, ok := cfg.ResolveModel(sessionModel); !ok {
-		return modelName
-	}
-	return sessionModel
-}
-
 func loadResumableSession(path string) (*agent.Session, error) {
 	if agent.IsCleanupPending(path) {
 		return nil, fmt.Errorf("session is pending cleanup")
@@ -617,7 +591,7 @@ func runAgent(args []string, version string) int {
 		return 2
 	}
 	if *copySession {
-		copied, err := copySessionForWriting(resumePath)
+		copied, err := copyResumableSession(*model, resumePath, cfg)
 		if err != nil {
 			fmt.Fprintln(os.Stderr, i18n.M.ErrorPrefix, err)
 			return 1
@@ -690,8 +664,8 @@ func runAgent(args []string, version string) int {
 	takeoverManager.SetInner(chain.sink)
 	chain.sink = takeoverManager
 	sink, resultOutput, metrics := chain.sink, chain.resultOutput, chain.metrics
-	if resumePath != "" {
-		*model = modelForResumePath(*model, resumePath, cfg)
+	if err := applyResumeModel(model, resumePath, cfg); err != nil {
+		return cliTakeoverFailure(takeoverBinding, leases, takeoverManager, err)
 	}
 	var effortOverride *string
 	if strings.TrimSpace(*effort) != "" {
@@ -738,13 +712,8 @@ func runAgent(args []string, version string) int {
 	// MCP/API callers that manage their own per-project session). Takes
 	// precedence over --continue.
 	// --continue: resume the most recent saved session.
-	if resumePath != "" {
-		if err := takeoverBinding.commitPrevious(takeoverManager); err != nil {
-			_ = cliReturnFailedTakeover(takeoverBinding, leases, takeoverManager)
-			fmt.Fprintln(os.Stderr, i18n.M.ErrorPrefix, err)
-			return 1
-		}
-		ctrl.Resume(resumeSession, resumePath)
+	if err := commitResumedSession(takeoverBinding, takeoverManager, ctrl, resumeSession, resumePath); err != nil {
+		return cliTakeoverFailure(takeoverBinding, leases, takeoverManager, err)
 	}
 	if ctrl.SessionPath() == "" && ctrl.SessionDir() != "" {
 		ctrl.SetFreshSessionPath(agent.NewSessionPath(ctrl.SessionDir(), ctrl.Label()))
@@ -948,7 +917,9 @@ func runServeWithOptions(args []string, opts serveRunOptions) int {
 			return 1
 		}
 	}
-	*model = modelForResumePath(*model, *resume, cfg)
+	if err := applyResumeModel(model, *resume, cfg); err != nil {
+		return cliFailure(err)
+	}
 	// Serve always resolves an implicit model from the user-global config,
 	// ignoring project-level default_model overrides. Explicit flags and
 	// resumable session models remain strict and are preserved verbatim.
@@ -965,15 +936,8 @@ func runServeWithOptions(args []string, opts serveRunOptions) int {
 	SetTaskJobKiller(ctrlKillerAdapter{ctrl})
 
 	// Auto-save target: reuse the resumed file, else a fresh one — same as chat.
-	if *resume != "" {
-		ctrl.Resume(resumeSession, *resume)
-	} else if *sessionID != "" {
-		freshPath, err := freshWebSessionPath(ctrl.SessionDir(), *sessionID)
-		if err != nil {
-			fmt.Fprintln(os.Stderr, i18n.M.ErrorPrefix, err)
-			return 1
-		}
-		ctrl.SetFreshSessionPath(freshPath)
+	if err := prepareServeSessionPath(ctrl, resumeSession, *resume, *sessionID); err != nil {
+		return cliFailure(err)
 	}
 	ctrl.EnsureSessionPath()
 	// Fresh sessions take the lease too (defensive: the path is brand new); a
@@ -1098,7 +1062,7 @@ func chatREPL(args []string, version string) int {
 		return 2
 	}
 	if *copySession {
-		copied, err := copySessionForWriting(resumePath)
+		copied, err := copyResumableSession(*model, resumePath, cfg)
 		if err != nil {
 			fmt.Fprintln(os.Stderr, i18n.M.ErrorPrefix, err)
 			return 1
@@ -1152,7 +1116,9 @@ func chatREPL(args []string, version string) int {
 	}
 
 	ctx := context.Background()
-	*model = modelForResumePath(*model, resumePath, cfg)
+	if err := applyResumeModel(model, resumePath, cfg); err != nil {
+		return cliTakeoverFailure(takeoverBinding, leases, takeoverManager, err)
+	}
 
 	// Plumb the controller's typed event stream through a channel so each event
 	// can become a tea.Msg inside the TUI's update loop. Buffered generously:
@@ -1202,13 +1168,8 @@ func chatREPL(args []string, version string) int {
 	// Decide where this conversation's auto-save lands. A resume reuses the
 	// file so closing/reopening keeps appending to the same history; a fresh
 	// session lands in a new file stamped with the model name.
-	if resumePath != "" {
-		if err := takeoverBinding.commitPrevious(takeoverManager); err != nil {
-			_ = cliReturnFailedTakeover(takeoverBinding, leases, takeoverManager)
-			fmt.Fprintln(os.Stderr, i18n.M.ErrorPrefix, err)
-			return 1
-		}
-		ctrl.Resume(startupResumeSession, resumePath)
+	if err := commitResumedSession(takeoverBinding, takeoverManager, ctrl, startupResumeSession, resumePath); err != nil {
+		return cliTakeoverFailure(takeoverBinding, leases, takeoverManager, err)
 	}
 	ctrl.EnsureSessionPath()
 	// Fresh sessions take the lease too (defensive: the path is brand new); a

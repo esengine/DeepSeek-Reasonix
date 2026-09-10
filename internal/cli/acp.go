@@ -19,6 +19,7 @@ import (
 	"reasonix/internal/extension/providerext"
 	"reasonix/internal/i18n"
 	"reasonix/internal/netclient"
+	"reasonix/internal/plugin"
 	"reasonix/internal/provider"
 	"reasonix/internal/sandbox"
 	"reasonix/internal/tool"
@@ -170,6 +171,7 @@ func (f *acpFactory) sessionBootOptions(p acp.SessionParams) (boot.Options, erro
 		Stderr:                   os.Stderr,
 		WorkspaceRoot:            root,
 		ExtraPlugins:             p.MCPServers,
+		MCPHostProfile:           plugin.HostProfileForInteractive(p.MCPInteractions),
 		CleanupPendingReconciler: acp.ReconcileCleanupPending,
 		OnSessionRecovered:       p.OnSessionRecovered,
 		OnSessionTransition:      p.OnSessionTransition,

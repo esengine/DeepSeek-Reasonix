@@ -365,6 +365,7 @@ export function RemoteConnectWizard({
 
   return createPortal(
     <div
+      data-app-overlay=""
       className="modal-backdrop remote-wizard-backdrop"
       role="presentation"
       onMouseDown={(event) => {

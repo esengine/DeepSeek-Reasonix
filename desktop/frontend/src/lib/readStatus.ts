@@ -9,6 +9,7 @@ export interface WireReadStatus {
   path: string;
   intent?: string;
   state: string;
+  verdict?: "partial_read_sufficient" | "full_read_pending" | "read_hard_stop";
   covered?: [number, number][];
   missing?: [number, number][];
   sourceEnd?: number;
@@ -16,6 +17,17 @@ export interface WireReadStatus {
   reason?: string;
   recovery?: string;
   active?: boolean;
+}
+
+/** Host recovery metadata, never an executable permission or read receipt. */
+export interface OperationDiagnostic {
+  code: string;
+  path?: string;
+  operation_id?: string;
+  expected_snapshot?: string;
+  actual_snapshot?: string;
+  required_ranges?: { start: number; end: number }[];
+  recovery: string;
 }
 
 export type ReadStatusHost = { readStatuses?: Record<string, WireReadStatus>; readStatusClosed?: boolean };

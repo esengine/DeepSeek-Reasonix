@@ -7,6 +7,7 @@ import type { AppBindings } from "../lib/bridge";
 import { useController } from "../lib/useController";
 import { historySliceFromMessages } from "./mockHistorySlice";
 import type { BalanceInfo, CheckpointMeta, ContextInfo, EffortInfo, HistoryMessage, HistorySliceRequest, JobView, Meta, TabMeta, WireEvent } from "../lib/types";
+import { installDesktopHostStub } from "./desktopHostStub";
 
 let passed = 0;
 let failed = 0;
@@ -133,8 +134,6 @@ const tabR = tabMeta("tab-r");
 const tabsById = new Map([tabA, tabR].map((tab) => [tab.id, tab]));
 const runningTabs = new Set<string>(["tab-r"]);
 let backendActiveId = "tab-a";
-const eventHandlers: Array<(e: WireEvent) => void> = [];
-const readyHandlers: Array<(tabId?: string) => void> = [];
 
 function currentTabs(): TabMeta[] {
   return Array.from(tabsById.values()).map((tab) => {
@@ -149,15 +148,7 @@ function historyFor(tabID: string): HistoryMessage[] {
   return [userMessage("cached A")];
 }
 
-window.runtime = {
-  EventsOn: (name: string, cb: (...data: unknown[]) => void) => {
-    if (name === "agent:event") eventHandlers.push(cb as (e: WireEvent) => void);
-    if (name === "agent:ready") readyHandlers.push(cb as (tabId?: string) => void);
-    return () => {};
-  },
-  BrowserOpenURL: () => {},
-};
-window.go = {
+const desktopStub = installDesktopHostStub(({
   main: {
     App: {
       RegisterNavigationIntent: async () => {},
@@ -186,7 +177,7 @@ window.go = {
       },
     } as Partial<AppBindings> as AppBindings,
   },
-};
+}).main.App);
 
 type Controller = ReturnType<typeof useController>;
 let controller: Controller | undefined;
@@ -236,10 +227,8 @@ ok(
 tabsById.set("tab-s", tabMeta("tab-s"));
 runningTabs.add("tab-s");
 await act(async () => {
-  for (const handler of eventHandlers) {
-    handler({ kind: "turn_started", tabId: "tab-s" } as WireEvent);
-    handler({ kind: "text", tabId: "tab-s", text: "streaming S" } as WireEvent);
-  }
+  desktopStub.emit("agent:event", { kind: "turn_started", tabId: "tab-s" } as WireEvent);
+  desktopStub.emit("agent:event", { kind: "text", tabId: "tab-s", text: "streaming S" } as WireEvent);
   await flushPromises();
 });
 await act(async () => {

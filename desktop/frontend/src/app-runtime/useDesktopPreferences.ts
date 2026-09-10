@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
+import { desktopHost } from "../lib/desktopHost";
 import { useCommittedCommand } from "../lib/useCommittedCommand";
 import { useCommittedAsyncCommand } from "../lib/useCommittedAsyncCommand";
 import { useConfigLoadWarnings } from "../lib/useConfigLoadWarnings";
@@ -43,7 +44,7 @@ export function useDesktopPreferences() {
     void reload(undefined, true);
   }, [reload]);
   useEffect(() => { void app.SetTrayLocale(locale).catch(() => {}); }, [locale]);
-  const nativeRuntime = typeof window === "undefined" || Boolean(window.runtime);
+  const nativeRuntime = typeof window === "undefined" || desktopHost().kind !== "none";
   const sidebarImConnections = useMemo(() => snapshot ? sidebarImConnectionsFromBot(snapshot.bot, t, botRuntime, nativeRuntime) : [], [snapshot, t, botRuntime, nativeRuntime]);
   const imTopicSources = useMemo(() => snapshot ? sidebarImTopicSourcesFromBot(snapshot.bot, t) : {}, [snapshot, t]);
   return {

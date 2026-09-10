@@ -144,7 +144,7 @@ re-render uniformly.
 
 - Each user message in the transcript gets a hover **rewind** control → menu:
   **rewind code / rewind conversation / both / fork-from-here**.
-- It calls the same prepare/commit rewind API over the Wails binding; the controller's
+- It calls the same prepare/commit rewind API over the desktop host protocol; the controller's
   event stream pushes the restored state and React re-renders. No rewind logic in
   the frontend.
 - Conversation rewind and fork-from-here keep the current tab and switch it to
