@@ -1,6 +1,6 @@
 // Run: tsx src/__tests__/crash-rejection-containment.test.ts
 //
-// A rejected Wails call arrives as a bare string (or a stackless object). That
+// A rejected desktop bridge call arrives as a bare string (or a stackless object). That
 // is an ordinary backend error and must never paint the full-screen crash
 // overlay; only rejections carrying a real stack keep the crash surface.
 
@@ -36,7 +36,7 @@ onRecoverableError(({ message }) => { toasts.push(message); });
 const originalConsoleError = console.error;
 console.error = () => {};
 
-// Mirrors main.tsx: bridge-level Wails filters are installed before the crash handlers.
+// Mirrors main.tsx: bridge-level filters are installed before the crash handlers.
 window.addEventListener("unhandledrejection", (e) => { if (e.reason === "bridge-filtered") e.preventDefault(); });
 installGlobalCrashHandlers();
 

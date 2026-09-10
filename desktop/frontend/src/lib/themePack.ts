@@ -171,7 +171,8 @@ let previewSnapshot: {
 } | null = null;
 
 // Browser development uses Vite-bundled copies of the same official images
-// that Wails serves through /__reasonix_theme_asset/. Only exact, internally
+// that the desktop service serves through /__reasonix_theme_asset/. Only
+// exact, internally
 // registered URLs may cross the background URL safety boundary.
 const trustedBundledThemeBackgroundURLs = new Set<string>();
 

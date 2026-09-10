@@ -6,6 +6,8 @@ package event
 // Covered and Missing use zero-based half-open source ranges, like read
 // envelopes and pause receipts. Consumers perform one-based display conversion.
 type ReadStatusPayload struct {
+	// Verdict is additive; older consumers continue to render State/Reason.
+	Verdict    string   `json:"verdict,omitempty"`
 	ReadID     string   `json:"read_id"`
 	Generation uint64   `json:"generation,omitempty"`
 	Sequence   uint64   `json:"sequence,omitempty"`

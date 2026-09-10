@@ -9,6 +9,7 @@ import { asArray } from "../lib/array";
 import { filterAtMatches } from "../lib/atMatches";
 import { DedupIndex, sha256 } from "../lib/attachDedup";
 import { app, onFilesDropped } from "../lib/bridge";
+import { desktopHost } from "../lib/desktopHost";
 import { steerInboxItemForActiveTurn } from "../lib/inboxSubmit";
 import { formatInboxError, isInboxItemMissing } from "../lib/inboxError";
 import { inboxScopeKey } from "../lib/composerInboxQueue";
@@ -107,9 +108,7 @@ export interface WorkspaceReference {
 const LONG_PASTE_MIN_CHARS = 2000;
 const LONG_PASTE_MIN_LINES = 20;
 const COMPOSER_MIN_HEIGHT = 104;
-// Fresh installs open at the compact baseline; a manual resize still persists
-// and takes precedence over this default.
-const COMPOSER_DEFAULT_HEIGHT = 104;
+const COMPOSER_DEFAULT_HEIGHT = 140;
 const COMPOSER_MAX_HEIGHT = 360;
 // Height reserved for the in-card run strip while a turn runs; applied via a
 // CSS calc so --composer-height always stays in "logical height" space.
@@ -561,7 +560,6 @@ export function Composer({
   imageInputEnabled = true,
   imageUnderstandingEnabled = false,
   attachmentInputEnabled = true,
-  remoteSession = false,
   tabId, turnId,
   effort,
   onSend,
@@ -647,7 +645,6 @@ export function Composer({
   imageUnderstandingEnabled?: boolean;
   /** False for remote sessions because local filesystem paths are not portable to Serve. */
   attachmentInputEnabled?: boolean;
-  remoteSession?: boolean;
   tabId?: string; turnId?: string;
   effort?: EffortInfo;
   onSend: (displayText: string, submitText?: string, tabId?: string, structured?: StructuredInvocationSubmit) => void | Promise<void>;
@@ -751,7 +748,6 @@ export function Composer({
   const finishing = runtimeState.finishing;
   if (runtimeState.known) running = runtimeState.running ?? running;
   if (runtimeState.unknown) disabled = true;
-  attachmentInputEnabled = attachmentInputEnabled && !disabled && !readOnly;
   const pendingKey = followupSessionKey(inboxSessionPath, inboxHostId, inboxWorkspace);
   const pendingKeyRef = useRef(pendingKey);
   pendingKeyRef.current = pendingKey;
@@ -1588,19 +1584,17 @@ export function Composer({
     if (menuMode && menuMode !== "pastChats") setContentMenuOpen(false);
   }, [menuMode]);
 
-  // Content remains editable during a run; task-mode controls still close.
+  // A starting run closes the transient content surfaces. Without this the
+  // popover state survives the run (its open prop gates on !running) and the
+  // menu would pop back unprompted the moment the turn finishes.
   useEffect(() => {
     if (!running) return;
-    setIntentMenuOpen(false);
-    setIntentMenuClosing(false);
-    if (remoteSession) {
-      setContentMenuOpen(false);
-      setDirectPastChats(false);
-      setShowPastChats(false);
-      setPastChatQuery("");
-      if (pastChatToken) setDismissed(true);
-    }
-  }, [pastChatToken, remoteSession, running]);
+    setContentMenuOpen(false);
+    setDirectPastChats(false);
+    setShowPastChats(false);
+    setPastChatQuery("");
+    if (pastChatToken) setDismissed(true);
+  }, [pastChatToken, running]);
 
   const resetPromptHistoryNavigation = () => {
     if (historyIndexRef.current === -1) return;
@@ -2417,7 +2411,6 @@ export function Composer({
   }, [attachmentInputEnabled]);
 
   const onPaste = (e: ClipboardEvent<HTMLTextAreaElement | HTMLDivElement>) => {
-    if (disabled || readOnly) return;
     clearNativeClipboardPasteTimer();
     const files = clipboardFiles(e.clipboardData);
     if (files.length > 0) {
@@ -2648,9 +2641,9 @@ export function Composer({
     try {
       await navigator.clipboard.writeText(selection.selected);
     } catch {
-      // Fall back to Wails desktop runtime, then execCommand
+      // Fall back to the desktop host clipboard, then execCommand
       try {
-        if (typeof window !== "undefined" && (await window.runtime?.ClipboardSetText?.(selection.selected))) {
+        if (await desktopHost().native.clipboardWriteText(selection.selected)) {
           /* ok */
         } else if (!fallbackCopyText(selection.selected)) {
           // Every clipboard path failed. Cutting now would delete text that
@@ -2762,15 +2755,10 @@ export function Composer({
     return items.some((item) => getWebkitFileEntry(item) === null);
   };
 
-  const clearWailsDropTarget = () => {
-    document.querySelectorAll(".wails-drop-target-active").forEach((el) => el.classList.remove("wails-drop-target-active"));
-  };
-
   const stopNativeFileDrop = (e: DragEvent<HTMLDivElement>) => {
     e.preventDefault();
     e.stopPropagation();
     e.nativeEvent.stopImmediatePropagation();
-    clearWailsDropTarget();
   };
 
   const onFileDropCapture = (e: DragEvent<HTMLDivElement>) => {
@@ -3171,10 +3159,10 @@ export function Composer({
   }, []);
 
   useEffect(() => {
-    if (!pastChatToken || directPastChats || dismissed || (running && remoteSession) || disabled || readOnly) return;
+    if (!pastChatToken || directPastChats || dismissed || running || disabled || readOnly) return;
     setDirectPastChats(true);
     void openPastChats(pastChatToken.query);
-  }, [directPastChats, disabled, dismissed, openPastChats, pastChatToken, readOnly, remoteSession, running]);
+  }, [directPastChats, disabled, dismissed, openPastChats, pastChatToken, readOnly, running]);
 
   const clearDirectPastChatToken = () => {
     const current = textRef.current;
@@ -3734,12 +3722,9 @@ export function Composer({
   const effortLabel = (id: string) => id === "auto" ? t("common.auto") : effortOptions.find((option) => option.id === id)?.name || id;
   const effortLevels = effort?.options ? ["auto", ...effortOptions.map((option) => option.id)] : asArray(effort?.levels);
   const currentEffort = effort?.current || "auto";
-  const selectedEffort = effort?.pending ?? currentEffort;
-  const effortPendingHint = effort?.pending ? t("composer.effortNextTurnHint") : undefined;
-  const effortDeferredUnavailable = running && (remoteSession || effort?.canDefer !== true);
   const hasEffort = Boolean(effort?.supported && effortLevels.length > 0);
   const chooseEffortLevel = (level: string) => {
-    if (!disabled && !readOnly && !effortDeferredUnavailable && level !== selectedEffort) onSetEffort(level);
+    if (level !== currentEffort) onSetEffort(level);
   };
   // Run-strip state machine: retry > waiting-approval > waiting-ask > streaming.
   // Decision surfaces own the "waiting on user" UI; while suspendedByDecision
@@ -3931,7 +3916,7 @@ export function Composer({
         decisionPending ? "composer-wrap--decision-pending" : "",
         heroMode ? "composer-wrap--hero" : "",
       ].filter(Boolean).join(" ")}
-      style={attachmentInputEnabled ? { "--wails-drop-target": "drop" } as CSSProperties : undefined}
+      data-native-drop-target={attachmentInputEnabled ? "" : undefined}
       onDropCapture={onFileDropCapture}
     >
       <input
@@ -3950,7 +3935,7 @@ export function Composer({
         }}
       />
       {!heroMode && <AnchoredPopover
-        open={((contentMenuOpen && !(running && remoteSession)) || (intentMenuOpen && !running)) && !disabled && !readOnly}
+        open={(contentMenuOpen || intentMenuOpen) && !disabled && !readOnly && !running}
         anchorRef={contentMenuOpen ? contentMenuAnchorRef : intentMenuAnchorRef}
         onClose={() => { setContentMenuOpen(false); closeIntentMenu(); }}
         className="composer-access-menu composer-content-menu composer-intent-menu composer-menu-surface"
@@ -4557,7 +4542,7 @@ export function Composer({
                     type="button"
                     className={`composer-content-trigger${contentMenuOpen ? " composer-content-trigger--open" : ""}`}
                     onClick={() => (contentMenuOpen ? setContentMenuOpen(false) : openContentMenu())}
-                    disabled={disabled || readOnly || (running && remoteSession)}
+                    disabled={disabled || readOnly || running}
                     aria-haspopup="menu"
                     aria-expanded={contentMenuOpen}
                     aria-label={t("composer.contentMenuTitle")}
@@ -4631,10 +4616,10 @@ export function Composer({
                 useAppNavigationStore.getState().setSettingsTarget("models");
               }} /></Suspense>
               {hasEffort && !heroMode && <div className="composer-effort-control">
-                <ComposerChoice key={`effort-${draftKey}`} label={effortLabel(selectedEffort)}
-                  ariaLabel={`${t("status.effortTitle")}: ${effortLabel(selectedEffort)}`}
-                  icon={<Brain size={16} />} showChevron title={effortPendingHint}
-                  value={selectedEffort} disabled={disabled || readOnly || effortDeferredUnavailable}
+                <ComposerChoice key={`effort-${tabId}`} label={effortLabel(currentEffort)}
+                  ariaLabel={`${t("status.effortTitle")}: ${effortLabel(currentEffort)}`}
+                  icon={<Brain size={16} />} showChevron
+                  value={currentEffort} disabled={disabled || readOnly || running}
                   onPick={chooseEffortLevel}
                   options={effortLevels.map(level => ({ value: level, label: effortLabel(level) }))} />
               </div>}

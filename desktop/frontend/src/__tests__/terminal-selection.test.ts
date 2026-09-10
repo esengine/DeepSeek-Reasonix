@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
 import { JSDOM } from "jsdom";
+import { installDesktopHostStub } from "./desktopHostStub";
 
 const dom = new JSDOM("<!doctype html><html><body></body></html>");
 const previousWindow = globalThis.window;
@@ -153,7 +154,7 @@ function keyEvent(overrides: Partial<ConstructorParameters<typeof KeyboardEvent>
 }
 
 // readTerminalClipboardText prefers the async Clipboard API and falls back to
-// the Wails runtime bridge when the webview denies permission.
+// the desktop bridge when the webview denies permission.
 {
   const originalClipboard = Object.getOwnPropertyDescriptor(globalThis.navigator, "clipboard");
   const originalRuntime = (globalThis.window as unknown as { runtime?: unknown }).runtime;
@@ -168,12 +169,10 @@ function keyEvent(overrides: Partial<ConstructorParameters<typeof KeyboardEvent>
       configurable: true,
       value: { readText: async () => { throw new Error("denied"); } },
     });
-    (globalThis.window as unknown as { runtime?: unknown }).runtime = {
-      ClipboardGetText: async () => "from-runtime",
-    };
+    const clipboardStub = installDesktopHostStub({}, { clipboardReadText: "from-runtime" });
     assert.equal(await readTerminalClipboardText(), "from-runtime", "bridge is the permission fallback");
 
-    (globalThis.window as unknown as { runtime?: unknown }).runtime = undefined;
+    clipboardStub.uninstall();
     assert.equal(await readTerminalClipboardText(), "", "no clipboard source returns empty");
   } finally {
     if (originalClipboard) Object.defineProperty(globalThis.navigator, "clipboard", originalClipboard);

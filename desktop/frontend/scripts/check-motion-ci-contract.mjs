@@ -14,8 +14,6 @@ const desktopMainSource = readFileSync(resolve(repoRoot, "desktop/main.go"), "ut
 const transcriptScrollBenchSource = readFileSync(resolve(repoRoot, "desktop/frontend/bench/transcript-scroll-stability.mjs"), "utf8");
 const transcriptSelectionBenchSource = readFileSync(resolve(repoRoot, "desktop/frontend/bench/transcript-selection.mjs"), "utf8");
 const transcriptSelectionComponentSource = readFileSync(resolve(repoRoot, "desktop/frontend/src/components/TranscriptSelectionMenu.tsx"), "utf8");
-const transcriptSelectionSmokeSource = readFileSync(resolve(repoRoot, "desktop/transcript_selection_smoke_contract.js"), "utf8");
-const transcriptSelectionHostSource = readFileSync(resolve(repoRoot, "desktop/cmd/transcript-selection-smoke/host_windows.go"), "utf8");
 
 function jobBody(name) {
   const match = workflow.match(new RegExp(`\\n  ${name}:\\n([\\s\\S]*?)(?=\\n  [a-z][a-z0-9-]*:|$)`));
@@ -35,17 +33,17 @@ for (const [job, body, command] of [
 
 const windowsJob = jobBody("desktop-windows", "lint");
 for (const required of [
-  "wails build -clean -s -skipbindings -nopackage -platform windows/amd64 -webview2 embed",
-  "Test WebView2 native smoke state machine",
-  "../scripts/test-webview2-native-smoke.ps1 -SelfTest",
-  "Smoke-test Wails/WebView2 native startup",
-  "../scripts/test-webview2-native-smoke.ps1",
-  "Test WebView2 transcript selection compositor",
-  "../scripts/test-transcript-selection-webview2.ps1 -Iterations 3",
-  "Upload WebView2 transcript selection evidence",
+  "node packaging/package.mjs windows/amd64 v0.0.0-ci canary",
+  "Smoke-test Electron native startup",
+  "node packaging/smoke.mjs build/electron/windows-amd64/app --service build/bin/reasonix-desktop.exe",
 ]) {
   if (!windowsJob.includes(required)) {
     throw new Error(`motion-ci-contract: desktop-windows must include ${required}`);
+  }
+}
+for (const retired of ["WebView2", "webview2", "test-transcript-selection"]) {
+  if (windowsJob.includes(retired)) {
+    throw new Error(`motion-ci-contract: desktop-windows must not reference the retired native smoke harness (${retired})`);
   }
 }
 
@@ -86,30 +84,19 @@ for (const [path, source] of [
     }
   }
 }
-for (const requiredPath of [
-  "desktop/cmd/transcript-selection-smoke/main.go",
+// The Wails-era native selection smoke (WebView2 host + contract script) left
+// with the old shell; selection geometry is covered by the Chromium browser
+// bench above and the packaged Electron startup smoke.
+for (const retiredPath of [
+  "desktop/cmd/transcript-selection-smoke",
+  "desktop/cmd/transcript-native-smoke",
   "desktop/transcript_selection_smoke_contract.js",
   "scripts/test-transcript-selection-webview2.ps1",
+  "scripts/test-webview2-native-smoke.ps1",
 ]) {
-  if (!existsSync(resolve(repoRoot, requiredPath))) {
-    throw new Error(`motion-ci-contract: missing independent WebView2 selection smoke file ${requiredPath}`);
+  if (existsSync(resolve(repoRoot, retiredPath))) {
+    throw new Error(`motion-ci-contract: retired native smoke harness still exists: ${retiredPath}`);
   }
-}
-for (const required of [
-  "async settle()",
-  "data-transcript-geometry-pending",
-  ".reasoning--loading",
-  "stableSamples >= 4",
-]) {
-  if (!transcriptSelectionSmokeSource.includes(required)) {
-    throw new Error(`motion-ci-contract: native selection setup must retain ${required}`);
-  }
-}
-const compositorWarmIndex = transcriptSelectionHostSource.indexOf("host.warmCompositor()");
-const targetSettleIndex = transcriptSelectionHostSource.indexOf("host.settleTarget()");
-const pointerMoveIndex = transcriptSelectionHostSource.indexOf("movePointerToClientPoint(hwnd, settled.Point)");
-if (!(compositorWarmIndex >= 0 && compositorWarmIndex < targetSettleIndex && targetSettleIndex < pointerMoveIndex)) {
-  throw new Error("motion-ci-contract: native pointer coordinates must be measured after compositor warmup and target settling");
 }
 for (const retiredPath of [
   "desktop/webview2_approval_smoke.go",
@@ -228,4 +215,4 @@ for (const required of [
   }
 }
 
-console.log("motion-ci-contract: browser approval behavior and exact-binary WebView2 startup are separate release gates without production smoke instrumentation");
+console.log("motion-ci-contract: browser gates and packaged Electron startup are separate release gates without production smoke instrumentation");

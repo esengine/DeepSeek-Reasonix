@@ -19,7 +19,7 @@
   line-height: 20px;
   text-align: left;
   cursor: pointer;
-  --wails-draggable: no-drag;
+  --reasonix-draggable: no-drag;
 }
 .settings-select__value { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .settings-select > svg { flex: 0 0 auto; color: var(--fg-dim); }

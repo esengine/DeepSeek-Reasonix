@@ -617,7 +617,7 @@ console.log("\ncomposer run strip");
   const { root, rerender } = await renderComposer({ running: true, turnStartAt: Date.now() });
 
   const handle = document.querySelector(".composer-resize-handle") as HTMLButtonElement;
-  eq((document.querySelector(".composer-card") as HTMLElement).style.getPropertyValue("--composer-height"), "104px", "fresh composer defaults to the selected 104px height");
+  eq((document.querySelector(".composer-card") as HTMLElement).style.getPropertyValue("--composer-height"), "140px", "fresh composer defaults to the selected 140px height");
   await act(async () => {
     handle.focus();
     handle.dispatchEvent(new window.KeyboardEvent("keydown", { key: "Home", bubbles: true }));
@@ -697,7 +697,7 @@ console.log("\ncomposer run strip");
     handle.dispatchEvent(new window.MouseEvent("dblclick", { bubbles: true }));
     await flushTimers();
   });
-  eq(card.style.getPropertyValue("--composer-height"), "104px", "reset restores the 104px default after manual resizing");
+  eq(card.style.getPropertyValue("--composer-height"), "140px", "reset restores the 140px default after manual resizing");
 
   await act(async () => {
     root.unmount();

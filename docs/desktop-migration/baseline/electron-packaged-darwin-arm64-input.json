@@ -1,0 +1,36 @@
+{
+  "measuredAt": "2026-09-08T20:55:51.573Z",
+  "overlayAfterEscape": 0,
+  "inputEvents": {
+    "all": {
+      "n": 450,
+      "p50": 24,
+      "p95": 40,
+      "max": 72
+    },
+    "keydown": {
+      "n": 80,
+      "p50": 24,
+      "p95": 40,
+      "max": 72
+    },
+    "input": {
+      "n": 80,
+      "p50": 24,
+      "p95": 40,
+      "max": 72
+    },
+    "byName": {
+      "keydown": 80,
+      "keypress": 40,
+      "beforeinput": 80,
+      "input": 80,
+      "keyup": 62,
+      "pointerover": 36,
+      "pointerenter": 36,
+      "mouseover": 36
+    }
+  },
+  "projectTreeTopics": 0,
+  "sessionLabels": []
+}

@@ -343,7 +343,7 @@ func (a *App) CloseMergedWorktreeTab(request CloseMergedWorktreeTabRequest) (Clo
 	a.markTabRemovedLocked(current)
 	delete(a.tabs, current.ID)
 	a.removeTabOrderLocked(current.ID)
-	_ = a.saveTabsLocked()
+	a.saveTabsLocked()
 	a.mu.Unlock()
 
 	if a.terminals != nil {
@@ -584,19 +584,6 @@ func (a *App) worktreeRuntimeReferenced(worktreeRoot string) bool {
 	a.mu.RLock()
 	defer a.mu.RUnlock()
 	return a.runtimeReferencesCanonicalLocked(key)
-}
-
-func pathWithinWorktree(path, worktreeRoot string) bool {
-	pathKey := canonicalRuntimeRoot(path)
-	rootKey := canonicalRuntimeRoot(worktreeRoot)
-	if pathKey == "" || rootKey == "" {
-		return false
-	}
-	if pathKey == rootKey {
-		return true
-	}
-	rel, err := filepath.Rel(rootKey, pathKey)
-	return err == nil && rel != "." && rel != ".." && !strings.HasPrefix(rel, ".."+string(filepath.Separator))
 }
 
 func canonicalRuntimeRoot(root string) string {

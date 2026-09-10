@@ -2,6 +2,7 @@ package config
 
 import (
 	"fmt"
+	"reasonix/internal/provider"
 	"slices"
 	"strings"
 )
@@ -47,7 +48,7 @@ func (c *Config) resolveAutomaticWebSearchProvider(current *ProviderEntry) *Prov
 		return nil
 	}
 	if current != nil && current.WebSearch != nil && !*current.WebSearch &&
-		(SupportsServerWebSearch(current) || IsOfficialDeepSeekSearchEndpoint(current)) {
+		(SupportsServerWebSearch(current) || IsOfficialDeepSeekSearchEndpoint(current) || isOpenCodeGoEntry(current)) {
 		return nil
 	}
 	resolve := func(e *ProviderEntry) *ProviderEntry {
@@ -69,6 +70,11 @@ func (c *Config) resolveAutomaticWebSearchProvider(current *ProviderEntry) *Prov
 	}
 	if selected := resolve(current); selected != nil {
 		return selected
+	}
+	if isOpenCodeGoEntry(current) {
+		// OpenCode auto search is account-bound, including when the migrated
+		// connection has since been edited. Never fall through to another account.
+		return c.resolveOpenCodeGoAutomaticSearch(current, resolve)
 	}
 	for i := range c.Providers {
 		entry, ok := c.ResolveModel(c.Providers[i].Name)
@@ -92,6 +98,15 @@ type WebSearchResolution struct {
 // ResolveWebSearchModel resolves an exact account/model without legacy account
 // retargeting: an explicit search assignment must never silently change accounts.
 func (c *Config) ResolveWebSearchModel(ref string) (*ProviderEntry, error) {
+	name, model, exact := strings.Cut(strings.TrimSpace(ref), "/")
+	entry, exists := c.Provider(name)
+	if !exact || !exists || !entry.HasModel(model) {
+		var aliasErr error
+		ref, aliasErr = c.resolveOpenCodeGoAlias(ref, true)
+		if aliasErr != nil {
+			return nil, aliasErr
+		}
+	}
 	name, model, ok := strings.Cut(strings.TrimSpace(ref), "/")
 	if !ok {
 		return nil, fmt.Errorf("search model must use provider/model")
@@ -149,13 +164,37 @@ func (c *Config) ResolveWebSearch(current *ProviderEntry) WebSearchResolution {
 		route := c.resolveAutomaticWebSearchProvider(entry)
 		return WebSearchResolution{Entry: route, Status: "ready"}
 	}
-	if current != nil && current.WebSearch != nil && !*current.WebSearch && (SupportsServerWebSearch(current) || IsOfficialDeepSeekSearchEndpoint(current)) {
+	if current != nil && current.WebSearch != nil && !*current.WebSearch && (SupportsServerWebSearch(current) || IsOfficialDeepSeekSearchEndpoint(current) || isOpenCodeGoEntry(current)) {
 		return WebSearchResolution{Status: "disabled"}
+	}
+	if isOpenCodeGoEntry(current) && c.openCodeGoJournal != nil {
+		// A saved search identity is an assignment, including in auto mode.
+		// Its disappearance must not select another account from the catalog.
+		refs := make([]string, 0, len(c.openCodeGoJournal.SearchAliases))
+		for old, alias := range c.openCodeGoJournal.SearchAliases {
+			if alias.Identity == openCodeGoIdentity(*current) {
+				refs = append(refs, old)
+			}
+		}
+		slices.Sort(refs)
+		for _, old := range refs {
+			if _, err := c.resolveHistoricalWebSearchModel(old); err != nil {
+				return WebSearchResolution{Status: "invalid", Reason: err.Error()}
+			}
+		}
 	}
 	if entry := c.resolveAutomaticWebSearchProvider(current); entry != nil {
 		return WebSearchResolution{Entry: entry, Status: "ready"}
 	}
 	return WebSearchResolution{Status: "unavailable"}
+}
+
+func isOpenCodeGoEntry(e *ProviderEntry) bool {
+	if e == nil {
+		return false
+	}
+	_, ok := provider.OpenCodeGoRequestRoute(e.Kind, e.BaseURL, e.RequestURL, e.ChatURL)
+	return ok
 }
 
 // ResolveWebSearchProvider retains the existing API for consumers that only need

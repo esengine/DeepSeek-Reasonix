@@ -7,7 +7,9 @@ import (
 	"time"
 
 	"reasonix/internal/event"
+	"reasonix/internal/evidence"
 	"reasonix/internal/provider"
+	"reasonix/internal/tool"
 )
 
 func (a *Agent) emitBatchToolResult(c provider.ToolCall, o toolOutcome, duration, started int64, parallel bool, batchStart time.Time) error {
@@ -29,6 +31,9 @@ func (a *Agent) emitBatchToolResult(c provider.ToolCall, o toolOutcome, duration
 		Truncated:    o.truncated,
 		DurationMs:   duration,
 		Execution:    toEventShellExecution(o.execution, duration),
+	}
+	if o.diagnostic != nil {
+		tr.Diagnostic, _ = json.Marshal(o.diagnostic)
 	}
 	if o.subagentOutcome != nil {
 		tr.SubagentRef = o.subagentOutcome.Ref
@@ -88,21 +93,36 @@ func (a *Agent) recordToolExecutionAudit(readOnly, parallel bool, startedAt, dur
 }
 
 func (a *Agent) storeBatchToolResult(ctx context.Context, call provider.ToolCall, o toolOutcome) {
+	if o.executed && o.errMsg == "" && !o.blocked {
+		a.turn.evidenceBlocked.retireWrittenSource(o.evidenceSource)
+	}
 	state := outcomeRunState(o)
 	msg := provider.Message{Role: provider.RoleTool, Content: o.output, Images: o.images, VisionSummary: o.visionSummary, ToolCallID: call.ID, Name: call.Name, ToolRunState: state, ToolExecution: toProviderToolExecution(o.execution)}
 	if o.deferredTodoState != nil && state == provider.ToolRunCompleted && (call.Name == "todo_write" || call.Name == "complete_step") {
 		msg.DeferredTodoCompletions = cloneDeferredTodoState(o.deferredTodoState)
 	}
+	if o.diagnostic != nil {
+		msg.ToolDiagnostic, _ = json.Marshal(o.diagnostic)
+		if o.diagnostic.Code == tool.WriteTargetAbsent && a.task.ledger != nil {
+			a.task.ledger.RecordTextObservation(evidence.TextObservation{Path: o.diagnostic.Path, Absent: true})
+		}
+	}
 	if o.rawOutput != "" && o.rawOutput != o.output {
 		msg.RawContent = o.rawOutput
 	}
 	if env, ok := a.finalizedReadEnvelope(ctx, call, o); ok {
+		if env.HasMore {
+			msg.ToolDiagnostic, _ = json.Marshal(tool.OperationDiagnostic{Code: tool.ReadPartial, Path: env.Source.CanonicalPath, OperationID: call.ID, ActualSnapshot: env.Source.Snapshot, RequiredRanges: env.DeliveredRanges, Recovery: "continue with the next window only if the task requires more coverage"})
+		}
 		if raw, err := json.Marshal(env); err == nil {
 			msg.ReadResult = raw
 		}
 		a.observeReadShadow(env, o.readActiveMillis)
 		a.rememberReadDelivery(call.ID, o.output, env)
-		if a.readPipelineActive() {
+		args, _ := parseReadFileArgs([]byte(call.Arguments))
+		// Rollback may retain the rest for optional recovery, but ordinary
+		// partial windows still provide exact evidence for visible local edits.
+		if a.readPipelineActive() || (o.rawOutput != "" && !args.fullRead()) {
 			if observer, ok := tReadObserver(a, call); ok {
 				if observed, ok := observer.ObserveModelText(json.RawMessage(call.Arguments), o.output); ok {
 					if len(env.DeliveredRanges) == 0 {

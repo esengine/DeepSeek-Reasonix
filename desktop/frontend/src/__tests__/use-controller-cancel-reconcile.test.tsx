@@ -7,6 +7,7 @@ import { useController } from "../lib/useController";
 import type { AppBindings } from "../lib/bridge";
 import type { ContextInfo, EffortInfo, HistorySliceRequest, Meta, TabMeta, WireEvent } from "../lib/types";
 import { historySliceFromMessages } from "./mockHistorySlice";
+import { installDesktopHostStub } from "./desktopHostStub";
 
 let passed = 0;
 let failed = 0;
@@ -100,7 +101,6 @@ globalThis.localStorage = dom.window.localStorage;
 globalThis.requestAnimationFrame = dom.window.requestAnimationFrame.bind(dom.window);
 globalThis.cancelAnimationFrame = dom.window.cancelAnimationFrame.bind(dom.window);
 
-const eventHandlers: Array<(e: WireEvent) => void> = [];
 let backendRunning = false;
 let cancelCalls = 0;
 let cancelInboxCalls = 0;
@@ -116,14 +116,7 @@ let turnReplayCalls = 0;
 const context: ContextInfo = { used: 0, window: 100, sessionTokens: 0 };
 const effort: EffortInfo = { supported: true, current: "auto", default: "auto", levels: ["auto"] };
 
-window.runtime = {
-  EventsOn: (name: string, cb: (payload: unknown) => void) => {
-    if (name === "agent:event") eventHandlers.push(cb as (e: WireEvent) => void);
-    return () => {};
-  },
-  BrowserOpenURL: () => {},
-};
-window.go = {
+const desktopStub = installDesktopHostStub(({
   main: {
     App: {
       ListTabs: async () => [tabMeta({ running: backendRunning, cancellable: backendRunning })],
@@ -203,7 +196,7 @@ window.go = {
       },
     } as Partial<AppBindings> as AppBindings,
   },
-};
+}).main.App);
 
 type Controller = ReturnType<typeof useController>;
 let controller: Controller | undefined;
@@ -232,32 +225,26 @@ checkpointLoads = 0;
 // been replayed. This interleaving is driven only by resolved promises (no
 // timing sleeps), then a duplicate seq=3 is ignored idempotently.
 await act(async () => {
-  for (const handler of eventHandlers) {
-    handler({ kind: "turn_status", tabId: "tab-a", turnId: "turn-gap", seq: 1, status: "queued" });
-    handler({ kind: "turn_status", tabId: "tab-a", turnId: "turn-gap", seq: 3, status: "waiting_user" });
-  }
+  desktopStub.emit("agent:event", { kind: "turn_status", tabId: "tab-a", turnId: "turn-gap", seq: 1, status: "queued" });
+  desktopStub.emit("agent:event", { kind: "turn_status", tabId: "tab-a", turnId: "turn-gap", seq: 3, status: "waiting_user" });
   for (let step = 0; step < 20; step += 1) await Promise.resolve();
 });
 eq(turnReplayCalls, 1, "sequence gap replays the durable missing prefix once");
 eq(controller?.state.items.find((item) => item.kind === "assistant")?.id, "a:turn-gap:0", "gap replay keeps the stable sampling-segment item id");
 eq(controller?.state.pendingPrompt, true, "future event projects only after the missing prefix");
 await act(async () => {
-  for (const handler of eventHandlers) {
-    handler({ kind: "turn_status", tabId: "tab-a", turnId: "turn-gap", seq: 3, status: "in_progress" });
-  }
+  desktopStub.emit("agent:event", { kind: "turn_status", tabId: "tab-a", turnId: "turn-gap", seq: 3, status: "in_progress" });
   await Promise.resolve();
 });
 eq(controller?.state.pendingPrompt, true, "duplicate sequence is ignored idempotently");
 await act(async () => {
-  for (const handler of eventHandlers) {
-    handler({ kind: "turn_done", tabId: "tab-a", turnId: "turn-gap", seq: 4, status: "completed" });
-  }
+  desktopStub.emit("agent:event", { kind: "turn_done", tabId: "tab-a", turnId: "turn-gap", seq: 4, status: "completed" });
   await Promise.resolve();
 });
 
 backendRunning = true;
 await act(async () => {
-  for (const handler of eventHandlers) handler({ kind: "turn_started", tabId: "tab-a" });
+  desktopStub.emit("agent:event", { kind: "turn_started", tabId: "tab-a" });
   await flushPromises();
 });
 eq(controller?.state.running, true, "turn_started marks the tab running");
@@ -315,7 +302,7 @@ ok(controller?.state.items.some((item) => item.kind === "user" && item.text === 
 eq(historyLoads, 0, "resubmission cannot race a stale cancellation history response");
 
 await act(async () => {
-  for (const handler of eventHandlers) handler({ kind: "turn_done", tabId: "tab-a", checkpointTurn: 0 });
+  desktopStub.emit("agent:event", { kind: "turn_done", tabId: "tab-a", checkpointTurn: 0 });
   await flushPromises();
 });
 eq(checkpointHistoryCalls, 0, "TurnDone does not request the full checkpoint-turn history");
@@ -357,7 +344,7 @@ const cancelCallsBefore = cancelCalls;
 backendRunning = true;
 interruptError = new Error('turn "turn-live" is not the active turn for tab "tab-a"');
 await act(async () => {
-  for (const handler of eventHandlers) handler({ kind: "turn_started", tabId: "tab-a", turnId: "turn-live" });
+  desktopStub.emit("agent:event", { kind: "turn_started", tabId: "tab-a", turnId: "turn-live" });
   await flushPromises();
 });
 eq(controller?.state.activeTurnId, "turn-live", "turn_started with a turn id records the active turn");
@@ -374,7 +361,7 @@ await waitFor("fallback cancel reconciliation", () => controller?.state.running 
 backendRunning = false;
 interruptError = new Error("reasonix_error:turn_not_running");
 await act(async () => {
-  for (const handler of eventHandlers) handler({ kind: "turn_started", tabId: "tab-a", turnId: "turn-idle" });
+  desktopStub.emit("agent:event", { kind: "turn_started", tabId: "tab-a", turnId: "turn-idle" });
   await flushPromises();
 });
 await act(async () => {
@@ -385,6 +372,26 @@ eq(interruptCalls, 2, "idle stop still asks the backend once");
 eq(cancelCalls, cancelCallsBefore + 1, "idle stop does not retry through CancelTab");
 eq(controller?.state.items.filter((item) => item.kind === "notice").length, noticesBefore, "idle stop does not surface a Cancel failed notice");
 await waitFor("idle stop reconciliation", () => controller?.state.running === false);
+
+// A transport gap can hide the final event entirely: the resnapshot must
+// settle core state while retaining the mounted transcript and never cancel.
+backendRunning = true;
+await act(async () => {
+  desktopStub.emit("agent:event", { kind: "turn_started", tabId: "tab-a", turnId: "turn-gap-final" });
+  await flushPromises();
+});
+const gapCancelCalls = cancelCalls;
+const projectedUsers = controller?.state.items.filter(item => item.kind === "user") ?? [];
+const gapHistoryLoads = historyLoads;
+backendRunning = false;
+await act(async () => {
+  desktopStub.emit("desktop:resync", { generation: "g-current", reason: "gap", expectedSeq: 2, actualSeq: 4 });
+  await flushPromises();
+});
+await waitFor("event gap runtime snapshot", () => controller?.state.running === false);
+eq(cancelCalls, gapCancelCalls, "event gap recovery never replays a state-changing command");
+ok(projectedUsers.every(item => controller?.state.items.includes(item)), "event gap recovery retains projected user item identities");
+eq(historyLoads, gapHistoryLoads, "same-session event repair does not reload mounted history");
 
 await act(async () => {
   root.unmount();

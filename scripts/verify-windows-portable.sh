@@ -71,6 +71,14 @@ for name in reasonix-desktop.exe reasonix-cli.exe reasonix-update-helper.exe; do
 	}
 done
 
+# The Electron bundle is the app/ tree member of the active version.
+for name in "app/Reasonix.exe" "app/resources/app.asar" "app/resources/build.json" "app/resources/app/index.html"; do
+	[ -f "$version_path/$name" ] || {
+		echo "Windows portable app tree member is missing: $active_dir/$name" >&2
+		exit 1
+	}
+done
+
 # Guard must not persist in a normal portable layout.
 if [ -e "$staging/reasonix-guard.exe" ] || [ -e "$staging/reasonix-desktop.exe" ]; then
 	echo "Windows portable must not ship flat reasonix-guard.exe or reasonix-desktop.exe at InstallRoot" >&2

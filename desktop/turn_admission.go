@@ -128,13 +128,6 @@ func (a *App) beginRuntimeTurn(tabID string, reclaim, detached bool, submissionI
 			abort()
 			return nil, nil, control.ErrTurnRunning
 		}
-		if selection := a.pendingTabEffort(tab); selection != nil {
-			abort()
-			if err := a.applyPendingTabEffort(tab, selection); err != nil {
-				return nil, nil, fmt.Errorf("apply reasoning effort before the next run: %w", err)
-			}
-			continue
-		}
 		if a.ctx != nil {
 			needed, err := modelSettingsNeedApply(ctrl)
 			if err != nil {

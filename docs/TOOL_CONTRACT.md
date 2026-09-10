@@ -1,5 +1,10 @@
 # Tool Contract
 
+Read coverage, source observation and per-operation write guards are separate.
+Ordinary partial `inspect`/`range` reads do not block finalization; explicit
+`intent=full` and host Stops remain bounded completion requirements. See
+[Read evidence lifecycle](READ_EVIDENCE_LIFECYCLE.md) for recovery and compatibility.
+
 <a href="./TOOL_CONTRACT.zh-CN.md">简体中文</a>
 
 This document records the provider-visible contract for Reasonix compile-time built-in tools. It is generated from the same canonical schema path used by the runtime registry.

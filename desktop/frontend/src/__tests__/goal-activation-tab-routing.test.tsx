@@ -11,6 +11,7 @@ import type { AppBindings } from "../lib/bridge";
 import { useController } from "../lib/useController";
 import { historySliceFromMessages } from "./mockHistorySlice";
 import type { BalanceInfo, CheckpointMeta, ContextInfo, EffortInfo, HistoryMessage, HistorySliceRequest, JobView, Meta, TabMeta } from "../lib/types";
+import { installDesktopHostStub } from "./desktopHostStub";
 
 let passed = 0;
 let failed = 0;
@@ -112,11 +113,7 @@ const balance: BalanceInfo = { available: false, display: "" };
 const jobs: JobView[] = [];
 const checkpoints: CheckpointMeta[] = [];
 
-window.runtime = {
-  EventsOn: () => () => {},
-  BrowserOpenURL: () => {},
-};
-window.go = {
+const appStubTable = ({
   main: {
     App: {
       RegisterNavigationIntent: async () => {},
@@ -181,7 +178,8 @@ window.go = {
       },
     } as Partial<AppBindings> as AppBindings,
   },
-};
+}).main.App;
+installDesktopHostStub(appStubTable);
 
 type Controller = ReturnType<typeof useController>;
 let controller: Controller | undefined;
@@ -244,11 +242,11 @@ eq(initialGoalCalls.length, 1, "atomic Goal submit ran once");
 // structured submit.
 const failedInitialGoalCalls: string[] = [];
 const failInvokeCalls: string[] = [];
-(window.go.main.App as AppBindings).SubmitInitialGoalToTabWithID = async (tabID: string) => {
+appStubTable.SubmitInitialGoalToTabWithID = async (tabID: string) => {
   failedInitialGoalCalls.push(tabID);
   throw new Error("workbench target changed");
 };
-(window.go.main.App as AppBindings).SubmitInvocationsToTab = async (tabID: string) => {
+appStubTable.SubmitInvocationsToTab = async (tabID: string) => {
   failInvokeCalls.push(tabID);
 };
 

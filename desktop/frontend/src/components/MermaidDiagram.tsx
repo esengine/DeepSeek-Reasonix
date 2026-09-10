@@ -493,7 +493,7 @@ const MermaidDiagram = memo(function MermaidDiagram({ definition }: MermaidDiagr
   );
 
   const content = (
-    <div className={[
+    <div data-app-overlay={fullscreen ? "" : undefined} className={[
       "mermaid-diagram",
       state.status === "error" ? "mermaid-diagram--error" : "",
       fullscreen ? "mermaid-diagram--fullscreen" : "",

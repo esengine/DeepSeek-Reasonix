@@ -751,10 +751,13 @@ func (c *Catalog) refreshStatus(ctx context.Context) {
 	c.status.Revision = c.revision.Load()
 	c.statusMu.Unlock()
 }
-
 func (c *Catalog) publish(revision uint64, roots []string, reason string) {
 	c.revision.Store(revision)
-	c.refreshStatus(context.Background())
+	statusCtx := c.ctx
+	if statusCtx == nil {
+		statusCtx = context.Background()
+	}
+	c.refreshStatus(statusCtx)
 	if c.opts.OnRevision != nil {
 		c.opts.OnRevision(c.Status(), roots, reason)
 	}

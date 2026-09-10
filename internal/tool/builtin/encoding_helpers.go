@@ -8,6 +8,7 @@ import (
 
 	"reasonix/internal/fileutil"
 	fileenc "reasonix/internal/fileutil/encoding"
+	"reasonix/internal/tool"
 )
 
 // readFileEncoded reads a file and decodes its encoding to UTF-8.
@@ -172,7 +173,10 @@ func matchedRangeSample(content, fallback string, ranges []editRange) string {
 	return sample
 }
 
-func oldStringNotFoundError(path, oldString, content string) error {
+func oldStringNotFoundError(path, oldString, content string) (err error) {
+	defer func() {
+		err = &tool.OperationError{Diagnostic: tool.OperationDiagnostic{Code: tool.WriteEvidenceStale, Path: path, Recovery: "re-read the target range, then retry with its current text"}, Cause: err}
+	}()
 	hint := oldStringNotFoundHint(oldString, content)
 	if line, text, ok := nearestContentLine(oldString, content); ok {
 		return fmt.Errorf("old_string not found in %s (nearest line %d: %q).%s", path, line, text, hint)
@@ -193,7 +197,10 @@ func oldStringNotFoundHint(oldString, content string) string {
 	return " The target file uses CRLF line endings, but edit_file/multi_edit already tolerate LF-only old_string for CRLF files; check for stale, incomplete, or non-unique context before retrying."
 }
 
-func oldStringNotUniqueError(path, oldString, content string, matches int, replaceAllHint bool) error {
+func oldStringNotUniqueError(path, oldString, content string, matches int, replaceAllHint bool) (err error) {
+	defer func() {
+		err = &tool.OperationError{Diagnostic: tool.OperationDiagnostic{Code: tool.WriteTargetAmbiguous, Path: path, Recovery: "read surrounding lines and use a unique anchor"}, Cause: err}
+	}()
 	lineHint := oldStringMatchLineSummary(oldString, content, 5)
 	if replaceAllHint {
 		return fmt.Errorf("old_string is not unique in %s (%d matches)%s; add nearby unique code, not just repeated separator lines, or set replace_all if every match should change", path, matches, lineHint)

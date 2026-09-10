@@ -4,6 +4,7 @@ import { createRoot } from "react-dom/client";
 import { JSDOM } from "jsdom";
 import { useTopicSummary } from "../app-runtime/useTopicSummary";
 import type { TabMeta } from "../lib/types";
+import { installDesktopHostStub } from "./desktopHostStub";
 
 const dom = new JSDOM("<div id='root'></div>");
 Object.assign(globalThis, { window: dom.window, document: dom.window.document, IS_REACT_ACT_ENVIRONMENT: true });
@@ -23,7 +24,7 @@ function tab(topicId: string, scope = "project", workspaceRoot = "/repo"): TabMe
 const requests: { scope: string; workspaceRoot: string; topicId: string }[] = [];
 const gates = new Map<string, ReturnType<typeof deferred<{ turns?: number }>>>();
 let failWith: Error | null = null;
-window.go = {
+installDesktopHostStub(({
   main: {
     App: {
       GetTopicSummary: (request: { scope: string; workspaceRoot: string; topicId: string }) => {
@@ -34,7 +35,7 @@ window.go = {
       },
     },
   },
-} as unknown as typeof window.go;
+}).main.App);
 
 let states!: ReturnType<typeof useTopicSummary>;
 function Probe({ target, revision = 0 }: { target?: TabMeta; revision?: number }) {

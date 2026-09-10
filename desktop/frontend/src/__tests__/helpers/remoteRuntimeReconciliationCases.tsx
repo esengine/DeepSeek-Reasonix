@@ -3,10 +3,12 @@ import { createRoot } from "react-dom/client";
 import { RemoteSessionSurface } from "../../components/RemoteSessionSurface";
 import { LocaleProvider } from "../../lib/i18n";
 import { useRemoteSession, type RemoteSessionApi } from "../../lib/useRemoteSession";
-import { __emitMockRemoteTab, type AppBindings } from "../../lib/bridge";
+import type { AppBindings } from "../../lib/bridge";
 import type { TabMeta } from "../../lib/types";
 
-export async function runRemoteRuntimeCases({ remoteTab, ok, tape, flush, setSnapshotHistory }: {
+export async function runRemoteRuntimeCases({ commands, emitRemote: __emitMockRemoteTab, remoteTab, ok, tape, flush, setSnapshotHistory }: {
+  commands: AppBindings;
+  emitRemote: (tabId: string, channel: "state" | "event", payload: unknown) => void;
   remoteTab: TabMeta;
   ok: (value: boolean, label: string) => void;
   tape: string[];
@@ -80,9 +82,9 @@ export async function runRemoteRuntimeCases({ remoteTab, ok, tape, flush, setSna
   });
   await publishRuntime("idle");
   ok(runtimeProbe!.transcript.running, "old idle remains fenced after the next turn_started");
-  const originalSnapshot = window.go!.main.App.RemoteTabSnapshot;
+  const originalSnapshot = commands.RemoteTabSnapshot;
   let releaseRuntimeHistory: ((value: Awaited<ReturnType<AppBindings["RemoteTabSnapshot"]>>) => void) | undefined;
-  window.go!.main.App.RemoteTabSnapshot = async () => new Promise(resolve => { releaseRuntimeHistory = resolve; });
+  commands.RemoteTabSnapshot = async () => new Promise(resolve => { releaseRuntimeHistory = resolve; });
   await publishRuntime("idle", "next-turn");
   await act(async () => {
     __emitMockRemoteTab("tab-runtime", "event", { kind: "turn_started", turnId: "third-turn" });
@@ -102,7 +104,7 @@ export async function runRemoteRuntimeCases({ remoteTab, ok, tape, flush, setSna
   });
   ok(runtimeProbe!.transcript.items.some(item => item.kind === "assistant" && item.text === "third durable answer"),
     "late telemetry from the settled turn does not discard durable history");
-  window.go!.main.App.RemoteTabSnapshot = originalSnapshot;
+  commands.RemoteTabSnapshot = originalSnapshot;
   await act(async () => runtimeRoot.unmount());
   runtimeNode.remove();
 }

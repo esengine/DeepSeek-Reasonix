@@ -32,7 +32,8 @@ func newProviderWithSearchMode(e *config.ProviderEntry, proxy netclient.ProxySpe
 	if err := config.ValidateProviderEndpoint(e); err != nil {
 		return nil, err
 	}
-	if err := config.ReasoningCapabilityForEntry(e).Validate(e.Model, config.EffectiveEffort(e)); err != nil {
+	reasoning := config.ReasoningCapabilityForEntry(e)
+	if err := reasoning.Validate(e.Model, config.EffectiveEffort(e)); err != nil {
 		return nil, err
 	}
 	if modelInfo == nil {
@@ -60,6 +61,7 @@ func newProviderWithSearchMode(e *config.ProviderEntry, proxy netclient.ProxySpe
 			"thinking":           e.Thinking,
 			"effort":             config.EffectiveEffort(e),
 			"supported_efforts":  e.SupportedEfforts,
+			"default_effort":     reasoning.Default,
 			"reasoning_protocol": config.ReasoningProtocolForEntry(e),
 			"max_output_tokens":  e.MaxOutputTokens,
 			"chat_url":           e.ChatURL,

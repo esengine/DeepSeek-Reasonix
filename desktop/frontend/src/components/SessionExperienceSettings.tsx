@@ -1,6 +1,6 @@
 import { SettingsOptions } from "./SettingsOptions";
 import { useEffect, useState } from "react";
-import { PanelBottom } from "lucide-react";
+import { PanelBottom, ShieldCheck } from "lucide-react";
 import { app } from "../lib/bridge";
 import { useT } from "../lib/i18n";
 import { useCommittedCommand } from "../lib/useCommittedCommand";
@@ -8,6 +8,9 @@ import { applySessionExperience, getSessionExperience, type SessionExperience } 
 import { hydrateReasoningDisplayMode } from "../lib/reasoningDisplayPreference";
 import type { SettingsView } from "../lib/types";
 import { SettingsField, SettingsSection } from "./SettingsForm";
+import { normalizeToolApprovalMode } from "../lib/types";
+
+const TOOL_APPROVAL_MODES = ["ask", "auto", "yolo"] as const;
 
 type Props = {
   snapshot: SettingsView;
@@ -18,6 +21,7 @@ type Props = {
 export function SessionExperienceSettings({ snapshot, busy, apply }: Props) {
   const t = useT();
   const [mode, setMode] = useState<SessionExperience>(getSessionExperience);
+  const defaultToolApprovalMode = normalizeToolApprovalMode(snapshot.defaultToolApprovalMode);
   const present = useCommittedCommand((next: SessionExperience) => {
     setMode(next);
     applySessionExperience(next);
@@ -30,6 +34,7 @@ export function SessionExperienceSettings({ snapshot, busy, apply }: Props) {
     // The shared Settings apply/reload path owns both success and failure.
     await apply(() => app.SetSessionExperience(next));
   });
+  const saveApproval = (next: (typeof TOOL_APPROVAL_MODES)[number]) => void apply(() => app.SetDefaultToolApprovalMode(next));
   return <SettingsSection title={t("settings.general.sectionConversation")} description={t("settings.sessionExperienceHint")}>
     <SettingsField label={t("settings.sessionExperience")} hint={mode === "deep" ? t("settings.sessionExperience.deepHint") : t("settings.sessionExperience.standardHint")} icon={<PanelBottom size={18} />}>
       <SettingsOptions layout="field" className="set-seg" role="radiogroup" aria-label={t("settings.sessionExperience")}>
@@ -38,6 +43,11 @@ export function SessionExperienceSettings({ snapshot, busy, apply }: Props) {
           aria-checked={mode === value} disabled={busy} onClick={() => void save(value)}>
           {t(`settings.sessionExperience.${value}`)}
         </button>)}
+      </SettingsOptions>
+    </SettingsField>
+    <SettingsField label={t("settings.defaultToolApprovalMode")} hint={t("settings.defaultToolApprovalModeHint")} icon={<ShieldCheck size={18} />}>
+      <SettingsOptions layout="field" className="set-seg" role="radiogroup" aria-label={t("settings.defaultToolApprovalMode")}>
+        {TOOL_APPROVAL_MODES.map((value) => <button key={value} type="button" className={`set-seg__btn${defaultToolApprovalMode === value ? " set-seg__btn--on" : ""}`} role="radio" aria-checked={defaultToolApprovalMode === value} disabled={busy} onClick={() => saveApproval(value)}>{t(`settings.defaultToolApprovalMode.${value}`)}</button>)}
       </SettingsOptions>
     </SettingsField>
   </SettingsSection>;

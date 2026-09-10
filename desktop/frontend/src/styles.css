@@ -8,8 +8,8 @@
  *  - System font stack for text; bundled icon fonts only (no web-font fetches).
  *  - No backdrop-filter / blur (slow & inconsistent on Linux WebKitGTK).
  *  - Colors via CSS variables + prefers-color-scheme so the webview follows the OS.
- *  - --wails-draggable marks the title region as an OS drag handle (macOS inset
- *    title bar); interactive children opt out with --wails-draggable: no-drag.
+ *  - --reasonix-draggable marks the title region as an OS drag handle (macOS inset
+ *    title bar); interactive children opt out with --reasonix-draggable: no-drag.
  */
 
 @font-face {
@@ -2378,7 +2378,7 @@ a[href] {
   padding: 12px 10px 12px;
   background: var(--sidebar-bg);
   border-right: 1px solid var(--border-soft);
-  --wails-draggable: drag;
+  --reasonix-draggable: drag;
   user-select: none;
   overflow: hidden;
 }
@@ -2387,7 +2387,7 @@ a[href] {
 /* Windows window movement belongs to the dedicated chrome surfaces. Keep the
    navigation sidebar and its adjacent resize handle out of the native drag path. */
 .app--windows .sidebar {
-  --wails-draggable: no-drag;
+  --reasonix-draggable: no-drag;
 }
 
 .app--darwin .sidebar {
@@ -2402,7 +2402,7 @@ a[href] {
 .sidebar button,
 .sidebar input,
 .sidebar select {
-  --wails-draggable: no-drag;
+  --reasonix-draggable: no-drag;
 }
 .sidebar__new,
 .sidebar__navitem {
@@ -2501,7 +2501,7 @@ a[href] {
   border-top: none;
 }
 .sidebar-im__summary {
-  --wails-draggable: no-drag;
+  --reasonix-draggable: no-drag;
   width: 100%;
   height: 28px;
   display: flex;
@@ -2790,7 +2790,7 @@ a[href] {
   display: none;
 }
 .sidebar-resizer {
-  --wails-draggable: no-drag;
+  --reasonix-draggable: no-drag;
   position: absolute;
   top: var(--app-chrome-height);
   bottom: var(--statusbar-height);
@@ -2829,7 +2829,7 @@ a[href] {
   display: none;
 }
 .workspace-panel-resizer {
-  --wails-draggable: no-drag;
+  --reasonix-draggable: no-drag;
   position: relative;
   grid-row: 2;
   grid-column: 3;
@@ -2884,7 +2884,7 @@ a[href] {
   padding: 0 18px;
   background: var(--chat-bg);
   border-bottom: 1px solid var(--border-soft);
-  --wails-draggable: drag;
+  --reasonix-draggable: drag;
   user-select: none;
 }
 .topbar__identity {
@@ -2920,7 +2920,7 @@ a[href] {
   display: inline-flex;
 }
 .chip {
-  --wails-draggable: no-drag;
+  --reasonix-draggable: no-drag;
   display: inline-flex;
   align-items: center;
   justify-content: center;
@@ -2962,7 +2962,7 @@ a[href] {
 }
 
 .modal-close-button {
-  --wails-draggable: no-drag;
+  --reasonix-draggable: no-drag;
   display: inline-flex;
   align-items: center;
   justify-content: center;
@@ -3356,7 +3356,7 @@ a[href] {
 
 /* Startup splash restored from the v0.50 desktop intro. It masks cold boot while
 /* Startup splash restored from the v0.50 desktop intro. It masks cold boot while
-   the Wails bridge and background startup work settle, then yields to the app. */
+   the desktop bridge and background startup work settle, then yields to the app. */
 .startup-splash {
   position: fixed;
   inset: 0;
@@ -3625,7 +3625,7 @@ a[href] {
   contain-intrinsic-size: none;
 }
 .transcript__jump-bottom:not([hidden]) {
-  --wails-draggable: no-drag;
+  --reasonix-draggable: no-drag;
   position: absolute;
   left: 50%;
   bottom: 34px;
@@ -4253,7 +4253,7 @@ a[href] {
 
 /* ── messages ────────────────────────────────────────────────────────────── */
 .msg {
-  --wails-draggable: no-drag;
+  --reasonix-draggable: no-drag;
   margin: 18px auto;
   user-select: text;
   -webkit-user-select: text;
@@ -5472,7 +5472,7 @@ button.reasoning-summary:focus-visible {
   margin-bottom: 0;
 }
 .md-table-fold__toggle {
-  --wails-draggable: no-drag;
+  --reasonix-draggable: no-drag;
   align-self: flex-start;
   margin: 0;
   padding: 4px 10px;
@@ -6936,7 +6936,7 @@ body > .mermaid-diagram--fullscreen {
   cursor: default;
 }
 .composer-resize-handle {
-  --wails-draggable: no-drag;
+  --reasonix-draggable: no-drag;
   appearance: none;
   position: absolute;
   top: -10px;
@@ -7333,7 +7333,7 @@ body > .mermaid-diagram--fullscreen {
   margin-left: 0;
 }
 .composer__input::-webkit-scrollbar {
-  display: none;                    /* Chrome / Safari / Wails webview */
+  display: none;                    /* Chrome / Safari / embedded webview */
 }
 .composer-card--resized .composer__input {
   /* Fill the current logical card height during live resize; content sizing
@@ -7468,7 +7468,7 @@ body > .mermaid-diagram--fullscreen {
 }
 
 .composer-content-trigger {
-  --wails-draggable: no-drag;
+  --reasonix-draggable: no-drag;
   display: inline-flex;
   align-items: center;
   justify-content: center;
@@ -7573,7 +7573,7 @@ body > .mermaid-diagram--fullscreen {
 }
 
 .composer-modebar {
-  --wails-draggable: no-drag;
+  --reasonix-draggable: no-drag;
   --composer-modebar-index: 0;
   --composer-modebar-active-bg: var(--bg-elev);
   --composer-modebar-active-border: var(--border);
@@ -7715,7 +7715,7 @@ body > .mermaid-diagram--fullscreen {
 }
 
 .composer-task-mode-trigger {
-  --wails-draggable: no-drag;
+  --reasonix-draggable: no-drag;
   display: inline-flex;
   align-items: center;
   justify-content: center;
@@ -7773,7 +7773,7 @@ body > .mermaid-diagram--fullscreen {
 }
 
 .composer-more-trigger {
-  --wails-draggable: no-drag;
+  --reasonix-draggable: no-drag;
   display: inline-flex;
   align-items: center;
   justify-content: center;
@@ -8039,7 +8039,7 @@ body > .mermaid-diagram--fullscreen {
 }
 
 .anchored-popover {
-  --wails-draggable: no-drag;
+  --reasonix-draggable: no-drag;
   position: fixed;
   z-index: var(--z-popover);
 }
@@ -8112,7 +8112,7 @@ body > .mermaid-diagram--fullscreen {
   font-weight: 650;
 }
 .composer-access-menu__item {
-  --wails-draggable: no-drag;
+  --reasonix-draggable: no-drag;
   width: 100%;
   height: 56px;
   min-height: 56px;
@@ -8235,7 +8235,7 @@ body > .mermaid-diagram--fullscreen {
 }
 
 .composer-intent-menu__stop {
-  --wails-draggable: no-drag;
+  --reasonix-draggable: no-drag;
   align-self: flex-end;
   margin: 2px 6px 0;
   padding: 5px 7px;
@@ -8298,7 +8298,7 @@ body > .mermaid-diagram--fullscreen {
 }
 
 .composer-more-menu__item {
-  --wails-draggable: no-drag;
+  --reasonix-draggable: no-drag;
   display: flex;
   align-items: center;
   gap: 8px;
@@ -8818,7 +8818,7 @@ body > .mermaid-diagram--fullscreen {
 
 /* effort switcher: same status-bar affordance as the model switcher */
 .effortsw__trigger {
-  --wails-draggable: no-drag;
+  --reasonix-draggable: no-drag;
   width: 100%;
 }
 .effortsw__trigger:disabled {
@@ -8878,7 +8878,7 @@ body > .mermaid-diagram--fullscreen {
   flex-wrap: wrap;
 }
 .reasonix-confirm-backdrop {
-  --wails-draggable: no-drag;
+  --reasonix-draggable: no-drag;
   z-index: var(--z-overlay-backdrop);
 }
 .reasonix-confirm-dialog {
@@ -8896,7 +8896,7 @@ body > .mermaid-diagram--fullscreen {
 .reasonix-confirm-dialog__actions .btn { min-width: 84px; }
 .reasonix-confirm-dialog__actions .btn--danger { font-weight: 600; }
 .blank-project-backdrop {
-  --wails-draggable: no-drag;
+  --reasonix-draggable: no-drag;
   z-index: var(--z-overlay-backdrop);
 }
 .blank-project-dialog {
@@ -9234,7 +9234,7 @@ body > .mermaid-diagram--fullscreen {
   justify-content: flex-end;
 }
 .prompt-shelf__header-button {
-  --wails-draggable: no-drag;
+  --reasonix-draggable: no-drag;
   display: inline-flex;
   align-items: center;
   justify-content: center;
@@ -9272,7 +9272,7 @@ body > .mermaid-diagram--fullscreen {
   gap: 6px;
 }
 .prompt-action {
-  --wails-draggable: no-drag;
+  --reasonix-draggable: no-drag;
   display: flex;
   align-items: flex-start;
   gap: 8px;
@@ -9689,7 +9689,7 @@ body > .mermaid-diagram--fullscreen {
   overflow-wrap: anywhere;
 }
 .prompt-action__description-toggle {
-  --wails-draggable: no-drag;
+  --reasonix-draggable: no-drag;
   justify-self: start;
   min-height: 24px;
   margin: -2px 0;
@@ -9799,7 +9799,7 @@ body > .mermaid-diagram--fullscreen {
   flex-wrap: wrap;
 }
 .recovery-guidance-trigger {
-  --wails-draggable: no-drag;
+  --reasonix-draggable: no-drag;
   display: inline-flex;
   align-items: center;
   min-height: 28px;
@@ -10438,7 +10438,7 @@ body > .mermaid-diagram--fullscreen {
   border-left: 0;
 }
 .workspace-tree-resizer {
-  --wails-draggable: no-drag;
+  --reasonix-draggable: no-drag;
   position: absolute;
   top: 0;
   /* Tree sits on the right after the files/preview swap, so the resizer
@@ -10558,7 +10558,7 @@ body > .mermaid-diagram--fullscreen {
   line-height: 0;
 }
 .workspace-current-file__recent {
-  --wails-draggable: no-drag;
+  --reasonix-draggable: no-drag;
   flex: 0 0 auto;
   display: inline-flex;
   align-items: center;
@@ -10648,7 +10648,7 @@ body > .mermaid-diagram--fullscreen {
   font-size: 11px;
 }
 .workspace-iconbtn {
-  --wails-draggable: no-drag;
+  --reasonix-draggable: no-drag;
   display: inline-flex;
   align-items: center;
   justify-content: center;
@@ -10861,7 +10861,7 @@ body > .mermaid-diagram--fullscreen {
 .turn-check-log summary { width: fit-content; cursor: pointer; color: var(--accent); }
 .turn-check-log pre { max-height: 320px; overflow: auto; white-space: pre-wrap; overflow-wrap: anywhere; padding: 10px; background: var(--bg-soft); border-radius: 4px; color: var(--fg); }
 .floating-menu {
-  --wails-draggable: no-drag;
+  --reasonix-draggable: no-drag;
   position: fixed;
   z-index: var(--z-floating-menu);
   min-width: 148px;
@@ -10905,7 +10905,7 @@ body > .mermaid-diagram--fullscreen {
   display: flex;
 }
 .tooltip {
-  --wails-draggable: no-drag;
+  --reasonix-draggable: no-drag;
   --tooltip-arrow-x: 50%;
   --tooltip-arrow-y: 50%;
   position: fixed;
@@ -11083,7 +11083,7 @@ body > .mermaid-diagram--fullscreen {
   border: 1px solid var(--border-soft);
 }
 .workspace-files__tab {
-  --wails-draggable: no-drag;
+  --reasonix-draggable: no-drag;
   display: inline-flex;
   align-items: center;
   justify-content: center;
@@ -11180,7 +11180,7 @@ body > .mermaid-diagram--fullscreen {
   color: var(--fg-faint);
 }
 .workspace-files__scope button {
-  --wails-draggable: no-drag;
+  --reasonix-draggable: no-drag;
   flex: 0 0 auto;
   width: 20px;
   height: 20px;
@@ -11203,7 +11203,7 @@ body > .mermaid-diagram--fullscreen {
   padding: 0 6px 12px;
 }
 .workspace-tree__row {
-  --wails-draggable: no-drag;
+  --reasonix-draggable: no-drag;
   position: relative;
   width: 100%;
   min-width: 0;
@@ -11269,7 +11269,7 @@ body > .mermaid-diagram--fullscreen {
   color: var(--fg);
 }
 .workspace-change {
-  --wails-draggable: no-drag;
+  --reasonix-draggable: no-drag;
   width: 100%;
   min-width: 0;
   min-height: 48px;
@@ -11318,7 +11318,7 @@ body > .mermaid-diagram--fullscreen {
   border-radius: 0;
 }
 .workspace-change__revert {
-  --wails-draggable: no-drag;
+  --reasonix-draggable: no-drag;
   position: absolute;
   top: 50%;
   right: 8px;
@@ -11453,7 +11453,7 @@ body > .mermaid-diagram--fullscreen {
   font-size: 11.5px;
 }
 .workspace-change-scope__head button {
-  --wails-draggable: no-drag;
+  --reasonix-draggable: no-drag;
   flex: 0 0 auto;
   width: 20px;
   height: 20px;
@@ -11541,7 +11541,7 @@ body > .mermaid-diagram--fullscreen {
   border-top: 1px solid var(--border-soft);
 }
 .workspace-commit-history__toggle {
-  --wails-draggable: no-drag;
+  --reasonix-draggable: no-drag;
   display: flex;
   align-items: center;
   gap: 6px;
@@ -11581,7 +11581,7 @@ body > .mermaid-diagram--fullscreen {
   overflow: hidden;
 }
 .workspace-git-history__head {
-  --wails-draggable: no-drag;
+  --reasonix-draggable: no-drag;
   display: flex;
   flex-direction: column;
   width: 100%;
@@ -11872,7 +11872,7 @@ body > .mermaid-diagram--fullscreen {
   padding: 4px 12px 8px;
 }
 .palette__chip {
-  --wails-draggable: no-drag;
+  --reasonix-draggable: no-drag;
   display: flex;
   flex-direction: column;
   align-items: center;
@@ -11907,7 +11907,7 @@ body > .mermaid-diagram--fullscreen {
   max-width: 100%;
 }
 .palette__item {
-  --wails-draggable: no-drag;
+  --reasonix-draggable: no-drag;
   display: flex;
   align-items: center;
   gap: 12px;
@@ -12018,7 +12018,7 @@ body > .mermaid-diagram--fullscreen {
   width: min(var(--drawer-width, 720px), 94vw);
 }
 .drawer-resizer {
-  --wails-draggable: no-drag;
+  --reasonix-draggable: no-drag;
   position: absolute;
   top: 0;
   bottom: 0;
@@ -12261,7 +12261,7 @@ body > .mermaid-diagram--fullscreen {
   flex: 0 1 auto;
 }
 .mem-ws-select__trigger {
-  --wails-draggable: no-drag;
+  --reasonix-draggable: no-drag;
   display: flex;
   align-items: center;
   gap: 6px;
@@ -12660,7 +12660,7 @@ body > .mermaid-diagram--fullscreen {
   min-width: 0;
 }
 .mem-doc__toggle {
-  --wails-draggable: no-drag;
+  --reasonix-draggable: no-drag;
   border: 0;
   padding: 0;
   background: transparent;
@@ -13292,7 +13292,7 @@ body > .mermaid-diagram--fullscreen {
   animation: drawer-in 0.12s ease;
 }
 .menu__item {
-  --wails-draggable: no-drag;
+  --reasonix-draggable: no-drag;
   display: flex;
   align-items: center;
   gap: 9px;
@@ -13335,7 +13335,7 @@ body > .mermaid-diagram--fullscreen {
   color: var(--fg-faint);
 }
 .cap-disclosure {
-  --wails-draggable: no-drag;
+  --reasonix-draggable: no-drag;
   flex-shrink: 0;
   width: 14px;
   height: 18px;
@@ -13518,7 +13518,7 @@ body > .mermaid-diagram--fullscreen {
   background: var(--bg);
 }
 .cap-connection-option {
-  --wails-draggable: no-drag;
+  --reasonix-draggable: no-drag;
   display: grid;
   grid-template-columns: 17px minmax(0, 1fr);
   gap: 9px;
@@ -13650,7 +13650,7 @@ body > .mermaid-diagram--fullscreen {
   flex: 0 0 auto;
 }
 .cap-mcp-icon-btn {
-  --wails-draggable: no-drag;
+  --reasonix-draggable: no-drag;
   display: inline-flex;
   align-items: center;
   justify-content: center;
@@ -13764,7 +13764,7 @@ body > .mermaid-diagram--fullscreen {
   opacity: 0.68;
 }
 .cap-mcp-list-row__main {
-  --wails-draggable: no-drag;
+  --reasonix-draggable: no-drag;
   min-width: 0;
   display: grid;
   grid-template-columns: 36px minmax(0, 1fr) 18px;
@@ -13863,7 +13863,7 @@ body > .mermaid-diagram--fullscreen {
   margin-bottom: 18px;
 }
 .cap-mcp-subpage__back {
-  --wails-draggable: no-drag;
+  --reasonix-draggable: no-drag;
   display: inline-flex;
   align-items: center;
   gap: 6px;
@@ -14030,7 +14030,7 @@ body > .mermaid-diagram--fullscreen {
   padding-top: 2px;
 }
 .cap-mcp-advanced__toggle {
-  --wails-draggable: no-drag;
+  --reasonix-draggable: no-drag;
   display: inline-flex;
   align-items: center;
   gap: 6px;
@@ -14188,7 +14188,7 @@ body > .mermaid-diagram--fullscreen {
   gap: 8px;
 }
 .cap-plugin-option {
-  --wails-draggable: no-drag;
+  --reasonix-draggable: no-drag;
   display: inline-flex;
   align-items: center;
   gap: 6px;
@@ -14390,7 +14390,7 @@ body > .mermaid-diagram--fullscreen {
   background: var(--bg-soft);
 }
 .cap-tab {
-  --wails-draggable: no-drag;
+  --reasonix-draggable: no-drag;
   height: 28px;
   border: none;
   border-radius: 6px;
@@ -14624,7 +14624,7 @@ body > .mermaid-diagram--fullscreen {
   white-space: nowrap;
 }
 .cap-source-skills__more {
-  --wails-draggable: no-drag;
+  --reasonix-draggable: no-drag;
   align-self: flex-start;
   border: 0;
   background: transparent;
@@ -14893,7 +14893,7 @@ body > .mermaid-diagram--fullscreen {
   line-height: 1.3;
 }
 .cap-skill-card {
-  --wails-draggable: no-drag;
+  --reasonix-draggable: no-drag;
   width: 100%;
   min-width: 0;
   padding: 10px 12px;
@@ -15464,7 +15464,7 @@ body > .mermaid-diagram--fullscreen {
   align-items: center;
 }
 .cap-switch {
-  --wails-draggable: no-drag;
+  --reasonix-draggable: no-drag;
   display: inline-flex;
 }
 .cap-switch input {
@@ -15503,7 +15503,7 @@ body > .mermaid-diagram--fullscreen {
 }
 /* ── management modals: shared shell for settings, history, and trash ───────── */
 .management-modal-backdrop {
-  --wails-draggable: no-drag;
+  --reasonix-draggable: no-drag;
   position: fixed;
   inset: 0;
   z-index: var(--z-modal);
@@ -15756,7 +15756,7 @@ body > .mermaid-diagram--fullscreen {
   border: 1px solid var(--border);
 }
 .history-filter__pill {
-  --wails-draggable: no-drag;
+  --reasonix-draggable: no-drag;
   display: inline-flex;
   align-items: center;
   gap: 6px;
@@ -15915,7 +15915,7 @@ body > .mermaid-diagram--fullscreen {
   background: var(--accent);
 }
 .hist-item__main {
-  --wails-draggable: no-drag;
+  --reasonix-draggable: no-drag;
   flex: 1;
   min-width: 0;
   display: flex;
@@ -16030,7 +16030,7 @@ body > .mermaid-diagram--fullscreen {
 
 /* ── settings centre modal ──────────────────────────────────────────────────── */
 .settings-modal-backdrop {
-  --wails-draggable: no-drag;
+  --reasonix-draggable: no-drag;
   padding: clamp(0px, calc((900px - 100vw) * 0.114), 16px);
 }
 
@@ -16054,7 +16054,7 @@ body > .mermaid-diagram--fullscreen {
 }
 
 .settings-center__navitem {
-  --wails-draggable: no-drag;
+  --reasonix-draggable: no-drag;
   position: relative;
   display: flex;
   flex-direction: column;
@@ -16439,7 +16439,7 @@ body > .mermaid-diagram--fullscreen {
 }
 
 .shortcuts-settings__key {
-  --wails-draggable: no-drag;
+  --reasonix-draggable: no-drag;
   display: inline-flex;
   align-items: center;
   justify-content: center;
@@ -16829,7 +16829,7 @@ body > .mermaid-diagram--fullscreen {
 }
 
 .notification-volume-control input[type="range"] {
-  --wails-draggable: no-drag;
+  --reasonix-draggable: no-drag;
   width: 100%;
   margin: 0;
   accent-color: var(--accent);
@@ -16898,7 +16898,7 @@ body > .mermaid-diagram--fullscreen {
 }
 
 .memory-storage-toggle {
-  --wails-draggable: no-drag;
+  --reasonix-draggable: no-drag;
   flex: 0 0 auto;
   border: 1px solid var(--border);
   border-radius: 7px;
@@ -16972,7 +16972,7 @@ body > .mermaid-diagram--fullscreen {
 }
 
 .memory-suggestion-tab {
-  --wails-draggable: no-drag;
+  --reasonix-draggable: no-drag;
   flex: 0 0 auto;
   margin-left: auto;
   display: inline-flex;
@@ -17007,7 +17007,7 @@ body > .mermaid-diagram--fullscreen {
 }
 
 .settings-subtab {
-  --wails-draggable: no-drag;
+  --reasonix-draggable: no-drag;
   display: inline-flex;
   align-items: center;
   gap: 6px;
@@ -18846,7 +18846,7 @@ body > .mermaid-diagram--fullscreen {
   align-content: start;
 }
 .bot-channel-entry-card {
-  --wails-draggable: no-drag;
+  --reasonix-draggable: no-drag;
   display: grid;
   grid-template-columns: auto minmax(0, 1fr);
   gap: 12px;
@@ -18966,7 +18966,7 @@ body > .mermaid-diagram--fullscreen {
   align-content: start;
 }
 .bot-channel-tab {
-  --wails-draggable: no-drag;
+  --reasonix-draggable: no-drag;
   display: grid;
   grid-template-columns: auto minmax(0, 1fr) auto;
   align-items: center;
@@ -19144,7 +19144,7 @@ body > .mermaid-diagram--fullscreen {
   min-width: 0;
 }
 .bot-step-chip {
-  --wails-draggable: no-drag;
+  --reasonix-draggable: no-drag;
   display: flex;
   align-items: center;
   gap: 9px;
@@ -19233,7 +19233,7 @@ body > .mermaid-diagram--fullscreen {
   min-height: 56px;
 }
 .bot-access-platforms__toggle {
-  --wails-draggable: no-drag;
+  --reasonix-draggable: no-drag;
   justify-self: start;
   border: 0;
   background: transparent;
@@ -19287,7 +19287,7 @@ body > .mermaid-diagram--fullscreen {
   padding-bottom: 12px;
 }
 .bot-simple-advanced__summary {
-  --wails-draggable: no-drag;
+  --reasonix-draggable: no-drag;
   display: flex;
   align-items: flex-start;
   justify-content: space-between;
@@ -19373,7 +19373,7 @@ body > .mermaid-diagram--fullscreen {
   grid-template-columns: repeat(2, minmax(0, 1fr));
 }
 .bot-choice-card {
-  --wails-draggable: no-drag;
+  --reasonix-draggable: no-drag;
   display: grid;
   gap: 5px;
   min-height: 84px;
@@ -19514,7 +19514,7 @@ body > .mermaid-diagram--fullscreen {
   padding: 2px;
 }
 .bot-phone-target {
-  --wails-draggable: no-drag;
+  --reasonix-draggable: no-drag;
   display: inline-flex;
   align-items: center;
   gap: 6px;
@@ -19902,7 +19902,7 @@ body > .mermaid-diagram--fullscreen {
   box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent) 18%, transparent);
 }
 .bot-access-panel__summary {
-  --wails-draggable: no-drag;
+  --reasonix-draggable: no-drag;
   display: flex;
   align-items: center;
   justify-content: space-between;
@@ -20108,7 +20108,7 @@ body > .mermaid-diagram--fullscreen {
   min-width: 0;
 }
 .bot-connection-identity {
-  --wails-draggable: no-drag;
+  --reasonix-draggable: no-drag;
   display: block;
   width: 100%;
   min-width: 0;
@@ -20255,7 +20255,7 @@ body > .mermaid-diagram--fullscreen {
   padding: 18px;
 }
 .bot-connection-row--nav {
-  --wails-draggable: no-drag;
+  --reasonix-draggable: no-drag;
   width: 100%;
   border: 1px solid var(--border);
   border-radius: 8px;
@@ -20625,7 +20625,7 @@ body > .mermaid-diagram--fullscreen {
   border-top: 1px solid var(--border-soft);
 }
 .bot-advanced > summary {
-  --wails-draggable: no-drag;
+  --reasonix-draggable: no-drag;
   display: flex;
   align-items: center;
   min-height: 36px;
@@ -21478,7 +21478,7 @@ body > .mermaid-diagram--fullscreen {
 }
 
 .composer-guidance-shelf {
-  --wails-draggable: no-drag;
+  --reasonix-draggable: no-drag;
   display: grid;
   gap: 5px;
   max-width: var(--maxw);
@@ -21781,7 +21781,7 @@ body > .mermaid-diagram--fullscreen {
 }
 .composer-context__remove,
 .composer-context__item > .tooltip-trigger:last-child button {
-  --wails-draggable: no-drag;
+  --reasonix-draggable: no-drag;
   display: inline-flex;
   align-items: center;
   justify-content: center;
@@ -21894,7 +21894,7 @@ body > .mermaid-diagram--fullscreen {
   gap: 4px;
 }
 .composer__pasted-head button {
-  --wails-draggable: no-drag;
+  --reasonix-draggable: no-drag;
   display: inline-flex;
   align-items: center;
   justify-content: center;
@@ -22147,194 +22147,6 @@ body > .mermaid-diagram--fullscreen {
   }
 }
 
-/* onboarding — first-run gate covering the whole window. Sits above every
-/* onboarding — first-run gate covering the whole window. Sits above every
-   other layer; the card is centered, terminal-styled, with a faint scanline
-   accent so it reads as "stop and paste a key" rather than a generic modal. */
-.onboarding {
-  position: fixed;
-  inset: 0;
-  z-index: var(--z-onboarding);
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  background: radial-gradient(
-      ellipse at top,
-      rgba(217, 119, 87, 0.06) 0%,
-      transparent 60%
-    ),
-    rgba(7, 8, 10, 0.92);
-  backdrop-filter: none;
-  --wails-draggable: drag;
-}
-.onboarding__card {
-  --wails-draggable: no-drag;
-  width: min(440px, calc(100vw - 48px));
-  padding: 32px 32px 28px;
-  background: var(--bg-elev);
-  border: 1px solid var(--border);
-  border-radius: 12px;
-  box-shadow: 0 24px 60px rgba(0, 0, 0, 0.55), 0 0 0 1px rgba(217, 119, 87, 0.04);
-  display: flex;
-  flex-direction: column;
-  gap: 14px;
-}
-.onboarding__logo {
-  width: 36px;
-  height: 36px;
-  align-self: flex-start;
-  margin-bottom: 4px;
-}
-.onboarding__title {
-  font-size: 18px;
-  font-weight: 600;
-  letter-spacing: 0.2px;
-  color: var(--fg);
-}
-.onboarding__tag {
-  font-size: 13px;
-  line-height: 1.55;
-  color: var(--fg-dim);
-  margin-bottom: 6px;
-}
-.onboarding__label {
-  font-size: 12px;
-  font-weight: 500;
-  color: var(--fg-dim);
-  text-transform: uppercase;
-  letter-spacing: 0.6px;
-}
-.onboarding__input {
-  font-family: var(--mono);
-  font-size: 13px;
-  padding: 10px 12px;
-  background: var(--bg);
-  border: 1px solid var(--border);
-  border-radius: 6px;
-  color: var(--fg);
-  outline: none;
-  transition: border-color 120ms ease, box-shadow 120ms ease;
-}
-.onboarding__input:focus {
-  border-color: var(--accent);
-  box-shadow: 0 0 0 3px rgba(217, 119, 87, 0.18);
-}
-.onboarding__input:disabled {
-  opacity: 0.6;
-  cursor: not-allowed;
-}
-.onboarding__error {
-  font-size: 12px;
-  line-height: 1.5;
-  color: #ff8b7a;
-  background: rgba(255, 70, 70, 0.08);
-  border: 1px solid rgba(255, 70, 70, 0.25);
-  border-radius: 6px;
-  padding: 8px 10px;
-}
-.onboarding__submit {
-  margin-top: 4px;
-  padding: 10px 14px;
-  background: var(--accent);
-  color: #1a0e08;
-  border: none;
-  border-radius: 6px;
-  font-size: 13px;
-  font-weight: 600;
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  gap: 8px;
-  transition: background 120ms ease, transform 80ms ease;
-}
-.onboarding__submit:hover:not(:disabled) {
-  background: #e08868;
-}
-.onboarding__submit:active:not(:disabled) {
-  transform: translateY(1px);
-}
-.onboarding__submit:disabled {
-  opacity: 0.7;
-  cursor: not-allowed;
-}
-.onboarding__provider {
-  padding: 9px 14px;
-  background: var(--bg-soft);
-  color: var(--fg);
-  border: 1px solid var(--border);
-  border-radius: 6px;
-  font-size: 13px;
-  font-weight: 550;
-  font-family: inherit;
-  transition: background 120ms ease, border-color 120ms ease;
-}
-.onboarding__provider:hover:not(:disabled) {
-  background: var(--bg-hover, rgba(128, 128, 128, 0.08));
-  border-color: var(--border-2, var(--border));
-}
-.onboarding__provider:disabled {
-  opacity: 0.5;
-  cursor: not-allowed;
-}
-.onboarding__spinner {
-  display: inline-block;
-  width: 12px;
-  height: 12px;
-  border: 2px solid rgba(26, 14, 8, 0.3);
-  border-top-color: #1a0e08;
-  border-radius: 50%;
-  animation: onboarding-spin 0.7s linear infinite;
-}
-@keyframes onboarding-spin {
-  to { transform: rotate(360deg); }
-}
-.onboarding__links {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  font-size: 12px;
-  color: var(--fg-dim);
-  margin-top: 4px;
-}
-.onboarding__link {
-  background: none;
-  border: none;
-  padding: 0;
-  color: var(--accent);
-  font: inherit;
-  text-decoration: underline;
-  text-underline-offset: 2px;
-}
-.onboarding__link:hover {
-  color: #e08868;
-}
-.onboarding__sep {
-  opacity: 0.5;
-}
-.onboarding__privacy {
-  opacity: 0.8;
-}
-.onboarding__skip {
-  background: none;
-  border: none;
-  padding: 4px 0;
-  margin-top: 2px;
-  color: var(--fg-dim);
-  font-size: 12px;
-  font-family: inherit;
-  text-align: center;
-  transition: color 120ms ease;
-}
-.onboarding__skip:hover:not(:disabled) {
-  color: var(--fg);
-  text-decoration: underline;
-  text-underline-offset: 2px;
-}
-.onboarding__skip:disabled {
-  opacity: 0.4;
-  cursor: not-allowed;
-}
-
 /* Memory filter input: a full-width mem-input variant that sits below
 /* Memory filter input: a full-width mem-input variant that sits below
    the section title. The existing mem-input already has a 28px height
@@ -22343,148 +22155,6 @@ body > .mermaid-diagram--fullscreen {
 .mem-filter {
   margin: 4px 0 8px;
   width: 100%;
-
-}
-
-/* InlineDiff: a compact before/after diff card. The header strip carries
-/* InlineDiff: a compact before/after diff card. The header strip carries
-   the filename, the +/- counts, and a Copy button. The body is a monospace
-   pre with +/- row coloring. The CSS tokens are the same --add-bg /
-   --del-bg the existing DiffView uses, so light/dark theme changes apply
-   uniformly. */
-.inline-diff {
-  margin: 4px 0;
-  border: 1px solid var(--border-soft);
-  border-radius: 6px;
-  background: var(--bg-soft);
-  overflow: hidden;
-}
-.inline-diff__head {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  padding: 5px 9px;
-  border-bottom: 1px solid var(--border-soft);
-  font-size: 11px;
-}
-.inline-diff__file {
-  font-family: var(--mono);
-  color: var(--fg-dim);
-  max-width: 60%;
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
-}
-.inline-diff__stats {
-  display: inline-flex;
-  gap: 6px;
-  font-family: var(--mono);
-  font-size: 10.5px;
-}
-.inline-diff__add {
-  color: var(--add-fg);
-}
-.inline-diff__del {
-  color: var(--del-fg);
-}
-.inline-diff__spacer {
-  flex: 1;
-}
-.inline-diff__btn {
-  display: inline-flex;
-  align-items: center;
-  gap: 4px;
-  padding: 2px 6px;
-  font-family: var(--sans);
-  font-size: 10.5px;
-  color: var(--fg-dim);
-  background: transparent;
-  border: 1px solid var(--border);
-  border-radius: 4px;
-  cursor: pointer;
-}
-.inline-diff__btn:hover {
-  color: var(--fg);
-  background: var(--bg-elev);
-}
-.inline-diff__body {
-  margin: 0;
-  padding: 4px 0;
-  font-family: var(--mono);
-  font-size: 11.5px;
-  line-height: 1.55;
-  max-height: 320px;
-  overflow: auto;
-  background: var(--code-bg, var(--bg-soft));
-  color: var(--code-fg, var(--fg));
-}
-.inline-diff__table {
-  display: block;
-  min-width: max-content;
-  width: 100%;
-}
-.inline-diff__row {
-  display: flex;
-  --inline-diff-row-bg: var(--code-bg, var(--bg-soft));
-  background: var(--inline-diff-row-bg);
-  box-sizing: border-box;
-  min-width: 100%;
-  width: 100%;
-}
-.inline-diff__row--add {
-  --inline-diff-row-bg: var(--code-add-bg, var(--code-bg, var(--bg-soft)));
-}
-.inline-diff__row--del {
-  --inline-diff-row-bg: var(--code-del-bg, var(--code-bg, var(--bg-soft)));
-}
-.inline-diff__gutter {
-  position: sticky;
-  left: 0;
-  z-index: var(--z-local-raised);
-  display: grid;
-  grid-template-columns: 3ch 3ch 10px;
-  gap: 5px;
-  flex: 0 0 auto;
-  padding: 0 6px 0 8px;
-  background: var(--inline-diff-row-bg);
-  box-shadow: 1px 0 0 var(--code-border, var(--border-soft));
-  user-select: none;
-}
-.inline-diff__line {
-  color: var(--fg-faint);
-  font-variant-numeric: tabular-nums;
-  text-align: right;
-}
-.inline-diff__sign {
-  width: 10px;
-  flex-shrink: 0;
-  text-align: center;
-  opacity: 0.6;
-  user-select: none;
-}
-.inline-diff__text {
-  flex: 1 0 auto;
-  padding: 0 8px 0 6px;
-  white-space: pre-wrap;
-  word-break: break-word;
-}
-.inline-diff__more {
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  gap: 5px;
-  width: 100%;
-  padding: 5px 0;
-  font-size: 11px;
-  color: var(--fg-dim);
-  background: transparent;
-  border: 0;
-  border-top: 1px solid var(--border-soft);
-  cursor: pointer;
-}
-.inline-diff__more:hover {
-  color: var(--accent);
-  background: var(--bg-elev);
 
 }
 
@@ -22545,12 +22215,12 @@ body > .mermaid-diagram--fullscreen {
   padding: 0;
   background: var(--bg-soft);
   border-bottom: 1px solid var(--border-soft);
-  --wails-draggable: drag;
+  --reasonix-draggable: drag;
   user-select: none;
 }
 
 .app-chrome button {
-  --wails-draggable: no-drag;
+  --reasonix-draggable: no-drag;
 }
 
 .app-chrome__panel-toggle {
@@ -22637,7 +22307,7 @@ body > .mermaid-diagram--fullscreen {
   gap: 8px;
   color: var(--fg-dim);
   overflow: hidden;
-  --wails-draggable: drag;
+  --reasonix-draggable: drag;
 }
 
 .app-chrome__logo {
@@ -22672,7 +22342,7 @@ body > .mermaid-diagram--fullscreen {
   gap: 8px;
   min-width: 0;
   margin-left: 8px;
-  --wails-draggable: no-drag;
+  --reasonix-draggable: no-drag;
   transition:
     margin 0.28s cubic-bezier(0.2, 0.72, 0.2, 1),
     transform 0.18s cubic-bezier(0.2, 0.8, 0.2, 1);
@@ -22707,7 +22377,7 @@ body > .mermaid-diagram--fullscreen {
   box-shadow: -12px 0 18px -18px color-mix(in srgb, var(--fg) 46%, transparent);
   pointer-events: auto;
   user-select: none;
-  --wails-draggable: no-drag;
+  --reasonix-draggable: no-drag;
   transition: opacity var(--dur-base) ease;
 }
 
@@ -22759,7 +22429,7 @@ body > .mermaid-diagram--fullscreen {
   transition:
     background var(--dur-fast),
     color var(--dur-fast);
-  --wails-draggable: no-drag;
+  --reasonix-draggable: no-drag;
 }
 
 .windows-window-control:hover,
@@ -22784,11 +22454,11 @@ body > .mermaid-diagram--fullscreen {
 }
 
 .app--darwin .app-chrome--tabs .tabbar {
-  --wails-draggable: drag;
+  --reasonix-draggable: drag;
 }
 
 .app--darwin .app-chrome--tabs .tabbar * {
-  --wails-draggable: no-drag;
+  --reasonix-draggable: no-drag;
 }
 
 .app--darwin .app-chrome--tabs .app-chrome__drag-rail,
@@ -22798,7 +22468,7 @@ body > .mermaid-diagram--fullscreen {
   top: 0;
   z-index: var(--z-local-handle);
   height: 10px;
-  --wails-draggable: drag;
+  --reasonix-draggable: drag;
 }
 
 .app--darwin .app-chrome--tabs .app-chrome__drag-rail {
@@ -23076,11 +22746,11 @@ body > .mermaid-diagram--fullscreen {
 .app--linux .app-chrome--native-tabs .tabbar,
 .app--windows .app-chrome--native-tabs .tabbar *,
 .app--linux .app-chrome--native-tabs .tabbar * {
-  --wails-draggable: no-drag;
+  --reasonix-draggable: no-drag;
 }
 
 .app--windows-frameless:not(.app--workbench):not(.app--creation) .app-chrome--native-tabs .tabbar {
-  --wails-draggable: drag;
+  --reasonix-draggable: drag;
 }
 
 .app--windows .app-chrome--native-tabs .app-chrome__identity {
@@ -23320,12 +22990,12 @@ body > .mermaid-diagram--fullscreen {
   height: 38px;
   background: var(--bg-soft);
   border-bottom: 1px solid var(--border-soft);
-  --wails-draggable: drag;
+  --reasonix-draggable: drag;
 }
 
 .workspace-tabs-bar .tabbar,
 .workspace-tabs-bar .tabbar * {
-  --wails-draggable: no-drag;
+  --reasonix-draggable: no-drag;
 }
 
 .topicbar {
@@ -23340,12 +23010,12 @@ body > .mermaid-diagram--fullscreen {
   padding: 6px 8px;
   background: var(--bg-elev);
   border-bottom: 1px solid var(--border-soft);
-  --wails-draggable: drag;
+  --reasonix-draggable: drag;
   user-select: none;
 }
 
 .topicbar button {
-  --wails-draggable: no-drag;
+  --reasonix-draggable: no-drag;
 }
 
 .topicbar__chrome-btn {
@@ -23417,7 +23087,7 @@ body > .mermaid-diagram--fullscreen {
   gap: 6px;
   min-width: 0;
   max-width: 100%;
-  --wails-draggable: no-drag;
+  --reasonix-draggable: no-drag;
 }
 
 .topicbar__title-input {
@@ -23434,7 +23104,7 @@ body > .mermaid-diagram--fullscreen {
   font-size: 15px;
   line-height: 1.25;
   font-weight: 680;
-  --wails-draggable: no-drag;
+  --reasonix-draggable: no-drag;
   transition: border-color 0.12s, background 0.12s;
 }
 
@@ -23454,7 +23124,7 @@ body > .mermaid-diagram--fullscreen {
   align-items: center;
   gap: 6px;
   position: relative;
-  --wails-draggable: no-drag;
+  --reasonix-draggable: no-drag;
 }
 /* When the dock is closed in workbench mode, the fixed top-right dock-toggle
 /* When the dock is closed in workbench mode, the fixed top-right dock-toggle
@@ -23722,7 +23392,7 @@ body > .mermaid-diagram--fullscreen {
   border-radius: 8px;
   background: var(--bg-elev);
   box-shadow: 0 16px 36px rgba(0, 0, 0, 0.36);
-  --wails-draggable: no-drag;
+  --reasonix-draggable: no-drag;
 }
 
 .topicbar__export-menu button {
@@ -23758,7 +23428,7 @@ body > .mermaid-diagram--fullscreen {
   background: var(--bg-elev);
   box-shadow: none;
   overflow: visible;
-  --wails-draggable: no-drag;
+  --reasonix-draggable: no-drag;
 }
 
 .external-opener--open {
@@ -23868,7 +23538,7 @@ body > .mermaid-diagram--fullscreen {
   border: 1px solid var(--border);
   border-radius: 12px;
   box-shadow: 0 18px 42px color-mix(in srgb, #000 32%, transparent);
-  --wails-draggable: no-drag;
+  --reasonix-draggable: no-drag;
 }
 
 .external-opener__menu button {
@@ -24375,7 +24045,7 @@ body > .mermaid-diagram--fullscreen {
 .project-tree__collapse-all,
 .project-tree__header-action-btn,
 .project-tree__new-topic {
-  --wails-draggable: no-drag;
+  --reasonix-draggable: no-drag;
   width: 24px;
   height: 24px;
   display: inline-flex;
@@ -24472,7 +24142,7 @@ body > .mermaid-diagram--fullscreen {
 }
 
 .project-tree__time-filter-opt {
-  --wails-draggable: no-drag;
+  --reasonix-draggable: no-drag;
   display: flex;
   align-items: center;
   justify-content: flex-start;
@@ -24565,7 +24235,7 @@ body > .mermaid-diagram--fullscreen {
 
 /* Classic per-folder show-more toggle and empty-folder placeholder rows. */
 .project-tree__topic-window-toggle {
-  --wails-draggable: no-drag;
+  --reasonix-draggable: no-drag;
   display: flex;
   align-items: center;
   width: 100%;
@@ -24793,7 +24463,7 @@ body > .mermaid-diagram--fullscreen {
 }
 
 .project-tree__folder-input {
-  --wails-draggable: no-drag;
+  --reasonix-draggable: no-drag;
   flex: 1 1 auto;
   min-width: 0;
   height: 26px;
@@ -24882,7 +24552,7 @@ body > .mermaid-diagram--fullscreen {
 }
 
 .project-tree__topic-main {
-  --wails-draggable: no-drag;
+  --reasonix-draggable: no-drag;
   flex: 1 1 auto;
   min-width: 0;
   min-height: 34px;
@@ -25138,7 +24808,7 @@ body > .mermaid-diagram--fullscreen {
 }
 
 .project-tree__topic-input {
-  --wails-draggable: no-drag;
+  --reasonix-draggable: no-drag;
   flex: 1 1 auto;
   min-width: 0;
   align-self: stretch;
@@ -25337,7 +25007,7 @@ body > .mermaid-diagram--fullscreen {
 }
 
 .context-menu {
-  --wails-draggable: no-drag;
+  --reasonix-draggable: no-drag;
   position: fixed;
   z-index: var(--z-overlay-backdrop);
   max-height: calc(100vh - 16px);
@@ -25447,7 +25117,7 @@ body > .mermaid-diagram--fullscreen {
 }
 
 .transcript-selection-action {
-  --wails-draggable: no-drag;
+  --reasonix-draggable: no-drag;
   position: fixed;
   z-index: var(--z-floating-menu);
   max-width: calc(100vw - 16px);
@@ -25557,7 +25227,7 @@ body > .mermaid-diagram--fullscreen {
 }
 
 .project-tree__empty-primary {
-  --wails-draggable: no-drag;
+  --reasonix-draggable: no-drag;
   display: inline-flex;
   align-items: center;
   justify-content: center;
@@ -25584,7 +25254,7 @@ body > .mermaid-diagram--fullscreen {
 }
 
 .project-tree__empty-secondary {
-  --wails-draggable: no-drag;
+  --reasonix-draggable: no-drag;
   display: inline-flex;
   align-items: center;
   justify-content: center;
@@ -25653,7 +25323,7 @@ body > .mermaid-diagram--fullscreen {
   gap: 8px;
   padding: 7px 10px 3px;
   border-bottom: 1px solid transparent;
-  --wails-draggable: drag;
+  --reasonix-draggable: drag;
 }
 
 /* Dock collapse/expand toggle pinned to the top-right corner of the window.
@@ -25670,7 +25340,7 @@ body > .mermaid-diagram--fullscreen {
   align-items: center;
   justify-content: center;
   z-index: var(--z-app-chrome);
-  --wails-draggable: no-drag;
+  --reasonix-draggable: no-drag;
   pointer-events: auto;
 }
 .app__dock-toggle .topicbar__chrome-btn {
@@ -25688,7 +25358,7 @@ body > .mermaid-diagram--fullscreen {
 }
 
 .workbench-dock__tabs {
-  --wails-draggable: no-drag;
+  --reasonix-draggable: no-drag;
   flex: 0 1 auto;
   width: max-content;
   max-width: 100%;
@@ -25704,7 +25374,7 @@ body > .mermaid-diagram--fullscreen {
 }
 
 .workbench-dock__tab {
-  --wails-draggable: no-drag;
+  --reasonix-draggable: no-drag;
   display: inline-flex;
   align-items: center;
   justify-content: center;
@@ -30248,7 +29918,7 @@ body > .mermaid-diagram--fullscreen {
 .sidebar--workbench .sidebar__head,
 .sidebar--workbench .sidebar__quick-actions,
 .sidebar--workbench .sidebar__utility-row {
-  --wails-draggable: no-drag;
+  --reasonix-draggable: no-drag;
 }
 
 .sidebar--workbench .sidebar__quick-action,
@@ -30509,7 +30179,7 @@ body > .mermaid-diagram--fullscreen {
 }
 
 .sidebar--workbench .project-tree__header-icon-btn {
-  --wails-draggable: no-drag;
+  --reasonix-draggable: no-drag;
   width: var(--project-tree-action-column);
   height: var(--project-tree-action-column);
   display: inline-flex;
@@ -30696,7 +30366,7 @@ body > .mermaid-diagram--fullscreen {
 }
 
 .sidebar--workbench .project-tree__folder-action {
-  --wails-draggable: no-drag;
+  --reasonix-draggable: no-drag;
   width: var(--project-tree-action-column);
   height: var(--project-tree-action-column);
   display: inline-flex;
@@ -30959,7 +30629,7 @@ body > .mermaid-diagram--fullscreen {
 
 .sidebar--workbench .project-tree__topic-action,
 .app--classic .project-tree__topic-action {
-  --wails-draggable: no-drag;
+  --reasonix-draggable: no-drag;
   width: 26px;
   height: 26px;
   display: inline-flex;
@@ -31258,7 +30928,7 @@ body > .mermaid-diagram--fullscreen {
   overflow-wrap: anywhere;
 }
 .toast__action {
-  --wails-draggable: no-drag;
+  --reasonix-draggable: no-drag;
   flex: 0 0 auto;
   height: 26px;
   border: 1px solid color-mix(in srgb, currentColor 30%, transparent);
@@ -33093,7 +32763,7 @@ body > .mermaid-diagram--fullscreen {
 
 .app--creation .sidebar-feature-zone__item,
 :root[data-theme-style] .app--creation .sidebar-feature-zone__item {
-  --wails-draggable: no-drag;
+  --reasonix-draggable: no-drag;
   display: flex;
   align-items: center;
   gap: 8px;
@@ -33434,7 +33104,7 @@ body > .mermaid-diagram--fullscreen {
 
 .app--creation .sidebar-collapse-toggle,
 :root[data-theme-style] .app--creation .sidebar-collapse-toggle {
-  --wails-draggable: no-drag;
+  --reasonix-draggable: no-drag;
   position: absolute;
   top: 50%;
   left: calc(var(--sidebar-width) - 13px);
@@ -33553,7 +33223,7 @@ body > .mermaid-diagram--fullscreen {
 
 .app--creation .transcript__scrollbar,
 :root[data-theme-style] .app--creation .transcript__scrollbar {
-  --wails-draggable: no-drag;
+  --reasonix-draggable: no-drag;
   position: absolute;
   top: 0;
   /* Hug the chat/right-dock seam; keep only a tiny air gap. */
@@ -34975,7 +34645,7 @@ body > .mermaid-diagram--fullscreen {
 
 .app--creation .workbench-dock .workspace-commit-history__toggle,
 :root[data-theme-style] .app--creation .workbench-dock .workspace-commit-history__toggle {
-  --wails-draggable: no-drag;
+  --reasonix-draggable: no-drag;
   display: flex;
   align-items: center;
   gap: 6px;
@@ -35859,7 +35529,7 @@ body > .mermaid-diagram--fullscreen {
   line-height: 1.45;
 }
 .diag-page .frontend-diagnostics--embedded {
-  --wails-draggable: no-drag;
+  --reasonix-draggable: no-drag;
   display: flex;
   align-items: center;
   flex-wrap: wrap;

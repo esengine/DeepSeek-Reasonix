@@ -116,7 +116,7 @@ func (a *App) InterruptTurnWithInboxItemsForTab(tabID, turnID string, itemIDs []
 	}
 	result, err := ctrl.CancelWithInboxItemsResult(itemIDs, "desktop")
 	if err != nil {
-		return view, inboxWailsError(err)
+		return view, inboxBridgeError(err)
 	}
 	view.DiscardedItemIDs = append(view.DiscardedItemIDs, result.DiscardedItemIDs...)
 	view.Warning = result.Warning

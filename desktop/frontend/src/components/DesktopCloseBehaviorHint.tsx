@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react";
 import { app, type DesktopShellStatusView } from "../lib/bridge";
+import { desktopHost } from "../lib/desktopHost";
 
 export function DesktopCloseBehaviorHint({
   backgroundSelected,
@@ -24,7 +25,8 @@ export function DesktopCloseBehaviorHint({
     };
     const getStatus = app.GetDesktopShellStatus;
     if (typeof getStatus === "function") void getStatus.call(app).then(update).catch(() => undefined);
-    const off = window.runtime?.EventsOn("desktop:shell-status", update);
+    const host = desktopHost();
+    const off = host.kind === "none" ? undefined : host.events.on("desktop:shell-status", update);
     return () => {
       active = false;
       off?.();

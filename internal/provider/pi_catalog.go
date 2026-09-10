@@ -1,6 +1,7 @@
 package provider
 
 import (
+	"slices"
 	"sort"
 	"strings"
 
@@ -85,6 +86,44 @@ func PiCatalogOpenCodeGoModelIDs(route string) []string {
 	}
 	sort.Strings(ids)
 	return ids
+}
+
+// PiCatalogOpenCodeGoReasoning exposes catalog wire values, not Pi's clamping
+// policy. Missing off mappings do not invent a disable token for the adapter.
+func PiCatalogOpenCodeGoReasoning(route, id string) (ReasoningCapability, bool) {
+	for _, model := range piCatalogOpenCodeGoModels(route) {
+		if model.ID != id {
+			continue
+		}
+		if !model.Reasoning {
+			return ReasoningOptions(""), true
+		}
+		var ids []string
+		for _, level := range piAI.GetSupportedThinkingLevels(model) {
+			value, explicit := model.ThinkingLevelMap[level]
+			wire := string(level)
+			if explicit {
+				if value == nil {
+					continue
+				}
+				wire = *value
+			} else if level == "off" {
+				continue
+			}
+			if wire != "" && !slices.Contains(ids, wire) {
+				ids = append(ids, wire)
+			}
+		}
+		def := "high"
+		if !slices.Contains(ids, def) {
+			def = ""
+			if len(ids) > 0 {
+				def = ids[0]
+			}
+		}
+		return ReasoningOptions(def, ids...), true
+	}
+	return ReasoningCapability{}, false
 }
 
 // PiCatalogOpenCodeGoVisionModelIDs returns the route's catalog models that

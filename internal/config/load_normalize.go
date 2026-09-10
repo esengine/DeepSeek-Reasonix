@@ -15,6 +15,7 @@ func normalizeLoadedConfig(cfg *Config) error {
 	normalizeLegacyLongCatContextWindows(cfg)
 	normalizeLegacyQwenContextWindows(cfg)
 	normalizeLegacyKimiK3Catalog(cfg)
+	normalizeOpenCodeGoRuntimeCompatibility(cfg)
 	normalizeLegacyOpenCodeGoInstalls(cfg)
 	normalizeLegacyMimoCustomProviders(cfg)
 	normalizeLegacyProviderModels(cfg)

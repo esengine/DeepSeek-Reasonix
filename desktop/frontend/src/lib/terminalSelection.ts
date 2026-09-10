@@ -1,3 +1,5 @@
+import { desktopHost } from "./desktopHost";
+
 export type TerminalSelectionPoint = { left: number; top: number };
 
 export type TerminalSelectionOperation<T> = {
@@ -135,8 +137,8 @@ export function handleTerminalCopyKey(input: {
   return { intercepted: true, text: input.getSelection() };
 }
 
-// Async clipboard reads need the webview's Clipboard API permission; the Wails
-// runtime bridge is the fallback, mirroring writeClipboardText's ladder.
+// Async clipboard reads need the webview's Clipboard API permission; the
+// desktop bridge is the fallback, mirroring writeClipboardText's ladder.
 export async function readTerminalClipboardText(): Promise<string> {
   try {
     if (typeof navigator !== "undefined" && navigator.clipboard?.readText) {
@@ -146,9 +148,8 @@ export async function readTerminalClipboardText(): Promise<string> {
     // Permission denied or unavailable — try the bridge.
   }
   try {
-    if (typeof window !== "undefined" && window.runtime?.ClipboardGetText) {
-      return await window.runtime.ClipboardGetText();
-    }
+    const host = desktopHost();
+    if (host.kind !== "none") return await host.native.clipboardReadText();
   } catch {
     // Bridge missing or failed.
   }

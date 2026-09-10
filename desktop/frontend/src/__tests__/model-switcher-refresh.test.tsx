@@ -6,6 +6,7 @@ import { createRoot } from "react-dom/client";
 import { ModelSwitcher, normalizeModelInfo } from "../components/ModelSwitcher";
 import { LocaleProvider } from "../lib/i18n";
 import type { ModelInfo } from "../lib/types";
+import { installDesktopHostStub } from "./desktopHostStub";
 
 class TestResizeObserver {
   observe() {}
@@ -66,7 +67,7 @@ if (normalizedNullMetadata.provider !== "" || normalizedNullMetadata.model !== "
 let currentCatalog: ModelInfo[] = [
   { ref: "glm-cn/glm-5.2", provider: "glm-cn", model: "glm-5.2", current: true },
 ];
-(window as unknown as { go: { main: { App: Record<string, unknown> } } }).go = {
+installDesktopHostStub(({
   main: {
     App: {
       ModelsForTab: async () => {
@@ -78,7 +79,7 @@ let currentCatalog: ModelInfo[] = [
       },
     },
   },
-};
+}).main.App);
 
 const root = createRoot(document.getElementById("root")!);
 const renderSwitcher = (label: string, tabId: string, ready = true, sessionKey?: string) => (

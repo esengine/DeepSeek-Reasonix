@@ -96,7 +96,7 @@ export function beginNavigationSurfaceState(intent: number): NavigationSurfaceSt
   return { intent, phase: "source-retained" };
 }
 
-/** The Wails/navigation call returned; target data may still be hydrating. */
+/** The bridge navigation call returned; target data may still be hydrating. */
 export function markNavigationTargetMasked(
   current: NavigationSurfaceState,
   intent: number,

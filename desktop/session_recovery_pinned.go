@@ -44,7 +44,7 @@ func (a *App) handleTabSessionRecovered(tab *WorkspaceTab) func(control.SessionR
 			}
 			tab.SessionPath = canonicalTabSessionPath(info.RecoveryPath)
 			if a.tabs[tab.ID] == tab {
-				_ = a.saveTabsLocked()
+				a.saveTabsLocked()
 			}
 		}
 		a.mu.Unlock()

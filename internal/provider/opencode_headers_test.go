@@ -8,12 +8,12 @@ import (
 )
 
 func TestOpenCodeGoHeadersScopedStableAndPrivate(t *testing.T) {
-	for _, base := range []string{"https://opencode.ai/zen/go", "https://opencode.ai/zen/go/v1"} {
+	for _, endpoint := range []string{"https://opencode.ai/zen/go/v1/messages", "https://opencode.ai/zen/go/v1/chat/completions", "https://opencode.ai/zen/go/v1/responses"} {
 		ctx := WithCacheSession(context.Background(), "/private/path/to/session.jsonl")
 		var previous string
 		for i := range 3 {
-			req, _ := http.NewRequestWithContext(ctx, http.MethodPost, base+"/responses", nil)
-			ApplyOpenCodeGoHeaders(req, base, NewClientIdentityHeaders())
+			req, _ := http.NewRequestWithContext(ctx, http.MethodPost, endpoint, nil)
+			ApplyOpenCodeGoHeaders(req, "https://custom-base.example", NewClientIdentityHeaders())
 			id := req.Header.Get("x-opencode-session")
 			if id == "" || strings.Contains(id, "private") || i > 0 && id != previous {
 				t.Fatalf("unstable/private session ID: %q", id)
@@ -23,9 +23,9 @@ func TestOpenCodeGoHeadersScopedStableAndPrivate(t *testing.T) {
 			}
 			previous = id
 		}
-		child, _ := http.NewRequestWithContext(WithCacheSession(ctx, "child"), http.MethodPost, base, nil)
-		ApplyOpenCodeGoHeaders(child, base, NewClientIdentityHeaders())
-		if child.Header.Get("x-opencode-session") == previous {
+		child, _ := http.NewRequestWithContext(WithCacheSession(ctx, "child"), http.MethodPost, endpoint, nil)
+		ApplyOpenCodeGoHeaders(child, endpoint, NewClientIdentityHeaders())
+		if child.Header.Get("x-opencode-session") == "" || child.Header.Get("x-opencode-session") == previous {
 			t.Fatal("child retained parent identity")
 		}
 	}

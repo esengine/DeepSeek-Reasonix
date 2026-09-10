@@ -449,7 +449,7 @@ Reasonix 的对应实现，并不代表导入 Hook 的每一种运行时决策�
 
 ## 桌面端后端方法
 
-Desktop 通过 Wails 方法暴露插件包操作：
+Desktop 通过 host command 暴露插件包操作：
 
 - `Plugins`
 - `PlanPluginInstall`

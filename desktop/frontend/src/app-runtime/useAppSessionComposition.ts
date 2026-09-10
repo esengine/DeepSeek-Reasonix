@@ -1,7 +1,6 @@
 import { useMemo, useRef, useState, type CSSProperties } from "react";
 import { useCommittedCommand } from "../lib/useCommittedCommand";
 import { projectSessionAvailability } from "../lib/sessionAvailability";
-import { useWailsResizeFix } from "../lib/useWailsResizeFix";
 import type { RemoteSessionApi } from "../lib/useRemoteSession";
 import { activeLeaseBlockedTab } from "../lib/tabMetaRefresh";
 import { topicTitle } from "../lib/sessionTitles";
@@ -175,7 +174,7 @@ export function useAppSessionComposition(input: AppSessionCompositionInput) {
   } = runtime.navigation;
   const {
     setTransientOverlayDismissSignal, managementActive, desktopLayoutStyle,
-    singleSurfaceLayout, windowsFramelessChrome, mainWindowMaximised, rightDockMode,
+    singleSurfaceLayout, windowsFramelessChrome, rightDockMode,
     workspacePanelOpen, workspacePanelMaximized, liveTerminalHeight, setLiveWorkspacePanelRenderWidth,
     setRightDockTreeWidth, terminalPanelOpen, setSettingsTarget, enterConversation,
   } = shell;
@@ -204,7 +203,6 @@ export function useAppSessionComposition(input: AppSessionCompositionInput) {
     setInsertTarget: setWorkspaceInsertTarget, replaceComposerInsert,
   } = insertCommands;
   useWindowsMaximisedSync(windowsFramelessChrome);
-  useWailsResizeFix(windowsFramelessChrome, mainWindowMaximised);
   const clearCommands = useSessionClearCommands({
     activeTabId,
     activeSessionIdentity,

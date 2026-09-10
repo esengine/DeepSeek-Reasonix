@@ -369,7 +369,7 @@ func (a *App) TakeoverSession(tabID, mode string) error {
 		if a.tabs[tab.ID] == tab && !tab.removed && tab.Ctrl == nil {
 			tab.restoreStartupState(previousStartup)
 			a.setSessionRuntimePhaseLocked(tab, sessionRuntimeLeaseBlocked, &sessionLeaseBusyError{})
-			_ = a.saveTabsLocked()
+			a.saveTabsLocked()
 		}
 		a.mu.Unlock()
 		return err

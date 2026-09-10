@@ -270,6 +270,30 @@ Reasonix 还在 `agentCapabilities._meta["reasonix.io"]` 中通告两个扩展�
 已安装插件声明的扩展 action 以 `/<plugin>:<action>` 出现在
 `available_commands_update` 中，可像普通斜杠命令一样调用。
 
+## 可选的 MCP 用户交互扩展
+
+支持 MCP elicitation 的宿主在 `initialize.clientCapabilities` 中显式声明：
+
+```json
+{"_meta":{"reasonix.io":{"mcpInteraction":{"supported":true,"schemaVersion":1}}}}
+```
+
+Reasonix 在 `agentCapabilities._meta.reasonix.io.mcpInteraction` 返回对应能力，
+方法为 `_reasonix.io/mcp/request_interaction`。协商成功的会话使用 interactive MCP
+host profile；未声明或版本不匹配的客户端继续使用 core profile，不接收新增反向请求。
+新建、加载与重建会话均遵循这一协商结果。
+
+反向请求包含 `sessionId`、`promptId`、`turnId`、`server`、`mode`、`message`，
+表单模式还包含 `requestedSchema`，URL 模式包含 `url` 和 `elicitationId`。
+响应为 `{"action":"accept","content":{}}`、`{"action":"decline"}` 或
+`{"action":"cancel"}`。宿主应按 schema 校验表单；URL 流程交给用户操作，
+不得把登录凭据作为表单内容返回。不支持的交互应取消。
+
+每次回答绑定原 controller 和 turn。取消、无效回答及被拒绝的 URL 均取消交互，
+只有 `accept` 才使用 content。controller 先持久化决定，再释放 MCP 等待者。
+这一扩展不替代 `session/request_permission`，也不改变工具权限策略。
+协商出的 host profile 会影响 MCP capability/cache identity，transcript schema 不变。
+
 ## 兼容性与缓存行为
 
 | 表面 | 旧版或非 Reasonix 客户端的行为 | 结论 |

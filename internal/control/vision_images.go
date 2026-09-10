@@ -120,7 +120,7 @@ func (c *Controller) uploadOfficialVisionFile(filename string, data []byte) (str
 	if err != nil {
 		return "", err
 	}
-	ref := c.modelRef
+	ref := c.selection.ref
 	if ref == "" {
 		ref = cfg.DefaultModel
 	}

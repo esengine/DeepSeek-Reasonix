@@ -78,7 +78,7 @@ type Owner struct {
 }
 
 // State is a sanitized process-local snapshot used by Desktop. WaitingKeys are
-// internal canonical identities; they are never copied into the Wails payload.
+// internal canonical identities; they are never copied into the desktop payload.
 type State struct {
 	Acquired    bool
 	Waiting     bool

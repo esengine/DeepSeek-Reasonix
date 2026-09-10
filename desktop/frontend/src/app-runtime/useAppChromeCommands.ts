@@ -41,8 +41,8 @@ export function useAppChromeCommands(input: AppChromeCommandsInput) {
     input.setSettingsTarget("bots");
   });
 
-  // The Wails drag runtime ignores anything with detail !== 1, so a double click
-  // on a --wails-draggable region never reaches the OS. Both platforms that hide
+  // The OS drag region ignores anything with detail !== 1, so a double click
+  // on a --reasonix-draggable region never reaches the shell. Both platforms that hide
   // their native title bar need this handled here.
   const chromeDoubleClickZooms = input.windowsFrameless || input.platform === "darwin";
   const handleChromeTitlebarDoubleClick = useCommittedCommand((event: ReactMouseEvent<HTMLDivElement>) => {

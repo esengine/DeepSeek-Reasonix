@@ -5,6 +5,7 @@ import { WorkspaceTurnResult } from "../src/components/WorkspaceTurnResult";
 import { initialState, reducer, type Item } from "../src/lib/useController";
 import { historicalResultNotice } from "../src/lib/completionResultState";
 import { app, type AppBindings } from "../src/lib/bridge";
+import { installDesktopHostStub } from "../src/__tests__/desktopHostStub";
 import { LocaleProvider, useI18n } from "../src/lib/i18n";
 import type { TurnChanges, WireCompletionSummary, WireEvent } from "../src/lib/types";
 import "../src/styles.css";
@@ -17,12 +18,12 @@ const diff: TurnChanges = { id: "0:42", turn: 0, coverage: "complete", added: 18
 let unavailable = false;
 const calls: string[] = [];
 const fallback = Object.fromEntries(["ReportFrontendDiagnostic", "ToolResultForTab", "ListDirForTab", "WorkspaceChanges"].map(k => [k, app[k as keyof AppBindings]]));
-window.go = { main: { App: new Proxy({
+installDesktopHostStub(new Proxy({
   ...fallback,
   WorkspaceTurnChanges: async (_tab: string, _session: string, _turn: number, id: string) => { calls.push("summary:" + id); return unavailable ? { ...diff, id: undefined, coverage: "unknown", files: [] } : { ...diff, id }; },
   WorkspaceTurnChangeDetail: async (_tab: string, _session: string, _turn: number, id: string, file: string) => { calls.push("detail:" + id); return unavailable ? null : { ...diff.files.find(f => f.path === file), patch: "@@ -1,2 +1,3 @@\n-old result\n+frozen result for " + id + "\n+confirmed changes\n context" }; },
   TurnCheckLog: async (_tab: string, session: string, id: string) => { calls.push("log:" + session + ":" + id); return unavailable ? null : { output: "go test ./...\n--- FAIL: TestFrozenResult\nexpected 0, got 1\nFAIL\nexit status 1", truncated: false }; },
-}, { get(target, key) { return target[key as keyof typeof target] ?? (async () => undefined); } }) as unknown as AppBindings } };
+}, { get(target, key) { return target[key as keyof typeof target] ?? (async () => undefined); } }) as unknown as AppBindings);
 (window as unknown as { turnResultCalls: string[] }).turnResultCalls = calls;
 
 function snapshot(scenario: string) {

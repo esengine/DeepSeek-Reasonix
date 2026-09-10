@@ -65,15 +65,6 @@ func TestSetEffortForTabIsTabLocal(t *testing.T) {
 	}
 }
 
-func TestPersistedDesktopTabEntryKeepsPendingEffort(t *testing.T) {
-	base := "auto"
-	tab := &WorkspaceTab{effort: &base, pendingEffort: &pendingEffortSelection{value: "max"}}
-	entry := persistedDesktopTabEntry(tab)
-	if entry.Effort == nil || *entry.Effort != "max" {
-		t.Fatalf("persisted effort = %#v, want max", entry.Effort)
-	}
-}
-
 func TestEffortForTabResolvesProjectProviderConfig(t *testing.T) {
 	isolateDesktopUserDirs(t)
 

@@ -26,4 +26,3 @@ export interface ModelSettingsResult {
   issues: { code: string; message: string }[];
   appliedCatalogs: string[];
 }
-

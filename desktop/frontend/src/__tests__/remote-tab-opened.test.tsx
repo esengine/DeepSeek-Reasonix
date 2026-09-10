@@ -3,12 +3,13 @@
 import { JSDOM } from "jsdom";
 import React, { act, useRef, useState } from "react";
 import { createRoot } from "react-dom/client";
-import { __emitMockRemoteTab, __emitMockRemoteTabOpened, __emitMockRemoteTabUpdated, app } from "../lib/bridge";
+import { __emitMockRemoteTabOpened, __emitMockRemoteTabUpdated, app } from "../lib/bridge";
 import type { TabMeta } from "../lib/types";
 import type { RemoteSessionApi } from "../lib/useRemoteSession";
 import { useRemoteSession } from "../lib/useRemoteSession";
 import { useRemoteTabOpened } from "../lib/useRemoteTabOpened";
 import { useRemoteTabSwitch } from "../lib/useRemoteTabSwitch";
+import { installDesktopHostStub } from "./desktopHostStub";
 
 let passed = 0;
 let failed = 0;
@@ -76,14 +77,13 @@ let activeCalls = 0;
 let releaseNavigationRegistration: (() => void) | undefined;
 let navigationRegistration = new Promise<void>((resolve) => { releaseNavigationRegistration = resolve; });
 const originalHistory = app.HistorySliceForTab;
-const previousGo = window.go;
-window.go = { main: { App: {
+const desktopStub = installDesktopHostStub(({ main: { App: {
   HistorySliceForTab: async (...args: Parameters<typeof originalHistory>) => {
   historyCalls += 1;
   return originalHistory(...args);
   },
   SetActiveTab: async () => { activeCalls += 1; },
-} as unknown as typeof app } } as typeof window.go;
+} as unknown as typeof app } }).main.App);
 
 function SwitchHarness() {
   const [activeId, setActiveId] = useState<string | undefined>("local-1");
@@ -119,17 +119,17 @@ await act(async () => switchRoot.unmount());
 navigationRegistration = Promise.resolve();
 
 let terminalProbe: RemoteSessionApi | undefined;
-window.go = { main: { App: {
+desktopStub.replaceCommands(({ main: { App: {
   RemoteTabSnapshot: async () => { throw new Error("serve unavailable"); },
   SetActiveTab: async (tabId: string) => {
-    __emitMockRemoteTab(tabId, "state", { state: "serve_down", error: "bootstrap failed" });
+    desktopStub.emit(`remote-tab:${tabId}:state`, { state: "serve_down", error: "bootstrap failed" });
   },
-} as unknown as typeof app } } as typeof window.go;
+} as unknown as typeof app } }).main.App);
 function TerminalHarness() { terminalProbe = useRemoteSession("remote-terminal", "disconnected"); return null; }
 const terminalRoot = createRoot(document.getElementById("root")!);
 await act(async () => terminalRoot.render(<TerminalHarness />));
 eq(terminalProbe?.state, "serve_down", "restored shell observes terminal state republished during activation");
 await act(async () => terminalRoot.unmount());
-window.go = previousGo;
+desktopStub.uninstall();
 process.stdout.write(`\n${passed} passed, ${failed} failed\n`);
 if (failed > 0) process.exit(1);

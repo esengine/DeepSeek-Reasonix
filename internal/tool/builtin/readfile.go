@@ -452,7 +452,7 @@ func (r readFile) scan(src io.Reader, offset, limit int) (string, error) {
 	if safetyPaged {
 		b.WriteString(readFileSafetyTrailer(offset+len(collected), requestedEnd))
 	} else if hasMore {
-		fmt.Fprintf(&b, "\n[more lines below; pass offset=%d to continue]\n", offset+len(collected))
+		fmt.Fprintf(&b, "\n[PARTIAL view: showing lines %d-%d of at least %d; pass offset=%d to continue. A partial window may be sufficient for local work.]\n", offset+1, maxShown, lineNo, maxShown)
 	}
 	return b.String(), nil
 }

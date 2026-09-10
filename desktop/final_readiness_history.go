@@ -1,8 +1,10 @@
 package main
 
 import (
+	"fmt"
 	"reasonix/internal/event"
 	"reasonix/internal/provider"
+	"strings"
 )
 
 func historyLocalOnlyRows(m provider.Message) ([]HistoryMessage, bool) {
@@ -11,6 +13,9 @@ func historyLocalOnlyRows(m provider.Message) ([]HistoryMessage, bool) {
 	}
 	if m.ReadPause != nil {
 		return []HistoryMessage{{Role: "notice", Code: event.TurnOutcomeIncompleteRead, Level: "info", ReadPause: m.ReadPause}}, true
+	}
+	if m.ReadCompletion != nil {
+		return []HistoryMessage{{Role: "notice", Code: "read_completion", Level: "info", Content: "Partial read coverage was accepted for this turn.", Detail: formatReadCompletionDetail(m.ReadCompletion), ReadCompletion: m.ReadCompletion}}, true
 	}
 	if len(m.ProtocolRecovery) > 0 {
 		if r, ok := provider.DecodeProtocolRecovery(m.ProtocolRecovery); ok && r.State == "pending" {
@@ -29,4 +34,15 @@ func historyLocalOnlyRows(m provider.Message) ([]HistoryMessage, bool) {
 		}}, true
 	}
 	return historySteerRows(m.Content, true)
+}
+
+func formatReadCompletionDetail(r *provider.ReadCompletion) string {
+	if r == nil {
+		return ""
+	}
+	parts := make([]string, 0, len(r.Reads))
+	for _, read := range r.Reads {
+		parts = append(parts, fmt.Sprintf("%s · %s · covered=%v", read.Path, read.Verdict, read.Covered))
+	}
+	return strings.Join(parts, "\n")
 }

@@ -1,8 +1,8 @@
 # nfpm config for the Linux .deb package. scripts/desktop-build.sh's linux branch
-# runs `nfpm package` after `wails build`, from the desktop/ dir (so the src paths
-# below are relative to desktop/). Portable clients keep using the .tar.gz under
-# platforms[]; this .deb is the native package channel (native_packages) and also
-# remains a human-download artifact.
+# runs `nfpm package` after the Electron packaging step, from the desktop/ dir
+# (so the src paths below are relative to desktop/). Portable clients keep using
+# the .tar.gz under platforms[]; this .deb is the native package channel
+# (native_packages) and also remains a human-download artifact.
 #
 # $DEB_VERSION and $DEB_ARCH are exported by desktop-build.sh. DEB_VERSION follows
 # Debian version ordering: stable X.Y.Z, prereleases as X.Y.Z~rc.N / X.Y.Z~canary.N
@@ -16,18 +16,20 @@ section: "utils"
 priority: "optional"
 maintainer: "esengine <esengine@users.noreply.github.com>"
 description: |
-  Reasonix desktop — a Wails shell around the Go kernel.
+  Reasonix desktop — an Electron shell around the Go kernel.
 vendor: "Reasonix Contributors"
 homepage: "https://github.com/esengine/DeepSeek-Reasonix"
 license: "MIT"
 scripts:
   postinstall: ./build/linux/postinstall.sh
-# Runtime libraries the WebKitGTK 4.1 build links against (-tags webkit2_41); apt
-# pulls them in on install. These package names ship from Ubuntu 22.04 / Debian 12 on.
+# Runtime libraries the bundled Chromium links against at runtime; apt pulls
+# them in on install. These package names ship from Ubuntu 22.04 / Debian 12 on.
 # pkexec is required for the in-app Polkit authorization update path.
 depends:
   - libgtk-3-0
-  - libwebkit2gtk-4.1-0
+  - libnss3
+  - libgbm1
+  - libasound2
   - pkexec
 contents:
   - src: ./build/bin/reasonix-desktop
@@ -46,6 +48,13 @@ contents:
     dst: /usr/lib/reasonix/reasonix-update-helper
     file_info:
       mode: 0755
+  # The Electron bundle (Reasonix executable, chrome-sandbox, resources),
+  # staged at build/bin/app by desktop-build.sh. The service bootstrap starts
+  # app/Reasonix from here; postinstall.sh sets the chrome-sandbox helper
+  # setuid-root (4755) so the renderer sandbox works without --no-sandbox.
+  - src: ./build/bin/app
+    dst: /usr/lib/reasonix/app
+    type: tree
   - src: ./build/linux/io.reasonix.desktop.update.policy
     dst: /usr/share/polkit-1/actions/io.reasonix.desktop.update.policy
     file_info:

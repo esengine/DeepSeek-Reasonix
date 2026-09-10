@@ -1,3 +1,5 @@
+import { desktopHost } from "./desktopHost";
+
 export type InboxChangedEvent = {
   tabId: string;
   sessionPath?: string;
@@ -5,8 +7,9 @@ export type InboxChangedEvent = {
 };
 
 export function onInboxChanged(cb: (event: InboxChangedEvent) => void): () => void {
-  if (typeof window !== "undefined" && window.runtime && window.go?.main?.App) {
-    return window.runtime.EventsOn("InboxChanged", (payload?: unknown) => {
+  const host = desktopHost();
+  if (host.kind !== "none") {
+    return host.events.on("InboxChanged", (payload?: unknown) => {
       const tabId = payload && typeof payload === "object" && "tabId" in payload
         ? String((payload as { tabId?: unknown }).tabId ?? "")
         : "";

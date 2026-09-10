@@ -2,7 +2,7 @@ import { useRef, useState, type ReactNode } from "react";
 import { Check, ChevronDown } from "lucide-react";
 import { AnchoredPopover } from "./AnchoredPopover";
 
-export function ComposerChoice({ label, ariaLabel, icon, showChevron, value, options, disabled, onPick, tone, title }: {
+export function ComposerChoice({ label, ariaLabel, icon, showChevron, value, options, disabled, onPick, tone }: {
   label: string;
   ariaLabel?: string;
   showChevron?: boolean;
@@ -12,13 +12,12 @@ export function ComposerChoice({ label, ariaLabel, icon, showChevron, value, opt
   disabled?: boolean;
   onPick: (value: string) => void;
   tone?: string;
-  title?: string;
 }) {
   const [open, setOpen] = useState(false);
   const anchor = useRef<HTMLButtonElement>(null);
   return <>
     <button ref={anchor} type="button" className={`composer-choice ${tone || ""}`} disabled={disabled}
-      aria-label={ariaLabel || label} aria-haspopup="menu" aria-expanded={open && !disabled} title={title} onClick={() => setOpen(!open)}>
+      aria-label={ariaLabel || label} aria-haspopup="menu" aria-expanded={open && !disabled} onClick={() => setOpen(!open)}>
       {icon}<span>{label}</span>{(showChevron ?? !icon) && <ChevronDown size={12} />}
     </button>
     <AnchoredPopover open={open && !disabled} anchorRef={anchor} onClose={() => setOpen(false)} className="composer-access-menu composer-menu-surface" align="start">

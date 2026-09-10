@@ -171,7 +171,7 @@ export function WorktreeMergeModal({ tabId, isOpen, onClose, onMerged }: Worktre
   if (!isOpen) return null;
 
   return (
-    <div className="management-modal-backdrop" onMouseDown={(event) => { if (event.target === event.currentTarget && !merging) onClose(); }}>
+    <div className="management-modal-backdrop" data-app-overlay="" onMouseDown={(event) => { if (event.target === event.currentTarget && !merging) onClose(); }}>
       <section ref={dialogRef} className="management-modal worktree-merge-modal" role="dialog" aria-modal="true" aria-labelledby="worktree-merge-title" aria-describedby="worktree-merge-summary">
         <header className="management-modal__head">
           <div>

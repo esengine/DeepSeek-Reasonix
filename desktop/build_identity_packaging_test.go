@@ -29,8 +29,8 @@ func TestDesktopBuildLinksSharedSourceRevision(t *testing.T) {
 	}
 
 	revisionIndex := strings.Index(script, `SOURCE_REVISION="$(git -C "$ROOT" rev-parse --verify HEAD)"`)
-	packagingMutationIndex := strings.Index(script, `node -e 'const fs=require("fs")`)
+	packagingMutationIndex := strings.Index(script, `node "$ROOT/desktop/packaging/package.mjs"`)
 	if revisionIndex < 0 || packagingMutationIndex < 0 || revisionIndex >= packagingMutationIndex {
-		t.Fatal("desktop-build.sh must capture the source revision before mutating packaging metadata")
+		t.Fatal("desktop-build.sh must capture the source revision before packaging the Electron shell")
 	}
 }

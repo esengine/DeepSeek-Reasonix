@@ -10,6 +10,7 @@ import type { AppBindings } from "../lib/bridge";
 import { LocaleProvider, t } from "../lib/i18n";
 import { mcpServerLifecycleActions, mcpServerRetryableFromAvailableList } from "../lib/mcpServerLifecycle";
 import type { MCPServerInput, Meta, ServerView, TabMeta } from "../lib/types";
+import { installDesktopHostStub } from "./desktopHostStub";
 
 function ok(value: unknown, message: string) {
   if (!value) throw new Error(message);
@@ -51,7 +52,7 @@ function ok(value: unknown, message: string) {
     args: [],
     url: "https://mcp.example.test/mcp",
   };
-  window.go = {
+  const appStubTable: AppBindings = ({
     main: {
       App: {
         Meta: async () => meta,
@@ -82,14 +83,13 @@ function ok(value: unknown, message: string) {
           return 1;
         },
         InstallMCPServer: async (input) => {
-          const app = window.go?.main?.App;
-          if (!app) throw new Error("missing App bindings");
-          const toolCount = await app.AddMCPServer(input);
+          const toolCount: number = await appStubTable.AddMCPServer(input);
           return { name: input.name, state: "ready", toolCount, action: "none", message: "ready" };
         },
       } as Partial<AppBindings> as AppBindings,
     },
-  };
+  }).main.App;
+  installDesktopHostStub(appStubTable);
 
   await act(async () => {
     root.render(React.createElement(LocaleProvider, null, React.createElement(MCPServersSettingsPage)));
@@ -357,7 +357,7 @@ console.log("capabilities panel MCP actions");
       { name: "broken_read", description: "Broken tool.", readOnlyHint: true, schemaError: "invalid input schema: bad nested type" },
     ],
   }];
-  window.go = {
+  installDesktopHostStub(({
     main: {
       App: {
         Meta: async () => meta,
@@ -365,7 +365,7 @@ console.log("capabilities panel MCP actions");
         MCPServers: async () => servers,
       } as Partial<AppBindings> as AppBindings,
     },
-  };
+  }).main.App);
 
   await act(async () => {
     root.render(React.createElement(LocaleProvider, null, React.createElement(MCPServersSettingsPage)));
@@ -450,7 +450,7 @@ console.log("capabilities panel MCP actions");
     resources: 0,
     toolList: [{ name: "get_issue", description: "Read an issue.", readOnlyHint: true }],
   }];
-  window.go = {
+  installDesktopHostStub(({
     main: {
       App: {
         Meta: async () => meta,
@@ -458,7 +458,7 @@ console.log("capabilities panel MCP actions");
         MCPServers: async () => servers,
       } as Partial<AppBindings> as AppBindings,
     },
-  };
+  }).main.App);
 
   await act(async () => {
     root.render(React.createElement(LocaleProvider, null, React.createElement(MCPServersSettingsPage)));
@@ -565,7 +565,7 @@ console.log("capabilities panel MCP actions");
     resources: 0,
     toolList: [{ name: "echo", description: "Echo input", readOnlyHint: true }],
   }];
-  window.go = {
+  installDesktopHostStub(({
     main: {
       App: {
         Meta: async () => meta,
@@ -573,7 +573,7 @@ console.log("capabilities panel MCP actions");
         MCPServers: async () => servers,
       } as Partial<AppBindings> as AppBindings,
     },
-  };
+  }).main.App);
 
   await act(async () => {
     root.render(React.createElement(LocaleProvider, null, React.createElement(MCPServersSettingsPage)));
@@ -635,7 +635,7 @@ console.log("capabilities panel MCP actions");
     resources: 0,
     error: "command not found",
   }];
-  window.go = {
+  installDesktopHostStub(({
     main: {
       App: {
         Meta: async () => meta,
@@ -643,7 +643,7 @@ console.log("capabilities panel MCP actions");
         MCPServers: async () => servers,
       } as Partial<AppBindings> as AppBindings,
     },
-  };
+  }).main.App);
 
   await act(async () => {
     root.render(React.createElement(LocaleProvider, null, React.createElement(MCPServersSettingsPage)));
@@ -713,7 +713,7 @@ console.log("capabilities panel MCP actions");
       toolList: [{ name: "generate_yso_bytes", description: "Generate bytes" }],
     },
   ];
-  window.go = {
+  installDesktopHostStub(({
     main: {
       App: {
         Meta: async () => meta,
@@ -755,7 +755,7 @@ console.log("capabilities panel MCP actions");
         },
       } as Partial<AppBindings> as AppBindings,
     },
-  };
+  }).main.App);
 
   await act(async () => {
     root.render(React.createElement(LocaleProvider, null, React.createElement(MCPServersSettingsPage)));

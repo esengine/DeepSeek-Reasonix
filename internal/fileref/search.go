@@ -48,7 +48,7 @@ func SkipEntry(rel, name string, isDir bool) bool {
 
 var skipDirPaths = map[string]bool{
 	"bin":                      true,
-	"desktop/frontend/wailsjs": true,
+	"desktop/frontend/wailsjs": true, // retired Wails-generated bindings (stale dirs on old checkouts)
 	"npm/.stage":               true,
 	"site/.astro":              true,
 	"stage":                    true,

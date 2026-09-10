@@ -33,8 +33,8 @@ import (
 
 // updater.go is the transport-free core of the desktop auto-updater: manifest
 // fetch, version comparison, signed download, and per-platform apply/relaunch. It
-// has no Wails dependency so the logic is unit-tested directly; updater_app.go is
-// the thin Wails binding that wires these into App methods and progress events.
+// has no shell dependency so the logic is unit-tested directly; updater_app.go is
+// the thin bridge binding that wires these into App methods and progress events.
 
 // Manifest endpoints — R2 CDN first (fast, especially in CN), then the crash
 // worker release gateway, then GitHub as the stable channel's last resort. The
@@ -196,7 +196,7 @@ type UpdateDownloadResult struct {
 	SHA256    string `json:"sha256"`
 }
 
-// updateProgress is the payload of the "updater:progress" Wails event emitted
+// updateProgress is the payload of the "updater:progress" bridge event emitted
 // throughout DownloadUpdate / InstallUpdate.
 type updateProgress struct {
 	RequestID string `json:"requestId"`
@@ -344,7 +344,7 @@ func validateManifestAsset(selected, version, filename string, asset update.Asse
 // client never partially installs an unrecognized package shape.
 func validateAssetInstallLayout(layout string) error {
 	switch strings.TrimSpace(layout) {
-	case "", installlayout.InstallLayoutVersionedV1:
+	case "", installlayout.InstallLayoutVersionedV1, update.ElectronInstallLayout:
 		return nil
 	default:
 		return fmt.Errorf("unsupported install_layout %q (keeping current version)", layout)
@@ -1130,48 +1130,7 @@ func applyLinux(targz []byte, prepared *repair.UpdateTransaction) error {
 // one-shot reasonix-guard member for v1.18-v1.19 updaters, but v1.20+ ignores
 // that member and never persists it again.
 func applyLinuxVersioned(targz []byte, targetVersion string) error {
-	release, err := extractLinuxReleaseUnit(targz)
-	if err != nil {
-		return err
-	}
-	root := currentInstallDirForLinuxUpdate()
-	if _, err := installlayout.ReadCurrent(root); err != nil {
-		return fmt.Errorf("update: resolve active Linux layout: %w", err)
-	}
-	targetVersion = strings.TrimSpace(targetVersion)
-	if !strings.HasPrefix(targetVersion, "v") {
-		targetVersion = "v" + targetVersion
-	}
-	if err := installlayout.ValidateVersionName(targetVersion); err != nil {
-		return err
-	}
-	staging, err := os.MkdirTemp(root, ".reasonix-linux-update-*")
-	if err != nil {
-		return fmt.Errorf("update: create Linux version staging: %w", err)
-	}
-	defer os.RemoveAll(staging)
-	desktopPath := filepath.Join(staging, installlayout.DesktopBinaryName())
-	cliPath := filepath.Join(staging, installlayout.CLIBinaryName())
-	if err := os.WriteFile(desktopPath, release["reasonix-desktop"], 0o700); err != nil {
-		return fmt.Errorf("update: stage Linux desktop: %w", err)
-	}
-	if err := os.WriteFile(cliPath, release["reasonix"], 0o700); err != nil {
-		return fmt.Errorf("update: stage Linux CLI: %w", err)
-	}
-	if err := installlayout.ActivateVersion(installlayout.ActivationRequest{
-		InstallRoot: root,
-		Version:     targetVersion,
-		RequestID:   "linux-" + targetVersion,
-		Members: []installlayout.Member{
-			{Name: installlayout.DesktopBinaryName(), Path: desktopPath, Mode: 0o700},
-			{Name: installlayout.CLIBinaryName(), Path: cliPath, Mode: 0o700},
-		},
-		RequiredNames: []string{installlayout.DesktopBinaryName(), installlayout.CLIBinaryName()},
-	}); err != nil {
-		return fmt.Errorf("update: activate Linux version: %w", err)
-	}
-	_ = installlayout.RetainPreviousVersions(root, 0)
-	return nil
+	return activateLinuxShellRelease(targz, targetVersion, currentInstallDirForLinuxUpdate())
 }
 
 var currentExecutablePathForLinux = currentExecutablePath

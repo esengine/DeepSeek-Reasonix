@@ -2,7 +2,7 @@ package winuninstall
 
 import "testing"
 
-func TestPlanDoesNotPromoteLegacyOnlyRegistrationWithoutManagedWailsInstall(t *testing.T) {
+func TestPlanDoesNotPromoteLegacyOnlyRegistrationWithoutManagedDesktopInstall(t *testing.T) {
 	legacy := &Registration{
 		DisplayName:     "Reasonix",
 		DisplayVersion:  "0.53.0",
@@ -19,7 +19,7 @@ func TestPlanDoesNotPromoteLegacyOnlyRegistrationWithoutManagedWailsInstall(t *t
 	}
 }
 
-func TestPlanRefreshesManagedWailsRegistrationAndDeletesMatchingLegacyAlias(t *testing.T) {
+func TestPlanRefreshesManagedDesktopRegistrationAndDeletesMatchingLegacyAlias(t *testing.T) {
 	current := &Registration{
 		DisplayName:     "Reasonix",
 		DisplayVersion:  "1.18.0",

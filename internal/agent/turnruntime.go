@@ -1,9 +1,6 @@
 package agent
 
 import (
-	"slices"
-	"sync"
-
 	"reasonix/internal/completion"
 	"reasonix/internal/provider"
 	"reasonix/internal/runtimepolicy"
@@ -120,66 +117,6 @@ type turnRuntime struct {
 	// sessionContext is the content-free diagnostic for the snapshot selected
 	// before this real user turn. It is attached to Usage events only.
 	sessionContext turnContextDiagnostics
-}
-
-// evidenceBlockState is the mutex-guarded set of paths whose writer was blocked
-// for missing evidence in this turn.
-type evidenceBlockState struct {
-	mu    sync.Mutex
-	paths map[string]struct{}
-	calls map[string]provider.ToolCall
-	// checks memoizes the batch preflight verdict per call id. Evidence is
-	// evaluated once per batch by design, so the per-call gate reuses that
-	// verdict instead of re-reading the writer's target.
-	checks map[string]evidenceCheck
-}
-
-func (s *evidenceBlockState) memoCheck(id string, check evidenceCheck) {
-	if id == "" {
-		return
-	}
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	if s.checks == nil {
-		s.checks = map[string]evidenceCheck{}
-	}
-	s.checks[id] = check
-}
-
-func (s *evidenceBlockState) memoizedCheck(id string) (evidenceCheck, bool) {
-	if id == "" {
-		return evidenceCheck{}, false
-	}
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	check, ok := s.checks[id]
-	return check, ok
-}
-
-func (s *evidenceBlockState) record(path string, calls ...provider.ToolCall) {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	if s.paths == nil {
-		s.paths = map[string]struct{}{}
-	}
-	s.paths[path] = struct{}{}
-	if len(calls) > 0 {
-		if s.calls == nil {
-			s.calls = map[string]provider.ToolCall{}
-		}
-		s.calls[path] = calls[0]
-	}
-}
-
-func (s *evidenceBlockState) snapshot() []string {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	out := make([]string, 0, len(s.paths))
-	for path := range s.paths {
-		out = append(out, path)
-	}
-	slices.Sort(out)
-	return out
 }
 
 // terminalProtocolState groups the run's terminal-protocol bookkeeping: the

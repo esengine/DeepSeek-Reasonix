@@ -14,6 +14,7 @@ import { Composer } from "../components/Composer";
 import { LocaleProvider } from "../lib/i18n";
 import { ToastProvider } from "../lib/toast";
 import type { CollaborationMode, ToolApprovalMode } from "../lib/types";
+import { installDesktopHostStub } from "./desktopHostStub";
 
 let passed = 0;
 let failed = 0;
@@ -87,17 +88,17 @@ function installDom() {
 }
 
 function installBridgeApp(methods: Record<string, unknown>) {
-  (window as unknown as { go: { main: { App: Record<string, unknown> } } }).go = {
-    go: undefined,
-    main: {
-      App: {
-        Commands: async () => [],
-        Models: async () => [],
-        ModelsForTab: async () => [],
-        ...methods,
-      },
+  installDesktopHostStub(
+    {
+      Commands: async () => [],
+      Models: async () => [],
+      ModelsForTab: async () => [],
+      ...methods,
     },
-  } as never;
+    // The native clipboard write reports failure so the composer falls through
+    // to the execCommand ladder exactly like a denied webview clipboard.
+    { clipboardWriteResult: () => false },
+  );
 }
 
 async function renderComposer(props: Partial<Parameters<typeof Composer>[0]> = {}) {

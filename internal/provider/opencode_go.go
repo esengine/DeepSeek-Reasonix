@@ -211,6 +211,10 @@ func OpenCodeGoModelInfo(kind, baseURL, model string) (ModelInfo, bool) {
 		return ModelInfo{}, false
 	}
 	info := ModelInfo{ID: strings.TrimSpace(model), InputModalities: []ModelModality{ModalityText}}
+	if model == "deepseek-v4-flash-vision-exp" {
+		info.InputModalities = []ModelModality{ModalityText, ModalityImage}
+		return info, true
+	}
 	vision := map[string]map[string]bool{
 		OpenCodeGoRouteChat:      {"kimi-k3": true},
 		OpenCodeGoRouteAnthropic: {"qwen3.8-max": true, "qwen3.7-plus": true, "qwen3.6-plus": true},

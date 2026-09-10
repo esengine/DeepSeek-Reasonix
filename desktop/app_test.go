@@ -5894,7 +5894,7 @@ func TestSetTokenModeKeepsControllerWhenRebuildFails(t *testing.T) {
 	assertDeprecatedExecutionModeNoop(t, app, tab, old, *notices)
 }
 
-func TestSetEffortDefersRunningTurn(t *testing.T) {
+func TestSetEffortRejectsRunningTurn(t *testing.T) {
 	isolateDesktopUserDirs(t)
 
 	runner := &blockingRunner{started: make(chan struct{}), release: make(chan struct{})}
@@ -5904,12 +5904,8 @@ func TestSetEffortDefersRunningTurn(t *testing.T) {
 	<-runner.started
 
 	err := app.SetEffort("max")
-	if err != nil {
-		t.Fatalf("SetEffort while running: %v", err)
-	}
-	info := app.Effort()
-	if info.Current != "auto" || info.Pending == nil || *info.Pending != "max" || !info.CanDefer {
-		t.Fatalf("running effort = %+v, want auto with max pending", info)
+	if err == nil || !strings.Contains(err.Error(), "finish or cancel") {
+		t.Fatalf("SetEffort while running error = %v, want finish/cancel guard", err)
 	}
 
 	close(runner.release)

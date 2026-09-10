@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import { Check, Copy } from "lucide-react";
+import { desktopHost } from "../lib/desktopHost";
 import { useT } from "../lib/i18n";
 
 function fallbackCopyText(value: string): boolean {
@@ -43,16 +44,16 @@ async function writeClipboardText(value: string): Promise<void> {
     /* try the desktop runtime below */
   }
   try {
-    if (typeof window !== "undefined" && (await window.runtime?.ClipboardSetText?.(value))) return;
+    if (await desktopHost().native.clipboardWriteText(value)) return;
   } catch {
-    /* runtime unavailable in browser dev */
+    /* host clipboard unavailable in browser dev */
   }
   if (fallbackCopyText(value)) return;
   throw new Error("clipboard unavailable");
 }
 
 // CopyButton copies text to the clipboard on click and briefly flips to a check.
-// Clipboard writes are best-effort across browser dev, Wails, and webviews, so
+// Clipboard writes are best-effort across browser dev and the desktop shell, so
 // the visible acknowledgement stays tied to the user action.
 export function CopyButton({
   text,

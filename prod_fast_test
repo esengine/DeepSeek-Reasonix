@@ -2,8 +2,7 @@
 # Fast local production-style desktop package from this checkout.
 #
 # This is a convenience wrapper around ./prod_test for iteration builds:
-# native host architecture, no Wails clean, and no macOS DMG unless explicitly
-# overridden.
+# native host architecture and no macOS DMG unless explicitly overridden.
 set -euo pipefail
 
 if [[ "${1:-}" == "-h" || "${1:-}" == "--help" ]]; then
@@ -18,7 +17,6 @@ Examples:
 
 Fast defaults:
   platform  native host architecture; macOS uses darwin/arm64 or darwin/amd64
-  clean     skipped by default; set DESKTOP_BUILD_CLEAN=1 to force Wails -clean
   dmg       skipped by default; set DESKTOP_BUILD_SKIP_DMG=0 to create it
 
 This delegates to ./prod_test with PROD_TEST_FAST=1.

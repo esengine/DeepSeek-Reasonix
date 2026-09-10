@@ -9,6 +9,7 @@ import { createRoot } from "react-dom/client";
 import type { AppBindings } from "../lib/bridge";
 import { useController } from "../lib/useController";
 import type { HistorySlice, HistorySliceRequest, TabMeta } from "../lib/types";
+import { installDesktopHostStub } from "./desktopHostStub";
 
 let passed = 0;
 let failed = 0;
@@ -89,7 +90,7 @@ let backendActiveId = "tab-local";
 let historySliceCalls: string[] = [];
 let setActiveCalls: string[] = [];
 
-window.go = {
+installDesktopHostStub(({
   main: {
     App: {
       RegisterNavigationIntent: async () => {},
@@ -131,7 +132,7 @@ window.go = {
       ReportUIReady: async () => {},
     } as Partial<AppBindings> as AppBindings,
   },
-};
+}).main.App);
 
 type ControllerApi = {
   activeTabId?: string;

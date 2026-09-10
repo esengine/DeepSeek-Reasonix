@@ -7,6 +7,7 @@ import type { AppBindings } from "../lib/bridge";
 import type { HistoryMessage, Meta, TabMeta, WireEvent } from "../lib/types";
 import { useController } from "../lib/useController";
 import { historySliceFromMessages } from "./mockHistorySlice";
+import { installDesktopHostStub } from "./desktopHostStub";
 
 let passed = 0;
 let failed = 0;
@@ -72,7 +73,6 @@ let revision = 1;
 let history: HistoryMessage[] = [];
 let listTabsCalls = 0;
 let historyCalls = 0;
-const agentEventHandlers: Array<(event: WireEvent) => void> = [];
 
 function tabMeta(): TabMeta {
   return {
@@ -120,14 +120,7 @@ function meta(): Meta {
   };
 }
 
-window.runtime = {
-  EventsOn: (name, handler) => {
-    if (name === "agent:event") agentEventHandlers.push(handler as (event: WireEvent) => void);
-    return () => {};
-  },
-  BrowserOpenURL: () => {},
-};
-window.go = {
+const desktopStub = installDesktopHostStub(({
   main: {
     App: {
       ListTabs: async () => {
@@ -151,7 +144,7 @@ window.go = {
       },
     } as Partial<AppBindings> as AppBindings,
   },
-};
+}).main.App);
 
 type Controller = ReturnType<typeof useController>;
 let controller: Controller | undefined;
@@ -170,10 +163,8 @@ await act(async () => {
 await waitFor("initial session", () => controller?.activeTabId === tabID && historyCalls > 0);
 
 await act(async () => {
-  for (const handler of agentEventHandlers) {
-    handler({ kind: "turn_started", tabId: tabID });
-    handler({ kind: "turn_done", tabId: tabID });
-  }
+  desktopStub.emit("agent:event", { kind: "turn_started", tabId: tabID });
+  desktopStub.emit("agent:event", { kind: "turn_done", tabId: tabID });
   await flushPromises();
 });
 fakeNow += 60_000;

@@ -1,3 +1,5 @@
+import { desktopHost } from "./desktopHost";
+
 export type DesktopPlatform = "darwin" | "windows" | "linux";
 const MACOS_WORKBENCH_TITLEBAR_HEIGHT = 46;
 
@@ -7,7 +9,7 @@ export function normalizeDesktopPlatform(value: string): DesktopPlatform {
 }
 
 export function browserPlatformOverride(): DesktopPlatform | null {
-  if (typeof window === "undefined" || window.runtime) return null;
+  if (typeof window === "undefined" || desktopHost().kind !== "none") return null;
   const value = new URLSearchParams(window.location.search).get("platform");
   if (value === "darwin" || value === "windows" || value === "linux") return value;
   return null;

@@ -29,7 +29,7 @@ A minimal project file is usually enough:
 # Build and verify
 
 - Run `go test ./...` before reporting completion.
-- Do not edit generated files under `desktop/frontend/wailsjs/`.
+- Do not edit generated files under `desktop/frontend/src/generated/`.
 - Keep public API changes backward compatible.
 ```
 

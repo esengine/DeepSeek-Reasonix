@@ -65,7 +65,7 @@ func (c *Controller) sessionTitleProvider() (provider.Provider, string, error) {
 	}
 	c.mu.Lock()
 	resolver := c.providerResolver
-	ref := strings.TrimSpace(c.modelRef)
+	ref := strings.TrimSpace(c.selection.ref)
 	c.mu.Unlock()
 	if resolver == nil {
 		return nil, "", fmt.Errorf("session title: no provider resolver available")

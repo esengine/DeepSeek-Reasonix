@@ -10,6 +10,9 @@ import (
 func (a *Agent) markDependencySkipped(calls []provider.ToolCall, outcomes []toolOutcome, results []string, durations []int64, start int, cause *mutationBarrierCause) {
 	if cause != nil {
 		a.mutationDependencyBarrier.CompareAndSwap(nil, cause)
+		if !cause.evidenceOnly {
+			a.mutationDependencyBarrier.Store(cause)
+		}
 	}
 	cause = a.mutationDependencyBarrier.Load()
 	for j := start; j < len(calls); j++ {
@@ -20,6 +23,9 @@ func (a *Agent) markDependencySkipped(calls []provider.ToolCall, outcomes []tool
 		// targets fall through to run() so executeOne can resolve the real
 		// target and re-apply the barrier before Commit/Execute.
 		if !batchCallStaticallySkippable(a, calls[j]) {
+			continue
+		}
+		if cause != nil && cause.evidenceOnly && a.independentEvidenceWriter(calls[j]) {
 			continue
 		}
 		isVerification := calls[j].Name == "bash" && evidence.IsVerificationCommand(bashCommandFromArgs(json.RawMessage(calls[j].Arguments)))

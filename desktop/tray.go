@@ -36,6 +36,9 @@ func (a *App) startTray() bool {
 	if a == nil || a.shuttingDown.Load() || a.forceQuit.Load() {
 		return false
 	}
+	if a.hostShell != nil {
+		return a.hostShell.startTray()
+	}
 	if !traySupported() {
 		reason := "no_session_bus"
 		if goruntime.GOOS == "darwin" {
@@ -111,6 +114,10 @@ func (a *App) startTray() bool {
 }
 
 func (a *App) stopTray() {
+	if a.hostShell != nil {
+		a.hostShell.stopTray()
+		return
+	}
 	a.mu.RLock()
 	t := a.tray
 	var end func()
@@ -139,6 +146,10 @@ func (t *desktopTray) stopHealthMonitor() {
 }
 
 func (a *App) updateTrayLocale(locale string) {
+	if a.hostShell != nil {
+		a.hostShell.updateTrayLocale(locale)
+		return
+	}
 	a.mu.RLock()
 	t := a.tray
 	var openItem, quitItem *systray.MenuItem

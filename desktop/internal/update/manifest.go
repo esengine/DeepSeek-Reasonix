@@ -7,6 +7,11 @@ package update
 
 import "runtime"
 
+// ElectronInstallLayout is an explicit migration boundary. Wails-era clients
+// reject unknown layouts before downloading or replacing any installed file.
+// Their first Electron upgrade must use the complete installer manually.
+const ElectronInstallLayout = "electron-v1"
+
 // Manifest is the latest.json published alongside a desktop release. The updater
 // fetches it from the R2 mirror (primary) or GitHub releases (fallback), compares
 // Version against the running build, and looks up the running platform's artifact

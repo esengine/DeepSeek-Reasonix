@@ -21,7 +21,8 @@
   typed report 等显式流程保留自己的约束。
 - compaction 默认单次摘要;chunked/tree-reduce 高级恢复仅限显式场景
   (手动 `/compact` 与明确标记的 recovery workflow)。
-- final readiness、工具安全、取消、预算和 incomplete-read 继续作为硬边界。
+- final readiness、工具安全、取消、预算和显式全文读取的有界暂停继续作为硬边界；
+  普通部分读取不冻结独立工作，详见 [读取证据生命周期](READ_EVIDENCE_LIFECYCLE.zh-CN.md)。
 - 旧配置/旧状态保留一版读取兼容;新运行时不再执行旧 fallback。
 
 ## 指标基线

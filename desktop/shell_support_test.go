@@ -140,7 +140,7 @@ func TestSettingsSandboxViewShellContract(t *testing.T) {
 	if sb.ShellReloadRequired {
 		t.Fatal("no controller divergence without a controller")
 	}
-	// Wails must encode an array, never null.
+	// The bridge must encode an array, never null.
 	if sb.ShellCapabilities == nil {
 		t.Fatal("shellCapabilities must never be nil")
 	}

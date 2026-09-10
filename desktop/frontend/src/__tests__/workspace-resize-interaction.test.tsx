@@ -8,6 +8,7 @@ import { WorkspacePanel } from "../components/WorkspacePanel";
 import type { AppBindings } from "../lib/bridge";
 import { LocaleProvider } from "../lib/i18n";
 import { resetWorkspaceTreeMemoryForTests } from "../lib/workspaceTreeMemory";
+import { installDesktopHostStub } from "./desktopHostStub";
 
 let passed = 0;
 let failed = 0;
@@ -85,7 +86,7 @@ Object.defineProperty(dom.window.HTMLElement.prototype, "getBoundingClientRect",
 console.log("\nworkspace right-side tree resize interaction");
 
 resetWorkspaceTreeMemoryForTests();
-window.go = {
+installDesktopHostStub(({
   main: {
     App: {
       ListDirForTab: async (_tabId, dir) => dir === "" ? [{ name: "app.ts", isDir: false }] : [],
@@ -96,7 +97,7 @@ window.go = {
       ReadFileForTab: async (_tabId, path) => ({ path, body: "const value = 1;", size: 16, truncated: false, binary: false }),
     } as Partial<AppBindings> as AppBindings,
   },
-};
+}).main.App);
 
 const rootElement = document.getElementById("root");
 if (!rootElement) throw new Error("missing root");

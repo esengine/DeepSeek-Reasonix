@@ -124,7 +124,7 @@ func (a *App) openTopicTabPreferLiveActivation(scope, workspaceRoot, topicID, se
 	a.mu.Lock()
 	if promoted := a.promoteDetachedRuntimeLocked(sessionPath, activate); promoted != nil {
 		meta := a.tabMeta(promoted, promoted.ID == a.activeTabID)
-		_ = a.saveTabsLocked()
+		a.saveTabsLocked()
 		a.mu.Unlock()
 		// A TurnDone missed while the runtime was detached leaves a permanent
 		// spinner; reconcile against the controller's real turn state on open.

@@ -21,7 +21,7 @@ coverage.out
 cpu.prof
 mem.prof
 
-# Wails desktop artifacts
+# Desktop build artifacts
 /desktop/build/*
 !/desktop/build/appicon.png
 !/desktop/build/appicon.svg
@@ -29,8 +29,7 @@ mem.prof
 /desktop/frontend/dist/*
 !/desktop/frontend/dist/.gitkeep
 /desktop/frontend/sourcemaps/
-/desktop/frontend/wailsjs/
-/desktop/frontend/package.json.md5
+/desktop/electron/dist/
 
 # Environment / local config (reasonix.example.toml is the shared template)
 .env

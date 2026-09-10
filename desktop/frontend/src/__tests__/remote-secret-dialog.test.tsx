@@ -5,6 +5,7 @@ import { JSDOM } from "jsdom";
 import { act } from "react";
 
 import type { AppBindings } from "../lib/bridge";
+import { installDesktopHostStub } from "./desktopHostStub";
 
 let passed = 0;
 let failed = 0;
@@ -45,11 +46,11 @@ const [{ createRoot }, { RemoteSecretDialog }, { LocaleProvider }, { useRemoteSt
 ]);
 
 const calls: Array<{ hostId: string; promptId: string; secret: string; accept: boolean }> = [];
-window.go = { main: { App: {
+installDesktopHostStub(({ main: { App: {
   async ConfirmRemoteSecret(hostId: string, promptId: string, secret: string, accept: boolean) {
     calls.push({ hostId, promptId, secret, accept });
   },
-} as Partial<AppBindings> as AppBindings } };
+} as Partial<AppBindings> as AppBindings } }).main.App);
 
 const rootElement = document.getElementById("root");
 if (!rootElement) throw new Error("missing root");

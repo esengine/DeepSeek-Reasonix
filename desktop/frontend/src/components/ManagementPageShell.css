@@ -1,7 +1,7 @@
-.management-screen { position: fixed; inset: 0; z-index: var(--z-modal); display: flex; flex-direction: column; overflow: hidden; background: var(--bg-soft); color: var(--fg); --wails-draggable: no-drag; }
+.management-screen { position: fixed; inset: 0; z-index: var(--z-modal); display: flex; flex-direction: column; overflow: hidden; background: var(--bg-soft); color: var(--fg); --reasonix-draggable: no-drag; }
 .management-screen[hidden] { display: none; }
-.management-screen__chrome { flex: 0 0 var(--management-titlebar-height, 44px); background: var(--bg-soft); --wails-draggable: drag; user-select: none; }
-.management-screen__back { display: flex; align-items: center; gap: 10px; margin: 8px 14px 12px; padding: 12px; flex: 0 0 auto; border: 0; border-radius: 8px; background: transparent; color: var(--fg-dim); font: inherit; text-align: left; cursor: pointer; --wails-draggable: no-drag; }
+.management-screen__chrome { flex: 0 0 var(--management-titlebar-height, 44px); background: var(--bg-soft); --reasonix-draggable: drag; user-select: none; }
+.management-screen__back { display: flex; align-items: center; gap: 10px; margin: 8px 14px 12px; padding: 12px; flex: 0 0 auto; border: 0; border-radius: 8px; background: transparent; color: var(--fg-dim); font: inherit; text-align: left; cursor: pointer; --reasonix-draggable: no-drag; }
 .management-screen__back:hover { background: var(--bg-elev); color: var(--fg); }
 .management-screen__back:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
 .management-screen__top { display: flex; align-items: center; gap: 20px; padding: 0 24px 16px 0; }

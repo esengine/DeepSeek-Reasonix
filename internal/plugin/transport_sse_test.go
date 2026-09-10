@@ -336,12 +336,29 @@ func TestLegacySSEDisconnectRebuildsBeforeNextCall(t *testing.T) {
 	}
 	transport.reconnectDelays = []time.Duration{time.Millisecond}
 	defer transport.close()
+	initial, err := transport.acquire(t.Context())
+	if err != nil {
+		t.Fatal(err)
+	}
 
 	if _, err := transport.call(t.Context(), "tools/list", map[string]any{}); err != nil {
 		t.Fatalf("first tools/list: %v", err)
 	}
 	ctx, cancel := context.WithTimeout(t.Context(), 3*time.Second)
 	defer cancel()
+	// The first POST returning does not mean the client has read SSE EOF.
+	// Wait for that actual connection boundary before testing a call after EOF;
+	// otherwise it can legitimately race the retired endpoint and receive 410.
+	ended := make(chan struct{})
+	go func() {
+		_ = initial.session.Wait()
+		close(ended)
+	}()
+	select {
+	case <-ended:
+	case <-ctx.Done():
+		t.Fatal("client did not observe the initial SSE stream ending")
+	}
 	if _, err := transport.call(ctx, "tools/list", map[string]any{}); err != nil {
 		t.Fatalf("tools/list after SSE EOF: %v", err)
 	}

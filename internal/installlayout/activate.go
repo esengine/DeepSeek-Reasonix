@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"path"
 	"path/filepath"
 	"runtime"
 	"slices"
@@ -21,7 +22,8 @@ const activationLockName = ".reasonix-activate.lock"
 
 // Member is one file to publish into a version directory.
 type Member struct {
-	// Name is a base name only (no directories). Must be on the allow-list.
+	// Name is a forward-slash path relative to the version directory: a
+	// whitelisted base name, or app/... for the shell tree.
 	Name string
 	// Path is a regular file on the same volume as the install root (preferred)
 	// or any readable regular file that will be copied.
@@ -38,8 +40,8 @@ type ActivationRequest struct {
 	// share a global pending file.
 	RequestID string
 	Members   []Member
-	// RequiredNames, when non-empty, is the exact member whitelist. Defaults to
-	// the platform desktop release unit.
+	// RequiredNames, when non-empty, is the exact member whitelist and may list
+	// app/ tree members. Defaults to the platform desktop release unit.
 	RequiredNames []string
 	// RootMembers are stable entry points published at InstallRoot before the
 	// current.json commit. They are rolled back if any later step fails.
@@ -82,14 +84,14 @@ func ActivateVersion(req ActivationRequest) error {
 	if len(required) == 0 {
 		required = AllowedVersionMembers()
 	}
-	if err := validateMembers(req.Members, required); err != nil {
+	if err := validateMembers(req.Members, required, true); err != nil {
 		return err
 	}
 	if len(req.RootMembers) > 0 {
 		if len(req.RequiredRootNames) == 0 {
 			return fmt.Errorf("installlayout: root member whitelist is required")
 		}
-		if err := validateMembers(req.RootMembers, req.RequiredRootNames); err != nil {
+		if err := validateMembers(req.RootMembers, req.RequiredRootNames, false); err != nil {
 			return fmt.Errorf("installlayout: root entries: %w", err)
 		}
 	} else if len(req.RequiredRootNames) > 0 {
@@ -138,16 +140,8 @@ func ActivateVersion(req ActivationRequest) error {
 			return err
 		}
 	}
-	// Ensure every required name exists as a regular file (no symlinks).
-	for _, name := range required {
-		path := filepath.Join(stagingPath, name)
-		info, err := os.Lstat(path)
-		if err != nil {
-			return fmt.Errorf("installlayout: staged member %s: %w", name, err)
-		}
-		if !info.Mode().IsRegular() || info.Mode()&os.ModeSymlink != 0 {
-			return fmt.Errorf("installlayout: staged member %s is not a regular file", name)
-		}
+	if err := verifyStagedMembers(stagingPath, required); err != nil {
+		return err
 	}
 	if len(req.RootMembers) > 0 {
 		if err := os.Mkdir(rootStagingPath, 0o755); err != nil {
@@ -291,7 +285,28 @@ func wrapRollbackError(label string, err error) error {
 	return fmt.Errorf("installlayout: %s: %w", label, err)
 }
 
-func validateMembers(members []Member, required []string) error {
+// ValidateMemberName accepts a base name or a forward-slash path under app/
+// whose segments are never empty, ".", "..", or contain a backslash or colon.
+func ValidateMemberName(name string) error {
+	invalid := fmt.Errorf("installlayout: member name %q is invalid", name)
+	if name == "" || name != strings.TrimSpace(name) || strings.ContainsAny(name, "\\:\x00") {
+		return invalid
+	}
+	if path.IsAbs(name) || filepath.IsAbs(name) || path.Clean(name) != name {
+		return invalid
+	}
+	for part := range strings.SplitSeq(name, "/") {
+		if part == "" || part == "." || part == ".." {
+			return invalid
+		}
+	}
+	if strings.Contains(name, "/") && !strings.HasPrefix(name, AppShellDirName+"/") {
+		return fmt.Errorf("installlayout: member %q must be under %s/", name, AppShellDirName)
+	}
+	return nil
+}
+
+func validateMembers(members []Member, required []string, allowTree bool) error {
 	if len(members) == 0 {
 		return fmt.Errorf("installlayout: no members to activate")
 	}
@@ -301,9 +316,12 @@ func validateMembers(members []Member, required []string) error {
 	}
 	seen := make(map[string]struct{}, len(members))
 	for _, m := range members {
+		if err := ValidateMemberName(m.Name); err != nil {
+			return err
+		}
 		name := normalizeMemberName(m.Name)
-		if name == "" || name != filepath.Base(name) || strings.Contains(name, `\`) {
-			return fmt.Errorf("installlayout: member name %q is invalid", m.Name)
+		if !allowTree && strings.Contains(name, "/") {
+			return fmt.Errorf("installlayout: member %q must be a base name", m.Name)
 		}
 		if _, ok := allowed[name]; !ok {
 			return fmt.Errorf("installlayout: member %q is not allowed", m.Name)
@@ -335,6 +353,23 @@ func normalizeMemberName(name string) string {
 	return name
 }
 
+func verifyStagedMembers(stagingPath string, required []string) error {
+	for _, name := range required {
+		rel := filepath.FromSlash(name)
+		if err := rejectSymlinkPathComponents(stagingPath, rel); err != nil {
+			return fmt.Errorf("installlayout: staged member %s: %w", name, err)
+		}
+		info, err := os.Lstat(filepath.Join(stagingPath, rel))
+		if err != nil {
+			return fmt.Errorf("installlayout: staged member %s: %w", name, err)
+		}
+		if !info.Mode().IsRegular() {
+			return fmt.Errorf("installlayout: staged member %s is not a regular file", name)
+		}
+	}
+	return nil
+}
+
 func publishMember(stagingDir string, m Member) error {
 	src := filepath.Clean(strings.TrimSpace(m.Path))
 	info, err := os.Lstat(src)
@@ -348,7 +383,10 @@ func publishMember(stagingDir string, m Member) error {
 	if mode == 0 {
 		mode = 0o755
 	}
-	dst := filepath.Join(stagingDir, filepath.Base(m.Name))
+	dst := filepath.Join(stagingDir, filepath.FromSlash(m.Name))
+	if err := os.MkdirAll(filepath.Dir(dst), 0o755); err != nil {
+		return fmt.Errorf("installlayout: create %s parent: %w", m.Name, err)
+	}
 	if err := copyFileRegular(src, dst, mode); err != nil {
 		return fmt.Errorf("installlayout: copy %s: %w", m.Name, err)
 	}

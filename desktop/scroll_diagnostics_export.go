@@ -15,8 +15,6 @@ import (
 	"slices"
 	"strings"
 	"time"
-
-	"github.com/wailsapp/wails/v2/pkg/runtime"
 )
 
 const (
@@ -303,11 +301,6 @@ func oneOf(value string, candidates ...string) bool {
 	return slices.Contains(candidates, value)
 }
 
-func buildScrollDiagnosticsZip(payload string) ([]byte, error) {
-	data, _, err := buildScrollDiagnosticsArchive(payload)
-	return data, err
-}
-
 func buildScrollDiagnosticsArchive(payload string) ([]byte, string, error) {
 	decoded, err := decodeScrollDiagnosticsPayload(payload)
 	if err != nil {
@@ -371,7 +364,7 @@ func (a *App) ExportScrollDiagnostics(payload string) (string, error) {
 		return "", nil
 	}
 	defaultFilename := fmt.Sprintf("reasonix-scroll-diagnostics-%s.zip", reportID[:8])
-	path, err := runtime.SaveFileDialog(a.ctx, runtime.SaveDialogOptions{
+	path, err := a.nativeHost().SaveFileDialog(a.ctx, nativeDialogOptions{
 		Title:                "Export scroll diagnostics",
 		DefaultDirectory:     dialogDefaultDirectory(a.activeWorkspaceRoot()),
 		DefaultFilename:      safeExportFilename(defaultFilename),

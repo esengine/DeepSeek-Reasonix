@@ -10,6 +10,7 @@ import { TurnCheckDetails } from "../components/TurnCheckDetails";
 import { LocaleProvider } from "../lib/i18n";
 import type { AppBindings } from "../lib/bridge";
 import type { WireCompletionSummary } from "../lib/types";
+import { installDesktopHostStub } from "./desktopHostStub";
 
 registerHooks({
   resolve(specifier, context, nextResolve) {
@@ -90,7 +91,7 @@ type WorkspaceProps = Parameters<typeof WorkspacePanel>[0];
 
 async function createHarness(props: Partial<WorkspaceProps>) {
   const dom = installDom();
-  window.go = {
+  installDesktopHostStub(({
     main: {
       App: {
         ListDirForTab: async () => [],
@@ -104,7 +105,7 @@ async function createHarness(props: Partial<WorkspaceProps>) {
         ReadFileForTab: async (_tabID, path) => ({ path, body: "", size: 0, truncated: false, binary: false }),
       } as Partial<AppBindings> as AppBindings,
     },
-  };
+  }).main.App);
   const root = createRoot(document.getElementById("root")!);
   let currentProps: WorkspaceProps = {
     open: true,
@@ -189,11 +190,11 @@ console.log("\nworkspace turn verification");
   const root = createRoot(document.getElementById("root")!);
   const pending = new Map<string, (value: unknown) => void>();
   const deferred = (key: string) => new Promise(resolve => pending.set(key, resolve));
-  window.go = { main: { App: {
+  installDesktopHostStub({
     WorkspaceTurnChanges: (_tab, session) => deferred(`files:${session}`),
     WorkspaceTurnChangeDetail: (_tab, session) => deferred(`detail:${session}`),
     TurnCheckLog: (_tab, session) => deferred(`log:${session}`),
-  } as Partial<AppBindings> as AppBindings } };
+  } as Partial<AppBindings> as AppBindings);
   const diff = { id: "frozen", turn: 0, coverage: "complete" as const, files: [{ path: "f.ts", kind: "modify", added: 1, removed: 1 }], added: 1, removed: 1, reasons: [] };
   const result = { ...summary(1), receipt: { verdict: "partial", diff, verifications: [{ command: "test", passed: false, toolCallId: "check", toolResultId: "entry" }] } };
   const paint = (session: string) => act(async () => root.render(<LocaleProvider><WorkspaceTurnResult summary={result} tabId="a" sessionPath={session} initialView="changes" onAllChanges={() => {}} /></LocaleProvider>));

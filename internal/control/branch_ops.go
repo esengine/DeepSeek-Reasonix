@@ -91,6 +91,8 @@ func (c *Controller) forkNamedReady(turn int, name string, switchToFork bool, ki
 		Preview:          forkPreview,
 		Turns:            forkTurns,
 		SchemaVersion:    agent.BranchMetaCountsVersion,
+		Model:            c.selection.ref,
+		ModelIdentity:    c.selection.identity,
 	}); err != nil {
 		return "", c.rewindFail(err)
 	}
@@ -183,6 +185,8 @@ func (c *Controller) Branch(name string) (string, error) {
 		Preview:          branchPreview,
 		Turns:            branchTurns,
 		SchemaVersion:    agent.BranchMetaCountsVersion,
+		Model:            c.selection.ref,
+		ModelIdentity:    c.selection.identity,
 	}); err != nil {
 		return "", c.rewindFail(err)
 	}
@@ -246,6 +250,9 @@ func (c *Controller) SwitchBranch(ref string) (agent.BranchInfo, error) {
 	}
 	if !agent.IsVisibleSession(match.Path) {
 		return agent.BranchInfo{}, c.rewindFail(fmt.Errorf("branch %q not found", ref))
+	}
+	if err := c.ValidateSessionModel(match.Path); err != nil {
+		return agent.BranchInfo{}, c.rewindFail(err)
 	}
 	if match.HeadID != "" && agent.CanonicalSessionPath(match.Path) == agent.CanonicalSessionPath(c.SessionPath()) {
 		return c.switchHeadInPlace(match)

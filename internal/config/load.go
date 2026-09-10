@@ -72,6 +72,7 @@ func LoadUserConfigReadOnly() (*Config, error) {
 		}
 	}
 	normalizeConfigForEdit(cfg)
+	cfg.loadOpenCodeGoJournal(userConfigLoadPath())
 	return cfg, nil
 }
 
@@ -233,7 +234,7 @@ func loadForRoot(root string, opts loadForRootOptions) (*Config, error) {
 		cfg.mergeMCPJSON(loadLegacyMCP(legacyConfigPath()))
 	}
 	_ = mergeInstalledPluginPackages(cfg, root)
-	if err := normalizeLoadedConfig(cfg); err != nil {
+	if err := normalizeRuntimeConfigWithMigrationJournal(cfg); err != nil {
 		return nil, err
 	}
 	if userDefaultModelExplicit {
@@ -749,6 +750,7 @@ func loadForEditStrict(path string, loadCredentials, persistMigrations bool) (*C
 	}
 	markExplicitDefaultProjectSkillKeys(cfg, path, meta)
 	changed := normalizeConfigForEdit(cfg)
+	cfg.loadOpenCodeGoJournal(path)
 	if persistMigrations && changed && strings.TrimSpace(path) != "" {
 		if _, err := os.Stat(path); err == nil {
 			if err := cfg.SaveTo(path); err != nil {

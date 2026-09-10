@@ -94,7 +94,7 @@ func (a *App) SetActiveTab(tabID string) error {
 
 	// I/O outside the lock — disk writes can block for hundreds of ms on
 	// Windows when antivirus or the search indexer briefly locks the file.
-	_ = a.saveTabsWrite(dir, entries, activeID, version)
+	a.saveTabsWrite(dir, entries, activeID, version)
 	if active != nil {
 		active.clearRuntimeDisplayCurrency()
 	}

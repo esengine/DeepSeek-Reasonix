@@ -4,7 +4,7 @@
 
 ## Desktop PR checks
 
-`desktop-prepare` generates Wails bindings and builds the Linux frontend once.
+`desktop-prepare` regenerates the desktop host contract (failing on drift) and builds the Linux frontend once.
 Its artifact is consumed by independent `desktop-frontend`, `desktop-browser`,
 and `desktop-go` jobs. The existing required `desktop` check aggregates all
 four results, rejects failures/cancellations/unexpected skips, and accepts a

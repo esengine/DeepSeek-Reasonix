@@ -6,6 +6,7 @@ import { createRoot } from "react-dom/client";
 import { HeartbeatView, TaskEditor } from "../custom/features/heartbeat/HeartbeatPanel";
 import type { HeartbeatTask } from "../custom/features/heartbeat/heartbeat.types";
 import { LocaleProvider } from "../lib/i18n";
+import { installDesktopHostStub } from "./desktopHostStub";
 
 let passed = 0;
 let failed = 0;
@@ -58,23 +59,17 @@ let nextID = 0;
 let savedUpdate: { tasks?: HeartbeatTask[] } | null = null;
 let backendTasks: HeartbeatTask[] = [];
 let saveShouldFail = false;
-Object.assign(window, {
-  go: {
-    main: {
-      App: {
-        async HeartbeatReloadConfig() { return { revision: 1, etag: "test", tasks: backendTasks }; },
-        async HeartbeatSaveConfig(update: { tasks?: HeartbeatTask[] }) {
-          if (saveShouldFail) throw new Error("conflict");
-          savedUpdate = update;
-          backendTasks = update.tasks ?? [];
-          return { revision: 2, etag: "saved", tasks: backendTasks };
-        },
-        async HeartbeatTriggerNow() {},
-        async HeartbeatGenerateID() { nextID += 1; return `draft-${nextID}`; },
-        async ListWorkspaces() { return [{ name: "Project One", path: "/project-one", current: true }]; },
-      },
-    },
+installDesktopHostStub({
+  async HeartbeatReloadConfig() { return { revision: 1, etag: "test", tasks: backendTasks }; },
+  async HeartbeatSaveConfig(update: { tasks?: HeartbeatTask[] }) {
+    if (saveShouldFail) throw new Error("conflict");
+    savedUpdate = update;
+    backendTasks = update.tasks ?? [];
+    return { revision: 2, etag: "saved", tasks: backendTasks };
   },
+  async HeartbeatTriggerNow() {},
+  async HeartbeatGenerateID() { nextID += 1; return `draft-${nextID}`; },
+  async ListWorkspaces() { return [{ name: "Project One", path: "/project-one", current: true }]; },
 });
 
 const rootElement = document.getElementById("root");

@@ -2,6 +2,7 @@ package boot
 
 import (
 	"reasonix/internal/agentpreset"
+	"reasonix/internal/tool"
 )
 
 // Role vocabulary re-exported for old frontends. Runtime constraints live in
@@ -91,4 +92,26 @@ func UnifiedProviderToolNames() []string {
 	out = append(out, core...)
 	out = append(out, host...)
 	return out
+}
+
+// applyUnifiedProviderToolSurface restricts Schemas/ContractEntries to the
+// shared core + host-control tools. use_capability can still Get every
+// registered tool, including those hidden from the provider schema.
+func applyUnifiedProviderToolSurface(reg *tool.Registry) {
+	if reg == nil {
+		return
+	}
+	allow := make([]string, 0, 16)
+	for _, name := range UnifiedProviderToolNames() {
+		if _, ok := reg.Get(name); ok {
+			allow = append(allow, name)
+		}
+	}
+	// Always keep use_capability if somehow only that remains.
+	if len(allow) == 0 {
+		if _, ok := reg.Get("use_capability"); ok {
+			allow = []string{"use_capability"}
+		}
+	}
+	reg.SetProviderVisibleTools(allow)
 }

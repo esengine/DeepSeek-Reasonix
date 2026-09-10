@@ -3,8 +3,6 @@ package main
 import (
 	"os"
 	"path/filepath"
-
-	wailsruntime "github.com/wailsapp/wails/v2/pkg/runtime"
 )
 
 // PickRemoteIdentityFile opens a native file dialog and returns the selected
@@ -18,10 +16,10 @@ func (a *App) PickRemoteIdentityFile() (string, error) {
 	if home, err := os.UserHomeDir(); err == nil {
 		defaultDir = dialogDefaultDirectory(filepath.Join(home, ".ssh"))
 	}
-	return wailsruntime.OpenFileDialog(a.ctx, wailsruntime.OpenDialogOptions{
+	return a.nativeHost().OpenFileDialog(a.ctx, nativeDialogOptions{
 		Title:            "Choose SSH identity file",
 		DefaultDirectory: defaultDir,
-		Filters: []wailsruntime.FileFilter{
+		Filters: []nativeFileFilter{
 			{DisplayName: "SSH identity files", Pattern: "*"},
 		},
 	})

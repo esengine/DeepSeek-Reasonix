@@ -76,17 +76,17 @@ func TestModelForResumePathUsesStoredModelWhenAvailable(t *testing.T) {
 		},
 	}
 
-	if got := modelForResumePath("", path, cfg); got != "saved/model" {
+	if got, err := modelForResumePath("", path, cfg); err != nil || got != "saved/model" {
 		t.Fatalf("modelForResumePath = %q, want saved/model", got)
 	}
-	if got := modelForResumePath("explicit/model", path, cfg); got != "explicit/model" {
+	if got, err := modelForResumePath("explicit/model", path, cfg); err != nil || got != "explicit/model" {
 		t.Fatalf("explicit model was overwritten: %q", got)
 	}
-	if got := modelForResumePath("", filepath.Join(dir, "missing.jsonl"), cfg); got != "" {
+	if got, err := modelForResumePath("", filepath.Join(dir, "missing.jsonl"), cfg); err != nil || got != "" {
 		t.Fatalf("missing session model = %q, want empty fallback", got)
 	}
 	cfg.Providers = cfg.Providers[:1]
-	if got := modelForResumePath("", path, cfg); got != "" {
+	if got, err := modelForResumePath("", path, cfg); err != nil || got != "" {
 		t.Fatalf("unknown stored model = %q, want empty fallback", got)
 	}
 }
@@ -615,7 +615,7 @@ command = "legacy-bin"
 	if err != nil {
 		t.Fatalf("read migrated user config: %v", err)
 	}
-	for _, want := range []string{`config_version = 9`, `[desktop]`, `name    = "legacy-cli"`} {
+	for _, want := range []string{`config_version = 10`, `[desktop]`, `name    = "legacy-cli"`} {
 		if !strings.Contains(string(body), want) {
 			t.Fatalf("migrated config missing %q:\n%s", want, body)
 		}
@@ -642,7 +642,7 @@ func TestRunAppliesUserConfigUpgradesOnStartup(t *testing.T) {
 	if err != nil {
 		t.Fatalf("read upgraded user config: %v", err)
 	}
-	if !strings.Contains(string(body), "config_version = 9") {
+	if !strings.Contains(string(body), "config_version = 10") {
 		t.Fatalf("CLI startup should apply user config upgrades:\n%s", body)
 	}
 }

@@ -266,14 +266,14 @@ ok(
 );
 
 ok(
-  finalDeclaration(".app--darwin .app-chrome--tabs .tabbar", "--wails-draggable") === "drag" &&
-    finalDeclaration(".app--windows-frameless:not(.app--workbench):not(.app--creation) .app-chrome--native-tabs .tabbar", "--wails-draggable") === "drag",
+  finalDeclaration(".app--darwin .app-chrome--tabs .tabbar", "--reasonix-draggable") === "drag" &&
+    finalDeclaration(".app--windows-frameless:not(.app--workbench):not(.app--creation) .app-chrome--native-tabs .tabbar", "--reasonix-draggable") === "drag",
   "classic tabbar whitespace drags the window on macOS and frameless Windows",
 );
 
 ok(
-  finalDeclaration(".app--darwin .app-chrome--tabs .tabbar *", "--wails-draggable") === "no-drag" &&
-    finalDeclaration(".app--windows .app-chrome--native-tabs .tabbar *", "--wails-draggable") === "no-drag",
+  finalDeclaration(".app--darwin .app-chrome--tabs .tabbar *", "--reasonix-draggable") === "no-drag" &&
+    finalDeclaration(".app--windows .app-chrome--native-tabs .tabbar *", "--reasonix-draggable") === "no-drag",
   "classic tabbar controls and tab gaps remain interactive no-drag regions",
 );
 
@@ -449,7 +449,7 @@ ok(
     /PreviewRewindForTab\(tabID: string, turn: number, scope: string\)/.test(bridgeSource) &&
     /CommitRewindForTab\(tabID: string, planID: string, turn: number, scope: string\)/.test(bridgeSource) &&
     /UndoRewindForTab\(tabID: string, transactionID: string\)/.test(bridgeSource),
-  "session-changing controller actions use explicit tab-scoped Wails bindings",
+  "session-changing controller actions use explicit tab-scoped bridge bindings",
 );
 
 ok(
@@ -541,16 +541,16 @@ for (const selector of [
 }
 
 ok(
-  finalDeclaration(".app--windows-frameless:not(.app--workbench):not(.app--creation) .app-chrome--native-tabs .app-chrome__drag-rail", "--wails-draggable") === "drag" &&
+  finalDeclaration(".app--windows-frameless:not(.app--workbench):not(.app--creation) .app-chrome--native-tabs .app-chrome__drag-rail", "--reasonix-draggable") === "drag" &&
     finalDeclaration(".app--windows-frameless:not(.app--workbench):not(.app--creation) .app-chrome--native-tabs .app-chrome__drag-rail", "right")?.includes("--windows-window-controls-safe") &&
-    finalDeclaration(".app--windows .app-chrome--native-tabs .tabbar", "--wails-draggable") === "no-drag",
+    finalDeclaration(".app--windows .app-chrome--native-tabs .tabbar", "--reasonix-draggable") === "no-drag",
   "Windows classic chrome keeps a draggable rail while tabs remain clickable",
 );
 
 ok(
-  finalDeclaration(".sidebar", "--wails-draggable") === "drag" &&
-    finalDeclaration(".app--windows .sidebar", "--wails-draggable") === "no-drag" &&
-    finalDeclaration(".sidebar-resizer", "--wails-draggable") === "no-drag",
+  finalDeclaration(".sidebar", "--reasonix-draggable") === "drag" &&
+    finalDeclaration(".app--windows .sidebar", "--reasonix-draggable") === "no-drag" &&
+    finalDeclaration(".sidebar-resizer", "--reasonix-draggable") === "no-drag",
   "Windows sidebar avoids native window drag without changing other platforms",
 );
 
@@ -599,9 +599,9 @@ ok(
 );
 
 ok(
-  finalDeclaration(".workbench-dock__tools", "--wails-draggable") === "drag" &&
-    finalDeclaration(".workbench-dock__tabs", "--wails-draggable") === "no-drag" &&
-    finalDeclaration(".workbench-dock__tab", "--wails-draggable") === "no-drag",
+  finalDeclaration(".workbench-dock__tools", "--reasonix-draggable") === "drag" &&
+    finalDeclaration(".workbench-dock__tabs", "--reasonix-draggable") === "no-drag" &&
+    finalDeclaration(".workbench-dock__tab", "--reasonix-draggable") === "no-drag",
   "maximized workbench dock keeps a draggable title region while tabs remain clickable",
 );
 
@@ -713,7 +713,7 @@ ok(
   "offscreen skip link does not leak its focus shadow into the workbench title area",
 );
 
-// The Wails drag runtime drops any mousedown with detail !== 1, so a double
+// The OS drag runtime drops any mousedown with detail !== 1, so a double
 // click on a drag region never reaches the OS: both title-bar-hiding platforms
 // have to zoom from here or not at all.
 ok(

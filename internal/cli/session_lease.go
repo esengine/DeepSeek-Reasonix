@@ -9,6 +9,17 @@ import (
 	"reasonix/internal/control"
 )
 
+func persistCLIModelSelection(ctrl control.SessionAPI) error {
+	selected, ok := ctrl.(interface {
+		ModelRef() string
+		ModelSelectionIdentity() string
+	})
+	if !ok || selected.ModelSelectionIdentity() == "" || ctrl.SessionPath() == "" {
+		return nil
+	}
+	return agent.SetBranchModelSelectionPreserveUpdated(ctrl.SessionPath(), selected.ModelRef(), selected.ModelSelectionIdentity())
+}
+
 // bindAndLoadCLIResume acquires the single-writer lease before reading the
 // transcript. Loading first leaves a race where the previous writer can append
 // and release between the read and Rebind, giving the new CLI ownership of a
@@ -80,6 +91,11 @@ func (m *chatTUI) commitSessionSwitch(path string) error {
 func (m *chatTUI) commitSessionSwitchWithLoader(path string, load func(string) (*agent.Session, error)) error {
 	if m == nil {
 		return fmt.Errorf("resume candidate unavailable")
+	}
+	if validator, ok := m.ctrl.(interface{ ValidateSessionModel(string) error }); ok {
+		if err := validator.ValidateSessionModel(path); err != nil {
+			return err
+		}
 	}
 	binding, err := cliAcquireFreeSession(path, m.leases, m.takeover)
 	if err != nil {
@@ -211,6 +227,7 @@ func copySessionForWriting(src string) (string, error) {
 		Turns:            turns,
 		SchemaVersion:    agent.BranchMetaCountsVersion,
 		Model:            srcMeta.Model,
+		ModelIdentity:    srcMeta.ModelIdentity,
 	}
 	if title := strings.TrimSpace(firstNonEmpty(srcMeta.CustomTitle, srcMeta.TopicTitle)); title != "" {
 		meta.CustomTitle = title + " (copy)"

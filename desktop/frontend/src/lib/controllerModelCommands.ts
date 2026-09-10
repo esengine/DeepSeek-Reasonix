@@ -1,11 +1,9 @@
 import { app } from "./bridge";
-import type { BalanceInfo, TabMeta } from "./types";
+import type { BalanceInfo } from "./types";
 
 type Ref<T> = { current: T };
 type Ports = {
-  statesRef: Ref<ReadonlyMap<string, { balance?: BalanceInfo; sessionGen?: number; meta?: Pick<TabMeta, "sessionPath" | "sessionGeneration"> }>>;
-  effortSwitchSeqByTab: Ref<Map<string, number>>;
-  effortSwitchQueueByTab: Ref<Map<string, Promise<void>>>;
+  statesRef: Ref<ReadonlyMap<string, { balance?: BalanceInfo }>>;
   modelSwitchSeqByTab: Ref<Map<string, number>>;
   modelSwitchSuccessVersionByTab: Ref<Map<string, number>>;
   modelSwitchQueueByTab: Ref<ReadonlyMap<string, { fallbackBalance?: BalanceInfo }>>;
@@ -71,38 +69,14 @@ export function createControllerModelCommands(ports: Ports) {
 
   const setEffortForTab = async (tabId: string, level: string) => {
     if (!tabId) return;
-    const { effortSwitchSeqByTab, effortSwitchQueueByTab } = ports;
-    const sequence = (effortSwitchSeqByTab.current.get(tabId) ?? 0) + 1;
-    effortSwitchSeqByTab.current.set(tabId, sequence);
-    const source = statesRef.current.get(tabId);
-    const modelSequence = modelSwitchSeqByTab.current.get(tabId);
-    const ownsTarget = () => {
-      const current = statesRef.current.get(tabId);
-      return effortSwitchSeqByTab.current.get(tabId) === sequence
-        && modelSwitchSeqByTab.current.get(tabId) === modelSequence
-        && source?.sessionGen === current?.sessionGen
-        && source?.meta?.sessionPath === current?.meta?.sessionPath
-        && source?.meta?.sessionGeneration === current?.meta?.sessionGeneration;
-    };
-    // Wails calls can finish out of order. Serialize writes per tab and skip
-    // superseded requests before dispatch; other tabs remain independent.
-    const write = (effortSwitchQueueByTab.current.get(tabId) ?? Promise.resolve())
-      .catch(() => {})
-      .then(async () => {
-        if (ownsTarget()) await app.SetEffortForTab(tabId, level);
-      });
-    effortSwitchQueueByTab.current.set(tabId, write);
     try {
-      await write;
+      await app.SetEffortForTab(tabId, level);
     } catch (err) {
       const { effortSwitchNoticeText } = await import("./controllerSwitchNotices");
-      if (ownsTarget()) dispatchTo(tabId, { type: "local_notice", level: "warn", text: effortSwitchNoticeText(err) });
-    } finally {
-      if (effortSwitchQueueByTab.current.get(tabId) === write) effortSwitchQueueByTab.current.delete(tabId);
-      // A failed idle rebuild can still leave a saved pending selection. Read
-      // the authoritative current/pending pair after both success and failure.
-      if (ownsTarget()) await refreshMetaForTab(tabId);
+      dispatchTo(tabId, { type: "local_notice", level: "warn", text: effortSwitchNoticeText(err) });
+      return;
     }
+    await refreshMetaForTab(tabId);
   };
 
 

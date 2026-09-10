@@ -70,6 +70,7 @@ type incompleteRead struct {
 	path             string
 	phase            incompleteReadPhase
 	fullRead         bool
+	explicitFull     bool
 	cumulativeBytes  int
 	cumulativeTokens int
 	toolCallID       string
@@ -108,6 +109,7 @@ type incompleteReadState struct {
 	roundViolation          bool
 	consecutiveViolations   int
 	failure                 *IncompleteReadError
+	lastHint                string
 }
 
 type incompleteReadTransition struct {
@@ -339,11 +341,12 @@ func (s *incompleteReadState) observeReadFile(
 	fullRead := entry != nil && entry.fullRead || args.fullRead() || s.legacyImplicitFullRead(args)
 	if entry == nil {
 		entry = &incompleteRead{
-			requestPath: args.Path,
-			path:        resolvedPath,
-			fullRead:    fullRead,
-			searches:    make(map[string]incompleteReadSearch),
-			reads:       make(map[string]incompleteReadWindow),
+			requestPath:  args.Path,
+			path:         resolvedPath,
+			fullRead:     fullRead,
+			explicitFull: args.fullRead(),
+			searches:     make(map[string]incompleteReadSearch),
+			reads:        make(map[string]incompleteReadWindow),
 		}
 		entry.readID = incompleteReadID(plan.call.ID, resultRef, entry.path)
 		entry.key = entry.readID
@@ -603,29 +606,21 @@ func (s *incompleteReadState) gate(plan *toolCallPlan) (string, bool) {
 	}
 
 	input := parseIncompleteReadGateInput(plan)
-	hasStrategy := false
 	for _, key := range s.order {
 		entry := s.entries[key]
 		if entry == nil {
 			continue
 		}
-		message, matched, strategy := matchIncompleteReadGateEntry(plan, input, key, entry)
-		hasStrategy = hasStrategy || strategy
+		message, matched, _ := matchIncompleteReadGateEntry(plan, input, key, entry)
 		if matched {
-			if message != "" {
+			if message != "" && entry.explicitFull {
 				s.roundViolation = true
 			}
 			return message, message != ""
 		}
 	}
-	if hasStrategy {
-		s.roundViolation = true
-		return "blocked: an oversized read_file is in restricted search/read mode. Only grep on the target file, read_file with explicit offset and limit, exact session:tool_result recovery, or session:read_strategy_receipt is allowed.", true
-	}
-	if plan.effects.StateMutation || plan.evidenceName == "complete_step" || plan.evidenceName == "submit_plan" {
-		s.roundViolation = true
-		return "blocked: read_file has unread content retained by the host. Complete the exact continuation requested in the latest host message before modifying state or finishing.", true
-	}
+	// Only the addressed continuation is validated here. Mutations have their
+	// own current-source evidence gate; unread pages never freeze other calls.
 	return "", false
 }
 
@@ -636,7 +631,7 @@ func (s *incompleteReadState) blockFinal() (instruction string, pause *Incomplet
 		s.mu.Unlock()
 		return "", &copy
 	}
-	entry := s.firstLocked()
+	entry := s.firstExplicitFullLocked()
 	if entry == nil {
 		s.mu.Unlock()
 		return "", nil
@@ -648,8 +643,9 @@ func (s *incompleteReadState) blockFinal() (instruction string, pause *Incomplet
 		s.mu.Unlock()
 		return "", err
 	}
+	key := entry.key
 	s.mu.Unlock()
-	return s.nextInstruction(), nil
+	return s.instructionFor(key), nil
 }
 
 func (s *incompleteReadState) pauseForEntryLocked(entry *incompleteRead, reason string) *IncompleteReadError {
@@ -684,13 +680,27 @@ func (s *incompleteReadState) finishToolRound() incompleteReadRoundResult {
 			result.record = append(result.record, window.observed...)
 		}
 		result.resolvedIDs = append(result.resolvedIDs, entry.readID)
+		if entry.explicitFull {
+			entry.pendingReceipt = nil
+			result.pause = s.pauseForEntryLocked(entry, "targeted read strategy completed, but the explicit whole-file requirement remains unproven")
+			continue
+		}
 		s.removeEntryLocked(key)
 	}
-	entry := s.firstLocked()
+	entry := s.firstExplicitFullLocked()
 	if entry != nil && s.consecutiveViolations >= 2 {
 		result.pause = s.pauseForEntryLocked(entry, "the model violated the restricted read strategy in two consecutive rounds")
 	}
 	s.roundProgress = false
 	s.roundViolation = false
 	return result
+}
+
+func (s *incompleteReadState) firstExplicitFullLocked() *incompleteRead {
+	for _, key := range s.order {
+		if e := s.entries[key]; e != nil && e.explicitFull {
+			return e
+		}
+	}
+	return nil
 }

@@ -17,6 +17,7 @@ import { LocaleProvider } from "../lib/i18n";
 import type { AppBindings } from "../lib/bridge";
 import type { ProviderPresetView, ProviderView, SettingsView } from "../lib/types";
 import { baseSettings } from "../test-support/settingsTestFixtures";
+import { installDesktopHostStub } from "./desktopHostStub";
 
 let passed = 0;
 let failed = 0;
@@ -286,7 +287,7 @@ defaultCustomSettings.defaultModel = "my-proxy/my-model";
 defaultCustomSettings.providers = [defaultCustomProvider];
 defaultCustomSettings.providerKinds = ["openai"];
 let removedDefaultCustomProviders: string[] = [];
-window.go = {
+installDesktopHostStub(({
   main: {
     App: {
       Settings: async () => defaultCustomSettings,
@@ -299,7 +300,7 @@ window.go = {
       },
     } as Partial<AppBindings> as AppBindings,
   },
-};
+}).main.App);
 const settingsRootEl = document.createElement("div");
 document.body.appendChild(settingsRootEl);
 const settingsRoot = createRoot(settingsRootEl);

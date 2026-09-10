@@ -201,6 +201,7 @@ func (a *App) registerRemoteTabOpen(tab *remoteTab, hostLabel string, opts Remot
 		}
 		delete(a.remoteTabs, id)
 		a.remoteTabLayout.order = removeRemoteTabOrderID(a.remoteTabLayout.order, id)
+		a.forgetRemoteBrowserExecutor(id)
 	}
 	tab.modelSeq = remoteTabModelSeq.Add(1)
 	a.remoteTabs[tab.id] = tab

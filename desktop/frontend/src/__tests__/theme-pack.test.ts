@@ -38,6 +38,7 @@ import {
   isPreviewActive,
   startGlobalPreview,
 } from "../lib/themeExperience";
+import { installDesktopHostStub } from "./desktopHostStub";
 
 const testDir = dirname(fileURLToPath(import.meta.url));
 const packSource = readFileSync(resolve(testDir, "../lib/themePack.ts"), "utf8");
@@ -151,7 +152,6 @@ function styleText(id: string): string {
 (globalThis as unknown as { window: unknown }).window = {
   matchMedia: () => ({ matches: false, addEventListener() {}, removeEventListener() {}, addListener() {}, removeListener() {} }),
   location: { href: "http://127.0.0.1:5197/", origin: "http://127.0.0.1:5197" },
-  runtime: undefined,
 };
 
 console.log("\ntheme pack contract");
@@ -367,10 +367,7 @@ ok(!attrs.has("data-theme-pack"), "cancel restores cleared pack");
 clearThemePack();
 applyTheme("dark", "graphite", { persist: false });
 startGlobalPreview(draft);
-const testWindow = window as unknown as {
-  go?: { main?: { App?: { ActivateThemePack: (id: string) => Promise<void> } } };
-};
-testWindow.go = {
+const activationStub = installDesktopHostStub(({
   main: {
     App: {
       async ActivateThemePack() {
@@ -378,7 +375,7 @@ testWindow.go = {
       },
     },
   },
-};
+}).main.App);
 let activationRejected = false;
 try {
   await activateThemePack(draft.id);
@@ -389,7 +386,7 @@ ok(activationRejected, "activation failure surfaces to caller");
 ok(isPreviewActive(), "activation failure keeps preview reversible");
 cancelGlobalPreview();
 ok(!attrs.has("data-theme-pack") && getThemeStyle() === "graphite", "cancel restores appearance after activation failure");
-delete testWindow.go;
+activationStub.uninstall();
 
 // Save-and-apply must commit the preview before editor unmount cleanup can
 // restore the old snapshot while the gallery reload is in flight.
@@ -722,7 +719,6 @@ ok(stylesSource.includes(".theme-editor__setting-hint"), "content-area guidance 
 ok(stylesSource.includes("background: var(--code-bg, var(--bg-soft))"), "code and diff surfaces consume the opaque code background");
 ok(
   stylesSource.includes("--diff-row-bg: var(--code-add-bg") &&
-    stylesSource.includes("--inline-diff-row-bg: var(--code-del-bg") &&
     stylesSource.includes("background: var(--tp-code-add-bg)") &&
     stylesSource.includes("background: var(--tp-code-del-bg)"),
   "live and preview diff rows consume the same pre-composited safe backgrounds",

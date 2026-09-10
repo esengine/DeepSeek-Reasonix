@@ -180,11 +180,11 @@ func TestExternalOpenersForGlobalTabReportsWorkspaceCapability(t *testing.T) {
 		t.Fatal("ExternalOpenersForTab(global) workspaceOpenable = false, want true")
 	}
 	if view.Openers == nil {
-		t.Fatal("ExternalOpenersForTab(global) openers = nil, want a Wails-safe array")
+		t.Fatal("ExternalOpenersForTab(global) openers = nil, want a bridge-safe array")
 	}
 	unavailable := app.ExternalOpenersForTab("unknown")
 	if unavailable.WorkspaceOpenable || unavailable.Openers == nil {
-		t.Fatalf("ExternalOpenersForTab(unknown) = %+v, want unavailable with an empty Wails-safe array", unavailable)
+		t.Fatalf("ExternalOpenersForTab(unknown) = %+v, want unavailable with an empty bridge-safe array", unavailable)
 	}
 }
 

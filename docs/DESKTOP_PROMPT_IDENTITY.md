@@ -17,7 +17,7 @@ Prompt requests and lifecycle events expose `promptId`, `promptKind`, and
 turn identity are marked `promptLegacy` and are accepted only by compatibility
 paths.
 
-Older Wails methods such as `AnswerQuestionForTab`, `ApproveTab`, and
+Older host methods such as `AnswerQuestionForTab`, `ApproveTab`, and
 `ResolveRecoveryTab` remain available for older clients. New frontend code uses
 `ResolvePromptForTab` and does not silently downgrade to an unfenced method.
 When a stale response is received, the card is removed from the active decision

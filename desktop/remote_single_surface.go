@@ -67,6 +67,7 @@ func (a *App) keepOnlyRemoteVisibleTab(tabID string) (TabMeta, error) {
 				remoteCancels = append(remoteCancels, tab.cancel)
 			}
 			delete(a.remoteTabs, id)
+			a.forgetRemoteBrowserExecutor(id)
 		}
 		a.remoteTabLayout.activeID = tabID
 		a.remoteTabLayout.order = []string{tabID}
@@ -94,7 +95,7 @@ func (a *App) keepOnlyRemoteVisibleTab(tabID string) (TabMeta, error) {
 		for _, tab := range removedLocal {
 			a.removeVisibleTabRuntimeAdmissionHeld(tab)
 		}
-		_ = a.saveTabsWrite(dir, entries, activeID, version)
+		a.saveTabsWrite(dir, entries, activeID, version)
 		return meta, remoteCancels, nil
 	}()
 	if err != nil {

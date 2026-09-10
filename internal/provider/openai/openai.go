@@ -60,6 +60,7 @@ func init() {
 
 // New builds an OpenAI-compatible provider from a resolved config.
 func New(cfg provider.Config) (provider.Provider, error) {
+	cfg = provider.ApplyOpenCodeGoContract("openai", cfg)
 	if cfg.BaseURL == "" {
 		return nil, fmt.Errorf("openai: base_url is required for provider %q", cfg.Name)
 	}

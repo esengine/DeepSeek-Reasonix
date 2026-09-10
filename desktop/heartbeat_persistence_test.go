@@ -93,7 +93,7 @@ func TestHeartbeatTaskLeaseCoversRunStatePersistence(t *testing.T) {
 		t.Fatal(err)
 	}
 	result := make(chan HeartbeatTask, 1)
-	go func() { result <- first.executeTask(task) }()
+	go func() { result <- first.executeTaskWithLease(task, nil) }()
 	<-ctrl.submittedSignal
 
 	if release, err := second.tryAcquireTaskLease(task.ID); !errors.Is(err, filelock.ErrHeld) {
@@ -268,7 +268,7 @@ func TestMergeHeartbeatDiskRunHistoryPreservesAllEngineRunState(t *testing.T) {
 }
 
 // TestHeartbeatMergeRunUpdatesPersistsRunHistory: 模拟 TriggerNow 的完整写盘链路——
-// executeTask 返回含 runHistory 的 t → mergeRunUpdatesLocked → 磁盘。验证 runHistory 真实落盘。
+// executeTaskWithLease 返回含 runHistory 的 t → mergeRunUpdatesLocked → 磁盘。验证 runHistory 真实落盘。
 func TestHeartbeatMergeRunUpdatesPersistsRunHistory(t *testing.T) {
 	isolateDesktopUserDirs(t)
 	engine := &HeartbeatEngine{}
@@ -277,7 +277,7 @@ func TestHeartbeatMergeRunUpdatesPersistsRunHistory(t *testing.T) {
 	if err := engine.ReplaceTasks(seed); err != nil {
 		t.Fatalf("seed: %v", err)
 	}
-	// 模拟 executeTask 返回值：lastRunAt 更新 + runHistory 追加 1 条
+	// 模拟 executeTaskWithLease 返回值：lastRunAt 更新 + runHistory 追加 1 条
 	updates := map[string]HeartbeatTask{
 		"t1": {
 			ID:         "t1",

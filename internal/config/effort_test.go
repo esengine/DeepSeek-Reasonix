@@ -295,7 +295,7 @@ func TestGLMModelRegistryUpgradesLegacyGatewayConfig(t *testing.T) {
 	if got := ReasoningProtocolForEntry(nonGLM); got != "" {
 		t.Fatalf("non-exact GLM alias protocol = %q, want empty without explicit override", got)
 	}
-	otherGateway := &ProviderEntry{Kind: "openai", BaseURL: "https://opencode.ai/zen/go/v1", Model: "glm-5.2"}
+	otherGateway := &ProviderEntry{Kind: "openai", BaseURL: "https://unrelated-gateway.example/v1", Model: "glm-5.2"}
 	if got := ReasoningProtocolForEntry(otherGateway); got != "" {
 		t.Fatalf("unrelated gateway GLM protocol = %q, want empty without explicit override", got)
 	}

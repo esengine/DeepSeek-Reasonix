@@ -10,6 +10,7 @@ import { WorkspacePanel } from "../components/WorkspacePanel";
 import type { AppBindings } from "../lib/bridge";
 import { LocaleProvider } from "../lib/i18n";
 import { resetWorkspaceTreeMemoryForTests } from "../lib/workspaceTreeMemory";
+import { installDesktopHostStub } from "./desktopHostStub";
 
 let passed = 0;
 let failed = 0;
@@ -148,7 +149,7 @@ dom.window.localStorage.setItem("reasonix.workspaceState.v2", JSON.stringify({
   }],
 }));
 
-window.go = {
+installDesktopHostStub(({
   main: {
     App: {
       ListDirForTab: async (_tabId, dir) => {
@@ -167,7 +168,7 @@ window.go = {
       OpenWorkspacePathForTab: async () => {},
     } as Partial<AppBindings> as AppBindings,
   },
-};
+}).main.App);
 
 const rootElement = document.getElementById("root");
 if (!rootElement) throw new Error("missing root");

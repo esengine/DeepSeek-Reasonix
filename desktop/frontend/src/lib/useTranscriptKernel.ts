@@ -217,7 +217,7 @@ export function useTranscriptKernel({
     observedTopRef.current = current.scrollTop;
     const nativeOwned = kernel.observeNativeScroll(current);
     if (!nativeOwned) return null;
-    // Wheel delivery and native scrolling are not synchronous on every Wails
+    // Wheel delivery and native scrolling are not synchronous on every
     // engine. Renew the same lease until the final native scroll event so the
     // browser's final position remains authoritative.
     if (kernel.nativeGestureLeaseActive) renewGestureLease();

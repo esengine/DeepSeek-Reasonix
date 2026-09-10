@@ -648,14 +648,12 @@ func (a *App) flushMetrics() {
 	metricsPendingMu.Unlock()
 	flat := flatten(readCounters(temp))
 	device := collectDeviceInfo()
-	runtimeContext := webRuntimeContextForTelemetry(500 * time.Millisecond)
 	payload := metricsPayload{
 		Version: version, OS: runtime.GOOS, Arch: runtime.GOARCH, Channel: channel,
 		OSBuild: device.OSBuild, OSRevision: device.OSRevision,
 		DistroID: device.DistroID, DistroVersion: device.DistroVersion,
 		KernelVersion: device.KernelVersion, SessionType: device.SessionType,
-		RuntimeEngine: runtimeContext.Engine, RuntimeVersion: runtimeContext.RuntimeVersion,
-		GPUMode: runtimeContext.GPUMode, Counters: flat,
+		RuntimeEngine: desktopRendererEngine, Counters: flat,
 	}
 	if id, err := installID(); err == nil {
 		payload.InstallID = id

@@ -125,7 +125,7 @@ export function RecoveryLineageDialog({ topic, initial, onClose, onChanged, onOp
   };
 
   return createPortal(
-    <div className="management-modal-backdrop recovery-lineage-backdrop" onMouseDown={(event) => { if (event.target === event.currentTarget) onClose(); }}>
+    <div className="management-modal-backdrop recovery-lineage-backdrop" data-app-overlay="" onMouseDown={(event) => { if (event.target === event.currentTarget) onClose(); }}>
       <section className="management-modal recovery-lineage-dialog" role="dialog" aria-modal="true" aria-labelledby="recovery-lineage-title">
         <header className="management-modal__head">
           <div>

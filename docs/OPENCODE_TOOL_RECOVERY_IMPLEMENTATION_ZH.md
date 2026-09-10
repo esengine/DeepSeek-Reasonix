@@ -56,7 +56,7 @@ OpenCode Go `kimi-k3`，Chat 协议，low/max 两档 × 读取/编辑/固定验�
 - 根模块 `go test -p 2 ./...`；Desktop 独立模块 `go test ./...`。
 - 协议/手动恢复、取消/代次、回放、参数、搜索及原写入核验相关 race 检查。通道控制的测试在取消后释放供应商回复，断言无工具启动、无迟到助手提交。
 - Controller 持久化测试在供应商请求阻塞时读取磁盘，验证消费记录已落盘；重复/并发动作不能再次访问供应商。另测新输入失效、重启、未知版本/字段、准备取消及检查点失败。
-- 前端类型、255 个发现式测试套件及相关交互测试；实际浏览器通过 mock bridge 驱动生产 Transcript、恢复按钮及工具卡，验证恢复、停止、迟到结果、无来源提示和摘要。此证据不覆盖原生 Wails 窗口。成功场景没有页面异常；既有 mock 侧栏仍产生重复 tab key 控制台警告。
+- 前端类型、255 个发现式测试套件及相关交互测试；实际浏览器通过 mock bridge 驱动生产 Transcript、恢复按钮及工具卡，验证恢复、停止、迟到结果、无来源提示和摘要。此证据不覆盖原生 Electron 窗口。成功场景没有页面异常；既有 mock 侧栏仍产生重复 tab key 控制台警告。
 - 浏览器复跑：`node desktop/frontend/bench/protocol-recovery.mjs`，需要 Chrome。真实测试使用环境凭据及 `-tags live`：`TestLiveKimiActionComparison`、`TestLiveManualProtocolRecovery`、`TestLiveMultiProviderNativeSearch`。不得把凭据写入测试二进制、日志或文档。
 
 新增本地字段用原始 JSON 保留未知版本及字段，未知版本不允许恢复。旧客户端可读取普通历史，但无法执行新的恢复预算约束，不应依赖降级续跑未解决故障。未触发搜索或恢复的请求前缀和工具 schema 不变；显式故障历史投影可能影响相应缓存前缀。独立搜索的 JSON 新字段改变该次工具结果及后续前缀，不改动此前 system 和工具 schema。来源状态不属于原生协议证明。

@@ -27,6 +27,7 @@ import type {
   TopicActivationRequest,
   WireEvent,
 } from "../lib/types";
+import { installDesktopHostStub } from "./desktopHostStub";
 
 let passed = 0;
 let failed = 0;
@@ -138,10 +139,6 @@ const tabR = tabMeta("tab-r", { running: true, cancellable: true });
 const tabAsk = tabMeta("tab-ask", { workspaceRoot: "/work/ask", topicId: "topic-ask", sessionPath: "/sessions/ask.jsonl" });
 let backendActiveId = "tab-a";
 const tabsById = new Map([tabA, tabB, tabC, tabR, tabAsk].map((tab) => [tab.id, tab]));
-const eventHandlers: Array<(e: WireEvent) => void> = [];
-const readyHandlers: Array<(tabId?: string) => void> = [];
-const topicActivationHandlers: Array<(e: TopicActivationEvent) => void> = [];
-const tabMetaHandlers: Array<(e: TabMetaRefreshEvent) => void> = [];
 // requestId the controller issued per tab, recorded by the mock.
 const requestIdByTab = new Map<string, string>();
 // When true, the mock emits starting+ready synchronously BEFORE returning the
@@ -153,7 +150,7 @@ let failSetActiveTabId = "";
 let restoredTabSeq = 0;
 
 function emitActivation(event: TopicActivationEvent): void {
-  for (const handler of topicActivationHandlers) handler(event);
+  desktopStub.emit("topic:activation", event);
 }
 
 function historyFor(tabID: string): HistoryMessage[] {
@@ -166,17 +163,7 @@ function hasHistory(tabID: string): boolean {
   return controller?.state.items.some((item) => item.kind === "user" && item.text === `history ${tabID}`) ?? false;
 }
 
-window.runtime = {
-  EventsOn: (name: string, cb: (...data: unknown[]) => void) => {
-    if (name === "agent:event") eventHandlers.push(cb as (e: WireEvent) => void);
-    if (name === "agent:ready") readyHandlers.push(cb as (tabId?: string) => void);
-    if (name === "topic:activation") topicActivationHandlers.push(cb as (e: TopicActivationEvent) => void);
-    if (name === "tab:meta") tabMetaHandlers.push(cb as (e: TabMetaRefreshEvent) => void);
-    return () => {};
-  },
-  BrowserOpenURL: () => {},
-};
-window.go = {
+const desktopStub = installDesktopHostStub(({
   main: {
     App: {
       RegisterNavigationIntent: async () => {},
@@ -228,7 +215,7 @@ window.go = {
       ReplayPendingPrompts: async () => {},
     } as Partial<AppBindings> as AppBindings,
   },
-};
+}).main.App);
 
 type Controller = ReturnType<typeof useController>;
 let controller: Controller | undefined;
@@ -328,20 +315,20 @@ eagerActivationEvents = false;
 
 // ── legacy agent:ready flow still works for non-ticketed tabs ───────────────
 await act(async () => {
-  for (const handler of readyHandlers) handler("tab-b");
+  desktopStub.emit("agent:ready", "tab-b");
   await flushPromises();
 });
 await waitFor("legacy ready keeps the session", () => controller?.activeTabId === "tab-b" && hasHistory("tab-b"));
 
 // ── tab:meta refresh push merges; wrong session is fenced out ───────────────
 await act(async () => {
-  for (const handler of tabMetaHandlers) handler({ tabId: "tab-b", meta: metaFor(tabB, { gitBranch: "feature/x", imageInputEnabled: true }) });
+  desktopStub.emit("tab:meta", { tabId: "tab-b", meta: metaFor(tabB, { gitBranch: "feature/x", imageInputEnabled: true }) });
   await flushPromises();
 });
 eq(controller?.state.meta?.gitBranch, "feature/x", "tab:meta merges the refreshed git branch");
 eq(controller?.state.meta?.imageInputEnabled, true, "tab:meta merges the refreshed image-input capability");
 await act(async () => {
-  for (const handler of tabMetaHandlers) handler({ tabId: "tab-b", meta: metaFor(tabB, { gitBranch: "stale", sessionPath: "/elsewhere/other.jsonl" }) });
+  desktopStub.emit("tab:meta", { tabId: "tab-b", meta: metaFor(tabB, { gitBranch: "stale", sessionPath: "/elsewhere/other.jsonl" }) });
   await flushPromises();
 });
 eq(controller?.state.meta?.gitBranch, "feature/x", "tab:meta for a different session binding is discarded");
@@ -412,13 +399,11 @@ transientHistoryFailures.set(tabAsk.id, {
 });
 await act(async () => {
   await controller?.activateTopic("project", tabAsk.workspaceRoot, tabAsk.topicId ?? "");
-  for (const handler of eventHandlers) {
-    handler({
-      kind: "ask_request",
-      tabId: tabAsk.id,
-      ask: { id: "ask-tab-ask", questions: [{ id: "choice", prompt: "Choose a repair", options: [] }] },
-    });
-  }
+  desktopStub.emit("agent:event", {
+    kind: "ask_request",
+    tabId: tabAsk.id,
+    ask: { id: "ask-tab-ask", questions: [{ id: "choice", prompt: "Choose a repair", options: [] }] },
+  });
   await flushPromises();
 });
 eq(controller?.state.ask?.id, "ask-tab-ask", "Ask is visible before activation history hydrates");
@@ -426,7 +411,7 @@ await act(async () => {
   // Production emits agent:ready before topic:activation ready. Hold the
   // startup hydration open so activation-ready must supersede it without
   // resetting the live Ask.
-  for (const handler of readyHandlers) handler(tabAsk.id);
+  desktopStub.emit("agent:ready", tabAsk.id);
   await historyStarted;
   emitActivation({ requestId: requestIdByTab.get(tabAsk.id) ?? "", tabId: tabAsk.id, phase: "ready" });
   releaseHistoryFailure?.();

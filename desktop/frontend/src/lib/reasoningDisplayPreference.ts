@@ -52,7 +52,7 @@ export function setReasoningDisplayPending(): void {
   emit();
 }
 
-/** Hydrates the frontend mirror from the authoritative Wails startup payload. */
+/** Hydrates the frontend mirror from the authoritative desktop startup payload. */
 export function hydrateReasoningDisplayMode(configuredMode: unknown, explicit = false): void {
   const next = resolveReasoningDisplayMode(configuredMode, explicit);
   // Compatibility callers still participate in the canonical two-state

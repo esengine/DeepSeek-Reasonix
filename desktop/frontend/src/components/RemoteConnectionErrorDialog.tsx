@@ -39,7 +39,7 @@ export function RemoteConnectionErrorDialog({
   }, [onClose]);
 
   return createPortal(
-    <div className="remote-hostkey-overlay" role="dialog" aria-modal="true" aria-labelledby="remote-connection-error-title">
+    <div className="remote-hostkey-overlay" data-app-overlay="" role="dialog" aria-modal="true" aria-labelledby="remote-connection-error-title">
       <div className="remote-hostkey-dialog remote-connection-error-dialog">
         <h2 id="remote-connection-error-title" className="remote-hostkey-dialog__title">
           {t(mismatch ? "remote.error.hostKeyMismatch.title" : "remote.error.dialog.title")}

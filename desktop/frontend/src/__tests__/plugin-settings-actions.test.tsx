@@ -5,6 +5,7 @@ import type { AppBindings } from "../lib/bridge";
 import { LocaleProvider } from "../lib/i18n";
 import type { Meta, PluginInstallOptions, PluginView, TabMeta } from "../lib/types";
 import { findButton, flush, installDom, setInputValue, waitFor } from "./capabilities-test-helpers";
+import { installDesktopHostStub } from "./desktopHostStub";
 
 function ok(value: unknown, message: string) {
   if (!value) throw new Error(message);
@@ -52,7 +53,7 @@ function ok(value: unknown, message: string) {
     hooks: 1,
     mcpServers: 0,
   }];
-  window.go = {
+  installDesktopHostStub(({
     main: {
       App: {
         Meta: async () => meta,
@@ -132,7 +133,7 @@ function ok(value: unknown, message: string) {
         },
       } as Partial<AppBindings> as AppBindings,
     },
-  };
+  }).main.App);
 
   await act(async () => {
     root.render(React.createElement(LocaleProvider, null, React.createElement(PluginsSettingsPage)));

@@ -30,6 +30,7 @@ import {
 } from "../lib/useController";
 import { ExtensionCard } from "../components/ExtensionCard";
 import { ExtensionFormDialog } from "../components/ExtensionFormDialog";
+import { installDesktopHostStub } from "./desktopHostStub";
 
 let passed = 0;
 let failed = 0;
@@ -206,7 +207,7 @@ async function flush(ms = 30) {
 
 const invokeCalls: Array<{ tabId: string; name: string; args: Record<string, string> }> = [];
 let invokeResult: string | Error = "Completed!";
-(dom.window as unknown as { go: unknown }).go = {
+installDesktopHostStub(({
   main: {
     App: {
       InvokeExtensionAction: async (tabId: string, name: string, args: Record<string, string>) => {
@@ -216,7 +217,7 @@ let invokeResult: string | Error = "Completed!";
       },
     },
   },
-};
+}).main.App);
 
 const cardItem: ExtensionItem = {
   kind: "extension",

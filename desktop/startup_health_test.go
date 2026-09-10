@@ -259,7 +259,7 @@ func TestShutdownPersistsRecoveryPathCommittedAfterCallback(t *testing.T) {
 			// the old path. The recovery lease must keep this write anchored to
 			// recovery instead of undoing the callback's first save.
 			a.mu.Lock()
-			_ = a.saveTabsLocked()
+			a.saveTabsLocked()
 			a.mu.Unlock()
 			// Controller.commitRecoveredSession updates its path only after the
 			// callback succeeds. Mirror that ordering exactly.

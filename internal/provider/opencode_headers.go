@@ -28,9 +28,9 @@ func NewClientIdentityHeaders() http.Header {
 
 // ApplyOpenCodeGoHeaders implements Go's client identification/cache contract
 // for all three wire adapters. It never changes model input or other vendors.
-func ApplyOpenCodeGoHeaders(req *http.Request, baseURL string, fallback http.Header) {
-	path, ok := officialOpenCodeGoPath(baseURL)
-	if !ok || (path != openCodeGoChatPath && path != openCodeGoAnthropicPath) {
+func ApplyOpenCodeGoHeaders(req *http.Request, _ string, fallback http.Header) {
+	path, ok := officialOpenCodeGoPath(req.URL.String())
+	if !ok || (path != "/zen/go/v1/chat/completions" && path != "/zen/go/v1/messages" && path != "/zen/go/v1/responses" && path != "/zen/go/v1/models") {
 		return
 	}
 	if req.Header.Get("User-Agent") == "" {

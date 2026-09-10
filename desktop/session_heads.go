@@ -26,7 +26,6 @@ func (a *App) tabMetaAfterHeadSwitch(tab *WorkspaceTab) TabMeta {
 	if tab == nil {
 		return TabMeta{}
 	}
-	a.discardPendingTabEffort(tab)
 	a.mu.Lock()
 	tab.SessionGeneration++
 	if tab.sink != nil {

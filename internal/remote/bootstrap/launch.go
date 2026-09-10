@@ -29,8 +29,9 @@ func shellQuote(s string) string {
 // and file-based port, pid, and auth token state. It uses setsid when present
 // and falls back to nohup on stock macOS. Credential-proxy mode selects the
 // tunnel-backed provider; its scoped token remains in the remote 0600 .env
-// and never appears in this command.
-func LaunchCommand(bin, workspace string, p StatePaths, cred *CredentialProxyOptions) string {
+// and never appears in this command. A browser broker rides the serve's
+// environment only, never argv or the config file.
+func LaunchCommand(bin, workspace string, p StatePaths, cred *CredentialProxyOptions, browser *BrowserBrokerOptions) string {
 	modelFlag := ""
 	if cred != nil {
 		modelFlag = " --model " + shellQuote(cred.Provider)
@@ -38,13 +39,14 @@ func LaunchCommand(bin, workspace string, p StatePaths, cred *CredentialProxyOpt
 	return fmt.Sprintf(
 		"mkdir -p %s && cd %s && rm -f %s %s && umask 077 && : >>%s && chmod 600 %s && "+
 			"SX=; command -v setsid >/dev/null 2>&1 && SX=setsid; "+
-			"$SX nohup %s serve --addr 127.0.0.1:0 --auth token --token-file %s --port-file %s --pid-file %s%s </dev/null >>%s 2>&1 & echo $!",
+			"%s$SX nohup %s serve --addr 127.0.0.1:0 --auth token --token-file %s --port-file %s --pid-file %s%s </dev/null >>%s 2>&1 & echo $!",
 		shellQuote(p.Dir),
 		shellQuote(workspace),
 		shellQuote(p.PortFile),
 		shellQuote(p.PidFile),
 		shellQuote(p.LogFile),
 		shellQuote(p.LogFile),
+		browserEnvPrefix(browser),
 		shellQuote(bin),
 		shellQuote(p.TokenFile),
 		shellQuote(p.PortFile),

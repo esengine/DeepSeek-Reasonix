@@ -1,6 +1,7 @@
 <?xml version="1.0" encoding="utf-8"?>
 <!-- Sign the finished NSIS container only when the exact payload used to build it
-     is present and already Authenticode-signed. GitHub Actions wraps this flat
+     is present and already Authenticode-signed: the flat Go executables plus
+     every PE file inside the Electron app/ tree. GitHub Actions wraps this
      bundle in a zip before SignPath receives it. Keep this versioned separately
      so provisioning it cannot break releases still using windows-installer. -->
 <artifact-configuration xmlns="http://signpath.io/artifact-configuration/v1">
@@ -26,5 +27,12 @@
     <pe-file path="reasonix-uninstall.exe">
       <authenticode-verify />
     </pe-file>
+    <pe-file-set>
+      <include path="app/**/*.exe" min-matches="1" max-matches="unbounded" />
+      <include path="app/**/*.dll" min-matches="1" max-matches="unbounded" />
+      <for-each>
+        <authenticode-verify />
+      </for-each>
+    </pe-file-set>
   </zip-file>
 </artifact-configuration>

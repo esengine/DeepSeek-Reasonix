@@ -1,7 +1,7 @@
 // Command windows-resource stamps Reasonix branding and metadata into a Windows
-// support executable after it has been built. Wails already uses the same
-// winres library for the desktop executable; keeping the support binaries on the
-// same resource path avoids generic Explorer, shortcut, and taskbar icons.
+// support executable after it has been built. The desktop executable rides the
+// same winres library; keeping the support binaries on the same resource path
+// avoids generic Explorer, shortcut, and taskbar icons.
 package main
 
 import (

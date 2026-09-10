@@ -7,7 +7,7 @@ const source = readFileSync(file, "utf8");
 const lines = source.split(/\r?\n/).length;
 const failures = [];
 if (lines > 200) failures.push(`App.tsx is ${lines} lines; composition boundary is 200`);
-if (/\bapp\./.test(source) || /from ["']\.\/lib\/bridge["']/.test(source)) failures.push("App.tsx directly accesses the Wails bridge");
+if (/\bapp\./.test(source) || /from ["']\.\/lib\/bridge["']/.test(source)) failures.push("App.tsx directly accesses the desktop bridge");
 if (/\buseEffect\s*\(/.test(source) || /\bawait\b/.test(source)) failures.push("App.tsx owns an effect or asynchronous operation");
 if (!/from ["']\.\/AppRuntime["']/.test(source)) failures.push("App.tsx must compose AppRuntime");
 if (failures.length) {

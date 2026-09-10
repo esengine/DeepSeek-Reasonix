@@ -7,6 +7,7 @@ import type { AppBindings } from "../lib/bridge";
 import { useController } from "../lib/useController";
 import { historySliceFromMessages } from "./mockHistorySlice";
 import type { BalanceInfo, CheckpointMeta, ContextInfo, EffortInfo, HistoryMessage, HistorySliceRequest, JobView, Meta, TabMeta } from "../lib/types";
+import { installDesktopHostStub } from "./desktopHostStub";
 
 let passed = 0;
 let failed = 0;
@@ -129,11 +130,7 @@ let metaCalls = 0;
 let approvalModeCalls = 0;
 const metaTabIds: string[] = [];
 
-window.runtime = {
-  EventsOn: () => () => {},
-  BrowserOpenURL: () => {},
-};
-window.go = {
+installDesktopHostStub(({
   main: {
     App: {
       ListTabs: async () => {
@@ -176,7 +173,7 @@ window.go = {
       },
     } as Partial<AppBindings> as AppBindings,
   },
-};
+}).main.App);
 
 type Controller = ReturnType<typeof useController>;
 let controller: Controller | undefined;

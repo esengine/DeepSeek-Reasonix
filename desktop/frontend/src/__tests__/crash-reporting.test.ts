@@ -30,6 +30,7 @@ import { installObjectHasOwnPolyfill } from "../lib/compat";
 import { readFileSync } from "node:fs";
 import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
+import { installDesktopHostStub } from "./desktopHostStub";
 
 let passed = 0;
 let failed = 0;
@@ -333,7 +334,6 @@ eq(shouldPromptForPerformanceLabel(false, 11 * 60_000, false, false), false, "ne
   // runs before the visibilitychange/focus task is delivered (the race behind
   // the field reports #6419/#5909).
   (globalThis as any).window = {
-    runtime: {},
     location: { protocol: "app:", host: "test", pathname: "/", hash: "" },
     addEventListener: () => {},
     setInterval: (cb: () => void) => {
@@ -341,6 +341,8 @@ eq(shouldPromptForPerformanceLabel(false, 11 * 60_000, false, false), false, "ne
       return 1;
     },
   };
+  // The pressure monitor only runs under a desktop shell.
+  installDesktopHostStub({});
   (globalThis as any).document = {
     visibilityState: "visible",
     hasFocus: () => focused,
@@ -462,17 +464,11 @@ eq([...parseReportedPerf("{not json", "abc123")], [], "tolerates corrupt storage
     },
   };
   setNavigator(rejectingClipboard);
-  let bridgeCalls = 0;
-  (globalThis as any).window = {
-    runtime: {
-      ClipboardSetText: async (value: string) => {
-        bridgeCalls += 1;
-        return value.length > 0;
-      },
-    },
-  };
-  eq(await writeClipboardText("report"), true, "copy falls back to the Wails native clipboard bridge when the clipboard API rejects");
-  eq(bridgeCalls, 1, "the rejected clipboard write goes through the native bridge exactly once");
+  const bridgeWrites: string[] = [];
+  (globalThis as any).window = {};
+  installDesktopHostStub({}, { clipboardWrites: bridgeWrites });
+  eq(await writeClipboardText("report"), true, "copy falls back to the desktop native clipboard bridge when the clipboard API rejects");
+  eq(bridgeWrites, ["report"], "the rejected clipboard write goes through the native bridge exactly once");
 
   setNavigator(rejectingClipboard);
   const execCommands: string[] = [];

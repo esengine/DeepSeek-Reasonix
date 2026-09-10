@@ -311,11 +311,7 @@ for (const path of localeChunks) {
   // 64606 / 65349 B, so both dialect ceilings ratchet to the next tenth.
   // Model-application copy on the read-pause base measures 64734 / 65499 B,
   // adding 128 / 150 B. Retain only the next one-decimal ceiling.
-  // The session-change notice adds 65 / 50 B over fa018e410 (64734 /
-  // 65499 B), measuring 64799 / 65549 B. Only zh-TW needs one tenth.
-  // The pending-effort next-turn hint adds 16 / 23 B, measuring 64815 /
-  // 65572 B; zh now needs the next one-decimal ceiling for CI headroom.
-  const budget = name.startsWith("zh-TW-") ? 64.1 * 1024 : 63.4 * 1024;
+  const budget = name.startsWith("zh-TW-") ? 64.0 * 1024 : 63.3 * 1024;
   assertBudget(`${name} gzip`, gzipBytes(path), budget);
 }
 
@@ -449,12 +445,6 @@ const rawInitialBytes = [...initialJS, ...initialCSS, ...appShellCSS]
 // measure 2488853 B. Keep the next tenth; gzip, CSS, and chunk limits unchanged.
 // Combined model-settings and read-evidence integration measures 2492541 B,
 // adding 3688 B (0.148%) over the base. Retain the next one-decimal ceiling.
-// Session-scoped effort ordering, content guards, and mock parity add 1733 B
-// (0.070%) over the same-toolchain fa018e410 build (2492623 B).
-// Measured total: 2494356 B; retain the next one-decimal ceiling.
-// The pending-effort next-turn hint adds 144 B (2494356 -> 2494500 B): one
-// English locale string plus its trigger-title plumbing. Retain the next
-// one-decimal ceiling.
-const rawInitialBudgetKiB = 2_436.1;
+const rawInitialBudgetKiB = 2_434.2;
 assertBudget("initial raw JavaScript and CSS", rawInitialBytes, rawInitialBudgetKiB * 1024);
 assertBudget("largest initial JavaScript chunk raw", largestInitialJSRaw, 1_000 * 1024);

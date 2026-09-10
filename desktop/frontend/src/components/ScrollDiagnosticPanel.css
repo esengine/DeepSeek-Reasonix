@@ -1,5 +1,5 @@
 .scroll-diagnostics {
-  --wails-draggable: no-drag;
+  --reasonix-draggable: no-drag;
   position: absolute;
   left: 14px;
   bottom: 14px;

@@ -55,6 +55,9 @@ func (r readFile) ExecuteRead(ctx context.Context, args json.RawMessage) (string
 		}
 		f, openErr := os.Open(rp.Path)
 		if openErr != nil {
+			if os.IsNotExist(openErr) {
+				return "", tool.ReadResultEnvelope{}, &tool.OperationError{Diagnostic: tool.OperationDiagnostic{Code: tool.WriteTargetAbsent, Path: rp.Path, Recovery: "the source is absent; create it only if the task requires a new file"}, Cause: openErr}
+			}
 			return "", tool.ReadResultEnvelope{}, fmt.Errorf("read %s: %s", rp.DisplayPath, rp.ErrorText(openErr))
 		}
 		info, statErr := f.Stat()

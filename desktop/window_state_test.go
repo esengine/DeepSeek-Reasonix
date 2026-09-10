@@ -213,7 +213,7 @@ func TestSaveWindowStateConcurrentReports(t *testing.T) {
 }
 
 func TestSaveWindowStateDPIZeroShutdownPathNeverQueriesNative(t *testing.T) {
-	// Contract test: saveWindowStateSync must succeed with ctx nil (no Wails
+	// Contract test: saveWindowStateSync must succeed with ctx nil (no shell
 	// runtime) and never require native DPI/window APIs. This is the regression
 	// guard for ScaleToDefaultDPI panics during Windows shutdown.
 	isolateDesktopUserDirs(t)

@@ -7,6 +7,7 @@ import type { AppBindings } from "../lib/bridge";
 import { LocaleProvider } from "../lib/i18n";
 import type { GitCommitView, WireCompletionSummary, WorkspaceChangeDetailView, WorkspaceChangesView } from "../lib/types";
 import { resetWorkspaceTreeMemoryForTests } from "../lib/workspaceTreeMemory";
+import { installDesktopHostStub } from "./desktopHostStub";
 
 registerHooks({
   resolve(specifier, context, nextResolve) {
@@ -100,7 +101,7 @@ export async function renderWorkspace(
 ) {
   resetWorkspaceTreeMemoryForTests();
   const dom = installDom();
-  window.go = {
+  const desktopStub = installDesktopHostStub(({
     main: {
       App: {
         ListDirForTab: async () => [],
@@ -110,7 +111,7 @@ export async function renderWorkspace(
         ReadFileForTab: async (_tabID, path) => ({ path, body: "", size: 0, truncated: false, binary: false }),
       } as Partial<AppBindings> as AppBindings,
     },
-  };
+  }).main.App);
   const rootEl = document.getElementById("root");
   if (!rootEl) throw new Error("missing root");
   const root = createRoot(rootEl);
@@ -139,7 +140,7 @@ export async function renderWorkspace(
 export async function renderFilesWorkspace(methods: Partial<AppBindings>, props: Partial<Parameters<typeof WorkspacePanel>[0]> = {}) {
   resetWorkspaceTreeMemoryForTests();
   const dom = installDom();
-  window.go = {
+  const desktopStub = installDesktopHostStub(({
     main: {
       App: {
         ListDirForTab: async () => [],
@@ -151,7 +152,7 @@ export async function renderFilesWorkspace(methods: Partial<AppBindings>, props:
         ...methods,
       } as Partial<AppBindings> as AppBindings,
     },
-  };
+  }).main.App);
   const rootEl = document.getElementById("root");
   if (!rootEl) throw new Error("missing root");
   const root = createRoot(rootEl);

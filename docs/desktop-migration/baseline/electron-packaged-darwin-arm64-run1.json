@@ -1,0 +1,37 @@
+{
+  "label": "electron-packaged-darwin-arm64-run1",
+  "executable": "/tmp/reasonix-phaseF/pkg/Reasonix.app/Contents/MacOS/Reasonix",
+  "measuredAt": "2026-09-08T20:42:14.443448+00:00",
+  "machine": {
+    "platform": "macOS-26.6.2-arm64-arm-64bit",
+    "machine": "arm64"
+  },
+  "startup": {
+    "readyMs": 3901,
+    "healthyMs": 7592
+  },
+  "samples": [
+    {
+      "afterHealthySeconds": 2,
+      "rssKiB": 694800,
+      "processCount": 5,
+      "processes": "Reasonix;Reasonix Helper;Reasonix Helper (Renderer);reasonix-desktop"
+    },
+    {
+      "afterHealthySeconds": 10,
+      "rssKiB": 658944,
+      "processCount": 5,
+      "processes": "Reasonix;Reasonix Helper;Reasonix Helper (Renderer);reasonix-desktop"
+    },
+    {
+      "afterHealthySeconds": 30,
+      "rssKiB": 658464,
+      "processCount": 5,
+      "processes": "Reasonix;Reasonix Helper;Reasonix Helper (Renderer);reasonix-desktop"
+    }
+  ],
+  "exit": {
+    "terminatedWithinMs": 252,
+    "clean": true
+  }
+}

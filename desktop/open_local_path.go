@@ -11,7 +11,7 @@ import (
 // normalizeLocalOpenPath validates and normalizes a user-clicked local path
 // before it is handed to the OS opener. It accepts either a plain absolute
 // path (D:\a\b.md or D:/a/b.md) or a file URL. The native boundary validates
-// URLs independently because Wails methods are callable without the frontend.
+// URLs independently because desktop commands are callable without the frontend.
 func normalizeLocalOpenPath(path string) (string, error) {
 	path = strings.TrimSpace(path)
 	if path == "" {

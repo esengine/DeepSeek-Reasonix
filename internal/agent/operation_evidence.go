@@ -5,7 +5,9 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"fmt"
+	"os"
 	"path/filepath"
 	"slices"
 	"strings"
@@ -13,6 +15,8 @@ import (
 	"reasonix/internal/evidence"
 	"reasonix/internal/provider"
 	"reasonix/internal/runtimepolicy"
+	"reasonix/internal/sandbox"
+	"reasonix/internal/shellsafe"
 	"reasonix/internal/tool"
 )
 
@@ -25,11 +29,13 @@ type evidenceCheck struct {
 	Satisfied bool
 	// Supported is false when the writer cannot declare what it replaces; the
 	// caller then keeps the existing boundary rather than assuming safety.
-	Supported bool
-	Path      string
-	Missing   []tool.ReadRange
-	Reason    string
-	Recovery  string
+	Supported   bool
+	Path        string
+	Missing     []tool.ReadRange
+	Reason      string
+	Recovery    string
+	Diagnostic  *tool.OperationDiagnostic
+	NativeError error
 }
 
 // maxEvidenceReadPages bounds how much the host will read to prove a whole-file
@@ -53,6 +59,11 @@ func (a *Agent) checkOperationEvidence(ctx context.Context, call provider.ToolCa
 	}
 	info, err := declarer.DeclareEvidenceTarget(ctx, json.RawMessage(call.Arguments))
 	if err != nil {
+		var operationErr *tool.OperationError
+		if errors.As(err, &operationErr) {
+			d := operationErr.Diagnostic
+			return evidenceCheck{Supported: true, Path: d.Path, Reason: d.Code, Recovery: d.Recovery, Diagnostic: &d, NativeError: err}
+		}
 		// A writer that cannot name what it replaces is never granted a pass
 		// while a read requirement is outstanding; with nothing outstanding the
 		// writer's own validation still reports the concrete error.
@@ -61,7 +72,12 @@ func (a *Agent) checkOperationEvidence(ctx context.Context, call provider.ToolCa
 	if info.Path == "" {
 		return evidenceCheck{Satisfied: true, Supported: true}
 	}
+	info.Path = filepath.Clean(info.Path)
 	check := evidenceCheck{Supported: true, Path: info.Path, Target: info}
+	if info.PreservesContent && info.Snapshot != "" {
+		check.Satisfied = true
+		return check
+	}
 	if info.WholeFile && a.rebuildAuthorized(info.Path) {
 		// The user explicitly asked to rebuild this file; the model cannot grant
 		// this to itself, and the instruction must name the file.
@@ -72,6 +88,7 @@ func (a *Agent) checkOperationEvidence(ctx context.Context, call provider.ToolCa
 	if info.WholeFile && len(info.Ranges) == 0 && len(info.Hashes) > 0 {
 		info.Ranges = []tool.ReadRange{{Start: 0, End: len(info.Hashes)}}
 	}
+	check.Target = info
 	if len(info.Ranges) == 0 && !info.WholeFile {
 		// The writer creates a new file: there is no prior content to have seen.
 		check.Satisfied = true
@@ -87,10 +104,13 @@ func (a *Agent) checkOperationEvidence(ctx context.Context, call provider.ToolCa
 		info.Hashes = hashes
 		info.Ranges = []tool.ReadRange{{Start: 0, End: len(hashes)}}
 	}
+	check.Target = info
 
 	observations := a.eligibleObservations(info.Path, boundary)
-	if info.WholeFile && info.Snapshot != "" {
-		observations = slices.DeleteFunc(observations, func(o evidence.TextObservation) bool { return o.Snapshot != info.Snapshot })
+	if info.Snapshot != "" {
+		observations = slices.DeleteFunc(observations, func(o evidence.TextObservation) bool {
+			return o.Snapshot != info.Snapshot && (info.WholeFile || o.Snapshot != "")
+		})
 	}
 	if len(observations) == 0 {
 		check.Reason = "no_eligible_read"
@@ -135,6 +155,11 @@ func (a *Agent) eligibleObservations(path string, boundary uint64) []evidence.Te
 // current content the writer is about to replace. Windows from different
 // snapshots are never stitched together.
 func evidenceCoversTarget(observations []evidence.TextObservation, target tool.EvidenceTargetInfo) (bool, []tool.ReadRange) {
+	if target.Snapshot != "" {
+		observations = slices.DeleteFunc(slices.Clone(observations), func(o evidence.TextObservation) bool {
+			return o.Snapshot != target.Snapshot && (target.WholeFile || o.Snapshot != "")
+		})
+	}
 	if len(target.Hashes) == 0 {
 		return false, target.Ranges
 	}
@@ -299,35 +324,69 @@ func (a *Agent) applyEvidenceGates(ctx context.Context, plan *toolCallPlan) (too
 	if plan.evidenceName != "" {
 		call.Name, call.Arguments = plan.evidenceName, string(plan.evidenceArgs)
 	}
-	check, memoized := a.turn.evidenceBlocked.memoizedCheck(plan.call.ID)
+	check, memoized := a.turn.evidenceBlocked.memoizedCheck(call, boundary)
 	if !memoized || plan.evidenceName != plan.call.Name {
 		check = a.checkOperationEvidence(ctx, call, resolved, boundary)
 		if plan.evidenceName == plan.call.Name {
-			a.turn.evidenceBlocked.memoCheck(plan.call.ID, check)
+			a.turn.evidenceBlocked.memoCheck(call, boundary, check)
 		}
 	}
 	switch {
+	case check.NativeError != nil:
+		a.recordRepeatFailure(call, resolved, check.NativeError)
+		return blockedEvidenceOutcome(check, call), true
 	case check.Satisfied:
 		plan.expectedWriteSource = check.Target
 		return toolOutcome{}, false
 	case !check.Supported:
-		if !evidence.ClassifyToolCall(call.Name, json.RawMessage(call.Arguments), plan.readOnly || resolved.ReadOnly()).StateMutation {
+		if !evidence.ClassifyToolCall(call.Name, json.RawMessage(call.Arguments), plan.readOnly || resolved.ReadOnly()).ContentMutation {
 			return toolOutcome{}, false
 		}
 		// A writer that cannot declare its target is never granted a pass. While
 		// another writer is blocked for missing evidence, it must not become the
 		// way around that block.
 		outstanding := a.outstandingReadEvidence(ctx, boundary)
+		if (call.Name == "bash" || call.Name == "shell") && !toolHooksMayMutateWorkspace(a.svc.hooks) {
+			var args struct {
+				Command string `json:"command"`
+			}
+			if json.Unmarshal([]byte(call.Arguments), &args) == nil {
+				if paths, known := shellsafe.StaticWritePaths(args.Command); known {
+					outstanding = slices.DeleteFunc(outstanding, func(path string) bool {
+						for _, candidate := range paths {
+							if evidencePathsOverlap(resolveMaybeRelative(a.writeWorkspaceRoot, candidate), path) {
+								return false
+							}
+						}
+						return true
+					})
+				}
+			}
+		}
 		if len(outstanding) == 0 || plan.readOnly {
 			return toolOutcome{}, false
 		}
 		msg := fmt.Sprintf("blocked: [evidence required] %s cannot declare which files it changes while a read-evidence requirement is outstanding (%s); use the exact file tool for those paths",
 			plan.call.Name, strings.Join(outstanding, ", "))
-		return toolOutcome{output: msg, blocked: true, errMsg: firstLine(msg)}, true
+		d := &tool.OperationDiagnostic{Code: tool.WriteEvidenceMissing, OperationID: plan.call.ID, Recovery: "declare the exact write paths or use the dedicated file tool"}
+		if len(outstanding) > 0 {
+			d.Path = outstanding[0]
+		}
+		return toolOutcome{output: msg, blocked: true, errMsg: firstLine(msg), diagnostic: d}, true
 	}
-	a.turn.evidenceBlocked.record(check.Path, call)
-	msg := describeEvidence(check, plan.call.Name)
-	return toolOutcome{output: msg, blocked: true, errMsg: firstLine(msg)}, true
+	a.turn.evidenceBlocked.record(check, call, boundary)
+	return blockedEvidenceOutcome(check, call), true
+}
+
+func evidencePathsOverlap(left, right string) bool {
+	l, le := sandbox.ResolveAbsPath(left)
+	r, re := sandbox.ResolveAbsPath(right)
+	if le != nil || re != nil || l == r {
+		return true
+	}
+	li, le := os.Stat(l)
+	ri, re := os.Stat(r)
+	return le == nil && re == nil && os.SameFile(li, ri)
 }
 
 // recordRebuildAuthorization captures the files an AllowRebuild instruction
@@ -363,6 +422,7 @@ func (a *Agent) preflightEvidenceBatch(ctx context.Context, calls []provider.Too
 		return blocked
 	}
 	boundary := observationBoundary(ctx, a.task.ledger.ObservationBoundary())
+	a.outstandingReadEvidence(ctx, boundary)
 	for i, call := range calls {
 		resolved, _, ambiguous := a.svc.tools.ResolveCall(call.Name)
 		if resolved == nil || len(ambiguous) > 0 || resolved.ReadOnly() {
@@ -373,15 +433,32 @@ func (a *Agent) preflightEvidenceBatch(ctx context.Context, calls []provider.Too
 			continue
 		}
 		check := a.checkOperationEvidence(ctx, call, resolved, boundary)
-		a.turn.evidenceBlocked.memoCheck(call.ID, check)
-		if !check.Supported || check.Satisfied {
+		a.turn.evidenceBlocked.memoCheck(call, boundary, check)
+		if !check.Supported || check.Satisfied || check.NativeError != nil {
 			continue
 		}
-		a.turn.evidenceBlocked.record(check.Path, call)
-		msg := describeEvidence(check, call.Name)
-		blocked[i] = toolOutcome{output: msg, blocked: true, errMsg: firstLine(msg)}
+		a.turn.evidenceBlocked.record(check, call, boundary)
+		blocked[i] = blockedEvidenceOutcome(check, call)
 	}
 	return blocked
+}
+
+func blockedEvidenceOutcome(check evidenceCheck, call provider.ToolCall) toolOutcome {
+	code := tool.WriteEvidenceMissing
+	if check.Reason == "stale_or_partial_evidence" {
+		code = tool.WriteEvidenceStale
+	}
+	d := &tool.OperationDiagnostic{Code: code, Path: check.Path, OperationID: call.ID, ActualSnapshot: check.Target.Snapshot, RequiredRanges: slices.Clone(check.Missing), Recovery: check.Recovery}
+	if check.Diagnostic != nil {
+		copy := *check.Diagnostic
+		copy.OperationID = call.ID
+		d = &copy
+	}
+	msg := describeEvidence(check, call.Name)
+	if check.NativeError != nil {
+		msg = "error: " + check.NativeError.Error()
+	}
+	return toolOutcome{output: msg, blocked: true, errMsg: firstLine(msg), diagnostic: d}
 }
 
 func ownsAnchoredEvidence(target tool.Tool) bool {

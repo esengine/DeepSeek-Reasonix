@@ -16,15 +16,6 @@ import (
 	"reasonix/internal/fileutil"
 )
 
-// loadTasks reads tasks from disk.
-func (e *HeartbeatEngine) loadTasks() []HeartbeatTask {
-	snapshot, err := e.readConfigSnapshot()
-	if err != nil {
-		return nil
-	}
-	return snapshot.cfg.Tasks
-}
-
 func (e *HeartbeatEngine) readConfigSnapshot() (heartbeatConfigSnapshot, error) {
 	path := e.configPath()
 	b, err := readFileUTF8(path)
@@ -102,11 +93,6 @@ func (e *HeartbeatEngine) adoptExternalEditsLocked() {
 	e.recordConfigSnapshotLocked(snapshot)
 	e.tasks = snapshot.cfg.Tasks
 	e.prunePendingTopicsLocked(e.tasks)
-}
-
-// saveTasks writes tasks to disk atomically.
-func (e *HeartbeatEngine) saveTasks(tasks []HeartbeatTask) error {
-	return e.writeTasks(tasks, heartbeatConfigSnapshot{}, false)
 }
 
 func (e *HeartbeatEngine) writeTasks(tasks []HeartbeatTask, expected heartbeatConfigSnapshot, compare bool) error {

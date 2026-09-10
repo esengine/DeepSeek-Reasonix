@@ -34,7 +34,7 @@ func TestInboxWailsErrorsUseStableCodes(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			got := inboxWailsError(tt.err)
+			got := inboxBridgeError(tt.err)
 			if got.Error() != "reasonix_error:"+tt.code {
 				t.Fatalf("error = %q, want stable code %q", got, tt.code)
 			}
@@ -46,7 +46,7 @@ func TestInboxWailsErrorsUseStableCodes(t *testing.T) {
 
 	unknown := errors.New("filesystem detail: /private/example")
 	//nolint:errorlint // Identity is the contract: unknown diagnostics must not be wrapped.
-	if got := inboxWailsError(unknown); got != unknown {
+	if got := inboxBridgeError(unknown); got != unknown {
 		t.Fatalf("unknown diagnostic error = %q, want original error", got)
 	}
 }

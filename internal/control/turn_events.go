@@ -525,7 +525,7 @@ func (c *Controller) DrainTurnEventMetrics() turnevent.MetricsSnapshot {
 }
 
 // TurnIDForSubmission exposes the synchronous admission receipt without
-// depending on whether the provider is still running when Wails returns.
+// depending on whether the provider is still running when the desktop call returns.
 func (c *Controller) TurnIDForSubmission(submissionID string) string {
 	ledger := c.turnEventLedger()
 	if ledger == nil {

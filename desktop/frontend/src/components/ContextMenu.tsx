@@ -145,6 +145,7 @@ export function ContextMenu({
   return createPortal(
     <div
       ref={menuRef}
+      data-app-overlay=""
       className={`context-menu${className ? ` ${className}` : ""}`}
       role="menu"
       aria-label={ariaLabel}

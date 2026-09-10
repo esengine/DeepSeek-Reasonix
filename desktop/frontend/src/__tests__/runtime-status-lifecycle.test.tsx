@@ -5,6 +5,7 @@ import { JSDOM } from "jsdom";
 import { createPollingOwner, type PollClock } from "../app-runtime/pollingOwner";
 import { useRuntimeStatus } from "../app-runtime/useRuntimeStatus";
 import type { BackgroundRuntimeView, WorkspaceConflictView } from "../lib/types";
+import { installDesktopHostStub } from "./desktopHostStub";
 
 function deferred<T>() { let resolve!: (value: T) => void; let reject!: (error: unknown) => void;
   const promise = new Promise<T>((yes, no) => { resolve = yes; reject = no; }); return { promise, resolve, reject }; }
@@ -35,10 +36,10 @@ Object.assign(globalThis, { window: dom.window, document: dom.window.document, I
 const background = deferred<BackgroundRuntimeView[]>();
 const requests: { tab: string; value: ReturnType<typeof deferred<WorkspaceConflictView>> }[] = [];
 let backgroundReads = 0;
-Object.assign(window, { go: { main: { App: {
+installDesktopHostStub({
   BackgroundRuntimes: () => { backgroundReads++; return background.promise; },
   WorkspaceConflictForTab: (tab: string) => { const value = deferred<WorkspaceConflictView>(); requests.push({ tab, value }); return value.promise; },
-} } } });
+});
 const root = createRoot(document.getElementById("root")!);
 let current!: ReturnType<typeof useRuntimeStatus>;
 function Probe({ tab, generation = 1, running = true }: { tab: string; generation?: number; running?: boolean }) {

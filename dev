@@ -25,18 +25,30 @@ if (( vite_port < 1024 || vite_port > 36000 )); then
   exit 2
 fi
 
-wails_port="${REASONIX_DESKTOP_WAILS_PORT:-$((vite_port + 29000))}"
-
 export REASONIX_DESKTOP_VITE_PORT="$vite_port"
 export REASONIX_DEV=1
 # pnpm honors npm_config_* not PNPM_CONFIG_*; suppress headless TTY purge prompt + age gate.
 export npm_config_confirm_modules_purge=false
 export npm_config_minimum_release_age=0
 
-echo "Reasonix desktop dev"
+service="$desktop_dir/build/bin/reasonix-desktop-service"
+if [[ "$OSTYPE" == msys* || "$OSTYPE" == cygwin* || "$OSTYPE" == win32* ]]; then
+  service="$service.exe"
+fi
+
+echo "Reasonix desktop dev (Electron shell)"
 echo "  worktree: $root"
 echo "  vite:     http://127.0.0.1:$vite_port"
-echo "  wails:    127.0.0.1:$wails_port"
+echo "  service:  $service"
+
+mkdir -p "$(dirname "$service")"
+(cd "$desktop_dir" && go build -o "$service" .)
+
+# The Vite dev server hot-reloads the frontend; the Electron shell loads it via
+# REASONIX_ELECTRON_DEV_URL (see desktop/electron/scripts/start.mjs).
+(cd "$desktop_dir/frontend" && exec pnpm dev) &
+vite_pid=$!
+trap 'kill "$vite_pid" 2>/dev/null || true' EXIT
 
 cd "$desktop_dir"
-exec wails dev -nosyncgomod -devserver "127.0.0.1:$wails_port" "$@"
+exec pnpm --dir electron dev "$@"

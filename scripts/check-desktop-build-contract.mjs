@@ -8,7 +8,6 @@ const read = (relativePath) =>
   fs.readFileSync(path.join(repoRoot, relativePath), "utf8");
 
 const frontendPackage = JSON.parse(read("desktop/frontend/package.json"));
-const wailsConfig = JSON.parse(read("desktop/wails.json"));
 const ciWorkflow = read(".github/workflows/ci.yml");
 const releaseWorkflow = read(".github/workflows/release-desktop.yml");
 const readme = read("README.md");
@@ -34,9 +33,9 @@ const nodeVersions = (workflow) =>
 assert.equal(read("desktop/frontend/.nvmrc").trim(), "24");
 assert.equal(frontendPackage.engines?.node, ">=24");
 assert.equal(frontendPackage.engines?.pnpm, ">=10 <11");
-assert.equal(
-  wailsConfig["frontend:install"],
-  "pnpm install --config.confirmModulesPurge=false",
+assert.ok(
+  !fs.existsSync(path.join(repoRoot, "desktop/wails.json")),
+  "desktop/wails.json must be retired with the Wails shell",
 );
 
 for (const jobName of ["desktop-prepare", "desktop-go", "desktop-frontend", "desktop-browser", "desktop-macos", "desktop-windows"]) {
@@ -66,25 +65,63 @@ for (const [name, content] of [
   ["desktop/README.md", desktopReadme],
 ]) {
   assert.match(content, /npm i(?:nstall)? -g pnpm@10/);
-  assert.match(content, /make wails-install/);
   assert.doesNotMatch(
     content,
-    /github\.com\/wailsapp\/wails\/v2\/cmd\/wails@/,
-    `${name} must use the shared Wails installer`,
+    /wails/i,
+    `${name} must not reference the retired Wails toolchain`,
   );
 }
 
 assert.match(readme, /#### CLI/);
 assert.match(readme, /#### Desktop/);
-assert.match(desktopBuildScript, /make wails-install/);
+
+// The desktop build is the Electron packaging entrypoint: it must regenerate
+// the shell/service contract and fail on drift before compiling anything.
+assert.match(
+  desktopBuildScript,
+  /go run \. -emit-contract frontend\/src\/generated/,
+  "desktop builds must regenerate the host contract",
+);
+assert.match(
+  desktopBuildScript,
+  /git -C "\$ROOT" diff --exit-code -- desktop\/frontend\/src\/generated/,
+  "desktop builds must fail on host contract drift",
+);
+// The release channel now rides in the Go service ldflags (the shell reads
+// the same identity from resources/build.json written by package.mjs).
+assert.match(
+  desktopBuildScript,
+  /service_ldflags="-X main\.version=\$VERSION -X main\.channel=\$CHANNEL/,
+  "desktop builds must link the release channel into the Go service",
+);
+// The shell is packaged through the Electron packaging script, never wails build.
+assert.match(
+  desktopBuildScript,
+  /node "\$ROOT\/desktop\/packaging\/package\.mjs" "\$PLATFORM" "\$VERSION" "\$CHANNEL"/,
+  "desktop builds must package the shell through desktop/packaging/package.mjs",
+);
+assert.doesNotMatch(desktopBuildScript, /wails build/);
 assert.doesNotMatch(
   desktopBuildScript,
   /github\.com\/wailsapp\/wails\/v2\/cmd\/wails@/,
 );
+// darwin/universal still ships one fat binary per Go artifact.
 assert.match(
   desktopBuildScript,
-  /REASONIX_CHANNEL="\$CHANNEL" wails build/,
-  "desktop builds must pass the Go release channel through to Vite",
+  /lipo -create "\$service_tmp\/amd64" "\$service_tmp\/arm64" -output "\$service_out"/,
+  "darwin universal builds must lipo the desktop service",
+);
+// Windows keeps one canonical SignPath payload: signing-files.txt enumerates
+// every PE file, then package-windows-desktop.sh rebuilds from the payload.
+assert.match(
+  desktopBuildScript,
+  /node "\$ROOT\/desktop\/packaging\/signing-files\.mjs" "\$payload_dir"/,
+  "windows builds must enumerate the signing payload",
+);
+assert.match(
+  desktopBuildScript,
+  /VERSION="\$VERSION" "\$ROOT\/scripts\/package-windows-desktop\.sh" "\$arch" "\$payload_dir"/,
+  "windows builds must package from the signing payload",
 );
 
 console.log("desktop build contract: PASS");

@@ -37,7 +37,7 @@ func TestControllerInputImagesResolvesAttachment(t *testing.T) {
 	if err != nil {
 		t.Fatalf("SaveImageDataURL: %v", err)
 	}
-	urls := (&Controller{modelRef: "custom/vision-pro"}).inputImages("look at @" + ref)
+	urls := (&Controller{selection: modelSelection{ref: "custom/vision-pro"}}).inputImages("look at @" + ref)
 	if len(urls) != 1 {
 		t.Fatalf("inputImages = %v, want one resolved data URL", urls)
 	}
@@ -64,7 +64,7 @@ func TestControllerInputImagesResolvesWorkspaceImage(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	urls := (&Controller{workspaceRoot: workspace, modelRef: "custom/vision-pro"}).inputImages("look at @docs/diagram.png")
+	urls := (&Controller{workspaceRoot: workspace, selection: modelSelection{ref: "custom/vision-pro"}}).inputImages("look at @docs/diagram.png")
 	if len(urls) != 1 {
 		t.Fatalf("inputImages = %v, want one resolved data URL", urls)
 	}
@@ -81,7 +81,7 @@ func TestControllerInputImagesResolvesAbsoluteWorkspaceImage(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	urls := (&Controller{workspaceRoot: workspace, modelRef: "custom/vision-pro"}).inputImages("look at @" + path)
+	urls := (&Controller{workspaceRoot: workspace, selection: modelSelection{ref: "custom/vision-pro"}}).inputImages("look at @" + path)
 	if len(urls) != 1 {
 		t.Fatalf("inputImages = %v, want one resolved data URL", urls)
 	}
@@ -122,12 +122,12 @@ func TestControllerInputImagesSkipsModelImagesWhenSelectedModelIsTextOnly(t *tes
 		t.Fatal(err)
 	}
 
-	c := &Controller{workspaceRoot: workspace, modelRef: "custom/text-only"}
+	c := &Controller{workspaceRoot: workspace, selection: modelSelection{ref: "custom/text-only"}}
 	if urls := c.inputImages("look at @diagram.png"); len(urls) != 0 {
 		t.Fatalf("text-only model should suppress image payloads, got %v", urls)
 	}
 
-	c.modelRef = "custom/vision-pro"
+	c.selection.ref = "custom/vision-pro"
 	if urls := c.inputImages("look at @diagram.png"); len(urls) != 1 {
 		t.Fatalf("vision model should keep image payloads, got %v", urls)
 	}
@@ -151,7 +151,7 @@ func TestControllerResolvesSubagentImageCandidatesForTextParent(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	c := &Controller{workspaceRoot: workspace, modelRef: "custom/text-only"}
+	c := &Controller{workspaceRoot: workspace, selection: modelSelection{ref: "custom/text-only"}}
 	if urls := c.inputImages("look at @diagram.png"); len(urls) != 0 {
 		t.Fatalf("text-only parent should suppress its own image payload, got %v", urls)
 	}
@@ -168,7 +168,7 @@ func TestControllerResolveTurnImagesReusesCandidatesForVisionParent(t *testing.T
 		t.Fatal(err)
 	}
 
-	c := &Controller{workspaceRoot: workspace, modelRef: "custom/vision-pro"}
+	c := &Controller{workspaceRoot: workspace, selection: modelSelection{ref: "custom/vision-pro"}}
 	userImages, candidates := c.resolveTurnImages("inspect @diagram.png")
 	if len(userImages) != 1 || len(candidates) != 1 {
 		t.Fatalf("turn images = %v, candidates = %v; want one image in both paths", userImages, candidates)
@@ -177,7 +177,7 @@ func TestControllerResolveTurnImagesReusesCandidatesForVisionParent(t *testing.T
 		t.Fatal("vision parent and subagent candidates should reuse the same resolved image slice")
 	}
 
-	c.modelRef = "custom/text-only"
+	c.selection.ref = "custom/text-only"
 	userImages, candidates = c.resolveTurnImages("inspect @diagram.png")
 	if len(userImages) != 0 || len(candidates) != 1 {
 		t.Fatalf("text parent turn images = %v, candidates = %v; want candidates only", userImages, candidates)
@@ -192,7 +192,7 @@ func TestGoalContinuationKeepsCurrentTurnImageCandidatesWithoutCrossTurnLeak(t *
 		t.Fatal(err)
 	}
 
-	c := &Controller{workspaceRoot: workspace, modelRef: "custom/text-only"}
+	c := &Controller{workspaceRoot: workspace, selection: modelSelection{ref: "custom/text-only"}}
 	initial := c.prepareOrchestratedTurnImages(orchestratedTurn{
 		raw:       "inspect the diagnostic",
 		imageRefs: "@diagram.png",
@@ -220,7 +220,7 @@ func TestControllerImageInputEnabledDoesNotFallbackFromUnknownRef(t *testing.T) 
 	workspace := t.TempDir()
 	writeVisionTestConfig(t, workspace)
 
-	c := &Controller{workspaceRoot: workspace, modelRef: "deleted/model"}
+	c := &Controller{workspaceRoot: workspace, selection: modelSelection{ref: "deleted/model"}}
 	if c.imageInputEnabled() {
 		t.Fatal("unknown ref should not inherit image input from the default fallback model")
 	}
@@ -238,7 +238,7 @@ func TestResolveRefsVisionCapableImageDoesNotAskForOCR(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	c := &Controller{workspaceRoot: dir, modelRef: "custom/vision-pro"}
+	c := &Controller{workspaceRoot: dir, selection: modelSelection{ref: "custom/vision-pro"}}
 	block, errs := c.ResolveRefs(context.Background(), "这是什么？ @"+slashPath)
 	if len(errs) != 0 {
 		t.Fatalf("ResolveRefs errors = %v", errs)
@@ -257,7 +257,7 @@ func TestResolveRefsVisionCapableImageDoesNotAskForOCR(t *testing.T) {
 func TestControllerInputImagesPassesHTTPURLAndFileID(t *testing.T) {
 	workspace := t.TempDir()
 	writeVisionTestConfig(t, workspace)
-	c := &Controller{workspaceRoot: workspace, modelRef: "custom/vision-pro"}
+	c := &Controller{workspaceRoot: workspace, selection: modelSelection{ref: "custom/vision-pro"}}
 	urls := c.inputImages("see @https://cdn.example.com/cat.png and @file-api-0a1b2c3d4e5f6071")
 	if len(urls) != 2 || urls[0] != "https://cdn.example.com/cat.png" || urls[1] != "file-api-0a1b2c3d4e5f6071" {
 		t.Fatalf("inputImages = %v, want URL then file_id", urls)
@@ -304,7 +304,7 @@ func TestControllerUploadsLargeOfficialDeepSeekImageViaFilesAPI(t *testing.T) {
 	if err := os.WriteFile(path, raw, 0o644); err != nil {
 		t.Fatal(err)
 	}
-	c := &Controller{workspaceRoot: workspace, modelRef: "deepseek/deepseek-v4-flash-vision-exp"}
+	c := &Controller{workspaceRoot: workspace, selection: modelSelection{ref: "deepseek/deepseek-v4-flash-vision-exp"}}
 	got := c.inputImages("look at @.reasonix/attachments/big.png")
 	if len(got) != 1 || got[0] != "file-api-uploaded0001" {
 		t.Fatalf("inputImages = %v, want uploaded file_id", got)

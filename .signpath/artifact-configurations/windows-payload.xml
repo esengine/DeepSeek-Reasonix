@@ -1,6 +1,9 @@
 <?xml version="1.0" encoding="utf-8"?>
-<!-- Sign every executable that the NSIS installer writes to disk. GitHub Actions
-     wraps the flat payload directory in this zip before SignPath receives it. -->
+<!-- Sign every executable that the NSIS installer writes to disk: the flat Go
+     payload plus every PE file inside the Electron app/ tree. GitHub Actions
+     wraps the payload directory (desktop/build/windows/signing-payload, which
+     also carries the generated signing-files.txt manifest of these PE files)
+     in a zip before SignPath receives it. -->
 <artifact-configuration xmlns="http://signpath.io/artifact-configuration/v1">
   <zip-file>
     <pe-file path="reasonix-desktop.exe">
@@ -21,5 +24,15 @@
     <pe-file path="reasonix-uninstall.exe">
       <authenticode-sign />
     </pe-file>
+    <pe-file path="app/Reasonix.exe">
+      <authenticode-sign />
+    </pe-file>
+    <pe-file-set>
+      <include path="app/**/*.exe" min-matches="1" max-matches="unbounded" />
+      <include path="app/**/*.dll" min-matches="1" max-matches="unbounded" />
+      <for-each>
+        <authenticode-sign />
+      </for-each>
+    </pe-file-set>
   </zip-file>
 </artifact-configuration>

@@ -356,10 +356,10 @@ func TestFutureTopicSchemaWithoutLegacyReturnsVisibleReadError(t *testing.T) {
 	}
 	_, err = NewApp().ListProjectTopics(ProjectTopicPageRequest{Scope: "project", WorkspaceRoot: workspaceRoot})
 	if err == nil || !strings.Contains(err.Error(), "newer Reasonix version") {
-		t.Fatalf("Wails read error = %v", err)
+		t.Fatalf("bridge read error = %v", err)
 	}
 	if strings.Contains(err.Error(), workspaceRoot) {
-		t.Fatalf("Wails read error leaked workspace path: %v", err)
+		t.Fatalf("bridge read error leaked workspace path: %v", err)
 	}
 }
 

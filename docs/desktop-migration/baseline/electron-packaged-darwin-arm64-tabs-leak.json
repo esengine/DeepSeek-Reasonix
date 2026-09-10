@@ -1,0 +1,695 @@
+{
+  "label": "electron-packaged-darwin-arm64-tabs-leak",
+  "executable": "/tmp/reasonix-phaseF/pkg/Reasonix.app/Contents/MacOS/Reasonix",
+  "measuredAt": "2026-09-08T20:47:23.241Z",
+  "phases": {
+    "idle": {
+      "rssKiB": 698928,
+      "processCount": 5,
+      "processes": "Reasonix Helper (Renderer)(241344);Reasonix(217632);Reasonix Helper(119328);reasonix-desktop(70944);Reasonix Helper(49680)",
+      "perProc": [
+        {
+          "pid": 72168,
+          "comm": "Reasonix Helper (Renderer)",
+          "rssKiB": 241344
+        },
+        {
+          "pid": 72133,
+          "comm": "Reasonix",
+          "rssKiB": 217632
+        },
+        {
+          "pid": 72166,
+          "comm": "Reasonix Helper",
+          "rssKiB": 119328
+        },
+        {
+          "pid": 72169,
+          "comm": "reasonix-desktop",
+          "rssKiB": 70944
+        },
+        {
+          "pid": 72167,
+          "comm": "Reasonix Helper",
+          "rssKiB": 49680
+        }
+      ]
+    },
+    "tabs-1": {
+      "rssKiB": 767536,
+      "processCount": 6,
+      "processes": "Reasonix Helper (Renderer)(242480);Reasonix(201344);Reasonix Helper (Renderer)(98752);Reasonix Helper(98704);reasonix-desktop(70976);Reasonix Helper(55280)",
+      "perProc": [
+        {
+          "pid": 72168,
+          "comm": "Reasonix Helper (Renderer)",
+          "rssKiB": 242480
+        },
+        {
+          "pid": 72133,
+          "comm": "Reasonix",
+          "rssKiB": 201344
+        },
+        {
+          "pid": 72227,
+          "comm": "Reasonix Helper (Renderer)",
+          "rssKiB": 98752
+        },
+        {
+          "pid": 72166,
+          "comm": "Reasonix Helper",
+          "rssKiB": 98704
+        },
+        {
+          "pid": 72169,
+          "comm": "reasonix-desktop",
+          "rssKiB": 70976
+        },
+        {
+          "pid": 72167,
+          "comm": "Reasonix Helper",
+          "rssKiB": 55280
+        }
+      ]
+    },
+    "tabs-5": {
+      "rssKiB": 1255280,
+      "processCount": 10,
+      "processes": "Reasonix Helper (Renderer)(242528);Reasonix(208496);Reasonix Helper (Renderer)(137696);Reasonix Helper (Renderer)(130576);Reasonix Helper(104432);Reasonix Helper (Renderer)(98720);Reasonix Helper (Renderer)(98704);Reasonix Helper (Renderer)(98640);reasonix-desktop(70992);Reasonix Helper(64496)",
+      "perProc": [
+        {
+          "pid": 72168,
+          "comm": "Reasonix Helper (Renderer)",
+          "rssKiB": 242528
+        },
+        {
+          "pid": 72133,
+          "comm": "Reasonix",
+          "rssKiB": 208496
+        },
+        {
+          "pid": 72395,
+          "comm": "Reasonix Helper (Renderer)",
+          "rssKiB": 137696
+        },
+        {
+          "pid": 72523,
+          "comm": "Reasonix Helper (Renderer)",
+          "rssKiB": 130576
+        },
+        {
+          "pid": 72166,
+          "comm": "Reasonix Helper",
+          "rssKiB": 104432
+        },
+        {
+          "pid": 72347,
+          "comm": "Reasonix Helper (Renderer)",
+          "rssKiB": 98720
+        },
+        {
+          "pid": 72227,
+          "comm": "Reasonix Helper (Renderer)",
+          "rssKiB": 98704
+        },
+        {
+          "pid": 72327,
+          "comm": "Reasonix Helper (Renderer)",
+          "rssKiB": 98640
+        },
+        {
+          "pid": 72169,
+          "comm": "reasonix-desktop",
+          "rssKiB": 70992
+        },
+        {
+          "pid": 72167,
+          "comm": "Reasonix Helper",
+          "rssKiB": 64496
+        }
+      ]
+    },
+    "tabs-closed": {
+      "rssKiB": 688768,
+      "processCount": 5,
+      "processes": "Reasonix Helper (Renderer)(242896);Reasonix(207312);Reasonix Helper(103312);reasonix-desktop(70992);Reasonix Helper(64256)",
+      "perProc": [
+        {
+          "pid": 72168,
+          "comm": "Reasonix Helper (Renderer)",
+          "rssKiB": 242896
+        },
+        {
+          "pid": 72133,
+          "comm": "Reasonix",
+          "rssKiB": 207312
+        },
+        {
+          "pid": 72166,
+          "comm": "Reasonix Helper",
+          "rssKiB": 103312
+        },
+        {
+          "pid": 72169,
+          "comm": "reasonix-desktop",
+          "rssKiB": 70992
+        },
+        {
+          "pid": 72167,
+          "comm": "Reasonix Helper",
+          "rssKiB": 64256
+        }
+      ]
+    },
+    "leak-base": {
+      "rssKiB": 688768,
+      "processCount": 5,
+      "processes": "Reasonix Helper (Renderer)(242896);Reasonix(207312);Reasonix Helper(103312);reasonix-desktop(70992);Reasonix Helper(64256)",
+      "perProc": [
+        {
+          "pid": 72168,
+          "comm": "Reasonix Helper (Renderer)",
+          "rssKiB": 242896
+        },
+        {
+          "pid": 72133,
+          "comm": "Reasonix",
+          "rssKiB": 207312
+        },
+        {
+          "pid": 72166,
+          "comm": "Reasonix Helper",
+          "rssKiB": 103312
+        },
+        {
+          "pid": 72169,
+          "comm": "reasonix-desktop",
+          "rssKiB": 70992
+        },
+        {
+          "pid": 72167,
+          "comm": "Reasonix Helper",
+          "rssKiB": 64256
+        }
+      ]
+    },
+    "leak-tabs-end": {
+      "rssKiB": 710656,
+      "processCount": 5,
+      "processes": "Reasonix Helper (Renderer)(249168);Reasonix(219152);Reasonix Helper(102736);reasonix-desktop(71072);Reasonix Helper(68528)",
+      "perProc": [
+        {
+          "pid": 72168,
+          "comm": "Reasonix Helper (Renderer)",
+          "rssKiB": 249168
+        },
+        {
+          "pid": 72133,
+          "comm": "Reasonix",
+          "rssKiB": 219152
+        },
+        {
+          "pid": 72166,
+          "comm": "Reasonix Helper",
+          "rssKiB": 102736
+        },
+        {
+          "pid": 72169,
+          "comm": "reasonix-desktop",
+          "rssKiB": 71072
+        },
+        {
+          "pid": 72167,
+          "comm": "Reasonix Helper",
+          "rssKiB": 68528
+        }
+      ]
+    }
+  },
+  "tabLeakLoop": [
+    {
+      "cycle": 5,
+      "rssKiB": 680336,
+      "processCount": 6,
+      "webContents": 1,
+      "wcListeners": 22,
+      "activeHandles": 5,
+      "openTabs": 0
+    },
+    {
+      "cycle": 10,
+      "rssKiB": 686128,
+      "processCount": 6,
+      "webContents": 1,
+      "wcListeners": 22,
+      "activeHandles": 5,
+      "openTabs": 0
+    },
+    {
+      "cycle": 15,
+      "rssKiB": 691552,
+      "processCount": 6,
+      "webContents": 1,
+      "wcListeners": 22,
+      "activeHandles": 5,
+      "openTabs": 0
+    },
+    {
+      "cycle": 20,
+      "rssKiB": 696288,
+      "processCount": 6,
+      "webContents": 1,
+      "wcListeners": 22,
+      "activeHandles": 5,
+      "openTabs": 0
+    },
+    {
+      "cycle": 25,
+      "rssKiB": 700352,
+      "processCount": 6,
+      "webContents": 1,
+      "wcListeners": 22,
+      "activeHandles": 5,
+      "openTabs": 0
+    },
+    {
+      "cycle": 30,
+      "rssKiB": 705632,
+      "processCount": 6,
+      "webContents": 1,
+      "wcListeners": 22,
+      "activeHandles": 5,
+      "openTabs": 0
+    },
+    {
+      "cycle": 35,
+      "rssKiB": 710640,
+      "processCount": 6,
+      "webContents": 1,
+      "wcListeners": 22,
+      "activeHandles": 5,
+      "openTabs": 0
+    }
+  ],
+  "sessionLeakLoop": [
+    {
+      "cycle": 5,
+      "goRssKiB": 71152,
+      "sessions": 0
+    },
+    {
+      "cycle": 10,
+      "goRssKiB": 71200,
+      "sessions": 0
+    },
+    {
+      "cycle": 15,
+      "goRssKiB": 71456,
+      "sessions": 0
+    },
+    {
+      "cycle": 20,
+      "goRssKiB": 71744,
+      "sessions": 0
+    },
+    {
+      "cycle": 25,
+      "goRssKiB": 71744,
+      "sessions": 0
+    },
+    {
+      "cycle": 30,
+      "goRssKiB": 71760,
+      "sessions": 0
+    },
+    {
+      "cycle": 35,
+      "goRssKiB": 71760,
+      "sessions": 0
+    }
+  ],
+  "inputLatencyMs": [],
+  "checks": [
+    {
+      "name": "5 browser tabs are open",
+      "ok": true,
+      "detail": "count=5"
+    },
+    {
+      "name": "all browser tabs closed",
+      "ok": true,
+      "detail": ""
+    },
+    {
+      "name": "WebContents back to idle count after closing tabs",
+      "ok": true,
+      "detail": "idle=1 after=1"
+    },
+    {
+      "name": "process count back to idle after closing tabs",
+      "ok": true,
+      "detail": "idle=5 after=5"
+    },
+    {
+      "name": "tab loop leaves no open tabs",
+      "ok": true,
+      "detail": "tabs=0"
+    },
+    {
+      "name": "WebContents count does not grow across 35 tab cycles",
+      "ok": true,
+      "detail": "cycle5=1 cycle35=1 end=1"
+    },
+    {
+      "name": "process count does not grow across 35 tab cycles",
+      "ok": true,
+      "detail": "cycle5=6 cycle35=6 end=5"
+    },
+    {
+      "name": "main-process WebContents listener total does not trend up",
+      "ok": true,
+      "detail": "cycle5=22 cycle35=22"
+    },
+    {
+      "name": "tree RSS growth over 35 tab cycles < 64 MiB",
+      "ok": true,
+      "detail": "29.6 MiB cycle5→cycle35"
+    },
+    {
+      "name": "session loop leaves no session accumulation",
+      "ok": true,
+      "detail": "before=0 after=0"
+    },
+    {
+      "name": "Go service RSS growth over 35 session cycles < 32 MiB",
+      "ok": true,
+      "detail": "0.6 MiB (base 69 → end 70 MiB)"
+    },
+    {
+      "name": "harness completed",
+      "ok": false,
+      "detail": "locator.click: Timeout 30000ms exceeded.\nCall log:\n\u001b[2m  - waiting for locator('textarea.composer__input:not([aria-hidden=true])').first()\u001b[22m\n\u001b[2m    - locator resolved to <textarea rows=\"1\" autocorrect=\"off\" spellcheck=\"false\" id=\"composer-input\" autocapitalize=\"off\" class=\"composer__input\" aria-label=\"给 Reasonix 发消息…  ( / 命令 · @ 文件 · ! 终端 )\" placeholder=\"给 Reasonix 发消息…  ( / 命令 · @ 文件 · ! 终端 )\"></textarea>\u001b[22m\n\u001b[2m  - attempting click action\u001b[22m\n\u001b[2m    2 × waiting for element to be visible, enabled and stable\u001b[22m\n\u001b[2m      - element is visible, enabled and stable\u001b[22m\n\u001b[2m      - scrolling into view if needed\u001b[22m\n\u001b[2m      - done scrolling\u001b[22m\n\u001b[2m      - <section aria-label=\"DeepSeek\" class=\"provider-catalog__detail\">…</section> from <section aria-label=\"设置\" data-app-overlay=\"\" class=\"management-screen settings-screen\">…</section> subtree intercepts pointer events\u001b[22m\n\u001b[2m    - retrying click action\u001b[22m\n\u001b[2m    - waiting 20ms\u001b[22m\n\u001b[2m    2 × waiting for element to be visible, enabled and stable\u001b[22m\n\u001b[2m      - element is visible, enabled and stable\u001b[22m\n\u001b[2m      - scrolling into view if needed\u001b[22m\n\u001b[2m      - done scrolling\u001b[22m\n\u001b[2m      - <section aria-label=\"DeepSeek\" class=\"provider-catalog__detail\">…</section> from <section aria-label=\"设置\" data-app-overlay=\"\" class=\"management-screen settings-screen\">…</section> subtree intercepts pointer events\u001b[22m\n\u001b[2m    - retrying click action\u001b[22m\n\u001b[2m      - waiting 100ms\u001b[22m\n\u001b[2m    58 × waiting for element to be visible, enabled and stable\u001b[22m\n\u001b[2m       - element is visible, enabled and stable\u001b[22m\n\u001b[2m       - scrolling into view if needed\u001b[22m\n\u001b[2m       - done scrolling\u001b[22m\n\u001b[2m       - <section aria-label=\"DeepSeek\" class=\"provider-catalog__detail\">…</section> from <section aria-label=\"设置\" data-app-overlay=\"\" class=\"management-screen settings-screen\">…</section> subtree intercepts pointer events\u001b[22m\n\u001b[2m     - retrying click action\u001b[22m\n\u001b[2m       - waiting 500ms\u001b[22m\n"
+    }
+  ],
+  "healthyMs": 1394,
+  "idleMain": {
+    "webContents": 1,
+    "webContentsListenersTotal": 22,
+    "windows": 1,
+    "appMetrics": [
+      {
+        "pid": 72133,
+        "type": "Browser",
+        "workingSetKiB": 217776
+      },
+      {
+        "pid": 72166,
+        "type": "GPU",
+        "workingSetKiB": 119328
+      },
+      {
+        "pid": 72167,
+        "type": "Utility",
+        "workingSetKiB": 49680
+      },
+      {
+        "pid": 72168,
+        "type": "Tab",
+        "workingSetKiB": 241344
+      }
+    ],
+    "activeHandles": 5
+  },
+  "tabs1": {
+    "main": {
+      "webContents": 2,
+      "webContentsListenersTotal": 49,
+      "windows": 1,
+      "appMetrics": [
+        {
+          "pid": 72133,
+          "type": "Browser",
+          "workingSetKiB": 201344
+        },
+        {
+          "pid": 72166,
+          "type": "GPU",
+          "workingSetKiB": 98704
+        },
+        {
+          "pid": 72167,
+          "type": "Utility",
+          "workingSetKiB": 55280
+        },
+        {
+          "pid": 72168,
+          "type": "Tab",
+          "workingSetKiB": 242480
+        },
+        {
+          "pid": 72227,
+          "type": "Tab",
+          "workingSetKiB": 98752
+        }
+      ],
+      "activeHandles": 5
+    },
+    "tab": {
+      "id": "tab-1",
+      "taskId": "user",
+      "url": "https://example.com/",
+      "title": "Example Domain",
+      "loading": true,
+      "canGoBack": false,
+      "canGoForward": false,
+      "temporary": true,
+      "mode": "agent",
+      "epoch": 1,
+      "zoom": 1,
+      "active": true,
+      "error": null
+    }
+  },
+  "tabs5": {
+    "main": {
+      "webContents": 6,
+      "webContentsListenersTotal": 157,
+      "windows": 1,
+      "appMetrics": [
+        {
+          "pid": 72133,
+          "type": "Browser",
+          "workingSetKiB": 208512
+        },
+        {
+          "pid": 72166,
+          "type": "GPU",
+          "workingSetKiB": 104432
+        },
+        {
+          "pid": 72167,
+          "type": "Utility",
+          "workingSetKiB": 64496
+        },
+        {
+          "pid": 72168,
+          "type": "Tab",
+          "workingSetKiB": 242528
+        },
+        {
+          "pid": 72227,
+          "type": "Tab",
+          "workingSetKiB": 98704
+        },
+        {
+          "pid": 72327,
+          "type": "Tab",
+          "workingSetKiB": 98640
+        },
+        {
+          "pid": 72347,
+          "type": "Tab",
+          "workingSetKiB": 98720
+        },
+        {
+          "pid": 72395,
+          "type": "Tab",
+          "workingSetKiB": 137696
+        },
+        {
+          "pid": 72523,
+          "type": "Tab",
+          "workingSetKiB": 130576
+        }
+      ],
+      "activeHandles": 5
+    },
+    "count": 5
+  },
+  "tabsClosed": {
+    "main": {
+      "webContents": 1,
+      "webContentsListenersTotal": 22,
+      "windows": 1,
+      "appMetrics": [
+        {
+          "pid": 72133,
+          "type": "Browser",
+          "workingSetKiB": 207312
+        },
+        {
+          "pid": 72166,
+          "type": "GPU",
+          "workingSetKiB": 103312
+        },
+        {
+          "pid": 72167,
+          "type": "Utility",
+          "workingSetKiB": 64256
+        },
+        {
+          "pid": 72168,
+          "type": "Tab",
+          "workingSetKiB": 242896
+        }
+      ],
+      "activeHandles": 5
+    },
+    "count": 0
+  },
+  "tabLeakSummary": {
+    "base": {
+      "sample": {
+        "rssKiB": 688768,
+        "processCount": 5,
+        "processes": "Reasonix Helper (Renderer)(242896);Reasonix(207312);Reasonix Helper(103312);reasonix-desktop(70992);Reasonix Helper(64256)",
+        "perProc": [
+          {
+            "pid": 72168,
+            "comm": "Reasonix Helper (Renderer)",
+            "rssKiB": 242896
+          },
+          {
+            "pid": 72133,
+            "comm": "Reasonix",
+            "rssKiB": 207312
+          },
+          {
+            "pid": 72166,
+            "comm": "Reasonix Helper",
+            "rssKiB": 103312
+          },
+          {
+            "pid": 72169,
+            "comm": "reasonix-desktop",
+            "rssKiB": 70992
+          },
+          {
+            "pid": 72167,
+            "comm": "Reasonix Helper",
+            "rssKiB": 64256
+          }
+        ]
+      },
+      "main": {
+        "webContents": 1,
+        "webContentsListenersTotal": 22,
+        "windows": 1,
+        "appMetrics": [
+          {
+            "pid": 72133,
+            "type": "Browser",
+            "workingSetKiB": 207312
+          },
+          {
+            "pid": 72166,
+            "type": "GPU",
+            "workingSetKiB": 103312
+          },
+          {
+            "pid": 72167,
+            "type": "Utility",
+            "workingSetKiB": 64256
+          },
+          {
+            "pid": 72168,
+            "type": "Tab",
+            "workingSetKiB": 242896
+          }
+        ],
+        "activeHandles": 5
+      }
+    },
+    "end": {
+      "sample": {
+        "rssKiB": 710656,
+        "processCount": 5,
+        "processes": "Reasonix Helper (Renderer)(249168);Reasonix(219152);Reasonix Helper(102736);reasonix-desktop(71072);Reasonix Helper(68528)",
+        "perProc": [
+          {
+            "pid": 72168,
+            "comm": "Reasonix Helper (Renderer)",
+            "rssKiB": 249168
+          },
+          {
+            "pid": 72133,
+            "comm": "Reasonix",
+            "rssKiB": 219152
+          },
+          {
+            "pid": 72166,
+            "comm": "Reasonix Helper",
+            "rssKiB": 102736
+          },
+          {
+            "pid": 72169,
+            "comm": "reasonix-desktop",
+            "rssKiB": 71072
+          },
+          {
+            "pid": 72167,
+            "comm": "Reasonix Helper",
+            "rssKiB": 68528
+          }
+        ]
+      },
+      "main": {
+        "webContents": 1,
+        "webContentsListenersTotal": 22,
+        "windows": 1,
+        "appMetrics": [
+          {
+            "pid": 72133,
+            "type": "Browser",
+            "workingSetKiB": 219152
+          },
+          {
+            "pid": 72166,
+            "type": "GPU",
+            "workingSetKiB": 102736
+          },
+          {
+            "pid": 72167,
+            "type": "Utility",
+            "workingSetKiB": 68528
+          },
+          {
+            "pid": 72168,
+            "type": "Tab",
+            "workingSetKiB": 249168
+          }
+        ],
+        "activeHandles": 5
+      },
+      "openTabs": 0
+    },
+    "rssGrowthMiBCycle5To35": 29.59375
+  },
+  "sessionLeakSummary": {
+    "goBaseKiB": 71072,
+    "goEndKiB": 71776,
+    "sessionsBefore": 0,
+    "sessionsAfter": 0
+  },
+  "exitedCleanly": true
+}

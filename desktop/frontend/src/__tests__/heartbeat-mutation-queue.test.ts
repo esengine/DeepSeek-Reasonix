@@ -33,18 +33,13 @@ const initial: HeartbeatTask[] = [
 ];
 const saveCalls: SaveCall[] = [];
 
-Object.assign(window, {
-  go: {
-    main: {
-      App: {
-        async HeartbeatReloadConfig() {
-          return { revision: 1, etag: "etag-1", tasks: initial };
-        },
-        HeartbeatSaveConfig(update: ConfigUpdate) {
-          return new Promise<ConfigUpdate>((resolve) => saveCalls.push({ ...update, resolve }));
-        },
-      },
-    },
+const { installDesktopHostStub } = await import("./desktopHostStub");
+installDesktopHostStub({
+  async HeartbeatReloadConfig() {
+    return { revision: 1, etag: "etag-1", tasks: initial };
+  },
+  HeartbeatSaveConfig(update: ConfigUpdate) {
+    return new Promise<ConfigUpdate>((resolve) => saveCalls.push({ ...update, resolve }));
   },
 });
 

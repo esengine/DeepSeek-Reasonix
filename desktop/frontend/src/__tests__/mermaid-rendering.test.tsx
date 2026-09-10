@@ -23,6 +23,7 @@ import {
 import { createMermaidPanZoom } from "../components/mermaidPanZoom";
 import { LocaleProvider } from "../lib/i18n";
 import { REMOTE_MARKDOWN_IMAGE_PATH } from "../lib/markdownImage";
+import { installDesktopHostStub } from "./desktopHostStub";
 
 const testDir = dirname(fileURLToPath(import.meta.url));
 const styles = readFileSync(resolve(testDir, "../styles.css"), "utf8");
@@ -479,7 +480,7 @@ console.log("\nmermaid rendering");
 
 {
   const dom = installDom();
-  Object.defineProperty(dom.window, "runtime", { configurable: true, value: {} });
+  installDesktopHostStub({});
   const dirtySvg = `
     <svg xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink" onload="steal()">
       <script>alert(1)</script>

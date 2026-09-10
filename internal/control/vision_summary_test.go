@@ -29,7 +29,7 @@ func (visionSummaryTestProvider) Stream(ctx context.Context, _ provider.Request)
 
 func TestPrepareVisionTurnSummarizesTextOnlyInputAndKeepsRawPrompt(t *testing.T) {
 	c := &Controller{
-		modelRef:    "text/text-model",
+		selection:   modelSelection{ref: "text/text-model"},
 		visionModel: "vision/vision-model",
 		visionProviderResolver: func(string) (provider.Provider, error) {
 			return visionSummaryTestProvider{}, nil
@@ -53,7 +53,7 @@ func TestCachedVisionSummaryIsReused(t *testing.T) {
 	session := agent.NewSession("system")
 	calls := 0
 	c := &Controller{
-		modelRef:    "text/text-model",
+		selection:   modelSelection{ref: "text/text-model"},
 		visionModel: "vision/vision-model",
 		executor:    agent.New(nil, nil, session, agent.Options{}, event.Discard),
 		visionProviderResolver: func(string) (provider.Provider, error) {

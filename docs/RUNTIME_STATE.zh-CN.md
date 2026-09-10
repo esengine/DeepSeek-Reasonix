@@ -50,4 +50,4 @@ Serve 的 `GET /runtime-states` 仅读取前台及 detached 控制器的内存�
 - Desktop 独立模块：`go test ./...`；`go test -race . -run 'RuntimeState|RemoteRuntime|ProjectTreeRuntime|SessionRuntime|RuntimeBinding'`。
 - 前端：`runtime-state-store.test.ts`、`composer-inbox-recovery.test.tsx`、项目树专项、`pnpm test:remote`、`pnpm test:app-lifecycle`、`pnpm build`。
 - 浏览器：`node bench/runtime-state.mjs` 使用真实 Chromium 与可控帧覆盖收尾、排队、失败重试、后台任务、远程断线/恢复及会话切换；`pnpm test:app-browser` 覆盖常规发送和界面生命周期。浏览器帧夹具不能替代控制器及 HTTP/SSE 集成回归。
-- 原生桌面需另外验证。macOS 的本地隔离应用和 loopback 测试模型可验证真实 Wails 发送、完成及侧边栏清除；Windows/Linux 不能由浏览器结果推定通过。
+- 原生桌面需另外验证。macOS 的本地隔离应用和 loopback 测试模型可验证真实 Electron 壳内发送、完成及侧边栏清除；Windows/Linux 不能由浏览器结果推定通过。

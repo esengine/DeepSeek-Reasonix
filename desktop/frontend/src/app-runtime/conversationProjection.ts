@@ -60,7 +60,6 @@ export function projectConversation({ local, remote, tab, activeTabId, backgroun
       imageInputEnabled: !remoteActive && local.meta?.imageInputEnabled !== false,
       imageUnderstandingEnabled: !remoteActive && local.meta?.visionFallbackEnabled === true,
       attachmentInputEnabled: !remoteActive,
-      remoteSession: remoteActive,
       pinnedFiles: remote ? undefined : local.meta?.pinnedFiles,
       turnId: remote ? undefined : local.activeTurnId,
       effort: remote ? remote.effort : local.effort,

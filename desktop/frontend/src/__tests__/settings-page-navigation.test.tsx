@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import { JSDOM } from "jsdom";
 import { baseSettings } from "../test-support/settingsTestFixtures";
+import { installDesktopHostStub } from "./desktopHostStub";
 
 const dom = new JSDOM('<!doctype html><div id="workspace"><button id="opener">Settings</button></div><div id="root"></div>', { url: "http://localhost", pretendToBeVisual: true });
 Object.assign(globalThis, { window: dom.window, document: dom.window.document, HTMLElement: dom.window.HTMLElement, Node: dom.window.Node, Event: dom.window.Event, CustomEvent: dom.window.CustomEvent, localStorage: dom.window.localStorage, sessionStorage: dom.window.sessionStorage, IS_REACT_ACT_ENVIRONMENT: true });
@@ -10,7 +11,7 @@ globalThis.cancelAnimationFrame = dom.window.cancelAnimationFrame.bind(dom.windo
 window.matchMedia = () => ({ matches: true, addEventListener() {}, removeEventListener() {} }) as unknown as MediaQueryList;
 window.scrollTo = () => {};
 const settings = baseSettings("standard");
-(window as unknown as { go: unknown }).go = { main: { App: { Settings: async () => settings, FetchAllProviderModels: async () => ({}) } } };
+installDesktopHostStub(({ main: { App: { Settings: async () => settings, FetchAllProviderModels: async () => ({}) } } }).main.App);
 const { default: React, act } = await import("react");
 const { createRoot } = await import("react-dom/client");
 const { useManagementWorkspace } = await import("../lib/useManagementWorkspace");

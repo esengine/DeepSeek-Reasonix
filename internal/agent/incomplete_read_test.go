@@ -236,7 +236,7 @@ func TestReadFileTruncationUsesContiguousUTF8PrefixAndExactRecovery(t *testing.T
 func TestIncompleteReadBlocksFinalUntilRecoveryAndDefersObservation(t *testing.T) {
 	path := makeIncompleteReadFixture(t, "rules-crlf.txt", 430, 96, 362, incompleteReadKeyRule)
 	read := incompleteReadBuiltin(t)
-	readArgs := fmt.Sprintf(`{"path":%q}`, path)
+	readArgs := fmt.Sprintf(`{"path":%q,"intent":"full"}`, path)
 	full := expectedReadOutput(t, read, readArgs)
 	bounded, _ := truncateToolOutputFor(full, "read_file", "read-1")
 	offset, ok := readFileRecoveryOffset(bounded)
@@ -274,11 +274,11 @@ func TestIncompleteReadBlocksFinalUntilRecoveryAndDefersObservation(t *testing.T
 	}
 	observations := agent.task.ledger.TextObservations()
 	observedLines := 0
-	if len(observations) > 0 {
-		observedLines = len(observations[0].LineHashes)
+	for _, observation := range observations {
+		observedLines += len(observation.LineHashes)
 	}
-	if len(observations) != 1 || len(observations[0].LineHashes) != 430 {
-		t.Fatalf("completed observation windows=%d lines=%d, want one 430-line window", len(observations), observedLines)
+	if observedLines != 430 {
+		t.Fatalf("completed observation windows=%d lines=%d, want 430 visible lines", len(observations), observedLines)
 	}
 	for _, code := range []string{
 		event.NoticeCodeIncompleteReadDetected,
@@ -294,7 +294,7 @@ func TestIncompleteReadBlocksFinalUntilRecoveryAndDefersObservation(t *testing.T
 func TestIncompleteReadSecondIgnoredFinalPausesRecoverably(t *testing.T) {
 	path := makeIncompleteReadFixture(t, "ignored.txt", 430, 96, 362, incompleteReadKeyRule)
 	read := incompleteReadBuiltin(t)
-	readArgs := fmt.Sprintf(`{"path":%q}`, path)
+	readArgs := fmt.Sprintf(`{"path":%q,"intent":"full"}`, path)
 	prov := &scriptedProvider{name: "ignore-continuation", turns: [][]provider.Chunk{
 		{toolCallChunk("read-ignore", "read_file", readArgs), {Type: provider.ChunkDone}},
 		textTurn("first premature answer"),
@@ -311,7 +311,7 @@ func TestIncompleteReadSecondIgnoredFinalPausesRecoverably(t *testing.T) {
 	}
 }
 
-func TestIncompleteReadBlocksSameBatchMutationBeforeExecution(t *testing.T) {
+func TestIncompleteReadDoesNotFreezeIndependentMutation(t *testing.T) {
 	path := makeIncompleteReadFixture(t, "read-before-write.txt", 430, 96, 362, incompleteReadKeyRule)
 	read := incompleteReadBuiltin(t)
 	readArgs := fmt.Sprintf(`{"path":%q}`, path)
@@ -326,15 +326,11 @@ func TestIncompleteReadBlocksSameBatchMutationBeforeExecution(t *testing.T) {
 	}}
 	agent := newLegacyIncompleteReadTestAgent(prov, read, NewSession("sys"), event.Discard, writer)
 	err := agent.Run(context.Background(), "Read the rules and then update state.")
-	var pause *IncompleteReadError
-	if !errors.As(err, &pause) {
-		t.Fatalf("Run error=%T %v, want IncompleteReadError", err, err)
+	if err != nil {
+		t.Fatal(err)
 	}
-	if writer.count() != 0 {
-		t.Fatalf("mutation executed %d times before recovery", writer.count())
-	}
-	if got := toolResultByID(agent.Session(), "mutate"); !strings.Contains(got, "unread content") {
-		t.Fatalf("mutation result=%q, want host incomplete-read block", got)
+	if writer.count() != 1 {
+		t.Fatalf("independent mutation executed %d times", writer.count())
 	}
 }
 
@@ -344,8 +340,8 @@ func TestIncompleteReadRecoversParallelFilesBeforeFinal(t *testing.T) {
 	pathA := makeIncompleteReadFixture(t, "parallel-a.txt", 430, 96, 362, keyA)
 	pathB := makeIncompleteReadFixture(t, "parallel-b.txt", 430, 96, 362, keyB)
 	read := incompleteReadBuiltin(t)
-	argsA := fmt.Sprintf(`{"path":%q}`, pathA)
-	argsB := fmt.Sprintf(`{"path":%q}`, pathB)
+	argsA := fmt.Sprintf(`{"path":%q,"intent":"full"}`, pathA)
+	argsB := fmt.Sprintf(`{"path":%q,"intent":"full"}`, pathB)
 	fullA := expectedReadOutput(t, read, argsA)
 	fullB := expectedReadOutput(t, read, argsB)
 	boundedA, _ := truncateToolOutputFor(fullA, "read_file", "read-a")
@@ -372,8 +368,13 @@ func TestIncompleteReadRecoversParallelFilesBeforeFinal(t *testing.T) {
 	if err := agent.Run(context.Background(), "Read both rules files completely."); err != nil {
 		t.Fatalf("Run: %v", err)
 	}
-	if prov.call != 3 || len(agent.task.ledger.TextObservations()) != 2 {
-		t.Fatalf("rounds=%d observations=%d, want both reads complete before final", prov.call, len(agent.task.ledger.TextObservations()))
+	observations := agent.task.ledger.TextObservations()
+	observedLines := 0
+	for _, observation := range observations {
+		observedLines += len(observation.LineHashes)
+	}
+	if prov.call != 3 || observedLines != 860 {
+		t.Fatalf("rounds=%d observations=%d lines=%d, want both reads complete before final", prov.call, len(observations), observedLines)
 	}
 	if !requestHasText(prov.requests[2], keyA) || !requestHasText(prov.requests[2], keyB) {
 		t.Fatal("accepted final request did not contain both recovered tails")
@@ -438,7 +439,7 @@ func TestExplicitReadLimitConsumesOnlyRequestedWindow(t *testing.T) {
 func TestIncompleteReadAutomaticallyRecoversBeyondFormerByteAndTokenCaps(t *testing.T) {
 	path := makeIncompleteReadFixture(t, "oversize.txt", 1500, 96, 1400, "OVERSIZE_TAIL_RULE")
 	read := incompleteReadBuiltin(t)
-	readArgs := fmt.Sprintf(`{"path":%q}`, path)
+	readArgs := fmt.Sprintf(`{"path":%q,"intent":"full"}`, path)
 	full := expectedReadOutput(t, read, readArgs)
 	if len(full) <= 128*1024 || estimateCrossLanguageReadTokens(full) <= 32*1024 {
 		t.Fatalf("fixture bytes=%d tokens=%d, want beyond former byte and token caps", len(full), estimateCrossLanguageReadTokens(full))
@@ -470,8 +471,12 @@ func TestIncompleteReadAutomaticallyRecoversBeyondFormerByteAndTokenCaps(t *test
 		t.Fatalf("Run: %v", err)
 	}
 	observations := agent.task.ledger.TextObservations()
-	if len(observations) != 1 || len(observations[0].LineHashes) != 1500 {
-		t.Fatalf("observations=%+v, want complete 1500-line evidence", observations)
+	observedLines := 0
+	for _, observation := range observations {
+		observedLines += len(observation.LineHashes)
+	}
+	if observedLines != 1500 {
+		t.Fatalf("observations=%d lines=%d, want complete 1500-line evidence", len(observations), observedLines)
 	}
 	if sink.hasCode(event.NoticeCodeReadStrategyRequired) || sink.hasCode(event.NoticeCodeReadOversizeRejected) {
 		t.Fatal("large read incorrectly entered strategy or legacy oversize rejection")
@@ -516,8 +521,8 @@ func TestIncompleteReadContextLimitEntersSearchReadReceiptStrategy(t *testing.T)
 		t.Fatalf("provider rounds=%d, want read + grep + exact read + receipt + next-round final", prov.call)
 	}
 	observations := agent.task.ledger.TextObservations()
-	if len(observations) != 1 || len(observations[0].LineHashes) != 30 {
-		t.Fatalf("observations=%+v, want only the explicit 30-line strategy window", observations)
+	if len(observations) != 2 || len(observations[0].LineHashes) >= 350 || observations[1].StartLine != 351 || len(observations[1].LineHashes) != 30 {
+		t.Fatalf("observations=%d, want visible prefix plus the explicit 30-line strategy window", len(observations))
 	}
 	result := toolResultByID(agent.Session(), "read-context-soft")
 	if !strings.Contains(result, "INCOMPLETE READ") || strings.Contains(result, incompleteReadKeyRule) {
@@ -533,7 +538,7 @@ func TestIncompleteReadContextLimitEntersSearchReadReceiptStrategy(t *testing.T)
 func TestIncompleteReadUnknownContextEntersStrategyWithoutImmediatePause(t *testing.T) {
 	path := makeIncompleteReadFixture(t, "unknown-context.txt", 430, 96, 362, incompleteReadKeyRule)
 	read := incompleteReadBuiltin(t)
-	readArgs := fmt.Sprintf(`{"path":%q}`, path)
+	readArgs := fmt.Sprintf(`{"path":%q,"intent":"full"}`, path)
 	prov := &scriptedProvider{name: "unknown-context", turns: [][]provider.Chunk{
 		{toolCallChunk("read-unknown", "read_file", readArgs), {Type: provider.ChunkDone}},
 		textTurn("first premature answer"),
@@ -554,7 +559,7 @@ func TestIncompleteReadUnknownContextEntersStrategyWithoutImmediatePause(t *test
 	}
 }
 
-func TestReadStrategyReceiptUnlocksOnlyAfterBatchBoundary(t *testing.T) {
+func TestReadStrategyReceiptDoesNotGateIndependentWriter(t *testing.T) {
 	path := makeIncompleteReadFixture(t, "receipt-boundary.txt", 430, 96, 362, incompleteReadKeyRule)
 	read := incompleteReadBuiltin(t)
 	grepTool, ok := tool.LookupBuiltin("grep")
@@ -589,36 +594,33 @@ func TestReadStrategyReceiptUnlocksOnlyAfterBatchBoundary(t *testing.T) {
 	if err := agent.Run(context.Background(), "Search and read the key rule, then mutate only after the receipt boundary."); err != nil {
 		t.Fatalf("Run: %v", err)
 	}
-	if writer.count() != 0 {
+	if writer.count() != 1 {
 		t.Fatalf("same-batch writer executed %d times", writer.count())
-	}
-	if got := toolResultByID(agent.Session(), "write-same-batch"); !strings.Contains(got, "restricted search/read mode") {
-		t.Fatalf("same-batch write result=%q, want strategy gate", got)
 	}
 	if prov.call != 5 {
 		t.Fatalf("provider rounds=%d, want final only after receipt batch boundary", prov.call)
 	}
 }
 
-func TestReadStrategyViolationsCountOncePerModelRound(t *testing.T) {
+func TestReadStrategyAllowsIndependentReadOnlyTools(t *testing.T) {
 	state := incompleteReadState{}
 	state.addEntryLocked(&incompleteRead{
 		key: "ir-round", readID: "ir-round", path: "rules.txt", requestPath: "rules.txt",
 		phase: incompleteReadStrategy, searches: map[string]incompleteReadSearch{}, reads: map[string]incompleteReadWindow{},
 	})
 	for range 3 {
-		if _, blocked := state.gate(&toolCallPlan{evidenceName: "ls"}); !blocked {
-			t.Fatal("strategy did not block unrelated read-only tool")
+		if _, blocked := state.gate(&toolCallPlan{evidenceName: "ls"}); blocked {
+			t.Fatal("strategy blocked unrelated read-only tool")
 		}
 	}
-	if round := state.finishToolRound(); round.pause != nil || state.consecutiveViolations != 1 {
+	if round := state.finishToolRound(); round.pause != nil || state.consecutiveViolations != 0 {
 		t.Fatalf("first violating round pause=%v consecutive=%d, want one violation", round.pause, state.consecutiveViolations)
 	}
-	if _, blocked := state.gate(&toolCallPlan{evidenceName: "glob"}); !blocked {
-		t.Fatal("strategy did not block second unrelated tool")
+	if _, blocked := state.gate(&toolCallPlan{evidenceName: "glob"}); blocked {
+		t.Fatal("strategy blocked second unrelated tool")
 	}
-	if round := state.finishToolRound(); round.pause == nil {
-		t.Fatal("second consecutive violating model round did not pause")
+	if round := state.finishToolRound(); round.pause != nil {
+		t.Fatal("independent work caused a read pause")
 	}
 }
 
@@ -781,7 +783,7 @@ func TestIncompleteReadRequiresExactContinuationMetadata(t *testing.T) {
 	for _, finalizer := range []string{"complete_step", "submit_plan"} {
 		finalizerState := incompleteReadState{}
 		finalizerState.addEntryLocked(&incompleteRead{key: "pending", phase: incompleteReadAutoResultPage})
-		if msg, blocked := finalizerState.gate(&toolCallPlan{evidenceName: finalizer}); !blocked || !strings.Contains(msg, "unread content") {
+		if msg, blocked := finalizerState.gate(&toolCallPlan{evidenceName: finalizer}); blocked {
 			t.Errorf("%s blocked=%v msg=%q", finalizer, blocked, msg)
 		}
 	}

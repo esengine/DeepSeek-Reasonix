@@ -50,4 +50,4 @@ Diagnostics report source, anonymous epoch, revision, phase, synchronization rea
 - Desktop module: `go test ./...`; `go test -race . -run 'RuntimeState|RemoteRuntime|ProjectTreeRuntime|SessionRuntime|RuntimeBinding'`.
 - Frontend: runtime-state store, Composer inbox recovery and project-tree suites; `pnpm test:remote`, `pnpm test:app-lifecycle`, `pnpm build`.
 - Browser: `node bench/runtime-state.mjs` runs real Chromium with controlled runtime frames for finishing, enqueue/retry, jobs, remote disconnection/recovery and switching. `pnpm test:app-browser` covers ordinary submission and application lifecycle. Frame fixtures supplement controller and HTTP/SSE integration tests.
-- Native Desktop requires separate verification. An isolated macOS application with a loopback test model exercises real Wails submission, completion and sidebar settlement. Browser success does not establish Windows or Linux native behavior.
+- Native Desktop requires separate verification. An isolated macOS application with a loopback test model exercises real Electron-hosted submission, completion and sidebar settlement. Browser success does not establish Windows or Linux native behavior.

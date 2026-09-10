@@ -54,7 +54,7 @@ reasonix remote … (CLI)                   ~/.reasonix/remote/
 浏览器打开 serve Web UI，或桌面应用内远程会话标签页
 ```
 
-- **本地前端**：`reasonix remote …` CLI；桌面应用（Wails）；serve 自带的
+- **本地前端**：`reasonix remote …` CLI；桌面应用（Electron）；serve 自带的
   Web 客户端（浏览器打开，或由独立的 Web 窗口子进程承载）。
 - **传输内核**：一条受监督的 SSH 连接——拨号、主机密钥校验、挂载端口
   转发、keepalive、断线退避重连。CLI 与桌面共用同一内核；需要交互的

@@ -13,6 +13,7 @@ import { ToolCard } from "../components/ToolCard";
 import { LocaleProvider } from "../lib/i18n";
 import { historyMessagesToItems, initialState, reducer, type Item } from "../lib/useController";
 import type { HistoryMessage, WireShellExecution } from "../lib/types";
+import { installDesktopHostStub } from "./desktopHostStub";
 
 type ToolItem = Extract<Item, { kind: "tool" }>;
 
@@ -326,9 +327,9 @@ console.log("\ntool card shell execution");
   };
 
   const dom = installDom();
-  // Inject a Wails-shaped binding so bridge.realApp() picks up our stub
+  // Inject a desktop host stub so the bridge proxy picks up our methods
   // instead of the browser mock (which always returns null for ToolResultForTab).
-  (window as unknown as { go: { main: { App: Record<string, unknown> } } }).go = {
+installDesktopHostStub(({
     main: {
       App: {
         ToolResultForTab: async () => ({
@@ -338,7 +339,7 @@ console.log("\ntool card shell execution");
         }),
       },
     },
-  };
+  }).main.App);
   const rootEl = document.getElementById("root");
   if (!rootEl) throw new Error("missing root");
   const root = createRoot(rootEl);

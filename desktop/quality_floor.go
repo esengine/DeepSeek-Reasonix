@@ -19,7 +19,7 @@ func (a *App) SetQualityFloor(floor string) error {
 }
 
 // SetQualityFloorForTab updates the tab's floor and pushes it to the
-// controller between turns. Failures return error so the Wails Promise
+// controller between turns. Failures return error so the bridge Promise
 // rejects; an unknown value never reaches the controller.
 func (a *App) SetQualityFloorForTab(tabID, floor string) error {
 	normalized, err := control.NormalizeQualityFloor(floor)
@@ -48,7 +48,7 @@ func (a *App) SetQualityFloorForTab(tabID, floor string) error {
 	}
 	a.mu.Lock()
 	if a.tabs[tabIDForSave] == tab {
-		_ = a.saveTabsLocked()
+		a.saveTabsLocked()
 	}
 	a.mu.Unlock()
 	return nil

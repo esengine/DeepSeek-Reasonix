@@ -7,6 +7,7 @@ import { createRoot } from "react-dom/client";
 import { ContextWindowRing } from "../components/ContextWindowRing";
 import { LocaleProvider } from "../lib/i18n";
 import type { ContextPanelInfo } from "../lib/types";
+import { installDesktopHostStub } from "./desktopHostStub";
 
 let passed = 0;
 let failed = 0;
@@ -91,13 +92,13 @@ function contextPanelInfo(requestCount: number): ContextPanelInfo {
 }
 
 function installContextPanelMock(fn: (tabId: string) => Promise<ContextPanelInfo>) {
-  (window as unknown as { go: { main: { App: { ContextPanel: typeof fn } } } }).go = {
+installDesktopHostStub(({
     main: {
       App: {
         ContextPanel: fn,
       },
     },
-  };
+  }).main.App);
 }
 
 async function checkSeparateDurations() {

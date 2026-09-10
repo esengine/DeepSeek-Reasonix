@@ -1,7 +1,8 @@
 #!/usr/bin/env bash
-# Build and package the Wails desktop app for one platform. Wails cannot
-# cross-compile a CGO+webview binary, so this runs on a native runner per target
-# (see .github/workflows/release-desktop.yml) and is invoked once per matrix entry.
+# Build and package the Electron desktop app for one platform. Electron's
+# Chromium shell cannot cross-compile the native targets from one host, so this
+# runs on a native runner per target (see .github/workflows/release-desktop.yml)
+# and is invoked once per matrix entry.
 #
 # Output lands in <repo>/dist/ with stable, platform-keyed names that
 # desktop/cmd/sign's `manifest` subcommand maps back to update.PlatformKey:
@@ -9,7 +10,7 @@
 #            Reasonix-darwin-universal.dmg               (drag-to-install; human download)
 #   Windows: Reasonix-windows-<arch>-installer.exe       (NSIS per-user installer; updater channel)
 #            Reasonix-windows-<arch>.zip                 (portable human download)
-#   Linux:   Reasonix-linux-<arch>.tar.gz                (desktop + guard + CLI; portable updater)
+#   Linux:   Reasonix-linux-<arch>.tar.gz                (desktop + guard + CLI + app/ tree; portable updater)
 #            Reasonix-linux-<arch>.deb                   (Debian/Ubuntu package; native updater)
 #
 # Usage: scripts/desktop-build.sh <os/arch> <version> [channel]
@@ -20,7 +21,8 @@
 #   - Go toolchain matching desktop/go.mod (>= 1.25; the `toolchain` directive
 #     auto-downloads when GOTOOLCHAIN=auto)
 #   - Node >= 24 and pnpm 10 (the same major versions used by CI and releases)
-#   - Wails CLI matching the shared .wails-version pin (`make wails-install`)
+#   - A pnpm-installed desktop workspace (this script runs
+#     `pnpm --dir desktop install --frozen-lockfile` when node_modules is absent)
 set -euo pipefail
 
 PLATFORM="${1:?usage: desktop-build.sh <os/arch> <version> [channel]}"
@@ -31,8 +33,8 @@ os="${PLATFORM%/*}"
 arch="${PLATFORM#*/}"
 
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
-APPNAME="Reasonix"            # wails.json productName -> Reasonix.app
-BINNAME="reasonix-desktop"    # wails.json outputfilename -> linux binary name
+APPNAME="Reasonix"            # Electron productName -> Reasonix.app / Reasonix.exe
+BINNAME="reasonix-desktop"    # Go desktop service (and the active version entry the launcher starts)
 CLINAME="reasonix"            # bundled CLI sidecar used for remote serve upload
 WINDOWS_CLINAME="reasonix-cli" # Windows cannot store Reasonix.exe and reasonix.exe separately
 GUARDNAME="reasonix-guard"
@@ -41,9 +43,8 @@ windows_resource_tool_dir=""
 windows_host_include=""
 
 # desktop/ is a nested Go module, so the Go toolchain cannot discover the
-# repository VCS revision for the Wails binary. Link the same source identity
-# into both Desktop and its CLI sidecar before this script mutates packaging
-# metadata such as wails.json.
+# repository VCS revision for the service binary. Link the same source identity
+# into both Desktop and its CLI sidecar.
 SOURCE_REVISION="$(git -C "$ROOT" rev-parse --verify HEAD)"
 if ! git -C "$ROOT" diff-index --quiet HEAD --; then
 	SOURCE_REVISION="$SOURCE_REVISION+dirty"
@@ -51,7 +52,6 @@ fi
 # Short commit + real UTC build clock for CLI `version --verbose/--json`.
 GIT_COMMIT="$(git -C "$ROOT" rev-parse --short=12 HEAD 2>/dev/null || echo unknown)"
 BUILD_TIME_UTC="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
-# The remote protocol source-revision ldflag was removed with Remote Workbench.
 product_docs_ldflags="-X reasonix/internal/productdocs.linkedVersion=$VERSION -X reasonix/internal/productdocs.linkedRevision=$SOURCE_REVISION"
 cli_identity_ldflags="-X main.version=$VERSION -X main.gitCommit=$GIT_COMMIT -X main.buildTimeUTC=$BUILD_TIME_UTC $product_docs_ldflags"
 
@@ -112,110 +112,103 @@ stamp_windows_executable() {
 		-original-filename "$original_filename"
 }
 
-# Stamp the version resource (Windows file properties, macOS CFBundleVersion) from
-# the tag. Wails feeds info.productVersion into goversioninfo and NSIS's
-# VIFileVersion, both of which demand a strictly numeric X.X.X, so strip the
-# leading "v" AND any prerelease suffix (a `-rc1` tag would otherwise abort the
-# installer build). The full tag still rides in ldflags for the in-app version.
+# Stamp the Windows version resource from the tag. goversioninfo demands a
+# strictly numeric X.X.X, so strip the leading "v" AND any prerelease suffix (a
+# `-rc1` tag would otherwise abort the resource stamping). The full tag still
+# rides in ldflags for the in-app version.
 numver="${VERSION#v}"; numver="${numver%%-*}"
-node -e 'const fs=require("fs"),f="wails.json",j=JSON.parse(fs.readFileSync(f,"utf8"));j.info.productVersion=process.argv[1];fs.writeFileSync(f,JSON.stringify(j,null,2)+"\n")' "$numver"
 
-# NSIS installer is Windows-only (Wails requires a single windows target for -nsis).
-ldflags="-X main.version=$VERSION -X main.channel=$CHANNEL $product_docs_ldflags"
-[ "$os" = "darwin" ] && [ "${HAS_APPLE_CERT:-}" = "true" ] && ldflags="$ldflags -X main.macSelfUpdate=true"
-UPDATE_HELPER="reasonix-update-helper.exe"
-if [ "$os" = windows ]; then
-	windows_resource_tool_dir=$(mktemp -d)
-	windows_host_include="$ROOT/desktop/build/windows/installer/reasonix_host.nsh"
-	case "$(uname -s 2>/dev/null || printf '%s' unknown)" in
-		Darwin* | Linux* | FreeBSD*)
-			printf '%s\n' '!define REASONIX_UNINST_FINALIZE '\''/bin/cp -f "%1" "reasonix-uninstall.exe"'\''' >"$windows_host_include"
-			;;
-		*)
-			printf '%s\n' '!define REASONIX_UNINST_FINALIZE '\''cmd.exe /C copy /Y "%1" "reasonix-uninstall.exe" >NUL'\''' >"$windows_host_include"
-			;;
-	esac
-	windows_resource_tool="$windows_resource_tool_dir/reasonix-windows-resource.exe"
-	echo "==> build Windows resource stamper"
-	go build -trimpath -o "$windows_resource_tool" ./cmd/windows-resource
-	guard_out="$ROOT/desktop/build/windows/installer/$GUARDNAME.exe"
-	build_guard
-	stamp_windows_executable "$guard_out" "Reasonix Legacy Migrator" "$GUARDNAME" "$GUARDNAME.exe"
-	launcher_out="$ROOT/desktop/build/windows/installer/$LAUNCHERNAME.exe"
-	echo "==> go build Windows GUI thin launcher"
-	(cd "$ROOT" && GOOS=windows GOARCH="$arch" CGO_ENABLED=0 go build -trimpath \
-		-ldflags="-s -w -H windowsgui -X main.version=$VERSION" -o "$launcher_out" ./cmd/reasonix-launcher)
-	stamp_windows_executable "$launcher_out" "Reasonix Launcher" "$LAUNCHERNAME" "$LAUNCHERNAME.exe"
-	echo "==> go build Windows update helper"
-	GOOS=windows GOARCH="$arch" go build -trimpath -ldflags="-s -w" \
-		-o "build/windows/installer/$UPDATE_HELPER" ./cmd/update-helper
-	stamp_windows_executable "build/windows/installer/$UPDATE_HELPER" "Reasonix Update Helper" "reasonix-update-helper" "$UPDATE_HELPER"
-	cli_out="$ROOT/desktop/build/windows/installer/$WINDOWS_CLINAME.exe"
-	build_cli
-	stamp_windows_executable "$cli_out" "Reasonix CLI" "$WINDOWS_CLINAME" "$WINDOWS_CLINAME.exe"
-	# The first NSIS pass must regenerate this release's uninstaller; a stale
-	# preserved file must never enter the signing payload.
-	rm -f "build/windows/installer/reasonix-uninstall.exe"
+# Regenerate the desktop host contract and fail on drift: the packaged shell
+# embeds desktopContract.json, so a stale frontend/src/generated would ship a
+# shell/service protocol mismatch. CI's desktop-prepare job runs the same check.
+echo "==> desktop host contract drift check"
+go run . -emit-contract frontend/src/generated
+if ! git -C "$ROOT" diff --exit-code -- desktop/frontend/src/generated >/dev/null; then
+	echo "desktop contract is stale - run 'cd desktop && go run . -emit-contract frontend/src/generated' and commit" >&2
+	git -C "$ROOT" diff --stat -- desktop/frontend/src/generated >&2
+	exit 1
 fi
-build_args=()
-[ "${DESKTOP_BUILD_CLEAN:-1}" != "0" ] && build_args+=(-clean)
-build_args+=(-platform "$PLATFORM" -ldflags "$ldflags")
-[ "$os" = windows ] && build_args+=(-nsis -webview2 embed)
-# Link cgo against WebKitGTK 4.1: 4.0 (libwebkit2gtk-4.0.so.37) is gone on
-# Ubuntu 24.04+/Fedora 40+, while 4.1 ships from Ubuntu 22.04 onward.
-[ "$os" = linux ] && build_args+=(-tags webkit2_41)
 
-echo "==> wails build ${build_args[*]}"
-# Vite receives the channel through the environment, while the Go shell gets it
-# through ldflags. Keep both identities aligned so preview/canary test packages
-# expose test-only frontend diagnostics instead of silently compiling as stable.
-REASONIX_CHANNEL="$CHANNEL" wails build "${build_args[@]}"
-if [ "$os" != windows ]; then
-	# Linux still ships a one-shot migrator named reasonix-guard in the portable
-	# tarball so 1.18–1.19.1 updaters can hand off. macOS does not bundle Guard.
-	if [ "$os" = linux ]; then
-		guard_out="$ROOT/desktop/build/bin/$GUARDNAME"
-		build_guard
-		launcher_out="$ROOT/desktop/build/bin/$LAUNCHERNAME"
-		echo "==> go build Linux thin launcher"
-		(cd "$ROOT" && GOOS=linux GOARCH="$arch" CGO_ENABLED=0 go build -trimpath \
-			-ldflags="-s -w -X main.version=$VERSION" -o "$launcher_out" ./cmd/reasonix-launcher)
+# The packaging script drives the frontend (build:electron) and shell builds
+# through pnpm; make sure the workspace dependencies (Electron, the packager)
+# are installed first. A warm store makes this a no-op.
+if [ ! -d "$ROOT/desktop/node_modules/@electron/packager" ] || [ ! -d "$ROOT/desktop/electron/node_modules/electron" ]; then
+	echo "==> pnpm install desktop workspace"
+	pnpm --dir "$ROOT/desktop" install --frozen-lockfile
+fi
+
+# Service ldflags carry version + channel; the shell reads the same identity
+# from resources/build.json written by package.mjs. macOS Developer ID builds
+# enable the in-app self-update path.
+service_ldflags="-X main.version=$VERSION -X main.channel=$CHANNEL $product_docs_ldflags"
+[ "$os" = "darwin" ] && [ "${HAS_APPLE_CERT:-}" = "true" ] && service_ldflags="$service_ldflags -X main.macSelfUpdate=true"
+
+# build_service compiles the Go desktop service (reasonix-desktop). It stays
+# the active version entry the thin launcher starts: without --host-rpc it
+# bootstraps the Electron shell from app/ and exits; the shell then spawns it
+# with --host-rpc as the service (see docs/DESKTOP_SHELL_MIGRATION.md phase E).
+build_service() {
+	echo "==> go build Reasonix desktop service"
+	mkdir -p "$(dirname "$service_out")"
+	if [ "$arch" = universal ]; then
+		service_tmp=$(mktemp -d)
+		GOOS=darwin GOARCH=amd64 go build -trimpath -ldflags="-s -w $service_ldflags" -o "$service_tmp/amd64" .
+		GOOS=darwin GOARCH=arm64 go build -trimpath -ldflags="-s -w $service_ldflags" -o "$service_tmp/arm64" .
+		lipo -create "$service_tmp/amd64" "$service_tmp/arm64" -output "$service_out"
+		rm -rf "$service_tmp"
+	else
+		GOOS="$os" GOARCH="$arch" go build -trimpath -ldflags="-s -w $service_ldflags" -o "$service_out" .
 	fi
-	cli_out="$ROOT/desktop/build/bin/$CLINAME"
-	build_cli
-fi
+}
+
+# package_shell runs @electron/packager via the packaging script and leaves the
+# bundle at desktop/build/electron/<os>-<arch>/ (Reasonix.app on macOS, app/
+# elsewhere). It also builds the frontend (build:electron) with the channel
+# threaded through REASONIX_CHANNEL.
+package_shell() {
+	echo "==> package Electron shell ($PLATFORM)"
+	REASONIX_COMMIT="$GIT_COMMIT" REASONIX_BUILD_TIME="$BUILD_TIME_UTC" \
+		node "$ROOT/desktop/packaging/package.mjs" "$PLATFORM" "$VERSION" "$CHANNEL"
+}
 
 mkdir -p "$ROOT/dist"
 
 case "$os" in
 darwin)
-	# Wails names the bundle after outputfilename (reasonix-desktop.app); repackage
-	# it as Reasonix.app for a clean user-facing name.
+	service_out="$ROOT/desktop/build/bin/$BINNAME"
+	build_service
+	cli_out="$ROOT/desktop/build/bin/$CLINAME"
+	build_cli
+	package_shell
+
 	staging=$(mktemp -d)
 	app="$staging/${APPNAME}.app"
-	cp -R "build/bin/reasonix-desktop.app" "$app"
-	# v1.20+: no Guard in the App bundle. CLI remains a sibling helper for
-	# terminal workflows; LaunchServices must own the Wails process directly.
-	cp "$cli_out" "$app/Contents/MacOS/$CLINAME"
+	cp -R "build/electron/${os}-${arch}/${APPNAME}.app" "$app"
+	# The bundle's main executable is Electron; the Go service lives next to it
+	# in Contents/MacOS and is also copied to Contents/Resources/service/ because
+	# the shell's default service lookup is process.resourcesPath/service/…
+	# (launchers that do not set REASONIX_DESKTOP_SERVICE still find it there).
 	bundle_executable=$(/usr/libexec/PlistBuddy -c "Print :CFBundleExecutable" "$app/Contents/Info.plist")
-	[ "$bundle_executable" = "$BINNAME" ] || { echo "macOS bundle executable is $bundle_executable, want $BINNAME" >&2; exit 1; }
+	[ "$bundle_executable" = "$APPNAME" ] || { echo "macOS bundle executable is $bundle_executable, want $APPNAME" >&2; exit 1; }
+	mkdir -p "$app/Contents/Resources/service"
+	cp "$service_out" "$app/Contents/MacOS/$BINNAME"
+	cp "$service_out" "$app/Contents/Resources/service/$BINNAME"
+	# Contents/MacOS already holds the Electron executable "Reasonix"; on
+	# case-insensitive APFS a "reasonix" sibling would overwrite it, so the
+	# CLI sidecar ships next to the service copy the shell actually launches
+	# (desktopCLIBinaryPath resolves it beside the running service).
+	cp "$cli_out" "$app/Contents/Resources/service/$CLINAME"
 	if [ -e "$app/Contents/MacOS/$GUARDNAME" ]; then
 		echo "macOS bundle must not include $GUARDNAME" >&2
 		exit 1
 	fi
-	bundle_icon=$(/usr/libexec/PlistBuddy -c "Print :CFBundleIconFile" "$app/Contents/Info.plist")
+	darwin_icon="$ROOT/desktop/build/darwin/icon.icns"
+	bundle_icon=$(/usr/libexec/PlistBuddy -c "Print :CFBundleIconFile" "$app/Contents/Info.plist" 2>/dev/null || true)
 	case "$bundle_icon" in
 	*.icns) ;;
 	*) bundle_icon="$bundle_icon.icns" ;;
 	esac
-	darwin_icon="$ROOT/desktop/build/darwin/icon.icns"
-	[ -s "$darwin_icon" ] || { echo "macOS source icon is missing: $darwin_icon" >&2; exit 1; }
-	# Wails v2 always regenerates iconfile.icns from build/appicon.png. Replace it
-	# with the platform-specific asset before signing so the macOS safe area does
-	# not force the shared Windows/Linux artwork to shrink as well.
-	cp "$darwin_icon" "$app/Contents/Resources/$bundle_icon"
 	[ -s "$app/Contents/Resources/$bundle_icon" ] || { echo "macOS bundle icon is missing: $bundle_icon" >&2; exit 1; }
-	cmp -s "$darwin_icon" "$app/Contents/Resources/$bundle_icon" || { echo "macOS bundle icon replacement failed: $bundle_icon" >&2; exit 1; }
 
 	# Two signing paths, selected by HAS_APPLE_CERT (set by release-desktop.yml when
 	# the APPLE_* secrets are present). With a real Developer ID cert + notarization
@@ -287,31 +280,110 @@ darwin)
 	rm -rf "$staging"
 	;;
 windows)
-	# Keep one canonical flat payload for SignPath. The release workflow signs
-	# these files, then calls package-windows-desktop.sh again so both the
-	# portable archive and the files embedded by NSIS carry Authenticode.
+	windows_resource_tool_dir=$(mktemp -d)
+	windows_host_include="$ROOT/desktop/build/windows/installer/reasonix_host.nsh"
+	case "$(uname -s 2>/dev/null || printf '%s' unknown)" in
+		Darwin* | Linux* | FreeBSD*)
+			printf '%s\n' '!define REASONIX_UNINST_FINALIZE '\''/bin/cp -f "%1" "reasonix-uninstall.exe"'\''' >"$windows_host_include"
+			;;
+		*)
+			printf '%s\n' '!define REASONIX_UNINST_FINALIZE '\''cmd.exe /C copy /Y "%1" "reasonix-uninstall.exe" >NUL'\''' >"$windows_host_include"
+			;;
+	esac
+	windows_resource_tool="$windows_resource_tool_dir/reasonix-windows-resource.exe"
+	echo "==> build Windows resource stamper"
+	go build -trimpath -o "$windows_resource_tool" ./cmd/windows-resource
+
+	installer_dir="$ROOT/desktop/build/windows/installer"
+	guard_out="$installer_dir/$GUARDNAME.exe"
+	build_guard
+	stamp_windows_executable "$guard_out" "Reasonix Legacy Migrator" "$GUARDNAME" "$GUARDNAME.exe"
+	launcher_out="$installer_dir/$LAUNCHERNAME.exe"
+	echo "==> go build Windows GUI thin launcher"
+	(cd "$ROOT" && GOOS=windows GOARCH="$arch" CGO_ENABLED=0 go build -trimpath \
+		-ldflags="-s -w -H windowsgui -X main.version=$VERSION" -o "$launcher_out" ./cmd/reasonix-launcher)
+	stamp_windows_executable "$launcher_out" "Reasonix Launcher" "$LAUNCHERNAME" "$LAUNCHERNAME.exe"
+	UPDATE_HELPER="reasonix-update-helper.exe"
+	echo "==> go build Windows update helper"
+	GOOS=windows GOARCH="$arch" go build -trimpath -ldflags="-s -w" \
+		-o "$installer_dir/$UPDATE_HELPER" ./cmd/update-helper
+	stamp_windows_executable "$installer_dir/$UPDATE_HELPER" "Reasonix Update Helper" "reasonix-update-helper" "$UPDATE_HELPER"
+	cli_out="$installer_dir/$WINDOWS_CLINAME.exe"
+	build_cli
+	stamp_windows_executable "$cli_out" "Reasonix CLI" "$WINDOWS_CLINAME" "$WINDOWS_CLINAME.exe"
+
+	service_out="$ROOT/desktop/build/bin/$BINNAME.exe"
+	build_service
+	stamp_windows_executable "$service_out" "Reasonix Desktop" "$BINNAME" "$BINNAME.exe"
+	# NSIS File sources live next to project.nsi; the service joins the flat
+	# payload files there (package-windows-desktop.sh overwrites them with the
+	# signed copies before the second pass).
+	cp "$service_out" "$installer_dir/$BINNAME.exe"
+
+	package_shell
+	# The Electron bundle becomes versions/v<ver>/app/ at install time; NSIS
+	# consumes it as the "app" directory next to project.nsi.
+	rm -rf "$installer_dir/app"
+	cp -R "build/electron/${os}-${arch}/app" "$installer_dir/app"
+
+	# First NSIS pass: regenerate this release's uninstaller. A stale preserved
+	# uninstaller must never enter the signing payload.
+	rm -f "$installer_dir/reasonix-uninstall.exe"
+	find "$ROOT/desktop/build/bin" -maxdepth 1 -type f -name '*installer*.exe' -delete
+	arch_binary_define="ARG_REASONIX_AMD64_BINARY"
+	[ "$arch" = arm64 ] && arch_binary_define="ARG_REASONIX_ARM64_BINARY"
+	(
+		cd "$installer_dir"
+		makensis "-D${arch_binary_define}=$installer_dir/$BINNAME.exe" project.nsi
+	)
+	[ -s "$installer_dir/reasonix-uninstall.exe" ] || { echo "first NSIS pass did not produce reasonix-uninstall.exe" >&2; exit 1; }
+
+	# Keep one canonical payload for SignPath: the flat Go executables plus the
+	# Electron app/ tree. The release workflow signs these files, then calls
+	# package-windows-desktop.sh again so both the portable archive and the
+	# files embedded by NSIS carry Authenticode.
 	payload_dir="$ROOT/desktop/build/windows/signing-payload"
 	rm -rf -- "$payload_dir"
 	mkdir -p "$payload_dir"
-	cp "build/bin/$BINNAME.exe" "$payload_dir/$BINNAME.exe"
-	cp "build/windows/installer/$UPDATE_HELPER" "$payload_dir/$UPDATE_HELPER"
-	cp "$launcher_out" "$payload_dir/$LAUNCHERNAME.exe"
-	cp "$guard_out" "$payload_dir/$GUARDNAME.exe"
-	cp "build/windows/installer/$WINDOWS_CLINAME.exe" "$payload_dir/$WINDOWS_CLINAME.exe"
-	cp "build/windows/installer/reasonix-uninstall.exe" "$payload_dir/reasonix-uninstall.exe"
-	"$ROOT/scripts/package-windows-desktop.sh" "$arch" "$payload_dir"
+	for name in "$BINNAME.exe" "$GUARDNAME.exe" "$LAUNCHERNAME.exe" "$UPDATE_HELPER" "$WINDOWS_CLINAME.exe" "reasonix-uninstall.exe"; do
+		cp "$installer_dir/$name" "$payload_dir/$name"
+	done
+	cp -R "$installer_dir/app" "$payload_dir/app"
+	# signing-files.txt enumerates every PE file (flat payload + app tree); the
+	# SignPath artifact configuration and the Authenticode verifier consume it.
+	node "$ROOT/desktop/packaging/signing-files.mjs" "$payload_dir"
+	VERSION="$VERSION" "$ROOT/scripts/package-windows-desktop.sh" "$arch" "$payload_dir"
 	;;
 linux)
+	service_out="$ROOT/desktop/build/bin/$BINNAME"
+	build_service
+	# Linux still ships a one-shot migrator named reasonix-guard in the portable
+	# tarball so 1.18–1.19.1 updaters can hand off.
+	guard_out="$ROOT/desktop/build/bin/$GUARDNAME"
+	build_guard
+	launcher_out="$ROOT/desktop/build/bin/$LAUNCHERNAME"
+	echo "==> go build Linux thin launcher"
+	(cd "$ROOT" && GOOS=linux GOARCH="$arch" CGO_ENABLED=0 go build -trimpath \
+		-ldflags="-s -w -X main.version=$VERSION" -o "$launcher_out" ./cmd/reasonix-launcher)
+	cli_out="$ROOT/desktop/build/bin/$CLINAME"
+	build_cli
+	package_shell
+	# Stage the Electron tree next to the Go binaries so the tarball and the
+	# nfpm config share one source root (build/bin).
+	rm -rf "build/bin/app"
+	cp -R "build/electron/${os}-${arch}/app" "build/bin/app"
+
 	for desktop_contract in \
 		'Exec=reasonix-launcher' \
 		'Icon=reasonix-desktop' \
-		'StartupWMClass=reasonix-desktop'; do
+		'StartupWMClass=Reasonix'; do
 		grep -F -x -q "$desktop_contract" build/linux/reasonix.desktop || { echo "Linux desktop entry missing: $desktop_contract" >&2; exit 1; }
 	done
-	# Portable Linux tarball: desktop + thin launcher + one-shot migrator
-	# (compat name reasonix-guard) + CLI. After migrator runs, Guard self-deletes.
+	# Portable Linux tarball: service + thin launcher + one-shot migrator
+	# (compat name reasonix-guard) + CLI + the Electron app/ tree. After the
+	# migrator runs, Guard self-deletes.
 	tar -czf "$ROOT/dist/${APPNAME}-linux-${arch}.tar.gz" -C build/bin \
-		"$BINNAME" "$LAUNCHERNAME" "$GUARDNAME" "$CLINAME"
+		"$BINNAME" "$LAUNCHERNAME" "$GUARDNAME" "$CLINAME" app
 	# Build the privileged update helper shipped inside the .deb. Portable tarball
 	# installs do not need it; only the dpkg package installs helper + Polkit policy.
 	echo "==> go build reasonix-update-helper"
@@ -333,13 +405,15 @@ linux)
 	DEB_VERSION="$deb_version" DEB_ARCH="$arch" \
 		nfpm package --config build/linux/nfpm.yaml --packager deb \
 		--target "$ROOT/dist/${APPNAME}-linux-${arch}.deb"
-	# Contract smoke: helper, policy, package identity, and pkexec dependency.
+	# Contract smoke: helper, policy, package identity, Electron tree, sandbox.
 	deb_path="$ROOT/dist/${APPNAME}-linux-${arch}.deb"
 	dpkg-deb --field "$deb_path" Package | grep -x 'reasonix-desktop' >/dev/null
 	dpkg-deb --field "$deb_path" Version | grep -x "$deb_version" >/dev/null
 	dpkg-deb --field "$deb_path" Depends | grep -F 'pkexec' >/dev/null
 	dpkg-deb --contents "$deb_path" | grep -E 'usr/lib/reasonix/reasonix-update-helper' >/dev/null
 	dpkg-deb --contents "$deb_path" | grep -E 'usr/share/polkit-1/actions/io.reasonix.desktop.update.policy' >/dev/null
+	dpkg-deb --contents "$deb_path" | grep -E "usr/lib/reasonix/app/${APPNAME}" >/dev/null
+	dpkg-deb --contents "$deb_path" | grep -E 'usr/lib/reasonix/app/chrome-sandbox' >/dev/null
 	;;
 *)
 	echo "unsupported os: $os" >&2

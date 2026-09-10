@@ -195,6 +195,7 @@ func (m *desktopRemoteManager) EnsureServer(ctx context.Context, hostID, workspa
 		FetchBinary:     m.fetchRemoteBinary,
 		MinVersion:      bootstrap.MinServeVersion,
 		CredentialProxy: credOpts,
+		BrowserBroker:   m.browserBrokerCallback(c, hostID, mh),
 		Progress: func(step, detail string) {
 			view := RemoteServerView{HostID: hostID, Workspace: workspace, State: step, Message: detail}
 			m.publishServerIfCurrent(hostID, mh, view, "", "")
@@ -214,6 +215,9 @@ func (m *desktopRemoteManager) EnsureServer(ctx context.Context, hostID, workspa
 		if !m.publishServerIfCurrent(hostID, mh, previousServer, res.Token, res.State.Addr) {
 			return RemoteServerView{}, "", fmt.Errorf("host %q connection was replaced", hostID)
 		}
+		// A reused process still carries the previous generation's broker
+		// environment; rotate the route and rebind it to this connection.
+		m.rebindBrowserBrokerBestEffort(opCtx, c, mh, hostID, previousServer, res.Token)
 		return m.finishCredentialServe(opCtx, c, mh, hostID, workspace, previousServer, res.Token, res, entry.CredentialProxyEnabled())
 	}
 	// Start the replacement before retiring the old tunnel. If binding fails,
@@ -379,6 +383,9 @@ func (m *desktopRemoteManager) StopServer(hostID, workspace string) error {
 	}
 	// Tear down the local serve tunnel so a stale forward can't linger.
 	_ = c.Forwards().Remove(serveForwardName(workspace))
+	// A stopped serve keeps its broker environment; drop the host's route so
+	// the token dies with the process that held it.
+	m.revokeBrowserBroker(hostID)
 	view := RemoteServerView{HostID: hostID, Workspace: workspace, State: "stopped"}
 	m.publishServerIfCurrent(hostID, mh, view, "", "")
 	return nil

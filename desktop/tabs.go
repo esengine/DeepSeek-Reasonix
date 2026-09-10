@@ -8,7 +8,6 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"github.com/wailsapp/wails/v2/pkg/runtime"
 	"log/slog"
 	"maps"
 	"os"
@@ -149,9 +148,8 @@ type WorkspaceTab struct {
 
 	model            string // active model ref (for meta)
 	effort           *string
-	pendingEffort    *pendingEffortSelection // next-run selection; guarded by App.mu
-	qualityFloor     string                  // standard|delivery; see desktop/quality_floor.go
-	mode             string                  // "normal" | "plan" | "yolo" | "plan-yolo"; yolo/full access is runtime-only
+	qualityFloor     string // standard|delivery; see desktop/quality_floor.go
+	mode             string // "normal" | "plan" | "yolo" | "plan-yolo"; yolo/full access is runtime-only
 	goal             string
 	toolApprovalMode string
 	disabledMCP      map[string]ServerView
@@ -613,7 +611,6 @@ func cloneDetachedRuntimeTab(tab *WorkspaceTab, key, path string) *WorkspaceTab 
 		displayState:             tab.displayBufferState(),
 		model:                    tab.model,
 		effort:                   cloneStringPtr(tab.effort),
-		pendingEffort:            tab.pendingEffort,
 		qualityFloor:             tab.qualityFloor,
 		mode:                     tab.mode,
 		goal:                     tab.goal,
@@ -665,10 +662,6 @@ func (a *App) detachRuntimeForReplacementLocked(tab *WorkspaceTab) bool {
 	if detached == nil {
 		return false
 	}
-	// This source is being replaced with another session. Retire its pending
-	// selection in both wrappers; ordinary tab detach keeps its own profile.
-	detached.pendingEffort = nil
-	tab.pendingEffort = nil
 	// Transfer lease ownership through the locked helpers: a concurrent
 	// ensureSessionLease (blank-session boot, recovery callback) must never
 	// observe a torn pointer or have its freshly acquired lease clobbered.
@@ -694,7 +687,7 @@ func (a *App) detachRuntimeForReplacementLocked(tab *WorkspaceTab) bool {
 // applyRuntimeTab moves source's runtime (controller, sink, lease, telemetry)
 // onto target. path is the real session path for display/persistence; the
 // case-folded runtime key must never be written into SessionPath.
-func applyRuntimeTab(target, source *WorkspaceTab, path string, wailsCtx context.Context, app *App) {
+func applyRuntimeTab(target, source *WorkspaceTab, path string, appCtx context.Context, app *App) {
 	if target == nil || source == nil {
 		return
 	}
@@ -712,7 +705,7 @@ func applyRuntimeTab(target, source *WorkspaceTab, path string, wailsCtx context
 	if source.sink != nil {
 		source.sink.setBinding(target.ID, app)
 		source.sink.setSessionGeneration(target.SessionGeneration)
-		source.sink.setContext(wailsCtx)
+		source.sink.setContext(appCtx)
 	}
 
 	target.Ctrl = source.Ctrl
@@ -728,7 +721,6 @@ func applyRuntimeTab(target, source *WorkspaceTab, path string, wailsCtx context
 	target.ActivityStatus = source.ActivityStatus
 	target.model = source.model
 	target.effort = cloneStringPtr(source.effort)
-	target.pendingEffort = source.pendingEffort
 	target.qualityFloor = source.qualityFloor
 	target.mode = source.mode
 	target.goal = source.goal
@@ -769,7 +761,7 @@ func applyRuntimeTab(target, source *WorkspaceTab, path string, wailsCtx context
 	}
 }
 
-func (a *App) attachExistingSessionRuntimeCore(tab *WorkspaceTab, path string, wailsCtx context.Context) bool {
+func (a *App) attachExistingSessionRuntimeCore(tab *WorkspaceTab, path string, appCtx context.Context) bool {
 	key := sessionRuntimeKey(path)
 	if tab == nil || key == "" {
 		return false
@@ -823,9 +815,9 @@ func (a *App) attachExistingSessionRuntimeCore(tab *WorkspaceTab, path string, w
 			return false
 		}
 		delete(a.detachedSessions, key)
-		applyRuntimeTab(tab, detached, path, wailsCtx, a)
+		applyRuntimeTab(tab, detached, path, appCtx, a)
 		if current := a.tabs[tab.ID]; current == tab {
-			_ = a.saveTabsLocked()
+			a.saveTabsLocked()
 		}
 		attachedCtrl := tab.Ctrl
 		attachedSink := tab.sink
@@ -864,8 +856,8 @@ func (a *App) attachExistingSessionRuntimeCore(tab *WorkspaceTab, path string, w
 	if a.activeTabID == source.ID {
 		a.activeTabID = tab.ID
 	}
-	applyRuntimeTab(tab, source, path, wailsCtx, a)
-	_ = a.saveTabsLocked()
+	applyRuntimeTab(tab, source, path, appCtx, a)
+	a.saveTabsLocked()
 	attachedCtrl := tab.Ctrl
 	attachedSink := tab.sink
 	attachedEpoch := a.runtimeEpochForTabLocked(tab)
@@ -1646,15 +1638,15 @@ type runtimeEventEnvelope struct {
 	payload []any
 }
 
-// asyncRuntimeEmitter decouples Wails' runtime event bridge from agent emission.
-// runtime.EventsEmit can block when the single webview event channel backs up;
-// callers enqueue in-order work and return without holding the agent event lock.
+// asyncRuntimeEmitter decouples the host event bridge from agent emission.
+// Emit can block when the event channel backs up; callers enqueue in-order
+// work and return without holding the agent event lock.
 // runtimeEventsEmitFallback is the emit used when no per-instance override is
-// installed. Production keeps the real Wails bridge; the test binary swaps in
-// a no-op via TestMain, because Wails EventsEmit log.Fatals outside a running
-// Wails app and would kill the whole test process from any code path that
-// emits a runtime event with a plain Background context.
-var runtimeEventsEmitFallback runtimeEventEmitFunc = runtime.EventsEmit
+// installed. Production replaces it with the host RPC server emit in
+// runHostRPC; the test binary swaps in a no-op via TestMain.
+var runtimeEventsEmitFallback runtimeEventEmitFunc = func(_ context.Context, name string, _ ...any) {
+	slog.Debug("desktop: runtime event dropped without a host shell", "name", name)
+}
 
 type asyncRuntimeEmitter struct {
 	mu                     sync.Mutex
@@ -2248,7 +2240,7 @@ func (a *App) syncTabWorkspaceRootSpellings() {
 		changed = syncRuntimeWorkspaceRootSpelling(tab, projects) || changed
 	}
 	if changed {
-		_ = a.saveTabsLocked()
+		a.saveTabsLocked()
 	}
 	a.mu.Unlock()
 	if changed {
@@ -2325,7 +2317,7 @@ func (a *App) openTopicTabWithActivation(scope, workspaceRoot, topicID, sessionP
 					a.activeTabID = tab.ID
 				}
 				meta := a.tabMeta(tab, tab.ID == a.activeTabID)
-				_ = a.saveTabsLocked()
+				a.saveTabsLocked()
 				a.mu.Unlock()
 				return enrichTabMeta(meta), nil
 			}
@@ -2339,7 +2331,7 @@ func (a *App) openTopicTabWithActivation(scope, workspaceRoot, topicID, sessionP
 			}
 			sameSession := targetKey == "" || sessionRuntimeKey(tab.currentSessionPath()) == targetKey
 			meta := a.tabMeta(tab, tab.ID == a.activeTabID)
-			_ = a.saveTabsLocked()
+			a.saveTabsLocked()
 			a.mu.Unlock()
 			if sameSession || a.skipContinuationRebind(tab, sessionPath) {
 				return enrichTabMeta(meta), nil
@@ -2392,7 +2384,7 @@ func (a *App) openTopicTabWithActivation(scope, workspaceRoot, topicID, sessionP
 	if activate {
 		a.activeTabID = tabID
 	}
-	_ = a.saveTabsLocked()
+	a.saveTabsLocked()
 	meta := a.tabMeta(tab, tab.ID == a.activeTabID)
 	a.mu.Unlock()
 
@@ -2591,7 +2583,7 @@ func (a *App) ensureBlankTab(scope, workspaceRoot string) (TabMeta, error) {
 		}
 		a.activeTabID = reusable.ID
 		meta := a.tabMeta(reusable, true)
-		_ = a.saveTabsLocked()
+		a.saveTabsLocked()
 		a.mu.Unlock()
 		return enrichTabMeta(meta), nil
 	}
@@ -2658,7 +2650,7 @@ func (a *App) ensureBlankTab(scope, workspaceRoot string) (TabMeta, error) {
 			return TabMeta{}, err
 		}
 		created.SessionPath = prePath
-		_ = a.saveTabsLocked()
+		a.saveTabsLocked()
 		meta := a.tabMeta(created, true)
 		a.mu.Unlock()
 
@@ -2710,7 +2702,7 @@ func (a *App) ensureBlankTab(scope, workspaceRoot string) (TabMeta, error) {
 		return TabMeta{}, err
 	}
 	created.SessionPath = prePath
-	_ = a.saveTabsLocked()
+	a.saveTabsLocked()
 	meta := a.tabMeta(created, true)
 	a.mu.Unlock()
 
@@ -2784,7 +2776,7 @@ func (a *App) alignReusableBlankTabModel(tab *WorkspaceTab, model string) error 
 	tab.Label = model
 	tab.Ready = false
 	clearTabStartupError(tab)
-	_ = a.saveTabsLocked()
+	a.saveTabsLocked()
 	a.mu.Unlock()
 	a.startTabControllerBuild(tab)
 	return nil
@@ -3066,7 +3058,7 @@ func (a *App) ReorderTabs(tabIDs []string) error {
 	a.tabOrder = next
 	dir, entries, activeID, version := a.saveTabsCollectLocked()
 	a.mu.Unlock()
-	_ = a.saveTabsWrite(dir, entries, activeID, version)
+	a.saveTabsWrite(dir, entries, activeID, version)
 	return nil
 }
 
@@ -3156,7 +3148,7 @@ func (a *App) closeTabRuntime(tabID string, allowDetach bool) error {
 			a.activeTabID = a.tabOrder[nextIndex]
 		}
 	}
-	_ = a.saveTabsLocked()
+	a.saveTabsLocked()
 	// Snapshot the teardown targets while still holding the lock: the tab is
 	// no longer reachable from a.tabs after this section, but locked writers
 	// holding stale pointers (rememberTabSessionPath, applySessionBindingToTab)
@@ -3273,7 +3265,7 @@ func (a *App) keepOnlyVisibleTab(tabID string) (TabMeta, error) {
 			a.removeTabOrderLocked(id)
 		}
 		a.tabOrder = []string{tabID}
-		_ = a.saveTabsLocked()
+		a.saveTabsLocked()
 		meta := a.tabMeta(active, true)
 		a.mu.Unlock()
 
@@ -3591,7 +3583,7 @@ func (a *App) buildTabControllerWithContextCore(tab *WorkspaceTab, loadedSession
 		// builds so the test can observe every build it started.
 		hook(tab.ID)
 	}
-	wailsCtx := a.ctx
+	appCtx := a.ctx
 	if a.tabBuildSuperseded(tab, buildGeneration) {
 		return
 	}
@@ -3635,7 +3627,7 @@ func (a *App) buildTabControllerWithContextCore(tab *WorkspaceTab, loadedSession
 	_ = config.MigrateLegacyCredentialsForRoot(root)
 	cfg, err := config.LoadForRoot(root)
 	if err != nil {
-		a.recordTabStartupFailure(tab, buildGeneration, wailsCtx, err)
+		a.recordTabStartupFailure(tab, buildGeneration, appCtx, err)
 		return
 	}
 
@@ -3643,7 +3635,7 @@ func (a *App) buildTabControllerWithContextCore(tab *WorkspaceTab, loadedSession
 		return
 	}
 	if tabSink != nil {
-		tabSink.setContext(wailsCtx)
+		tabSink.setContext(appCtx)
 	}
 
 	sessionDir := desktopSessionDir(root)
@@ -3696,7 +3688,7 @@ func (a *App) buildTabControllerWithContextCore(tab *WorkspaceTab, loadedSession
 		} else {
 			resolved, _, ok := cfg.ResolveDesktopNewSessionModel()
 			if !ok {
-				a.recordTabStartupFailure(tab, buildGeneration, wailsCtx, errNoDesktopChatModel)
+				a.recordTabStartupFailure(tab, buildGeneration, appCtx, errNoDesktopChatModel)
 				return
 			}
 			model = resolved
@@ -3741,7 +3733,7 @@ func (a *App) buildTabControllerWithContextCore(tab *WorkspaceTab, loadedSession
 	buildToolApprovalMode := tab.toolApprovalMode
 	buildGoal := tab.goal
 	buildSink := tab.sink
-	_ = a.saveTabsLocked()
+	a.saveTabsLocked()
 	a.mu.Unlock()
 	buildRuntime := (tabRuntimeSnapshot{
 		tokenMode:        buildTokenMode,
@@ -3759,16 +3751,16 @@ func (a *App) buildTabControllerWithContextCore(tab *WorkspaceTab, loadedSession
 	buildCtx, registration := beginSharedHostMCPRegistration(buildCtx, sharedHost)
 	defer registration.rollback()
 	ctrl, err := a.buildTabControllerBootFenced(buildCtx, extensionGen, boot.Options{
-		Model:                    model,
-		RequireKey:               false,
-		StatsSource:              "desktop",
-		TaskStore:                a.taskStore(),
-		OnConfigLoadWarnings:     a.configLoadWarningsHandler(),
-		Sink:                     sink,
-		WorkspaceRoot:            root,
-		SessionDir:               sessionDir,
-		EffortOverride:           cloneStringPtr(buildEffort),
-		SharedHost:               sharedHost,
+		Model:                model,
+		RequireKey:           false,
+		StatsSource:          "desktop",
+		TaskStore:            a.taskStore(),
+		OnConfigLoadWarnings: a.configLoadWarningsHandler(),
+		Sink:                 sink,
+		WorkspaceRoot:        root,
+		SessionDir:           sessionDir,
+		EffortOverride:       cloneStringPtr(buildEffort),
+		SharedHost:           sharedHost, BrowserExecutor: a.browserExecutorForTab(tab),
 		CleanupPendingReconciler: reconcileDesktopCleanupPending,
 		SubagentParentLive:       a.subagentParentProbeForBuild(tab),
 		SessionRecoveryMeta:      a.tabSessionRecoveryMeta(tab),
@@ -3778,7 +3770,7 @@ func (a *App) buildTabControllerWithContextCore(tab *WorkspaceTab, loadedSession
 		BeforeInboxDispatch:      a.beforeInboxDispatch,
 		OnSessionTitleChanged:    a.onSessionTitleChanged,
 	})
-	if a.handleTabControllerBootError(tab, registration, rootKey, buildGeneration, wailsCtx, err) {
+	if a.handleTabControllerBootError(tab, registration, rootKey, buildGeneration, appCtx, err) {
 		return
 	}
 	if a.tabBuildSuperseded(tab, buildGeneration) {
@@ -3847,7 +3839,7 @@ func (a *App) buildTabControllerWithContextCore(tab *WorkspaceTab, loadedSession
 			if leaseHeld {
 				a.scheduleDeferredStartupBuild(tab.ID)
 			}
-			a.emitReady(wailsCtx, tab.ID)
+			a.emitReady(appCtx, tab.ID)
 			return
 		}
 		if path == "" {
@@ -3858,7 +3850,7 @@ func (a *App) buildTabControllerWithContextCore(tab *WorkspaceTab, loadedSession
 			if a.claimSessionRuntime(tab, path, buildCtx) {
 				ctrl.Close()
 				a.releaseSharedHost(rootKey)
-				a.emitReady(wailsCtx, tab.ID)
+				a.emitReady(appCtx, tab.ID)
 				return
 			}
 			preLeaseKey := tab.sessionLeaseRuntimeKey()
@@ -3884,7 +3876,7 @@ func (a *App) buildTabControllerWithContextCore(tab *WorkspaceTab, loadedSession
 				if leaseHeld {
 					a.scheduleDeferredStartupBuild(tab.ID)
 				}
-				a.emitReady(wailsCtx, tab.ID)
+				a.emitReady(appCtx, tab.ID)
 				return
 			}
 			// Remember which lease THIS build bound: if the build is later
@@ -3925,7 +3917,7 @@ func (a *App) buildTabControllerWithContextCore(tab *WorkspaceTab, loadedSession
 				if leaseHeld {
 					a.scheduleDeferredStartupBuild(tab.ID)
 				}
-				a.emitReady(wailsCtx, tab.ID)
+				a.emitReady(appCtx, tab.ID)
 				return
 			}
 			a.persistTabSessionPath(tab, path)
@@ -3962,7 +3954,7 @@ func (a *App) buildTabControllerWithContextCore(tab *WorkspaceTab, loadedSession
 		return
 	}
 	defer releasePublication()
-	if a.rejectStaleStartupModelSettings(tab, ctrl, buildGeneration, wailsCtx, func() {
+	if a.rejectStaleStartupModelSettings(tab, ctrl, buildGeneration, appCtx, func() {
 		registration.rollback()
 		a.abandonSupersededBuild(tab, ctrl, rootKey, acquiredLeaseKey)
 	}) {
@@ -3976,7 +3968,7 @@ func (a *App) buildTabControllerWithContextCore(tab *WorkspaceTab, loadedSession
 	}
 	// Commit the scope while the final tab-generation check is still guarded.
 	// It only takes the plugin Host leaf lock and cannot call back into App.
-	if !a.commitStartupWriteAuthorityLocked(tab, ctrl, registration, rootKey, acquiredLeaseKey, wailsCtx) {
+	if !a.commitStartupWriteAuthorityLocked(tab, ctrl, registration, rootKey, acquiredLeaseKey, appCtx) {
 		return
 	}
 	tab.Ctrl = ctrl
@@ -3988,7 +3980,7 @@ func (a *App) buildTabControllerWithContextCore(tab *WorkspaceTab, loadedSession
 	a.advanceSessionRuntimeEpochLocked(tab)
 	keepBuildContext = true
 	a.mu.Unlock()
-	a.finishStartupPublication(tab, ctrl, wailsCtx)
+	a.finishStartupPublication(tab, ctrl, appCtx)
 }
 
 type sessionBinding struct {
@@ -4125,7 +4117,7 @@ func (a *App) applySessionBindingToTab(tab *WorkspaceTab, binding sessionBinding
 		tab.TopicTitle = topicTitle
 	}
 	if changed && current == tab {
-		_ = a.saveTabsLocked()
+		a.saveTabsLocked()
 	}
 	sink := tab.sink
 	a.mu.Unlock()
@@ -4750,9 +4742,9 @@ func desktopConfigDir() string {
 	return config.ReasonixHomeDir()
 }
 
-func (a *App) saveTabsLocked() error {
+func (a *App) saveTabsLocked() {
 	dir, entries, activeID, version := a.saveTabsCollectLocked()
-	return a.saveTabsWrite(dir, entries, activeID, version)
+	a.saveTabsWrite(dir, entries, activeID, version)
 }
 
 // saveTabsCollectLocked gathers the tab-snapshot data under the caller's lock
@@ -4777,15 +4769,15 @@ func (a *App) saveTabsCollectLocked() (string, []desktopTabEntry, string, uint64
 // saveTabsWrite writes the tab-snapshot to disk. It does not require a.mu, but
 // writes must be serialized because every save uses the same destination and
 // fixed .tmp path.
-func (a *App) saveTabsWrite(dir string, entries []desktopTabEntry, activeID string, version uint64) error {
+func (a *App) saveTabsWrite(dir string, entries []desktopTabEntry, activeID string, version uint64) {
 	a.tabsSaveMu.Lock()
 	defer a.tabsSaveMu.Unlock()
 	if version < a.tabsLastWrittenVersion {
-		return nil
+		return
 	}
 
 	if err := os.MkdirAll(dir, 0o755); err != nil {
-		return err
+		return
 	}
 	localIDs := make([]string, 0, len(entries))
 	for _, entry := range entries {
@@ -4798,18 +4790,17 @@ func (a *App) saveTabsWrite(dir string, entries []desktopTabEntry, activeID stri
 	f := desktopTabsFile{Tabs: entries, ActiveTab: activeID, RemoteTabs: remoteEntries, RemoteTabOrder: remoteOrder, TabOrder: tabOrder}
 	b, err := json.MarshalIndent(f, "", "  ")
 	if err != nil {
-		return err
+		return
 	}
 	path := filepath.Join(dir, tabsFileName)
 	tmp := path + ".tmp"
 	if err := os.WriteFile(tmp, b, 0o644); err != nil {
-		return err
+		return
 	}
 	if err := fileutil.ReplaceFile(tmp, path); err != nil {
-		return err
+		return
 	}
 	a.tabsLastWrittenVersion = version
-	return nil
 }
 
 func (a *App) orderedTabIDsLocked() []string {
@@ -4838,16 +4829,6 @@ func (a *App) orderedTabIDsSnapshotLocked() ([]string, bool) {
 	sort.Strings(missing)
 	ordered = append(ordered, missing...)
 	return ordered, len(ordered) != len(a.tabOrder) || len(missing) > 0
-}
-
-func (a *App) removeTabOrderLocked(tabID string) {
-	next := a.tabOrder[:0]
-	for _, id := range a.tabOrder {
-		if id != tabID {
-			next = append(next, id)
-		}
-	}
-	a.tabOrder = next
 }
 
 func loadTabsFile() desktopTabsFile {
@@ -6121,7 +6102,7 @@ type ProjectNode struct {
 	RecoveryBranchCount          int    `json:"recoveryBranchCount,omitempty"`
 	RecoveryUnresolvedCount      int    `json:"recoveryUnresolvedCount,omitempty"`
 	RecoveryCleanupEligibleCount int    `json:"recoveryCleanupEligibleCount,omitempty"`
-	// RecoveryCopyCount is retained for Wails compatibility with older desktop
+	// RecoveryCopyCount is retained for compatibility with older desktop
 	// frontends. Ordinary project-tree payloads intentionally leave it at zero:
 	// physical recovery copies are an internal persistence detail.
 	RecoveryCopyCount int           `json:"recoveryCopyCount,omitempty"`
@@ -7093,7 +7074,6 @@ type tabRuntimeSnapshot struct {
 	sharedHostKey                 string
 	model                         string
 	effort                        *string
-	pendingEffort                 *pendingEffortSelection
 	tokenMode, qualityFloor, mode string
 	goal, toolApprovalMode        string
 }
@@ -7127,7 +7107,6 @@ func snapshotTabRuntimeLocked(tab *WorkspaceTab) tabRuntimeSnapshot {
 		sharedHostKey:    tab.SharedHostKey,
 		model:            tab.model,
 		effort:           cloneStringPtr(tab.effort),
-		pendingEffort:    tab.pendingEffort,
 		tokenMode:        currentTabTokenMode(tab),
 		qualityFloor:     tab.qualityFloor,
 		mode:             tab.mode,
@@ -7749,7 +7728,7 @@ func (a *App) rememberTabSessionPath(tab *WorkspaceTab, path string) {
 	a.mu.Lock()
 	if current := a.tabs[tab.ID]; current == tab {
 		tab.SessionPath = path
-		_ = a.saveTabsLocked()
+		a.saveTabsLocked()
 	} else {
 		tab.SessionPath = path
 	}

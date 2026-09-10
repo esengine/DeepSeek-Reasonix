@@ -6,8 +6,6 @@ import (
 	goruntime "runtime"
 	"sync"
 	"time"
-
-	wailsruntime "github.com/wailsapp/wails/v2/pkg/runtime"
 )
 
 const (
@@ -20,18 +18,16 @@ const (
 type desktopShellPhase string
 
 const (
-	desktopShellStarting             desktopShellPhase = "starting"
-	desktopShellDOMReady             desktopShellPhase = "dom_ready"
-	desktopShellFrontendReady        desktopShellPhase = "frontend_ready"
-	desktopShellVisible              desktopShellPhase = "visible"
-	desktopShellBackgroundHidden     desktopShellPhase = "background_hidden"
-	desktopShellRendererRecovering   desktopShellPhase = "renderer_recovering"
-	desktopShellCompatibilityRestart desktopShellPhase = "compatibility_restart"
-	desktopShellFailed               desktopShellPhase = "failed"
+	desktopShellStarting         desktopShellPhase = "starting"
+	desktopShellDOMReady         desktopShellPhase = "dom_ready"
+	desktopShellFrontendReady    desktopShellPhase = "frontend_ready"
+	desktopShellVisible          desktopShellPhase = "visible"
+	desktopShellBackgroundHidden desktopShellPhase = "background_hidden"
+	desktopShellFailed           desktopShellPhase = "failed"
 )
 
 // desktopShellCoordinator is the single owner of main-window lifecycle state.
-// Native window commands remain on the Wails runtime boundary, while every
+// Native window commands stay behind the nativeHost boundary, while every
 // startup, tray, second-instance, menu and watchdog presentation goes through
 // Present so platform ordering cannot drift again.
 type desktopShellCoordinator struct {
@@ -54,7 +50,7 @@ func newDesktopShellCoordinator(app *App) *desktopShellCoordinator {
 }
 
 func (c *desktopShellCoordinator) start(ctx context.Context) {
-	if c == nil || c.app == nil || c.app.remoteWindowTicket != "" {
+	if c == nil || c.app == nil {
 		return
 	}
 	c.mu.Lock()
@@ -95,7 +91,7 @@ func (c *desktopShellCoordinator) start(ctx context.Context) {
 		c.mu.Lock()
 		ready := c.frontendReady
 		if !ready {
-			c.phase = desktopShellRendererRecovering
+			c.phase = desktopShellFailed
 		}
 		c.mu.Unlock()
 		if !ready {
@@ -130,7 +126,7 @@ func (c *desktopShellCoordinator) markDOMReady() {
 	c.mu.Unlock()
 }
 
-// markFrontendHeartbeat separates the first React + Wails bridge frame from a
+// markFrontendHeartbeat separates the first React + host bridge frame from a
 // stable renderer. Health requires a later heartbeat at least two seconds
 // after the first, so one lucky bridge call cannot commit update/LKG state.
 func (c *desktopShellCoordinator) markFrontendHeartbeat(now time.Time) (first, healthy bool) {
@@ -162,31 +158,13 @@ func (c *desktopShellCoordinator) markFrontendHeartbeat(now time.Time) (first, h
 	return first, healthy
 }
 
-func (c *desktopShellCoordinator) markCompatibilityRestart() {
-	if c == nil {
-		return
-	}
-	c.mu.Lock()
-	c.phase = desktopShellCompatibilityRestart
-	c.mu.Unlock()
-}
-
-func (c *desktopShellCoordinator) markFailed() {
-	if c == nil {
-		return
-	}
-	c.mu.Lock()
-	c.phase = desktopShellFailed
-	c.mu.Unlock()
-}
-
 func (c *desktopShellCoordinator) Present(source string) {
 	if c == nil || c.app == nil || c.app.ctx == nil {
 		return
 	}
 	c.mu.Lock()
 	wasMaximised := c.app.backgroundMaximised.Swap(false)
-	applyDesktopPresentPlan(c.app.ctx, desktopPresentPlanFor(goruntime.GOOS, wasMaximised))
+	applyDesktopPresentPlan(c.app.ctx, c.app.nativeHost(), desktopPresentPlanFor(goruntime.GOOS, wasMaximised))
 	c.backgroundHidden = false
 	c.presented = true
 	c.phase = desktopShellVisible
@@ -209,7 +187,7 @@ func (c *desktopShellCoordinator) hideToBackground(ctx context.Context, canHide 
 	c.backgroundHidden = true
 	c.presented = false
 	c.phase = desktopShellBackgroundHidden
-	hideForBackground(ctx)
+	hideForBackground(ctx, c.app.nativeHost())
 	return true
 }
 
@@ -238,13 +216,10 @@ const (
 	desktopPresentUnminimise
 )
 
-// desktopPresentPlanFor deliberately emits only gtk_window_present on Linux.
-// Wails maps WindowUnminimise to gtk_window_present; preceding it with
-// gtk_widget_show breaks maximised -> minimised restoration on GNOME (#7552).
+// Electron's restore only unminimises a window; unlike the retired GTK
+// gtk_window_present path it does not present a hidden Linux window. Every
+// platform must explicitly show it, preserving maximised state when requested.
 func desktopPresentPlanFor(goos string, wasMaximised bool) []desktopPresentAction {
-	if goos == "linux" {
-		return []desktopPresentAction{desktopPresentUnminimise}
-	}
 	actions := make([]desktopPresentAction, 0, 3)
 	if goos == "darwin" {
 		actions = append(actions, desktopPresentApplicationShow)
@@ -256,17 +231,44 @@ func desktopPresentPlanFor(goos string, wasMaximised bool) []desktopPresentActio
 	return append(actions, desktopPresentWindowShow, desktopPresentUnminimise)
 }
 
-func applyDesktopPresentPlan(ctx context.Context, actions []desktopPresentAction) {
+func applyDesktopPresentPlan(ctx context.Context, host nativeHost, actions []desktopPresentAction) {
 	for _, action := range actions {
 		switch action {
 		case desktopPresentApplicationShow:
-			wailsruntime.Show(ctx)
+			host.ShowApplication(ctx)
 		case desktopPresentMaximise:
-			wailsruntime.WindowMaximise(ctx)
+			host.MaximiseWindow(ctx)
 		case desktopPresentWindowShow:
-			wailsruntime.WindowShow(ctx)
+			host.ShowWindow(ctx)
 		case desktopPresentUnminimise:
-			wailsruntime.WindowUnminimise(ctx)
+			host.UnminimiseWindow(ctx)
 		}
 	}
+}
+
+// showMainWindowFrom presents the main window through the shell coordinator
+// (or the raw present plan when no coordinator is attached, e.g. tests).
+func (a *App) showMainWindowFrom(source string) {
+	if a.ctx == nil {
+		return
+	}
+	if a.desktopShell.coordinator != nil {
+		a.desktopShell.coordinator.Present(source)
+	} else {
+		applyDesktopPresentPlan(a.ctx, a.nativeHost(), desktopPresentPlanFor("", a.backgroundMaximised.Swap(false)))
+	}
+	a.kickDeferredRebuildRetry()
+}
+
+// handleDesktopFrontendTimeout fires when the frontend heartbeat never
+// arrived. The Electron shell reloads a crashed renderer itself; a page that
+// is alive but never responsive still deserves a presented window and a
+// diagnostics trail instead of a hidden process.
+func (a *App) handleDesktopFrontendTimeout(source string) {
+	if a == nil {
+		return
+	}
+	slog.Warn("desktop: frontend never became ready", "source", metricBucket(source))
+	a.recordDiagnosticMetric("desktop_frontend", "ready_timeout."+metricBucket(source))
+	a.showMainWindowFrom("frontend_ready_timeout")
 }

@@ -55,5 +55,5 @@ func (a *App) saveTabsFromRemote() {
 	a.mu.Lock()
 	dir, entries, activeID, version := a.saveTabsCollectLocked()
 	a.mu.Unlock()
-	_ = a.saveTabsWrite(dir, entries, activeID, version)
+	a.saveTabsWrite(dir, entries, activeID, version)
 }

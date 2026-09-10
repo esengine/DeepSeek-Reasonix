@@ -12,6 +12,7 @@ import { ToastProvider } from "../lib/toast";
 import type { AppBindings } from "../lib/bridge";
 import type { ComposerInvocation, StructuredInvocationSubmit } from "../lib/invocationDisplay";
 import type { CollaborationMode, CommandInfo, DirEntry, ToolApprovalMode } from "../lib/types";
+import { dispatchNativeFileDrop, installDesktopHostStub, type DesktopHostStubOptions } from "./desktopHostStub";
 
 let passed = 0;
 let failed = 0;
@@ -153,8 +154,8 @@ async function renderComposer(props: Partial<Parameters<typeof Composer>[0]> = {
   return { root, calls, rerender: paint };
 }
 
-function mockApp(methods: Partial<AppBindings>) {
-  window.go = {
+function mockApp(methods: Partial<AppBindings>, stubOptions?: DesktopHostStubOptions) {
+  installDesktopHostStub(({
     main: {
       App: {
         Commands: async () => [],
@@ -164,7 +165,7 @@ function mockApp(methods: Partial<AppBindings>) {
         ...methods,
       } as Partial<AppBindings> as AppBindings,
     },
-  };
+  }).main.App, stubOptions ?? { getPathForFile: (file) => file.name });
 }
 
 function dispatchPasteFile(textarea: HTMLTextAreaElement, file: File) {
@@ -430,15 +431,6 @@ console.log("\ncomposer goal toggle");
 {
   // Workspace-ref-only first Goal: no text, no skill — workspace refs remain valid task context.
   const dom = installDom();
-  let droppedCallback: ((x: number, y: number, paths: string[]) => void) | undefined;
-  window.runtime = {
-    EventsOn: () => () => {},
-    BrowserOpenURL: () => {},
-    OnFileDrop: (cb) => {
-      droppedCallback = cb;
-    },
-    OnFileDropOff: () => {},
-  };
   mockApp({
     AttachDropped: async () => ({
       kind: "workspace",
@@ -448,9 +440,10 @@ console.log("\ncomposer goal toggle");
     }),
   });
   const { root, calls } = await renderComposer({ collaborationMode: "goal", goal: "" });
-  if (!droppedCallback) throw new Error("native file drop handler did not register for workspace-ref goal");
+  const wrap = document.querySelector(".composer-wrap");
+  if (!wrap) throw new Error("composer drop target did not render for workspace-ref goal");
   await act(async () => {
-    droppedCallback?.(0, 0, ["/repo/src/App.tsx"]);
+    dispatchNativeFileDrop(wrap, [new File([""], "/repo/src/App.tsx")]);
     await flushTimers();
   });
   await waitFor("workspace-ref-only initial goal card", () => document.body.textContent?.includes("App.tsx") === true);
@@ -817,15 +810,6 @@ console.log("\ncomposer goal toggle");
 
 {
   const dom = installDom();
-  let droppedCallback: ((x: number, y: number, paths: string[]) => void) | undefined;
-  window.runtime = {
-    EventsOn: () => () => {},
-    BrowserOpenURL: () => {},
-    OnFileDrop: (cb) => {
-      droppedCallback = cb;
-    },
-    OnFileDropOff: () => {},
-  };
   mockApp({
     AttachDropped: async () => {
       throw new Error("/Users/example/secret.pdf: permission denied");
@@ -838,10 +822,11 @@ console.log("\ncomposer goal toggle");
   if (!textarea) throw new Error("composer textarea did not render");
   const sendButton = document.querySelector(".composer__btn--send") as HTMLButtonElement | null;
   if (!sendButton) throw new Error("composer send button did not render");
-  if (!droppedCallback) throw new Error("native file drop handler did not register");
+  const wrapSecret = document.querySelector(".composer-wrap");
+  if (!wrapSecret) throw new Error("composer drop target did not render");
 
   await act(async () => {
-    droppedCallback?.(0, 0, ["/Users/example/secret.pdf"]);
+    dispatchNativeFileDrop(wrapSecret, [new File([""], "/Users/example/secret.pdf")]);
     await flushTimers();
   });
   await waitFor("dropped file failure toast", () => document.body.textContent?.includes("Dropped file attach failed") === true);
@@ -859,15 +844,6 @@ console.log("\ncomposer goal toggle");
 
 {
   const dom = installDom();
-  let droppedCallback: ((x: number, y: number, paths: string[]) => void) | undefined;
-  window.runtime = {
-    EventsOn: () => () => {},
-    BrowserOpenURL: () => {},
-    OnFileDrop: (cb) => {
-      droppedCallback = cb;
-    },
-    OnFileDropOff: () => {},
-  };
   mockApp({
     AttachDropped: async () => ({
       kind: "attachment",
@@ -875,10 +851,11 @@ console.log("\ncomposer goal toggle");
     }),
   });
   const { root } = await renderComposer();
-  if (!droppedCallback) throw new Error("native file drop handler did not register");
+  const wrapReport = document.querySelector(".composer-wrap");
+  if (!wrapReport) throw new Error("composer drop target did not render");
 
   await act(async () => {
-    droppedCallback?.(0, 0, ["/Users/example/report.pdf"]);
+    dispatchNativeFileDrop(wrapReport, [new File([""], "/Users/example/report.pdf")]);
     await flushTimers();
   });
   await waitFor("dropped file attachment", () => document.body.textContent?.includes("report.pdf") === true);
@@ -893,15 +870,6 @@ console.log("\ncomposer goal toggle");
 
 {
   const dom = installDom();
-  let droppedCallback: ((x: number, y: number, paths: string[]) => void) | undefined;
-  window.runtime = {
-    EventsOn: () => () => {},
-    BrowserOpenURL: () => {},
-    OnFileDrop: (cb) => {
-      droppedCallback = cb;
-    },
-    OnFileDropOff: () => {},
-  };
   mockApp({
     AttachDropped: async () => ({
       kind: "workspace",
@@ -912,10 +880,11 @@ console.log("\ncomposer goal toggle");
   });
   const { root, calls, rerender } = await renderComposer();
   await rerender({ insertRequest: { id: 4, text: "inspect", mode: "replace" } });
-  if (!droppedCallback) throw new Error("native file drop handler did not register");
+  const wrapFolderwithspaces = document.querySelector(".composer-wrap");
+  if (!wrapFolderwithspaces) throw new Error("composer drop target did not render");
 
   await act(async () => {
-    droppedCallback?.(0, 0, ["/Users/example/Folder With Spaces"]);
+    dispatchNativeFileDrop(wrapFolderwithspaces, [new File([""], "/Users/example/Folder With Spaces")]);
     await flushTimers();
   });
   await waitFor("dropped external folder chip", () => document.body.textContent?.includes("Folder With Spaces/") === true);
@@ -2269,10 +2238,10 @@ console.log("\ncomposer goal toggle");
   eq(textarea.value, "existing text", "disabled command action does not insert / into existing text");
 
   await rerender({ running: true });
-  ok(Boolean(document.querySelector(".composer-content-menu")), "content menu remains available when a run starts");
-  await act(async () => { contentTrigger.click(); await flushTimers(); });
+  await waitFor("content menu closes when a run starts", () => !document.querySelector(".composer-content-menu"));
   await rerender({ running: false });
   ok(!document.querySelector(".composer-content-menu"), "content menu stays closed after the run ends");
+
   await replaceComposerDraft(rerender, 3004, "");
   await act(async () => {
     contentTrigger.click();
@@ -2286,9 +2255,9 @@ console.log("\ncomposer goal toggle");
   });
   await waitFor("recent-session picker before running", () => Boolean(document.querySelector(".slashmenu__search")));
   await rerender({ running: true });
-  ok(Boolean(document.querySelector(".slashmenu__search")), "recent-session picker remains usable during a run");
+  await waitFor("recent-session picker closes when a run starts", () => !document.querySelector(".slashmenu__search"));
   await rerender({ running: false });
-  ok(Boolean(document.querySelector(".slashmenu__search")), "finishing a run does not discard the reference being prepared");
+  ok(!document.querySelector(".slashmenu__search"), "recent-session picker stays closed after the run ends");
 
   await act(async () => {
     root.unmount();

@@ -62,7 +62,7 @@ supervised SSH connection ─── SSH tunnel ─── headless reasonix serve
 serve web UI in a browser, or the in-app remote session tab
 ```
 
-- **Local frontends**: the `reasonix remote …` CLI; the desktop app (Wails);
+- **Local frontends**: the `reasonix remote …` CLI; the desktop app (Electron);
   and serve's own web client (opened in a browser or hosted by the separate
   web-window child process).
 - **Transport kernel**: one supervised SSH connection — dial, host-key

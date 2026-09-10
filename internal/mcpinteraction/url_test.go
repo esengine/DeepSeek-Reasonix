@@ -72,7 +72,8 @@ func TestBrokerContextRoundTrip(t *testing.T) {
 	if FromContext(context.Background()) != nil {
 		t.Fatal("empty context must resolve to nil broker")
 	}
-	if FromContext(nil) != nil { //nolint:staticcheck // Explicitly verify the documented nil-safe boundary.
+	//nolint:staticcheck
+	if FromContext(nil) != nil {
 		t.Fatal("nil context must resolve to nil broker")
 	}
 }

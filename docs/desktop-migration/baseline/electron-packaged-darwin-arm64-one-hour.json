@@ -1,0 +1,825 @@
+{
+  "label": "electron-packaged-darwin-arm64-one-hour",
+  "durationMin": 60,
+  "measuredAt": "2026-09-08T20:56:06.135Z",
+  "samples": [
+    {
+      "minute": 0,
+      "rssKiB": 1301792,
+      "processCount": 10,
+      "webContents": 6,
+      "wcListeners": 157,
+      "handles": 5,
+      "tabs": 5,
+      "perProc": [
+        {
+          "pid": 79917,
+          "comm": "Reasonix Helper (Renderer)",
+          "rssKiB": 250624
+        },
+        {
+          "pid": 79914,
+          "comm": "Reasonix",
+          "rssKiB": 229632
+        },
+        {
+          "pid": 79962,
+          "comm": "Reasonix Helper (Renderer)",
+          "rssKiB": 137616
+        },
+        {
+          "pid": 79990,
+          "comm": "Reasonix Helper (Renderer)",
+          "rssKiB": 128752
+        },
+        {
+          "pid": 79915,
+          "comm": "Reasonix Helper",
+          "rssKiB": 123984
+        },
+        {
+          "pid": 79954,
+          "comm": "Reasonix Helper (Renderer)",
+          "rssKiB": 98752
+        },
+        {
+          "pid": 79943,
+          "comm": "Reasonix Helper (Renderer)",
+          "rssKiB": 98656
+        },
+        {
+          "pid": 79936,
+          "comm": "Reasonix Helper (Renderer)",
+          "rssKiB": 98640
+        },
+        {
+          "pid": 79918,
+          "comm": "reasonix-desktop",
+          "rssKiB": 70384
+        },
+        {
+          "pid": 79916,
+          "comm": "Reasonix Helper",
+          "rssKiB": 64752
+        }
+      ]
+    },
+    {
+      "minute": 5,
+      "rssKiB": 1310496,
+      "processCount": 11,
+      "webContents": 6,
+      "wcListeners": 157,
+      "handles": 5,
+      "tabs": 5,
+      "perProc": [
+        {
+          "pid": 79917,
+          "comm": "Reasonix Helper (Renderer)",
+          "rssKiB": 254640
+        },
+        {
+          "pid": 79914,
+          "comm": "Reasonix",
+          "rssKiB": 224960
+        },
+        {
+          "pid": 79962,
+          "comm": "Reasonix Helper (Renderer)",
+          "rssKiB": 137984
+        },
+        {
+          "pid": 79990,
+          "comm": "Reasonix Helper (Renderer)",
+          "rssKiB": 130896
+        },
+        {
+          "pid": 79915,
+          "comm": "Reasonix Helper",
+          "rssKiB": 125600
+        },
+        {
+          "pid": 79943,
+          "comm": "Reasonix Helper (Renderer)",
+          "rssKiB": 100352
+        },
+        {
+          "pid": 79936,
+          "comm": "Reasonix Helper (Renderer)",
+          "rssKiB": 100336
+        },
+        {
+          "pid": 79954,
+          "comm": "Reasonix Helper (Renderer)",
+          "rssKiB": 100256
+        },
+        {
+          "pid": 79918,
+          "comm": "reasonix-desktop",
+          "rssKiB": 70544
+        },
+        {
+          "pid": 79916,
+          "comm": "Reasonix Helper",
+          "rssKiB": 64928
+        },
+        {
+          "pid": 81469,
+          "comm": "2026 (Reasonix Helper )",
+          "rssKiB": 0
+        }
+      ]
+    },
+    {
+      "minute": 10,
+      "rssKiB": 1402880,
+      "processCount": 11,
+      "webContents": 6,
+      "wcListeners": 157,
+      "handles": 5,
+      "tabs": 5,
+      "perProc": [
+        {
+          "pid": 79917,
+          "comm": "Reasonix Helper (Renderer)",
+          "rssKiB": 381456
+        },
+        {
+          "pid": 79914,
+          "comm": "Reasonix",
+          "rssKiB": 205664
+        },
+        {
+          "pid": 79962,
+          "comm": "Reasonix Helper (Renderer)",
+          "rssKiB": 138000
+        },
+        {
+          "pid": 79990,
+          "comm": "Reasonix Helper (Renderer)",
+          "rssKiB": 132192
+        },
+        {
+          "pid": 79915,
+          "comm": "Reasonix Helper",
+          "rssKiB": 109088
+        },
+        {
+          "pid": 79943,
+          "comm": "Reasonix Helper (Renderer)",
+          "rssKiB": 100336
+        },
+        {
+          "pid": 79936,
+          "comm": "Reasonix Helper (Renderer)",
+          "rssKiB": 100320
+        },
+        {
+          "pid": 79954,
+          "comm": "Reasonix Helper (Renderer)",
+          "rssKiB": 100256
+        },
+        {
+          "pid": 79918,
+          "comm": "reasonix-desktop",
+          "rssKiB": 70608
+        },
+        {
+          "pid": 79916,
+          "comm": "Reasonix Helper",
+          "rssKiB": 64960
+        },
+        {
+          "pid": 83025,
+          "comm": "2026 (Reasonix Helper )",
+          "rssKiB": 0
+        }
+      ]
+    },
+    {
+      "minute": 15,
+      "rssKiB": 1406768,
+      "processCount": 11,
+      "webContents": 6,
+      "wcListeners": 157,
+      "handles": 5,
+      "tabs": 5,
+      "perProc": [
+        {
+          "pid": 79917,
+          "comm": "Reasonix Helper (Renderer)",
+          "rssKiB": 383872
+        },
+        {
+          "pid": 79914,
+          "comm": "Reasonix",
+          "rssKiB": 206064
+        },
+        {
+          "pid": 79962,
+          "comm": "Reasonix Helper (Renderer)",
+          "rssKiB": 138000
+        },
+        {
+          "pid": 79990,
+          "comm": "Reasonix Helper (Renderer)",
+          "rssKiB": 132880
+        },
+        {
+          "pid": 79915,
+          "comm": "Reasonix Helper",
+          "rssKiB": 109392
+        },
+        {
+          "pid": 79943,
+          "comm": "Reasonix Helper (Renderer)",
+          "rssKiB": 100336
+        },
+        {
+          "pid": 79936,
+          "comm": "Reasonix Helper (Renderer)",
+          "rssKiB": 100320
+        },
+        {
+          "pid": 79954,
+          "comm": "Reasonix Helper (Renderer)",
+          "rssKiB": 100256
+        },
+        {
+          "pid": 79918,
+          "comm": "reasonix-desktop",
+          "rssKiB": 70656
+        },
+        {
+          "pid": 79916,
+          "comm": "Reasonix Helper",
+          "rssKiB": 64992
+        },
+        {
+          "pid": 86422,
+          "comm": "2026 (Reasonix Helper )",
+          "rssKiB": 0
+        }
+      ]
+    },
+    {
+      "minute": 20,
+      "rssKiB": 1410176,
+      "processCount": 11,
+      "webContents": 6,
+      "wcListeners": 157,
+      "handles": 5,
+      "tabs": 5,
+      "perProc": [
+        {
+          "pid": 79917,
+          "comm": "Reasonix Helper (Renderer)",
+          "rssKiB": 385232
+        },
+        {
+          "pid": 79914,
+          "comm": "Reasonix",
+          "rssKiB": 207232
+        },
+        {
+          "pid": 79962,
+          "comm": "Reasonix Helper (Renderer)",
+          "rssKiB": 138032
+        },
+        {
+          "pid": 79990,
+          "comm": "Reasonix Helper (Renderer)",
+          "rssKiB": 133728
+        },
+        {
+          "pid": 79915,
+          "comm": "Reasonix Helper",
+          "rssKiB": 109184
+        },
+        {
+          "pid": 79943,
+          "comm": "Reasonix Helper (Renderer)",
+          "rssKiB": 100368
+        },
+        {
+          "pid": 79936,
+          "comm": "Reasonix Helper (Renderer)",
+          "rssKiB": 100352
+        },
+        {
+          "pid": 79954,
+          "comm": "Reasonix Helper (Renderer)",
+          "rssKiB": 100288
+        },
+        {
+          "pid": 79918,
+          "comm": "reasonix-desktop",
+          "rssKiB": 70672
+        },
+        {
+          "pid": 79916,
+          "comm": "Reasonix Helper",
+          "rssKiB": 65088
+        },
+        {
+          "pid": 1416,
+          "comm": "2026 (Reasonix Helper )",
+          "rssKiB": 0
+        }
+      ]
+    },
+    {
+      "minute": 25,
+      "rssKiB": 1408816,
+      "processCount": 11,
+      "webContents": 6,
+      "wcListeners": 157,
+      "handles": 5,
+      "tabs": 5,
+      "perProc": [
+        {
+          "pid": 79917,
+          "comm": "Reasonix Helper (Renderer)",
+          "rssKiB": 382544
+        },
+        {
+          "pid": 79914,
+          "comm": "Reasonix",
+          "rssKiB": 207504
+        },
+        {
+          "pid": 79962,
+          "comm": "Reasonix Helper (Renderer)",
+          "rssKiB": 138032
+        },
+        {
+          "pid": 79990,
+          "comm": "Reasonix Helper (Renderer)",
+          "rssKiB": 134528
+        },
+        {
+          "pid": 79915,
+          "comm": "Reasonix Helper",
+          "rssKiB": 109344
+        },
+        {
+          "pid": 79943,
+          "comm": "Reasonix Helper (Renderer)",
+          "rssKiB": 100368
+        },
+        {
+          "pid": 79936,
+          "comm": "Reasonix Helper (Renderer)",
+          "rssKiB": 100352
+        },
+        {
+          "pid": 79954,
+          "comm": "Reasonix Helper (Renderer)",
+          "rssKiB": 100288
+        },
+        {
+          "pid": 79918,
+          "comm": "reasonix-desktop",
+          "rssKiB": 70672
+        },
+        {
+          "pid": 79916,
+          "comm": "Reasonix Helper",
+          "rssKiB": 65184
+        },
+        {
+          "pid": 2219,
+          "comm": "2026 (Reasonix Helper )",
+          "rssKiB": 0
+        }
+      ]
+    },
+    {
+      "minute": 30,
+      "rssKiB": 1482832,
+      "processCount": 12,
+      "webContents": 6,
+      "wcListeners": 157,
+      "handles": 5,
+      "tabs": 5,
+      "perProc": [
+        {
+          "pid": 79917,
+          "comm": "Reasonix Helper (Renderer)",
+          "rssKiB": 383504
+        },
+        {
+          "pid": 79914,
+          "comm": "Reasonix",
+          "rssKiB": 208560
+        },
+        {
+          "pid": 79962,
+          "comm": "Reasonix Helper (Renderer)",
+          "rssKiB": 138032
+        },
+        {
+          "pid": 79990,
+          "comm": "Reasonix Helper (Renderer)",
+          "rssKiB": 135328
+        },
+        {
+          "pid": 79915,
+          "comm": "Reasonix Helper",
+          "rssKiB": 109344
+        },
+        {
+          "pid": 79943,
+          "comm": "Reasonix Helper (Renderer)",
+          "rssKiB": 100368
+        },
+        {
+          "pid": 79936,
+          "comm": "Reasonix Helper (Renderer)",
+          "rssKiB": 100352
+        },
+        {
+          "pid": 79954,
+          "comm": "Reasonix Helper (Renderer)",
+          "rssKiB": 100288
+        },
+        {
+          "pid": 2899,
+          "comm": "reasonix",
+          "rssKiB": 71088
+        },
+        {
+          "pid": 79918,
+          "comm": "reasonix-desktop",
+          "rssKiB": 70688
+        },
+        {
+          "pid": 79916,
+          "comm": "Reasonix Helper",
+          "rssKiB": 65280
+        },
+        {
+          "pid": 3251,
+          "comm": "2026 (Reasonix Helper )",
+          "rssKiB": 0
+        }
+      ]
+    },
+    {
+      "minute": 35,
+      "rssKiB": 1488528,
+      "processCount": 12,
+      "webContents": 6,
+      "wcListeners": 157,
+      "handles": 5,
+      "tabs": 5,
+      "perProc": [
+        {
+          "pid": 79917,
+          "comm": "Reasonix Helper (Renderer)",
+          "rssKiB": 383376
+        },
+        {
+          "pid": 79914,
+          "comm": "Reasonix",
+          "rssKiB": 210112
+        },
+        {
+          "pid": 79962,
+          "comm": "Reasonix Helper (Renderer)",
+          "rssKiB": 138032
+        },
+        {
+          "pid": 79990,
+          "comm": "Reasonix Helper (Renderer)",
+          "rssKiB": 136320
+        },
+        {
+          "pid": 79915,
+          "comm": "Reasonix Helper",
+          "rssKiB": 109360
+        },
+        {
+          "pid": 79943,
+          "comm": "Reasonix Helper (Renderer)",
+          "rssKiB": 100368
+        },
+        {
+          "pid": 79936,
+          "comm": "Reasonix Helper (Renderer)",
+          "rssKiB": 100352
+        },
+        {
+          "pid": 79954,
+          "comm": "Reasonix Helper (Renderer)",
+          "rssKiB": 100288
+        },
+        {
+          "pid": 2899,
+          "comm": "reasonix",
+          "rssKiB": 74240
+        },
+        {
+          "pid": 79918,
+          "comm": "reasonix-desktop",
+          "rssKiB": 70720
+        },
+        {
+          "pid": 79916,
+          "comm": "Reasonix Helper",
+          "rssKiB": 65360
+        },
+        {
+          "pid": 4703,
+          "comm": "2026 (Reasonix Helper )",
+          "rssKiB": 0
+        }
+      ]
+    },
+    {
+      "minute": 40,
+      "rssKiB": 1484544,
+      "processCount": 12,
+      "webContents": 6,
+      "wcListeners": 157,
+      "handles": 5,
+      "tabs": 5,
+      "perProc": [
+        {
+          "pid": 79917,
+          "comm": "Reasonix Helper (Renderer)",
+          "rssKiB": 381136
+        },
+        {
+          "pid": 79914,
+          "comm": "Reasonix",
+          "rssKiB": 210784
+        },
+        {
+          "pid": 79962,
+          "comm": "Reasonix Helper (Renderer)",
+          "rssKiB": 138032
+        },
+        {
+          "pid": 79990,
+          "comm": "Reasonix Helper (Renderer)",
+          "rssKiB": 137344
+        },
+        {
+          "pid": 79915,
+          "comm": "Reasonix Helper",
+          "rssKiB": 109360
+        },
+        {
+          "pid": 79943,
+          "comm": "Reasonix Helper (Renderer)",
+          "rssKiB": 100368
+        },
+        {
+          "pid": 79936,
+          "comm": "Reasonix Helper (Renderer)",
+          "rssKiB": 100352
+        },
+        {
+          "pid": 79954,
+          "comm": "Reasonix Helper (Renderer)",
+          "rssKiB": 100288
+        },
+        {
+          "pid": 79918,
+          "comm": "reasonix-desktop",
+          "rssKiB": 70720
+        },
+        {
+          "pid": 5348,
+          "comm": "reasonix",
+          "rssKiB": 70656
+        },
+        {
+          "pid": 79916,
+          "comm": "Reasonix Helper",
+          "rssKiB": 65504
+        },
+        {
+          "pid": 6317,
+          "comm": "2026 (Reasonix Helper )",
+          "rssKiB": 0
+        }
+      ]
+    },
+    {
+      "minute": 45,
+      "rssKiB": 1421664,
+      "processCount": 12,
+      "webContents": 6,
+      "wcListeners": 157,
+      "handles": 5,
+      "tabs": 5,
+      "perProc": [
+        {
+          "pid": 79917,
+          "comm": "Reasonix Helper (Renderer)",
+          "rssKiB": 360304
+        },
+        {
+          "pid": 79914,
+          "comm": "Reasonix",
+          "rssKiB": 205952
+        },
+        {
+          "pid": 79990,
+          "comm": "Reasonix Helper (Renderer)",
+          "rssKiB": 137968
+        },
+        {
+          "pid": 79962,
+          "comm": "Reasonix Helper (Renderer)",
+          "rssKiB": 120960
+        },
+        {
+          "pid": 79915,
+          "comm": "Reasonix Helper",
+          "rssKiB": 104336
+        },
+        {
+          "pid": 79943,
+          "comm": "Reasonix Helper (Renderer)",
+          "rssKiB": 97872
+        },
+        {
+          "pid": 79936,
+          "comm": "Reasonix Helper (Renderer)",
+          "rssKiB": 97360
+        },
+        {
+          "pid": 79954,
+          "comm": "Reasonix Helper (Renderer)",
+          "rssKiB": 95120
+        },
+        {
+          "pid": 79918,
+          "comm": "reasonix-desktop",
+          "rssKiB": 70352
+        },
+        {
+          "pid": 11962,
+          "comm": "reasonix",
+          "rssKiB": 69376
+        },
+        {
+          "pid": 79916,
+          "comm": "Reasonix Helper",
+          "rssKiB": 62064
+        },
+        {
+          "pid": 12239,
+          "comm": "2026 (Reasonix Helper )",
+          "rssKiB": 0
+        }
+      ]
+    },
+    {
+      "minute": 50,
+      "rssKiB": 1425136,
+      "processCount": 12,
+      "webContents": 6,
+      "wcListeners": 157,
+      "handles": 5,
+      "tabs": 5,
+      "perProc": [
+        {
+          "pid": 79917,
+          "comm": "Reasonix Helper (Renderer)",
+          "rssKiB": 361184
+        },
+        {
+          "pid": 79914,
+          "comm": "Reasonix",
+          "rssKiB": 207424
+        },
+        {
+          "pid": 79990,
+          "comm": "Reasonix Helper (Renderer)",
+          "rssKiB": 138000
+        },
+        {
+          "pid": 79962,
+          "comm": "Reasonix Helper (Renderer)",
+          "rssKiB": 120960
+        },
+        {
+          "pid": 79915,
+          "comm": "Reasonix Helper",
+          "rssKiB": 104368
+        },
+        {
+          "pid": 79943,
+          "comm": "Reasonix Helper (Renderer)",
+          "rssKiB": 97872
+        },
+        {
+          "pid": 79936,
+          "comm": "Reasonix Helper (Renderer)",
+          "rssKiB": 97360
+        },
+        {
+          "pid": 79954,
+          "comm": "Reasonix Helper (Renderer)",
+          "rssKiB": 95120
+        },
+        {
+          "pid": 79918,
+          "comm": "reasonix-desktop",
+          "rssKiB": 70384
+        },
+        {
+          "pid": 11962,
+          "comm": "reasonix",
+          "rssKiB": 70224
+        },
+        {
+          "pid": 79916,
+          "comm": "Reasonix Helper",
+          "rssKiB": 62240
+        },
+        {
+          "pid": 13412,
+          "comm": "2026 (Reasonix Helper )",
+          "rssKiB": 0
+        }
+      ]
+    },
+    {
+      "minute": 55,
+      "rssKiB": 1424064,
+      "processCount": 12,
+      "webContents": 6,
+      "wcListeners": 157,
+      "handles": 5,
+      "tabs": 5,
+      "perProc": [
+        {
+          "pid": 79917,
+          "comm": "Reasonix Helper (Renderer)",
+          "rssKiB": 360320
+        },
+        {
+          "pid": 79914,
+          "comm": "Reasonix",
+          "rssKiB": 208752
+        },
+        {
+          "pid": 79990,
+          "comm": "Reasonix Helper (Renderer)",
+          "rssKiB": 138032
+        },
+        {
+          "pid": 79962,
+          "comm": "Reasonix Helper (Renderer)",
+          "rssKiB": 120960
+        },
+        {
+          "pid": 79915,
+          "comm": "Reasonix Helper",
+          "rssKiB": 104368
+        },
+        {
+          "pid": 79943,
+          "comm": "Reasonix Helper (Renderer)",
+          "rssKiB": 97872
+        },
+        {
+          "pid": 79936,
+          "comm": "Reasonix Helper (Renderer)",
+          "rssKiB": 97360
+        },
+        {
+          "pid": 79954,
+          "comm": "Reasonix Helper (Renderer)",
+          "rssKiB": 95120
+        },
+        {
+          "pid": 79918,
+          "comm": "reasonix-desktop",
+          "rssKiB": 70400
+        },
+        {
+          "pid": 14539,
+          "comm": "reasonix",
+          "rssKiB": 68544
+        },
+        {
+          "pid": 79916,
+          "comm": "Reasonix Helper",
+          "rssKiB": 62336
+        },
+        {
+          "pid": 15069,
+          "comm": "2026 (Reasonix Helper )",
+          "rssKiB": 0
+        }
+      ]
+    }
+  ],
+  "exitedCleanly": true
+}

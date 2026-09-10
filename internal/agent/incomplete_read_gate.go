@@ -86,23 +86,37 @@ func matchReadStrategyAction(plan *toolCallPlan, input incompleteReadGateInput, 
 }
 
 func (s *incompleteReadState) nextInstruction() string {
+	return s.instructionFor("")
+}
+
+func (s *incompleteReadState) instructionFor(key string) string {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	entry := s.firstLocked()
+	if key != "" {
+		entry = s.entries[key]
+	}
 	if entry == nil {
 		return ""
+	}
+	if key == "" {
+		hint := fmt.Sprintf("%s/%d/%d/%d/%d/%d", entry.key, entry.phase, entry.nextByteOffset, entry.nextSourceOffset, len(entry.searches), len(entry.reads))
+		if hint == s.lastHint {
+			return ""
+		}
+		s.lastHint = hint
 	}
 	switch entry.phase {
 	case incompleteReadAutoResultPage, incompleteReadStrategyResultPage:
 		args, _ := json.Marshal(map[string]any{"tool_call_id": entry.toolCallID, "result_ref": entry.resultRef, "offset": entry.nextByteOffset, "limit": toolResultPageMaxBytes})
-		return fmt.Sprintf("The host has an INCOMPLETE read_file result. Before any state change or final answer, call use_capability with action=\"call\", capability_id=\"session:tool_result\", arguments=%s. Continue from each returned next_offset until complete=true.", args)
+		return fmt.Sprintf("The host retained a PARTIAL read_file result. If more content is needed, call use_capability with action=\"call\", capability_id=\"session:tool_result\", arguments=%s. Independent work may continue; an explicit full-file request still requires complete coverage.", args)
 	case incompleteReadAutoSourcePage, incompleteReadStrategySourcePage:
 		args, _ := json.Marshal(map[string]any{"path": entry.path, "offset": entry.nextSourceOffset, "limit": entry.nextSourceLimit})
-		return fmt.Sprintf("The read_file window has more source lines. Before any state change or final answer, call read_file with exactly %s.", args)
+		return fmt.Sprintf("The read_file window has more source lines. Continue with read_file %s if needed. A partial window may be sufficient for local work; an explicit full-file request still requires complete coverage.", args)
 	case incompleteReadStrategy:
 		readExample, _ := json.Marshal(map[string]any{"path": entry.path, "offset": 0, "limit": 200})
 		receiptExample, _ := json.Marshal(map[string]any{"read_id": entry.readID, "search_tool_call_ids": []string{"<grep tool call id>"}, "read_tool_call_ids": []string{"<read_file tool call id>"}, "conclusion": "<why these searches and exact windows are sufficient for the task>"})
-		return fmt.Sprintf("The complete file cannot fit the dynamic context budget. RESTRICTED READ STRATEGY read_id=%q path=%q. Do not modify state or answer yet. Search only this exact file with grep, then read relevant windows with explicit offset and limit (example %s). After at least one complete search and one complete exact window, call use_capability with action=\"call\", capability_id=\"session:read_strategy_receipt\", arguments=%s.", entry.readID, entry.path, readExample, receiptExample)
+		return fmt.Sprintf("The complete file cannot fit the dynamic context budget. READ STRATEGY read_id=%q path=%q. Independent work may continue. Search this file with grep, then read relevant windows (example %s). A targeted receipt never proves whole-file coverage. Record the targeted scope using use_capability with action=\"call\", capability_id=\"session:read_strategy_receipt\", arguments=%s.", entry.readID, entry.path, readExample, receiptExample)
 	default:
 		return ""
 	}

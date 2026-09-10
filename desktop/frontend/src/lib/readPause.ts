@@ -2,8 +2,9 @@ import type { Item } from "./useController";
 import { t } from "./i18n";
 
 export interface WireReadPause {
-  id: string;
-  reads: { readId: string; path: string; intent?: string; covered?: [number, number][]; missing?: [number, number][]; reason: string }[];
+	code?: string;
+	id: string;
+	reads: { readId: string; path: string; snapshot?: string; intent?: string; covered?: [number, number][]; missing?: [number, number][]; reason: string }[];
   omitted?: number;
 }
 

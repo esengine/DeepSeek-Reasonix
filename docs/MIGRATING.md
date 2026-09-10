@@ -195,7 +195,7 @@ and DeepSeek prefix-cache–oriented design.
   delegation in Plan uses Permissions/Sandbox.
 - **Web dashboard remains available; desktop is recommended**: run
   `reasonix serve` when a local browser UI is useful. For the primary visual
-  experience, prefer the Wails desktop app; CLI/TUI remains the terminal-native
+  experience, prefer the desktop app; CLI/TUI remains the terminal-native
   path.
 - Some granular v1 tools are intentionally consolidated (e.g. file-management ops
   go through `bash`); a few v1 tools are not yet ported (tracked on Discussions).

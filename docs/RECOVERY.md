@@ -13,7 +13,7 @@ reasonix crash report   # when available in your build
 ```
 
 - **doctor** inspects configuration, derived desktop state, and common install
-  problems without loading the Wails shell.
+  problems without loading the desktop shell.
 - **doctor repair** applies safe, explicit repairs the user opts into.
 - Crash reports remain opt-in and never force a degraded product mode.
 
@@ -78,7 +78,7 @@ showing only exit code 1.
 
 ## macOS
 
-macOS keeps LaunchServices launching the Wails app bundle directly. Updates
+macOS keeps LaunchServices launching the desktop app bundle directly. Updates
 replace the signed `.app` atomically; there is no Guard process.
 
 After the replacement window becomes visible, Reasonix commits only the exact

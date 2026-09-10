@@ -101,7 +101,7 @@ func (c *Controller) UndoRewind(transactionID string) (RewindResult, error)
 ## 桌面端体验（与 VS Code 扩展对齐）
 
 - Transcript 中每条用户消息悬停时显示 **rewind** 控件，并提供：恢复代码、恢复会话、同时恢复、从此处分叉。
-- 前端通过 Wails binding 调用同一个 prepare / commit rewind API；Controller 事件流推送恢复结果，React 负责重绘。前端不包含独立 rewind 逻辑。
+- 前端通过桌面 host 协议调用同一个 prepare / commit rewind API；Controller 事件流推送恢复结果，React 负责重绘。前端不包含独立 rewind 逻辑。
 - 对话回溯和“从此处分叉”保留当前标签页并把它切到新 head，原有链留在“查看
   版本”中。只有隔离 worktree 分叉才会打开新标签页，因为它要把会话复制到新的
   工作区。

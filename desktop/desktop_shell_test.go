@@ -1,17 +1,16 @@
 package main
 
 import (
-	"os"
 	"reflect"
 	"testing"
 	"time"
 )
 
-func TestDesktopPresentPlanUsesGtkPresentOnlyOnLinux(t *testing.T) {
-	if got, want := desktopPresentPlanFor("linux", true), []desktopPresentAction{desktopPresentUnminimise}; !reflect.DeepEqual(got, want) {
+func TestDesktopPresentPlanShowsHiddenElectronWindowOnLinux(t *testing.T) {
+	if got, want := desktopPresentPlanFor("linux", true), []desktopPresentAction{desktopPresentMaximise, desktopPresentWindowShow}; !reflect.DeepEqual(got, want) {
 		t.Fatalf("linux present actions = %v, want %v", got, want)
 	}
-	if got, want := desktopPresentPlanFor("linux", false), []desktopPresentAction{desktopPresentUnminimise}; !reflect.DeepEqual(got, want) {
+	if got, want := desktopPresentPlanFor("linux", false), []desktopPresentAction{desktopPresentWindowShow, desktopPresentUnminimise}; !reflect.DeepEqual(got, want) {
 		t.Fatalf("linux normal present actions = %v, want %v", got, want)
 	}
 }
@@ -125,29 +124,6 @@ func TestEvaluateStatusNotifierSnapshot(t *testing.T) {
 	}
 }
 
-func TestLinuxRendererCompatibilityRestartJournalPreventsLoop(t *testing.T) {
-	oldVersion := version
-	version = "journal-test"
-	oldCompatibility := os.Getenv(linuxRendererCompatibilityEnv)
-	_ = os.Unsetenv(linuxRendererCompatibilityEnv)
-	t.Cleanup(func() {
-		version = oldVersion
-		_ = os.Setenv(linuxRendererCompatibilityEnv, oldCompatibility)
-	})
-	_ = os.Remove(linuxRendererRecoveryJournalPath())
-	t.Cleanup(func() { _ = os.Remove(linuxRendererRecoveryJournalPath()) })
-	now := time.Now()
-	if !claimLinuxRendererCompatibilityRestart(now, "startup") {
-		t.Fatal("first compatibility restart was not claimed")
-	}
-	if claimLinuxRendererCompatibilityRestart(now.Add(time.Minute), "startup") {
-		t.Fatal("same-version restart loop was not blocked")
-	}
-	if !claimLinuxRendererCompatibilityRestart(now.Add(linuxRendererRecoveryWindow+time.Second), "startup") {
-		t.Fatal("restart was not allowed after the five-minute guard window")
-	}
-}
-
 func TestProcessEnvWithOverridesReplacesInsteadOfDuplicating(t *testing.T) {
 	got := processEnvWithOverrides([]string{"A=old", "B=kept", "A=duplicate"}, map[string]string{"A": "new", "C": "added"})
 	counts := map[string]int{}
@@ -163,38 +139,5 @@ func TestProcessEnvWithOverridesReplacesInsteadOfDuplicating(t *testing.T) {
 	}
 	if counts["A"] != 1 || values["A"] != "new" || values["B"] != "kept" || values["C"] != "added" {
 		t.Fatalf("overridden environment = %v", got)
-	}
-}
-
-func TestWebKitReloadNeedsPostReloadFrontendHeartbeat(t *testing.T) {
-	app := NewApp()
-	recovery := app.desktopShell.linuxRecovery
-	recovery.nativeEvent(webKitNativeEvent{recovery: webKitRecoverySucceeded, generation: 7}, false)
-	recovery.mu.Lock()
-	pending := recovery.pendingEvent
-	recovery.mu.Unlock()
-	if pending == nil || pending.generation != 7 {
-		t.Fatal("native load-finished was incorrectly treated as complete recovery")
-	}
-
-	recovery.frontendReady()
-	recovery.mu.Lock()
-	pending = recovery.pendingEvent
-	recovery.mu.Unlock()
-	if pending != nil {
-		t.Fatal("post-reload frontend heartbeat did not complete recovery")
-	}
-}
-
-func TestWebKitRecoveryStopClearsPendingHeartbeat(t *testing.T) {
-	app := NewApp()
-	recovery := app.desktopShell.linuxRecovery
-	recovery.nativeEvent(webKitNativeEvent{recovery: webKitRecoverySucceeded, generation: 11}, false)
-	recovery.stop()
-
-	recovery.mu.Lock()
-	defer recovery.mu.Unlock()
-	if !recovery.stopped || recovery.pendingTimer != nil || recovery.pendingEvent != nil {
-		t.Fatalf("stopped recovery retained pending work: %+v", recovery)
 	}
 }

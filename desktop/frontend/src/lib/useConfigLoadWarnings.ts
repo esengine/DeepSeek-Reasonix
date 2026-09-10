@@ -1,3 +1,4 @@
+import { desktopHost } from "./desktopHost";
 import { useCallback, useEffect, useRef, useState } from "react";
 
 export interface ConfigLoadWarningsSnapshot {
@@ -40,8 +41,9 @@ export function normalizeConfigLoadWarningsEvent(payload: unknown, revisionValue
 }
 
 export function subscribeConfigLoadWarnings(cb: (snapshot: ConfigLoadWarningsSnapshot) => void): () => void {
-  if (typeof window !== "undefined" && window.go?.main?.App && window.runtime) {
-    return window.runtime.EventsOn("config:load-warnings", (payload?: unknown, revision?: unknown) => {
+  const host = desktopHost();
+  if (host.kind !== "none") {
+    return host.events.on("config:load-warnings", (payload?: unknown, revision?: unknown) => {
       const snapshot = normalizeConfigLoadWarningsEvent(payload, revision);
       if (snapshot) cb(snapshot);
     });

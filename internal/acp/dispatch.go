@@ -53,10 +53,12 @@ type updateSink struct {
 	sessionID string
 	// cwd resolves relative tool-arg paths for tool_call locations. Set once
 	// via bindCwd before the sink receives events.
-	cwd     string
-	approve func(id string, allow, session, persist bool)
-	answer  func(id string, answers []event.AskAnswer)
-	status  func(event.Event)
+	cwd                     string
+	approve                 func(id string, allow, session, persist bool)
+	answer                  func(id string, answers []event.AskAnswer)
+	mcpInteractionSupported bool
+	answerMCPInteraction    func(string, string, map[string]any) error
+	status                  func(event.Event)
 	// extensionSurface records the client's negotiated
 	// reasonix.extensionSurface support: structured surfaces go out as vendor
 	// session/update payloads on top of the always-sent text fallback.
@@ -228,19 +230,8 @@ func (s *updateSink) Emit(e event.Event) {
 			})
 		}
 
-	case event.ApprovalRequest:
-		// The run loop is now blocked awaiting Approve(id, …). Do the
-		// client round-trip off the emit goroutine so Emit returns at once
-		// (the agent emits serially); the answer unblocks the loop.
-		turnCtx := s.currentTurnContext()
-		go s.requestPermission(turnCtx, e.Approval)
-
-	case event.AskRequest:
-		// ACP has no separate "ask the user a business question" method. Reuse
-		// the standard permission round-trip with the question options as choices;
-		// clients such as Zed already know how to render this interaction.
-		turnCtx := s.currentTurnContext()
-		go s.requestAsk(turnCtx, e.Ask)
+	case event.ApprovalRequest, event.AskRequest, event.MCPInteractionRequest:
+		s.emitPrompt(e)
 
 	case event.ExtensionSurface, event.ExtensionStatus:
 		s.emitExtension(e)

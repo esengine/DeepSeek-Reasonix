@@ -8,12 +8,13 @@ import (
 	"path/filepath"
 	"strings"
 
+	"reasonix/desktop/internal/update"
 	"reasonix/internal/installlayout"
 	"reasonix/internal/repair"
 )
 
 // activateVersionedWindowsFromStaging publishes the versioned-v1 layout from a
-// staged NSIS payload:
+// staged NSIS payload whose signed manifest names every member:
 //
 //	InstallRoot/
 //	  reasonix-launcher.exe
@@ -24,9 +25,9 @@ import (
 //	    reasonix-desktop.exe
 //	    reasonix-cli.exe
 //	    reasonix-update-helper.exe
+//	    app/...                 (Electron shell tree, schema 2 manifests)
 //
-// Any failure before the current.json pointer swap leaves the previous active
-// version unchanged. The helper never counts crashes or selects prior versions.
+// Any failure before the current.json pointer swap keeps the previous version active; the helper never rolls back.
 func activateVersionedWindowsFromStaging(claimed *repair.UpdateTransaction, stagingDir string) error {
 	if claimed == nil {
 		return fmt.Errorf("versioned activate: transaction is nil")
@@ -48,33 +49,31 @@ func activateVersionedWindowsFromStaging(claimed *repair.UpdateTransaction, stag
 	}
 	stagingDir = filepath.Clean(strings.TrimSpace(stagingDir))
 
-	desktopSrc := filepath.Join(stagingDir, "reasonix-desktop.exe")
-	cliSrc := filepath.Join(stagingDir, "reasonix-cli.exe")
-	helperSrc := filepath.Join(stagingDir, "reasonix-update-helper.exe")
-	launcherSrc := filepath.Join(stagingDir, "reasonix-launcher.exe")
-	for _, path := range []string{desktopSrc, cliSrc, helperSrc, launcherSrc} {
-		info, err := os.Lstat(path)
-		if err != nil {
-			return fmt.Errorf("versioned activate: staged %s: %w", filepath.Base(path), err)
-		}
-		if !info.Mode().IsRegular() || info.Mode()&os.ModeSymlink != 0 {
-			return fmt.Errorf("versioned activate: staged %s is not a regular file", filepath.Base(path))
-		}
+	hashes, err := loadWindowsPayloadManifest(stagingDir, strings.TrimSpace(claimed.ToVersion))
+	if err != nil {
+		return fmt.Errorf("versioned activate: %w", err)
 	}
+	versionNames := update.WindowsPayloadVersionMembers(hashes)
+	members, err := stagedWindowsPayloadMembers(stagingDir, hashes, versionNames)
+	if err != nil {
+		return fmt.Errorf("versioned activate: %w", err)
+	}
+	rootFiles, err := stagedWindowsPayloadMembers(stagingDir, hashes, []string{"reasonix-launcher.exe", "reasonix-cli.exe"})
+	if err != nil {
+		return fmt.Errorf("versioned activate: %w", err)
+	}
+	launcherSrc, cliSrc := rootFiles[0].Path, rootFiles[1].Path
 
 	requestID := repair.UpdateTransactionID(claimed)
 	if requestID == "" {
 		requestID = "helper-" + version
 	}
 	if err := installlayout.ActivateVersion(installlayout.ActivationRequest{
-		InstallRoot: installRoot,
-		Version:     version,
-		RequestID:   requestID,
-		Members: []installlayout.Member{
-			{Name: "reasonix-desktop.exe", Path: desktopSrc, Mode: 0o700},
-			{Name: "reasonix-cli.exe", Path: cliSrc, Mode: 0o700},
-			{Name: "reasonix-update-helper.exe", Path: helperSrc, Mode: 0o700},
-		},
+		InstallRoot:   installRoot,
+		Version:       version,
+		RequestID:     requestID,
+		Members:       members,
+		RequiredNames: versionNames,
 		RootMembers: []installlayout.Member{
 			{Name: "reasonix-launcher.exe", Path: launcherSrc, Mode: 0o700},
 			{Name: "Reasonix.exe", Path: launcherSrc, Mode: 0o700},

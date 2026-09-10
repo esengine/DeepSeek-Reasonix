@@ -25,7 +25,7 @@ func (a *App) setTabReadOnly(tabID string, readOnly bool) {
 	if !readOnly {
 		tab.Takeover.Spectator = false
 	}
-	_ = a.saveTabsLocked()
+	a.saveTabsLocked()
 	a.mu.Unlock()
 	if len(terminalSessions) > 0 {
 		// Existing shells can keep modifying the workspace without renderer

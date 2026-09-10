@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"reasonix/internal/tool"
 )
 
 // ErrFileChanged is returned when a structured write tool re-reads the target
@@ -49,7 +50,7 @@ func (s editSource) assertUnchanged(ctx context.Context, overlay FileOverlay, pa
 		return err
 	}
 	if !s.id.equal(now) {
-		return fmt.Errorf("%w: %s", ErrFileChanged, path)
+		return &tool.OperationError{Diagnostic: tool.OperationDiagnostic{Code: tool.WriteEvidenceStale, Path: path, ExpectedSnapshot: s.readSnapshot(path), Recovery: "re-read the current source, then retry"}, Cause: fmt.Errorf("%w: %s", ErrFileChanged, path)}
 	}
 	return nil
 }

@@ -27,6 +27,7 @@ import (
 	"reasonix/internal/agent"
 	"reasonix/internal/agentpreset"
 	"reasonix/internal/billing"
+	"reasonix/internal/browser"
 	"reasonix/internal/capability"
 	"reasonix/internal/command"
 	"reasonix/internal/config"
@@ -106,6 +107,10 @@ type Options struct {
 	// EffortOverride is a session-local reasoning effort override. Nil means use
 	// the resolved provider config; a non-nil empty string means provider default.
 	EffortOverride *string
+	// ConfigSnapshot is an optional, caller-owned immutable configuration for
+	// this assembly. Desktop passes the snapshot used to resolve the selection
+	// so a concurrent settings edit cannot change another role halfway through.
+	ConfigSnapshot *config.Config
 	// PermissionAllow adds process-local allow rules (for example CLI
 	// --allowed-tools). They override configured ask rules but never deny rules
 	// and are not persisted.
@@ -191,6 +196,10 @@ type Options struct {
 	// schemas stay byte-identical, so the provider-visible surface is unchanged.
 	FileOverlay    builtin.FileOverlay
 	TerminalRunner builtin.TerminalRunner
+	// BrowserExecutor attaches the host's browser; nil registers nothing. Its
+	// tools are registry-only: use_capability reaches them while the provider-
+	// visible surface never changes, so the cached prompt prefix stays identical.
+	BrowserExecutor browser.Executor
 	// ProviderResolver routes every model role through a caller-owned provider
 	// catalog. Nil preserves local behavior.
 	ProviderResolver provider.Resolver
@@ -242,7 +251,7 @@ func build(ctx context.Context, opts Options) (*BuildResult, error) {
 	memoryCompilerMigrated, memoryCompilerMigErr := config.MigrateLegacyMemoryCompilerForRoot(root)
 	multiThresholdMigrated, multiThresholdMigErr := config.MigrateLegacyMultiThresholdCompactionForRoot(root)
 	config.MigrateLegacyMCPTiersForRoot(root)
-	cfg, err := config.LoadModelRuntimeSnapshot(root, opts.Model)
+	cfg, err := resolveBuildConfiguration(root, opts.Model, opts.ConfigSnapshot)
 	if err != nil {
 		return nil, err
 	}
@@ -250,6 +259,9 @@ func build(ctx context.Context, opts Options) (*BuildResult, error) {
 		return nil, err
 	}
 	deepSeekProtocolMigErr = deepSeekProtocolMigrationNoticeError(handleConfigLoadWarnings(opts, cfg), deepSeekProtocolMigErr)
+	if err := preflightRoleReasoning(cfg, opts, opts.ProviderResolver, false); err != nil {
+		return nil, err
+	}
 	// Arm the credential-protection layers from the user-global [secrets]
 	// section before any tool, hook, or plugin subprocess can spawn. Package
 	// globals are correct here because [secrets] is user-global (project
@@ -425,6 +437,9 @@ func build(ctx context.Context, opts Options) (*BuildResult, error) {
 	// instead of hard-failing every command on "missing env X_API_KEY" (issue
 	// #6996). The fallback only kicks in when the caller did not pass an
 	// explicit opts.Model; explicit choices still fail loudly.
+	if err := preflightRoleReasoning(cfg, opts, effectiveResolver, true); err != nil {
+		return nil, err
+	}
 	modelName := opts.Model
 	if modelName == "" {
 		if resolved, _, ok := cfg.ResolveNewSessionChatModel(); ok {
@@ -466,21 +481,7 @@ func build(ctx context.Context, opts Options) (*BuildResult, error) {
 	} else if migrated != nil {
 		sink.Emit(event.Event{Kind: event.Notice, Level: event.LevelInfo, Text: migrated.Notice()})
 	}
-	if deepSeekProtocolMigrated {
-		sink.Emit(event.Event{
-			Kind:   event.Notice,
-			Level:  event.LevelInfo,
-			Text:   "User configuration was upgraded.",
-			Detail: "Legacy built-in DeepSeek defaults now use Chat Completions with independent web search. Explicit custom routes remain unchanged. Protocol changes start a new provider cache prefix; later requests rebuild normal prefix-cache reuse.",
-		})
-	} else if deepSeekProtocolMigErr != nil {
-		sink.Emit(event.Event{
-			Kind:   event.Notice,
-			Level:  event.LevelWarn,
-			Text:   "DeepSeek protocol migration did not complete.",
-			Detail: deepSeekProtocolMigErr.Error(),
-		})
-	}
+	emitUserConfigUpgradeNotice(sink, cfg, deepSeekProtocolMigrated, deepSeekProtocolMigErr)
 	if stepLimitsMigrated || cfg.IgnoredLegacyAgentStepLimits() {
 		level := event.LevelInfo
 		text := "Deprecated agent step limits were removed."
@@ -730,6 +731,11 @@ func build(ctx context.Context, opts Options) (*BuildResult, error) {
 	// provider-visible surface is narrowed later via SetProviderVisibleTools.
 	addBuiltins(reg, enabledBuiltins, writeRoots, writeRootSet, bashSpec, bashTimeout, searchSpec, stderr, root, proxySpec, forbidReadRoots, readPathResolver, sessionGuard, managedConfig, opts.FileOverlay, opts.TerminalRunner, sessionTemp, fileWriteReceipt)
 	addWebSearch(reg, cfg, entry, proxySpec, sink)
+	if opts.BrowserExecutor != nil {
+		for _, t := range browser.Tools(opts.BrowserExecutor) {
+			reg.Add(t)
+		}
+	}
 	// Use the caller-supplied shared host when set, so controllers for the same
 	// workspace root reuse running MCP processes (e.g. one CodeGraph daemon
 	// instead of one per tab). Otherwise construct a private host per controller.
@@ -1779,7 +1785,6 @@ func build(ctx context.Context, opts Options) (*BuildResult, error) {
 	ctrlOpts := control.Options{
 		ModelSettingsRevision:          cfg.ModelRuntimeFingerprint(modelRef),
 		ModelSettingsCurrent:           runtimeModelSettingsReader(root, modelName, modelRef, opts.ModelSettings),
-		FrozenEffort:                   &entry.Effort,
 		FrozenImageInput:               &imageEnabled,
 		ImageCapabilityChanged:         runtimeImageCapabilityReader(root, modelName, imageSnapshot, opts.ModelSettings),
 		TaskBudget:                     taskBudgetFromConfig(cfg),
@@ -1791,6 +1796,8 @@ func build(ctx context.Context, opts Options) (*BuildResult, error) {
 		SubagentGate:                   headlessGate,
 		Label:                          label,
 		ModelRef:                       modelRef,
+		ModelIdentity:                  cfg.ModelSelectionIdentity(modelRef),
+		ResolveSessionModel:            cfg.ResolveSavedModel,
 		VisionModel:                    cfg.Agent.VisionModel,
 		VisionProviderResolver:         visionProviderResolver,
 		VisionModelSelector:            visionModelSelector,
@@ -2057,28 +2064,6 @@ func build(ctx context.Context, opts Options) (*BuildResult, error) {
 		ImplicitSkillInvocation: implicitSkillInvocation,
 	}
 	return finalizeBuildResult(&BuildResult{Controller: ctrl, Snapshot: snap, Runtime: runtimeSet, Owner: owner, Extensions: extensionMgr, Dispatcher: extensionDispatcher, ExtensionUI: extUIHub, ProviderResolver: providerResolver, BaseProviderResolver: baseResolver, Assembly: assembly}, !opts.deferPublish), nil
-}
-
-// applyUnifiedProviderToolSurface restricts Schemas/ContractEntries to the
-// shared core + host-control tools. use_capability can still Get every
-// registered tool, including those hidden from the provider schema.
-func applyUnifiedProviderToolSurface(reg *tool.Registry) {
-	if reg == nil {
-		return
-	}
-	allow := make([]string, 0, 16)
-	for _, name := range UnifiedProviderToolNames() {
-		if _, ok := reg.Get(name); ok {
-			allow = append(allow, name)
-		}
-	}
-	// Always keep use_capability if somehow only that remains.
-	if len(allow) == 0 {
-		if _, ok := reg.Get("use_capability"); ok {
-			allow = []string{"use_capability"}
-		}
-	}
-	reg.SetProviderVisibleTools(allow)
 }
 
 // effectivePlannerModel centralizes planner precedence. Every role setting

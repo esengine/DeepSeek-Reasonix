@@ -1,4 +1,4 @@
-// Window-level failure routing. Wails rejects a bound Go call with the bare
+// Window-level failure routing. The desktop bridge rejects a bound Go call with the bare
 // error string, so a stackless rejection is an ordinary backend error that is
 // contained and toasted; only faults carrying a stack reach the crash overlay.
 

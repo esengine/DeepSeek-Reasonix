@@ -172,7 +172,7 @@ func (a *App) retargetOpenTabsToContinuations() {
 			a.mu.Lock()
 			if !item.tab.hasActiveRuntimeWork() && (a.tabs[item.tab.ID] == item.tab || a.detachedSessions[sessionRuntimeKey(item.tab.currentSessionPath())] == item.tab) {
 				item.tab.SessionPath = item.next
-				_ = a.saveTabsLocked()
+				a.saveTabsLocked()
 			}
 			a.mu.Unlock()
 			continue

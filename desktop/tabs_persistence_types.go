@@ -39,7 +39,7 @@ func persistedDesktopTabEntry(tab *WorkspaceTab) desktopTabEntry {
 		ReadOnly:          tab.ReadOnly,
 		TakeoverSpectator: tab.Takeover.Spectator,
 		Model:             tab.model,
-		Effort:            persistedTabEffort(tab),
+		Effort:            cloneStringPtr(tab.effort),
 		AgentPreset:       currentTabAgentPreset(tab),
 		TokenMode:         currentTabTokenMode(tab),
 		QualityFloor:      tab.qualityFloor,

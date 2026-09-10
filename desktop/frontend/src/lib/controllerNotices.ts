@@ -19,7 +19,6 @@ export function errorMessage(err: unknown): string {
 }
 
 const noticeCodeKeys: Record<string, DictKey> = {
-  effort_selection_cleared: "composer.effortSelectionCleared",
   final_readiness: "notice.finalReadiness",
   search_sources_not_provided: "sources.notProvided",
   empty_final: "notice.emptyFinal",

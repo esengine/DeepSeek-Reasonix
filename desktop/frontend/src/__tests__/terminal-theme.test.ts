@@ -110,7 +110,7 @@ const firstSave = saveTerminalTheme("light");
 await Promise.resolve();
 const secondSave = saveTerminalTheme("dark");
 await Promise.resolve();
-assert.deepEqual(saveOrder, ["start:light"], "newer intent waits for the active Wails save");
+assert.deepEqual(saveOrder, ["start:light"], "newer intent waits for the active bridge save");
 releaseFirstSave();
 await Promise.all([firstSave, secondSave]);
 assert.deepEqual(saveOrder, ["start:light", "end:light", "start:dark", "end:dark"]);

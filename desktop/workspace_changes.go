@@ -33,7 +33,7 @@ type workspaceChangeAccumulator struct {
 const (
 	workspaceGitBranchCacheTTL = 2 * time.Second
 	// Bound both decoded file contents and rendered patches before they cross
-	// the Wails bridge; generated files must not turn a preview click into OOM.
+	// the desktop bridge; generated files must not turn a preview click into OOM.
 	workspaceChangeDetailLimit = 2 * 1024 * 1024
 )
 

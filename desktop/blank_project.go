@@ -5,8 +5,6 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
-
-	"github.com/wailsapp/wails/v2/pkg/runtime"
 )
 
 // PickBlankProjectParent opens a folder chooser defaulting to the active
@@ -21,7 +19,7 @@ func (a *App) PickBlankProjectParent() (string, error) {
 		cur = filepath.Dir(tab.WorkspaceRoot)
 	}
 	a.mu.RUnlock()
-	return runtime.OpenDirectoryDialog(a.ctx, runtime.OpenDialogOptions{
+	return a.nativeHost().OpenDirectoryDialog(a.ctx, nativeDialogOptions{
 		Title:            "Choose where to create the project",
 		DefaultDirectory: dialogDefaultDirectory(cur),
 	})

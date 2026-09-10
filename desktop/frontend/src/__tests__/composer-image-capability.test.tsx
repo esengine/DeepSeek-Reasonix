@@ -9,6 +9,7 @@ import { UserMessage } from "../components/Message";
 import { LocaleProvider } from "../lib/i18n";
 import { ToastProvider } from "../lib/toast";
 import type { CollaborationMode, ToolApprovalMode } from "../lib/types";
+import { installDesktopHostStub } from "./desktopHostStub";
 
 let passed = 0;
 let failed = 0;
@@ -91,16 +92,12 @@ function installDom() {
 }
 
 function installBridgeApp(methods: Record<string, unknown>) {
-  (window as unknown as { go: { main: { App: Record<string, unknown> } } }).go = {
-    main: {
-      App: {
-        Commands: async () => [],
-        Models: async () => [],
-        ModelsForTab: async () => [],
-        ...methods,
-      },
-    },
-  };
+  installDesktopHostStub({
+    Commands: async () => [],
+    Models: async () => [],
+    ModelsForTab: async () => [],
+    ...methods,
+  });
 }
 
 async function renderComposer(props: Partial<Parameters<typeof Composer>[0]> = {}) {

@@ -23,7 +23,7 @@ func (c *Controller) prepareVisionTurn(ctx context.Context, input string, images
 	if svc == nil {
 		svc = imageinput.New(imageinput.Config{Model: c.visionModel, Resolve: c.visionProviderResolver, Select: c.visionModelSelector})
 	}
-	summary, err := svc.Understand(ctx, c.modelRef, images, history, c.sink)
+	summary, err := svc.Understand(ctx, c.selection.ref, images, history, c.sink)
 	if err != nil {
 		return input, ctx, fmt.Errorf("图片理解失败，当前回答尚未发送：%w", err)
 	}

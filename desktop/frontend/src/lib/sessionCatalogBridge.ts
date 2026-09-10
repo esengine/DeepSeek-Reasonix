@@ -1,4 +1,5 @@
 import { asArray } from "./array";
+import { desktopHost } from "./desktopHost";
 import type {
   ProjectNode,
   ProjectTopicKey,
@@ -9,8 +10,9 @@ import type {
 } from "./types";
 
 export function onProjectTreeChangedV2(cb: (event: ProjectTreeChangedV2) => void): () => void {
-  if (typeof window !== "undefined" && window.runtime) {
-    return window.runtime.EventsOn("project-tree:changed-v2", (payload?: unknown) => {
+  const host = desktopHost();
+  if (host.kind !== "none") {
+    return host.events.on("project-tree:changed-v2", (payload?: unknown) => {
       if (!payload || typeof payload !== "object") return;
       const event = payload as Partial<ProjectTreeChangedV2>;
       cb({

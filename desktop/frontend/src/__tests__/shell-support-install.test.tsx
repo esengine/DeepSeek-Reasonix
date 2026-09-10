@@ -14,6 +14,7 @@ import { LocaleProvider } from "../lib/i18n";
 import type { AppBindings } from "../lib/bridge";
 import type { SettingsView } from "../lib/types";
 import { baseSettings, flushPromises, installCanvasMock, waitFor } from "../test-support/settingsTestFixtures";
+import { installDesktopHostStub } from "./desktopHostStub";
 
 let passed = 0;
 let failed = 0;
@@ -118,7 +119,7 @@ function windowsSettings(overrides: {
   let cancelCalls = 0;
   let reloadCalls = 0;
   let settingsCalls = 0;
-  window.go = {
+  const desktopStub = installDesktopHostStub(({
     main: {
       App: {
         Settings: async () => {
@@ -134,7 +135,7 @@ function windowsSettings(overrides: {
         ReloadSettings: async () => { reloadCalls += 1; },
       } as Partial<AppBindings> as AppBindings,
     },
-  };
+  }).main.App, { externalOpens: openedURLs });
   await act(async () => {
     root.render(
       <LocaleProvider>
@@ -188,7 +189,7 @@ function windowsSettings(overrides: {
     shellRepairGuidance: { manager: "apt", command: "apt-get install bash" },
   };
   let reloadCalls = 0;
-  window.go = {
+  const desktopStub = installDesktopHostStub(({
     main: {
       App: {
         Settings: async () => linuxSettings,
@@ -198,7 +199,7 @@ function windowsSettings(overrides: {
         ReloadSettings: async () => { reloadCalls += 1; },
       } as Partial<AppBindings> as AppBindings,
     },
-  };
+  }).main.App, { externalOpens: openedURLs });
   await act(async () => {
     root.render(
       <LocaleProvider>
@@ -253,7 +254,7 @@ function windowsSettings(overrides: {
     shellRepairGuidance: null,
     gitRepairGuidance: { manager: "homebrew", command: "brew install git" },
   };
-  window.go = {
+  const desktopStub = installDesktopHostStub(({
     main: {
       App: {
         Settings: async () => macSettings,
@@ -263,7 +264,7 @@ function windowsSettings(overrides: {
         ReloadSettings: async () => {},
       } as Partial<AppBindings> as AppBindings,
     },
-  };
+  }).main.App, { externalOpens: openedURLs });
   await act(async () => {
     root.render(
       <LocaleProvider>

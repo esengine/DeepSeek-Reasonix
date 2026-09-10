@@ -71,7 +71,7 @@ func modelTokenSeparator(r rune) bool {
 	return r == '-' || r == '_' || r == '.' || r == '/' || r == ':'
 }
 
-// CanConfigureVision is retained for the Wails payload contract. Capability
+// CanConfigureVision is retained for the desktop payload contract. Capability
 // choices are now derived from model metadata; the wire layer still refuses
 // unsupported official DeepSeek Flash/Pro image payloads.
 func CanConfigureVision(e *ProviderEntry) bool {

@@ -6,6 +6,7 @@ import React from "react";
 import { act } from "react";
 import { createRoot } from "react-dom/client";
 import type { UsageStatsRange, UsageStatsRequest } from "../lib/types";
+import { installDesktopHostStub } from "./desktopHostStub";
 
 registerHooks({
   resolve(specifier, context, nextResolve) {
@@ -103,7 +104,7 @@ const usageStats = (req: UsageStatsRequest): Promise<UsageStatsRange> => {
     daily: [{ day: day(0), total: 100, byModel: { "deepseek/model": 100 }, byProvider: { deepseek: 100 }, requests: 1, turns: 1, cacheHit: 10, cacheMiss: 10 }],
   }));
 };
-(window as unknown as { go: unknown }).go = { main: { App: { UsageStats: usageStats } } };
+installDesktopHostStub(({ main: { App: { UsageStats: usageStats } } }).main.App);
 
 const [{ LocaleProvider }, { UsageStatsPanel }] = await Promise.all([
   import("../lib/i18n"),

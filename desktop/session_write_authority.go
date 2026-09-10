@@ -65,7 +65,7 @@ func (a *App) validateAndBindSessionRebindLocked(tab *WorkspaceTab, source tabRu
 // commitStartupWriteAuthorityLocked commits extension registration and write
 // authority under the final publication lock. App.mu must be held on entry;
 // failure paths release it and retire the unpublished controller.
-func (a *App) commitStartupWriteAuthorityLocked(tab *WorkspaceTab, ctrl control.SessionAPI, registration *sharedHostMCPRegistration, rootKey, acquiredLeaseKey string, wailsCtx context.Context) bool {
+func (a *App) commitStartupWriteAuthorityLocked(tab *WorkspaceTab, ctrl control.SessionAPI, registration *sharedHostMCPRegistration, rootKey, acquiredLeaseKey string, appCtx context.Context) bool {
 	if !registration.commit() {
 		a.mu.Unlock()
 		a.abandonSupersededBuild(tab, ctrl, rootKey, acquiredLeaseKey)
@@ -77,7 +77,7 @@ func (a *App) commitStartupWriteAuthorityLocked(tab *WorkspaceTab, ctrl control.
 		a.mu.Unlock()
 		a.writeTabsSaveRequest(save)
 		a.abandonSupersededBuild(tab, ctrl, rootKey, acquiredLeaseKey)
-		a.emitReady(wailsCtx, tab.ID)
+		a.emitReady(appCtx, tab.ID)
 		return false
 	}
 	return true

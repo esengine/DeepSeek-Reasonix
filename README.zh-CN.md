@@ -125,18 +125,14 @@ make cross      # -> dist/（darwin|linux|windows × amd64|arm64）
 
 #### 桌面端
 
-桌面端构建额外需要：
-
-- **Node 24+ 和 pnpm 10**（`npm install -g pnpm@10`）用于前端
-- **Wails CLI**，与共享的 `.wails-version` 固定版本一致
+桌面端构建额外需要 **Node 24+ 和 pnpm 10**（`npm install -g pnpm@10`），
+用于前端与 Electron 壳：
 
 ```sh
-make wails-install
-cd desktop
-wails build
+scripts/desktop-build.sh darwin/arm64 v0.0.0-dev   # 每次构建一个平台
 ```
 
-平台相关的 WebView 依赖和 Linux 构建标签见
+无需安装系统 WebView 依赖：Electron 壳自带 Chromium。详见
 [桌面端构建指南](desktop/README.md#prerequisites)。
 
 ## 快速开始

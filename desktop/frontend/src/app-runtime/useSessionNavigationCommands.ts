@@ -102,7 +102,7 @@ export function useSessionNavigationCommands(input: SessionNavigationCommandsInp
     if (running && !singleSurface) {
       throw new Error(t("history.failedOpenSession"));
     }
-    // Claim the navigation epoch before the first Wails await. If the user
+    // Claim the navigation epoch before the first bridge await. If the user
     // switches tabs while the task/session lookup is pending, its completion is
     // stale and must not enqueue a newer navigation request.
     const navigationIntentSeq = input.noteNavigationIntent();

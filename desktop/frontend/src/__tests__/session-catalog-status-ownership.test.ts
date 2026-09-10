@@ -13,7 +13,7 @@ const lateRemoteWrite = remoteStatus.then((state) => {
   if (statusWriteIsAllowed(remoteGeneration, false)) renderedStates.push(state);
 });
 
-// The Wails rebuild rejects after the finished event has already started its
+// The desktop rebuild rejects after the finished event has already started its
 // status read. Restoring the retryable failure must fence out that late read.
 generation += 1;
 renderedStates.push("degraded");

@@ -60,6 +60,10 @@ type Options struct {
 	// CredentialProxy installs a tunnel-backed provider and a scoped virtual
 	// token on the remote. The real provider key never leaves the desktop.
 	CredentialProxy *CredentialProxyOptions
+	// BrowserBroker is consulted right before a fresh launch, only when the
+	// located binary advertises ServeBrowserBrokerMarker; it opens the reverse
+	// forward and returns what the serve's environment must carry.
+	BrowserBroker func(context.Context) (*BrowserBrokerOptions, error)
 }
 
 func (o Options) progress(step, detail string) {
@@ -164,7 +168,7 @@ func EnsureServe(ctx context.Context, conn Conn, opts Options) (Result, error) {
 		return Result{}, fmt.Errorf("bootstrap: publish token: %w", err)
 	}
 	opts.progress("launch", "")
-	launchRes, err := conn.Exec(ctx, LaunchCommand(bin, workspace, paths, opts.CredentialProxy))
+	launchRes, err := conn.Exec(ctx, LaunchCommand(bin, workspace, paths, opts.CredentialProxy, resolveBrowserBroker(ctx, conn, bin, opts)))
 	if err != nil {
 		cleanupFailedLaunch(conn, fs, paths, 0)
 		return Result{}, fmt.Errorf("bootstrap: launch: %w", err)

@@ -100,6 +100,16 @@ func (m moveFile) Execute(ctx context.Context, args json.RawMessage) (string, er
 			return "", fmt.Errorf("mkdir %s: %w", dir, err)
 		}
 	}
+	if expected, ok := tool.ExpectedWriteSource(ctx); ok && expected.Path == src && expected.Snapshot != "" {
+		id, err := diskIdentity(src)
+		if err != nil {
+			return "", err
+		}
+		actual := tool.SourceSnapshot(tool.ReadSourceDisk, src, fmt.Sprintf("raw-sha256:%x", id.sum))
+		if !id.existed || actual != expected.Snapshot {
+			return "", &tool.OperationError{Diagnostic: tool.OperationDiagnostic{Code: tool.WriteEvidenceStale, Path: src, ExpectedSnapshot: expected.Snapshot, ActualSnapshot: actual, Recovery: "the move source changed; inspect it before retrying"}, Cause: ErrFileChanged}
+		}
+	}
 	if err := renameFile(src, dst); err != nil {
 		if sameFileDestination {
 			if rerr := renameSameFileDestination(src, dst); rerr != nil {

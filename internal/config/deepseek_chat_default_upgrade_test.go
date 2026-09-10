@@ -39,7 +39,7 @@ future_desktop_field = true
 		t.Fatalf("upgrade=%v err=%v", changed, err)
 	}
 	got, _ := os.ReadFile(path)
-	want := strings.ReplaceAll(raw, `config_version = 7`, `config_version = 9`)
+	want := strings.ReplaceAll(raw, `config_version = 7`, `config_version = 10`)
 	want = strings.ReplaceAll(want, `kind = "anthropic"`, `kind = "openai"`)
 	want = strings.ReplaceAll(want, `base_url = "https://api.deepseek.com/anthropic"`, `base_url = "https://api.deepseek.com"`)
 	if string(got) != want {
@@ -110,7 +110,7 @@ providers = [{name="deepseek-pro",kind="anthropic",base_url="https://api.deepsee
 	if _, err := toml.Decode(string(got), &parsed); err != nil {
 		t.Fatal(err)
 	}
-	if parsed.ConfigVersion != 9 || len(parsed.Providers) != 1 || parsed.Providers[0].Kind != "openai" || *parsed.Providers[0].WebSearch {
+	if parsed.ConfigVersion != 10 || len(parsed.Providers) != 1 || parsed.Providers[0].Kind != "openai" || *parsed.Providers[0].WebSearch {
 		t.Fatalf("bad migration: %s", got)
 	}
 	if !strings.Contains(string(got), `future="kept"`) {

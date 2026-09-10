@@ -41,7 +41,8 @@ const fakeApp = {
     if (writeError) throw writeError;
   },
 };
-(globalThis.window as unknown as { go: unknown }).go = { main: { App: fakeApp } };
+const { installDesktopHostStub } = await import("./desktopHostStub");
+const hostStub = installDesktopHostStub(fakeApp);
 
 const { resetTerminalStoreForTests, useTerminalStore } = await import("../store/terminal");
 resetTerminalStoreForTests();
@@ -260,6 +261,15 @@ if (useTerminalStore.getState().error !== "terminal input failed") {
 }
 writeError = null;
 process.stdout.write("PASS terminal write failures remain visible to the user\n");
+
+const { startTerminalEventBridge } = await import("../lib/terminalEvents");
+const stopEventBridge = startTerminalEventBridge();
+useTerminalStore.getState().clearError();
+hostStub.emit("desktop:resync", { generation: "g1", reason: "gap" });
+if (!useTerminalStore.getState().error) throw new Error("an event gap left terminal output falsely complete");
+if (useTerminalStore.getState().workspace?.sessions[0]?.id !== firstSession.id) throw new Error("gap handling removed the existing terminal");
+stopEventBridge();
+process.stdout.write("PASS terminal event gaps preserve the view and expose incomplete output\n");
 
 if (previousWindow) globalThis.window = previousWindow;
 else delete (globalThis as { window?: unknown }).window;

@@ -17,13 +17,6 @@ func supersededDesktopNeedsRelaunch(exe string) bool {
 	return err == nil && !active
 }
 
-func maybeRelaunchPrimaryIfSuperseded(launch desktopLaunchOptions) bool {
-	if launch.RemoteWindowTicket != "" {
-		return false
-	}
-	return maybeRelaunchIfSuperseded()
-}
-
 func maybeRelaunchIfSuperseded() bool {
 	exe, err := os.Executable()
 	if err != nil {

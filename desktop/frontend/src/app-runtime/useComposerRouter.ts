@@ -1,4 +1,5 @@
 import { app } from "../lib/bridge";
+import { desktopHost } from "../lib/desktopHost";
 import { useCommittedCommand } from "../lib/useCommittedCommand";
 import { clearThemePack } from "../lib/themePack";
 import { applyTheme, getTheme, getThemeStyle, isThemeStyle } from "../lib/theme";
@@ -83,7 +84,7 @@ export function useComposerRouter(input: ComposerRouterInput) {
       await ports.newSession();
       return;
     }
-    const decisionMock = typeof window !== "undefined" && !window.runtime
+    const decisionMock = typeof window !== "undefined" && desktopHost().kind === "none"
       ? decisionSurfaceMockFromInput(trimmed)
       : null;
     if (decisionMock === "workspace_conflict" || decisionMock === "mode_jobs" || decisionMock === "close_active" || decisionMock === "clear_context") {

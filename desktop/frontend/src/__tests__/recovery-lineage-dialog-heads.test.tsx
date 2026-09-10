@@ -1,6 +1,7 @@
 import { JSDOM } from "jsdom";
 import type { AppBindings } from "../lib/bridge";
 import type { RecoveryCleanupRequest, RecoveryLineageView, RecoveryPreferenceRequest } from "../lib/types";
+import { installDesktopHostStub } from "./desktopHostStub";
 
 const dom = new JSDOM("<!doctype html><html><body><div id=\"root\"></div></body></html>", { pretendToBeVisual: true, url: "http://localhost/" });
 (globalThis as typeof globalThis & { IS_REACT_ACT_ENVIRONMENT: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
@@ -36,7 +37,7 @@ const heads: RecoveryLineageView = {
   ],
 };
 
-window.go = {
+installDesktopHostStub(({
   main: {
     App: {
       ChooseRecoveryBranch: async (request: RecoveryPreferenceRequest) => { chosen.push(request); },
@@ -49,7 +50,7 @@ window.go = {
       },
     } as Partial<AppBindings> as AppBindings,
   },
-};
+}).main.App);
 
 // React must see the jsdom globals when it loads, or its change-event support
 // probe fails and typing never reaches onChange.

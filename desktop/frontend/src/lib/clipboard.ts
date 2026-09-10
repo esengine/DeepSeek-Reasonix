@@ -1,6 +1,7 @@
 // Clipboard writes for the desktop shell: the async Clipboard API when the
-// webview grants it, the Wails runtime bridge when it does not, and a hidden
+// webview grants it, the desktop host clipboard when it does not, and a hidden
 // textarea + execCommand as the last resort.
+import { desktopHost } from "./desktopHost";
 
 export async function writeClipboardText(value: string): Promise<boolean> {
   try {
@@ -9,14 +10,12 @@ export async function writeClipboardText(value: string): Promise<boolean> {
       return true;
     }
   } catch {
-    // Permission denied or unavailable — try the Wails bridge.
+    // Permission denied or unavailable — try the desktop host.
   }
   try {
-    if (typeof window !== "undefined" && (await window.runtime?.ClipboardSetText?.(value))) {
-      return true;
-    }
+    if (await desktopHost().native.clipboardWriteText(value)) return true;
   } catch {
-    // Bridge missing or failed — fall through to execCommand.
+    // Host missing or failed — fall through to execCommand.
   }
   return fallbackCopyText(value);
 }

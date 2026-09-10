@@ -46,7 +46,7 @@ const lightANSI: ITheme = {
   brightWhite: "#34383d",
 };
 
-// Wails dispatches bound Go calls on separate goroutines. Keep terminal-theme
+// The host bridge dispatches bound Go calls on separate goroutines. Keep terminal-theme
 // writes in click order so an older save can never finish after newer intent.
 export function createTerminalThemeSaveQueue(
   persist: (theme: TerminalThemePreference) => Promise<void>,

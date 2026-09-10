@@ -50,6 +50,7 @@ func ExportSessionSchemaOne(src, dst string) error {
 	if srcMeta, ok, err := LoadBranchMeta(src); err == nil && ok {
 		meta.Name, meta.Scope, meta.WorkspaceRoot = srcMeta.Name, srcMeta.Scope, srcMeta.WorkspaceRoot
 		meta.TopicID, meta.TopicTitle, meta.CustomTitle, meta.Model = srcMeta.TopicID, srcMeta.TopicTitle, srcMeta.CustomTitle, srcMeta.Model
+		meta.ModelIdentity = srcMeta.ModelIdentity
 		meta.CreatedAt = srcMeta.CreatedAt
 	}
 	if err := saveBranchMeta(dst, meta, false); err != nil {

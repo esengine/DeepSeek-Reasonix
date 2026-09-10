@@ -8,6 +8,7 @@ import { LocaleProvider } from "../lib/i18n";
 import { imageInputHardBlocked, imageInputState, mergeImageInputModes } from "../lib/providerImageInput";
 import type { AppBindings } from "../lib/bridge";
 import type { ProviderModelCapabilityView, ProviderView } from "../lib/types";
+import { installDesktopHostStub } from "./desktopHostStub";
 
 const dom = new JSDOM('<div id="root"></div>', { url: "http://localhost/", pretendToBeVisual: true });
 Object.assign(globalThis, { window: dom.window, document: dom.window.document, Node: dom.window.Node, HTMLElement: dom.window.HTMLElement, Event: dom.window.Event, CustomEvent: dom.window.CustomEvent, MouseEvent: dom.window.MouseEvent, localStorage: dom.window.localStorage, sessionStorage: dom.window.sessionStorage, IS_REACT_ACT_ENVIRONMENT: true });
@@ -66,7 +67,7 @@ assert(el.textContent?.includes("Image capability unknown"), "auto must not reus
 // A controlled Promise completes only after unmount. It must not modify the
 // replacement editor or enable a model from the previous provider request.
 let complete!: (v: ProviderModelCapabilityView[]) => void;
-window.go = { main: { App: { FetchProviderModelCatalog: () => new Promise((resolve) => { complete = resolve; }) } as Partial<AppBindings> as AppBindings } };
+installDesktopHostStub(({ main: { App: { FetchProviderModelCatalog: () => new Promise((resolve) => { complete = resolve; }) } as Partial<AppBindings> as AppBindings } }).main.App);
 await render(editor("fetching"));
 await click("Refresh models");
 await render(editor("replacement"));
