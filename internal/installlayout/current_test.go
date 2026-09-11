@@ -96,6 +96,72 @@ func TestValidateVersionName(t *testing.T) {
 		}
 	}
 }
+func TestValidateActiveDirRelative(t *testing.T) {
+	// Shape-only validation: no filesystem access, so symlink enforcement is
+	// deliberately not tested here (ValidateActiveDir handles it, see
+	// TestValidateActiveDirRejectsSymlinkVersionDir). activeDir must equal
+	// versions/<version> exactly after trimming and separator normalization.
+	cases := []struct {
+		version   string
+		activeDir string
+		wantErr   bool
+	}{
+		// In-bounds relatives.
+		{"v1.20.0", "versions/v1.20.0", false},
+		{"v1.20.0", "  versions/v1.20.0  ", false}, // trimmed
+		{"v1.20.0-preview.1", "versions/v1.20.0-preview.1", false},
+		// Version label problems.
+		{"", "versions/v1.20.0", true},
+		{"1.20.0", "versions/v1.20.0", true},
+		{"../evil", "versions/v1.20.0", true},
+		// Empty activeDir.
+		{"v1.20.0", "", true},
+		{"v1.20.0", "   ", true},
+		// Absolute paths.
+		{"v1.20.0", "/abs/path", true},
+		// ".." escapes: leading, middle, trailing, bare.
+		{"v1.20.0", "../versions/v1.20.0", true},
+		{"v1.20.0", "versions/../v1.20.0", true},
+		{"v1.20.0", "versions/v1.20.0/..", true},
+		{"v1.20.0", "..", true},
+		{"v1.20.0", "versions/..", true},
+		{"v1.20.0", "../../etc", true},
+		// Separators and exact-match requirement.
+		{"v1.20.0", "versions\\v1.20.0", runtime.GOOS != "windows"}, // ToSlash on Windows only
+		{"v1.20.0", "versions/v1.19.0", true},                       // wrong version dir
+		{"v1.20.0", "versions/v1.20.0/", true},                      // trailing separator
+		{"v1.20.0", "versions//v1.20.0", true},                      // doubled separator
+	}
+	for _, tc := range cases {
+		err := ValidateActiveDirRelative(tc.version, tc.activeDir)
+		if tc.wantErr && err == nil {
+			t.Errorf("ValidateActiveDirRelative(%q, %q): expected error", tc.version, tc.activeDir)
+		}
+		if !tc.wantErr && err != nil {
+			t.Errorf("ValidateActiveDirRelative(%q, %q): unexpected error %v", tc.version, tc.activeDir, err)
+		}
+	}
+}
+
+func TestPortableAliasName(t *testing.T) {
+	cases := []struct {
+		goos string
+		want string
+	}{
+		{"windows", "Reasonix.exe"},
+		{"linux", ""},
+		{"darwin", ""},
+	}
+	for _, tc := range cases {
+		if tc.goos != runtime.GOOS {
+			continue
+		}
+		if got := PortableAliasName(); got != tc.want {
+			t.Fatalf("PortableAliasName() on %s = %q, want %q", tc.goos, got, tc.want)
+		}
+	}
+}
+
 func TestResolveInstallRootFromVersionedDesktop(t *testing.T) {
 	root := t.TempDir()
 	version := "v1.20.0"
