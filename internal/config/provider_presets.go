@@ -152,6 +152,16 @@ var (
 	huggingFaceModels = []string{"zai-org/GLM-5.2", "deepseek-ai/DeepSeek-V3.2", "Qwen/Qwen3.5-72B-Instruct"}
 	nvidiaModels      = []string{"nvidia/nemotron-3-nano-30b-a3b", "nvidia/nemotron-3-super-120b-a12b", "nvidia/nemotron-3-ultra-550b-a55b", "deepseek-ai/deepseek-v4-pro", "qwen/qwen3.5-397b-a17b"}
 	ollamaCloudModels = []string{"glm-5.2", "kimi-k2.7-code", "deepseek-v4-pro", "deepseek-v4-flash", "minimax-m3", "nemotron-3-nano:30b", "qwen3-coder-next"}
+
+	orcaRouterModels = []string{
+		"deepseek/deepseek-v4-flash",
+		"deepseek/deepseek-reasoner",
+		"anthropic/claude-sonnet-5",
+		"google/gemini-2.5-flash",
+		"openai/gpt-5.5",
+		"orcarouter/auto",
+		"orcarouter/fusion",
+	}
 )
 
 func qwenModelContextOverrides() map[string]ProviderModelOverride {
@@ -204,6 +214,21 @@ func tokenRhythmModelOverrides() map[string]ProviderModelOverride {
 		"minimax-m2.5":   {ContextWindow: 200_000},
 		"mimo-v2.5-pro":  {ContextWindow: 256_000},
 		"kimi-k2.7-code": {ContextWindow: 256_000},
+	}
+}
+
+func orcaRouterModelOverrides() map[string]ProviderModelOverride {
+	return map[string]ProviderModelOverride{
+		"deepseek/deepseek-v4-flash": {
+			ReasoningProtocol: ReasoningProtocolDeepSeek,
+			SupportedEfforts:  []string{"disabled", "low", "high", "max"},
+			DefaultEffort:     "high",
+		},
+		"deepseek/deepseek-reasoner": {
+			ReasoningProtocol: ReasoningProtocolDeepSeek,
+			SupportedEfforts:  []string{"disabled", "high", "max"},
+			DefaultEffort:     "high",
+		},
 	}
 }
 
@@ -1072,6 +1097,21 @@ var curatedProviderPresets = []ProviderPreset{
 			Models:    ollamaCloudModels,
 			Default:   "glm-5.2",
 			APIKeyEnv: "OLLAMA_API_KEY",
+		}},
+	},
+	{
+		ID:          "orcarouter",
+		Label:       "OrcaRouter",
+		Description: "OrcaRouter multi-model OpenAI-compatible gateway.",
+		KeyEnv:      "ORCAROUTER_API_KEY",
+		Entries: []ProviderEntry{{
+			Name:           "orcarouter",
+			Kind:           "openai",
+			BaseURL:        "https://api.orcarouter.ai/v1",
+			Models:         orcaRouterModels,
+			Default:        "deepseek/deepseek-v4-flash",
+			APIKeyEnv:      "ORCAROUTER_API_KEY",
+			ModelOverrides: orcaRouterModelOverrides(),
 		}},
 	},
 }
