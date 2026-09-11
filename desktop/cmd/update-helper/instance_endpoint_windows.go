@@ -5,6 +5,7 @@ package main
 import (
 	"errors"
 	"fmt"
+	"os"
 	"unsafe"
 
 	"golang.org/x/sys/windows"
@@ -77,6 +78,11 @@ func desktopEndpointImage(id string) (string, error) {
 }
 
 func notifyHandoffBlocked(installed bool) {
+	// Background/silent update execution has no interactive recovery owner.
+	// Its caller records the installed-versus-started result in the update log.
+	if os.Getenv("REASONIX_INTERACTIVE_RECOVERY") != "1" {
+		return
+	}
 	message := "Reasonix could not finish the update restart. Choose Quit in the old Reasonix window, then open Reasonix again. Your running instance was preserved."
 	if installed {
 		message = "The new version is installed, but restart is incomplete. Choose Quit in the old Reasonix window, then open Reasonix again. Your running instance was preserved."

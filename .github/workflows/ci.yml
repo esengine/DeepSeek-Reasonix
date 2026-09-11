@@ -98,6 +98,26 @@ jobs:
         with:
           node-version: "22"
 
+      # Defender real-time scanning on GitHub Windows runners intermittently
+      # crashes Go test binaries mid-syscall (DEP fault at PC=0 in the Windows
+      # syscall trampoline, e.g. golang/go#67139) and briefly keeps freshly
+      # written test files open, causing flaky sharing violations. Exclude the
+      # ephemeral build/test locations; failures stay non-fatal warnings.
+      - name: Exclude build dirs from Defender scanning
+        if: env.RUN_STEPS == 'true' && runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          $paths = @($env:GITHUB_WORKSPACE, $env:RUNNER_TEMP, $env:TEMP, (go env GOCACHE)) |
+            Where-Object { $_ -and (Test-Path $_) } | Select-Object -Unique
+          foreach ($p in $paths) {
+            try {
+              Add-MpPreference -ExclusionPath $p -ErrorAction Stop
+              Write-Host "Defender exclusion added: $p"
+            } catch {
+              Write-Host "::warning::Defender exclusion failed for ${p}: $($_.Exception.Message)"
+            }
+          }
+
       - name: Install and verify Linux sandbox backend
         if: env.RUN_STEPS == 'true' && runner.os == 'Linux'
         run: |
@@ -219,6 +239,25 @@ jobs:
         with:
           node-version: "22"
 
+      # Defender real-time scanning on GitHub Windows runners intermittently
+      # crashes Go test binaries mid-syscall (DEP fault at PC=0 in the Windows
+      # syscall trampoline, e.g. golang/go#67139) and briefly keeps freshly
+      # written test files open, causing flaky sharing violations. Exclude the
+      # ephemeral build/test locations; failures stay non-fatal warnings.
+      - name: Exclude build dirs from Defender scanning
+        shell: pwsh
+        run: |
+          $paths = @($env:GITHUB_WORKSPACE, $env:RUNNER_TEMP, $env:TEMP, (go env GOCACHE)) |
+            Where-Object { $_ -and (Test-Path $_) } | Select-Object -Unique
+          foreach ($p in $paths) {
+            try {
+              Add-MpPreference -ExclusionPath $p -ErrorAction Stop
+              Write-Host "Defender exclusion added: $p"
+            } catch {
+              Write-Host "::warning::Defender exclusion failed for ${p}: $($_.Exception.Message)"
+            }
+          }
+
       - name: test
         if: env.RUN_STEPS == 'true'
         timeout-minutes: 10
@@ -244,6 +283,25 @@ jobs:
       - uses: actions/setup-node@v7
         with:
           node-version: "22"
+
+      # Defender real-time scanning on GitHub Windows runners intermittently
+      # crashes Go test binaries mid-syscall (DEP fault at PC=0 in the Windows
+      # syscall trampoline, e.g. golang/go#67139) and briefly keeps freshly
+      # written test files open, causing flaky sharing violations. Exclude the
+      # ephemeral build/test locations; failures stay non-fatal warnings.
+      - name: Exclude build dirs from Defender scanning
+        shell: pwsh
+        run: |
+          $paths = @($env:GITHUB_WORKSPACE, $env:RUNNER_TEMP, $env:TEMP, (go env GOCACHE)) |
+            Where-Object { $_ -and (Test-Path $_) } | Select-Object -Unique
+          foreach ($p in $paths) {
+            try {
+              Add-MpPreference -ExclusionPath $p -ErrorAction Stop
+              Write-Host "Defender exclusion added: $p"
+            } catch {
+              Write-Host "::warning::Defender exclusion failed for ${p}: $($_.Exception.Message)"
+            }
+          }
       - name: test
         timeout-minutes: 10
         env:
@@ -318,6 +376,26 @@ jobs:
         uses: actions/setup-go@v7
         with:
           go-version-file: sdk/go/go.mod
+
+      # Defender real-time scanning on GitHub Windows runners intermittently
+      # crashes Go test binaries mid-syscall (DEP fault at PC=0 in the Windows
+      # syscall trampoline, e.g. golang/go#67139) and briefly keeps freshly
+      # written test files open, causing flaky sharing violations. Exclude the
+      # ephemeral build/test locations; failures stay non-fatal warnings.
+      - name: Exclude build dirs from Defender scanning
+        if: env.RUN_STEPS == 'true' && runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          $paths = @($env:GITHUB_WORKSPACE, $env:RUNNER_TEMP, $env:TEMP, (go env GOCACHE)) |
+            Where-Object { $_ -and (Test-Path $_) } | Select-Object -Unique
+          foreach ($p in $paths) {
+            try {
+              Add-MpPreference -ExclusionPath $p -ErrorAction Stop
+              Write-Host "Defender exclusion added: $p"
+            } catch {
+              Write-Host "::warning::Defender exclusion failed for ${p}: $($_.Exception.Message)"
+            }
+          }
 
       - name: gofmt
         if: env.RUN_STEPS == 'true'
@@ -683,6 +761,25 @@ jobs:
           node-version: "24"
           cache: pnpm
           cache-dependency-path: desktop/pnpm-lock.yaml
+
+      # Defender real-time scanning on GitHub Windows runners intermittently
+      # crashes Go test binaries mid-syscall (DEP fault at PC=0 in the Windows
+      # syscall trampoline, e.g. golang/go#67139) and briefly keeps freshly
+      # written test files open, causing flaky sharing violations. Exclude the
+      # ephemeral build/test locations; failures stay non-fatal warnings.
+      - name: Exclude build dirs from Defender scanning
+        shell: pwsh
+        run: |
+          $paths = @($env:GITHUB_WORKSPACE, $env:RUNNER_TEMP, $env:TEMP, (go env GOCACHE)) |
+            Where-Object { $_ -and (Test-Path $_) } | Select-Object -Unique
+          foreach ($p in $paths) {
+            try {
+              Add-MpPreference -ExclusionPath $p -ErrorAction Stop
+              Write-Host "Defender exclusion added: $p"
+            } catch {
+              Write-Host "::warning::Defender exclusion failed for ${p}: $($_.Exception.Message)"
+            }
+          }
 
       # go:embed of frontend/dist needs a built frontend before the package
       # compiles, same as the ubuntu desktop leg.

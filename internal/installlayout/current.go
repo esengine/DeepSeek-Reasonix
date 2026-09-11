@@ -310,6 +310,17 @@ func HasCurrent(installRoot string) bool {
 	return err == nil
 }
 
+// HasActiveShell reports whether the active version carries the app/ shell
+// tree. Shell-less versioned layouts (pre-shell releases) return false.
+func HasActiveShell(installRoot string) bool {
+	desktop, err := ActiveDesktopPath(installRoot)
+	if err != nil {
+		return false
+	}
+	info, err := os.Lstat(filepath.Join(filepath.Dir(desktop), AppShellDirName))
+	return err == nil && info.IsDir()
+}
+
 // ResolveInstallRoot walks upward from path (usually the running executable)
 // and returns the InstallRoot that owns current.json. Flat installs return the
 // directory containing the executable when no pointer is found.

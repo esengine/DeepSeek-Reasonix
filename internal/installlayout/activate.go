@@ -49,6 +49,10 @@ type ActivationRequest struct {
 	// RequiredRootNames is the exact root-entry whitelist when RootMembers is
 	// non-empty. Callers must provide it explicitly.
 	RequiredRootNames []string
+	// CheckProcesses runs under the activation lock before file replacement and
+	// immediately before pointer publication. The caller owns its coordination
+	// lock first. A late failure rolls back the staged version and root entries.
+	CheckProcesses func() error
 }
 
 // AllowedVersionMembers returns the default files inside versions/<version>/.
@@ -154,6 +158,11 @@ func ActivateVersion(req ActivationRequest) error {
 		}
 	}
 
+	if req.CheckProcesses != nil {
+		if err := req.CheckProcesses(); err != nil {
+			return err
+		}
+	}
 	finalRel := VersionDirRelative(req.Version)
 	finalPath := filepath.Join(installRoot, filepath.FromSlash(finalRel))
 	var versionBackup string
@@ -200,6 +209,11 @@ func ActivateVersion(req ActivationRequest) error {
 		SchemaVersion: CurrentSchemaVersion,
 		ActiveVersion: req.Version,
 		ActiveDir:     finalRel,
+	}
+	if req.CheckProcesses != nil {
+		if err := req.CheckProcesses(); err != nil {
+			return errors.Join(err, rollbackRoots(), rollbackVersion())
+		}
 	}
 	if err := WriteCurrent(installRoot, ptr); err != nil {
 		rootErr := rollbackRoots()

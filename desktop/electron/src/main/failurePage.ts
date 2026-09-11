@@ -21,7 +21,7 @@ export function renderFailurePage(failure: HandshakeFailure, logsPath: string): 
 <head>
 <meta charset="utf-8">
 <meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src 'unsafe-inline'">
-<title>Reasonix cannot start</title>
+<title>${failure.name === "starting" ? "Reasonix is starting" : "Reasonix cannot start"}</title>
 <style>
   html, body { margin: 0; height: 100%; background: #1a1a2e; color: #f4f4f3; font: 14px/1.5 -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; }
   main { max-width: 640px; margin: 0 auto; padding: 64px 32px; }
@@ -40,7 +40,7 @@ export function renderFailurePage(failure: HandshakeFailure, logsPath: string): 
   <div class="code">${escapeHTML(code)}</div>
   <pre>${escapeHTML(failure.detail)}</pre>
   <div class="actions">
-    <a class="primary" href="${SHELL_ACTION_PREFIX}restart">Restart service</a>
+    ${failure.name === "starting" ? "" : failure.name === "build_mismatch" || failure.name === "contract_mismatch" ? '<p>Install the full Reasonix package to repair this installation. / 请安装完整包恢复启动，无需清理会话。</p>' : `<a class="primary" href="${SHELL_ACTION_PREFIX}restart">Retry / 重试</a>`}
     <a href="${SHELL_ACTION_PREFIX}open-logs">Open logs folder</a>
     <a href="${SHELL_ACTION_PREFIX}quit">Quit</a>
   </div>

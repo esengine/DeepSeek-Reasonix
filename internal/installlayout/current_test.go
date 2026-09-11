@@ -115,3 +115,31 @@ func TestResolveInstallRootFromVersionedDesktop(t *testing.T) {
 		t.Fatalf("got %q err=%v want %q", got, err, root)
 	}
 }
+
+func TestHasActiveShell(t *testing.T) {
+	root := t.TempDir()
+	version := "v1.20.0"
+	dir := filepath.Join(root, "versions", version)
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if HasActiveShell(root) {
+		t.Fatal("shell reported without a version pointer")
+	}
+	if err := os.WriteFile(filepath.Join(dir, DesktopBinaryName()), []byte("x"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	ptr := CurrentPointer{SchemaVersion: 1, ActiveVersion: version, ActiveDir: VersionDirRelative(version)}
+	if err := WriteCurrent(root, ptr); err != nil {
+		t.Fatal(err)
+	}
+	if HasActiveShell(root) {
+		t.Fatal("shell reported for a shell-less versioned layout")
+	}
+	if err := os.MkdirAll(filepath.Join(dir, AppShellDirName), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if !HasActiveShell(root) {
+		t.Fatal("shell tree not detected beside the active desktop")
+	}
+}

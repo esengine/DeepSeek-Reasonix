@@ -59,6 +59,10 @@ func Run(args []string, buildVersion string) int {
 		return 1
 	}
 
+	if handled, code := coordinatedLaunch(installRoot, args); handled {
+		return code
+	}
+
 	cmd := exec.Command(desktopPath, StripLegacyLaunchArgs(args)...)
 	proc.HideConsole(cmd)
 	cmd.Stdin, cmd.Stdout, cmd.Stderr = os.Stdin, os.Stdout, os.Stderr

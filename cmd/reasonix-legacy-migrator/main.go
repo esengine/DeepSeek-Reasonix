@@ -19,6 +19,8 @@ import (
 	"strings"
 	"time"
 
+	"reasonix/internal/config"
+	"reasonix/internal/desktopinstance"
 	"reasonix/internal/desktoplauncher"
 	"reasonix/internal/fileutil"
 	"reasonix/internal/installlayout"
@@ -52,8 +54,11 @@ func run(args []string) int {
 	activeVersion := strings.TrimSpace(version)
 	activateStaging := ""
 	relaunch := true
+	interactive := false
 	for i := 0; i < len(args); i++ {
 		switch args[i] {
+		case "--interactive-recovery":
+			interactive = true
 		case "--install-root":
 			if i+1 >= len(args) {
 				fmt.Fprintln(os.Stderr, "error: --install-root requires a path")
@@ -103,9 +108,9 @@ func run(args []string) int {
 			fmt.Fprintln(os.Stderr, "error:", err)
 			return 1
 		}
-		if err := activateInstallerStaging(installRoot, activeVersion, activateStaging); err != nil {
+		if err := activateInstallerStagingWithRecovery(installRoot, activeVersion, activateStaging, interactive); err != nil {
 			fmt.Fprintln(os.Stderr, "error:", err)
-			return 1
+			return desktopinstance.ExitCode(err)
 		}
 		if relaunch {
 			_ = startLauncher(installRoot)
@@ -251,6 +256,10 @@ func normalizeActiveVersion(activeVersion string) (string, error) {
 }
 
 func activateInstallerStaging(installRoot, activeVersion, stagingRoot string) error {
+	return activateInstallerStagingWithRecovery(installRoot, activeVersion, stagingRoot, false)
+}
+
+func activateInstallerStagingWithRecovery(installRoot, activeVersion, stagingRoot string, interactive bool) error {
 	installRoot = filepath.Clean(strings.TrimSpace(installRoot))
 	stagingRoot = filepath.Clean(strings.TrimSpace(stagingRoot))
 	if !pathWithinInstallRoot(installRoot, stagingRoot) || stagingRoot == installRoot {
@@ -298,10 +307,16 @@ func activateInstallerStaging(installRoot, activeVersion, stagingRoot string) er
 		requiredRootNames = append(requiredRootNames, alias)
 	}
 
+	release, err := desktopinstance.PrepareInstall(installRoot, config.ReasonixHomeDir(), interactive)
+	if err != nil {
+		return err
+	}
+	defer release()
 	if err := installlayout.ActivateVersion(installlayout.ActivationRequest{
 		InstallRoot:       installRoot,
 		Version:           activeVersion,
 		RequestID:         "signed-installer-" + activeVersion,
+		CheckProcesses:    func() error { return desktopinstance.CheckInstallVacant(installRoot, config.ReasonixHomeDir()) },
 		Members:           members,
 		RequiredNames:     requiredNames,
 		RootMembers:       rootMembers,

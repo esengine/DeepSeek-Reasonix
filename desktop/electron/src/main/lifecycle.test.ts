@@ -101,3 +101,33 @@ test("relaunch waits for shutdown then starts the committed stable launcher", as
   assert.deepEqual(log, ["shutdown", "closeAllowed"]);
   assert.deepEqual(calls, ["quit", "relaunch:--after-update@/opt/reasonix/reasonix-launcher", "quit", "exit"]);
 });
+
+test("cleanup failure cannot skip later cleanup or the final quit deadline", async () => {
+  const events: string[] = [];
+  let deadline: (() => void) | undefined;
+  let q!: QuitSequencer;
+  q = new QuitSequencer({
+    service: { beforeClose: async () => false, shutdown: async () => { events.push("stopped"); } },
+    app: { quit: () => { if (q.onBeforeQuit()) events.push("quit"); }, exit: () => events.push("forced"), relaunch() {} },
+    onCloseAllowed: () => { throw new Error("window cleanup"); },
+    cleanup: [{ name: "tray", run: () => { events.push("tray"); } }],
+    schedule: (run, ms) => { assert.equal(ms, 5000); deadline = run; }, log: silent,
+  });
+  q.approve(); await tick();
+  assert.deepEqual(events, ["stopped", "tray", "quit"]);
+  deadline?.(); assert.equal(events.at(-1), "forced");
+});
+
+test("service termination failure withholds shell exit and permits an exit retry", async () => {
+  let attempts = 0;
+  let exits = 0;
+  let q!: QuitSequencer;
+  q = new QuitSequencer({
+    service: { beforeClose: async () => false, shutdown: async () => { if (++attempts === 1) throw new Error("child alive"); } },
+    app: { quit: () => { if (q.onBeforeQuit()) exits++; }, relaunch() {} },
+    onCloseAllowed() {}, log: silent,
+  });
+  q.approve(); await tick();
+  assert.equal(exits, 0); assert.equal(q.isQuitting, false);
+  q.approve(); await tick(); assert.equal(exits, 1);
+});

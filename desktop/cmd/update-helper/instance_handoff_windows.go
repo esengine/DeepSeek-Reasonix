@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"reasonix/desktop/internal/instanceidentity"
+	"reasonix/internal/desktopinstance"
 	"reasonix/internal/installlayout"
 )
 
@@ -35,6 +36,9 @@ func verifyDesktopHandoff(installDir string, started bool) error {
 		target, err = installlayout.ActiveDesktopPath(installDir)
 		if err != nil {
 			return err
+		}
+		if started {
+			return desktopinstance.VerifyCurrent(installDir, home)
 		}
 	}
 	deadline := handoffNowFn().Add(desktopHandoffTimeout)

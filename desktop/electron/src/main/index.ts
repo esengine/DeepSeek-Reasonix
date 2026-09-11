@@ -10,7 +10,7 @@ import { ElectronGuestViewFactory } from "./browser/electronGuestViews.js";
 import { GrantRegistry } from "./browser/grants.js";
 import { buildBrowserHostCalls } from "./browser/hostCalls.js";
 import { browserLayoutInDIP } from "./browser/layout.js";
-import { BrowserSurfaceManager, SHARED_PARTITION } from "./browser/surfaceManager.js";
+import { BrowserSurfaceManager, SHARED_PARTITION, type BrowserTab } from "./browser/surfaceManager.js";
 import { BrowserControlStore, loadBrowserControlBootstrap, type BrowserSession } from "./browserControl.js";
 import { BrowserControlHost } from "./browserControlHost.js";
 import { applyAppUserModelId, registerTaskbarRelaunch } from "./appIdentity.js";
@@ -19,7 +19,7 @@ import type { CookieSink } from "./chromeImport.js";
 import { emptyContract, loadContract, type LoadedContract } from "./contract.js";
 import { DialogHost } from "./dialogs.js";
 import { renderFailurePage, type ShellAction } from "./failurePage.js";
-import { buildHelloParams, describeHandshakeFailure, validateHelloResult, type HelloResult } from "./handshake.js";
+import { buildHelloParams, describeHandshakeFailure, validateHelloResult, type HelloResult, type HandshakeFailure } from "./handshake.js";
 import { reasonixHome } from "./home.js";
 import { buildHostCallTable, dispatchHostCall, type ScreenInfo } from "./hostCalls.js";
 import { firstExisting, iconCandidates } from "./icons.js";
@@ -38,6 +38,8 @@ import { TrayHost } from "./tray.js";
 import { DEFAULT_GEOMETRY, MainWindow } from "./window.js";
 import { AppZoomStore } from "./zoomStore.js";
 import { GraphicsSettingsStore, loadGraphicsBootstrap } from "./graphics.js";
+import { initialShellStatus, listenShellStatus, QUIT_REQUEST } from "./shellStatus.js";
+import { supersededLauncher } from "./recovery.js";
 
 const MAIN_WINDOW_PERMISSIONS = new Set(["clipboard-read", "clipboard-sanitized-write", "fullscreen", "notifications"]);
 const TAKEOVER_KINDS = new Set<string>(["mousedown", "keydown", "wheel", "touchstart", "pointerdown"]);
@@ -58,6 +60,8 @@ if (home === "") {
   app.exit(1);
 } else if (!claimShellInstance(app, home, dev)) {
   app.quit();
+} else if (process.argv.includes(QUIT_REQUEST)) {
+  app.quit();
 } else {
   const graphics = loadGraphicsBootstrap(app.getPath("userData"), process.env, process.argv);
   if (graphics.shouldDisable) app.disableHardwareAcceleration();
@@ -74,6 +78,14 @@ function bootstrap(dataHome: string): void {
     try { log.info(`graphics feature status: ${JSON.stringify(app.getGPUFeatureStatus())}`); } catch (error) { log.warn(`graphics status unavailable: ${errorText(error)}`); }
   });
   const serviceLog = new RotatingFile(join(logsDir, "service.log"));
+  let buildVersion = "unknown";
+  try { buildVersion = loadBuildIdentity(app.isPackaged, process.resourcesPath, process.env).version; } catch { /* Handshake owns the visible metadata error. */ }
+  const status = initialShellStatus(app.getPath("userData"), buildVersion);
+  let firstHeartbeat = 0;
+  const startingPage = { code: null, name: "starting", title: "Reasonix is starting / 正在启动", detail: "Please wait. / 请稍候。" };
+  let lastFailure: HandshakeFailure = startingPage;
+  let startupTimer: ReturnType<typeof setTimeout> | undefined;
+  log.info(`startup ${status.generation}: shell pid=${process.pid} version=${buildVersion}`);
   process.on("uncaughtException", (error) => log.error(`uncaught exception: ${errorText(error)}`));
   process.on("unhandledRejection", (reason) => log.error(`unhandled rejection: ${errorText(reason)}`));
 
@@ -100,13 +112,21 @@ function bootstrap(dataHome: string): void {
 
   let domReadyGeneration = "";
 
-  const mainWindow = new MainWindow({
+  let mainWindow: MainWindow;
+  let browser: BrowserSurfaceManager;
+  let lifecycle: QuitSequencer;
+  let guestViews: ElectronGuestViewFactory;
+  mainWindow = new MainWindow({
+    isQuitting: () => lifecycle.isQuitting,
     preloadPath: join(__dirname, "preload.cjs"),
     appURL,
     platform: process.platform,
     icon: windowIcon,
     log,
     onRendererLost: (reason) => {
+      status.healthy = false;
+      status.rendererVersion = "";
+      firstHeartbeat = 0;
       browser.pauseForRendererLoss(reason);
       for (const tab of browser.all()) documents.invalidateTab(tab.id);
     },
@@ -129,7 +149,12 @@ function bootstrap(dataHome: string): void {
     onCloseAllowed: () => lifecycle.approve(),
     onShellAction: (action: ShellAction) => {
       if (action === "open-logs") void shell.openPath(logsDir);
-      else if (action === "restart") void service.restart().catch(() => undefined);
+      else if (action === "restart") {
+        if (lifecycle.isQuitting) return;
+        const launcher = process.platform === "win32" ? supersededLauncher(process.execPath, buildVersion) : undefined;
+        if (launcher) lifecycle.relaunch(process.argv.slice(1), launcher);
+        else void service.restart().catch(() => undefined);
+      }
       else lifecycle.approve();
     },
     zoomStore,
@@ -157,14 +182,14 @@ function bootstrap(dataHome: string): void {
 
   const downloads = new DownloadTracker({
     tabForWebContents: (id) => {
-      const tab = browser.all().find((entry) => entry.view.page.id === id);
+      const tab = browser.all().find((entry: BrowserTab) => entry.view.page.id === id);
       return tab ? { id: tab.id, taskId: tab.taskId } : undefined;
     },
     defaultDirectory: (taskId) => join(app.getPath("userData"), "downloads", safeDirName(taskId)),
     onUpdate: (download) => mainWindow.send(IPC.browserDownload, download),
     log,
   });
-  const guestViews = new ElectronGuestViewFactory({
+  guestViews = new ElectronGuestViewFactory({
     window: () => mainWindow.browserWindow,
     preloadPath: join(__dirname, "guest-preload.cjs"),
     log,
@@ -173,7 +198,7 @@ function bootstrap(dataHome: string): void {
       guestSession.on("will-download", (_event, item, contents) => downloads.handleWillDownload(item, contents.id));
     },
   });
-  const browser = new BrowserSurfaceManager({
+  browser = new BrowserSurfaceManager({
     views: guestViews,
     contentSize: () => mainWindow.contentSize(),
     onTakeover: (tab, reason) => void service.hostEvent("browser.takeover", { tabId: tab.id, epoch: tab.epoch, reason }),
@@ -203,13 +228,14 @@ function bootstrap(dataHome: string): void {
   });
   const dialogs = new DialogHost(dialog, () => mainWindow.browserWindow ?? undefined);
 
-  const lifecycle = new QuitSequencer({
+  lifecycle = new QuitSequencer({
     service: {
       beforeClose: async (reason) => record(await service.request("desktop/beforeClose", { reason })).prevent === true,
       shutdown: () => service.shutdown(),
     },
     app: {
       quit: () => app.quit(),
+      exit: (code) => app.exit(code),
       relaunch: (args: string[], execPath?: string) => {
         if (execPath) delete process.env.REASONIX_DESKTOP_SERVICE;
         app.relaunch({ args, ...(execPath ? { execPath } : {}) });
@@ -217,12 +243,14 @@ function bootstrap(dataHome: string): void {
     },
     // Website views go first: a WebContents closing after its window is
     // gone is the ordering that left orphaned renderers in the prototype.
-    onCloseAllowed: () => {
-      browser.destroyAll();
-      mainWindow.allowClose();
-      remote.closeAll();
-      tray.destroy();
-    },
+    onCloseAllowed: () => mainWindow.allowClose(),
+    cleanup: [
+      { name: "browser views", run: () => browser.destroyAll() },
+      { name: "remote windows", run: () => remote.closeAll() },
+      { name: "main window", run: () => mainWindow.close() },
+      { name: "tray", run: () => tray.destroy() },
+      { name: "startup deadline", run: () => clearTimeout(startupTimer) },
+    ],
     log,
   });
 
@@ -276,9 +304,30 @@ function bootstrap(dataHome: string): void {
         home: dataHome,
         dev,
       }), 10_000)),
-      onRequest: (method, params) => dispatchHostCall(hostCalls, method, params),
+      onRequest: (method, params) => {
+        if (lifecycle.isQuitting) return Promise.reject(new Error("Reasonix is shutting down"));
+        return dispatchHostCall(hostCalls, method, params);
+      },
       onEvent: (frame) => mainWindow.send(IPC.event, frame),
       onState: (state) => {
+        log.info(`startup ${status.generation}: service=${state.phase} generation=${state.generation}`);
+        status.service = state.phase;
+        status.healthy = false;
+        status.rendererVersion = "";
+        firstHeartbeat = 0;
+        if (state.phase === "starting" || state.phase === "restarting") {
+          status.lifecycle = "starting";
+          clearTimeout(startupTimer);
+          startupTimer = setTimeout(() => {
+            if (lifecycle.isQuitting || status.healthy || status.lifecycle === "failed") return;
+            lastFailure = { code: null, name: "startup_timeout", title: "Startup incomplete / 启动未完成", detail: "Reasonix did not become ready within 30 seconds. Open logs or retry. / 30 秒内未完成启动，请打开日志或重试。" };
+            status.lifecycle = "failed";
+            log.error(`startup ${status.generation}: readiness timeout`);
+            if (!mainWindow.browserWindow) mainWindow.create(DEFAULT_GEOMETRY);
+            void mainWindow.showFailure(renderFailurePage(lastFailure, logsDir));
+          }, 30_000);
+          startupTimer.unref();
+        }
         mainWindow.send(IPC.serviceState, state);
         grants.observeGeneration(state.generation);
         if (state.phase !== "ready") {
@@ -287,7 +336,13 @@ function bootstrap(dataHome: string): void {
         }
       },
       onReady: async (hello: HelloResult) => {
+        if (lifecycle.isQuitting) return;
+        status.lifecycle = "ready";
+        status.servicePID = hello.service.pid;
         log.info(`desktop service ready: generation ${hello.runtimeGeneration}, pid ${hello.service.pid}`);
+        try { await zoomStore.load(); } catch (error) { log.warn(`app zoom initialization failed: ${errorText(error)}`); }
+        if (lifecycle.isQuitting || service.generation !== hello.runtimeGeneration) return;
+        mainWindow.prepareApp(hello.window);
         // A restarted service starts with the capability on, so the persisted
         // switch is replayed before any session can be built.
         void service.request("desktop/browserControl", { enabled: browserControl.state().controlEnabled })
@@ -306,7 +361,10 @@ function bootstrap(dataHome: string): void {
         if (!mainWindow.reattachApp()) void mainWindow.loadApp();
       },
       onFailed: (error) => {
+        if (lifecycle.isQuitting) return;
         const failure = describeHandshakeFailure(error);
+        lastFailure = failure;
+        status.lifecycle = "failed";
         log.error(`desktop service failed: ${failure.name}: ${failure.detail}`);
         if (!mainWindow.browserWindow) mainWindow.create(DEFAULT_GEOMETRY);
         void mainWindow.showFailure(renderFailurePage(failure, logsDir));
@@ -318,18 +376,35 @@ function bootstrap(dataHome: string): void {
   // sequence as the menu so Go snapshots sessions before the process ends.
   process.on("SIGTERM", () => lifecycle.requestQuit());
   app.on("second-instance", (_event, argv) => {
-    mainWindow.focusForSecondInstance();
-    void service.hostEvent("secondInstance", { argv });
+    if (argv.includes(QUIT_REQUEST)) { lifecycle.requestQuit(); return; }
+    presentInstance(argv);
   });
-  app.on("activate", () => mainWindow.show("activate"));
+  function presentInstance(argv: string[] = []): void {
+    if (lifecycle.isQuitting) return;
+    if (!app.isReady()) { void app.whenReady().then(() => presentInstance(argv)); return; }
+    if (!mainWindow.browserWindow) mainWindow.create(DEFAULT_GEOMETRY);
+    if (!service.ready) void mainWindow.showFailure(renderFailurePage(status.lifecycle === "starting" ? startingPage : lastFailure, logsDir));
+    mainWindow.focusForSecondInstance();
+    if (service.ready) void service.hostEvent("secondInstance", { argv });
+  }
+  app.on("activate", () => presentInstance());
   app.on("before-quit", (event) => {
     if (!lifecycle.onBeforeQuit()) event.preventDefault();
   });
   app.on("window-all-closed", () => {
-    // Go decides when the process ends; a hidden main window keeps running.
+    if (!service.ready) lifecycle.requestQuit();
   });
+  const statusServer = process.platform === "win32" ? listenShellStatus(() => ({
+    ...status,
+    lifecycle: lifecycle.currentPhase === "done" ? "done" : lifecycle.isQuitting ? "quitting" : status.lifecycle,
+    visible: mainWindow.browserWindow?.isVisible() ?? false,
+  }), log) : undefined;
+  app.on("will-quit", () => statusServer?.close());
 
   void app.whenReady().then(() => {
+    if (lifecycle.isQuitting) return;
+    mainWindow.create(DEFAULT_GEOMETRY);
+    void mainWindow.showFailure(renderFailurePage(lastFailure, logsDir));
     if (process.platform === "darwin") {
       const dockIcon = firstExisting(icons.window);
       if (dockIcon && app.dock) app.dock.setIcon(dockIcon);
@@ -356,7 +431,21 @@ function bootstrap(dataHome: string): void {
       ipcMain,
       contract,
       window: mainWindow,
-      invoke: (method, args) => service.invoke(method, args),
+      invoke: async (method, args) => {
+        const generation = service.generation;
+        const result = await service.invoke(method, args);
+        if (generation !== service.generation || lifecycle.isQuitting) return result;
+        if (method === "Version" && typeof result === "string") status.rendererVersion = result;
+        if (method === "ReportDesktopWebViewReady") {
+          if (!firstHeartbeat) firstHeartbeat = Date.now();
+          else if (Date.now() - firstHeartbeat >= 2000 && status.lifecycle === "ready") {
+            status.healthy = true;
+            clearTimeout(startupTimer);
+          }
+          if (status.rendererVersion === "") void mainWindow.browserWindow?.webContents.executeJavaScript('window.reasonixDesktop.invoke("Version", [])').catch(() => undefined);
+        }
+        return result;
+      },
       serviceState: () => service.current,
       clipboard,
       graphics,

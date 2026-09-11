@@ -17,6 +17,7 @@ export interface MainWindowDeps {
   log: Logger;
   onAppDomReady(rendererGeneration: number): void;
   onRendererLost?(reason: string): void;
+  isQuitting?(): boolean;
   onCloseRequested(): Promise<boolean>;
   onCloseAllowed(): void;
   onShellAction(action: ShellAction): void;
@@ -49,6 +50,14 @@ export class MainWindow {
 
   get browserWindow(): BrowserWindow | null {
     return this.win && !this.win.isDestroyed() ? this.win : null;
+  }
+
+  prepareApp(geometry: HelloWindow): void {
+    if (this.content === "app" && this.browserWindow) return;
+    const previous = this.browserWindow;
+    this.win = null;
+    this.create(geometry);
+    previous?.destroy();
   }
 
   create(geometry: HelloWindow): void {
@@ -99,7 +108,7 @@ export class MainWindow {
     win.webContents.on("render-process-gone", (_event, details) => {
       deps.log.error(`renderer process gone: ${details.reason} (exit code ${details.exitCode})`);
       deps.onRendererLost?.(`app renderer ${details.reason}`);
-      if (this.content === "app" && this.browserWindow) win.webContents.reload();
+      if (!this.deps.isQuitting?.() && this.content === "app" && this.browserWindow) win.webContents.reload();
     });
     win.on("close", (event) => {
       if (this.closeAllowed) return;
@@ -107,7 +116,7 @@ export class MainWindow {
       void this.requestClose();
     });
     win.on("closed", () => {
-      this.win = null;
+      if (this.win === win) this.win = null;
     });
   }
 
@@ -149,9 +158,11 @@ export class MainWindow {
     try {
       await win.loadURL(`data:text/html;charset=utf-8,${encodeURIComponent(html)}`);
     } catch (error) {
-      this.deps.log.error(`failed to load the failure page: ${errorText(error)}`);
+      // Successful startup replaces the provisional window while its data URL
+      // may still be loading. That cancellation is not a startup failure.
+      if (!win.isDestroyed() && this.browserWindow === win) this.deps.log.error(`failed to load the recovery page: ${errorText(error).slice(0, 300)}`);
     }
-    win.show();
+    if (!win.isDestroyed() && !this.deps.isQuitting?.() && this.content === "failure") win.show();
   }
 
   allowClose(): void {

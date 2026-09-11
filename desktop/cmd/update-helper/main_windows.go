@@ -317,6 +317,7 @@ func relaunchPublishedInstall(logger *log.Logger, relaunch, installDir, failVerb
 		notifyHandoffBlockedFn(true)
 		return 1
 	}
+	_ = installlayout.RetainPreviousVersions(installDir, 0)
 	return 0
 }
 
@@ -592,5 +593,6 @@ func startRelaunch(relaunch, installDir string) error {
 	cmd := proc.VisibleCommand(relaunch)
 	cmd.Dir = installDir
 	cmd.SysProcAttr = &syscall.SysProcAttr{HideWindow: true}
+	cmd.Env = append(os.Environ(), "REASONIX_NONINTERACTIVE=1")
 	return cmd.Start()
 }

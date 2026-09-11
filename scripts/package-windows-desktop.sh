@@ -172,6 +172,9 @@ if command -v powershell.exe >/dev/null 2>&1; then
 elif command -v zip >/dev/null 2>&1; then
 	# macOS/Linux cross-builds do not ship powershell.exe; the portable layout
 	# is ordinary ZIP data, so use the host zip utility in that case.
+	# zip updates an existing archive and otherwise retains previous version
+	# directories. Always assemble a fresh distributable from this payload.
+	rm -f -- "$dist_portable"
 	(
 		cd "$portable_staging"
 		zip -q -r "$dist_portable" .

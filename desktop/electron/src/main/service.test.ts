@@ -87,7 +87,7 @@ class FakeChild extends EventEmitter {
   }
 }
 
-function harness(options: { children?: FakeChild[]; budget?: RestartBudget } = {}) {
+function harness(options: { children?: FakeChild[]; budget?: RestartBudget; onState?(state: ServiceState): void } = {}) {
   const spawned: FakeChild[] = [];
   const states: ServiceState[] = [];
   const events: string[] = [];
@@ -113,8 +113,8 @@ function harness(options: { children?: FakeChild[]; budget?: RestartBudget } = {
       hello: async (client) => validateHelloResult(await client.request("desktop/hello", {}, 1000)),
       onRequest: async () => ({}),
       onEvent: (frame) => events.push(`${frame.generation}:${frame.name}`),
-      onState: (state) => states.push(state),
-      onReady: (hello: HelloResult, restarted) => ready.push({ generation: hello.runtimeGeneration, restarted }),
+      onState: (state) => { states.push(state); options.onState?.(state); },
+      onReady: (hello: HelloResult, restarted) => { ready.push({ generation: hello.runtimeGeneration, restarted }); },
       onFailed: (error) => failures.push(error instanceof Error ? error.message : String(error)),
     },
   );
@@ -199,4 +199,35 @@ test("a service that ignores stdin close is killed after the grace period", asyn
   await h.supervisor.shutdown();
   assert.equal(child.alive, false);
   assert.equal(h.supervisor.current.phase, "exited");
+});
+
+test("shutdown fences a hello completion queued before shutdown", async () => {
+  const h = harness();
+  const starting = h.supervisor.start();
+  const rejected = assert.rejects(starting, /cancelled|exited/);
+  await h.supervisor.shutdown();
+  await rejected;
+  assert.deepEqual(h.ready, []);
+  assert.deepEqual(h.failures, []);
+  assert.equal(h.spawned.length, 1);
+  await assert.rejects(h.supervisor.start(), /shutting down/);
+});
+
+test("a destroyed renderer throwing during exit notification cannot prevent shutdown", async () => {
+  const h = harness({ onState: (state) => { if (state.phase === "exited") throw new Error("Object has been destroyed"); } });
+  await h.supervisor.start();
+  await h.supervisor.shutdown();
+  assert.equal(h.supervisor.current.phase, "exited");
+  assert.equal(h.spawned[0].alive, false);
+});
+
+test("concurrent restarts share one replacement and shutdown prevents its spawn", async () => {
+  const h = harness();
+  await h.supervisor.start();
+  const a = h.supervisor.restart();
+  const b = h.supervisor.restart();
+  const rejected = Promise.all([assert.rejects(a, /shutting down/), assert.rejects(b, /shutting down/)]);
+  await h.supervisor.shutdown();
+  await rejected;
+  assert.equal(h.spawned.length, 1);
 });

@@ -1,12 +1,52 @@
 package installlayout
 
 import (
+	"errors"
 	"os"
 	"path/filepath"
 	"runtime"
 	"testing"
 	"time"
 )
+
+func TestActivateVersionRollsBackWhenProcessAppearsBeforeCommit(t *testing.T) {
+	root, src := t.TempDir(), t.TempDir()
+	members := []Member{}
+	for _, name := range AllowedVersionMembers() {
+		members = append(members, Member{Name: name, Path: writeTempMember(t, src, name, "payload")})
+	}
+	seed := ActivationRequest{InstallRoot: root, Version: "v1.38.5", RequestID: "seed", Members: members}
+	if err := ActivateVersion(seed); err != nil {
+		t.Fatal(err)
+	}
+	before, err := os.ReadFile(filepath.Join(root, "current.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	checks := 0
+	seed.Version = "v1.38.7"
+	seed.RequestID = "race"
+	seed.CheckProcesses = func() error {
+		checks++
+		if checks == 2 {
+			return errors.New("old launcher started a process")
+		}
+		return nil
+	}
+	if err := ActivateVersion(seed); err == nil {
+		t.Fatal("committed despite a new process")
+	}
+	after, err := os.ReadFile(filepath.Join(root, "current.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(before) != string(after) {
+		t.Fatal("pointer changed")
+	}
+	if _, err := os.Stat(filepath.Join(root, "versions", "v1.38.7")); !os.IsNotExist(err) {
+		t.Fatal("uncommitted version left behind", err)
+	}
+}
 
 func writeTempMember(t *testing.T, dir, name, body string) string {
 	t.Helper()

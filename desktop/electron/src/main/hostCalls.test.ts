@@ -110,5 +110,9 @@ test("failure page actions ride the reasonix://app/__shell/ prefix and the page 
   assert.match(html, /Mixed &lt;install&gt;/);
   assert.match(html, /digest &quot;a&quot; != &#39;b&#39;/);
   assert.match(html, /contract_mismatch \(-32003\)/);
-  assert.match(html, /reasonix:\/\/app\/__shell\/restart/);
+  assert.doesNotMatch(html, /reasonix:\/\/app\/__shell\/restart/);
+  for (const name of ["build_mismatch", "contract_mismatch"]) {
+    assert.doesNotMatch(renderFailurePage({ code: -32003, name, title: "Mismatch", detail: "Install the complete package" }, "/logs"), /reasonix:\/\/app\/__shell\/restart/);
+  }
+  assert.match(renderFailurePage({ code: -1, name: "service_failed", title: "Failed", detail: "Retry" }, "/logs"), /reasonix:\/\/app\/__shell\/restart/);
 });

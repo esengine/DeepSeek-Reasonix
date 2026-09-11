@@ -14,7 +14,7 @@ export interface ServiceHandlers {
   onRequest(method: string, params: unknown): Promise<unknown>;
   onEvent(frame: EventFrame): void;
   onState(state: ServiceState): void;
-  onReady(hello: HelloResult, restarted: boolean): void;
+  onReady(hello: HelloResult, restarted: boolean): void | Promise<void>;
   onFailed(error: unknown): void;
 }
 
@@ -57,6 +57,9 @@ export class ServiceSupervisor {
   private hello: HelloResult | null = null;
   private launching: Promise<HelloResult> | null = null;
   private stopping = false;
+  private shutdownPending: Promise<void> | null = null;
+  private revision = 0;
+  private restarting: Promise<HelloResult> | null = null;
   private readonly budget: RestartBudget;
   private readonly spawnFn: SpawnFn;
   private readonly now: () => number;
@@ -90,10 +93,14 @@ export class ServiceSupervisor {
   }
 
   async restart(): Promise<HelloResult> {
+    if (this.stopping) throw new Error("desktop service is shutting down");
     if (this.launching) return this.launching;
-    const old = this.session;
-    if (old?.alive) await this.terminate(old);
-    return this.begin(true);
+    if (!this.restarting) this.restarting = (async () => {
+      const old = this.session;
+      if (old?.alive) await this.terminate(old);
+      return this.begin(true);
+    })().finally(() => { this.restarting = null; });
+    return this.restarting;
   }
 
   async invoke(method: string, args: unknown[]): Promise<unknown> {
@@ -112,8 +119,14 @@ export class ServiceSupervisor {
     }
   }
 
-  async shutdown(): Promise<void> {
+  shutdown(): Promise<void> {
     this.stopping = true;
+    this.revision++;
+    if (!this.shutdownPending) this.shutdownPending = this.finishShutdown().finally(() => { this.shutdownPending = null; });
+    return this.shutdownPending;
+  }
+
+  private async finishShutdown(): Promise<void> {
     const session = this.session;
     if (!session?.alive) {
       this.setState({ phase: "exited", generation: "" });
@@ -131,11 +144,12 @@ export class ServiceSupervisor {
 
   private live(): Session {
     const session = this.session;
-    if (!session?.alive || !session.ready) throw new Error(`desktop service is not running (${this.state.phase})`);
+    if (this.stopping || !session?.alive || !session.ready) throw new Error(`desktop service is not running (${this.state.phase})`);
     return session;
   }
 
   private begin(restarted: boolean): Promise<HelloResult> {
+    if (this.stopping) return Promise.reject(new Error("desktop service is shutting down"));
     if (this.launching) return this.launching;
     this.launching = this.launch(restarted).finally(() => {
       this.launching = null;
@@ -144,23 +158,26 @@ export class ServiceSupervisor {
   }
 
   private async launch(restarted: boolean): Promise<HelloResult> {
+    const revision = ++this.revision;
     this.setState({ phase: restarted ? "restarting" : "starting", generation: "" });
-    const session = this.spawnSession();
+    let session: Session | null = null;
     try {
+      session = this.spawnSession();
       const hello = await this.handlers.hello(session.client);
+      if (this.stopping || revision !== this.revision) throw new Error("desktop startup cancelled");
       session.generation = hello.runtimeGeneration;
       await session.client.request("desktop/start", {}, LIFECYCLE_TIMEOUT_MS);
-      if (!session.alive) throw new Error("desktop service exited during startup");
+      if (!session.alive || this.stopping || revision !== this.revision) throw new Error("desktop service exited during startup");
       session.ready = true;
       this.hello = hello;
       this.setState({ phase: "ready", generation: hello.runtimeGeneration });
-      this.handlers.onReady(hello, restarted);
+      await this.handlers.onReady(hello, restarted);
       return hello;
     } catch (error) {
-      if (this.session === session) {
+      if ((!session || this.session === session) && !this.stopping && revision === this.revision) {
         this.setState({ phase: "failed", generation: "", error: errorText(error) });
         this.handlers.onFailed(error);
-        void this.terminate(session);
+        if (session) void this.terminate(session).catch((error) => this.options.log.error(`service termination failed: ${errorText(error)}`));
       }
       throw error;
     }
@@ -267,10 +284,14 @@ export class ServiceSupervisor {
     this.options.log.warn("desktop service did not exit after stdin close; killing it");
     session.child.kill("SIGKILL");
     await Promise.race([session.exited, delay(1000)]);
+    if (session.alive) throw new Error("desktop service did not terminate; shell exit withheld");
   }
 
   private setState(state: ServiceState): void {
     this.state = state;
-    this.handlers.onState(state);
+    // A destroyed renderer or failing observer must not turn confirmed service
+    // exit into a failed shutdown, nor skip the shell's remaining cleanup.
+    try { this.handlers.onState(state); }
+    catch (error) { this.options.log.warn(`service state observer failed: ${errorText(error)}`); }
   }
 }

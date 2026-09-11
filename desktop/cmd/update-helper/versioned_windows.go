@@ -6,6 +6,8 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"reasonix/internal/config"
+	"reasonix/internal/desktopinstance"
 	"strings"
 
 	"reasonix/desktop/internal/update"
@@ -68,12 +70,18 @@ func activateVersionedWindowsFromStaging(claimed *repair.UpdateTransaction, stag
 	if requestID == "" {
 		requestID = "helper-" + version
 	}
+	release, err := desktopinstance.PrepareInstall(installRoot, config.ReasonixHomeDir(), false)
+	if err != nil {
+		return err
+	}
+	defer release()
 	if err := installlayout.ActivateVersion(installlayout.ActivationRequest{
-		InstallRoot:   installRoot,
-		Version:       version,
-		RequestID:     requestID,
-		Members:       members,
-		RequiredNames: versionNames,
+		InstallRoot:    installRoot,
+		Version:        version,
+		RequestID:      requestID,
+		CheckProcesses: func() error { return desktopinstance.CheckInstallVacant(installRoot, config.ReasonixHomeDir()) },
+		Members:        members,
+		RequiredNames:  versionNames,
 		RootMembers: []installlayout.Member{
 			{Name: "reasonix-launcher.exe", Path: launcherSrc, Mode: 0o700},
 			{Name: "Reasonix.exe", Path: launcherSrc, Mode: 0o700},
@@ -94,7 +102,6 @@ func activateVersionedWindowsFromStaging(claimed *repair.UpdateTransaction, stag
 		_ = os.Remove(filepath.Join(installRoot, name))
 	}
 	// Best-effort retention GC of older version trees.
-	_ = installlayout.RetainPreviousVersions(installRoot, 0)
 	_ = installlayout.CleanupStaleStaging(installRoot, 0)
 	return nil
 }
