@@ -7,6 +7,8 @@ import (
 )
 
 func TestWSLClipboardCommandPreservesUTF8Text(t *testing.T) {
+	t.Setenv("PATH", t.TempDir())
+	t.Setenv("WAYLAND_DISPLAY", "")
 	for _, text := range []string{"中文测试", "hello", "你好 🚀"} {
 		t.Run(text, func(t *testing.T) {
 			cmd := newWSLClipboardCommand(text)

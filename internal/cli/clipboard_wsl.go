@@ -21,8 +21,8 @@ $reader = [IO.StreamReader]::new($stdin, [Text.UTF8Encoding]::new($false))
 Set-Clipboard -Value $reader.ReadToEnd()`
 
 // writeClipboardText uses the normal platform clipboard outside WSL. WSL is a
-// Linux process, so atotto/clipboard's Windows-interop fallback would otherwise
-// send UTF-8 bytes to clip.exe without first converting them to Unicode.
+// Linux process: preserve its clipboard utilities, but replace the clip.exe
+// fallback that would otherwise decode UTF-8 using a Windows code page.
 func writeClipboardText(text string) error {
 	if isWSL() {
 		return writeWSLClipboardText(text)
@@ -55,13 +55,28 @@ func writeWSLClipboardText(text string) error {
 }
 
 func newWSLClipboardCommand(text string) *exec.Cmd {
-	cmd := proc.Command(
+	args := []string{
 		"powershell.exe",
 		"-NoProfile",
 		"-NonInteractive",
 		"-Command",
 		wslClipboardWriteScript,
-	)
+	}
+	// Keep native Linux clipboard support when Windows interop is unavailable.
+	switch {
+	case os.Getenv("WAYLAND_DISPLAY") != "" && clipboardCommandAvailable("wl-copy"):
+		args = []string{"wl-copy"}
+	case clipboardCommandAvailable("xclip"):
+		args = []string{"xclip", "-in", "-selection", "clipboard"}
+	case clipboardCommandAvailable("xsel"):
+		args = []string{"xsel", "--input", "--clipboard"}
+	}
+	cmd := proc.Command(args[0], args[1:]...)
 	cmd.Stdin = strings.NewReader(text)
 	return cmd
+}
+
+func clipboardCommandAvailable(name string) bool {
+	_, err := exec.LookPath(name)
+	return err == nil
 }
