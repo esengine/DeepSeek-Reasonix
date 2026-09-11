@@ -1,0 +1,12 @@
+{
+  "schemaVersion": 1,
+  "name": "reader-reverse-jump",
+  "viewport": 725,
+  "direction": 1,
+  "samples": [
+    { "top": 14567.47, "height": 15829 },
+    { "top": 12618.67, "height": 13344 },
+    { "top": 12618.67, "height": 15829 }
+  ],
+  "expected": { "minimumCorrection": 1900, "maximumReverse": 96 }
+}

@@ -32,6 +32,48 @@ func TestBuildRequestEmbedsImagesForVisionModel(t *testing.T) {
 	}
 }
 
+func TestModelInfoEnablesImageWireSerialization(t *testing.T) {
+	p, err := New(provider.Config{
+		Name: "catalog", BaseURL: "https://example.test/v1", Model: "kimi-k3",
+		ModelInfo: &provider.ModelInfo{ID: "kimi-k3", InputModalities: []provider.ModelModality{provider.ModalityText, provider.ModalityImage}},
+	})
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+	c := p.(*client)
+	if !c.vision {
+		t.Fatal("model metadata should enable image wire serialization")
+	}
+	req := c.buildRequest(provider.Request{Messages: []provider.Message{{Role: provider.RoleUser, Content: "describe", Images: []string{"data:image/png;base64,AAAA"}}}})
+	if _, ok := req.Messages[0].Content.([]chatContentPart); !ok {
+		t.Fatalf("content = %#v, want image content parts", req.Messages[0].Content)
+	}
+}
+
+func TestBuildRequestEmbedsOfficialDeepSeekImageURLAndFileID(t *testing.T) {
+	c := &client{model: OfficialDeepSeekVisionModel, vision: true, deepseek: true}
+	req := c.buildRequest(provider.Request{
+		Messages: []provider.Message{{
+			Role:    provider.RoleUser,
+			Content: "what is this",
+			Images: []string{
+				"https://cdn.example.com/cat.png",
+				"file-api-0a1b2c3d4e5f6071",
+			},
+		}},
+	})
+	parts, ok := req.Messages[0].Content.([]chatContentPart)
+	if !ok || len(parts) != 3 {
+		t.Fatalf("parts = %#v", req.Messages[0].Content)
+	}
+	if parts[1].Type != "image_url" || parts[1].ImageURL == nil || parts[1].ImageURL.URL != "https://cdn.example.com/cat.png" {
+		t.Fatalf("url part = %+v", parts[1])
+	}
+	if parts[2].Type != "file" || parts[2].FileID != "file-api-0a1b2c3d4e5f6071" {
+		t.Fatalf("file part = %+v", parts[2])
+	}
+}
+
 func TestBuildRequestSkipsImagesWithoutVision(t *testing.T) {
 	c := &client{model: "deepseek-v4"} // vision unset
 	req := c.buildRequest(provider.Request{
@@ -79,7 +121,7 @@ func TestOfficialDeepSeekProviderWideVisionInputMatchesTextOnlyRequest(t *testin
 	}
 }
 
-func TestOfficialDeepSeekExplicitFutureVisionInputUsesImageParts(t *testing.T) {
+func TestOfficialDeepSeekUnknownModelExplicitVisionSerializesImages(t *testing.T) {
 	p, err := New(provider.Config{
 		Name:    "deepseek",
 		BaseURL: "https://api.deepseek.com",
@@ -94,16 +136,26 @@ func TestOfficialDeepSeekExplicitFutureVisionInputUsesImageParts(t *testing.T) {
 	}
 	c := p.(*client)
 	if !c.vision {
-		t.Fatal("explicit model-scoped vision must remain enabled on the official DeepSeek endpoint")
+		t.Fatal("explicit vision must enable unknown DeepSeek models")
 	}
 
-	req := c.buildRequest(provider.Request{Messages: []provider.Message{{
+	textOnly := provider.Request{Messages: []provider.Message{{
+		Role: provider.RoleUser, Content: "describe",
+	}}}
+	withImage := provider.Request{Messages: []provider.Message{{
 		Role: provider.RoleUser, Content: "describe",
 		Images: []string{"data:image/png;base64,AAAA"},
-	}}})
-	parts, ok := req.Messages[0].Content.([]chatContentPart)
-	if !ok || len(parts) != 2 || parts[1].ImageURL == nil {
-		t.Fatalf("explicit future DeepSeek content = %#v, want [text, image_url]", req.Messages[0].Content)
+	}}}
+	textBody, err := json.Marshal(c.buildRequest(textOnly))
+	if err != nil {
+		t.Fatalf("marshal text request: %v", err)
+	}
+	imageBody, err := json.Marshal(c.buildRequest(withImage))
+	if err != nil {
+		t.Fatalf("marshal image request: %v", err)
+	}
+	if bytes.Equal(imageBody, textBody) || !bytes.Contains(imageBody, []byte("data:image/png;base64,AAAA")) {
+		t.Fatalf("explicit unknown DeepSeek image missing from request: %s", imageBody)
 	}
 }
 
@@ -112,21 +164,27 @@ func TestOfficialDeepSeekDoesNotInjectToolResultImages(t *testing.T) {
 		Name:    "deepseek",
 		BaseURL: "https://api.deepseek.com/v1",
 		Model:   "deepseek-v4-pro",
-		Extra:   map[string]any{"vision": true},
+		Extra: map[string]any{
+			"vision":                true,
+			"vision_model_explicit": true,
+		},
 	})
 	if err != nil {
 		t.Fatalf("New: %v", err)
 	}
-	req := p.(*client).buildRequest(provider.Request{Messages: []provider.Message{
+	plainMessages := []provider.Message{
 		{Role: provider.RoleUser, Content: "take a screenshot"},
 		{Role: provider.RoleAssistant, ToolCalls: []provider.ToolCall{{
 			ID: "c1", Name: "shot", Arguments: "{}",
 		}}},
 		{
 			Role: provider.RoleTool, ToolCallID: "c1", Name: "shot",
-			Content: "[image: image/png]", Images: []string{"data:image/png;base64,AAAA"},
+			Content: "[image: image/png]",
 		},
-	}})
+	}
+	imageMessages := append([]provider.Message(nil), plainMessages...)
+	imageMessages[2].Images = []string{"data:image/png;base64,AAAA"}
+	req := p.(*client).buildRequest(provider.Request{Messages: imageMessages})
 	if len(req.Messages) != 3 {
 		t.Fatalf("messages = %d, want 3 without an injected image message", len(req.Messages))
 	}
@@ -136,6 +194,134 @@ func TestOfficialDeepSeekDoesNotInjectToolResultImages(t *testing.T) {
 	}
 	if strings.Contains(string(body), "image_url") || strings.Contains(string(body), "base64,AAAA") {
 		t.Fatalf("official DeepSeek request leaked tool image payload: %s", body)
+	}
+	plainBody, err := json.Marshal(p.(*client).buildRequest(provider.Request{Messages: plainMessages}))
+	if err != nil {
+		t.Fatalf("marshal plain request: %v", err)
+	}
+	if !bytes.Equal(body, plainBody) {
+		t.Fatalf("official DeepSeek tool image metadata changed provider-visible bytes:\nplain: %s\nimage: %s", plainBody, body)
+	}
+}
+
+func TestOfficialDeepSeekVisionSKUEmbedsUserImages(t *testing.T) {
+	p, err := New(provider.Config{
+		Name:    "deepseek",
+		BaseURL: "https://api.deepseek.com",
+		Model:   OfficialDeepSeekVisionModel,
+	})
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+	c := p.(*client)
+	if !c.vision {
+		t.Fatal("pinned official DeepSeek vision SKU must enable user image serialization")
+	}
+	req := c.buildRequest(provider.Request{Messages: []provider.Message{{
+		Role: provider.RoleUser, Content: "describe",
+		Images: []string{"data:image/png;base64,AAAA"},
+	}}})
+	parts, ok := req.Messages[0].Content.([]chatContentPart)
+	if !ok || len(parts) != 2 || parts[0].Type != "text" || parts[1].Type != "image_url" {
+		t.Fatalf("vision SKU user content = %#v, want [text, image_url]", req.Messages[0].Content)
+	}
+	if parts[1].ImageURL == nil || parts[1].ImageURL.URL != "data:image/png;base64,AAAA" {
+		t.Fatalf("image_url = %+v", parts[1].ImageURL)
+	}
+
+	textOnly := c.buildRequest(provider.Request{Messages: []provider.Message{{
+		Role: provider.RoleUser, Content: "hello",
+	}}})
+	if s, ok := textOnly.Messages[0].Content.(string); !ok || s != "hello" {
+		t.Fatalf("vision SKU text-only content = %#v, want a string", textOnly.Messages[0].Content)
+	}
+}
+
+// V4.1 Flash is natively multimodal, so the official endpoint must serialize
+// images for it — and for the ids the vendor still aliases to it — without the
+// caller first resolving capability metadata.
+func TestOfficialDeepSeekMultimodalSKUsEmbedUserImages(t *testing.T) {
+	for _, model := range []string{"deepseek-flash", "deepseek-v4-flash", "deepseek-v4.1-flash-expires-on-0910"} {
+		p, err := New(provider.Config{Name: "deepseek", BaseURL: "https://api.deepseek.com", Model: model})
+		if err != nil {
+			t.Fatalf("New(%s): %v", model, err)
+		}
+		c := p.(*client)
+		if !c.vision {
+			t.Fatalf("%s must serialize user images without resolved metadata", model)
+		}
+		req := c.buildRequest(provider.Request{Messages: []provider.Message{{
+			Role: provider.RoleUser, Content: "describe",
+			Images: []string{"data:image/png;base64,AAAA"},
+		}}})
+		parts, ok := req.Messages[0].Content.([]chatContentPart)
+		if !ok || len(parts) != 2 || parts[0].Type != "text" || parts[1].Type != "image_url" {
+			t.Fatalf("%s user content = %#v, want [text, image_url]", model, req.Messages[0].Content)
+		}
+		if parts[1].ImageURL == nil || parts[1].ImageURL.URL != "data:image/png;base64,AAAA" {
+			t.Fatalf("%s image_url = %+v", model, parts[1].ImageURL)
+		}
+	}
+}
+
+func TestOfficialRequestURLImageHardLimit(t *testing.T) {
+	p, err := New(provider.Config{BaseURL: "https://relay.test", Model: "deepseek-v4-pro", Extra: map[string]any{"request_url": "https://api.deepseek.com/v1/chat/completions", "vision": true}, ModelInfo: &provider.ModelInfo{InputModalities: []provider.ModelModality{provider.ModalityText, provider.ModalityImage}}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	body, err := json.Marshal(p.(*client).buildRequest(provider.Request{Messages: []provider.Message{{Role: provider.RoleUser, Content: "describe", Images: []string{"data:image/png;base64,AAAA"}}}}))
+	if err != nil || strings.Contains(string(body), "AAAA") {
+		t.Fatalf("official request URL leaked image: %s %v", body, err)
+	}
+}
+
+func TestOfficialVisionExplicitOffRespectsResolvedMetadata(t *testing.T) {
+	p, err := New(provider.Config{BaseURL: "https://api.deepseek.com", Model: OfficialDeepSeekVisionModel, Extra: map[string]any{"vision": true}, ModelInfo: &provider.ModelInfo{InputModalities: []provider.ModelModality{provider.ModalityText}}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	body, err := json.Marshal(p.(*client).buildRequest(provider.Request{Messages: []provider.Message{{Role: provider.RoleUser, Content: "describe", Images: []string{"data:image/png;base64,AAAA"}}}}))
+	if err != nil || strings.Contains(string(body), "AAAA") {
+		t.Fatalf("explicit off leaked image: %s %v", body, err)
+	}
+	if p.(provider.ModelInfoProvider).ModelInfo().SupportsInput(provider.ModalityImage) {
+		t.Fatal("metadata disagrees with serializer")
+	}
+}
+
+func TestOfficialDeepSeekVisionSKUEmbedsToolImages(t *testing.T) {
+	p, err := New(provider.Config{
+		Name:    "deepseek",
+		BaseURL: "https://api.deepseek.com",
+		Model:   OfficialDeepSeekVisionModel,
+		Extra:   map[string]any{"vision": true},
+	})
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+	plain := []provider.Message{
+		{Role: provider.RoleUser, Content: "take a screenshot"},
+		{Role: provider.RoleAssistant, ToolCalls: []provider.ToolCall{{
+			ID: "c1", Name: "shot", Arguments: "{}",
+		}}},
+		{Role: provider.RoleTool, ToolCallID: "c1", Name: "shot", Content: "[image: image/png]"},
+	}
+	withToolImage := append([]provider.Message(nil), plain...)
+	withToolImage[2].Images = []string{"data:image/png;base64,AAAA"}
+	c := p.(*client)
+	body, err := json.Marshal(c.buildRequest(provider.Request{Messages: withToolImage}))
+	if err != nil {
+		t.Fatalf("marshal: %v", err)
+	}
+	if !strings.Contains(string(body), "base64,AAAA") {
+		t.Fatalf("official DeepSeek vision SKU omitted tool image payload: %s", body)
+	}
+	plainBody, err := json.Marshal(c.buildRequest(provider.Request{Messages: plain}))
+	if err != nil {
+		t.Fatalf("marshal plain: %v", err)
+	}
+	if bytes.Equal(body, plainBody) {
+		t.Fatalf("tool images changed official DeepSeek vision SKU bytes:\nplain: %s\nimage: %s", plainBody, body)
 	}
 }
 

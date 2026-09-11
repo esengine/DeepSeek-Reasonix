@@ -117,6 +117,16 @@ What is **not** done:
   line on phase changes and terminal only; verbose previews print at most once
   every 2 seconds per child.
 
+## Serve
+
+- A call carrying `parentId` renders inside its parent's card, never as a
+  top-level entry: a delegated command must not read as the session's own
+  work. The parent opens while it runs and folds when it settles, unless the
+  user took over the toggle.
+- Narrow layouts hide the status badge, except on a call the host refused
+  (`not_run` shell state) — there a red icon alone would read as "failed"
+  rather than "never ran".
+
 ## Contract stability
 
 Frontends match the reserved names by the `reasonix.subagent.` prefix, so a

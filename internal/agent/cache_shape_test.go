@@ -35,3 +35,19 @@ func TestCaptureShapeNormalizesToolSchemaOrder(t *testing.T) {
 		t.Fatalf("CaptureShape mutated caller schema order: got [%s %s]", schemas[0].Name, schemas[1].Name)
 	}
 }
+
+func TestCompareShapeIgnoresBareLogRewriteVersionDrift(t *testing.T) {
+	before := CaptureShape("system", nil, 5)
+	// Simulates AddDecisionReceipt/UpdateToolCallPreview/UpdateToolCallResolution/
+	// ReplaceLocalMetadata bumping rewriteVersion alone, with no drained content
+	// reason: none of those touch provider-visible bytes, so this must not be
+	// reported as a cache-prefix change.
+	after := CaptureShape("system", nil, 9)
+	if diag := CompareShape(before, after, nil, nil); diag.PrefixChanged {
+		t.Fatalf("LogRewriteVersion drift with no drained reason must not report a change: %+v", diag)
+	}
+
+	if diag := CompareShape(before, after, nil, []string{"compact_auto"}); !diag.PrefixChanged || len(diag.PrefixChangeReasons) != 1 || diag.PrefixChangeReasons[0] != "compact_auto" {
+		t.Fatalf("a real drained reason must be reported: %+v", diag)
+	}
+}

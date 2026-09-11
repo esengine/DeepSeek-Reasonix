@@ -30,9 +30,9 @@ func TestDeepSeekThinkingHonorsDeclaredEffortVocabulary(t *testing.T) {
 	}
 }
 
-// Without a declaration there is nothing to defer to, so an unknown level is
-// still rejected rather than silently forwarded to the official endpoint.
-func TestDeepSeekThinkingRejectsUndeclaredEffort(t *testing.T) {
+// V4 compatibility aliases normalize at the provider boundary even when a
+// caller bypasses config.NormalizeEffort.
+func TestDeepSeekThinkingRejectsUndeclaredV4Alias(t *testing.T) {
 	_, err := New(provider.Config{
 		Name:    "official",
 		BaseURL: "https://api.deepseek.com",
@@ -44,7 +44,7 @@ func TestDeepSeekThinkingRejectsUndeclaredEffort(t *testing.T) {
 		},
 	})
 	if err == nil {
-		t.Fatal("New with an undeclared effort level = nil error, want rejection")
+		t.Fatal("undeclared alias must be rejected")
 	}
 }
 

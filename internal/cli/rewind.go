@@ -139,7 +139,7 @@ func (m chatTUI) applyRewind() (tea.Model, tea.Cmd) {
 			m.followSessionLease()
 			m.replayActiveBranch(fmt.Sprintf("branched from turn %d", meta.Turn+1))
 		}
-		return m, nil // the branch is a new session
+		return m, nil // the controller is on the fork now
 	case "summ-from":
 		m.rewind = nil
 		_ = m.ctrl.SummarizeFrom(context.Background(), meta.Turn)
@@ -194,15 +194,19 @@ func (m chatTUI) commitPreparedRewind() (tea.Model, tea.Cmd) {
 	scope := control.RewindScope(r.pendingPlan.Scope)
 	planID := r.pendingPlan.PlanID
 	m.rewind = nil
-	result, err := m.ctrl.CommitRewind(planID)
+	result, err := m.ctrl.CommitRewindInPlace(planID)
 	if err != nil || !result.OK {
 		return m, nil
 	}
-	// The controller emits a notice marking the rewind point; the committed
-	// transcript stays in terminal scrollback (v2 has no managed viewport), so for a
-	// conversation/both rewind we prefill the composer with that turn's prompt to
-	// re-send or edit — Claude Code's behavior — while the model's context is
-	// truncated underneath.
+	if result.ConversationForked {
+		// The controller is already on the rewound conversation: a head of the
+		// same log, or the fork file of a schema-1 session. Only the lease and
+		// the transcript view still follow it.
+		m.followSessionLease()
+		m.replayActiveBranch(fmt.Sprintf("rewound to turn %d", meta.Turn+1))
+	}
+	// Conversation rewind activates the fork and prefills the selected prompt
+	// for editing. Code-only rewind keeps the current transcript on screen.
 	if scope != control.RewindCode && strings.TrimSpace(meta.Prompt) != "" {
 		m.input.SetValue(meta.Prompt)
 		m.growInputToFit()
@@ -219,8 +223,18 @@ func (m chatTUI) renderRewind() string {
 	var b strings.Builder
 	if r.stage == 0 {
 		b.WriteString(accent(i18n.M.RewindPickTitle) + "\n")
-		for i, meta := range r.metas {
+		// Long sessions list one row per turn; window it like quickPicker so
+		// the overlay never outgrows the terminal (no scrolling viewport).
+		start, end := quickPickerWindow(len(r.metas), r.sel)
+		if start > 0 {
+			b.WriteString(dim("  ↑ more") + "\n")
+		}
+		for i := start; i < end; i++ {
+			meta := r.metas[i]
 			b.WriteString(rowLine(i == r.sel, meta.Turn+1, "", turnLabel(meta, w), false) + "\n")
+		}
+		if end < len(r.metas) {
+			b.WriteString(dim("  ↓ more") + "\n")
 		}
 		b.WriteString(dim(i18n.M.RewindPickHint))
 		return choicePanelStyle.Width(w).Render(b.String())

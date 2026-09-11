@@ -35,13 +35,11 @@ func TestMachineIdentityKeyInitializesOnceAcrossConcurrentReaders(t *testing.T) 
 	const readers = 16
 	results := make(chan result, readers)
 	var wg sync.WaitGroup
-	for i := 0; i < readers; i++ {
-		wg.Add(1)
-		go func() {
-			defer wg.Done()
+	for range readers {
+		wg.Go(func() {
 			key, err := loadMachineIdentityKey()
 			results <- result{key: key, err: err}
-		}()
+		})
 	}
 	wg.Wait()
 	close(results)

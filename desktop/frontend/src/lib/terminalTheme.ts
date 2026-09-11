@@ -46,7 +46,7 @@ const lightANSI: ITheme = {
   brightWhite: "#34383d",
 };
 
-// Wails dispatches bound Go calls on separate goroutines. Keep terminal-theme
+// The host bridge dispatches bound Go calls on separate goroutines. Keep terminal-theme
 // writes in click order so an older save can never finish after newer intent.
 export function createTerminalThemeSaveQueue(
   persist: (theme: TerminalThemePreference) => Promise<void>,
@@ -103,7 +103,10 @@ export function terminalThemeForElement(element: Element): ITheme {
     foreground: cssToken(style, "--terminal-fg", resolved === "light" ? "#25272a" : "#e8e5df"),
     cursor: cssToken(style, "--terminal-cursor", resolved === "light" ? "#9a4f00" : "#e6a15c"),
     cursorAccent: cssToken(style, "--terminal-bg", resolved === "light" ? "#f7f8fa" : "#111315"),
-    selectionBackground: cssToken(style, "--terminal-selection", resolved === "light" ? "#b9d7ff" : "#344c68"),
+    selectionBackground: cssToken(style, "--terminal-selection", resolved === "light" ? "#6ea8fe" : "#4a6d8c"),
+    // Explicit themes keep at least 4.5:1 contrast over their selection
+    // backgrounds. Auto mode inherits from the CSS layer.
+    selectionForeground: cssToken(style, "--terminal-selection-fg", resolved === "light" ? "#0b0f14" : "#ffffff"),
   };
 }
 

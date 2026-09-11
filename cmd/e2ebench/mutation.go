@@ -129,7 +129,7 @@ func mutantBody(fset *token.FileSet, results *ast.FieldList) string {
 		if n == 0 {
 			n = 1
 		}
-		for i := 0; i < n; i++ {
+		for range n {
 			rets = append(rets, t)
 		}
 	}

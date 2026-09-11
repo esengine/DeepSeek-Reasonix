@@ -1,0 +1,5 @@
+prompt = "Write the current API base URL for this project into answer.txt."
+class = "update"
+max_steps = 8
+timeout_sec = 180
+memory_markers = ["MEMKEY-UPD8R"]

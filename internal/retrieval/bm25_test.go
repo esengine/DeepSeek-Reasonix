@@ -7,10 +7,19 @@ import (
 )
 
 func TestTokensHandlesLatinAndCJK(t *testing.T) {
-	got := Tokens("BM25 检索 cache-first")
-	want := []string{"bm25", "检", "索", "cache", "first"}
-	if strings.Join(got, ",") != strings.Join(want, ",") {
-		t.Fatalf("Tokens() = %#v, want %#v", got, want)
+	for _, tc := range []struct {
+		in   string
+		want []string
+	}{
+		{"BM25 检索 cache-first", []string{"bm25", "检索", "cache", "first"}},
+		{"数据库迁移", []string{"数据", "据库", "库迁", "迁移"}},
+		{"库", []string{"库"}},
+		{"用pnpm装依赖", []string{"用", "pnpm", "装依", "依赖"}},
+	} {
+		got := Tokens(tc.in)
+		if strings.Join(got, ",") != strings.Join(tc.want, ",") {
+			t.Fatalf("Tokens(%q) = %#v, want %#v", tc.in, got, tc.want)
+		}
 	}
 }
 

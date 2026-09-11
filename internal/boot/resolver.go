@@ -14,12 +14,20 @@ import (
 
 // LocalProviderResolver preserves the historical config-backed provider path.
 type LocalProviderResolver struct {
-	cfg   *config.Config
-	proxy netclient.ProxySpec
+	cfg          *config.Config
+	proxy        netclient.ProxySpec
+	capabilities *config.ModelCapabilityResolver
 }
 
 func NewLocalProviderResolver(cfg *config.Config, proxy netclient.ProxySpec) *LocalProviderResolver {
-	return &LocalProviderResolver{cfg: cfg, proxy: proxy}
+	return NewLocalProviderResolverWithCapabilities(cfg, proxy, nil)
+}
+
+func NewLocalProviderResolverWithCapabilities(cfg *config.Config, proxy netclient.ProxySpec, capabilities *config.ModelCapabilityResolver) *LocalProviderResolver {
+	if capabilities == nil {
+		capabilities = config.NewModelCapabilityResolver()
+	}
+	return &LocalProviderResolver{cfg: cfg, proxy: proxy, capabilities: capabilities}
 }
 
 func (r *LocalProviderResolver) Catalog() []provider.Descriptor {
@@ -28,28 +36,53 @@ func (r *LocalProviderResolver) Catalog() []provider.Descriptor {
 	}
 	out := make([]provider.Descriptor, 0, len(r.cfg.Providers))
 	for i := range r.cfg.Providers {
-		e := &r.cfg.Providers[i]
-		ref := modelRefFromEntry(e)
-		d := provider.Descriptor{
-			Ref: ref, DisplayName: e.Name, Model: e.Model,
-			ContextWindow: e.ContextWindow, Vision: config.EffectiveVision(e),
-			Tools: true, DefaultEffort: config.EffectiveEffort(e),
+		base := &r.cfg.Providers[i]
+		models := base.ModelList()
+		if len(models) == 0 {
+			models = []string{base.Model}
 		}
-		if price := e.PriceForModel(e.Model); price != nil {
-			d.PricingCurrency = price.Currency
-			d.CacheHitPerMillion = price.CacheHit
-			d.InputPerMillion = price.Input
-			d.OutputPerMillion = price.Output
+		for _, model := range models {
+			entry := *base
+			entry.Model = model
+			if selected, ok := r.cfg.ResolveModel(base.Name + "/" + model); ok {
+				entry = *selected
+			}
+			ref := modelRefFromEntry(&entry)
+			if resolved, ok := r.cfg.ResolveModel(ref); ok {
+				entry = *resolved
+			}
+			capability := config.ResolvedModelCapability{State: config.CapabilityUnknown}
+			if r.capabilities != nil {
+				capability = r.capabilities.Resolve(&entry)
+			}
+			d := provider.Descriptor{
+				Ref: ref, DisplayName: entry.Name, Model: entry.Model,
+				ContextWindow: entry.ContextWindow, Vision: capability.State == config.CapabilitySupported,
+				InputModalities: append([]provider.ModelModality(nil), capability.InputModalities...),
+				Tools:           true, DefaultEffort: config.EffectiveEffort(&entry),
+			}
+			if capability.ModelInfo.ContextWindow > 0 && d.ContextWindow == 0 {
+				d.ContextWindow = capability.ModelInfo.ContextWindow
+			}
+			if capability.ModelInfo.Reasoning {
+				d.Reasoning = true
+			}
+			if price := entry.PriceForModel(entry.Model); price != nil {
+				d.PricingCurrency = price.Currency
+				d.CacheHitPerMillion = price.CacheHit
+				d.InputPerMillion = price.Input
+				d.OutputPerMillion = price.Output
+			}
+			if reasoning := config.ReasoningCapabilityForEntry(&entry); len(reasoning.Options) > 0 {
+				d.Efforts = reasoning.IDs()
+				d.Reasoning = true
+			}
+			if config.ReasoningProtocolForEntry(&entry) == config.ReasoningProtocolDeepSeek {
+				d.ToolCallReasoning = true
+				d.Reasoning = true
+			}
+			out = append(out, d)
 		}
-		if len(e.SupportedEfforts) > 0 {
-			d.Efforts = append([]string(nil), e.SupportedEfforts...)
-			d.Reasoning = true
-		}
-		if config.ReasoningProtocolForEntry(e) == config.ReasoningProtocolDeepSeek {
-			d.ToolCallReasoning = true
-			d.Reasoning = true
-		}
-		out = append(out, d)
 	}
 	return out
 }
@@ -67,9 +100,23 @@ func (r *LocalProviderResolver) Resolve(selection provider.Selection) (provider.
 		return nil, fmt.Errorf("%w %q", ErrUnknownModel, ref)
 	}
 	if selection.Effort != nil {
+		if *selection.Effort != "" {
+			if _, err := config.NormalizeEffort(entry, *selection.Effort); err != nil {
+				return nil, err
+			}
+		}
 		entry.Effort = *selection.Effort
 	}
-	return NewProviderWithProxy(entry, r.proxy)
+	var modelInfo *provider.ModelInfo
+	if r.capabilities != nil {
+		resolved := r.capabilities.Resolve(entry)
+		info := resolved.ModelInfo
+		if info.ID == "" {
+			info = provider.ModelInfo{ID: resolved.Model, InputModalities: resolved.InputModalities}
+		}
+		modelInfo = &info
+	}
+	return NewProviderWithProxyAndModelInfo(entry, r.proxy, modelInfo)
 }
 
 func resolveProvider(resolver provider.Resolver, cfg *config.Config, proxy netclient.ProxySpec, selection provider.Selection) (provider.Provider, error) {
@@ -80,15 +127,11 @@ func resolveProvider(resolver provider.Resolver, cfg *config.Config, proxy netcl
 }
 
 // mergeSidecarProviders wraps the build's resolver with the extension-hosted
-// provider adapter (stage 7) whenever a started sidecar declared providers in
-// its handshake. The base resolver — the caller-owned broker when
-// opts.ProviderResolver is set, the local config-backed one otherwise — keeps
-// serving every non-plugin ref; plugin providers are additive on top of it,
-// and an exact-ref collision without the plugin's provider:<ref> claim is a
-// *providerext.ConflictError (fatal at the call site). The merged Resolver is
-// also the sidecar clients' stream router, installed here so inbound
-// stream/chunk and stream/end notifications reach the buffered streams.
-func mergeSidecarProviders(base provider.Resolver, mgr *sidecar.Manager, claims map[extension.Slot]extension.ContributionSource) (provider.Resolver, error) {
+// provider adapter (stage 7) whenever a started sidecar declared providers.
+// It does not install stream routers — call installSidecarStreamRouters after
+// commit so failed narrow rebuilds never leave adopted clients on a discarded
+// generation resolver.
+func mergeSidecarProviders(base provider.Resolver, mgr *sidecar.Manager, claims map[extension.Slot]extension.ContributionSource, owners ...*extension.RuntimeOwner) (provider.Resolver, error) {
 	if mgr == nil {
 		return base, nil
 	}
@@ -110,14 +153,22 @@ func mergeSidecarProviders(base provider.Resolver, mgr *sidecar.Manager, claims 
 		}
 		return out
 	}
-	merged, err := providerext.New(base, clientsFn, claims)
-	if err != nil {
-		return nil, err
+	return providerext.New(base, clientsFn, claims, owners...)
+}
+
+// installSidecarStreamRouters binds merged as the stream router on every live
+// client. Call only after cold-start success or narrow-rebuild commit.
+func installSidecarStreamRouters(mgr *sidecar.Manager, merged provider.Resolver) {
+	if mgr == nil || merged == nil {
+		return
+	}
+	router, ok := merged.(sidecar.StreamRouter)
+	if !ok {
+		return
 	}
 	for _, client := range mgr.Clients() {
-		client.SetStreamRouter(merged)
+		client.SetStreamRouter(router)
 	}
-	return merged, nil
 }
 
 func modelRefFromEntry(e *config.ProviderEntry) string {
@@ -136,6 +187,9 @@ func modelRefFromEntry(e *config.ProviderEntry) string {
 // ref. The unknown-model error names every ref the session could have used,
 // including plugin-namespaced refs a merged extension resolver serves.
 func resolveModelEntry(resolver provider.Resolver, cfg *config.Config, modelName string) (*config.ProviderEntry, string, error) {
+	if err := cfg.ModelReferenceError(modelName); err != nil {
+		return nil, "", err
+	}
 	if resolver != nil {
 		entry := syntheticEntryFromResolver(resolver, modelName)
 		if strings.TrimSpace(entry.Name) != "" {
@@ -222,8 +276,8 @@ func syntheticEntryFromResolver(r provider.Resolver, ref string) *config.Provide
 
 func splitProviderRef(ref string) (string, string) {
 	ref = strings.TrimSpace(ref)
-	if i := strings.IndexByte(ref, '/'); i >= 0 {
-		return ref[:i], ref[i+1:]
+	if before, after, ok := strings.Cut(ref, "/"); ok {
+		return before, after
 	}
 	return ref, ""
 }

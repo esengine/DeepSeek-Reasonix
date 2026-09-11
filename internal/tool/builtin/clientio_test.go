@@ -71,11 +71,66 @@ func TestReadFileOverlayFallsBackToDisk(t *testing.T) {
 	}
 }
 
+func TestGrepOverlayServesUnsavedBufferContent(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "overlay-only.go")
+	overlay := &fakeOverlay{files: map[string]string{
+		path: "package overlay\n// BUFFER_NEEDLE exists only in the unsaved buffer\n",
+	}}
+	grep := byName(Workspace{
+		Dir: dir,
+		// Overlay-backed single-file searches must not delegate to ripgrep,
+		// which can only see the disk snapshot.
+		Search:      SearchSpec{RgPath: filepath.Join(dir, "must-not-run-rg")},
+		FileOverlay: overlay,
+	}.Tools("grep"))["grep"]
+
+	out, err := grep.Execute(context.Background(), json.RawMessage(`{"pattern":"BUFFER_NEEDLE","path":"overlay-only.go"}`))
+	if err != nil {
+		t.Fatalf("Execute: %v", err)
+	}
+	if !strings.Contains(out, "BUFFER_NEEDLE") || !strings.Contains(out, ":2:") {
+		t.Fatalf("grep did not search the unsaved overlay content:\n%s", out)
+	}
+}
+
+func TestGrepOverlayDoesNotBypassReadConfinement(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "secret.txt")
+	overlay := &fakeOverlay{files: map[string]string{path: "OVERLAY_SECRET\n"}}
+	grep := grepTool{workDir: dir, forbidRoots: realRoots([]string{dir}), overlay: overlay}
+
+	out, err := grep.Execute(context.Background(), json.RawMessage(`{"pattern":"OVERLAY_SECRET","path":"secret.txt"}`))
+	if err == nil && strings.Contains(out, "OVERLAY_SECRET") {
+		t.Fatalf("forbidden overlay content escaped confinement: %q", out)
+	}
+}
+
+func TestGrepOverlayFallsBackToDisk(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "disk-only.txt")
+	if err := os.WriteFile(path, []byte("DISK_NEEDLE\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	grep := byName(Workspace{Dir: dir, FileOverlay: &fakeOverlay{files: map[string]string{}}}.Tools("grep"))["grep"]
+
+	out, err := grep.Execute(context.Background(), json.RawMessage(`{"pattern":"DISK_NEEDLE","path":"disk-only.txt"}`))
+	if err != nil || !strings.Contains(out, "DISK_NEEDLE") {
+		t.Fatalf("overlay miss did not fall back to disk: out=%q err=%v", out, err)
+	}
+}
+
 func TestWriteFileOverlayAppliesWrite(t *testing.T) {
 	dir := t.TempDir()
 	path := filepath.Join(dir, "c.go")
 	overlay := &fakeOverlay{writes: map[string]string{}}
-	wf := writeFile{workDir: dir, roots: realRoots([]string{dir}), overlay: overlay}
+	receipts := 0
+	wf := writeFile{workDir: dir, roots: realRoots([]string{dir}), overlay: overlay, receipt: func(gotPath string, hadPrior bool, prior []byte) {
+		receipts++
+		if gotPath != path || hadPrior || len(prior) != 0 {
+			t.Fatalf("overlay receipt = path:%q hadPrior:%v prior:%q", gotPath, hadPrior, prior)
+		}
+	}}
 
 	args, _ := json.Marshal(map[string]string{"path": "c.go", "content": "hello"})
 	out, err := wf.Execute(context.Background(), json.RawMessage(args))
@@ -91,11 +146,17 @@ func TestWriteFileOverlayAppliesWrite(t *testing.T) {
 	if !strings.Contains(out, "wrote 5 bytes") {
 		t.Fatalf("output = %q", out)
 	}
+	if receipts != 1 {
+		t.Fatalf("receipts = %d, want 1", receipts)
+	}
 
 	// A client-side write failure surfaces instead of silently double-applying.
 	overlay.wErr = fmt.Errorf("readonly buffer")
 	if _, err := wf.Execute(context.Background(), json.RawMessage(args)); err == nil {
 		t.Fatal("overlay write error must surface")
+	}
+	if receipts != 1 {
+		t.Fatal("failed overlay writes must not record a receipt")
 	}
 }
 
@@ -130,7 +191,7 @@ type fakeTerminal struct {
 	called []string
 }
 
-func (f *fakeTerminal) RunCommand(_ context.Context, command, _ string, _ time.Duration) (string, bool, error) {
+func (f *fakeTerminal) RunCommand(_ context.Context, command, _ string, _ time.Duration, _ map[string]string) (string, bool, error) {
 	f.called = append(f.called, command)
 	return f.out, f.ok, f.err
 }

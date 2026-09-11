@@ -14,9 +14,15 @@ const createNoWindow = 0x08000000 // CREATE_NO_WINDOW
 // CREATE_NO_WINDOW suppresses the console a console child (git, rg, a shell)
 // would otherwise pop; HideWindow guards any GUI child that shows a window.
 func HideWindow(cmd *exec.Cmd) {
+	HideConsole(cmd)
+	cmd.SysProcAttr.HideWindow = true
+}
+
+// HideConsole prevents a console window without hiding a GUI application's
+// first window. Use it for launchers that can start either console or GUI code.
+func HideConsole(cmd *exec.Cmd) {
 	if cmd.SysProcAttr == nil {
 		cmd.SysProcAttr = &syscall.SysProcAttr{}
 	}
-	cmd.SysProcAttr.HideWindow = true
 	cmd.SysProcAttr.CreationFlags |= createNoWindow
 }

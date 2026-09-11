@@ -58,11 +58,11 @@ func locate(content string, line1 int, symbol, enc string) (Position, error) {
 		return Position{}, fmt.Errorf("line %d out of range (file has %d lines)", line1, len(lines))
 	}
 	text := strings.TrimSuffix(lines[line1-1], "\r")
-	col := strings.Index(text, symbol)
-	if col < 0 {
+	before, _, ok := strings.Cut(text, symbol)
+	if !ok {
 		return Position{}, fmt.Errorf("symbol %q not found on line %d", symbol, line1)
 	}
-	return Position{Line: line1 - 1, Character: encodeChar(text[:col], enc)}, nil
+	return Position{Line: line1 - 1, Character: encodeChar(before, enc)}, nil
 }
 
 func encodeChar(prefix, enc string) int {

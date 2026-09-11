@@ -216,7 +216,7 @@ func TestNewChatTUIKeepsExplicitKeylessControllerModel(t *testing.T) {
 	}
 
 	const explicit = "deepseek-flash/deepseek-v4-flash"
-	ctrl, err := setupProfile(context.Background(), explicit, 0, false, event.Discard, "balanced", "")
+	ctrl, err := setupProfile(context.Background(), explicit, 0, false, event.Discard, "")
 	if err != nil {
 		t.Fatalf("interactive build should remain reachable for missing-key recovery: %v", err)
 	}

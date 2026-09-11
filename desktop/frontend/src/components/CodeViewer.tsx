@@ -1,10 +1,13 @@
-import { lazy, Suspense } from "react";
+import { lazy, Suspense, type CSSProperties } from "react";
+
+export type CodeScrollMode = "expand" | "bounded";
 
 export interface EditorProps {
   value: string;
   language?: string;
   readOnly?: boolean;
-  maxHeight?: number;
+  scrollMode?: CodeScrollMode;
+  maxHeight?: CSSProperties["maxHeight"];
   /** Original source size in bytes when the caller already has it. */
   sourceSize?: number;
   /** Opt in to the workspace-oriented viewer with line numbers and search. */
@@ -24,11 +27,12 @@ const LineNumberImpl = lazy(() => import("./editors/LineNumberCode"));
 
 export function CodeViewer(props: EditorProps) {
   const Impl = props.showLineNumbers ? LineNumberImpl : HljsImpl;
+  const bounded = props.scrollMode === "bounded" || (props.scrollMode !== "expand" && props.maxHeight != null);
   return (
     <div className="code-block">
       <Suspense
         fallback={
-          <pre className="code code--loading">
+          <pre className={`code code--loading${bounded ? " code--scroll-y" : ""}`} data-nested-scroll={bounded ? "" : undefined}>
             <code>{props.value}</code>
           </pre>
         }

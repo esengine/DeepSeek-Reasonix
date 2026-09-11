@@ -1,7 +1,9 @@
 package control
 
 import (
+	"bytes"
 	"encoding/base64"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -10,6 +12,8 @@ import (
 	"path/filepath"
 	"regexp"
 	"runtime"
+	"slices"
+	"strconv"
 	"strings"
 	"sync/atomic"
 	"time"
@@ -18,9 +22,47 @@ import (
 	"reasonix/internal/secrets"
 )
 
-const maxImageAttachmentBytes = 10 * 1024 * 1024
+const maxImageAttachmentBytes = 64 * 1024 * 1024
 const maxFileAttachmentBytes = 25 * 1024 * 1024
 const maxAttachmentCreateAttempts = 1000
+
+// ErrNoClipboardImage reports that the clipboard was read successfully but holds
+// no supported image. It is distinct from a missing clipboard tool: callers
+// offering an image-first paste shortcut use it to fall back to text before
+// surfacing an image-specific diagnostic.
+var ErrNoClipboardImage = errors.New("clipboard does not contain an image")
+
+// ErrUnsupportedClipboardImage marks the more specific no-pasteable-image case
+// where the clipboard advertised only image formats Reasonix cannot save.
+var ErrUnsupportedClipboardImage = errors.New("clipboard image type is not supported")
+
+type unsupportedClipboardImageError struct {
+	tool  string
+	types []string
+}
+
+func (e unsupportedClipboardImageError) Error() string {
+	return fmt.Sprintf("%s offers unsupported image types: %s", e.tool, strings.Join(e.types, ", "))
+}
+
+// Unsupported image formats still mean there is no image Reasonix can paste.
+// Wrapping the sentinel lets image-first shortcuts try their normal text
+// fallback before surfacing the more specific diagnostic.
+func (e unsupportedClipboardImageError) Unwrap() []error {
+	return []error{ErrNoClipboardImage, ErrUnsupportedClipboardImage}
+}
+
+var (
+	lookClipboardTool = exec.LookPath
+	runClipboardTool  = func(path string, args ...string) ([]byte, []byte, error) {
+		cmd := proc.Command(path, args...)
+		cmd.Env = secrets.ProcessEnv()
+		var stderr bytes.Buffer
+		cmd.Stderr = &stderr
+		out, err := cmd.Output()
+		return out, stderr.Bytes(), err
+	}
+)
 
 var attachmentPathSeq atomic.Uint64
 var attachmentNow = time.Now
@@ -32,11 +74,11 @@ var safeAttachmentExt = regexp.MustCompile(`^\.[a-z0-9]{1,12}$`)
 // origName supplies only the extension; the stored name is generated.
 func SaveAttachmentDataURL(origName, dataURL string) (string, error) {
 	const marker = ";base64,"
-	i := strings.Index(dataURL, marker)
-	if !strings.HasPrefix(dataURL, "data:") || i < 0 {
+	_, after, ok := strings.Cut(dataURL, marker)
+	if !strings.HasPrefix(dataURL, "data:") || !ok {
 		return "", fmt.Errorf("unsupported pasted file")
 	}
-	raw, err := base64.StdEncoding.DecodeString(dataURL[i+len(marker):])
+	raw, err := base64.StdEncoding.DecodeString(after)
 	if err != nil {
 		return "", fmt.Errorf("decode pasted file: %w", err)
 	}
@@ -82,7 +124,7 @@ func SaveImageBytes(declaredMime string, raw []byte) (string, error) {
 
 func SaveImageBytesInRoot(root, declaredMime string, raw []byte) (string, error) {
 	if len(raw) == 0 || len(raw) > maxImageAttachmentBytes {
-		return "", fmt.Errorf("pasted image must be between 1 byte and 10 MB")
+		return "", fmt.Errorf("pasted image must be between 1 byte and 64 MB")
 	}
 	mime := detectedImageMime(raw)
 	if mime == "" {
@@ -135,7 +177,7 @@ func SaveImageFile(path string) (string, error) {
 		return "", fmt.Errorf("pasted image path must not be a symlink")
 	}
 	if info.IsDir() || info.Size() <= 0 || info.Size() > maxImageAttachmentBytes {
-		return "", fmt.Errorf("pasted image must be between 1 byte and 10 MB")
+		return "", fmt.Errorf("pasted image must be between 1 byte and 64 MB")
 	}
 	f, err := os.Open(path)
 	if err != nil {
@@ -154,7 +196,7 @@ func SaveImageFile(path string) (string, error) {
 		return "", err
 	}
 	if len(raw) == 0 || len(raw) > maxImageAttachmentBytes {
-		return "", fmt.Errorf("pasted image must be between 1 byte and 10 MB")
+		return "", fmt.Errorf("pasted image must be between 1 byte and 64 MB")
 	}
 	if after, err := f.Stat(); err != nil {
 		return "", err
@@ -245,12 +287,13 @@ if ($null -eq $img) { [Console]::Error.WriteLine('clipboard has no image'); exit
 $ms = New-Object System.IO.MemoryStream
 $img.Save($ms, [System.Drawing.Imaging.ImageFormat]::Png)
 [Convert]::ToBase64String($ms.ToArray())`
-	cmd := exec.Command("powershell", "-NoProfile", "-NonInteractive", "-Command", script)
+	cmd := proc.Command("powershell", "-NoProfile", "-NonInteractive", "-Command", script)
 	cmd.Env = secrets.ProcessEnv()
 	proc.HideWindow(cmd)
 	out, err := cmd.Output()
 	if err != nil {
-		if ee, ok := err.(*exec.ExitError); ok && len(ee.Stderr) > 0 {
+		var ee *exec.ExitError
+		if errors.As(err, &ee) && len(ee.Stderr) > 0 {
 			return "", fmt.Errorf("read clipboard image: %s", strings.TrimSpace(string(ee.Stderr)))
 		}
 		return "", fmt.Errorf("read clipboard image: %w", err)
@@ -262,19 +305,120 @@ $img.Save($ms, [System.Drawing.Imaging.ImageFormat]::Png)
 	return SaveImageBytes("", raw)
 }
 
+// clipboardImageTypes lists the image mimes we can save, most preferred
+// first; Wayland compositors and screenshot apps offer any of these.
+var clipboardImageTypes = []string{"image/png", "image/jpeg", "image/gif", "image/webp"}
+
+func clipboardImageReadArgs(tool, mime string) []string {
+	if tool == "wl-paste" {
+		return []string{"--type", mime, "--no-newline"}
+	}
+	return []string{"-selection", "clipboard", "-t", mime, "-o"}
+}
+
 func saveLinuxClipboardImage() (string, error) {
-	// Wayland (wl-paste) then X11 (xclip); both write image bytes to stdout.
-	for _, c := range [][]string{
-		{"wl-paste", "--type", "image/png", "--no-newline"},
-		{"xclip", "-selection", "clipboard", "-t", "image/png", "-o"},
-	} {
-		cmd := exec.Command(c[0], c[1:]...)
-		cmd.Env = secrets.ProcessEnv()
-		if out, err := cmd.Output(); err == nil && len(out) > 0 {
-			return SaveImageBytes("", out)
+	type clipboardTool struct {
+		name      string
+		typesArgs []string
+	}
+	tools := []clipboardTool{
+		{name: "wl-paste", typesArgs: []string{"--list-types"}},
+		{name: "xclip", typesArgs: []string{"-selection", "clipboard", "-t", "TARGETS", "-o"}},
+	}
+	foundTool := false
+	confirmedNoImage := false
+	var probeFailures, readFailures []error
+	for _, tool := range tools {
+		path, err := lookClipboardTool(tool.name)
+		if err != nil {
+			continue
+		}
+		foundTool = true
+		types, stderr, err := runClipboardTool(path, tool.typesArgs...)
+		if err != nil {
+			if clipboardProbeMeansNoImage(tool.name, stderr) {
+				confirmedNoImage = true
+				continue
+			}
+			probeFailures = append(probeFailures, fmt.Errorf("probe %s clipboard types: %w", tool.name, err))
+			continue
+		}
+		mime := ""
+		for _, want := range clipboardImageTypes {
+			if clipboardTypeListed(types, want) {
+				mime = want
+				break
+			}
+		}
+		if mime == "" {
+			if offered := offeredImageTypes(types); len(offered) > 0 {
+				readFailures = append(readFailures, unsupportedClipboardImageError{tool: tool.name, types: offered})
+				continue
+			}
+			confirmedNoImage = true
+			continue
+		}
+		out, _, err := runClipboardTool(path, clipboardImageReadArgs(tool.name, mime)...)
+		if err != nil {
+			readFailures = append(readFailures, fmt.Errorf("read clipboard image with %s: %w", tool.name, err))
+			continue
+		}
+		if len(out) == 0 {
+			readFailures = append(readFailures, fmt.Errorf("read clipboard image with %s: empty image data", tool.name))
+			continue
+		}
+		rel, err := SaveImageBytes("", out)
+		if err != nil {
+			readFailures = append(readFailures, fmt.Errorf("save clipboard image from %s: %w", tool.name, err))
+			continue
+		}
+		return rel, nil
+	}
+	if !foundTool {
+		return "", fmt.Errorf("clipboard image paste needs wl-paste (Wayland) or xclip (X11)")
+	}
+	if len(readFailures) > 0 {
+		return "", fmt.Errorf("read clipboard image: %w", errors.Join(readFailures...))
+	}
+	if confirmedNoImage {
+		return "", ErrNoClipboardImage
+	}
+	return "", fmt.Errorf("read clipboard image: %w", errors.Join(probeFailures...))
+}
+
+func clipboardTypeListed(raw []byte, want string) bool {
+	for field := range strings.FieldsSeq(string(raw)) {
+		if strings.EqualFold(field, want) {
+			return true
 		}
 	}
-	return "", fmt.Errorf("clipboard image paste needs wl-paste (Wayland) or xclip (X11)")
+	return false
+}
+
+// offeredImageTypes returns safely quoted image/* MIME names that Reasonix
+// cannot save. Clipboard owners control these strings, so errors must never
+// contain their terminal control sequences verbatim.
+func offeredImageTypes(raw []byte) []string {
+	var offered []string
+	for field := range strings.FieldsSeq(string(raw)) {
+		lower := strings.ToLower(field)
+		if strings.HasPrefix(lower, "image/") && !slices.Contains(clipboardImageTypes, lower) {
+			offered = append(offered, strconv.QuoteToASCII(field))
+		}
+	}
+	return offered
+}
+
+func clipboardProbeMeansNoImage(tool string, stderr []byte) bool {
+	message := string(stderr)
+	switch tool {
+	case "wl-paste":
+		return strings.Contains(message, "Nothing is copied")
+	case "xclip":
+		return strings.Contains(message, "There is no owner for the") && strings.Contains(message, "selection")
+	default:
+		return false
+	}
 }
 
 func ImageDataURL(path string) (string, error) {
@@ -311,7 +455,7 @@ func readAttachmentImage(path string) (raw []byte, mime string, err error) {
 		return nil, "", fmt.Errorf("attachment path must not be a symlink")
 	}
 	if info.IsDir() || info.Size() <= 0 || info.Size() > maxImageAttachmentBytes {
-		return nil, "", fmt.Errorf("attachment image must be between 1 byte and 10 MB")
+		return nil, "", fmt.Errorf("attachment image must be between 1 byte and 64 MB")
 	}
 	f, err := os.Open(clean)
 	if err != nil {
@@ -330,7 +474,7 @@ func readAttachmentImage(path string) (raw []byte, mime string, err error) {
 		return nil, "", err
 	}
 	if len(raw) == 0 || len(raw) > maxImageAttachmentBytes {
-		return nil, "", fmt.Errorf("attachment image must be between 1 byte and 10 MB")
+		return nil, "", fmt.Errorf("attachment image must be between 1 byte and 64 MB")
 	}
 	if after, err := f.Stat(); err != nil {
 		return nil, "", err
@@ -371,7 +515,7 @@ func rejectSymlinkComponents(path, root string) error {
 		return fmt.Errorf("attachment path is outside .reasonix/attachments")
 	}
 	cur := root
-	for _, part := range strings.Split(rel, string(filepath.Separator)) {
+	for part := range strings.SplitSeq(rel, string(filepath.Separator)) {
 		if part == "" || part == "." {
 			continue
 		}
@@ -418,12 +562,20 @@ func ensureAttachmentRootIn(base string) error {
 }
 
 func saveDarwinClipboardImage() (string, error) {
+	return saveDarwinClipboardImageWith(saveDarwinClipboardClass)
+}
+
+func saveDarwinClipboardImageWith(readClass func(string) (string, error)) (string, error) {
 	for _, class := range []string{"PNGf", "JPEG"} {
-		if rel, err := saveDarwinClipboardClass(class); err == nil {
+		rel, err := readClass(class)
+		if err == nil {
 			return rel, nil
 		}
+		if !errors.Is(err, ErrNoClipboardImage) {
+			return "", err
+		}
 	}
-	return "", fmt.Errorf("clipboard does not contain a supported image")
+	return "", ErrNoClipboardImage
 }
 
 func saveDarwinClipboardClass(class string) (string, error) {
@@ -443,13 +595,18 @@ func saveDarwinClipboardClass(class string) (string, error) {
 		_ = os.Remove(rel)
 		return "", err
 	}
+	const noImageMarker = "__REASONIX_NO_CLIPBOARD_IMAGE__"
 	script := fmt.Sprintf(`
+set hasImageType to false
+repeat with typeEntry in (clipboard info)
+	if (item 1 of typeEntry) is «class %s» then
+		set hasImageType to true
+		exit repeat
+	end if
+end repeat
+if not hasImageType then return %q
 set outPath to POSIX file %q
-try
-	set img to the clipboard as «class %s»
-on error
-	error "clipboard does not contain this image type"
-end try
+set img to the clipboard as «class %s»
 set f to open for access outPath with write permission
 try
 	set eof f to 0
@@ -461,12 +618,13 @@ on error errMsg
 	end try
 	error errMsg
 end try
-`, abs, class)
-	clip := exec.Command("osascript", "-e", script)
+	`, class, noImageMarker, abs, class)
+	clip := proc.Command("osascript", "-e", script)
 	clip.Env = secrets.ProcessEnv()
-	if out, err := clip.CombinedOutput(); err != nil {
+	out, runErr := clip.CombinedOutput()
+	if err := classifyDarwinClipboardResult(out, runErr, noImageMarker); err != nil {
 		_ = os.Remove(rel)
-		return "", fmt.Errorf("read clipboard image: %s", strings.TrimSpace(string(out)))
+		return "", err
 	}
 	raw, err := os.ReadFile(rel)
 	_ = os.Remove(rel)
@@ -474,6 +632,20 @@ end try
 		return "", err
 	}
 	return SaveImageBytes("", raw)
+}
+
+func classifyDarwinClipboardResult(out []byte, runErr error, noImageMarker string) error {
+	detail := strings.TrimSpace(string(out))
+	if runErr == nil {
+		if detail == noImageMarker {
+			return ErrNoClipboardImage
+		}
+		return nil
+	}
+	if detail == "" {
+		return fmt.Errorf("read clipboard image: %w", runErr)
+	}
+	return fmt.Errorf("read clipboard image: %s: %w", detail, runErr)
 }
 
 func createAttachmentFile(ext string) (string, *os.File, error) {

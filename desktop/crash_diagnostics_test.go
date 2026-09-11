@@ -1,55 +1,37 @@
 package main
 
 import (
+	"encoding/json"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
-	"sync/atomic"
 	"testing"
-	"time"
 
 	"reasonix/internal/repair"
 )
 
-func TestParseWebView2ProcessFailure(t *testing.T) {
-	kind, ok := parseWebView2ProcessFailure("windows | WebVie2wProcess failed with kind 6")
-	if !ok || kind != 6 {
-		t.Fatalf("kind=%d ok=%v", kind, ok)
+// Pending reports queued by the retired WebView2/WebKitGTK shell must still
+// decode and forward after the upgrade removed every producer.
+func TestPendingReportDecodesLegacyWebRuntimeDiagnostics(t *testing.T) {
+	raw := `{
+		"kind": "performance",
+		"version": "v1.24.0",
+		"os": "linux",
+		"arch": "amd64",
+		"message": "legacy",
+		"webRuntime": {"engine": "webkitgtk", "kind": "web_process", "reason": "crashed", "runtimeVersion": "2.42.5", "gpuMode": "on_demand", "recovery": "reload_succeeded"},
+		"webview2": {"kind": "render_process_unresponsive", "reason": "unresponsive", "runtimeVersion": "132.0.1", "gpuDisabled": true, "recovery": "reload_failed"}
+	}`
+	var report crashReport
+	if err := json.Unmarshal([]byte(raw), &report); err != nil {
+		t.Fatalf("legacy pending report no longer decodes: %v", err)
 	}
-	if _, ok := parseWebView2ProcessFailure("unrelated failure"); ok {
-		t.Fatal("unrelated log message matched WebView2 failure")
+	if report.WebRuntime == nil || report.WebRuntime.Engine != "webkitgtk" || report.WebRuntime.Recovery != "reload_succeeded" {
+		t.Fatalf("webRuntime diagnostic lost: %+v", report.WebRuntime)
 	}
-}
-
-func TestWebView2ProcessFailureReportIsStructured(t *testing.T) {
-	report := webView2ProcessFailureReportWithContext(2, 3, "132.0.2957.140")
-	if report.Source != "webview2.process" || report.Label != "windows.webview2.process_failed" {
-		t.Fatalf("report = %+v", report)
-	}
-	if report.FingerprintHint != "windows.webview2.render_process_unresponsive" {
-		t.Fatalf("fingerprint hint = %q", report.FingerprintHint)
-	}
-	for _, want := range []string{"runtime version: 132.0.2957.140", "same-process occurrence: 3", "exit code: unavailable"} {
-		if !strings.Contains(report.Message, want) {
-			t.Fatalf("report message missing %q: %s", want, report.Message)
-		}
-	}
-}
-
-func TestWebView2FailureTrackerDeduplicatesSessionBursts(t *testing.T) {
-	var tracker webView2FailureTracker
-	base := time.Date(2026, 8, 3, 10, 0, 0, 0, time.UTC)
-	if occurrence, report := tracker.observe(2, base); occurrence != 1 || !report {
-		t.Fatalf("first observation = (%d, %v)", occurrence, report)
-	}
-	if occurrence, report := tracker.observe(2, base.Add(time.Minute)); occurrence != 2 || report {
-		t.Fatalf("burst observation = (%d, %v)", occurrence, report)
-	}
-	if occurrence, report := tracker.observe(2, base.Add(webView2FailureReportCooldown)); occurrence != 3 || !report {
-		t.Fatalf("post-cooldown observation = (%d, %v)", occurrence, report)
-	}
-	if occurrence, report := tracker.observe(6, base.Add(time.Minute)); occurrence != 1 || !report {
-		t.Fatalf("different kind observation = (%d, %v)", occurrence, report)
+	if report.WebView2 == nil || report.WebView2.Kind != "render_process_unresponsive" || !report.WebView2.GPUDisabled {
+		t.Fatalf("webview2 diagnostic lost: %+v", report.WebView2)
 	}
 }
 
@@ -63,11 +45,24 @@ func TestPreviousRunReportUsesOnlyBoundedLifecycleContext(t *testing.T) {
 		UpdateTo:       "v2",
 		UptimeBucket:   "m_2_10",
 	})
-	if report.Source != "native.lifecycle" || report.Label != "desktop.abnormal_exit" {
+	if report.Source != "native.lifecycle.legacy" || report.Label != "desktop.legacy_abnormal_exit" {
 		t.Fatalf("report = %+v", report)
 	}
 	if !strings.Contains(report.Message, "uptime bucket: m_2_10") {
 		t.Fatalf("message missing bounded uptime: %q", report.Message)
+	}
+}
+
+func TestDesktopLifecycleReportUsesCurrentLifecycleNamespace(t *testing.T) {
+	report := desktopLifecycleReport(desktopLifecycleObservation{
+		Version: "v1.23.0", Channel: "stable", Phase: "healthy",
+		StartedAt: "2026-08-10T01:00:00Z", UpdatedAt: "2026-08-10T02:00:00Z",
+	})
+	if report.Source != "native.lifecycle" || report.Label != "desktop.abnormal_exit.v2" {
+		t.Fatalf("report = %+v", report)
+	}
+	if report.FingerprintHint != "desktop.abnormal_exit.v2."+runtime.GOOS+".healthy" {
+		t.Fatalf("fingerprint = %q", report.FingerprintHint)
 	}
 }
 
@@ -188,62 +183,6 @@ func TestCapturePreviousFatalCrashMigratesLegacyDump(t *testing.T) {
 	}
 }
 
-func TestAwaitWindowRestoreRequiresNativeConfirmation(t *testing.T) {
-	ticks := make(chan time.Time)
-	deadline := make(chan time.Time, 1)
-	deadline <- time.Now()
-
-	if awaitWindowRestoreConfirmation(func() bool { return false }, ticks, deadline) {
-		t.Fatal("an enqueued show request without native confirmation was treated as restored")
-	}
-}
-
-func TestAwaitWindowRestoreAcceptsConfirmationAfterTick(t *testing.T) {
-	ticks := make(chan time.Time, 1)
-	deadline := make(chan time.Time)
-	var confirmed atomic.Bool
-	result := make(chan bool, 1)
-	go func() {
-		result <- awaitWindowRestoreConfirmation(confirmed.Load, ticks, deadline)
-	}()
-
-	confirmed.Store(true)
-	ticks <- time.Now()
-	if !<-result {
-		t.Fatal("native window confirmation was not accepted")
-	}
-}
-
-func TestSupersededWindowRestoreDoesNotRemoveLatestJournal(t *testing.T) {
-	path := windowRestoreStatePath()
-	_ = os.Remove(path)
-	t.Cleanup(func() { _ = os.Remove(path) })
-	oldSequence := windowRestoreSequence.Load()
-	t.Cleanup(func() { windowRestoreSequence.Store(oldSequence) })
-
-	latest := windowRestoreState{
-		SchemaVersion: windowRestoreStateVersion,
-		PID:           os.Getpid(),
-		AttemptID:     2,
-		Source:        "tray",
-		StartedAt:     "2026-07-24T08:01:00Z",
-	}
-	if !writeWindowRestoreState(latest) {
-		t.Fatal("write latest window restore state")
-	}
-	windowRestoreSequence.Store(latest.AttemptID)
-
-	NewApp().completeWindowRestoreAttempt(1, windowRestoreState{AttemptID: 1}, true)
-
-	got, err := readWindowRestoreState()
-	if err != nil {
-		t.Fatalf("latest journal was removed by superseded attempt: %v", err)
-	}
-	if got != latest {
-		t.Fatalf("latest journal changed: got %+v want %+v", got, latest)
-	}
-}
-
 func resetFatalCrashArtifacts(t *testing.T) {
 	t.Helper()
 	oldProcessAlive := fatalCrashProcessAlive
@@ -259,34 +198,4 @@ func resetFatalCrashArtifacts(t *testing.T) {
 		_ = os.RemoveAll(fatalCrashDir())
 		fatalCrashProcessAlive = oldProcessAlive
 	})
-}
-
-func TestWindowRestoreFailureReportSeparatesTimeoutAndSource(t *testing.T) {
-	report := windowRestoreFailureReport("timeout", "second_instance", "2026-07-24T08:00:00Z")
-	if report.Label != "windows.window_restore.timeout" || report.TopFrame != "windows.window_restore.second_instance" {
-		t.Fatalf("report = %+v", report)
-	}
-}
-
-func TestWriteWindowRestoreStateCreatesReadableJournal(t *testing.T) {
-	path := windowRestoreStatePath()
-	_ = os.Remove(path)
-	t.Cleanup(func() { _ = os.Remove(path) })
-
-	want := windowRestoreState{
-		SchemaVersion: windowRestoreStateVersion,
-		PID:           os.Getpid(),
-		Source:        "tray",
-		StartedAt:     "2026-07-24T08:00:00Z",
-	}
-	if !writeWindowRestoreState(want) {
-		t.Fatal("writeWindowRestoreState returned false")
-	}
-	got, err := readWindowRestoreState()
-	if err != nil {
-		t.Fatalf("readWindowRestoreState: %v", err)
-	}
-	if got != want {
-		t.Fatalf("journal = %+v, want %+v", got, want)
-	}
 }

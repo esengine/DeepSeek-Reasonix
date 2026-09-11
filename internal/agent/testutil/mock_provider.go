@@ -82,7 +82,6 @@ func (p *MockProvider) Stream(ctx context.Context, req provider.Request) (<-chan
 	t := p.script[p.seen]
 	p.seen++
 	p.mu.Unlock()
-
 	if t.StreamError != nil {
 		return nil, t.StreamError
 	}
@@ -115,6 +114,8 @@ func (p *MockProvider) Stream(ctx context.Context, req provider.Request) (<-chan
 	go func() {
 		defer close(ch)
 		for _, c := range chunks {
+			// Check before every send so an already-observed cancellation is
+			// never masked by a select that also has a ready receiver.
 			if err := ctx.Err(); err != nil {
 				ch <- provider.Chunk{Type: provider.ChunkError, Err: err}
 				return

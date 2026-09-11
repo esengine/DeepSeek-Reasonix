@@ -42,6 +42,14 @@ type reasoningRoundTripScriptedProvider struct {
 
 func (reasoningRoundTripScriptedProvider) RequiresReasoningRoundTrip() bool { return true }
 
+type assistantReasoningReplayScriptedProvider struct {
+	*scriptedProvider
+}
+
+func (assistantReasoningReplayScriptedProvider) RequiresAssistantReasoningReplay(m provider.Message) bool {
+	return m.ReasoningContent != ""
+}
+
 // TestPostLLMCallAbsentStreamsReasoningLive is the regression guard: with no
 // PostLLMCall hook, reasoning must still stream chunk-by-chunk (one Reasoning
 // event per delta) so the live "thinking…" display keeps working.
@@ -60,7 +68,7 @@ func TestPostLLMCallAbsentStreamsReasoningLive(t *testing.T) {
 	if joined := strings.Join(reasoningEvents, ""); joined != "think A think B" {
 		t.Fatalf("streamed reasoning = %q, want the full chain", joined)
 	}
-	if got := assistantReasoning(a.session.Messages); got != "think A think B" {
+	if got := assistantReasoning(a.sess.conversation.Messages); got != "think A think B" {
 		t.Fatalf("stored reasoning = %q, want the untransformed chain", got)
 	}
 }
@@ -87,7 +95,7 @@ func TestPostLLMCallTransformsReasoningOnce(t *testing.T) {
 	if len(h.postLLMTurns) != 1 || h.postLLMTurns[0] != 1 {
 		t.Fatalf("hook turns = %v, want [1]", h.postLLMTurns)
 	}
-	if got := assistantReasoning(a.session.Messages); got != "TRANSLATED" {
+	if got := assistantReasoning(a.sess.conversation.Messages); got != "TRANSLATED" {
 		t.Fatalf("stored reasoning = %q, want the hook's replacement", got)
 	}
 }
@@ -100,8 +108,21 @@ func TestPostLLMCallKeepsOriginalForReasoningRoundTripProvider(t *testing.T) {
 	if err := a.Run(context.Background(), "go"); err != nil {
 		t.Fatalf("Run: %v", err)
 	}
-	if got := assistantReasoning(a.session.Messages); got != "think A think B" {
+	if got := assistantReasoning(a.sess.conversation.Messages); got != "think A think B" {
 		t.Fatalf("stored reasoning = %q, want raw provider reasoning for replay", got)
+	}
+}
+
+func TestPostLLMCallKeepsOriginalForPlainReasoningReplayProvider(t *testing.T) {
+	prov := assistantReasoningReplayScriptedProvider{&scriptedProvider{name: "p", turns: reasoningTurn()}}
+	h := &stubHooks{hasPostLLM: true, postLLMOut: "TRANSLATED"}
+	a := New(prov, tool.NewRegistry(), NewSession(""), Options{Hooks: h}, event.Discard)
+
+	if err := a.Run(context.Background(), "go"); err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+	if got := assistantReasoning(a.sess.conversation.Messages); got != "think A think B" {
+		t.Fatalf("stored reasoning = %q, want original provider reasoning", got)
 	}
 }
 
@@ -127,7 +148,7 @@ func TestPostLLMCallKeepsOriginalForProviderReasoningMetadata(t *testing.T) {
 	if len(reasoningEvents) != 1 || reasoningEvents[0] != "TRANSLATED" {
 		t.Fatalf("want transformed reasoning shown live, got %v", reasoningEvents)
 	}
-	for _, m := range a.session.Messages {
+	for _, m := range a.sess.conversation.Messages {
 		if m.Role != provider.RoleAssistant {
 			continue
 		}
@@ -187,10 +208,10 @@ func TestPostLLMCallKeepsSignedReasoningOriginal(t *testing.T) {
 	if len(reasoningEvents) != 1 || reasoningEvents[0] != "TRANSLATED" {
 		t.Fatalf("want the transformed reasoning shown live, got %v", reasoningEvents)
 	}
-	if got := assistantReasoning(a.session.Messages); got != "think A think B" {
+	if got := assistantReasoning(a.sess.conversation.Messages); got != "think A think B" {
 		t.Fatalf("stored reasoning = %q, want the original (signature pins it)", got)
 	}
-	for _, m := range a.session.Messages {
+	for _, m := range a.sess.conversation.Messages {
 		if m.Role == provider.RoleAssistant && m.ReasoningSignature != "sig-xyz" {
 			t.Fatalf("stored signature = %q, want sig-xyz alongside its original text", m.ReasoningSignature)
 		}

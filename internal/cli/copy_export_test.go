@@ -115,6 +115,7 @@ func TestSlashExportFiltersInternalAndReferencedContext(t *testing.T) {
 		"<file path=\"auth_private.go\">\nconst hiddenReference = true\n</file>\n\n" +
 		"please explain @auth_private.go"
 	m := newTestChatTUIWithMessages(t, dir,
+		provider.Message{Role: provider.RoleUser, Origin: provider.MessageOriginHost, Content: "<pinned_context_revision>private pinned body</pinned_context_revision>"},
 		provider.Message{Role: provider.RoleUser, Content: expandedReference},
 		provider.Message{Role: provider.RoleUser, Content: agent.MidTurnSteerPrefix + "\ninternal steer should not export"},
 		provider.Message{
@@ -157,6 +158,7 @@ func TestSlashExportFiltersInternalAndReferencedContext(t *testing.T) {
 		"Referenced context:",
 		"<file path=",
 		"hiddenReference",
+		"private pinned body",
 		"internal steer should not export",
 		"private thinking should not export",
 		"private-tool-input.txt",
@@ -165,6 +167,17 @@ func TestSlashExportFiltersInternalAndReferencedContext(t *testing.T) {
 		if strings.Contains(got, unwanted) {
 			t.Fatalf("export leaked %q:\n%s", unwanted, got)
 		}
+	}
+}
+
+func TestSlashCopyIgnoresTrailingPinnedRevision(t *testing.T) {
+	msgs := []provider.Message{
+		{Role: provider.RoleUser, Content: "current prompt"},
+		{Role: provider.RoleAssistant, Content: "current answer"},
+		{Role: provider.RoleUser, Origin: provider.MessageOriginHost, Content: "<pinned_context_revision>private pinned body</pinned_context_revision>"},
+	}
+	if got := copyAssistantParts(msgs); !reflect.DeepEqual(got, []string{"current answer"}) {
+		t.Fatalf("copyAssistantParts() = %#v, want current answer", got)
 	}
 }
 

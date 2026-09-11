@@ -10,6 +10,8 @@ import (
 	"testing"
 
 	"golang.org/x/text/encoding/simplifiedchinese"
+
+	fileenc "reasonix/internal/fileutil/encoding"
 )
 
 // TestReadFileStreamsLargeGB18030 proves GB18030 content far past the 256KB
@@ -18,7 +20,7 @@ func TestReadFileStreamsLargeGB18030(t *testing.T) {
 	dir := t.TempDir()
 	path := filepath.Join(dir, "big.gbk")
 	var sb strings.Builder
-	for i := 0; i < 20000; i++ {
+	for range 20000 {
 		sb.WriteString("第一行中文 line one 你好世界\n")
 	}
 	sb.WriteString("终点标记 THE-END\n")
@@ -45,7 +47,7 @@ func TestReadFileLargeBoundedMemory(t *testing.T) {
 	dir := t.TempDir()
 	path := filepath.Join(dir, "big.txt")
 	var sb strings.Builder
-	for i := 0; i < 130000; i++ { // ~8 MB, no NUL
+	for range 130000 { // ~8 MB, no NUL
 		sb.WriteString("a line of perfectly ordinary text in a large utf-8 file\n")
 	}
 	if err := os.WriteFile(path, []byte(sb.String()), 0o644); err != nil {
@@ -66,5 +68,43 @@ func TestReadFileLargeBoundedMemory(t *testing.T) {
 	}
 	if !strings.Contains(out, "1→a line") {
 		t.Fatalf("unexpected output: %q", out[:min(80, len(out))])
+	}
+}
+
+func TestReadFileLargeUTF16UsesStreamingDecoder(t *testing.T) {
+	var sb strings.Builder
+	for range 100000 {
+		sb.WriteString("a line of ordinary UTF-16 text with a searchable marker\n")
+	}
+	content := sb.String()
+	cases := []struct {
+		name string
+		kind fileenc.Kind
+	}{
+		{"le-bom", fileenc.UTF16LE}, {"be-bom", fileenc.UTF16BE},
+		{"le-no-bom", fileenc.UTF16LENoBOM}, {"be-no-bom", fileenc.UTF16BENoBOM},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			path := filepath.Join(t.TempDir(), "big-utf16.txt")
+			if err := os.WriteFile(path, fileenc.Encode(content, tc.kind), 0o644); err != nil {
+				t.Fatal(err)
+			}
+			args, _ := json.Marshal(map[string]any{"path": path, "limit": 5})
+			runtime.GC()
+			var m0, m1 runtime.MemStats
+			runtime.ReadMemStats(&m0)
+			out, err := readFile{}.Execute(context.Background(), args)
+			runtime.ReadMemStats(&m1)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if alloc := m1.TotalAlloc - m0.TotalAlloc; alloc > 4<<20 {
+				t.Fatalf("UTF-16 read allocated %d bytes for a five-line window", alloc)
+			}
+			if !strings.Contains(out, "UTF-16 text") || strings.Contains(out, "\x00") {
+				t.Fatalf("unexpected streamed UTF-16 output: %q", out)
+			}
+		})
 	}
 }

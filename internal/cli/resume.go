@@ -2,6 +2,7 @@ package cli
 
 import (
 	"fmt"
+	"path/filepath"
 	"sort"
 	"strconv"
 	"strings"
@@ -26,6 +27,66 @@ func recentSessions(dir string) []agent.SessionInfo {
 	}
 	sessions = orderResumeSessions(sessions)
 	return capResumeSessionGroups(sessions, resumeListCap)
+}
+
+// resumeEntry is one picker row: a session plus, for cross-project rows, the
+// project it belongs to. The current directory's sessions keep project empty
+// so existing labels are unchanged.
+type resumeEntry struct {
+	session agent.SessionInfo
+	project string
+}
+
+const resumeOtherProjectsCap = 5
+
+// resumeEntries lists the current directory's recent sessions, then the
+// newest session of other known projects — a user who worked on this machine
+// over SSH resumes from any directory, not only the workspace root (#9477).
+func resumeEntries(dir string) []resumeEntry {
+	base := recentSessions(dir)
+	out := make([]resumeEntry, 0, len(base)+resumeOtherProjectsCap)
+	for _, s := range base {
+		out = append(out, resumeEntry{session: s})
+	}
+	out = append(out, otherProjectResumeEntries(dir)...)
+	return out
+}
+
+func otherProjectResumeEntries(excludeDir string) []resumeEntry {
+	type target struct {
+		path string
+		root string
+	}
+	var targets []target
+	for _, t := range defaultSessionCatalogTargets() {
+		if t.Scope != "project" || t.Path == "" {
+			continue
+		}
+		targets = append(targets, target{path: t.Path, root: t.WorkspaceRoot})
+	}
+	exclude := filepath.Clean(excludeDir)
+	var out []resumeEntry
+	for _, t := range targets {
+		if filepath.Clean(t.path) == exclude {
+			continue
+		}
+		sessions, err := agent.ListSessions(t.path)
+		if err != nil || len(sessions) == 0 {
+			continue
+		}
+		name := filepath.Base(strings.TrimRight(t.root, string(filepath.Separator)))
+		if name == "" || name == "." {
+			name = t.root
+		}
+		out = append(out, resumeEntry{session: sessions[0], project: name})
+	}
+	sort.SliceStable(out, func(i, j int) bool {
+		return out[i].session.ModTime.After(out[j].session.ModTime)
+	})
+	if len(out) > resumeOtherProjectsCap {
+		out = out[:resumeOtherProjectsCap]
+	}
+	return out
 }
 
 // mostRecentSession returns the chronologically newest saved session for
@@ -176,8 +237,8 @@ func (m *chatTUI) runResumeCommand(input string) {
 	// resolving it here. Removing an earlier row would silently retarget the
 	// user's already-selected number. Bare /resume performs cleanup before it
 	// builds the picker, and startup performs the ordinary background sweep.
-	sessions := recentSessions(m.ctrl.SessionDir())
-	if len(sessions) == 0 {
+	entries := resumeEntries(m.ctrl.SessionDir())
+	if len(entries) == 0 {
 		m.notice(i18n.M.NoSessionToResume)
 		return
 	}
@@ -186,31 +247,106 @@ func (m *chatTUI) runResumeCommand(input string) {
 		return
 	}
 	idx, err := strconv.Atoi(strings.TrimSpace(args[1]))
-	if err != nil || idx < 1 || idx > len(sessions) {
-		m.notice(fmt.Sprintf(i18n.M.ResumeBadIndexFmt, len(sessions)))
+	if err != nil || idx < 1 || idx > len(entries) {
+		m.notice(fmt.Sprintf(i18n.M.ResumeBadIndexFmt, len(entries)))
 		return
 	}
-	target := sessions[idx-1]
-	if target.Path == m.ctrl.SessionPath() {
+	target := entries[idx-1]
+	if target.session.Path == m.ctrl.SessionPath() {
 		m.notice(i18n.M.ResumeAlreadyActive)
-		return
-	}
-	loaded, err := agent.LoadSession(target.Path)
-	if err != nil {
-		m.notice("resume: " + err.Error())
 		return
 	}
 	// Persist the conversation we're leaving so switching back later restores it.
 	// Snapshot before moving the lease: the outgoing session must be written
 	// while this process still owns it.
-	_ = m.ctrl.Snapshot()
-	m.followSessionLease()
-	if err := m.rebindSessionLease(target.Path); err != nil {
-		m.notice("resume: " + sessionLeaseHeldNotice(err))
+	if err := m.ctrl.Snapshot(); err != nil {
+		m.notice("resume: snapshot current session: " + err.Error())
 		return
 	}
-	m.ctrl.Resume(loaded, target.Path)
+	m.followSessionLease()
+	if err := m.commitSessionSwitch(target.session.Path); err != nil {
+		m.notice("resume: " + sessionLeaseHeldNotice(err))
+		if cliSessionTakeoverCandidate(err) {
+			m.pendingTakeoverPath = target.session.Path
+			m.notice("run /takeover to take this session over from the resident serve")
+		}
+		return
+	}
 	m.replayActiveBranch(i18n.M.ResumedTitle)
+}
+
+// runTakeoverCommand handles "/takeover": it force-takes the last refused
+// resume target (or an explicit index/path argument) from the resident serve
+// on this machine, then resumes it.
+func (m *chatTUI) runTakeoverCommand(input string) {
+	m.echoLocalCommand(input)
+	args := tokenizeArgs(input) // args[0] == "/takeover"
+	target := strings.TrimSpace(m.pendingTakeoverPath)
+	if len(args) >= 2 {
+		target = strings.TrimSpace(args[1])
+		if idx, err := strconv.Atoi(target); err == nil {
+			entries := resumeEntries(m.ctrl.SessionDir())
+			if idx < 1 || idx > len(entries) {
+				m.notice(fmt.Sprintf(i18n.M.ResumeBadIndexFmt, len(entries)))
+				return
+			}
+			target = entries[idx-1].session.Path
+		}
+	}
+	if target == "" {
+		m.notice("takeover: no refused session; run /resume <n> first or pass an index")
+		return
+	}
+	if m.ctrl.Running() {
+		m.notice(i18n.M.ResumeBusy)
+		return
+	}
+	_, err := loadResumableSession(target)
+	if err != nil {
+		m.notice("takeover: " + err.Error())
+		return
+	}
+	if err := m.ctrl.Snapshot(); err != nil {
+		m.notice("takeover: snapshot current session: " + err.Error())
+		return
+	}
+	m.followSessionLease()
+	binding, bindErr := cliAcquireFreeSession(target, m.leases, m.takeover)
+	if bindErr != nil {
+		if !cliSessionTakeoverCandidate(bindErr) {
+			m.notice("takeover: " + sessionLeaseHeldNotice(bindErr))
+			return
+		}
+		m.notice("taking the session over from the resident serve…")
+		binding, err = cliTakeoverHeldSession(target, bindErr, m.leases, m.takeover)
+		if err != nil {
+			m.notice("takeover: " + err.Error())
+			return
+		}
+	}
+	loaded, err := cliPrepareTakeoverCandidate(binding, m.leases)
+	if err != nil {
+		_ = cliReturnFailedTakeover(binding, m.leases, m.takeover)
+		m.notice("takeover: " + err.Error())
+		return
+	}
+	if err := binding.commitPrevious(m.takeover); err != nil {
+		_ = cliReturnFailedTakeover(binding, m.leases, m.takeover)
+		m.notice("takeover: " + err.Error())
+		return
+	}
+	m.ctrl.Resume(loaded, target)
+	if err := bindChatTUIAuthority(m); err != nil {
+		m.notice("takeover: " + err.Error())
+		return
+	}
+	m.pendingTakeoverPath = ""
+	if m.takeover != nil && binding.grant.MirrorID != "" {
+		m.takeover.AttachController(m.ctrl)
+		m.takeover.Activate(binding)
+	}
+	m.replayActiveBranch(i18n.M.ResumedTitle)
+	m.notice("session taken over; the remote side is now read-only and can take it back")
 }
 
 // resumeArgItems completes the index argument of "/resume <n>": once past the
@@ -228,12 +364,15 @@ func (m *chatTUI) resumeArgItems(val string) ([]compItem, int, bool) {
 	}
 	cur := val[from:]
 	var out []compItem
-	for i, s := range recentSessions(m.ctrl.SessionDir()) {
+	for i, entry := range resumeEntries(m.ctrl.SessionDir()) {
 		idx := strconv.Itoa(i + 1)
 		if cur != "" && !strings.HasPrefix(idx, cur) {
 			continue
 		}
-		hint := fmt.Sprintf("%s · %s", s.ModTime.Local().Format("01-02 15:04"), sessionSummary(s))
+		hint := fmt.Sprintf("%s · %s", entry.session.ModTime.Local().Format("01-02 15:04"), sessionSummary(entry.session))
+		if entry.project != "" {
+			hint = fmt.Sprintf("[%s] %s", entry.project, hint)
+		}
 		out = append(out, compItem{label: idx, insert: idx, hint: hint})
 	}
 	return out, from, true

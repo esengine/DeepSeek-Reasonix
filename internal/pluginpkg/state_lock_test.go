@@ -19,9 +19,7 @@ func TestStateConcurrentUpsertAndSetEnabled(t *testing.T) {
 	var wg sync.WaitGroup
 	for i := range n {
 		name := fmt.Sprintf("plugin-%02d", i)
-		wg.Add(1)
-		go func() {
-			defer wg.Done()
+		wg.Go(func() {
 			if err := Upsert(home, InstalledPlugin{Name: name, Root: "plugins/" + name}); err != nil {
 				t.Errorf("Upsert(%s): %v", name, err)
 				return
@@ -29,7 +27,7 @@ func TestStateConcurrentUpsertAndSetEnabled(t *testing.T) {
 			if err := SetEnabled(home, name, true); err != nil {
 				t.Errorf("SetEnabled(%s): %v", name, err)
 			}
-		}()
+		})
 	}
 	wg.Wait()
 
@@ -62,9 +60,7 @@ func TestStateConcurrentRemove(t *testing.T) {
 	var wg sync.WaitGroup
 	for i := range n {
 		name := fmt.Sprintf("plugin-%02d", i)
-		wg.Add(1)
-		go func() {
-			defer wg.Done()
+		wg.Go(func() {
 			removed, ok, err := Remove(home, name)
 			if err != nil {
 				t.Errorf("Remove(%s): %v", name, err)
@@ -73,7 +69,7 @@ func TestStateConcurrentRemove(t *testing.T) {
 			if !ok || removed.Name != name {
 				t.Errorf("Remove(%s) = %+v, ok=%v", name, removed, ok)
 			}
-		}()
+		})
 	}
 	wg.Wait()
 

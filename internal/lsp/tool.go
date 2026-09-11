@@ -13,9 +13,9 @@ import (
 // and shares one server per language.
 func Tools(m *Manager) []tool.Tool {
 	return []tool.Tool{
-		posTool{m, "lsp_definition", "Jump to where a symbol is defined. Give the file, the 1-based line the symbol appears on, and the symbol text itself.", m.Definition},
-		posTool{m, "lsp_references", "List every reference to a symbol across the workspace. Give the file, the 1-based line, and the symbol text.", m.References},
-		posTool{m, "lsp_hover", "Show the type signature and documentation for a symbol. Give the file, the 1-based line, and the symbol text.", m.Hover},
+		posTool{m, tool.HostLspDefinition, "Jump to where a symbol is defined. Give the file, the 1-based line the symbol appears on, and the symbol text itself.", m.Definition},
+		posTool{m, tool.HostLspReferences, "List every reference to a symbol across the workspace. Give the file, the 1-based line, and the symbol text.", m.References},
+		posTool{m, tool.HostLspHover, "Show the type signature and documentation for a symbol. Give the file, the 1-based line, and the symbol text.", m.Hover},
 		diagTool{m},
 	}
 }
@@ -67,7 +67,7 @@ func (t posTool) Execute(ctx context.Context, args json.RawMessage) (string, err
 
 type diagTool struct{ m *Manager }
 
-func (diagTool) Name() string   { return "lsp_diagnostics" }
+func (diagTool) Name() string   { return tool.HostLspDiagnostics }
 func (diagTool) ReadOnly() bool { return true }
 
 // SnipHint keeps a long head of diagnostics and a short tail.

@@ -13,19 +13,21 @@ import (
 	"reasonix/internal/taskmonitor"
 )
 
+const (
+	taskCommandUsage = "usage: reasonix task <list|show|monitor|status|events|stop|cancel|requeue|open-session|tmux> [flags]"
+	taskMonitorUsage = "usage: reasonix task monitor <list|status|events|stop|cancel|requeue|open-session> [flags]"
+	taskTmuxUsage    = "usage: reasonix task tmux <attach|status|open|detach>"
+)
+
 // taskStore is the taskmonitor.Store used by the task CLI commands.
-// Tests override it with mock stores via SetTaskStore.  When nil, the
-// CLI defaults to a FileStore backed by .reasonix/tasks under the
-// project directory.
+// When nil, the CLI defaults to a FileStore backed by .reasonix/tasks
+// under the project directory.
 var taskStore taskmonitor.Store
 
 // taskJobKiller is an optional JobKiller for stopping running tasks.
 // It is injected by the main wiring or by cli.go when a controller is
 // available (Desktop or running session).  When nil, kill is a no-op.
 var taskJobKiller taskmonitor.JobKiller
-
-// SetTaskStore replaces the Store used by the task subcommands.
-func SetTaskStore(s taskmonitor.Store) { taskStore = s }
 
 // SetTaskJobKiller sets the JobKiller for control subcommands.
 // Called by the wiring when a controller with jobs.Manager is available.
@@ -64,7 +66,7 @@ func contentFreeTaskEvents(events []taskmonitor.TaskEvent) []taskmonitor.TaskEve
 
 func taskCommand(args []string) int {
 	if len(args) == 0 {
-		fmt.Fprintln(os.Stderr, "usage: reasonix task <list|show|monitor|status|events|stop|cancel|requeue|open-session|tmux> [flags]")
+		fmt.Fprintln(os.Stderr, taskCommandUsage)
 		return 2
 	}
 	store := taskStore
@@ -101,13 +103,14 @@ func taskCommand(args []string) int {
 		return taskTmuxCmd(store, args[1:])
 	default:
 		fmt.Fprintf(os.Stderr, "unknown task subcommand: %s\n", args[0])
+		fmt.Fprintln(os.Stderr, taskCommandUsage)
 		return 2
 	}
 }
 
 func taskMonitorCommand(store taskmonitor.Store, args []string) int {
 	if len(args) == 0 {
-		fmt.Fprintln(os.Stderr, "usage: reasonix task monitor <list|status|events|stop|cancel|requeue|open-session> [flags]")
+		fmt.Fprintln(os.Stderr, taskMonitorUsage)
 		return 2
 	}
 	switch args[0] {
@@ -127,13 +130,14 @@ func taskMonitorCommand(store taskmonitor.Store, args []string) int {
 		return taskOpenSessionCmd(store, args[1:])
 	default:
 		fmt.Fprintf(os.Stderr, "unknown task monitor subcommand: %s\n", args[0])
+		fmt.Fprintln(os.Stderr, taskMonitorUsage)
 		return 2
 	}
 }
 
 func taskTmuxCmd(store taskmonitor.Store, args []string) int {
 	if len(args) == 0 {
-		fmt.Fprintln(os.Stderr, "usage: reasonix task tmux <attach|status|open|detach>")
+		fmt.Fprintln(os.Stderr, taskTmuxUsage)
 		return 2
 	}
 	a := taskmonitor.NewTmuxAdapter(store, ".reasonix/tasks")
@@ -148,6 +152,7 @@ func taskTmuxCmd(store taskmonitor.Store, args []string) int {
 		return taskTmuxDetachCmd(a, args[1:])
 	default:
 		fmt.Fprintf(os.Stderr, "unknown task tmux subcommand: %s\n", args[0])
+		fmt.Fprintln(os.Stderr, taskTmuxUsage)
 		return 2
 	}
 }
@@ -263,7 +268,7 @@ func taskTmuxDetachCmd(a *taskmonitor.TmuxAdapter, args []string) int {
 	return printTmuxResult(a.Detach(context.Background(), dir, fs.Arg(0)), jsonOut)
 }
 
-// --- list ---
+// list
 
 func taskListCmd(store taskmonitor.Store, args []string) int {
 	fs := flag.NewFlagSet("task list", flag.ContinueOnError)
@@ -300,7 +305,7 @@ func taskListCmd(store taskmonitor.Store, args []string) int {
 	return 0
 }
 
-// --- status ---
+// status
 
 func taskStatusCmd(store taskmonitor.Store, args []string) int {
 	fs := flag.NewFlagSet("task status", flag.ContinueOnError)
@@ -342,7 +347,7 @@ func taskStatusCmd(store taskmonitor.Store, args []string) int {
 	return 0
 }
 
-// --- events ---
+// events
 
 func taskEventsCmd(store taskmonitor.Store, args []string) int {
 	fs := flag.NewFlagSet("task events", flag.ContinueOnError)
@@ -430,7 +435,7 @@ func taskEventsCmd(store taskmonitor.Store, args []string) int {
 	return 0
 }
 
-// --- control commands ---
+// control commands
 
 func taskStopCmd(store taskmonitor.Store, args []string) int {
 	fs := flag.NewFlagSet("task stop", flag.ContinueOnError)

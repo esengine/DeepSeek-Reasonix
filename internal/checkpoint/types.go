@@ -10,6 +10,7 @@ import (
 const (
 	SchemaV1 = 1
 	SchemaV2 = 2
+	SchemaV3 = 3
 )
 
 // Coverage describes how completely a checkpoint captured workspace mutations.
@@ -35,6 +36,7 @@ const (
 	GapBashSideEffect   = "bash_side_effect"
 	GapHookWrite        = "hook_write"
 	GapMCPExternal      = "mcp_external"
+	GapScratch          = "scratch"
 	GapOutsideWorkspace = "outside_workspace"
 	GapSymlink          = "symlink"
 	GapHardlink         = "hardlink"
@@ -45,6 +47,17 @@ const (
 	GapCaptureFailed    = "capture_failed"
 	GapExpiredPayload   = "expired_file_payload"
 )
+
+// HasProjectCoverageGap reports a gap that can prevent restoring workspace
+// files. Scratch-only gaps do not.
+func HasProjectCoverageGap(gaps []CoverageGap) bool {
+	for _, gap := range gaps {
+		if gap.Reason != "" && gap.Reason != GapScratch {
+			return true
+		}
+	}
+	return false
+}
 
 // CaptureSource identifies how a preimage was obtained.
 type CaptureSource string
@@ -167,6 +180,7 @@ type RewindPlan struct {
 	BoundaryIndex      int              `json:"boundaryIndex,omitempty"`
 	HasBoundary        bool             `json:"hasBoundary"`
 	CreatedAt          time.Time        `json:"createdAt"`
+	ConversationAction string           `json:"conversationAction,omitempty"`
 	// Single-file revert extras.
 	Path               string `json:"path,omitempty"`
 	ConflictResolution string `json:"conflictResolution,omitempty"`
@@ -174,17 +188,21 @@ type RewindPlan struct {
 
 // RewindResult is returned after commit or undo.
 type RewindResult struct {
-	OK             bool             `json:"ok"`
-	TransactionID  string           `json:"transactionId,omitempty"`
-	UndoAvailable  bool             `json:"undoAvailable"`
-	Written        []string         `json:"written,omitempty"`
-	Deleted        []string         `json:"deleted,omitempty"`
-	Files          []FileStage      `json:"files,omitempty"`
-	ConversationOK bool             `json:"conversationOk,omitempty"`
-	Error          string           `json:"error,omitempty"`
-	Conflicts      []RewindConflict `json:"conflicts,omitempty"`
-	Coverage       Coverage         `json:"coverage,omitempty"`
-	CoverageGaps   []CoverageGap    `json:"coverageGaps,omitempty"`
+	OK                 bool             `json:"ok"`
+	TransactionID      string           `json:"transactionId,omitempty"`
+	UndoAvailable      bool             `json:"undoAvailable"`
+	Written            []string         `json:"written,omitempty"`
+	Deleted            []string         `json:"deleted,omitempty"`
+	Files              []FileStage      `json:"files,omitempty"`
+	ConversationOK     bool             `json:"conversationOk,omitempty"`
+	ConversationForked bool             `json:"conversationForked,omitempty"`
+	OperationID        string           `json:"operationId,omitempty"`
+	Branch             string           `json:"branch,omitempty"`
+	Partial            bool             `json:"partial,omitempty"`
+	Error              string           `json:"error,omitempty"`
+	Conflicts          []RewindConflict `json:"conflicts,omitempty"`
+	Coverage           Coverage         `json:"coverage,omitempty"`
+	CoverageGaps       []CoverageGap    `json:"coverageGaps,omitempty"`
 }
 
 // ConflictResolution chooses how to handle a single-file conflict on commit.
@@ -261,6 +279,7 @@ type TransactionManifest struct {
 	ConversationForward []byte `json:"conversationForward,omitempty"`
 	BoundaryIndex       int    `json:"boundaryIndex,omitempty"`
 	HasBoundary         bool   `json:"hasBoundary"`
+	ConversationAction  string `json:"conversationAction,omitempty"`
 	// TruncateFrom is the checkpoint turn to drop after a successful conversation rewind.
 	TruncateFrom int `json:"truncateFrom,omitempty"`
 	// CheckpointTurns holds serialized future checkpoints for undo.
@@ -270,7 +289,8 @@ type TransactionManifest struct {
 	Error             string `json:"error,omitempty"`
 }
 
-// Default retention for file payloads.
+// Default retention and soft byte budget for file payloads. Both v3 raw
+// preimages and legacy blobs use the same budget value in their own stores.
 const (
 	DefaultRetainCheckpoints = 100
 	DefaultBlobQuotaBytes    = 1 << 30  // 1 GiB

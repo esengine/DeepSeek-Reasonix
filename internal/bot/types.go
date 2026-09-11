@@ -4,6 +4,7 @@ package bot
 
 import (
 	"context"
+	"slices"
 	"strings"
 )
 
@@ -11,9 +12,10 @@ import (
 type Platform string
 
 const (
-	PlatformQQ     Platform = "qq"
-	PlatformFeishu Platform = "feishu"
-	PlatformWeixin Platform = "weixin"
+	PlatformQQ       Platform = "qq"
+	PlatformFeishu   Platform = "feishu"
+	PlatformWeixin   Platform = "weixin"
+	PlatformDingtalk Platform = "dingtalk"
 )
 
 // ChatType 标识会话类型。
@@ -59,12 +61,16 @@ type InboundMessage struct {
 	UserID       string   `json:"user_id"`
 	UserName     string   `json:"user_name"`
 	// OperatorID, when set, is the authenticated actor gated by the allowlist; UserID stays routing-only.
-	OperatorID string         `json:"operator_id,omitempty"`
-	Text       string         `json:"text"`
-	MessageID  string         `json:"message_id"`
-	ThreadID   string         `json:"thread_id,omitempty"`
-	MediaURLs  []string       `json:"media_urls,omitempty"`
-	Media      []InboundMedia `json:"-"`
+	OperatorID string `json:"operator_id,omitempty"`
+	Text       string `json:"text"`
+	MessageID  string `json:"message_id"`
+	ThreadID   string `json:"thread_id,omitempty"`
+	// SessionWebhook is the platform reply webhook carried by the inbound
+	// message, used by webhook-addressed channels (DingTalk) to reply to the
+	// conversation. Channels with a global send API leave it empty.
+	SessionWebhook string         `json:"session_webhook,omitempty"`
+	MediaURLs      []string       `json:"media_urls,omitempty"`
+	Media          []InboundMedia `json:"-"`
 	// ResolveUserName performs optional platform enrichment after admission.
 	// UserName remains the safe fallback when the callback is nil or fails.
 	ResolveUserName func(context.Context) string `json:"-"`
@@ -86,15 +92,19 @@ func (m InboundMessage) Session() SessionSource {
 
 // OutboundMessage 是发送到平台的消息。
 type OutboundMessage struct {
-	ConnectionID string           `json:"connection_id,omitempty"`
-	Domain       string           `json:"domain,omitempty"`
-	ChatID       string           `json:"chat_id"`
-	ChatType     ChatType         `json:"chat_type,omitempty"`
-	Text         string           `json:"text,omitempty"`
-	MediaURLs    []string         `json:"media_urls,omitempty"`
-	ReplyToMsgID string           `json:"reply_to_msg_id,omitempty"`
-	Keyboard     *InlineKeyboard  `json:"keyboard,omitempty"`
-	Card         *InteractiveCard `json:"card,omitempty"`
+	ConnectionID string   `json:"connection_id,omitempty"`
+	Domain       string   `json:"domain,omitempty"`
+	ChatID       string   `json:"chat_id"`
+	ChatType     ChatType `json:"chat_type,omitempty"`
+	Text         string   `json:"text,omitempty"`
+	MediaURLs    []string `json:"media_urls,omitempty"`
+	ReplyToMsgID string   `json:"reply_to_msg_id,omitempty"`
+	// SessionWebhook 是入站消息携带的会话回复 webhook（webhook 寻址渠道如
+	// 钉钉），由 sendText 从入站消息透传，保证 gateway 重启后持久化恢复的
+	// 消息仍能回复（无需等用户再次发消息重新学习）。
+	SessionWebhook string           `json:"session_webhook,omitempty"`
+	Keyboard       *InlineKeyboard  `json:"keyboard,omitempty"`
+	Card           *InteractiveCard `json:"card,omitempty"`
 }
 
 // InlineKeyboard 是内联键盘（用于 QQ 审批）。
@@ -144,10 +154,8 @@ func (r SendResult) DeliveredMessageIDs() []string {
 		if id == "" {
 			return
 		}
-		for _, existing := range ids {
-			if existing == id {
-				return
-			}
+		if slices.Contains(ids, id) {
+			return
 		}
 		ids = append(ids, id)
 	}
@@ -162,13 +170,7 @@ func (r SendResult) DeliveredMessageIDs() []string {
 // last delivered ID for callers using the legacy singular field.
 func (r *SendResult) Merge(delivered SendResult) {
 	for _, id := range delivered.DeliveredMessageIDs() {
-		duplicate := false
-		for _, existing := range r.MessageIDs {
-			if existing == id {
-				duplicate = true
-				break
-			}
-		}
+		duplicate := slices.Contains(r.MessageIDs, id)
 		if !duplicate {
 			r.MessageIDs = append(r.MessageIDs, id)
 		}
@@ -198,6 +200,12 @@ type Adapter interface {
 
 	// Name 返回适配器实例名（用于日志）。
 	Name() string
+}
+
+// TestSender 由支持主动发送测试消息的适配器实现（钉钉需先学到会话
+// webhook 才能回复，测试发送走最近交互过的会话）。
+type TestSender interface {
+	TestSend(ctx context.Context, text string) (SendResult, error)
 }
 
 // MessageHandler 是 BotGateway 处理入站消息的回调。

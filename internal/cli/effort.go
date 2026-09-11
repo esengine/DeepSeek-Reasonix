@@ -108,7 +108,6 @@ func (m *chatTUI) runEffortCommand(input string) tea.Cmd {
 	m.pendingModelSwitch = func() tea.Msg {
 		c, err := build(controllerBuildSpec{
 			ModelRef:         ref,
-			RuntimeProfile:   m.runtimeProfile,
 			ToolApprovalMode: oldCtrl.ToolApprovalMode(),
 			PlanMode:         oldCtrl.PlanMode(),
 			EffortOverride:   &effort,

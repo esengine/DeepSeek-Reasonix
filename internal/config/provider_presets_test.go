@@ -1,10 +1,35 @@
 package config
 
-import "testing"
+import (
+	"strings"
+	"testing"
+
+	"reasonix/internal/provider"
+	"reasonix/internal/provider/openai"
+)
+
+func TestAnthropicPresetsDoNotImplicitlyEnableServerTools(t *testing.T) {
+	var entries []ProviderEntry
+	entries = append(entries, Default().Providers...)
+	for _, preset := range CuratedProviderPresets() {
+		entries = append(entries, preset.Entries...)
+	}
+	for _, entry := range entries {
+		if entry.Kind != "anthropic" {
+			continue
+		}
+		root := strings.TrimSuffix(strings.TrimRight(entry.BaseURL, "/"), "/v1")
+		if strings.EqualFold(root, "https://api.anthropic.com") {
+			if entry.Name != "anthropic" || entry.WebSearch == nil || *entry.WebSearch || entry.AuthHeader {
+				t.Fatalf("official Anthropic preset must explicitly use API-key auth without native server tools: %q", entry.Name)
+			}
+		}
+	}
+}
 
 func TestCuratedProviderPresetsCoverRequestedProviders(t *testing.T) {
 	wantIDs := []string{
-		"deepseek-anthropic",
+		"opencode-go-recommended",
 		"longcat-openai",
 		"longcat-anthropic",
 		"token-rhythm",
@@ -32,6 +57,9 @@ func TestCuratedProviderPresetsCoverRequestedProviders(t *testing.T) {
 		"zai-coding-plan-global-anthropic",
 		"opencode-go",
 		"opencode-go-anthropic",
+		"opencode-go-responses",
+		"opencode-go-deepseek-anthropic",
+		"opencode-go-deepseek-responses",
 		"opencode-zen-anthropic",
 		"qwen-cn",
 		"qwen-global",
@@ -41,6 +69,9 @@ func TestCuratedProviderPresetsCoverRequestedProviders(t *testing.T) {
 		"qwen-coding-plan-global-anthropic",
 		"stepfun",
 		"stepfun-anthropic",
+		"stepfun-responses",
+		"stepfun-api",
+		"stepfun-api-anthropic",
 		"novita",
 		"gmi",
 		"vercel-ai-gateway",
@@ -49,6 +80,8 @@ func TestCuratedProviderPresetsCoverRequestedProviders(t *testing.T) {
 		"atlas-cloud",
 		"kilocode",
 		"ollama-cloud",
+		"scnet",
+		"scnet-anthropic",
 	}
 	got := map[string]ProviderPreset{}
 	for _, preset := range CuratedProviderPresets() {
@@ -75,6 +108,220 @@ func TestCuratedProviderPresetsCoverRequestedProviders(t *testing.T) {
 	for _, id := range wantIDs {
 		if _, ok := got[id]; !ok {
 			t.Fatalf("missing preset %q", id)
+		}
+	}
+}
+
+func TestOpenCodeGoContextWindowPresetsMatchModelsDev(t *testing.T) {
+	preset, ok := CuratedProviderPreset("opencode-go")
+	if !ok || len(preset.Entries) != 1 {
+		t.Fatal("missing opencode-go preset")
+	}
+	entry := preset.Entries[0]
+	if entry.ContextWindow != 128000 {
+		t.Fatalf("provider fallback window = %d, want 128000", entry.ContextWindow)
+	}
+	for id, lim := range provider.OpenCodeGoChatModels() {
+		if got := entry.ModelOverrides[id].ContextWindow; got != lim.Context {
+			t.Fatalf("%s context = %d, want %d", id, got, lim.Context)
+		}
+	}
+	anth, ok := CuratedProviderPreset("opencode-go-anthropic")
+	if !ok {
+		t.Fatal("missing opencode-go-anthropic")
+	}
+	for id, lim := range provider.OpenCodeGoAnthropicModels() {
+		if got := anth.Entries[0].ModelOverrides[id].ContextWindow; got != lim.Context {
+			t.Fatalf("anthropic %s context = %d, want %d", id, got, lim.Context)
+		}
+	}
+	responses, ok := CuratedProviderPreset("opencode-go-responses")
+	if !ok {
+		t.Fatal("missing opencode-go-responses")
+	}
+	for id, lim := range provider.OpenCodeGoResponsesModels() {
+		if got := responses.Entries[0].ModelOverrides[id].ContextWindow; got != lim.Context {
+			t.Fatalf("responses %s context = %d, want %d", id, got, lim.Context)
+		}
+	}
+	dsAnth, _ := CuratedProviderPreset("opencode-go-deepseek-anthropic")
+	if dsAnth.Entries[0].ContextWindow != 1_000_000 {
+		t.Fatalf("deepseek anthropic window = %d", dsAnth.Entries[0].ContextWindow)
+	}
+	dsResp, _ := CuratedProviderPreset("opencode-go-deepseek-responses")
+	if dsResp.Entries[0].ContextWindow != 1_000_000 {
+		t.Fatalf("deepseek responses window = %d", dsResp.Entries[0].ContextWindow)
+	}
+}
+
+func TestOpenCodeGoChatPresetsExposeDeepSeekVisionModel(t *testing.T) {
+	for _, presetID := range []string{"opencode-go", "opencode-go-recommended"} {
+		preset, ok := CuratedProviderPreset(presetID)
+		if !ok {
+			t.Fatalf("missing %s preset", presetID)
+		}
+		var entry *ProviderEntry
+		for i := range preset.Entries {
+			if preset.Entries[i].Name == "opencode-go" {
+				entry = &preset.Entries[i]
+				break
+			}
+		}
+		if entry == nil || !entry.HasModel(openai.OfficialDeepSeekVisionModel) || !entry.HasVisionModel(openai.OfficialDeepSeekVisionModel) {
+			t.Fatalf("%s Chat entry = %+v, want DeepSeek vision SKU", presetID, entry)
+		}
+	}
+}
+
+func TestOpenCodePresetPresentationMetadata(t *testing.T) {
+	want := map[string]struct {
+		group    string
+		section  string
+		tier     string
+		route    string
+		optional bool
+	}{
+		"opencode-go-recommended":        {group: "opencode", section: "go", tier: "primary", route: "bundle"},
+		"opencode-go":                    {group: "opencode", section: "go", tier: "compatibility", route: "chat"},
+		"opencode-go-anthropic":          {group: "opencode", section: "go", tier: "advanced", route: "anthropic"},
+		"opencode-go-responses":          {group: "opencode", section: "go", tier: "advanced", route: "responses"},
+		"opencode-go-deepseek-anthropic": {group: "opencode", section: "go", tier: "advanced", route: "search-anthropic", optional: true},
+		"opencode-go-deepseek-responses": {group: "opencode", section: "go", tier: "advanced", route: "search-responses", optional: true},
+		"opencode-zen-anthropic":         {group: "opencode", section: "zen", tier: "primary", route: "zen-anthropic"},
+	}
+	for id, expected := range want {
+		preset, ok := CuratedProviderPreset(id)
+		if !ok {
+			t.Fatalf("missing preset %q", id)
+		}
+		if preset.DisplayGroup != expected.group || preset.DisplaySection != expected.section || preset.DisplayTier != expected.tier || preset.RouteKind != expected.route || preset.Optional != expected.optional {
+			t.Fatalf("preset %q metadata = group:%q section:%q tier:%q route:%q optional:%t", id, preset.DisplayGroup, preset.DisplaySection, preset.DisplayTier, preset.RouteKind, preset.Optional)
+		}
+	}
+}
+
+func TestOpenCodeGoPresetOutputBudgetsAreConservative(t *testing.T) {
+	for _, id := range []string{
+		"opencode-go-recommended",
+		"opencode-go",
+		"opencode-go-anthropic",
+		"opencode-go-responses",
+		"opencode-go-deepseek-anthropic",
+		"opencode-go-deepseek-responses",
+	} {
+		preset, ok := CuratedProviderPreset(id)
+		if !ok {
+			t.Fatalf("missing preset %q", id)
+		}
+		for _, entry := range preset.Entries {
+			if entry.MaxOutputTokens != 32_768 {
+				t.Fatalf("preset %q entry %q max output = %d, want 32768", id, entry.Name, entry.MaxOutputTokens)
+			}
+		}
+	}
+}
+
+func TestOpenCodeGoDeepSeekAlternativeProtocolPresets(t *testing.T) {
+	responsesPreset, ok := CuratedProviderPreset("opencode-go-deepseek-responses")
+	if !ok || len(responsesPreset.Entries) != 1 {
+		t.Fatalf("opencode-go-deepseek-responses preset = %+v, found=%v", responsesPreset, ok)
+	}
+	responses := responsesPreset.Entries[0]
+	if responses.Kind != "responses" || responses.BaseURL != "https://opencode.ai/zen/go/v1" || responses.ResponsesMode != "stateless" || responses.Default != "deepseek-v4-flash" {
+		t.Fatalf("opencode-go-deepseek-responses entry = %+v", responses)
+	}
+	if !responses.HasModel("deepseek-v4-flash") || responses.HasModel("deepseek-v4-pro") {
+		t.Fatalf("opencode-go-deepseek-responses models = %v, want currently verified Flash only", responses.ModelList())
+	}
+	if !EffectiveWebSearch(&responses) || !HasServerWebSearchCapability(&responses) {
+		t.Fatalf("opencode-go-deepseek-responses web search = effective:%t capability:%t", EffectiveWebSearch(&responses), HasServerWebSearchCapability(&responses))
+	}
+	if cap := EffortCapabilityForEntry(&responses); !cap.Supported || cap.Default != "high" || !containsString(cap.Levels, "none") || !containsString(cap.Levels, "low") || !containsString(cap.Levels, "max") {
+		t.Fatalf("opencode-go-deepseek-responses effort capability = %+v", cap)
+	}
+
+	anthropicPreset, ok := CuratedProviderPreset("opencode-go-deepseek-anthropic")
+	if !ok || len(anthropicPreset.Entries) != 1 {
+		t.Fatalf("opencode-go-deepseek-anthropic preset = %+v, found=%v", anthropicPreset, ok)
+	}
+	var cfg Config
+	if err := cfg.UpsertProvider(anthropicPreset.Entries[0]); err != nil {
+		t.Fatalf("UpsertProvider(opencode-go-deepseek-anthropic): %v", err)
+	}
+	flash, ok := cfg.ResolveModel("opencode-go-deepseek-anthropic/deepseek-v4-flash")
+	if !ok {
+		t.Fatal("opencode-go-deepseek-anthropic/deepseek-v4-flash did not resolve")
+	}
+	if cfgEntry, _ := cfg.Provider("opencode-go-deepseek-anthropic"); cfgEntry.HasModel("deepseek-v4-pro") || !EffectiveWebSearch(cfgEntry) || !HasServerWebSearchCapability(cfgEntry) {
+		t.Fatalf("opencode-go-deepseek-anthropic entry = %+v, want Flash-only web search capability", cfgEntry)
+	}
+	if cap := EffortCapabilityForEntry(flash); !cap.Supported || cap.Default != "high" || !containsString(cap.Levels, "max") {
+		t.Fatalf("opencode-go-deepseek-anthropic Flash effort capability = %+v", cap)
+	}
+}
+
+func TestOpenCodeGoResponsesPresetRoutesGrokToResponsesAPI(t *testing.T) {
+	preset, ok := CuratedProviderPreset("opencode-go-responses")
+	if !ok || len(preset.Entries) != 1 {
+		t.Fatalf("opencode-go-responses preset = %+v, found=%v", preset, ok)
+	}
+	entry := preset.Entries[0]
+	if entry.Kind != "responses" || entry.BaseURL != "https://opencode.ai/zen/go/v1" || entry.ResponsesMode != "stateless" || entry.DefaultModel() != "grok-4.5" {
+		t.Fatalf("opencode-go-responses entry = %+v", entry)
+	}
+	for _, model := range []string{"grok-4.5", "gpt-5.6-luna", "muse-spark-1.2-contributor"} {
+		if !entry.HasModel(model) || !entry.HasVisionModel(model) {
+			t.Fatalf("opencode-go-responses model %q missing from model/vision catalog: %+v", model, entry)
+		}
+	}
+	if entry.ContextWindow != 500_000 {
+		t.Fatalf("opencode-go-responses Grok capability = %+v", entry)
+	}
+	for model, want := range map[string][]string{
+		"grok-4.5":                   {"low", "medium", "high"},
+		"gpt-5.6-luna":               {"none", "low", "medium", "high", "xhigh", "max"},
+		"muse-spark-1.2-contributor": {"minimal", "low", "medium", "high", "xhigh"},
+	} {
+		resolved := entry
+		resolved.Model = model
+		resolved.applyModelOverride()
+		cap := EffortCapabilityForEntry(&resolved)
+		if !cap.Supported || cap.Default != "high" {
+			t.Fatalf("opencode-go-responses %s effort capability = %+v", model, cap)
+		}
+		for _, level := range want {
+			if !containsString(cap.Levels, level) {
+				t.Fatalf("opencode-go-responses %s effort levels = %v, missing %s", model, cap.Levels, level)
+			}
+		}
+	}
+}
+
+func TestOpenCodeGoRecommendedPresetIsOneClickAndCostBounded(t *testing.T) {
+	preset, ok := CuratedProviderPreset("opencode-go-recommended")
+	if !ok || !preset.Recommended || preset.BillingMode != "subscription_equivalent" {
+		t.Fatalf("recommended preset metadata = %+v, found=%v", preset, ok)
+	}
+	if len(preset.Entries) != 3 {
+		t.Fatalf("recommended preset entries = %d, want 3 route entries", len(preset.Entries))
+	}
+	want := map[string]struct {
+		kind   string
+		base   string
+		model  string
+		window int
+	}{
+		"opencode-go":           {kind: "openai", base: "https://opencode.ai/zen/go/v1", model: "glm-5.3", window: 128_000},
+		"opencode-go-anthropic": {kind: "anthropic", base: "https://opencode.ai/zen/go", model: "qwen3.7-plus", window: 262_144},
+		"opencode-go-responses": {kind: "responses", base: "https://opencode.ai/zen/go/v1", model: "grok-4.5", window: 500_000},
+	}
+	for _, entry := range preset.Entries {
+		w, exists := want[entry.Name]
+		if !exists || entry.Kind != w.kind || entry.BaseURL != w.base || entry.DefaultModel() != w.model || entry.ContextWindow != w.window {
+			t.Fatalf("recommended entry = %+v", entry)
+		}
+		if entry.BillingMode != "subscription_equivalent" || entry.MaxOutputTokens != 32_768 {
+			t.Fatalf("recommended entry %q cost controls = billing:%q max_output:%d", entry.Name, entry.BillingMode, entry.MaxOutputTokens)
 		}
 	}
 }
@@ -106,7 +353,7 @@ func TestDeepSeekAnthropicPresetIsOptionalAndModelScoped(t *testing.T) {
 	if got, err := NormalizeEffort(flash, "low"); err != nil || got != "low" {
 		t.Fatalf("Flash low effort = %q/%v, want low/nil", got, err)
 	}
-	if cap := EffortCapabilityForEntry(pro); cap.Default != "high" || containsString(cap.Levels, "low") || !containsString(cap.Levels, "max") {
+	if cap := EffortCapabilityForEntry(pro); cap.Default != "high" || !containsString(cap.Levels, "low") || !containsString(cap.Levels, "max") {
 		t.Fatalf("Pro effort capability = %+v", cap)
 	}
 }
@@ -120,21 +367,39 @@ func TestDeepSeekResponsesPresetMatchesOfficialSupport(t *testing.T) {
 	if entry.Kind != "responses" || entry.BaseURL != "https://api.deepseek.com" || entry.ResponsesMode != "stateless" {
 		t.Fatalf("deepseek responses endpoint = %+v", entry)
 	}
-	if len(entry.Models) != 1 || entry.Models[0] != "deepseek-v4-flash" || entry.Default != "deepseek-v4-flash" {
+	if !entry.HasModel("deepseek-v4-flash") || !entry.HasModel("deepseek-v4-pro") || entry.Default != "deepseek-v4-flash" {
 		t.Fatalf("deepseek responses models = %v default=%q", entry.Models, entry.Default)
 	}
 	if entry.ModelsURL != "" {
 		t.Fatalf("deepseek responses models URL = %q, want static supported-model list", entry.ModelsURL)
 	}
-	if !EffectiveWebSearch(&entry) || entry.Vision || entry.VisionModels != nil {
+	if !EffectiveWebSearch(&entry) || entry.Vision {
 		t.Fatalf("deepseek responses capabilities = web_search:%t vision:%t vision_models:%v", EffectiveWebSearch(&entry), entry.Vision, entry.VisionModels)
+	}
+	var cfg Config
+	if err := cfg.UpsertProvider(entry); err != nil {
+		t.Fatalf("UpsertProvider: %v", err)
+	}
+	flash, ok := cfg.ResolveModel("deepseek-responses/deepseek-v4-flash")
+	if !ok {
+		t.Fatal("Flash model did not resolve")
+	}
+	pro, ok := cfg.ResolveModel("deepseek-responses/deepseek-v4-pro")
+	if !ok {
+		t.Fatal("Pro model did not resolve")
+	}
+	if cap := EffortCapabilityForEntry(flash); cap.Default != "high" || !containsString(cap.Levels, "disabled") || !containsString(cap.Levels, "low") || !containsString(cap.Levels, "max") {
+		t.Fatalf("Flash effort capability = %+v", cap)
+	}
+	if cap := EffortCapabilityForEntry(pro); cap.Default != "high" || !containsString(cap.Levels, "low") || !containsString(cap.Levels, "max") {
+		t.Fatalf("Pro effort capability = %+v", cap)
 	}
 }
 
 func TestCuratedProviderPresetsDisplayOrder(t *testing.T) {
 	wantPrefix := []string{
+		"opencode-go-recommended",
 		"deepseek-responses",
-		"deepseek-anthropic",
 		"glm-cn",
 		"zai-global",
 		"glm-coding-plan-cn",
@@ -160,6 +425,17 @@ func TestCuratedProviderPresetsDisplayOrder(t *testing.T) {
 		if got[i].ID != want {
 			t.Fatalf("preset[%d] = %q, want %q", i, got[i].ID, want)
 		}
+	}
+}
+
+func TestCuratedProviderPresetsHideRedundantDeepSeekAnthropicPreset(t *testing.T) {
+	for _, preset := range CuratedProviderPresets() {
+		if preset.ID == "deepseek-anthropic" {
+			t.Fatal("redundant DeepSeek Anthropic preset should not be shown in the curated list")
+		}
+	}
+	if _, ok := CuratedProviderPreset("deepseek-anthropic"); !ok {
+		t.Fatal("legacy DeepSeek Anthropic preset must remain available for compatibility")
 	}
 }
 
@@ -225,6 +501,21 @@ func TestCuratedProviderPresetsStepFunUsesOfficialBaseURLs(t *testing.T) {
 			kind:    "anthropic",
 			baseURL: "https://api.stepfun.com/step_plan",
 		},
+		{
+			id:      "stepfun-responses",
+			kind:    "responses",
+			baseURL: "https://api.stepfun.com/v1",
+		},
+		{
+			id:      "stepfun-api",
+			kind:    "openai",
+			baseURL: "https://api.stepfun.com/v1",
+		},
+		{
+			id:      "stepfun-api-anthropic",
+			kind:    "anthropic",
+			baseURL: "https://api.stepfun.com",
+		},
 	}
 	for _, tt := range tests {
 		t.Run(tt.id, func(t *testing.T) {
@@ -243,6 +534,44 @@ func TestCuratedProviderPresetsStepFunUsesOfficialBaseURLs(t *testing.T) {
 				t.Fatalf("preset %q base_url = %q, want %q", tt.id, entry.BaseURL, tt.baseURL)
 			}
 		})
+	}
+}
+
+// StepFun's Responses API enables only step-3.7-flash server-side and ignores
+// previous_response_id, so the preset must ship the single-model catalog and
+// the stateless mode.
+func TestCuratedProviderPresetsStepFunResponsesContract(t *testing.T) {
+	preset, ok := CuratedProviderPreset("stepfun-responses")
+	if !ok || len(preset.Entries) != 1 {
+		t.Fatal("missing stepfun-responses preset")
+	}
+	entry := preset.Entries[0]
+	if got := entry.ModelList(); len(got) != 1 || got[0] != "step-3.7-flash" {
+		t.Fatalf("stepfun-responses models = %v, want [step-3.7-flash]", got)
+	}
+	if entry.ResponsesMode != "stateless" {
+		t.Fatalf("stepfun-responses responses_mode = %q, want stateless", entry.ResponsesMode)
+	}
+}
+
+// The pay-as-you-go presets must stay on the standard /v1 surface and expose
+// vision only on step-3.7-flash, matching the channel's live behavior (the
+// step_plan channel rejects images; 3.5 SKUs are not Responses-enabled).
+func TestCuratedProviderPresetsStepFunPayAsYouGoContract(t *testing.T) {
+	api, ok := CuratedProviderPreset("stepfun-api")
+	if !ok || len(api.Entries) != 1 {
+		t.Fatal("missing stepfun-api preset")
+	}
+	entry := api.Entries[0]
+	if !stringSlicesEqual(entry.VisionModels, []string{"step-3.7-flash"}) {
+		t.Fatalf("stepfun-api vision_models = %v, want [step-3.7-flash]", entry.VisionModels)
+	}
+	anthropic, ok := CuratedProviderPreset("stepfun-api-anthropic")
+	if !ok || len(anthropic.Entries) != 1 {
+		t.Fatal("missing stepfun-api-anthropic preset")
+	}
+	if got := anthropic.Entries[0].BaseURL; got != "https://api.stepfun.com" {
+		t.Fatalf("stepfun-api-anthropic base_url = %q, want origin (SDK appends /v1/messages)", got)
 	}
 }
 
@@ -521,8 +850,8 @@ func TestCuratedProviderPresetCapabilities(t *testing.T) {
 	if !ok {
 		t.Fatal("opencode-go/glm-5.2 did not resolve")
 	}
-	if cap := EffortCapabilityForEntry(plain); cap.Supported {
-		t.Fatalf("opencode plain model effort capability = %+v, want unsupported without override", cap)
+	if cap := EffortCapabilityForEntry(plain); !cap.Supported || cap.Default != "high" || !containsString(cap.Levels, "max") {
+		t.Fatalf("opencode GLM-5.2 effort capability = %+v, want high/max", cap)
 	}
 	zen, ok := cfg.Provider("opencode-zen-anthropic")
 	if !ok {
@@ -535,7 +864,7 @@ func TestCuratedProviderPresetCapabilities(t *testing.T) {
 	if !ok {
 		t.Fatal("opencode-go-anthropic provider missing")
 	}
-	if goAnthropic.Kind != "anthropic" || goAnthropic.BaseURL != "https://opencode.ai/zen/go" || goAnthropic.DefaultModel() != "qwen3.7-plus" || !goAnthropic.HasModel("minimax-m3") {
+	if goAnthropic.Kind != "anthropic" || goAnthropic.BaseURL != "https://opencode.ai/zen/go" || goAnthropic.DefaultModel() != "qwen3.7-plus" || !goAnthropic.HasModel("qwen3.8-max") || !goAnthropic.HasModel("minimax-m3") || goAnthropic.HasModel("deepseek-v4-flash") {
 		t.Fatalf("opencode-go-anthropic capability mismatch: %+v", goAnthropic)
 	}
 
@@ -649,43 +978,5 @@ func TestCuratedProviderPresetCapabilities(t *testing.T) {
 	}
 	if cap := EffortCapabilityForEntry(ollama); !cap.Supported || cap.Default != "auto" || !containsString(cap.Levels, "max") || !containsString(cap.Levels, "none") {
 		t.Fatalf("ollama-cloud effort capability = %+v, want none/max", cap)
-	}
-}
-
-func TestCuratedProviderPresetDeepSeekReasoningProtocolScope(t *testing.T) {
-	var cfg Config
-	for _, preset := range CuratedProviderPresets() {
-		for _, entry := range preset.Entries {
-			if err := cfg.UpsertProvider(entry); err != nil {
-				t.Fatalf("upsert preset %q: %v", preset.ID, err)
-			}
-		}
-	}
-
-	tests := []struct {
-		ref  string
-		want string
-	}{
-		{ref: "opencode-go/deepseek-v4-pro", want: ReasoningProtocolDeepSeek},
-		{ref: "opencode-go/deepseek-v4-flash", want: ReasoningProtocolDeepSeek},
-		{ref: "ollama-cloud/deepseek-v4-pro", want: ReasoningProtocolDeepSeek},
-		{ref: "ollama-cloud/deepseek-v4-flash", want: ReasoningProtocolDeepSeek},
-		{ref: "novita/deepseek/deepseek-v4-pro"},
-		{ref: "novita/deepseek/deepseek-v4-flash"},
-		{ref: "gmi/deepseek-ai/DeepSeek-V4-Pro"},
-		{ref: "gmi/deepseek-ai/DeepSeek-V4-Flash"},
-		{ref: "nvidia/deepseek-ai/deepseek-v4-pro"},
-		{ref: "vercel-ai-gateway/deepseek/deepseek-v4-pro"},
-	}
-	for _, tc := range tests {
-		t.Run(tc.ref, func(t *testing.T) {
-			entry, ok := cfg.ResolveModel(tc.ref)
-			if !ok {
-				t.Fatalf("ResolveModel(%q) failed", tc.ref)
-			}
-			if got := ReasoningProtocolForEntry(entry); got != tc.want {
-				t.Fatalf("ReasoningProtocolForEntry(%q) = %q, want %q", tc.ref, got, tc.want)
-			}
-		})
 	}
 }

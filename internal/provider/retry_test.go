@@ -7,6 +7,7 @@ import (
 	"io"
 	"net"
 	"net/http"
+	"net/http/httptest"
 	"strings"
 	"sync"
 	"syscall"
@@ -40,6 +41,28 @@ func TestRetryableStatus(t *testing.T) {
 		if RetryableStatus(s) {
 			t.Errorf("status %d should not be retryable", s)
 		}
+	}
+}
+
+func TestSendWithRetryCarriesDisplayIdentityAndSanitizedRequestPath(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		http.NotFound(w, r)
+	}))
+	defer server.Close()
+	_, err := SendWithRetry(context.Background(), server.Client(), SendOptions{
+		Provider: "deepseek-anthropic", ProviderDisplayName: "Deepseek2", Protocol: "openai",
+	}, func(ctx context.Context) (*http.Request, error) {
+		return http.NewRequestWithContext(ctx, http.MethodPost, server.URL+"/anthropic/v1/chat/completions?token=secret", nil)
+	})
+	var apiErr *APIError
+	if !errors.As(err, &apiErr) {
+		t.Fatalf("error = %T %v", err, err)
+	}
+	if apiErr.Provider != "deepseek-anthropic" || apiErr.ProviderDisplayName != "Deepseek2" || apiErr.Protocol != "openai" || apiErr.RequestPath != "/anthropic/v1/chat/completions" {
+		t.Fatalf("API error identity = %+v", apiErr)
+	}
+	if strings.Contains(apiErr.RequestPath, "secret") {
+		t.Fatalf("query leaked into request path: %q", apiErr.RequestPath)
 	}
 }
 
@@ -172,7 +195,7 @@ func TestSendWithRetryRetriesTransientAuthForKnownKey(t *testing.T) {
 	if err != nil {
 		t.Fatalf("a previously-good key should recover from a transient 401: %v", err)
 	}
-	if resp.StatusCode != 200 || calls != 3 {
+	if resp.StatusCode != http.StatusOK || calls != 3 {
 		t.Fatalf("status=%d calls=%d, want 200 after 3 calls", resp.StatusCode, calls)
 	}
 }
@@ -228,7 +251,7 @@ func TestSendWithRetryUnblocksStalledErrorBody(t *testing.T) {
 	cl := &http.Client{Transport: rtFunc(func(r *http.Request) (*http.Response, error) {
 		calls++
 		if calls == 1 {
-			return &http.Response{StatusCode: 502, Body: newStallingBody(), Header: http.Header{}}, nil
+			return &http.Response{StatusCode: http.StatusBadGateway, Body: newStallingBody(), Header: http.Header{}}, nil
 		}
 		return statusResp(200, nil), nil
 	})}
@@ -248,7 +271,7 @@ func TestSendWithRetryUnblocksStalledErrorBody(t *testing.T) {
 		if r.err != nil {
 			t.Fatalf("should recover after the stalled 502: %v", r.err)
 		}
-		if r.resp.StatusCode != 200 || calls != 2 {
+		if r.resp.StatusCode != http.StatusOK || calls != 2 {
 			t.Fatalf("status=%d calls=%d, want 200 after 2 calls", r.resp.StatusCode, calls)
 		}
 	case <-time.After(5 * time.Second):
@@ -273,7 +296,7 @@ func TestSendWithRetryRecoversAndNotifies(t *testing.T) {
 	if err != nil {
 		t.Fatalf("should recover after one retry: %v", err)
 	}
-	if resp.StatusCode != 200 || calls != 2 {
+	if resp.StatusCode != http.StatusOK || calls != 2 {
 		t.Fatalf("status=%d calls=%d, want 200 after 2 calls", resp.StatusCode, calls)
 	}
 	if len(infos) != 1 || infos[0].Attempt != 1 || infos[0].Max != MaxRetries {
@@ -305,5 +328,16 @@ func TestRequestAttemptCountSurvivesRetriesThenTerminalFailure(t *testing.T) {
 	usage := UsageWithRequestAttemptCount(ctx, nil)
 	if usage == nil || usage.TotalTokens != 0 || usage.RequestCount != 3 {
 		t.Fatalf("failed request usage = %+v, want tokens=0 requests=3", usage)
+	}
+}
+
+func TestIndependentRequestAttemptCounter(t *testing.T) {
+	parent := WithRequestAttemptCounter(context.Background())
+	recordRequestAttempt(parent)
+	child := WithIndependentRequestAttemptCounter(parent)
+	recordRequestAttempt(child)
+	recordRequestAttempt(child)
+	if RequestAttemptCount(parent) != 1 || RequestAttemptCount(child) != 2 {
+		t.Fatalf("auxiliary and main request counts leaked: parent=%d child=%d", RequestAttemptCount(parent), RequestAttemptCount(child))
 	}
 }

@@ -201,7 +201,7 @@ func requestContents(req provider.Request) string {
 	return b.String()
 }
 
-// --- agent.before_start ---
+// agent.before_start
 
 func TestAgentBeforeStartContinue(t *testing.T) {
 	client := &fakeDispatchClient{}
@@ -325,7 +325,7 @@ func TestSetExtensionsInstallsAfterConstruction(t *testing.T) {
 	}
 }
 
-// --- context.prepare ---
+// context.prepare
 
 func TestContextPrepareReplaceIsEphemeral(t *testing.T) {
 	client := &fakeDispatchClient{interceptFn: func(ev protocol.InterceptEvent, _ json.RawMessage) (protocol.InterceptResult, error) {
@@ -417,7 +417,7 @@ func TestContextPrepareFailurePolicy(t *testing.T) {
 	})
 }
 
-// --- provider.request ---
+// provider.request
 
 func TestProviderRequestReplace(t *testing.T) {
 	client := &fakeDispatchClient{interceptFn: func(ev protocol.InterceptEvent, payload json.RawMessage) (protocol.InterceptResult, error) {
@@ -567,7 +567,7 @@ func TestProviderRequestReplacementCacheEphemerality(t *testing.T) {
 	}
 }
 
-// --- provider.response ---
+// provider.response
 
 func TestProviderResponseReplaceIsTranscript(t *testing.T) {
 	client := &fakeDispatchClient{interceptFn: func(ev protocol.InterceptEvent, _ json.RawMessage) (protocol.InterceptResult, error) {
@@ -680,7 +680,7 @@ func TestProviderResponseFailurePolicy(t *testing.T) {
 	})
 }
 
-// --- tool.before ---
+// tool.before
 
 func TestToolBeforeContinue(t *testing.T) {
 	client := &fakeDispatchClient{}
@@ -689,7 +689,7 @@ func TestToolBeforeContinue(t *testing.T) {
 	reg := tool.NewRegistry()
 	reg.Add(rec)
 	a := New(nil, reg, NewSession(""), Options{Extensions: d}, event.Discard)
-	out := a.executeOne(context.Background(), provider.ToolCall{Name: "read_file", Arguments: `{"path":"/x"}`})
+	out := a.executeOne(context.Background(), &a.turn, provider.ToolCall{Name: "read_file", Arguments: `{"path":"/x"}`})
 	if out.errMsg != "" || !strings.Contains(out.output, "read_file ok") {
 		t.Fatalf("outcome = %+v, want the tool to run", out)
 	}
@@ -713,7 +713,7 @@ func TestToolBeforeBlock(t *testing.T) {
 	reg := tool.NewRegistry()
 	reg.Add(rec)
 	a := New(nil, reg, NewSession(""), Options{Extensions: d}, event.Discard)
-	out := a.executeOne(context.Background(), provider.ToolCall{Name: "read_file", Arguments: `{"path":"/x"}`})
+	out := a.executeOne(context.Background(), &a.turn, provider.ToolCall{Name: "read_file", Arguments: `{"path":"/x"}`})
 	if !out.blocked || out.output != "blocked: tool denied" {
 		t.Fatalf("outcome = %+v, want a blocked tool result with the reason", out)
 	}
@@ -734,7 +734,7 @@ func TestToolBeforeReplaceArgs(t *testing.T) {
 	reg := tool.NewRegistry()
 	reg.Add(rec)
 	a := New(nil, reg, NewSession(""), Options{Extensions: d}, event.Discard)
-	out := a.executeOne(context.Background(), provider.ToolCall{Name: "read_file", Arguments: `{"path":"/original"}`})
+	out := a.executeOne(context.Background(), &a.turn, provider.ToolCall{Name: "read_file", Arguments: `{"path":"/original"}`})
 	if out.errMsg != "" {
 		t.Fatalf("outcome = %+v, want success", out)
 	}
@@ -757,7 +757,7 @@ func TestToolBeforeReplaceName(t *testing.T) {
 	reg.Add(orig)
 	reg.Add(substituted)
 	a := New(nil, reg, NewSession(""), Options{Extensions: d}, event.Discard)
-	out := a.executeOne(context.Background(), provider.ToolCall{Name: "read_file", Arguments: `{"path":"/x"}`})
+	out := a.executeOne(context.Background(), &a.turn, provider.ToolCall{Name: "read_file", Arguments: `{"path":"/x"}`})
 	if out.errMsg != "" || !strings.Contains(out.output, "grep ok") {
 		t.Fatalf("outcome = %+v, want the substituted tool to run", out)
 	}
@@ -788,7 +788,7 @@ func TestToolBeforeInvalidReplacements(t *testing.T) {
 			reg := tool.NewRegistry()
 			reg.Add(rec)
 			a := New(nil, reg, NewSession(""), Options{Extensions: d}, event.Discard)
-			out := a.executeOne(context.Background(), provider.ToolCall{Name: "read_file", Arguments: `{"path":"/x"}`})
+			out := a.executeOne(context.Background(), &a.turn, provider.ToolCall{Name: "read_file", Arguments: `{"path":"/x"}`})
 			if out.errMsg == "" || !strings.Contains(out.output, "violated the intercept contract") || !strings.Contains(out.output, tc.want) {
 				t.Fatalf("outcome = %+v, want a contract-violation error result containing %q", out, tc.want)
 			}
@@ -811,7 +811,7 @@ func TestToolBeforeInvalidReplacements(t *testing.T) {
 		reg := tool.NewRegistry()
 		reg.Add(rec)
 		a := New(nil, reg, NewSession(""), Options{Extensions: d}, event.Discard)
-		out := a.executeOne(context.Background(), provider.ToolCall{Name: "read_file", Arguments: `{"path":"/x"}`})
+		out := a.executeOne(context.Background(), &a.turn, provider.ToolCall{Name: "read_file", Arguments: `{"path":"/x"}`})
 		if out.errMsg == "" || !strings.Contains(out.output, "violated the intercept contract") {
 			t.Fatalf("outcome = %+v, want a dispatch violation error result", out)
 		}
@@ -832,7 +832,7 @@ func TestToolBeforeFailurePolicy(t *testing.T) {
 		reg := tool.NewRegistry()
 		reg.Add(rec)
 		a := New(nil, reg, NewSession(""), Options{Extensions: d}, event.Discard)
-		out := a.executeOne(context.Background(), provider.ToolCall{Name: "read_file", Arguments: `{"path":"/x"}`})
+		out := a.executeOne(context.Background(), &a.turn, provider.ToolCall{Name: "read_file", Arguments: `{"path":"/x"}`})
 		if out.errMsg == "" || !strings.Contains(out.output, "extension fake failed at tool.before") {
 			t.Fatalf("outcome = %+v, want the required failure as the tool result", out)
 		}
@@ -850,7 +850,7 @@ func TestToolBeforeFailurePolicy(t *testing.T) {
 		reg := tool.NewRegistry()
 		reg.Add(rec)
 		a := New(nil, reg, NewSession(""), Options{Extensions: d}, event.Discard)
-		out := a.executeOne(context.Background(), provider.ToolCall{Name: "read_file", Arguments: `{"path":"/x"}`})
+		out := a.executeOne(context.Background(), &a.turn, provider.ToolCall{Name: "read_file", Arguments: `{"path":"/x"}`})
 		if out.errMsg != "" || rec.execs != 1 {
 			t.Fatalf("outcome = %+v execs = %d, want the tool to run", out, rec.execs)
 		}
@@ -860,7 +860,7 @@ func TestToolBeforeFailurePolicy(t *testing.T) {
 	})
 }
 
-// --- permission.decision ---
+// permission.decision
 
 func TestPermissionDecisionExtensionAllowOverridesHostDeny(t *testing.T) {
 	client := &fakeDispatchClient{interceptFn: func(ev protocol.InterceptEvent, payload json.RawMessage) (protocol.InterceptResult, error) {
@@ -884,7 +884,7 @@ func TestPermissionDecisionExtensionAllowOverridesHostDeny(t *testing.T) {
 	var events []event.Event
 	sink := event.FuncSink(func(e event.Event) { events = append(events, e) })
 	a := New(nil, reg, NewSession(""), Options{Gate: gate, Extensions: d}, sink)
-	out := a.executeOne(context.Background(), provider.ToolCall{Name: "edit_file", Arguments: `{"path":"/x"}`})
+	out := a.executeOne(context.Background(), &a.turn, provider.ToolCall{Name: "edit_file", Arguments: `{"path":"/x"}`})
 	if out.errMsg != "" || rec.execs != 1 {
 		t.Fatalf("outcome = %+v execs = %d, want the full-trust override to execute", out, rec.execs)
 	}
@@ -914,7 +914,7 @@ func TestPermissionDecisionExtensionDenyOverridesHostAllow(t *testing.T) {
 	reg := tool.NewRegistry()
 	reg.Add(rec)
 	a := New(nil, reg, NewSession(""), Options{Gate: &stubGate{}, Extensions: d}, event.Discard)
-	out := a.executeOne(context.Background(), provider.ToolCall{Name: "edit_file", Arguments: `{"path":"/x"}`})
+	out := a.executeOne(context.Background(), &a.turn, provider.ToolCall{Name: "edit_file", Arguments: `{"path":"/x"}`})
 	if !out.blocked || !strings.Contains(out.output, "denied by extension permission policy") {
 		t.Fatalf("outcome = %+v, want an extension denial", out)
 	}
@@ -931,7 +931,7 @@ func TestPermissionDecisionContinueKeepsHostDeny(t *testing.T) {
 	reg.Add(rec)
 	gate := &stubGate{deny: map[string]bool{"edit_file": true}}
 	a := New(nil, reg, NewSession(""), Options{Gate: gate, Extensions: d}, event.Discard)
-	out := a.executeOne(context.Background(), provider.ToolCall{Name: "edit_file", Arguments: `{"path":"/x"}`})
+	out := a.executeOne(context.Background(), &a.turn, provider.ToolCall{Name: "edit_file", Arguments: `{"path":"/x"}`})
 	if !out.blocked || !strings.Contains(out.output, "denied by test policy") {
 		t.Fatalf("outcome = %+v, want the host denial to stand", out)
 	}
@@ -953,7 +953,7 @@ func TestPermissionDecisionBlockAndFailure(t *testing.T) {
 		reg := tool.NewRegistry()
 		reg.Add(rec)
 		a := New(nil, reg, NewSession(""), Options{Gate: &stubGate{}, Extensions: d}, event.Discard)
-		out := a.executeOne(context.Background(), provider.ToolCall{Name: "edit_file", Arguments: `{"path":"/x"}`})
+		out := a.executeOne(context.Background(), &a.turn, provider.ToolCall{Name: "edit_file", Arguments: `{"path":"/x"}`})
 		if !out.blocked || !strings.Contains(out.output, "policy says no") {
 			t.Fatalf("outcome = %+v, want the block reason", out)
 		}
@@ -967,7 +967,7 @@ func TestPermissionDecisionBlockAndFailure(t *testing.T) {
 		reg := tool.NewRegistry()
 		reg.Add(rec)
 		a := New(nil, reg, NewSession(""), Options{Gate: &stubGate{}, Extensions: d}, event.Discard)
-		out := a.executeOne(context.Background(), provider.ToolCall{Name: "edit_file", Arguments: `{"path":"/x"}`})
+		out := a.executeOne(context.Background(), &a.turn, provider.ToolCall{Name: "edit_file", Arguments: `{"path":"/x"}`})
 		if !out.blocked || !strings.Contains(out.output, "extension fake failed at permission.decision") {
 			t.Fatalf("outcome = %+v, want the required failure", out)
 		}
@@ -985,7 +985,7 @@ func TestPermissionDecisionBlockAndFailure(t *testing.T) {
 		reg := tool.NewRegistry()
 		reg.Add(rec)
 		a := New(nil, reg, NewSession(""), Options{Gate: &stubGate{}, Extensions: d}, event.Discard)
-		out := a.executeOne(context.Background(), provider.ToolCall{Name: "edit_file", Arguments: `{"path":"/x"}`})
+		out := a.executeOne(context.Background(), &a.turn, provider.ToolCall{Name: "edit_file", Arguments: `{"path":"/x"}`})
 		if out.errMsg != "" || rec.execs != 1 {
 			t.Fatalf("outcome = %+v execs = %d, want the host allow to stand", out, rec.execs)
 		}
@@ -995,7 +995,7 @@ func TestPermissionDecisionBlockAndFailure(t *testing.T) {
 	})
 }
 
-// --- tool.after ---
+// tool.after
 
 func TestToolAfterReplaceResult(t *testing.T) {
 	client := &fakeDispatchClient{interceptFn: func(ev protocol.InterceptEvent, _ json.RawMessage) (protocol.InterceptResult, error) {
@@ -1011,7 +1011,7 @@ func TestToolAfterReplaceResult(t *testing.T) {
 	reg := tool.NewRegistry()
 	reg.Add(rec)
 	a := New(nil, reg, NewSession(""), Options{Extensions: d}, event.Discard)
-	out := a.executeOne(context.Background(), provider.ToolCall{Name: "read_file", Arguments: `{"path":"/x"}`})
+	out := a.executeOne(context.Background(), &a.turn, provider.ToolCall{Name: "read_file", Arguments: `{"path":"/x"}`})
 	if out.errMsg != "" || !strings.Contains(out.output, "EXTENSION RESULT") {
 		t.Fatalf("outcome = %+v, want the replaced result", out)
 	}
@@ -1040,7 +1040,7 @@ func TestToolAfterReplaceClearsError(t *testing.T) {
 	reg := tool.NewRegistry()
 	reg.Add(fakeTool{name: "read_file", readOnly: true, err: errors.New("boom")})
 	a := New(nil, reg, NewSession(""), Options{Extensions: d}, event.Discard)
-	out := a.executeOne(context.Background(), provider.ToolCall{Name: "read_file", Arguments: `{"path":"/x"}`})
+	out := a.executeOne(context.Background(), &a.turn, provider.ToolCall{Name: "read_file", Arguments: `{"path":"/x"}`})
 	if out.errMsg != "" || !strings.Contains(out.output, "RECOVERED BY EXTENSION") {
 		t.Fatalf("outcome = %+v, want the failure converted to the replaced success", out)
 	}
@@ -1058,7 +1058,7 @@ func TestToolAfterBlock(t *testing.T) {
 	reg := tool.NewRegistry()
 	reg.Add(rec)
 	a := New(nil, reg, NewSession(""), Options{Extensions: d}, event.Discard)
-	out := a.executeOne(context.Background(), provider.ToolCall{Name: "read_file", Arguments: `{"path":"/x"}`})
+	out := a.executeOne(context.Background(), &a.turn, provider.ToolCall{Name: "read_file", Arguments: `{"path":"/x"}`})
 	if out.errMsg == "" || !strings.Contains(out.output, "result withheld") {
 		t.Fatalf("outcome = %+v, want an error tool result with the reason", out)
 	}
@@ -1078,7 +1078,7 @@ func TestToolAfterFailurePolicy(t *testing.T) {
 		reg := tool.NewRegistry()
 		reg.Add(rec)
 		a := New(nil, reg, NewSession(""), Options{Extensions: d}, event.Discard)
-		out := a.executeOne(context.Background(), provider.ToolCall{Name: "read_file", Arguments: `{"path":"/x"}`})
+		out := a.executeOne(context.Background(), &a.turn, provider.ToolCall{Name: "read_file", Arguments: `{"path":"/x"}`})
 		if out.errMsg == "" || !strings.Contains(out.output, "extension fake failed at tool.after") {
 			t.Fatalf("outcome = %+v, want the required failure as the tool result", out)
 		}
@@ -1093,7 +1093,7 @@ func TestToolAfterFailurePolicy(t *testing.T) {
 		reg := tool.NewRegistry()
 		reg.Add(rec)
 		a := New(nil, reg, NewSession(""), Options{Extensions: d}, event.Discard)
-		out := a.executeOne(context.Background(), provider.ToolCall{Name: "read_file", Arguments: `{"path":"/x"}`})
+		out := a.executeOne(context.Background(), &a.turn, provider.ToolCall{Name: "read_file", Arguments: `{"path":"/x"}`})
 		if out.errMsg != "" || !strings.Contains(out.output, "read_file ok") {
 			t.Fatalf("outcome = %+v, want the original result", out)
 		}
@@ -1103,77 +1103,28 @@ func TestToolAfterFailurePolicy(t *testing.T) {
 	})
 }
 
-// --- compaction.prepare / compaction.complete ---
+// compaction.prepare / compaction.complete
 
 // newCompactionAgent builds an agent whose session has a foldable middle
 // (large assistant turns) so CompactNow always finds a region, with the
-// summarizer scripted to answer "SUMMARY TEXT".
+// summarizer scripted to answer "SUMMARY TEXT". The recent tail stays small so
+// the content-driven candidate lands under compact_ratio.
 func newCompactionAgent(t *testing.T, d *dispatch.Dispatcher) (*mockProvider, *Agent) {
 	t.Helper()
 	mp := &mockProvider{name: "p", chunks: []provider.Chunk{
 		{Type: provider.ChunkText, Text: "SUMMARY TEXT"}, {Type: provider.ChunkDone},
 	}}
 	sess := NewSession("sys")
-	big := strings.Repeat("a", 4000)
+	big := strings.Repeat("a", 8000)
 	sess.Add(provider.Message{Role: provider.RoleUser, Content: "task"})
 	sess.Add(provider.Message{Role: provider.RoleAssistant, Content: big})
 	sess.Add(provider.Message{Role: provider.RoleUser, Content: "more"})
 	sess.Add(provider.Message{Role: provider.RoleAssistant, Content: big})
-	sess.Add(provider.Message{Role: provider.RoleUser, Content: "again"})
-	sess.Add(provider.Message{Role: provider.RoleAssistant, Content: big})
-	return mp, New(mp, tool.NewRegistry(), sess, Options{ContextWindow: 1000, Extensions: d}, event.Discard)
-}
-
-func TestCompactionPrepareReplaceGuidance(t *testing.T) {
-	client := &fakeDispatchClient{interceptFn: func(ev protocol.InterceptEvent, payload json.RawMessage) (protocol.InterceptResult, error) {
-		if ev == protocol.EventCompactionPrepare {
-			var in dispatch.CompactionPreparePayload
-			if err := json.Unmarshal(payload, &in); err != nil {
-				return protocol.InterceptResult{}, err
-			}
-			in.Guidance = "EXTENSION GUIDANCE"
-			return replaceWith(t, in), nil
-		}
-		return protocol.InterceptResult{Decision: protocol.DecisionContinue}, nil
-	}}
-	d := newExtDispatcher(client, true, nil, extension.PointCompactionPrepare)
-	mp, a := newCompactionAgent(t, d)
-	if err := a.CompactNow(context.Background(), ""); err != nil {
-		t.Fatalf("CompactNow: %v", err)
-	}
-	if len(mp.requests) != 1 {
-		t.Fatalf("summarizer requests = %d, want 1", len(mp.requests))
-	}
-	sys := mp.requests[0].Messages[0].Content
-	if !strings.Contains(sys, "EXTENSION GUIDANCE") {
-		t.Fatalf("summarizer system prompt missing the replaced guidance:\n%.200q", sys)
-	}
-	if sc := sessionContents(a.Session()); !strings.Contains(sc, "SUMMARY TEXT") {
-		t.Fatalf("session missing the summary:\n%.200q", sc)
-	}
-	if n := client.notifyCountFor(protocol.EventCompactionPrepare); n != 1 {
-		t.Fatalf("compaction.prepare events = %d, want 1", n)
-	}
-}
-
-func TestCompactionPrepareReplaceMessages(t *testing.T) {
-	client := &fakeDispatchClient{interceptFn: func(ev protocol.InterceptEvent, _ json.RawMessage) (protocol.InterceptResult, error) {
-		if ev == protocol.EventCompactionPrepare {
-			return replaceWith(t, dispatch.CompactionPreparePayload{
-				Messages: []protocol.ProviderMessage{{Role: protocol.ProviderRoleUser, Content: "EXTENSION FOLD"}},
-			}), nil
-		}
-		return protocol.InterceptResult{Decision: protocol.DecisionContinue}, nil
-	}}
-	d := newExtDispatcher(client, true, nil, extension.PointCompactionPrepare)
-	mp, a := newCompactionAgent(t, d)
-	if err := a.CompactNow(context.Background(), ""); err != nil {
-		t.Fatalf("CompactNow: %v", err)
-	}
-	transcript := mp.requests[0].Messages[1].Content
-	if !strings.Contains(transcript, "EXTENSION FOLD") {
-		t.Fatalf("summarizer transcript = %.200q, want the replaced fold", transcript)
-	}
+	sess.Add(provider.Message{Role: provider.RoleUser, Content: "next"})
+	sess.Add(provider.Message{Role: provider.RoleAssistant, Content: "ok"})
+	return mp, New(mp, tool.NewRegistry(), sess, Options{
+		ContextWindow: 50_000, CompactRatio: 0.85, RecentKeep: 2, Extensions: d,
+	}, event.Discard)
 }
 
 func TestCompactionPrepareBlock(t *testing.T) {
@@ -1225,8 +1176,8 @@ func TestCompactionPrepareFailurePolicy(t *testing.T) {
 		if err := a.CompactNow(context.Background(), ""); err != nil {
 			t.Fatalf("CompactNow: %v", err)
 		}
-		if sc := sessionContents(a.Session()); !strings.Contains(sc, "SUMMARY TEXT") {
-			t.Fatalf("session missing the summary:\n%.200q", sc)
+		if sc := joinContents(visibleContext(a)); !strings.Contains(sc, "SUMMARY TEXT") {
+			t.Fatalf("projection missing the summary:\n%.200q", sc)
 		}
 		if !warns.contains("skipping this optional extension") {
 			t.Fatalf("warnings = %v, want an optional-extension skip warning", warns.msgs)
@@ -1253,9 +1204,9 @@ func TestCompactionCompleteReplace(t *testing.T) {
 	if err := a.CompactNow(context.Background(), ""); err != nil {
 		t.Fatalf("CompactNow: %v", err)
 	}
-	sc := sessionContents(a.Session())
+	sc := joinContents(visibleContext(a))
 	if !strings.Contains(sc, "EXTENSION SUMMARY") {
-		t.Fatalf("session missing the replaced summary:\n%.200q", sc)
+		t.Fatalf("projection missing the replaced summary:\n%.200q", sc)
 	}
 	if strings.Contains(sc, "SUMMARY TEXT") {
 		t.Fatalf("session leaked the original summary:\n%.200q", sc)
@@ -1579,7 +1530,7 @@ func TestPermissionDecisionSlotOwnerVeto(t *testing.T) {
 	reg := tool.NewRegistry()
 	reg.Add(rec)
 	a := New(nil, reg, NewSession(""), Options{Gate: &stubGate{}, Extensions: d}, event.Discard)
-	out := a.executeOne(context.Background(), provider.ToolCall{Name: "edit_file", Arguments: `{"path":"/x"}`})
+	out := a.executeOne(context.Background(), &a.turn, provider.ToolCall{Name: "edit_file", Arguments: `{"path":"/x"}`})
 	if !out.blocked || !strings.Contains(out.output, "owner policy says no") {
 		t.Fatalf("outcome = %+v, want the owner's veto", out)
 	}
@@ -1610,7 +1561,7 @@ func TestPermissionDecisionSlotOwnerFinalAfterChainAllow(t *testing.T) {
 	reg.Add(rec)
 	gate := &stubGate{deny: map[string]bool{"edit_file": true}}
 	a := New(nil, reg, NewSession(""), Options{Gate: gate, Extensions: d}, event.Discard)
-	out := a.executeOne(context.Background(), provider.ToolCall{Name: "edit_file", Arguments: `{"path":"/x"}`})
+	out := a.executeOne(context.Background(), &a.turn, provider.ToolCall{Name: "edit_file", Arguments: `{"path":"/x"}`})
 	if calls != 2 {
 		t.Fatalf("owner consulted %d times, want 2 (chain, then strategy)", calls)
 	}
@@ -1632,7 +1583,7 @@ func TestPermissionDecisionSlotOwnerFailureIsFatal(t *testing.T) {
 	reg := tool.NewRegistry()
 	reg.Add(rec)
 	a := New(nil, reg, NewSession(""), Options{Gate: &stubGate{}, Extensions: d}, event.Discard)
-	out := a.executeOne(context.Background(), provider.ToolCall{Name: "edit_file", Arguments: `{"path":"/x"}`})
+	out := a.executeOne(context.Background(), &a.turn, provider.ToolCall{Name: "edit_file", Arguments: `{"path":"/x"}`})
 	if !out.blocked || !strings.Contains(out.output, "extension fake failed at permission.decision") {
 		t.Fatalf("outcome = %+v, want the owner failure", out)
 	}
@@ -1659,8 +1610,8 @@ func TestCompactionPrepareSlotOwnerConsulted(t *testing.T) {
 	if err := a.CompactNow(context.Background(), ""); err != nil {
 		t.Fatalf("CompactNow: %v", err)
 	}
-	if sys := mp.requests[0].Messages[0].Content; !strings.Contains(sys, "OWNER GUIDANCE") {
-		t.Fatalf("summarizer system prompt missing the owner's guidance:\n%.200q", sys)
+	if instruction := mp.requests[0].Messages[len(mp.requests[0].Messages)-1].Content; !strings.Contains(instruction, "OWNER GUIDANCE") {
+		t.Fatalf("final summary instruction missing the owner's guidance:\n%.200q", instruction)
 	}
 }
 
@@ -1695,9 +1646,9 @@ func TestCompactionPrepareSlotOwnerFinalSayAfterChain(t *testing.T) {
 	if calls != 2 {
 		t.Fatalf("owner consulted %d times, want 2 (chain, then strategy)", calls)
 	}
-	sys := mp.requests[0].Messages[0].Content
-	if !strings.Contains(sys, "OWNER GUIDANCE") || strings.Contains(sys, "CHAIN GUIDANCE") {
-		t.Fatalf("summarizer system prompt = %.200q, want the strategy ruling to win", sys)
+	instruction := mp.requests[0].Messages[len(mp.requests[0].Messages)-1].Content
+	if !strings.Contains(instruction, "OWNER GUIDANCE") || strings.Contains(instruction, "CHAIN GUIDANCE") {
+		t.Fatalf("final summary instruction = %.200q, want the strategy ruling to win", instruction)
 	}
 }
 
@@ -1731,8 +1682,8 @@ func TestCompactionCompleteSlotOwnerConsulted(t *testing.T) {
 	if err := a.CompactNow(context.Background(), ""); err != nil {
 		t.Fatalf("CompactNow: %v", err)
 	}
-	if sc := sessionContents(a.Session()); !strings.Contains(sc, "OWNER SUMMARY") {
-		t.Fatalf("session missing the owner's summary:\n%.200q", sc)
+	if sc := joinContents(visibleContext(a)); !strings.Contains(sc, "OWNER SUMMARY") {
+		t.Fatalf("projection missing the owner's summary:\n%.200q", sc)
 	}
 }
 
@@ -1765,9 +1716,9 @@ func TestCompactionCompleteSlotOwnerFinalSayAfterChain(t *testing.T) {
 	if calls != 2 {
 		t.Fatalf("owner consulted %d times, want 2 (chain, then strategy)", calls)
 	}
-	sc := sessionContents(a.Session())
+	sc := joinContents(visibleContext(a))
 	if !strings.Contains(sc, "OWNER SUMMARY") || strings.Contains(sc, "CHAIN SUMMARY") {
-		t.Fatalf("session = %.200q, want the strategy ruling persisted", sc)
+		t.Fatalf("projection = %.200q, want the strategy ruling persisted", sc)
 	}
 }
 

@@ -1,12 +1,12 @@
 // Run: tsx src/__tests__/transcript-selection-menu.test.tsx
 //
 // Regression coverage for transcript selection actions. Selected message text
-// exposes Add to Chat after pointer/keyboard selection, while the Wails shell
+// exposes Add to Chat after pointer/keyboard selection, while the desktop shell
 // also keeps its app-drawn right-click Copy menu:
 // - a non-collapsed selection inside .msg__body opens the menu and Copy
 //   writes the selection through the runtime clipboard bridge
 // - collapsed selections, non-message selections, editable targets, and
-//   plain-browser sessions (no window.runtime) never open the menu
+//   plain-browser sessions (no desktop shell) never open the menu
 // - a surviving message selection does not hijack right-clicks landing
 //   outside message bodies (project tree, tab bar, ... own those menus)
 // - the target message must itself touch the selection: selecting message A
@@ -24,6 +24,11 @@ import { createRoot } from "react-dom/client";
 import { TranscriptSelectionMenu } from "../components/TranscriptSelectionMenu";
 import { LocaleProvider } from "../lib/i18n";
 import { resetCustomShortcuts, saveCustomShortcut } from "../lib/keyboardShortcuts";
+import {
+  transcriptSelectionStore,
+  type TranscriptSelectableRow,
+} from "../lib/transcriptSelectionStore";
+import { installDesktopHostStub } from "./desktopHostStub";
 
 let passed = 0;
 let failed = 0;
@@ -94,18 +99,21 @@ async function dispatchContextMenu(target: Element, clientX = 120, clientY = 80)
   return event;
 }
 
+function transcriptActionHost(): HTMLElement | null {
+  return document.querySelector<HTMLElement>('.transcript-selection-action[data-surface="transcript"]');
+}
+
+function transcriptActionState(): string | undefined {
+  return transcriptActionHost()?.dataset.state;
+}
+
 console.log("\ntranscript selection menu");
 
 {
   const dom = installDom();
   const clipboard: string[] = [];
   const additions: string[] = [];
-  (window as unknown as { runtime: { ClipboardSetText: (text: string) => Promise<boolean> } }).runtime = {
-    ClipboardSetText: async (text: string) => {
-      clipboard.push(text);
-      return true;
-    },
-  };
+  installDesktopHostStub({}, { clipboardWrites: clipboard });
 
   document.body.insertAdjacentHTML(
     "beforeend",
@@ -131,6 +139,28 @@ console.log("\ntranscript selection menu");
     await flushTimers();
   });
 
+  const stableActionHost = transcriptActionHost();
+  eq(document.querySelectorAll('.transcript-selection-action[data-surface="transcript"]').length, 1, "transcript owns exactly one stable action host");
+  eq(transcriptActionState(), "closed", "the stable action host starts closed");
+  eq(stableActionHost?.getAttribute("aria-hidden"), "true", "the closed action host is hidden from assistive technology");
+  eq(stableActionHost?.querySelector("button")?.getAttribute("tabindex"), "-1", "the closed action button leaves the tab order");
+  eq((stableActionHost?.querySelector("button") as HTMLButtonElement | null)?.disabled, true, "the closed action button cannot be activated");
+
+  for (let cycle = 1; cycle <= 4; cycle += 1) {
+    selectNodeText(msgBody.firstChild as Node);
+    await act(async () => {
+      msgBody.dispatchEvent(new window.MouseEvent("pointerup", { bubbles: true, button: 0 }));
+      await drainFrame();
+    });
+    eq(transcriptActionHost(), stableActionHost, `selection cycle ${cycle} reuses the stable action host`);
+    eq(transcriptActionState(), "open", `selection cycle ${cycle} opens the stable action host`);
+    await act(async () => {
+      document.dispatchEvent(new window.MouseEvent("pointerdown", { bubbles: true, button: 0 }));
+      await flushTimers();
+    });
+    eq(transcriptActionState(), "closed", `selection cycle ${cycle} closes without unmounting the host`);
+  }
+
   // Message selection opens the menu and suppresses the (already dead) default.
   selectNodeText(msgBody.firstChild as Node);
   const openEvent = await dispatchContextMenu(msgBody);
@@ -145,6 +175,7 @@ console.log("\ntranscript selection menu");
     await flushTimers();
   });
   eq(clipboard[0], "assistant reply text", "Copy writes the selection through the clipboard bridge");
+  eq(document.getSelection()?.isCollapsed, true, "Copy releases the browser selection after the clipboard write succeeds");
   eq(document.querySelector(".context-menu"), null, "transcript menu closes after Copy");
 
   // Releasing a pointer after selecting message text exposes the compact Add
@@ -158,12 +189,17 @@ console.log("\ntranscript selection menu");
   const addButton = document.querySelector(".transcript-selection-action button") as HTMLButtonElement | null;
   eq(addButton?.textContent?.includes("Add to Chat"), true, "pointer selection exposes Add to Chat");
   await act(async () => {
+    addButton?.dispatchEvent(new window.MouseEvent("pointerdown", { bubbles: true, button: 0 }));
+    await flushTimers();
+  });
+  eq(document.getSelection()?.isCollapsed, false, "clicking Add to Chat keeps the captured selection until activation");
+  await act(async () => {
     addButton?.click();
     await flushTimers();
   });
   eq(additions[0], "assistant reply text", "Add to Chat forwards the exact selected text");
   eq(document.getSelection()?.isCollapsed, true, "Add to Chat clears the browser selection");
-  eq(document.querySelector(".transcript-selection-action"), null, "Add to Chat closes the floating action");
+  eq(transcriptActionState(), "closed", "Add to Chat closes the floating action without unmounting it");
 
   // The shortcut is scoped to a live transcript selection, so it cannot steal
   // Cmd/Ctrl+L during normal app navigation.
@@ -185,23 +221,39 @@ console.log("\ntranscript selection menu");
     msgBody.dispatchEvent(new window.MouseEvent("pointerup", { bubbles: true, button: 0 }));
     await drainFrame();
   });
-  ok(document.querySelector(".transcript-selection-action") != null, "pointer selection re-exposes the floating action");
+  eq(transcriptActionState(), "open", "pointer selection re-exposes the floating action");
   await act(async () => {
     document.dispatchEvent(new window.KeyboardEvent("keydown", { key: "Escape", bubbles: true }));
     await flushTimers();
   });
-  eq(document.querySelector(".transcript-selection-action"), null, "Escape dismisses the floating action");
+  eq(transcriptActionState(), "closed", "Escape dismisses the floating action without unmounting it");
   eq(document.getSelection()?.isCollapsed, false, "Escape keeps the browser selection");
   await act(async () => {
     document.dispatchEvent(new window.KeyboardEvent("keyup", { key: "Escape", bubbles: true }));
     await drainFrame();
   });
-  eq(document.querySelector(".transcript-selection-action"), null, "the Escape keyup does not re-open the dismissed action");
+  eq(transcriptActionState(), "closed", "the Escape keyup does not re-open the dismissed action");
   await act(async () => {
     msgBody.dispatchEvent(new window.MouseEvent("pointerup", { bubbles: true, button: 0 }));
     await drainFrame();
   });
-  ok(document.querySelector(".transcript-selection-action") != null, "a fresh pointer gesture re-opens the dismissed action");
+  eq(transcriptActionState(), "open", "a fresh pointer gesture re-opens the dismissed action");
+
+  // A new left-click must release the previous browser range before the
+  // WebView's selectionchange event arrives. This keeps a stale selection from
+  // surviving a click elsewhere in the chat area.
+  selectNodeText(msgBody.firstChild as Node);
+  await act(async () => {
+    document.dispatchEvent(new window.MouseEvent("pointerdown", { bubbles: true, button: 0 }));
+    await flushTimers();
+  });
+  eq(document.getSelection()?.isCollapsed, true, "a new left-click clears the previous transcript selection");
+  eq(transcriptActionState(), "closed", "clearing the selection closes the floating action");
+  selectNodeText(msgBody.firstChild as Node);
+  await act(async () => {
+    msgBody.dispatchEvent(new window.MouseEvent("pointerup", { bubbles: true, button: 0 }));
+    await drainFrame();
+  });
 
   // Rebinding selection.addToChat through the shared shortcut registry remaps
   // both the handler and the visible hint; the old combo stops firing.
@@ -239,7 +291,7 @@ console.log("\ntranscript selection menu");
     msgBody.dispatchEvent(new window.MouseEvent("pointerup", { bubbles: true, button: 0 }));
     await drainFrame();
   });
-  ok(document.querySelector(".transcript-selection-action") != null, "selection opens the floating action before a tab switch");
+  eq(transcriptActionState(), "open", "selection opens the floating action before a tab switch");
   await act(async () => {
     root.render(
       <LocaleProvider>
@@ -248,7 +300,8 @@ console.log("\ntranscript selection menu");
     );
     await flushTimers();
   });
-  eq(document.querySelector(".transcript-selection-action"), null, "a tab switch discards the captured selection action");
+  eq(transcriptActionState(), "closed", "a tab switch discards the captured selection action without unmounting the host");
+  eq(document.getSelection()?.isCollapsed, true, "a tab switch clears the native transcript selection");
   await act(async () => {
     root.render(
       <LocaleProvider>
@@ -261,7 +314,11 @@ console.log("\ntranscript selection menu");
     document.dispatchEvent(new window.KeyboardEvent("keyup", { key: "Meta", bubbles: true }));
     await drainFrame();
   });
-  eq(document.querySelector(".transcript-selection-action"), null, "keyup over a hydration placeholder cannot re-summon the action");
+  eq(transcriptActionState(), "closed", "keyup over a hydration placeholder cannot re-summon the action");
+  selectNodeText(msgBody.firstChild as Node);
+  const disabledContextEvent = await dispatchContextMenu(msgBody);
+  eq(disabledContextEvent.defaultPrevented, false, "disabled selection handling leaves the native context menu alone");
+  eq(document.querySelector(".context-menu"), null, "disabled selection handling does not open a copy menu");
 
   selectNodeText(msgBody.firstChild as Node);
   await act(async () => {
@@ -274,6 +331,15 @@ console.log("\ntranscript selection menu");
   });
   await dispatchContextMenu(msgBody);
   ok(document.querySelector(".context-menu") != null, "the copy menu opens before a tab switch");
+  await act(async () => {
+    root.render(
+      <LocaleProvider>
+        <TranscriptSelectionMenu onAddToChat={(text) => additions.push(text)} resetKey="tab-b" enabled={false} />
+      </LocaleProvider>,
+    );
+    await flushTimers();
+  });
+  eq(document.querySelector(".context-menu"), null, "disabling selection handling closes an already-open copy menu");
   await act(async () => {
     root.render(
       <LocaleProvider>
@@ -348,7 +414,7 @@ console.log("\ntranscript selection menu");
 }
 
 {
-  // Plain browser (no window.runtime): the native menu owns right-click.
+  // Plain browser (no desktop shell): the browser context menu owns right-click.
   const dom = installDom();
   document.body.insertAdjacentHTML("beforeend", "<div class=\"msg__body\">browser text</div>");
   const msgBody = document.querySelector(".msg__body") as HTMLElement;
@@ -369,6 +435,111 @@ console.log("\ntranscript selection menu");
   eq(document.querySelector(".context-menu"), null, "plain browser never sees the app menu");
 
   await act(async () => {
+    root.unmount();
+  });
+  dom.window.close();
+}
+
+{
+  const dom = installDom();
+  const clipboard: string[] = [];
+  const additions: string[] = [];
+  installDesktopHostStub({}, { clipboardWrites: clipboard });
+  document.body.insertAdjacentHTML(
+    "beforeend",
+    '<div class="transcript__row" data-row-key="row-a"><div class="msg__body" data-transcript-selectable="message">alpha</div></div>' +
+      '<div class="transcript__row" data-row-key="row-b"><div class="msg__body" data-transcript-selectable="message">bravo</div></div>',
+  );
+  const first = document.querySelector<HTMLElement>('[data-row-key="row-a"] .msg__body')!;
+  const root = createRoot(document.getElementById("root") as HTMLElement);
+  const logicalRows = (resolvers?: Partial<Record<string, () => Promise<string>>>): TranscriptSelectableRow[] => [
+    {
+      rowKey: "row-a",
+      sourceText: "alpha",
+      contentRevision: 1,
+      resolveText: resolvers?.["row-a"] ?? (async () => "alpha"),
+    },
+    {
+      rowKey: "row-b",
+      sourceText: "bravo",
+      contentRevision: 1,
+      resolveText: resolvers?.["row-b"] ?? (async () => "bravo"),
+    },
+  ];
+  const selectLogical = (rows = logicalRows()) => {
+    transcriptSelectionStore.clear("test-reset");
+    transcriptSelectionStore.beginNative("tab-logical");
+    transcriptSelectionStore.promoteToLogical(
+      "tab-logical",
+      { rowKey: "row-a", textOffset: 1, affinity: "forward" },
+      { rowKey: "row-b", textOffset: 3, affinity: "forward" },
+      rows,
+    );
+    transcriptSelectionStore.settleLogical();
+  };
+
+  await act(async () => {
+    root.render(
+      <LocaleProvider>
+        <TranscriptSelectionMenu resetKey="tab-logical" onAddToChat={(text) => additions.push(text)} />
+      </LocaleProvider>,
+    );
+    await flushTimers();
+  });
+  await act(async () => {
+    selectLogical();
+    await flushTimers();
+  });
+  const logicalAdd = document.querySelector<HTMLButtonElement>(".transcript-selection-action button");
+  ok(logicalAdd != null, "settled logical selection exposes Add to Chat by snapshot id");
+  await act(async () => {
+    logicalAdd?.click();
+    await flushTimers();
+  });
+  eq(additions[0], "lpha\n\nbra", "logical Add to Chat resolves partial endpoints in document order");
+  eq(transcriptSelectionStore.getSnapshot().mode, "none", "logical Add to Chat clears the consumed snapshot");
+
+  await act(async () => {
+    selectLogical();
+    await flushTimers();
+  });
+  const logicalContextEvent = await dispatchContextMenu(first);
+  eq(logicalContextEvent.defaultPrevented, true, "right-click inside a logical selection opens the app menu");
+  const logicalCopy = document.querySelector<HTMLButtonElement>('.context-menu [role="menuitem"]');
+  await act(async () => {
+    logicalCopy?.click();
+    await flushTimers();
+  });
+  eq(clipboard[0], "lpha\n\nbra", "logical right-click Copy resolves the frozen snapshot");
+  eq(transcriptSelectionStore.getSnapshot().mode, "none", "successful logical Copy clears the snapshot");
+
+  let finishProjection!: (text: string) => void;
+  const delayedProjection = new Promise<string>((resolve) => { finishProjection = resolve; });
+  await act(async () => {
+    selectLogical(logicalRows({ "row-a": () => delayedProjection }));
+    await flushTimers();
+  });
+  const staleAdd = document.querySelector<HTMLButtonElement>(".transcript-selection-action button");
+  await act(async () => {
+    staleAdd?.click();
+    await flushTimers();
+  });
+  await act(async () => {
+    root.render(
+      <LocaleProvider>
+        <TranscriptSelectionMenu resetKey="tab-after-switch" onAddToChat={(text) => additions.push(text)} />
+      </LocaleProvider>,
+    );
+    await flushTimers();
+  });
+  await act(async () => {
+    finishProjection("alpha");
+    await flushTimers();
+  });
+  eq(additions.length, 1, "tab switch discards a late logical Add to Chat projection");
+
+  await act(async () => {
+    transcriptSelectionStore.clear("test-cleanup");
     root.unmount();
   });
   dom.window.close();

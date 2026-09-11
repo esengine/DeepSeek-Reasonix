@@ -194,7 +194,10 @@ func migrateLegacySessionsWithMarkers(srcDir, globalDest, marker, jsonlMarker st
 			continue
 		}
 		s := &Session{Messages: msgs}
-		if err := s.Save(dest); err != nil {
+		if err := s.SaveIfAbsent(dest); err != nil {
+			if errors.Is(err, os.ErrExist) {
+				continue
+			}
 			return imported, err
 		}
 		if eventsInfo != nil {
@@ -460,7 +463,10 @@ func migrateSubDirectory(subDir, globalDest string, projectDir func(string) stri
 				continue
 			}
 			s := &Session{Messages: msgs}
-			if err := s.Save(dest); err != nil {
+			if err := s.SaveIfAbsent(dest); err != nil {
+				if errors.Is(err, os.ErrExist) {
+					continue
+				}
 				return imported, err
 			}
 		} else if isNativeSessionEventLog(SessionEventLogPath(srcPath)) {
@@ -510,7 +516,7 @@ func saveNativeSessionCopy(src, dst string) error {
 	if err != nil {
 		return err
 	}
-	return session.Save(dst)
+	return session.SaveIfAbsent(dst)
 }
 
 func fileExists(path string) bool {
@@ -622,7 +628,7 @@ func transformAndCopyJsonl(src, dst string) error {
 	if err := tmp.Close(); err != nil {
 		return err
 	}
-	if err := os.Rename(tmpPath, dst); err != nil {
+	if err := publishFileNoReplace(tmpPath, dst); err != nil {
 		return err
 	}
 	ok = true
@@ -648,25 +654,25 @@ func dirExists(path string) bool {
 	return err == nil && info.IsDir()
 }
 
-// moveFlatImport re-homes a session the flat import left in the global dir.
-// The legacy event log's mtime was stamped onto the imported file, so a match
-// identifies it; a same-named native v1+ session never matches and stays put.
-func moveFlatImport(oldPath, newPath string, srcInfo os.FileInfo) bool {
-	if srcInfo == nil {
-		return false
+// publishFileNoReplace atomically publishes a completed sibling temp file
+// without replacing a destination another startup/import writer created.
+// The temp and destination share a directory, so a hard link is atomic and
+// portable across the filesystems Reasonix supports.
+func publishFileNoReplace(tmp, dst string) error {
+	if err := linkFileNoReplace(tmp, dst); err != nil {
+		return err
 	}
-	info, err := os.Stat(oldPath)
-	if err != nil {
-		return false
+	return os.Remove(tmp)
+}
+
+func linkFileNoReplace(src, dst string) error {
+	if err := os.Link(src, dst); err != nil {
+		if os.IsExist(err) {
+			return os.ErrExist
+		}
+		return err
 	}
-	d := info.ModTime().Sub(srcInfo.ModTime())
-	if d < -2*time.Second || d > 2*time.Second {
-		return false
-	}
-	if err := os.MkdirAll(filepath.Dir(newPath), 0o755); err != nil {
-		return false
-	}
-	return os.Rename(oldPath, newPath) == nil
+	return nil
 }
 
 // recordImportedTitle stores the legacy summary as the session's display title

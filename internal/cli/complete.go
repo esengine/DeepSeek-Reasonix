@@ -4,14 +4,18 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"slices"
 	"sort"
 	"strings"
 
 	"charm.land/lipgloss/v2"
+	rw "github.com/mattn/go-runewidth"
 
+	"reasonix/internal/config"
 	"reasonix/internal/control"
 	"reasonix/internal/fileref"
 	"reasonix/internal/i18n"
+	"reasonix/internal/plugin"
 	"reasonix/internal/skill"
 )
 
@@ -35,14 +39,17 @@ type compItem struct {
 }
 
 // completion is the live autocomplete menu state. Empty value = inactive.
-// replaceFrom is the byte offset in the input where the completed token starts
-// (0 for a slash line, the '@' index for an @-reference).
+// replaceFrom/replaceTo are byte offsets of the token span that accept replaces
+// (half-open [replaceFrom, replaceTo)). For a bare slash name, replaceFrom is 0
+// and replaceTo is len(value). For @-refs, replaceFrom is the '@' and replaceTo
+// is the first unescaped whitespace after the token (or end of input).
 type completion struct {
 	active      bool
 	kind        compKind
 	items       []compItem
 	sel         int
 	replaceFrom int
+	replaceTo   int
 }
 
 const (
@@ -57,9 +64,26 @@ const (
 	maxFileSearchItems = 20
 )
 
-// slashItems is the full set of slash commands offered for completion: the
-// built-in verbs, custom commands, skills (each as "/<name>"), and MCP prompts.
-func (m *chatTUI) slashItems() []compItem {
+// refreshHostAndInvalidateSlashCatalog reloads m.host from the controller and
+// drops the slash catalog so MCP prompts (and any host-backed menu entries)
+// rebuild on the next slashItems call. Use after connect/disconnect/remove/
+// import, MCPSurfaceReady, auth clear, and every other host mutation path.
+func (m *chatTUI) refreshHostAndInvalidateSlashCatalog() {
+	if m.ctrl != nil {
+		m.host = m.ctrl.Host()
+	}
+	m.invalidateSlashCatalog()
+}
+
+// setHostAndInvalidateSlashCatalog assigns a host pointer (e.g. from a model-
+// switch message) and invalidates the slash catalog.
+func (m *chatTUI) setHostAndInvalidateSlashCatalog(host *plugin.Host) {
+	m.host = host
+	m.invalidateSlashCatalog()
+}
+
+// buildSlashCatalog constructs the full slash menu from current sources.
+func (m *chatTUI) buildSlashCatalog() []compItem {
 	docsOwner := control.ResolveSlashCommandOwner(control.DocsSlashName, m.commands, m.skills)
 	docsBuiltin := "/" + control.ResolvedBuiltinSlashName(control.DocsSlashName, m.commands, m.skills)
 	items := renameSlashItem(builtinSlashItems(), "/docs", docsBuiltin)
@@ -99,8 +123,8 @@ func renameSlashItem(items []compItem, oldLabel, newLabel string) []compItem {
 			continue
 		}
 		items[i].label = newLabel
-		if strings.HasPrefix(items[i].insert, oldLabel) {
-			items[i].insert = newLabel + strings.TrimPrefix(items[i].insert, oldLabel)
+		if after, ok := strings.CutPrefix(items[i].insert, oldLabel); ok {
+			items[i].insert = newLabel + after
 		}
 		break
 	}
@@ -122,38 +146,101 @@ func removeSlashItems(items []compItem, label string) []compItem {
 // token under the cursor is "@…".
 func (m *chatTUI) updateCompletion() {
 	val := m.input.Value()
+	cursor := m.inputCursorByteOffset()
 
 	// An @-reference token under the cursor wins — it can appear mid-line, even
 	// inside a slash command's arguments (e.g. "/review @file").
-	if at, token, ok := activeAtToken(val); ok {
+	if at, end, token, ok := activeAtToken(val, cursor); ok {
 		if items := m.atItems(token); len(items) > 0 {
-			m.setCompletion(compAt, items, at)
+			m.setCompletion(compAt, items, at, end)
 			return
 		}
 	}
 
+	// Slash completion only when the line is a pure slash command being typed
+	// from the start (not mid-line after free text). Use the full value so a
+	// mid-token cursor still filters the catalog without rewriting the line.
 	if strings.HasPrefix(val, "/") {
 		if items, from, ok := m.explicitSubcommandItems(val); ok && len(items) > 0 {
-			m.setCompletion(compSlashArg, items, from)
+			m.setCompletion(compSlashArg, items, from, tokenEnd(val, from))
 			return
 		}
 		if !strings.ContainsAny(val, " \t\n") {
-			// Still naming the command itself.
+			// Still naming the command itself. Catalog is cached; filter is cheap.
 			if items := fuzzyFilterSlash(m.slashItems(), val); len(items) > 0 {
-				m.setCompletion(compSlash, items, 0)
+				m.setCompletion(compSlash, items, 0, len(val))
 				return
 			}
 		} else if m.bareSubcommandSpace(val) {
+			m.endSlashArgSnapshot()
 			m.completion = completion{}
 			return
 		} else if items, from, ok := m.slashArgItems(val); ok && len(items) > 0 {
 			// Past the command word — complete its structured arguments.
-			m.setCompletion(compSlashArg, items, from)
+			m.setCompletion(compSlashArg, items, from, tokenEnd(val, from))
 			return
 		}
 	}
 
 	m.completion = completion{}
+}
+
+// inputCursorByteOffset returns the byte offset of the insertion caret in
+// input.Value(). Falls back to len(Value) when layout is unavailable so
+// completion still works in unit tests that never size the window.
+func (m *chatTUI) inputCursorByteOffset() int {
+	val := m.input.Value()
+	if val == "" {
+		return 0
+	}
+	// Prefer the visual-row model used by mouse selection: it maps the caret
+	// to a stable rune offset into Value().
+	if m.width > 0 {
+		rows := m.composerRows()
+		if len(rows) > 0 {
+			if cur := m.input.Cursor(); cur != nil {
+				absRow := m.input.ScrollYOffset() + cur.Y
+				if absRow >= 0 && absRow < len(rows) {
+					row := rows[absRow]
+					// cur.X is screen-relative and includes the "❯ " prompt
+					// gutter (composerPromptWidth columns). Subtract it so
+					// we measure content columns only.
+					col := max(cur.X-composerPromptWidth, 0)
+					visual := 0
+					for _, cell := range row.cells {
+						w := rw.RuneWidth(cell.r)
+						if visual+w > col {
+							if cell.offset >= 0 {
+								// cell.offset is a rune index into Value.
+								return runeOffsetToByte(val, cell.offset)
+							}
+							break
+						}
+						visual += w
+					}
+					if row.endOffset >= 0 {
+						return runeOffsetToByte(val, row.endOffset)
+					}
+				}
+			}
+		}
+	}
+	return len(val)
+}
+
+// runeOffsetToByte converts a rune index into Value() into a byte index.
+func runeOffsetToByte(val string, runeOff int) int {
+	if runeOff <= 0 {
+		return 0
+	}
+	i := 0
+	for ri := range val {
+		if i == runeOff {
+			return ri
+		}
+		i++
+	}
+	return len(val)
 }
 
 // slashArgItems completes the arguments of a slash command (everything after the
@@ -163,24 +250,24 @@ func (m *chatTUI) updateCompletion() {
 // currently /mcp; custom commands and MCP prompts take free-form template args,
 // so they yield nothing.
 func (m *chatTUI) slashArgItems(val string) ([]compItem, int, bool) {
-	if items, from, ok := m.workModeArgItems(val); ok {
-		return items, from, len(items) > 0
-	}
 	if items, from, ok := m.branchArgItems(val); ok {
+		m.endSlashArgSnapshot()
 		return items, from, len(items) > 0
 	}
 	if items, from, ok := m.resumeArgItems(val); ok {
+		m.endSlashArgSnapshot()
 		return items, from, len(items) > 0
 	}
 	if items, from, ok := m.themeArgItems(val); ok {
+		m.endSlashArgSnapshot()
 		return items, from, len(items) > 0
 	}
 	// Delegate to the shared completion logic so the chat TUI and the desktop
 	// offer identical sub-command hints. We supply the data from the TUI's own
 	// cached lists (no live controller needed), build the items, and adapt them
 	// to compItem.
-	items, from := control.SlashArgItems(val, m.slashArgData())
-	if len(items) == 0 {
+	items, from, applies := m.cachedSlashArgItems(val)
+	if !applies || len(items) == 0 {
 		return nil, 0, false
 	}
 	return slashItemsToComps(items), from, true
@@ -198,6 +285,11 @@ func (m *chatTUI) slashArgData() control.ArgData {
 		ProviderNames:   providerNames(),
 		CurrentProvider: curProvider,
 		PluginNames:     pluginArgNames(),
+	}
+	if strings.TrimSpace(m.modelRef) != "" {
+		if entry, _, err := m.currentConfigProvider(); err == nil {
+			data.EffortLevels = slices.Clone(config.EffortCapabilityForEntry(entry).Levels)
+		}
 	}
 	if m.ctrl != nil {
 		data.DisabledSkills = m.ctrl.DisabledSkills()
@@ -221,7 +313,9 @@ func (m *chatTUI) explicitSubcommandItems(val string) ([]compItem, int, bool) {
 	default:
 		return nil, 0, false
 	}
-	items, _ := control.SlashArgItems(cmd+" ", m.slashArgData())
+	// These question-mark overlays only list static root subcommands. Dynamic
+	// data is resolved after the user descends into an argument that needs it.
+	items, _ := control.SlashArgItems(cmd+" ", control.ArgData{})
 	if len(items) == 0 {
 		return nil, 0, false
 	}
@@ -294,13 +388,25 @@ func (m *chatTUI) branchArgItems(val string) ([]compItem, int, bool) {
 }
 
 // setCompletion installs items, preserving the selection index only while the
-// same menu kind stays open.
-func (m *chatTUI) setCompletion(kind compKind, items []compItem, replaceFrom int) {
+// same menu kind stays open. replaceFrom/replaceTo form a half-open byte span
+// of the token that acceptCompletion will replace.
+func (m *chatTUI) setCompletion(kind compKind, items []compItem, replaceFrom, replaceTo int) {
 	sel := 0
 	if m.completion.active && m.completion.kind == kind && m.completion.sel < len(items) {
 		sel = m.completion.sel
 	}
-	m.completion = completion{active: true, kind: kind, items: items, sel: sel, replaceFrom: replaceFrom}
+	if replaceTo < replaceFrom {
+		replaceTo = replaceFrom
+	}
+	m.completion = completion{
+		active: true, kind: kind, items: items, sel: sel,
+		replaceFrom: replaceFrom, replaceTo: replaceTo,
+	}
+}
+
+func (m *chatTUI) dismissCompletion() {
+	m.completion = completion{}
+	m.endSlashArgSnapshot()
 }
 
 // fuzzyFilterSlash returns the slash-menu items that match query as a
@@ -359,31 +465,59 @@ func subsequenceMatch(target, query string) bool {
 	return false
 }
 
-// activeAtToken finds the @-reference token ending at the cursor (assumed at the
-// input's end). The '@' must start the line or follow whitespace, so emails
-// like "a@b" don't trigger it. A backslash-escaped space or tab is part of the
-// token (the form EscapeRefPath inserts for paths with spaces), so completion
-// can descend through such directories. Returns the '@' offset and the text
-// after it.
-func activeAtToken(val string) (int, string, bool) {
-	for i := len(val) - 1; i >= 0; i-- {
+// activeAtToken finds the @-reference token under the cursor. cursor is a byte
+// offset into val; when out of range the scan uses the end of the string.
+// The '@' must start the line or follow whitespace, so emails like "a@b" don't
+// trigger it. A backslash-escaped space or tab is part of the token.
+//
+// Returns (at, end, query, ok):
+//   - [at, end) is the full token span to replace on accept (including '@'),
+//     extending past the caret to the next unescaped whitespace so mid-token
+//     accept never leaves a dangling suffix ("@foo|bar" → "@file.md ", not
+//     "@file.mdbar").
+//   - query is only the text after '@' up to the caret, used for menu filtering
+//     ("@fo|o" filters as "fo", not "foo").
+func activeAtToken(val string, cursor int) (at, end int, query string, ok bool) {
+	if cursor < 0 || cursor > len(val) {
+		cursor = len(val)
+	}
+	for i := cursor - 1; i >= 0; i-- {
 		switch val[i] {
 		case ' ', '\t':
 			if i > 0 && val[i-1] == '\\' {
 				i-- // escaped whitespace stays inside the token
 				continue
 			}
-			return 0, "", false // hit whitespace before an '@' → no active token
+			return 0, 0, "", false
 		case '\n':
-			return 0, "", false
+			return 0, 0, "", false
 		case '@':
 			if i == 0 || val[i-1] == ' ' || val[i-1] == '\t' || val[i-1] == '\n' {
-				return i, val[i+1:], true
+				end = tokenEnd(val, i+1)
+				queryEnd := min(max(cursor, i+1), end)
+				return i, end, val[i+1 : queryEnd], true
 			}
-			return 0, "", false
+			return 0, 0, "", false
 		}
 	}
-	return 0, "", false
+	return 0, 0, "", false
+}
+
+// tokenEnd returns the exclusive byte end of a path/ref token starting at from
+// (just after '@'). Stops at unescaped whitespace or newline.
+func tokenEnd(val string, from int) int {
+	for i := from; i < len(val); i++ {
+		switch val[i] {
+		case ' ', '\t':
+			if i > 0 && val[i-1] == '\\' {
+				continue
+			}
+			return i
+		case '\n':
+			return i
+		}
+	}
+	return len(val)
 }
 
 // atItems builds the @-reference menu for a token. A "server:uri" token whose
@@ -457,10 +591,7 @@ func (m *chatTUI) fileItems(token string) []compItem {
 		for _, it := range items {
 			seen[strings.TrimPrefix(it.insert, "@")] = true
 		}
-		remaining := maxCompItems - len(items)
-		if remaining > maxFileSearchItems {
-			remaining = maxFileSearchItems
-		}
+		remaining := min(maxCompItems-len(items), maxFileSearchItems)
 		results := m.searchFileRefs(fsFrag)
 		if len(results) > remaining {
 			results = results[:remaining]
@@ -518,12 +649,7 @@ func (m *chatTUI) isMCPServer(name string) bool {
 	if m.host == nil {
 		return false
 	}
-	for _, s := range m.host.ServerNames() {
-		if s == name {
-			return true
-		}
-	}
-	return false
+	return slices.Contains(m.host.ServerNames(), name)
 }
 
 // resourceItems lists MCP resources as @server:uri completions. When server is
@@ -588,40 +714,73 @@ func (m *chatTUI) completionSelectedInsertPresent() bool {
 		return false
 	}
 	val := m.input.Value()
-	if m.completion.replaceFrom > len(val) {
+	rf, rt := m.completion.replaceFrom, m.completion.replaceTo
+	if rf < 0 || rf > len(val) {
 		return false
 	}
-	return val[m.completion.replaceFrom:] == m.completion.items[m.completion.sel].insert
+	if rt < rf || rt > len(val) {
+		rt = len(val)
+	}
+	return val[rf:rt] == m.completion.items[m.completion.sel].insert
 }
 
 // acceptCompletion applies the selected item to the input, then recomputes the
 // menu from the new value: it re-opens one level deeper (a descended directory
 // or a freshly completed command's arguments) or closes when nothing applies.
+// Cursor moves to the end of the inserted token only on accept — ordinary
+// keystrokes never call this path, so mid-line typing keeps its caret.
 func (m *chatTUI) acceptCompletion() {
 	if m.completion.sel >= len(m.completion.items) {
-		m.completion = completion{}
+		m.dismissCompletion()
 		return
 	}
 	it := m.completion.items[m.completion.sel]
 	val := m.input.Value()
 	rf := m.completion.replaceFrom
-	if rf > len(val) {
-		rf = len(val)
+	rt := m.completion.replaceTo
+	if rf < 0 || rf > len(val) {
+		rf = 0
 	}
-	m.input.SetValue(val[:rf] + it.insert)
-	m.input.CursorEnd()
+	// replaceTo must be set by setCompletion. Hand-built test completions may
+	// leave it at 0; treat inverted/empty whole-line spans as "to end".
+	if rt < rf || rt > len(val) {
+		rt = len(val)
+	} else if rt == rf && rf == 0 && len(val) > 0 {
+		// Bare slash replace with unset replaceTo: replace the whole line.
+		rt = len(val)
+	}
+	// Replace the full token span [rf, rt); keep any suffix after the token
+	// so "see @foo and more" + accept @foobar.md becomes
+	// "see @foobar.md and more" (not "@foobar.mdand" or "@foobar.mdfoo").
+	newVal := val[:rf] + it.insert + val[rt:]
+	insertEnd := rf + len(it.insert)
+	m.input.SetValue(newVal)
+	// Place caret at the end of the inserted completion only. Fall back to
+	// CursorEnd when the layout has no width yet (unit tests).
+	if m.width > 0 {
+		m.setComposerCursor(len([]rune(newVal[:min(insertEnd, len(newVal))])))
+	} else {
+		m.input.CursorEnd()
+	}
 	if it.descend || strings.HasSuffix(it.insert, " ") {
 		m.updateCompletion()
 		return
 	}
 	m.updateCompletion() // re-filter for arg completion (e.g. /resume → numbered sessions)
+	if !m.completion.active {
+		m.endSlashArgSnapshot()
+		return
+	}
 	// If the completion re-opened with the same single item the user just
 	// selected (i.e. the token was already typed), close it so the next Enter
 	// submits the command rather than being captured again by acceptCompletion.
 	if m.completion.active && len(m.completion.items) == 1 {
-		tok := m.input.Value()[m.completion.replaceFrom:]
-		if tok == m.completion.items[0].insert {
-			m.completion = completion{}
+		rf, rt := m.completion.replaceFrom, m.completion.replaceTo
+		val := m.input.Value()
+		if rf >= 0 && rf <= len(val) && rt >= rf && rt <= len(val) {
+			if val[rf:rt] == m.completion.items[0].insert {
+				m.dismissCompletion()
+			}
 		}
 	}
 }
@@ -655,18 +814,9 @@ func (m chatTUI) renderCompletion() string {
 	items := m.completion.items
 	start := 0
 	if len(items) > maxCompRows {
-		start = m.completion.sel - maxCompRows/2
-		if start < 0 {
-			start = 0
-		}
-		if start > len(items)-maxCompRows {
-			start = len(items) - maxCompRows
-		}
+		start = min(max(m.completion.sel-maxCompRows/2, 0), len(items)-maxCompRows)
 	}
-	end := start + maxCompRows
-	if end > len(items) {
-		end = len(items)
-	}
+	end := min(start+maxCompRows, len(items))
 
 	var b strings.Builder
 	for i := start; i < end; i++ {

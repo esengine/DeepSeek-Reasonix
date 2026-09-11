@@ -86,6 +86,18 @@ func TestGenManifest(t *testing.T) {
 	if m.Version != "v1.2.0" {
 		t.Fatalf("version = %q, want v1.2.0", m.Version)
 	}
+	// Published v1.38.x readers accept only empty/versioned-v1. They must stop
+	// before the old helper can discard the app tree. DownloadPage stays usable.
+	for group, assets := range map[string]map[string]update.Asset{"platforms": m.Platforms, "native_packages": m.NativePackages, "downloads": m.Downloads} {
+		for name, asset := range assets {
+			if asset.InstallLayout != update.ElectronInstallLayout {
+				t.Errorf("%s/%s lacks the manual migration boundary: %q", group, name, asset.InstallLayout)
+			}
+			if asset.InstallLayout == "" || asset.InstallLayout == "versioned-v1" {
+				t.Errorf("v1.38.x would hand %s to the incompatible old installer", name)
+			}
+		}
+	}
 	if m.DownloadPage != "https://reasonix.io/?download=desktop#start" {
 		t.Fatalf("download_page = %q, want official install page", m.DownloadPage)
 	}

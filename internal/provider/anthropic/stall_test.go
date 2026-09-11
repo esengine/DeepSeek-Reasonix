@@ -12,6 +12,12 @@ import (
 	"reasonix/internal/provider"
 )
 
+func TestDefaultStreamIdleTimeoutIsFiveMinutes(t *testing.T) {
+	if defaultStreamIdleTimeout != 300*time.Second {
+		t.Fatalf("default stream idle timeout = %s, want 5m", defaultStreamIdleTimeout)
+	}
+}
+
 // TestStreamStallTimesOut covers issue #3374 for the Anthropic provider: a
 // half-open connection sends the SSE head then goes silent without an RST, which
 // would hang scanner.Scan() forever. The idle watchdog must surface a stall error.

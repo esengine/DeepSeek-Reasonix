@@ -85,7 +85,34 @@ func TestRunOutputJSONIncludesCurrencyAwareCostFields(t *testing.T) {
 	}
 }
 
+func TestRunOutputJSONTotalsMoreThanAuditLimit(t *testing.T) {
+	var out bytes.Buffer
+	sink := newRunOutputSink(&out, runOutputJSON)
+	for range 65 {
+		sink.Emit(event.Event{
+			Kind:    event.Usage,
+			Usage:   &provider.Usage{PromptTokens: 1_000_000},
+			Pricing: &provider.Pricing{Input: 1, Currency: "USD"},
+		})
+	}
+	if err := sink.Finalize("abc", time.Now(), nil); err != nil {
+		t.Fatal(err)
+	}
+	var result runResult
+	if err := json.Unmarshal(out.Bytes(), &result); err != nil {
+		t.Fatal(err)
+	}
+	if !result.CostComplete || result.TotalCost != 65 || result.Currency != "USD" {
+		t.Fatalf("65-event total was truncated: %+v", result)
+	}
+	if result.CostQuote == nil || result.CostQuote.Selected == nil || result.CostQuote.Selected.Amount != "65" {
+		t.Fatalf("65-event aggregate quote = %+v", result.CostQuote)
+	}
+}
+
 func TestRunOutputJSONRejectsMixedPricingCurrencies(t *testing.T) {
+	// Mixed originals no longer error: they emit original_costs + cost_complete=false
+	// when a shared display valuation is unavailable (no FX table in unit test).
 	var out bytes.Buffer
 	sink := newRunOutputSink(&out, runOutputJSON)
 	for _, currency := range []string{"$", "¥"} {
@@ -95,12 +122,18 @@ func TestRunOutputJSONRejectsMixedPricingCurrencies(t *testing.T) {
 			Pricing: &provider.Pricing{Input: 1, Currency: currency},
 		})
 	}
-	err := sink.Finalize("abc", time.Now(), nil)
-	if err == nil || !strings.Contains(err.Error(), "mixed pricing currencies") {
-		t.Fatalf("Finalize mixed currencies error = %v", err)
+	if err := sink.Finalize("abc", time.Now(), nil); err != nil {
+		t.Fatalf("Finalize mixed currencies: %v", err)
 	}
-	if out.Len() != 0 {
-		t.Fatalf("mixed-currency JSON should not emit a misleading total: %s", out.String())
+	var result runResult
+	if err := json.Unmarshal(out.Bytes(), &result); err != nil {
+		t.Fatal(err)
+	}
+	if !result.CostComplete || result.DisplayComplete || result.DisplayStatus != "bucketed" {
+		t.Fatalf("expected complete cost facts but bucketed display, got %+v", result)
+	}
+	if len(result.OriginalCosts) < 2 {
+		t.Fatalf("expected per-currency original_costs, got %+v", result.OriginalCosts)
 	}
 }
 
@@ -242,10 +275,34 @@ func TestRunOutputEventsJSONLClassifiesRecoveryPauseAsControlledOutcome(t *testi
 	}
 }
 
+func TestRunOutputJSONPreservesCompletionUncertainAsControlledOutcome(t *testing.T) {
+	var out bytes.Buffer
+	sink := newRunOutputSink(&out, runOutputJSON)
+	runErr := &agent.CompletionUncertainError{Cause: agent.CompletionUncertainContextTool}
+	if err := sink.Finalize("abc", time.Now(), runErr); err != nil {
+		t.Fatal(err)
+	}
+	var result runResult
+	if err := json.Unmarshal(out.Bytes(), &result); err != nil {
+		t.Fatal(err)
+	}
+	if result.IsError || result.Subtype != event.TurnOutcomeCompletionUncertain || result.Result != runErr.Error() || result.NumTurns != 1 {
+		t.Fatalf("completion uncertain result = %+v", result)
+	}
+}
+
 func TestClassifyRunCompletion(t *testing.T) {
 	pause := fmt.Errorf("wrapped: %w", &agent.RecoveryPauseError{Message: "paused"})
 	if got := classifyRunCompletion(pause); got.outcome != event.TurnOutcomeRecoveryPaused || got.isError || got.exitCode != 0 {
 		t.Fatalf("pause completion = %+v", got)
+	}
+	uncertain := fmt.Errorf("wrapped: %w", &agent.CompletionUncertainError{Cause: agent.CompletionUncertainContextTool})
+	if got := classifyRunCompletion(uncertain); got.outcome != event.TurnOutcomeCompletionUncertain || got.subtype != event.TurnOutcomeCompletionUncertain || got.isError || got.exitCode != 1 {
+		t.Fatalf("completion uncertain = %+v", got)
+	}
+	incomplete := fmt.Errorf("wrapped: %w", &agent.IncompleteReadError{Reason: "page budget"})
+	if got := classifyRunCompletion(incomplete); got.outcome != event.TurnOutcomeIncompleteRead || got.subtype != event.TurnOutcomeIncompleteRead || got.isError || got.exitCode != 1 {
+		t.Fatalf("incomplete read = %+v", got)
 	}
 	if got := classifyRunCompletion(errors.New("provider failed")); got.outcome != "" || !got.isError || got.exitCode != 1 {
 		t.Fatalf("error completion = %+v", got)

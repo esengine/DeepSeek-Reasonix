@@ -120,10 +120,6 @@ func run(args []string) int {
 	return 0
 }
 
-func migrate(installRoot, activeVersion string) error {
-	return migrateWithRelaunch(installRoot, activeVersion, true)
-}
-
 func migrateWithRelaunch(installRoot, activeVersion string, relaunch bool) error {
 	var err error
 	activeVersion, err = normalizeActiveVersion(activeVersion)
@@ -187,6 +183,14 @@ func migrateWithRelaunch(installRoot, activeVersion string, relaunch bool) error
 		} else {
 			return fmt.Errorf("migrate: flat update helper %s is required", helperName)
 		}
+	}
+	shellMembers, err := installlayout.ShellMembers(installRoot, runtime.GOOS)
+	if err != nil {
+		return fmt.Errorf("migrate shell: %w", err)
+	}
+	for _, member := range shellMembers {
+		members = append(members, member)
+		requiredNames = append(requiredNames, member.Name)
 	}
 
 	// Old Linux updaters only publish desktop, CLI, and the compatibility
@@ -269,6 +273,17 @@ func activateInstallerStaging(installRoot, activeVersion, stagingRoot string) er
 	members := make([]installlayout.Member, 0, len(requiredNames))
 	for _, name := range requiredNames {
 		members = append(members, installlayout.Member{Name: name, Path: filepath.Join(stagingRoot, name)})
+	}
+	shellMembers, err := installlayout.ShellMembers(stagingRoot, runtime.GOOS)
+	if err != nil {
+		return fmt.Errorf("installer shell: %w", err)
+	}
+	if len(shellMembers) == 0 {
+		return fmt.Errorf("installer shell is missing; use the complete installer")
+	}
+	for _, member := range shellMembers {
+		members = append(members, member)
+		requiredNames = append(requiredNames, member.Name)
 	}
 
 	launcherName := installlayout.LauncherBinaryName()

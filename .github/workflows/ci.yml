@@ -72,6 +72,10 @@ jobs:
   test:
     needs: changes
     if: always()
+    # Backstop against a wedged step holding the workflow's concurrency group:
+    # the Windows full-suite step has outlived its own timeout and kept the job
+    # alive. Normal full-suite wall time is 8-12 minutes per platform.
+    timeout-minutes: 45
     strategy:
       fail-fast: false
       matrix:
@@ -88,6 +92,11 @@ jobs:
         with:
           go-version-file: go.mod
           cache: true
+
+      - if: env.RUN_STEPS == 'true' && runner.os == 'Windows'
+        uses: actions/setup-node@v7
+        with:
+          node-version: "22"
 
       - name: Install and verify Linux sandbox backend
         if: env.RUN_STEPS == 'true' && runner.os == 'Linux'
@@ -133,21 +142,46 @@ jobs:
           REASONIX_RELEASE_CACHE_GUARD: "1"
         run: go test ./...
 
-      # Pull requests run a Windows smoke suite: the packages that actually
-      # carry *_windows.go code, the startup/checkpoint packages with portable
-      # filesystem contracts, plus cmd/. The full ./... sweep stays on pushes
-      # to main-v2; the Unix legs always run the full suite.
+      # Agent, boot and control own isolated Windows runners on PRs and pushes.
+      # The shared selector excludes them here, preserving platform smoke
+      # coverage without competing durable-session I/O or duplicate execution.
       - name: test (Windows smoke)
         if: env.RUN_STEPS == 'true' && runner.os == 'Windows' && github.event_name == 'pull_request'
-        timeout-minutes: 10
+        timeout-minutes: 15
         env:
           REASONIX_RELEASE_CACHE_GUARD: "1"
           WINDOWS_SANDBOX_WAIT_MS: "20000"
-        run: go test -p 4 -timeout=3m ./internal/agent/... ./internal/boot/... ./internal/checkpoint/... ./internal/cli/... ./internal/control/... ./internal/desktoplauncher/... ./internal/filelock/... ./internal/fileutil/... ./internal/hook/... ./internal/instruction/... ./internal/mcplaunch/... ./internal/notify/... ./internal/proc/... ./internal/remote/... ./internal/repair/... ./internal/sandbox/... ./internal/sysproxy/... ./internal/workspacelease/... ./cmd/...
+        run: node scripts/windows-go-tests.mjs smoke
 
+      # The general Windows PR smoke list intentionally omits internal/tool.
+      # Keep the session-temp portability contract covered without widening the
+      # leg to every tool test: two real PowerShell launches must share the
+      # injected TMPDIR/TMP/TEMP directory.
+      - name: test (Windows session temp)
+        if: env.RUN_STEPS == 'true' && runner.os == 'Windows' && github.event_name == 'pull_request'
+        timeout-minutes: 3
+        run: go test -timeout=2m -run '^TestBashSharesSessionTempAcrossCalls$' ./internal/tool/builtin
+
+      # Serve and taskmonitor are outside the general Windows PR smoke list.
+      # Cover runtime identities and snapshot publication before mainline push.
+      - name: test (Windows runtime status and task snapshots)
+        if: env.RUN_STEPS == 'true' && runner.os == 'Windows' && github.event_name == 'pull_request'
+        timeout-minutes: 5
+        run: go test -timeout=2m -run '^TestRuntimeStateHTTP|^TestFileStoreSaveTaskWaitsForTransientSnapshotReader$' ./internal/serve ./internal/taskmonitor
+
+      # Shell execution contract: PowerShell identity, Chinese workspace paths,
+      # UTF-8 output, and ExitCode retention must gate PRs on native Windows.
+      # Keep this focused (not full ./internal/tool) so the smoke budget holds.
+      - name: test (Windows shell execution contract)
+        if: env.RUN_STEPS == 'true' && runner.os == 'Windows' && github.event_name == 'pull_request'
+        timeout-minutes: 5
+        run: go test -timeout=3m -run '^TestBashPowerShellExecuteDetailedContract$|^TestBashPowerShell51PreflightRejectsAndAndDetailed$|^TestBashPowerShellOutputIsUTF8$|^TestBashPowerShellSurfacesNonZeroExit$|^TestBashPowerShellRejectsChaining$' ./internal/tool/builtin
+
+      # Enumerate the entire module and run every remaining package. The union
+      # with the isolated jobs is exhaustive and disjoint, including new packages.
       - name: test (full)
         if: env.RUN_STEPS == 'true' && runner.os == 'Windows' && github.event_name != 'pull_request'
-        timeout-minutes: 10
+        timeout-minutes: 20
         env:
           # Run the prompt-cache prefix-stability guard (TestCacheHit*) in CI: a
           # regression there silently tanks the cache hit rate the project is
@@ -156,13 +190,66 @@ jobs:
           # Bound sandbox helper children in Windows tests so a failed OS-level
           # launch cannot pin the Actions step after Go's package timeout fires.
           WINDOWS_SANDBOX_WAIT_MS: "20000"
-        run: go test -p 4 -timeout=3m ./...
+        run: node scripts/windows-go-tests.mjs full
 
       - name: test (Scoop desktop launch)
         if: env.RUN_STEPS == 'true' && runner.os == 'Windows'
         timeout-minutes: 10
         shell: powershell
         run: .\scripts\test-scoop-desktop-launch.ps1
+
+  windows-control:
+    needs: changes
+    if: always()
+    runs-on: windows-latest
+    env:
+      RUN_STEPS: ${{ github.event_name != 'pull_request' || needs.changes.outputs.code != 'false' }}
+    steps:
+      - if: env.RUN_STEPS == 'true'
+        uses: actions/checkout@v7
+
+      - if: env.RUN_STEPS == 'true'
+        uses: actions/setup-go@v7
+        with:
+          go-version-file: go.mod
+          cache: true
+
+      - if: env.RUN_STEPS == 'true'
+        uses: actions/setup-node@v7
+        with:
+          node-version: "22"
+
+      - name: test
+        if: env.RUN_STEPS == 'true'
+        timeout-minutes: 10
+        env:
+          REASONIX_RELEASE_CACHE_GUARD: "1"
+          WINDOWS_SANDBOX_WAIT_MS: "20000"
+        run: node scripts/windows-go-tests.mjs control
+
+  windows-isolated:
+    needs: changes
+    if: always() && (github.event_name != 'pull_request' || needs.changes.outputs.code != 'false')
+    runs-on: windows-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        group: [agent, boot]
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-go@v7
+        with:
+          go-version-file: go.mod
+          cache: true
+      - uses: actions/setup-node@v7
+        with:
+          node-version: "22"
+      - name: test
+        timeout-minutes: 10
+        env:
+          REASONIX_RELEASE_CACHE_GUARD: "1"
+          WINDOWS_SANDBOX_WAIT_MS: "20000"
+        run: node scripts/windows-go-tests.mjs ${{ matrix.group }}
 
   race:
     needs: changes
@@ -228,7 +315,7 @@ jobs:
         uses: actions/checkout@v7
 
       - if: env.RUN_STEPS == 'true'
-        uses: actions/setup-go@v6
+        uses: actions/setup-go@v7
         with:
           go-version-file: sdk/go/go.mod
 
@@ -266,8 +353,105 @@ jobs:
         run: go test -race ./...
 
   desktop:
+    needs: [changes, desktop-prepare, desktop-go, desktop-frontend, desktop-browser]
+    if: always()
+    runs-on: ubuntu-latest
+    steps:
+      - name: Verify desktop validation jobs
+        env:
+          CHANGES_RESULT: ${{ needs.changes.result }}
+          SHOULD_RUN: ${{ github.event_name != 'pull_request' || needs.changes.outputs.desktop != 'false' }}
+          PREPARE_RESULT: ${{ needs.desktop-prepare.result }}
+          GO_RESULT: ${{ needs.desktop-go.result }}
+          FRONTEND_RESULT: ${{ needs.desktop-frontend.result }}
+          BROWSER_RESULT: ${{ needs.desktop-browser.result }}
+        run: |
+          test "$CHANGES_RESULT" = success
+          expected=skipped
+          if [ "$SHOULD_RUN" = true ]; then expected=success; fi
+          test "$PREPARE_RESULT" = "$expected"
+          test "$GO_RESULT" = "$expected"
+          test "$FRONTEND_RESULT" = "$expected"
+          test "$BROWSER_RESULT" = "$expected"
+
+  desktop-frontend:
+    needs: [changes, desktop-prepare]
+    if: always() && needs.desktop-prepare.result == 'success' && (github.event_name != 'pull_request' || needs.changes.outputs.desktop != 'false')
+    runs-on: ubuntu-22.04
+    defaults:
+      run:
+        working-directory: desktop
+    steps:
+      - uses: actions/checkout@v7
+      - uses: pnpm/action-setup@v6.1.0
+        with:
+          version: 10
+          run_install: false
+      - uses: actions/setup-node@v7
+        with:
+          node-version: "24"
+          cache: pnpm
+          cache-dependency-path: desktop/pnpm-lock.yaml
+      - run: pnpm --dir frontend install --frozen-lockfile
+      - uses: actions/download-artifact@v8
+        with:
+          name: ${{ needs.desktop-prepare.outputs.artifact_name }}
+          path: desktop/frontend/dist
+      - name: Verify frontend artifact layout
+        run: test -f frontend/dist/index.html
+      - name: Verify CI test coverage and runner
+        run: node --test frontend/scripts/ci-test-plan.test.mjs
+      - name: Check the Electron shell
+        run: |
+          pnpm --dir electron typecheck
+          pnpm --dir electron test
+          node --test packaging/*.test.mjs
+          pnpm --dir electron build
+      - name: Test desktop frontend once per suite
+        env:
+          REASONIX_TEST_CONCURRENCY: "2"
+        run: node frontend/scripts/run-ci-tests.mjs
+
+  desktop-browser:
+    needs: [changes, desktop-prepare]
+    if: always() && needs.desktop-prepare.result == 'success' && (github.event_name != 'pull_request' || needs.changes.outputs.desktop != 'false')
+    runs-on: ubuntu-22.04
+    defaults:
+      run:
+        working-directory: desktop
+    steps:
+      - uses: actions/checkout@v7
+      - uses: pnpm/action-setup@v6.1.0
+        with:
+          version: 10
+          run_install: false
+      - uses: actions/setup-node@v7
+        with:
+          node-version: "24"
+          cache: pnpm
+          cache-dependency-path: desktop/pnpm-lock.yaml
+      - run: pnpm --dir frontend install --frozen-lockfile
+      - uses: actions/download-artifact@v8
+        with:
+          name: ${{ needs.desktop-prepare.outputs.artifact_name }}
+          path: desktop/frontend/dist
+      - name: Verify frontend artifact layout
+        run: test -f frontend/dist/index.html
+      - name: Install browser runtimes
+        run: PLAYWRIGHT_BROWSERS_PATH=.pw-browsers pnpm --dir frontend exec playwright install --with-deps chromium
+      - name: Test desktop browser contracts
+        run: |
+          pnpm --dir frontend test:motion-browser
+          PLAYWRIGHT_BROWSERS_PATH=.pw-browsers pnpm --dir frontend test:app-browser
+          PLAYWRIGHT_BROWSERS_PATH=.pw-browsers REASONIX_SETTINGS_BROWSERS=chromium pnpm --dir frontend test:settings-browser
+          xvfb-run -a env REASONIX_TRANSCRIPT_NATIVE_THUMB=1 pnpm --dir frontend test:transcript-browser
+          REASONIX_TRANSCRIPT_READER_BROWSERS=chromium PLAYWRIGHT_BROWSERS_PATH=.pw-browsers pnpm --dir frontend test:transcript-reader-browser
+
+  desktop-prepare:
     needs: changes
     if: always() && (github.event_name != 'pull_request' || needs.changes.outputs.desktop != 'false')
+    outputs:
+      artifact_name: desktop-frontend-${{ github.run_id }}-${{ github.run_attempt }}
     runs-on: ubuntu-22.04
     defaults:
       run:
@@ -281,7 +465,7 @@ jobs:
           cache: true
           cache-dependency-path: desktop/go.sum
 
-      - uses: pnpm/action-setup@v6.0.9
+      - uses: pnpm/action-setup@v6.1.0
         with:
           version: 10
           run_install: false
@@ -290,12 +474,7 @@ jobs:
         with:
           node-version: "24"
           cache: pnpm
-          cache-dependency-path: desktop/frontend/pnpm-lock.yaml
-
-      - name: Install Wails CLI
-        run: |
-          echo "$(go env GOPATH)/bin" >> "$GITHUB_PATH"
-          go install github.com/wailsapp/wails/v2/cmd/wails@v2.12.0
+          cache-dependency-path: desktop/pnpm-lock.yaml
 
       - name: gofmt
         run: |
@@ -315,25 +494,63 @@ jobs:
             exit 1
           fi
 
-      # WebKitGTK 4.0 toolchain (pinned to ubuntu-22.04; no webkit2_41 tag).
-      - name: Install Linux build deps
+      # The packaged Electron shell embeds desktopContract.json; a stale
+      # frontend/src/generated would ship a shell/service protocol mismatch.
+      - name: Check desktop host contract drift
         run: |
-          sudo apt-get update
-          sudo apt-get install -y gcc libgtk-3-dev libwebkit2gtk-4.0-dev
+          go run . -emit-contract frontend/src/generated
+          if ! git diff --exit-code -- frontend/src/generated; then
+            echo "desktop contract is stale - run 'cd desktop && go run . -emit-contract frontend/src/generated' and commit."
+            exit 1
+          fi
 
       - name: Build frontend
         run: |
-          wails generate module
           pnpm --dir frontend install --frozen-lockfile
-          pnpm --dir frontend build
+          pnpm --dir frontend build:electron
 
-      - name: Test desktop frontend
-        run: |
-          pnpm --dir frontend test:terminal
-          pnpm --dir frontend test:task-monitor
+      - uses: actions/upload-artifact@v7
+        with:
+          name: desktop-frontend-${{ github.run_id }}-${{ github.run_attempt }}
+          path: |
+            desktop/frontend/dist
+          if-no-files-found: error
+          retention-days: 3
 
-      - name: Test usage statistics frontend
-        run: pnpm --dir frontend test:usage-stats
+  desktop-go:
+    needs: [changes, desktop-prepare]
+    if: always() && needs.desktop-prepare.result == 'success' && (github.event_name != 'pull_request' || needs.changes.outputs.desktop != 'false')
+    runs-on: ubuntu-22.04
+    defaults:
+      run:
+        working-directory: desktop
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/setup-go@v7
+        with:
+          go-version-file: desktop/go.mod
+          cache: true
+          cache-dependency-path: desktop/go.sum
+
+      - uses: pnpm/action-setup@v6.1.0
+        with:
+          version: 10
+          run_install: false
+
+      - uses: actions/setup-node@v7
+        with:
+          node-version: "24"
+          cache: pnpm
+          cache-dependency-path: desktop/pnpm-lock.yaml
+
+      - uses: actions/download-artifact@v8
+        with:
+          name: ${{ needs.desktop-prepare.outputs.artifact_name }}
+          path: desktop/frontend/dist
+      - name: Verify frontend artifact layout
+        run: test -f frontend/dist/index.html
+      - run: pnpm --dir frontend install --frozen-lockfile
 
       - name: vet
         run: go vet ./...
@@ -358,7 +575,7 @@ jobs:
         run: go test -race ./...
 
   # desktop/ is a separate module, so the root macOS matrix above does not
-  # compile or exercise the native PTY implementation.
+  # compile or exercise the native PTY and FSEvents implementations.
   desktop-macos:
     needs: changes
     if: always() && (github.event_name != 'pull_request' || needs.changes.outputs.desktop != 'false')
@@ -375,8 +592,58 @@ jobs:
           cache: true
           cache-dependency-path: desktop/go.sum
 
-      - name: Test integrated terminal and PTY lifecycle
-        run: go test -race -run 'Test(ResolveTerminal|Terminal|EmptyTerminal|UnixTerminalProcess)' .
+      - uses: pnpm/action-setup@v6.1.0
+        with:
+          version: 10
+          run_install: false
+
+      - uses: actions/setup-node@v7
+        with:
+          node-version: "24"
+          cache: pnpm
+          cache-dependency-path: desktop/pnpm-lock.yaml
+
+      - name: Build frontend
+        run: |
+          pnpm --dir frontend install --frozen-lockfile
+          pnpm --dir frontend build
+
+      - name: Test integrated terminal, PTY, and FSEvents lifecycle
+        run: go test -race -run 'Test(DarwinWorkspaceWatcher|WorkspaceChangeHub|ResolveTerminal|Terminal|EmptyTerminal|UnixTerminalProcess)' .
+
+      - name: Test native macOS signing coverage
+        run: node --test packaging/sign-macos.test.mjs
+
+      # The production desktop build uses CGO. Keep the explicit unavailable
+      # backend buildable as a fail-closed portability contract instead of
+      # silently falling back to kqueue's per-file descriptor usage.
+      - name: Test macOS build without CGO
+        env:
+          CGO_ENABLED: "0"
+        run: go test -run '^TestDarwinWorkspaceWatcherWithoutCGOIsUnavailable$' .
+
+      # desktop/*_darwin.go is the one build-tag set the lint job cannot reach:
+      # the main-thread watchdog is cgo, so it only type-checks with a real
+      # macOS toolchain.
+      - name: golangci-lint
+        uses: golangci/golangci-lint-action@v9
+        with:
+          version: v2.12.2
+          working-directory: desktop
+          args: --timeout=5m
+
+      # Packaging validation, not a code gate: run it on pushes to main-v2 (the
+      # release pipeline packages again anyway), and let pull requests stop
+      # after the lint step. Ad-hoc signs (no Apple secrets in CI) and skips
+      # the DMG.
+      - name: Package Electron app and verify bundle members
+        if: github.event_name != 'pull_request'
+        timeout-minutes: 25
+        env:
+          DESKTOP_BUILD_SKIP_DMG: "1"
+        run: |
+          ../scripts/desktop-build.sh darwin/arm64 v0.0.0-ci canary
+          node packaging/verify.mjs ../dist/Reasonix-darwin-arm64.zip
 
   # Desktop project-root matching is case-insensitive only on Windows
   # (sameDesktopPath folds case when os.PathSeparator is '\'), so the
@@ -386,6 +653,9 @@ jobs:
     needs: changes
     if: always() && (github.event_name != 'pull_request' || needs.changes.outputs.desktop != 'false')
     runs-on: windows-latest
+    # A hung native step must not hold the workflow's concurrency group for the
+    # six-hour default. Normal runs finish in ~25 minutes.
+    timeout-minutes: 45
     defaults:
       run:
         shell: bash
@@ -399,7 +669,7 @@ jobs:
           cache: true
           cache-dependency-path: desktop/go.sum
 
-      - uses: pnpm/action-setup@v6.0.9
+      - uses: pnpm/action-setup@v6.1.0
         with:
           version: 10
           run_install: false
@@ -408,24 +678,59 @@ jobs:
         with:
           node-version: "24"
           cache: pnpm
-          cache-dependency-path: desktop/frontend/pnpm-lock.yaml
-
-      - name: Install Wails CLI
-        run: |
-          echo "$(go env GOPATH)/bin" >> "$GITHUB_PATH"
-          go install github.com/wailsapp/wails/v2/cmd/wails@v2.12.0
+          cache-dependency-path: desktop/pnpm-lock.yaml
 
       # go:embed of frontend/dist needs a built frontend before the package
       # compiles, same as the ubuntu desktop leg.
       - name: Build frontend
         run: |
-          wails generate module
           pnpm --dir frontend install --frozen-lockfile
           pnpm --dir frontend build
 
-      - name: test (Windows desktop and update helper)
+      - name: Test native motion contracts
+        run: pnpm --dir frontend test:motion
+
+      # Chromium is the deterministic browser replay on the Windows runner; the
+      # shell-level Electron startup smoke below separately exercises the real
+      # packaged runtime.
+      - name: Test transcript browser replay on Windows
+        timeout-minutes: 10
+        env:
+          PLAYWRIGHT_BROWSERS_PATH: ${{ github.workspace }}/desktop/frontend/.pw-browsers
+        run: |
+          pnpm --dir frontend exec playwright install chromium
+          pnpm --dir frontend test:transcript-browser
+
+      - name: Test settings layout on Windows
+        timeout-minutes: 5
+        env:
+          PLAYWRIGHT_BROWSERS_PATH: ${{ github.workspace }}/desktop/frontend/.pw-browsers
+        run: pnpm --dir frontend test:settings-browser
+
+      # Package the real Electron shell on every desktop PR and exercise the
+      # production startup path (shell -> Go service handshake) in the packaged
+      # layout. package.mjs builds the frontend itself (build:electron flavor).
+      - name: Package Electron shell for native startup smoke
         timeout-minutes: 15
+        run: |
+          pnpm install --frozen-lockfile
+          go build -trimpath -ldflags "-s -w -X main.version=v0.0.0-ci -X main.channel=canary" -o build/bin/reasonix-desktop.exe .
+          node packaging/package.mjs windows/amd64 v0.0.0-ci canary
+
+      - name: Smoke-test Electron native startup
+        timeout-minutes: 3
+        run: node packaging/smoke.mjs build/electron/windows-amd64/app --service build/bin/reasonix-desktop.exe
+
+      - name: test (Windows desktop and update helper)
+        # Normal wall time is 6-7 minutes; a loaded runner has exceeded 15 with
+        # every package still passing. Keep the budget above that load spike so
+        # the job-level timeout, not this step, ends a real hang.
+        timeout-minutes: 25
         run: go test ./...
+
+      - name: test (vendored systray identity)
+        timeout-minutes: 2
+        run: go test -timeout=60s fyne.io/systray
 
       # Installer packaging is packaging validation, not a code gate: run it
       # on pushes to main-v2 (the release pipeline builds installers again
@@ -439,9 +744,17 @@ jobs:
         timeout-minutes: 20
         run: ../scripts/desktop-build.sh windows/amd64 v0.0.0-ci canary
 
+      - name: Verify packaged Windows artifacts
+        if: github.event_name != 'pull_request'
+        run: |
+          node packaging/verify.mjs ../dist/Reasonix-windows-amd64.zip
+          node packaging/signing-files.mjs build/windows/signing-payload --check
+
+  # repolint scans desktop/ and sdk/ too, so this job also runs for diffs the
+  # `code` filter would otherwise skip.
   lint:
     needs: changes
-    if: always() && (github.event_name != 'pull_request' || needs.changes.outputs.code != 'false')
+    if: always() && (github.event_name != 'pull_request' || needs.changes.outputs.code != 'false' || needs.changes.outputs.desktop != 'false' || needs.changes.outputs.sdk != 'false')
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7
@@ -451,29 +764,54 @@ jobs:
           go-version-file: go.mod
           cache: true
 
+      - if: github.event_name != 'pull_request' || needs.changes.outputs.desktop != 'false'
+        uses: pnpm/action-setup@v6.1.0
+        with:
+          version: 10
+          run_install: false
+
+      - if: github.event_name != 'pull_request' || needs.changes.outputs.desktop != 'false'
+        uses: actions/setup-node@v7
+        with:
+          node-version: "24"
+          cache: pnpm
+          cache-dependency-path: desktop/pnpm-lock.yaml
+
+      - name: required native motion contracts
+        if: github.event_name != 'pull_request' || needs.changes.outputs.desktop != 'false'
+        run: |
+          pnpm --dir desktop/frontend install --frozen-lockfile
+          pnpm --dir desktop/frontend test:motion
+
+      - name: repo standards
+        run: go run ./tools/repolint
+
+      # `make lint-install` reads the same file, so a local run and this job
+      # cannot drift onto different linter versions.
+      - id: golangci
+        run: echo "version=$(cat .golangci-version)" >> "$GITHUB_OUTPUT"
+
       - name: golangci-lint
         uses: golangci/golangci-lint-action@v9
         with:
-          version: v2.12.2
+          version: ${{ steps.golangci.outputs.version }}
           args: --timeout=5m
 
-      # Report-only complexity monitor for internal/agent. Does not duplicate the
-      # main lint/test/race gates; funlen+cyclop run with issues-exit-code=0 so
-      # the baseline is visible as a CI summary/artifact without blocking merges.
-      - name: agent complexity report
-        if: always()
+      # The step above only type-checks the linux/amd64 build, so every
+      # //go:build windows and //go:build darwin file in the tree went unlinted.
+      # Both modules cross-check without a toolchain; desktop under darwin does
+      # not, because its bundle icon repair is cgo, so that leg lives in
+      # desktop-macos.
+      - name: golangci-lint (cross-platform build tags)
         run: |
-          # Reuse the golangci-lint binary installed by the previous step.
-          bash scripts/agent-complexity-report.sh
-
-      - name: upload agent complexity report
-        if: always()
-        uses: actions/upload-artifact@v7
-        with:
-          name: agent-complexity-report
-          path: agent-complexity-report.txt
-          if-no-files-found: ignore
-          retention-days: 14
+          set -euo pipefail
+          command -v golangci-lint
+          for target in "darwin ." "windows ." "windows desktop"; do
+            read -r target_os target_dir <<< "$target"
+            echo "::group::golangci-lint GOOS=$target_os ($target_dir)"
+            (cd "$target_dir" && GOOS="$target_os" golangci-lint run --timeout=5m ./...)
+            echo "::endgroup::"
+          done
 
       - name: release workflow contracts
         run: |
@@ -485,8 +823,12 @@ jobs:
             .github/workflows/release.yml \
             .github/workflows/release-npm.yml \
             .github/workflows/release-desktop.yml \
+            .github/workflows/apple-notary-log.yml \
+            .github/workflows/macos-signing-check.yml \
             .github/workflows/release-verify-issues.yml \
-            .github/workflows/docs-impact.yml
+            .github/workflows/docs-impact.yml \
+            .github/workflows/ci.yml
+          node --test scripts/desktop-release-artifacts.test.mjs scripts/ci-workflow.test.mjs scripts/notarize-desktop.test.mjs scripts/windows-go-tests.test.mjs
           bash scripts/release-workflows.test.sh
           node scripts/check-single-release-public-contract.mjs
 
@@ -513,7 +855,7 @@ jobs:
 
   govulncheck:
     needs: changes
-    if: always() && (github.event_name != 'pull_request' || needs.changes.outputs.code != 'false')
+    if: github.event_name != 'pull_request'
     runs-on: ubuntu-latest
     continue-on-error: true # informational — stdlib vulns need a Go patch release
     steps:
@@ -532,7 +874,7 @@ jobs:
 
   coverage:
     needs: changes
-    if: always() && (github.event_name != 'pull_request' || needs.changes.outputs.code != 'false')
+    if: github.event_name != 'pull_request'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7

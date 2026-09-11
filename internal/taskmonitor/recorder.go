@@ -49,7 +49,7 @@ func newRuntimeOwnerID() string {
 	if _, err := crand.Read(nonce[:]); err == nil {
 		return hex.EncodeToString(nonce[:])
 	}
-	h := sha256.Sum256([]byte(fmt.Sprintf("%d:%d", timeNow().UnixNano(), runtimeOwnerSequence.Add(1))))
+	h := sha256.Sum256(fmt.Appendf(nil, "%d:%d", timeNow().UnixNano(), runtimeOwnerSequence.Add(1)))
 	return hex.EncodeToString(h[:16])
 }
 
@@ -74,7 +74,7 @@ func sessionlessMonitorTaskID(jobID string) string {
 	if _, err := crand.Read(nonce[:]); err != nil {
 		// crypto/rand failure is exceptional; retain a bounded, non-path-like
 		// identity rather than falling back to the colliding raw job ID.
-		h := sha256.Sum256([]byte(fmt.Sprintf("%s:%d", jobID, timeNow().UnixNano())))
+		h := sha256.Sum256(fmt.Appendf(nil, "%s:%d", jobID, timeNow().UnixNano()))
 		return hex.EncodeToString(h[:8]) + "--" + jobID
 	}
 	return hex.EncodeToString(nonce[:]) + "--" + jobID
@@ -181,7 +181,7 @@ func (r *TaskRecorder) RecordDone(id string, st jobs.Status, jobErr error) {
 	}
 	r.stopHeartbeat(monitorID)
 	const maxSaveAttempts = 4
-	for attempt := 0; attempt < maxSaveAttempts; attempt++ {
+	for range maxSaveAttempts {
 		cur, gerr := r.store.GetTask(ctx, r.projectDir, monitorID)
 		if gerr != nil || cur == nil {
 			return // never recorded (recorder attached after the job started)

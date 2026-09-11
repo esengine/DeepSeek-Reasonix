@@ -240,7 +240,6 @@ func pointCases() []pointCase {
 		},
 	}
 	for _, phase := range []string{PhaseStart, PhaseEnd, PhaseLoad, PhaseSave, PhaseRotate} {
-		phase := phase
 		point := extension.InterceptorPoint("session." + phase)
 		cases = append(cases, pointCase{
 			point:       point,
@@ -791,7 +790,7 @@ func TestOptionalTimeoutWarnsOnce(t *testing.T) {
 	d := buildDispatcher(
 		map[extension.InterceptorPoint][]extension.Contribution{point: {interceptor("opt", point, 0)}},
 		nil, map[string]*fakeClient{"opt": fake}, nil, warns)
-	for i := 0; i < 2; i++ {
+	for i := range 2 {
 		payload := &ToolBeforePayload{Name: "bash", Arguments: `{"cmd":"ls"}`}
 		result, err := d.Intercept(context.Background(), point, payload)
 		if err != nil {
@@ -990,7 +989,7 @@ func TestConcurrentDispatch(t *testing.T) {
 
 	var wg sync.WaitGroup
 	errs := make(chan error, 32)
-	for i := 0; i < 32; i++ {
+	for i := range 32 {
 		wg.Add(1)
 		go func(i int) {
 			defer wg.Done()

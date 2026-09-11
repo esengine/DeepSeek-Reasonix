@@ -16,7 +16,7 @@ import { fileURLToPath } from "node:url";
 const testDir = dirname(fileURLToPath(import.meta.url));
 // Strip comments so declaration parsing never matches prose inside them.
 const styles = readFileSync(resolve(testDir, "../styles.css"), "utf8").replace(/\/\*[\s\S]*?\*\//g, "");
-const appSource = readFileSync(resolve(testDir, "../App.tsx"), "utf8");
+const appSource = readFileSync(resolve(testDir, "../app-shell/AppRuntimeView.tsx"), "utf8");
 const composerSource = readFileSync(resolve(testDir, "../components/Composer.tsx"), "utf8");
 
 let passed = 0;
@@ -66,7 +66,7 @@ eq(finalDeclaration(".footer", "flex"), "0 0 auto", "base .footer keeps its flex
 // AC2 — decision state: capped + scrollable so tall approval cards stay
 // reachable and never slip behind the status bar (#7030 stays fixed).
 eq(finalDeclaration(".footer--decision", "overflow-y"), "auto", "decision footer scrolls tall approval cards");
-eq(finalDeclaration(".footer--decision", "max-height"), "calc(100% - var(--topicbar-height))", "decision footer is capped above the status bar");
+eq(finalDeclaration(".footer--decision", "max-height"), "100%", "decision footer is capped above the status bar");
 
 // AC3 — the menu stays anchored above the composer, but its preferred 360px cap
 // is now bounded by the real viewport space measured by Composer.
@@ -76,8 +76,8 @@ eq(finalDeclaration(".slashmenu", "max-height"), "min(360px, var(--composer-menu
 
 // AC4 — App.tsx applies footer--decision exactly when a decision surface owns
 // the footer, and the pre-existing footer--compact wiring stays intact.
-eq(/decisionSurface \? "footer--decision" : ""/.test(appSource), true, "App.tsx toggles footer--decision on decisionSurface");
-eq(/terminalPanelOpen && !sidebarCreation \? "footer--compact" : ""/.test(appSource), true, "footer--compact wiring stays intact");
+eq(/visibleDecisionSurface \? "footer--decision" : ""/.test(appSource), true, "App.tsx toggles footer--decision on the visible decision surface");
+eq(/terminalSurfaceOpen && !sidebarCreation \? "footer--compact" : ""/.test(appSource), true, "footer--compact wiring stays intact");
 eq(/ref=\{composerWrapRef\}/.test(composerSource), true, "Composer measures the real menu anchor");
 eq(/observeComposerMenuViewport\(anchor\)/.test(composerSource), true, "Composer observes geometry while a menu is open");
 

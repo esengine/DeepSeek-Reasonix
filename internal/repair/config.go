@@ -137,7 +137,7 @@ func inspectAndRepairConfigUnlocked(opts ConfigOptions) (ConfigReport, error) {
 		if expected := opts.expectedStates[item.path]; expected != "" {
 			if err := verifyRepairPlanStateIDFor(quarantine, item.path, expected); err != nil {
 				if restoreErr := restoreRepairNodeIfAbsent(quarantine, item.path); restoreErr != nil {
-					return report, fmt.Errorf("quarantine %s config changed after confirmation and restore failed: %v: %w", item.scope, restoreErr, err)
+					return report, fmt.Errorf("quarantine %s config changed after confirmation and restore failed: %w: %w", item.scope, restoreErr, err)
 				}
 				return report, err
 			}
@@ -148,7 +148,7 @@ func inspectAndRepairConfigUnlocked(opts ConfigOptions) (ConfigReport, error) {
 			}
 			restoreErr := restoreRepairNodeIfAbsent(quarantine, item.path)
 			if restoreErr != nil {
-				return report, fmt.Errorf("commit quarantine %s config undo state: %w; confirmed config retained at %s: %v", item.scope, err, quarantine, restoreErr)
+				return report, fmt.Errorf("commit quarantine %s config undo state: %w; confirmed config retained at %s: %w", item.scope, err, quarantine, restoreErr)
 			}
 			return report, fmt.Errorf("commit quarantine %s config undo state: %w", item.scope, err)
 		}

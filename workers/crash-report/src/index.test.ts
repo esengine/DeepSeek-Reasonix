@@ -6,17 +6,17 @@ import {
   isDevelopmentGroup,
   isKnownNonCrashDiagnostic,
   namespaceReportFingerprint,
-  newestReleaseVersion,
-  diagnosticWindowWhere,
   normalizeForFingerprint,
   Ping,
   Metrics,
   CLI_TELEMETRY_SCHEMA_SQL,
   ensureCLITelemetrySchema,
-  refreshMetricUserRollup,
   severityForReport,
+  maxSeverity,
+  nativeWebRuntimeFingerprintBasis,
   telemetryTableNames,
 } from "./index";
+import type { Env } from "./env";
 import { renderStats } from "./stats";
 import clientSurfaceMigrationSQL from "../migrate-client-surface.sql?raw";
 
@@ -129,28 +129,15 @@ describe("metrics compatibility", () => {
   });
 });
 
-describe("stats window and release baseline", () => {
-  it("uses an inclusive calendar window for diagnostic groups", () => {
-    expect(diagnosticWindowWhere(7)).toBe("date(last_seen) >= date('now', '-6 day')");
-    expect(diagnosticWindowWhere(30)).toBe("date(last_seen) >= date('now', '-29 day')");
-  });
-
-  it("does not promote prerelease or synthetic non-semver labels", () => {
-    expect(newestReleaseVersion(["v1.19.4", "v1.20.0-beta.1", "dev", "v9.9.9-test"])).toBe("v1.19.4");
-  });
-});
-
 describe("telemetry deployment order compatibility", () => {
   it("keeps the released Desktop tables unchanged and isolates CLI rows", () => {
     expect(telemetryTableNames("desktop")).toEqual({
       pings: "pings",
       metrics: "metrics",
-      metricUsers: "metric_users",
     });
     expect(telemetryTableNames("cli")).toEqual({
       pings: "cli_pings",
       metrics: "cli_metrics",
-      metricUsers: "cli_metric_users",
     });
   });
 
@@ -166,12 +153,11 @@ describe("telemetry deployment order compatibility", () => {
     }
   });
 
-  it("keeps the migration and Worker bootstrap schema identical", () => {
-    const normalize = (sql: string) => sql.replace(/\s+/g, " ").trim().replace(/;$/, "");
-    const migration = normalize(clientSurfaceMigrationSQL);
-    for (const statement of CLI_TELEMETRY_SCHEMA_SQL) {
-      expect(migration).toContain(normalize(statement));
-    }
+  it("extends the legacy CLI migration with the diagnostics bootstrap columns", () => {
+    const runtimeSchema = CLI_TELEMETRY_SCHEMA_SQL.join("\n");
+    expect(runtimeSchema).toContain("os_build INTEGER NOT NULL DEFAULT 0");
+    expect(runtimeSchema).toContain("os_revision INTEGER NOT NULL DEFAULT 0");
+    expect(runtimeSchema).toContain("arch TEXT NOT NULL");
   });
 
   it("uses additive idempotent DDL when the Worker deploys before the migration", async () => {
@@ -218,86 +204,32 @@ describe("telemetry deployment order compatibility", () => {
   });
 });
 
-function fakeRollupDB(options: { failAtQuery?: number } = {}) {
-  const cursor = { next_signal: 0 };
-  const queried: string[] = [];
-  const batches: string[][] = [];
-  const db = {
-    prepare(sql: string) {
-      const stmt = {
-        sql,
-        binds: [] as unknown[],
-        bind(...args: unknown[]) {
-          stmt.binds = args;
-          return stmt;
-        },
-        async first() {
-          return sql.includes("FROM metric_user_rollup_state") ? { next_signal: cursor.next_signal } : null;
-        },
-        async all() {
-          if (!sql.includes("COUNT(DISTINCT install_id)")) return { results: [] };
-          const nth = queried.length;
-          queried.push(String(stmt.binds[0]));
-          if (options.failAtQuery === nth) throw new Error("D1 DB exceeded its CPU time limit and was reset");
-          return { results: [{ bucket: "dark", total: 7 }] };
-        },
-        async run() {
-          if (sql.includes("INSERT INTO metric_user_rollup_state")) cursor.next_signal = Number(stmt.binds[0]);
-          return {};
-        },
-      };
-      return stmt;
-    },
-    async batch(stmts: { sql: string }[]) {
-      batches.push(stmts.map((s) => s.sql));
-      return [];
-    },
-  } as unknown as D1Database;
-  return { env: { DB: db } as unknown as Parameters<typeof refreshMetricUserRollup>[0], cursor, queried, batches };
-}
-
-describe("metric_user rollup", () => {
-  it("walks the whole signal list across runs without repeating one", async () => {
-    const { env, cursor, queried } = fakeRollupDB();
-
-    await refreshMetricUserRollup(env, 3);
-    expect(cursor.next_signal).toBe(3);
-    await refreshMetricUserRollup(env, 3);
-    expect(cursor.next_signal).toBe(6);
-
-    expect(queried).toHaveLength(6);
-    expect(new Set(queried).size).toBe(6);
-  });
-
-  it("wraps the cursor back to the start after a full pass", async () => {
-    const { env, cursor, queried } = fakeRollupDB();
-    await refreshMetricUserRollup(env, 10_000);
-    expect(queried.length).toBeGreaterThan(50);
-    expect(new Set(queried).size).toBe(queried.length);
-    expect(cursor.next_signal).toBe(0);
-  });
-
-  it("moves past a signal whose query is abandoned instead of retrying it forever", async () => {
-    const { env, cursor, queried } = fakeRollupDB({ failAtQuery: 1 });
-    await refreshMetricUserRollup(env, 3);
-    expect(queried).toHaveLength(3);
-    expect(cursor.next_signal).toBe(3);
-  });
-
-  it("replaces a signal's rows in one batch so no reader sees it half-written", async () => {
-    const { env, batches } = fakeRollupDB();
-    await refreshMetricUserRollup(env, 2);
-
-    const writes = batches.filter((b) => b.some((sql) => /DELETE FROM metric_user_rollup\b/.test(sql)));
-    expect(writes).toHaveLength(2);
-    for (const batch of writes) {
-      expect(batch[0]).toMatch(/DELETE FROM metric_user_rollup\b/);
-      expect(batch.slice(1).every((sql) => /INSERT INTO metric_user_rollup\b/.test(sql))).toBe(true);
-    }
-  });
-});
-
 describe("diagnostic classification", () => {
+
+  it("keeps native runtime fingerprints independent from recovery outcomes", () => {
+    const failure = { engine: "webview2", kind: "render_process_exited", reason: "crashed", exitCode: 1 };
+    expect(nativeWebRuntimeFingerprintBasis(failure)).toBe(
+      nativeWebRuntimeFingerprintBasis({ ...failure }),
+    );
+    expect(nativeWebRuntimeFingerprintBasis({ ...failure, reason: "out_of_memory" })).not.toBe(
+      nativeWebRuntimeFingerprintBasis(failure),
+    );
+  });
+
+  it("bounds unknown runtime buckets and WebView2 unresponsive exit code", () => {
+    expect(nativeWebRuntimeFingerprintBasis({
+      engine: "webkitgtk", kind: "random_kind_123", reason: "random_reason_456",
+    })).toBe("webkitgtk\nunknown\nunknown\nunknown");
+    expect(nativeWebRuntimeFingerprintBasis({
+      engine: "webview2", kind: "render_process_unresponsive", reason: "unresponsive", exitCode: 259,
+    })).toBe("webview2\nrender_process_unresponsive\nunresponsive\nunknown");
+  });
+
+  it("only upgrades aggregate severity", () => {
+    expect(maxSeverity("high", "low")).toBe("high");
+    expect(maxSeverity("low", "high")).toBe("high");
+    expect(maxSeverity("critical", "high")).toBe("critical");
+  });
   it("keeps development reports out of release crash priority", () => {
     expect(isDevelopmentReport({ ...base, version: "dev-32bit" })).toBe(true);
     expect(isDevelopmentReport({ ...base, version: "v1.40.0", channel: "dev" })).toBe(true);
@@ -460,9 +392,6 @@ describe("diagnostics dashboard lanes", () => {
       ],
       metrics: [],
       previousMetrics: [],
-      metricUsers: [],
-      metricUsersUnavailable: false,
-      metricUsersComputedAt: "",
       sources: [],
       overview: { latestAdoptionPct: null, openReports: 4, newLatestReports: 0, regressedReports: 0, criticalOpenReports: 1 },
       latestVersion: "v1.40.0",
@@ -476,7 +405,6 @@ describe("diagnostics dashboard lanes", () => {
         newLatest: false,
         regressed: false,
         windowDays: 30,
-        preferenceMode: "users",
       },
     };
 
@@ -507,9 +435,6 @@ describe("diagnostics dashboard lanes", () => {
       crashes: [],
       metrics: [],
       previousMetrics: [],
-      metricUsers: [],
-      metricUsersUnavailable: false,
-      metricUsersComputedAt: "",
       sources: [],
       overview: { latestAdoptionPct: null, openReports: 0, newLatestReports: 0, regressedReports: 0, criticalOpenReports: 0 },
       latestVersion: "",
@@ -523,7 +448,6 @@ describe("diagnostics dashboard lanes", () => {
         newLatest: false,
         regressed: false,
         windowDays: 30,
-        preferenceMode: "users",
       },
     };
     const html = renderStats(
@@ -536,21 +460,43 @@ describe("diagnostics dashboard lanes", () => {
     expect(html).toContain('href="/stats"');
   });
 
-  it("says the deduplication did not finish instead of showing an empty dashboard", () => {
+  it("makes triage priorities scannable with labeled metrics and explicit status", () => {
     type StatsData = Parameters<typeof renderStats>[0];
+    const row = {
+      fingerprint: "a".repeat(64),
+      kind: "crash",
+      count: 102373,
+      first_version: "v1.24.0",
+      last_version: "v1.36.0",
+      seen: "2026-09-03",
+      status: "open",
+      title: "A long lifecycle failure summary that should remain available to assistive technology",
+      source: "native.lifecycle",
+      label: "",
+      error_type: "Error",
+      top_frame: "at render",
+      severity: "high",
+      last_os: "windows",
+      last_arch: "amd64",
+      last_channel: "stable",
+      regressed_at: "",
+      affected_installs: 16406,
+      window_events: 34941,
+      identified_events: 34941,
+      identity_coverage: 1,
+      dimension_coverage: 1,
+      impact_rate: 0.137,
+    };
     const data: StatsData = {
       daily: [],
       versions: [],
       platforms: [],
-      crashes: [],
+      crashes: [row, { ...row, fingerprint: "b".repeat(64), status: "resolved" }, { ...row, fingerprint: "c".repeat(64), status: "ignored" }],
       metrics: [],
       previousMetrics: [],
-      metricUsers: [],
-        metricUsersUnavailable: true,
-      metricUsersComputedAt: "",
       sources: [],
-      overview: { latestAdoptionPct: null, openReports: 0, newLatestReports: 0, regressedReports: 0, criticalOpenReports: 0 },
-      latestVersion: "",
+      overview: { latestAdoptionPct: null, openReports: 3, newLatestReports: 0, regressedReports: 0, criticalOpenReports: 0 },
+      latestVersion: "v1.36.0",
       filters: {
         surface: "desktop",
         status: "",
@@ -561,88 +507,36 @@ describe("diagnostics dashboard lanes", () => {
         newLatest: false,
         regressed: false,
         windowDays: 30,
-        preferenceMode: "users",
       },
     };
+
     const html = renderStats(
       data,
-      { id: 1, email: "viewer@example.com", role: "viewer", created_at: "", approved_at: "" },
-      "preferences",
+      { id: 1, email: "admin@example.com", role: "admin", created_at: "", approved_at: "" },
+      "diagnostics",
     );
-    const installs = html.slice(html.indexOf("Deduplicated installs"), html.indexOf("Launch/open snapshots"));
-    expect(installs).toContain("deduplication");
-    expect(installs).toContain("window=7d");
-    expect(installs).not.toContain("No settings preference metrics yet");
+
+    expect(html).toContain("Past 30 days");
+    expect(html).toContain("ranked by affected installs");
+    expect(html).toContain("受影响安装");
+    expect(html).toContain("受影响安装（30天）");
+    expect(html).toContain("影响率");
+    expect(html).toContain("窗口事件");
+    expect(html).toContain("身份覆盖率");
+    expect(html).toContain("累计");
+    expect(html).toContain('aria-label="A long lifecycle failure summary that should remain available to assistive technology"');
+    expect(html).toContain("status-open");
+    expect(html).toContain("status-resolved");
+    expect(html).toContain("status-ignored");
+    expect(html).toContain(":focus-visible");
+
+    const sevenDayHtml = renderStats(
+      { ...data, filters: { ...data.filters, windowDays: 7 } },
+      { id: 1, email: "admin@example.com", role: "admin", created_at: "", approved_at: "" },
+      "diagnostics",
+    );
+    expect(sevenDayHtml).toContain("受影响安装（7天）");
+    expect(sevenDayHtml).not.toContain("受影响安装（30天）");
   });
 
-  it("shows how old the precomputed window is", () => {
-    type StatsData = Parameters<typeof renderStats>[0];
-    const data: StatsData = {
-      daily: [],
-      versions: [],
-      platforms: [],
-      crashes: [],
-      metrics: [],
-      previousMetrics: [],
-      metricUsers: [{ signal: "settings_theme", bucket: "dark", total: 12 }],
-      metricUsersUnavailable: false,
-      metricUsersComputedAt: "2026-08-03T07:28:41.019Z",
-      sources: [],
-      overview: { latestAdoptionPct: null, openReports: 0, newLatestReports: 0, regressedReports: 0, criticalOpenReports: 0 },
-      latestVersion: "",
-      filters: {
-        surface: "desktop",
-        status: "",
-        source: "",
-        version: "",
-        os: "",
-        platform: "",
-        newLatest: false,
-        regressed: false,
-        windowDays: 30,
-        preferenceMode: "users",
-      },
-    };
-    const user = { id: 1, email: "viewer@example.com", role: "viewer", created_at: "", approved_at: "" } as const;
-    expect(renderStats(data, user, "preferences")).toContain("2026-08-03 07:28Z");
-  });
-
-  it("shows deduplicated affected installs on agent health", () => {
-    type StatsData = Parameters<typeof renderStats>[0];
-    const data: StatsData = {
-      daily: [],
-      versions: [],
-      platforms: [],
-      crashes: [],
-      metrics: [{ signal: "desktop_hang", bucket: "windows_ui_thread", total: 12 }],
-      previousMetrics: [],
-      metricUsers: [{ signal: "desktop_hang", bucket: "windows_ui_thread", total: 3 }],
-      metricUsersUnavailable: false,
-      metricUsersComputedAt: "",
-      sources: [],
-      overview: { latestAdoptionPct: null, openReports: 0, newLatestReports: 0, regressedReports: 0, criticalOpenReports: 0 },
-      latestVersion: "v1.19.4",
-      filters: {
-        surface: "desktop",
-        status: "",
-        source: "",
-        version: "",
-        os: "",
-        platform: "",
-        newLatest: false,
-        regressed: false,
-        windowDays: 7,
-        preferenceMode: "users",
-      },
-    };
-    const html = renderStats(
-      data,
-      { id: 1, email: "viewer@example.com", role: "viewer", created_at: "", approved_at: "" },
-      "health",
-    );
-    const installs = html.slice(html.indexOf("Affected installs"), html.indexOf("Signal distributions"));
-    expect(installs).toContain("Desktop hangs");
-    expect(installs).toContain(">3<");
-    expect(installs).not.toContain(">12<");
-  });
 });

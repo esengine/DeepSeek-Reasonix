@@ -36,7 +36,7 @@ export function RemoteSecretDialog() {
   };
 
   return createPortal(
-    <div className="remote-hostkey-overlay" role="dialog" aria-modal="true" aria-labelledby="remote-secret-title">
+    <div className="remote-hostkey-overlay" data-app-overlay="" role="dialog" aria-modal="true" aria-labelledby="remote-secret-title">
       <form
         className="remote-hostkey-dialog"
         onSubmit={(event) => {

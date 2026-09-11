@@ -34,7 +34,7 @@
 | 文件 | 作用 |
 |------|------|
 | `desktop/frontend/src/components/Composer.tsx` | 输入框组件，包含 @ 功能 |
-| `desktop/frontend/src/components/FileMenu.tsx` | @ 文件菜单组件 |
+| `desktop/frontend/src/components/FileReferenceMenu.tsx` | @ 文件菜单组件 |
 | `desktop/frontend/src/components/HistoryPanel.tsx` | 历史会话面板 |
 | `desktop/frontend/src/lib/bridge.ts` | 前后端通信接口 |
 | `desktop/frontend/src/lib/types.ts` | 类型定义 |
@@ -59,7 +59,7 @@ const atMatches = useMemo(() => {
 const menuMode: "slash" | "slasharg" | "at" | null = ...;
 
 // 渲染文件菜单
-{menuMode === "at" && <FileMenu items={atMatches} ... />}
+{menuMode === "at" && <FileReferenceMenu items={atMatches} ... />}
 ```
 
 ### 2.3 已有的会话 API（可复用）
@@ -114,7 +114,7 @@ interface AppBindings {
 desktop/frontend/src/lib/types.ts      — 添加 SessionReference 类型
 desktop/frontend/src/lib/bridge.ts     — 添加 SearchSessions API
 desktop/frontend/src/components/Composer.tsx — 扩展 @ 菜单逻辑
-desktop/frontend/src/components/FileMenu.tsx — 扩展菜单支持会话项
+desktop/frontend/src/components/FileReferenceMenu.tsx — 扩展菜单支持会话项
 desktop/app.go                         — 添加 SearchSessions 方法
 desktop/sessions.go                    — 实现会话搜索逻辑
 ```
@@ -181,7 +181,7 @@ const [sessionRefs, setSessionRefs] = useState<SessionReference[]>([]);
         <span className="slashmenu__name">past:chats</span>
         <span className="slashmenu__desc">引用历史会话</span>
       </button>
-      <FileMenu items={atMatches} ... />
+      <FileReferenceMenu items={atMatches} ... />
     </>
   )
 )}
@@ -259,7 +259,7 @@ const handleSubmit = async () => {
 │                           ▼                                 │
 │  ┌─────────────────────────────────────────────────────┐   │
 │  │  菜单渲染                                            │   │
-│  │  - showPastChats=false → FileMenu + past:chats 按钮 │   │
+│  │  - showPastChats=false → FileReferenceMenu + past:chats 按钮 │   │
 │  │  - showPastChats=true  → SessionMenu (会话列表)     │   │
 │  └─────────────────────────────────────────────────────┘   │
 └─────────────────────────────────────────────────────────────┘

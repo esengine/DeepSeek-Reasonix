@@ -39,7 +39,7 @@ func TestRedactMasksCommonSecretShapes(t *testing.T) {
 func TestRedactLongConcurrentTranscriptAvoidsRegexpBacktracking(t *testing.T) {
 	const secret = "sk-real-secret-value-1234567890"
 	var transcript strings.Builder
-	for i := 0; i < 2_000; i++ {
+	for i := range 2_000 {
 		fmt.Fprintf(&transcript, "message %d payload=%s DEEPSEEK_API_KEY=%s Authorization: Bearer %s\n", i, strings.Repeat("x", i%31), secret, secret)
 	}
 	input := transcript.String()
@@ -48,11 +48,9 @@ func TestRedactLongConcurrentTranscriptAvoidsRegexpBacktracking(t *testing.T) {
 	const iterations = 20
 	var wg sync.WaitGroup
 	errs := make(chan string, workers)
-	for worker := 0; worker < workers; worker++ {
-		wg.Add(1)
-		go func() {
-			defer wg.Done()
-			for i := 0; i < iterations; i++ {
+	for range workers {
+		wg.Go(func() {
+			for range iterations {
 				got := Redact(input)
 				if strings.Contains(got, secret) {
 					errs <- "long concurrent redaction leaked the test secret"
@@ -63,7 +61,7 @@ func TestRedactLongConcurrentTranscriptAvoidsRegexpBacktracking(t *testing.T) {
 					return
 				}
 			}
-		}()
+		})
 	}
 	wg.Wait()
 	close(errs)

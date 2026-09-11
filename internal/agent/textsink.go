@@ -6,6 +6,7 @@ import (
 	"io"
 	"strings"
 
+	"reasonix/internal/billing"
 	"reasonix/internal/event"
 	"reasonix/internal/provider"
 )
@@ -96,8 +97,39 @@ func (s *TextSink) Emit(e event.Event) {
 			name := e.Tool.Name
 			if e.Tool.Name == "use_capability" {
 				name = textSinkToolHead(e.Tool.Name, e.Tool.Args)
+			} else if e.Tool.Name == "bash" && e.Tool.Execution != nil && e.Tool.Execution.Shell != "" {
+				name = e.Tool.Execution.Shell
+				switch e.Tool.Execution.Shell {
+				case "powershell":
+					name = "Windows PowerShell"
+				case "pwsh":
+					name = "PowerShell 7+"
+				case "git-bash":
+					name = "Git Bash"
+				}
 			}
-			fmt.Fprintf(s.out, "  ⊘ %s %s\n", name, e.Tool.Err)
+			errText := e.Tool.Err
+			if e.Tool.Execution != nil {
+				var parts []string
+				if e.Tool.Execution.ExitCode != nil {
+					parts = append(parts, fmt.Sprintf("exit %d", *e.Tool.Execution.ExitCode))
+				}
+				if e.Tool.Execution.FailurePhase != "" {
+					parts = append(parts, e.Tool.Execution.FailurePhase)
+				}
+				switch e.Tool.Execution.FailurePhase {
+				case "preflight", "authorization", "dependency", "launch":
+					parts = append(parts, "not executed")
+				default:
+					if e.Tool.Execution.MutationRisk == "may_be_partial" {
+						parts = append(parts, "may be partial")
+					}
+				}
+				if len(parts) > 0 {
+					errText = strings.Join(parts, " · ") + " · " + errText
+				}
+			}
+			fmt.Fprintf(s.out, "  ⊘ %s %s\n", name, errText)
 			s.wroteAnything = true
 		}
 
@@ -108,7 +140,7 @@ func (s *TextSink) Emit(e event.Event) {
 			fmt.Fprintln(s.out)
 			s.textWritten = false
 		}
-		s.usageLine(e.Usage, e.Pricing, e.CacheDiagnostics)
+		s.usageLine(e.Usage, e.CostQuote, e.CacheDiagnostics)
 
 	case event.Notice:
 		glyph := "·"
@@ -135,7 +167,7 @@ func (s *TextSink) Emit(e event.Event) {
 			break // aborted pass — the caller's Notice already explained why
 		}
 		fmt.Fprintln(s.out, dimText(fmt.Sprintf("  ⋯ compacted %d messages (%s)", c.Messages, c.Trigger)))
-		for _, ln := range strings.Split(strings.TrimRight(c.Summary, "\n"), "\n") {
+		for ln := range strings.SplitSeq(strings.TrimRight(c.Summary, "\n"), "\n") {
 			fmt.Fprintln(s.out, dimText("    "+ln))
 		}
 		s.wroteAnything = true
@@ -194,8 +226,8 @@ func (s *TextSink) closeTextStream(text, reasoning string) {
 }
 
 // usageLine writes the one-line token/cache summary; no-op when usage is unset.
-func (s *TextSink) usageLine(u *provider.Usage, p *provider.Pricing, d *event.CacheDiagnostics) {
-	if line := FormatUsageLine(u, p, d); line != "" {
+func (s *TextSink) usageLine(u *provider.Usage, q *billing.CostQuote, d *event.CacheDiagnostics) {
+	if line := FormatQuotedUsageLine(u, q, d); line != "" {
 		fmt.Fprintln(s.out, line)
 		s.wroteAnything = true
 	}
@@ -210,6 +242,15 @@ func (s *TextSink) usageLine(u *provider.Usage, p *provider.Pricing, d *event.Ca
 // chain-of-thought cost. Shared by TextSink and the chat TUI so both frontends
 // render the line identically.
 func FormatUsageLine(u *provider.Usage, p *provider.Pricing, d *event.CacheDiagnostics) string {
+	var quote *billing.CostQuote
+	if u != nil && p != nil {
+		quote = event.EnsureCostQuote(event.Event{Kind: event.Usage, Usage: u, Pricing: p}, nil)
+	}
+	return FormatQuotedUsageLine(u, quote, d)
+}
+
+// FormatQuotedUsageLine renders usage from the canonical occurrence-time quote.
+func FormatQuotedUsageLine(u *provider.Usage, q *billing.CostQuote, d *event.CacheDiagnostics) string {
 	if u == nil || u.TotalTokens == 0 {
 		return ""
 	}
@@ -229,8 +270,20 @@ func FormatUsageLine(u *provider.Usage, p *provider.Pricing, d *event.CacheDiagn
 		reasoning = fmt.Sprintf(" (%d reasoning)", u.ReasoningTokens)
 	}
 	cost := ""
-	if p != nil {
-		cost = fmt.Sprintf(" · %s%.4f", p.Symbol(), p.Cost(u))
+	if q != nil && q.CostComplete {
+		money := q.Original
+		if q.Selected != nil {
+			money = *q.Selected
+		}
+		cost = fmt.Sprintf(" · %s%.4f", billing.CurrencySymbol(money.Currency), money.Float64())
+		switch q.RateBand {
+		case billing.RateBandPeak:
+			cost += " · peak"
+		case billing.RateBandOffPeak:
+			cost += " · off-peak"
+		case billing.RateBandMixed:
+			cost += " · mixed rates"
+		}
 	}
 	churn := ""
 	if d != nil && d.PrefixChanged {

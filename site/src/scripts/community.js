@@ -3,6 +3,7 @@
 // Bilingual like the rest of the site: static labels via .l-en/.l-zh spans that the
 // shared `reasonix-lang` choice toggles; plain-text strings pick the current lang.
 import { initTheme } from "./theme.js";
+import { initMobileNav } from "./mobile-nav.js";
 
 const FORUM = (import.meta.env.PUBLIC_FORUM_API || "https://forum.reasonix.io").replace(/\/$/, "");
 const ACCOUNTS = (import.meta.env.PUBLIC_ACCOUNTS_API || "https://id.reasonix.io").replace(/\/$/, "");
@@ -127,12 +128,11 @@ const loginUrl = () => `/login/?next=${encodeURIComponent(location.pathname + lo
 let account = null;
 async function loadAccount() {
   try { account = (await api(ACCOUNTS, "/me")).user; } catch { account = null; }
-  const slot = el("nav-account");
-  if (slot) {
+  document.querySelectorAll("#nav-account, #mobile-nav-account").forEach((slot) => {
     slot.innerHTML = account
       ? `<a href="/account/" title="${esc(account.email)}">${avatar(account.handle)}</a>`
       : `<a class="btn btn-ghost sm" href="${loginUrl()}">${L("Sign in", "登录")}</a>`;
-  }
+  });
 }
 
 /* ── home ─────────────────────────────────────────── */
@@ -214,7 +214,9 @@ async function renderThread() {
   try { data = await forum(`/topics/${id}`); }
   catch { el("posts").innerHTML = `<div class="empty">${L("That discussion doesn't exist or was removed.", "该讨论不存在或已被移除。")}</div>`; return; }
   const { topic, posts } = data;
-  firstPostId = posts[0]?.id || 0;
+  let loadedPosts = posts.slice();
+  let pageInfo = data.pageInfo || null;
+  firstPostId = loadedPosts[0]?.id || 0;
 
   document.title = `${topic.title} — ${t("Reasonix Community", "Reasonix 社区")}`;
   el("crumb-cat").textContent = catText(topic.category, topic.category);
@@ -223,10 +225,35 @@ async function renderThread() {
   el("t-meta").innerHTML =
     `${topic.status === "solved" ? `<span class="badge solved">✓ ${L("Solved", "已解决")}</span>` : ""}
      <span>${topic.replyCount} ${L("replies", "回复")} · ${topic.viewCount} ${L("views", "浏览")} · ${L("started", "发起于")} ${ago(topic.createdAt)}</span>`;
-  el("posts").innerHTML = posts.map((p) => postHtml(p, topic)).join("");
+  const renderPosts = () => {
+    const more = pageInfo?.hasMore
+      ? `<button class="btn btn-ghost" id="posts-more" type="button">${L("Load more replies", "加载更多回复")}</button>`
+      : "";
+    el("posts").innerHTML = loadedPosts.map((p) => postHtml(p, topic)).join("") + more;
+  };
+  renderPosts();
 
   const seen = new Set();
-  el("parti").innerHTML = posts.filter((p) => !seen.has(p.author) && seen.add(p.author)).slice(0, 8).map((p) => avatar(p.handle || p.author)).join("");
+  el("parti").innerHTML = loadedPosts.filter((p) => !seen.has(p.author) && seen.add(p.author)).slice(0, 8).map((p) => avatar(p.handle || p.author)).join("");
+
+  const loadMore = async () => {
+    if (!pageInfo?.hasMore || !pageInfo.nextAfter || !pageInfo.nextAfterId) return;
+    const button = el("posts-more");
+    button.disabled = true;
+    try {
+      const next = await forum(`/topics/${id}?limit=${encodeURIComponent(pageInfo.limit)}&after=${encodeURIComponent(pageInfo.nextAfter)}&afterId=${encodeURIComponent(pageInfo.nextAfterId)}`);
+      loadedPosts = loadedPosts.concat(next.posts || []);
+      pageInfo = next.pageInfo || null;
+      renderPosts();
+      const participants = new Set();
+      el("parti").innerHTML = loadedPosts.filter((p) => !participants.has(p.author) && participants.add(p.author)).slice(0, 8).map((p) => avatar(p.handle || p.author)).join("");
+      el("posts-more")?.addEventListener("click", loadMore);
+    } catch (err) {
+      button.disabled = false;
+      alert(errText(err));
+    }
+  };
+  el("posts-more")?.addEventListener("click", loadMore);
 
   el("posts").addEventListener("click", async (e) => {
     const like = e.target.closest("[data-like]");
@@ -327,6 +354,7 @@ async function renderNew() {
 
 (async function () {
   initTheme();
+  initMobileNav();
   initLang();
   await loadAccount();
   if (el("topic-list")) renderHome();

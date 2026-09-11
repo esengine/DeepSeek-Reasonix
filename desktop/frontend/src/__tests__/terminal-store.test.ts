@@ -41,7 +41,8 @@ const fakeApp = {
     if (writeError) throw writeError;
   },
 };
-(globalThis.window as unknown as { go: unknown }).go = { main: { App: fakeApp } };
+const { installDesktopHostStub } = await import("./desktopHostStub");
+const hostStub = installDesktopHostStub(fakeApp);
 
 const { resetTerminalStoreForTests, useTerminalStore } = await import("../store/terminal");
 resetTerminalStoreForTests();
@@ -120,6 +121,40 @@ if (useTerminalStore.getState().workspace?.readOnly) {
   throw new Error("stale read-only capability replaced the forced writable refresh");
 }
 process.stdout.write("PASS forced capability refresh supersedes an in-flight same-tab request\n");
+
+resetTerminalStoreForTests();
+calls = 0;
+const paintedWorkspace: Workspace = {
+  available: true,
+  readOnly: false,
+  sessions: [{
+    id: "painted",
+    title: "zsh",
+    shell: "default",
+    cwd: ".",
+    createdAt: 1,
+    running: true,
+  }],
+  shells: [{ id: "default", label: "Default shell" }],
+};
+useTerminalStore.setState({
+  tabId: "warm-tab",
+  workspace: paintedWorkspace,
+  loading: false,
+  activeSessionId: "painted",
+});
+const warmRefresh = useTerminalStore.getState().syncWorkspace("warm-tab");
+await Promise.resolve();
+if (useTerminalStore.getState().workspace?.sessions[0]?.id !== "painted") {
+  throw new Error("same-tab refresh cleared the painted workspace before the response landed");
+}
+if (useTerminalStore.getState().loading !== true) {
+  throw new Error("same-tab refresh should still mark loading while the request is in flight");
+}
+pending.get("warm-tab")?.(paintedWorkspace);
+await warmRefresh;
+if (calls !== 1) throw new Error(`same-tab refresh expected one workspace call, got ${calls}`);
+process.stdout.write("PASS same-tab refresh keeps the painted workspace warm\n");
 
 resetTerminalStoreForTests();
 createPending.length = 0;
@@ -226,6 +261,15 @@ if (useTerminalStore.getState().error !== "terminal input failed") {
 }
 writeError = null;
 process.stdout.write("PASS terminal write failures remain visible to the user\n");
+
+const { startTerminalEventBridge } = await import("../lib/terminalEvents");
+const stopEventBridge = startTerminalEventBridge();
+useTerminalStore.getState().clearError();
+hostStub.emit("desktop:resync", { generation: "g1", reason: "gap" });
+if (!useTerminalStore.getState().error) throw new Error("an event gap left terminal output falsely complete");
+if (useTerminalStore.getState().workspace?.sessions[0]?.id !== firstSession.id) throw new Error("gap handling removed the existing terminal");
+stopEventBridge();
+process.stdout.write("PASS terminal event gaps preserve the view and expose incomplete output\n");
 
 if (previousWindow) globalThis.window = previousWindow;
 else delete (globalThis as { window?: unknown }).window;

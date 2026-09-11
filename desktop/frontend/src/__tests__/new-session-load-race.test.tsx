@@ -4,8 +4,11 @@ import { JSDOM } from "jsdom";
 import React, { act } from "react";
 import { createRoot } from "react-dom/client";
 import { initialState, reducer, useController, type Item } from "../lib/useController";
+import type { NavigationResult } from "../lib/navigationSurfaceTransition";
+import { historySliceFromMessages } from "./mockHistorySlice";
 import type { AppBindings } from "../lib/bridge";
-import type { BalanceInfo, CheckpointMeta, ContextInfo, EffortInfo, HistoryMessage, JobView, Meta, TabMeta, WireEvent } from "../lib/types";
+import type { BalanceInfo, CheckpointMeta, ContextInfo, EffortInfo, HistoryMessage, HistorySliceRequest, JobView, Meta, TabMeta, WireEvent } from "../lib/types";
+import { installDesktopHostStub } from "./desktopHostStub";
 
 let passed = 0;
 let failed = 0;
@@ -144,31 +147,34 @@ let newSessionCalls = 0;
 let backendCanonicalTodos = [{ content: "Old task", status: "in_progress" }];
 let holdNextMeta = false;
 let staleMetaStarted = false;
-const eventHandlers: Array<(event: WireEvent) => void> = [];
+let backendRuntimeEpoch = "runtime-old";
+let backendPendingPrompt = false;
+let promptReplayCalls = 0;
+const resumeRPCGate = deferred<void>();
+const channelRPCGate = deferred<void>();
 const context: ContextInfo = { used: 12, window: 100, sessionTokens: 12 };
 const effort: EffortInfo = { supported: true, current: "auto", default: "auto", levels: ["auto"] };
 const balance: BalanceInfo = { available: false, display: "" };
 const jobs: JobView[] = [];
 const checkpoints: CheckpointMeta[] = [];
 
-window.runtime = {
-  EventsOn: (name: string, cb: (...data: unknown[]) => void) => {
-    if (name === "agent:event") eventHandlers.push(cb as (event: WireEvent) => void);
-    return () => {};
-  },
-  BrowserOpenURL: () => {},
-};
-window.go = {
-  main: {
-    App: {
-      ListTabs: async () => [tabMeta()],
+const appStubTable = {
+      RegisterNavigationIntent: async () => {},
+      ListTabs: async () => {
+        return [tabMeta({
+          runtime: { phase: "ready", epoch: backendRuntimeEpoch },
+          running: backendPendingPrompt,
+          pendingPrompt: backendPendingPrompt,
+          cancellable: backendPendingPrompt,
+        })];
+      },
       MetaForTab: async () => {
         if (holdNextMeta) {
           holdNextMeta = false;
           staleMetaStarted = true;
           return staleSessionMeta.promise;
         }
-        return meta({ canonicalTodos: backendCanonicalTodos });
+        return meta({ canonicalTodos: backendCanonicalTodos, runtime: { phase: "ready", epoch: backendRuntimeEpoch } });
       },
       ContextUsageForTab: async () => context,
       EffortForTab: async () => effort,
@@ -180,8 +186,20 @@ window.go = {
         const messages = await staleHistory.promise;
         return { messages, startTurn: 0, endTurn: messages.filter((message) => message.role === "user").length, totalTurns: messages.filter((message) => message.role === "user").length, hasOlder: false };
       },
+      HistorySliceForTab: async (tabID: string, req: HistorySliceRequest) =>
+        historySliceFromMessages(tabID, await staleHistory.promise, req),
       HistoryCheckpointTurnsForTab: async () => [],
       ReplayPendingPrompts: async () => {},
+      ReplayPendingPromptsForTab: async (tabID: string) => {
+        promptReplayCalls += 1;
+        if (tabID !== "tab-a" || !backendPendingPrompt) return;
+        desktopStub.emit("agent:event", {
+            kind: "ask_request",
+            tabId: tabID,
+            runtimeEpoch: backendRuntimeEpoch,
+            ask: { id: `replayed-${backendRuntimeEpoch}`, questions: [{ id: "choice", prompt: "Recovered after hydration", options: [] }] },
+          });
+      },
       NewSession: async () => {
         newSessionCalls += 1;
         backendCanonicalTodos = [];
@@ -193,6 +211,23 @@ window.go = {
       },
       ResumeSessionPageForTab: async () => {
         backendCanonicalTodos = [{ content: "Restored task", status: "completed" }];
+        const oldEpoch = backendRuntimeEpoch;
+        backendRuntimeEpoch = "runtime-resumed";
+        backendPendingPrompt = true;
+        desktopStub.emit("runtime:rebuilt", "tab-a", backendRuntimeEpoch);
+        desktopStub.emit("agent:event", {
+            kind: "ask_request",
+            tabId: "tab-a",
+            runtimeEpoch: oldEpoch,
+            ask: { id: "stale-old-epoch", questions: [{ id: "choice", prompt: "Stale", options: [] }] },
+          });
+desktopStub.emit("agent:event", {
+            kind: "ask_request",
+            tabId: "tab-a",
+            runtimeEpoch: backendRuntimeEpoch,
+            ask: { id: "pre-response-resume", questions: [{ id: "choice", prompt: "Before Resume RPC returns", options: [] }] },
+          });
+        await resumeRPCGate.promise;
         return {
           messages: [{ role: "user", content: "restore" }, { role: "assistant", content: "done" }],
           startTurn: 0,
@@ -201,9 +236,34 @@ window.go = {
           hasOlder: false,
         };
       },
-    } as Partial<AppBindings> as AppBindings,
-  },
-};
+      OpenChannelSessionPageForTab: async () => {
+        const oldEpoch = backendRuntimeEpoch;
+        backendRuntimeEpoch = "runtime-channel";
+        backendPendingPrompt = true;
+        desktopStub.emit("runtime:rebuilt", "tab-a", backendRuntimeEpoch);
+        desktopStub.emit("agent:event", {
+            kind: "ask_request",
+            tabId: "tab-a",
+            runtimeEpoch: oldEpoch,
+            ask: { id: "stale-channel-old-epoch", questions: [{ id: "choice", prompt: "Stale channel", options: [] }] },
+          });
+desktopStub.emit("agent:event", {
+            kind: "ask_request",
+            tabId: "tab-a",
+            runtimeEpoch: backendRuntimeEpoch,
+            ask: { id: "pre-response-channel", questions: [{ id: "choice", prompt: "Before channel RPC returns", options: [] }] },
+          });
+        await channelRPCGate.promise;
+        return {
+          messages: [{ role: "user", content: "channel" }, { role: "assistant", content: "waiting" }],
+          startTurn: 0,
+          endTurn: 1,
+          totalTurns: 1,
+          hasOlder: false,
+        };
+      },
+    } as Partial<AppBindings> as AppBindings;
+const desktopStub = installDesktopHostStub(appStubTable);
 
 type Controller = ReturnType<typeof useController>;
 let controller: Controller | undefined;
@@ -231,7 +291,7 @@ eq(controller?.state.meta?.canonicalTodos?.[0]?.content, "Old task", "pre-reset 
 
 holdNextMeta = true;
 await act(async () => {
-  for (const handler of eventHandlers) handler({ kind: "turn_done", tabId: "tab-a" });
+  desktopStub.emit("agent:event", { kind: "turn_done", tabId: "tab-a" });
   await flushPromises();
 });
 await waitFor("stale metadata request", () => staleMetaStarted);
@@ -259,11 +319,44 @@ await act(async () => {
 
 eq(controller?.state.items.length, 0, "stale history load cannot repopulate a new blank session");
 
+let resumeNavigation: NavigationResult<void> | undefined;
+let resumeSurfaceSettled = false;
 await act(async () => {
-  await controller?.resumeSession("/sessions/restored.jsonl", "tab-a");
+  resumeNavigation = controller?.resumeSession("/sessions/restored.jsonl", "tab-a");
+  void resumeNavigation?.surfaceReady.then(() => { resumeSurfaceSettled = true; });
   await flushPromises();
 });
+eq(resumeSurfaceSettled, false, "Resume releases navigation acquisition before target history settles");
+eq(controller?.state.ask?.id, "pre-response-resume", "Resume accepts the new-epoch ask and rejects the interleaved old-epoch ask before returning");
+await act(async () => {
+  resumeRPCGate.resolve();
+  await resumeNavigation?.surfaceReady;
+  await flushPromises();
+});
+eq(resumeSurfaceSettled, true, "Resume surfaceReady resolves after authoritative history and reconciliation");
 eq(controller?.state.meta?.canonicalTodos?.[0]?.status, "completed", "resuming a session refreshes its authoritative canonical todo state");
+eq(controller?.state.ask?.id, "replayed-runtime-resumed", "Resume RPC ask emitted before return is restored after reset/history hydration");
+ok(promptReplayCalls > 0, "Resume completion performs a tab-scoped pending-prompt replay");
+
+backendPendingPrompt = false;
+await act(async () => {
+  desktopStub.emit("agent:event", { kind: "turn_done", tabId: "tab-a", runtimeEpoch: backendRuntimeEpoch });
+  await flushPromises();
+});
+const replayCallsBeforeChannelOpen = promptReplayCalls;
+let channelNavigation: NavigationResult<void> | undefined;
+await act(async () => {
+  channelNavigation = controller?.openChannelSession("/sessions/channel.jsonl", "tab-a");
+  await flushPromises();
+});
+eq(controller?.state.ask?.id, "pre-response-channel", "channel-open accepts the new-epoch ask and rejects the interleaved old-epoch ask before returning");
+await act(async () => {
+  channelRPCGate.resolve();
+  await channelNavigation?.surfaceReady;
+  await flushPromises();
+});
+eq(controller?.state.ask?.id, "replayed-runtime-channel", "channel-open ask emitted before return is restored after reset/history hydration");
+ok(promptReplayCalls > replayCallsBeforeChannelOpen, "channel-open completion performs a tab-scoped pending-prompt replay");
 
 await act(async () => {
   root.unmount();
@@ -292,7 +385,8 @@ const reusedTabPage = {
   hasOlder: false,
 };
 const reusedEmptyPage = { messages: [], startTurn: 0, endTurn: 0, totalTurns: 0, hasOlder: false };
-window.go.main.App = {
+desktopStub.replaceCommands({
+  RegisterNavigationIntent: async () => {},
   ListTabs: async () => [reusedTab],
   MetaForTab: async () => meta({ sessionPath: "/sessions/new.jsonl" }),
   ContextUsageForTab: async () => context,
@@ -304,10 +398,15 @@ window.go.main.App = {
     reusedHistoryCalls.push("history");
     return reusedHistoryCalls.length === 1 ? reusedOldHistory.promise : reusedEmptyPage;
   },
+  HistorySliceForTab: async (tabID: string, req: HistorySliceRequest) => {
+    reusedHistoryCalls.push("history");
+    const page = reusedHistoryCalls.length === 1 ? await reusedOldHistory.promise : reusedEmptyPage;
+    return historySliceFromMessages(tabID, page.messages, req);
+  },
   HistoryCheckpointTurnsForTab: async () => [],
   ReplayPendingPrompts: async () => {},
   EnsureBlankTab: async () => ({ ...reusedTab, sessionPath: "/sessions/new.jsonl", active: true }),
-} as Partial<AppBindings> as AppBindings;
+} as Partial<AppBindings> as AppBindings);
 
 controller = undefined;
 const reuseRoot = createRoot(rootEl);
@@ -345,7 +444,8 @@ const raceBlank = tabMeta({ id: "race-blank", active: false, sessionPath: "/sess
 let raceBackendActiveId = raceTabA.id;
 const raceHistoryCalls: string[] = [];
 const raceSetActiveCalls: string[] = [];
-window.go.main.App = {
+desktopStub.replaceCommands({
+  RegisterNavigationIntent: async () => {},
   ListTabs: async () => [raceTabA, raceTabB, raceBlank].map((tab) => ({ ...tab, active: tab.id === raceBackendActiveId })),
   MetaForTab: async (tabID: string) => meta({ sessionPath: `/sessions/${tabID}.jsonl` }),
   ContextUsageForTab: async () => context,
@@ -356,6 +456,10 @@ window.go.main.App = {
   HistoryPageForTab: async (tabID: string) => {
     raceHistoryCalls.push(tabID);
     return reusedEmptyPage;
+  },
+  HistorySliceForTab: async (tabID: string, req: HistorySliceRequest) => {
+    raceHistoryCalls.push(tabID);
+    return historySliceFromMessages(tabID, reusedEmptyPage.messages, req);
   },
   HistoryCheckpointTurnsForTab: async () => [],
   ReplayPendingPrompts: async () => {},
@@ -368,7 +472,7 @@ window.go.main.App = {
     raceSetActiveCalls.push(tabID);
     raceBackendActiveId = tabID;
   },
-} as Partial<AppBindings> as AppBindings;
+} as Partial<AppBindings> as AppBindings);
 
 controller = undefined;
 const queuedRaceRoot = createRoot(rootEl);
@@ -413,7 +517,8 @@ const guardedStartupTabs = deferred<TabMeta[]>();
 const staleProjectA = "/repo/project-a";
 const targetProjectB = "/repo/project-b";
 const ensureBlankSurfaceCalls: Array<{ scope: string; workspaceRoot: string }> = [];
-window.go.main.App = {
+desktopStub.replaceCommands({
+  RegisterNavigationIntent: async () => {},
   ListTabs: async () => guardedStartupTabs.promise,
   MetaForTab: async (tabID: string) => tabID === "tab-new"
     ? meta({ cwd: targetProjectB, workspaceRoot: targetProjectB, workspaceName: "project-b", workspacePath: targetProjectB })
@@ -439,7 +544,7 @@ window.go.main.App = {
       cwd: targetProjectB,
     });
   },
-} as Partial<AppBindings> as AppBindings;
+} as Partial<AppBindings> as AppBindings);
 
 controller = undefined;
 const guardRoot = createRoot(rootEl);

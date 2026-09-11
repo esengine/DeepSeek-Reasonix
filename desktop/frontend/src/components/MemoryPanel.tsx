@@ -1,3 +1,4 @@
+import { SettingsSelect } from "./SettingsSelect";
 import { Activity, AlertTriangle, ArchiveRestore, Check, ChevronDown, ChevronRight, FileText, History, Pencil, Plus, RefreshCw, Search, Sparkles, Trash2 } from "lucide-react";
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { app } from "../lib/bridge";
@@ -640,17 +641,17 @@ export function MemoryPanel({
               <div className="mem-section__title">{t("memory.quickAdd")}</div>
               <div className="mem-add">
                 <Tooltip label={t("memory.whereToSave")}>
-                  <select
+                  <SettingsSelect
                     className="mem-select"
                     value={activeScope}
-                    onChange={(e) => setScope(e.target.value)}
+                    onValueChange={(value) => setScope(value)}
                   >
                     {scopes.map((s) => (
                       <option key={s.scope} value={s.scope}>
                         {s.scope}
                       </option>
                     ))}
-                  </select>
+                  </SettingsSelect>
                 </Tooltip>
                 <input
                   className="mem-input"
@@ -1198,7 +1199,7 @@ export function MemorySettingsPage() {
 					<code>{view.storeDir}</code>
 				</div>
 			)}
-			<div className="memory-tabs-row" role="tablist" aria-label={t("settings.tab.memory")}>
+			<div className="memory-tabs-row settings-toolbar" role="tablist" aria-label={t("settings.tab.memory")}>
 				<div className="settings-subtabs memory-tabs-row__primary" role="presentation">
 					<button
 						className={"settings-subtab" + (tab === "saved" ? " settings-subtab--active" : "")}
@@ -1767,17 +1768,17 @@ export function MemorySettingsPage() {
 						</div>
 						<div className="mem-add">
 							<Tooltip label={t("memory.whereToSave")}>
-								<select
+								<SettingsSelect
 									className="mem-select"
 									value={activeScope}
-									onChange={(e) => setScope(e.target.value)}
+									onValueChange={(value) => setScope(value)}
 								>
 									{scopes.map((s) => (
 										<option key={s.scope} value={s.scope}>
 											{memoryScopeLabel(s.scope, t)}
 										</option>
 									))}
-								</select>
+								</SettingsSelect>
 							</Tooltip>
 							<input
 								className="mem-input"

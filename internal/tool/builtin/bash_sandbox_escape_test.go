@@ -213,11 +213,11 @@ func windowsSandboxFailureForShell(sh sandbox.Shell) string {
 func backgroundJobIDFromStartOutput(t *testing.T, out string) string {
 	t.Helper()
 	const prefix = `Started background job "`
-	start := strings.Index(out, prefix)
-	if start < 0 {
+	_, after, ok := strings.Cut(out, prefix)
+	if !ok {
 		t.Fatalf("start output = %q, want background job id", out)
 	}
-	rest := out[start+len(prefix):]
+	rest := after
 	end := strings.IndexByte(rest, '"')
 	if end < 0 {
 		t.Fatalf("start output = %q, want closing quote for background job id", out)

@@ -1,0 +1,4 @@
+prompt = "Receipts show prices 10x off: cart.py totals integer cents while receipt.py assumes tenths when formatting dollars. Fix the mismatch across cart.py and receipt.py; format_total(1234) must render '$12.34'."
+class = "multi-file-bugfix"
+max_steps = 15
+timeout_sec = 240

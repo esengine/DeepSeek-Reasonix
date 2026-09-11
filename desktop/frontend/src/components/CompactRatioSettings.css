@@ -1,77 +1,154 @@
-.compact-ratio-controls,
-.compact-ratio-custom-panel {
+.compact-ratio-controls {
   display: flex;
   flex-direction: column;
-  gap: 8px;
+  gap: 6px;
   width: 100%;
 }
 
-.compact-ratio-presets {
-  width: 100%;
-}
-
-.compact-ratio-presets .set-seg__btn {
-  display: flex;
-  flex: 1 1 0;
-  flex-direction: column;
-  align-items: center;
-  justify-content: center;
-  gap: 2px;
+.compact-ratio-choice-list {
   min-width: 0;
-  min-height: 44px;
-  padding: 6px 8px;
-  text-transform: none;
-  white-space: normal;
-}
-
-.compact-ratio-preset__percent {
-  font-weight: 650;
-}
-
-.compact-ratio-preset__caption {
-  font-size: var(--text-2xs);
-}
-
-.compact-ratio-summary {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 12px;
   width: 100%;
+  margin: 0;
+  padding: 0;
+  border: 0;
+  border-top: 1px solid var(--border-soft);
 }
 
-.compact-ratio-current {
+.compact-ratio-choice {
+  border-bottom: 1px solid var(--border-soft);
+}
+
+.compact-ratio-choice__row {
+  display: grid;
+  grid-template-columns: 16px auto auto minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+  min-height: 40px;
+  padding: 8px 0;
   color: var(--fg);
   font-size: var(--font-control-small);
-  font-weight: 600;
+  line-height: 1.35;
+  cursor: pointer;
 }
 
-.compact-ratio-custom-toggle[aria-expanded="true"] {
-  background: var(--bg-soft);
+.compact-ratio-choice__row input[type="radio"] {
+  width: 14px;
+  height: 14px;
+  margin: 0;
+  accent-color: var(--accent);
+}
+
+.compact-ratio-choice__name,
+.compact-ratio-choice__percent {
+  font-weight: 650;
+  white-space: nowrap;
+}
+
+.compact-ratio-choice__effect {
+  min-width: 0;
+  color: var(--fg-dim);
+}
+
+.compact-ratio-choice__inline-input {
+  grid-column: 4 / -1;
+  justify-self: end;
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  width: 116px;
+  min-width: 0;
+  padding: 0 8px;
+  border: 1px solid var(--border-soft);
+  border-radius: 6px;
+  color: var(--fg-faint);
+  font-size: var(--text-2xs);
+  overflow: hidden;
+}
+
+.compact-ratio-choice__inline-input:focus-within {
+  border-color: var(--accent);
+  box-shadow: 0 0 0 2px color-mix(in srgb, var(--accent) 14%, transparent);
+}
+
+.compact-ratio-choice__inline-input:has(input[aria-invalid="true"]) {
+  border-color: var(--danger);
+}
+
+.compact-ratio-choice__inline-input input {
+  width: 100%;
+  min-width: 0;
+  height: 28px;
+  padding: 0;
+  border: 0;
+  outline: 0;
+  background: transparent;
   color: var(--fg);
+  font: inherit;
+  font-variant-numeric: tabular-nums;
+  text-align: right;
 }
 
-.compact-ratio-impact,
-.compact-ratio-custom__hint,
-.compact-ratio-custom__suffix {
+.compact-ratio-choice__inline-input input::placeholder {
+  color: var(--fg-faint);
+  opacity: 1;
+}
+
+/* The wrapper owns focus; override the shared settings focus-visible rule. */
+:root .settings-center .settings-page[data-layout] .compact-ratio-choice__inline-input input:focus,
+:root .settings-center .settings-page[data-layout] .compact-ratio-choice__inline-input input:focus-visible {
+  outline: none;
+  box-shadow: none;
+  border: 0;
+}
+
+.compact-ratio-choice__inline-input input::-webkit-inner-spin-button,
+.compact-ratio-choice__inline-input input::-webkit-outer-spin-button {
+  margin: 0;
+  appearance: none;
+}
+
+.compact-ratio-choice__inline-input > span {
+  flex: 0 0 auto;
+}
+
+.compact-ratio-choice[data-selected="true"] .compact-ratio-choice__name,
+.compact-ratio-choice[data-selected="true"] .compact-ratio-choice__percent {
+  color: var(--accent);
+}
+
+.compact-ratio-choice__badge {
+  padding: 2px 6px;
+  border: 1px solid color-mix(in srgb, var(--accent) 28%, transparent);
+  border-radius: 999px;
+  background: var(--accent-soft);
+  color: var(--accent);
+  font-size: var(--text-2xs);
+  font-weight: 650;
+  line-height: 1.2;
+  white-space: nowrap;
+}
+
+.compact-ratio-impact {
   color: var(--fg-dim);
   font-size: var(--text-2xs);
   line-height: 1.45;
 }
 
-.compact-ratio-custom-panel {
-  gap: 6px;
-}
+@media (max-width: 520px) {
+  .compact-ratio-choice__row {
+    grid-template-columns: 16px auto auto minmax(0, 1fr);
+  }
 
-.compact-ratio-custom {
-  justify-content: flex-start;
-  max-width: 100%;
-}
+  .compact-ratio-choice__badge {
+    grid-column: 2;
+  }
 
-.compact-ratio-custom .mem-input {
-  flex: 0 0 88px;
-}
+  .compact-ratio-choice__effect {
+    grid-column: 2 / -1;
+  }
 
-.compact-ratio-custom__hint--invalid {
-  color: var(--danger);
+  .compact-ratio-choice__inline-input {
+    grid-column: 4;
+  }
 }

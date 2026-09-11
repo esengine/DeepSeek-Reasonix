@@ -10,7 +10,7 @@ import (
 	"testing"
 )
 
-// --- read_file extended tests ---
+// read_file extended tests
 
 func TestReadFileMissing(t *testing.T) {
 	_, err := readFile{}.Execute(context.Background(), argsJSON(t, map[string]any{"path": "/nonexistent/file.txt"}))
@@ -51,7 +51,7 @@ func TestReadFileLargeFile(t *testing.T) {
 	}
 	// Pagination hint points at the next page; it no longer reads the whole file
 	// to compute an exact remaining count.
-	if !strings.Contains(out, "more line") || !strings.Contains(out, "offset=3") {
+	if !strings.Contains(out, "PARTIAL view") || !strings.Contains(out, "offset=3") {
 		t.Errorf("pagination hint missing: %s", out)
 	}
 }
@@ -74,7 +74,7 @@ func TestReadFileInvalidArgs(t *testing.T) {
 	}
 }
 
-// --- ls extended tests ---
+// ls extended tests
 
 func TestLsEmptyDir(t *testing.T) {
 	dir := t.TempDir()
@@ -106,7 +106,7 @@ func TestLsInvalidArgs(t *testing.T) {
 	}
 }
 
-// --- grep extended tests ---
+// grep extended tests
 
 func TestGrepSingleFile(t *testing.T) {
 	dir := t.TempDir()
@@ -172,7 +172,7 @@ func TestGrepTruncation(t *testing.T) {
 	dir := t.TempDir()
 	// Create a file with many matching lines.
 	var b strings.Builder
-	for i := 0; i < 300; i++ {
+	for i := range 300 {
 		fmt.Fprintf(&b, "match %d\n", i)
 	}
 	os.WriteFile(filepath.Join(dir, "many.txt"), []byte(b.String()), 0o644)
@@ -183,7 +183,7 @@ func TestGrepTruncation(t *testing.T) {
 	}
 }
 
-// --- glob extended tests ---
+// glob extended tests
 
 func TestGlobEmptyPattern(t *testing.T) {
 	_, err := globTool{}.Execute(context.Background(), argsJSON(t, map[string]any{"pattern": ""}))

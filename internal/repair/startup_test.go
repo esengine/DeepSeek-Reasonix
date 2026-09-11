@@ -3,6 +3,8 @@ package repair
 import (
 	"os"
 	"path/filepath"
+	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 )
@@ -40,6 +42,9 @@ func TestStartupTrackerObservesDeadLegacyOwner(t *testing.T) {
 	if got.UpdateFrom != "v1.19.0" || got.UpdateTo != "v1.19.1" || got.UptimeBucket != "m_0_2" {
 		t.Fatalf("observation metadata = %+v", got)
 	}
+	if got := tracker.ObservePreviousRun(); got.Abnormal {
+		t.Fatalf("claimed legacy record replayed: %+v", got)
+	}
 }
 
 func TestStartupTrackerIgnoresLiveAndCleanLegacyRecords(t *testing.T) {
@@ -54,6 +59,38 @@ func TestStartupTrackerIgnoresLiveAndCleanLegacyRecords(t *testing.T) {
 	writeLegacyStartupState(t, path, `{"phase":"clean-exit","pid":42}`)
 	if got := tracker.ObservePreviousRun(); got.Abnormal {
 		t.Fatalf("clean exit reported abnormal: %+v", got)
+	}
+	if _, err := os.Stat(path); !os.IsNotExist(err) {
+		t.Fatalf("clean legacy record was not consumed: %v", err)
+	}
+}
+
+func TestStartupTrackerConcurrentClaimReportsOnce(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "startup.json")
+	writeLegacyStartupState(t, path, `{"phase":"healthy","version":"v1.19.1","pid":42}`)
+
+	const observers = 16
+	start := make(chan struct{})
+	var ready sync.WaitGroup
+	var done sync.WaitGroup
+	var reports atomic.Int32
+	for range observers {
+		ready.Add(1)
+		done.Go(func() {
+			tracker := NewStartupTracker(path)
+			tracker.processAlive = func(int) bool { return false }
+			ready.Done()
+			<-start
+			if tracker.ObservePreviousRun().Abnormal {
+				reports.Add(1)
+			}
+		})
+	}
+	ready.Wait()
+	close(start)
+	done.Wait()
+	if got := reports.Load(); got != 1 {
+		t.Fatalf("concurrent reports = %d, want 1", got)
 	}
 }
 

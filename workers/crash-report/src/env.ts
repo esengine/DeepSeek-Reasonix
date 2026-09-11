@@ -23,4 +23,11 @@ export interface Env {
   // Lark bot URLs get their native payload shape; any other receiver gets
   // Slack-style {"text": ...}. Unset = log-only.
   ALERT_WEBHOOK?: string;
+  // Crash sample storage rollout. `d1` is the fail-safe default; `dual`
+  // preserves D1 samples while mirroring Firebase; `firebase` keeps only the
+  // D1 query projection and the bounded retry outbox.
+  CRASH_STORAGE_MODE?: string;
+  FIREBASE_DATABASE_URL?: string;
+  FIREBASE_CLIENT_EMAIL?: string;
+  FIREBASE_PRIVATE_KEY?: string;
 }

@@ -4,6 +4,7 @@ package main
 
 import (
 	"encoding/json"
+	"errors"
 	"flag"
 	"fmt"
 	"io"
@@ -21,20 +22,18 @@ import (
 )
 
 const (
-	macBundleID         = "com.wails.reasonix-desktop"
+	macBundleID         = "com.wails.reasonix-desktop" // frozen bundle identity; renaming it would orphan installed apps
 	macUpdateHandoffArg = "--reasonix-mac-update-handoff"
 	macHandoffReadyFD   = 3
 	macHandoffProceedFD = 4
 	macHandoffReadyWait = 5 * time.Second
-	// macUpdateHandoffLockTimeout covers concurrent Guard rollback/prepare while
-	// the critical directory swap runs. PID wait happens before the lock so a
-	// long exit wait does not starve unrelated repairs.
+	// macUpdateHandoffLockTimeout covers concurrent Guard rollback/prepare during
+	// the swap; the PID wait runs before the lock so a long exit starves no repairs.
 	macUpdateHandoffLockTimeout = 2 * time.Minute
 )
 
 var (
-	// Test seams keep desktop tests independent of a real signed bundle and the
-	// process executable path used by repair transaction validation.
+	// Test seams keep desktop tests independent of a real signed bundle and the executable path.
 	openCommand = func(args ...string) *exec.Cmd {
 		return exec.Command("/usr/bin/open", args...)
 	}
@@ -48,9 +47,7 @@ var (
 	macHandoffCopy               = func(oldPath, newPath string) error {
 		return exec.Command("/usr/bin/ditto", oldPath, newPath).Run()
 	}
-	macHandoffRename = func(oldPath, newPath string) error {
-		return unix.RenameatxNp(unix.AT_FDCWD, oldPath, unix.AT_FDCWD, newPath, unix.RENAME_EXCL)
-	}
+	macHandoffRename  = macUpdateRenameNoReplace
 	macHandoffLogPath = func() string {
 		cacheDir, err := updateCacheDir()
 		if err != nil {
@@ -60,7 +57,7 @@ var (
 	}
 )
 
-func applyMac(zipPath, targetVersion string) error {
+func applyMac(zipPath, targetVersion string, ownerPID int) error {
 	if !macSelfUpdateAllowed() {
 		return fmt.Errorf("macOS automatic update is not enabled for this build")
 	}
@@ -104,7 +101,7 @@ func applyMac(zipPath, targetVersion string) error {
 		backupApp,
 		nextApp,
 		staging,
-		os.Getpid(),
+		ownerPID,
 	)
 	if err != nil {
 		return err
@@ -112,7 +109,7 @@ func applyMac(zipPath, targetVersion string) error {
 	readyReader, readyWriter, err := os.Pipe()
 	if err != nil {
 		if _, cancelErr := cancelMacUpdateHandoff(tx, macUpdateHandoffLockTimeout); cancelErr != nil {
-			return fmt.Errorf("create macOS update readiness pipe: %w; cancel prepared update: %v", err, cancelErr)
+			return fmt.Errorf("create macOS update readiness pipe: %w; cancel prepared update: %w", err, cancelErr)
 		}
 		return fmt.Errorf("create macOS update readiness pipe: %w", err)
 	}
@@ -121,20 +118,20 @@ func applyMac(zipPath, targetVersion string) error {
 		_ = readyReader.Close()
 		_ = readyWriter.Close()
 		if _, cancelErr := cancelMacUpdateHandoff(tx, macUpdateHandoffLockTimeout); cancelErr != nil {
-			return fmt.Errorf("create macOS update proceed pipe: %w; cancel prepared update: %v", err, cancelErr)
+			return fmt.Errorf("create macOS update proceed pipe: %w; cancel prepared update: %w", err, cancelErr)
 		}
 		return fmt.Errorf("create macOS update proceed pipe: %w", err)
 	}
 	defer readyReader.Close()
 	defer proceedWriter.Close()
-	// Detach a self-subprocess that holds the shared repair mutation lock for
-	// the actual mv/ditto window. A shell helper cannot share Go flock keys, so
-	// the binary that performs the directory swap must take LockRepairMutations.
+	// Detach a self-subprocess that holds the shared repair mutation lock for the
+	// swap window: a shell helper cannot share Go flock keys (LockRepairMutations).
 	cmd := exec.Command(exe,
 		macUpdateHandoffArg,
 		"-to-version", tx.ToVersion,
 		"-created-at", tx.CreatedAt,
 		"-transaction-id", repair.UpdateTransactionID(tx),
+		"-owner-pid", fmt.Sprintf("%d", ownerPID),
 		"-ready-fd", fmt.Sprintf("%d", macHandoffReadyFD),
 		"-proceed-fd", fmt.Sprintf("%d", macHandoffProceedFD),
 	)
@@ -143,7 +140,7 @@ func applyMac(zipPath, targetVersion string) error {
 		_ = readyWriter.Close()
 		_ = proceedReader.Close()
 		if _, cancelErr := cancelMacUpdateHandoff(tx, macUpdateHandoffLockTimeout); cancelErr != nil {
-			return fmt.Errorf("%w; cancel prepared update: %v", err, cancelErr)
+			return fmt.Errorf("%w; cancel prepared update: %w", err, cancelErr)
 		}
 		return err
 	}
@@ -155,10 +152,10 @@ func applyMac(zipPath, targetVersion string) error {
 		_ = cmd.Wait()
 		cancelled, cancelErr := cancelMacUpdateHandoff(tx, macUpdateHandoffLockTimeout)
 		if cancelErr != nil {
-			return fmt.Errorf("%w; cancel prepared update: %v", cause, cancelErr)
+			return fmt.Errorf("%w; cancel prepared update: %w", cause, cancelErr)
 		}
 		if cleanupErr := cleanupMacHandoffStaging(cancelled); cleanupErr != nil {
-			return fmt.Errorf("%w; cleanup prepared update: %v", cause, cleanupErr)
+			return fmt.Errorf("%w; cleanup prepared update: %w", cause, cleanupErr)
 		}
 		return cause
 	}
@@ -233,8 +230,7 @@ func reportMacHandoffStartupFailure(cfg macUpdateHandoffConfig, phase string, er
 	})
 }
 
-// maybeRunMacUpdateHandoff handles the detached self-update child before Wails
-// or single-instance setup runs.
+// maybeRunMacUpdateHandoff handles the detached self-update child before the shell starts.
 func maybeRunMacUpdateHandoff(args []string) (handled bool, exitCode int) {
 	if len(args) == 0 || args[0] != macUpdateHandoffArg {
 		return false, 0
@@ -251,8 +247,10 @@ type macUpdateHandoffConfig struct {
 	ToVersion     string
 	CreatedAt     string
 	TransactionID string
-	ReadyFD       int
-	ProceedFD     int
+	// OwnerPID must exit before the bundle swap: the shell parent process under Electron.
+	OwnerPID  int
+	ReadyFD   int
+	ProceedFD int
 }
 
 func parseMacUpdateHandoffArgs(args []string) (macUpdateHandoffConfig, error) {
@@ -261,6 +259,7 @@ func parseMacUpdateHandoffArgs(args []string) (macUpdateHandoffConfig, error) {
 	fs.StringVar(&cfg.ToVersion, "to-version", "", "pending update target version")
 	fs.StringVar(&cfg.CreatedAt, "created-at", "", "pending update creation timestamp")
 	fs.StringVar(&cfg.TransactionID, "transaction-id", "", "complete pending update identity")
+	fs.IntVar(&cfg.OwnerPID, "owner-pid", 0, "process that must exit before the bundle swap")
 	fs.IntVar(&cfg.ReadyFD, "ready-fd", 0, "parent readiness pipe")
 	fs.IntVar(&cfg.ProceedFD, "proceed-fd", 0, "parent proceed pipe")
 	if err := fs.Parse(args); err != nil {
@@ -272,7 +271,7 @@ func parseMacUpdateHandoffArgs(args []string) (macUpdateHandoffConfig, error) {
 	cfg.ToVersion = strings.TrimSpace(cfg.ToVersion)
 	cfg.CreatedAt = strings.TrimSpace(cfg.CreatedAt)
 	cfg.TransactionID = strings.TrimSpace(cfg.TransactionID)
-	if cfg.ToVersion == "" || cfg.CreatedAt == "" || cfg.TransactionID == "" {
+	if cfg.ToVersion == "" || cfg.CreatedAt == "" || cfg.TransactionID == "" || cfg.OwnerPID <= 0 {
 		return macUpdateHandoffConfig{}, fmt.Errorf("missing required handoff arguments")
 	}
 	if (cfg.ReadyFD == 0) != (cfg.ProceedFD == 0) ||
@@ -305,10 +304,7 @@ func runMacUpdateHandoff(cfg macUpdateHandoffConfig) int {
 		reportMacHandoffStartupFailure(cfg, "read-pending-transaction", err)
 		return 1
 	}
-	if strings.TrimSpace(pending.ToVersion) != cfg.ToVersion ||
-		strings.TrimSpace(pending.CreatedAt) != cfg.CreatedAt ||
-		repair.UpdateTransactionID(pending) != cfg.TransactionID ||
-		pending.HandoffOwnerPID <= 0 {
+	if !macHandoffIdentityMatches(pending, cfg) {
 		err := fmt.Errorf("pending update does not match handoff identity")
 		logf("%v", err)
 		reportMacHandoffStartupFailure(cfg, "validate-transaction-identity", err)
@@ -423,10 +419,9 @@ func runMacUpdateHandoff(cfg macUpdateHandoffConfig) int {
 			} else {
 				retainedFailedApp = true
 				if err := repair.VerifyAppBundleUpdateHandoffReplacement(claimed, failedApp); err != nil {
-					// Preserve the changed replacement at the failed path and
-					// continue restoring the independently verified backup.
-					// Putting an unverified bundle back at the live path would
-					// make the failed rollback executable.
+					// Preserve the changed replacement at the failed path and restore
+					// the independently verified backup; putting an unverified bundle
+					// back at the live path would make the failed rollback executable.
 					logf("preserving changed replacement bundle at %s: %v", failedApp, err)
 				} else {
 					failedAppVerified = true
@@ -436,10 +431,10 @@ func runMacUpdateHandoff(cfg macUpdateHandoffConfig) int {
 		if err := macHandoffRename(backupApp, oldApp); err != nil {
 			if retainedFailedApp && failedAppVerified {
 				if verifyErr := repair.VerifyAppBundleUpdateHandoffReplacement(claimed, failedApp); verifyErr != nil {
-					return fmt.Errorf("restore backup bundle: %w (retained replacement changed: %v)", err, verifyErr)
+					return fmt.Errorf("restore backup bundle: %w (retained replacement changed: %w)", err, verifyErr)
 				}
 				if compensateErr := macHandoffRename(failedApp, oldApp); compensateErr != nil {
-					return fmt.Errorf("restore backup bundle: %w (failed to restore replacement bundle: %v)", err, compensateErr)
+					return fmt.Errorf("restore backup bundle: %w (failed to restore replacement bundle: %w)", err, compensateErr)
 				}
 			}
 			return fmt.Errorf("restore backup bundle: %w", err)
@@ -447,14 +442,14 @@ func runMacUpdateHandoff(cfg macUpdateHandoffConfig) int {
 		if err := repair.VerifyAppBundleUpdateHandoffOriginal(claimed); err != nil {
 			rejected, retainErr := retainMacHandoffNode(oldApp, "reasonix-update-rejected")
 			if retainErr != nil {
-				return fmt.Errorf("restored backup bundle changed: %w (retain rejected bundle: %v)", err, retainErr)
+				return fmt.Errorf("restored backup bundle changed: %w (retain rejected bundle: %w)", err, retainErr)
 			}
 			if retainedFailedApp && failedAppVerified {
 				if verifyErr := repair.VerifyAppBundleUpdateHandoffReplacement(claimed, failedApp); verifyErr != nil {
-					return fmt.Errorf("restored backup bundle changed: %w (rejected bundle retained at %s; prior live bundle changed: %v)", err, rejected, verifyErr)
+					return fmt.Errorf("restored backup bundle changed: %w (rejected bundle retained at %s; prior live bundle changed: %w)", err, rejected, verifyErr)
 				}
 				if compensateErr := macHandoffRename(failedApp, oldApp); compensateErr != nil {
-					return fmt.Errorf("restored backup bundle changed: %w (rejected bundle retained at %s; restore prior live bundle: %v)", err, rejected, compensateErr)
+					return fmt.Errorf("restored backup bundle changed: %w (rejected bundle retained at %s; restore prior live bundle: %w)", err, rejected, compensateErr)
 				}
 			}
 			return fmt.Errorf("restored backup bundle changed: %w (rejected bundle retained at %s)", err, rejected)
@@ -584,6 +579,13 @@ func runMacUpdateHandoff(cfg macUpdateHandoffConfig) int {
 	return 0
 }
 
+func macHandoffIdentityMatches(pending *repair.UpdateTransaction, cfg macUpdateHandoffConfig) bool {
+	return strings.TrimSpace(pending.ToVersion) == cfg.ToVersion &&
+		strings.TrimSpace(pending.CreatedAt) == cfg.CreatedAt &&
+		repair.UpdateTransactionID(pending) == cfg.TransactionID &&
+		pending.HandoffOwnerPID > 0 && pending.HandoffOwnerPID == cfg.OwnerPID
+}
+
 func completeMacHandoffHandshake(cfg macUpdateHandoffConfig) error {
 	if cfg.ReadyFD == 0 && cfg.ProceedFD == 0 {
 		return nil
@@ -611,7 +613,7 @@ func completeMacHandoffHandshake(cfg macUpdateHandoffConfig) error {
 }
 
 func retainMacHandoffNode(path, suffix string) (string, error) {
-	for attempt := 0; attempt < 16; attempt++ {
+	for attempt := range 16 {
 		retained := fmt.Sprintf(
 			"%s.%s-%d-%d",
 			path,
@@ -632,13 +634,41 @@ func retainMacHandoffNode(path, suffix string) (string, error) {
 
 var macUpdateCleanupAfterRename = func(string, string) {}
 
+// macUpdateRenameNoReplace prefers RENAME_EXCL and falls back on volumes such
+// as exFAT to an existence check plus os.Rename. The fallback is best-effort:
+// callers hold Reasonix's mutation locks, and os.ErrExist only means the
+// destination was observed; it is not an atomic no-replace guarantee.
+func macUpdateRenameNoReplace(oldPath, newPath string) error {
+	return macRenameNoReplace(macExclusiveRename, oldPath, newPath)
+}
+
+func macExclusiveRename(oldPath, newPath string) error {
+	return unix.RenameatxNp(unix.AT_FDCWD, oldPath, unix.AT_FDCWD, newPath, unix.RENAME_EXCL)
+}
+
+func macRenameNoReplace(exclusive func(string, string) error, oldPath, newPath string) error {
+	err := exclusive(oldPath, newPath)
+	if err == nil || !(errors.Is(err, syscall.ENOTSUP) || errors.Is(err, syscall.ENOSYS)) {
+		return err
+	}
+	if _, statErr := os.Lstat(newPath); statErr == nil {
+		return fmt.Errorf("macOS update rename target already exists (best-effort under Reasonix mutation lock): %w", os.ErrExist)
+	} else if !os.IsNotExist(statErr) {
+		return statErr
+	}
+	if err := os.Rename(oldPath, newPath); err != nil {
+		return fmt.Errorf("macOS update rename (best-effort under Reasonix mutation lock): %w", err)
+	}
+	return nil
+}
+
 func cleanupOwnedMacUpdateDirectory(path string, owner os.FileInfo) error {
 	if strings.TrimSpace(path) == "" || owner == nil || !owner.IsDir() {
 		return fmt.Errorf("macOS update cleanup identity is incomplete")
 	}
-	for attempt := 0; attempt < 16; attempt++ {
+	for attempt := range 16 {
 		cleanup := fmt.Sprintf("%s.reasonix-cleanup-%d-%d", path, time.Now().UTC().UnixNano(), attempt)
-		err := unix.RenameatxNp(unix.AT_FDCWD, path, unix.AT_FDCWD, cleanup, unix.RENAME_EXCL)
+		err := macUpdateRenameNoReplace(path, cleanup)
 		if err != nil {
 			if os.IsNotExist(err) {
 				return nil
@@ -654,7 +684,7 @@ func cleanupOwnedMacUpdateDirectory(path string, owner os.FileInfo) error {
 			return statErr
 		}
 		if !os.SameFile(owner, actual) {
-			if restoreErr := unix.RenameatxNp(unix.AT_FDCWD, cleanup, unix.AT_FDCWD, path, unix.RENAME_EXCL); restoreErr != nil {
+			if restoreErr := macUpdateRenameNoReplace(cleanup, path); restoreErr != nil {
 				return fmt.Errorf("macOS update directory changed before cleanup; preserve replacement at %s: %w", cleanup, restoreErr)
 			}
 			return fmt.Errorf("macOS update directory changed before cleanup")

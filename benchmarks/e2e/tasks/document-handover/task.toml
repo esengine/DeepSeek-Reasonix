@@ -1,0 +1,4 @@
+prompt = "Write HANDOVER.md describing the real current state of this workspace for the next person. It must name the key builder that exists but is never called, name the test that is skipped and why, and state plainly that notes.txt is stale and which of its claims is false. Do not change any code."
+class = "read-only-output"
+max_steps = 30
+timeout_sec = 600

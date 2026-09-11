@@ -5,7 +5,7 @@ import (
 	"testing"
 )
 
-// --- ParseDecision ---
+// ParseDecision
 
 func TestParseDecisionAllow(t *testing.T) {
 	if ParseDecision("allow") != Allow {
@@ -46,7 +46,7 @@ func TestParseDecisionUnknown(t *testing.T) {
 	}
 }
 
-// --- Decision.String ---
+// Decision.String
 
 func TestDecisionString(t *testing.T) {
 	if Allow.String() != "allow" {
@@ -63,7 +63,7 @@ func TestDecisionString(t *testing.T) {
 	}
 }
 
-// --- matchGlob edge cases ---
+// matchGlob edge cases
 
 func TestMatchGlobEmptyPattern(t *testing.T) {
 	// Empty pattern matches empty name (both consumed simultaneously).
@@ -108,7 +108,7 @@ func TestMatchGlobQuestionMark(t *testing.T) {
 	}
 }
 
-// --- Subject edge cases ---
+// Subject edge cases
 
 func TestSubjectNestedJSON(t *testing.T) {
 	// Array values should not match.
@@ -147,7 +147,7 @@ func TestSubjectMoveFilePaths(t *testing.T) {
 	}
 }
 
-// --- rememberRule ---
+// rememberRule
 
 func TestRememberRuleWithBashSubjectUsesPrefixWhenAvailable(t *testing.T) {
 	// Bash commands with a safe prefix prefer the prefix over the exact command
@@ -368,7 +368,7 @@ func TestFileMutationRuleMatchesMutationToolsByPath(t *testing.T) {
 	}
 }
 
-// --- New ---
+// New
 
 func TestNewPolicy(t *testing.T) {
 	p := New("deny",
@@ -390,7 +390,7 @@ func TestNewPolicy(t *testing.T) {
 	}
 }
 
-// --- NewGate ---
+// NewGate
 
 func TestNewGate(t *testing.T) {
 	p := New("ask", nil, nil, nil)

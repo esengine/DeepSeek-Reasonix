@@ -103,7 +103,7 @@ function fixture(
       version,
       candidateSha,
       runner,
-      sleep: () => {},
+      sleep: (milliseconds) => calls.push({ args: ["sleep", String(milliseconds)] }),
       log: () => {},
     };
     if (attempts !== null) options.attempts = attempts;
@@ -119,7 +119,7 @@ function fixture(
     });
   }
 
-  return { packages, registry, calls, publish, addVersion };
+  return { packages, registry, calls, publish, addVersion, revealPackages: () => hiddenReads.clear() };
 }
 
 test("reuses a fully published npm candidate without republishing", (t) => {
@@ -155,11 +155,37 @@ test("fills a partially published package set before advancing canary", (t) => {
 });
 
 test("waits through multi-minute npm registry visibility lag", (t) => {
-  const fx = fixture(t, "1.5.0-canary.42", { visibilityDelayReads: 18 });
+  const fx = fixture(t, "1.5.0-canary.42", { visibilityDelayReads: 45 });
 
   assert.doesNotThrow(() => fx.publish({ attempts: null }));
+  const firstSleep = fx.calls.findIndex(({ args }) => args[0] === "sleep");
+  assert.equal(fx.calls.slice(0, firstSleep).filter(({ args }) => args[0] === "publish").length, fx.packages.length);
+  // One shared visibility window, not one sequential wait per package.
+  assert.equal(fx.calls.filter(({ args }) => args[0] === "sleep").length, 45);
   for (const { name } of fx.packages) {
     assert.equal(fx.registry.get(name).tags.get("canary"), "1.5.0-canary.42");
+  }
+});
+
+test("a visibility timeout uploads the full set but preserves aliases and staging for recovery", (t) => {
+  const fx = fixture(t, "1.5.0-canary.42", { visibilityDelayReads: 5 });
+  for (const { name } of fx.packages) fx.registry.get(name).tags.set("canary", "1.5.0-canary.41");
+
+  assert.throws(() => fx.publish(), /did not become visible/);
+  assert.equal(fx.calls.filter(({ args }) => args[0] === "publish").length, fx.packages.length);
+  assert.equal(fx.calls.some(({ args }) => args[0] === "dist-tag"), false);
+  for (const { name } of fx.packages) {
+    assert.equal(fx.registry.get(name).tags.get("canary"), "1.5.0-canary.41");
+    assert.equal(fx.registry.get(name).tags.get("canary-staging"), "1.5.0-canary.42");
+  }
+  const uploaded = fx.calls.filter(({ args }) => args[0] === "publish").length;
+  // Once npm exposes the uploaded versions, recovery reuses them.
+  fx.revealPackages();
+  assert.doesNotThrow(() => fx.publish());
+  assert.equal(fx.calls.filter(({ args }) => args[0] === "publish").length, uploaded);
+  for (const { name } of fx.packages) {
+    assert.equal(fx.registry.get(name).tags.get("canary"), "1.5.0-canary.42");
+    assert.equal(fx.registry.get(name).tags.has("canary-staging"), false);
   }
 });
 

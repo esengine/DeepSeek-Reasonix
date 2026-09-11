@@ -14,6 +14,7 @@ package event
 import (
 	"encoding/json"
 
+	"reasonix/internal/billing"
 	"reasonix/internal/evidence"
 	"reasonix/internal/nilutil"
 	"reasonix/internal/provider"
@@ -102,17 +103,91 @@ const (
 	// extension sidecar (Extension payload with Status set). Appended last to
 	// keep the Kind values before it wire-stable.
 	ExtensionStatus
-	// KindCount is a sentinel one past the last real Kind. New event kinds must
-	// be inserted above it so completeness tests cover them automatically.
-	KindCount
+	// StreamAttempt marks the local lifecycle of one sampling attempt within a
+	// model round (StreamAttempt payload: begin | discard | commit). IDs are
+	// host-local only — never persisted or sent to the model. Appended last to
+	// keep earlier Kind values wire-stable; older clients ignore unknown kinds.
+	StreamAttempt
+	// ContextMaintenance reports a free tool-result maintenance or a durable
+	// blocked/noop outcome. It is separate from CompactionStarted/Done so UIs do
+	// not render a paid-summary card for a cache-preserving view update.
+	ContextMaintenanceEvent
+	// WorkspaceChanged reports a debounced host-side workspace mutation.
+	WorkspaceChanged
+	// TurnPhase reports a host-side work phase for the active turn (working |
+	// checking | verifying | reviewing). Content-free; Text holds the phase.
+	TurnPhase
+	// CompletionSummary reports a content-free end-of-turn quality summary for
+	// role-setting strategies (preset, verdict, check counts, review status).
+	CompletionSummary
+	// ToolResultPreview reports that a tool has finished locally before its
+	// provider-ordered ToolResult can be emitted. Upsert-capable frontends may
+	// render the successful state early; append-only consumers should ignore it.
+	// The later ToolResult remains the call's only terminal event.
+	ToolResultPreview
+	// TurnStatusChanged is a content-free lifecycle transition such as
+	// waiting_user, cancelling, or returning to in_progress after an answer.
+	TurnStatusChanged
+	// PromptAnswered records that a durable Ask/approval item was answered and the same turn resumed; ItemID carries the stable prompt id and answer content remains in its purpose-built decision receipt.
+	PromptAnswered
+	// MCPInteractionRequest carries a server-initiated MCP elicitation (form
+	// or URL) for the frontend to answer via the MCP interaction resolve call.
+	// Appended last to keep the Kind values before it wire-stable.
+	MCPInteractionRequest
+	// SessionChanged is a content-free Serve routing barrier for all-session clients.
+	SessionChanged
+	// ReadStatus upserts one logical read's delivery state instead of per page.
+	ReadStatus
+	ToolStarted // Persisted after policy/validation and before execution.
+	KindCount   // Follows all real event kinds.
 )
 
-const TurnOutcomeFinalReadiness = "final_readiness"
+// TurnPhaseName is the machine-readable phase on TurnPhase events.
+type TurnPhaseName string
 
-// TurnOutcomeRecoveryPaused marks an Auto recovery Episode budget stop. New
-// clients show an informational status (not send-failed); older clients still
-// read Err text and ignore the unknown outcome.
-const TurnOutcomeRecoveryPaused = "recovery_paused"
+const (
+	TurnPhaseWorking   TurnPhaseName = "working"
+	TurnPhaseChecking  TurnPhaseName = "checking"
+	TurnPhaseVerifying TurnPhaseName = "verifying"
+	TurnPhaseReviewing TurnPhaseName = "reviewing"
+)
+
+// CompletionSummaryInfo is the content-free quality summary on CompletionSummary
+// events. It never carries user prompts, file contents, command args, or
+// reviewer reasoning.
+type CompletionSummaryInfo struct {
+	Preset             string // deprecated wire-compat label; pinned to "balanced"
+	Verdict            string // complete | partial | blocked | continue
+	Mutations          int
+	ChangedFiles       int
+	ChecksPassed       int
+	ChecksFailed       int
+	ChecksSuppressed   int
+	Review             string // none | passed | warned | failed | unavailable
+	GapKinds           []string
+	ConstraintDegraded bool
+	Floor              string // standard | delivery; empty on legacy events
+	Attention          bool   // authoritative when Floor is non-empty
+}
+
+// StreamAttemptAction is the lifecycle phase of a local sampling attempt.
+type StreamAttemptAction string
+
+const (
+	StreamAttemptBegin   StreamAttemptAction = "begin"
+	StreamAttemptDiscard StreamAttemptAction = "discard"
+	StreamAttemptCommit  StreamAttemptAction = "commit"
+)
+
+// StreamAttemptInfo carries host-local bookkeeping for one sampling attempt.
+// Reason is a fixed enum (connection_reset | premature_eof | idle_timeout).
+type StreamAttemptInfo struct {
+	ID      string
+	Action  StreamAttemptAction
+	Attempt int // 1-based attempt number
+	Max     int // total attempts including the first (typically 6)
+	Reason  string
+}
 
 // Level classifies a Notice so sinks can style or filter it.
 type Level int
@@ -145,9 +220,13 @@ type Profile struct {
 // Output/Err/Truncated are filled in. Args is the raw JSON arguments — a sink
 // compacts it for display.
 type Tool struct {
-	ID   string
-	Name string
-	Args string
+	RunState   provider.ToolRunState
+	Diagnostic json.RawMessage `json:"diagnostic,omitempty"`
+	// Verifying is emitted only once an authorized check actually enters execution.
+	Verifying bool
+	ID        string
+	Name      string
+	Args      string
 	// ResolvedName/CapabilityID describe the real target behind a stable proxy
 	// while Name/Args remain the provider-visible call. They are optional local
 	// display metadata and never enter provider requests.
@@ -158,6 +237,10 @@ type Tool struct {
 	ReadOnly     bool
 	Truncated    bool  // ToolResult: Output was head+tailed before display/model
 	DurationMs   int64 // ToolResult: wall-clock execution time in milliseconds
+	// StartedAt/EndedAt are unix-millisecond execution bounds (ToolResult).
+	// Zero when the call never ran (dependency-skipped, cancelled, synthetic).
+	StartedAt int64
+	EndedAt   int64
 	// Partial marks an early ToolDispatch emitted when a call begins (ID/Name set,
 	// Args still streaming) so a frontend can show the card immediately; a second,
 	// full ToolDispatch (Partial false, Args set) follows when the call completes.
@@ -175,8 +258,42 @@ type Tool struct {
 	// sub-agent's calls carry the parent `task` call's ID so a frontend can nest
 	// them under it. Empty for top-level calls.
 	ParentID string
+	// AttemptID is the host-local stream_attempt id that produced a speculative
+	// partial ToolDispatch. Empty for committed/full dispatches and for nested
+	// sub-agent tools. Frontends must only journal partial events whose
+	// AttemptID matches the active stream_attempt begin.
+	AttemptID string
 	FileDiff
 	Profile *Profile // ToolDispatch: subagent model/effort (set for task/skill calls)
+	// Subagent outcome metadata is host/UI-only and never enters provider requests.
+	SubagentRef       string
+	SubagentStatus    string
+	SubagentErrorCode string
+	SubagentRetryable bool
+	// Execution is optional local shell metadata (ToolResult). Never sent to
+	// model providers; omitempty keeps old wire readers compatible.
+	Execution *ShellExecution
+	// Workspace mutation metadata is host-only and is omitted from eventwire.
+	WorkspaceMutation bool
+	WorkspacePaths    []string
+	WorkspaceAllPaths bool
+}
+
+// ShellExecution mirrors tool.ShellExecution for event sinks without importing
+// the tool package (event is a lower-level dependency of tool consumers).
+type ShellExecution struct {
+	Kind           string `json:"kind,omitempty"`
+	Shell          string `json:"shell,omitempty"`
+	ShellVersion   string `json:"shellVersion,omitempty"`
+	Platform       string `json:"platform,omitempty"`
+	SupportsAndAnd bool   `json:"supportsAndAnd"`
+	State          string `json:"state,omitempty"`
+	FailurePhase   string `json:"failurePhase,omitempty"`
+	ExitCode       *int   `json:"exitCode,omitempty"`
+	OutputTail     string `json:"outputTail,omitempty"`
+	MutationRisk   string `json:"mutationRisk,omitempty"`
+	Verification   string `json:"verification,omitempty"`
+	DurationMs     int64  `json:"durationMs,omitempty"`
 }
 
 // FileDiff is a previewed change carried on a writer tool's full ToolDispatch
@@ -187,44 +304,6 @@ type FileDiff struct {
 	Diff    string
 	Added   int
 	Removed int
-}
-
-// Approval identifies a pending tool-call approval for an ApprovalRequest
-// event. ID correlates the request with the controller's Approve(ID, …) reply.
-type Approval struct {
-	ID      string
-	Tool    string
-	Subject string
-	Reason  string // optional annotation explaining why approval is needed
-	// RawInput is the exact structured tool input. ACP permission clients use it
-	// together with locations/reason instead of parsing a human title.
-	RawInput json.RawMessage
-	Fresh    bool // current human decision required; do not offer remembered grants
-	// Kind classifies the approval surface: "tool" (default), "plan", or
-	// "recovery". Empty means ordinary tool permission for backward compat.
-	Kind string
-	// Recovery carries Auto Guard card fields when Kind is "recovery".
-	// Old frontends ignore it and still render a one-shot fresh approval.
-	Recovery *RecoveryApproval
-}
-
-// RecoveryApproval is the backward-compatible structured payload for Auto
-// Guard decisions. All fields are plain strings/bools so wire JSON stays simple
-// and old clients can ignore unknown nested objects safely.
-type RecoveryApproval struct {
-	SourceAgent     string // agent that proposed the next mutation
-	FailedTool      string // tool that failed; empty for pre-action boundaries
-	FailedSummary   string // short failure/error summary; optional
-	Diagnosis       string // agent/host diagnosis when failure recovery is active
-	NextTool        string // tool about to run
-	NextAction      string // concrete next command/file change/MCP action
-	ChangeKind      string // same_strategy | strategy | scope | risk | uncertain
-	ChangeRationale string // what changed vs the original approach
-	ReviewRationale string // why the host/reviewer needs confirmation
-	PlanBefore      string // active structured plan before a material transition
-	PlanAfter       string // proposed structured plan after a material transition
-	CanGrantTask    bool   // offer a semantic grant scoped to the current task
-	TaskGrantScope  string // concise host-classified operation + exact target
 }
 
 // AskOption is one choice the user can pick for an AskQuestion.
@@ -247,6 +326,22 @@ type AskQuestion struct {
 type Ask struct {
 	ID        string
 	Questions []AskQuestion
+	TurnID    string
+}
+
+// MCPInteraction carries one MCPInteractionRequest: a server-initiated
+// elicitation the frontend must answer with accept/decline/cancel. Mode is
+// "form" (RequestedSchema is a flat primitive JSON schema) or "url" (URL is a
+// credential-free HTTP(S) target the user opens explicitly).
+type MCPInteraction struct {
+	ID              string
+	Server          string
+	Mode            string
+	Message         string
+	RequestedSchema json.RawMessage
+	URL             string
+	ElicitationID   string
+	TurnID          string
 }
 
 // Extension surface kind values carried by ExtensionSurfacePayload.Kind. They
@@ -263,7 +358,7 @@ const (
 
 // ExtensionSurfacePayload carries one extension sidecar's structured UI
 // contribution for the ExtensionSurface / ExtensionStatus kinds. The structs
-// mirror the Extension Protocol v1 UI payload DTOs field-for-field so any
+// mirror the Extension Protocol v2 UI payload DTOs field-for-field so any
 // frontend can render them with native widgets; the protocol stays
 // structured-only (no HTML/CSS/JS/URLs). All user-visible strings are already
 // credential-redacted by the host UI hub before the event is emitted. Exactly
@@ -350,6 +445,22 @@ type Compaction struct {
 	Archive  string // Done: path the dropped originals were archived to ("" if none)
 }
 
+// ContextMaintenance is the typed wire-safe receipt for snip/prune/noop/
+// blocked operations. Transcript bytes are represented by hashes and counts.
+type ContextMaintenance struct {
+	Status              string `json:"status,omitempty"`
+	Action              string `json:"action,omitempty"`
+	Trigger             string `json:"trigger,omitempty"`
+	OperationID         string `json:"operationId,omitempty"`
+	InputTokens         int    `json:"inputTokens,omitempty"`
+	ResultTokens        int    `json:"resultTokens,omitempty"`
+	SavedTokens         int    `json:"savedTokens,omitempty"`
+	AffectedToolResults int    `json:"affectedToolResults,omitempty"`
+	ProjectionVersion   uint64 `json:"projectionVersion,omitempty"`
+	CacheBreak          bool   `json:"cacheBreak,omitempty"`
+	Reason              string `json:"reason,omitempty"`
+}
+
 // GuardianResult carries the outcome of a guardian sub-agent safety review.
 // Emitted with Kind=GuardianAssessment after each review completes.
 type GuardianResult struct {
@@ -372,27 +483,12 @@ type AskAnswer struct {
 	Selected   []string
 }
 
-// CacheDiagnostics describes whether and why the cacheable prefix changed since
-// the last turn. It rides on the Usage event so every frontend can show
-// cache-churn attribution.
-type CacheDiagnostics struct {
-	PrefixHash          string
-	PrefixChanged       bool
-	PrefixChangeReasons []string // "system", "tools", "log_rewrite"
-	SystemHash          string
-	ToolsHash           string
-	LogRewriteVersion   int
-	ToolSchemaTokens    int
-	CacheMissTokens     int
-	CacheHitTokens      int
-}
-
 // FinalReadiness carries machine-readable recovery requirements on TurnDone.
 // Missing values are stable category ids; user-facing detail stays localized in
 // the frontend instead of scraping the diagnostic error string.
 type FinalReadiness struct {
-	Attempts int
-	Missing  []string
+	Attempts int      `json:"attempts,omitempty"`
+	Missing  []string `json:"missing,omitempty"`
 }
 
 const (
@@ -409,30 +505,12 @@ const (
 
 // Event is one increment in a turn's event stream. Read the field(s) documented
 // for Kind; the others are zero.
-// Notice codes are stable machine-readable identifiers for known notices.
-// Frontends localize a notice's main copy by Code and fall back to matching
-// the English Text (or showing it raw) when Code is empty or unknown, so
-// wording edits in Go no longer silently break localization. Values are
-// wire-stable: never rename or reuse one once shipped.
-const (
-	NoticeCodeFinalReadiness                = "final_readiness"
-	NoticeCodeEmptyFinal                    = "empty_final"
-	NoticeCodeExecutorHandoff               = "executor_handoff"
-	NoticeCodeToolBudget                    = "tool_budget"
-	NoticeCodeLoopGuard                     = "loop_guard"
-	NoticeCodeWorkspaceLease                = "workspace_lease"
-	NoticeCodeCancelledTurn                 = "cancelled_turn_display"
-	NoticeCodeUnappliedSteer                = "unapplied_steer"
-	NoticeCodeSessionRecoveryForked         = "session_recovery_forked"
-	NoticeCodeSessionRecoveryAdopted        = "session_recovery_adopted"
-	NoticeCodeSessionRecoveryAdoptedCovered = "session_recovery_adopted_covered"
-	NoticeCodeSessionRecoveryDepthCap       = "session_recovery_depth_cap"
-	NoticeCodeSessionShutdownRecoveryForked = "session_shutdown_recovery_forked"
-	NoticeCodeDecisionReceipt               = "decision_receipt"
-)
-
 type Event struct {
 	Kind             Kind
+	PromptKind       string                    // interactive prompt kind for lifecycle events
+	TurnID           string                    // stable id of the owning top-level turn
+	Sequence         uint64                    // monotonic session-local event sequence
+	Status           TurnStatus                // lifecycle state after this event
 	Text             string                    // Reasoning / Text / Message / Notice / Phase
 	ModelRef         string                    // Usage: canonical "provider/model" ref that produced this usage
 	Detail           string                    // Notice: optional diagnostic text for expandable details
@@ -441,7 +519,8 @@ type Event struct {
 	MemoryCitations  []provider.MemoryCitation // Message: local memory references displayed by rich frontends
 	Tool             Tool                      // ToolDispatch / ToolResult
 	Usage            *provider.Usage           // Usage
-	Pricing          *provider.Pricing         // Usage: for cost display (nil = omit cost)
+	Pricing          *provider.Pricing         // Usage: rate card for quote middleware (nil = omit cost)
+	CostQuote        *billing.CostQuote        // Usage: host-side quote; sinks must not reprice
 	Source           string                    // optional display/event source (executor, planner, subagent, ...)
 	UsageSource      string                    // Usage: billable call source; empty means executor for compatibility
 	CacheDiagnostics *CacheDiagnostics         // Usage: cache-churn attribution (nil = N/A)
@@ -449,28 +528,106 @@ type Event struct {
 	// session (Usage events only), so a frontend can show the aggregate hit-rate
 	// — which doesn't crater on a short turn or after compaction — alongside
 	// Usage's single-turn numbers.
-	SessionHit      int                      // Usage: cumulative cache-hit prompt tokens this session
-	SessionMiss     int                      // Usage: cumulative cache-miss prompt tokens this session
-	Level           Level                    // Notice
-	Audience        NoticeAudience           // Notice: empty = ordinary frontend delivery; operator = no end-user chat forwarding
-	Approval        Approval                 // ApprovalRequest
-	Ask             Ask                      // AskRequest
-	Extension       *ExtensionSurfacePayload // ExtensionSurface / ExtensionStatus (nil for every other kind)
-	Err             error                    // TurnDone: non-nil on failure
-	Cancelled       bool                     // TurnDone: Cancel was requested while the turn was active
-	Outcome         string                   // TurnDone: optional machine-readable recoverable outcome
-	Readiness       *FinalReadiness          // TurnDone: structured final-readiness recovery state
-	Compaction      Compaction               // Compaction
-	Guardian        GuardianResult
-	DecisionReceipt *provider.DecisionReceipt // Notice: durable user decision receipt
-	RetryAttempt    int                       // Retrying: 1-based attempt about to be made
-	RetryMax        int                       // Retrying: total attempts before giving up
+	SessionHit         int                      // Usage: cumulative cache-hit prompt tokens this session
+	SessionMiss        int                      // Usage: cumulative cache-miss prompt tokens this session
+	Level              Level                    // Notice
+	Audience           NoticeAudience           // Notice: empty = ordinary frontend delivery; operator = no end-user chat forwarding
+	Approval           Approval                 // ApprovalRequest
+	Ask                Ask                      // AskRequest
+	MCPInteraction     MCPInteraction           // MCPInteractionRequest
+	Extension          *ExtensionSurfacePayload // ExtensionSurface / ExtensionStatus (nil for every other kind)
+	Err                error                    // TurnDone: non-nil on failure
+	Cancelled          bool                     // TurnDone: Cancel was requested while the turn was active
+	Outcome            string                   // TurnDone: optional machine-readable recoverable outcome
+	Readiness          *FinalReadiness          // TurnDone: structured final-readiness recovery state
+	ProtocolRecovery   *provider.ProtocolRecoveryAction
+	Diagnostic         *provider.FailureDiagnostic
+	RecoveryCheckpoint bool                // local durable recovery checkpoint, not a notice
+	Receipt            *CompletionReceipt  // TurnDone: what the host verified, and what it could not
+	CheckpointTurn     *int                // TurnDone: authoritative checkpoint for this turn's visible user message
+	Compaction         Compaction          // Compaction
+	Maintenance        *ContextMaintenance // ContextMaintenanceEvent
+	Guardian           GuardianResult
+	DecisionReceipt    *provider.DecisionReceipt // Notice: durable user decision receipt
+	WriteIntent        bool                      // local write-ahead checkpoint, not a user notice
+	Recovery           *RecoveryStatus           // optional local recovery details
+	RetryAttempt       int                       // Retrying: 1-based attempt about to be made
+	RetryMax           int                       // Retrying: total attempts before giving up
+	RetryScope         RetryScope                // Retrying: optional "headers" | "stream"; empty for older emitters
+	StreamAttempt      StreamAttemptInfo         // StreamAttempt lifecycle
+	ReadStatus         *ReadStatusPayload        // ReadStatus: one logical read's delivery state
+	ReadPause          *provider.ReadPause       // TurnDone: durable display-only pause receipt
+	ItemID             string                    // correlates durable inbox events
+	SessionPath        string                    // routes Serve frames
+	SessionReset       bool                      // SessionChanged came from /new or /clear, not resume/recovery
+	Workspace          *WorkspaceChangedPayload  // WorkspaceChanged (host-local)
+	// PhaseName is set on TurnPhase events (working|checking|verifying|reviewing).
+	PhaseName TurnPhaseName
+	// Completion is set on CompletionSummary events.
+	Completion *CompletionSummaryInfo
+}
+
+type WorkspaceWatchState string
+
+const (
+	WorkspaceWatchActive      WorkspaceWatchState = "active"
+	WorkspaceWatchDegraded    WorkspaceWatchState = "degraded"
+	WorkspaceWatchUnavailable WorkspaceWatchState = "unavailable"
+)
+
+type WorkspaceRevision struct {
+	Content     uint64 `json:"content"`
+	Tree        uint64 `json:"tree"`
+	WorkingTree uint64 `json:"workingTree"`
+	GitMeta     uint64 `json:"gitMeta"`
+	Session     uint64 `json:"session"`
+}
+
+type WorkspacePathChange struct {
+	Path    string `json:"path"`
+	OldPath string `json:"oldPath,omitempty"`
+	Op      string `json:"op"`
+}
+
+type WorkspaceChangedPayload struct {
+	Revisions  WorkspaceRevision
+	Changes    []WorkspacePathChange
+	AllPaths   bool
+	Source     string
+	WatchState WorkspaceWatchState
 }
 
 // ReadinessAuditSink is an optional sink capability. Sinks that do not care
 // about readiness audit receipts can implement only Sink and will ignore them.
 type ReadinessAuditSink interface {
 	RecordReadinessAudit(evidence.ReadinessAudit)
+}
+
+// AnchorSafetyAudit is a content-free shadow decision for an anchor-based
+// writer. It contains only bounded enums/counts; paths, anchors, source text,
+// and digests never leave the host-side observation ledger.
+type AnchorSafetyAudit struct {
+	Mode                  string
+	TaskMode              string
+	RangeLines            int
+	ObservationAge        int
+	LegacyAllowed         bool
+	ShadowAllowed         bool
+	Reason                string
+	SameBatchReadRejected bool
+}
+
+type AnchorSafetyAuditSink interface {
+	RecordAnchorSafetyAudit(AnchorSafetyAudit)
+}
+
+func RecordAnchorSafetyAudit(s Sink, a AnchorSafetyAudit) {
+	if nilutil.IsNil(s) {
+		return
+	}
+	if as, ok := s.(AnchorSafetyAuditSink); ok {
+		as.RecordAnchorSafetyAudit(a)
+	}
 }
 
 // TurnCompletionSink is an optional sink capability for synchronous controller
@@ -489,6 +646,24 @@ func RecordTurnCompletion(s Sink) {
 	}
 	if ts, ok := s.(TurnCompletionSink); ok {
 		ts.RecordTurnCompletion()
+	}
+}
+
+// OperationAuditSink is an optional sink capability for operation-lifecycle
+// counters. Implementations must keep it content-free: the audit carries host
+// identifiers only, never paths, arguments, or tool output.
+type OperationAuditSink interface {
+	RecordOperationAudit(evidence.OperationAudit)
+}
+
+// RecordOperationAudit reports one operation transition to a sink that wants
+// the counters; every other sink ignores it.
+func RecordOperationAudit(s Sink, a evidence.OperationAudit) {
+	if nilutil.IsNil(s) || a.Metric == "" {
+		return
+	}
+	if os, ok := s.(OperationAuditSink); ok {
+		os.RecordOperationAudit(a)
 	}
 }
 
@@ -515,10 +690,169 @@ const (
 	ProtocolRecoveryMissingReasoningRetryReplaced   ProtocolRecoveryKind = "missing_reasoning_retry_replaced_response"
 	ProtocolRecoveryMissingReasoningRetrySuppressed ProtocolRecoveryKind = "missing_reasoning_retry_suppressed"
 	ProtocolRecoveryMissingReasoningFallback        ProtocolRecoveryKind = "missing_reasoning_fallback_used"
+	ProtocolRecoveryReasoningOverflowDetected       ProtocolRecoveryKind = "reasoning_overflow_detected"
+	ProtocolRecoveryClientToolRejected              ProtocolRecoveryKind = "client_tool_rejected_unreplayable_reasoning"
+	ProtocolRecoveryServerSearchSalvaged            ProtocolRecoveryKind = "server_search_history_salvaged"
+	ProtocolRecoveryHistoryRepaired                 ProtocolRecoveryKind = "unreplayable_history_repaired"
+	ProtocolRecoveryReasoningReplay400Detected      ProtocolRecoveryKind = "reasoning_replay_400_detected"
+	ProtocolRecoveryReasoningReplay400Recovered     ProtocolRecoveryKind = "reasoning_replay_400_recovered"
 )
 
 type ProtocolRecoveryAudit struct {
 	Kind ProtocolRecoveryKind
+}
+
+// ContractShadowAudit is the shadow task-contract's end-of-turn summary:
+// counts and enums only, never requirement text. Shadow means observed, not
+// enforced — the old control logic still decides behavior.
+type ContractShadowAudit struct {
+	Intent                string
+	Requirements          int
+	RequirementsSatisfied int
+	Checks                int
+	ChecksSatisfied       int
+	Epoch                 uint64
+	Verdict               string
+	Complete              bool
+	ReadyToFinalize       bool
+}
+
+// ContractShadowAuditSink is an optional sink capability; implementations
+// must keep it content-free, like every other audit channel.
+type ContractShadowAuditSink interface {
+	RecordContractShadow(ContractShadowAudit)
+}
+
+// RecordContractShadow forwards the shadow contract summary only to sinks
+// that explicitly opt in. Ordinary UI sinks receive nothing.
+func RecordContractShadow(s Sink, a ContractShadowAudit) {
+	if nilutil.IsNil(s) {
+		return
+	}
+	if cs, ok := s.(ContractShadowAuditSink); ok {
+		cs.RecordContractShadow(a)
+	}
+}
+
+// CompletionReportAudit is the host-authored completion report's end-of-turn
+// summary: counts, enums, and gap kinds only, never paths or command text.
+// The gap counters carry the point — what the turn left unproven.
+type CompletionReportAudit struct {
+	Verdict             string
+	Risk                string
+	Criteria            int
+	CriteriaSatisfied   int
+	Changes             int
+	ChangesUnreviewed   int
+	Verifications       int
+	VerificationsFailed int
+	VerificationsStale  int
+	Gaps                int
+	GapKinds            []string
+	// ClaimsVerified counts the turn's own asserted verifications;
+	// ClaimsUnbacked is how many of them the ledger did not support.
+	ClaimsVerified int
+	ClaimsUnbacked int
+}
+
+// CompletionReportAuditSink is an optional sink capability; implementations
+// must keep it content-free, like every other audit channel.
+type CompletionReportAuditSink interface {
+	RecordCompletionReport(CompletionReportAudit)
+}
+
+// RecordCompletionReport forwards the completion summary only to sinks that
+// explicitly opt in. Ordinary UI sinks receive nothing.
+func RecordCompletionReport(s Sink, a CompletionReportAudit) {
+	if nilutil.IsNil(s) {
+		return
+	}
+	if cs, ok := s.(CompletionReportAuditSink); ok {
+		cs.RecordCompletionReport(a)
+	}
+}
+
+// MemoryRecallAudit summarizes one automatic-recall decision: identifiers,
+// scores, and budget numbers only — never the query or fact text.
+type MemoryRecallAudit struct {
+	Hits       []MemoryRecallHit
+	UsedChars  int
+	Omitted    int
+	Suppressed string // reason recall stayed silent; "" when hits were injected
+	// Shadow is the Retrieval V2 ranking (telemetry only, never served).
+	Shadow []MemoryRecallHit
+}
+
+// MemoryRecallHit is one recalled fact's content-free fingerprint.
+type MemoryRecallHit struct {
+	ID        string
+	Revision  int
+	Scope     string
+	Type      string
+	Freshness string
+	Score     float64
+}
+
+// MemoryRecallSink is an optional sink capability; implementations must keep
+// it content-free, like every other audit channel.
+type MemoryRecallSink interface {
+	RecordMemoryRecall(MemoryRecallAudit)
+}
+
+// RecordMemoryRecall forwards a recall decision only to sinks that explicitly
+// opt in. Ordinary UI sinks receive nothing.
+func RecordMemoryRecall(s Sink, a MemoryRecallAudit) {
+	if nilutil.IsNil(s) {
+		return
+	}
+	if mr, ok := s.(MemoryRecallSink); ok {
+		mr.RecordMemoryRecall(a)
+	}
+}
+
+// DelegationAdmissionAudit is the shadow admission verdict for one expensive
+// delegation call: tool name and enums only, never the query or prompt text.
+// Shadow means observed, not enforced — no call is blocked.
+type DelegationAdmissionAudit struct {
+	Tool    string
+	Verdict string // "allow" | "deny"
+	Reason  string // e.g. "local_fix_no_external_need"
+	Intent  string // compatibility field; no longer classified from prompt text
+}
+
+// DelegationAdmissionSink is an optional sink capability; implementations
+// must keep it content-free, like every other audit channel.
+type DelegationAdmissionSink interface {
+	RecordDelegationAdmission(DelegationAdmissionAudit)
+}
+
+// RecordDelegationAdmission forwards a shadow admission verdict only to sinks
+// that explicitly opt in. Ordinary UI sinks receive nothing.
+func RecordDelegationAdmission(s Sink, a DelegationAdmissionAudit) {
+	if nilutil.IsNil(s) {
+		return
+	}
+	if da, ok := s.(DelegationAdmissionSink); ok {
+		da.RecordDelegationAdmission(a)
+	}
+}
+
+// OutcomeProgressSink is an optional sink capability for the shadow outcome
+// scorer's per-round samples: counts only, never paths or commands. Shadow
+// means observed, not enforced — the novelty guard still decides behavior.
+type OutcomeProgressSink interface {
+	RecordOutcomeProgress(evidence.OutcomeSample)
+}
+
+// RecordOutcomeProgress forwards a shadow outcome sample only to sinks that
+// explicitly opt in. Ordinary UI sinks receive nothing.
+func RecordOutcomeProgress(s Sink, sample evidence.OutcomeSample) {
+	if nilutil.IsNil(s) {
+		return
+	}
+	if op, ok := s.(OutcomeProgressSink); ok {
+		op.RecordOutcomeProgress(sample)
+	}
 }
 
 // ProtocolRecoveryAuditSink is an optional sink capability. Implementations
@@ -538,26 +872,3 @@ func RecordProtocolRecovery(s Sink, a ProtocolRecoveryAudit) {
 		rs.RecordProtocolRecovery(a)
 	}
 }
-
-// Sink consumes a turn's events. The agent calls Emit serially from its run
-// loop (tool execution may fan out across goroutines, but emission does not),
-// so an implementation need not be safe for concurrent Emit. Emit must not
-// block indefinitely — a channel-backed sink should be buffered or drained by
-// a live reader.
-type Sink interface {
-	Emit(Event)
-}
-
-// FuncSink adapts a plain function to a Sink.
-type FuncSink func(Event)
-
-// Emit calls the wrapped function.
-func (f FuncSink) Emit(e Event) {
-	if f != nil {
-		f(e)
-	}
-}
-
-// Discard is a Sink that drops every event. Useful in tests and for runs that
-// only care about the final session state.
-var Discard Sink = FuncSink(func(Event) {})

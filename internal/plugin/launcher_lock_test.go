@@ -8,6 +8,7 @@ import (
 	"path/filepath"
 	"reflect"
 	"runtime"
+	"slices"
 	"strings"
 	"testing"
 
@@ -149,12 +150,7 @@ func TestStoredUVXFromLauncherLockKeepsFromValueAdjacent(t *testing.T) {
 }
 
 func stringSliceContains(values []string, want string) bool {
-	for _, value := range values {
-		if value == want {
-			return true
-		}
-	}
-	return false
+	return slices.Contains(values, want)
 }
 
 func TestMutableLauncherRejectsAmbiguousFlagValue(t *testing.T) {

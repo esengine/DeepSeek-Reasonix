@@ -27,6 +27,7 @@ import (
 
 	"reasonix/internal/bot"
 	"reasonix/internal/config"
+	"reasonix/internal/fileutil"
 	fileencoding "reasonix/internal/fileutil/encoding"
 )
 
@@ -283,13 +284,13 @@ func (a *adapter) saveContextTokens() {
 	if err != nil {
 		return
 	}
-	if err := os.WriteFile(path, data, 0o600); err != nil {
+	if err := fileutil.AtomicWriteFile(path, data, 0o600); err != nil {
 		a.logger.Warn("failed to save weixin context tokens", "err", err)
 	}
 }
 
 func ilinkGET(ctx context.Context, baseURL, endpoint string) (map[string]any, error) {
-	req, err := http.NewRequestWithContext(ctx, "GET", strings.TrimRight(baseURL, "/")+"/"+strings.TrimLeft(endpoint, "/"), nil)
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, strings.TrimRight(baseURL, "/")+"/"+strings.TrimLeft(endpoint, "/"), nil)
 	if err != nil {
 		return nil, err
 	}
@@ -358,7 +359,7 @@ func (a *adapter) getUpdates(ctx context.Context) ([]ilinkUpdate, error) {
 	url := a.apiBase() + getUpdatesPath
 
 	a.mu.Lock()
-	payload := map[string]interface{}{
+	payload := map[string]any{
 		"get_updates_buf": a.syncBuf,
 		"base_info": map[string]string{
 			"channel_version": ilinkChannelVersion,
@@ -367,7 +368,7 @@ func (a *adapter) getUpdates(ctx context.Context) ([]ilinkUpdate, error) {
 	a.mu.Unlock()
 
 	body, _ := json.Marshal(payload)
-	req, err := http.NewRequestWithContext(ctx, "POST", url, bytes.NewBuffer(body))
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, url, bytes.NewBuffer(body))
 	if err != nil {
 		return nil, err
 	}
@@ -542,9 +543,9 @@ func setIlinkHeaders(req *http.Request, token string, body []byte) {
 func randomWechatUIN() string {
 	var b [4]byte
 	if _, err := rand.Read(b[:]); err != nil {
-		return base64.StdEncoding.EncodeToString([]byte(fmt.Sprintf("%d", time.Now().UnixNano())))
+		return base64.StdEncoding.EncodeToString(fmt.Appendf(nil, "%d", time.Now().UnixNano()))
 	}
-	return base64.StdEncoding.EncodeToString([]byte(fmt.Sprintf("%d", uint32(b[0])<<24|uint32(b[1])<<16|uint32(b[2])<<8|uint32(b[3]))))
+	return base64.StdEncoding.EncodeToString(fmt.Appendf(nil, "%d", uint32(b[0])<<24|uint32(b[1])<<16|uint32(b[2])<<8|uint32(b[3])))
 }
 
 func firstNonEmptyString(vals ...string) string {
@@ -565,27 +566,27 @@ func (a *adapter) sendMessage(ctx context.Context, msg bot.OutboundMessage) (bot
 
 	url := a.apiBase() + sendMessagePath
 
-	payload := map[string]interface{}{
+	payload := map[string]any{
 		"base_info": map[string]string{"channel_version": ilinkChannelVersion},
-		"msg": map[string]interface{}{
+		"msg": map[string]any{
 			"from_user_id":  "",
 			"to_user_id":    msg.ChatID,
 			"client_id":     fmt.Sprintf("reasonix-%d", time.Now().UnixNano()),
 			"message_type":  weixinMsgTypeBot,
 			"message_state": weixinMsgStateDone,
-			"item_list": []map[string]interface{}{
+			"item_list": []map[string]any{
 				{"type": weixinItemText, "text_item": map[string]string{"text": msg.Text}},
 			},
 		},
 	}
 	if contextToken := a.contextToken(msg.ChatID); contextToken != "" {
-		if m, ok := payload["msg"].(map[string]interface{}); ok {
+		if m, ok := payload["msg"].(map[string]any); ok {
 			m["context_token"] = contextToken
 		}
 	}
 
 	body, _ := json.Marshal(payload)
-	req, err := http.NewRequestWithContext(ctx, "POST", url, bytes.NewBuffer(body))
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, url, bytes.NewBuffer(body))
 	if err != nil {
 		return bot.SendResult{}, err
 	}
@@ -627,7 +628,7 @@ func (a *adapter) sendTyping(ctx context.Context, chatID string) error {
 
 	url := a.apiBase() + sendTypingPath
 
-	payload := map[string]interface{}{
+	payload := map[string]any{
 		"base_info":     map[string]string{"channel_version": ilinkChannelVersion},
 		"ilink_user_id": chatID,
 		"status":        1,
@@ -637,7 +638,7 @@ func (a *adapter) sendTyping(ctx context.Context, chatID string) error {
 	}
 	body, _ := json.Marshal(payload)
 
-	req, err := http.NewRequestWithContext(ctx, "POST", url, bytes.NewBuffer(body))
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, url, bytes.NewBuffer(body))
 	if err != nil {
 		return err
 	}

@@ -26,7 +26,7 @@ func TestDiffBodyDropsHeadersKeepsLineNumbers(t *testing.T) {
 func TestDiffBodyFolds(t *testing.T) {
 	var b strings.Builder
 	b.WriteString("--- a/x\n+++ b/x\n@@ -1,8 +1,8 @@\n")
-	for i := 0; i < 8; i++ {
+	for range 8 {
 		b.WriteString("+line\n")
 	}
 	body := diffBody(event.FileDiff{Diff: b.String()}, "x", 80, 5)

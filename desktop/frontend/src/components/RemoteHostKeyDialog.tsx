@@ -46,7 +46,7 @@ export function RemoteHostKeyDialog() {
   };
 
   return createPortal(
-    <div className="remote-hostkey-overlay" role="dialog" aria-modal="true" aria-labelledby="remote-hostkey-title">
+    <div className="remote-hostkey-overlay" data-app-overlay="" role="dialog" aria-modal="true" aria-labelledby="remote-hostkey-title">
       <div className="remote-hostkey-dialog">
         <h2 id="remote-hostkey-title" className="remote-hostkey-dialog__title">
           {t("remote.fingerprint.title")}

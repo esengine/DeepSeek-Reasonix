@@ -1,0 +1,8 @@
+prompt = """Implement inventory.py so that `python3 inventory.py` processes commands.txt and writes the results:
+- commands are `stock ITEM N`, `reserve ITEM N`, `release ITEM N`, `ship ITEM N`; N is a positive integer; every item starts with free=0, reserved=0
+- stock adds N to free; reserve moves N from free to reserved; release moves N from reserved back to free; ship removes N from reserved
+- a command that would need more than is available is rejected: append the line verbatim to rejected.txt (input order) and change nothing
+- afterwards write inventory.json mapping every item that appeared to {"free": x, "reserved": y}, keys sorted; create rejected.txt even when empty"""
+class = "long-horizon"
+max_steps = 30
+timeout_sec = 600

@@ -1,9 +1,12 @@
 package fileutil
 
 import (
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
+	"runtime"
+	"syscall"
 	"time"
 )
 
@@ -17,25 +20,54 @@ var (
 	renameFile = os.Rename
 )
 
-// AtomicWriteFile writes data to a sibling temporary file, fsyncs it, then
-// publishes it via ReplaceFile. On filesystems that support replacement rename,
-// readers see either the old file or the complete new file. ReplaceFile retains
-// its compatibility copy fallback for Windows filter drivers that reject a
-// same-directory rename as cross-device; callers that cannot tolerate that
-// non-atomic fallback must use AtomicWriteFileStrict.
+// CrashPoint, when non-nil, runs before every durable write/replace. Tests use
+// it to inject a process-crash panic at persistence boundaries; production
+// leaves it nil.
+var CrashPoint func(op, path string)
+
+// Crash invokes the optional crash-consistency fault-injection hook.
+func Crash(op, path string) {
+	if CrashPoint != nil {
+		CrashPoint(op, path)
+	}
+}
+
+// AtomicWriteFile writes via temp + fsync + ReplaceFile. On rename-capable
+// filesystems readers see only the old or complete new file. ReplaceFile may
+// copy on Windows filter-driver EXDEV; callers that cannot tolerate that must
+// use AtomicWriteFileStrict.
 func AtomicWriteFile(path string, data []byte, perm os.FileMode) error {
 	return atomicWriteFile(path, data, perm, true)
 }
 
-// AtomicWriteFileStrict publishes data only through an atomic rename. Unlike
-// AtomicWriteFile, a cross-device/filter-driver error is returned without ever
-// truncating path. Use it for commit pointers whose corruption would make the
-// surrounding state impossible to recover automatically.
+// AtomicWriteFileStrict publishes only via atomic rename (no EXDEV copy).
+// After a successful rename it best-effort fsyncs the parent directory so the
+// directory entry can survive power loss. A returned error always means the
+// destination was not published; post-rename dir-sync problems are not errors
+// (callers that roll back in-memory state on error would otherwise fork from
+// the on-disk pointer).
 func AtomicWriteFileStrict(path string, data []byte, perm os.FileMode) error {
 	return atomicWriteFile(path, data, perm, false)
 }
 
+// syncParentDirFn is the post-publish parent-dir fsync implementation.
+// Tests replace it via SetSyncParentDirForTest.
+var syncParentDirFn = syncParentDir
+
+// SetSyncParentDirForTest replaces post-rename parent-dir fsync. Restore with
+// the returned function. Production must leave the default in place.
+func SetSyncParentDirForTest(fn func(path string) error) (restore func()) {
+	prev := syncParentDirFn
+	if fn == nil {
+		syncParentDirFn = syncParentDir
+	} else {
+		syncParentDirFn = fn
+	}
+	return func() { syncParentDirFn = prev }
+}
+
 func atomicWriteFile(path string, data []byte, perm os.FileMode, allowCrossDeviceCopy bool) error {
+	Crash("atomic-write", path)
 	tmpPath, err := writeAtomicTemp(path, data, perm)
 	if err != nil {
 		return err
@@ -44,7 +76,39 @@ func atomicWriteFile(path string, data []byte, perm os.FileMode, allowCrossDevic
 		os.Remove(tmpPath)
 		return err
 	}
+	// Strict only: parent-dir fsync is power-loss durability after publish.
+	// Never surface failures here — rename already committed the new file.
+	if !allowCrossDeviceCopy {
+		_ = syncParentDirFn(path)
+	}
 	return nil
+}
+
+// syncParentDir fsyncs path's parent after rename (including "."). Unsupported
+// dir sync on Windows / some network FS is ignored.
+func syncParentDir(path string) error {
+	dirPath := filepath.Dir(path)
+	if dirPath == "" {
+		dirPath = "."
+	}
+	f, err := os.Open(dirPath)
+	if err != nil {
+		return fmt.Errorf("open parent dir for fsync %s: %w", path, err)
+	}
+	defer f.Close()
+	if err := f.Sync(); err != nil {
+		if runtime.GOOS == "windows" || isDirSyncUnsupported(err) {
+			return nil
+		}
+		return fmt.Errorf("fsync parent dir for %s: %w", path, err)
+	}
+	return nil
+}
+
+func isDirSyncUnsupported(err error) bool {
+	return errors.Is(err, syscall.EINVAL) ||
+		errors.Is(err, syscall.ENOTSUP) ||
+		errors.Is(err, syscall.ENOSYS)
 }
 
 // AtomicCreateFile publishes a complete file only when path is still absent.
@@ -62,6 +126,23 @@ func AtomicCreateFile(path string, data []byte, perm os.FileMode) error {
 	return nil
 }
 
+// AtomicOverwriteFile replaces an existing file's contents atomically while
+// keeping the two properties a bare rename drops: the file's current permission
+// bits (an executable script must not come back 0644) and the symlink target
+// (a link must be written through, not replaced by a regular file). defaultPerm
+// applies only when path does not exist yet.
+func AtomicOverwriteFile(path string, data []byte, defaultPerm os.FileMode) error {
+	target := path
+	if resolved, err := filepath.EvalSymlinks(path); err == nil {
+		target = resolved
+	}
+	perm := defaultPerm
+	if info, err := os.Stat(target); err == nil {
+		perm = info.Mode().Perm()
+	}
+	return AtomicWriteFile(target, data, perm)
+}
+
 func writeAtomicTemp(path string, data []byte, perm os.FileMode) (string, error) {
 	dir := filepath.Dir(path)
 	dirPerm := os.FileMode(0o755)
@@ -76,14 +157,25 @@ func writeAtomicTemp(path string, data []byte, perm os.FileMode) (string, error)
 		return "", fmt.Errorf("create tmp for %s: %w", path, err)
 	}
 	tmpPath := tmp.Name()
+	closed := false
+	closeTmp := func() error {
+		if closed {
+			return nil
+		}
+		closed = true
+		return tmp.Close()
+	}
+	keep := false
+	defer func() {
+		_ = closeTmp()
+		if !keep {
+			_ = os.Remove(tmpPath)
+		}
+	}()
 	if _, err := tmp.Write(data); err != nil {
-		tmp.Close()
-		os.Remove(tmpPath)
 		return "", fmt.Errorf("write tmp for %s: %w", path, err)
 	}
 	if err := tmp.Sync(); err != nil {
-		tmp.Close()
-		os.Remove(tmpPath)
 		return "", fmt.Errorf("fsync tmp for %s: %w", path, err)
 	}
 	// Chmod the still-open handle, before Close, so there is no window between
@@ -91,14 +183,12 @@ func writeAtomicTemp(path string, data []byte, perm os.FileMode) (string, error)
 	// indexer) to grab or move the tmp and make the chmod fail with "file not
 	// found". CreateTemp makes a 0600 file, so this only widens when perm asks.
 	if err := tmp.Chmod(perm); err != nil {
-		tmp.Close()
-		os.Remove(tmpPath)
 		return "", fmt.Errorf("chmod tmp for %s: %w", path, err)
 	}
-	if err := tmp.Close(); err != nil {
-		os.Remove(tmpPath)
+	if err := closeTmp(); err != nil {
 		return "", fmt.Errorf("close tmp for %s: %w", path, err)
 	}
+	keep = true
 	return tmpPath, nil
 }
 
@@ -124,7 +214,17 @@ func writeAtomicTemp(path string, data []byte, perm os.FileMode) (string, error)
 //
 // A missing tmp means the write itself failed and no retry can help.
 func ReplaceFile(tmp, dest string) error {
+	Crash("replace", dest)
 	return replaceFile(tmp, dest, true)
+}
+
+// ClaimRename renames src to dst for callers that use the rename itself as a
+// claim: it retries the same transient locks ReplaceFile does, but never falls
+// back to a copy, because a copy would let two claimants both succeed. A src
+// that has disappeared ends the retries at once — that is the loser of a race,
+// not a fault.
+func ClaimRename(src, dst string) error {
+	return replaceFile(src, dst, false)
 }
 
 func replaceFile(tmp, dest string, allowCrossDeviceCopy bool) error {

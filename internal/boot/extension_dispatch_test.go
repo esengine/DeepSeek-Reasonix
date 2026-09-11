@@ -260,7 +260,7 @@ func TestBootSystemPromptBuildEventObserved(t *testing.T) {
 		if err != nil {
 			return false
 		}
-		for _, candidate := range strings.Split(strings.TrimSpace(string(data)), "\n") {
+		for candidate := range strings.SplitSeq(strings.TrimSpace(string(data)), "\n") {
 			if strings.HasPrefix(candidate, "system_prompt.build ") {
 				line = candidate
 				return true

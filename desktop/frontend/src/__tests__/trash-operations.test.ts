@@ -1,0 +1,21 @@
+import assert from "node:assert/strict";
+import { purgeTrashBatch } from "../lib/trashOperations";
+const calls: string[] = [];
+let release!: () => void;
+const pending = new Promise<void>((resolve) => { release = resolve; });
+const paths = ["a", "b", "a", "c"];
+const batch = purgeTrashBatch(paths, async (path) => {
+  calls.push(path);
+  if (path === "a") await pending;
+  if (path === "b") throw new Error("busy");
+});
+paths.push("later");
+assert.deepEqual(calls, ["a"], "batch executes sequentially");
+release();
+const result = await batch;
+assert.deepEqual(calls, ["a", "b", "c"], "snapshot excludes new arrivals and duplicate paths");
+assert.deepEqual(result, { succeeded: ["a", "c"], failed: ["b"] });
+const retryCalls: string[] = [];
+await purgeTrashBatch(result.failed, async (path) => { retryCalls.push(path); });
+assert.deepEqual(retryCalls, ["b"], "retry never repeats known successful deletions");
+console.log("PASS trash partial failure, fixed targets, deduplication and explicit failed-only retry");

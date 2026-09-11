@@ -5,12 +5,12 @@ package main
 import (
 	"crypto/sha256"
 	"encoding/hex"
+	"errors"
 	"flag"
 	"fmt"
 	"io"
 	"log"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"strings"
 	"sync"
@@ -19,22 +19,26 @@ import (
 
 	"golang.org/x/sys/windows"
 
+	"reasonix/desktop/internal/winuninstall"
 	"reasonix/internal/installlayout"
+	"reasonix/internal/proc"
 	"reasonix/internal/repair"
 )
 
 const parentExitTimeout = 2 * time.Minute
 
 var (
-	waitForProcessExitFn       = waitForProcessExit
-	runInstallerFn             = runInstaller
-	startRelaunchFn            = startRelaunch
-	claimPendingFileUpdateFn   = repair.ClaimPendingFileUpdateExact
-	installStagedReleaseUnitFn = installStagedWindowsReleaseUnit
-	recordInstalledUpdateFn    = repair.RecordClaimedFileUpdateInstalled
-	stageInstallerFn           = stageVerifiedInstaller
-	claimInstallerExecutionFn  = claimVerifiedInstallerForExecution
-	lstatUpdateStagingFn       = os.Lstat
+	waitForProcessExitFn                    = waitForProcessExit
+	runInstallerFn                          = runInstaller
+	startRelaunchFn                         = startRelaunch
+	claimPendingFileUpdateFn                = repair.ClaimPendingFileUpdateExact
+	installStagedReleaseUnitFn              = installStagedWindowsReleaseUnit
+	recordInstalledUpdateFn                 = repair.RecordClaimedFileUpdateInstalled
+	stageInstallerFn                        = stageVerifiedInstaller
+	claimInstallerExecutionFn               = claimVerifiedInstallerForExecution
+	lstatUpdateStagingFn                    = os.Lstat
+	reconcileWindowsUninstallRegistrationFn = winuninstall.Reconcile
+	verifyDesktopHandoffFn                  = verifyDesktopHandoff
 )
 
 func main() {
@@ -90,6 +94,7 @@ func run(args []string) int {
 	if parentPID != 0 {
 		if err := waitForProcessExitFn(uint32(parentPID), parentExitTimeout); err != nil {
 			logger.Printf("wait for parent process %d: %v", parentPID, err)
+			notifyHandoffBlockedFn(false)
 			return 1
 		}
 	}
@@ -134,7 +139,7 @@ func run(args []string) int {
 			logger.Printf("cancel unstarted update: %v", cancelErr)
 		}
 		if relaunch != "" {
-			if relaunchErr := startRelaunchFn(relaunch, installDir); relaunchErr != nil {
+			if relaunchErr := startRelaunchFn(preferRelaunchPath(relaunch, installDir), installDir); relaunchErr != nil {
 				logger.Printf("relaunch after unstarted update failure: %v", relaunchErr)
 			}
 		}
@@ -219,13 +224,7 @@ func run(args []string) int {
 			logger.Printf("clear completed update marker: %v", err)
 		}
 	}
-	if relaunch != "" {
-		if err := startRelaunchFn(preferRelaunchPath(relaunch, installDir), installDir); err != nil {
-			logger.Printf("relaunch: %v", err)
-			return 1
-		}
-	}
-	return 0
+	return relaunchPublishedInstall(logger, relaunch, installDir, "relaunch")
 }
 
 func runVersionedWindowsUpdate(logger *log.Logger, installer, installerSHA256, installDir, relaunch, toVersion string) int {
@@ -287,23 +286,48 @@ func runVersionedWindowsUpdate(logger *log.Logger, installer, installerSHA256, i
 		logger.Printf("activate versioned release: %v", err)
 		return recoverExisting()
 	}
-	if relaunch != "" {
-		if err := startRelaunchFn(preferRelaunchPath(relaunch, installDir), installDir); err != nil {
-			logger.Printf("relaunch versioned release: %v", err)
-			return 1
-		}
+	if _, err := reconcileWindowsUninstallRegistrationFn(installDir, toVersion); err != nil {
+		// The release is already active and must not be rolled back for stale
+		// Add/Remove Programs metadata. A later update or full installer retries
+		// this idempotent reconciliation.
+		logger.Printf("reconcile Windows uninstall registration: %v", err)
+	}
+	return relaunchPublishedInstall(logger, relaunch, installDir, "relaunch versioned release")
+}
+
+func relaunchPublishedInstall(logger *log.Logger, relaunch, installDir, failVerb string) int {
+	if err := verifyDesktopHandoffFn(installDir, false); err != nil {
+		logger.Printf("installed; restart incomplete: %v", err)
+		notifyHandoffBlockedFn(true)
+		return 1
+	}
+	path := preferRelaunchPath(relaunch, installDir)
+	if path == "" {
+		logger.Print("installed; no stable restart target is available")
+		notifyHandoffBlockedFn(true)
+		return 1
+	}
+	if err := startRelaunchFn(path, installDir); err != nil {
+		logger.Printf("%s: %v", failVerb, err)
+		notifyHandoffBlockedFn(true)
+		return 1
+	}
+	if err := verifyDesktopHandoffFn(installDir, true); err != nil {
+		logger.Printf("installed; restart unconfirmed: %v", err)
+		notifyHandoffBlockedFn(true)
+		return 1
 	}
 	return 0
 }
 
-// preferRelaunchPath chooses the thin launcher when present so post-update
-// restarts use the permanent entry point, not a flat desktop binary.
+// preferRelaunchPath chooses the install-root launcher after a versioned
+// activation. A retained versions/<old>/ desktop path is never restarted.
 func preferRelaunchPath(relaunch, installDir string) string {
-	for _, name := range []string{"reasonix-launcher.exe", "Reasonix.exe"} {
-		path := filepath.Join(installDir, name)
-		if info, err := os.Lstat(path); err == nil && info.Mode().IsRegular() {
-			return path
-		}
+	if path, err := installlayout.StableRelaunchPath(installDir); err == nil && path != "" {
+		return path
+	}
+	if installlayout.IsSupersededVersionedDesktop(installDir, relaunch) {
+		return ""
 	}
 	return relaunch
 }
@@ -491,7 +515,7 @@ func newLogger() *log.Logger {
 func waitForProcessExit(pid uint32, timeout time.Duration) error {
 	h, err := windows.OpenProcess(windows.SYNCHRONIZE, false, pid)
 	if err != nil {
-		if err == windows.ERROR_INVALID_PARAMETER {
+		if errors.Is(err, windows.ERROR_INVALID_PARAMETER) {
 			return nil
 		}
 		return err
@@ -513,7 +537,7 @@ func waitForProcessExit(pid uint32, timeout time.Duration) error {
 }
 
 func runInstaller(installer, installDir string) error {
-	cmd := exec.Command(installer)
+	cmd := proc.VisibleCommand(installer)
 	// Keep the helper itself hidden, but let the NSIS update-progress window be
 	// visible. /REASONIXSTAGE makes the signed installer extract only; the helper
 	// performs every live replacement through the claimed transaction.
@@ -525,7 +549,7 @@ func cleanupOwnedWindowsUpdateDirectory(path string, owner os.FileInfo) error {
 	if path == "" || owner == nil || !owner.IsDir() {
 		return fmt.Errorf("Windows update cleanup identity is incomplete")
 	}
-	for attempt := 0; attempt < 16; attempt++ {
+	for attempt := range 16 {
 		cleanup := fmt.Sprintf("%s.reasonix-cleanup-%d-%d", path, time.Now().UTC().UnixNano(), attempt)
 		from, err := windows.UTF16PtrFromString(path)
 		if err != nil {
@@ -565,7 +589,7 @@ func cleanupOwnedWindowsUpdateDirectory(path string, owner os.FileInfo) error {
 }
 
 func startRelaunch(relaunch, installDir string) error {
-	cmd := exec.Command(relaunch)
+	cmd := proc.VisibleCommand(relaunch)
 	cmd.Dir = installDir
 	cmd.SysProcAttr = &syscall.SysProcAttr{HideWindow: true}
 	return cmd.Start()

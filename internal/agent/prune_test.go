@@ -2,8 +2,7 @@ package agent
 
 import (
 	"context"
-	"encoding/json"
-	"fmt"
+	"errors"
 	"os"
 	"path/filepath"
 	"strings"
@@ -14,426 +13,300 @@ import (
 	"reasonix/internal/tool"
 )
 
-func pruneFixture(toolContent string) *Session {
-	return &Session{Messages: []provider.Message{
-		{Role: provider.RoleSystem, Content: "sys"},
-		{Role: provider.RoleUser, Content: "task"},
-		{Role: provider.RoleAssistant, ToolCalls: []provider.ToolCall{{ID: "1", Name: "read_file", Arguments: "{}"}}},
-		{Role: provider.RoleTool, ToolCallID: "1", Name: "read_file", Content: toolContent},
-		{Role: provider.RoleAssistant, Content: "step done"},
-		{Role: provider.RoleUser, Content: "next"},
-		{Role: provider.RoleAssistant, Content: "ok"},
-	}}
-}
-
-func TestPruneStaleToolResults(t *testing.T) {
-	big := strings.Repeat("x", 5000)
-	sess := pruneFixture(big)
-	dir := t.TempDir()
-	a := New(nil, tool.NewRegistry(), sess, Options{ContextWindow: 1000, RecentKeep: 2, ArchiveDir: dir}, event.Discard)
-
-	st, err := a.PruneStaleToolResults()
-	if err != nil {
-		t.Fatalf("prune: %v", err)
-	}
-	if st.Results != 1 {
-		t.Fatalf("Results = %d, want 1", st.Results)
-	}
-	if st.SavedChars < 4000 {
-		t.Errorf("SavedChars = %d, want > 4000", st.SavedChars)
-	}
-	msgs := sess.Snapshot()
-	if len(msgs) != 7 {
-		t.Fatalf("message count changed: %d", len(msgs))
-	}
-	pruned := msgs[3]
-	if !strings.HasPrefix(pruned.Content, prunedMarker) {
-		t.Errorf("tool content not elided: %.60q", pruned.Content)
-	}
-	if pruned.ToolCallID != "1" || pruned.Name != "read_file" || pruned.Role != provider.RoleTool {
-		t.Errorf("tool pairing fields changed: %+v", pruned)
-	}
-	if len(msgs[2].ToolCalls) != 1 || msgs[2].ToolCalls[0].ID != "1" {
-		t.Errorf("assistant tool_calls touched: %+v", msgs[2])
-	}
-	if got := sess.RewriteVersion(); got != 1 {
-		t.Errorf("RewriteVersion = %d, want 1", got)
-	}
-	if st.Archive == "" {
-		t.Fatal("no archive written")
-	}
-	raw, err := os.ReadFile(st.Archive)
-	if err != nil {
-		t.Fatalf("read archive: %v", err)
-	}
-	if !strings.Contains(string(raw), big[:64]) {
-		t.Error("archive does not contain the original tool output")
-	}
-	if filepath.Dir(st.Archive) != dir {
-		t.Errorf("archive outside dir: %s", st.Archive)
-	}
-
-	st2, err := a.PruneStaleToolResults()
-	if err != nil {
-		t.Fatalf("second prune: %v", err)
-	}
-	if st2.Results != 0 {
-		t.Errorf("second pass pruned %d, want 0 (idempotent)", st2.Results)
-	}
-	if got := sess.RewriteVersion(); got != 1 {
-		t.Errorf("no-op pass bumped RewriteVersion to %d", got)
-	}
-}
-
-func TestPruneNeverRewritesLocalInterruptedDisplay(t *testing.T) {
-	m := provider.Message{
-		Role: provider.RoleTool, LocalOnly: true,
-		ToolCallID: provider.LocalOnlyToolID, Name: provider.LocalOnlyToolName,
-		Content: strings.Repeat("partial output", 1024),
-	}
-	if shouldMaintainToolResult(m, toolResultSnip) || shouldMaintainToolResult(m, toolResultPrune) {
-		t.Fatal("local interrupted display must remain verbatim across tool-result maintenance")
-	}
-}
-
-func TestSnipStaleToolResults(t *testing.T) {
-	var lines []string
-	for i := 0; i < 1000; i++ {
-		lines = append(lines, "line")
-	}
-	big := strings.Join(lines, "\n")
-	sess := pruneFixture(big)
-	dir := t.TempDir()
-	a := New(nil, tool.NewRegistry(), sess, Options{ContextWindow: 1000, RecentKeep: 2, ArchiveDir: dir}, event.Discard)
-
-	st, err := a.SnipStaleToolResults()
-	if err != nil {
-		t.Fatalf("snip: %v", err)
-	}
-	if st.Results != 1 {
-		t.Fatalf("Results = %d, want 1", st.Results)
-	}
-	snipped := sess.Snapshot()[3].Content
-	if !strings.HasPrefix(snipped, snippedMarker) {
-		t.Fatalf("tool content not snipped: %.80q", snipped)
-	}
-	if !strings.Contains(snipped, "[... ") || !strings.Contains(snipped, "lines omitted") {
-		t.Fatalf("snipped content missing omission marker: %.120q", snipped)
-	}
-	if st.SavedChars <= 0 {
-		t.Fatalf("SavedChars = %d, want positive", st.SavedChars)
-	}
-	if st.Archive == "" {
-		t.Fatal("no archive written")
-	}
-
-	st2, err := a.SnipStaleToolResults()
-	if err != nil {
-		t.Fatalf("second snip: %v", err)
-	}
-	if st2.Results != 0 {
-		t.Fatalf("second pass snipped %d, want 0", st2.Results)
-	}
-}
-
-func TestSnipCanUpgradeToPrune(t *testing.T) {
-	big := strings.Join([]string{strings.Repeat("a\n", 800), strings.Repeat("b\n", 800)}, "")
-	sess := pruneFixture(big)
-	a := New(nil, tool.NewRegistry(), sess, Options{ContextWindow: 1000, RecentKeep: 2, ArchiveDir: t.TempDir()}, event.Discard)
-
-	snipStats, err := a.SnipStaleToolResults()
-	if err != nil || snipStats.Results != 1 {
-		t.Fatalf("snip st=%+v err=%v, want one result", snipStats, err)
-	}
-	if pruneStats, err := a.PruneStaleToolResults(); err != nil || pruneStats.Results != 1 {
-		t.Fatalf("prune st=%+v err=%v, want one upgraded result", pruneStats, err)
-	}
-	if got := sess.Snapshot()[3].Content; !strings.HasPrefix(got, prunedMarker) {
-		t.Fatalf("snipped result was not upgraded to prune: %.80q", got)
-	} else if !strings.Contains(got, snipStats.Archive) {
-		t.Fatalf("pruned marker did not preserve original archive path %q: %.120q", snipStats.Archive, got)
-	}
-}
-
-func TestPruneNoopWithoutWindow(t *testing.T) {
-	sess := pruneFixture(strings.Repeat("x", 5000))
-	a := New(nil, tool.NewRegistry(), sess, Options{RecentKeep: 2}, event.Discard)
-	st, err := a.PruneStaleToolResults()
-	if err != nil || st.Results != 0 {
-		t.Fatalf("st=%+v err=%v, want no-op", st, err)
-	}
-}
-
-func TestPruneSkipsSmallResults(t *testing.T) {
-	sess := pruneFixture(strings.Repeat("x", 200))
-	a := New(nil, tool.NewRegistry(), sess, Options{ContextWindow: 1000, RecentKeep: 2}, event.Discard)
-	st, err := a.PruneStaleToolResults()
-	if err != nil || st.Results != 0 {
-		t.Fatalf("st=%+v err=%v, want small result kept", st, err)
-	}
-	if got := sess.Snapshot()[3].Content; !strings.HasPrefix(got, "xxx") {
-		t.Errorf("small tool result was rewritten: %.40q", got)
-	}
-}
-
-func TestMaybeCompactPruneAvoidsFold(t *testing.T) {
-	prov := &fakeProvider{reply: "summary"}
-	sess := pruneFixture(strings.Repeat("x", 5000))
-	a := New(prov, tool.NewRegistry(), sess, Options{ContextWindow: 1000, RecentKeep: 2, ArchiveDir: t.TempDir()}, event.Discard)
-
-	a.maybeCompact(context.Background(), &provider.Usage{PromptTokens: 850})
-
-	if prov.got != nil {
-		t.Fatal("summarizer was called although pruning cleared the trigger")
-	}
-	if got := sess.Snapshot()[3].Content; !strings.HasPrefix(got, prunedMarker) {
-		t.Errorf("tool result not pruned: %.60q", got)
-	}
-}
-
-func TestMaybeCompactSnipsAtSnipRatioWithoutFold(t *testing.T) {
-	prov := &fakeProvider{reply: "summary"}
-	sess := pruneFixture(strings.Repeat("line\n", 1000))
-	a := New(prov, tool.NewRegistry(), sess, Options{ContextWindow: 1000, RecentKeep: 2, ArchiveDir: t.TempDir()}, event.Discard)
-
-	a.maybeCompact(context.Background(), &provider.Usage{PromptTokens: 650})
-
-	if prov.got != nil {
-		t.Fatal("summarizer was called at snip ratio")
-	}
-	if got := sess.Snapshot()[3].Content; !strings.HasPrefix(got, snippedMarker) {
-		t.Errorf("tool result not snipped at snip ratio: %.80q", got)
-	}
-}
-
-func TestMaybeCompactPruneFallsThroughWhenStillOverThreshold(t *testing.T) {
-	prov := &fakeProvider{reply: "summary"}
+// Automatic prune/snip projections are gone. These APIs remain as no-ops so
+// older call sites do not panic, but they never rewrite the model view.
+func TestPruneAndSnipAreNoOps(t *testing.T) {
 	sess := &Session{Messages: []provider.Message{
 		{Role: provider.RoleSystem, Content: "sys"},
 		{Role: provider.RoleUser, Content: "task"},
-		{Role: provider.RoleAssistant, Content: strings.Repeat("foldable assistant work\n", 500)},
-		{Role: provider.RoleAssistant, ToolCalls: []provider.ToolCall{{ID: "1", Name: "read_file", Arguments: "{}"}}},
-		{Role: provider.RoleTool, ToolCallID: "1", Name: "read_file", Content: strings.Repeat("x", 1200)},
-		{Role: provider.RoleAssistant, Content: "step done"},
+		{Role: provider.RoleAssistant, ToolCalls: []provider.ToolCall{{ID: "t1", Name: "read_file", Arguments: "{}"}}},
+		{Role: provider.RoleTool, ToolCallID: "t1", Name: "read_file", Content: strings.Repeat("x", 8000)},
 		{Role: provider.RoleUser, Content: "next"},
-		{Role: provider.RoleAssistant, Content: "ok"},
 	}}
-	a := New(prov, tool.NewRegistry(), sess, Options{ContextWindow: 10000, RecentKeep: 2, ArchiveDir: t.TempDir()}, event.Discard)
-
-	a.maybeCompact(context.Background(), &provider.Usage{PromptTokens: 8900})
-
-	if prov.got == nil {
-		t.Fatal("summarizer was not called although pruning still left prompt above compact threshold")
+	a := New(nil, tool.NewRegistry(), sess, Options{ContextWindow: 100_000, RecentKeep: 2}, event.Discard)
+	st, err := a.PruneStaleToolResults()
+	if err != nil {
+		t.Fatal(err)
 	}
-	foundSummary := false
+	if st.Results != 0 {
+		t.Fatalf("prune results = %d, want 0", st.Results)
+	}
+	st, err = a.SnipStaleToolResults()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if st.Results != 0 {
+		t.Fatalf("snip results = %d, want 0", st.Results)
+	}
+	if got := a.currentProjectionVersion(); got != 0 {
+		t.Fatalf("projection version = %d, want 0", got)
+	}
 	for _, m := range sess.Snapshot() {
-		if strings.Contains(m.Content, summaryTagOpen) {
-			foundSummary = true
-			break
+		if m.Role == provider.RoleTool && m.Content != strings.Repeat("x", 8000) {
+			t.Fatal("canonical tool result was rewritten")
 		}
-	}
-	if !foundSummary {
-		t.Fatal("summary compaction did not update the session")
 	}
 }
 
-func TestMaybeCompactForceRatioStillFolds(t *testing.T) {
-	prov := &fakeProvider{reply: "summary"}
-	// A big assistant turn in the foldable region (after the pinned task, before the
-	// recent tail) survives pruning — only tool results prune — so the forced fold
-	// has real content to compact while the task turn stays pinned verbatim.
+func TestBelowThresholdSamplingKeepsBoundedToolContentWithoutProjection(t *testing.T) {
+	full := strings.Repeat("完整结果", 10_000)
+	bounded := "legacy bounded result"
+	sess := &Session{Messages: []provider.Message{
+		{Role: provider.RoleSystem, Content: "sys"},
+		{Role: provider.RoleUser, Content: "read"},
+		{Role: provider.RoleAssistant, ToolCalls: []provider.ToolCall{{ID: "call-1", Name: "read_file", Arguments: "{}"}}},
+		{Role: provider.RoleTool, ToolCallID: "call-1", Name: "read_file", Content: bounded, RawContent: full},
+	}}
+	a := New(&countingProvider{reply: "unused"}, tool.NewRegistry(), sess, Options{ContextWindow: 1_000_000}, event.Discard)
+	req, err := a.buildSamplingRequest(context.Background(), CompactionTriggerPressure)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := req.req.Messages[3].Content; got != bounded {
+		t.Fatalf("provider tool result = %q, want bounded content", got)
+	}
+	if a.currentProjectionVersion() != 0 {
+		t.Fatalf("below-threshold request installed projection version %d", a.currentProjectionVersion())
+	}
+	stored := sess.Snapshot()[3]
+	if stored.Content != bounded || stored.RawContent != full {
+		t.Fatal("request projection mutated compatibility storage")
+	}
+}
+
+func TestPruneSurvivesSummaryFailureAndRestart(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "session.jsonl")
+	bigTool := strings.Repeat("🧪", 12_000)
+	bigWork := strings.Repeat("assistant work ", 12_000)
 	sess := &Session{Messages: []provider.Message{
 		{Role: provider.RoleSystem, Content: "sys"},
 		{Role: provider.RoleUser, Content: "task"},
-		{Role: provider.RoleAssistant, Content: strings.Repeat("y", 5000)},
-		{Role: provider.RoleAssistant, ToolCalls: []provider.ToolCall{{ID: "1", Name: "read_file", Arguments: "{}"}}},
-		{Role: provider.RoleTool, ToolCallID: "1", Name: "read_file", Content: strings.Repeat("x", 5000)},
-		{Role: provider.RoleAssistant, Content: "step done"},
-		{Role: provider.RoleUser, Content: "next"},
-		{Role: provider.RoleAssistant, Content: "ok"},
+		{Role: provider.RoleAssistant, ToolCalls: []provider.ToolCall{{ID: "call-1", Name: "read_file", Arguments: "{}"}}},
+		{Role: provider.RoleTool, ToolCallID: "call-1", Name: "read_file", Content: bigTool},
+		{Role: provider.RoleAssistant, Content: bigWork},
+		{Role: provider.RoleUser, Content: "tail"},
 	}}
-	a := New(prov, tool.NewRegistry(), sess, Options{ContextWindow: 1000, RecentKeep: 2, ArchiveDir: t.TempDir()}, event.Discard)
+	a := New(&fakeProvider{streamErr: errors.New("summary down")}, tool.NewRegistry(), sess, Options{
+		ContextWindow: 60_000, CompactRatio: 0.50, SessionPath: path,
+	}, event.Discard)
+	if _, err := a.contextManager().Prepare(context.Background(), ContextPreparePolicy{Trigger: CompactionTriggerPressure}); err != nil {
+		t.Fatalf("pressure below hard ceiling should continue from prune: %v", err)
+	}
+	if a.currentProjectionVersion() != 1 || countToolResultsContaining(a.modelVisibleMessages(), toolPruneMarker) != 1 {
+		t.Fatalf("prune did not survive summary failure: version=%d view=%+v", a.currentProjectionVersion(), a.modelVisibleMessages())
+	}
 
-	a.maybeCompact(context.Background(), &provider.Usage{PromptTokens: 950})
-
-	if prov.got == nil {
-		t.Fatal("force ratio crossed but summarizer never called")
-	}
-	if got := sess.Snapshot()[1].Content; got != "task" {
-		t.Errorf("first user turn not pinned verbatim: %.40q", got)
-	}
-	found := false
-	for _, m := range sess.Snapshot() {
-		if strings.Contains(m.Content, summaryTagOpen) {
-			found = true
-		}
-	}
-	if !found {
-		t.Error("no compaction summary in session after forced fold")
+	restarted := New(nil, tool.NewRegistry(), sess, Options{ContextWindow: 60_000, CompactRatio: 0.50, SessionPath: path}, event.Discard)
+	if restarted.currentProjectionVersion() != 1 || countToolResultsContaining(restarted.modelVisibleMessages(), toolPruneMarker) != 1 {
+		t.Fatalf("restart lost prune projection: version=%d view=%+v", restarted.currentProjectionVersion(), restarted.modelVisibleMessages())
 	}
 }
 
-func TestPruneSkipsRecentTail(t *testing.T) {
-	old := strings.Repeat("old\n", 1000)
-	recent := strings.Repeat("recent\n", 1000)
+func TestPruneSidecarWriteFailureRollsBackWithoutAppliedReceipt(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "session.jsonl")
+	bigTool := strings.Repeat("界", toolPruneThresholdRunes+1)
 	sess := &Session{Messages: []provider.Message{
 		{Role: provider.RoleSystem, Content: "sys"},
-		{Role: provider.RoleUser, Content: "task"},
-		{Role: provider.RoleAssistant, ToolCalls: []provider.ToolCall{{ID: "old", Name: "read_file", Arguments: "{}"}}},
-		{Role: provider.RoleTool, ToolCallID: "old", Name: "read_file", Content: old},
-		{Role: provider.RoleUser, Content: "next"},
-		{Role: provider.RoleAssistant, ToolCalls: []provider.ToolCall{{ID: "recent", Name: "read_file", Arguments: "{}"}}},
-		{Role: provider.RoleTool, ToolCallID: "recent", Name: "read_file", Content: recent},
+		{Role: provider.RoleUser, Content: "read"},
+		{Role: provider.RoleAssistant, ToolCalls: []provider.ToolCall{{ID: "call-1", Name: "read_file", Arguments: "{}"}}},
+		{Role: provider.RoleTool, ToolCallID: "call-1", Name: "read_file", Content: bigTool},
 	}}
-	a := New(nil, tool.NewRegistry(), sess, Options{ContextWindow: 1000, RecentKeep: 3, ArchiveDir: t.TempDir()}, event.Discard)
-
-	st, err := a.PruneStaleToolResults()
-	if err != nil {
-		t.Fatalf("prune: %v", err)
-	}
-	if st.Results != 1 {
-		t.Fatalf("Results = %d, want only the stale result pruned", st.Results)
-	}
-	msgs := sess.Snapshot()
-	if !strings.HasPrefix(msgs[3].Content, prunedMarker) {
-		t.Fatalf("old result was not pruned: %.80q", msgs[3].Content)
-	}
-	if msgs[6].Content != recent {
-		t.Fatalf("recent tail tool result was rewritten")
-	}
-}
-
-func TestPruneHonorsKeepErrors(t *testing.T) {
-	// KeepErrors must carry error/blocked tool results through pruning verbatim;
-	// eliding here rewrites Content to the [elided ...] marker, so compact()'s
-	// KeepErrors predicate sees only the placeholder and the failure is lost on
-	// the next fold.
-	for _, prefix := range []string{"error:", "blocked:"} {
-		content := prefix + strings.Repeat(" detail", 200)
-		sess := pruneFixture(content)
-		a := New(nil, tool.NewRegistry(), sess, Options{ContextWindow: 1000, RecentKeep: 2, KeepPolicy: KeepErrors}, event.Discard)
-
-		st, err := a.PruneStaleToolResults()
-		if err != nil {
-			t.Fatalf("prune (%s): %v", prefix, err)
+	appliedEvents := 0
+	sink := event.FuncSink(func(e event.Event) {
+		if e.Kind == event.ContextMaintenanceEvent && e.Maintenance != nil && e.Maintenance.Status == "applied" {
+			appliedEvents++
 		}
-		if st.Results != 0 {
-			t.Errorf("%s: Results = %d, want 0 (KeepErrors preserves error tool results)", prefix, st.Results)
-		}
-		if got := sess.Snapshot()[3].Content; !strings.HasPrefix(got, prefix) {
-			t.Errorf("%s: error tool result was elided: %.60q", prefix, got)
-		}
+	})
+	a := New(nil, tool.NewRegistry(), sess, Options{ContextWindow: 20_000, SessionPath: path}, sink)
+	// A directory at the sidecar destination makes atomic publication fail
+	// without relying on platform-specific permission behavior.
+	if err := os.Mkdir(ContextStatePath(path), 0o755); err != nil {
+		t.Fatal(err)
+	}
+
+	a.sess.compactionRunMu.Lock()
+	advanced, err := a.pruneToolResultsToProjectionLocked(CompactionTriggerPressure)
+	a.sess.compactionRunMu.Unlock()
+	if err == nil {
+		t.Fatal("prune unexpectedly succeeded with an unwritable sidecar destination")
+	}
+	if advanced {
+		t.Fatal("failed prune reported projection progress")
+	}
+	if got := a.currentProjectionVersion(); got != 0 {
+		t.Fatalf("projection version = %d, want rollback to 0", got)
+	}
+	if a.sess.compactionState.LastReceipt != nil {
+		t.Fatalf("failed prune published in-memory receipt: %+v", a.sess.compactionState.LastReceipt)
+	}
+	if appliedEvents != 0 {
+		t.Fatalf("applied maintenance events = %d, want 0", appliedEvents)
+	}
+	if got := sess.Snapshot()[3].Content; got != bigTool {
+		t.Fatal("failed prune modified canonical tool content")
 	}
 }
 
-func TestPruneElidesErrorsWithoutKeepPolicy(t *testing.T) {
-	// Without KeepErrors, a large error tool result prunes like any other — a
-	// regression guard for the policy-gated skip.
-	content := "error: build failed\n" + strings.Repeat("x", 5000)
-	sess := pruneFixture(content)
-	a := New(nil, tool.NewRegistry(), sess, Options{ContextWindow: 1000, RecentKeep: 2}, event.Discard)
-
-	st, err := a.PruneStaleToolResults()
-	if err != nil {
-		t.Fatalf("prune: %v", err)
-	}
-	if st.Results != 1 {
-		t.Errorf("Results = %d, want 1 (no keep policy)", st.Results)
-	}
-	if got := sess.Snapshot()[3].Content; !strings.HasPrefix(got, prunedMarker) {
-		t.Errorf("error tool result not elided without keep policy: %.60q", got)
-	}
-}
-
-// hintingTool is a read-only tool that advertises a distinctive snip geometry,
-// so a test can prove the maintainer honored the tool's own SnipHint rather
-// than a name-keyed table or a generic default.
-type hintingTool struct {
-	name string
-	hint tool.SnipHint
-}
-
-func (h hintingTool) Name() string                                           { return h.name }
-func (hintingTool) Description() string                                      { return "" }
-func (hintingTool) Schema() json.RawMessage                                  { return json.RawMessage(`{"type":"object"}`) }
-func (hintingTool) ReadOnly() bool                                           { return true }
-func (hintingTool) Execute(context.Context, json.RawMessage) (string, error) { return "", nil }
-func (h hintingTool) SnipHint() tool.SnipHint                                { return h.hint }
-
-func snipFixtureFor(toolName, content string) *Session {
-	return &Session{Messages: []provider.Message{
+// At the compact_ratio trigger, maintenance persists a prune projection first.
+// If that projection clears pressure, no paid summary request is made.
+func TestMaintenancePrunesBeforeSummaryAndStopsWhenPressureClears(t *testing.T) {
+	big := strings.Repeat("x", 10_000)
+	msgs := []provider.Message{
 		{Role: provider.RoleSystem, Content: "sys"},
 		{Role: provider.RoleUser, Content: "task"},
-		{Role: provider.RoleAssistant, ToolCalls: []provider.ToolCall{{ID: "1", Name: toolName, Arguments: "{}"}}},
-		{Role: provider.RoleTool, ToolCallID: "1", Name: toolName, Content: content},
-		{Role: provider.RoleAssistant, Content: "step done"},
-		{Role: provider.RoleUser, Content: "next"},
-		{Role: provider.RoleAssistant, Content: "ok"},
+	}
+	for i := range 8 {
+		id := "t" + string(rune('a'+i))
+		msgs = append(msgs,
+			provider.Message{Role: provider.RoleAssistant, ToolCalls: []provider.ToolCall{{ID: id, Name: "read_file", Arguments: "{}"}}},
+			provider.Message{Role: provider.RoleTool, ToolCallID: id, Name: "read_file", Content: big},
+		)
+	}
+	msgs = append(msgs,
+		provider.Message{Role: provider.RoleUser, Content: "tail"},
+		provider.Message{Role: provider.RoleAssistant, Content: "ok"},
+	)
+	prov := &countingProvider{reply: "digest"}
+	a := New(prov, tool.NewRegistry(), &Session{Messages: msgs}, Options{
+		ContextWindow: 30_000, CompactRatio: 0.5, RecentKeep: 2,
+	}, event.Discard)
+	if _, err := a.contextManager().Prepare(context.Background(), ContextPreparePolicy{Trigger: CompactionTriggerPressure}); err != nil {
+		t.Fatal(err)
+	}
+	if a.currentProjectionVersion() != 1 {
+		t.Fatalf("projection version = %d, want 1", a.currentProjectionVersion())
+	}
+	if len(prov.got) != 0 {
+		t.Fatalf("summarizer calls = %d, want 0", len(prov.got))
+	}
+	visible := a.modelVisibleMessages()
+	if got := countToolResultsContaining(visible, toolPruneMarker); got != 8 {
+		t.Fatalf("pruned tool results = %d, want 8", got)
+	}
+	if got := a.sess.compactionState.LastReceipt.Action; got != "prune" {
+		t.Fatalf("receipt action = %q, want prune", got)
+	}
+	for _, msg := range a.sess.conversation.Snapshot() {
+		if msg.Role == provider.RoleTool && msg.Content != big {
+			t.Fatal("canonical tool result was modified")
+		}
+	}
+}
+
+func countToolResultsContaining(msgs []provider.Message, marker string) int {
+	n := 0
+	for _, msg := range msgs {
+		if msg.Role == provider.RoleTool && strings.Contains(msg.Content, marker) {
+			n++
+		}
+	}
+	return n
+}
+
+func TestSnipStrategyStillBuildsBoundedCompatibilityContent(t *testing.T) {
+	a := &Agent{svc: agentServices{tools: tool.NewRegistry()}}
+	s := a.snipStrategyFor("read_file")
+	if s.head <= 0 || s.tail <= 0 {
+		t.Fatalf("snip strategy for read_file = %+v", s)
+	}
+	body, notice := truncateToolOutputFor(strings.Repeat("x", maxToolOutputBytes+100), "read_file", "call-1")
+	if notice == "" || !strings.Contains(body, "call_id=call-1") {
+		t.Fatalf("first-visible truncation missing marker: notice=%q body=%.200q", notice, body)
+	}
+	if len(body) > maxToolOutputBytes+200 {
+		t.Fatalf("bounded body still oversized: %d", len(body))
+	}
+}
+
+func TestModelInputMessagesKeepsBoundedToolContent(t *testing.T) {
+	msgs := []provider.Message{
+		{Role: provider.RoleUser, Content: "display user", RawContent: "raw user"},
+		{Role: provider.RoleTool, Content: "bounded", RawContent: "complete tool result", ToolCallID: "call-1"},
+	}
+
+	got := modelInputMessages(msgs)
+	if got[0].Content != "display user" {
+		t.Fatalf("user content = %q, want display form", got[0].Content)
+	}
+	if got[1].Content != "bounded" {
+		t.Fatalf("tool content = %q, want bounded Content", got[1].Content)
+	}
+	if got[1].RawContent != "" {
+		t.Fatalf("provider-bound RawContent = %q, want empty", got[1].RawContent)
+	}
+	if msgs[1].Content != "bounded" || msgs[1].RawContent != "complete tool result" {
+		t.Fatalf("stored message was mutated: %+v", msgs[1])
+	}
+}
+
+func TestPruneToolResultUsesUnicodeCodePoints(t *testing.T) {
+	head := strings.Repeat("界", toolPruneHeadRunes)
+	middle := strings.Repeat("🧪", toolPruneThresholdRunes-toolPruneHeadRunes-toolPruneTailRunes+1)
+	tail := strings.Repeat("尾", toolPruneTailRunes)
+	original := head + middle + tail
+
+	got, changed := pruneToolResultContent(original)
+	if !changed {
+		t.Fatal("oversized tool result was not pruned")
+	}
+	want := head + toolPruneMarker + tail
+	if got != want {
+		t.Fatalf("pruned content mismatch: got runes=%d want runes=%d", len([]rune(got)), len([]rune(want)))
+	}
+	if _, changed := pruneToolResultContent(strings.Repeat("🧪", toolPruneThresholdRunes)); changed {
+		t.Fatal("tool result at threshold must remain intact")
+	}
+}
+
+// Pruning must allocate for the retained head/marker/tail only. Converting the
+// complete input to []rune makes a large ASCII tool result consume roughly
+// four additional bytes per source byte exactly when maintenance is trying to
+// recover from context pressure.
+func TestPruneToolResultAllocationIsBoundedByRetainedContent(t *testing.T) {
+	const inputBytes = 256 << 10
+	large := strings.Repeat("x", inputBytes)
+	result := testing.Benchmark(func(b *testing.B) {
+		b.ReportAllocs()
+		for range b.N {
+			got, changed := pruneToolResultContent(large)
+			if !changed || len(got) == 0 {
+				b.Fatal("large tool result was not pruned")
+			}
+		}
+	})
+	if got := result.AllocedBytesPerOp(); got > 64<<10 {
+		t.Fatalf("prune allocated %d bytes/op for a %d-byte input; want allocation bounded by retained content", got, inputBytes)
+	}
+}
+
+func TestPrunePreservesToolEnvelopeMetadata(t *testing.T) {
+	exit := 7
+	original := provider.Message{
+		Role: provider.RoleTool, Name: "bash", ToolCallID: "call-7",
+		Content: strings.Repeat("🧪", toolPruneThresholdRunes+1),
+		Images:  []string{"data:image/png;base64,AA=="}, CreatedAt: 77,
+		ToolExecution: &provider.ToolExecution{State: tool.ShellStateFailed, ExitCode: &exit},
+	}
+	sess := &Session{Messages: []provider.Message{
+		{Role: provider.RoleSystem, Content: "sys"},
+		{Role: provider.RoleAssistant, ToolCalls: []provider.ToolCall{{ID: "call-7", Name: "bash", Arguments: `{}`}}},
+		original,
 	}}
-}
-
-func TestSnipUsesRegisteredToolHint(t *testing.T) {
-	// 600 numbered lines; a SnipHinter keeping head=3, tail=2 must yield exactly
-	// those boundary lines, which no default geometry would produce.
-	var lines []string
-	for i := 0; i < 600; i++ {
-		lines = append(lines, fmt.Sprintf("L%d", i))
+	a := New(nil, tool.NewRegistry(), sess, Options{}, event.Discard)
+	a.sess.compactionRunMu.Lock()
+	advanced, err := a.pruneToolResultsToProjectionLocked(CompactionTriggerPressure)
+	a.sess.compactionRunMu.Unlock()
+	if err != nil || !advanced {
+		t.Fatalf("prune advanced=%v err=%v", advanced, err)
 	}
-	content := strings.Join(lines, "\n")
-	sess := snipFixtureFor("custom_reader", content)
-
-	reg := tool.NewRegistry()
-	reg.Add(hintingTool{name: "custom_reader", hint: tool.SnipHint{Head: 3, Tail: 2, HeadChars: 100, TailChars: 100}})
-	a := New(nil, reg, sess, Options{ContextWindow: 1000, RecentKeep: 2, ArchiveDir: t.TempDir()}, event.Discard)
-
-	if st, err := a.SnipStaleToolResults(); err != nil || st.Results != 1 {
-		t.Fatalf("snip st=%+v err=%v, want one result", st, err)
+	got := a.sess.compactionState.Projection.Messages[2]
+	if got.Role != original.Role || got.Name != original.Name || got.ToolCallID != original.ToolCallID || got.CreatedAt != original.CreatedAt {
+		t.Fatalf("tool envelope changed: got=%+v want=%+v", got, original)
 	}
-	got := sess.Snapshot()[3].Content
-	if !strings.Contains(got, "showing first 3 lines and last 2 lines") {
-		t.Fatalf("snip did not honor the tool's SnipHint geometry: %.120q", got)
+	if len(got.Images) != 1 || got.Images[0] != original.Images[0] || got.ToolExecution != original.ToolExecution {
+		t.Fatalf("tool metadata changed: got=%+v want=%+v", got, original)
 	}
-	if !strings.Contains(got, "\nL0\nL1\nL2\n") {
-		t.Errorf("kept head is not the first 3 lines: %.160q", got)
-	}
-	if !strings.Contains(got, "\nL598\nL599") {
-		t.Errorf("kept tail is not the last 2 lines: %.160q", got)
-	}
-}
-
-func TestSnipFallsBackByReadOnlyTier(t *testing.T) {
-	var lines []string
-	for i := 0; i < 600; i++ {
-		lines = append(lines, fmt.Sprintf("L%d", i))
-	}
-	content := strings.Join(lines, "\n")
-
-	// A side-effecting tool with no SnipHint takes the even-split default
-	// (head==tail), while a read-only one keeps a longer head than tail.
-	cases := []struct {
-		name     string
-		readOnly bool
-		evenEnds bool
-	}{
-		{"side_effecting", false, true},
-		{"read_only", true, false},
-	}
-	for _, tc := range cases {
-		sess := snipFixtureFor(tc.name, content)
-		reg := tool.NewRegistry()
-		reg.Add(fakeTool{name: tc.name, readOnly: tc.readOnly})
-		a := New(nil, reg, sess, Options{ContextWindow: 1000, RecentKeep: 2, ArchiveDir: t.TempDir()}, event.Discard)
-
-		if st, err := a.SnipStaleToolResults(); err != nil || st.Results != 1 {
-			t.Fatalf("%s: snip st=%+v err=%v, want one result", tc.name, st, err)
-		}
-		got := sess.Snapshot()[3].Content
-		want := "showing first 40 lines and last 40 lines"
-		if !tc.evenEnds {
-			want = "showing first 80 lines and last 12 lines"
-		}
-		if !strings.Contains(got, want) {
-			t.Errorf("%s: fallback geometry wrong, want %q in: %.120q", tc.name, want, got)
-		}
+	if !strings.Contains(got.Content, toolPruneMarker) {
+		t.Fatalf("tool body was not pruned: runes=%d", len([]rune(got.Content)))
 	}
 }

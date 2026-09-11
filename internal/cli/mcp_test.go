@@ -407,7 +407,7 @@ func TestRenderMCPStatusGroupsAndCompactsResources(t *testing.T) {
 		[]plugin.ServerStatus{{Name: "docs", Transport: "stdio", Tools: 2}},
 		[]plugin.Prompt{{Server: "docs", Name: "mcp__docs__summarize", Description: "Summarize a selected document for review"}},
 		[]plugin.Resource{{Server: "docs", URI: longURI, Name: "Resource manual", MimeType: "text/markdown"}},
-		nil,
+		nil, []plugin.CapabilityView{},
 	)
 	for _, want := range []string{
 		"MCP servers (1)",
@@ -430,14 +430,14 @@ func TestRenderMCPStatusGroupsAndCompactsResources(t *testing.T) {
 
 func TestRenderMCPStatusCapsLongSections(t *testing.T) {
 	var resources []plugin.Resource
-	for i := 0; i < mcpMaxItemsPerSection+2; i++ {
+	for range mcpMaxItemsPerSection + 2 {
 		resources = append(resources, plugin.Resource{Server: "fs", URI: "file:///tmp/resource.md"})
 	}
 	got := renderMCPStatus(80,
 		[]plugin.ServerStatus{{Name: "fs", Transport: "stdio"}},
 		nil,
 		resources,
-		nil,
+		nil, []plugin.CapabilityView{},
 	)
 	if !strings.Contains(got, "+2 more resources") {
 		t.Fatalf("rendered MCP status should cap long resource sections:\n%s", got)
@@ -455,12 +455,79 @@ func TestRenderMCPStatusShowsQuarantinedTools(t *testing.T) {
 		}},
 		nil,
 		nil,
-		nil,
+		nil, []plugin.CapabilityView{},
 	)
 	for _, want := range []string{"1 tool", "1 unavailable tool", "unavailable tools", "generate_yso_bytes", "invalid input schema"} {
 		if !strings.Contains(got, want) {
 			t.Fatalf("rendered MCP status missing %q:\n%s", want, got)
 		}
+	}
+}
+
+func TestRenderMCPStatusShowsConfigSource(t *testing.T) {
+	got := renderMCPStatus(120,
+		[]plugin.ServerStatus{{
+			Name: "docs", Transport: "stdio", ConfigSource: "project_config", Tools: 1,
+			ToolList: []plugin.ToolInfo{{Name: "search", Description: "find docs"}},
+		}},
+		nil, nil, nil, []plugin.CapabilityView{},
+	)
+	for _, want := range []string{"docs", "source=project_config", "tools", "search", "source=project_config"} {
+		if !strings.Contains(got, want) {
+			t.Fatalf("rendered MCP status missing %q:\n%s", want, got)
+		}
+	}
+}
+
+func TestRenderMCPStatusStripsControlSequencesFromExternalText(t *testing.T) {
+	// Malicious MCP description with CSI clear + OSC clipboard poke must not
+	// survive into the TUI payload.
+	evil := "safe\x1b[2J\x1b]52;c;AAAA\x07 payload"
+	got := renderMCPStatus(160,
+		[]plugin.ServerStatus{{
+			Name: "evil\x1b[31m", Transport: "stdio", ConfigSource: "user\x1b[0m",
+			Tools: 1,
+			ToolList: []plugin.ToolInfo{
+				{Name: "ok", Description: evil},
+				{Name: "bad", SchemaError: "schema\x1b[1merr"},
+			},
+		}},
+		[]plugin.Prompt{{Server: "evil", Name: "p", Description: "prompt\x1b[2J"}},
+		[]plugin.Resource{{Server: "evil", URI: "file:///x", Name: "res\x1b]0;x\x07"}},
+		[]plugin.Failure{{Name: "fail", Error: "boom\x1b[2J"}},
+		nil,
+	)
+	for _, ban := range []string{"\x1b", "\x07", "]52;", "[2J", "[31m", "[1m"} {
+		if strings.Contains(got, ban) {
+			t.Fatalf("control sequence %q leaked into MCP status:\n%q", ban, got)
+		}
+	}
+	if !strings.Contains(got, "safe") || !strings.Contains(got, "payload") {
+		t.Fatalf("sanitized description lost content:\n%s", got)
+	}
+	// Invalid tools must not appear under the ordinary tools list.
+	toolsIdx := strings.Index(got, "tools")
+	unavailIdx := strings.Index(got, "unavailable tools")
+	if toolsIdx < 0 || unavailIdx < 0 {
+		t.Fatalf("expected tools and unavailable sections:\n%s", got)
+	}
+	toolsSection := got[toolsIdx:unavailIdx]
+	if strings.Contains(toolsSection, "bad") {
+		t.Fatalf("invalid tool listed under tools:\n%s", toolsSection)
+	}
+	if !strings.Contains(got[unavailIdx:], "bad") {
+		t.Fatalf("invalid tool missing from unavailable:\n%s", got)
+	}
+}
+
+func TestSanitizeExternalDisplayText(t *testing.T) {
+	in := "hello\x1b[2J\x1b]52;c;QQ\x07 world\n\t!"
+	got := sanitizeExternalDisplayText(in)
+	if strings.ContainsAny(got, "\x1b\x07\n\t") {
+		t.Fatalf("controls remain: %q", got)
+	}
+	if got != "hello world !" {
+		t.Fatalf("sanitize = %q", got)
 	}
 }
 
@@ -476,6 +543,7 @@ func TestRenderMCPStatusShowsFailures(t *testing.T) {
 		nil,
 		nil,
 		[]plugin.Failure{{Name: "broken", Transport: "stdio", Error: "npm error ENOENT"}},
+		[]plugin.CapabilityView{},
 	)
 	for _, want := range []string{"MCP servers (0)", "broken", "npm error ENOENT"} {
 		if !strings.Contains(got, want) {
@@ -582,7 +650,7 @@ func TestRenderMCPManagerListCompactsLongNames(t *testing.T) {
 		{Name: "@modelcontextprotocol/server-sequential-thinking", Transport: "stdio", Status: "deferred", Configured: true, Tier: "background"},
 	}}}
 	got := p.renderList(80)
-	for _, line := range strings.Split(got, "\n") {
+	for line := range strings.SplitSeq(got, "\n") {
 		if visibleWidth(line) > 80 {
 			t.Fatalf("line exceeds width 80 (%d): %q\n%s", visibleWidth(line), line, got)
 		}
@@ -724,7 +792,7 @@ func TestRenderMCPManagerDetailCompactsConfigPath(t *testing.T) {
 		},
 	}
 	got := p.renderDetail(80)
-	for _, line := range strings.Split(got, "\n") {
+	for line := range strings.SplitSeq(got, "\n") {
 		if visibleWidth(line) > 80 {
 			t.Fatalf("detail line exceeds width 80 (%d): %q\n%s", visibleWidth(line), line, got)
 		}
@@ -879,11 +947,9 @@ func TestMCPEditConfigLaunchEditorRejectsShellMetachars(t *testing.T) {
 	}
 }
 
-// TestMCPEditConfigLaunchEditorExpandsEnvVar confirms that $VAR references
-// in EDITOR/VISUAL are expanded without going through a shell, preserving
-// the behavior of the prior sh -lc path for users who set values such as
-// EDITOR="$HOME/bin/myeditor" verbatim (rather than relying on the shell
-// to expand at export time).
+// TestMCPEditConfigLaunchEditorExpandsEnvVar confirms $VAR references in
+// EDITOR/VISUAL expand without a shell, preserving the prior sh -lc behavior
+// for EDITOR="$HOME/bin/myeditor" style values.
 func TestMCPEditConfigLaunchEditorExpandsEnvVar(t *testing.T) {
 	t.Setenv("REASONIX_TEST_EDITOR_BIN", "/opt/custom/bin/myed")
 	t.Setenv("VISUAL", "$REASONIX_TEST_EDITOR_BIN --flag")

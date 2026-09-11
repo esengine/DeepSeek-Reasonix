@@ -235,7 +235,7 @@ func TestStoreSaveTitleInIndexAndFrontmatter(t *testing.T) {
 	}); err != nil {
 		t.Fatal(err)
 	}
-	if idx := s.Index(); !strings.Contains(idx, "[Prefers tabs](tabs-rule.md)") {
+	if idx := s.Index(); !strings.Contains(idx, "[Prefers tabs](project/tabs-rule.md)") {
 		t.Fatalf("index link should use the title label:\n%s", idx)
 	}
 	if got := s.List()[0].Title; got != "Prefers tabs" {
@@ -250,7 +250,7 @@ func TestStoreIndexLabelFallsBackToDeKebabbedName(t *testing.T) {
 	if _, err := s.Save(Memory{Name: "likes-go", Description: "d", Type: TypeUser, Body: "b"}); err != nil {
 		t.Fatal(err)
 	}
-	if idx := s.Index(); !strings.Contains(idx, "[likes go](likes-go.md)") {
+	if idx := s.Index(); !strings.Contains(idx, "[likes go](project/likes-go.md)") {
 		t.Fatalf("missing-title label should de-kebab the name:\n%s", idx)
 	}
 }

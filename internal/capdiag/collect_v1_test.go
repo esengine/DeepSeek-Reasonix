@@ -10,10 +10,10 @@ import (
 	"reasonix/internal/pluginpkg"
 )
 
-// TestPluginPackageV1FieldsAreReported pins the Manifest v1 additions to the
+// TestPluginPackageV2FieldsAreReported pins the Manifest v2 additions to the
 // plugins report: prompts/themes counts and the runtime flag, in both the
 // JSON payload and the text renderer.
-func TestPluginPackageV1FieldsAreReported(t *testing.T) {
+func TestPluginPackageV2FieldsAreReported(t *testing.T) {
 	root := t.TempDir()
 	home := t.TempDir()
 	reasonixHome := filepath.Join(home, ".reasonix")
@@ -22,7 +22,7 @@ func TestPluginPackageV1FieldsAreReported(t *testing.T) {
 
 	pluginRoot := filepath.Join(reasonixHome, "plugins", "demo")
 	write(t, filepath.Join(pluginRoot, pluginpkg.NativeManifest), `{
-  "apiVersion": "reasonix.io/plugin/v1",
+  "apiVersion": "reasonix.io/plugin/v2",
   "name": "demo",
   "contributes": {
     "prompts": ["prompts"],
@@ -80,7 +80,7 @@ func TestPluginPackageLegacyOmitsV1Fields(t *testing.T) {
 	t.Setenv("REASONIX_HOME", reasonixHome)
 
 	pluginRoot := filepath.Join(reasonixHome, "plugins", "legacy")
-	write(t, filepath.Join(pluginRoot, pluginpkg.NativeManifest), `{"name":"legacy","skills":["skills"]}`)
+	write(t, filepath.Join(pluginRoot, pluginpkg.NativeManifest), `{"apiVersion":"reasonix.io/plugin/v2","name":"legacy","skills":["skills"]}`)
 	write(t, filepath.Join(pluginRoot, "skills", "s", "SKILL.md"), "---\ndescription: s\n---\nS\n")
 	if err := pluginpkg.Upsert(reasonixHome, pluginpkg.InstalledPlugin{
 		Name: "legacy", Root: "plugins/legacy", ManifestKind: "reasonix", Enabled: true,

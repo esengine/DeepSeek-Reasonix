@@ -4,6 +4,7 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
+	"maps"
 	"sort"
 
 	"reasonix/internal/provider"
@@ -32,6 +33,77 @@ type RuntimeSnapshot struct {
 // (RuntimeSet.CloseIfGeneration) recognize that a snapshot has been
 // superseded.
 func (s *RuntimeSnapshot) Generation() uint64 { return s.generation }
+
+// WithGeneration returns a shallow copy of the snapshot with a new generation.
+// CacheHash and provider-visible fields are preserved byte-for-byte so a
+// no-op rebuild can advance generation without prompt/tool cache churn.
+func (s *RuntimeSnapshot) WithGeneration(gen uint64) *RuntimeSnapshot {
+	if s == nil {
+		return nil
+	}
+	cp := *s
+	cp.generation = gen
+	return &cp
+}
+
+// WithLiveContributions returns a copy with generation advanced and interceptor
+// chain / replacement slots rebuilt from live sidecar contributions. System
+// prompt, tool schemas, and CacheHash stay byte-identical: provider/MCP backend
+// rolls must not churn the provider-visible prefix. Catalog overlay is rebuilt
+// so doctor/UI see the live provider/UI contribution set.
+func (s *RuntimeSnapshot) WithLiveContributions(gen uint64, live []Contribution) *RuntimeSnapshot {
+	if s == nil {
+		return nil
+	}
+	cp := *s
+	cp.generation = gen
+	// Always drop plugin-scoped live kinds, even when live is empty (plugin removed).
+	catalog := NewCatalog()
+	if s.catalog != nil {
+		for _, ct := range s.catalog.All() {
+			switch ct.Kind {
+			case KindInterceptor, KindProvider, KindUIAction, KindStrategy:
+				if ct.Source.Scope == ScopePlugin {
+					continue
+				}
+			}
+			catalog.Add(ct)
+		}
+	}
+	if len(live) > 0 {
+		catalog.Add(live...)
+	}
+
+	chains := map[InterceptorPoint][]Contribution{}
+	for _, ct := range catalog.ByKind(KindInterceptor) {
+		point := InterceptorPoint(ct.ID)
+		chains[point] = append(chains[point], ct)
+	}
+	for point, chain := range chains {
+		chains[point] = SortInterceptors(chain)
+	}
+	// Rebuild replacements: keep non-plugin owners, drop all plugin owners,
+	// then re-apply live strategy claims only.
+	repl := make(map[Slot]ContributionSource)
+	for slot, src := range s.replacements {
+		if src.Scope != ScopePlugin {
+			repl[slot] = src
+		}
+	}
+	for _, ct := range catalog.ByKind(KindStrategy) {
+		if claimer, ok := ct.Payload.(SlotClaimer); ok {
+			for _, slot := range claimer.ReplacementSlots() {
+				repl[slot] = ct.Source
+			}
+		}
+	}
+	catalog.freeze()
+	cp.catalog = catalog
+	cp.interceptorChain = chains
+	cp.replacements = repl
+	// CacheHash intentionally unchanged (system + tools only).
+	return &cp
+}
 
 // Catalog returns the frozen catalog of effective (post-resolution)
 // contributions. The catalog itself is immutable; its accessors return
@@ -64,9 +136,7 @@ func (s *RuntimeSnapshot) InterceptorChain() map[InterceptorPoint][]Contribution
 // Replacements returns the winning owner per replacement slot (a copy).
 func (s *RuntimeSnapshot) Replacements() map[Slot]ContributionSource {
 	out := make(map[Slot]ContributionSource, len(s.replacements))
-	for slot, owner := range s.replacements {
-		out[slot] = owner
-	}
+	maps.Copy(out, s.replacements)
 	return out
 }
 

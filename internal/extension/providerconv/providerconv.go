@@ -1,5 +1,5 @@
 // Package providerconv holds the host-side conversions between
-// internal/provider values and the public Extension Protocol v1 wire DTOs.
+// internal/provider values and the public Extension Protocol v2 wire DTOs.
 // The protocol package deliberately does not import internal/provider, so
 // every host surface that moves provider data across the extension boundary —
 // the agent's intercept wiring (stage 6b2) and the sidecar provider adapter
@@ -179,6 +179,7 @@ func DescriptorFromProtocol(d protocol.ProviderDescriptor) provider.Descriptor {
 		InputPerMillion:                d.InputPerMillion,
 		OutputPerMillion:               d.OutputPerMillion,
 		Vision:                         d.Vision,
+		InputModalities:                stringModalities(d.InputModalities),
 		Tools:                          d.Tools,
 		Reasoning:                      d.Reasoning,
 		Efforts:                        append([]string(nil), d.Efforts...),
@@ -187,6 +188,17 @@ func DescriptorFromProtocol(d protocol.ProviderDescriptor) provider.Descriptor {
 		ReasoningRoundTrip:             d.ReasoningRoundTrip,
 		WarnOnMissingToolCallReasoning: d.WarnOnMissingToolCallReasoning,
 	}
+}
+
+func stringModalities(values []string) []provider.ModelModality {
+	if values == nil {
+		return nil
+	}
+	out := make([]provider.ModelModality, 0, len(values))
+	for _, value := range values {
+		out = append(out, provider.ModelModality(value))
+	}
+	return out
 }
 
 // ChunkFromProtocol converts one inbound extension stream chunk. The protocol

@@ -10,7 +10,7 @@ func TestSanitizeErrTextRedactsSecretsAndPaths(t *testing.T) {
 	ws := t.TempDir()
 	in := "stdio plugin \"x\": command \"npx\" not found on PATH; PATH=\"" + home + "/bin:/usr/bin\" Bearer sk-secret-token " +
 		ws + "/secret.env stderr: Authorization=Bearer abc.def"
-	out := sanitizeErrTextWithPaths(in, ws, home)
+	out := sanitizeErrTextWithPaths(in, ws, home, "")
 	if strings.Contains(out, home) {
 		t.Fatalf("home path leaked: %q", out)
 	}

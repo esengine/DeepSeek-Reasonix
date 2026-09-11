@@ -1,0 +1,4 @@
+prompt = "Write ARCHITECTURE.md explaining how the pipeline package is layered. Name all three modules, state which one depends on which, and name the module that depends on nothing else in the package. Do not change any code."
+class = "read-only-output"
+max_steps = 25
+timeout_sec = 480

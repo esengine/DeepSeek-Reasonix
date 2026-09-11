@@ -20,7 +20,7 @@ import (
 )
 
 var setupSubagentCommand = func(ctx context.Context, modelName string, maxStepsOverride int, requireKey bool, sink event.Sink, workspaceRoot string) (*control.Controller, error) {
-	return setupProfile(ctx, modelName, maxStepsOverride, requireKey, sink, "", workspaceRoot)
+	return setupProfile(ctx, modelName, maxStepsOverride, requireKey, sink, workspaceRoot)
 }
 
 const subagentUsageText = `usage:
@@ -558,7 +558,7 @@ func profileFlagsChanged(values subagentProfileFlags) bool {
 func parseToolList(raw string) []string {
 	seen := map[string]bool{}
 	var tools []string
-	for _, item := range strings.Split(raw, ",") {
+	for item := range strings.SplitSeq(raw, ",") {
 		name := strings.TrimSpace(item)
 		if name == "" || seen[name] {
 			continue

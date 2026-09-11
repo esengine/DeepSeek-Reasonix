@@ -115,6 +115,7 @@ func remoteAddCLI(args []string) int {
 	workspace := fs.String("workspace", "", "default remote workspace directory")
 	useSSHConfig := fs.Bool("use-ssh-config", false, "layer ~/.ssh/config values under unset fields")
 	serveInstall := fs.String("serve-install", "auto", "remote CLI install strategy: auto|npm|upload|never")
+	credentialMode := fs.String("credential-mode", "remote", "where model-call credentials live: remote (on the host) | local-proxy (desktop holds the key; calls tunnel back)")
 	passphraseEnv := fs.String("passphrase-env", "", "env var name holding the key passphrase")
 	passwordEnv := fs.String("password-env", "", "env var name holding the login password")
 	if code, ok := parseCommandFlags(fs, args[2:]); !ok {
@@ -126,17 +127,18 @@ func remoteAddCLI(args []string) int {
 		return 2
 	}
 	entry := config.RemoteHostEntry{
-		Name:          name,
-		Host:          host,
-		Port:          port,
-		User:          user,
-		IdentityFile:  *identity,
-		ProxyJump:     *jump,
-		Workspace:     *workspace,
-		ServeInstall:  *serveInstall,
-		UseSSHConfig:  *useSSHConfig,
-		PassphraseEnv: *passphraseEnv,
-		PasswordEnv:   *passwordEnv,
+		Name:           name,
+		Host:           host,
+		Port:           port,
+		User:           user,
+		IdentityFile:   *identity,
+		ProxyJump:      *jump,
+		Workspace:      *workspace,
+		ServeInstall:   *serveInstall,
+		CredentialMode: *credentialMode,
+		UseSSHConfig:   *useSSHConfig,
+		PassphraseEnv:  *passphraseEnv,
+		PasswordEnv:    *passwordEnv,
 	}
 	if err := config.EditUserConfigWithCredentials(func(c *config.Config) ([]config.CredentialChange, error) {
 		var removalCandidates []string

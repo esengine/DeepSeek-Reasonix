@@ -21,3 +21,39 @@ func TestWireEventTabPreservesSharedRetryingFields(t *testing.T) {
 		}
 	}
 }
+
+func TestWireEventTabPreservesTurnDoneCheckpointZero(t *testing.T) {
+	turn := 0
+	b, err := json.Marshal(toWireTabWithSubmission(event.Event{Kind: event.TurnDone, CheckpointTurn: &turn}, "tab-1", "runtime-1", "submission-1", 0))
+	if err != nil {
+		t.Fatalf("marshal: %v", err)
+	}
+	for _, want := range []string{`"kind":"turn_done"`, `"checkpointTurn":0`, `"tabId":"tab-1"`, `"runtimeEpoch":"runtime-1"`, `"submissionId":"submission-1"`} {
+		if !strings.Contains(string(b), want) {
+			t.Fatalf("tab TurnDone JSON = %s, want it to contain %s", b, want)
+		}
+	}
+}
+
+func TestWireEventTabCarriesAuthoritativeTurnStart(t *testing.T) {
+	const startedAt = int64(1_723_456_789_000)
+	b, err := json.Marshal(toWireTabWithSubmission(event.Event{Kind: event.TurnStarted}, "tab-1", "runtime-1", "submission-1", startedAt))
+	if err != nil {
+		t.Fatalf("marshal: %v", err)
+	}
+	for _, want := range []string{`"kind":"turn_started"`, `"turnStartedAt":1723456789000`, `"tabId":"tab-1"`, `"submissionId":"submission-1"`} {
+		if !strings.Contains(string(b), want) {
+			t.Fatalf("tab TurnStarted JSON = %s, want it to contain %s", b, want)
+		}
+	}
+}
+
+func TestWireEventTabCarriesSessionGeneration(t *testing.T) {
+	b, err := json.Marshal(toWireTabWithSubmission(event.Event{Kind: event.TurnDone}, "tab-1", "runtime-1", "", 0, 7))
+	if err != nil {
+		t.Fatalf("marshal: %v", err)
+	}
+	if !strings.Contains(string(b), `"sessionGeneration":7`) {
+		t.Fatalf("tab event JSON = %s, want session generation", b)
+	}
+}

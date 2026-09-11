@@ -1,17 +1,53 @@
 package cli
 
 import (
+	"context"
 	"encoding/json"
 	"flag"
 	"fmt"
 	"os"
 	"strings"
 
+	"reasonix/internal/agent"
+	"reasonix/internal/config"
 	"reasonix/internal/doctor"
 	"reasonix/internal/repair"
+	"reasonix/internal/sessioncatalog"
 )
 
+func doctorBillingCommand(args []string) int {
+	fs := flag.NewFlagSet("doctor billing", flag.ContinueOnError)
+	jsonOut := fs.Bool("json", false, "print billing diagnostics as JSON")
+	root := fs.String("root", ".", "project root for config resolution")
+	if code, ok := parseCommandFlags(fs, args); !ok {
+		return code
+	}
+	cfg, err := config.LoadForRoot(*root)
+	if err != nil {
+		// Still report with defaults so doctor stays useful offline.
+		cfg = config.Default()
+	}
+	report := doctor.CollectBilling(cfg)
+	if *jsonOut {
+		enc := json.NewEncoder(os.Stdout)
+		enc.SetIndent("", "  ")
+		if err := enc.Encode(report); err != nil {
+			fmt.Fprintln(os.Stderr, err)
+			return 1
+		}
+		return 0
+	}
+	fmt.Print(doctor.RenderBillingText(report))
+	return 0
+}
+
 func doctorCommand(args []string, version string) int {
+	if len(args) > 0 && args[0] == "catalogs" {
+		return doctorCatalogsCommand(args[1:])
+	}
+	if len(args) > 0 && args[0] == "sessions" {
+		return doctorSessionsCommand(args[1:])
+	}
 	if len(args) > 0 && args[0] == "quality" {
 		return doctorQualityCommand(args[1:], version)
 	}
@@ -23,6 +59,12 @@ func doctorCommand(args []string, version string) int {
 	}
 	if len(args) > 0 && args[0] == "capabilities" {
 		return doctorCapabilitiesCommand(args[1:])
+	}
+	if len(args) > 0 && args[0] == "runtime" {
+		return doctorRuntimeCommand(args[1:])
+	}
+	if len(args) > 0 && args[0] == "billing" {
+		return doctorBillingCommand(args[1:])
 	}
 	if len(args) > 0 && args[0] == "repair" {
 		return doctorRepairCommand(args[1:])
@@ -44,6 +86,54 @@ func doctorCommand(args []string, version string) int {
 		return 0
 	}
 	fmt.Print(doctor.RenderText(report))
+	return 0
+}
+
+func doctorSessionsCommand(args []string) int {
+	fs := flag.NewFlagSet("doctor sessions", flag.ContinueOnError)
+	jsonOut := fs.Bool("json", false, "print session catalog diagnostics as JSON")
+	if code, ok := parseCommandFlags(fs, args); !ok {
+		return code
+	}
+	if fs.NArg() != 0 {
+		fmt.Fprintln(os.Stderr, "usage: reasonix doctor sessions [--json]")
+		return 2
+	}
+	status, err := sessioncatalog.Inspect(context.Background(), sessioncatalog.DefaultPath())
+	if err != nil {
+		fmt.Fprintln(os.Stderr, "error:", err)
+		return 1
+	}
+	if *jsonOut {
+		enc := json.NewEncoder(os.Stdout)
+		enc.SetIndent("", "  ")
+		if err := enc.Encode(status); err != nil {
+			fmt.Fprintln(os.Stderr, err)
+			return 1
+		}
+		return 0
+	}
+	fmt.Println("Reasonix session catalog")
+	fmt.Printf("  state: %s\n", status.State)
+	fmt.Printf("  mode: %s\n", status.Mode)
+	fmt.Printf("  revision: %d\n", status.Revision)
+	fmt.Printf("  indexed: %d\n", status.Indexed)
+	fmt.Printf("  physical sessions: %d\n", status.PhysicalSessions)
+	fmt.Printf("  logical sessions: %d\n", status.LogicalSessions)
+	fmt.Printf("  repair pending: %d\n", status.RepairPending)
+	fmt.Printf("  repair: %d active, %d deferred, %d blocked\n",
+		status.RepairActive, status.RepairDeferred, status.RepairBlocked)
+	if len(status.RepairErrorKinds) > 0 {
+		fmt.Printf("  repair error kinds: %v\n", status.RepairErrorKinds)
+	}
+	if status.LastRepairDurationMS > 0 {
+		fmt.Printf("  last repair wave: %dms\n", status.LastRepairDurationMS)
+	}
+	fmt.Printf("  recovery: %d groups, %d branches, %d diverged, %d safe cleanup\n",
+		status.RecoveryGroups, status.RecoveryBranches, status.RecoveryDiverged, status.CleanupEligible)
+	if status.LastError != "" {
+		fmt.Printf("  note: %s\n", status.LastError)
+	}
 	return 0
 }
 
@@ -208,16 +298,26 @@ func doctorRedactSessionsCommand(args []string) int {
 func doctorSessionCommand(args []string, version string) int {
 	ref := ""
 	outPath := ""
+	exportPath := ""
 	for i := 0; i < len(args); i++ {
 		arg := args[i]
 		switch arg {
 		case "-h", "--help":
-			fmt.Fprintln(os.Stdout, "usage: reasonix doctor session <branch-id-or-path> [--zip] [--out PATH]")
+			fmt.Fprintln(os.Stdout, "usage: reasonix doctor session <branch-id-or-path> [--zip] [--out PATH] [--export-v1 PATH.jsonl]")
 			fmt.Fprintln(os.Stdout, "")
 			fmt.Fprintln(os.Stdout, "Bundles the session transcript, persistence sidecars, conflict diagnostics,")
 			fmt.Fprintln(os.Stdout, "and the recovery parent chain into a zip for support. Unlike `reasonix doctor`,")
 			fmt.Fprintln(os.Stdout, "bundled transcripts are NOT redacted; share only with a trusted support channel.")
+			fmt.Fprintln(os.Stdout, "--export-v1 instead writes the session's current version as a schema-1 session")
+			fmt.Fprintln(os.Stdout, "that releases before v1.39.0 can open.")
 			return 0
+		case "--export-v1":
+			i++
+			if i >= len(args) {
+				fmt.Fprintln(os.Stderr, "error: --export-v1 requires a destination .jsonl path")
+				return 2
+			}
+			exportPath = args[i]
 		case "--zip":
 			// The subcommand currently writes a zip by default. Keep --zip as an
 			// explicit, script-friendly marker so support replies can say exactly
@@ -250,8 +350,21 @@ func doctorSessionCommand(args []string, version string) int {
 		}
 	}
 	if ref == "" {
-		fmt.Fprintln(os.Stderr, "usage: reasonix doctor session <branch-id-or-path> [--zip] [--out PATH]")
+		fmt.Fprintln(os.Stderr, "usage: reasonix doctor session <branch-id-or-path> [--zip] [--out PATH] [--export-v1 PATH.jsonl]")
 		return 2
+	}
+	if exportPath != "" {
+		src, err := doctor.ResolveSessionRef(ref)
+		if err != nil {
+			fmt.Fprintln(os.Stderr, "error:", err)
+			return 1
+		}
+		if err := agent.ExportSessionSchemaOne(src, exportPath); err != nil {
+			fmt.Fprintln(os.Stderr, "error:", err)
+			return 1
+		}
+		fmt.Println(exportPath)
+		return 0
 	}
 	result, err := doctor.WriteSessionBundle(doctor.SessionBundleOptions{
 		Version:    version,

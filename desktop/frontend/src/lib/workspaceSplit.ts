@@ -112,6 +112,7 @@ export function workspaceSplitTreeWidthFromPointer({
   railWidth = 0,
   treeMinWidth,
   previewMinWidth,
+  treeOnRight = false,
 }: {
   clientX: number;
   panelLeft: number;
@@ -119,7 +120,19 @@ export function workspaceSplitTreeWidthFromPointer({
   railWidth?: number;
   treeMinWidth: number;
   previewMinWidth: number;
+  treeOnRight?: boolean;
 }): number {
+  if (treeOnRight && typeof panelWidth === "number") {
+    // Tree width is the distance from the pointer to the panel's right edge.
+    // The rail still occupies its own column on the opposite side.
+    return clampWorkspaceSplitTreeWidth({
+      width: panelLeft + panelWidth - clientX,
+      panelWidth,
+      railWidth,
+      treeMinWidth,
+      previewMinWidth,
+    });
+  }
   return clampWorkspaceSplitTreeWidth({
     width: clientX - panelLeft - railWidth,
     panelWidth,

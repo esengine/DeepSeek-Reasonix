@@ -132,14 +132,14 @@ func TestInboundHandlerConcurrencyIsBoundedWithoutBlockingResponses(t *testing.T
 	})
 	done := make(chan error, 1)
 	go func() { done <- conn.Serve(context.Background()) }()
-	for i := 0; i < 2; i++ {
+	for range 2 {
 		select {
 		case <-started:
 		case <-time.After(time.Second):
 			t.Fatal("bounded handlers did not start")
 		}
 	}
-	for i := 0; i < 3; i++ {
+	for range 3 {
 		select {
 		case <-out.busy:
 		case <-time.After(time.Second):
@@ -169,7 +169,7 @@ func TestInboundHandlerConcurrencyIsBoundedWithoutBlockingResponses(t *testing.T
 func TestQueuedNotificationsPreserveBurstOrder(t *testing.T) {
 	const count = 500
 	var input strings.Builder
-	for i := 0; i < count; i++ {
+	for i := range count {
 		fmt.Fprintf(&input, "{\"jsonrpc\":\"2.0\",\"method\":\"note\",\"params\":{\"index\":%d}}\n", i)
 	}
 	conn := NewConn(strings.NewReader(input.String()), io.Discard, Options{
@@ -201,7 +201,7 @@ func TestQueuedNotificationsPreserveBurstOrder(t *testing.T) {
 
 func TestQueuedNotificationOverflowFailsConnection(t *testing.T) {
 	var input strings.Builder
-	for i := 0; i < 100; i++ {
+	for i := range 100 {
 		fmt.Fprintf(&input, "{\"jsonrpc\":\"2.0\",\"method\":\"note\",\"params\":{\"index\":%d}}\n", i)
 	}
 	conn := NewConn(strings.NewReader(input.String()), io.Discard, Options{
@@ -360,7 +360,7 @@ func TestConcurrentWritesDoNotInterleaveFrames(t *testing.T) {
 	conn := NewConn(strings.NewReader(""), w, Options{})
 	var wg sync.WaitGroup
 	errs := make(chan error, count)
-	for i := 0; i < count; i++ {
+	for i := range count {
 		wg.Add(1)
 		go func(i int) {
 			defer wg.Done()

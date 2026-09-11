@@ -230,6 +230,20 @@ func TestSessionManagerRunIfIdleSerializesNewAdmission(t *testing.T) {
 	}
 }
 
+func TestSessionManagerTryAcquireIdleNeverQueuesDuplicate(t *testing.T) {
+	sm := NewSessionManager(time.Second)
+	key := "durable-session"
+	if !sm.TryAcquireIdle(key) {
+		t.Fatal("first idle acquisition failed")
+	}
+	if sm.TryAcquireIdle(key) {
+		t.Fatal("second idle acquisition unexpectedly succeeded")
+	}
+	if next := sm.Release(key); next != nil {
+		t.Fatalf("failed durable acquisition created an in-memory duplicate: %+v", next)
+	}
+}
+
 func TestHashID(t *testing.T) {
 	h1 := hashID("user_12345")
 	h2 := hashID("user_12345")

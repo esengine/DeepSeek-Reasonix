@@ -29,10 +29,47 @@ type pathBoundCapabilityProxy struct {
 	resolver tool.CallResolver
 }
 
+func (p pathBoundCapabilityProxy) bindToolResultSession(session func() *Session) {
+	if binder, ok := p.inner.(toolResultSessionBinder); ok {
+		binder.bindToolResultSession(session)
+	}
+}
+
+func (p pathBoundCapabilityProxy) bindReadStrategyState(state func() *incompleteReadState) {
+	if binder, ok := p.inner.(readStrategyStateBinder); ok {
+		binder.bindReadStrategyState(state)
+	}
+}
+
+func (p pathBoundCapabilityProxy) bindMCPListObserver(observer func(mcpListObservation)) {
+	if binder, ok := p.inner.(mcpListObserverBinder); ok {
+		binder.bindMCPListObserver(observer)
+	}
+}
+
+func (p pathBoundCapabilityProxy) activateMCPListObserver() func() {
+	if activator, ok := p.inner.(mcpListObserverActivator); ok {
+		return activator.activateMCPListObserver()
+	}
+	return func() {}
+}
+
 func (p pathBoundCapabilityProxy) Name() string            { return p.inner.Name() }
 func (p pathBoundCapabilityProxy) Description() string     { return p.inner.Description() }
 func (p pathBoundCapabilityProxy) Schema() json.RawMessage { return p.inner.Schema() }
 func (p pathBoundCapabilityProxy) ReadOnly() bool          { return p.inner.ReadOnly() }
+
+func (p pathBoundCapabilityProxy) ClassifyCall(args json.RawMessage) tool.CallClass {
+	classifier, ok := p.inner.(tool.BatchClassifier)
+	if !ok {
+		return tool.CallClass{}
+	}
+	class := classifier.ClassifyCall(args)
+	if class.Known && (!class.ReadOnly || !class.ParallelSafe) {
+		return tool.CallClass{}
+	}
+	return class
+}
 
 func (p pathBoundCapabilityProxy) ResolveCall(ctx context.Context, args json.RawMessage) (tool.ResolvedCall, error) {
 	resolved, err := p.resolver.ResolveCall(ctx, args)
@@ -76,6 +113,37 @@ func (w pathBoundWriter) PlanModeSafe() bool {
 		return p.PlanModeSafe()
 	}
 	return false
+}
+
+func (w pathBoundWriter) DeclareWriteAccess(args json.RawMessage) (tool.WriteAccessDeclaration, error) {
+	if d, ok := w.inner.(tool.WriteAccessDeclarer); ok {
+		return d.DeclareWriteAccess(args)
+	}
+	return tool.WriteAccessDeclaration{}, nil
+}
+
+func (w pathBoundWriter) DeclareEvidenceTarget(ctx context.Context, args json.RawMessage) (tool.EvidenceTargetInfo, error) {
+	paths, err := extractWritePathsFromArgs(w.inner.Name(), w.workDir, args)
+	if err != nil {
+		return tool.EvidenceTargetInfo{}, err
+	}
+	for _, path := range paths {
+		if !w.claims.AllowsPath(path) {
+			return tool.EvidenceTargetInfo{}, fmt.Errorf("write target is outside declared write_paths")
+		}
+	}
+	if declarer, ok := w.inner.(tool.EvidenceDeclarer); ok {
+		return declarer.DeclareEvidenceTarget(ctx, args)
+	}
+	return tool.EvidenceTargetInfo{}, fmt.Errorf("writer does not declare evidence")
+}
+
+func (w pathBoundWriter) ResolveAnchoredTextTarget(ctx context.Context, args json.RawMessage) (tool.AnchoredTextTargetInfo, error) {
+	resolver, ok := w.inner.(tool.AnchoredTextTarget)
+	if !ok {
+		return tool.AnchoredTextTargetInfo{}, fmt.Errorf("tool %q does not expose an anchored target", w.inner.Name())
+	}
+	return resolver.ResolveAnchoredTextTarget(ctx, args)
 }
 
 func (w pathBoundWriter) Execute(ctx context.Context, args json.RawMessage) (string, error) {

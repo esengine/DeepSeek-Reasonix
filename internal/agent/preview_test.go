@@ -183,3 +183,58 @@ func mcContract(t *testing.T, sourceEvent string) string {
 	}
 	return "<memory-compiler-execution>\n" + string(body) + "\n</memory-compiler-execution>"
 }
+
+func TestIsHostRecoveryGuidance(t *testing.T) {
+	cases := []struct {
+		name string
+		in   string
+		want bool
+	}{
+		{name: "tool failed", in: HostRecoveryGuidanceToolFailedPrefix + ", continue unrelated work automatically.", want: true},
+		{name: "transient", in: HostRecoveryGuidanceTransientPrefix + " Inspect its current state.", want: true},
+		{name: "steer notice prefix", in: "↪ " + HostRecoveryGuidanceToolFailedPrefix + ", continue.", want: true},
+		{name: "user quoting failure", in: "A tool failed yesterday, please retry the install.", want: false},
+		{name: "user steer", in: "改用 Pillow 10 验证", want: false},
+	}
+	for _, tc := range cases {
+		if got := IsHostRecoveryGuidance(tc.in); got != tc.want {
+			t.Errorf("%s: IsHostRecoveryGuidance(%q) = %v, want %v", tc.name, tc.in, got, tc.want)
+		}
+	}
+	if text, ok := VisibleSteerText(MidTurnSteerPrefix + "\n改用 Pillow 10 验证"); !ok || text != "改用 Pillow 10 验证" {
+		t.Fatalf("VisibleSteerText user steer = %q %v", text, ok)
+	}
+	if text, ok := VisibleSteerText(MidTurnSteerPrefix + "\n" + HostRecoveryGuidanceToolFailedPrefix + ", continue."); ok {
+		t.Fatalf("VisibleSteerText host recovery = %q, want hidden", text)
+	}
+}
+
+func TestMessageOriginIsAuthoritativeWithLegacyFallback(t *testing.T) {
+	hostText := CompletionValidationContinuationPrefix + " the last message did not deliver a self-contained final result."
+	for _, tc := range []struct {
+		name string
+		msg  provider.Message
+		want bool
+	}{
+		{name: "new host without keyword", msg: provider.Message{Role: provider.RoleUser, Origin: provider.MessageOriginHost, Content: "continue normally", RawContent: "user-looking raw text"}, want: true},
+		{name: "new user quoting host text", msg: provider.Message{Role: provider.RoleUser, Origin: provider.MessageOriginUser, Content: hostText}, want: false},
+		{name: "legacy host text", msg: provider.Message{Role: provider.RoleUser, Content: hostText}, want: true},
+		{name: "legacy ordinary user", msg: provider.Message{Role: provider.RoleUser, Content: "continue normally"}, want: false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := IsHostGeneratedUserMessage(tc.msg); got != tc.want {
+				t.Fatalf("IsHostGeneratedUserMessage(%+v) = %v, want %v", tc.msg, got, tc.want)
+			}
+		})
+	}
+}
+
+func TestRawSteerRemainsGuidanceNotAUserTurn(t *testing.T) {
+	msg := provider.Message{
+		Role: provider.RoleUser, Origin: provider.MessageOriginUser,
+		Content: midTurnSteerMessage("use the smaller patch"), RawContent: "use the smaller patch",
+	}
+	if IsUserAuthoredTurnMessage(msg) {
+		t.Fatal("a real steer with RawContent must not start a new user turn")
+	}
+}

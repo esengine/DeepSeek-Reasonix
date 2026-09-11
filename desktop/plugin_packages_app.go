@@ -213,6 +213,7 @@ func (a *App) InstallPlugin(source string, opts PluginInstallOptions) (string, e
 	if err != nil {
 		return "", err
 	}
+	a.bumpExtensionGeneration()
 	a.invalidateSkillRootsCache()
 	if rebuildErr := a.rebuild(); rebuildErr != nil {
 		if _, ok := a.deferredRebuildWarning("plugins", rebuildErr); ok {
@@ -255,6 +256,7 @@ func (a *App) RemovePlugin(name string) error {
 	if _, err := tl.Execute(context.Background(), raw); err != nil {
 		return err
 	}
+	a.bumpExtensionGeneration()
 	a.invalidateSkillRootsCache()
 	if tab == nil || a.ctx == nil {
 		return nil
@@ -275,6 +277,7 @@ func (a *App) SetPluginEnabled(name string, enabled bool) error {
 	if err := pluginpkg.SetEnabled(config.ReasonixHomeDir(), strings.TrimSpace(name), enabled); err != nil {
 		return err
 	}
+	a.bumpExtensionGeneration()
 	a.invalidateSkillRootsCache()
 	if err := a.rebuild(); err != nil {
 		if _, ok := a.deferredRebuildWarning("plugins", err); ok {

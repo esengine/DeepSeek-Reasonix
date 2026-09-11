@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"testing"
+	"time"
 
 	"reasonix/internal/provider"
 )
@@ -42,14 +43,39 @@ func TestMockProviderStreamStopsOnContextCancellation(t *testing.T) {
 		t.Fatalf("first chunk text = %q, want first", got)
 	}
 	cancel()
-	chunk, ok := <-ch
-	if !ok {
-		t.Fatal("stream closed without returning cancellation error")
+
+	// Cancellation can race a send that is already committed: at most one
+	// data chunk may arrive after the cancel. The stream must then deliver a
+	// cancellation error and close.
+	inFlight := 0
+	for {
+		var chunk provider.Chunk
+		var ok bool
+		select {
+		case chunk, ok = <-ch:
+		case <-time.After(5 * time.Second):
+			t.Fatal("stream did not terminate after cancellation")
+		}
+		if !ok {
+			t.Fatal("stream closed without returning cancellation error")
+		}
+		if chunk.Type == provider.ChunkError {
+			if !errors.Is(chunk.Err, context.Canceled) {
+				t.Fatalf("cancellation error = %v, want context.Canceled", chunk.Err)
+			}
+			break
+		}
+		inFlight++
+		if inFlight > 1 {
+			t.Fatalf("stream kept sending data after cancellation (%d chunks)", inFlight)
+		}
 	}
-	if chunk.Type != provider.ChunkError || !errors.Is(chunk.Err, context.Canceled) {
-		t.Fatalf("chunk after cancellation = %#v, want context.Canceled error", chunk)
-	}
-	if _, ok := <-ch; ok {
-		t.Fatal("stream stayed open after cancellation error")
+	select {
+	case _, ok := <-ch:
+		if ok {
+			t.Fatal("stream stayed open after cancellation error")
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("stream did not close after the cancellation error")
 	}
 }

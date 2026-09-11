@@ -6,8 +6,12 @@ updates:
       interval: "weekly"
     open-pull-requests-limit: 5
     groups:
+      pi-catalog:
+        patterns: ["github.com/sky-valley/pi"]
+        update-types: ["minor", "patch"]
       go:
         patterns: ["*"]
+        exclude-patterns: ["github.com/sky-valley/pi"]
         update-types: ["minor", "patch"]
 
   - package-ecosystem: "gomod"

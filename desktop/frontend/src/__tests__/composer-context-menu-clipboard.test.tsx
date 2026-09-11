@@ -13,7 +13,8 @@ import { createRoot } from "react-dom/client";
 import { Composer } from "../components/Composer";
 import { LocaleProvider } from "../lib/i18n";
 import { ToastProvider } from "../lib/toast";
-import type { CollaborationMode, TokenMode, ToolApprovalMode } from "../lib/types";
+import type { CollaborationMode, ToolApprovalMode } from "../lib/types";
+import { installDesktopHostStub } from "./desktopHostStub";
 
 let passed = 0;
 let failed = 0;
@@ -87,17 +88,17 @@ function installDom() {
 }
 
 function installBridgeApp(methods: Record<string, unknown>) {
-  (window as unknown as { go: { main: { App: Record<string, unknown> } } }).go = {
-    go: undefined,
-    main: {
-      App: {
-        Commands: async () => [],
-        Models: async () => [],
-        ModelsForTab: async () => [],
-        ...methods,
-      },
+  installDesktopHostStub(
+    {
+      Commands: async () => [],
+      Models: async () => [],
+      ModelsForTab: async () => [],
+      ...methods,
     },
-  } as never;
+    // The native clipboard write reports failure so the composer falls through
+    // to the execCommand ladder exactly like a denied webview clipboard.
+    { clipboardWriteResult: () => false },
+  );
 }
 
 async function renderComposer(props: Partial<Parameters<typeof Composer>[0]> = {}) {
@@ -108,7 +109,7 @@ async function renderComposer(props: Partial<Parameters<typeof Composer>[0]> = {
     running: false,
     collaborationMode: "normal",
     toolApprovalMode: "ask" as ToolApprovalMode,
-    tokenMode: "full" as TokenMode,
+
     goal: "",
     cwd: "/repo",
     modelLabel: "DeepSeek-R1",
@@ -116,7 +117,7 @@ async function renderComposer(props: Partial<Parameters<typeof Composer>[0]> = {
     tabId: "context-menu-tab",
     sessionKey: "session:project:/repo:topic-a:session-a",
     onSend: () => {},
-    onCancel: () => undefined,
+    onCancel: async () => ({ discardedItemIds: [] }),
     onCycleMode: () => {},
     onSetMode: () => {},
     onSetCollaborationMode: (_mode: CollaborationMode) => {},
@@ -125,7 +126,7 @@ async function renderComposer(props: Partial<Parameters<typeof Composer>[0]> = {
     onClearGoal: () => {},
     onSwitchModel: () => {},
     onSetEffort: () => {},
-    onSetTokenMode: () => {},
+
     ready: true,
     ...props,
   };

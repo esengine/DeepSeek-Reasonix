@@ -87,6 +87,49 @@ func TestShutdownWaitsForRuntimeLifecycleMutation(t *testing.T) {
 	}
 }
 
+func TestShutdownDoesNotWaitForCancelledControllerBuild(t *testing.T) {
+	isolateDesktopUserDirs(t)
+	app := NewApp()
+	tab := app.createTabEntryWithID("global", "", "", "blocked-build")
+	app.mu.Lock()
+	app.tabs[tab.ID] = tab
+	app.tabOrder = []string{tab.ID}
+	app.activeTabID = tab.ID
+	app.mu.Unlock()
+
+	started := make(chan struct{})
+	release := make(chan struct{})
+	app.tabBuildStartHook = func(string) {
+		close(started)
+		<-release
+	}
+	buildDone := make(chan struct{})
+	go func() {
+		app.startTabControllerBuild(tab)
+		close(buildDone)
+	}()
+	<-started
+
+	shutdownDone := make(chan struct{})
+	go func() {
+		app.shutdown(context.Background())
+		close(shutdownDone)
+	}()
+	select {
+	case <-shutdownDone:
+		close(release)
+	case <-time.After(750 * time.Millisecond):
+		close(release)
+		<-shutdownDone
+		t.Fatal("shutdown waited for a cancelled controller build")
+	}
+	select {
+	case <-buildDone:
+	case <-time.After(5 * time.Second):
+		t.Fatal("cancelled controller build did not finish")
+	}
+}
+
 // TestShutdownRecordsLKGOnlyAfterReady pins that last-known-good config is only
 // written after the window reached domReady. A quit before paint must not
 // rewrite the LKG snapshot from an incomplete boot.
@@ -136,6 +179,29 @@ func TestCaptureAndCommitPendingUpdateHealthUsesExactStartupIdentity(t *testing.
 	}
 	if !called {
 		t.Fatal("exact startup transaction was not committed")
+	}
+}
+
+func TestCapturePendingUpdateHealthAcceptsVersionPrefixMismatch(t *testing.T) {
+	originalRead := readPendingUpdateForHealth
+	originalVersion := version
+	t.Cleanup(func() {
+		readPendingUpdateForHealth = originalRead
+		version = originalVersion
+	})
+	version = "1.21.0"
+	readPendingUpdateForHealth = func() (*repair.UpdateTransaction, error) {
+		return &repair.UpdateTransaction{
+			ToVersion:  "v1.21.0",
+			CreatedAt:  "2026-08-07T00:00:00Z",
+			TargetKind: "file",
+		}, nil
+	}
+	app := &App{}
+	capturePendingUpdateHealthIdentity(app)
+	if app.healthyUpdateCreatedAt == "" || app.healthyUpdateTransactionID == "" {
+		t.Fatalf("expected health identity for v-prefix mismatch, got createdAt=%q id=%q",
+			app.healthyUpdateCreatedAt, app.healthyUpdateTransactionID)
 	}
 }
 

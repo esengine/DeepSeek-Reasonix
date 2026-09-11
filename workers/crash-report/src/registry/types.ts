@@ -56,6 +56,7 @@ export interface PackageDTO {
 }
 
 export interface VersionRow {
+  id: number;
   version: string;
   source: string;
   content_hash: string;

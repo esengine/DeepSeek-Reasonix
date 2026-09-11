@@ -1,6 +1,15 @@
-import type { MouseEvent as ReactMouseEvent, ReactNode } from "react";
-import { ExternalLink, Mail } from "lucide-react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import type { KeyboardEvent as ReactKeyboardEvent, MouseEvent as ReactMouseEvent, ReactNode } from "react";
+import { Copy, ExternalLink, FolderOpen, Hash, Mail, Save } from "lucide-react";
 import { app, openExternal } from "../lib/bridge";
+import { writeClipboardText } from "../lib/clipboard";
+import { t } from "../lib/i18n";
+import { localPathFromHref } from "../lib/localFileUrl";
+import type { ExternalOpenerView, ExternalOpenersView } from "../lib/types";
+import { useToast } from "../lib/toast";
+import { ContextMenu, contextMenuPointFromEvent, type ContextMenuItem, type ContextMenuPoint } from "./ContextMenu";
+
+export { localPathFromHref } from "../lib/localFileUrl";
 
 export interface GitHubLinkInfo {
   kind: "issue" | "pull" | "commit";
@@ -112,15 +121,202 @@ function openLink(href: string | undefined) {
   if (href) openExternal(href);
 }
 
-// localPathFromHref returns the decoded local filesystem path when href is a
-// file:/// URL (the form remarkLocalPathLinks emits), or null otherwise.
-export function localPathFromHref(href?: string): string | null {
-  if (!href || !href.startsWith("file:///")) return null;
-  try {
-    return decodeURIComponent(href.slice("file:///".length));
-  } catch {
-    return null;
+function localPathErrorText(error: unknown): string {
+  return error instanceof Error ? error.message : String(error);
+}
+
+// Menu actions transform information the link already carries (open, copy,
+// derive a compact reference); no network or async work is introduced here.
+function richLinkMenuItems(
+  href: string,
+  github: GitHubLinkInfo | null,
+  closeMenu: () => void,
+  copyText: (text: string) => void,
+): ContextMenuItem[] {
+  const isMail = classifyLinkIcon(href) === "mail";
+  let copyTarget = href;
+  if (isMail) {
+    const address = new URL(href).pathname;
+    try {
+      copyTarget = decodeURIComponent(address);
+    } catch {
+      // Keep malformed escapes readable without breaking the menu.
+      copyTarget = address;
+    }
   }
+  const reference = github === null
+    ? null
+    : github.kind === "commit"
+      ? `${github.owner}/${github.repo}@${github.compactLabel}`
+      : `${github.owner}/${github.repo}#${github.value}`;
+  return [
+    {
+      key: "open",
+      icon: <ExternalLink size={13} />,
+      label: isMail ? t("richLink.composeEmail") : t("richLink.openInBrowser"),
+      onSelect: () => {
+        closeMenu();
+        openExternal(href);
+      },
+    },
+    { type: "separator", key: "open-separator" },
+    {
+      key: "copy-link",
+      icon: <Copy size={13} />,
+      label: isMail ? t("richLink.copyEmail") : t("richLink.copyLink"),
+      onSelect: () => copyText(copyTarget),
+    },
+    ...(reference !== null
+      ? [{
+          key: "copy-reference",
+          icon: <Hash size={13} />,
+          label: t("richLink.copyReference"),
+          onSelect: () => copyText(reference),
+        }]
+      : []),
+  ];
+}
+
+function LocalPathMarkdownLink({
+  href,
+  path,
+  children,
+}: {
+  href: string;
+  path: string;
+  children: ReactNode;
+}) {
+  const { showToast } = useToast();
+  const [menuPoint, setMenuPoint] = useState<ContextMenuPoint | null>(null);
+  const [openers, setOpeners] = useState<ExternalOpenersView>({ openers: [], preferred: "" });
+
+  const closeMenu = useCallback(() => setMenuPoint(null), []);
+  const openerRequestRef = useRef(0);
+  const mountedRef = useRef(true);
+  const refreshOpeners = useCallback(() => {
+    const request = ++openerRequestRef.current;
+    void app.ExternalOpeners().then((next) => {
+      if (!mountedRef.current || request !== openerRequestRef.current) return;
+      setOpeners({
+        openers: Array.isArray(next.openers) ? next.openers : [],
+        preferred: next.preferred ?? "",
+      });
+    }).catch(() => {});
+  }, []);
+
+  useEffect(() => {
+    // React StrictMode replays mount effects in development. Reset the guard
+    // during every setup so the replayed mount can still accept discoveries.
+    mountedRef.current = true;
+    return () => {
+      mountedRef.current = false;
+      openerRequestRef.current += 1;
+    };
+  }, []);
+
+  const openWith = useCallback((opener: ExternalOpenerView) => {
+    closeMenu();
+    void app.OpenLocalPathInExternalOpener(path, opener.id).catch((error) => {
+      showToast(t("externalOpener.failed", { name: opener.name, error: localPathErrorText(error) }), "error");
+    });
+  }, [closeMenu, path, showToast]);
+
+  const menuItems = useMemo<ContextMenuItem[]>(() => {
+    const openerItems = openers.openers.filter((opener) => opener.kind !== "file-manager").map((opener) => ({
+      key: `open-with-${opener.id}`,
+      label: t("externalOpener.openIn", { name: opener.name }),
+      onSelect: () => openWith(opener),
+    }));
+    return [
+      {
+        key: "open-default",
+        icon: <ExternalLink size={13} />,
+        label: t("externalOpener.openDefault"),
+        onSelect: () => {
+          closeMenu();
+          openLink(href);
+        },
+      },
+      ...(openerItems.length > 0
+        ? [{ type: "separator" as const, key: "open-with-separator" }, ...openerItems]
+        : []),
+      { type: "separator" as const, key: "path-separator" },
+      {
+        key: "reveal",
+        icon: <FolderOpen size={13} />,
+        label: t("externalOpener.reveal"),
+        onSelect: () => {
+          closeMenu();
+          void app.RevealPath(path).catch((error) => {
+            showToast(t("externalOpener.failed", { name: t("externalOpener.reveal"), error: localPathErrorText(error) }), "error");
+          });
+        },
+      },
+      {
+        key: "copy-path",
+        icon: <Copy size={13} />,
+        label: t("projectTree.copyPath"),
+        onSelect: () => {
+          closeMenu();
+          void writeClipboardText(path);
+        },
+      },
+      {
+        key: "save-as",
+        icon: <Save size={13} />,
+        label: t("externalOpener.saveAs"),
+        onSelect: () => {
+          closeMenu();
+          void app.SaveLocalPathAs(path).then((savedPath) => {
+            if (savedPath) {
+              showToast(t("externalOpener.saved", { path: savedPath }), "info");
+            }
+          }).catch((error) => {
+            showToast(t("externalOpener.failed", { name: t("externalOpener.saveAs"), error: localPathErrorText(error) }), "error");
+          });
+        },
+      },
+    ];
+  }, [closeMenu, href, openWith, openers.openers, path, showToast]);
+
+  return (
+    <>
+      <a
+        className="md-rich-link md-rich-link--local"
+        href={href}
+        onClick={(event) => {
+          event.preventDefault();
+          closeMenu();
+          openLink(href);
+        }}
+        onAuxClick={(event) => {
+          if (event.button !== 1) return;
+          event.preventDefault();
+          openLink(href);
+        }}
+        onMouseDown={(event) => {
+          if (event.button === 1) event.preventDefault();
+        }}
+        onContextMenu={(event) => {
+          event.preventDefault();
+          event.stopPropagation();
+          setMenuPoint(contextMenuPointFromEvent(event));
+          refreshOpeners();
+        }}
+      >
+        <ExternalLink aria-hidden="true" size={13} strokeWidth={2} />
+        <span className="md-rich-link__label">{children}</span>
+      </a>
+      <ContextMenu
+        open={menuPoint !== null}
+        point={menuPoint}
+        items={menuItems}
+        onClose={closeMenu}
+        minWidth={220}
+        ariaLabel={t("externalOpener.choose")}
+      />
+    </>
+  );
 }
 
 export function RichMarkdownLink({
@@ -130,7 +326,34 @@ export function RichMarkdownLink({
   href?: string;
   children: ReactNode;
 }) {
+  // Menu state lives here so web/mail links get a context menu; local file
+  // links keep their own richer menu inside LocalPathMarkdownLink below.
+  const { showToast } = useToast();
   const github = parseGitHubLink(href);
+  const [menuPoint, setMenuPoint] = useState<ContextMenuPoint | null>(null);
+  const closeMenu = useCallback(() => setMenuPoint(null), []);
+  const copyText = useCallback((text: string) => {
+    closeMenu();
+    void writeClipboardText(text).then((copied) => {
+      if (copied) showToast(t("richLink.copied"), "info");
+      else showToast(t("richLink.copyFailed"), "error");
+    });
+  }, [closeMenu, showToast]);
+  const menuItems = useMemo(
+    () => richLinkMenuItems(href ?? "", github, closeMenu, copyText),
+    [closeMenu, copyText, github, href],
+  );
+  const openMenu = (event: ReactMouseEvent<HTMLAnchorElement> | ReactKeyboardEvent<HTMLAnchorElement>) => {
+    event.preventDefault();
+    event.stopPropagation();
+    setMenuPoint(contextMenuPointFromEvent(event));
+  };
+
+  const local = localPathFromHref(href);
+  if (local !== null) {
+    return <LocalPathMarkdownLink href={href ?? ""} path={local} children={children} />;
+  }
+
   const iconKind = classifyLinkIcon(href);
   const compactLabel = github && linkText(children) === href ? github.compactLabel : undefined;
   const accessibleLabel = github ? githubAccessibleLabel(github) : undefined;
@@ -140,6 +363,7 @@ export function RichMarkdownLink({
       openLink(href);
     },
     onAuxClick: (event: ReactMouseEvent<HTMLAnchorElement>) => {
+      if (event.button !== 1) return;
       event.preventDefault();
       openLink(href);
     },
@@ -153,20 +377,35 @@ export function RichMarkdownLink({
   }
 
   return (
-    <a
-      aria-label={compactLabel ? accessibleLabel : undefined}
-      className={`md-rich-link md-rich-link--${iconKind}`}
-      href={href}
-      title={github ? accessibleLabel : undefined}
-      {...handlers}
-    >
-      <LinkMark kind={iconKind} />
-      <span
-        className="md-rich-link__label"
-        data-display-label={compactLabel}
+    <>
+      <a
+        aria-label={compactLabel ? accessibleLabel : undefined}
+        className={`md-rich-link md-rich-link--${iconKind}`}
+        href={href}
+        title={github ? accessibleLabel : undefined}
+        {...handlers}
+        onContextMenu={openMenu}
+        onKeyDown={(event) => {
+          if (event.key !== "ContextMenu" && !(event.shiftKey && event.key === "F10")) return;
+          openMenu(event);
+        }}
       >
-        {children}
-      </span>
-    </a>
+        <LinkMark kind={iconKind} />
+        <span
+          className="md-rich-link__label"
+          data-display-label={compactLabel}
+        >
+          {children}
+        </span>
+      </a>
+      <ContextMenu
+        open={menuPoint !== null}
+        point={menuPoint}
+        items={menuItems}
+        onClose={closeMenu}
+        minWidth={200}
+        ariaLabel={t("richLink.menuAriaLabel")}
+      />
+    </>
   );
 }

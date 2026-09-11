@@ -242,11 +242,11 @@ func hasOpenTag(s, tag string) bool {
 
 func trimLeadingTransientBlock(content, tag string) (string, bool) {
 	closeTag := "</" + tag + ">"
-	i := strings.Index(content, closeTag)
-	if i < 0 {
+	_, after, ok := strings.Cut(content, closeTag)
+	if !ok {
 		return content, false
 	}
-	return strings.TrimLeft(content[i+len(closeTag):], " \t\r\n"), true
+	return strings.TrimLeft(after, " \t\r\n"), true
 }
 
 // WithResponseLanguagePreference carries the runtime final-answer language

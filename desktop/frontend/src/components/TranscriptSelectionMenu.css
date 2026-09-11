@@ -1,0 +1,30 @@
+.transcript-selection-action[data-surface="transcript"] {
+  visibility: hidden;
+  opacity: 0;
+  pointer-events: none;
+  animation: none;
+}
+
+.transcript-selection-action[data-surface="transcript"][data-state="open"] {
+  visibility: visible;
+  opacity: 1;
+  pointer-events: auto;
+  animation: menu-pop-in var(--dur-base) var(--ease-out) both;
+}
+
+/*
+ * WebView2 can retain pixels when native text selection and a translucent,
+ * transformed body portal change in the same frame. Keep the transcript host
+ * stable and paint it against an opaque system backing on Windows. Terminal
+ * selection actions and the animated macOS/Linux treatment stay unchanged.
+ */
+:root[data-platform="windows"] .transcript-selection-action[data-surface="transcript"] {
+  background-color: Canvas;
+  background-image: linear-gradient(var(--bg-elev), var(--bg-elev));
+  -webkit-backdrop-filter: none;
+  backdrop-filter: none;
+  animation: none;
+  transition: none;
+  transform: none;
+  isolation: isolate;
+}

@@ -7,19 +7,34 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"maps"
+	"slices"
 	"strings"
+
+	"reasonix/internal/installlayout"
 )
 
 const (
-	WindowsPayloadManifestSchemaVersion = 1
+	// WindowsPayloadManifestSchemaVersion lists the flat release unit plus every
+	// file of the app/ shell tree; schema 1 manifests carry the flat list only.
+	WindowsPayloadManifestSchemaVersion = 2
+	windowsPayloadFlatSchemaVersion     = 1
 	WindowsPayloadManifestName          = "reasonix-payload.json"
 	WindowsPayloadSignatureName         = WindowsPayloadManifestName + ".minisig"
+	// WindowsPayloadTreePrefix starts every shell tree entry name.
+	WindowsPayloadTreePrefix = installlayout.AppShellDirName + "/"
 )
 
 var windowsPayloadFileNames = [...]string{
 	"reasonix-desktop.exe",
 	"reasonix-guard.exe",
 	"reasonix-launcher.exe",
+	"reasonix-update-helper.exe",
+	"reasonix-cli.exe",
+}
+
+var windowsPayloadVersionFileNames = [...]string{
+	"reasonix-desktop.exe",
 	"reasonix-update-helper.exe",
 	"reasonix-cli.exe",
 }
@@ -39,6 +54,24 @@ func WindowsPayloadFileNames() []string {
 	return append([]string(nil), windowsPayloadFileNames[:]...)
 }
 
+// ValidWindowsPayloadTreeName reports whether name is a shell tree entry.
+func ValidWindowsPayloadTreeName(name string) bool {
+	return strings.HasPrefix(name, WindowsPayloadTreePrefix) && installlayout.ValidateMemberName(name) == nil
+}
+
+// WindowsPayloadVersionMembers lists the manifest entries published under
+// versions/<version>/, sorted: desktop, CLI, update helper and the app/ tree.
+func WindowsPayloadVersionMembers(hashes map[string]string) []string {
+	members := make([]string, 0, len(hashes))
+	for name := range hashes {
+		if slices.Contains(windowsPayloadVersionFileNames[:], name) || ValidWindowsPayloadTreeName(name) {
+			members = append(members, name)
+		}
+	}
+	slices.Sort(members)
+	return members
+}
+
 func EncodeWindowsPayloadManifest(version string, hashes map[string]string) ([]byte, error) {
 	version = strings.TrimSpace(version)
 	if version == "" {
@@ -47,9 +80,12 @@ func EncodeWindowsPayloadManifest(version string, hashes map[string]string) ([]b
 	manifest := WindowsPayloadManifest{
 		SchemaVersion: WindowsPayloadManifestSchemaVersion,
 		Version:       version,
-		Files:         make([]WindowsPayloadManifestFile, 0, len(windowsPayloadFileNames)),
+		Files:         make([]WindowsPayloadManifestFile, 0, len(hashes)),
 	}
-	for _, name := range windowsPayloadFileNames {
+	for _, name := range slices.Sorted(maps.Keys(hashes)) {
+		if !windowsPayloadMemberAllowed(name, WindowsPayloadManifestSchemaVersion) {
+			return nil, fmt.Errorf("Windows payload manifest contains unexpected file %q", name)
+		}
 		hash := strings.ToLower(strings.TrimSpace(hashes[name]))
 		if !validWindowsPayloadSHA256(hash) {
 			return nil, fmt.Errorf("Windows payload manifest hash for %s is invalid", name)
@@ -59,8 +95,8 @@ func EncodeWindowsPayloadManifest(version string, hashes map[string]string) ([]b
 			SHA256: hash,
 		})
 	}
-	if len(hashes) != len(manifest.Files) {
-		return nil, fmt.Errorf("Windows payload manifest contains unexpected files")
+	if err := requireWindowsPayloadFlatMembers(hashes); err != nil {
+		return nil, err
 	}
 	b, err := json.MarshalIndent(manifest, "", "  ")
 	if err != nil {
@@ -84,20 +120,16 @@ func DecodeWindowsPayloadManifest(data []byte, expectedVersion string) (map[stri
 		return nil, fmt.Errorf("decode Windows payload manifest: %w", err)
 	}
 	expectedVersion = strings.TrimSpace(expectedVersion)
-	if manifest.SchemaVersion != WindowsPayloadManifestSchemaVersion ||
+	if !windowsPayloadSchemaSupported(manifest.SchemaVersion) ||
 		expectedVersion == "" ||
 		manifest.Version != expectedVersion {
 		return nil, fmt.Errorf("Windows payload manifest identity does not match the pending update")
-	}
-	expected := make(map[string]struct{}, len(windowsPayloadFileNames))
-	for _, name := range windowsPayloadFileNames {
-		expected[name] = struct{}{}
 	}
 	hashes := make(map[string]string, len(manifest.Files))
 	for _, file := range manifest.Files {
 		name := file.Name
 		hash := file.SHA256
-		if _, ok := expected[name]; !ok || !validWindowsPayloadSHA256(hash) {
+		if !windowsPayloadMemberAllowed(name, manifest.SchemaVersion) || !validWindowsPayloadSHA256(hash) {
 			return nil, fmt.Errorf("Windows payload manifest member is invalid")
 		}
 		if _, duplicate := hashes[name]; duplicate {
@@ -105,10 +137,30 @@ func DecodeWindowsPayloadManifest(data []byte, expectedVersion string) (map[stri
 		}
 		hashes[name] = hash
 	}
-	if len(hashes) != len(expected) {
-		return nil, fmt.Errorf("Windows payload manifest is incomplete")
+	if err := requireWindowsPayloadFlatMembers(hashes); err != nil {
+		return nil, err
 	}
 	return hashes, nil
+}
+
+func windowsPayloadSchemaSupported(schemaVersion int) bool {
+	return schemaVersion == windowsPayloadFlatSchemaVersion || schemaVersion == WindowsPayloadManifestSchemaVersion
+}
+
+func windowsPayloadMemberAllowed(name string, schemaVersion int) bool {
+	if slices.Contains(windowsPayloadFileNames[:], name) {
+		return true
+	}
+	return schemaVersion >= WindowsPayloadManifestSchemaVersion && ValidWindowsPayloadTreeName(name)
+}
+
+func requireWindowsPayloadFlatMembers(hashes map[string]string) error {
+	for _, name := range windowsPayloadFileNames {
+		if _, ok := hashes[name]; !ok {
+			return fmt.Errorf("Windows payload manifest is incomplete")
+		}
+	}
+	return nil
 }
 
 func WindowsPayloadSHA256(data []byte) string {

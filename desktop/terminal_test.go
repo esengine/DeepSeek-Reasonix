@@ -291,13 +291,13 @@ func TestTerminalManagerCountsConcurrentStartsTowardLimit(t *testing.T) {
 
 	type result struct{ err error }
 	results := make(chan result, maxTerminalsPerWorkspace+1)
-	for i := 0; i < maxTerminalsPerWorkspace+1; i++ {
+	for range maxTerminalsPerWorkspace + 1 {
 		go func() {
 			_, err := manager.create("tab", "workspace", ".", terminalCommand{path: "shell", label: "shell"})
 			results <- result{err: err}
 		}()
 	}
-	for i := 0; i < maxTerminalsPerWorkspace; i++ {
+	for range maxTerminalsPerWorkspace {
 		select {
 		case <-entered:
 		case <-time.After(time.Second):
@@ -307,7 +307,7 @@ func TestTerminalManagerCountsConcurrentStartsTowardLimit(t *testing.T) {
 	close(release)
 
 	succeeded, limited := 0, 0
-	for i := 0; i < maxTerminalsPerWorkspace+1; i++ {
+	for range maxTerminalsPerWorkspace + 1 {
 		result := <-results
 		switch {
 		case result.err == nil:

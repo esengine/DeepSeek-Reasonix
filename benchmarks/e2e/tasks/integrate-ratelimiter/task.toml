@@ -1,0 +1,4 @@
+prompt = "This directory contains a ratelimit/ package with a README describing its TokenBucket API. Create throttle.py with a function allowed(events) that takes a sorted list of event timestamps (seconds, floats) and returns the list of timestamps the bucket admits, using TokenBucket with capacity 3 and refill_per_sec 1 exactly as the README specifies. Use the package — do not reimplement the bucket."
+class = "api-integration"
+max_steps = 20
+timeout_sec = 300

@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"maps"
 	"os"
 	"path/filepath"
 	"strconv"
@@ -14,6 +15,7 @@ import (
 
 	"reasonix/internal/config"
 	"reasonix/internal/event"
+	"reasonix/internal/extension"
 	"reasonix/internal/extension/protocol"
 	"reasonix/internal/extension/providerext"
 	"reasonix/internal/extension/sidecar"
@@ -54,9 +56,7 @@ func installProviderFake(t *testing.T, home, name string, extraEnv map[string]st
 		bootFakeEnvPluginName: name,
 		bootFakeEnvProvider:   "1",
 	}
-	for k, v := range extraEnv {
-		env[k] = v
-	}
+	maps.Copy(env, extraEnv)
 	installBootFakePlugin(t, home, name, map[string]any{
 		"capabilities": []string{"providers"},
 		"env":          env,
@@ -199,9 +199,9 @@ func TestBootStartsExtensionPackagesOncePerBuild(t *testing.T) {
 
 	calls := 0
 	orig := startExtensionPackages
-	startExtensionPackages = func(ctx context.Context, home string, sessionCtx protocol.SessionContext, ui sidecar.UIHandler) (*sidecar.Manager, []string, error) {
+	startExtensionPackages = func(ctx context.Context, home string, sessionCtx protocol.SessionContext, ui sidecar.UIHandler, previous *sidecar.Manager, plan *extension.RuntimePlan) (*sidecar.Manager, []string, error) {
 		calls++
-		return orig(ctx, home, sessionCtx, ui)
+		return orig(ctx, home, sessionCtx, ui, previous, plan)
 	}
 	t.Cleanup(func() { startExtensionPackages = orig })
 
@@ -227,8 +227,8 @@ func TestBootRedactsExtensionStartupWarnings(t *testing.T) {
 	installBootFakePlugin(t, config.ReasonixHomeDir(), "warning-source", map[string]any{})
 
 	orig := startExtensionPackages
-	startExtensionPackages = func(ctx context.Context, home string, sessionCtx protocol.SessionContext, ui sidecar.UIHandler) (*sidecar.Manager, []string, error) {
-		manager, warnings, err := orig(ctx, home, sessionCtx, ui)
+	startExtensionPackages = func(ctx context.Context, home string, sessionCtx protocol.SessionContext, ui sidecar.UIHandler, previous *sidecar.Manager, plan *extension.RuntimePlan) (*sidecar.Manager, []string, error) {
+		manager, warnings, err := orig(ctx, home, sessionCtx, ui, previous, plan)
 		return manager, append(warnings, "sidecar rejected api_key="+secret), err
 	}
 	t.Cleanup(func() { startExtensionPackages = orig })

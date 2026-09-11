@@ -1,0 +1,26 @@
+import { JSDOM } from "jsdom";
+import React, { act, useState } from "react";
+import { createRoot } from "react-dom/client";
+import assert from "node:assert/strict";
+import { ProviderConnections } from "../components/ProviderConnections";
+import { LocaleProvider } from "../lib/i18n";
+import type { ProviderAccessGroup } from "../components/SettingsPanel";
+const dom = new JSDOM('<div id="root"></div>', { url: "http://localhost" });
+Object.assign(globalThis, { window: dom.window, document: dom.window.document, IS_REACT_ACT_ENVIRONMENT: true });
+const groups = ['a', 'b'].map(id => ({id, label:id, models:[], providers:[], kind:'openai', baseUrl:'', configured:true})) as ProviderAccessGroup[];
+function Draft({id}:{id:string}) { const [n,setN]=useState(0);return <button data-draft={id} onClick={()=>setN(n+1)}>{n}</button>; }
+const root=createRoot(document.getElementById('root')!);
+const render=(items=groups,hidden=false)=> <LocaleProvider><ProviderConnections groups={items} presets={[]} revealedProvider={null} hidden={hidden} busy={false} onAdd={()=>{}} renderDetail={g=><Draft id={g.id}/>} /></LocaleProvider>;
+await act(async()=>root.render(render()));
+await act(async()=> (document.querySelector('[data-draft="a"]') as HTMLElement).click());
+await act(async()=> (document.querySelectorAll('.provider-connections__item')[1] as HTMLElement).click());
+assert.equal(document.querySelector('[data-draft="a"]')!.parentElement!.hidden,true);
+await act(async()=> (document.querySelectorAll('.provider-connections__item')[0] as HTMLElement).click());
+assert.equal(document.querySelector('[data-draft="a"]')!.textContent,'1');
+await act(async()=>root.render(render(groups,true)));
+await act(async()=>root.render(render()));
+assert.equal(document.querySelector('[data-draft="a"]')!.textContent,'1');
+await act(async()=>root.render(render([groups[1]])));
+assert.equal(document.querySelector('[data-draft="b"]')!.parentElement!.hidden,false);
+await act(async()=>root.unmount());
+console.log('PASS: navigation preserves drafts, add flow preserves drafts, deletion selects remaining connection');

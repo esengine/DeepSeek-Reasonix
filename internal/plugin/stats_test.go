@@ -73,7 +73,7 @@ func TestRecordStartupCapsAtWindow(t *testing.T) {
 	withTempCache(t)
 
 	const total = 25
-	for i := 0; i < total; i++ {
+	for i := range total {
 		// Use distinct values so we can verify the *oldest* ones were dropped.
 		if err := RecordStartup("bar", time.Duration(i+1)*time.Millisecond); err != nil {
 			t.Fatalf("RecordStartup #%d: %v", i, err)
@@ -140,7 +140,7 @@ func TestRecommendAtBudgetDemotes(t *testing.T) {
 	withTempCache(t)
 
 	budget := 5 * time.Second
-	for i := 0; i < 3; i++ {
+	for i := range 3 {
 		if err := RecordStartup("timeout-plugin", budget); err != nil {
 			t.Fatalf("RecordStartup #%d: %v", i, err)
 		}
@@ -231,7 +231,7 @@ func TestStatsSlugCollisionDoesNotCrossDemote(t *testing.T) {
 	withTempCache(t)
 
 	// Interleave a chronically slow server with a healthy one sharing the slug.
-	for i := 0; i < defaultDemoteAfter; i++ {
+	for range defaultDemoteAfter {
 		if err := RecordStartup("foo.bar", 5*time.Second); err != nil {
 			t.Fatalf("RecordStartup foo.bar: %v", err)
 		}
@@ -264,7 +264,7 @@ func TestStatsLegacyNamedFileMigrated(t *testing.T) {
 	withTempCache(t)
 
 	legacy := StartupStats{Version: statsVersion, Name: "legacy", LastSeen: time.Now()}
-	for i := 0; i < 3; i++ {
+	for range 3 {
 		legacy.SamplesMs = append(legacy.SamplesMs, 100)
 	}
 	if err := writeStatsAtomic(legacyStatsPath("legacy"), legacy); err != nil {
@@ -291,7 +291,7 @@ func TestStatsLegacyNamelessCollisionNotTrusted(t *testing.T) {
 	withTempCache(t)
 
 	nameless := StartupStats{Version: statsVersion, LastSeen: time.Now()}
-	for i := 0; i < defaultDemoteAfter; i++ {
+	for range defaultDemoteAfter {
 		nameless.SamplesMs = append(nameless.SamplesMs, 5000) // over budget
 	}
 	if err := writeStatsAtomic(legacyStatsPath("foo.bar"), nameless); err != nil {
@@ -322,7 +322,7 @@ func TestStatsLegacyNamelessCollisionNotTrusted(t *testing.T) {
 func TestStatsLegacyFileWithoutNameAdopted(t *testing.T) {
 	withTempCache(t)
 
-	for i := 0; i < 3; i++ {
+	for range 3 {
 		if err := RecordStartup("legacy", 100*time.Millisecond); err != nil {
 			t.Fatalf("RecordStartup: %v", err)
 		}

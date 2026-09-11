@@ -9,8 +9,6 @@ import (
 	"sync"
 
 	"reasonix/internal/config"
-
-	"github.com/wailsapp/wails/v2/pkg/runtime"
 )
 
 // themeMu serializes theme library mutations (import/save/delete/activate).
@@ -663,9 +661,9 @@ func (a *App) ImportThemePack(sourcePath string, replace bool) (ThemeImportResul
 		if a.ctx == nil {
 			return ThemeImportResult{}, fmt.Errorf("no theme package selected")
 		}
-		picked, err := runtime.OpenFileDialog(a.ctx, runtime.OpenDialogOptions{
+		picked, err := a.nativeHost().OpenFileDialog(a.ctx, nativeDialogOptions{
 			Title: "Import Reasonix Theme",
-			Filters: []runtime.FileFilter{
+			Filters: []nativeFileFilter{
 				{DisplayName: "Reasonix Theme (*.reasonix-theme)", Pattern: "*.reasonix-theme"},
 				{DisplayName: "ZIP (*.zip)", Pattern: "*.zip"},
 			},
@@ -726,10 +724,10 @@ func (a *App) ExportThemePack(id, destPath string) (string, error) {
 			return "", fmt.Errorf("no export path")
 		}
 		defaultName := id + themePackExt
-		picked, err := runtime.SaveFileDialog(a.ctx, runtime.SaveDialogOptions{
+		picked, err := a.nativeHost().SaveFileDialog(a.ctx, nativeDialogOptions{
 			Title:           "Export Reasonix Theme",
 			DefaultFilename: defaultName,
-			Filters: []runtime.FileFilter{
+			Filters: []nativeFileFilter{
 				{DisplayName: "Reasonix Theme (*.reasonix-theme)", Pattern: "*.reasonix-theme"},
 			},
 		})
@@ -756,9 +754,9 @@ func (a *App) PickThemeBackground() (string, error) {
 	if a.ctx == nil {
 		return "", fmt.Errorf("file dialog unavailable")
 	}
-	path, err := runtime.OpenFileDialog(a.ctx, runtime.OpenDialogOptions{
+	path, err := a.nativeHost().OpenFileDialog(a.ctx, nativeDialogOptions{
 		Title: "Choose Theme Background",
-		Filters: []runtime.FileFilter{
+		Filters: []nativeFileFilter{
 			{DisplayName: "Images (*.png;*.jpg;*.jpeg;*.webp)", Pattern: "*.png;*.jpg;*.jpeg;*.webp"},
 		},
 	})

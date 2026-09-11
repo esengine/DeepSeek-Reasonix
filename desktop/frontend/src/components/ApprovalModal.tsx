@@ -1,6 +1,5 @@
 import { useCallback, useEffect, useId, useRef, useState } from "react";
 import type { KeyboardEvent as ReactKeyboardEvent } from "react";
-import gsap from "gsap";
 import { useT, type Translator } from "../lib/i18n";
 import type { ComposerInsertRequest, DirEntry, ToolApprovalMode, WireApproval } from "../lib/types";
 import {
@@ -11,27 +10,14 @@ import {
   PromptHeaderAction,
   PromptShelf,
 } from "./PromptShelf";
-import { DUR_FAST } from "../lib/gsapAnimations";
+import { animateElementExit, DUR_FAST } from "../lib/motion";
 import {
   FileReferenceMenu,
   insertTextAtSelection,
   pickInlineFileReference,
   useFileReferenceMenu,
 } from "./FileReferenceMenu";
-
-function animateShelfExit(
-  el: HTMLDivElement,
-  options: { opacity: number; y: number; duration: number; ease: string; onComplete: () => void },
-) {
-  const animator = typeof gsap.to === "function"
-    ? gsap
-    : (gsap as unknown as { default?: typeof gsap }).default;
-  if (animator && typeof animator.to === "function") {
-    animator.to(el, options);
-    return;
-  }
-  options.onComplete();
-}
+import { WriteAccessApprovalDetails, writeAccessDecisionActions, type DecisionAction } from "./WriteAccessApproval";
 
 function requiresFreshHumanApproval(tool: string): boolean {
   return tool === "remember" || tool === "forget" || tool === "exit_plan_mode" || tool === "sandbox_escape" || tool === "config_write";
@@ -150,18 +136,6 @@ function localizePlanModeApprovalReason(tool: string, reason: string, t: Transla
   return reason;
 }
 
-type DecisionAction = {
-  key: string;
-  label: string;
-  desc: string;
-  tone?: "default" | "danger";
-  primary?: boolean;
-  // Plan revision and plan guidance open inline editors instead of submitting.
-  // Other recovery actions use direct-click submit (no select-then-confirm).
-  kind: "submit" | "toggle-revision" | "toggle-guidance" | "direct";
-  run?: () => void;
-};
-
 const RECOVERY_FEEDBACK_MAX = 1000;
 
 function recoveryReasonText(
@@ -264,6 +238,7 @@ export function ApprovalModal({
 }) {
   const t = useT();
   const isPlanApproval = approval.tool === "exit_plan_mode";
+  const isWriteAccessApproval = approval.kind === "write_access" || Boolean(approval.write_access);
   const isRecoveryApproval = approval.kind === "recovery" || Boolean(approval.recovery);
   const recovery = approval.recovery;
   const recoveryChangeKind = (recovery?.change_kind ?? "").toLowerCase();
@@ -316,9 +291,8 @@ export function ApprovalModal({
   const onRevisionActiveChangeRef = useRef(onRevisionActiveChange);
   const revisionActiveRef = useRef(false);
   onRevisionActiveChangeRef.current = onRevisionActiveChange;
-  // When consecutive approvals arrive, animate the old card out before
-  // the new one slides in.  GSAP fromTo on the shelf wrapper avoids the
-  // jarring pop when the API cycles through 4+ pending approvals.
+  // When consecutive approvals arrive, animate the old card out before the
+  // new one slides in so a queue of pending approvals does not visibly pop.
   const closingRef = useRef(false);
   const fileMenu = useFileReferenceMenu(revisionText, cwd, tabId, workspaceScopeKey);
 
@@ -328,11 +302,10 @@ export function ApprovalModal({
     setSubmitting(true);
     const el = shelfRef.current;
     if (el) {
-      animateShelfExit(el, {
+      animateElementExit(el, {
         opacity: 0,
         y: 8,
         duration: DUR_FAST,
-        ease: "power2.in",
         onComplete: fn,
       });
     } else {
@@ -391,6 +364,8 @@ export function ApprovalModal({
           run: () => resolveRecovery(grantSimilarForTask && recovery?.can_grant_task ? "continue_task" : "continue"),
         },
       ]
+    : isWriteAccessApproval
+    ? writeAccessDecisionActions(t, onAnswer)
     : isPlanApproval
     ? [
         {
@@ -765,6 +740,8 @@ export function ApprovalModal({
         title={
           isPlanApproval
             ? t("approval.planReady")
+            : isWriteAccessApproval
+              ? t("approval.writeAccessPending")
             : isRecoveryPlanChange
               ? t("approval.recoveryPlanChangePending")
               : isRecoveryApproval
@@ -940,7 +917,7 @@ export function ApprovalModal({
       >
         {(approvalModeRelaxed ||
           isRecoveryApproval ||
-          (!isPlanApproval && !isRecoveryApproval && (subject || (reasonOpen && reason))) ||
+          (!isPlanApproval && !isRecoveryApproval && (subject || isWriteAccessApproval || (reasonOpen && reason))) ||
           (isPlanApproval && revisionOpen)) && (
           <>
             {approvalModeRelaxed && !isRecoveryApproval && (
@@ -1010,7 +987,10 @@ export function ApprovalModal({
                 )}
               </dl>
             )}
-            {!isPlanApproval && !isRecoveryApproval && subject && (
+            {!isPlanApproval && !isRecoveryApproval && isWriteAccessApproval && (
+              <WriteAccessApprovalDetails approval={approval} subject={subject} reason={reason} reasonOpen={reasonOpen} t={t} />
+            )}
+            {!isPlanApproval && !isRecoveryApproval && !isWriteAccessApproval && subject && (
               <div className="approval-details">
                 <pre className="approval-subject">{subject}</pre>
                 {reasonOpen && reason && <div className="approval-reason">{reason}</div>}

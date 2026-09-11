@@ -15,9 +15,13 @@ configuration, plugins, and sandbox policy, see the [Guide](./GUIDE.md).
 ```sh
 reasonix
 reasonix --model deepseek-pro
-reasonix --profile delivery --effort high
+reasonix --effort high
 reasonix --dir /path/to/project
 ```
+
+Ordinary requests always enter the executor. There is no automatic simple /
+light / full task mode to pick. The dedicated planner runs only for an
+explicit Plan, an approval boundary, or Goal start.
 
 Running `reasonix` without a subcommand starts the interactive terminal UI. Use
 `reasonix setup` first when no provider is configured.
@@ -25,7 +29,6 @@ Running `reasonix` without a subcommand starts the interactive terminal UI. Use
 | Flag | Purpose |
 | --- | --- |
 | `--model NAME` | Select a configured provider or `provider/model` reference. |
-| `--profile economy\|balanced\|delivery` | Select the runtime work profile. |
 | `--effort LEVEL` | Override reasoning effort for this session. |
 | `--max-steps N` | Set a one-off maximum tool-call round budget; `0` uses automatic execution. |
 | `--dir PATH` | Change the workspace root before loading config and tools. |
@@ -84,23 +87,22 @@ different keys. Providers added or removed through setup are also added to or
 removed from desktop provider access, so the same models are available in the
 desktop app.
 
-### Configure regional pricing currency
+### Configure fee display currency
 
-Use the user-global currency command to inspect or select the official DeepSeek
-regional price table:
+Use the user-global command to inspect or select the display currency:
 
 ```sh
 reasonix config currency             # show the saved and resolved currency
-reasonix config currency auto        # follow the resolved locale
+reasonix config currency auto        # wallet hint, then original price currency
 reasonix config currency CNY
 reasonix config currency USD
 ```
 
-`auto` resolves Simplified or Traditional Chinese locales to CNY and English or
-other locales to USD. An explicit `CNY` or `USD` selection remains independent
-from the UI language. This preference is stored in the user config and cannot
-be overridden by project `reasonix.toml`; `--local` is therefore not supported.
-Custom provider prices are preserved.
+`auto` remains unresolved in configuration. With one valid wallet currency it
+can become a runtime session hint; otherwise CLI uses the original currency or
+sorted currency buckets. Language and host locale never select a price table.
+The preference is user-global and cannot be overridden by project
+`reasonix.toml`; `--local` is therefore not supported. Custom prices are preserved.
 
 In an interactive session, `/currency` shows the saved and resolved values, and
 `/currency auto|CNY|USD` changes the preference and refreshes the current
@@ -118,9 +120,12 @@ reasonix config compact-ratio 75           # set the user-global default
 reasonix config compact-ratio --local 75   # override in ./reasonix.toml
 ```
 
-The editable range is 65–85%, with 80% as the built-in default. Lower values
-compact earlier and may reduce prompt-prefix cache reuse; higher values retain
-more context before compaction. Project `reasonix.toml` takes precedence over
+The editable range is 30–85%, with 80% as the built-in default. Lower values
+compact earlier, may increase summary calls and cost, and may reduce
+prompt-prefix cache reuse; higher values retain more context before compaction.
+Below the threshold, complete tool results may
+increase ordinary request cost; at pressure they are durably pruned before the
+cache-aligned summary runs. Project `reasonix.toml` takes precedence over
 the user config. Changes apply to new CLI sessions; an already-running session
 keeps the threshold it loaded at startup.
 
@@ -137,10 +142,10 @@ echo "explain this code" | reasonix run
 ```
 
 `reasonix run` keeps the normal streamed terminal presentation unless `-p` or a
-structured output format is selected. It also accepts `--model`, `--profile`,
-`--max-steps`, `--effort`, `--dir`, `--add-dir`, `--continue`, `--resume PATH`,
-`--copy`, `--allowed-tools`, `--permission-mode`, and `--auto` / `-y` (an alias
-for `--permission-mode auto`).
+structured output format is selected. It also accepts `--model`,
+`--max-steps`, `--effort`, `--dir`, `--add-dir`,
+`--continue`, `--resume QUERY`, `--copy`, `--allowed-tools`, `--permission-mode`,
+and `--auto` / `-y` (an alias for `--permission-mode auto`).
 
 ### Benchmark arms
 
@@ -156,6 +161,22 @@ reasonix run --ablate evidence,planner --metrics run.json "fix the failing test"
 
 This is a measurement tool, not a tuning knob: switching a subsystem off makes
 Reasonix worse at the work it was added for.
+
+### Trajectory recording
+
+`--trajectory PATH` appends the run's full event stream — tool dispatches and
+results with absolute start/end times, reasoning, retries, readiness and
+recovery decisions — as one timestamped, sequenced JSONL record per event, so
+a run can be replayed and its time attributed offline (tool execution vs. the
+model thinking between calls). Records reuse the shared `eventwire` JSON
+contract under an `event` key, wrapped in `schema_version`, `seq`, and `ts`
+(unix ms). Every completed line survives a killed run. Unlike `--events-jsonl`,
+the file contains prompts, tool arguments, and reasoning: treat it with the
+same care as a session transcript.
+
+```sh
+reasonix run --metrics run.json --trajectory run.trajectory.jsonl "fix the failing test"
+```
 
 ### Output formats
 
@@ -194,16 +215,35 @@ The final structured object has this shape:
 }
 ```
 
-`total_cost` is denominated in the ISO currency code from `currency`, currently
-`CNY` or `USD` for official DeepSeek pricing. `total_cost_usd` remains as a
-numeric compatibility alias and mirrors `total_cost`; despite its legacy name,
-it is not converted to USD when `currency` is `CNY`. New consumers must use
-`total_cost` together with `currency`. A structured run fails instead of
-reporting a misleading total if usage contains mixed currencies.
+`total_cost` is present only when a single `selected` display amount exists (ISO
+code in `currency`). Prefer the structured `cost_quote` field when present: it
+carries the original estimate, `original_totals`, occurrence-time valuations
+(`official_table` for dual-region public prices), `cost_complete`,
+`display_complete`, `display_status`, and `billing_mode` (`payg` or `subscription_equivalent` for
+pay-as-you-go equivalent estimates such as MiMo Token Plan).
+
+`total_cost_usd` remains a numeric compatibility alias when `total_cost` exists
+and does **not** imply USD. Mixed original currencies no longer fail the run:
+`cost_complete` remains true when usage/pricing facts are known,
+`display_complete` is false, and `original_costs`/`original_totals` list per-ISO
+totals so clients never invent a cross-currency sum.
+
+Global display preference is `[billing].display_currency` (`auto|CNY|USD`);
+legacy `[desktop].currency` still migrates. Provider list prices use each
+entry's frozen `billing_currency` and are never rewritten by display switches.
+Diagnose with `reasonix doctor billing`.
 
 Execution failures use `subtype: "error_during_execution"` and
 `is_error: true`. Structured modes keep runtime errors in JSON instead of also
 printing a duplicate human-readable error.
+
+The completion validator has been removed. A clean model stop without tool
+calls ends the turn directly; a response with tools continues through the tool
+loop, and a truly empty response is retried at the frozen-request boundary.
+Legacy `completion_validation`, `completion_evaluator_model`, and
+`REASONIX_COMPLETION_VALIDATION_MODE` settings remain readable but are ignored
+and are no longer emitted by the config renderer. Host-owned readiness, budget,
+tool-safety, and recovery boundaries remain active.
 
 ### Redacted machine interfaces
 
@@ -286,9 +326,10 @@ reasonix --resume provider-config --copy
 - `--copy` leaves the original transcript untouched and continues in a new
   writable session. Use it when another Reasonix process owns the original.
 
-For one-shot runs, `reasonix run --resume PATH "task"` accepts a session file
-path. Session leases prevent the desktop app and CLI from writing the same
-transcript concurrently.
+For one-shot runs, `reasonix run --resume QUERY "task"` accepts a session file
+path, a session ID, or an opaque machine session ID from `--events-jsonl` /
+`reasonix session show --json`. Session leases prevent the desktop app and CLI
+from writing the same transcript concurrently.
 
 ## Permissions
 
@@ -304,7 +345,7 @@ reasonix --allowed-tools "Bash(go test ./...)" --allowed-tools read_file
 | Mode | Behavior |
 | --- | --- |
 | `manual`, `ask` | Ask for ordinary approval decisions. |
-| `auto` | Automatically approve normal fallback operations while preserving explicit ask and deny rules. |
+| `auto` | Automatically approve normal fallback operations, including interactive `remember`/`forget`, while preserving explicit ask and deny rules. |
 | `acceptEdits` | Allow file-editing tools; this is not full Auto mode. |
 | `dontAsk` | Deny unapproved requests without opening an approval prompt. |
 | `plan` | Start the plan-first workflow; tool calls still use the active permissions and sandbox. |
@@ -332,10 +373,13 @@ an explicit ask rule; select it with `--permission-mode auto`, `--auto`, or
 `-y`. `dontAsk` denies unapproved writers.
 `bypassPermissions` runs ordinary calls despite ask rules and writer fallback,
 but configured deny rules, the sandbox, and tools that require fresh human
-approval (memory, plan, sandbox escape, managed config write) still apply. In
-every mode, the owning top-level controller may still create a bounded,
-non-sensitive, create-only project or reference memory; all other memory
-mutations remain denied without a human.
+approval (plan, sandbox escape, managed config write) still apply. Interactive
+Auto auto-allows the default `remember`/`forget` fallback while preserving
+explicit ask and deny rules; interactive YOLO bypasses memory ask prompts but
+still honors deny. In every headless mode, the owning
+top-level controller may still create a bounded, non-sensitive, create-only
+project or reference memory; all other memory mutations remain denied without a
+human.
 
 ## Additional directories
 
@@ -369,13 +413,12 @@ single-key shortcuts.
 | `Ctrl+Y` | Toggle YOLO independently of the composer-mode cycle. |
 
 The responsive footer keeps interaction state on the left and, when space
-allows, places model, effort, and work mode on the right. Its second row shows
+allows, places model and effort on the right. Its second row shows
 available repository and session telemetry such as cache hit rate, context use,
 compaction headroom, background jobs, and balance. `ready` means the composer is
 idle; that slot changes when a picker, approval, image paste, shell mode, or
 other interaction needs attention. Narrow terminals move or compact complete
-groups instead of cutting labels in half. Visible labels and work-mode values
-follow `/language`.
+groups instead of cutting labels in half. Visible labels follow `/language`.
 
 Use `/theme auto|light|dark` to select the terminal background mode, or choose a
 named accent from `/theme`. Both composer borders, the insertion cursor,
@@ -394,7 +437,9 @@ use the terminal paste shortcut because the remote process cannot read the local
 clipboard; `/mouse` restores the terminal's native right-click menu. Image paste
 is application-owned: use `Ctrl+V` on macOS/Linux, `Alt+V` on Windows, or
 `/paste-image`; the footer shows `Pasting image…` until the attachment token is
-ready.
+ready. Where the terminal forwards that shortcut instead of pasting itself, a
+clipboard holding no image falls back to a text paste, so the key never swallows
+plain text.
 
 ## In-session commands
 
@@ -404,23 +449,24 @@ the displayed list matches the commands the TUI accepts.
 
 | Command | Purpose |
 | --- | --- |
+| `/continue-checks [guidance]` | Resume the immediately preceding paused task-completion check while preserving its verified tool evidence. The command is one-shot and refuses stale cards after another user turn. |
 | `/model` | Search configured models and switch the active model. |
 | `/provider` | Choose a provider, then choose one of its configured models. |
 | `/resume` | Search recent sessions and switch to one. |
-| `/status` | Show model, effort, cache, Git, background jobs, and profile or balance details. |
-| `/work-mode [economy\|balanced\|delivery]` | View or change the runtime profile; `/profile` is an alias. |
+| `/status` | Show model, effort, cache, Git, background jobs, and balance details. |
 | `/theme [auto\|light\|dark\|style]` | View or change the CLI background mode and accent palette. |
-| `/currency [auto\|CNY\|USD]` | View or change the user-global official pricing currency and refresh the runtime. |
+| `/currency [auto\|CNY\|USD]` | View or change the user-global fee display currency and refresh the runtime. |
 | `/paste-image` | Read a clipboard image and insert an editable attachment token. |
-| `/mouse` | Toggle in-app mouse selection, scrollbar, and wheel handling. |
+| `/mouse` | Toggle in-app mouse selection, scrollbar, and wheel handling; SSH sessions start with capture off so the terminal's native selection works. |
 | `/effort` | View or change reasoning effort. |
+| `/preset [standard\|delivery]` | Switch the session quality floor; delivery turns on delivery completion gates and shows a PRESET tag in the status line. |
 | `/output-style` | Select an answer style. |
 | `/verbose` | Toggle expanded reasoning display. |
 | `/sandbox` | Inspect sandbox status. |
-| `/goal [objective]` | Start a long-running goal, or inspect the current goal and its budget runtime. |
-| `/goal status` | Show the active goal plus the turn/token/no-progress budget summary and the last continuation/evaluator reason. |
-| `/goal pause` | Pause the running goal (keeps todos, Delivery checkpoint, and budget). |
-| `/goal resume` | Resume a paused or blocked goal (budget pauses add one more budget slice). |
+| `/goal [objective]` | Start a continuous goal, or inspect its runtime statistics. |
+| `/goal status` | Show the active goal plus turns, requests, tokens, work time, and the last continuation/evaluator reason. |
+| `/goal pause` | Pause the running goal (keeps todos, Delivery checkpoint, and runtime history). |
+| `/goal resume` | Resume a manually paused or genuinely blocked goal without changing a numeric quota. |
 | `/goal clear` | End goal mode permanently. |
 | `/docs [question]` | Show the embedded corpus identity, or search it locally and ask the configured AI to answer from version-matched evidence. |
 | `/reasonix:docs [question]` | Preferred built-in fallback when an existing custom command or compatible plugin/skill alias owns `/docs`; if this spelling is also owned, the menu selects the next free `reasonix:`-qualified name without displacing it. |
@@ -431,9 +477,49 @@ the displayed list matches the commands the TUI accepts.
 | `/tree`, `/branch`, `/switch` | Inspect or navigate conversation branches. |
 | `/reload` | Reload the agent runtime (extensions, tools, skills, commands, hooks, providers) while keeping the session. Queued once while a turn runs, then fail-atomic: a failed rebuild keeps the current runtime. |
 
-Switching model, effort, or work mode rebuilds the runtime while preserving the
+Switching model or effort rebuilds the runtime while preserving the
 active conversation, session-scoped permission overrides, additional directory
 access, and session ownership. `/reload` uses the same fail-atomic rebuild.
+Execution modes no longer exist: planning, verification, and review strength
+follow task risk per turn.
+
+## Session catalog diagnostics
+
+The desktop session catalog is a disposable SQLite query projection; transcript
+JSONL and sidecars remain authoritative. Inspect it read-only or replace only
+the projection:
+
+```sh
+reasonix doctor sessions [--json]
+reasonix sessions reindex [--json]
+reasonix sessions reindex --dir /path/to/sessions --dir /another/path
+```
+
+Without `--dir`, reindex includes global sessions and all projects saved by the
+desktop app. See [Session Catalog and Desktop Startup](./SESSION_CATALOG.md) for
+failure, migration, and data-safety guarantees.
+
+History search uses a separate disposable projection:
+
+```sh
+reasonix doctor catalogs [--json]
+reasonix catalogs reindex history [--dir PATH ...] [--json]
+```
+
+See [History Search Catalog](./HISTORY_SEARCH_CATALOG.md).
+Usage statistics use a separate disposable rollup projection:
+reasonix catalogs reindex usage [--json]
+See [Usage Catalog](./USAGE_CATALOG.md).
+
+Inspect or rebuild the disposable task projection independently:
+
+```sh
+reasonix doctor catalogs [--json]
+reasonix catalogs reindex tasks [--project PATH ...] [--json]
+```
+
+See [Task Catalog](./TASK_CATALOG.md) for the authoritative FileStore boundary,
+cross-project routing, and rebuild behavior.
 
 ### Memory diagnostics and recovery
 

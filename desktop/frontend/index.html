@@ -4,9 +4,24 @@
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" />
     <title>Reasonix</title>
+    <!-- Critical boot shell: paint useful branded state before the desktop
+         bundle and full application stylesheet finish parsing. React replaces
+         this tree only after styles.css is ready, so the app never flashes
+         unstyled content. Keep these rules in sync with StartupSplash. -->
+    <style>
+      html,body,#root{width:100%;height:100%;margin:0}body{overflow:hidden;background:#111214;color:#f4f4f3;font-family:Inter,-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif}.boot-shell{position:fixed;inset:0;display:grid;place-items:center;background:#111214}.boot-shell__card{display:flex;flex-direction:column;align-items:center;gap:10px}.boot-shell__mark{display:grid;width:64px;height:64px;place-items:center}.boot-shell__mark img{display:block;width:56px;height:56px}.boot-shell__name{font-size:22px;font-weight:650;letter-spacing:0}.boot-shell__dots{display:flex;height:12px;align-items:center;gap:5px}.boot-shell__dots span{width:5px;height:5px;border-radius:50%;background:#e58a3a;animation:boot-pulse 1s ease-in-out infinite}.boot-shell__dots span:nth-child(2){animation-delay:.14s}.boot-shell__dots span:nth-child(3){animation-delay:.28s}@keyframes boot-pulse{0%,100%{opacity:.3;transform:translateY(0)}50%{opacity:1;transform:translateY(-2px)}}
+    </style>
   </head>
   <body>
-    <div id="root"></div>
+    <div id="root">
+      <div class="boot-shell" role="status" aria-label="Reasonix is starting">
+        <div class="boot-shell__card">
+          <div class="boot-shell__mark" aria-hidden="true"><img src="/src/assets/logo-symbol.svg" alt="" /></div>
+          <div class="boot-shell__name">Reasonix</div>
+          <div class="boot-shell__dots" aria-hidden="true"><span></span><span></span><span></span></div>
+        </div>
+      </div>
+    </div>
     <script type="module" src="/src/main.tsx"></script>
   </body>
 </html>

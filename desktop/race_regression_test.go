@@ -36,14 +36,14 @@ func TestSessionLeaseHelpersConcurrentAccess(t *testing.T) {
 	wg.Add(3)
 	go func() {
 		defer wg.Done()
-		for i := 0; i < iterations; i++ {
+		for range iterations {
 			_ = tabA.ensureSessionLease(path)
 			_ = tabA.sessionLeaseRuntimeKey()
 		}
 	}()
 	go func() {
 		defer wg.Done()
-		for i := 0; i < iterations; i++ {
+		for range iterations {
 			// The applyRuntimeTab transfer shape: move A's lease to B and back.
 			tabB.adoptSessionLease(tabA.takeSessionLease())
 			tabA.adoptSessionLease(tabB.takeSessionLease())
@@ -51,7 +51,7 @@ func TestSessionLeaseHelpersConcurrentAccess(t *testing.T) {
 	}()
 	go func() {
 		defer wg.Done()
-		for i := 0; i < iterations; i++ {
+		for range iterations {
 			tabA.releaseSessionLease()
 		}
 	}()
@@ -142,13 +142,13 @@ func TestTabEventSinkEmitConcurrentRebind(t *testing.T) {
 	wg.Add(2)
 	go func() {
 		defer wg.Done()
-		for i := 0; i < iterations; i++ {
+		for range iterations {
 			sink.Emit(event.Event{Kind: event.Notice, Text: "hammer"})
 		}
 	}()
 	go func() {
 		defer wg.Done()
-		for i := 0; i < iterations; i++ {
+		for i := range iterations {
 			sink.setBinding(fmt.Sprintf("tab-%d", i%2), nil)
 			sink.clearContext()
 		}
@@ -170,7 +170,7 @@ func TestModeRebuildAndABANavigationFenceLeaseFailureAndOldEpochEvent(t *testing
 	continueCommit := make(chan struct{})
 	oldEvent := make(chan wireEventTab, 1)
 	var capturedOldEvent wireEventTab
-	oldSink.runtimeEvents.emit = func(_ context.Context, name string, payload ...interface{}) {
+	oldSink.runtimeEvents.emit = func(_ context.Context, name string, payload ...any) {
 		if name != eventChannel || len(payload) != 1 {
 			return
 		}
@@ -207,9 +207,8 @@ func TestModeRebuildAndABANavigationFenceLeaseFailureAndOldEpochEvent(t *testing
 		t.Fatal("A to B rebind did not reach restored candidate")
 	}
 
-	// This call observes A/economy, then waits behind the rebind transaction.
-	// Once B commits it must rebuild B to full, never interleave with the
-	// candidate or publish a half-updated profile.
+	// Concurrent deprecated mode call must not interleave with the rebind
+	// transaction or publish a half-updated profile.
 	modeDone := make(chan error, 1)
 	go func() {
 		modeDone <- app.SetTokenModeForTab(tab.ID, boot.TokenModeFull)
@@ -219,7 +218,7 @@ func TestModeRebuildAndABANavigationFenceLeaseFailureAndOldEpochEvent(t *testing
 		t.Fatalf("A to B rebind: %v", err)
 	}
 	if err := <-modeDone; err != nil {
-		t.Fatalf("mode rebuild after A to B: %v", err)
+		t.Fatalf("SetTokenModeForTab after A to B: %v", err)
 	}
 
 	stale := capturedOldEvent
@@ -232,7 +231,7 @@ func TestModeRebuildAndABANavigationFenceLeaseFailureAndOldEpochEvent(t *testing
 	if app.controllerForTab(tab) == oldCtrl ||
 		sessionRuntimeKey(tab.currentSessionPath()) != sessionRuntimeKey(pathB) ||
 		currentTabTokenMode(tab) != boot.TokenModeFull {
-		t.Fatalf("A to B plus mode rebuild did not converge: ctrl=%p path=%q token=%q",
+		t.Fatalf("A to B plus SetTokenModeForTab did not converge: ctrl=%p path=%q token=%q",
 			app.controllerForTab(tab), tab.currentSessionPath(), currentTabTokenMode(tab))
 	}
 
@@ -459,7 +458,7 @@ func TestRebindInvalidatesInFlightAsyncBuildBeforeSnapshot(t *testing.T) {
 		}
 	})
 
-	// startTabControllerBuild only backgrounds the build when a Wails context
+	// startTabControllerBuild only backgrounds the build when a host context
 	// exists; expand its goroutine branch by hand so a.ctx can stay nil (the
 	// nil-ctx emit guards are what every other build test relies on too).
 	buildCtx, cancel := context.WithCancel(context.Background())
@@ -573,18 +572,17 @@ func TestMetaForTabConcurrentWithBuildSwap(t *testing.T) {
 	done := make(chan struct{})
 	go func() {
 		defer close(done)
-		for i := 0; i < iterations; i++ {
+		for i := range iterations {
 			app.mu.Lock()
 			tab.Ready = !tab.Ready
 			tab.Label = fmt.Sprintf("model-%d", i)
 			tab.StartupErr = ""
 			tab.model = fmt.Sprintf("provider/m%d", i)
 			tab.goal = fmt.Sprintf("goal-%d", i)
-			tab.tokenMode = "full"
 			app.mu.Unlock()
 		}
 	}()
-	for i := 0; i < iterations; i++ {
+	for range iterations {
 		meta := app.MetaForTab("tab")
 		if meta.EventChannel == "" {
 			t.Fatal("MetaForTab returned zero meta for a live tab")

@@ -87,13 +87,16 @@ func TestValidateAssetInstallLayout(t *testing.T) {
 	if err := validateAssetInstallLayout("versioned-v1"); err != nil {
 		t.Fatalf("versioned-v1 must be accepted: %v", err)
 	}
+	if err := validateAssetInstallLayout(update.ElectronInstallLayout); err != nil {
+		t.Fatal(err)
+	}
 	if err := validateAssetInstallLayout("unknown-layout"); err == nil {
 		t.Fatal("unknown install_layout must be rejected")
 	}
 }
 
 func TestUpdaterWailsMethodContracts(t *testing.T) {
-	appType := reflect.TypeOf((*App)(nil))
+	appType := reflect.TypeFor[*App]()
 	tests := []struct {
 		name   string
 		numIn  int
@@ -1092,9 +1095,10 @@ func TestExtractLinuxReleaseUnitRejectsAmbiguousMembers(t *testing.T) {
 }
 
 func TestApplyLinuxVersionedActivatesWithoutPersistingGuard(t *testing.T) {
-	root := t.TempDir()
-	source := t.TempDir()
-	for _, name := range []string{installlayout.DesktopBinaryName(), installlayout.CLIBinaryName()} {
+	root := robustTempDir(t)
+	source := robustTempDir(t)
+	// This fixture describes a Linux release even when the test host is Windows.
+	for _, name := range []string{"reasonix-desktop", "reasonix"} {
 		if err := os.WriteFile(filepath.Join(source, name), []byte("old-"+name), 0o700); err != nil {
 			t.Fatal(err)
 		}
@@ -1104,10 +1108,10 @@ func TestApplyLinuxVersionedActivatesWithoutPersistingGuard(t *testing.T) {
 		Version:     "v1.20.0",
 		RequestID:   "seed-linux",
 		Members: []installlayout.Member{
-			{Name: installlayout.DesktopBinaryName(), Path: filepath.Join(source, installlayout.DesktopBinaryName())},
-			{Name: installlayout.CLIBinaryName(), Path: filepath.Join(source, installlayout.CLIBinaryName())},
+			{Name: "reasonix-desktop", Path: filepath.Join(source, "reasonix-desktop")},
+			{Name: "reasonix", Path: filepath.Join(source, "reasonix")},
 		},
-		RequiredNames: []string{installlayout.DesktopBinaryName(), installlayout.CLIBinaryName()},
+		RequiredNames: []string{"reasonix-desktop", "reasonix"},
 	}); err != nil {
 		t.Fatal(err)
 	}
@@ -1116,36 +1120,15 @@ func TestApplyLinuxVersionedActivatesWithoutPersistingGuard(t *testing.T) {
 	currentInstallDirForLinuxUpdate = func() string { return root }
 	t.Cleanup(func() { currentInstallDirForLinuxUpdate = originalRoot })
 
-	var archive bytes.Buffer
-	gz := gzip.NewWriter(&archive)
-	tw := tar.NewWriter(gz)
-	for _, name := range []string{"reasonix-desktop", "reasonix-guard", "reasonix"} {
-		body := []byte("new-" + name)
-		if err := tw.WriteHeader(&tar.Header{Name: name, Mode: 0o755, Size: int64(len(body)), Typeflag: tar.TypeReg}); err != nil {
-			t.Fatal(err)
-		}
-		if _, err := tw.Write(body); err != nil {
-			t.Fatal(err)
-		}
-	}
-	if err := tw.Close(); err != nil {
-		t.Fatal(err)
-	}
-	if err := gz.Close(); err != nil {
+	if err := applyLinuxVersioned(linuxShellArchive(t, nil, ""), "1.20.1"); err != nil {
 		t.Fatal(err)
 	}
 
-	if err := applyLinuxVersioned(archive.Bytes(), "1.20.1"); err != nil {
-		t.Fatal(err)
-	}
 	ptr, err := installlayout.ReadCurrent(root)
 	if err != nil || ptr.ActiveVersion != "v1.20.1" {
 		t.Fatalf("pointer=%+v err=%v", ptr, err)
 	}
-	activeDesktop, err := installlayout.ActiveDesktopPath(root)
-	if err != nil {
-		t.Fatal(err)
-	}
+	activeDesktop := filepath.Join(root, filepath.FromSlash(ptr.ActiveDir), "reasonix-desktop")
 	data, err := os.ReadFile(activeDesktop)
 	if err != nil || string(data) != "new-reasonix-desktop" {
 		t.Fatalf("active desktop=%q err=%v", data, err)
@@ -1161,8 +1144,8 @@ func TestApplyLinuxVersionedActivatesWithoutPersistingGuard(t *testing.T) {
 }
 
 func TestApplyLinuxHoldsReleaseUnitLockDuringReplace(t *testing.T) {
-	dir := t.TempDir()
-	t.Setenv("REASONIX_HOME", t.TempDir())
+	dir := robustTempDir(t)
+	t.Setenv("REASONIX_HOME", robustTempDir(t))
 	exe := filepath.Join(dir, "reasonix-desktop")
 	releasePaths := releaseUnitPathsFor(dir, "linux")
 	for _, path := range releasePaths {
@@ -1256,9 +1239,9 @@ func fastRetry(t *testing.T) {
 func TestDownloadRecoversFromMidStreamReset(t *testing.T) {
 	fastRetry(t)
 	const body = "complete-installer-bytes"
-	var calls int32
+	var calls atomic.Int32
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
-		if atomic.AddInt32(&calls, 1) < int32(downloadAttempts) {
+		if calls.Add(1) < int32(downloadAttempts) {
 			// Mid-stream reset: promise 100 bytes, send a few, drop the socket —
 			// the client's body read fails with unexpected EOF, exactly the CN-IPv6
 			// "forcibly closed" case the retry exists for.
@@ -1283,16 +1266,16 @@ func TestDownloadRecoversFromMidStreamReset(t *testing.T) {
 	if string(data) != body {
 		t.Fatalf("got %q, want %q", data, body)
 	}
-	if n := atomic.LoadInt32(&calls); n != int32(downloadAttempts) {
+	if n := calls.Load(); n != int32(downloadAttempts) {
 		t.Fatalf("made %d attempts, want %d", n, downloadAttempts)
 	}
 }
 
 func TestDownloadGivesUpAfterCap(t *testing.T) {
 	fastRetry(t)
-	var calls int32
+	var calls atomic.Int32
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
-		atomic.AddInt32(&calls, 1)
+		calls.Add(1)
 		conn, _, err := w.(http.Hijacker).Hijack()
 		if err != nil {
 			t.Errorf("hijack: %v", err)
@@ -1305,7 +1288,7 @@ func TestDownloadGivesUpAfterCap(t *testing.T) {
 	if _, err := download(context.Background(), srv.Client(), nil, srv.URL, 0, nil); err == nil {
 		t.Fatal("download should fail after exhausting retries")
 	}
-	if n := atomic.LoadInt32(&calls); n != int32(downloadAttempts) {
+	if n := calls.Load(); n != int32(downloadAttempts) {
 		t.Fatalf("made %d attempts, want %d", n, downloadAttempts)
 	}
 }
@@ -1329,10 +1312,10 @@ func TestDownloadResumesWithRange(t *testing.T) {
 	fastRetry(t)
 	full := bytes.Repeat([]byte("0123456789"), 50) // 500 bytes
 	const cut = 200
-	var calls int32
+	var calls atomic.Int32
 	rangeCh := make(chan string, 4)
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if atomic.AddInt32(&calls, 1) == 1 {
+		if calls.Add(1) == 1 {
 			// First attempt: promise the whole file, send a prefix, drop the socket.
 			conn, bw, err := w.(http.Hijacker).Hijack()
 			if err != nil {
@@ -1379,9 +1362,9 @@ func TestDownloadFallsBackToSecondClient(t *testing.T) {
 	primary := &http.Client{Transport: rtFunc(func(*http.Request) (*http.Response, error) {
 		return nil, errors.New("connection reset (ipv6)")
 	})}
-	var fbCalls int32
+	var fbCalls atomic.Int32
 	fallback := &http.Client{Transport: rtFunc(func(*http.Request) (*http.Response, error) {
-		atomic.AddInt32(&fbCalls, 1)
+		fbCalls.Add(1)
 		return &http.Response{
 			StatusCode:    http.StatusOK,
 			Body:          io.NopCloser(strings.NewReader(body)),
@@ -1397,7 +1380,7 @@ func TestDownloadFallsBackToSecondClient(t *testing.T) {
 	if string(data) != body {
 		t.Fatalf("got %q, want %q", data, body)
 	}
-	if atomic.LoadInt32(&fbCalls) == 0 {
+	if fbCalls.Load() == 0 {
 		t.Fatal("fallback client was never used after the primary failed")
 	}
 }
@@ -1480,9 +1463,9 @@ func TestFetchBytesFallbackEscapesStalledPrimary(t *testing.T) {
 
 func TestFetchBytesDoesNotRetryPermanentHTTPStatus(t *testing.T) {
 	fastRetry(t)
-	var calls int32
+	var calls atomic.Int32
 	client := &http.Client{Transport: rtFunc(func(*http.Request) (*http.Response, error) {
-		atomic.AddInt32(&calls, 1)
+		calls.Add(1)
 		return &http.Response{
 			StatusCode: http.StatusForbidden,
 			Status:     "403 Forbidden",
@@ -1494,7 +1477,7 @@ func TestFetchBytesDoesNotRetryPermanentHTTPStatus(t *testing.T) {
 	if _, err := fetchBytes(context.Background(), client, "https://example.invalid/latest.json"); err == nil {
 		t.Fatal("fetchBytes should return a permanent HTTP error")
 	}
-	if got := atomic.LoadInt32(&calls); got != 1 {
+	if got := calls.Load(); got != 1 {
 		t.Fatalf("permanent HTTP error made %d requests, want 1", got)
 	}
 }
@@ -1502,9 +1485,9 @@ func TestFetchBytesDoesNotRetryPermanentHTTPStatus(t *testing.T) {
 func TestFetchBytesRejectsOversizeResponsesWithoutRetry(t *testing.T) {
 	fastRetry(t)
 	t.Run("declared content length", func(t *testing.T) {
-		var calls int32
+		var calls atomic.Int32
 		client := &http.Client{Transport: rtFunc(func(*http.Request) (*http.Response, error) {
-			atomic.AddInt32(&calls, 1)
+			calls.Add(1)
 			return &http.Response{
 				StatusCode:    http.StatusOK,
 				Status:        "200 OK",
@@ -1523,7 +1506,7 @@ func TestFetchBytesRejectsOversizeResponsesWithoutRetry(t *testing.T) {
 		); !errors.Is(err, errUpdateResponseTooLarge) {
 			t.Fatalf("declared oversize error = %v, want errUpdateResponseTooLarge", err)
 		}
-		if got := atomic.LoadInt32(&calls); got != 1 {
+		if got := calls.Load(); got != 1 {
 			t.Fatalf("declared oversize response made %d requests, want 1", got)
 		}
 	})

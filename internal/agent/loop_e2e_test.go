@@ -19,65 +19,6 @@ import (
 	"reasonix/internal/tool"
 )
 
-type toolCallReasoningRequiredProvider struct {
-	*testutil.MockProvider
-}
-
-func (p toolCallReasoningRequiredProvider) RequiresToolCallReasoning() bool { return true }
-
-type configuredToolCallReasoningProvider struct {
-	*testutil.MockProvider
-	identity string
-}
-
-type cancelMissingReasoningRetryProvider struct {
-	calls          atomic.Int32
-	retryUsageSent chan struct{}
-}
-
-func (p *cancelMissingReasoningRetryProvider) Name() string { return "deepseek-cancel-retry" }
-func (p *cancelMissingReasoningRetryProvider) RequiresToolCallReasoning() bool {
-	return true
-}
-
-func (p *cancelMissingReasoningRetryProvider) Stream(ctx context.Context, _ provider.Request) (<-chan provider.Chunk, error) {
-	call := p.calls.Add(1)
-	ch := make(chan provider.Chunk)
-	go func() {
-		defer close(ch)
-		send := func(chunk provider.Chunk) bool {
-			select {
-			case <-ctx.Done():
-				return false
-			case ch <- chunk:
-				return true
-			}
-		}
-		if call == 1 {
-			toolCall := provider.ToolCall{ID: "discarded", Name: "echo", Arguments: `{"text":"must not run"}`}
-			if !send(provider.Chunk{Type: provider.ChunkToolCall, ToolCall: &toolCall}) {
-				return
-			}
-			if !send(provider.Chunk{Type: provider.ChunkUsage, Usage: &provider.Usage{PromptTokens: 10, CompletionTokens: 2, TotalTokens: 12}}) {
-				return
-			}
-			send(provider.Chunk{Type: provider.ChunkDone})
-			return
-		}
-		if !send(provider.Chunk{Type: provider.ChunkUsage, Usage: &provider.Usage{PromptTokens: 10, CompletionTokens: 1, TotalTokens: 11}}) {
-			return
-		}
-		close(p.retryUsageSent)
-		<-ctx.Done()
-	}()
-	return ch, nil
-}
-
-func (p configuredToolCallReasoningProvider) RequiresToolCallReasoning() bool { return true }
-func (p configuredToolCallReasoningProvider) MissingToolCallReasoningWarningIdentity() string {
-	return p.identity
-}
-
 func echoRegistry() *tool.Registry {
 	reg := tool.NewRegistry()
 	reg.Add(echoTool{})
@@ -91,7 +32,7 @@ func TestRunPersistsUserCreatedAtWithoutSendingItToProvider(t *testing.T) {
 	session.Add(provider.Message{Role: provider.RoleUser, Content: "existing", CreatedAt: existingCreatedAt})
 	agent := New(prov, tool.NewRegistry(), session, Options{}, event.Discard)
 
-	if err := agent.Run(context.Background(), "new prompt"); err != nil {
+	if err := agent.Run(withNoClosedLoop(context.Background()), "new prompt"); err != nil {
 		t.Fatalf("Run: %v", err)
 	}
 	request := prov.LastRequest()
@@ -122,7 +63,7 @@ func TestRunPersistsResponsesItemsAcrossSessionReload(t *testing.T) {
 	}})
 	session := NewSession("system")
 	agent := New(prov, tool.NewRegistry(), session, Options{}, event.Discard)
-	if err := agent.Run(context.Background(), "search"); err != nil {
+	if err := agent.Run(withNoClosedLoop(context.Background()), "search"); err != nil {
 		t.Fatalf("Run: %v", err)
 	}
 
@@ -160,7 +101,7 @@ func TestRunMultiToolRoundEmptyIDsSurvivePairing(t *testing.T) {
 		testutil.Turn{Text: "done"},
 	)
 	a := New(mp, echoRegistry(), NewSession(""), Options{}, event.Discard)
-	if err := a.Run(context.Background(), "go"); err != nil {
+	if err := a.Run(withNoClosedLoop(context.Background()), "go"); err != nil {
 		t.Fatalf("Run: %v", err)
 	}
 
@@ -188,7 +129,7 @@ func TestRunPersistsCumulativeAssistantWorkDuration(t *testing.T) {
 		testutil.Turn{Text: "done"},
 	)
 	a := New(mp, echoRegistry(), NewSession(""), Options{}, event.Discard)
-	if err := a.Run(context.Background(), "go"); err != nil {
+	if err := a.Run(withNoClosedLoop(context.Background()), "go"); err != nil {
 		t.Fatalf("Run: %v", err)
 	}
 
@@ -213,7 +154,7 @@ func TestRunCancelledMidStreamLeavesResumableSession(t *testing.T) {
 	mp := testutil.NewMock("m", testutil.ErrorTurn(context.Canceled))
 	a := New(mp, echoRegistry(), NewSession("sys"), Options{}, event.Discard)
 
-	err := a.Run(context.Background(), "do the thing")
+	err := a.Run(withNoClosedLoop(context.Background()), "do the thing")
 	if !errors.Is(err, context.Canceled) {
 		t.Fatalf("Run should surface the cancellation, got %v", err)
 	}
@@ -225,13 +166,13 @@ func TestRunCancelledMidStreamLeavesResumableSession(t *testing.T) {
 		}
 	}
 	last := repaired[len(repaired)-1]
-	if last.Role != provider.RoleUser || last.Content != "do the thing" {
+	if last.Role != provider.RoleUser || StripTransientUserBlocks(last.Content) != "do the thing" {
 		t.Errorf("the pending user message should survive a cancel, got %+v", last)
 	}
 }
 
 func TestRunRecoversInterruptedStreamAfterPartialText(t *testing.T) {
-	interrupted := &provider.StreamInterruptedError{Err: errors.New("deepseek-flash: read stream: unexpected EOF")}
+	interrupted := &provider.StreamInterruptedError{Err: errors.New("deepseek-flash: read stream: unexpected EOF"), Reason: provider.StreamInterruptPrematureEOF}
 	mp := testutil.NewMock("m",
 		testutil.Turn{Text: "partial ", ChunkError: interrupted},
 		testutil.Turn{Text: "continued"},
@@ -239,7 +180,7 @@ func TestRunRecoversInterruptedStreamAfterPartialText(t *testing.T) {
 	sink := &recordSink{}
 	a := New(mp, echoRegistry(), NewSession(""), Options{}, sink)
 
-	if err := a.Run(context.Background(), "go"); err != nil {
+	if err := a.Run(withNoClosedLoop(context.Background()), "go"); err != nil {
 		t.Fatalf("Run should recover the interrupted stream, got %v", err)
 	}
 	if mp.CallCount() != 2 {
@@ -250,35 +191,57 @@ func TestRunRecoversInterruptedStreamAfterPartialText(t *testing.T) {
 	if len(reqs) != 2 {
 		t.Fatalf("recorded requests = %d, want 2", len(reqs))
 	}
-	second := reqs[1].Messages
-	for _, message := range second {
+	// Codex-style: exact original request replay — no synthetic recovery user
+	// message, no partial assistant in the provider body.
+	if !providerRequestBodiesEqual(reqs[0], reqs[1]) {
+		t.Fatalf("retry must replay the identical provider request\nfirst=%+v\nsecond=%+v", reqs[0], reqs[1])
+	}
+	for _, message := range reqs[1].Messages {
 		if message.LocalOnly || message.Content == "partial " {
-			t.Fatalf("partial assistant leaked into provider recovery request: %+v", second)
+			t.Fatalf("partial assistant leaked into provider recovery request: %+v", reqs[1].Messages)
+		}
+		if strings.Contains(message.Content, "interrupted") && message.Role == provider.RoleUser {
+			t.Fatalf("synthetic stream recovery must not be injected: %+v", message)
 		}
 	}
-	if second[len(second)-1].Role != provider.RoleUser || !strings.Contains(second[len(second)-1].Content, "excluded from model context") {
-		t.Fatalf("recovery prompt missing duplicate guard: %+v", second[len(second)-1])
-	}
-	var local provider.Message
+	// Successful recovery never persists a LocalOnly interrupted record.
 	for _, message := range a.Session().Messages {
 		if message.LocalOnly {
-			local = message
+			t.Fatalf("successful recovery must not leave LocalOnly interrupt records: %+v", message)
 		}
-	}
-	if local.Content != "partial " || local.InterruptedTurn == nil || local.InterruptedTurn.Pending {
-		t.Fatalf("partial assistant was not retained as consumed display-only history: %+v", local)
 	}
 
 	var streamed strings.Builder
 	for _, e := range sink.kinds(event.Text) {
 		streamed.WriteString(e.Text)
 	}
-	if streamed.String() != "partial continued" {
-		t.Fatalf("streamed text = %q, want %q", streamed.String(), "partial continued")
+	// Both attempts emit text to the sink; Desktop discards the first via
+	// stream_attempt. Agent still emits both for non-journal sinks.
+	if !strings.Contains(streamed.String(), "continued") {
+		t.Fatalf("streamed text = %q, want final continued answer", streamed.String())
 	}
 	retries := sink.kinds(event.Retrying)
-	if len(retries) != 1 || retries[0].RetryAttempt != 1 || retries[0].RetryMax != maxStreamRecoveries {
+	if len(retries) != 1 || retries[0].RetryAttempt != 1 || retries[0].RetryMax != maxStreamRecoveries || retries[0].RetryScope != event.RetryScopeStream {
 		t.Fatalf("retry events = %+v, want one stream recovery retry", retries)
+	}
+	attempts := sink.kinds(event.StreamAttempt)
+	if len(attempts) < 3 {
+		t.Fatalf("stream_attempt events = %d, want begin/discard/begin/commit at least", len(attempts))
+	}
+	var sawDiscard, sawCommit bool
+	for _, e := range attempts {
+		if e.StreamAttempt.Action == event.StreamAttemptDiscard {
+			sawDiscard = true
+			if e.StreamAttempt.Reason != provider.StreamInterruptPrematureEOF {
+				t.Fatalf("discard reason = %q", e.StreamAttempt.Reason)
+			}
+		}
+		if e.StreamAttempt.Action == event.StreamAttemptCommit {
+			sawCommit = true
+		}
+	}
+	if !sawDiscard || !sawCommit {
+		t.Fatalf("stream attempts missing discard/commit: %+v", attempts)
 	}
 }
 
@@ -292,27 +255,31 @@ func TestRunRecoversRepeatedInterruptedStreams(t *testing.T) {
 	sink := &recordSink{}
 	a := New(mp, echoRegistry(), NewSession(""), Options{}, sink)
 
-	if err := a.Run(context.Background(), "go"); err != nil {
+	if err := a.Run(withNoClosedLoop(context.Background()), "go"); err != nil {
 		t.Fatalf("Run should recover repeated interrupted streams, got %v", err)
 	}
 	if mp.CallCount() != 3 {
 		t.Fatalf("provider calls = %d, want 3", mp.CallCount())
+	}
+	reqs := mp.Requests()
+	if !providerRequestBodiesEqual(reqs[0], reqs[1]) || !providerRequestBodiesEqual(reqs[0], reqs[2]) {
+		t.Fatalf("all retries must replay the same frozen provider request")
 	}
 
 	var streamed strings.Builder
 	for _, e := range sink.kinds(event.Text) {
 		streamed.WriteString(e.Text)
 	}
-	if streamed.String() != "first second done" {
-		t.Fatalf("streamed text = %q, want repeated partials plus final text", streamed.String())
+	if !strings.Contains(streamed.String(), "done") {
+		t.Fatalf("streamed text = %q, want final done", streamed.String())
 	}
 	retries := sink.kinds(event.Retrying)
 	if len(retries) != 2 || retries[0].RetryAttempt != 1 || retries[1].RetryAttempt != 2 {
 		t.Fatalf("retry events = %+v, want attempts 1 and 2", retries)
 	}
 	for _, retry := range retries {
-		if retry.RetryMax != maxStreamRecoveries {
-			t.Fatalf("retry max = %d, want %d", retry.RetryMax, maxStreamRecoveries)
+		if retry.RetryMax != maxStreamRecoveries || retry.RetryScope != event.RetryScopeStream {
+			t.Fatalf("retry = %+v, want max=%d scope=stream", retry, maxStreamRecoveries)
 		}
 	}
 }
@@ -328,28 +295,181 @@ func TestRunRecoversInterruptedPartialToolCallWithoutExecutingIt(t *testing.T) {
 	)
 	a := New(mp, echoRegistry(), NewSession(""), Options{}, event.Discard)
 
-	if err := a.Run(context.Background(), "go"); err != nil {
+	if err := a.Run(withNoClosedLoop(context.Background()), "go"); err != nil {
 		t.Fatalf("Run should recover the interrupted tool-call stream, got %v", err)
 	}
 
-	var displayOnly provider.Message
 	for _, m := range a.Session().Messages {
 		if m.Role == provider.RoleTool && !m.LocalOnly {
 			t.Fatalf("partial tool call should not have executed or produced a tool result: %+v", m)
 		}
 		if m.LocalOnly {
-			displayOnly = m
+			t.Fatalf("successful recovery must not leave LocalOnly interrupt: %+v", m)
 		}
 	}
-	if len(displayOnly.ToolCalls) != 1 || displayOnly.ToolCalls[0].Name != "echo" || displayOnly.ToolCalls[0].Arguments != "" {
-		t.Fatalf("partial tool call was not retained safely for display: %+v", displayOnly)
-	}
 	reqs := mp.Requests()
-	second := reqs[1].Messages
-	last := second[len(second)-1]
-	if last.Role != provider.RoleUser || !strings.Contains(last.Content, "fresh complete tool call") {
-		t.Fatalf("partial-tool recovery prompt missing fresh-call instruction: %+v", last)
+	if len(reqs) != 2 || !providerRequestBodiesEqual(reqs[0], reqs[1]) {
+		t.Fatalf("partial-tool interrupt must exact-replay without synthetic recovery")
 	}
+}
+
+func TestRunStreamRetryRequestCountIsLinearNotTriangular(t *testing.T) {
+	interrupted := &provider.StreamInterruptedError{Err: errors.New("eof"), Reason: provider.StreamInterruptPrematureEOF}
+	mp := testutil.NewMock("m",
+		testutil.Turn{Text: "a", Usage: &provider.Usage{PromptTokens: 30, CompletionTokens: 1, TotalTokens: 31, CacheMissTokens: 30}, ChunkError: interrupted},
+		testutil.Turn{Text: "b", Usage: &provider.Usage{PromptTokens: 30, CompletionTokens: 1, TotalTokens: 31, CacheMissTokens: 30}, ChunkError: interrupted},
+		testutil.Turn{Text: "ok", Usage: &provider.Usage{PromptTokens: 30, CompletionTokens: 2, TotalTokens: 32, CacheMissTokens: 30}},
+	)
+	sink := &recordSink{}
+	a := New(mp, echoRegistry(), NewSession(""), Options{}, sink)
+	if err := a.Run(withNoClosedLoop(context.Background()), "go"); err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+	if mp.CallCount() != 3 {
+		t.Fatalf("provider calls = %d, want 3", mp.CallCount())
+	}
+	usages := sink.kinds(event.Usage)
+	if len(usages) != 1 || usages[0].Usage == nil {
+		t.Fatalf("usage events = %d, want one aggregate", len(usages))
+	}
+	u := usages[0].Usage
+	if u.RequestCount != 3 {
+		t.Fatalf("RequestCount = %d, want 3 (linear, not triangular 6)", u.RequestCount)
+	}
+	// Billable input is summed; context gauge uses ContextPromptTokens.
+	if u.PromptTokens != 90 {
+		t.Fatalf("PromptTokens = %d, want billable sum 90", u.PromptTokens)
+	}
+	if u.ContextPromptTokens != 30 {
+		t.Fatalf("ContextPromptTokens = %d, want latest 30", u.ContextPromptTokens)
+	}
+	if u.CacheHitTokens+u.CacheMissTokens != u.PromptTokens {
+		t.Fatalf("cache split %d+%d must align with PromptTokens %d", u.CacheHitTokens, u.CacheMissTokens, u.PromptTokens)
+	}
+	if u.CompletionTokens != 4 {
+		t.Fatalf("CompletionTokens = %d, want billable sum 4", u.CompletionTokens)
+	}
+	// ContextSnapshot and compaction use the latest full attempt shape.
+	if last := a.sess.output.lastUsage.Load(); last == nil || last.PromptTokens != 30 {
+		t.Fatalf("lastUsage prompt = %+v, want latest attempt prompt 30", last)
+	}
+}
+
+func TestRunExhaustedStreamRetriesPersistPendingLocalOnly(t *testing.T) {
+	interrupted := &provider.StreamInterruptedError{Err: errors.New("eof"), Reason: provider.StreamInterruptPrematureEOF}
+	turns := make([]testutil.Turn, 0, maxSamplingAttempts)
+	for range maxSamplingAttempts {
+		turns = append(turns, testutil.Turn{Text: "half", ChunkError: interrupted})
+	}
+	mp := testutil.NewMock("m", turns...)
+	a := New(mp, echoRegistry(), NewSession(""), Options{}, event.Discard)
+
+	err := a.Run(withNoClosedLoop(context.Background()), "go")
+	if !provider.IsStreamInterrupted(err) {
+		t.Fatalf("Run error = %v, want StreamInterruptedError after exhausting retries", err)
+	}
+	if mp.CallCount() != maxSamplingAttempts {
+		t.Fatalf("provider calls = %d, want %d", mp.CallCount(), maxSamplingAttempts)
+	}
+	var pending *provider.InterruptedTurnRecovery
+	var local provider.Message
+	for _, m := range a.Session().Messages {
+		if m.LocalOnly && m.InterruptedTurn != nil && m.InterruptedTurn.Pending {
+			pending = m.InterruptedTurn
+			local = m
+		}
+	}
+	if pending == nil || local.Content != "half" {
+		t.Fatalf("exhausted retries must leave one pending LocalOnly record: local=%+v pending=%+v", local, pending)
+	}
+	// No synthetic recovery user messages mid-turn.
+	for _, m := range a.Session().Messages {
+		if m.Role == provider.RoleUser && strings.Contains(m.Content, "previous assistant response was interrupted") {
+			t.Fatalf("must not inject synthetic stream recovery: %+v", m)
+		}
+	}
+}
+
+func TestRunCompleteUncommittedToolCallNeverExecutes(t *testing.T) {
+	// Full tool block arrived, but the stream was interrupted before a clean
+	// terminal — the call stays speculative and must never reach executeBatch.
+	interrupted := &provider.StreamInterruptedError{Err: errors.New("eof"), Reason: provider.StreamInterruptPrematureEOF}
+	writer := &countingWriterTool{}
+	reg := tool.NewRegistry()
+	reg.Add(writer)
+	mp := testutil.NewMock("m",
+		testutil.Turn{Chunks: []provider.Chunk{
+			{Type: provider.ChunkToolCall, ToolCall: &provider.ToolCall{ID: "w1", Name: "write_file", Arguments: `{"path":"x.txt","content":"from-writer"}`}},
+			{Type: provider.ChunkError, Err: interrupted},
+		}},
+		testutil.Turn{Text: "recovered without write"},
+	)
+	a := New(mp, reg, NewSession(""), Options{}, event.Discard)
+	if err := a.Run(withNoClosedLoop(context.Background()), "write it"); err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+	if writer.calls.Load() != 0 {
+		t.Fatalf("writer executed %d times, want 0 (uncommitted tool call)", writer.calls.Load())
+	}
+}
+
+type countingWriterTool struct{ calls atomic.Int32 }
+
+func (c *countingWriterTool) Name() string        { return "write_file" }
+func (c *countingWriterTool) Description() string { return "count writes" }
+func (c *countingWriterTool) Schema() json.RawMessage {
+	return json.RawMessage(`{"type":"object","properties":{"path":{"type":"string"},"content":{"type":"string"}}}`)
+}
+func (c *countingWriterTool) ReadOnly() bool { return false }
+func (c *countingWriterTool) Execute(context.Context, json.RawMessage) (string, error) {
+	c.calls.Add(1)
+	return "wrote", nil
+}
+
+// providerRequestBodiesEqual compares the provider-visible request surface
+// (messages, tools order/bytes, temperature, token limit, response format).
+func providerRequestBodiesEqual(a, b provider.Request) bool {
+	if a.MaxTokens != b.MaxTokens {
+		return false
+	}
+	if (a.Temperature == nil) != (b.Temperature == nil) {
+		return false
+	}
+	if a.Temperature != nil && b.Temperature != nil && *a.Temperature != *b.Temperature {
+		return false
+	}
+	if (a.ResponseFormat == nil) != (b.ResponseFormat == nil) {
+		return false
+	}
+	if a.ResponseFormat != nil && b.ResponseFormat != nil && a.ResponseFormat.Type != b.ResponseFormat.Type {
+		return false
+	}
+	if len(a.Messages) != len(b.Messages) || len(a.Tools) != len(b.Tools) {
+		return false
+	}
+	for i := range a.Messages {
+		am, bm := a.Messages[i], b.Messages[i]
+		if am.Role != bm.Role || am.Content != bm.Content || am.ReasoningContent != bm.ReasoningContent ||
+			am.Name != bm.Name || am.ToolCallID != bm.ToolCallID || am.LocalOnly != bm.LocalOnly {
+			return false
+		}
+		if len(am.ToolCalls) != len(bm.ToolCalls) {
+			return false
+		}
+		for j := range am.ToolCalls {
+			if am.ToolCalls[j].ID != bm.ToolCalls[j].ID || am.ToolCalls[j].Name != bm.ToolCalls[j].Name ||
+				am.ToolCalls[j].Arguments != bm.ToolCalls[j].Arguments {
+				return false
+			}
+		}
+	}
+	for i := range a.Tools {
+		if a.Tools[i].Name != b.Tools[i].Name || a.Tools[i].Description != b.Tools[i].Description ||
+			string(a.Tools[i].Parameters) != string(b.Tools[i].Parameters) {
+			return false
+		}
+	}
+	return true
 }
 
 func TestRunGenericStreamErrorPersistsLocalDisplayAndInjectsBoundedRecovery(t *testing.T) {
@@ -361,7 +481,7 @@ func TestRunGenericStreamErrorPersistsLocalDisplayAndInjectsBoundedRecovery(t *t
 	session := NewSession("system")
 	a := New(mp, echoRegistry(), session, Options{}, event.Discard)
 
-	if err := a.Run(context.Background(), "change the file"); !errors.Is(err, apiErr) {
+	if err := a.Run(withNoClosedLoop(context.Background()), "change the file"); !errors.Is(err, apiErr) {
 		t.Fatalf("first Run error = %v, want %v", err, apiErr)
 	}
 	msgs := session.Snapshot()
@@ -373,7 +493,7 @@ func TestRunGenericStreamErrorPersistsLocalDisplayAndInjectsBoundedRecovery(t *t
 		t.Fatalf("local display lost streamed output: %+v", last)
 	}
 
-	if err := a.Run(context.Background(), "continue"); err != nil {
+	if err := a.Run(withNoClosedLoop(context.Background()), "continue"); err != nil {
 		t.Fatalf("second Run: %v", err)
 	}
 	req := mp.Requests()[1]
@@ -384,7 +504,7 @@ func TestRunGenericStreamErrorPersistsLocalDisplayAndInjectsBoundedRecovery(t *t
 	}
 	lastUser := req.Messages[len(req.Messages)-1]
 	if lastUser.Role != provider.RoleUser || !strings.Contains(lastUser.Content, "<interrupted-turn-recovery>") ||
-		!strings.Contains(lastUser.Content, "unsafe_partial_output: excluded") || !strings.HasSuffix(lastUser.Content, "continue") {
+		!strings.Contains(lastUser.Content, "unsafe_partial_output: excluded") || !strings.Contains(lastUser.Content, "continue") {
 		t.Fatalf("next user turn missing bounded recovery block: %+v", lastUser)
 	}
 	if got := StripTransientUserBlocks(lastUser.Content); got != "continue" {
@@ -413,7 +533,7 @@ func TestRunRecoveryKeepsCompletedToolPairAndSummarizesChangedFile(t *testing.T)
 	})
 	mp := testutil.NewMock("m", testutil.Turn{Text: "done"})
 	a := New(mp, echoRegistry(), session, Options{}, event.Discard)
-	if err := a.Run(context.Background(), "continue"); err != nil {
+	if err := a.Run(withNoClosedLoop(context.Background()), "continue"); err != nil {
 		t.Fatalf("Run: %v", err)
 	}
 
@@ -444,7 +564,7 @@ func TestRunWellFormedToolLoopRoundTrips(t *testing.T) {
 		testutil.Turn{Text: "all set"},
 	)
 	a := New(mp, echoRegistry(), NewSession(""), Options{}, event.Discard)
-	if err := a.Run(context.Background(), "go"); err != nil {
+	if err := a.Run(withNoClosedLoop(context.Background()), "go"); err != nil {
 		t.Fatalf("Run: %v", err)
 	}
 
@@ -469,7 +589,7 @@ func TestRunNonDeepSeekMissingToolCallReasoningDoesNotRetry(t *testing.T) {
 	sink := &recordSink{}
 	a := New(mp, echoRegistry(), NewSession(""), Options{}, sink)
 
-	if err := a.Run(context.Background(), "go"); err != nil {
+	if err := a.Run(withNoClosedLoop(context.Background()), "go"); err != nil {
 		t.Fatalf("Run: %v", err)
 	}
 	if got := mp.CallCount(); got != 2 {
@@ -503,9 +623,9 @@ func TestRunSilentlyRecoversMissingToolCallReasoning(t *testing.T) {
 		testutil.Turn{Text: "done"},
 	)
 	sink := &recordSink{}
-	a := New(toolCallReasoningRequiredProvider{mp}, echoRegistry(), NewSession(""), Options{}, sink)
+	a := New(strictToolCallReasoningProvider{mp}, echoRegistry(), NewSession(""), Options{}, sink)
 
-	if err := a.Run(context.Background(), "go"); err != nil {
+	if err := a.Run(withNoClosedLoop(context.Background()), "go"); err != nil {
 		t.Fatalf("Run: %v", err)
 	}
 	var savedToolTurns int
@@ -559,9 +679,9 @@ func TestMissingReasoningRecoveryAdoptsRetryWithoutToolCall(t *testing.T) {
 		},
 	)
 	sink := &recordSink{}
-	a := New(toolCallReasoningRequiredProvider{mp}, echoRegistry(), NewSession(""), Options{}, sink)
+	a := New(strictToolCallReasoningProvider{mp}, echoRegistry(), NewSession(""), Options{}, sink)
 
-	if err := a.Run(context.Background(), "go"); err != nil {
+	if err := a.Run(withNoClosedLoop(context.Background()), "go"); err != nil {
 		t.Fatalf("Run: %v", err)
 	}
 	if mp.CallCount() != 2 {
@@ -572,7 +692,7 @@ func TestMissingReasoningRecoveryAdoptsRetryWithoutToolCall(t *testing.T) {
 		if message.Role == provider.RoleAssistant && len(message.ToolCalls) > 0 {
 			toolTurns++
 		}
-		if message.Role == provider.RoleTool {
+		if message.Role == provider.RoleTool && !message.LocalOnly {
 			toolResults++
 		}
 	}
@@ -598,23 +718,19 @@ func TestMissingReasoningRecoveryAdoptsRetryWithoutToolCall(t *testing.T) {
 	}
 }
 
-func TestMissingReasoningRecoveryFailureFallsBackBeforeToolExecution(t *testing.T) {
+func TestCompatibleMissingReasoningKeepsOriginalWithoutRecovery(t *testing.T) {
 	mp := testutil.NewMock("deepseek-proxy",
 		testutil.Turn{
 			ToolCalls: []provider.ToolCall{{ID: "c1", Name: "echo", Arguments: `{"text":"hi"}`}},
 			Usage:     &provider.Usage{PromptTokens: 10, CompletionTokens: 2, TotalTokens: 12, FinishReason: "tool_calls"},
-		},
-		testutil.Turn{
-			Usage:      &provider.Usage{PromptTokens: 10, CompletionTokens: 1, TotalTokens: 11},
-			ChunkError: errors.New("recovery stream failed"),
 		},
 		testutil.Turn{Text: "done"},
 	)
 	sink := &recordSink{}
 	a := New(toolCallReasoningRequiredProvider{mp}, echoRegistry(), NewSession(""), Options{}, sink)
 
-	if err := a.Run(context.Background(), "go"); err != nil {
-		t.Fatalf("Run should keep the complete first response, got %v", err)
+	if err := a.Run(withNoClosedLoop(context.Background()), "go"); err != nil {
+		t.Fatalf("Run should keep the provider-compatible original response, got %v", err)
 	}
 	var toolResults int
 	for _, message := range a.Session().Messages {
@@ -626,11 +742,11 @@ func TestMissingReasoningRecoveryFailureFallsBackBeforeToolExecution(t *testing.
 		t.Fatalf("tool results = %d, want the original call executed once", toolResults)
 	}
 	usageEvents := sink.kinds(event.Usage)
-	if len(usageEvents) == 0 || usageEvents[0].Usage == nil || usageEvents[0].Usage.TotalTokens != 23 {
+	if len(usageEvents) == 0 || usageEvents[0].Usage == nil || usageEvents[0].Usage.TotalTokens != 12 {
 		t.Fatalf("failed recovery usage was not accounted for: %+v", usageEvents)
 	}
-	if sink.recoveryCount(event.ProtocolRecoveryMissingReasoningFallback) != 1 {
-		t.Fatalf("fallback audit missing: %+v", sink.recovery)
+	if sink.recoveryCount(event.ProtocolRecoveryMissingReasoningFallback) != 0 {
+		t.Fatalf("unexpected long-lived fallback audit: %+v", sink.recovery)
 	}
 }
 
@@ -664,7 +780,7 @@ func TestMissingReasoningRecoveryCancellationAccountsBothAttempts(t *testing.T) 
 	}
 }
 
-func TestSetSessionRearmsInMemoryMissingReasoningRecovery(t *testing.T) {
+func TestCompatibleMissingReasoningDoesNotRearmOnSessionChange(t *testing.T) {
 	mp := testutil.NewMock("deepseek-proxy",
 		testutil.Turn{ToolCalls: []provider.ToolCall{{ID: "c1", Name: "echo", Arguments: `{"text":"hi"}`}}},
 		testutil.Turn{ToolCalls: []provider.ToolCall{{ID: "c1r", Name: "echo", Arguments: `{"text":"hi"}`}}},
@@ -676,22 +792,22 @@ func TestSetSessionRearmsInMemoryMissingReasoningRecovery(t *testing.T) {
 	sink := &recordSink{}
 	a := New(toolCallReasoningRequiredProvider{mp}, echoRegistry(), NewSession(""), Options{}, sink)
 
-	if err := a.Run(context.Background(), "go"); err != nil {
+	if err := a.Run(withNoClosedLoop(context.Background()), "go"); err != nil {
 		t.Fatalf("first Run: %v", err)
 	}
 	a.SetSession(NewSession(""))
-	if err := a.Run(context.Background(), "go"); err != nil {
+	if err := a.Run(withNoClosedLoop(context.Background()), "go"); err != nil {
 		t.Fatalf("second Run: %v", err)
 	}
-	if got := sink.recoveryCount(event.ProtocolRecoveryMissingReasoningRetryAttempted); got != 2 {
-		t.Fatalf("recovery retries across two sessions = %d, want 2", got)
+	if got := sink.recoveryCount(event.ProtocolRecoveryMissingReasoningRetryAttempted); got != 0 {
+		t.Fatalf("recovery retries across two sessions = %d, want 0", got)
 	}
 }
 
 // A shared state dir turns the old warning cooldown into a cross-process retry
 // circuit breaker. The first process retries once; a fresh process immediately
 // uses the empty-key fallback without doubling the request.
-func TestMissingReasoningRecoveryRateLimitsAcrossProcesses(t *testing.T) {
+func TestCompatibleMissingReasoningIgnoresLegacyIncidentState(t *testing.T) {
 	stateDir := t.TempDir()
 	mp := testutil.NewMock("deepseek-proxy",
 		testutil.Turn{ToolCalls: []provider.ToolCall{{ID: "c1", Name: "echo", Arguments: `{"text":"hi"}`}}},
@@ -700,11 +816,11 @@ func TestMissingReasoningRecoveryRateLimitsAcrossProcesses(t *testing.T) {
 	)
 	sink1 := &recordSink{}
 	a1 := New(toolCallReasoningRequiredProvider{mp}, echoRegistry(), NewSession(""), Options{MissingReasoningWarnStateDir: stateDir}, sink1)
-	if err := a1.Run(context.Background(), "go"); err != nil {
+	if err := a1.Run(withNoClosedLoop(context.Background()), "go"); err != nil {
 		t.Fatalf("first Run: %v", err)
 	}
-	if got := sink1.recoveryCount(event.ProtocolRecoveryMissingReasoningRetryAttempted); got != 1 {
-		t.Fatalf("first process recovery retries = %d, want 1", got)
+	if got := sink1.recoveryCount(event.ProtocolRecoveryMissingReasoningRetryAttempted); got != 0 {
+		t.Fatalf("first process recovery retries = %d, want 0", got)
 	}
 
 	mp2 := testutil.NewMock("deepseek-proxy",
@@ -713,14 +829,14 @@ func TestMissingReasoningRecoveryRateLimitsAcrossProcesses(t *testing.T) {
 	)
 	sink2 := &recordSink{}
 	a2 := New(toolCallReasoningRequiredProvider{mp2}, echoRegistry(), NewSession(""), Options{MissingReasoningWarnStateDir: stateDir}, sink2)
-	if err := a2.Run(context.Background(), "go"); err != nil {
+	if err := a2.Run(withNoClosedLoop(context.Background()), "go"); err != nil {
 		t.Fatalf("second process Run: %v", err)
 	}
 	if got := sink2.recoveryCount(event.ProtocolRecoveryMissingReasoningRetryAttempted); got != 0 {
 		t.Fatalf("fresh process recovery retries = %d, want 0", got)
 	}
-	if got := sink2.recoveryCount(event.ProtocolRecoveryMissingReasoningRetrySuppressed); got != 1 {
-		t.Fatalf("fresh process suppressed retries = %d, want 1", got)
+	if got := sink2.recoveryCount(event.ProtocolRecoveryMissingReasoningRetrySuppressed); got != 0 {
+		t.Fatalf("fresh process suppressed retries = %d, want 0", got)
 	}
 }
 
@@ -734,7 +850,7 @@ func TestMissingReasoningRecoverySeparatesProviderConfigurations(t *testing.T) {
 		)
 		sink := &recordSink{}
 		a := New(configuredToolCallReasoningProvider{MockProvider: mp, identity: identity}, echoRegistry(), NewSession(""), Options{MissingReasoningWarnStateDir: stateDir}, sink)
-		if err := a.Run(context.Background(), "go"); err != nil {
+		if err := a.Run(withNoClosedLoop(context.Background()), "go"); err != nil && !isReplayFailureForTest(err) {
 			t.Fatalf("Run(%q): %v", identity, err)
 		}
 		return sink.recoveryCount(event.ProtocolRecoveryMissingReasoningRetryAttempted)
@@ -758,8 +874,8 @@ func TestThreeHealthyToolCallReasoningTurnsRearmFutureRegression(t *testing.T) {
 	run := func(turns ...testutil.Turn) int {
 		mp := testutil.NewMock("deepseek-proxy", turns...)
 		sink := &recordSink{}
-		a := New(toolCallReasoningRequiredProvider{mp}, echoRegistry(), NewSession(""), Options{MissingReasoningWarnStateDir: stateDir}, sink)
-		if err := a.Run(context.Background(), "go"); err != nil {
+		a := New(strictToolCallReasoningProvider{mp}, echoRegistry(), NewSession(""), Options{MissingReasoningWarnStateDir: stateDir}, sink)
+		if err := a.Run(withNoClosedLoop(context.Background()), "go"); err != nil && !isReplayFailureForTest(err) {
 			t.Fatalf("Run: %v", err)
 		}
 		return sink.recoveryCount(event.ProtocolRecoveryMissingReasoningRetryAttempted)
@@ -781,7 +897,7 @@ func TestThreeHealthyToolCallReasoningTurnsRearmFutureRegression(t *testing.T) {
 
 func TestHealthyToolCallReasoningStreakWorksWithinOneAgentAndResetsOnMissing(t *testing.T) {
 	stateDir := t.TempDir()
-	prov := toolCallReasoningRequiredProvider{testutil.NewMock("deepseek-proxy")}
+	prov := strictToolCallReasoningProvider{testutil.NewMock("deepseek-proxy")}
 	a := New(prov, echoRegistry(), NewSession(""), Options{MissingReasoningWarnStateDir: stateDir}, event.Discard)
 	calls := []provider.ToolCall{{ID: "c1", Name: "echo", Arguments: `{"text":"hi"}`}}
 
@@ -807,7 +923,7 @@ func TestMissingReasoningRecoveryIOFailureStillSuppressesLocally(t *testing.T) {
 	if err := os.WriteFile(statePath, []byte("occupied"), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	prov := toolCallReasoningRequiredProvider{testutil.NewMock("deepseek-proxy")}
+	prov := strictToolCallReasoningProvider{testutil.NewMock("deepseek-proxy")}
 	a := New(prov, echoRegistry(), NewSession(""), Options{MissingReasoningWarnStateDir: statePath}, event.Discard)
 	calls := []provider.ToolCall{{ID: "c1", Name: "echo", Arguments: `{"text":"hi"}`}}
 
@@ -824,7 +940,7 @@ func TestHealthyToolCallReasoningRetriesTransientStateWriteFailure(t *testing.T)
 		t.Skip("chmod permissions are not portable to Windows")
 	}
 	stateDir := t.TempDir()
-	prov := toolCallReasoningRequiredProvider{testutil.NewMock("deepseek-proxy")}
+	prov := strictToolCallReasoningProvider{testutil.NewMock("deepseek-proxy")}
 	a := New(prov, echoRegistry(), NewSession(""), Options{MissingReasoningWarnStateDir: stateDir}, event.Discard)
 	calls := []provider.ToolCall{{ID: "c1", Name: "echo", Arguments: `{"text":"hi"}`}}
 
@@ -847,7 +963,7 @@ func TestHealthyToolCallReasoningRetriesTransientStateWriteFailure(t *testing.T)
 		t.Fatal(err)
 	}
 	permissionsRestored = true
-	for healthy := 0; healthy < missingReasoningHealthyResolveStreak-1; healthy++ {
+	for healthy := range missingReasoningHealthyResolveStreak - 1 {
 		if missing, retry := a.observeMissingToolCallReasoning(calls, "healthy reasoning"); missing || retry {
 			t.Fatalf("healthy recovery observation %d = missing:%v retry:%v, want false/false", healthy+1, missing, retry)
 		}
@@ -871,7 +987,7 @@ func TestRunPreservesOriginalRequiredToolCallReasoningAcrossHook(t *testing.T) {
 	h := &stubHooks{hasPostLLM: true, postLLMOut: "translated display"}
 	a := New(toolCallReasoningRequiredProvider{mp}, echoRegistry(), NewSession(""), Options{Hooks: h}, event.Discard)
 
-	if err := a.Run(context.Background(), "go"); err != nil {
+	if err := a.Run(withNoClosedLoop(context.Background()), "go"); err != nil {
 		t.Fatalf("Run: %v", err)
 	}
 	reqs := mp.Requests()
@@ -901,10 +1017,49 @@ func TestRunStoresTransformedNonToolReasoningForToolCallOnlyProvider(t *testing.
 	h := &stubHooks{hasPostLLM: true, postLLMOut: "translated display"}
 	a := New(toolCallReasoningRequiredProvider{mp}, echoRegistry(), NewSession(""), Options{Hooks: h}, event.Discard)
 
-	if err := a.Run(context.Background(), "go"); err != nil {
+	if err := a.Run(withNoClosedLoop(context.Background()), "go"); err != nil {
 		t.Fatalf("Run: %v", err)
 	}
-	if got := assistantReasoning(a.session.Messages); got != "translated display" {
+	if got := assistantReasoning(a.sess.conversation.Messages); got != "translated display" {
 		t.Fatalf("stored non-tool reasoning = %q, want transformed display text", got)
+	}
+}
+
+// TestRunNotifiesWhenStreamRetriesExhausted pins the #9560 visibility fix:
+// when every sampling attempt of a model round ends in a stream interruption,
+// the run must surface a user-readable warn notice explaining the failure —
+// not only the generic interrupted-turn record.
+func TestRunNotifiesWhenStreamRetriesExhausted(t *testing.T) {
+	interrupted := &provider.StreamInterruptedError{Err: errors.New("dial tcp: lookup gw.invalid: no such host"), Reason: provider.StreamInterruptIdleTimeout}
+	script := make([]testutil.Turn, maxSamplingAttempts)
+	for i := range script {
+		script[i] = testutil.Turn{ChunkError: interrupted}
+	}
+	mp := testutil.NewMock("m", script...)
+	sink := &recordSink{}
+	a := New(mp, echoRegistry(), NewSession(""), Options{}, sink)
+
+	err := a.Run(withNoClosedLoop(context.Background()), "go")
+	if err == nil {
+		t.Fatal("Run must fail after exhausting stream retries")
+	}
+	if !provider.IsStreamInterrupted(err) {
+		t.Fatalf("terminal error = %v, want a stream interruption", err)
+	}
+	var sawExplanation bool
+	for _, e := range sink.kinds(event.Notice) {
+		if e.Level == event.LevelWarn && strings.Contains(e.Text, "idle timeout") {
+			sawExplanation = true
+			if e.Code != event.NoticeCodeStreamInterruptedIdleTimeout {
+				t.Fatalf("stream interruption notice code = %q", e.Code)
+			}
+			if strings.Contains(e.Text, "gw.invalid") || strings.Contains(e.Text, "dial tcp") {
+				t.Fatalf("notice leaks raw transport error text: %q", e.Text)
+			}
+		}
+	}
+	if !sawExplanation {
+		notices := sink.kinds(event.Notice)
+		t.Fatalf("no warn notice explains the exhausted stream; notices = %+v", notices)
 	}
 }

@@ -82,6 +82,53 @@ func TestEffectiveWebSearchDefaultsOnlySupportedOfficialDeepSeekAPIs(t *testing.
 	}
 }
 
+func TestOpenCodeGoDeepSeekWebSearchCapabilityIsModelScoped(t *testing.T) {
+	explicitTrue := true
+	tests := []struct {
+		name  string
+		entry ProviderEntry
+		want  bool
+	}{
+		{
+			name:  "responses flash",
+			entry: ProviderEntry{Kind: "responses", BaseURL: "https://opencode.ai/zen/go/v1", Models: []string{"deepseek-v4-flash"}, WebSearch: &explicitTrue},
+			want:  true,
+		},
+		{
+			name:  "anthropic flash trailing slash",
+			entry: ProviderEntry{Kind: "anthropic", BaseURL: "https://opencode.ai/zen/go/", Model: "deepseek-v4-flash", WebSearch: &explicitTrue},
+			want:  true,
+		},
+		{
+			name:  "mixed anthropic catalog remains unverified",
+			entry: ProviderEntry{Kind: "anthropic", BaseURL: "https://opencode.ai/zen/go", Models: []string{"qwen3.7-plus", "deepseek-v4-flash"}, WebSearch: &explicitTrue},
+			want:  false,
+		},
+		{
+			name:  "pro remains unsupported",
+			entry: ProviderEntry{Kind: "responses", BaseURL: "https://opencode.ai/zen/go/v1", Model: "deepseek-v4-pro", WebSearch: &explicitTrue},
+			want:  false,
+		},
+		{
+			name:  "wrong responses path",
+			entry: ProviderEntry{Kind: "responses", BaseURL: "https://opencode.ai/zen/go", Model: "deepseek-v4-flash", WebSearch: &explicitTrue},
+			want:  false,
+		},
+		{
+			name:  "lookalike host",
+			entry: ProviderEntry{Kind: "anthropic", BaseURL: "https://opencode.ai.attacker.example/zen/go", Model: "deepseek-v4-flash", WebSearch: &explicitTrue},
+			want:  false,
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := HasServerWebSearchCapability(&tt.entry); got != tt.want {
+				t.Fatalf("HasServerWebSearchCapability(%+v) = %t, want %t", tt.entry, got, tt.want)
+			}
+		})
+	}
+}
+
 func TestWebSearchTOMLRoundTripPreservesExplicitOff(t *testing.T) {
 	explicitFalse := false
 	cfg := &Config{Providers: []ProviderEntry{{

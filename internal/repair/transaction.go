@@ -8,6 +8,7 @@ import (
 	"os"
 	"path/filepath"
 	"reflect"
+	"slices"
 	"strings"
 	"time"
 
@@ -217,7 +218,7 @@ func clearPreparedRepairTransaction(expected *RepairTransaction) error {
 	repairPendingAfterMove(path, cleanup)
 	restoreUnknown := func(cause error) error {
 		if restoreErr := renameRepairNodeNoReplace(cleanup, path); restoreErr != nil {
-			return fmt.Errorf("%w; displaced pending repair retained at %s: %v", cause, cleanup, restoreErr)
+			return fmt.Errorf("%w; displaced pending repair retained at %s: %w", cause, cleanup, restoreErr)
 		}
 		return cause
 	}
@@ -548,8 +549,8 @@ func UndoLastRepair() (*RepairTransaction, error) {
 		tx.Changes[i].Undone = true
 		return persistRepairTransaction(tx)
 	}
-	for i := len(tx.Changes) - 1; i >= 0; i-- {
-		change := tx.Changes[i]
+	for i, v := range slices.Backward(tx.Changes) {
+		change := v
 		if change.Undone {
 			// Progress was persisted but the backup removal may have been cut
 			// short by a crash; finish the cleanup the completed step owed.
@@ -685,7 +686,7 @@ func UndoLastRepair() (*RepairTransaction, error) {
 		if restoreErr != nil {
 			if redo != "" {
 				if compensateErr := restoreRepairNodeIfAbsent(redo, change.TargetPath); compensateErr != nil {
-					return nil, fmt.Errorf("undo repair: restore %s: %w (current state retained at %s: %v)", change.TargetPath, restoreErr, redo, compensateErr)
+					return nil, fmt.Errorf("undo repair: restore %s: %w (current state retained at %s: %w)", change.TargetPath, restoreErr, redo, compensateErr)
 				}
 			}
 			return nil, fmt.Errorf("undo repair: restore %s: %w", change.TargetPath, restoreErr)

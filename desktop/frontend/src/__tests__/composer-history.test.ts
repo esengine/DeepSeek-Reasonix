@@ -4,6 +4,7 @@
 
 import { invalidateCache, snapshot, pushHistory, clearHistory, loadOlder } from "../lib/composerHistory";
 import type { PromptHistoryEntry, PromptHistoryResult } from "../lib/types";
+import { installDesktopHostStub } from "./desktopHostStub";
 
 let passed = 0;
 let failed = 0;
@@ -25,7 +26,7 @@ function ensureWindow() {
   }
 }
 
-// Install a mock ScanPromptHistory on window.go so the bridge proxy finds it.
+// Install a mock ScanPromptHistory on the desktop host stub so the bridge proxy finds it.
 function setMock(
   mock: (
     nonce: string,
@@ -39,10 +40,7 @@ function setMock(
   >,
 ) {
   ensureWindow();
-  const w = window as unknown as { go?: Record<string, unknown> };
-  w.go = {
-    main: { App: { ScanPromptHistory: mock } as never },
-  };
+  installDesktopHostStub({ ScanPromptHistory: mock });
   invalidateCache();
 }
 

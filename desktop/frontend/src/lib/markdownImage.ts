@@ -1,13 +1,28 @@
+import { desktopHost } from "./desktopHost";
+
 export const REMOTE_MARKDOWN_IMAGE_PATH = "/__reasonix_remote_markdown_image";
 
-function runningInWailsShell(): boolean {
-  return typeof window !== "undefined" && window.runtime != null;
+export interface MarkdownImageView {
+  url: string;
+  filename?: string;
+  mime?: string;
+  size?: number;
+  openHref?: string;
+  errorCode?: string;
 }
 
-// WebView2 runs without the Windows system proxy. Route only absolute remote
-// Markdown images back through the local Wails asset server; relative, data,
-// blob, and workspace-media URLs remain local and unchanged.
-export function markdownImageSource(src: string | undefined, nativeShell = runningInWailsShell()): string {
+function runningInDesktopShell(): boolean {
+  return desktopHost().kind !== "none";
+}
+
+export function hasMarkdownImageResolver(): boolean {
+  return typeof desktopHost().app?.ResolveMarkdownImageForTab === "function";
+}
+
+// Route only absolute remote Markdown images back through the local desktop
+// asset origin; relative, data, blob, and workspace-media URLs remain local
+// and unchanged.
+export function markdownImageSource(src: string | undefined, nativeShell = runningInDesktopShell()): string {
   const value = src?.trim() ?? "";
   if (!nativeShell || value === "") return value;
 

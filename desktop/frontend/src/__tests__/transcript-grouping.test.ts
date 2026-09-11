@@ -3,7 +3,7 @@
 import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { dirname, resolve } from "node:path";
-import { buildStepGroups, buildTurnGroups, createWarmLayerState, lastQuestionTurn, questionTurnsById, warmColdPageForTurn, warmLayerForSession, warmLayerWithColdPageAtLeast, warmLayerWithExpandedTurn, warmLayerWithNextColdPage, warmPagination } from "../lib/transcriptGrouping";
+import { buildStepGroups, buildTurnGroups, lastQuestionTurn, questionTurnsById } from "../lib/transcriptGrouping";
 import type { Item } from "../lib/useController";
 
 let passed = 0;
@@ -130,51 +130,6 @@ console.log("\ntranscript grouping contract");
   const elapsed = performance.now() - start;
   eq(groups.length, 10_000, "large transcript grouping keeps every turn");
   ok(elapsed < 50, `groups 10k turns in ${elapsed.toFixed(2)}ms`);
-}
-
-{
-  const firstPage = warmPagination({ turnCount: 100, hotTurns: 30, pageSize: 20, coldPage: 0 });
-  eq(firstPage.warmStartTurn, 50, "long transcripts initially render only the latest warm page");
-  eq(firstPage.warmEndTurn, 70, "warm page stops before the hot zone");
-  eq(firstPage.coldTurnCount, 50, "older cold turns stay hidden behind the load-more button");
-
-  const secondPage = warmPagination({ turnCount: 100, hotTurns: 30, pageSize: 20, coldPage: 1 });
-  eq(secondPage.warmStartTurn, 30, "loading earlier history adds one more warm page");
-  eq(secondPage.warmEndTurn, 70, "loading earlier history keeps the hot-zone boundary stable");
-  eq(secondPage.coldTurnCount, 30, "loading earlier history reduces the hidden cold count");
-
-  const shortTranscript = warmPagination({ turnCount: 25, hotTurns: 30, pageSize: 20, coldPage: 0 });
-  eq(shortTranscript.warmStartTurn, 0, "short transcripts have no warm zone");
-  eq(shortTranscript.warmEndTurn, 0, "short transcripts have no warm boundary");
-  eq(shortTranscript.coldTurnCount, 0, "short transcripts have no cold turns");
-}
-
-{
-  eq(warmColdPageForTurn({ turn: 10, turnCount: 100, hotTurns: 30, pageSize: 20 }), 2, "jumping to cold-zone turn 10 loads enough warm pages");
-  eq(warmColdPageForTurn({ turn: 0, turnCount: 100, hotTurns: 30, pageSize: 20 }), 3, "jumping to the first warm turn loads all warm pages");
-  eq(warmColdPageForTurn({ turn: 65, turnCount: 100, hotTurns: 30, pageSize: 20 }), 0, "jumping inside the initial warm page needs no extra cold page");
-  eq(warmColdPageForTurn({ turn: 80, turnCount: 100, hotTurns: 30, pageSize: 20 }), 0, "jumping inside the hot zone needs no warm pagination");
-}
-
-{
-  let state = createWarmLayerState("tab-a|0|a-u0");
-  state = warmLayerWithNextColdPage(state, "tab-a|0|a-u0");
-  state = warmLayerWithNextColdPage(state, "tab-a|0|a-u0");
-  state = warmLayerWithNextColdPage(state, "tab-a|0|a-u0");
-  state = warmLayerWithExpandedTurn(state, "tab-a|0|a-u0", 10, true);
-  eq(state.coldPage, 3, "loading earlier history advances the current session page");
-  ok(state.expandedWarmTurns.has(10), "expanded warm turns stay scoped to the current session");
-
-  const switched = warmLayerForSession(state, "tab-b|1|b-u0");
-  eq(switched.coldPage, 0, "switching sessions resets warm pagination before rendering");
-  eq(switched.expandedWarmTurns.size, 0, "switching sessions clears expanded warm turns");
-
-  const switchedPage = warmPagination({ turnCount: 100, hotTurns: 30, pageSize: 20, coldPage: switched.coldPage });
-  eq(switchedPage.warmStartTurn, 50, "switched long transcripts render only the latest warm page first");
-
-  const paged = warmLayerWithColdPageAtLeast(switched, "tab-b|1|b-u0", 2);
-  eq(paged.coldPage, 2, "jumping to a cold-zone question raises the session warm page");
-  eq(warmLayerWithColdPageAtLeast(paged, "tab-b|1|b-u0", 1).coldPage, 2, "jumping never lowers the loaded warm page");
 }
 
 console.log(`\n${passed} passed, ${failed} failed`);

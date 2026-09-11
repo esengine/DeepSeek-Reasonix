@@ -43,6 +43,9 @@ func friendlySessionFileError(err error) error {
 	if err == nil {
 		return nil
 	}
+	if errors.Is(err, agent.ErrSessionFileLockHeld) {
+		return errSessionBusyElsewhere
+	}
 	var errno syscall.Errno
 	if !errors.As(err, &errno) {
 		return err

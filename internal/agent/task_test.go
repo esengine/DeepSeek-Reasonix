@@ -50,7 +50,7 @@ func TestTaskToolReturnsSubAgentFinalAnswer(t *testing.T) {
 	if sys := sub.lastReq.Messages[0]; sys.Role != provider.RoleSystem || sys.Content != "test-sys-prompt" {
 		t.Errorf("first message = %+v, want system 'test-sys-prompt'", sys)
 	}
-	if got := lastUser(sub.lastReq); !strings.Contains(got, `<subagent-context event="SubagentStart">`) || !strings.HasSuffix(got, "find callers of Foo") {
+	if got := lastUser(sub.lastReq); !strings.Contains(got, `<subagent-context event="SubagentStart">`) || !strings.Contains(got, "find callers of Foo") || !strings.Contains(got, completeSubtaskContract) {
 		t.Errorf("sub-agent user = %q, want SubagentStart context plus prompt", got)
 	}
 }
@@ -85,7 +85,7 @@ func TestTaskToolInjectsWorkspaceContextIntoSubagentPrompt(t *testing.T) {
 	if !strings.Contains(got, `<workspace-context event="SubagentWorkspace">`) ||
 		!strings.Contains(got, "Current workspace: "+strconv.Quote(workspace)) ||
 		!strings.Contains(got, `prefer "." or relative paths`) ||
-		!strings.HasSuffix(got, "inspect project") {
+		!strings.Contains(got, "inspect project") || !strings.Contains(got, completeSubtaskContract) {
 		t.Fatalf("sub-agent user = %q, want workspace context plus prompt", got)
 	}
 }
@@ -148,8 +148,29 @@ func TestTaskToolInheritsReasoningLanguageFromContext(t *testing.T) {
 		t.Fatalf("Execute: %v", err)
 	}
 	got := lastUser(sub.lastReq)
-	if !strings.HasPrefix(got, "<reasoning-language>") || !strings.Contains(got, "简体中文") || !strings.HasSuffix(got, "inspect auth") {
+	if !strings.HasPrefix(got, "<reasoning-language>") || !strings.Contains(got, "简体中文") || !strings.Contains(got, "inspect auth") {
 		t.Fatalf("sub-agent user = %q, want reasoning-language-prefixed prompt", got)
+	}
+}
+
+func TestTaskToolPropagatesSubagentImageCandidates(t *testing.T) {
+	sub := &mockProvider{name: "sub", chunks: []provider.Chunk{
+		{Type: provider.ChunkText, Text: "image received"},
+		{Type: provider.ChunkDone},
+	}}
+	task := newTestTaskTool(t, sub, tool.NewRegistry(), "sys", "", "", nil)
+	ctx := WithSubagentImageCandidates(testTaskContext(), []string{"data:image/png;base64,AAAA"})
+	if _, err := task.Execute(ctx, []byte(`{"prompt":"inspect the attached image"}`)); err != nil {
+		t.Fatalf("Execute: %v", err)
+	}
+	var images []string
+	for _, msg := range sub.lastReq.Messages {
+		if msg.Role == provider.RoleUser {
+			images = msg.Images
+		}
+	}
+	if len(images) != 1 || images[0] != "data:image/png;base64,AAAA" {
+		t.Fatalf("sub-agent images = %v, want the parent candidate", images)
 	}
 }
 
@@ -397,7 +418,7 @@ func TestReadOnlyTaskToolRunsEphemerallyWithReadOnlyRegistry(t *testing.T) {
 	if sys := sub.lastReq.Messages[0]; sys.Role != provider.RoleSystem || sys.Content != DefaultReadOnlyTaskSystemPrompt {
 		t.Fatalf("read_only_task system prompt = %+v, want read-only prompt", sys)
 	}
-	if got := lastUser(sub.lastReq); !strings.Contains(got, "Current workspace: ") || !strings.HasSuffix(got, "inspect callers") {
+	if got := lastUser(sub.lastReq); !strings.Contains(got, "Current workspace: ") || !strings.Contains(got, "inspect callers") {
 		t.Fatalf("read_only_task user = %q, want workspace context plus prompt", got)
 	}
 
@@ -482,7 +503,7 @@ func TestTaskToolPersistsAndContinuesTranscript(t *testing.T) {
 	if len(msgs) < 4 {
 		t.Fatalf("continued request messages = %+v, want prior transcript plus new task", msgs)
 	}
-	if !strings.HasSuffix(msgs[1].Content, "first task") || msgs[2].Content != "first answer" || !strings.HasSuffix(lastUser(sub.requests[1]), "second task") {
+	if !strings.Contains(msgs[1].Content, "first task") || msgs[2].Content != "first answer" || !strings.Contains(lastUser(sub.requests[1]), "second task") {
 		t.Fatalf("continued request messages = %+v, want first task/answer then second task", msgs)
 	}
 }
@@ -652,7 +673,7 @@ func TestTaskToolFailedForegroundContinuationPersistsAndRejectsReuse(t *testing.
 		t.Fatalf("LoadSession: %v", err)
 	}
 	msgs := loaded.Snapshot()
-	if len(msgs) != 5 || !strings.HasSuffix(msgs[1].Content, "first task") || msgs[2].Content != "first answer" || !strings.HasSuffix(msgs[3].Content, "second task") || !msgs[4].LocalOnly {
+	if len(msgs) != 5 || !strings.Contains(msgs[1].Content, "first task") || msgs[2].Content != "first answer" || !strings.Contains(msgs[3].Content, "second task") || !msgs[4].LocalOnly {
 		t.Fatalf("failed continuation transcript = %+v, want tasks plus provider-excluded failure recovery", msgs)
 	}
 	if _, err := task.Execute(testTaskContext(), []byte(`{"prompt":"third task","continue_from":"`+ref+`"}`)); err == nil || !strings.Contains(err.Error(), "failed and cannot be continued") {
@@ -686,8 +707,8 @@ func TestTaskToolBackgroundPanicPersistsFailedMetadata(t *testing.T) {
 	if len(res) != 1 || res[0].Status != jobs.Failed {
 		t.Fatalf("background job result = %+v, want failed", res)
 	}
-	if !strings.Contains(res[0].Output, "Subagent reference (failed): "+ref) {
-		t.Fatalf("job output = %q, want failed subagent ref %s", res[0].Output, ref)
+	if !strings.Contains(res[0].Output, "Subagent reference: "+ref) || !strings.Contains(res[0].Output, "status=failed") {
+		t.Fatalf("job output = %q, want failed subagent outcome for %s", res[0].Output, ref)
 	}
 	meta, err := store.LoadMeta(ref)
 	if err != nil {
@@ -825,7 +846,7 @@ func TestTaskToolBackgroundCapRefusesFanOut(t *testing.T) {
 	// Saturate the cap with still-running task jobs owned by this session.
 	release := make(chan struct{})
 	var ids []string
-	for i := 0; i < maxConcurrentBackgroundTasks; i++ {
+	for range maxConcurrentBackgroundTasks {
 		j := jm.StartForSession("parent-session", "task", "busy", func(jctx context.Context, _ io.Writer) (string, error) {
 			select {
 			case <-release:
@@ -862,7 +883,7 @@ func TestTaskToolBackgroundCapRefusesFanOut(t *testing.T) {
 	}
 }
 
-func TestTaskToolBackgroundSalvagePublishesEvidenceForCollection(t *testing.T) {
+func TestTaskToolBackgroundRunPublishesEvidenceForCollection(t *testing.T) {
 	reg := evidenceRegistry()
 	finalText := []provider.Chunk{{Type: provider.ChunkText, Text: "done, explanations added"}, {Type: provider.ChunkDone}}
 	sub := &scriptedProvider{name: "sub", turns: [][]provider.Chunk{
@@ -873,8 +894,7 @@ func TestTaskToolBackgroundSalvagePublishesEvidenceForCollection(t *testing.T) {
 		finalText,
 	}}
 	task := NewTaskTool(sub, nil, reg, 20, 0, 0, 0, 0, 0, 0, 0.0, "", "sys", nil, 0, "", "", nil).
-		WithTranscripts(NewSubagentStore(t.TempDir()), t.TempDir(), "base-model", "base-effort").
-		WithDeliveryProfile(true)
+		WithTranscripts(NewSubagentStore(t.TempDir()), t.TempDir(), "base-model", "base-effort")
 
 	jm := jobs.NewManager(event.Discard)
 	defer jm.Close()
@@ -890,8 +910,8 @@ func TestTaskToolBackgroundSalvagePublishesEvidenceForCollection(t *testing.T) {
 	}
 	jobID := extractJobID(out)
 	res := jm.WaitForSession(context.Background(), "parent-session", []string{jobID}, 5)
-	if len(res) != 1 || res[0].Status != jobs.Done || !strings.Contains(res[0].Output, "[unverified]") {
-		t.Fatalf("background salvage = %+v, want done unverified result", res)
+	if len(res) != 1 || res[0].Status != jobs.Done {
+		t.Fatalf("background task = %+v, want done", res)
 	}
 	if parentLedger.Summary().HasMutation() {
 		t.Fatal("background goroutine wrote directly into the parent turn ledger")
@@ -948,7 +968,7 @@ func TestBackgroundEvidenceNotCommittedWhenTurnFails(t *testing.T) {
 	// so the next turn can review it instead of shipping it unreviewed.
 	jm := jobs.NewManager(event.Discard)
 	defer jm.Close()
-	jobID := startTerminalBackgroundMutation(t, jm, "parent-session", "qa/bank.md")
+	jobID := startTerminalBackgroundMutation(t, jm, "parent-session", "internal/auth/session.go")
 
 	reg := evidenceRegistry()
 	waitBuiltin(t, reg)
@@ -958,8 +978,8 @@ func TestBackgroundEvidenceNotCommittedWhenTurnFails(t *testing.T) {
 		{{Type: provider.ChunkText, Text: "all set"}, {Type: provider.ChunkDone}},
 		{{Type: provider.ChunkText, Text: "all set"}, {Type: provider.ChunkDone}},
 	}}
-	a := New(prov, reg, NewSession(""), Options{DeliveryProfile: true, Jobs: jm}, event.Discard)
-	ctx := jobs.WithManager(WithParentSession(context.Background(), "parent-session"), jm)
+	a := New(prov, reg, NewSession(""), Options{Jobs: jm}, event.Discard)
+	ctx := withClosedLoopContext(jobs.WithManager(WithParentSession(context.Background(), "parent-session"), jm))
 	ctx = jobs.WithSession(ctx, "parent-session")
 
 	err := a.Run(ctx, "collect and finish the background task")
@@ -1012,7 +1032,7 @@ func TestBackgroundEvidenceCommittedWhenTurnDelivers(t *testing.T) {
 func TestFailedTurnBackgroundMutationForcesReadinessOnNextRunWithoutWait(t *testing.T) {
 	jm := jobs.NewManager(event.Discard)
 	defer jm.Close()
-	jobID := startTerminalBackgroundMutation(t, jm, "parent-session", "qa/bank.md")
+	jobID := startTerminalBackgroundMutation(t, jm, "parent-session", "internal/auth/session.go")
 
 	reg := evidenceRegistry()
 	waitBuiltin(t, reg)
@@ -1026,8 +1046,8 @@ func TestFailedTurnBackgroundMutationForcesReadinessOnNextRunWithoutWait(t *test
 		{{Type: provider.ChunkText, Text: "sure, here you go"}, {Type: provider.ChunkDone}},
 		{{Type: provider.ChunkText, Text: "sure, here you go"}, {Type: provider.ChunkDone}},
 	}}
-	a := New(prov, reg, NewSession(""), Options{DeliveryProfile: true, Jobs: jm}, event.Discard)
-	ctx := jobs.WithManager(WithParentSession(context.Background(), "parent-session"), jm)
+	a := New(prov, reg, NewSession(""), Options{Jobs: jm}, event.Discard)
+	ctx := withClosedLoopContext(jobs.WithManager(WithParentSession(context.Background(), "parent-session"), jm))
 	ctx = jobs.WithSession(ctx, "parent-session")
 
 	var readiness *FinalReadinessError
@@ -1059,7 +1079,7 @@ func TestRestartRecoversPendingBackgroundMutationForcesReadinessWithoutWait(t *t
 	first.SetActiveSessionPath("parent-session", sessionPath)
 	j := first.StartForSession("parent-session", "task", "bg writer", func(ctx context.Context, _ io.Writer) (string, error) {
 		jobs.PublishEvidence(ctx, evidence.ChildEvidenceSummary{Receipts: []evidence.Receipt{{
-			ToolName: "write_file", Success: true, Write: true, Mutation: true, Paths: []string{"qa/bank.md"},
+			ToolName: "write_file", Success: true, Write: true, Mutation: true, Paths: []string{"internal/auth/session.go"},
 		}}})
 		return "background answer", nil
 	})
@@ -1078,8 +1098,8 @@ func TestRestartRecoversPendingBackgroundMutationForcesReadinessWithoutWait(t *t
 		{{Type: provider.ChunkText, Text: "all set"}, {Type: provider.ChunkDone}},
 		{{Type: provider.ChunkText, Text: "all set"}, {Type: provider.ChunkDone}},
 	}}
-	a := New(prov, reg, NewSession(""), Options{DeliveryProfile: true, Jobs: second}, event.Discard)
-	ctx := jobs.WithManager(WithParentSession(context.Background(), "parent-session"), second)
+	a := New(prov, reg, NewSession(""), Options{Jobs: second}, event.Discard)
+	ctx := withClosedLoopContext(jobs.WithManager(WithParentSession(context.Background(), "parent-session"), second))
 	ctx = jobs.WithSession(ctx, "parent-session")
 
 	var readiness *FinalReadinessError
@@ -1124,9 +1144,9 @@ func extractJobID(msg string) string {
 
 func subagentRefFromOutput(t *testing.T, out string) string {
 	t.Helper()
-	for _, line := range strings.Split(out, "\n") {
-		if strings.HasPrefix(line, "Subagent reference: ") {
-			return strings.TrimSpace(strings.TrimPrefix(line, "Subagent reference: "))
+	for line := range strings.SplitSeq(out, "\n") {
+		if after, ok := strings.CutPrefix(line, "Subagent reference: "); ok {
+			return strings.TrimSpace(after)
 		}
 	}
 	t.Fatalf("no subagent reference in output:\n%s", out)

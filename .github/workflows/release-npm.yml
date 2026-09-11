@@ -149,8 +149,7 @@ jobs:
       - uses: actions/checkout@v7
         with:
           ref: ${{ inputs.approved_sha || inputs.tag || github.ref }}
-      - name: Load approved standalone recovery control plane
-        if: ${{ !inputs.orchestrated }}
+      - name: Load approved npm publication control plane
         env:
           RECOVERY_CONTROL_SHA: ${{ github.workflow_sha }}
         run: |

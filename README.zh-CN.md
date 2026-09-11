@@ -1,5 +1,5 @@
 <p align="center">
-  <img src="docs/logo.svg" alt="Reasonix" width="640"/>
+  <img src="docs/logo-ghost-wave-effect.svg" alt="Reasonix" width="360"/>
 </p>
 
 <p align="center">
@@ -39,8 +39,13 @@
 
 <br/>
 
-<h3 align="center">面向终端的 DeepSeek 原生 AI coding agent。</h3>
-<p align="center">由配置与插件驱动的极薄 harness——单一静态 Go 二进制，围绕 DeepSeek 的前缀缓存调优，长会话也能把 token 成本压低。</p>
+<p align="center"><strong>开源 · MIT · 单个 Go 二进制</strong></p>
+<h3 align="center">可以一直开着跑的编码 Agent。</h3>
+<p align="center">一套本地引擎,四个入口——终端、桌面端、浏览器,或通过 ACP 接入你的编辑器。计划模式、权限、工作区沙箱与逐轮 checkpoint,让长时间自治运行始终可读、可撤销。</p>
+
+<div align="center">
+  <video src="https://github.com/user-attachments/assets/ab2f3878-e224-4931-8254-060e7695cfb9" controls preload="metadata" width="560"></video>
+</div>
 
 <br/>
 
@@ -58,7 +63,7 @@
 - **缓存友好的上下文维护**：启动时注入稳定的环境摘要；旧工具输出会先 snip/prune，
   再进入摘要 compaction；内置工具 schema 合约有文档和回归测试保护。
 - **零摩擦分发**：`CGO_ENABLED=0` 单二进制；一条命令交叉编译到六个目标平台。
-  唯一依赖是一个 TOML 解析库。
+  产物是完全自包含的静态二进制——目标机器上除二进制本身外无需安装任何东西。
 
 ## 安装
 
@@ -101,12 +106,34 @@ Windows 安装器通过 [SignPath.io](https://signpath.io/) 完成代码签名�
 
 ### 路径 D：从源码构建
 
+先克隆仓库：
+
 ```sh
 git clone https://github.com/esengine/DeepSeek-Reasonix.git
 cd DeepSeek-Reasonix
+```
+
+#### CLI
+
+CLI 构建需要 **Go 1.25+**。模块固定了 `toolchain` 指令；
+保持 `GOTOOLCHAIN=auto` 让 Go 自动下载固定的工具链，或自行安装。
+
+```sh
 make build      # -> bin/reasonix(.exe)
 make cross      # -> dist/（darwin|linux|windows × amd64|arm64）
 ```
+
+#### 桌面端
+
+桌面端构建额外需要 **Node 24+ 和 pnpm 10**（`npm install -g pnpm@10`），
+用于前端与 Electron 壳：
+
+```sh
+scripts/desktop-build.sh darwin/arm64 v0.0.0-dev   # 每次构建一个平台
+```
+
+无需安装系统 WebView 依赖：Electron 壳自带 Chromium。详见
+[桌面端构建指南](desktop/README.md#prerequisites)。
 
 ## 快速开始
 
@@ -174,14 +201,13 @@ CLI 进阶用法和详细配置见 **[CLI 命令参考](./docs/CLI.zh-CN.md)**�
 | Contributor | Contributor | Contributor | Contributor |
 | --- | --- | --- | --- |
 | [**SivanCola**](https://github.com/SivanCola) | [**esengine**](https://github.com/esengine) | [**ttmouse**](https://github.com/ttmouse) | [**lifu963**](https://github.com/lifu963) |
-| **reasonix**（anonymous） | [**HUQIANTAO**](https://github.com/HUQIANTAO) | [**GTC2080**](https://github.com/GTC2080) | [**light-front-theory**](https://github.com/light-front-theory) |
-| **merge-order-check**（anonymous） | [**Li-Charles-One**](https://github.com/Li-Charles-One) | [**eghrhegpe**](https://github.com/eghrhegpe) | **wufengfan**（anonymous） |
+| **reasonix** | [**HUQIANTAO**](https://github.com/HUQIANTAO) | [**GTC2080**](https://github.com/GTC2080) | [**light-front-theory**](https://github.com/light-front-theory) |
+| **merge-order-check** | [**Li-Charles-One**](https://github.com/Li-Charles-One) | [**eghrhegpe**](https://github.com/eghrhegpe) | **wufengfan** |
 | [**CVEngineer66**](https://github.com/CVEngineer66) | [**dependabot\[bot\]**](https://github.com/apps/dependabot) | [**lanshi17**](https://github.com/lanshi17) | [**SuMuxi66**](https://github.com/SuMuxi66) |
 | [**CnsMaple**](https://github.com/CnsMaple) | [**cyq1017**](https://github.com/cyq1017) | [**JesonChou**](https://github.com/JesonChou) | [**XTLine**](https://github.com/XTLine) |
 <!-- reasonix-top-contributors:end -->
 
-另外特别感谢 [**Bernardxu123**](https://github.com/Bernardxu123) 设计的项目 logo，
-以及 [AIGC Link](https://xhslink.com/m/80ngts127cA) 在小红书上的推广。
+特别感谢 [**Bernardxu123**](https://github.com/Bernardxu123) 设计的项目 logo和开场视频。
 
 <p align="center">
   <a href="https://github.com/esengine/DeepSeek-Reasonix/graphs/contributors">

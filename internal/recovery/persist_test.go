@@ -89,7 +89,7 @@ func TestSaveSnapshotIsAtomicAndOwnerOnly(t *testing.T) {
 	sessionPath := filepath.Join(t.TempDir(), "session.jsonl")
 	const writers = 24
 	var wg sync.WaitGroup
-	for i := 0; i < writers; i++ {
+	for i := range writers {
 		wg.Add(1)
 		go func(i int) {
 			defer wg.Done()

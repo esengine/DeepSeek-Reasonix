@@ -1,0 +1,5 @@
+prompt = "Copy the exact server timeout configuration line from config/server.conf into answer.txt, unchanged."
+class = "history"
+max_steps = 8
+timeout_sec = 180
+memory_markers = ["MEMKEY-HIST6M"]

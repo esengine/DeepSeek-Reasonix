@@ -5,6 +5,8 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"slices"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -14,6 +16,7 @@ import (
 	"reasonix/internal/control"
 	"reasonix/internal/event"
 	"reasonix/internal/jobs"
+	"reasonix/internal/provider"
 )
 
 // reloadRuntimeFixture writes the config the ReloadRuntime tests share (one
@@ -77,7 +80,7 @@ func TestReloadRuntimeSwapsAndClosesOldAfterSwap(t *testing.T) {
 	app.readyHook = func() {}
 	var fenceMu sync.Mutex
 	var fenceNames []string
-	app.runtimeEvents.emit = func(_ context.Context, name string, _ ...interface{}) {
+	app.runtimeEvents.emit = func(_ context.Context, name string, _ ...any) {
 		fenceMu.Lock()
 		fenceNames = append(fenceNames, name)
 		fenceMu.Unlock()
@@ -131,13 +134,7 @@ func TestReloadRuntimeSwapsAndClosesOldAfterSwap(t *testing.T) {
 	deadline := time.Now().Add(2 * time.Second)
 	for {
 		fenceMu.Lock()
-		found := false
-		for _, name := range fenceNames {
-			if name == "runtime:rebuilt" {
-				found = true
-				break
-			}
-		}
+		found := slices.Contains(fenceNames, "runtime:rebuilt")
 		fenceMu.Unlock()
 		if found {
 			break
@@ -146,6 +143,42 @@ func TestReloadRuntimeSwapsAndClosesOldAfterSwap(t *testing.T) {
 			t.Fatal("no runtime:rebuilt fence emitted")
 		}
 		time.Sleep(5 * time.Millisecond)
+	}
+}
+
+// TestSubmitReloadRoutesToRuntimeReload pins the desktop slash-command entry:
+// /reload is a local management action, not a user turn sent to the model.
+func TestSubmitReloadRoutesToRuntimeReload(t *testing.T) {
+	dir := reloadRuntimeFixture(t)
+	oldPath := filepath.Join(dir, "old.jsonl")
+	oldExec := agent.New(nil, nil, agent.NewSession("old system prompt"), agent.Options{}, event.Discard)
+	closed := false
+	oldCtrl := control.New(control.Options{
+		Executor:    oldExec,
+		SessionDir:  dir,
+		SessionPath: oldPath,
+		Label:       "old",
+		Sink:        event.Discard,
+		Cleanup:     func() { closed = true },
+	})
+	app := NewApp()
+	app.ctx = context.Background()
+	app.readyHook = func() {}
+	tab := reloadRuntimeTab(t, app, dir, oldCtrl)
+
+	if err := app.SubmitToTab(tab.ID, "/reload"); err != nil {
+		t.Fatalf("SubmitToTab(/reload): %v", err)
+	}
+	if tab.Ctrl == oldCtrl {
+		t.Fatal("/reload did not replace the outgoing controller")
+	}
+	if !closed {
+		t.Fatal("/reload did not retire the outgoing controller after the swap")
+	}
+	for _, message := range tab.Ctrl.History() {
+		if message.Role == provider.RoleUser && strings.TrimSpace(message.Content) == "/reload" {
+			t.Fatal("/reload leaked into conversation history as a model turn")
+		}
 	}
 }
 
@@ -235,7 +268,8 @@ func TestReloadRuntimeBusyQueuesDeferred(t *testing.T) {
 		t.Fatalf("second busy ReloadRuntime returned %v, want nil", err)
 	}
 	app.deferredRebuild.mu.Lock()
-	label, ok := app.deferredRebuild.pending[tab.ID]
+	request, ok := app.deferredRebuild.pending[tab.ID]
+	label := request.label
 	count := len(app.deferredRebuild.pending)
 	app.deferredRebuild.mu.Unlock()
 	if !ok || label != deferredRuntimeReloadLabel {

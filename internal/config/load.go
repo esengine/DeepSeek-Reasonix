@@ -3,9 +3,12 @@ package config
 import (
 	"fmt"
 	"log/slog"
+	"maps"
 	"net/url"
 	"os"
 	"path/filepath"
+	"reflect"
+	"slices"
 	"strings"
 
 	"github.com/BurntSushi/toml"
@@ -33,14 +36,24 @@ func Load() (*Config, error) {
 // mergeRuntimeTOMLFileSnapshot). Callers that must not mutate config files should use
 // LoadForRootReadOnly instead.
 func LoadForRoot(root string) (*Config, error) {
-	return loadForRoot(root, true)
+	return loadForRoot(root, loadForRootOptions{migrateOnDisk: true, loadCredentials: true})
 }
 
 // LoadForRootReadOnly is like LoadForRoot but never writes config files: it skips
 // on-disk legacy MCP tier migration. Prefer this for diagnostics, doctor, and
 // other read-only inspection paths.
 func LoadForRootReadOnly(root string) (*Config, error) {
-	return loadForRoot(root, false)
+	return loadForRoot(root, loadForRootOptions{loadCredentials: true})
+}
+
+// LoadForRootWithoutCredentialsReadOnly is the credential-free form of
+// LoadForRootReadOnly. It still merges the effective user + project config and
+// carries project .env values for workspace-scoped expansion, but it neither
+// pins Reasonix credentials into the process environment nor resolves provider
+// API keys. Settings probes use it when they need runtime network policy before
+// resolving only the edited provider's credential explicitly.
+func LoadForRootWithoutCredentialsReadOnly(root string) (*Config, error) {
+	return loadForRoot(root, loadForRootOptions{})
 }
 
 // LoadUserConfigReadOnly loads only the trusted user-global config. It never
@@ -59,12 +72,21 @@ func LoadUserConfigReadOnly() (*Config, error) {
 		}
 	}
 	normalizeConfigForEdit(cfg)
+	cfg.loadOpenCodeGoJournal(userConfigLoadPath())
 	return cfg, nil
 }
 
-func loadForRoot(root string, migrateOnDisk bool) (*Config, error) {
+type loadForRootOptions struct {
+	migrateOnDisk   bool
+	loadCredentials bool
+}
+
+func loadForRoot(root string, opts loadForRootOptions) (*Config, error) {
 	root = resolveRoot(root)
-	expansionEnv := loadDotEnvForRoot(root)
+	expansionEnv := loadProjectDotEnvForExpansion(root)
+	if opts.loadCredentials {
+		loadCredentialStoreForRoot(root)
+	}
 	cfg := Default()
 	cfg.setExpansionEnv(expansionEnv)
 	cfg.CredentialsStore = credentialsStoreMode()
@@ -83,7 +105,7 @@ func loadForRoot(root string, migrateOnDisk bool) (*Config, error) {
 	}
 
 	mergeTOML := mergeFileSnapshot
-	if migrateOnDisk {
+	if opts.migrateOnDisk {
 		mergeTOML = mergeRuntimeTOMLFileSnapshot
 	}
 
@@ -129,7 +151,8 @@ func loadForRoot(root string, migrateOnDisk bool) (*Config, error) {
 	globalRemote := cfg.Remote.Clone()
 	globalDesktopLanguage := cfg.Desktop.Language
 	globalPricingCurrency := cfg.Desktop.Currency
-	globalTelemetry := cfg.Telemetry
+	globalBillingDisplayCurrency := cfg.Billing.DisplayCurrency
+	globalTelemetry, globalLegacyAnchorSafetyGate := cfg.Telemetry, cfg.Agent.LegacyAnchorSafetyGate
 
 	tomlSources = append(tomlSources, projectTOML)
 	projectMeta, err := mergeTOML(cfg, projectTOML)
@@ -161,9 +184,10 @@ func loadForRoot(root string, migrateOnDisk bool) (*Config, error) {
 	// A repository must not be able to alter how the user's spend is shown.
 	cfg.Desktop.Language = globalDesktopLanguage
 	cfg.Desktop.Currency = globalPricingCurrency
+	cfg.Billing.DisplayCurrency = globalBillingDisplayCurrency
 	// CLI telemetry is an explicit user-global privacy choice. Project config
 	// cannot opt a user in or out, including when the global value is absent.
-	cfg.Telemetry = globalTelemetry
+	cfg.Telemetry, cfg.Agent.LegacyAnchorSafetyGate = globalTelemetry, globalLegacyAnchorSafetyGate
 	// TOML decoding replaces [[plugins]] wholesale, so cfg.Plugins now holds
 	// only the last file's. Re-merge by name across all sources (later wins) so a
 	// project reasonix.toml doesn't drop the global config's MCP servers.
@@ -210,30 +234,17 @@ func loadForRoot(root string, migrateOnDisk bool) (*Config, error) {
 		cfg.mergeMCPJSON(loadLegacyMCP(legacyConfigPath()))
 	}
 	_ = mergeInstalledPluginPackages(cfg, root)
-	normalizePluginCommandLines(cfg)
-	normalizeLegacyEffort(cfg)
-	cfg.ignoredLegacyStepLimits = normalizeLegacyAgentStepLimits(cfg)
-	normalizeRetiredAutoPlan(cfg)
-	normalizeLegacyMCPTiers(cfg)
-	normalizeLegacyStepFunBaseURLs(cfg)
-	normalizeLegacyLongCatContextWindows(cfg)
-	normalizeLegacyQwenContextWindows(cfg)
-	normalizeLegacyKimiK3Catalog(cfg)
-	normalizeLegacyOpenCodeGoKimiK3Catalog(cfg)
-	normalizeLegacyMimoCustomProviders(cfg)
-	normalizeLegacyProviderModels(cfg)
-	normalizeDesktopOfficialProviderAccess(cfg)
-	normalizeOfficialDeepSeekModels(cfg)
-	applyDeepSeekOfficialDefaultPricing(cfg)
-	backfillDeepSeekOfficialPrices(cfg)
-	normalizeEffortConfig(cfg)
-	backfillDeepSeekPro(cfg)
+	if err := normalizeRuntimeConfigWithMigrationJournal(cfg); err != nil {
+		return nil, err
+	}
 	if userDefaultModelExplicit {
 		restoreUnresolvableProjectDefaultModel(cfg, userDefaultModel)
 	}
 	cfg.CredentialsStore = credentialsStoreMode()
 	cfg.setExpansionEnv(expansionEnv)
-	resolveProviderCredentialsForRoot(root, cfg)
+	if opts.loadCredentials {
+		resolveProviderCredentialsForRoot(root, cfg)
+	}
 	return cfg, nil
 }
 
@@ -278,9 +289,7 @@ func cloneStringMap(in map[string]string) map[string]string {
 		return nil
 	}
 	out := make(map[string]string, len(in))
-	for k, v := range in {
-		out[k] = v
-	}
+	maps.Copy(out, in)
 	return out
 }
 
@@ -326,14 +335,6 @@ func tomlFileDefinesKey(path string, key ...string) bool {
 	return meta.IsDefined(key...)
 }
 
-// ConfigFileDefinesCompactRatio reports whether path explicitly overrides the
-// automatic compaction threshold. It is used by config surfaces that need to
-// explain whether the effective value came from defaults, user config, or the
-// current project.
-func ConfigFileDefinesCompactRatio(path string) bool {
-	return tomlFileDefinesKey(path, "agent", "compact_ratio")
-}
-
 // backfillDeepSeekPro restores deepseek-pro for configs the pre-fix setup wizard
 // wrote with only deepseek-v4-flash: a keyless /models probe used to drop the Pro
 // SKU, leaving users unable to switch to it. In-memory only — the user's file is
@@ -369,11 +370,16 @@ func backfillDeepSeekPro(c *Config) {
 	for _, bp := range Default().Providers {
 		if bp.Name == "deepseek-pro" {
 			bp.APIKeyEnv = flash.APIKeyEnv
-			currency := c.DeepSeekOfficialPricingCurrency()
-			if c.DesktopCurrency() == "" && flash.persistedOfficialCurrency != "" {
+			// Inherit the flash provider's frozen billing currency for list prices.
+			currency := flash.ProviderBillingCurrency()
+			if currency == "" {
 				currency = flash.persistedOfficialCurrency
-				bp.persistedOfficialCurrency = currency
 			}
+			if currency == "" {
+				currency = "USD"
+			}
+			bp.BillingCurrency = currency
+			bp.persistedOfficialCurrency = currency
 			bp.Price = deepSeekV4PriceForModel(currency, proModel)
 			c.Providers = append(c.Providers, bp)
 			return
@@ -391,9 +397,12 @@ func backfillDeepSeekOfficialPrices(c *Config) {
 			continue
 		}
 		backfillDeepSeekOfficialEndpointDefaults(p)
-		currency := c.DeepSeekOfficialPricingCurrency()
-		if c.DesktopCurrency() == "" && p.persistedOfficialCurrency != "" {
+		currency := p.ProviderBillingCurrency()
+		if currency == "" {
 			currency = p.persistedOfficialCurrency
+		}
+		if currency == "" {
+			currency = "USD"
 		}
 		defaults := DeepSeekV4PricesForCurrency(currency)
 		if p.Price != nil {
@@ -735,10 +744,13 @@ func loadForEditStrict(path string, loadCredentials, persistMigrations bool) (*C
 		loadDotEnvForEditPath(path)
 	}
 	cfg := Default()
-	if err := mergeFile(cfg, path); err != nil {
+	meta, err := mergeFileSnapshot(cfg, path)
+	if err != nil {
 		return nil, err
 	}
+	markExplicitDefaultProjectSkillKeys(cfg, path, meta)
 	changed := normalizeConfigForEdit(cfg)
+	cfg.loadOpenCodeGoJournal(path)
 	if persistMigrations && changed && strings.TrimSpace(path) != "" {
 		if _, err := os.Stat(path); err == nil {
 			if err := cfg.SaveTo(path); err != nil {
@@ -749,23 +761,70 @@ func loadForEditStrict(path string, loadCredentials, persistMigrations bool) (*C
 	return cfg, nil
 }
 
+// markExplicitDefaultProjectSkillKeys preserves project skill fields that are
+// explicitly present in a file but equal the built-in default. Without this
+// transient provenance, saving an unrelated project setting would mistake an
+// intentional `false`/empty override for a stale delta and remove it.
+func markExplicitDefaultProjectSkillKeys(c *Config, path string, meta toml.MetaData) {
+	if c == nil || isUserConfigPath(path) {
+		return
+	}
+	for _, key := range projectSkillKeys {
+		if !meta.IsDefined("skills", key) || !projectSkillKeyIsDefault(c, key) {
+			continue
+		}
+		if c.explicitProjectSkillKeys == nil {
+			c.explicitProjectSkillKeys = make(map[string]bool)
+		}
+		c.explicitProjectSkillKeys[key] = true
+	}
+}
+
 func normalizeConfigForEdit(cfg *Config) bool {
 	normalizePluginCommandLines(cfg)
 	normalizeLegacyEffort(cfg)
 	normalizeLegacyAgentStepLimits(cfg)
 	changed := normalizeRetiredAutoPlan(cfg)
+	changed = normalizeRetiredMultiThresholdCompaction(cfg) || changed
 	normalizeLegacyMCPTiers(cfg)
 	changed = normalizeLegacyStepFunBaseURLs(cfg) || changed
 	changed = normalizeLegacyLongCatContextWindows(cfg) || changed
 	changed = normalizeLegacyQwenContextWindows(cfg) || changed
 	changed = normalizeLegacyKimiK3Catalog(cfg) || changed
-	changed = normalizeLegacyOpenCodeGoKimiK3Catalog(cfg) || changed
+	changed = normalizeLegacyOpenCodeGoInstalls(cfg) || changed
 	changed = normalizeLegacyMimoCustomProviders(cfg) || changed
 	normalizeLegacyProviderModels(cfg)
 	normalizeDesktopOfficialProviderAccess(cfg)
+	normalizeOfficialDeepSeekModels(cfg)
+	migrateBillingDisplayCurrency(cfg)
+	freezeProviderBillingCurrencies(cfg)
 	applyDeepSeekOfficialDefaultPricing(cfg)
 	backfillDeepSeekOfficialPrices(cfg)
 	normalizeEffortConfig(cfg)
+	return changed
+}
+
+// normalizeRetiredMultiThresholdCompaction clears retired multi-threshold keys
+// so they never reach the Agent. Disk migration removes them on ordinary start;
+// loading still ignores them if migration could not rewrite the file.
+func normalizeRetiredMultiThresholdCompaction(c *Config) bool {
+	if c == nil {
+		return false
+	}
+	changed := c.Agent.SoftCompactRatio != 0 ||
+		c.Agent.ToolResultSnipRatio != 0 ||
+		c.Agent.CompactForceRatio != 0 ||
+		c.Agent.ColdResumePrune != nil ||
+		strings.TrimSpace(c.Agent.ContextEditing) != ""
+	c.Agent.SoftCompactRatio = 0
+	c.Agent.ToolResultSnipRatio = 0
+	c.Agent.CompactForceRatio = 0
+	c.Agent.ColdResumePrune = nil
+	c.Agent.ContextEditing = ""
+	if c.Agent.CompactRatio <= 0 {
+		c.Agent.CompactRatio = Default().Agent.CompactRatio
+		changed = true
+	}
 	return changed
 }
 
@@ -1041,9 +1100,66 @@ func stripLegacyMemoryCompilerLines(raw string) (string, bool) {
 	return stripTOMLKeyLines(raw, "agent", "memory_compiler")
 }
 
+// MigrateLegacyMultiThresholdCompactionForRoot strips retired soft/snip/force keys.
+func MigrateLegacyMultiThresholdCompactionForRoot(root string) (bool, error) {
+	root = resolveRoot(root)
+	paths := make([]string, 0, 2)
+	if userPath := userConfigLoadPath(); userPath != "" {
+		paths = append(paths, userPath)
+	}
+	projectPath := "reasonix.toml"
+	if root != "." {
+		projectPath = filepath.Join(root, "reasonix.toml")
+	}
+	paths = append(paths, projectPath)
+
+	changedAny := false
+	seen := make(map[string]struct{}, len(paths))
+	for _, path := range paths {
+		clean := filepath.Clean(path)
+		if _, ok := seen[clean]; ok {
+			continue
+		}
+		seen[clean] = struct{}{}
+		changed, err := migrateLegacyMultiThresholdCompactionFile(path)
+		if err != nil {
+			return changedAny, fmt.Errorf("migrate deprecated multi-threshold compaction keys in %s: %w", path, err)
+		}
+		changedAny = changedAny || changed
+	}
+	return changedAny, nil
+}
+
+func migrateLegacyMultiThresholdCompactionFile(path string) (bool, error) {
+	return migrateRetiredConfigKeysFile(path, stripLegacyMultiThresholdCompactionLines)
+}
+
+func stripLegacyMultiThresholdCompactionLines(raw string) (string, bool) {
+	return stripTOMLKeyLines(raw, "agent",
+		"soft_compact_ratio",
+		"tool_result_snip_ratio",
+		"compact_force_ratio",
+		"cold_resume_prune",
+		"context_editing",
+	)
+}
+
 func migrateLegacyMCPTiersFile(path string) error {
 	_, err := migrateRetiredConfigKeysFile(path, stripLegacyMCPTierLines)
 	return err
+}
+
+// MigrateLegacyMCPTiersForRoot keeps boot's historical on-disk migration
+// separate from immutable snapshots, whose freshness checks must be read-only.
+func MigrateLegacyMCPTiersForRoot(root string) {
+	for _, path := range []string{userConfigLoadPath(), filepath.Join(resolveRoot(root), "reasonix.toml")} {
+		if path == "" {
+			continue
+		}
+		if err := migrateLegacyMCPTiersFile(path); err != nil {
+			slog.Warn("config: legacy mcp tier migration failed", "path", path, "err", err)
+		}
+	}
 }
 
 func stripLegacyMCPTierLines(raw string) (string, bool) {
@@ -1182,15 +1298,6 @@ func tomlSectionHeader(line string) string {
 		return strings.TrimSpace(trimmed[1 : len(trimmed)-1])
 	}
 	return "other"
-}
-
-func isTOMLKeyAssignment(line, key string) bool {
-	trimmed := strings.TrimSpace(line)
-	if strings.HasPrefix(trimmed, "#") || !strings.HasPrefix(trimmed, key) {
-		return false
-	}
-	rest := strings.TrimSpace(strings.TrimPrefix(trimmed, key))
-	return strings.HasPrefix(rest, "=")
 }
 
 // normalizeLegacyProviderModels repairs provider entries written by older
@@ -1416,7 +1523,7 @@ func mergeMissingKimiK3Override(p *ProviderEntry, defaults ProviderModelOverride
 // catalog from the original editable OpenCode Go preset. A user-curated model
 // list or custom endpoint is left alone, while other provider edits (headers,
 // key env, provider-wide context) survive the additive K3 capability update.
-func normalizeLegacyOpenCodeGoKimiK3Catalog(c *Config) bool {
+func normalizeLegacyOpenCodeGoKimiK3Catalog(c *Config) (changed bool) {
 	if c == nil {
 		return false
 	}
@@ -1438,9 +1545,64 @@ func normalizeLegacyOpenCodeGoKimiK3Catalog(c *Config) bool {
 			DefaultEffort:     "max",
 			ContextWindow:     1_048_576,
 		})
-		return true
+		changed = true
 	}
-	return false
+	return changed
+}
+
+// normalizeLegacyOpenCodeGoVisionCatalog upgrades only the untouched Chat
+// catalog that predates OpenCode Go's DeepSeek vision SKU. Custom model lists
+// and explicit image-input choices remain user-owned.
+func normalizeLegacyOpenCodeGoVisionCatalog(c *Config) (changed bool) {
+	if c == nil {
+		return false
+	}
+	for i := range c.Providers {
+		p := &c.Providers[i]
+		presetID := strings.TrimSpace(p.PresetID)
+		if (presetID != "opencode-go" && (presetID != "" || strings.TrimSpace(p.Name) != "opencode-go")) ||
+			!strings.EqualFold(strings.TrimSpace(p.Kind), "openai") ||
+			normalizedBaseURLForMigration(p.BaseURL) != "https://opencode.ai/zen/go/v1" ||
+			!stringSlicesEqual(p.Models, preVisionOpenCodeGoModels) ||
+			strings.TrimSpace(p.Model) != "" {
+			continue
+		}
+		p.Models = append([]string(nil), opencodeGoModels...)
+		if p.VisionModels == nil || stringSlicesEqual(p.VisionModels, preVisionOpenCodeGoVisionModels) {
+			p.VisionModels = append([]string(nil), opencodeGoVisionModels...)
+		}
+		mergeMissingOpenCodeGoVisionOverride(p)
+		changed = true
+	}
+	return changed
+}
+
+func mergeMissingOpenCodeGoVisionOverride(p *ProviderEntry) {
+	if p.ModelOverrides == nil {
+		p.ModelOverrides = map[string]ProviderModelOverride{}
+	}
+	const model = "deepseek-v4-flash-vision-exp"
+	key := model
+	for candidate := range p.ModelOverrides {
+		if strings.EqualFold(strings.TrimSpace(candidate), model) {
+			key = candidate
+			break
+		}
+	}
+	override := p.ModelOverrides[key]
+	if strings.TrimSpace(override.ReasoningProtocol) == "" {
+		override.ReasoningProtocol = ReasoningProtocolDeepSeek
+	}
+	if override.SupportedEfforts == nil {
+		override.SupportedEfforts = []string{"disabled", "low", "high", "max"}
+	}
+	if strings.TrimSpace(override.DefaultEffort) == "" && containsString(normalizedEffortLevels(override.SupportedEfforts), "high") {
+		override.DefaultEffort = "high"
+	}
+	if override.ContextWindow <= 0 {
+		override.ContextWindow = 1_000_000
+	}
+	p.ModelOverrides[key] = override
 }
 
 func normalizeLegacyMimoProviderCatalogs(c *Config) bool {
@@ -1536,8 +1698,24 @@ func normalizeOfficialDeepSeekModels(c *Config) {
 			ensureProviderModels(p, []string{"deepseek-v4-flash"}, "deepseek-v4-flash")
 		case "deepseek-pro":
 			ensureProviderModels(p, []string{"deepseek-v4-pro"}, "deepseek-v4-pro")
+		case "deepseek-responses":
+			ensureProviderModels(p, []string{"deepseek-v4-flash", "deepseek-v4-pro"}, "deepseek-v4-flash")
 		}
+		backfillOfficialDeepSeekResponsesModels(p)
+		backfillDeepSeekAnthropicCapabilities(p)
+		backfillOfficialDeepSeekResponsesCapabilities(p)
 	}
+}
+
+func backfillDeepSeekAnthropicCapabilities(p *ProviderEntry) {
+	if p == nil || !strings.EqualFold(strings.TrimSpace(p.Kind), "anthropic") ||
+		!IsOfficialDeepSeekWebSearchEndpoint(p) {
+		return
+	}
+	if strings.TrimSpace(p.Thinking) == "" {
+		p.Thinking = "enabled"
+	}
+	backfillOfficialDeepSeekEffortOverrides(p)
 }
 
 func officialProviderHost(baseURL string) string {
@@ -1631,6 +1809,8 @@ func legacyMimoConfigRefs(c *Config) []string {
 	refs := []string{
 		c.DefaultModel,
 		c.Agent.PlannerModel,
+		c.Agent.VisionModel,
+		c.Agent.WebSearchModel,
 		c.Agent.SubagentModel,
 		c.Bot.Model,
 	}
@@ -1726,10 +1906,25 @@ func normalizeDesktopOfficialProviderAccess(c *Config) {
 	if c == nil || len(c.Desktop.ProviderAccess) == 0 {
 		return
 	}
+	canCanonicalizeDeepSeek := canCanonicalizeLegacyDeepSeekProviders(c)
+	_, hasCanonicalDeepSeek := c.Provider("deepseek")
+	legacyDeepSeek := officialLegacyDeepSeekProviders(c)
 	seen := desktopProviderAccessMap(nil)
 	next := make([]string, 0, len(c.Desktop.ProviderAccess))
 	for _, name := range c.Desktop.ProviderAccess {
-		name = desktopProviderAccessNameForConfig(c, name)
+		name = strings.TrimSpace(name)
+		if name == "deepseek" && !canCanonicalizeDeepSeek && !hasCanonicalDeepSeek && len(legacyDeepSeek) > 0 {
+			for _, legacy := range legacyDeepSeek {
+				if !seen[legacy.Name] {
+					seen[legacy.Name] = true
+					next = append(next, legacy.Name)
+				}
+			}
+			continue
+		}
+		if CanonicalDesktopOfficialProviderName(name) != "deepseek" || name == "deepseek" || canCanonicalizeDeepSeek {
+			name = desktopProviderAccessNameForConfig(c, name)
+		}
 		if name == "" || seen[name] {
 			continue
 		}
@@ -1741,7 +1936,11 @@ func normalizeDesktopOfficialProviderAccess(c *Config) {
 		ensureDeepSeekOfficialProvider(c)
 	}
 	normalizeLegacyMimoProviderCatalogs(c)
-	retargetDesktopOfficialRefs(c, seen)
+	retargetAccess := maps.Clone(seen)
+	if p, ok := c.Provider("deepseek"); !canCanonicalizeDeepSeek || !ok || officialProviderKind(p) != "deepseek" {
+		delete(retargetAccess, "deepseek")
+	}
+	retargetDesktopOfficialRefs(c, retargetAccess)
 }
 
 // NormalizeLegacyDesktopProviderAccess seeds the desktop provider-access list
@@ -1772,6 +1971,8 @@ func NormalizeLegacyDesktopProviderAccess(c *Config) {
 	}
 	addRef(c.DefaultModel)
 	addRef(c.Agent.PlannerModel)
+	addRef(c.Agent.VisionModel)
+	addRef(c.Agent.WebSearchModel)
 	addRef(c.Agent.SubagentModel)
 	for _, ref := range c.Agent.SubagentModels {
 		addRef(ref)
@@ -1830,7 +2031,7 @@ func providerEntryMatchesCanonicalOfficialAccess(p *ProviderEntry, canonical str
 	}
 	switch canonical {
 	case "deepseek":
-		return officialProviderKind(p) == "deepseek"
+		return isCanonicalizableLegacyDeepSeekProvider(p)
 	default:
 		return false
 	}
@@ -1860,27 +2061,37 @@ func ensureDeepSeekOfficialProvider(c *Config) {
 		}
 		return
 	}
-	entry := ProviderEntry{
-		Name:          "deepseek",
-		Kind:          "openai",
-		BaseURL:       "https://api.deepseek.com",
-		Models:        []string{"deepseek-v4-flash", "deepseek-v4-pro"},
-		Default:       "deepseek-v4-flash",
-		APIKeyEnv:     "DEEPSEEK_API_KEY",
-		BalanceURL:    "https://api.deepseek.com/user/balance",
-		ContextWindow: 1_000_000,
-		Prices:        deepSeekV4PricesForConfig(c),
+	if !canCanonicalizeLegacyDeepSeekProviders(c) {
+		return
 	}
-	if old, ok := c.Provider("deepseek-flash"); ok {
-		entry = officialProviderFromLegacy(entry, old)
+	entry := ProviderEntry{
+		Name:           "deepseek",
+		Kind:           "anthropic",
+		BaseURL:        deepSeekAnthropicBaseURL,
+		Models:         []string{"deepseek-v4-flash", "deepseek-v4-pro"},
+		Default:        "deepseek-v4-flash",
+		APIKeyEnv:      "DEEPSEEK_API_KEY",
+		BalanceURL:     "https://api.deepseek.com/user/balance",
+		Thinking:       "enabled",
+		WebSearch:      boolPointer(true),
+		ContextWindow:  1_000_000,
+		Prices:         deepSeekV4PricesForConfig(c),
+		ModelOverrides: deepSeekV4EffortOverrides(),
+	}
+	legacyProviders := officialLegacyDeepSeekProviders(c)
+	if len(legacyProviders) > 0 {
+		entry = officialProviderFromLegacy(entry, legacyProviders[0])
 		currency := c.DeepSeekOfficialPricingCurrency()
-		if c.DesktopCurrency() == "" && old.persistedOfficialCurrency != "" {
-			currency = old.persistedOfficialCurrency
+		if c.DesktopCurrency() == "" && legacyProviders[0].persistedOfficialCurrency != "" {
+			currency = legacyProviders[0].persistedOfficialCurrency
 			entry.persistedOfficialCurrency = currency
 		}
 		entry.Prices = DeepSeekV4PricesForCurrency(currency)
-		entry.Models = mergeModelLists([]string{"deepseek-v4-flash", "deepseek-v4-pro"}, old.ModelList())
-		entry.Default = firstKnownModel(entry.Default, entry.Models, "deepseek-v4-flash")
+		for _, old := range legacyProviders {
+			entry.Models = mergeModelLists(entry.Models, old.ModelList())
+			mergeLegacyDeepSeekModelConfiguration(&entry, old)
+		}
+		entry.Default = preferredLegacyDeepSeekDefault(legacyProviders, entry.Models, entry.Default)
 	}
 	backfillOfficialContextWindow(&entry, 1_000_000)
 	c.Providers = append(c.Providers, entry)
@@ -1911,26 +2122,373 @@ func backfillOfficialContextWindow(e *ProviderEntry, fallback int) {
 }
 
 func officialProviderFromLegacy(entry ProviderEntry, old *ProviderEntry) ProviderEntry {
-	entry.Kind = old.Kind
-	entry.BaseURL = old.BaseURL
-	entry.ModelsURL = old.ModelsURL
-	entry.APIKeyEnv = old.APIKeyEnv
-	entry.BalanceURL = old.BalanceURL
-	entry.ContextWindow = old.ContextWindow
-	entry.Price = old.Price
-	entry.Thinking = old.Thinking
-	entry.Effort = old.Effort
-	entry.ReasoningProtocol = old.ReasoningProtocol
-	entry.SupportedEfforts = append([]string(nil), old.SupportedEfforts...)
-	entry.DefaultEffort = old.DefaultEffort
-	entry.NoProxy = old.NoProxy
-	entry.persistedOfficialCurrency = old.persistedOfficialCurrency
-	return entry
+	if old == nil {
+		return entry
+	}
+	// Start from the legacy entry so current and future transport fields are not
+	// silently dropped from the effective canonical provider. Identity, catalog,
+	// pricing and capability fields are merged model by model below.
+	legacy := cloneProviderEntry(*old)
+	legacy.Name = entry.Name
+	legacy.Model = ""
+	legacy.Models = append([]string(nil), entry.Models...)
+	legacy.Default = entry.Default
+	legacy.ContextWindow = entry.ContextWindow
+	legacy.MaxOutputTokens = entry.MaxOutputTokens
+	legacy.Price = nil
+	legacy.Prices = clonePricingMap(entry.Prices)
+	legacy.ReasoningProtocol = entry.ReasoningProtocol
+	legacy.SupportedEfforts = append([]string(nil), entry.SupportedEfforts...)
+	legacy.DefaultEffort = entry.DefaultEffort
+	legacy.Vision = entry.Vision
+	legacy.VisionModels = append([]string(nil), entry.VisionModels...)
+	legacy.ModelOverrides = cloneModelOverrideMap(entry.ModelOverrides)
+	return legacy
+}
+
+func officialLegacyDeepSeekProviders(c *Config) []*ProviderEntry {
+	if c == nil {
+		return nil
+	}
+	out := make([]*ProviderEntry, 0, 2)
+	for _, name := range []string{"deepseek-flash", "deepseek-pro"} {
+		if p, ok := c.Provider(name); ok && isCanonicalizableLegacyDeepSeekProvider(p) {
+			out = append(out, p)
+		}
+	}
+	return out
+}
+
+func isCanonicalizableLegacyDeepSeekProvider(p *ProviderEntry) bool {
+	if p == nil {
+		return false
+	}
+	switch strings.ToLower(strings.TrimSpace(p.Kind)) {
+	case "openai":
+		return isOfficialDeepSeekOpenAIEndpoint(p.BaseURL)
+	case "anthropic":
+		return IsOfficialDeepSeekWebSearchEndpoint(p)
+	default:
+		return false
+	}
+}
+
+func canCanonicalizeLegacyDeepSeekProviders(c *Config) bool {
+	if c == nil {
+		return true
+	}
+	legacy := officialLegacyDeepSeekProviders(c)
+	if canonical, ok := c.Provider("deepseek"); ok {
+		if officialProviderKind(canonical) != "deepseek" {
+			return false
+		}
+		for _, old := range legacy {
+			if !legacyDeepSeekProviderWideFieldsEqual(canonical, old) ||
+				!legacyDeepSeekModelFieldsCompatibleIgnoringDefault(canonical, old) {
+				return false
+			}
+		}
+	}
+	for i := 1; i < len(legacy); i++ {
+		if !legacyDeepSeekProviderWideFieldsEqual(legacy[0], legacy[i]) ||
+			!legacyDeepSeekModelFieldsCompatible(legacy[0], legacy[i]) {
+			return false
+		}
+	}
+	return true
+}
+
+func legacyDeepSeekModelFieldsCompatibleIgnoringDefault(a, b *ProviderEntry) bool {
+	if a == nil || b == nil {
+		return a == b
+	}
+	left := cloneProviderEntry(*a)
+	right := cloneProviderEntry(*b)
+	left.Default = ""
+	right.Default = ""
+	return legacyDeepSeekModelFieldsCompatible(&left, &right)
+}
+
+func legacyDeepSeekProviderWideFieldsEqual(a, b *ProviderEntry) bool {
+	if a == nil || b == nil {
+		return a == b
+	}
+	left := legacyDeepSeekProviderWideProjection(a)
+	right := legacyDeepSeekProviderWideProjection(b)
+	return reflect.DeepEqual(left, right)
+}
+
+func legacyDeepSeekProviderWideProjection(entry *ProviderEntry) ProviderEntry {
+	out := cloneProviderEntry(*entry)
+	out.Name = ""
+	out.Kind = strings.ToLower(strings.TrimSpace(out.Kind))
+	out.BaseURL = normalizedBaseURLForMigration(out.BaseURL)
+	out.ChatURL = strings.TrimSpace(out.ChatURL)
+	out.RequestURL = strings.TrimSpace(out.RequestURL)
+	out.ModelsURL = strings.TrimSpace(out.ModelsURL)
+	out.APIKeyEnv = strings.TrimSpace(out.APIKeyEnv)
+	out.BalanceURL = normalizedDeepSeekBalanceURL(out.BalanceURL)
+	out.ResponsesMode = strings.TrimSpace(out.ResponsesMode)
+	out.Thinking = strings.TrimSpace(out.Thinking)
+	out.Effort = strings.TrimSpace(out.Effort)
+	out.VisionDetail = strings.TrimSpace(out.VisionDetail)
+
+	// These fields can be represented independently for every model in the
+	// canonical provider. They are compared by legacyDeepSeekModelFieldsCompatible.
+	out.Model = ""
+	out.Models = nil
+	out.Default = ""
+	out.ContextWindow = 0
+	out.MaxOutputTokens = 0
+	out.Price = nil
+	out.Prices = nil
+	out.ReasoningProtocol = ""
+	out.SupportedEfforts = nil
+	out.DefaultEffort = ""
+	out.Vision = false
+	out.VisionModels = nil
+	out.ModelOverrides = nil
+	out.visionOverride = nil
+	out.resolvedAPIKey = ""
+	out.resolvedSource = CredentialSource{}
+	return out
+}
+
+func normalizedDeepSeekBalanceURL(raw string) string {
+	raw = strings.TrimRight(strings.TrimSpace(raw), "/")
+	if raw == "" {
+		return deepSeekOfficialBalanceURL
+	}
+	return raw
+}
+
+type legacyDeepSeekModelFields struct {
+	contextWindowSet     bool
+	contextWindow        int
+	maxOutputTokensSet   bool
+	maxOutputTokens      int
+	priceSet             bool
+	price                *provider.Pricing
+	reasoningProtocolSet bool
+	reasoningProtocol    string
+	supportedEffortsSet  bool
+	supportedEfforts     []string
+	defaultEffortSet     bool
+	defaultEffort        string
+	visionSet            bool
+	vision               bool
+}
+
+func legacyDeepSeekModelFieldsCompatible(a, b *ProviderEntry) bool {
+	if a == nil || b == nil {
+		return a == b
+	}
+	if left, right := strings.TrimSpace(a.Default), strings.TrimSpace(b.Default); left != "" && right != "" && left != right {
+		return false
+	}
+	models := map[string]string{}
+	add := func(model string) {
+		model = strings.TrimSpace(model)
+		if model != "" {
+			models[strings.ToLower(model)] = model
+		}
+	}
+	for _, entry := range []*ProviderEntry{a, b} {
+		for _, model := range entry.ModelList() {
+			add(model)
+		}
+		for _, model := range entry.VisionModels {
+			add(model)
+		}
+		for model := range entry.Prices {
+			add(model)
+		}
+		for model := range entry.ModelOverrides {
+			add(model)
+		}
+	}
+	for _, model := range models {
+		left, leftSet := legacyDeepSeekModelFieldProjection(a, model)
+		right, rightSet := legacyDeepSeekModelFieldProjection(b, model)
+		if leftSet && rightSet && !legacyDeepSeekModelFieldProjectionsCompatible(left, right) {
+			return false
+		}
+	}
+	return true
+}
+
+func legacyDeepSeekModelFieldProjection(entry *ProviderEntry, model string) (legacyDeepSeekModelFields, bool) {
+	var out legacyDeepSeekModelFields
+	if entry == nil {
+		return out, false
+	}
+	listed := entry.HasModel(model)
+	if listed {
+		out.contextWindowSet = true
+		out.contextWindow = entry.ContextWindow
+		if out.contextWindow <= 0 {
+			out.contextWindow = 1_000_000
+		}
+		out.maxOutputTokensSet = true
+		out.maxOutputTokens = entry.MaxOutputTokens
+		out.reasoningProtocolSet = true
+		out.reasoningProtocol = strings.TrimSpace(entry.ReasoningProtocol)
+		out.supportedEffortsSet = true
+		out.supportedEfforts = append([]string(nil), entry.SupportedEfforts...)
+		out.defaultEffortSet = true
+		out.defaultEffort = strings.TrimSpace(entry.DefaultEffort)
+		out.visionSet = true
+		out.vision = entry.Vision || entry.HasVisionModel(model)
+		if price := entry.PriceForModel(model); price != nil {
+			out.priceSet = true
+			out.price = price
+		}
+	}
+	if price, ok := pricingForModelKey(entry.Prices, model); ok {
+		out.priceSet = true
+		out.price = clonePricing(price)
+	}
+	if override, ok := entry.modelOverrideForModel(model); ok {
+		if override.ContextWindow > 0 {
+			out.contextWindowSet = true
+			out.contextWindow = override.ContextWindow
+		}
+		if override.MaxOutputTokens != 0 {
+			out.maxOutputTokensSet = true
+			out.maxOutputTokens = override.MaxOutputTokens
+		}
+		if strings.TrimSpace(override.ReasoningProtocol) != "" {
+			out.reasoningProtocolSet = true
+			out.reasoningProtocol = strings.TrimSpace(override.ReasoningProtocol)
+		}
+		if override.SupportedEfforts != nil {
+			out.supportedEffortsSet = true
+			out.supportedEfforts = append([]string(nil), override.SupportedEfforts...)
+			out.defaultEffortSet = true
+			out.defaultEffort = strings.TrimSpace(override.DefaultEffort)
+		}
+		if override.Vision != nil {
+			out.visionSet = true
+			out.vision = *override.Vision
+		}
+	}
+	return out, listed || out.contextWindowSet || out.maxOutputTokensSet || out.priceSet ||
+		out.reasoningProtocolSet || out.supportedEffortsSet || out.defaultEffortSet || out.visionSet
+}
+
+func pricingForModelKey(prices map[string]*provider.Pricing, model string) (*provider.Pricing, bool) {
+	for key, price := range prices {
+		if strings.EqualFold(strings.TrimSpace(key), strings.TrimSpace(model)) {
+			return price, true
+		}
+	}
+	return nil, false
+}
+
+func legacyDeepSeekModelFieldProjectionsCompatible(a, b legacyDeepSeekModelFields) bool {
+	return (!a.contextWindowSet || !b.contextWindowSet || a.contextWindow == b.contextWindow) &&
+		(!a.maxOutputTokensSet || !b.maxOutputTokensSet || a.maxOutputTokens == b.maxOutputTokens) &&
+		(!a.priceSet || !b.priceSet || reflect.DeepEqual(a.price, b.price)) &&
+		(!a.reasoningProtocolSet || !b.reasoningProtocolSet || a.reasoningProtocol == b.reasoningProtocol) &&
+		(!a.supportedEffortsSet || !b.supportedEffortsSet || slices.Equal(a.supportedEfforts, b.supportedEfforts)) &&
+		(!a.defaultEffortSet || !b.defaultEffortSet || a.defaultEffort == b.defaultEffort) &&
+		(!a.visionSet || !b.visionSet || a.vision == b.vision)
+}
+
+func preferredLegacyDeepSeekDefault(entries []*ProviderEntry, models []string, fallback string) string {
+	for _, entry := range entries {
+		if entry == nil {
+			continue
+		}
+		candidate := strings.TrimSpace(entry.Default)
+		if candidate != "" && slices.Contains(models, candidate) {
+			return candidate
+		}
+	}
+	return firstKnownModel(fallback, models, "deepseek-v4-flash")
+}
+
+func mergeLegacyDeepSeekModelConfiguration(entry, old *ProviderEntry) {
+	if entry == nil || old == nil {
+		return
+	}
+	if entry.Prices == nil {
+		entry.Prices = map[string]*provider.Pricing{}
+	}
+	if entry.ModelOverrides == nil {
+		entry.ModelOverrides = map[string]ProviderModelOverride{}
+	}
+	entry.VisionModels = mergeModelLists(entry.VisionModels, old.VisionModels)
+	for model, price := range old.Prices {
+		entry.Prices[model] = clonePricing(price)
+	}
+	for _, model := range old.ModelList() {
+		model = strings.TrimSpace(model)
+		if model == "" {
+			continue
+		}
+		if price := old.PriceForModel(model); price != nil {
+			entry.Prices[model] = price
+		}
+		override := entry.ModelOverrides[model]
+		if old.ContextWindow > 0 && old.ContextWindow != entry.ContextWindow {
+			override.ContextWindow = old.ContextWindow
+		}
+		if old.MaxOutputTokens != entry.MaxOutputTokens {
+			override.MaxOutputTokens = old.MaxOutputTokens
+		}
+		if protocol := strings.TrimSpace(old.ReasoningProtocol); protocol != "" {
+			override.ReasoningProtocol = protocol
+		}
+		if len(old.SupportedEfforts) > 0 {
+			override.SupportedEfforts = append([]string(nil), old.SupportedEfforts...)
+			override.DefaultEffort = old.DefaultEffort
+		}
+		if old.Vision || old.HasVisionModel(model) {
+			vision := true
+			override.Vision = &vision
+		}
+		if explicit, ok := old.modelOverrideForModel(model); ok {
+			mergeProviderModelOverride(&override, explicit)
+		}
+		entry.ModelOverrides[model] = override
+	}
+	for model, override := range old.ModelOverrides {
+		if old.HasModel(model) {
+			continue
+		}
+		current := entry.ModelOverrides[model]
+		mergeProviderModelOverride(&current, override)
+		entry.ModelOverrides[model] = current
+	}
+}
+
+func mergeProviderModelOverride(dst *ProviderModelOverride, src ProviderModelOverride) {
+	if dst == nil {
+		return
+	}
+	if strings.TrimSpace(src.ReasoningProtocol) != "" {
+		dst.ReasoningProtocol = src.ReasoningProtocol
+	}
+	if len(src.SupportedEfforts) > 0 {
+		dst.SupportedEfforts = append([]string(nil), src.SupportedEfforts...)
+		dst.DefaultEffort = src.DefaultEffort
+	}
+	if src.Vision != nil {
+		vision := *src.Vision
+		dst.Vision = &vision
+	}
+	if src.ContextWindow > 0 {
+		dst.ContextWindow = src.ContextWindow
+	}
+	if src.MaxOutputTokens != 0 {
+		dst.MaxOutputTokens = src.MaxOutputTokens
+	}
 }
 
 func mergeModelLists(primary, extra []string) []string {
 	seen := map[string]bool{}
-	out := make([]string, 0, len(primary)+len(extra))
+	out := make([]string, 0, len(primary))
 	for _, list := range [][]string{primary, extra} {
 		for _, model := range list {
 			model = strings.TrimSpace(model)
@@ -1946,15 +2504,11 @@ func mergeModelLists(primary, extra []string) []string {
 
 func firstKnownModel(current string, models []string, fallback string) string {
 	current = strings.TrimSpace(current)
-	for _, model := range models {
-		if model == current {
-			return current
-		}
+	if slices.Contains(models, current) {
+		return current
 	}
-	for _, model := range models {
-		if model == fallback {
-			return fallback
-		}
+	if slices.Contains(models, fallback) {
+		return fallback
 	}
 	if len(models) > 0 {
 		return models[0]
@@ -1965,6 +2519,7 @@ func firstKnownModel(current string, models []string, fallback string) string {
 func retargetDesktopOfficialRefs(c *Config, access map[string]bool) {
 	c.DefaultModel = retargetDesktopOfficialRef(c.DefaultModel, access)
 	c.Agent.PlannerModel = retargetDesktopOfficialRef(c.Agent.PlannerModel, access)
+	c.Agent.VisionModel = retargetDesktopOfficialRef(c.Agent.VisionModel, access)
 	c.Agent.SubagentModel = retargetDesktopOfficialRef(c.Agent.SubagentModel, access)
 	for skill, ref := range c.Agent.SubagentModels {
 		c.Agent.SubagentModels[skill] = retargetDesktopOfficialRef(ref, access)

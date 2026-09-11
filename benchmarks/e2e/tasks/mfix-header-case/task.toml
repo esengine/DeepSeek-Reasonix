@@ -1,0 +1,4 @@
+prompt = "Bearer tokens sometimes vanish: auth.py cannot read back headers that headers.py stored. The bug spans headers.py and auth.py — make header lookup case-insensitive end to end."
+class = "multi-file-bugfix"
+max_steps = 15
+timeout_sec = 240

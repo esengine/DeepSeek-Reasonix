@@ -5,7 +5,7 @@ import (
 	"testing"
 )
 
-// --- visibleWidth ---
+// visibleWidth
 
 func TestVisibleWidthPlain(t *testing.T) {
 	if got := visibleWidth("hello"); got != 5 {
@@ -27,7 +27,7 @@ func TestVisibleWidthANSI(t *testing.T) {
 	}
 }
 
-// --- padRight ---
+// padRight
 
 func TestPadRightAlreadyWide(t *testing.T) {
 	got := padRight("hello", 3)
@@ -57,7 +57,7 @@ func TestPadRightEmpty(t *testing.T) {
 	}
 }
 
-// --- boxed ---
+// boxed
 
 func TestBoxedSingleLine(t *testing.T) {
 	got := boxed([]string{"hello"})

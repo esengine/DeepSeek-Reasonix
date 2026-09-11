@@ -108,7 +108,7 @@ func fetchBounded(ctx context.Context, client *http.Client, rawURL string, limit
 
 func verifyChecksum(data []byte, assetName string, checksums []byte) error {
 	want := ""
-	for _, line := range strings.Split(string(checksums), "\n") {
+	for line := range strings.SplitSeq(string(checksums), "\n") {
 		fields := strings.Fields(line)
 		if len(fields) != 2 || strings.TrimPrefix(fields[1], "*") != assetName {
 			continue

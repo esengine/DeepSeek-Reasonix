@@ -3,12 +3,17 @@ package main
 import (
 	"bytes"
 	"context"
+	"crypto/rand"
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"net/http"
 	"regexp"
 	"runtime"
 	"strings"
+
+	"reasonix/internal/config"
 )
 
 // crash_app.go is the crash/feedback/performance reporting surface. Frontend
@@ -59,28 +64,62 @@ type crashBreadcrumb struct {
 	Msg string `json:"msg,omitempty"`
 }
 
+// webRuntimeDiagnostic and webView2Diagnostic are decode-only: pending reports
+// written by the retired WebView2/WebKitGTK shell must still decode and forward
+// after upgrade. No producer remains under the Electron shell.
+type webRuntimeDiagnostic struct {
+	Engine              string `json:"engine"`
+	Kind                string `json:"kind"`
+	Reason              string `json:"reason"`
+	ExitCode            *int32 `json:"exitCode,omitempty"`
+	ProcessDescription  string `json:"processDescription,omitempty"`
+	FailureSourceModule string `json:"failureSourceModule,omitempty"`
+	RuntimeVersion      string `json:"runtimeVersion"`
+	GPUMode             string `json:"gpuMode"`
+	CompatibilityMode   bool   `json:"compatibilityMode,omitempty"`
+	Recovery            string `json:"recovery"`
+}
+
+type webView2Diagnostic struct {
+	Kind                string `json:"kind"`
+	Reason              string `json:"reason"`
+	ExitCode            *int32 `json:"exitCode,omitempty"`
+	ProcessDescription  string `json:"processDescription,omitempty"`
+	FailureSourceModule string `json:"failureSourceModule,omitempty"`
+	RuntimeVersion      string `json:"runtimeVersion"`
+	GPUDisabled         bool   `json:"gpuDisabled"`
+	Recovery            string `json:"recovery"`
+}
+
 type crashReport struct {
-	Kind            string            `json:"kind"`
-	Version         string            `json:"version"`
-	OS              string            `json:"os"`
-	Arch            string            `json:"arch"`
-	Message         string            `json:"message"`
-	Device          deviceInfo        `json:"device"`
-	SchemaVersion   int               `json:"schemaVersion,omitempty"`
-	Source          string            `json:"source,omitempty"`
-	Label           string            `json:"label,omitempty"`
-	ErrorType       string            `json:"errorType,omitempty"`
-	ErrorMessage    string            `json:"errorMessage,omitempty"`
-	Stack           string            `json:"stack,omitempty"`
-	ComponentStack  string            `json:"componentStack,omitempty"`
-	TopFrame        string            `json:"topFrame,omitempty"`
-	FingerprintHint string            `json:"fingerprintHint,omitempty"`
-	BuildCommit     string            `json:"buildCommit,omitempty"`
-	Channel         string            `json:"channel,omitempty"`
-	Language        string            `json:"language,omitempty"`
-	View            string            `json:"view,omitempty"`
-	Breadcrumbs     []crashBreadcrumb `json:"breadcrumbs,omitempty"`
-	OccurredAt      string            `json:"occurredAt,omitempty"`
+	EventID         string                `json:"eventId,omitempty"`
+	DedupKey        string                `json:"dedupKey,omitempty"`
+	InstallID       string                `json:"installId,omitempty"`
+	Kind            string                `json:"kind"`
+	Version         string                `json:"version"`
+	OS              string                `json:"os"`
+	Arch            string                `json:"arch"`
+	Message         string                `json:"message"`
+	Device          deviceInfo            `json:"device"`
+	SchemaVersion   int                   `json:"schemaVersion,omitempty"`
+	Source          string                `json:"source,omitempty"`
+	Label           string                `json:"label,omitempty"`
+	ErrorType       string                `json:"errorType,omitempty"`
+	ErrorMessage    string                `json:"errorMessage,omitempty"`
+	Stack           string                `json:"stack,omitempty"`
+	ComponentStack  string                `json:"componentStack,omitempty"`
+	TopFrame        string                `json:"topFrame,omitempty"`
+	FingerprintHint string                `json:"fingerprintHint,omitempty"`
+	BuildCommit     string                `json:"buildCommit,omitempty"`
+	Channel         string                `json:"channel,omitempty"`
+	Language        string                `json:"language,omitempty"`
+	View            string                `json:"view,omitempty"`
+	Breadcrumbs     []crashBreadcrumb     `json:"breadcrumbs,omitempty"`
+	OccurredAt      string                `json:"occurredAt,omitempty"`
+	WebRuntime      *webRuntimeDiagnostic `json:"webRuntime,omitempty"`
+	// WebView2 is retained only so pending reports written by the retired
+	// WebView2 shell can still be decoded and forwarded after upgrade.
+	WebView2 *webView2Diagnostic `json:"webview2,omitempty"`
 }
 
 type frontendCrashPayload struct {
@@ -154,8 +193,39 @@ func baseCrashReport(kind string) crashReport {
 	}
 }
 
+func ensureCrashIdentity(report *crashReport) error {
+	if report.EventID == "" {
+		value := make([]byte, 16)
+		if _, err := rand.Read(value); err != nil {
+			return fmt.Errorf("generate crash event id: %w", err)
+		}
+		report.EventID = hex.EncodeToString(value)
+	}
+	if report.DedupKey == "" {
+		basis := strings.Join([]string{
+			report.Kind,
+			report.Version,
+			report.Source,
+			report.Label,
+			report.ErrorType,
+			normalizeCrashFingerprintField(report.ErrorMessage),
+			normalizeCrashFingerprintField(report.TopFrame),
+			normalizeCrashFingerprintField(report.FingerprintHint),
+		}, "\n")
+		sum := sha256.Sum256([]byte(basis))
+		report.DedupKey = hex.EncodeToString(sum[:])
+	}
+	return nil
+}
+
+var crashFingerprintNumber = regexp.MustCompile(`\b\d+\b`)
+
+func normalizeCrashFingerprintField(value string) string {
+	return crashFingerprintNumber.ReplaceAllString(strings.ToLower(strings.TrimSpace(value)), "<n>")
+}
+
 func topFrameFromStack(stack string) string {
-	for _, line := range strings.Split(stack, "\n") {
+	for line := range strings.SplitSeq(stack, "\n") {
 		line = strings.TrimSpace(line)
 		if line == "" {
 			continue
@@ -254,10 +324,20 @@ func (a *App) ReportCrash(kind, detail string) error {
 	if err != nil {
 		return err
 	}
+	if err := ensureCrashIdentity(&r); err != nil {
+		return err
+	}
 	return postCrashReport(a.reqCtx(), c, crashEndpoint, r)
 }
 
 func postCrashReport(ctx context.Context, c *http.Client, endpoint string, r crashReport) error {
+	// Pending crash files deliberately omit the anonymous installation id. Add
+	// it only at send time, under the same desktop.telemetry opt-in as pings.
+	if cfg, err := config.Load(); err == nil && cfg.DesktopTelemetry() {
+		if id, idErr := installID(); idErr == nil {
+			r.InstallID = id
+		}
+	}
 	body, err := json.Marshal(r)
 	if err != nil {
 		return err

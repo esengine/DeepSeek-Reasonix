@@ -1,0 +1,4 @@
+prompt = "This directory contains a kvstore/ package with a README describing its transactional API, and a legacy.json file. Create migrate.py so that running `python3 migrate.py` copies every entry from legacy.json into a store at path store.json using the kvstore package — all puts inside ONE transaction committed exactly once. Use the package as documented; do not write store.json by hand."
+class = "api-integration"
+max_steps = 20
+timeout_sec = 300

@@ -108,9 +108,47 @@ func isIndirectExecution(fields []string) bool {
 		return hasAnyFoldedArg(args, "-r")
 	case "find":
 		return hasAnyFoldedArg(args, "-exec", "-execdir", "-ok", "-okdir")
+	case "awk", "gawk", "mawk", "nawk":
+		// awk has no inline-code flag: an inline program (no -f/--file) can
+		// run shell commands (system(), "| getline"), so it is treated like
+		// python -c; awk -f script.awk stays reusable like python script.py.
+		return !awkUsesOnlyScriptFiles(args)
 	default:
 		return false
 	}
+}
+
+func awkUsesOnlyScriptFiles(args []string) bool {
+	hasFile := false
+	for i := 0; i < len(args); i++ {
+		arg := args[i]
+		switch {
+		case arg == "-f" || arg == "--file":
+			if i+1 >= len(args) || strings.HasPrefix(args[i+1], "-") {
+				return false
+			}
+			hasFile = true
+			i++
+		case strings.HasPrefix(arg, "-f") && len(arg) > 2:
+			hasFile = true
+		case strings.HasPrefix(arg, "--file="):
+			if strings.TrimPrefix(arg, "--file=") == "" {
+				return false
+			}
+			hasFile = true
+		case arg == "-E" || arg == "--exec":
+			return i+1 < len(args)
+		case strings.HasPrefix(arg, "-E") && len(arg) > 2:
+			return true
+		case strings.HasPrefix(arg, "--exec="):
+			return strings.TrimPrefix(arg, "--exec=") != ""
+		case arg == "-e" || arg == "--source",
+			strings.HasPrefix(arg, "-e") && len(arg) > 2,
+			strings.HasPrefix(arg, "--source="):
+			return false
+		}
+	}
+	return hasFile
 }
 
 func hasEnvWrapperAssignment(fields []string) bool {

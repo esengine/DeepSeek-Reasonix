@@ -7,11 +7,11 @@ import (
 	"go/ast"
 	"go/parser"
 	"go/token"
-	"os"
 	"path/filepath"
 	"strings"
 
 	"reasonix/internal/diff"
+	"reasonix/internal/sandbox"
 	"reasonix/internal/tool"
 )
 
@@ -19,9 +19,11 @@ func init() { tool.RegisterBuiltin(deleteSymbol{}) }
 
 type deleteSymbol struct {
 	roots   []string
+	rootSet *sandbox.WritableRootSet
 	guard   SessionDataGuard
 	managed ManagedConfigPaths
 	workDir string
+	overlay FileOverlay
 }
 
 type symbolMatch struct {
@@ -56,6 +58,10 @@ func (deleteSymbol) Schema() json.RawMessage {
 
 func (deleteSymbol) ReadOnly() bool { return false }
 
+func (d deleteSymbol) DeclareWriteAccess(args json.RawMessage) (tool.WriteAccessDeclaration, error) {
+	return declareFilePathWriteAccess(d.workDir, args)
+}
+
 func (d deleteSymbol) Execute(ctx context.Context, args json.RawMessage) (string, error) {
 	var p struct {
 		Path   string `json:"path"`
@@ -73,7 +79,7 @@ func (d deleteSymbol) Execute(ctx context.Context, args json.RawMessage) (string
 		return "", fmt.Errorf("name is required")
 	}
 	p.Path = resolveIn(d.workDir, p.Path)
-	if err := confineWrite(ctx, d.roots, d.guard, d.managed, p.Path); err != nil {
+	if err := confineWrite(ctx, effectiveWriteRoots(ctx, d.rootSet, d.roots), d.guard, d.managed, p.Path); err != nil {
 		return "", err
 	}
 
@@ -82,19 +88,19 @@ func (d deleteSymbol) Execute(ctx context.Context, args json.RawMessage) (string
 		return "", fmt.Errorf("delete_symbol only supports Go files — use delete_range for %s files", ext)
 	}
 
-	m, fset, err := d.findSymbol(p.Path, p.Name, p.Kind, p.Parent)
+	src, err := readEditSource(ctx, d.overlay, p.Path)
+	if err != nil {
+		return "", fmt.Errorf("read %s: %w", p.Path, err)
+	}
+	original := src.content
+
+	m, fset, err := d.findSymbol(p.Path, p.Name, p.Kind, p.Parent, []byte(original))
 	if err != nil {
 		return "", err
 	}
 
-	src, err := os.ReadFile(p.Path)
-	if err != nil {
-		return "", fmt.Errorf("read %s: %w", p.Path, err)
-	}
-	original := string(src)
-
 	newContent := deleteLines(original, fset, m)
-	if err := os.WriteFile(p.Path, []byte(newContent), 0o644); err != nil {
+	if err := src.write(ctx, d.overlay, p.Path, newContent); err != nil {
 		return "", fmt.Errorf("write %s: %w", p.Path, err)
 	}
 
@@ -102,7 +108,7 @@ func (d deleteSymbol) Execute(ctx context.Context, args json.RawMessage) (string
 	return change.Diff, nil
 }
 
-func (d deleteSymbol) Preview(args json.RawMessage) (diff.Change, error) {
+func (d deleteSymbol) Preview(ctx context.Context, args json.RawMessage) (diff.Change, error) {
 	var p struct {
 		Path   string `json:"path"`
 		Name   string `json:"name"`
@@ -119,7 +125,7 @@ func (d deleteSymbol) Preview(args json.RawMessage) (diff.Change, error) {
 		return diff.Change{}, fmt.Errorf("name is required")
 	}
 	p.Path = resolveIn(d.workDir, p.Path)
-	if err := confinePreview(d.roots, d.guard, d.managed, p.Path); err != nil {
+	if err := confinePreview(effectiveWriteRoots(ctx, d.rootSet, d.roots), d.guard, d.managed, p.Path); err != nil {
 		return diff.Change{}, err
 	}
 
@@ -128,24 +134,27 @@ func (d deleteSymbol) Preview(args json.RawMessage) (diff.Change, error) {
 		return diff.Change{}, fmt.Errorf("delete_symbol only supports Go files")
 	}
 
-	m, fset, err := d.findSymbol(p.Path, p.Name, p.Kind, p.Parent)
-	if err != nil {
-		return diff.Change{}, err
-	}
-
-	src, err := os.ReadFile(p.Path)
+	src, err := readEditSource(ctx, d.overlay, p.Path)
 	if err != nil {
 		return diff.Change{}, fmt.Errorf("read %s: %w", p.Path, err)
 	}
-	original := string(src)
+	original := src.content
+
+	m, fset, err := d.findSymbol(p.Path, p.Name, p.Kind, p.Parent, []byte(original))
+	if err != nil {
+		return diff.Change{}, err
+	}
 
 	newContent := deleteLines(original, fset, m)
 	return diff.Build(p.Path, original, newContent, diff.Modify), nil
 }
 
-func (d deleteSymbol) findSymbol(path, name, kind, parent string) (symbolMatch, *token.FileSet, error) {
+// findSymbol parses src rather than re-reading path, so the returned fset
+// offsets index the exact bytes the caller will edit — an unsaved editor buffer
+// differs from disk, and offsets from the wrong one would cut the wrong lines.
+func (d deleteSymbol) findSymbol(path, name, kind, parent string, src []byte) (symbolMatch, *token.FileSet, error) {
 	fset := token.NewFileSet()
-	f, err := parser.ParseFile(fset, path, nil, parser.ParseComments)
+	f, err := parser.ParseFile(fset, path, src, parser.ParseComments)
 	if err != nil {
 		return symbolMatch{}, nil, fmt.Errorf("parse %s: %w", path, err)
 	}

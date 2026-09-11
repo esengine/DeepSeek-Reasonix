@@ -43,6 +43,18 @@ func TestBashSubjectRequiresExplicitApproval(t *testing.T) {
 		{name: "ruby attached inline code", subject: `ruby -eFile.write('x','')`, wantHuman: true, wantExact: true},
 		{name: "cmd attached command string", subject: `cmd /cecho x`, wantHuman: true, wantExact: true},
 		{name: "find exec", subject: `find . -exec touch {} ;`, wantHuman: true, wantExact: true},
+		{name: "awk inline system call", subject: `awk 'BEGIN{system("touch /tmp/x")}'`, wantHuman: true, wantExact: true},
+		{name: "awk inline getline pipe", subject: `awk '{"touch /tmp/x" | getline line}' file`, wantHuman: true, wantExact: true},
+		{name: "awk variant inline program", subject: `gawk '{print $1}' file`, wantHuman: true, wantExact: true},
+		{name: "awk field separator is not a script file", subject: `awk -F: 'BEGIN{system("touch /tmp/x")}' /etc/passwd`, wantHuman: true, wantExact: true},
+		{name: "awk separate field separator is not a script file", subject: `awk -F : 'BEGIN{system("touch /tmp/x")}' /etc/passwd`, wantHuman: true, wantExact: true},
+		{name: "gawk inline source overrides script file", subject: `gawk -f safe.awk -e 'BEGIN{system("touch /tmp/x")}'`, wantHuman: true, wantExact: true},
+		{name: "gawk long inline source overrides script file", subject: `gawk --file=safe.awk --source='BEGIN{system("touch /tmp/x")}'`, wantHuman: true, wantExact: true},
+		{name: "awk script file", subject: `awk -f transform.awk input.txt`},
+		{name: "awk attached script file", subject: `mawk -ftransform.awk input.txt`},
+		{name: "awk long script file", subject: `awk --file=transform.awk input.txt`},
+		{name: "gawk exec script file", subject: `gawk -E transform.awk input.txt`},
+		{name: "gawk long exec script file", subject: `gawk --exec=transform.awk input.txt`},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {

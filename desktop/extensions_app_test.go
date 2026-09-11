@@ -13,7 +13,7 @@ import (
 // SubmitExtensionForm (asserted locally by the binding until the port grows
 // it).
 type extensionUIController struct {
-	control.SessionAPI
+	stubSessionAPI
 	actions         []control.ExtensionActionView
 	invokeMessage   string
 	invokeErr       error
@@ -184,7 +184,7 @@ func TestSubmitExtensionFormWithoutSubmitterFailsCleanly(t *testing.T) {
 }
 
 type extensionUIActionsOnlyController struct {
-	control.SessionAPI
+	stubSessionAPI
 }
 
 func (c *extensionUIActionsOnlyController) ExtensionActions() []control.ExtensionActionView {

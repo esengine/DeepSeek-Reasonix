@@ -5,7 +5,8 @@
 import { z } from "zod";
 import type { Env } from "./env";
 import { html, redirect } from "./shell";
-import { renderGroup, renderStats, type Group, type StatsModule } from "./stats";
+import { renderStats, type StatsModule } from "./stats";
+import { renderGroup, type Group, type ReportSample } from "./group";
 import { renderAccount } from "./auth_pages";
 import { renderUsers, renderAudit, type UserRow, type AuditRow } from "./admin";
 import {
@@ -30,54 +31,68 @@ import {
   handleDesktopReleaseManifest,
   handleReleaseGatewayRequest,
 } from "./desktop_release";
-
+import {
+  DEVELOPMENT_FINGERPRINT_PREFIX,
+  crashGroups,
+  currentWindowSince,
+  developmentGroupSQL,
+  diagnosticFacets as loadDiagnosticFacets,
+  diagnosticWindowWhere,
+  effectiveGroupSeverity,
+  groupDiagnosticSummary,
+  isDevelopmentGroup,
+  reportAggregateStatements,
+  type DiagnosticFacets,
+} from "./diagnostics_v2";
+import { statsQueryObserver } from "./stats_timing";
+import { loadD1GroupReports, loadGroupDiagnostics } from "./group_queries";
+import { Report, WebRuntimeDiagnostic, type ReportPayload } from "./report_schema";
+import { statsFilters, type StatsFilters } from "./stats_filters";
+import {
+  acquireFirebaseGroupLease,
+  claimFirebaseCrash,
+  crashStorageMode,
+  enqueueFirebaseCrash,
+  firebaseEventExists,
+  firebaseGroupState,
+  firebaseProjectionExists,
+  firebaseStorageReady,
+  projectionCompletionStatements,
+  purgeFirebaseDeliveryState,
+  recordFirebaseRetry,
+  reclaimUnusedFirebaseReservation,
+  releaseFirebaseGroupLease,
+  renewFirebaseGroupLease,
+  reserveFirebaseGroup,
+  type FirebaseGroupLease,
+} from "./crash_delivery";
+import {
+  readFirebaseCrashGroup,
+  writeFirebaseGroupMeta,
+} from "./firebase_rtdb";
+import {
+  deliverCrashEventToFirebase,
+  drainFirebaseCrashOutbox as drainFirebaseOutbox,
+  type StoredCrashEvent,
+} from "./firebase_delivery";
+import {
+  archiveFirebaseGroupForAdmin,
+  firebaseStorageSummary,
+  runFirebaseCrashLifecycle,
+  FIREBASE_OUTBOX_WARNING,
+  type FirebaseStorageSummary,
+} from "./firebase_lifecycle";
+import {
+  firebaseMeta,
+  firebaseSamples,
+  loadFirebaseGroupMeta,
+  type FirebaseGroupRow,
+} from "./firebase_crash_view";
+export { Report } from "./report_schema";
+export { diagnosticWindowWhere, effectiveGroupSeverity, isDevelopmentGroup } from "./diagnostics_v2";
 const MAX_BODY_BYTES = 96 * 1024;
 const LATEST_SAMPLES_PER_GROUP = 5;
-const DEVELOPMENT_FINGERPRINT_PREFIX = "dev:";
 const GROUP_PATH_RE = /^\/stats\/group\/((?:dev:)?[0-9a-f]{64})$/;
-
-const Device = z
-  .object({
-    osVersion: z.string().max(128),
-    cpu: z.string().max(128),
-    cores: z.number().int().min(0).max(4096),
-    ramGb: z.number().min(0).max(65536),
-  })
-  .partial();
-
-const Report = z.object({
-  kind: z.enum(["crash", "exception", "feedback", "performance", "bot"]),
-  version: z.string().min(1).max(64),
-  os: z.string().min(1).max(32),
-  arch: z.string().min(1).max(32),
-  message: z.string().min(1).max(16 * 1024),
-  device: Device.optional(),
-  schemaVersion: z.number().int().min(1).max(10).optional(),
-  source: z.string().trim().min(1).max(32).regex(/^[a-z0-9_.-]+$/).optional(),
-  label: z.string().max(64).optional(),
-  errorType: z.string().max(128).optional(),
-  errorMessage: z.string().max(4 * 1024).optional(),
-  stack: z.string().max(16 * 1024).optional(),
-  componentStack: z.string().max(16 * 1024).optional(),
-  topFrame: z.string().max(300).optional(),
-  fingerprintHint: z.string().max(300).optional(),
-  buildCommit: z.string().max(64).optional(),
-  channel: z.string().max(32).optional(),
-  language: z.string().max(64).optional(),
-  view: z.string().max(200).optional(),
-  breadcrumbs: z
-    .array(
-      z.object({
-        t: z.number().int().optional(),
-        cat: z.string().max(64).optional(),
-        msg: z.string().max(240).optional(),
-      }),
-    )
-    .max(30)
-    .optional(),
-  occurredAt: z.string().max(64).optional(),
-});
-type ReportPayload = z.infer<typeof Report>;
 
 const ClientSurface = z.enum(["desktop", "cli"]);
 type ClientSurfaceName = z.infer<typeof ClientSurface>;
@@ -85,12 +100,11 @@ type ClientSurfaceName = z.infer<typeof ClientSurface>;
 type TelemetryTableNames = {
   pings: "pings" | "cli_pings";
   metrics: "metrics" | "cli_metrics";
-  metricUsers: "metric_users" | "cli_metric_users";
 };
 
 const TELEMETRY_TABLES: Record<ClientSurfaceName, TelemetryTableNames> = {
-  desktop: { pings: "pings", metrics: "metrics", metricUsers: "metric_users" },
-  cli: { pings: "cli_pings", metrics: "cli_metrics", metricUsers: "cli_metric_users" },
+  desktop: { pings: "pings", metrics: "metrics" },
+  cli: { pings: "cli_pings", metrics: "cli_metrics" },
 };
 
 export function telemetryTableNames(surface: ClientSurfaceName): TelemetryTableNames {
@@ -105,6 +119,16 @@ export const CLI_TELEMETRY_SCHEMA_SQL = [
      os TEXT NOT NULL,
      arch TEXT NOT NULL,
      os_version TEXT NOT NULL DEFAULT '',
+     os_build INTEGER NOT NULL DEFAULT 0,
+     os_revision INTEGER NOT NULL DEFAULT 0,
+     channel TEXT NOT NULL DEFAULT '',
+     distro_id TEXT NOT NULL DEFAULT '',
+     distro_version TEXT NOT NULL DEFAULT '',
+     kernel_version TEXT NOT NULL DEFAULT '',
+     session_type TEXT NOT NULL DEFAULT '',
+     runtime_engine TEXT NOT NULL DEFAULT '',
+     runtime_version TEXT NOT NULL DEFAULT '',
+     gpu_mode TEXT NOT NULL DEFAULT '',
      opens INTEGER NOT NULL DEFAULT 1,
      PRIMARY KEY (date, install_id)
    )`,
@@ -116,15 +140,6 @@ export const CLI_TELEMETRY_SCHEMA_SQL = [
      bucket TEXT NOT NULL,
      count INTEGER NOT NULL DEFAULT 0,
      PRIMARY KEY (date, version, os, signal, bucket)
-   )`,
-  `CREATE TABLE IF NOT EXISTS cli_metric_users (
-     date TEXT NOT NULL,
-     signal TEXT NOT NULL,
-     bucket TEXT NOT NULL,
-     install_id TEXT NOT NULL,
-     version TEXT NOT NULL,
-     os TEXT NOT NULL,
-     PRIMARY KEY (date, signal, bucket, install_id)
    )`,
   // No secondary indexes: each primary key already leads with `date`, which is
   // what every dashboard query filters on. See migrate-window-index-fix.sql.
@@ -153,6 +168,16 @@ export const Ping = z.object({
   os: z.string().min(1).max(32),
   arch: z.string().min(1).max(32),
   osVersion: z.string().max(128).optional(),
+  osBuild: z.number().int().min(0).max(1_000_000).optional(),
+  osRevision: z.number().int().min(0).max(1_000_000).optional(),
+  channel: z.string().max(32).optional(),
+  distroId: z.string().max(64).optional(),
+  distroVersion: z.string().max(64).optional(),
+  kernelVersion: z.string().max(128).optional(),
+  sessionType: z.enum(["wayland", "x11", "remote", "unknown"]).optional(),
+  runtimeEngine: z.enum(["webview2", "webkitgtk", "unknown"]).optional(),
+  runtimeVersion: z.string().max(128).optional(),
+  gpuMode: z.enum(["enabled", "disabled", "always", "on_demand", "unknown"]).optional(),
   surface: ClientSurface.default("desktop"),
 });
 
@@ -179,6 +204,12 @@ const METRIC_SIGNALS = [
   "desktop_update_transition",
   "desktop_restore",
   "desktop_webview2_failure",
+  "desktop_webview2_outcome",
+  "desktop_web_runtime_failure",
+  "desktop_web_runtime_outcome",
+  "desktop_web_runtime_dropped",
+  "desktop_legacy_exit",
+  "desktop_legacy_exit_phase",
   "cli_mode",
   "cli_profile",
   "cli_permission_mode",
@@ -255,12 +286,19 @@ const UnknownMetricCounter = z
   .transform(() => null);
 
 export const Metrics = z.object({
-  installId: z
-    .string()
-    .regex(/^[0-9a-f]{32}$/)
-    .optional(),
   version: z.string().min(1).max(64),
   os: z.string().min(1).max(32),
+  arch: z.string().max(32).optional(),
+  osBuild: z.number().int().min(0).max(1_000_000).optional(),
+  osRevision: z.number().int().min(0).max(1_000_000).optional(),
+  channel: z.string().max(32).optional(),
+  distroId: z.string().max(64).optional(),
+  distroVersion: z.string().max(64).optional(),
+  kernelVersion: z.string().max(128).optional(),
+  sessionType: z.enum(["wayland", "x11", "remote", "unknown"]).optional(),
+  runtimeEngine: z.enum(["webview2", "webkitgtk", "unknown"]).optional(),
+  runtimeVersion: z.string().max(128).optional(),
+  gpuMode: z.enum(["enabled", "disabled", "always", "on_demand", "unknown"]).optional(),
   surface: ClientSurface.default("desktop"),
   counters: z
     .array(z.union([KnownMetricCounter, UnknownMetricCounter]))
@@ -343,6 +381,63 @@ export function normalizeForFingerprint(inputOrKind: FingerprintInput | string, 
   );
 }
 
+export function nativeWebRuntimeFingerprintBasis(input: {
+  engine: string;
+  kind: string;
+  reason: string;
+  exitCode?: number;
+}): string {
+  const kind = normalizeRuntimeBucket(input.engine, "kind", input.kind);
+  const reason = normalizeRuntimeBucket(input.engine, "reason", input.reason);
+  const normalizedExitCode = input.engine === "webview2" && kind === "render_process_unresponsive" && input.exitCode === 259 ? undefined : input.exitCode;
+  const exitCode = normalizedExitCode === undefined ? "unknown" : String(normalizedExitCode);
+  return [input.engine, kind, reason, exitCode].join("\n");
+}
+
+type NormalizedWebRuntime = z.infer<typeof WebRuntimeDiagnostic>;
+
+function basenameOnly(value: string | undefined): string {
+  return (value ?? "").split(/[\\/]/).pop()?.slice(0, 255) ?? "";
+}
+
+function normalizeRuntimeBucket(engine: string, field: "kind" | "reason", input: string): string {
+  const buckets = engine === "webview2"
+    ? field === "kind"
+      ? ["browser_process_exited", "render_process_exited", "render_process_unresponsive", "frame_render_process_exited", "utility_process_exited", "sandbox_helper_process_exited", "gpu_process_exited", "ppapi_plugin_process_exited", "ppapi_broker_process_exited", "unknown_process_exited", "unknown"]
+      : ["unexpected", "unresponsive", "terminated", "crashed", "launch_failed", "out_of_memory", "profile_deleted", "normal_exit", "abnormal_exit", "integrity_failure", "unknown"]
+    : field === "kind"
+      ? ["web_process", "unknown"]
+      : ["crashed", "out_of_memory", "terminated_by_api", "unknown"];
+  const value = input.trim().toLowerCase();
+  return buckets.includes(value) ? value : "unknown";
+}
+
+function normalizedWebRuntime(r: ReportPayload): NormalizedWebRuntime | undefined {
+  const input: NormalizedWebRuntime | undefined = r.webRuntime ?? (r.webview2
+    ? {
+        engine: "webview2",
+        kind: r.webview2.kind,
+        reason: r.webview2.reason,
+        exitCode: r.webview2.exitCode,
+        processDescription: r.webview2.processDescription,
+        failureSourceModule: r.webview2.failureSourceModule,
+        runtimeVersion: r.webview2.runtimeVersion,
+        gpuMode: r.webview2.gpuDisabled ? "disabled" : "enabled",
+        recovery: r.webview2.recovery,
+      }
+    : undefined);
+  if (!input) return undefined;
+  return {
+    ...input,
+    kind: normalizeRuntimeBucket(input.engine, "kind", input.kind),
+    reason: normalizeRuntimeBucket(input.engine, "reason", input.reason),
+    runtimeVersion: input.runtimeVersion.trim() || "unknown",
+    exitCode: input.engine === "webview2" && normalizeRuntimeBucket(input.engine, "kind", input.kind) === "render_process_unresponsive" && input.exitCode === 259 ? undefined : input.exitCode,
+    processDescription: scrubSensitiveText(input.processDescription ?? "").slice(0, 255),
+    failureSourceModule: basenameOnly(input.failureSourceModule),
+  };
+}
+
 function hasStructuredCrashFields(r: ReportPayload): boolean {
   return Boolean(
     r.schemaVersion ||
@@ -384,12 +479,14 @@ type SeverityInput = {
   errorMessage: string;
   topFrame: string;
   channel?: string;
+  recovery?: string;
 };
 
 const RESIZE_OBSERVER_NOTICE_RE = /^ResizeObserver loop (?:limit exceeded|completed with undelivered notifications\.?)$/;
 
 export function isDevelopmentReport(input: SeverityInput): boolean {
-  return input.channel?.trim().toLowerCase() === "dev" || input.version?.trim().toLowerCase().startsWith("dev") === true;
+  const channel = input.channel?.trim().toLowerCase();
+  return channel === "dev" || channel === "test" || input.version?.trim().toLowerCase().startsWith("dev") === true;
 }
 
 export function namespaceReportFingerprint(hash: string, development: boolean): string {
@@ -430,7 +527,17 @@ function severityForKind(kind: string): string {
 
 export function severityForReport(input: SeverityInput): string {
   if (isDevelopmentReport(input) || isOpaqueScriptErrorReport(input) || isKnownNonCrashDiagnostic(input)) return "low";
+  if ((input.source === "web.runtime.native" || input.source === "webview2.process.native") && input.recovery === "reload_succeeded") return "low";
+  if ((input.source === "web.runtime.native" || input.source === "webview2.process.native") && input.kind === "exception") return "high";
   return severityForKind(input.kind);
+}
+
+export function severityRank(severity: string): number {
+  return ({ low: 1, medium: 2, high: 3, critical: 4 })[severity] ?? 0;
+}
+
+export function maxSeverity(current: string, incoming: string): string {
+  return severityRank(incoming) > severityRank(current) ? incoming : current;
 }
 
 async function sha256Hex(s: string): Promise<string> {
@@ -448,14 +555,183 @@ async function readJSON(request: Request): Promise<unknown | Response> {
   }
 }
 
-// Ingest writes fail together when the database is unhealthy (e.g. the D1
-// size cap: every INSERT throws while reads stay fine). Surface that as a
-// deliberate 503 with a loud log instead of an opaque worker exception, so
-// `wrangler tail` / observability show the root cause and clients see a
-// retryable status.
+// Storage operations surface a deliberate 503 with a loud but credential-free
+// log instead of an opaque worker exception, so clients retain retryable state.
 function storageUnavailable(op: string, err: unknown): Response {
-  console.error(`${op}: D1 write failed`, err);
+  console.error(`${op}: storage unavailable`, err);
   return new Response("storage unavailable", { status: 503 });
+}
+
+async function prepareCrashEvent(r: ReportPayload, keepD1Sample: boolean): Promise<StoredCrashEvent> {
+  const message = scrubSensitiveText(r.message);
+  const errorMessage = scrubSensitiveText(r.errorMessage ?? "");
+  const stack = scrubSensitiveText(r.stack ?? "");
+  const componentStack = scrubSensitiveText(r.componentStack ?? "");
+  const topFrame = scrubSensitiveText(r.topFrame ?? "");
+  const fingerprintHint = scrubSensitiveText(r.fingerprintHint ?? "");
+  const view = scrubSensitiveText(r.view ?? "");
+  const breadcrumbs = (r.breadcrumbs ?? []).map((breadcrumb) => ({
+    ...breadcrumb,
+    msg: breadcrumb.msg ? scrubSensitiveText(breadcrumb.msg) : breadcrumb.msg,
+  }));
+  const webRuntime = normalizedWebRuntime(r);
+  const webview2 = r.webview2
+    ? {
+        ...r.webview2,
+        processDescription: scrubSensitiveText(r.webview2.processDescription ?? "").slice(0, 255),
+        failureSourceModule: basenameOnly(r.webview2.failureSourceModule),
+      }
+    : undefined;
+  const report: ReportPayload = {
+    ...r,
+    eventId: r.eventId ?? crypto.randomUUID().replaceAll("-", ""),
+    message,
+    errorMessage,
+    stack,
+    componentStack,
+    topFrame,
+    fingerprintHint,
+    view,
+    breadcrumbs,
+    webRuntime,
+    webview2,
+  };
+  const fingerprintBasis = (
+    report.source === "web.runtime.native" || report.source === "webview2.process.native"
+  ) && webRuntime
+    ? nativeWebRuntimeFingerprintBasis(webRuntime)
+    : hasStructuredCrashFields(report)
+      ? normalizeForFingerprint({
+        kind: report.kind,
+        message,
+        source: report.source,
+        label: report.label,
+        errorType: report.errorType,
+        errorMessage,
+        topFrame,
+        fingerprintHint,
+      })
+      : normalizeForFingerprint(report.kind, message);
+  const severityInput = {
+    kind: report.kind,
+    version: report.version,
+    source: report.source ?? "legacy",
+    label: report.label ?? "",
+    errorType: report.errorType ?? "",
+    errorMessage,
+    topFrame,
+    channel: report.channel ?? "",
+    recovery: webRuntime?.recovery,
+  };
+  const development = isDevelopmentReport(severityInput);
+  return {
+    eventId: report.eventId!,
+    fingerprint: namespaceReportFingerprint(await sha256Hex(fingerprintBasis), development),
+    receivedAt: new Date().toISOString(),
+    keepD1Sample,
+    report,
+  };
+}
+
+async function projectCrashEvent(env: Env, event: StoredCrashEvent): Promise<void> {
+  const firebaseDelivery = crashStorageMode(env) !== "d1";
+  if (firebaseDelivery && await firebaseProjectionExists(env, event.eventId)) {
+    await env.DB.prepare(
+      "UPDATE firebase_crash_outbox SET state = 'projected', updated_at = ?2 WHERE event_id = ?1",
+    ).bind(event.eventId, new Date().toISOString()).run();
+    return;
+  }
+  const r = event.report;
+  const webRuntime = normalizedWebRuntime(r);
+  const webview2 = r.webview2;
+  const message = r.message;
+  const errorMessage = r.errorMessage ?? "";
+  const topFrame = r.topFrame ?? "";
+  const source = r.source ?? "legacy";
+  const label = r.label ?? "";
+  const errorType = r.errorType ?? "";
+  const buildCommit = r.buildCommit ?? "";
+  const channel = r.channel ?? "";
+  const severity = severityForReport({
+    kind: r.kind,
+    version: r.version,
+    source,
+    label,
+    errorType,
+    errorMessage,
+    topFrame,
+    channel,
+    recovery: webRuntime?.recovery,
+  });
+  const prior = await env.DB.prepare("SELECT status FROM groups WHERE fingerprint = ?1")
+    .bind(event.fingerprint)
+    .first<{ status: string }>();
+  const regressedAt = prior?.status === "resolved" ? event.receivedAt : "";
+  const groupWrite = env.DB.prepare(
+    `INSERT INTO groups (
+       fingerprint, kind, count, first_seen, last_seen, first_version, last_version,
+       status, title, source, label, error_type, top_frame, severity,
+       last_os, last_arch, last_build_commit, last_channel, last_sample_at, regressed_at
+     )
+     VALUES (?1, ?2, 1, ?3, ?3, ?4, ?4, 'open', ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?3, ?15)
+     ON CONFLICT (fingerprint) DO UPDATE SET
+       kind = CASE
+         WHEN severity = 'critical' THEN kind
+         WHEN (CASE ?10 WHEN 'critical' THEN 4 WHEN 'high' THEN 3 WHEN 'medium' THEN 2 ELSE 1 END) >
+              (CASE severity WHEN 'critical' THEN 4 WHEN 'high' THEN 3 WHEN 'medium' THEN 2 ELSE 1 END)
+           THEN ?2 ELSE kind END,
+       count = count + 1, last_seen = ?3, last_version = ?4, title = ?5,
+       source = ?6, label = ?7, error_type = ?8, top_frame = ?9,
+       severity = CASE
+         WHEN severity = 'critical' THEN severity
+         WHEN (CASE ?10 WHEN 'critical' THEN 4 WHEN 'high' THEN 3 WHEN 'medium' THEN 2 ELSE 1 END) >
+              (CASE severity WHEN 'critical' THEN 4 WHEN 'high' THEN 3 WHEN 'medium' THEN 2 ELSE 1 END)
+           THEN ?10 ELSE severity END,
+       last_os = ?11, last_arch = ?12, last_build_commit = ?13, last_channel = ?14,
+       last_sample_at = ?3,
+       status = CASE WHEN status = 'resolved' THEN 'open' ELSE status END,
+       regressed_at = CASE WHEN status = 'resolved' THEN ?3 ELSE regressed_at END`,
+  ).bind(
+    event.fingerprint, r.kind, event.receivedAt, r.version, crashTitle(message), source,
+    label, errorType, topFrame, severity, r.os, r.arch, buildCommit, channel, regressedAt,
+  );
+  const statements: D1PreparedStatement[] = [groupWrite];
+  if (event.keepD1Sample) {
+    statements.push(env.DB.prepare(
+      `INSERT INTO reports (
+         fingerprint, kind, version, os, arch, message, device, created_at,
+         source, label, error_type, error_message, top_frame, build_commit, channel,
+         language, view, breadcrumbs, component_stack, stack, occurred_at, webview2, web_runtime
+       ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17, ?18, ?19, ?20, ?21, ?22, ?23)`,
+    ).bind(
+      event.fingerprint, r.kind, r.version, r.os, r.arch, message,
+      JSON.stringify(r.device ?? {}), event.receivedAt, source, label, errorType, errorMessage,
+      topFrame, buildCommit, channel, r.language ?? "", r.view ?? "",
+      JSON.stringify(r.breadcrumbs ?? []), r.componentStack ?? "", r.stack ?? "",
+      r.occurredAt ?? "", webview2 ? JSON.stringify(webview2) : "",
+      webRuntime ? JSON.stringify(webRuntime) : "",
+    ));
+  }
+  statements.push(...reportAggregateStatements(env.DB, r, event.fingerprint, channel, webRuntime));
+  if (event.keepD1Sample) {
+    statements.push(env.DB.prepare(
+      `DELETE FROM reports WHERE fingerprint = ?1 AND id NOT IN (
+         SELECT id FROM (SELECT id FROM reports WHERE fingerprint = ?1 ORDER BY id ASC LIMIT 1)
+         UNION
+         SELECT id FROM (SELECT id FROM reports WHERE fingerprint = ?1 ORDER BY id DESC LIMIT ?2)
+       )`,
+    ).bind(event.fingerprint, LATEST_SAMPLES_PER_GROUP));
+  }
+  if (firebaseDelivery) {
+    statements.push(...projectionCompletionStatements(
+      env.DB, event.eventId, event.fingerprint, event.receivedAt,
+    ));
+  }
+  await env.DB.batch(statements);
+}
+
+export async function drainFirebaseCrashOutbox(env: Env): Promise<void> {
+  return drainFirebaseOutbox(env, projectCrashEvent);
 }
 
 async function handleReport(request: Request, env: Env): Promise<Response> {
@@ -467,133 +743,59 @@ async function handleReport(request: Request, env: Env): Promise<Response> {
   if (raw instanceof Response) return raw;
   const parsed = Report.safeParse(raw);
   if (!parsed.success) return new Response("bad request", { status: 400 });
-  const r = parsed.data;
-  const message = scrubSensitiveText(r.message);
-  const errorMessage = scrubSensitiveText(r.errorMessage ?? "");
-  const stack = scrubSensitiveText(r.stack ?? "");
-  const componentStack = scrubSensitiveText(r.componentStack ?? "");
-  const topFrame = scrubSensitiveText(r.topFrame ?? "");
-  const fingerprintHint = scrubSensitiveText(r.fingerprintHint ?? "");
-  const view = scrubSensitiveText(r.view ?? "");
-  const breadcrumbs = (r.breadcrumbs ?? []).map((b) => ({
-    ...b,
-    msg: b.msg ? scrubSensitiveText(b.msg) : b.msg,
-  }));
-
-  const fingerprintBasis = hasStructuredCrashFields(r)
-    ? normalizeForFingerprint({
-        kind: r.kind,
-        message,
-        source: r.source,
-        label: r.label,
-        errorType: r.errorType,
-        errorMessage,
-        topFrame,
-        fingerprintHint,
-      })
-    : normalizeForFingerprint(r.kind, message);
-  const now = new Date().toISOString();
-  const title = crashTitle(message);
-  const source = r.source ?? "legacy";
-  const label = r.label ?? "";
-  const errorType = r.errorType ?? "";
-  const buildCommit = r.buildCommit ?? "";
-  const channel = r.channel ?? "";
-  const severityInput = {
-    kind: r.kind,
-    version: r.version,
-    source,
-    label,
-    errorType,
-    errorMessage,
-    topFrame,
-    channel,
-  };
-  const development = isDevelopmentReport(severityInput);
-  const fingerprint = namespaceReportFingerprint(await sha256Hex(fingerprintBasis), development);
-  const severity = severityForReport(severityInput);
+  let mode;
   try {
-    const prior = await env.DB.prepare("SELECT status FROM groups WHERE fingerprint = ?1")
-      .bind(fingerprint)
-      .first<{ status: string }>();
-    const regressedAt = prior?.status === "resolved" ? now : "";
-
-    await env.DB.prepare(
-      `INSERT INTO groups (
-         fingerprint, kind, count, first_seen, last_seen, first_version, last_version,
-         status, title, source, label, error_type, top_frame, severity,
-         last_os, last_arch, last_build_commit, last_channel, last_sample_at, regressed_at
-       )
-       VALUES (?1, ?2, 1, ?3, ?3, ?4, ?4, 'open', ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?3, ?15)
-       ON CONFLICT (fingerprint) DO UPDATE SET
-         count = count + 1,
-         last_seen = ?3,
-         last_version = ?4,
-         title = ?5,
-         source = ?6,
-         label = ?7,
-         error_type = ?8,
-         top_frame = ?9,
-         severity = CASE WHEN severity = 'critical' THEN severity WHEN ?10 = 'low' THEN 'low' ELSE severity END,
-         last_os = ?11,
-         last_arch = ?12,
-         last_build_commit = ?13,
-         last_channel = ?14,
-         last_sample_at = ?3,
-         status = CASE WHEN status = 'resolved' THEN 'open' ELSE status END,
-         regressed_at = CASE WHEN status = 'resolved' THEN ?3 ELSE regressed_at END`,
-    )
-      .bind(fingerprint, r.kind, now, r.version, title, source, label, errorType, topFrame, severity, r.os, r.arch, buildCommit, channel, regressedAt)
-      .run();
-
-    await env.DB.prepare(
-      `INSERT INTO reports (
-         fingerprint, kind, version, os, arch, message, device, created_at,
-         source, label, error_type, error_message, top_frame, build_commit, channel,
-         language, view, breadcrumbs, component_stack, stack, occurred_at
-       )
-       VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17, ?18, ?19, ?20, ?21)`,
-    )
-      .bind(
-        fingerprint,
-        r.kind,
-        r.version,
-        r.os,
-        r.arch,
-        message,
-        JSON.stringify(r.device ?? {}),
-        now,
-        source,
-        label,
-        errorType,
-        errorMessage,
-        topFrame,
-        buildCommit,
-        channel,
-        r.language ?? "",
-        view,
-        JSON.stringify(breadcrumbs),
-        componentStack,
-        stack,
-        r.occurredAt ?? "",
-      )
-      .run();
-
-    await env.DB.prepare(
-      `DELETE FROM reports
-       WHERE fingerprint = ?1
-         AND id NOT IN (
-           SELECT id FROM (SELECT id FROM reports WHERE fingerprint = ?1 ORDER BY id ASC LIMIT 1)
-           UNION
-           SELECT id FROM (SELECT id FROM reports WHERE fingerprint = ?1 ORDER BY id DESC LIMIT ?2)
-         )`,
-    )
-      .bind(fingerprint, LATEST_SAMPLES_PER_GROUP)
-      .run();
+    mode = crashStorageMode(env);
+    if (!firebaseStorageReady(env)) throw new Error("firebase crash storage is not configured");
+  } catch (err) {
+    console.error("report: crash storage configuration failed", err);
+    return new Response("storage unavailable", { status: 503 });
+  }
+  const event = await prepareCrashEvent(parsed.data, mode !== "firebase");
+  if (mode !== "d1") {
+    let lease: FirebaseGroupLease | null = null;
+    try {
+      if (await firebaseEventExists(env, event.eventId)) return new Response("ok", { status: 202 });
+      if (await reserveFirebaseGroup(env, event.fingerprint, event.receivedAt) === "full") {
+        return new Response("storage unavailable", { status: 503 });
+      }
+      const enqueued = await enqueueFirebaseCrash(
+        env, event.eventId, event.fingerprint, JSON.stringify(event), event.receivedAt,
+      );
+      if (enqueued === "duplicate") return new Response("ok", { status: 202 });
+      if (enqueued === "full") {
+        await reclaimUnusedFirebaseReservation(env, event.fingerprint);
+        return new Response("storage unavailable", { status: 503 });
+      }
+      lease = await acquireFirebaseGroupLease(env, event.fingerprint);
+    } catch (err) {
+      return storageUnavailable("report outbox", err);
+    }
+    if (!lease) return new Response("ok", { status: 202 });
+    try {
+      if (!await claimFirebaseCrash(env, event.eventId, new Date().toISOString())) {
+        return new Response("ok", { status: 202 });
+      }
+      try {
+        await projectCrashEvent(env, event);
+      } catch (err) {
+        console.error("report: buffered D1 projection failed", err);
+        await recordFirebaseRetry(env, event.eventId, "queued", 0);
+        return new Response("ok", { status: 202 });
+      }
+      await deliverCrashEventToFirebase(env, event, 0, lease);
+      return new Response("ok", { status: 202 });
+    } finally {
+      await releaseFirebaseGroupLease(env, event.fingerprint, lease).catch((error) => {
+        console.error("firebase crash group lease release failed", error);
+      });
+    }
+  }
+  try {
+    await projectCrashEvent(env, event);
   } catch (err) {
     return storageUnavailable("report", err);
   }
-
   return new Response("ok", { status: 202 });
 }
 
@@ -612,12 +814,21 @@ async function handlePing(request: Request, env: Env): Promise<Response> {
   try {
     if (p.surface === "cli") await ensureCLITelemetrySchema(env);
     await env.DB.prepare(
-      `INSERT INTO ${tables.pings} (date, install_id, version, os, arch, os_version, opens)
-       VALUES (date('now'), ?1, ?2, ?3, ?4, ?5, 1)
+      `INSERT INTO ${tables.pings} (
+         date, install_id, version, os, arch, os_version, os_build, os_revision, channel,
+         distro_id, distro_version, kernel_version, session_type, runtime_engine, runtime_version, gpu_mode, opens
+       )
+       VALUES (date('now'), ?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, 1)
        ON CONFLICT (date, install_id) DO UPDATE SET
-         opens = opens + 1, version = ?2, os_version = ?5`,
+         opens = opens + 1, version = ?2, os_version = ?5, os_build = ?6, os_revision = ?7,
+         channel = ?8, distro_id = ?9, distro_version = ?10, kernel_version = ?11,
+         session_type = ?12, runtime_engine = ?13, runtime_version = ?14, gpu_mode = ?15`,
     )
-      .bind(p.installId, p.version, p.os, p.arch, p.osVersion ?? "")
+      .bind(
+        p.installId, p.version, p.os, p.arch, p.osVersion ?? "", p.osBuild ?? 0, p.osRevision ?? 0,
+        p.channel ?? "", p.distroId ?? "", p.distroVersion ?? "", p.kernelVersion ?? "",
+        p.sessionType ?? "", p.runtimeEngine ?? "", p.runtimeVersion ?? "", p.gpuMode ?? "",
+      )
       .run();
   } catch (err) {
     return storageUnavailable("ping", err);
@@ -651,20 +862,6 @@ async function handleMetrics(request: Request, env: Env): Promise<Response> {
   } catch (err) {
     return storageUnavailable("metrics", err);
   }
-  if (m.installId) {
-    const userUpsert = env.DB.prepare(
-      `INSERT INTO ${tables.metricUsers} (date, version, os, signal, bucket, install_id)
-       VALUES (date('now'), ?1, ?2, ?3, ?4, ?5)
-       ON CONFLICT (date, signal, bucket, install_id) DO UPDATE SET
-         version = ?1, os = ?2`,
-    );
-    try {
-      await env.DB.batch(m.counters.map((c) => userUpsert.bind(m.version, m.os, c.signal, c.bucket, m.installId)));
-    } catch (err) {
-      console.warn("metric_users write failed", err);
-    }
-  }
-
   return new Response("ok", { status: 202 });
 }
 
@@ -687,155 +884,6 @@ async function formObject(request: Request): Promise<Record<string, string>> {
   const out: Record<string, string> = {};
   for (const [k, v] of form) out[k] = typeof v === "string" ? v : "";
   return out;
-}
-
-type StatsFilters = {
-  surface: "desktop" | "cli";
-  status: string;
-  source: string;
-  version: string;
-  os: string;
-  platform: string;
-  newLatest: boolean;
-  regressed: boolean;
-  windowDays: 7 | 30;
-  preferenceMode: "users" | "opens";
-};
-
-function statsFilters(url: URL): StatsFilters {
-  const status = url.searchParams.get("status") ?? "";
-  const surface = url.searchParams.get("surface") ?? "desktop";
-  const windowParam = url.searchParams.get("window") ?? "";
-  return {
-    surface: surface === "cli" ? "cli" : "desktop",
-    status: ["open", "resolved", "ignored"].includes(status) ? status : "",
-    source: (url.searchParams.get("source") ?? "").slice(0, 32),
-    version: (url.searchParams.get("version") ?? "").slice(0, 64),
-    os: (url.searchParams.get("os") ?? "").slice(0, 32),
-    platform: (url.searchParams.get("platform") ?? "").slice(0, 80),
-    newLatest: url.searchParams.get("new") === "latest",
-    regressed: url.searchParams.get("regressed") === "1",
-    windowDays: windowParam === "7d" ? 7 : 30,
-    preferenceMode: url.searchParams.get("prefs") === "opens" ? "opens" : "users",
-  };
-}
-
-async function crashGroups(env: Env, filters: StatsFilters, latestVersion: string) {
-  const where: string[] = [diagnosticWindowWhere(filters.windowDays)];
-  const binds: unknown[] = [];
-  const add = (sql: string, value?: unknown) => {
-    where.push(sql.replace("?", `?${binds.length + 1}`));
-    if (value !== undefined) binds.push(value);
-  };
-  if (filters.status) add("status = ?", filters.status);
-  if (filters.source) add("source = ?", filters.source);
-  if (filters.version) add("last_version = ?", filters.version);
-  if (filters.os) add("last_os = ?", filters.os);
-  if (filters.platform) add("last_os || ' ' || last_arch = ?", filters.platform);
-  if (filters.newLatest && latestVersion) add("first_version = ?", latestVersion);
-  if (filters.regressed) where.push("regressed_at <> ''");
-  let latestOrder = "";
-  if (latestVersion) {
-    latestOrder = `CASE WHEN first_version = ?${binds.length + 1} THEN 0 ELSE 1 END,`;
-    binds.push(latestVersion);
-  }
-  const sql = `SELECT fingerprint, kind, count, first_version, last_version, substr(last_seen, 1, 10) AS seen,
-      status, title, source, label, error_type, top_frame, severity, last_os, last_arch, last_channel, regressed_at
-    FROM groups ${where.length ? `WHERE ${where.join(" AND ")}` : ""}
-    ORDER BY
-      CASE WHEN status = 'open' THEN 0 ELSE 1 END,
-      CASE
-        WHEN severity = 'critical' THEN 0
-        WHEN ${developmentGroupSQL}
-          OR title = '[window.error] Script error.'
-          OR title LIKE '%ResizeObserver loop %'
-          OR title LIKE '%Minified React error #520%'
-          OR title LIKE '%additional File object is not a file on the disk%'
-          THEN 3
-        WHEN severity = 'high' THEN 1
-        WHEN severity = 'medium' THEN 2
-        ELSE 3
-      END,
-      ${latestOrder}
-      CASE WHEN regressed_at <> '' THEN 0 ELSE 1 END,
-      count DESC,
-      last_seen DESC
-    LIMIT 50`;
-  const stmt = env.DB.prepare(sql);
-  const query = binds.length ? stmt.bind(...binds) : stmt;
-  const result = await query.all<{
-    fingerprint: string;
-    kind: string;
-    count: number;
-    first_version: string;
-    last_version: string;
-    seen: string;
-    status: string;
-    title: string;
-    source: string;
-    label: string;
-    error_type: string;
-    top_frame: string;
-    severity: string;
-    last_os: string;
-    last_arch: string;
-    last_channel: string;
-    regressed_at: string;
-  }>();
-  result.results = result.results
-    .map((row) => ({ ...row, severity: effectiveGroupSeverity(row), development: isDevelopmentGroup(row) }))
-    .sort((a, b) => compareDiagnosticPriority(a, b, latestVersion));
-  return result;
-}
-
-type GroupPriorityRow = {
-  fingerprint: string;
-  status: string;
-  severity: string;
-  regressed_at: string;
-  first_version: string;
-  count: number;
-  seen: string;
-  title: string;
-  last_version: string;
-  last_channel: string;
-};
-
-const developmentGroupSQL = `fingerprint LIKE 'dev:%'`;
-
-export function isDevelopmentGroup(row: Pick<GroupPriorityRow, "fingerprint">): boolean {
-  // Legacy hashes can contain release observations between retained development
-  // samples, so only the explicit namespace proves that a group is dev-only.
-  return row.fingerprint.startsWith(DEVELOPMENT_FINGERPRINT_PREFIX);
-}
-
-export function effectiveGroupSeverity(
-  row: Pick<GroupPriorityRow, "fingerprint" | "severity" | "title">,
-): string {
-  if (row.severity === "critical") return row.severity;
-  if (isDevelopmentGroup(row)) return "low";
-  if (
-    row.title === "[window.error] Script error." ||
-    row.title.includes("ResizeObserver loop ") ||
-    row.title.includes("Minified React error #520") ||
-    row.title.includes("additional File object is not a file on the disk")
-  ) {
-    return "low";
-  }
-  return row.severity;
-}
-
-function compareDiagnosticPriority(a: GroupPriorityRow, b: GroupPriorityRow, latestVersion: string): number {
-  const statusRank = (value: string) => (value === "open" ? 0 : 1);
-  const severityRank = (value: string) => ({ critical: 0, high: 1, medium: 2, low: 3 })[value] ?? 4;
-  return (
-    statusRank(a.status) - statusRank(b.status) ||
-    severityRank(a.severity) - severityRank(b.severity) ||
-    Number(b.first_version === latestVersion) - Number(a.first_version === latestVersion) ||
-    Number(Boolean(b.regressed_at)) - Number(Boolean(a.regressed_at)) ||
-    b.count - a.count ||
-    b.seen.localeCompare(a.seen)
-  );
 }
 
 type ParsedVersion = {
@@ -964,14 +1012,6 @@ async function diagnosticOverview(env: Env, latestVersion: string, days: 7 | 30,
   };
 }
 
-function currentWindowSince(days: 7 | 30): string {
-  return `-${days - 1} day`;
-}
-
-export function diagnosticWindowWhere(days: 7 | 30): string {
-  return `date(last_seen) >= date('now', '${currentWindowSince(days)}')`;
-}
-
 function previousWindowSince(days: 7 | 30): string {
   return `-${days * 2 - 1} day`;
 }
@@ -991,59 +1031,10 @@ async function metricRows(env: Env, days: 7 | 30, surface: ClientSurfaceName, pr
   return rows.results;
 }
 
-// The 30-day desktop window is served from the cron-built rollup: computing it
-// live exceeds what D1 spends on one query (see refreshMetricUserRollup). Null
-// here means "not computed yet", which the dashboard says out loud rather than
-// rendering as an empty result.
-async function rollupMetricUserRows(
-  env: Env,
-): Promise<{ rows: { signal: string; bucket: string; total: number }[]; computedAt: string } | null> {
-  try {
-    await ensureRollupSchema(env);
-    const rows = await env.DB.prepare(
-      `SELECT signal, bucket, total, computed_at FROM metric_user_rollup WHERE window_days = ?1 ORDER BY signal, total DESC`,
-    )
-      .bind(ROLLUP_WINDOW_DAYS)
-      .all<{ signal: string; bucket: string; total: number; computed_at: string }>();
-    if (!rows.results.length) return null;
-    // Oldest wins: the cursor refreshes a slice at a time, so this is how far
-    // behind the least recently recomputed signal is.
-    const computedAt = rows.results.reduce((min, r) => (r.computed_at < min ? r.computed_at : min), rows.results[0].computed_at);
-    return { rows: rows.results, computedAt };
-  } catch (err) {
-    console.warn("metric_user_rollup read failed", err);
-    return null;
-  }
-}
-
-// Null means the query did not complete, which is distinct from "no rows": at
-// ~1M rows a day, the 30-day COUNT(DISTINCT install_id) exceeds what D1 will
-// spend on one query and comes back as a CPU-limit reset. Rendering that as an
-// empty dashboard would read as "nobody uses these settings".
-async function metricUserRows(
-  env: Env,
-  days: 7 | 30,
-  surface: ClientSurfaceName,
-): Promise<{ rows: { signal: string; bucket: string; total: number }[]; computedAt: string } | null> {
-  if (surface === "desktop" && days === ROLLUP_WINDOW_DAYS) return rollupMetricUserRows(env);
-  try {
-    const table = telemetryTableNames(surface).metricUsers;
-    const rows = await env.DB.prepare(
-      `SELECT signal, bucket, COUNT(DISTINCT install_id) AS total FROM ${table} WHERE date >= date('now', '${currentWindowSince(days)}') GROUP BY signal, bucket ORDER BY signal, total DESC`,
-    ).all<{ signal: string; bucket: string; total: number }>();
-    return { rows: rows.results, computedAt: "" };
-  } catch (err) {
-    console.warn("metric_users query failed", err);
-    return null;
-  }
-}
-
 type Bar = { label: string; users: number };
 type MetricTotals = { signal: string; bucket: string; total: number }[];
-
-// Each stats module renders only its own section, so a page load should query
-// only what that section shows — the 30-day COUNT(DISTINCT) over metric_users,
-// the heaviest query, is read solely by the preferences module.
+// Each stats module renders only its own section, so a page load queries only
+// what that section shows.
 async function handleStats(request: Request, env: Env, user: User, activeModule: StatsModule): Promise<Response> {
   const url = new URL(request.url);
   const filters = statsFilters(url);
@@ -1065,10 +1056,14 @@ async function handleStats(request: Request, env: Env, user: User, activeModule:
   let crashes: Awaited<ReturnType<typeof crashGroups>>["results"] = [];
   let metrics: MetricTotals = [];
   let previousMetrics: MetricTotals = [];
-  let metricUsers: MetricTotals = [];
-  let metricUsersUnavailable = false;
-  let metricUsersComputedAt = "";
   let sources: Bar[] = [];
+  let diagnosticFacets: DiagnosticFacets = {
+    versions: [], platforms: [],
+    osBuilds: [], osRevisions: [], distros: [], distroVersions: [], kernels: [], sessions: [],
+    architectures: [], channels: [], runtimes: [], runtimeEngines: [],
+    failureKinds: [], failureReasons: [], exitCodes: [], recoveries: [], gpuStates: [],
+  };
+  let installationLinkedSince = "";
   let overview: OverviewCounts = {
     latestAdoptionPct: null,
     openReports: 0,
@@ -1077,6 +1072,7 @@ async function handleStats(request: Request, env: Env, user: User, activeModule:
     criticalOpenReports: 0,
   };
   let latestVersion = "";
+  let firebaseStorage: FirebaseStorageSummary | undefined;
 
   if (activeModule === "usage") {
     latestVersion = await latestObservedVersion(env, surface);
@@ -1096,38 +1092,34 @@ async function handleStats(request: Request, env: Env, user: User, activeModule:
     overview = overviewR;
   } else if (activeModule === "diagnostics") {
     latestVersion = await latestObservedVersion(env, "desktop");
-    const [crashesR, sourcesR, versionsR, platformsR] = await Promise.all([
-      crashGroups(env, filters, latestVersion),
+    const [crashesR, sourcesR, facets, linkedSince] = await Promise.all([
+      crashGroups(env, filters, latestVersion, statsQueryObserver("/stats/diagnostics")),
       bars(`SELECT source AS label, COUNT(*) AS users FROM groups WHERE ${diagnosticWindowWhere(days)} GROUP BY source ORDER BY users DESC`),
-      pingVersions(),
-      pingPlatforms(),
+      loadDiagnosticFacets(env, days, statsQueryObserver("/stats/diagnostics")),
+      env.DB.prepare("SELECT value FROM diagnostics_meta WHERE key = 'installation_linked_since'").first<{ value: string }>(),
     ]);
     crashes = crashesR.results;
     sources = sourcesR;
-    versions = versionsR;
-    platforms = platformsR;
+    versions = facets.versions;
+    platforms = facets.platforms;
+    diagnosticFacets = facets;
+    installationLinkedSince = linkedSince?.value ?? "";
+    if (crashStorageMode(env) !== "d1") firebaseStorage = await firebaseStorageSummary(env);
   } else if (activeModule === "preferences") {
-    const [metricsR, usersR] = await Promise.all([metricRows(env, days, surface), metricUserRows(env, days, surface)]);
-    metrics = metricsR;
-    metricUsersUnavailable = usersR === null;
-    metricUsers = usersR?.rows ?? [];
-    metricUsersComputedAt = usersR?.computedAt ?? "";
+    metrics = await metricRows(env, days, surface);
   } else {
-    const [metricsR, previousMetricsR, usersR] = await Promise.all([
+    const [metricsR, previousMetricsR] = await Promise.all([
       metricRows(env, days, surface),
       metricRows(env, days, surface, true),
-      metricUserRows(env, days, surface),
     ]);
     metrics = metricsR;
     previousMetrics = previousMetricsR;
-    metricUsersUnavailable = usersR === null;
-    metricUsers = usersR?.rows ?? [];
-    metricUsersComputedAt = usersR?.computedAt ?? "";
   }
 
   return html(
     renderStats(
-      { daily, versions, platforms, crashes, metrics, previousMetrics, metricUsers, metricUsersUnavailable, metricUsersComputedAt, sources, overview, latestVersion, filters },
+      { daily, versions, platforms, crashes, metrics, previousMetrics, sources, diagnosticFacets,
+        installationLinkedSince, overview, latestVersion, filters, firebaseStorage },
       user,
       activeModule,
     ),
@@ -1138,34 +1130,66 @@ async function handleGroup(env: Env, fingerprint: string, user: User): Promise<R
   const group = await env.DB.prepare("SELECT * FROM groups WHERE fingerprint = ?1").bind(fingerprint).first<Group>();
   if (!group) return new Response("not found", { status: 404 });
   group.severity = effectiveGroupSeverity(group);
-  const reports = await env.DB.prepare(
-    `SELECT version, os, arch, message, device, created_at, source, label, error_type, error_message,
-      top_frame, build_commit, channel, language, view, breadcrumbs, component_stack, stack, occurred_at
-     FROM reports WHERE fingerprint = ?1 ORDER BY id DESC`,
-  )
-    .bind(fingerprint)
-    .all<{
-      version: string;
-      os: string;
-      arch: string;
-      message: string;
-      device: string;
-      created_at: string;
-      source: string;
-      label: string;
-      error_type: string;
-      error_message: string;
-      top_frame: string;
-      build_commit: string;
-      channel: string;
-      language: string;
-      view: string;
-      breadcrumbs: string;
-      component_stack: string;
-      stack: string;
-      occurred_at: string;
-    }>();
-  return html(renderGroup(group, reports.results, user));
+  const state = crashStorageMode(env) === "d1" ? null : await firebaseGroupState(env, fingerprint);
+  let reports: ReportSample[] = [], samplesUnavailable = false;
+  if (crashStorageMode(env) === "firebase") {
+    if (state?.sample_state === "archived") {
+      reports = [];
+    } else {
+      try {
+        const stored = await readFirebaseCrashGroup(env, fingerprint);
+        reports = firebaseSamples(stored?.samples);
+      } catch (error) {
+        return storageUnavailable("firebase group detail", error);
+      }
+    }
+  } else {
+    const loaded = await loadD1GroupReports(env, fingerprint, LATEST_SAMPLES_PER_GROUP, statsQueryObserver("/stats/group"));
+    reports = loaded.reports;
+    samplesUnavailable = loaded.unavailable;
+  }
+  const loadedDiagnostics = await loadGroupDiagnostics(env, fingerprint, statsQueryObserver("/stats/group"));
+  return html(renderGroup(
+    group, reports, user, loadedDiagnostics.summary,
+    state ? { state: state.sample_state, epoch: Number(state.sample_epoch) } : undefined,
+    { samplesUnavailable, diagnosticsUnavailable: loadedDiagnostics.unavailable },
+  ));
+}
+
+async function syncFirebaseGroupMetaLocked(
+  env: Env,
+  fingerprint: string,
+  lease?: FirebaseGroupLease,
+): Promise<void> {
+  if (crashStorageMode(env) === "d1") return;
+  if (!lease) throw new Error("firebase crash group lease is missing");
+  const [group, state] = await Promise.all([
+    loadFirebaseGroupMeta(env, fingerprint),
+    firebaseGroupState(env, fingerprint),
+  ]);
+  if (!group || !state) return;
+  if (state.sample_state === "archived") return;
+  await writeFirebaseGroupMeta(
+    env, fingerprint, firebaseMeta(group), lease.generation, Number(state.sample_epoch),
+    state.sample_state, () => renewFirebaseGroupLease(env, fingerprint, lease),
+  );
+}
+
+async function withFirebaseGroupLease<T>(
+  env: Env,
+  fingerprint: string,
+  operation: (lease?: FirebaseGroupLease) => Promise<T>,
+): Promise<T> {
+  if (crashStorageMode(env) === "d1") return operation();
+  const lease = await acquireFirebaseGroupLease(env, fingerprint);
+  if (!lease) throw new Error("firebase crash group is busy");
+  try {
+    return await operation(lease);
+  } finally {
+    await releaseFirebaseGroupLease(env, fingerprint, lease).catch((error) => {
+      console.error("firebase crash group lease release failed", error);
+    });
+  }
 }
 
 async function handleGroupAction(request: Request, env: Env, admin: User, fingerprint: string): Promise<Response> {
@@ -1175,20 +1199,37 @@ async function handleGroupAction(request: Request, env: Env, admin: User, finger
   const a = parsed.data;
 
   if (a.action === "delete") {
-    await env.DB.batch([
-      env.DB.prepare("DELETE FROM reports WHERE fingerprint = ?1").bind(fingerprint),
-      env.DB.prepare("DELETE FROM groups WHERE fingerprint = ?1").bind(fingerprint),
-    ]);
+    try {
+      if (crashStorageMode(env) !== "d1") {
+        await archiveFirebaseGroupForAdmin(env, fingerprint);
+      } else {
+        await env.DB.batch([
+          env.DB.prepare("DELETE FROM reports WHERE fingerprint = ?1").bind(fingerprint),
+          env.DB.prepare("DELETE FROM report_daily WHERE fingerprint = ?1").bind(fingerprint),
+          env.DB.prepare("DELETE FROM report_installations WHERE fingerprint = ?1").bind(fingerprint),
+          env.DB.prepare("DELETE FROM report_event_dimensions WHERE fingerprint = ?1").bind(fingerprint),
+          env.DB.prepare("DELETE FROM firebase_crash_outbox WHERE fingerprint = ?1").bind(fingerprint),
+          env.DB.prepare("DELETE FROM groups WHERE fingerprint = ?1").bind(fingerprint),
+        ]);
+      }
+    } catch (error) {
+      return storageUnavailable("firebase group deletion", error);
+    }
     await logAction(env, admin, "delete_group", fingerprint.slice(0, 8));
     return redirect("/stats");
   }
   if (a.action === "status") {
     const status = a.status ?? "open";
-    await env.DB.prepare(
-      "UPDATE groups SET status = ?1, resolved_at = CASE WHEN ?1 = 'resolved' THEN ?3 ELSE resolved_at END WHERE fingerprint = ?2",
-    )
-      .bind(status, fingerprint, new Date().toISOString())
-      .run();
+    try {
+      await withFirebaseGroupLease(env, fingerprint, async (lease) => {
+        await env.DB.prepare(
+          "UPDATE groups SET status = ?1, resolved_at = CASE WHEN ?1 = 'resolved' THEN ?3 ELSE resolved_at END WHERE fingerprint = ?2",
+        ).bind(status, fingerprint, new Date().toISOString()).run();
+        await syncFirebaseGroupMetaLocked(env, fingerprint, lease);
+      });
+    } catch (error) {
+      return storageUnavailable("firebase group metadata", error);
+    }
     await logAction(env, admin, "set_status", fingerprint.slice(0, 8), status);
     return redirect(`/stats/group/${fingerprint}`);
   }
@@ -1200,10 +1241,18 @@ async function handleGroupAction(request: Request, env: Env, admin: User, finger
     return redirect(`/stats/group/${fingerprint}`);
   }
   if (a.action === "severity") {
-    await env.DB.prepare("UPDATE groups SET severity = ?1 WHERE fingerprint = ?2")
-      .bind(a.severity ?? "medium", fingerprint)
-      .run();
-    await logAction(env, admin, "set_severity", fingerprint.slice(0, 8), a.severity ?? "medium");
+    const severity = a.severity ?? "medium";
+    try {
+      await withFirebaseGroupLease(env, fingerprint, async (lease) => {
+        await env.DB.prepare("UPDATE groups SET severity = ?1 WHERE fingerprint = ?2")
+          .bind(severity, fingerprint)
+          .run();
+        await syncFirebaseGroupMetaLocked(env, fingerprint, lease);
+      });
+    } catch (error) {
+      return storageUnavailable("firebase group metadata", error);
+    }
+    await logAction(env, admin, "set_severity", fingerprint.slice(0, 8), severity);
     return redirect(`/stats/group/${fingerprint}`);
   }
   await env.DB.prepare("UPDATE groups SET note = ?1 WHERE fingerprint = ?2").bind(a.note ?? "", fingerprint).run();
@@ -1350,12 +1399,13 @@ async function handleCommunityAction(
 // throwing (all of /v1/ping, /v1/metrics and /v1/report 500 while reads keep
 // working — exactly the 2026-07-03 stats blackout).
 const RETENTION = [
+  { table: "report_daily", keepDays: 30 },
+  { table: "report_installations", keepDays: 30 },
+  { table: "report_event_dimensions", keepDays: 30 },
   { table: "pings", keepDays: 30 },
   { table: "metrics", keepDays: 60 },
-  { table: "metric_users", keepDays: 30 },
   { table: "cli_pings", keepDays: 30 },
   { table: "cli_metrics", keepDays: 60 },
-  { table: "cli_metric_users", keepDays: 30 },
 ] as const;
 // Deletes run in rowid chunks so a run never holds one giant transaction.
 // Steady state is one expired day per table; the chunk cap is a backstop that
@@ -1367,102 +1417,6 @@ const RETENTION_MAX_CHUNKS = 200;
 // scheduled handler dispatches on controller.cron; every other trigger
 // (the retention cron, manual runs) falls through to the purge.
 const SENTINEL_CRON = "17 1,7,13,19 * * *";
-const ROLLUP_CRON = "23 * * * *";
-
-// The preferences module's 30-day COUNT(DISTINCT install_id) spans ~28M rows
-// and D1 abandons it mid-query. It cannot be summed from per-day totals either:
-// an install active on twelve days would count twelve times. So the window is
-// computed here instead, one signal at a time — a single signal takes ~1s, and
-// the cursor spreads the ~57 of them across hourly runs rather than blowing one
-// invocation's CPU budget.
-const ROLLUP_WINDOW_DAYS = 30;
-const ROLLUP_SIGNALS_PER_RUN = 8;
-
-const ROLLUP_SCHEMA_SQL = [
-  `CREATE TABLE IF NOT EXISTS metric_user_rollup (
-     window_days INTEGER NOT NULL,
-     signal TEXT NOT NULL,
-     bucket TEXT NOT NULL,
-     total INTEGER NOT NULL,
-     computed_at TEXT NOT NULL,
-     PRIMARY KEY (window_days, signal, bucket)
-   )`,
-  `CREATE TABLE IF NOT EXISTS metric_user_rollup_state (
-     id INTEGER PRIMARY KEY CHECK (id = 1),
-     next_signal INTEGER NOT NULL,
-     updated_at TEXT NOT NULL
-   )`,
-] as const;
-
-const rollupSchemaPromises = new WeakMap<object, Promise<void>>();
-
-function ensureRollupSchema(env: Pick<Env, "DB">): Promise<void> {
-  const key = env.DB as unknown as object;
-  const existing = rollupSchemaPromises.get(key);
-  if (existing) return existing;
-  const creation = env.DB
-    .batch(ROLLUP_SCHEMA_SQL.map((sql) => env.DB.prepare(sql)))
-    .then(() => undefined)
-    .catch((err) => {
-      rollupSchemaPromises.delete(key);
-      throw err;
-    });
-  rollupSchemaPromises.set(key, creation);
-  return creation;
-}
-
-export async function refreshMetricUserRollup(env: Env, signalsPerRun = ROLLUP_SIGNALS_PER_RUN): Promise<void> {
-  await ensureRollupSchema(env);
-  const state = await env.DB.prepare("SELECT next_signal FROM metric_user_rollup_state WHERE id = 1").first<{
-    next_signal: number;
-  }>();
-  const start = Number(state?.next_signal ?? 0) % METRIC_SIGNALS.length;
-  const now = new Date().toISOString();
-  let advanced = 0;
-
-  for (let i = 0; i < signalsPerRun && i < METRIC_SIGNALS.length; i++) {
-    const signal = METRIC_SIGNALS[(start + i) % METRIC_SIGNALS.length];
-    try {
-      const rows = await env.DB.prepare(
-        `SELECT bucket, COUNT(DISTINCT install_id) AS total FROM metric_users
-         WHERE date >= date('now', '-${ROLLUP_WINDOW_DAYS - 1} day') AND signal = ?1
-         GROUP BY bucket`,
-      )
-        .bind(signal)
-        .all<{ bucket: string; total: number }>();
-      // Delete and insert in one batch so a reader never sees a signal
-      // half-replaced; an empty result still clears the previous window's rows.
-      await env.DB.batch([
-        env.DB
-          .prepare("DELETE FROM metric_user_rollup WHERE window_days = ?1 AND signal = ?2")
-          .bind(ROLLUP_WINDOW_DAYS, signal),
-        ...rows.results.map((r) =>
-          env.DB
-            .prepare(
-              `INSERT INTO metric_user_rollup (window_days, signal, bucket, total, computed_at)
-               VALUES (?1, ?2, ?3, ?4, ?5)`,
-            )
-            .bind(ROLLUP_WINDOW_DAYS, signal, r.bucket, r.total, now),
-        ),
-      ]);
-      advanced++;
-    } catch (err) {
-      // One signal timing out must not strand the cursor on it forever.
-      console.error(`rollup: ${signal} failed`, err);
-      advanced++;
-    }
-  }
-
-  await env.DB
-    .prepare(
-      `INSERT INTO metric_user_rollup_state (id, next_signal, updated_at) VALUES (1, ?1, ?2)
-       ON CONFLICT(id) DO UPDATE SET next_signal = ?1, updated_at = ?2`,
-    )
-    .bind((start + advanced) % METRIC_SIGNALS.length, now)
-    .run();
-  console.log(`rollup: refreshed ${advanced} signals from index ${start}`);
-}
-
 // Ingest sentinel. The 2026-07-03 blackout went unnoticed for ten days because
 // clients swallow ping failures by design and nothing watched the write path.
 // Four times a day (hours chosen so the UTC day always has >1h of traffic;
@@ -1500,6 +1454,20 @@ async function sendAlert(env: Env, text: string): Promise<void> {
 
 async function runIngestSentinel(env: Env): Promise<void> {
   const problems: string[] = [];
+  if (crashStorageMode(env) !== "d1") {
+    try {
+      const storage = await firebaseStorageSummary(env);
+      if (storage.reservedBytes >= storage.budgetBytes * 0.8) {
+        problems.push(`Firebase reserved storage is ${Math.round(storage.reservedBytes / 1048576)} MiB`);
+      }
+      if (storage.stuckArchiving > 0) problems.push(`${storage.stuckArchiving} Firebase archives are stuck`);
+      if (storage.outboxCount >= FIREBASE_OUTBOX_WARNING) {
+        problems.push(`Firebase outbox contains ${storage.outboxCount} rows`);
+      }
+    } catch (err) {
+      problems.push(`Firebase storage sentinel failed: ${errText(err)}`);
+    }
+  }
   try {
     await env.DB.prepare(
       `INSERT INTO pings (date, install_id, version, os, arch, opens)
@@ -1690,13 +1658,17 @@ export default {
 
   async scheduled(controller: ScheduledController, env: Env, ctx: ExecutionContext): Promise<void> {
     if (controller.cron === SENTINEL_CRON) {
-      ctx.waitUntil(runIngestSentinel(env));
+      ctx.waitUntil(Promise.all([
+        runIngestSentinel(env),
+        drainFirebaseCrashOutbox(env),
+      ]).then(() => undefined));
       return;
     }
-    if (controller.cron === ROLLUP_CRON) {
-      ctx.waitUntil(refreshMetricUserRollup(env));
-      return;
-    }
-    ctx.waitUntil(purgeExpiredStatsRows(env));
+    ctx.waitUntil(Promise.all([
+      purgeExpiredStatsRows(env),
+      crashStorageMode(env) === "d1" ? Promise.resolve() : purgeFirebaseDeliveryState(env),
+      drainFirebaseCrashOutbox(env),
+      crashStorageMode(env) === "d1" ? Promise.resolve() : runFirebaseCrashLifecycle(env),
+    ]).then(() => undefined));
   },
 };

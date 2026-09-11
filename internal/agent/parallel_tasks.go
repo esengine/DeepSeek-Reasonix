@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"slices"
 	"strings"
 	"sync"
 
@@ -28,7 +29,7 @@ func NewParallelTasksTool(taskTool *TaskTool, reg *tool.Registry) *ParallelTasks
 	return &ParallelTasksTool{taskTool: taskTool}
 }
 
-func (p *ParallelTasksTool) Name() string { return "parallel_tasks" }
+func (p *ParallelTasksTool) Name() string { return tool.HostParallelTasks }
 
 func (p *ParallelTasksTool) Description() string {
 	return "Dispatch multiple read-only sub-agent tasks concurrently. Blocks until all complete, then returns a bounded preview and a stable Subagent reference for every completed persisted child; use read_subagent_result to page through any full answer without combined-result truncation."
@@ -177,27 +178,17 @@ func (p *ParallelTasksTool) Execute(ctx context.Context, args json.RawMessage) (
 			},
 		})
 
-		wg.Add(1)
-		go func() {
-			defer wg.Done()
+		wg.Go(func() {
 			modelRef, effortRef := p.taskTool.effectiveProfile(t.Model, t.Effort)
 			itemCtx := withCallContext(ctx, subID, subSinkFor(subID, sink), nil, PlanModeFromContext(ctx))
 			// Route through TaskTool's unified runner so persisted parent sessions
 			// retain one independently readable transcript per child. Headless runs
 			// remain ephemeral and still receive fair bounded previews.
 			output, runErr := p.taskTool.RunProfileSpec(itemCtx, ProfileExecSpec{
-				Kind:         "task",
-				Name:         "task",
-				Prompt:       t.Prompt,
-				Description:  label,
-				CallTools:    t.Tools,
-				MaxSteps:     t.MaxSteps,
-				Model:        modelRef,
-				Effort:       effortRef,
-				ReadOnly:     true,
-				AllowNoTools: true,
-				Nested:       SubagentDepth(ctx) > 0,
-				SystemPrompt: DefaultReadOnlyTaskSystemPrompt,
+				Task:   TaskSpec{Objective: t.Prompt, Description: label},
+				Worker: WorkerSpec{Kind: "task", Name: "task", SystemPrompt: DefaultReadOnlyTaskSystemPrompt, Model: modelRef, Effort: effortRef},
+				Grant:  CapabilityGrant{ReadOnly: true, AllowNoTools: true, CallTools: t.Tools},
+				Sched:  SchedulerPolicy{MaxSteps: t.MaxSteps, Nested: SubagentDepth(ctx) > 0},
 			})
 
 			if ctx.Err() != nil && runErr == nil {
@@ -221,7 +212,7 @@ func (p *ParallelTasksTool) Execute(ctx context.Context, args json.RawMessage) (
 			})
 			answer, ref := splitSubagentRunResult(output)
 			doneCh <- subResult{index: idx, output: answer, ref: ref}
-		}()
+		})
 	}
 
 	markCancelled := func(err error) {
@@ -300,10 +291,8 @@ func parallelGroupTerminalPhase(ctx context.Context, err error, statuses []paral
 	if ctx.Err() != nil {
 		return subagentPhaseCancelled
 	}
-	for _, st := range statuses {
-		if st == parallelTaskFailed {
-			return subagentPhaseFailed
-		}
+	if slices.Contains(statuses, parallelTaskFailed) {
+		return subagentPhaseFailed
 	}
 	if err != nil {
 		return subagentPhaseFailed

@@ -107,6 +107,45 @@ func TestLinuxExternalOpenerCommandPerTerminalArguments(t *testing.T) {
 	}
 }
 
+func TestLinuxExternalOpenerCommandUsesParentForRegularFiles(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "report.md")
+	if err := os.WriteFile(path, []byte("report"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	cases := []struct {
+		name string
+		spec externalOpenerSpec
+		want []string
+	}{
+		{
+			name: "editor",
+			spec: externalOpenerSpec{View: ExternalOpenerView{Kind: externalOpenerEditor}, Target: "/usr/bin/code", LaunchMode: "path"},
+			want: []string{"/usr/bin/code", path},
+		},
+		{
+			name: "terminal",
+			spec: externalOpenerSpec{View: ExternalOpenerView{Kind: externalOpenerTerminal}, Target: "/usr/bin/ghostty", LaunchMode: "ghostty"},
+			want: []string{"/usr/bin/ghostty", "--working-directory=" + dir},
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			cmd, err := linuxExternalOpenerCommand(tc.spec, path)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if !reflect.DeepEqual(cmd.Args, tc.want) {
+				t.Fatalf("args = %#v, want %#v", cmd.Args, tc.want)
+			}
+			if cmd.Dir != dir {
+				t.Fatalf("dir = %q, want parent directory %q", cmd.Dir, dir)
+			}
+		})
+	}
+}
+
 func TestLinuxExternalOpenerCommandLaunchesDesktopEntriesViaGio(t *testing.T) {
 	binDir := t.TempDir()
 	gio := filepath.Join(binDir, "gio")

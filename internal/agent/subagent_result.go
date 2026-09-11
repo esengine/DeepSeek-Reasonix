@@ -5,10 +5,12 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"slices"
 	"strings"
 	"unicode/utf8"
 
 	"reasonix/internal/provider"
+	"reasonix/internal/tool"
 )
 
 const (
@@ -20,9 +22,10 @@ const (
 	subagentResultMaxBytes       = 24 * 1024
 )
 
-// SubagentResultTool pages through the final answer of a completed persisted
-// sub-agent. Parallel/fleet aggregates use this stable reader instead of
-// forcing every child answer through one fixed-size tool result.
+// SubagentResultTool pages through the retained answer of a persisted
+// sub-agent, including partial and retryable failures. Parallel/fleet
+// aggregates use this stable reader instead of forcing every child answer
+// through one fixed-size tool result.
 type SubagentResultTool struct {
 	store         *SubagentStore
 	workspaceRoot string
@@ -35,10 +38,10 @@ func NewSubagentResultTool(task *TaskTool) *SubagentResultTool {
 	return &SubagentResultTool{store: task.transcripts, workspaceRoot: task.workspaceRoot}
 }
 
-func (*SubagentResultTool) Name() string { return "read_subagent_result" }
+func (*SubagentResultTool) Name() string { return tool.HostReadSubagentResult }
 
 func (*SubagentResultTool) Description() string {
-	return "Read a completed sub-agent's full final answer by the Subagent reference returned from task, parallel_tasks, or fleet. Results are scoped to the current conversation lineage and paged by UTF-8 byte offset so large answers remain lossless without overflowing one tool result."
+	return "Read a completed or partial sub-agent's retained answer by the Subagent reference returned from task, parallel_tasks, or fleet. Failed runs may expose their last useful output and an explicit retryability status. Results are scoped to the current conversation lineage and paged by UTF-8 byte offset so large answers remain lossless without overflowing one tool result."
 }
 
 func (*SubagentResultTool) Schema() json.RawMessage {
@@ -91,10 +94,7 @@ func (t *SubagentResultTool) Execute(ctx context.Context, args json.RawMessage) 
 	if p.OffsetBytes < len(answer) && !utf8.RuneStart(answer[p.OffsetBytes]) {
 		return "", fmt.Errorf("offset_bytes %d is not at a UTF-8 character boundary; use next_offset_bytes from the previous page", p.OffsetBytes)
 	}
-	end := p.OffsetBytes + p.LimitBytes
-	if end > len(answer) {
-		end = len(answer)
-	}
+	end := min(p.OffsetBytes+p.LimitBytes, len(answer))
 	for end > p.OffsetBytes && end < len(answer) && !utf8.RuneStart(answer[end]) {
 		end--
 	}
@@ -145,8 +145,11 @@ func (s *SubagentStore) ReadFinalAnswer(ref, parentSession, workspaceRoot string
 	if want := strings.TrimSpace(workspaceRoot); want != "" && strings.TrimSpace(meta.WorkspaceRoot) != want {
 		return "", meta.Status, fmt.Errorf("subagent reference %q belongs to a different workspace", ref)
 	}
-	if meta.Status != SubagentCompleted {
-		return "", meta.Status, fmt.Errorf("subagent reference %q is %s; only completed results can be read", ref, meta.Status)
+	if meta.Status == SubagentRunning {
+		return "", meta.Status, fmt.Errorf("subagent reference %q is still in progress", ref)
+	}
+	if meta.Status == SubagentInterrupted && meta.Outcome != string(SubagentOutcomeCancelled) {
+		return "", meta.Status, fmt.Errorf("subagent reference %q was interrupted; only completed or retained partial results can be read", ref)
 	}
 
 	sess, err := LoadSession(s.sessionPath(ref))
@@ -154,9 +157,13 @@ func (s *SubagentStore) ReadFinalAnswer(ref, parentSession, workspaceRoot string
 		return "", meta.Status, fmt.Errorf("load subagent transcript %q: %w", ref, err)
 	}
 	msgs := sess.Snapshot()
-	for i := len(msgs) - 1; i >= 0; i-- {
-		if msgs[i].Role == provider.RoleAssistant && strings.TrimSpace(msgs[i].Content) != "" {
-			return msgs[i].Content, meta.Status, nil
+	for _, v := range slices.Backward(msgs) {
+		if v.Role == provider.RoleAssistant && strings.TrimSpace(v.Content) != "" {
+			status := meta.Status
+			if meta.Outcome != "" {
+				status = SubagentStatus(meta.Outcome)
+			}
+			return v.Content, status, nil
 		}
 	}
 	return "", meta.Status, fmt.Errorf("subagent reference %q has no final assistant answer", ref)
@@ -171,22 +178,37 @@ type subagentAggregateItem struct {
 }
 
 func formatBoundedSubagentAggregate(prefix string, items []subagentAggregateItem) string {
-	baseBytes := len(prefix)
+	// Attestations are reserved before prose gets any budget: a long child
+	// answer must never truncate away what the host saw it change. They
+	// degrade to header plus violations only if they would starve previews.
+	prose := make([]string, len(items))
+	receipts := make([]string, len(items))
+	receiptBytes := 0
+	for i, item := range items {
+		prose[i], receipts[i] = splitHostReceipts(item.answer)
+		receiptBytes += len(receipts[i]) + 1
+	}
+	if reserve := subagentAggregateBudgetBytes / 2; receiptBytes > reserve && len(items) > 0 {
+		receiptBytes = 0
+		for i := range receipts {
+			receipts[i] = boundedHostReceipts(receipts[i], reserve/len(items))
+			receiptBytes += len(receipts[i]) + 1
+		}
+	}
+
+	baseBytes := len(prefix) + receiptBytes
 	completed := 0
-	for _, item := range items {
+	for i, item := range items {
 		baseBytes += len(item.header) + len(item.status) + len(item.detail)
 		if item.ref != "" {
 			baseBytes += len("Subagent reference: \n") + len(item.ref)
 		}
-		if item.answer != "" {
+		if prose[i] != "" {
 			baseBytes += len("Final answer preview:\n\n")
 			completed++
 		}
 	}
-	available := subagentAggregateBudgetBytes - baseBytes
-	if available < 0 {
-		available = 0
-	}
+	available := max(subagentAggregateBudgetBytes-baseBytes, 0)
 	perAnswer := 0
 	if completed > 0 {
 		perAnswer = available / completed
@@ -195,7 +217,7 @@ func formatBoundedSubagentAggregate(prefix string, items []subagentAggregateItem
 	var b strings.Builder
 	b.Grow(minInt(subagentAggregateBudgetBytes, baseBytes+available))
 	b.WriteString(prefix)
-	for _, item := range items {
+	for i, item := range items {
 		b.WriteString(item.header)
 		b.WriteString(item.status)
 		if item.ref != "" {
@@ -204,9 +226,13 @@ func formatBoundedSubagentAggregate(prefix string, items []subagentAggregateItem
 		if item.detail != "" {
 			b.WriteString(item.detail)
 		}
-		if item.answer != "" {
+		if prose[i] != "" {
 			b.WriteString("Final answer preview:\n")
-			b.WriteString(subagentAnswerPreview(item.answer, item.ref, perAnswer))
+			b.WriteString(subagentAnswerPreview(prose[i], item.ref, perAnswer))
+			b.WriteByte('\n')
+		}
+		if receipts[i] != "" {
+			b.WriteString(receipts[i])
 			b.WriteByte('\n')
 		}
 	}
@@ -280,8 +306,8 @@ func splitSubagentRunResult(output string) (answer, ref string) {
 		return strings.TrimSpace(output), ""
 	}
 	const marker = "\n\nFinal answer:\n"
-	if idx := strings.Index(output, marker); idx >= 0 {
-		return strings.TrimSpace(output[idx+len(marker):]), ref
+	if _, after, ok := strings.Cut(output, marker); ok {
+		return strings.TrimSpace(after), ref
 	}
 	return strings.TrimSpace(output), ref
 }

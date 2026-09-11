@@ -50,10 +50,24 @@ func contractEntriesFromTools(tools []Tool, canonical map[string]json.RawMessage
 // this registry's write lock — holding the read lock across ReadOnly is an
 // AB-BA deadlock (boot's snapshot assembly hit it with a live swap in flight).
 func (r *Registry) ContractEntries() []ContractEntry {
+	return r.contractEntries(true)
+}
+
+// AllContractEntries returns every registered tool's contract, including tools
+// hidden from the provider schema. Capability catalogs use this so
+// use_capability can list and call tool:<name> targets.
+func (r *Registry) AllContractEntries() []ContractEntry {
+	return r.contractEntries(false)
+}
+
+func (r *Registry) contractEntries(providerVisibleOnly bool) []ContractEntry {
 	r.mu.RLock()
 	tools := make([]Tool, 0, len(r.order))
 	canonical := make(map[string]json.RawMessage, len(r.order))
 	for _, name := range r.order {
+		if providerVisibleOnly && !r.isProviderVisibleLocked(name) {
+			continue
+		}
 		t := r.tools[name]
 		if t == nil {
 			continue

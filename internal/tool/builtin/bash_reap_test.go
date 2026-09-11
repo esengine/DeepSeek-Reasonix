@@ -46,7 +46,7 @@ func TestReapTreeKillsGroupStragglers(t *testing.T) {
 	proc.KillTree(cmd)
 
 	dead := false
-	for i := 0; i < 50; i++ {
+	for range 50 {
 		if syscall.Kill(pid, 0) != nil {
 			dead = true
 			break

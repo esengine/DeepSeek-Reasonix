@@ -1,11 +1,14 @@
 package sandbox
 
 import (
+	"context"
 	"fmt"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"strings"
+	"sync"
+	"time"
 )
 
 // Command returns the argv to run `command` through sh, wrapped in sandbox-exec
@@ -30,10 +33,53 @@ func CommandArgs(spec Spec, args []string) ([]string, bool) {
 	return append([]string{"sandbox-exec", "-p", seatbeltProfile(spec)}, args...), true
 }
 
-// Available reports whether sandbox-exec is on PATH (it ships with macOS).
+// sandboxExecUsability caches the probe result per resolved binary path, so
+// repeated Available() calls stay O(1) after the first check.
+var sandboxExecUsability sync.Map // resolved executable path -> bool
+
+const (
+	sandboxExecProbeTimeout = 10 * time.Second
+	sandboxExecProbeCommand = "/usr/bin/true"
+)
+
+// usableSandboxExec distinguishes an installed sandbox-exec from a usable
+// Seatbelt backend. On restricted macOS hosts, sandbox-exec can be on PATH
+// while sandbox_apply fails with exit 71. Probe that operation directly with a
+// minimal profile, mirroring usableBwrap on Linux.
+func usableSandboxExec() bool {
+	path, err := exec.LookPath("sandbox-exec")
+	if err != nil {
+		return false
+	}
+	return usableSandboxExecPath(path)
+}
+
+func usableSandboxExecPath(path string) bool {
+	if path == "" {
+		return false
+	}
+	if cached, ok := sandboxExecUsability.Load(path); ok {
+		return cached.(bool)
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), sandboxExecProbeTimeout)
+	defer cancel()
+	err := exec.CommandContext(ctx, path, "-p", "(version 1)(allow default)", sandboxExecProbeCommand).Run()
+	// A slow host should not permanently poison the process-local cache with a
+	// transient timeout. Definitive probe failures (including exit 71) remain
+	// cached so every command does not pay the failed probe cost.
+	if ctx.Err() != nil {
+		return false
+	}
+	usable := err == nil
+	actual, _ := sandboxExecUsability.LoadOrStore(path, usable)
+	return actual.(bool)
+}
+
+// Available reports whether the OS sandbox backend can actually confine
+// processes. macOS probes sandbox-exec; Linux verifies bubblewrap can enter its
+// namespace (see seatbelt_other.go).
 func Available() bool {
-	_, err := exec.LookPath("sandbox-exec")
-	return err == nil
+	return usableSandboxExec()
 }
 
 // seatbeltProfile builds an SBPL profile that allows everything, then denies
@@ -60,7 +106,38 @@ func seatbeltProfile(spec Spec) string {
 	if !spec.Network {
 		b.WriteString("(deny network*)\n")
 	}
+	for _, p := range forbidWriteDirs(spec.ProtectedWriteRoots) {
+		fmt.Fprintf(&b, "(deny file-write* (subpath %s))\n", sbplString(p))
+	}
+	for _, p := range explicitProtectedAllowDirs(spec) {
+		fmt.Fprintf(&b, "(allow file-write* (subpath %s))\n", sbplString(p))
+	}
 	return b.String()
+}
+
+func forbidWriteDirs(roots []string) []string {
+	return forbidReadDirs(roots)
+}
+
+func explicitProtectedAllowDirs(spec Spec) []string {
+	protected := forbidWriteDirs(spec.ProtectedWriteRoots)
+	if len(protected) == 0 {
+		return nil
+	}
+	stateRoot := singleProtectedStateRoot(protected)
+	var out []string
+	for _, root := range writeAllowDirsForSpec(spec) {
+		if stateRoot != "" && IsProtectedWritePath(root, stateRoot) {
+			continue
+		}
+		for _, prot := range protected {
+			if root != prot && PathWithin(prot, root) {
+				out = append(out, root)
+				break
+			}
+		}
+	}
+	return out
 }
 
 // writeAllowDirs is the deduplicated, symlink-resolved set of directories the
@@ -75,6 +152,11 @@ func writeAllowDirsForSpec(spec Spec) []string {
 	roots := spec.WriteRoots
 	dirs := append([]string{}, roots...)
 	dirs = append(dirs, "/dev")
+	if dir := strings.TrimSpace(spec.SessionTemp); dir != "" {
+		// Session-private temporary directory must be writable under Seatbelt
+		// even when MinimalWrites omits the broad host temp allowances.
+		dirs = append(dirs, dir)
+	}
 	if !spec.MinimalWrites {
 		dirs = append(dirs, "/tmp", "/private/tmp", "/private/var/folders", os.TempDir())
 	}

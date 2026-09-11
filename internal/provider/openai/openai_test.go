@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"io"
+	"maps"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -76,11 +77,14 @@ func TestStreamRetriesThenSucceeds(t *testing.T) {
 }
 
 func TestMergeUsageCountsStreamsNotUsageChunks(t *testing.T) {
-	firstChunk := &provider.Usage{PromptTokens: 2, TotalTokens: 2, RequestCount: 2}
-	secondChunk := &provider.Usage{CompletionTokens: 1, TotalTokens: 1, RequestCount: 2}
+	firstChunk := &provider.Usage{PromptTokens: 2, TotalTokens: 2, RequestCount: 2, CacheWriteTokens: 2, CacheWriteBilledTokens: 2.5}
+	secondChunk := &provider.Usage{CompletionTokens: 1, TotalTokens: 1, RequestCount: 2, CacheWriteTokens: 3, CacheWriteBilledTokens: 6}
 	oneStream := mergeUsage(firstChunk, secondChunk, false)
 	if oneStream.RequestCount != 2 {
 		t.Fatalf("same-stream request count = %d, want 2", oneStream.RequestCount)
+	}
+	if oneStream.CacheWriteTokens != 5 || oneStream.CacheWriteBilledTokens != 8.5 {
+		t.Fatalf("same-stream cache writes = raw %d billed %v, want 5/8.5", oneStream.CacheWriteTokens, oneStream.CacheWriteBilledTokens)
 	}
 	nextStream := &provider.Usage{PromptTokens: 3, TotalTokens: 3, RequestCount: 1}
 	combined := mergeUsage(oneStream, nextStream, true)
@@ -528,8 +532,8 @@ func TestStreamUsesConfiguredChatURL(t *testing.T) {
 	var sawRequest bool
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		sawRequest = true
-		if r.URL.Path != "/proxy/v1/chat/completions" {
-			t.Errorf("path = %s, want /proxy/v1/chat/completions", r.URL.Path)
+		if r.URL.RequestURI() != "/proxy/v1/chat/completions" {
+			t.Errorf("request URI = %s, want /proxy/v1/chat/completions", r.URL.RequestURI())
 			http.NotFound(w, r)
 			return
 		}
@@ -547,7 +551,7 @@ func TestStreamUsesConfiguredChatURL(t *testing.T) {
 		BaseURL: srv.URL + "/base",
 		Model:   "model-a",
 		APIKey:  "k",
-		Extra:   map[string]any{"chat_url": srv.URL + "/proxy/v1/chat/completions"},
+		Extra:   map[string]any{"chat_url": srv.URL + "/proxy/v1/chat/completions/"},
 	})
 	if err != nil {
 		t.Fatalf("New: %v", err)
@@ -959,12 +963,10 @@ func TestNormaliseUsageMiMoShape(t *testing.T) {
 	}
 }
 
-// TestBuildRequestDropsReasoningContent guards the cache/cost fix: an assistant
-// turn's reasoning_content is a response-only signal and must never be echoed
-// back in the outgoing request. DeepSeek otherwise counts it as paid prompt
-// input (~500 tok/turn on a reasoner chain). The session keeps it for
-// display/archive; the wire request must not carry it.
-func TestBuildRequestDropsReasoningOnPlainAssistantTurn(t *testing.T) {
+// TestBuildRequestReplaysReasoningOnPlainAssistantTurn guards the DeepSeek
+// replay contract: a reasoning-bearing assistant turn must keep its exact
+// reasoning_content in later requests even when it made no tool call.
+func TestBuildRequestReplaysReasoningOnPlainAssistantTurn(t *testing.T) {
 	c := &client{model: "deepseek-reasoner", deepseek: true}
 	req := c.buildRequest(provider.Request{
 		Messages: []provider.Message{
@@ -977,11 +979,11 @@ func TestBuildRequestDropsReasoningOnPlainAssistantTurn(t *testing.T) {
 	if err != nil {
 		t.Fatalf("marshal: %v", err)
 	}
-	if strings.Contains(string(b), "reasoning_content") {
-		t.Errorf("a no-tool-calls assistant turn must not carry reasoning_content: %s", b)
+	if !strings.Contains(string(b), "reasoning_content") {
+		t.Errorf("a reasoning-bearing assistant turn must carry reasoning_content: %s", b)
 	}
-	if strings.Contains(string(b), "SECRET-CHAIN-OF-THOUGHT") {
-		t.Errorf("the assistant chain-of-thought leaked into the request: %s", b)
+	if !strings.Contains(string(b), "SECRET-CHAIN-OF-THOUGHT") {
+		t.Errorf("the assistant chain-of-thought was dropped from the request: %s", b)
 	}
 	if !strings.Contains(string(b), "the answer") {
 		t.Errorf("assistant content was dropped along with reasoning: %s", b)
@@ -1074,7 +1076,7 @@ func TestNewDeepSeekV4FlashForwardsLowEffort(t *testing.T) {
 		t.Fatalf("Flash reasoning_effort = %q, want low", got)
 	}
 
-	_, err = New(provider.Config{
+	pro, err := New(provider.Config{
 		Name:    "deepseek",
 		BaseURL: "https://api.deepseek.com",
 		Model:   "deepseek-v4-pro",
@@ -1084,8 +1086,11 @@ func TestNewDeepSeekV4FlashForwardsLowEffort(t *testing.T) {
 			"reasoning_protocol": "deepseek",
 		},
 	})
-	if err == nil || !strings.Contains(err.Error(), "requires deepseek-v4-flash") {
-		t.Fatalf("New Pro low error = %v, want model-scoped rejection", err)
+	if err != nil {
+		t.Fatalf("New Pro low: %v", err)
+	}
+	if got := pro.(*client).buildRequest(provider.Request{}).ReasoningEffort; got != "low" {
+		t.Fatalf("Pro reasoning_effort = %q, want low", got)
 	}
 
 	custom, err := New(provider.Config{
@@ -1104,6 +1109,17 @@ func TestNewDeepSeekV4FlashForwardsLowEffort(t *testing.T) {
 	}
 	if got := custom.(*client).buildRequest(provider.Request{}).ReasoningEffort; got != "low" {
 		t.Fatalf("custom reasoning_effort = %q, want explicit low", got)
+	}
+}
+
+func TestDeepSeekV4EffortAliasesRejected(t *testing.T) {
+	for _, model := range []string{"deepseek-v4-flash", "deepseek-v4-pro", OfficialDeepSeekVisionModel} {
+		for _, alias := range []string{"medium", "xhigh"} {
+			_, err := New(provider.Config{BaseURL: "https://api.deepseek.com", Model: model, Extra: map[string]any{"effort": alias}})
+			if err == nil {
+				t.Fatalf("%s accepted undeclared %s", model, alias)
+			}
+		}
 	}
 }
 
@@ -1240,9 +1256,24 @@ func TestBuildRequestUsesProviderSpecificOutputBudget(t *testing.T) {
 		return p.(*client)
 	}
 
+	// Official DeepSeek auto omits max_tokens so the server uses its 384K ceiling.
+	// Effort only selects thinking depth; it must not invent a 16/32/64K cap.
 	deepseek := newClient(t, "https://api.deepseek.com", "deepseek-v4-flash", 0).buildRequest(provider.Request{})
-	if deepseek.MaxTokens != provider.DefaultReasoningOutputTokens || deepseek.MaxCompletionTokens != 0 {
-		t.Fatalf("DeepSeek output budget = max_tokens %d, max_completion_tokens %d", deepseek.MaxTokens, deepseek.MaxCompletionTokens)
+	if deepseek.MaxTokens != 0 || deepseek.MaxCompletionTokens != 0 {
+		t.Fatalf("DeepSeek auto budget = max_tokens %d, max_completion_tokens %d, want omitted",
+			deepseek.MaxTokens, deepseek.MaxCompletionTokens)
+	}
+
+	lowEffort, err := New(provider.Config{
+		Name: "test", BaseURL: "https://api.deepseek.com", Model: "deepseek-v4-flash",
+		Extra: map[string]any{"effort": "low", "max_output_tokens": 0},
+	})
+	if err != nil {
+		t.Fatalf("New low-effort DeepSeek: %v", err)
+	}
+	lowReq := lowEffort.(*client).buildRequest(provider.Request{})
+	if lowReq.MaxTokens != 0 {
+		t.Fatalf("low-effort auto budget = %d, want omitted", lowReq.MaxTokens)
 	}
 
 	thinkingDisabledProvider, err := New(provider.Config{
@@ -1253,8 +1284,8 @@ func TestBuildRequestUsesProviderSpecificOutputBudget(t *testing.T) {
 		t.Fatalf("New thinking-disabled DeepSeek: %v", err)
 	}
 	thinkingDisabled := thinkingDisabledProvider.(*client).buildRequest(provider.Request{})
-	if thinkingDisabled.MaxTokens != 0 || thinkingDisabled.MaxCompletionTokens != 0 {
-		t.Fatalf("thinking-disabled DeepSeek received an automatic output budget: %+v", thinkingDisabled)
+	if thinkingDisabled.MaxTokens != 0 {
+		t.Fatalf("thinking-disabled DeepSeek auto budget = %d, want omitted", thinkingDisabled.MaxTokens)
 	}
 	effortDisabledProvider, err := New(provider.Config{
 		Name: "test", BaseURL: "https://api.deepseek.com", Model: "deepseek-v4-pro",
@@ -1265,7 +1296,7 @@ func TestBuildRequestUsesProviderSpecificOutputBudget(t *testing.T) {
 	}
 	effortDisabled := effortDisabledProvider.(*client).buildRequest(provider.Request{})
 	if effortDisabled.MaxTokens != 0 || effortDisabled.Thinking == nil || effortDisabled.Thinking.Type != "disabled" {
-		t.Fatalf("effort-disabled DeepSeek request = %+v, want thinking disabled without an automatic budget", effortDisabled)
+		t.Fatalf("effort-disabled DeepSeek request = %+v, want thinking disabled with omitted budget", effortDisabled)
 	}
 
 	explicitDisabledProvider, err := New(provider.Config{
@@ -1603,11 +1634,9 @@ func TestNewThinkingConfigParsing(t *testing.T) {
 
 // TestBuildRequestDeepSeekDisabled covers both user-facing ways to turn
 // DeepSeek thinking off. Either input must route to thinking.type=disabled,
-// drop reasoning_effort, and keep the pre-fix tool-call history bytes: a
-// tool_calls turn with no reasoning omits the reasoning_content key entirely
-// (only thinking mode requires it), while reasoning left over from a
-// thinking-mode round still round-trips so the prompt-cache prefix of a mixed
-// thinking-on→off session stays stable.
+// drop reasoning_effort, and preserve provider-issued reasoning from earlier
+// assistant turns while still omitting an empty key for a reasoning-less tool
+// turn.
 func TestBuildRequestDeepSeekDisabled(t *testing.T) {
 	base := provider.Config{Name: "ds", BaseURL: "https://api.deepseek.com", Model: "deepseek-v4", APIKey: "k"}
 	for _, tc := range []struct {
@@ -1650,6 +1679,7 @@ func TestBuildRequestDeepSeekDisabled(t *testing.T) {
 						ID: "call_2", Name: "read_file", Arguments: `{"path":"go.mod"}`,
 					}}},
 					{Role: provider.RoleTool, ToolCallID: "call_2", Name: "read_file", Content: "module demo"},
+					{Role: provider.RoleAssistant, Content: "plain answer", ReasoningContent: "plain reasoning"},
 				},
 			})
 			if req.Thinking == nil || req.Thinking.Type != "disabled" {
@@ -1664,6 +1694,9 @@ func TestBuildRequestDeepSeekDisabled(t *testing.T) {
 			if rc := req.Messages[3].ReasoningContent; rc == nil || *rc != "from a thinking round" {
 				t.Fatalf("disabled mode must keep round-tripping thinking-round reasoning, got %v", rc)
 			}
+			if rc := req.Messages[5].ReasoningContent; rc == nil || *rc != "plain reasoning" {
+				t.Fatalf("disabled mode must keep round-tripping plain-turn reasoning, got %v", rc)
+			}
 		})
 	}
 }
@@ -1674,9 +1707,7 @@ func withEffort(c provider.Config, effort string) provider.Config {
 		extra = map[string]any{}
 	} else {
 		cp := make(map[string]any, len(extra)+1)
-		for k, v := range extra {
-			cp[k] = v
-		}
+		maps.Copy(cp, extra)
 		extra = cp
 	}
 	extra["effort"] = effort
@@ -1757,7 +1788,7 @@ func TestNewReadsEffortFromConfig(t *testing.T) {
 		Name:    "mimo",
 		BaseURL: "https://api.example.com",
 		Model:   "mimo-v2",
-		Extra:   map[string]any{"effort": "medium"},
+		Extra:   map[string]any{"effort": "medium", "supported_efforts": []string{"low", "medium", "high"}},
 	})
 	if err != nil {
 		t.Fatalf("New: %v", err)
@@ -1837,8 +1868,8 @@ func TestStreamReasoningContentTakesPrecedenceOverFallback(t *testing.T) {
 // assistant tool_calls turn whose reasoning_content KEY is missing from the
 // request JSON, but accepts an empty string. A turn whose reasoning was lost
 // upstream (gateway renamed/dropped the field, legacy session, model switch)
-// must therefore still serialize the key — while plain assistant text turns
-// keep omitting it.
+// must therefore still serialize the key, while plain assistant text turns
+// carrying reasoning are replayed too.
 func TestBuildRequestAlwaysSendsReasoningKeyOnDeepSeekToolCalls(t *testing.T) {
 	p, err := New(provider.Config{
 		Name:    "deepseek-proxy",
@@ -1857,7 +1888,7 @@ func TestBuildRequestAlwaysSendsReasoningKeyOnDeepSeekToolCalls(t *testing.T) {
 				ID: "call_1", Name: "read_file", Arguments: `{"path":"main.go"}`,
 			}}},
 			{Role: provider.RoleTool, ToolCallID: "call_1", Name: "read_file", Content: "package main"},
-			{Role: provider.RoleAssistant, Content: "plain text turn"},
+			{Role: provider.RoleAssistant, Content: "plain text turn", ReasoningContent: "plain reasoning"},
 		},
 	}))
 	if err != nil {
@@ -1879,8 +1910,8 @@ func TestBuildRequestAlwaysSendsReasoningKeyOnDeepSeekToolCalls(t *testing.T) {
 	if string(rc) != `""` {
 		t.Fatalf("reasoning_content = %s, want empty string", rc)
 	}
-	if _, ok := req.Messages[3]["reasoning_content"]; ok {
-		t.Fatal("plain assistant text turn must keep omitting reasoning_content")
+	if got, ok := req.Messages[3]["reasoning_content"]; !ok || string(got) != `"plain reasoning"` {
+		t.Fatalf("plain assistant text turn reasoning_content = %s, want plain reasoning", got)
 	}
 }
 

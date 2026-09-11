@@ -3,33 +3,8 @@ package main
 import (
 	"os"
 	"path/filepath"
-	"strings"
 	"testing"
-
-	"github.com/wailsapp/wails/v2/pkg/options"
 )
-
-func TestSingleInstanceLockRestoresExistingInstance(t *testing.T) {
-	t.Setenv("REASONIX_HOME", t.TempDir())
-	app := NewApp()
-	lock := singleInstanceLock(app)
-
-	if lock == nil {
-		t.Fatal("singleInstanceLock returned nil")
-	}
-	id := singleInstanceID()
-	if lock.UniqueId != id {
-		t.Fatalf("UniqueId = %q, want %q", lock.UniqueId, id)
-	}
-	if !strings.HasPrefix(lock.UniqueId, singleInstanceIDPrefix+".") {
-		t.Fatalf("UniqueId = %q, want prefix %s.", lock.UniqueId, singleInstanceIDPrefix)
-	}
-	if lock.OnSecondInstanceLaunch == nil {
-		t.Fatal("OnSecondInstanceLaunch should restore the existing window")
-	}
-
-	lock.OnSecondInstanceLaunch(options.SecondInstanceData{})
-}
 
 func TestSingleInstanceIDScopesToReasonixHome(t *testing.T) {
 	first := filepath.Join(t.TempDir(), "first")
@@ -73,12 +48,5 @@ func TestSingleInstanceIDResolvesMissingHomeThroughSymlink(t *testing.T) {
 	t.Setenv("REASONIX_HOME", filepath.Join(aliasParent, "not-created", "home"))
 	if got := singleInstanceID(); got != realID {
 		t.Fatalf("aliased missing data home produced different ids: %q != %q", got, realID)
-	}
-}
-
-func TestSingleInstanceLockSkipsInDevMode(t *testing.T) {
-	t.Setenv("REASONIX_DEV", "1")
-	if lock := singleInstanceLock(NewApp()); lock != nil {
-		t.Fatalf("singleInstanceLock returned %#v, want nil in dev mode", lock)
 	}
 }

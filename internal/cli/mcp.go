@@ -10,12 +10,9 @@ import (
 	"sort"
 	"strconv"
 	"strings"
-	"time"
 
-	"reasonix/internal/boot"
 	"reasonix/internal/config"
 	"reasonix/internal/mcpregistry"
-	"reasonix/internal/plugin"
 )
 
 // mcp.go holds the MCP server-management surface shared by the `reasonix mcp`
@@ -335,6 +332,8 @@ func mcpCommand(args []string) int {
 	case "retry", "connect":
 		// connect remains a compatibility alias for enable/retry.
 		return mcpRetryCLI(args[1:])
+	case "auth", "authorize":
+		return mcpAuthCLI(args[1:])
 	case "update":
 		return mcpUpdateCLI(args[1:])
 	case "import":
@@ -781,31 +780,6 @@ func mcpAddCLI(args []string) int {
 	return 0
 }
 
-var mcpProbeForInstall = probeMCPReadiness
-
-func probeMCPReadiness(entry config.PluginEntry) (plugin.MCPInstallResult, error) {
-	entry.Source = config.MCPSourceUserConfig
-	workspace, err := os.Getwd()
-	if err != nil {
-		workspace = ""
-	}
-	specs := boot.PluginSpecsForRootWithOptions([]config.PluginEntry{entry}, workspace, boot.PluginSpecOptions{
-		DefaultCallTimeout: 30 * time.Second,
-		ConfigSource:       string(config.MCPSourceUserConfig),
-		StateHome:          config.ReasonixHomeDir(),
-		Network:            true,
-	})
-	if len(specs) != 1 {
-		err := fmt.Errorf("could not build MCP launch specification")
-		return plugin.InstallResultForError(entry.Name, err), err
-	}
-	host := plugin.NewHost()
-	defer host.Close()
-	ctx, cancel := context.WithTimeout(context.Background(), 45*time.Second)
-	defer cancel()
-	return host.InstallAndConnect(ctx, specs[0])
-}
-
 func persistCLIInstalledMCP(workspace string, entry config.PluginEntry) error {
 	entry.Source = config.MCPSourceUserConfig
 	_, err := config.InstallUserPluginForRoot(workspace, entry, entry.ShouldAutoStart())
@@ -828,9 +802,13 @@ func mcpRemoveCLI(args []string) int {
 		fmt.Fprintf(os.Stderr, "no MCP server named %q in config\n", name)
 		return 1
 	}
-	// Uninstall clears activation overrides; schema/auth cleanup is handled by
-	// the live session path when present.
+	// Uninstall clears activation overrides and Reasonix-owned OAuth state. A
+	// same-resource lower-priority declaration keeps owning the shared state.
 	_ = config.DefaultMCPActivationStore().ClearServer(removed, workspace)
+	if err := reconcileRemovedMCPOAuth(workspace, name); err != nil {
+		fmt.Fprintf(os.Stderr, "removed MCP server %q, but failed to reconcile OAuth state: %v\n", name, err)
+		return 1
+	}
 	fmt.Printf("removed MCP server %q\n", name)
 	return 0
 }
@@ -858,6 +836,7 @@ Usage:
   reasonix mcp enable <name>
   reasonix mcp disable <name>
   reasonix mcp retry <name>
+  reasonix mcp auth <name>                          remote OAuth (opens browser)
   reasonix mcp update <name>
   reasonix mcp browse [query] [--limit N] [--json]
   reasonix mcp import
@@ -874,7 +853,9 @@ Examples:
 
 CLI config changes take effect on the next session. Inside a running chat, use
 /mcp add to save and connect a server immediately. Installing a server is also
-its authorization; there is no separate trust step.
+its launch authorization; there is no separate trust step. Remote OAuth, when
+requested by the server, is completed with reasonix mcp auth <name> and stored
+in Reasonix-private MCP state.
 
 Servers declared by project reasonix.toml or .mcp.json are trusted configuration
 and need no separate launch confirmation. Project entries override same-name

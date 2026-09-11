@@ -39,7 +39,11 @@ func fetchGitStatus() tea.Cmd {
 }
 
 func loadGitStatus(ctx context.Context, cwd string) (gitStatus, error) {
-	root, err := runGit(ctx, cwd, "rev-parse", "--show-toplevel")
+	return loadGitStatusWithRunner(ctx, cwd, runGit)
+}
+
+func loadGitStatusWithRunner(ctx context.Context, cwd string, run func(context.Context, string, ...string) (string, error)) (gitStatus, error) {
+	root, err := run(ctx, cwd, "rev-parse", "--show-toplevel")
 	if err != nil {
 		return gitStatus{}, err
 	}
@@ -49,12 +53,12 @@ func loadGitStatus(ctx context.Context, cwd string) (gitStatus, error) {
 	}
 
 	status := gitStatus{Repo: filepath.Base(root)}
-	if branch, err := runGit(ctx, root, "symbolic-ref", "--quiet", "--short", "HEAD"); err == nil && strings.TrimSpace(branch) != "" {
+	if branch, err := run(ctx, root, "symbolic-ref", "--quiet", "--short", "HEAD"); err == nil && strings.TrimSpace(branch) != "" {
 		status.Branch = strings.TrimSpace(branch)
-	} else if sha, err := runGit(ctx, root, "rev-parse", "--short", "HEAD"); err == nil && strings.TrimSpace(sha) != "" {
+	} else if sha, err := run(ctx, root, "rev-parse", "--short", "HEAD"); err == nil && strings.TrimSpace(sha) != "" {
 		status.Branch = strings.TrimSpace(sha)
 		status.Detached = true
-	} else if ref, err := runGit(ctx, root, "symbolic-ref", "--short", "HEAD"); err == nil && strings.TrimSpace(ref) != "" {
+	} else if ref, err := run(ctx, root, "symbolic-ref", "--short", "HEAD"); err == nil && strings.TrimSpace(ref) != "" {
 		status.Branch = strings.TrimSpace(ref)
 	}
 	if status.Branch == "" {
@@ -62,20 +66,23 @@ func loadGitStatus(ctx context.Context, cwd string) (gitStatus, error) {
 		status.Detached = true
 	}
 
-	if out, err := runGit(ctx, root, "diff", "--numstat", "HEAD", "--"); err == nil {
+	if out, err := run(ctx, root, "diff", "--numstat", "HEAD", "--"); err == nil {
 		status.Added, status.Removed = parseGitNumstat(out)
 	}
-	if out, err := runGit(ctx, root, "status", "--porcelain=v1", "--untracked-files=normal"); err == nil {
+	if out, err := run(ctx, root, "status", "--porcelain=v1", "--untracked-files=normal"); err == nil {
 		status.Untracked = countUntracked(out)
+	}
+	if err := ctx.Err(); err != nil {
+		return gitStatus{}, err
 	}
 	return status, nil
 }
 
 func runGit(ctx context.Context, cwd string, args ...string) (string, error) {
-	cmd := gitcmd.Command(ctx, "", args...)
-	if cwd != "" {
-		cmd.Dir = cwd
-	}
+	// cwd goes through gitcmd's dir parameter, not cmd.Dir, so the gitcmd
+	// baseline can resolve the repository's own config relative to it (the
+	// filter-driver neutralization reads <cwd>/.git/config).
+	cmd := gitcmd.Command(ctx, cwd, args...)
 	out, err := cmd.Output()
 	if err != nil {
 		return "", err
@@ -84,7 +91,7 @@ func runGit(ctx context.Context, cwd string, args ...string) (string, error) {
 }
 
 func parseGitNumstat(out string) (added int, removed int) {
-	for _, line := range strings.Split(strings.TrimSpace(out), "\n") {
+	for line := range strings.SplitSeq(strings.TrimSpace(out), "\n") {
 		if line == "" {
 			continue
 		}
@@ -108,7 +115,7 @@ func parseGitNumstat(out string) (added int, removed int) {
 
 func countUntracked(out string) int {
 	n := 0
-	for _, line := range strings.Split(strings.TrimRight(out, "\n"), "\n") {
+	for line := range strings.SplitSeq(strings.TrimRight(out, "\n"), "\n") {
 		if strings.HasPrefix(line, "?? ") {
 			n++
 		}

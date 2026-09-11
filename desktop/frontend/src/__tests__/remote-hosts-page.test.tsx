@@ -1,14 +1,16 @@
+import { selectSettingsValue } from "./settingsSelectTestUtils";
 // Run: tsx src/__tests__/remote-hosts-page.test.tsx
 
-import { JSDOM } from "jsdom";
 import React from "react";
+import { JSDOM } from "jsdom";
 import { act } from "react";
 import { createRoot } from "react-dom/client";
 
 import { RemoteHostsPage } from "../components/RemoteHostsPage";
 import type { AppBindings } from "../lib/bridge";
 import { LocaleProvider } from "../lib/i18n";
-import type { RemoteHostView } from "../lib/types";
+import type { RemoteHostInput, RemoteHostView } from "../lib/types";
+import { installDesktopHostStub } from "./desktopHostStub";
 
 let passed = 0;
 let failed = 0;
@@ -29,7 +31,7 @@ async function flush() {
 
 function button(label: string, root: ParentNode = document): HTMLButtonElement | undefined {
   return Array.from(root.querySelectorAll<HTMLButtonElement>("button"))
-    .find((candidate) => candidate.textContent?.trim() === label);
+    .find((candidate) => (candidate.getAttribute("aria-label") || candidate.textContent?.trim()) === label);
 }
 
 console.log("\nRemote SSH host settings");
@@ -61,11 +63,13 @@ let hosts: RemoteHostView[] = [{
   proxyJump: "",
   defaultWorkspace: "/srv/app",
   serveInstall: "auto",
+  credentialMode: "remote",
   useSSHConfig: false,
   passwordSet: true,
   keyPassphraseSet: true,
 }];
 let removeCalls = 0;
+const recordedUpdates: Array<RemoteHostInput & { id: string }> = [];
 let legacyView = { mirrorCount: 0, mirrorBytes: 0, trustFile: false };
 let cleanCalls: string[] = [];
 const bindings = {
@@ -75,14 +79,19 @@ const bindings = {
     removeCalls += 1;
     hosts = hosts.filter((host) => host.id !== id);
   },
+  async UpdateRemoteHost(id: string, input: RemoteHostInput) {
+    recordedUpdates.push({ id, ...input });
+    return { ...hosts.find((host) => host.id === id)!, ...input, id } as RemoteHostView;
+  },
   async ScanRemoteLegacyWorkbenchData() { return legacyView; },
   async CleanRemoteLegacyWorkbenchData(target: "mirrors" | "trust") {
     cleanCalls.push(target);
     legacyView = { mirrorCount: 0, mirrorBytes: 0, trustFile: false };
   },
 } as unknown as AppBindings;
-window.go = { main: { App: bindings } };
+installDesktopHostStub(({ main: { App: bindings } }).main.App);
 
+window.matchMedia = (() => ({matches: true, addEventListener(){}, removeEventListener(){}})) as any;
 const rootElement = document.getElementById("root");
 if (!rootElement) throw new Error("missing root");
 const root = createRoot(rootElement);
@@ -120,6 +129,19 @@ await act(async () => {
   await flush();
 });
 ok(document.body.textContent?.includes("saved password will be removed") === true, "explicit clear action is staged until Save");
+
+// Credential mode: the host form offers remote | local-proxy and the choice
+// rides the UpdateRemoteHost payload.
+{
+  const modeSelect = Array.from(document.querySelectorAll<HTMLButtonElement>("button.settings-select")).find(sel => sel.value === "remote");
+  ok(Boolean(modeSelect), "edit form offers the credential-mode select");
+  if (modeSelect) await selectSettingsValue(modeSelect, "local-proxy");
+  await act(async () => {
+    button("Save")?.click();
+    await flush();
+  });
+  ok(recordedUpdates.length === 1 && recordedUpdates[0].credentialMode === "local-proxy", `save carries the chosen credential mode (got ${JSON.stringify(recordedUpdates.map((u) => u.credentialMode))})`);
+}
 
 await act(async () => {
   button("Cancel")?.click();

@@ -154,7 +154,7 @@ func TestDeleteSymbolPreview(t *testing.T) {
 	src := "package main\n\nfunc main() {}\n\nfunc helper() {}\n"
 	os.WriteFile(f, []byte(src), 0o644)
 
-	change, err := deleteSymbol{}.Preview(argsJSON(t, map[string]any{"path": f, "name": "helper"}))
+	change, err := deleteSymbol{}.Preview(context.Background(), argsJSON(t, map[string]any{"path": f, "name": "helper"}))
 	if err != nil {
 		t.Fatalf("Preview: %v", err)
 	}

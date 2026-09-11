@@ -13,6 +13,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"reflect"
+	"slices"
 	"strconv"
 	"strings"
 	"sync"
@@ -29,6 +30,7 @@ import (
 	"reasonix/internal/control"
 	"reasonix/internal/event"
 	"reasonix/internal/evidence"
+	"reasonix/internal/history"
 	"reasonix/internal/instruction"
 	"reasonix/internal/jobs"
 	"reasonix/internal/mcplaunch"
@@ -38,12 +40,14 @@ import (
 	"reasonix/internal/provider"
 	"reasonix/internal/sandbox"
 	"reasonix/internal/skill"
+	"reasonix/internal/stats"
 	"reasonix/internal/store"
+	"reasonix/internal/taskcatalog"
 	"reasonix/internal/tool"
 )
 
 type todoMetaController struct {
-	control.SessionAPI
+	stubSessionAPI
 	todos []evidence.TodoItem
 }
 
@@ -233,6 +237,15 @@ func isolateDesktopUserDirs(t *testing.T) string {
 	t.Setenv("REASONIX_STATE_HOME", filepath.Join(home, "state"))
 	t.Setenv("REASONIX_CACHE_HOME", filepath.Join(home, "cache"))
 	t.Setenv("AppData", appData)
+	// Close process-local SQLite handles before TempDir cleanup for Windows.
+	t.Cleanup(func() {
+		ctx, cancel := context.WithTimeout(context.Background(), time.Second)
+		defer cancel()
+		desktopTopicState.close()
+		_ = history.CloseSharedCatalog(ctx)
+		_ = stats.CloseUsageCatalogs(ctx)
+		_ = taskcatalog.ShutdownShared(ctx)
+	})
 	return home
 }
 
@@ -381,6 +394,9 @@ func TestCommandsIncludesDocsAndEffortNotThinking(t *testing.T) {
 	}
 	if !hasCommand(cmds, "effort") {
 		t.Fatalf("Commands() should include effort: %+v", cmds)
+	}
+	if !hasCommand(cmds, "reload") {
+		t.Fatalf("Commands() should include reload: %+v", cmds)
 	}
 	if hasCommand(cmds, "thinking") {
 		t.Fatalf("Commands() should not include thinking: %+v", cmds)
@@ -1058,14 +1074,14 @@ func TestBackgroundRestorePlanAvoidsNormalWindowFlash(t *testing.T) {
 
 func TestEmitReadyInvokesReadyHook(t *testing.T) {
 	app := NewApp()
-	var calls int32
+	var calls atomic.Int32
 	app.readyHook = func() {
-		atomic.AddInt32(&calls, 1)
+		calls.Add(1)
 	}
 
 	app.emitReady(context.TODO())
 
-	if got := atomic.LoadInt32(&calls); got != 1 {
+	if got := calls.Load(); got != 1 {
 		t.Fatalf("ready hook calls = %d, want 1", got)
 	}
 }
@@ -1145,7 +1161,7 @@ status_bar_items = ["cost", "balance"]
 	}
 
 	got := NewApp().Settings()
-	if got.DesktopLanguage != "en" || got.DesktopLayoutStyle != "classic" || got.DesktopTheme != "dark" || got.DesktopThemeStyle != "graphite" || got.DesktopTerminalTheme != "light" || got.CloseBehavior != "background" || got.StatusBarStyle != "text" {
+	if got.DesktopLanguage != "en" || got.DesktopLayoutStyle != "workbench" || got.DesktopTheme != "dark" || got.DesktopThemeStyle != "graphite" || got.DesktopTerminalTheme != "light" || got.CloseBehavior != "background" || got.StatusBarStyle != "text" {
 		t.Fatalf("desktop settings = lang:%q layout:%q theme:%q style:%q close:%q status:%q, want user-level desktop prefs", got.DesktopLanguage, got.DesktopLayoutStyle, got.DesktopTheme, got.DesktopThemeStyle, got.CloseBehavior, got.StatusBarStyle)
 	}
 	if want := []string{"model", "balance", "cache"}; !reflect.DeepEqual(got.StatusBarItems, want) {
@@ -1189,7 +1205,7 @@ func TestDesktopStartupSettingsUsesUserDesktopPreferencesWithoutFullSettingsPayl
 	}
 
 	got := NewApp().DesktopStartupSettings()
-	if got.DesktopLanguage != "en" || got.DesktopLayoutStyle != "classic" || got.DesktopTheme != "dark" || got.DesktopThemeStyle != "graphite" || got.DesktopTerminalTheme != "light" || got.DisplayMode != "standard" || got.StatusBarStyle != "icon" || got.CheckUpdates || got.UpdateChannel != "stable" {
+	if got.DesktopLanguage != "en" || got.DesktopLayoutStyle != "workbench" || got.DesktopTheme != "dark" || got.DesktopThemeStyle != "graphite" || got.DesktopTerminalTheme != "light" || got.DisplayMode != "standard" || got.StatusBarStyle != "icon" || got.CheckUpdates || got.UpdateChannel != "stable" {
 		t.Fatalf("DesktopStartupSettings desktop prefs = %+v, want user-level startup prefs", got)
 	}
 	if want := []string{"workspace", "git_branch", "model"}; !reflect.DeepEqual(got.StatusBarItems, want) {
@@ -1227,7 +1243,7 @@ func BenchmarkDesktopSettingsPayloads(b *testing.B) {
 	b.Setenv("SHARED_PROVIDER_KEY", "sk-test")
 
 	cfg := config.LoadForEdit(config.UserConfigPath())
-	for i := 0; i < 40; i++ {
+	for i := range 40 {
 		cfg.Providers = append(cfg.Providers, config.ProviderEntry{
 			Name:      fmt.Sprintf("custom-%02d", i),
 			Kind:      "openai",
@@ -1243,12 +1259,12 @@ func BenchmarkDesktopSettingsPayloads(b *testing.B) {
 	app := NewApp()
 
 	b.Run("Settings", func(b *testing.B) {
-		for i := 0; i < b.N; i++ {
+		for range b.N {
 			_ = app.Settings()
 		}
 	})
 	b.Run("DesktopStartupSettings", func(b *testing.B) {
-		for i := 0; i < b.N; i++ {
+		for range b.N {
 			_ = app.DesktopStartupSettings()
 		}
 	})
@@ -1383,7 +1399,7 @@ status_bar_items = ["model", "cache", "balance"]
 	if got.ConfigPath != config.UserConfigPath() {
 		t.Fatalf("Settings configPath = %q, want user config %q", got.ConfigPath, config.UserConfigPath())
 	}
-	if got.DefaultModel != "legacy-provider/legacy-model" || got.DesktopLanguage != "zh" || got.DesktopLayoutStyle != "workbench" || got.DesktopTheme != "light" || got.DesktopThemeStyle != "glacier" || got.CloseBehavior != "quit" || got.StatusBarStyle != "text" {
+	if got.DefaultModel != "legacy-provider/legacy-model" || got.DesktopLanguage != "zh" || got.DesktopLayoutStyle != "workbench" || got.DesktopTheme != "light" || got.DesktopThemeStyle != "glacier" || got.CloseBehavior != "quit" || got.StatusBarStyle != "icon" {
 		t.Fatalf("Settings did not seed from legacy project config: %+v", got)
 	}
 	if want := []string{"model", "cache", "balance"}; !reflect.DeepEqual(got.StatusBarItems, want) {
@@ -1396,7 +1412,7 @@ status_bar_items = ["model", "cache", "balance"]
 		t.Fatalf("SetDesktopLanguage: %v", err)
 	}
 	userCfg := config.LoadForEdit(config.UserConfigPath())
-	if userCfg.DesktopLanguage() != "en" || userCfg.DesktopLayoutStyle() != "workbench" || userCfg.DesktopTheme() != "light" || userCfg.DesktopThemeStyle() != "glacier" || userCfg.DesktopCloseBehavior() != "quit" || userCfg.DesktopStatusBarStyle() != "text" {
+	if userCfg.DesktopLanguage() != "en" || userCfg.DesktopLayoutStyle() != "workbench" || userCfg.DesktopTheme() != "light" || userCfg.DesktopThemeStyle() != "glacier" || userCfg.DesktopCloseBehavior() != "quit" || userCfg.DesktopStatusBarStyle() != "icon" {
 		t.Fatalf("saved user config did not preserve seeded desktop prefs: lang:%q layout:%q theme:%q style:%q close:%q status:%q", userCfg.DesktopLanguage(), userCfg.DesktopLayoutStyle(), userCfg.DesktopTheme(), userCfg.DesktopThemeStyle(), userCfg.DesktopCloseBehavior(), userCfg.DesktopStatusBarStyle())
 	}
 	if want := []string{"model", "cache", "balance"}; !reflect.DeepEqual(userCfg.DesktopStatusBarItems(), want) {
@@ -1497,7 +1513,7 @@ api_key_env = "DEEPSEEK_API_KEY"
 		if !p.BuiltIn {
 			t.Fatalf("deepseek provider should be marked built-in for official endpoint: %+v", p)
 		}
-		if !p.Added || !p.KeySet || len(p.Models) != 2 || p.Models[0] != "deepseek-v4-flash" || p.Models[1] != "deepseek-v4-pro" || p.Default != "deepseek-v4-flash" {
+		if !p.Added || !p.KeySet || len(p.Models) != 3 || p.Models[0] != "deepseek-v4-flash" || p.Models[1] != "deepseek-v4-pro" || p.Models[2] != "deepseek-v4-flash-vision-exp" || !slices.Equal(p.VisionModels, []string{"deepseek-v4-flash-vision-exp"}) || p.Default != "deepseek-v4-flash" {
 			t.Fatalf("deepseek provider = %+v, want added repaired official model list", p)
 		}
 		if got.DefaultModel != "deepseek/deepseek-v4-flash" {
@@ -1688,7 +1704,7 @@ api_key_env = "DEEPSEEK_API_KEY"
 	if !ok {
 		t.Fatal("deepseek provider not saved")
 	}
-	if len(p.Models) != 2 || p.Models[0] != "deepseek-v4-flash" || p.Models[1] != "deepseek-v4-pro" || p.Default != "deepseek-v4-flash" {
+	if len(p.Models) != 3 || p.Models[0] != "deepseek-v4-flash" || p.Models[1] != "deepseek-v4-pro" || p.Models[2] != "deepseek-v4-flash-vision-exp" || !slices.Equal(p.VisionModels, []string{"deepseek-v4-flash-vision-exp"}) || p.Default != "deepseek-v4-flash" {
 		t.Fatalf("deepseek provider after add = %+v, want official model list", p)
 	}
 	if !providerAccessSet(cfg.Desktop.ProviderAccess)["deepseek"] {
@@ -1718,6 +1734,9 @@ func TestSettingsSurfacesCuratedProviderPresets(t *testing.T) {
 		}
 		if preset.KeyEnv == "" || len(preset.ProviderNames) == 0 || len(preset.Models) == 0 {
 			t.Fatalf("preset %q view has missing fields: %+v", id, preset)
+		}
+		if preset.ID == "opencode-go-recommended" && (preset.DisplayGroup != "opencode" || preset.DisplaySection != "go" || preset.DisplayTier != "primary" || preset.RouteKind != "bundle") {
+			t.Fatalf("recommended OpenCode metadata = %+v", preset)
 		}
 	}
 }
@@ -1932,8 +1951,8 @@ func TestAddProviderPresetAccessSavesEditableProviderAndKey(t *testing.T) {
 	if err != nil {
 		t.Fatalf("read saved credentials: %v", err)
 	}
-	if !strings.Contains(string(data), "MIMO_API_KEY=sk-mimo") {
-		t.Fatalf("saved credentials missing MiMo key:\n%s", data)
+	if p.APIKeyEnv == "MIMO_API_KEY" || !strings.Contains(string(data), p.APIKeyEnv+"=sk-mimo") {
+		t.Fatal("saved credentials missing the isolated MiMo key reference")
 	}
 
 	view := NewApp().Settings()
@@ -2073,7 +2092,6 @@ func TestResetProviderPresetAccessRejectsMissingSameNameProvider(t *testing.T) {
 
 func TestAddEveryProviderPresetAccessInstallsTemplate(t *testing.T) {
 	for _, preset := range config.CuratedProviderPresets() {
-		preset := preset
 		t.Run(preset.ID, func(t *testing.T) {
 			isolateDesktopUserDirs(t)
 
@@ -2093,7 +2111,7 @@ func TestAddEveryProviderPresetAccessInstallsTemplate(t *testing.T) {
 				if !access[entry.Name] {
 					t.Fatalf("provider_access for preset %q missing %q: %+v", preset.ID, entry.Name, cfg.Desktop.ProviderAccess)
 				}
-				if got.Kind != entry.Kind || got.BaseURL != entry.BaseURL || got.DefaultModel() != entry.DefaultModel() || got.APIKeyEnv != entry.APIKeyEnv || got.AuthHeader != entry.AuthHeader || got.NoProxy != entry.NoProxy {
+				if got.Kind != entry.Kind || got.BaseURL != entry.BaseURL || got.DefaultModel() != entry.DefaultModel() || got.APIKeyEnv == entry.APIKeyEnv || !config.CredentialStored(got.APIKeyEnv) || got.AuthHeader != entry.AuthHeader || got.NoProxy != entry.NoProxy {
 					t.Fatalf("provider %q core fields = %+v, want template %+v", entry.Name, got, entry)
 				}
 				if got.PresetID != preset.ID || got.PresetVersion != config.ProviderPresetVersion {
@@ -2125,7 +2143,184 @@ func TestAddEveryProviderPresetAccessInstallsTemplate(t *testing.T) {
 	}
 }
 
-func TestAddOfficialProviderAccessRejectsBackgroundJobsBeforeSavingKey(t *testing.T) {
+func TestAddOpenCodeGoRecommendedPresetCompletesMissingRoutes(t *testing.T) {
+	isolateDesktopUserDirs(t)
+	t.Setenv("OPENCODE_GO_API_KEY", "")
+	os.Unsetenv("OPENCODE_GO_API_KEY")
+
+	preset, ok := config.CuratedProviderPreset("opencode-go-recommended")
+	if !ok || len(preset.Entries) != 3 {
+		t.Fatalf("recommended preset = %+v, found=%v", preset, ok)
+	}
+	cfg := config.Default()
+	seed := preset.Entries[0]
+	seed.PresetID = "opencode-go"
+	if err := cfg.UpsertProvider(seed); err != nil {
+		t.Fatalf("seed existing OpenCode Go route: %v", err)
+	}
+	if err := cfg.SaveTo(config.UserConfigPath()); err != nil {
+		t.Fatalf("save seed config: %v", err)
+	}
+	partial := providerPresetViewByID(t, NewApp().Settings(), preset.ID)
+	if partial.Status != providerPresetStatusPartial || len(partial.MissingProviderNames) != 2 {
+		t.Fatalf("recommended preset partial view = %+v, want two missing routes", partial)
+	}
+
+	if warning, err := NewApp().AddProviderPresetAccess(preset.ID, "sk-opencode"); err != nil {
+		t.Fatalf("AddProviderPresetAccess: %v", err)
+	} else if warning != "" {
+		t.Fatalf("AddProviderPresetAccess warning = %q, want none", warning)
+	}
+
+	cfg = config.LoadForEdit(config.UserConfigPath())
+	for _, entry := range preset.Entries {
+		if _, ok := cfg.Provider(entry.Name); !ok {
+			t.Fatalf("missing recommended route %q after completion", entry.Name)
+		}
+	}
+	data, err := os.ReadFile(config.UserCredentialsPath())
+	if err != nil {
+		t.Fatalf("read saved credentials: %v", err)
+	}
+	for _, route := range preset.Entries {
+		entry, _ := cfg.Provider(route.Name)
+		if entry.APIKeyEnv == "OPENCODE_GO_API_KEY" || !strings.Contains(string(data), entry.APIKeyEnv+"=sk-opencode") {
+			t.Fatalf("route %s did not receive an isolated credential reference", route.Name)
+		}
+	}
+}
+
+func TestAddOpenCodeGoRecommendedPresetSelectsUsableDefaultForFreshSetup(t *testing.T) {
+	isolateDesktopUserDirs(t)
+	t.Setenv("OPENCODE_GO_API_KEY", "")
+	os.Unsetenv("OPENCODE_GO_API_KEY")
+
+	cfg := config.Default()
+	if err := cfg.SaveTo(config.UserConfigPath()); err != nil {
+		t.Fatalf("save fresh config: %v", err)
+	}
+	if _, err := NewApp().AddProviderPresetAccess("opencode-go-recommended", "sk-opencode"); err != nil {
+		t.Fatalf("AddProviderPresetAccess: %v", err)
+	}
+
+	got := config.LoadForEdit(config.UserConfigPath())
+	if got.DefaultModel != "opencode-go/glm-5.3" {
+		t.Fatalf("default model = %q, want ready-to-use OpenCode Go default", got.DefaultModel)
+	}
+}
+
+func TestAddOpenCodeGoRecommendedPresetPreservesConfiguredDefault(t *testing.T) {
+	isolateDesktopUserDirs(t)
+	t.Setenv("OPENCODE_GO_API_KEY", "")
+	os.Unsetenv("OPENCODE_GO_API_KEY")
+
+	cfg := config.Default()
+	if err := cfg.UpsertProvider(config.ProviderEntry{
+		Name:    "local-ready",
+		Kind:    "openai",
+		BaseURL: "http://127.0.0.1:11434/v1",
+		Models:  []string{"local-model"},
+		Default: "local-model",
+	}); err != nil {
+		t.Fatalf("upsert configured provider: %v", err)
+	}
+	if err := cfg.SetDefaultModel("local-ready/local-model"); err != nil {
+		t.Fatalf("set configured default: %v", err)
+	}
+	if err := cfg.SaveTo(config.UserConfigPath()); err != nil {
+		t.Fatalf("save configured default: %v", err)
+	}
+
+	if _, err := NewApp().AddProviderPresetAccess("opencode-go-recommended", "sk-opencode"); err != nil {
+		t.Fatalf("AddProviderPresetAccess: %v", err)
+	}
+	if got := config.LoadForEdit(config.UserConfigPath()).DefaultModel; got != "local-ready/local-model" {
+		t.Fatalf("default model = %q, want existing configured default preserved", got)
+	}
+}
+
+func TestAddOpenCodeGoRecommendedPresetPreservesModifiedRoute(t *testing.T) {
+	isolateDesktopUserDirs(t)
+	t.Setenv("OPENCODE_GO_API_KEY", "")
+	os.Unsetenv("OPENCODE_GO_API_KEY")
+
+	preset, ok := config.CuratedProviderPreset("opencode-go-recommended")
+	if !ok || len(preset.Entries) != 3 {
+		t.Fatalf("recommended preset = %+v, found=%v", preset, ok)
+	}
+	cfg := config.Default()
+	modified := preset.Entries[0]
+	modified.BaseURL = "https://custom.example/v1"
+	modified.PresetID = "opencode-go"
+	if err := cfg.UpsertProvider(modified); err != nil {
+		t.Fatalf("seed modified OpenCode Go route: %v", err)
+	}
+	if err := cfg.SaveTo(config.UserConfigPath()); err != nil {
+		t.Fatalf("save modified config: %v", err)
+	}
+
+	if _, err := NewApp().AddProviderPresetAccess(preset.ID, "sk-opencode"); err != nil {
+		t.Fatalf("AddProviderPresetAccess: %v", err)
+	}
+	cfg = config.LoadForEdit(config.UserConfigPath())
+	got, ok := cfg.Provider("opencode-go")
+	if !ok || got.BaseURL != "https://custom.example/v1" {
+		t.Fatalf("modified route = %+v, want preserved custom endpoint", got)
+	}
+	for _, name := range []string{"opencode-go-anthropic", "opencode-go-responses"} {
+		if _, ok := cfg.Provider(name); !ok {
+			t.Fatalf("missing route %q after completing bundle around modified route", name)
+		}
+	}
+}
+
+func TestAddOpenCodeGoRecommendedPresetRejectsConflictAtomically(t *testing.T) {
+	isolateDesktopUserDirs(t)
+	t.Setenv("OPENCODE_GO_API_KEY", "")
+	os.Unsetenv("OPENCODE_GO_API_KEY")
+
+	cfg := config.Default()
+	conflict := config.ProviderEntry{
+		Name:          "opencode-go",
+		Kind:          "openai",
+		BaseURL:       "https://custom.example/v1",
+		Models:        []string{"custom-model"},
+		Default:       "custom-model",
+		APIKeyEnv:     "OPENCODE_GO_API_KEY",
+		PresetID:      "custom",
+		PresetVersion: 1,
+	}
+	if err := cfg.UpsertProvider(conflict); err != nil {
+		t.Fatalf("upsert conflicting provider: %v", err)
+	}
+	if err := cfg.SaveTo(config.UserConfigPath()); err != nil {
+		t.Fatalf("save conflict config: %v", err)
+	}
+
+	if warning, err := NewApp().AddProviderPresetAccess("opencode-go-recommended", "sk-should-not-save"); err == nil {
+		t.Fatal("AddProviderPresetAccess unexpectedly accepted same-name conflict")
+	} else if !strings.Contains(err.Error(), "opencode-go") {
+		t.Fatalf("AddProviderPresetAccess error = %v, want opencode-go conflict", err)
+	} else if warning != "" {
+		t.Fatalf("AddProviderPresetAccess warning = %q, want none", warning)
+	}
+
+	cfg = config.LoadForEdit(config.UserConfigPath())
+	if _, ok := cfg.Provider("opencode-go-anthropic"); ok {
+		t.Fatal("conflicting bundle partially installed Anthropic route")
+	}
+	if _, err := os.Stat(config.UserCredentialsPath()); err == nil {
+		data, readErr := os.ReadFile(config.UserCredentialsPath())
+		if readErr != nil {
+			t.Fatalf("read credentials: %v", readErr)
+		}
+		if strings.Contains(string(data), "sk-should-not-save") {
+			t.Fatalf("conflicting bundle saved credentials: %s", data)
+		}
+	}
+}
+
+func TestAddOfficialProviderAccessPreservesBackgroundJobsWhenSavingKey(t *testing.T) {
 	isolateDesktopUserDirs(t)
 	t.Setenv("DEEPSEEK_API_KEY", "")
 	os.Unsetenv("DEEPSEEK_API_KEY")
@@ -2135,11 +2330,12 @@ func TestAddOfficialProviderAccessRejectsBackgroundJobsBeforeSavingKey(t *testin
 	app.setTestCtrl(newBackgroundJobController(t, "provider-access-job"), "deepseek-flash/deepseek-v4-flash")
 
 	_, err := app.AddOfficialProviderAccess("deepseek", "sk-test")
-	if err == nil || !strings.Contains(err.Error(), "stop background jobs") {
-		t.Fatalf("AddOfficialProviderAccess with background job error = %v, want active-work guard", err)
+	if err != nil || !controllerHasActiveRuntimeWork(app.activeCtrl()) {
+		t.Fatalf("AddOfficialProviderAccess interrupted background work: %v", err)
 	}
-	if data, readErr := os.ReadFile(config.UserCredentialsPath()); readErr == nil && strings.Contains(string(data), "DEEPSEEK_API_KEY") {
-		t.Fatalf("provider key should not be saved after rejected add access:\n%s", data)
+	p, _ := config.LoadForEdit(config.UserConfigPath()).Provider("deepseek")
+	if !config.CredentialStored(p.APIKeyEnv) || p.APIKeyEnv == "DEEPSEEK_API_KEY" {
+		t.Fatal("official key was not committed to a new reference")
 	}
 }
 
@@ -2275,8 +2471,8 @@ func TestSetProviderKeyLeaseHeldKeepsCurrentController(t *testing.T) {
 	if err != nil {
 		t.Fatalf("SetProviderKey: %v", err)
 	}
-	if !strings.Contains(warning, "current session could not refresh yet") || !strings.Contains(warning, "another Reasonix window") {
-		t.Fatalf("SetProviderKey warning = %q, want deferred rebuild warning", warning)
+	if warning != "" {
+		t.Fatalf("SetProviderKey warning = %q; saving does not acquire the session lease", warning)
 	}
 	if strings.Contains(warning, sessionPath) || strings.Contains(warning, "held by") {
 		t.Fatalf("SetProviderKey surfaced raw lease details: %v", warning)
@@ -2295,7 +2491,7 @@ func TestSetProviderKeyLeaseHeldKeepsCurrentController(t *testing.T) {
 	}
 }
 
-func TestSetProviderKeyRebuildSupersedesInFlightStartupBuild(t *testing.T) {
+func TestSetProviderKeyPreservesInFlightStartupBuild(t *testing.T) {
 	isolateDesktopUserDirs(t)
 
 	cfg := config.Default()
@@ -2346,12 +2542,10 @@ func TestSetProviderKeyRebuildSupersedesInFlightStartupBuild(t *testing.T) {
 	if _, err := app.SetProviderKey("OLD_MODEL_KEY", "sk-new"); err != nil {
 		t.Fatalf("SetProviderKey: %v", err)
 	}
-	if tab.Ctrl == nil {
-		t.Fatal("provider-key rebuild did not install a controller")
+	if tab.Ctrl != nil || tab.buildGeneration != startupGeneration || buildCtx.Err() != nil {
+		t.Fatal("saving a key published or cancelled an in-flight startup; publication owns its version check")
 	}
-	defer tab.Ctrl.Close()
-
-	assertTabBuildSuperseded(t, app, tab, startupGeneration, buildCtx)
+	buildCancel()
 }
 
 func TestSaveProviderWithKeyLeaseHeldPersistsCustomProvider(t *testing.T) {
@@ -2419,8 +2613,8 @@ func TestSaveProviderWithKeyLeaseHeldPersistsCustomProvider(t *testing.T) {
 	if err != nil {
 		t.Fatalf("SaveProviderWithKey: %v", err)
 	}
-	if !strings.Contains(warning, "current session could not refresh yet") || !strings.Contains(warning, "another Reasonix window") {
-		t.Fatalf("SaveProviderWithKey warning = %q, want deferred rebuild warning", warning)
+	if warning != "" {
+		t.Fatalf("SaveProviderWithKey warning = %q; saving does not acquire the session lease", warning)
 	}
 	if strings.Contains(warning, sessionPath) || strings.Contains(warning, "held by") {
 		t.Fatalf("SaveProviderWithKey surfaced raw lease details: %v", warning)
@@ -2443,8 +2637,8 @@ func TestSaveProviderWithKeyLeaseHeldPersistsCustomProvider(t *testing.T) {
 	if err != nil {
 		t.Fatalf("read credentials: %v", err)
 	}
-	if !strings.Contains(string(data), "PROXY_API_KEY=sk-proxy") {
-		t.Fatalf("provider key was not saved:\n%s", data)
+	if got.APIKeyEnv == "PROXY_API_KEY" || !strings.Contains(string(data), got.APIKeyEnv+"=sk-proxy") {
+		t.Fatal("provider key was not saved with an isolated reference")
 	}
 }
 
@@ -2516,10 +2710,6 @@ func TestDeferredRebuildRetryAppliesAfterLeaseRelease(t *testing.T) {
 	isolateDesktopUserDirs(t)
 	setDesktopTestCredential(t, "OLD_MODEL_KEY", "sk-test")
 
-	prevInterval := deferredRebuildRetryInterval
-	deferredRebuildRetryInterval = 20 * time.Millisecond
-	t.Cleanup(func() { deferredRebuildRetryInterval = prevInterval })
-
 	cfg := config.Default()
 	cfg.DefaultModel = "old/old-model"
 	cfg.Desktop.ProviderAccess = []string{"old"}
@@ -2560,8 +2750,6 @@ func TestDeferredRebuildRetryAppliesAfterLeaseRelease(t *testing.T) {
 	app := NewApp()
 	app.ctx = context.Background()
 	app.readyHook = func() {}
-	app.enableDeferredRebuildRetry()
-	t.Cleanup(app.stopDeferredRebuildRetry)
 	tab := &WorkspaceTab{
 		ID:          "tab_deferred_retry",
 		Scope:       "global",
@@ -2583,8 +2771,8 @@ func TestDeferredRebuildRetryAppliesAfterLeaseRelease(t *testing.T) {
 		tab.releaseSessionLease()
 	})
 
-	if err := app.SetMaxSubagentDepth(1); err != nil {
-		t.Fatalf("SetMaxSubagentDepth: %v", err)
+	if err := app.SetAgentParams(0.2, 0, 0, "updated prompt"); err != nil {
+		t.Fatalf("SetAgentParams: %v", err)
 	}
 	if !app.deferredRebuildPending(tab.ID) {
 		t.Fatal("deferred rebuild was not scheduled while the lease is held")
@@ -2596,13 +2784,7 @@ func TestDeferredRebuildRetryAppliesAfterLeaseRelease(t *testing.T) {
 	externalLease.Release()
 	released = true
 
-	deadline := time.Now().Add(10 * time.Second)
-	for time.Now().Before(deadline) {
-		if !app.deferredRebuildPending(tab.ID) && app.controllerForTab(tab) != oldCtrl {
-			break
-		}
-		time.Sleep(10 * time.Millisecond)
-	}
+	app.deferredRebuildTick(false)
 	if app.deferredRebuildPending(tab.ID) {
 		t.Fatal("deferred rebuild is still pending after the lease was released")
 	}
@@ -2620,13 +2802,9 @@ func TestDeferredRebuildScheduleAfterStopIsNoop(t *testing.T) {
 	}
 }
 
-func TestDeferredRebuildWaitsForTabToBecomeActive(t *testing.T) {
+func TestDeferredRebuildAppliesToItsInactiveTarget(t *testing.T) {
 	isolateDesktopUserDirs(t)
 	setDesktopTestCredential(t, "OLD_MODEL_KEY", "sk-test")
-
-	prevInterval := deferredRebuildRetryInterval
-	deferredRebuildRetryInterval = 20 * time.Millisecond
-	t.Cleanup(func() { deferredRebuildRetryInterval = prevInterval })
 
 	cfg := config.Default()
 	cfg.DefaultModel = "old/old-model"
@@ -2671,8 +2849,6 @@ func TestDeferredRebuildWaitsForTabToBecomeActive(t *testing.T) {
 	app := NewApp()
 	app.ctx = context.Background()
 	app.readyHook = func() {}
-	app.enableDeferredRebuildRetry()
-	t.Cleanup(app.stopDeferredRebuildRetry)
 	tab := &WorkspaceTab{
 		ID:          "tab_pending",
 		Scope:       "global",
@@ -2703,50 +2879,25 @@ func TestDeferredRebuildWaitsForTabToBecomeActive(t *testing.T) {
 		tab.releaseSessionLease()
 	})
 
-	if err := app.SetMaxSubagentDepth(1); err != nil {
-		t.Fatalf("SetMaxSubagentDepth: %v", err)
+	if err := app.SetAgentParams(0.2, 0, 0, "updated prompt"); err != nil {
+		t.Fatalf("SetAgentParams: %v", err)
 	}
 	if !app.deferredRebuildPending(tab.ID) {
 		t.Fatal("deferred rebuild was not scheduled while the lease is held")
 	}
 
-	// Focus another tab, then release the lease: the retry must not rebuild
-	// while the pending tab is inactive (rebuildSettingLocked acts on the
-	// active tab), and must not touch the focused tab's runtime either.
+	// A concrete target retains its rebuild ownership when focus moves.
 	app.mu.Lock()
 	app.activeTabID = other.ID
 	app.mu.Unlock()
 	externalLease.Release()
 	released = true
-
-	time.Sleep(150 * time.Millisecond)
-	if !app.deferredRebuildPending(tab.ID) {
-		t.Fatal("pending entry was consumed while its tab was inactive")
-	}
-	if app.controllerForTab(tab) != oldCtrl {
-		t.Fatal("inactive pending tab was rebuilt")
+	app.deferredRebuildTick(false)
+	if app.deferredRebuildPending(tab.ID) || app.controllerForTab(tab) == oldCtrl {
+		t.Fatal("inactive target was not rebuilt")
 	}
 	if app.controllerForTab(other) != otherCtrl {
-		t.Fatal("focused tab was rebuilt by another tab's deferred retry")
-	}
-
-	// Switch back: the retry should now refresh the pending tab.
-	app.mu.Lock()
-	app.activeTabID = tab.ID
-	app.mu.Unlock()
-
-	deadline := time.Now().Add(10 * time.Second)
-	for time.Now().Before(deadline) {
-		if !app.deferredRebuildPending(tab.ID) && app.controllerForTab(tab) != oldCtrl {
-			break
-		}
-		time.Sleep(10 * time.Millisecond)
-	}
-	if app.deferredRebuildPending(tab.ID) {
-		t.Fatal("deferred rebuild still pending after its tab became active again")
-	}
-	if c := app.controllerForTab(tab); c == nil || c == oldCtrl {
-		t.Fatalf("controller was not rebuilt after tab reactivation: got %p", c)
+		t.Fatal("retry rebuilt the focused sibling")
 	}
 }
 
@@ -2840,7 +2991,7 @@ func TestSetEffortForTabLeaseHeldKeepsOldControllerAlive(t *testing.T) {
 }
 
 func TestSetEffortForTabReanchorsDepthCapRecoveryBranch(t *testing.T) {
-	isolateDesktopUserDirs(t)
+	isolateDesktopUserDirsSchemaOne(t)
 	setDesktopTestCredential(t, "OLD_MODEL_KEY", "sk-test")
 
 	cfg := config.Default()
@@ -2890,7 +3041,7 @@ func TestSetEffortForTabReanchorsDepthCapRecoveryBranch(t *testing.T) {
 
 	app := NewApp()
 	app.ctx = context.Background()
-	app.runtimeEvents.emit = func(context.Context, string, ...interface{}) {}
+	app.runtimeEvents.emit = func(context.Context, string, ...any) {}
 	tab := &WorkspaceTab{
 		ID:          "tab_depth_cap_effort",
 		Scope:       "global",
@@ -2924,30 +3075,31 @@ func TestSetEffortForTabReanchorsDepthCapRecoveryBranch(t *testing.T) {
 	if err := app.SetEffortForTab(tab.ID, "max"); err != nil {
 		t.Fatalf("SetEffortForTab: %v", err)
 	}
-	if got := tab.Ctrl.SessionPath(); got != recoveryPath {
-		t.Fatalf("session path after effort switch = %q, want current recovery branch %q", got, recoveryPath)
+	isolatedPath := tab.Ctrl.SessionPath()
+	if isolatedPath == recoveryPath || !strings.Contains(isolatedPath, "-recovery-") {
+		t.Fatalf("session path after effort switch = %q, want an isolated recovery branch", isolatedPath)
 	}
-	if got := tab.currentSessionPath(); got != recoveryPath {
-		t.Fatalf("tab current session path = %q, want %q", got, recoveryPath)
+	if got := tab.currentSessionPath(); got != isolatedPath {
+		t.Fatalf("tab current session path = %q, want %q", got, isolatedPath)
 	}
-	if tab.sessionLease == nil || sessionRuntimeKey(tab.sessionLease.Path()) != sessionRuntimeKey(recoveryPath) {
-		t.Fatalf("tab lease path = %q, want %q", tab.sessionLeaseRuntimeKey(), recoveryPath)
+	if tab.sessionLease == nil || sessionRuntimeKey(tab.sessionLease.Path()) != sessionRuntimeKey(isolatedPath) {
+		t.Fatalf("tab lease path = %q, want %q", tab.sessionLeaseRuntimeKey(), isolatedPath)
 	}
 	matches, err := filepath.Glob(filepath.Join(dir, "*-recovery-*.jsonl"))
 	if err != nil {
 		t.Fatalf("glob recovery branches: %v", err)
 	}
 	matches = primarySessionFiles(matches)
-	if len(matches) != 1 || matches[0] != recoveryPath {
-		t.Fatalf("recovery branches after effort switch = %v, want only %q", matches, recoveryPath)
+	if len(matches) != 2 || !slices.Contains(matches, recoveryPath) || !slices.Contains(matches, isolatedPath) {
+		t.Fatalf("recovery branches after effort switch = %v, want canonical and isolated paths", matches)
 	}
 
 	lines := readConflictLogLines(t, store.SessionConflictLog(recoveryPath))
 	if len(lines) != 1 {
-		t.Fatalf("conflict log lines = %v, want one depth-cap diagnostic", lines)
+		t.Fatalf("conflict log lines = %v, want one recovery diagnostic", lines)
 	}
-	if !strings.Contains(lines[0], `"outcome":"recovery_depth_cap_force_saved"`) {
-		t.Fatalf("conflict diagnostic = %s, want depth-cap outcome", lines[0])
+	if !strings.Contains(lines[0], `"outcome":"forked_recovery_branch"`) {
+		t.Fatalf("conflict diagnostic = %s, want stable recovery fork", lines[0])
 	}
 	if strings.Contains(lines[0], dir) || strings.Contains(lines[0], recoveryPath) {
 		t.Fatalf("conflict diagnostic leaked local path: %s", lines[0])
@@ -2965,43 +3117,14 @@ func TestSetEffortForTabReanchorsDepthCapRecoveryBranch(t *testing.T) {
 		t.Fatalf("glob recovery branches after snapshot: %v", err)
 	}
 	matches = primarySessionFiles(matches)
-	if len(matches) != 1 || matches[0] != recoveryPath {
-		t.Fatalf("recovery branches after follow-up snapshot = %v, want only %q", matches, recoveryPath)
-	}
-}
-
-func TestAddOfficialProviderAccessUsesDesktopLanguagePricing(t *testing.T) {
-	isolateDesktopUserDirs(t)
-	if err := os.MkdirAll(filepath.Dir(config.UserConfigPath()), 0o755); err != nil {
-		t.Fatalf("mkdir config dir: %v", err)
-	}
-	if err := os.WriteFile(config.UserConfigPath(), []byte(`
-[desktop]
-language = "zh"
-`), 0o644); err != nil {
-		t.Fatalf("write config: %v", err)
-	}
-
-	if _, err := NewApp().AddOfficialProviderAccess("deepseek", ""); err != nil {
-		t.Fatalf("AddOfficialProviderAccess: %v", err)
-	}
-	cfg := config.LoadForEdit(config.UserConfigPath())
-	p, ok := cfg.Provider("deepseek")
-	if !ok {
-		t.Fatal("deepseek provider not saved")
-	}
-	flash := p.Prices["deepseek-v4-flash"]
-	pro := p.Prices["deepseek-v4-pro"]
-	if flash == nil || flash.Output != 2 || flash.Currency != "¥" {
-		t.Fatalf("flash price = %+v, want CNY preset", flash)
-	}
-	if pro == nil || pro.Output != 6 || pro.Currency != "¥" {
-		t.Fatalf("pro price = %+v, want CNY preset", pro)
+	if len(matches) != 2 || !slices.Contains(matches, recoveryPath) || !slices.Contains(matches, isolatedPath) {
+		t.Fatalf("recovery branches after follow-up snapshot = %v, want canonical and isolated paths", matches)
 	}
 }
 
 func TestRemoveBuiltInProviderAccessRetargetsDefaultToRemainingAccess(t *testing.T) {
 	isolateDesktopUserDirs(t)
+	setDesktopTestCredential(t, "MIMO_API_KEY", "sk-test")
 	if err := os.MkdirAll(filepath.Dir(config.UserConfigPath()), 0o755); err != nil {
 		t.Fatalf("mkdir config dir: %v", err)
 	}
@@ -3048,12 +3171,12 @@ func TestModelsForTabOnlyListsProviderAccessWhenConfigured(t *testing.T) {
 	setDesktopTestCredential(t, "MIMO_API_KEY", "sk-test")
 
 	cfg := config.Default()
-	cfg.DefaultModel = "deepseek-flash/deepseek-v4-flash"
-	cfg.Desktop.ProviderAccess = []string{"deepseek-flash", "mimo-pro"}
-	deepseek, _ := cfg.Provider("deepseek-flash")
-	deepseek.Model = ""
-	deepseek.Models = []string{"deepseek-v4-flash", "deepseek-v4-pro"}
-	deepseek.Default = "deepseek-v4-flash"
+	cfg.DefaultModel = "deepseek/deepseek-v4-flash"
+	cfg.Desktop.ProviderAccess = []string{"deepseek", "mimo-pro"}
+	cfg.Providers = append(cfg.Providers, config.ProviderEntry{
+		Name: "deepseek", Kind: "anthropic", BaseURL: "https://api.deepseek.com/anthropic",
+		Models: []string{"deepseek-v4-flash", "deepseek-v4-pro"}, Default: "deepseek-v4-flash", APIKeyEnv: "DEEPSEEK_API_KEY",
+	})
 	if err := cfg.SaveTo(config.UserConfigPath()); err != nil {
 		t.Fatalf("save config: %v", err)
 	}
@@ -3078,8 +3201,8 @@ func TestModelsForTabOnlyListsProviderAccessWhenConfigured(t *testing.T) {
 			t.Fatalf("Models() refs = %+v, should not include hidden provider %s", models, hidden)
 		}
 	}
-	if len(models) != 4 {
-		t.Fatalf("Models() len = %d, want 4: %+v", len(models), models)
+	if len(models) != 5 {
+		t.Fatalf("Models() len = %d, want 5: %+v", len(models), models)
 	}
 }
 
@@ -3530,7 +3653,7 @@ func TestRebuildSettingLockedRestoresSessionAuthorizations(t *testing.T) {
 }
 
 func TestSetModelForTabContinuesRecoveryPathAfterSnapshotConflict(t *testing.T) {
-	isolateDesktopUserDirs(t)
+	isolateDesktopUserDirsSchemaOne(t)
 	setDesktopTestCredential(t, "OLD_MODEL_KEY", "sk-test")
 	setDesktopTestCredential(t, "NEW_MODEL_KEY", "sk-test")
 
@@ -3566,7 +3689,7 @@ func TestSetModelForTabContinuesRecoveryPathAfterSnapshotConflict(t *testing.T) 
 
 	app := NewApp()
 	app.ctx = context.Background()
-	app.runtimeEvents.emit = func(context.Context, string, ...interface{}) {}
+	app.runtimeEvents.emit = func(context.Context, string, ...any) {}
 	tab := &WorkspaceTab{
 		ID:          "tab_recovery_model",
 		Scope:       "global",
@@ -4303,8 +4426,24 @@ reasoning_protocol = "none"
 	}
 }
 
-func TestClassicLayoutQuickClicksSerializeWorkspaceRebuild(t *testing.T) {
-	runQuickClickWorkspaceReconcileTest(t, "classic")
+// A config file written before the classic style was removed still holds the
+// retired value. It must read as workbench — not fail, and not resurrect the
+// multi-tab model that value used to select, which the UI can no longer show.
+func TestRetiredClassicLayoutReadsAsWorkbench(t *testing.T) {
+	isolateDesktopUserDirs(t)
+	if err := editUserConfig(func(c *config.Config) error {
+		c.Desktop.LayoutStyle = "classic"
+		return nil
+	}); err != nil {
+		t.Fatalf("write the retired layout style: %v", err)
+	}
+	cfg, err := config.Load()
+	if err != nil {
+		t.Fatalf("load config: %v", err)
+	}
+	if got := cfg.DesktopLayoutStyle(); got != "workbench" {
+		t.Fatalf("retired classic reads as %q, want workbench", got)
+	}
 }
 
 func TestWorkbenchLayoutQuickClicksSerializeWorkspaceRebuild(t *testing.T) {
@@ -4318,9 +4457,6 @@ func TestCreationLayoutQuickClicksSerializeWorkspaceRebuild(t *testing.T) {
 func runQuickClickWorkspaceReconcileTest(t *testing.T, layoutStyle string) {
 	t.Helper()
 	f := newStaleWorkspaceBindingFixtureWithLayout(t, "quick_click_"+layoutStyle, layoutStyle)
-	if got, want := f.app.singleSurfaceLayoutEnabled(), singleSurfaceLayoutStyle(layoutStyle); got != want {
-		t.Fatalf("singleSurfaceLayoutEnabled(%q) = %v, want %v", layoutStyle, got, want)
-	}
 	blockingCtrl := f.installBlockingSnapshotController()
 
 	type quickAction struct {
@@ -4339,16 +4475,13 @@ func runQuickClickWorkspaceReconcileTest(t *testing.T, layoutStyle string) {
 	errs := make(chan error, len(actions))
 	var wg sync.WaitGroup
 	for _, action := range actions {
-		action := action
-		wg.Add(1)
-		go func() {
-			defer wg.Done()
+		wg.Go(func() {
 			ready <- struct{}{}
 			<-start
 			if err := action.run(); err != nil {
 				errs <- fmt.Errorf("%s: %w", action.name, err)
 			}
-		}()
+		})
 	}
 	for range actions {
 		<-ready
@@ -4435,9 +4568,9 @@ func TestListSessionsUsesPinnedSessionOwnerBeforeStaleRuntimeDir(t *testing.T) {
 	app.tabs = map[string]*WorkspaceTab{tab.ID: tab}
 	app.tabOrder = []string{tab.ID}
 	app.activeTabID = tab.ID
+	installSessionCatalogForTest(t, app, sessionDirA, "project", projectA)
 	t.Cleanup(oldCtrl.Close)
-
-	sessions := app.ListSessions()
+	sessions := listSessionsAfterPinnedOwnerReconcile(t, app, sessionDirA, projectA)
 	if len(sessions) == 0 {
 		t.Fatal("ListSessions() returned no sessions")
 	}
@@ -4518,7 +4651,7 @@ func TestSaveProviderPersistsReasoningProtocol(t *testing.T) {
 	t.Fatalf("Settings() missing saved provider: %+v", view.Providers)
 }
 
-func TestDeleteProviderMigratesConfigAndOpenTabs(t *testing.T) {
+func TestDeleteProviderMigratesConfigAndPreservesOpenTabs(t *testing.T) {
 	isolateDesktopUserDirs(t)
 	setDesktopTestCredential(t, "REASONIX_TEST_KEY", "sk-test")
 
@@ -4556,11 +4689,11 @@ func TestDeleteProviderMigratesConfigAndOpenTabs(t *testing.T) {
 	if providerAccessSet(got.Desktop.ProviderAccess)["prov-a"] {
 		t.Fatalf("provider access still contains prov-a: %+v", got.Desktop.ProviderAccess)
 	}
-	if tab.model != "prov-b/model-b1" || tab.Label != "prov-b/model-b1" {
-		t.Fatalf("tab model after delete = model:%q label:%q, want prov-b/model-b1", tab.model, tab.Label)
+	if tab.model != "prov-a/model-a1" || tab.Label != "prov-a/model-a1" {
+		t.Fatalf("saving deletion changed current identity: model:%q label:%q", tab.model, tab.Label)
 	}
-	if tab.Ctrl != nil {
-		t.Fatal("tab controller should be closed and cleared when retargeted without a running app context")
+	if tab.Ctrl != ctrl {
+		t.Fatal("saving deletion closed the current controller")
 	}
 }
 
@@ -4585,7 +4718,7 @@ func assertTabBuildSuperseded(t *testing.T, app *App, tab *WorkspaceTab, generat
 	}
 }
 
-func TestDeleteProviderSupersedesInFlightStartupBuild(t *testing.T) {
+func TestDeleteProviderLeavesStartupPublicationToVersionFence(t *testing.T) {
 	isolateDesktopUserDirs(t)
 	setDesktopTestCredential(t, "REASONIX_TEST_KEY", "sk-test")
 
@@ -4618,13 +4751,13 @@ func TestDeleteProviderSupersedesInFlightStartupBuild(t *testing.T) {
 	if err := app.DeleteProvider("prov-a"); err != nil {
 		t.Fatalf("DeleteProvider: %v", err)
 	}
-	assertTabBuildSuperseded(t, app, tab, 1, buildCtx)
-	if tab.model != "prov-b/model-b1" {
-		t.Fatalf("tab model after delete = %q, want prov-b/model-b1", tab.model)
+	if tab.buildGeneration != 1 || buildCtx.Err() != nil || tab.model != "prov-a/model-a1" {
+		t.Fatal("saving deletion changed an in-flight startup before its publication fence")
 	}
+	buildCancel()
 }
 
-func TestRemoveBuiltInProviderAccessSupersedesInFlightStartupBuild(t *testing.T) {
+func TestRemoveBuiltInProviderAccessLeavesStartupPublicationToVersionFence(t *testing.T) {
 	isolateDesktopUserDirs(t)
 	setDesktopTestCredential(t, "REASONIX_TEST_KEY", "sk-test")
 
@@ -4655,10 +4788,10 @@ func TestRemoveBuiltInProviderAccessSupersedesInFlightStartupBuild(t *testing.T)
 	if err := app.RemoveProviderAccess("deepseek"); err != nil {
 		t.Fatalf("RemoveProviderAccess: %v", err)
 	}
-	assertTabBuildSuperseded(t, app, tab, 1, buildCtx)
-	if tab.model != "prov-b/model-b1" {
-		t.Fatalf("tab model after access removal = %q, want prov-b/model-b1", tab.model)
+	if tab.buildGeneration != 1 || buildCtx.Err() != nil || tab.model != "deepseek/deepseek-chat" {
+		t.Fatal("saving access removal changed an in-flight startup before its publication fence")
 	}
+	buildCancel()
 }
 
 func TestClearActiveSessionRuntimeSupersedesInFlightStartupBuild(t *testing.T) {
@@ -4714,7 +4847,7 @@ func TestClearActiveSessionRuntimeSupersedesInFlightStartupBuild(t *testing.T) {
 	app.activeTabID = tab.ID
 	t.Cleanup(tab.releaseSessionLease)
 
-	if err := app.clearActiveSessionRuntime(tab, oldCtrl); err != nil {
+	if _, err := app.clearActiveSessionRuntime(tab, oldCtrl); err != nil {
 		t.Fatalf("clearActiveSessionRuntime: %v", err)
 	}
 	if tab.Ctrl == nil || tab.Ctrl == oldCtrl {
@@ -4774,7 +4907,7 @@ func TestClearActiveSessionRuntimeReleasesResourcesWhenTabReplaced(t *testing.T)
 	app.activeTabID = tab.ID
 	t.Cleanup(tab.releaseSessionLease)
 
-	err := app.clearActiveSessionRuntime(tab, oldCtrl)
+	_, err := app.clearActiveSessionRuntime(tab, oldCtrl)
 	if err == nil || !strings.Contains(err.Error(), "changed while clearing") {
 		t.Fatalf("clearActiveSessionRuntime error = %v, want tab-changed error", err)
 	}
@@ -4792,7 +4925,7 @@ func TestClearActiveSessionRuntimeReleasesResourcesWhenTabReplaced(t *testing.T)
 	}
 }
 
-func TestDeleteProviderRejectsRunningAffectedTab(t *testing.T) {
+func TestDeleteProviderPreservesRunningAffectedTab(t *testing.T) {
 	isolateDesktopUserDirs(t)
 	setDesktopTestCredential(t, "REASONIX_TEST_KEY", "sk-test")
 
@@ -4814,11 +4947,11 @@ func TestDeleteProviderRejectsRunningAffectedTab(t *testing.T) {
 	<-runner.started
 
 	err := app.DeleteProvider("prov-a")
-	if err == nil || !strings.Contains(err.Error(), "finish or cancel") {
-		t.Fatalf("DeleteProvider while running error = %v, want finish/cancel guard", err)
+	if err != nil || app.activeCtrl() != ctrl || !ctrl.RuntimeStatus().Running {
+		t.Fatalf("DeleteProvider interrupted accepted work: %v", err)
 	}
-	if _, ok := config.LoadForEdit(config.UserConfigPath()).Provider("prov-a"); !ok {
-		t.Fatal("provider should remain after rejected deletion")
+	if _, ok := config.LoadForEdit(config.UserConfigPath()).Provider("prov-a"); ok {
+		t.Fatal("provider deletion was not persisted during the run")
 	}
 
 	close(runner.release)
@@ -4826,7 +4959,7 @@ func TestDeleteProviderRejectsRunningAffectedTab(t *testing.T) {
 	ctrl.Close()
 }
 
-func TestDeleteProviderRechecksWorkAfterWaitingForRuntimeMutation(t *testing.T) {
+func TestDeleteProviderDoesNotWaitForRuntimeReconstruction(t *testing.T) {
 	isolateDesktopUserDirs(t)
 	setDesktopTestCredential(t, "REASONIX_TEST_KEY", "sk-test")
 	cfg := config.Default()
@@ -4844,53 +4977,31 @@ func TestDeleteProviderRechecksWorkAfterWaitingForRuntimeMutation(t *testing.T) 
 	app.setTestCtrl(control.New(control.Options{Runner: runner}), "prov-a/model-a1")
 	ctrl := app.activeCtrl()
 	app.runtimeRebuildMu.Lock()
-	rebuildHeld := true
-	defer func() {
-		if rebuildHeld {
-			app.runtimeRebuildMu.Unlock()
-		}
-	}()
-	deleteEntered := make(chan struct{})
-	var enteredOnce sync.Once
-	app.runtimeMutationBeforeLockHook = func(operation string) {
-		if operation == "delete-provider" {
-			enteredOnce.Do(func() { close(deleteEntered) })
-		}
-	}
-	deleteDone := make(chan error, 1)
-	go func() { deleteDone <- app.DeleteProvider("prov-a") }()
-	select {
-	case <-deleteEntered:
-	case <-time.After(5 * time.Second):
-		t.Fatal("provider deletion did not reach the runtime lifecycle lock")
-	}
-
+	defer app.runtimeRebuildMu.Unlock()
 	ctrl.Submit("work")
+	<-runner.started
+	done := make(chan error, 1)
+	go func() { done <- app.DeleteProvider("prov-a") }()
 	select {
-	case <-runner.started:
-	case <-time.After(5 * time.Second):
-		t.Fatal("turn did not start while provider deletion waited for the lifecycle lock")
-	}
-	app.runtimeRebuildMu.Unlock()
-	rebuildHeld = false
-	select {
-	case err := <-deleteDone:
-		if err == nil || !strings.Contains(err.Error(), "active work") {
-			t.Fatalf("DeleteProvider after late turn error = %v, want active-work guard", err)
+	case err := <-done:
+		if err != nil {
+			t.Fatal(err)
 		}
 	case <-time.After(5 * time.Second):
-		t.Fatal("provider deletion did not re-check runtime work after acquiring the lock")
+		t.Fatal("saving provider deletion waited for runtime reconstruction")
 	}
-	if _, ok := config.LoadForEdit(config.UserConfigPath()).Provider("prov-a"); !ok {
-		t.Fatal("provider was deleted after a turn started while deletion waited")
+	if app.activeCtrl() != ctrl || !ctrl.RuntimeStatus().Running {
+		t.Fatal("saving deletion interrupted accepted work")
 	}
-
+	if _, ok := config.LoadForEdit(config.UserConfigPath()).Provider("prov-a"); ok {
+		t.Fatal("deletion was not committed")
+	}
 	close(runner.release)
 	waitNotRunning(t, ctrl)
 	ctrl.Close()
 }
 
-func TestDeleteProviderReleasesAffectedTabSharedHostReference(t *testing.T) {
+func TestDeleteProviderPreservesAffectedTabSharedHostReference(t *testing.T) {
 	isolateDesktopUserDirs(t)
 	setDesktopTestCredential(t, "REASONIX_TEST_KEY", "sk-test")
 	cfg := config.Default()
@@ -4918,18 +5029,20 @@ func TestDeleteProviderReleasesAffectedTabSharedHostReference(t *testing.T) {
 	if err := app.DeleteProvider("prov-a"); err != nil {
 		t.Fatalf("DeleteProvider: %v", err)
 	}
-	if tab.SharedHostKey != "" {
-		t.Fatalf("affected tab retained shared host key %q", tab.SharedHostKey)
+	if tab.SharedHostKey != hostKey || tab.Ctrl != ctrl {
+		t.Fatal("saving deletion released the current runtime's shared host")
 	}
 	app.sharedHostsMu.Lock()
 	_, retained := app.sharedHosts[hostKey]
 	app.sharedHostsMu.Unlock()
-	if retained {
-		t.Fatal("provider deletion leaked the affected tab's shared host reference")
+	if !retained {
+		t.Fatal("provider deletion released an owned shared host reference")
 	}
+	ctrl.Close()
+	app.releaseSharedHost(hostKey)
 }
 
-func TestRemoveBuiltInProviderAccessReleasesAffectedTabSharedHostReference(t *testing.T) {
+func TestRemoveBuiltInProviderAccessPreservesAffectedTabSharedHostReference(t *testing.T) {
 	isolateDesktopUserDirs(t)
 	setDesktopTestCredential(t, "REASONIX_TEST_KEY", "sk-test")
 	cfg := config.Default()
@@ -4958,18 +5071,20 @@ func TestRemoveBuiltInProviderAccessReleasesAffectedTabSharedHostReference(t *te
 	if err := app.RemoveProviderAccess("deepseek"); err != nil {
 		t.Fatalf("RemoveProviderAccess: %v", err)
 	}
-	if tab.SharedHostKey != "" {
-		t.Fatalf("affected tab retained shared host key %q", tab.SharedHostKey)
+	if tab.SharedHostKey != hostKey || tab.Ctrl != ctrl {
+		t.Fatal("saving access removal released the current runtime's shared host")
 	}
 	app.sharedHostsMu.Lock()
 	_, retained := app.sharedHosts[hostKey]
 	app.sharedHostsMu.Unlock()
-	if retained {
-		t.Fatal("provider access removal leaked the affected tab's shared host reference")
+	if !retained {
+		t.Fatal("provider access removal released an owned shared host reference")
 	}
+	ctrl.Close()
+	app.releaseSharedHost(hostKey)
 }
 
-func TestDeleteProviderRejectsAffectedBackgroundJobs(t *testing.T) {
+func TestDeleteProviderPreservesAffectedBackgroundJobs(t *testing.T) {
 	isolateDesktopUserDirs(t)
 	setDesktopTestCredential(t, "REASONIX_TEST_KEY", "sk-test")
 
@@ -4999,15 +5114,15 @@ func TestDeleteProviderRejectsAffectedBackgroundJobs(t *testing.T) {
 	})
 
 	err := app.DeleteProvider("prov-a")
-	if err == nil || !strings.Contains(err.Error(), "active work") {
-		t.Fatalf("DeleteProvider with background job error = %v, want active-work guard", err)
+	if err != nil || !controllerHasActiveRuntimeWork(ctrl) {
+		t.Fatalf("DeleteProvider interrupted background work: %v", err)
 	}
-	if _, ok := config.LoadForEdit(config.UserConfigPath()).Provider("prov-a"); !ok {
-		t.Fatal("provider should remain after rejected deletion")
+	if _, ok := config.LoadForEdit(config.UserConfigPath()).Provider("prov-a"); ok {
+		t.Fatal("provider deletion was not persisted")
 	}
 }
 
-func TestDeleteProviderRejectsUnaffectedBackgroundJobsBeforeSavingConfig(t *testing.T) {
+func TestDeleteProviderPreservesUnaffectedBackgroundJobsWhenSavingConfig(t *testing.T) {
 	isolateDesktopUserDirs(t)
 	setDesktopTestCredential(t, "REASONIX_TEST_KEY", "sk-test")
 
@@ -5026,15 +5141,15 @@ func TestDeleteProviderRejectsUnaffectedBackgroundJobsBeforeSavingConfig(t *test
 	app.setTestCtrl(newBackgroundJobController(t, "provider-unaffected-job"), "prov-b/model-b1")
 
 	err := app.DeleteProvider("prov-a")
-	if err == nil || !strings.Contains(err.Error(), "stop background jobs") {
-		t.Fatalf("DeleteProvider with unaffected background job error = %v, want active-work guard", err)
+	if err != nil || !controllerHasActiveRuntimeWork(app.activeCtrl()) {
+		t.Fatalf("DeleteProvider interrupted unrelated background work: %v", err)
 	}
-	if _, ok := config.LoadForEdit(config.UserConfigPath()).Provider("prov-a"); !ok {
-		t.Fatal("unaffected provider should remain after rejected deletion")
+	if _, ok := config.LoadForEdit(config.UserConfigPath()).Provider("prov-a"); ok {
+		t.Fatal("provider deletion was not persisted")
 	}
 }
 
-func TestRemoveBuiltInProviderAccessRejectsBackgroundJobsBeforeSavingConfig(t *testing.T) {
+func TestRemoveBuiltInProviderAccessPreservesBackgroundJobsWhenSavingConfig(t *testing.T) {
 	isolateDesktopUserDirs(t)
 	if err := os.MkdirAll(filepath.Dir(config.UserConfigPath()), 0o755); err != nil {
 		t.Fatalf("mkdir config dir: %v", err)
@@ -5068,31 +5183,38 @@ api_key_env = "MIMO_API_KEY"
 	app.setTestCtrl(newBackgroundJobController(t, "provider-access-unaffected-job"), "mimo-token-plan/mimo-v2.5-pro")
 
 	err := app.RemoveProviderAccess("deepseek")
-	if err == nil || !strings.Contains(err.Error(), "stop background jobs") {
-		t.Fatalf("RemoveProviderAccess with background job error = %v, want active-work guard", err)
+	if err != nil || !controllerHasActiveRuntimeWork(app.activeCtrl()) {
+		t.Fatalf("RemoveProviderAccess interrupted background work: %v", err)
 	}
 	cfg := config.LoadForEdit(config.UserConfigPath())
 	access := providerAccessSet(cfg.Desktop.ProviderAccess)
-	if !access["deepseek"] && !access["deepseek-flash"] {
-		t.Fatalf("provider_access should still contain deepseek after rejected removal: %+v", cfg.Desktop.ProviderAccess)
+	if access["deepseek"] || access["deepseek-flash"] {
+		t.Fatalf("provider access removal was not persisted: %+v", cfg.Desktop.ProviderAccess)
 	}
 }
 
-func TestConnectKeyRejectsBackgroundJobsBeforeSavingKey(t *testing.T) {
+func TestConnectKeySavesWhileBackgroundJobKeepsItsController(t *testing.T) {
 	isolateDesktopUserDirs(t)
 	t.Setenv("DEEPSEEK_API_KEY", "")
 	os.Unsetenv("DEEPSEEK_API_KEY")
+	oldFetch := connectKeyBalanceFetch
+	connectKeyBalanceFetch = func(context.Context, *http.Client, string, string) (*billing.Balance, error) {
+		return &billing.Balance{Available: true}, nil
+	}
+	t.Cleanup(func() { connectKeyBalanceFetch = oldFetch })
 
 	app := NewApp()
 	app.ctx = context.Background()
 	app.setTestCtrl(newBackgroundJobController(t, "connect-key-job"), "deepseek-flash/deepseek-v4-flash")
+	oldCtrl := app.activeCtrl()
 
 	_, err := app.ConnectKey("sk-test")
-	if err == nil || !strings.Contains(err.Error(), "stop background jobs") {
-		t.Fatalf("ConnectKey with background job error = %v, want active-work guard", err)
+	if err != nil {
+		t.Fatalf("ConnectKey with background job: %v", err)
 	}
-	if data, readErr := os.ReadFile(config.UserCredentialsPath()); readErr == nil && strings.Contains(string(data), "DEEPSEEK_API_KEY") {
-		t.Fatalf("onboarding key should not be saved after rejected connect:\n%s", data)
+	p, ok := config.LoadForEdit(config.UserConfigPath()).Provider("deepseek")
+	if !ok || !p.Configured() || app.activeCtrl() != oldCtrl {
+		t.Fatal("key save must configure the connection and preserve the background runtime")
 	}
 }
 
@@ -5140,6 +5262,46 @@ func TestConnectKeyRestoresDeepSeekProviderAccess(t *testing.T) {
 	}
 }
 
+func TestConnectKeyFreshInstallUsesDeepSeekChatAndIndependentSearchDefaults(t *testing.T) {
+	isolateDesktopUserDirs(t)
+	oldFetch := connectKeyBalanceFetch
+	connectKeyBalanceFetch = func(context.Context, *http.Client, string, string) (*billing.Balance, error) {
+		return &billing.Balance{Available: true}, nil
+	}
+	t.Cleanup(func() { connectKeyBalanceFetch = oldFetch })
+
+	app := NewApp()
+	app.ctx = context.Background()
+	app.readyHook = func() {}
+	app.setTestCtrl(control.New(control.Options{Label: "fresh-install"}), "deepseek-flash/deepseek-v4-flash")
+	workspace := t.TempDir()
+	app.tabs["test"].WorkspaceRoot = workspace
+	defer func() {
+		if ctrl := app.activeCtrl(); ctrl != nil {
+			ctrl.Close()
+		}
+	}()
+
+	if _, err := app.ConnectKey("sk-test"); err != nil {
+		t.Fatalf("ConnectKey: %v", err)
+	}
+	cfg, err := config.LoadForRootReadOnly(workspace)
+	if err != nil {
+		t.Fatalf("load fresh-install config: %v", err)
+	}
+	entry, ok := cfg.ResolveModel(cfg.DefaultModel)
+	if !ok {
+		t.Fatalf("default model %q did not resolve", cfg.DefaultModel)
+	}
+	if entry.Kind != "openai" || entry.BaseURL != "https://api.deepseek.com" ||
+		entry.Thinking != "enabled" || !config.EffectiveIndependentWebSearch(entry) || !config.EffectiveVision(entry) {
+		t.Fatalf("fresh-install DeepSeek entry = %+v; want Chat Completions, thinking, independent search, and native image input", entry)
+	}
+	if app.NeedsOnboarding() {
+		t.Fatal("fresh-install onboarding should close after the validated DeepSeek key is stored")
+	}
+}
+
 func TestBalanceForTabUsesDesktopPricingCurrency(t *testing.T) {
 	isolateDesktopUserDirs(t)
 	cfg := config.Default()
@@ -5161,8 +5323,12 @@ func TestBalanceForTabUsesDesktopPricingCurrency(t *testing.T) {
 	app.setTestCtrl(ctrl, "deepseek/deepseek-v4-flash")
 
 	got := app.BalanceForTab("test")
-	if !got.Available || got.Display != "$9.82" || got.Err != "" {
-		t.Fatalf("USD desktop balance = %+v, want available $9.82", got)
+	// Prefer the matching USD wallet exactly; no FX approximation is used.
+	if !got.Available || got.Err != "" {
+		t.Fatalf("USD desktop balance = %+v, want available", got)
+	}
+	if !strings.Contains(got.Display, "9.82") && !strings.Contains(got.Display, "$9.82") {
+		t.Fatalf("USD desktop balance display = %q, want USD 9.82", got.Display)
 	}
 }
 
@@ -5228,8 +5394,8 @@ func TestConnectKeyRebuildLeaseHeldKeepsCurrentController(t *testing.T) {
 	if err != nil {
 		t.Fatalf("ConnectKey: %v", err)
 	}
-	if !strings.Contains(warning, "another Reasonix window") {
-		t.Fatalf("ConnectKey warning = %q, want user-facing lease warning", warning)
+	if warning != "" {
+		t.Fatalf("ConnectKey warning = %q; saving does not acquire a runtime lease", warning)
 	}
 	if tab.Ctrl != oldCtrl {
 		t.Fatalf("tab controller changed after failed connect-key rebuild")
@@ -5237,8 +5403,9 @@ func TestConnectKeyRebuildLeaseHeldKeepsCurrentController(t *testing.T) {
 	if tab.StartupErr != "" {
 		t.Fatalf("tab startup error = %q, want unchanged current session", tab.StartupErr)
 	}
-	if !config.CredentialStored(onboardingKeyEnv) {
-		t.Fatal("onboarding key should be persisted even when hot rebuild is deferred")
+	p, ok := config.LoadForEdit(config.UserConfigPath()).Provider("deepseek")
+	if !ok || !p.Configured() {
+		t.Fatal("onboarding key should be persisted under the new connection reference")
 	}
 }
 
@@ -5338,7 +5505,65 @@ func TestSetEffortMigratesStaleOfficialDeepSeekTabModel(t *testing.T) {
 	}
 }
 
+func captureTabNotices(app *App, tab *WorkspaceTab) *[]string {
+	var notices []string
+	if tab.sink == nil {
+		tab.sink = &tabEventSink{tabID: tab.ID, app: app, ctx: context.Background()}
+	}
+	tab.sink.SetBotSink(event.FuncSink(func(e event.Event) {
+		if e.Kind == event.Notice && strings.TrimSpace(e.Text) != "" {
+			notices = append(notices, e.Text)
+		}
+	}))
+	return &notices
+}
+
+func assertDeprecatedExecutionModeNoop(t *testing.T, app *App, tab *WorkspaceTab, old control.SessionAPI, notices []string) {
+	t.Helper()
+	if tab == nil {
+		t.Fatal("tab missing")
+	}
+	if tab.Ctrl == nil || tab.Ctrl != old {
+		t.Fatalf("controller identity changed: got %p want %p", tab.Ctrl, old)
+	}
+	if got := old.AgentPreset(); got != boot.AgentPresetStandard {
+		t.Fatalf("controller AgentPreset = %q, want standard (light folds)", got)
+	}
+	if got := currentTabTokenMode(tab); got != boot.TokenModeFull {
+		t.Fatalf("token mode = %q, want full", got)
+	}
+	meta := app.MetaForTab(tab.ID)
+	if meta.TokenMode != boot.TokenModeFull || meta.AgentPreset != boot.AgentPresetStandard {
+		t.Fatalf("meta token/preset = %q/%q, want full/standard", meta.TokenMode, meta.AgentPreset)
+	}
+}
+
+func assertSetTokenModeDidNotPersistLiveModes(t *testing.T) {
+	t.Helper()
+	for _, entry := range loadTabsFile().Tabs {
+		if entry.TokenMode == "economy" || entry.TokenMode == "light" {
+			t.Fatalf("SetTokenMode persisted folded mode %q", entry.TokenMode)
+		}
+		if entry.AgentPreset == "light" || entry.AgentPreset == "balanced" {
+			t.Fatalf("SetTokenMode persisted non-floor preset %q", entry.AgentPreset)
+		}
+	}
+}
+
+func assertPinnedCompatPersisted(t *testing.T, app *App, tab *WorkspaceTab) {
+	t.Helper()
+	app.persistTabTokenMode(tab)
+	saved := loadTabsFile()
+	if len(saved.Tabs) != 1 {
+		t.Fatalf("saved tabs = %+v, want 1", saved.Tabs)
+	}
+	if saved.Tabs[0].TokenMode != boot.TokenModeFull {
+		t.Fatalf("saved compat token = %q, want full", saved.Tabs[0].TokenMode)
+	}
+}
+
 func TestSetTokenModeRebuildsController(t *testing.T) {
+	// Name kept for history; SetTokenMode is a deprecated no-op wrapper.
 	isolateDesktopUserDirs(t)
 
 	app := NewApp()
@@ -5351,33 +5576,19 @@ func TestSetTokenModeRebuildsController(t *testing.T) {
 			c.Close()
 		}
 	}()
+	tab := app.activeTab()
+	notices := captureTabNotices(app, tab)
 
 	if err := app.SetTokenMode("economy"); err != nil {
 		t.Fatalf("SetTokenMode(economy): %v", err)
 	}
-	if c := app.activeCtrl(); c == nil {
-		t.Fatal("SetTokenMode should leave a rebuilt controller")
-	}
-	if c := app.activeCtrl(); c == old {
-		t.Fatal("SetTokenMode should rebuild the active controller so the provider sees the new tool profile")
-	}
-	tab := app.activeTab()
-	if tab == nil {
-		t.Fatal("active tab missing")
-	}
-	if got := currentTabTokenMode(tab); got != "economy" {
-		t.Fatalf("token mode = %q, want economy", got)
-	}
-	if got := app.Meta().TokenMode; got != "economy" {
-		t.Fatalf("Meta token mode = %q, want economy", got)
-	}
-	saved := loadTabsFile()
-	if len(saved.Tabs) != 1 || saved.Tabs[0].TokenMode != "economy" {
-		t.Fatalf("saved tabs = %+v, want economy token mode", saved.Tabs)
-	}
+	assertDeprecatedExecutionModeNoop(t, app, tab, old, *notices)
+	assertSetTokenModeDidNotPersistLiveModes(t)
+	assertPinnedCompatPersisted(t, app, tab)
 }
 
 func TestSetTokenModeDeliveryRebuildsAndPersistsProfile(t *testing.T) {
+	// SetTokenMode(delivery) now writes the session quality floor in place.
 	isolateDesktopUserDirs(t)
 
 	app := NewApp()
@@ -5390,43 +5601,27 @@ func TestSetTokenModeDeliveryRebuildsAndPersistsProfile(t *testing.T) {
 			c.Close()
 		}
 	}()
+	tab := app.activeTab()
+	notices := captureTabNotices(app, tab)
 
 	if err := app.SetTokenMode(boot.TokenModeDelivery); err != nil {
 		t.Fatalf("SetTokenMode(delivery): %v", err)
 	}
-	if c := app.activeCtrl(); c == nil || c == old {
-		t.Fatal("delivery profile should rebuild the active controller")
+	if tab.Ctrl == nil || tab.Ctrl != old {
+		t.Fatalf("controller identity changed: got %p want %p", tab.Ctrl, old)
 	}
-	tab := app.activeTab()
-	if got := currentTabTokenMode(tab); got != boot.TokenModeDelivery {
-		t.Fatalf("token mode = %q, want delivery", got)
+	if got := old.QualityFloor(); got != control.QualityFloorDelivery {
+		t.Fatalf("controller QualityFloor = %q, want delivery", got)
 	}
-	if got := app.Meta().TokenMode; got != boot.TokenModeDelivery {
-		t.Fatalf("Meta token mode = %q, want delivery", got)
-	}
-	saved := loadTabsFile()
-	if len(saved.Tabs) != 1 || saved.Tabs[0].TokenMode != boot.TokenModeDelivery {
-		t.Fatalf("saved tabs = %+v, want delivery profile", saved.Tabs)
+	if got := tab.qualityFloor; got != control.QualityFloorDelivery {
+		t.Fatalf("tab qualityFloor = %q, want delivery", got)
 	}
 
-	// Leaving delivery must clear the persisted tokenMode so a restart does not
-	// re-arm final-readiness gates (#6582).
 	if err := app.SetTokenMode(boot.TokenModeFull); err != nil {
 		t.Fatalf("SetTokenMode(full): %v", err)
 	}
-	if got := currentTabTokenMode(app.activeTab()); got != boot.TokenModeFull {
-		t.Fatalf("token mode after full = %q, want full", got)
-	}
-	if got := app.Meta().TokenMode; got != boot.TokenModeFull {
-		t.Fatalf("Meta token mode after full = %q, want full", got)
-	}
-	saved = loadTabsFile()
-	if len(saved.Tabs) != 1 {
-		t.Fatalf("saved tabs = %+v", saved.Tabs)
-	}
-	if saved.Tabs[0].TokenMode != "" {
-		t.Fatalf("saved tokenMode = %q, want omitted/empty for full", saved.Tabs[0].TokenMode)
-	}
+	assertDeprecatedExecutionModeNoop(t, app, tab, old, *notices)
+	assertPinnedCompatPersisted(t, app, tab)
 }
 
 func TestSetTokenModeReusesCurrentSessionLease(t *testing.T) {
@@ -5477,15 +5672,11 @@ func TestSetTokenModeReusesCurrentSessionLease(t *testing.T) {
 	if err := tab.ensureSessionLease(path); err != nil {
 		t.Fatalf("ensureSessionLease: %v", err)
 	}
+	notices := captureTabNotices(app, tab)
 	if err := app.SetTokenModeForTab(tab.ID, "economy"); err != nil {
 		t.Fatalf("SetTokenModeForTab: %v", err)
 	}
-	if tab.Ctrl == nil || tab.Ctrl == oldCtrl {
-		t.Fatalf("tab controller was not rebuilt")
-	}
-	if got := currentTabTokenMode(tab); got != "economy" {
-		t.Fatalf("token mode = %q, want economy", got)
-	}
+	assertDeprecatedExecutionModeNoop(t, app, tab, oldCtrl, *notices)
 	if tab.sessionLease == nil || sessionRuntimeKey(tab.sessionLease.Path()) != sessionRuntimeKey(path) {
 		t.Fatalf("session lease path = %q, want %q", tab.currentSessionPath(), path)
 	}
@@ -5544,22 +5735,16 @@ func TestSetTokenModeLeaseHeldKeepsCurrentController(t *testing.T) {
 	app.tabOrder = []string{tab.ID}
 	app.activeTabID = tab.ID
 
-	err = app.SetTokenModeForTab(tab.ID, "economy")
-	if !errors.Is(err, agent.ErrSessionLeaseHeld) {
-		t.Fatalf("SetTokenModeForTab err = %v, want ErrSessionLeaseHeld", err)
+	// Deprecated wrapper must not re-acquire the session lease, so an
+	// externally held lease does not block the call or replace the controller.
+	notices := captureTabNotices(app, tab)
+	if err := app.SetTokenModeForTab(tab.ID, "economy"); err != nil {
+		t.Fatalf("SetTokenModeForTab: %v", err)
 	}
-	if strings.Contains(err.Error(), path) || strings.Contains(err.Error(), "held by") {
-		t.Fatalf("SetTokenModeForTab surfaced raw lease details: %v", err)
-	}
-	if tab.Ctrl != oldCtrl {
-		t.Fatalf("tab controller changed after failed switch")
-	}
-	if got := currentTabTokenMode(tab); got != "full" {
-		t.Fatalf("token mode = %q, want full", got)
-	}
+	assertDeprecatedExecutionModeNoop(t, app, tab, oldCtrl, *notices)
 	meta := app.MetaForTab(tab.ID)
 	if !meta.Ready || meta.Runtime.Phase != sessionRuntimeReady {
-		t.Fatalf("failed switch disabled current runtime: ready=%v phase=%q", meta.Ready, meta.Runtime.Phase)
+		t.Fatalf("deprecated mode call disabled current runtime: ready=%v phase=%q", meta.Ready, meta.Runtime.Phase)
 	}
 }
 
@@ -5592,19 +5777,20 @@ func TestSetTokenModeMigratesStaleOfficialDeepSeekTabModel(t *testing.T) {
 		}
 	}()
 
+	tab := app.activeTab()
+	notices := captureTabNotices(app, tab)
 	if err := app.SetTokenMode("economy"); err != nil {
 		t.Fatalf("SetTokenMode(economy): %v", err)
 	}
-	tab := app.activeTab()
 	if tab == nil {
 		t.Fatal("active tab missing")
 	}
-	if tab.model != "deepseek/deepseek-v4-flash" {
-		t.Fatalf("tab model = %q, want migrated official ref", tab.model)
+	// SetTokenMode does not rebuild, so stale model aliases stay put
+	// (migration still runs on model/effort rebuilds).
+	if tab.model != "deepseek-flash/deepseek-v4-flash" {
+		t.Fatalf("tab model = %q, want unchanged stale ref without rebuild", tab.model)
 	}
-	if got := currentTabTokenMode(tab); got != "economy" {
-		t.Fatalf("token mode = %q, want economy", got)
-	}
+	assertDeprecatedExecutionModeNoop(t, app, tab, old, *notices)
 }
 
 func TestMetaForTabReportsImageInputCapability(t *testing.T) {
@@ -5642,9 +5828,24 @@ func TestMetaForTabReportsImageInputCapability(t *testing.T) {
 	if err := app.SetModel("custom/vision-pro"); err != nil {
 		t.Fatalf("SetModel(custom/vision-pro): %v", err)
 	}
-	if got := app.Meta().ImageInputEnabled; !got {
-		t.Fatal("vision model meta should enable image input")
+	// ImageInputEnabled is served from the per-tab cache; the model change
+	// invalidates it and a background refresh repopulates it (tab:meta).
+	waitForMetaImageInput(t, app, true)
+}
+
+// waitForMetaImageInput polls until the cached image-input capability reaches
+// the expected value. MetaForTab serves the background-refreshed cache, so the
+// value flips asynchronously after a model/settings change.
+func waitForMetaImageInput(t *testing.T, app *App, want bool) {
+	t.Helper()
+	deadline := time.Now().Add(10 * time.Second)
+	for time.Now().Before(deadline) {
+		if app.Meta().ImageInputEnabled == want {
+			return
+		}
+		time.Sleep(10 * time.Millisecond)
 	}
+	t.Fatalf("Meta().ImageInputEnabled did not become %v", want)
 }
 
 func TestMetaForTabImageInputCapabilityUsesCurrentRef(t *testing.T) {
@@ -5682,6 +5883,7 @@ func TestMetaForTabImageInputCapabilityUsesCurrentRef(t *testing.T) {
 }
 
 func TestSetTokenModeKeepsControllerWhenRebuildFails(t *testing.T) {
+	// Name kept for history; an unknown model must not block the deprecated no-op.
 	isolateDesktopUserDirs(t)
 	t.Setenv("DEEPSEEK_API_KEY", "")
 	t.Setenv("MIMO_API_KEY", "")
@@ -5696,24 +5898,13 @@ func TestSetTokenModeKeepsControllerWhenRebuildFails(t *testing.T) {
 			c.Close()
 		}
 	}()
-
-	err := app.SetTokenMode("economy")
-	if err == nil {
-		t.Fatal("SetTokenMode(economy) with an unknown model should fail")
-	}
-	if c := app.activeCtrl(); c != old {
-		t.Fatalf("SetTokenMode failure replaced controller: got %p want %p", c, old)
-	}
 	tab := app.activeTab()
-	if tab == nil {
-		t.Fatal("active tab missing")
+	notices := captureTabNotices(app, tab)
+
+	if err := app.SetTokenMode("economy"); err != nil {
+		t.Fatalf("SetTokenMode(economy): %v", err)
 	}
-	if got := currentTabTokenMode(tab); got != "full" {
-		t.Fatalf("token mode after failed rebuild = %q, want full", got)
-	}
-	if got := app.Meta().TokenMode; got != "full" {
-		t.Fatalf("Meta token mode after failed rebuild = %q, want full", got)
-	}
+	assertDeprecatedExecutionModeNoop(t, app, tab, old, *notices)
 }
 
 func TestSetEffortRejectsRunningTurn(t *testing.T) {
@@ -5735,24 +5926,29 @@ func TestSetEffortRejectsRunningTurn(t *testing.T) {
 }
 
 func TestSetTokenModeRejectsRunningTurn(t *testing.T) {
+	// Name kept for history; the deprecated wrapper does not require an idle tab.
 	isolateDesktopUserDirs(t)
 
 	runner := &blockingRunner{started: make(chan struct{}), release: make(chan struct{})}
 	app := NewApp()
-	app.setTestCtrl(control.New(control.Options{Runner: runner}), "")
-	app.activeCtrl().Submit("work")
+	old := control.New(control.Options{Runner: runner})
+	app.setTestCtrl(old, "")
+	tab := app.activeTab()
+	notices := captureTabNotices(app, tab)
+	old.Submit("work")
 	<-runner.started
 
-	err := app.SetTokenMode("economy")
-	if err == nil || !strings.Contains(err.Error(), "finish or cancel") {
-		t.Fatalf("SetTokenMode while running error = %v, want finish/cancel guard", err)
+	if err := app.SetTokenMode("economy"); err != nil {
+		t.Fatalf("SetTokenMode while running: %v", err)
 	}
+	assertDeprecatedExecutionModeNoop(t, app, tab, old, *notices)
 
 	close(runner.release)
 	waitNotRunning(t, app.activeCtrl())
 }
 
 func TestSetTokenModeRejectsBackgroundJobs(t *testing.T) {
+	// Name kept for history; background jobs must not block the deprecated wrapper.
 	isolateDesktopUserDirs(t)
 	setDesktopTestCredential(t, "OLD_MODEL_KEY", "sk-test")
 
@@ -5781,6 +5977,8 @@ func TestSetTokenModeRejectsBackgroundJobs(t *testing.T) {
 			current.Close()
 		}
 	})
+	tab := app.activeTab()
+	notices := captureTabNotices(app, tab)
 
 	release := make(chan struct{})
 	job := jm.StartForSession(agent.BranchID(path), "bash", "long job", func(ctx context.Context, _ io.Writer) (string, error) {
@@ -5793,10 +5991,10 @@ func TestSetTokenModeRejectsBackgroundJobs(t *testing.T) {
 	})
 	t.Cleanup(func() { close(release) })
 
-	err := app.SetTokenMode("economy")
-	if err == nil || !strings.Contains(err.Error(), "background_jobs=1") {
-		t.Fatalf("SetTokenMode with background job error = %v, want exact background-job guard", err)
+	if err := app.SetTokenMode("economy"); err != nil {
+		t.Fatalf("SetTokenMode with background job: %v", err)
 	}
+	assertDeprecatedExecutionModeNoop(t, app, tab, ctrl, *notices)
 	cancelled, err := app.CancelJobForTab("", job.ID)
 	if err != nil || !cancelled {
 		t.Fatalf("CancelJobForTab = %v, %v, want true, nil", cancelled, err)
@@ -5804,8 +6002,18 @@ func TestSetTokenModeRejectsBackgroundJobs(t *testing.T) {
 	if result := jm.WaitForSession(context.Background(), agent.BranchID(path), []string{job.ID}, 5); len(result) != 1 || result[0].Status != jobs.Killed {
 		t.Fatalf("stopped background job = %+v, want one killed result", result)
 	}
-	if err := app.SetTokenMode("economy"); err != nil {
-		t.Fatalf("SetTokenMode after stopping background job: %v", err)
+}
+
+func TestSetTokenModeUnknownTabErrors(t *testing.T) {
+	isolateDesktopUserDirs(t)
+	app := NewApp()
+	err := app.SetTokenModeForTab("missing-tab", "economy")
+	if err == nil || !strings.Contains(err.Error(), `tab "missing-tab" not found`) {
+		t.Fatalf("SetTokenModeForTab(unknown) = %v, want tab not found", err)
+	}
+	err = app.SetAgentPresetForTab("missing-tab", "light")
+	if err == nil || !strings.Contains(err.Error(), `tab "missing-tab" not found`) {
+		t.Fatalf("SetAgentPresetForTab(unknown) = %v, want tab not found", err)
 	}
 }
 
@@ -5861,7 +6069,7 @@ func TestClearSessionCancelsRunningRuntimeAndKeepsTopic(t *testing.T) {
 
 	oldCtrl.Submit("work")
 	<-runner.started
-	if err := app.ClearSession(); err != nil {
+	if _, err := app.ClearSession(); err != nil {
 		t.Fatalf("ClearSession: %v", err)
 	}
 	waitNotRunning(t, oldCtrl)
@@ -5917,7 +6125,7 @@ func TestClearSessionRemovesRunningJobArtifacts(t *testing.T) {
 		t.Fatalf("job sidecar should exist before clear: %v", err)
 	}
 
-	if err := app.ClearSession(); err != nil {
+	if _, err := app.ClearSession(); err != nil {
 		t.Fatalf("ClearSession: %v", err)
 	}
 	if _, err := os.Stat(jobsDir); !os.IsNotExist(err) {
@@ -6668,7 +6876,7 @@ func TestDeleteSessionCancelsInactiveOpenRuntime(t *testing.T) {
 		tabOrder:    []string{"active", "inactive"},
 		activeTabID: "active",
 	}
-
+	installSessionCatalogForTest(t, app, dir, "global", "")
 	if err := app.DeleteSession(filepath.Base(inactivePath)); err != nil {
 		t.Fatalf("DeleteSession(inactive open basename): %v", err)
 	}
@@ -6793,7 +7001,7 @@ func assertSingleTeardownTimeoutNotice(t *testing.T, notices <-chan event.Event,
 		t.Fatal("missing background-job teardown timeout notice")
 	}
 	var waited time.Duration
-	for _, field := range strings.Fields(notice.Detail) {
+	for field := range strings.FieldsSeq(notice.Detail) {
 		if !strings.HasPrefix(field, "waited=") {
 			continue
 		}
@@ -6894,7 +7102,6 @@ func TestRestoreSessionRejectsDestroyingSession(t *testing.T) {
 
 func TestDesktopSessionAPIsUseControllerSessionDir(t *testing.T) {
 	isolateDesktopUserDirs(t)
-
 	dirA := filepath.Join(t.TempDir(), "workspace-a-sessions")
 	dirB := filepath.Join(t.TempDir(), "workspace-b-sessions")
 	if err := os.MkdirAll(dirA, 0o755); err != nil {
@@ -6915,9 +7122,10 @@ func TestDesktopSessionAPIsUseControllerSessionDir(t *testing.T) {
 	app := NewApp()
 	app.setTestCtrl(control.New(control.Options{SessionDir: dirA, SessionPath: pathA, Label: "test"}), "")
 	defer app.activeCtrl().Close()
-
+	installSessionCatalogForTest(t, app, dirA, "global", "")
 	sessions := app.ListSessions()
-	if len(sessions) != 1 || sessions[0].Path != pathA || sessions[0].Preview != "workspace A" {
+	if len(sessions) != 1 || sessions[0].Path != pathA || sessions[0].TurnsState != "unknown" ||
+		!strings.Contains(sessions[0].Preview, "being indexed") {
 		t.Fatalf("ListSessions should read the active controller session dir only, got %+v", sessions)
 	}
 	if err := app.RenameSession(pathA, "A title"); err != nil {
@@ -6930,6 +7138,7 @@ func TestDesktopSessionAPIsUseControllerSessionDir(t *testing.T) {
 	if meta.CustomTitle != "A title" {
 		t.Fatalf("custom title should be written to branch meta, got %q", meta.CustomTitle)
 	}
+	reconcileSessionCatalogForTest(t, app, dirA, "global", "")
 	sessions = app.ListSessions()
 	if len(sessions) != 1 || sessions[0].Title != "A title" {
 		t.Fatalf("ListSessions should return custom title from branch meta, got %+v", sessions)
@@ -6967,7 +7176,7 @@ func TestListSessionsMarksAutoBotSessionAsChannel(t *testing.T) {
 	app := NewApp()
 	app.setTestCtrl(control.New(control.Options{SessionDir: dir, SessionPath: filepath.Join(dir, "active.jsonl"), Label: "test"}), "")
 	defer app.activeCtrl().Close()
-
+	installSessionCatalogForTest(t, app, dir, "global", "")
 	sessions := app.ListSessions()
 	if len(sessions) != 1 {
 		t.Fatalf("ListSessions len = %d, want 1: %+v", len(sessions), sessions)
@@ -7297,7 +7506,7 @@ func BenchmarkDesktopListSessionsScoped(b *testing.B) {
 		if err := os.MkdirAll(dir, 0o755); err != nil {
 			b.Fatalf("mkdir %s: %v", dir, err)
 		}
-		for i := 0; i < 120; i++ {
+		for i := range 120 {
 			path := filepath.Join(dir, fmt.Sprintf("session-%03d.jsonl", i))
 			body := fmt.Sprintf(`{"role":"user","content":"session %03d"}`+"\n", i)
 			if err := os.WriteFile(path, []byte(body), 0o644); err != nil {
@@ -7312,7 +7521,7 @@ func BenchmarkDesktopListSessionsScoped(b *testing.B) {
 
 	b.ReportAllocs()
 	b.ResetTimer()
-	for i := 0; i < b.N; i++ {
+	for range b.N {
 		sessions := app.ListSessions()
 		if len(sessions) != 120 {
 			b.Fatalf("ListSessions len = %d, want 120", len(sessions))
@@ -7332,56 +7541,8 @@ func (r *appendingDesktopRunner) Run(_ context.Context, input string) error {
 	return nil
 }
 
-func TestSubmitToTabHistoryDisplaysRawInputAfterMemoryCompose(t *testing.T) {
-	isolateDesktopUserDirs(t)
-	dir := config.SessionDir()
-	if err := os.MkdirAll(dir, 0o755); err != nil {
-		t.Fatal(err)
-	}
-
-	path := filepath.Join(dir, "memory-display.jsonl")
-	sess := agent.NewSession("sys")
-	exec := agent.New(nil, nil, sess, agent.Options{}, event.Discard)
-	runner := &appendingDesktopRunner{session: sess, started: make(chan string, 1)}
-	ctrl := control.New(control.Options{
-		Runner:      runner,
-		Executor:    exec,
-		Sink:        event.Discard,
-		SessionDir:  dir,
-		SessionPath: path,
-		Label:       "test",
-	})
-	defer ctrl.Close()
-
-	app := NewApp()
-	app.setTestCtrl(ctrl, "deepseek/test")
-	ctrl.QueueMemory(`Saved memory "reasonix-contributions": contribution count updated`)
-
-	const prompt = "不要，删了"
-	app.SubmitToTab("test", prompt)
-	composed := <-runner.started
-	waitNotRunning(t, ctrl)
-
-	if !strings.Contains(composed, "<memory-update>") || !strings.HasSuffix(composed, prompt) {
-		t.Fatalf("model input should include memory update followed by prompt, got %q", composed)
-	}
-	got := app.HistoryForTab("test")
-	if len(got) < 2 {
-		t.Fatalf("history length = %d, want user + assistant", len(got))
-	}
-	if got[0].Role != "system" || got[1].Role != "user" {
-		t.Fatalf("history roles = %+v, want system then user", got[:min(len(got), 2)])
-	}
-	if got[1].Content != prompt {
-		t.Fatalf("displayed user content = %q, want %q", got[1].Content, prompt)
-	}
-	if strings.Contains(got[1].Content, "<memory-update>") {
-		t.Fatalf("displayed user content leaked memory update: %q", got[1].Content)
-	}
-}
-
 func TestForkCreatesActiveTabWithoutSwitchingSourceController(t *testing.T) {
-	isolateDesktopUserDirs(t)
+	isolateDesktopUserDirsSchemaOne(t)
 
 	workspace := robustTempDir(t)
 	if err := os.WriteFile(filepath.Join(workspace, "reasonix.toml"), []byte(""), 0o644); err != nil {
@@ -7563,12 +7724,12 @@ func TestDesktopSharedHostProjectMCPConnectsWithoutLaunchApproval(t *testing.T) 
 
 	srv := desktopMCPHTTPServer(t)
 	defer srv.Close()
-	if err := os.WriteFile(filepath.Join(dir, "reasonix.toml"), []byte(fmt.Sprintf(`
+	if err := os.WriteFile(filepath.Join(dir, "reasonix.toml"), fmt.Appendf(nil, `
 [[plugins]]
 name = "h"
 type = "http"
 url = %q
-`, srv.URL)), 0o644); err != nil {
+`, srv.URL), 0o644); err != nil {
 		t.Fatal(err)
 	}
 
@@ -7759,12 +7920,12 @@ func TestSetMCPServerEnabledSharedHostPreservesSiblingTabs(t *testing.T) {
 
 	srv := desktopMCPHTTPServer(t)
 	defer srv.Close()
-	if err := os.WriteFile(filepath.Join(dir, "reasonix.toml"), []byte(fmt.Sprintf(`
+	if err := os.WriteFile(filepath.Join(dir, "reasonix.toml"), fmt.Appendf(nil, `
 [[plugins]]
 name = "h"
 type = "http"
 url = %q
-`, srv.URL)), 0o644); err != nil {
+`, srv.URL), 0o644); err != nil {
 		t.Fatal(err)
 	}
 
@@ -7909,12 +8070,12 @@ func TestReconnectMCPServerUsesEffectiveProjectConfigWhenUserNameIsShadowed(t *t
 	if err := userCfg.SaveTo(config.UserConfigPath()); err != nil {
 		t.Fatal(err)
 	}
-	if err := os.WriteFile(filepath.Join(dir, "reasonix.toml"), []byte(fmt.Sprintf(`
+	if err := os.WriteFile(filepath.Join(dir, "reasonix.toml"), fmt.Appendf(nil, `
 [[plugins]]
 name = "h"
 type = "http"
 url = %q
-`, projectServer.URL)), 0o644); err != nil {
+`, projectServer.URL), 0o644); err != nil {
 		t.Fatal(err)
 	}
 
@@ -8055,7 +8216,7 @@ func newGatedDesktopMCPLaunchFixture(t *testing.T, startGateAddr string) gatedDe
 		gateConfig = fmt.Sprintf("DESKTOP_MCP_START_GATE_ADDR = %q\n", startGateAddr)
 	}
 	helperArgs := []string{"-test.run=TestDesktopMCPHelperProcess", "--"}
-	if err := os.WriteFile(filepath.Join(dir, "reasonix.toml"), []byte(fmt.Sprintf(`
+	if err := os.WriteFile(filepath.Join(dir, "reasonix.toml"), fmt.Appendf(nil, `
 [[plugins]]
 name = "h"
 command = %q
@@ -8067,7 +8228,7 @@ DESKTOP_MCP_SINGLE_INSTANCE_ADDR = %q
 %s
 [sandbox]
 network = true
-`, exe, singleInstanceAddr, gateConfig)), 0o644); err != nil {
+`, exe, singleInstanceAddr, gateConfig), 0o644); err != nil {
 		t.Fatal(err)
 	}
 
@@ -8305,13 +8466,13 @@ func installGatedTestPluginPackage(t *testing.T, mcpServerName string) string {
 	if err := os.MkdirAll(root, 0o755); err != nil {
 		t.Fatal(err)
 	}
-	if err := os.WriteFile(filepath.Join(root, pluginpkg.NativeManifest), []byte(fmt.Sprintf(`{
+	if err := os.WriteFile(filepath.Join(root, pluginpkg.NativeManifest), fmt.Appendf(nil, `{"apiVersion": "reasonix.io/plugin/v2",
   "name": "review-helper",
   "version": "1.0.0",
   "mcpServers": {
     %q: { "type": "stdio", "command": "helper" }
   }
-}`, mcpServerName)), 0o644); err != nil {
+}`, mcpServerName), 0o644); err != nil {
 		t.Fatal(err)
 	}
 	if err := pluginpkg.Upsert(reasonixHome, pluginpkg.InstalledPlugin{
@@ -8553,7 +8714,7 @@ func TestBridgeDriveReleasesRuntimeAdmissionWhenTakeoverWasReclaimed(t *testing.
 	fixture.app.runtimeAdmissionMu.Unlock()
 }
 
-func TestBeginTabTurnWorkspaceRepairDoesNotRecursivelyLockAdmission(t *testing.T) {
+func TestBeginTabTurnWorkspaceRepairStaysOutsideLifecycleAdmission(t *testing.T) {
 	fixture := newStaleWorkspaceBindingFixture(t, "admission_writer")
 	fixture.tab.reconcileMu.Lock()
 
@@ -8565,16 +8726,6 @@ func TestBeginTabTurnWorkspaceRepairDoesNotRecursivelyLockAdmission(t *testing.T
 		}
 		turnDone <- err
 	}()
-	deadline := time.Now().Add(5 * time.Second)
-	for fixture.app.runtimeAdmissionMu.TryLock() {
-		fixture.app.runtimeAdmissionMu.Unlock()
-		if time.Now().After(deadline) {
-			fixture.tab.reconcileMu.Unlock()
-			t.Fatal("beginTabTurn never acquired the admission read lock")
-		}
-		time.Sleep(time.Millisecond)
-	}
-
 	writerRebuildLocked := make(chan struct{})
 	writerAdmissionLocked := make(chan struct{})
 	writerDone := make(chan struct{})
@@ -8588,9 +8739,13 @@ func TestBeginTabTurnWorkspaceRepairDoesNotRecursivelyLockAdmission(t *testing.T
 		close(writerDone)
 	}()
 	<-writerRebuildLocked
-	for fixture.app.runtimeAdmissionMu.TryRLock() {
-		fixture.app.runtimeAdmissionMu.RUnlock()
-		time.Sleep(time.Millisecond)
+	select {
+	case <-writerAdmissionLocked:
+		// The repair is still blocked on reconcileMu; acquiring the lifecycle
+		// writer here proves no slow repair/build I/O owns the read side.
+	case <-time.After(5 * time.Second):
+		fixture.tab.reconcileMu.Unlock()
+		t.Fatal("workspace repair held runtimeAdmissionMu while waiting")
 	}
 	fixture.tab.reconcileMu.Unlock()
 
@@ -8600,12 +8755,7 @@ func TestBeginTabTurnWorkspaceRepairDoesNotRecursivelyLockAdmission(t *testing.T
 			t.Fatalf("beginTabTurn after workspace repair: %v", err)
 		}
 	case <-time.After(10 * time.Second):
-		t.Fatal("workspace repair recursively waited on runtimeAdmissionMu with a writer pending")
-	}
-	select {
-	case <-writerAdmissionLocked:
-	case <-time.After(5 * time.Second):
-		t.Fatal("lifecycle writer never acquired runtimeAdmissionMu after repaired turn admission")
+		t.Fatal("workspace repair did not complete after lifecycle writer released")
 	}
 	select {
 	case <-writerDone:
@@ -9082,13 +9232,13 @@ func TestRemoveMCPServerRejectsPluginManagedServerWithoutDisconnecting(t *testin
 	if err := os.MkdirAll(root, 0o755); err != nil {
 		t.Fatal(err)
 	}
-	if err := os.WriteFile(filepath.Join(root, pluginpkg.NativeManifest), []byte(fmt.Sprintf(`{
+	if err := os.WriteFile(filepath.Join(root, pluginpkg.NativeManifest), fmt.Appendf(nil, `{"apiVersion": "reasonix.io/plugin/v2",
   "name": "superpowers",
   "version": "1.0.0",
   "mcpServers": {
     "helper": { "type": "http", "url": %q }
   }
-}`, srv.URL)), 0o644); err != nil {
+}`, srv.URL), 0o644); err != nil {
 		t.Fatal(err)
 	}
 	if err := pluginpkg.Upsert(reasonixHome, pluginpkg.InstalledPlugin{
@@ -10127,7 +10277,7 @@ func TestRunShellForTabStaysBoundDuringRapidProjectTabSwitching(t *testing.T) {
 	waitForShellDispatch(t, shellEvents, marker)
 	waitForFile(t, filepath.Join(projectA, marker), "shell")
 
-	for i := 0; i < 8; i++ {
+	for range 8 {
 		if err := app.SetActiveTab("project-b"); err != nil {
 			t.Fatalf("SetActiveTab(project-b): %v", err)
 		}
@@ -10281,12 +10431,7 @@ func newBackgroundJobController(t *testing.T, label string) *control.Controller 
 }
 
 func hasLevel(levels []string, want string) bool {
-	for _, level := range levels {
-		if level == want {
-			return true
-		}
-	}
-	return false
+	return slices.Contains(levels, want)
 }
 
 func hasCommand(cmds []CommandInfo, name string) bool {
@@ -10312,7 +10457,7 @@ func TestSessionActionsWithoutControllerReturnError(t *testing.T) {
 	if err := app.NewSession(); err == nil {
 		t.Error("NewSession with no controller must surface an error, not silently no-op")
 	}
-	if err := app.ClearSession(); err == nil {
+	if _, err := app.ClearSession(); err == nil {
 		t.Error("ClearSession with no controller must surface an error")
 	}
 
@@ -10326,7 +10471,7 @@ func TestSessionActionsWithoutControllerReturnError(t *testing.T) {
 	}
 }
 
-// --- Prompt history scanning tests ------------------------------------------
+// Prompt history scanning tests
 
 func identityPromptDisplay(text string) string { return text }
 
@@ -10616,14 +10761,14 @@ func TestScanPromptHistoryFromDirUsesSessionActivityBeforeEventInterleaving(t *t
 	early := filepath.Join(dir, "early.jsonl")
 	late := filepath.Join(dir, "late.jsonl")
 
-	if err := os.WriteFile(early, []byte(fmt.Sprintf(`{"role":"user","content":"early first","time":%d}
+	if err := os.WriteFile(early, fmt.Appendf(nil, `{"role":"user","content":"early first","time":%d}
 {"role":"assistant","content":"ok"}
 {"role":"user","content":"early second","time":%d}
-`, base.UnixMilli(), base.Add(time.Minute).UnixMilli())), 0o644); err != nil {
+`, base.UnixMilli(), base.Add(time.Minute).UnixMilli()), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	if err := os.WriteFile(late, []byte(fmt.Sprintf(`{"role":"user","content":"late newest","time":%d}
-`, base.Add(2*time.Minute).UnixMilli())), 0o644); err != nil {
+	if err := os.WriteFile(late, fmt.Appendf(nil, `{"role":"user","content":"late newest","time":%d}
+`, base.Add(2*time.Minute).UnixMilli()), 0o644); err != nil {
 		t.Fatal(err)
 	}
 	// Invert file mtimes: session activity should keep each session grouped
@@ -10792,8 +10937,8 @@ func TestScanPromptHistoryPaginatesCurrentSessionBeforeCrossSession(t *testing.T
 	other := filepath.Join(dir, "other.jsonl")
 	var lines []byte
 	for i := range 55 {
-		lines = append(lines, []byte(fmt.Sprintf(`{"role":"user","content":"current %d"}
-`, i))...)
+		lines = append(lines, fmt.Appendf(nil, `{"role":"user","content":"current %d"}
+`, i)...)
 	}
 	if err := os.WriteFile(current, lines, 0o644); err != nil {
 		t.Fatal(err)
@@ -10867,8 +11012,8 @@ func TestScanPromptHistoryFromDirReadsAllEntriesForInternalHelper(t *testing.T) 
 	dir := t.TempDir()
 	var lines []byte
 	for i := range 250 {
-		lines = append(lines, []byte(fmt.Sprintf(`{"role":"user","content":"prompt %d"}
-`, i))...)
+		lines = append(lines, fmt.Appendf(nil, `{"role":"user","content":"prompt %d"}
+`, i)...)
 	}
 	if err := os.WriteFile(filepath.Join(dir, "many.jsonl"), lines, 0o644); err != nil {
 		t.Fatal(err)

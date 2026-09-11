@@ -187,23 +187,29 @@ function readDistTag(runner, name, distTag) {
   return value;
 }
 
-function waitForPackage(
+function waitForPackages(
   runner,
-  entry,
+  packages,
   version,
   candidateSha,
   attempts,
   sleep,
+  log,
 ) {
+  const pending = new Map(packages.map((entry) => [entry.name, entry]));
   for (let attempt = 1; attempt <= attempts; attempt += 1) {
-    const metadata = registryPackage(runner, entry.name, version);
-    if (metadata) {
-      verifyRegistryPackage(metadata, entry.name, version, candidateSha);
-      return;
+    for (const [name] of pending) {
+      const metadata = registryPackage(runner, name, version);
+      if (metadata) {
+        verifyRegistryPackage(metadata, name, version, candidateSha);
+        pending.delete(name);
+      }
     }
+    if (pending.size === 0) return;
+    log(`waiting for npm registry visibility (${attempt}/${attempts}): ${[...pending.keys()].join(", ")}`);
     if (attempt < attempts) sleep(10_000);
   }
-  throw new Error(`${entry.name}@${version} did not become visible in the npm registry`);
+  throw new Error(`npm packages did not become visible at ${version}: ${[...pending.keys()].join(", ")}`);
 }
 
 function ensurePackage(
@@ -212,8 +218,6 @@ function ensurePackage(
   version,
   candidateSha,
   stagingTag,
-  attempts,
-  sleep,
   log,
 ) {
   readLocalPackage(entry, version, candidateSha);
@@ -237,14 +241,6 @@ function ensurePackage(
     if (!raced) throw error;
     verifyRegistryPackage(raced, entry.name, version, candidateSha);
   }
-  waitForPackage(
-    runner,
-    entry,
-    version,
-    candidateSha,
-    attempts,
-    sleep,
-  );
 }
 
 function advanceDistTag(runner, name, version, distTag, attempts, sleep, log) {
@@ -296,9 +292,10 @@ export function publishPackages({
   runner = defaultRunner,
   sleep = defaultSleep,
   // npm's public registry can lag a successful immutable publish by several
-  // minutes. Keep this bounded, but allow enough time for normal replication
-  // before recovery treats the package as missing.
-  attempts = 31,
+  // minutes (v1.38.6 exceeded the old five-minute window). Submit the whole
+  // set first, then poll pending packages together for up to twenty minutes
+  // of scheduled waits, plus registry request time. Never republish on E404.
+  attempts = 121,
   log = console.log,
 }) {
   if (!Array.isArray(packages) || packages.length === 0) {
@@ -309,44 +306,18 @@ export function publishPackages({
   }
   const distTag = distTagForVersion(version);
   const stagingTag = `${distTag}-staging`;
-  let failure;
-
-  try {
-    for (const entry of packages) {
-      ensurePackage(
-        runner,
-        entry,
-        version,
-        candidateSha,
-        stagingTag,
-        attempts,
-        sleep,
-        log,
-      );
-    }
-    for (const entry of packages) {
-      advanceDistTag(
-        runner,
-        entry.name,
-        version,
-        distTag,
-        attempts,
-        sleep,
-        log,
-      );
-    }
-  } catch (error) {
-    failure = error;
+  for (const entry of packages) {
+    ensurePackage(runner, entry, version, candidateSha, stagingTag, log);
   }
-
-  try {
-    for (const entry of packages) {
-      cleanupStagingTag(runner, entry.name, version, stagingTag, log);
-    }
-  } catch (error) {
-    if (!failure) failure = error;
+  // A delayed platform must not prevent the remaining immutable uploads.
+  // All packages must prove the candidate before any official alias moves.
+  waitForPackages(runner, packages, version, candidateSha, attempts, sleep, log);
+  for (const entry of packages) {
+    advanceDistTag(runner, entry.name, version, distTag, attempts, sleep, log);
   }
-
-  if (failure) throw failure;
+  // Keep staging evidence on failure so recovery can inspect and reuse it.
+  for (const entry of packages) {
+    cleanupStagingTag(runner, entry.name, version, stagingTag, log);
+  }
   return { distTag, version };
 }

@@ -21,6 +21,73 @@ func TestAllowlistUserCountIncludesRoles(t *testing.T) {
 	}
 }
 
+// TestAllowlistUserCountIncludesDingtalk: 钉钉 allowlist 字段必须计入，
+// 否则仅配置钉钉白名单时启动门禁误判为无访问控制而拒绝启动。
+func TestAllowlistUserCountIncludesDingtalk(t *testing.T) {
+	allowlist := config.BotAllowlist{
+		DingtalkUsers: []string{"ding-user"}, DingtalkApprovers: []string{"ding-approver"},
+		DingtalkAdmins: []string{"ding-admin"},
+	}
+	if got := AllowlistUserCount(allowlist); got != 3 {
+		t.Fatalf("AllowlistUserCount() = %d, want dingtalk users included", got)
+	}
+}
+
+// TestBotConfigHasAccessControlDingtalk: 仅直配 [bot.dingtalk].access 时
+// 必须识别为有访问控制（关闭 pairing、无全局 allowlist 的场景）。
+func TestBotConfigHasAccessControlDingtalk(t *testing.T) {
+	bc := config.BotConfig{
+		Dingtalk: config.DingtalkBotConfig{
+			Access: config.BotAccessConfig{Users: []string{"ding-user"}},
+		},
+	}
+	if !BotConfigHasAccessControl(bc) {
+		t.Fatal("BotConfigHasAccessControl() = false, want true for direct dingtalk access")
+	}
+}
+
+// TestMergeLegacyDingtalkChannel: 直配 [bot.dingtalk]（无 [[bot.connections]]）
+// 时，模型/权限/工作目录必须合成进 Channels 与 ConnectionChannels，否则 CLI
+// bot 模式忽略这些运行选项（与桌面端 legacy 钉钉通道同路径）。
+func TestMergeLegacyDingtalkChannel(t *testing.T) {
+	channels, connectionChannels := MergeLegacyDingtalkChannel(config.DingtalkBotConfig{
+		Model:            "deepseek/deepseek-v4-flash",
+		ToolApprovalMode: "yolo",
+		WorkspaceRoot:    "/tmp/work",
+	}, nil, nil)
+
+	plat := channels[bot.PlatformDingtalk]
+	if plat.Model != "deepseek/deepseek-v4-flash" {
+		t.Fatalf("channel model = %q, want deepseek/deepseek-v4-flash", plat.Model)
+	}
+	if plat.ToolApprovalMode != "yolo" {
+		t.Fatalf("channel tool_approval_mode = %q, want yolo", plat.ToolApprovalMode)
+	}
+	if plat.WorkspaceRoot != "/tmp/work" {
+		t.Fatalf("channel workspace_root = %q, want /tmp/work", plat.WorkspaceRoot)
+	}
+	conn := connectionChannels[string(bot.PlatformDingtalk)]
+	if conn.Model != "deepseek/deepseek-v4-flash" {
+		t.Fatalf("connection channel model = %q, want deepseek/deepseek-v4-flash", conn.Model)
+	}
+}
+
+func TestMergeLegacyDingtalkChannelEmptyIsNoop(t *testing.T) {
+	channels := map[bot.Platform]bot.ChannelConfig{
+		bot.PlatformFeishu: {Model: "keep"},
+	}
+	out, conn := MergeLegacyDingtalkChannel(config.DingtalkBotConfig{}, channels, nil)
+	if _, ok := out[bot.PlatformDingtalk]; ok {
+		t.Fatalf("empty legacy dingtalk config should not create a dingtalk channel")
+	}
+	if out[bot.PlatformFeishu].Model != "keep" {
+		t.Fatalf("existing channels were mutated")
+	}
+	if conn != nil {
+		t.Fatalf("connection channels should stay nil for empty config")
+	}
+}
+
 func TestRemoteRemembererKeepsDistinctGroupUsers(t *testing.T) {
 	isolateUserConfig(t)
 	cfg := config.Default()
@@ -121,6 +188,85 @@ func TestRememberInboundSessionCreatesMappingWithSessionID(t *testing.T) {
 	mappings := got.Bot.Connections[0].SessionMappings
 	if len(mappings) != 1 || mappings[0].RemoteID != "oc-chat-1" || mappings[0].SessionID != "path:/sessions/topic-bot.jsonl" || mappings[0].SessionSource != "auto" {
 		t.Fatalf("mappings = %+v, want mapping with session id", mappings)
+	}
+}
+
+// TestRememberInboundSessionCreatesMappingWithSessionID: legacy 直配
+// [bot.dingtalk]（无 connection 记录）时，会话绑定必须持久化到
+// Dingtalk.SessionMappings，重启后仍能恢复（#9116 review 阻塞项⑤）。
+func TestRememberInboundSessionLegacyDingtalkMapping(t *testing.T) {
+	isolateUserConfig(t)
+	cfg := config.Default()
+	cfg.Bot.Dingtalk.Enabled = true
+	cfg.Bot.Dingtalk.Model = "deepseek/deepseek-v4-flash"
+	if err := cfg.SaveTo(config.UserConfigPath()); err != nil {
+		t.Fatalf("save config: %v", err)
+	}
+
+	if err := RememberInboundSession(bot.InboundMessage{
+		Platform: bot.PlatformDingtalk,
+		ChatType: bot.ChatDM,
+		ChatID:   "cid-ding-1",
+		UserID:   "user-1",
+	}, "path:/sessions/bot-ding-rotated.jsonl"); err != nil {
+		t.Fatalf("remember inbound session: %v", err)
+	}
+
+	got := config.LoadForEdit(config.UserConfigPath())
+	mappings := got.Bot.Dingtalk.SessionMappings
+	if len(mappings) != 1 || mappings[0].RemoteID != "cid-ding-1" || mappings[0].SessionID != "path:/sessions/bot-ding-rotated.jsonl" || mappings[0].SessionSource != "auto" {
+		t.Fatalf("legacy dingtalk mappings = %+v, want rotated session pinned", mappings)
+	}
+
+	// 有 connection 记录时不写 legacy（避免双写）。
+	cfg2 := config.Default()
+	cfg2.Bot.Dingtalk.Enabled = true
+	cfg2.Bot.Connections = []config.BotConnectionConfig{
+		{ID: "ding-conn", Provider: "dingtalk", Enabled: true, Status: "connected"},
+	}
+	if err := cfg2.SaveTo(config.UserConfigPath()); err != nil {
+		t.Fatalf("save config: %v", err)
+	}
+	if err := RememberInboundSession(bot.InboundMessage{
+		Platform:     bot.PlatformDingtalk,
+		ConnectionID: "ding-conn",
+		ChatType:     bot.ChatDM,
+		ChatID:       "cid-ding-2",
+		UserID:       "user-1",
+	}, "path:/sessions/conn-session.jsonl"); err != nil {
+		t.Fatalf("remember inbound session via connection: %v", err)
+	}
+	got2 := config.LoadForEdit(config.UserConfigPath())
+	if len(got2.Bot.Dingtalk.SessionMappings) != 0 {
+		t.Fatalf("legacy dingtalk mappings = %+v, want empty when connection exists", got2.Bot.Dingtalk.SessionMappings)
+	}
+	if len(got2.Bot.Connections[0].SessionMappings) != 1 {
+		t.Fatalf("connection mappings = %+v, want the rotated session", got2.Bot.Connections[0].SessionMappings)
+	}
+
+	// 禁用的 connection 不接管入站，也不能阻止 legacy 映射持久化。
+	cfg3 := config.Default()
+	cfg3.Bot.Dingtalk.Enabled = true
+	cfg3.Bot.Connections = []config.BotConnectionConfig{
+		{ID: "ding-disabled", Provider: "dingtalk", Enabled: false},
+	}
+	if err := cfg3.SaveTo(config.UserConfigPath()); err != nil {
+		t.Fatalf("save disabled connection config: %v", err)
+	}
+	if err := RememberInboundSession(bot.InboundMessage{
+		Platform: bot.PlatformDingtalk,
+		ChatType: bot.ChatDM,
+		ChatID:   "cid-ding-disabled-conn",
+		UserID:   "user-1",
+	}, "path:/sessions/legacy-with-disabled-conn.jsonl"); err != nil {
+		t.Fatalf("remember inbound session with disabled connection: %v", err)
+	}
+	got3 := config.LoadForEdit(config.UserConfigPath())
+	if mappings := got3.Bot.Dingtalk.SessionMappings; len(mappings) != 1 || mappings[0].RemoteID != "cid-ding-disabled-conn" {
+		t.Fatalf("legacy dingtalk mappings = %+v, want mapping when only disabled connection exists", mappings)
+	}
+	if mappings := got3.Bot.Connections[0].SessionMappings; len(mappings) != 0 {
+		t.Fatalf("disabled connection mappings = %+v, want none", mappings)
 	}
 }
 

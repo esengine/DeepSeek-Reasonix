@@ -1,7 +1,9 @@
 // Run: tsx src/__tests__/context-panel-breakdown.test.ts
 
-import { cacheHitTone, contextBreakdown, contextCostDisplay, contextSessionCache, contextSourceRows, contextUsageRefreshKey, contextWindowStatus, formatCacheHitRate, formatMetricTokens } from "../components/ContextPanel";
+import { cacheHitTone, contextBreakdown, contextCostDisplay, contextSessionCache, contextSourceRows, contextUsageRefreshKey, contextWindowStatus, formatCacheHitRate, formatMetricTokens, formatSharePercent, liveTurnUsageBreakdown } from "../components/ContextPanel";
+import { contextWindowPercentages } from "../lib/contextWindow";
 import { currencySymbol, formatMoney, formatMoneyLocalized } from "../lib/money";
+import type { WireUsage } from "../lib/types";
 
 let passed = 0;
 let failed = 0;
@@ -27,6 +29,8 @@ function ok(condition: boolean, label: string) {
 }
 
 console.log("\ncontext panel breakdown");
+
+eq(formatSharePercent(1, 1_000), "<1%", "small non-zero source shares are not shown as zero");
 
 const mock = contextBreakdown(42_124, 128_000, 22_134, 12_345, 7_521);
 eq(
@@ -76,6 +80,76 @@ eq(
 );
 eq(Math.round(oversized.otherPct * 10) / 10, 6.1, "oversized provider breakdown does not fill the ring");
 
+// Multi-attempt stream recovery: billable aggregates vs latest Context* shape.
+// Ring uses used=30002; panel breakdown must not show 60000/5 from aggregates.
+const multiAttemptUsage = {
+  promptTokens: 60_000,
+  completionTokens: 5,
+  totalTokens: 60_005,
+  cacheHitTokens: 0,
+  cacheMissTokens: 60_000,
+  reasoningTokens: 3,
+  sessionCacheHitTokens: 0,
+  sessionCacheMissTokens: 0,
+  contextPromptTokens: 30_000,
+  contextCompletionTokens: 2,
+  contextReasoningTokens: 1,
+} as WireUsage;
+const multiAttemptTurn = liveTurnUsageBreakdown(multiAttemptUsage, {
+  promptTokens: 30_000,
+  completionTokens: 2,
+  reasoningTokens: 1,
+});
+eq(
+  multiAttemptTurn,
+  { promptTokens: 30_000, completionTokens: 2, reasoningTokens: 1 },
+  "live turn breakdown prefers Context* over billable aggregates",
+);
+const multiAttemptRing = contextBreakdown(
+  30_002,
+  200_000,
+  multiAttemptTurn.promptTokens,
+  multiAttemptTurn.completionTokens,
+  multiAttemptTurn.reasoningTokens,
+);
+eq(
+  {
+    promptTokens: multiAttemptRing.promptTokens,
+    completionTokens: multiAttemptRing.completionTokens,
+    reasoningTokens: multiAttemptRing.reasoningTokens,
+  },
+  { promptTokens: 30_000, completionTokens: 1, reasoningTokens: 1 },
+  "2×30K recovery: panel segments match latest attempt, not 60000/5",
+);
+const legacyLive = liveTurnUsageBreakdown(
+  {
+    promptTokens: 100,
+    completionTokens: 20,
+    totalTokens: 120,
+    cacheHitTokens: 0,
+    cacheMissTokens: 100,
+    reasoningTokens: 8,
+    sessionCacheHitTokens: 0,
+    sessionCacheMissTokens: 0,
+  } as WireUsage,
+  null,
+);
+eq(
+  legacyLive,
+  { promptTokens: 100, completionTokens: 20, reasoningTokens: 8 },
+  "legacy usage without Context* falls back to billable fields",
+);
+const rebindFallback = liveTurnUsageBreakdown(null, {
+  promptTokens: 30_000,
+  completionTokens: 2,
+  reasoningTokens: 1,
+});
+eq(
+  rebindFallback,
+  { promptTokens: 30_000, completionTokens: 2, reasoningTokens: 1 },
+  "without live usage, panel uses backend rebind snapshot",
+);
+
 const unknownWindow = contextBreakdown(42_124, 0, 22_134, 12_345, 7_521);
 eq(
   {
@@ -95,10 +169,21 @@ eq(
 
 console.log("\ncontext window status");
 
+eq(
+  contextWindowPercentages(1_400_000, 1_000_000),
+  { raw: 140, display: 100 },
+  "over-limit context preserves the raw percentage while capping the meter fill",
+);
+eq(
+  contextWindowPercentages(1_001, 1_000),
+  { raw: 101, display: 100 },
+  "just-over-limit context remains visibly over 100 percent after integer formatting",
+);
 eq(contextWindowStatus(33, 80), { tone: "good", key: "context.windowStatusHealthy" }, "low usage stays healthy");
 eq(contextWindowStatus(72, 80), { tone: "notice", key: "context.windowStatusWatch" }, "usage near compact threshold warns early");
 eq(contextWindowStatus(80, 80), { tone: "warn", key: "context.windowStatusPastCompact" }, "compact threshold reached takes warning tone");
 eq(contextWindowStatus(91, 80), { tone: "warn", key: "context.windowStatusNearLimit" }, "near hard limit overrides compact status");
+eq(contextWindowStatus(140, 80), { tone: "warn", key: "context.windowStatusOverLimit" }, "over-limit context has a distinct status");
 
 console.log("\ncontext panel cost");
 
@@ -108,7 +193,11 @@ const infoCost = contextCostDisplay({
   sessionCurrency: "¥",
   usage: { cost: 0, costUsd: 0, currency: "¥" },
 });
-eq(infoCost, { amount: 0.1759, currency: "$" }, "panel cost keeps the panel currency instead of state default");
+eq(
+  infoCost,
+  { amount: 0.1759, currency: "$", estimated: true, complete: true, labelKind: "estimated" },
+  "panel cost keeps the panel currency instead of state default",
+);
 const singleRequestOnly = contextCostDisplay({
   info: { sessionCost: 0, sessionCurrency: "", sessionCostUsd: 0 },
   sessionCost: 0,
@@ -117,7 +206,7 @@ const singleRequestOnly = contextCostDisplay({
 });
 eq(
   singleRequestOnly,
-  { amount: 0, currency: "¥" },
+  { amount: 0, currency: "¥", estimated: true, complete: false, labelKind: "unavailable" },
   "a single request's cost never renders under the session-cost label",
 );
 const localAccumulated = contextCostDisplay({
@@ -126,7 +215,32 @@ const localAccumulated = contextCostDisplay({
   sessionCurrency: "¥",
   usage: { cost: 0.42, costUsd: 0.42, currency: "$" },
 });
-eq(localAccumulated, { amount: 1.5, currency: "¥" }, "locally accumulated session cost still renders");
+eq(
+  localAccumulated,
+  { amount: 1.5, currency: "¥", estimated: true, complete: true, labelKind: "estimated" },
+  "locally accumulated session cost still renders",
+);
+const incompleteStructured = contextCostDisplay({
+  info: {
+    sessionCost: 1,
+    sessionCurrency: "USD",
+    sessionCostComplete: false,
+    sessionCostQuote: {
+      original: { amount: "7", currency: "CNY" },
+      selected: { amount: "1", currency: "USD" },
+      estimated: true,
+      complete: false,
+      incompleteReason: "incomplete_valuations",
+    },
+  },
+  sessionCost: 1,
+  sessionCurrency: "USD",
+});
+eq(
+  incompleteStructured,
+  { amount: 0, currency: "USD", estimated: true, complete: false, labelKind: "unavailable" },
+  "an incomplete structured quote never renders a partial selected total",
+);
 
 console.log("\ncontext panel session cache scope");
 

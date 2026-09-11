@@ -182,6 +182,7 @@ export function AnchoredPopover({
   return createPortal(
     <div
       ref={popoverRef}
+      data-app-overlay=""
       data-anchored-popover="active"
       data-ready={position ? "true" : "false"}
       data-state={closing || phase === "closing" ? "closing" : "open"}

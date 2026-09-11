@@ -46,13 +46,12 @@ type SessionRuntimeView struct {
 //
 // All fields are guarded by App.mu.
 type desktopSessionRuntime struct {
-	ID      string
-	Key     string
-	Epoch   string
-	Phase   SessionRuntimePhase
-	Issue   *SessionRuntimeIssue
-	Owner   *WorkspaceTab
-	readyCh chan struct{}
+	ID, Key, Epoch         string
+	Phase                  SessionRuntimePhase
+	Issue                  *SessionRuntimeIssue
+	Owner                  *WorkspaceTab
+	suppressStartupRestore bool
+	readyCh                chan struct{}
 }
 
 func newSessionRuntimeID(prefix string) string {
@@ -145,6 +144,19 @@ func (a *App) runtimeForTabLocked(tab *WorkspaceTab) *desktopSessionRuntime {
 	return rt
 }
 
+// runtimeEpochForTabLocked returns the generation already transferred to tab.
+// Callers use it when reattaching an existing runtime: the generation must be
+// announced before that runtime replays any pending prompt.
+func (a *App) runtimeEpochForTabLocked(tab *WorkspaceTab) string {
+	if rt := a.runtimeForTabLocked(tab); rt != nil {
+		return rt.Epoch
+	}
+	if tab != nil && tab.sink != nil {
+		return tab.sink.runtimeEpochSnapshot()
+	}
+	return ""
+}
+
 func (a *App) runtimeOwnerLiveLocked(rt *desktopSessionRuntime) bool {
 	if rt == nil || rt.Owner == nil {
 		return false
@@ -194,6 +206,7 @@ func (a *App) setSessionRuntimePhaseLocked(tab *WorkspaceTab, phase SessionRunti
 	}
 	rt.Phase = phase
 	rt.Issue = sessionRuntimeIssueForError(err)
+	rt.suppressStartupRestore = false
 	if phase == sessionRuntimeStarting {
 		rt.Issue = nil
 		if rt.readyCh == nil {
@@ -218,6 +231,7 @@ func (a *App) advanceSessionRuntimeEpochLocked(tab *WorkspaceTab) string {
 	rt.Epoch = newSessionRuntimeID("epoch")
 	rt.Phase = sessionRuntimeReady
 	rt.Issue = nil
+	rt.suppressStartupRestore = false
 	closeRuntimeReadyChannelLocked(rt)
 	if tab.sink != nil {
 		tab.sink.setRuntimeEpoch(rt.Epoch)

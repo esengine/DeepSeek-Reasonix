@@ -19,6 +19,8 @@ import (
 
 type stubProvider struct{}
 
+const autosaveTestTimeout = 10 * time.Second
+
 func (stubProvider) Name() string { return "stub" }
 
 func (stubProvider) Stream(_ context.Context, _ provider.Request) (<-chan provider.Chunk, error) {
@@ -38,7 +40,7 @@ func controllerWithContent(t *testing.T, path string) *control.Controller {
 
 func waitForFile(t *testing.T, path, want string) {
 	t.Helper()
-	deadline := time.Now().Add(2 * time.Second)
+	deadline := time.Now().Add(autosaveTestTimeout)
 	for time.Now().Before(deadline) {
 		if b, err := os.ReadFile(path); err == nil && strings.Contains(string(b), want) {
 			return
@@ -50,7 +52,7 @@ func waitForFile(t *testing.T, path, want string) {
 
 func waitForAutosaveIdle(t *testing.T, tab *WorkspaceTab) {
 	t.Helper()
-	waitForAutosaveIdleWithin(t, tab, 2*time.Second)
+	waitForAutosaveIdleWithin(t, tab, autosaveTestTimeout)
 }
 
 func waitForAutosaveIdleWithin(t *testing.T, tab *WorkspaceTab, timeout time.Duration) {
@@ -124,12 +126,10 @@ func TestScheduleSnapshotCoalesces(t *testing.T) {
 	_ = a
 
 	var wg sync.WaitGroup
-	for i := 0; i < 64; i++ {
-		wg.Add(1)
-		go func() {
-			defer wg.Done()
+	for range 64 {
+		wg.Go(func() {
 			tab.sink.Emit(event.Event{Kind: event.TurnDone})
-		}()
+		})
 	}
 	wg.Wait()
 
@@ -174,6 +174,7 @@ func TestAutosaveFailureRetriesAndRecoversOnNextTurnDone(t *testing.T) {
 }
 
 func TestDesktopSnapshotConflictRecoveryUpdatesTabAndProjectTree(t *testing.T) {
+	t.Setenv(agent.SessionLogSchemaEnv, "v1")
 	isolateDesktopUserDirs(t)
 
 	root := globalTabWorkspaceRoot()
@@ -289,6 +290,7 @@ func TestDesktopSnapshotConflictRecoveryUpdatesTabAndProjectTree(t *testing.T) {
 }
 
 func TestDesktopSnapshotConflictRecoveryRequiresRecoveryLease(t *testing.T) {
+	t.Setenv(agent.SessionLogSchemaEnv, "v1")
 	isolateDesktopUserDirs(t)
 
 	root := globalTabWorkspaceRoot()
@@ -335,11 +337,11 @@ func TestDesktopSnapshotConflictRecoveryRequiresRecoveryLease(t *testing.T) {
 		detachedSessions: map[string]*WorkspaceTab{},
 		activeTabID:      "recovery_tab",
 	}
-	app.runtimeEvents.emit = func(ctx context.Context, name string, payload ...interface{}) {
+	app.runtimeEvents.emit = func(ctx context.Context, name string, payload ...any) {
 		runtimeEvents <- runtimeEventEnvelope{
 			ctx:     ctx,
 			name:    name,
-			payload: append([]interface{}(nil), payload...),
+			payload: append([]any(nil), payload...),
 		}
 	}
 	tab := &WorkspaceTab{

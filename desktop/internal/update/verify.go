@@ -21,10 +21,6 @@ RWSw66n0RsoSr6Zhh6qt5YO95YkpCayTOCMFVDNUQSjJYwxoYngNVBSq`
 // touching disk — never apply an update whose signature has not checked out.
 func Verify(data, sig []byte) error { return verifyWith(publicKey, data, sig) }
 
-// PublicKey returns the embedded public key in its canonical two-line text form,
-// so docs/UI can surface it for manual `minisign -Vm <file>` verification.
-func PublicKey() string { return publicKey }
-
 // verifyWith is the testable core: it parses an arbitrary public-key text and
 // verifies the signature, letting tests use a throwaway key pair without the
 // embedded key's (secret) counterpart.

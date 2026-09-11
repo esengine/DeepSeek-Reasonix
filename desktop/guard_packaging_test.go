@@ -30,6 +30,15 @@ func TestVerifyWindowsPortableVersionedLayout(t *testing.T) {
 	for _, name := range []string{"reasonix-desktop.exe", "reasonix-cli.exe", "reasonix-update-helper.exe"} {
 		writePortableFixture(t, ver, name, name)
 	}
+	// The Electron bundle is the app/ tree member of the active version.
+	appDir := filepath.Join(ver, "app")
+	if err := os.MkdirAll(filepath.Join(appDir, "resources", "app"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	writePortableFixture(t, appDir, "Reasonix.exe", "shell")
+	writePortableFixture(t, filepath.Join(appDir, "resources"), "app.asar", "asar")
+	writePortableFixture(t, filepath.Join(appDir, "resources"), "build.json", "{}")
+	writePortableFixture(t, filepath.Join(appDir, "resources", "app"), "index.html", "<html></html>")
 	if err := os.WriteFile(filepath.Join(good, "current.json"), []byte(`{
   "schemaVersion": 1,
   "activeVersion": "v1.20.0",
@@ -71,24 +80,22 @@ func TestDesktopPackagesPreserveNativePlatformLaunchers(t *testing.T) {
 		`./cmd/reasonix`,
 		`./cmd/reasonix-legacy-migrator`,
 		`./cmd/reasonix-launcher`,
-		`cp "$cli_out" "$app/Contents/MacOS/$CLINAME"`,
+		`cp "$cli_out" "$app/Contents/Resources/service/$CLINAME"`,
 		`macOS bundle must not include $GUARDNAME`,
-		`[ "$bundle_executable" = "$BINNAME" ]`,
+		`[ "$bundle_executable" = "$APPNAME" ]`,
 		`Print :CFBundleIconFile`,
 		`darwin_icon="$ROOT/desktop/build/darwin/icon.icns"`,
-		`cp "$darwin_icon" "$app/Contents/Resources/$bundle_icon"`,
-		`cmp -s "$darwin_icon" "$app/Contents/Resources/$bundle_icon"`,
-		`Contents/Resources/$bundle_icon`,
+		`[ -s "$app/Contents/Resources/$bundle_icon" ]`,
+		`macOS bundle icon is missing: $bundle_icon`,
 		`-H windowsgui`,
 		`stamp_windows_executable "$guard_out" "Reasonix Legacy Migrator"`,
 		`stamp_windows_executable "$launcher_out" "Reasonix Launcher"`,
-		`stamp_windows_executable "build/windows/installer/$UPDATE_HELPER" "Reasonix Update Helper"`,
+		`stamp_windows_executable "$installer_dir/$UPDATE_HELPER" "Reasonix Update Helper"`,
 		`payload_dir="$ROOT/desktop/build/windows/signing-payload"`,
-		`cp "build/bin/$BINNAME.exe" "$payload_dir/$BINNAME.exe"`,
-		`cp "$launcher_out" "$payload_dir/$LAUNCHERNAME.exe"`,
-		`cp "$guard_out" "$payload_dir/$GUARDNAME.exe"`,
-		`cp "build/windows/installer/$WINDOWS_CLINAME.exe" "$payload_dir/$WINDOWS_CLINAME.exe"`,
-		`cp "build/windows/installer/reasonix-uninstall.exe" "$payload_dir/reasonix-uninstall.exe"`,
+		`for name in "$BINNAME.exe" "$GUARDNAME.exe" "$LAUNCHERNAME.exe" "$UPDATE_HELPER" "$WINDOWS_CLINAME.exe" "reasonix-uninstall.exe"; do`,
+		`cp "$installer_dir/$name" "$payload_dir/$name"`,
+		`cp -R "$installer_dir/app" "$payload_dir/app"`,
+		`node "$ROOT/desktop/packaging/signing-files.mjs" "$payload_dir"`,
 		`"$ROOT/scripts/package-windows-desktop.sh" "$arch" "$payload_dir"`,
 		`"$BINNAME" "$LAUNCHERNAME" "$GUARDNAME" "$CLINAME"`,
 		`Exec=reasonix-launcher`,
@@ -98,20 +105,29 @@ func TestDesktopPackagesPreserveNativePlatformLaunchers(t *testing.T) {
 		}
 	}
 	if strings.Contains(build, `Set :CFBundleExecutable $GUARDNAME`) {
-		t.Fatal("macOS package must not replace the native Wails bundle executable with Guard")
+		t.Fatal("macOS package must not replace the Electron bundle executable with Guard")
 	}
 	launcherStamp := strings.Index(build, `stamp_windows_executable "$launcher_out" "Reasonix Launcher"`)
-	payloadCopy := strings.Index(build, `cp "$launcher_out" "$payload_dir/$LAUNCHERNAME.exe"`)
+	payloadCopy := strings.Index(build, `cp "$installer_dir/$name" "$payload_dir/$name"`)
 	if launcherStamp < 0 || payloadCopy < 0 || launcherStamp > payloadCopy {
 		t.Fatalf("Windows payload must copy the already-stamped launcher (stamp=%d copy=%d)", launcherStamp, payloadCopy)
 	}
 	if strings.Contains(build, `"$staging/$CLINAME.exe"`) {
 		t.Fatal("Windows package must not collide reasonix.exe with the Reasonix.exe launcher")
 	}
-	darwinIconCopy := strings.Index(build, `cp "$darwin_icon" "$app/Contents/Resources/$bundle_icon"`)
-	developerIDSign := strings.Index(build, `codesign --force --deep --timestamp --options runtime`)
-	if darwinIconCopy < 0 || developerIDSign < 0 || darwinIconCopy > developerIDSign {
-		t.Fatalf("macOS icon must be replaced before signing (icon=%d sign=%d)", darwinIconCopy, developerIDSign)
+	darwinIconCheck := strings.Index(build, `[ -s "$app/Contents/Resources/$bundle_icon" ]`)
+	developerIDSign := strings.Index(build, `node "$ROOT/desktop/packaging/sign-macos.mjs" "$app" "$identity"`)
+	if darwinIconCheck < 0 || developerIDSign < 0 || darwinIconCheck > developerIDSign {
+		t.Fatalf("macOS bundle icon must be verified before signing (icon=%d sign=%d)", darwinIconCheck, developerIDSign)
+	}
+	for _, copyCommand := range []string{
+		`cp "$service_out" "$app/Contents/MacOS/$BINNAME"`,
+		`cp "$service_out" "$app/Contents/Resources/service/$BINNAME"`,
+		`cp "$cli_out" "$app/Contents/Resources/service/$CLINAME"`,
+	} {
+		if index := strings.Index(build, copyCommand); index < 0 || index > developerIDSign {
+			t.Errorf("macOS sidecar must be installed before signing: %s", copyCommand)
+		}
 	}
 
 	for _, want := range []string{
@@ -175,7 +191,8 @@ func TestDesktopPackagesPreserveNativePlatformLaunchers(t *testing.T) {
 	windows := string(windowsData)
 	for _, want := range []string{
 		`File "/oname=${REASONIX_CLI}" "${REASONIX_CLI}"`,
-		`!uninstfinalize 'cmd.exe /C copy /Y "%1" "reasonix-uninstall.exe" >NUL'`,
+		`!define REASONIX_UNINST_FINALIZE 'cmd.exe /C copy /Y "%1" "reasonix-uninstall.exe" >NUL'`,
+		`!uninstfinalize '${REASONIX_UNINST_FINALIZE}'`,
 		`File "/oname=uninstall.exe" "${ARG_REASONIX_SIGNED_UNINSTALLER}"`,
 		`StrCpy $R9 "$INSTDIR\versions\.installer-v${INFO_PRODUCTVERSION}-$R8"`,
 		`File "/oname=${REASONIX_LAYOUT_INSTALLER}" "${REASONIX_GUARD}"`,

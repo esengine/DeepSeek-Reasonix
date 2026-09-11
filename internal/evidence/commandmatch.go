@@ -1,6 +1,7 @@
 package evidence
 
 import (
+	"path/filepath"
 	"strings"
 
 	"reasonix/internal/shellparse"
@@ -99,4 +100,103 @@ func segmentTokens(s string) []string {
 		}
 	}
 	return tokens
+}
+
+func (l *Ledger) HasSuccessfulCommand(command string) bool {
+	command = strings.TrimSpace(command)
+	if l == nil || command == "" {
+		return false
+	}
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	for _, r := range l.receipts {
+		if r.Success && r.ToolName == "bash" && CommandMatches(command, r.Command) {
+			return true
+		}
+	}
+	return false
+}
+
+// HasFailedCommand reports whether the cited command ran this turn but exited
+// non-zero — so callers can distinguish "ran and failed" from "never ran".
+func (l *Ledger) HasFailedCommand(command string) bool {
+	command = strings.TrimSpace(command)
+	if l == nil || command == "" {
+		return false
+	}
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	for _, r := range l.receipts {
+		if !r.Success && r.ToolName == "bash" && CommandMatches(command, r.Command) {
+			return true
+		}
+	}
+	return false
+}
+
+// SuccessfulCommands returns up to limit successful bash commands from this
+// turn, most recent first, for self-correction hints in rejection errors.
+func (l *Ledger) SuccessfulCommands(limit int) []string {
+	if l == nil || limit <= 0 {
+		return nil
+	}
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	var out []string
+	for i := len(l.receipts) - 1; i >= 0 && len(out) < limit; i-- {
+		r := l.receipts[i]
+		if r.Success && r.ToolName == "bash" && r.Command != "" {
+			out = append(out, r.Command)
+		}
+	}
+	return out
+}
+
+// HasSuccessfulBashMentioningPaths reports whether every path appears in some
+// successful bash command this turn — files created or edited through shell
+// redirection (`seq … > file`) leave no reader/writer receipt, so the command
+// text naming the path is the receipt.
+func (l *Ledger) HasSuccessfulBashMentioningPaths(paths []string) bool {
+	wanted := normalizePaths(paths)
+	if l == nil || len(wanted) == 0 {
+		return false
+	}
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	for _, p := range wanted {
+		needle := strings.ToLower(filepath.ToSlash(p))
+		found := false
+		for _, r := range l.receipts {
+			if !r.Success || r.ToolName != "bash" {
+				continue
+			}
+			command := strings.ToLower(strings.ReplaceAll(r.Command, `\`, `/`))
+			if strings.Contains(command, needle) {
+				found = true
+				break
+			}
+		}
+		if !found {
+			return false
+		}
+	}
+	return true
+}
+
+func (l *Ledger) HasSuccessfulCommandAfter(command string, after int) bool {
+	command = strings.TrimSpace(command)
+	if l == nil || command == "" {
+		return false
+	}
+	start := max(after+1, 0)
+
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	for i := start; i < len(l.receipts); i++ {
+		r := l.receipts[i]
+		if r.Success && r.ToolName == "bash" && CommandMatches(command, r.Command) {
+			return true
+		}
+	}
+	return false
 }

@@ -12,6 +12,7 @@ import (
 	"reasonix/internal/netclient"
 	"reasonix/internal/sandbox"
 	"reasonix/internal/secrets"
+	"reasonix/internal/sessiontemp"
 	"reasonix/internal/tool"
 )
 
@@ -20,6 +21,10 @@ import (
 // each command through the sandbox (see package sandbox). guard appends a
 // warning to command output when the command references Reasonix's own session
 // stores (see SessionDataGuard).
+//
+// Session-private temporary directories are bound separately via
+// BindSessionTemp (or Workspace.SessionTemp) so the timeout variadic form stays
+// stable for existing callers.
 func ConfineBash(spec sandbox.Spec, guard SessionDataGuard, timeout ...time.Duration) tool.Tool {
 	shell := spec.Shell
 	if shell.Path == "" {
@@ -30,6 +35,22 @@ func ConfineBash(spec sandbox.Spec, guard SessionDataGuard, timeout ...time.Dura
 		b.timeout = timeout[0]
 	}
 	return b
+}
+
+// BindSessionTemp attaches a session-private temporary directory manager to a
+// confined bash (and, when present, grep) tool. ok is false when tl is not a
+// bash tool (including wrappers that do not unwrap).
+func BindSessionTemp(tl tool.Tool, m *sessiontemp.Manager) (tool.Tool, bool) {
+	switch t := tl.(type) {
+	case bash:
+		t.sessionTemp = m
+		return t, true
+	case grepTool:
+		t.sessionTemp = m
+		return t, true
+	default:
+		return nil, false
+	}
 }
 
 // RebindBashWriteRoots returns a copy of bash with its complete write surface
@@ -55,6 +76,9 @@ func RebindBashWriteRoots(tl tool.Tool, roots []string) (tool.Tool, bool) {
 	// confinement — the claim roots are the only allowed write surface.
 	spec.AppContainerWriteRoots = append([]string(nil), rs...)
 	b.sb = spec
+	// rootSet is preserved so later session grants still apply inside the claim.
+	// sessionTemp is preserved: sub-agent write-root rebinding must not drop
+	// the session-private temporary directory manager.
 	return b, true
 }
 
@@ -96,6 +120,7 @@ func ConfineReaders(forbidRoots []string) []tool.Tool {
 	rs := realRoots(forbidRoots)
 	return []tool.Tool{
 		readFile{forbidRoots: rs},
+		viewImage{forbidRoots: rs},
 		listDir{forbidRoots: rs},
 		globTool{forbidRoots: rs},
 		codeIndex{forbidRoots: rs},
@@ -207,16 +232,13 @@ func confineWrite(ctx context.Context, roots []string, guard SessionDataGuard, m
 	return managed.approve(ctx, target)
 }
 
-// confinePreview mirrors confineWrite for ctx-less diff previews: they read the
-// target to render a diff but never write, so a managed config file passes
-// without the per-write approval — Execute still gates the actual write.
-func confinePreview(roots []string, guard SessionDataGuard, managed ManagedConfigPaths, target string) error {
-	confineErr := confine(roots, target)
-	if confineErr == nil {
-		return guard.Check(target)
-	}
-	if !managed.Match(target) {
-		return confineErr
+// confinePreview is stricter than confineWrite because Preview runs before the
+// permission gate and reads old content into the approval card and session.
+// Managed config files outside the roots therefore stay unreadable here; only
+// Execute may use their explicit, per-write approval escape hatch.
+func confinePreview(roots []string, guard SessionDataGuard, _ ManagedConfigPaths, target string) error {
+	if err := confine(roots, target); err != nil {
+		return err
 	}
 	return guard.Check(target)
 }

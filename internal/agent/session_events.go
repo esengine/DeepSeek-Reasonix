@@ -2,6 +2,7 @@ package agent
 
 import (
 	"bytes"
+	"context"
 	"crypto/sha256"
 	"encoding/json"
 	"errors"
@@ -23,9 +24,8 @@ const (
 	sessionEventTypeReplace   = "replace"
 	sessionEventTypeAppend    = "append"
 	// sessionEventReplayMaxBytes caps decoder input before encoding/json can
-	// allocate an arbitrarily large record. Session logs normally compact far
-	// below this threshold; the generous ceiling still accommodates histories
-	// with embedded images while keeping corrupt logs from exhausting the host.
+	// allocate an arbitrarily large record. The ceiling still accommodates
+	// image-bearing histories while keeping corrupt logs from exhausting RAM.
 	sessionEventReplayMaxBytes = int64(128 << 20)
 	// A byte limit alone is insufficient: a compact JSON array can expand into
 	// a much larger graph of messages and event records after decoding.
@@ -34,11 +34,11 @@ const (
 	sessionEventReplayMaxCollectionItems = 100_000
 	sessionEventProbeMaxBytes            = int64(4 << 10)
 	// sessionEventLogCompactFloor is the smallest log size that can trigger
-	// compaction, so short sessions never pay a checkpoint rewrite.
+	// event-log maintenance, so short sessions never pay a checkpoint rewrite.
 	sessionEventLogCompactFloor = int64(256 << 10)
 	// sessionEventLogCompactFactor bounds the log at this multiple of the live
 	// transcript's encoded size; past it the log is rewritten to one replace
-	// event so replace-heavy histories (compaction, rewind) cannot grow the
+	// event so replace-heavy histories (rewind and recovery) cannot grow the
 	// file without bound.
 	sessionEventLogCompactFactor = int64(4)
 )
@@ -184,159 +184,23 @@ type sessionEventReplay struct {
 	damaged bool
 }
 
-// sessionEventLogProbe classifies whatever sits at the session's event-log
-// path. Legacy imports can leave a foreign ".events.jsonl" (e.g. the v0.x
-// Claude-style event transcript) at exactly the native log path; writing into
-// or over it would corrupt the user's original file, so foreign logs are
-// read-ignored and never touched.
-type sessionEventLogProbe struct {
-	size          int64
-	native        bool // missing/empty, or first record is a supported native event
-	futureSchema  bool // first record declares a newer schema than this build
-	schemaVersion int
-}
-
-// sessionEventSidecarsFit reports whether the event log and index filenames
-// stay within the filesystem's name limit. Overlong transcript names (from the
-// pre-bounded recovery cascade, until reconcileOverlongSessionFilenames renames
-// them) must run checkpoint-only: creating their sidecars would fail with
-// ENAMETOOLONG mid-save.
-func sessionEventSidecarsFit(sessionPath string) bool {
-	logName := filepath.Base(store.SessionEventLog(sessionPath))
-	indexName := filepath.Base(store.SessionEventIndex(sessionPath))
-	return len(logName) <= nameMaxBytes && len(indexName) <= nameMaxBytes
-}
-
-// probeSessionEventLog inspects the first record of the event log to decide
-// whether the native persistence layer owns the file. Missing or empty logs
-// count as native (we may create/append); an undecodable or foreign first
-// record — or a transcript name too long for the sidecars to fit — marks the
-// file as not ours.
-func probeSessionEventLog(sessionPath string) (sessionEventLogProbe, error) {
-	return probeSessionEventLogWithLimits(sessionPath, defaultSessionReplayLimits)
-}
-
-func probeSessionEventLogWithLimits(sessionPath string, limits sessionReplayLimits) (sessionEventLogProbe, error) {
-	path := store.SessionEventLog(sessionPath)
-	if path == "" {
-		return sessionEventLogProbe{native: true}, nil
-	}
-	if !sessionEventSidecarsFit(sessionPath) {
-		return sessionEventLogProbe{}, nil
-	}
-	info, err := os.Stat(path)
-	if err != nil {
-		if os.IsNotExist(err) {
-			return sessionEventLogProbe{native: true}, nil
-		}
-		return sessionEventLogProbe{}, err
-	}
-	if info.IsDir() {
-		return sessionEventLogProbe{}, nil
-	}
-	if info.Size() == 0 {
-		return sessionEventLogProbe{native: true}, nil
-	}
-	probe := sessionEventLogProbe{size: info.Size()}
-	f, err := os.Open(path)
-	if err != nil {
-		return sessionEventLogProbe{}, err
-	}
-	defer f.Close()
-	var schemaVersion int
-	var eventType string
-	var ok bool
-	schemaVersion, eventType, ok = probeSessionEventHeader(f)
-	if !ok && info.Size() <= limits.maxBytes {
-		// Native writers put both identifying fields in the bounded prefix. For
-		// other valid in-budget JSON, fall back to a minimal struct decode so
-		// field order remains a compatibility property rather than a format
-		// requirement. Unknown fields are not materialized into messages.
-		if _, err := f.Seek(0, io.SeekStart); err != nil {
-			return sessionEventLogProbe{}, err
-		}
-		var header struct {
-			SchemaVersion int    `json:"schema_version"`
-			Type          string `json:"type"`
-		}
-		dec := json.NewDecoder(&io.LimitedReader{R: f, N: limits.maxBytes + 1})
-		if err := dec.Decode(&header); err == nil {
-			schemaVersion, eventType, ok = header.SchemaVersion, header.Type, true
-		}
-	}
-	if !ok {
-		// Nothing decodable at the head: not a native log this build can own.
-		return probe, nil
-	}
-	probe.schemaVersion = schemaVersion
-	switch {
-	case schemaVersion == sessionEventSchemaVersion &&
-		(eventType == sessionEventTypeReplace || eventType == sessionEventTypeAppend):
-		probe.native = true
-	case schemaVersion > sessionEventSchemaVersion:
-		// A newer writer owns this log; ignoring or truncating it would
-		// silently discard that writer's transcript.
-		probe.futureSchema = true
-	}
-	return probe, nil
-}
-
-// probeSessionEventHeader searches a bounded prefix for the identifying fields.
-// Using Decode on a partial struct still buffers the whole JSON value, so native
-// writer output must take this fast path before replay's byte budget is checked.
-func probeSessionEventHeader(r io.Reader) (schemaVersion int, eventType string, ok bool) {
-	dec := json.NewDecoder(io.LimitReader(r, sessionEventProbeMaxBytes))
-	tok, err := dec.Token()
-	if err != nil {
-		return 0, "", false
-	}
-	if delim, isDelim := tok.(json.Delim); !isDelim || delim != '{' {
-		return 0, "", false
-	}
-	var haveSchema, haveType bool
-	for dec.More() {
-		key, err := dec.Token()
-		if err != nil {
-			return 0, "", false
-		}
-		name, isString := key.(string)
-		if !isString {
-			return 0, "", false
-		}
-		switch name {
-		case "schema_version":
-			if err := dec.Decode(&schemaVersion); err != nil {
-				return 0, "", false
-			}
-			haveSchema = true
-		case "type":
-			if err := dec.Decode(&eventType); err != nil {
-				return 0, "", false
-			}
-			haveType = true
-		default:
-			var discard json.RawMessage
-			if err := dec.Decode(&discard); err != nil {
-				return 0, "", false
-			}
-		}
-		if haveSchema && haveType {
-			return schemaVersion, eventType, true
-		}
-	}
-	return 0, "", false
-}
-
 // replaySessionEventLog decodes an event log tolerantly: decoding stops at the
 // first record that fails to parse or chain, and the state up to that point is
 // returned with damaged=true so writers can self-heal. Unsupported schema
 // versions and unknown event types stay hard errors — they mean a newer writer
 // owns this log, and truncating it would discard that writer's data.
 func replaySessionEventLog(path string) (sessionEventReplay, error) {
-	return replaySessionEventLogWithLimits(path, defaultSessionReplayLimits)
+	return replaySessionEventLogWithLimits(path, defaultSessionReplayLimits, nil)
 }
 
-func replaySessionEventLogWithLimits(path string, limits sessionReplayLimits) (sessionEventReplay, error) {
+func replaySessionEventLogWithLimits(path string, limits sessionReplayLimits, hasher *sessionTranscriptHasher) (sessionEventReplay, error) {
+	return replaySessionEventLogWithContext(context.Background(), path, limits, hasher)
+}
+
+func replaySessionEventLogWithContext(ctx context.Context, path string, limits sessionReplayLimits, hasher *sessionTranscriptHasher) (sessionEventReplay, error) {
+	if err := ctx.Err(); err != nil {
+		return sessionEventReplay{}, err
+	}
 	f, err := os.Open(path)
 	if err != nil {
 		return sessionEventReplay{}, err
@@ -352,11 +216,17 @@ func replaySessionEventLogWithLimits(path string, limits sessionReplayLimits) (s
 	}
 	// Stat and read are not atomic across processes. LimitReader keeps a log
 	// that grows after Stat inside the same byte budget.
-	limited := &io.LimitedReader{R: f, N: limits.maxBytes + 1}
+	limited := &io.LimitedReader{R: &contextReader{ctx: ctx, reader: f}, N: limits.maxBytes + 1}
 	dec := json.NewDecoder(limited)
 	for {
+		if err := ctx.Err(); err != nil {
+			return replay, err
+		}
 		var rec sessionEventWireRecord
 		if err := dec.Decode(&rec); err != nil {
+			if ctxErr := ctx.Err(); ctxErr != nil {
+				return replay, ctxErr
+			}
 			if limited.N == 0 {
 				return replay, sessionReplayLimitError(path, "encoded_bytes", limits.maxBytes+1, limits.maxBytes)
 			}
@@ -374,8 +244,11 @@ func replaySessionEventLogWithLimits(path string, limits sessionReplayLimits) (s
 		}
 		switch rec.Type {
 		case sessionEventTypeReplace:
-			msgs, collectionItems, err := decodeSessionEventMessages(path, rec.Messages, 0, 0, limits)
+			msgs, collectionItems, err := decodeSessionEventMessages(ctx, path, rec.Messages, 0, 0, limits)
 			if err != nil {
+				if ctxErr := ctx.Err(); ctxErr != nil {
+					return replay, ctxErr
+				}
 				if errors.Is(err, ErrSessionReplayLimitExceeded) {
 					return replay, err
 				}
@@ -385,15 +258,17 @@ func replaySessionEventLogWithLimits(path string, limits sessionReplayLimits) (s
 			replay.msgs = msgs
 			replay.collectionItems = collectionItems
 			replay.times = make([]time.Time, len(replay.msgs))
+			hasher.rehash(msgs)
 		case sessionEventTypeAppend:
 			if rec.MessageIndex != len(replay.msgs) {
 				replay.damaged = true
 				return replay, nil
 			}
-			msgs, collectionItems, err := decodeSessionEventMessages(
-				path, rec.Messages, len(replay.msgs), replay.collectionItems, limits,
-			)
+			msgs, collectionItems, err := decodeSessionEventMessages(ctx, path, rec.Messages, len(replay.msgs), replay.collectionItems, limits)
 			if err != nil {
+				if ctxErr := ctx.Err(); ctxErr != nil {
+					return replay, ctxErr
+				}
 				if errors.Is(err, ErrSessionReplayLimitExceeded) {
 					return replay, err
 				}
@@ -405,6 +280,7 @@ func replaySessionEventLogWithLimits(path string, limits sessionReplayLimits) (s
 			for range msgs {
 				replay.times = append(replay.times, rec.CreatedAt)
 			}
+			hasher.addAll(msgs)
 		default:
 			return replay, fmt.Errorf("decode session event log %s: unsupported event type %q", path, rec.Type)
 		}
@@ -418,6 +294,7 @@ func replaySessionEventLogWithLimits(path string, limits sessionReplayLimits) (s
 // The token walk is independent of today's provider.Message fields, so future
 // slice fields inherit the same aggregate object-graph bound automatically.
 func decodeSessionEventMessages(
+	ctx context.Context,
 	path string,
 	raw json.RawMessage,
 	existingMessages, existingCollectionItems int,
@@ -428,12 +305,12 @@ func decodeSessionEventMessages(
 		return nil, existingCollectionItems, nil
 	}
 	messageCount, collectionItems, err := preflightSessionEventMessages(
-		path, trimmed, existingMessages, existingCollectionItems, limits,
+		ctx, path, trimmed, existingMessages, existingCollectionItems, limits,
 	)
 	if err != nil {
 		return nil, existingCollectionItems, err
 	}
-	dec := json.NewDecoder(bytes.NewReader(trimmed))
+	dec := json.NewDecoder(&contextReader{ctx: ctx, reader: bytes.NewReader(trimmed)})
 	tok, err := dec.Token()
 	if err != nil {
 		return nil, existingCollectionItems, err
@@ -443,6 +320,9 @@ func decodeSessionEventMessages(
 	}
 	msgs := make([]provider.Message, 0, messageCount)
 	for dec.More() {
+		if err := ctx.Err(); err != nil {
+			return nil, existingCollectionItems, err
+		}
 		var msg provider.Message
 		if err := dec.Decode(&msg); err != nil {
 			return nil, existingCollectionItems, err
@@ -453,157 +333,6 @@ func decodeSessionEventMessages(
 		return nil, existingCollectionItems, err
 	}
 	return msgs, collectionItems, nil
-}
-
-func preflightSessionEventMessages(
-	path string,
-	raw []byte,
-	existingMessages, existingCollectionItems int,
-	limits sessionReplayLimits,
-) (messageCount, collectionItems int, err error) {
-	dec := json.NewDecoder(bytes.NewReader(raw))
-	tok, err := dec.Token()
-	if err != nil {
-		return 0, existingCollectionItems, err
-	}
-	if delim, ok := tok.(json.Delim); !ok || delim != '[' {
-		return 0, existingCollectionItems, fmt.Errorf("messages must be an array")
-	}
-	collectionItems = existingCollectionItems
-	for dec.More() {
-		if existingMessages+messageCount >= limits.maxMessages {
-			return 0, existingCollectionItems, sessionReplayLimitError(
-				path, "messages", int64(existingMessages+messageCount+1), int64(limits.maxMessages),
-			)
-		}
-		messageCount++
-		if err := preflightSessionEventValue(path, dec, &collectionItems, limits.maxCollectionItems); err != nil {
-			return 0, existingCollectionItems, err
-		}
-	}
-	if _, err := dec.Token(); err != nil {
-		return 0, existingCollectionItems, err
-	}
-	return messageCount, collectionItems, nil
-}
-
-// preflightSessionEventValue walks one JSON value without materializing maps or
-// slices. Each array element is charged before its value is read, so an invalid
-// over-limit element cannot allocate a typed provider collection first.
-func preflightSessionEventValue(path string, dec *json.Decoder, collectionItems *int, maxCollectionItems int) error {
-	tok, err := dec.Token()
-	if err != nil {
-		return err
-	}
-	delim, ok := tok.(json.Delim)
-	if !ok {
-		return nil
-	}
-	switch delim {
-	case '{':
-		for dec.More() {
-			key, err := dec.Token()
-			if err != nil {
-				return err
-			}
-			if _, ok := key.(string); !ok {
-				return fmt.Errorf("object key must be a string")
-			}
-			if err := preflightSessionEventValue(path, dec, collectionItems, maxCollectionItems); err != nil {
-				return err
-			}
-		}
-		end, err := dec.Token()
-		if err != nil {
-			return err
-		}
-		if end != json.Delim('}') {
-			return fmt.Errorf("object is not terminated")
-		}
-		return nil
-	case '[':
-		for dec.More() {
-			if *collectionItems >= maxCollectionItems {
-				return sessionReplayLimitError(
-					path,
-					"message_collection_items",
-					int64(*collectionItems+1),
-					int64(maxCollectionItems),
-				)
-			}
-			(*collectionItems)++
-			if err := preflightSessionEventValue(path, dec, collectionItems, maxCollectionItems); err != nil {
-				return err
-			}
-		}
-		end, err := dec.Token()
-		if err != nil {
-			return err
-		}
-		if end != json.Delim(']') {
-			return fmt.Errorf("array is not terminated")
-		}
-		return nil
-	default:
-		return fmt.Errorf("unexpected JSON delimiter %q", delim)
-	}
-}
-
-// loadSessionMessages returns the session transcript, preferring the event log
-// when the native layer owns it and it holds at least one decodable record.
-// Foreign files squatting the log path (legacy import leftovers) are ignored
-// in favor of the .jsonl checkpoint. damaged reports that a native log could
-// not be replayed to its end (torn tail or corrupt record); callers that write
-// should rewrite-and-compact to heal it.
-func loadSessionMessages(sessionPath string) (msgs []provider.Message, fromEvents, damaged bool, err error) {
-	return loadSessionMessagesWithLimits(sessionPath, defaultSessionReplayLimits)
-}
-
-func loadSessionMessagesWithLimits(sessionPath string, limits sessionReplayLimits) (msgs []provider.Message, fromEvents, damaged bool, err error) {
-	probe, err := probeSessionEventLogWithLimits(sessionPath, limits)
-	if err != nil {
-		return nil, false, false, err
-	}
-	if probe.futureSchema {
-		return nil, true, false, fmt.Errorf("session event log for %s uses schema %d; this build supports up to %d", sessionPath, probe.schemaVersion, sessionEventSchemaVersion)
-	}
-	if probe.native && probe.size > 0 {
-		replay, replayErr := replaySessionEventLogWithLimits(store.SessionEventLog(sessionPath), limits)
-		if replayErr != nil {
-			return nil, true, false, replayErr
-		}
-		if replay.records > 0 {
-			return replay.msgs, true, replay.damaged, nil
-		}
-		// Defensive: the probe saw a native head but nothing replayed; fall
-		// back to the checkpoint and let the next save rebuild the log.
-		msgs, err = loadSessionMessagesFromJSONL(sessionPath)
-		return msgs, false, true, err
-	}
-	msgs, err = loadSessionMessagesFromJSONL(sessionPath)
-	return msgs, false, false, err
-}
-
-func loadSessionMessagesFromJSONL(path string) ([]provider.Message, error) {
-	f, err := os.Open(path)
-	if err != nil {
-		return nil, err
-	}
-	defer f.Close()
-
-	var msgs []provider.Message
-	dec := json.NewDecoder(f)
-	for {
-		var m provider.Message
-		if err := dec.Decode(&m); err != nil {
-			if errors.Is(err, io.EOF) {
-				break
-			}
-			return nil, fmt.Errorf("decode %s: %w", path, err)
-		}
-		msgs = append(msgs, m)
-	}
-	return msgs, nil
 }
 
 // repairSessionEventLogTail truncates undecodable bytes left by a crash or
@@ -714,6 +443,7 @@ func appendSessionEvent(sessionPath string, rec sessionEventRecord, sync bool) e
 	if path == "" {
 		return fmt.Errorf("empty session event log path")
 	}
+	fileutil.Crash("wal-append", path)
 	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
 		return err
 	}
@@ -830,15 +560,22 @@ func readSessionEventIndex(sessionPath string) (*sessionEventIndex, error) {
 }
 
 func writeSessionEventIndex(path string, msgs []provider.Message, digest [sha256.Size]byte, revision int64) error {
+	return writeSessionEventIndexContext(context.Background(), path, msgs, digest, revision)
+}
+
+func writeSessionEventIndexContext(ctx context.Context, path string, msgs []provider.Message, digest [sha256.Size]byte, revision int64) error {
 	indexPath := store.SessionEventIndex(path)
 	if indexPath == "" {
 		return nil
+	}
+	if err := ctx.Err(); err != nil {
+		return err
 	}
 	logInfo, err := os.Stat(store.SessionEventLog(path))
 	if err != nil {
 		if os.IsNotExist(err) {
 			// No log means nothing for the index to describe; drop a stale
-			// index (e.g. after a force save folded the log away).
+			// index left by migration or manual sidecar cleanup.
 			if err := os.Remove(indexPath); err != nil && !os.IsNotExist(err) {
 				return err
 			}
@@ -855,31 +592,10 @@ func writeSessionEventIndex(path string, msgs []provider.Message, digest [sha256
 		WriterID:      SessionWriterID(),
 		UpdatedAt:     time.Now().UTC(),
 	}
-	b, err := json.MarshalIndent(idx, "", "  ")
+	b, err := marshalJSONIndentContext(ctx, idx)
 	if err != nil {
 		return err
 	}
 	b = append(b, '\n')
-	if err := os.MkdirAll(filepath.Dir(indexPath), 0o755); err != nil {
-		return err
-	}
-	tmp, err := os.CreateTemp(filepath.Dir(indexPath), ".session-event-index.*.tmp")
-	if err != nil {
-		return err
-	}
-	tmpPath := tmp.Name()
-	if _, err := tmp.Write(b); err != nil {
-		tmp.Close()
-		os.Remove(tmpPath)
-		return err
-	}
-	if err := tmp.Close(); err != nil {
-		os.Remove(tmpPath)
-		return err
-	}
-	if err := fileutil.ReplaceFile(tmpPath, indexPath); err != nil {
-		os.Remove(tmpPath)
-		return err
-	}
-	return nil
+	return atomicWriteFileContext(ctx, indexPath, ".session-event-index.*.tmp", "event-index", b, 0o600, false)
 }

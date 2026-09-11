@@ -45,9 +45,8 @@ func TestACPRebuildSerializesCollaborationAndApprovalChanges(t *testing.T) {
 	rebuildErr := make(chan error, 1)
 	go func() {
 		rebuildErr <- svc.rebuildSession(context.Background(), sess, SessionConfigState{
-			Model:          "pro",
-			RuntimeProfile: "delivery",
-		}, []sessionConfigDelta{{axis: "work_mode", runtimeProfile: "delivery"}})
+			Model: "pro",
+		}, []sessionConfigDelta{{axis: "model", model: "pro"}})
 	}()
 	select {
 	case <-buildStarted:
@@ -96,8 +95,8 @@ func TestACPRebuildSerializesCollaborationAndApprovalChanges(t *testing.T) {
 	if !ctrl.PlanMode() || ctrl.ToolApprovalMode() != control.ToolApprovalAuto {
 		t.Fatalf("post-rebuild axes = plan:%v approval:%q, want plan + auto", ctrl.PlanMode(), ctrl.ToolApprovalMode())
 	}
-	if sess.runtimeProfile != "delivery" || sess.currentModeID() != sessionModePlan {
-		t.Fatalf("post-rebuild session = profile:%q mode:%q, want delivery + plan", sess.runtimeProfile, sess.currentModeID())
+	if sess.model != "pro" || sess.currentModeID() != sessionModePlan {
+		t.Fatalf("post-rebuild session = model:%q mode:%q, want pro + plan", sess.model, sess.currentModeID())
 	}
 }
 
@@ -313,11 +312,10 @@ func TestACPRebuildSessionAppliesPendingConfigAfterMaintenance(t *testing.T) {
 
 // TestACPRebuildSessionQueuedCrossAxisChangeDoesNotRollbackCompletedAxis pins
 // the fix for a race where a queued config change resolved its full
-// SessionConfigState snapshot at enqueue time from sess.model/effortOverride/
-// runtimeProfile — fields that only update once an in-flight rebuild for a
-// *different* axis lands. Queuing a work-mode (profile) switch while a model
-// switch was still rebuilding used to restore the pre-switch model as soon as
-// the queued profile switch drained.
+// SessionConfigState snapshot at enqueue time from sess.model/effortOverride —
+// fields that only update once an in-flight rebuild for a *different* axis
+// lands. Queuing an effort switch while a model switch was still rebuilding
+// used to restore the pre-switch model as soon as the queued effort drained.
 func TestACPRebuildSessionQueuedCrossAxisChangeDoesNotRollbackCompletedAxis(t *testing.T) {
 	sink := newUpdateSink(&fakeNotifier{}, "sess-cross-axis")
 	sess := &acpSession{
@@ -355,12 +353,8 @@ func TestACPRebuildSessionQueuedCrossAxisChangeDoesNotRollbackCompletedAxis(t *t
 		t.Fatal("first rebuild did not start")
 	}
 
-	// Work Mode -> delivery queues while Model -> pro is still rebuilding, so
-	// sess.model still reads "fast" at this instant. Before the fix, the
-	// queued change stored that stale full snapshot; the fix stores only the
-	// work_mode delta and re-resolves the baseline when it actually applies.
-	if _, err := svc.switchSessionRuntimeProfile(context.Background(), sess, "delivery"); err != nil {
-		t.Fatalf("queue work mode switch: %v", err)
+	if _, err := svc.switchSessionEffort(context.Background(), sess, "high"); err != nil {
+		t.Fatalf("queue effort during model rebuild: %v", err)
 	}
 
 	close(factory.releaseFirst)
@@ -369,8 +363,8 @@ func TestACPRebuildSessionQueuedCrossAxisChangeDoesNotRollbackCompletedAxis(t *t
 		if result.err != nil {
 			t.Fatalf("model switch: %v", result.err)
 		}
-		if result.state.Model != "pro" || result.state.RuntimeProfile != "delivery" {
-			t.Fatalf("model switch response = model %q, profile %q; want final pro/delivery state after pending drain", result.state.Model, result.state.RuntimeProfile)
+		if result.state.Model != "pro" {
+			t.Fatalf("model switch response model = %q, want pro", result.state.Model)
 		}
 	case <-time.After(time.Second):
 		t.Fatal("model switch did not finish")
@@ -380,10 +374,10 @@ func TestACPRebuildSessionQueuedCrossAxisChangeDoesNotRollbackCompletedAxis(t *t
 		t.Fatalf("factory builds = %d, want %d", got, want)
 	}
 	if sess.model != "pro" {
-		t.Fatalf("session model = %q, want pro (queued profile switch must not roll back a completed model switch)", sess.model)
+		t.Fatalf("session model = %q, want pro", sess.model)
 	}
-	if sess.runtimeProfile != "delivery" {
-		t.Fatalf("session runtime profile = %q, want delivery", sess.runtimeProfile)
+	if got := stringPtrValue(sess.effortOverride); got != "high" {
+		t.Fatalf("session effort = %q, want high", got)
 	}
 }
 
@@ -411,7 +405,7 @@ func TestACPCtrlReadPathsDoNotRaceWithRebuild(t *testing.T) {
 	done := make(chan struct{})
 	go func() {
 		defer close(done)
-		for i := 0; i < rebuilds; i++ {
+		for i := range rebuilds {
 			if err := svc.rebuildSession(context.Background(), sess, SessionConfigState{Model: models[i%len(models)]}, []sessionConfigDelta{{axis: "model", model: models[i%len(models)]}}); err != nil {
 				t.Errorf("rebuildSession %d: %v", i, err)
 				return
@@ -568,7 +562,7 @@ func (c *planModeDriftProbeController) PlanMode() bool {
 
 // TestACPFinishTurnReconcilesModeDriftBeforeExposingIdle pins the fix for the
 // race where finish() exposed the session as idle before emitModeDrift
-// corrected a controller-side Plan auto-exit. A concurrent work-mode switch
+// corrected a controller-side Plan auto-exit. A concurrent model switch
 // landing in that window used to see sess.running already false, rebuild
 // immediately from the stale "plan" modeID, and resurrect Plan mode on the
 // replacement controller even though the controller had already exited it.
@@ -615,15 +609,14 @@ func TestACPFinishTurnReconcilesModeDriftBeforeExposingIdle(t *testing.T) {
 		t.Fatal("mode drift check did not run")
 	}
 
-	// A concurrent work-mode switch races in here. Before the fix this landed
-	// while sess.running was already false (finish() ran first), so it read
-	// the stale "plan" modeID and rebuilt with Plan mode re-enabled. The drift
-	// pass now holds stateChangeMu, so the switch runs from a goroutine: it
-	// either queues behind the still-running turn or rebuilds only after the
-	// drift correction landed — never from the stale modeID.
+	// Concurrent model switch must not rebuild from a stale modeID.
 	switchDone := make(chan error, 1)
 	go func() {
-		_, err := svc.switchSessionRuntimeProfile(context.Background(), sess, "delivery")
+		_, err := svc.switchSessionModel(context.Background(), sess, "pro")
+		if err != nil {
+			<-finished
+			_, err = svc.switchSessionModel(context.Background(), sess, "pro")
+		}
 		switchDone <- err
 	}()
 
@@ -636,22 +629,25 @@ func TestACPFinishTurnReconcilesModeDriftBeforeExposingIdle(t *testing.T) {
 	select {
 	case err := <-switchDone:
 		if err != nil {
-			t.Fatalf("switchSessionRuntimeProfile: %v", err)
+			t.Fatalf("switchSessionModel: %v", err)
 		}
 	case <-time.After(time.Second):
-		t.Fatal("work-mode switch did not complete")
+		t.Fatal("model switch did not complete")
 	}
 
 	if sess.currentCtrl().PlanMode() {
-		t.Fatal("concurrent work-mode switch resurrected Plan mode after it had already exited")
+		t.Fatal("concurrent model switch resurrected Plan mode after it had already exited")
 	}
 	if got := sess.currentModeID(); got != sessionModeNormal {
 		t.Fatalf("session modeID = %q, want normal", got)
 	}
+	if sess.model != "pro" {
+		t.Fatalf("session model = %q, want pro", sess.model)
+	}
 }
 
 // TestACPPendingConfigMergesAxesQueuedDuringActiveTurn pins the per-axis
-// pending-config queue: a model change and a work-mode change both requested
+// pending-config queue: a model change and an effort change both requested
 // during one active turn must both apply when the turn ends and the queue
 // drains. With the old single-slot queue the second request silently
 // overwrote the first even though both RPCs had already reported success and
@@ -676,26 +672,26 @@ func TestACPPendingConfigMergesAxesQueuedDuringActiveTurn(t *testing.T) {
 	if _, err := svc.switchSessionModel(context.Background(), sess, "fast"); err != nil {
 		t.Fatalf("switchSessionModel during turn: %v", err)
 	}
-	if _, err := svc.switchSessionRuntimeProfile(context.Background(), sess, "delivery"); err != nil {
-		t.Fatalf("switchSessionRuntimeProfile during turn: %v", err)
+	if _, err := svc.switchSessionEffort(context.Background(), sess, "high"); err != nil {
+		t.Fatalf("switchSessionEffort during turn: %v", err)
 	}
 	sess.mu.Lock()
 	queued := len(sess.pendingConfig)
 	sess.mu.Unlock()
 	if queued != 2 {
-		t.Fatalf("pending deltas = %d, want one per axis (2)", queued)
+		t.Fatalf("pending deltas = %d, want model + effort (2)", queued)
 	}
 
 	svc.finishTurn(context.Background(), sess)
 
 	sess.mu.Lock()
-	model, profile := sess.model, sess.runtimeProfile
+	model, effort := sess.model, stringPtrValue(sess.effortOverride)
 	sess.mu.Unlock()
-	if model != "fast" || profile != "delivery" {
-		t.Fatalf("after drain model = %q, profile = %q; want fast/delivery (an axis queued during the turn was dropped)", model, profile)
+	if model != "fast" || effort != "high" {
+		t.Fatalf("after drain model = %q, effort = %q; want fast/high", model, effort)
 	}
 	if got := factory.buildCount(); got != 1 {
-		t.Fatalf("factory builds = %d, want a single merged rebuild", got)
+		t.Fatalf("factory builds = %d, want a single rebuild applying both queued axes", got)
 	}
 }
 
@@ -709,6 +705,7 @@ func TestACPApplyPendingClaimsStateBeforeResolving(t *testing.T) {
 		releasePro:   make(chan struct{}),
 		fastResolved: make(chan struct{}),
 	}
+	high := "high"
 	sess := &acpSession{
 		id:             "sess-pending-order",
 		ctrl:           control.New(control.Options{}),
@@ -718,7 +715,7 @@ func TestACPApplyPendingClaimsStateBeforeResolving(t *testing.T) {
 		runtimeProfile: "balanced",
 		pendingConfig: []sessionConfigDelta{
 			{axis: "model", model: "pro"},
-			{axis: "work_mode", runtimeProfile: "delivery"},
+			{axis: "thought_level", effortOverride: &high},
 		},
 	}
 	svc := &service{factory: factory, sessions: map[string]*acpSession{sess.id: sess}}
@@ -771,8 +768,8 @@ func TestACPApplyPendingClaimsStateBeforeResolving(t *testing.T) {
 	if got := sess.model; got != "fast" {
 		t.Fatalf("session model = %q, want latest requested value fast", got)
 	}
-	if got := sess.runtimeProfile; got != "delivery" {
-		t.Fatalf("runtime profile = %q, want pending different-axis value delivery preserved", got)
+	if got := stringPtrValue(sess.effortOverride); got != "high" {
+		t.Fatalf("effort = %q, want pending different-axis value high preserved", got)
 	}
 }
 
@@ -942,11 +939,11 @@ func TestACPFinishTurnModeDriftDoesNotRevertConcurrentSetMode(t *testing.T) {
 	if _, _, ok := sess.begin(context.Background()); !ok {
 		t.Fatal("begin failed")
 	}
-	// A work-mode change queued during the turn makes finishTurn rebuild the
+	// A model change queued during the turn makes finishTurn rebuild the
 	// controller, which re-applies the session's modeID — the step that turned
 	// the stale drift write-back into a durable loss of the user's selection.
 	sess.mu.Lock()
-	sess.pendingConfig = []sessionConfigDelta{{axis: "work_mode", runtimeProfile: "delivery"}}
+	sess.pendingConfig = []sessionConfigDelta{{axis: "model", model: "pro"}}
 	sess.mu.Unlock()
 
 	finished := make(chan struct{})
@@ -1000,6 +997,16 @@ func TestACPFinishTurnModeDriftDoesNotRevertConcurrentSetMode(t *testing.T) {
 	if !sess.currentCtrl().PlanMode() {
 		t.Fatal("rebuilt controller lost Plan mode after concurrent set_mode")
 	}
+	if sess.model != "pro" {
+		t.Fatalf("session model = %q, want queued pro after finishTurn rebuild", sess.model)
+	}
+}
+
+func stringPtrValue(p *string) string {
+	if p == nil {
+		return ""
+	}
+	return *p
 }
 
 // TestACPDriftEmittersSerializeWithStateChanges pins the lock contract behind

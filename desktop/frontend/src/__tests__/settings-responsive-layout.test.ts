@@ -6,6 +6,8 @@ import { fileURLToPath } from "node:url";
 
 const testDir = dirname(fileURLToPath(import.meta.url));
 const styles = readFileSync(resolve(testDir, "../styles.css"), "utf8");
+const managementStyles = readFileSync(resolve(testDir, "../components/ManagementPageShell.css"), "utf8");
+const panelStyles = readFileSync(resolve(testDir, "../components/SettingsPanel.css"), "utf8");
 
 let passed = 0;
 let failed = 0;
@@ -35,6 +37,54 @@ function declaration(block: string, property: string): string | undefined {
 
 console.log("\nsettings responsive layout contract");
 
+const settingsScreen = ruleBlock(managementStyles, ".management-screen");
+eq(declaration(settingsScreen, "position"), "fixed", "settings owns the viewport without resizing the workspace");
+eq(declaration(settingsScreen, "inset"), "0", "settings fills the entire viewport");
+eq(declaration(settingsScreen, "background"), "var(--bg-soft)", "settings has an opaque theme surface");
+const windowsSettings = ruleBlock(managementStyles, ".app--windows-frameless:has(.management-screen:not([hidden]))");
+const caption = ruleBlock(managementStyles, ":root[data-theme-style] .app--windows-frameless:has(.management-screen:not([hidden])) > .windows-window-controls");
+eq(declaration(windowsSettings, "--management-titlebar-height"), "48px", "Windows settings owns a caption height independent of workspace style");
+eq(declaration(ruleBlock(managementStyles, ".management-screen__chrome"), "flex"), "0 0 var(--management-titlebar-height, 44px)", "drag strip shares caption geometry while retaining macOS spacing");
+eq(declaration(caption, "--windows-window-controls-height"), "var(--management-titlebar-height)", "Windows caption buttons match the settings drag strip");
+eq(declaration(caption, "background"), "var(--bg-soft)", "caption controls blend with settings in every theme");
+eq(declaration(caption, "border"), "0", "workspace borders do not leak into the settings caption");
+const settingsCenter = ruleBlock(panelStyles, ".settings-center");
+eq(declaration(settingsCenter, "grid-template-columns"), "clamp(220px, 20.5vw, 304px) minmax(0, 1fr)", "settings navigation remains readable without consuming the content pane");
+
+const generalPage = ruleBlock(panelStyles, ".settings-page--general");
+eq(declaration(generalPage, "container"), "settings-general / inline-size", "general settings respond to their available content width");
+
+const generalContainerStart = panelStyles.indexOf("@container settings-general (max-width: 620px)");
+const generalFallbackStart = panelStyles.indexOf("@media (max-width: 980px)", generalContainerStart);
+const generalContainer = panelStyles.slice(generalContainerStart, generalFallbackStart);
+const compactGeneralField = ruleBlock(generalContainer, ".settings-page--general .settings-field");
+eq(declaration(compactGeneralField, "grid-template-columns"), "1fr", "general settings stack before controls overflow their content pane");
+eq(declaration(compactGeneralField, "gap"), "10px", "stacked general settings keep compact vertical spacing");
+const compactGeneralControl = ruleBlock(generalContainer, ".settings-page--general .settings-field__control");
+eq(declaration(compactGeneralControl, "min-width"), "0", "compact general controls may shrink within the content pane");
+
+const soundContainerStart = panelStyles.indexOf("@container settings-general (max-width: 440px)");
+const soundContainerEnd = panelStyles.indexOf("@media (max-width: 980px)", soundContainerStart);
+const compactSound = panelStyles.slice(soundContainerStart, soundContainerEnd);
+const compactSoundRow = ruleBlock(compactSound, ".settings-sound-row");
+eq(declaration(compactSoundRow, "grid-template-columns"), "minmax(0, 1fr)", "narrow sound settings stack labels above their controls");
+eq(
+  compactSound.includes(".settings-sound-row .notification-volume-control") && compactSound.includes("width: 100%"),
+  true,
+  "notification volume expands without overflowing a narrow settings pane",
+);
+
+const fallbackPanel = panelStyles.slice(generalFallbackStart, panelStyles.indexOf("@media (max-width: 760px)", generalFallbackStart));
+const fallbackGeneralField = ruleBlock(fallbackPanel, ".settings-page--general .settings-field");
+eq(declaration(fallbackGeneralField, "grid-template-columns"), "1fr", "980px fallback stacks general settings without container queries");
+
+const generalSectionBoundary = ruleBlock(panelStyles, ".settings-page--general > .settings-section:not(:last-child) .settings-section__body");
+eq(
+  declaration(generalSectionBoundary, "border-bottom"),
+  "1px solid var(--border-soft)",
+  "general settings end intermediate sections with a subtle divider",
+);
+
 const wideTail = ruleBlock(styles, ".memory-tabs-row__tail");
 eq(declaration(wideTail, "display"), "contents", "wide memory controls preserve the original row flex items");
 eq(declaration(wideTail, "flex"), undefined, "wide memory wrapper does not compete in flex sizing");
@@ -49,6 +99,16 @@ eq(declaration(narrowTail, "display"), "flex", "narrow memory controls form a fl
 eq(declaration(narrowTail, "flex"), "0 1 100%", "narrow memory controls stay on their own row");
 eq(declaration(narrowTail, "min-width"), "0", "narrow memory controls may shrink without overflowing");
 eq(declaration(narrowTail, "gap"), "12px", "narrow memory controls retain their compact spacing");
+
+const compactPanelStart = panelStyles.indexOf("@media (max-width: 760px)");
+const compactPanel = panelStyles.slice(compactPanelStart);
+const compactCenter = ruleBlock(compactPanel, ".settings-center,\n  :root[data-theme-style] .settings-center");
+eq(declaration(compactCenter, "grid-template-columns"), "minmax(0, 1fr)", "minimum-width settings use one content column");
+eq(declaration(compactCenter, "grid-template-rows"), "auto minmax(0, 1fr)", "minimum-width navigation occupies its own top row");
+const compactNav = ruleBlock(compactPanel, ".settings-center__nav,\n  :root[data-theme-style] .settings-center__nav");
+eq(declaration(compactNav, "width"), "100%", "minimum-width navigation spans the settings panel");
+eq(declaration(compactNav, "overflow-x"), "auto", "minimum-width navigation scrolls horizontally");
+eq(declaration(compactNav, "overflow-y"), "hidden", "minimum-width navigation does not create a second vertical scroller");
 
 console.log(`\n${passed} passed, ${failed} failed, ${passed + failed} total`);
 if (failed > 0) process.exit(1);

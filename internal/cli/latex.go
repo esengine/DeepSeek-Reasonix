@@ -91,7 +91,20 @@ func convertCommand(b *strings.Builder, rs []rune, i int) int {
 		arg, k2 := readAtom(rs, k, true)
 		b.WriteString(blackboard(arg))
 		return k2
-	case "left", "right", "big", "Big", "bigg", "Bigg", "bigl", "bigr", "Bigl", "Bigr", "displaystyle", "textstyle", "limits", "nolimits":
+	case "boxed":
+		// A terminal can't draw a box, so render only the inner content.
+		// Without this, \boxed{x} printed the literal word "boxedx".
+		arg, k2 := readAtom(rs, k, true)
+		b.WriteString(convertMath([]rune(arg)))
+		return k2
+	case "left", "right":
+		// \left. / \right. are invisible delimiters — drop the dot; any other
+		// delimiter follows as ordinary text and renders its glyph.
+		if k < len(rs) && rs[k] == '.' {
+			return k + 1
+		}
+		return k
+	case "big", "Big", "bigg", "Bigg", "bigl", "bigr", "Bigl", "Bigr", "displaystyle", "textstyle", "limits", "nolimits":
 		return k
 	case "begin", "end":
 		_, k2 := readAtom(rs, k, true)
@@ -359,6 +372,8 @@ var symbols = map[string]string{
 	"lor": "∨", "vee": "∨",
 
 	"angle": "∠", "perp": "⊥", "parallel": "∥", "mid": "∣", "nmid": "∤",
+	"vert": "∣", "lvert": "∣", "rvert": "∣",
+	"Vert": "‖", "lVert": "‖", "rVert": "‖",
 	"triangle": "△", "square": "□", "diamond": "◇", "top": "⊤", "bot": "⊥",
 	"vdash": "⊢", "models": "⊨", "therefore": "∴", "because": "∵",
 

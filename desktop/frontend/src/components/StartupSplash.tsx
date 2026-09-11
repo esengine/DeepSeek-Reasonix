@@ -1,27 +1,11 @@
 import { useEffect, useRef, useState } from "react";
 import logoSymbol from "../assets/logo-symbol.svg";
 import { useT } from "../lib/i18n";
+import { markSplashShown } from "../lib/startupSplashState";
 
-const SPLASH_FLAG = "reasonix.splash.shown";
 const MIN_VISIBLE_MS = 1400;
 const FADE_OUT_MS = 420;
 const MAX_HOLD_MS = 6000;
-
-export function shouldShowStartupSplash(): boolean {
-  try {
-    return window.sessionStorage.getItem(SPLASH_FLAG) !== "1";
-  } catch {
-    return true;
-  }
-}
-
-function markSplashShown(): void {
-  try {
-    window.sessionStorage.setItem(SPLASH_FLAG, "1");
-  } catch {
-    /* sessionStorage unavailable */
-  }
-}
 
 export function StartupSplash({ hold, onDone }: { hold: boolean; onDone: () => void }) {
   const t = useT();

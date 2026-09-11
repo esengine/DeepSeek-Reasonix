@@ -7,6 +7,7 @@ import { createRoot } from "react-dom/client";
 import { ContextWindowRing } from "../components/ContextWindowRing";
 import { LocaleProvider } from "../lib/i18n";
 import type { ContextPanelInfo } from "../lib/types";
+import { installDesktopHostStub } from "./desktopHostStub";
 
 let passed = 0;
 let failed = 0;
@@ -91,13 +92,30 @@ function contextPanelInfo(requestCount: number): ContextPanelInfo {
 }
 
 function installContextPanelMock(fn: (tabId: string) => Promise<ContextPanelInfo>) {
-  (window as unknown as { go: { main: { App: { ContextPanel: typeof fn } } } }).go = {
+installDesktopHostStub(({
     main: {
       App: {
         ContextPanel: fn,
       },
     },
-  };
+  }).main.App);
+}
+
+async function checkSeparateDurations() {
+  const dom = installDom();
+  installContextPanelMock(async () => ({ ...contextPanelInfo(12), elapsedMs: 120_000 }));
+  const { root } = await renderRing({ turnMetrics: { elapsed: "20s", tokens: "104 tokens", tps: "12 tokens/s" } });
+  await act(async () => {
+    (document.querySelector(".context-ring") as HTMLButtonElement).click();
+    await wait();
+  });
+  const rows = [...document.querySelectorAll(".context-ring-popover__row")];
+  const value = (label: string) => rows.find(row => row.querySelector(".context-ring-popover__label")?.textContent === label)
+    ?.querySelector(".context-ring-popover__value")?.textContent;
+  eq(value("Turn time"), "20s", "turn duration has its own stable label");
+  ok(Boolean(value("Session time")) && value("Session time") !== "20s", "session duration stays separate from turn duration");
+  await act(async () => { root.unmount(); });
+  dom.window.close();
 }
 
 async function renderRing(props: Partial<Parameters<typeof ContextWindowRing>[0]> = {}) {
@@ -126,6 +144,23 @@ async function renderRing(props: Partial<Parameters<typeof ContextWindowRing>[0]
 }
 
 console.log("\ncontext window ring");
+
+{
+  const dom = installDom();
+  installContextPanelMock(async () => contextPanelInfo(2));
+  const { root } = await renderRing();
+  const trigger = document.querySelector<HTMLButtonElement>(".context-ring")!;
+  eq(trigger.textContent, "10%", "ring exposes its percentage outside Creation layout");
+  await act(async () => { trigger.focus(); trigger.click(); await wait(); });
+  eq(trigger.getAttribute("aria-expanded"), "true", "keyboard activation opens usage details");
+  await act(async () => {
+    document.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true }));
+    await wait(230);
+  });
+  eq(trigger.getAttribute("aria-expanded"), "false", "Escape cancels pending hover timers without reopening");
+  await act(async () => { root.unmount(); });
+  dom.window.close();
+}
 
 {
   const dom = installDom();
@@ -164,6 +199,30 @@ console.log("\ncontext window ring");
     "$0.1250",
     "turn cost uses the session currency before panel info is available",
   );
+
+  await act(async () => {
+    root.unmount();
+  });
+  dom.window.close();
+}
+
+{
+  const dom = installDom();
+  installContextPanelMock(async () => contextPanelInfo(0));
+
+  const { root } = await renderRing({ context: { used: 1_001, window: 1_000, compactRatio: 0.8 } });
+  const button = document.querySelector(".context-ring") as HTMLButtonElement | null;
+  if (!button) throw new Error("missing over-limit context ring button");
+  await act(async () => {
+    button.dispatchEvent(new MouseEvent("mouseover", { bubbles: true, relatedTarget: null }));
+    await wait(220);
+  });
+
+  const popover = document.querySelector(".context-ring-popover");
+  const fill = popover?.querySelector(".context-ring-popover__fill") as HTMLElement | null;
+  eq(popover?.querySelector(".context-ring-popover__pct")?.textContent, "101%", "ring popover keeps a just-over-limit ratio visibly above 100 percent");
+  eq(fill?.style.width, "100%", "ring popover fill is capped at the physical track width");
+  eq(popover?.querySelectorAll(".context-ring-popover__seg").length, 0, "ring popover does not mix token composition into its capacity fill");
 
   await act(async () => {
     root.unmount();
@@ -227,5 +286,6 @@ console.log("\ncontext window ring");
   dom.window.close();
 }
 
+await checkSeparateDurations();
 console.log(`\n${passed} passed, ${failed} failed`);
 if (failed > 0) process.exit(1);

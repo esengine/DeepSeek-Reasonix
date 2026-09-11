@@ -14,6 +14,7 @@ import (
 
 	"reasonix/internal/config"
 	"reasonix/internal/i18n"
+	"reasonix/internal/netclient"
 )
 
 type providerSetupSession struct {
@@ -533,13 +534,17 @@ func providerManagerItems(s *providerSetupSession) []menuItem {
 func addProviderToSession(s *providerSetupSession, anthropic bool) bool {
 	var result providerPromptResult
 	var err error
+	var proxy netclient.ProxySpec
+	if s != nil && s.cfg != nil {
+		proxy = s.cfg.NetworkProxySpec()
+	}
 	if anthropic {
-		result, err = promptAnthropicProvider()
+		result, err = promptAnthropicProvider(proxy)
 	} else {
-		result, err = promptCustomProvider()
+		result, err = promptCustomProvider(proxy)
 	}
 	if err != nil {
-		if err != errCancelled {
+		if !errors.Is(err, errCancelled) {
 			fmt.Fprintln(os.Stderr, err)
 		}
 		return false
@@ -631,7 +636,7 @@ func promptOptionalAPIKeyEnvName(in *bufio.Scanner, w io.Writer, label, def stri
 func splitModels(raw string) []string {
 	seen := map[string]bool{}
 	var models []string
-	for _, model := range strings.Split(raw, ",") {
+	for model := range strings.SplitSeq(raw, ",") {
 		model = strings.TrimSpace(model)
 		if model != "" && !seen[model] {
 			seen[model] = true
@@ -687,7 +692,11 @@ func testAndRefreshProvider(s *providerSetupSession, p config.ProviderEntry) {
 	p.ResolveAPIKeyFromProcessEnvForProbe()
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
-	models, err := p.FetchModels(ctx)
+	var proxy netclient.ProxySpec
+	if s.cfg != nil {
+		proxy = s.cfg.NetworkProxySpec()
+	}
+	models, err := p.FetchModelsWithProxy(ctx, proxy)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, i18n.M.FetchModelsFailedFmt+"\n", p.Name, err)
 		return

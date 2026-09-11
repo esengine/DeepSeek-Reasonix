@@ -3,6 +3,7 @@ package main
 import (
 	"bytes"
 	"encoding/base64"
+	"errors"
 	"fmt"
 	"image"
 	_ "image/jpeg"
@@ -45,7 +46,7 @@ func validateThemeImageFile(path string) error {
 
 	head := make([]byte, 512)
 	n, err := io.ReadFull(f, head)
-	if err != nil && err != io.ErrUnexpectedEOF && err != io.EOF {
+	if err != nil && !errors.Is(err, io.ErrUnexpectedEOF) && !errors.Is(err, io.EOF) {
 		return err
 	}
 	head = head[:n]
@@ -130,12 +131,12 @@ func decodeDataURLImage(dataURL string) (filename string, data []byte, err error
 	}
 	// data:[<mediatype>][;base64],<data>
 	rest := dataURL[len(prefix):]
-	comma := strings.IndexByte(rest, ',')
-	if comma < 0 {
+	before, after, ok := strings.Cut(rest, ",")
+	if !ok {
 		return "", nil, fmt.Errorf("invalid data URL")
 	}
-	meta := rest[:comma]
-	payload := rest[comma+1:]
+	meta := before
+	payload := after
 	parts := strings.Split(meta, ";")
 	mime := strings.TrimSpace(parts[0])
 	base64Enc := false

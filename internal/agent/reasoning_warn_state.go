@@ -147,60 +147,79 @@ func missingReasoningUnixNanoFromMillis(unixMs int64) (int64, bool) {
 	return unixMs * int64(time.Millisecond), true
 }
 
+func validMissingReasoningIncidentFields(incident missingReasoningIncident) bool {
+	return incident.LastMissingUnixNano >= 0 && incident.LastResolvedAtUnixNano >= 0 &&
+		incident.LastHealthyAtUnixNano >= 0 &&
+		incident.ResolveStreak >= 0 && incident.ResolveStreak < missingReasoningHealthyResolveStreak
+}
+
 func normalizeMissingReasoningIncident(incident missingReasoningIncident, now time.Time) (missingReasoningIncident, bool) {
 	incident.Fingerprint = strings.TrimSpace(incident.Fingerprint)
 	if !validMissingReasoningFingerprint(incident.Fingerprint) ||
-		incident.LastMissingUnixNano < 0 || incident.LastResolvedAtUnixNano < 0 ||
-		incident.LastHealthyAtUnixNano < 0 || incident.ResolveStreak < 0 ||
-		incident.ResolveStreak >= missingReasoningHealthyResolveStreak {
+		!validMissingReasoningIncidentFields(incident) {
 		return missingReasoningIncident{}, false
 	}
-
-	warnedAtUnixNano := int64(0)
-	if incident.WarnedAtUnixMs != 0 {
-		var ok bool
-		warnedAtUnixNano, ok = missingReasoningUnixNanoFromMillis(incident.WarnedAtUnixMs)
-		if !ok {
-			return missingReasoningIncident{}, false
-		}
-	}
-	if incident.LastMissingUnixMs != 0 {
-		lastMissingFromMillis, ok := missingReasoningUnixNanoFromMillis(incident.LastMissingUnixMs)
-		if !ok {
-			return missingReasoningIncident{}, false
-		}
-		if incident.LastMissingUnixNano == 0 {
-			incident.LastMissingUnixNano = lastMissingFromMillis
-		} else if incident.LastMissingUnixNano/int64(time.Millisecond) != incident.LastMissingUnixMs {
-			return missingReasoningIncident{}, false
-		}
-	} else if incident.LastMissingUnixNano != 0 {
+	incident, warnedAtUnixNano, ok := normalizeMissingReasoningTimestamps(incident)
+	if !ok {
 		return missingReasoningIncident{}, false
 	}
-
 	nowUnixNano := now.UnixNano()
 	if warnedAtUnixNano > nowUnixNano || incident.LastMissingUnixNano > nowUnixNano ||
 		incident.LastResolvedAtUnixNano > nowUnixNano || incident.LastHealthyAtUnixNano > nowUnixNano {
 		return missingReasoningIncident{}, false
 	}
 	if incident.LastMissingUnixNano > incident.LastResolvedAtUnixNano {
-		if warnedAtUnixNano == 0 || incident.LastMissingUnixNano < warnedAtUnixNano {
-			return missingReasoningIncident{}, false
-		}
-		age := now.Sub(time.UnixMilli(incident.WarnedAtUnixMs))
-		if age < 0 || age >= missingReasoningWarnStateCooldown {
-			return missingReasoningIncident{}, false
-		}
-		if incident.ResolveStreak > 0 {
-			if incident.LastHealthyAtUnixNano <= incident.LastMissingUnixNano ||
-				incident.LastHealthyAtUnixNano <= incident.LastResolvedAtUnixNano {
-				return missingReasoningIncident{}, false
-			}
-		} else if incident.LastHealthyAtUnixNano != 0 {
-			return missingReasoningIncident{}, false
-		}
-		return incident, true
+		return normalizeActiveMissingReasoningIncident(incident, warnedAtUnixNano, now)
 	}
+	return normalizeResolvedMissingReasoningIncident(incident, now)
+}
+
+func normalizeMissingReasoningTimestamps(incident missingReasoningIncident) (missingReasoningIncident, int64, bool) {
+	warnedAtUnixNano := int64(0)
+	if incident.WarnedAtUnixMs != 0 {
+		var ok bool
+		warnedAtUnixNano, ok = missingReasoningUnixNanoFromMillis(incident.WarnedAtUnixMs)
+		if !ok {
+			return missingReasoningIncident{}, 0, false
+		}
+	}
+	if incident.LastMissingUnixMs == 0 {
+		return incident, warnedAtUnixNano, incident.LastMissingUnixNano == 0
+	}
+	lastMissingFromMillis, ok := missingReasoningUnixNanoFromMillis(incident.LastMissingUnixMs)
+	if !ok {
+		return missingReasoningIncident{}, 0, false
+	}
+	if incident.LastMissingUnixNano == 0 {
+		incident.LastMissingUnixNano = lastMissingFromMillis
+	} else if incident.LastMissingUnixNano/int64(time.Millisecond) != incident.LastMissingUnixMs {
+		return missingReasoningIncident{}, 0, false
+	}
+	return incident, warnedAtUnixNano, true
+}
+
+func normalizeActiveMissingReasoningIncident(incident missingReasoningIncident, warnedAtUnixNano int64, now time.Time) (missingReasoningIncident, bool) {
+	if warnedAtUnixNano == 0 || incident.LastMissingUnixNano < warnedAtUnixNano {
+		return missingReasoningIncident{}, false
+	}
+	ageOrigin := time.UnixMilli(incident.WarnedAtUnixMs)
+	maxAge := missingReasoningWarnStateCooldown
+	age := now.Sub(ageOrigin)
+	if age < 0 || age >= maxAge {
+		return missingReasoningIncident{}, false
+	}
+	if incident.ResolveStreak > 0 {
+		if incident.LastHealthyAtUnixNano <= incident.LastMissingUnixNano ||
+			incident.LastHealthyAtUnixNano <= incident.LastResolvedAtUnixNano {
+			return missingReasoningIncident{}, false
+		}
+	} else if incident.LastHealthyAtUnixNano != 0 {
+		return missingReasoningIncident{}, false
+	}
+	return incident, true
+}
+
+func normalizeResolvedMissingReasoningIncident(incident missingReasoningIncident, now time.Time) (missingReasoningIncident, bool) {
 	if incident.LastResolvedAtUnixNano <= 0 || incident.ResolveStreak != 0 ||
 		incident.LastHealthyAtUnixNano > incident.LastResolvedAtUnixNano {
 		return missingReasoningIncident{}, false
@@ -214,14 +233,11 @@ func normalizeMissingReasoningIncident(incident missingReasoningIncident, now ti
 }
 
 func (incident missingReasoningIncident) lastEventUnixNano() int64 {
-	lastEvent := incident.LastMissingUnixNano
-	if incident.LastResolvedAtUnixNano > lastEvent {
-		lastEvent = incident.LastResolvedAtUnixNano
-	}
-	if incident.LastHealthyAtUnixNano > lastEvent {
-		lastEvent = incident.LastHealthyAtUnixNano
-	}
-	return lastEvent
+	return incident.lastObservedUnixNano()
+}
+
+func (incident missingReasoningIncident) lastObservedUnixNano() int64 {
+	return max(incident.LastHealthyAtUnixNano, max(incident.LastResolvedAtUnixNano, incident.LastMissingUnixNano))
 }
 
 // load returns only current v2 incidents and resolution watermarks. Missing,

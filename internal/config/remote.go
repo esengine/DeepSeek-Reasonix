@@ -3,6 +3,7 @@ package config
 import (
 	"fmt"
 	"net"
+	"path"
 	"strconv"
 	"strings"
 )
@@ -14,8 +15,9 @@ import (
 // hosts, jump chains, or forwards.
 type RemoteConfig struct {
 	// ImportSSHConfig surfaces ~/.ssh/config aliases in `reasonix remote import`.
-	ImportSSHConfig bool              `toml:"import_ssh_config"`
-	Hosts           []RemoteHostEntry `toml:"hosts"`
+	ImportSSHConfig bool                 `toml:"import_ssh_config"`
+	Hosts           []RemoteHostEntry    `toml:"hosts"`
+	Projects        []RemoteProjectEntry `toml:"projects"`
 }
 
 // RemoteHostEntry describes one SSH target. Secrets follow the provider
@@ -23,18 +25,19 @@ type RemoteConfig struct {
 // values live in Reasonix's global .env, never in TOML. identity_file is a
 // path — private key material itself is never stored by Reasonix.
 type RemoteHostEntry struct {
-	Name          string               `toml:"name"`
-	Host          string               `toml:"host"`
-	Port          int                  `toml:"port"` // 0 => 22 (or ssh_config value)
-	User          string               `toml:"user"`
-	IdentityFile  string               `toml:"identity_file"`
-	PassphraseEnv string               `toml:"passphrase_env"`
-	PasswordEnv   string               `toml:"password_env"`
-	ProxyJump     string               `toml:"proxy_jump"`     // OpenSSH ProxyJump syntax, comma-separated chain
-	Workspace     string               `toml:"workspace"`      // default remote workspace dir
-	ServeInstall  string               `toml:"serve_install"`  // remote CLI: auto|npm|upload|never
-	UseSSHConfig  bool                 `toml:"use_ssh_config"` // layer ~/.ssh/config values under unset fields
-	Forwards      []RemoteForwardEntry `toml:"forwards"`
+	Name           string               `toml:"name"`
+	Host           string               `toml:"host"`
+	Port           int                  `toml:"port"` // 0 => 22 (or ssh_config value)
+	User           string               `toml:"user"`
+	IdentityFile   string               `toml:"identity_file"`
+	PassphraseEnv  string               `toml:"passphrase_env"`
+	PasswordEnv    string               `toml:"password_env"`
+	ProxyJump      string               `toml:"proxy_jump"`      // OpenSSH ProxyJump syntax, comma-separated chain
+	Workspace      string               `toml:"workspace"`       // default remote workspace dir
+	ServeInstall   string               `toml:"serve_install"`   // remote CLI: auto|npm|upload|never
+	CredentialMode string               `toml:"credential_mode"` // model-call credentials: ""|remote (on the host) | local-proxy (desktop holds the key, calls tunnel back)
+	UseSSHConfig   bool                 `toml:"use_ssh_config"`  // layer ~/.ssh/config values under unset fields
+	Forwards       []RemoteForwardEntry `toml:"forwards"`
 }
 
 // RemoteForwardEntry is a persisted port-forward rule applied on connect.
@@ -42,6 +45,14 @@ type RemoteForwardEntry struct {
 	Type   string `toml:"type"`   // "local" (-L) | "remote" (-R)
 	Bind   string `toml:"bind"`   // "127.0.0.1:8080" or bare port => 127.0.0.1:<port>
 	Target string `toml:"target"` // host:port on the other side
+}
+
+// RemoteProjectEntry pins one remote workspace so it shows in the project
+// tree. It references a configured host by name.
+type RemoteProjectEntry struct {
+	HostID    string `toml:"host_id"`
+	Workspace string `toml:"workspace"`
+	Title     string `toml:"title,omitempty"`
 }
 
 // RemoteServeInstallModes are the accepted serve_install values.
@@ -61,6 +72,9 @@ func (r RemoteConfig) Clone() RemoteConfig {
 			out.Hosts[i] = h
 		}
 	}
+	if r.Projects != nil {
+		out.Projects = append([]RemoteProjectEntry(nil), r.Projects...)
+	}
 	return out
 }
 
@@ -71,6 +85,13 @@ func (e RemoteHostEntry) ServeInstallMode() string {
 		return "auto"
 	}
 	return m
+}
+
+// CredentialProxyEnabled reports whether the host routes model-call
+// credentials through the desktop's reverse-tunnel proxy instead of keeping
+// provider keys on the remote host.
+func (e RemoteHostEntry) CredentialProxyEnabled() bool {
+	return strings.EqualFold(strings.TrimSpace(e.CredentialMode), "local-proxy")
 }
 
 // PortOrDefault returns the configured port, defaulting to 22.
@@ -90,6 +111,11 @@ func validateRemoteHost(e RemoteHostEntry) error {
 	}
 	if strings.TrimSpace(e.Host) == "" {
 		return fmt.Errorf("remote host %q: host is required", e.Name)
+	}
+	switch strings.ToLower(strings.TrimSpace(e.CredentialMode)) {
+	case "", "remote", "local-proxy":
+	default:
+		return fmt.Errorf("remote host %q: credential_mode must be remote or local-proxy", e.Name)
 	}
 	if e.Port < 0 || e.Port > 65535 {
 		return fmt.Errorf("remote host %q: port %d out of range", e.Name, e.Port)
@@ -176,6 +202,76 @@ func (c *Config) RemoveRemoteHost(name string) bool {
 	for i := range c.Remote.Hosts {
 		if c.Remote.Hosts[i].Name == name {
 			c.Remote.Hosts = append(c.Remote.Hosts[:i], c.Remote.Hosts[i+1:]...)
+			projects := c.Remote.Projects[:0]
+			for _, project := range c.Remote.Projects {
+				if project.HostID != name {
+					projects = append(projects, project)
+				}
+			}
+			c.Remote.Projects = projects
+			return true
+		}
+	}
+	return false
+}
+
+func normalizeRemoteWorkspace(workspace string) string {
+	workspace = strings.TrimSpace(workspace)
+	if workspace == "" {
+		return ""
+	}
+	return path.Clean(workspace)
+}
+
+// RemoteProject looks up a pinned remote workspace by host and normalized
+// POSIX path. Remote targets are currently Linux/macOS, so slash semantics are
+// stable even when the desktop itself runs on another platform.
+func (c *Config) RemoteProject(hostID, workspace string) (RemoteProjectEntry, bool) {
+	hostID = strings.TrimSpace(hostID)
+	workspace = normalizeRemoteWorkspace(workspace)
+	for _, project := range c.Remote.Projects {
+		if project.HostID == hostID && normalizeRemoteWorkspace(project.Workspace) == workspace {
+			return project, true
+		}
+	}
+	return RemoteProjectEntry{}, false
+}
+
+// UpsertRemoteProject adds e, or replaces the entry with the same host and
+// normalized workspace while preserving its position.
+func (c *Config) UpsertRemoteProject(e RemoteProjectEntry) error {
+	e.HostID = strings.TrimSpace(e.HostID)
+	e.Workspace = normalizeRemoteWorkspace(e.Workspace)
+	e.Title = strings.TrimSpace(e.Title)
+	if e.HostID == "" {
+		return fmt.Errorf("remote project: host is required")
+	}
+	if e.Workspace == "" {
+		return fmt.Errorf("remote project %q: workspace is required", e.HostID)
+	}
+	if _, ok := c.RemoteHost(e.HostID); !ok {
+		return fmt.Errorf("remote project: unknown remote host %q", e.HostID)
+	}
+	for i := range c.Remote.Projects {
+		project := &c.Remote.Projects[i]
+		if project.HostID == e.HostID && normalizeRemoteWorkspace(project.Workspace) == e.Workspace {
+			*project = e
+			return nil
+		}
+	}
+	c.Remote.Projects = append(c.Remote.Projects, e)
+	return nil
+}
+
+// RemoveRemoteProject deletes the pinned workspace, reporting whether it was
+// present.
+func (c *Config) RemoveRemoteProject(hostID, workspace string) bool {
+	hostID = strings.TrimSpace(hostID)
+	workspace = normalizeRemoteWorkspace(workspace)
+	for i := range c.Remote.Projects {
+		project := c.Remote.Projects[i]
+		if project.HostID == hostID && normalizeRemoteWorkspace(project.Workspace) == workspace {
+			c.Remote.Projects = append(c.Remote.Projects[:i], c.Remote.Projects[i+1:]...)
 			return true
 		}
 	}

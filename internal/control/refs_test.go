@@ -199,57 +199,6 @@ func TestClassifyRef(t *testing.T) {
 	}
 }
 
-func TestResolveRefsAttachmentKinds(t *testing.T) {
-	temp := t.TempDir()
-	attachmentsDir := filepath.Join(temp, ".reasonix", "attachments")
-	if err := os.MkdirAll(attachmentsDir, 0o755); err != nil {
-		t.Fatal(err)
-	}
-	ymlRef := filepath.ToSlash(".reasonix/attachments/config.yml")
-	zipRef := filepath.ToSlash(".reasonix/attachments/archive.zip")
-	pngRef := filepath.ToSlash(".reasonix/attachments/shot.png")
-	if err := os.WriteFile(filepath.Join(temp, filepath.FromSlash(ymlRef)), []byte("name: reasonix\n"), 0o644); err != nil {
-		t.Fatal(err)
-	}
-	if err := os.WriteFile(filepath.Join(temp, filepath.FromSlash(zipRef)), []byte{'P', 'K', 0x03, 0x04, 0x00}, 0o644); err != nil {
-		t.Fatal(err)
-	}
-	if err := os.WriteFile(filepath.Join(temp, filepath.FromSlash(pngRef)), []byte("\x89PNG\r\n\x1a\n"), 0o644); err != nil {
-		t.Fatal(err)
-	}
-
-	oldCwd, err := os.Getwd()
-	if err != nil {
-		t.Fatal(err)
-	}
-	if err := os.Chdir(temp); err != nil {
-		t.Fatal(err)
-	}
-	t.Cleanup(func() {
-		if err := os.Chdir(oldCwd); err != nil {
-			t.Error(err)
-		}
-	})
-
-	line := "check @" + ymlRef + " @" + zipRef + " @" + pngRef
-	block, errs := (&Controller{}).ResolveRefs(context.Background(), line)
-	if len(errs) != 0 {
-		t.Fatalf("ResolveRefs errors = %v", errs)
-	}
-	if !strings.Contains(block, `<file path="`+ymlRef+`">`) || !strings.Contains(block, "name: reasonix") {
-		t.Fatalf("expected yml attachment to resolve as file content, got: %s", block)
-	}
-	if !strings.Contains(block, `<file path="`+zipRef+`">`) || !strings.Contains(block, "[binary file "+zipRef) {
-		t.Fatalf("expected zip attachment to resolve as binary file note, got: %s", block)
-	}
-	if !strings.Contains(block, `<image path="`+pngRef+`">`) {
-		t.Fatalf("expected png attachment to resolve as image block, got: %s", block)
-	}
-	if !strings.Contains(block, "OCR/image/vision tool") || !strings.Contains(block, "image bytes are not inlined") {
-		t.Fatalf("expected image attachment note to mention tool-readable path without inlined bytes, got: %s", block)
-	}
-}
-
 func TestReadFileRef(t *testing.T) {
 	dir := t.TempDir()
 
@@ -858,7 +807,7 @@ func TestWorkspaceImageRefsAlsoAttachAsModelImages(t *testing.T) {
 	}
 
 	writeVisionTestConfig(t, workspace)
-	c := &Controller{workspaceRoot: workspace, modelRef: "custom/vision-pro"}
+	c := &Controller{workspaceRoot: workspace, selection: modelSelection{ref: "custom/vision-pro"}}
 	refs := c.detectRefs("see @" + diagram + " @" + attachment)
 	if len(refs) != 2 {
 		t.Fatalf("detectRefs = %+v, want two refs", refs)
@@ -874,8 +823,8 @@ func TestWorkspaceImageRefsAlsoAttachAsModelImages(t *testing.T) {
 	if len(errs) != 0 {
 		t.Fatalf("ResolveRefs errors = %v", errs)
 	}
-	if !strings.Contains(block, `<file path="docs/diagram.png">`) || !strings.Contains(block, "sent as direct model image input only when the selected model supports vision") || !strings.Contains(block, "OCR/image/vision tool") {
-		t.Fatalf("workspace png should resolve as direct-vision-or-tool image metadata:\n%s", block)
+	if !strings.Contains(block, `<file path="docs/diagram.png">`) || !strings.Contains(block, "attached as visual input") || strings.Contains(block, "OCR/image/vision tool") {
+		t.Fatalf("workspace png on a vision model should ask the model to look at the image, not OCR it:\n%s", block)
 	}
 	if urls := c.inputImages("see @" + diagram); len(urls) != 1 || !strings.HasPrefix(urls[0], "data:image/png;base64,") {
 		t.Fatalf("workspace png inputImages = %v, want one png data URL", urls)

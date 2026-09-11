@@ -15,7 +15,7 @@ import (
 func TestLargeRewriteBoundedCost(t *testing.T) {
 	var oldB, newB strings.Builder
 	const n = 6000
-	for i := 0; i < n; i++ {
+	for i := range n {
 		fmt.Fprintf(&oldB, "old line %d\n", i)
 		fmt.Fprintf(&newB, "totally different new line %d\n", i)
 	}
@@ -49,7 +49,7 @@ func TestLargeRewriteBoundedCost(t *testing.T) {
 func TestSmallEditOnLargeFileStillDiffs(t *testing.T) {
 	var oldB strings.Builder
 	const n = 8000
-	for i := 0; i < n; i++ {
+	for i := range n {
 		fmt.Fprintf(&oldB, "line %d\n", i)
 	}
 	old := oldB.String()

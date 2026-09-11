@@ -30,6 +30,9 @@ const candidateSha = execFileSync("git", ["rev-parse", "HEAD"], {
   cwd: ROOT,
   encoding: "utf8",
 }).trim();
+const gitCommit = candidateSha.slice(0, 12);
+// Real UTC build clock for version --verbose/--json (not VCS commit time).
+const buildTimeUTC = new Date().toISOString().replace(/\.\d{3}Z$/, "Z");
 
 rmSync(STAGE, { recursive: true, force: true });
 mkdirSync(STAGE, { recursive: true });
@@ -48,7 +51,7 @@ for (const t of TARGETS) {
       "build",
       "-trimpath",
       "-ldflags",
-      `-s -w -X main.version=${binaryVersion} -X reasonix/internal/productdocs.linkedVersion=${binaryVersion} -X reasonix/internal/productdocs.linkedRevision=${candidateSha}`,
+      `-s -w -X main.version=${binaryVersion} -X main.gitCommit=${gitCommit} -X main.buildTimeUTC=${buildTimeUTC} -X reasonix/internal/productdocs.linkedVersion=${binaryVersion} -X reasonix/internal/productdocs.linkedRevision=${candidateSha}`,
       "-o",
       join(dir, "bin", exe),
       "./cmd/reasonix",

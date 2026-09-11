@@ -41,6 +41,7 @@ const selections: SelectedTextReference[] = [
   { id: "chat-1", text: `${repeatedPrefix} first` },
   { id: "chat-2", text: `${repeatedPrefix} second` },
   { id: "code-1", path: "src/a]b.ts", text: "if (ready) {\n  run_task();\n}" },
+  { id: "terminal-1", source: "terminal", text: "Error: boom\n    at main.ts:1" },
 ];
 const labels = selections.map(formatSelectionLabel);
 const authoredLabel = labels[0];
@@ -48,14 +49,16 @@ const display = `compare ${authoredLabel}\n${labels.join(" ")}`;
 const selectedBlocks = parseSelectedTextBlocks(display, formatSelectedTextContext(selections));
 
 eq(labels[2].includes("a］b.ts"), true, "selection labels sanitize closing brackets in file names");
+eq(labels[3].startsWith("[Terminal:"), true, "terminal selections use a Terminal label prefix");
 eq(
   selectedBlocks.map(({ label, content, path, kind }) => ({ label, content, path, kind })),
   [
     { label: labels[0], content: `${repeatedPrefix} first`, kind: "chat" },
     { label: labels[1], content: `${repeatedPrefix} second`, kind: "chat" },
     { label: labels[2], content: "if (ready) {\n  run_task();\n}", path: "src/a]b.ts", kind: "code" },
+    { label: labels[3], content: "Error: boom\n    at main.ts:1", kind: "terminal" },
   ],
-  "selection cards recover duplicate snippets and bracketed file names from the existing JSON context",
+  "selection cards recover duplicate snippets, bracketed file names, and terminal source from JSON context",
 );
 eq(selectedBlocks[0]?.start, display.indexOf(labels[0], display.indexOf("\n") + 1), "label-shaped authored prose is not consumed as a selection card");
 const unterminatedDisplay = `explain literal [Chat: ${labels.join(" ")}`;

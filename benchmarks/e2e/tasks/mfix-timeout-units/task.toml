@@ -1,0 +1,4 @@
+prompt = "Requests wait about 1000x too long. The bug spans api.py and client.py: one side speaks milliseconds, the other seconds. Fix the mismatch so client.wait_seconds() really returns seconds while api.timeout_ms() keeps returning milliseconds as its name promises."
+class = "multi-file-bugfix"
+max_steps = 15
+timeout_sec = 240

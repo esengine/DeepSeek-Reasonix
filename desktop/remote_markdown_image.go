@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/xml"
+	"errors"
 	"fmt"
 	"io"
 	"net"
@@ -176,10 +177,10 @@ func resolveRemoteMarkdownImageAddresses(ctx context.Context, host string, looku
 	return addresses, nil
 }
 
-// remoteMarkdownImageMiddleware keeps external images out of the WebView2
+// remoteMarkdownImageMiddleware keeps external images out of the desktop
 // network stack. The backend fetches them with Reasonix's proxy configuration,
 // validates the response, sanitizes SVG, and serves only bounded image bytes
-// from the local Wails origin.
+// from the local desktop origin.
 func (a *App) remoteMarkdownImageMiddleware() func(http.Handler) http.Handler {
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -264,6 +265,14 @@ func serveRemoteMarkdownImage(
 	body, mimeType := safeRemoteMarkdownImage(body)
 	if mimeType == "" {
 		http.Error(w, "remote response is not a supported image", http.StatusUnsupportedMediaType)
+		return
+	}
+	if err := validateMarkdownImageBytes(body, mimeType); err != nil {
+		if errors.Is(err, errMarkdownImageTooLarge) {
+			http.Error(w, "remote image exceeds the decode budget", http.StatusRequestEntityTooLarge)
+			return
+		}
+		http.Error(w, "remote response is not a valid image", http.StatusUnsupportedMediaType)
 		return
 	}
 
@@ -383,7 +392,7 @@ func sanitizeRemoteMarkdownSVG(body []byte) ([]byte, bool) {
 
 	for {
 		token, err := decoder.Token()
-		if err == io.EOF {
+		if errors.Is(err, io.EOF) {
 			break
 		}
 		if err != nil {

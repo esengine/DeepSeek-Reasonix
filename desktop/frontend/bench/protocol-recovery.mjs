@@ -1,0 +1,45 @@
+import { createServer } from 'vite';
+import { chromium } from 'playwright';
+import path from 'node:path';
+import { fileURLToPath } from 'node:url';
+const root=path.resolve(path.dirname(fileURLToPath(import.meta.url)),'..');
+const server=await createServer({root,server:{host:'127.0.0.1',port:0},logLevel:'error'});
+await server.listen();
+let browser;
+try {
+ browser=await chromium.launch({headless:true,channel:'chrome'});
+ const page=await browser.newPage({viewport:{width:1280,height:850}});
+ const errors=[];page.on('pageerror',e=>errors.push(String(e)));
+ const url=server.resolvedUrls.local[0];
+ page.setDefaultTimeout(15000);
+ await page.goto(url+'?mock=fresh',{waitUntil:'domcontentloaded'});
+ const later=page.getByRole('button',{name:/稍后设置|Set up later/});
+ try { await later.waitFor({state:'visible',timeout:3000}); await later.click(); } catch {}
+ const composer=page.locator('#composer-input');await composer.waitFor({state:'visible',timeout:60000});
+ const send=async text=>{await composer.fill(text);await page.locator('.composer__btn--send').click();};
+ await send('/mock-protocol-recovery'); console.log('sent mock failure');
+ const recover=page.getByRole('button',{name:/从有效历史恢复|Recover from valid history/});
+ await recover.waitFor({state:'visible'});
+ if(await recover.count()!==1)throw Error('duplicate recovery cards');
+ await recover.click();
+ const stop=page.locator('.composer__btn--stop');await stop.waitFor({state:'visible'});await stop.click();
+ await stop.waitFor({state:'hidden'});
+ await page.waitForTimeout(1700);
+ if(await page.locator('.tool__search-summary').count())throw Error('late response after cancellation committed');
+ await send('/mock-protocol-recovery');await recover.waitFor({state:'visible'});await recover.click();
+ const note=page.getByText(/搜索已完成，供应商未提供可用的结构化来源|Search completed; the provider/).first();
+ await note.waitFor({state:'visible',timeout:15000});
+ const summary=page.getByText('搜索摘要仍然可读。');
+ const header=page.locator('.tool__head').last();
+ if(await header.count()===0)await page.locator('.turn-collapse__label').last().click();
+ if(await header.getAttribute('aria-expanded')==='false')await header.click();
+ await summary.waitFor({state:'visible'});
+ await summary.scrollIntoViewIfNeeded();
+ await page.waitForTimeout(300);
+ const summaryBox=await summary.boundingBox();
+ const composerBox=await page.locator('.composer').boundingBox();
+ if(!summaryBox || !composerBox || summaryBox.y+summaryBox.height>composerBox.y || summaryBox.y<0)throw Error('search summary is outside the readable transcript viewport');
+ await page.screenshot({path:'/tmp/reasonix-protocol-recovery-browser.png',fullPage:true});
+ if(errors.length)throw Error(errors.join('\n'));
+ console.log('PASS: one recovery button, click, stop, no late search, source-free successful search and summary; no page errors');
+} catch(error) { console.error(error); if(browser){const p=browser.contexts()[0]?.pages()[0]; if(p){await p.screenshot({path:'/tmp/reasonix-protocol-browser-failure.png'});console.error((await p.locator('body').innerText()).slice(-4500));}} throw error; } finally {await browser?.close();await server.close();}

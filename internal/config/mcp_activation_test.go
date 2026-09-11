@@ -88,9 +88,7 @@ func TestMCPActivationStoreConcurrentIndependentWriters(t *testing.T) {
 	start := make(chan struct{})
 	var wg sync.WaitGroup
 	for i, store := range stores {
-		wg.Add(1)
-		go func() {
-			defer wg.Done()
+		wg.Go(func() {
 			<-start
 			if err := store.SetEnabled(MCPActivationOverride{
 				Scope:   MCPActivationGlobal,
@@ -99,7 +97,7 @@ func TestMCPActivationStoreConcurrentIndependentWriters(t *testing.T) {
 			}); err != nil {
 				t.Errorf("SetEnabled(%d): %v", i, err)
 			}
-		}()
+		})
 	}
 	close(start)
 	wg.Wait()

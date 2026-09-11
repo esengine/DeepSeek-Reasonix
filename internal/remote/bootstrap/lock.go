@@ -3,11 +3,10 @@ package bootstrap
 import (
 	"context"
 	"fmt"
+	"os"
 	"strconv"
 	"strings"
 	"time"
-
-	"reasonix/internal/remote/sftpfs"
 )
 
 const (
@@ -16,7 +15,7 @@ const (
 )
 
 type serveLock struct {
-	fs    *sftpfs.FS
+	fs    serveLockFS
 	paths StatePaths
 	owner string
 }
@@ -26,7 +25,7 @@ type serveLock struct {
 // locate/install phase stays outside the lock. A crashed owner's directory is
 // reclaimed only after a minute; the guarded health check itself is bounded to
 // 20 seconds, so a live owner cannot legitimately age past that threshold.
-func acquireServeLock(ctx context.Context, fs *sftpfs.FS, paths StatePaths, clock func() time.Time) (*serveLock, error) {
+func acquireServeLock(ctx context.Context, fs serveLockFS, paths StatePaths, clock func() time.Time) (*serveLock, error) {
 	if err := fs.MkdirAll(ctx, paths.Dir); err != nil {
 		return nil, err
 	}
@@ -35,6 +34,7 @@ func acquireServeLock(ctx context.Context, fs *sftpfs.FS, paths StatePaths, cloc
 		return nil, err
 	}
 	owner := strconv.FormatInt(clock().Unix(), 10) + ":" + token
+	retriedMissing := false
 	for {
 		mkdirErr := fs.MkdirExclusive(ctx, paths.LockDir)
 		if mkdirErr == nil {
@@ -44,11 +44,25 @@ func acquireServeLock(ctx context.Context, fs *sftpfs.FS, paths StatePaths, cloc
 			}
 			return &serveLock{fs: fs, paths: paths, owner: owner}, nil
 		}
+		if err := ctx.Err(); err != nil {
+			return nil, fmt.Errorf("bootstrap: wait for serve lock: %w", err)
+		}
+		if !lockCreationMayContend(mkdirErr) {
+			return nil, fmt.Errorf("bootstrap: create serve lock: %w", mkdirErr)
+		}
 
 		lockInfo, statErr := fs.Stat(ctx, paths.LockDir)
+		// The owner may release between mkdir and Stat. Recompete once per
+		// observed lock: SFTP v3 generic failures cannot prove contention, so
+		// repeated missing observations must not spin on permanent failures.
+		if os.IsNotExist(statErr) && !retriedMissing {
+			retriedMissing = true
+			continue
+		}
 		if statErr != nil || !lockInfo.IsDir {
 			return nil, fmt.Errorf("bootstrap: create serve lock: %w", mkdirErr)
 		}
+		retriedMissing = false
 		data, _, _, readErr := fs.ReadFile(ctx, paths.LockOwner, 512)
 		if readErr == nil {
 			observed := strings.TrimSpace(string(data))

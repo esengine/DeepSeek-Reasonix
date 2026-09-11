@@ -13,6 +13,7 @@ import (
 	tea "charm.land/bubbletea/v2"
 
 	"reasonix/internal/agent"
+	"reasonix/internal/boot"
 	"reasonix/internal/config"
 	"reasonix/internal/control"
 	"reasonix/internal/event"
@@ -32,7 +33,6 @@ func chatTUIWithRunningBackgroundJob(t *testing.T) chatTUI {
 	m := newTestChatTUI()
 	m.ctrl = ctrl
 	m.modelRef = "deepseek-flash/deepseek-v4-flash"
-	m.runtimeProfile = "full"
 	m.buildController = func(controllerBuildSpec, []provider.Message, string, control.SessionAPI) (*control.Controller, error) {
 		t.Fatal("runtime switch built a replacement while a background job was running")
 		return nil, nil
@@ -125,6 +125,7 @@ func divergedSessionControllerWithRecovery(t *testing.T, dir, path string, onRec
 }
 
 func TestSessionRecoveryCallbackMovesLeaseBeforeControllerCommit(t *testing.T) {
+	t.Setenv(agent.SessionLogSchemaEnv, "v1")
 	dir := t.TempDir()
 	originalPath := filepath.Join(dir, "turn-end-conflict.jsonl")
 	leases := control.NewSessionLeaseKeeper()
@@ -134,6 +135,9 @@ func TestSessionRecoveryCallbackMovesLeaseBeforeControllerCommit(t *testing.T) {
 	}
 	ctrl := divergedSessionControllerWithRecovery(t, dir, originalPath, cliSessionRecoveredHandler(leases))
 	t.Cleanup(ctrl.Close)
+	if err := leases.BindControllerAuthority(ctrl); err != nil {
+		t.Fatalf("bind controller authority: %v", err)
+	}
 
 	if err := ctrl.Snapshot(); err != nil {
 		t.Fatalf("Snapshot: %v", err)
@@ -145,6 +149,7 @@ func TestSessionRecoveryCallbackMovesLeaseBeforeControllerCommit(t *testing.T) {
 	if got, want := leases.HeldPath(), agent.CanonicalSessionPath(recoveryPath); got != want {
 		t.Fatalf("lease after recovery callback = %q, want %q", got, want)
 	}
+	leases.WaitForRetiredLeases()
 	if probe, err := agent.TryAcquireSessionLease(originalPath); err != nil {
 		t.Fatalf("original lease was not released after recovery: %v", err)
 	} else {
@@ -159,6 +164,7 @@ func TestSessionRecoveryCallbackMovesLeaseBeforeControllerCommit(t *testing.T) {
 }
 
 func TestSessionRecoveryCallbackFailureKeepsOriginalLeaseAndPath(t *testing.T) {
+	t.Setenv(agent.SessionLogSchemaEnv, "v1")
 	dir := t.TempDir()
 	originalPath := filepath.Join(dir, "held-recovery-conflict.jsonl")
 	leases := control.NewSessionLeaseKeeper()
@@ -207,6 +213,7 @@ func TestSessionRecoveryCallbackFailureKeepsOriginalLeaseAndPath(t *testing.T) {
 // must be that recovery path. A pre-snapshot capture bound the just-recovered
 // transcript back to the original file, re-conflicting on every later save.
 func TestModelSwitchCarriesRecoveryPathAfterSnapshotConflict(t *testing.T) {
+	t.Setenv(agent.SessionLogSchemaEnv, "v1")
 	isolateUserConfig(t)
 	dir := t.TempDir()
 	originalPath := filepath.Join(dir, "model-switch-conflict.jsonl")
@@ -237,6 +244,7 @@ func TestModelSwitchCarriesRecoveryPathAfterSnapshotConflict(t *testing.T) {
 // TestEffortSwitchCarriesRecoveryPathAfterSnapshotConflict covers the same
 // contract for the TUI /effort rebuild path.
 func TestEffortSwitchCarriesRecoveryPathAfterSnapshotConflict(t *testing.T) {
+	t.Setenv(agent.SessionLogSchemaEnv, "v1")
 	isolateUserConfig(t)
 	dir := t.TempDir()
 	originalPath := filepath.Join(dir, "effort-switch-conflict.jsonl")
@@ -267,6 +275,7 @@ func TestEffortSwitchCarriesRecoveryPathAfterSnapshotConflict(t *testing.T) {
 // TestSkillRefreshCarriesRecoveryPathAfterSnapshotConflict covers the TUI skill
 // rebuild path, which also snapshots then rebuilds the controller in place.
 func TestSkillRefreshCarriesRecoveryPathAfterSnapshotConflict(t *testing.T) {
+	t.Setenv(agent.SessionLogSchemaEnv, "v1")
 	dir := t.TempDir()
 	originalPath := filepath.Join(dir, "skill-refresh-conflict.jsonl")
 
@@ -292,41 +301,46 @@ func TestSkillRefreshCarriesRecoveryPathAfterSnapshotConflict(t *testing.T) {
 	}
 }
 
-func TestWorkModeSwitchCarriesRecoveryPathAndMovesLeaseBeforeRebuild(t *testing.T) {
+func TestWorkModeSwitchUpdatesInPlaceWithoutRebuildOrLeaseMove(t *testing.T) {
 	dir := t.TempDir()
 	originalPath := filepath.Join(dir, "work-mode-conflict.jsonl")
 
 	m := newTestChatTUI()
-	m.ctrl = divergedSessionController(t, dir, originalPath)
+	oldCtrl := divergedSessionController(t, dir, originalPath)
+	m.ctrl = oldCtrl
 	m.modelRef = "deepseek-flash/deepseek-v4-flash"
-	m.runtimeProfile = "full"
 	m.leases = control.NewSessionLeaseKeeper()
 	t.Cleanup(m.leases.Release)
 	if err := m.leases.Rebind(originalPath); err != nil {
 		t.Fatalf("seed active lease: %v", err)
 	}
-	var gotResumePath, heldAtBuild string
+	builds := 0
 	m.buildController = func(_ controllerBuildSpec, _ []provider.Message, resumePath string, _ control.SessionAPI) (*control.Controller, error) {
-		gotResumePath = resumePath
-		heldAtBuild = m.leases.HeldPath()
+		builds++
 		return control.New(control.Options{Label: "deepseek-flash"}), nil
 	}
 
-	cmd := m.runWorkModeCommand("/work-mode delivery")
-	if cmd == nil {
-		t.Fatal("work-mode switch did not queue a rebuild")
+	cmd := m.runWorkModeCommand("/preset delivery")
+	if cmd != nil {
+		t.Fatal("/preset must not queue a controller rebuild")
 	}
-	cmd()
-
-	if gotResumePath == "" || gotResumePath == originalPath || !strings.Contains(filepath.Base(gotResumePath), "-recovery-") {
-		t.Fatalf("resume path = %q, want recovery path distinct from %q", gotResumePath, originalPath)
+	if m.ctrl != oldCtrl {
+		t.Fatal("controller instance must stay the same")
 	}
-	if got, want := heldAtBuild, agent.CanonicalSessionPath(gotResumePath); got != want {
-		t.Fatalf("lease at build = %q, want recovery path %q", got, want)
+	if m.ctrl.AgentPreset() != boot.AgentPresetDelivery {
+		t.Fatalf("controller preset = %q, want delivery", m.ctrl.AgentPreset())
+	}
+	if builds != 0 {
+		t.Fatalf("unexpected rebuilds: %d", builds)
+	}
+	// Lease stays on the original session path — no recovery rewrite.
+	if got := m.leases.HeldPath(); got != agent.CanonicalSessionPath(originalPath) {
+		t.Fatalf("lease path = %q, want original %q", got, originalPath)
 	}
 }
 
 func TestResumeCommandKeepsLeaseOnRecoveryPathWhenTargetHeld(t *testing.T) {
+	t.Setenv(agent.SessionLogSchemaEnv, "v1")
 	dir := t.TempDir()
 	active := filepath.Join(dir, "resume-active-conflict.jsonl")
 	target := filepath.Join(dir, "resume-target.jsonl")
@@ -354,6 +368,7 @@ func TestResumeCommandKeepsLeaseOnRecoveryPathWhenTargetHeld(t *testing.T) {
 }
 
 func TestResumePickerKeepsLeaseOnRecoveryPathWhenTargetHeld(t *testing.T) {
+	t.Setenv(agent.SessionLogSchemaEnv, "v1")
 	dir := t.TempDir()
 	active := filepath.Join(dir, "resume-picker-active-conflict.jsonl")
 	target := filepath.Join(dir, "resume-picker-target.jsonl")
@@ -361,7 +376,7 @@ func TestResumePickerKeepsLeaseOnRecoveryPathWhenTargetHeld(t *testing.T) {
 
 	m := newTestChatTUI()
 	m.ctrl = divergedSessionController(t, dir, active)
-	m.resumePick = &resumePicker{sessions: []agent.SessionInfo{{Path: target}}, sel: 0}
+	m.resumePick = &resumePicker{entries: []resumeEntry{{session: agent.SessionInfo{Path: target}}}, sel: 0}
 	m.leases = control.NewSessionLeaseKeeper()
 	t.Cleanup(m.leases.Release)
 	if err := m.leases.Rebind(active); err != nil {
@@ -382,6 +397,7 @@ func TestResumePickerKeepsLeaseOnRecoveryPathWhenTargetHeld(t *testing.T) {
 }
 
 func TestCompactDoneKeepsLeaseOnRecoveryPathAfterSnapshotConflict(t *testing.T) {
+	t.Setenv(agent.SessionLogSchemaEnv, "v1")
 	dir := t.TempDir()
 	active := filepath.Join(dir, "compact-active-conflict.jsonl")
 
@@ -406,6 +422,7 @@ func TestCompactDoneKeepsLeaseOnRecoveryPathAfterSnapshotConflict(t *testing.T) 
 }
 
 func TestBranchTreeKeepsLeaseOnRecoveryPathAfterSnapshotConflict(t *testing.T) {
+	t.Setenv(agent.SessionLogSchemaEnv, "v1")
 	dir := t.TempDir()
 	active := filepath.Join(dir, "tree-active-conflict.jsonl")
 
@@ -430,6 +447,7 @@ func TestBranchTreeKeepsLeaseOnRecoveryPathAfterSnapshotConflict(t *testing.T) {
 }
 
 func TestShutdownMessageSnapshotsCurrentController(t *testing.T) {
+	t.Setenv(agent.SessionLogSchemaEnv, "v1")
 	dir := t.TempDir()
 	active := filepath.Join(dir, "shutdown-active-conflict.jsonl")
 
@@ -463,6 +481,7 @@ func TestShutdownMessageSnapshotsCurrentController(t *testing.T) {
 // /switch tab-completion path: listing branches snapshots the session, which
 // can retarget the controller to a recovery branch even though no switch runs.
 func TestBranchCompletionKeepsLeaseOnRecoveryPathAfterSnapshotConflict(t *testing.T) {
+	t.Setenv(agent.SessionLogSchemaEnv, "v1")
 	dir := t.TempDir()
 	active := filepath.Join(dir, "completion-active-conflict.jsonl")
 
@@ -492,6 +511,7 @@ func TestBranchCompletionKeepsLeaseOnRecoveryPathAfterSnapshotConflict(t *testin
 // controller to a recovery branch, and a failed build must not leave the lease
 // on the stale original path.
 func TestModelSwitchFailureKeepsLeaseOnRecoveryPathAfterSnapshotConflict(t *testing.T) {
+	t.Setenv(agent.SessionLogSchemaEnv, "v1")
 	isolateUserConfig(t)
 	dir := t.TempDir()
 	active := filepath.Join(dir, "model-switch-failure-conflict.jsonl")
@@ -529,6 +549,7 @@ func TestModelSwitchFailureKeepsLeaseOnRecoveryPathAfterSnapshotConflict(t *test
 // buildController, so the lease must already guard the retargeted path when
 // the build starts, not only after modelSwitchMsg lands.
 func TestModelSwitchMovesLeaseToRecoveryPathBeforeRebuild(t *testing.T) {
+	t.Setenv(agent.SessionLogSchemaEnv, "v1")
 	isolateUserConfig(t)
 	dir := t.TempDir()
 	active := filepath.Join(dir, "model-switch-lease-order.jsonl")
@@ -559,6 +580,7 @@ func TestModelSwitchMovesLeaseToRecoveryPathBeforeRebuild(t *testing.T) {
 // TestEffortSwitchMovesLeaseToRecoveryPathBeforeRebuild covers the same
 // lease-before-bind order for the /effort rebuild path.
 func TestEffortSwitchMovesLeaseToRecoveryPathBeforeRebuild(t *testing.T) {
+	t.Setenv(agent.SessionLogSchemaEnv, "v1")
 	isolateUserConfig(t)
 	dir := t.TempDir()
 	active := filepath.Join(dir, "effort-switch-lease-order.jsonl")
@@ -589,6 +611,7 @@ func TestEffortSwitchMovesLeaseToRecoveryPathBeforeRebuild(t *testing.T) {
 // TestSkillRefreshMovesLeaseToRecoveryPathBeforeRebuild covers the same
 // lease-before-bind order for the TUI skill rebuild path.
 func TestSkillRefreshMovesLeaseToRecoveryPathBeforeRebuild(t *testing.T) {
+	t.Setenv(agent.SessionLogSchemaEnv, "v1")
 	dir := t.TempDir()
 	active := filepath.Join(dir, "skill-refresh-lease-order.jsonl")
 

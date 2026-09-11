@@ -30,6 +30,7 @@ import {
 } from "../lib/useController";
 import { ExtensionCard } from "../components/ExtensionCard";
 import { ExtensionFormDialog } from "../components/ExtensionFormDialog";
+import { installDesktopHostStub } from "./desktopHostStub";
 
 let passed = 0;
 let failed = 0;
@@ -148,7 +149,7 @@ ok(acceptsExtensionGeneration(5, undefined), "events without a generation always
 
 {
   let s: ControllerState = { ...initialState };
-  s = reducer(s, { type: "user", text: "hello", seq: 0 });
+  s = reducer(s, { type: "user", text: "hello", seq: 0, submissionId: "extension-submit" });
   ok(s.pendingUser === "hello", "optimistic user bubble pending");
   s = reducer(s, { type: "event", e: surfaceEvent({ kind: "card", card: { title: "bg" } }) });
   ok(s.pendingUser === "hello", "extension events never flush the optimistic user bubble");
@@ -173,6 +174,9 @@ const dom = new JSDOM("<!doctype html><html><body><div id=\"root\"></div></body>
 (globalThis as typeof globalThis & { IS_REACT_ACT_ENVIRONMENT: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
 globalThis.window = dom.window as unknown as Window & typeof globalThis;
 globalThis.document = dom.window.document;
+// Node's built-in navigator reflects the machine's ICU locale; pin jsdom's
+// en-US one so English-string assertions hold on zh-locale machines.
+Object.defineProperty(globalThis, "navigator", { configurable: true, value: dom.window.navigator });
 globalThis.Node = dom.window.Node;
 globalThis.Element = dom.window.Element;
 globalThis.HTMLElement = dom.window.HTMLElement;
@@ -203,7 +207,7 @@ async function flush(ms = 30) {
 
 const invokeCalls: Array<{ tabId: string; name: string; args: Record<string, string> }> = [];
 let invokeResult: string | Error = "Completed!";
-(dom.window as unknown as { go: unknown }).go = {
+installDesktopHostStub(({
   main: {
     App: {
       InvokeExtensionAction: async (tabId: string, name: string, args: Record<string, string>) => {
@@ -213,7 +217,7 @@ let invokeResult: string | Error = "Completed!";
       },
     },
   },
-};
+}).main.App);
 
 const cardItem: ExtensionItem = {
   kind: "extension",

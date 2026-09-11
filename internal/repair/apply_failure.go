@@ -206,7 +206,7 @@ func clearUpdateApplyFailureExact(expected *UpdateApplyFailure) error {
 	updateCleanupAfterRename(path, cleanup)
 	restore := func(cause error) error {
 		if restoreErr := renameRepairNodeNoReplace(cleanup, path); restoreErr != nil {
-			return fmt.Errorf("%w; update failure marker retained at %s: %v", cause, cleanup, restoreErr)
+			return fmt.Errorf("%w; update failure marker retained at %s: %w", cause, cleanup, restoreErr)
 		}
 		return cause
 	}

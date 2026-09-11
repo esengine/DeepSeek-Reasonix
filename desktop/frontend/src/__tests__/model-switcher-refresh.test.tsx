@@ -6,6 +6,7 @@ import { createRoot } from "react-dom/client";
 import { ModelSwitcher, normalizeModelInfo } from "../components/ModelSwitcher";
 import { LocaleProvider } from "../lib/i18n";
 import type { ModelInfo } from "../lib/types";
+import { installDesktopHostStub } from "./desktopHostStub";
 
 class TestResizeObserver {
   observe() {}
@@ -28,6 +29,7 @@ globalThis.document = dom.window.document;
 globalThis.Event = dom.window.Event;
 globalThis.MouseEvent = dom.window.MouseEvent;
 globalThis.HTMLElement = dom.window.HTMLElement;
+globalThis.Node = dom.window.Node;
 globalThis.ResizeObserver = TestResizeObserver as unknown as typeof ResizeObserver;
 globalThis.requestAnimationFrame = dom.window.requestAnimationFrame.bind(dom.window);
 globalThis.cancelAnimationFrame = dom.window.cancelAnimationFrame.bind(dom.window);
@@ -65,7 +67,7 @@ if (normalizedNullMetadata.provider !== "" || normalizedNullMetadata.model !== "
 let currentCatalog: ModelInfo[] = [
   { ref: "glm-cn/glm-5.2", provider: "glm-cn", model: "glm-5.2", current: true },
 ];
-(window as unknown as { go: { main: { App: Record<string, unknown> } } }).go = {
+installDesktopHostStub(({
   main: {
     App: {
       ModelsForTab: async () => {
@@ -77,14 +79,16 @@ let currentCatalog: ModelInfo[] = [
       },
     },
   },
-};
+}).main.App);
 
 const root = createRoot(document.getElementById("root")!);
-const renderSwitcher = (label: string, tabId: string) => (
+const renderSwitcher = (label: string, tabId: string, ready = true, sessionKey?: string) => (
   <LocaleProvider>
     <ModelSwitcher
       label={label}
       tabId={tabId}
+      ready={ready}
+      sessionKey={sessionKey}
       onPick={(ref) => {
         picked.push(ref);
         return pickGates.shift()?.promise ?? Promise.resolve(true);
@@ -339,6 +343,47 @@ const nullSafeOptions = Array.from(document.querySelectorAll<HTMLElement>("[role
 if (nullSafeOptions.length !== 2) {
   throw new Error(`null model metadata prevented catalog rendering: ${nullSafeOptions.length}`);
 }
+
+// Connection order and duplicate model IDs must survive selection and renaming.
+currentCatalog = [
+  { ref: "z/shared", provider: "z", displayName: "First connection", model: "shared", current: false },
+  { ref: "a/shared", provider: "a", displayName: "Second connection", model: "shared", current: true },
+];
+await act(async () => {
+  window.dispatchEvent(new Event("reasonix:model-catalog-changed"));
+  await new Promise(resolve => setTimeout(resolve, 0));
+});
+const connectionLabels = Array.from(document.querySelectorAll(".modelsw__group-label"), el => el.textContent);
+if (connectionLabels.join("|") !== "First connection|Second connection") {
+  throw new Error(`connection order differs from catalog: ${connectionLabels}`);
+}
+if (document.querySelectorAll("[role='option']").length !== 2) {
+  throw new Error("same model ID in separate connections was merged");
+}
+
+// Cold restoration can finish after the initial catalog read while retaining
+// the same tab and model label. Readiness and session identity must refresh
+// the connection without requiring the user to open the menu.
+await act(async () => {
+  (document.querySelector(".modelsw__trigger") as HTMLButtonElement).click();
+  currentCatalog = currentCatalog.map(m => ({ ...m, current: m.provider === "z" }));
+  root.render(renderSwitcher("shared", "tab-restored", false, "session-one"));
+});
+await act(async () => { await new Promise(resolve => setTimeout(resolve, 0)); });
+const restoredLabel = () => document.querySelector(".modelsw__trigger")?.getAttribute("aria-label") ?? "";
+if (!restoredLabel().includes("First connection")) throw new Error("cold catalog fixture did not load");
+await act(async () => {
+  currentCatalog = currentCatalog.map(m => ({ ...m, current: m.provider === "a" }));
+  root.render(renderSwitcher("shared", "tab-restored", true, "session-one"));
+});
+await act(async () => { await new Promise(resolve => setTimeout(resolve, 0)); });
+if (!restoredLabel().includes("Second connection")) throw new Error("ready session retained the startup connection label");
+await act(async () => {
+  currentCatalog = currentCatalog.map(m => ({ ...m, current: m.provider === "z" }));
+  root.render(renderSwitcher("shared", "tab-restored", true, "session-two"));
+});
+await act(async () => { await new Promise(resolve => setTimeout(resolve, 0)); });
+if (!restoredLabel().includes("First connection")) throw new Error("resumed session retained another session's connection label");
 
 await act(async () => root.unmount());
 console.log("model switcher refresh: PASS");

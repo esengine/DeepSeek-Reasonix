@@ -702,26 +702,7 @@ func repairPlanTreeEntries(root string) ([]repairPlanTreeEntry, error) {
 // installed bundle contain the same bytes even though they live at different
 // paths.
 func repairPlanTreeContentStateID(root string) (string, error) {
-	info, err := os.Lstat(root)
-	if err != nil {
-		return "", err
-	}
-	if !info.IsDir() {
-		return "", fmt.Errorf("expected directory, got %s", info.Mode().Type())
-	}
-	entries, err := repairPlanTreeEntries(root)
-	if err != nil {
-		return "", err
-	}
-	for _, entry := range entries {
-		switch entry.Kind {
-		case "unreadable", "file-unreadable", "symlink-unreadable":
-			return "", fmt.Errorf("cannot read bundle entry %q", entry.Rel)
-		case "other":
-			return "", fmt.Errorf("unsupported bundle entry %q", entry.Rel)
-		}
-	}
-	return repairPlanStateID(entries), nil
+	return repairPlanTreeDigest(root, nil)
 }
 
 func repairPlanTreeStateIDFor(readRoot, identityRoot string) string {

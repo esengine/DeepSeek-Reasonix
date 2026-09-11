@@ -5,7 +5,9 @@ import React, { act } from "react";
 import { createRoot } from "react-dom/client";
 import type { AppBindings } from "../lib/bridge";
 import { useController } from "../lib/useController";
-import type { BalanceInfo, CheckpointMeta, ContextInfo, EffortInfo, HistoryMessage, JobView, Meta, TabMeta } from "../lib/types";
+import { historySliceFromMessages } from "./mockHistorySlice";
+import type { BalanceInfo, CheckpointMeta, ContextInfo, EffortInfo, HistoryMessage, HistorySliceRequest, JobView, Meta, TabMeta } from "../lib/types";
+import { installDesktopHostStub } from "./desktopHostStub";
 
 let passed = 0;
 let failed = 0;
@@ -119,21 +121,13 @@ const effort: EffortInfo = { supported: true, current: "auto", default: "auto", 
 const balance: BalanceInfo = { available: false, display: "" };
 const jobs: JobView[] = [];
 const checkpoints: CheckpointMeta[] = [];
-const readyHandlers: Array<(tabId?: string) => void> = [];
 const historyGate = deferred<HistoryMessage[]>();
 let backendReady = false;
 let listTabsCalls = 0;
 let historyCalls = 0;
 let metaCalls = 0;
 
-window.runtime = {
-  EventsOn: (name: string, cb: (...data: unknown[]) => void) => {
-    if (name === "agent:ready") readyHandlers.push(cb as (tabId?: string) => void);
-    return () => {};
-  },
-  BrowserOpenURL: () => {},
-};
-window.go = {
+const desktopStub = installDesktopHostStub(({
   main: {
     App: {
       ListTabs: async () => {
@@ -155,11 +149,15 @@ window.go = {
         const messages = await historyGate.promise;
         return { messages, startTurn: 0, endTurn: messages.filter((message) => message.role === "user").length, totalTurns: messages.filter((message) => message.role === "user").length, hasOlder: false };
       },
+      HistorySliceForTab: async (tabId: string, req: HistorySliceRequest) => {
+        historyCalls += 1;
+        return historySliceFromMessages(tabId, await historyGate.promise, req);
+      },
       HistoryCheckpointTurnsForTab: async () => [],
       ReplayPendingPrompts: async () => {},
     } as Partial<AppBindings> as AppBindings,
   },
-};
+}).main.App);
 
 type Controller = ReturnType<typeof useController>;
 let controller: Controller | undefined;
@@ -184,7 +182,7 @@ eq(metaCalls, 0, "startup history remains in flight before ancillary meta");
 
 backendReady = true;
 await act(async () => {
-  for (const handler of readyHandlers) handler("tab-ready");
+  desktopStub.emit("agent:ready", "tab-ready");
   await flushPromises();
 });
 await waitFor("ready metadata refreshed before history settles", () => controller?.state.meta?.ready === true);

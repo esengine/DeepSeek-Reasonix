@@ -8,6 +8,7 @@ import (
 
 	"reasonix/internal/boot"
 	"reasonix/internal/control"
+	"reasonix/internal/event"
 	"reasonix/internal/i18n"
 )
 
@@ -111,8 +112,7 @@ func (m *chatTUI) scheduleRuntimeReload() tea.Cmd {
 
 	rebuild := m.rebuildRuntime
 	spec := controllerBuildSpec{
-		ModelRef:       m.modelRef,
-		RuntimeProfile: m.runtimeProfile,
+		ModelRef: m.modelRef,
 		// EffortOverride stays nil: the captured build options in cli.go
 		// already track the session's current effort.
 	}
@@ -190,12 +190,10 @@ func (m *chatTUI) scheduleCurrentControllerRebuild(reason, successNotice string)
 	oldCtrl := m.ctrl
 	build := m.buildController
 	ref := m.modelRef
-	profile := m.runtimeProfile
 	m.modelSwitchPending = true
 	m.pendingModelSwitch = func() tea.Msg {
 		c, err := build(controllerBuildSpec{
 			ModelRef:         ref,
-			RuntimeProfile:   profile,
 			ToolApprovalMode: oldCtrl.ToolApprovalMode(),
 			PlanMode:         oldCtrl.PlanMode(),
 		}, carried, resumePath, oldCtrl)
@@ -214,4 +212,30 @@ func (m *chatTUI) scheduleCurrentControllerRebuild(reason, successNotice string)
 		}
 	}
 	return m.pendingModelSwitch
+}
+
+func (m *chatTUI) bindRuntimeRebuilder(maxSteps int, sink event.Sink, yolo bool, overrides cliBuildOverrides, buildOpts func(string, int, bool, event.Sink, cliBuildOverrides) boot.Options) {
+	m.rebuildRuntime = func(ctx context.Context, spec controllerBuildSpec, old *control.Controller) (*boot.BuildResult, error) {
+		effectiveOverrides := overrides
+		if spec.EffortOverride != nil {
+			effectiveOverrides.Effort = spec.EffortOverride
+		}
+		opts := buildOpts(spec.ModelRef, maxSteps, false, sink, effectiveOverrides)
+		var res *boot.BuildResult
+		var err error
+		if m.lastBuildResult != nil {
+			res, err = boot.RebuildFrom(ctx, m.lastBuildResult, opts)
+		} else {
+			res, err = boot.Rebuild(ctx, old, opts)
+		}
+		if err != nil {
+			return nil, err
+		}
+		m.lastBuildResult = res
+		res.Controller.EnableInteractiveApproval()
+		if yolo {
+			res.Controller.SetAutoApproveTools(true)
+		}
+		return res, nil
+	}
 }

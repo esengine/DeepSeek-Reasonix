@@ -14,11 +14,11 @@ import (
 	"io"
 	"log/slog"
 	"math"
-	"net"
 	"net/url"
 	"os"
 	"os/signal"
 	"path/filepath"
+	"slices"
 	"sort"
 	"strconv"
 	"strings"
@@ -35,11 +35,13 @@ import (
 	"reasonix/internal/extension/providerext"
 	fileencoding "reasonix/internal/fileutil/encoding"
 	"reasonix/internal/i18n"
+	"reasonix/internal/netclient"
 	"reasonix/internal/notify"
+	"reasonix/internal/plugin"
 	"reasonix/internal/provider"
 	"reasonix/internal/provider/openai"
 	"reasonix/internal/serve"
-	"reasonix/internal/stats"
+	"reasonix/internal/sessiontemp"
 	"reasonix/internal/telemetry"
 
 	tea "charm.land/bubbletea/v2"
@@ -50,17 +52,25 @@ import (
 var (
 	runInteractiveSession = chatREPL
 	cliIsInteractive      = isInteractive
+	runWebCommand         = runWeb
+	openBrowserURL        = openInBrowser
 )
 
 // Run is the CLI entry point; it returns a process exit code.
+// Prefer RunWithBuildInfo when git commit / build time are available from ldflags.
 func Run(args []string, version string) int {
+	return RunWithBuildInfo(args, BuildInfo{Version: version})
+}
+
+// RunWithBuildInfo is the full CLI entry with optional build metadata for
+// `reasonix version --verbose` / `--json`.
+func RunWithBuildInfo(args []string, info BuildInfo) int {
+	info = info.withDefaults()
+	version := info.Version
 	// Usage recording is asynchronous so provider/UI paths never wait on disk.
-	// Drain records accepted by this process before a normal CLI exit.
-	defer func() {
-		flushCtx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
-		defer cancel()
-		_ = stats.Flush(flushCtx, config.StatsDir())
-	}()
+	// Drain accepted records and fence the projection worker before returning.
+	// An embedded Run may outlive one invocation and remove its CacheDir.
+	defer closeCLIUsageCatalogs()
 	// Pick the UI language up front so even pre-config paths (the first-run
 	// welcome banner) come through localized. Env-only first; if a config
 	// exists and pins a language, that wins.
@@ -115,6 +125,8 @@ func Run(args []string, version string) int {
 		return runInteractiveSession(rest, version)
 	case "serve":
 		return runServe(rest)
+	case "web":
+		return runWebCommand(rest)
 	case "setup":
 		configureCLIThemeFromConfigForTTYOutput()
 		return setupConfig(rest)
@@ -150,9 +162,8 @@ func Run(args []string, version string) int {
 	case "report":
 		configureCLIThemeFromConfig()
 		return reportCommand(rest)
-	case "session":
-		configureCLIThemeFromConfig()
-		return sessionCommand(rest)
+	case "session", "sessions", "catalogs":
+		return runSessionOrCatalogCommand(cmd, rest)
 	case "hook", "hooks":
 		configureCLIThemeFromConfig()
 		return hookCommand(rest)
@@ -168,9 +179,14 @@ func Run(args []string, version string) int {
 	case "upgrade", "update":
 		configureCLIThemeFromConfig()
 		return upgradeCommand(rest, version)
-	case "version", "--version", "-v":
-		fmt.Println("reasonix", version)
-		return 0
+	case "version":
+		// Detailed identity: version --verbose / --json. Top-level --version/-v
+		// stay single-line for script compatibility (Integration D/E).
+		return versionCommand(rest, info, true)
+	case "--version", "-v":
+		return versionCommand(nil, info, false)
+	case "completion":
+		return completionCommand(rest)
 	case "docs-manifest":
 		return docsManifestCommand(rest, version)
 	case "help", "--help", "-h":
@@ -189,7 +205,7 @@ func isDoctorRepairCommand(args []string) bool {
 
 func isDefaultInteractiveFlag(arg string) bool {
 	switch arg {
-	case "--model", "--max-steps", "--continue", "-c", "--resume", "-r", "--copy", "--dangerously-skip-permissions", "--yolo", "--permission-mode", "--effort", "--dir", "--add-dir", "--allowed-tools", "--allowedTools":
+	case "--model", "--max-steps", "--continue", "-c", "--resume", "-r", "--copy", "--dangerously-skip-permissions", "--yolo", "--permission-mode", "--effort", "--dir", "--add-dir", "--allowed-tools", "--allowedTools", "--profile", "--preset":
 		return true
 	}
 	if name, _, ok := strings.Cut(arg, "="); ok && isDefaultInteractiveFlag(name) {
@@ -200,19 +216,10 @@ func isDefaultInteractiveFlag(arg string) bool {
 
 func shouldMigrateLegacyConfigForCLI(cmd string) bool {
 	switch cmd {
-	case "", "run", "chat", "code", "serve", "setup", "config", "init", "acp", "mcp", "remote", "plugin", "subagent", "doctor", "bot", "upgrade", "update":
+	case "", "run", "chat", "code", "serve", "web", "setup", "config", "init", "acp", "mcp", "remote", "plugin", "subagent", "doctor", "bot", "upgrade", "update":
 		return true
 	default:
 		return false
-	}
-}
-
-func migrateLegacyConfigForCLI() {
-	if _, err := config.MigrateLegacyIfNeeded(); err != nil {
-		fmt.Fprintln(os.Stderr, "warning: config migration failed:", err)
-	}
-	if _, err := config.ApplyUserConfigUpgradesOnStartup(config.UserConfigPath()); err != nil {
-		fmt.Fprintln(os.Stderr, "warning: config upgrade failed:", err)
 	}
 }
 
@@ -246,17 +253,13 @@ func configureCLIThemeFromConfigForTTYOutput() {
 // The assembly (model resolution, tool registry, permission gate, two-model
 // Coordinator) lives in internal/boot, shared with the desktop frontend.
 // requireKey forces the executor's API key to be present (used by run); chat
-// passes false so the session UI is reachable before a key is set. sink receives
-// the agent's typed event stream — runAgent passes a TextSink that renders to
-// stdout, the TUI passes an event-channel sink so events become tea.Msgs.
-// profile selects economy|balanced|delivery (empty = balanced/full).
-// workspaceRoot pins the project root explicitly (from --dir); empty falls back
-// to git-root detection.
-func setupProfile(ctx context.Context, modelName string, maxStepsOverride int, requireKey bool, sink event.Sink, profile string, workspaceRoot string) (*control.Controller, error) {
-	return setupProfileWithOverrides(ctx, modelName, maxStepsOverride, requireKey, sink, profile, cliBuildOverrides{WorkspaceRoot: workspaceRoot})
+// passes false so the session UI is reachable before a key is set.
+func setupProfile(ctx context.Context, modelName string, maxStepsOverride int, requireKey bool, sink event.Sink, workspaceRoot string) (*control.Controller, error) {
+	return setupProfileWithOverrides(ctx, modelName, maxStepsOverride, requireKey, sink, cliBuildOverrides{WorkspaceRoot: workspaceRoot})
 }
 
 type cliBuildOverrides struct {
+	Preset               string
 	Effort               *string
 	PermissionAllow      []string
 	AdditionalDirs       []string
@@ -265,42 +268,52 @@ type cliBuildOverrides struct {
 	Stderr               io.Writer
 	OnSessionRecovered   func(control.SessionRecoveryInfo) error
 	Ablation             ablation.Set
+	// InteractiveHost marks human-in-the-loop entries (chat TUI); print mode
+	// and bots stay on core-v1.
+	InteractiveHost bool
+	// SessionTemp carries the previous Controller's private temporary directory
+	// manager across model/profile rebuilds so temporary files survive.
+	SessionTemp *sessiontemp.Manager
 }
 
-func setupProfileWithOverrides(ctx context.Context, modelName string, maxStepsOverride int, requireKey bool, sink event.Sink, profile string, overrides cliBuildOverrides) (*control.Controller, error) {
+// sessionTempFromCLIController returns the logical-session private temporary
+// directory manager for a same-session CLI controller rebuild. Nil keeps fresh
+// builds on control.New's normal new-manager path.
+func sessionTempFromCLIController(ctrl control.SessionAPI) *sessiontemp.Manager {
+	prev, ok := ctrl.(*control.Controller)
+	if !ok || prev == nil {
+		return nil
+	}
+	return prev.SessionTemp()
+}
+
+func setupProfileWithOverrides(ctx context.Context, modelName string, maxStepsOverride int, requireKey bool, sink event.Sink, overrides cliBuildOverrides) (*control.Controller, error) {
 	migrateMCPConfigForCLIWorkspace()
-	return boot.Build(ctx, cliProfileBuildOptions(modelName, maxStepsOverride, requireKey, sink, profile, overrides))
+	return boot.Build(ctx, cliProfileBuildOptions(modelName, maxStepsOverride, requireKey, sink, overrides))
 }
 
-func cliProfileBuildOptions(modelName string, maxStepsOverride int, requireKey bool, sink event.Sink, profile string, overrides cliBuildOverrides) boot.Options {
-	return boot.Options{
+func cliProfileBuildOptions(modelName string, maxStepsOverride int, requireKey bool, sink event.Sink, overrides cliBuildOverrides) boot.Options {
+	opts := boot.Options{
 		Model:                modelName,
 		MaxSteps:             maxStepsOverride,
 		MaxStepsKey:          "--max-steps",
 		RequireKey:           requireKey,
 		Sink:                 sink,
-		TokenMode:            profile,
 		SessionDir:           resolveCLISessionDir(),
+		AgentPreset:          overrides.Preset,
 		WorkspaceRoot:        overrides.WorkspaceRoot,
 		EffortOverride:       overrides.Effort,
 		PermissionAllow:      overrides.PermissionAllow,
 		AdditionalDirs:       overrides.AdditionalDirs,
 		HeadlessApprovalMode: overrides.HeadlessApprovalMode,
-		AutoPricingCurrency:  cliAutoPricingCurrency(),
 		StatsSource:          "cli",
 		Stderr:               overrides.Stderr,
 		OnSessionRecovered:   overrides.OnSessionRecovered,
 		Ablation:             overrides.Ablation,
+		SessionTemp:          overrides.SessionTemp,
 	}
-}
-
-func cliAutoPricingCurrency() string {
-	switch i18n.CurrentLanguage() {
-	case "zh", "zh-TW":
-		return "CNY"
-	default:
-		return "USD"
-	}
+	opts.MCPHostProfile = plugin.HostProfileForInteractive(overrides.InteractiveHost)
+	return opts
 }
 
 type cliPermissionMode struct {
@@ -367,23 +380,26 @@ func resolveCLISessionDir() string {
 // setupQuietProfile is like setupProfile but guarantees plugin subprocess
 // stderr stays off the terminal. Interactive callers provide the private TUI
 // diagnostic writer; other callers fall back to io.Discard.
-func setupQuietProfile(ctx context.Context, modelName string, maxStepsOverride int, requireKey bool, sink event.Sink, profile string, overrides cliBuildOverrides) (*control.Controller, error) {
+func setupQuietProfile(ctx context.Context, modelName string, maxStepsOverride int, requireKey bool, sink event.Sink, overrides cliBuildOverrides) (*control.Controller, error) {
 	if overrides.Stderr == nil {
 		overrides.Stderr = io.Discard
 	}
-	return boot.Build(ctx, cliProfileBuildOptions(modelName, maxStepsOverride, requireKey, sink, profile, overrides))
+	return boot.Build(ctx, cliProfileBuildOptions(modelName, maxStepsOverride, requireKey, sink, overrides))
 }
 
+// parseRuntimeProfile validates a role-flag value and maps it onto the
+// session quality floor: light folds to standard silently, delivery sets the
+// delivery floor.
 func parseRuntimeProfile(value string) (string, error) {
 	switch strings.ToLower(strings.TrimSpace(value)) {
-	case "", "balanced", boot.TokenModeFull:
-		return boot.TokenModeFull, nil
-	case boot.TokenModeEconomy:
-		return boot.TokenModeEconomy, nil
-	case boot.TokenModeDelivery:
-		return boot.TokenModeDelivery, nil
+	case "", "balanced", "standard", boot.TokenModeFull:
+		return "standard", nil
+	case "economy", "light", "lite", "eco":
+		return "standard", nil
+	case boot.TokenModeDelivery, "deliver", "quality":
+		return "delivery", nil
 	default:
-		return "", fmt.Errorf("unknown runtime profile %q (want economy, balanced, or delivery)", value)
+		return "", fmt.Errorf("unknown execution setting %q (accepted: standard, delivery; legacy light folds to standard)", value)
 	}
 }
 
@@ -418,23 +434,6 @@ func workspaceRootForDir(dir string) (string, error) {
 	return wd, nil
 }
 
-func modelForResumePath(modelName, resumePath string, cfg *config.Config) string {
-	if strings.TrimSpace(modelName) != "" || strings.TrimSpace(resumePath) == "" {
-		return modelName
-	}
-	sessionModel, ok := agent.LoadSessionModel(resumePath)
-	if !ok {
-		return modelName
-	}
-	if cfg == nil {
-		return sessionModel
-	}
-	if _, ok := cfg.ResolveModel(sessionModel); !ok {
-		return modelName
-	}
-	return sessionModel
-}
-
 func loadResumableSession(path string) (*agent.Session, error) {
 	if agent.IsCleanupPending(path) {
 		return nil, fmt.Errorf("session is pending cleanup")
@@ -461,18 +460,25 @@ func registerContinueFlag(fs *pflag.FlagSet) *bool {
 }
 
 func runAgent(args []string, version string) int {
+	defer closeCLIUsageCatalogs()
+	args, deprecatedMode, err := consumeDeprecatedModeFlags(args, "profile", "preset")
+	if err != nil {
+		fmt.Fprintln(os.Stderr, i18n.M.ErrorPrefix, err)
+		return 2
+	}
 	fs := pflag.NewFlagSet("run", pflag.ContinueOnError)
 	fs.SetInterspersed(true)
 	model := fs.String("model", "", "provider name (default: config default_model)")
-	profileFlag := fs.String("profile", "balanced", "runtime profile: economy | balanced | delivery")
 	maxSteps := fs.Int("max-steps", 0, "one-off max tool-call rounds (0 = automatic)")
 	showThinking := fs.Bool("show-thinking", false, "show thinking text instead of the collapsed thinking marker")
 	metricsPath := fs.String("metrics", "", "write a JSON token/cache/cost summary of the run to this path")
+	trajectoryPath := fs.String("trajectory", "", "append a timestamped JSONL trajectory of the run's full event stream (tool calls, reasoning, decisions) to this path")
 	ablateFlag := fs.String("ablate", "", "benchmark arm: comma-separated subsystems to switch off (evidence, planner, subagent, retrieval, compaction; none|all)")
 	dir := fs.String("dir", "", "change to this directory first (project root); config, sandbox and file tools resolve from here")
 	cont := registerContinueFlag(fs)
-	resume := fs.String("resume", "", "resume a specific session file (non-interactive; takes precedence over --continue)")
+	resume := fs.String("resume", "", "resume by session file path, session ID, or machine session ID (takes precedence over --continue)")
 	copySession := fs.Bool("copy", false, "with --resume/--continue: duplicate the session and continue in the copy (escape hatch when the original is held by another Reasonix process)")
+	takeover := fs.Bool("takeover", false, "with --resume/--continue: when a resident serve on this machine holds the session, take it over instead of refusing")
 	effort := fs.String("effort", "", "session reasoning effort override")
 	permissionMode := fs.String("permission-mode", "ask", "permission mode: manual | ask | auto | acceptEdits | dontAsk | plan | bypassPermissions")
 	autoApprove := fs.BoolP("auto", "y", false, "explicitly auto-approve ordinary writer fallbacks (alias for --permission-mode auto)")
@@ -510,8 +516,7 @@ func runAgent(args []string, version string) int {
 		}
 		format = runOutputEventsJSONL
 	}
-	profile, err := parseRuntimeProfile(*profileFlag)
-	if err != nil {
+	if err := acceptDeprecatedModeFlag(deprecatedMode); err != nil {
 		fmt.Fprintln(os.Stderr, i18n.M.ErrorPrefix, err)
 		return 2
 	}
@@ -560,8 +565,17 @@ func runAgent(args []string, version string) int {
 
 	// Resolve the resume target up front so --copy and the session lease can be
 	// handled before any heavy assembly. --resume takes precedence over
-	// --continue, matching the Resume call below.
+	// --continue, matching the Resume call below. Accept file paths, branch
+	// IDs, preview text, and opaque machine session IDs (#7429).
 	resumePath := strings.TrimSpace(*resume)
+	if resumePath != "" {
+		resolved, err := resolveSessionQuery(resolveCLISessionDir(), resumePath)
+		if err != nil {
+			fmt.Fprintln(os.Stderr, i18n.M.ErrorPrefix, err)
+			return 1
+		}
+		resumePath = resolved
+	}
 	if resumePath == "" && *cont {
 		sessionDir := resolveCLISessionDir()
 		reclaimCLIRecoveryBranches(sessionDir)
@@ -577,7 +591,7 @@ func runAgent(args []string, version string) int {
 		return 2
 	}
 	if *copySession {
-		copied, err := copySessionForWriting(resumePath)
+		copied, err := copyResumableSession(*model, resumePath, cfg)
 		if err != nil {
 			fmt.Fprintln(os.Stderr, i18n.M.ErrorPrefix, err)
 			return 1
@@ -594,7 +608,7 @@ func runAgent(args []string, version string) int {
 	}
 	sessionMode := cliTelemetrySessionMode(*cont, strings.TrimSpace(*resume) != "", *copySession)
 	reporter := startCLITelemetry(cfg, telemetry.Options{
-		Version: version, Interactive: false, CLIMode: "run", Profile: profile,
+		Version: version, Interactive: false, CLIMode: "run",
 		PermissionMode: *permissionMode, SessionMode: sessionMode,
 	})
 
@@ -603,20 +617,36 @@ func runAgent(args []string, version string) int {
 	// silently double-writing. Released after the controller closes.
 	leases := control.NewSessionLeaseKeeper()
 	defer leases.Release()
+	takeoverManager := newCLITakeoverManager(nil, leases)
+	defer func() {
+		if err := takeoverManager.Close(); err != nil {
+			fmt.Fprintln(os.Stderr, i18n.M.ErrorPrefix, err)
+		}
+	}()
 	var resumeSession *agent.Session
+	var takeoverBinding *cliTakeoverBinding
 	if resumePath != "" {
-		if err := leases.Rebind(resumePath); err != nil {
+		var err error
+		resumeSession, err = bindAndLoadCLIResume(leases, resumePath, loadResumableSession)
+		if errors.Is(err, agent.ErrSessionLeaseHeld) && *takeover {
+			takeoverBinding, err = cliTakeoverHeldSession(resumePath, err, leases, takeoverManager)
+			if err != nil {
+				fmt.Fprintln(os.Stderr, i18n.M.ErrorPrefix, err)
+				return 1
+			}
+			resumeSession, err = cliPrepareTakeoverCandidate(takeoverBinding, leases)
+			if err != nil {
+				_ = cliReturnFailedTakeover(takeoverBinding, leases, takeoverManager)
+				fmt.Fprintln(os.Stderr, i18n.M.ErrorPrefix, err)
+				return 1
+			}
+		}
+		if err != nil {
 			if errors.Is(err, agent.ErrSessionLeaseHeld) {
 				fmt.Fprintln(os.Stderr, i18n.M.ErrorPrefix, sessionLeaseResumeRefusal(err))
 			} else {
 				fmt.Fprintln(os.Stderr, i18n.M.ErrorPrefix, err)
 			}
-			return 1
-		}
-		var err error
-		resumeSession, err = loadResumableSession(resumePath)
-		if err != nil {
-			fmt.Fprintln(os.Stderr, i18n.M.ErrorPrefix, err)
 			return 1
 		}
 	}
@@ -625,36 +655,17 @@ func runAgent(args []string, version string) int {
 	defer stop()
 	started := time.Now()
 
-	// Live run: render the agent's event stream to stdout. Markdown post-stream
-	// redraw (cursor moves) is enabled only on a TTY; piped / captured output
-	// keeps the raw stream.
-	var sink event.Sink
-	var resultOutput *runOutputSink
-	if *printOnly || format != runOutputText {
-		resultOutput = newRunOutputSink(os.Stdout, format)
-		sink = resultOutput
-	} else {
-		var renderer agent.Renderer
-		termW := 80
-		if isTTY(os.Stdout) {
-			if w, _, err := term.GetSize(int(os.Stdout.Fd())); err == nil && w > 0 {
-				termW = w
-			}
-			renderer = newMarkdownRenderer(termW)
-		}
-		textSink := agent.NewTextSink(os.Stdout, renderer, termW)
-		textSink.SetShowReasoning(*showThinking)
-		sink = textSink
+	chain, err := buildRunSink(format, *printOnly, *showThinking, *metricsPath, *trajectoryPath, cfg, reporter)
+	if err != nil {
+		_ = cliReturnFailedTakeover(takeoverBinding, leases, takeoverManager)
+		fmt.Fprintln(os.Stderr, i18n.M.ErrorPrefix, err)
+		return 1
 	}
-	var metrics *metricsSink
-	if *metricsPath != "" {
-		metrics = &metricsSink{inner: sink}
-		sink = metrics
-	}
-	sink = withNotifications(sink, cfg)
-	sink = reporter.Wrap(sink)
-	if resumePath != "" {
-		*model = modelForResumePath(*model, resumePath, cfg)
+	takeoverManager.SetInner(chain.sink)
+	chain.sink = takeoverManager
+	sink, resultOutput, metrics := chain.sink, chain.resultOutput, chain.metrics
+	if err := applyResumeModel(model, resumePath, cfg); err != nil {
+		return cliTakeoverFailure(takeoverBinding, leases, takeoverManager, err)
 	}
 	var effortOverride *string
 	if strings.TrimSpace(*effort) != "" {
@@ -671,6 +682,7 @@ func runAgent(args []string, version string) int {
 	// UI can answer; unattended writes require explicit --auto/-y,
 	// --permission-mode auto, or yolo.
 	overrides := cliBuildOverrides{
+		Preset:               deprecatedMode,
 		Effort:               effortOverride,
 		PermissionAllow:      allowedTools,
 		AdditionalDirs:       additionalDirs,
@@ -679,8 +691,9 @@ func runAgent(args []string, version string) int {
 		OnSessionRecovered:   cliSessionRecoveredHandler(leases),
 		Ablation:             ablated,
 	}
-	ctrl, err := setupProfileWithOverrides(ctx, *model, *maxSteps, true, sink, profile, overrides)
+	ctrl, err := setupProfileWithOverrides(ctx, *model, *maxSteps, true, sink, overrides)
 	if err != nil {
+		_ = cliReturnFailedTakeover(takeoverBinding, leases, takeoverManager)
 		if resultOutput != nil && format != runOutputText {
 			if encodeErr := resultOutput.Finalize("", started, err); encodeErr != nil {
 				fmt.Fprintln(os.Stderr, i18n.M.ErrorPrefix, encodeErr)
@@ -691,6 +704,7 @@ func runAgent(args []string, version string) int {
 		return 1
 	}
 	defer ctrl.Close()
+	takeoverManager.AttachController(ctrl)
 	SetTaskJobKiller(ctrlKillerAdapter{ctrl})
 	ctrl.ApplyHeadlessApprovalMode(permissions.approval)
 
@@ -698,17 +712,21 @@ func runAgent(args []string, version string) int {
 	// MCP/API callers that manage their own per-project session). Takes
 	// precedence over --continue.
 	// --continue: resume the most recent saved session.
-	if resumePath != "" {
-		ctrl.Resume(resumeSession, resumePath)
+	if err := commitResumedSession(takeoverBinding, takeoverManager, ctrl, resumeSession, resumePath); err != nil {
+		return cliTakeoverFailure(takeoverBinding, leases, takeoverManager, err)
 	}
 	if ctrl.SessionPath() == "" && ctrl.SessionDir() != "" {
 		ctrl.SetFreshSessionPath(agent.NewSessionPath(ctrl.SessionDir(), ctrl.Label()))
 	}
 	// Fresh sessions take the lease too (defensive: the path is brand new); a
 	// resumed path is already held, making this a no-op.
-	if err := leases.Rebind(ctrl.SessionPath()); err != nil {
+	if err := rebindCLIControllerAuthority(leases, ctrl); err != nil {
+		_ = cliReturnFailedTakeover(takeoverBinding, leases, takeoverManager)
 		fmt.Fprintln(os.Stderr, i18n.M.ErrorPrefix, control.SessionInUseMessage(err)+"; "+control.SessionLeaseCloseHint)
 		return 1
+	}
+	if takeoverBinding != nil {
+		takeoverManager.Activate(takeoverBinding)
 	}
 	reclaimCLIRecoveryBranches(ctrl.SessionDir())
 
@@ -723,25 +741,24 @@ func runAgent(args []string, version string) int {
 		})
 	}
 	if metrics != nil {
-		metrics.m.DurationMs = time.Since(started).Milliseconds()
-		metrics.m.Outcome = completion.class
-		metrics.m.Arm = ablated.Arm()
+		// Snapshot under the sink's lock: a background job can still be emitting
+		// into it while this goroutine assembles the final record.
+		final := metrics.Snapshot()
+		final.DurationMs = time.Since(started).Milliseconds()
+		final.Outcome = completion.class
+		final.Arm = ablated.Arm()
 		if exec := ctrl.Executor(); exec != nil {
 			if audit := exec.CapabilityAudit(); audit != nil {
 				snap := audit.Snapshot()
-				metrics.m.MergeCapabilityAuditCounters(
-					snap.Routes, snap.RoutedCandidates, snap.RoutedRequire, snap.RoutedPrefer, snap.RoutedSuggest, snap.Declines,
-					snap.SemanticRoutes, snap.SemanticFallbacks,
-					snap.RequireMissing, snap.RequireRecovered, snap.PreferMissing, snap.PreferRecovered,
-					snap.SkillInvocations, snap.SkillFailures, snap.SkillUnavailable,
-					snap.MCPInspect, snap.MCPCall, snap.MCPCallFailures,
-					snap.ReviewBlocks, snap.SecurityReviewBlocks,
-					snap.RouterPromptTokens, snap.RouterCompletionTokens,
-					snap.RouterCost, snap.RouterLatencyMs,
-				)
+				final.MergeCapabilityAudit(&snap)
 			}
 		}
-		if err := writeMetrics(*metricsPath, metrics.m); err != nil {
+		if err := writeMetrics(*metricsPath, final); err != nil {
+			fmt.Fprintln(os.Stderr, i18n.M.ErrorPrefix, err)
+		}
+	}
+	if chain.trajectory != nil {
+		if err := chain.trajectory.Close(); err != nil {
 			fmt.Fprintln(os.Stderr, i18n.M.ErrorPrefix, err)
 		}
 	}
@@ -753,32 +770,36 @@ func runAgent(args []string, version string) int {
 		}
 	}
 	if runErr != nil {
-		if !completion.isError {
-			if format == runOutputText {
-				fmt.Fprintln(os.Stderr, "\n"+runErr.Error())
-			}
-			return completion.exitCode
-		}
-		if resultOutput == nil {
-			fmt.Fprintln(os.Stderr, "\n"+i18n.M.ErrorPrefix, runErr)
-		}
+		reportRunFailure(os.Stderr, format, resultOutput != nil, completion, runErr)
 		return completion.exitCode
 	}
 	return completion.exitCode
 }
 
-// runServe exposes the controller over HTTP+SSE: events stream to the browser,
-// commands arrive as JSON POSTs. The Broadcaster is the controller's event sink,
-// so the same typed stream the chat TUI consumes reaches web clients — the
-// transport-agnostic controller driven by a second frontend.
-func runServe(args []string) int {
-	fs := flag.NewFlagSet("serve", flag.ContinueOnError)
+func runServeWithOptions(args []string, opts serveRunOptions) int {
+	if opts.command == "" {
+		opts.command = "serve"
+	}
+	args, deprecatedMode, err := consumeDeprecatedModeFlags(args, "profile", "preset")
+	if err != nil {
+		fmt.Fprintln(os.Stderr, i18n.M.ErrorPrefix, err)
+		return 2
+	}
+	fs := flag.NewFlagSet(opts.command, flag.ContinueOnError)
 	model := fs.String("model", "", "provider name (default: config default_model)")
-	profileFlag := fs.String("profile", "balanced", "runtime profile: economy | balanced | delivery")
 	maxSteps := fs.Int("max-steps", 0, "one-off max tool-call rounds (0 = automatic)")
 	addr := fs.String("addr", "127.0.0.1:8787", "listen address")
 	resume := fs.String("resume", "", "resume a saved session file")
-	auth := fs.String("auth", "", "auth mode: none, token, or password (default: none)")
+	sessionIDValue := ""
+	sessionID := &sessionIDValue
+	if opts.command == "web" {
+		sessionID = fs.String("session-id", "", "bind a fresh Web session identity (used by /web handoff)")
+	}
+	authHelp := "auth mode: none, token, or password (default: config/none)"
+	if opts.command == "web" {
+		authHelp = "auth mode: none, token, or password (default: generated token)"
+	}
+	auth := fs.String("auth", "", authHelp)
 	token := fs.String("token", "", "pre-shared token for auth=token (auto-generated if empty)")
 	password := fs.String("password", "", "password for auth=password (use --hash-password to store a hash instead)")
 	hashPassword := fs.Bool("hash-password", false, "print a bcrypt hash of --password and exit")
@@ -786,11 +807,29 @@ func runServe(args []string) int {
 	portFile := fs.String("port-file", "", "write the actual bound listen address (host:port) to this file after binding")
 	tokenFile := fs.String("token-file", "", "read the auth=token pre-shared token from this file (overrides --token; keeps the secret out of argv)")
 	pidFile := fs.String("pid-file", "", "write the server process id to this file")
+	registerServeCapabilityFlags(fs)
+	openBrowser := fs.Bool("open", opts.openBrowser, "open the Web UI in the default browser")
+	noOpen := fs.Bool("no-open", false, "do not open the Web UI in the default browser")
 	if code, ok := parseCommandFlags(fs, args); !ok {
 		return code
 	}
-	profile, err := parseRuntimeProfile(*profileFlag)
-	if err != nil {
+	authExplicit := false
+	fs.Visit(func(f *flag.Flag) {
+		if f.Name == "auth" {
+			authExplicit = true
+		}
+	})
+	if *resume != "" && *sessionID != "" {
+		fmt.Fprintln(os.Stderr, i18n.M.ErrorPrefix, "--resume and --session-id cannot be used together")
+		return 2
+	}
+	if *sessionID != "" {
+		if err := validateWebSessionID(*sessionID); err != nil {
+			fmt.Fprintln(os.Stderr, i18n.M.ErrorPrefix, err)
+			return 2
+		}
+	}
+	if err := acceptDeprecatedModeFlag(deprecatedMode); err != nil {
 		fmt.Fprintln(os.Stderr, i18n.M.ErrorPrefix, err)
 		return 2
 	}
@@ -811,11 +850,13 @@ func runServe(args []string) int {
 	}
 
 	ctx := context.Background()
-	bc := serve.NewBroadcaster()
-	cfg, _ := config.Load()
+	bc, sessionTag, cfg := newServeBootstrap()
 
 	// Build serve config, merging CLI flags over config file.
-	serveCfg := cfg.Serve
+	serveCfg := serveConfigWithCommandDefaults(opts.command, authExplicit, cfg.Serve)
+	// `reasonix web` is a local browser entry point and defaults to a freshly
+	// generated token. `reasonix serve` keeps its existing config-driven default,
+	// and an explicit --auth always wins for both commands.
 	if *auth != "" {
 		serveCfg.AuthMode = *auth
 	}
@@ -876,7 +917,9 @@ func runServe(args []string) int {
 			return 1
 		}
 	}
-	*model = modelForResumePath(*model, *resume, cfg)
+	if err := applyResumeModel(model, *resume, cfg); err != nil {
+		return cliFailure(err)
+	}
 	// Serve always resolves an implicit model from the user-global config,
 	// ignoring project-level default_model overrides. Explicit flags and
 	// resumable session models remain strict and are preserved verbatim.
@@ -884,9 +927,7 @@ func runServe(args []string) int {
 	// Keep the browser reachable when the selected provider has no saved key.
 	// The loopback-only provider setup surface stores the missing credential and
 	// rebuilds this controller in place before the normal web UI is exposed.
-	ctrl, err := setupProfileWithOverrides(ctx, *model, *maxSteps, false, bc, profile, cliBuildOverrides{
-		OnSessionRecovered: cliSessionRecoveredHandler(leases),
-	})
+	ctrl, serveBuildOpts, err := setupCLIMultiSessionProfile(ctx, *model, *maxSteps, deprecatedMode, sessionTag, leases)
 	if err != nil {
 		fmt.Fprintln(os.Stderr, i18n.M.ErrorPrefix, err)
 		return 1
@@ -895,109 +936,39 @@ func runServe(args []string) int {
 	SetTaskJobKiller(ctrlKillerAdapter{ctrl})
 
 	// Auto-save target: reuse the resumed file, else a fresh one — same as chat.
-	if *resume != "" {
-		ctrl.Resume(resumeSession, *resume)
+	if err := prepareServeSessionPath(ctrl, resumeSession, *resume, *sessionID); err != nil {
+		return cliFailure(err)
 	}
 	ctrl.EnsureSessionPath()
 	// Fresh sessions take the lease too (defensive: the path is brand new); a
 	// resumed path is already held, making this a no-op.
-	if err := leases.Rebind(ctrl.SessionPath()); err != nil {
+	if err := rebindCLIControllerAuthority(leases, ctrl); err != nil {
 		fmt.Fprintln(os.Stderr, i18n.M.ErrorPrefix, control.SessionInUseMessage(err)+"; "+control.SessionLeaseCloseHint)
 		return 1
 	}
 
-	srv := serve.New(ctrl, bc, serveCfg)
-	srv.SetSessionLeases(leases)
-
-	// With --port-file the supervisor needs the real bound port (--addr may be
-	// 127.0.0.1:0), so listen first, record the address, then serve on the
-	// existing listener.
-	var ln net.Listener
-	displayAddr := *addr
-	if *portFile != "" {
-		var lerr error
-		ln, lerr = net.Listen("tcp", *addr)
-		if lerr != nil {
-			fmt.Fprintln(os.Stderr, i18n.M.ErrorPrefix, lerr)
-			return 1
-		}
-		displayAddr = ln.Addr().String()
-		if err := writeServeAddrFile(*portFile, displayAddr); err != nil {
-			_ = ln.Close()
-			fmt.Fprintln(os.Stderr, i18n.M.ErrorPrefix, err)
-			return 1
-		}
-		defer os.Remove(*portFile)
-	}
-	if *pidFile != "" {
-		if err := writeServePidFile(*pidFile); err != nil {
-			if ln != nil {
-				_ = ln.Close()
-			}
-			fmt.Fprintln(os.Stderr, i18n.M.ErrorPrefix, err)
-			return 1
-		}
-		defer os.Remove(*pidFile)
-	}
-	srv.EnableProviderSetupForListener(displayAddr)
-
-	fmt.Printf("reasonix serve — %s on http://%s\n", ctrl.Label(), displayAddr)
-	if srv.AuthMode() == "token" {
-		fmt.Printf("  auth: token\n")
-		// Under --port-file the process is supervised (e.g. remote bootstrap):
-		// stdout is redirected to a log, so printing the token here would leak it
-		// into a file readable by other same-machine users. The supervisor
-		// already holds the token (it wrote --token-file), so suppress the share
-		// URL and print only the token-file reference.
-		if *portFile != "" && *tokenFile != "" {
-			fmt.Printf("  share: http://%s/ (token in %s)\n", displayAddr, *tokenFile)
-		} else {
-			fmt.Printf("  share: http://%s/?token=%s\n", displayAddr, srv.AuthToken())
-		}
-	} else if srv.AuthMode() == "password" {
-		fmt.Printf("  auth: password (login at http://%s/login)\n", displayAddr)
-	}
-	if warning := serve.PlainHTTPAuthWarning(serveCfg, displayAddr); warning != "" {
-		fmt.Fprintf(os.Stderr, "  %s\n", warning)
-	}
-	// Balance is diagnostics, not readiness. Run it off the serving path so a
-	// slow or unauthenticated Provider endpoint cannot leave a published port
-	// file pointing at a listener whose HTTP accept loop has not started yet.
-	go func() {
-		if b, err := ctrl.Balance(context.Background()); err != nil {
-			fmt.Fprintf(os.Stderr, "  balance: error — %v\n", err)
-		} else if b == nil {
-			fmt.Fprintf(os.Stderr, "  balance: not configured (no balance_url for this provider)\n")
-		} else {
-			fmt.Printf("  balance: %s\n", b.Display())
-		}
-	}()
-
-	// Use graceful shutdown so SIGINT/SIGTERM drain active connections.
-	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
-	defer stop()
-	if ln != nil {
-		if err := srv.RunGracefulListener(ctx, ln); err != nil {
-			fmt.Fprintln(os.Stderr, i18n.M.ErrorPrefix, err)
-			return 1
-		}
-		return 0
-	}
-	if err := srv.RunGraceful(ctx, *addr); err != nil {
-		fmt.Fprintln(os.Stderr, i18n.M.ErrorPrefix, err)
-		return 1
-	}
-	return 0
+	srv := newCLIMultiSessionServer(ctrl, bc, sessionTag, serveCfg, leases, serveBuildOpts)
+	defer srv.Close()
+	return runServeFrontend(ctrl, srv, serveCfg, serveFrontendOptions{
+		command: opts.command, address: *addr,
+		portFile: *portFile, tokenFile: *tokenFile, pidFile: *pidFile,
+		openBrowser: *openBrowser && !*noOpen,
+		hasSession:  *resume != "" || *sessionID != "",
+	})
 }
 
 // chatREPL is an interactive session: a single persistent agent/session and a
 // prompt loop that keeps conversation context across turns. Exit with
 // 'exit'/'quit' or Ctrl-D.
 func chatREPL(args []string, version string) int {
+	args, deprecatedMode, err := consumeDeprecatedModeFlags(args, "profile", "preset")
+	if err != nil {
+		fmt.Fprintln(os.Stderr, i18n.M.ErrorPrefix, err)
+		return 2
+	}
 	fs := pflag.NewFlagSet("reasonix", pflag.ContinueOnError)
 	fs.SetInterspersed(true)
 	model := fs.String("model", "", "provider name (default: config default_model)")
-	profileFlag := fs.String("profile", "balanced", "runtime profile: economy | balanced | delivery")
 	maxSteps := fs.Int("max-steps", 0, "one-off max tool-call rounds (0 = automatic)")
 	cont := registerContinueFlag(fs)
 	resume := fs.StringP("resume", "r", "", "resume by session ID/query, or open the picker when no value is given")
@@ -1021,8 +992,7 @@ func chatREPL(args []string, version string) int {
 		fmt.Fprintln(os.Stderr, i18n.M.ErrorPrefix, err)
 		return 2
 	}
-	profile, err := parseRuntimeProfile(*profileFlag)
-	if err != nil {
+	if err := acceptDeprecatedModeFlag(deprecatedMode); err != nil {
 		fmt.Fprintln(os.Stderr, i18n.M.ErrorPrefix, err)
 		return 2
 	}
@@ -1040,16 +1010,18 @@ func chatREPL(args []string, version string) int {
 		fmt.Fprintln(os.Stderr, i18n.M.ErrorPrefix, err)
 		return 1
 	}
+	// Bubble Tea owns the terminal from the resume picker through controller
+	// shutdown. Start diagnostics before config/controller work so hangs leave a
+	// non-zero log with milestones (#7435, #7507).
+	diagnostics := startTUIDiagnostics(config.ReasonixHomeDir())
+	defer diagnostics.Close()
+	diagnostics.Milestone("config_load_begin")
 	cfg, err := config.Load()
 	if err == nil {
 		configureCLIThemeWithStyle(cfg.UITheme(), cfg.UIThemeStyle())
 		cliCursorShape = cfg.UICursorShape()
 	}
-	// Bubble Tea owns the terminal from the resume picker through controller
-	// shutdown. Route process logs and plugin stderr to a private, bounded file
-	// for that whole lifetime; user-facing warnings arrive as typed TUI events.
-	diagnostics := startTUIDiagnostics(config.ReasonixHomeDir())
-	defer diagnostics.Close()
+	diagnostics.Milestone("config_load_done")
 
 	// Decide whether we're starting fresh or resuming. --resume opens an
 	// interactive picker; --continue / -c jumps straight into the newest.
@@ -1090,7 +1062,7 @@ func chatREPL(args []string, version string) int {
 		return 2
 	}
 	if *copySession {
-		copied, err := copySessionForWriting(resumePath)
+		copied, err := copyResumableSession(*model, resumePath, cfg)
 		if err != nil {
 			fmt.Fprintln(os.Stderr, i18n.M.ErrorPrefix, err)
 			return 1
@@ -1100,7 +1072,7 @@ func chatREPL(args []string, version string) int {
 	}
 	sessionMode := cliTelemetrySessionMode(*cont, resumeValue != "", *copySession)
 	reporter := startCLITelemetry(cfg, telemetry.Options{
-		Version: version, Interactive: isInteractive(), CLIMode: "tui", Profile: profile,
+		Version: version, Interactive: isInteractive(), CLIMode: "tui",
 		PermissionMode: *permissionMode, SessionMode: sessionMode,
 	})
 
@@ -1110,8 +1082,30 @@ func chatREPL(args []string, version string) int {
 	// and this chat from silently double-writing one transcript.
 	leases := control.NewSessionLeaseKeeper()
 	defer leases.Release()
+	takeoverManager := newCLITakeoverManager(nil, leases)
+	defer func() {
+		if err := takeoverManager.Close(); err != nil {
+			fmt.Fprintln(os.Stderr, i18n.M.ErrorPrefix, err)
+		}
+	}()
+	var takeoverBinding *cliTakeoverBinding
+	var startupResumeSession *agent.Session
 	if resumePath != "" {
-		if err := leases.Rebind(resumePath); err != nil {
+		startupResumeSession, err = bindAndLoadCLIResume(leases, resumePath, loadResumableSession)
+		if errors.Is(err, agent.ErrSessionLeaseHeld) && cliSessionTakeoverCandidate(err) && promptSessionTakeover(err) {
+			takeoverBinding, err = cliTakeoverHeldSession(resumePath, err, leases, takeoverManager)
+			if err != nil {
+				fmt.Fprintln(os.Stderr, i18n.M.ErrorPrefix, err)
+				return 1
+			}
+			startupResumeSession, err = cliPrepareTakeoverCandidate(takeoverBinding, leases)
+			if err != nil {
+				_ = cliReturnFailedTakeover(takeoverBinding, leases, takeoverManager)
+				fmt.Fprintln(os.Stderr, i18n.M.ErrorPrefix, err)
+				return 1
+			}
+		}
+		if err != nil {
 			if errors.Is(err, agent.ErrSessionLeaseHeld) {
 				fmt.Fprintln(os.Stderr, i18n.M.ErrorPrefix, sessionLeaseResumeRefusal(err))
 			} else {
@@ -1122,7 +1116,9 @@ func chatREPL(args []string, version string) int {
 	}
 
 	ctx := context.Background()
-	*model = modelForResumePath(*model, resumePath, cfg)
+	if err := applyResumeModel(model, resumePath, cfg); err != nil {
+		return cliTakeoverFailure(takeoverBinding, leases, takeoverManager, err)
+	}
 
 	// Plumb the controller's typed event stream through a channel so each event
 	// can become a tea.Msg inside the TUI's update loop. Buffered generously:
@@ -1133,49 +1129,53 @@ func chatREPL(args []string, version string) int {
 	var sink event.Sink = &eventSink{ch: eventCh}
 	sink = withNotifications(sink, cfg)
 	sink = reporter.Wrap(sink)
+	takeoverManager.SetInner(sink)
+	sink = takeoverManager
 	var effortOverride *string
 	if strings.TrimSpace(*effort) != "" {
 		effortOverride = effort
 	}
 	overrides := cliBuildOverrides{
+		Preset:             deprecatedMode,
 		Effort:             effortOverride,
 		PermissionAllow:    allowedTools,
 		AdditionalDirs:     additionalDirs,
 		WorkspaceRoot:      workspaceRoot,
+		InteractiveHost:    true,
 		Stderr:             diagnostics.Writer(),
 		OnSessionRecovered: cliSessionRecoveredHandler(leases),
 	}
-	ctrl, err := setupProfileWithOverrides(ctx, *model, *maxSteps, false, sink, profile, overrides)
+	diagnostics.Milestone("controller_build_begin")
+	ctrl, err := setupProfileWithOverrides(ctx, *model, *maxSteps, false, sink, overrides)
 	if err != nil && errors.Is(err, boot.ErrUnknownModel) && isInteractive() && config.SourcePath() == "" {
 		// True first run whose default model can't resolve: guide setup, then retry.
 		// With a config present, fall through to the descriptive error — re-running
 		// the wizard would overwrite the user's config (#2856).
 		fmt.Fprintln(os.Stderr, i18n.M.ReconfigureOnUnknownModel)
 		if rc := interactiveSetup(defaultConfigTarget(), defaultEnvTarget()); rc != 0 {
+			_ = cliReturnFailedTakeover(takeoverBinding, leases, takeoverManager)
 			return rc
 		}
-		ctrl, err = setupProfileWithOverrides(ctx, *model, *maxSteps, false, sink, profile, overrides)
+		ctrl, err = setupProfileWithOverrides(ctx, *model, *maxSteps, false, sink, overrides)
 	}
 	if err != nil {
+		_ = cliReturnFailedTakeover(takeoverBinding, leases, takeoverManager)
 		fmt.Fprintln(os.Stderr, i18n.M.ErrorPrefix, err)
 		return 1
 	}
+	diagnostics.Milestone("controller_build_done")
 
 	// Decide where this conversation's auto-save lands. A resume reuses the
 	// file so closing/reopening keeps appending to the same history; a fresh
 	// session lands in a new file stamped with the model name.
-	if resumePath != "" {
-		loaded, err := agent.LoadSession(resumePath)
-		if err != nil {
-			fmt.Fprintln(os.Stderr, i18n.M.ErrorPrefix, err)
-			return 1
-		}
-		ctrl.Resume(loaded, resumePath)
+	if err := commitResumedSession(takeoverBinding, takeoverManager, ctrl, startupResumeSession, resumePath); err != nil {
+		return cliTakeoverFailure(takeoverBinding, leases, takeoverManager, err)
 	}
 	ctrl.EnsureSessionPath()
 	// Fresh sessions take the lease too (defensive: the path is brand new); a
 	// resumed path is already held, making this a no-op.
-	if err := leases.Rebind(ctrl.SessionPath()); err != nil {
+	if err := rebindCLIControllerAuthority(leases, ctrl); err != nil {
+		_ = cliReturnFailedTakeover(takeoverBinding, leases, takeoverManager)
 		fmt.Fprintln(os.Stderr, i18n.M.ErrorPrefix, control.SessionInUseMessage(err)+"; "+control.SessionLeaseCloseHint)
 		return 1
 	}
@@ -1222,12 +1222,20 @@ func chatREPL(args []string, version string) int {
 	}
 
 	m := newChatTUI(ctrl, missing, eventCh, termW)
+	m.diagnostics = diagnostics
+	m.updateWatchdogStatusProvider()
 	m.planMode = permissions.plan
 	m.leases = leases
-	if cfg, err := config.Load(); err == nil {
+	m.takeover = takeoverManager
+	takeoverManager.AttachController(ctrl)
+	if takeoverBinding != nil {
+		takeoverManager.Activate(takeoverBinding)
+	}
+	if cfg != nil {
 		m.outputStyle = cfg.Agent.OutputStyle    // shown as the active entry in /output-style
 		m.statuslineCmd = cfg.Statusline.Command // custom status-line command, "" = built-in row
 		m.showReasoning = cfg.UI.ShowReasoning   // /verbose persistence: start with config default
+		m.showTurnUsage = cfg.UI.ShowTurnUsage   // retain usage accounting even when transcript receipts are hidden
 		m.cfg = cfg
 	}
 
@@ -1240,7 +1248,10 @@ func chatREPL(args []string, version string) int {
 		if spec.EffortOverride != nil {
 			effectiveOverrides.Effort = spec.EffortOverride
 		}
-		c, err := setupQuietProfile(ctx, spec.ModelRef, *maxSteps, false, sink, spec.RuntimeProfile, effectiveOverrides)
+		// Keep the logical-session private temporary directory across model /
+		// profile switches (Issue #7575).
+		effectiveOverrides.SessionTemp = sessionTempFromCLIController(oldCtrl)
+		c, err := setupQuietProfile(ctx, spec.ModelRef, *maxSteps, false, sink, effectiveOverrides)
 		if err != nil {
 			return nil, err
 		}
@@ -1267,25 +1278,7 @@ func chatREPL(args []string, version string) int {
 	// goal/recovery state, lifecycle). Same construction inputs as
 	// buildController so the replacement matches this session's launch wiring;
 	// the CLI holds no SharedHost, so each rebuild owns its plugin host.
-	m.rebuildRuntime = func(ctx context.Context, spec controllerBuildSpec, old *control.Controller) (*boot.BuildResult, error) {
-		effectiveOverrides := overrides
-		if spec.EffortOverride != nil {
-			effectiveOverrides.Effort = spec.EffortOverride
-		}
-		res, err := boot.Rebuild(ctx, old, cliProfileBuildOptions(spec.ModelRef, *maxSteps, false, sink, spec.RuntimeProfile, effectiveOverrides))
-		if err != nil {
-			return nil, err
-		}
-		// The interactive approval gate and the --yolo posture are frontend
-		// wiring boot.Rebuild deliberately leaves to the caller (it carries
-		// the Ask/Auto/Yolo tool-approval mode, not the launch flag).
-		res.Controller.EnableInteractiveApproval()
-		if *yolo {
-			res.Controller.SetAutoApproveTools(true)
-		}
-		return res, nil
-	}
-	m.runtimeProfile = profile
+	m.bindRuntimeRebuilder(*maxSteps, sink, *yolo, overrides, cliProfileBuildOptions)
 	if effortOverride != nil {
 		m.effortLevel = *effortOverride
 	}
@@ -1300,7 +1293,10 @@ func chatREPL(args []string, version string) int {
 	// Non-Termux terminals use an alt-screen transcript viewport. Termux stays
 	// in the normal buffer so native touch scrollback and soft-keyboard focus
 	// keep working; finalized transcript lines are emitted via tea.Println.
+	diagnostics.Milestone("terminal_takeover_begin")
 	p := tea.NewProgram(m)
+	takeoverManager.SetYieldCallback(func() { p.Send(tuiShutdownMsg{}) })
+	diagnostics.StartWatchdog(p)
 	// SSH drop (SIGHUP) or service stop (SIGTERM): persist the conversation
 	// before the terminal goes away, then unwind through the normal close path
 	// so resume picks up the interrupted session (#3772).
@@ -1313,12 +1309,23 @@ func chatREPL(args []string, version string) int {
 	}()
 	final, runErr := p.Run()
 	signal.Stop(hangup)
+	diagnostics.Milestone("terminal_released")
+	if err := takeoverManager.Close(); err != nil {
+		fmt.Fprintln(os.Stderr, i18n.M.ErrorPrefix, err)
+		if runErr == nil {
+			runErr = err
+		}
+	}
 	// Close the active controller plus any retired ones from /model switches.
 	// Retired controllers were stashed rather than closed at switch time
 	// because Controller.Close() runs SessionEnd hooks and kills plugin
 	// subprocesses — operations that corrupt bubbletea's terminal raw mode
 	// when executed while the TUI is alive.
+	var launchWeb bool
+	var launchWebPath, launchWebSessionID, launchWebModelRef string
 	if fm, ok := final.(chatTUI); ok {
+		reportShutdownFailure(fm.shutdownErr)
+		launchWeb = fm.launchWebOnExit
 		for _, oc := range fm.oldControllers {
 			if c, ok := oc.(*control.Controller); ok {
 				reporter.RecordRecovery(c.DrainRecoveryMetrics())
@@ -1326,6 +1333,9 @@ func chatREPL(args []string, version string) int {
 			oc.Close()
 		}
 		if fm.ctrl != nil {
+			launchWebPath = fm.launchWebResumePath
+			launchWebSessionID = fm.launchWebSessionID
+			launchWebModelRef = fm.launchWebModelRef
 			if c, ok := fm.ctrl.(*control.Controller); ok {
 				reporter.RecordRecovery(c.DrainRecoveryMetrics())
 			}
@@ -1341,6 +1351,15 @@ func chatREPL(args []string, version string) int {
 	if runErr != nil {
 		fmt.Fprintln(os.Stderr, i18n.M.ErrorPrefix, runErr)
 		return 1
+	}
+	if launchWeb {
+		// The Web runtime resumes a materialized TUI transcript or binds the exact
+		// reserved identity for a never-used session. Release the TUI lease before
+		// rebuilding the controller or the handoff would correctly reject its own
+		// session as already in use. The deferred Release remains as a harmless
+		// final guard for every other return path.
+		leases.Release()
+		return runWebCommand(webHandoffArgs(launchWebPath, launchWebSessionID, launchWebModelRef))
 	}
 	return 0
 }
@@ -1387,7 +1406,7 @@ func prepareNativeScrollback(w io.Writer, rows int) {
 }
 
 func reserveNativeScrollbackFrame(w io.Writer, rows int) {
-	for i := 0; i < rows; i++ {
+	for range rows {
 		fmt.Fprintln(w)
 	}
 }
@@ -1617,14 +1636,14 @@ func familyStaticModels(providers []config.ProviderEntry, idxs []int) []string {
 // later wizard step), network/auth error, or a vendor without /models — it
 // silently returns the preset's static model list so the wizard can always
 // present something. The fetch has a 10s timeout and is best-effort.
-func fetchOrFallback(probe *config.ProviderEntry, famName string) []string {
+func fetchOrFallback(probe *config.ProviderEntry, famName string, proxy netclient.ProxySpec) []string {
 	static := probe.ModelList()
 	if probe.BaseURL == "" {
 		return static
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
-	models, err := probe.FetchModels(ctx)
+	models, err := probe.FetchModelsWithProxy(ctx, proxy)
 	if err != nil || len(models) == 0 {
 		if len(static) > 0 {
 			fmt.Fprintf(os.Stderr, "  %s\n", dim(fmt.Sprintf(i18n.M.FetchModelsUsingPresetsFmt, famName)))
@@ -1646,7 +1665,7 @@ func fetchOrFallback(probe *config.ProviderEntry, famName string) []string {
 // wizard's idea of "what models exist" diverged from the chat client's actual
 // endpoint. Returning the empty slice (not an error) on full miss lets the
 // wizard fall through to a manual text input without an error message.
-func fetchModelListCompat(ctx context.Context, baseURL, apiKey string) ([]string, error) {
+func fetchModelListCompat(ctx context.Context, baseURL, apiKey string, proxy netclient.ProxySpec) ([]string, error) {
 	candidates, err := config.BuildModelFetchURLs(baseURL, "")
 	if err != nil {
 		return nil, err
@@ -1654,7 +1673,7 @@ func fetchModelListCompat(ctx context.Context, baseURL, apiKey string) ([]string
 	var lastErr error
 	var firstHardErr error
 	for _, u := range candidates {
-		models, err := openai.FetchModels(ctx, u, apiKey, nil)
+		models, err := openai.FetchModelsWithOptions(ctx, u, apiKey, openai.FetchModelsOptions{Proxy: proxy})
 		if err == nil {
 			return models, nil
 		}
@@ -1724,12 +1743,7 @@ func buildFamilyEntry(probe config.ProviderEntry, selected []string) config.Prov
 }
 
 func containsString(xs []string, v string) bool {
-	for _, x := range xs {
-		if x == v {
-			return true
-		}
-	}
-	return false
+	return slices.Contains(xs, v)
 }
 
 // filterStaleCustomEntries drops the wizard's own magic-name entries
@@ -1888,7 +1902,7 @@ func newProviderPromptResult(entries []config.ProviderEntry, key, value string) 
 }
 
 // promptCustomProvider handles the custom provider entry flow.
-func promptCustomProvider() (providerPromptResult, error) {
+func promptCustomProvider(proxy netclient.ProxySpec) (providerPromptResult, error) {
 	methodIdx, err := selectOne(i18n.M.CustomAddMethodLabel, []menuItem{
 		{name: i18n.M.CustomMethodManual},
 		{name: i18n.M.CustomMethodURL},
@@ -1899,7 +1913,7 @@ func promptCustomProvider() (providerPromptResult, error) {
 	if methodIdx == 0 {
 		return promptCustomProviderManual()
 	}
-	return promptCustomProviderFromURL()
+	return promptCustomProviderFromURL(proxy)
 }
 
 // promptCustomProviderManual handles manual model entry.
@@ -1935,7 +1949,7 @@ func promptCustomProviderManualWith(in *bufio.Scanner, baseURL, keyEnv, apiKey s
 	}
 	entry := config.ProviderEntry{
 		Name: providerName, Kind: "openai", BaseURL: baseURL,
-		Model: modelName, APIKeyEnv: keyEnv, ContextWindow: 128000,
+		Model: modelName, APIKeyEnv: keyEnv, ContextWindow: askContextWindow(in, os.Stdout),
 	}
 	fmt.Printf("  %s\n", green(fmt.Sprintf(i18n.M.CustomAddedFmt, entry.Name+"/"+modelName)))
 	return newProviderPromptResult([]config.ProviderEntry{entry}, keyEnv, apiKey), nil
@@ -1945,7 +1959,7 @@ func promptCustomProviderManualWith(in *bufio.Scanner, baseURL, keyEnv, apiKey s
 // endpoint and shows a checkbox of the returned models. If the call fails
 // (network error, auth failure, or a vendor without /models) it falls
 // through to manual entry, reusing the URL and key the user already typed.
-func promptCustomProviderFromURL() (providerPromptResult, error) {
+func promptCustomProviderFromURL(proxy netclient.ProxySpec) (providerPromptResult, error) {
 	in := bufio.NewScanner(os.Stdin)
 	fmt.Println()
 
@@ -1960,7 +1974,7 @@ func promptCustomProviderFromURL() (providerPromptResult, error) {
 	fmt.Printf("  %s\n", dim(fmt.Sprintf(i18n.M.FetchingModelsFmt, "custom")))
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
-	models, err := fetchModelListCompat(ctx, baseURL, apiKey)
+	models, err := fetchModelListCompat(ctx, baseURL, apiKey, proxy)
 	if err != nil || len(models) == 0 {
 		if err != nil {
 			fmt.Fprintf(os.Stderr, "  %s\n", dim(fmt.Sprintf(i18n.M.FetchModelsFailedFmt, "custom", err)))
@@ -1985,14 +1999,14 @@ func promptCustomProviderFromURL() (providerPromptResult, error) {
 	}
 	entry := config.ProviderEntry{
 		Name: providerName, Kind: "openai", BaseURL: baseURL,
-		Models: selected, Model: selected[0], APIKeyEnv: keyEnv, ContextWindow: 128000,
+		Models: selected, Model: selected[0], APIKeyEnv: keyEnv, ContextWindow: askContextWindow(in, os.Stdout),
 	}
 	fmt.Printf("  %s\n", green(fmt.Sprintf(i18n.M.CustomAddedFmt, entry.Name+"/"+selected[0])))
 	return newProviderPromptResult([]config.ProviderEntry{entry}, keyEnv, apiKey), nil
 }
 
 // promptAnthropicProvider handles the Anthropic compatible provider entry flow.
-func promptAnthropicProvider() (providerPromptResult, error) {
+func promptAnthropicProvider(proxy netclient.ProxySpec) (providerPromptResult, error) {
 	methodIdx, err := selectOne(i18n.M.AnthropicAddMethodLabel, []menuItem{
 		{name: i18n.M.AnthropicMethodManual},
 		{name: i18n.M.AnthropicMethodURL},
@@ -2003,7 +2017,7 @@ func promptAnthropicProvider() (providerPromptResult, error) {
 	if methodIdx == 0 {
 		return promptAnthropicProviderManual()
 	}
-	return promptAnthropicProviderFromURL()
+	return promptAnthropicProviderFromURL(proxy)
 }
 
 // promptAnthropicProviderManual handles manual model entry.
@@ -2037,7 +2051,7 @@ func promptAnthropicProviderManualWith(in *bufio.Scanner, baseURL, keyEnv, apiKe
 	}
 	entry := config.ProviderEntry{
 		Name: providerSlug("anthropic", baseURL), Kind: "anthropic", BaseURL: baseURL,
-		Model: modelName, APIKeyEnv: keyEnv, ContextWindow: 128000,
+		Model: modelName, APIKeyEnv: keyEnv, ContextWindow: askContextWindow(in, os.Stdout),
 	}
 	fmt.Printf("  %s\n", green(fmt.Sprintf(i18n.M.AnthropicAddedFmt, entry.Name+"/"+modelName)))
 	return newProviderPromptResult([]config.ProviderEntry{entry}, keyEnv, apiKey), nil
@@ -2048,7 +2062,7 @@ func promptAnthropicProviderManualWith(in *bufio.Scanner, baseURL, keyEnv, apiKe
 // — Anthropic's own API has no public model list — so on any failure the
 // flow falls through to manual entry with the URL/key already filled in,
 // rather than aborting the wizard.
-func promptAnthropicProviderFromURL() (providerPromptResult, error) {
+func promptAnthropicProviderFromURL(proxy netclient.ProxySpec) (providerPromptResult, error) {
 	in := bufio.NewScanner(os.Stdin)
 	fmt.Println()
 
@@ -2062,7 +2076,7 @@ func promptAnthropicProviderFromURL() (providerPromptResult, error) {
 	fmt.Printf("  %s\n", dim(fmt.Sprintf(i18n.M.AnthropicFetchingModelsFmt, "anthropic")))
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
-	models, err := fetchModelListCompat(ctx, baseURL, apiKey)
+	models, err := fetchModelListCompat(ctx, baseURL, apiKey, proxy)
 	if err != nil || len(models) == 0 {
 		if err != nil {
 			fmt.Fprintf(os.Stderr, "  %s\n", dim(fmt.Sprintf(i18n.M.AnthropicFetchModelsFailedFmt, "anthropic", err)))
@@ -2087,7 +2101,7 @@ func promptAnthropicProviderFromURL() (providerPromptResult, error) {
 	}
 	entry := config.ProviderEntry{
 		Name: providerSlug("anthropic", baseURL), Kind: "anthropic", BaseURL: baseURL,
-		Models: selected, Model: selected[0], APIKeyEnv: keyEnv, ContextWindow: 128000,
+		Models: selected, Model: selected[0], APIKeyEnv: keyEnv, ContextWindow: askContextWindow(in, os.Stdout),
 	}
 	fmt.Printf("  %s\n", green(fmt.Sprintf(i18n.M.AnthropicAddedFmt, entry.Name+"/"+selected[0])))
 	return newProviderPromptResult([]config.ProviderEntry{entry}, keyEnv, apiKey), nil
@@ -2258,7 +2272,7 @@ func appendEnv(path string, lines []string) error {
 
 	var kept []string
 	if data, err := fileencoding.ReadFileUTF8(path); err == nil {
-		for _, raw := range strings.Split(string(data), "\n") {
+		for raw := range strings.SplitSeq(string(data), "\n") {
 			trimmed := strings.TrimSpace(raw)
 			check := strings.TrimPrefix(trimmed, "export ")
 			if k, _, ok := strings.Cut(check, "="); ok && target[strings.TrimSpace(k)] {
@@ -2361,8 +2375,7 @@ func configCurrencyCommand(args []string) int {
 			fmt.Fprintln(os.Stderr, i18n.M.ErrorPrefix, err)
 			return 1
 		}
-		cfg.ApplyRuntimeAutoPricingCurrency(cliAutoPricingCurrency())
-		fmt.Printf("currency = %q (resolved: %s)\n", pricingCurrencyDisplay(cfg.DesktopCurrency()), cfg.DeepSeekOfficialPricingCurrency())
+		fmt.Printf("currency = %q (display: %s)\n", pricingCurrencyDisplay(cfg.DisplayCurrencyPref()), cfg.ResolveDisplayCurrency())
 		return 0
 	}
 	mode, err := parseCLIPricingCurrency(rest[0])
@@ -2378,19 +2391,16 @@ func configCurrencyCommand(args []string) int {
 	unlock := config.LockUserConfigEdits()
 	defer unlock()
 	cfg := config.LoadForEdit(path)
-	if err := cfg.SetDesktopCurrency(mode); err != nil {
+	if err := cfg.SetDisplayCurrency(mode); err != nil {
 		fmt.Fprintln(os.Stderr, i18n.M.ErrorPrefix, err)
 		return 2
 	}
-	resolved := cfg.DeepSeekOfficialPricingCurrency()
-	if mode == "" && cfg.DesktopLanguage() == "" {
-		resolved = cliAutoPricingCurrency()
-	}
+	resolved := cfg.ResolveDisplayCurrency()
 	if err := cfg.SaveTo(path); err != nil {
 		fmt.Fprintln(os.Stderr, i18n.M.ErrorPrefix, err)
 		return 1
 	}
-	fmt.Printf("currency = %q (resolved: %s, %s)\n", pricingCurrencyDisplay(mode), resolved, displayPath(path))
+	fmt.Printf("currency = %q (display: %s, %s)\n", pricingCurrencyDisplay(mode), resolved, displayPath(path))
 	return 0
 }
 
@@ -2582,8 +2592,10 @@ func configCompactRatioCommand(args []string) int {
 		return 0
 	}
 	percent, err := strconv.ParseFloat(strings.TrimSpace(rest[0]), 64)
-	if err != nil || math.IsNaN(percent) || math.IsInf(percent, 0) || percent < 65 || percent > 85 {
-		fmt.Fprintln(os.Stderr, i18n.M.ErrorPrefix, "compact ratio must be a percentage between 65 and 85")
+	minPercent := config.CompactRatioMin * 100
+	maxPercent := config.CompactRatioMax * 100
+	if err != nil || math.IsNaN(percent) || math.IsInf(percent, 0) || percent < minPercent || percent > maxPercent {
+		fmt.Fprintf(os.Stderr, "%s compact ratio must be a percentage between %.0f and %.0f\n", i18n.M.ErrorPrefix, minPercent, maxPercent)
 		return 2
 	}
 	ratio := percent / 100
@@ -2652,7 +2664,7 @@ func formatCompactRatioPercent(ratio float64) string {
 func configUsage() {
 	fmt.Print(`Usage:
   reasonix config reasoning-language [--local] [auto|zh|en]
-  reasonix config compact-ratio [--local] [65..85]
+  reasonix config compact-ratio [--local] [30..85]
   reasonix config currency [auto|CNY|USD]
   reasonix config telemetry [auto|on|off]
 `)
@@ -2666,7 +2678,7 @@ func configTelemetryUsage() {
 
 func configCompactRatioUsage() {
 	fmt.Print(`Usage:
-  reasonix config compact-ratio [--local] [65..85]
+  reasonix config compact-ratio [--local] [30..85]
 `)
 }
 

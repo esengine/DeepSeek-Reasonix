@@ -52,7 +52,7 @@ func runACPFakeSidecar(stdin io.Reader, stdout io.Writer) {
 	pluginName := strings.TrimSpace(os.Getenv(acpFakeEnvPluginName))
 	providerRef := "plugin/" + pluginName + "/fake/x"
 	descriptor := fmt.Sprintf(`{"ref":%q,"displayName":"ACP Fake","model":"x","contextWindow":64000,"tools":true}`, providerRef)
-	initResult := fmt.Sprintf(`{"protocolVersion":"1","name":"acp-fake","version":"1.0.0","stateSchemaVersion":0,"providers":[%s]}`, descriptor)
+	initResult := fmt.Sprintf(`{"protocolVersion":"2","name":"acp-fake","version":"1.0.0","stateSchemaVersion":0,"providers":[%s]}`, descriptor)
 
 	streamCompletion := func(id json.RawMessage, rawParams json.RawMessage) {
 		var params struct {
@@ -120,7 +120,7 @@ func installACPFakeProviderPlugin(t *testing.T, home, name string) {
 		t.Fatalf("MkdirAll: %v", err)
 	}
 	manifest, err := json.Marshal(map[string]any{
-		"apiVersion": pluginpkg.ManifestAPIVersionV1,
+		"apiVersion": pluginpkg.ManifestAPIVersionV2,
 		"name":       name,
 		"version":    "1.0.0",
 		"runtime": map[string]any{
@@ -150,6 +150,9 @@ func writeACPFixture(t *testing.T, dir string) {
 	t.Helper()
 	if err := os.WriteFile(filepath.Join(dir, "reasonix.toml"), []byte(`
 default_model = "local/fake-model"
+
+[agent]
+completion_validation = "off"
 
 [environment]
 enabled = false

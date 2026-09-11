@@ -1,0 +1,374 @@
+// bridgeBenchFixtures — deterministic heavyweight mock sessions for the
+// real-DOM benchmark harness (desktop/frontend/bench), served by the dev mock
+// when the page URL carries ?mock=bench. This module is imported lazily from
+// bridge.ts so the generators never land in the eager production bundle.
+
+import type { HistoryMessage, HistoryToolCall } from "./types";
+
+// Soak tests need async hydration, but not simulated backend latency per cycle.
+// Geometry/browser fixtures keep their delayed expansion contract by default.
+export function benchHydrationDelay(search = window.location.search): number {
+  const params = new URLSearchParams(search);
+  return params.get("mock") === "bench" && params.get("bench") === "1"
+    && params.get("app-lifecycle-probe") === "1" && params.get("bench-hydration") === "soak" ? 0 : 1_500;
+}
+
+// ── Benchmark fixtures (?mock=bench, Phase F) ─────────────────────────────
+// Fixed diagnostic sessions for the real-DOM performance harness
+// (desktop/frontend/bench). Content is deterministic and generated once per
+// page load. Shapes follow the plan's fixtures, mirrored from the Go-side
+// history_slice tests: a tool-dense 38-turn session (~3.2k provider
+// messages), a markdown-heavy 46-turn session (~600 messages incl. one
+// ~500KiB answer with a big table and one oversized code block), a small
+// 6-turn session, and a single turn with thousands of messages.
+const benchFixtureCache = new Map<string, HistoryMessage[]>();
+const benchFixture = (key: string, build: () => HistoryMessage[]): HistoryMessage[] => {
+  const cached = benchFixtureCache.get(key);
+  if (cached) return cached;
+  const built = build();
+  benchFixtureCache.set(key, built);
+  return built;
+};
+const benchToolOutput = (turn: number, index: number): string =>
+  [
+    `ok turn=${turn} call=${index}`,
+    "status: success",
+    `duration_ms: ${(turn * 7 + index * 13) % 420}`,
+    `detail: ${"x".repeat(120)}`,
+  ].join("\n");
+const benchToolTurn = (turn: number, callCount: number, answer: string): HistoryMessage[] => {
+  const toolCalls: HistoryToolCall[] = [];
+  const results: HistoryMessage[] = [];
+  for (let k = 0; k < callCount; k += 1) {
+    const id = `bench-t${turn}-call-${k}`;
+    const readOnly = k % 3 !== 0;
+    toolCalls.push({
+      id,
+      name: readOnly ? "read_file" : "bash",
+      arguments: JSON.stringify(readOnly ? { path: `internal/bench/pkg-${k}/mod.go` } : { command: `go test ./internal/bench/pkg-${k}` }),
+      resolvedReadOnly: readOnly,
+      subject: readOnly ? `internal/bench/pkg-${k}/mod.go` : `go test pkg-${k}`,
+    });
+    results.push({ role: "tool", toolCallId: id, toolName: toolCalls[k].name, content: benchToolOutput(turn, k) });
+  }
+  return [
+    { role: "user", content: `bench turn ${turn}: run the verification batch and summarize per-package results.` },
+    { role: "assistant", content: "", reasoning: `planning verification batch ${turn}: ${callCount} checks.`, toolCalls },
+    ...results,
+    ...(answer ? [{ role: "assistant", content: answer, workDurationMs: 1200 }] : []),
+  ];
+};
+const benchToolDenseHistory = (): HistoryMessage[] => {
+  // 38 visible turns × 86 messages = 3268 provider messages (nominal 3255).
+  const messages: HistoryMessage[] = [];
+  for (let turn = 1; turn <= 38; turn += 1) messages.push(...benchToolTurn(turn, 42, turn % 4 === 0 ? `Batch ${turn} done: all checks green.` : ""));
+  return messages;
+};
+const benchMarkdownSection = (turn: number): string =>
+  [
+    `## Turn ${turn} summary`,
+    "",
+    "The verification sweep completed with all packages green. Key observations:",
+    "",
+    "- display-index hits stayed high across paged reads",
+    "- long tasks remained under the main-thread budget",
+    "- cache weights stayed within their declared byte budgets",
+    "",
+    "```ts",
+    "export function digest(values: number[]): number {",
+    "  return values.reduce((acc, v) => (acc * 31 + v) | 0, 7);",
+    "}",
+    "```",
+    "",
+    "| package | tests | duration ms |",
+    "| --- | ---: | ---: |",
+    ...Array.from({ length: 12 }, (_, k) => `| pkg-${k} | ${20 + k * 3} | ${40 + ((turn * 17 + k * 29) % 300)} |`),
+    "",
+  ].join("\n");
+const benchBigMarkdownAnswer = (): string => {
+  // ~500KiB answer: a giant table plus repeated prose/code sections.
+  const parts: string[] = ["# Full verification report", ""];
+  parts.push("| row | package | tests | duration ms | status |", "| ---: | --- | ---: | ---: | --- |");
+  for (let row = 0; row < 4000; row += 1) {
+    parts.push(`| ${row} | pkg-${row % 64} | ${(row * 7) % 90} | ${(row * 13) % 800} | ${row % 11 === 0 ? "flaky" : "green"} |`);
+  }
+  let body = parts.join("\n");
+  let section = 0;
+  while (body.length < 500 * 1024) {
+    section += 1;
+    body += `\n\n${benchMarkdownSection(1000 + section)}`;
+  }
+  return body;
+};
+const benchOversizedCodeBlock = (): string => {
+  // Single >64KiB code block (a content-ref candidate on the real backend).
+  const line = "const row = await db.query('select id, payload from bench where shard = $1', [shard]); // ";
+  const lines = Math.ceil((300 * 1024) / line.length);
+  return ["Here is the full generated migration:", "", "```sql", ...Array.from({ length: lines }, (_, k) => `-- ${k} ${line}`), "```"].join("\n");
+};
+const benchMarkdownHeavyHistory = (): HistoryMessage[] => {
+  // 46 visible turns; 13 messages per normal turn (10 tool pairs), plus the
+  // newest turn carrying the ~500KiB report and the oversized code block.
+  const messages: HistoryMessage[] = [];
+  for (let turn = 1; turn <= 45; turn += 1) messages.push(...benchToolTurn(turn, 5, benchMarkdownSection(turn)));
+  messages.push(
+    { role: "user", content: "bench final turn: produce the full verification report with the big table, then the migration SQL." },
+    { role: "assistant", content: benchBigMarkdownAnswer(), workDurationMs: 2400 },
+    { role: "assistant", content: benchOversizedCodeBlock(), workDurationMs: 800 },
+  );
+  return messages;
+};
+const benchSmallHistory = (): HistoryMessage[] => {
+  // 6 visible turns × 78 messages = 468 provider messages (nominal 473).
+  const messages: HistoryMessage[] = [];
+  for (let turn = 1; turn <= 6; turn += 1) {
+    const answer = turn === 6
+      ? [
+          "# Asynchronously hydrated verification appendix",
+          ...Array.from({ length: 1_200 }, (_, row) => `- package-${row % 42}: verified row ${row} with stable virtual measurements`),
+          "ASYNC LAYOUT EXPANSION COMPLETE",
+        ].join("\n")
+      : `Batch ${turn} summary.`;
+    messages.push(...benchToolTurn(turn, 38, answer));
+  }
+  return messages;
+};
+const benchGiantTurnHistory = (): HistoryMessage[] => {
+  // A single turn with thousands of messages (1000 tool pairs).
+  return benchToolTurn(1, 1000, "Single-turn sweep complete.");
+};
+
+const benchWindowedHistory = (): HistoryMessage[] => {
+  const messages: HistoryMessage[] = [];
+  for (let turn = 1; turn <= 1_000; turn += 1) {
+    messages.push(
+      { role: "user", content: `windowed turn ${turn}: verify the stable block anchor.` },
+      {
+        role: "assistant",
+        reasoning: turn === 950 ? Array.from({ length: 40 }, (_, line) => `Reasoning paragraph ${line + 1}: verify expanded cold history geometry.`).join("\n\n") : undefined,
+        content: turn % 25 === 0
+          ? `## Windowed turn ${turn}\n\n中文 English emoji ✅\n\n| turn | status |\n| ---: | --- |\n| ${turn} | stable |\n\n\`\`\`ts\nconst turn = ${turn};\n\`\`\``
+          : `Windowed result ${turn}: the block identity and native viewport geometry remain stable.`,
+      },
+    );
+  }
+  return messages;
+};
+
+const benchReportedLongTurnHistory = (): HistoryMessage[] => {
+  // Sanitized reproduction of the reported shape: one user turn, 70 tool
+  // results, and 44 separately measured assistant blocks. Keeping the height
+  // distribution matters; no user content or exported session data is used.
+  const messages: HistoryMessage[] = [
+    { role: "user", content: "Inspect the workspace, apply the changes, and verify the result." },
+  ];
+  for (let block = 0; block < 44; block += 1) {
+    const callCount = block < 26 ? 2 : 1;
+    const toolCalls: HistoryToolCall[] = [];
+    for (let call = 0; call < callCount; call += 1) {
+      const id = `reported-block-${block}-call-${call}`;
+      toolCalls.push({
+        id,
+        name: block % 3 === 0 ? "bash" : "read_file",
+        arguments: JSON.stringify(block % 3 === 0
+          ? { command: `pnpm test --filter reported-${block}-${call}` }
+          : { path: `src/reported/section-${block}-${call}.ts` }),
+        resolvedReadOnly: block % 3 !== 0,
+        subject: `reported section ${block + 1}.${call + 1}`,
+      });
+    }
+    messages.push({
+      role: "assistant",
+      content: [
+        `### Verification block ${block + 1}`,
+        "",
+        `Processed the deterministic fixture section ${block + 1}.`,
+        "",
+        ...Array.from({ length: 2 + (block % 5) }, (_, row) => `- check ${row + 1}: stable measurement ${block}-${row}`),
+      ].join("\n"),
+      reasoning: `Planning verification block ${block + 1}.`,
+      toolCalls,
+    });
+    messages.push(...toolCalls.map((toolCall, call) => ({
+      role: "tool" as const,
+      toolCallId: toolCall.id,
+      toolName: toolCall.name,
+      content: benchToolOutput(block + 1, call),
+    })));
+  }
+  messages.push({ role: "assistant", content: "Reported long turn complete." });
+  return messages;
+};
+
+const benchGeometryContractHistory = (): HistoryMessage[] => {
+  // One semantic turn with many heterogeneous rows. This verifies that row
+  // density does not change the block-level anchoring and mounting contract.
+  const messages: HistoryMessage[] = [
+    { role: "user", content: "验证首次向上遍历未访问的折叠过程行，记录逐帧几何和滚动方向。" },
+  ];
+  for (let block = 0; block < 60; block += 1) {
+    const id = `geometry-contract-${block}`;
+    const readOnly = block % 3 !== 0;
+    // Start the reasoning tail earlier so the reduced fixture still carries
+    // the 31 folded reasoning rows required by the contract gate.
+    const reasoningOrdinal = block - 29;
+    const reasoning = reasoningOrdinal >= 0
+      ? [
+          `第 ${reasoningOrdinal + 1} 段分析：验证折叠状态不读取完整正文。`,
+          ...Array.from(
+            { length: 8 + reasoningOrdinal * 5 },
+            (_, line) => `reasoning ${reasoningOrdinal + 1}.${line + 1} 中文 English ${"x".repeat(32 + (line % 4) * 16)}`,
+          ),
+        ].join("\n")
+      : undefined;
+    messages.push({
+      role: "assistant",
+      reasoning,
+      content: [
+        `### Geometry block ${block + 1}`,
+        "",
+        `折叠布局检查 ${block + 1} 完成，answer 保持内容感知估高。`,
+        "",
+        block % 5 === 0 ? "```ts\nconst stable = layoutVariant === 'reasoning-summary';\n```" : "- 中文换行\n- English wrapping",
+      ].join("\n"),
+      toolCalls: [
+        {
+          id,
+          name: readOnly ? "read_file" : "bash",
+          arguments: JSON.stringify(readOnly
+            ? { path: `src/geometry/section-${block}.ts` }
+            : { command: `pnpm test --filter geometry-${block}` }),
+          resolvedReadOnly: readOnly,
+          subject: `geometry section ${block + 1}`,
+        },
+        ...(block >= 31 && block < 55 ? [{
+          id: `${id}-stopped`,
+          name: "bash",
+          arguments: JSON.stringify({ command: `pnpm typecheck --filter geometry-${block}` }),
+          resolvedReadOnly: false,
+          subject: `geometry stopped section ${block + 1}`,
+        }] : []),
+      ],
+    });
+    messages.push({
+      role: "tool",
+      toolCallId: id,
+      toolName: readOnly ? "read_file" : "bash",
+      content: `ok block=${block + 1}\nstatus: success\n${"measurement stable ".repeat(4)}`,
+    });
+  }
+  messages.push({ role: "assistant", content: "Geometry contract fixture complete." });
+  return messages;
+};
+
+// Ref-resolution storm fixture (#8657): the newest page of a long session
+// carries many ref-replaced fields, so opening the session fires a paced
+// stream of history_items_patch invalidations — the exact load that used to
+// remount the virtual list on every scroll idle and strand the view at
+// estimate-based restore landings. The marker sits past the 4KiB preview
+// cut, so it only appears in the DOM once the ref has resolved.
+export const BENCH_STORM_MARKER = "BENCH STORM HYDRATION RESOLVED";
+const benchStormAnswer = (turn: number): string => {
+  let body = [
+    `## Storm turn ${turn} verification report`,
+    "",
+    "Inline preview summary: the batch completed and per-package details follow.",
+    "",
+  ].join("\n");
+  let row = 0;
+  while (body.length < 9 * 1024) {
+    row += 1;
+    body += `\n- storm-${turn}-${row}: resolved payload ${"y".repeat(90)}`;
+  }
+  body += `\n- storm-${turn}-FINAL ${BENCH_STORM_MARKER}`;
+  return body;
+};
+const benchStormReasoning = (turn: number): string => {
+  let body = `planning storm turn ${turn}: gather results, then tabulate.\n`;
+  while (body.length < 6 * 1024) body += `reasoning fragment ${turn} ${"z".repeat(90)}\n`;
+  return `${body}${BENCH_STORM_MARKER}`;
+};
+const benchStormHistory = (): HistoryMessage[] => {
+  // 40 visible turns. The newest 12 turns (exactly the page a session opens
+  // with) carry ref-replaced answer+reasoning fields; turns 1-28 are small
+  // and eager. Opening the session resolves ~24 refs at a paced interval.
+  const messages: HistoryMessage[] = [];
+  for (let turn = 1; turn <= 40; turn += 1) {
+    if (turn <= 28) {
+      messages.push(...benchToolTurn(turn, 3, `Batch ${turn} summary.`));
+    } else {
+      messages.push(
+        { role: "user", content: `storm turn ${turn}: produce the verification report.` },
+        { role: "assistant", content: benchStormAnswer(turn), reasoning: benchStormReasoning(turn), workDurationMs: 900 },
+      );
+    }
+  }
+  return messages;
+};
+
+export const BENCH_SELECTION_TABLE_MARKER = "SELECTION REPAINT TARGET";
+
+const benchSelectionTableHistory = (): HistoryMessage[] => {
+  const messages: HistoryMessage[] = [];
+  for (let turn = 1; turn <= 12; turn += 1) {
+    messages.push(
+      { role: "user", content: `selection fixture turn ${turn}: summarize the stable table inputs.` },
+      {
+        role: "assistant",
+        content: [
+          `## Selection fixture turn ${turn}`,
+          "",
+          "This deterministic paragraph keeps the virtual transcript away from its native top while all rows remain settled.",
+          "",
+          "- no streaming output",
+          "- no asynchronous content refs",
+          "- stable Markdown geometry",
+        ].join("\n"),
+      },
+    );
+  }
+  messages.push(
+    { role: "user", content: "Render the final selection regression table." },
+    {
+      role: "assistant",
+      content: [
+        "## WebView2 selection repaint regression",
+        "",
+        "| check | target | expected |",
+        "| --- | --- | --- |",
+        "| native multi-click | **SELECTION REPAINT TARGET** | transcript pixels remain stable |",
+        "| scroll geometry | fixed table row | no viewport movement |",
+        "| portal lifetime | one toolbar host | no mount churn |",
+        "",
+        "The table is the final settled row in this fixture.",
+      ].join("\n"),
+    },
+  );
+  return messages;
+};
+
+/** The bench session for a mock topic, or undefined for non-bench topics. */
+export function benchTopicHistory(topicId: string): HistoryMessage[] | undefined {
+  switch (topicId) {
+    case "topic_bench_tools":
+      return benchFixture("tools", benchToolDenseHistory);
+    case "topic_bench_markdown":
+      return benchFixture("markdown", benchMarkdownHeavyHistory);
+    case "topic_bench_small":
+      return benchFixture("small", benchSmallHistory);
+    case "topic_bench_giant_turn":
+      return benchFixture("giant", benchGiantTurnHistory);
+    case "topic_bench_windowed":
+      return benchFixture("windowed", benchWindowedHistory);
+    case "topic_bench_reported_long_turn":
+      return benchFixture("reported-long-turn", benchReportedLongTurnHistory);
+    case "topic_bench_geometry_contract":
+      return benchFixture("geometry-contract", benchGeometryContractHistory);
+    case "topic_bench_storm":
+      return benchFixture("storm", benchStormHistory);
+    case "topic_bench_selection_table":
+      return benchFixture("selection-table", benchSelectionTableHistory);
+    default:
+      return undefined;
+  }
+}

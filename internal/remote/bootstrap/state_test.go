@@ -11,6 +11,7 @@ func TestServeStateRoundTrip(t *testing.T) {
 		Addr:      "127.0.0.1:38121",
 		Workspace: "/home/dev/app",
 		Version:   "1.9.0",
+		ServeCaps: ServeCapsToken,
 		TokenFile: "/home/dev/.reasonix/remote/serve-x.token",
 		LogFile:   "/home/dev/.reasonix/remote/serve-x.log",
 		StartedAt: 1_700_000_000,
@@ -36,7 +37,7 @@ func TestServeStateBackwardCompat(t *testing.T) {
 	if err != nil {
 		t.Fatalf("old record failed to decode: %v", err)
 	}
-	if st.PID != 42 || st.Addr != "127.0.0.1:9000" || st.Version != "" || st.StartedAt != 0 {
+	if st.PID != 42 || st.Addr != "127.0.0.1:9000" || st.Version != "" || st.ServeCaps != "" || st.StartedAt != 0 {
 		t.Fatalf("backward-compat decode wrong: %+v", st)
 	}
 }

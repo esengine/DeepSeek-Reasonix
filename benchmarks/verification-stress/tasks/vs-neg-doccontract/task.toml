@@ -1,0 +1,4 @@
+prompt = "rates.py and fees.py are public API but undocumented. Add docstrings to every public function describing parameters, return value, and the zero/negative-amount edge cases. Do not change behavior."
+class = "ebm-negative"
+max_steps = 12
+timeout_sec = 240

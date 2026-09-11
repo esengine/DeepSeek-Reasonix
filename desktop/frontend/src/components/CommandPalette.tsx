@@ -201,6 +201,7 @@ export function CommandPalette({
   return (
     <div
       className="drawer-backdrop"
+      data-app-overlay=""
       data-state={status}
       onClick={onClose}
       role="presentation"

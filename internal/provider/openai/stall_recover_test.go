@@ -2,6 +2,7 @@ package openai
 
 import (
 	"context"
+	"errors"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -13,32 +14,24 @@ import (
 	"reasonix/internal/provider"
 )
 
-// TestStreamStallRecoversViaReconnect exercises the watchdog's primary target:
+// TestStreamStallSurfacesAsInterrupt exercises the watchdog's primary target:
 // a proxy that drops a long-lived SSE connection silently mid-stream (no FIN,
-// no RST) during a reasoner's first-token gap, before any model output. The
-// stall must be treated as recoverable and replayed — like a clean idle-close —
-// not surfaced as a hard failure. Before the fix the stall error was plain and
-// bypassed streamWithReconnect, so this test would fail with a "stalled" error.
-func TestStreamStallRecoversViaReconnect(t *testing.T) {
+// no RST) during a reasoner's first-token gap. Body-phase cuts surface as
+// StreamInterruptedError so the Agent can replay the frozen request — providers
+// no longer stack a second reconnect budget.
+func TestStreamStallSurfacesAsInterrupt(t *testing.T) {
 	release := make(chan struct{})
 	var reqs atomic.Int32
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
-		if reqs.Add(1) == 1 {
-			// First connection: one keep-alive comment (resets the watchdog
-			// once) then total silence — a half-open connection that never
-			// delivers data and never closes.
-			w.Header().Set("Content-Type", "text/event-stream")
-			w.WriteHeader(http.StatusOK)
-			flush(w)
-			_, _ = io.WriteString(w, ": keep-alive\n\n")
-			flush(w)
-			<-release
-			return
-		}
-		// Reconnect serves a complete stream.
+		reqs.Add(1)
+		// One keep-alive comment (resets the watchdog once) then total silence —
+		// a half-open connection that never delivers data and never closes.
 		w.Header().Set("Content-Type", "text/event-stream")
-		_, _ = io.WriteString(w, "data: {\"choices\":[{\"delta\":{\"content\":\"recovered\"}}]}\n\n")
-		_, _ = io.WriteString(w, "data: [DONE]\n\n")
+		w.WriteHeader(http.StatusOK)
+		flush(w)
+		_, _ = io.WriteString(w, ": keep-alive\n\n")
+		flush(w)
+		<-release
 	}))
 	defer srv.Close()
 	defer close(release)
@@ -53,20 +46,18 @@ func TestStreamStallRecoversViaReconnect(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Stream: %v", err)
 	}
-	var text strings.Builder
+	var gotInterrupted bool
 	for chunk := range ch {
 		if chunk.Type == provider.ChunkError {
-			t.Fatalf("a pre-output half-open stall should reconnect, not surface: %v", chunk.Err)
-		}
-		if chunk.Type == provider.ChunkText {
-			text.WriteString(chunk.Text)
+			var interrupted *provider.StreamInterruptedError
+			gotInterrupted = errors.As(chunk.Err, &interrupted)
 		}
 	}
-	if got := text.String(); got != "recovered" {
-		t.Errorf("text = %q, want %q (stall should have triggered a reconnect)", got, "recovered")
+	if !gotInterrupted {
+		t.Error("half-open stall must surface as StreamInterruptedError for Agent replay")
 	}
-	if got := reqs.Load(); got != 2 {
-		t.Errorf("server saw %d requests, want 2 (one stall + one replay)", got)
+	if got := reqs.Load(); got != 1 {
+		t.Errorf("server saw %d requests, want 1 (no provider body replay)", got)
 	}
 }
 

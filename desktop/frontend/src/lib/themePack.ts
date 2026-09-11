@@ -171,7 +171,8 @@ let previewSnapshot: {
 } | null = null;
 
 // Browser development uses Vite-bundled copies of the same official images
-// that Wails serves through /__reasonix_theme_asset/. Only exact, internally
+// that the desktop service serves through /__reasonix_theme_asset/. Only
+// exact, internally
 // registered URLs may cross the background URL safety boundary.
 const trustedBundledThemeBackgroundURLs = new Set<string>();
 
@@ -477,6 +478,7 @@ function applyBackgroundCSSVars(root: HTMLElement, pack: ThemePackView): void {
     root.style.setProperty("--theme-pane-session-hover-pct", `${Math.min((homePane + 0.26) * 100, 100)}%`);
     root.style.setProperty("--theme-pane-child-pct", `${Math.min((homePane + 0.30) * 100, 100)}%`);
     root.style.setProperty("--theme-pane-interact-pct", `${Math.min((homePane + 0.40) * 100, 100)}%`);
+    root.style.setProperty("--theme-pane-overlay-pct", `${Math.min((homePane + 0.40) * 100, 100)}%`);
     // Legacy aliases keep V1 tests and third-party diagnostics stable.
     root.style.setProperty("--theme-bg-image", `url("${cssUrlEscape(homeUrl)}")`);
     root.style.setProperty("--theme-bg-focus-x", `${clamp01(home.focusX) * 100}%`);
@@ -507,6 +509,7 @@ function applyBackgroundCSSVars(root: HTMLElement, pack: ThemePackView): void {
   root.style.setProperty("--theme-pane-task-session-hover-pct", `${Math.min((taskPane + 0.26) * 100, 100)}%`);
   root.style.setProperty("--theme-pane-task-child-pct", `${Math.min((taskPane + 0.30) * 100, 100)}%`);
   root.style.setProperty("--theme-pane-task-interact-pct", `${Math.min((taskPane + 0.40) * 100, 100)}%`);
+  root.style.setProperty("--theme-pane-task-overlay-pct", `${Math.min((taskPane + 0.40) * 100, 100)}%`);
   const safe = taskSource?.safeArea === "left" || taskSource?.safeArea === "right" ? taskSource.safeArea : "center";
   root.setAttribute("data-theme-safe-area", safe);
   root.setAttribute("data-theme-has-bg", "true");
@@ -535,9 +538,11 @@ function clearBackgroundCSSVars(root: HTMLElement): void {
   root.style.removeProperty("--theme-pane-session-hover-pct");
   root.style.removeProperty("--theme-pane-child-pct");
   root.style.removeProperty("--theme-pane-interact-pct");
+  root.style.removeProperty("--theme-pane-overlay-pct");
   root.style.removeProperty("--theme-pane-task-session-hover-pct");
   root.style.removeProperty("--theme-pane-task-child-pct");
   root.style.removeProperty("--theme-pane-task-interact-pct");
+  root.style.removeProperty("--theme-pane-task-overlay-pct");
   root.removeAttribute("data-theme-safe-area");
   root.removeAttribute("data-theme-has-bg");
 }

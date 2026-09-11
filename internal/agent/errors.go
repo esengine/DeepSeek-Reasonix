@@ -4,19 +4,49 @@ import (
 	"errors"
 	"fmt"
 	"strings"
+
+	"reasonix/internal/provider"
 )
+
+// ReasoningReplayFailure classifies why an assistant turn could not safely be
+// committed to provider-visible history.
+type ReasoningReplayFailure string
+
+const (
+	ReasoningReplayMissing      ReasoningReplayFailure = "missing_required_reasoning"
+	ReasoningReplayOverflow     ReasoningReplayFailure = "reasoning_overflow"
+	ReasoningReplayIncomplete   ReasoningReplayFailure = "incomplete_reasoning"
+	ReasoningReplayUnreplayable ReasoningReplayFailure = "unreplayable_history"
+)
+
+// ReasoningReplayError stops client tools before execution when their provider
+// reasoning cannot be replayed. Completed work is retained as LocalOnly by the
+// ordinary interrupted-turn recovery path.
+type ReasoningReplayError struct {
+	Kind ReasoningReplayFailure
+}
+
+func (e *ReasoningReplayError) Error() string {
+	if e != nil && e.Kind == ReasoningReplayIncomplete {
+		return "The provider ended the response with unfinished reasoning. Reasonix kept existing work and did not run the requested tools; retry to continue safely."
+	}
+	if e != nil && e.Kind == ReasoningReplayOverflow {
+		return "The provider reasoning exceeded the client safety limit, so Reasonix did not run the requested tools. Existing work was kept; retry to continue safely."
+	}
+	return "The provider repeatedly omitted reasoning required to replay this tool turn. Reasonix exhausted its safe automatic recovery and did not run the requested tools. Existing work was kept; switch provider or protocol if this continues."
+}
 
 // PauseClass names the guard that deliberately ended a run, so a host can
 // classify an outcome without reaching into the unexported pause types.
 // Empty for ordinary provider/tool failures.
 func PauseClass(err error) string {
+	var budgetPause *taskBudgetPause
+	if errors.As(err, &budgetPause) {
+		return "task_budget"
+	}
 	var maxSteps *maxStepsPause
 	if errors.As(err, &maxSteps) {
 		return "max_steps"
-	}
-	var stall *todoStallPause
-	if errors.As(err, &stall) {
-		return "todo_stall"
 	}
 	var readiness *FinalReadinessError
 	if errors.As(err, &readiness) {
@@ -26,15 +56,109 @@ func PauseClass(err error) string {
 	if errors.As(err, &recovery) {
 		return "recovery_paused"
 	}
+	var completion *CompletionUncertainError
+	if errors.As(err, &completion) {
+		return "completion_uncertain"
+	}
+	var incompleteRead *IncompleteReadError
+	if errors.As(err, &incompleteRead) {
+		return "incomplete_read"
+	}
 	return ""
 }
+
+// IncompleteReadError is a recoverable run boundary: a read_file result was
+// only partially visible and the host refused to let the model silently treat
+// it as complete. It carries only routing/size metadata, never file contents.
+type IncompleteReadError struct {
+	Pause         *provider.ReadPause
+	Reason        string
+	Path          string
+	ToolCallID    string
+	ResultRef     string
+	NextOffset    int
+	ConsumedBytes int
+	TotalBytes    int
+}
+
+func (e *IncompleteReadError) Error() string {
+	if e == nil {
+		return "read_file did not complete"
+	}
+	detail := strings.TrimSpace(e.Reason)
+	if detail == "" {
+		detail = "the retained result still has unread content"
+	}
+	return "read_file did not complete safely: " + detail
+}
+
+// RunPauseInfo is the stable host-facing description of a deliberate Run
+// boundary. It keeps unexported control-flow error types private while allowing
+// Controller to distinguish task budgets from an explicit runtime max_steps.
+type RunPauseInfo struct {
+	Kind      string
+	Limit     int
+	Key       string
+	HostOwned bool
+	Reason    string
+}
+
+// InspectRunPause unwraps a deliberate explicit run boundary.
+func InspectRunPause(err error) (RunPauseInfo, bool) {
+	var maxSteps *maxStepsPause
+	if errors.As(err, &maxSteps) {
+		return RunPauseInfo{Kind: "max_steps", Limit: maxSteps.steps, Key: maxSteps.key}, true
+	}
+	var budget *taskBudgetPause
+	if errors.As(err, &budget) {
+		return RunPauseInfo{Kind: "task_budget", Key: budget.axis, HostOwned: true, Reason: budget.detail}, true
+	}
+	var incompleteRead *IncompleteReadError
+	if errors.As(err, &incompleteRead) {
+		return RunPauseInfo{Kind: "incomplete_read", HostOwned: true, Reason: incompleteRead.Reason}, true
+	}
+	return RunPauseInfo{}, false
+}
+
+// ReadinessContinuationClass is retained for compatibility with hosts that
+// inspect FinalReadinessError. Ordinary Standard/Delivery turns never use it
+// to schedule another model request; only Goal/approved-Plan orchestration may
+// interpret the advisory class after the visible turn has ended.
+type ReadinessContinuationClass string
+
+const (
+	// ReadinessContinuationNone is also the zero value so older callers that
+	// construct FinalReadinessError directly never opt into another model turn.
+	ReadinessContinuationNone ReadinessContinuationClass = ""
+	// ReadinessContinuationGeneric covers ordinary post-write verification and
+	// review gaps for Goal/Plan diagnostics.
+	ReadinessContinuationGeneric ReadinessContinuationClass = "generic"
+	// ReadinessContinuationHighConfidence covers exact or strict, safely
+	// actionable readiness duties for Goal/Plan diagnostics.
+	ReadinessContinuationHighConfidence ReadinessContinuationClass = "high_confidence"
+)
 
 // FinalReadinessError reports that the model exhausted its recovery attempts
 // before satisfying the host-observed delivery checks.
 type FinalReadinessError struct {
-	Attempts int
-	Reason   string
-	Missing  []string
+	Attempts          int
+	Reason            string
+	Missing           []string
+	ContinuationClass ReadinessContinuationClass
+	ProgressKey       string
+	// Operations names the concrete changes the host could not settle, so the
+	// report points at a real change with a real next action instead of a
+	// category the user has to map back onto their work themselves.
+	Operations []ReadinessOperationGap
+}
+
+// ReadinessOperationGap is one unsettled host-observed change in a readiness
+// report. Action is the closed-set next step, never prose.
+type ReadinessOperationGap struct {
+	OperationID string   `json:"operation_id"`
+	Paths       []string `json:"paths,omitempty"`
+	State       string   `json:"state"`
+	Action      string   `json:"action"`
 }
 
 func (e *FinalReadinessError) Error() string {
@@ -65,4 +189,31 @@ func (e *RecoveryPauseError) Error() string {
 		return e.Message
 	}
 	return "Automatic retries paused. Reasonix stopped repeated attempts and kept completed work. Send \"continue\" to start a fresh attempt, or add instructions to change direction."
+}
+
+// CompletionUncertainContextTool is the retained host-safety cause for a
+// context-unavailable tool being called again after the repair instruction.
+const CompletionUncertainContextTool = "context_tool_repeat"
+
+// CompletionUncertainError reports that a host safety condition paused the
+// current turn after completed work was retained. It is a control-flow signal,
+// not a provider failure: the candidate answer, tool results, and completed
+// work stay in the session, and the user can continue in the next message.
+type CompletionUncertainError struct {
+	// Cause is the stable classifier naming why completion stayed unconfirmed.
+	Cause string
+	// Message is the user-facing English product copy for wire/CLI clients.
+	Message string
+	// Detail is optional expandable diagnostic text; never product copy.
+	Detail string
+}
+
+func (e *CompletionUncertainError) Error() string {
+	if e == nil {
+		return "completion could not be confirmed"
+	}
+	if strings.TrimSpace(e.Message) != "" {
+		return e.Message
+	}
+	return "Completion could not be confirmed. Reasonix kept the current result and all completed work. Send \"continue\" to resume, or restate what should change."
 }

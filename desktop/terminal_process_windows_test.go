@@ -11,6 +11,11 @@ import (
 	"time"
 )
 
+// A loaded Windows runner can take far longer than the shell's own work to echo
+// a marker or reap a ConPTY child. Keep the outer responsiveness bound generous;
+// the test still fails if the process never responds.
+const conptySmokeWait = 30 * time.Second
+
 func TestWindowsTerminalProcessConPTYSmoke(t *testing.T) {
 	available, reason := terminalPlatformAvailable()
 	if !available {
@@ -65,7 +70,7 @@ func TestWindowsTerminalProcessConPTYSmoke(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-	case <-time.After(10 * time.Second):
+	case <-time.After(conptySmokeWait):
 		t.Fatal("timed out waiting for ConPTY output")
 	}
 
@@ -82,7 +87,7 @@ func TestWindowsTerminalProcessConPTYSmoke(t *testing.T) {
 		if err != nil {
 			t.Fatalf("wait for ConPTY exit: %v", err)
 		}
-	case <-time.After(10 * time.Second):
+	case <-time.After(conptySmokeWait):
 		t.Fatal("timed out waiting for ConPTY process exit")
 	}
 }

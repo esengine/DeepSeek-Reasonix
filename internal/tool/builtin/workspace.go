@@ -8,6 +8,7 @@ import (
 
 	"reasonix/internal/netclient"
 	"reasonix/internal/sandbox"
+	"reasonix/internal/sessiontemp"
 	"reasonix/internal/tool"
 )
 
@@ -35,16 +36,28 @@ type Workspace struct {
 	ProxySpec       netclient.ProxySpec
 	ReadPaths       *PathResolver
 	SessionGuard    SessionDataGuard
+	// WriteRootSet is the live writable-root manager. When set, file writers
+	// and bash read Baseline+Session+per-call roots from it instead of a
+	// static WriteRoots snapshot.
+	WriteRootSet *sandbox.WritableRootSet
 	// ManagedConfig names the Reasonix-owned config files the file-writers may
 	// touch outside WriteRoots after a fresh per-write human approval (see
 	// ManagedConfigPaths). The zero value disables the escape hatch.
 	ManagedConfig ManagedConfigPaths
-	// FileOverlay, when non-nil, serves read_file/write_file content through the
+	// FileOverlay, when non-nil, serves every file tool's content through the
 	// host transport (unsaved editor buffers) with disk fallback; Terminal, when
 	// non-nil, runs foreground bash in a host-owned terminal when the local OS
 	// sandbox is not enforcing. Both are nil outside host transports like ACP.
 	FileOverlay FileOverlay
 	Terminal    TerminalRunner
+	// SessionTemp is the logical-session private temporary directory manager
+	// shared by bash and ripgrep-backed grep. Nil leaves those tools without a
+	// session-private temp (platform defaults apply).
+	SessionTemp *sessiontemp.Manager
+	// FileWriteReceipt receives prior-state evidence after a successful
+	// write_file mutation. It is instance-scoped so concurrent runtimes never
+	// record into another session's recovery ledger.
+	FileWriteReceipt func(path string, hadPrior bool, prior []byte)
 }
 
 // Tools returns the built-in tools bound to the workspace, ready to Add to a
@@ -61,26 +74,27 @@ func (w Workspace) Tools(enabled ...string) []tool.Tool {
 	forbidRoots := realRoots(w.ForbidReadRoots)
 
 	overrides := map[string]tool.Tool{
+		"view_image":    viewImage{workDir: w.Dir, paths: w.ReadPaths, forbidRoots: forbidRoots},
 		"read_file":     readFile{workDir: w.Dir, paths: w.ReadPaths, forbidRoots: forbidRoots, overlay: w.FileOverlay},
-		"write_file":    writeFile{workDir: w.Dir, roots: roots, guard: w.SessionGuard, managed: w.ManagedConfig, overlay: w.FileOverlay},
-		"edit_file":     editFile{workDir: w.Dir, roots: roots, guard: w.SessionGuard, managed: w.ManagedConfig},
-		"multi_edit":    multiEdit{workDir: w.Dir, roots: roots, guard: w.SessionGuard, managed: w.ManagedConfig},
+		"write_file":    writeFile{workDir: w.Dir, roots: roots, guard: w.SessionGuard, managed: w.ManagedConfig, overlay: w.FileOverlay, receipt: w.FileWriteReceipt},
+		"edit_file":     editFile{workDir: w.Dir, roots: roots, guard: w.SessionGuard, managed: w.ManagedConfig, overlay: w.FileOverlay},
+		"multi_edit":    multiEdit{workDir: w.Dir, roots: roots, guard: w.SessionGuard, managed: w.ManagedConfig, overlay: w.FileOverlay},
 		"move_file":     moveFile{workDir: w.Dir, roots: roots, guard: w.SessionGuard, managed: w.ManagedConfig},
-		"notebook_edit": notebookEdit{workDir: w.Dir, roots: roots, guard: w.SessionGuard, managed: w.ManagedConfig},
-		"delete_range":  deleteRange{workDir: w.Dir, roots: roots, guard: w.SessionGuard, managed: w.ManagedConfig},
-		"delete_symbol": deleteSymbol{workDir: w.Dir, roots: roots, guard: w.SessionGuard, managed: w.ManagedConfig},
+		"notebook_edit": notebookEdit{workDir: w.Dir, roots: roots, guard: w.SessionGuard, managed: w.ManagedConfig, overlay: w.FileOverlay},
+		"delete_range":  deleteRange{workDir: w.Dir, roots: roots, guard: w.SessionGuard, managed: w.ManagedConfig, overlay: w.FileOverlay},
+		"delete_symbol": deleteSymbol{workDir: w.Dir, roots: roots, guard: w.SessionGuard, managed: w.ManagedConfig, overlay: w.FileOverlay},
 		"code_index":    codeIndex{workDir: w.Dir, forbidRoots: forbidRoots},
-		"bash":          bash{workDir: w.Dir, sb: w.Bash, timeout: w.BashTimeout, guard: w.SessionGuard, terminal: w.Terminal},
+		"bash":          bash{workDir: w.Dir, sb: w.Bash, timeout: w.BashTimeout, guard: w.SessionGuard, terminal: w.Terminal, sessionTemp: w.SessionTemp},
 		"ls":            listDir{workDir: w.Dir, paths: w.ReadPaths, forbidRoots: forbidRoots},
 		"glob":          globTool{workDir: w.Dir, paths: w.ReadPaths, forbidRoots: forbidRoots},
-		"grep":          grepTool{workDir: w.Dir, paths: w.ReadPaths, rg: w.Search.RgPath, forbidRoots: forbidRoots, sb: w.Bash},
+		"grep":          grepTool{workDir: w.Dir, paths: w.ReadPaths, rg: w.Search.RgPath, forbidRoots: forbidRoots, sb: w.Bash, sessionTemp: w.SessionTemp, overlay: w.FileOverlay},
 		"web_fetch":     webFetch{proxySpec: w.ProxySpec},
 	}
 	all := tool.Builtins()
 	if len(enabled) == 0 {
 		for i, t := range all {
 			if bound, ok := overrides[t.Name()]; ok {
-				all[i] = bound
+				all[i] = BindWriteRootSet(bound, w.WriteRootSet)
 			}
 		}
 		return all
@@ -93,7 +107,7 @@ func (w Workspace) Tools(enabled ...string) []tool.Tool {
 	for _, t := range all {
 		if want[t.Name()] {
 			if bound, ok := overrides[t.Name()]; ok {
-				t = bound
+				t = BindWriteRootSet(bound, w.WriteRootSet)
 			}
 			out = append(out, t)
 		}

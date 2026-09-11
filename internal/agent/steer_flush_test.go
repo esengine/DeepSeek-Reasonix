@@ -94,6 +94,9 @@ func TestRunFlushesUnconsumedSteersOnCancel(t *testing.T) {
 	if n := a.steerQueueLen(); n != 0 {
 		t.Fatalf("steer queue should be empty after the turn, len=%d", n)
 	}
+	if !a.HasUnappliedSteer() {
+		t.Fatal("host should observe that the cancelled turn left unapplied guidance")
+	}
 	if a.Steer("after the turn") {
 		t.Fatalf("Steer must be rejected once the turn has exited")
 	}
@@ -116,6 +119,37 @@ func TestCloseSteerIntakeIfIdleMakesAdmissionLinearizable(t *testing.T) {
 	}
 	if n := a.steerQueueLen(); n != 0 {
 		t.Fatalf("rejected steer remained queued, len=%d", n)
+	}
+	if a.HasUnappliedSteer() {
+		t.Fatal("closing an empty steer intake must not report unapplied guidance")
+	}
+}
+
+func TestWithdrawnDurableSteerDoesNotEmitUnappliedNotice(t *testing.T) {
+	var notices int
+	a := New(nil, tool.NewRegistry(), NewSession(""), Options{}, event.FuncSink(func(e event.Event) {
+		if e.Kind == event.Notice && e.Code == event.NoticeCodeUnappliedSteer {
+			notices++
+		}
+	}))
+	a.steerMu.Lock()
+	a.steerRunActive = true
+	a.steerMu.Unlock()
+	if !a.SteerItem("withdrawn-consume", func() (string, error) { return "", ErrSteerWithdrawn }) {
+		t.Fatal("active steer should be accepted")
+	}
+	if text, itemID, ok := a.consumeSteer(); ok || text != "" || itemID != "" {
+		t.Fatalf("withdrawn consume = (%q, %q, %v), want silent miss", text, itemID, ok)
+	}
+	if !a.SteerItem("withdrawn-flush", func() (string, error) { return "", ErrSteerWithdrawn }) {
+		t.Fatal("second active steer should be accepted")
+	}
+	a.flushSteerQueue()
+	if notices != 0 {
+		t.Fatalf("withdrawn steer emitted %d unapplied notices", notices)
+	}
+	if len(a.Session().Messages) != 0 {
+		t.Fatalf("withdrawn steer wrote transcript messages: %+v", a.Session().Messages)
 	}
 }
 

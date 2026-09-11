@@ -1,0 +1,7 @@
+# sensor dump 2026-08-07
+2
+
+4
+n/a
+6.0
+sensor offline

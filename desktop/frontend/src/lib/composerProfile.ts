@@ -4,18 +4,17 @@ import {
   modeHasPlan,
   normalizeCollaborationMode,
   normalizeMode,
-  normalizeTokenMode,
   normalizeToolApprovalMode,
   type CollaborationMode,
   type GoalStatus,
   type Meta,
   type Mode,
   type TabMeta,
-  type TokenMode,
+  type QualityFloor,
   type ToolApprovalMode,
 } from "./types";
 
-export type ComposerProfileField = "collaborationMode" | "toolApprovalMode" | "tokenMode" | "goal";
+export type ComposerProfileField = "collaborationMode" | "toolApprovalMode" | "goal" | "qualityFloor";
 
 export type ComposerProfilePending = Partial<Record<ComposerProfileField, true>>;
 
@@ -23,22 +22,22 @@ export interface ComposerProfile {
   collaborationMode: CollaborationMode;
   goalDraftMode: boolean;
   toolApprovalMode: ToolApprovalMode;
-  tokenMode: TokenMode;
   goal: string;
+  qualityFloor: QualityFloor;
   pending: ComposerProfilePending;
 }
 
 export type ComposerProfilesByTab = Record<string, ComposerProfile>;
 export type UserPlanModeIntents = Record<string, true>;
 
-const profileFields: ComposerProfileField[] = ["collaborationMode", "toolApprovalMode", "tokenMode", "goal"];
+const profileFields: ComposerProfileField[] = ["collaborationMode", "toolApprovalMode", "goal", "qualityFloor"];
 
 export const defaultComposerProfile: ComposerProfile = Object.freeze({
   collaborationMode: "normal",
   goalDraftMode: false,
   toolApprovalMode: "ask",
-  tokenMode: "full",
   goal: "",
+  qualityFloor: "standard",
   pending: {},
 });
 
@@ -71,8 +70,8 @@ export function composerProfileFromTab(tab?: TabMeta | null, fallback?: ToolAppr
       tab.toolApprovalMode === "yolo",
       fallbackToolApprovalMode(tab.toolApprovalMode, fallback),
     ),
-    tokenMode: normalizeTokenMode(tab.tokenMode),
     goal,
+    qualityFloor: tab.qualityFloor ?? "standard",
   });
 }
 
@@ -90,8 +89,8 @@ export function composerProfileFromMeta(meta?: Meta | null, legacyMode?: Mode, f
     collaborationMode: normalizeCollaborationMode(meta.collaborationMode, goal, fallbackMode),
     goalDraftMode: false,
     toolApprovalMode,
-    tokenMode: normalizeTokenMode(meta.tokenMode),
     goal,
+    qualityFloor: meta.qualityFloor ?? "standard",
   });
 }
 
@@ -107,11 +106,11 @@ function assignField(profile: ComposerProfile, field: ComposerProfileField, valu
     case "toolApprovalMode":
       profile.toolApprovalMode = value as ToolApprovalMode;
       return;
-    case "tokenMode":
-      profile.tokenMode = value as TokenMode;
-      return;
     case "goal":
       profile.goal = value;
+      return;
+    case "qualityFloor":
+      profile.qualityFloor = value as QualityFloor;
       return;
   }
 }
@@ -121,8 +120,8 @@ function profilesEqual(a: ComposerProfile | undefined, b: ComposerProfile | unde
   return a.collaborationMode === b.collaborationMode
     && a.goalDraftMode === b.goalDraftMode
     && a.toolApprovalMode === b.toolApprovalMode
-    && a.tokenMode === b.tokenMode
     && a.goal === b.goal
+    && a.qualityFloor === b.qualityFloor
     && profileFields.every((field) => Boolean(a.pending[field]) === Boolean(b.pending[field]));
 }
 

@@ -1,9 +1,8 @@
-import { createContext, memo, useCallback, useContext, useEffect, useMemo, useRef, useState } from "react";
+import { createContext, lazy, memo, Suspense, useCallback, useContext, useEffect, useMemo, useRef, useState } from "react";
 import type { FormEvent, KeyboardEvent as ReactKeyboardEvent } from "react";
-import { BrainCircuit, ChevronDown, ChevronRight, FileText, Folder, GitBranch, Image, MessageSquare, Pencil, RotateCcw, ScrollText } from "lucide-react";
+import { BrainCircuit, ChevronDown, FileText, Folder, GitBranch, Image, MessageSquare, Pencil, RotateCcw, ScrollText } from "lucide-react";
 import { Markdown } from "./Markdown";
 import { CopyButton } from "./CopyButton";
-import { ProcessBrainIcon } from "./ProcessCard";
 import { ComposerContextCard } from "./ComposerContextCard";
 import { formatAttachmentRefForDisplay, formatAttachmentRefForSubmit, parseAttachmentRefsForDisplay, sortDisplayAttachments } from "../lib/attachmentDisplay";
 import type { DisplayAttachment } from "../lib/attachmentDisplay";
@@ -12,19 +11,20 @@ import { replaySubmitTextPreservingSelectedContext } from "../lib/editReplay";
 import { useT } from "../lib/i18n";
 import { ImageViewer } from "./ImageViewer";
 import { Tooltip } from "./Tooltip";
-import { useGSAPCollapse } from "../lib/useGSAPCollapse";
-import { displayReasoningText } from "../lib/reasoningDisplay";
+import { useWorkProcessPresentation } from "../lib/sessionExperience";
 import { stripMemoryCompilerExecution } from "../lib/memoryCompilerDisplay";
-import { visibleTranscriptMemoryCitations } from "../lib/memoryCitationVisibility";
 import { invocationSegmentsFromMessage, type InvocationMetadataMap } from "../lib/invocationDisplay";
-import type { Item, MessageActionScope } from "../lib/useController";
-import type { CheckpointMeta, MemoryCitation } from "../lib/types";
+import { messageActionLabelKey, type MessageActionScope } from "../lib/messageActions";
+import type { Item } from "../lib/useController";
+import type { CheckpointMeta } from "../lib/types";
 import { InvocationBadge } from "./InvocationBadge";
 import { CodeViewer } from "./CodeViewer";
 import { formatSelectionLabels, languageFor, parseSelectedTextContext, stripSelectionLabels } from "../lib/selectedTextContext";
 
-type AssistantItem = Extract<Item, { kind: "assistant" }>;
-export type TurnActionMenu = "summary" | "rewind";
+const AssistantReasoningPanel = lazy(() => import("./AssistantReasoningPanel").then((module) => ({ default: module.AssistantReasoningPanel })));
+const MemoryCitations = lazy(() => import("./MemoryCitations").then((module) => ({ default: module.MemoryCitations })));
+const SearchSourcesPanel = lazy(() => import("./SearchSourcesPanel").then((module) => ({ default: module.SearchSourcesPanel }))); type AssistantItem = Extract<Item, { kind: "assistant" }>;
+export type TurnActionMenu = "summary" | "rewind" | "fork";
 export const InvocationMetadataContext = createContext<InvocationMetadataMap>({});
 type ImSourceMessage = {
   provider: string;
@@ -118,7 +118,7 @@ export type SelectedTextBlockInfo = {
   path?: string;
   start: number;
   end: number;
-  kind: "chat" | "code";
+  kind: "chat" | "code" | "terminal";
 };
 
 export function parseSelectedTextBlocks(text: string, submitText?: string): SelectedTextBlockInfo[] {
@@ -132,7 +132,7 @@ export function parseSelectedTextBlocks(text: string, submitText?: string): Sele
   let start = text.length - suffix.length;
   return entries.map((entry) => {
     const label = formatSelectionLabels([entry]);
-    const kind = entry.path ? "code" : "chat";
+    const kind = entry.path ? "code" : entry.source === "terminal" ? "terminal" : "chat";
     const block = {
       label,
       content: entry.text,
@@ -144,60 +144,6 @@ export function parseSelectedTextBlocks(text: string, submitText?: string): Sele
     start = block.end + 1;
     return block;
   });
-}
-
-function MemoryCitations({ citations }: { citations?: MemoryCitation[] }) {
-  const t = useT();
-  const bodyRef = useRef<HTMLDivElement>(null);
-  const [open, setOpen] = useState(false);
-  const clean = visibleTranscriptMemoryCitations(citations)
-    .filter((citation) => (citation.source ?? citation.id ?? citation.note ?? "").trim() !== "")
-    .slice(0, 5);
-  useGSAPCollapse(bodyRef, open);
-  if (clean.length === 0) return null;
-  return (
-    <div className="msg-memory-citations">
-      <button
-        type="button"
-        className="msg-memory-citations__toggle"
-        aria-expanded={open}
-        onClick={() => setOpen((value) => !value)}
-      >
-        <ChevronRight className={`msg-memory-citations__chevron${open ? " msg-memory-citations__chevron--open" : ""}`} size={15} />
-        <span>{t("msg.memoryCompilerCitationsCount", { n: clean.length })}</span>
-      </button>
-      {open && (
-        <div ref={bodyRef} className="msg-memory-citations__body">
-          {clean.map((citation, index) => {
-            const lines = memoryCitationLines(citation, t);
-            return (
-              <div key={`${citation.id ?? citation.source}-${index}`} className="msg-memory-citations__item">
-                <div className="msg-memory-citations__source">
-                  <span>{memoryCitationSource(citation)}</span>
-                  {lines && <span className="msg-memory-citations__lines">{lines}</span>}
-                </div>
-                {citation.note && <div className="msg-memory-citations__note">{citation.note}</div>}
-              </div>
-            );
-          })}
-        </div>
-      )}
-    </div>
-  );
-}
-
-function memoryCitationSource(citation: MemoryCitation): string {
-  const source = (citation.source || citation.id || "Memory v5").trim();
-  if (citation.kind === "compiler_reference" && source === "Memory v5") return "Memory v5 compiler";
-  return source;
-}
-
-function memoryCitationLines(citation: MemoryCitation, t: ReturnType<typeof useT>): string {
-  const start = citation.lineStart ?? 0;
-  const end = citation.lineEnd ?? 0;
-  if (start <= 0) return "";
-  if (end > 0 && end !== start) return t("msg.memoryCitationLineRange", { start, end });
-  return t("msg.memoryCitationLine", { line: start });
 }
 
 function messageDate(value?: number): Date {
@@ -278,14 +224,14 @@ export function UserMessage({
   type DisplaySegment =
     | { type: "text"; content: string }
     | { type: "block"; key: string; block: PastedBlockInfo; kind: "paste" }
-    | { type: "block"; key: string; block: SelectedTextBlockInfo; kind: "chat" | "code" };
+    | { type: "block"; key: string; block: SelectedTextBlockInfo; kind: "chat" | "code" | "terminal" };
 
   const displaySegments = useMemo((): DisplaySegment[] => {
     if (pasteBlocks.length === 0 && selectedTextBlocks.length === 0) return [{ type: "text", content: displayText }];
     const segments: DisplaySegment[] = [];
     const ordered: Array<
       | { block: PastedBlockInfo; start: number; end: number; kind: "paste" }
-      | { block: SelectedTextBlockInfo; start: number; end: number; kind: "chat" | "code" }
+      | { block: SelectedTextBlockInfo; start: number; end: number; kind: "chat" | "code" | "terminal" }
     > = [
       ...pasteBlocks.map((block) => {
         const start = displayText.indexOf(block.label);
@@ -436,7 +382,7 @@ export function UserMessage({
       data-history-restore={id && id.startsWith("h") ? "" : undefined}
       data-entrance={id || undefined}
     >
-      <div className={`msg__body${editing ? " msg__body--editing" : ""}`}>
+      <div className={`msg__body${editing ? " msg__body--editing" : ""}`} data-transcript-selectable="message">
         {editing ? (
           <form className="msg-edit" onSubmit={(event) => void submitEdit(event)}>
             {orderedDraftAttachments.length > 0 && (
@@ -486,13 +432,13 @@ export function UserMessage({
           </form>
         ) : imSource ? (
           <div className="im-source-card">
-            <div className="im-source-card__head">
+            <div className="im-source-card__head" data-transcript-selection-ignore>
               <MessageSquare size={14} />
               <span>{t("msg.fromIm", { source: sourceLabel })}</span>
             </div>
             {displayText && <div className="im-source-card__text">{displayText}</div>}
             {(imSource.sender || imSource.chat) && (
-              <div className="im-source-card__meta">
+              <div className="im-source-card__meta" data-transcript-selection-ignore>
                 {imSource.sender && <span>{t("msg.imSender", { id: imSource.sender })}</span>}
                 {imSource.chat && <span>{imSource.chat}</span>}
               </div>
@@ -521,8 +467,8 @@ export function UserMessage({
               return (
                 <div className="msg-pasted" key={seg.key}>
                   <div className="msg-pasted-block">
-                    <div className="msg-pasted-head">
-                      {seg.kind === "chat" ? <MessageSquare size={15} /> : <FileText size={15} />}
+                    <div className="msg-pasted-head" data-transcript-selection-ignore>
+                      {seg.kind === "code" ? <FileText size={15} /> : <MessageSquare size={15} />}
                       <span className="msg-pasted-label">{seg.block.label}</span>
                       <div className="msg-pasted-actions">
                         <Tooltip label={t(expanded ? "msg.pastedCollapseTooltip" : "msg.pastedExpandTooltip")}>
@@ -536,8 +482,8 @@ export function UserMessage({
                       <div className="msg-pasted-expanded">
                         {seg.kind === "chat"
                           ? <Markdown text={seg.block.content} />
-                          : seg.kind === "code"
-                            ? <CodeViewer value={seg.block.content} language={languageFor(seg.block.path ?? "")} maxHeight={360} />
+                          : seg.kind === "code" || seg.kind === "terminal"
+                            ? <CodeViewer value={seg.block.content} language={seg.kind === "terminal" ? "console" : languageFor(seg.block.path ?? "")} maxHeight={360} />
                             : seg.block.content}
                       </div>
                     )}
@@ -547,9 +493,9 @@ export function UserMessage({
             })}
           </>
         )}
-        {failed && <div className="msg__send-failed">{t("msg.sendFailed")}</div>}
+        {failed && <div className="msg__send-failed" data-transcript-selection-ignore>{t("msg.sendFailed")}</div>}
         {orderedAttachments.length > 0 && (
-          <div className="msg-attachments" aria-label={t("msg.attachments")}>
+          <div className="msg-attachments" aria-label={t("msg.attachments")} data-transcript-selection-ignore>
             {orderedAttachments.map((attachment, index) => {
               const isImage = attachment.kind === "image";
               const el = (
@@ -654,7 +600,7 @@ export function TurnActions({
   const actionDisabledReason = (scope: string): string => {
     if (rewindDisabled || actionPending) return t("rewind.disabledRunning");
     if (!checkpoint) return t("rewind.disabledNoCheckpoint");
-    if ((scope === "fork" || scope === "summ-from" || scope === "conversation") && !checkpoint.canConversation) {
+    if ((scope === "fork" || scope === "fork-worktree" || scope === "summ-from" || scope === "conversation") && !checkpoint.canConversation) {
       return t("rewind.disabledNoBoundary");
     }
     if (scope === "summ-from" && isLastTurn) {
@@ -671,38 +617,7 @@ export function TurnActions({
     }
     return "";
   };
-  const actionLabel = (scope: MessageActionScope): string => {
-    if (confirmScope !== scope) {
-      switch (scope) {
-        case "fork":
-          return t("rewind.fork");
-        case "summ-from":
-          return t("rewind.summFrom");
-        case "summ-upto":
-          return t("rewind.summUpto");
-        case "conversation":
-          return t("rewind.conversation");
-        case "code":
-          return t("rewind.code");
-        default:
-          return t("rewind.both");
-      }
-    }
-    switch (scope) {
-      case "fork":
-        return t("rewind.confirmFork");
-      case "summ-from":
-        return t("rewind.confirmSummFrom");
-      case "summ-upto":
-        return t("rewind.confirmSummUpto");
-      case "conversation":
-        return t("rewind.confirmConversation");
-      case "code":
-        return t("rewind.confirmCode");
-      default:
-        return t("rewind.confirmBoth");
-    }
-  };
+  const actionLabel = (scope: MessageActionScope): string => t(messageActionLabelKey(scope, confirmScope === scope));
   const actionMeta = (scope: MessageActionScope): string => {
     const total = checkpoint?.fileCount ?? checkpoint?.files?.length ?? 0;
     if ((scope === "code" || scope === "both") && total > 0) {
@@ -779,19 +694,35 @@ export function TurnActions({
   };
   return (
     <div className={`turn-actions${openMenu ? " turn-actions--open" : ""}${hoverMenus ? " turn-actions--hover-menu" : ""}`}>
-      <CopyButton text={text} label={t("msg.copy")} />
+      {text.trim() && <CopyButton text={text} label={t("msg.copy")} />}
       {canAct && (
         <>
-          <button
-            className={`turn-actions__btn${confirmScope === "fork" ? " turn-actions__btn--confirm" : ""}`}
-            type="button"
-            disabled={Boolean(forkDisabledReason)}
-            title={forkDisabledReason || undefined}
-            onClick={() => selectRewind("fork")}
+          <div
+            className={`turn-actions__group${openMenu === "fork" ? " turn-actions__group--open" : ""}`}
+            onMouseEnter={() => openHoverMenu("fork")}
           >
-            <GitBranch size={13} />
-            <span>{actionLabel("fork")}</span>
-          </button>
+            <button
+              className={`turn-actions__btn${confirmScope === "fork" || confirmScope === "fork-worktree" ? " turn-actions__btn--confirm" : ""}`}
+              type="button"
+              disabled={Boolean(forkDisabledReason)}
+              aria-haspopup="menu"
+              aria-expanded={openMenu === "fork"}
+              title={forkDisabledReason || t("rewind.forkTooltip")}
+              onClick={() => toggleMenu("fork")}
+            >
+              <GitBranch size={13} />
+              <span className="turn-actions__label-inline">
+                <span>{confirmScope === "fork-worktree" ? actionLabel("fork-worktree") : (confirmScope === "fork" ? actionLabel("fork") : t("rewind.fork"))}</span>
+                <ChevronDown size={12} />
+              </span>
+            </button>
+            {openMenu === "fork" && (
+              <div className="rewind__menu turn-actions__menu" role="menu">
+                {renderAction("fork-worktree")}
+                {renderAction("fork")}
+              </div>
+            )}
+          </div>
           <div
             className={`turn-actions__group${openMenu === "summary" ? " turn-actions__group--open" : ""}`}
             onMouseEnter={() => openHoverMenu("summary")}
@@ -804,8 +735,10 @@ export function TurnActions({
               onClick={() => toggleMenu("summary")}
             >
               <ScrollText size={13} />
-              <span>{t("turnActions.summary")}</span>
-              <ChevronDown size={12} />
+              <span className="turn-actions__label-inline">
+                <span>{t("turnActions.summary")}</span>
+                <ChevronDown size={12} />
+              </span>
             </button>
             {openMenu === "summary" && (
               <div className="rewind__menu turn-actions__menu" role="menu">
@@ -828,8 +761,10 @@ export function TurnActions({
               onClick={() => toggleMenu("rewind")}
             >
               <RotateCcw size={13} />
-              <span>{t("turnActions.rewind")}</span>
-              <ChevronDown size={12} />
+              <span className="turn-actions__label-inline">
+                <span>{t("turnActions.rewind")}</span>
+                <ChevronDown size={12} />
+              </span>
             </button>
             {openMenu === "rewind" && (
               <div className="rewind__menu turn-actions__menu" role="menu">
@@ -847,135 +782,46 @@ export function TurnActions({
   );
 }
 
-function reasoningDurationLabel(durationMs: number | undefined, t: ReturnType<typeof useT>): string {
-  if (typeof durationMs !== "number" || !Number.isFinite(durationMs) || durationMs <= 0) {
-    return t("msg.thinkingDone");
-  }
-  const seconds = Math.max(1, Math.round(durationMs / 1000));
-  return t("msg.thinkingDuration", { s: seconds });
-}
-
-function ReasoningPanel({
-  item,
-  defaultExpanded,
-  expandWhileStreaming,
-  truncateStreamingReasoning,
-}: {
-  item: AssistantItem;
-  defaultExpanded: boolean;
-  expandWhileStreaming: boolean;
-  truncateStreamingReasoning: boolean;
-}) {
-  const t = useT();
-  const reasoningBodyRef = useRef<HTMLDivElement>(null);
-  // Thinking streams in before the answer — show it live while the model is still
-  // working, then it stays available behind the toggle once the answer arrives.
-  const [reasoningOpen, setReasoningOpen] = useState((expandWhileStreaming && item.streaming) || defaultExpanded);
-  const userOverridden = useRef(false);
-  const prevStreamingRef = useRef(item.streaming);
-  const prevReasoningCompleteRef = useRef(item.reasoningComplete ?? false);
-  useGSAPCollapse(reasoningBodyRef, reasoningOpen);
-
-  // Follow the current display mode while streaming unless the user manually
-  // toggled this message; auto-close at stream end for untouched messages.
-  useEffect(() => {
-    const wasStreaming = prevStreamingRef.current;
-    const nowStreaming = item.streaming;
-    prevStreamingRef.current = nowStreaming;
-
-    const wasRC = prevReasoningCompleteRef.current;
-    const nowRC = item.reasoningComplete ?? false;
-    prevReasoningCompleteRef.current = nowRC;
-
-    if (nowStreaming) {
-      if (!wasStreaming) userOverridden.current = false;
-      if (defaultExpanded) {
-        setReasoningOpen(true);
-      } else if (!userOverridden.current) {
-        setReasoningOpen(expandWhileStreaming && !nowRC);
-      }
-    } else if (nowRC && !wasRC) {
-      // Reasoning just finished — auto-close while we wait for text.
-      if (!defaultExpanded && !userOverridden.current) {
-        setReasoningOpen(false);
-      }
-    } else if (wasStreaming) {
-      // Stream fully ended — auto-close if user didn't interact.
-      if (!defaultExpanded && !userOverridden.current) {
-        setReasoningOpen(false);
-      }
-    }
-  }, [item.streaming, item.reasoningComplete, defaultExpanded, expandWhileStreaming]);
-
-  const toggleReasoning = () => {
-    userOverridden.current = true;
-    setReasoningOpen((v) => !v);
-  };
-  const isReasoningRunning = item.streaming && !item.reasoningComplete;
-  const visibleReasoning = reasoningOpen
-    ? displayReasoningText(item.reasoning, {
-        streaming: item.streaming,
-        truncateStreaming: truncateStreamingReasoning,
-      })
-    : "";
-  const label = isReasoningRunning ? t("msg.thinkingRunning") : t("msg.thinking");
-  const meta = isReasoningRunning ? "" : reasoningDurationLabel(item.reasoningDurationMs, t);
-
-  return (
-    <div className="reasoning">
-      <button
-        type="button"
-        className="reasoning__head"
-        data-running={isReasoningRunning ? "" : undefined}
-        onClick={toggleReasoning}
-        aria-expanded={reasoningOpen}
-      >
-        <ProcessBrainIcon size={12} />
-        <span data-creation-label={t("creation.reasoningLabel")}>{label}</span>
-        {meta && <span className="reasoning__meta">{meta}</span>}
-        <ChevronRight className={`reasoning__chevron${reasoningOpen ? " reasoning__chevron--open" : ""}`} size={12} />
-      </button>
-      {reasoningOpen && (
-        <div ref={reasoningBodyRef} className="reasoning__body">{visibleReasoning}</div>
-      )}
-    </div>
-  );
-}
-
 export const AssistantMessage = memo(function AssistantMessage({
   item,
   defaultExpanded = false,
-  expandWhileStreaming = true,
-  truncateStreamingReasoning = false,
+  expandWhileStreaming = false,
   creationMode = false,
 }: {
   item: AssistantItem;
   defaultExpanded?: boolean;
   /** false in compact mode: completed steps fold away, so auto-open + fold reads as flicker. */
   expandWhileStreaming?: boolean;
-  /** Opt-in for compact mode to keep live DeepSeek reasoning from growing an unbounded DOM. */
-  truncateStreamingReasoning?: boolean;
   creationMode?: boolean;
 }) {
+  const presentation = useWorkProcessPresentation();
   const hasText = item.streaming || item.text.trim() !== "";
-  const processOnly = Boolean(item.reasoning) && !hasText;
-  const processWithText = Boolean(item.reasoning) && hasText;
+  const hasFootnotes = Boolean(item.searchSources?.length);
+  const processOnly = Boolean(item.reasoning) && !hasText && !hasFootnotes;
+  const processWithText = Boolean(item.reasoning) && (hasText || hasFootnotes);
+  const reasoningFallback = <div className="reasoning reasoning--loading" data-expanded={defaultExpanded || presentation.keepExpandedAfterCompletion || (item.streaming && (presentation.showWhileRunning || expandWhileStreaming)) ? "" : undefined} aria-hidden />;
   return (
     <div className={`msg msg--assistant${processOnly ? " msg--process-only" : ""}${processWithText ? " msg--process-with-text" : ""}`} data-history-restore={item.id.startsWith("h") ? "" : undefined} data-entrance={item.id}>
       {item.reasoning && (
-        <ReasoningPanel
-          item={item}
-          defaultExpanded={defaultExpanded}
-          expandWhileStreaming={expandWhileStreaming}
-          truncateStreamingReasoning={truncateStreamingReasoning}
-        />
+        <Suspense fallback={reasoningFallback}>
+          <AssistantReasoningPanel item={item} defaultExpanded={defaultExpanded} expandWhileStreaming={expandWhileStreaming} />
+        </Suspense>
       )}
-      {hasText && (
-        <div className="msg__body">
-          <Markdown text={item.text} plainStatusBlocks={creationMode} streaming={item.streaming} />
+      {(hasText || hasFootnotes) && (
+        <div className="msg__body" data-transcript-selectable="message">
+          {hasText && (
+            <Markdown
+              text={item.text}
+              plainStatusBlocks={creationMode}
+              streaming={item.streaming}
+              cacheKey={item.id}
+              wasStreamed={item.wasStreamed}
+            />
+          )}
+          <Suspense fallback={null}><SearchSourcesPanel sources={item.searchSources} /></Suspense>
         </div>
       )}
-      <MemoryCitations citations={item.memoryCitations} />
+      {Boolean(item.memoryCitations?.length) && <Suspense fallback={null}><MemoryCitations citations={item.memoryCitations} /></Suspense>}
     </div>
   );
 });

@@ -64,6 +64,8 @@ export function subjectOf(name: string, args: string): string {
       return str(a, "pattern") || str(a, "path");
     case "web_fetch":
       return str(a, "url");
+    case "web_search":
+      return str(a, "query");
     case "task":
       return str(a, "description") || str(a, "prompt");
     case "run_skill":

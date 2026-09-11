@@ -1,6 +1,7 @@
 package agent
 
 import (
+	"context"
 	"crypto/rand"
 	"crypto/sha256"
 	"encoding/hex"
@@ -36,6 +37,9 @@ type SubagentMeta struct {
 	CreatedAt        time.Time      `json:"createdAt"`
 	UpdatedAt        time.Time      `json:"updatedAt"`
 	Status           SubagentStatus `json:"status"`
+	Outcome          string         `json:"outcome,omitempty"`
+	Retryable        bool           `json:"retryable,omitempty"`
+	ErrorCode        string         `json:"errorCode,omitempty"`
 	Kind             string         `json:"kind"` // task | skill
 	Name             string         `json:"name"`
 	WorkspaceRoot    string         `json:"workspaceRoot"`
@@ -47,6 +51,10 @@ type SubagentMeta struct {
 	ToolSchemaHash   string         `json:"toolSchemaHash"`
 	Model            string         `json:"model"`
 	Effort           string         `json:"effort"`
+	// Capsule records what context this run was given; CapsuleHash is its
+	// stable identity for comparing two runs.
+	Capsule     ContextCapsule `json:"capsule"`
+	CapsuleHash string         `json:"capsuleHash"`
 }
 
 // subagentMetaDecodeError distinguishes malformed metadata content from file
@@ -77,8 +85,12 @@ type SubagentSpec struct {
 	ParentToolCallID string
 	SystemPrompt     string
 	Registry         *tool.Registry
+	ToolContext      context.Context
 	Model            string
 	Effort           string
+	// ResumedFrom feeds the context capsule; it does not change how the
+	// transcript itself is stored.
+	ResumedFrom string
 }
 
 // SubagentRun is a prepared transcript run. Call Release exactly once.
@@ -88,8 +100,9 @@ type SubagentRun struct {
 	Meta       SubagentMeta
 	ForkedFrom string
 
-	store   *SubagentStore
-	release func()
+	store             *SubagentStore
+	release           func()
+	terminalPersisted bool
 }
 
 // SubagentArtifact is a persisted sub-agent transcript and metadata pair owned
@@ -425,6 +438,18 @@ func (s *SubagentStore) PrepareContinue(ref string, spec SubagentSpec) (*Subagen
 	}
 	meta.ParentSession = spec.ParentSession
 	meta.ParentToolCallID = spec.ParentToolCallID
+	// Re-acquire the running state while holding the per-ref lease so a resumed
+	// transcript is visible as active and stale cleanup cannot mark it
+	// interrupted while the continuation is executing.
+	meta.Status = SubagentRunning
+	meta.Outcome = ""
+	meta.Retryable = false
+	meta.ErrorCode = ""
+	meta.UpdatedAt = time.Now().UTC()
+	if err := s.saveMeta(meta); err != nil {
+		release()
+		return nil, fmt.Errorf("mark resumed subagent %q running: %w", ref, err)
+	}
 	return &SubagentRun{Ref: ref, Session: sess, Meta: meta, store: s, release: release}, nil
 }
 
@@ -661,47 +686,6 @@ func (s *SubagentStore) MarkRunning(run *SubagentRun) error {
 	return s.saveMeta(meta)
 }
 
-func (s *SubagentStore) SaveCompleted(run *SubagentRun) error {
-	if s == nil || run == nil || run.Ref == "" {
-		return nil
-	}
-	if s.parentDestroyed(run) {
-		return nil
-	}
-	if err := s.ensureBranchCreatedAt(run); err != nil {
-		return err
-	}
-	if err := run.Session.Save(s.sessionPath(run.Ref)); err != nil {
-		return err
-	}
-	meta := run.Meta
-	meta.Status = SubagentCompleted
-	meta.UpdatedAt = time.Now().UTC()
-	run.Meta = meta
-	return s.saveMeta(meta)
-}
-
-func (s *SubagentStore) SaveFailed(run *SubagentRun) error {
-	if s == nil || run == nil || run.Ref == "" {
-		return nil
-	}
-	if s.parentDestroyed(run) {
-		return nil
-	}
-	// Terminal status is independent from transcript persistence. Keep going so
-	// a sidecar failure cannot leave a failed run marked as running on disk.
-	branchErr := s.ensureBranchCreatedAt(run)
-	var sessionErr error
-	if run.Session != nil {
-		sessionErr = run.Session.Save(s.sessionPath(run.Ref))
-	}
-	meta := run.Meta
-	meta.Status = SubagentFailed
-	meta.UpdatedAt = time.Now().UTC()
-	run.Meta = meta
-	return errors.Join(branchErr, sessionErr, s.saveMeta(meta))
-}
-
 // ensureBranchCreatedAt seeds the session list sidecar before the first
 // transcript save. Subagent transcripts are written only on completion, so
 // Session.Save would otherwise backfill BranchMeta.CreatedAt with the save
@@ -741,31 +725,11 @@ func (s *SubagentStore) LoadMeta(ref string) (SubagentMeta, error) {
 	return meta, nil
 }
 
-func metaFromSpec(ref string, status SubagentStatus, created, updated time.Time, spec SubagentSpec) SubagentMeta {
-	scope, schemaHash := toolIdentity(spec.Registry)
-	return SubagentMeta{
-		Ref:              ref,
-		CreatedAt:        created,
-		UpdatedAt:        updated,
-		Status:           status,
-		Kind:             strings.TrimSpace(spec.Kind),
-		Name:             strings.TrimSpace(spec.Name),
-		WorkspaceRoot:    strings.TrimSpace(spec.WorkspaceRoot),
-		ParentSession:    strings.TrimSpace(spec.ParentSession),
-		ParentToolCallID: strings.TrimSpace(spec.ParentToolCallID),
-		SystemPromptHash: bytesHash([]byte(spec.SystemPrompt)),
-		ToolScope:        scope,
-		ToolSchemaHash:   schemaHash,
-		Model:            strings.TrimSpace(spec.Model),
-		Effort:           strings.TrimSpace(spec.Effort),
-	}
-}
-
 func validateMeta(meta SubagentMeta, spec SubagentSpec) error {
 	if meta.Status == SubagentRunning {
 		return fmt.Errorf("subagent reference %q is still in progress", meta.Ref)
 	}
-	if meta.Status == SubagentFailed {
+	if meta.Status == SubagentFailed && !meta.Retryable && meta.Outcome != string(SubagentOutcomePartial) {
 		return fmt.Errorf("subagent reference %q failed and cannot be continued", meta.Ref)
 	}
 	if meta.Status == SubagentInterrupted {
@@ -940,17 +904,6 @@ func validSubagentRef(ref string) bool {
 		return false
 	}
 	return true
-}
-
-func toolIdentity(reg *tool.Registry) ([]string, string) {
-	if reg == nil {
-		return nil, bytesHash(nil)
-	}
-	names := reg.Names()
-	sort.Strings(names)
-	schemas := normalizeToolSchemas(reg.Schemas())
-	data, _ := json.Marshal(schemas)
-	return names, bytesHash(data)
 }
 
 func bytesHash(data []byte) string {

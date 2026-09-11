@@ -26,7 +26,12 @@ var TransientUserBlockTags = []string{
 	"hook-context",
 	"capability-route",
 	"interrupted-turn-recovery",
+	"execution-policy",
 }
+
+// reTrailingExecutionPolicy matches the host-appended execution-policy block at
+// the end of a user turn (attributes allowed on the open tag).
+var reTrailingExecutionPolicy = regexp.MustCompile(`(?s)\n*<execution-policy(?:\s+[^>]*)?>.*?</execution-policy>\s*$`)
 
 var reTransientUserBlock = buildTransientUserBlockRE(TransientUserBlockTags)
 
@@ -95,6 +100,7 @@ func StripTransientUserBlocks(content string) string {
 		s = next
 	}
 	s = stripTrailingDeliveryRuntime(s)
+	s = reTrailingExecutionPolicy.ReplaceAllString(s, "")
 	s = stripTrailingMemoryRecall(s)
 	return strings.TrimLeft(s, " \t\r\n")
 }
@@ -244,17 +250,29 @@ func hasLegacyProviderWrapper(content string) bool {
 	return HandoffTask(stripped) != stripped
 }
 
-// SyntheticUserPrefixes lists the openings of host-injected user-role messages
-// (readiness retries, stream recovery, goal-loop nudges, compaction folds).
-// They are persisted with role "user" for provider-contract reasons but are not
-// user-authored: previews, titles, and user-turn counts must skip them, and the
-// chat UI never renders them as user bubbles. Keep in sync with the injection
-// sites in internal/agent/agent.go, internal/agent/compact.go, and
-// internal/control (plan approval, goal loop).
-var SyntheticUserPrefixes = []string{
+// Auto Guard writes these onto the failed tool result for the model. Older
+// sessions may still have them persisted as mid-turn user steers; display
+// paths must hide those so they never appear as the user's own words.
+const (
+	HostRecoveryGuidanceToolFailedPrefix = "A tool failed. Use read-only diagnosis as needed"
+	HostRecoveryGuidanceTransientPrefix  = "The tool timed out or hit a transient execution limit."
+	ReadinessContinuationPrefix          = "This turn ended with work still outstanding:"
+	StandardTodoContinuationPrefix       = "The current task list still has an in-progress item."
+	// CompletionValidationContinuationPrefix is retained only so legacy
+	// synthetic user messages from pre-Harness sessions remain classified as
+	// host-generated after the completion validator is removed.
+	CompletionValidationContinuationPrefix = "The host could not confirm this turn is complete:"
+)
+
+// legacySyntheticUserPrefixes recognizes host messages written before
+// provider.Message carried durable origin metadata. Current messages never use
+// this list for control: their origin is stamped at construction time.
+var legacySyntheticUserPrefixes = []string{
 	"<reasoning-language>",
 	"Plan approved — plan mode is off",
 	"Host final-answer readiness check failed",
+	ReadinessContinuationPrefix,
+	StandardTodoContinuationPrefix,
 	"You are already in the executor phase",
 	"The previous assistant response was interrupted while a tool call",
 	"The previous assistant response was interrupted during streaming",
@@ -267,33 +285,105 @@ var SyntheticUserPrefixes = []string{
 	"The agent signaled goal completion and all tasks are marked done.",
 	"Goal signaled complete but issues remain:",
 	"No tool calls in recent turns.",
+	HostRecoveryGuidanceToolFailedPrefix,
+	HostRecoveryGuidanceTransientPrefix,
+	CompletionValidationContinuationPrefix,
+	"This task has reached its ",
+	"Your tool-call round limit (",
+	"The following tools are unavailable in the current workflow phase:",
+	"Auto recovery has reached its limit for this turn.",
+	"Host progress check:",
+	"Host progress redirect:",
 }
 
-// IsSyntheticUserText reports whether a persisted user-role message is a
-// host-injected synthetic turn rather than user-authored input.
+// IsHostRecoveryGuidance reports model-facing Auto Guard policy text.
+func IsHostRecoveryGuidance(text string) bool {
+	trimmed := strings.TrimSpace(text)
+	if trimmed == "" {
+		return false
+	}
+	if after, ok := strings.CutPrefix(trimmed, "↪ "); ok {
+		trimmed = strings.TrimSpace(after)
+	}
+	return strings.HasPrefix(trimmed, HostRecoveryGuidanceToolFailedPrefix) ||
+		strings.HasPrefix(trimmed, HostRecoveryGuidanceTransientPrefix)
+}
+
+// VisibleSteerText is the user-authored mid-turn steer the transcript may
+// show. Host Auto Guard policy is not user-authored and must stay hidden.
+func VisibleSteerText(content string) (string, bool) {
+	text, handled := ReplaySteerText(content)
+	if !handled || text == "" {
+		return "", false
+	}
+	return text, true
+}
+
+// ReplaySteerText reports a persisted steer for display replay. handled is
+// true for any steer; text is empty when host Auto Guard policy must be omitted.
+func ReplaySteerText(content string) (text string, handled bool) {
+	text, isSteer := SteerText(content)
+	if !isSteer {
+		return "", false
+	}
+	if IsHostRecoveryGuidance(text) {
+		return "", true
+	}
+	return text, true
+}
+
+// IsSyntheticUserText is the compatibility classifier for text-only and legacy
+// callers. New persisted-message callers must use IsHostGeneratedUserMessage.
 func IsSyntheticUserText(content string) bool {
 	trimmed := strings.TrimSpace(StripTransientUserBlocks(content))
-	for _, prefix := range SyntheticUserPrefixes {
-		if strings.HasPrefix(trimmed, prefix) {
+	if IsHostRecoveryGuidance(trimmed) {
+		return true
+	}
+	steerText, isSteer := SteerText(content)
+	if isSteer {
+		steerText = strings.TrimSpace(steerText)
+		if IsHostRecoveryGuidance(steerText) {
+			return true
+		}
+	}
+	for _, prefix := range legacySyntheticUserPrefixes {
+		if strings.HasPrefix(trimmed, prefix) || (isSteer && strings.HasPrefix(steerText, prefix)) {
 			return true
 		}
 	}
 	return false
 }
 
-// IsUserAuthoredTurn reports whether a persisted user-role message counts as a
-// visible user turn: not a host-injected synthetic message and not a mid-turn
-// steer. Preview/title/turn-count derivations share this so a delivery
-// readiness nudge can never become a session title or inflate turn counts.
-func IsUserAuthoredTurn(content string) bool {
+// IsHostGeneratedUserMessage reports whether a user-role message came from the
+// host. Explicit provenance is authoritative; only legacy records fall back to
+// text recognition.
+func IsHostGeneratedUserMessage(msg provider.Message) bool {
+	if msg.Role != provider.RoleUser {
+		return false
+	}
+	switch msg.Origin {
+	case provider.MessageOriginHost:
+		return true
+	case provider.MessageOriginUser:
+		return false
+	default:
+		return IsSyntheticUserText(msg.Content)
+	}
+}
+
+// IsUserAuthoredTurnMessage reports whether a persisted message begins a real
+// visible user turn. Mid-turn steers are user-authored but do not start turns.
+func IsUserAuthoredTurnMessage(msg provider.Message) bool {
+	if msg.Role != provider.RoleUser || IsHostGeneratedUserMessage(msg) {
+		return false
+	}
+	content := UserMessageText(msg)
 	if strings.TrimSpace(StripTransientUserBlocks(content)) == "" {
 		return false
 	}
-	if IsSyntheticUserText(content) {
-		return false
-	}
-	if _, isSteer := SteerText(content); isSteer {
-		return false
-	}
-	return true
+	// RawContent is the user's exact steer text and deliberately omits the
+	// provider wrapper. Turn classification must inspect stored Content, while
+	// evidence/display continue to prefer RawContent.
+	_, isSteer := SteerText(msg.Content)
+	return !isSteer
 }

@@ -58,6 +58,11 @@ type vendorCapabilities struct {
 	// answer survives long reasoning.
 	defaultMaxOutputTokens int
 
+	// compactionOutputTokens is the separate budget for native/summary
+	// compaction calls. Zero means "no dedicated compaction budget; fall
+	// back to ordinary summarize without inheriting a large default".
+	compactionOutputTokens int
+
 	// summaryRequired marks vendors whose Responses API requires the
 	// `summary` list on input reasoning items (DashScope; without it the
 	// server rejects with "Invalid 'summary': summary is required..."). The
@@ -77,6 +82,8 @@ var vendorTable = map[string]vendorCapabilities{
 		singleSegmentReasoning: false,
 		ignoresTemperature:     false,
 		summaryRequired:        true,
+		// No native compact endpoint yet; summarize fallback only.
+		compactionOutputTokens: 8192,
 	},
 	"deepseek": {
 		stateless:              true,
@@ -84,7 +91,11 @@ var vendorTable = map[string]vendorCapabilities{
 		toolCallReasoning:      true,
 		singleSegmentReasoning: false,
 		ignoresTemperature:     false,
-		defaultMaxOutputTokens: provider.DefaultReasoningOutputTokens,
+		// 0 = omit max_output_tokens; official server ceiling is 384K.
+		defaultMaxOutputTokens: 0,
+		// Compaction summaries use a dedicated 16K-class budget, independent of
+		// ordinary answer output.
+		compactionOutputTokens: provider.DefaultOrdinaryOutputTokens,
 	},
 	"mimo": {
 		stateless:              true,
@@ -92,9 +103,28 @@ var vendorTable = map[string]vendorCapabilities{
 		toolCallReasoning:      true,
 		singleSegmentReasoning: true,
 		ignoresTemperature:     true,
-		defaultMaxOutputTokens: 65536,
+		// Coding-agent default 32K; users may raise explicitly. Not 128K auto.
+		defaultMaxOutputTokens: provider.DefaultReasoningOutputTokens,
+		compactionOutputTokens: provider.DefaultOrdinaryOutputTokens,
+	},
+	// StepFun's Responses API accepts reasoning items only with a `summary`
+	// list and silently ignores previous_response_id (verified live: a
+	// continuation request billed only the new-turn tokens and the model
+	// hallucinated unrelated context), so it is stateless like DeepSeek but
+	// needs the summary field like DashScope. Only step-3.7-flash is enabled
+	// server-side; the wire shape is identical on the standard and step_plan
+	// hosts, so one entry covers both.
+	"stepfun": {
+		stateless:              true,
+		sessionCacheHeader:     false,
+		toolCallReasoning:      true,
+		singleSegmentReasoning: false,
+		ignoresTemperature:     false,
+		summaryRequired:        true,
+		compactionOutputTokens: provider.DefaultOrdinaryOutputTokens,
 	},
 	// "" (unknown OpenAI-compatible endpoint) → zero value = default behavior.
+	// Unknown gateways deliberately do NOT inherit a large max-output default.
 }
 
 // capabilitiesFor returns the wire capabilities for a detected vendor name.
@@ -118,6 +148,8 @@ func DetectVendor(baseURL string) string {
 		return "deepseek"
 	case host == "api.xiaomimimo.com", strings.HasSuffix(host, ".xiaomimimo.com"):
 		return "mimo"
+	case host == "api.stepfun.com", host == "api.stepfun.ai":
+		return "stepfun"
 	default:
 		return ""
 	}

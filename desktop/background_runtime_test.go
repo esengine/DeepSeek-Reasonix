@@ -1,6 +1,8 @@
 package main
 
 import (
+	"os"
+	"path/filepath"
 	"testing"
 
 	"reasonix/internal/control"
@@ -9,10 +11,11 @@ import (
 )
 
 type backgroundRuntimeController struct {
-	control.SessionAPI
+	stubSessionAPI
 	status     control.RuntimeStatus
 	jobs       []jobs.View
 	lease      workspacelease.State
+	leaseKeys  []string
 	cancelled  []string
 	turnCancel int
 }
@@ -32,7 +35,12 @@ func (c *backgroundRuntimeController) CancelJob(id string) bool {
 }
 func (c *backgroundRuntimeController) Cancel() { c.turnCancel++ }
 func (c *backgroundRuntimeController) WorkspaceLeaseState() workspacelease.State {
-	return c.lease
+	state := c.lease
+	state.HeldKeys = append([]string(nil), c.leaseKeys...)
+	return state
+}
+func (c *backgroundRuntimeController) WorkspaceLeaseHeldKeys() []string {
+	return append([]string(nil), c.leaseKeys...)
 }
 
 func TestBackgroundRuntimeAPIsKeepDetachedJobsActionable(t *testing.T) {
@@ -133,5 +141,84 @@ func TestWorkspaceConflictIdentifiesExactLocalWriterWithoutIdentity(t *testing.T
 	}
 	if len(conflict.OwnerWork.Jobs) != 1 || conflict.OwnerWork.Jobs[0].ID != "owner-job" {
 		t.Fatalf("owner work = %+v, want sanitized active work", conflict.OwnerWork)
+	}
+}
+
+func TestWorkspaceConflictMatchesTheWaitingFile(t *testing.T) {
+	root := t.TempDir()
+	aPath := filepath.Join(root, "a.go")
+	bPath := filepath.Join(root, "b.go")
+	waiterCtrl := &backgroundRuntimeController{lease: workspacelease.State{
+		Waiting: true, Scope: "file", Label: "a.go", WaitingKeys: []string{aPath},
+	}}
+	wrongCtrl := &backgroundRuntimeController{
+		lease: workspacelease.State{Acquired: true, Scope: "file", Label: "b.go"}, leaseKeys: []string{bPath},
+	}
+	rightCtrl := &backgroundRuntimeController{
+		lease: workspacelease.State{Acquired: true, Scope: "file", Label: "a.go"}, leaseKeys: []string{aPath},
+	}
+	app := &App{
+		tabs: map[string]*WorkspaceTab{
+			"waiter": {ID: "waiter", WorkspaceRoot: root, Ctrl: waiterCtrl},
+			"wrong":  {ID: "wrong", WorkspaceRoot: root, Ctrl: wrongCtrl},
+			"right":  {ID: "right", WorkspaceRoot: root, Ctrl: rightCtrl},
+		},
+		tabOrder: []string{"waiter", "wrong", "right"}, activeTabID: "waiter",
+	}
+
+	conflict := app.WorkspaceConflictForTab("waiter")
+	if conflict.State != "local" || conflict.OwnerTabID != "right" {
+		t.Fatalf("WorkspaceConflictForTab = %+v, want right file owner", conflict)
+	}
+}
+
+func TestWorkspaceConflictMatchesWaitingFileAcrossNestedWorkspaceRoots(t *testing.T) {
+	parent := t.TempDir()
+	nested := filepath.Join(parent, "nested")
+	if err := os.MkdirAll(filepath.Join(nested, ".git"), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	path := filepath.Join(nested, "shared.go")
+	waiterCtrl := &backgroundRuntimeController{lease: workspacelease.State{
+		Waiting: true, Scope: "file", Label: "shared.go", WaitingKeys: []string{path},
+	}}
+	ownerCtrl := &backgroundRuntimeController{
+		lease:     workspacelease.State{Acquired: true, Scope: "file", Label: "shared.go"},
+		leaseKeys: []string{path},
+	}
+	app := &App{
+		tabs: map[string]*WorkspaceTab{
+			"waiter": {ID: "waiter", WorkspaceRoot: parent, Ctrl: waiterCtrl},
+			"owner":  {ID: "owner", WorkspaceRoot: nested, Ctrl: ownerCtrl},
+		},
+		tabOrder: []string{"waiter", "owner"}, activeTabID: "waiter",
+	}
+
+	conflict := app.WorkspaceConflictForTab("waiter")
+	if conflict.State != "local" || conflict.OwnerTabID != "owner" {
+		t.Fatalf("WorkspaceConflictForTab = %+v, want nested local owner", conflict)
+	}
+}
+
+func TestWorkspaceConflictAllowsAcquiredOwnerToWaitForAnotherFile(t *testing.T) {
+	root := t.TempDir()
+	aPath := filepath.Join(root, "a.go")
+	waiterCtrl := &backgroundRuntimeController{lease: workspacelease.State{
+		Acquired: true, Waiting: true, Scope: "file", Label: "a.go", WaitingKeys: []string{aPath},
+	}}
+	ownerCtrl := &backgroundRuntimeController{
+		lease: workspacelease.State{Acquired: true, Scope: "file", Label: "a.go"}, leaseKeys: []string{aPath},
+	}
+	app := &App{
+		tabs: map[string]*WorkspaceTab{
+			"waiter": {ID: "waiter", WorkspaceRoot: root, Ctrl: waiterCtrl},
+			"owner":  {ID: "owner", WorkspaceRoot: root, Ctrl: ownerCtrl},
+		},
+		tabOrder: []string{"waiter", "owner"}, activeTabID: "waiter",
+	}
+
+	conflict := app.WorkspaceConflictForTab("waiter")
+	if conflict.State != "local" || conflict.OwnerTabID != "owner" {
+		t.Fatalf("WorkspaceConflictForTab = %+v, want local owner", conflict)
 	}
 }

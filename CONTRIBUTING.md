@@ -7,7 +7,8 @@ everything you need to get started.
 
 - **Go 1.25+** — the project targets the latest stable Go release
 - **Git** — for version control
-- **Node.js** (optional) — only if you work on the desktop app (`desktop/`)
+- **Node.js 24+ and pnpm 10** (optional) — only if you work on the desktop app
+  (`desktop/`)
 
 ## Getting started
 
@@ -38,7 +39,7 @@ go test ./...              # runs the full test suite
 | `internal/sandbox` | OS-level sandboxing |
 | `internal/serve` | HTTP/SSE server frontend |
 | `internal/checkpoint` | Snapshot-based rewind |
-| `desktop/` | Wails-based desktop app (separate Go module) |
+| `desktop/` | Electron desktop app + Go service (separate Go module) |
 | `docs/` | Engineering spec, migration guide |
 
 ### Dependency direction
@@ -81,8 +82,7 @@ REASONIX_HOME=/tmp/reasonix-dev go run ./cmd/reasonix
 **Desktop**
 
 ```bash
-cd desktop && wails build
-REASONIX_HOME=/tmp/reasonix-dev-isolated build/bin/reasonix-desktop
+scripts/desktop-build.sh darwin/arm64 v0.0.0-dev   # one platform per run
 ```
 
 On Windows, use `$env:REASONIX_HOME` in PowerShell or `set REASONIX_HOME=` in
@@ -123,6 +123,10 @@ go test ./...                           # all tests
 go test ./internal/agent/ -v            # verbose, one package
 go test ./internal/tool/builtin/ -run TestGrep  # one test
 ```
+
+Desktop transcript scroll changes follow the discipline in
+`desktop/AGENTS.md` (single scroll writer, deterministic race tests via
+`pnpm test:transcript` in `desktop/frontend/`).
 
 ### Code style
 

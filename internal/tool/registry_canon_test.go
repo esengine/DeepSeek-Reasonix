@@ -35,7 +35,7 @@ func TestSchemasCanonicalizesOncePerTool(t *testing.T) {
 		t.Fatalf("Schema() called %d times at Add, want 1", calls)
 	}
 
-	for i := 0; i < 50; i++ {
+	for range 50 {
 		schemas := r.Schemas()
 		if len(schemas) != 1 {
 			t.Fatalf("Schemas() returned %d entries, want 1", len(schemas))

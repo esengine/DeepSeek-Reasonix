@@ -16,11 +16,11 @@ import (
 	"testing"
 
 	"reasonix/internal/agent"
-	"reasonix/internal/boot"
 	"reasonix/internal/config"
 	"reasonix/internal/control"
 	"reasonix/internal/event"
 	"reasonix/internal/i18n"
+	"reasonix/internal/netclient"
 	"reasonix/internal/notify"
 	"reasonix/internal/provider"
 	"reasonix/internal/telemetry"
@@ -76,17 +76,17 @@ func TestModelForResumePathUsesStoredModelWhenAvailable(t *testing.T) {
 		},
 	}
 
-	if got := modelForResumePath("", path, cfg); got != "saved/model" {
+	if got, err := modelForResumePath("", path, cfg); err != nil || got != "saved/model" {
 		t.Fatalf("modelForResumePath = %q, want saved/model", got)
 	}
-	if got := modelForResumePath("explicit/model", path, cfg); got != "explicit/model" {
+	if got, err := modelForResumePath("explicit/model", path, cfg); err != nil || got != "explicit/model" {
 		t.Fatalf("explicit model was overwritten: %q", got)
 	}
-	if got := modelForResumePath("", filepath.Join(dir, "missing.jsonl"), cfg); got != "" {
+	if got, err := modelForResumePath("", filepath.Join(dir, "missing.jsonl"), cfg); err != nil || got != "" {
 		t.Fatalf("missing session model = %q, want empty fallback", got)
 	}
 	cfg.Providers = cfg.Providers[:1]
-	if got := modelForResumePath("", path, cfg); got != "" {
+	if got, err := modelForResumePath("", path, cfg); err != nil || got != "" {
 		t.Fatalf("unknown stored model = %q, want empty fallback", got)
 	}
 }
@@ -331,6 +331,32 @@ func TestRunDefaultsToInteractiveSession(t *testing.T) {
 	}
 	if gotArgs != nil {
 		t.Fatalf("interactive args = %#v, want nil", gotArgs)
+	}
+}
+
+func TestRunDispatchesProfileFlagToInteractiveSession(t *testing.T) {
+	isolateCLIConfigHome(t)
+
+	prev := runInteractiveSession
+	prevInteractive := cliIsInteractive
+	t.Cleanup(func() {
+		runInteractiveSession = prev
+		cliIsInteractive = prevInteractive
+	})
+	cliIsInteractive = func() bool { return true }
+
+	var gotArgs []string
+	runInteractiveSession = func(args []string, _ string) int {
+		gotArgs = append([]string(nil), args...)
+		return 17
+	}
+
+	if rc := Run([]string{"--profile", "delivery"}, "test-version"); rc != 17 {
+		t.Fatalf("Run --profile delivery rc = %d, want 17 (interactive session dispatch)", rc)
+	}
+	want := []string{"--profile", "delivery"}
+	if !reflect.DeepEqual(gotArgs, want) {
+		t.Fatalf("interactive args = %#v, want %#v", gotArgs, want)
 	}
 }
 
@@ -589,7 +615,7 @@ command = "legacy-bin"
 	if err != nil {
 		t.Fatalf("read migrated user config: %v", err)
 	}
-	for _, want := range []string{`config_version = 5`, `[desktop]`, `name    = "legacy-cli"`} {
+	for _, want := range []string{`config_version = 10`, `[desktop]`, `name    = "legacy-cli"`} {
 		if !strings.Contains(string(body), want) {
 			t.Fatalf("migrated config missing %q:\n%s", want, body)
 		}
@@ -616,7 +642,7 @@ func TestRunAppliesUserConfigUpgradesOnStartup(t *testing.T) {
 	if err != nil {
 		t.Fatalf("read upgraded user config: %v", err)
 	}
-	if !strings.Contains(string(body), "config_version = 5") {
+	if !strings.Contains(string(body), "config_version = 10") {
 		t.Fatalf("CLI startup should apply user config upgrades:\n%s", body)
 	}
 }
@@ -816,6 +842,32 @@ func TestConfigCompactRatioCommandWritesUserConfigAndReportsSource(t *testing.T)
 	}
 }
 
+func TestConfigCompactRatioCommandAcceptsLowerBound(t *testing.T) {
+	isolateCLIConfigHome(t)
+
+	for _, value := range []string{"30", "64"} {
+		t.Run(value, func(t *testing.T) {
+			out := captureStdout(t, func() {
+				if rc := Run([]string{"config", "compact-ratio", value}, "test-version"); rc != 0 {
+					t.Fatalf("config compact-ratio %s rc = %d, want 0", value, rc)
+				}
+			})
+			if !strings.Contains(out, "compact_ratio = "+value+"%") {
+				t.Fatalf("config compact-ratio %s output = %q", value, out)
+			}
+			want := 0.0
+			if value == "30" {
+				want = 0.30
+			} else {
+				want = 0.64
+			}
+			if got := config.LoadForEdit(config.UserConfigPath()).Agent.CompactRatio; got != want {
+				t.Fatalf("saved compact ratio = %v, want %v", got, want)
+			}
+		})
+	}
+}
+
 func TestConfigCompactRatioQueryReportsBuiltInDefault(t *testing.T) {
 	isolateCLIConfigHome(t)
 
@@ -882,14 +934,14 @@ func TestConfigCompactRatioLocalCreatesMinimalProjectOverride(t *testing.T) {
 func TestConfigCompactRatioRejectsValuesOutsideEditableRange(t *testing.T) {
 	isolateCLIConfigHome(t)
 
-	for _, value := range []string{"64", "86", "NaN", "+Inf", "not-a-number"} {
+	for _, value := range []string{"29", "86", "NaN", "+Inf", "not-a-number"} {
 		t.Run(value, func(t *testing.T) {
 			errOut := captureStderr(t, func() {
 				if rc := Run([]string{"config", "compact-ratio", value}, "test-version"); rc != 2 {
 					t.Fatalf("config compact-ratio %s rc = %d, want 2", value, rc)
 				}
 			})
-			if !strings.Contains(errOut, "percentage between 65 and 85") {
+			if !strings.Contains(errOut, "percentage between 30 and 85") {
 				t.Fatalf("config compact-ratio %s stderr = %q", value, errOut)
 			}
 		})
@@ -907,16 +959,19 @@ func TestConfigCurrencyCommandWritesUserConfig(t *testing.T) {
 			t.Fatalf("config currency rc = %d, want 0", rc)
 		}
 	})
-	if !strings.Contains(out, `currency = "CNY"`) || !strings.Contains(out, "resolved: CNY") {
+	if !strings.Contains(out, `currency = "CNY"`) || !strings.Contains(out, "display: CNY") {
 		t.Fatalf("config currency output = %q", out)
 	}
 	cfg := config.LoadForEdit(config.UserConfigPath())
 	if got := cfg.DesktopCurrency(); got != "CNY" {
 		t.Fatalf("saved currency = %q, want CNY", got)
 	}
+	if got := cfg.DisplayCurrencyPref(); got != "CNY" {
+		t.Fatalf("display pref = %q, want CNY", got)
+	}
 }
 
-func TestConfigCurrencyAutoUsesResolvedCLILocale(t *testing.T) {
+func TestConfigCurrencyAutoRemainsUnresolved(t *testing.T) {
 	isolateCLIConfigHome(t)
 	i18n.DetectLanguage("zh-TW")
 	t.Cleanup(func() { i18n.DetectLanguage("en") })
@@ -926,7 +981,7 @@ func TestConfigCurrencyAutoUsesResolvedCLILocale(t *testing.T) {
 			t.Fatalf("config currency auto rc = %d, want 0", rc)
 		}
 	})
-	if !strings.Contains(out, `currency = "auto"`) || !strings.Contains(out, "resolved: CNY") {
+	if !strings.Contains(out, `currency = "auto"`) || !strings.Contains(out, "display: ,") {
 		t.Fatalf("config currency auto output = %q", out)
 	}
 	cfg := config.LoadForEdit(config.UserConfigPath())
@@ -1520,7 +1575,7 @@ func TestFetchOrFallback(t *testing.T) {
 			BaseURL: "",
 			Models:  []string{"preset-a", "preset-b"},
 		}
-		got := fetchOrFallback(&probe, "Test")
+		got := fetchOrFallback(&probe, "Test", netclient.ProxySpec{})
 		if !reflect.DeepEqual(got, []string{"preset-a", "preset-b"}) {
 			t.Errorf("got %v, want preset-a/b", got)
 		}
@@ -1533,7 +1588,7 @@ func TestFetchOrFallback(t *testing.T) {
 			APIKeyEnv: "REASONIX_FETCH_TEST_KEY",
 			Models:    []string{"preset-a"},
 		}
-		got := fetchOrFallback(&probe, "Test")
+		got := fetchOrFallback(&probe, "Test", netclient.ProxySpec{})
 		if !reflect.DeepEqual(got, []string{"preset-a"}) {
 			t.Errorf("got %v, want preset-a", got)
 		}
@@ -1563,7 +1618,7 @@ func TestFetchModelListCompatWalksCandidates(t *testing.T) {
 		}))
 		defer srv.Close()
 
-		models, err := fetchModelListCompat(context.Background(), srv.URL, "k")
+		models, err := fetchModelListCompat(context.Background(), srv.URL, "k", netclient.ProxySpec{})
 		if err != nil {
 			t.Fatalf("fetchModelListCompat: %v", err)
 		}
@@ -1585,7 +1640,7 @@ func TestFetchModelListCompatWalksCandidates(t *testing.T) {
 		}))
 		defer srv.Close()
 
-		models, err := fetchModelListCompat(context.Background(), srv.URL+"/v1", "k")
+		models, err := fetchModelListCompat(context.Background(), srv.URL+"/v1", "k", netclient.ProxySpec{})
 		if err != nil {
 			t.Fatalf("fetchModelListCompat: %v", err)
 		}
@@ -1603,7 +1658,7 @@ func TestFetchModelListCompatWalksCandidates(t *testing.T) {
 		}))
 		defer srv.Close()
 
-		models, err := fetchModelListCompat(context.Background(), srv.URL, "k")
+		models, err := fetchModelListCompat(context.Background(), srv.URL, "k", netclient.ProxySpec{})
 		if err != nil {
 			t.Fatalf("expected graceful empty result on all-miss, got err: %v", err)
 		}
@@ -1614,11 +1669,52 @@ func TestFetchModelListCompatWalksCandidates(t *testing.T) {
 
 	t.Run("non-404 network error short-circuits with the real error", func(t *testing.T) {
 		// Point at a closed port — connection refused, not a 404.
-		models, err := fetchModelListCompat(context.Background(), "http://127.0.0.1:1", "k")
+		models, err := fetchModelListCompat(context.Background(), "http://127.0.0.1:1", "k", netclient.ProxySpec{})
 		if err == nil {
 			t.Fatalf("expected error for unreachable host, got models=%v", models)
 		}
 	})
+
+	t.Run("configured proxy reaches a proxy-only gateway", func(t *testing.T) {
+		const gateway = "http://reasonix-cli-probe.invalid/v1"
+		proxy := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			if r.URL.String() != gateway+"/models" {
+				http.Error(w, "unexpected target "+r.URL.String(), http.StatusBadRequest)
+				return
+			}
+			w.Header().Set("Content-Type", "application/json")
+			_, _ = io.WriteString(w, `{"data":[{"id":"proxied-model"}]}`)
+		}))
+		defer proxy.Close()
+
+		spec := netclient.ProxySpec{Mode: netclient.ModeCustom, URL: proxy.URL}
+		models, err := fetchModelListCompat(context.Background(), gateway, "k", spec)
+		if err != nil {
+			t.Fatalf("fetchModelListCompat through proxy: %v", err)
+		}
+		if !reflect.DeepEqual(models, []string{"proxied-model"}) {
+			t.Fatalf("models = %v, want [proxied-model]", models)
+		}
+	})
+}
+
+func TestFetchOrFallbackUsesConfiguredProxy(t *testing.T) {
+	const gateway = "http://reasonix-preset-probe.invalid/v1"
+	proxy := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.String() != gateway+"/models" {
+			http.Error(w, "unexpected target "+r.URL.String(), http.StatusBadRequest)
+			return
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = io.WriteString(w, `{"data":[{"id":"live-model"}]}`)
+	}))
+	defer proxy.Close()
+
+	probe := config.ProviderEntry{BaseURL: gateway, Models: []string{"preset-model"}}
+	spec := netclient.ProxySpec{Mode: netclient.ModeCustom, URL: proxy.URL}
+	if got := fetchOrFallback(&probe, "Test", spec); !reflect.DeepEqual(got, []string{"live-model"}) {
+		t.Fatalf("models = %v, want live proxy result", got)
+	}
 }
 
 // TestFamilyStaticModels proves the offline fallback unions every member of a
@@ -2022,6 +2118,7 @@ func TestWithBuiltinFamiliesDoesNotAddMissingMimo(t *testing.T) {
 }
 
 func TestWithBuiltinFamiliesForLanguageUsesDeepSeekPricing(t *testing.T) {
+	// Language no longer rewrites list prices; defaults stay on the frozen USD table.
 	providers := withBuiltinFamiliesForLanguage(nil, "zh")
 	var flash *config.ProviderEntry
 	for i := range providers {
@@ -2033,8 +2130,8 @@ func TestWithBuiltinFamiliesForLanguageUsesDeepSeekPricing(t *testing.T) {
 	if flash == nil {
 		t.Fatal("deepseek-flash provider missing")
 	}
-	if flash.Price == nil || flash.Price.Output != 2 || flash.Price.Currency != "¥" {
-		t.Fatalf("flash price = %+v, want CNY preset", flash.Price)
+	if flash.Price == nil || flash.Price.Output != 1.2 || flash.Price.Currency != "$" {
+		t.Fatalf("flash price = %+v, want frozen USD official table", flash.Price)
 	}
 }
 
@@ -2166,11 +2263,9 @@ func TestProvidersWithMissingKeysIncludesPlannerModel(t *testing.T) {
 
 func TestParseRuntimeProfile(t *testing.T) {
 	for input, want := range map[string]string{
-		"":         boot.TokenModeFull,
-		"balanced": boot.TokenModeFull,
-		"full":     boot.TokenModeFull,
-		"economy":  boot.TokenModeEconomy,
-		"delivery": boot.TokenModeDelivery,
+		"": "standard", "balanced": "standard", "standard": "standard", "full": "standard",
+		"economy": "standard", "light": "standard", "lite": "standard", "eco": "standard",
+		"delivery": "delivery", "deliver": "delivery", "quality": "delivery",
 	} {
 		got, err := parseRuntimeProfile(input)
 		if err != nil || got != want {

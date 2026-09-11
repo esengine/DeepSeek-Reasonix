@@ -1,5 +1,8 @@
 # Reasonix 使用指南
 
+Provider 模型能力元数据见
+[`MODEL_CAPABILITIES.zh-CN.md`](./MODEL_CAPABILITIES.zh-CN.md)。
+
 <a href="../README.zh-CN.md">README</a>
 &nbsp;·&nbsp;
 <a href="./GUIDE.md">English</a>
@@ -12,9 +15,10 @@
 ## 目录
 
 - [配置](#配置)
+- [计费与展示币种](./BILLING.zh-CN.md)
 - [CLI 命令参考](./CLI.zh-CN.md)
 - [环境变量](#环境变量)
-- [Serve Web 前端](#serve-web-前端)
+- [Web 前端](#web-前端)
 - [配置路径](./CONFIG_PATHS.zh-CN.md)
 - [思考语言](./REASONING_LANGUAGE.zh-CN.md)
 - [任务合约与暂停策略](./TASK_CONTRACT.zh-CN.md)
@@ -51,24 +55,32 @@ default_model = "deepseek-flash"   # 执行器；设 [agent].planner_model 可�
 [ui]
 # shortcut_layout = "desktop"      # classic|desktop；兼容旧配置
 # cursor_shape = "bar"             # block|underline|bar；CLI/TUI 输入光标
+show_turn_usage = false             # 隐藏 TUI 每轮 token/费用回执；默认 true
 
 [agent]
 reasoning_language = "auto"      # 可见思考过程语言：auto|zh|en
 # plan_mode_read_only_commands = ["gh issue view"]   # 仅兼容旧配置；Plan bash 现由 Permissions 决定
 # planner_model = "deepseek-pro"      # 可选的低频规划器
+# vision_model = "auto"                # 可选；文本模型先用同服务商视觉模型生成隐藏图片摘要
 # subagent_model = "deepseek-pro"     # runAs=subagent skill 的默认模型
 # subagent_models = { review = "deepseek-pro", security_review = "deepseek-pro" }
 # max_subagent_depth = 2              # 子代理嵌套委派深度；设为 1 可恢复旧的单层边界
 # max_subagent_concurrency = 6        # 会话级子代理总并发（task/fleet/skills）
 # max_parallel_writers = 3            # 互不重叠 write_paths 时的并行写入上限
-tool_result_snip_ratio = 0.6       # 在摘要 compaction 前先缩短旧工具输出
+# compact_ratio 是唯一自动维护阈值（默认 0.80；预设 0.70/0.80/0.85）
+# max_output_tokens = 0            # 自动：官方 DeepSeek 空间充足时省略字段（服务端 384K），临界时裁剪
+# max_output_tokens = 32768        # 可选控费上限，仍可按物理剩余继续下调
+# max_output_tokens = 65536        # 可选控费上限
+# max_output_tokens = -1           # 明确省略 wire 字段；已知自动预算放不下时压缩
+# max_output_tokens 不参与 compact_ratio；0 是 Provider 自动值，不再表示“跳过本地检查”
 
 [[providers]]
 name        = "deepseek-flash"
-kind        = "openai"
-base_url    = "https://api.deepseek.com"
+kind        = "anthropic"
+base_url    = "https://api.deepseek.com/anthropic"
 model       = "deepseek-v4-flash"
 api_key_env = "DEEPSEEK_API_KEY"
+web_search  = true
 # 还有预设：deepseek-pro
 
 [tools]
@@ -79,6 +91,7 @@ mcp_call_timeout_seconds = 300   # MCP 调用默认安全上限；可用 plugin/
 
 [environment]
 enabled = true   # 启动时把 OS、shell 和常见工具摘要稳定注入 prompt
+offline = false  # 无出站网络时设为 true，避免 agent 无效重试网络请求
 # [environment.tools]
 # go = "/opt/homebrew/bin/go"   # 可选：显式可信路径；workspace 内路径不会在启动时自动执行
 
@@ -181,19 +194,33 @@ reasonix report delete [ID]     # 不发送，直接删除
 需要单独审阅的报告。Go 无法恢复 runtime fatal throw、操作系统强制终止，以及未包装
 后台 goroutine 中的 panic，因此这些情况不会生成本地报告。
 
-## Serve Web 前端
+## Web 前端
 
-`reasonix serve` 会用同一个本地 Reasonix 引擎启动浏览器 UI。适合不安装桌面端但想用可视化界面、
-在远程开发机上通过 tunnel 使用，或把当前会话临时共享给浏览器查看的场景。
+本机使用时，`reasonix web` 会启动浏览器 UI，并自动用默认浏览器打开。也可以在 CLI 交互会话中
+执行 `/web`：Reasonix 会保存当前会话、恢复终端，然后打开明确的
+`/sessions/<id>#token=...` 深链。即使会话尚未产生第一轮消息，也会延续已预留的 Session ID，
+同时继续保持“空会话不提前写 transcript”的惰性落盘行为。
 
 ```bash
 cd your-project
-reasonix serve
-# 打开 http://127.0.0.1:8787
+reasonix web
 ```
 
-默认监听 `127.0.0.1:8787`，认证模式是 `auth_mode = "none"`。这个默认值只适合本机使用。
-如果要绑定到非 loopback 地址、通过 tunnel 暴露，或放到反向代理后面，请先开启认证再分享 URL：
+如果想启动前台 Web 服务并打印地址、但不自动新开浏览器标签页，可使用
+`reasonix web --no-open`。底层的 `reasonix serve`
+默认不会打开浏览器，继续用于远程开发机、进程托管、tunnel、反向代理和需要认证分享的场景。
+
+`reasonix web` 从 `127.0.0.1:8787` 开始监听；端口占用时会依次尝试 8788、8789……，
+最多递增重试 100 次。它默认启用自动生成的 Token，即使配置中的 `[serve].auth_mode`
+是 `none` 也一样。每个运行实例都会在 `<Reasonix home>/server/instances/` 下写入自己的
+单写者 heartbeat 文件；正常退出时只删除自己的文件，新实例则会惰性清理已确认进程死亡的记录。
+因此多个 Web 实例可以共用同一个 Reasonix home，而不会相互覆盖登记状态。服务保持在前台运行，
+按 Ctrl-C 停止。
+
+显式传入 `reasonix web --auth none` 可以关闭默认 Token，只应在监听地址确定可信时使用。
+`reasonix serve` 则保持向后兼容：默认监听 `127.0.0.1:8787`，认证模式仍由配置决定，空配置为
+`auth_mode = "none"`。如果要绑定到非 loopback 地址、通过 tunnel 暴露，或放到反向代理后面，
+请先开启认证再分享 URL：
 
 ```bash
 reasonix serve --auth token
@@ -201,7 +228,9 @@ reasonix serve --addr 0.0.0.0:8787 --auth token
 reasonix serve --auth password --password 'temporary-password'
 ```
 
-Token 模式会在终端打印带 `?token=...` 的分享链接；可通过 `--token` 或 `[serve].token`
+Token 模式会在终端打印带 `#token=...` 的分享链接；Web 页面会先将 fragment 换成
+HttpOnly Cookie，再启动 API 与 SSE 请求，从而避免 Token 进入请求 URL、浏览器历史、
+Referrer 和访问日志。可通过 `--token` 或 `[serve].token`
 复用固定 token。Password 模式必须在启动时传 `--password`，或在配置里保存 bcrypt hash：
 
 ```bash
@@ -216,10 +245,11 @@ behind_proxy = true    # 仅可信反向代理后方使用
 
 Web UI 提供聊天、工具审批、会话历史、rewind/fork/summarize、模型与 reasoning effort 控件、
 Goal、由 `todo_write` 工具驱动的实时 Todo 面板、扩展发布的 status/card/form/notification
-界面，以及已配置 provider 的余额显示。扩展提供的模型也会进入模型选择器。空闲时运行
-`/reload` 可在不重启 Serve 的情况下，以失败原子方式重载扩展 Sidecar 和运行时 generation。临时启动可用
-`--model`、`--max-steps` 或 `--resume`；不传 `--model` 时，`serve` 使用用户全局
-`default_model`。
+界面，以及已配置 provider 的余额显示。扩展提供的模型也会进入模型选择器。Serve 可以同时维持
+多个活动会话：新建或恢复其他会话时，正在执行的回合会转入后台而不是被取消，会话列表也会持续显示
+其运行状态。空闲时运行 `/reload` 可在不重启 Serve 的情况下，以失败原子方式重载扩展 Sidecar
+和运行时 generation。临时启动可用 `--model`、`--max-steps` 或 `--resume`；不传
+`--model` 时，`serve` 使用用户全局 `default_model`。
 
 如果当前 Provider 尚未保存 API Key，绑定在回环地址的 Serve 仍会启动，并先显示 Provider
 配置页，而不是在浏览器连接前直接失败。通过 Serve 认证后可在该页输入 Key；Reasonix 会以受限
@@ -241,87 +271,56 @@ Remote-SSH 式的体验。它在远端主机上引导一个常驻的 headless `r
 回环端口转发过去,再经隧道打开现有的 serve Web 客户端。agent、工具与文件全部原生运行在远端
 主机上,保真度 100%,不经过有损的文件代理。V1 支持 Linux 与 macOS 远端主机。
 
-主机保存在 `config.toml` 的用户级 `[remote]` 段。与 `[secrets]` 一样,项目级
-`reasonix.toml` 无法注入或覆盖远程主机 —— 克隆的仓库永远无法左右 Reasonix 向何处发起 SSH
-连接。凭据沿用 provider 惯例:主机只记录环境变量名(`passphrase_env`、`password_env`),其值
-存放在 Reasonix 全局 `.env` 中;私钥内容本身从不存储 —— `identity_file` 只是路径。
-
-```toml
-[remote]
-[[remote.hosts]]
-name          = "gpu-box"
-host          = "203.0.113.7"
-user          = "dev"
-identity_file = "~/.ssh/id_ed25519"
-workspace     = "~/projects/app"
-serve_install = "auto"            # 远端 CLI：auto | npm | upload | never
-
-[[remote.hosts.forwards]]
-type   = "local"                  # local (-L) | remote (-R)
-bind   = "127.0.0.1:5432"
-target = "127.0.0.1:5432"
-```
-
-命令行:
-
-```bash
-reasonix remote add gpu-box dev@203.0.113.7 --workspace '~/projects/app'
-reasonix remote import --all              # 导入别名；连接时通过 ssh -G 解析 Include/Match 等规则
-reasonix remote test gpu-box              # 拨号 + 认证 + 主机密钥确认
-reasonix remote connect gpu-box --open    # 引导 serve、建隧道、打开 URL
-reasonix remote serve status gpu-box
-reasonix remote fs ls gpu-box:'~/projects/app'
-```
-
-启用 `use_ssh_config` 的主机会通过本机 OpenSSH `ssh -G` 获取最终有效配置，因此支持
-`Include`、通配 `Host`、`Match`（包括 `Match exec`）、多个 `IdentityFile`、`ProxyJump` 和
-`IdentitiesOnly`。导入时只保存原始别名，不复制一份容易过期的解析结果。
-
-`connect` 是前台守护(相当于 `ssh -N` 加上 serve 引导):它保持隧道与已配置的转发存活,断线时
-以指数退避自动重连,并在重连后重新挂载转发。Ctrl-C 只断开本地一侧 —— 远端 serve 继续运行,
-下次 `connect` 会复用它。V1 无后台守护进程。
-
-主机密钥会对照你的 OpenSSH `~/.ssh/known_hosts`(只读)以及 Reasonix 托管的
-`~/.reasonix/remote/known_hosts` 校验。首次见到的密钥会提示 TOFU 确认并记入托管文件;与已记录
-密钥冲突的密钥会硬失败并指明出错的行,绝不自动接受。
-
-远端侧状态位于远端主机的 `~/.reasonix/remote/`:`serve-<工作区 slug>.json`(pid、绑定的回环
-地址、工作区)、`serve-<slug>.token`(0600;认证 token,经 `--token-file` 传给 serve,因此不会
-出现在 `ps` 中)、`serve-<slug>.log`。
-
-在桌面端,于 **设置 -> 远程 SSH** 管理主机,再通过状态栏徽标或主机行的 **远程浏览器** 按钮经
-SFTP 浏览与编辑文件、管理端口转发、启动/打开远程工作区。打开工作区时会创建一个类似 VS Code
-Remote SSH 的独立 Reasonix 原生窗口。主窗口持有 SSH 隧道；远程窗口是隔离的轻量外壳，不会恢复
-或抢占本地对话会话。远程网页使用**远端**主机上的 Provider 配置与 API Key —— 桌面端绝不会把
-本机 Provider 暴露给远端主机。如果远端缺少当前 Provider 的 API Key，窗口会先显示经过认证的
-配置页，只把 Key 保存到远端 Reasonix 凭据文件，并在不重启远端 Serve 的情况下激活 Provider。
-短暂的 SSH 中断不会关闭远程窗口；桌面端会在后台重连、重新挂载回环转发，并让窗口重新加载已恢复的
-Serve。认证失败或主机密钥错误属于终止性故障，此时会关闭已经不可用的远程窗口。
+独立的 **[远程会话系统](./REMOTE_SESSIONS.zh-CN.md)** 文档集中说明主机配置(`config.toml`
+的 `[remote]` 段)、`ssh -G` 解析与别名导入、`reasonix remote` CLI、远端 serve 引导与
+安装阶梯、远程会话生命周期与接管、桌面端远程工作、`remote` 与 `local-proxy` 凭据模式、
+连接故障语义与故障排查。
 
 ## 自定义 OpenAI-compatible provider
 
 在桌面端打开 **设置 -> 模型 -> 接入 -> 添加模型服务 -> 自定义供应商**，用于接入代理、
 聚合平台或自建 OpenAI-compatible chat API / Anthropic-compatible Messages API 服务。
 
-常用服务优先使用 **添加模型服务 -> 推荐预设**。DeepSeek 官方服务默认继续使用经过专项适配的
-OpenAI Chat Completions；需要 Anthropic Messages 兼容时，可单独添加 **DeepSeek Anthropic**
-可选预设，两者不会互相替换。Reasonix 还可以预填以下可编辑的自定义 provider：
+常用服务优先使用 **添加模型服务 -> 推荐预设**。新建的官方 DeepSeek provider 默认使用
+Anthropic-compatible Messages 端点，并开启 provider 侧 `web_search`；两种协议都复用同一个
+`DEEPSEEK_API_KEY`。启动时，Reasonix 会自动升级仍使用官方端点、标准密钥和标准模型设置且
+未修改过的旧 `deepseek-flash` / `deepseek-pro` 条目。修改过的官方 Chat Completions 配置保持
+原样，设置页会提供 **升级到推荐协议** 操作。代理地址、自定义 Headers、模型列表和能力覆盖
+都不会自动迁移。已有单独命名的 `deepseek-anthropic` 条目继续兼容，但新增
+接入不再展示这个重复预设。Reasonix 还可以预填以下可编辑的自定义 provider：
 Kimi CN、Kimi Global、Kimi Coding Plan、MiMo API、MiMo Anthropic、MiMo Token Plan
 CN/SGP/AMS 及其 Anthropic-compatible 变体、MiniMax CN/Global API、MiniMax
 CN/Global Anthropic、GLM CN、Z.AI Global、GLM/Z.AI Coding Plan 的
 OpenAI-compatible 与 Anthropic-compatible 端点、OpenCode Go、OpenCode Go
-Anthropic、OpenCode Zen Anthropic、Qwen/DashScope CN/Global、Qwen Coding Plan
+Anthropic、OpenCode Go DeepSeek Anthropic、OpenCode Go DeepSeek Responses、
+OpenCode Zen Anthropic、Qwen/DashScope CN/Global、
+Qwen Coding Plan
 CN/Global 的 OpenAI-compatible 与 Anthropic-compatible 端点、StepFun
 OpenAI-compatible 与 Anthropic-compatible 端点、NovitaAI、GMI Cloud、Vercel AI
-Gateway、HuggingFace Router、NVIDIA NIM、KiloCode 和 Ollama Cloud。Plan 表示
+Gateway、HuggingFace Router、ModelScope、NVIDIA NIM、KiloCode 和 Ollama Cloud。Plan 表示
 访问/付费形态；只有服务商确实提供不同区域端点时，预设名才同时带 CN/Global。
 因此 Kimi Coding Plan 是独立 plan 端点，Kimi 直连 API 才拆成 CN 和 Global。
 预设路径通常只需要填写服务商 API Key：真实 key 会写入 Reasonix home `.env`，
-`config.toml` 只保存端点、模型列表、key 环境变量名、上下文窗口、视觉模型元数据、
+`config.toml` 只保存端点、模型列表、key 环境变量名、上下文窗口、模型能力元数据、
 中国区端点直连、MiniMax `reasoning_split`、GLM/MiniMax thinking heuristic、
 Anthropic-compatible 网关需要的 Bearer 认证、Ollama Cloud max-effort 支持，
-以及 OpenCode Go 的每模型 reasoning 覆盖。OpenCode Go 预设原生包含订阅线路的
-`kimi-k3`，并配置图像输入、`high`/`max` 推理强度和 1,048,576 token 上下文窗口。未修改过
+以及 OpenCode Go 的每模型 reasoning 覆盖。官方 DeepSeek 的 Anthropic、Responses 与
+Chat Completions 目录还会带上多模态 SKU `deepseek-flash` 与 `deepseek-v4-flash-vision-exp`。设置页会按模型能力元数据
+展示支持图片的模型，也提供逐模型“图片输入：自动 / 开启 / 关闭”。中转站只返回
+模型 ID 时会显示“图片能力未识别”；向服务商确认支持后，选择开启并保存即可。
+详见[图片输入指南](MODEL_CAPABILITIES.zh-CN.md#中转站模型使用指南)。
+composer/`@` 用户图片会按官方文档的三种方式发出：本地小图走内联 base64 `data:` URL；
+`http(s)` 图片链接原样作为 URL 传入；`file-api-` 引用走 Files API（官方 DeepSeek 上
+超过 32 MiB 的本地图会自动上传）。Chat Completions 用 `image_url` 或 `file`，Anthropic
+用 `image`+`source.base64|url|file`，Responses 用 `input_image`。Flash/Pro 即使旧配置列出
+为视觉模型，线上仍是纯文本，工具截图也不会作为图片块转发。
+视觉 SKU 使用 Flash 价卡。专用的 OpenCode Go DeepSeek Anthropic 与
+DeepSeek Responses 预设接入已验证的 Flash 线路，并默认启用 provider 侧 `web_search`；
+Responses 变体使用无状态上下文回放。原有混合 OpenCode Go Anthropic 预设仍只包含 Qwen
+与 MiniMax，避免把服务端搜索工具发送给未验证模型。DeepSeek Pro 暂时仍只放在 Chat
+Completions 预设中，因为真实 Anthropic
+和 Responses 请求目前会在 OpenCode Go 的上游转换阶段失败。OpenCode Go 预设原生包含
+订阅线路的 `kimi-k3`，并配置图像输入、`high`/`max` 推理强度和 1,048,576 token 上下文窗口。未修改过
 模型目录的既有 OpenCode Go 预设会自动升级；用户编辑过的模型目录保持不变。
 Kimi CN 和 Kimi Global 直连 API 预设也包含 `kimi-k3`，支持图像输入、1,048,576 token
 上下文窗口以及官方 `low`/`high`/`max` 推理强度（默认 `max`）。对官方 K3 端点，Reasonix
@@ -408,6 +407,10 @@ CLI/TUI 文本输入可通过 `[ui].cursor_shape` 设置光标形状，支持 `u
 
 ### 桌面端 GUI
 
+桌面端 Todo 面板会同时依据 `todo_write` 和所属标签页的运行态显示状态：真实执行时为「进行中」，
+等待审批或回答时为「等待输入」，回合空闲或恢复历史后为「待继续」。后者提供「继续」按钮；发送前
+会再次核对创建该按钮的标签页，因此快速切换标签页不会把旧待办误发到另一个会话。
+
 桌面端快捷键在 **设置 → 快捷键** 中管理。选择可配置的行后按下新的组合键，Reasonix 会为桌面端保存该绑定。
 撤销、重做等标准编辑快捷键会以锁定行展示，因为 WebView 的原生文本历史依赖这些平台组合键。
 如果新组合键和已有动作冲突，会拒绝保存，避免一个快捷键触发两个动作。按 `?` 或点击 topic bar
@@ -436,7 +439,7 @@ CLI/TUI 文本输入可通过 `[ui].cursor_shape` 设置光标形状，支持 `u
 | macOS `Cmd+Z`，Windows/Linux `Ctrl+Z` | 撤销输入框中的最近一次编辑 | 普通键入继续由 WebView 原生历史管理；Reasonix 接管的粘贴、剪切、折叠块和结构化 token 会作为完整事务恢复。 |
 | macOS `Cmd+Shift+Z`，Windows/Linux `Ctrl+Shift+Z` | 重做输入框中的最近一次编辑 | Windows/Linux 改绑 YOLO 后也可使用 `Ctrl+Y`。 |
 | `Cmd+Y` / `Ctrl+Y`（默认） | 切换 YOLO 开/关 | 关闭 YOLO 时会尽量恢复之前的 Ask/Auto 基底；当前绑定可在 **设置 → 快捷键** 查看。 |
-| macOS `Cmd+V`，Windows/Linux `Ctrl+V` | 粘贴剪贴板内容 | 剪贴板图片会作为附件加入；图片也可以拖进输入框。 |
+| macOS `Cmd+V`，Windows/Linux `Ctrl+V` | 粘贴剪贴板内容 | 剪贴板图片会作为附件加入；图片也可以拖进输入框。官方 DeepSeek 的 `deepseek-flash` 与 `deepseek-v4-flash` 原生支持图片；V4 Pro 仍是纯文本。 |
 | 输入边界处的普通 `Up` / `Down` | 回放更旧或更新的已提交提示词 | 带修饰键的方向键和原生文本导航仍交给 textarea。 |
 | 运行中按 `Esc` | 取消当前 turn | 如果后端尚未开始回复，会恢复草稿。 |
 
@@ -461,11 +464,10 @@ CLI/TUI 文本输入可通过 `[ui].cursor_shape` 设置光标形状，支持 `u
 命名配色，再用 `/theme <style>` 选择强调色。
 
 响应式底栏左侧保留当前 Ask/Auto/Plan 或 YOLO 姿态和交互状态；终端较宽时，模型、推理
-强度和工作模式作为一组靠右显示，第二行按可用性显示 Git 标识、缓存命中率、上下文占用、
+强度作为一组靠右显示，第二行按可用性显示 Git 标识、缓存命中率、上下文占用、
 压缩余量、后台任务和余额。“就绪”只表示输入框空闲，并不是模型健康检查；选择器、审批、
 图片粘贴、shell 模式等活动会替换这个状态。窄终端会按完整信息组移动、换行或压缩。
-标签和展示用的工作模式值跟随 `/language`，但 `/work-mode` 的命令参数继续使用稳定的
-英文标识。
+标签和展示用的语言跟随 `/language`。
 
 聊天与 transcript：
 
@@ -482,7 +484,7 @@ CLI/TUI 文本输入可通过 `[ui].cursor_shape` 设置光标形状，支持 `u
 | transcript 文本选择 | 复制 transcript 文本 | 应用内拖选松开后，本地会话通过可验证的系统剪贴板路径写入（macOS `pbcopy`、Linux 可用的 Wayland/X11 工具、Windows 系统剪贴板）；SSH 才回退到 OSC 52，并明确标记为回退而不是宣称原生复制成功。`Ctrl+C`/`Super+C`/`Meta+C` 或右键当前选区可再次复制。 |
 | 输入框文本选择 | 选中、复制或替换草稿文本 | 应用内拖选松开后，会通过与 transcript 相同的可验证剪贴板路径复制；输入或粘贴会替换选区，方向键会收起选区。 |
 | 没有活动选区时右键 | 在本地会话粘贴剪贴板文本 | 本地会话开启鼠标接管时，Reasonix 只读取文本并交给正常的 bracketed-paste 处理。SSH 下远端进程无法读取本机剪贴板，请使用终端粘贴快捷键；`/mouse` 可恢复终端原生右键菜单。存在活动选区时，右键仍优先复制该选区。 |
-| `/mouse` | 切换应用内鼠标接管 | 关闭后由终端处理原生拖选和右键菜单，但会失去应用内选区、滚动条和滚轮。可用 `REASONIX_DISABLE_MOUSE=1` 让每次会话默认关闭。 |
+| `/mouse` | 切换应用内鼠标接管 | 关闭后由终端处理原生拖选和右键菜单，但会失去应用内选区、滚动条和滚轮。可用 `REASONIX_DISABLE_MOUSE=1` 让每次会话默认关闭。SSH 远程会话默认即关闭，保证原生拖选/复制可用；`REASONIX_DISABLE_MOUSE=0` 可强制全局开启。SSH 下 TUI 还会开启同步输出（mode 2026）避免远端回传时整帧重绘闪烁；如需关闭可设置 `REASONIX_DISABLE_SYNC_OUTPUT=1`。 |
 | `Ctrl+C` | 复制、取消、清空或退出 | 有 transcript 或输入框活动选区时优先复制；否则取消运行中的 turn、清空非空输入，或在空输入下连按两次退出。 |
 | `Ctrl+D` | 退出 TUI | 立即退出。 |
 | 终端的文本粘贴快捷键 | 粘贴文本 | 文本保持终端原生 bracketed-paste 路径：macOS 通常是 `Cmd+V`，Linux 通常是 `Ctrl+Shift+V`，其它环境使用终端自身配置。Reasonix 只消费收到的文本粘贴事件，不会先探测图片。 |
@@ -497,11 +499,10 @@ CLI/TUI 文本输入可通过 `[ui].cursor_shape` 设置光标形状，支持 `u
 | `Shift+Tab` | 按 Ask → Auto → Plan → Ask 循环 | YOLO 不进入这个输入模式循环；底部状态栏会显示当前模式。 |
 | `Ctrl+Y` | 切换 YOLO 开/关 | 关闭 YOLO 时会尽量恢复之前的 Ask/Auto 基底。终端若能转发 Command/Super，也可能识别 `Cmd+Y`，但稳定可用的是 `Ctrl+Y`。 |
 | `--yolo`、`--dangerously-skip-permissions` | 启动时进入 YOLO | 和 `Ctrl+Y` 是同一个运行时模式。 |
-| `/work-mode [economy|balanced|delivery]` | 查看或切换当前会话的工作模式 | `/profile` 是兼容别名。切换会原子重建运行时，保留对话和审批姿态；有工作正在进行时会拒绝切换。 |
 | `/theme [auto|light|dark|style]` | 查看或切换 CLI 主题 | 不带参数会列出背景模式和命名配色。选择会保存到用户配置；单次运行可用 `REASONIX_THEME` 和 `REASONIX_THEME_STYLE` 覆盖。 |
 | `Ctrl+O` | 切换详细 reasoning 显示 | 也可通过 `/verbose` 使用。 |
 | `Ctrl+B` | 展开或收起较长 shell 输出 | 较长 shell 输出的提示行也可点击；全屏 TUI 开启鼠标接管时，文本选区由应用内处理。 |
-| `/goal <目标>`、`/goal --research <目标>`、`/goal --simple <目标>`、`/goal status`、`/goal clear` | 启动、查看或清除 Goal | Goal 不进入任何快捷键循环；显式启动 Goal 后，明显长周期目标会自动启用 AutoResearch。 |
+| `/goal <目标>`、`/goal status`、`/goal pause`、`/goal resume`、`/goal clear` | 启动、查看、暂停、恢复或清除 Goal | Goal 默认持续执行；只有用户显式预算会按数字暂停。 |
 | `/migrate`、`/migrate --from <旧目录>` | 重试旧数据迁移，或从指定 v0.x 来源导入 sessions | Windows v0.52 自定义安装/数据目录用 `--from`；该形式只导入 sessions。详见[配置路径](./CONFIG_PATHS.zh-CN.md)。 |
 
 选择器与审批：
@@ -515,15 +516,15 @@ CLI/TUI 文本输入可通过 `[ui].cursor_shape` 设置光标形状，支持 `u
 | 模型、provider 或 Resume 选择器 | `Up`/`Down` 或 `Ctrl+P`/`Ctrl+N`；搜索词为空时可用 `j`/`k`；输入文字过滤；`Enter`；`Esc` | 搜索、选择或关闭选择器；开始搜索后 `j`/`k` 会作为查询字符输入；`/provider` 会继续打开该 provider 的模型列表。 |
 | MCP 导入选择器 | `Up`/`Down` 或 `j`/`k`、`Space`、`Enter`、`Esc` / `Ctrl+C` | 移动、勾选服务器、导入勾选服务器，或取消。 |
 | MCP 管理器 | `Up`/`Down` 或 `j`/`k`、`Enter`、`Left`/`Right` 或 `h`/`l`、`r`、数字键、`q` / `Ctrl+C` | 导航服务器列表/详情、刷新、选择动作，或关闭。 |
-| `/clear` 确认 | 方向键或 `j`/`k` / `Tab`、`Enter`、`y`、`n`、`Esc` / `Ctrl+C` | 在 Clear/Cancel 间切换、确认清空，或取消。 |
+| `/clear` 确认 | 方向键或 `j`/`k` / `Tab`、`Enter`、`y`、`n`、`Esc` / `Ctrl+C` | 在 Clear/Cancel 间切换、确认清空，或取消。YOLO 模式下 `/clear` 直接清空，不再询问。 |
 
 模式含义：
 
 | 模式 | 含义 |
 | --- | --- |
 | Ask | writer 兜底审批时询问。 |
-| Auto | 自动放行兜底审批；显式 `ask` / `deny` 规则仍生效。 |
-| YOLO | 跳过普通工具审批；`deny`、用户 `ask` 问题和计划批准提示仍会等待。 |
+| Auto | 自动放行兜底审批，包括交互式 `remember`/`forget`；显式 `ask` / `deny` 规则仍生效。 |
+| YOLO | 跳过普通工具审批，包括 `remember`/`forget`；`deny`、用户 `ask` 问题和计划批准提示仍会等待。 |
 | Plan | 要求模型先规划——这是 plan-first 工作流，不是全部工具只读。内置 writer 仍遵守当前 Ask/Auto/YOLO 与 Sandbox；已安装 MCP writer、destructive 目标与未信任 reader 在整个规划阶段硬阻断（审批不能放行，退出 Plan 后恢复）；`complete_step` 等显式阶段工具需等到计划批准后。 |
 | Goal | 持续追一个已保存目标，直到完成、阻塞或清除。 |
 
@@ -539,16 +540,50 @@ CLI/TUI 文本输入可通过 `[ui].cursor_shape` 设置光标形状，支持 `u
 Ask 不是只读模式：writer 获得批准后仍会执行。Permissions 决定放行或询问，Sandbox 才是强制能力边界。
 Sandbox 是授权之后的第二层边界，不能替代命令解析，也不能把无法证明静态安全的命令变成可自动授权命令。
 
-权限是**策略**（哪些调用放行/询问），**沙盒**是**强制**：文件写工具
+权限是**策略**（哪些调用放行/询问），**沙盒**是**强制**：这是两层机制。已经放行的调用
+仍然不能写出已批准的根目录。文件写工具
 （`write_file` / `edit_file` / `multi_edit` / `move_file`）拒绝 `[sandbox] workspace_root`
 之外的任何路径（默认当前目录，编辑不出项目），并解析符号链接与 `..`，使链接无法
-打洞越界。`forbid_read` 可选地隐藏敏感文件或目录，使 agent 的读文件、列目录和搜索工具不能读取或列出它们；
+打洞越界。写出工作区时走交互式「扩展写入范围」审批（仅本次 / 本会话 / 写入项目
+`reasonix.toml` / 拒绝），不会退化成无沙箱执行。Bash 必须用 `additional_write_dirs`
+加上 `justification` 声明所需目录；宿主不会从命令文本猜测路径。无头 `reasonix run`
+不会弹审批：请传 `--add-dir` 或配置 `[sandbox].allow_write`。整个用户主目录可以在
+强警告后批准；文件系统根和 Reasonix 会话/状态目录不能通过动态流程批准。`forbid_read` 可选地隐藏敏感文件或目录，使 agent 的读文件、列目录和搜索工具不能读取或列出它们；
 建议使用绝对路径或 `${HOME}` / `${VAR}`，不要写 `~`，因为配置只做环境变量展开。
 `bash` 本身默认进 OS 沙盒（`[sandbox] bash`：macOS 使用 Seatbelt，Linux 使用 bubblewrap）：
 命令只能写这些 root（外加平台按命令提供的临时/缓存 root），
 OS 沙盒生效时也不能读取配置的 `forbid_read` roots，`[sandbox] network` 为真时才能联网。
 Reasonix 始终会从工具子进程环境中移除已保存的 provider 与 bot 凭据变量，并自动把
 全局凭据 `.env` 加入运行时禁读边界；项目 `.env` 仍保持现有的 workspace 范围行为。
+
+**会话私有标准临时目录。**同一逻辑会话内的多条 Bash 命令共享一个私有临时目录，
+因此连续调用可以通过 `$TMPDIR` 交换文件（在 Linux bubblewrap 下还可以通过字面
+`/tmp`）。用户不需要设置：Reasonix 会自动为 Bash 和客户端托管的 ACP 终端注入
+`TMPDIR`、`TMP`、`TEMP`。目录按需创建，不会回退到宿主公共临时目录；在 `/new`、
+`/clear`、恢复另一会话、切换分支时旋转。模型或设置热重建会保留同一目录。临时文件
+不是持久存储：跨进程 resume 不会恢复其中内容；需要长期保留的数据应写入工作区或
+用户指定路径。
+
+Reasonix 生成的脚本和项目脚本应使用标准临时目录变量，不要硬编码 `/tmp`；用户无需
+自行设置这些变量。例如：
+
+```sh
+tmp_file="${TMPDIR:?}/result.json"
+```
+
+```powershell
+$tmpFile = Join-Path $env:TEMP "result.json"
+```
+
+| 平台 | `$TMPDIR` / `$TMP` / `$TEMP` | 字面 `/tmp` |
+| --- | --- | --- |
+| Linux + bubblewrap | 虚拟 `/tmp`（绑定到私有目录） | 会话内共享（不再是每次新建的空 tmpfs） |
+| macOS Seatbelt | 私有宿主目录路径（Seatbelt 允许写入） | 仍是 macOS 宿主临时目录；脚本应使用 `$TMPDIR` |
+| Windows（无 OS 级 Bash 沙箱） | 私有宿主目录路径 | 不保证与该目录等价（例如 Git Bash 的 `/tmp`） |
+
+MCP 等独立沙盒继续使用自己的隔离规范，不继承父会话临时目录。获得批准后绕过沙盒的
+命令仍继承私有临时变量，但在 Linux 上其字面 `/tmp` 不再由 bwrap 映射。
+
 **Windows 说明：**Reasonix 不在 Windows 上提供 OS 级 Bash 沙箱，生效模式固定为
 `off`。旧配置即使写了 `bash = "enforce"` 也会解析为 `off`，`reasonix doctor`
 会提示该设置被忽略，桌面设置中的选择器也为只读。Bash 命令会在不受 OS 沙箱限制的
@@ -600,6 +635,17 @@ Reasonix 是一个 MCP 客户端。`[[plugins]]` 的 `type` 选择传输：`stdi
 程（`command`/`args`/`env`）；`http`（Streamable HTTP）连接远程 `url`，可带静态
 `headers`（`${VAR}` / `${VAR:-default}` 从环境展开，密钥不入文件）。
 `sse` 则兼容仍使用持久 GET 与 server 公布 POST endpoint 的旧版远程 server。
+
+远程 HTTP server 未配置静态 `Authorization` header 时，认证要求会显示为 **登录**。
+CLI 可运行 `reasonix mcp auth <name>`，桌面端则在 MCP 面板点击该 server 的 **登录**。
+Reasonix 会执行 OAuth 元数据发现、动态客户端注册、PKCE S256 授权与
+refresh token 轮换；发现和 token 请求与 MCP 连接使用相同的 Reasonix 网络代理设置。
+
+OAuth client 与 token 状态保存在工作区之外、该 server 私有的 Reasonix 状态目录中，文件权限
+为 `0600`，并绑定完整的 resource URL。显式静态 `Authorization` header 始终优先。
+**清除认证** 只删除 Reasonix 本地 OAuth 状态，不会退出第三方浏览器会话。Reasonix 仅在用户
+主动点击或运行登录命令后打开浏览器，不会因后台工具调用失败而自动弹出浏览器。删除 MCP server
+也会删除其本地 OAuth 状态；若删除后有同一 resource 的低优先级声明生效，则保留该状态。
 
 可在 **设置 → MCP 服务器 → 浏览市场** 打开官方 MCP Registry，也可使用
 `reasonix mcp browse [query]` 与 `reasonix mcp install <registry-name>`。Registry
@@ -694,12 +740,12 @@ RPC 调用。两者都可按服务器覆盖。
 
 ## 斜杠命令
 
-交互式 `reasonix` 会话里，内置命令（`/compact`、`/new`、`/clear`、`/rewind`、`/tree`、`/branch`、`/switch`、`/todo`、`/model`、`/work-mode`、`/mcp`、`/skills`、`/hooks`、`/memory`、`/goal`、`/output-style`、`/sandbox`、`/language`、`/reasoning-language`、`/help`）在本地执行——`/help` 可列出全部。
+交互式 `reasonix` 会话里，内置命令（`/compact`、`/context`、`/new`、`/clear`、`/rewind`、`/tree`、`/branch`、`/switch`、`/todo`、`/model`、`/mcp`、`/skills`、`/hooks`、`/memory`、`/goal`、`/output-style`、`/sandbox`、`/language`、`/reasoning-language`、`/help`）在本地执行——`/help` 可列出全部。
 内置 **Skill**（如 `/init`、`/explore`、`/test`、`/reasonix-guide`）也会出现在斜杠菜单，
 并可通过 `run_skill` 调用（正文按需加载；只有索引行进入缓存稳定前缀）。配置或能力排障时
 用 `/reasonix-guide`，它会引导运行 `reasonix doctor capabilities`（见
 [能力诊断](./CAPABILITY_DIAGNOSTICS.zh-CN.md)）。
-`/new` 会开启新会话，同时保存之前的 transcript 供历史记录和恢复使用；`/clear` 会二次确认，确认后丢弃当前上下文且不保存。
+`/new` 会开启新会话，同时保存之前的 transcript 供历史记录和恢复使用；`/clear` 会丢弃当前上下文且不保存——默认需二次确认，但在 YOLO 模式下会立即清空（YOLO 本就承诺跳过确认）。
 `/tree` 查看已保存的对话分支，`/branch [name]` 从当前对话末端分支，`/branch <turn> [name]`
 从较早的 checkpoint 轮次分支，`/switch <id|name>` 切换到另一个分支。**自定义命令**
 是放在 `.reasonix/commands/`（项目）或 `~/.reasonix/commands/`（用户）下的 Markdown 文件——
@@ -749,9 +795,10 @@ Context Engine v2 把上下文分成两个用途不同的层：
 字符追加到本轮 user turn。这段动态后缀不会改写 cache-stable system prompt 或工具 schema。
 运行 `/memory recall` 可查看选中的 ID、score、原因、freshness、预算和 suppressed 决定。
 
-新的、有界、非敏感 project/reference 事实可以零配置自动创建，不弹审批。全局事实、用户偏好、
-feedback、更新、重复项、敏感/超长内容，以及所有 `forget` 仍需显式确认。存储层会把自动授权
-强制为 create-only，因此并发出现的新事实也不会被覆盖。顶层 headless controller 可使用同一条
+新的、有界、非敏感 project/reference 事实可以零配置自动创建，不弹审批。在 Ask 下，全局事实、
+用户偏好、feedback、更新、重复项、敏感/超长内容，以及所有 `forget` 仍需显式确认。交互式 Auto
+把这些记忆工具作为普通 fallback 处理，并保留显式 `ask` / `deny`；交互式 YOLO 会绕过记忆 ask
+审批，但仍遵守 deny。存储层会把自动创建授权强制为 create-only，因此并发出现的新事实也不会被覆盖。顶层 headless controller 可使用同一条
 一次性低风险创建路径；子智能体和不拥有该作用域 controller 的 headless surface 会 fail closed。
 
 `forget` 只归档，不永久删除。每次更新都会快照上一 revision；恢复旧版本或 archive 时总会创建
@@ -814,19 +861,29 @@ Skill 别名会继续拥有 `/docs`；发生冲突时，CLI 与桌面端通常�
 如果 Pull Request 修改了用户可见的 CLI、桌面端、配置、Provider、权限或工具行为，必须声明
 是否已同步更新内置文档；如果无需更新，则必须说明现有的版本匹配说明为何仍然正确。
 
-## Goal 与 AutoResearch
+## Goal
 
-Goal 是长期目标的统一运行机制。普通 `/goal` 继续走轻量 Goal：Reasonix 会持续推进，直到
-完成、阻塞、暂停或被清除。对于明显长周期的目标，Goal 会自动进入 AutoResearch 策略，而不是
-要求用户单独运行 `/auto-research` skill；`auto-research` 也不会作为独立 builtin skill 出现在
-Settings -> Skills 或斜杠菜单里。普通聊天不会隐式改变协作模式；需要长目标时，请在输入框中
-明确选择 Goal，或使用 `/goal` 启动。
+Goal 是长期目标的统一运行机制。Reasonix 会持续推进，直到完成、阻塞、暂停或被清除。
+普通聊天不会隐式改变协作模式；需要长目标时，请在输入框中明确选择 Goal，或使用 `/goal` 启动。
 
-Goal 按类别运行在预算内：简单目标 10 轮 / 20 万 token，写入型 20 轮 / 40 万 token，
-AutoResearch 目标 40 轮 / 80 万 token；连续 4 轮没有宿主可验证进展会暂停。暂停会保留
-Goal、todo、Delivery checkpoint 与预算历史——用 `/goal resume` 继续（预算型暂停会追加一档
-同类别额度），`/goal pause` 可手动暂停运行中的目标，`/goal status` 显示完整的轮次/token/
-无进展运行摘要。每个目标 turn 结束时，模型通过结构化的 `update_goal` 工具报告
+Goal 默认不设模型轮数、跨 Run turn 数、墙钟时长或数字式无进展上限。它会持续执行，直到完成、
+确实只有用户/外部条件能解除阻塞、用户主动暂停/停止、发生不可恢复的外部错误，或耗尽用户显式预算。
+如需给无人值守 Goal 增加可选 token 边界，可配置：
+
+```toml
+[agent]
+goal_token_budget = 20000000
+```
+
+默认值 `0` 表示关闭。达到正数阈值后，Goal 会先生成一次总结再进入可恢复的 `budget_spend` 暂停；
+`/goal resume` 会授予新的完整预算切片，但累计 turn、token、请求数和实际工作时间不会清零。
+进展按 Goal 范围的新颖性计算：新的读取/搜索
+结果、mutation、verification、todo/签收变化和 review 会推进目标；完全相同的工具、参数与
+结果重复不会推进。相同宿主失败、零新增证据和 Todo 停滞的数字阈值只会注入纠偏提示、重置干预周期
+并要求缩小步骤、切换策略或说明真实 blocker，不会暂停 Goal。未配置对应预算时，累计 turn、token、
+真实 provider 请求数与实际工作时间只做统计展示。暂停会保留 Goal、todo、Delivery checkpoint 与运行历史——用
+`/goal resume` 继续，`/goal pause` 可手动暂停运行中的目标；`/goal status` 只显示轮次、请求数、
+token、可选的显式 token 阈值和工作时间。每个目标 turn 结束时，模型通过结构化的 `update_goal` 工具报告
 continue/complete/blocked；没有报告时由独立的有界 evaluator 判定一次，任何 evaluator
 故障都会安全暂停目标而不是静默继续。
 
@@ -834,27 +891,17 @@ continue/complete/blocked；没有报告时由独立的有界 evaluator 判定�
 Output format、Constraints 和 Pause policy。Goal 模式会把这些部分当作自主执行的边界；
 除非下一步需要不可逆或对外可见操作、任务范围变化，或必须由用户提供信息，否则会继续采用合理默认值推进，并在最后汇报假设与结果。
 
-AutoResearch 会在这些目标里自动启用：包含“持续”“长期”“彻底”“直到根因明确”“多轮排查”
-“不要原地打转”“完整方案”“跑实验”“反复验证”“系统性研究”等强信号；或者目标同时包含
-研究/排查、实现/修复、验证/测试、优化/文档/发布等多个阶段；或者用户明确给出
-`.reasonix/autoresearch/<task-id>/` 任务目录。高级用户可以用
-`/goal --research <目标>` 强制启用，也可以用 `/goal --simple <目标>` 强制保持轻量 Goal。
-未显式启动 Goal 时，这些信号只作为普通聊天文本处理，不会创建持久化 AutoResearch 任务。
+旧的简单/写入/研究参数只作为兼容元数据解析，不再改变执行额度。Goal 状态只保存在普通会话 sidecar；进展只来自宿主工具 receipt、canonical todo、
+`complete_step`、review 与 Delivery checkpoint 中的新证据，最终由 Delivery readiness 和有界 Goal
+evaluator 判定。Light/Balanced 会接受 `update_goal` 里诚实申报的 `unverified` 检查缺口；同一检查缺口连续两次 `complete` 会结束 Goal，而不是继续验证循环。旧 `.reasonix/autoresearch/<task-id>/` 目录保持只读：显式引用旧路径时可恢复为
+普通 Goal，但新版本不会创建或改写这些目录。旧预算 flags 仅为兼容继续接受，不再出现在帮助和补全中。
 
-进入 AutoResearch 后，agent 会把目标当成有状态的研究循环，而不是只靠聊天上下文续写。
-它会创建或复用项目级 `.reasonix/autoresearch/<task-id>/` 目录。新任务默认使用
-`YYYYMMDD-HHMMSS-slug` 作为 id，例如 `20260618-224530-cache-audit`；创建前会先检查
-当前项目目录，只有同名已存在时才追加 `-2`、`-3` 等后缀。任务状态包括
-`task_spec.md`、`progress.json`、`findings.jsonl`、`directions_tried.json` 和
-`iteration_log.jsonl`，记录每轮方向、证据、验证结果和卡住原因，并用 `stale_count` 判断
-是否在低质量重复。连续停滞时，它会要求结构性 pivot，例如换证据源、入口、测试 oracle、
-拆解方式、benchmark 或 worker 策略，而不是继续重复同一种尝试。
+### 按顺序批量签收步骤
 
-worker/subagent 可以独立探索，但 canonical state 由 orchestrator 负责写入。完成前必须
-对照 `task_spec.md` 的 success criteria 做逐项证据审计；窄范围检查通过不能证明宽范围需求
-完成。动态运行态只写进 `.reasonix/autoresearch/...`，不写入 `REASONIX.md`、`AGENTS.md`、
-project memory、tool schema 或 cache-stable system prompt。公开发布、破坏性操作、凭证、
-付款和外部通知仍然遵守正常的 approval、privacy 与 cache gate。
+宿主可以在同一个 provider 工具调用轮次中处理多个 `complete_step`。这些调用必须严格遵循
+canonical Todo 顺序，并且每一步的工作和证据都必须在对应签收之前已经产生。每次成功签收后，
+宿主立即推进 Todo 状态；跳过、仍为 pending 或乱序的步骤仍会被拒绝。这不会改变 provider-visible
+工具 Schema。
 
 ## @ 引用
 
@@ -878,36 +925,60 @@ planner_model = "deepseek-pro"   # 作为低频规划器
 Planner 会看到已加载的 `REASONIX.md` / `AGENTS.md` 记忆，并拿到一小组只读研究工具，
 因此可以先检查相关文件再把计划交给执行器。写入类和流程类工具仍只给执行器使用。
 
-Reasonix 会用确定性规则路由每一轮，不再调用额外的 classifier 模型：问答、短回复、
-明确的单点小改和边界清楚的纯只读动作直达 Executor；边界清楚的实现任务可生成简短的
-Light 计划；模糊、跨面、结构化、高风险、活跃 Goal 或 Delivery 的任务生成 Full 计划，
-明确的原子小改或纯只读动作除外。
-显式 Plan Mode 仍是独立的宿主流程，不会发生双重规划。
-明确的 `先规划` / `plan first` 会强制规划，`直接改` / `just do it` 则直达 Executor；
-执行边界可出现在请求中的任意子句，不要求位于句首，同时会忽略引号内的示例；
-普通的“先规划”会在规划完成后自动交接 Executor；明确要求“等我确认”的请求停在宿主
-审批边界，批准后继续交接 Executor。只有明确的 `只规划` / `不要执行` 才以计划结束当前
-回合而不执行，计划会写入同一会话，用户之后仍可继续要求 Executor 落地。阶段详情会记录
-不含用户原文的 route、depth 与 reason code，便于诊断。
+Reasonix 会用确定性规则路由每一轮，不再调用额外的 classifier 模型。普通请求一律
+直达 Executor。独立 Planner 只响应显式 `先规划` / `plan first`、显式等待批准、
+显式 `只规划` / `不要执行`，或 Goal 启动。“复杂重构”“修复登录”这类措辞不会自动
+启动 Planner，也没有 Light/Full 规划深度。显式 Plan Mode 仍是 executor 上的独立
+宿主流程，不会发生双重规划。`直接改` / `just do it` 同样直达 Executor。执行边界
+可出现在请求中的任意子句，不要求位于句首，同时会忽略引号内的示例。普通的“先规划”
+会在规划完成后自动交接 Executor；明确要求“等我确认”的请求停在宿主审批边界，批准后
+继续交接 Executor。只有明确的 `只规划` / `不要执行` 才以计划结束当前回合而不执行，
+计划会写入同一会话，用户之后仍可继续要求 Executor 落地。阶段详情会记录不含用户原文
+的 route 与 reason code，便于诊断。
 
-Light 计划包含紧凑目标、最多四个有序步骤、可能触点和主要验证；Full 计划会区分已验证
-与候选触点，并按需补充非目标、风险、验收标准、命令级验证，以及难回滚操作的回滚方案。
-这些合约位于同一个稳定的 Planner system prompt，单轮只在 user turn 追加很小的深度指令，
-因此除本次 prompt 升级的一次缓存未命中外，不会持续破坏 Planner prefix cache。宿主也会
-为 Light 与 Full 调研设置不同的单轮轮次预算。若 Planner 在有界调研和最终总结轮后仍未
-给出最终计划，普通 plan-and-execute 会用原始任务直接交给 Executor 继续；plan-only 与
-等待批准请求仍保持 fail-closed，并回滚不完整的 Planner 回合，避免留下无法继续的会话尾部。
+Planner 使用同一个稳定的 system prompt，单轮只追加很小的 `<planner-turn>` 标明
+显式路由，因此除本次 prompt 升级的一次缓存未命中外，不会持续破坏 Planner prefix
+cache。计划应区分已验证与候选触点，并在证据支持时补充非目标、风险、验收标准和
+命令级验证。Planner 必须调用 `submit_plan`，没有提交计划的普通文本视为协议错误。
+若 Planner 在有界调研和最终总结轮后仍未给出最终计划，所有路由都 fail-closed，
+不会降级到 Executor，并回滚不完整的 Planner 回合，避免留下无法继续的会话尾部。
 
-Reasonix 会自动管理正常执行：活跃 Todo 连续 8 个工具调用轮次没有新的完成项、唯一读取、
-命令或修改时，宿主会要求执行器重新评估；连续 16 个无进展轮次后暂停并保存工作，可在
-下一轮用户消息中继续。完全重复的操作不算进展，新的宿主可观测工作会自动续期。两级任务
+普通 clean final 即结束回合。Goal、review、guardian 仍保留各自的 continuation
+约束。Goal 中活跃 Todo 超过停滞阈值仍没有新的完成项、唯一读取、命令或修改时，
+宿主会强制缩小步骤、换工具/方法、聚焦委派或报告真实阻塞，然后继续执行。完全重复
+的操作不算进展，新的宿主可观测工作会自动续期。两级任务
 列表保持同一"唯一当前项"契约：唯一的 `in_progress` 是活跃的 level-1 子步骤，其 level-0
 阶段保持 `pending`；子步骤按顺序推进并签核，全部完成后阶段本身转为 `in_progress` 做
 最后签核。
 
 升级时仍可解析已有的 `[agent].max_steps` 和 `planner_max_steps`，但其值会被忽略，并在一次性
 迁移提示后从配置中移除，避免隐藏的旧上限截断自动进度管理或子 Agent 的继承任务。确实需要
-为单次运行设置预算时使用 CLI `--max-steps`；无人值守 Bot 仍保留 `[bot].max_steps`。
+为单次运行设置预算时使用 CLI `--max-steps`；无人值守 Bot 仍保留 `[bot].max_steps`，其中 `0`
+表示自动持续执行，正数表示用户显式上限。
+
+**普通对话任务默认没有任何上限**——轮数、token、时长、花费都不限。它一直跑到模型自己
+结束、自适应守卫判定它不再产生进展，或者你手动停止为止。
+
+需要时可以自行开启花费闸门。它约束的是**整个任务**（包括每一次"继续"，直到你开始不相关的
+新工作）；越过阈值时会产出一次不带工具的总结然后暂停，已完成的工作全部保留，下一条消息
+即可继续。
+
+```toml
+[agent]
+task_cost_budget = 5.0            # 模型定价货币
+task_time_budget_minutes = 60     # 整个任务累计的墙钟时长
+```
+
+两个维度都默认关闭，也都没有默认值。`task_time_budget_minutes = 0`（以及兼容读取的负数）表示
+关闭时间闸门，只有正数才启用显式时间预算。**该不该停是只有你能下的判断**：金额在不同模型之间
+不可移植（对便宜模型足够宽松的额度，换成前沿模型可能问两句就触发），而任务跑得久，既可能
+是失控，也可能就是你要的活。
+
+成本维度只对有定价的模型生效：没有价目表时该维度直接不参与判断，而不是把任务读成免费；
+免费或本地模型请改用时长维度。
+
+轮数刻意不作为一个维度。能跑到很高轮数却没花多少钱的任务，说明它每一轮都又便宜又快，
+这恰恰是最不该打断的情况。确实想按轮数限制某次运行时，用一次性的 `--max-steps`。
 
 Subagent skills 默认继承执行器模型。设置 `subagent_model` 可让它们统一走另一个已配置
 模型；设置 `subagent_models` 则只覆盖 `review`、`security_review` 等指定 skill。
@@ -922,9 +993,9 @@ workflow skill 派发 reviewer subagent 的场景，同时避免无限递归和�
 用 `read_only_skill`。两者都会启动
 ephemeral 只读 subagent，只暴露只读研究工具和安全前台 bash，只返回最终答案，不创建
 可续接的 subagent transcript。只读嵌套委派会在 `max_subagent_depth` 内可用，其内部仍不提供
-可写的 `task` / `run_skill`。在 token economy 模式下，只用
-`connect_tool_source(source="read_only_skill")` 连接这条窄入口；完整的 `skills`
-source 也可在 Plan 中加载，后续 writer 调用仍通过 Permissions/Sandbox。
+可写的 `task` / `run_skill`。执行设定不再改变 provider 可见工具面；通过
+`use_capability` 调度 `read_only_skill` 等可选能力，后续 writer 调用仍通过
+Permissions/Sandbox。
 
 所有严格只读子会话都经过同一对共享构造入口——`RunReadOnlySubAgentWithSession` /
 `NewReadOnlyAgent`——两者都会把子会话标记为永久只读并做最终 registry 过滤：移除 writer、
@@ -945,6 +1016,11 @@ destructive MCP 目标、来自未授权 server 的 reader，以及一切会改�
 可用 `read_subagent_result` 按 `offset_bytes` 分页读取该引用对应的完整答案；读取范围受当前
 会话 lineage 与工作区约束。没有持久化父会话的 headless 运行仍保持 ephemeral，只返回公平
 分配的有界预览，不能生成持久引用。
+
+已持久化的子 Agent 结果还会带有 `status`（`completed`、`partial`、`failed` 或
+`cancelled`）和 `retryable`。部分完成或可重试的失败会保留最后一条可见回答与引用，父 Agent
+可以用 `read_subagent_result` 查看，或通过 `task` / `run_skill` 的 `continue_from` 继续同一条
+transcript。
 
 交互式双模型 Planner 使用专用构造路径（`NewPlannerAgent`）：仍阻止 bash、文件写入与普通
 writer，但可通过固定的 `use_capability` 代理调用已授权、非 destructive 的 MCP，不再要求
@@ -969,33 +1045,36 @@ enable、授权与完整连接身份，因此共享 Host 中另一个项目/tab 
 server 无法在这里提升权限。严格只读边界比独立 Planner 更窄：Planner 接受已授权的 opaque
 非 destructive MCP，而严格只读子会话必须有明确 reader hint，且根本不暴露 writer。
 
-启动会话时可以用 `--profile economy|balanced|delivery` 选择运行模式，例如
-`reasonix run --profile delivery "修复并验证这个 bug"`。Economy（轻量）初始只带 9 个工具：
-直接读/bash/编辑/写入、后台 shell 生命周期控制、`ask` 和 `connect_tool_source`；内置文档、
-专用搜索/文件/
-workflow 工具、session history、memory 写入、slash command、Skills、MCP、LSP、网络、安装与
-subagent 都在任务需要时才连接。
-Balanced（均衡）是提供完整工具面的默认档；配置独立 Planner 时，Planner 与 Executor 都会获得各自的
-`use_capability` frontend，规划阶段发现的 capability 可在 handoff 后按同一 ID 直接执行，同时保留
-Executor 的完整直接 MCP 工具面。固定代理自身的 schema 保持稳定，但由于 Balanced Executor 刻意保留
-直接 `mcp__*`，安装、连接或刷新这些直接工具时，Executor 的整体 provider 工具前缀仍可能变化。Delivery（交付优先）
-保留完整工具面，额外增加稳定能力代理 `use_capability`（list/inspect/call MCP，包括
-`auto_start=false`，且不改变主工具 Schema），并增加“明确验收标准、修复根因、运行验证、复审最终
-diff”的稳定交付合约。该合约由宿主运行时强制执行：没有具体 `todo_write` 验收清单时会阻止变更和验证
-命令；发生变更后，必须复查结果、在最后一次变更之后运行验证，并用带证据的 `complete_step` 签收后才能
-结束；Skill/MCP 的 require/prefer 路由会被门禁；中/高风险改动强制结构化 review；`task`/`run_skill`
-等元工具本身不算 mutation。纯只读分析不会被迫产生写入。
+Reasonix 使用**事实驱动执行**。普通请求一律进入 executor，没有自动任务模式；
+唯一的会话角色是质量底线（standard/delivery），事实仍可能高于它。Plan、Goal、permission、sandbox 与任务合同是互相独立的状态。
 
-交互式 TUI 会话内可用 `/work-mode` 查看当前模式，或用
-`/work-mode economy|balanced|delivery` 热切换；`/profile` 是兼容别名。切换会原子重建
-Controller，同时保留 history、session 路径、Lease 和 Ask/Auto/Yolo 审批姿态；当前 turn、审批/询问、
-后台任务或另一场运行时切换尚未结束时会拒绝切换。构建失败时旧 Controller 继续可用。该命令只修改当前
-会话，不持久化新的全局默认值。跨 Profile 切换会产生一次新的 provider 缓存前缀。均衡与交付优先模式下，
-system contract 和工具 Schema 在后续轮次保持稳定；轻量模式下，每次成功调用 `connect_tool_source`
-都会在下一次请求加入对应工具 Schema，形成一次新前缀，之后在工具面再次变化前保持稳定。
+Standard 和 Delivery 都不会执行通用的隐藏 final-readiness 重试。Delivery 把 readiness 缺口
+作为可恢复结果返回并展示现有的「继续检查」入口，只有用户主动点击后才会启动恢复回合；
+Standard 的验证、复核和签收缺口仍作为完成提示处理。除此之外，Standard 有一个同一前台
+`Agent.Run` 内的 Todo 一致性保护：可信宿主确认用户要求执行、当前回合成功写入唯一
+`in_progress` Todo 且写工具可用时，会追加一次固定续做提示；只有产生新的宿主 receipt 才允许
+第二次，并且最多两次。Plan、Goal、Delivery、只读、恢复、取消和已有排队用户输入都会禁用该
+保护。Goal 和已批准 Plan 继续由各自状态机控制连续执行；provider 层的流中断/截断恢复与
+final-readiness 恢复相互独立。历史 canonical Todo 继续显示，但空闲时标记为「待继续」而不是
+「进行中」；用户点击「继续」只会发送到当前可见会话，不会把历史 Todo 隐式变成后台任务。
 
-桌面端标签页提供相同三档并持久化轻量或交付优先
-模式；旧的空值/`full` 继续解释为均衡模式。
+所有任务共享同一套 provider 可见核心工具面（直接读/bash/编辑/写入、后台 shell
+生命周期工具，以及稳定的 `use_capability` 代理）。可选工具（搜索、MCP、skills、
+subagents、docs、web_fetch 等）通过 `use_capability` 调度，不会扩展 top-level
+provider schema，因此任何任务都不会制造新的工具 schema 缓存前缀。Harness 的
+minimal preset 不是任务复杂度模式。
+
+模型按需决定是否调查、写 todo、调用子 Agent。宿主再根据具体 Tool Call、真实
+目标路径和执行回执建立验证义务：
+
+- 纯只读调用不产生义务。
+- 文档、i18n、fixture、样式的局部修改只需 Advisory 定向验证。
+- 单个生产文件修改是 Recoverable 定向验证加 diff review。
+- 多文件或范围不清的本地写入，先要求 todo 和验收标准。
+- Schema、迁移、公共接口、认证路径或破坏性操作，在实际写入后形成 Strict
+  验证、复查和签收。
+- Goal 项和已批准 Plan 的验收项全部为 Strict。
+- 用户话里出现 OAuth、token 等词本身不会产生动作风险。
 
 交互式前端中的计划模式始终由用户显式选择：桌面端在“协作方式”中选择计划模式，CLI 用
 `Shift+Tab` 切换到 Plan。Reasonix 先生成计划，待用户批准后工作流才切换到实施；规划期间的
@@ -1005,8 +1084,9 @@ system contract 和工具 Schema 在后续轮次保持稳定；轻量模式下�
 `reasonix config reasoning-language auto|zh|en`。只有明确想为
 reasoning-language 写项目级覆盖时，才给 shell 命令加 `--local`。
 
-桌面端“协作方式”菜单里的计划模式、目标模式和“轻量 / 均衡 / 交付优先”三档运行模式的使用方法与注意事项，
-见 [`COLLABORATION_MODES.zh-CN.md`](./COLLABORATION_MODES.zh-CN.md)。
+桌面端“协作方式”菜单里的计划模式与目标模式的使用方法与注意事项，
+见 [`COLLABORATION_MODES.zh-CN.md`](./COLLABORATION_MODES.zh-CN.md)。没有自动
+任务模式；唯一的会话角色是质量底线（standard/delivery），验证义务由宿主根据真实工具动作建立。
 
 桌面端“工具权限”里的询问、自动和 Yolo 模式的区别与使用场景，
 见 [`TOOL_APPROVAL_MODES.zh-CN.md`](./TOOL_APPROVAL_MODES.zh-CN.md)。

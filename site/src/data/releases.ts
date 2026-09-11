@@ -3,11 +3,13 @@ import { readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 
 export type LocalizedText = { en: string; zh: string };
+export type ReleaseTarget = 'desktop' | 'cli' | 'site' | 'service';
 
 export type ReleaseItem = {
   title: LocalizedText;
   body: LocalizedText;
   refs?: number[];
+  targets?: ReleaseTarget[];
 };
 
 export type ReleaseHighlight = ReleaseItem & {
@@ -19,6 +21,7 @@ export type ReleaseUpgrade = ReleaseItem & { level: 'info' | 'warning' };
 
 export type ReleaseRecord = {
   version: string;
+  targetingVersion?: 1;
   releaseId?: string;
   baseVersion?: string;
   date: string;
@@ -67,4 +70,19 @@ export const latestRelease = latestStableRelease;
 
 export function releasePath(version: string): string {
   return `/changelog/v${version}/`;
+}
+
+export function releaseContentItems(release: ReleaseRecord): ReleaseItem[] {
+  return [
+    ...release.highlights,
+    ...release.changes.new,
+    ...release.changes.improved,
+    ...release.changes.fixed,
+    ...release.upgrade,
+    ...release.risks,
+  ];
+}
+
+export function releaseTargetCount(release: ReleaseRecord, target: ReleaseTarget): number {
+  return releaseContentItems(release).filter((item) => item.targets?.includes(target)).length;
 }

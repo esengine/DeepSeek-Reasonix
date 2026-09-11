@@ -4,6 +4,7 @@ import { JSDOM } from "jsdom";
 import { act } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { LocaleProvider } from "../lib/i18n";
+import { installDesktopHostStub } from "../__tests__/desktopHostStub";
 
 type Task = Record<string, unknown>;
 type Event = Record<string, unknown>;
@@ -55,6 +56,10 @@ const dom = new JSDOM("<!doctype html><html><body></body></html>", {
 (globalThis as typeof globalThis & { IS_REACT_ACT_ENVIRONMENT: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
 globalThis.window = dom.window as unknown as Window & typeof globalThis;
 globalThis.document = dom.window.document;
+// Pin the locale source to the JSDOM navigator (en-US): Node's own global
+// navigator follows the machine's system language, which flips detectLocale
+// to Chinese on zh hosts and breaks the English assertions below.
+Object.defineProperty(globalThis, "navigator", { configurable: true, value: dom.window.navigator });
 globalThis.Node = dom.window.Node;
 globalThis.Element = dom.window.Element;
 globalThis.HTMLElement = dom.window.HTMLElement;
@@ -68,6 +73,7 @@ let listTasksImpl: () => Promise<Task[]> = async () => [];
 let listEventsImpl: () => Promise<Event[]> = async () => [];
 const listTaskTabIDs: string[] = [];
 const listEventCalls: unknown[][] = [];
+const stopCalls: unknown[][] = [];
 const requeueCalls: unknown[][] = [];
 const mockApp = {
   ListTasks: () => listTasksImpl(),
@@ -97,7 +103,10 @@ const mockApp = {
     listEventCalls.push(args);
     return listEventsImpl();
   },
-  StopTaskForTab: async () => ({ schema_version: 1, command: "stop", task_id: "", accepted: true, idempotent: false }),
+  StopTaskForTab: async (...args: unknown[]) => {
+    stopCalls.push(args);
+    return { schema_version: 1, command: "stop", task_id: "", accepted: true, idempotent: false };
+  },
   CancelTaskForTab: async () => ({ schema_version: 1, command: "cancel", task_id: "", accepted: true, idempotent: false }),
   RequeueTaskForTab: async (...args: unknown[]) => {
     requeueCalls.push(args);
@@ -114,7 +123,7 @@ const mockApp = {
   },
   OpenTaskSessionForTab: async () => ({ schema_version: 1, command: "open_session", task_id: "", session_id: "sess-1", accepted: true, idempotent: false }),
 };
-(window as unknown as { go: { main: { App: typeof mockApp } } }).go = { main: { App: mockApp } };
+installDesktopHostStub(mockApp);
 
 const { TaskMonitorPanel } = await import("./TaskMonitorPanel");
 
@@ -154,6 +163,7 @@ async function cleanup() {
   listEventsImpl = async () => [];
   listTaskTabIDs.length = 0;
   listEventCalls.length = 0;
+  stopCalls.length = 0;
   requeueCalls.length = 0;
 }
 
@@ -174,6 +184,13 @@ function buttonByText(label: string): HTMLButtonElement {
 async function click(button: HTMLButtonElement) {
   await act(async () => {
     button.click();
+    await flush();
+  });
+}
+
+async function keyDown(element: HTMLElement, key: string) {
+  await act(async () => {
+    element.dispatchEvent(new dom.window.KeyboardEvent("keydown", { key, bubbles: true }));
     await flush();
   });
 }
@@ -236,6 +253,62 @@ await check("separates lifecycle state from runtime liveness", async () => {
   await openPanel();
   const text = document.body.textContent ?? "";
   return text.includes("Exited") && text.includes("Runtime unknown");
+});
+
+await check("offers one working stop action for active tasks", async () => {
+  listTasksImpl = async () => [snap()];
+  await renderPanel();
+  await openPanel();
+  await click(buttonByLabel("Task task-000 — Running"));
+  const actionLabels = Array.from(document.querySelectorAll<HTMLButtonElement>(".taskmonitor__actions button"))
+    .map((button) => button.textContent?.trim());
+  const hasMergedActions = actionLabels.filter((label) => label === "Stop").length === 1
+    && !actionLabels.includes("Cancel")
+    && actionLabels.includes("Open session");
+  await click(buttonByText("Stop"));
+  const confirmStop = buttonByText("Stop");
+  const detailValues = Array.from(document.querySelectorAll<HTMLElement>(".taskmonitor__detail dd"))
+    .map((value) => value.textContent?.trim());
+  const hasReplacementConfirmation = document.querySelector(".taskmonitor__actions") === null
+    && document.activeElement === confirmStop
+    && detailValues.includes("Running")
+    && !detailValues.includes("running");
+  await click(confirmStop);
+  return hasMergedActions
+    && hasReplacementConfirmation
+    && JSON.stringify(stopCalls[0]) === JSON.stringify([
+      "tab-a",
+      "task-0001",
+      1,
+      "desktop request",
+      "desktop-stop-task-0001-1",
+    ]);
+});
+
+await check("dismisses stop confirmation with Escape and restores focus", async () => {
+  listTasksImpl = async () => [snap()];
+  await renderPanel();
+  await openPanel();
+  await click(buttonByLabel("Task task-000 — Running"));
+  await click(buttonByText("Stop"));
+  await keyDown(buttonByText("Stop"), "Escape");
+  const restoredStop = buttonByText("Stop");
+  return document.querySelector(".taskmonitor__confirm") === null
+    && document.activeElement === restoredStop
+    && stopCalls.length === 0;
+});
+
+await check("dismisses stop confirmation when polling observes a terminal task", async () => {
+  listTasksImpl = async () => [snap()];
+  await renderPanel();
+  await openPanel();
+  await click(buttonByLabel("Task task-000 — Running"));
+  await click(buttonByText("Stop"));
+  listTasksImpl = async () => [snap({ state: "succeeded", runtime_state: "exited", version: 2 })];
+  await click(buttonByLabel("Refresh"));
+  return document.querySelector(".taskmonitor__confirm") === null
+    && document.body.textContent?.includes("Succeeded") === true
+    && stopCalls.length === 0;
 });
 
 await check("requeues failed exited tasks", async () => {
@@ -327,6 +400,52 @@ await check("marks only terminal tasks", async () => {
   await renderPanel();
   await openPanel();
   return document.querySelectorAll(".taskmonitor__terminal").length === 1;
+});
+
+await check("freezes terminal task elapsed time", async () => {
+  const realNow = Date.now;
+  try {
+    Date.now = () => Date.parse("2025-01-01T02:00:00Z");
+    listTasksImpl = async () => [snap({ state: "cancelled", runtime_state: "exited" })];
+    await renderPanel();
+    await openPanel();
+    const atFinish = document.querySelector(".taskmonitor__time")?.textContent;
+    Date.now = () => Date.parse("2025-01-01T03:00:00Z");
+    await click(buttonByLabel("Refresh"));
+    const afterRefresh = document.querySelector(".taskmonitor__time")?.textContent;
+    return atFinish === "1h" && afterRefresh === "1h";
+  } finally {
+    Date.now = realNow;
+  }
+});
+
+await check("uses the expired runtime lease for stale task elapsed time", async () => {
+  const realNow = Date.now;
+  try {
+    Date.now = () => Date.parse("2025-01-01T02:00:00Z");
+    listTasksImpl = async () => [snap({
+      state: "stale",
+      runtime_state: "exited",
+      updated_at: "2025-01-01T00:00:00Z",
+      runtime_lease_until: "2025-01-01T00:30:00Z",
+    })];
+    await renderPanel();
+    await openPanel();
+    const atDetection = document.querySelector(".taskmonitor__time")?.textContent;
+    Date.now = () => Date.parse("2025-01-01T03:00:00Z");
+    await click(buttonByLabel("Refresh"));
+    const afterRefresh = document.querySelector(".taskmonitor__time")?.textContent;
+    return atDetection === "30m" && afterRefresh === "30m";
+  } finally {
+    Date.now = realNow;
+  }
+});
+
+await check("does not present requeue age as elapsed runtime", async () => {
+  listTasksImpl = async () => [snap({ state: "queued", runtime_state: "exited" })];
+  await renderPanel();
+  await openPanel();
+  return document.querySelector(".taskmonitor__time")?.textContent === "—";
 });
 
 dom.window.close();

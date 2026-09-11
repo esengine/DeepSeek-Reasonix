@@ -1,6 +1,7 @@
 // Run: tsx src/__tests__/resize-drag.test.ts
 
-import { createRafResizeUpdater } from "../lib/resizeDrag";
+import { JSDOM } from "jsdom";
+import { createPointerResizeLifecycle, createRafResizeUpdater } from "../lib/resizeDrag";
 
 let passed = 0;
 let failed = 0;
@@ -96,6 +97,43 @@ try {
   eq(appliedValues.length, 0, "live resize callback waits for animation frame");
   frames[0](0);
   eq(appliedValues.join(","), "300", "live resize callback receives the applied rounded value");
+
+  const dom = new JSDOM('<!doctype html><button id="separator"></button>');
+  globalThis.window = dom.window as unknown as Window & typeof globalThis;
+  const separator = dom.window.document.getElementById("separator") as HTMLButtonElement;
+  let capturedPointer: number | null = null;
+  let finished = 0;
+  let moved = 0;
+  separator.setPointerCapture = (pointerId) => { capturedPointer = pointerId; };
+  separator.hasPointerCapture = (pointerId) => capturedPointer === pointerId;
+  separator.releasePointerCapture = (pointerId) => {
+    capturedPointer = null;
+    const lost = new dom.window.Event("lostpointercapture") as Event & { pointerId: number };
+    Object.defineProperty(lost, "pointerId", { value: pointerId });
+    separator.dispatchEvent(lost);
+  };
+  const pointerEvent = (type: string, pointerId: number) => {
+    const event = new dom.window.Event(type) as Event & { pointerId: number };
+    Object.defineProperty(event, "pointerId", { value: pointerId });
+    return event;
+  };
+  const lifecycle = createPointerResizeLifecycle({
+    separator,
+    pointerId: 7,
+    onMove: () => { moved += 1; },
+    onFinish: () => { finished += 1; },
+  });
+  dom.window.dispatchEvent(pointerEvent("pointermove", 8));
+  dom.window.dispatchEvent(pointerEvent("pointermove", 7));
+  eq(moved, 1, "resize lifecycle ignores other pointers and delivers the active pointer");
+  dom.window.dispatchEvent(pointerEvent("pointercancel", 7));
+  eq(finished, 1, "pointer cancellation finishes the resize once");
+  lifecycle.finish();
+  separator.dispatchEvent(pointerEvent("lostpointercapture", 7));
+  dom.window.dispatchEvent(new dom.window.Event("blur"));
+  eq(finished, 1, "capture loss, blur, and component cleanup cannot finish a gesture twice");
+  eq(capturedPointer, null, "resize finish releases active pointer capture");
+  dom.window.close();
 } finally {
   globalThis.requestAnimationFrame = originalRequestAnimationFrame;
   globalThis.cancelAnimationFrame = originalCancelAnimationFrame;

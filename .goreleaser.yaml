@@ -14,7 +14,9 @@ builds:
     flags:
       - -trimpath
     ldflags:
-      - -s -w -X main.version={{ .Tag }} -X reasonix/internal/productdocs.linkedVersion={{ .Tag }} -X reasonix/internal/productdocs.linkedRevision={{ .Commit }}
+      # Inject version identity for `reasonix version --verbose/--json` (Integration D/E).
+      # buildTimeUTC is the goreleaser run time (UTC), not vcs.time.
+      - -s -w -X main.version={{ .Tag }} -X main.gitCommit={{ .ShortCommit }} -X main.buildTimeUTC={{ .Date }} -X reasonix/internal/productdocs.linkedVersion={{ .Tag }} -X reasonix/internal/productdocs.linkedRevision={{ .Commit }}
     goos: [darwin, linux, windows]
     goarch: [amd64, arm64]
 

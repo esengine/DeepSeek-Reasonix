@@ -1,4 +1,4 @@
-//go:build !windows
+//go:build !windows && cgo
 
 package main
 

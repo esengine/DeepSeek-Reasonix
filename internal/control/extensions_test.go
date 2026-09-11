@@ -204,7 +204,7 @@ func TestInputReceiveBlock(t *testing.T) {
 func TestInputReceiveNilDispatcherUntouched(t *testing.T) {
 	runner := &fakeTurnRunner{}
 	c := New(Options{Runner: runner})
-	if _, wrapped := c.sink.(*frontendEventSink); wrapped {
+	if sinkHasFrontendWrapper(c.sink) {
 		t.Fatal("sink wrapped without a dispatcher — the nil fast path must stay unwrapped")
 	}
 	if err := runTestTurn(c, "plain"); err != nil {
@@ -247,19 +247,30 @@ func TestSetExtensionsInstallsDispatcher(t *testing.T) {
 		t.Fatal("SetExtensions(nil) wrapped the sink")
 	}
 	c.SetExtensions(d)
-	if _, wrapped := c.sink.(*frontendEventSink); !wrapped {
+	// Durable inbox observation sits outside the frontend wrapper.
+	if !sinkHasFrontendWrapper(c.sink) {
 		t.Fatal("SetExtensions did not wrap the sink")
 	}
-	// The first install wins; a later dispatcher is ignored.
+	// The first install wins; a later SetExtensions is ignored.
 	c.SetExtensions(newExtensionTestDispatcher(&fakeExtClient{}, nil, nil))
 	if c.extensions != d {
 		t.Fatal("SetExtensions swapped an installed dispatcher")
 	}
+	// ReplaceExtensions is the generation-safe rebuild path.
+	client2 := &fakeExtClient{}
+	d2 := newExtensionTestDispatcher(client2, []extension.InterceptorPoint{extension.PointInputReceive}, nil)
+	c.ReplaceExtensions(d2)
+	if c.extensions != d2 {
+		t.Fatal("ReplaceExtensions did not swap dispatcher")
+	}
 	if err := runTestTurn(c, "hello"); err != nil {
 		t.Fatal(err)
 	}
-	if len(client.intercepts) != 1 {
-		t.Fatalf("intercepts = %d, want the installed dispatcher to fire once", len(client.intercepts))
+	if len(client.intercepts) != 0 {
+		t.Fatalf("old dispatcher still fired: %d", len(client.intercepts))
+	}
+	if len(client2.intercepts) != 1 {
+		t.Fatalf("intercepts = %d, want the replaced dispatcher to fire once", len(client2.intercepts))
 	}
 }
 
@@ -535,4 +546,22 @@ func controlSystemMessage(msgs []provider.Message) string {
 		}
 	}
 	return ""
+}
+
+func sinkHasFrontendWrapper(s event.Sink) bool {
+	switch t := s.(type) {
+	case *frontendEventSink:
+		return true
+	case *inboxEventSink:
+		if _, ok := t.inner.(*frontendEventSink); ok {
+			return true
+		}
+		if lifecycle, ok := t.inner.(*turnEventSink); ok {
+			_, wrapped := lifecycle.inner.(*frontendEventSink)
+			return wrapped
+		}
+		return false
+	default:
+		return false
+	}
 }

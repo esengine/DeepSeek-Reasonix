@@ -1,8 +1,16 @@
 {
-  "apiVersion": "reasonix.io/plugin/v1",
+  "apiVersion": "reasonix.io/plugin/v2",
   "name": "starter-extension",
   "version": "0.1.0",
-  "description": "Minimal Reasonix Extension Protocol v1 sidecar",
+  "description": "Minimal Reasonix Extension Protocol sidecar",
+  "provides": [
+    {
+      "namespace": "plugin/starter-extension",
+      "kind": "interceptors",
+      "id": "default",
+      "version": "1.0.0"
+    }
+  ],
   "contributes": {},
   "runtime": {
     "command": "${REASONIX_PLUGIN_ROOT}/bin/starter-extension.exe",

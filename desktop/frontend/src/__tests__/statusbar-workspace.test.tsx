@@ -36,23 +36,45 @@ function renderStatusBar(props: Partial<Parameters<typeof StatusBar>[0]> = {}): 
 
 console.log("\nstatus bar workspace");
 
+{
+  ok(normalizeStatusBarItems(["model"]).join(",") === "workspace", "model-only migration keeps one workspace item");
+  ok(normalizeStatusBarItems(["model", "unknown"]).join(",") === "workspace", "removed model with unknown entries remains compact");
+  ok(normalizeStatusBarItems(["cache", "model", "git_branch", "workspace"]).join(",") === "cache,workspace", "migration preserves valid order and merges branch duplicates");
+  for (const input of [undefined, [], ["unknown"]]) {
+    ok(normalizeStatusBarItems(input).join(",") === DEFAULT_STATUS_BAR_ITEMS.join(","), "missing or invalid configuration retains defaults");
+  }
+  const saved = JSON.parse(JSON.stringify(normalizeStatusBarItems(["model"])));
+  ok(normalizeStatusBarItems(saved).join(",") === "workspace", "migration stays compact after save and reload");
+}
+
 
 {
   const defaultItems = DEFAULT_STATUS_BAR_ITEMS as readonly string[];
   ok(defaultItems.includes("workspace"), "workspace is a default configurable status item");
-  ok(defaultItems.includes("git_branch"), "git branch is a default configurable status item");
+  ok(!defaultItems.includes("git_branch"), "branch is merged into the workspace setting");
   ok(
-    normalizeStatusBarItems(["git_branch", "workspace", "cache"]).join(",") === "git_branch,workspace,cache",
-    "workspace items preserve configured order",
+    normalizeStatusBarItems(["git_branch", "workspace", "cache"]).join(",") === "workspace,cache",
+    "legacy workspace items merge at their first configured position",
   );
 }
 
 {
+  const html = renderStatusBar({
+    items: ["context"],
+    context: { used: 1_001, window: 1_000, sessionTokens: 1_001, compactRatio: 0.8 },
+  });
+  ok(html.includes(">101%</b>"), "context status preserves a just-over-limit percentage");
+  ok(!html.includes(">100%</b>"), "context status does not clamp an over-limit percentage to 100 percent");
+}
+
+{
   const remoteHosts = [
-    { id: "demo", label: "demo", host: "192.0.2.10", port: 22, user: "dev", identityFile: "", proxyJump: "", defaultWorkspace: "~/app", serveInstall: "auto", useSSHConfig: false },
+    { id: "demo", label: "demo", host: "192.0.2.10", port: 22, user: "dev", identityFile: "", proxyJump: "", defaultWorkspace: "~/app", serveInstall: "auto", credentialMode: "remote", useSSHConfig: false },
   ];
   const stopped = renderStatusBar({ workspacePath: "/workspace/repo", workspaceName: "repo", remoteHosts });
-  ok(stopped.includes("SSH · Disconnected"), "configured SSH entry remains visible while disconnected");
+  ok(stopped.includes("SSH · Disconnected"), "disconnected SSH entry keeps its full accessible status");
+  ok(stopped.includes('statusbar__remote--idle'), "disconnected SSH entry uses the compact idle treatment");
+  ok(stopped.includes('<span class="statusbar__remote-label">SSH</span>'), "disconnected SSH entry renders only the compact SSH label");
   ok(stopped.indexOf("SSH · Disconnected") < stopped.indexOf("workspace/repo"), "window-level SSH entry leads the status bar");
 
   const connected = renderStatusBar({
@@ -62,6 +84,8 @@ console.log("\nstatus bar workspace");
     remoteStatuses: { demo: { hostId: "demo", state: "connected" } },
   });
   ok(connected.includes("demo · Connected"), "SSH entry includes host and connected state text");
+  ok(connected.includes('statusbar__remote-state-dot'), "connected SSH entry renders a state dot");
+  ok(connected.includes('<span class="statusbar__remote-label">demo</span>'), "connected SSH entry renders the host without redundant state text");
 
   const failed = renderStatusBar({
     workspacePath: "/workspace/repo",
@@ -69,6 +93,7 @@ console.log("\nstatus bar workspace");
     remoteStatuses: { demo: { hostId: "demo", state: "stopped", error: "handshake failed" } },
   });
   ok(failed.includes("demo · Connection failed"), "SSH entry keeps a recoverable failure summary visible");
+  ok(failed.includes('<span class="statusbar__remote-label">demo · Connection failed</span>'), "failed SSH entry keeps the failure visible in the status bar");
   ok(!failed.includes("handshake failed"), "status entry keeps raw connection diagnostics out of primary chrome");
 
   const degraded = renderStatusBar({
@@ -94,7 +119,7 @@ console.log("\nstatus bar workspace");
     gitBranch: "feature/meta",
   };
   const html = renderStatusBar(propsWithLegacySandbox);
-  ok(html.includes("workspace/repo"), "workspace chip uses workspace path");
+  ok(!html.includes("workspace/repo"), "workspace path stays out of the visible branch label");
   ok(!html.includes("sandbox/repo"), "workspace chip does not display sandbox path");
   ok(html.includes("feature/meta"), "git branch remains visible");
 }
@@ -117,12 +142,14 @@ console.log("\nstatus bar workspace");
     workspaceName: "repo",
     gitBranch: "feature/meta",
   });
-  ok(html.indexOf("feature/meta") >= 0 && html.indexOf("workspace/repo") >= 0, "workspace and git branch render as configured items");
-  ok(html.indexOf("feature/meta") < html.indexOf("workspace/repo"), "workspace items follow configured order");
+  ok(html.includes("feature/meta") && !html.includes("workspace/repo"), "combined chip shows only the current branch");
+  ok((html.match(/class="stat statusbar__workspace"/g) || []).length === 1, "legacy items render one combined chip");
+  ok(!html.includes('<b>…/workspace/repo</b>'), "workspace path is not a separate visible label when a branch is available");
 }
 
 {
   const html = renderStatusBar({ items: ["model"] });
+  ok(!html.includes("stat--model"), "legacy model setting cannot restore the removed model entry");
   ok(!html.includes("YOLO"), "status bar renders only configured status items, not mode indicators");
   ok(!html.includes("后台作业") && !html.includes("Background jobs"), "status bar hides the operational jobs entry while idle");
 }
@@ -190,6 +217,41 @@ console.log("\nstatus bar workspace");
 }
 
 {
+  const exact = renderStatusBar({
+    items: ["turn_tps"],
+    lastTurnOutputTokens: 100,
+    lastTurnModelMs: 5_000,
+  });
+  ok(exact.includes("20 t/s"), "completed TPS uses provider-output time");
+
+  const estimated = renderStatusBar({
+    items: ["turn_tps"],
+    lastTurnOutputTokens: 100,
+    lastTurnModelMs: 5_000,
+    lastTurnOutputEstimated: true,
+  });
+  ok(estimated.includes("≈20 t/s"), "fallback TPS is visibly marked as estimated");
+
+  const perRequest = renderStatusBar({
+    items: ["turn_tps"],
+    lastRequestTps: 35,
+    lastTurnOutputTokens: 100,
+    lastTurnModelMs: 5_000,
+  });
+  ok(perRequest.includes("35 t/s"), "per-request TPS wins over the completed turn value");
+
+  const slowRequest = renderStatusBar({
+    items: ["turn_tps"], lastRequestTps: 1 / 3, lastTurnOutputTokens: 100, lastTurnModelMs: 5_000,
+  });
+  ok(slowRequest.includes("&lt;1 t/s") && !slowRequest.includes("20 t/s"), "sub-one request TPS replaces the stale turn fallback");
+
+  const unavailable = renderStatusBar({
+    items: ["turn_tps"], lastRequestTps: null, lastTurnOutputTokens: 100, lastTurnModelMs: 5_000,
+  });
+  ok(unavailable.includes('stat__value--empty">-</b>') && !unavailable.includes("20 t/s"), "unmeasured latest requests clear the stale turn fallback");
+}
+
+{
   const dom = new JSDOM("<!doctype html><html><body><div id=\"root\"></div></body></html>", {
     pretendToBeVisual: true,
     url: "http://localhost/",
@@ -197,6 +259,9 @@ console.log("\nstatus bar workspace");
   (globalThis as typeof globalThis & { IS_REACT_ACT_ENVIRONMENT: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
   globalThis.window = dom.window as unknown as Window & typeof globalThis;
   globalThis.document = dom.window.document;
+  // Node's built-in navigator reflects the machine's ICU locale; pin jsdom's
+  // en-US one so English-string assertions hold on zh-locale machines.
+  Object.defineProperty(globalThis, "navigator", { configurable: true, value: dom.window.navigator });
   globalThis.Node = dom.window.Node;
   globalThis.HTMLElement = dom.window.HTMLElement;
   globalThis.HTMLButtonElement = dom.window.HTMLButtonElement;

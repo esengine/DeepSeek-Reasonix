@@ -112,12 +112,16 @@ hljs.registerLanguage("vim", vim);
 hljs.registerLanguage("xml", xml);
 hljs.registerLanguage("yaml", yaml);
 
-function escapeHtml(s: string): string {
+export function escapeHtml(s: string): string {
   return s.replace(/[&<>]/g, (c) => (c === "&" ? "&amp;" : c === "<" ? "&lt;" : "&gt;"));
 }
 
 export const MAX_HIGHLIGHT_BYTES = 512 * 1024;
 export const MAX_HIGHLIGHT_LINES = 20_000;
+// Above this size a highlightable block renders as full plain text first and
+// swaps in highlighted HTML from an idle callback — a several-hundred-KB
+// highlight.js walk must not block the frame that mounts the block.
+export const IDLE_HIGHLIGHT_MIN_BYTES = 32 * 1024;
 
 export function shouldHighlightCode(sourceSize: number, lineCount: number): boolean {
   return sourceSize <= MAX_HIGHLIGHT_BYTES && lineCount <= MAX_HIGHLIGHT_LINES;

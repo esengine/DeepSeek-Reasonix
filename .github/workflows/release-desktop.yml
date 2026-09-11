@@ -1,14 +1,15 @@
 name: Release desktop
 
-# Desktop (Wails) release line. Official releases are called by
+# Desktop (Electron) release line. Official releases are called by
 # release-stable.yml after its single GitHub environment approval. Production
 # SignPath requests therefore have the exact protected main-v2 origin.
 #
-# Wails cannot cross-compile a CGO/WebKit binary, so build/ fans out to one native
-# runner per platform. Artifacts are minisign-signed (MINISIGN_* secrets), a
-# latest.json manifest is generated, and everything is published to a GitHub
-# release and mirrored to R2 (the updater reads R2 first, then the crash worker
-# release gateway; stable desktop releases own GitHub's repository-wide "latest").
+# The Electron shell cannot cross-compile its native targets from one host, so
+# build/ fans out to one native runner per platform. Artifacts are
+# minisign-signed (MINISIGN_* secrets), a latest.json manifest is generated, and
+# everything is published to a GitHub release and mirrored to R2 (the updater
+# reads R2 first, then the crash worker release gateway; stable desktop releases
+# own GitHub's repository-wide "latest").
 #
 # Historical workflow-call inputs still understand Preview artifacts so old
 # runs remain diagnosable. They are not exposed by manual dispatch and cannot
@@ -36,6 +37,10 @@ on:
         default: false
         type: boolean
   workflow_call:
+    outputs:
+      artifact_prefix:
+        description: "Same-run signed artifacts produced by this invocation"
+        value: ${{ jobs.resolve.outputs.artifact_prefix }}
     inputs:
       channel:
         description: "Release channel selected by the approved orchestrator"
@@ -84,6 +89,11 @@ on:
         required: false
         default: false
         type: boolean
+      preflight_artifact_prefix:
+        description: "Signed artifact set returned by the successful same-run preflight"
+        required: false
+        default: ""
+        type: string
 
 concurrency:
   # A channel pointer is a monotonic public state machine. Serialize every
@@ -107,6 +117,7 @@ jobs:
       prerelease: ${{ steps.release.outputs.prerelease }}
       notes_version: ${{ steps.release.outputs.notes_version }}
       sha: ${{ steps.candidate.outputs.sha }}
+      artifact_prefix: desktop-${{ github.run_id }}-${{ github.run_attempt }}-${{ inputs.signing_preflight && 'preflight' || 'release' }}
     steps:
       - uses: actions/checkout@v7
         with:
@@ -211,6 +222,8 @@ jobs:
           cache: true
 
       - name: Validate signing mode
+        env:
+          PREFLIGHT_ARTIFACT_PREFIX: ${{ inputs.preflight_artifact_prefix }}
         run: |
           if [ "${{ inputs.production_signing_smoke }}" = "true" ] && [ "${{ inputs.signing_preflight }}" = "true" ]; then
             echo "::error::production_signing_smoke and signing_preflight are mutually exclusive"
@@ -219,6 +232,13 @@ jobs:
           if [ "${{ inputs.signing_preflight_verified }}" = "true" ] && [ "${{ inputs.orchestrated }}" != "true" ]; then
             echo "::error::only the approved stable orchestrator can assert signing_preflight_verified"
             exit 1
+          fi
+          if [ -n "$PREFLIGHT_ARTIFACT_PREFIX" ]; then
+            if [ "${{ inputs.orchestrated }}" != "true" ] || [ "${{ inputs.signing_preflight_verified }}" != "true" ] || [ "${{ inputs.signing_preflight }}" = "true" ] || [ "${{ inputs.channel }}" != "stable" ]; then
+              echo "::error::artifact reuse requires a verified stable orchestrator preflight"
+              exit 1
+            fi
+            [[ "$PREFLIGHT_ARTIFACT_PREFIX" =~ ^desktop-${GITHUB_RUN_ID}-[1-9][0-9]*-preflight$ ]] || exit 1
           fi
 
       - name: Validate and fingerprint SignPath contract
@@ -274,8 +294,8 @@ jobs:
 
   build:
     name: build (${{ matrix.name }})
-    needs: [resolve, cache-guard]
-    if: ${{ always() && !cancelled() && needs.resolve.result == 'success' && needs.cache-guard.result == 'success' }}
+    needs: [resolve, cache-guard, signing-contract]
+    if: ${{ always() && !cancelled() && needs.resolve.result == 'success' && needs.cache-guard.result == 'success' && inputs.preflight_artifact_prefix == '' }}
     permissions:
       contents: read # checkout only; the publish job holds contents: write
       actions: read # SignPath reads run details + downloads the unsigned artifact
@@ -308,28 +328,24 @@ jobs:
           cache: true
           cache-dependency-path: desktop/go.sum
 
-      - uses: actions/setup-node@v7
-        with:
-          node-version: "22"
-      - uses: pnpm/action-setup@v6.0.9
+      - uses: pnpm/action-setup@v6.1.0
         with:
           version: 10
+          run_install: false
+      - uses: actions/setup-node@v7
+        with:
+          node-version: "24"
+          cache: pnpm
+          cache-dependency-path: desktop/pnpm-lock.yaml
 
-      # Linux: WebKitGTK 4.1 toolchain (-tags webkit2_41 in desktop-build.sh).
-      # 4.1 ships from ubuntu-22.04 on and is the only one present on 24.04+/Fedora 40+.
-      - name: Install Linux build deps
-        if: runner.os == 'Linux'
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y gcc libgtk-3-dev libwebkit2gtk-4.1-dev
-
-      # Linux: nfpm builds the .deb in desktop-build.sh's linux branch. go install
-      # drops it in ~/go/bin, already on PATH (same place the wails CLI lands below).
+      # nfpm builds the .deb in desktop-build.sh's linux branch; go install
+      # drops it in ~/go/bin, already on PATH.
       - name: Install nfpm
         if: runner.os == 'Linux'
         run: go install github.com/goreleaser/nfpm/v2/cmd/nfpm@v2.46.3
 
-      # Windows: NSIS provides makensis for `wails build -nsis`.
+      # Windows: NSIS provides makensis for the installer passes in
+      # desktop-build.sh / package-windows-desktop.sh.
       - name: Install NSIS
         if: runner.os == 'Windows'
         run: pwsh -NoProfile -File scripts/install-nsis.ps1
@@ -370,9 +386,6 @@ jobs:
           echo "$APPLE_API_KEY_P8" | base64 --decode > "$RUNNER_TEMP/notary.p8"
           rm -f "$RUNNER_TEMP/cert.p12"
 
-      - name: Install Wails CLI
-        run: go install github.com/wailsapp/wails/v2/cmd/wails@v2.12.0
-
       # Official Windows releases must fail closed. Forks can still exercise
       # unsigned packaging without repository secrets, but esengine releases
       # may never publish an unsigned payload or installer.
@@ -393,19 +406,68 @@ jobs:
           APPLE_API_KEY_PATH: ${{ runner.temp }}/notary.p8
           APPLE_API_KEY_ID: ${{ secrets.APPLE_API_KEY_ID }}
           APPLE_API_ISSUER_ID: ${{ secrets.APPLE_API_ISSUER_ID }}
+          APPLE_NOTARIZATION_LOG_DIR: ${{ runner.temp }}/apple-notarization
         run: scripts/desktop-build.sh "${{ matrix.platform }}" "${{ needs.resolve.outputs.version }}" "${{ needs.resolve.outputs.channel }}"
+
+      - name: Upload Apple notarization diagnostics
+        if: ${{ always() && runner.os == 'macOS' }}
+        uses: actions/upload-artifact@v7
+        with:
+          name: apple-notarization-${{ github.run_id }}-${{ github.run_attempt }}-${{ matrix.name }}
+          path: ${{ runner.temp }}/apple-notarization/*.json
+          if-no-files-found: ignore
+          retention-days: 7
+
+      # Candidate code is immutable, but release validation belongs to the
+      # protected workflow control plane. Reuse this sparse checkout later for
+      # Authenticode verification rather than trusting a candidate-owned test.
+      - name: Checkout protected release verifier
+        uses: actions/checkout@v7
+        with:
+          ref: ${{ github.workflow_sha }}
+          path: release-control
+          sparse-checkout: |
+            scripts/verify-windows-authenticode.ps1
+            scripts/desktop-release-artifacts.mjs
+          sparse-checkout-cone-mode: false
+          persist-credentials: false
+
+      # Exercise the exact production Electron package built for Stable: launch
+      # the packaged shell and require the shell -> Go service handshake before
+      # signing or publication.
+      - name: Smoke-test packaged Electron startup
+        if: runner.os == 'Windows'
+        run: |
+          node desktop/packaging/smoke.mjs \
+            desktop/build/electron/${{ matrix.name }}/app \
+            --service desktop/build/bin/reasonix-desktop.exe
+
+      - name: Smoke-test macOS archive startup
+        if: runner.os == 'macOS'
+        run: |
+          ditto -xk dist/Reasonix-darwin-arm64.zip "$RUNNER_TEMP/desktop-startup"
+          node desktop/packaging/smoke.mjs "$RUNNER_TEMP/desktop-startup/Reasonix.app"
+
+      - name: Smoke-test packaged Linux startup
+        if: runner.os == 'Linux'
+        run: |
+          xvfb-run -a node desktop/packaging/smoke.mjs \
+            desktop/build/bin/app --service desktop/build/bin/reasonix-desktop
 
       # Sign every executable that users actually run before rebuilding the
       # portable archive and NSIS installer. Signing only the finished NSIS
       # container leaves reasonix-desktop.exe and its sidecars unsigned after
-      # installation, which can trigger Defender reputation/ML quarantine.
+      # installation, which can trigger Defender reputation/ML quarantine. The
+      # payload directory holds the flat Go executables, the Electron app/ tree
+      # and signing-files.txt (the PE enumeration the SignPath artifact
+      # configuration and the Authenticode verifier share).
       - name: Upload unsigned Windows payload for SignPath
         if: runner.os == 'Windows' && env.HAS_SIGNPATH == 'true'
         id: unsigned-windows-payload
         uses: actions/upload-artifact@v7
         with:
           name: unsigned-payload-${{ matrix.name }}
-          path: desktop/build/windows/signing-payload/*.exe
+          path: desktop/build/windows/signing-payload
           if-no-files-found: error
           retention-days: 1
 
@@ -460,14 +522,15 @@ jobs:
         run: scripts/package-windows-desktop.sh "${{ matrix.platform == 'windows/arm64' && 'arm64' || 'amd64' }}" signed-payload
 
       # The second request signs the rebuilt NSIS container. Release signing
-      # also verifies every payload signature against a Windows trusted root.
+      # also verifies every payload signature (flat executables and the app/
+      # tree) against a Windows trusted root.
       - name: Upload unsigned installer for SignPath
         if: runner.os == 'Windows' && env.HAS_SIGNPATH == 'true'
         id: unsigned-installer
         uses: actions/upload-artifact@v7
         with:
           name: unsigned-${{ matrix.name }}
-          path: desktop/build/windows/installer-signing-bundle/*.exe
+          path: desktop/build/windows/installer-signing-bundle
           if-no-files-found: error
           retention-days: 1
 
@@ -504,20 +567,6 @@ jobs:
         if: runner.os == 'Windows' && env.HAS_SIGNPATH == 'true'
         run: cp signed-installer/*installer*.exe dist/
 
-      # Recovery builds intentionally check out the immutable product SHA,
-      # which can predate a verifier repair. Fetch only the verifier from the
-      # protected workflow commit so recovery can validate old immutable
-      # artifacts without rebuilding them from a moving product branch.
-      - name: Checkout protected release verifier
-        if: runner.os == 'Windows' && env.HAS_SIGNPATH == 'true'
-        uses: actions/checkout@v7
-        with:
-          ref: ${{ github.sha }}
-          path: release-control
-          sparse-checkout: scripts/verify-windows-authenticode.ps1
-          sparse-checkout-cone-mode: false
-          persist-credentials: false
-
       - name: Verify Windows Authenticode release contract
         if: runner.os == 'Windows' && env.HAS_SIGNPATH == 'true'
         shell: pwsh
@@ -536,18 +585,32 @@ jobs:
           MINISIGN_PASSWORD: ${{ secrets.MINISIGN_PASSWORD }}
         run: go run ./cmd/sign sign ../dist/*
 
+      - name: Bind signed artifacts to candidate and workflow
+        env:
+          RELEASE_SOURCE_SHA: ${{ needs.resolve.outputs.sha }}
+          RELEASE_CONTROL_SHA: ${{ github.workflow_sha }}
+          RELEASE_TAG: ${{ needs.resolve.outputs.tag }}
+          RELEASE_VERSION: ${{ needs.resolve.outputs.version }}
+          RELEASE_CHANNEL: ${{ needs.resolve.outputs.channel }}
+          RELEASE_SIGNING_FINGERPRINT: ${{ needs.signing-contract.outputs.fingerprint }}
+          RELEASE_ARTIFACT_PREFIX: ${{ needs.resolve.outputs.artifact_prefix }}
+        run: node release-control/scripts/desktop-release-artifacts.mjs pack dist "$RUNNER_TEMP/desktop-bundle" "${{ matrix.name }}"
+
       - uses: actions/upload-artifact@v7
         with:
-          name: dist-${{ matrix.name }}
-          path: dist/*
+          name: ${{ needs.resolve.outputs.artifact_prefix }}-${{ matrix.name }}
+          path: ${{ runner.temp }}/desktop-bundle
+          # A failed-job retry replaces only this fully revalidated platform.
+          # The resolved invocation prefix remains stable across that retry.
+          overwrite: true
           if-no-files-found: error
           # Same-run handoff to the publish job only; 7 days covers debugging.
           retention-days: 7
 
   publish:
     name: publish release
-    needs: [resolve, build]
-    if: ${{ always() && !cancelled() && needs.resolve.result == 'success' && needs.build.result == 'success' && !inputs.production_signing_smoke && !inputs.signing_preflight }}
+    needs: [resolve, signing-contract, cache-guard, build]
+    if: ${{ always() && !cancelled() && needs.resolve.result == 'success' && (needs.build.result == 'success' || (needs.build.result == 'skipped' && inputs.preflight_artifact_prefix != '' && inputs.orchestrated && inputs.signing_preflight_verified)) && needs.signing-contract.result == 'success' && needs.cache-guard.result == 'success' && !inputs.production_signing_smoke && !inputs.signing_preflight }}
     runs-on: ubuntu-latest
     permissions:
       contents: write
@@ -594,13 +657,23 @@ jobs:
 
       - uses: actions/setup-node@v7
         with:
-          node-version: "22"
+          node-version: "24"
 
       - uses: actions/download-artifact@v8
         with:
-          path: dist
-          pattern: dist-*
-          merge-multiple: true
+          path: ${{ runner.temp }}/desktop-bundles
+          pattern: ${{ inputs.preflight_artifact_prefix || needs.resolve.outputs.artifact_prefix }}-*
+
+      - name: Verify complete signed artifact handoff
+        env:
+          RELEASE_SOURCE_SHA: ${{ needs.resolve.outputs.sha }}
+          RELEASE_CONTROL_SHA: ${{ github.workflow_sha }}
+          RELEASE_TAG: ${{ needs.resolve.outputs.tag }}
+          RELEASE_VERSION: ${{ needs.resolve.outputs.version }}
+          RELEASE_CHANNEL: ${{ needs.resolve.outputs.channel }}
+          RELEASE_SIGNING_FINGERPRINT: ${{ needs.signing-contract.outputs.fingerprint }}
+          RELEASE_ARTIFACT_PREFIX: ${{ inputs.preflight_artifact_prefix || needs.resolve.outputs.artifact_prefix }}
+        run: node release-control/scripts/desktop-release-artifacts.mjs collect "$RUNNER_TEMP/desktop-bundles" dist
 
       # Generate latest.json with GitHub release download URLs; the mirror step
       # rewrites them to R2 afterwards. GITHUB_REPOSITORY is provided by the runner.

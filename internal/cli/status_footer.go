@@ -6,6 +6,8 @@ import (
 
 	"github.com/charmbracelet/x/ansi"
 
+	"reasonix/internal/billing"
+	"reasonix/internal/control"
 	"reasonix/internal/event"
 	"reasonix/internal/i18n"
 	"reasonix/internal/provider"
@@ -32,10 +34,6 @@ func footerInfo(value string) string {
 	return themeFg(activeCLITheme.info, value)
 }
 
-func footerSecondary(value string) string {
-	return themeFg(activeCLITheme.secondary, value)
-}
-
 func footerMetric(label, value string) string {
 	if strings.TrimSpace(value) == "" {
 		return ""
@@ -48,6 +46,14 @@ func footerMetric(label, value string) string {
 // message metadata: it stays in transcript scrollback and deliberately uses a
 // quieter palette than runtime/session state.
 func renderTurnReceipt(u *provider.Usage, p *provider.Pricing, d *event.CacheDiagnostics) string {
+	var quote *billing.CostQuote
+	if u != nil && p != nil {
+		quote = event.EnsureCostQuote(event.Event{Kind: event.Usage, Usage: u, Pricing: p}, nil)
+	}
+	return renderQuotedTurnReceipt(u, quote, d)
+}
+
+func renderQuotedTurnReceipt(u *provider.Usage, q *billing.CostQuote, d *event.CacheDiagnostics) string {
 	if u == nil || u.TotalTokens == 0 {
 		return ""
 	}
@@ -73,8 +79,21 @@ func renderTurnReceipt(u *provider.Usage, p *provider.Pricing, d *event.CacheDia
 	if u.ReasoningTokens > 0 {
 		groups = append(groups, "reasoning "+shortTokens(u.ReasoningTokens))
 	}
-	if p != nil {
-		groups = append(groups, fmt.Sprintf("%s%.4f", p.Symbol(), p.Cost(u)))
+	if q != nil && q.CostComplete {
+		// Host quotes are estimates; never present a bare zero as real spend.
+		money := q.Original
+		if q.Selected != nil {
+			money = *q.Selected
+		}
+		cost := money.Float64()
+		if cost > 0 {
+			groups = append(groups, fmt.Sprintf("≈%s%.4f", billing.CurrencySymbol(money.Currency), cost))
+		} else {
+			groups = append(groups, "cost n/a")
+		}
+		if band := localizedRateBand(q.RateBand); band != "" {
+			groups = append(groups, band)
+		}
 	}
 	if u.Estimated {
 		groups = append(groups, "estimated")
@@ -94,6 +113,70 @@ func renderTurnReceipt(u *provider.Usage, p *provider.Pricing, d *event.CacheDia
 		receipt += separator + themeFg(activeCLITheme.warn, "cache prefix changed: "+reasons)
 	}
 	return receipt
+}
+
+func localizedRateBand(band string) string {
+	switch band {
+	case billing.RateBandPeak:
+		return i18n.M.RateBandPeak
+	case billing.RateBandOffPeak:
+		return i18n.M.RateBandOffPeak
+	case billing.RateBandMixed:
+		return i18n.M.RateBandMixed
+	default:
+		return ""
+	}
+}
+
+func mergeSessionRateBand(current *billing.CostQuote, next billing.CostQuote) string {
+	if current == nil {
+		return next.RateBand
+	}
+	if current.RateBand == "" || next.RateBand == "" {
+		return ""
+	}
+	if current.RateBand == billing.RateBandMixed || next.RateBand == billing.RateBandMixed || current.RateBand != next.RateBand {
+		return billing.RateBandMixed
+	}
+	return current.RateBand
+}
+
+func (m *chatTUI) addSessionCostQuote(next *billing.CostQuote) {
+	if m == nil || next == nil {
+		return
+	}
+	band := mergeSessionRateBand(m.sessionCostQuote, *next)
+	quotes := []billing.CostQuote{*next}
+	if m.sessionCostQuote != nil {
+		quotes = append([]billing.CostQuote{*m.sessionCostQuote}, quotes...)
+	}
+	display := ""
+	if next.Selected != nil {
+		display = next.Selected.Currency
+	}
+	total := billing.AggregateQuotes(quotes, display)
+	total.RateBand = band
+	total.RatedAt = ""
+	m.sessionCostQuote = &total
+}
+
+func (m chatTUI) sessionCostStatus() string {
+	q := m.sessionCostQuote
+	if q == nil || !q.CostComplete {
+		return ""
+	}
+	money := q.Original
+	if q.Selected != nil {
+		money = *q.Selected
+	}
+	if money.Float64() <= 0 {
+		return ""
+	}
+	value := fmt.Sprintf("≈%s%.4f", billing.CurrencySymbol(money.Currency), money.Float64())
+	if band := localizedRateBand(q.RateBand); band != "" {
+		value += " · " + band
+	}
+	return value
 }
 
 // primaryStatusLine renders the interaction half of the first footer row. The
@@ -139,6 +222,17 @@ func (m chatTUI) primaryStatusLine(modeTag string, shellMode, cancelRequested bo
 	return status
 }
 
+// presetTag mirrors the desktop's preset chips in the status line: the default
+// standard posture stays quiet, delivery is always visible so a /preset switch
+// reads back from the UI.
+func (m chatTUI) presetTag() string {
+	if m.ctrl == nil || m.ctrl.QualityFloor() != control.QualityFloorDelivery {
+		return ""
+	}
+	value := themeStyle(activeCLITheme.info).Bold(true).Render(control.QualityFloorDelivery)
+	return footerMetric(i18n.M.ChatStatusPresetLabel, value)
+}
+
 // statusModelWorkGroup is the bounded, session-level group placed at the right
 // edge of the first footer row. A custom statusline still replaces every
 // built-in data field, matching its existing configuration contract.
@@ -147,21 +241,17 @@ func (m chatTUI) statusModelWorkGroup(maxWidth int) string {
 		return ""
 	}
 	model := strings.TrimSpace(m.label)
-	work := ""
-	if m.runtimeProfile != "" {
-		work = runtimeProfileDisplay(m.runtimeProfile)
-	}
 	if maxWidth <= 0 {
 		maxWidth = 1
 	}
 
 	const separator = "   "
-	tail := make([]string, 0, 2)
+	tail := make([]string, 0, 3)
 	if effort := m.effortTag(); effort != "" {
 		tail = append(tail, effort)
 	}
-	if work != "" {
-		tail = append(tail, footerMetric(i18n.M.ChatStatusWorkLabel, footerSecondary(work)))
+	if preset := m.presetTag(); preset != "" {
+		tail = append(tail, preset)
 	}
 	if model == "" && len(tail) == 0 {
 		return ""
@@ -266,6 +356,9 @@ func (m chatTUI) statusTelemetryGroups() []string {
 	if m.balance != "" {
 		data = append(data, footerMetric(i18n.M.ChatStatusBalanceLabel, footerValue(m.balance)))
 	}
+	if cost := m.sessionCostStatus(); cost != "" {
+		data = append(data, footerMetric(i18n.M.ChatStatusCostLabel, footerValue(cost)))
+	}
 	return data
 }
 
@@ -292,7 +385,7 @@ func (m chatTUI) renderStatusBlock(primary string, width int) string {
 // the optional shortcut help yields space to the composer.
 func hideStatusHintWhenKeyNamesCannotFit(primary string, width int) string {
 	hint := i18n.M.ChatStatusCycleHintCompact
-	for _, group := range strings.Split(hint, " · ") {
+	for group := range strings.SplitSeq(hint, " · ") {
 		if visibleWidth(statusFooterIndent+group) > width {
 			return strings.Replace(primary, " · "+footerHint(hint), "", 1)
 		}

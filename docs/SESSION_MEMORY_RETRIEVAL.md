@@ -29,7 +29,7 @@ A minimal project file is usually enough:
 # Build and verify
 
 - Run `go test ./...` before reporting completion.
-- Do not edit generated files under `desktop/frontend/wailsjs/`.
+- Do not edit generated files under `desktop/frontend/src/generated/`.
 - Keep public API changes backward compatible.
 ```
 
@@ -80,6 +80,10 @@ Each fact is a Markdown file with:
 - `created_at` and `updated_at` timestamps;
 - a human-readable name, title, and description;
 - an independent `type` and `scope`;
+- optional search `keywords` — aliases and translations of key terms that let
+  a paraphrased or cross-language query reach the fact;
+- an optional `subject_key` — a dotted key naming the question the fact
+  answers (`project.package_manager`, `user.response_style`);
 - the Markdown body.
 
 `type` classifies the content:
@@ -97,16 +101,32 @@ Each fact is a Markdown file with:
 Type does not imply scope. Project feedback remains project-local, and a global
 reference remains a reference.
 
+A subject key is the knowledge-conflict model: one scope holds at most one
+active value per subject. Saving a second fact for a held subject is rejected
+with the holder's id, so "npm → pnpm" becomes a revision of one fact instead
+of two contradicting facts both staying active. `/memory subjects` lists the
+keys in use; facts answering the same subject count as equivalent for
+overrides and recall suppression regardless of their names and titles.
+
 When equivalent project and global facts exist, automatic recall uses the
 project fact. Both remain visible in Context Center and `/memory`, with the
 override explained instead of deleting or hiding either source.
 
-For compatibility and first-turn usability, globally scoped `user` and
-`feedback` bodies are snapshotted into a lower-priority stable-guidance section
-at session start. When an equivalent project fact exists, it suppresses that
-global guidance before the stable prefix is built, so project-over-global
-precedence does not depend on a later recall match. Other fact bodies remain
-retrieval-only until relevant.
+A third dimension, `activation`, is orthogonal to both: `relevant` (the
+default) keeps a fact retrieval-only, while `pinned` snapshots its body into a
+lower-priority `session-context` section before the next real user turn. Pinning
+is an
+explicit user choice (`/memory pin <id-or-name>`, or asking the assistant),
+and total pinned bodies are capped at 1,500 characters — enforced when
+pinning, with overflow directed to REASONIX.md/AGENTS.md instructions, where
+always-binding rules belong. A fact is either pinned (in `session-context`) or
+relevant (recallable): never both, never neither.
+
+For compatibility, legacy globally scoped `user` and `feedback` facts that
+predate the field stay pinned until explicitly unpinned. When an equivalent
+project fact exists, it suppresses pinned global guidance before the background
+snapshot is built, so project-over-global precedence does not depend on a later
+recall match.
 
 ## Automatic recall
 
@@ -118,7 +138,9 @@ not mutate the system prompt or tool schema.
 Recall is conservative:
 
 - generic turns such as "continue" do not trigger recall;
-- distinctive lexical matches are ranked with BM25;
+- distinctive lexical matches are ranked with BM25 (CJK text is matched by
+  character bigrams, so a hit needs a real word overlap, not scattered common
+  characters);
 - project facts receive a small relevance preference;
 - stale facts are down-ranked, not silently deleted;
 - equivalent project facts suppress global fallbacks for that recall;
@@ -128,13 +150,23 @@ Recall is conservative:
 - fact storage paths are omitted, and home-directory prefixes in snippets are
   replaced with `<local-home>`.
 
-Freshness depends on fact type:
+Freshness defaults depend on fact type:
 
 | Type | Fresh | Current | Stale after |
 | --- | ---: | ---: | ---: |
 | `reference` | 14 days | 45 days | 45 days |
 | `project` | 30 days | 180 days | 180 days |
 | `user`, `feedback` | 90 days | 365 days | 365 days |
+
+Type is a default, not a truth about volatility — a README location can hold
+for years while a release branch dies in days. An explicit `volatility`
+overrides the type windows: `volatile` (7 / 30 days), `stable` (90 / 365
+days), or `evergreen` (never ages). Two optional timestamps refine it further:
+`expires_at` is a hard boundary — past it the fact is `expired` and excluded
+from automatic recall entirely (explicit search still finds it) — and
+`last_verified_at`, stamped by `/memory verify <id-or-name>` or by the
+assistant re-confirming a fact, renews the freshness clock without changing
+what `updated_at` means.
 
 Freshness is a warning and ranking signal, not a truth claim. Recalled text
 explicitly tells the model that it may be wrong and cannot override the current
@@ -170,7 +202,7 @@ new memory only when all of these conditions hold:
 The grant is one-shot and the storage layer enforces create-only semantics, so a
 concurrent fact cannot be overwritten after assessment.
 
-Everything else still requires explicit confirmation:
+Under Ask, everything else still requires explicit confirmation:
 
 - global facts;
 - `user` preferences and `feedback`;
@@ -179,11 +211,14 @@ Everything else still requires explicit confirmation:
 - sensitive or oversized content;
 - every `forget` operation.
 
-Auto and Yolo do not bypass those confirmations. Guardian and permission hooks
-cannot approve them for the user. A top-level headless controller may use only
-the same one-shot low-risk create path above. Sub-agents and headless surfaces
-without the owning scoped controller fail closed; all other memory mutations
-still require an interactive confirmation surface.
+Ask keeps those confirmations. Interactive Auto treats `remember` and `forget`
+as normal policy fallback: default calls proceed, while explicit `ask` and
+`deny` rules remain effective. Interactive YOLO skips memory ask prompts unless
+an explicit deny rule matches. Guardian and permission hooks cannot approve
+them for the user. A top-level headless controller may use only the same
+one-shot low-risk create path above, including headless YOLO. Sub-agents and
+headless surfaces without the owning scoped controller fail closed; all other
+headless memory mutations still require an interactive confirmation surface.
 
 Direct edits made by the user in Context Center, `/remember`, restore, and
 recovery commands are already explicit user actions and do not add another
@@ -212,8 +247,8 @@ path escapes, refuses ID/name collisions, and never overwrites an active file:
 ```
 
 Recovered content also becomes a new monotonic revision. Restore and recovery
-apply to the current session through a one-turn tail note, then join the stable
-prefix naturally on the next session.
+mark the background snapshot dirty; one complete replacement `session-context`
+is appended before the next real user turn.
 
 ## Zero-configuration suggestions
 
@@ -269,8 +304,9 @@ required.
 
 ## Cache and privacy contract
 
-- Standing instructions and the derived memory index join the stable prefix at
-  session start.
+- Standing instructions join the stable system prefix at session start. The
+  derived index and pinned guidance live in the versioned `session-context`
+  snapshot and refresh before the next real user turn when their digest changes.
 - Provider-visible instruction provenance uses stable `workspace/...` and
   `user/...` labels; absolute source and store paths stay in local diagnostics.
 - Provider-visible memory tool results use stable `project/<name>.md` and
@@ -278,8 +314,7 @@ required.
   read, update, revision, and archive operations, including when both scopes
   contain the same name; Context Center and local recovery diagnostics retain
   the real storage paths.
-- Dynamic recall and mid-session changes are appended only to the current user
-  turn.
+- Dynamic recall is appended only to the current user turn.
 - Diagnostics never enter provider requests.
 - Automatic recall omits fact storage paths and redacts home-directory prefixes
   in snippets.

@@ -26,7 +26,7 @@ Context Engine v2 为 Reasonix 提供两个权限不同的持久上下文层：
 # Build and verify
 
 - Run `go test ./...` before reporting completion.
-- Do not edit generated files under `desktop/frontend/wailsjs/`.
+- Do not edit generated files under `desktop/frontend/src/generated/`.
 - Keep public API changes backward compatible.
 ```
 
@@ -70,6 +70,10 @@ Reasonix 识别 `REASONIX.md`、`AGENTS.md`、`CLAUDE.md`，以及对应的 `.lo
 - `created_at`、`updated_at` 时间；
 - 便于阅读的 name、title 和 description；
 - 相互独立的 `type` 与 `scope`；
+- 可选的检索 `keywords` —— 关键词的同义词与双语别名，让换一种说法或换一种
+  语言的提问也能命中这条事实；
+- 可选的 `subject_key` —— 点号分隔的键，标明这条事实回答的是哪个问题
+  （`project.package_manager`、`user.response_style`）；
 - Markdown 正文。
 
 `type` 表示内容类别：
@@ -86,12 +90,24 @@ Reasonix 识别 `REASONIX.md`、`AGENTS.md`、`CLAUDE.md`，以及对应的 `.lo
 
 type 不推导 scope。项目反馈仍只属于项目，全局 reference 仍然是 reference。
 
+subject key 是知识冲突模型：同一 scope 内每个 subject 至多一个 active 值。对已被
+占用的 subject 再存新事实会被拒绝并给出持有者的 id——于是 "npm → pnpm" 成为同一
+事实的新 revision，而不是两条互相矛盾、同时活跃的事实。`/memory subjects` 列出在用
+的 key；回答同一 subject 的事实在覆盖与召回抑制中视为等价，与它们的 name/title 无关。
+
 当等价的项目事实和全局事实同时存在时，自动召回使用项目事实。Context Center 和
 `/memory` 仍展示两者，并解释覆盖关系，而不是删除或隐藏任何来源。
 
-为兼容旧数据并保证首轮可用性，全局 `user` 和 `feedback` 正文会在会话开始时快照到一个
-低优先级稳定指导区。存在等价项目事实时，它会在稳定前缀构建前屏蔽对应的全局指导，
-因此“项目覆盖全局”不依赖后续查询是否恰好触发召回。其他事实正文只有在相关时才进入上下文。
+第三个维度 `activation` 与前两者正交：`relevant`（默认）表示事实只走检索；`pinned`
+表示正文在下一真实用户回合前快照进低优先级 `session-context`。pin 必须是用户显式选择（`/memory pin
+<id-or-name>`，或明确要求助手），且 pinned 正文总量上限 1,500 字符——在 pin 时强制
+执行，超限会提示把"永远必须遵守的规则"移入 REASONIX.md/AGENTS.md instructions。
+一个事实要么 pinned（在 `session-context` 里）、要么 relevant（可被召回）：不会两者皆是，也不会
+两者皆非。
+
+为兼容旧数据，早于该字段的全局 `user`/`feedback` 事实保持 pinned，直到显式 unpin。
+存在等价项目事实时，它会在背景快照构建前屏蔽对应的全局 pinned 指导，因此"项目覆盖
+全局"不依赖后续查询是否恰好触发召回。
 
 ## 自动召回
 
@@ -102,7 +118,8 @@ type 不推导 scope。项目反馈仍只属于项目，全局 reference 仍然�
 召回策略刻意保守：
 
 - “继续”这类泛化回合不触发召回；
-- 用 BM25 排序有区分度的词法命中；
+- 用 BM25 排序有区分度的词法命中（CJK 文本按双字 bigram 匹配，命中需要真实的
+  词语重叠，零散的常用字不算）；
 - 项目事实有轻微相关性加权；
 - 过期事实只降权，不静默删除；
 - 本轮存在等价项目事实时，不再注入对应的全局 fallback；
@@ -111,13 +128,20 @@ type 不推导 scope。项目反馈仍只属于项目，全局 reference 仍然�
 - provider 可见块不包含 fact storage path，snippet 中的 home directory 前缀会替换为
   `<local-home>`。
 
-freshness 按事实类型计算：
+freshness 默认按事实类型计算：
 
 | 类型 | fresh | current | 超过多久为 stale |
 | --- | ---: | ---: | ---: |
 | `reference` | 14 天 | 45 天 | 45 天 |
 | `project` | 30 天 | 180 天 | 180 天 |
 | `user`、`feedback` | 90 天 | 365 天 | 365 天 |
+
+类型只是默认值，不代表事实的真实易变性——README 地址可能三年不变，release 分支可能
+三天就失效。显式 `volatility` 会覆盖类型窗口：`volatile`（7 / 30 天）、`stable`
+（90 / 365 天）、`evergreen`（永不老化）。两个可选时间戳进一步细化：`expires_at`
+是硬边界——过期后事实状态为 `expired`，完全不再被自动召回（显式搜索仍可见）；
+`last_verified_at` 由 `/memory verify <id-or-name>` 或助手重新确认事实时打戳，
+在不改变 `updated_at` 含义的前提下续期新鲜度时钟。
 
 freshness 是提醒和排序信号，不代表事实真假。召回文本会明确告诉模型：内容可能错误或过期，
 不能覆盖当前请求和常驻指令。
@@ -148,7 +172,7 @@ omitted 数量和 suppressed 原因。
 
 授权是一次性的，存储层还会强制 create-only，因此评估后并发出现的事实也不会被覆盖。
 
-其余情况仍需显式确认：
+在 Ask 下，其余情况仍需显式确认：
 
 - 全局事实；
 - `user` 偏好和 `feedback`；
@@ -157,9 +181,11 @@ omitted 数量和 suppressed 原因。
 - 敏感或超长内容；
 - 所有 `forget` 操作。
 
-Auto 和 Yolo 不会绕过这些确认。Guardian 和 permission hook 不能替用户批准。顶层
-headless controller 只能使用上述同一个一次性低风险创建路径；子智能体以及不拥有该作用域
-controller 的 headless surface 会 fail closed，其他记忆变更仍必须有交互式确认界面。
+Ask 保留这些确认。交互式 Auto 把 `remember`/`forget` 作为普通策略 fallback：默认调用直接
+执行，显式 `ask` / `deny` 仍生效。交互式 YOLO 会绕过记忆 ask 审批，除非命中显式 deny。
+Guardian 和 permission hook 不能替用户批准。顶层
+headless controller（包括无头 YOLO）只能使用上述同一个一次性低风险创建路径；子智能体以及不拥有该作用域
+controller 的 headless surface 会 fail closed，其他无头记忆变更仍必须有交互式确认界面。
 
 用户直接在 Context Center、`/remember`、restore 或 recover 命令中发起的操作，本身就是
 显式用户动作，不会再增加一次审批。

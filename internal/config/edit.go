@@ -39,6 +39,11 @@ const (
 	listAllow = "allow"
 	listAsk   = "ask"
 	listDeny  = "deny"
+
+	// CompactRatioMin and CompactRatioMax are the bounds shared by the
+	// programmatic config editor and all CLI/Desktop callers.
+	CompactRatioMin = 0.30
+	CompactRatioMax = 0.85
 )
 
 // SetDefaultModel points default_model at an existing model. It accepts both
@@ -74,6 +79,33 @@ func (c *Config) SetPlannerModel(name string) error {
 		return fmt.Errorf("set planner: no provider %q (configured: %s)", name, c.providerNames())
 	}
 	c.Agent.PlannerModel = name
+	return nil
+}
+
+// SetVisionModel sets (or clears) the optional image-understanding fallback.
+// "auto" is resolved by the runtime within the active provider; an explicit
+// value must be a configured vision-capable model.
+func (c *Config) SetVisionModel(name string) error {
+	name = strings.TrimSpace(name)
+	if name == "" {
+		c.Agent.VisionModel = ""
+		return nil
+	}
+	if strings.EqualFold(name, "auto") {
+		c.Agent.VisionModel = "auto"
+		return nil
+	}
+	entry, ok := c.ResolveModel(name)
+	if !ok {
+		return fmt.Errorf("set vision model: no such model %q (configured: %s)", name, c.providerNames())
+	}
+	if NewModelCapabilityResolver().Resolve(entry).State != CapabilitySupported {
+		return fmt.Errorf("set vision model: %q does not support image input", name)
+	}
+	if !entry.Configured() {
+		return fmt.Errorf("set vision model: provider %q has no key", entry.Name)
+	}
+	c.Agent.VisionModel = entry.Name + "/" + entry.Model
 	return nil
 }
 
@@ -230,27 +262,6 @@ func (c *Config) SetDesktopLanguage(lang string) error {
 	return nil
 }
 
-// SetDesktopCurrency pins the user-global official pricing region independently
-// from language. The name is retained for persisted-schema compatibility.
-// Empty/auto follows the language preference.
-func (c *Config) SetDesktopCurrency(currency string) error {
-	overridePersisted := false
-	switch strings.ToUpper(strings.TrimSpace(currency)) {
-	case "", "AUTO":
-		c.Desktop.Currency = ""
-	case "CNY", "RMB", "CNH":
-		c.Desktop.Currency = "CNY"
-		overridePersisted = true
-	case "USD":
-		c.Desktop.Currency = "USD"
-		overridePersisted = true
-	default:
-		return fmt.Errorf("desktop currency %q: must be auto|CNY|USD", currency)
-	}
-	applyDeepSeekOfficialDefaultPricingWithOverride(c, overridePersisted)
-	return nil
-}
-
 // SetDesktopAppearance sets desktop-only theme preferences. It must not affect
 // CLI theme settings or provider-visible request data.
 func (c *Config) SetDesktopAppearance(theme, style string) error {
@@ -296,14 +307,15 @@ func (c *Config) SetDesktopTerminalTheme(theme string) error {
 // affect CLI output or provider-visible request data.
 func (c *Config) SetDesktopLayoutStyle(style string) error {
 	switch strings.ToLower(strings.TrimSpace(style)) {
-	case "", "classic":
-		c.Desktop.LayoutStyle = "classic"
-	case "workbench", "workspace":
-		c.Desktop.LayoutStyle = "workbench"
 	case "creation":
 		c.Desktop.LayoutStyle = "creation"
+	case "", "classic", "workbench", "workspace":
+		// "classic" is retired and stores as workbench, matching the read path
+		// in normalizeDesktopLayoutStyle. An older caller that still sends it
+		// gets the surviving style rather than an error.
+		c.Desktop.LayoutStyle = "workbench"
 	default:
-		return fmt.Errorf("desktop layout style %q: must be classic|workbench|creation", style)
+		return fmt.Errorf("desktop layout style %q: must be workbench|creation", style)
 	}
 	return nil
 }
@@ -363,6 +375,7 @@ func (c *Config) SetDesktopStatusBarStyle(style string) error {
 	default:
 		return fmt.Errorf("status bar style %q: must be icon|text", style)
 	}
+	c.Desktop.StatusBarStyleInitialized = true
 	return nil
 }
 
@@ -396,7 +409,7 @@ func (c *Config) SetDesktopCheckUpdates(enabled bool) error {
 	return nil
 }
 
-// SetDesktopUpdateChannel is retained for pre-single-channel Wails clients.
+// SetDesktopUpdateChannel is retained for pre-single-channel desktop clients.
 // Clearing the legacy field keeps the next canonical write channel-free.
 func (c *Config) SetDesktopUpdateChannel(_ string) error {
 	c.Desktop.UpdateChannel = ""
@@ -421,21 +434,12 @@ func (c *Config) SetColdResumePrune(enabled bool) error {
 	return nil
 }
 
-// SetCompactRatio updates the user-controlled auto-compaction threshold.
-// Keep the editable range inside the default snip/force guard rails so lowering
-// the threshold cannot accidentally turn normal cache growth into constant
-// compaction, while higher values still retain context-exhaustion headroom.
+// SetCompactRatio updates the sole user-controlled automatic compaction
+// threshold. Allowed range is CompactRatioMin–CompactRatioMax; presets are
+// 0.70 / 0.80 / 0.85.
 func (c *Config) SetCompactRatio(ratio float64) error {
-	if math.IsNaN(ratio) || math.IsInf(ratio, 0) || ratio < 0.65 || ratio > 0.85 {
-		return fmt.Errorf("compact ratio %v: must be between 0.65 and 0.85", ratio)
-	}
-	snip := c.Agent.ToolResultSnipRatio
-	force := c.Agent.CompactForceRatio
-	if snip > 0 && ratio <= snip {
-		return fmt.Errorf("compact ratio %.2f: must be greater than tool result snip ratio %.2f", ratio, snip)
-	}
-	if force > 0 && ratio >= force {
-		return fmt.Errorf("compact ratio %.2f: must be less than force ratio %.2f", ratio, force)
+	if math.IsNaN(ratio) || math.IsInf(ratio, 0) || ratio < CompactRatioMin || ratio > CompactRatioMax {
+		return fmt.Errorf("compact ratio %v: must be between %.2f and %.2f", ratio, CompactRatioMin, CompactRatioMax)
 	}
 	c.Agent.CompactRatio = ratio
 	return nil
@@ -486,14 +490,6 @@ func (c *Config) SetDesktopConversationWidth(width string) error {
 // SetUICloseBehavior is kept for callers compiled against the old edit API.
 func (c *Config) SetUICloseBehavior(mode string) error {
 	return c.SetDesktopCloseBehavior(mode)
-}
-
-// SetExpandThinking sets whether the desktop reasoning/thinking section is
-// expanded by default. It is desktop-only and must not affect CLI output or
-// provider-visible request data.
-func (c *Config) SetExpandThinking(on bool) error {
-	c.Desktop.ExpandThinking = on
-	return nil
 }
 
 // SetShowReasoning sets the CLI's default verbose-reasoning preference. When
@@ -583,7 +579,8 @@ func (c *Config) RemoveProvider(name string) error {
 	}
 
 	fallback := ""
-	if defaultRefsProvider || plannerRefsProvider || subagentRefsProvider || len(subagentModelRefsProvider) > 0 {
+	visionRefsProvider := c.modelRefTargetsProvider(c.Agent.VisionModel, name)
+	if defaultRefsProvider || plannerRefsProvider || visionRefsProvider || subagentRefsProvider || len(subagentModelRefsProvider) > 0 {
 		fallback = c.providerRemovalFallback(name)
 	}
 	if defaultRefsProvider && fallback == "" {
@@ -597,6 +594,9 @@ func (c *Config) RemoveProvider(name string) error {
 	}
 	if plannerRefsProvider {
 		c.Agent.PlannerModel = fallback
+	}
+	if visionRefsProvider {
+		c.Agent.VisionModel = ""
 	}
 	if subagentRefsProvider {
 		c.Agent.SubagentModel = fallback
@@ -676,10 +676,8 @@ func (c *Config) AddPermissionRule(list, rule string) error {
 	if _, ok := permission.ParseRule(rule); !ok {
 		return fmt.Errorf("invalid permission rule %q (want \"ToolName\" or \"ToolName(glob)\")", rule)
 	}
-	for _, existing := range *target {
-		if existing == rule {
-			return nil // already present
-		}
+	if slices.Contains(*target, rule) {
+		return nil // already present
 	}
 	*target = append(*target, rule)
 	return nil
@@ -786,6 +784,25 @@ func (c *Config) ExcludeSkillPath(path string) error {
 	return nil
 }
 
+// SetSkillPathEnabled enables or disables a skill discovery root without
+// deleting its configured path. Disabled roots are recorded in excluded_paths
+// and can be restored without asking the user to browse for the folder again.
+func (c *Config) SetSkillPathEnabled(path string, enabled bool) error {
+	path = strings.TrimSpace(path)
+	if path == "" {
+		return fmt.Errorf("skill path: empty path")
+	}
+	want := CanonicalSkillPath(path)
+	if want == "" {
+		return fmt.Errorf("skill path: empty path")
+	}
+	if enabled {
+		c.removeExcludedSkillPath(want)
+		return nil
+	}
+	return c.ExcludeSkillPath(path)
+}
+
 func (c *Config) removeExcludedSkillPath(want string) {
 	next := c.Skills.ExcludedPaths[:0]
 	for _, existing := range c.Skills.ExcludedPaths {
@@ -826,6 +843,13 @@ func (c *Config) SetSkillEnabled(name string, enabled bool) error {
 	return nil
 }
 
+// SetSkillImplicitInvocation controls whether skills are exposed to the model
+// for automatic discovery and invocation. Explicit /skill commands remain
+// available regardless of this setting.
+func (c *Config) SetSkillImplicitInvocation(enabled bool) {
+	c.Skills.DisableImplicitInvocation = !enabled
+}
+
 // CanonicalSkillPath expands env vars, ~ and relative segments to an absolute
 // cleaned path for comparing skill roots. On Windows it folds case so paths that
 // differ only in casing dedupe. Use only for comparison, never as stored config.
@@ -842,6 +866,12 @@ func CanonicalSkillPath(path string) string {
 	}
 	if abs, err := filepath.Abs(path); err == nil {
 		path = abs
+	}
+	// Resolve existing paths before cleaning so Windows 8.3 short names and
+	// long names compare identically. A missing configured path still falls
+	// back to the absolute lexical form used for persistence and diagnostics.
+	if resolved, err := filepath.EvalSymlinks(path); err == nil {
+		path = resolved
 	}
 	path = filepath.Clean(path)
 	if runtime.GOOS == "windows" {
@@ -1607,11 +1637,12 @@ func (c *Config) saveProjectIncrementalResolved(logicalPath, resolvedPath string
 	}
 	removePlugins := len(tomlPluginsForScope(c.Plugins, RenderScopeProject)) == 0 && tomlBodyHasSection(body, "plugins")
 	removeSandboxBash := shouldRemoveIneffectiveProjectSandboxBash(body, c)
+	removeSkills := projectSkillsKeysToRemove(body, c)
 	_, hasLegacyDesktopAutoGuard := tomlSectionKeyValue(body, "desktop", "default_auto_recovery_checkpoint")
 	_, hasRetiredAgentAutoGuard := tomlSectionKeyValue(body, "agent", "auto_recovery_checkpoint")
 	removeRetiredAutoGuard := hasLegacyDesktopAutoGuard || hasRetiredAgentAutoGuard
 	writeProviderAccess := c.Desktop.ProviderAccess != nil
-	if strings.TrimSpace(delta) == "" && !removePlugins && !removeSandboxBash && !removeRetiredAutoGuard && !writeProviderAccess {
+	if strings.TrimSpace(delta) == "" && !removePlugins && !removeSandboxBash && !removeSkills && !removeRetiredAutoGuard && !writeProviderAccess {
 		return nil // no changes to write
 	}
 
@@ -1625,6 +1656,9 @@ func (c *Config) saveProjectIncrementalResolved(logicalPath, resolvedPath string
 	if removeSandboxBash {
 		body = removeTOMLSectionKey(body, "sandbox", "bash")
 	}
+	if removeSkills {
+		body = cleanupProjectSkillsKeys(body, c)
+	}
 	if removeRetiredAutoGuard {
 		body = removeTOMLSectionKey(body, "desktop", "default_auto_recovery_checkpoint")
 		body = removeTOMLSectionKey(body, "agent", "auto_recovery_checkpoint")
@@ -1633,6 +1667,58 @@ func (c *Config) saveProjectIncrementalResolved(logicalPath, resolvedPath string
 		body = upsertTOMLSectionKey(body, "desktop", "provider_access", "provider_access = "+renderStringArray(c.Desktop.ProviderAccess))
 	}
 	return writeConfigFileResolved(resolvedPath, body, configFilePerm(logicalPath))
+}
+
+// projectSkillsKeysToRemove reports whether an existing project [skills]
+// section contains a field whose current edit value is the built-in default.
+// Project saves are incremental, so an empty RenderTOMLProjectDelta cannot
+// remove a stale override without this explicit cleanup pass.
+func projectSkillsKeysToRemove(body string, c *Config) bool {
+	if c == nil || !tomlBodyHasSection(body, "skills") {
+		return false
+	}
+	for _, key := range projectSkillKeys {
+		if projectSkillKeyIsDefault(c, key) {
+			if _, ok := tomlSectionKeyValue(body, "skills", key); ok {
+				return true
+			}
+		}
+	}
+	return false
+}
+
+var projectSkillKeys = [...]string{"paths", "excluded_paths", "disabled_skills", "disable_implicit_invocation", "max_depth"}
+
+func projectSkillKeyIsDefault(c *Config, key string) bool {
+	if c != nil && c.keepsProjectSkillKey(key) {
+		return false
+	}
+	switch key {
+	case "paths":
+		return len(c.Skills.Paths) == 0
+	case "excluded_paths":
+		return len(c.Skills.ExcludedPaths) == 0
+	case "disabled_skills":
+		return len(c.Skills.DisabledSkills) == 0
+	case "disable_implicit_invocation":
+		return !c.Skills.DisableImplicitInvocation
+	case "max_depth":
+		return c.Skills.MaxDepth == 0
+	default:
+		return false
+	}
+}
+
+func cleanupProjectSkillsKeys(body string, c *Config) string {
+	if c == nil {
+		return body
+	}
+	for _, key := range projectSkillKeys {
+		if projectSkillKeyIsDefault(c, key) {
+			body = removeTOMLSectionKey(body, "skills", key)
+		}
+	}
+	return body
 }
 
 func shouldRemoveIneffectiveProjectSandboxBash(body string, c *Config) bool {
@@ -1704,7 +1790,7 @@ func mergeTOMLDelta(body, delta string) string {
 }
 
 func mergeTOMLTopLevelFields(body, fields string) string {
-	for _, line := range strings.Split(fields, "\n") {
+	for line := range strings.SplitSeq(fields, "\n") {
 		line = strings.TrimSpace(line)
 		if line == "" {
 			continue
@@ -1761,6 +1847,9 @@ func writeConfigFileResolved(path, body string, perm os.FileMode) error {
 	if strings.TrimSpace(path) == "" {
 		return fmt.Errorf("save: empty config path")
 	}
+	if err := finalizeOpenCodeGoJournal(path); err != nil {
+		return err
+	}
 	return fileutil.AtomicWriteFile(path, []byte(body), perm)
 }
 
@@ -1770,6 +1859,9 @@ func writeConfigFileResolved(path, body string, perm os.FileMode) error {
 func atomicWriteToConfigFile(path, body string, perm os.FileMode) error {
 	resolved, err := resolveConfigReadPath(path)
 	if err != nil {
+		return err
+	}
+	if err := finalizeOpenCodeGoJournal(resolved); err != nil {
 		return err
 	}
 	if err := fileutil.AtomicWriteFile(resolved, []byte(body), perm); err != nil {
@@ -2173,15 +2265,16 @@ func removeTOMLSectionKey(body, sectionName, key string) string {
 	if sectionIdx < 0 || keyIdx < 0 {
 		return body
 	}
+	keyEndIdx := tomlValueEndSpan(spans, keyIdx)
 	for i := sectionIdx + 1; i < endIdx; i++ {
-		if i == keyIdx {
+		if i >= keyIdx && i <= keyEndIdx {
 			continue
 		}
 		trimmed := strings.TrimSpace(spans[i].text)
 		if trimmed == "" || strings.HasPrefix(trimmed, "#") {
 			continue
 		}
-		return body[:spans[keyIdx].start] + body[spans[keyIdx].end:]
+		return body[:spans[keyIdx].start] + body[spans[keyEndIdx].end:]
 	}
 	sectionStart := spans[sectionIdx].start
 	sectionEnd := len(body)
@@ -2320,75 +2413,4 @@ func tomlBodyHasSection(body, sectionName string) bool {
 		}
 	}
 	return false
-}
-
-func renderScopeForPath(path string) RenderScope {
-	if isUserConfigPath(path) {
-		return RenderScopeUser
-	}
-	return RenderScopeProject
-}
-
-func isUserConfigPath(path string) bool {
-	path = strings.TrimSpace(path)
-	if path == "" {
-		return false
-	}
-	for _, uc := range userConfigCandidatePaths() {
-		uc = strings.TrimSpace(uc)
-		if uc == "" {
-			continue
-		}
-		pathAbs, pathErr := filepath.Abs(path)
-		ucAbs, ucErr := filepath.Abs(uc)
-		if pathErr == nil && ucErr == nil {
-			if filepath.Clean(pathAbs) == filepath.Clean(ucAbs) {
-				return true
-			}
-			continue
-		}
-		if filepath.Clean(path) == filepath.Clean(uc) {
-			return true
-		}
-	}
-	return false
-}
-
-// IsUserConfigPath reports whether path is one of Reasonix's current or legacy
-// user-global config locations. Other paths use project-scoped rendering.
-func IsUserConfigPath(path string) bool {
-	return isUserConfigPath(path)
-}
-
-// Save writes the configuration back to the file it was loaded from
-// (SourcePath), or to ./reasonix.toml when none exists yet — the conventional
-// project-local target a fresh GUI session would create.
-func (c *Config) Save() error {
-	path := SourcePath()
-	if path == "" {
-		path = "reasonix.toml"
-	}
-	return c.SaveTo(path)
-}
-
-// SaveForRoot saves root's project config when it exists, falling back to the
-// user's global config when root has no reasonix.toml. Existing project files
-// are edited from their own TOML only, never from a runtime user+project merge.
-func (c *Config) SaveForRoot(root string) error {
-	root = resolveRoot(root)
-	projectTOML := "reasonix.toml"
-	if root != "." {
-		projectTOML = filepath.Join(root, "reasonix.toml")
-	}
-	if _, err := os.Stat(projectTOML); err == nil {
-		projectCfg := LoadForEditWithoutCredentials(projectTOML)
-		return projectCfg.SaveTo(projectTOML)
-	}
-	if uc := userConfigPath(); uc != "" {
-		if err := os.MkdirAll(filepath.Dir(uc), 0o755); err != nil {
-			return err
-		}
-		return c.SaveTo(uc)
-	}
-	return c.SaveTo(projectTOML)
 }

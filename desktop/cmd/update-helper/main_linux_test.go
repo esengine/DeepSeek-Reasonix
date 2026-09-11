@@ -227,7 +227,7 @@ func TestCopyOwnedRegularFileCopiesMatchingOwner(t *testing.T) {
 	}
 }
 
-// --- runInstall table-driven coverage via injectable deps ---
+// runInstall table-driven coverage via injectable deps
 
 type installProbe struct {
 	phases   []string

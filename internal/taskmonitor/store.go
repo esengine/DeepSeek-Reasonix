@@ -18,6 +18,13 @@ type Store interface {
 	ListEvents(ctx context.Context, projectDir string, taskID string, afterSequence int) ([]TaskEvent, error)
 }
 
+// ProjectionSink receives post-commit hints. Implementations must enqueue and
+// return immediately; FileStore remains the only authority for task control.
+type ProjectionSink interface {
+	SnapshotChanged(projectRoot, taskID string)
+	EventsChanged(projectRoot, taskID string)
+}
+
 // IdempotencyRecord captures the binding between an idempotency key and the
 // operation it was used for.
 type IdempotencyRecord struct {

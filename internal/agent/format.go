@@ -7,10 +7,9 @@ import (
 	"reasonix/internal/provider"
 )
 
-// responseFormatContextKey carries a per-turn structured-output request
-// through Run's context (same pattern as runStepLimitContextKey). The agent
-// reads it when building the provider.Request so a turn can ask for
-// json_object output without changing the agent's persistent state.
+// responseFormatContextKey carries a per-turn structured-output request through
+// Run's context. The agent reads it when building the provider.Request so a
+// turn can ask for json_object output without changing persistent state.
 type responseFormatContextKey struct{}
 
 // WithResponseFormat attaches a structured-output format to a turn context.

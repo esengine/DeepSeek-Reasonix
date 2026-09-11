@@ -11,7 +11,6 @@ import (
 	"time"
 
 	"reasonix/internal/agent"
-	"reasonix/internal/capability"
 	"reasonix/internal/event"
 	"reasonix/internal/evidence"
 	"reasonix/internal/hook"
@@ -57,9 +56,8 @@ func TestTurnOrchestratorAttachesTrustedPlannerMetadata(t *testing.T) {
 	exec := agent.New(nil, tool.NewRegistry(), sess, agent.Options{}, event.Discard)
 	runner := &plannerMetadataRunner{}
 	c := New(Options{
-		Runner:         runner,
-		Executor:       exec,
-		RuntimeProfile: capability.ProfileDelivery,
+		Runner:   runner,
+		Executor: exec,
 	})
 	c.SetGoal("migrate authentication across the backend")
 
@@ -72,8 +70,8 @@ func TestTurnOrchestratorAttachesTrustedPlannerMetadata(t *testing.T) {
 	if runner.meta.UserText != raw {
 		t.Fatalf("planner metadata user text = %q, want pristine %q", runner.meta.UserText, raw)
 	}
-	if runner.meta.ExplicitPlanMode || !runner.meta.GoalActive || !runner.meta.DeliveryProfile {
-		t.Fatalf("planner metadata missing trusted host state: %+v", runner.meta)
+	if runner.meta.ExplicitPlanMode {
+		t.Fatalf("planner metadata should not force plan mode: %+v", runner.meta)
 	}
 	if !runner.meta.HasConversationContext {
 		t.Fatalf("planner metadata lost executor conversation ownership: %+v", runner.meta)
@@ -333,90 +331,50 @@ type recordingSessionRunner struct {
 }
 
 type deliveryScopeErrorRunner struct {
-	scopes []agent.DeliveryExecutionScope
-}
-
-type requestBudgetErrorRunner struct{}
-
-func (requestBudgetErrorRunner) Run(context.Context, string) error {
-	return &provider.RequestBudgetError{Used: 190, Limit: 200, Remaining: 10, EstimatedInput: 25}
-}
-
-func TestGoalRequestBudgetErrorPausesWithoutAnotherContinuation(t *testing.T) {
-	executor := agent.New(nil, tool.NewRegistry(), agent.NewSession(""), agent.Options{}, event.Discard)
-	c := New(Options{Runner: requestBudgetErrorRunner{}, Executor: executor})
-	c.SetGoal("stay within budget")
-	if err := newTurnOrchestrator(c).runGoalLoopWithRawDisplay(context.Background(), "start", "start", ""); err != nil {
-		t.Fatalf("budget admission error should be absorbed by Goal FSM: %v", err)
-	}
-	runtime := c.GoalRuntime()
-	if c.GoalStatus() != GoalStatusBlocked || runtime.StopCause != stopCauseBudgetTokens {
-		t.Fatalf("runtime = %+v, want blocked budget_tokens", runtime)
-	}
-	block := c.goals.capture().block
-	if !strings.Contains(block, "cannot admit another provider request") {
-		t.Fatalf("block reason = %q", block)
-	}
-}
-
-func TestSubagentSkillGoalBudgetErrorPausesThroughFSM(t *testing.T) {
-	executor := agent.New(nil, tool.NewRegistry(), agent.NewSession(""), agent.Options{}, event.Discard)
-	c := New(Options{Executor: executor})
-	c.SetGoal("stay within subagent budget")
-	runner := func(context.Context, skill.Skill, string, skill.SubagentRunOptions) (string, error) {
-		return "", &provider.RequestBudgetError{Used: 190, Limit: 200, Remaining: 10, EstimatedInput: 25}
-	}
-	err := newTurnOrchestrator(c).runSubagentSkillTurnsGoalLoop(
-		context.Background(),
-		[]skill.Skill{{Name: "inspect", Body: "inspect", RunAs: skill.RunSubagent}},
-		"inspect", "inspect", "", runner, false,
-	)
-	if err != nil {
-		t.Fatalf("subagent budget admission error should be absorbed by Goal FSM: %v", err)
-	}
-	runtime := c.GoalRuntime()
-	if c.GoalStatus() != GoalStatusBlocked || runtime.StopCause != stopCauseBudgetTokens {
-		t.Fatalf("runtime = %+v, want blocked budget_tokens", runtime)
-	}
-	if c.goalUsageTee.activeRecorder() != nil {
-		t.Fatal("subagent Goal recorder remained active after budget pause")
-	}
+	scopes        []agent.DeliveryExecutionScope
+	terminalAfter int
+	// usage stands in for the billable work a real executor would report; the
+	// goal's spend budget is measured in it.
+	usage event.Sink
 }
 
 func (r *deliveryScopeErrorRunner) Run(ctx context.Context, _ string) error {
 	if scope, ok := agent.DeliveryExecutionScopeFromContext(ctx); ok {
 		r.scopes = append(r.scopes, scope)
 	}
+	if r.usage != nil {
+		r.usage.Emit(event.Event{Kind: event.Usage, UsageSource: event.UsageSourceExecutor,
+			Usage: &provider.Usage{PromptTokens: 100, CompletionTokens: 10, TotalTokens: 110, RequestCount: 1}})
+	}
+	if r.terminalAfter > 0 && len(r.scopes) >= r.terminalAfter {
+		return errors.New("external provider stop")
+	}
 	return &agent.FinalReadinessError{Attempts: 1, Reason: "missing verification", Missing: []string{"verification"}}
 }
 
-func TestGoalReadinessFailureContinuesThenPausesOnNoProgress(t *testing.T) {
-	runner := &deliveryScopeErrorRunner{}
+func TestGoalReadinessFailureContinuesUntilExternalStop(t *testing.T) {
+	runner := &deliveryScopeErrorRunner{terminalAfter: 3}
 	executor := agent.New(nil, tool.NewRegistry(), agent.NewSession(""), agent.Options{}, event.Discard)
 	c := New(Options{Runner: runner, Executor: executor})
 	c.SetGoal("ship the integration")
 
 	err := newTurnOrchestrator(c).runGoalLoopWithRawDisplay(context.Background(), "start", "start", "")
-	if err != nil {
-		t.Fatalf("run err = %v, want the loop to absorb FinalReadinessError and pause on no-progress", err)
+	if err == nil || err.Error() != "external provider stop" {
+		t.Fatalf("run err = %v, want external provider stop after continuations", err)
 	}
-	// The FSM absorbs the readiness failure and continues with the missing
-	// requirements; with no host-verifiable progress across turns the
-	// no-progress gate pauses the goal instead of looping forever.
-	if got := c.GoalStatus(); got != GoalStatusBlocked {
-		t.Fatalf("GoalStatus = %q, want blocked (no-progress pause)", got)
+	// The FSM absorbs readiness failures and keeps the Goal running; only the
+	// external provider error ends this execution attempt.
+	if got := c.GoalStatus(); got != GoalStatusRunning {
+		t.Fatalf("GoalStatus = %q, want running", got)
 	}
-	if rt := c.GoalRuntime(); rt.StopCause != stopCauseNoProgress {
-		t.Fatalf("stop cause = %q, want %q", rt.StopCause, stopCauseNoProgress)
+	if rt := c.GoalRuntime(); rt.StopCause != "" || rt.TurnsUsed != 2 {
+		t.Fatalf("runtime = %+v, want two completed continuations and no pause", rt)
 	}
 	if len(runner.scopes) < 2 || runner.scopes[0].ID == "" || runner.scopes[0].TaskText != "ship the integration" {
 		t.Fatalf("delivery scopes = %+v, want scoped continuation turns", runner.scopes)
 	}
-	if !c.ResumeGoal() || c.GoalStatus() != GoalStatusRunning {
-		t.Fatal("paused Goal should resume with its existing scope")
-	}
 	if id, task, ok := c.goals.deliveryScope(); !ok || id != runner.scopes[0].ID || task != "ship the integration" {
-		t.Fatalf("resumed scope = (%q, %q, %v), want preserved id/task", id, task, ok)
+		t.Fatalf("preserved scope = (%q, %q, %v), want original id/task", id, task, ok)
 	}
 }
 
@@ -523,11 +481,11 @@ func TestTurnOrchestratorGoalContinuationRunsStopPerUnit(t *testing.T) {
 }
 
 func TestTurnOrchestratorApprovedPlanSharesOneStopHook(t *testing.T) {
-	prov := &scriptedTurns{turns: [][]provider.Chunk{
-		textTurn("Plan:\n1. Make the change\n2. Verify it"),
-		textTurn("Done."),
-	}}
-	ag := agent.New(prov, tool.NewRegistry(), agent.NewSession(""), agent.Options{}, event.Discard)
+	prov := &scriptedTurns{turns: planThenExecuteTurns(
+		"Plan:\n1. Make the change\n2. Verify it",
+		"Done.",
+	)}
+	ag := newPlanTestAgent(prov)
 	approvalID := make(chan string, 1)
 	var promptSubmitEvents, stopEvents int
 	hooks := hook.NewRunner([]hook.ResolvedHook{
@@ -572,8 +530,8 @@ func TestTurnOrchestratorApprovedPlanSharesOneStopHook(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	if prov.call != 2 {
-		t.Fatalf("provider calls = %d, want plan + approved execution", prov.call)
+	if prov.call != 3 {
+		t.Fatalf("provider calls = %d, want plan + read + answer", prov.call)
 	}
 	if promptSubmitEvents != 1 {
 		t.Fatalf("UserPromptSubmit events = %d, want one for plan + approved execution unit", promptSubmitEvents)
@@ -697,50 +655,43 @@ func TestTurnOrchestratorAutoReasoningLanguageUsesRawPromptForRefTurns(t *testin
 	}
 }
 
-func TestTurnOrchestratorCheckpointBoundaryPrecedesUserMessage(t *testing.T) {
+// TestTurnOrchestratorCheckpointPromptIsRawUserInput verifies the rewind picker
+// label records the user's own text, not the composed provider input. compose()
+// prefixes the turn with transient blocks (<response-language>,
+// <reasoning-language>, plan marker, memory, hook context, …); storing that
+// string as checkpoint.Prompt made the Esc-Esc picker show a wall of prefab
+// prompt text instead of the user's messages.
+func TestTurnOrchestratorCheckpointPromptIsRawUserInput(t *testing.T) {
 	dir := t.TempDir()
 	path := filepath.Join(dir, "session.jsonl")
 	sess := agent.NewSession("sys")
 	exec := agent.New(nil, nil, sess, agent.Options{}, event.Discard)
 	runner := &recordingSessionRunner{session: sess}
 	c := New(Options{
-		Runner:      runner,
-		Executor:    exec,
-		SessionDir:  dir,
-		SessionPath: path,
-		Label:       "test",
+		Runner:            runner,
+		Executor:          exec,
+		SessionDir:        dir,
+		SessionPath:       path,
+		Label:             "test",
+		ResponseLanguage:  "zh",
+		ReasoningLanguage: "en",
 	})
-
 	o := newTurnOrchestrator(c)
-	if err := o.runTurnWithRawDisplay(context.Background(), "write the test", "write the test", ""); err != nil {
+	const raw = "fix the parser"
+	if err := o.runTurnWithRawDisplay(context.Background(), raw, raw, ""); err != nil {
 		t.Fatal(err)
 	}
-
-	if !c.CheckpointHasBoundary(0) {
-		t.Fatal("checkpoint boundary should be available for the orchestrated turn")
+	cps := c.Checkpoints()
+	if len(cps) != 1 {
+		t.Fatalf("checkpoints = %+v, want exactly one", cps)
 	}
-	if len(sess.Messages) != 2 || sess.Messages[1].Content != "write the test" {
-		t.Fatalf("session messages after turn = %+v, want system + user", sess.Messages)
+	if got := cps[0].Prompt; got != raw {
+		t.Fatalf("checkpoint prompt = %q, want raw user input %q (composed text leaked into the rewind picker)", got, raw)
 	}
-	loaded, err := agent.LoadSession(path)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if len(loaded.Messages) != 2 {
-		t.Fatalf("saved messages = %d, want system + user", len(loaded.Messages))
-	}
-	meta, ok, err := agent.LoadBranchMeta(path)
-	if err != nil || !ok {
-		t.Fatalf("load branch meta ok=%v err=%v", ok, err)
-	}
-	if meta.UpdatedAt.IsZero() {
-		t.Fatal("activity meta should be marked after transcript changes")
-	}
-	if err := c.Rewind(0, RewindConversation); err != nil {
-		t.Fatal(err)
-	}
-	if len(sess.Messages) != 1 {
-		t.Fatalf("session messages after rewind = %d, want boundary before user message", len(sess.Messages))
+	for _, prefab := range []string{"<response-language>", "<reasoning-language>"} {
+		if strings.Contains(cps[0].Prompt, prefab) {
+			t.Fatalf("checkpoint prompt contains %q: %q", prefab, cps[0].Prompt)
+		}
 	}
 }
 
@@ -804,7 +755,7 @@ func TestTurnOrchestratorStopFailureHookCancelledContext(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel()
 	o := newTurnOrchestrator(c)
-	if err := o.runTurnWithRawDisplay(ctx, "test", "test", ""); err != nil && err != context.Canceled {
+	if err := o.runTurnWithRawDisplay(ctx, "test", "test", ""); err != nil && !errors.Is(err, context.Canceled) {
 		t.Fatal(err)
 	}
 	if stopCalls != 1 {
@@ -928,7 +879,7 @@ func TestTurnOrchestratorInterruptedAfterCompactionRelocatesVisibleTurn(t *testi
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			sess := agent.NewSession("system")
-			for i := 0; i < 3; i++ {
+			for range 3 {
 				sess.Add(provider.Message{Role: provider.RoleUser, Content: "old task"})
 				sess.Add(provider.Message{Role: provider.RoleAssistant, Content: "old answer"})
 			}
@@ -1018,12 +969,12 @@ func TestTurnOrchestratorCancelBeforeRunnerAddsUserPreservesVisiblePrompt(t *tes
 	c.canceling = true
 	c.mu.Unlock()
 
-	err := newTurnOrchestrator(c).runTurnWithRawDisplay(context.Background(), "inspect @diagram.png", "inspect @diagram.png", "")
+	err := newTurnOrchestrator(c).runTurnWithImageRefsRawDisplay(context.Background(), "Referenced context:\n\n<image path=\"diagram.png\">\n@diagram.png\n</image>\n\ninspect the diagnostic", "inspect the diagnostic", "@diagram.png", "")
 	if !errors.Is(err, context.Canceled) {
 		t.Fatalf("expected context.Canceled, got %v", err)
 	}
 	msgs := sess.Snapshot()
-	if len(msgs) != 3 || msgs[1].Role != provider.RoleUser || msgs[1].Content != "inspect @diagram.png" || !msgs[2].LocalOnly {
+	if len(msgs) != 3 || msgs[1].Role != provider.RoleUser || !strings.Contains(msgs[1].Content, "inspect the diagnostic") || !msgs[2].LocalOnly {
 		t.Fatalf("session after pre-executor cancel = %+v, want user plus recovery marker", msgs)
 	}
 	if len(msgs[1].Images) != 1 || !strings.HasPrefix(msgs[1].Images[0], "data:image/png;base64,") {

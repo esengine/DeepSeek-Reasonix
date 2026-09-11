@@ -167,3 +167,171 @@ func TestRepositoryConfigCannotRunCommandsDuringInspection(t *testing.T) {
 		t.Fatalf("stat marker: %v", err)
 	}
 }
+
+// The clean-filter residual from the advisory: a .gitattributes entry plus a
+// filter.<driver>.clean command in the repository's local config makes
+// `git diff` run that command to produce the "clean" working-tree side, and
+// neither --no-ext-diff nor --no-textconv covers it. Diff invocations must
+// neutralize every locally-defined driver while still rendering a correct
+// diff (the emptied filter is an identity pass-through, not a content wipe).
+func TestDiffDoesNotRunRepositoryCleanFilters(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("payload script is POSIX shell")
+	}
+	if _, err := exec.LookPath("git"); err != nil {
+		t.Skip("git not installed")
+	}
+
+	repo := t.TempDir()
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+
+	run := func(args ...string) {
+		t.Helper()
+		if out, err := Command(ctx, repo, args...).CombinedOutput(); err != nil {
+			t.Fatalf("git %v: %v: %s", args, err, out)
+		}
+	}
+	run("init", "--quiet")
+	run("config", "user.email", "test@example.com")
+	run("config", "user.name", "test")
+
+	marker := filepath.Join(t.TempDir(), "executed")
+	payload := filepath.Join(t.TempDir(), "clean.sh")
+	script := "#!/bin/sh\ntouch " + marker + "\ncat\n"
+	if err := os.WriteFile(payload, []byte(script), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(repo, ".gitattributes"), []byte("secret.bin filter=pwn\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(repo, "secret.bin"), []byte("secret\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	run("add", ".gitattributes", "secret.bin")
+	run("commit", "--quiet", "-m", "initial")
+	run("config", "filter.pwn.clean", payload)
+	run("config", "filter.pwn.process", payload)
+	run("config", "filter.pwn.required", "true")
+	if err := os.WriteFile(filepath.Join(repo, "secret.bin"), []byte("secret\nchanged\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	// The exact shape desktop/workspace_changes.go builds: -C inside args.
+	out, err := Command(ctx, "", "-C", repo, "diff", "--no-ext-diff", "--no-textconv", "--relative", "HEAD", "--", filepath.FromSlash("secret.bin")).CombinedOutput()
+	if err != nil {
+		t.Fatalf("diff failed: %v: %s", err, out)
+	}
+	if !strings.Contains(string(out), "changed") {
+		t.Fatalf("diff output lost the working-tree change (filter neutralization must pass content through):\n%s", out)
+	}
+	// And the shape internal/cli/gitstatus.go builds: dir parameter + diff.
+	if out, err = Command(ctx, repo, "diff", "--numstat", "HEAD", "--").CombinedOutput(); err != nil {
+		t.Fatalf("numstat diff failed: %v: %s", err, out)
+	}
+
+	if _, err := os.Stat(marker); err == nil {
+		t.Fatal("repository clean filter ran during a diff")
+	} else if !os.IsNotExist(err) {
+		t.Fatalf("stat marker: %v", err)
+	}
+}
+
+func TestFilterNeutralizingConfigOnlyForDiff(t *testing.T) {
+	repo := t.TempDir()
+	if err := os.MkdirAll(filepath.Join(repo, ".git"), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	config := `[core]
+	bare = false
+[filter "lfs"]
+	clean = git-lfs clean -- %f
+	process = git-lfs filter-process
+	required = true
+[filter "pwn"]
+	smudge = whatever
+`
+	if err := os.WriteFile(filepath.Join(repo, ".git", "config"), []byte(config), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	for _, want := range []string{
+		"filter.lfs.clean=", "filter.lfs.process=", "filter.lfs.required=false",
+		"filter.pwn.clean=", "filter.pwn.process=", "filter.pwn.required=false",
+	} {
+		args := argsFor("linux", repo, nil, "diff", "HEAD")
+		if !hasConfig(args, want) {
+			t.Fatalf("diff args = %v, want -c %s", args, want)
+		}
+	}
+
+	// The -C-inside-args form workspace_changes.go uses resolves the same repo.
+	args := argsFor("linux", "", nil, "-C", repo, "diff", "--no-ext-diff")
+	if !hasConfig(args, "filter.lfs.clean=") {
+		t.Fatalf("args with -C inside = %v, want filter.lfs.clean= override", args)
+	}
+
+	// Non-diff subcommands carry no filter overrides, and a repo without
+	// filter sections adds nothing even for diff.
+	for _, sub := range []string{"status", "rev-parse", "diff-tree"} {
+		if args := argsFor("linux", repo, nil, sub, "--porcelain=v1"); hasConfig(args, "filter.lfs.clean=") {
+			t.Fatalf("%s args = %v, must not carry diff-only filter overrides", sub, args)
+		}
+	}
+	clean := t.TempDir()
+	if err := os.MkdirAll(filepath.Join(clean, ".git"), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(clean, ".git", "config"), []byte("[core]\n\tbare = false\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if args := argsFor("linux", clean, nil, "diff"); slices.Contains(args, "filter.") {
+		t.Fatalf("filter-free repo diff args = %v, want no filter overrides", args)
+	}
+}
+
+// A linked worktree keeps its config next to the gitdir the .git file points
+// at; the neutralization must follow the link.
+func TestLocalFilterDriversFollowsWorktreeLink(t *testing.T) {
+	main := t.TempDir()
+	if err := os.MkdirAll(filepath.Join(main, ".git"), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	wt := t.TempDir()
+	if err := os.WriteFile(filepath.Join(wt, ".git"), []byte("gitdir: "+filepath.Join(main, ".git")+"\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(main, ".git", "config"), []byte("[filter \"x\"]\n\tclean = cmd\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	if got := localFilterDrivers(wt); !slices.Equal(got, []string{"x"}) {
+		t.Fatalf("localFilterDrivers(worktree) = %v, want [x]", got)
+	}
+	args := argsFor("linux", wt, nil, "diff")
+	if !hasConfig(args, "filter.x.clean=") {
+		t.Fatalf("worktree diff args = %v, want filter.x.clean= override", args)
+	}
+}
+
+func TestGitSubcommandSkipsGlobalOptions(t *testing.T) {
+	for _, tt := range []struct {
+		args []string
+		sub  string
+		cDir string
+	}{
+		{args: []string{"status"}, sub: "status"},
+		{args: []string{"diff", "HEAD"}, sub: "diff"},
+		{args: []string{"-C", "/repo", "diff"}, sub: "diff", cDir: "/repo"},
+		{args: []string{"-C/repo", "status"}, sub: "status", cDir: "/repo"},
+		{args: []string{"-c", "a=b", "-C", "/r", "log"}, sub: "log", cDir: "/r"},
+		{args: []string{"--no-pager", "status"}, sub: "status"},
+		{args: []string{}},
+		{args: []string{"-c", "a=b"}},
+	} {
+		sub, cDir := gitSubcommand(tt.args)
+		if sub != tt.sub || cDir != tt.cDir {
+			t.Fatalf("gitSubcommand(%v) = (%q, %q), want (%q, %q)", tt.args, sub, cDir, tt.sub, tt.cDir)
+		}
+	}
+}

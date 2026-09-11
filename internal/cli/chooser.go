@@ -81,7 +81,7 @@ func (c *chooser) answers() []event.AskAnswer {
 	return out
 }
 
-// --- chatTUI integration ---
+// chatTUI integration
 
 // handleChooserKey routes a keystroke to the active chooser (when not in free-text
 // mode — that's handled in Update by the textarea). Selecting an option in a
@@ -168,7 +168,7 @@ func (m chatTUI) chooserActivate(row int) (tea.Model, tea.Cmd) {
 	case row == len(q.Options): // Type something
 		c.typing = true
 		c.cursor = row
-		m.input.Reset()
+		m.resetComposerInput()
 		m.input.SetHeight(1)
 		m.refreshInputPlaceholder()
 		return m, nil

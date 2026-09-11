@@ -53,11 +53,12 @@ func TestResolveRuntimeCommandExpandsPluginRoot(t *testing.T) {
 func TestStartupFailureRedactsAndBoundsStderr(t *testing.T) {
 	pkg, installed := fakeSidecarPackage(t, "fakeplugin", func(rt *pluginpkg.RuntimeSpec) {
 		rt.Env[fakeEnvMode] = "stderr_flood"
-		rt.Env[fakeEnvInitResult] = `{"protocolVersion":"2","name":"fake","version":"1","stateSchemaVersion":0}`
+		// Wrong major forces handshake failure after stderr flood.
+		rt.Env[fakeEnvInitResult] = `{"protocolVersion":"1","name":"fake","version":"1","stateSchemaVersion":0}`
 	})
 	_, err := StartClient(context.Background(), ClientOptions{Package: pkg, Installed: installed, Session: testSessionContext()})
 	if err == nil {
-		t.Fatal("StartClient succeeded with protocol major 2")
+		t.Fatal("StartClient succeeded despite protocol mismatch")
 	}
 	var failure *startupFailure
 	if !errors.As(err, &failure) {

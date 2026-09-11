@@ -21,7 +21,7 @@ func TestParallelBashMarkersKeepOwnLineCount(t *testing.T) {
 		m.ingestEvent(event.Event{Kind: event.ToolDispatch, Tool: event.Tool{ID: id, Name: "bash", Args: `{"command":"ls"}`, Partial: false}})
 	}
 	for _, id := range ids {
-		for i := 0; i < 22; i++ {
+		for range 22 {
 			m.ingestEvent(event.Event{Kind: event.ToolProgress, Tool: event.Tool{ID: id, Output: "line\n"}})
 		}
 	}

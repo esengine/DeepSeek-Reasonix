@@ -4,7 +4,16 @@ import (
 	"os"
 	"testing"
 	"time"
+
+	"reasonix/internal/provider"
 )
+
+// mainConversationRequests is retained as a test helper name for callers that
+// predate the removal of the completion validator. All provider requests now
+// belong to the main deterministic Agent loop.
+func mainConversationRequests(reqs []provider.Request) []provider.Request {
+	return append([]provider.Request(nil), reqs...)
+}
 
 // robustTempDir is a drop-in for t.TempDir whose cleanup retries RemoveAll for a
 // short window. Tests here build a full Controller (Build / control.New); at
@@ -25,7 +34,7 @@ func robustTempDir(t *testing.T) string {
 	}
 	t.Cleanup(func() {
 		var rmErr error
-		for i := 0; i < 100; i++ {
+		for range 100 {
 			if rmErr = os.RemoveAll(dir); rmErr == nil {
 				return
 			}

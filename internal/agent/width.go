@@ -31,7 +31,7 @@ func streamedRows(s string, width int) int {
 		width = 80
 	}
 	rows := 0
-	for _, line := range strings.Split(s, "\n") {
+	for line := range strings.SplitSeq(s, "\n") {
 		if w := visibleWidth(line); w > 0 {
 			rows += (w - 1) / width
 		}

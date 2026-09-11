@@ -9,7 +9,7 @@ import (
 	"reasonix/internal/event"
 )
 
-func TestBuildKeepsExecutorWhenPlannerModelIsUnresolvable(t *testing.T) {
+func TestBuildFailsWhenPlannerModelIsUnresolvable(t *testing.T) {
 	isolateConfigHome(t)
 	dir := robustTempDir(t)
 	t.Chdir(dir)
@@ -28,28 +28,11 @@ kind = "boot-token-profile-test"
 model = "executor-model"
 `)
 
-	var notices []string
-	sink := event.FuncSink(func(e event.Event) {
-		if e.Kind == event.Notice {
-			notices = append(notices, e.Text)
-		}
-	})
-
-	ctrl, err := Build(context.Background(), Options{Sink: sink})
-	if err != nil {
-		t.Fatalf("an unusable optional planner must not block startup: %v", err)
+	ctrl, err := Build(context.Background(), Options{Sink: event.Discard})
+	if err == nil || !strings.Contains(err.Error(), "planner_model") {
+		t.Fatalf("Build = (%v, %v), want a planner_model configuration error", ctrl, err)
 	}
-	if ctrl == nil {
-		t.Fatal("Build returned no controller")
-	}
-
-	var warned bool
-	for _, n := range notices {
-		if strings.Contains(n, "planner_model") {
-			warned = true
-		}
-	}
-	if !warned {
-		t.Fatalf("the dropped planner must be announced, got notices %v", notices)
+	if ctrl != nil {
+		t.Fatal("Build must not return a controller when planner_model is unusable")
 	}
 }

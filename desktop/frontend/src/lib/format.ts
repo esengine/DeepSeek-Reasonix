@@ -78,3 +78,23 @@ export function formatOptionalTokens(tokens?: number | null, options?: TokenForm
   if (typeof tokens !== "number" || tokens <= 0) return "-";
   return formatTokens(tokens, options);
 }
+
+/**
+ * Format an output-throughput reading for display.
+ *
+ * Returns `null` when unmeasurable so callers can omit the row entirely. Sub-one
+ * readings collapse to `<1 t/s` rather than rounding away to `0 t/s`, and an
+ * estimated reading carries the product-wide `≈` cue.
+ *
+ * @example
+ *  formatTps(20)          // "20 t/s"
+ *  formatTps(20, true)    // "≈20 t/s"
+ *  formatTps(1 / 3)       // "<1 t/s"
+ *  formatTps(0)           // null
+ */
+export function formatTps(tps?: number | null, estimated = false): string | null {
+  if (!tps || tps <= 0) return null;
+  const prefix = estimated ? "≈" : "";
+  if (tps < 1) return `${prefix}<1 t/s`;
+  return `${prefix}${Math.round(tps)} t/s`;
+}

@@ -22,7 +22,6 @@ func warningFingerprint(label string) string {
 	digest := sha256.Sum256([]byte(label))
 	return hex.EncodeToString(digest[:])
 }
-
 func missingReasoningTestNow() time.Time {
 	return time.Now().Add(-time.Hour).Truncate(time.Millisecond)
 }
@@ -406,14 +405,12 @@ func TestMissingReasoningWarnStateConcurrentSameIncidentWarnsOnce(t *testing.T) 
 	var warned atomic.Int64
 	var wg sync.WaitGroup
 	for range 8 {
-		wg.Add(1)
-		go func() {
-			defer wg.Done()
+		wg.Go(func() {
 			<-start
 			if newMissingReasoningWarnState(dir).claimAt(fingerprint, now) {
 				warned.Add(1)
 			}
-		}()
+		})
 	}
 	close(start)
 	wg.Wait()
@@ -490,14 +487,12 @@ func TestMissingReasoningWarnStateConcurrentClaimsKeepEveryConfiguration(t *test
 	var wg sync.WaitGroup
 	for _, label := range labels {
 		fingerprint := warningFingerprint(label)
-		wg.Add(1)
-		go func() {
-			defer wg.Done()
+		wg.Go(func() {
 			<-start
 			if !newMissingReasoningWarnState(dir).claimAt(fingerprint, now) {
 				t.Errorf("fresh configuration %q did not claim its notice", label)
 			}
-		}()
+		})
 	}
 	close(start)
 	wg.Wait()

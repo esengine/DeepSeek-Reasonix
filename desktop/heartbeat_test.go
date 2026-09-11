@@ -2,6 +2,8 @@ package main
 
 import (
 	"context"
+	"encoding/json"
+	"errors"
 	"os"
 	"path/filepath"
 	"testing"
@@ -19,6 +21,100 @@ func TestHeartbeatConfigPathUsesReasonixUserStateDir(t *testing.T) {
 
 	if got := engine.configPath(); got != want {
 		t.Fatalf("configPath = %q, want %q", got, want)
+	}
+}
+
+func TestHeartbeatConfigRevisionKeepsLegacyFilesReadable(t *testing.T) {
+	isolateDesktopUserDirs(t)
+	engine := &HeartbeatEngine{}
+	legacy := `{"tasks":[{"id":"legacy","title":"Legacy","interval":"1h","enabled":false}]}`
+	if err := os.MkdirAll(filepath.Dir(engine.configPath()), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(engine.configPath(), []byte(legacy), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	tasks := engine.ReloadTasks()
+	if len(tasks) != 1 || tasks[0].ID != "legacy" {
+		t.Fatalf("legacy tasks = %+v, want one readable task", tasks)
+	}
+	if engine.cfgRevision != 0 {
+		t.Fatalf("legacy revision = %d, want zero", engine.cfgRevision)
+	}
+	if err := engine.ReplaceTasks(tasks); err != nil {
+		t.Fatalf("upgrade save: %v", err)
+	}
+	data, err := os.ReadFile(engine.configPath())
+	if err != nil {
+		t.Fatal(err)
+	}
+	var cfg heartbeatConfig
+	if err := json.Unmarshal(data, &cfg); err != nil {
+		t.Fatal(err)
+	}
+	if cfg.Revision != 1 || len(cfg.Tasks) != 1 {
+		t.Fatalf("upgraded config = %+v, want revision 1 with legacy task", cfg)
+	}
+	var previousReader struct {
+		Tasks []HeartbeatTask `json:"tasks"`
+	}
+	if err := json.Unmarshal(data, &previousReader); err != nil || len(previousReader.Tasks) != 1 {
+		t.Fatalf("previous reader could not ignore revision: tasks=%+v err=%v", previousReader.Tasks, err)
+	}
+}
+
+func TestHeartbeatReplaceTasksRejectsStaleRevision(t *testing.T) {
+	isolateDesktopUserDirs(t)
+	engine := &HeartbeatEngine{}
+	initial := []HeartbeatTask{{ID: "same", Title: "initial", Interval: "1h", Enabled: false}}
+	if err := engine.saveTasks(initial); err != nil {
+		t.Fatal(err)
+	}
+	engine.ReloadTasks()
+	external := []HeartbeatTask{{ID: "same", Title: "edited externally", Interval: "2h", Enabled: false}}
+	if err := engine.saveTasks(external); err != nil {
+		t.Fatal(err)
+	}
+	err := engine.ReplaceTasks([]HeartbeatTask{{ID: "same", Title: "stale UI edit", Interval: "3h", Enabled: false}})
+	if !errors.Is(err, ErrHeartbeatConfigConflict) {
+		t.Fatalf("ReplaceTasks error = %v, want config conflict", err)
+	}
+	onDisk := engine.loadTasks()
+	if len(onDisk) != 1 || onDisk[0].Title != "edited externally" || onDisk[0].Interval != "2h" {
+		t.Fatalf("stale replacement changed disk config: %+v", onDisk)
+	}
+	if got := engine.ListTasks()[0].Title; got != "initial" {
+		t.Fatalf("stale replacement changed in-memory tasks: %q", got)
+	}
+}
+
+func TestHeartbeatReplaceConfigRejectsSameRevisionExternalEditByETag(t *testing.T) {
+	isolateDesktopUserDirs(t)
+	engine := &HeartbeatEngine{}
+	initial := []HeartbeatTask{{ID: "same", Title: "initial", Interval: "1h", Enabled: false}}
+	if err := engine.saveTasks(initial); err != nil {
+		t.Fatal(err)
+	}
+	loaded := engine.ReloadConfig()
+	external := heartbeatConfig{Revision: loaded.Revision, Tasks: []HeartbeatTask{{ID: "same", Title: "edited externally", Interval: "2h", Enabled: false}}}
+	data, err := json.MarshalIndent(external, "", "  ")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(engine.configPath(), data, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	_, err = engine.ReplaceConfig(HeartbeatConfigUpdate{
+		Revision: loaded.Revision,
+		ETag:     loaded.ETag,
+		Tasks:    []HeartbeatTask{{ID: "same", Title: "stale UI edit", Interval: "3h", Enabled: false}},
+	})
+	if !errors.Is(err, ErrHeartbeatConfigConflict) {
+		t.Fatalf("ReplaceConfig error = %v, want config conflict", err)
+	}
+	onDisk := engine.loadTasks()
+	if len(onDisk) != 1 || onDisk[0].Title != "edited externally" {
+		t.Fatalf("same-revision external edit was overwritten: %+v", onDisk)
 	}
 }
 
@@ -65,6 +161,75 @@ func TestHeartbeatTaskDueAtWaitsForDailySchedule(t *testing.T) {
 	}
 }
 
+func TestHeartbeatTaskDueAtCronExpression(t *testing.T) {
+	loc := time.FixedZone("test", 8*60*60)
+	task := HeartbeatTask{
+		ID:        "cron",
+		Interval:  "0 9 * * 1-5", // weekdays at 09:00
+		Enabled:   true,
+		CreatedAt: time.Date(2026, 6, 15, 0, 0, 0, 0, loc).UnixMilli(), // Monday
+	}
+
+	// Not due outside the cron window (Monday 08:59).
+	if heartbeatTaskDueAt(task, time.Date(2026, 6, 15, 8, 59, 0, 0, loc)) {
+		t.Fatal("cron task should wait for the configured time")
+	}
+	// Due exactly at Monday 09:00.
+	if !heartbeatTaskDueAt(task, time.Date(2026, 6, 15, 9, 0, 0, 0, loc)) {
+		t.Fatal("cron task should be due at the configured time")
+	}
+	// Not due again within the same minute after running.
+	task.LastRunAt = time.Date(2026, 6, 15, 9, 0, 0, 0, loc).UnixMilli()
+	if heartbeatTaskDueAt(task, time.Date(2026, 6, 15, 9, 0, 30, 0, loc)) {
+		t.Fatal("cron task should not fire twice for the same occurrence")
+	}
+	// Due again on the next weekday.
+	if !heartbeatTaskDueAt(task, time.Date(2026, 6, 16, 9, 0, 0, 0, loc)) {
+		t.Fatal("cron task should be due at the next weekday occurrence")
+	}
+	// Weekend (Saturday) is not part of 1-5.
+	if heartbeatTaskDueAt(task, time.Date(2026, 6, 20, 9, 0, 0, 0, loc)) {
+		t.Fatal("cron task should skip weekends")
+	}
+}
+
+func TestHeartbeatTaskDueAtCronEvery15Minutes(t *testing.T) {
+	loc := time.FixedZone("test", 8*60*60)
+	task := HeartbeatTask{
+		ID:        "cron-15",
+		Interval:  "*/15 * * * *",
+		Enabled:   true,
+		CreatedAt: time.Date(2026, 6, 18, 0, 0, 0, 0, loc).UnixMilli(),
+	}
+
+	for _, tt := range []struct {
+		at   time.Time
+		want bool
+	}{
+		{time.Date(2026, 6, 18, 10, 7, 0, 0, loc), false},
+		{time.Date(2026, 6, 18, 10, 15, 0, 0, loc), true},
+		{time.Date(2026, 6, 18, 10, 30, 0, 0, loc), true},
+		{time.Date(2026, 6, 18, 10, 31, 0, 0, loc), false},
+	} {
+		if got := heartbeatTaskDueAt(task, tt.at); got != tt.want {
+			t.Fatalf("cron */15 due at %v = %v, want %v", tt.at, got, tt.want)
+		}
+	}
+}
+
+func TestHeartbeatTaskDueAtCronDedupesByOccurrenceMinute(t *testing.T) {
+	loc := time.UTC
+	lastRun := time.Date(2026, 6, 18, 9, 1, 41, 0, loc)
+	task := HeartbeatTask{Interval: "* * * * *", LastRunAt: lastRun.UnixMilli()}
+
+	if heartbeatTaskDueAt(task, time.Date(2026, 6, 18, 9, 1, 59, 0, loc)) {
+		t.Fatal("cron task must not run twice in one occurrence minute")
+	}
+	if !heartbeatTaskDueAt(task, time.Date(2026, 6, 18, 9, 2, 10, 0, loc)) {
+		t.Fatal("every-minute cron task must run in the next occurrence minute")
+	}
+}
+
 func TestHeartbeatTaskDueAtHonorsWeeklySelection(t *testing.T) {
 	loc := time.UTC
 	task := HeartbeatTask{
@@ -91,10 +256,20 @@ func (s heartbeatStatusStub) RuntimeStatus() control.RuntimeStatus {
 }
 
 type heartbeatExecuteTaskCtrlStub struct {
-	control.SessionAPI
+	stubSessionAPI
 	status       control.RuntimeStatus
 	submitted    []string
 	approvalMode string
+}
+
+type heartbeatSignalingCtrlStub struct {
+	heartbeatExecuteTaskCtrlStub
+	submittedSignal chan struct{}
+}
+
+func (s *heartbeatSignalingCtrlStub) SubmitUserTurn(input, display string) {
+	s.heartbeatExecuteTaskCtrlStub.SubmitUserTurn(input, display)
+	close(s.submittedSignal)
 }
 
 func (s *heartbeatExecuteTaskCtrlStub) RuntimeStatus() control.RuntimeStatus {
@@ -120,6 +295,10 @@ func (s *heartbeatExecuteTaskCtrlStub) AutoApproveTools() bool {
 
 func (s *heartbeatExecuteTaskCtrlStub) Goal() string {
 	return ""
+}
+
+func (s *heartbeatExecuteTaskCtrlStub) GoalStatus() string {
+	return control.GoalStatusStopped
 }
 
 func (s *heartbeatExecuteTaskCtrlStub) ToolApprovalMode() string {
@@ -150,16 +329,44 @@ func TestHeartbeatControllerBusyIncludesPendingPrompt(t *testing.T) {
 	}
 }
 
+func TestHeartbeatTaskExecutionReservationSerializesTriggers(t *testing.T) {
+	engine := &HeartbeatEngine{}
+	if !engine.claimTask("same") {
+		t.Fatal("first task claim should succeed")
+	}
+	second := make(chan bool, 1)
+	go func() { second <- engine.claimTask("same") }()
+	if <-second {
+		t.Fatal("overlapping task trigger should be rejected")
+	}
+	engine.releaseTask("same")
+	if !engine.claimTask("same") {
+		t.Fatal("task should be claimable after the owner releases it")
+	}
+	engine.releaseTask("same")
+}
+
 func TestHeartbeatExecuteTaskPersistsFreshConversationTopicID(t *testing.T) {
 	isolateDesktopUserDirs(t)
 	app := NewApp()
 	app.ctx = context.Background()
 	app.readyHook = func() {}
-	app.runtimeEvents.emit = func(context.Context, string, ...interface{}) {}
+	app.runtimeEvents.emit = func(context.Context, string, ...any) {}
 	engine := &HeartbeatEngine{
 		app:           app,
 		pendingTopics: map[string]heartbeatPendingTopic{},
 	}
+	seed := HeartbeatTask{
+		ID:                     "fresh",
+		Title:                  "Fresh",
+		Prompt:                 "ping",
+		NewConversationEachRun: true,
+		ApprovalMode:           "auto",
+	}
+	if err := engine.saveTasks([]HeartbeatTask{seed}); err != nil {
+		t.Fatal(err)
+	}
+	engine.ReloadConfig()
 	ctrl := &heartbeatExecuteTaskCtrlStub{}
 	injected := make(chan struct{})
 
@@ -205,13 +412,7 @@ func TestHeartbeatExecuteTaskPersistsFreshConversationTopicID(t *testing.T) {
 		}
 	}()
 
-	got := engine.executeTask(HeartbeatTask{
-		ID:                     "fresh",
-		Title:                  "Fresh",
-		Prompt:                 "ping",
-		NewConversationEachRun: true,
-		ApprovalMode:           "auto",
-	})
+	got := engine.executeTaskWithLease(seed, nil)
 
 	if got.TopicID == "" {
 		t.Fatal("fresh conversation task should return the newly created topic ID")
@@ -236,11 +437,22 @@ func TestHeartbeatExecuteTaskSkipsPendingPrompt(t *testing.T) {
 	app := NewApp()
 	app.ctx = context.Background()
 	app.readyHook = func() {}
-	app.runtimeEvents.emit = func(context.Context, string, ...interface{}) {}
+	app.runtimeEvents.emit = func(context.Context, string, ...any) {}
 	engine := &HeartbeatEngine{
 		app:           app,
 		pendingTopics: map[string]heartbeatPendingTopic{},
 	}
+	seed := HeartbeatTask{
+		ID:                     "fresh",
+		Title:                  "Fresh",
+		Prompt:                 "ping",
+		NewConversationEachRun: true,
+		ApprovalMode:           "auto",
+	}
+	if err := engine.saveTasks([]HeartbeatTask{seed}); err != nil {
+		t.Fatal(err)
+	}
+	engine.ReloadConfig()
 	ctrl := &heartbeatExecuteTaskCtrlStub{status: control.RuntimeStatus{PendingPrompt: true}}
 	injected := make(chan struct{})
 
@@ -286,13 +498,7 @@ func TestHeartbeatExecuteTaskSkipsPendingPrompt(t *testing.T) {
 		}
 	}()
 
-	got := engine.executeTask(HeartbeatTask{
-		ID:                     "fresh",
-		Title:                  "Fresh",
-		Prompt:                 "ping",
-		NewConversationEachRun: true,
-		ApprovalMode:           "auto",
-	})
+	got := engine.executeTaskWithLease(seed, nil)
 
 	if got.LastRunAt != 0 {
 		t.Fatalf("pending prompt should not mark heartbeat run complete, LastRunAt=%d", got.LastRunAt)
@@ -383,6 +589,27 @@ func TestHeartbeatMergeRunUpdatesPreservesConcurrentEditsAndDeletes(t *testing.T
 		if task.ID == "deleted" {
 			t.Fatalf("deleted task was resurrected: %+v", engine.tasks)
 		}
+	}
+}
+
+func TestHeartbeatMergeRunUpdatesNeverRegressesNewerRunState(t *testing.T) {
+	tasks := []HeartbeatTask{{
+		ID:        "run",
+		TopicID:   "topic-new",
+		LastRunAt: 300,
+	}}
+	mergeHeartbeatRunUpdates(tasks, map[string]HeartbeatTask{
+		"run": {ID: "run", TopicID: "topic-old", LastRunAt: 200},
+	})
+	if tasks[0].TopicID != "topic-new" || tasks[0].LastRunAt != 300 {
+		t.Fatalf("stale run state regressed the owner result: %+v", tasks[0])
+	}
+
+	mergeHeartbeatRunUpdates(tasks, map[string]HeartbeatTask{
+		"run": {ID: "run", TopicID: "topic-latest", LastRunAt: 400},
+	})
+	if tasks[0].TopicID != "topic-latest" || tasks[0].LastRunAt != 400 {
+		t.Fatalf("newer run state was not adopted: %+v", tasks[0])
 	}
 }
 
@@ -504,7 +731,6 @@ func TestHeartbeatTickAdoptsExternalFileEdits(t *testing.T) {
 	}
 	engine.mu.Lock()
 	engine.tasks = engine.loadTasks()
-	engine.noteConfigModLocked()
 	engine.mu.Unlock()
 
 	// External edit lands after the engine last touched the file. Force the
@@ -525,5 +751,34 @@ func TestHeartbeatTickAdoptsExternalFileEdits(t *testing.T) {
 	tasks := engine.ListTasks()
 	if len(tasks) != 2 || tasks[1].ID != "b" {
 		t.Fatalf("tick did not adopt the external edit: %+v", tasks)
+	}
+}
+
+func TestHeartbeatExternalDeletionDoesNotResurrectTasks(t *testing.T) {
+	isolateDesktopUserDirs(t)
+	engine := newHeartbeatEngine(nil)
+	if err := engine.saveTasks([]HeartbeatTask{{ID: "deleted", Title: "old", Interval: "1h", Enabled: true}}); err != nil {
+		t.Fatal(err)
+	}
+	snapshot, err := engine.readConfigSnapshot()
+	if err != nil {
+		t.Fatal(err)
+	}
+	engine.mu.Lock()
+	engine.recordConfigSnapshotLocked(snapshot)
+	engine.tasks = append([]HeartbeatTask(nil), snapshot.cfg.Tasks...)
+	if err := os.Remove(engine.configPath()); err != nil {
+		engine.mu.Unlock()
+		t.Fatal(err)
+	}
+	engine.adoptExternalEditsLocked()
+	if len(engine.tasks) != 0 || !engine.cfgDeleted {
+		engine.mu.Unlock()
+		t.Fatalf("deleted config left stale tasks: tasks=%+v deleted=%v", engine.tasks, engine.cfgDeleted)
+	}
+	engine.mergeRunUpdatesLocked(map[string]HeartbeatTask{"deleted": {ID: "deleted", LastRunAt: 123}})
+	engine.mu.Unlock()
+	if _, err := os.Stat(engine.configPath()); !os.IsNotExist(err) {
+		t.Fatalf("deleted heartbeat config was recreated, stat err=%v", err)
 	}
 }

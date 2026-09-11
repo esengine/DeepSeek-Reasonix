@@ -535,15 +535,20 @@ const desc = "Browse, publish, and install community skills, plugins, and MCP se
     // Nav account state, via the site's shared account client. Signed out → a
     // sign-in link; signed in → the handle (linking to /account) + a log-out control.
     async function mountAccount() {
-      const slot = document.querySelector('[data-account-slot]');
+      const slots = [...document.querySelectorAll('[data-account-slot]')];
       const user = await currentAccount();
+      if (!slots.length) return null;
       if (!user) {
-        slot.innerHTML = `<a class="btn btn-ghost" href="/login/?next=${encodeURIComponent('/skills/')}"><span class="l-en">Sign in</span><span class="l-zh">登录</span></a>`;
+        slots.forEach((slot) => {
+          slot.innerHTML = `<a class="btn btn-ghost" href="/login/?next=${encodeURIComponent('/skills/')}"><span class="l-en">Sign in</span><span class="l-zh">登录</span></a>`;
+        });
         return null;
       }
       const warn = user.emailVerified ? '' : `<a class="acct-warn" href="/account/"><span class="l-en">unverified</span><span class="l-zh">未验证</span></a>`;
-      slot.innerHTML = `<span class="acct">${warn}<a class="acct-name" href="/account/">@${esc(user.handle)}</a><button type="button" class="acct-logout"><span class="l-en">Log out</span><span class="l-zh">退出</span></button></span>`;
-      slot.querySelector('.acct-logout').addEventListener('click', async () => { await accountLogout(); location.reload(); });
+      slots.forEach((slot) => {
+        slot.innerHTML = `<span class="acct">${warn}<a class="acct-name" href="/account/">@${esc(user.handle)}</a><button type="button" class="acct-logout"><span class="l-en">Log out</span><span class="l-zh">退出</span></button></span>`;
+        slot.querySelector('.acct-logout').addEventListener('click', async () => { await accountLogout(); location.reload(); });
+      });
       return user;
     }
 

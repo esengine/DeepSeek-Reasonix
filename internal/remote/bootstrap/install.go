@@ -72,8 +72,20 @@ func ensureBinary(ctx context.Context, conn Conn, fs *sftpfs.FS, opts Options, h
 // install/upload path replaces it. minVersion is accepted for signature
 // stability but the flag probe is authoritative.
 func locate(ctx context.Context, conn Conn, uploaded, minVersion string) (bin, version string) {
+	return locateWithCommand(ctx, conn, LocateCommand(uploaded), minVersion)
+}
+
+func locateUploaded(ctx context.Context, conn Conn, uploaded, minVersion string) (bin, version string) {
+	return locateWithCommand(ctx, conn, LocateUploadedCommand(uploaded), minVersion)
+}
+
+func locateNPMGlobal(ctx context.Context, conn Conn, minVersion string) (bin, version string) {
+	return locateWithCommand(ctx, conn, LocateNPMGlobalCommand(), minVersion)
+}
+
+func locateWithCommand(ctx context.Context, conn Conn, command, minVersion string) (bin, version string) {
 	_ = minVersion
-	res, err := conn.Exec(ctx, LocateCommand(uploaded))
+	res, err := conn.Exec(ctx, command)
 	if err != nil {
 		return "", ""
 	}
@@ -82,19 +94,31 @@ func locate(ctx context.Context, conn Conn, uploaded, minVersion string) (bin, v
 	if path == "" {
 		return "", ""
 	}
-	supportsPortFile := false
+	supportsPortFile, supportsSessionEvents, supportsDetachedHeal, supportsCaps := false, false, false, false
 	for _, ln := range lines[1:] {
 		ln = strings.TrimSpace(ln)
 		if ln == "portfile:yes" {
 			supportsPortFile = true
 		} else if ln == "portfile:no" {
 			supportsPortFile = false
+		} else if ln == "sessionevents:yes" {
+			supportsSessionEvents = true
+		} else if ln == "sessionevents:no" {
+			supportsSessionEvents = false
+		} else if ln == "detachedheal:yes" {
+			supportsDetachedHeal = true
+		} else if ln == "detachedheal:no" {
+			supportsDetachedHeal = false
+		} else if ln == "caps:yes" {
+			supportsCaps = true
+		} else if ln == "caps:no" {
+			supportsCaps = false
 		} else if v, verr := ParseVersion(ln); verr == nil {
 			version = v
 		}
 	}
-	if !supportsPortFile {
-		// Missing the --port-file flag: treat as unusable so it is upgraded.
+	if !supportsPortFile || !supportsSessionEvents || !supportsDetachedHeal || !supportsCaps {
+		// Missing a required Serve contract: treat as unusable so it is upgraded.
 		return "", ""
 	}
 	return path, version
@@ -109,7 +133,7 @@ func installViaNPM(ctx context.Context, conn Conn, minVersion string) (bin, vers
 		return "", "", fmt.Errorf("bootstrap: npm install failed: %s", tail(res.Stdout, 400))
 	}
 	// npm may install outside the login PATH; probe npm prefix explicitly.
-	loc, ver := locate(ctx, conn, "", minVersion)
+	loc, ver := locateNPMGlobal(ctx, conn, minVersion)
 	if loc == "" {
 		return "", "", fmt.Errorf("bootstrap: reasonix not found after npm install (check remote PATH / npm prefix)")
 	}
@@ -144,7 +168,7 @@ func installBinaryBytes(ctx context.Context, conn Conn, fs *sftpfs.FS, data []by
 	if err := fs.WriteFileAtomic(ctx, uploaded, data, 0o755); err != nil {
 		return "", "", fmt.Errorf("bootstrap: upload binary: %w", err)
 	}
-	loc, ver := locate(ctx, conn, uploaded, minVersion)
+	loc, ver := locateUploaded(ctx, conn, uploaded, minVersion)
 	if loc == "" {
 		return "", "", fmt.Errorf("bootstrap: uploaded binary not runnable on remote")
 	}

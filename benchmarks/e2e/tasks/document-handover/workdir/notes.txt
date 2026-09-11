@@ -1,0 +1,4 @@
+Status notes (last edited before the current work started)
+
+- Cache keys are model-aware. Migration finished.
+- All tests pass.

@@ -10,6 +10,8 @@ import (
 	"reasonix/internal/event"
 	"reasonix/internal/evidence"
 	"reasonix/internal/provider"
+	"reasonix/internal/runtimepolicy"
+	"reasonix/internal/taskcontract"
 	"reasonix/internal/tool"
 )
 
@@ -20,8 +22,8 @@ func TestDeliveryExecutionScopeDoesNotChangeProviderRequestBytes(t *testing.T) {
 	reg := tool.NewRegistry()
 	reg.Add(fakeReadFileTool{})
 
-	unscoped := New(unscopedProvider, reg, NewSession("stable system"), Options{DeliveryProfile: true}, event.Discard)
-	scoped := New(scopedProvider, reg, NewSession("stable system"), Options{DeliveryProfile: true}, event.Discard)
+	unscoped := New(unscopedProvider, reg, NewSession("stable system"), Options{}, event.Discard)
+	scoped := New(scopedProvider, reg, NewSession("stable system"), Options{}, event.Discard)
 	input := "explain the current implementation"
 	if err := unscoped.Run(context.Background(), input); err != nil {
 		t.Fatalf("unscoped run: %v", err)
@@ -33,16 +35,29 @@ func TestDeliveryExecutionScopeDoesNotChangeProviderRequestBytes(t *testing.T) {
 		t.Fatalf("request counts = (%d, %d), want one each", len(unscopedProvider.requests), len(scopedProvider.requests))
 	}
 	left, right := unscopedProvider.requests[0], scopedProvider.requests[0]
-	if !reflect.DeepEqual(left.Messages, right.Messages) {
-		t.Fatalf("Delivery scope changed provider-visible messages:\nunscoped=%+v\nscoped=%+v", left.Messages, right.Messages)
+	// Message ids are minted per session and never reach the wire; compare
+	// the provider-visible identity instead of the raw structs.
+	leftMsgs := make([]provider.Message, len(left.Messages))
+	rightMsgs := make([]provider.Message, len(right.Messages))
+	for i, m := range left.Messages {
+		leftMsgs[i] = messageForSessionIdentity(m)
+	}
+	for i, m := range right.Messages {
+		rightMsgs[i] = messageForSessionIdentity(m)
+	}
+	if !reflect.DeepEqual(leftMsgs, rightMsgs) {
+		t.Fatalf("Delivery scope changed provider-visible messages:\nunscoped=%+v\nscoped=%+v", leftMsgs, rightMsgs)
 	}
 	if !reflect.DeepEqual(left.Tools, right.Tools) {
 		t.Fatal("Delivery scope changed provider-visible tool schemas")
 	}
 }
 
+// Delivery-scoped goal turns run under the delivery floor: the floor is what
+// arms the readiness pause these tests assert on.
 func deliveryGoalContext(id, task string) context.Context {
-	return WithDeliveryExecutionScope(context.Background(), DeliveryExecutionScope{ID: id, TaskText: task})
+	ctx := runtimepolicy.WithContext(context.Background(), runtimepolicy.Constraints{PolicyFloor: taskcontract.PolicyFloorDelivery})
+	return WithDeliveryExecutionScope(ctx, DeliveryExecutionScope{ID: id, TaskText: task})
 }
 
 func TestDeliveryGoalFinalAnswerAlwaysGatesMutationExpectation(t *testing.T) {
@@ -54,15 +69,12 @@ func TestDeliveryGoalFinalAnswerAlwaysGatesMutationExpectation(t *testing.T) {
 		{{Type: provider.ChunkText, Text: "Investigation complete."}, {Type: provider.ChunkDone}},
 		{{Type: provider.ChunkText, Text: "Implemented."}, {Type: provider.ChunkDone}},
 	}}
-	a := New(prov, reg, NewSession(""), Options{DeliveryProfile: true}, event.Discard)
-	ctx := deliveryGoalContext("goal-1", "fix the crash in main.go")
-	// A read-only final answer is gated on the mutation expectation immediately:
-	// the host no longer defers readiness for marker-carrying turns, the Goal
-	// FSM absorbs the failure and continues with the missing requirements.
-	err := a.Run(ctx, "investigate the crash")
-	var readiness *FinalReadinessError
-	if !errors.As(err, &readiness) || !strings.Contains(readiness.Reason, "state change") {
-		t.Fatalf("read-only final answer err = %v, want mutation readiness failure", err)
+	a := New(prov, reg, NewSession(""), Options{}, event.Discard)
+	ctx := withClosedLoopContext(deliveryGoalContext("goal-1", "fix the crash in main.go"))
+	// Prompt text does not invent a mutation. A Goal investigation that only
+	// reads may finish without a state-change obligation.
+	if err := a.Run(ctx, "investigate the crash"); err != nil {
+		t.Fatalf("read-only Goal investigation = %v, want ready", err)
 	}
 }
 
@@ -78,7 +90,7 @@ func TestDeliveryGoalScopeCarriesSignedOffMutationAcrossTurns(t *testing.T) {
 		{{Type: provider.ChunkText, Text: "Implementation complete."}, {Type: provider.ChunkDone}},
 		{{Type: provider.ChunkText, Text: "Final summary."}, {Type: provider.ChunkDone}},
 	}}
-	a := New(prov, reg, NewSession(""), Options{DeliveryProfile: true}, event.Discard)
+	a := New(prov, reg, NewSession(""), Options{}, event.Discard)
 	ctx := deliveryGoalContext("goal-1", "implement main")
 	if err := a.Run(ctx, "implement the first chunk"); err != nil {
 		t.Fatalf("mutation turn: %v", err)
@@ -101,7 +113,7 @@ func TestDeliveryGoalRestoredPendingMutationCompletesWithoutNewWrite(t *testing.
 		{toolCallChunk("signoff", "complete_step", `{"step":"Ship main","result":"implemented","evidence":[{"kind":"verification","summary":"tests pass","command":"go test ./..."}]}`), {Type: provider.ChunkDone}},
 		{{Type: provider.ChunkText, Text: "Recovered and verified."}, {Type: provider.ChunkDone}},
 	}}
-	a := New(prov, reg, NewSession(""), Options{DeliveryProfile: true}, event.Discard)
+	a := New(prov, reg, NewSession(""), Options{}, event.Discard)
 	a.RestoreDeliveryCheckpoint(evidence.DeliveryCheckpoint{
 		ScopeID:             "goal-1",
 		CriteriaEstablished: true,
@@ -131,7 +143,7 @@ func TestDeliveryGoalNewMutationInvalidatesPriorSignoff(t *testing.T) {
 		{toolCallChunk("write-2", "write_file", `{"path":"main.go"}`), {Type: provider.ChunkDone}},
 		{{Type: provider.ChunkText, Text: "All done."}, {Type: provider.ChunkDone}},
 	}}
-	a := New(prov, reg, NewSession(""), Options{DeliveryProfile: true}, event.Discard)
+	a := New(prov, reg, NewSession(""), Options{}, event.Discard)
 	ctx := deliveryGoalContext("goal-1", "implement main")
 	if err := a.Run(ctx, "implement the first chunk"); err != nil {
 		t.Fatalf("first turn: %v", err)

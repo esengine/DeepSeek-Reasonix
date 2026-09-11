@@ -7,10 +7,12 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"sort"
 	"strings"
 	"time"
 
 	"reasonix/internal/fileutil"
+	"reasonix/internal/provider"
 	"reasonix/internal/store"
 )
 
@@ -22,9 +24,14 @@ import (
 // only those — are safe to reclaim automatically.
 
 // RecoveryGCGracePeriod is how long a reclaimable recovery branch must sit
-// idle before GC may collect it. A fresh fork is part of an active conflict
-// flow — the user may be comparing it against the original right now.
+// idle before the periodic GC may collect it. A fresh fork is part of an
+// active conflict flow — the user may be comparing it against the original.
 const RecoveryGCGracePeriod = 24 * time.Hour
+
+// RecoveryGCStartupGracePeriod is used for the first post-restore sweep so
+// upgrade storms of covered copies are cleared within minutes rather than a
+// full day, while still protecting a conflict the user is actively inspecting.
+const RecoveryGCStartupGracePeriod = 15 * time.Minute
 
 const (
 	recoveryTrashDir             = ".trash"
@@ -77,6 +84,72 @@ func RecoveryBranchCoveredByParent(path, parentDir string) bool {
 		return false
 	}
 	return recoveryBranchCoveredByParent(path, parentDir, meta)
+}
+
+// SessionContentCovers reports whether covering contains the complete message
+// history stored in covered. It is intentionally conservative for catalog
+// canonical promotion: repaired or damaged loads cannot authorize a redirect.
+func SessionContentCovers(coveringPath, coveredPath string) bool {
+	covering, ok := LoadSessionContentSnapshot(coveringPath)
+	if !ok {
+		return false
+	}
+	covered, ok := LoadSessionContentSnapshot(coveredPath)
+	return ok && covering.Covers(covered)
+}
+
+// RecoveryPreferenceCurrent proves that the branch still has the exact content
+// the user selected. Continued or externally edited branches fall back to an
+// unresolved lineage until the user chooses again.
+func RecoveryPreferenceCurrent(path string, meta BranchMeta) bool {
+	if !meta.RecoveryPreferred || strings.TrimSpace(meta.RecoveryPreferredDigest) == "" {
+		return false
+	}
+	session, err := LoadSession(path)
+	if err != nil || session == nil || session.normalizedDirty || session.eventLogDamaged {
+		return false
+	}
+	digest, err := digestSessionMessages(session.Snapshot())
+	return err == nil && digestString(digest) == strings.TrimSpace(meta.RecoveryPreferredDigest)
+}
+
+// SessionContentSnapshot is an immutable, validated transcript projection used
+// by the catalog. Its messages stay private so callers cannot accidentally use
+// a classification read as a mutable Session.
+type SessionContentSnapshot struct {
+	messages []provider.Message
+	digest   string
+}
+
+// LoadSessionContentSnapshot loads one transcript once for lineage analysis.
+// Dirty normalization and damaged event logs fail closed: neither may prove a
+// canonical branch or authorize cleanup.
+func LoadSessionContentSnapshot(path string) (SessionContentSnapshot, bool) {
+	session, err := LoadSession(path)
+	if err != nil || session == nil || session.normalizedDirty || session.eventLogDamaged {
+		return SessionContentSnapshot{}, false
+	}
+	messages := session.Snapshot()
+	digest, err := digestSessionMessages(messages)
+	if err != nil {
+		return SessionContentSnapshot{}, false
+	}
+	return SessionContentSnapshot{messages: messages, digest: digestString(digest)}, true
+}
+
+// Len is used only to discard candidates that cannot cover the longest member.
+func (s SessionContentSnapshot) Len() int { return len(s.messages) }
+
+// MatchesDigest binds catalog lineage decisions to the recovery ledger.
+func (s SessionContentSnapshot) MatchesDigest(digest string) bool {
+	return strings.TrimSpace(digest) != "" && s.digest == strings.TrimSpace(digest)
+}
+
+// Covers reports whether s contains all content in covered as a compatible
+// prefix. Both snapshots have already passed the conservative load checks.
+func (s SessionContentSnapshot) Covers(covered SessionContentSnapshot) bool {
+	return messagesHavePrefix(s.messages, covered.messages) ||
+		messagesHavePrefixWithCompatibleSystem(s.messages, covered.messages)
 }
 
 // TryAcquireRecoveryParentGuard verifies that a recovery branch is covered by
@@ -207,14 +280,117 @@ func ReclaimableRecoveryBranches(dir string, now time.Time, grace time.Duration)
 	return out, nil
 }
 
-// TrashReclaimableRecoveryBranch moves one redundant recovery branch into the
-// same recoverable .trash layout used by Desktop. It rechecks parent coverage
-// while holding both the parent and branch removal guards, so a concurrent save
-// cannot turn a redundant copy into unique history between verification and
-// relocation. The operation is durable: an interrupted move stays in an
-// invisible staging directory and is completed by ReconcileCleanupPending on
-// startup.
+// TrashCoveredRecoveryBranch moves a redundant recovery branch into the same
+// recoverable .trash layout used by Desktop. This is the explicit/manual cleanup
+// path, so it does not require the background GC idle grace period. Parent
+// coverage is rechecked while both parent and branch removal guards are held.
+func TrashCoveredRecoveryBranch(path, parentDir string) error {
+	return trashCoveredRecoveryBranch(path, parentDir, false)
+}
+
+// TrashRecoveryBranchCoveredBy moves path to recoverable trash when canonical
+// contains its complete transcript. Unlike TrashCoveredRecoveryBranch this is
+// lineage-aware: legacy recovery storms form chains, so an adopted leaf may
+// cover an ancestor even though that ancestor's immediate parent does not cover
+// it. Both transcripts are held behind removal guards while coverage is proved.
+func TrashRecoveryBranchCoveredBy(path, canonicalPath, parentDir string) error {
+	path = filepath.Clean(strings.TrimSpace(path))
+	canonicalPath = filepath.Clean(strings.TrimSpace(canonicalPath))
+	parentDir = filepath.Clean(strings.TrimSpace(parentDir))
+	if path == "." || canonicalPath == "." || parentDir == "." || path == canonicalPath ||
+		filepath.Dir(path) != parentDir || filepath.Dir(canonicalPath) != parentDir {
+		return ErrRecoveryBranchNotCovered
+	}
+	meta, ok, err := LoadBranchMeta(path)
+	if err != nil || !ok || !meta.Recovered {
+		return ErrRecoveryBranchNotCovered
+	}
+	paths := []string{path, canonicalPath}
+	sort.Strings(paths)
+	guards := make(map[string]*SessionRemovalGuard, len(paths))
+	for _, guardedPath := range paths {
+		guard, guardErr := TryAcquireSessionRemovalGuard(guardedPath)
+		if guardErr != nil {
+			for _, held := range guards {
+				held.Release()
+			}
+			return guardErr
+		}
+		guards[guardedPath] = guard
+	}
+	defer func() {
+		for _, guard := range guards {
+			guard.Release()
+		}
+	}()
+	if !SessionContentCovers(canonicalPath, path) {
+		return ErrRecoveryBranchNotCovered
+	}
+	key := filepath.Base(path)
+	if !validRecoveryTrashKey(key) {
+		return fmt.Errorf("invalid recovery session path")
+	}
+	stageDir, err := reserveRecoveryTrashStage(parentDir)
+	if err != nil {
+		return err
+	}
+	if err := prepareRecoveryTrashStage(path, key, stageDir); err != nil {
+		return err
+	}
+	return finishRecoveryTrashStage(parentDir, path, key, stageDir, guards[path])
+}
+
+// ReparentRecoveryCanonical shortens a proved recovery chain to root ->
+// canonical without rewriting either transcript. This preserves discovery for
+// older versions after covered intermediate branches are moved to trash.
+func ReparentRecoveryCanonical(canonicalPath, rootID, parentDir string) error {
+	canonicalPath = filepath.Clean(strings.TrimSpace(canonicalPath))
+	parentDir = filepath.Clean(strings.TrimSpace(parentDir))
+	rootID = strings.TrimSpace(rootID)
+	rootPath := filepath.Join(parentDir, rootID+".jsonl")
+	if canonicalPath == "." || parentDir == "." || rootID == "" || filepath.Base(rootID) != rootID ||
+		filepath.Dir(canonicalPath) != parentDir || canonicalPath == rootPath {
+		return ErrRecoveryBranchNotCovered
+	}
+	paths := []string{canonicalPath, rootPath}
+	sort.Strings(paths)
+	guards := make([]*SessionRemovalGuard, 0, len(paths))
+	for _, path := range paths {
+		guard, err := TryAcquireSessionRemovalGuard(path)
+		if err != nil {
+			for _, held := range guards {
+				held.Release()
+			}
+			return err
+		}
+		guards = append(guards, guard)
+	}
+	defer func() {
+		for _, guard := range guards {
+			guard.Release()
+		}
+	}()
+	if !SessionContentCovers(canonicalPath, rootPath) {
+		return ErrRecoveryBranchNotCovered
+	}
+	return UpdateBranchMeta(canonicalPath, false, func(meta *BranchMeta) error {
+		if !meta.Recovered {
+			return ErrRecoveryBranchNotCovered
+		}
+		meta.ParentID = rootID
+		meta.RecoveryDepth = 1
+		return nil
+	})
+}
+
+// TrashReclaimableRecoveryBranch is the background-GC variant. In addition to
+// the same atomic coverage proof, it requires the branch to remain idle for the
+// full grace period.
 func TrashReclaimableRecoveryBranch(path, parentDir string) error {
+	return trashCoveredRecoveryBranch(path, parentDir, true)
+}
+
+func trashCoveredRecoveryBranch(path, parentDir string, requireIdle bool) error {
 	path = filepath.Clean(strings.TrimSpace(path))
 	parentDir = filepath.Clean(strings.TrimSpace(parentDir))
 	if path == "." || parentDir == "." || filepath.Dir(path) != parentDir {
@@ -236,9 +412,11 @@ func TrashReclaimableRecoveryBranch(path, parentDir string) error {
 		return err
 	}
 	defer branchGuard.Release()
-	meta, ok, err := LoadBranchMeta(path)
-	if err != nil || !ok || !recoveryBranchIdle(path, meta, time.Now(), RecoveryGCGracePeriod) {
-		return ErrRecoveryBranchNotIdle
+	if requireIdle {
+		meta, ok, err := LoadBranchMeta(path)
+		if err != nil || !ok || !recoveryBranchIdle(path, meta, time.Now(), RecoveryGCGracePeriod) {
+			return ErrRecoveryBranchNotIdle
+		}
 	}
 	if !RecoveryBranchCoveredByParent(path, parentDir) {
 		return ErrRecoveryBranchNotCovered
@@ -457,7 +635,7 @@ func publishRecoveryTrashStage(dir, key, stageDir string) (string, error) {
 	root := filepath.Join(dir, recoveryTrashDir)
 	stem := strings.TrimSuffix(key, filepath.Ext(key))
 	stamp := time.Now().UTC().UnixMilli()
-	for i := 0; i < 1000; i++ {
+	for i := range 1000 {
 		name := key
 		if i > 0 {
 			name = fmt.Sprintf("%s-recovery-%d-%d", stem, stamp, i)
@@ -523,7 +701,7 @@ func reserveRecoveryTrashItemDir(dir, key string) (string, string, error) {
 		return "", "", err
 	}
 	stem := strings.TrimSuffix(key, filepath.Ext(key))
-	for i := 0; i < 1000; i++ {
+	for i := range 1000 {
 		name := key
 		if i > 0 {
 			name = fmt.Sprintf("%s-recovery-%d-%d", stem, time.Now().UTC().UnixMilli(), i)
@@ -600,6 +778,7 @@ func recoveryTrashSidecars(path string) []string {
 		path+".telemetry.json",
 		store.SessionCheckpointDir(path),
 		store.SessionJobsDir(path),
+		store.SessionInboxDir(path),
 	)
 	return artifacts
 }

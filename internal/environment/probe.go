@@ -236,7 +236,7 @@ func runOne(ctx context.Context, command string, opts ProbeOptions) ProbeResult 
 	}
 	cmdCtx, cancel := context.WithTimeout(ctx, probeTimeout)
 	defer cancel()
-	cmd := exec.CommandContext(cmdCtx, exe, parts[1:]...)
+	cmd := proc.CommandContext(cmdCtx, exe, parts[1:]...)
 	// Always set the env explicitly: leaving cmd.Env nil would inherit the
 	// full process environment and bypass [secrets] filter_subprocess_env for
 	// probes that declare no extra variables of their own.
@@ -292,8 +292,8 @@ func sortResults(results []ProbeResult) {
 
 func firstLine(s string) string {
 	s = strings.TrimSpace(s)
-	if i := strings.IndexByte(s, '\n'); i >= 0 {
-		return strings.TrimRight(s[:i], "\r")
+	if before, _, ok := strings.Cut(s, "\n"); ok {
+		return strings.TrimRight(before, "\r")
 	}
 	return s
 }

@@ -73,7 +73,7 @@ func TestRecallToolDropsCommonWordNoise(t *testing.T) {
 		Type:        TypeProject,
 		Body:        "rareterm common common common",
 	})
-	for i := 0; i < 12; i++ {
+	for i := range 12 {
 		saveMemory(t, store, Memory{
 			Name:        "common-note-" + string(rune('a'+i)),
 			Description: "Common note",

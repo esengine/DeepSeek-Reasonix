@@ -1,0 +1,4 @@
+prompt = "Every page drops its last item: pager.py hands out inclusive bounds while slicer.py slices exclusively. Fix the disagreement between pager.py and slicer.py."
+class = "multi-file-bugfix"
+max_steps = 15
+timeout_sec = 240

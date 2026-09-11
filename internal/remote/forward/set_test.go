@@ -1,6 +1,7 @@
 package forward
 
 import (
+	"errors"
 	"fmt"
 	"io"
 	"net"
@@ -136,7 +137,7 @@ func TestDuplicateForwardRejected(t *testing.T) {
 	if _, err := set.Add(spec); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := set.Add(spec); err != ErrDuplicateForward {
+	if _, err := set.Add(spec); !errors.Is(err, ErrDuplicateForward) {
 		t.Fatalf("second add err = %v, want ErrDuplicateForward", err)
 	}
 }
@@ -211,7 +212,7 @@ func TestReplaceWhileDetachedPreservesExistingForward(t *testing.T) {
 	if _, err := set.Add(old); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := set.Replace(Spec{Name: "serve", Direction: Local, BindAddr: "127.0.0.1:0", TargetAddr: "new:80"}); err != ErrNotAttached {
+	if _, err := set.Replace(Spec{Name: "serve", Direction: Local, BindAddr: "127.0.0.1:0", TargetAddr: "new:80"}); !errors.Is(err, ErrNotAttached) {
 		t.Fatalf("Replace error = %v, want ErrNotAttached", err)
 	}
 	entries := set.List()
@@ -240,7 +241,7 @@ func TestBindBusyReported(t *testing.T) {
 	if err == nil {
 		t.Fatal("expected bind-busy error")
 	}
-	if err != ErrBindBusy && !containsErr(err, ErrBindBusy) {
+	if !errors.Is(err, ErrBindBusy) {
 		t.Fatalf("err = %v, want ErrBindBusy", err)
 	}
 }
@@ -296,20 +297,50 @@ func TestRemoteForwardEndToEnd(t *testing.T) {
 	}
 }
 
-func containsErr(err, target error) bool {
-	type wrapper interface{ Unwrap() []error }
-	if w, ok := err.(wrapper); ok {
-		for _, e := range w.Unwrap() {
-			if e == target || containsErr(e, target) {
-				return true
-			}
+// A remote listener that dies under an attached Set must clear Up. Leaving the
+// entry marked Up with a dead BoundAddr makes credential-proxy ensure reuse the
+// stale port and the remote serve dials connection refused forever.
+func TestRemoteForwardAcceptExitMarksDown(t *testing.T) {
+	srv := sshtest.Start(t, sshtest.Options{})
+	cl := dialSSHClient(t, srv)
+	target := echoServer(t)
+
+	set := NewSet(nil)
+	defer set.Close()
+	if err := set.Attach(cl); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := set.Add(Spec{Name: "cred", Direction: Remote, BindAddr: "127.0.0.1:0", TargetAddr: target}); err != nil {
+		t.Fatalf("add remote forward: %v", err)
+	}
+	deadline := time.After(5 * time.Second)
+	for {
+		entries := set.List()
+		if len(entries) == 1 && entries[0].Up && entries[0].BoundAddr != "" {
+			break
+		}
+		select {
+		case <-deadline:
+			t.Fatalf("remote forward never came up: %+v", entries)
+		case <-time.After(20 * time.Millisecond):
 		}
 	}
-	type single interface{ Unwrap() error }
-	if s, ok := err.(single); ok {
-		return containsErr(s.Unwrap(), target)
+
+	// Close the SSH client without Detach: Accept returns, and the registry
+	// must not keep advertising the dead listener as Up.
+	_ = cl.Close()
+	deadline = time.After(5 * time.Second)
+	for {
+		entries := set.List()
+		if len(entries) == 1 && !entries[0].Up {
+			return
+		}
+		select {
+		case <-deadline:
+			t.Fatalf("dead remote forward still Up: %+v", entries)
+		case <-time.After(20 * time.Millisecond):
+		}
 	}
-	return err == target
 }
 
 var _ = fmt.Sprintf

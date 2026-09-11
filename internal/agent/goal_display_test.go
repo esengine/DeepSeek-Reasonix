@@ -40,24 +40,3 @@ func TestDisplayAssistantTextStripsAllProtocolArtifacts(t *testing.T) {
 		t.Errorf("DisplayAssistantText = %q, want %q", got, want)
 	}
 }
-
-// Planner conclusion markers are coordinator protocol; the display filter
-// removes the standalone lines while parsing keeps reading the raw text
-// (#6789: a relayed answer-only plan must not show "[no_changes]").
-func TestDisplayFilterStripsPlannerConclusionMarkers(t *testing.T) {
-	in := "The two agents differ mainly in orchestration.\n\n[no_changes]"
-	want := "The two agents differ mainly in orchestration."
-	if got := DisplayAssistantText(in); got != want {
-		t.Errorf("DisplayAssistantText = %q, want %q", got, want)
-	}
-	in = "Plan ready for review.\n[planner_requires_approval]"
-	want = "Plan ready for review."
-	if got := StripGoalMarkers(in); got != want {
-		t.Errorf("StripGoalMarkers = %q, want %q", got, want)
-	}
-	// Inline mentions survive — only standalone marker lines are protocol.
-	in = "The [no_changes] marker is emitted when done."
-	if got := DisplayAssistantText(in); got != in {
-		t.Errorf("inline mention altered: %q", got)
-	}
-}

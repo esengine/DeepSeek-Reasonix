@@ -98,6 +98,162 @@ func TestReconcilePendingFileUpdateCancelsPreparedReleaseUnit(t *testing.T) {
 	}
 }
 
+// TestReconcilePendingFileUpdateQuarantinesForeignTarget: a self-describing
+// transaction whose launcher and target directories no longer match (install
+// layout moved to versions\<version>\, or the old install directory is gone)
+// cannot be resumed or rolled back by this installation. Leaving the marker
+// blocks every future update permanently, so reconciliation quarantines it the
+// same way preparation does, without touching the target or rollback material
+// (#7391, #7416).
+func TestReconcilePendingFileUpdateQuarantinesForeignTarget(t *testing.T) {
+	t.Setenv("REASONIX_HOME", t.TempDir())
+	target := filepath.Join(t.TempDir(), "reasonix-desktop")
+	originalExecutable := repairExecutable
+	repairExecutable = func() (string, error) { return filepath.Join(filepath.Dir(target), "reasonix-guard"), nil }
+	t.Cleanup(func() { repairExecutable = originalExecutable })
+	if err := os.WriteFile(target, []byte("old"), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	tx, err := PrepareFileUpdate("v1", "v2", target)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// The install layout moved: the current launcher now lives in a different
+	// directory from the transaction target.
+	repairExecutable = func() (string, error) { return filepath.Join(t.TempDir(), "reasonix-guard"), nil }
+
+	result, err := ReconcilePendingUpdate("v2")
+	if err != nil {
+		t.Fatalf("reconcile foreign-target transaction: %v", err)
+	}
+	if !result.Pending || !result.Cleared || result.RolledBack || result.AwaitingHealth {
+		t.Fatalf("reconcile result = %+v", result)
+	}
+	if PendingUpdateExists() {
+		t.Fatal("foreign-target marker survived reconciliation")
+	}
+	// The marker is quarantined, not deleted, and the target plus rollback
+	// material are untouched.
+	quarantined, err := filepath.Glob(PendingUpdatePath() + ".unusable-*")
+	if err != nil || len(quarantined) != 1 {
+		t.Fatalf("quarantined markers = %v, %v; want exactly one", quarantined, err)
+	}
+	if got, err := os.ReadFile(target); err != nil || string(got) != "old" {
+		t.Fatalf("prepared target changed = %q, %v", got, err)
+	}
+	for _, file := range tx.Files {
+		if _, err := os.Stat(file.BackupPath); err != nil {
+			t.Fatalf("rollback backup disappeared: %v", err)
+		}
+	}
+}
+
+// TestPrepareFileUpdateQuarantinesForeignTarget: preparation must offer the
+// same exit as reconciliation for a self-describing marker that is not valid
+// for this installation, so callers that skip reconciliation (or reach prepare
+// first) do not dead-end forever on the marker (#7391, #7416).
+func TestPrepareFileUpdateQuarantinesForeignTarget(t *testing.T) {
+	t.Setenv("REASONIX_HOME", t.TempDir())
+	target := filepath.Join(t.TempDir(), "reasonix-desktop")
+	originalExecutable := repairExecutable
+	repairExecutable = func() (string, error) { return filepath.Join(filepath.Dir(target), "reasonix-guard"), nil }
+	t.Cleanup(func() { repairExecutable = originalExecutable })
+	if err := os.WriteFile(target, []byte("old"), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := PrepareFileUpdate("v1", "v2", target); err != nil {
+		t.Fatal(err)
+	}
+
+	// The install layout moved: the launcher now lives in a different
+	// directory from the first transaction's target.
+	newLauncherDir := t.TempDir()
+	repairExecutable = func() (string, error) { return filepath.Join(newLauncherDir, "reasonix-guard"), nil }
+	newTarget := filepath.Join(newLauncherDir, "reasonix-desktop")
+	if err := os.WriteFile(newTarget, []byte("old2"), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := PrepareFileUpdate("v2", "v3", newTarget); err != nil {
+		t.Fatalf("prepare after quarantining a foreign-target marker: %v", err)
+	}
+	quarantined, err := filepath.Glob(PendingUpdatePath() + ".unusable-*")
+	if err != nil || len(quarantined) != 1 {
+		t.Fatalf("quarantined markers = %v, %v; want exactly one", quarantined, err)
+	}
+}
+
+func TestReconcileForeignQuarantineRejectsMarkerReplacement(t *testing.T) {
+	t.Setenv("REASONIX_HOME", t.TempDir())
+	target := filepath.Join(t.TempDir(), "reasonix-desktop")
+	originalExecutable := repairExecutable
+	repairExecutable = func() (string, error) { return filepath.Join(filepath.Dir(target), "reasonix-guard"), nil }
+	t.Cleanup(func() { repairExecutable = originalExecutable })
+	if err := os.WriteFile(target, []byte("old"), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := PrepareFileUpdate("v1", "v2", target); err != nil {
+		t.Fatal(err)
+	}
+	repairExecutable = func() (string, error) { return filepath.Join(t.TempDir(), "reasonix-guard"), nil }
+	digest, err := pendingUpdateMarkerDigest(PendingUpdatePath())
+	if err != nil {
+		t.Fatal(err)
+	}
+	replacement := &UpdateTransaction{
+		SchemaVersion: updateTransactionVersion,
+		FromVersion:   "v2",
+		ToVersion:     "v3",
+		Platform:      "test/amd64",
+		TargetKind:    "file",
+		TargetPath:    target,
+		CreatedAt:     time.Now().UTC().Format(time.RFC3339Nano),
+	}
+	if err := overwritePendingUpdateForTest(replacement); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := quarantinePendingUpdateAfterReconcile("test", digest, true); err == nil || !strings.Contains(err.Error(), "changed while waiting") {
+		t.Fatalf("quarantine after marker replacement = %v, want a replacement error", err)
+	}
+	if !PendingUpdateExists() {
+		t.Fatal("replacement marker was quarantined")
+	}
+	if got := quarantinedCopies(t); len(got) != 0 {
+		t.Fatalf("quarantined copies = %v, want none", got)
+	}
+}
+
+func TestSelfDescribingInvalidTransactionRemainsBlocked(t *testing.T) {
+	t.Setenv("REASONIX_HOME", t.TempDir())
+	target := filepath.Join(t.TempDir(), "reasonix-desktop")
+	originalExecutable := repairExecutable
+	repairExecutable = func() (string, error) { return filepath.Join(filepath.Dir(target), "reasonix-guard"), nil }
+	t.Cleanup(func() { repairExecutable = originalExecutable })
+	if err := os.WriteFile(target, []byte("old"), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	tx, err := PrepareFileUpdate("v1", "v2", target)
+	if err != nil {
+		t.Fatal(err)
+	}
+	tx.BackupSHA256 = ""
+	if err := overwritePendingUpdateForTest(tx); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := ReconcilePendingUpdate("v1"); err == nil || !strings.Contains(err.Error(), "backup hash is missing") {
+		t.Fatalf("reconcile invalid self-describing transaction = %v, want validation failure", err)
+	}
+	if _, err := PrepareFileUpdate("v1", "v3", target); err == nil || !strings.Contains(err.Error(), "backup hash is missing") {
+		t.Fatalf("prepare over invalid self-describing transaction = %v, want validation failure", err)
+	}
+	if !PendingUpdateExists() {
+		t.Fatal("invalid self-describing marker was quarantined or removed")
+	}
+	if got := quarantinedCopies(t); len(got) != 0 {
+		t.Fatalf("quarantined copies = %v, want none", got)
+	}
+}
+
 func TestReconcilePendingFileUpdateLeavesBoundProbationaryReleaseUnit(t *testing.T) {
 	t.Setenv("REASONIX_HOME", t.TempDir())
 	target := filepath.Join(t.TempDir(), "reasonix-desktop")
@@ -131,6 +287,149 @@ func TestReconcilePendingFileUpdateLeavesBoundProbationaryReleaseUnit(t *testing
 	}
 	if !PendingUpdateExists() {
 		t.Fatal("probationary transaction was removed")
+	}
+}
+
+func TestUpdateVersionsEqualNormalizesLeadingV(t *testing.T) {
+	if !UpdateVersionsEqual("1.19.7", "v1.19.7") {
+		t.Fatal("expected 1.19.7 and v1.19.7 to match")
+	}
+	if !UpdateVersionsEqual("v1.20.0", "V1.20.0") {
+		t.Fatal("expected case-insensitive v prefix normalization")
+	}
+	if UpdateVersionsEqual("v1.19.7", "v1.19.8") {
+		t.Fatal("different versions must not match")
+	}
+	if UpdateVersionsEqual("", "v1") {
+		t.Fatal("empty version must not match")
+	}
+}
+
+func TestReconcilePendingFileUpdateCommitsStaleProbationaryReleaseUnit(t *testing.T) {
+	t.Setenv("REASONIX_HOME", t.TempDir())
+	target := filepath.Join(t.TempDir(), "reasonix-desktop")
+	originalExecutable := repairExecutable
+	repairExecutable = func() (string, error) { return filepath.Join(filepath.Dir(target), "reasonix-guard"), nil }
+	t.Cleanup(func() { repairExecutable = originalExecutable })
+	// Do not rewrite CreatedAt: it is part of the transaction identity that
+	// install-evidence binding requires. Force the stale decision instead.
+	pendingUpdateHealthIsStaleOverride = func(*UpdateTransaction) bool { return true }
+	t.Cleanup(func() { pendingUpdateHealthIsStaleOverride = nil })
+
+	if err := os.WriteFile(target, []byte("old"), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	tx, err := PrepareFileUpdate("v1", "v2", target)
+	if err != nil {
+		t.Fatal(err)
+	}
+	receipt, err := PublishClaimedFileUpdateMemberExact(tx, target, []byte("new"), 0o700)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := RecordClaimedFileUpdateInstalled(tx, receipt); err != nil {
+		t.Fatal(err)
+	}
+
+	// Version-prefix mismatch used to skip health commits; reconcile must still heal.
+	result, err := ReconcilePendingUpdate("2")
+	if err != nil {
+		t.Fatalf("reconcile stale probationary update: %v", err)
+	}
+	if !result.Healthy || !result.Cleared || result.AwaitingHealth || result.Pending {
+		t.Fatalf("reconcile result = %+v", result)
+	}
+	if PendingUpdateExists() {
+		t.Fatal("stale probationary transaction survived reconcile")
+	}
+	if got, err := os.ReadFile(target); err != nil || string(got) != "new" {
+		t.Fatalf("installed target changed = %q, %v", got, err)
+	}
+}
+
+func TestAbandonPendingUpdateCommitsProbationaryReleaseUnit(t *testing.T) {
+	t.Setenv("REASONIX_HOME", t.TempDir())
+	target := filepath.Join(t.TempDir(), "reasonix-desktop")
+	originalExecutable := repairExecutable
+	repairExecutable = func() (string, error) { return filepath.Join(filepath.Dir(target), "reasonix-guard"), nil }
+	t.Cleanup(func() { repairExecutable = originalExecutable })
+	if err := os.WriteFile(target, []byte("old"), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	tx, err := PrepareFileUpdate("v1", "v2", target)
+	if err != nil {
+		t.Fatal(err)
+	}
+	receipt, err := PublishClaimedFileUpdateMemberExact(tx, target, []byte("new"), 0o700)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := RecordClaimedFileUpdateInstalled(tx, receipt); err != nil {
+		t.Fatal(err)
+	}
+
+	result, err := AbandonPendingUpdate("v2")
+	if err != nil {
+		t.Fatalf("abandon: %v", err)
+	}
+	if !result.Healthy || !result.Cleared {
+		t.Fatalf("abandon result = %+v", result)
+	}
+	if PendingUpdateExists() {
+		t.Fatal("pending transaction survived abandon")
+	}
+	if got, err := os.ReadFile(target); err != nil || string(got) != "new" {
+		t.Fatalf("installed target changed = %q, %v", got, err)
+	}
+}
+
+func TestAbandonPendingUpdateForceRetiresWhenBackupDigestBroken(t *testing.T) {
+	t.Setenv("REASONIX_HOME", t.TempDir())
+	target := filepath.Join(t.TempDir(), "reasonix-desktop")
+	originalExecutable := repairExecutable
+	repairExecutable = func() (string, error) { return filepath.Join(filepath.Dir(target), "reasonix-guard"), nil }
+	t.Cleanup(func() { repairExecutable = originalExecutable })
+	if err := os.WriteFile(target, []byte("old"), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	tx, err := PrepareFileUpdate("v1", "v2", target)
+	if err != nil {
+		t.Fatal(err)
+	}
+	receipt, err := PublishClaimedFileUpdateMemberExact(tx, target, []byte("new"), 0o700)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := RecordClaimedFileUpdateInstalled(tx, receipt); err != nil {
+		t.Fatal(err)
+	}
+
+	// Corrupt backup: MarkUpdateHealthy fails; abandon must still force-retire.
+	if strings.TrimSpace(tx.BackupPath) == "" {
+		t.Fatal("expected prepared backup path")
+	}
+	if err := os.WriteFile(tx.BackupPath, []byte("corrupted-backup"), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := MarkUpdateHealthy("v2"); err == nil {
+		t.Fatal("MarkUpdateHealthy should fail when backup digest drifts")
+	}
+	if !PendingUpdateExists() {
+		t.Fatal("pending transaction was removed by failed MarkUpdateHealthy")
+	}
+
+	result, err := AbandonPendingUpdate("v2")
+	if err != nil {
+		t.Fatalf("abandon with broken backup: %v", err)
+	}
+	if !result.Healthy || !result.Cleared || result.AwaitingHealth || result.Pending {
+		t.Fatalf("abandon result = %+v", result)
+	}
+	if PendingUpdateExists() {
+		t.Fatal("pending transaction survived force-retire abandon")
+	}
+	if got, err := os.ReadFile(target); err != nil || string(got) != "new" {
+		t.Fatalf("installed target changed = %q, %v", got, err)
 	}
 }
 

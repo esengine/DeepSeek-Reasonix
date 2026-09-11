@@ -202,7 +202,7 @@ func TestSkillPickerRenderDialogStyle(t *testing.T) {
 	t.Cleanup(func() { i18n.DetectLanguage("en") })
 
 	var skills []skill.Skill
-	for i := 0; i < 24; i++ {
+	for i := range 24 {
 		skills = append(skills, skill.Skill{
 			Name:        "skill-" + strings.Repeat("x", i%4) + string(rune('a'+i)),
 			Description: "this long description should stay out of the default picker list",
@@ -787,9 +787,9 @@ func TestBottomRowsIncludesResumePicker(t *testing.T) {
 	m.width = 80
 	m.height = 40
 	m.resumePick = &resumePicker{
-		sessions: nil,
-		sel:      0,
-		active:   -1,
+		entries: nil,
+		sel:     0,
+		active:  -1,
 	}
 
 	// Not testing exact row count (resumePicker needs sessions for rendering),

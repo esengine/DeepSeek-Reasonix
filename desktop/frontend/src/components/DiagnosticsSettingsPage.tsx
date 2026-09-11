@@ -2,8 +2,24 @@ import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } fro
 import { ChevronDown, ChevronRight, Clipboard, Loader2, RefreshCw } from "lucide-react";
 import { app } from "../lib/bridge";
 import { asArray } from "../lib/array";
-import { useT } from "../lib/i18n";
-import type { CapabilityDiagnosticsReport, CapabilityIssue, SettingsTab } from "../lib/types";
+import { useI18n, useT, type Locale } from "../lib/i18n";
+import type { CapabilityDiagnosticsReport, CapabilityIssue, RuntimeDoctorReport, SettingsTab } from "../lib/types";
+import { FrontendDiagnosticsControl } from "./FrontendDiagnosticsControl";
+
+const FRONTEND_COPY: Record<Locale, { title: string; hint: string }> = {
+  en: {
+    title: "Frontend interaction recording",
+    hint: "When scrolling jumps, sessions switch, or the UI flickers, turn this on, reproduce the issue, then turn it off and choose where to export. Only timing, events, and geometry are recorded; conversation content, input values, paths, and secrets are excluded.",
+  },
+  zh: {
+    title: "前端交互记录",
+    hint: "遇到滚动闪回、会话切换或界面抖动时，打开记录开关，复现问题后关闭并选择路径导出。仅记录时间、事件和几何信息，不记录对话内容、输入值、路径或密钥。",
+  },
+  "zh-TW": {
+    title: "前端互動記錄",
+    hint: "遇到捲動閃回、工作階段切換或介面抖動時，開啟記錄開關，重現問題後關閉並選擇路徑匯出。僅記錄時間、事件與幾何資訊，不記錄對話內容、輸入值、路徑或密鑰。",
+  },
+};
 
 export function DiagnosticsSettingsPage({
   onNavigate,
@@ -11,13 +27,17 @@ export function DiagnosticsSettingsPage({
   onNavigate?: (tab: SettingsTab) => void;
 }) {
   const t = useT();
+  const { locale } = useI18n();
+  const frontendCopy = FRONTEND_COPY[locale];
   const [report, setReport] = useState<CapabilityDiagnosticsReport | null>(null);
+  const [runtimeDoctor, setRuntimeDoctor] = useState<RuntimeDoctorReport | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [includeRuntime, setIncludeRuntime] = useState(false);
   const [copied, setCopied] = useState(false);
   const [open, setOpen] = useState<Record<string, boolean>>({
     issues: true,
+    runtime: true,
     instructions: false,
     skills: false,
     commands: false,
@@ -34,13 +54,21 @@ export function DiagnosticsSettingsPage({
     setError(null);
     try {
       const next = normalizeDiagnosticsReport(await app.CapabilityDiagnostics(runtime));
+      let doctor: RuntimeDoctorReport | null = null;
+      try {
+        doctor = await app.RuntimeDoctor();
+      } catch {
+        doctor = null;
+      }
       // Last-request-wins: ignore stale responses after rapid refresh/toggle.
       if (seq !== loadSeq.current) return;
       setReport(next);
+      setRuntimeDoctor(doctor);
     } catch (err) {
       if (seq !== loadSeq.current) return;
       setError(err instanceof Error ? err.message : String(err));
       setReport(null);
+      setRuntimeDoctor(null);
     } finally {
       if (seq === loadSeq.current) {
         setLoading(false);
@@ -84,7 +112,7 @@ export function DiagnosticsSettingsPage({
 
   return (
     <div className="diag-page">
-      <div className="diag-page__toolbar">
+      <div className="diag-page__toolbar settings-toolbar">
         <label className="diag-page__runtime">
           <input
             type="checkbox"
@@ -106,6 +134,16 @@ export function DiagnosticsSettingsPage({
       </div>
 
       <p className="diag-page__hint">{t("diag.hint")}</p>
+
+      <section className="diag-section diag-section--frontend" data-testid="frontend-diagnostics-settings">
+        <div className="diag-section__body diag-section__body--frontend">
+          <div className="diag-frontend-recording__copy">
+            <strong>{frontendCopy.title}</strong>
+            <span>{frontendCopy.hint}</span>
+          </div>
+          <FrontendDiagnosticsControl embedded />
+        </div>
+      </section>
 
       {loading && !report && <div className="empty">{t("settings.loading")}</div>}
       {error && <div className="settings-error" role="alert">{error}</div>}
@@ -138,6 +176,42 @@ export function DiagnosticsSettingsPage({
               </span>
             </div>
           </div>
+
+          {runtimeDoctor && (
+            <section className="diag-section">
+              <button type="button" className="diag-section__header" onClick={() => toggle("runtime")}>
+                {open.runtime ? <ChevronDown size={16} /> : <ChevronRight size={16} />}
+                <span>Extension runtime (v2)</span>
+              </button>
+              {open.runtime && (
+                <div className="diag-section__body">
+                  <div className="diag-summary">
+                    <div className="diag-summary__item">
+                      <strong>{runtimeDoctor.publishedGeneration}</strong>
+                      <span>generation</span>
+                    </div>
+                    <div className="diag-summary__item">
+                      <strong>{runtimeDoctor.allowResume ? "yes" : "no"}</strong>
+                      <span>allow resume</span>
+                    </div>
+                    <div className="diag-summary__item">
+                      <strong>{runtimeDoctor.cleanRollback ? "yes" : "no"}</strong>
+                      <span>clean rollback</span>
+                    </div>
+                    <div className="diag-summary__meta">
+                      <span>
+                        no-op={runtimeDoctor.noOpRebuilds} subgraph={runtimeDoctor.subgraphRebuilds} full={runtimeDoctor.fullRebuilds}{" "}
+                        staleDrops={runtimeDoctor.staleDrops} admitReject={runtimeDoctor.admissionRejected} ownerFallbacks={runtimeDoctor.runtimeOwnerFallbacks}
+                      </span>
+                    </div>
+                  </div>
+                  <pre className="diag-path" style={{ whiteSpace: "pre-wrap", marginTop: 8 }}>
+                    {runtimeDoctor.text}
+                  </pre>
+                </div>
+              )}
+            </section>
+          )}
 
           <section className="diag-section">
             <button type="button" className="diag-section__header" onClick={() => toggle("issues")}>

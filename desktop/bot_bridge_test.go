@@ -155,7 +155,7 @@ func TestBridgeTakeoverSwitchAnnouncesReleaseToOldTab(t *testing.T) {
 		t.Fatalf("switch to B: %v", err)
 	}
 	seen := map[string]bool{}
-	for i := 0; i < 2; i++ {
+	for range 2 {
 		select {
 		case got := <-env.announced:
 			seen[got[0]] = true

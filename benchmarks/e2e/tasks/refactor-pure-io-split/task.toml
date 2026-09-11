@@ -1,0 +1,7 @@
+prompt = """report.py mixes computation and file IO in one function. Refactor:
+- extract a pure summarize(numbers) returning the dict of stats (no file access)
+- write_report(path, numbers) must call summarize and keep writing the identical file
+- same output for the same input, no other behavior changes"""
+class = "refactor"
+max_steps = 20
+timeout_sec = 300

@@ -9,6 +9,8 @@
 //    that already shows real usage.
 // 4. A retry event repairs stale idle snapshots in either delivery order so
 //    the turn remains stoppable.
+// 5. TPS telemetry accumulates provider-output intervals without tool gaps and
+//    survives both missing usage and missing turn_done events.
 
 import { initialState, promptEventClock, reducer } from "../lib/useController";
 import type { WireEvent } from "../lib/types";
@@ -28,6 +30,94 @@ function eq(a: unknown, b: unknown, label: string) {
 
 function ev(s: typeof initialState, e: WireEvent) {
   return reducer(s, { type: "event", e });
+}
+
+// Desktop keeps ordinary completion receipts off the transcript, but retains
+// details for the change panel and surfaces actionable gaps as a short notice.
+{
+  const before = {
+    ...initialState,
+    seq: 2,
+    items: [{ kind: "user" as const, id: "u1", text: "update it" }],
+  };
+  const complete = ev(before, {
+    kind: "completion_summary",
+    completion: {
+      preset: "balanced",
+      verdict: "complete",
+      mutations: 3,
+      checks_passed: 12,
+      checks_failed: 0,
+      checks_suppressed: 0,
+      review: "passed",
+      gap_kinds: [],
+      constraint_degraded: false,
+      floor: "standard",
+      attention: false,
+    },
+  });
+  eq(complete.items.length, before.items.length + 1, "workspace mutations add a neutral change notice");
+  const changeNotice = complete.items[complete.items.length - 1];
+  eq(changeNotice?.kind === "notice" ? changeNotice.level : "", "info", "workspace mutations use an info notice, not a warning");
+  eq(changeNotice?.kind === "notice" ? changeNotice.completionSummary : undefined, complete.completionSummary, "neutral change notice retains its own normalized summary");
+  eq(complete.completionSummary?.preset, "balanced", "ordinary completion summary remains available to the change panel");
+
+  const after = ev(complete, {
+    kind: "completion_summary",
+    completion: {
+      preset: "balanced",
+      verdict: "partial",
+      mutations: 3,
+      checks_passed: 12,
+      checks_failed: 1,
+      checks_suppressed: 2,
+      review: "passed",
+      gap_kinds: ["stale_check"],
+      constraint_degraded: true,
+      floor: "delivery",
+      attention: true,
+    },
+  });
+  eq(after.items.length, complete.items.length, "summary refresh replaces the same result notice");
+  const notice = after.items[after.items.length - 1];
+  eq(notice?.kind === "notice" ? notice.variant : "", "completion", "quality gap uses the completion notice variant");
+  eq(notice?.kind === "notice" ? notice.action : "", "open_changes", "quality gap links to the change panel");
+  eq(notice?.kind === "notice" ? notice.completionSummary : undefined, after.completionSummary, "completion notice retains its own normalized summary");
+  eq(notice?.kind === "notice" ? notice.text.includes("balanced") : true, false, "compact notice does not expose internal preset values");
+  eq(after.completionSummary?.checks_failed, 1, "actionable completion summary is retained for details");
+
+  const switchedFloor = ev({
+    ...complete,
+    meta: { label: "test", ready: true, eventChannel: "", cwd: "/repo", qualityFloor: "delivery" },
+  }, {
+    kind: "completion_summary",
+    completion: {
+      ...complete.completionSummary!,
+      verdict: "partial",
+      gap_kinds: ["unverified_change"],
+      floor: "standard",
+      attention: false,
+    },
+  });
+  const switchedNotice = switchedFloor.items[switchedFloor.items.length - 1];
+  eq(switchedNotice?.kind === "notice" ? switchedNotice.level : "", "info", "turn-time standard summary stays neutral after switching to delivery");
+
+  const suppressed = ev(complete, {
+    kind: "completion_summary",
+    completion: {
+      ...complete.completionSummary!,
+      mutations: 0,
+      checks_suppressed: 1,
+      gap_kinds: ["suppressed_requirement"],
+      floor: "delivery",
+      attention: true,
+    },
+  });
+  const suppressedNotice = suppressed.items[suppressed.items.length - 1];
+  eq(suppressedNotice?.kind === "notice" ? suppressedNotice.title : "", "Turn result", "required suppression retains the fixed result title");
+
+  const restarted = ev(after, { kind: "turn_started" });
+  eq(restarted.completionSummary, undefined, "a new turn clears the previous turn's quality details");
 }
 
 // --- 1. partial dispatch upserts a running card with argChars ---
@@ -106,6 +196,148 @@ function ev(s: typeof initialState, e: WireEvent) {
   eq(only?.kind === "tool" ? only.id : "", "c1", "surviving card carries the real call ID");
 }
 
+// --- 1c. stream_attempt discard rolls back partial tool cards and text ---
+{
+  let s = { ...initialState, running: true, turnActive: true };
+  s = ev(s, { kind: "stream_attempt", streamAttempt: { id: "sa-1", action: "begin", attempt: 1, max: 6 } } as WireEvent);
+  s = ev(s, { kind: "text", text: "partial half" } as WireEvent);
+  s = ev(s, { kind: "tool_dispatch", tool: { id: "c1", name: "edit_file", readOnly: false, partial: true, argChars: 6000, attemptId: "sa-1" } } as WireEvent);
+  // Concurrent background sub-agent tool must not be journaled.
+  s = ev(s, { kind: "tool_dispatch", tool: { id: "child-1", name: "read_file", readOnly: true, partial: true, parentId: "task-1", attemptId: "sa-1" } } as WireEvent);
+  eq(s.items.filter((it) => it.kind === "tool" && it.id === "c1").length, 1, "partial edit_file card appears during attempt");
+  eq(s.items.filter((it) => it.kind === "tool" && it.id === "child-1").length, 1, "sub-agent partial is still shown");
+  eq(s.live?.text, "partial half", "partial text is live during attempt");
+  eq(s.turnArgChars, 6000, "arg progress tracked during attempt");
+
+  s = ev(s, { kind: "stream_attempt", streamAttempt: { id: "sa-1", action: "discard", attempt: 1, max: 6, reason: "premature_eof" } } as WireEvent);
+  eq(s.items.filter((it) => it.kind === "tool" && it.id === "c1").length, 0, "discard removes uncommitted parent tool card");
+  eq(s.items.filter((it) => it.kind === "tool" && it.id === "child-1").length, 1, "discard keeps concurrent sub-agent tool card");
+  eq(s.live?.text ?? "", "", "discard clears attempt text (not concatenate)");
+  eq(s.turnArgChars, 0, "discard restores turnArgChars baseline");
+
+  s = ev(s, { kind: "stream_attempt", streamAttempt: { id: "sa-2", action: "begin", attempt: 2, max: 6 } } as WireEvent);
+  s = ev(s, { kind: "text", text: "full answer" } as WireEvent);
+  s = ev(s, { kind: "tool_dispatch", tool: { id: "c2", name: "edit_file", readOnly: false, partial: true, argChars: 12000, attemptId: "sa-2" } } as WireEvent);
+  s = ev(s, { kind: "stream_attempt", streamAttempt: { id: "sa-2", action: "commit", attempt: 2, max: 6 } } as WireEvent);
+  s = ev(s, { kind: "tool_dispatch", tool: { id: "c2", name: "edit_file", args: '{"path":"a"}', readOnly: false } } as WireEvent);
+  eq(s.items.filter((it) => it.kind === "tool" && it.id === "c2").length, 1, "final success has committed parent tool card");
+  eq(s.items.filter((it) => it.kind === "tool" && it.id === "child-1").length, 1, "sub-agent card still present after commit");
+  const committedAssistant = s.items.find((it) => it.kind === "assistant" && it.text === "full answer");
+  eq(Boolean(committedAssistant), true, "full dispatch settles the committed attempt text");
+  eq(s.live, undefined, "full dispatch closes the compatibility-path assistant segment");
+}
+
+// --- 1d. stale discard must not clear a newer attempt journal ---
+{
+  let s = { ...initialState, running: true, turnActive: true };
+  s = ev(s, { kind: "stream_attempt", streamAttempt: { id: "sa-new", action: "begin", attempt: 2, max: 6 } } as WireEvent);
+  s = ev(s, { kind: "tool_dispatch", tool: { id: "c-new", name: "edit_file", readOnly: false, partial: true, attemptId: "sa-new" } } as WireEvent);
+  eq(s.streamAttemptJournal?.id, "sa-new", "journal tracks current attempt");
+  s = ev(s, { kind: "stream_attempt", streamAttempt: { id: "sa-old", action: "discard", attempt: 1, max: 6, reason: "premature_eof" } } as WireEvent);
+  eq(s.streamAttemptJournal?.id, "sa-new", "stale discard leaves current journal");
+  eq(s.items.filter((it) => it.kind === "tool" && it.id === "c-new").length, 1, "stale discard does not remove current partial card");
+  s = ev(s, { kind: "turn_done" } as WireEvent);
+  eq(s.streamAttemptJournal, undefined, "turn_done clears stream attempt journal");
+}
+
+// --- 1e. one backend turn keeps each provider sampling round in timeline order ---
+{
+  let s = ev({ ...initialState }, { kind: "turn_started", turnId: "multi-round" } as WireEvent);
+  s = ev(s, { kind: "stream_attempt", streamAttempt: { id: "round-1", action: "begin", attempt: 1, max: 3 } } as WireEvent);
+  s = ev(s, { kind: "reasoning", reasoning: "first analysis" } as WireEvent);
+  s = ev(s, { kind: "message", text: "", reasoning: "first analysis" } as WireEvent);
+  s = ev(s, { kind: "stream_attempt", streamAttempt: { id: "round-1", action: "commit", attempt: 1, max: 3 } } as WireEvent);
+  s = ev(s, { kind: "tool_dispatch", tool: { id: "lookup-1", name: "read_file", args: "{}", readOnly: true } } as WireEvent);
+  s = ev(s, { kind: "tool_result", tool: { id: "lookup-1", name: "read_file", args: "{}", readOnly: true, output: "ok" } } as WireEvent);
+  s = ev(s, { kind: "stream_attempt", streamAttempt: { id: "round-2", action: "begin", attempt: 1, max: 3 } } as WireEvent);
+  s = ev(s, { kind: "reasoning", reasoning: "second analysis" } as WireEvent);
+  s = ev(s, { kind: "message", text: "final answer", reasoning: "second analysis" } as WireEvent);
+  s = ev(s, { kind: "stream_attempt", streamAttempt: { id: "round-2", action: "commit", attempt: 1, max: 3 } } as WireEvent);
+  const replayedStart = ev(s, { kind: "turn_started", turnId: "multi-round" } as WireEvent);
+  eq(replayedStart.items.filter((item) => item.kind === "assistant").length, 2, "a replayed turn_started event does not duplicate settled segments");
+  s = replayedStart;
+  s = ev(s, { kind: "turn_done", turnId: "multi-round" } as WireEvent);
+
+  const timeline = s.items.filter((item) => item.kind === "assistant" || item.kind === "tool");
+  eq(timeline.map((item) => item.kind).join(","), "assistant,tool,assistant", "multi-round live order matches persisted history order");
+  eq(timeline[0]?.id, "a:multi-round:0", "first sample owns ordinal zero");
+  eq(timeline[2]?.id, "a:multi-round:1", "second sample owns a distinct ordinal");
+  eq(timeline[0]?.kind === "assistant" ? timeline[0].reasoning : "", "first analysis", "first reasoning is not overwritten");
+  eq(timeline[2]?.kind === "assistant" ? timeline[2].text : "", "final answer", "final answer remains in the second segment");
+  eq(timeline[2]?.kind === "assistant" ? timeline[2].wasStreamed : undefined, true, "live-origin identity survives completion");
+
+}
+
+// --- 1f. tool-only samples remove their placeholder before the next round ---
+{
+  let s = ev({ ...initialState }, { kind: "turn_started", turnId: "tool-only" } as WireEvent);
+  s = ev(s, { kind: "stream_attempt", streamAttempt: { id: "tool-round", action: "begin", attempt: 1, max: 2 } } as WireEvent);
+  s = ev(s, { kind: "tool_dispatch", tool: { id: "shell-1", name: "bash", readOnly: false, partial: true, attemptId: "tool-round" } } as WireEvent);
+  s = ev(s, { kind: "stream_attempt", streamAttempt: { id: "tool-round", action: "commit", attempt: 1, max: 2 } } as WireEvent);
+  eq(s.items.some((item) => item.kind === "assistant"), false, "tool-only commit removes its empty assistant placeholder");
+  s = ev(s, { kind: "tool_dispatch", tool: { id: "shell-1", name: "bash", args: "{}", readOnly: false } } as WireEvent);
+  s = ev(s, { kind: "tool_result", tool: { id: "shell-1", name: "bash", args: "{}", readOnly: false, output: "ok" } } as WireEvent);
+  s = ev(s, { kind: "stream_attempt", streamAttempt: { id: "answer-round", action: "begin", attempt: 1, max: 2 } } as WireEvent);
+  s = ev(s, { kind: "reasoning", reasoning: "after tool" } as WireEvent);
+  s = ev(s, { kind: "message", text: "done", reasoning: "after tool" } as WireEvent);
+  const visible = s.items.filter((item) => item.kind === "tool" || item.kind === "assistant");
+  eq(visible.map((item) => item.kind).join(","), "tool,assistant", "next reasoning is appended below the committed tool");
+  eq(visible[1]?.id, "a:tool-only:1", "tool-only placeholder ordinal is not reused");
+}
+
+// --- 1g. discard retries preserve segment identity; legacy full tools retire placeholders ---
+{
+  let s = ev({ ...initialState }, { kind: "turn_started", turnId: "retry-segment" } as WireEvent);
+  const segmentId = s.currentAssistant;
+  s = ev(s, { kind: "stream_attempt", streamAttempt: { id: "bad", action: "begin", attempt: 1, max: 2 } } as WireEvent);
+  s = ev(s, { kind: "reasoning", reasoning: "discard me" } as WireEvent);
+  s = ev(s, { kind: "stream_attempt", streamAttempt: { id: "bad", action: "discard", attempt: 1, max: 2 } } as WireEvent);
+  s = ev(s, { kind: "stream_attempt", streamAttempt: { id: "good", action: "begin", attempt: 2, max: 2 } } as WireEvent);
+  eq(s.currentAssistant, segmentId, "retry reuses the same sampling segment identity");
+  eq(s.live?.reasoning, "", "retry starts from the rolled-back reasoning baseline");
+
+  let legacy = ev({ ...initialState }, { kind: "turn_started", turnId: "legacy" } as WireEvent);
+  legacy = ev(legacy, { kind: "tool_dispatch", tool: { id: "legacy-tool", name: "bash", args: "{}", readOnly: false } } as WireEvent);
+  legacy = ev(legacy, { kind: "reasoning", reasoning: "legacy follow-up" } as WireEvent);
+  const legacyTimeline = legacy.items.filter((item) => item.kind === "tool" || item.kind === "assistant");
+  eq(legacyTimeline.map((item) => item.kind).join(","), "tool,assistant", "full dispatch compatibility path retires the empty placeholder");
+  eq(legacyTimeline[1]?.id, "a:legacy:1", "legacy follow-up gets the next segment ordinal");
+
+  let partialLegacy = ev({ ...initialState, activeTurnId: "partial-legacy", running: true, turnActive: true }, {
+    kind: "tool_dispatch",
+    tool: { id: "partial-legacy-tool", name: "bash", readOnly: false, partial: true },
+  } as WireEvent);
+  eq(partialLegacy.currentAssistant, "a:partial-legacy:0", "first partial dispatch backfills a sampling segment");
+  partialLegacy = ev(partialLegacy, {
+    kind: "tool_dispatch",
+    tool: { id: "partial-legacy-tool", name: "bash", args: "{}", readOnly: false },
+  } as WireEvent);
+  eq(partialLegacy.items.some((item) => item.kind === "assistant"), false, "legacy full dispatch removes the partial path's empty segment");
+}
+
+// --- 1h. terminal duration belongs to the last retained assistant segment ---
+{
+  const originalNow = Date.now;
+  let now = 100_000;
+  Date.now = () => now;
+  try {
+    let s = ev({ ...initialState }, { kind: "turn_started", turnId: "terminal-duration" } as WireEvent);
+    now = 101_000;
+    s = ev(s, { kind: "message", text: "first answer" } as WireEvent);
+    s = ev(s, { kind: "tool_dispatch", tool: { id: "duration-tool", name: "bash", args: "{}", readOnly: false } } as WireEvent);
+    s = ev(s, { kind: "tool_result", tool: { id: "duration-tool", name: "bash", args: "{}", readOnly: false, output: "ok" } } as WireEvent);
+    now = 110_000;
+    s = ev(s, { kind: "stream_attempt", streamAttempt: { id: "empty-final", action: "begin", attempt: 1, max: 1 } } as WireEvent);
+    s = ev(s, { kind: "turn_done", turnId: "terminal-duration", status: "interrupted" } as WireEvent);
+
+    const assistants = s.items.filter((item) => item.kind === "assistant");
+    eq(assistants.length, 1, "turn_done removes the empty terminal placeholder");
+    eq(assistants[0]?.kind === "assistant" ? assistants[0].workDurationMs : 0, 10_000, "turn_done assigns total work duration to the last visible assistant");
+  } finally {
+    Date.now = originalNow;
+  }
+}
+
 // --- 2. usageSeq bumps for every source ---
 {
   let s = { ...initialState, running: true, turnActive: true };
@@ -143,6 +375,11 @@ function ev(s: typeof initialState, e: WireEvent) {
   s = ev(s, { kind: "retrying", retryAttempt: 3, retryMax: 10 } as WireEvent);
   eq(s.retry?.attempt, 3, "retry status keeps the current attempt");
   eq(s.retry?.max, 10, "retry status keeps the retry budget");
+  const recovery = { phase: "headers", next_attempt_at: Date.now() + 60_000, waited_ms: 14_000, waiting: true };
+  s = ev(s, { kind: "retrying", retryAttempt: 4, retryMax: 3, recovery } as WireEvent);
+  eq(s.retry?.recovery?.waiting, true, "continuous wait survives the controller projection");
+  eq(s.retry?.recovery?.next_attempt_at, recovery.next_attempt_at, "countdown uses the provider recovery deadline");
+
   eq(s.running, true, "retry event restores the active turn");
   eq(s.turnActive, true, "retry event restores the turn epoch");
   eq(s.cancellable, true, "retry event keeps Stop and Escape cancellation available");
@@ -152,6 +389,11 @@ function ev(s: typeof initialState, e: WireEvent) {
   const completed = ev(repaired, { kind: "turn_done" } as WireEvent);
   eq(completed.running, false, "turn_done still ends the repaired turn");
   eq(completed.retry, undefined, "turn_done clears the retry indicator");
+
+  const failed = ev(repaired, { kind: "turn_done", err: "shared window overflow" } as WireEvent);
+  eq(failed.running, false, "terminal context error clears running");
+  eq(failed.pendingPrompt, false, "terminal context error clears pending prompt");
+  eq(failed.messageAction, undefined, "terminal context error restores message actions");
 
   const staleSnapshotAt = promptEventClock();
   s = ev(repaired, { kind: "retrying", retryAttempt: 4, retryMax: 10 } as WireEvent);
@@ -180,6 +422,319 @@ function ev(s: typeof initialState, e: WireEvent) {
   });
   eq(s.running, false, "fresh idle snapshot can reconcile a missed turn_done");
   eq(s.retry, undefined, "fresh idle snapshot clears the retry indicator");
+}
+
+// --- 4b. runtime status sequence is monotonic within a controller epoch ---
+{
+  let s = { ...initialState, running: true, turnActive: true };
+  s = reducer(s, {
+    type: "backend_status", running: true, turnId: "turn-new", runtimeEpoch: "epoch-a", turnEventSeq: 12,
+  });
+  const stale = reducer(s, {
+    type: "backend_status", running: false, runtimeEpoch: "epoch-a", turnEventSeq: 11,
+  });
+  eq(stale.running, true, "older idle runtime snapshot cannot hide a newer running turn");
+  eq(stale.activeTurnId, "turn-new", "older runtime snapshot cannot clear the active turn");
+  const duplicate = reducer(s, {
+    type: "backend_status", running: false, runtimeEpoch: "epoch-a", turnEventSeq: 12,
+  });
+  eq(duplicate.running, true, "duplicate runtime sequence cannot mutate turn state");
+  const rebuilt = reducer(stale, {
+    type: "backend_status", running: false, runtimeEpoch: "epoch-b", turnEventSeq: 1,
+  });
+  eq(rebuilt.running, false, "a new controller epoch may settle from its first snapshot");
+}
+
+// --- 5. TPS telemetry excludes tool gaps and preserves fallback estimates ---
+{
+  const originalNow = Date.now;
+  let now = 1_000;
+  Date.now = () => now;
+  try {
+    let s = ev({ ...initialState }, { kind: "turn_started" } as WireEvent);
+    now = 1_100;
+    s = ev(s, { kind: "text", text: "abcd" } as WireEvent);
+    now = 2_100;
+    s = ev(s, { kind: "usage", usage: { promptTokens: 10, completionTokens: 4, totalTokens: 14, cacheHitTokens: 0, cacheMissTokens: 10 } } as WireEvent);
+    s = ev(s, { kind: "message", text: "abcd" } as WireEvent);
+    eq(s.turnModelActiveMs, 1_000, "first provider output interval is accumulated");
+    eq(s.turnOutputCharsAtUsage, 0, "completed assistant message resets the live-character baseline");
+
+    // A long tool gap must not lower TPS for the next provider request.
+    now = 8_000;
+    s = ev(s, { kind: "text", text: "abcdefgh" } as WireEvent);
+    now = 9_000;
+    s = ev(s, { kind: "turn_done" } as WireEvent);
+    eq(s.lastTurnOutputTokens, 6, "missing final usage adds only the in-flight character estimate");
+    eq(s.lastTurnModelMs, 2_000, "tool gap is excluded from completed TPS duration");
+    eq(s.lastTurnOutputEstimated, true, "missing final usage marks completed TPS as estimated");
+
+    // Providers that omit per-request usage must still close the first model
+    // interval before the tool runs.
+    now = 12_000;
+    s = ev({ ...initialState }, { kind: "turn_started" } as WireEvent);
+    now = 12_100;
+    s = ev(s, { kind: "text", text: "abcd" } as WireEvent);
+    now = 13_100;
+    s = ev(s, { kind: "message", text: "abcd" } as WireEvent);
+    s = ev(s, { kind: "tool_dispatch", tool: { id: "missing-usage", name: "read_file", args: "{}", readOnly: true } } as WireEvent);
+    now = 19_000;
+    s = ev(s, { kind: "text", text: "efgh" } as WireEvent);
+    now = 20_000;
+    s = ev(s, { kind: "turn_done" } as WireEvent);
+    eq(s.lastTurnOutputTokens, 2, "missing usage estimates output across provider requests");
+    eq(s.lastTurnModelMs, 2_000, "missing usage still excludes the tool gap");
+
+    now = 21_000;
+    s = ev({ ...initialState }, { kind: "turn_started" } as WireEvent);
+    now = 21_100;
+    s = ev(s, { kind: "text", text: "abcd" } as WireEvent);
+    now = 22_100;
+    s = ev(s, { kind: "usage", usage: { promptTokens: 10, completionTokens: 1, totalTokens: 11, cacheHitTokens: 0, cacheMissTokens: 10, estimated: true } } as WireEvent);
+    s = ev(s, { kind: "turn_done" } as WireEvent);
+    eq(s.lastTurnOutputEstimated, true, "provider-estimated usage marks completed TPS as estimated");
+
+    now = 23_000;
+    s = ev({ ...initialState }, { kind: "turn_started" } as WireEvent);
+    s = ev(s, { kind: "text", text: "abcd" } as WireEvent);
+    now = 24_000;
+    s = reducer(s, {
+      type: "backend_status",
+      running: false,
+      pendingPrompt: false,
+      backgroundJobs: 0,
+      cancelRequested: false,
+      cancellable: false,
+    });
+    eq(s.lastTurnOutputTokens, 1, "idle reconciliation snapshots fallback output telemetry");
+    eq(s.lastTurnModelMs, 1_000, "idle reconciliation closes the active provider interval");
+    eq(s.lastTurnOutputEstimated, true, "idle reconciliation preserves the estimated marker");
+  } finally {
+    Date.now = originalNow;
+  }
+}
+
+// --- 6. TPS telemetry follows executor output-token semantics and retry intervals ---
+{
+  const originalNow = Date.now;
+  let now = 30_000;
+  Date.now = () => now;
+  try {
+    let s = ev({ ...initialState }, { kind: "turn_started" } as WireEvent);
+    now = 30_100;
+    s = ev(s, { kind: "text", text: "abcd" } as WireEvent);
+    now = 31_100;
+    s = ev(s, { kind: "usage", usage: {
+      promptTokens: 100,
+      completionTokens: 20,
+      reasoningTokens: 10,
+      totalTokens: 120,
+      cacheHitTokens: 0,
+      cacheMissTokens: 100,
+      source: "executor",
+    } } as WireEvent);
+    s = ev(s, { kind: "turn_done" } as WireEvent);
+    eq(s.lastTurnOutputTokens, 20, "reasoning tokens are not added twice to completed TPS");
+    eq(s.lastTurnModelMs, 1_000, "reasoning usage preserves the executor output interval");
+
+    now = 32_000;
+    s = ev({ ...initialState }, { kind: "turn_started" } as WireEvent);
+    now = 32_100;
+    s = ev(s, { kind: "text", text: "abcd" } as WireEvent);
+    now = 32_500;
+    s = ev(s, { kind: "usage", usage: {
+      promptTokens: 50,
+      completionTokens: 100,
+      totalTokens: 150,
+      cacheHitTokens: 0,
+      cacheMissTokens: 50,
+      source: "subagent",
+    } } as WireEvent);
+    now = 33_100;
+    s = ev(s, { kind: "usage", usage: {
+      promptTokens: 10,
+      completionTokens: 10,
+      totalTokens: 20,
+      cacheHitTokens: 0,
+      cacheMissTokens: 10,
+      source: "executor",
+    } } as WireEvent);
+    s = ev(s, { kind: "turn_done" } as WireEvent);
+    eq(s.lastTurnOutputTokens, 10, "subagent usage is excluded from executor TPS tokens");
+    eq(s.lastTurnModelMs, 1_000, "subagent usage does not close the executor output interval");
+
+    now = 34_000;
+    s = ev({ ...initialState }, { kind: "turn_started" } as WireEvent);
+    s = ev(s, { kind: "stream_attempt", streamAttempt: { id: "tps-a1", action: "begin", attempt: 1, max: 2 } } as WireEvent);
+    now = 34_100;
+    s = ev(s, { kind: "text", text: "abcdefgh" } as WireEvent);
+    now = 35_100;
+    s = ev(s, { kind: "stream_attempt", streamAttempt: { id: "tps-a1", action: "discard", attempt: 1, max: 2 } } as WireEvent);
+    now = 38_000;
+    s = ev(s, { kind: "stream_attempt", streamAttempt: { id: "tps-a2", action: "begin", attempt: 2, max: 2 } } as WireEvent);
+    s = ev(s, { kind: "text", text: "abcd" } as WireEvent);
+    now = 39_000;
+    s = ev(s, { kind: "turn_done" } as WireEvent);
+    eq(s.lastTurnModelMs, 2_000, "discarded sampling attempts exclude retry backoff from TPS");
+  } finally {
+    Date.now = originalNow;
+  }
+}
+
+// --- 7. lastRequestTps pairs the closed interval with the usage tokens ---
+{
+  const originalNow = Date.now;
+  let now = 50_000;
+  Date.now = () => now;
+  try {
+    let s = ev({ ...initialState }, { kind: "turn_started" } as WireEvent);
+    now = 50_100;
+    s = ev(s, { kind: "text", text: "abcd" } as WireEvent);
+    now = 51_100;
+    // The message event closes the interval BEFORE the usage event arrives.
+    s = ev(s, { kind: "message", text: "abcd" } as WireEvent);
+    now = 51_200;
+    s = ev(s, { kind: "usage", usage: {
+      promptTokens: 130, completionTokens: 30, totalTokens: 160,
+      contextPromptTokens: 100, contextCompletionTokens: 20,
+      cacheHitTokens: 0, cacheMissTokens: 100, source: "executor",
+    } } as WireEvent);
+    eq(s.lastRequestTps, 20, "sampling recovery pairs the interval with latest-attempt tokens");
+
+    now = 52_000;
+    s = ev(s, { kind: "text", text: "more" } as WireEvent);
+    now = 52_050;
+    s = ev(s, { kind: "message", text: "more" } as WireEvent);
+    now = 52_100;
+    s = ev(s, { kind: "usage", usage: {
+      promptTokens: 5, completionTokens: 50, totalTokens: 55,
+      cacheHitTokens: 0, cacheMissTokens: 5, source: "subagent",
+    } } as WireEvent);
+    eq(s.lastRequestTps, 20, "non-executor usage neither computes nor consumes the pending interval");
+    now = 52_300;
+    s = ev(s, { kind: "usage", usage: {
+      promptTokens: 10, completionTokens: 30, totalTokens: 40,
+      cacheHitTokens: 0, cacheMissTokens: 10, source: "executor",
+    } } as WireEvent);
+    eq(s.lastRequestTps, null, "intervals under the 500ms gate clear stale request TPS");
+
+    now = 53_000;
+    s = ev(s, { kind: "text", text: "second" } as WireEvent);
+    now = 54_000;
+    s = ev(s, { kind: "message", text: "second" } as WireEvent);
+    now = 54_100;
+    s = ev(s, { kind: "usage", usage: {
+      promptTokens: 10, completionTokens: 30, totalTokens: 40,
+      cacheHitTokens: 0, cacheMissTokens: 10, source: "executor",
+    } } as WireEvent);
+    eq(s.lastRequestTps, 30, "a later executor usage refreshes the request TPS");
+
+    now = 55_000;
+    s = ev(s, { kind: "text", text: "direct" } as WireEvent);
+    now = 56_000;
+    s = ev(s, { kind: "usage", usage: {
+      promptTokens: 10, completionTokens: 40, totalTokens: 50,
+      cacheHitTokens: 0, cacheMissTokens: 10, source: "executor",
+    } } as WireEvent);
+    eq(s.lastRequestTps, 40, "usage measures an interval still open at arrival");
+
+    now = 57_000;
+    s = ev(s, { kind: "turn_done" } as WireEvent);
+    eq(s.lastRequestTps, 40, "request TPS persists across turn boundaries");
+
+    now = 58_000;
+    s = ev(s, { kind: "turn_started" } as WireEvent);
+    now = 58_100;
+    s = ev(s, { kind: "usage", usage: {
+      promptTokens: 10, completionTokens: 8, totalTokens: 18,
+      cacheHitTokens: 0, cacheMissTokens: 10, source: "executor",
+    } } as WireEvent);
+    eq(s.lastRequestTps, null, "usage without a provider interval clears stale request TPS");
+    now = 58_200;
+    s = ev(s, { kind: "tool_dispatch", tool: { id: "final-only", name: "read_file", args: "{}", readOnly: true } } as WireEvent);
+    eq(s.lastRequestTps, null, "a final-only tool dispatch after usage cannot resurrect stale TPS");
+
+    now = 59_000;
+    s = ev(s, { kind: "text", text: "toolcall" } as WireEvent);
+    now = 60_000;
+    s = ev(s, { kind: "tool_dispatch", tool: { id: "t1", name: "read_file", args: "{}", readOnly: true } } as WireEvent);
+    now = 60_100;
+    s = ev(s, { kind: "usage", usage: {
+      promptTokens: 10, completionTokens: 25, totalTokens: 35,
+      cacheHitTokens: 0, cacheMissTokens: 10, source: "executor",
+    } } as WireEvent);
+    eq(s.lastRequestTps, 25, "tool_dispatch closes the interval the next executor usage pairs with");
+
+    now = 61_000;
+    s = ev(s, { kind: "tool_dispatch", tool: { id: "t2", name: "write_file", readOnly: false, partial: true, argChars: 600 } } as WireEvent);
+    now = 62_000;
+    s = ev(s, { kind: "usage", usage: {
+      promptTokens: 10, completionTokens: 30, totalTokens: 40,
+      cacheHitTokens: 0, cacheMissTokens: 10, source: "executor",
+    } } as WireEvent);
+    eq(s.lastRequestTps, 30, "usage closes the interval started by a partial tool dispatch");
+    now = 62_100;
+    s = ev(s, { kind: "tool_dispatch", tool: { id: "t2", name: "write_file", args: "{}", readOnly: false } } as WireEvent);
+    eq(s.lastRequestTps, 30, "the later full tool dispatch preserves the measured request TPS");
+
+    now = 63_000;
+    s = ev(s, { kind: "text", text: "closing" } as WireEvent);
+    now = 64_000;
+    s = ev(s, { kind: "message", text: "closing" } as WireEvent);
+    now = 64_100;
+    s = ev(s, { kind: "tool_dispatch", tool: { id: "t3", name: "write_file", readOnly: false, partial: true, argChars: 300 } } as WireEvent);
+    now = 64_700;
+    s = ev(s, { kind: "tool_dispatch", tool: { id: "t3", name: "write_file", args: "{}", readOnly: false } } as WireEvent);
+    now = 64_800;
+    s = ev(s, { kind: "usage", usage: {
+      promptTokens: 10, completionTokens: 30, totalTokens: 40,
+      cacheHitTokens: 0, cacheMissTokens: 10, source: "executor",
+    } } as WireEvent);
+    // The partial restart begins a new interval; the full dispatch closes it
+    // and overwrites the message-stashed pending with its own (≥500ms) tail.
+    eq(s.lastRequestTps, 50, "a full dispatch overwrites a message-stashed pending with its own tail close");
+
+    now = 65_000;
+    s = ev(s, { kind: "text", text: "slow" } as WireEvent);
+    now = 68_000;
+    s = ev(s, { kind: "message", text: "slow" } as WireEvent);
+    now = 68_100;
+    s = ev(s, { kind: "usage", usage: {
+      promptTokens: 10, completionTokens: 1, totalTokens: 11,
+      cacheHitTokens: 0, cacheMissTokens: 10, source: "executor",
+    } } as WireEvent);
+    eq(s.lastRequestTps, 1 / 3, "slow measurable requests retain their raw sub-one TPS");
+  } finally {
+    Date.now = originalNow;
+  }
+}
+
+// --- 8. context occupancy uses prompt tokens and keeps legacy fallback semantics ---
+{
+  let s = ev({
+    ...initialState,
+    running: true,
+    turnActive: true,
+    context: { ...initialState.context, window: 1_000 },
+  }, { kind: "usage", usage: {
+    promptTokens: 500,
+    completionTokens: 20,
+    totalTokens: 520,
+    contextPromptTokens: 0,
+    contextCompletionTokens: 20,
+    source: "executor",
+  } } as WireEvent);
+  eq(s.context.used, 500, "completion-only latest usage falls back to aggregate prompt occupancy");
+
+  s = ev({ ...s, running: true, turnActive: true }, { kind: "usage", usage: {
+    promptTokens: 700,
+    completionTokens: 30,
+    totalTokens: 730,
+    contextPromptTokens: 450,
+    contextCompletionTokens: 0,
+    source: "executor",
+  } } as WireEvent);
+  eq(s.context.used, 450, "latest-attempt prompt occupancy excludes completion tokens");
 }
 
 process.stdout.write(`\n${passed} passed, ${failed} failed\n`);

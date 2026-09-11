@@ -87,7 +87,7 @@ func TestGrepWorkspaceE2E(t *testing.T) {
 // files, relative to repo with forward slashes.
 func matchedRelFiles(repo, out string) map[string]bool {
 	found := map[string]bool{}
-	for _, line := range strings.Split(out, "\n") {
+	for line := range strings.SplitSeq(out, "\n") {
 		i := strings.LastIndex(line, ":")
 		if i < 0 {
 			continue

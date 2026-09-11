@@ -4,6 +4,7 @@ import (
 	"bufio"
 	"bytes"
 	"context"
+	"errors"
 	"fmt"
 	"net"
 	"os"
@@ -98,7 +99,7 @@ func (p *HostKeyPolicy) Callback(ctx context.Context, host string) (ssh.HostKeyC
 				return nil
 			}
 			var keyErr *knownhosts.KeyError
-			if !asKeyError(err, &keyErr) {
+			if !errors.As(err, &keyErr) {
 				return err
 			}
 			if len(keyErr.Want) > 0 {
@@ -144,7 +145,7 @@ func (p *HostKeyPolicy) HostKeyAlgorithms(hostname string, remote net.Addr) ([]s
 		return nil, nil
 	}
 	var keyErr *knownhosts.KeyError
-	if !asKeyError(err, &keyErr) {
+	if !errors.As(err, &keyErr) {
 		return nil, err
 	}
 	if len(keyErr.Want) == 0 {
@@ -368,22 +369,6 @@ func newHostKeyMismatchError(host, presented string, e *knownhosts.KeyError) err
 		locations = append(locations, KnownHostLocation{Filename: k.Filename, Line: k.Line})
 	}
 	return &HostKeyMismatchError{Host: host, PresentedFingerprint: presented, Locations: locations}
-}
-
-func asKeyError(err error, target **knownhosts.KeyError) bool {
-	for err != nil {
-		if ke, ok := err.(*knownhosts.KeyError); ok {
-			*target = ke
-			return true
-		}
-		type unwrapper interface{ Unwrap() error }
-		u, ok := err.(unwrapper)
-		if !ok {
-			return false
-		}
-		err = u.Unwrap()
-	}
-	return false
 }
 
 func fileExists(path string) bool {

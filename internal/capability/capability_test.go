@@ -71,7 +71,7 @@ func TestRouteRespectsSkillAutoUseMetadata(t *testing.T) {
 
 func TestRouteKeepsAllStrongCandidatesBeforeSuggestBudget(t *testing.T) {
 	entries := make([]Entry, 0, 8)
-	for i := 0; i < 6; i++ {
+	for i := range 6 {
 		entries = append(entries, Entry{ID: fmt.Sprintf("skill:required-%d", i), Kind: KindSkill, Name: fmt.Sprintf("required-%d", i), AutoUse: AutoUsePrefer, Triggers: []string{"ship"}})
 	}
 	entries = append(entries,
@@ -90,13 +90,13 @@ func TestRouteKeepsAllStrongCandidatesBeforeSuggestBudget(t *testing.T) {
 	}
 }
 
-func TestRouteDeliveryPromotesMatchedBuiltinSkills(t *testing.T) {
+func TestRouteClosedLoopPromotesMatchedBuiltinSkills(t *testing.T) {
 	entries := []Entry{
 		{ID: "skill:explore", Kind: KindSkill, Name: "explore", Source: string(skill.ScopeBuiltin), AutoUse: AutoUseSuggest, Triggers: []string{"调用链"}},
 		{ID: "skill:custom", Kind: KindSkill, Name: "custom", Source: string(skill.ScopeProject), AutoUse: AutoUseSuggest, Triggers: []string{"调用链"}},
 	}
-	decision := RouteDelivery("分析调用链", entries)
-	if !decision.Delivery || len(decision.Candidates) != 2 {
+	decision := RouteClosedLoop("分析调用链", entries)
+	if !decision.ClosedLoop || len(decision.Candidates) != 2 {
 		t.Fatalf("delivery decision = %+v", decision)
 	}
 	if decision.Candidates[0].Entry.ID != "skill:explore" || decision.Candidates[0].Policy != AutoUsePrefer {
@@ -121,6 +121,23 @@ func TestRoutePrefersGitHubMCPForIssueLookup(t *testing.T) {
 	got := decision.Candidates[0]
 	if got.Entry.ID != "mcp-tool:github/search_issues" || got.Policy != AutoUsePrefer {
 		t.Fatalf("candidate = %+v, want github mcp/prefer", got)
+	}
+}
+
+func TestRouteDoesNotPreferFailedCachedMCPTool(t *testing.T) {
+	entries := []Entry{{
+		ID:            "mcp-tool:github/search_issues",
+		Kind:          KindMCPTool,
+		Name:          "github/search_issues",
+		Source:        "github",
+		Status:        StatusFailed,
+		ConnectSource: "mcp",
+		ConnectName:   "github",
+	}}
+
+	decision := Route("查一下 GitHub issue 里有没有相关反馈", entries)
+	if len(decision.Candidates) != 0 {
+		t.Fatalf("failed cached MCP tool was still routed: %+v", decision.Candidates)
 	}
 }
 

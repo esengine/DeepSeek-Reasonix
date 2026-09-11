@@ -4,11 +4,12 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 )
 
-// --- sbplString ---
+// sbplString
 
 func TestSbplString(t *testing.T) {
 	cases := []struct {
@@ -29,7 +30,7 @@ func TestSbplString(t *testing.T) {
 	}
 }
 
-// --- writeAllowDirs ---
+// writeAllowDirs
 
 func TestWriteAllowDirsDeduplication(t *testing.T) {
 	dirs := writeAllowDirs([]string{"/tmp", "/tmp", "/tmp"})
@@ -62,15 +63,19 @@ func TestWriteAllowDirsIncludesTemp(t *testing.T) {
 	dirs := writeAllowDirs(nil)
 	tmpDir := os.TempDir()
 	realTmp, _ := filepath.EvalSymlinks(tmpDir)
-	found := false
-	for _, d := range dirs {
-		if d == realTmp {
-			found = true
-			break
-		}
-	}
+	found := slices.Contains(dirs, realTmp)
 	if !found {
 		t.Errorf("writeAllowDirs should include temp dir %s, got %v", tmpDir, dirs)
+	}
+}
+
+func TestWriteAllowDirsIncludesSessionTemp(t *testing.T) {
+	private := t.TempDir()
+	dirs := writeAllowDirsForSpec(Spec{SessionTemp: private, MinimalWrites: true})
+	real, _ := filepath.EvalSymlinks(private)
+	found := slices.Contains(dirs, real)
+	if !found {
+		t.Fatalf("SessionTemp must be allowed under Seatbelt even with MinimalWrites: %v", dirs)
 	}
 }
 
@@ -95,7 +100,7 @@ func TestWriteAllowDirsNoDuplicates(t *testing.T) {
 	}
 }
 
-// --- seatbeltProfile ---
+// seatbeltProfile
 
 func TestSeatbeltProfileDeniesNetwork(t *testing.T) {
 	spec := Spec{Mode: "enforce", Network: false, WriteRoots: []string{"/workspace"}}
@@ -160,12 +165,7 @@ func containsDarwinPath(paths []string, want string) bool {
 	if real, err := filepath.EvalSymlinks(abs); err == nil {
 		abs = real
 	}
-	for _, path := range paths {
-		if path == abs {
-			return true
-		}
-	}
-	return false
+	return slices.Contains(paths, abs)
 }
 
 func TestCommandUnwrappedWhenOff(t *testing.T) {
@@ -175,6 +175,51 @@ func TestCommandUnwrappedWhenOff(t *testing.T) {
 	}
 	if len(argv) != 3 || argv[0] != "bash" || argv[1] != "-c" || argv[2] != "echo hi" {
 		t.Errorf("argv = %v, want [bash -c echo hi]", argv)
+	}
+}
+
+func TestProfileDeniesProtectedWriteRoots(t *testing.T) {
+	home := t.TempDir()
+	state := canonicalDir(filepath.Join(home, ".reasonix"))
+	sessions := filepath.Join(state, "sessions")
+	if err := os.MkdirAll(sessions, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	profile := seatbeltProfile(Spec{
+		Mode:                "enforce",
+		WriteRoots:          []string{home},
+		ProtectedWriteRoots: ProtectedWriteRoots(state),
+	})
+	if !strings.Contains(profile, `(deny file-write* (subpath "`+state+`")`) &&
+		!strings.Contains(profile, "deny file-write*") {
+		t.Fatalf("protected write deny missing:\n%s", profile)
+	}
+	if !strings.Contains(profile, "deny file-write*") || !strings.Contains(profile, state) {
+		t.Fatalf("expected deny of state boundary in profile:\n%s", profile)
+	}
+}
+
+func TestProfileReallowsOnlySafeStateChild(t *testing.T) {
+	state := canonicalDir(t.TempDir())
+	skills := filepath.Join(state, "skills")
+	projects := filepath.Join(state, "projects", "slug")
+	if err := os.MkdirAll(skills, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(projects, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	profile := seatbeltProfile(Spec{
+		Mode:                "enforce",
+		WriteRoots:          []string{skills, projects},
+		ProtectedWriteRoots: ProtectedWriteRoots(state),
+		MinimalWrites:       true,
+	})
+	if !strings.Contains(profile, `(allow file-write* (subpath "`+skills+`"))`) {
+		t.Fatalf("safe state child should be explicitly reopened:\n%s", profile)
+	}
+	if strings.Contains(profile, `(allow file-write* (subpath "`+projects+`"))`) {
+		t.Fatalf("project runtime state must remain denied:\n%s", profile)
 	}
 }
 
@@ -293,5 +338,46 @@ func TestGoBuildUnderSandbox(t *testing.T) {
 	}
 	if _, err := os.Stat(filepath.Join(work, "sbtest")); err != nil {
 		t.Errorf("build output missing: %v", err)
+	}
+}
+
+// fakeSandboxExec writes an executable named sandbox-exec into a fresh temp
+// dir and returns its path. Tests probe the returned path directly so they do
+// not depend on process-global PATH state while the package runs in parallel
+// with the rest of the repository.
+func fakeSandboxExec(t *testing.T, exitCode string) string {
+	t.Helper()
+	dir := t.TempDir()
+	path := filepath.Join(dir, "sandbox-exec")
+	if err := os.WriteFile(path, []byte("#!/bin/sh\nexit "+exitCode+"\n"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	return path
+}
+
+// TestAvailableFalseWhenSandboxExecUnusable covers the macOS 10.14+ case where
+// sandbox-exec is installed but sandbox_apply is refused (exit 71): the probe
+// must report unavailable so enforce mode fails loudly at boot instead of
+// silently on every command.
+func TestAvailableFalseWhenSandboxExecUnusable(t *testing.T) {
+	path := fakeSandboxExec(t, "71")
+	sandboxExecUsability.Delete(path) // the fake is fresh per test; re-probe it
+	if usableSandboxExecPath(path) {
+		t.Fatal("sandbox-exec probe = true, want false: executable is unusable (exit 71)")
+	}
+}
+
+func TestAvailableTrueWhenSandboxExecUsable(t *testing.T) {
+	path := fakeSandboxExec(t, "0")
+	sandboxExecUsability.Delete(path)
+	if !usableSandboxExecPath(path) {
+		t.Fatal("sandbox-exec probe = false, want true: working sandbox-exec")
+	}
+}
+
+func TestAvailableFalseWhenSandboxExecMissing(t *testing.T) {
+	t.Setenv("PATH", t.TempDir()) // no sandbox-exec anywhere on PATH
+	if Available() {
+		t.Fatal("Available() = true, want false: sandbox-exec not on PATH")
 	}
 }

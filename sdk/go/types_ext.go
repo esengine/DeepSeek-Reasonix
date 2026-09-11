@@ -18,9 +18,7 @@ import (
 // required fields, method names, directions, limits, error reasons, and
 // semantics never change.
 
-// ---------------------------------------------------------------------------
 // Enum helpers
-// ---------------------------------------------------------------------------
 
 // InterceptEvents returns the 17 frozen hook point names, sorted.
 func InterceptEvents() []string {
@@ -73,9 +71,7 @@ func validUISeverity(severity UISeverity) bool {
 	return false
 }
 
-// ---------------------------------------------------------------------------
 // Wire DTO validators
-// ---------------------------------------------------------------------------
 
 // Validate enforces the deterministic wire shape.
 func (request ProviderRequest) Validate() error {
@@ -142,9 +138,7 @@ func (d ProtocolErrorData) Validate() error {
 	return nil
 }
 
-// ---------------------------------------------------------------------------
 // ProtocolError
-// ---------------------------------------------------------------------------
 
 // ProtocolError is the extension protocol's structured error. Handlers may
 // return one to choose the wire reason; the SDK answers with the frozen
@@ -180,9 +174,7 @@ func MustProtocolError(reason ErrorReason) *ProtocolError {
 	return errValue
 }
 
-// ---------------------------------------------------------------------------
 // internal helpers shared with the validator
-// ---------------------------------------------------------------------------
 
 type validationFailure struct{ message string }
 

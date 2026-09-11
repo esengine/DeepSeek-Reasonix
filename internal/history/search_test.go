@@ -131,7 +131,7 @@ func TestSearchDropsCommonWordNoise(t *testing.T) {
 	writeSession(t, filepath.Join(sessionDir, "rare.jsonl"), []provider.Message{
 		{Role: provider.RoleUser, Content: "rareterm common common common"},
 	})
-	for i := 0; i < 12; i++ {
+	for i := range 12 {
 		writeSession(t, filepath.Join(sessionDir, "common-"+string(rune('a'+i))+".jsonl"), []provider.Message{
 			{Role: provider.RoleUser, Content: "common"},
 		})

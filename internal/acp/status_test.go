@@ -9,12 +9,88 @@ import (
 	"testing"
 
 	"reasonix/internal/agent"
+	"reasonix/internal/billing"
+	"reasonix/internal/control"
 	"reasonix/internal/event"
 	"reasonix/internal/provider"
 )
 
 type statusFactory struct {
 	*configurableFactory
+}
+
+func TestUsageAccumulatorTotalsMoreThanAuditLimit(t *testing.T) {
+	var accumulator usageAccumulator
+	usage := &provider.Usage{PromptTokens: 1_000_000}
+	pricing := &provider.Pricing{Input: 1, Currency: "USD"}
+	for range 65 {
+		quote := billing.BuildQuote(billing.QuoteInput{
+			Usage:           billing.UsageTokens{PromptTokens: usage.PromptTokens},
+			Rates:           billing.RateCard{Input: pricing.Input, Currency: pricing.Currency},
+			DisplayCurrency: "USD",
+		})
+		accumulator.addQuoted(usage, pricing, &quote, event.UsageSourceExecutor)
+	}
+	wire := accumulator.wire()
+	if wire.EstimatedCost == nil || *wire.EstimatedCost != 65 || wire.Currency == nil || *wire.Currency != "USD" {
+		t.Fatalf("65-event ACP total was truncated: %+v", wire)
+	}
+	if wire.CostQuote == nil || wire.CostQuote.Selected == nil || wire.CostQuote.Selected.Amount != "65" {
+		t.Fatalf("65-event ACP aggregate quote = %+v", wire.CostQuote)
+	}
+	if wire.CostComplete == nil || !*wire.CostComplete {
+		t.Fatalf("65-event ACP quote incomplete: %+v", wire)
+	}
+}
+
+func TestUsageAccumulatorExposesAuthoritativeTotalWithoutCacheDoubleCount(t *testing.T) {
+	var accumulator usageAccumulator
+	accumulator.addQuoted(&provider.Usage{
+		PromptTokens: 1_000, CompletionTokens: 500, ReasoningTokens: 300,
+		CacheHitTokens: 800, CacheMissTokens: 200,
+	}, nil, nil, event.UsageSourceExecutor)
+
+	wire := accumulator.wire()
+	if wire.TotalTokens != 1_500 {
+		t.Fatalf("total tokens = %d, want 1500: %+v", wire.TotalTokens, wire)
+	}
+	if wire.PromptTokens != wire.CacheHitTokens+wire.CacheMissTokens {
+		t.Fatalf("cache split no longer partitions prompt tokens: %+v", wire)
+	}
+}
+
+func TestRestoreUsageReconstructsTotalTokensFromLegacySnapshot(t *testing.T) {
+	wire := restoreUsage(persistedUsageAccumulator{
+		PromptTokens: 1_000, CompletionTokens: 500,
+		CacheHitTokens: 800, CacheMissTokens: 200,
+	}).wire()
+
+	if wire.TotalTokens != 1_500 {
+		t.Fatalf("restored total tokens = %d, want 1500: %+v", wire.TotalTokens, wire)
+	}
+}
+
+func TestRestoredUsageKeepsFullScalarTotalAfterNewQuote(t *testing.T) {
+	complete := true
+	accumulator := restoreUsage(persistedUsageAccumulator{
+		PromptTokens: 1_000_000, Events: 1, PricedEvents: 1,
+		EstimatedCost: 2, Currency: "USD", CostComplete: &complete,
+	})
+	usage := &provider.Usage{PromptTokens: 1_000_000}
+	pricing := &provider.Pricing{Input: 1, Currency: "USD"}
+	quote := billing.BuildQuote(billing.QuoteInput{
+		Usage:           billing.UsageTokens{PromptTokens: usage.PromptTokens},
+		Rates:           billing.RateCard{Input: pricing.Input, Currency: pricing.Currency},
+		DisplayCurrency: "USD",
+	})
+	accumulator.addQuoted(usage, pricing, &quote, event.UsageSourceExecutor)
+	wire := accumulator.wire()
+	if wire.EstimatedCost == nil || *wire.EstimatedCost != 3 {
+		t.Fatalf("restored scalar history was replaced by the new ledger fragment: %+v", wire)
+	}
+	if wire.CostComplete == nil || !*wire.CostComplete {
+		t.Fatalf("restored complete state was lost: %+v", wire)
+	}
 }
 
 type runtimeTrackingFactory struct {
@@ -103,7 +179,7 @@ func TestStatusExtensionTracksMultipleSessionsAndUsage(t *testing.T) {
 		t.Fatalf("effective runtime status = %+v", firstStatus)
 	}
 	usage := firstStatus.Usage.Cumulative
-	if usage.PromptTokens != 15 || usage.CompletionTokens != 5 || usage.ReasoningTokens != 2 || usage.CacheHitTokens != 7 || usage.CacheMissTokens != 8 {
+	if usage.TotalTokens != 20 || usage.PromptTokens != 15 || usage.CompletionTokens != 5 || usage.ReasoningTokens != 2 || usage.CacheHitTokens != 7 || usage.CacheMissTokens != 8 {
 		t.Fatalf("cumulative usage = %+v", usage)
 	}
 	if usage.UsageSource != "mixed" || usage.CacheHitRatio == nil || usage.EstimatedCost == nil || usage.Currency == nil || *usage.Currency != "USD" {
@@ -144,6 +220,7 @@ func TestStatusExtensionTracksMultipleSessionsAndUsage(t *testing.T) {
 }
 
 func TestStatusNormalizesPhaseAndRedactsPublicText(t *testing.T) {
+	const opaqueSecret = "readinessSecretAbc123"
 	telemetry := newStatusTelemetry()
 	telemetry.beginTurn()
 	telemetry.onEvent(event.Event{Kind: event.Phase, Source: event.UsageSourcePlanner, Text: "planner · private stage label"})
@@ -156,7 +233,7 @@ func TestStatusNormalizesPhaseAndRedactsPublicText(t *testing.T) {
 	}
 	telemetry.finishTurn(&agent.FinalReadinessError{
 		Attempts: 1,
-		Reason:   "token=secret-reason",
+		Reason:   "token=secret-reason credential " + opaqueSecret,
 		Missing:  []string{"api_key=secret-risk"},
 	}, false, "running", "authorization: bearer secret-summary")
 	snapshot := telemetry.snapshot()
@@ -167,7 +244,7 @@ func TestStatusNormalizesPhaseAndRedactsPublicText(t *testing.T) {
 	if strings.Contains(string(encoded), "secret-") || !strings.Contains(string(encoded), "[redacted]") {
 		t.Fatalf("status text was not redacted: %s", encoded)
 	}
-	if strings.Contains(snapshot.turnOutcome.Reason, "secret-") {
+	if strings.Contains(snapshot.turnOutcome.Reason, "secret-") || strings.Contains(snapshot.turnOutcome.Reason, opaqueSecret) {
 		t.Fatalf("turn outcome was not redacted: %q", snapshot.turnOutcome.Reason)
 	}
 
@@ -187,6 +264,28 @@ func TestRestoreStatusNormalizesLegacyPresentationPhase(t *testing.T) {
 	})
 	if got := restored.snapshot().phase; got != "implementing" {
 		t.Fatalf("restored phase = %q, want implementing", got)
+	}
+}
+
+func TestRestoreStatusStronglyRedactsLegacyTurnOutcome(t *testing.T) {
+	const opaqueSecret = "readinessSecretAbc123"
+	const bearerSecret = "bearerSecretAbc123"
+	restored := restoreStatusTelemetry(&persistedStatusTelemetry{
+		TurnOutcome: ReasonixTurnOutcome{
+			Kind:   "error",
+			Reason: "credential " + opaqueSecret + " Authorization: Bearer " + bearerSecret,
+		},
+	})
+
+	snapshot := restored.snapshot()
+	persisted := restored.persisted()
+	for name, reason := range map[string]string{
+		"public snapshot":  snapshot.turnOutcome.Reason,
+		"repersisted data": persisted.TurnOutcome.Reason,
+	} {
+		if strings.Contains(reason, opaqueSecret) || strings.Contains(reason, bearerSecret) {
+			t.Errorf("%s leaked a legacy credential: %q", name, reason)
+		}
 	}
 }
 
@@ -221,7 +320,7 @@ func TestRestoreStatusMarksInterruptedTurnPaused(t *testing.T) {
 	}
 }
 
-func TestStatusRecomputesPlannerModeAfterWorkModeSwitch(t *testing.T) {
+func TestStatusWorkModeSetConfigOptionSwitchesQualityFloor(t *testing.T) {
 	factory := &runtimeTrackingFactory{configurableFactory: &configurableFactory{}}
 	client, stop := startServer(t, factory)
 	defer stop()
@@ -230,26 +329,41 @@ func TestStatusRecomputesPlannerModeAfterWorkModeSwitch(t *testing.T) {
 	if status := getStatus(t, client, sessionID); status.WorkMode != "balanced" || status.PlannerMode != "on" {
 		t.Fatalf("initial runtime status = %+v", status)
 	}
+	buildsBefore := factory.buildCount()
 
-	for _, tc := range []struct {
-		profile string
-		planner string
-	}{
-		{profile: "economy", planner: "off"},
-		{profile: "delivery", planner: "on"},
-	} {
+	for _, value := range []string{"economy", "delivery", "light"} {
 		resp := client.call(t, "session/set_config_option", SetSessionConfigOptionParams{
 			SessionID: sessionID,
 			ConfigID:  "work_mode",
-			Value:     tc.profile,
+			Value:     value,
 		})
 		if resp.Error != nil {
-			t.Fatalf("set work mode %q: %+v", tc.profile, resp.Error)
+			t.Fatalf("set work mode %q: %+v", value, resp.Error)
+		}
+		var set SetSessionConfigOptionResult
+		if err := json.Unmarshal(resp.Result, &set); err != nil {
+			t.Fatalf("set work mode %q result: %v", value, err)
+		}
+		want := control.QualityFloorStandard
+		if value == "delivery" {
+			want = control.QualityFloorDelivery
+		}
+		var floorOpt *SessionConfigOption
+		for i := range set.ConfigOptions {
+			if set.ConfigOptions[i].ID == "quality_floor" {
+				floorOpt = &set.ConfigOptions[i]
+			}
+		}
+		if floorOpt == nil || floorOpt.CurrentValue != want {
+			t.Fatalf("quality floor option after work_mode %q = %+v, want %q", value, floorOpt, want)
 		}
 		status := getStatus(t, client, sessionID)
-		if status.WorkMode != tc.profile || status.PlannerMode != tc.planner {
-			t.Fatalf("runtime status after %q = %+v", tc.profile, status)
+		if status.WorkMode != "balanced" || status.PlannerMode != "on" {
+			t.Fatalf("runtime status after deprecated work_mode %q = %+v", value, status)
 		}
+	}
+	if got := factory.buildCount(); got != buildsBefore {
+		t.Fatalf("work_mode rebuilt controller: builds=%d, want %d", got, buildsBefore)
 	}
 }
 

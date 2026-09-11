@@ -90,6 +90,7 @@ api_key_env = "REASONIX_TEST_REMOTE_MISSING_KEY"
 	})
 
 	var addr string
+	var lastReadErr error
 	deadline := time.Now().Add(15 * time.Second)
 	for time.Now().Before(deadline) {
 		data, err := os.ReadFile(portFile)
@@ -97,13 +98,14 @@ api_key_env = "REASONIX_TEST_REMOTE_MISSING_KEY"
 			addr = strings.TrimSpace(string(data))
 			break
 		}
-		if err != nil && !os.IsNotExist(err) {
-			t.Fatalf("read Serve port file: %v", err)
-		}
+		// Every read error is retryable inside the deadline: on Windows the
+		// writing child briefly holds the file (sharing violation), which is a
+		// timing condition, not a failure.
+		lastReadErr = err
 		time.Sleep(20 * time.Millisecond)
 	}
 	if addr == "" {
-		t.Fatalf("Serve did not publish its port with a missing Provider key:\n%s", output.String())
+		t.Fatalf("Serve did not publish its port with a missing Provider key (last read err: %v):\n%s", lastReadErr, output.String())
 	}
 	select {
 	case <-balanceStarted:

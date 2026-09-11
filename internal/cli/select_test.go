@@ -78,7 +78,7 @@ func TestFrameLinesNeverExceedsTerminal(t *testing.T) {
 	// Otherwise the terminal scrolls and cursor repositioning drifts.
 	termRows := 24
 	for _, searching := range []bool{false, true} {
-		for n := 0; n <= 200; n++ {
+		for n := range 201 {
 			lines := FrameLines(n, termRows, searching)
 			if lines > termRows {
 				t.Errorf("FrameLines(%d, %d, searching=%v) = %d, exceeds terminal",

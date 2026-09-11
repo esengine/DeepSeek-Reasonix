@@ -206,6 +206,7 @@ func TestRenderMCPStatusStaysWithinWidth(t *testing.T) {
 		[]plugin.Prompt{{Server: "a-very-long-server-name-that-should-not-wrap", Name: "mcp__server__prompt_with_a_really_long_name", Description: strings.Repeat("describe ", 20)}},
 		[]plugin.Resource{{Server: "a-very-long-server-name-that-should-not-wrap", URI: "file:///Users/me/project/docs/really/deep/resource.md", Name: strings.Repeat("resource ", 20)}},
 		[]plugin.Failure{{Name: "another-very-long-server-name-that-should-not-wrap", Transport: "stdio", Error: strings.Repeat("failure ", 20)}},
+		nil,
 	)
 	assertLinesWithin(t, got, width)
 }

@@ -1,0 +1,4 @@
+prompt = "merge_files in merge.py is dropping rows and mangling headers when combining exported CSVs: a two-file merge of 3 data rows comes back with 1 row and a semicolon-joined header. Fix merge so all data rows survive under one clean lowercase comma header."
+class = "ebm-positive"
+max_steps = 18
+timeout_sec = 300

@@ -39,7 +39,9 @@ type Entry struct {
 
 // New opens an SFTP session over an established SSH client.
 func New(cl *ssh.Client) (*FS, error) {
-	c, err := sftp.NewClient(cl)
+	// Pipeline writes so high-RTT links overlap packet acknowledgements while
+	// preserving per-file offsets.
+	c, err := sftp.NewClient(cl, sftp.UseConcurrentWrites(true))
 	if err != nil {
 		return nil, err
 	}
@@ -76,9 +78,17 @@ func run[T any](ctx context.Context, op func() (T, error)) (T, error) {
 	}
 }
 
-// List returns the entries of dir.
+// List returns dir entries. "~" and "~/..." resolve from the SFTP session's
+// canonical starting directory because the protocol does not expand tildes.
 func (f *FS) List(ctx context.Context, dir string) ([]Entry, error) {
 	return run(ctx, func() ([]Entry, error) {
+		if dir == "~" || strings.HasPrefix(dir, "~/") {
+			home, err := f.client.RealPath(".")
+			if err != nil {
+				return nil, err
+			}
+			dir = path.Join(home, strings.TrimPrefix(strings.TrimPrefix(dir, "~"), "/"))
+		}
 		infos, err := f.client.ReadDir(dir)
 		if err != nil {
 			return nil, err
@@ -199,7 +209,9 @@ func (f *FS) writeFileAtomic(ctx context.Context, p string, r io.Reader, perm fs
 		if oerr != nil {
 			return 0, oerr
 		}
-		n, werr := io.Copy(fh, r)
+		// Explicitly request the client's bounded packet concurrency even when
+		// the reader cannot report its total size.
+		n, werr := fh.ReadFromWithConcurrency(r, 0)
 		if werr != nil {
 			_ = fh.Close()
 			_ = f.client.Remove(tmp)

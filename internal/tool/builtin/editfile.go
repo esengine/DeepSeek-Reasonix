@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 
+	"reasonix/internal/sandbox"
 	"reasonix/internal/tool"
 )
 
@@ -16,9 +17,11 @@ func init() { tool.RegisterBuiltin(editFile{}) }
 // relative path resolves against (see resolveIn).
 type editFile struct {
 	roots   []string
+	rootSet *sandbox.WritableRootSet
 	guard   SessionDataGuard
 	managed ManagedConfigPaths
 	workDir string
+	overlay FileOverlay
 }
 
 func (editFile) Name() string { return "edit_file" }
@@ -28,10 +31,14 @@ func (editFile) Description() string {
 }
 
 func (editFile) Schema() json.RawMessage {
-	return json.RawMessage(`{"type":"object","properties":{"path":{"type":"string","description":"File path"},"old_string":{"type":"string","description":"Exact text to replace (must be unique in the file)"},"new_string":{"type":"string","description":"Replacement text (may be empty to delete)"}},"required":["path","old_string","new_string"]}`)
+	return json.RawMessage(`{"type":"object","properties":{"path":{"type":"string","description":"File path"},"old_string":{"type":"string","description":"Exact text to replace (must be unique in the file)"},"new_string":{"type":"string","description":"Replacement text (may be empty to delete)"},"source_token":{"type":"string","description":"Optional: the source_token printed by the read_file that showed you this file. Citing it names the exact version you are editing, so a change made outside this session is caught instead of silently overwritten."}},"required":["path","old_string","new_string"]}`)
 }
 
 func (editFile) ReadOnly() bool { return false }
+
+func (e editFile) DeclareWriteAccess(args json.RawMessage) (tool.WriteAccessDeclaration, error) {
+	return declareFilePathWriteAccess(e.workDir, args)
+}
 
 func (e editFile) Execute(ctx context.Context, args json.RawMessage) (string, error) {
 	var p struct {
@@ -49,26 +56,26 @@ func (e editFile) Execute(ctx context.Context, args json.RawMessage) (string, er
 		return "", fmt.Errorf("old_string is required")
 	}
 	p.Path = resolveIn(e.workDir, p.Path)
-	if err := confineWrite(ctx, e.roots, e.guard, e.managed, p.Path); err != nil {
+	if err := confineWrite(ctx, effectiveWriteRoots(ctx, e.rootSet, e.roots), e.guard, e.managed, p.Path); err != nil {
 		return "", err
 	}
 
-	content, enc, err := readFileEncoded(p.Path)
+	src, err := readEditSource(ctx, e.overlay, p.Path)
 	if err != nil {
 		return "", fmt.Errorf("read %s: %w", p.Path, err)
 	}
 
-	applied := applyOldStringEdit(content, p.OldString, p.NewString, false)
+	applied := applyOldStringEdit(src.content, p.OldString, p.NewString, false)
 	switch {
 	case applied.applied == 1:
 		// ok
 	case applied.matches == 0:
-		return "", oldStringNotFoundError(p.Path, p.OldString, content)
+		return "", oldStringNotFoundError(p.Path, p.OldString, src.content)
 	default:
-		return "", oldStringNotUniqueError(p.Path, p.OldString, content, applied.matches, false)
+		return "", oldStringNotUniqueError(p.Path, p.OldString, src.content, applied.matches, false)
 	}
 
-	if err := writeFileEncoded(p.Path, applied.updated, enc); err != nil {
+	if err := src.write(ctx, e.overlay, p.Path, applied.updated); err != nil {
 		return "", fmt.Errorf("write %s: %w", p.Path, err)
 	}
 	summary := fmt.Sprintf("edited %s", p.Path)

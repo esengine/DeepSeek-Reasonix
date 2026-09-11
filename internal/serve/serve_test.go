@@ -10,6 +10,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -19,7 +20,9 @@ import (
 	"reasonix/internal/event"
 	"reasonix/internal/eventwire"
 	"reasonix/internal/jobs"
+	"reasonix/internal/permission"
 	"reasonix/internal/provider"
+	"reasonix/internal/tool"
 )
 
 func TestTitlePromptRequiresUserMessageLanguage(t *testing.T) {
@@ -65,6 +68,43 @@ func TestGenerateTitleRecordsUsageWithModelIdentity(t *testing.T) {
 type fakeRunner struct{ got chan string }
 
 func (f fakeRunner) Run(_ context.Context, input string) error { f.got <- input; return nil }
+
+type serveApprovalWriter struct{}
+
+func (serveApprovalWriter) Name() string        { return "serve_write" }
+func (serveApprovalWriter) Description() string { return "write a test file" }
+func (serveApprovalWriter) Schema() json.RawMessage {
+	return json.RawMessage(`{"type":"object","properties":{"path":{"type":"string"}}}`)
+}
+func (serveApprovalWriter) ReadOnly() bool { return false }
+func (serveApprovalWriter) Execute(context.Context, json.RawMessage) (string, error) {
+	return "ok", nil
+}
+
+type serveApprovalProvider struct {
+	mu   sync.Mutex
+	turn int
+}
+
+func (p *serveApprovalProvider) Name() string { return "serve-approval-test" }
+func (p *serveApprovalProvider) Stream(context.Context, provider.Request) (<-chan provider.Chunk, error) {
+	p.mu.Lock()
+	turn := p.turn
+	p.turn++
+	p.mu.Unlock()
+
+	ch := make(chan provider.Chunk, 2)
+	if turn == 0 {
+		ch <- provider.Chunk{Type: provider.ChunkToolCall, ToolCall: &provider.ToolCall{
+			ID: "serve-approval-1", Name: "serve_write", Arguments: `{"path":"a.txt"}`,
+		}}
+	} else {
+		ch <- provider.Chunk{Type: provider.ChunkText, Text: "done"}
+	}
+	ch <- provider.Chunk{Type: provider.ChunkDone}
+	close(ch)
+	return ch, nil
+}
 
 func TestServeSubmitRunsAndBroadcastsTurnDone(t *testing.T) {
 	bc := NewBroadcaster()
@@ -114,11 +154,11 @@ func TestServeEndpoints(t *testing.T) {
 	srv := httptest.NewServer(New(ctrl, bc, config.ServeConfig{}).Handler())
 	defer srv.Close()
 
-	if resp, err := http.Get(srv.URL + "/history"); err != nil || resp.StatusCode != 200 {
+	if resp, err := http.Get(srv.URL + "/history"); err != nil || resp.StatusCode != http.StatusOK {
 		t.Fatalf("history = %v / %v", resp, err)
 	}
 
-	if resp, _ := http.Get(srv.URL + "/context"); resp.StatusCode != 200 {
+	if resp, _ := http.Get(srv.URL + "/context"); resp.StatusCode != http.StatusOK {
 		t.Errorf("context status = %d", resp.StatusCode)
 	}
 
@@ -240,6 +280,22 @@ func TestHistoryMessagesPreserveToolDetails(t *testing.T) {
 	}
 }
 
+func TestHistoryMessagesStripTransientReasoningLanguageBlock(t *testing.T) {
+	got := historyMessages([]provider.Message{
+		{Role: provider.RoleUser, Content: "<reasoning-language>\nVisible reasoning/thinking text preference: use English.\n</reasoning-language>\n\nExplain this module"},
+		{Role: provider.RoleAssistant, Content: "ok"},
+	})
+	if len(got) != 2 {
+		t.Fatalf("history length = %d, want 2: %+v", len(got), got)
+	}
+	if got[0].Role != "user" || got[0].Content != "Explain this module" {
+		t.Fatalf("user history = %+v, want plain user text without reasoning-language", got[0])
+	}
+	if strings.Contains(got[0].Content, "<reasoning-language>") {
+		t.Fatalf("reasoning-language leaked into /history user content: %q", got[0].Content)
+	}
+}
+
 func TestSessionsListPreviewStripsTransientReasoningLanguageBlock(t *testing.T) {
 	dir := t.TempDir()
 	path := filepath.Join(dir, "session.jsonl")
@@ -322,22 +378,6 @@ func TestServeApproveMissingID(t *testing.T) {
 	}
 }
 
-func TestServeNewSessionEndpoint(t *testing.T) {
-	bc := NewBroadcaster()
-	ctrl := control.New(control.Options{Sink: bc})
-	srv := httptest.NewServer(New(ctrl, bc, config.ServeConfig{}).Handler())
-	defer srv.Close()
-
-	resp, err := http.Post(srv.URL+"/new", "application/json", nil)
-	if err != nil {
-		t.Fatal(err)
-	}
-	resp.Body.Close()
-	if resp.StatusCode != http.StatusNoContent {
-		t.Errorf("new session = %d, want 204", resp.StatusCode)
-	}
-}
-
 func TestServeCompactEndpoint(t *testing.T) {
 	bc := NewBroadcaster()
 	ctrl := control.New(control.Options{Sink: bc})
@@ -351,26 +391,6 @@ func TestServeCompactEndpoint(t *testing.T) {
 	resp.Body.Close()
 	if resp.StatusCode != http.StatusNoContent {
 		t.Errorf("compact = %d, want 204", resp.StatusCode)
-	}
-}
-
-func TestServeIndexPage(t *testing.T) {
-	bc := NewBroadcaster()
-	ctrl := control.New(control.Options{Sink: bc})
-	srv := httptest.NewServer(New(ctrl, bc, config.ServeConfig{}).Handler())
-	defer srv.Close()
-
-	resp, err := http.Get(srv.URL + "/")
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer resp.Body.Close()
-	if resp.StatusCode != 200 {
-		t.Errorf("index status = %d", resp.StatusCode)
-	}
-	ct := resp.Header.Get("Content-Type")
-	if !strings.Contains(ct, "text/html") {
-		t.Errorf("index content-type = %q, want text/html", ct)
 	}
 }
 
@@ -406,7 +426,7 @@ func TestServeIndexReportsSessionDeleteFailures(t *testing.T) {
 func TestServeIndexHandlesRetryingEvents(t *testing.T) {
 	html := string(indexHTML)
 	for _, want := range []string{
-		"case 'retrying': setRetrying(e.retryAttempt,e.retryMax); break;",
+		"case 'retrying': setRetrying(e.retryAttempt,e.retryMax,e.recovery); break;",
 		"if(e.kind!=='retrying')clearRetrying();",
 		"'retrying_status': 'Retrying ({attempt}/{max})...'",
 		"'retrying_status': '正在重试 ({attempt}/{max})...'",
@@ -622,45 +642,6 @@ func TestServeExtensionReloadPublishesOnlySuccessfulReplacement(t *testing.T) {
 	}
 }
 
-func TestServeSwitchEffortUsesModelRefForDuplicateModelNames(t *testing.T) {
-	writeServeModelConfig(t)
-
-	bc := NewBroadcaster()
-	ctrl := control.New(control.Options{
-		Sink:       bc,
-		Label:      "shared-chat",
-		ModelRef:   "alternate/shared-chat",
-		SessionDir: t.TempDir(),
-	})
-	server := New(ctrl, bc, config.ServeConfig{})
-	var builtRef string
-	server.buildController = func(_ context.Context, ref string) (*control.Controller, error) {
-		builtRef = ref
-		return control.New(control.Options{
-			Sink:       bc,
-			Label:      "shared-chat",
-			ModelRef:   ref,
-			SessionDir: t.TempDir(),
-		}), nil
-	}
-
-	if err := server.switchEffort(context.Background(), "high"); err != nil {
-		t.Fatalf("switchEffort: %v", err)
-	}
-	if builtRef != "alternate/shared-chat" {
-		t.Fatalf("rebuilt model ref = %q, want alternate/shared-chat", builtRef)
-	}
-	edit := config.LoadForEdit(config.UserConfigPath())
-	def, _ := edit.Provider("default")
-	if def.Effort != "" {
-		t.Fatalf("default effort = %q, want unchanged", def.Effort)
-	}
-	alt, _ := edit.Provider("alternate")
-	if alt.Effort != "high" {
-		t.Fatalf("alternate effort = %q, want high", alt.Effort)
-	}
-}
-
 func writeServeModelConfig(t *testing.T) {
 	t.Helper()
 	home := t.TempDir()
@@ -804,7 +785,7 @@ func TestSessionsSkipsCleanupPending(t *testing.T) {
 	if err := json.NewDecoder(resp.Body).Decode(&got); err != nil {
 		t.Fatal(err)
 	}
-	if len(got) != 1 || got[0].Name != "active" || filepath.Clean(got[0].Path) != filepath.Clean(active) {
+	if len(got) != 1 || got[0].Name != "active" || got[0].Path != agent.CanonicalSessionPath(active) {
 		t.Fatalf("/sessions = %+v, want only active session", got)
 	}
 }
@@ -945,7 +926,7 @@ func TestServeContextEndpoint(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer resp.Body.Close()
-	if resp.StatusCode != 200 {
+	if resp.StatusCode != http.StatusOK {
 		t.Errorf("context status = %d", resp.StatusCode)
 	}
 	var body map[string]int
@@ -955,5 +936,230 @@ func TestServeContextEndpoint(t *testing.T) {
 	// Before any turn, used should be 0.
 	if body["used"] != 0 {
 		t.Errorf("used = %d, want 0", body["used"])
+	}
+}
+
+// TestServeEventsReplaysPendingAskOnAttach proves a late /events subscriber
+// receives a still-blocked ask_request. Without replay, the browser attaches to
+// a healthy-looking session that never surfaces the parked prompt (#7643).
+func TestServeEventsReplaysPendingAskOnAttach(t *testing.T) {
+	bc := NewBroadcaster()
+	ctrl := control.New(control.Options{Sink: bc})
+	ctrl.EnableInteractiveApproval()
+	srv := httptest.NewServer(New(ctrl, bc, config.ServeConfig{}).Handler())
+	defer srv.Close()
+
+	firstSub, cancelFirst := bc.Subscribe()
+	defer cancelFirst()
+
+	askCtx, cancelAsk := context.WithCancel(context.Background())
+	askDone := make(chan error, 1)
+	go func() {
+		_, err := ctrl.Ask(askCtx, []event.AskQuestion{{
+			ID: "q1", Prompt: "pick one", Options: []event.AskOption{{Label: "A"}, {Label: "B"}},
+		}})
+		askDone <- err
+	}()
+
+	if frame := nextServeProtocolFrame(t, firstSub, nil); frame.Kind != "ask_request" {
+		t.Fatalf("initial subscriber got %+v, want ask_request", frame)
+	}
+
+	resp, err := http.Get(srv.URL + "/events")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("/events status = %d", resp.StatusCode)
+	}
+
+	replayed := make(chan string, 1)
+	go func() {
+		buf := make([]byte, 0, 4096)
+		tmp := make([]byte, 512)
+		for {
+			n, readErr := resp.Body.Read(tmp)
+			if n > 0 {
+				buf = append(buf, tmp[:n]...)
+				if strings.Contains(string(buf), `"kind":"ask_request"`) {
+					replayed <- string(buf)
+					return
+				}
+			}
+			if readErr != nil {
+				return
+			}
+		}
+	}()
+
+	select {
+	case <-replayed:
+	case <-time.After(2 * time.Second):
+		t.Fatal("late SSE attach never received replayed ask_request")
+	}
+
+	select {
+	case err := <-askDone:
+		t.Fatalf("ask resolved before the late client answered: %v", err)
+	default:
+	}
+
+	// Reconnect recovery must be connection-local: the existing subscriber
+	// must not receive the same prompt a second time.
+	assertNoServeProtocolFrames(t, firstSub)
+
+	cancelAsk()
+	select {
+	case <-askDone:
+	case <-time.After(2 * time.Second):
+		t.Fatal("blocked ask did not exit after test cancellation")
+	}
+}
+
+// TestServeEventsReplayHandoffSerializesPromptEmission proves the controller's
+// attach handoff can register a subscriber and replay while prompt emission is
+// serialized, so a prompt cannot land between those two operations.
+func TestServeEventsReplayHandoffSerializesPromptEmission(t *testing.T) {
+	bc := NewBroadcaster()
+	ctrl := control.New(control.Options{Sink: bc})
+	ctrl.EnableInteractiveApproval()
+
+	askCtx, cancelAsk := context.WithCancel(context.Background())
+	defer cancelAsk()
+	taskDone := make(chan struct{})
+	var sub <-chan []byte
+	var cancelSub func()
+	ctrl.ReplayPendingPromptsWith(func() event.Sink {
+		sub, cancelSub = bc.Subscribe()
+		go func() {
+			_, _ = ctrl.Ask(askCtx, []event.AskQuestion{{
+				ID: "q1", Prompt: "pick one", Options: []event.AskOption{{Label: "A"}, {Label: "B"}},
+			}})
+			close(taskDone)
+		}()
+		return event.FuncSink(func(e event.Event) { bc.EmitTo(sub, e) })
+	})
+	defer cancelSub()
+
+	if frame := nextServeProtocolFrame(t, sub, nil); frame.Kind != "ask_request" {
+		t.Fatalf("handoff subscriber got %+v, want ask_request", frame)
+	}
+	assertNoServeProtocolFrames(t, sub)
+
+	cancelAsk()
+	select {
+	case <-taskDone:
+	case <-time.After(2 * time.Second):
+		t.Fatal("handoff ask did not exit after cancellation")
+	}
+}
+
+// TestServeEventsReplaysPendingApprovalOnAttach covers the actual approval
+// surface from #7643: a late browser must receive a parked ApprovalRequest and
+// be able to answer it through the serve HTTP endpoint.
+func TestServeEventsReplaysPendingApprovalOnAttach(t *testing.T) {
+	reg := tool.NewRegistry()
+	reg.Add(serveApprovalWriter{})
+	ag := agent.New(&serveApprovalProvider{}, reg, agent.NewSession(""), agent.Options{}, event.Discard)
+	bc := NewBroadcaster()
+	ctrl := control.New(control.Options{
+		Runner:   ag,
+		Executor: ag,
+		Sink:     bc,
+		Policy:   permission.New("ask", nil, nil, nil),
+	})
+	ctrl.EnableInteractiveApproval()
+	srv := httptest.NewServer(New(ctrl, bc, config.ServeConfig{}).Handler())
+	defer srv.Close()
+
+	runDone := make(chan error, 1)
+	go func() { runDone <- ctrl.Executor().Run(context.Background(), "write a file") }()
+
+	deadline := time.After(2 * time.Second)
+	for !ctrl.PendingPrompt() {
+		select {
+		case <-deadline:
+			t.Fatal("timed out waiting for parked approval")
+		default:
+			time.Sleep(5 * time.Millisecond)
+		}
+	}
+
+	resp, err := http.Get(srv.URL + "/events")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("/events status = %d", resp.StatusCode)
+	}
+
+	replayed := make(chan eventwire.Event, 1)
+	go func() {
+		buf := make([]byte, 0, 4096)
+		tmp := make([]byte, 512)
+		for {
+			n, readErr := resp.Body.Read(tmp)
+			if n > 0 {
+				buf = append(buf, tmp[:n]...)
+				if strings.Contains(string(buf), `"kind":"approval_request"`) {
+					frame := string(buf)
+					start := strings.Index(frame, "data: ")
+					if start < 0 {
+						return
+					}
+					end := strings.IndexByte(frame[start:], '\n')
+					if end < 0 {
+						end = len(frame) - start
+					}
+					var wire eventwire.Event
+					if json.Unmarshal([]byte(strings.TrimSpace(frame[start+len("data: "):start+end])), &wire) == nil {
+						replayed <- wire
+					}
+					return
+				}
+			}
+			if readErr != nil {
+				return
+			}
+		}
+	}()
+
+	var approval eventwire.Event
+	select {
+	case approval = <-replayed:
+	case <-time.After(2 * time.Second):
+		t.Fatal("late SSE attach never received replayed approval_request")
+	}
+	if approval.Kind != "approval_request" || approval.Approval == nil || approval.Approval.Tool != "serve_write" {
+		t.Fatalf("replayed approval = %+v, want serve_write approval_request", approval)
+	}
+
+	payload, err := json.Marshal(map[string]any{"id": approval.Approval.ID, "allow": true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	req, err := http.NewRequest(http.MethodPost, srv.URL+"/approve", strings.NewReader(string(payload)))
+	if err != nil {
+		t.Fatal(err)
+	}
+	req.Header.Set("Content-Type", "application/json")
+	answer, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	answer.Body.Close()
+	if answer.StatusCode != http.StatusNoContent {
+		t.Fatalf("/approve status = %d", answer.StatusCode)
+	}
+
+	select {
+	case err := <-runDone:
+		if err != nil {
+			t.Fatalf("executor run after approval: %v", err)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("executor did not finish after approval")
 	}
 }

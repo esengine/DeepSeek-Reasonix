@@ -21,7 +21,10 @@ import (
 
 	"golang.org/x/sys/windows"
 
+	"reasonix/desktop/internal/instanceidentity"
+	"reasonix/internal/config"
 	"reasonix/internal/installlayout"
+	"reasonix/internal/proc"
 	"reasonix/internal/repair"
 )
 
@@ -45,7 +48,7 @@ var claimWindowsUpdateHelperExecutionFn = claimVerifiedWindowsUpdateHelperExecut
 // exec.Command would quote a path containing spaces (e.g. C:\Users\Jane Doe\...)
 // and NSIS would then mis-parse the target directory.
 func installerCommand(name, dir string) *exec.Cmd {
-	cmd := exec.Command(name)
+	cmd := proc.VisibleCommand(name)
 	cmd.SysProcAttr = &syscall.SysProcAttr{CmdLine: installerCommandLine(name, dir)}
 	return cmd
 }
@@ -72,10 +75,10 @@ func startWindowsVersionedUpdateHandoff(installerPath, installerSHA256, installD
 	}
 	defer releaseExecution()
 	err = retryWindowsUpdateHelperStart(func() error {
-		cmd := exec.Command(helperPath, windowsVersionedUpdateHandoffArgs(
-			os.Getpid(), installerPath, installerSHA256, installDir, relaunchPath, targetVersion,
+		cmd := proc.Command(helperPath, windowsVersionedUpdateHandoffArgs(
+			windowsUpdateOwnerPID(), installerPath, installerSHA256, installDir, relaunchPath, targetVersion,
 		)...)
-		cmd.SysProcAttr = &syscall.SysProcAttr{HideWindow: true}
+		cmd.Env = instanceidentity.UpdateEnvironment(os.Environ(), config.ReasonixHomeDir())
 		return cmd.Start()
 	})
 	if err != nil {
@@ -102,8 +105,8 @@ func startWindowsUpdateHelper(installerPath, installerSHA256, installDir, relaun
 	}
 	defer releaseExecution()
 	err = retryWindowsUpdateHelperStart(func() error {
-		cmd := exec.Command(helperPath, windowsUpdateHandoffArgs(
-			os.Getpid(),
+		cmd := proc.Command(helperPath, windowsUpdateHandoffArgs(
+			windowsUpdateOwnerPID(),
 			installerPath,
 			installerSHA256,
 			installDir,
@@ -112,7 +115,7 @@ func startWindowsUpdateHelper(installerPath, installerSHA256, installDir, relaun
 			prepared.CreatedAt,
 			repair.UpdateTransactionID(prepared),
 		)...)
-		cmd.SysProcAttr = &syscall.SysProcAttr{HideWindow: true}
+		cmd.Env = instanceidentity.UpdateEnvironment(os.Environ(), config.ReasonixHomeDir())
 		return cmd.Start()
 	})
 	if err != nil {
@@ -273,8 +276,8 @@ func validateWindowsUpdateHelper(data []byte, goarch string) error {
 	if !ok {
 		return fmt.Errorf("unsupported Windows architecture %q", goarch)
 	}
-	if f.FileHeader.Machine != want {
-		return fmt.Errorf("PE machine 0x%x does not match %s", f.FileHeader.Machine, goarch)
+	if f.Machine != want {
+		return fmt.Errorf("PE machine 0x%x does not match %s", f.Machine, goarch)
 	}
 	return nil
 }
@@ -331,7 +334,7 @@ func windowsUpdateHelperStartError(err error) error {
 	}
 	var errno syscall.Errno
 	if errors.As(err, &errno) {
-		return fmt.Errorf("start Windows update helper: Windows error %d (%s)", errno, errno.Error())
+		return fmt.Errorf("start Windows update helper: Windows error %w (%s)", errno, errno.Error())
 	}
 	return fmt.Errorf("start Windows update helper: process creation failed")
 }

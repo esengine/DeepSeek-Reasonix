@@ -21,15 +21,9 @@ const firstPersist = deferred();
 const persisted: WindowStateSnapshot[] = [];
 const save = createWindowStateSaver(
   {
-    async WindowGetSize() {
+    async getWindowBounds() {
       sizeReads += 1;
-      return { w: nativeState.width, h: nativeState.height };
-    },
-    async WindowGetPosition() {
-      return { x: nativeState.x, y: nativeState.y };
-    },
-    async WindowIsMaximised() {
-      return nativeState.maximised;
+      return { ...nativeState };
     },
   },
   async (state) => {

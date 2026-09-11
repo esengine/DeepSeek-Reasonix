@@ -1,0 +1,4 @@
+prompt = "Rename the public entry point fetch_all to list_records across the package (core.py, cache.py, cli.py import each other) keeping behavior identical; keep no compatibility alias."
+class = "ebm-neutral"
+max_steps = 18
+timeout_sec = 300

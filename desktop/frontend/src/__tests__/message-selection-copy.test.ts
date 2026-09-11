@@ -8,9 +8,11 @@ import { JSDOM } from "jsdom";
 import { reasonixRehypePlugins, reasonixRemarkPlugins } from "../components/markdownRemarkPlugins";
 import { normalizeMath } from "../components/mathNormalize";
 import {
+  installMessageSelectionCopy,
   messageSelectionContextText,
   messageSelectionCopyText,
 } from "../lib/messageSelectionCopy";
+import { transcriptSelectionStore, type TranscriptSelectableRow } from "../lib/transcriptSelectionStore";
 
 let passed = 0;
 let failed = 0;
@@ -255,6 +257,61 @@ function inlineKatex(source: string, rendered: string): string {
     "before $V=\\yng(2,1) | x$ then\n$$\n\\young(ab,c)\n$$\nafter",
     "copies authored Young macros through nested pipe protection",
   );
+}
+
+{
+  const dom = new JSDOM("<!doctype html><body><div class=\"msg__body\">logical</div></body>");
+  installDOMGlobals(dom);
+  globalThis.window = dom.window as unknown as Window & typeof globalThis;
+  globalThis.document = dom.window.document;
+  globalThis.Event = dom.window.Event;
+  globalThis.CustomEvent = dom.window.CustomEvent;
+  Object.defineProperty(globalThis, "navigator", { configurable: true, value: dom.window.navigator });
+  const writes: string[] = [];
+  Object.defineProperty(dom.window.navigator, "clipboard", {
+    configurable: true,
+    value: { writeText: async (text: string) => { writes.push(text); } },
+  });
+  let finish!: (text: string) => void;
+  const delayed = new Promise<string>((resolve) => { finish = resolve; });
+  const rows: TranscriptSelectableRow[] = [{
+    rowKey: "a",
+    sourceText: "fallback",
+    contentRevision: 1,
+    resolveText: () => delayed,
+  }];
+  transcriptSelectionStore.clear("copy-test-reset");
+  transcriptSelectionStore.beginNative("tab-copy");
+  transcriptSelectionStore.promoteToLogical(
+    "tab-copy",
+    { rowKey: "a", textOffset: 0, affinity: "forward" },
+    { rowKey: "a", textOffset: 8, affinity: "forward" },
+    rows,
+  );
+  transcriptSelectionStore.settleLogical();
+  const uninstall = installMessageSelectionCopy(document);
+  const staleCopy = new window.Event("copy", { bubbles: true, cancelable: true });
+  document.dispatchEvent(staleCopy);
+  eq(staleCopy.defaultPrevented, true, "logical copy claims the event before async projection resolves");
+  transcriptSelectionStore.clear("tab-switch");
+  finish("resolved");
+  await new Promise((resolve) => setTimeout(resolve, 0));
+  eq(writes.length, 0, "late logical copy result cannot write after its snapshot is cleared");
+
+  transcriptSelectionStore.beginNative("tab-copy");
+  transcriptSelectionStore.promoteToLogical(
+    "tab-copy",
+    { rowKey: "a", textOffset: 0, affinity: "forward" },
+    { rowKey: "a", textOffset: 8, affinity: "forward" },
+    [{ ...rows[0], resolveText: async () => "resolved" }],
+  );
+  transcriptSelectionStore.settleLogical();
+  document.dispatchEvent(new window.Event("copy", { bubbles: true, cancelable: true }));
+  await new Promise((resolve) => setTimeout(resolve, 0));
+  eq(writes[0], "resolved", "logical keyboard copy writes the frozen text projection");
+  eq(transcriptSelectionStore.getSnapshot().mode, "none", "successful logical keyboard copy clears the snapshot");
+  uninstall();
+  dom.window.close();
 }
 
 console.log(`\n${passed} passed, ${failed} failed`);

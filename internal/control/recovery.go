@@ -4,10 +4,12 @@ import (
 	"context"
 	"fmt"
 	"log/slog"
+	"slices"
 	"strings"
 	"unicode/utf8"
 
 	"reasonix/internal/agent"
+	"reasonix/internal/event"
 	"reasonix/internal/recovery"
 )
 
@@ -15,6 +17,12 @@ import (
 // action is continue|continue_task|revise. For revise, feedback is returned in the
 // blocked tool result so the same agent sees it exactly once before retrying.
 func (c *Controller) ResolveRecovery(id string, action agent.RecoveryAction, feedback string) error {
+	c.promptResolveMu.Lock()
+	defer c.promptResolveMu.Unlock()
+	return c.resolveRecoveryLocked(id, action, feedback)
+}
+
+func (c *Controller) resolveRecoveryLocked(id string, action agent.RecoveryAction, feedback string) error {
 	if c == nil {
 		return fmt.Errorf("controller is nil")
 	}
@@ -54,12 +62,15 @@ func (c *Controller) ResolveRecovery(id string, action agent.RecoveryAction, fee
 	// Host hard-caps free-text feedback; empty revise is filled by the gate.
 	// Clip on a UTF-8 boundary so multi-byte runes are never split.
 	feedback = clipUTF8(feedback, 4*1024)
-	// Validate and resolve the gate first. In particular, an unsupported
-	// continue_task must leave the live approval intact so the frontend can
-	// recover and offer a one-shot decision instead.
-	if err := gate.Resolve(id, recovery.Action(action), feedback); err != nil {
+	// Validate the gate action, persist PromptAnswered, then release the gate.
+	// Unsupported continue_task and ledger failures both leave the live
+	// decision unresolved.
+	if err := gate.ResolveAfter(id, recovery.Action(action), feedback, func() error {
+		return c.emitTurnEventChecked(event.Event{Kind: event.PromptAnswered, ItemID: id, Status: event.TurnInProgress})
+	}); err != nil {
 		return err
 	}
+	c.promptOwner.Remove(id)
 
 	// Also resolve any matching approvalManager entry so legacy Approve paths
 	// and ReplayPending do not keep a stale prompt.
@@ -117,9 +128,9 @@ func (c *Controller) initRecoveryGate(reviewer recovery.Reviewer, headless bool)
 				return ""
 			}
 			msgs := c.executor.Session().Snapshot()
-			for i := len(msgs) - 1; i >= 0; i-- {
-				if string(msgs[i].Role) == "user" && strings.TrimSpace(msgs[i].Content) != "" {
-					text := agent.UserMessageText(msgs[i])
+			for _, v := range slices.Backward(msgs) {
+				if string(v.Role) == "user" && strings.TrimSpace(v.Content) != "" {
+					text := agent.UserMessageText(v)
 					if len(text) > 800 {
 						return text[:800] + "…"
 					}
@@ -153,6 +164,7 @@ func (c *Controller) loadRecoveryState(path string) {
 		return
 	}
 	c.approval.clearKind(recovery.ApprovalKindRecovery)
+	c.promptOwner.RemoveKind(PromptRecovery)
 	c.mu.Lock()
 	gate := c.recoveryGate
 	c.mu.Unlock()
@@ -189,6 +201,7 @@ func (c *Controller) carryRecoveryState(path string) {
 		return
 	}
 	c.approval.clearKind(recovery.ApprovalKindRecovery)
+	c.promptOwner.RemoveKind(PromptRecovery)
 	c.mu.Lock()
 	gate := c.recoveryGate
 	c.mu.Unlock()
@@ -210,6 +223,7 @@ func (c *Controller) CarryRecoveryFrom(prev *Controller) {
 		return
 	}
 	c.approval.clearKind(recovery.ApprovalKindRecovery)
+	c.promptOwner.RemoveKind(PromptRecovery)
 	prev.mu.Lock()
 	prevGate := prev.recoveryGate
 	prev.mu.Unlock()
@@ -297,6 +311,7 @@ func (c *Controller) emitRecoveryPrompt(ctx context.Context, taskID string, pend
 	// Strict fresh decision: never session/persist grants, never auto-drain on
 	// mode switch.
 	c.approval.promptMu.Lock()
+	c.approval.promptEmitMu.Lock()
 	// Hold promptMu for the duration of registration+emit only; waiting happens
 	// in the recovery gate on its own channel. We deliberately do not block here
 	// on the approval reply — ResolveRecovery unblocks the gate.
@@ -310,6 +325,7 @@ func (c *Controller) emitRecoveryPrompt(ctx context.Context, taskID string, pend
 		recovery.ApprovalKindRecovery,
 		ev.Recovery,
 	)
+	c.registerOwnedPrompt(id, PromptRecovery)
 	ev.ID = id
 	c.mu.Lock()
 	gate := c.recoveryGate
@@ -325,11 +341,20 @@ func (c *Controller) emitRecoveryPrompt(ctx context.Context, taskID string, pend
 		select {
 		case <-reply:
 		case <-ctx.Done():
-			c.approval.cancel(id)
+			c.cancelOwnedPrompt(id)
 		}
 	}()
 
-	c.sink.Emit(c.approvalRequestEvent(ev))
+	if err := event.EmitChecked(c.sink, c.approvalRequestEvent(ev)); err != nil {
+		c.cancelOwnedPrompt(id)
+		if gate != nil {
+			gate.UnbindApprovalID(taskID, id)
+		}
+		c.approval.promptEmitMu.Unlock()
+		c.approval.promptMu.Unlock()
+		return "", fmt.Errorf("persist Auto Guard approval request: %w", err)
+	}
+	c.approval.promptEmitMu.Unlock()
 	c.approval.promptMu.Unlock()
 
 	if c.hooks != nil {

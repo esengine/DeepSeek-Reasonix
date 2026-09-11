@@ -1,0 +1,57 @@
+name: Diagnose Apple notarization
+run-name: Diagnose Apple notarization ${{ inputs.submission_id }}
+
+on:
+  workflow_dispatch:
+    inputs:
+      submission_id:
+        description: "Existing Apple notarization submission UUID (read only)"
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+jobs:
+  fetch-log:
+    if: github.repository == 'esengine/DeepSeek-Reasonix' && github.ref == 'refs/heads/main-v2' && github.ref_protected
+    runs-on: macos-latest
+    environment: release
+    timeout-minutes: 10
+    steps:
+      - name: Retrieve existing submission information and log
+        env:
+          SUBMISSION_ID: ${{ inputs.submission_id }}
+          APPLE_API_KEY_P8: ${{ secrets.APPLE_API_KEY_P8 }}
+          APPLE_API_KEY_ID: ${{ secrets.APPLE_API_KEY_ID }}
+          APPLE_API_ISSUER_ID: ${{ secrets.APPLE_API_ISSUER_ID }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          [[ "$SUBMISSION_ID" =~ ^[0-9a-fA-F]{8}(-[0-9a-fA-F]{4}){3}-[0-9a-fA-F]{12}$ ]] || {
+            echo "::error::submission_id must be a UUID"
+            exit 1
+          }
+          : "${APPLE_API_KEY_P8:?Apple API key is not configured}"
+          : "${APPLE_API_KEY_ID:?Apple API key ID is not configured}"
+          : "${APPLE_API_ISSUER_ID:?Apple API issuer is not configured}"
+          umask 077
+          key_path="$(mktemp "$RUNNER_TEMP/apple-notary-key.XXXXXX")"
+          trap 'rm -f "$key_path"' EXIT
+          printf '%s' "$APPLE_API_KEY_P8" | base64 --decode > "$key_path"
+          diagnostics="$RUNNER_TEMP/apple-notarization"
+          mkdir -p "$diagnostics"
+          auth=(--key "$key_path" --key-id "$APPLE_API_KEY_ID" --issuer "$APPLE_API_ISSUER_ID")
+          xcrun notarytool info "$SUBMISSION_ID" "${auth[@]}" --output-format json > "$diagnostics/submission.json" || {
+            echo "::warning::Could not retrieve submission information; attempting the log directly"
+          }
+          xcrun notarytool log "$SUBMISSION_ID" "${auth[@]}" "$diagnostics/notary-log.json"
+
+      - name: Upload Apple notarization diagnostics
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: apple-notary-log-${{ github.run_id }}-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/apple-notarization/*.json
+          if-no-files-found: ignore
+          retention-days: 7

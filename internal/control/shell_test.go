@@ -6,6 +6,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -19,8 +20,11 @@ import (
 // the runGuarded goroutine to complete.
 func collectSink() (event.Sink, chan event.Event, *[]event.Event) {
 	var events []event.Event
+	var mu sync.Mutex
 	done := make(chan event.Event, 1)
 	sink := event.FuncSink(func(e event.Event) {
+		mu.Lock()
+		defer mu.Unlock()
 		events = append(events, e)
 		if e.Kind == event.TurnDone {
 			done <- e
@@ -68,6 +72,9 @@ func TestRunShell_EmitsEvents(t *testing.T) {
 	td := (*events)[len(*events)-1]
 	if td.Kind != event.TurnDone {
 		t.Errorf("last event: want TurnDone, got %v", td.Kind)
+	}
+	if td.CheckpointTurn != nil {
+		t.Errorf("shell TurnDone checkpoint = %d, want nil", *td.CheckpointTurn)
 	}
 
 	// Penultimate event: ToolResult

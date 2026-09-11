@@ -93,6 +93,60 @@ func TestWritePathOverlapParentChildAndCase(t *testing.T) {
 	}
 }
 
+func TestScheduleOverlapsAllowsSiblingDirectoryClaims(t *testing.T) {
+	root := t.TempDir()
+	if err := os.MkdirAll(filepath.Join(root, "src"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	a, err := NormalizeWritePaths(root, []string{"src/"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	b, err := NormalizeWritePaths(root, []string{"src/"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !a.Overlaps(b) {
+		t.Fatal("capability overlap must still treat identical dirs as overlapping")
+	}
+	if ScheduleOverlaps(a, b) {
+		t.Fatal("schedule must allow two directory claims over the same tree")
+	}
+}
+
+func TestScheduleOverlapsDirVsFileInside(t *testing.T) {
+	root := t.TempDir()
+	if err := os.MkdirAll(filepath.Join(root, "src"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	dir, err := NormalizeWritePaths(root, []string{"src/"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	file, err := NormalizeWritePaths(root, []string{"src/a.go"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !ScheduleOverlaps(dir, file) {
+		t.Fatal("directory claim must still block a concrete file inside it at start")
+	}
+}
+
+func TestScheduleOverlapsWholeWorkspaceUnchanged(t *testing.T) {
+	root := t.TempDir()
+	whole, err := WholeWorkspaceWriteClaim(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	file, err := NormalizeWritePaths(root, []string{"a.go"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !ScheduleOverlaps(whole, file) {
+		t.Fatal("omitted write_paths must still serialize at start")
+	}
+}
+
 func TestValidateNonOverlappingWriteClaims(t *testing.T) {
 	root := t.TempDir()
 	a, _ := NormalizeWritePaths(root, []string{"a.md"})

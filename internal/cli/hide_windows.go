@@ -13,5 +13,5 @@ func hideFileWindows(path string) {
 		return
 	}
 	// FILE_ATTRIBUTE_HIDDEN = 0x02
-	syscall.SetFileAttributes(p, 0x02)
+	_ = syscall.SetFileAttributes(p, 0x02)
 }

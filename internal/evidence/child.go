@@ -8,6 +8,9 @@ import "sort"
 // treating the meta tool call itself as a mutation.
 type ChildEvidenceSummary struct {
 	Receipts []Receipt
+	// WorkspaceRoot is host-only context for classifying background evidence.
+	// Durable artifacts store only the resulting risk and mutation paths.
+	WorkspaceRoot string `json:"-"`
 }
 
 // HasMutation reports whether any successful receipt is a real state change.
@@ -26,6 +29,28 @@ func (s ChildEvidenceSummary) MutationPaths() []string {
 	var out []string
 	for _, r := range s.Receipts {
 		if !r.Success || !r.Mutation {
+			continue
+		}
+		for _, p := range r.Paths {
+			if p == "" || seen[p] {
+				continue
+			}
+			seen[p] = true
+			out = append(out, p)
+		}
+	}
+	sort.Strings(out)
+	return out
+}
+
+// EvidencePaths returns every distinct path the child produced a successful
+// receipt for, reads included. MutationPaths answers what the child changed;
+// this answers what it looked at, which is what evidence origin scores.
+func (s ChildEvidenceSummary) EvidencePaths() []string {
+	seen := map[string]bool{}
+	var out []string
+	for _, r := range s.Receipts {
+		if !r.Success {
 			continue
 		}
 		for _, p := range r.Paths {
@@ -62,7 +87,7 @@ func (l *Ledger) MergeChild(summary ChildEvidenceSummary) {
 	for _, r := range summary.Receipts {
 		// Drop nested bookkeeping that the parent already owns.
 		switch r.ToolName {
-		case "todo_write", "complete_step", "ask":
+		case "todo_write", "complete_step", "complete_subtask", "ask":
 			continue
 		}
 		l.Record(r)

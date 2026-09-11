@@ -15,9 +15,10 @@ import (
 	"reasonix/internal/agent"
 	"reasonix/internal/provider"
 	"reasonix/internal/textutil"
+	"reasonix/internal/tool"
 )
 
-// ---- list_sessions tool -----------------------------------------------------
+// list_sessions tool
 
 type listSessionsTool struct {
 	sessionDir string
@@ -28,7 +29,7 @@ func NewListSessionsTool(sessionDir string) *listSessionsTool {
 	return &listSessionsTool{sessionDir: sessionDir}
 }
 
-func (t *listSessionsTool) Name() string   { return "list_sessions" }
+func (t *listSessionsTool) Name() string   { return tool.HostListSessions }
 func (t *listSessionsTool) ReadOnly() bool { return true }
 
 func (t *listSessionsTool) Description() string {
@@ -63,7 +64,7 @@ func (t *listSessionsTool) Execute(_ context.Context, _ json.RawMessage) (string
 	return b.String(), nil
 }
 
-// ---- read_session tool ------------------------------------------------------
+// read_session tool
 
 type readSessionTool struct {
 	sessionDir string
@@ -74,7 +75,7 @@ func NewReadSessionTool(sessionDir string) *readSessionTool {
 	return &readSessionTool{sessionDir: sessionDir}
 }
 
-func (t *readSessionTool) Name() string   { return "read_session" }
+func (t *readSessionTool) Name() string   { return tool.HostReadSession }
 func (t *readSessionTool) ReadOnly() bool { return true }
 
 func (t *readSessionTool) Description() string {
@@ -158,6 +159,9 @@ func (t *readSessionTool) Execute(_ context.Context, args json.RawMessage) (stri
 	turnCount := 0
 loop:
 	for _, m := range msgs {
+		if agent.IsPinnedContextRevision(m) {
+			continue
+		}
 		switch m.Role {
 		case provider.RoleSystem:
 			// System prompts excluded for privacy (matching history tool).
@@ -198,7 +202,7 @@ loop:
 	return b.String(), nil
 }
 
-// ---- helpers ----------------------------------------------------------------
+// helpers
 
 // truncateRunes preserves the historical name but truncates by grapheme
 // clusters so previews do not split combined emoji or other visible characters.
@@ -212,14 +216,14 @@ func truncateRunes(s string, max int) string {
 func modelFromPath(path string) string {
 	name := filepath.Base(path)
 	name = strings.TrimSuffix(name, ".jsonl")
-	firstDash := strings.Index(name, "-")
-	if firstDash < 0 {
+	_, after, ok := strings.Cut(name, "-")
+	if !ok {
 		return "(unknown)"
 	}
-	rest := name[firstDash+1:]
-	secondDash := strings.Index(rest, "-")
-	if secondDash < 0 {
+	rest := after
+	_, after0, ok0 := strings.Cut(rest, "-")
+	if !ok0 {
 		return rest
 	}
-	return rest[secondDash+1:]
+	return after0
 }

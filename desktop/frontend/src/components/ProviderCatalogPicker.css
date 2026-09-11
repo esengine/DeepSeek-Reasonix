@@ -1,0 +1,28 @@
+.provider-catalog { display: grid; grid-template-columns: minmax(150px, 220px) minmax(0, 1fr); border: 1px solid var(--border); border-radius: 12px; overflow: hidden; }
+.provider-catalog__sidebar { min-width: 0; padding: 12px; border-right: 1px solid var(--border); }
+.provider-catalog__brands { display: flex; flex-direction: column; gap: 4px; max-height: 480px; overflow-y: auto; margin-top: 10px; }
+.provider-catalog__brand { display: flex; align-items: center; gap: 9px; padding: 10px; border: 1px solid transparent; border-radius: 8px; background: transparent; color: inherit; text-align: left; cursor: pointer; font: inherit; }
+.provider-catalog__brand[aria-pressed="true"] { background: var(--bg-elev); border-color: var(--border); }
+.provider-catalog__brand:hover { background: var(--bg-soft); }
+.provider-catalog__monogram { display: grid; place-items: center; flex: 0 0 26px; height: 26px; border-radius: 7px; background: var(--bg-soft); font-weight: 600; }
+.provider-catalog__detail { min-width: 0; padding: 20px; display: flex; flex-direction: column; gap: 12px; }
+.provider-catalog__title { font-size: 18px; }
+.provider-catalog__options { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; }
+.provider-catalog__field { display: flex; flex-direction: column; gap: 6px; min-width: 0; }
+.provider-catalog__field .mem-select, .provider-catalog__field .mem-input { width: 100%; min-width: 0; }
+.provider-catalog__models { display: flex; flex-direction: column; gap: 6px; overflow-wrap: anywhere; font-size: 12px; }
+@media (max-width: 650px) { .provider-catalog { grid-template-columns: minmax(0, 1fr); } .provider-catalog__sidebar { border-right: 0; border-bottom: 1px solid var(--border); } .provider-catalog__brands { max-height: 160px; } .provider-catalog__options { grid-template-columns: minmax(0, 1fr); } }
+
+.provider-catalog__icon { flex: 0 0 26px; height: 26px; background-color: currentColor; mask-size: contain; mask-position: center; mask-repeat: no-repeat; }
+.provider-catalog__detail { align-self: start; }
+.provider-catalog .mem-input { flex: none; height: 36px; box-sizing: border-box; }
+.provider-catalog__brand:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
+.provider-catalog__brand[aria-pressed="true"] { font-weight: 600; }
+
+/* Field-level reset stays inside the URL control without changing row height. */
+.provider-catalog__url-control { position: relative; min-width: 0; }
+.provider-catalog__url-control .mem-input { padding-right: 42px; }
+.provider-catalog__restore { position: absolute; right: 4px; top: 50%; transform: translateY(-50%); display: grid; place-items: center; width: 28px; height: 28px; padding: 0; border: 0; border-radius: 6px; background: transparent; color: var(--fg-dim); cursor: pointer; }
+.provider-catalog__restore:hover { background: var(--bg-soft); color: var(--text); }
+.provider-catalog__restore:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+.provider-catalog__restore:disabled { opacity: .45; cursor: default; }

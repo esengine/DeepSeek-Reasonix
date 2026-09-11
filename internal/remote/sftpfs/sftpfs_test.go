@@ -203,3 +203,36 @@ func TestSFTPWriteAtomicAndMkdirRenameRemove(t *testing.T) {
 		t.Fatal("dir not removed")
 	}
 }
+
+// TestSFTPListResolvesTilde covers both home and home-relative directories.
+func TestSFTPListResolvesTilde(t *testing.T) {
+	root := t.TempDir()
+	if err := os.WriteFile(filepath.Join(root, "marker.txt"), []byte("x"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Mkdir(filepath.Join(root, "sub"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	fsys := dialFS(t, root)
+
+	entries, err := fsys.List(context.Background(), "~")
+	if err != nil {
+		t.Fatalf("List(~): %v", err)
+	}
+	names := make(map[string]bool, len(entries))
+	for _, e := range entries {
+		names[e.Name] = true
+	}
+	if !names["marker.txt"] || !names["sub"] {
+		t.Fatalf("List(~) entries = %v, want the root listing", names)
+	}
+	// Entry paths must be absolute (resolved), not "~"-prefixed.
+	for _, entry := range entries {
+		if strings.HasPrefix(entry.Path, "~/") {
+			t.Fatalf("entry path kept the ~ prefix: %q", entry.Path)
+		}
+	}
+	if nested, err := fsys.List(context.Background(), "~/sub"); err != nil || len(nested) != 0 {
+		t.Fatalf("List(~/sub) = %v, %v", nested, err)
+	}
+}

@@ -1,0 +1,20 @@
+{
+  "name": "reasonix-desktop-workspace",
+  "private": true,
+  "version": "0.0.0",
+  "packageManager": "pnpm@10.34.5",
+  "scripts": {
+    "build": "pnpm --filter reasonix-desktop-frontend build:electron && pnpm --filter reasonix-desktop-shell build",
+    "typecheck": "pnpm --filter reasonix-desktop-frontend typecheck && pnpm --filter reasonix-desktop-shell typecheck",
+    "test": "pnpm --filter reasonix-desktop-frontend test && pnpm --filter reasonix-desktop-shell test"
+  },
+  "engines": {
+    "node": ">=24",
+    "pnpm": ">=10 <11"
+  },
+  "devDependencies": {
+    "@electron/osx-sign": "2.7.0",
+    "@electron/packager": "20.3.0",
+    "@electron/universal": "3.0.6"
+  }
+}

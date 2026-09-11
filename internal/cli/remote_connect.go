@@ -268,7 +268,7 @@ func remoteConnectCLI(args []string, version string) int {
 			fmt.Fprintln(os.Stderr, i18n.M.ErrorPrefix, err)
 			return 1
 		}
-		localURL, ferr := forwardServe(client, res.State.Addr, syntax.localPort, res.Token)
+		localURL, ferr := forwardServe(ctx, client, res.State.Addr, syntax.localPort, res.Token)
 		if ferr != nil {
 			fmt.Fprintln(os.Stderr, i18n.M.ErrorPrefix, ferr)
 			return 1
@@ -303,7 +303,7 @@ func applyConfiguredForwards(client *remote.Client, entry config.RemoteHostEntry
 
 // forwardServe adds the reserved "serve" local forward to the remote serve
 // address and returns the local URL (with token).
-func forwardServe(client *remote.Client, remoteAddr string, localPort int, token string) (string, error) {
+func forwardServe(ctx context.Context, client *remote.Client, remoteAddr string, localPort int, token string) (string, error) {
 	bind := "127.0.0.1:0"
 	if localPort > 0 {
 		bind = fmt.Sprintf("127.0.0.1:%d", localPort)
@@ -317,7 +317,7 @@ func forwardServe(client *remote.Client, remoteAddr string, localPort int, token
 	if err != nil {
 		return "", err
 	}
-	return fmt.Sprintf("http://%s/?token=%s", bound, token), nil
+	return remoteServeBrowserURL(ctx, bound, token), nil
 }
 
 func normalizeBind(bind string) string {
@@ -375,6 +375,10 @@ func remoteServeCLI(args []string, version string) int {
 		return 1
 	}
 	entry, _ := cfg.RemoteHost(name)
+	if action == "start" && entry.CredentialProxyEnabled() {
+		fmt.Fprintln(os.Stderr, i18n.M.ErrorPrefix, "credential mode local-proxy requires the Reasonix desktop")
+		return 1
+	}
 	ws := *workspace
 	if ws == "" {
 		ws = entry.Workspace
@@ -386,13 +390,20 @@ func remoteServeCLI(args []string, version string) int {
 		return 1
 	}
 	defer cleanup()
-	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
-	defer cancel()
-	if err := client.Start(ctx); err != nil {
+	connectCtx, connectCancel := context.WithTimeout(context.Background(), 60*time.Second)
+	if err := client.Start(connectCtx); err != nil {
+		connectCancel()
 		fmt.Fprintln(os.Stderr, i18n.M.ErrorPrefix, err)
 		return 1
 	}
+	connectCancel()
 	defer client.Close()
+	operationTimeout := 60 * time.Second
+	if action == "start" {
+		operationTimeout = 10 * time.Minute // same-platform binary upload
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), operationTimeout)
+	defer cancel()
 
 	switch action {
 	case "start":
@@ -610,13 +621,17 @@ func withRemoteFS(name string, fn func(ctx context.Context, client *remote.Clien
 		return 1
 	}
 	defer cleanup()
-	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
-	defer cancel()
-	if err := client.Start(ctx); err != nil {
+	connectCtx, connectCancel := context.WithTimeout(context.Background(), 60*time.Second)
+	if err := client.Start(connectCtx); err != nil {
+		connectCancel()
 		fmt.Fprintln(os.Stderr, i18n.M.ErrorPrefix, err)
 		return 1
 	}
+	connectCancel()
 	defer client.Close()
+	// fs put may transfer arbitrary files over a slow link.
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Minute)
+	defer cancel()
 	return fn(ctx, client)
 }
 
@@ -734,5 +749,12 @@ func openInBrowser(url string) error {
 		cmd, args = "xdg-open", []string{url}
 	}
 	c := exec.Command(cmd, args...)
-	return c.Start()
+	if err := c.Start(); err != nil {
+		return err
+	}
+	// Browser launchers normally exit immediately after handing the URL to the
+	// desktop session. Reap that helper asynchronously so a long-lived web or
+	// remote process does not retain its process resources.
+	go func() { _ = c.Wait() }()
+	return nil
 }

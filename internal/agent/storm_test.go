@@ -38,7 +38,9 @@ func (o okTool) Execute(context.Context, json.RawMessage) (string, error) { retu
 func noticeRecorder() (event.Sink, *[]string) {
 	var notices []string
 	sink := event.FuncSink(func(e event.Event) {
-		if e.Kind == event.Notice {
+		// Storm tests assert on the storm breaker's own notices; the adaptive
+		// progress guard has its own code and cadence (progress_guard_test.go).
+		if e.Kind == event.Notice && e.Code == event.NoticeCodeLoopGuard {
 			notices = append(notices, e.Text)
 		}
 	})
@@ -57,9 +59,9 @@ func TestStormBreakerEscalatesRepeatedFailure(t *testing.T) {
 	sink, notices := noticeRecorder()
 	a := New(nil, reg, NewSession(""), Options{}, sink)
 
-	args := []string{`{"content":"Mountains are`, `{"path":"n.txt","content":"Peaks rise`, `{}`}
+	args := []string{`{"content":"Mountains are"}`, `{"path":"n.txt","content":"Peaks rise"}`, `{}`}
 	var last string
-	for i := 0; i < stormBreakThreshold; i++ {
+	for i := range stormBreakThreshold {
 		call := provider.ToolCall{Name: "write_file", Arguments: args[i]}
 		last = executeBatchOutputs(a, context.Background(), []provider.ToolCall{call})[0]
 	}
@@ -97,7 +99,7 @@ func TestStormBreakerEscalatesRepeatedBlockedPermission(t *testing.T) {
 		`{"command":"ls -la"}`,
 	}
 	var last string
-	for i := 0; i < stormBreakThreshold; i++ {
+	for i := range stormBreakThreshold {
 		call := provider.ToolCall{Name: "bash", Arguments: args[i]}
 		last = executeBatchOutputs(a, context.Background(), []provider.ToolCall{call})[0]
 	}
@@ -139,7 +141,7 @@ func TestStormBreakerEscalatesAlternatingBlockedShapes(t *testing.T) {
 	if !strings.Contains(last, "[loop guard]") {
 		t.Fatalf("after %d all-blocked turns the guard should fire despite alternating tools, got: %q", stormBreakThreshold, last)
 	}
-	if !a.loopGuardArmed {
+	if !a.turn.loopGuardArmed {
 		t.Fatal("streak guard should arm the final-readiness loop-guard pass")
 	}
 	if len(*notices) == 0 {
@@ -171,8 +173,8 @@ func TestStormBreakerBlockedStreakResetBySuccess(t *testing.T) {
 	if strings.Contains(last, "[loop guard]") {
 		t.Fatalf("a successful turn should reset the blocked streak, got: %q", last)
 	}
-	if a.blockedTurnStreak != 1 {
-		t.Fatalf("blockedTurnStreak = %d, want 1 after success reset plus one block", a.blockedTurnStreak)
+	if a.turn.blockedTurnStreak != 1 {
+		t.Fatalf("blockedTurnStreak = %d, want 1 after success reset plus one block", a.turn.blockedTurnStreak)
 	}
 }
 
@@ -187,11 +189,11 @@ func TestStormBreakerEscalatesRepeatedBatch(t *testing.T) {
 	a := New(nil, reg, NewSession(""), Options{}, sink)
 
 	batch := []provider.ToolCall{
-		{Name: "write_a", Arguments: `{"content":"x`},
-		{Name: "write_b", Arguments: `{"content":"y`},
+		{Name: "write_a", Arguments: `{"content":"x"}`},
+		{Name: "write_b", Arguments: `{"content":"y"}`},
 	}
 	var first string
-	for i := 0; i < stormBreakThreshold; i++ {
+	for range stormBreakThreshold {
 		first = executeBatchOutputs(a, context.Background(), batch)[0]
 	}
 
@@ -217,11 +219,11 @@ func TestStormBreakerBatchResetsOnPartialSuccess(t *testing.T) {
 	a := New(nil, reg, NewSession(""), Options{}, sink)
 
 	batch := []provider.ToolCall{
-		{Name: "write_file", Arguments: `{"content":"x`},
+		{Name: "write_file", Arguments: `{"content":"x"}`},
 		{Name: "read_file", Arguments: `{"path":"x"}`},
 	}
 	var first string
-	for i := 0; i < stormBreakThreshold+2; i++ {
+	for range stormBreakThreshold + 2 {
 		first = executeBatchOutputs(a, context.Background(), batch)[0]
 	}
 
@@ -241,9 +243,9 @@ func TestStormBreakerSilentBelowThreshold(t *testing.T) {
 	sink, notices := noticeRecorder()
 	a := New(nil, reg, NewSession(""), Options{}, sink)
 
-	call := provider.ToolCall{Name: "write_file", Arguments: `{"content":"x`}
+	call := provider.ToolCall{Name: "write_file", Arguments: `{"content":"x"}`}
 	var last string
-	for i := 0; i < stormBreakThreshold-1; i++ {
+	for range stormBreakThreshold - 1 {
 		last = executeBatchOutputs(a, context.Background(), []provider.ToolCall{call})[0]
 	}
 
@@ -264,14 +266,14 @@ func TestStormBreakerResetsOnSuccess(t *testing.T) {
 	sink, notices := noticeRecorder()
 	a := New(nil, reg, NewSession(""), Options{}, sink)
 
-	fail := provider.ToolCall{Name: "write_file", Arguments: `{"content":"x`}
+	fail := provider.ToolCall{Name: "write_file", Arguments: `{"content":"x"}`}
 	good := provider.ToolCall{Name: "read_file", Arguments: `{"path":"x"}`}
 	ctx := context.Background()
 
-	a.executeBatch(ctx, []provider.ToolCall{fail})                    // count 1
-	a.executeBatch(ctx, []provider.ToolCall{fail})                    // count 2
-	a.executeBatch(ctx, []provider.ToolCall{good})                    // success → reset
-	a.executeBatch(ctx, []provider.ToolCall{fail})                    // count 1
+	a.executeBatch(ctx, &a.turn, []provider.ToolCall{fail})           // count 1
+	a.executeBatch(ctx, &a.turn, []provider.ToolCall{fail})           // count 2
+	a.executeBatch(ctx, &a.turn, []provider.ToolCall{good})           // success → reset
+	a.executeBatch(ctx, &a.turn, []provider.ToolCall{fail})           // count 1
 	last := executeBatchOutputs(a, ctx, []provider.ToolCall{fail})[0] // count 2 — still below threshold
 
 	if strings.Contains(last, "[loop guard]") {
@@ -284,7 +286,7 @@ func TestStormBreakerResetsOnSuccess(t *testing.T) {
 
 // executeBatchOutputs runs the batch and returns just the model-facing outputs.
 func executeBatchOutputs(a *Agent, ctx context.Context, calls []provider.ToolCall) []string {
-	batch := a.executeBatch(ctx, calls)
+	batch := a.executeBatch(ctx, &a.turn, calls)
 	outputs := batch.results
 	return outputs
 }

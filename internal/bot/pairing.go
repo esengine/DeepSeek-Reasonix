@@ -343,7 +343,7 @@ func pairingRequestMatches(req PairingRequest, msg InboundMessage) bool {
 func newPairingCode() (string, error) {
 	var b strings.Builder
 	max := big.NewInt(int64(len(pairingAlphabet)))
-	for i := 0; i < 8; i++ {
+	for range 8 {
 		n, err := rand.Int(rand.Reader, max)
 		if err != nil {
 			return "", err

@@ -19,7 +19,7 @@ import (
 	"reasonix/internal/netclient"
 )
 
-const endpoint = "https://crash.reasonix.io/v1"
+var endpoint = "https://crash.reasonix.io/v1"
 
 var uploadSignals = map[string]bool{
 	"finish_reason": true, "empty_final": true, "provider_error": true,
@@ -30,8 +30,11 @@ var uploadSignals = map[string]bool{
 	"recovery_review_error": true, "recovery_repeat_prompt": true,
 	"recovery_review_latency": true, "client_surface": true,
 	"client_version": true, "settings_language": true, "cli_mode": true,
-	"cli_profile": true, "cli_permission_mode": true, "cli_session_mode": true,
+	"cli_permission_mode": true, "cli_session_mode": true,
 	"cli_turn_latency": true, "cli_exit": true,
+	"completion_validation_outcome": true, "completion_validation_latency": true,
+	"completion_validation_error": true, "completion_validation_attempt": true,
+	"completion_evaluator_finish_reason": true, "completion_evaluator_cache_hit": true,
 }
 
 type Client struct {
@@ -240,7 +243,7 @@ func (c *Client) flushPending(ctx context.Context) error {
 			continue
 		}
 		if err := c.post(ctx, "/metrics", metricsPayload{
-			InstallID: c.installID, Version: g.payload.Version, OS: g.payload.OS, Surface: "cli", Counters: counters,
+			Version: g.payload.Version, OS: g.payload.OS, Surface: "cli", Counters: counters,
 		}); err != nil {
 			return err
 		}

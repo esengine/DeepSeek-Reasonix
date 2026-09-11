@@ -7,7 +7,7 @@ import (
 	"testing"
 )
 
-// --- splitFrontmatter ---
+// splitFrontmatter
 
 func TestSplitFrontmatterNoFence(t *testing.T) {
 	fm, body := splitFrontmatter("just body text\nno fence")
@@ -56,7 +56,7 @@ func TestSplitFrontmatterCRLF(t *testing.T) {
 	}
 }
 
-// --- Render edge cases ---
+// Render edge cases
 
 func TestRenderManyPositionals(t *testing.T) {
 	c := Command{Body: "$1 $2 $3 $4 $5 $6 $7 $8 $9"}
@@ -99,7 +99,7 @@ func TestRenderNoTokens(t *testing.T) {
 	}
 }
 
-// --- Load edge cases ---
+// Load edge cases
 
 func TestLoadEmptyDir(t *testing.T) {
 	dir := t.TempDir()

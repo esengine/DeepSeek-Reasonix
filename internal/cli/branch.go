@@ -6,7 +6,6 @@ import (
 
 	"github.com/charmbracelet/x/ansi"
 
-	"reasonix/internal/agent"
 	"reasonix/internal/control"
 	"reasonix/internal/provider"
 )
@@ -18,8 +17,7 @@ func (m *chatTUI) showBranchTree() {
 		m.notice("tree: " + err.Error())
 		return
 	}
-	current := agent.BranchID(m.ctrl.SessionPath())
-	tree := renderBranchTree(control.FormatBranchTree(branches, current))
+	tree := renderBranchTree(control.FormatBranchTree(branches, m.ctrl.CurrentBranchID()))
 	m.commitLine(ansi.Hardwrap(tree, max(m.width, 20), false))
 }
 

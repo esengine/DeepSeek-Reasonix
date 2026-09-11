@@ -1,5 +1,8 @@
 # AutoResearch Runtime Verification Matrix
 
+> Superseded historical audit. The verified runtime described below is no
+> longer active; Goal now owns budgeting, progress and completion directly.
+
 Date: 2026-06-30
 
 Scope: host-managed AutoResearch runtime, controller integration, desktop API,

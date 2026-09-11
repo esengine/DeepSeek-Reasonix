@@ -33,9 +33,10 @@ func TestObserveClassifiesEvents(t *testing.T) {
 		{Kind: event.Usage, Usage: &provider.Usage{FinishReason: "tool_calls", CacheHitTokens: 60, CacheMissTokens: 40}},
 		{Kind: event.ToolResult, Tool: event.Tool{Name: "bash", Err: "blocked by permission policy"}},
 		{Kind: event.CompactionDone},
-		{Kind: event.Notice, Text: "No visible answer was produced; asking the assistant to respond again.", Detail: "empty final answer blocked: model returned no visible answer text; retrying"},
+		{Kind: event.Notice, Code: event.NoticeCodeEmptyFinal, Text: "No visible answer was produced; asking the assistant to respond again.", Detail: "empty final answer blocked: model returned no visible answer text; retrying"},
 		{Kind: event.TurnDone, Err: errors.New("deepseek-flash: status 429: rate limited")},
 		{Kind: event.TurnDone, Err: errors.New("automatic recovery paused"), Outcome: event.TurnOutcomeRecoveryPaused},
+		{Kind: event.TurnDone, Err: errors.New("incomplete read"), Outcome: event.TurnOutcomeIncompleteRead},
 		{Kind: event.TurnDone},
 	}
 	for _, e := range feed {
@@ -49,7 +50,7 @@ func TestObserveClassifiesEvents(t *testing.T) {
 		"compaction":     {"total": 1},
 		"empty_final":    {"total": 1},
 		"provider_error": {"http_429": 1},
-		"turns":          {"total": 3},
+		"turns":          {"total": 4},
 	}
 	for sig, buckets := range want {
 		for b, n := range buckets {
@@ -87,6 +88,17 @@ func TestObserveReadsNoMessageText(t *testing.T) {
 	m.observe(event.Event{Kind: event.Notice, Text: "see docs: empty final answer blocked is a guard"})
 	if m.c["empty_final"] != nil {
 		t.Errorf("empty_final should only match the notice prefix, got %v", m.c["empty_final"])
+	}
+}
+
+func TestObserveClassifiesLocalizedEmptyFinalByCode(t *testing.T) {
+	m := newMetricsAggregator(t.TempDir())
+	m.observe(event.Event{
+		Kind: event.Notice, Code: event.NoticeCodeEmptyFinal,
+		Text: "没有生成可见回复，已要求助手重新作答。",
+	})
+	if got := m.c["empty_final"]["total"]; got != 1 {
+		t.Fatalf("localized empty_final/total = %d, want 1", got)
 	}
 }
 

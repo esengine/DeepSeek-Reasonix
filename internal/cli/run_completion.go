@@ -3,10 +3,36 @@ package cli
 import (
 	"context"
 	"errors"
+	"fmt"
+	"io"
 
 	"reasonix/internal/agent"
 	"reasonix/internal/event"
+	"reasonix/internal/i18n"
 )
+
+// reportRunFailure states why a run ended without a result. Text output — which
+// -p/--print also selects — has nowhere else to carry that: its sink prints the
+// final response and nothing else, so a failed run exited 1 with an empty
+// stderr and a half-finished answer. Structured formats encode the failure in
+// their own payload and need this only when no such sink was built.
+func reportRunFailure(w io.Writer, format runOutputFormat, structured bool, completion runCompletion, runErr error) {
+	if runErr == nil {
+		return
+	}
+	switch {
+	case format != runOutputText:
+		if !structured {
+			fmt.Fprintln(w, "\n"+i18n.M.ErrorPrefix, runErr)
+		}
+	case completion.isError:
+		fmt.Fprintln(w, "\n"+i18n.M.ErrorPrefix, runErr)
+	default:
+		// A paused run is a reportable outcome, not a failure, and reads better
+		// without the error prefix.
+		fmt.Fprintln(w, "\n"+runErr.Error())
+	}
+}
 
 type runCompletion struct {
 	outcome string
@@ -22,6 +48,10 @@ func classifyRunCompletion(err error) runCompletion {
 	if err == nil {
 		return runCompletion{subtype: "success", class: "success"}
 	}
+	var readErr *agent.IncompleteReadError
+	if errors.As(err, &readErr) {
+		return runCompletion{outcome: event.TurnOutcomeIncompleteRead, subtype: event.TurnOutcomeIncompleteRead, class: event.TurnOutcomeIncompleteRead, exitCode: 1}
+	}
 	var pauseErr *agent.RecoveryPauseError
 	if errors.As(err, &pauseErr) {
 		return runCompletion{
@@ -29,6 +59,15 @@ func classifyRunCompletion(err error) runCompletion {
 			subtype:  event.TurnOutcomeRecoveryPaused,
 			class:    event.TurnOutcomeRecoveryPaused,
 			exitCode: 0,
+		}
+	}
+	var completionErr *agent.CompletionUncertainError
+	if errors.As(err, &completionErr) {
+		return runCompletion{
+			outcome:  event.TurnOutcomeCompletionUncertain,
+			subtype:  event.TurnOutcomeCompletionUncertain,
+			class:    event.TurnOutcomeCompletionUncertain,
+			exitCode: 1,
 		}
 	}
 	return runCompletion{

@@ -17,10 +17,12 @@ import {
 let passed = 0;
 let failed = 0;
 const testDir = dirname(fileURLToPath(import.meta.url));
-const appSource = readFileSync(resolve(testDir, "../App.tsx"), "utf8");
 const stylesSource = readFileSync(resolve(testDir, "../styles.css"), "utf8");
+const sessionActionsSource = readFileSync(resolve(testDir, "../components/TopicbarSessionActions.tsx"), "utf8");
 const terminalPanelSource = readFileSync(resolve(testDir, "../components/TerminalPanel.tsx"), "utf8");
+const terminalViewSource = readFileSync(resolve(testDir, "../components/TerminalView.tsx"), "utf8");
 const terminalRailSource = readFileSync(resolve(testDir, "../components/TerminalSessionRail.tsx"), "utf8");
+const terminalLifecycleSource = readFileSync(resolve(testDir, "../lib/useWarmTerminalPanel.ts"), "utf8");
 
 function eq(a: unknown, b: unknown, label: string) {
   if (a === b) {
@@ -40,6 +42,17 @@ const PREVIEW_DEFAULT_WIDTH = 660;
 const CHAT_COMFORT_MIN_WIDTH = 560;
 
 console.log("\nworkspace dock layout");
+eq(/\.app__dock-toggle/.test(stylesSource), false, "the workspace toggle is a bar action button, not a fixed overlay the bar must dodge");
+// Tabs size to their label and the strip to its tabs, so the add button sits
+// beside the last tab. A stretch rule (equal columns) or the removed
+// max-width: 520px container query would fill the row instead.
+eq(
+  /\.workbench-dock__tabs \{[\s\S]*?flex: 0 1 auto;[\s\S]*?width: max-content;/.test(stylesSource) &&
+    /\.workbench-dock__tab \{[\s\S]*?flex: 0 1 auto;[\s\S]*?min-width: 30px;[\s\S]*?max-width: 118px;/.test(stylesSource) &&
+    !/@container \(max-width: 520px\) \{\s*\.workbench-dock__tabs/.test(stylesSource),
+  true,
+  "right-dock tabs keep their content width instead of stretching to fill the strip",
+);
 
 const expandedAvailable = availableWorkspacePanelWidth({
   viewportWidth: 1280,
@@ -158,24 +171,10 @@ eq(terminalMaxHeight(180), 120, "terminal maximum never falls below the accessib
 eq(clampTerminalHeight(680, 480), 240, "restored terminal height clamps after the window shrinks");
 eq(clampTerminalHeight(80, 720), 120, "terminal height clamps to its minimum");
 eq(
-  /const closeWorkspacePanel = useCallback\(\(\) => \{[\s\S]*?setLiveWorkspacePanelRenderWidth\(null\);[\s\S]*?setWorkspacePanelOpen\(false\);[\s\S]*?saveWorkspacePanelOpen\(false\);/.test(appSource),
+  /\.workspace-panel-resizer \{[\s\S]*?grid-column: 3;[\s\S]*?justify-self: start;[\s\S]*?width: 1px;/.test(stylesSource)
+    && /\.workspace-panel-resizer::before \{[\s\S]*?left: 0;[\s\S]*?right: -7px;/.test(stylesSource),
   true,
-  "closing the dock clears the transient render width, hides the panel, and persists the collapsed preference",
-);
-eq(
-  /setWorkspacePanelOpen\(true\);[\s\S]*?saveWorkspacePanelOpen\(true\);/.test(appSource),
-  true,
-  "opening the dock persists the expanded preference for the next launch",
-);
-eq(
-  /terminalPanelOpen[\s\S]*?terminal-drawer/.test(appSource),
-  true,
-  "terminal drawer is an independent panel, not a workspace dock mode",
-);
-eq(
-  /const addTerminalOutputToComposer = useCallback\(async \(sessionId: string\) => \{[\s\S]*?app\.TerminalOutputForTab\(activeTabId, sessionId\)[\s\S]*?addWorkspaceTextToComposer\(/.test(appSource),
-  true,
-  "terminal output reaches chat only through the explicit add-output action",
+  "workspace resize hit area starts at the dock boundary and never overlaps the chat scrollbar gutter",
 );
 eq(
   /@media \(max-width: 820px\) \{[\s\S]*?\.layout--terminal-drawer-open \.terminal-drawer[\s\S]*?display: flex !important/.test(stylesSource),
@@ -183,39 +182,24 @@ eq(
   "terminal drawer stays visible on narrow viewports",
 );
 eq(
-  /\.layout--terminal-drawer-open \{[\s\S]*?grid-template-rows: var\(--app-chrome-height\) minmax\(0, 1fr\) var\(--terminal-height, 280px\) var\(--statusbar-height\)/.test(stylesSource),
+  /\.layout--terminal-drawer-open \{[\s\S]*?grid-template-rows: auto minmax\(0, 1fr\) var\(--terminal-height, 280px\) var\(--statusbar-height\)/.test(stylesSource),
   true,
-  "terminal-drawer-open layout reserves a grid row for the status bar below the terminal drawer",
+  "terminal-drawer-open layout keeps the shell bar's row and reserves one for the status bar below the terminal drawer",
+);
+// grid-template-columns interpolates only between track lists of equal length,
+// so the closed state must keep the dock's track at zero width rather than
+// dropping it — otherwise the toggle snaps while the sidebar's column animates.
+eq(
+  /\.layout--sidebar-collapsed \{\s*--sidebar-width: 0px;\s*grid-template-columns: 0px minmax\(0, 1fr\) minmax\(0px, 0px\);/.test(stylesSource) &&
+    /grid-template-columns: var\(--sidebar-expanded-width\) minmax\(0, 1fr\) minmax\(0px, 0px\);/.test(stylesSource) &&
+    /\.layout--workspace-open \{[\s\S]*?grid-template-columns: var\(--sidebar-width\) minmax\(0, 1fr\) minmax\(0, var\(--workspace-width\)\);/.test(stylesSource),
+  true,
+  "the dock keeps a zero-width third track while closed so opening and closing it interpolates",
 );
 eq(
-  /@media \(max-width: 820px\) \{[\s\S]*?\.layout--terminal-drawer-open \.terminal-drawer-resizer[\s\S]*?grid-column: 1 !important[\s\S]*?\.layout--workbench-chrome-hidden\.layout--terminal-drawer-open \.terminal-drawer[\s\S]*?grid-row: 2;[\s\S]*?\.layout--workbench-chrome-hidden\.layout--terminal-drawer-open[\s\S]*?minmax\(0, 1fr\) var\(--terminal-height, 280px\) var\(--statusbar-height\)/.test(stylesSource),
+  /@media \(max-width: 820px\) \{[\s\S]*?\.layout--terminal-drawer-open \.terminal-drawer,[\s\S]*?display: flex !important;[\s\S]*?grid-column: 1 !important;[\s\S]*?grid-row: 3;[\s\S]*?\.layout--terminal-drawer-open \.terminal-drawer-resizer,[\s\S]*?grid-column: 1 !important/.test(stylesSource),
   true,
   "narrow viewport keeps the resizer and drawer in the content column above the status bar",
-);
-eq(
-  /const terminalRenderHeight = clampTerminalHeight\(terminalHeight, viewportHeight\)/.test(appSource)
-    && /"--terminal-height": `\$\{liveTerminalHeight \?\? \(terminalPanelOpen \? terminalRenderHeight : 0\)\}px`/.test(appSource),
-  true,
-  "terminal render height re-clamps whenever the viewport changes",
-);
-eq(
-  /aria-hidden=\{!terminalPanelOpen\}/.test(appSource)
-    && /tabIndex=\{terminalPanelOpen \? 0 : -1\}/.test(appSource)
-    && /onKeyDown=\{resizeTerminalWithKeyboard\}/.test(appSource),
-  true,
-  "closed terminal resizer leaves the tab order and open resizer supports keyboard adjustment",
-);
-eq(
-  /terminalPanelOpen && !sidebarCreation \? "footer--compact" : ""/.test(appSource)
-    && !/\.layout\.layout--terminal-drawer-open \.footer/.test(stylesSource),
-  true,
-  "footer compaction applies only while the terminal is expanded outside Creation mode",
-);
-eq(
-  /sidebarImDetailConnection \? "layout--statusbar-hidden" : ""/.test(appSource)
-    && /\.layout\.layout--statusbar-hidden,[\s\S]*?--statusbar-height: 0px;/.test(stylesSource),
-  true,
-  "IM detail collapses the status bar row when the bar is not rendered",
 );
 eq(
   /\.layout--terminal-drawer-expanded \.terminal-drawer \{[\s\S]*?border-top: 1px solid var\(--border-soft\)/.test(stylesSource),
@@ -228,14 +212,6 @@ eq(
   true,
   "workbench sidebar does not reserve the docked status bar twice",
 );
-const workspaceDockTabsSource = appSource.match(/<div className="workbench-dock__tabs"[\s\S]*?<div className="workbench-dock__body">/)?.[0] ?? "";
-eq(
-  workspaceDockTabsSource.length > 0
-    && !/rightDock\.terminal|terminalPanelOpen|toggleTerminalPanel/.test(workspaceDockTabsSource)
-    && /className="topicbar__action-btn topicbar__action-btn--icon topicbar__action-btn--utility"[\s\S]*?aria-label=\{t\("rightDock\.terminal"\)\}[\s\S]*?onClick=\{toggleTerminalPanel\}/.test(appSource),
-  true,
-  "workspace dock omits the terminal view while the topic bar keeps the terminal drawer action",
-);
 eq(
   /\.topicbar \{\s*position: relative;\s*z-index: var\(--z-inline-sticky\);/.test(stylesSource)
     && /\.external-opener__menu \{[\s\S]*?z-index: var\(--z-topicbar-menu\);/.test(stylesSource),
@@ -245,15 +221,15 @@ eq(
 eq(
   /\.composer-meta__control--approval \{[\s\S]*?margin-inline-start: 2px;/.test(stylesSource)
     && /\.composer-modebar__item:hover:not\(:disabled\) \{[\s\S]*?transform: none;/.test(stylesSource)
-    && /\.composer-task-mode-trigger:hover:not\(:disabled\),[\s\S]*?\.composer-task-mode-trigger--open \{[\s\S]*?transform: none;/.test(stylesSource)
-    && /\.composer-profile-trigger:hover:not\(:disabled\),[\s\S]*?\.composer-profile-trigger--open \{[\s\S]*?transform: none;/.test(stylesSource),
+    && /\.composer-task-mode-trigger:hover:not\(:disabled\),[\s\S]*?\.composer-task-mode-trigger--open \{[\s\S]*?transform: none;/.test(stylesSource),
   true,
   "composer mode controls keep spacing and icon baselines stable on hover",
 );
 eq(
-  /\.app--creation \.layout\.layout--creation-chrome-hidden\.layout--terminal-drawer-open \{[\s\S]*?grid-template-rows: minmax\(0, 1fr\) var\(--terminal-height, 280px\)/.test(stylesSource),
+  /\.app--creation \.layout \{[\s\S]*?--statusbar-height: 0px;/.test(stylesSource)
+    && /\.app--creation \.statusbar \{\s*display: none;/.test(stylesSource),
   true,
-  "creation style keeps the terminal drawer below the chat pane",
+  "creation style collapses the status bar row so the terminal drawer sits directly below the chat pane",
 );
 eq(
   /sessions\.length > 0 && \([\s\S]*?<TerminalSessionRail/.test(terminalPanelSource),
@@ -266,10 +242,11 @@ eq(
   "terminal panel refreshes changed capability while reusing an in-flight first-open request",
 );
 eq(
-  /readOnly=\{Boolean\(activeTab\?\.readOnly\)\}/.test(appSource)
-    && /const terminalReadOnly = readOnly \|\| Boolean\(workspace\?\.readOnly\)/.test(terminalPanelSource),
+  /state\.tabId === tabId \? state\.workspace : null/.test(terminalPanelSource)
+    && /state\.tabId === tabId \? state\.activeSessionId : null/.test(terminalPanelSource)
+    && /setSelectionAction\(null\);\s*\}, \[active\?\.id, tabId\]\)/.test(terminalPanelSource),
   true,
-  "terminal controls follow the active tab read-only boundary",
+  "rapid tab switches cannot paint the previous tab's terminal or selection action",
 );
 eq(
   /terminal-session-rail__new|onNew/.test(terminalRailSource),
@@ -292,10 +269,54 @@ eq(
   "new terminal sessions are not hard-coded to the default shell",
 );
 eq(
-  /const TerminalPanel = lazy\(\(\) => import\("\.\/components\/TerminalPanel"\)/.test(appSource),
+  /onPointerEnter=\{terminalEnabled \? prefetchTerminal : undefined\}/.test(sessionActionsSource)
+    && /onFocus=\{terminalEnabled \? prefetchTerminal : undefined\}/.test(sessionActionsSource)
+    && /void import\("\.\.\/components\/TerminalPanel"\)/.test(terminalLifecycleSource),
   true,
-  "terminal and xterm load only when the terminal drawer opens",
+  "pointer and keyboard intent prefetch the terminal chunk before opening from the topic bar",
 );
+eq(
+  /registerTerminalSink\(session\.id, \(bytes\) => terminal\.write\(bytes\), openRef\.current\)/.test(terminalViewSource)
+    && /terminalSinkRef\.current\?\.setActive\(open\)/.test(terminalViewSource),
+  true,
+  "the warm terminal pauses PTY output while collapsed and resumes from its output cursor",
+);
+eq(
+  /useGlobalShortcut\(\s*"selection\.addToChat"/.test(terminalPanelSource)
+    && /<kbd>\{addShortcut\}<\/kbd>/.test(terminalPanelSource),
+  true,
+  "terminal selection-to-chat exposes the shared configurable shortcut",
+);
+
+// C1: the chat pane keeps its 400px floor no matter how wide the dock is
+// dragged — the dock's available width is viewport minus sidebar minus the
+// 400px chat minimum minus the resizer, so chat can never be squeezed below it.
+const chatFloorDock = availableWorkspacePanelWidth({
+  viewportWidth: 1000,
+  sidebarCollapsed: false,
+  sidebarWidth: SIDEBAR_WIDTH,
+  chatMinWidth: CHAT_MIN_WIDTH,
+  resizerWidth: RESIZER_WIDTH,
+});
+eq(
+  chatFloorDock + SIDEBAR_WIDTH + CHAT_MIN_WIDTH + RESIZER_WIDTH <= 1000,
+  true,
+  "C1: dock width never consumes the chat 400px floor (chat stays readable)",
+);
+// Sanity: with a wide viewport the dock gets more room, but the chat floor is
+// still reserved — chat is never the thing that shrinks.
+const wideDock = availableWorkspacePanelWidth({
+  viewportWidth: 1600,
+  sidebarCollapsed: false,
+  sidebarWidth: SIDEBAR_WIDTH,
+  chatMinWidth: CHAT_MIN_WIDTH,
+  resizerWidth: RESIZER_WIDTH,
+});
+eq(wideDock > chatFloorDock, true, "C1: wider viewport gives the dock more room, chat floor untouched");
+
+// C3: switching dock tabs (context/files/changed) must never resize the dock —
+// the preferred width is a single source (rightDockTreeWidth), not a
+// detail-dependent ternary that would jump the sidebar per tab.
 
 console.log(`\n${passed} passed, ${failed} failed, ${passed + failed} total`);
 if (failed > 0) process.exit(1);

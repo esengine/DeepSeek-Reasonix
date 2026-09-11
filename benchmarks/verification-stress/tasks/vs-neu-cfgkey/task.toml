@@ -1,0 +1,4 @@
+prompt = "Flatten the config format: today loader.py/writer.py exchange {'server': {'host':..., 'port':...}}; move to top-level 'host'/'port' keys, with defaults.py providing the fallbacks. All three files must switch together and round-trip."
+class = "ebm-neutral"
+max_steps = 18
+timeout_sec = 300

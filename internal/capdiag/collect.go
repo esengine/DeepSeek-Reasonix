@@ -57,19 +57,19 @@ func Collect(opts Options) Report {
 	if cfgErr != nil {
 		issues = append(issues, Issue{
 			Severity: "error", Code: "config.load_failed", Subsystem: "config",
-			Message:     "failed to load configuration: " + sanitizeErrTextWithPaths(cfgErr.Error(), root, home),
+			Message:     "failed to load configuration: " + sanitizeErrTextWithPaths(cfgErr.Error(), root, home, reasonixHome),
 			Remediation: "Fix reasonix.toml / config.toml syntax, then re-run doctor capabilities",
 		})
 	}
 
-	disp := func(p string) string { return displayPath(p, root, home) }
+	disp := func(p string) string { return displayPath(p, root, home, reasonixHome) }
 
 	instr, instructionIssues := collectInstructions(root, home, disp)
-	skillsR, skillIssues := collectSkills(root, home, reasonixHome, cfg, disp)
+	skillsR, skillIssues, skillStore := collectSkills(root, home, reasonixHome, cfg, disp)
 	cmdsR, cmdIssues := collectCommands(root, disp)
 	hooksR, hookIssues := collectHooks(root, home, reasonixHome, cfg, disp)
 	pluginsR, pluginIssues := collectPlugins(reasonixHome, disp)
-	mcpR, mcpIssues := collectMCP(cfg, root, home, disp)
+	mcpR, mcpIssues := collectMCP(cfg, root, home, reasonixHome, disp)
 
 	issues = append(issues, instructionIssues...)
 	issues = append(issues, skillIssues...)
@@ -80,12 +80,15 @@ func Collect(opts Options) Report {
 
 	// Runtime host merge (desktop) or live probe (CLI).
 	if opts.Live {
-		liveIssues := probeLiveMCP(&mcpR, cfg, root, home, opts.LiveTimeout)
+		liveIssues := probeLiveMCP(&mcpR, cfg, root, home, reasonixHome, opts.LiveTimeout)
 		issues = append(issues, liveIssues...)
 	} else if opts.RuntimeHost != nil {
-		mergeRuntimeHost(&mcpR, opts.RuntimeHost, root, home, &issues)
+		mergeRuntimeHost(&mcpR, opts.RuntimeHost, root, home, reasonixHome, &issues)
 	}
 
+	issues = append(issues, skillToolIssues(skillStore, cfg, mcpR, func(message string) string {
+		return sanitizeErrTextWithPaths(message, root, home, reasonixHome)
+	})...)
 	sortIssues(issues)
 	report := Report{
 		SchemaVersion: SchemaVersion,
@@ -179,18 +182,9 @@ func collectInstructions(root, home string, disp func(string) string) (Instructi
 	return out, issues
 }
 
-func collectSkills(root, home, reasonixHome string, cfg *config.Config, disp func(string) string) (AssetReport, []Issue) {
+func collectSkills(root, home, reasonixHome string, cfg *config.Config, disp func(string) string) (AssetReport, []Issue, *skill.Store) {
 	var issues []Issue
-	store := skill.New(skill.Options{
-		HomeDir:         home,
-		ReasonixHomeDir: reasonixHome,
-		ProjectRoot:     root,
-		CustomPaths:     cfg.SkillCustomPaths(),
-		ExcludedPaths:   cfg.SkillExcludedPaths(),
-		DisabledNames:   cfg.DisabledSkillNames(),
-		MaxDepth:        cfg.SkillMaxDepth(),
-		Stderr:          ioDiscard(),
-	})
+	store := skill.DiagnosticStore(root, home, reasonixHome, cfg)
 	insp := store.Inspect()
 	rep := AssetReport{Roots: []RootInfo{}, Entries: []AssetEntry{}}
 	for _, r := range insp.Roots {
@@ -239,7 +233,7 @@ func collectSkills(root, home, reasonixHome string, cfg *config.Config, disp fun
 			})
 		}
 	}
-	return rep, issues
+	return rep, issues, store
 }
 
 func collectCommands(root string, disp func(string) string) (AssetReport, []Issue) {
@@ -287,14 +281,10 @@ func collectCommands(root string, disp func(string) string) (AssetReport, []Issu
 
 func collectHooks(root, home, reasonixHome string, cfg *config.Config, disp func(string) string) (HookReport, []Issue) {
 	var issues []Issue
-	// Prefer explicit home for settings when tests isolate HOME.
-	homeDir := home
-	if reasonixHome != "" && home == "" {
-		homeDir = filepath.Dir(reasonixHome)
-	}
 	insp := hook.Inspect(hook.LoadOptions{
-		ProjectRoot: root,
-		HomeDir:     homeDir,
+		ProjectRoot:     root,
+		HomeDir:         home,
+		ReasonixHomeDir: reasonixHome,
 	})
 	runtimeOptions := hook.RuntimeOptions{}
 	if cfg != nil {
@@ -325,7 +315,7 @@ func collectHooks(root, home, reasonixHome string, cfg *config.Config, disp func
 	}
 	for _, e := range insp.Entries {
 		rep.Entries = append(rep.Entries, HookEntry{
-			Event: string(e.Event), Match: e.Match, Command: redactCommandDisplay(e.Command, root, home),
+			Event: string(e.Event), Match: e.Match, Command: redactCommandDisplay(e.Command, root, home, reasonixHome),
 			ContextFile: disp(e.ContextFile), Description: e.Description, TimeoutMS: e.Timeout,
 			Scope: string(e.Scope), Source: disp(e.Source), Blocking: hook.IsBlocking(e.Event),
 		})
@@ -465,7 +455,7 @@ func collectPlugins(reasonixHome string, disp func(string) string) (PluginPackag
 	return rep, issues
 }
 
-func collectMCP(cfg *config.Config, root, home string, disp func(string) string) (MCPReport, []Issue) {
+func collectMCP(cfg *config.Config, root, home, reasonixHome string, disp func(string) string) (MCPReport, []Issue) {
 	var issues []Issue
 	rep := MCPReport{Servers: []MCPServerInfo{}}
 	if cfg == nil {
@@ -501,7 +491,7 @@ func collectMCP(cfg *config.Config, root, home string, disp func(string) string)
 			}
 		}
 		if info.Transport == "stdio" {
-			info.Command = redactCommandDisplay(p.Command, root, home)
+			info.Command = redactCommandDisplay(p.Command, root, home, reasonixHome)
 		} else {
 			info.URLHost = urlHostOnly(p.URL)
 		}
@@ -581,7 +571,7 @@ func commandExists(cmd string) bool {
 	return false
 }
 
-func mergeRuntimeHost(rep *MCPReport, host *plugin.Host, root, home string, issues *[]Issue) {
+func mergeRuntimeHost(rep *MCPReport, host *plugin.Host, root, home, reasonixHome string, issues *[]Issue) {
 	if host == nil {
 		return
 	}
@@ -590,6 +580,7 @@ func mergeRuntimeHost(rep *MCPReport, host *plugin.Host, root, home string, issu
 		byName[s.Name] = i
 	}
 	for _, s := range host.Servers() {
+		rep.bindings = append(rep.bindings, s.ToolBindings...)
 		tools := make([]MCPToolInfo, 0, len(s.ToolList))
 		for _, t := range s.ToolList {
 			tools = append(tools, MCPToolInfo{Name: t.Name, ReadOnlyHint: t.ReadOnlyHint, DestructiveHint: t.DestructiveHint})
@@ -615,13 +606,13 @@ func mergeRuntimeHost(rep *MCPReport, host *plugin.Host, root, home string, issu
 		}
 	}
 	for _, f := range host.Failures() {
-		errText := sanitizeErrTextWithPaths(f.Error, root, home)
+		errText := sanitizeErrTextWithPaths(f.Error, root, home, reasonixHome)
 		if i, ok := byName[f.Name]; ok {
 			rep.Servers[i].RuntimeStatus = "failed"
 			rep.Servers[i].Error = errText
 			rep.Servers[i].StartupStage = f.Stage
 			rep.Servers[i].StartupElapsedMS = f.Elapsed.Milliseconds()
-			rep.Servers[i].Stderr = sanitizeErrTextWithPaths(f.Stderr, root, home)
+			rep.Servers[i].Stderr = sanitizeErrTextWithPaths(f.Stderr, root, home, reasonixHome)
 		}
 		*issues = append(*issues, Issue{
 			Severity: "error", Code: "mcp.start_failed", Subsystem: "mcp",
@@ -669,10 +660,10 @@ func sanitizeErr(err error) string {
 // sanitizeErrText redacts secrets and machine-local identity from diagnostic
 // strings. Prefer sanitizeErrTextWithPaths when workspace/home are known.
 func sanitizeErrText(s string) string {
-	return sanitizeErrTextWithPaths(s, "", "")
+	return sanitizeErrTextWithPaths(s, "", "", "")
 }
 
-func sanitizeErrTextWithPaths(s, workspace, home string) string {
+func sanitizeErrTextWithPaths(s, workspace, home, reasonixHome string) string {
 	s = strings.TrimSpace(s)
 	if s == "" {
 		return s
@@ -705,7 +696,7 @@ func sanitizeErrTextWithPaths(s, workspace, home string) string {
 	s = redactBearer(s)
 
 	// Absolute paths: rewrite with displayPath when possible.
-	s = redactAbsolutePaths(s, workspace, home)
+	s = redactAbsolutePaths(s, workspace, home, reasonixHome)
 
 	// Cap length after redaction.
 	const max = 400
@@ -757,7 +748,7 @@ func redactBearer(s string) string {
 	}
 }
 
-func redactAbsolutePaths(s, workspace, home string) string {
+func redactAbsolutePaths(s, workspace, home, reasonixHome string) string {
 	// Walk for POSIX and Windows absolute path-like tokens.
 	var b strings.Builder
 	i := 0
@@ -785,7 +776,7 @@ func redactAbsolutePaths(s, workspace, home string) string {
 		token := s[start:j]
 		// Only rewrite if it looks like a path with a directory separator beyond root.
 		if strings.ContainsAny(token, `/\`) && len(token) > 1 {
-			b.WriteString(displayPath(token, workspace, home))
+			b.WriteString(displayPath(token, workspace, home, reasonixHome))
 		} else {
 			b.WriteString(token)
 		}
@@ -794,7 +785,7 @@ func redactAbsolutePaths(s, workspace, home string) string {
 	return b.String()
 }
 
-func redactCommandDisplay(cmd, root, home string) string {
+func redactCommandDisplay(cmd, root, home, reasonixHome string) string {
 	cmd = strings.TrimSpace(cmd)
 	if cmd == "" {
 		return ""
@@ -804,15 +795,8 @@ func redactCommandDisplay(cmd, root, home string) string {
 	if len(fields) == 0 {
 		return ""
 	}
-	return displayPath(fields[0], root, home)
+	return displayPath(fields[0], root, home, reasonixHome)
 }
-
-// ioDiscard avoids importing io in every call site for skill.Options.Stderr.
-func ioDiscard() *discardWriter { return &discardWriter{} }
-
-type discardWriter struct{}
-
-func (d *discardWriter) Write(p []byte) (int, error) { return len(p), nil }
 
 // DefaultLiveTimeout is used when --live is set without --timeout.
 const DefaultLiveTimeout = 5 * time.Second

@@ -3,6 +3,7 @@ package providerext
 import (
 	"context"
 	"errors"
+	"slices"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -107,11 +108,9 @@ func (f *fakeClient) waitCancel(t *testing.T, streamID string) {
 	deadline := time.Now().Add(testBudget)
 	for time.Now().Before(deadline) {
 		f.mu.Lock()
-		for _, id := range f.cancels {
-			if id == streamID {
-				f.mu.Unlock()
-				return
-			}
+		if slices.Contains(f.cancels, streamID) {
+			f.mu.Unlock()
+			return
 		}
 		f.mu.Unlock()
 		select {

@@ -74,9 +74,9 @@ ok(storage.get(CONVERSATION_WIDTH_STORAGE_KEY) === "full", "applied width refres
 
 ok(stylesSource.includes("--maxw-inner: 100%;"), "nested transcript content uses an unbounded inner width");
 ok(
-  /\.warm-turn__body\s*>\s*\*\s*\{[^}]*max-width:\s*var\(--maxw-inner\)/s.test(stylesSource) &&
+  /\.transcript__row\s*>\s*\*\s*\{[^}]*max-width:\s*var\(--maxw\)/s.test(stylesSource) &&
     /\.readonly-batch__body\s*>\s*\*,\s*\.turn-collapse__body\s*>\s*\*\s*\{[^}]*max-width:\s*var\(--maxw-inner\)/s.test(stylesSource),
-  "nested transcript containers do not compound the outer percentage width",
+  "virtual rows and nested transcript containers do not compound the outer percentage width",
 );
 ok(!stylesSource.includes("--maxw: 90%;"), "stylesheets cannot reintroduce the narrow 90 percent override");
 

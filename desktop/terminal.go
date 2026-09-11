@@ -57,7 +57,7 @@ type TerminalShellView struct {
 }
 
 // TerminalWorkspaceView describes terminal capability for the active tab. All
-// slices are initialized so Wails serializes empty values as [] rather than null.
+// slices are initialized so the desktop bridge encodes empty values as [] rather than null.
 type TerminalWorkspaceView struct {
 	Available bool                  `json:"available"`
 	ReadOnly  bool                  `json:"readOnly"`
@@ -181,6 +181,11 @@ func (a *App) CreateTerminalForTab(tabID, rel, shellID string) (TerminalSessionV
 	if err != nil {
 		return TerminalSessionView{}, err
 	}
+	releaseAdmission, err := a.beginWorkspaceRuntimeAdmission(target.workspaceRoot)
+	if err != nil {
+		return TerminalSessionView{}, err
+	}
+	defer releaseAdmission()
 	available, reason := terminalPlatformAvailable()
 	if !available {
 		return TerminalSessionView{}, errors.New(reason)
@@ -200,17 +205,6 @@ func (a *App) CreateTerminalForTab(tabID, rel, shellID string) (TerminalSessionV
 		return TerminalSessionView{}, errTerminalManagerOff
 	}
 	return a.terminals.create(target.tabID, target.workspaceKey, dir, command)
-}
-
-func (a *App) WriteTerminalForTab(tabID, sessionID, data string) error {
-	target, err := a.terminalTargetForTab(tabID, true)
-	if err != nil {
-		return err
-	}
-	if a.terminals == nil {
-		return errTerminalManagerOff
-	}
-	return a.terminals.write(target.workspaceKey, sessionID, []byte(data))
 }
 
 func (a *App) ResizeTerminalForTab(tabID, sessionID string, cols, rows int) error {
@@ -405,25 +399,6 @@ func resolveTerminalCommand(_ string, shellID string) (terminalCommand, error) {
 		return defaultTerminalCommand()
 	}
 	return namedTerminalCommand(shellID)
-}
-
-func terminalCommandFromConfig(prefer, configuredPath string) (terminalCommand, bool) {
-	prefer = strings.ToLower(strings.TrimSpace(prefer))
-	configuredPath = strings.TrimSpace(configuredPath)
-	if prefer == "" || prefer == "auto" {
-		return terminalCommand{}, false
-	}
-	if prefer != "bash" && prefer != "powershell" && prefer != "pwsh" {
-		return terminalCommand{}, false
-	}
-	if configuredPath != "" {
-		if path, err := exec.LookPath(configuredPath); err == nil {
-			label := strings.TrimSuffix(filepath.Base(path), filepath.Ext(path))
-			return commandForShellPath(path, label), true
-		}
-	}
-	command, err := namedTerminalCommand(prefer)
-	return command, err == nil
 }
 
 func defaultTerminalCommand() (terminalCommand, error) {

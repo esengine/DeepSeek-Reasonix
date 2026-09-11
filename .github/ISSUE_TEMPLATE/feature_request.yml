@@ -10,7 +10,7 @@ body:
       description: Which line is this for?
       options:
         - "v2 — Go rewrite (1.x), main-v2 (active development)"
-        - "v1 — Legacy TypeScript (0.x), maintenance only"
+        - "v3 — Studio (2.x), studio"
     validations:
       required: true
   - type: textarea

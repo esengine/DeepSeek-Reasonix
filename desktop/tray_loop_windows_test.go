@@ -13,7 +13,7 @@ func TestDesktopTrayLoopRunsOnLockedOSThread(t *testing.T) {
 	done := make(chan struct{})
 	runDesktopTrayLoop(func() {
 		first := windows.GetCurrentThreadId()
-		for i := 0; i < 100; i++ {
+		for range 100 {
 			runtime.Gosched()
 		}
 		if got := windows.GetCurrentThreadId(); got != first {

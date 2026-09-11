@@ -1,10 +1,9 @@
 // Run: tsx src/__tests__/composer-resized-input-css.test.ts
 //
 // Contract: in the user-resized composer (`.composer-card--resized`), the
-// input fills the fixed card height and scrolls internally. JS applies no
-// inline height in resized mode, so `height: auto` would collapse the
-// rows=1 textarea to a single visible line forever (regression shipped in
-// desktop-v1.17.11: typing multiline text kept the input one line tall).
+// input fills the available card height and can scroll internally. These CSS
+// fallbacks remain authoritative during a live resize, when JS temporarily
+// removes the content-derived inline height.
 
 import { readFileSync } from "node:fs";
 import { dirname, resolve } from "node:path";

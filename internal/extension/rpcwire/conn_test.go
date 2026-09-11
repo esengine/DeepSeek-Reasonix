@@ -88,7 +88,7 @@ func TestHandlerResponseAfterWriteReceivesTransportFailure(t *testing.T) {
 }
 
 func TestRequestKeepsDeliveredResponseWhenPeerClosesAfterWrite(t *testing.T) {
-	for attempt := 0; attempt < 100; attempt++ {
+	for attempt := range 100 {
 		serverToClientR, serverToClientW := io.Pipe()
 		clientToServerR, clientToServerW := io.Pipe()
 		client := NewConn(serverToClientR, clientToServerW, Options{Name: "response-close-client"})
@@ -209,7 +209,7 @@ func TestTryNotifyDropsImmediatelyWhenQueueIsFull(t *testing.T) {
 }
 
 func TestWriterExitsAfterGracefulServeClose(t *testing.T) {
-	for attempt := 0; attempt < 100; attempt++ {
+	for attempt := range 100 {
 		conn := NewConn(strings.NewReader(""), io.Discard, Options{Name: "writer-exit"})
 		if err := conn.Serve(context.Background()); err != nil {
 			t.Fatalf("attempt %d Serve: %v", attempt, err)
@@ -230,8 +230,7 @@ func TestRequestReturnsStructuredPeerError(t *testing.T) {
 	server.Handle("fail", func(context.Context, json.RawMessage) (any, error) {
 		return nil, &RPCError{Code: -32000, Message: "busy", Data: map[string]any{"reasonixCode": "HOST_BUSY"}}
 	})
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
+	ctx := t.Context()
 	go func() { _ = client.Serve(ctx) }()
 	go func() { _ = server.Serve(ctx) }()
 	_, err := client.Request(ctx, "fail", struct{}{})
@@ -267,7 +266,7 @@ func TestStrictJSONRPCRejectsMissingVersionAndInvalidShape(t *testing.T) {
 	}
 	dec := json.NewDecoder(&out)
 	wantIDs := []string{"1", "2", "3", "null", "5", "null"}
-	for i := 0; i < 6; i++ {
+	for i := range 6 {
 		var frame struct {
 			ID    json.RawMessage `json:"id"`
 			Error *ErrorObject    `json:"error"`

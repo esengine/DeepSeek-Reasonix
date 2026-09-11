@@ -201,45 +201,51 @@ api_key_env = "REASONIX_TEST_KEY_UNSET"
 }
 
 func TestSaveTabsPersistsNonBalancedTokenModes(t *testing.T) {
+	// New writes pin the deprecated dual-write compat labels; economy/delivery
+	// must not be persisted as live modes.
 	isolateDesktopUserDirs(t)
 
 	app := NewApp()
 	tab := testTab("a", t.TempDir())
-	tab.tokenMode = "economy"
+	tab.qualityFloor = control.QualityFloorStandard
 	app.tabs = map[string]*WorkspaceTab{tab.ID: tab}
 	app.tabOrder = []string{tab.ID}
 	app.activeTabID = tab.ID
 
-	app.mu.Lock()
-	app.saveTabsLocked()
-	app.mu.Unlock()
+	for _, inMemory := range []string{"", "delivery", ""} {
+		tab.qualityFloor = inMemory
+		app.mu.Lock()
+		app.saveTabsLocked()
+		app.mu.Unlock()
 
+		got := loadTabsFile()
+		if len(got.Tabs) != 1 {
+			t.Fatalf("tabs len = %d, want 1", len(got.Tabs))
+		}
+		wantToken, wantPreset := boot.TokenModeFull, boot.AgentPresetStandard
+		if inMemory == "delivery" {
+			wantToken, wantPreset = boot.TokenModeDelivery, boot.AgentPresetDelivery
+		}
+		if got.Tabs[0].TokenMode != wantToken || got.Tabs[0].AgentPreset != wantPreset {
+			t.Fatalf("saved compat after in-memory %q = token:%q preset:%q, want %q/%q",
+				inMemory, got.Tabs[0].TokenMode, got.Tabs[0].AgentPreset, wantToken, wantPreset)
+		}
+	}
+}
+
+func TestLoadTabsFileDecodesLegacyTokenModes(t *testing.T) {
+	isolateDesktopUserDirs(t)
+	dir := desktopConfigDir()
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	body := `{"tabs":[{"id":"old","scope":"global","tokenMode":"economy","agentPreset":"light"}],"activeTab":"old"}`
+	if err := os.WriteFile(filepath.Join(dir, tabsFileName), []byte(body), 0o644); err != nil {
+		t.Fatal(err)
+	}
 	got := loadTabsFile()
-	if len(got.Tabs) != 1 {
-		t.Fatalf("tabs len = %d, want 1", len(got.Tabs))
-	}
-	if got.Tabs[0].TokenMode != "economy" {
-		t.Fatalf("saved token mode = %q, want economy", got.Tabs[0].TokenMode)
-	}
-
-	tab.tokenMode = "delivery"
-	app.mu.Lock()
-	app.saveTabsLocked()
-	app.mu.Unlock()
-
-	got = loadTabsFile()
-	if got.Tabs[0].TokenMode != "delivery" {
-		t.Fatalf("saved token mode = %q, want delivery", got.Tabs[0].TokenMode)
-	}
-
-	tab.tokenMode = "full"
-	app.mu.Lock()
-	app.saveTabsLocked()
-	app.mu.Unlock()
-
-	got = loadTabsFile()
-	if got.Tabs[0].TokenMode != "" {
-		t.Fatalf("balanced/full token mode should be omitted from persistence, got %q", got.Tabs[0].TokenMode)
+	if len(got.Tabs) != 1 || got.Tabs[0].TokenMode != "economy" || got.Tabs[0].AgentPreset != "light" {
+		t.Fatalf("legacy tabs decode = %+v", got.Tabs)
 	}
 }
 
@@ -483,181 +489,12 @@ func TestMetaReportsGoalStatus(t *testing.T) {
 	}
 
 	app.SetCollaborationModeForTab(tab.ID, "plan")
-	tab.tokenMode = boot.TokenModeEconomy
+	app.mu.Lock()
+	tab.qualityFloor = ""
+	app.mu.Unlock()
 	meta = app.MetaForTab(tab.ID)
-	if meta.CollaborationMode != "plan" || meta.TokenMode != boot.TokenModeEconomy {
-		t.Fatalf("profile meta = %+v, want plan + economy", meta)
-	}
-}
-
-func TestAutoResearchStatusSurfaceForActiveTab(t *testing.T) {
-	isolateDesktopUserDirs(t)
-
-	root := t.TempDir()
-	if resolved, err := filepath.EvalSymlinks(root); err == nil {
-		root = resolved
-	}
-	app := NewApp()
-	tab := testTab("a", root)
-	tab.Ctrl = control.New(control.Options{Label: tab.ID, WorkspaceRoot: root})
-	app.tabs = map[string]*WorkspaceTab{tab.ID: tab}
-	app.tabOrder = []string{tab.ID}
-	app.activeTabID = tab.ID
-	defer tab.Ctrl.Close()
-
-	tab.Ctrl.SetGoalWithResearchMode("identify the root cause", control.GoalResearchOn)
-
-	meta := app.MetaForTab(tab.ID)
-	if meta.AutoResearch == nil || meta.AutoResearch.TaskID == "" {
-		t.Fatalf("MetaForTab AutoResearch = %+v, want compact active task summary", meta.AutoResearch)
-	}
-	if meta.AutoResearch.Status != control.GoalStatusRunning || meta.AutoResearch.Iteration != 0 {
-		t.Fatalf("compact AutoResearch summary = %+v", meta.AutoResearch)
-	}
-
-	current := app.AutoResearchCurrent()
-	if current.TaskID != meta.AutoResearch.TaskID || current.Goal != "identify the root cause" {
-		t.Fatalf("AutoResearchCurrent = %+v, want task %q", current, meta.AutoResearch.TaskID)
-	}
-	if current.TaskPath == "" || current.Status != control.GoalStatusRunning {
-		t.Fatalf("AutoResearchCurrent missing status/path: %+v", current)
-	}
-	heartbeatPath := filepath.Join(root, ".reasonix", "autoresearch", current.TaskID, "logs", "heartbeat.jsonl")
-	if err := os.WriteFile(heartbeatPath, []byte(`{"status":"turn_done","iteration":1,"created_at":"2026-06-30T00:00:00Z"}`+"\n"), 0o644); err != nil {
-		t.Fatalf("write heartbeat: %v", err)
-	}
-	current = app.AutoResearchCurrent()
-	if current.LastHeartbeatAt != "2026-06-30T00:00:00Z" || current.NextRequiredAction == "" {
-		t.Fatalf("AutoResearchCurrent missing runtime fields: %+v", current)
-	}
-
-	tabs := app.ListTabs()
-	if len(tabs) != 1 || tabs[0].AutoResearch == nil || tabs[0].AutoResearch.TaskID != current.TaskID {
-		t.Fatalf("ListTabs AutoResearch = %+v, want compact summary for task %q", tabs, current.TaskID)
-	}
-}
-
-func TestAutoResearchFindingsAreLoadedOnDemand(t *testing.T) {
-	isolateDesktopUserDirs(t)
-
-	root := t.TempDir()
-	if resolved, err := filepath.EvalSymlinks(root); err == nil {
-		root = resolved
-	}
-	app := NewApp()
-	tab := testTab("a", root)
-	tab.Ctrl = control.New(control.Options{Label: tab.ID, WorkspaceRoot: root})
-	app.tabs = map[string]*WorkspaceTab{tab.ID: tab}
-	app.tabOrder = []string{tab.ID}
-	app.activeTabID = tab.ID
-	defer tab.Ctrl.Close()
-
-	tab.Ctrl.SetGoalWithResearchMode("collect accepted findings", control.GoalResearchOn)
-	current := app.AutoResearchCurrent()
-	if current.TaskID == "" {
-		t.Fatal("expected active AutoResearch task")
-	}
-	findingsPath := filepath.Join(root, ".reasonix", "autoresearch", current.TaskID, "state", "findings.jsonl")
-	if err := os.WriteFile(findingsPath, []byte(
-		`{"id":"f1","kind":"test","summary":"old","source":"command","command":"go test ./...","accepted":true,"created_at":"2026-06-29T10:00:00Z"}`+"\n"+
-			`{"id":"f2","kind":"review","summary":"new","source":"manual","accepted":true,"created_at":"2026-06-29T11:00:00Z"}`+"\n",
-	), 0o644); err != nil {
-		t.Fatalf("write findings: %v", err)
-	}
-
-	findings := app.AutoResearchFindings(tab.ID, 1)
-	if len(findings) != 1 || findings[0].ID != "f2" || findings[0].Summary != "new" {
-		t.Fatalf("AutoResearchFindings = %+v, want newest capped finding", findings)
-	}
-	if meta := app.MetaForTab(tab.ID); meta.AutoResearch == nil || meta.AutoResearch.TaskID != current.TaskID {
-		t.Fatalf("MetaForTab compact summary lost task id: %+v", meta.AutoResearch)
-	}
-}
-
-func TestAutoResearchListReturnsWorkspaceTasks(t *testing.T) {
-	isolateDesktopUserDirs(t)
-
-	root := t.TempDir()
-	if resolved, err := filepath.EvalSymlinks(root); err == nil {
-		root = resolved
-	}
-	app := NewApp()
-	tab := testTab("a", root)
-	tab.Ctrl = control.New(control.Options{Label: tab.ID, WorkspaceRoot: root})
-	app.tabs = map[string]*WorkspaceTab{tab.ID: tab}
-	app.tabOrder = []string{tab.ID}
-	app.activeTabID = tab.ID
-	defer tab.Ctrl.Close()
-
-	tab.Ctrl.SetGoalWithResearchMode("list active research task", control.GoalResearchOn)
-	list := app.AutoResearchList(tab.ID)
-	if len(list) != 1 || list[0].TaskID == "" || list[0].Goal != "list active research task" {
-		t.Fatalf("AutoResearchList = %+v, want active workspace task", list)
-	}
-}
-
-func TestAutoResearchOpenTaskRevealsTaskDirectory(t *testing.T) {
-	isolateDesktopUserDirs(t)
-
-	root := t.TempDir()
-	if resolved, err := filepath.EvalSymlinks(root); err == nil {
-		root = resolved
-	}
-	app := NewApp()
-	tab := testTab("a", root)
-	tab.Ctrl = control.New(control.Options{Label: tab.ID, WorkspaceRoot: root})
-	app.tabs = map[string]*WorkspaceTab{tab.ID: tab}
-	app.tabOrder = []string{tab.ID}
-	app.activeTabID = tab.ID
-	defer tab.Ctrl.Close()
-
-	tab.Ctrl.SetGoalWithResearchMode("open task folder", control.GoalResearchOn)
-	current := app.AutoResearchCurrent()
-	var revealed string
-	oldReveal := revealPath
-	revealPath = func(path string) error {
-		revealed = path
-		return nil
-	}
-	defer func() { revealPath = oldReveal }()
-
-	if err := app.AutoResearchOpenTask(tab.ID); err != nil {
-		t.Fatalf("AutoResearchOpenTask: %v", err)
-	}
-	if revealed != current.TaskPath {
-		t.Fatalf("revealed path = %q, want task path %q", revealed, current.TaskPath)
-	}
-}
-
-func TestAutoResearchRecordEvidenceThroughDesktopAPI(t *testing.T) {
-	isolateDesktopUserDirs(t)
-
-	root := t.TempDir()
-	if resolved, err := filepath.EvalSymlinks(root); err == nil {
-		root = resolved
-	}
-	app := NewApp()
-	tab := testTab("a", root)
-	tab.Ctrl = control.New(control.Options{Label: tab.ID, WorkspaceRoot: root})
-	app.tabs = map[string]*WorkspaceTab{tab.ID: tab}
-	app.tabOrder = []string{tab.ID}
-	app.activeTabID = tab.ID
-	defer tab.Ctrl.Close()
-
-	tab.Ctrl.SetGoalWithResearchMode("record evidence through desktop", control.GoalResearchOn)
-	err := app.AutoResearchRecordEvidence(tab.ID, "objective_evidence", AutoResearchEvidenceView{
-		ID:       "f1",
-		Kind:     "test",
-		Summary:  "desktop evidence recorded",
-		Source:   "manual",
-		Accepted: true,
-	})
-	if err != nil {
-		t.Fatalf("AutoResearchRecordEvidence: %v", err)
-	}
-	findings := app.AutoResearchFindings(tab.ID, 10)
-	if len(findings) != 1 || findings[0].ID != "f1" {
-		t.Fatalf("findings = %+v, want f1", findings)
+	if meta.CollaborationMode != "plan" || meta.TokenMode != boot.TokenModeFull || meta.AgentPreset != boot.AgentPresetStandard {
+		t.Fatalf("profile meta = %+v, want plan + full/standard", meta)
 	}
 }
 

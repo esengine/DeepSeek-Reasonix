@@ -1,6 +1,7 @@
 package cli
 
 import (
+	"errors"
 	"fmt"
 	"math"
 	"os"
@@ -8,13 +9,16 @@ import (
 	"path/filepath"
 	"regexp"
 	"runtime"
+	"slices"
 	"strconv"
 	"strings"
 
 	tea "charm.land/bubbletea/v2"
 	"github.com/atotto/clipboard"
 
+	"reasonix/internal/agent"
 	"reasonix/internal/control"
+	"reasonix/internal/i18n"
 	"reasonix/internal/provider"
 	"reasonix/internal/secrets"
 	"reasonix/internal/shellparse"
@@ -129,11 +133,11 @@ func recoverOrphanedPasteLabelsFromHistory(sent string, knownBlocks []pastedBloc
 		var recovered string
 		found := false
 		ambiguous := false
-		for i := len(history) - 1; i >= 0; i-- {
-			if history[i].Role != provider.RoleUser {
+		for _, v := range slices.Backward(history) {
+			if v.Role != provider.RoleUser || agent.IsPinnedContextRevision(v) {
 				continue
 			}
-			for _, body := range expandedPasteBodies(history[i].Content, label) {
+			for _, body := range expandedPasteBodies(v.Content, label) {
 				if !found {
 					recovered = body
 					found = true
@@ -246,10 +250,7 @@ func (m *chatTUI) takeNextPasteID() int {
 	if m.ctrl != nil {
 		m.syncPasteIDStateFromHistory(m.ctrl.History())
 	}
-	candidate := m.nextPasteID
-	if candidate < 1 {
-		candidate = 1
-	}
+	candidate := max(m.nextPasteID, 1)
 	if m.usedPasteIDs == nil {
 		m.usedPasteIDs = make(map[int]struct{})
 	}
@@ -312,17 +313,116 @@ func (m *chatTUI) clearSubmittedPastes() {
 	m.pendingPastes = nil
 }
 
+// applyComposerPaste owns both terminal bracketed pastes and text read from the
+// native clipboard. Only terminal events advance terminalPasteSeq: replaying an
+// internal clipboard result must not make another in-flight Ctrl+V look as if
+// the terminal already handled it.
+func (m chatTUI) applyComposerPaste(msg tea.PasteMsg, terminal bool) (tea.Model, tea.Cmd) {
+	return m.applyComposerPasteCount(msg, terminal, 1)
+}
+
+func (m chatTUI) applyComposerPasteCount(msg tea.PasteMsg, terminal bool, count int) (tea.Model, tea.Cmd) {
+	if terminal {
+		m.terminalPasteSeq++
+	}
+	var cmds []tea.Cmd
+	for range count {
+		cmds = append(cmds, m.applyComposerPasteOnce(msg)...)
+	}
+	return m, finalize(m, cmds)
+}
+
+func (m *chatTUI) applyComposerPasteOnce(msg tea.PasteMsg) []tea.Cmd {
+	m.followComposerCursor()
+	pasteBefore := m.input.Value()
+	var cmds []tea.Cmd
+	if m.state != tuiRunning && m.attachPastedImages(msg.Content) {
+		if shouldClearWideInputChange(pasteBefore, m.input.Value()) {
+			cmds = append(cmds, tea.ClearScreen)
+		}
+		return cmds
+	}
+	if m.validComposerSelection() && !m.composerSel.empty() {
+		m.deleteComposerSelection()
+	}
+	if ref, ok := pastedFileRef(msg.Content); ok {
+		m.input.InsertString(ref + " ")
+		m.growInputToFit()
+		m.updateCompletion()
+		if shouldClearWideInputChange(pasteBefore, m.input.Value()) {
+			cmds = append(cmds, tea.ClearScreen)
+		}
+		return cmds
+	}
+	if !m.chooserTyping() && m.pendingApproval == nil && m.rewind == nil && m.resumePick == nil && m.mcp == nil && m.clearConfirm == nil && m.mcpImport == nil && m.skillPick == nil && m.shouldFoldPaste(msg.Content) {
+		m.insertFoldedPaste(msg.Content)
+		m.growInputToFit()
+		m.updateCompletion()
+		if shouldClearWideInputChange(pasteBefore, m.input.Value()) {
+			cmds = append(cmds, tea.ClearScreen)
+		}
+		return cmds
+	}
+
+	var inputCmd tea.Cmd
+	m.input, inputCmd = m.input.Update(msg)
+	cmds = append(cmds, inputCmd)
+	m.growInputToFit()
+	if shouldClearWideInputChange(pasteBefore, m.input.Value()) {
+		cmds = append(cmds, tea.ClearScreen)
+	}
+	return cmds
+}
+
+var readClipboardImage = control.SaveClipboardImage
+
 func pasteClipboardImage() tea.Cmd {
 	return func() tea.Msg {
-		path, err := control.SaveClipboardImage()
+		path, err := readClipboardImage()
 		return clipboardImageMsg{path: path, err: err}
 	}
 }
 
 type clipboardTextPasteMsg struct {
-	text   string
-	err    error
-	remote bool
+	text             string
+	err              error
+	imageErr         error
+	remote           bool
+	terminalPasteSeq uint64
+	pending          int
+}
+
+// handleClipboardTextPaste applies the guarded native text read that backs a
+// keyboard paste on terminals without bracketed-paste delivery, including the
+// image-probe fallback. A fallback that reads neither text nor a supported
+// image surfaces a notice instead of failing silently (#8377).
+func (m chatTUI) handleClipboardTextPaste(msg clipboardTextPasteMsg) (tea.Model, tea.Cmd) {
+	count := 1
+	if msg.pending > 0 {
+		count = pendingClipboardTextPastes(msg.pending, msg.terminalPasteSeq, m.terminalPasteSeq)
+		if count == 0 {
+			return m, nil
+		}
+	}
+	if msg.remote {
+		m.notice(i18n.M.ClipboardTextPasteRemoteHint)
+		return m, nil
+	}
+	if msg.err != nil {
+		m.notice(fmt.Sprintf(i18n.M.ClipboardTextPasteFailedFmt, sanitizeExternalDisplayText(msg.err.Error())))
+		return m, nil
+	}
+	if msg.text == "" {
+		if msg.pending > 0 {
+			if errors.Is(msg.imageErr, control.ErrUnsupportedClipboardImage) {
+				m.notice(fmt.Sprintf(i18n.M.ClipboardImagePasteFailedFmt, sanitizeExternalDisplayText(msg.imageErr.Error())))
+			} else {
+				m.notice(i18n.M.ClipboardPasteEmptyNotice)
+			}
+		}
+		return m, nil
+	}
+	return m.applyComposerPasteCount(tea.PasteMsg{Content: msg.text}, false, count)
 }
 
 var readNativeClipboardText = clipboard.ReadAll
@@ -331,12 +431,18 @@ var readNativeClipboardText = clipboard.ReadAll
 // paste still arrives from the terminal as a bracketed tea.PasteMsg; this read
 // is deliberately text-only so right-click never probes for an image first.
 func pasteClipboardText() tea.Cmd {
+	return pasteClipboardTextGuarded(0, 0, nil)
+}
+
+func pasteClipboardTextGuarded(terminalPasteSeq uint64, pending int, imageErr error) tea.Cmd {
 	return func() tea.Msg {
+		msg := clipboardTextPasteMsg{imageErr: imageErr, terminalPasteSeq: terminalPasteSeq, pending: pending}
 		if remoteClipboardSession() {
-			return clipboardTextPasteMsg{remote: true}
+			msg.remote = true
+			return msg
 		}
-		text, err := readNativeClipboardText()
-		return clipboardTextPasteMsg{text: text, err: err}
+		msg.text, msg.err = readNativeClipboardText()
+		return msg
 	}
 }
 
@@ -348,11 +454,24 @@ func imagePasteShortcut(keyName, goos string) bool {
 }
 
 func (m *chatTUI) beginClipboardImagePaste() tea.Cmd {
+	m.clipboardImageRequests++
 	if m.clipboardImagePending {
 		return nil
 	}
 	m.clipboardImagePending = true
+	m.clipboardImageTerminalPasteSeq = m.terminalPasteSeq
 	return pasteClipboardImage()
+}
+
+func pendingClipboardTextPastes(requests int, startedAt, current uint64) int {
+	if requests <= 0 {
+		return 0
+	}
+	delivered := current - startedAt
+	if delivered >= uint64(requests) {
+		return 0
+	}
+	return requests - int(delivered)
 }
 
 var (
@@ -519,7 +638,7 @@ func splitPastePathTokens(s string) []string {
 			b.Reset()
 		}
 	}
-	for i := 0; i < len(s); i++ {
+	for i := range len(s) {
 		ch := s[i]
 		switch {
 		case escaped:
@@ -548,7 +667,7 @@ func splitPastePathTokens(s string) []string {
 
 func nonEmptyPasteLines(text string) []string {
 	var out []string
-	for _, line := range strings.Split(strings.ReplaceAll(text, "\r\n", "\n"), "\n") {
+	for line := range strings.SplitSeq(strings.ReplaceAll(text, "\r\n", "\n"), "\n") {
 		line = strings.TrimSpace(line)
 		if line != "" {
 			out = append(out, line)
@@ -629,7 +748,7 @@ func pastedImagePathForOS(src, goos string) (string, bool) {
 
 func hasUnescapedPathWhitespace(s string) bool {
 	escaped := false
-	for i := 0; i < len(s); i++ {
+	for i := range len(s) {
 		ch := s[i]
 		if escaped {
 			escaped = false

@@ -2,13 +2,13 @@ package cli
 
 import (
 	"context"
+	"errors"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"runtime"
 	"strings"
 	"testing"
-	"time"
 
 	"github.com/charmbracelet/x/ansi"
 )
@@ -107,9 +107,8 @@ func TestLoadGitStatus(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
-	defer cancel()
-	status, err := loadGitStatus(ctx, filepath.Join(root, "subdir"))
+	// This checks Git semantics, not subprocess speed on a shared CI runner.
+	status, err := loadGitStatus(t.Context(), filepath.Join(root, "subdir"))
 	if err != nil {
 		t.Fatalf("loadGitStatus: %v", err)
 	}
@@ -121,6 +120,40 @@ func TestLoadGitStatus(t *testing.T) {
 	}
 	if plain := ansi.Strip(status.Render()); !strings.Contains(plain, filepath.Base(root)+"@main") || !strings.Contains(plain, "+2 -1 ?1") {
 		t.Fatalf("rendered status = %q", plain)
+	}
+}
+
+func TestLoadGitStatusRejectsCanceledSnapshot(t *testing.T) {
+	for _, cancelAt := range []string{"symbolic-ref", "diff", "status"} {
+		t.Run(cancelAt, func(t *testing.T) {
+			ctx, cancel := context.WithCancel(t.Context())
+			defer cancel()
+			run := func(ctx context.Context, _ string, args ...string) (string, error) {
+				if args[0] == cancelAt {
+					cancel()
+				}
+				if err := ctx.Err(); err != nil {
+					return "", err
+				}
+				switch args[0] {
+				case "rev-parse":
+					return filepath.Join("workspace", "repo"), nil
+				case "symbolic-ref":
+					return "main", nil
+				case "diff":
+					return "2\t1\ttracked.txt\n", nil
+				case "status":
+					return "?? new.txt\n", nil
+				default:
+					t.Fatalf("unexpected git args: %v", args)
+					return "", nil
+				}
+			}
+			status, err := loadGitStatusWithRunner(ctx, "", run)
+			if !errors.Is(err, context.Canceled) || status != (gitStatus{}) {
+				t.Fatalf("canceled query returned status=%+v err=%v", status, err)
+			}
+		})
 	}
 }
 

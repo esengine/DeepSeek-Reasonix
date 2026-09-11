@@ -41,6 +41,7 @@ func newTestChatTUI() chatTUI {
 		toolLineCountByID:    map[string]int{},
 		subagentProgressIdx:  map[string]int{},
 		subagentProgress:     map[string]*cliSubagentProgress{},
+		showTurnUsage:        true,
 	}
 }
 
@@ -136,6 +137,23 @@ func TestTurnReceiptLeavesOneBlankRowAfterAssistantAnswer(t *testing.T) {
 	}
 	if !strings.Contains(ansi.Strip(m.transcript[2]), "TURN") {
 		t.Fatalf("last block should be the turn receipt, got %q", m.transcript[2])
+	}
+}
+
+func TestTurnReceiptCanBeHiddenWithoutDisablingUsageAccounting(t *testing.T) {
+	m := newTestChatTUI()
+	m.showTurnUsage = false
+	m.ingestEvent(event.Event{Kind: event.Text, Text: "Answer"})
+	m.ingestEvent(event.Event{Kind: event.Message})
+	m.ingestEvent(event.Event{Kind: event.Usage, Usage: &provider.Usage{
+		PromptTokens: 10, CompletionTokens: 2, TotalTokens: 12,
+	}})
+
+	if len(m.transcript) != 1 {
+		t.Fatalf("hidden turn receipt should not add transcript blocks, got %d: %v", len(m.transcript), m.transcript)
+	}
+	if m.turnTokens != 2 {
+		t.Fatalf("hidden turn receipt should still account for completion tokens, got %d", m.turnTokens)
 	}
 }
 
@@ -386,6 +404,18 @@ func TestRepeatedShellCommandDoesNotAccumulateOutput(t *testing.T) {
 	}
 }
 
+func TestShellResultReplacesCappedLiveProgress(t *testing.T) {
+	m := newTestChatTUI()
+	const id = "shell-build"
+	const final = "build started\n...[truncated]...\nfinal compiler error\n"
+	m.ingestEvent(event.Event{Kind: event.ToolDispatch, Tool: event.Tool{ID: id, Name: "bash", Args: `{"command":"build"}`}})
+	m.ingestEvent(event.Event{Kind: event.ToolProgress, Tool: event.Tool{ID: id, Output: "build started\n...[live capped]...\n"}})
+	m.ingestEvent(event.Event{Kind: event.ToolResult, Tool: event.Tool{ID: id, Name: "bash", Output: final}})
+	if got := m.shellOutputs[id]; got != final {
+		t.Fatalf("shellOutputs[%q] = %q, want bounded final result %q", id, got, final)
+	}
+}
+
 func TestCollapsedShellHintUsesKeyboardShortcutOnly(t *testing.T) {
 	m := newTestChatTUI()
 	const id = "shell-long"
@@ -470,7 +500,7 @@ func TestTodoPanelKeepsLastSuccessfulTodoWrite(t *testing.T) {
 func TestToolProgressTailCap(t *testing.T) {
 	m := newTestChatTUI()
 	m.ingestEvent(event.Event{Kind: event.ToolDispatch, Tool: event.Tool{ID: "b1", Name: "bash", Args: `{"command":"x"}`}})
-	for i := 0; i < toolStreamTailLines+5; i++ {
+	for i := range toolStreamTailLines + 5 {
 		m.ingestEvent(event.Event{Kind: event.ToolProgress, Tool: event.Tool{ID: "b1", Output: "line" + string(rune('A'+i)) + "\n"}})
 	}
 	block := m.transcript[m.toolStreamIdx]
@@ -486,7 +516,7 @@ func TestToolProgressTailCap(t *testing.T) {
 // long stream — the fix for the O(n²)/multi-GB re-render of the full thought.
 func TestReasoningViewBounded(t *testing.T) {
 	m := newTestChatTUI()
-	for i := 0; i < 5000; i++ {
+	for range 5000 {
 		m.ingestEvent(event.Event{Kind: event.Reasoning, Text: "some thinking text token "})
 	}
 	if len(m.reasoningView) > reasoningViewMax {

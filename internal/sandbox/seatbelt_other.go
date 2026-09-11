@@ -80,26 +80,7 @@ func Available() bool {
 // forbid-read paths so directories appear empty and files read as empty. The
 // rest of the filesystem is mounted read-only (matching macOS Seatbelt).
 func bwrapArgs(spec Spec, sh Shell, command string) []string {
-	args := []string{
-		"--unshare-net", // deny network by default
-		"--ro-bind", "/", "/",
-		"--dev", "/dev",
-		"--proc", "/proc",
-		"--tmpfs", "/tmp",
-	}
-	if spec.Network {
-		// Re-allow network by removing the network namespace.
-		args = args[1:] // drop --unshare-net
-	}
-	for _, root := range spec.WriteRoots {
-		args = append(args, "--bind", root, root)
-	}
-	if !spec.MinimalWrites {
-		for _, root := range linuxWriteDirs() {
-			args = append(args, "--bind", root, root)
-		}
-	}
-	args = append(args, bwrapForbidReadArgs(spec.ForbidReadRoots)...)
+	args := bwrapBaseArgs(spec)
 	return append(args, sh.argv(command)...)
 }
 
@@ -107,34 +88,125 @@ func bwrapArgs(spec Spec, sh Shell, command string) []string {
 // command string. It builds the same sandbox prefix and appends the caller's
 // argv directly — no shell interpreter wrapping.
 func bwrapArgsForArgs(spec Spec, args []string) []string {
-	out := []string{
+	out := bwrapBaseArgs(spec)
+	// /tmp is replaced above (tmpfs or session-private bind) so MCP servers
+	// cannot inspect unrelated host temporary files. A configured executable
+	// may itself live below /tmp, though (for example a downloaded one-shot
+	// launcher or a Go test helper). Re-expose only that exact file, read-only,
+	// after every masking mount so the process can start without revealing its
+	// siblings. Session-private binds already contain the generation's files,
+	// so only host-/tmp executables need this re-mount.
+	out = append(out, bwrapExecutableMountArgs(args)...)
+	return append(out, args...)
+}
+
+// bwrapBaseArgs is the shared bubblewrap prefix for shell and raw-argv launches.
+// With Spec.SessionTemp set, the private directory is bind-mounted at /tmp so
+// consecutive Bash calls in the same logical session share temporary files.
+// Without it (MCP and other independent sandboxes), /tmp is a fresh empty
+// tmpfs as before.
+func bwrapBaseArgs(spec Spec) []string {
+	args := []string{
 		"--unshare-net", // deny network by default
 		"--ro-bind", "/", "/",
 		"--dev", "/dev",
 		"--proc", "/proc",
-		"--tmpfs", "/tmp",
 	}
+	args = append(args, bwrapTmpMountArgs(spec)...)
 	if spec.Network {
 		// Re-allow network by removing the network namespace.
-		out = out[1:] // drop --unshare-net
+		args = args[1:] // drop --unshare-net
 	}
 	for _, root := range spec.WriteRoots {
-		out = append(out, "--bind", root, root)
+		args = append(args, bwrapWriteRootMountArgs(root)...)
 	}
 	if !spec.MinimalWrites {
 		for _, root := range linuxWriteDirs() {
-			out = append(out, "--bind", root, root)
+			args = append(args, "--bind", root, root)
 		}
 	}
-	out = append(out, bwrapForbidReadArgs(spec.ForbidReadRoots)...)
-	// /tmp is intentionally replaced with an empty filesystem above so MCP
-	// servers cannot inspect unrelated host temporary files. A configured
-	// executable may itself live below /tmp, though (for example a downloaded
-	// one-shot launcher or a Go test helper). Re-expose only that exact file,
-	// read-only, after every masking mount so the process can start without
-	// revealing its siblings.
-	out = append(out, bwrapExecutableMountArgs(args)...)
-	return append(out, args...)
+	args = append(args, bwrapProtectedWriteArgs(spec, spec.WriteRoots)...)
+	return append(args, bwrapForbidReadArgs(spec.ForbidReadRoots)...)
+}
+
+func bwrapProtectedWriteArgs(spec Spec, writeRoots []string) []string {
+	protected := resolveProtectedWriteRoots(spec.ProtectedWriteRoots)
+	protected = overlappingProtectedWriteRoots(protected, writeRoots)
+	if len(protected) == 0 {
+		return nil
+	}
+	var out []string
+	seen := map[string]bool{}
+	for _, root := range protected {
+		if seen[root] {
+			continue
+		}
+		seen[root] = true
+		out = append(out, "--ro-bind", root, root)
+	}
+	stateRoot := singleProtectedStateRoot(protected)
+	for _, abs := range writeRoots {
+		if stateRoot != "" && IsProtectedWritePath(abs, stateRoot) {
+			continue
+		}
+		for _, prot := range protected {
+			if abs != prot && PathWithin(prot, abs) {
+				out = append(out, "--bind", abs, abs)
+				break
+			}
+		}
+	}
+	return out
+}
+
+func overlappingProtectedWriteRoots(protected, writeRoots []string) []string {
+	var out []string
+	for _, prot := range protected {
+		for _, root := range writeRoots {
+			root = filepath.Clean(strings.TrimSpace(root))
+			if root != "" && root != "." && (PathWithin(root, prot) || PathWithin(prot, root)) {
+				out = append(out, prot)
+				break
+			}
+		}
+	}
+	return out
+}
+
+func resolveProtectedWriteRoots(roots []string) []string {
+	seen := map[string]bool{}
+	out := make([]string, 0, len(roots))
+	for _, root := range roots {
+		root = strings.TrimSpace(root)
+		if root == "" {
+			continue
+		}
+		abs, err := ResolveAbsPath(root)
+		if err == nil && !seen[abs] {
+			seen[abs] = true
+			out = append(out, abs)
+		}
+	}
+	return out
+}
+
+func bwrapTmpMountArgs(spec Spec) []string {
+	if dir := strings.TrimSpace(spec.SessionTemp); dir != "" {
+		return []string{"--bind", dir, "/tmp"}
+	}
+	return []string{"--tmpfs", "/tmp"}
+}
+
+func bwrapWriteRootMountArgs(root string) []string {
+	root = filepath.Clean(strings.TrimSpace(root))
+	if root == "" || root == "." {
+		return nil
+	}
+	if !filepath.IsAbs(root) || !pathWithin(root, "/tmp") {
+		return []string{"--bind", root, root}
+	}
+	out := bwrapTmpParentDirArgs(root)
+	return append(out, "--bind", root, root)
 }
 
 // bwrapForbidReadArgs returns mounts suitable for both configured directory
@@ -202,6 +274,11 @@ func bwrapExecutableMountArgs(args []string) []string {
 		source = resolved
 	}
 
+	out := bwrapTmpParentDirArgs(destination)
+	return append(out, "--ro-bind", source, destination)
+}
+
+func bwrapTmpParentDirArgs(destination string) []string {
 	parent := filepath.Dir(destination)
 	rel, err := filepath.Rel("/tmp", parent)
 	if err != nil {
@@ -209,14 +286,14 @@ func bwrapExecutableMountArgs(args []string) []string {
 	}
 	out := make([]string, 0, 2*strings.Count(rel, string(filepath.Separator))+4)
 	current := "/tmp"
-	for _, part := range strings.Split(rel, string(filepath.Separator)) {
+	for part := range strings.SplitSeq(rel, string(filepath.Separator)) {
 		if part == "" || part == "." {
 			continue
 		}
 		current = filepath.Join(current, part)
 		out = append(out, "--dir", current)
 	}
-	return append(out, "--ro-bind", source, destination)
+	return out
 }
 
 func pathWithin(path, root string) bool {

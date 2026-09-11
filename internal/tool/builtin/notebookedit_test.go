@@ -192,7 +192,7 @@ func TestNotebookPreviewMatchesExecute(t *testing.T) {
 	args := map[string]any{"path": p, "cell_number": 1, "new_source": "print(99)\n"}
 	raw, _ := json.Marshal(args)
 
-	change, err := notebookEdit{}.Preview(raw)
+	change, err := notebookEdit{}.Preview(context.Background(), raw)
 	if err != nil {
 		t.Fatalf("preview: %v", err)
 	}

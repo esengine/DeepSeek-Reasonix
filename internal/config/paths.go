@@ -6,6 +6,7 @@ import (
 	"os"
 	"path/filepath"
 	"runtime"
+	"slices"
 	"strings"
 	"unicode/utf8"
 
@@ -461,6 +462,24 @@ func ProjectSessionDir(workspaceRoot string) string {
 	return filepath.Join(base, "projects", WorkspaceSlug(root), "sessions")
 }
 
+// DesktopTopicStatePath returns the authoritative SQLite path for Desktop
+// topic metadata. Global topics live directly under the user state root;
+// project topics share the same stable workspace slug as project sessions.
+func DesktopTopicStatePath(workspaceRoot string) string {
+	base := MemoryUserDir()
+	if base == "" {
+		return ""
+	}
+	root := strings.TrimSpace(workspaceRoot)
+	if root == "" {
+		return filepath.Join(base, "desktop", "topic-state-v1.sqlite")
+	}
+	if abs, err := filepath.Abs(root); err == nil {
+		root = abs
+	}
+	return filepath.Join(base, "projects", WorkspaceSlug(root), "desktop", "topic-state-v1.sqlite")
+}
+
 // WorkspaceSlug flattens an absolute workspace path into the directory name
 // used under <config root>/projects. Windows spells the same folder with
 // varying case (drive-letter case, Explorer renames), so the slug folds case
@@ -540,8 +559,8 @@ var ConventionDirs = []string{".reasonix", ".agents", ".agent", ".claude"}
 // highest-priority entry — command.Load lets a later directory win on a clash.
 func conventionSubdirsAsc(base, sub string) []string {
 	out := make([]string, 0, len(ConventionDirs))
-	for i := len(ConventionDirs) - 1; i >= 0; i-- {
-		out = append(out, filepath.Join(base, ConventionDirs[i], sub))
+	for _, v := range slices.Backward(ConventionDirs) {
+		out = append(out, filepath.Join(base, v, sub))
 	}
 	return out
 }

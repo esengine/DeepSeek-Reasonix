@@ -29,6 +29,54 @@ func TestParseOSReleasePrettyName(t *testing.T) {
 	}
 }
 
+func TestParseOSReleaseTechnicalFields(t *testing.T) {
+	fields := parseOSRelease("# comment\nID=fedora\nVERSION_ID=\"40\"\nPRETTY_NAME='Fedora Linux 40'\nBROKEN\n")
+	if fields["ID"] != "fedora" || fields["VERSION_ID"] != "40" || fields["PRETTY_NAME"] != "Fedora Linux 40" {
+		t.Fatalf("os-release fields = %#v", fields)
+	}
+}
+
+func TestParseOSReleaseDistributionMatrix(t *testing.T) {
+	tests := []struct {
+		name, body, id, version string
+	}{
+		{name: "ubuntu", body: "ID=ubuntu\nVERSION_ID=22.04\n", id: "ubuntu", version: "22.04"},
+		{name: "debian", body: "ID=debian\nVERSION_ID=12\n", id: "debian", version: "12"},
+		{name: "fedora", body: "ID=fedora\nVERSION_ID=40\n", id: "fedora", version: "40"},
+		{name: "arch", body: "ID=arch\n", id: "arch"},
+		{name: "unknown", body: "NAME=Custom Linux\n", id: ""},
+		{name: "malformed", body: "BROKEN\n=bad\n", id: ""},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			fields := parseOSRelease(test.body)
+			if fields["ID"] != test.id || fields["VERSION_ID"] != test.version {
+				t.Fatalf("fields = %#v", fields)
+			}
+		})
+	}
+}
+
+func TestLinuxSessionTypeUsesBoundedBuckets(t *testing.T) {
+	tests := []struct {
+		name string
+		env  map[string]string
+		want string
+	}{
+		{name: "wayland", env: map[string]string{"XDG_SESSION_TYPE": "Wayland"}, want: "wayland"},
+		{name: "x11 fallback", env: map[string]string{"DISPLAY": ":0"}, want: "x11"},
+		{name: "remote wins", env: map[string]string{"SSH_CONNECTION": "present", "XDG_SESSION_TYPE": "wayland"}, want: "remote"},
+		{name: "unknown", env: map[string]string{"XDG_SESSION_TYPE": "tty"}, want: "unknown"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := linuxSessionType(func(key string) string { return tt.env[key] }); got != tt.want {
+				t.Fatalf("linuxSessionType() = %q, want %q", got, tt.want)
+			}
+		})
+	}
+}
+
 func TestCollectDeviceInfoSane(t *testing.T) {
 	d := collectDeviceInfo()
 	if d.Cores < 1 {

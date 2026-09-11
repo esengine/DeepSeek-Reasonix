@@ -45,7 +45,7 @@ func TestStoreV2IndexIsDerivedFromFacts(t *testing.T) {
 	}
 
 	index := store.Index()
-	if !strings.Contains(index, "[Source of truth](source-of-truth.md)") || strings.Contains(index, "Ghost") {
+	if !strings.Contains(index, "[Source of truth](project/source-of-truth.md)") || strings.Contains(index, "Ghost") {
 		t.Fatalf("derived index used stale MEMORY.md:\n%s", index)
 	}
 }
@@ -339,12 +339,10 @@ func TestStoreV2RestoreArchivedIsConcurrencySafe(t *testing.T) {
 	var wg sync.WaitGroup
 	errs := make(chan error, 2)
 	for range 2 {
-		wg.Add(1)
-		go func() {
-			defer wg.Done()
+		wg.Go(func() {
 			_, restoreErr := store.RestoreArchived(archivePath)
 			errs <- restoreErr
-		}()
+		})
 	}
 	wg.Wait()
 	close(errs)

@@ -2,6 +2,7 @@ package recovery
 
 import (
 	"encoding/json"
+	"slices"
 	"strings"
 	"unicode/utf8"
 )
@@ -309,8 +310,8 @@ func trimDiagnosis(af *activeFailure) {
 	total := 0
 	kept := make([]string, 0, len(notes))
 	// Keep the newest notes within the total budget.
-	for i := len(notes) - 1; i >= 0; i-- {
-		n := clipDiagnosisNote(notes[i])
+	for _, v := range slices.Backward(notes) {
+		n := clipDiagnosisNote(v)
 		if n == "" {
 			continue
 		}
@@ -341,10 +342,8 @@ func appendDiagnosisNote(af *activeFailure, note string) bool {
 	if note == "" {
 		return false
 	}
-	for _, existing := range af.diagnosis {
-		if existing == note {
-			return false
-		}
+	if slices.Contains(af.diagnosis, note) {
+		return false
 	}
 	af.diagnosis = append(af.diagnosis, note)
 	trimDiagnosis(af)

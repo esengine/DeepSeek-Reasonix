@@ -8,6 +8,256 @@ branch.
 
 ### Added
 
+- **Durable tool recovery:** fsynced tool-start barriers, persistent attempt
+  identities, restart-safe unknown-effect handling, and a shared Electron/Remote
+  inspection and confirmation panel. Explicit retries remain disabled by default
+  and require read-only execution or a fenced, authoritative absence check.
+
+- **MCP 2026-07-28 protocol:** multi-round-trip form/URL elicitation across
+  Desktop, CLI TUI, and serve; headless entries stay on the core surface and
+  cancel unanswered requests instead of guessing.
+- **MCP Apps 2026-01-26 (Desktop):** inline app surfaces in tool cards behind
+  a per-server double-iframe sandbox, app-tool visibility metadata, bounded
+  aggregate local presentations, tab-bound AppBridge routing and teardown,
+  immutable digest-bound resource snapshots, and confirmed external links;
+  local rich results, instance-gated app tool calls, and the four-layer
+  capability matrix in MCP status.
+- **Profile-scoped MCP schema caches:** capability-declaring hosts keep their
+  own `v3` cache files so catalogs negotiated under different client
+  capabilities never cross-read.
+
+### Changed
+
+- **Fact-driven execution:** Ordinary requests always enter the executor.
+  There is no automatic simple / light / full task mode and no per-turn
+  `TaskPolicy` classification. The planner runs only for an explicit Plan,
+  an approval boundary, or Goal start. The host builds verification
+  obligations from concrete tool effects and receipts. Plan, Goal,
+  permission, and sandbox stay independent. Tool schemas and the executor
+  system prefix stay byte-stable. Historical `<execution-policy>` tags remain
+  readable on old sessions and are stripped from new provider context.
+  Old `--preset`/`--profile` compatibility no-ops are unchanged.
+
+- **Remote connect wizard host picker:** Step 1's host field now opens the
+  saved SSH connections through an explicit chevron dropdown on the input's
+  right edge instead of the old focus-triggered popup. The dropdown lists
+  every saved connection unfiltered, appends non-standard ports to each row,
+  leads with a "saved SSH connections" caption, and closes on pick, arrow
+  toggle, Escape (before the Escape that exits the wizard), or an outside
+  pointer press. The arrow is hidden while no hosts are saved and disabled
+  while a connection is busy.
+
+### Fixed
+
+- **Read evidence recovery:** partial reads no longer freeze independent work
+  or ordinary final answers. Explicit full reads retain bounded completion
+  checks. Rejected edits track operation/version requirements so successful
+  retries, fresh versions and confirmed deletion retire obsolete blocks.
+- **File and shell boundaries:** guard raced creates/overwrites and move-source
+  changes, recognize `git --no-pager` inspections, and retain structured recovery
+  diagnostics without changing provider tool schemas.
+
+- **Relay image input:** ID-only or invalid model metadata now stays unknown.
+  Both Desktop model editors expose per-model Auto / On / Off overrides, with
+  official protocol limits retained. A separate V2 discovery cache rejects stale
+  results; saved settings and runtime image serialization share one resolver and
+  apply at Controller rebuild boundaries. Legacy configuration remains readable.
+- **中转站图片输入：** 缺失或无效的模型能力显示“图片能力未识别”，两个编辑入口
+  均可逐模型选择“自动 / 开启 / 关闭”。独立 V2 缓存隔离旧错误声明并防止陈旧结果
+  覆盖；保存设置与实际图片请求统一解析，在 Controller 重建边界生效，兼容旧配置。
+
+- **Deterministic natural-turn completion:** removed the extra completion
+  validator model request. Clean model stops now finish from provider/tool state;
+  true zero-content responses retry the frozen request at the Agent step
+  boundary, while explicit host-owned readiness and safety gates remain active.
+  Legacy completion-validator configuration and `completion_uncertain` event
+  values remain readable for compatibility but are no longer produced by the
+  validator path.
+
+- **serve Host-header allowlist:** `reasonix serve` now rejects requests whose
+  `Host` is neither loopback nor the actual listen address (HTTP 421), closing
+  the DNS-rebinding bypass of the JSON content-type CSRF guard — a rebind page
+  becomes same-origin with the loopback listener and could previously drive
+  `/bypass`, `/submit`, and read `/history`. `behind_proxy` deployments and
+  wildcard/non-loopback binds are exempt. The non-loopback plaintext-HTTP
+  startup warning now also fires — loudest — for the unauthenticated `auth =
+  none` case that used to stay silent.
+
+- **Preview read confinement:** `write_file` / `edit_file` / `multi_edit`
+  previews now apply the same `confinePreview` boundary as `delete_range` /
+  `delete_symbol`. A model-supplied absolute path outside the workspace roots
+  previously read the file (rendering its contents into the approval card and
+  session log) even though Execute would refuse the write.
+
+- **Clean-filter hardening on internal diffs:** gitcmd diff invocations now
+  neutralize every `filter.<driver>` defined in the repository's local
+  `.git/config` (`clean=` emptied, `required` forced off), so viewing a changed
+  file's diff can no longer execute a repository-configured clean filter via
+  `.gitattributes`. Emptied filters are identity pass-throughs: the diff still
+  renders the real working-tree change.
+
+- **install_source proxy SSRF parity:** the install_source SSRF dial guard now
+  also validates the request destination (IP literals) at the RoundTripper
+  boundary, so a configured HTTP/HTTPS proxy can no longer forward a blocked
+  target (cloud metadata, RFC1918, link-local, CGNAT) that the dial-time check
+  never sees — matching web_fetch's proxy-path behavior.
+
+- **awk approval classification:** the bash indirect-execution classifier now
+  treats `awk`/`gawk`/`mawk`/`nawk` with an inline program (anything not read
+  via `-f`/`--file`) like `python -c`: it always requires human approval and
+  can never be covered by a remembered reusable prefix rule. `awk
+  'BEGIN{system("…")}'` previously fell through to the reusable class.
+
+- **cargo check/doc read-only correction:** the legacy read-only command table
+  no longer lists `cargo check` / `cargo doc` as permission readers — cargo
+  executes the crate's `build.rs` for both. The effect classifier already
+  billed them as code-executing writers; the stale table entry (and its test)
+  now agree. Only `cargo search` remains read-only.
+
+- **Compact MCP discovery:** `use_capability(action=list)` now returns one
+  compact summary per configured MCP server instead of expanding every cached
+  tool description, including tools from disabled servers. Inspecting one
+  enabled `mcp-server:<name>` still returns its live or cached directory
+  without starting it, while direct known-ID calls, routing, authorization,
+  and the fixed provider-visible tool schema remain unchanged.
+
+- **Project MCP session reliability:** The MCP client now uses the official Go
+  SDK for stdio, legacy SSE, and Streamable HTTP while retaining Reasonix's
+  existing configuration, OAuth, process isolation, and schema-cache contracts.
+  Streamable HTTP opens its long-lived GET/SSE listener immediately after
+  initialization, so JetBrains project-level `.mcp.json` servers no longer lose
+  their pending session before the first tool call. Lost sessions converge on
+  one bounded rebuild and one replay, read-only surfaces consume every cursor
+  page, prompts/resources share the tool session, and shutdown terminates HTTP
+  sessions and local processes. MCP calls also accept a single JSON-object
+  string in `use_capability.arguments`, while rejecting arrays, scalars, invalid
+  JSON, and nested encoded strings. `/mcp` and Desktop expose redacted protocol,
+  listening, reconnect, and error-category diagnostics without session IDs.
+
+- **v1.24.2 session snapshot & recovery root fix:** Keep PR #7982's WAL/CAS/lease
+  safety foundation, but replace process-level "I hold a lease" ownership with a
+  generation-bound `SessionWriteAuthority`. Same-revision tool-preview/load
+  reshapes no longer false-diverge; recovery files are bounded to one path per
+  writer/lineage; empty checkpoints heal from their own WAL; projection lineage
+  rebinds across upgrade/model switch and inherits across recovery forks without
+  changing provider-visible prompt bytes. Catalog upgrades to disposable
+  `session-catalog/v3.sqlite` with recovery lineage roles
+  (`normal|covered_copy|adopted|diverged`); covered idle copies move to the
+  recoverable `.trash` using a 15-minute idle threshold applied on two early
+  sweeps (at startup and ~20 minutes later), then a 24-hour threshold on the
+  6-hour background ticker; independent diverged branches stay and are listed
+  for user choice. v1/v2 catalogs are
+  left byte-unchanged for coexistence/downgrade.
+  **v1.24.1** only hid/reclaimed already-created covered copies and fixed Windows
+  flash-window startup; **v1.24.2** stops the misclassification source and repairs
+  existing user directories without rewriting authoritative JSONL/WAL/sidecar data.
+
+- Goal now runs continuously by default: the former 16-round per-Run boundary,
+  10/20/40 cross-Run quotas, default wall-clock budget, and numeric
+  no-progress/Todo-stall pauses no longer stop valid work. Progress guards still
+  detect repeated host outcomes and zero-evidence work, but redirect the model
+  to re-plan instead of producing `goal_run_budget` or `goal_stuck`. Explicit
+  `[agent].goal_token_budget`, `--max-steps`, positive time/cost budgets, manual
+  pause/stop, genuine user/external blockers, and evaluator fail-closed behavior
+  remain available. The Goal token budget defaults to `0` (off); resuming its
+  `budget_spend` pause grants a fresh slice without clearing cumulative usage.
+  Goal status reports turns, provider requests, tokens, the optional configured
+  token threshold, and cumulative active work time. Bot `max_steps` also
+  defaults to `0` (continuous), while positive user configuration is enforced.
+
+- Removed numeric Goal pauses in existing sidecars automatically normalize to
+  `running` without sending a model request. Active Goal sidecars write
+  `turnsLimit: -1` as a downgrade-safe unlimited sentinel while public runtime
+  APIs retain deprecated limit fields as `0`. The migration preserves unknown
+  fields, todos, checkpoints, usage, evidence, and historical metadata.
+
+- Goal is now the sole long-task runtime. Historical AutoResearch sidecars
+  migrate transactionally into Goals with research compatibility metadata. Invalid archives block
+  fail closed and remain read-only, retaining the task id and compatibility mode
+  for a restart or `/goal resume` retry; successful Goal-only sidecars omit the
+  old task id and write an explicit downgrade fence so previous readers cannot
+  reactivate the removed runtime.
+
+- Context-dependent workflow tools now share one host-side execution boundary.
+  Goal, Plan sign-off, and background-job calls cannot reach permissions,
+  hooks, leases, or Execute outside their owning context; mixed batches execute
+  valid calls once and stop safely after one repair. Child agents also isolate
+  inherited Goal, Jobs, and live memory queues, while persisted tool identity
+  records the effective child schema projection.
+
+- **Issue #7575:** Linux Bash under bubblewrap no longer mounts a fresh empty
+  `--tmpfs /tmp` on every call. Consecutive commands in the same logical session
+  now share a private temporary directory (bound at `/tmp` on Linux, exported via
+  `TMPDIR`/`TMP`/`TEMP` on all platforms) without exposing the host public
+  temporary root. `/new`, `/clear`, resume of another session, and branch
+  switches rotate the directory; model/settings hot rebuilds keep it. Sub-agent
+  runs get independent directories. Temporary files are not durable across process
+  restarts.
+
+### Added
+
+- Added `[ui].show_turn_usage` so CLI/TUI users can hide per-request token and
+  cost receipts from transcript scrollback without disabling usage accounting.
+
+## [1.20.0] — 2026-08-05
+
+Extension kernel, Task Monitor, and safer Goal completion.
+
+Compact decision surfaces, local decision receipts, unified extension kernel,
+native Task Monitor, bounded sub-agent progress, Goal fail-closed completion,
+MiMo and DashScope Responses fixes, SSH remote access simplification, and
+multiple Desktop stability improvements.
+
+### Highlights
+
+- **Unified Extension Kernel and Extension Protocol v1**: Immutable runtime
+  snapshots, fail-atomic reload, Plugin Manifest v1 (prompts, themes, full-trust
+  code runtimes), stable JSON-RPC sidecar protocol, interceptor dispatch,
+  streaming provider adapter, structured UI, and Go SDK.
+- **Native Task Monitor**: Monitor agent tasks natively in CLI and Desktop with
+  lifecycle semantics and session-scoped summary view.
+- **Bounded Sub-agent Progress Forwarding**: Forward structured progress for
+  `task`, `parallel_tasks`, and `fleet` without flooding the parent stream.
+  Renders nested lifecycle cards in Desktop and stable per-child transcript
+  slots in CLI.
+- **Goal Completion Fail-Closed**: Replace free-form Goal footer markers with a
+  stable `update_goal` tool and epoch-scoped per-turn reports. Centralized
+  completion logic with bounded evaluator, progress-aware budgets, and
+  pause/resume controls.
+- **Ablation Subsystem Switches**: Switch subsystems off behind one shared
+  vocabulary for controlled experiments. Includes planner, subagent, retrieval,
+  evidence, and compaction.
+- **Benchmark Cost per Solved Task**: Report cost per solved task, tokens per
+  solved, median wall time, and failure-class breakdown in e2e reports.
+- **Compact Decision Surfaces and Local Receipts**: Compact footer decision-card
+  layout with bounded scroll, dense action rows, and overflow disclosure.
+  Record bounded Ask, approval, and recovery decisions as local transcript
+  receipts.
+- **Simplified SSH Remote Access**: Remove Remote Workbench protocol and
+  stacks; reuse CLI/Serve remote model. Desktop opens per-host native web child
+  windows via SSH. Keyless remote Serve setup with loopback-only page.
+- **Model Usage Charts with Primer Palette**: Replace monochrome accent ramp
+  with GitHub Primer data-viz two-set categorical palette. Fix donut overflow
+  on hover and keyboard accessibility.
+- **Cross-platform Extension and Task Monitor Reliability**: Make
+  content-reference eviction deterministic, reject Unix and Windows absolute
+  plugin paths consistently, stabilize parallel-task cancellation, and restore
+  reliable Windows validation for Task Monitor and remote provider setup.
+- **MiMo and DashScope Responses Wire Alignment**: Fix multi-turn tool loops,
+  reasoning round-trip, JSON output for MiMo; fix DashScope second-turn 400
+  error, all-zero usage suppression, and vendor-aware cache TTL.
+- **Desktop Stability Fixes**: Recover stuck updates and legacy WebKit, contain
+  macOS alias repair startup crashes, keep composer overflow stacks readable,
+  and harden account verification and community flows.
+- **Remote Web Recovery After SSH Drops**: Add integration regression test for
+  SSH drop, forward recovery, and window reload. Document transient outage
+  behavior.
+- **CI: Auto-minimize Activity-Farming Spam Comments**: Detect and minimize
+  template spam comments from non-contributor accounts based on structural
+  signals.
+
+### Added
+
 - Added Extension Protocol v1 and the unified extension kernel: installed or
   linked sidecars can contribute tools, skills, commands, hooks, MCP servers,
   providers, interceptors, and structured UI surfaces through a versioned
@@ -66,9 +316,6 @@ branch.
   hatch.
 - Added `/status` details for the active model, effort, cache, Git state,
   background jobs, work profile, and provider balance where available.
-
-### Changed
-
 - Remote SSH workspaces now open as a standalone remote web window again.
   Opening a workspace from the status bar or the Remote Server tab starts or
   reuses the remote `reasonix serve`, tunnels its loopback port, and opens the
@@ -178,6 +425,21 @@ branch.
   private (`0600`, with private job directories), and the retired
   `redact_tool_output` setting is removed with a one-time upgrade notice.
 
+### Notes
+
+- Full bilingual release notes:
+  <https://reasonix.io/changelog/v1.20.0/> ·
+  [GitHub release](https://github.com/esengine/DeepSeek-Reasonix/releases/tag/desktop-v1.20.0).
+- The detailed entries below accumulated on `main-v2` after 1.0.0 and shipped
+  across 1.1.0–1.20.0; per-version attribution lives in the per-version release
+  notes linked above.
+
+## 1.1.0 – 1.19.7
+
+Per-version entries for the intermediate releases are published in the
+[bilingual release notes](https://reasonix.io/changelog/) and on the
+[GitHub releases page](https://github.com/esengine/DeepSeek-Reasonix/releases).
+
 ## [1.0.0] — 2026-06-03
 
 First stable release — a **ground-up rewrite in Go**. Not an upgrade of the `0.x`
@@ -222,4 +484,5 @@ TypeScript line; a new codebase that becomes the default (`main-v2`).
   support for the fetched runtime is unverified — install `codegraph` on PATH if
   the auto-fetch doesn't resolve there.
 
+[1.20.0]: https://github.com/esengine/DeepSeek-Reasonix/releases/tag/desktop-v1.20.0
 [1.0.0]: https://github.com/esengine/DeepSeek-Reasonix/releases/tag/v1.0.0

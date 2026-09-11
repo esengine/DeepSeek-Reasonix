@@ -21,6 +21,7 @@ import (
 func TestBuildUnknownModelErrorIsActionable(t *testing.T) {
 	t.Setenv("REASONIX_HOME", t.TempDir())
 	dir := robustTempDir(t)
+	fenceBootTestHistoryCatalog(t)
 	t.Chdir(dir)
 	writeFile(t, dir, "reasonix.toml", `
 default_model = "legacy-missing"
@@ -60,6 +61,7 @@ api_key_env = "REASONIX_TEST_KEY_UNSET"
 `)
 
 	dir := robustTempDir(t)
+	fenceBootTestHistoryCatalog(t)
 	t.Chdir(dir)
 	writeFile(t, dir, "reasonix.toml", `
 default_model = "deepseek-flash"
@@ -91,6 +93,7 @@ default_model = "deepseek-flash"
 
 func TestBuildMigratesLegacyBareMimoModelOverride(t *testing.T) {
 	dir := robustTempDir(t)
+	fenceBootTestHistoryCatalog(t)
 	t.Chdir(dir)
 	writeFile(t, dir, "reasonix.toml", `
 default_model = "deepseek-flash"
@@ -119,6 +122,7 @@ api_key_env = "REASONIX_TEST_KEY_UNSET"
 func TestBuildNoticesMissingAPIKey(t *testing.T) {
 	const keyEnv = "REASONIX_MISSING_KEY_FOR_TEST"
 	dir := robustTempDir(t)
+	fenceBootTestHistoryCatalog(t)
 	t.Chdir(dir)
 	writeFile(t, dir, "reasonix.toml", `
 default_model = "x"
@@ -158,6 +162,7 @@ api_key_env = "`+keyEnv+`"
 func TestBuildDoesNotNoticeMissingAPIKeyForNoAuthLoopback(t *testing.T) {
 	const keyEnv = "REASONIX_LOCAL_GATEWAY_KEY_FOR_TEST"
 	dir := robustTempDir(t)
+	fenceBootTestHistoryCatalog(t)
 	t.Chdir(dir)
 	t.Setenv(keyEnv, "")
 	writeFile(t, dir, "reasonix.toml", `
@@ -209,6 +214,7 @@ func TestBuildKeylessDefaultFallsBackToConfiguredProvider(t *testing.T) {
 	}
 
 	dir := robustTempDir(t)
+	fenceBootTestHistoryCatalog(t)
 	t.Chdir(dir)
 	writeFile(t, dir, "reasonix.toml", `
 default_model = "deepseek/deepseek-v4-flash"
@@ -261,6 +267,7 @@ func TestBuildExplicitKeylessModelStillFails(t *testing.T) {
 	}
 
 	dir := robustTempDir(t)
+	fenceBootTestHistoryCatalog(t)
 	t.Chdir(dir)
 	writeFile(t, dir, "reasonix.toml", `
 default_model = "minimax/MiniMax-M3"

@@ -60,13 +60,12 @@ const (
 	// MaxEvidenceBytes caps the serialized evidence JSON.
 	MaxEvidenceBytes = 6 * 1024
 	// Field budgets keep the total request inside boundedllm.DefaultMaxTotalBytes.
-	MaxGoalBytes         = 600
-	MaxAssistantFinal    = 1200
-	MaxTodoSummary       = 600
-	MaxAutoResearchBytes = 600
-	MaxTurnStatusBytes   = 300
-	MaxLastReasonBytes   = 200
-	MaxReasonBytes       = 500
+	MaxGoalBytes       = 600
+	MaxAssistantFinal  = 1200
+	MaxTodoSummary     = 600
+	MaxTurnStatusBytes = 300
+	MaxLastReasonBytes = 200
+	MaxReasonBytes     = 500
 )
 
 // Outcome is the evaluator's structured verdict disposition.
@@ -95,8 +94,6 @@ type GoalEvidence struct {
 	AssistantFinal string
 	// TodoSummary is a host-built todo/readiness summary.
 	TodoSummary string
-	// AutoResearchSummary is the AutoResearch success-criteria summary.
-	AutoResearchSummary string
 	// TurnStatus describes turn/budget state.
 	TurnStatus string
 	// LastContinuationReason is the previous continuation's recorded reason.
@@ -184,13 +181,12 @@ func (s *Session) Evaluate(ctx context.Context, evidence GoalEvidence) (Verdict,
 }
 
 type evidencePayload struct {
-	Notice              string `json:"notice"`
-	GoalContract        string `json:"goal_contract,omitempty"`
-	AssistantFinal      string `json:"assistant_final,omitempty"`
-	TodoSummary         string `json:"todo_summary,omitempty"`
-	AutoResearchSummary string `json:"autoresearch_summary,omitempty"`
-	TurnStatus          string `json:"turn_status,omitempty"`
-	LastReason          string `json:"last_reason,omitempty"`
+	Notice         string `json:"notice"`
+	GoalContract   string `json:"goal_contract,omitempty"`
+	AssistantFinal string `json:"assistant_final,omitempty"`
+	TodoSummary    string `json:"todo_summary,omitempty"`
+	TurnStatus     string `json:"turn_status,omitempty"`
+	LastReason     string `json:"last_reason,omitempty"`
 }
 
 // buildEvidence budgets every field before marshaling; the serialized payload
@@ -207,9 +203,6 @@ func buildEvidence(evidence GoalEvidence) (string, error) {
 	}
 	if s := clip(strings.TrimSpace(evidence.TodoSummary), MaxTodoSummary); s != "" {
 		payload.TodoSummary = s
-	}
-	if s := clip(strings.TrimSpace(evidence.AutoResearchSummary), MaxAutoResearchBytes); s != "" {
-		payload.AutoResearchSummary = s
 	}
 	if s := clip(strings.TrimSpace(evidence.TurnStatus), MaxTurnStatusBytes); s != "" {
 		payload.TurnStatus = s

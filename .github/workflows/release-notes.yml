@@ -4,9 +4,12 @@ on:
   pull_request:
     paths:
       - "release-notes/**"
+      - "scripts/generate-release-notes.mjs"
       - "scripts/release-notes*.mjs"
       - "site/src/pages/changelog/**"
       - "site/src/components/ChangelogPage.astro"
+      - "site/src/data/releases.ts"
+      - "site/src/styles/changelog.css"
       - "desktop/frontend/src/App.tsx"
       - "desktop/frontend/src/components/SettingsPanel.tsx"
       - "desktop/frontend/src/components/UpdateBanner.tsx"

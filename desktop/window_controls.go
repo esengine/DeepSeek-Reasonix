@@ -1,13 +1,11 @@
 package main
 
-import "github.com/wailsapp/wails/v2/pkg/runtime"
-
 // MinimiseMainWindow backs the Windows frameless titlebar controls.
 func (a *App) MinimiseMainWindow() {
 	if a.ctx == nil {
 		return
 	}
-	runtime.WindowMinimise(a.ctx)
+	a.nativeHost().MinimiseWindow(a.ctx)
 }
 
 // ToggleMaximiseMainWindow backs the Windows frameless titlebar controls.
@@ -15,7 +13,7 @@ func (a *App) ToggleMaximiseMainWindow() {
 	if a.ctx == nil {
 		return
 	}
-	runtime.WindowToggleMaximise(a.ctx)
+	a.nativeHost().ToggleMaximiseWindow(a.ctx)
 }
 
 // IsMainWindowMaximised reports the native maximise state for the Windows
@@ -24,7 +22,7 @@ func (a *App) IsMainWindowMaximised() bool {
 	if a.ctx == nil {
 		return false
 	}
-	return runtime.WindowIsMaximised(a.ctx)
+	return a.nativeHost().WindowIsMaximised(a.ctx)
 }
 
 // CloseMainWindow preserves Reasonix's configured close behavior for the
@@ -37,5 +35,5 @@ func (a *App) CloseMainWindow() {
 		return
 	}
 	a.forceQuit.Store(true)
-	runtime.Quit(a.ctx)
+	a.nativeHost().Quit(a.ctx)
 }

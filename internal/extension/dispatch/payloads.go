@@ -340,7 +340,7 @@ func decodePayload(point extension.InterceptorPoint, raw json.RawMessage) (any, 
 	decoder := json.NewDecoder(bytes.NewReader(raw))
 	decoder.DisallowUnknownFields()
 	if err := decoder.Decode(fresh); err != nil {
-		return nil, fmt.Errorf("replacement does not match the %s payload: %v", point, err)
+		return nil, fmt.Errorf("replacement does not match the %s payload: %w", point, err)
 	}
 	var extra any
 	if err := decoder.Decode(&extra); !errors.Is(err, io.EOF) {

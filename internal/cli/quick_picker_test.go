@@ -83,7 +83,7 @@ func TestQuickPickerRendersWithinNarrowPanel(t *testing.T) {
 		}},
 	}
 	out := p.render(32)
-	for _, line := range strings.Split(out, "\n") {
+	for line := range strings.SplitSeq(out, "\n") {
 		if got := visibleWidth(line); got > 32 {
 			t.Fatalf("rendered line width = %d, want <= 32: %q", got, line)
 		}

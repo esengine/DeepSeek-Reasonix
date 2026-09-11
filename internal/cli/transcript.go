@@ -1,7 +1,6 @@
 package cli
 
 import (
-	"encoding/base64"
 	"math"
 	"os"
 	"strconv"
@@ -35,12 +34,16 @@ const (
 // instead of replacing it: the rendered slice remains the fast path for every
 // frame and preserves the many index-based live tool/reasoning updates.
 type transcriptSource struct {
-	kind     transcriptSourceKind
-	raw      string
-	aux      string
-	planMode bool
-	maxLines int
-	history  []provider.Message
+	kind transcriptSourceKind
+	raw  string
+	aux  string
+	// copyRendered mirrors an already-rendered fixed block with internal copy
+	// spans. It is never displayed or persisted; selection copy consumes the
+	// spans to omit decorations whose provenance would otherwise be ambiguous.
+	copyRendered string
+	planMode     bool
+	maxLines     int
+	history      []provider.Message
 }
 
 func (m *chatTUI) ensureTranscriptSources() {
@@ -56,6 +59,7 @@ func (m *chatTUI) appendTranscriptBlock(rendered string, source transcriptSource
 	m.ensureTranscriptSources()
 	m.transcript = append(m.transcript, rendered)
 	m.transcriptSources = append(m.transcriptSources, source)
+	// Wrap cache extends on next Update via append-only path.
 }
 
 func (m *chatTUI) setTranscriptBlock(index int, rendered string, source transcriptSource) {
@@ -65,6 +69,9 @@ func (m *chatTUI) setTranscriptBlock(index int, rendered string, source transcri
 	m.ensureTranscriptSources()
 	m.transcript[index] = rendered
 	m.transcriptSources[index] = source
+	// In-place rewrite: drop wrap from this block onward so the next sync
+	// re-wraps the mutated block and everything after it.
+	m.invalidateWrapFrom(index)
 }
 
 func (m *chatTUI) removeTranscriptBlock(index int) {
@@ -74,6 +81,7 @@ func (m *chatTUI) removeTranscriptBlock(index int) {
 	m.ensureTranscriptSources()
 	m.transcript = append(m.transcript[:index], m.transcript[index+1:]...)
 	m.transcriptSources = append(m.transcriptSources[:index], m.transcriptSources[index+1:]...)
+	m.invalidateWrapFrom(index)
 }
 
 func (m *chatTUI) truncateTranscriptBlocks(length int) {
@@ -81,6 +89,7 @@ func (m *chatTUI) truncateTranscriptBlocks(length int) {
 	m.ensureTranscriptSources()
 	m.transcript = m.transcript[:length]
 	m.transcriptSources = m.transcriptSources[:length]
+	m.invalidateWrapFrom(length)
 }
 
 func (m *chatTUI) renderTranscriptSource(source transcriptSource, terminalWidth int) string {
@@ -115,12 +124,22 @@ func (m chatTUI) renderReplayBundle(
 	contentWidth int,
 	renderAssistant func(string, int) string,
 ) string {
+	return m.renderReplayBundleWithRenderers(source, contentWidth, renderAssistant, reasoningBlock)
+}
+
+func (m chatTUI) renderReplayBundleWithRenderers(
+	source transcriptSource,
+	contentWidth int,
+	renderAssistant func(string, int) string,
+	renderReasoning func(string, int, int) string,
+) string {
 	var b strings.Builder
 	b.WriteString(renderTUIBanner(m.label, source.raw, contentWidth))
-	for _, section := range replaySectionsForWithAssistantRenderer(
+	for _, section := range replaySectionsForWithRenderers(
 		source.history,
 		contentWidth,
 		renderAssistant,
+		renderReasoning,
 	) {
 		b.WriteString(section)
 	}
@@ -133,11 +152,11 @@ func (m chatTUI) renderReplayBundleCopy(
 	prefix string,
 ) string {
 	assistantIndex := 0
-	return m.renderReplayBundle(source, contentWidth, func(raw string, width int) string {
+	return m.renderReplayBundleWithRenderers(source, contentWidth, func(raw string, width int) string {
 		messagePrefix := prefix + "-" + strconv.Itoa(assistantIndex)
 		assistantIndex++
 		return renderAssistantMarkdownCopy(raw, width, messagePrefix)
-	})
+	}, reasoningBlockCopy)
 }
 
 const assistantTranscriptIndent = "  "
@@ -167,7 +186,7 @@ func renderAssistantMarkdown(raw string, contentWidth int) string {
 }
 
 // renderAssistantMarkdownCopy mirrors renderAssistantMarkdown's visible output
-// and adds zero-width math markers for on-demand clipboard reconstruction.
+// and adds zero-width copy spans for math reconstruction and generated gutters.
 func renderAssistantMarkdownCopy(raw string, contentWidth int, prefix string) string {
 	contentWidth = max(contentWidth, 1)
 	indent := assistantTranscriptIndent
@@ -195,7 +214,11 @@ func indentTranscriptBlock(block, indent string) string {
 	lines := strings.Split(block, "\n")
 	for i, line := range lines {
 		if line != "" {
-			lines[i] = indent + line
+			if rest, ok := strings.CutPrefix(line, copyOmitSpanStart); ok {
+				lines[i] = copyOmitSpanStart + indent + rest
+			} else {
+				lines[i] = indent + line
+			}
 		}
 	}
 	return strings.Join(lines, "\n")
@@ -233,50 +256,6 @@ func (m *chatTUI) commitTranscriptSource(source transcriptSource) {
 	m.appendTranscriptBlock(rendered, source)
 }
 
-const (
-	copyMathStartPrefix = "\x1b]1337;reasonix-copy-math="
-	copyMathEndPrefix   = "\x1b]1337;reasonix-copy-math-end="
-	copyMathTerminator  = "\x07"
-)
-
-func copyMathStartMarker(id, source string) string {
-	encoded := base64.RawURLEncoding.EncodeToString([]byte(source))
-	return copyMathStartPrefix + id + ";" + encoded + copyMathTerminator
-}
-
-func copyMathEndMarker(id string) string {
-	return copyMathEndPrefix + id + copyMathTerminator
-}
-
-// buildCopyTranscript renders semantic Markdown only when a copy is requested.
-// The visible text stays byte-for-byte equivalent after ANSI stripping, while
-// math markers retain the source needed to map display cells back to LaTeX.
-func (m chatTUI) buildCopyTranscript(contentWidth int) (string, int, bool) {
-	if len(m.transcriptSources) != len(m.transcript) {
-		return "", 0, false
-	}
-	var b strings.Builder
-	markers := 0
-	for i, source := range m.transcriptSources {
-		if i > 0 {
-			b.WriteByte('\n')
-		}
-		switch source.kind {
-		case transcriptSourceMarkdown:
-			rendered := renderAssistantMarkdownCopy(source.raw, contentWidth, strconv.Itoa(i))
-			markers += strings.Count(rendered, copyMathStartPrefix)
-			b.WriteString(rendered)
-		case transcriptSourceReplayBundle:
-			rendered := m.renderReplayBundleCopy(source, contentWidth, strconv.Itoa(i))
-			markers += strings.Count(rendered, copyMathStartPrefix)
-			b.WriteString(rendered)
-		default:
-			b.WriteString(m.transcript[i])
-		}
-	}
-	return b.String(), markers, true
-}
-
 // transcriptResizeAnchor identifies the transcript block at the top of the
 // viewport plus the relative row within it. Reflow can change a block's line
 // count, so preserving a raw Y offset would jump to unrelated content.
@@ -311,7 +290,7 @@ func (a transcriptResizeAnchor) yOffset(blocks []string, width int) int {
 	}
 	block := min(max(a.block, 0), len(blocks)-1)
 	offset := 0
-	for i := 0; i < block; i++ {
+	for i := range block {
 		offset += transcriptBlockLineCount(blocks[i], width)
 	}
 	lines := transcriptBlockLineCount(blocks[block], width)
@@ -467,7 +446,7 @@ func (m chatTUI) renderTranscript() string {
 
 	rows := make([]string, h)
 	bar := make([]string, h)
-	for r := 0; r < h; r++ {
+	for r := range h {
 		idx := yoff + r
 		line := blank // off-content rows fill to width
 		if idx >= 0 && idx < total {
@@ -507,219 +486,15 @@ func selSpan(idx int, start, end selPos, cw int) (lo, hi int, ok bool) {
 	return lo, hi, true
 }
 
-type copyMathSpan struct {
-	start  int
-	end    int
-	id     string
-	source string
-}
-
-type copyTranscriptLine struct {
-	text string
-	math []copyMathSpan
-}
-
-type activeCopyMath struct {
-	id     string
-	source string
-	start  int
-}
-
-func parseCopyTranscript(wrapped string) ([]copyTranscriptLine, int, bool) {
-	rawLines := strings.Split(wrapped, "\n")
-	lines := make([]copyTranscriptLine, 0, len(rawLines))
-	var active *activeCopyMath
-	parsedMarkers := 0
-
-	for _, raw := range rawLines {
-		var clean strings.Builder
-		var spans []copyMathSpan
-		column := 0
-		position := 0
-
-		for position < len(raw) {
-			startAt := strings.Index(raw[position:], copyMathStartPrefix)
-			endAt := strings.Index(raw[position:], copyMathEndPrefix)
-			if startAt >= 0 {
-				startAt += position
-			}
-			if endAt >= 0 {
-				endAt += position
-			}
-
-			markerAt := -1
-			isStart := false
-			switch {
-			case startAt >= 0 && (endAt < 0 || startAt < endAt):
-				markerAt, isStart = startAt, true
-			case endAt >= 0:
-				markerAt = endAt
-			}
-			if markerAt < 0 {
-				chunk := raw[position:]
-				clean.WriteString(chunk)
-				column += ansi.StringWidth(chunk)
-				break
-			}
-
-			chunk := raw[position:markerAt]
-			clean.WriteString(chunk)
-			column += ansi.StringWidth(chunk)
-
-			prefix := copyMathEndPrefix
-			if isStart {
-				prefix = copyMathStartPrefix
-			}
-			payloadStart := markerAt + len(prefix)
-			terminatorAt := strings.Index(raw[payloadStart:], copyMathTerminator)
-			if terminatorAt < 0 {
-				return nil, 0, false
-			}
-			terminatorAt += payloadStart
-			payload := raw[payloadStart:terminatorAt]
-			position = terminatorAt + len(copyMathTerminator)
-
-			if isStart {
-				parts := strings.SplitN(payload, ";", 2)
-				if len(parts) != 2 || active != nil {
-					return nil, 0, false
-				}
-				decoded, err := base64.RawURLEncoding.DecodeString(parts[1])
-				if err != nil {
-					return nil, 0, false
-				}
-				active = &activeCopyMath{id: parts[0], source: string(decoded), start: column}
-				parsedMarkers++
-				continue
-			}
-
-			if active == nil || active.id != payload {
-				return nil, 0, false
-			}
-			spans = append(spans, copyMathSpan{
-				start: active.start, end: column, id: active.id, source: active.source,
-			})
-			active = nil
-		}
-
-		if active != nil {
-			spans = append(spans, copyMathSpan{
-				start: active.start, end: column, id: active.id, source: active.source,
-			})
-			active.start = 0
-		}
-		lines = append(lines, copyTranscriptLine{text: clean.String(), math: spans})
-	}
-	if active != nil {
-		return nil, 0, false
-	}
-	return lines, parsedMarkers, true
-}
-
-func (m chatTUI) copyTranscriptLines() ([]copyTranscriptLine, bool) {
-	contentWidth := m.viewport.Width()
-	marked, expectedMarkers, ok := m.buildCopyTranscript(contentWidth)
-	if !ok {
-		return nil, false
-	}
-	lines, parsedMarkers, ok := parseCopyTranscript(wrapTranscript(marked, contentWidth))
-	if !ok || parsedMarkers != expectedMarkers || len(lines) != len(m.wrappedLines) {
-		return nil, false
-	}
-	for i := range lines {
-		if ansi.Strip(lines[i].text) != ansi.Strip(m.wrappedLines[i]) {
-			return nil, false
-		}
-	}
-	return lines, true
-}
-
-func selectedDisplayText(lines []string, start, end selPos) string {
-	var out []string
-	for idx := start.line; idx <= end.line && idx < len(lines); idx++ {
-		lo, hi := 0, ansi.StringWidth(lines[idx])
-		if idx == start.line {
-			lo = start.col
-		}
-		if idx == end.line {
-			hi = end.col
-		}
-		out = append(out, strings.TrimRight(ansi.Strip(ansi.Cut(lines[idx], lo, hi)), " "))
-	}
-	return strings.Join(out, "\n")
-}
-
-func selectedCopyText(lines []copyTranscriptLine, start, end selPos) string {
-	seen := make(map[string]bool)
-	var out []string
-	for idx := start.line; idx <= end.line && idx < len(lines); idx++ {
-		line := lines[idx]
-		lo, hi := 0, ansi.StringWidth(line.text)
-		if idx == start.line {
-			lo = start.col
-		}
-		if idx == end.line {
-			hi = end.col
-		}
-
-		var selected strings.Builder
-		cursor := lo
-		touchedMath := false
-		for _, span := range line.math {
-			if span.end <= lo || span.start >= hi {
-				continue
-			}
-			touchedMath = true
-			if span.start > cursor {
-				selected.WriteString(ansi.Strip(ansi.Cut(line.text, cursor, min(span.start, hi))))
-			}
-			if !seen[span.id] {
-				selected.WriteString(span.source)
-				seen[span.id] = true
-			}
-			cursor = max(cursor, min(span.end, hi))
-		}
-		if cursor < hi {
-			selected.WriteString(ansi.Strip(ansi.Cut(line.text, cursor, hi)))
-		}
-		if selected.Len() == 0 && touchedMath {
-			continue
-		}
-		out = append(out, strings.TrimRight(selected.String(), " "))
-	}
-	return strings.Join(out, "\n")
-}
-
-// selectedText is the plain text of the active display-cell selection. Math is
-// reconstructed on demand from semantic transcript sources; if the marked copy
-// rendition ever diverges from the visible transcript, the safe fallback keeps
-// the exact displayed text rather than applying mismatched coordinates.
-func (m chatTUI) selectedText() string {
-	if !m.sel.active || m.sel.empty() {
-		return ""
-	}
-	start, end := m.sel.ordered()
-	if lines, ok := m.copyTranscriptLines(); ok {
-		return selectedCopyText(lines, start, end)
-	}
-	return selectedDisplayText(m.wrappedLines, start, end)
-}
-
 // scrollbarThumb returns the thumb's [start, start+size) row span for a viewport
 // of `height` rows showing `total` content lines scrolled to `yoff`.
 func scrollbarThumb(height, yoff, total int) (start, size int) {
 	if total <= height {
 		return 0, 0 // no overflow → no thumb
 	}
-	size = height * height / total
-	if size < 1 {
-		size = 1
-	}
+	size = max(height*height/total, 1)
 	maxYoff := total - height
-	start = yoff * (height - size) / maxYoff
-	if start > height-size {
-		start = height - size
-	}
+	start = min(yoff*(height-size)/maxYoff, height-size)
 	return start, size
 }
 
@@ -732,13 +507,7 @@ func scrollbarYOffset(height, row, total, grabOffset int) int {
 	if maxTop <= 0 {
 		return 0
 	}
-	top := row - grabOffset
-	if top < 0 {
-		top = 0
-	}
-	if top > maxTop {
-		top = maxTop
-	}
+	top := min(max(row-grabOffset, 0), maxTop)
 	maxYoff := total - height
 	return (top*maxYoff + maxTop/2) / maxTop
 }
@@ -771,6 +540,9 @@ func (m chatTUI) scrollbarGrabRowOffset(row int) int {
 
 func (m *chatTUI) dragScrollbar(row int) {
 	m.viewport.SetYOffset(scrollbarYOffset(m.viewport.Height(), row, len(m.wrappedLines), m.scrollbarGrabOffset))
+	// Sync immediately so a streaming event between drag motions cannot see a
+	// stale followTail and yank the reader back to the bottom (#6430/#6978).
+	m.syncScrollModeAfterGesture()
 }
 
 // transcriptCaret maps a screen cell (x, y) in the transcript region to an

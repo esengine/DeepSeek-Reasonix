@@ -476,7 +476,7 @@ func TestSubagentProgressGroupBudgetBoundsBurstAndServesAll(t *testing.T) {
 	t.Cleanup(merger.Close)
 
 	const n = 64
-	for i := 0; i < n; i++ {
+	for i := range n {
 		child := "child-" + string(rune('0'+i/10)) + string(rune('0'+i%10))
 		// Ordinary phase transitions share the budget with previews: 64
 		// status changes alone must not exceed the 32 events/s contract.
@@ -501,7 +501,7 @@ func TestSubagentProgressGroupBudgetBoundsBurstAndServesAll(t *testing.T) {
 	// Once the budget refills, every child is served exactly once — no child
 	// starves behind a high-activity sibling.
 	var rest []event.Event
-	for i := 0; i < 16; i++ {
+	for range 16 {
 		clock.Advance(time.Second)
 		rest = append(rest, collectFor(t, ch, 50*time.Millisecond)...)
 	}
@@ -614,8 +614,8 @@ func TestRunProfileSpecEmitsSubagentProgress(t *testing.T) {
 	task := newTestTaskTool(t, reasoningTextProvider{}, tool.NewRegistry(), "sys", "", "", nil)
 
 	out, err := task.RunProfileSpec(ctx, ProfileExecSpec{
-		Kind: "task", Name: "task", Prompt: "do the thing",
-		SystemPrompt: "sys", AllowNoTools: true,
+		Task: TaskSpec{Objective: "do the thing"}, Grant: CapabilityGrant{AllowNoTools: true},
+		Worker: WorkerSpec{Kind: "task", Name: "task", SystemPrompt: "sys"},
 	})
 	if err != nil {
 		t.Fatalf("RunProfileSpec: %v", err)
@@ -668,8 +668,8 @@ func TestRunProfileSpecProgressCancelledTerminal(t *testing.T) {
 	task := newTestTaskTool(t, reasoningTextProvider{}, tool.NewRegistry(), "sys", "", "", nil)
 
 	if _, err := task.RunProfileSpec(ctx, ProfileExecSpec{
-		Kind: "task", Name: "task", Prompt: "do the thing",
-		SystemPrompt: "sys", AllowNoTools: true,
+		Task: TaskSpec{Objective: "do the thing"}, Grant: CapabilityGrant{AllowNoTools: true},
+		Worker: WorkerSpec{Kind: "task", Name: "task", SystemPrompt: "sys"},
 	}); err == nil {
 		t.Fatal("cancelled RunProfileSpec must return an error")
 	}
@@ -694,8 +694,8 @@ func TestRunProfileSpecProgressFailedOnProviderError(t *testing.T) {
 	task := newTestTaskTool(t, &streamErrorProvider{err: errors.New("transport cut")}, tool.NewRegistry(), "sys", "", "", nil)
 
 	if _, err := task.RunProfileSpec(ctx, ProfileExecSpec{
-		Kind: "task", Name: "task", Prompt: "do the thing",
-		SystemPrompt: "sys", AllowNoTools: true,
+		Task: TaskSpec{Objective: "do the thing"}, Grant: CapabilityGrant{AllowNoTools: true},
+		Worker: WorkerSpec{Kind: "task", Name: "task", SystemPrompt: "sys"},
 	}); err == nil {
 		t.Fatal("provider error must propagate")
 	}
@@ -726,8 +726,8 @@ func TestRunProfileSpecProgressPanicEmitsFailed(t *testing.T) {
 			}
 		}()
 		task.RunProfileSpec(ctx, ProfileExecSpec{
-			Kind: "task", Name: "task", Prompt: "do the thing",
-			SystemPrompt: "sys", AllowNoTools: true,
+			Task: TaskSpec{Objective: "do the thing"}, Grant: CapabilityGrant{AllowNoTools: true},
+			Worker: WorkerSpec{Kind: "task", Name: "task", SystemPrompt: "sys"},
 		})
 	}()
 	if !panicked {

@@ -71,7 +71,7 @@ func TestBuildDeterminism(t *testing.T) {
 		hash    string
 	}
 	var reference *fingerprint
-	for seed := int64(0); seed < 100; seed++ {
+	for seed := range int64(100) {
 		r := rand.New(rand.NewSource(seed))
 		perm := r.Perm(len(contributors))
 		b := NewBuilder().WithSystemPrompt("system prompt v1").WithGeneration(7)

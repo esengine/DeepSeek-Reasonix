@@ -1,14 +1,103 @@
 package main
 
 import (
+	"context"
 	"log/slog"
 	"os"
-	"os/exec"
 	"strconv"
 	"strings"
 
+	"reasonix/internal/config"
 	"reasonix/internal/plugin"
+	"reasonix/internal/proc"
 )
+
+// bumpExtensionGeneration records that plugin/MCP configuration changed while
+// controller builds may still be running off the lifecycle lock. In-flight
+// builds that finish with a stale generation must not publish.
+func (a *App) bumpExtensionGeneration() {
+	if a == nil {
+		return
+	}
+	a.extensionGeneration.Add(1)
+}
+
+func (a *App) currentExtensionGeneration() uint64 {
+	if a == nil {
+		return 0
+	}
+	return a.extensionGeneration.Load()
+}
+
+// lockMCPMutation serializes shared-Host boot with live MCP mutations without
+// holding runtimeAdmissionMu while an optimistic controller build finishes its
+// extension startup. A final generation bump invalidates builds that loaded
+// configuration while the mutation held the gate.
+func (a *App) lockMCPMutation(operation string) func() {
+	if hook := a.runtimeMutationBeforeLockHook; hook != nil {
+		hook(operation)
+	}
+	a.runtimeRebuildMu.Lock()
+	a.extensionBuildMu.Lock()
+	a.runtimeAdmissionMu.Lock()
+	return func() {
+		a.bumpExtensionGeneration()
+		a.runtimeAdmissionMu.Unlock()
+		a.extensionBuildMu.Unlock()
+		a.runtimeRebuildMu.Unlock()
+	}
+}
+
+type sharedHostMCPRegistration struct {
+	scope     *plugin.RegistrationScope
+	finished  bool
+	committed bool
+}
+
+// beginSharedHostMCPRegistration attributes only context-scoped connections to
+// this build. Unrelated Host writes never become rollback candidates.
+func beginSharedHostMCPRegistration(ctx context.Context, host *plugin.Host) (context.Context, *sharedHostMCPRegistration) {
+	registration := &sharedHostMCPRegistration{}
+	if host == nil {
+		return ctx, registration
+	}
+	registration.scope = host.BeginRegistrationScope()
+	return plugin.ContextWithRegistrationScope(ctx, registration.scope), registration
+}
+
+func (r *sharedHostMCPRegistration) rollback() {
+	if r == nil || r.finished {
+		return
+	}
+	r.finished = true
+	if r.scope != nil {
+		r.scope.AbortAndRollback()
+	}
+}
+
+func (r *sharedHostMCPRegistration) commit() bool {
+	if r == nil {
+		return true
+	}
+	if r.finished {
+		return r.committed
+	}
+	if r.scope != nil && !r.scope.Commit() {
+		r.finished = true
+		return false
+	}
+	r.finished = true
+	r.committed = true
+	return true
+}
+
+func (a *App) saveDesktopMCPServerAndBump(root string, entry config.PluginEntry) error {
+	if err := a.saveDesktopMCPServer(root, entry); err != nil {
+		return err
+	}
+	a.bumpExtensionGeneration()
+	return nil
+}
 
 // sharedPluginHost is a reference-counted plugin.Host shared across tabs
 // that share the same workspace root. Multiple controllers (one per tab)
@@ -37,7 +126,12 @@ func (a *App) acquireSharedHost(root string) *plugin.Host {
 		return entry.host
 	}
 
-	host := plugin.NewHost()
+	// Full Apps surface; a failed sandbox listener degrades here to
+	// interactive-v1 rather than downgrading a negotiated session.
+	host := plugin.NewHostWithProfile(plugin.HostProfileDesktopApps)
+	if !a.mcpAppsSandboxAvailable() {
+		host = plugin.NewHostWithProfile(plugin.HostProfileInteractive)
+	}
 	a.sharedHosts[root] = &sharedPluginHost{host: host, refs: 1}
 	slog.Debug("shared host acquired (new)", "root", root)
 	return host
@@ -71,9 +165,9 @@ func (a *App) reapOrphanCodeGraph() {
 	// empty set and continue scanning for orphans rather than skipping the
 	// entire reaping step.
 	ours := map[int]bool{}
-	out, err := exec.Command("pgrep", "-P", strconv.Itoa(myPID)).Output()
+	out, err := proc.Command("pgrep", "-P", strconv.Itoa(myPID)).Output()
 	if err == nil {
-		for _, f := range strings.Fields(string(out)) {
+		for f := range strings.FieldsSeq(string(out)) {
 			if pid, err := strconv.Atoi(f); err == nil {
 				ours[pid] = true
 			}
@@ -81,11 +175,11 @@ func (a *App) reapOrphanCodeGraph() {
 	}
 
 	// Find every codegraph MCP process.
-	out, err = exec.Command("pgrep", "-f", "codegraph\\.js serve --mcp").Output()
+	out, err = proc.Command("pgrep", "-f", "codegraph\\.js serve --mcp").Output()
 	if err != nil {
 		return
 	}
-	for _, f := range strings.Fields(string(out)) {
+	for f := range strings.FieldsSeq(string(out)) {
 		pid, err := strconv.Atoi(f)
 		if err != nil || pid == myPID || ours[pid] {
 			continue
@@ -93,7 +187,7 @@ func (a *App) reapOrphanCodeGraph() {
 		// Verify the process is truly orphaned before killing it:
 		// check its parent PID — if the parent is alive and isn't ours,
 		// this codegraph belongs to another active Reasonix session.
-		ppidOut, err := exec.Command("ps", "-o", "ppid=", "-p", strconv.Itoa(pid)).Output()
+		ppidOut, err := proc.Command("ps", "-o", "ppid=", "-p", strconv.Itoa(pid)).Output()
 		if err != nil {
 			continue
 		}

@@ -18,7 +18,7 @@ function ok(cond: boolean, label: string) {
 }
 
 const here = dirname(fileURLToPath(import.meta.url));
-const appSource = readFileSync(resolve(here, "../App.tsx"), "utf8");
+const appSource = readFileSync(resolve(here, "../AppRuntime.tsx"), "utf8");
 
 console.log("\nquiet recovery prompt privacy");
 

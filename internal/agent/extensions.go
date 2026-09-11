@@ -1,7 +1,9 @@
 package agent
 
 import (
+	"bytes"
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"reflect"
@@ -14,7 +16,7 @@ import (
 	"reasonix/internal/provider"
 )
 
-// Extension Protocol v1 agent-side wiring (stage 6b2). The agent consults the
+// Extension Protocol v2 agent-side wiring. The agent consults the
 // frozen dispatcher at the nine agent-loop intercept points:
 //
 //	agent.before_start   Run, before the turn is appended (block aborts the run)
@@ -40,7 +42,7 @@ import (
 //
 // Error policy follows the dispatcher: a required extension's failure fails
 // the local operation; an optional extension's failure is warned about once
-// and skipped. A nil dispatcher (no v1 runtime packages installed) passes
+// and skipped. A nil dispatcher (no runtime packages installed) passes
 // every point through untouched, so behavior stays byte-identical to the
 // pre-dispatch path.
 //
@@ -107,13 +109,14 @@ func strategyReplaced(ctx context.Context, d *dispatch.Dispatcher, slot extensio
 // a required extension's failure) aborts the run before the user turn is
 // appended; the error surfaces like a normal run error.
 func (a *Agent) interceptAgentStart(ctx context.Context) error {
-	d := a.extensions
+	d := a.svc.extensions
 	if d == nil {
 		return nil
 	}
+	providerCtx := a.withAgentContext(ctx)
 	payload := dispatch.AgentStartPayload{
-		Model:     a.prov.Name(),
-		ToolCount: len(a.tools.Schemas()),
+		Model:     a.svc.prov.Name(),
+		ToolCount: len(a.svc.tools.SchemasForContext(providerCtx)),
 		SessionID: ParentSession(ctx),
 	}
 	result, err := d.Intercept(ctx, extension.PointAgentBeforeStart, &payload)
@@ -132,7 +135,7 @@ func (a *Agent) interceptAgentStart(ctx context.Context) error {
 // never touched, so a replacement is invisible to the next turn (and to the
 // prompt-cache prefix) — ephemerality is the cache contract.
 func (a *Agent) interceptContextPrepare(ctx context.Context, messages []provider.Message) ([]provider.Message, error) {
-	d := a.extensions
+	d := a.svc.extensions
 	if d == nil {
 		return messages, nil
 	}
@@ -162,7 +165,7 @@ func (a *Agent) interceptContextPrepare(ctx context.Context, messages []provider
 // registry (tool parameter schemas must be JSON objects, messages/tools must
 // be arrays) before it may substitute the request being sent.
 func (a *Agent) interceptProviderRequest(ctx context.Context, req provider.Request) (provider.Request, error) {
-	d := a.extensions
+	d := a.svc.extensions
 	if d == nil {
 		return req, nil
 	}
@@ -198,7 +201,7 @@ func (a *Agent) interceptProviderRequest(ctx context.Context, req provider.Reque
 // streaming); a replaced Usage drives only this turn's Usage event and
 // compaction decision. A block fails the turn with the redacted reason.
 func (a *Agent) interceptProviderResponse(ctx context.Context, text, reasoning, signature string, calls []provider.ToolCall, usage *provider.Usage) (string, string, string, []provider.ToolCall, *provider.Usage, error) {
-	d := a.extensions
+	d := a.svc.extensions
 	if d == nil {
 		return text, reasoning, signature, calls, usage, nil
 	}
@@ -231,7 +234,8 @@ func (a *Agent) interceptProviderResponse(ctx context.Context, text, reasoning, 
 	return text, reasoning, signature, calls, usage, nil
 }
 
-// interceptToolBefore runs tool.before right after the call parsed. A block
+// interceptToolBefore runs tool.before after the host resolved and validated
+// the concrete target. A block
 // fails the call with the reason as the tool-result error (mirroring a
 // PreToolUse hook block). A replacement substitutes the provider-visible name
 // and arguments, but only after host revalidation — the arguments must decode
@@ -240,7 +244,7 @@ func (a *Agent) interceptProviderResponse(ctx context.Context, text, reasoning, 
 // see the call that will actually execute. An invalid replacement fails the
 // call with a contract-violation error result.
 func (a *Agent) interceptToolBefore(ctx context.Context, plan *toolCallPlan) (toolOutcome, bool) {
-	d := a.extensions
+	d := a.svc.extensions
 	if d == nil {
 		return toolOutcome{}, false
 	}
@@ -267,15 +271,12 @@ func (a *Agent) interceptToolBefore(ctx context.Context, plan *toolCallPlan) (to
 	if trimmed == "" || trimmed[0] != '{' {
 		return violation("arguments must decode as a JSON object")
 	}
-	t, _, ambiguous := a.tools.ResolveCall(payload.Name)
+	t, _, ambiguous := a.svc.tools.ResolveCall(payload.Name)
 	if t == nil || len(ambiguous) > 0 {
 		return violation(fmt.Sprintf("substituted tool name %q does not resolve in the registry", payload.Name))
 	}
 	plan.call.Name = payload.Name
 	plan.call.Arguments = payload.Arguments
-	if blocked, early := a.parseToolCall(plan); early {
-		return blocked, true
-	}
 	return toolOutcome{}, false
 }
 
@@ -287,7 +288,7 @@ func (a *Agent) interceptToolBefore(ctx context.Context, plan *toolCallPlan) (to
 // host decision standing. allow is updated in place; early=true carries the
 // blocked outcome.
 func (a *Agent) interceptExtensionPermission(ctx context.Context, plan *toolCallPlan, allow *bool) (toolOutcome, bool) {
-	d := a.extensions
+	d := a.svc.extensions
 	if d == nil {
 		return toolOutcome{}, false
 	}
@@ -329,7 +330,7 @@ func (a *Agent) interceptExtensionPermission(ctx context.Context, plan *toolCall
 	}
 	d.Event(extension.PointPermissionDecision, payload)
 	for _, note := range result.Audit {
-		a.sink.Emit(event.Event{Kind: event.Notice, Level: event.LevelWarn, Text: note})
+		a.svc.sink.Emit(event.Event{Kind: event.Notice, Level: event.LevelWarn, Text: note})
 	}
 	switch {
 	case result.Blocked:
@@ -358,7 +359,7 @@ func (a *Agent) interceptExtensionPermission(ctx context.Context, plan *toolCall
 // (or a required extension's failure) converts the call to an error tool
 // result with the reason; the tool itself already ran.
 func (a *Agent) interceptToolAfter(ctx context.Context, call provider.ToolCall, result string, err error) (string, error) {
-	d := a.extensions
+	d := a.svc.extensions
 	if d == nil {
 		return result, err
 	}
@@ -394,13 +395,17 @@ func (a *Agent) interceptToolAfter(ctx context.Context, call provider.ToolCall, 
 // replacement's messages and guidance drive only this compaction pass; a
 // block skips the pass with the reason surfaced through the caller's notice.
 func (a *Agent) interceptCompactionPrepare(ctx context.Context, fold []provider.Message, guidance string) ([]provider.Message, string, error) {
-	d := a.extensions
+	d := a.svc.extensions
 	if d == nil {
 		return fold, guidance, nil
 	}
 	payload := dispatch.CompactionPreparePayload{
 		Messages: providerconv.MessagesToProtocol(fold),
 		Guidance: guidance,
+	}
+	originalMessages, err := json.Marshal(payload.Messages)
+	if err != nil {
+		return nil, "", err
 	}
 	result, err := d.Intercept(ctx, extension.PointCompactionPrepare, &payload)
 	if err != nil {
@@ -418,6 +423,13 @@ func (a *Agent) interceptCompactionPrepare(ctx context.Context, fold []provider.
 	}
 	d.Event(extension.PointCompactionPrepare, payload)
 	if len(result.Applied) > 0 || replaced {
+		preparedMessages, marshalErr := json.Marshal(payload.Messages)
+		if marshalErr != nil {
+			return nil, "", marshalErr
+		}
+		if bytes.Equal(preparedMessages, originalMessages) {
+			return fold, payload.Guidance, nil
+		}
 		return providerconv.MessagesFromProtocol(payload.Messages), payload.Guidance, nil
 	}
 	return fold, guidance, nil
@@ -428,7 +440,7 @@ func (a *Agent) interceptCompactionPrepare(ctx context.Context, fold []provider.
 // into the session. A replacement is persisted as the summary; a block skips
 // the pass.
 func (a *Agent) interceptCompactionComplete(ctx context.Context, summary string) (string, error) {
-	d := a.extensions
+	d := a.svc.extensions
 	if d == nil {
 		return summary, nil
 	}

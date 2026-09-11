@@ -23,8 +23,8 @@ func TestDeepSeekV4FlashEffortCapabilityIncludesLow(t *testing.T) {
 	if got, err := NormalizeEffort(flash, "low"); err != nil || got != "low" {
 		t.Fatalf("Flash low = %q/%v, want low/nil", got, err)
 	}
-	if got, err := NormalizeEffort(flash, "xhigh"); err != nil || got != "high" {
-		t.Fatalf("Flash xhigh = %q/%v, want high/nil", got, err)
+	if _, err := NormalizeEffort(flash, "xhigh"); err == nil {
+		t.Fatal("undeclared xhigh must be rejected")
 	}
 	flash.ReasoningProtocol = ReasoningProtocolDeepSeek
 	if got := EffortCapabilityForEntry(flash); len(got.Levels) != len(want) || got.Levels[2] != "low" {
@@ -33,21 +33,46 @@ func TestDeepSeekV4FlashEffortCapabilityIncludesLow(t *testing.T) {
 	if got, err := NormalizeEffort(flash, "low"); err != nil || got != "low" {
 		t.Fatalf("explicit DeepSeek Flash low = %q/%v, want low/nil", got, err)
 	}
-	if got, err := NormalizeEffort(flash, "xhigh"); err != nil || got != "high" {
-		t.Fatalf("explicit DeepSeek Flash xhigh = %q/%v, want high/nil", got, err)
+	if _, err := NormalizeEffort(flash, "xhigh"); err == nil {
+		t.Fatal("undeclared xhigh must be rejected")
 	}
 
 	pro := &ProviderEntry{Kind: "openai", BaseURL: "https://api.deepseek.com", Model: "deepseek-v4-pro"}
-	if got, err := NormalizeEffort(pro, "low"); err != nil || got != "high" {
-		t.Fatalf("Pro low = %q/%v, want existing high mapping", got, err)
+	if got, err := NormalizeEffort(pro, "low"); err != nil || got != "low" {
+		t.Fatalf("Pro low = %q/%v, want low/nil", got, err)
 	}
-	if got, err := NormalizeEffort(pro, "xhigh"); err != nil || got != "max" {
-		t.Fatalf("Pro xhigh = %q/%v, want max/nil", got, err)
+	if _, err := NormalizeEffort(pro, "xhigh"); err == nil {
+		t.Fatal("undeclared xhigh must be rejected")
 	}
-	for _, level := range EffortCapabilityForEntry(pro).Levels {
-		if level == "low" {
-			t.Fatalf("Pro capability unexpectedly exposes low: %+v", EffortCapabilityForEntry(pro))
+	if cap := EffortCapabilityForEntry(pro); !containsString(cap.Levels, "low") {
+		t.Fatalf("Pro capability = %+v, want low", cap)
+	}
+}
+
+func TestDefaultDeepSeekV4EntriesRejectCompatibilityAliases(t *testing.T) {
+	cfg := Default()
+	for _, ref := range []string{"deepseek-flash", "deepseek-pro"} {
+		entry, ok := cfg.ResolveModel(ref)
+		if !ok {
+			t.Fatalf("default model %q did not resolve", ref)
 		}
+		for _, alias := range []string{"medium", "xhigh"} {
+			got, err := NormalizeEffort(entry, alias)
+			if err == nil {
+				t.Errorf("%s %s = %q: undeclared alias accepted", ref, alias, got)
+			}
+		}
+	}
+}
+
+func TestDeepSeekV4CustomEffortVocabularyRemainsAuthoritative(t *testing.T) {
+	entry := &ProviderEntry{
+		Kind:             "anthropic",
+		Model:            "deepseek-v4-pro",
+		SupportedEfforts: []string{"disabled", "high", "max"},
+	}
+	if _, err := NormalizeEffort(entry, "medium"); err == nil {
+		t.Fatal("custom supported_efforts should reject an undeclared compatibility alias")
 	}
 }
 
@@ -239,8 +264,8 @@ func TestEffortCapabilityExplicitGLMProtocolOnGateway(t *testing.T) {
 	if got, err := NormalizeEffort(e, "disabled"); err != nil || got != "disabled" {
 		t.Fatalf("explicit GLM disabled = %q/%v, want disabled/nil", got, err)
 	}
-	if got, err := NormalizeEffort(e, "high"); err != nil || got != "enabled" {
-		t.Fatalf("explicit GLM legacy high = %q/%v, want enabled/nil", got, err)
+	if _, err := NormalizeEffort(e, "high"); err == nil {
+		t.Fatal("GLM must reject undeclared depth")
 	}
 }
 
@@ -270,7 +295,7 @@ func TestGLMModelRegistryUpgradesLegacyGatewayConfig(t *testing.T) {
 	if got := ReasoningProtocolForEntry(nonGLM); got != "" {
 		t.Fatalf("non-exact GLM alias protocol = %q, want empty without explicit override", got)
 	}
-	otherGateway := &ProviderEntry{Kind: "openai", BaseURL: "https://opencode.ai/zen/go/v1", Model: "glm-5.2"}
+	otherGateway := &ProviderEntry{Kind: "openai", BaseURL: "https://unrelated-gateway.example/v1", Model: "glm-5.2"}
 	if got := ReasoningProtocolForEntry(otherGateway); got != "" {
 		t.Fatalf("unrelated gateway GLM protocol = %q, want empty without explicit override", got)
 	}
@@ -333,6 +358,12 @@ func TestNormalizeEffortOllamaCloud(t *testing.T) {
 	}
 	for _, tc := range cases {
 		got, err := NormalizeEffort(e, tc.in)
+		if tc.in != tc.want && tc.in != "auto" {
+			if err == nil {
+				t.Errorf("undeclared %q was silently mapped to %q", tc.in, got)
+			}
+			continue
+		}
 		if err != nil {
 			t.Errorf("NormalizeEffort(%q) returned error: %v", tc.in, err)
 			continue
@@ -363,6 +394,12 @@ func TestNormalizeEffortZhipu(t *testing.T) {
 	}
 	for _, tc := range cases {
 		got, err := NormalizeEffort(e, tc.in)
+		if tc.in != tc.want && tc.in != "auto" {
+			if err == nil {
+				t.Errorf("undeclared %q was silently mapped to %q", tc.in, got)
+			}
+			continue
+		}
 		if err != nil {
 			t.Errorf("NormalizeEffort(%q) returned error: %v", tc.in, err)
 			continue
@@ -391,6 +428,12 @@ func TestNormalizeEffortLongCat(t *testing.T) {
 	}
 	for _, tc := range cases {
 		got, err := NormalizeEffort(e, tc.in)
+		if tc.in != tc.want && tc.in != "auto" {
+			if err == nil {
+				t.Errorf("undeclared %q was silently mapped to %q", tc.in, got)
+			}
+			continue
+		}
 		if err != nil {
 			t.Errorf("NormalizeEffort(%q) returned error: %v", tc.in, err)
 			continue
@@ -441,6 +484,12 @@ func TestNormalizeEffortMiniMax(t *testing.T) {
 	}
 	for _, tc := range cases {
 		got, err := NormalizeEffort(e, tc.in)
+		if tc.in != tc.want && tc.in != "auto" {
+			if err == nil {
+				t.Errorf("undeclared %q was silently mapped to %q", tc.in, got)
+			}
+			continue
+		}
 		if err != nil {
 			t.Errorf("NormalizeEffort(%q) returned error: %v", tc.in, err)
 			continue
@@ -459,7 +508,7 @@ func TestNormalizeEffortMiniMaxRejectsGarbage(t *testing.T) {
 	// errors. "off" is *not* in this list — it's a retired level we now
 	// migrate to "adaptive" (tested in TestNormalizeEffortMiniMax above).
 	cases := map[string]string{
-		"turbo": "auto|adaptive|disabled",
+		"turbo": "UNSUPPORTED_REASONING_EFFORT",
 		"":      "auto|<level>",
 	}
 	for in, wantHint := range cases {

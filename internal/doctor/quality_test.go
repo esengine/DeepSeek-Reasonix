@@ -8,6 +8,7 @@ import (
 	"testing"
 
 	"reasonix/internal/agent"
+	"reasonix/internal/provider"
 )
 
 func TestCollectQualityProducesPublicSafeSummary(t *testing.T) {
@@ -113,6 +114,16 @@ func TestCollectQualityWithoutTelemetryStaysUseful(t *testing.T) {
 	}
 	if len(report.Warnings) != 1 || !strings.Contains(report.Warnings[0], "telemetry") {
 		t.Fatalf("warnings = %v", report.Warnings)
+	}
+}
+
+func TestQualityTranscriptExcludesPinnedContextRevisions(t *testing.T) {
+	report := summarizeQualityTranscript([]provider.Message{
+		{Role: provider.RoleUser, Origin: provider.MessageOriginHost, Content: "<pinned_context_revision>private pinned body</pinned_context_revision>"},
+		{Role: provider.RoleUser, Content: "visible question"},
+	})
+	if report.Messages != 1 || report.UserMessages != 1 {
+		t.Fatalf("quality transcript = %+v, want one visible user message", report)
 	}
 }
 

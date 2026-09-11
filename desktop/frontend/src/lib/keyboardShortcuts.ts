@@ -1,3 +1,4 @@
+import { useAppNavigationStore } from "../store/appNavigation";
 import { useEffect, useState, type DependencyList } from "react";
 import type { DictKey } from "./i18n";
 
@@ -512,6 +513,10 @@ export function useGlobalShortcut(
     const platform = detectShortcutPlatform();
     const onKey = (event: globalThis.KeyboardEvent) => {
       if (isShortcutRecorderTarget(event.target)) return;
+      if (useAppNavigationStore.getState().page.kind !== "workspace") {
+        if (!["commandPalette.open", "settings.open", "app.newSession", "tab.close", "shortcuts.show", "textSize.increase", "textSize.decrease", "textSize.reset"].includes(action)) return;
+        if (document.querySelector('[aria-modal="true"]') && !action.startsWith("textSize.")) return;
+      }
       const editableTarget = isEditableTarget(event.target);
       if (!definition.allowInEditable && editableTarget) return;
       // Existing installations may already have a global action stored on

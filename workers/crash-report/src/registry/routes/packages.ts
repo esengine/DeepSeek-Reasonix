@@ -5,7 +5,7 @@ import { repos } from "../db";
 import { requireAuth, currentUser } from "../http/auth";
 import { writeRateLimit } from "../http/ratelimit";
 import { ApiError } from "../http/errors";
-import { parseBody, parseQuery, PublishSchema, ListQuerySchema } from "../lib/validation";
+import { parseBody, parseQuery, PublishSchema, ListQuerySchema, VersionQuerySchema } from "../lib/validation";
 
 const packages = new Hono<AppEnv>();
 
@@ -23,11 +23,12 @@ packages.get("/", async (c) => {
 
 packages.get("/:handle/:name", async (c) => {
   const slug = `${c.req.param("handle")}/${c.req.param("name")}`;
+  const page = parseQuery(c, VersionQuerySchema);
   const { packages: repo } = repos(c.env);
   const row = await repo.bySlug(slug);
   if (!row || row.status !== "active") throw new ApiError(404, "not_found", "No such package.");
-  const versions = await repo.versions(row.id);
-  return c.json({ package: toPackageDTO(row), versions });
+  const versions = await repo.versions(row.id, page);
+  return c.json({ package: toPackageDTO(row), ...versions });
 });
 
 packages.post("/", writeRateLimit, requireAuth, async (c) => {
@@ -55,20 +56,18 @@ packages.post("/", writeRateLimit, requireAuth, async (c) => {
 packages.post("/:handle/:name/installed", writeRateLimit, async (c) => {
   const slug = `${c.req.param("handle")}/${c.req.param("name")}`;
   const { packages: repo, events } = repos(c.env);
-  const count = await repo.recordInstall(slug);
-  if (count === null) throw new ApiError(404, "not_found", "No such package.");
-  const row = await repo.bySlug(slug);
-  await events.log({ type: "install", packageId: row?.id ?? null, actorHandle: "", summary: `installed ${slug}`, now: now() });
-  if (isMilestone(count) && row) {
+  const result = await repo.recordInstall(slug, now());
+  if (result === null) throw new ApiError(404, "not_found", "No such package.");
+  if (isMilestone(result.count)) {
     await events.log({
       type: "milestone",
-      packageId: row.id,
-      actorHandle: row.scope_handle,
-      summary: `${slug} reached ${count} installs`,
+      packageId: result.packageId,
+      actorHandle: result.scopeHandle,
+      summary: `${slug} reached ${result.count} installs`,
       now: now(),
     });
   }
-  return c.json({ ok: true, installCount: count });
+  return c.json({ ok: true, installCount: result.count });
 });
 
 packages.post("/:handle/:name/star", writeRateLimit, requireAuth, async (c) => {

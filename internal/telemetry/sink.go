@@ -6,11 +6,11 @@ import (
 	"net"
 	"regexp"
 	"runtime"
+	"slices"
 	"strings"
 	"time"
 
 	"reasonix/internal/event"
-	"reasonix/internal/evidence"
 	"reasonix/internal/netclient"
 	"reasonix/internal/provider"
 	"reasonix/internal/recovery"
@@ -23,7 +23,6 @@ type Options struct {
 	Interactive    bool
 	Proxy          netclient.ProxySpec
 	CLIMode        string
-	Profile        string
 	PermissionMode string
 	SessionMode    string
 	Language       string
@@ -55,7 +54,6 @@ func Start(opts Options) *Reporter {
 			{Signal: "client_surface", Bucket: "cli", Count: 1},
 			{Signal: "client_version", Bucket: safeBucket(opts.Version, "other"), Count: 1},
 			{Signal: "cli_mode", Bucket: enumBucket(opts.CLIMode, "run", "tui"), Count: 1},
-			{Signal: "cli_profile", Bucket: enumBucket(opts.Profile, "economy", "balanced", "delivery"), Count: 1},
 			{Signal: "cli_permission_mode", Bucket: permissionBucket(opts.PermissionMode), Count: 1},
 			{Signal: "cli_session_mode", Bucket: enumBucket(opts.SessionMode, "fresh", "resume", "continue", "copy"), Count: 1},
 			{Signal: "settings_language", Bucket: languageBucket(opts.Language), Count: 1},
@@ -69,7 +67,7 @@ func (r *Reporter) Wrap(inner event.Sink) event.Sink {
 	if r == nil {
 		return inner
 	}
-	return &sink{inner: inner, reporter: r, counts: countersFrom(r.static)}
+	return &sink{AuditForwarder: event.AuditForwarder{Inner: inner}, inner: inner, reporter: r, counts: countersFrom(r.static)}
 }
 
 func (r *Reporter) RecordRecovery(m recovery.Metrics) {
@@ -113,6 +111,7 @@ func (r *Reporter) append(counts map[string]int) {
 }
 
 type sink struct {
+	event.AuditForwarder
 	inner          event.Sink
 	reporter       *Reporter
 	counts         map[string]int
@@ -124,10 +123,6 @@ type sink struct {
 func (s *sink) Emit(e event.Event) {
 	s.observe(e)
 	s.inner.Emit(e)
-}
-
-func (s *sink) RecordReadinessAudit(a evidence.ReadinessAudit) {
-	event.RecordReadinessAudit(s.inner, a)
 }
 
 func (s *sink) RecordProtocolRecovery(a event.ProtocolRecoveryAudit) {
@@ -217,10 +212,8 @@ func safeBucket(value, fallback string) string {
 
 func enumBucket(value string, allowed ...string) string {
 	value = strings.ToLower(strings.TrimSpace(value))
-	for _, item := range allowed {
-		if value == item {
-			return value
-		}
+	if slices.Contains(allowed, value) {
+		return value
 	}
 	return "other"
 }
@@ -367,6 +360,12 @@ func exitBucket(e event.Event) string {
 	}
 	if e.Outcome == event.TurnOutcomeRecoveryPaused {
 		return "recovery_paused"
+	}
+	if e.Outcome == event.TurnOutcomeCompletionUncertain {
+		return "completion_uncertain"
+	}
+	if e.Outcome == event.TurnOutcomeIncompleteRead {
+		return "incomplete_read"
 	}
 	if e.Err != nil {
 		return "error"

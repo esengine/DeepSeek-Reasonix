@@ -9,7 +9,7 @@
 //
 // The package is frontend-agnostic: all interactivity flows through callbacks
 // (HostKeyPrompt, SecretPrompt) and status subscriptions, so the CLI, chat
-// TUI, and the Wails desktop consume the same surface.
+// TUI, and the desktop app consume the same surface.
 package remote
 
 import (
@@ -188,7 +188,7 @@ func (p BackoffPolicy) max() time.Duration {
 func (p BackoffPolicy) delay(attempt int) time.Duration {
 	d := float64(p.initial())
 	f := p.factor()
-	for i := 0; i < attempt; i++ {
+	for range attempt {
 		d *= f
 		if d >= float64(p.max()) {
 			return p.max()

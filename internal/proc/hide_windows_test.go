@@ -48,3 +48,16 @@ func TestHideWindowPreservesStdoutCapture(t *testing.T) {
 		t.Fatalf("output = %q, want it to contain reasonix-ok", out)
 	}
 }
+
+func TestHideConsolePreservesGUIVisibilityAndExistingFlags(t *testing.T) {
+	const createNewProcessGroup = 0x00000200
+	cmd := exec.Command("desktop.exe")
+	cmd.SysProcAttr = &syscall.SysProcAttr{CreationFlags: createNewProcessGroup}
+	HideConsole(cmd)
+	if cmd.SysProcAttr.HideWindow {
+		t.Fatal("console suppression must not hide the desktop GUI")
+	}
+	if got := cmd.SysProcAttr.CreationFlags; got != createNewProcessGroup|createNoWindow {
+		t.Fatalf("creation flags = %#x", got)
+	}
+}

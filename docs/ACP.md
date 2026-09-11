@@ -13,6 +13,12 @@ agent over standard input and output. Editors and other ACP hosts launch the
 process, open one or more workspace-scoped sessions, and receive streamed
 messages, tool activity, plans, permission requests, and configuration updates.
 
+Session status usage objects may include structured `costQuote` (original
+currency, `originalTotals`, identity/official-table valuations,
+`costComplete`, `displayComplete`, `displayStatus`, and `billingMode`) alongside legacy
+`estimatedCost` / `currency` aliases that mirror the selected display valuation.
+See [Billing](./BILLING.md).
+
 ## Start the agent
 
 An ACP host should launch one of these commands:
@@ -20,12 +26,12 @@ An ACP host should launch one of these commands:
 ```sh
 reasonix acp
 reasonix acp --model deepseek-pro
-reasonix acp --profile delivery
+reasonix acp
 ```
 
 `--model` selects the startup model when the client does not override it.
-`--profile` sets the startup work mode to `economy`, `balanced`, or `delivery`.
-Both remain session-configurable after initialization.
+Ordinary requests always enter the executor. There is no automatic simple /
+light / full task mode. Verification obligations come from real tool actions.
 
 Standard output is reserved for ACP messages. Reasonix sends diagnostics to
 standard error, so hosts must not merge the two streams. Run `reasonix setup`
@@ -71,14 +77,46 @@ the following capability shape (irrelevant fields omitted):
 When the client advertises `fs.readTextFile`, `fs.writeTextFile`, or
 `terminal`, Reasonix routes eligible file operations through the editor's
 unsaved buffers and eligible foreground commands through a client-owned
-terminal. Without those client capabilities, the normal workspace tools run
-locally inside the Reasonix process.
+terminal. Every file tool takes part — reads, edits and writes alike — so an
+edit applies to what the editor currently shows instead of to the last saved
+copy on disk. A non-UTF-8 file is not eligible: the ACP file methods are
+text-only, so it stays on the local encoding-preserving path and keeps its
+original charset. Without those client capabilities, the normal workspace
+tools run locally inside the Reasonix process.
+
+## Opt-in MCP interaction extension
+
+Hosts supporting MCP elicitation advertise this in `initialize.clientCapabilities`:
+
+```json
+{"_meta":{"reasonix.io":{"mcpInteraction":{"supported":true,"schemaVersion":1}}}}
+```
+
+Reasonix advertises the matching capability under
+`agentCapabilities._meta.reasonix.io.mcpInteraction`, including the method
+`_reasonix.io/mcp/request_interaction`. Negotiated sessions use the interactive
+MCP host profile. Clients without this exact opt-in keep the core profile and
+receive no new reverse requests. This applies to new, loaded and rebuilt sessions.
+
+The reverse request contains `sessionId`, `promptId`, `turnId`, `server`, `mode`
+and `message`, plus `requestedSchema` for a form or `url` and `elicitationId` for
+URL mode. Respond with `{"action":"accept","content":{}}`,
+`{"action":"decline"}` or `{"action":"cancel"}`. Validate the requested form;
+URL flows require user interaction and must not send credentials as form content.
+Hosts that cannot render a requested interaction should cancel it.
+
+Replies belong to the originating controller and turn. Cancellation, malformed
+replies and rejected URLs cancel the interaction; content is ignored unless the
+action is `accept`. Reasonix persists the decision through the controller before
+releasing its MCP waiter. This does not replace standard
+`session/request_permission` or change tool permission policy. The negotiated
+host profile affects MCP capability/cache identity; transcript schema is unchanged.
 
 ## Session lifecycle
 
 Each ACP session owns an independent Reasonix controller, workspace root, model,
-work mode, collaboration mode, approval mode, MCP set, and persisted transcript.
-State does not leak between sessions.
+collaboration mode, approval mode, MCP set, and persisted transcript. State does
+not leak between sessions.
 
 | Method | Behavior |
 | --- | --- |
@@ -106,10 +144,9 @@ one mode selector:
 | Collaboration mode | `normal`, `plan`, `goal` | `modes` and `session/set_mode` |
 | Model | Configured `provider/model` entries | `configOptions` with id `model` |
 | Reasoning effort | Provider-supported levels or `auto` | `configOptions` with id `effort` |
-| Work mode | `economy`, `balanced`, `delivery` | `configOptions` with id `work_mode` |
 | Tool approval | `ask`, `auto`, `yolo` | `configOptions` with id `tool_approval` |
 
-Use `session/set_config_option` for model, effort, work mode, and tool approval.
+Use `session/set_config_option` for model, effort, and tool approval.
 Its parameters are `sessionId`, `configId` and `value`, where `configId` is the
 `id` of the option as advertised in `configOptions`:
 
@@ -129,9 +166,15 @@ Its parameters are `sessionId`, `configId` and `value`, where `configId` is the
 Note that the field is `configId`, not `optionId`. The result is the full
 refreshed `configOptions` array. An unknown id returns `-32602 InvalidParams`.
 
-Model, effort, and work-mode changes rebuild the session controller while
-preserving its history and the other axes. Tool-approval changes update the
-gate without rebuilding the controller.
+Model and effort changes rebuild the session controller while preserving its
+history and the other axes. Tool-approval changes update the gate in place
+without rebuilding the controller.
+
+Execution modes are gone. For one compatibility version, clients that still
+send `session/set_config_option` with `configId` `agent_preset` or `work_mode`
+(including legacy aliases `profile`, `runtime_profile`, `token_mode`) receive a
+successful no-op: nothing switches, nothing rebuilds, and the result carries a
+`deprecatedNotice` explaining the adaptive standard execution.
 
 For older clients, `session/set_model` remains available. The legacy
 `session/set_mode` values `default` and `auto` are also accepted as Normal + Ask
@@ -154,6 +197,34 @@ audio are not advertised. During a turn, Reasonix may send:
 Hosts should keep the `session/prompt` request open until Reasonix returns its
 stop reason, while continuing to process requests and notifications in both
 directions.
+
+Reasonix emits only ACP v1 stop reasons. A completed turn that still needs a
+final-readiness check sends a `[warning]` message chunk and returns `end_turn`;
+its vendor status remains `readiness_paused` so the host can offer recovery.
+An explicit model-round limit (`max_steps`) sends a `[warning]`, returns
+`max_turn_requests`, and records a paused vendor outcome. A host task-time,
+token, or cost budget also sends a `[warning]` and records a paused outcome,
+but returns `end_turn` because ACP v1 has no task-budget-specific stop reason.
+The completion validator has been removed. A clean model stop without tool
+calls returns `end_turn`; a response with tool calls continues through the
+agent loop, and a truly empty response is retried at the frozen-request
+boundary. Legacy `completion_validation`, `completion_evaluator_model`, and
+`REASONIX_COMPLETION_VALIDATION_MODE` settings remain readable but are ignored
+and are no longer emitted. Host-owned readiness, budget, tool-safety, and
+recovery boundaries remain active.
+Client cancellation returns `cancelled`, even when the interrupted runner exits
+without an error. Other provider, tool, or runtime failures return a JSON-RPC
+`-32603 InternalError` whose message contains a bounded, credential-redacted
+cause; they do not return a successful prompt result with a non-standard
+`stopReason`.
+
+When the status phase is `readiness_paused`, resume that exact check with a
+`session/prompt` request whose optional `action` is
+`"final_readiness_recovery"`. Sending `/continue-checks` as the sole text block
+is the compatibility form. Both forms consume a one-shot, persisted host
+checkpoint; ordinary prompt text never inherits it, and a stale action after a
+newer user turn is rejected as JSON-RPC `-32600 InvalidRequest` without
+publishing or persisting a synthetic status turn.
 
 ## Mid-turn steering extension
 
@@ -191,22 +262,50 @@ Call the advertised method while `session/prompt` is active:
 }
 ```
 
-A successful `{}` result means the active turn accepted the guidance. Reasonix
-adds it as a user message before the next safe model-call boundary, without
-cancelling the turn or consuming an extra tool-step budget. The message is
-persisted in normal history; transcript replay shows the original user text,
-not Reasonix's internal steer marker.
+A persistent session returns an item id and disposition:
+
+```json
+{"itemId":"inbox-item-id","disposition":"steer_accepted"}
+```
+
+Reasonix durably commits the guidance before returning. `steer_accepted` means
+the active turn accepted it; `queued_followup` means that admission lost a race
+or no turn was active, so the same item remains queued for a later turn. A
+pathless compatibility session may omit `itemId` and still returns
+`steer_accepted`. Applied guidance is persisted in normal history; transcript
+replay shows the original user text, not Reasonix's internal steer marker.
 
 | Condition | JSON-RPC result |
 | --- | --- |
-| Active prompt accepted the guidance | `{}` |
+| Active prompt accepted durable guidance | `{"itemId":"...","disposition":"steer_accepted"}` |
+| Guidance persisted but active admission was rejected | `{"itemId":"...","disposition":"queued_followup"}` |
 | Unknown session or empty prompt | `-32602 InvalidParams` |
-| Session has no active prompt | `-32600 InvalidRequest` |
+| Pathless compatibility session has no active prompt | `-32600 InvalidRequest` |
 | Client calls `session/steer` | `-32601 MethodNotFound` |
 
-On `InvalidRequest`, the guidance was not queued. A client may wait for the
-active prompt to finish and offer the text as a normal new prompt, but it should
-not silently report the failed steer as accepted.
+On `InvalidRequest`, the compatibility session did not queue the guidance.
+
+## Durable session inbox extension
+
+Discover the versioned queue at
+`agentCapabilities._meta["reasonix.io"].sessionInbox`. Schema version 1
+advertises method names in its `methods` map; clients must use those advertised
+names rather than constructing vendor method strings.
+
+| Key | Purpose | Main parameters |
+| --- | --- | --- |
+| `enqueue` | Persist a follow-up or steer | `sessionId`, `text`, optional `intent`, `idempotencyKey` |
+| `list` | Read metadata, capacity, pause and recovery state | `sessionId` |
+| `get` | Read one full envelope on demand | `sessionId`, `itemId` |
+| `update` / `delete` | Edit or delete pending work | `sessionId`, `itemId` |
+| `move` | Reorder pending work | `sessionId`, `itemId`, zero-based `toIndex` |
+| `setPaused` | Pause or resume dispatch | `sessionId`, `paused` |
+| `retry` / `refresh` | Retry uncertain work or re-freeze references | `sessionId`, `itemId` |
+
+`enqueue` returns `itemId`, `disposition`, `position`, `paused`, and
+`idempotent`. List responses contain previews and byte counts, never prompt
+bodies. A recovered inbox is paused; clients should let users inspect it before
+calling `setPaused` with `false`.
 
 ## Runtime reload and extension surface
 
@@ -238,8 +337,8 @@ any other slash command.
 | --- | --- | --- |
 | Existing ACP v1 methods | Their names and response shapes are unchanged. | Compatible |
 | Capability `_meta` | Unknown metadata may be ignored. | Compatible |
-| Persisted transcripts | No new persisted schema is required. | Compatible |
-| CLI, Desktop, and Bot steering | Their existing idle fallback remains unchanged. | Compatible |
+| Persisted transcripts | Transcript schema is unchanged; the inbox is a versioned sidecar. | Compatible |
+| CLI, Desktop, and Bot steering | Rejected steers remain durable follow-ups. | Compatible |
 
 Steering appends a user-requested message to normal conversation history. It
 does not change the system prompt, tool schemas, tool order, or other stable
@@ -256,7 +355,7 @@ earlier prefix remains reusable.
    a prompt is running.
 5. Show steer UI only when the Reasonix capability is advertised and a prompt
    is active.
-6. Treat a successful steer response as queued guidance, not immediate model
-   completion.
+6. Branch on the steer `disposition`; both accepted steer and queued follow-up
+   are durable, but only the former can affect the active turn.
 7. Use `session/close` for resource cleanup and `session/delete` only when the
    user intends to remove persisted history.

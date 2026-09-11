@@ -19,8 +19,8 @@ var githubAPIBaseURL = "https://api.github.com"
 // plan turns a request into a list of actions plus a warnings slice. It
 // does not touch the disk; the apply phase is responsible for side effects.
 func (t *installSourceTool) plan(ctx context.Context, req request) ([]action, []string, error) {
-	if strings.HasPrefix(req.Source, "git:github.com/") {
-		req.Source = "https://github.com/" + strings.TrimPrefix(req.Source, "git:github.com/")
+	if after, ok := strings.CutPrefix(req.Source, "git:github.com/"); ok {
+		req.Source = "https://github.com/" + after
 	}
 	if isURL(req.Source) {
 		return t.planURL(ctx, req)

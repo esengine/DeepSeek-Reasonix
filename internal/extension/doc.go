@@ -4,6 +4,11 @@
 // Contribution with explicit provenance, assembled by a deterministic Builder
 // into an immutable RuntimeSnapshot.
 //
+// Spatiotemporal composability (plugin/runtime v2) adds EffectScope-owned live
+// resources, a typed DependencyGraph, component epochs, and RuntimePlan-driven
+// activate/publish/drain. RuntimeSnapshot stays configuration-only; live
+// handles (processes, streams, watchers, goroutines) never enter the snapshot.
+//
 // The kernel exists so that shadowing, conflicts, and ordering stop being
 // emergent side effects of whichever discovery path ran last. Discovery still
 // lives in the existing packages (internal/skill, internal/command,
@@ -15,8 +20,8 @@
 // silent overrides, and hooks/interceptors stay additive. Callers assembling
 // pre-kernel legacy resources (boot) can opt into ConflictCollect, which
 // records such conflicts on the snapshot's Diagnostics and keeps the
-// deterministic winner instead of failing the build; v1 extensions keep the
-// default ConflictFail.
+// deterministic winner instead of failing the build; native extensions keep
+// the default ConflictFail.
 //
 // A RuntimeSnapshot is immutable after Freeze: every accessor returns
 // defensive copies, so a snapshot can be shared across turns, subagents, and

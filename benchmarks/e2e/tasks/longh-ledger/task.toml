@@ -1,0 +1,9 @@
+prompt = """Implement ledger.py so that `python3 ledger.py` processes transactions.txt and writes the results:
+- each line is `deposit ACCT AMOUNT`, `withdraw ACCT AMOUNT`, or `transfer SRC DST AMOUNT`; amounts are positive integers; every account starts at 0
+- process lines in order; a withdraw or transfer whose amount exceeds the source balance is rejected: append the line verbatim to rejected.txt (in input order) and apply nothing
+- a transfer debits SRC and credits DST
+- afterwards write balances.json: a JSON object mapping every account that appeared to its final integer balance, keys sorted
+- create rejected.txt even when nothing was rejected"""
+class = "long-horizon"
+max_steps = 30
+timeout_sec = 600

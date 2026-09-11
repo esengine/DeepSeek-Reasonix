@@ -44,10 +44,7 @@ func boxed(lines []string) string {
 	b.WriteString(accent("╭" + bar + "╮"))
 	b.WriteByte('\n')
 	for _, l := range lines {
-		gap := inner - visibleWidth(l) - 2
-		if gap < 0 {
-			gap = 0
-		}
+		gap := max(inner-visibleWidth(l)-2, 0)
 		b.WriteString(accent("│"))
 		b.WriteByte(' ')
 		b.WriteString(l)

@@ -56,23 +56,39 @@ done <<< "$changed_input"
 
 cache_sensitive=()
 system_prompt_sensitive=()
+standing_instruction_changed=()
 
 for file in "${changed_files[@]:-}"; do
   case "$file" in
+    REASONIX.md|AGENTS.md|CLAUDE.md|\
+    REASONIX.local.md|AGENTS.local.md|CLAUDE.local.md|\
+    */REASONIX.md|*/AGENTS.md|*/CLAUDE.md|\
+    */REASONIX.local.md|*/AGENTS.local.md|*/CLAUDE.local.md)
+      standing_instruction_changed+=("$file")
+      cache_sensitive+=("$file")
+      system_prompt_sensitive+=("$file")
+      ;;
     desktop/session_prompt.go|\
     internal/agent/agent.go|\
     internal/agent/ask.go|\
     internal/agent/cache*|\
     internal/agent/compact*|\
+    internal/agent/goal_display.go|\
     internal/agent/parallel_tasks.go|\
+    internal/agent/planner_registry.go|\
     internal/agent/prune*|\
     internal/agent/subagent_registry*|\
+    internal/agent/subagent_identity.go|\
     internal/agent/task.go|\
     internal/boot/*|\
     internal/command/slashtool.go|\
     internal/config/config.go|\
     internal/config/system_prompt*|\
+    internal/control/goal.go|\
+    internal/control/input.go|\
+    internal/control/turn_orchestrator.go|\
     internal/environment/*|\
+    internal/goaleval/*|\
     internal/history/tool.go|\
     internal/installsource/*|\
     internal/lsp/tool.go|\
@@ -81,6 +97,7 @@ for file in "${changed_files[@]:-}"; do
     internal/plugin/*|\
     internal/provider/*|\
     internal/skill/*|\
+    internal/taskintent/*|\
     internal/tool/*|\
     scripts/cache-guard.sh|\
     scripts/check-cache-impact.sh)
@@ -153,6 +170,14 @@ require_review_field() {
 
 require_field "Cache-impact"
 require_field "Cache-guard"
+
+if [[ "${#standing_instruction_changed[@]}" -gt 0 ]]; then
+  cache_impact="$(field_value "Cache-impact" || true)"
+  cache_impact_lower="$(printf '%s' "$cache_impact" | tr '[:upper:]' '[:lower:]')"
+  if [[ "$cache_impact_lower" =~ ^none($|[[:space:]:-]) ]]; then
+    failures+=("Cache-impact: cannot be none when standing instruction files change")
+  fi
+fi
 
 if [[ "${#system_prompt_sensitive[@]}" -gt 0 ]]; then
   require_review_field "System-prompt-review"

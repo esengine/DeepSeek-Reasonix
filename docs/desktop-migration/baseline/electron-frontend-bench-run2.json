@@ -1,0 +1,203 @@
+{
+  "startedAt": "2026-09-08T20:54:42.790Z",
+  "url": "http://127.0.0.1:4617/?mock=bench&bench=1",
+  "gates": {
+    "firstPaintP95Ms": 100,
+    "interactiveP95Ms": 300,
+    "inpP95Ms": 200,
+    "longTaskP95Ms": 50,
+    "longTaskMaxMs": 500,
+    "markdownParseMaxMs": 3000,
+    "idleCpuPercent": 3,
+    "heapGrowthMiB": 20
+  },
+  "switches": 100,
+  "coldRuns": 5,
+  "checks": [
+    {
+      "name": "A first-paint P95",
+      "value": 20,
+      "gate": 100,
+      "pass": true,
+      "unit": "ms"
+    },
+    {
+      "name": "A interactive P95",
+      "value": 337.09999990463257,
+      "gate": 300,
+      "pass": false,
+      "unit": "ms"
+    },
+    {
+      "name": "B switch latency P95 (click→target session rendered)",
+      "value": 475.2000000476837,
+      "gate": 300,
+      "pass": false,
+      "unit": "ms"
+    },
+    {
+      "name": "B activation ready P95",
+      "value": 100.69999992847443,
+      "gate": 300,
+      "pass": true,
+      "unit": "ms"
+    },
+    {
+      "name": "B input-event P95 (INP-ish)",
+      "value": 24,
+      "gate": 200,
+      "pass": true,
+      "unit": "ms"
+    },
+    {
+      "name": "B long-task P95",
+      "value": 79,
+      "gate": 50,
+      "pass": false,
+      "unit": "ms"
+    },
+    {
+      "name": "B long-task max",
+      "value": 84,
+      "gate": 500,
+      "pass": true,
+      "unit": "ms"
+    },
+    {
+      "name": "B markdown Worker completed parses (minimum)",
+      "value": 23,
+      "gate": 1,
+      "pass": true,
+      "unit": ""
+    },
+    {
+      "name": "B markdown Worker max parse",
+      "value": 721.4000000953674,
+      "gate": 3000,
+      "pass": true,
+      "unit": "ms"
+    },
+    {
+      "name": "B settled renderer task time",
+      "value": 2.7071666666666663,
+      "gate": 3,
+      "pass": true,
+      "unit": "%"
+    },
+    {
+      "name": "B retained heap growth",
+      "value": 3.524907112121582,
+      "gate": 20,
+      "pass": true,
+      "unit": "MiB"
+    },
+    {
+      "name": "B cache: body bytes within budget",
+      "value": 1.6838359832763672,
+      "gate": 32,
+      "pass": true,
+      "unit": "MiB"
+    },
+    {
+      "name": "B cache: markdown bytes within budget",
+      "value": 10.057119369506836,
+      "gate": 16,
+      "pass": true,
+      "unit": "MiB"
+    },
+    {
+      "name": "B cache: resident sessions",
+      "value": 1,
+      "gate": 3,
+      "pass": true,
+      "unit": ""
+    },
+    {
+      "name": "B DOM node growth vs warmup baseline",
+      "value": 0,
+      "gate": 10,
+      "pass": true,
+      "unit": "%"
+    }
+  ],
+  "scenarioA": {
+    "firstPaintMs": {
+      "n": 5,
+      "p50": 20,
+      "p95": 20,
+      "max": 20
+    },
+    "interactiveMs": {
+      "n": 5,
+      "p50": 323.39999997615814,
+      "p95": 337.09999990463257,
+      "max": 337.09999990463257
+    }
+  },
+  "scenarioB": {
+    "switchMs": {
+      "n": 100,
+      "p50": 444.89999997615814,
+      "p95": 475.2000000476837,
+      "max": 481.10000002384186
+    },
+    "activationReadyMs": {
+      "n": 100,
+      "p50": 76.39999997615814,
+      "p95": 100.69999992847443,
+      "max": 101.89999997615814
+    },
+    "longTasksMs": {
+      "n": 200,
+      "p50": 74,
+      "p95": 79,
+      "max": 84
+    },
+    "inputEventsMs": {
+      "n": 2607,
+      "p50": 24,
+      "p95": 24,
+      "max": 32
+    },
+    "heap": {
+      "baselineUsedMiB": 39.29997539520264,
+      "finalUsedMiB": 42.82488250732422,
+      "growthMiB": 3.524907112121582
+    },
+    "domNodes": {
+      "baseline": 7213,
+      "final": 7213
+    },
+    "transcriptCache": {
+      "residentSessions": 1,
+      "maxResidentSessions": 3,
+      "bodyBytes": 1765630,
+      "bodyBudgetBytes": 33554432,
+      "markdownBytes": 10545654,
+      "markdownBudgetBytes": 16777216,
+      "historyEvictions": 0,
+      "markdownEvictions": 0
+    },
+    "markdownWorker": {
+      "pending": 0,
+      "completed": 23,
+      "avgParseMs": 174.68260871845743,
+      "maxParseMs": 721.4000000953674,
+      "fallbackActive": false,
+      "workerFailures": 0
+    },
+    "idleMainThreadPercent": 2.7071666666666663,
+    "baselineCache": {
+      "residentSessions": 1,
+      "maxResidentSessions": 3,
+      "bodyBytes": 1765630,
+      "bodyBudgetBytes": 33554432,
+      "markdownBytes": 10545654,
+      "markdownBudgetBytes": 16777216,
+      "historyEvictions": 0,
+      "markdownEvictions": 0
+    }
+  },
+  "finishedAt": "2026-09-08T20:55:42.044Z",
+  "verdict": "FAIL"
+}

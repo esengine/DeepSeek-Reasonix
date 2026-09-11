@@ -7,7 +7,7 @@ import (
 	"testing"
 )
 
-// --- splitFrontmatter ---
+// splitFrontmatter
 
 func TestSplitFrontmatterNoFence(t *testing.T) {
 	fm, body := splitFrontmatter("just plain text\nno frontmatter")
@@ -79,7 +79,7 @@ func TestSplitFrontmatterQuotedValues(t *testing.T) {
 	}
 }
 
-// --- slug ---
+// slug
 
 func TestSlug(t *testing.T) {
 	cases := []struct {
@@ -119,7 +119,7 @@ func TestStoreSaveUnicodeAndRejectsEmptySlug(t *testing.T) {
 	}
 }
 
-// --- oneLine ---
+// oneLine
 
 func TestOneLine(t *testing.T) {
 	cases := []struct {
@@ -140,7 +140,7 @@ func TestOneLine(t *testing.T) {
 	}
 }
 
-// --- render ---
+// render
 
 func TestRenderRoundTrip(t *testing.T) {
 	m := Memory{
@@ -174,7 +174,7 @@ func TestRenderNormalizesType(t *testing.T) {
 	}
 }
 
-// --- loadMemory ---
+// loadMemory
 
 func TestLoadMemoryNoFrontmatter(t *testing.T) {
 	dir := t.TempDir()
@@ -213,7 +213,7 @@ func TestLoadMemoryEmptyFile(t *testing.T) {
 	}
 }
 
-// --- Store.List edge cases ---
+// Store.List edge cases
 
 func TestListSkipsNonMdFiles(t *testing.T) {
 	dir := t.TempDir()
@@ -252,7 +252,7 @@ func TestListSortedByName(t *testing.T) {
 	}
 }
 
-// --- Store.Save edge cases ---
+// Store.Save edge cases
 
 func TestSaveEmptyName(t *testing.T) {
 	s := Store{Dir: t.TempDir()}
@@ -274,7 +274,7 @@ func TestSaveCreatesDir(t *testing.T) {
 	}
 }
 
-// --- Store.Path ---
+// Store.Path
 
 func TestStorePath(t *testing.T) {
 	dir := filepath.Join(t.TempDir(), "memory")

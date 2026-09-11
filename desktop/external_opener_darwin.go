@@ -48,7 +48,7 @@ func darwinInstalledApplicationIndex() map[string]string {
 	defer cancel()
 	out, err := exec.CommandContext(ctx, "/usr/bin/mdfind", "kMDItemContentType == 'com.apple.application-bundle'").Output()
 	if err == nil {
-		for _, line := range strings.Split(string(out), "\n") {
+		for line := range strings.SplitSeq(string(out), "\n") {
 			add(line)
 		}
 	}
@@ -169,12 +169,13 @@ func platformExternalOpenerIconDataURL(spec externalOpenerSpec) string {
 }
 
 func darwinExternalOpenerCommand(spec externalOpenerSpec, path string) *exec.Cmd {
+	launchPath := externalOpenerLaunchPath(spec, path)
 	if spec.LaunchMode == "ghostty" {
-		return exec.Command("/usr/bin/open", "-na", spec.Target, "--args", "--working-directory="+path)
+		return exec.Command("/usr/bin/open", "-na", spec.Target, "--args", "--working-directory="+launchPath)
 	}
-	return exec.Command("/usr/bin/open", "-a", spec.Target, path)
+	return exec.Command("/usr/bin/open", "-a", spec.Target, launchPath)
 }
 
-func launchPlatformExternalOpener(spec externalOpenerSpec, path string) error {
+func launchPlatformExternalOpener(spec externalOpenerSpec, path string, _ bool) error {
 	return startDetachedExternalOpener(darwinExternalOpenerCommand(spec, path))
 }

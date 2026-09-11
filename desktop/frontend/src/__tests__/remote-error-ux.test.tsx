@@ -1,7 +1,7 @@
 // Run: tsx src/__tests__/remote-error-ux.test.tsx
 
-import { JSDOM } from "jsdom";
 import React from "react";
+import { JSDOM } from "jsdom";
 import { act } from "react";
 import { createRoot } from "react-dom/client";
 
@@ -29,6 +29,10 @@ const dom = new JSDOM("<!doctype html><html><body><div id=\"root\"></div></body>
 (globalThis as typeof globalThis & { IS_REACT_ACT_ENVIRONMENT: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
 globalThis.window = dom.window as unknown as Window & typeof globalThis;
 globalThis.document = dom.window.document;
+// Pin the locale source to the JSDOM navigator (en-US): Node's own global
+// navigator follows the machine's system language, which flips detectLocale
+// to Chinese on zh hosts and breaks the English assertions below.
+Object.defineProperty(globalThis, "navigator", { configurable: true, value: dom.window.navigator });
 globalThis.Node = dom.window.Node;
 globalThis.HTMLElement = dom.window.HTMLElement;
 globalThis.Event = dom.window.Event;
@@ -51,6 +55,7 @@ const host: RemoteHostView = {
   proxyJump: "",
   defaultWorkspace: "/srv/app",
   serveInstall: "auto",
+  credentialMode: "remote",
   useSSHConfig: false,
 };
 const rawError = "remote: host key mismatch (/home/dev/.ssh/known_hosts:7)";

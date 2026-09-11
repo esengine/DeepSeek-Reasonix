@@ -36,7 +36,7 @@ export type RemoteState = {
   hosts: RemoteHostView[];
   statuses: Record<string, RemoteConnectionStatus>;
   forwards: Record<string, RemoteForwardView[]>;
-  servers: Record<string, RemoteServerView>;
+  servers: Record<string, Record<string, RemoteServerView>>;
   pendingFingerprint: RemoteFingerprintView | null;
   pendingSecretPrompt: RemoteSecretPromptView | null;
   statusPopoverRequest: RemoteStatusPopoverRequest | null;
@@ -112,7 +112,12 @@ export const useRemoteStore = create<RemoteState>((set) => ({
     set((state) => ({ forwards: { ...state.forwards, [hostId]: forwards } })),
 
   setServer: (s) =>
-    set((state) => ({ servers: { ...state.servers, [s.hostId]: s } })),
+    set((state) => ({
+      servers: {
+        ...state.servers,
+        [s.hostId]: { ...state.servers[s.hostId], [s.workspace]: s },
+      },
+    })),
 
   clearPendingFingerprint: (expected) =>
     set((state) => {

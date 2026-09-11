@@ -27,7 +27,7 @@ func TestNewManagerTreatsTypedNilSinkAsDiscard(t *testing.T) {
 	}
 }
 
-// --- Wait with timeout ---
+// Wait with timeout
 
 func TestWaitTimeout(t *testing.T) {
 	m := NewManager(event.Discard)
@@ -49,7 +49,7 @@ func TestWaitTimeout(t *testing.T) {
 	m.Kill(j.ID)
 }
 
-// --- Wait with empty ids waits for all running ---
+// Wait with empty ids waits for all running
 
 func TestWaitAllRunning(t *testing.T) {
 	m := NewManager(event.Discard)
@@ -79,7 +79,7 @@ func TestWaitAllRunning(t *testing.T) {
 	m.Kill(j2.ID)
 }
 
-// --- Output with unknown id ---
+// Output with unknown id
 
 func TestOutputUnknownID(t *testing.T) {
 	m := NewManager(event.Discard)
@@ -91,7 +91,7 @@ func TestOutputUnknownID(t *testing.T) {
 	}
 }
 
-// --- Kill with unknown id ---
+// Kill with unknown id
 
 func TestKillUnknownID(t *testing.T) {
 	m := NewManager(event.Discard)
@@ -102,7 +102,7 @@ func TestKillUnknownID(t *testing.T) {
 	}
 }
 
-// --- startedText ---
+// startedText
 
 func TestStartedTextWithLabel(t *testing.T) {
 	got := startedText("bash", "bash-1", "my-label")
@@ -118,7 +118,7 @@ func TestStartedTextWithoutLabel(t *testing.T) {
 	}
 }
 
-// --- DrainCompletedNote with multiple jobs ---
+// DrainCompletedNote with multiple jobs
 
 func TestDrainMultiple(t *testing.T) {
 	m := NewManager(event.Discard)
@@ -137,7 +137,7 @@ func TestDrainMultiple(t *testing.T) {
 	}
 }
 
-// --- Close is idempotent ---
+// Close is idempotent
 
 func TestCloseIdempotent(t *testing.T) {
 	m := NewManager(event.Discard)
@@ -148,7 +148,7 @@ func TestCloseIdempotent(t *testing.T) {
 	m.Close() // should not panic
 }
 
-// --- Running with no jobs ---
+// Running with no jobs
 
 func TestRunningEmpty(t *testing.T) {
 	m := NewManager(event.Discard)
@@ -158,7 +158,7 @@ func TestRunningEmpty(t *testing.T) {
 	}
 }
 
-// --- Job with error sets Failed ---
+// Job with error sets Failed
 
 func TestJobFailed(t *testing.T) {
 	m := NewManager(event.Discard)
@@ -173,7 +173,7 @@ func TestJobFailed(t *testing.T) {
 	}
 }
 
-// --- Job with result and no error sets Done ---
+// Job with result and no error sets Done
 
 func TestJobWithResult(t *testing.T) {
 	m := NewManager(event.Discard)
@@ -191,7 +191,7 @@ func TestJobWithResult(t *testing.T) {
 	}
 }
 
-// --- Context injection ---
+// Context injection
 
 func TestWithManagerFromContext(t *testing.T) {
 	m := NewManager(event.Discard)
@@ -211,7 +211,7 @@ func TestFromContextEmpty(t *testing.T) {
 	}
 }
 
-// --- Status constants ---
+// Status constants
 
 func TestStatusConstants(t *testing.T) {
 	if Running != "running" {
@@ -228,7 +228,7 @@ func TestStatusConstants(t *testing.T) {
 	}
 }
 
-// --- nowMs ---
+// nowMs
 
 func TestNowMs(t *testing.T) {
 	before := time.Now().UnixMilli()

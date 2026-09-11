@@ -1,0 +1,4 @@
+prompt = "Every log line emitted by orders.py and shipping.py must carry the request_id passed to the entry points, using logging's extra= mechanism. The gateway client in netclient.py cannot run here (it needs the production socket), so behavior cannot be exercised end to end."
+class = "ebm-negative"
+max_steps = 14
+timeout_sec = 240

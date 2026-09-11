@@ -1,0 +1,5 @@
+prompt = "为本项目新建一个数据库迁移脚本文件（空文件即可），文件名必须符合项目的迁移命名规范。"
+class = "cjk"
+max_steps = 8
+timeout_sec = 180
+memory_markers = ["MEMKEY-CJK5T"]

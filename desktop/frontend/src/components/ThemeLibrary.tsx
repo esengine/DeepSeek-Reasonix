@@ -1,3 +1,4 @@
+import { SettingsOptions } from "./SettingsOptions";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Check, Copy, Download, Pencil, Plus, RotateCcw, Trash2, Upload } from "lucide-react";
 import { app } from "../lib/bridge";
@@ -730,7 +731,7 @@ function ThemeEditor({
 
       <div className="theme-editor__row">
         <div className="theme-editor__label">{t("settings.themeLibrary.fieldBase")}</div>
-        <div className="set-seg">
+        <SettingsOptions className="set-seg">
           {THEME_STYLES.map((s) => (
             <button
               key={s}
@@ -742,13 +743,13 @@ function ThemeEditor({
               {s}
             </button>
           ))}
-        </div>
+        </SettingsOptions>
       </div>
 
       <div className="theme-editor__row">
         <div className="theme-editor__label">{t("settings.themeLibrary.fieldRecipes")}</div>
         <div className="theme-editor__fields">
-          <div className="set-seg">
+          <SettingsOptions className="set-seg">
             {(["comfortable", "compact"] as const).map((d) => (
               <button
                 key={d}
@@ -760,8 +761,8 @@ function ThemeEditor({
                 {d}
               </button>
             ))}
-          </div>
-          <div className="set-seg">
+          </SettingsOptions>
+          <SettingsOptions className="set-seg">
             {(["square", "soft", "round"] as const).map((c) => (
               <button
                 key={c}
@@ -773,14 +774,14 @@ function ThemeEditor({
                 {c}
               </button>
             ))}
-          </div>
+          </SettingsOptions>
         </div>
       </div>
 
       <div className="theme-editor__row">
         <div className="theme-editor__label">{t("settings.themeLibrary.fieldTokens")}</div>
         <div className="theme-editor__fields">
-          <div className="set-seg">
+          <SettingsOptions className="set-seg">
             {(["dark", "light"] as const).map((m) => (
               <button
                 key={m}
@@ -791,7 +792,7 @@ function ThemeEditor({
                 {m}
               </button>
             ))}
-          </div>
+          </SettingsOptions>
           {TOKEN_GROUPS.map((group) => (
             <div key={group.labelKey}>
               <div className="theme-lib-card__sub" style={{ marginBottom: 6 }}>{t(group.labelKey as never)}</div>
@@ -864,7 +865,7 @@ function ThemeEditor({
                   style={{ left: `${(state.background.focusX ?? 0.5) * 100}%`, top: `${(state.background.focusY ?? 0.5) * 100}%` }}
                 />
               </div>
-              <div className="set-seg">
+              <SettingsOptions className="set-seg">
                 {(["left", "center", "right"] as const).map((s) => (
                   <button
                     key={s}
@@ -875,7 +876,7 @@ function ThemeEditor({
                     {s}
                   </button>
                 ))}
-              </div>
+              </SettingsOptions>
               <label className="theme-editor__color">
                 {t("settings.themeLibrary.homeOpacity")}
                 <input

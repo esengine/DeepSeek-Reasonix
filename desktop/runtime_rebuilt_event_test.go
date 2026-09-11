@@ -15,12 +15,8 @@ import (
 	"reasonix/internal/provider"
 )
 
-// TestRuntimeRebuildsEmitRuntimeRebuiltForTab pins the frontend contract the
-// prompt-chime dedupe depends on: every in-place controller replacement must
-// announce itself. Model, effort, and token-mode switches rebuild the tab's
-// controller WITHOUT an agent:ready — the rebuilt controller restarts its
-// approval/ask id counter at "1", so without runtime:rebuilt the frontend's
-// id-keyed chime dedupe mutes the first prompt after a switch.
+// TestRuntimeRebuildsEmitRuntimeRebuiltForTab pins the chime-dedupe contract:
+// model/effort rebuilds emit runtime:rebuilt; deprecated SetTokenMode does not.
 func TestRuntimeRebuildsEmitRuntimeRebuiltForTab(t *testing.T) {
 	isolateDesktopUserDirs(t)
 	setDesktopTestCredential(t, "OLD_MODEL_KEY", "sk-test")
@@ -59,14 +55,14 @@ func TestRuntimeRebuildsEmitRuntimeRebuiltForTab(t *testing.T) {
 	// The App-level queue must stay silent: ordering against the tab's agent
 	// events only holds when the notice rides the tab sink's own queue, so a
 	// notice showing up here means the routing regressed to the fallback.
-	app.runtimeEvents.emit = func(_ context.Context, name string, _ ...interface{}) {
+	app.runtimeEvents.emit = func(_ context.Context, name string, _ ...any) {
 		if name == "runtime:rebuilt" {
 			mu.Lock()
 			rebuilt = append(rebuilt, "VIA-APP-QUEUE")
 			mu.Unlock()
 		}
 	}
-	sinkEmit := func(_ context.Context, name string, payload ...interface{}) {
+	sinkEmit := func(_ context.Context, name string, payload ...any) {
 		if name != "runtime:rebuilt" {
 			return
 		}
@@ -129,10 +125,12 @@ func TestRuntimeRebuildsEmitRuntimeRebuiltForTab(t *testing.T) {
 	if err := app.SetTokenModeForTab(tab.ID, "economy"); err != nil {
 		t.Fatalf("SetTokenModeForTab: %v", err)
 	}
-	waitCount(3, "token-mode switch")
-
+	// Give a real rebuild event time to arrive if the no-op regresses.
+	time.Sleep(50 * time.Millisecond)
 	mu.Lock()
-	defer mu.Unlock()
+	if len(rebuilt) != 2 {
+		t.Fatalf("after SetTokenModeForTab: runtime:rebuilt events = %v, want 2 (no rebuild)", rebuilt)
+	}
 	for i, id := range rebuilt {
 		if id == "VIA-APP-QUEUE" {
 			t.Fatalf("event %d took the App-level fallback queue; it must ride the tab sink queue so it orders before the rebuilt controller's agent events (full: %v)", i, rebuilt)
@@ -140,5 +138,67 @@ func TestRuntimeRebuildsEmitRuntimeRebuiltForTab(t *testing.T) {
 		if id != tab.ID {
 			t.Fatalf("event %d carried tab id %q, want %q (full: %v)", i, id, tab.ID, rebuilt)
 		}
+	}
+	mu.Unlock()
+}
+
+// TestRuntimeReattachFencesPendingAskBeforeReplay pins the detached-runtime
+// handoff order. A transferred controller keeps its pending ask, but the
+// frontend must learn the transferred epoch before that ask reaches it.
+func TestRuntimeReattachFencesPendingAskBeforeReplay(t *testing.T) {
+	type emittedEvent struct {
+		name    string
+		payload []any
+	}
+	emitted := make(chan emittedEvent, 4)
+	sink := &tabEventSink{
+		tabID:        "tab-reattach",
+		ctx:          context.Background(),
+		runtimeEpoch: "runtime-new",
+	}
+	sink.runtimeEvents.emit = func(_ context.Context, name string, payload ...any) {
+		emitted <- emittedEvent{name: name, payload: payload}
+	}
+
+	ctrl := control.New(control.Options{Sink: sink})
+	ctx, cancel := context.WithCancel(t.Context())
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		_, _ = ctrl.Ask(ctx, []event.AskQuestion{{ID: "choice", Prompt: "Pick one"}})
+	}()
+	t.Cleanup(func() {
+		cancel()
+		<-done
+		ctrl.Close()
+	})
+
+	select {
+	case initial := <-emitted:
+		if initial.name != eventChannel {
+			t.Fatalf("initial event = %q, want %q", initial.name, eventChannel)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("timed out waiting for initial ask")
+	}
+
+	app := NewApp()
+	tab := &WorkspaceTab{ID: "tab-reattach", Ctrl: ctrl, sink: sink, Ready: true}
+	app.replayPendingPromptsAfterRuntimeAttach(tab.ID, sink, ctrl, "runtime-new")
+
+	var got []emittedEvent
+	for len(got) < 2 {
+		select {
+		case next := <-emitted:
+			got = append(got, next)
+		case <-time.After(2 * time.Second):
+			t.Fatalf("timed out waiting for reattach events; got %+v", got)
+		}
+	}
+	if got[0].name != "runtime:rebuilt" || got[1].name != eventChannel {
+		t.Fatalf("reattach event order = [%s, %s], want [runtime:rebuilt, %s]", got[0].name, got[1].name, eventChannel)
+	}
+	if len(got[0].payload) < 2 || got[0].payload[0] != tab.ID || got[0].payload[1] != "runtime-new" {
+		t.Fatalf("runtime:rebuilt payload = %#v", got[0].payload)
 	}
 }

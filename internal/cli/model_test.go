@@ -152,8 +152,9 @@ func TestMergeExtensionModelRefs(t *testing.T) {
 	catalog := []provider.Descriptor{
 		{Ref: "plugin/demo/fake/x"},
 		{Ref: "plugin/demo/fake/y"},
-		{Ref: "deepseek/deepseek-v4"}, // claim-replaced duplicate must not repeat
-		{Ref: "  "},                   // blank entries are dropped
+		{Ref: "deepseek/deepseek-v4"},  // claim-replaced duplicate must not repeat
+		{Ref: "hidden/ordinary-model"}, // merged base refs are not extension models
+		{Ref: "  "},                    // blank entries are dropped
 	}
 	got := mergeExtensionModelRefs(base, catalog)
 	want := []string{"deepseek/deepseek-v4", "mimo/mimo-v2", "plugin/demo/fake/x", "plugin/demo/fake/y"}

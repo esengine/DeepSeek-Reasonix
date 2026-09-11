@@ -1,6 +1,7 @@
 package main
 
 import (
+	"errors"
 	"fmt"
 	"log/slog"
 	"strings"
@@ -114,7 +115,7 @@ func (a *App) bridgeAnnounce(tabID, text string) {
 func (a *App) bridgeDrive(tabID, text string, route bot.DesktopWatchRoute) error {
 	admission, ctrl, err := a.beginTabTurn(tabID, false)
 	if err != nil {
-		if err == control.ErrTurnRunning {
+		if errors.Is(err, control.ErrTurnRunning) {
 			return errDriveBusy
 		}
 		return err

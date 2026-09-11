@@ -1,0 +1,29 @@
+{
+  "apiVersion": "reasonix.io/plugin/v2",
+  "name": "example",
+  "version": "2.0.0",
+  "requires": [
+    {
+      "namespace": "reasonix",
+      "kind": "provider",
+      "id": "provider/v4",
+      "versionRange": ">=1.0.0",
+      "optional": false
+    }
+  ],
+  "provides": [
+    {
+      "namespace": "plugin/example",
+      "kind": "provider",
+      "id": "fake/x",
+      "version": "1.0.0",
+      "schemaHash": "sha256:0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef"
+    }
+  ],
+  "runtime": {
+    "command": "${REASONIX_PLUGIN_ROOT}/bin/example",
+    "intercepts": ["input.receive"],
+    "replaces": [],
+    "capabilities": ["providers"]
+  }
+}

@@ -1,5 +1,9 @@
 # AutoResearch Runtime Design
 
+> Superseded: the active AutoResearch runtime was removed when Goal became the
+> sole runtime. This document is retained as historical design context only;
+> new Goal runs do not create or mutate `.reasonix/autoresearch/` state.
+
 ## Context
 
 Reasonix already has Goal mode and AutoResearch instructions. When a goal looks
@@ -318,7 +322,7 @@ Success criteria list:
 Findings list:
 
 - newest accepted findings first
-- kind badge: command, file, test, benchmark, manual, review
+- kind badge: command, file, test, benchmark, manual, review, verification
 - summary
 - source command/path if present
 - created time

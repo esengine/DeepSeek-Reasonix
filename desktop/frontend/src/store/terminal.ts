@@ -2,7 +2,8 @@ import { create } from "zustand";
 
 import { app } from "../lib/bridge";
 import type { TerminalSessionView, TerminalWorkspaceView } from "../lib/types";
-import { forgetTerminalSession, registerTerminalExitListener } from "../lib/terminalEvents";
+import { forgetTerminalSession, registerTerminalExitListener, registerTerminalGapListener } from "../lib/terminalEvents";
+import { t } from "../lib/i18n";
 
 type TerminalState = {
   tabId: string;
@@ -50,8 +51,19 @@ export const useTerminalStore = create<TerminalState>((set, get) => ({
       return null;
     }
     if (!force && inFlight?.tabId === normalizedTabId) return inFlight.promise;
-    const generation = get().generation + 1;
-    set({ tabId: normalizedTabId, generation, loading: true, workspace: null, activeSessionId: null, error: null });
+    const previous = get();
+    // A background refresh for the same tab should not tear down a painted
+    // xterm. Keep its workspace until the replacement response is ready.
+    const keepWorkspace = !force && previous.tabId === normalizedTabId && previous.workspace != null;
+    const generation = previous.generation + 1;
+    set({
+      tabId: normalizedTabId,
+      generation,
+      loading: true,
+      workspace: keepWorkspace ? previous.workspace : null,
+      activeSessionId: keepWorkspace ? previous.activeSessionId : null,
+      error: null,
+    });
     const request = app.TerminalWorkspaceForTab(normalizedTabId)
       .then((value) => {
         const workspace = normalizedWorkspace(value);
@@ -164,6 +176,11 @@ registerTerminalExitListener((event) => {
       : session);
     return { workspace: { ...state.workspace, sessions } };
   });
+});
+
+registerTerminalGapListener(ids => {
+  useTerminalStore.setState(state => state.workspace?.sessions.some(session => ids.length === 0 || ids.includes(session.id))
+    ? { error: t("terminal.outputIncomplete") } : {});
 });
 
 export function resetTerminalStoreForTests(): void {

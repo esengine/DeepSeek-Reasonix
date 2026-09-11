@@ -1,0 +1,218 @@
+#!/usr/bin/env node
+
+import { ciUnitScripts } from "./ci-test-plan.mjs";
+import { existsSync, readFileSync } from "node:fs";
+import { dirname, resolve } from "node:path";
+import { fileURLToPath } from "node:url";
+
+const repoRoot = resolve(dirname(fileURLToPath(import.meta.url)), "../../..");
+const workflow = readFileSync(resolve(repoRoot, ".github/workflows/ci.yml"), "utf8");
+const packageJSON = JSON.parse(readFileSync(resolve(repoRoot, "desktop/frontend/package.json"), "utf8"));
+const appSource = readFileSync(resolve(repoRoot, "desktop/frontend/src/App.tsx"), "utf8");
+const bridgeSource = readFileSync(resolve(repoRoot, "desktop/frontend/src/lib/bridge.ts"), "utf8");
+const desktopMainSource = readFileSync(resolve(repoRoot, "desktop/main.go"), "utf8");
+const transcriptScrollBenchSource = readFileSync(resolve(repoRoot, "desktop/frontend/bench/transcript-scroll-stability.mjs"), "utf8");
+const transcriptSelectionBenchSource = readFileSync(resolve(repoRoot, "desktop/frontend/bench/transcript-selection.mjs"), "utf8");
+const transcriptSelectionComponentSource = readFileSync(resolve(repoRoot, "desktop/frontend/src/components/TranscriptSelectionMenu.tsx"), "utf8");
+
+function jobBody(name) {
+  const match = workflow.match(new RegExp(`\\n  ${name}:\\n([\\s\\S]*?)(?=\\n  [a-z][a-z0-9-]*:|$)`));
+  if (!match) throw new Error(`motion-ci-contract: could not locate ${name} job`);
+  return match[1];
+}
+
+for (const [job, body, command] of [
+  ["desktop-frontend", jobBody("desktop-frontend"), "node frontend/scripts/run-ci-tests.mjs"],
+  ["desktop-windows", jobBody("desktop-windows", "lint"), "pnpm --dir frontend test:motion"],
+  ["required lint", jobBody("lint", "site"), "pnpm --dir desktop/frontend test:motion"],
+]) {
+  if (!body.includes(command)) {
+    throw new Error(`motion-ci-contract: ${job} must run test:motion`);
+  }
+}
+
+const windowsJob = jobBody("desktop-windows", "lint");
+for (const required of [
+  "node packaging/package.mjs windows/amd64 v0.0.0-ci canary",
+  "Smoke-test Electron native startup",
+  "node packaging/smoke.mjs build/electron/windows-amd64/app --service build/bin/reasonix-desktop.exe",
+]) {
+  if (!windowsJob.includes(required)) {
+    throw new Error(`motion-ci-contract: desktop-windows must include ${required}`);
+  }
+}
+for (const retired of ["WebView2", "webview2", "test-transcript-selection"]) {
+  if (windowsJob.includes(retired)) {
+    throw new Error(`motion-ci-contract: desktop-windows must not reference the retired native smoke harness (${retired})`);
+  }
+}
+
+for (const required of [
+  "bench:selection-table",
+  "SELECTION REPAINT TARGET",
+  "selection endpoint blocks remain resident by stable key",
+  "measurement changes cannot run structural corrections during selection",
+]) {
+  if (!transcriptSelectionBenchSource.includes(required)) {
+    throw new Error(`motion-ci-contract: transcript selection browser gate must retain ${required}`);
+  }
+}
+for (const required of [
+  'data-surface="transcript"',
+  "data-state={actionOverlay.phase}",
+  "actionOverlayStateRef.current.action",
+]) {
+  if (!transcriptSelectionComponentSource.includes(required)) {
+    throw new Error(`motion-ci-contract: stable transcript selection host must retain ${required}`);
+  }
+}
+
+for (const [path, source] of [
+  ["desktop/main.go", desktopMainSource],
+  ["desktop/frontend/src/App.tsx", appSource],
+  ["desktop/frontend/src/lib/bridge.ts", bridgeSource],
+]) {
+  for (const forbidden of [
+    "REASONIX_WEBVIEW2_APPROVAL_SMOKE",
+    "__REASONIX_WEBVIEW2_APPROVAL_SMOKE__",
+    "WebView2ApprovalSmokeBridge",
+    "__reasonixSelectionSmoke",
+    "reasonix_transcript_smoke",
+  ]) {
+    if (source.includes(forbidden)) {
+      throw new Error(`motion-ci-contract: ${path} must not embed test-only WebView2 instrumentation (${forbidden})`);
+    }
+  }
+}
+// The Wails-era native selection smoke (WebView2 host + contract script) left
+// with the old shell; selection geometry is covered by the Chromium browser
+// bench above and the packaged Electron startup smoke.
+for (const retiredPath of [
+  "desktop/cmd/transcript-selection-smoke",
+  "desktop/cmd/transcript-native-smoke",
+  "desktop/transcript_selection_smoke_contract.js",
+  "scripts/test-transcript-selection-webview2.ps1",
+  "scripts/test-webview2-native-smoke.ps1",
+]) {
+  if (existsSync(resolve(repoRoot, retiredPath))) {
+    throw new Error(`motion-ci-contract: retired native smoke harness still exists: ${retiredPath}`);
+  }
+}
+for (const retiredPath of [
+  "desktop/webview2_approval_smoke.go",
+  "desktop/frontend/src/lib/useWebView2ApprovalSmoke.ts",
+  "desktop/frontend/src/lib/webView2ApprovalSmoke.ts",
+  "scripts/test-webview2-approval-smoke.ps1",
+]) {
+  if (existsSync(resolve(repoRoot, retiredPath))) {
+    throw new Error(`motion-ci-contract: retired production smoke path still exists: ${retiredPath}`);
+  }
+}
+
+const motionScript = packageJSON.scripts?.["test:motion"] ?? "";
+for (const required of [
+  "check-waapi-contract.mjs --self-test",
+  "native-motion.test.tsx",
+  "approval-animation.test.tsx",
+]) {
+  if (!motionScript.includes(required)) {
+    throw new Error(`motion-ci-contract: test:motion must include ${required}`);
+  }
+}
+
+if (motionScript.includes("transcript-virtualization.test.tsx")) {
+  throw new Error("motion-ci-contract: test:motion must not include the transcript virtualization suite");
+}
+
+const motionBrowserCommand = "pnpm --dir frontend test:motion-browser";
+const motionBrowserRuns = workflow.match(/pnpm --dir frontend test:motion-browser(?:\s|$)/g)?.length ?? 0;
+if (!jobBody("desktop-browser").includes(motionBrowserCommand) || motionBrowserRuns !== 1) {
+  throw new Error("motion-ci-contract: the Linux browser job must run test:motion-browser exactly once");
+}
+if (!packageJSON.scripts?.["test:motion-browser"]?.includes("approval-animation.mjs")) {
+  throw new Error("motion-ci-contract: test:motion-browser must exercise the approval animation in real Chromium");
+}
+
+const transcriptScript = packageJSON.scripts?.["test:transcript"] ?? "";
+for (const required of [
+  "transcript-kernel.test.ts",
+  "transcript-kernel-races.test.ts",
+  "transcript-timeline.test.ts",
+  "transcript-viewport.test.tsx",
+  "transcript-question-jump.test.ts",
+  "nested-scroll-handoff.test.ts",
+  "creation-transcript-scrollbar.test.ts",
+  "markdown-table-virtual.test.tsx",
+  "typography-overflow-contract.test.ts",
+  "transcript-selection-retention.test.tsx",
+  "transcript-logical-selection.test.ts",
+  "transcript-selection-overlay.test.tsx",
+  "markdown-pipeline.test.tsx",
+  "message-selection-copy.test.ts",
+  "transcript-selection-menu.test.tsx",
+  "transcript-selection-rendering.test.ts",
+  "transcript-store.test.ts",
+]) {
+  if (!transcriptScript.includes(required)) {
+    throw new Error(`motion-ci-contract: test:transcript must include ${required}`);
+  }
+}
+
+const transcriptBrowserScript = packageJSON.scripts?.["test:transcript-browser"] ?? "";
+for (const required of ["transcript-selection.mjs", "transcript-scroll-stability.mjs"]) {
+  if (!transcriptBrowserScript.includes(required)) {
+    throw new Error(`motion-ci-contract: test:transcript-browser must include ${required}`);
+  }
+}
+
+// A near-zero `transition: all` still starts from the old value, so same-frame
+// geometry reads miss transform/padding writes and the transcript guards
+// compound. The global reduced-motion reset must remove transitions outright.
+const stylesSource = readFileSync(resolve(repoRoot, "desktop/frontend/src/styles.css"), "utf8");
+const globalReducedMotion = stylesSource.match(
+  /@media \(prefers-reduced-motion: reduce\) \{\s*\*,\s*\*::before,\s*\*::after \{([^}]*)\}/,
+);
+if (!globalReducedMotion) {
+  throw new Error("motion-ci-contract: styles.css must keep the global universal prefers-reduced-motion reset");
+}
+if (!globalReducedMotion[1].includes("transition: none !important")) {
+  throw new Error("motion-ci-contract: the global reduced-motion reset must use `transition: none !important`");
+}
+if (/transition-duration/.test(globalReducedMotion[1])) {
+  throw new Error("motion-ci-contract: the global reduced-motion reset must not shorten transitions (same-frame geometry reads would lag)");
+}
+
+if (!ciUnitScripts.includes("test:motion") || !ciUnitScripts.includes("test:transcript")) {
+  throw new Error("motion-ci-contract: Linux CI must include all dedicated motion and transcript suites");
+}
+const desktopLinuxJob = jobBody("desktop-browser");
+
+const transcriptBrowserCommand = "pnpm --dir frontend test:transcript-browser";
+const transcriptBrowserRuns = desktopLinuxJob.match(/pnpm --dir frontend test:transcript-browser(?:\s|$)/g)?.length ?? 0;
+if (!desktopLinuxJob.includes(transcriptBrowserCommand) || transcriptBrowserRuns !== 1) {
+  throw new Error("motion-ci-contract: the Linux desktop job must run test:transcript-browser exactly once");
+}
+if (!desktopLinuxJob.includes("PLAYWRIGHT_BROWSERS_PATH=.pw-browsers pnpm --dir frontend exec playwright install")) {
+  throw new Error("motion-ci-contract: Chromium must install into the path used by frontend browser tests");
+}
+if (!windowsJob.includes(transcriptBrowserCommand)) {
+  throw new Error("motion-ci-contract: desktop-windows must run the transcript browser replay");
+}
+for (const required of ["transcript-selection.mjs", "transcript-scroll-stability.mjs"]) {
+  if (!packageJSON.scripts?.["test:transcript-browser"]?.includes(required)) {
+    throw new Error(`motion-ci-contract: test:transcript-browser must include ${required}`);
+  }
+}
+for (const required of [
+  "bench:windowed-1000t",
+  "data-transcript-mounted-blocks",
+  "history prepend produces zero blank viewport frames",
+  "question jump performs exactly one accepted physical write",
+  "at most 40 completed blocks",
+]) {
+  if (!transcriptScrollBenchSource.includes(required)) {
+    throw new Error(`motion-ci-contract: transcript scroll browser gate must retain block-kernel assertion ${required}`);
+  }
+}
+
+console.log("motion-ci-contract: browser gates and packaged Electron startup are separate release gates without production smoke instrumentation");

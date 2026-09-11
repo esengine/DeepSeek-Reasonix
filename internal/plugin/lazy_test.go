@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"sync"
 	"testing"
@@ -93,10 +94,8 @@ func waitForServer(t *testing.T, host *Host, name string, timeout time.Duration)
 	t.Helper()
 	deadline := time.Now().Add(timeout)
 	for time.Now().Before(deadline) {
-		for _, n := range host.ServerNames() {
-			if n == name {
-				return
-			}
+		if slices.Contains(host.ServerNames(), name) {
+			return
 		}
 		time.Sleep(10 * time.Millisecond)
 	}
@@ -541,9 +540,7 @@ func TestLazySwapDoesNotRaceRegistrySchemas(t *testing.T) {
 
 	done := make(chan struct{})
 	var wg sync.WaitGroup
-	wg.Add(1)
-	go func() {
-		defer wg.Done()
+	wg.Go(func() {
 		for {
 			select {
 			case <-done:
@@ -552,7 +549,7 @@ func TestLazySwapDoesNotRaceRegistrySchemas(t *testing.T) {
 				_ = reg.Schemas()
 			}
 		}
-	}()
+	})
 
 	out, err := echo.Execute(ctx, json.RawMessage(`{"msg":"race"}`))
 	close(done)
@@ -723,7 +720,7 @@ func TestLazyConcurrentExecuteOnlyOneSpawn(t *testing.T) {
 	results := make([]string, goroutines)
 	errs := make([]error, goroutines)
 	wg.Add(goroutines)
-	for i := 0; i < goroutines; i++ {
+	for i := range goroutines {
 		go func(i int) {
 			defer wg.Done()
 			out, err := echo.Execute(ctx, json.RawMessage(fmt.Sprintf(`{"msg":"r%d"}`, i)))
@@ -1052,8 +1049,7 @@ func TestAddWithLifecycleSurvivesHandshakeCtxCancel(t *testing.T) {
 	host := NewHost()
 	defer host.Close()
 
-	lifeCtx, cancelLife := context.WithCancel(context.Background())
-	defer cancelLife()
+	lifeCtx := t.Context()
 	handshakeCtx, cancelHandshake := context.WithTimeout(context.Background(), 5*time.Second)
 	tools, err := host.AddWithLifecycle(lifeCtx, handshakeCtx, spec)
 	cancelHandshake() // the proxy's deferred cancel fires right after connect

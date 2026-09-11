@@ -66,6 +66,15 @@ cd DeepSeek-Reasonix && make build                        # -> bin/reasonix(.exe
 
 完整路径和限制见[配置路径](./CONFIG_PATHS.zh-CN.md)。
 
+### Desktop Topic 元数据
+
+Desktop 会自动把四个旧 `desktop-topic-*.json` 索引迁移到 Reasonix 状态根目录下按
+scope 隔离的权威 SQLite 数据库。已存在旧文件的 scope 会继续同步 JSON，因此正常降级到
+前一版本 Desktop 时仍能读取标题和时间；全新 scope 只写 SQLite，旧版 Desktop 无法直接
+读取这部分状态：现有 session metadata 可能恢复标题，但不保证创建时间和自动标题阶段完整。
+迁移不会删除旧文件，也不会修改项目拥有的 `.reasonix` 资产。不支持新旧 Desktop 同时写
+同一个工作区。
+
 ## Context Engine v2 升级
 
 指令与记忆升级会自动完成，不需要 setup mode、re-index 命令或新配置：
@@ -118,7 +127,7 @@ agent 核心延续了原有能力：循环、读写编辑与 glob/grep/bash 等�
 - 使用 `read_only_task` / `read_only_skill` 创建技术上只读的子智能体；普通 `task` / `run_skill` 仍可写入，并受权限与 Sandbox 控制。未声明 `readOnlyHint` 的 MCP 工具仍按 writer 处理。
 - `default_tools_approval_mode`、`tools.<raw>.approval_mode` 和 `approvals_reviewer` 已停用，加载时忽略并在下次保存时移除；安装或通过项目配置声明 server 后，其所有工具直接可用。
 - **Web Dashboard 仍然可用，桌面端更推荐**：需要浏览器访问时，可运行
-  `reasonix serve` 启动本地 Web UI；日常可视化使用优先选择 Wails 桌面端，
+  `reasonix serve` 启动本地 Web UI；日常可视化使用优先选择 Electron 桌面端，
   终端工作流继续使用 CLI/TUI。
 - 一些细粒度 v1 工具被合并，例如文件管理操作改由 `bash` 完成；少数工具尚未移植，进度在 Discussions 中跟踪。
 
@@ -133,6 +142,6 @@ Reasonix 1.0 支持读取和编辑 UTF-8、UTF-8 BOM、UTF-16 LE/BE 与 GB18030�
 
 ## 报告问题
 
-Issue 和 PR 按代码线标记：**`v1`** 表示旧 TypeScript 版，**`v2`** 表示 Go 版。请按实际使用版本提交报告。旧 `v1` 线处于维护模式，只接收 bug 修复，不再新增功能。
+Issue 和 PR 按代码线标记：**`v2`** 表示 Go 版（`main-v2`），**`v3`** 表示 Studio（`studio`）。请按实际使用版本提交报告。
 
 如有问题，请发起 [Discussion](https://github.com/esengine/DeepSeek-Reasonix/discussions)。

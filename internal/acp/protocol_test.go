@@ -89,7 +89,7 @@ func TestToolKindFor(t *testing.T) {
 	}
 }
 
-// --- newSessionID ---
+// newSessionID
 
 func TestNewSessionID(t *testing.T) {
 	id, err := newSessionID()
@@ -116,7 +116,7 @@ func TestNewSessionID(t *testing.T) {
 
 func TestNewSessionIDUnique(t *testing.T) {
 	seen := map[string]bool{}
-	for i := 0; i < 100; i++ {
+	for range 100 {
 		id, err := newSessionID()
 		if err != nil {
 			t.Fatalf("newSessionID: %v", err)
@@ -128,7 +128,7 @@ func TestNewSessionIDUnique(t *testing.T) {
 	}
 }
 
-// --- mcpSpecs ---
+// mcpSpecs
 
 func TestMcpSpecsNil(t *testing.T) {
 	if got, err := mcpSpecs(nil, ""); err != nil || got != nil {
@@ -273,7 +273,7 @@ func TestMcpSpecsRejectsUnsupportedTransport(t *testing.T) {
 	}
 }
 
-// --- transcriptPath ---
+// transcriptPath
 
 func TestTranscriptPath(t *testing.T) {
 	dir := t.TempDir()
@@ -283,7 +283,7 @@ func TestTranscriptPath(t *testing.T) {
 	}
 }
 
-// --- Protocol constants ---
+// Protocol constants
 
 func TestProtocolVersion(t *testing.T) {
 	if ProtocolVersion != 1 {
@@ -309,7 +309,7 @@ func TestErrorCodes(t *testing.T) {
 	}
 }
 
-// --- acpSession ---
+// acpSession
 
 func TestAcpSessionSetCancelAbort(t *testing.T) {
 	sess := &acpSession{id: "test"}

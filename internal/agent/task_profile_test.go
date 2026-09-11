@@ -35,8 +35,8 @@ func TestTaskWriterWithoutPathsClaimsWholeWorkspace(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !spec.WritePaths.WholeWorkspace || spec.WritePaths.WorkspaceRoot == "" {
-		t.Fatalf("writer without write_paths must claim the workspace, got %+v", spec.WritePaths)
+	if !spec.Grant.WritePaths.WholeWorkspace || spec.Grant.WritePaths.WorkspaceRoot == "" {
+		t.Fatalf("writer without write_paths must claim the workspace, got %+v", spec.Grant.WritePaths)
 	}
 }
 

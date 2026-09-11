@@ -18,7 +18,7 @@ import (
 func TestHandshakeSuccess(t *testing.T) {
 	client := startFakeClient(t, func(rt *pluginpkg.RuntimeSpec) {
 		rt.Intercepts = []string{"input.receive", "tool.before"}
-		rt.Env[fakeEnvInitResult] = `{"protocolVersion":"1","name":"fake-sidecar","version":"1.2.3","subscriptions":["input.receive"],"stateSchemaVersion":0}`
+		rt.Env[fakeEnvInitResult] = `{"protocolVersion":"2","name":"fake-sidecar","version":"1.2.3","subscriptions":["input.receive"],"stateSchemaVersion":0}`
 	}, nil)
 	result := client.Handshake()
 	if result.Name != "fake-sidecar" || result.Version != "1.2.3" {
@@ -32,13 +32,50 @@ func TestHandshakeSuccess(t *testing.T) {
 	}
 }
 
+func TestInitializeParamsCarryManifestV2DependencyIdentity(t *testing.T) {
+	c := &Client{
+		rt: &pluginpkg.RuntimeSpec{
+			Intercepts:   []string{"input.receive", "system_prompt.build"},
+			Replaces:     []string{"system_prompt"},
+			Capabilities: []string{"interceptors", "strategies", "providers", "ui"},
+		},
+		requires: []pluginpkg.CapabilityRef{{
+			Namespace: "reasonix", Kind: "provider", ID: "base", VersionRange: ">=1.0.0", Optional: true,
+		}},
+		provides: []pluginpkg.CapabilityRef{
+			{Namespace: "plugin/example", Kind: "provider", ID: "fake/echo", Version: "1.0.0", SchemaHash: "sha256:provider"},
+			{Namespace: "plugin/example", Kind: "uiaction", ID: "demo", Version: "1.0.0", SchemaHash: "sha256:ui"},
+		},
+		session: protocol.SessionContext{SessionID: "sess", WorkspaceRoot: "/workspace", Generation: 7},
+		uiHost:  protocol.UIHostDesktop,
+	}
+
+	params := c.initializeParams()
+	if params.DependencySchemaVersion != protocol.DependencySchemaVersion || params.Capabilities.DependencySchemaVersion != protocol.DependencySchemaVersion {
+		t.Fatalf("dependency schema versions = %d/%d, want %d", params.DependencySchemaVersion, params.Capabilities.DependencySchemaVersion, protocol.DependencySchemaVersion)
+	}
+	if len(params.Manifest.Requires) != 1 || params.Manifest.Requires[0].ID != "base" || params.Manifest.Requires[0].VersionRange != ">=1.0.0" || !params.Manifest.Requires[0].Optional {
+		t.Fatalf("manifest requires = %+v", params.Manifest.Requires)
+	}
+	if len(params.Manifest.Provides) != 2 || params.Manifest.Provides[0].SchemaHash != "sha256:provider" || params.Manifest.Provides[1].SchemaHash != "sha256:ui" {
+		t.Fatalf("manifest provides = %+v", params.Manifest.Provides)
+	}
+	if len(params.Manifest.Providers) != 1 || params.Manifest.Providers[0] != "plugin/example/fake/echo" {
+		t.Fatalf("manifest providers = %v", params.Manifest.Providers)
+	}
+	if len(params.Manifest.UIActions) != 1 || params.Manifest.UIActions[0] != "demo" {
+		t.Fatalf("manifest uiActions = %v", params.Manifest.UIActions)
+	}
+}
+
 func TestHandshakeProtocolVersionMismatch(t *testing.T) {
 	pkg, installed := fakeSidecarPackage(t, "fakeplugin", func(rt *pluginpkg.RuntimeSpec) {
-		rt.Env[fakeEnvInitResult] = `{"protocolVersion":"2","name":"fake-sidecar","version":"1.0.0","stateSchemaVersion":0}`
+		// Peer still speaking Extension Protocol v1 major must be rejected.
+		rt.Env[fakeEnvInitResult] = `{"protocolVersion":"1","name":"fake-sidecar","version":"1.0.0","stateSchemaVersion":0}`
 	})
 	_, err := StartClient(context.Background(), ClientOptions{Package: pkg, Installed: installed, Session: testSessionContext()})
 	if err == nil {
-		t.Fatal("StartClient succeeded with protocol major 2")
+		t.Fatal("StartClient succeeded with protocol major 1")
 	}
 	if reason := protocolReason(t, err); reason != protocol.ErrUnsupportedVersion {
 		t.Fatalf("reason = %q, want %q", reason, protocol.ErrUnsupportedVersion)
@@ -90,27 +127,27 @@ func TestHandshakeCapabilityViolations(t *testing.T) {
 		{
 			name:       "subscriptions superset",
 			configure:  func(rt *pluginpkg.RuntimeSpec) { rt.Intercepts = []string{"input.receive"} },
-			initResult: `{"protocolVersion":"1","name":"fake","version":"1","subscriptions":["input.receive","tool.before"],"stateSchemaVersion":0}`,
+			initResult: `{"protocolVersion":"2","name":"fake","version":"1","subscriptions":["input.receive","tool.before"],"stateSchemaVersion":0}`,
 		},
 		{
 			name:       "replaces superset",
 			configure:  func(rt *pluginpkg.RuntimeSpec) { rt.Replaces = []string{"system_prompt"} },
-			initResult: `{"protocolVersion":"1","name":"fake","version":"1","replaces":["system_prompt","compaction"],"stateSchemaVersion":0}`,
+			initResult: `{"protocolVersion":"2","name":"fake","version":"1","replaces":["system_prompt","compaction"],"stateSchemaVersion":0}`,
 		},
 		{
 			name:       "providers without capability",
 			configure:  nil,
-			initResult: `{"protocolVersion":"1","name":"fake","version":"1","providers":[{"ref":"plugin/fakeplugin/openai/gpt-5"}],"stateSchemaVersion":0}`,
+			initResult: `{"protocolVersion":"2","name":"fake","version":"1","providers":[{"ref":"plugin/fakeplugin/openai/gpt-5"}],"stateSchemaVersion":0}`,
 		},
 		{
 			name:       "provider ref outside plugin namespace",
 			configure:  func(rt *pluginpkg.RuntimeSpec) { rt.Capabilities = []string{"providers"} },
-			initResult: `{"protocolVersion":"1","name":"fake","version":"1","providers":[{"ref":"plugin/other/openai/gpt-5"}],"stateSchemaVersion":0}`,
+			initResult: `{"protocolVersion":"2","name":"fake","version":"1","providers":[{"ref":"plugin/other/openai/gpt-5"}],"stateSchemaVersion":0}`,
 		},
 		{
 			name:       "ui actions without capability",
 			configure:  nil,
-			initResult: `{"protocolVersion":"1","name":"fake","version":"1","uiActions":[{"actionId":"a1"}],"stateSchemaVersion":0}`,
+			initResult: `{"protocolVersion":"2","name":"fake","version":"1","uiActions":[{"actionId":"a1"}],"stateSchemaVersion":0}`,
 		},
 	}
 	for _, tc := range cases {
@@ -135,7 +172,7 @@ func TestHandshakeCapabilityViolations(t *testing.T) {
 func TestHandshakeDeclaredProvidersAndUIAccepted(t *testing.T) {
 	client := startFakeClient(t, func(rt *pluginpkg.RuntimeSpec) {
 		rt.Capabilities = []string{"providers", "ui"}
-		rt.Env[fakeEnvInitResult] = `{"protocolVersion":"1","name":"fake","version":"1",` +
+		rt.Env[fakeEnvInitResult] = `{"protocolVersion":"2","name":"fake","version":"1",` +
 			`"providers":[{"ref":"plugin/fakeplugin/openai/gpt-5"}],` +
 			`"uiActions":[{"actionId":"act1","label":"Act"}],"stateSchemaVersion":0}`
 	}, nil)
@@ -145,6 +182,24 @@ func TestHandshakeDeclaredProvidersAndUIAccepted(t *testing.T) {
 	}
 	if len(result.UIActions) != 1 || result.UIActions[0].ActionID != "act1" {
 		t.Fatalf("uiActions = %+v", result.UIActions)
+	}
+}
+
+func TestHandshakeProvidesOutsideManifestRejected(t *testing.T) {
+	pkg, installed := fakeSidecarPackage(t, "fakeplugin", func(rt *pluginpkg.RuntimeSpec) {
+		rt.Env[fakeEnvInitResult] = `{"protocolVersion":"2","name":"fake","version":"1",` +
+			`"provides":[{"namespace":"plugin/fakeplugin","kind":"provider","id":"rogue","version":"1.0.0","schemaHash":"sha256:rogue"}],` +
+			`"stateSchemaVersion":0}`
+	})
+	pkg.Manifest.Provides = []pluginpkg.CapabilityRef{{
+		Namespace: "plugin/fakeplugin", Kind: "provider", ID: "declared", Version: "1.0.0", SchemaHash: "sha256:declared",
+	}}
+	_, err := StartClient(context.Background(), ClientOptions{Package: pkg, Installed: installed, Session: testSessionContext()})
+	if err == nil {
+		t.Fatal("StartClient accepted a handshake provides entry outside the manifest ceiling")
+	}
+	if reason := protocolReason(t, err); reason != protocol.ErrCapabilityNotDeclared {
+		t.Fatalf("reason = %q, want %q", reason, protocol.ErrCapabilityNotDeclared)
 	}
 }
 

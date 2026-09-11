@@ -294,6 +294,63 @@ func (a *App) TestBotConnection(id, target string) (BotConnectionDiagnostic, err
 	return diag, nil
 }
 
+// TestDingtalkBot 向最近交互过的钉钉会话发送测试消息，验证凭据与发送链路。
+func (a *App) TestDingtalkBot() (BotConnectionDiagnostic, error) {
+	cfg, err := a.loadDesktopBotConfig()
+	if err != nil {
+		return botConnectionDiagnostic(nil, "dingtalk", "error", "config", "config_load_failed", err.Error(), true), nil
+	}
+	conn, connID, connOK := dingtalkRuntimeConnection(cfg.Bot.Connections)
+	clientID := strings.TrimSpace(cfg.Bot.Dingtalk.ClientID)
+	if clientID == "" {
+		clientID = os.Getenv(strings.TrimSpace(cfg.Bot.Dingtalk.ClientIDEnv))
+	}
+	secret := strings.TrimSpace(cfg.Bot.Dingtalk.ClientSecret)
+	if secret == "" {
+		secret = os.Getenv(strings.TrimSpace(cfg.Bot.Dingtalk.SecretEnv))
+	}
+	if connOK {
+		if v := strings.TrimSpace(conn.Credential.AppID); v != "" {
+			clientID = v
+		}
+		if v := strings.TrimSpace(conn.Credential.AppSecretEnv); v != "" {
+			secret = os.Getenv(v)
+		}
+	}
+	if clientID == "" || secret == "" {
+		return botConnectionDiagnostic(nil, "dingtalk", "warning", "credential", "dingtalk_secret_missing", "钉钉凭据未配置完整（AppKey / AppSecret）。", false), nil
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
+	defer cancel()
+	// domain 传空：匹配任意 domain 的钉钉 adapter（空 domain 视为匹配任意）。
+	result, err := a.botRuntime.TestSendToAdapter(ctx, connID, "", "Reasonix bot 测试消息：钉钉配置与发送链路可用。")
+	if err != nil {
+		if strings.Contains(err.Error(), "requires a known chat") {
+			return botConnectionDiagnostic(nil, "dingtalk", "warning", "send", "dingtalk_test_send_no_chat", "还没有可发送的钉钉会话：请先在钉钉中给机器人发一条消息，之后即可发送测试消息。", false), nil
+		}
+		return botConnectionDiagnostic(nil, "dingtalk", "error", "send", "dingtalk_test_send_failed", err.Error(), true), nil
+	}
+	diag := botConnectionDiagnostic(nil, "dingtalk", "ok", "send", "dingtalk_test_send_ok", "测试消息已发送，请检查钉钉会话。", false)
+	diag.MessageID = result.MessageID
+	return diag, nil
+}
+
+// dingtalkRuntimeConnection 返回第一个启用的钉钉 connection 与运行时 id。
+func dingtalkRuntimeConnection(connections []config.BotConnectionConfig) (config.BotConnectionConfig, string, bool) {
+	for _, conn := range connections {
+		if !conn.Enabled || strings.TrimSpace(conn.Provider) != string(bot.PlatformDingtalk) {
+			continue
+		}
+		return conn, botruntime.ConnectionRuntimeID(conn), true
+	}
+	return config.BotConnectionConfig{}, string(bot.PlatformDingtalk), false
+}
+
+func dingtalkRuntimeConnectionID(connections []config.BotConnectionConfig) string {
+	_, id, _ := dingtalkRuntimeConnection(connections)
+	return id
+}
+
 func botConnectionDiagnostic(conn *config.BotConnectionConfig, id, status, phase, code, message string, reportable bool) BotConnectionDiagnostic {
 	id = strings.TrimSpace(id)
 	label := ""
@@ -693,7 +750,7 @@ func postFeishuInstallFormResult(base string, body map[string]string) (map[strin
 	for k, v := range body {
 		reqBody.Set(k, v)
 	}
-	req, err := http.NewRequestWithContext(ctx, "POST", strings.TrimRight(base, "/")+"/oauth/v1/app/registration", strings.NewReader(reqBody.Encode()))
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, strings.TrimRight(base, "/")+"/oauth/v1/app/registration", strings.NewReader(reqBody.Encode()))
 	if err != nil {
 		return nil, 0, err
 	}

@@ -1,0 +1,174 @@
+name: App memory screening
+
+on:
+  pull_request:
+    branches: [main-v2]
+  push:
+    branches: [main-v2]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: app-memory-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+env:
+  EXPECTED_SOURCE_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
+
+jobs:
+  changes:
+    runs-on: ubuntu-22.04
+    outputs:
+      run: ${{ steps.paths.outputs.run }}
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: ${{ env.EXPECTED_SOURCE_SHA }}
+          fetch-depth: 0
+      - uses: actions/setup-node@v7
+        with:
+          node-version: "24"
+      - id: paths
+        env:
+          BASE_SHA: ${{ github.event.pull_request.base.sha || github.event.before }}
+        run: |
+          if [ "$GITHUB_EVENT_NAME" != pull_request ]; then
+            echo 'run=true' >> "$GITHUB_OUTPUT"
+          else
+            git diff --name-only -z "$BASE_SHA...$EXPECTED_SOURCE_SHA" > "$RUNNER_TEMP/memory-paths"
+            node desktop/frontend/bench/app-memory-paths.mjs "$RUNNER_TEMP/memory-paths" >> "$GITHUB_OUTPUT"
+          fi
+
+  prepare:
+    needs: changes
+    if: needs.changes.outputs.run == 'true'
+    runs-on: ubuntu-22.04
+    timeout-minutes: 20
+    defaults:
+      run:
+        working-directory: desktop/frontend
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: ${{ env.EXPECTED_SOURCE_SHA }}
+      - uses: pnpm/action-setup@v6.1.0
+        with:
+          version: 10
+          run_install: false
+      - uses: actions/setup-node@v7
+        with:
+          node-version: "24"
+          cache: pnpm
+          cache-dependency-path: desktop/pnpm-lock.yaml
+      - run: pnpm install --frozen-lockfile
+      - run: node --test bench/app-memory-shards.test.mjs bench/app-memory-paths.test.mjs bench/app-memory-timing.test.mjs
+      - run: pnpm build
+      - run: node bench/app-memory-prepare.mjs "$RUNNER_TEMP/app-memory-build"
+      - uses: actions/upload-artifact@v7
+        with:
+          name: app-memory-build-${{ github.run_id }}-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/app-memory-build
+          include-hidden-files: true
+          if-no-files-found: error
+          retention-days: 7
+
+  shard:
+    needs: prepare
+    runs-on: ubuntu-22.04
+    timeout-minutes: 90
+    strategy:
+      fail-fast: false
+      matrix:
+        shard: [1, 2, 3]
+    defaults:
+      run:
+        working-directory: desktop/frontend
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: ${{ env.EXPECTED_SOURCE_SHA }}
+      - uses: pnpm/action-setup@v6.1.0
+        with:
+          version: 10
+          run_install: false
+      - uses: actions/setup-node@v7
+        with:
+          node-version: "24"
+          cache: pnpm
+          cache-dependency-path: desktop/pnpm-lock.yaml
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm exec playwright install --with-deps chromium
+      - uses: actions/download-artifact@v8
+        with:
+          name: app-memory-build-${{ github.run_id }}-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/app-memory-build
+      - run: cp -a "$RUNNER_TEMP/app-memory-build/dist/." dist/
+      - name: Run complete independent memory process
+        env:
+          REASONIX_APP_MEMORY_SHARD: ${{ matrix.shard }}
+          REASONIX_APP_MEMORY_PREPARED: ${{ runner.temp }}/app-memory-build/identity.json
+          REASONIX_APP_MEMORY_ARTIFACTS: ${{ runner.temp }}/app-memory-results
+          PLAYWRIGHT_BROWSERS_PATH: /home/runner/.cache/ms-playwright
+        run: node bench/app-memory.mjs
+      - uses: actions/upload-artifact@v7
+        if: always()
+        with:
+          name: app-memory-shard-${{ matrix.shard }}-${{ github.run_id }}-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/app-memory-results
+          if-no-files-found: error
+          retention-days: 7
+
+  app-memory:
+    if: always()
+    needs: [changes, prepare, shard]
+    runs-on: ubuntu-22.04
+    steps:
+      - name: Verify all prerequisite jobs
+        env:
+          CHANGES_RESULT: ${{ needs.changes.result }}
+          SHOULD_RUN: ${{ needs.changes.outputs.run }}
+          PREPARE_RESULT: ${{ needs.prepare.result }}
+          SHARD_RESULT: ${{ needs.shard.result }}
+        run: |
+          test "$CHANGES_RESULT" = success
+          if [ "$SHOULD_RUN" = true ]; then
+            test "$PREPARE_RESULT" = success
+            test "$SHARD_RESULT" = success
+          else
+            test "$SHOULD_RUN" = false
+            test "$PREPARE_RESULT" = skipped
+            test "$SHARD_RESULT" = skipped
+          fi
+      - uses: actions/checkout@v7
+        if: needs.changes.outputs.run == 'true'
+        with:
+          ref: ${{ env.EXPECTED_SOURCE_SHA }}
+      - uses: actions/setup-node@v7
+        if: needs.changes.outputs.run == 'true'
+        with:
+          node-version: "24"
+      - uses: actions/download-artifact@v8
+        if: needs.changes.outputs.run == 'true'
+        with:
+          pattern: app-memory-shard-*-${{ github.run_id }}-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/app-memory-reports
+      - uses: actions/download-artifact@v8
+        if: needs.changes.outputs.run == 'true'
+        with:
+          name: app-memory-build-${{ github.run_id }}-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/app-memory-build
+      - name: Verify same-build complete protocol
+        if: needs.changes.outputs.run == 'true'
+        run: |
+          node desktop/frontend/bench/app-memory-aggregate.mjs \
+            "$RUNNER_TEMP/app-memory-reports" "$RUNNER_TEMP/app-memory-build/identity.json" \
+            "$RUNNER_TEMP/app-memory-report.json" "$EXPECTED_SOURCE_SHA"
+      - uses: actions/upload-artifact@v7
+        if: success() && needs.changes.outputs.run == 'true'
+        with:
+          name: app-memory-aggregate-${{ github.run_id }}-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/app-memory-report.json
+          if-no-files-found: error
+          retention-days: 7

@@ -10,26 +10,11 @@ const (
 	StatusInvalid  = "invalid"
 )
 
+// Task is a read-only view of a historical AutoResearch archive.
 type Task struct {
 	ID   string
 	Root string
 	Spec TaskSpec
-	// CreateToken is an opaque ownership proof for the directory reserved by
-	// CreateTask. Rollback helpers must pass it to RemoveTask so a failed
-	// transaction cannot delete a task directory another creator reserved.
-	CreateToken string
-}
-
-type CreateOptions struct {
-	Now func() time.Time
-	// CreateToken optionally supplies the ownership proof written during task
-	// reservation. Durable parent transactions persist it before calling
-	// CreateTask so crash recovery can find and remove an uncommitted task.
-	CreateToken       string
-	Scope             []string
-	NonGoals          []string
-	AllowedOperations AllowedOperations
-	SuccessCriteria   []SuccessCriterion
 }
 
 type AllowedOperations struct {
@@ -65,20 +50,12 @@ type Progress struct {
 }
 
 const (
-	FindingKindCommand   = "command"
-	FindingKindFile      = "file"
-	FindingKindTest      = "test"
-	FindingKindBenchmark = "benchmark"
-	FindingKindManual    = "manual"
-	FindingKindReview    = "review"
-)
-
-const (
 	FindingSourceCommand = "command"
 	FindingSourceFile    = "file"
 	FindingSourceManual  = "manual"
 )
 
+// Finding.Kind is an opaque string. Unknown historical values must round-trip.
 type Finding struct {
 	ID        string    `json:"id"`
 	Kind      string    `json:"kind"`
@@ -103,24 +80,12 @@ type Heartbeat struct {
 	CreatedAt time.Time `json:"created_at"`
 }
 
-type Direction struct {
-	Summary             string
-	AcceptedEvidenceIDs []string
-	Now                 time.Time
-}
-
 type DirectionTried struct {
 	Fingerprint        string `json:"fingerprint"`
 	Summary            string `json:"summary"`
 	FirstSeenIteration int    `json:"first_seen_iteration"`
 	LastSeenIteration  int    `json:"last_seen_iteration"`
 	Count              int    `json:"count"`
-}
-
-type ProgressPatch struct {
-	Status           *string
-	CurrentDirection *string
-	BlockedReason    *string
 }
 
 type CriterionSummary struct {
@@ -146,13 +111,6 @@ type Summary struct {
 	Blocker            string             `json:"blocker"`
 	TaskPath           string             `json:"task_path"`
 	NextRequiredAction string             `json:"next_required_action"`
-}
-
-type ReadinessReport struct {
-	Ready           bool     `json:"ready"`
-	MissingCriteria []string `json:"missing_criteria"`
-	BlockedReason   string   `json:"blocked_reason"`
-	Errors          []string `json:"errors"`
 }
 
 type ValidationError struct {

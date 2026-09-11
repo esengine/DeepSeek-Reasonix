@@ -26,7 +26,7 @@ func parseResourcesPlugin(t *testing.T) pluginpkg.Package {
 	t.Helper()
 	root := t.TempDir()
 	writePluginFile(t, filepath.Join(root, pluginpkg.NativeManifest), `{
-  "apiVersion": "reasonix.io/plugin/v1",
+  "apiVersion": "reasonix.io/plugin/v2",
   "name": "res",
   "contributes": {
     "prompts": ["prompts"],
@@ -122,7 +122,7 @@ func TestManifestV1ValidatorListsStayInSync(t *testing.T) {
 	}
 	root := t.TempDir()
 	manifest := `{
-  "apiVersion": "reasonix.io/plugin/v1",
+  "apiVersion": "reasonix.io/plugin/v2",
   "name": "sync-check",
   "runtime": {
     "command": "sync-runtime",

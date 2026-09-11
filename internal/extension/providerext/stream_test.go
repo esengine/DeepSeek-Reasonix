@@ -13,53 +13,6 @@ import (
 	"reasonix/internal/provider"
 )
 
-// openTestStream resolves the demo ref and opens a stream, returning the
-// chunk channel and the stream ID the sidecar would address.
-func openTestStream(t *testing.T, r *Resolver, fc *fakeClient, effort *string) (<-chan provider.Chunk, string) {
-	t.Helper()
-	p, err := r.Resolve(provider.Selection{Ref: "plugin/demo/fake/x", Effort: effort})
-	if err != nil {
-		t.Fatalf("Resolve: %v", err)
-	}
-	out, err := p.Stream(context.Background(), provider.Request{
-		Messages:  []provider.Message{{Role: provider.RoleUser, Content: "hi"}},
-		MaxTokens: 16,
-	})
-	if err != nil {
-		t.Fatalf("Stream: %v", err)
-	}
-	return out, fc.openedParams(t).StreamID
-}
-
-func textChunk(text string) protocol.ProviderChunk {
-	return protocol.ProviderChunk{Type: protocol.ChunkText, Text: text}
-}
-
-// collectChunks drains the channel until it closes, failing on a wedge.
-func collectChunks(t *testing.T, out <-chan provider.Chunk) []provider.Chunk {
-	t.Helper()
-	var chunks []provider.Chunk
-	for {
-		select {
-		case chunk, ok := <-out:
-			if !ok {
-				return chunks
-			}
-			chunks = append(chunks, chunk)
-		case <-time.After(testBudget):
-			t.Fatal("stream channel did not close")
-		}
-	}
-}
-
-func texts(chunks []provider.Chunk) []string {
-	var out []string
-	for _, c := range chunks {
-		out = append(out, c.Text)
-	}
-	return out
-}
-
 func TestStreamDeliversOutOfOrderChunksInOrder(t *testing.T) {
 	fc := newFakeClient("demo", demoDescriptor())
 	r := testResolver(t, baseCatalog(), nil, fc)
@@ -114,6 +67,35 @@ func TestStreamCleanEndClosesChannel(t *testing.T) {
 	chunks := collectChunks(t, out)
 	if len(chunks) != 0 {
 		t.Fatalf("chunks = %v, want none", chunks)
+	}
+}
+
+func TestStreamIdleWatchdogRefreshesOnProviderChunk(t *testing.T) {
+	fc := newFakeClient("demo", demoDescriptor())
+	r := testResolver(t, baseCatalog(), nil, fc)
+	r.idleTimeout = 80 * time.Millisecond
+	out, id := openTestStream(t, r, fc, nil)
+
+	time.Sleep(50 * time.Millisecond)
+	r.RouteStreamChunk(protocol.StreamChunkParams{StreamID: id, Seq: 1, Chunk: textChunk("progress")})
+	time.Sleep(50 * time.Millisecond)
+	r.RouteStreamEnd(protocol.StreamEndParams{StreamID: id, LastSeq: 1})
+
+	chunks := collectChunks(t, out)
+	if got := texts(chunks); fmt.Sprint(got) != "[progress]" {
+		t.Fatalf("chunks = %v, want progress without idle cancellation", got)
+	}
+}
+
+func TestStreamIdleWatchdogCancelsSilentExtension(t *testing.T) {
+	fc := newFakeClient("demo", demoDescriptor())
+	r := testResolver(t, baseCatalog(), nil, fc)
+	r.idleTimeout = 30 * time.Millisecond
+	out, _ := openTestStream(t, r, fc, nil)
+
+	chunks := collectChunks(t, out)
+	if len(chunks) != 1 || chunks[0].Type != provider.ChunkError || chunks[0].Err == nil || !strings.Contains(chunks[0].Err.Error(), "stalled") {
+		t.Fatalf("silent stream chunks = %+v, want stalled interruption", chunks)
 	}
 }
 
@@ -460,7 +442,9 @@ func TestStreamOpenGenericErrorPassesThrough(t *testing.T) {
 }
 
 func TestStreamOpenCarriesRequestEffortAndSeqBase(t *testing.T) {
-	fc := newFakeClient("demo", demoDescriptor())
+	descriptor := demoDescriptor()
+	descriptor.Efforts = []string{"low", "high"}
+	fc := newFakeClient("demo", descriptor)
 	r := testResolver(t, baseCatalog(), nil, fc)
 
 	effort := "high"
@@ -669,7 +653,7 @@ func TestConcurrentStreamsOnOneSidecar(t *testing.T) {
 		id  string
 	}
 	handles := make([]handle, 0, streamCount)
-	for i := 0; i < streamCount; i++ {
+	for i := range streamCount {
 		p, err := r.Resolve(provider.Selection{Ref: "plugin/demo/fake/x"})
 		if err != nil {
 			t.Fatalf("Resolve: %v", err)
@@ -745,5 +729,31 @@ func TestStreamPendingWindowOverflowInterrupts(t *testing.T) {
 	last := chunks[len(chunks)-1]
 	if last.Type != provider.ChunkError || !provider.IsStreamInterrupted(last.Err) {
 		t.Fatalf("terminal chunk = %+v, want interrupted error", last)
+	}
+}
+
+func TestReasoningSelectionRejectsUndeclaredBeforeSidecarIO(t *testing.T) {
+	descriptor := demoDescriptor()
+	descriptor.Efforts = []string{"low", "high"}
+	fc := newFakeClient("demo", descriptor)
+	r := testResolver(t, baseCatalog(), nil, fc)
+	bad := "medium"
+	_, err := r.Resolve(provider.Selection{Ref: "plugin/demo/fake/x", Effort: &bad})
+	var unsupported *provider.UnsupportedReasoningEffort
+	if !errors.As(err, &unsupported) {
+		t.Fatalf("selection error=%v", err)
+	}
+	p, err := r.Resolve(provider.Selection{Ref: "plugin/demo/fake/x"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, err = p.Stream(context.Background(), provider.Request{EffortOverride: bad})
+	if !errors.As(err, &unsupported) {
+		t.Fatalf("override error=%v", err)
+	}
+	fc.mu.Lock()
+	defer fc.mu.Unlock()
+	if len(fc.opened) != 0 {
+		t.Fatal("invalid effort reached sidecar")
 	}
 }

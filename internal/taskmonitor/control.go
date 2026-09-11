@@ -277,7 +277,7 @@ func (cs *ControlService) controlOp(ctx context.Context, projectDir, taskID stri
 	// heartbeat. Retry those expected version advances. If RecordDone already
 	// persisted the requested terminal state, use that snapshot as the result.
 	const maxControlSaveAttempts = 4
-	for attempt := 0; attempt < maxControlSaveAttempts; attempt++ {
+	for attempt := range maxControlSaveAttempts {
 		next := *snap
 		next.Version++
 		next.State = targetState

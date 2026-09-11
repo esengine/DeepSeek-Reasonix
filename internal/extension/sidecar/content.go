@@ -94,10 +94,7 @@ func (s *Store) Read(ref string, offset int64) (chunk []byte, next *int64, total
 	if offset < 0 || offset > int64(len(object.data)) {
 		return nil, nil, 0, "", protocol.MustProtocolError(protocol.ErrContentRefExpired)
 	}
-	end := offset + protocol.ContentRefChunkBytes
-	if end > int64(len(object.data)) {
-		end = int64(len(object.data))
-	}
+	end := min(offset+protocol.ContentRefChunkBytes, int64(len(object.data)))
 	if end < int64(len(object.data)) {
 		value := end
 		next = &value

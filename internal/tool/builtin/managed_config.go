@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"slices"
 	"strings"
 
 	"reasonix/internal/tool"
@@ -48,12 +49,7 @@ func (m ManagedConfigPaths) Match(target string) bool {
 	if err != nil {
 		return false
 	}
-	for _, p := range m.paths {
-		if abs == p {
-			return true
-		}
-	}
-	return false
+	return slices.Contains(m.paths, abs)
 }
 
 // approve asks the user whether this managed-config write may proceed, via the

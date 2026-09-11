@@ -7,13 +7,14 @@ import (
 	"testing"
 	"time"
 
+	"reasonix/internal/checkpoint"
 	"reasonix/internal/config"
 	"reasonix/internal/control"
 	"reasonix/internal/provider"
 )
 
 type tabScopedActionController struct {
-	control.SessionAPI
+	stubSessionAPI
 	history           []provider.Message
 	newSessionCalls   int
 	clearSessionCalls int
@@ -63,6 +64,13 @@ func (c *tabScopedActionController) Rewind(_ int, _ control.RewindScope) error {
 	c.rewindCalls++
 	return nil
 }
+func (c *tabScopedActionController) PrepareRewind(_ int, _ control.RewindScope) (checkpoint.RewindPlan, error) {
+	return checkpoint.RewindPlan{PlanID: "tab-scoped", CanFiles: true, CanConversation: true}, nil
+}
+func (c *tabScopedActionController) CommitRewind(_ string) (checkpoint.RewindResult, error) {
+	c.rewindCalls++
+	return checkpoint.RewindResult{OK: true}, nil
+}
 func (c *tabScopedActionController) Compact(_ context.Context, _ string) error {
 	c.compactCalls++
 	return nil
@@ -111,7 +119,7 @@ func TestTabScopedSessionActionsIgnoreFocusedTab(t *testing.T) {
 	}
 	// Restore content so ClearSession exercises its non-blank path too.
 	targetCtrl.history = []provider.Message{{Role: provider.RoleSystem, Content: "system"}, {Role: provider.RoleUser, Content: "clear me"}}
-	if err := app.ClearSessionForTab("target"); err != nil {
+	if _, err := app.ClearSessionForTab("target"); err != nil {
 		t.Fatalf("ClearSessionForTab: %v", err)
 	}
 	if err := app.RewindForTab("target", 1, "conversation"); err != nil {

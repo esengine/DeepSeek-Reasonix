@@ -4,26 +4,15 @@ import { JSDOM } from "jsdom";
 import React from "react";
 import { act } from "react";
 import { createRoot } from "react-dom/client";
-import gsap from "gsap";
 import { ApprovalModal } from "../components/ApprovalModal";
 import { activeFileReferenceToken, pickInlineFileReference } from "../components/FileReferenceMenu";
 import { LocaleProvider, preloadDetectedLocale } from "../lib/i18n";
 import type { AppBindings } from "../lib/bridge";
 import type { WireApproval } from "../lib/types";
+import { installDesktopHostStub } from "./desktopHostStub";
 
 let passed = 0;
 let failed = 0;
-
-type GsapToOptions = { onComplete?: () => void };
-const gsapForTests = (typeof gsap.to === "function" ? gsap : (gsap as unknown as { default?: typeof gsap }).default) as unknown as {
-  to?: (target: unknown, vars: GsapToOptions) => unknown;
-};
-if (typeof gsapForTests.to === "function") {
-  gsapForTests.to = (_target: unknown, vars: GsapToOptions) => {
-    vars.onComplete?.();
-    return {};
-  };
-}
 
 function ok(value: boolean, label: string) {
   if (value) {
@@ -83,7 +72,7 @@ function installDom(language = "en-US") {
 }
 
 function mockApp(methods: Partial<AppBindings>) {
-  window.go = {
+  installDesktopHostStub(({
     main: {
       App: {
         ...methods,
@@ -91,7 +80,7 @@ function mockApp(methods: Partial<AppBindings>) {
         SearchFileRefsForTab: methods.SearchFileRefsForTab ?? (async (_tabId: string, query: string) => methods.SearchFileRefs?.(query) ?? []),
       } as Partial<AppBindings> as AppBindings,
     },
-  };
+  }).main.App);
 }
 
 async function renderApproval(props: Partial<Parameters<typeof ApprovalModal>[0]> = {}) {

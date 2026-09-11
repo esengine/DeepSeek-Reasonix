@@ -7,6 +7,7 @@ import (
 	"strings"
 
 	"reasonix/internal/event"
+	"reasonix/internal/tool"
 )
 
 // AskTool lets the model put a structured multiple-choice question (or a few) to
@@ -22,7 +23,7 @@ type AskTool struct{}
 
 func NewAskTool() *AskTool { return &AskTool{} }
 
-func (*AskTool) Name() string { return "ask" }
+func (*AskTool) Name() string { return tool.HostAsk }
 
 func (*AskTool) Description() string {
 	return "Ask the user one or more multiple-choice questions when you hit a decision that is genuinely theirs to make — one you can't resolve from the request, the code, or sensible defaults. The frontend shows the options for the user to pick; their choices are returned to you. Prefer this over asking in prose for any real fork (which approach, which library, scope). Don't use it for decisions with an obvious default — pick the sensible option and proceed. Tool-approval modes such as YOLO do not answer these questions for the user. Each question has a short `header` (a tab label), the `question` text, 2-4 `options` (each a `label` and optional `description`; put any recommended option first), and `multiSelect` when more than one may apply."
@@ -35,8 +36,8 @@ func (*AskTool) Schema() json.RawMessage {
   "questions":{
     "type":"array",
     "minItems":1,
-    "maxItems":4,
-    "description":"1-4 questions to ask together.",
+    "maxItems":3,
+    "description":"1-3 related questions to ask together. Same ambiguity is asked only once.",
     "items":{
       "type":"object",
       "properties":{
@@ -58,7 +59,9 @@ func (*AskTool) Schema() json.RawMessage {
       },
       "required":["question","header","options"]
     }
-  }
+  },
+  "decision_id":{"type":"string","description":"Required when reopening a previously accepted decision; cite the original decision_id."},
+  "new_evidence":{"type":"string","description":"Required with decision_id when asking again after the user already accepted a consequence."}
 },
 "required":["questions"]
 }`)
@@ -69,22 +72,9 @@ func (*AskTool) Schema() json.RawMessage {
 func (*AskTool) ReadOnly() bool { return true }
 
 func (*AskTool) Execute(ctx context.Context, args json.RawMessage) (string, error) {
-	var p struct {
-		Questions []struct {
-			Header      string `json:"header"`
-			Question    string `json:"question"`
-			MultiSelect bool   `json:"multiSelect"`
-			Options     []struct {
-				Label       string `json:"label"`
-				Description string `json:"description"`
-			} `json:"options"`
-		} `json:"questions"`
-	}
-	if err := json.Unmarshal(args, &p); err != nil {
-		return "", fmt.Errorf("invalid args: %w", err)
-	}
-	if len(p.Questions) == 0 {
-		return "", fmt.Errorf("at least one question is required")
+	p, err := parseAskArgs(args)
+	if err != nil {
+		return "", err
 	}
 
 	qs := make([]event.AskQuestion, 0, len(p.Questions))
@@ -115,6 +105,25 @@ func (*AskTool) Execute(ctx context.Context, args json.RawMessage) (string, erro
 		})
 	}
 
+	id := strings.TrimSpace(p.DecisionID)
+	explicitID := id != ""
+	if id == "" {
+		id = decisionIDForQuestions(qs)
+	}
+	if dec, ok := existingDecision(ctx, id); ok {
+		if strings.TrimSpace(p.Evidence) == "" {
+			return fmt.Sprintf("Host reused accepted decision %s. The user already chose: %s. Continue with that decision unless you supply decision_id and new_evidence.", dec.ID, dec.Answer), nil
+		}
+	} else if !explicitID {
+		if dec, matched := matchingExistingDecision(ctx, qs); matched {
+			return fmt.Sprintf("Host reused accepted decision %s for the same ambiguity. The user already chose: %s. Continue with that decision; to reopen it, cite decision_id %s and supply new_evidence.", dec.ID, dec.Answer, dec.ID), nil
+		}
+	} else if explicitID {
+		if _, hasAcceptedDecision := firstExistingDecision(ctx); hasAcceptedDecision {
+			return "", fmt.Errorf("unknown decision_id %q; cite the original accepted decision_id and include new_evidence to reopen it", id)
+		}
+	}
+
 	_, _, asker, ok := CallContext(ctx)
 	if !ok || asker == nil {
 		// Headless / no interactive user: don't block an autonomous run, but make
@@ -126,7 +135,9 @@ func (*AskTool) Execute(ctx context.Context, args json.RawMessage) (string, erro
 	if err != nil {
 		return "", fmt.Errorf("ask: %w", err)
 	}
-	return formatAnswers(qs, answers), nil
+	summary := formatAnswers(qs, answers)
+	rememberDecisionForQuestions(ctx, id, qs[0].Prompt, summary, qs)
+	return summary + "\n\ndecision_id: " + id, nil
 }
 
 // formatAnswers renders the user's selections as a compact, model-facing summary,

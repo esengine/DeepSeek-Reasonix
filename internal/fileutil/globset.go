@@ -54,8 +54,8 @@ func MatchSlashGlob(path, pattern string) bool {
 	if matched, _ := doublestar.Match(pattern, path); matched {
 		return true
 	}
-	if strings.HasPrefix(pattern, "**/") {
-		matched, _ := doublestar.Match(strings.TrimPrefix(pattern, "**/"), path)
+	if after, ok := strings.CutPrefix(pattern, "**/"); ok {
+		matched, _ := doublestar.Match(after, path)
 		return matched
 	}
 	return false

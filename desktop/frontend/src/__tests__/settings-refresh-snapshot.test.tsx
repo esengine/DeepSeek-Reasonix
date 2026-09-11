@@ -1,3 +1,4 @@
+import { selectSettingsValue } from "./settingsSelectTestUtils";
 // Run: tsx src/__tests__/settings-refresh-snapshot.test.tsx
 
 import { JSDOM } from "jsdom";
@@ -6,22 +7,22 @@ import { act } from "react";
 import { createRoot } from "react-dom/client";
 import {
   SettingsPanel,
-  formatProviderExtraBody,
-  parseProviderExtraBody,
-  providerExtraBodyParseError,
-  providerBaseURLFromChatURL,
-  providerChatURLPreview,
-  providerEditorEffectiveKind,
-  normalizeProviderView,
 } from "../components/SettingsPanel";
 import { LocaleProvider } from "../lib/i18n";
 import type { AppBindings } from "../lib/bridge";
-import type { ProviderView, SettingsView } from "../lib/types";
+import type { ProviderModelCapabilityView, ProviderView, SettingsView } from "../lib/types";
 import {
   applyTypographyPreferences,
   createDefaultTypographyPreferences,
   getTypographyPreferences,
 } from "../lib/typographyPreferences";
+import {
+  baseSettings,
+  flushPromises,
+  installCanvasMock,
+  waitFor,
+} from "../test-support/settingsTestFixtures";
+import { installDesktopHostStub } from "./desktopHostStub";
 
 let passed = 0;
 let failed = 0;
@@ -44,163 +45,7 @@ function eq(actual: unknown, expected: unknown, label: string) {
   }
 }
 
-function flushPromises(): Promise<void> {
-  return new Promise((resolve) => setTimeout(resolve, 0));
-}
-
-function installCanvasMock(win: Window) {
-  Object.defineProperty(win.HTMLCanvasElement.prototype, "getContext", {
-    configurable: true,
-    value(type: string) {
-      if (type !== "2d") return null;
-      return {
-        font: "",
-        measureText: () => ({ width: 0 }),
-      } as unknown as CanvasRenderingContext2D;
-    },
-  });
-}
-
-async function waitFor(label: string, predicate: () => boolean) {
-  for (let attempt = 0; attempt < 20; attempt += 1) {
-    await act(async () => {
-      await flushPromises();
-    });
-    if (predicate()) return;
-  }
-  throw new Error(`timed out waiting for ${label}`);
-}
-
-function baseSettings(displayMode: "standard" | "compact" = "standard"): SettingsView {
-  return {
-    defaultModel: "",
-    plannerModel: "",
-    subagentModel: "",
-    subagentEffort: "",
-    autoPlan: "off",
-    providers: [],
-    officialProviders: [],
-    providerPresets: [],
-    permissions: { mode: "ask", allow: [], ask: [], deny: [] },
-    sandbox: { bash: "enforce", network: false, workspaceRoot: "", allowWrite: [], effectiveWorkspaceRoot: "/work", effectiveWriteRoots: ["/work"], shell: "auto" },
-    network: { proxyMode: "auto", proxyUrl: "", noProxy: "", proxy: { type: "socks5", server: "", port: 0, username: "", password: "" } },
-    agent: { temperature: 0, maxSteps: 0, plannerMaxSteps: 0, maxSubagentDepth: 2, maxSubagentConcurrency: 6, maxParallelWriters: 3, systemPrompt: "", coldResumePrune: true, reasoningLanguage: "auto", compactRatio: 0.8 },
-    bot: {
-      enabled: false,
-      model: "",
-	      toolApprovalMode: "",
-	      maxSteps: 0,
-	      debounceMs: 0,
-	      queueMode: "steer",
-	      queueCap: 20,
-	      queueDrop: "summarize",
-	      ignoreSelfMessages: true,
-	      selfUserIds: { qq: [], feishu: [], weixin: [] },
-	      control: { enabled: false, addr: "127.0.0.1:37913", tokenEnv: "REASONIX_BOT_CONTROL_TOKEN" },
-	      pairing: { enabled: true, requestTtlMinutes: 60, maxPendingPerPlatform: 3 },
-	      routes: [],
-	      allowlist: {
-	        enabled: false,
-	        allowAll: false,
-	        qqUsers: [],
-	        feishuUsers: [],
-	        weixinUsers: [],
-	        qqApprovers: [],
-	        feishuApprovers: [],
-	        weixinApprovers: [],
-	        qqAdmins: [],
-	        feishuAdmins: [],
-	        weixinAdmins: [],
-	        qqGroups: [],
-	        feishuGroups: [],
-	        weixinGroups: [],
-	      },
-      qq: {
-        enabled: false,
-        appId: "",
-        appSecretEnv: "",
-        secretSet: false,
-        sandbox: false,
-        model: "",
-        toolApprovalMode: "ask",
-        workspaceRoot: "",
-        access: { enabled: true, allowAll: false, pairingEnabled: true, users: [], groups: [], approvers: [], admins: [] },
-      },
-      feishu: { enabled: false, domain: "feishu", appId: "", appSecretEnv: "", secretSet: false, verificationToken: "", mode: "webhook", webhookPort: 0, requireMention: false },
-      weixin: { enabled: false, accountId: "", tokenEnv: "", tokenSet: false, apiBase: "" },
-      connections: [],
-    },
-    desktopLanguage: "en",
-    desktopLayoutStyle: "workbench",
-    desktopTheme: "auto",
-    desktopThemeStyle: "graphite",
-    desktopTerminalTheme: "auto",
-    closeBehavior: "background",
-    displayMode,
-    statusBarStyle: "text",
-    statusBarItems: ["model", "workspace", "git_branch", "cache", "balance"],
-    defaultToolApprovalMode: "auto",
-    checkUpdates: true,
-    updateChannel: "stable",
-    telemetry: true,
-    metrics: true,
-    configPath: "/tmp/reasonix/config.toml",
-    providerKinds: [],
-    autoApproveTools: false,
-    bypass: false,
-  };
-}
-
 console.log("\nsettings refresh snapshot");
-
-const nullableProvider = normalizeProviderView({
-  name: null,
-  baseUrl: null,
-} as unknown as ProviderView);
-eq(nullableProvider.name, "", "provider snapshots normalize a null name at the settings boundary");
-eq(nullableProvider.baseUrl, "", "provider snapshots normalize a null base URL at the settings boundary");
-
-const glmProvider = normalizeProviderView({
-  name: "custom-glm",
-  baseUrl: "https://gateway.example.com/v1",
-  reasoningProtocol: "glm",
-} as ProviderView);
-eq(glmProvider.reasoningProtocol, "glm", "provider snapshots preserve the explicit GLM reasoning protocol");
-
-eq(providerEditorEffectiveKind(true, "anthropic", ["anthropic", "openai"]), "anthropic", "new custom providers keep the selected Anthropic-compatible kind");
-eq(providerEditorEffectiveKind(false, "anthropic", ["anthropic", "openai"]), "anthropic", "existing providers preserve their stored kind");
-eq(providerChatURLPreview("https://proxy.example.com/v1", "", false), "https://proxy.example.com/v1/chat/completions", "base URL mode previews chat completions URL");
-eq(providerChatURLPreview("", "https://proxy.example.com/custom/chat", true), "https://proxy.example.com/custom/chat", "full URL mode previews configured URL");
-eq(providerBaseURLFromChatURL("https://proxy.example.com/v1/chat/completions"), "https://proxy.example.com/v1", "chat URL derives base URL for model discovery");
-eq(formatProviderExtraBody({ top_p: 0.7, enable_thinking: true }), "{\n  \"enable_thinking\": true,\n  \"top_p\": 0.7\n}", "extra body editor formats stable JSON");
-eq(JSON.stringify(parseProviderExtraBody('{ "enable_thinking": true, "top_p": 0.7 }')), "{\"enable_thinking\":true,\"top_p\":0.7}", "extra body editor parses JSON object");
-let extraBodyRejected = false;
-try {
-  parseProviderExtraBody("[true]");
-} catch {
-  extraBodyRejected = true;
-}
-ok(extraBodyRejected, "extra body editor rejects non-object JSON");
-const extraBodyTestT = ((key: string, vars?: Record<string, string | number>) => {
-  if (key === "settings.providerExtraBodyError") return "localized extra body fallback";
-  if (key === "settings.providerExtraBodyNull") return `${vars?.path} localized null`;
-  return key;
-}) as any;
-eq(
-  providerExtraBodyParseError(new SyntaxError("Unexpected token } in JSON"), extraBodyTestT),
-  "localized extra body fallback",
-  "extra body editor localizes JSON syntax errors",
-);
-try {
-  parseProviderExtraBody('{ "nested": { "value": null } }', extraBodyTestT);
-  ok(false, "extra body editor rejects localized null validation errors");
-} catch (e) {
-  eq(
-    providerExtraBodyParseError(e, extraBodyTestT),
-    "extra_body.nested.value localized null",
-    "extra body editor keeps localized structured validation errors",
-  );
-}
 
 const dom = new JSDOM("<!doctype html><html><body><div id=\"root\"></div></body></html>", {
   pretendToBeVisual: true,
@@ -224,6 +69,7 @@ globalThis.KeyboardEvent = dom.window.KeyboardEvent;
 globalThis.MouseEvent = dom.window.MouseEvent;
 globalThis.localStorage = dom.window.localStorage;
 globalThis.sessionStorage = dom.window.sessionStorage;
+window.matchMedia = (() => ({matches: true, addEventListener(){}, removeEventListener(){}})) as any;
 globalThis.requestAnimationFrame = dom.window.requestAnimationFrame.bind(dom.window);
 globalThis.cancelAnimationFrame = dom.window.cancelAnimationFrame.bind(dom.window);
 window.scrollTo = () => {};
@@ -239,21 +85,30 @@ regionalTypography.code = {
 applyTypographyPreferences(regionalTypography);
 const regionalCodeFont = document.documentElement.style.getPropertyValue("--typography-code-font");
 
-const settingsSnapshots = [baseSettings("standard"), baseSettings("compact")];
+const settingsSnapshots = [
+  baseSettings("standard"),
+  { ...baseSettings("standard"), sessionExperience: "deep" as const },
+  { ...baseSettings("standard"), sessionExperience: "deep" as const },
+];
 let settingsCalls = 0;
 let setDisplayModeCalls = 0;
+let setSessionExperienceCalls = 0;
+let rejectSessionExperience = false;
 let onChangedSettings: SettingsView | undefined;
 
-window.go = {
+const desktopStub = installDesktopHostStub(({
   main: {
     App: {
       Settings: async () => settingsSnapshots[Math.min(settingsCalls++, settingsSnapshots.length - 1)],
       SetDisplayMode: async () => {
         setDisplayModeCalls += 1;
       },
+      SetSessionExperience: async () => {
+        setSessionExperienceCalls += 1;
+        if (rejectSessionExperience) throw new Error("session experience persistence failed");
+      },
     } as Partial<AppBindings> as AppBindings,
-  },
-};
+  }}).main.App);
 
 const rootEl = document.getElementById("root");
 if (!rootEl) throw new Error("missing root");
@@ -275,24 +130,45 @@ await act(async () => {
   await flushPromises();
 });
 
-const compactButton = Array.from(document.querySelectorAll("button")).find((button) => button.textContent?.trim() === "Compact") as HTMLButtonElement | undefined;
-if (!compactButton) throw new Error("compact display mode button did not render");
-const generalFieldLabels = Array.from(rootEl.querySelectorAll(".settings-section__body > .settings-field > .settings-field__copy > .settings-field__label"))
+const deepButton = Array.from(document.querySelectorAll("button")).find((button) => button.textContent?.trim() === "Deep") as HTMLButtonElement | undefined;
+if (!deepButton) throw new Error("deep session experience button did not render");
+const generalFieldLabels = Array.from(rootEl.querySelectorAll(".settings-section__body > .settings-field .settings-field__label"))
   .map((label) => label.textContent?.trim());
 eq(generalFieldLabels[0], "Desktop style", "general settings place desktop style first");
 eq(document.querySelectorAll(".step-limit-control").length, 0, "general settings hide executor and planner step-limit controls");
+eq(rootEl.querySelectorAll('[role="radiogroup"]').length > 0, true, "session experience exposes an accessible choice group");
+ok(rootEl.textContent?.includes("Session experience") === true, "general settings render the canonical session experience field");
+ok(!rootEl.textContent?.includes("Conversation density"), "general settings do not render the retired density field");
+ok(!rootEl.textContent?.includes("Thinking content"), "general settings do not render the retired reasoning field");
+ok(!rootEl.textContent?.includes("After the turn"), "general settings do not render the retired fold field");
 ok(!document.body.textContent?.includes("step limit"), "general settings keep automatic progress free of step-limit copy");
 ok(!document.body.textContent?.includes("Automatic plan mode"), "general settings omit the retired automatic Plan Mode control");
 ok(!document.body.textContent?.includes("planning defaults"), "general settings omit retired automatic Plan Mode copy");
 
 await act(async () => {
-  compactButton.click();
+  deepButton.click();
   await flushPromises();
 });
 
-eq(setDisplayModeCalls, 1, "display mode mutation is invoked once");
+eq(setSessionExperienceCalls, 1, "session experience mutation is invoked once");
+eq(setDisplayModeCalls, 0, "legacy display mode mutation is not invoked");
 eq(settingsCalls, 2, "settings panel reads Settings only for initial load and post-save reload");
-ok(onChangedSettings?.displayMode === "compact", "onChanged receives the post-save SettingsView snapshot");
+ok(onChangedSettings?.sessionExperience === "deep", "onChanged receives the post-save SettingsView snapshot");
+
+const standardButton = Array.from(document.querySelectorAll("button"))
+  .find((button) => button.textContent?.trim() === "Standard") as HTMLButtonElement | undefined;
+if (!standardButton) throw new Error("standard session experience button did not render");
+rejectSessionExperience = true;
+await act(async () => {
+  standardButton.click();
+  await flushPromises();
+});
+eq(setSessionExperienceCalls, 2, "failed session experience mutation is invoked once");
+eq(settingsCalls, 3, "failed save still reloads the authoritative Settings snapshot");
+ok(onChangedSettings?.sessionExperience === "deep", "failed save publishes the authoritative backend value");
+const refreshedDeepButton = Array.from(document.querySelectorAll("button"))
+  .find((button) => button.textContent?.trim() === "Deep") as HTMLButtonElement | undefined;
+eq(refreshedDeepButton?.getAttribute("aria-checked"), "true", "failed save reconciles the segmented control from the backend snapshot");
 
 await act(async () => {
   root.unmount();
@@ -333,18 +209,18 @@ compactSettings.providers = [{
   modelOverrides: [],
 }];
 let compactRatioCalls: number[] = [];
-window.go = {
+desktopStub.replaceCommands(({
   main: {
     App: {
       Settings: async () => compactSettings,
-      FetchAllProviderModels: async () => ({}),
+      FetchAllProviderModelCatalogs: async () => ({}),
       SetCompactRatio: async (ratio: number) => {
         compactRatioCalls.push(ratio);
         compactSettings = { ...compactSettings, agent: { ...compactSettings.agent, compactRatio: ratio } };
       },
     } as Partial<AppBindings> as AppBindings,
   },
-};
+}).main.App);
 
 await act(async () => {
   compactRoot.render(
@@ -356,31 +232,22 @@ await act(async () => {
 });
 ok(compactRootEl.textContent?.includes("Advanced context management") === false, "compaction preference has no redundant advanced disclosure");
 ok(compactRootEl.textContent?.includes("Automatic compaction threshold") === true, "compaction preference is visible without expanding a disclosure");
-ok(compactRootEl.textContent?.includes("80,000 tokens") === true, "compact ratio shows the default model token threshold");
-ok(compactRootEl.textContent?.includes("Current threshold: 80% · Balanced") === true, "compact ratio summarizes the saved preset separately");
+ok(compactRootEl.textContent?.includes("80,000 tokens") === false, "compact ratio avoids a redundant token estimate under the selected row");
+ok(compactRootEl.textContent?.includes("Balance continuity and cache reuse") === true, "compact ratio explains the recommended preset consequence");
 ok(compactRootEl.textContent?.includes("effective threshold is 75%") === true, "project override shows the active effective threshold");
-ok(compactRootEl.querySelector('input[aria-label="Custom compaction threshold percentage"]') === null, "custom compact ratio editor stays hidden on the default path");
-const balancedCompactButton = compactRootEl.querySelector('button[aria-label="80% · Balanced"]') as HTMLButtonElement | null;
-if (!balancedCompactButton) throw new Error("balanced compaction preset did not render");
-ok(balancedCompactButton.getAttribute("aria-pressed") === "true", "saved compact ratio starts selected");
-const customCompactButton = Array.from(compactRootEl.querySelectorAll("button")).find((button) => button.textContent?.includes("Custom threshold…")) as HTMLButtonElement | undefined;
+const recommendedCompactButton = compactRootEl.querySelector('input[type="radio"][aria-label="80% · Recommended"]') as HTMLInputElement | null;
+if (!recommendedCompactButton) throw new Error("recommended compaction preset did not render");
+ok(recommendedCompactButton.checked, "saved compact ratio starts selected");
+const customCompactButton = compactRootEl.querySelector('input[type="radio"][aria-label="Custom threshold…"]') as HTMLInputElement | null;
 if (!customCompactButton) throw new Error("custom compaction threshold option did not render");
-ok(customCompactButton.closest(".compact-ratio-presets") === null, "custom compaction is a separate disclosure rather than a preset value");
-ok(customCompactButton.hasAttribute("aria-pressed") === false, "custom disclosure does not announce a saved selection state");
-await act(async () => {
-  customCompactButton.click();
-  await flushPromises();
-});
-let customCompactInput = compactRootEl.querySelector('input[aria-label="Custom compaction threshold percentage"]') as HTMLInputElement | null;
-if (!customCompactInput) throw new Error("custom compaction threshold input did not open");
-eq(customCompactInput.value, "80", "custom compaction threshold defaults older backends to 80 percent");
-ok(compactRootEl.textContent?.includes("Tool output is trimmed at 60%") === true, "custom compact ratio explains the lower guard rail");
-ok(compactRootEl.textContent?.includes("90% forces compaction") === true, "custom compact ratio explains the upper guard rail");
-ok(document.activeElement === customCompactInput, "opening the custom compact ratio moves focus to its input");
-ok(customCompactButton.getAttribute("aria-expanded") === "true", "custom compact ratio exposes its expanded state");
-ok(balancedCompactButton.getAttribute("aria-pressed") === "true", "opening custom editing preserves the saved preset selection");
-const customCompactApply = Array.from(customCompactInput.closest(".compact-ratio-custom")?.querySelectorAll("button") ?? []).find((button) => button.textContent === "Apply") as HTMLButtonElement | undefined;
-if (!customCompactApply) throw new Error("custom compaction threshold apply action did not render");
+ok(customCompactButton.closest(".compact-ratio-choice-list") !== null, "custom compaction is the fourth choice in the shared radio group");
+ok(!customCompactButton.checked, "custom choice does not replace the saved preset before editing");
+const customCompactInput = compactRootEl.querySelector('input[aria-label="Custom compaction threshold percentage"]') as HTMLInputElement | null;
+if (!customCompactInput) throw new Error("inline custom compaction threshold input did not render");
+eq(customCompactInput.value, "", "preset selection leaves the inline custom input empty");
+eq(customCompactInput.placeholder, "Enter percentage", "inline custom input carries the requested percentage prompt");
+ok(customCompactInput.closest(".compact-ratio-choice") !== null, "custom input stays inside the fourth choice row");
+ok(customCompactInput.closest(".compact-ratio-choice")?.querySelectorAll("button").length === 0, "custom row has no secondary apply or cancel actions");
 const inputValueSetter = Object.getOwnPropertyDescriptor(dom.window.HTMLInputElement.prototype, "value")?.set;
 const setCustomCompactInput = (input: HTMLInputElement, value: string) => {
   const previous = input.value;
@@ -390,61 +257,124 @@ const setCustomCompactInput = (input: HTMLInputElement, value: string) => {
   input.dispatchEvent(new Event("change", { bubbles: true }));
 };
 await act(async () => {
-  setCustomCompactInput(customCompactInput, "64");
+  customCompactInput.focus();
   await flushPromises();
 });
-ok(customCompactApply.disabled, "out-of-range custom compact ratio cannot be applied");
-eq(compactRatioCalls.length, 0, "editing a custom compact ratio does not save eagerly");
+ok(recommendedCompactButton.checked, "focusing an empty custom input preserves the saved preset");
+ok(!customCompactButton.checked, "an empty custom draft is not announced as the saved selection");
 await act(async () => {
+  customCompactInput.focus();
+  setCustomCompactInput(customCompactInput, "29");
+  customCompactInput.blur();
+  await flushPromises();
+});
+eq(compactRatioCalls.length, 0, "out-of-range inline compact ratio is not saved");
+eq(customCompactInput.value, "29", "invalid inline value stays available for correction");
+eq(customCompactInput.getAttribute("aria-invalid"), "true", "invalid inline value is exposed to assistive technology");
+await act(async () => {
+  customCompactInput.focus();
   setCustomCompactInput(customCompactInput, "75");
+  customCompactInput.dispatchEvent(new KeyboardEvent("keydown", { key: "Enter", bubbles: true }));
   await flushPromises();
 });
-ok(!customCompactApply.disabled, "valid custom compact ratio enables explicit apply");
-await act(async () => {
-  customCompactApply.click();
-  await flushPromises();
-});
-eq(compactRatioCalls.length, 1, "custom compact ratio mutation is invoked once after apply");
+eq(compactRatioCalls.length, 1, "Enter saves the inline custom compact ratio once");
 eq(compactRatioCalls[0], 0.75, "custom compact ratio converts percentage to fraction");
-ok(compactRootEl.querySelector('input[aria-label="Custom compaction threshold percentage"]') === null, "successful custom compact ratio apply collapses the editor");
-ok(compactRootEl.textContent?.includes("Current threshold: 75% · Custom") === true, "saved custom compact ratio is summarized independently from the disclosure");
-ok(customCompactButton.textContent?.includes("Custom threshold…") === true, "custom disclosure keeps an action label after saving");
+eq(customCompactInput.value, "75", "saved custom compact ratio stays visible in the inline input");
+ok(customCompactButton.checked, "saved custom ratio selects the custom choice");
+ok(customCompactButton.getAttribute("aria-label") === "Custom threshold…", "custom choice keeps a stable accessible label after saving");
 await act(async () => {
-  customCompactButton.click();
-  await flushPromises();
-});
-customCompactInput = compactRootEl.querySelector('input[aria-label="Custom compaction threshold percentage"]') as HTMLInputElement | null;
-if (!customCompactInput) throw new Error("saved custom compaction threshold did not reopen");
-await act(async () => {
+  customCompactInput.focus();
   setCustomCompactInput(customCompactInput, "74");
   customCompactInput.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true }));
   await flushPromises();
 });
 eq(compactRatioCalls.length, 1, "Escape cancels a custom compact ratio without saving");
-ok(compactRootEl.querySelector('input[aria-label="Custom compaction threshold percentage"]') === null, "Escape collapses the custom compact ratio editor");
+eq(customCompactInput.value, "75", "Escape restores the saved inline custom ratio");
+const activeCompactButton = compactRootEl.querySelector('input[type="radio"][aria-label="70% · Active"]') as HTMLInputElement | null;
+if (!activeCompactButton) throw new Error("active compaction preset did not render");
 await act(async () => {
-  customCompactButton.click();
-  await flushPromises();
-});
-customCompactInput = compactRootEl.querySelector('input[aria-label="Custom compaction threshold percentage"]') as HTMLInputElement | null;
-if (!customCompactInput) throw new Error("custom compaction threshold did not reopen for cancel");
-const customCompactCancel = Array.from(customCompactInput.closest(".compact-ratio-custom")?.querySelectorAll("button") ?? []).find((button) => button.textContent === "Cancel") as HTMLButtonElement | undefined;
-if (!customCompactCancel) throw new Error("custom compaction threshold cancel action did not render");
-await act(async () => {
-  customCompactCancel.click();
-  await flushPromises();
-});
-eq(compactRatioCalls.length, 1, "Cancel closes a custom compact ratio without saving");
-ok(compactRootEl.querySelector('input[aria-label="Custom compaction threshold percentage"]') === null, "Cancel collapses the custom compact ratio editor");
-const earlierCompactButton = compactRootEl.querySelector('button[aria-label="70% · Earlier"]') as HTMLButtonElement | null;
-if (!earlierCompactButton) throw new Error("earlier compaction preset did not render");
-await act(async () => {
-  earlierCompactButton.click();
+  activeCompactButton.click();
   await flushPromises();
 });
 eq(compactRatioCalls.length, 2, "compact ratio preset adds one mutation");
 eq(compactRatioCalls[1], 0.7, "compact ratio preset sends the expected fraction");
-ok(earlierCompactButton.getAttribute("aria-pressed") === "true", "saved compact ratio is selected after Settings reload");
+ok(activeCompactButton.checked, "saved compact ratio is selected after Settings reload");
+
+// Model native mousedown -> blur -> click with a deliberately slow bridge.
+let finishCompactSave: (() => void) | undefined;
+(desktopStub.commands as AppBindings).SetCompactRatio = async (ratio: number) => {
+  compactRatioCalls.push(ratio);
+  await new Promise<void>((resolve) => { finishCompactSave = resolve; });
+  compactSettings = { ...compactSettings, agent: { ...compactSettings.agent, compactRatio: ratio } };
+};
+await act(async () => { customCompactInput.focus(); });
+await act(async () => { setCustomCompactInput(customCompactInput, "74"); });
+const recommendedLabel = recommendedCompactButton.closest("label")!;
+const presetDown = new dom.window.MouseEvent("mousedown", { button: 0, bubbles: true, cancelable: true });
+await act(async () => {
+  recommendedLabel.dispatchEvent(presetDown);
+  if (!presetDown.defaultPrevented) customCompactInput.blur();
+});
+ok(!recommendedCompactButton.disabled, "draft editing does not disable the preset before its click");
+await act(async () => { recommendedLabel.click(); });
+eq(compactRatioCalls.length, 3, "preset click sends only one mutation while bridge is pending");
+eq(compactRatioCalls[2], 0.8, "explicit preset wins over an unsaved custom draft");
+await act(async () => { finishCompactSave?.(); await flushPromises(); });
+ok(recommendedCompactButton.checked, "clicked preset remains selected after the slow save");
+eq(customCompactInput.value, "", "preset click clears the replaced custom draft");
+await act(async () => { customCompactInput.focus(); });
+await act(async () => { setCustomCompactInput(customCompactInput, "73"); });
+await act(async () => {
+  const down = new dom.window.MouseEvent("mousedown", { button: 0, bubbles: true, cancelable: true });
+  recommendedCompactButton.dispatchEvent(down);
+  if (!down.defaultPrevented) customCompactInput.blur();
+});
+await act(async () => { recommendedCompactButton.click(); });
+eq(compactRatioCalls.length, 3, "clicking the current preset cancels editing without saving the draft");
+eq(customCompactInput.value, "", "current preset click clears the draft");
+await act(async () => { customCompactInput.focus(); });
+await act(async () => { setCustomCompactInput(customCompactInput, "72"); });
+await act(async () => { customCompactInput.blur(); });
+eq(compactRatioCalls.length, 4, "ordinary blur still saves once");
+eq(compactRatioCalls[3], 0.72, "ordinary blur persists the draft");
+await act(async () => { finishCompactSave?.(); await flushPromises(); });
+ok(customCompactButton.checked, "ordinary blur selects the saved custom threshold");
+
+// A rejected save retains the draft for retry while selection stays authoritative.
+let rejectCompactSave = true;
+(desktopStub.commands as AppBindings).SetCompactRatio = async (ratio: number) => {
+  compactRatioCalls.push(ratio);
+  if (rejectCompactSave) throw new Error("Compaction save rejected");
+  compactSettings = { ...compactSettings, agent: { ...compactSettings.agent, compactRatio: ratio } };
+};
+await act(async () => { customCompactInput.focus(); });
+await act(async () => { setCustomCompactInput(customCompactInput, "74"); });
+await act(async () => { customCompactInput.blur(); await flushPromises(); });
+eq(customCompactInput.value, "74", "failed save retains the custom draft");
+eq(compactSettings.agent.compactRatio, 0.72, "failed save preserves the persisted threshold");
+ok(compactRootEl.textContent?.includes("Compaction save rejected"), "failed save displays its error");
+rejectCompactSave = false;
+await act(async () => { customCompactInput.focus(); });
+await act(async () => {
+  customCompactInput.dispatchEvent(new KeyboardEvent("keydown", { key: "Enter", bubbles: true }));
+  await flushPromises();
+});
+eq(compactSettings.agent.compactRatio, 0.74, "Enter retries the retained draft successfully");
+eq(customCompactInput.value, "74", "successful retry keeps the saved custom value visible");
+ok(!compactRootEl.textContent?.includes("Compaction save rejected"), "successful retry clears the error");
+rejectCompactSave = true;
+await act(async () => { customCompactInput.focus(); });
+await act(async () => { setCustomCompactInput(customCompactInput, "76"); });
+await act(async () => { customCompactInput.blur(); await flushPromises(); });
+eq(customCompactInput.value, "76", "subsequent rejection also retains the draft");
+const callsBeforeCancel = compactRatioCalls.length;
+await act(async () => { customCompactInput.focus(); });
+await act(async () => {
+  customCompactInput.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true }));
+  await flushPromises();
+});
+eq(customCompactInput.value, "74", "Escape after failure restores the persisted value");
+eq(compactRatioCalls.length, callsBeforeCancel, "Escape after failure does not write");
 
 await act(async () => {
   compactRoot.unmount();
@@ -454,7 +384,7 @@ const retryRootEl = document.createElement("div");
 document.body.appendChild(retryRootEl);
 const retryRoot = createRoot(retryRootEl);
 let failingSettingsCalls = 0;
-window.go = {
+desktopStub.replaceCommands(({
   main: {
     App: {
       Settings: async () => {
@@ -464,7 +394,7 @@ window.go = {
       },
     } as Partial<AppBindings> as AppBindings,
   },
-};
+}).main.App);
 
 await act(async () => {
   retryRoot.render(
@@ -491,7 +421,7 @@ await act(async () => {
   retryButton.click();
   await flushPromises();
 });
-await waitFor("settings retry success", () => Boolean(Array.from(document.querySelectorAll("button")).find((button) => button.textContent?.trim() === "Compact")));
+await waitFor("settings retry success", () => Boolean(Array.from(document.querySelectorAll("button")).find((button) => button.textContent?.trim() === "Deep")));
 
 eq(failingSettingsCalls, 2, "settings retry calls Settings again");
 ok(document.body.textContent?.includes("Settings could not be loaded.") === false, "settings retry clears the load error");
@@ -504,7 +434,7 @@ const windowsSandboxRootEl = document.createElement("div");
 document.body.appendChild(windowsSandboxRootEl);
 const windowsSandboxRoot = createRoot(windowsSandboxRootEl);
 let windowsSetSandboxCalls = 0;
-window.go = {
+desktopStub.replaceCommands(({
   main: {
     App: {
       // Deliberately return a stale enforce value: the Windows UI must still
@@ -515,7 +445,7 @@ window.go = {
       },
     } as Partial<AppBindings> as AppBindings,
   },
-};
+}).main.App);
 
 await act(async () => {
   windowsSandboxRoot.render(
@@ -532,13 +462,11 @@ await act(async () => {
 });
 await waitFor("Windows Bash sandbox control", () => document.body.textContent?.includes("This setting is fixed to off.") === true);
 
-const windowsBashSelect = Array.from(windowsSandboxRootEl.querySelectorAll("select")).find((select) =>
-  Array.from(select.options).some((option) => option.value === "off"),
-);
+const windowsBashSelect = Array.from(windowsSandboxRootEl.querySelectorAll<HTMLButtonElement>("button.settings-select")).find(select => select.value === "off");
 if (!windowsBashSelect) throw new Error("Windows Bash sandbox select did not render");
 ok(windowsBashSelect.disabled, "Windows Bash sandbox selector is disabled");
 eq(windowsBashSelect.value, "off", "Windows Bash sandbox selector is fixed to off");
-ok(!Array.from(windowsBashSelect.options).some((option) => option.value === "enforce"), "Windows Bash sandbox selector omits enforce");
+ok(windowsBashSelect.getAttribute("aria-expanded") === "false", "Windows Bash sandbox selector cannot open");
 eq(windowsSetSandboxCalls, 0, "Windows immutable Bash sandbox state does not save enforce");
 
 await act(async () => {
@@ -550,7 +478,7 @@ document.body.appendChild(zoomRootEl);
 const zoomRoot = createRoot(zoomRootEl);
 let persistedZoom = 0.5;
 const savedZoomFactors: number[] = [];
-window.go = {
+desktopStub.replaceCommands(({
   main: {
     App: {
       Settings: async () => baseSettings("standard"),
@@ -561,7 +489,7 @@ window.go = {
       },
     } as Partial<AppBindings> as AppBindings,
   },
-};
+}).main.App);
 
 localStorage.setItem("reasonix-zoom-restart", "1");
 await act(async () => {
@@ -579,13 +507,9 @@ await act(async () => {
 });
 await waitFor("persisted display zoom sync", () => document.querySelector(".zoom-slider__value")?.textContent?.trim() === "50%");
 
-const monoFontSelect = zoomRootEl.querySelector("select[aria-labelledby='appearance-mono-font-family-label']") as HTMLSelectElement | null;
+const monoFontSelect = zoomRootEl.querySelector("button.settings-select[aria-labelledby='appearance-mono-font-family-label']") as HTMLButtonElement | null;
 if (!monoFontSelect) throw new Error("monospace font selector did not render");
-await act(async () => {
-  monoFontSelect.value = "custom";
-  monoFontSelect.dispatchEvent(new Event("change", { bubbles: true }));
-  await flushPromises();
-});
+await selectSettingsValue(monoFontSelect, "custom");
 
 const preservedTypography = getTypographyPreferences();
 eq(preservedTypography.code.followGlobal, false, "global monospace changes preserve an explicit code-region override");
@@ -616,6 +540,14 @@ const botsRootEl = document.createElement("div");
 document.body.appendChild(botsRootEl);
 const botsRoot = createRoot(botsRootEl);
 const botsSettings = baseSettings("standard");
+botsSettings.bot.dingtalk = {
+  enabled: true,
+  clientId: "dinghuspf88znepnhwfp",
+  clientSecretEnv: "DINGTALK_CLIENT_SECRET",
+  secretSet: true,
+  botName: "",
+  requireMention: true,
+};
 botsSettings.bot.connections = [
   {
     id: "conn-feishu-1",
@@ -635,13 +567,13 @@ botsSettings.bot.connections = [
 	    access: { enabled: true, allowAll: false, pairingEnabled: true, users: ["ou_mock_user_001"], groups: [], approvers: [], admins: [] },
 	  },
 	];
-window.go = {
+desktopStub.replaceCommands(({
   main: {
     App: {
       Settings: async () => botsSettings,
     } as Partial<AppBindings> as AppBindings,
   },
-};
+}).main.App);
 
 await act(async () => {
   botsRoot.render(
@@ -660,8 +592,8 @@ ok(!document.getElementById("bot-step-access"), "bots tab omits the old global a
 ok(!document.getElementById("bot-step-behavior"), "bots tab omits global default behavior card");
 eq(document.querySelectorAll(".bot-step-chip").length, 0, "hero no longer shows the old two-step chips");
 
-eq(document.querySelectorAll(".bot-channel-tabs [role=\"tab\"]").length, 4, "bot manager uses four fixed channel tabs on the left");
-ok(document.querySelector(".bot-channel-setup-card")?.textContent?.includes("Configure QQ") === true, "unconfigured QQ tab shows key setup on the right");
+eq(document.querySelectorAll(".bot-channel-tabs [role=\"tab\"]").length, 5, "bot manager uses five fixed channel tabs on the left");
+ok(document.querySelector(".bot-channel-setup-card")?.querySelector("input") !== null, "unconfigured QQ tab shows key setup on the right");
 ok(document.body.textContent?.includes("Back to entry") === false, "bot manager does not show a return-to-entry action");
 
 const feishuTab = Array.from(document.querySelectorAll(".bot-channel-tabs [role=\"tab\"]")).find((button) => button.textContent?.includes("Feishu")) as HTMLButtonElement | undefined;
@@ -688,6 +620,109 @@ ok(
 ok(document.body.textContent?.includes("ou_mock_user_001") === true, "selected bot detail shows its trusted user");
 ok(document.body.textContent?.includes("Legacy global allowlist") === true, "advanced area keeps the legacy global allowlist");
 ok(document.querySelector(".bot-simple-advanced")?.textContent?.includes("local control API") === false, "advanced area no longer owns mobile/control API setup");
+
+// DingTalk channel: a persisted ClientID must round-trip back into the UI.
+// The unconfigured setup form and the configured detail card both show it;
+// blur-save and reload must not blank the field.
+const persistedDingtalkSettings = () => {
+  const s = baseSettings("standard");
+  s.bot.dingtalk = {
+    enabled: true,
+    clientId: "dinghuspf88znepnhwfp",
+    clientSecretEnv: "DINGTALK_CLIENT_SECRET",
+    secretSet: true,
+    botName: "",
+    requireMention: true,
+  };
+  return s;
+};
+let dingtalkSettings = persistedDingtalkSettings();
+let dingtalkTestCalls = 0;
+desktopStub.replaceCommands(({
+  main: {
+    App: {
+      Settings: async () => dingtalkSettings,
+      SetBotSettings: async (next: typeof dingtalkSettings) => {
+        dingtalkSettings = next;
+      },
+      SetBotSecret: async () => {},
+      TestDingtalkBot: async () => {
+        dingtalkTestCalls += 1;
+        return { id: "dingtalk", label: "DingTalk", status: "ok", message: "测试消息已发送，请检查钉钉会话。", messageId: "mock-dingtalk-id", phase: "send", code: "dingtalk_test_send_ok", reportKind: "", reportDetail: "", occurredAt: new Date().toISOString() };
+      },
+    } as Partial<AppBindings> as AppBindings,
+  },
+}).main.App);
+const dingtalkTab = Array.from(botsRootEl.querySelectorAll(".bot-channel-tabs [role=\"tab\"]")).find((button) => button.textContent?.includes("DingTalk")) as HTMLButtonElement | undefined;
+if (!dingtalkTab) throw new Error("DingTalk channel tab did not render");
+await act(async () => {
+  dingtalkTab.click();
+  await flushPromises();
+});
+// Secret is set and the bot is enabled: the configured detail card
+// shows the persisted ClientID (the "input disappeared" regression).
+await waitFor("DingTalk detail card with ClientID", () => {
+  const card = botsRootEl.querySelector(".bot-channel-manager__detail .bot-detail-card");
+  const hasClientId = card?.textContent?.includes("dinghuspf88znepnhwfp") === true;
+  return Boolean(card) && hasClientId;
+});
+const dingtalkDetailClientId = Array.from(botsRootEl.querySelectorAll("input[aria-label]")).find((input) => input.getAttribute("aria-label")?.includes("Client ID")) as HTMLInputElement | undefined;
+eq(dingtalkDetailClientId?.value, "dinghuspf88znepnhwfp", "persisted ClientID is visible in the DingTalk detail card");
+// DingTalk test-send entry: the detail card exposes a test-send button that
+// calls TestDingtalkBot and surfaces the result notice.
+const dingtalkTestButtons = Array.from(botsRootEl.querySelectorAll(".bot-channel-manager__detail .bot-detail-card__actions .btn")).filter((button) => /test|测试|測試|傳送/i.test(button.textContent ?? ""));
+eq(dingtalkTestButtons.length, 1, "DingTalk detail card exposes a test-send button");
+await act(async () => {
+  (dingtalkTestButtons[0] as HTMLButtonElement).click();
+  await flushPromises();
+});
+eq(dingtalkTestCalls, 1, "test-send button invokes TestDingtalkBot");
+await waitFor("DingTalk test-send result notice", () =>
+  botsRootEl.querySelector(".bot-channel-manager__detail .bot-detail-notice")?.textContent?.includes("测试消息已发送") === true);
+// Regression: a ClientID alone must NOT flip the channel into its configured
+// detail card. Only an enabled bot with a set secret does. Mount with
+// enabled=false + secretSet=true + clientId set; the setup panel (not the
+// detail card) must show.
+const notEnabledRootEl = document.createElement("div");
+document.body.appendChild(notEnabledRootEl);
+const notEnabledRoot = createRoot(notEnabledRootEl);
+const notEnabledSettings = baseSettings("standard");
+notEnabledSettings.bot.dingtalk = {
+  enabled: false,
+  clientId: "dinghuspf88znepnhwfp",
+  clientSecretEnv: "DINGTALK_CLIENT_SECRET",
+  secretSet: true,
+  botName: "",
+  requireMention: true,
+};
+desktopStub.replaceCommands(({
+  main: { App: { Settings: async () => notEnabledSettings } } as Partial<AppBindings> as AppBindings,
+}).main.App);
+await act(async () => {
+  notEnabledRoot.render(
+    <LocaleProvider>
+      <SettingsPanel initialTab="bots" desktopPlatform="linux" onClose={() => {}} onChanged={() => {}} />
+    </LocaleProvider>,
+  );
+  await flushPromises();
+});
+const notEnabledTab = Array.from(notEnabledRootEl.querySelectorAll(".bot-channel-tabs [role=\"tab\"]")).find((button) => button.textContent?.includes("DingTalk")) as HTMLButtonElement | undefined;
+if (!notEnabledTab) throw new Error("DingTalk channel tab did not render (not-enabled case)");
+await act(async () => {
+  notEnabledTab.click();
+  await flushPromises();
+});
+await waitFor("DingTalk setup panel instead of detail card when not enabled", () => {
+  const detailCard = notEnabledRootEl.querySelector(".bot-channel-manager__detail .bot-detail-card");
+  const setupCard = notEnabledRootEl.querySelector(".bot-channel-manager__detail .bot-channel-setup-card");
+  return Boolean(setupCard) && detailCard === null;
+});
+await act(async () => {
+  notEnabledRoot.unmount();
+});
+desktopStub.replaceCommands(({
+  main: { App: { Settings: async () => botsSettings } } as Partial<AppBindings> as AppBindings,
+}).main.App);
 
 await act(async () => {
   botsRoot.unmount();
@@ -731,17 +766,17 @@ providerRaceSettings.providers = [{
   modelOverrides: [],
   modelCatalogFingerprint: "old-fingerprint",
 }];
-let resolveProviderBatch: ((models: Record<string, string[]>) => void) | undefined;
-const providerBatch = new Promise<Record<string, string[]>>((resolve) => {
+let resolveProviderBatch: ((models: Record<string, ProviderModelCapabilityView[]>) => void) | undefined;
+const providerBatch = new Promise<Record<string, ProviderModelCapabilityView[]>>((resolve) => {
   resolveProviderBatch = resolve;
 });
 let providerBatchCalls = 0;
 let providerCatalogSaveCalls = 0;
-window.go = {
+desktopStub.replaceCommands(({
   main: {
     App: {
       Settings: async () => providerRaceSettings,
-      FetchAllProviderModels: async () => {
+      FetchAllProviderModelCatalogs: async () => {
         providerBatchCalls += 1;
         return providerBatch;
       },
@@ -751,7 +786,7 @@ window.go = {
       },
     } as Partial<AppBindings> as AppBindings,
   },
-};
+}).main.App);
 
 await act(async () => {
   providerRaceRoot.render(
@@ -765,8 +800,8 @@ await waitFor("provider background discovery", () => providerBatchCalls === 1);
 const providerRefreshStorageKeys = Array.from({ length: sessionStorage.length }, (_, index) => sessionStorage.key(index) ?? "");
 ok(providerRefreshStorageKeys.some((key) => key.includes("old-fingerprint")), "provider auto-refresh cooldown uses the opaque catalog fingerprint");
 ok(providerRefreshStorageKeys.every((key) => !key.includes("private-gateway-secret")), "provider auto-refresh cooldown does not persist header secrets");
-const accessModelsButton = Array.from(providerRaceRootEl.querySelectorAll(".settings-subtab")).find(
-  (button) => button.textContent?.trim() === "Access",
+const accessModelsButton = Array.from(providerRaceRootEl.querySelectorAll(".settings-center__navitem")).find(
+  (button) => button.textContent?.trim() === "Model services",
 ) as HTMLButtonElement | undefined;
 if (!accessModelsButton) throw new Error("provider Access subtab did not render");
 await act(async () => {
@@ -774,7 +809,7 @@ await act(async () => {
   await flushPromises();
 });
 await act(async () => {
-  resolveProviderBatch?.({ "race-provider": ["old-model", "stale-fetched-model"] });
+  resolveProviderBatch?.({ "race-provider": ["old-model", "stale-fetched-model"].map((model) => ({ model, inputModalities: [], state: "unknown", source: "adapter" })) });
   await flushPromises();
 });
 await waitFor("stale provider discovery completion", () => providerBatchCalls === 1);
@@ -782,6 +817,211 @@ eq(providerCatalogSaveCalls, 0, "leaving the models usage tab suppresses the sta
 
 await act(async () => {
   providerRaceRoot.unmount();
+});
+
+// Cancelling a freshly fetched model catalog must also clear the success copy
+// that asks the user to confirm and save that now-hidden draft.
+const providerRefreshCancelRootEl = document.createElement("div");
+document.body.appendChild(providerRefreshCancelRootEl);
+const providerRefreshCancelRoot = createRoot(providerRefreshCancelRootEl);
+const providerRefreshCancelSettings = baseSettings("standard");
+providerRefreshCancelSettings.defaultModel = "deepseek/deepseek-v4-flash";
+providerRefreshCancelSettings.providers = [{
+  name: "deepseek",
+  builtIn: true,
+  added: true,
+  kind: "anthropic",
+  baseUrl: "https://api.deepseek.com/anthropic",
+  chatUrl: "",
+  models: ["deepseek-v4-flash"],
+  visionModels: [],
+  visionModelsConfigured: true,
+  visionCapability: "unsupported",
+  modelsUrl: "https://api.deepseek.com/models",
+  default: "deepseek-v4-flash",
+  apiKeyEnv: "DEEPSEEK_API_KEY",
+  keySet: true,
+  requiresKey: true,
+  configured: true,
+  balanceUrl: "https://api.deepseek.com/user/balance",
+  contextWindow: 1_000_000,
+  reasoningProtocol: "",
+  thinking: "enabled",
+  webSearch: true,
+  serverWebSearchCapability: true,
+  supportedEfforts: [],
+  defaultEffort: "",
+}];
+desktopStub.replaceCommands(({
+  main: {
+    App: {
+      Settings: async () => providerRefreshCancelSettings,
+      FetchAllProviderModelCatalogs: async () => ({}),
+      FetchProviderModelCatalog: async () => ["deepseek-v4-flash", "deepseek-v4-pro"].map((model) => ({ model, inputModalities: ["text"], state: "unsupported", source: "adapter" })),
+    } as Partial<AppBindings> as AppBindings,
+  },
+}).main.App);
+
+await act(async () => {
+  providerRefreshCancelRoot.render(
+    <LocaleProvider>
+      <SettingsPanel initialTab="models" desktopPlatform="linux" onClose={() => {}} onChanged={() => {}} />
+    </LocaleProvider>,
+  );
+  await flushPromises();
+});
+const providerRefreshCancelAccessButton = Array.from(providerRefreshCancelRootEl.querySelectorAll(".settings-center__navitem")).find(
+  (button) => button.textContent?.trim() === "Model services",
+) as HTMLButtonElement | undefined;
+if (!providerRefreshCancelAccessButton) throw new Error("provider refresh cancel Access subtab did not render");
+await act(async () => {
+  providerRefreshCancelAccessButton.click();
+  await flushPromises();
+});
+const providerRefreshCancelButton = Array.from(providerRefreshCancelRootEl.querySelectorAll("button")).find(
+  (button) => button.getAttribute("aria-label") === "Refresh models",
+) as HTMLButtonElement | undefined;
+if (!providerRefreshCancelButton) throw new Error("provider refresh action did not render");
+await act(async () => {
+  providerRefreshCancelButton.click();
+  await flushPromises();
+});
+await waitFor("provider model discovery", () => providerRefreshCancelRootEl.textContent?.includes("deepseek-v4-pro") === true);
+const providerModelDraftCancelButton = providerRefreshCancelRootEl.querySelector<HTMLButtonElement>('.provider-editor-footer button');
+if (!providerModelDraftCancelButton) throw new Error("provider draft cancel action did not render");
+await act(async () => { providerModelDraftCancelButton.click(); await flushPromises(); });
+ok(!providerRefreshCancelRootEl.textContent?.includes("deepseek-v4-pro"), "cancelling discovery discards fetched candidates");
+ok(providerRefreshCancelSettings.providers[0].models.length === 1, "cancelling discovery preserves configured models");
+await act(async () => {
+  providerRefreshCancelRoot.unmount();
+});
+
+// A persisted protocol upgrade with a failed runtime refresh must be read back
+// so the panel offers application retry without repeating the saved upgrade.
+const upgradeFailureRootEl = document.createElement("div");
+document.body.appendChild(upgradeFailureRootEl);
+const upgradeFailureRoot = createRoot(upgradeFailureRootEl);
+let upgradeFailureSettings = baseSettings("standard");
+upgradeFailureSettings.defaultModel = "deepseek/deepseek-v4-flash";
+upgradeFailureSettings.providers = [{
+  name: "deepseek-flash",
+  builtIn: true,
+  added: true,
+  kind: "openai",
+  baseUrl: "https://api.deepseek.com",
+  chatUrl: "",
+  models: ["deepseek-v4-flash"],
+  visionModels: [],
+  visionModelsConfigured: true,
+  visionCapability: "unsupported",
+  modelsUrl: "https://api.deepseek.com/models",
+  default: "deepseek-v4-flash",
+  apiKeyEnv: "DEEPSEEK_API_KEY",
+  keySet: true,
+  requiresKey: true,
+  configured: true,
+  balanceUrl: "https://api.deepseek.com/user/balance",
+  contextWindow: 1_000_000,
+  reasoningProtocol: "deepseek",
+  thinking: "enabled",
+  webSearch: false,
+  serverWebSearchCapability: false,
+  supportedEfforts: ["low", "high", "max"],
+  defaultEffort: "high",
+  recommendedUpgradeAvailable: true,
+}];
+let upgradeFailureSettingsCalls = 0;
+let upgradeFailureMutationCalls = 0;
+let upgradeFailureChanged: SettingsView | undefined;
+desktopStub.replaceCommands(({
+  main: {
+    App: {
+      Settings: async () => {
+        upgradeFailureSettingsCalls += 1;
+        return upgradeFailureSettings;
+      },
+      FetchAllProviderModelCatalogs: async () => ({}),
+      ApplyModelSettings: async (change) => {
+        eq(change.kind, "protocol_upgrade", "protocol upgrade uses the structured settings service");
+        upgradeFailureMutationCalls += 1;
+        upgradeFailureSettings = {
+          ...upgradeFailureSettings,
+          providers: upgradeFailureSettings.providers.map((provider) => ({
+            ...provider,
+            kind: "anthropic",
+            baseUrl: "https://api.deepseek.com/anthropic",
+            webSearch: true,
+            serverWebSearchCapability: true,
+            recommendedUpgradeAvailable: false,
+          })),
+        };
+        return { requestId: change.requestId, persisted: true, revision: "upgraded", application: "failed", targets: [{tabId: "session-one", application: "failed", appliedRevision: "old", desiredRevision: "upgraded"}], issues: [{code: "apply_failed", message: "workspace runtime boot failed after protocol upgrade"}], appliedCatalogs: [] };
+      },
+    } as Partial<AppBindings> as AppBindings,
+  },
+}).main.App);
+
+await act(async () => {
+  upgradeFailureRoot.render(
+    <LocaleProvider>
+      <SettingsPanel
+        initialTab="models"
+        desktopPlatform="linux"
+        onClose={() => {}}
+        onChanged={(settings?: SettingsView) => {
+          upgradeFailureChanged = settings;
+        }}
+      />
+    </LocaleProvider>,
+  );
+  await flushPromises();
+});
+const upgradeFailureAccessButton = Array.from(upgradeFailureRootEl.querySelectorAll(".settings-center__navitem")).find(
+  (button) => button.textContent?.trim() === "Model services",
+) as HTMLButtonElement | undefined;
+if (!upgradeFailureAccessButton) throw new Error("upgrade failure Access subtab did not render");
+await act(async () => {
+  upgradeFailureAccessButton.click();
+  await flushPromises();
+});
+await waitFor(
+  "legacy DeepSeek protocol upgrade action",
+  () => upgradeFailureRootEl.textContent?.includes("Upgrade to recommended protocol") === true,
+);
+let upgradeFailureButton = Array.from(upgradeFailureRootEl.querySelectorAll("button")).find(
+  (button) => button.textContent?.includes("Upgrade to recommended protocol"),
+) as HTMLButtonElement | undefined;
+if (!upgradeFailureButton) throw new Error("DeepSeek protocol upgrade button did not render");
+await act(async () => {
+  upgradeFailureButton?.click();
+  await flushPromises();
+});
+upgradeFailureButton = upgradeFailureRootEl.querySelector<HTMLButtonElement>(
+  ".provider-protocol-upgrade .inline-confirm > button",
+) ?? undefined;
+if (upgradeFailureButton?.textContent?.trim() !== "Confirm") throw new Error("DeepSeek protocol upgrade confirmation did not render");
+await act(async () => {
+  upgradeFailureButton?.click();
+  await flushPromises();
+});
+await waitFor("post-error settings reload", () => upgradeFailureSettingsCalls === 2);
+
+eq(upgradeFailureMutationCalls, 1, "DeepSeek protocol upgrade mutation is invoked once");
+ok(
+  upgradeFailureRootEl.textContent?.includes("Upgrade to recommended protocol") === false,
+  "persisted DeepSeek protocol upgrade disappears after a runtime refresh error",
+);
+ok(
+  upgradeFailureRootEl.textContent?.includes("workspace runtime boot failed after protocol upgrade") === true,
+  "post-mutation reload preserves the original runtime error",
+);
+ok(
+  upgradeFailureChanged?.providers[0]?.kind === "anthropic",
+  "onChanged receives the authoritative persisted protocol after a runtime error",
+);
+
+await act(async () => {
+  upgradeFailureRoot.unmount();
 });
 dom.window.close();
 

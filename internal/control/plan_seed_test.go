@@ -2,6 +2,8 @@ package control
 
 import (
 	"encoding/json"
+	"fmt"
+	"strings"
 	"testing"
 
 	"reasonix/internal/agent"
@@ -108,6 +110,13 @@ func TestParsePlanTodos(t *testing.T) {
 				t.Fatalf("got %d todos, want %d: %+v", len(got), len(tc.want), got)
 			}
 			for i := range got {
+				// Seeded ids are positional by construction and asserted in
+				// TestParsePlanTodosMintsStableStepIDs; clear them here so the
+				// table stays about parsing.
+				if want := fmt.Sprintf("plan_step_%02d", i+1); got[i].StepID != want {
+					t.Errorf("todo %d step_id = %q, want %q", i, got[i].StepID, want)
+				}
+				got[i].StepID = ""
 				if got[i] != tc.want[i] {
 					t.Errorf("todo %d = %+v, want %+v", i, got[i], tc.want[i])
 				}
@@ -139,12 +148,32 @@ func TestPlanTodosJSONAlwaysSatisfiesSerialContract(t *testing.T) {
 	}
 }
 
-func TestParsePlanTodosCapsAtTwenty(t *testing.T) {
-	plan := ""
-	for i := 0; i < 30; i++ {
-		plan += "- item\n"
+func TestParsePlanTodosMintsStableStepIDs(t *testing.T) {
+	args := PlanTodosJSON("1. Change the DB\n   - add the column\n2. Change the API")
+	var payload struct {
+		Todos []evidence.TodoItem `json:"todos"`
 	}
-	if got := parsePlanTodos(plan); len(got) != 20 {
+	if err := json.Unmarshal([]byte(args), &payload); err != nil {
+		t.Fatalf("PlanTodosJSON: %v", err)
+	}
+	seen := make(map[string]bool, len(payload.Todos))
+	for i, todo := range payload.Todos {
+		if todo.StepID == "" {
+			t.Fatalf("seeded todo %d %q has no step_id; the model has nothing stable to cite", i+1, todo.Content)
+		}
+		if seen[todo.StepID] {
+			t.Fatalf("seeded todo %d reuses step_id %q", i+1, todo.StepID)
+		}
+		seen[todo.StepID] = true
+	}
+}
+
+func TestParsePlanTodosCapsAtTwenty(t *testing.T) {
+	var plan strings.Builder
+	for range 30 {
+		plan.WriteString("- item\n")
+	}
+	if got := parsePlanTodos(plan.String()); len(got) != 20 {
 		t.Fatalf("got %d todos, want cap of 20", len(got))
 	}
 }

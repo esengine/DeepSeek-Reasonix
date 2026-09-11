@@ -270,6 +270,19 @@ func (s *Set) startRemoteLocked(r *runner, cl *ssh.Client) (string, error) {
 }
 
 func (s *Set) acceptRemote(r *runner, ln net.Listener) {
+	defer func() {
+		s.mu.Lock()
+		// Only clear state for the still-current listener. Replace/Detach may
+		// have already swapped r.remote or marked the runner down.
+		if r.remote == ln {
+			r.remote = nil
+			if r.up {
+				r.up = false
+				s.emit(Event{Spec: r.spec, Up: false})
+			}
+		}
+		s.mu.Unlock()
+	}()
 	for {
 		remote, err := ln.Accept()
 		if err != nil {
@@ -288,19 +301,33 @@ func (s *Set) acceptRemote(r *runner, ln net.Listener) {
 
 func (s *Set) stopRunner(r *runner, closeLocal bool) {
 	close(r.stop)
-	if r.remote != nil {
-		_ = r.remote.Close()
-		r.remote = nil
+
+	// acceptRemote also retires r.remote/r.up when Accept exits. Move the
+	// active listener and state out under the same lock so Remove/Replace/Close
+	// cannot race that deferred cleanup.
+	s.mu.Lock()
+	remote := r.remote
+	r.remote = nil
+	local := r.local
+	wasUp := r.up
+	r.up = false
+	s.mu.Unlock()
+
+	if remote != nil {
+		_ = remote.Close()
 	}
-	if closeLocal && r.local != nil {
-		_ = r.local.Close()
+	if closeLocal && local != nil {
+		_ = local.Close()
 	}
 	r.acceptWG.Wait()
 	if closeLocal {
-		r.local = nil
+		s.mu.Lock()
+		if r.local == local {
+			r.local = nil
+		}
+		s.mu.Unlock()
 	}
-	if r.up {
-		r.up = false
+	if wasUp {
 		s.emit(Event{Spec: r.spec, Up: false})
 	}
 }

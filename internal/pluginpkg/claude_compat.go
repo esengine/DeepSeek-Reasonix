@@ -93,7 +93,7 @@ func claudeMatcherNeverFires(matcher string) bool {
 	if matcher == "" || matcher == "*" {
 		return false
 	}
-	for _, part := range strings.Split(matcher, "|") {
+	for part := range strings.SplitSeq(matcher, "|") {
 		part = strings.TrimSpace(part)
 		if !bareClaudeToolNamePattern.MatchString(part) || !claudeUnsupportedToolMatchers[part] {
 			return false
@@ -524,7 +524,7 @@ func splitCSV(raw string) []string {
 		raw = strings.TrimSpace(raw[1 : len(raw)-1])
 	}
 	var out []string
-	for _, item := range strings.Split(raw, ",") {
+	for item := range strings.SplitSeq(raw, ",") {
 		if item = strings.Trim(strings.TrimSpace(item), `"'`); item != "" {
 			out = append(out, item)
 		}

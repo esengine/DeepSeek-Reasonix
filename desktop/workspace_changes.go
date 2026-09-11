@@ -33,7 +33,7 @@ type workspaceChangeAccumulator struct {
 const (
 	workspaceGitBranchCacheTTL = 2 * time.Second
 	// Bound both decoded file contents and rendered patches before they cross
-	// the Wails bridge; generated files must not turn a preview click into OOM.
+	// the desktop bridge; generated files must not turn a preview click into OOM.
 	workspaceChangeDetailLimit = 2 * 1024 * 1024
 )
 
@@ -41,6 +41,7 @@ type workspaceGitBranchCacheEntry struct {
 	branch     string
 	expires    time.Time
 	refreshing bool
+	request    *int
 }
 
 var workspaceGitBranchCache = struct {
@@ -51,6 +52,12 @@ var workspaceGitBranchCache = struct {
 var workspaceGitBranchForMetaProbe = workspaceGitBranch
 
 func (a *App) WorkspaceChanges(tabID string) WorkspaceChangesView {
+	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+	defer cancel()
+	return a.workspaceChanges(ctx, tabID)
+}
+
+func (a *App) workspaceChanges(ctx context.Context, tabID string) WorkspaceChangesView {
 	out := WorkspaceChangesView{Files: []WorkspaceChangeView{}, GitAvailable: true}
 	tabID = strings.TrimSpace(tabID)
 
@@ -68,7 +75,7 @@ func (a *App) WorkspaceChanges(tabID string) WorkspaceChangesView {
 		return out
 	}
 
-	out.GitBranch = workspaceGitBranch(base)
+	out.GitBranch, _ = workspaceGitBranchContext(ctx, base)
 
 	changes := map[string]*workspaceChangeAccumulator{}
 	add := func(path string) *workspaceChangeAccumulator {
@@ -101,11 +108,13 @@ func (a *App) WorkspaceChanges(tabID string) WorkspaceChangesView {
 		}
 	}
 
-	gitEntries, gitErr := workspaceGitStatus(base)
+	gitEntries, gitErr := workspaceGitStatusContext(ctx, base)
 	if gitErr != nil {
 		out.GitAvailable = false
 		out.GitErr = gitErr.Error()
+		out.Incomplete = true
 	}
+	var untracked []string
 	for _, entry := range gitEntries {
 		acc := add(entry.Path)
 		if acc == nil {
@@ -114,6 +123,9 @@ func (a *App) WorkspaceChanges(tabID string) WorkspaceChangesView {
 		acc.hasGit = true
 		acc.view.GitStatus = entry.Status
 		acc.view.OldPath = normalizeWorkspaceRelPath(base, entry.OldPath)
+		if entry.Status == "??" {
+			untracked = append(untracked, entry.Path)
+		}
 	}
 
 	out.Files = make([]WorkspaceChangeView, 0, len(changes))
@@ -140,6 +152,9 @@ func (a *App) WorkspaceChanges(tabID string) WorkspaceChangesView {
 		}
 		return strings.ToLower(a.Path) < strings.ToLower(b.Path)
 	})
+	if out.GitAvailable {
+		out.Added, out.Removed, out.Incomplete = workspaceGitDiffTally(ctx, base, untracked)
+	}
 	return out
 }
 
@@ -351,7 +366,7 @@ func workspaceCurrentText(path string) (string, bool, bool, error) {
 
 func tallyUnifiedPatch(patch string) (added, removed int) {
 	inHunk := false
-	for _, line := range strings.Split(patch, "\n") {
+	for line := range strings.SplitSeq(patch, "\n") {
 		switch {
 		case strings.HasPrefix(line, "@@"):
 			inHunk = true
@@ -385,18 +400,24 @@ func workspaceGitOutputWithTimeout(timeout time.Duration, args ...string) ([]byt
 }
 
 func workspaceGitStatus(base string) ([]gitStatusEntry, error) {
+	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+	defer cancel()
+	return workspaceGitStatusContext(ctx, base)
+}
+
+func workspaceGitStatusContext(ctx context.Context, base string) ([]gitStatusEntry, error) {
 	// Git's porcelain paths are repository-relative even when -C points at a
 	// subdirectory. Derive the textual repository prefix from Git itself instead
 	// of comparing absolute paths: Windows may spell the same directory once as
 	// an 8.3 path and once as a long path, which makes filepath.Rel reject every
 	// otherwise valid status entry.
-	prefixCmd := workspaceGit("-C", base, "rev-parse", "--show-prefix")
+	prefixCmd := workspaceGitCommand(ctx, "-C", base, "rev-parse", "--show-prefix")
 	prefixRaw, err := prefixCmd.Output()
 	if err != nil {
 		return nil, err
 	}
 	prefix := strings.TrimSpace(string(prefixRaw))
-	cmd := workspaceGit("-C", base, "status", "--porcelain=v1", "-z", "--untracked-files=all", "--", ".")
+	cmd := workspaceGitCommand(ctx, "-C", base, "status", "--porcelain=v1", "-z", "--untracked-files=all", "--", ".")
 	raw, err := cmd.Output()
 	if err != nil {
 		return nil, err
@@ -483,23 +504,26 @@ func workspaceGitBranchForMeta(base string) string {
 			return branch
 		}
 		cached.refreshing = true
+		cached.request = new(int)
 		workspaceGitBranchCache.entries[key] = cached
 		workspaceGitBranchCache.Unlock()
-		go refreshWorkspaceGitBranchForMeta(key, base)
+		go refreshWorkspaceGitBranchForMeta(key, base, cached.request)
 		return branch
 	}
 
+	request := new(int)
 	workspaceGitBranchCache.entries[key] = workspaceGitBranchCacheEntry{
 		expires:    now.Add(workspaceGitBranchCacheTTL),
 		refreshing: true,
+		request:    request,
 	}
 	workspaceGitBranchCache.Unlock()
 
-	go refreshWorkspaceGitBranchForMeta(key, base)
+	go refreshWorkspaceGitBranchForMeta(key, base, request)
 	return ""
 }
 
-func refreshWorkspaceGitBranchForMeta(key, base string) {
+func refreshWorkspaceGitBranchForMeta(key, base string, request *int) {
 	branch := ""
 	// Store via defer so the refreshing flag is always cleared, even when the
 	// probe panics or exits the goroutine early; otherwise the entry would stay
@@ -507,6 +531,10 @@ func refreshWorkspaceGitBranchForMeta(key, base string) {
 	defer func() {
 		storeNow := time.Now()
 		workspaceGitBranchCache.Lock()
+		defer workspaceGitBranchCache.Unlock()
+		if cached, ok := workspaceGitBranchCache.entries[key]; !ok || cached.request != request {
+			return
+		}
 		if len(workspaceGitBranchCache.entries) > 256 {
 			for k, cached := range workspaceGitBranchCache.entries {
 				if storeNow.After(cached.expires) {
@@ -515,7 +543,6 @@ func refreshWorkspaceGitBranchForMeta(key, base string) {
 			}
 		}
 		workspaceGitBranchCache.entries[key] = workspaceGitBranchCacheEntry{branch: branch, expires: storeNow.Add(workspaceGitBranchCacheTTL)}
-		workspaceGitBranchCache.Unlock()
 	}()
 
 	branch = workspaceGitBranchForMetaProbe(base)
@@ -525,23 +552,30 @@ func refreshWorkspaceGitBranchForMeta(key, base string) {
 // at base, or an empty string when base is not inside a git repository or when
 // git is unavailable.
 func workspaceGitBranch(base string) string {
-	raw, err := workspaceGitOutputWithTimeout(2*time.Second, "-C", base, "branch", "--show-current")
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+	branch, _ := workspaceGitBranchContext(ctx, base)
+	return branch
+}
+
+func workspaceGitBranchContext(ctx context.Context, base string) (string, error) {
+	raw, err := workspaceGitCommand(ctx, "-C", base, "branch", "--show-current").Output()
 	if err != nil {
-		return ""
+		return "", err
 	}
 	if branch := strings.TrimSpace(string(raw)); branch != "" {
-		return branch
+		return branch, nil
 	}
 
-	raw, err = workspaceGitOutputWithTimeout(2*time.Second, "-C", base, "rev-parse", "--short", "HEAD")
+	raw, err = workspaceGitCommand(ctx, "-C", base, "rev-parse", "--short", "HEAD").Output()
 	if err != nil {
-		return ""
+		return "", err
 	}
 	short := strings.TrimSpace(string(raw))
 	if short == "" {
-		return ""
+		return "", nil
 	}
-	return "@" + short
+	return "@" + short, nil
 }
 
 // GitBranches returns all local git branches for the active workspace's repo.
@@ -550,31 +584,34 @@ func (a *App) GitBranches() ([]string, error) {
 	if err != nil {
 		return nil, err
 	}
-	cmd := workspaceGit("-C", base, "branch", "--format=%(refname:short)")
-	raw, err := cmd.Output()
-	if err != nil {
-		return nil, err
-	}
-	branches := append([]string{}, strings.FieldsFunc(strings.TrimSpace(string(raw)), func(r rune) bool { return r == '\n' })...)
-	return branches, nil
+	return workspaceLocalBranches(base)
 }
 
-// GitCheckout switches the active workspace's git branch and returns the
-// current branch name, or an error when git is unavailable.
 func (a *App) GitCheckout(branch string) error {
 	base, err := a.activeWorkspaceBase()
 	if err != nil {
 		return err
 	}
-	cmd := workspaceGit("-C", base, "checkout", branch)
-	out, err := cmd.CombinedOutput()
+	return workspaceCheckoutBranch(base, branch, false)
+}
+
+const gitRefInvalidChars = " ~^:?*[\\" + "\t\n"
+
+func validGitBranchName(name string) bool {
+	name = strings.TrimSpace(name)
+	if name == "" || strings.HasPrefix(name, "-") || strings.Contains(name, "..") ||
+		strings.HasSuffix(name, "/") || strings.HasSuffix(name, ".") || strings.Contains(name, "@{") {
+		return false
+	}
+	return !strings.ContainsAny(name, gitRefInvalidChars)
+}
+
+func (a *App) GitCreateBranch(name string) error {
+	base, err := a.activeWorkspaceBase()
 	if err != nil {
-		if len(out) > 0 {
-			return fmt.Errorf("git checkout: %s", strings.TrimSpace(string(out)))
-		}
 		return err
 	}
-	return nil
+	return workspaceCheckoutBranch(base, name, true)
 }
 
 type GitCommitView struct {

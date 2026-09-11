@@ -86,7 +86,7 @@ func TestRemoteRemoveCleansGeneratedCredentialsButKeepsUserManagedOnes(t *testin
 		if _, err := config.SetCredential(key, value); err != nil {
 			t.Fatal(err)
 		}
-		key := key
+
 		t.Cleanup(func() { _ = config.RemoveCredential(key) })
 	}
 	if err := editUserConfig(func(c *config.Config) error {

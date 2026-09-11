@@ -1,0 +1,7 @@
+[
+  {"name": "synthetic-run-1", "proxy_list_count": 1, "baseline_list_count": 8, "proxy_latency_ms": 1200, "baseline_latency_ms": 4100},
+  {"name": "synthetic-run-2", "proxy_list_count": 1, "baseline_list_count": 7, "proxy_latency_ms": 1100, "baseline_latency_ms": 3900},
+  {"name": "synthetic-run-3", "proxy_list_count": 0, "baseline_list_count": 9, "proxy_latency_ms": 980, "baseline_latency_ms": 4300},
+  {"name": "synthetic-run-4", "proxy_list_count": 1, "baseline_list_count": 8, "proxy_latency_ms": 1250, "baseline_latency_ms": 4000},
+  {"name": "synthetic-run-5", "proxy_list_count": 1, "baseline_list_count": 8, "proxy_latency_ms": 1180, "baseline_latency_ms": 4200}
+]

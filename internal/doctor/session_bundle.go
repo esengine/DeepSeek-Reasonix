@@ -54,6 +54,11 @@ type SessionBundleEntry struct {
 	Recovered      bool   `json:"recovered,omitempty"`
 	RecoveryReason string `json:"recovery_reason,omitempty"`
 	RecoveryDepth  int    `json:"recovery_depth,omitempty"`
+	// Head fields are set for a schema-2 session log; its versions are heads
+	// of one file, not separate transcripts in the chain above.
+	LogFormat    int                 `json:"log_format,omitempty"`
+	SelectedHead string              `json:"selected_head,omitempty"`
+	Heads        []SessionBundleHead `json:"heads,omitempty"`
 }
 
 type SessionBundleFile struct {
@@ -143,6 +148,9 @@ func WriteSessionBundle(opts SessionBundleOptions) (SessionBundleResult, error) 
 			entry.Recovered = meta.Recovered
 			entry.RecoveryReason = meta.RecoveryReason
 			entry.RecoveryDepth = meta.RecoveryDepth
+		}
+		if headErr := describeSessionBundleHeads(&entry, path); headErr != nil {
+			manifest.Missing = append(manifest.Missing, redactSessionBundlePath(store.SessionEventLog(path))+": "+redactSessionBundleError(headErr))
 		}
 		manifest.Sessions = append(manifest.Sessions, entry)
 

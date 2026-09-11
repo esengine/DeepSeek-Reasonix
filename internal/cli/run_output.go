@@ -8,6 +8,7 @@ import (
 	"sync"
 	"time"
 
+	"reasonix/internal/billing"
 	"reasonix/internal/event"
 	"reasonix/internal/eventwire"
 )
@@ -59,12 +60,21 @@ type runResult struct {
 	NumTurns   int     `json:"num_turns"`
 	Result     string  `json:"result"`
 	SessionID  string  `json:"session_id,omitempty"`
-	TotalCost  float64 `json:"total_cost"`
+	TotalCost  float64 `json:"total_cost,omitempty"`
 	Currency   string  `json:"currency,omitempty"`
 	// TotalCostUSD is the released compatibility alias. It mirrors TotalCost;
 	// new consumers must pair TotalCost with Currency instead of assuming USD.
-	TotalCostUSD float64        `json:"total_cost_usd"`
-	Usage        runResultUsage `json:"usage"`
+	TotalCostUSD float64 `json:"total_cost_usd,omitempty"`
+	// CostComplete is false when mixed originals lack a shared display valuation.
+	CostComplete    bool   `json:"cost_complete"`
+	DisplayComplete bool   `json:"display_complete"`
+	DisplayStatus   string `json:"display_status,omitempty"`
+	AggregateMode   string `json:"aggregate_mode,omitempty"`
+	// OriginalCosts lists per-ISO original totals (never cross-added).
+	OriginalCosts  map[string]float64 `json:"original_costs,omitempty"`
+	OriginalTotals []billing.Money    `json:"original_totals,omitempty"`
+	CostQuote      *billing.CostQuote `json:"cost_quote,omitempty"`
+	Usage          runResultUsage     `json:"usage"`
 }
 
 type machineEventUsage struct {
@@ -79,30 +89,31 @@ type machineEventUsage struct {
 // format is a rich UI transport and includes prompts, tool arguments, results,
 // and reasoning; this contract is for automation that must not receive them.
 type machineEventRecord struct {
-	SchemaVersion  int                `json:"schema_version"`
-	Sequence       uint64             `json:"sequence"`
-	Kind           string             `json:"kind"`
-	Code           string             `json:"code,omitempty"`
-	Level          string             `json:"level,omitempty"`
-	ToolID         string             `json:"tool_id,omitempty"`
-	ToolName       string             `json:"tool_name,omitempty"`
-	ToolReadOnly   bool               `json:"tool_read_only,omitempty"`
-	ToolError      bool               `json:"tool_error,omitempty"`
-	ToolTruncated  bool               `json:"tool_truncated,omitempty"`
-	ToolDurationMS int64              `json:"tool_duration_ms,omitempty"`
-	Usage          *machineEventUsage `json:"usage,omitempty"`
-	ApprovalID     string             `json:"approval_id,omitempty"`
-	ApprovalKind   string             `json:"approval_kind,omitempty"`
-	AskID          string             `json:"ask_id,omitempty"`
-	Outcome        string             `json:"outcome,omitempty"`
-	Cancelled      bool               `json:"cancelled,omitempty"`
-	Error          bool               `json:"error,omitempty"`
-	RetryAttempt   int                `json:"retry_attempt,omitempty"`
-	RetryMax       int                `json:"retry_max,omitempty"`
-	CompactionType string             `json:"compaction_type,omitempty"`
-	CompactionMsgs int                `json:"compaction_messages,omitempty"`
-	GuardianResult string             `json:"guardian_result,omitempty"`
-	GuardianRisk   string             `json:"guardian_risk,omitempty"`
+	SchemaVersion  int                   `json:"schema_version"`
+	Sequence       uint64                `json:"sequence"`
+	Kind           string                `json:"kind"`
+	Code           string                `json:"code,omitempty"`
+	Level          string                `json:"level,omitempty"`
+	ToolID         string                `json:"tool_id,omitempty"`
+	ToolName       string                `json:"tool_name,omitempty"`
+	ToolReadOnly   bool                  `json:"tool_read_only,omitempty"`
+	ToolError      bool                  `json:"tool_error,omitempty"`
+	ToolTruncated  bool                  `json:"tool_truncated,omitempty"`
+	ToolDurationMS int64                 `json:"tool_duration_ms,omitempty"`
+	Usage          *machineEventUsage    `json:"usage,omitempty"`
+	ApprovalID     string                `json:"approval_id,omitempty"`
+	ApprovalKind   string                `json:"approval_kind,omitempty"`
+	AskID          string                `json:"ask_id,omitempty"`
+	Outcome        string                `json:"outcome,omitempty"`
+	Cancelled      bool                  `json:"cancelled,omitempty"`
+	Error          bool                  `json:"error,omitempty"`
+	Recovery       *event.RecoveryStatus `json:"recovery,omitempty"`
+	RetryAttempt   int                   `json:"retry_attempt,omitempty"`
+	RetryMax       int                   `json:"retry_max,omitempty"`
+	CompactionType string                `json:"compaction_type,omitempty"`
+	CompactionMsgs int                   `json:"compaction_messages,omitempty"`
+	GuardianResult string                `json:"guardian_result,omitempty"`
+	GuardianRisk   string                `json:"guardian_risk,omitempty"`
 }
 
 type machineRunDone struct {
@@ -125,7 +136,14 @@ type runOutputSink struct {
 	usage               runResultUsage
 	cost                float64
 	currency            string
-	mixedCurrencies     bool
+	costComplete        bool
+	displayComplete     bool
+	displayStatus       string
+	aggregateMode       string
+	originalTotals      []billing.Money
+	sawQuote            bool
+	originalCosts       map[string]float64
+	quoteLedger         *billing.Ledger
 	turns               int
 	sequence            uint64
 	machineToolIDs      map[string]string
@@ -157,14 +175,44 @@ func (s *runOutputSink) Emit(e event.Event) {
 		s.usage.CacheReadInputTokens += e.Usage.CacheHitTokens
 		s.usage.CacheCreationInputTokens += e.Usage.CacheMissTokens
 		s.usage.Estimated = s.usage.Estimated || e.Usage.Estimated
-		if e.Pricing != nil {
-			s.cost += e.Pricing.Cost(e.Usage)
-			currency := pricingCurrencyCode(e.Pricing.Currency)
-			if s.currency == "" {
-				s.currency = currency
-			} else if currency != s.currency {
-				s.mixedCurrencies = true
+		q := e.CostQuote
+		if q == nil && e.Pricing != nil {
+			q = event.EnsureCostQuote(e, nil)
+		}
+		if q != nil {
+			s.sawQuote = true
+			if !q.CostComplete {
+				s.costComplete = false
 			}
+			// First complete quote establishes complete=true.
+			if q.Complete && s.quoteLedger == nil {
+				s.costComplete = true
+			}
+			if s.originalCosts == nil {
+				s.originalCosts = map[string]float64{}
+			}
+			if cur := billing.NormalizeCurrency(q.Original.Currency); cur != "" {
+				s.originalCosts[cur] += q.Original.Float64()
+			}
+			if q.Selected != nil && (s.currency == "" || s.currency == q.LegacyCurrencyCode()) {
+				s.cost += q.Selected.Float64()
+				s.currency = q.LegacyCurrencyCode()
+			} else if q.Selected != nil {
+				s.currency = ""
+				s.cost = 0
+			}
+			if s.quoteLedger == nil {
+				s.quoteLedger = billing.NewLedger()
+			}
+			s.quoteLedger.Add(*q, billing.UsageTokens{
+				PromptTokens:           e.Usage.PromptTokens,
+				CompletionTokens:       e.Usage.CompletionTokens,
+				CacheHitTokens:         e.Usage.CacheHitTokens,
+				CacheMissTokens:        e.Usage.CacheMissTokens,
+				CacheWriteTokens:       e.Usage.CacheWriteTokens,
+				CacheWriteBilledTokens: e.Usage.CacheWriteBilledTokens,
+				Estimated:              e.Usage.Estimated,
+			}, time.Now().UTC())
 		}
 	}
 	if e.Kind == event.TurnDone {
@@ -184,9 +232,8 @@ func (s *runOutputSink) Finalize(sessionID string, started time.Time, runErr err
 	if s.err != nil {
 		return s.err
 	}
-	if s.mixedCurrencies && s.format != runOutputText && s.format != runOutputEventsJSONL {
-		return fmt.Errorf("cannot total costs across mixed pricing currencies")
-	}
+	// Mixed original currencies no longer error: totals use shared display
+	// valuations when complete, otherwise cost_complete=false with original_costs.
 	if s.format == runOutputText {
 		if s.final != "" {
 			_, s.err = fmt.Fprintln(s.out, s.final)
@@ -221,34 +268,46 @@ func (s *runOutputSink) Finalize(sessionID string, started time.Time, runErr err
 	if turns == 0 && !completion.isError {
 		turns = 1
 	}
-	return s.encoder.Encode(runResult{
-		Type:         "result",
-		Subtype:      completion.subtype,
-		IsError:      completion.isError,
-		DurationMS:   time.Since(started).Milliseconds(),
-		NumTurns:     turns,
-		Result:       resultText,
-		SessionID:    sessionID,
-		TotalCost:    s.cost,
-		Currency:     s.currency,
-		TotalCostUSD: s.cost,
-		Usage:        s.usage,
-	})
-}
-
-func pricingCurrencyCode(value string) string {
-	value = strings.TrimSpace(value)
-	switch strings.ToUpper(value) {
-	case "", "CNY", "RMB", "CNH", "¥", "￥":
-		return "CNY"
-	case "USD", "$", "US$":
-		return "USD"
-	default:
-		if len(value) == 3 {
-			return strings.ToUpper(value)
+	var aggQuote *billing.CostQuote
+	if s.quoteLedger != nil && len(s.quoteLedger.Entries) > 0 {
+		agg := s.quoteLedger.Total("")
+		aggQuote = &agg
+		if agg.Selected != nil {
+			s.cost = agg.Selected.Float64()
+			s.currency = agg.LegacyCurrencyCode()
 		}
-		return value
+		if agg.Selected == nil {
+			s.cost = 0
+			s.currency = ""
+		}
+		s.costComplete = agg.CostComplete
+		s.displayComplete = agg.DisplayComplete
+		s.displayStatus = agg.DisplayStatus
+		s.aggregateMode = agg.AggregateMode
+		if agg.OriginalTotals != nil {
+			s.originalTotals = append([]billing.Money(nil), agg.OriginalTotals...)
+		}
 	}
+	return s.encoder.Encode(runResult{
+		Type:            "result",
+		Subtype:         completion.subtype,
+		IsError:         completion.isError,
+		DurationMS:      time.Since(started).Milliseconds(),
+		NumTurns:        turns,
+		Result:          resultText,
+		SessionID:       sessionID,
+		TotalCost:       s.cost,
+		Currency:        s.currency,
+		TotalCostUSD:    s.cost,
+		CostComplete:    s.costComplete || (!s.sawQuote && s.currency != ""),
+		DisplayComplete: s.displayComplete,
+		DisplayStatus:   s.displayStatus,
+		AggregateMode:   s.aggregateMode,
+		OriginalCosts:   s.originalCosts,
+		OriginalTotals:  s.originalTotals,
+		CostQuote:       aggQuote,
+		Usage:           s.usage,
+	})
 }
 
 func (s *runOutputSink) machineEventRecordFor(e event.Event, sequence uint64) machineEventRecord {
@@ -292,6 +351,7 @@ func (s *runOutputSink) machineEventRecordFor(e event.Event, sequence uint64) ma
 		record.GuardianResult = e.Guardian.Outcome
 		record.GuardianRisk = e.Guardian.RiskLevel
 	case event.Retrying:
+		record.Recovery = e.Recovery
 		record.RetryAttempt = e.RetryAttempt
 		record.RetryMax = e.RetryMax
 	}

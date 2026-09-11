@@ -5,22 +5,23 @@ import (
 	"path/filepath"
 	"testing"
 
+	"reasonix/internal/desktoplauncher"
 	"reasonix/internal/installlayout"
 )
 
 func TestStripLegacyLaunchArgs(t *testing.T) {
-	got := stripLegacyLaunchArgs([]string{
+	got := desktoplauncher.StripLegacyLaunchArgs([]string{
 		"launch", "--detach", "--safe-mode", "--app", `C:\Old\reasonix-desktop.exe`, "--foo", "bar",
 	})
 	want := []string{"--foo", "bar"}
 	if len(got) != len(want) || got[0] != want[0] || got[1] != want[1] {
 		t.Fatalf("got %#v want %#v", got, want)
 	}
-	got = stripLegacyLaunchArgs([]string{"--app=ignored", "keep"})
+	got = desktoplauncher.StripLegacyLaunchArgs([]string{"--app=ignored", "keep"})
 	if len(got) != 1 || got[0] != "keep" {
 		t.Fatalf("got %#v", got)
 	}
-	got = stripLegacyLaunchArgs([]string{"--", "--safe-mode", "x"})
+	got = desktoplauncher.StripLegacyLaunchArgs([]string{"--", "--safe-mode", "x"})
 	if len(got) != 3 || got[0] != "--" {
 		t.Fatalf("separator not preserved: %#v", got)
 	}
@@ -46,7 +47,7 @@ func TestResolveDesktopPathUsesCurrentJSON(t *testing.T) {
 	}); err != nil {
 		t.Fatal(err)
 	}
-	path, err := resolveDesktopPath(root)
+	path, err := desktoplauncher.ResolveDesktopPath(root)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -62,7 +63,7 @@ func TestResolveDesktopPathFallsBackToFlatSibling(t *testing.T) {
 	if err := os.WriteFile(flat, []byte("flat"), 0o755); err != nil {
 		t.Fatal(err)
 	}
-	path, err := resolveDesktopPath(root)
+	path, err := desktoplauncher.ResolveDesktopPath(root)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -82,7 +83,7 @@ func TestResolveDesktopPathRejectsCorruptPointer(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(root, installlayout.DesktopBinaryName()), []byte("x"), 0o755); err != nil {
 		t.Fatal(err)
 	}
-	if path, err := resolveDesktopPath(root); err == nil {
+	if path, err := desktoplauncher.ResolveDesktopPath(root); err == nil {
 		t.Fatalf("corrupt current.json resolved stale flat desktop %q", path)
 	}
 }

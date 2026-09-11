@@ -82,6 +82,10 @@ func reconcileRuntime(snap *TaskSnapshot, now time.Time) {
 	}
 }
 
+// ReconcileRuntime applies the read-time lease view without mutating the
+// authoritative snapshot file.
+func (ts *TaskSnapshot) ReconcileRuntime(now time.Time) { reconcileRuntime(ts, now) }
+
 // ValidTaskStates is the set of well-known states.
 var ValidTaskStates = map[TaskState]bool{
 	TaskStateQueued:    true,

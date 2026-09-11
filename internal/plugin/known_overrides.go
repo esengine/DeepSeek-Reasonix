@@ -1,7 +1,9 @@
 package plugin
 
 import (
+	"maps"
 	"path/filepath"
+	"slices"
 	"strings"
 )
 
@@ -50,12 +52,7 @@ func isCodebaseMemorySpec(s Spec) bool {
 	if isCodebaseMemoryID(s.Name) || isCodebaseMemoryCommand(s.Command) {
 		return true
 	}
-	for _, arg := range s.Args {
-		if isCodebaseMemoryID(arg) {
-			return true
-		}
-	}
-	return false
+	return slices.ContainsFunc(s.Args, isCodebaseMemoryID)
 }
 
 func isCodebaseMemoryCommand(command string) bool {
@@ -89,9 +86,7 @@ func isStdioSpecType(typ string) bool {
 
 func mergeDefaultEnv(existing map[string]string, key, value string) map[string]string {
 	out := make(map[string]string, len(existing)+1)
-	for name, v := range existing {
-		out[name] = v
-	}
+	maps.Copy(out, existing)
 	if _, ok := out[key]; !ok {
 		out[key] = value
 	}

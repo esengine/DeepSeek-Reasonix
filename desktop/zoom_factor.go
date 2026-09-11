@@ -3,21 +3,28 @@ package main
 import (
 	"encoding/json"
 	"os"
-	"os/exec"
 	"path/filepath"
 
 	"reasonix/internal/config"
+	"reasonix/internal/fileutil"
 )
 
-// DesktopZoomFactor persists the user's WebView2 zoom factor preference across
-// restarts. The frontend writes it; main.go reads it before wails.Run() to set
-// the Windows ZoomFactor option.
+// DesktopZoomFactor persists the user's zoom factor preference across
+// restarts. The frontend writes it; the host RPC Hello handshake reads it to
+// set the shell window's zoom factor.
 type DesktopZoomFactor struct {
 	ZoomFactor float64 `json:"zoomFactor"`
 }
 
 func zoomFactorPath() string {
 	return filepath.Join(config.MemoryUserDir(), "desktop-zoom.json")
+}
+
+func initialDesktopZoomFactor() float64 {
+	if zf, ok := loadZoomFactor(); ok && zf > 0 {
+		return zf
+	}
+	return 1.0
 }
 
 // loadZoomFactor reads the saved zoom factor. The bool is false when no saved
@@ -66,22 +73,12 @@ func (a *App) SetDesktopZoomFactor(factor float64) error {
 	if err != nil {
 		return err
 	}
-	return os.WriteFile(path, data, 0o644)
+	return fileutil.AtomicWriteFile(path, data, 0o644)
 }
 
-// RestartApplication saves the zoom and restarts the whole process so the new
-// ZoomFactor takes effect in the WebView2 window options.
+// RestartApplication restarts the whole application so a newly saved zoom
+// factor takes effect in the shell window.
 func (a *App) RestartApplication() error {
-	exe, err := os.Executable()
-	if err != nil {
-		return err
-	}
-	cmd := exec.Command(exe, os.Args[1:]...)
-	cmd.Stdout = os.Stdout
-	cmd.Stderr = os.Stderr
-	if err := cmd.Start(); err != nil {
-		return err
-	}
-	os.Exit(0)
+	a.relaunchDesktop(true)
 	return nil
 }

@@ -14,15 +14,85 @@ import (
 )
 
 func TestToWireRetryingJSON(t *testing.T) {
-	w := ToWire(event.Event{Kind: event.Retrying, RetryAttempt: 3, RetryMax: 10})
+	recovery := &event.RecoveryStatus{Phase: "headers", NextAttemptAt: 1700000000000, WaitedMs: 14000, WaitBudgetMs: 600000, Waiting: true}
+	w := ToWire(event.Event{Kind: event.Retrying, RetryAttempt: 3, RetryMax: 10, RetryScope: event.RetryScopeStream, Recovery: recovery})
 	b, err := json.Marshal(w)
 	if err != nil {
 		t.Fatalf("marshal: %v", err)
 	}
 	s := string(b)
-	for _, want := range []string{`"kind":"retrying"`, `"retryAttempt":3`, `"retryMax":10`} {
+	for _, want := range []string{`"kind":"retrying"`, `"retryAttempt":3`, `"retryMax":10`, `"retryScope":"stream"`, `"next_attempt_at":1700000000000`, `"waited_ms":14000`, `"wait_budget_ms":600000`, `"waiting":true`} {
 		if !strings.Contains(s, want) {
 			t.Fatalf("retrying JSON = %s, want it to contain %s", s, want)
+		}
+	}
+}
+
+func TestToWireStreamAttemptJSON(t *testing.T) {
+	w := ToWire(event.Event{
+		Kind: event.StreamAttempt,
+		StreamAttempt: event.StreamAttemptInfo{
+			ID: "sa-1", Action: event.StreamAttemptDiscard, Attempt: 2, Max: 6, Reason: "connection_reset",
+		},
+	})
+	b, err := json.Marshal(w)
+	if err != nil {
+		t.Fatalf("marshal: %v", err)
+	}
+	s := string(b)
+	for _, want := range []string{`"kind":"stream_attempt"`, `"id":"sa-1"`, `"action":"discard"`, `"attempt":2`, `"max":6`, `"reason":"connection_reset"`} {
+		if !strings.Contains(s, want) {
+			t.Fatalf("stream_attempt JSON = %s, want it to contain %s", s, want)
+		}
+	}
+}
+
+func TestToWireWorkspaceChangedKeepsBoundedEmptyArrays(t *testing.T) {
+	w := ToWire(event.Event{Kind: event.WorkspaceChanged, Workspace: &event.WorkspaceChangedPayload{
+		Revisions:  event.WorkspaceRevision{Content: 4, Tree: 2, WorkingTree: 3, GitMeta: 1, Session: 7},
+		WatchState: event.WorkspaceWatchDegraded,
+		Source:     "reconcile",
+	}})
+	if w.Workspace == nil || w.Workspace.Changes == nil {
+		t.Fatalf("workspace payload/changes must be non-nil: %+v", w.Workspace)
+	}
+	b, err := json.Marshal(w)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, want := range []string{`"kind":"workspace_changed"`, `"changes":[]`, `"watchState":"degraded"`, `"session":7`} {
+		if !strings.Contains(string(b), want) {
+			t.Fatalf("workspace JSON = %s, missing %s", b, want)
+		}
+	}
+}
+
+func TestToWireCompletionSummaryCarriesTurnTimeAttention(t *testing.T) {
+	w := ToWire(event.Event{Kind: event.CompletionSummary, Completion: &event.CompletionSummaryInfo{
+		Verdict: "partial", ChecksSuppressed: 1, Floor: "delivery", Attention: true,
+	}})
+	b, err := json.Marshal(w)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, want := range []string{`"kind":"completion_summary"`, `"floor":"delivery"`, `"attention":true`} {
+		if !strings.Contains(string(b), want) {
+			t.Fatalf("completion JSON = %s, missing %s", b, want)
+		}
+	}
+}
+
+func TestToWireContextMaintenanceJSON(t *testing.T) {
+	w := ToWire(event.Event{Kind: event.ContextMaintenanceEvent, Maintenance: &event.ContextMaintenance{
+		Status: "applied", Action: "prune", SavedTokens: 4096, ProjectionVersion: 3, CacheBreak: true,
+	}})
+	b, err := json.Marshal(w)
+	if err != nil {
+		t.Fatalf("marshal: %v", err)
+	}
+	for _, want := range []string{`"kind":"context_maintenance"`, `"action":"prune"`, `"savedTokens":4096`, `"projectionVersion":3`, `"cacheBreak":true`} {
+		if !strings.Contains(string(b), want) {
+			t.Fatalf("context maintenance JSON = %s, want %s", b, want)
 		}
 	}
 }
@@ -54,6 +124,21 @@ func TestToWireNoticeCarriesCode(t *testing.T) {
 	}
 }
 
+func TestToWireWriteAccessApprovalKeepsNonNilArrays(t *testing.T) {
+	w := ToWire(event.Event{Kind: event.ApprovalRequest, Approval: event.Approval{
+		ID: "a3", Tool: "bash", Subject: "install", Kind: event.ApprovalKindWriteAccess,
+		WriteAccess: event.NormalizeWriteAccessApproval(&event.WriteAccessApproval{}),
+	}})
+	b, err := json.Marshal(w)
+	if err != nil {
+		t.Fatal(err)
+	}
+	body := string(b)
+	if !strings.Contains(body, `"write_access"`) || !strings.Contains(body, `"directories":[]`) {
+		t.Fatalf("write_access arrays must be [] not null: %s", body)
+	}
+}
+
 func TestToWireNoticeCarriesDecisionReceipt(t *testing.T) {
 	w := ToWire(event.Event{
 		Kind: event.Notice, Level: event.LevelInfo, Code: event.NoticeCodeDecisionReceipt,
@@ -77,7 +162,7 @@ func TestToWireNoticeCarriesDecisionReceipt(t *testing.T) {
 }
 
 func TestKindNamesComplete(t *testing.T) {
-	for k := event.Kind(0); k < event.KindCount; k++ {
+	for k := range event.KindCount {
 		if ToWire(event.Event{Kind: k}).Kind == "" {
 			t.Fatalf("kind %d has no wire name", k)
 		}
@@ -86,7 +171,7 @@ func TestKindNamesComplete(t *testing.T) {
 
 func TestDesktopWireEventKindTypeCoversSharedKinds(t *testing.T) {
 	ts := readDesktopTypes(t)
-	for k := event.Kind(0); k < event.KindCount; k++ {
+	for k := range event.KindCount {
 		kind := ToWire(event.Event{Kind: k}).Kind
 		if !strings.Contains(ts, `"`+kind+`"`) {
 			t.Fatalf("desktop WireEvent EventKind is missing %q", kind)
@@ -98,9 +183,18 @@ func TestDesktopWireEventTypeCoversSharedPayloadFields(t *testing.T) {
 	ts := readDesktopTypes(t)
 	for _, want := range []string{
 		"detail?: string;",
-		`outcome?: "final_readiness" | "recovery_paused";`,
-		"retryAttempt?: number;",
+		"outcome?:",
+		`"completed" | "partial" | "blocked"`,
+		`"final_readiness" | "recovery_paused"`,
+		"checkpointTurn?: number;",
+		"retryAttempt?: number;", "WireEvent extends RecoveryEventFields", "recovery?: RecoveryStatus;",
 		"retryMax?: number;",
+		"retryScope?:",
+		"streamAttempt?: WireStreamAttempt;",
+		"export interface WireStreamAttempt",
+		"attemptId?: string;",
+		"contextPromptTokens?: number;",
+		"contextCompletionTokens?: number;",
 		"memoryCitations?: MemoryCitation[];",
 		"export interface MemoryCitation",
 		"resolvedName?: string;",
@@ -111,6 +205,10 @@ func TestDesktopWireEventTypeCoversSharedPayloadFields(t *testing.T) {
 		"prefixChanged: boolean;",
 		"prefixChangeReasons?: string[];",
 		"toolSchemaTokens: number;",
+		`sessionContext?: import("./sessionContextTypes").WireSessionContextDiagnostics;`,
+		"export interface WireSessionContextDiagnostics",
+		"targetRole:",
+		"backgroundMemory: WireSessionContextSectionDiagnostics;",
 	} {
 		if !strings.Contains(ts, want) {
 			t.Fatalf("desktop WireEvent types are missing %q", want)
@@ -155,6 +253,37 @@ func TestToWireToolCarriesResolvedCapabilityMetadata(t *testing.T) {
 	}
 }
 
+func TestToWireToolCarriesSubagentOutcomeMetadata(t *testing.T) {
+	w := ToWire(event.Event{Kind: event.ToolResult, Tool: event.Tool{
+		ID: "skill-1", Name: "run_skill", SubagentRef: "sa_child",
+		SubagentStatus: "partial", SubagentErrorCode: "completion_uncertain", SubagentRetryable: true,
+	}})
+	b, err := json.Marshal(w)
+	if err != nil {
+		t.Fatalf("marshal: %v", err)
+	}
+	for _, want := range []string{`"subagentRef":"sa_child"`, `"subagentStatus":"partial"`, `"subagentErrorCode":"completion_uncertain"`, `"subagentRetryable":true`} {
+		if !strings.Contains(string(b), want) {
+			t.Fatalf("subagent outcome JSON = %s, want %s", b, want)
+		}
+	}
+}
+
+func TestToWireToolOmitsHostOnlyWorkspaceMutationMetadata(t *testing.T) {
+	privatePath := "/Users/private/secret-project/file.go"
+	w := ToWire(event.Event{Kind: event.ToolResult, Tool: event.Tool{
+		ID: "c1", Name: "write_file", WorkspaceMutation: true,
+		WorkspacePaths: []string{privatePath}, WorkspaceAllPaths: true,
+	}})
+	b, err := json.Marshal(w)
+	if err != nil {
+		t.Fatalf("marshal: %v", err)
+	}
+	if strings.Contains(string(b), privatePath) || strings.Contains(string(b), "workspaceMutation") || strings.Contains(string(b), "workspacePaths") {
+		t.Fatalf("host-only workspace metadata leaked into eventwire JSON: %s", b)
+	}
+}
+
 func TestToWireTurnOutcomeIsOptionalAndMachineReadable(t *testing.T) {
 	readiness := ToWire(event.Event{
 		Kind:      event.TurnDone,
@@ -179,6 +308,25 @@ func TestToWireTurnOutcomeIsOptionalAndMachineReadable(t *testing.T) {
 	}
 	if strings.Contains(string(ordinary), `"outcome"`) {
 		t.Fatalf("ordinary error JSON must omit outcome: %s", ordinary)
+	}
+}
+
+func TestToWireTurnDoneCheckpointTurnPreservesZeroAndOmitsNil(t *testing.T) {
+	turn := 0
+	withCheckpoint, err := json.Marshal(ToWire(event.Event{Kind: event.TurnDone, CheckpointTurn: &turn}))
+	if err != nil {
+		t.Fatalf("marshal checkpoint turn: %v", err)
+	}
+	if !strings.Contains(string(withCheckpoint), `"checkpointTurn":0`) {
+		t.Fatalf("checkpoint JSON = %s, want turn zero", withCheckpoint)
+	}
+
+	withoutCheckpoint, err := json.Marshal(ToWire(event.Event{Kind: event.TurnDone}))
+	if err != nil {
+		t.Fatalf("marshal empty TurnDone: %v", err)
+	}
+	if strings.Contains(string(withoutCheckpoint), `"checkpointTurn"`) {
+		t.Fatalf("empty TurnDone JSON must omit checkpointTurn: %s", withoutCheckpoint)
 	}
 }
 
@@ -217,18 +365,23 @@ func readDesktopTypes(t *testing.T) string {
 	if !ok {
 		t.Fatal("runtime caller unavailable")
 	}
-	path := filepath.Join(filepath.Dir(file), "..", "..", "desktop", "frontend", "src", "lib", "types.ts")
-	b, err := os.ReadFile(path)
-	if err != nil {
-		t.Fatalf("read desktop types: %v", err)
+	dir := filepath.Join(filepath.Dir(file), "..", "..", "desktop", "frontend", "src", "lib")
+	var source strings.Builder
+	for _, name := range []string{"types.ts", "sessionContextTypes.ts", "recoveryStatus.ts"} {
+		b, err := os.ReadFile(filepath.Join(dir, name))
+		if err != nil {
+			t.Fatalf("read desktop type %s: %v", name, err)
+		}
+		source.Write(b)
 	}
-	return string(b)
+	return source.String()
 }
 
 func TestToWireToolPayloadJSON(t *testing.T) {
 	w := ToWire(event.Event{Kind: event.ToolDispatch, Tool: event.Tool{
 		ID: "call-1", Name: "task", Args: `{"prompt":"x"}`, Output: "ignored",
 		Err: "blocked", ReadOnly: true, Truncated: true, DurationMs: 522,
+		StartedAt: 1754500000000, EndedAt: 1754500000522,
 		Partial: true, Refreshed: true, ParentID: "parent-1",
 		FileDiff: event.FileDiff{Diff: "@@ -1 +1 @@\n-old\n+new\n", Added: 1, Removed: 1},
 		Profile:  &event.Profile{Model: "deepseek-pro", Effort: "max"},
@@ -242,6 +395,7 @@ func TestToWireToolPayloadJSON(t *testing.T) {
 		`"kind":"tool_dispatch"`, `"id":"call-1"`, `"name":"task"`,
 		`"args":"{\"prompt\":\"x\"}"`, `"output":"ignored"`, `"err":"blocked"`,
 		`"readOnly":true`, `"truncated":true`, `"durationMs":522`, `"partial":true`, `"refreshed":true`,
+		`"startedAt":1754500000000`, `"endedAt":1754500000522`,
 		`"parentId":"parent-1"`, `"diff":"@@ -1 +1 @@\n-old\n+new\n"`,
 		`"added":1`, `"removed":1`, `"profile":{"model":"deepseek-pro","effort":"max"}`,
 	} {
@@ -264,6 +418,10 @@ func TestToWireUsagePayloadJSON(t *testing.T) {
 			PrefixHash: "p", PrefixChanged: true, PrefixChangeReasons: []string{"log_rewrite"},
 			SystemHash: "s", ToolsHash: "t", LogRewriteVersion: 1, ToolSchemaTokens: 42,
 			CacheMissTokens: 100, CacheHitTokens: 900,
+			SessionContext: &event.SessionContextDiagnostics{
+				Version: 1, Digest: strings.Repeat("a", 64), TargetRole: "executor", Reasons: []string{"memory_changed"},
+				BackgroundMemory: event.SessionContextSectionDiagnostics{Digest: strings.Repeat("b", 64), Chars: 23},
+			},
 		},
 		SessionHit: 8000, SessionMiss: 2000,
 	})
@@ -279,6 +437,7 @@ func TestToWireUsagePayloadJSON(t *testing.T) {
 		`"source":"title"`, `"sessionCacheHitTokens":8000`, `"sessionCacheMissTokens":2000`,
 		`"currency":"¥"`, `"costUsd":`, `"cacheDiagnostics":`, `"prefixHash":"p"`,
 		`"prefixChanged":true`, `"prefixChangeReasons":["log_rewrite"]`, `"toolSchemaTokens":42`,
+		`"sessionContext":`, `"targetRole":"executor"`, `"reasons":["memory_changed"]`, `"chars":23`,
 	} {
 		if !strings.Contains(s, want) {
 			t.Fatalf("usage JSON = %s, want it to contain %s", s, want)
@@ -294,8 +453,8 @@ func TestToWireInteractionAndLifecyclePayloads(t *testing.T) {
 	}{
 		{
 			name: "approval",
-			in:   event.Event{Kind: event.ApprovalRequest, Approval: event.Approval{ID: "a1", Tool: "bash", Subject: "rm"}},
-			want: []string{`"kind":"approval_request"`, `"approval":{"id":"a1","tool":"bash","subject":"rm"}`},
+			in:   event.Event{Kind: event.ApprovalRequest, TurnID: "turn-a", ItemID: "a1", Approval: event.Approval{ID: "a1", Tool: "bash", Subject: "rm", TurnID: "turn-a"}},
+			want: []string{`"kind":"approval_request"`, `"promptId":"a1"`, `"promptKind":"approval"`, `"turnId":"turn-a"`, `"approval":{"id":"a1"`, `"tool":"bash"`, `"subject":"rm"`},
 		},
 		{
 			name: "fresh approval",
@@ -331,14 +490,15 @@ func TestToWireInteractionAndLifecyclePayloads(t *testing.T) {
 		},
 		{
 			name: "ask",
-			in: event.Event{Kind: event.AskRequest, Ask: event.Ask{
-				ID: "ask-1",
+			in: event.Event{Kind: event.AskRequest, TurnID: "turn-q", ItemID: "ask-1", Ask: event.Ask{
+				ID:     "ask-1",
+				TurnID: "turn-q",
 				Questions: []event.AskQuestion{{
 					ID: "q1", Header: "Pick", Prompt: "Choose", Multi: true,
 					Options: []event.AskOption{{Label: "A", Description: "Alpha"}, {Label: "B"}},
 				}},
 			}},
-			want: []string{`"kind":"ask_request"`, `"ask":{"id":"ask-1"`, `"header":"Pick"`, `"description":"Alpha"`, `"multi":true`},
+			want: []string{`"kind":"ask_request"`, `"promptId":"ask-1"`, `"promptKind":"ask"`, `"turnId":"turn-q"`, `"ask":{"id":"ask-1"`, `"header":"Pick"`, `"description":"Alpha"`, `"multi":true`},
 		},
 		{
 			name: "compaction",
@@ -371,5 +531,12 @@ func TestToWireInteractionAndLifecyclePayloads(t *testing.T) {
 				}
 			}
 		})
+	}
+}
+
+func TestPromptWireMarksLegacyIdentity(t *testing.T) {
+	w := ToWire(event.Event{Kind: event.AskRequest, ItemID: "legacy-ask", Ask: event.Ask{ID: "legacy-ask"}})
+	if !w.PromptLegacy || w.PromptID != "legacy-ask" || w.PromptKind != "ask" {
+		t.Fatalf("legacy prompt wire identity = %+v", w)
 	}
 }

@@ -1,11 +1,14 @@
 import { useEffect, useRef, useState, type ReactNode } from "react";
-import { Activity, ChevronsUpDown, CircleDollarSign, CircleGauge, Database, Folder, GitBranch, Layers, Percent, Puzzle, RefreshCw, Server, Settings, Square, Unplug, Wallet, Zap } from "lucide-react";
+import { Activity, CircleDollarSign, CircleGauge, Database, FileOutput, Folder, Gauge, GitBranch, HardDrive, Layers, Percent, Puzzle, RefreshCw, Server, Settings, Square, Unplug, Wallet, Zap } from "lucide-react";
 import { AnchoredPopover } from "./AnchoredPopover";
 import { RemoteConnectionErrorDialog } from "./RemoteConnectionErrorDialog";
 import { Tooltip } from "./Tooltip";
+import { contextWindowPercentages } from "../lib/contextWindow";
+import { formatTps } from "../lib/format";
 import { useI18n, type Translator } from "../lib/i18n";
 import { formatMoneyLocalized } from "../lib/money";
 import { normalizeStatusBarItems, type StatusBarItemId } from "../lib/statusBarItems";
+import { appendRateBand, rateBandLabel } from "../lib/costRateBand";
 import { isRemoteDegradedWarning, isRemoteHostKeyMismatch, isRemoteTerminalFailure, remoteConnectionErrorSummaryKey } from "../lib/remoteErrors";
 import type { ExtensionStatusEntry } from "../lib/useController";
 import { type BackgroundRuntimeView, type BalanceInfo, type ContextInfo, type JobView, type RemoteConnectionStatus, type RemoteHostView, type UsageSourceStats, type WireUsage } from "../lib/types";
@@ -14,8 +17,7 @@ import { useRemoteStore } from "../store/remote";
 type StatusBarLabelStyle = "icon" | "text";
 
 function formatRate(hit: number, denom: number): string | null {
-  if (denom <= 0) return null;
-  return ((hit / denom) * 100).toFixed(2);
+  return denom > 0 ? ((hit / denom) * 100).toFixed(2) : null;
 }
 
 // nowRate is the SINGLE-TURN prompt cache-hit % (latest turn) — the higher,
@@ -157,15 +159,18 @@ export function StatusBar({
   context,
   usage,
   balance,
-  running,
   sessionTurns,
   sessionTokens,
   turnTokens,
+  lastTurnOutputTokens,
+  lastTurnModelMs,
+  lastTurnOutputEstimated = false,
+  lastRequestTps,
   turnCost,
+  turnRateBand,
   cost,
   currency,
-  modelLabel,
-  labelStyle = "text",
+  labelStyle = "icon",
   items,
   workspacePath,
   workspaceName,
@@ -191,7 +196,12 @@ export function StatusBar({
   sessionTurns?: number;
   sessionTokens?: number;
   turnTokens?: number;
+  lastTurnOutputTokens?: number;
+  lastTurnModelMs?: number;
+  lastTurnOutputEstimated?: boolean;
+  lastRequestTps?: number | null; // Null means the latest request was not measurable.
   turnCost?: number;
+  turnRateBand?: string;
   cost?: number;
   currency?: string;
   modelLabel?: string;
@@ -216,7 +226,7 @@ export function StatusBar({
   extensionStatuses?: ExtensionStatusEntry[];
 }) {
   const { locale, t } = useI18n();
-  const pct = context.window ? Math.min(100, Math.round((context.used / context.window) * 100)) : null;
+  const pct = context.window > 0 ? contextWindowPercentages(context.used, context.window).raw : null;
   const compactPct = context.compactRatio ? Math.round(context.compactRatio * 100) : null;
   const compactNear = pct !== null && compactPct !== null && pct >= Math.max(0, compactPct - 10);
   const compactReached = pct !== null && compactPct !== null && pct >= compactPct;
@@ -227,42 +237,56 @@ export function StatusBar({
   const turnEstimated = usage?.estimated === true;
   const sessionEstimated = context.estimated === true;
   const markEstimated = (value: string, estimated: boolean) => estimated && value !== "-" ? `≈${value}` : value;
-  const turnCostLabel = markEstimated(formatMoneyLocalized(turnCost, currency, { locale }), turnEstimated);
+  const turnCostLabel = appendRateBand(markEstimated(formatMoneyLocalized(turnCost, currency, { locale, fractionDigits: 2 }), turnEstimated), turnRateBand, t);
   const costLabel = markEstimated(formatMoneyLocalized(cost, currency, { locale }), sessionEstimated);
   const displayWorkspacePath = (workspacePath || workspaceName || "").trim();
   const workspaceLabel = compactPath(displayWorkspacePath, workspaceName);
   const branchLabel = (gitBranch || "").trim();
-  const workspaceTitle = displayWorkspacePath ? workspaceTooltip(t, displayWorkspacePath, workspacePath, branchLabel) : "";
+  const workspaceTitle = workspaceTooltip(t, displayWorkspacePath, workspacePath, branchLabel);
   const turnLabel = formatTurnCount(sessionTurns, t);
   const tokenLabel = markEstimated(formatTokenCount(sessionTokens), sessionEstimated);
   const turnTokenLabel = markEstimated(formatTokenCount(turnTokens), turnEstimated);
+  const statusQuote = context.sessionCostQuote;
+  const statusBucketed = statusQuote?.displayStatus === "bucketed" || statusQuote?.aggregateMode === "currency_buckets";
+  const statusUnavailable = context.sessionCostComplete === false || statusQuote?.displayStatus === "unavailable" || statusQuote?.costComplete === false;
+  const statusSelectedAmount = statusQuote?.selected?.amount ? Number(statusQuote.selected.amount) : NaN;
+  const rawStatusCostLabel = statusBucketed
+    ? t("context.sessionCostBucketed")
+    : statusUnavailable
+      ? "-"
+      : Number.isFinite(statusSelectedAmount) && statusSelectedAmount > 0
+        ? markEstimated(formatMoneyLocalized(statusSelectedAmount, statusQuote?.selected?.currency || context.sessionCurrency || currency, { locale }), statusQuote?.estimated !== false)
+        : costLabel;
+  const statusCostLabel = appendRateBand(rawStatusCostLabel, statusQuote?.rateBand, t);
+  const rateBandTooltip = t("billing.rateBand.tooltip");
+  const turnCostTooltip = rateBandLabel(turnRateBand, t) ? `${t("status.turnCostTitle")} ${rateBandTooltip}` : t("status.turnCostTitle");
+  const sessionCostTooltip = rateBandLabel(statusQuote?.rateBand, t) ? `${t("status.spendTitle")} ${rateBandTooltip}` : t("status.spendTitle");
   const balanceLabel = balance?.available && balance.display ? balance.display : "-";
+  const balanceTitle = balance?.available
+    ? (balance.detail
+      ? `${t("status.balanceTitle")}: ${balance.detail}`
+      : t("status.balanceTitle"))
+    : t("status.balanceTitle");
+  const tpsLabel = lastRequestTps === undefined
+    ? formatTps(lastTurnOutputTokens && lastTurnModelMs ? lastTurnOutputTokens / (lastTurnModelMs / 1_000) : null, lastTurnOutputEstimated)
+    : formatTps(lastRequestTps);
+  const formatUsageToken = (value: number) => `${usage?.estimated ? "≈" : ""}${value.toLocaleString()}`;
+  const outputTokensLabel = usage && typeof usage.completionTokens === "number"
+    ? formatUsageToken(usage.completionTokens)
+    : "-";
+  const cacheHit = usage?.cacheHitTokens;
+  const cacheMiss = usage?.cacheMissTokens;
+  const hasCacheTokens = typeof cacheHit === "number" || typeof cacheMiss === "number";
   const metricLabelStyle = labelStyle === "text" ? "text" : "icon";
   const visibleItems = normalizeStatusBarItems(items);
   const cacheTooltip = sourceCacheTooltip(t, t("status.cacheTitle"), context);
   const avgCacheTooltip = sourceCacheTooltip(t, t("status.cacheAvgTitle"), context);
   const itemRenderers: Record<StatusBarItemId, ReactNode> = {
-    model: (
-      <Tooltip label={t("status.modelTitle")}>
-        <span className="stat stat--model">
-          <span className={`statusbar__dot ${running ? "statusbar__dot--busy" : ""}`} />
-          {modelLabel && <span className="statusbar__model">{modelLabel}</span>}
-        </span>
-      </Tooltip>
-    ),
-    workspace: workspaceLabel ? (
+    workspace: branchLabel || workspaceLabel ? (
       <Tooltip label={workspaceTitle} className="statusbar__metric statusbar__metric--workspace">
         <span className="stat statusbar__workspace">
-          <span className="stat__label stat__label--icon" aria-hidden="true"><Folder size={12} /></span>
-          <b>{workspaceLabel}</b>
-        </span>
-      </Tooltip>
-    ) : null,
-    git_branch: branchLabel ? (
-      <Tooltip label={`${t("status.gitBranchTitle")}: ${branchLabel}`} className="statusbar__metric statusbar__metric--branch">
-        <span className="stat statusbar__branch">
-          <span className="stat__label stat__label--icon" aria-hidden="true"><GitBranch size={12} /></span>
-          <b>{branchLabel}</b>
+          <span className="stat__label stat__label--icon" aria-hidden="true">{branchLabel ? <GitBranch size={12} /> : <Folder size={12} />}</span>
+          <b>{branchLabel || workspaceLabel}</b>
         </span>
       </Tooltip>
     ) : null,
@@ -299,7 +323,7 @@ export function StatusBar({
       </Tooltip>
     ),
     turn_cost: (
-      <Tooltip label={t("status.turnCostTitle")} className="statusbar__metric statusbar__metric--turn-cost">
+      <Tooltip label={turnCostTooltip} className="statusbar__metric statusbar__metric--turn-cost">
         <span className="stat statusbar__turn-cost">
           <MetricLabel style={metricLabelStyle} icon={<CircleDollarSign size={12} />} label={t("status.turnCostLabel")} />
           <b>{turnCostLabel}</b>
@@ -311,6 +335,38 @@ export function StatusBar({
         <span className="stat statusbar__turns">
           <MetricLabel style={metricLabelStyle} icon={<RefreshCw size={12} />} label={t("status.sessionTurnsLabel")} />
           <b className={turnLabel === "-" ? "stat__value--empty" : undefined}>{turnLabel}</b>
+        </span>
+      </Tooltip>
+    ),
+    turn_tps: (
+      <Tooltip label={t("status.tpsTitle")} className="statusbar__metric statusbar__metric--tps">
+        <span className="stat statusbar__tps">
+          <MetricLabel style={metricLabelStyle} icon={<Gauge size={12} />} label={t("status.tpsLabel")} />
+          <b className={tpsLabel === null ? "stat__value--empty" : undefined}>{tpsLabel ?? "-"}</b>
+        </span>
+      </Tooltip>
+    ),
+    turn_output_tokens: (
+      <Tooltip label={t("status.outputTokensTitle")} className="statusbar__metric statusbar__metric--output-tokens">
+        <span className="stat statusbar__output-tokens">
+          <MetricLabel style={metricLabelStyle} icon={<FileOutput size={12} />} label={t("status.outputTokensLabel")} />
+          <b className={outputTokensLabel === "-" ? "stat__value--empty" : undefined}>{outputTokensLabel}</b>
+        </span>
+      </Tooltip>
+    ),
+    turn_cache_tokens: (
+      <Tooltip label={t("status.cacheTokensTitle")} className="statusbar__metric statusbar__metric--cache-tokens">
+        <span className="stat statusbar__cache-tokens">
+          <MetricLabel style={metricLabelStyle} icon={<HardDrive size={12} />} label={t("status.cacheTokensLabel")} />
+          {hasCacheTokens ? (
+            <>
+              <span>{t("status.cacheHitShort")} </span><b>{formatUsageToken(typeof cacheHit === "number" && cacheHit > 0 ? cacheHit : 0)}</b>
+              <span className="statusbar__cache-sep">|</span>
+              <span>{t("status.cacheMissShort")} </span><b>{formatUsageToken(typeof cacheMiss === "number" && cacheMiss > 0 ? cacheMiss : 0)}</b>
+            </>
+          ) : (
+            <b className="stat__value--empty">-</b>
+          )}
         </span>
       </Tooltip>
     ),
@@ -338,15 +394,15 @@ export function StatusBar({
       </Tooltip>
     ),
     cost: (
-      <Tooltip label={t("status.spendTitle")} className="statusbar__metric statusbar__metric--cost">
+      <Tooltip label={sessionCostTooltip} className="statusbar__metric statusbar__metric--cost">
         <span className="stat statusbar__cost">
           <MetricLabel style={metricLabelStyle} icon={<CircleDollarSign size={12} />} label={t("status.costLabel")} />
-          <b>{costLabel}</b>
+          <b>{statusCostLabel}</b>
         </span>
       </Tooltip>
     ),
     balance: (
-      <Tooltip label={t("status.balanceTitle")} className="statusbar__metric statusbar__metric--balance">
+      <Tooltip label={balanceTitle} className="statusbar__metric statusbar__metric--balance">
         <span className="stat stat--balance statusbar__balance">
           <MetricLabel style={metricLabelStyle} icon={<Wallet size={12} />} label={t("status.balanceLabel")} />
           <b className={balanceLabel === "-" ? "stat__value--empty" : undefined}>{balanceLabel}</b>
@@ -357,8 +413,26 @@ export function StatusBar({
   const renderedItems = visibleItems
     .map((id) => ({ id, node: itemRenderers[id] }))
     .filter(({ node }) => node !== null && node !== undefined && node !== false);
+  const statusbarRef = useRef<HTMLDivElement>(null);
+  // React's onWheel is a passive listener, so preventDefault() there would be
+  // a no-op (plus a console warning). Register a native non-passive listener
+  // instead so wheel-panning the status bar also stops page scroll.
+  useEffect(() => {
+    const el = statusbarRef.current;
+    if (!el) return;
+    const onWheel = (e: WheelEvent) => {
+      if (el.scrollWidth <= el.clientWidth) return;
+      e.preventDefault();
+      el.scrollLeft += e.deltaY;
+    };
+    el.addEventListener("wheel", onWheel, { passive: false });
+    return () => el.removeEventListener("wheel", onWheel);
+  }, []);
   return (
-    <div className={`statusbar statusbar--${metricLabelStyle}`}>
+    <div
+      className={`statusbar statusbar--${metricLabelStyle}`}
+      ref={statusbarRef}
+    >
       <div className="statusbar__group statusbar__group--items">
         <RemoteStatusBarChip
           hosts={remoteHosts}
@@ -597,25 +671,24 @@ function RemoteStatusBarChip({
   const worstHost = hosts.find((host) => host.id === worst.hostId) ?? hosts[0];
   const triggerState = isRemoteTerminalFailure(worst) ? "error" : worst.state;
   const triggerStatus = isRemoteTerminalFailure(worst) ? t("remote.status.failed") : t(`remote.status.${worst.state}`);
-  const triggerLabel = worst.state === "stopped" && !worst.error
-    ? t("remote.statusBar.disconnected")
-    : t("remote.statusBar.summary", { host: worstHost.label, status: triggerStatus });
+  const idleDisconnected = worst.state === "stopped" && !worst.error;
+  const triggerLabel = idleDisconnected ? t("remote.statusBar.disconnected") : t("remote.statusBar.summary", { host: worstHost.label, status: triggerStatus });
+  const triggerText = idleDisconnected ? "SSH" : triggerState === "connected" ? worstHost.label : triggerLabel;
 
   return (
     <span className="statusbar__remote-wrap">
       <button
         ref={triggerRef}
         type="button"
-        className={`statusbar__remote remote-chip remote-chip--${triggerState}`}
+        className={`statusbar__remote remote-chip remote-chip--${triggerState}${idleDisconnected ? " statusbar__remote--idle" : ""}`}
         onClick={() => setOpen((value) => !value)}
         aria-label={triggerLabel}
         aria-haspopup="dialog"
         aria-expanded={open}
         title={triggerLabel}
       >
-        <Server size={11} aria-hidden="true" />
-        <span>{triggerLabel}</span>
-        <ChevronsUpDown size={10} aria-hidden="true" />
+        {triggerState === "connected" ? <span className="statusbar__remote-state-dot" aria-hidden="true" /> : <Server size={11} aria-hidden="true" />}
+        <span className="statusbar__remote-label">{triggerText}</span>
       </button>
       <AnchoredPopover
         open={open}

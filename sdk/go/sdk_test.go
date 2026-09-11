@@ -119,7 +119,7 @@ func TestOutboundCallBeforeInitializedFails(t *testing.T) {
 func TestInitializeVersionMismatch(t *testing.T) {
 	host, serveDone := startFakeHost(t, basicHandler(), Options{})
 	resp := host.request(MethodExtensionInitialize, InitializeParams{
-		ProtocolVersion: "2", ProtocolID: ProtocolID,
+		ProtocolVersion: "1", ProtocolID: ProtocolID,
 		Session:      SessionContext{SessionID: "s", WorkspaceRoot: "/r"},
 		Capabilities: HostCapabilities{ProtocolVersion: ProtocolVersion},
 	})

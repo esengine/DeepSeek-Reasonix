@@ -1,9 +1,9 @@
-// Package protocol is the frozen Extension Protocol v1 wire contract between
+// Package protocol is the frozen Extension Protocol v2 wire contract between
 // the Reasonix host and out-of-process extension sidecars. It is a public
 // protocol: sidecars are written against this package's generated JSON Schema
 // and its compatibility hash, not against Reasonix internals.
 //
-// Stability contract: within major version 1, only optional fields, new enum
+// Stability contract: within major version 2, only optional fields, new enum
 // values, and new methods may be added. Existing required fields, method
 // names, directions, limits, error reasons, and semantics never change. Any
 // such change requires a new major protocol version.
@@ -20,14 +20,14 @@ import (
 
 // ProtocolID is the immutable identity string peers exchange during the
 // initialize handshake. It is also the generated schema document's $id.
-const ProtocolID = "reasonix.extension.v1"
+const ProtocolID = "reasonix.extension.v2"
 
 // ProtocolMajor is the frozen major version of this protocol build.
-const ProtocolMajor = 1
+const ProtocolMajor = 2
 
 // ProtocolVersion is the wire string form of ProtocolMajor carried in the
 // initialize handshake.
-const ProtocolVersion = "1"
+const ProtocolVersion = "2"
 
 // NoResult is the result placeholder for notifications, which carry no
 // response payload.

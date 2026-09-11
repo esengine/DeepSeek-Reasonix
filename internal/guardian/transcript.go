@@ -2,6 +2,7 @@ package guardian
 
 import (
 	"fmt"
+	"slices"
 	"strings"
 	"unicode/utf8"
 
@@ -127,8 +128,8 @@ func renderTranscript(entries []TranscriptEntry) ([]string, string) {
 	}
 
 	// Fill remaining message budget with user entries from newest to oldest.
-	for i := len(userIdx) - 1; i >= 0; i-- {
-		idx := userIdx[i]
+	for _, v := range slices.Backward(userIdx) {
+		idx := v
 		if idx >= len(all) || included[idx] {
 			continue
 		}
@@ -226,17 +227,8 @@ func truncateText(content string, tokCap int) (string, bool) {
 	runes := []rune(content)
 	// Estimate how many runes fit in head/tail bytes (conservative: assume
 	// max 4 bytes per rune).
-	headRunes := head / 4
-	if headRunes > len(runes) {
-		headRunes = len(runes)
-	}
-	tailRunes := tail / 4
-	if tailRunes > len(runes)-headRunes {
-		tailRunes = len(runes) - headRunes
-	}
-	if tailRunes < 0 {
-		tailRunes = 0
-	}
+	headRunes := min(head/4, len(runes))
+	tailRunes := max(min(tail/4, len(runes)-headRunes), 0)
 	return string(runes[:headRunes]) + marker + string(runes[len(runes)-tailRunes:]), true
 }
 

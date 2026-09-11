@@ -1,28 +1,28 @@
 package builtin
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"os"
 
 	"reasonix/internal/diff"
-	fileenc "reasonix/internal/fileutil/encoding"
 )
 
 // preview.go gives the file-writing built-ins the optional tool.Previewer
 // capability: compute the change a call would make, reading the current file
 // but never writing. A front-end (e.g. a desktop approval card) calls Preview
-// before the permission gate runs Execute.
+// before the permission gate runs Execute, so every Preview confines its path
+// with confinePreview first: the read must be as bounded as the write.
 //
 // Each Preview mirrors its Execute's transformation exactly — same arg parsing,
 // same uniqueness / not-found rules — so the previewed NewText equals what
-// Execute would persist. That equality is asserted by TestPreviewMatchesExecute
-// in preview_test.go, which runs Execute against a temp file and compares; if
-// an Execute body ever drifts, that test fails rather than the preview lying.
+// Execute would persist (asserted by TestPreviewMatchesExecute in
+// preview_test.go; drift fails the test rather than the preview lying).
 
 // Preview computes the change write_file would make. A path that does not yet
 // exist is a Create; an existing one is a Modify.
-func (w writeFile) Preview(args json.RawMessage) (diff.Change, error) {
+func (w writeFile) Preview(ctx context.Context, args json.RawMessage) (diff.Change, error) {
 	var p struct {
 		Path    string `json:"path"`
 		Content string `json:"content"`
@@ -34,11 +34,13 @@ func (w writeFile) Preview(args json.RawMessage) (diff.Change, error) {
 		return diff.Change{}, fmt.Errorf("path is required")
 	}
 	p.Path = resolveIn(w.workDir, p.Path)
+	if err := confinePreview(effectiveWriteRoots(ctx, w.rootSet, w.roots), w.guard, w.managed, p.Path); err != nil {
+		return diff.Change{}, err
+	}
 
 	old, kind := "", diff.Create
-	if data, err := os.ReadFile(p.Path); err == nil {
-		enc, _ := fileenc.Detect(data)
-		old, kind = string(fileenc.Decode(data, enc)), diff.Modify
+	if src, err := readEditSource(ctx, w.overlay, p.Path); err == nil {
+		old, kind = src.content, diff.Modify
 	} else if !os.IsNotExist(err) {
 		return diff.Change{}, fmt.Errorf("read %s: %w", p.Path, err)
 	}
@@ -48,7 +50,7 @@ func (w writeFile) Preview(args json.RawMessage) (diff.Change, error) {
 // Preview computes the change edit_file would make. It enforces the same
 // "old_string must occur exactly once" rule as Execute, returning that error
 // when it doesn't — so a preview never shows a change the call couldn't make.
-func (e editFile) Preview(args json.RawMessage) (diff.Change, error) {
+func (e editFile) Preview(ctx context.Context, args json.RawMessage) (diff.Change, error) {
 	var p struct {
 		Path      string `json:"path"`
 		OldString string `json:"old_string"`
@@ -64,11 +66,15 @@ func (e editFile) Preview(args json.RawMessage) (diff.Change, error) {
 		return diff.Change{}, fmt.Errorf("old_string is required")
 	}
 	p.Path = resolveIn(e.workDir, p.Path)
+	if err := confinePreview(effectiveWriteRoots(ctx, e.rootSet, e.roots), e.guard, e.managed, p.Path); err != nil {
+		return diff.Change{}, err
+	}
 
-	content, _, err := readFileEncoded(p.Path)
+	src, err := readEditSource(ctx, e.overlay, p.Path)
 	if err != nil {
 		return diff.Change{}, fmt.Errorf("read %s: %w", p.Path, err)
 	}
+	content := src.content
 
 	applied := applyOldStringEdit(content, p.OldString, p.NewString, false)
 	switch {
@@ -87,7 +93,7 @@ func (e editFile) Preview(args json.RawMessage) (diff.Change, error) {
 // against an in-memory buffer — exactly as Execute does — and diffing the
 // result against the original. Any edit error surfaces here too, so a preview
 // of an invalid batch fails the same way the call would.
-func (m multiEdit) Preview(args json.RawMessage) (diff.Change, error) {
+func (m multiEdit) Preview(ctx context.Context, args json.RawMessage) (diff.Change, error) {
 	var p struct {
 		Path  string     `json:"path"`
 		Edits []editStep `json:"edits"`
@@ -102,11 +108,15 @@ func (m multiEdit) Preview(args json.RawMessage) (diff.Change, error) {
 		return diff.Change{}, fmt.Errorf("edits must not be empty")
 	}
 	p.Path = resolveIn(m.workDir, p.Path)
+	if err := confinePreview(effectiveWriteRoots(ctx, m.rootSet, m.roots), m.guard, m.managed, p.Path); err != nil {
+		return diff.Change{}, err
+	}
 
-	content, _, err := readFileEncoded(p.Path)
+	src, err := readEditSource(ctx, m.overlay, p.Path)
 	if err != nil {
 		return diff.Change{}, fmt.Errorf("read %s: %w", p.Path, err)
 	}
+	content := src.content
 	original := content
 
 	for i, step := range p.Edits {

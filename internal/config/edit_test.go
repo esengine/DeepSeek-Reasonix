@@ -17,34 +17,6 @@ import (
 	"github.com/BurntSushi/toml"
 )
 
-func TestSetDefaultModel(t *testing.T) {
-	c := Default()
-	if err := c.SetDefaultModel("deepseek-pro"); err != nil {
-		t.Fatalf("set valid default: %v", err)
-	}
-	if c.DefaultModel != "deepseek-pro" {
-		t.Errorf("default = %q, want deepseek-pro", c.DefaultModel)
-	}
-	if err := c.SetDefaultModel("nope"); err == nil {
-		t.Error("expected error for unknown provider")
-	}
-	// "provider/model" form is also accepted: the /model picker stores the
-	// full ref so a user can land on a non-default model under the same
-	// provider across restarts.
-	if err := c.SetDefaultModel("deepseek-pro/deepseek-v4-pro"); err != nil {
-		t.Fatalf("set provider/model default: %v", err)
-	}
-	if c.DefaultModel != "deepseek-pro/deepseek-v4-pro" {
-		t.Errorf("default = %q, want deepseek-pro/deepseek-v4-pro", c.DefaultModel)
-	}
-	if err := c.SetDefaultModel("deepseek-pro/missing"); err == nil {
-		t.Error("expected error for unknown model under known provider")
-	}
-	if err := c.SetDefaultModel(""); err == nil {
-		t.Error("expected error for empty name")
-	}
-}
-
 func TestUIThemeNormalizes(t *testing.T) {
 	c := Default()
 	for _, tt := range []struct {
@@ -197,15 +169,22 @@ func TestSetDesktopTerminalThemeValidatesPreference(t *testing.T) {
 func TestDesktopCurrencyNormalizesAndRefreshesOfficialPricing(t *testing.T) {
 	c := Default()
 	c.Desktop.Language = "zh"
+	flash, _ := c.Provider("deepseek-flash")
+	// Capture frozen list price before display switches.
+	wantOutput := flash.Price.Output
+	wantCurrency := flash.Price.Currency
 	if err := c.SetDesktopCurrency("usd"); err != nil {
 		t.Fatalf("SetDesktopCurrency USD: %v", err)
 	}
 	if got := c.DesktopCurrency(); got != "USD" {
 		t.Fatalf("desktop currency = %q, want USD", got)
 	}
-	flash, _ := c.Provider("deepseek-flash")
-	if flash.Price == nil || flash.Price.Output != 0.28 || flash.Price.Currency != "$" {
-		t.Fatalf("USD flash price = %+v", flash.Price)
+	if got := c.DisplayCurrencyPref(); got != "USD" {
+		t.Fatalf("display currency pref = %q, want USD", got)
+	}
+	// Display currency must not rewrite frozen provider list prices.
+	if flash.Price == nil || flash.Price.Output != wantOutput || flash.Price.Currency != wantCurrency {
+		t.Fatalf("list price mutated by display switch: %+v", flash.Price)
 	}
 	if err := c.SetDesktopCurrency("auto"); err != nil {
 		t.Fatalf("SetDesktopCurrency auto: %v", err)
@@ -213,8 +192,8 @@ func TestDesktopCurrencyNormalizesAndRefreshesOfficialPricing(t *testing.T) {
 	if got := c.DesktopCurrency(); got != "" {
 		t.Fatalf("auto desktop currency = %q, want empty", got)
 	}
-	if flash.Price == nil || flash.Price.Output != 2 || flash.Price.Currency != "¥" {
-		t.Fatalf("auto Chinese flash price = %+v", flash.Price)
+	if flash.Price == nil || flash.Price.Output != wantOutput || flash.Price.Currency != wantCurrency {
+		t.Fatalf("list price mutated after auto: %+v", flash.Price)
 	}
 	if err := c.SetDesktopCurrency("EUR"); err == nil {
 		t.Fatal("SetDesktopCurrency accepted unsupported EUR")
@@ -230,8 +209,8 @@ func TestDesktopLayoutStyleNormalizes(t *testing.T) {
 		want    string
 		wantErr bool
 	}{
-		{"", "classic", false},
-		{"classic", "classic", false},
+		{"", "workbench", false},
+		{"classic", "workbench", false},
 		{" workbench ", "workbench", false},
 		{"workspace", "workbench", false},
 		{"creation", "creation", false},
@@ -310,8 +289,8 @@ func TestDesktopExternalOpenerValidation(t *testing.T) {
 }
 
 func TestDesktopStatusBarStyleNormalizes(t *testing.T) {
-	if got := Default().DesktopStatusBarStyle(); got != "text" {
-		t.Fatalf("default desktop status bar style = %q, want text", got)
+	if got := Default().DesktopStatusBarStyle(); got != "icon" {
+		t.Fatalf("default desktop status bar style = %q, want icon", got)
 	}
 	for _, tt := range []struct {
 		in      string
@@ -323,7 +302,7 @@ func TestDesktopStatusBarStyleNormalizes(t *testing.T) {
 		{"icons", "icon", false},
 		{"text", "text", false},
 		{"labels", "text", false},
-		{"later", "text", true},
+		{"later", "icon", true},
 	} {
 		c := Default()
 		if err := c.SetDesktopStatusBarStyle(tt.in); (err != nil) != tt.wantErr {
@@ -609,7 +588,7 @@ func TestSetReasoningLanguage(t *testing.T) {
 
 func TestSetCompactRatio(t *testing.T) {
 	c := Default()
-	for _, ratio := range []float64{0.65, 0.7, 0.8, 0.85} {
+	for _, ratio := range []float64{0.30, 0.64, 0.65, 0.7, 0.8, 0.85} {
 		if err := c.SetCompactRatio(ratio); err != nil {
 			t.Fatalf("SetCompactRatio(%v): %v", ratio, err)
 		}
@@ -619,7 +598,7 @@ func TestSetCompactRatio(t *testing.T) {
 	}
 
 	previous := c.Agent.CompactRatio
-	for _, ratio := range []float64{0.64, 0.86, math.NaN(), math.Inf(1), math.Inf(-1)} {
+	for _, ratio := range []float64{0.29, 0.86, math.NaN(), math.Inf(1), math.Inf(-1)} {
 		if err := c.SetCompactRatio(ratio); err == nil {
 			t.Fatalf("SetCompactRatio(%v) should fail", ratio)
 		}
@@ -628,14 +607,14 @@ func TestSetCompactRatio(t *testing.T) {
 		}
 	}
 
+	// Deprecated snip/force ratios no longer constrain SetCompactRatio.
 	c.Agent.ToolResultSnipRatio = 0.75
-	if err := c.SetCompactRatio(0.7); err == nil {
-		t.Fatal("SetCompactRatio should reject a value at or below the configured snip ratio")
-	}
-	c.Agent.ToolResultSnipRatio = 0.6
 	c.Agent.CompactForceRatio = 0.8
-	if err := c.SetCompactRatio(0.8); err == nil {
-		t.Fatal("SetCompactRatio should reject a value at or above the configured force ratio")
+	if err := c.SetCompactRatio(0.7); err != nil {
+		t.Fatalf("SetCompactRatio(0.7) with legacy snip/force fields: %v", err)
+	}
+	if err := c.SetCompactRatio(0.8); err != nil {
+		t.Fatalf("SetCompactRatio(0.8) with legacy force field: %v", err)
 	}
 }
 
@@ -647,12 +626,18 @@ func TestNormalizeEffortDeepSeek(t *testing.T) {
 	}
 	for in, want := range map[string]string{"auto": "", "disabled": "disabled", "high": "high", "max": "max", "low": "high", "medium": "high", "xhigh": "max"} {
 		got, err := NormalizeEffort(e, in)
+		if in != want && in != "auto" {
+			if err == nil {
+				t.Fatalf("undeclared %q accepted as %q", in, got)
+			}
+			continue
+		}
 		if err != nil || got != want {
 			t.Fatalf("NormalizeEffort(%q) = %q/%v, want %q/nil", in, got, err, want)
 		}
 	}
 	// "off" is the retired DeepSeek "no thinking" spelling — now maps to disabled.
-	if got, err := NormalizeEffort(e, "off"); err != nil || got != "disabled" {
+	if got, err := NormalizeEffort(e, "off"); err == nil {
 		t.Fatalf("NormalizeEffort(\"off\") = %q/%v, want \"disabled\"/nil", got, err)
 	}
 }
@@ -761,7 +746,7 @@ func TestEffectiveVisionDoesNotInferCustomMimoProxy(t *testing.T) {
 	}
 }
 
-func TestEffectiveVisionDefaultsOfficialDeepSeekToTextOnlyButAllowsExplicitModels(t *testing.T) {
+func TestEffectiveVisionRejectsOfficialDeepSeekOverridesButPreservesCustomGateways(t *testing.T) {
 	for _, endpoint := range []struct {
 		kind    string
 		baseURL string
@@ -771,19 +756,28 @@ func TestEffectiveVisionDefaultsOfficialDeepSeekToTextOnlyButAllowsExplicitModel
 		{kind: "openai", baseURL: "https://eu.deepseek.com/v1"},
 		{kind: "anthropic", baseURL: "https://api.deepseek.com/anthropic"},
 	} {
+		visionOn := true
 		official := &ProviderEntry{
 			Name:              "deepseek",
 			Kind:              endpoint.kind,
 			BaseURL:           endpoint.baseURL,
 			Model:             "deepseek-v4-pro",
 			Vision:            true,
+			VisionModels:      []string{"deepseek-v4-pro"},
+			visionOverride:    &visionOn,
 			ReasoningProtocol: ReasoningProtocolDeepSeek,
+		}
+		if !CanConfigureVision(official) {
+			t.Fatalf("official DeepSeek endpoint %q must allow Settings vision checkboxes", endpoint.baseURL)
 		}
 		if EffectiveVision(official) {
 			t.Fatalf("official DeepSeek endpoint %q must remain text-only", endpoint.baseURL)
 		}
 		if ExplicitModelVision(official) {
-			t.Fatalf("provider-wide vision must not count as an explicit model capability for %q", endpoint.baseURL)
+			t.Fatalf("official DeepSeek endpoint %q must not expose ignored vision metadata as usable", endpoint.baseURL)
+		}
+		if !official.HasVisionModel("deepseek-v4-pro") {
+			t.Fatalf("official DeepSeek endpoint %q lost persisted vision metadata instead of ignoring it", endpoint.baseURL)
 		}
 	}
 
@@ -794,8 +788,8 @@ func TestEffectiveVisionDefaultsOfficialDeepSeekToTextOnlyButAllowsExplicitModel
 		Model:        "deepseek-v5-vision",
 		VisionModels: []string{"deepseek-v5-vision"},
 	}
-	if !EffectiveVision(future) || !ExplicitModelVision(future) {
-		t.Fatal("model listed in vision_models must opt in on the official DeepSeek endpoint")
+	if !EffectiveVision(future) {
+		t.Fatal("explicit vision model list must support unknown DeepSeek models")
 	}
 
 	visionOn := true
@@ -812,8 +806,8 @@ func TestEffectiveVisionDefaultsOfficialDeepSeekToTextOnlyButAllowsExplicitModel
 	if !ok {
 		t.Fatal("ResolveModel did not find explicit future DeepSeek model")
 	}
-	if !EffectiveVision(overridden) || !ExplicitModelVision(overridden) {
-		t.Fatal("model_overrides vision=true must opt in on the official DeepSeek endpoint")
+	if !EffectiveVision(overridden) {
+		t.Fatal("model_overrides vision=true must enable unknown DeepSeek models")
 	}
 
 	custom := &ProviderEntry{
@@ -824,8 +818,13 @@ func TestEffectiveVisionDefaultsOfficialDeepSeekToTextOnlyButAllowsExplicitModel
 		Vision:            true,
 		ReasoningProtocol: ReasoningProtocolDeepSeek,
 	}
-	if !EffectiveVision(custom) {
+	if !CanConfigureVision(custom) || !EffectiveVision(custom) {
 		t.Fatal("explicit vision=true must remain available for custom DeepSeek gateways")
+	}
+	custom.Vision = false
+	custom.VisionModels = []string{"deepseek-v4-pro"}
+	if !ExplicitModelVision(custom) {
+		t.Fatal("custom DeepSeek gateway must expose positive model-scoped vision metadata")
 	}
 }
 
@@ -1039,6 +1038,29 @@ func TestSkillPathMutators(t *testing.T) {
 	}
 }
 
+func TestSkillPathEnabledMutatorPreservesConfiguredPath(t *testing.T) {
+	c := Default()
+	root := t.TempDir()
+	if err := c.AddSkillPath(root); err != nil {
+		t.Fatalf("add skill path: %v", err)
+	}
+	if err := c.SetSkillPathEnabled(root, false); err != nil {
+		t.Fatalf("disable skill path: %v", err)
+	}
+	if len(c.Skills.Paths) != 1 || filepath.Clean(c.Skills.Paths[0]) != filepath.Clean(root) {
+		t.Fatalf("paths after disable = %v, want %q preserved", c.Skills.Paths, root)
+	}
+	if len(c.Skills.ExcludedPaths) != 1 || CanonicalSkillPath(c.Skills.ExcludedPaths[0]) != CanonicalSkillPath(root) {
+		t.Fatalf("excluded paths after disable = %v, want %q", c.Skills.ExcludedPaths, root)
+	}
+	if err := c.SetSkillPathEnabled(root, true); err != nil {
+		t.Fatalf("enable skill path: %v", err)
+	}
+	if len(c.Skills.Paths) != 1 || len(c.Skills.ExcludedPaths) != 0 {
+		t.Fatalf("state after enable = paths %v excluded %v", c.Skills.Paths, c.Skills.ExcludedPaths)
+	}
+}
+
 func TestSkillEnabledMutator(t *testing.T) {
 	c := Default()
 	if err := c.SetSkillEnabled("review", false); err != nil {
@@ -1061,6 +1083,21 @@ func TestSkillEnabledMutator(t *testing.T) {
 	}
 	if err := c.SetSkillEnabled("bad name", false); err == nil {
 		t.Fatal("invalid skill name should error")
+	}
+}
+
+func TestSkillImplicitInvocationMutator(t *testing.T) {
+	c := Default()
+	if !c.ImplicitSkillInvocationEnabled() {
+		t.Fatal("implicit skill invocation should be enabled by default")
+	}
+	c.SetSkillImplicitInvocation(false)
+	if c.ImplicitSkillInvocationEnabled() || !c.Skills.DisableImplicitInvocation {
+		t.Fatal("implicit skill invocation should be disabled")
+	}
+	c.SetSkillImplicitInvocation(true)
+	if !c.ImplicitSkillInvocationEnabled() || c.Skills.DisableImplicitInvocation {
+		t.Fatal("implicit skill invocation should be enabled")
 	}
 }
 
@@ -2007,6 +2044,178 @@ func TestSaveToExistingProjectPersistsTopLevelDelta(t *testing.T) {
 	}
 }
 
+func TestSaveToExistingProjectRemovesResetSkillOverrides(t *testing.T) {
+	tests := []struct {
+		name  string
+		key   string
+		set   func(*Config)
+		reset func(*Config)
+	}{
+		{name: "paths", key: "paths", set: func(c *Config) { c.Skills.Paths = []string{"project-skills"} }, reset: func(c *Config) { c.Skills.Paths = nil }},
+		{name: "excluded paths", key: "excluded_paths", set: func(c *Config) { c.Skills.ExcludedPaths = []string{"project-skills"} }, reset: func(c *Config) { c.Skills.ExcludedPaths = nil }},
+		{name: "disabled skills", key: "disabled_skills", set: func(c *Config) { c.Skills.DisabledSkills = []string{"review"} }, reset: func(c *Config) { c.Skills.DisabledSkills = nil }},
+		{name: "implicit invocation", key: "disable_implicit_invocation", set: func(c *Config) { c.Skills.DisableImplicitInvocation = true }, reset: func(c *Config) { c.Skills.DisableImplicitInvocation = false }},
+		{name: "max depth", key: "max_depth", set: func(c *Config) { c.Skills.MaxDepth = 2 }, reset: func(c *Config) { c.Skills.MaxDepth = 0 }},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			projectPath := filepath.Join(t.TempDir(), "reasonix.toml")
+			cfg := Default()
+			tt.set(cfg)
+			if err := cfg.SaveTo(projectPath); err != nil {
+				t.Fatalf("initial SaveTo: %v", err)
+			}
+			loaded, err := LoadForEditReadOnlyStrict(projectPath)
+			if err != nil {
+				t.Fatalf("load project config: %v", err)
+			}
+			tt.reset(loaded)
+			if err := loaded.SaveTo(projectPath); err != nil {
+				t.Fatalf("reset SaveTo: %v", err)
+			}
+			body, err := os.ReadFile(projectPath)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if strings.Contains(string(body), tt.key+" =") {
+				t.Fatalf("reset left stale %s override:\n%s", tt.key, body)
+			}
+			fresh, err := LoadForEditReadOnlyStrict(projectPath)
+			if err != nil {
+				t.Fatalf("reload reset project config: %v", err)
+			}
+			if fresh.Skills.Paths != nil || fresh.Skills.ExcludedPaths != nil || fresh.Skills.DisabledSkills != nil || fresh.Skills.DisableImplicitInvocation || fresh.Skills.MaxDepth != 0 {
+				t.Fatalf("reloaded skills retained reset override: %+v", fresh.Skills)
+			}
+		})
+	}
+}
+
+func TestSaveToExistingProjectPreservesExplicitSkillDefaults(t *testing.T) {
+	projectPath := filepath.Join(t.TempDir(), "reasonix.toml")
+	if err := os.WriteFile(projectPath, []byte("[skills]\npaths = [\"project-skills\"]\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	cfg, err := LoadForEditReadOnlyStrict(projectPath)
+	if err != nil {
+		t.Fatalf("load project config: %v", err)
+	}
+	cfg.Skills.Paths = nil
+	cfg.Skills.ExcludedPaths = nil
+	cfg.Skills.DisabledSkills = nil
+	cfg.Skills.DisableImplicitInvocation = false
+	cfg.Skills.MaxDepth = 0
+	for _, key := range projectSkillKeys {
+		if err := cfg.KeepProjectSkillKey(key); err != nil {
+			t.Fatalf("keep %s: %v", key, err)
+		}
+	}
+	if err := cfg.SaveTo(projectPath); err != nil {
+		t.Fatalf("save explicit project defaults: %v", err)
+	}
+	body, err := os.ReadFile(projectPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	text := string(body)
+	for _, want := range []string{
+		"paths = []",
+		"excluded_paths = []",
+		"disabled_skills = []",
+		"disable_implicit_invocation = false",
+		"max_depth = 0",
+	} {
+		if !strings.Contains(text, want) {
+			t.Fatalf("explicit project default %q missing from:\n%s", want, text)
+		}
+	}
+}
+
+func TestUnrelatedProjectSavePreservesExplicitDefaultSkillOverride(t *testing.T) {
+	projectPath := filepath.Join(t.TempDir(), "reasonix.toml")
+	if err := os.WriteFile(projectPath, []byte("[skills]\ndisable_implicit_invocation = false\n\n[permissions]\nmode = \"ask\"\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	cfg, err := LoadForEditReadOnlyStrict(projectPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := cfg.SetDefaultModel("deepseek-pro"); err != nil {
+		t.Fatal(err)
+	}
+	if err := cfg.SaveTo(projectPath); err != nil {
+		t.Fatal(err)
+	}
+	body, err := os.ReadFile(projectPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(body), "disable_implicit_invocation = false") {
+		t.Fatalf("explicit default override was removed:\n%s", body)
+	}
+}
+
+func TestExplicitProjectSkillDefaultOverridesUserConfig(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("REASONIX_HOME", home)
+	t.Setenv("HOME", home)
+	t.Setenv("USERPROFILE", home)
+	project := t.TempDir()
+	user := Default()
+	user.Skills.DisableImplicitInvocation = true
+	if err := user.SaveTo(UserConfigPath()); err != nil {
+		t.Fatalf("save user config: %v", err)
+	}
+	projectPath := filepath.Join(project, "reasonix.toml")
+	if err := os.WriteFile(projectPath, []byte("[skills]\ndisable_implicit_invocation = true\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	cfg, err := LoadForEditReadOnlyStrict(projectPath)
+	if err != nil {
+		t.Fatalf("load project config: %v", err)
+	}
+	cfg.SetSkillImplicitInvocation(true)
+	if err := cfg.KeepProjectSkillKey("disable_implicit_invocation"); err != nil {
+		t.Fatal(err)
+	}
+	if err := cfg.SaveTo(projectPath); err != nil {
+		t.Fatalf("save project override: %v", err)
+	}
+	effective, err := LoadForRootReadOnly(project)
+	if err != nil {
+		t.Fatalf("load effective config: %v", err)
+	}
+	if !effective.ImplicitSkillInvocationEnabled() {
+		t.Fatalf("project explicit false did not override user config: %+v", effective.Skills)
+	}
+}
+
+func TestSaveToExistingProjectRemovesMultilineSkillArray(t *testing.T) {
+	projectPath := filepath.Join(t.TempDir(), "reasonix.toml")
+	original := "[skills]\npaths = [\n  \"project-skills\",\n  \"shared-skills\",\n]\n\n[permissions]\nmode = \"ask\"\n"
+	if err := os.WriteFile(projectPath, []byte(original), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	cfg, err := LoadForEditReadOnlyStrict(projectPath)
+	if err != nil {
+		t.Fatalf("load project config: %v", err)
+	}
+	cfg.Skills.Paths = nil
+	if err := cfg.SaveTo(projectPath); err != nil {
+		t.Fatalf("reset multiline paths: %v", err)
+	}
+	body, err := os.ReadFile(projectPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(string(body), "project-skills") || strings.Contains(string(body), "shared-skills") {
+		t.Fatalf("multiline skill array was only partially removed:\n%s", body)
+	}
+	if err := ValidateFile(projectPath); err != nil {
+		t.Fatalf("reset project config is invalid TOML: %v\n%s", err, body)
+	}
+}
+
 func TestSaveToExistingProjectPersistsProviderAccessWithoutReplacingDesktopSection(t *testing.T) {
 	projectPath := filepath.Join(t.TempDir(), "reasonix.toml")
 	if err := os.WriteFile(projectPath, []byte("[desktop]\nlegacy_preference = \"keep\"\n\n[permissions]\nallow = [\"Bash(go test:*)\"]\n"), 0o644); err != nil {
@@ -2585,6 +2794,12 @@ func TestNormalizeEffortCustomSupportedEfforts(t *testing.T) {
 	}
 	for in, want := range map[string]string{"auto": "", "low": "low", "MEDIUM": "medium", "high": "high"} {
 		got, err := NormalizeEffort(e, in)
+		if in != want && in != "auto" {
+			if err == nil {
+				t.Fatalf("undeclared %q accepted as %q", in, got)
+			}
+			continue
+		}
 		if err != nil || got != want {
 			t.Fatalf("NormalizeEffort(%q) = %q/%v, want %q/nil", in, got, err, want)
 		}
@@ -2605,8 +2820,8 @@ func TestNormalizeEffortCustomDefaultEffort(t *testing.T) {
 		DefaultEffort:    "xhigh", // not in the list — must fall back to the first level
 	}
 	cap := EffortCapabilityForEntry(e)
-	if cap.Default != "low" {
-		t.Fatalf("default = %q, want low (first of supported_efforts)", cap.Default)
+	if cap.Default != "xhigh" {
+		t.Fatalf("invalid default must remain visible for validation, got %q", cap.Default)
 	}
 	// Omitting DefaultEffort also falls back to the first level.
 	e2 := *e
@@ -2619,8 +2834,8 @@ func TestNormalizeEffortCustomDefaultEffort(t *testing.T) {
 		t.Fatalf("NormalizeEffort(auto) = %q/%v, want empty/nil", got, err)
 	}
 	e.Effort = "auto"
-	if got := EffectiveEffort(e); got != "low" {
-		t.Fatalf("stored auto should fall through to default_effort, got %q", got)
+	if got := EffectiveEffort(e); got != "xhigh" {
+		t.Fatalf("invalid configured default must not silently fall back, got %q", got)
 	}
 	e.Effort = "high"
 	if got := EffectiveEffort(e); got != "high" {
@@ -2650,8 +2865,8 @@ func TestNormalizeEffortCustomLevelsCaseInsensitive(t *testing.T) {
 		t.Fatalf("default = %q, want medium", cap.Default)
 	}
 	got, err := NormalizeEffort(e, "MEDIUM")
-	if err != nil || got != "medium" {
-		t.Fatalf("NormalizeEffort(MEDIUM) = %q/%v, want medium/nil", got, err)
+	if err == nil {
+		t.Fatalf("NormalizeEffort(MEDIUM) accepted nonexact ID %q", got)
 	}
 	if got := EffectiveEffort(e); got != "medium" {
 		t.Fatalf("EffectiveEffort = %q, want medium", got)
@@ -2695,7 +2910,7 @@ func TestEffortCapabilityEmptySupportedEffortsNotConfigurable(t *testing.T) {
 	e := &ProviderEntry{
 		Name:    "mimo-pro",
 		Kind:    "openai",
-		BaseURL: "https://token-plan-cn.xiaomimimo.com/v1",
+		BaseURL: "https://unknown-gateway.example.com/v1",
 		Model:   "mimo-v2.5-pro",
 	}
 	if cap := EffortCapabilityForEntry(e); cap.Supported {

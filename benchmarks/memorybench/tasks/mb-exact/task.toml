@@ -1,0 +1,5 @@
+prompt = "Write this project's canonical fast-check command (the exact command line, nothing else) into answer.txt."
+class = "exact"
+max_steps = 8
+timeout_sec = 180
+memory_markers = ["MEMKEY-EXACT7Q"]

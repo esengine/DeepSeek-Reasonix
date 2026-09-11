@@ -88,10 +88,7 @@ func (t *thinkSplitter) drainPassthrough() string {
 // prefix of marker — the tail to hold back in case the rest of the tag arrives
 // in the next delta.
 func markerSuffixLen(s, marker string) int {
-	max := len(marker) - 1
-	if max > len(s) {
-		max = len(s)
-	}
+	max := min(len(marker)-1, len(s))
 	for n := max; n > 0; n-- {
 		if strings.HasPrefix(marker, s[len(s)-n:]) {
 			return n

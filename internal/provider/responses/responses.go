@@ -13,6 +13,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"maps"
 	"net/http"
 	"strings"
 	"sync"
@@ -21,59 +22,42 @@ import (
 
 	"reasonix/internal/netclient"
 	"reasonix/internal/provider"
+	"reasonix/internal/provider/openai"
 )
 
 const (
-	defaultStreamIdleTimeout     = 120 * time.Second
+	defaultStreamIdleTimeout     = 300 * time.Second
 	maxReplayableSearchItemBytes = 512 * 1024
 )
 
 func init() {
+	provider.RegisterReasoning("responses", ReasoningForConfig)
+	provider.RegisterReasoning("dashscope-responses", ReasoningForConfig)
 	provider.Register("responses", newFromConfig)
 	provider.Register("dashscope-responses", newFromConfig)
 }
 
-func newFromConfig(cfg provider.Config) (provider.Provider, error) {
-	effort, _ := cfg.Extra["effort"].(string)
-	mode, _ := cfg.Extra["mode"].(string)
-	webSearch, _ := cfg.Extra["web_search"].(bool)
-	var stateful *bool
-	switch value := cfg.Extra["stateful"].(type) {
-	case bool:
-		stateful = &value
-	case *bool:
-		stateful = value
-	}
-	proxy, _ := cfg.Extra["proxy_spec"].(netclient.ProxySpec)
-	keyEnv, _ := cfg.Extra["api_key_env"].(string)
-	keySource, _ := cfg.Extra["api_key_source"].(string)
-	maxOutputTokens, _ := cfg.Extra["max_output_tokens"].(int)
-	return New(Config{
-		Name: cfg.Name, APIKey: cfg.APIKey, BaseURL: cfg.BaseURL, Model: cfg.Model,
-		Effort: effort, Mode: mode, Stateful: stateful, WebSearch: webSearch, Proxy: proxy,
-		KeyEnv: keyEnv, KeySource: keySource, MaxOutputTokens: maxOutputTokens,
-		// Extra 原样透传：vision 等能力开关由调用方（boot/CLI）写入
-		// cfg.Extra，factory 若丢弃则 New() 读不到（评审 #7234 第 3 点）。
-		Extra: cfg.Extra,
-	}), nil
-}
-
 // Config holds Responses API provider settings.
 type Config struct {
-	Name      string
-	APIKey    string
-	BaseURL   string
-	Model     string
-	Effort    string
-	Mode      string // stateful | stateless; empty uses vendor detection.
-	Stateful  *bool  // legacy form of Mode; nil preserves vendor detection.
-	WebSearch bool   // expose the provider-executed web_search tool.
-	Proxy     netclient.ProxySpec
-	KeyEnv    string
-	KeySource string
-	// MaxOutputTokens is the total provider output budget. Zero enables Reasonix's
-	// 32K reasoning safety default on official DeepSeek and otherwise omits the
-	// field; thinking-disabled DeepSeek requests and negative values omit it.
+	HTTPClient  *http.Client
+	Name        string
+	DisplayName string
+	Protocol    string
+	APIKey      string
+	BaseURL     string
+	Model       string
+	ModelInfo   *provider.ModelInfo
+	Effort      string
+	Mode        string // stateful | stateless; empty uses vendor detection.
+	Stateful    *bool  // legacy form of Mode; nil preserves vendor detection.
+	WebSearch   bool   // expose the provider-executed web_search tool.
+	Proxy       netclient.ProxySpec
+	KeyEnv      string
+	KeySource   string
+	RequestURL  string // optional exact Responses request URL; empty derives from BaseURL
+	// MaxOutputTokens is the total provider output budget. Zero omits the field
+	// on official DeepSeek (server 384K ceiling) and unknown endpoints; MiMo
+	// still applies its 16K/32K ladder. Negative values omit it.
 	MaxOutputTokens int
 	// SessionCache controls DashScope's opt-in header. The header is never sent
 	// to non-DashScope endpoints even when this value is true.
@@ -104,17 +88,22 @@ func (c Config) mode() string {
 // deepseek (incl. eu.deepseek.com) / mimo via exact-host matching.
 
 type client struct {
-	name, apiKey, keyEnv, keySource string
-	baseURL, model, effort          string
-	vendor, mode                    string
-	caps                            vendorCapabilities
-	sessionCache                    bool
-	webSearch                       bool
-	maxOutputTokens                 int
-	vision                          bool // model accepts image input; embed Images as input_image parts
-	http                            *http.Client
-	idleTimeout                     time.Duration
-	authed                          atomic.Bool
+	identityHeaders                    http.Header
+	reasoning                          provider.ReasoningCapability
+	name                               string
+	identity                           provider.RequestIdentity
+	apiKey, keyEnv, keySource          string
+	baseURL, requestURL, model, effort string
+	vendor, mode                       string
+	caps                               vendorCapabilities
+	sessionCache                       bool
+	search                             provider.SearchPolicy
+	maxOutputTokens                    int
+	vision                             bool // model accepts image input; embed Images as input_image parts
+	modelInfo                          provider.ModelInfo
+	http                               *http.Client
+	idleTimeout                        time.Duration
+	authed                             atomic.Bool
 
 	mu                   sync.Mutex
 	lastResponseID       string
@@ -123,15 +112,28 @@ type client struct {
 
 // New creates a Responses API provider.
 func New(cfg Config) provider.Provider {
+	cfg.Extra = maps.Clone(cfg.Extra)
+	if cfg.Extra == nil {
+		cfg.Extra = map[string]any{}
+	}
+	if cfg.RequestURL != "" {
+		cfg.Extra["request_url"] = cfg.RequestURL
+	}
+	resolved := provider.ApplyOpenCodeGoContract("responses", provider.Config{BaseURL: cfg.BaseURL, Model: cfg.Model, Extra: cfg.Extra})
+	cfg.Extra = resolved.Extra
 	vendor := DetectVendor(cfg.BaseURL)
 	cap := capabilitiesFor(vendor)
+	// Explicit replay contracts apply to compatible gateways as well as exact
+	// vendor hosts. Do not inherit endpoint defaults, headers, or output limits.
+	if protocol, _ := cfg.Extra["reasoning_protocol"].(string); strings.EqualFold(strings.TrimSpace(protocol), "deepseek") || strings.EqualFold(strings.TrimSpace(protocol), "mimo") {
+		cap.toolCallReasoning = true
+	}
 	maxOutputTokens := cfg.MaxOutputTokens
-	// 默认输出预算从 vendor 表取（deepseek 32K / mimo 64K）——消除硬编码
-	// 常量分叉（review：responses.go 硬编码与 caps.defaultMaxOutputTokens
-	// 职责重叠）。条件保留：thinking-disabled 的 deepseek 请求不设自动
-	// 预算（与 openai.go 一致——服务端默认即可；测试断言该行为）。
-	if maxOutputTokens == 0 && cap.defaultMaxOutputTokens > 0 &&
-		!(vendor == "deepseek" && responsesReasoningDisabled(cfg.Effort)) {
+	// Official DeepSeek omits max_output_tokens (server 384K). MiMo still uses
+	// the 16K/32K effort ladder. Compact_ratio is independent.
+	if maxOutputTokens == 0 && vendor == "mimo" {
+		maxOutputTokens = responsesAutoOutputBudget(vendor, cfg.Effort)
+	} else if maxOutputTokens == 0 && vendor != "deepseek" && cap.defaultMaxOutputTokens > 0 {
 		maxOutputTokens = cap.defaultMaxOutputTokens
 	}
 	sessionCache := cap.sessionCacheHeader
@@ -139,20 +141,62 @@ func New(cfg Config) provider.Provider {
 		sessionCache = *cfg.SessionCache
 	}
 	vision, _ := cfg.Extra["vision"].(bool)
-	httpClient := &http.Client{Timeout: 300 * time.Second}
+	if cfg.ModelInfo != nil {
+		vision = cfg.ModelInfo.SupportsInput(provider.ModalityImage)
+	}
+	// Official DeepSeek image input is pinned to one SKU. Ignore metadata or
+	// Extra["vision"] for Flash/Pro.
+	vision = openai.DeepSeekImageInputAllowed(vendor == "deepseek", cfg.RequestURL, cfg.Model, cfg.ModelInfo != nil, vision)
+	httpClient := &http.Client{}
 	if built, err := netclient.NewHTTPClient(cfg.Proxy, netclient.TransportOptions{
 		DialTimeout: 30 * time.Second, KeepAlive: 30 * time.Second,
-		TLSHandshakeTimeout: 15 * time.Second, ResponseHeaderTimeout: 120 * time.Second,
+		TLSHandshakeTimeout: 15 * time.Second, ResponseHeaderTimeout: 300 * time.Second,
 	}); err == nil {
 		httpClient = built
 	}
-	return &client{
-		name: cfg.Name, apiKey: cfg.APIKey, keyEnv: cfg.KeyEnv, keySource: cfg.KeySource,
-		baseURL: strings.TrimRight(cfg.BaseURL, "/"), model: cfg.Model, effort: cfg.Effort,
-		vendor: vendor, caps: cap, mode: cfg.mode(), sessionCache: sessionCache, webSearch: cfg.WebSearch, maxOutputTokens: maxOutputTokens,
-		vision: vision,
-		http:   httpClient, idleTimeout: defaultStreamIdleTimeout,
+	if cfg.HTTPClient != nil {
+		httpClient = cfg.HTTPClient
 	}
+	baseURL := strings.TrimRight(strings.TrimSpace(cfg.BaseURL), "/")
+	requestURL := strings.TrimSpace(cfg.RequestURL)
+	if requestURL == "" {
+		requestURL = baseURL + "/responses"
+	}
+	modelInfo := provider.ModelInfo{ID: cfg.Model, InputModalities: []provider.ModelModality{provider.ModalityText}}
+	if cfg.ModelInfo != nil {
+		modelInfo = *cfg.ModelInfo
+		modelInfo.ID = cfg.Model
+	}
+	clientWebSearch, _ := cfg.Extra["client_web_search"].(bool)
+	if reject, _ := cfg.Extra["reject_redirects"].(bool); reject {
+		httpClient.CheckRedirect = func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }
+	}
+	if vision {
+		modelInfo.InputModalities = []provider.ModelModality{provider.ModalityText, provider.ModalityImage}
+	} else if modelInfo.SupportsInput(provider.ModalityImage) {
+		modelInfo.InputModalities = []provider.ModelModality{provider.ModalityText}
+	}
+	return &client{
+		identityHeaders: provider.NewClientIdentityHeaders(),
+		name:            cfg.Name,
+		identity:        provider.RequestIdentity{Provider: cfg.Name, DisplayName: cfg.DisplayName, Protocol: cfg.Protocol},
+		apiKey:          cfg.APIKey, keyEnv: cfg.KeyEnv, keySource: cfg.KeySource,
+		reasoning: ReasoningForConfig(provider.Config{BaseURL: cfg.BaseURL, Model: cfg.Model, Extra: cfg.Extra}),
+		baseURL:   baseURL, requestURL: requestURL, model: cfg.Model, effort: cfg.Effort,
+		vendor: vendor, caps: cap, mode: cfg.mode(), sessionCache: sessionCache, search: provider.SearchPolicy{NativeEnabled: cfg.WebSearch, ClientEnabled: clientWebSearch}, maxOutputTokens: maxOutputTokens,
+		vision:    vision,
+		modelInfo: modelInfo,
+		http:      httpClient, idleTimeout: defaultStreamIdleTimeout,
+	}
+}
+
+func (c *client) ModelInfo() provider.ModelInfo {
+	if c == nil {
+		return provider.ModelInfo{}
+	}
+	info := c.modelInfo
+	info.InputModalities = append([]provider.ModelModality(nil), info.InputModalities...)
+	return info
 }
 
 func responsesReasoningDisabled(effort string) bool {
@@ -164,49 +208,32 @@ func responsesReasoningDisabled(effort string) bool {
 	}
 }
 
+// responsesAutoOutputBudget is the MiMo (and similar) 16K/32K ladder.
+// Official DeepSeek must not call this; it omits max_output_tokens instead.
+func responsesAutoOutputBudget(vendor, effort string) int {
+	if responsesReasoningDisabled(effort) {
+		return provider.AutoOutputBudget(false, effort)
+	}
+	e := strings.ToLower(strings.TrimSpace(effort))
+	if vendor == "deepseek" && (e == "" || e == "auto") {
+		e = "high"
+	}
+	return provider.AutoOutputBudget(true, e)
+}
+
 func (c *client) Name() string { return c.name }
 
-// RequiresToolCallReasoning tells the agent to preserve stateless vendors'
-// reasoning on assistant tool-call turns so the follow-up can replay it.
-// DeepSeek and MiMo document this requirement for multi-turn tool calls.
-func (c *client) RequiresToolCallReasoning() bool {
-	return c.caps.toolCallReasoning
+func (c *client) NativeToolSearchAvailable() bool {
+	return c != nil && provider.IsFirstPartyOpenAI(c.baseURL) && nativeToolSearchModel(c.model)
 }
 
-func (c *client) MissingToolCallReasoningWarningIdentity() string {
-	if c == nil {
-		return ""
-	}
-	return strings.Join([]string{
-		"responses", strings.TrimSpace(c.name), strings.TrimSpace(c.baseURL),
-		strings.TrimSpace(c.model), strings.TrimSpace(c.vendor), strings.TrimSpace(c.mode), strings.TrimSpace(c.effort),
-	}, "\x00")
-}
-
-// WarnOnMissingToolCallReasoning reports a tool_calls turn that arrived
-// without reasoning only for vendors whose endpoint reliably emits it.
-// DeepSeek's official API emits tool-call reasoning for its pro-tier models,
-// so a missing chain-of-thought there is a real degradation worth one warning.
-// MiMo documents reasoning alongside tool calls but does not guarantee it on
-// every round (observed: mimo-v2.5-pro tool-call turn with empty reasoning),
-// so a missing chain-of-thought is endpoint-conditional, not a degradation
-// signal — silence the warning. Capability-driven (review #7234):
-// toolCallReasoning=false vendors (DashScope) never warn — no round-trip
-// contract; singleSegmentReasoning=true vendors (MiMo) never warn — their
-// tool-call thinking is a single optional segment. Only multi-segment
-// thinking vendors that require replay (DeepSeek) warn, scoped to non-flash.
-func (c *client) WarnOnMissingToolCallReasoning() bool {
-	if !c.caps.toolCallReasoning || c.caps.singleSegmentReasoning {
-		return false
-	}
-	model := strings.ToLower(strings.TrimSpace(c.model))
-	// Flash-tier DeepSeek models do not emit tool-call reasoning (same carve
-	// as openai.go expectsDeepSeekToolCallReasoning).
-	return !strings.Contains(model, "flash")
+func nativeToolSearchModel(model string) bool {
+	model = strings.ToLower(strings.TrimSpace(model))
+	return strings.HasPrefix(model, "gpt-5.4") || strings.HasPrefix(model, "gpt-5.5") || strings.HasPrefix(model, "gpt-5.6")
 }
 
 func (c *client) sendOpts() provider.SendOptions {
-	return provider.SendOptions{Provider: c.name, KeyEnv: c.keyEnv, KeySource: c.keySource, KeyPresent: c.apiKey != "", RetryAuth: c.authed.Load()}
+	return provider.SendOptions{Provider: c.name, ProviderDisplayName: c.identity.DisplayName, Protocol: c.identity.Protocol, KeyEnv: c.keyEnv, KeySource: c.keySource, KeyPresent: c.apiKey != "", RetryAuth: c.authed.Load()}
 }
 
 // ResetContext drops stateful continuation metadata. Full-input stateless mode
@@ -219,6 +246,14 @@ func (c *client) ResetContext() {
 }
 
 func (c *client) Stream(ctx context.Context, req provider.Request) (<-chan provider.Chunk, error) {
+	if c.effort != "auto" && c.effort != "off" {
+		if err := c.reasoning.Validate(c.model, c.effort); err != nil {
+			return nil, err
+		}
+	}
+	if err := c.reasoning.Validate(c.model, req.EffortOverride); err != nil {
+		return nil, err
+	}
 	requestCtx := provider.WithRequestAttemptCounter(ctx)
 	body, usedPrevious, wireMessages := c.buildRequestBody(req)
 	resp, err := c.send(requestCtx, body)
@@ -244,12 +279,13 @@ func (c *client) send(ctx context.Context, body map[string]any) (*http.Response,
 		return nil, fmt.Errorf("responses: marshal request: %w", err)
 	}
 	newRequest := func(ctx context.Context) (*http.Request, error) {
-		req, err := http.NewRequestWithContext(ctx, http.MethodPost, c.baseURL+"/responses", bytes.NewReader(payload))
+		req, err := http.NewRequestWithContext(ctx, http.MethodPost, c.requestURL, bytes.NewReader(payload))
 		if err != nil {
 			return nil, err
 		}
 		req.Header.Set("Content-Type", "application/json")
 		req.Header.Set("Authorization", "Bearer "+c.apiKey)
+		provider.ApplyOpenCodeGoHeaders(req, c.baseURL, c.identityHeaders)
 		if c.caps.sessionCacheHeader && c.sessionCache {
 			req.Header.Set("x-dashscope-session-cache", "enable")
 		}
@@ -273,7 +309,11 @@ func (c *client) buildRequestBody(req provider.Request) (map[string]any, bool, [
 	messages := provider.SanitizeToolPairing(provider.ModelMessages(req.Messages))
 	body := map[string]any{"model": c.model, "stream": true}
 
-	effort := strings.ToLower(strings.TrimSpace(c.effort))
+	effort := c.effort
+	if req.EffortOverride != "" {
+		effort = req.EffortOverride
+	}
+
 	switch effort {
 	case "auto":
 		effort = ""
@@ -287,12 +327,10 @@ func (c *client) buildRequestBody(req provider.Request) (map[string]any, bool, [
 	if maxOutputTokens == 0 {
 		maxOutputTokens = c.maxOutputTokens
 	}
-	if maxOutputTokens == 0 && c.caps.defaultMaxOutputTokens > 0 {
-		// 与 New() 构造期默认同条件：thinking-disabled 的 deepseek 请求
-		// 不设自动预算（服务端默认即可——测试断言该行为）。
-		if !(c.vendor == "deepseek" && responsesReasoningDisabled(c.effort)) {
-			maxOutputTokens = c.caps.defaultMaxOutputTokens
-		}
+	if maxOutputTokens == 0 && c.vendor == "mimo" {
+		maxOutputTokens = responsesAutoOutputBudget(c.vendor, c.effort)
+	} else if maxOutputTokens == 0 && c.vendor != "deepseek" && c.caps.defaultMaxOutputTokens > 0 {
+		maxOutputTokens = c.caps.defaultMaxOutputTokens
 	}
 	if maxOutputTokens > 0 {
 		body["max_output_tokens"] = maxOutputTokens
@@ -308,24 +346,8 @@ func (c *client) buildRequestBody(req provider.Request) (map[string]any, bool, [
 	if req.Temperature != nil && !c.caps.ignoresTemperature {
 		body["temperature"] = *req.Temperature
 	}
-	if c.webSearch || len(req.Tools) > 0 {
-		tools := make([]map[string]any, 0, len(req.Tools)+1)
-		// Keep the server tool first and stable across turns. DeepSeek executes
-		// this tool itself; ordinary Reasonix tools remain function entries.
-		if c.webSearch {
-			tools = append(tools, map[string]any{"type": "web_search"})
-		}
-		for _, tool := range req.Tools {
-			parameters := tool.Parameters
-			if len(parameters) == 0 {
-				parameters = provider.CanonicalizeSchema(nil)
-			}
-			tools = append(tools, map[string]any{
-				"type": "function", "name": tool.Name, "description": tool.Description,
-				"parameters": json.RawMessage(parameters),
-			})
-		}
-		body["tools"] = tools
+	if c.search.NativeEnabled || len(req.Tools) > 0 {
+		body["tools"] = encodeResponsesTools(c, req)
 	}
 	instructions, rest := splitInstructions(messages)
 	if instructions != "" {
@@ -335,16 +357,25 @@ func (c *client) buildRequestBody(req provider.Request) (map[string]any, bool, [
 	c.mu.Lock()
 	previousID, expectedDigest := c.lastResponseID, c.expectedPrefixDigest
 	c.mu.Unlock()
-	if c.mode == "stateful" && previousID != "" && len(messages) > 0 &&
-		messages[len(messages)-1].Role == provider.RoleUser &&
-		c.conversationDigest(messages[:len(messages)-1]) == expectedDigest {
+	if c.canUseStatefulContinuation(messages, previousID, expectedDigest) {
 		body["input"] = messages[len(messages)-1].Content
 		body["previous_response_id"] = previousID
 		return body, true, messages
 	}
 
-	body["input"] = messagesToInput(rest, c.vision, c.vendor == "deepseek", c.caps.summaryRequired)
+	body["input"] = messagesToInput(rest, c.vision, c.search.NativeEnabled, c.caps.summaryRequired)
 	return body, false, messages
+}
+
+func inputImagePart(ref string) map[string]string {
+	switch provider.ClassifyImage(ref) {
+	case provider.ImageFileID:
+		return map[string]string{"type": "input_image", "file_id": ref}
+	case provider.ImageDataURL, provider.ImageHTTPURL:
+		return map[string]string{"type": "input_image", "image_url": ref}
+	default:
+		return nil
+	}
 }
 
 func splitInstructions(messages []provider.Message) (string, []provider.Message) {
@@ -352,81 +383,6 @@ func splitInstructions(messages []provider.Message) (string, []provider.Message)
 		return "", messages
 	}
 	return messages[0].Content, messages[1:]
-}
-
-func messagesToInput(messages []provider.Message, vision, replayDeepSeekItems, summary bool) []map[string]any {
-	input := make([]map[string]any, 0, len(messages)*2)
-	for _, message := range messages {
-		switch message.Role {
-		case provider.RoleSystem, provider.RoleUser:
-			// Text-only turns keep the documented TextInput string shape.
-			// Vision-capable user turns with attached images switch to the
-			// InputItemList array form ({type:input_text} + {type:input_image})
-			// so the text and every image ride the same message, matching the
-			// MiMo/DashScope multimodal example. The system message is always
-			// plain text: images only attach to user turns.
-			if vision && message.Role == provider.RoleUser && len(message.Images) > 0 {
-				parts := make([]map[string]string, 0, len(message.Images)+1)
-				if message.Content != "" {
-					parts = append(parts, map[string]string{"type": "input_text", "text": message.Content})
-				}
-				for _, url := range message.Images {
-					parts = append(parts, map[string]string{"type": "input_image", "image_url": url})
-				}
-				input = append(input, map[string]any{"role": "user", "content": parts})
-			} else {
-				input = append(input, map[string]any{"role": string(message.Role), "content": message.Content})
-			}
-		case provider.RoleAssistant:
-			if message.ReasoningContent != "" {
-				// Reasoning items: the OpenAI base format only needs
-				// `content`. DashScope additionally requires a `summary`
-				// list ("Invalid 'summary': summary is required and must be
-				// a list for reasoning."). Other vendors (MiMo) do not
-				// define summary in their schema; sending it leaks the
-				// reasoning text into an extra field the server may echo
-				// back into the model context, doubling chain-of-thought
-				// each turn — so only send it where the wire demands it.
-				item := map[string]any{
-					"type":    "reasoning",
-					"content": []map[string]string{{"type": "reasoning_text", "text": message.ReasoningContent}},
-				}
-				if message.ReasoningID != "" {
-					// OpenAI Responses schema marks Reasoning.id required;
-					// round-trip the provider-issued id when we captured one.
-					item["id"] = message.ReasoningID
-				}
-				if message.ReasoningStatus != "" {
-					item["status"] = message.ReasoningStatus
-				}
-				if summary {
-					item["summary"] = []map[string]string{{"type": "summary_text", "text": message.ReasoningContent}}
-				}
-				input = append(input, item)
-			}
-			if replayDeepSeekItems {
-				for _, raw := range message.ResponsesItems {
-					if item, ok := decodeReplayableWebSearchItem(raw); ok {
-						input = append(input, item)
-					}
-				}
-			}
-			if message.Content != "" || len(message.ToolCalls) == 0 {
-				input = append(input, map[string]any{"role": "assistant", "content": message.Content})
-			}
-			for _, call := range message.ToolCalls {
-				input = append(input, map[string]any{
-					"type": "function_call", "call_id": call.ID,
-					"name": call.Name, "arguments": call.Arguments,
-				})
-			}
-		case provider.RoleTool:
-			input = append(input, map[string]any{
-				"type": "function_call_output", "call_id": message.ToolCallID, "output": message.Content,
-			})
-		}
-	}
-	return input
 }
 
 func decodeReplayableWebSearchItem(raw json.RawMessage) (map[string]any, bool) {
@@ -454,7 +410,7 @@ func (c *client) conversationDigest(messages []provider.Message) string {
 	payload, _ := json.Marshal(struct {
 		Instructions string           `json:"instructions,omitempty"`
 		Input        []map[string]any `json:"input"`
-	}{Instructions: instructions, Input: messagesToInput(rest, c.vision, c.vendor == "deepseek", c.caps.summaryRequired)})
+	}{Instructions: instructions, Input: messagesToInput(rest, c.vision, c.search.NativeEnabled, c.caps.summaryRequired)})
 	sum := sha256.Sum256(payload)
 	return hex.EncodeToString(sum[:])
 }
@@ -477,6 +433,7 @@ func (c *client) readStream(ctx context.Context, resp *http.Response, out chan<-
 	}
 	watchDone := make(chan struct{})
 	activity := make(chan struct{}, 1)
+	var reasoningSnapshots responseReasoningSnapshots
 	var stalled atomic.Bool
 	go func() {
 		timer := time.NewTimer(idle)
@@ -546,6 +503,7 @@ func (c *client) readStream(ctx context.Context, resp *http.Response, out chan<-
 			continue
 		}
 		key := fmt.Sprintf("%s:%d", event.ItemID, event.ContentIndex)
+		reasoningSnapshots.capture(event)
 		switch event.Type {
 		case "response.output_text.delta":
 			textDeltas[key] = true
@@ -613,7 +571,7 @@ func (c *client) readStream(ctx context.Context, resp *http.Response, out chan<-
 				}
 			}
 		case "response.output_item.done":
-			if event.Item != nil && event.Item.Type == "web_search_call" && c.vendor == "deepseek" {
+			if event.Item != nil && event.Item.Type == "web_search_call" && c.search.NativeEnabled {
 				if _, ok := decodeReplayableWebSearchItem(event.Item.Raw); ok {
 					key := event.Item.ID
 					if key == "" {
@@ -623,7 +581,7 @@ func (c *client) readStream(ctx context.Context, resp *http.Response, out chan<-
 						seenSearchItems[key] = struct{}{}
 						raw := append(json.RawMessage(nil), event.Item.Raw...)
 						responsesItems = append(responsesItems, raw)
-						if !sendChunk(ctx, out, provider.Chunk{Type: provider.ChunkResponsesItem, ResponsesItem: raw}) {
+						if !emitSearchReplay(ctx, out, raw) {
 							return
 						}
 					}
@@ -660,43 +618,14 @@ func (c *client) readStream(ctx context.Context, resp *http.Response, out chan<-
 			}
 		case "response.completed", "response.incomplete", "response.failed":
 			terminal = true
-			if event.Response != nil {
-				if event.Type == "response.completed" {
-					completedResponseID = event.Response.ID
+			if event.Type == "response.incomplete" {
+				if !sendChunk(ctx, out, provider.Chunk{Type: provider.ChunkReasoning, ReasoningState: provider.ReasoningIncomplete}) {
+					return
 				}
-				usage := usageFromResponse(event.Response)
-				provider.ApplyRequestAttemptCount(ctx, usage)
-				if event.Type == "response.incomplete" {
-					switch event.Response.IncompleteDetails.Reason {
-					case "max_output_tokens":
-						usage.FinishReason = "length"
-					case "content_filter":
-						usage.FinishReason = "content_filter"
-					default:
-						usage.FinishReason = "incomplete"
-					}
-				} else if event.Type == "response.completed" && usage.FinishReason == "" {
-					// A completed response finished normally (stop). Preserve any
-					// vendor-specific reason already set by usageFromResponse.
-					usage.FinishReason = "stop"
-				}
-				// DashScope occasionally reports a completed event whose usage
-				// object exists but is all zeros (server-side reporting gap; the
-				// tokens were actually billed). Emitting that as ChunkUsage
-				// would corrupt cache-ratio and cost accounting with a spurious
-				// zero record. 但完成语义必须保留：全零+stop 也发送——计费层
-				// （Pricing.Cost）对全零记录天然返回 0 成本，不污染统计；而
-				// agent 侧 reasoningOnlyFinishHonoured 依赖收到 usage 对象
-				// （FinishReason=stop）才能确认 reasoning-only 完成（#7168
-				// 评审"完成语义保留"的完整实现——此前 stop 被抑制时该语义
-				// 失效，空回复被误判触发重试）。异常终止 reason
-				// （length/content_filter/...）始终上报。
-				if usage.TotalTokens > 0 || usage.FinishReason != "" {
-
-					if !sendChunk(ctx, out, provider.Chunk{Type: provider.ChunkUsage, Usage: usage}) {
-						return
-					}
-				}
+			}
+			completedResponseID = terminalResponseID(event)
+			if !emitTerminalResponseUsage(ctx, out, event) {
+				return
 			}
 			if event.Type == "response.failed" {
 				failed = true
@@ -722,15 +651,29 @@ func (c *client) readStream(ctx context.Context, resp *http.Response, out chan<-
 		return
 	}
 	if err := scanner.Err(); err != nil {
+		var reason string
 		if stalled.Load() {
 			err = fmt.Errorf("responses: stream idle timeout after %s", idle)
+			reason = provider.StreamInterruptIdleTimeout
+		} else {
+			reason = provider.ClassifyStreamInterrupt(err)
 		}
-		_ = sendChunk(ctx, out, provider.Chunk{Type: provider.ChunkError, Err: &provider.StreamInterruptedError{Err: err}})
+		_ = sendChunk(ctx, out, provider.Chunk{Type: provider.ChunkError, Err: provider.StreamInterrupt(err, reason)})
 		return
 	}
+	// Protocol-defined terminal response events are required. Connection close
+	// before a terminal event leaves the attempt uncommitted — including any
+	// complete tool calls already forwarded as speculative output.
 	if !terminal {
-		_ = sendChunk(ctx, out, provider.Chunk{Type: provider.ChunkError, Err: &provider.StreamInterruptedError{Err: io.ErrUnexpectedEOF}})
+		_ = sendChunk(ctx, out, provider.Chunk{Type: provider.ChunkError, Err: provider.StreamInterrupt(io.ErrUnexpectedEOF, provider.StreamInterruptPrematureEOF)})
 		return
+	}
+	if !reasoningSnapshots.emit(ctx, out) {
+		return
+	}
+	responsesItems = append(responsesItems, reasoningSnapshots.items...)
+	if len(reasoningSnapshots.items) > 0 {
+		reasoningID, reasoningStatus = reasoningSnapshots.metadata()
 	}
 	if completedResponseID != "" {
 		assistant := provider.Message{Role: provider.RoleAssistant, Content: text.String(), ReasoningContent: reasoning.String(), ReasoningID: reasoningID, ReasoningStatus: reasoningStatus, ResponsesItems: responsesItems}
@@ -767,6 +710,7 @@ func sendChunk(ctx context.Context, out chan<- provider.Chunk, chunk provider.Ch
 		return true
 	default:
 	}
+	notifySendChunkEnterBlocking()
 	select {
 	case out <- chunk:
 		return true
@@ -788,10 +732,7 @@ func usageFromResponse(response *sseResponse) *provider.Usage {
 	if u.OutputTokensDetails != nil {
 		reasoning = u.OutputTokensDetails.ReasoningTokens
 	}
-	miss := u.InputTokens - cached
-	if miss < 0 {
-		miss = 0
-	}
+	miss := max(u.InputTokens-cached, 0)
 	total := u.TotalTokens
 	if total == 0 {
 		total = u.InputTokens + u.OutputTokens
@@ -811,7 +752,7 @@ func authErrorFromResponse(c *client, responseError *sseError) error {
 	if strings.Contains(value, "forbidden") || strings.Contains(value, "permission") {
 		status = http.StatusForbidden
 	}
-	return &provider.AuthError{Provider: c.name, KeyEnv: c.keyEnv, KeySource: c.keySource, Status: status, HasKey: c.apiKey != "", Body: responseError.Message}
+	return &provider.AuthError{Provider: c.name, ProviderDisplayName: c.identity.DisplayName, Protocol: c.identity.Protocol, KeyEnv: c.keyEnv, KeySource: c.keySource, Status: status, HasKey: c.apiKey != "", Body: responseError.Message}
 }
 
 type sseEvent struct {
@@ -847,6 +788,7 @@ func (i *sseItem) UnmarshalJSON(data []byte) error {
 }
 
 type sseResponse struct {
+	Output            []sseItem         `json:"output"`
 	ID                string            `json:"id"`
 	Usage             *sseUsage         `json:"usage"`
 	Error             *sseError         `json:"error"`

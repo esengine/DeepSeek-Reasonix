@@ -57,7 +57,8 @@ self-register; parents never import children. The Remote-SSH module layers
 `cli → remote/bootstrap → remote → {remote/forward, remote/sftpfs, config,
 netclient}`; `remote` and its subpackages never import `cli`, `agent`, or
 `serve`, and all interactivity flows through callbacks (host-key / secret
-prompts) so the desktop module consumes the same surface. See §Remote below.
+prompts) so the desktop module consumes the same surface. See the
+[Remote sessions](./REMOTE_SESSIONS.md) guide.
 
 ## 3. Core Abstractions
 
@@ -92,9 +93,10 @@ type Config struct {
   differing only in `base_url` / `model` / `api_key_env`. Adding another OpenAI-
   compatible model is a config edit, not a code change.
 - **A provider is a vendor endpoint** (one `base_url` + `api_key_env`) that offers
-  one or more models. OpenAI-compatible chat normally posts to
-  `base_url + "/chat/completions"`; set `chat_url` only for gateways that require a
-  full request URL. An entry declares either a single `model = "..."` or a
+  one or more models. `request_url`, when set, is the exact request target for
+  OpenAI-compatible, Anthropic-compatible, and Responses providers. Legacy
+  `chat_url` retains its historical OpenAI-only behavior; other legacy entries
+  derive the protocol path from `base_url`. An entry declares either a single `model = "..."` or a
   `models = ["...", "..."]` list (with an optional `default`); the list form lets
   one vendor expose several models without re-declaring the endpoint/key. A
   **model reference** (`default_model`, the `--model` flag, the desktop switcher)
@@ -129,20 +131,33 @@ type Tool interface {
 ### 3.3 Plugins (`internal/plugin`) — MCP client
 
 An external plugin is an MCP server declared in config. The wire protocol is
-**JSON-RPC 2.0** in every case; only the transport differs. A `transport`
-interface (`call` / `notify` / `close`) abstracts that, so the MCP-level logic
-(handshake, `tools/list`, `tools/call`, …) is written once.
+**JSON-RPC 2.0** in every case; only the transport differs. Reasonix keeps the
+product-level client and delegates protocol negotiation, request correlation,
+cancellation, pagination, and transport framing to the official MCP Go SDK.
+One concurrency-safe session per configured server is shared by tools, prompts,
+and resources.
 
 - **Transports** (config `type`):
   - `stdio` (default) — a local subprocess; one JSON message per line over the
     child's stdin/stdout (the MCP stdio convention). Declared with
     `command` / `args` / `env`; terminated on ctx cancel / shutdown.
-  - `http` (a.k.a. `streamable-http`) — a remote server at `url`. Each request
-    is an HTTP POST; the server replies with either `application/json` (one
-    response) or `text/event-stream` (an SSE stream carrying the response plus
-    any server notifications). The `Mcp-Session-Id` response header, once seen,
-    is echoed on subsequent requests. Static `headers` (e.g. a bearer token) are
-    sent on every request. OAuth is out of scope for now (see §9).
+  - `http` (a.k.a. `streamable-http`) — a remote server at `url`. After
+    initialize, a long-lived GET/SSE listener receives server messages while
+    POST carries client requests; POST-only and sessionless servers remain
+    supported. The `Mcp-Session-Id` response header, once seen, is echoed on
+    subsequent GET, POST, and bounded shutdown DELETE requests. Static
+    `headers` (e.g. a bearer token) are sent to the configured origin on each
+    transport method and are never forwarded cross-origin. When no static
+    `Authorization` header is configured,
+    user-initiated OAuth uses Protected Resource Metadata and Authorization
+    Server Metadata discovery, dynamic client registration, PKCE S256, a
+    loopback callback, resource indicators, and refresh-token rotation. Client
+    credentials and tokens are stored with mode `0600` in the server's private
+    Reasonix MCP state directory, outside the workspace; tokens are bound to the
+    configured resource URL and are never reused after that URL changes. OAuth
+    discovery, registration, and token requests honor Reasonix's resolved
+    network-proxy settings. Removing a declaration clears this state unless the
+    effective fallback uses the same OAuth resource.
   - `sse` — the legacy 2024-11-05 HTTP+SSE transport. A persistent GET stream
     receives an announced relative POST endpoint, JSON-RPC responses, and server
     messages. Cross-origin announced endpoints are rejected so static headers
@@ -151,6 +166,13 @@ interface (`call` / `notify` / `close`) abstracts that, so the MCP-level logic
   and `headers` so secrets come from the environment, not the config file.
 - Lifecycle: `initialize` → `notifications/initialized` → `tools/list`;
   invocation via `tools/call {name, arguments}`.
+- A per-server supervisor publishes only fully initialized/listening sessions.
+  An established session that returns 404 is rebuilt once with concurrent
+  callers joining the same rebuild; a call is replayed at most once. Ambiguous
+  disconnects never replay tool calls because the server may already have
+  executed them. Terminal background disconnects use bounded reconnect delays,
+  and stale callbacks from an older session generation cannot replace current
+  state.
 - When a workspace root exists, initialize advertises `roots` and transports
   answer `roots/list` with its file URI. `tools/call` includes a per-call
   `_meta.progressToken`; matching `notifications/progress` messages stream into
@@ -181,7 +203,10 @@ interface (`call` / `notify` / `close`) abstracts that, so the MCP-level logic
   process sandbox remain host-controlled boundaries.
 - `prompts/list` + `prompts/get` surface as `/mcp__<server>__<prompt>` slash
   commands; `resources/list` + `resources/read` are referenced as
-  `@<server>:<uri>` in chat. `/mcp` shows connected servers and their counts.
+  `@<server>:<uri>` in chat. All list cursors are consumed while preserving
+  server order. `/mcp` shows connected servers, counts, protocol/listening state,
+  reconnect attempts, and a redacted error category; it never exposes a session
+  identifier.
 - `cmd/reasonix-plugin-example` is a runnable reference stdio server (`echo`,
   `wordcount`), driven by an end-to-end test that builds the real binary.
 
@@ -197,32 +222,33 @@ interface (`call` / `notify` / `close`) abstracts that, so the MCP-level logic
 
 ### 3.5 Two-model collaboration (`Coordinator`)
 
-When `agent.planner_model` names a provider different from the executor, a
-`Coordinator` runs two models in **separate sessions** to keep each one's prompt
-prefix cache-stable:
+When `agent.planner_model` is set, a `Coordinator` runs two models in
+**separate sessions** to keep each one's prompt prefix cache-stable. An empty
+`planner_model` leaves the session executor-only. A configured but unusable
+planner model is a configuration error and does not silently continue on the
+executor:
 
 - The **planner** (low-frequency) runs in its own session with the same standing
   memory context plus a filtered read-only research tool set, then produces a
-  concise plan. A deterministic host policy chooses executor-only, light
-  planning, full planning, plan-for-approval, or explicit plan-only from
-  pristine user text plus trusted turn metadata. It does not call a classifier
-  model and does not infer host state from controller-authored prompt blocks.
-  Explicit Plan Mode, synthetic turns, short contextual replies, atomic edits,
-  and bounded read-only actions avoid a second planner; cross-surface,
-  structured, ambiguous, and high-risk work uses the full contract. Active Goal
-  and Delivery turns upgrade non-atomic mutation work, while bounded read-only
-  actions remain executor-only. The privacy-safe
-  route/depth/reason decision is emitted in phase detail.
-- Light plans use a small per-turn research-round budget and return a compact
-  objective, 1-4 ordered steps, likely touchpoints, and primary verification.
-  Full plans use a larger bounded budget and distinguish verified from candidate
-  touchpoints, with risks, acceptance criteria, command-level verification, and
-  rollback when relevant. The depth contract stays in one stable system prompt;
-  only a small host-authored `<planner-turn>` block changes per user turn. If
-  the planner still does not finalize after the bounded research and grace
-  round, plan-and-execute falls back to the executor with the pristine task;
-  plan-only and plan-for-approval remain fail-closed. The incomplete planner
-  turn is rolled back rather than exposed as a broken manual continuation.
+  concise plan. A deterministic host policy defaults to executor-only. It
+  invokes the dedicated planner only for an explicit plan-first /
+  plan-then-execute request, an explicit wait-for-approval boundary, an
+  explicit plan-only request, or an explicit Goal start. It does not call a
+  classifier model, does not infer complexity from wording, file count, or
+  keywords, and does not infer host state from controller-authored prompt
+  blocks. Explicit Plan Mode is an executor-driven workflow and never starts a
+  second planner. Synthetic turns, short contextual replies, and ordinary
+  requests stay executor-only. There is no Light/Full planning depth. The
+  privacy-safe route/reason decision is emitted in phase detail.
+- The planner uses one stable system prompt. Only a small host-authored
+  `<planner-turn>` block names the explicit route. The plan distinguishes
+  verified from candidate touchpoints and records non-goals, risks, acceptance
+  criteria, and command-level verification when the evidence supports them.
+  `submit_plan` is the only delivery channel; a prose reply without a submitted
+  plan is a planner protocol error. If the planner still does not finalize after
+  the bounded research and grace round, every route fails closed and the
+  executor is not started. The incomplete planner turn is rolled back rather
+  than exposed as a broken manual continuation.
 - A bare plan-first route hands the completed plan directly to the executor.
   Plan-for-approval is reserved for an explicit request to wait for
   confirmation; the host enforces that boundary even if the planner omits its
@@ -239,45 +265,93 @@ prefix cache-stable:
   "cache-first" with "two-model collaboration": switching models *inside one
   shared conversation* would break the prefix and tank cache hits, so we don't.
 
-### 3.6 Context management (compaction)
+### 3.6 Context management (content-driven summary)
 
-Long tasks eventually fill the model's context window. Reasonix manages this with
-**low-frequency compaction** that respects the cache-first design:
+Long tasks fill the model window. Reasonix keeps a **cache-first, append-only**
+canonical transcript and installs a short **provider-visible checkpoint** only
+when the sole automatic threshold is crossed.
 
-- Each provider declares its `context_window` (tokens). Context maintenance is
-  tiered: below `agent.tool_result_snip_ratio` (default `0.6`) the session is
-  left untouched apart from the soft notice; at the snip ratio, stale tool
-  results before the recent tail are archived and shortened with deterministic
-  head/tail markers; at `agent.compact_ratio` (default `0.8`) stale tool results
-  are archived and pruned to short placeholders before any summary call; only if
-  pruning still leaves the prompt above the threshold does summary compaction
-  run. At `agent.compact_force_ratio` (default `0.9`), the existing forced fold
-  may proceed even when the fold economics would normally skip it.
-- Users can inspect or change the 65–85% automatic threshold with
-  `reasonix config compact-ratio [--local] [VALUE]`. The default is 80%; the
-  project-local value overrides the shared user config used by desktop and new
-  CLI sessions.
-- A positive `model_overrides.<model>.context_window` replaces the provider-wide
-  value after model resolution. Missing or zero model overrides inherit the
-  provider value; provider-level `context_window = 0` disables compaction.
-- `max_output_tokens` is a separate total-output budget, not a conversion from
-  the client reasoning byte guard. Zero selects the provider's safe default,
-  positive values set an explicit cap, and negative values omit optional wire
-  limits. `model_overrides.<model>.max_output_tokens` can specialize mixed
-  gateways; Anthropic still supplies a mandatory `max_tokens` fallback.
-- Tool-result snip/prune never removes messages, so assistant `tool_calls` and
-  tool results stay paired. `KeepErrors` preserves error/blocked tool outputs,
-  and the recent tail is not rewritten. Snipped results can later be upgraded to
-  pruned placeholders; already-pruned results are left alone.
-- When summary compaction runs, it folds only the assistant/tool work. Every
-  **user turn** small enough to be a brief and every **prior digest** is kept
-  verbatim; the foldable remainder is summarized — using the executor's own
-  provider, no tools — in place. The boundary is aligned backward off any tool
-  result so the recent tail never begins with an orphan tool message whose
-  `tool_calls` were summarized away.
-- The dropped originals are archived under the user config dir
-  (`reasonix/archive/<timestamp>.jsonl`; see §5 for its per-OS location), one
-  message per line, so the full history stays traceable.
+- Each provider declares `context_window` (tokens). The only automatic trigger is
+  `agent.compact_ratio` (default **0.80**; presets 0.70 / 0.80 / 0.85; range
+  0.30–0.85). Lower values compact sooner and may increase summary cost or
+  reduce prompt-cache reuse.
+  `triggerTokens = floor(context_window × compact_ratio)`.
+- **Below the trigger** ordinary requests remain append-only and no sidecar is
+  written. Every provider request uses the durable, bounded tool `Content`;
+  local `RawContent` is never promoted into sampling, retry, summary, or replay.
+- **At the trigger** one singleflight maintenance transaction first persistently
+  prunes every tool result over 8192 Unicode code points to `4096 head +
+  "[... tool result middle pruned ...]" + 1024 tail`. If this clears pressure,
+  no summary request is made. Otherwise Reasonix summarizes the old contiguous
+  prefix and retains the newest **16%** of the context window verbatim, aligned so
+  assistant tool calls and tool results are never split.
+- The summary request replays the original system message, the selected message
+  prefix, and the ordinary request's tool schemas, then appends one final user
+  compaction instruction. This shape can reuse provider KV cache. Output is capped
+  at **8192 tokens**, and prefix planning keeps **5%** of the window (at least 256
+  tokens) below that cap as estimator headroom. A pressure run may make one
+  additional convergence summary (at most two successful summaries total);
+  overflow makes at most one summary and retries the original request at most
+  once after projection-version progress. An overflow rescue may also fold the
+  active turn's completed rounds, keeping its newest two rounds verbatim.
+- Every summary reply, success or provider overflow, feeds its real prompt count
+  back into the estimator. When the provider rejects the summary request itself,
+  the fold is re-planned on the corrected estimate (at most twice), then sent once
+  as a bounded transcript (tool results cut to 2000 characters, no tool schemas);
+  a manual compact may then take the fragment path. A failed automatic attempt
+  backs off further attempts on the same turn until the view has grown by 5% of
+  the window since that attempt, which bounds the retries one turn can pay.
+- A checkpoint must be strictly smaller than the replaced full request. Summary
+  timeout/error/empty/max-token results never produce a mechanical digest. Below
+  the hard ceiling the latest durable projection continues. At overflow or the
+  hard ceiling, when no summary can form, a lossy `truncate` projection elides the
+  oldest tool results and then drops the oldest replay units behind an explicit
+  marker until the view fits under the trigger; `ErrCompactionRequired` is
+  returned only when even that cannot reclaim enough.
+- Users inspect or change the threshold with
+  `reasonix config compact-ratio [--local] [VALUE]`. Project config overrides the
+  user-global value used by desktop and new CLI sessions. UI always shows the
+  **effective** ratio.
+- `max_output_tokens` is an independent **per-turn** completion ceiling and
+  never changes `triggerTokens` / `compact_ratio`.
+  - `0` is the provider auto value. Local admission uses the provider
+    capability (official DeepSeek 384K, OpenCode Go model table, or a learned
+    completion budget). It is **not** “skip the local output check”.
+  - Official DeepSeek Chat/Responses still omit the field when the remaining
+    shared window can host the 384K auto budget, and inject a clipped value
+    only when the window is tight. Official DeepSeek Anthropic always sends
+    384K or the clipped remainder because `max_tokens` is required.
+  - Official OpenCode Go presets send `min(model max, physical remaining)` on
+    the generic `max_tokens` / `max_output_tokens` field. Third-party
+    compatible APIs do not assume a shared window until a trusted context 400.
+  - A positive value is an explicit cost cap and may still be clipped down to
+    the physical remainder. A negative value force-omits optional wire limits;
+    if the known auto budget no longer fits, Reasonix compacts instead of
+    overriding that choice.
+- Canonical tool storage remains backward compatible: `Content` is the stable
+  provider-visible ≤32KB form and `RawContent` holds the full local original.
+  Full results are returned to the model only after an explicit paged
+  `use_capability` call to `session:tool_result`; sampling, stream retry, summary,
+  and projection replay all use the same bounded `Content`. Prune projections
+  never rewrite either canonical field. Older supported readers remain bounded.
+- Automatic maintenance is planned once in `ContextManager.Prepare` from the
+  current projection plus the append-only canonical tail. The canonical
+  transcript is never rewritten. Subsequent thresholds merge
+  **prior digest + new history** into a single digest (no multi-span merge, no
+  application-layer retry). Failure records a generation-scoped
+  `blocked`/`failed` receipt; the same generation does not pay for another
+  automatic summary. Manual `compress` can retry.
+- Old multi-threshold keys (`soft_compact_ratio`, `tool_result_snip_ratio`,
+  `compact_force_ratio`, `cold_resume_prune`, `context_editing`) are removed on
+  ordinary start and ignored at runtime. Native provider tool clearing is not
+  used; every provider uses the local summary checkpoint path.
+- `keep` / `recent_keep` remain readable and round-trip for compatibility but are
+  deprecated and ignored by compaction. Old user turns, failed tool results, and
+  `[[keep]]` messages enter the summary prefix. Restart restores an existing
+  checkpoint without re-summarizing or replaying timeline cards.
+- Full history remains in the session transcript. The read-only `history` tool
+  provides BM25 retrieval over sessions; new summary checkpoints do not create
+  prune archives.
 - The read-only `history` tool gives the agent on-demand BM25 retrieval over
   saved session JSONL files. `scope="project"` searches the current controller's
   session directory; `scope="global"` also searches the user-global session
@@ -300,11 +374,15 @@ Long tasks eventually fill the model's context window. Reasonix manages this wit
   budgets. This never mutates the stable system prompt or tool schemas.
 - The owning controller may auto-allow only a bounded, non-sensitive,
   create-only project/reference `remember`, including in a top-level headless
-  run. Global facts, preferences, feedback,
-  updates, duplicates, sensitive/oversized content, and every `forget` require a
-  fresh human approval even under Auto or YOLO. Guardian/safety review cannot
-  answer these prompts on the user's behalf. Sub-agents and headless surfaces
-  without the owning scoped controller fail closed. The approval request includes a compact preview, while
+  run. In Ask, global facts, preferences, feedback, updates, duplicates,
+  sensitive/oversized content, and every `forget` require a fresh human
+  approval. Interactive Auto treats `remember` and `forget` as normal policy
+  fallback while preserving explicit `ask` and `deny` rules. Interactive YOLO
+  bypasses memory ask prompts unless an explicit deny rule matches.
+  Guardian/safety review cannot answer these prompts on the user's
+  behalf. Sub-agents and headless surfaces without the owning scoped
+  controller fail closed, including headless YOLO except for the create-only
+  path above. The approval request includes a compact preview, while
   external notification hooks only receive the tool name.
 - Facts carry immutable IDs, monotonic revisions, timestamps, type, and scope.
   Updates snapshot the previous revision; restore and archive recovery create a
@@ -313,21 +391,19 @@ Long tasks eventually fill the model's context window. Reasonix manages this wit
   See [`SESSION_MEMORY_RETRIEVAL.md`](SESSION_MEMORY_RETRIEVAL.md) for the
   detailed implementation contract.
 
-**What survives a fold.** A fact the user states in a normal-sized turn is kept
-verbatim and is never summarized away — at any point in the session, across any
-number of compactions. A digest, once written, is likewise kept verbatim rather
-than re-summarized, so facts it captured are not lost to drift. The one
-**best-effort** boundary: a fact buried inside a single oversized message (a
-large paste, over the per-turn pin budget) folds with the rest, so its survival
-depends on the summarizer catching it while compressing bulk. There is no
-reliable way to auto-detect an arbitrary fact in bulk, so durable facts belong in
-their own turn rather than buried in a large paste; the raw oversized content is
-still archived and recoverable either way.
+**What survives a fold.** The system prompt and newest 16% tail survive verbatim.
+Every older model-visible message forms one contiguous summary prefix, including
+user turns, failed tool results, prior digests, and `[[keep]]` messages. Exact
+older wording remains available in the canonical transcript and through the
+read-only `history` tool. `keep` and `recent_keep` are compatibility-only fields.
 
-This is the **only** point where the prompt prefix changes — a deliberate, rare
-"cache-reset point". Between compactions the session grows prepend-only and
-stays cache-friendly, so cache hit rate (the key observability signal) stays
-high. `context_window = 0` disables compaction for an instance.
+Subsequent folds merge the current digest with newer old history into one digest.
+Compaction only writes a projection: canonical storage keeps every original, so
+a missed detail stays recoverable through `history`.
+
+Prune and summary commits are deliberate cache-reset points. Between maintenance
+runs the session remains append-only and cache-friendly. `context_window = 0`
+disables automatic compaction for an instance.
 
 ### 3.7 Permissions (`internal/permission`) — per-call gating
 
@@ -441,9 +517,11 @@ func (p Policy) Decide(toolName string, readOnly bool, args json.RawMessage) Dec
 - **User decisions are separate from tool approvals.** Runtime tool approval has
   three user-facing postures: `ask` ("需要批准"), `auto` ("自动批准"), and
   `yolo` ("Yolo批准"). `auto` lets the permission policy auto-approve the writer
-  fallback while preserving explicit ask/deny rules; `yolo` skips ordinary tool
-  permission prompts for approval-gated tools such as writers and Bash. Explicit
-  deny rules and forced fresh reviews still apply. Nested or indirect Bash
+  and interactive memory fallback while preserving explicit ask/deny rules;
+  `yolo` skips ordinary tool permission prompts for approval-gated tools such
+  as writers, Bash, and explicit interactive `remember`/`forget` ask prompts.
+  Explicit deny rules and forced fresh reviews
+  for plans, sandbox escapes, and managed config writes still apply. Nested or indirect Bash
   commands require a human in interactive Ask/Auto even during the approved-plan
   window; ordinary expansions, assignments, redirects, and globs continue under
   Auto fallback but cannot inherit reusable Bash rules. YOLO is the sole mode
@@ -477,16 +555,23 @@ func (p Policy) Decide(toolName string, readOnly bool, args json.RawMessage) Dec
   assumption. Completion requires the concrete request, output format,
   constraints, and relevant verification expectations to be satisfied or
   explicitly reported as unverified.
-  Goals that look like long-horizon research, debugging, optimization, or
-  implementation work automatically add an AutoResearch protocol to the same
-  transient active-goal user block. AutoResearch is a Goal strategy, not a
-  standalone global skill: it writes project-local state under
-  `.reasonix/autoresearch/YYYYMMDD-HHMMSS-slug/` and keeps dynamic run state out
-  of `REASONIX.md`, `AGENTS.md`, project memory, tool schemas, and the
-  cache-stable system prompt. `/goal --research <objective>` forces that
-  strategy; `/goal --simple <objective>` forces lightweight Goal. Outside goal
-  mode, ordinary prompts never change collaboration mode or create durable
-  AutoResearch state; the user must choose Goal or use `/goal` explicitly.
+  Goal has no default model-round, cross-Run turn, wall-clock, or numeric
+  no-progress boundary. Goal-scoped novelty accepts new read/search results and state changes
+  but rejects exact tool/argument/result repeats. All classes use the same Goal
+  FSM, host receipts, Delivery readiness, and bounded evaluator; there is no second research
+  protocol or writable sidecar runtime. Legacy `.reasonix/autoresearch/...`
+  archives remain read-only and explicit old paths recover as ordinary Goals.
+  Outside goal mode, ordinary prompts never change collaboration mode; the user
+  must choose Goal or use `/goal` explicitly.
+  Repeated host failures, zero-evidence rounds, and Todo stalls trigger bounded
+  strategy redirects and intervention-epoch resets, never a Goal pause. Turns,
+  tokens, provider requests, and active work duration remain observational when
+  the corresponding budget is not configured. Positive user-selected
+  `[agent].goal_token_budget`, `max_steps`, time, and cost budgets remain
+  explicit resumable boundaries. The Goal token budget defaults to `0` (off);
+  resuming a `budget_spend` pause grants a fresh slice without clearing
+  cumulative Goal statistics. `task_time_budget_minutes = 0` (and legacy
+  negative values) disables the time boundary.
   `/goal clear` removes the active goal. Switching into plan/normal mode clears
   the active goal in the desktop UI so the collaboration mode remains one of
   the three choices, while the underlying tool approval posture is preserved.
@@ -494,8 +579,8 @@ func (p Policy) Decide(toolName string, readOnly bool, args json.RawMessage) Dec
 | Tool approval posture | Tool approvals | Plan approval | `ask` questions |
 | --- | --- | --- | --- |
 | Need approval / `ask` | Follow permission policy (`Ask` prompts interactively) | Waits for user | Waits for user |
-| Auto approve / `auto` | Writer fallback auto-allowed; explicit ask/deny rules still apply | Waits for user | Waits for user |
-| YOLO approval / `yolo` | Ordinary prompts auto-allowed; deny rules and fresh reviews remain | Waits for user | Waits for user |
+| Auto approve / `auto` | Writer fallback and interactive `remember`/`forget` fallback auto-allowed; explicit ask/deny rules still apply | Waits for user | Waits for user |
+| YOLO approval / `yolo` | Ordinary prompts auto-allowed, including `remember`/`forget`; deny rules and plan/sandbox/config reviews remain | Waits for user | Waits for user |
 | Approved-plan execution window | Approved plan's writer fallback is auto-allowed; explicit `ask` / `deny` rules remain | Future plans still wait | Waits for user |
 
 Out of the box (`mode = "ask"`, no rules), interactive `reasonix` prompts before
@@ -583,7 +668,8 @@ resolved and prepended to the message as a tagged block the model can read.
 A subagent profile is a Skill with `runAs: subagent` and, for profiles managed
 by the desktop or CLI editors, `invocation: manual`. Profiles reuse the existing
 project/global Skill files; they do not introduce another state format or
-database. Manual invocation excludes a profile from the pinned Skill index so
+database. Manual invocation excludes a profile from the `session-context`
+Skills catalog so
 the model cannot discover it implicitly, while explicit `/<name> <task>`
 invocation remains available.
 
@@ -624,6 +710,280 @@ UTF-8 byte offset under the current conversation-lineage/workspace boundary.
 Headless runs remain ephemeral and return fair bounded previews without refs.
 See [Subagent profiles](./SUBAGENT_PROFILES.md)
 for the user-facing command and file-format contract.
+
+A profile describes a worker, not a run. Delegation is five separate concepts:
+the profile says how a worker thinks, `TaskSpec` what this call wants,
+`CapabilityGrant` what it may touch, `ContextCapsule` what it starts from, and
+`SchedulerPolicy` when it runs. A field belongs to whichever member decides its
+value, so a profile may carry a capability *ceiling* (`allowed-tools`,
+`read-only`) but never a per-call value such as `max_turns`, `write_paths`, or a
+retry or verification policy — those are decided by the task or the scheduler.
+Skill frontmatter may keep growing; `agent.ProfileFromSkill` is the single
+narrowing point, and routing metadata (triggers, auto-use, cost, freshness)
+stops there because it decides *when* a worker is chosen, not how it thinks.
+`internal/agent/profile_boundary_test.go` fails on any widening.
+
+### 3.11 Sub-agents close with a host-adjudicated claim
+
+A writer sub-agent ends its run by calling `complete_subtask` with a `status`,
+a `summary`, the `acceptance_criteria` it was held to (each with the command it
+ran or the paths it changed), and whatever it left `unresolved`. Prose alone is
+still accepted, but it is no longer the interface the parent reasons over.
+
+The submitted status is a claim, not a verdict. Before the parent sees it, the
+host checks every citation against its own receipts: a `verification` criterion
+must name a command the host recorded as run, `diff`/`files` must name paths the
+host observed written or read, and a `manual` note is never self-backing. Any
+criterion the receipts cannot back is lowered to `unsatisfied`, a report holding
+one cannot stay `complete`, and the downgrade is printed with its reason. The
+host never raises a status.
+
+The parent therefore receives, in order: the adjudicated status and criteria,
+the child's own prose, and the host's own receipts of what it changed and ran.
+
+### 3.12 Write claims are enforced, not advisory
+
+A declared `write_paths` is one truth source used for both scheduling and
+enforcement. When a writer sub-agent declares explicit paths, the host binds its
+registry to that claim before the child runs:
+
+- path-aware built-in writers (`write_file`, `edit_file`, `multi_edit`,
+  `move_file`, `notebook_edit`, `delete_range`, `delete_symbol`) reject any
+  argument path outside the claim, with both ends of a `move_file` checked;
+- paths are compared after symlink resolution against the deepest existing
+  ancestor, so neither `..` traversal nor a symlink inside the claim can launder
+  a write out of it;
+- `bash` is kept only if the OS sandbox can rebind its write roots to the claim,
+  and is otherwise removed from the child's registry entirely;
+- MCP goes through `use_capability`, which refuses at resolve time — before any
+  MCP process runs — every target not proven read-only;
+- writers the host cannot path-scope (custom, unknown) are dropped;
+- after the run, the host compares the mutations it recorded against the claim
+  and reports any outside path to the parent in the sub-agent's host receipts.
+
+Omitting `write_paths` is not an unscoped writer: the run starts by claiming
+the whole workspace, so it cannot start beside another writer. After it has
+only performed path-bound writes, the scheduler reservation shrinks to those
+files and a parent (or sibling) may write elsewhere. A `bash` or MCP workspace
+mutation makes the claim whole-workspace again. Directory claims may start
+together; they serialize only when they realize the same file. Enforcement
+still uses the declared bound — sandbox/`AllowsPath` do not shrink. Writes
+that leave the workspace are still reported as claim violations.
+
+Declaring paths is what buys parallelism; it costs `bash` on hosts where the OS
+sandbox cannot enforce write roots.
+
+### 3.13 Sub-agent context inheritance is explicit
+
+A child inherits nothing implicitly. What it receives is exactly this:
+
+| Given to the child | Where it comes from |
+| --- | --- |
+| System prompt | `DefaultTaskSystemPrompt`, `DefaultReadOnlyTaskSystemPrompt`, or the profile body — nothing else is composed into it |
+| Workspace root | `<workspace-context>` on the first user turn |
+| The task text | the user turn itself |
+| Completion contract | appended to a writer's task turn (§3.11) |
+| Delegation guidance | `<subagent-context>` on a nested child's fresh session |
+| Plan-mode marker, reasoning/response language | run options, when set |
+| A prior transcript | only via `continue_from` / `fork_from` |
+
+Not inherited, by construction: `REASONIX.md`, `AGENTS.md`, `CLAUDE.md`, project
+and global memory (the memory queue is disabled, so a child cannot record memory
+either), the parent conversation, the current Goal, planner output, and sibling
+sub-agent results. A constraint that must reach a child today has to be in its
+profile body or in the task text — there is no ambient channel.
+
+Every run records a `ContextCapsule` in its transcript sidecar: the workspace,
+the system-prompt source and hash, the resolved tool scope and schema hash, the
+model and effort, the parent session and tool-call id, any resumed transcript,
+and an `inherited` block whose fields are all false. `capsuleHash` is its stable
+identity, so *why did this reviewer not see that constraint* is answered from
+the record, and two runs that behaved differently can be diffed instead of
+guessed at. The capsule holds references and digests only — never copied parent
+context, which is what keeps delegation cheap and the child prefix cacheable.
+
+### 3.14 Fleet is a small dependency graph
+
+A fleet item may declare `id` and `depends_on`. That is the whole graph
+vocabulary: no conditions, no expressions, no dynamic fan-out. It is enough for
+
+```
+research ──▶ implement backend ──┐
+        └──▶ implement frontend ─┴──▶ integration test ──▶ review
+```
+
+Ids default to the 1-based position. A duplicate id, an id no task declares, a
+self-edge, or a cycle fails preflight, so a fleet that cannot finish never
+starts. Items run as soon as their dependencies complete; items with no ordering
+between them run in parallel under the same session scheduler as before.
+
+Dependencies are a property of the graph, never of a task: they live in the
+fleet plan and never reach `ProfileExecSpec`, which is what keeps `depends_on`
+from becoming the first keyword of a workflow language.
+
+The graph relaxes the write-claim preflight in the one place it should. Only
+items that can run at the same time need disjoint `write_paths`; an
+`implement → review` pair is serialised by its edge and may share paths, which
+a flat fleet could not express.
+
+Failure handling has one knob. A failed or skipped task always skips its whole
+downstream branch — running a dependent on a broken input only buys a result the
+parent must discard. Independent branches keep going unless `fail_fast` is set,
+which stops *starting* new tasks; tasks already running are left to finish so a
+writer is never abandoned mid-write.
+
+### 3.15 One child-construction primitive
+
+The APIs that spawn a child are many — `task`, `read_only_task`, `fleet`,
+`parallel_tasks`, `run_skill`, `/<profile>`, `reasonix subagent run|try`,
+desktop preview. The execution primitive behind them must stay one. Each entry
+point compiles its request into a `ProfileExecSpec` and hands it to
+`TaskTool.RunProfileSpec`, which is the only place that resolves depth, tool
+scope, permissions, sandbox, write claims, scheduler slots, the MCP frontend,
+the transcript and capsule, the evidence ledger, and the completion contract.
+
+This is not a style preference. A safety boundary spread across several
+construction paths only has to be forgotten once: past regressions where a
+preview path built unconfined file tools, and where a profile editor dropped
+`read-only` on save, were both one entry point missing one layer.
+
+An entry point that must not persist a transcript says so with
+`ContextRequest.Ephemeral` rather than building its own session, so its promise
+is a field on the spec instead of a second construction path.
+
+`internal/agent/spawn_boundary_test.go` enumerates the files that still call the
+low-level runners directly and fails on any new one. The remaining entries —
+`internal/boot` (skill runners), `internal/cli/review.go`, and
+`desktop/subagents_app.go` — are known debt, not precedent.
+
+### 3.16 MCP concurrency: read-only is not stateless
+
+Sub-agents share one session Host and its connections while each keeps its own
+`use_capability` frontend and ledger. For a stdio server that means they share
+one process, and therefore its session state.
+
+Read-only does not imply stateless. A browser server opens a page, selects a
+tab, scrolls; every one of those tools may honestly declare `readOnly` because
+nothing reaches the filesystem, yet two children calling it concurrently
+interleave on state neither of them can see. Write claims do not help — there is
+nothing to claim.
+
+A configured server therefore carries a concurrency policy:
+
+```toml
+[[mcp.servers]]
+name = "browser"
+concurrency = "serial"   # parallel (default) | serial
+```
+
+`serial` means the runtime never runs two calls to that server at once across
+the whole session, whichever child issues them. The gate lives on the shared
+runtime because the process being interleaved on is shared at exactly that
+scope, and a call waiting on it still honours its own cancellation. Servers
+whose names look known-stateful (browser, playwright, puppeteer, chrome,
+chromium, selenium) default to `serial`; explicit configuration always wins, and
+everything else stays parallel so the shared-Host tradeoff is unchanged.
+
+This is deliberately the conservative first version: one policy per server, not
+per capability. Per-tool `parallel_safe` / `exclusive` hints and explicit
+`concurrency_key` grouping are the later refinement, once real servers show
+which tools within one server genuinely differ.
+
+### 3.17 Measuring whether delegation pays
+
+Orchestration is easy to add and hard to justify: more agents always cost more
+tokens, and the extra tokens alone can look like an improvement. Comparing arms
+therefore has to hold the model fixed and read host-recorded facts, not prose.
+
+`reasonix run --json` emits per-run delegation counters alongside the existing
+token, cache, cost, and duration totals:
+
+| Counter | Answers |
+| --- | --- |
+| `subagent_runs`, `subagent_nested_runs` | which shape actually ran, not which was configured |
+| `tool_calls` − `subagent_tool_calls` | parent versus child work split |
+| `subagent_mutations`, `duplicate_work_paths` | did two children redo the same file |
+| `completion_reports`, `completions_prose_only` | how much of the run ended in a checkable claim |
+| `false_completions`, `criterion_downgrades` | claims the host refused to back |
+| `write_scope_violations` | writes that escaped a declared claim |
+
+The control axis is partial, and the counters are what revealed it.
+`--ablate subagent` removes `task`, `read_only_task`, `fleet`, and
+`parallel_tasks`, but a run can still delegate through a `runAs=subagent`
+profile skill: a measured `no-subagent` arm spent a child run on `explore`.
+Treat that arm as "no task-tool delegation", not "single agent", and read
+`subagent_runs` to see what actually happened rather than trusting the label.
+Nested depth is `agent.max_subagent_depth`.
+
+`false_completions` is the counter that matters most. It comes from the
+adjudication in §3.11, so it measures claims the host refused rather than a
+reviewer's opinion, and it is the one number that separates "the fleet finished
+faster" from "the fleet said it finished".
+
+Read these against the measured noise floor. Running the same arm twice over
+the same tasks moved per-task token use by a median of 19% and up to 54%, while
+the whole between-arm difference in that experiment was 2.5%. A single run per
+cell therefore proves nothing about delegation: the effect has to clear the
+variance before it is an effect. Budget repetitions, or restrict the comparison
+to tasks where `subagent_runs` shows delegation actually happened — in that
+experiment it happened on one task in six.
+
+What the counters have measured so far, on one model over four task shapes,
+each comparing a neutral prompt against a forced-delegation twin over identical
+work: three one-line fixes in separate modules cost 3.8x the tokens; a 24-file
+search 1.5x tokens and 2.2x wall; a 36-file three-package migration 2.6x tokens
+and 4.1x wall; three genuinely heterogeneous branches, the shape with the best
+theoretical case, 2.4x tokens and 3.7x wall over three repetitions. Success rate
+was 100% everywhere, and the forced arm's spread was about twice the neutral
+arm's, so delegation also buys variance.
+
+Read a child's token figure carefully: 27 measured child runs averaged 134k
+tokens each, but that is cumulative prompt tokens over 9.3 model calls with the
+same ~14k context re-sent each time, not 134k tokens of new material. At ~90%
+cache hit the real price of a child averaged ¥0.017. The 2-4x above is the
+number that matters, because both arms are counted the same way; the per-child
+total is not a threshold to compare a branch's size against.
+
+Why delegation is rare is answerable from the same runs, and the answer is not
+that the model weighs it and declines. Across 33 runs with delegation available,
+15% delegated and bash outnumbered every delegation-class call 10:1. The
+recorded reasoning shows the model deliberating over how to read efficiently —
+"that's 25 files... read them in parallel batches... I can read multiple files
+at once" — on a task built for `explore`, without delegation entering the
+decision at all.
+
+Three things explain that, and only one of them is a defect. The base system
+prompt never mentions delegation; every mention lives in the skills index, and
+each is a brake ("the heavy path... only when the task genuinely needs
+context-heavy work, not on weak relevance") next to an accelerator for inline
+skills ("even plausibly relevant... cheap"). The `task` tool description says
+what the tool does and never when to reach for it. And the model already has
+cheaper parallelism — several tool calls in one round trip, with no context
+duplicated — which is what it reasons in terms of.
+
+Given the measured 2.4-4.5x, a brake is the correct default; the gap is that
+nothing recognises the rare case where delegation would pay. Forcing it does not
+close that gap: in the forced fleet run the parent worked out all three fixes in
+its own reasoning before dispatching, so the children re-read the code to apply
+edits the parent had already derived. Delegation moved the typing, not the
+thinking.
+
+One hypothesis remains untested rather than disproved: delegation's isolation
+should pay when the parent is actually hurt by what it read. It could not be
+provoked here. Pinning a workspace `compact_ratio` down to 0.5% still produced
+zero compactions, because the agent keeps its session small by writing a script
+instead of reading — the same behaviour that wins it the comparisons. Context
+pressure needs a task that cannot be scripted away, which this corpus does not
+yet contain.
+
+The migration is the instructive one. Left alone the agent read a single file,
+wrote a script and changed 108 call sites in 28 seconds; split across three
+packages, no branch could see the transformation that solved all three. A task
+looking parallel-shaped is not evidence that splitting it is cheaper.
+
+Not yet measured, and deliberately not faked: rework-after-handoff needs
+mutation ordering across a whole run, which belongs to the harness driving the
+arms rather than the instrument recording one.
 
 ## 4. Data Types (`internal/provider`)
 
@@ -677,6 +1037,7 @@ default_model = "deepseek"   # provider name (→ its default model) or "provide
 [ui]
 # shortcut_layout = "desktop"       # classic|desktop; compatibility setting
 # cursor_shape = "bar"              # CLI/TUI textarea cursor: underline|block|bar
+show_turn_usage = false              # hide per-request token/cost receipts in the TUI; default true
 
 [agent]
 system_prompt = "You are Reasonix, a coding agent..."  # or system_prompt_file = "..."
@@ -692,21 +1053,29 @@ reasoning_language = "auto"       # visible reasoning text: auto|zh|en
 # A vendor endpoint exposing several models under one base_url/key.
 [[providers]]
 name           = "deepseek"
-kind           = "openai"
-base_url       = "https://api.deepseek.com"
-# chat_url     = "https://proxy.example.com/v1/chat/completions"   # optional full chat request URL
+kind           = "anthropic"
+base_url       = "https://api.deepseek.com/anthropic"
+# request_url  = "https://proxy.example.com/anthropic/v1/messages" # optional exact provider request URL
 # models_url   = "https://proxy.example.com/v1/models"             # optional model discovery URL
-models         = ["deepseek-v4-flash", "deepseek-v4-pro"]
+models         = ["deepseek-flash", "deepseek-v4-flash", "deepseek-v4-pro", "deepseek-v4-flash-vision-exp"]
 default        = "deepseek-v4-flash"   # optional; defaults to models[0]
+# vision_models = ["deepseek-v4-flash-vision-exp"]  # legacy compatibility; Settings derives image support from model metadata
+# Official DeepSeek vision accepts inline base64, http(s) image URLs, and Files API file_id.
 api_key_env    = "DEEPSEEK_API_KEY"
+web_search     = true
 context_window = 1000000   # tokens; harness compacts older history near this limit (0 disables)
-max_output_tokens = 32768  # total visible + reasoning + tool-call output; 0 = provider default
+# max_output_tokens = 0              # auto: provider capability; official DeepSeek omits until the window is tight
+# max_output_tokens = 32768          # optional cost cap; still clipped to physical remaining
+# max_output_tokens = 65536          # optional cost cap
+# max_output_tokens = -1             # force-omit optional wire limits; compact if the auto budget no longer fits
+# max_output_tokens never changes compact_ratio
 # model_overrides = { "deepseek-v4-flash" = { context_window = 1000000, max_output_tokens = 32768 } }
 
 # A single-model entry still works for custom OpenAI-compatible endpoints.
 
 [environment]
 enabled = true   # inject a stable startup summary of OS, shell, and common tool versions
+offline = false  # set true when outbound network access is unavailable; prevents futile retries
 
 # Optional trusted executable paths shown to the model when PATH probing is not enough.
 # Workspace-local paths are listed but not auto-executed during startup probing.
@@ -767,8 +1136,8 @@ release. Legacy channel configuration and arguments remain parseable during
 The executor tracks an adaptive progress lease while a todo is active. A new
 completion, unique successful read, command, or mutation renews the lease;
 exact repeats do not. After 8 no-progress tool-call rounds the host appends a
-one-shot reassessment nudge. After 16 it pauses and preserves work for a later
-user turn. The serial contract is level-aware while preserving the
+one-shot reassessment nudge. In Goal mode, the later threshold forces a re-plan
+and continues; outside Goal it may end the current attempt. The serial contract is level-aware while preserving the
 single-in_progress rule: in a two-level list the active level-1 sub-step is
 the only `in_progress` item and its level-0 phase stays `pending`; sub-steps
 complete in order, and the phase becomes `in_progress` — and signs off — only
@@ -776,7 +1145,7 @@ after all of its sub-steps have completed. A level-1 item with no phase above
 it is rejected. Retired `[agent].max_steps` and `planner_max_steps` keys remain
 parseable for upgrade compatibility, but are ignored and removed by a one-time
 migration. The CLI `--max-steps` flag and `[bot].max_steps` remain separate,
-explicit controls for one-off and unattended execution.
+explicit controls for one-off and unattended execution; bot `0` means continuous.
 
 `reasonix setup` writes this default config so the CLI is usable out of the box.
 
@@ -815,6 +1184,14 @@ the connection is ready.
 ```
 
 `[sandbox]` is the *enforcement* layer beneath permissions (which are *policy*).
+They stay two layers: a permitted call still cannot write outside the approved
+roots. Interactive sessions can extend those roots with a write-access approval
+(once / session / project `reasonix.toml` / deny). File tools request the target
+parent directory automatically. Bash must declare `additional_write_dirs` and a
+`justification`; the host does not infer paths from the command text. Headless
+`reasonix run` fails closed unless the directory is already in
+`[sandbox].allow_write` or `--add-dir`. Granting `${HOME}` is allowed with a
+high-risk warning; the filesystem root and Reasonix session/state paths are not.
 Phase 0 confines the file-writing built-ins (`write_file`, `edit_file`,
 `multi_edit`, `move_file`) to `workspace_root` (default cwd), the Reasonix user
 config dir, plus `allow_write`: a write whose target — resolved to an absolute,
@@ -874,8 +1251,8 @@ behavior. The escape-prompt and broader OS support are Phase 1's remainder (§9)
   command just fails and the model adapts), which completes the "allow inside the
   box, prompt at its edge" model. With this in place, "always allow" rule
   persistence becomes optional rather than load-bearing.
-- MCP long tail (deferred deliberately — no consumer / no foundation yet): OAuth
-  2.0 + `headersHelper` auth for remote servers; the remaining `.mcp.json` scopes
+- MCP long tail (deferred deliberately): `headersHelper` auth for remote
+  servers; the remaining `.mcp.json` scopes
   (local / user — project scope shipped, see §5); tool-search deferral;
   `list_changed` live updates; channels / elicitation / roots; plugins that
   provide *providers*, not just tools.

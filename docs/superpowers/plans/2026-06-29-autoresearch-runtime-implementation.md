@@ -1,5 +1,8 @@
 # AutoResearch Runtime Implementation Plan
 
+> Superseded historical plan. The standalone runtime and desktop surfaces were
+> later removed in favor of the unified Goal runtime.
+
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
 **Goal:** Implement the host-managed AutoResearch runtime from the design spec, including durable state, controller integration, desktop API, and frontend visibility.

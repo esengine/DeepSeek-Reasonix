@@ -30,6 +30,12 @@ const (
 	ErrProviderFailed        ErrorReason = "provider_failed"
 	ErrProviderInterrupted   ErrorReason = "provider_interrupted"
 	ErrInterceptTimeout      ErrorReason = "intercept_timeout"
+	ErrDependencyUnsatisfied ErrorReason = "dependency_unsatisfied"
+	ErrDependencyCycle       ErrorReason = "dependency_cycle"
+	ErrSchemaMismatch        ErrorReason = "schema_mismatch"
+	ErrActivationFailed      ErrorReason = "activation_failed"
+	ErrStaleGeneration       ErrorReason = "stale_generation"
+	ErrCleanupFailed         ErrorReason = "cleanup_failed"
 	ErrInternal              ErrorReason = "internal"
 )
 
@@ -44,7 +50,7 @@ type errorSpec struct {
 // pinned by tests.
 var frozenErrorSpecs = map[ErrorReason]errorSpec{
 	ErrProtocolError:         {rpcwire.ErrInvalidRequest, "The extension protocol frame or envelope is invalid.", false},
-	ErrUnknownMethod:         {rpcwire.ErrMethodNotFound, "The method is not registered in Extension Protocol v1.", false},
+	ErrUnknownMethod:         {rpcwire.ErrMethodNotFound, "The method is not registered in Extension Protocol v2.", false},
 	ErrInvalidParams:         {rpcwire.ErrInvalidParams, "The params do not match the registered method schema.", false},
 	ErrFrameTooLarge:         {DomainErrorCode, "The frame exceeds the frozen protocol size limit.", false},
 	ErrContentRefExpired:     {DomainErrorCode, "The referenced content has expired.", true},
@@ -56,6 +62,12 @@ var frozenErrorSpecs = map[ErrorReason]errorSpec{
 	ErrProviderFailed:        {DomainErrorCode, "The extension provider stream failed.", true},
 	ErrProviderInterrupted:   {DomainErrorCode, "The extension provider stream was interrupted.", true},
 	ErrInterceptTimeout:      {DomainErrorCode, "The extension did not answer an intercept within its timeout.", true},
+	ErrDependencyUnsatisfied: {DomainErrorCode, "A required dependency is missing or not version-compatible.", false},
+	ErrDependencyCycle:       {DomainErrorCode, "The dependency graph contains a required cycle.", false},
+	ErrSchemaMismatch:        {DomainErrorCode, "A capability schema hash does not match the expected pin.", false},
+	ErrActivationFailed:      {DomainErrorCode, "Component activation failed; the new generation was not published.", false},
+	ErrStaleGeneration:       {DomainErrorCode, "The message belongs to a superseded runtime generation.", false},
+	ErrCleanupFailed:         {DomainErrorCode, "Component cleanup failed while disposing scoped effects.", true},
 	ErrInternal:              {rpcwire.ErrInternal, "An internal extension protocol error occurred.", true},
 }
 

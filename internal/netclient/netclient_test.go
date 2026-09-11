@@ -125,17 +125,17 @@ func TestSummaryRedactsPassword(t *testing.T) {
 }
 
 func TestHTTPClientProxyModesAffectRequests(t *testing.T) {
-	var targetHits int32
+	var targetHits atomic.Int32
 	target := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		atomic.AddInt32(&targetHits, 1)
+		targetHits.Add(1)
 		_, _ = io.WriteString(w, "target")
 	}))
 	t.Cleanup(target.Close)
 	targetAddr := strings.TrimPrefix(target.URL, "http://")
 
-	var envProxyHits int32
+	var envProxyHits atomic.Int32
 	envProxy := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		atomic.AddInt32(&envProxyHits, 1)
+		envProxyHits.Add(1)
 		if got, want := r.URL.String(), "http://service.test/resource"; got != want {
 			t.Errorf("env proxy request URL = %q, want %q", got, want)
 		}
@@ -143,9 +143,9 @@ func TestHTTPClientProxyModesAffectRequests(t *testing.T) {
 	}))
 	t.Cleanup(envProxy.Close)
 
-	var customProxyHits int32
+	var customProxyHits atomic.Int32
 	customProxy := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		atomic.AddInt32(&customProxyHits, 1)
+		customProxyHits.Add(1)
 		if got, want := r.URL.String(), "http://service.test/resource"; got != want {
 			t.Errorf("custom proxy request URL = %q, want %q", got, want)
 		}
@@ -204,9 +204,9 @@ func TestHTTPClientProxyModesAffectRequests(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			atomic.StoreInt32(&targetHits, 0)
-			atomic.StoreInt32(&envProxyHits, 0)
-			atomic.StoreInt32(&customProxyHits, 0)
+			targetHits.Store(0)
+			envProxyHits.Store(0)
+			customProxyHits.Store(0)
 
 			client := mappedClient(t, tt.spec, "service.test:80", targetAddr)
 			resp, err := client.Get("http://service.test/resource")
@@ -221,13 +221,13 @@ func TestHTTPClientProxyModesAffectRequests(t *testing.T) {
 			if string(body) != tt.wantBody {
 				t.Fatalf("body = %q, want %q", body, tt.wantBody)
 			}
-			if got := atomic.LoadInt32(&targetHits); got != tt.wantTargetHits {
+			if got := targetHits.Load(); got != tt.wantTargetHits {
 				t.Fatalf("target hits = %d, want %d", got, tt.wantTargetHits)
 			}
-			if got := atomic.LoadInt32(&envProxyHits); got != tt.wantEnvHits {
+			if got := envProxyHits.Load(); got != tt.wantEnvHits {
 				t.Fatalf("env proxy hits = %d, want %d", got, tt.wantEnvHits)
 			}
-			if got := atomic.LoadInt32(&customProxyHits); got != tt.wantCustomHits {
+			if got := customProxyHits.Load(); got != tt.wantCustomHits {
 				t.Fatalf("custom proxy hits = %d, want %d", got, tt.wantCustomHits)
 			}
 		})
@@ -306,18 +306,18 @@ func TestStructuredProxyTypesAffectRequests(t *testing.T) {
 		})
 	}
 
-	if got := atomic.LoadInt32(&socks5Proxy.hits); got != 1 {
+	if got := socks5Proxy.hits.Load(); got != 1 {
 		t.Fatalf("socks5 proxy hits = %d, want 1", got)
 	}
-	if got := atomic.LoadInt32(&socks5hProxy.hits); got != 1 {
+	if got := socks5hProxy.hits.Load(); got != 1 {
 		t.Fatalf("socks5h proxy hits = %d, want 1", got)
 	}
 }
 
 func TestHTTPSRequestsRespectProxyModes(t *testing.T) {
-	var targetHits int32
+	var targetHits atomic.Int32
 	target := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		atomic.AddInt32(&targetHits, 1)
+		targetHits.Add(1)
 		w.Header().Set("Connection", "close")
 		_, _ = io.WriteString(w, "https-target")
 	}))
@@ -363,7 +363,7 @@ func TestHTTPSRequestsRespectProxyModes(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			atomic.StoreInt32(&targetHits, 0)
+			targetHits.Store(0)
 			atomic.StoreInt32(&proxyHits, 0)
 
 			tr := mappedTransport(t, tt.spec, "service.test:443", targetAddr)
@@ -381,7 +381,7 @@ func TestHTTPSRequestsRespectProxyModes(t *testing.T) {
 			if string(body) != "https-target" {
 				t.Fatalf("body = %q, want https-target", body)
 			}
-			if got := atomic.LoadInt32(&targetHits); got != 1 {
+			if got := targetHits.Load(); got != 1 {
 				t.Fatalf("target hits = %d, want 1", got)
 			}
 			if got := atomic.LoadInt32(&proxyHits); got != tt.wantProxyHits {
@@ -433,7 +433,7 @@ func mappedTransport(t *testing.T, spec ProxySpec, fromAddr, toAddr string) *htt
 
 type socksHTTPProxy struct {
 	addr string
-	hits int32
+	hits atomic.Int32
 }
 
 func newSocksHTTPProxy(t *testing.T) *socksHTTPProxy {
@@ -480,7 +480,7 @@ func (p *socksHTTPProxy) handle(conn net.Conn) {
 	if !p.readSocksAddr(r, req[3]) {
 		return
 	}
-	atomic.AddInt32(&p.hits, 1)
+	p.hits.Add(1)
 	if _, err := conn.Write([]byte{5, 0, 0, 1, 0, 0, 0, 0, 0, 0}); err != nil {
 		return
 	}

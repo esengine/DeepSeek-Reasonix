@@ -137,7 +137,7 @@ func TestSubmitSlashSubagentRunsIsolatedAndPersistsDistilledAnswer(t *testing.T)
 		t.Fatalf("runner context parent=%q call=%q plan=%v hostInitiated=%v", gotParent, gotCallID, gotPlanMode, gotHostInitiated)
 	}
 	msgs := c.History()
-	if len(msgs) != 3 || msgs[1].Role != provider.RoleUser || msgs[2].Role != provider.RoleAssistant {
+	if len(msgs) != 3 || !agent.IsUserAuthoredTurnMessage(msgs[1]) || msgs[2].Role != provider.RoleAssistant {
 		t.Fatalf("parent history = %+v, want system/user/assistant", msgs)
 	}
 	if !strings.Contains(msgs[1].Content, "inspect auth") || strings.Contains(msgs[1].Content, gotSkill.Body) {
@@ -215,7 +215,8 @@ func TestSubmitInvocationDisplayExecutesStructuredEntitiesInVisualOrder(t *testi
 		t.Fatalf("main runner received structured subagent turn: %q", mainRunner.inputs)
 	}
 	msgs := c.History()
-	if len(msgs) != 4 || msgs[1].Role != provider.RoleUser || msgs[2].Content != "first answer" || msgs[3].Content != "second answer" {
+	if len(msgs) != 5 || msgs[1].Origin != provider.MessageOriginHost ||
+		!agent.IsUserAuthoredTurnMessage(msgs[2]) || msgs[3].Content != "first answer" || msgs[4].Content != "second answer" {
 		t.Fatalf("parent history = %+v", msgs)
 	}
 }
@@ -491,8 +492,8 @@ func TestSubmitSlashSubagentWithoutRunnerFinishesWithError(t *testing.T) {
 	c.Submit("/helper inspect auth")
 	gotEvents := waitForTurnEvents(t, events)
 	waitIdle(t, c)
-	if len(gotEvents) != 1 || gotEvents[0].Kind != event.TurnDone || gotEvents[0].Err == nil ||
-		!strings.Contains(gotEvents[0].Err.Error(), "runner is unavailable") {
+	if terminal := gotEvents[len(gotEvents)-1]; terminal.Kind != event.TurnDone || terminal.Err == nil ||
+		!strings.Contains(terminal.Err.Error(), "runner is unavailable") {
 		t.Fatalf("missing terminal runner error: %+v", gotEvents)
 	}
 }
@@ -527,7 +528,7 @@ func TestCancelSlashSubagentStopsChildAndKeepsParentSessionUsable(t *testing.T) 
 		t.Fatal("controller still running after cancelling slash subagent")
 	}
 	msgs := c.History()
-	if len(msgs) != 2 || msgs[1].Role != provider.RoleUser {
+	if len(msgs) != 2 || !agent.IsUserAuthoredTurnMessage(msgs[1]) {
 		t.Fatalf("cancelled slash history = %+v, want system + preserved user task", msgs)
 	}
 	for _, e := range gotEvents {
@@ -844,59 +845,25 @@ func TestGoalAutoResearchTriggersForLongHorizonGoals(t *testing.T) {
 	c.SetGoal("持续排查这个线上卡顿直到根因明确，并验证修复")
 
 	got := c.Compose("next step?")
-	for _, want := range []string{
-		"AutoResearch protocol",
-		"<autoresearch-runtime>",
-		"task_id:",
-		"pivot_required:",
-		"stale_count >= 2",
-		"durable strategy for this Goal",
-	} {
-		if !strings.Contains(got, want) {
-			t.Fatalf("AutoResearch goal block missing %q:\n%s", want, got)
-		}
+	if !strings.Contains(got, "<active-goal>") || strings.Contains(strings.ToLower(got), "autoresearch") {
+		t.Fatalf("unified research Goal prompt = %q", got)
 	}
-}
-
-func TestGoalAutoResearchCanBeForcedOrDisabled(t *testing.T) {
-	c := New(Options{})
-	c.SetGoalWithResearchMode("fix the typo and add a test", GoalResearchOn)
-	if got := c.Compose("start"); !strings.Contains(got, "AutoResearch protocol") {
-		t.Fatalf("forced research goal should include AutoResearch protocol:\n%s", got)
+	if got := c.goals.budgetClass; got != budgetClassResearch {
+		t.Fatalf("research budget class = %q, want %q", got, budgetClassResearch)
 	}
-
-	c.SetGoalWithResearchMode("持续排查这个线上卡顿直到根因明确", GoalResearchOff)
-	if got := c.Compose("start"); strings.Contains(got, "AutoResearch protocol") {
-		t.Fatalf("simple override should suppress AutoResearch protocol:\n%s", got)
-	}
-}
-
-func TestGoalCommandPreservesResearchModeFlags(t *testing.T) {
-	c := New(Options{})
-	if !c.applyGoalCommand("/goal --research fix the typo", "") {
-		t.Fatal("goal command was not parsed")
-	}
-	if got := c.Compose("start"); !strings.Contains(got, "AutoResearch protocol") {
-		t.Fatalf("/goal --research should force AutoResearch through command dispatch:\n%s", got)
-	}
-
-	c = New(Options{})
-	if !c.applyGoalCommand("/goal --simple 持续排查这个线上卡顿直到根因明确", "") {
-		t.Fatal("goal command was not parsed")
-	}
-	if got := c.Compose("start"); strings.Contains(got, "AutoResearch protocol") {
-		t.Fatalf("/goal --simple should suppress AutoResearch through command dispatch:\n%s", got)
+	if c.GoalRuntime().TurnsLimit != 0 {
+		t.Fatalf("research Goal should have no turn quota: %+v", c.GoalRuntime())
 	}
 }
 
 func TestParseGoalCommandResearchFlags(t *testing.T) {
 	cmd, ok := ParseGoalCommand("/goal --research fix the typo")
-	if !ok || cmd.Action != GoalCommandSet || cmd.Text != "fix the typo" || cmd.ResearchMode != GoalResearchOn {
+	if !ok || cmd.Action != GoalCommandSet || cmd.Text != "fix the typo" || cmd.ResearchMode != GoalResearchOn || !cmd.DeprecatedBudgetFlag {
 		t.Fatalf("ParseGoalCommand --research = %+v ok=%v", cmd, ok)
 	}
 
 	cmd, ok = ParseGoalCommand("/goal --simple 持续排查直到根因明确")
-	if !ok || cmd.Action != GoalCommandSet || cmd.Text != "持续排查直到根因明确" || cmd.ResearchMode != GoalResearchOff {
+	if !ok || cmd.Action != GoalCommandSet || cmd.Text != "持续排查直到根因明确" || cmd.ResearchMode != GoalResearchOff || !cmd.DeprecatedBudgetFlag {
 		t.Fatalf("ParseGoalCommand --simple = %+v ok=%v", cmd, ok)
 	}
 }
@@ -985,19 +952,13 @@ func TestParseGoalCommandStrictOnlyConsumesLeadingFlags(t *testing.T) {
 	}
 }
 
-func TestComposeDrainsQueuedMemory(t *testing.T) {
-	c := New(Options{}) // no executor/memory — QueueMemory still queues a turn-tail note
+func TestQueueMemoryDoesNotCreateLegacyMemoryUpdate(t *testing.T) {
+	c := New(Options{})
 
 	c.QueueMemory("Saved memory \"rmb\": user's balance is in RMB")
 	got := c.Compose("hello")
-	if !strings.Contains(got, "<memory-update>") || !strings.Contains(got, "user's balance is in RMB") {
-		t.Fatalf("queued memory should ride the turn: %q", got)
-	}
-	if !strings.HasSuffix(got, "hello") {
-		t.Fatalf("user text should follow the memory block: %q", got)
-	}
-	if got2 := c.Compose("again"); got2 != "again" {
-		t.Fatalf("pendingMemory should drain after one turn, got %q", got2)
+	if got != "hello" {
+		t.Fatalf("background write must not create a legacy memory update: %q", got)
 	}
 }
 

@@ -70,6 +70,7 @@ export function ImageViewer({ open, imageUrl, imageName, onClose }: ImageViewerP
   const overlay = (
     <div
       className={`image-viewer-backdrop${visible ? " image-viewer--enter" : ""}`}
+      data-app-overlay=""
       onClick={handleBackdropClick}
       role="dialog"
       aria-modal="true"

@@ -3,8 +3,9 @@
 
 import { addBreadcrumb, dumpBreadcrumbs, snapshotBreadcrumbs, type Breadcrumb } from "./breadcrumbs";
 import { writeClipboardText } from "./clipboard";
+import { desktopHost } from "./desktopHost";
 import { t } from "./i18n";
-
+import { sessionPipelineDiagnostics, type SessionPipelineDiagnostics } from "./sessionDiagnostics";
 declare const __BUILD_COMMIT__: string;
 declare const __BUILD_CHANNEL__: string;
 
@@ -43,6 +44,11 @@ export type PerformanceSnapshot = {
     rttMs?: number;
     saveData?: boolean;
   };
+  // Session-switch/history pipeline diagnostics (Phase F): last activation
+  // timings, last HistorySlice page stats with index hit/miss, virtual mounted
+  // rows, markdown worker counters, transcript cache weights. All optional —
+  // absent before the first switch/page or when a provider never registered.
+  sessionPipeline?: SessionPipelineDiagnostics;
 };
 
 export type CrashPayload = {
@@ -268,7 +274,7 @@ export function topFrameFromStack(stack?: string): string {
     .split("\n")
     .map((l) => l.trim())
     .filter(Boolean);
-  return lines.find((l) => /\b(src|assets|wails|frontend)\b|\.tsx?:|\.jsx?:/.test(l)) ?? lines[1] ?? lines[0] ?? "";
+  return lines.find((l) => /\b(src|assets|frontend)\b|\.tsx?:|\.jsx?:/.test(l)) ?? lines[1] ?? lines[0] ?? "";
 }
 
 function currentView(): string {
@@ -365,6 +371,7 @@ function networkSnapshot(): PerformanceSnapshot["connection"] {
 function performanceSnapshot(reason: string, currentLagMs = 0): PerformanceSnapshot {
   const nav = typeof navigator === "undefined" ? undefined : (navigator as BrowserNavigator);
   const doc = typeof document === "undefined" ? undefined : document;
+  const pipeline = sessionPipelineDiagnostics();
   return {
     reason,
     uptimeMs: typeof performance !== "undefined" ? performance.now() : 0,
@@ -377,6 +384,7 @@ function performanceSnapshot(reason: string, currentLagMs = 0): PerformanceSnaps
     eventLoopLag: eventLoopLagSummary(currentLagMs),
     longTasks: typeof performance !== "undefined" ? longTaskSummary() : undefined,
     connection: networkSnapshot(),
+    sessionPipeline: Object.keys(pipeline).length > 0 ? pipeline : undefined,
   };
 }
 
@@ -426,6 +434,44 @@ export function formatPerformanceContext(snapshot: PerformanceSnapshot): string 
       snapshot.connection.saveData !== undefined ? `saveData ${snapshot.connection.saveData ? "true" : "false"}` : "",
     ].filter(Boolean);
     if (parts.length) lines.push(`connection: ${parts.join(", ")}`);
+  }
+  const pipeline = snapshot.sessionPipeline;
+  if (pipeline?.activation) {
+    const a = pipeline.activation;
+    const parts = [`request ${a.requestId}`];
+    if (a.tabId) parts.push(`tab ${a.tabId}`);
+    if (a.ticketToStartingMs !== undefined) parts.push(`ticket→starting ${fmtNumber(a.ticketToStartingMs)}ms`);
+    if (a.startingToReadyMs !== undefined) parts.push(`starting→ready ${fmtNumber(a.startingToReadyMs)}ms`);
+    if (a.totalMs !== undefined) parts.push(`total ${fmtNumber(a.totalMs)}ms`);
+    if (a.outcome) parts.push(`outcome ${a.outcome}`);
+    if (a.failureClass) parts.push(`failure ${a.failureClass}`);
+    lines.push(`activation: ${parts.join(", ")}`);
+  }
+  if (pipeline?.history) {
+    const h = pipeline.history;
+    lines.push(
+      `history page: ${h.entries} entries, ${fmtNumber(h.inlineBytes / 1024, 1)} KiB inline, ${fmtNumber(h.durationMs)}ms, source ${h.source || "unknown"}${h.stale ? ", stale" : ""} ` +
+        `(pages ${h.pages}, stale ${h.staleCount}, index hits ${h.indexHits}, misses ${h.indexMisses})`,
+    );
+  }
+  if (pipeline?.mountedRows) {
+    lines.push(`mounted rows: ${pipeline.mountedRows.mounted} of ${pipeline.mountedRows.total}`);
+  }
+  if (pipeline?.markdownWorker) {
+    const w = pipeline.markdownWorker;
+    lines.push(
+      `markdown worker: ${w.pending} pending, ${w.completed} parsed, avg ${fmtNumber(w.avgParseMs, 1)}ms, max ${fmtNumber(w.maxParseMs)}ms` +
+        `${w.fallbackActive ? ", fallback active" : ""}${w.workerFailures > 0 ? `, ${w.workerFailures} worker failures` : ""}`,
+    );
+  }
+  if (pipeline?.transcriptCache) {
+    const c = pipeline.transcriptCache;
+    lines.push(
+      `transcript cache: ${c.residentSessions}/${c.maxResidentSessions} resident sessions, ` +
+        `bodies ${fmtMb(c.bodyBytes / 1048576)} of ${fmtMb(c.bodyBudgetBytes / 1048576)}, ` +
+        `markdown ${fmtMb(c.markdownBytes / 1048576)} of ${fmtMb(c.markdownBudgetBytes / 1048576)}, ` +
+        `evictions ${c.historyEvictions} history + ${c.markdownEvictions} markdown`,
+    );
   }
   return lines.join("\n");
 }
@@ -627,9 +673,9 @@ function sendButton(
   className = "crash-overlay__send",
   onSent?: () => void,
 ): HTMLButtonElement | null {
-  // Resolved at click time via window.go, not the bridge module: this overlay must
-  // stay usable even when the rest of the app (and its imports) is broken.
-  const report = window.go?.main?.App?.ReportCrash;
+  // Resolved at click time through the host adapter, not the bridge module: this
+  // overlay must stay usable even when the rest of the app (and its imports) is broken.
+  const report = desktopHost().app?.ReportCrash;
   if (!report) return null;
   const send = document.createElement("button");
   send.className = className;
@@ -711,7 +757,7 @@ function paintPerformancePrompt(payload: CrashPayload, snapshot: PerformanceSnap
   host.replaceChildren(title, body, actions, note);
 }
 
-function paint(payload: CrashPayload) {
+export function paintCrashOverlay(payload: CrashPayload) {
   let host = document.getElementById("crash-overlay");
   if (!host) {
     host = document.createElement("div");
@@ -737,21 +783,20 @@ function paint(payload: CrashPayload) {
 }
 
 export function reportCrash(label: string, err: unknown, extra?: string) {
-  paint(buildCrashPayload(label, err, extra));
+  paintCrashOverlay(buildCrashPayload(label, err, extra));
 }
 
 type GlobalCrashEventLike = Pick<Event, "defaultPrevented"> & {
   message?: unknown;
   error?: unknown;
+  reason?: unknown;
   filename?: unknown;
   lineno?: unknown;
   colno?: unknown;
 };
 
-const RESIZE_OBSERVER_LOOP_MESSAGE_RE =
-  /^ResizeObserver loop (?:limit exceeded|completed with undelivered notifications\.?)$/;
+const RESIZE_OBSERVER_LOOP_MESSAGE_RE = /^ResizeObserver loop (?:limit exceeded|completed with undelivered notifications\.?)$/;
 const OPAQUE_SCRIPT_ERROR_MESSAGE = "Script error.";
-
 function globalCrashEventMessages(e: GlobalCrashEventLike): string[] {
   const messages: string[] = [];
   const pushMessage = (message: string) => {
@@ -759,7 +804,7 @@ function globalCrashEventMessages(e: GlobalCrashEventLike): string[] {
     if (trimmed) messages.push(trimmed);
   };
   if (typeof e.message === "string") pushMessage(e.message);
-  const error = e.error;
+  const error = e.error ?? e.reason;
   if (typeof error === "string") pushMessage(error);
   if (error && typeof error === "object" && "message" in error) {
     const msg = (error as { message?: unknown }).message;
@@ -770,8 +815,8 @@ function globalCrashEventMessages(e: GlobalCrashEventLike): string[] {
 
 export function shouldReportGlobalCrashEvent(e: GlobalCrashEventLike): boolean {
   if (e.defaultPrevented) return false;
-  if (globalCrashEventMessages(e).some((message) => RESIZE_OBSERVER_LOOP_MESSAGE_RE.test(message))) return false;
-  if (globalCrashEventMessages(e).some((message) => /Minified React error #520\b/.test(message))) return false;
+  if (globalCrashEventMessages(e).some((message) => RESIZE_OBSERVER_LOOP_MESSAGE_RE.test(message) ||
+    /Minified React error #520\b/.test(message) || message.includes("status was superseded by"))) return false;
   return true;
 }
 
@@ -859,7 +904,7 @@ function maybePromptForHeapPressure(): void {
 
 export function installPerformancePressureMonitor() {
   if (performanceMonitorInstalled || typeof window === "undefined" || typeof performance === "undefined") return;
-  if (!window.runtime) return;
+  if (desktopHost().kind === "none") return;
   performanceMonitorInstalled = true;
   const startedAt = performance.now();
   const graceUntil = startedAt + STARTUP_GRACE_MS;
@@ -964,16 +1009,4 @@ export function installPerformancePressureMonitor() {
     }
     maybePromptForHeapPressure();
   }, 1000);
-}
-
-export function installGlobalCrashHandlers() {
-  window.addEventListener("error", (e) => {
-    if (!shouldReportGlobalCrashEvent(e)) return;
-    const payload = buildCrashPayload("window.error", globalCrashReportReason(e));
-    if (isOpaqueScriptErrorEvent(e)) payload.fingerprintHint = opaqueScriptFingerprintHint();
-    paint(payload);
-  });
-  window.addEventListener("unhandledrejection", (e) => {
-    if (shouldReportGlobalCrashEvent(e)) reportCrash("unhandledrejection", e.reason);
-  });
 }

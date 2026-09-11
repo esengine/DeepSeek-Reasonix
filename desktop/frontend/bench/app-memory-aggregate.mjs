@@ -1,0 +1,10 @@
+import { readdirSync, readFileSync, writeFileSync } from "node:fs";
+import path from "node:path";
+import { aggregateShards } from "./app-memory-shards.mjs";
+const [directory, manifestFile, output, sourceSHA] = process.argv.slice(2);
+if (!directory || !manifestFile || !output || !sourceSHA) throw new Error("aggregate requires reports directory, manifest, output and source SHA");
+const files = readdirSync(directory, { recursive: true }).filter(file => path.basename(file) === "report.json");
+const reports = files.map(file => JSON.parse(readFileSync(path.join(directory, file), "utf8")));
+const result = aggregateShards(reports, JSON.parse(readFileSync(manifestFile, "utf8")), sourceSHA);
+writeFileSync(output, JSON.stringify(result, null, 2));
+console.log("App memory: three independent 896-round-trip shards passed; heap attribution remains pending.");

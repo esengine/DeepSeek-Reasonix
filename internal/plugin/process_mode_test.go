@@ -52,13 +52,13 @@ func TestHostModeEnsureConnectedSkipsCommandSandboxAndSharesProcess(t *testing.T
 		err error
 	}
 	ch := make(chan result, 3)
-	for i := 0; i < 3; i++ {
+	for range 3 {
 		go func() {
 			tools, err := host.EnsureConnected(ctx, spec)
 			ch <- result{len(tools), err}
 		}()
 	}
-	for i := 0; i < 3; i++ {
+	for range 3 {
 		r := <-ch
 		if r.err != nil {
 			t.Fatalf("EnsureConnected: %v", r.err)

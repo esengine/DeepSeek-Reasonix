@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"reasonix/internal/config"
+	"reasonix/internal/filelock"
 )
 
 // StartupState is the legacy startup-state.json shape written by v1.18-v1.19.
@@ -36,7 +37,7 @@ type PreviousRunObservation struct {
 	UptimeBucket   string
 }
 
-// StartupTracker is a read-only adapter for legacy startup records.
+// StartupTracker is a one-shot adapter for legacy startup records.
 type StartupTracker struct {
 	path         string
 	processAlive func(int) bool
@@ -52,10 +53,14 @@ func NewStartupTracker(path string) *StartupTracker {
 }
 
 func (t *StartupTracker) Read() (StartupState, error) {
-	if t.path == "" {
+	return readStartupState(t.path)
+}
+
+func readStartupState(path string) (StartupState, error) {
+	if path == "" {
 		return StartupState{}, nil
 	}
-	b, err := os.ReadFile(t.path)
+	b, err := os.ReadFile(path)
 	if err != nil {
 		if os.IsNotExist(err) {
 			return StartupState{}, nil
@@ -69,14 +74,51 @@ func (t *StartupTracker) Read() (StartupState, error) {
 	return state, nil
 }
 
-// ObservePreviousRun reports an unclean prior process without mutating its
-// record. No observation can alter startup behavior.
+// ObservePreviousRun atomically claims a completed legacy record and reports
+// an unclean prior process at most once. A record owned by a live legacy
+// process is never touched, and no observation can alter startup behavior.
 func (t *StartupTracker) ObservePreviousRun() PreviousRunObservation {
+	if t.path == "" {
+		return PreviousRunObservation{}
+	}
+	release, err := filelock.TryAcquire(t.path + ".claim.lock")
+	if err != nil {
+		return PreviousRunObservation{}
+	}
+	defer release()
+
 	state, err := t.Read()
-	if err != nil || state.Phase == "" || state.Phase == "clean-exit" {
+	if err != nil || state.Phase == "" {
 		return PreviousRunObservation{}
 	}
 	if runningStartupPhase(state.Phase) && state.PID > 0 && t.processAlive(state.PID) {
+		return PreviousRunObservation{}
+	}
+
+	claimed := t.path + ".claimed-" + time.Now().UTC().Format("20060102T150405.000000000")
+	if err := os.Rename(t.path, claimed); err != nil {
+		// Another launch may already have claimed the same record.
+		return PreviousRunObservation{}
+	}
+	defer os.Remove(claimed)
+
+	// Re-read the claimed bytes so a legacy writer that completed between the
+	// initial read and rename cannot be misclassified from a stale snapshot.
+	state, err = readStartupState(claimed)
+	if err != nil || state.Phase == "" {
+		// A legacy owner may still have been replacing the file while this old
+		// format was claimed. Preserve ambiguous bytes instead of turning a
+		// partial write into evidence loss.
+		_ = os.Rename(claimed, t.path)
+		return PreviousRunObservation{}
+	}
+	if state.Phase == "clean-exit" {
+		return PreviousRunObservation{}
+	}
+	if runningStartupPhase(state.Phase) && state.PID > 0 && t.processAlive(state.PID) {
+		// This is only possible if the legacy owner changed state during the
+		// claim window. Restore its record when the original path is still free.
+		_ = os.Rename(claimed, t.path)
 		return PreviousRunObservation{}
 	}
 	return PreviousRunObservation{

@@ -26,10 +26,18 @@ type syncSink struct {
 	inner Sink
 }
 
+var _ OptionalSinkCapabilities = (*syncSink)(nil)
+
 func (s *syncSink) Emit(e Event) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	s.inner.Emit(e)
+}
+
+func (s *syncSink) RecordDelegationAudit(a evidence.DelegationAudit) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	RecordDelegationAudit(s.inner, a)
 }
 
 func (s *syncSink) RecordReadinessAudit(a evidence.ReadinessAudit) {
@@ -38,6 +46,12 @@ func (s *syncSink) RecordReadinessAudit(a evidence.ReadinessAudit) {
 	if rs, ok := s.inner.(ReadinessAuditSink); ok {
 		rs.RecordReadinessAudit(a)
 	}
+}
+
+func (s *syncSink) RecordAnchorSafetyAudit(a AnchorSafetyAudit) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	RecordAnchorSafetyAudit(s.inner, a)
 }
 
 func (s *syncSink) RecordTurnCompletion() {
@@ -54,4 +68,62 @@ func (s *syncSink) RecordProtocolRecovery(a ProtocolRecoveryAudit) {
 	if rs, ok := s.inner.(ProtocolRecoveryAuditSink); ok {
 		rs.RecordProtocolRecovery(a)
 	}
+}
+
+func (s *syncSink) RecordContractShadow(a ContractShadowAudit) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if rs, ok := s.inner.(ContractShadowAuditSink); ok {
+		rs.RecordContractShadow(a)
+	}
+}
+
+func (s *syncSink) RecordCompletionReport(a CompletionReportAudit) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if rs, ok := s.inner.(CompletionReportAuditSink); ok {
+		rs.RecordCompletionReport(a)
+	}
+}
+
+func (s *syncSink) RecordOutcomeProgress(sample evidence.OutcomeSample) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if op, ok := s.inner.(OutcomeProgressSink); ok {
+		op.RecordOutcomeProgress(sample)
+	}
+}
+
+func (s *syncSink) RecordMemoryRecall(a MemoryRecallAudit) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if mr, ok := s.inner.(MemoryRecallSink); ok {
+		mr.RecordMemoryRecall(a)
+	}
+}
+
+func (s *syncSink) RecordDelegationAdmission(a DelegationAdmissionAudit) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if da, ok := s.inner.(DelegationAdmissionSink); ok {
+		da.RecordDelegationAdmission(a)
+	}
+}
+
+func (s *syncSink) RecordWorkspaceMutation(m WorkspaceMutation) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	RecordWorkspaceMutation(s.inner, m)
+}
+
+func (s *syncSink) RecordRunBudget(sample RunBudgetSample) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	RecordRunBudget(s.inner, sample)
+}
+
+func (s *syncSink) RecordSubagentLifecycle(info SubagentLifecycleInfo) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	RecordSubagentLifecycle(s.inner, info)
 }

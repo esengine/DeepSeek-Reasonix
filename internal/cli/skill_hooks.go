@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"log/slog"
 	"os"
+	"slices"
 	"strings"
 
 	tea "charm.land/bubbletea/v2"
@@ -226,7 +227,6 @@ func (m *chatTUI) scheduleSkillSessionRefresh(reason, notice string) bool {
 	m.pendingModelSwitch = func() tea.Msg {
 		c, err := build(controllerBuildSpec{
 			ModelRef:         ref,
-			RuntimeProfile:   m.runtimeProfile,
 			ToolApprovalMode: oldCtrl.ToolApprovalMode(),
 			PlanMode:         oldCtrl.PlanMode(),
 		}, carried, prevPath, oldCtrl)
@@ -313,10 +313,5 @@ func (m *chatTUI) hooksList(cwd string) {
 }
 
 func containsArg(args []string, flag string) bool {
-	for _, a := range args {
-		if a == flag {
-			return true
-		}
-	}
-	return false
+	return slices.Contains(args, flag)
 }

@@ -3,6 +3,7 @@
 package desktoplauncher
 
 import (
+	"errors"
 	"fmt"
 	"os"
 	"os/exec"
@@ -10,7 +11,9 @@ import (
 	"runtime"
 	"strings"
 
+	"reasonix/internal/appidentity"
 	"reasonix/internal/installlayout"
+	"reasonix/internal/proc"
 )
 
 // Run resolves the active desktop, performs the one-time legacy handoff when
@@ -26,11 +29,17 @@ func Run(args []string, buildVersion string) int {
 			return 0
 		}
 	}
+	if err := appidentity.ApplyToCurrentProcess(); err != nil {
+		fmt.Fprintln(os.Stderr, "warning: apply Windows app identity:", err)
+	}
 
 	installRoot, err := ResolveInstallRoot()
 	if err != nil {
 		fmt.Fprintln(os.Stderr, "error:", err)
 		return 1
+	}
+	if err := appidentity.RepairOwnedShortcuts(installRoot); err != nil {
+		fmt.Fprintln(os.Stderr, "warning: repair Windows shortcut identity:", err)
 	}
 	if err := runLegacyMigratorIfNeeded(installRoot); err != nil {
 		fmt.Fprintln(os.Stderr, "error:", err)
@@ -44,6 +53,7 @@ func Run(args []string, buildVersion string) int {
 	}
 
 	cmd := exec.Command(desktopPath, StripLegacyLaunchArgs(args)...)
+	proc.HideConsole(cmd)
 	cmd.Stdin, cmd.Stdout, cmd.Stderr = os.Stdin, os.Stdout, os.Stderr
 	cmd.Dir = installRoot
 	if DetachByDefault() {
@@ -54,7 +64,8 @@ func Run(args []string, buildVersion string) int {
 		return 0
 	}
 	if err := cmd.Run(); err != nil {
-		if exit, ok := err.(*exec.ExitError); ok {
+		var exit *exec.ExitError
+		if errors.As(err, &exit) {
 			return exit.ExitCode()
 		}
 		fmt.Fprintln(os.Stderr, "error:", err)
@@ -121,6 +132,7 @@ func runLegacyMigratorIfNeeded(installRoot string) error {
 	}
 
 	cmd := exec.Command(migratorPath, "--install-root", installRoot, "--no-relaunch")
+	proc.HideConsole(cmd)
 	cmd.Dir = installRoot
 	cmd.Stdin, cmd.Stdout, cmd.Stderr = os.Stdin, os.Stdout, os.Stderr
 	if err := cmd.Run(); err != nil {
@@ -150,7 +162,7 @@ func siblingDesktop(installRoot string) string {
 func StripLegacyLaunchArgs(args []string) []string {
 	out := make([]string, 0, len(args))
 	skipNext := false
-	for i := 0; i < len(args); i++ {
+	for i := range args {
 		if skipNext {
 			skipNext = false
 			continue

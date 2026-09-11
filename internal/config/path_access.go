@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 )
 
@@ -65,8 +66,8 @@ func evalSymlinksAllowMissing(path string) (string, error) {
 			if err != nil {
 				return "", err
 			}
-			for i := len(suffix) - 1; i >= 0; i-- {
-				resolved = filepath.Join(resolved, suffix[i])
+			for _, v := range slices.Backward(suffix) {
+				resolved = filepath.Join(resolved, v)
 			}
 			return filepath.Clean(resolved), nil
 		} else if !os.IsNotExist(err) {

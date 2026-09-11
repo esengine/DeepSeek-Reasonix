@@ -7,6 +7,7 @@ import (
 	"strings"
 
 	"reasonix/internal/config"
+	"reasonix/internal/fileutil"
 )
 
 // The desktop is a GUI app: launched from Finder or `open`, it starts with the
@@ -43,7 +44,7 @@ func saveWorkspace(dir string) {
 	if err := os.MkdirAll(filepath.Dir(p), 0o755); err != nil {
 		return
 	}
-	_ = os.WriteFile(p, []byte(dir), 0o644)
+	_ = fileutil.AtomicWriteFile(p, []byte(dir), 0o644)
 }
 
 // clearWorkspace removes the active workspace pointer file so that no stale
@@ -117,7 +118,7 @@ func rememberWorkspace(dir string) {
 		return
 	}
 	if b, err := json.MarshalIndent(paths, "", "  "); err == nil {
-		_ = os.WriteFile(p, b, 0o644)
+		_ = fileutil.AtomicWriteFile(p, b, 0o644)
 	}
 }
 
@@ -146,7 +147,7 @@ func forgetWorkspace(dir string) {
 		return
 	}
 	if b, err := json.MarshalIndent(paths, "", "  "); err == nil {
-		_ = os.WriteFile(p, b, 0o644)
+		_ = fileutil.AtomicWriteFile(p, b, 0o644)
 	}
 }
 

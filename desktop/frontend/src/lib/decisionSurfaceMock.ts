@@ -5,7 +5,8 @@ export type DecisionSurfaceKind =
   | "workspace_conflict"
   | "mode_jobs"
   | "close_active"
-  | "clear_context";
+  | "clear_context"
+  | "mcp_interaction";
 
 export const DECISION_SURFACE_MOCK_TRIGGERS: Readonly<Record<DecisionSurfaceKind, string>> = {
   tool_approval: "/mock-tool-approval",
@@ -15,9 +16,10 @@ export const DECISION_SURFACE_MOCK_TRIGGERS: Readonly<Record<DecisionSurfaceKind
   mode_jobs: "/mock-mode-jobs",
   close_active: "/mock-close-active",
   clear_context: "/mock-clear-context",
+  mcp_interaction: "/mock-mcp-interaction",
 };
 
-// QA-only stress scene. Keep this separate from the seven product decision
+// QA-only stress scene. Keep this separate from the eight product decision
 // surfaces so the canonical inventory stays stable while copy/layout extremes
 // can be exercised through the same Ask card used in production.
 export const LONG_DECISION_OPTIONS_MOCK_TRIGGER = "/mock-long-options";

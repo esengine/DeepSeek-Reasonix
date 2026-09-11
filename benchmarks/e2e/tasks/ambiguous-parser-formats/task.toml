@@ -1,0 +1,4 @@
+prompt = "parse_all in parser.py only handles some of the files under fixtures/. Users need it to handle all of them. Extend it so every fixture is parsed."
+class = "ambiguous"
+max_steps = 15
+timeout_sec = 300

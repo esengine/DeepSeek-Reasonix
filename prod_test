@@ -26,12 +26,11 @@ Environment overrides:
   PROD_TEST_VERSION        Same as second argument.
   PROD_TEST_CHANNEL        Same as third argument.
   PROD_TEST_FAST           1 enables a faster local iteration build:
-                           native host architecture on macOS, no Wails clean,
-                           and no DMG packaging unless overridden below.
-  PROD_TEST_INSTALL_TOOLS  1 installs missing Wails/create-dmg/nfpm when possible.
+                           native host architecture on macOS and no DMG
+                           packaging unless overridden below.
+  PROD_TEST_INSTALL_TOOLS  1 installs missing create-dmg/nfpm when possible.
                            Set to 0 to only check and print missing deps.
   PROD_TEST_OPEN_DIST      1 opens dist/ after a successful build when supported.
-  DESKTOP_BUILD_CLEAN      0 skips Wails -clean.
   DESKTOP_BUILD_SKIP_DMG   1 skips macOS DMG creation.
 EOF
 }
@@ -151,15 +150,6 @@ install_or_check_tools() {
 		fi
 	fi
 
-	if ! command -v wails >/dev/null 2>&1; then
-		if [[ "$install_tools" == "1" ]]; then
-			echo "==> installing Wails CLI"
-			go install github.com/wailsapp/wails/v2/cmd/wails@v2.12.0
-		else
-			fail "wails not found. Install with: go install github.com/wailsapp/wails/v2/cmd/wails@v2.12.0"
-		fi
-	fi
-
 	case "$os" in
 	darwin)
 		if [[ "${DESKTOP_BUILD_SKIP_DMG:-0}" == "1" ]]; then
@@ -192,7 +182,6 @@ install_or_check_tools() {
 
 FAST="${PROD_TEST_FAST:-0}"
 if [[ "$FAST" == "1" ]]; then
-	export DESKTOP_BUILD_CLEAN="${DESKTOP_BUILD_CLEAN:-0}"
 	export DESKTOP_BUILD_SKIP_DMG="${DESKTOP_BUILD_SKIP_DMG:-1}"
 fi
 
@@ -226,17 +215,6 @@ if [[ -n "$(git status --porcelain)" ]]; then
 	git status --short
 fi
 
-wails_json="desktop/wails.json"
-tmp_wails="$(mktemp)"
-cp "$wails_json" "$tmp_wails"
-restore_wails() {
-	if [[ -f "$tmp_wails" ]]; then
-		cp "$tmp_wails" "$wails_json"
-		rm -f "$tmp_wails"
-	fi
-}
-trap restore_wails EXIT
-
 echo "==> root: ."
 echo "==> branch: $(git branch --show-current 2>/dev/null || echo detached)"
 echo "==> commit: $(git rev-parse --short=8 HEAD 2>/dev/null || echo unknown)"
@@ -244,12 +222,11 @@ echo "==> platform: $PLATFORM"
 echo "==> version: $VERSION"
 echo "==> channel: $CHANNEL"
 if [[ "$FAST" == "1" ]]; then
-	echo "==> fast mode: DESKTOP_BUILD_CLEAN=$DESKTOP_BUILD_CLEAN DESKTOP_BUILD_SKIP_DMG=$DESKTOP_BUILD_SKIP_DMG"
+	echo "==> fast mode: DESKTOP_BUILD_SKIP_DMG=$DESKTOP_BUILD_SKIP_DMG"
 fi
 
 bash scripts/desktop-build.sh "$PLATFORM" "$VERSION" "$CHANNEL"
 
-echo "==> restored desktop/wails.json"
 echo "==> production-style artifacts are in dist/"
 
 if [[ "$OPEN_DIST" == "1" ]]; then

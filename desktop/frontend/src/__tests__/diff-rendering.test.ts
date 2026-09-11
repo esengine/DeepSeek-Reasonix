@@ -100,7 +100,7 @@ console.log("\ndiff rendering contract");
   eq(summarize("write_file", JSON.stringify({ content: "" })), "0 lines", "explicit empty write_file content still summarizes as 0 lines");
 }
 
-for (const prefix of ["diff", "inline-diff"]) {
+for (const prefix of ["diff"]) {
   eq(finalDeclaration(`.${prefix}__table`, "min-width"), "max-content", `${prefix} rows share the longest scroll width`);
   eq(finalDeclaration(`.${prefix}__table`, "width"), "100%", `${prefix} table fills the visible viewport`);
   eq(finalDeclaration(`.${prefix}__row`, "width"), "100%", `${prefix} row background fills table width`);

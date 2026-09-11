@@ -1,8 +1,10 @@
 package responses
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -50,6 +52,10 @@ func TestDetectVendorAndModeDefaults(t *testing.T) {
 		{"https://api.xiaomimimo.com/v1", "mimo", "stateless"},
 		{"https://dashscope.aliyuncs.com/compatible-mode/v1", "dashscope", "stateful"},
 		{"https://token-plan.cn-beijing.maas.aliyuncs.com/compatible-mode/v1", "dashscope", "stateful"},
+		{"https://api.stepfun.com/v1", "stepfun", "stateless"},
+		{"https://api.stepfun.com/step_plan/v1", "stepfun", "stateless"},
+		{"https://api.stepfun.ai/v1", "stepfun", "stateless"},
+		{"https://gateway.stepfun.com/v1", "", "stateful"},
 		{"https://api.deepseek.com.attacker.example/v1", "", "stateful"},
 		{"https://example.com/api.deepseek.com/v1", "", "stateful"},
 		{"https://example.com/v1", "", "stateful"},
@@ -88,6 +94,27 @@ func TestDeepSeekEffortUsesResponsesReasoningShape(t *testing.T) {
 	}
 }
 
+func TestDeepSeekProLowUsesResponsesReasoningShape(t *testing.T) {
+	client := New(Config{Name: "deepseek", BaseURL: "https://api.deepseek.com", Model: "deepseek-v4-pro", Effort: "low"}).(*client)
+	body, _, _ := client.buildRequestBody(provider.Request{Messages: []provider.Message{{Role: provider.RoleUser, Content: "hi"}}})
+	reasoning, _ := body["reasoning"].(map[string]any)
+	if got, _ := reasoning["effort"].(string); got != "low" {
+		t.Fatalf("Pro low effort = %q, want low", got)
+	}
+}
+
+func TestDeepSeekV4ResponsesEffortAliasesRejected(t *testing.T) {
+	for _, model := range []string{"deepseek-v4-flash", "deepseek-v4-pro"} {
+		for _, alias := range []string{"medium", "xhigh"} {
+			p := New(Config{Name: "deepseek", BaseURL: "https://api.deepseek.com", Model: model, Effort: alias})
+			_, err := p.Stream(context.Background(), provider.Request{})
+			if err == nil || !strings.Contains(err.Error(), "UNSUPPORTED_REASONING_EFFORT") {
+				t.Fatalf("%s/%s: %v", model, alias, err)
+			}
+		}
+	}
+}
+
 func TestRequestSerializesExplicitMaxOutputTokens(t *testing.T) {
 	client := New(Config{Name: "responses", BaseURL: "https://example.com", Model: "model"}).(*client)
 	body, _, _ := client.buildRequestBody(provider.Request{
@@ -104,15 +131,21 @@ func TestRequestUsesOnlySafeProviderOutputDefaults(t *testing.T) {
 
 	deepseek := New(Config{Name: "deepseek", BaseURL: "https://api.deepseek.com", Model: "deepseek-v4-flash"}).(*client)
 	deepseekBody, _, _ := deepseek.buildRequestBody(provider.Request{Messages: message})
-	if got := deepseekBody["max_output_tokens"]; got != provider.DefaultReasoningOutputTokens {
-		t.Fatalf("DeepSeek max_output_tokens = %#v, want %d", got, provider.DefaultReasoningOutputTokens)
+	if _, exists := deepseekBody["max_output_tokens"]; exists {
+		t.Fatalf("DeepSeek max_output_tokens = %#v, want omitted official 384K ceiling", deepseekBody["max_output_tokens"])
+	}
+
+	high := New(Config{Name: "deepseek", BaseURL: "https://api.deepseek.com", Model: "deepseek-v4-pro", Effort: "high"}).(*client)
+	highBody, _, _ := high.buildRequestBody(provider.Request{Messages: message})
+	if _, exists := highBody["max_output_tokens"]; exists {
+		t.Fatalf("high-effort DeepSeek budget = %#v, want omitted", highBody["max_output_tokens"])
 	}
 
 	for _, effort := range []string{"none", "disabled", "off", " NONE "} {
 		thinkingDisabled := New(Config{Name: "deepseek", BaseURL: "https://api.deepseek.com", Model: "deepseek-v4-flash", Effort: effort}).(*client)
 		thinkingDisabledBody, _, _ := thinkingDisabled.buildRequestBody(provider.Request{Messages: message})
 		if _, exists := thinkingDisabledBody["max_output_tokens"]; exists {
-			t.Fatalf("thinking-disabled DeepSeek effort %q received an automatic output budget: %#v", effort, thinkingDisabledBody)
+			t.Fatalf("thinking-disabled DeepSeek effort %q budget = %#v, want omitted", effort, thinkingDisabledBody["max_output_tokens"])
 		}
 	}
 
@@ -156,7 +189,7 @@ func TestFactoryPropagatesWebSearch(t *testing.T) {
 	if err != nil {
 		t.Fatalf("newFromConfig: %v", err)
 	}
-	if !p.(*client).webSearch {
+	if !p.(*client).search.NativeEnabled {
 		t.Fatal("web_search was not propagated to the Responses client")
 	}
 }
@@ -192,7 +225,7 @@ func TestStatelessRequestReplaysReasoningContentAndToolPair(t *testing.T) {
 	}))
 	defer server.Close()
 
-	p := New(Config{Name: "deepseek", APIKey: "key", BaseURL: server.URL, Model: "deepseek-v4-flash", Mode: "stateless", Effort: "high"})
+	p := New(Config{Name: "deepseek", APIKey: "key", BaseURL: server.URL, Model: "deepseek-v4-flash", Mode: "stateless", Effort: "high", Extra: map[string]any{"supported_efforts": []string{"high"}}})
 	collect(t, p, provider.Request{Messages: []provider.Message{
 		{Role: provider.RoleSystem, Content: "system"},
 		{Role: provider.RoleUser, Content: "weather"},
@@ -250,18 +283,18 @@ func TestStreamDoesNotDuplicateDoneText(t *testing.T) {
 	defer server.Close()
 
 	chunks := collect(t, New(Config{Name: "test", APIKey: "key", BaseURL: server.URL, Model: "m", Mode: "stateless"}), provider.Request{Messages: []provider.Message{{Role: provider.RoleUser, Content: "hi"}}})
-	var text string
+	var text strings.Builder
 	var usage *provider.Usage
 	for _, chunk := range chunks {
 		if chunk.Type == provider.ChunkText {
-			text += chunk.Text
+			text.WriteString(chunk.Text)
 		}
 		if chunk.Type == provider.ChunkUsage {
 			usage = chunk.Usage
 		}
 	}
-	if text != "hello" {
-		t.Fatalf("streamed text = %q, want one copy", text)
+	if text.String() != "hello" {
+		t.Fatalf("streamed text = %q, want one copy", text.String())
 	}
 	if usage == nil || usage.CacheHitTokens != 2 || usage.CacheMissTokens != 1 || usage.ReasoningTokens != 1 || usage.RequestCount != 1 {
 		t.Fatalf("usage = %+v", usage)
@@ -286,21 +319,21 @@ func TestStreamToleratesWebSearchLifecycleEvents(t *testing.T) {
 	chunks := collect(t, New(Config{Name: "deepseek", APIKey: "key", BaseURL: server.URL, Model: "deepseek-v4-flash", Mode: "stateless", WebSearch: true}), provider.Request{
 		Messages: []provider.Message{{Role: provider.RoleUser, Content: "search"}},
 	})
-	var text string
+	var text strings.Builder
 	for _, chunk := range chunks {
 		if chunk.Type == provider.ChunkText {
-			text += chunk.Text
+			text.WriteString(chunk.Text)
 		}
 		if chunk.Type == provider.ChunkError {
 			t.Fatalf("unexpected stream error: %v", chunk.Err)
 		}
 	}
-	if text != "found it" || chunks[len(chunks)-1].Type != provider.ChunkDone {
+	if text.String() != "found it" || chunks[len(chunks)-1].Type != provider.ChunkDone {
 		t.Fatalf("chunks = %#v, want searched answer followed by done", chunks)
 	}
 }
 
-func TestDeepSeekStatelessReplayPreservesCompletedWebSearchCall(t *testing.T) {
+func TestEnabledStatelessWebSearchPreservesCompletedCallForCompatibleGateway(t *testing.T) {
 	var bodies []map[string]any
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		var body map[string]any
@@ -321,10 +354,7 @@ func TestDeepSeekStatelessReplayPreservesCompletedWebSearchCall(t *testing.T) {
 	}))
 	defer server.Close()
 
-	client := New(Config{Name: "deepseek", APIKey: "key", BaseURL: server.URL, Model: "deepseek-v4-flash", Mode: "stateless", WebSearch: true}).(*client)
-	// The test server is local, so pin the vendor classification to the official
-	// DeepSeek behavior under test without weakening production URL detection.
-	client.vendor = "deepseek"
+	client := New(Config{Name: "compatible", APIKey: "key", BaseURL: server.URL, Model: "deepseek-v4-flash", Mode: "stateless", WebSearch: true}).(*client)
 	first := collect(t, client, provider.Request{Messages: []provider.Message{{Role: provider.RoleUser, Content: "search"}}})
 	var replayItems []json.RawMessage
 	for _, chunk := range first {
@@ -358,7 +388,7 @@ func TestDeepSeekStatelessReplayPreservesCompletedWebSearchCall(t *testing.T) {
 	}
 }
 
-func TestResponsesItemsAreIgnoredOutsideOfficialDeepSeekWire(t *testing.T) {
+func TestResponsesItemsAreIgnoredWhenServerWebSearchIsDisabled(t *testing.T) {
 	raw := json.RawMessage(`{"id":"ws_1","type":"web_search_call","status":"completed"}`)
 	client := New(Config{Name: "compatible", BaseURL: "https://gateway.example", Model: "m", Mode: "stateless"}).(*client)
 	body, _, _ := client.buildRequestBody(provider.Request{Messages: []provider.Message{
@@ -381,7 +411,7 @@ func TestDeepSeekReplayDropsMalformedOrIncompleteSearchItems(t *testing.T) {
 		json.RawMessage(`{"id":"fc_1","type":"function_call","status":"completed"}`),
 		json.RawMessage(`{"id":`),
 	}
-	client := New(Config{Name: "deepseek", BaseURL: "https://api.deepseek.com", Model: "deepseek-v4-flash", Mode: "stateless"}).(*client)
+	client := New(Config{Name: "deepseek", BaseURL: "https://api.deepseek.com", Model: "deepseek-v4-flash", Mode: "stateless", WebSearch: true}).(*client)
 	body, _, _ := client.buildRequestBody(provider.Request{Messages: []provider.Message{
 		{Role: provider.RoleUser, Content: "search"},
 		{Role: provider.RoleAssistant, Content: "answer", ResponsesItems: items},
@@ -753,7 +783,8 @@ func TestFailedEventSurfacesAuthenticationError(t *testing.T) {
 	chunks := collect(t, New(Config{Name: "test", APIKey: "key", KeyEnv: "TEST_API_KEY", BaseURL: server.URL, Model: "m"}), provider.Request{Messages: []provider.Message{{Role: provider.RoleUser, Content: "hi"}}})
 	for _, chunk := range chunks {
 		if chunk.Type == provider.ChunkError {
-			if _, ok := chunk.Err.(*provider.AuthError); !ok || !strings.Contains(chunk.Err.Error(), "TEST_API_KEY") {
+			var authErr *provider.AuthError
+			if !errors.As(chunk.Err, &authErr) || !strings.Contains(chunk.Err.Error(), "TEST_API_KEY") {
 				t.Fatalf("error = %T %v", chunk.Err, chunk.Err)
 			}
 			return
@@ -918,7 +949,7 @@ func TestMessagesToInputTextOnlyStaysStringShape(t *testing.T) {
 }
 
 func TestMessagesToInputEmbedsImagesAsInputImageParts(t *testing.T) {
-	c := New(Config{Name: "test", BaseURL: "https://api.deepseek.com", Model: "deepseek-v4-flash", Extra: map[string]any{"vision": true}}).(*client)
+	c := New(Config{Name: "mimo", BaseURL: "https://api.xiaomimimo.com/v1", Model: "mimo-v2.5", Extra: map[string]any{"vision": true}}).(*client)
 	body, _, _ := c.buildRequestBody(provider.Request{Messages: []provider.Message{
 		{Role: provider.RoleUser, Content: "what is this", Images: []string{"data:image/png;base64,AAAA", "data:image/jpeg;base64,BBBB"}},
 	}})
@@ -942,13 +973,38 @@ func TestMessagesToInputEmbedsImagesAsInputImageParts(t *testing.T) {
 		}
 	}
 	// Vision disabled: images are ignored, content stays a string.
-	plain := New(Config{Name: "test", BaseURL: "https://api.deepseek.com", Model: "deepseek-v4-flash"}).(*client)
+	plain := New(Config{Name: "mimo", BaseURL: "https://api.xiaomimimo.com/v1", Model: "mimo-v2.5"}).(*client)
 	body2, _, _ := plain.buildRequestBody(provider.Request{Messages: []provider.Message{
 		{Role: provider.RoleUser, Content: "what is this", Images: []string{"data:image/png;base64,AAAA"}},
 	}})
 	items2 := body2["input"].([]map[string]any)
 	if got, ok := items2[0]["content"].(string); !ok || got != "what is this" {
 		t.Fatalf("vision-off user content = %#v, want string", items2[0]["content"])
+	}
+}
+
+func TestOfficialDeepSeekResponsesIgnoresVisionMetadata(t *testing.T) {
+	c := New(Config{
+		Name: "deepseek", BaseURL: "https://api.deepseek.com", Model: "deepseek-v4-pro",
+		Extra: map[string]any{"vision": true},
+	}).(*client)
+	if c.vision {
+		t.Fatal("official DeepSeek Responses endpoint must ignore vision metadata")
+	}
+	body, _, _ := c.buildRequestBody(provider.Request{Messages: []provider.Message{{
+		Role: provider.RoleUser, Content: "what is this",
+		Images: []string{"data:image/png;base64,AAAA"},
+	}}})
+	items := body["input"].([]map[string]any)
+	if got, ok := items[0]["content"].(string); !ok || got != "what is this" {
+		t.Fatalf("official DeepSeek content = %#v, want plain text", items[0]["content"])
+	}
+	encoded, err := json.Marshal(body)
+	if err != nil {
+		t.Fatalf("marshal request body: %v", err)
+	}
+	if bytes.Contains(encoded, []byte("input_image")) || bytes.Contains(encoded, []byte("base64,AAAA")) {
+		t.Fatalf("official DeepSeek Responses request leaked image payload: %s", encoded)
 	}
 }
 
@@ -1123,27 +1179,60 @@ func TestReasoningMetaChunkEndToEnd(t *testing.T) {
 	}
 }
 
-// TestVendorTableMaxOutputTokens：默认输出预算完全由 vendor 表驱动——
-// mimo 65536（长思考不截断）、deepseek 32K、unknown 不设。
+// TestVendorTableMaxOutputTokens: MiMo keeps the 16K/32K ladder; official
+// DeepSeek omits max_output_tokens so the server uses its 384K ceiling.
 func TestVendorTableMaxOutputTokens(t *testing.T) {
 	msg := []provider.Message{{Role: provider.RoleUser, Content: "hi"}}
 
-	// mimo：表默认 65536（思考模式不设会顶到服务端 32768 截断）
 	mimo := New(Config{Name: "mimo", BaseURL: "https://api.xiaomimimo.com/v1", Model: "mimo-v2.5-pro"}).(*client)
 	body, _, _ := mimo.buildRequestBody(provider.Request{Messages: msg})
-	if got := body["max_output_tokens"]; got != 65536 {
-		t.Fatalf("mimo max_output_tokens = %#v, want 65536 (vendor table)", got)
+	if got := body["max_output_tokens"]; got != provider.DefaultReasoningOutputTokens {
+		t.Fatalf("mimo max_output_tokens = %#v, want reasoning %d", got, provider.DefaultReasoningOutputTokens)
 	}
-	// mimo 思考禁用也设 65536（mimo 无 thinking-disabled 豁免——表无条件）
 	noThinking := New(Config{Name: "mimo", BaseURL: "https://api.xiaomimimo.com/v1", Model: "mimo-v2.5-pro", Effort: "none"}).(*client)
 	nb, _, _ := noThinking.buildRequestBody(provider.Request{Messages: msg})
-	if nb["max_output_tokens"] != 65536 {
-		t.Fatalf("mimo thinking-disabled budget = %#v, want 65536", nb["max_output_tokens"])
+	if nb["max_output_tokens"] != provider.DefaultOrdinaryOutputTokens {
+		t.Fatalf("mimo thinking-disabled budget = %#v, want ordinary %d", nb["max_output_tokens"], provider.DefaultOrdinaryOutputTokens)
 	}
-	// deepseek 值来自表（非硬编码常量）
 	ds := New(Config{Name: "deepseek", BaseURL: "https://api.deepseek.com", Model: "deepseek-v4-pro"}).(*client)
 	db, _, _ := ds.buildRequestBody(provider.Request{Messages: msg})
-	if got := db["max_output_tokens"]; got != capabilitiesFor("deepseek").defaultMaxOutputTokens {
-		t.Fatalf("deepseek budget must come from vendor table, got %#v", got)
+	if _, exists := db["max_output_tokens"]; exists {
+		t.Fatalf("deepseek auto budget = %#v, want omitted official ceiling", db["max_output_tokens"])
+	}
+}
+
+// TestStepFunResponsesSummaryRequired: StepFun's Responses API rejects input
+// reasoning items without a `summary` list (verified live: 400 without,
+// 200 with), like DashScope. The vendor capability must carry the flag so the
+// replay path emits it, and its reasoning.effort shape follows the OpenAI
+// contract.
+func TestStepFunResponsesSummaryRequired(t *testing.T) {
+	c := New(Config{Name: "stepfun-responses", BaseURL: "https://api.stepfun.com/v1", Model: "step-3.7-flash", Effort: "low"}).(*client)
+	body, _, _ := c.buildRequestBody(provider.Request{
+		Messages: []provider.Message{
+			{Role: provider.RoleUser, Content: "hi"},
+			{Role: provider.RoleAssistant, Content: "answer", ReasoningContent: "think",
+				ReasoningID: "rs_1", ReasoningStatus: "completed"},
+		},
+	})
+	reasoning, _ := body["reasoning"].(map[string]any)
+	if got, _ := reasoning["effort"].(string); got != "low" {
+		t.Fatalf("stepfun reasoning.effort = %q, want low", got)
+	}
+	items := body["input"].([]map[string]any)
+	var reasoningItem map[string]any
+	for _, item := range items {
+		if item["type"] == "reasoning" {
+			reasoningItem = item
+		}
+	}
+	if reasoningItem == nil {
+		t.Fatal("stepfun input must replay the reasoning item")
+	}
+	if _, ok := reasoningItem["summary"].([]map[string]string); !ok {
+		t.Fatalf("stepfun reasoning item must carry summary, got %#v", reasoningItem["summary"])
+	}
+	if reasoningItem["id"] != "rs_1" {
+		t.Fatalf("stepfun reasoning item id = %v, want rs_1", reasoningItem["id"])
 	}
 }

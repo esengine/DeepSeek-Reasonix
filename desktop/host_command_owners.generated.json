@@ -1,0 +1,8373 @@
+{
+  "AIRenameSession": {
+    "domain": "desktop/session_ai_title.go",
+    "owner": "App.AIRenameSession",
+    "sources": [
+      "desktop/session_ai_title.go"
+    ],
+    "scope": {
+      "kind": "owner-inputs",
+      "resolver": "App.AIRenameSession",
+      "inputs": [
+        "topicID"
+      ]
+    }
+  },
+  "AbandonPendingUpdate": {
+    "domain": "desktop/updater_app.go",
+    "owner": "App.AbandonPendingUpdate",
+    "sources": [
+      "desktop/updater_app.go"
+    ],
+    "scope": {
+      "kind": "owner-state",
+      "resolver": "App.AbandonPendingUpdate",
+      "inputs": []
+    }
+  },
+  "AcceptDelivery": {
+    "domain": "desktop/delivery_accept.go",
+    "owner": "App.AcceptDelivery",
+    "sources": [
+      "desktop/delivery_accept.go"
+    ],
+    "scope": {
+      "kind": "owner-state",
+      "resolver": "App.AcceptDelivery",
+      "inputs": []
+    }
+  },
+  "AcceptDeliveryToTab": {
+    "domain": "desktop/delivery_accept.go",
+    "owner": "App.AcceptDeliveryToTab",
+    "sources": [
+      "desktop/delivery_accept.go"
+    ],
+    "scope": {
+      "kind": "owner-inputs",
+      "resolver": "App.AcceptDeliveryToTab",
+      "inputs": [
+        "tabID"
+      ]
+    }
+  },
+  "AcceptMemorySuggestion": {
+    "domain": "desktop/memory_suggestions.go",
+    "owner": "App.AcceptMemorySuggestion",
+    "sources": [
+      "desktop/memory_suggestions.go"
+    ],
+    "scope": {
+      "kind": "owner-inputs",
+      "resolver": "App.AcceptMemorySuggestion",
+      "inputs": [
+        "in"
+      ]
+    }
+  },
+  "AcceptMemorySuggestionForTab": {
+    "domain": "desktop/memory_suggestions.go",
+    "owner": "App.AcceptMemorySuggestionForTab",
+    "sources": [
+      "desktop/memory_suggestions.go"
+    ],
+    "scope": {
+      "kind": "owner-inputs",
+      "resolver": "App.AcceptMemorySuggestionForTab",
+      "inputs": [
+        "tabID",
+        "in"
+      ]
+    }
+  },
+  "AcceptSkillSuggestion": {
+    "domain": "desktop/memory_suggestions.go",
+    "owner": "App.AcceptSkillSuggestion",
+    "sources": [
+      "desktop/memory_suggestions.go"
+    ],
+    "scope": {
+      "kind": "owner-inputs",
+      "resolver": "App.AcceptSkillSuggestion",
+      "inputs": [
+        "in"
+      ]
+    }
+  },
+  "AcceptSkillSuggestionForTab": {
+    "domain": "desktop/memory_suggestions.go",
+    "owner": "App.AcceptSkillSuggestionForTab",
+    "sources": [
+      "desktop/memory_suggestions.go"
+    ],
+    "scope": {
+      "kind": "owner-inputs",
+      "resolver": "App.AcceptSkillSuggestionForTab",
+      "inputs": [
+        "tabID",
+        "in"
+      ]
+    }
+  },
+  "ActivateBaseStyle": {
+    "domain": "desktop/theme_app.go",
+    "owner": "App.ActivateBaseStyle",
+    "sources": [
+      "desktop/theme_app.go"
+    ],
+    "scope": {
+      "kind": "owner-inputs",
+      "resolver": "App.ActivateBaseStyle",
+      "inputs": [
+        "style"
+      ]
+    }
+  },
+  "ActivateThemePack": {
+    "domain": "desktop/theme_app.go",
+    "owner": "App.ActivateThemePack",
+    "sources": [
+      "desktop/theme_app.go"
+    ],
+    "scope": {
+      "kind": "owner-inputs",
+      "resolver": "App.ActivateThemePack",
+      "inputs": [
+        "id"
+      ]
+    }
+  },
+  "ActivateTopic": {
+    "domain": "desktop/tabs.go",
+    "owner": "App.ActivateTopic",
+    "sources": [
+      "desktop/tabs.go"
+    ],
+    "scope": {
+      "kind": "owner-inputs",
+      "resolver": "App.ActivateTopic",
+      "inputs": [
+        "scope",
+        "workspaceRoot",
+        "topicID",
+        "sessionPath"
+      ]
+    }
+  },
+  "ActiveWorkForTab": {
+    "domain": "desktop/background_runtime.go",
+    "owner": "App.ActiveWorkForTab",
+    "sources": [
+      "desktop/background_runtime.go"
+    ],
+    "scope": {
+      "kind": "owner-inputs",
+      "resolver": "App.ActiveWorkForTab",
+      "inputs": [
+        "tabID"
+      ]
+    }
+  },
+  "AddMCPServer": {
+    "domain": "desktop/app.go",
+    "owner": "App.AddMCPServer",
+    "sources": [
+      "desktop/app.go"
+    ],
+    "scope": {
+      "kind": "owner-inputs",
+      "resolver": "App.AddMCPServer",
+      "inputs": [
+        "in"
+      ]
+    }
+  },
+  "AddOfficialProviderAccess": {
+    "domain": "desktop/official_provider_access_install.go",
+    "owner": "App.AddOfficialProviderAccess",
+    "sources": [
+      "desktop/official_provider_access_install.go"
+    ],
+    "scope": {
+      "kind": "owner-inputs",
+      "resolver": "App.AddOfficialProviderAccess",
+      "inputs": [
+        "kind",
+        "key"
+      ]
+    }
+  },
+  "AddPermissionRule": {
+    "domain": "desktop/settings_app.go",
+    "owner": "App.AddPermissionRule",
+    "sources": [
+      "desktop/settings_app.go"
+    ],
+    "scope": {
+      "kind": "owner-inputs",
+      "resolver": "App.AddPermissionRule",
+      "inputs": [
+        "list",
+        "rule"
+      ]
+    }
+  },
+  "AddProviderConnection": {
+    "domain": "desktop/settings_app.go",
+    "owner": "App.AddProviderConnection",
+    "sources": [
+      "desktop/settings_app.go"
+    ],
+    "scope": {
+      "kind": "owner-inputs",
+      "resolver": "App.AddProviderConnection",
+      "inputs": [
+        "presetID",
+        "sourceName",
+        "key"
+      ]
+    }
+  },
+  "AddProviderConnectionWithOptions": {
+    "domain": "desktop/settings_app.go",
+    "owner": "App.AddProviderConnectionWithOptions",
+    "sources": [
+      "desktop/settings_app.go"
+    ],
+    "scope": {
+      "kind": "owner-inputs",
+      "resolver": "App.AddProviderConnectionWithOptions",
+      "inputs": [
+        "presetID",
+        "sourceName",
+        "key",
+        "baseURL",
+        "kind"
+      ]
+    }
+  },
+  "AddProviderConnectionWithURL": {
+    "domain": "desktop/settings_app.go",
+    "owner": "App.AddProviderConnectionWithURL",
+    "sources": [
+      "desktop/settings_app.go"
+    ],
+    "scope": {
+      "kind": "owner-inputs",
+      "resolver": "App.AddProviderConnectionWithURL",
+      "inputs": [
+        "presetID",
+        "sourceName",
+        "key",
+        "baseURL"
+      ]
+    }
+  },
+  "AddProviderPresetAccess": {
+    "domain": "desktop/settings_app.go",
+    "owner": "App.AddProviderPresetAccess",
+    "sources": [
+      "desktop/settings_app.go"
+    ],
+    "scope": {
+      "kind": "owner-inputs",
+      "resolver": "App.AddProviderPresetAccess",
+      "inputs": [
+        "id",
+        "key"
+      ]
+    }
+  },
+  "AddRemoteForward": {
+    "domain": "desktop/remote_app.go",
+    "owner": "App.AddRemoteForward",
+    "sources": [
+      "desktop/remote_app.go"
+    ],
+    "scope": {
+      "kind": "owner-inputs",
+      "resolver": "App.AddRemoteForward",
+      "inputs": [
+        "hostID",
+        "in"
+      ]
+    }
+  },
+  "AddRemoteHost": {
+    "domain": "desktop/remote_app.go",
+    "owner": "App.AddRemoteHost",
+    "sources": [
+      "desktop/remote_app.go"
+    ],
+    "scope": {
+      "kind": "owner-inputs",
+      "resolver": "App.AddRemoteHost",
+      "inputs": [
+        "in"
+      ]
+    }
+  },
+  "AddRemoteProject": {
+    "domain": "desktop/remote_project_registry.go",
+    "owner": "App.AddRemoteProject",
+    "sources": [
+      "desktop/remote_project_registry.go"
+    ],
+    "scope": {
+      "kind": "owner-inputs",
+      "resolver": "App.AddRemoteProject",
+      "inputs": [
+        "hostID",
+        "workspace"
+      ]
+    }
+  },
+  "AddSkillPath": {
+    "domain": "desktop/app.go",
+    "owner": "App.AddSkillPath",
+    "sources": [
+      "desktop/app.go"
+    ],
+    "scope": {
+      "kind": "owner-inputs",
+      "resolver": "App.AddSkillPath",
+      "inputs": [
+        "path"
+      ]
+    }
+  },
+  "AnswerMCPInteractionForTab": {
+    "domain": "desktop/mcp_interaction_app.go",
+    "owner": "App.AnswerMCPInteractionForTab",
+    "sources": [
+      "desktop/mcp_interaction_app.go"
+    ],
+    "scope": {
+      "kind": "owner-inputs",
+      "resolver": "App.AnswerMCPInteractionForTab",
+      "inputs": [
+        "tabID",
+        "id",
+        "action",
+        "content"
+      ]
+    }
+  },
+  "AnswerMCPInteractionForTurn": {
+    "domain": "desktop/decision_runtime_api.go",
+    "owner": "App.AnswerMCPInteractionForTurn",
+    "sources": [
+      "desktop/decision_runtime_api.go"
+    ],
+    "scope": {
+      "kind": "owner-inputs",
+      "resolver": "App.AnswerMCPInteractionForTurn",
+      "inputs": [
+        "tabID",
+        "turnID",
+        "runtimeEpoch",
+        "id",
+        "action",
+        "content"
+      ]
+    }
+  },
+  "AnswerPromptForTab": {
+    "domain": "desktop/turn_runtime_api.go",
+    "owner": "App.AnswerPromptForTab",
+    "sources": [
+      "desktop/turn_runtime_api.go"
+    ],
+    "scope": {
+      "kind": "owner-inputs",
+      "resolver": "App.AnswerPromptForTab",
+      "inputs": [
+        "tabID",
+        "turnID",
+        "promptID",
+        "answers"
+      ]
+    }
+  },
+  "AnswerQuestion": {
+    "domain": "desktop/app.go",
+    "owner": "App.AnswerQuestion",
+    "sources": [
+      "desktop/app.go"
+    ],
+    "scope": {
+      "kind": "owner-inputs",
+      "resolver": "App.AnswerQuestion",
+      "inputs": [
+        "id",
+        "answers"
+      ]
+    }
+  },
+  "AnswerQuestionForTab": {
+    "domain": "desktop/app.go",
+    "owner": "App.AnswerQuestionForTab",
+    "sources": [
+      "desktop/app.go"
+    ],
+    "scope": {
+      "kind": "owner-inputs",
+      "resolver": "App.AnswerQuestionForTab",
+      "inputs": [
+        "tabID",
+        "id",
+        "answers"
+      ]
+    }
+  },
+  "AnswerRemoteTab": {
+    "domain": "desktop/remote_tab.go",
+    "owner": "App.AnswerRemoteTab",
+    "sources": [
+      "desktop/remote_tab.go"
+    ],
+    "scope": {
+      "kind": "owner-inputs",
+      "resolver": "App.AnswerRemoteTab",
+      "inputs": [
+        "tabID",
+        "callID",
+        "answers"
+      ]
+    }
+  },
+  "ApplyModelSettings": {
+    "domain": "desktop/model_settings_api.go",
+    "owner": "App.ApplyModelSettings",
+    "sources": [
+      "desktop/model_settings_api.go"
+    ],
+    "scope": {
+      "kind": "owner-inputs",
+      "resolver": "App.ApplyModelSettings",
+      "inputs": [
+        "change"
+      ]
+    }
+  },
+  "ApplyUpdateRequest": {
+    "domain": "desktop/updater_app.go",
+    "owner": "App.ApplyUpdateRequest",
+    "sources": [
+      "desktop/updater_app.go"
+    ],
+    "scope": {
+      "kind": "owner-inputs",
+      "resolver": "App.ApplyUpdateRequest",
+      "inputs": [
+        "selectedChannel",
+        "expectedVersion",
+        "requestID"
+      ]
+    }
+  },
+  "Approve": {
+    "domain": "desktop/app.go",
+    "owner": "App.Approve",
+    "sources": [
+      "desktop/app.go"
+    ],
+    "scope": {
+      "kind": "owner-inputs",
+      "resolver": "App.Approve",
+      "inputs": [
+        "id",
+        "allow",
+        "session",
+        "persist"
+      ]
+    }
+  },
+  "ApproveRemoteTab": {
+    "domain": "desktop/remote_tab.go",
+    "owner": "App.ApproveRemoteTab",
+    "sources": [
+      "desktop/remote_tab.go"
+    ],
+    "scope": {
+      "kind": "owner-inputs",
+      "resolver": "App.ApproveRemoteTab",
+      "inputs": [
+        "tabID",
+        "callID",
+        "decision"
+      ]
+    }
+  },
+  "ApproveTab": {
+    "domain": "desktop/app.go",
+    "owner": "App.ApproveTab",
+    "sources": [
+      "desktop/app.go"
+    ],
+    "scope": {
+      "kind": "owner-inputs",
+      "resolver": "App.ApproveTab",
+      "inputs": [
+        "tabID",
+        "id",
+        "allow",
+        "session",
+        "persist"
+      ]
+    }
+  },
+  "ApproveTabForTurn": {
+    "domain": "desktop/decision_runtime_api.go",
+    "owner": "App.ApproveTabForTurn",
+    "sources": [
+      "desktop/decision_runtime_api.go"
+    ],
+    "scope": {
+      "kind": "owner-inputs",
+      "resolver": "App.ApproveTabForTurn",
+      "inputs": [
+        "tabID",
+        "turnID",
+        "runtimeEpoch",
+        "id",
+        "allow",
+        "session",
+        "persist"
+      ]
+    }
+  },
+  "AttachDropped": {
+    "domain": "desktop/app.go",
+    "owner": "App.AttachDropped",
+    "sources": [
+      "desktop/app.go"
+    ],
+    "scope": {
+      "kind": "owner-inputs",
+      "resolver": "App.AttachDropped",
+      "inputs": [
+        "path"
+      ]
+    }
+  },
+  "AttachmentDataURL": {
+    "domain": "desktop/app.go",
+    "owner": "App.AttachmentDataURL",
+    "sources": [
+      "desktop/app.go"
+    ],
+    "scope": {
+      "kind": "owner-inputs",
+      "resolver": "App.AttachmentDataURL",
+      "inputs": [
+        "path"
+      ]
+    }
+  },
+  "AuthenticateMCPServer": {
+    "domain": "desktop/mcp_oauth.go",
+    "owner": "App.AuthenticateMCPServer",
+    "sources": [
+      "desktop/mcp_oauth.go"
+    ],
+    "scope": {
+      "kind": "owner-inputs",
+      "resolver": "App.AuthenticateMCPServer",
+      "inputs": [
+        "name"
+      ]
+    }
+  },
+  "AuthorizeAndConnectMCPServer": {
+    "domain": "desktop/app.go",
+    "owner": "App.AuthorizeAndConnectMCPServer",
+    "sources": [
+      "desktop/app.go"
+    ],
+    "scope": {
+      "kind": "owner-inputs",
+      "resolver": "App.AuthorizeAndConnectMCPServer",
+      "inputs": [
+        "name"
+      ]
+    }
+  },
+  "AvailableSubagentTools": {
+    "domain": "desktop/app.go",
+    "owner": "App.AvailableSubagentTools",
+    "sources": [
+      "desktop/app.go"
+    ],
+    "scope": {
+      "kind": "owner-state",
+      "resolver": "App.AvailableSubagentTools",
+      "inputs": []
+    }
+  },
+  "BackgroundRuntimes": {
+    "domain": "desktop/background_runtime.go",
+    "owner": "App.BackgroundRuntimes",
+    "sources": [
+      "desktop/background_runtime.go"
+    ],
+    "scope": {
+      "kind": "owner-state",
+      "resolver": "App.BackgroundRuntimes",
+      "inputs": []
+    }
+  },
+  "Balance": {
+    "domain": "desktop/app.go",
+    "owner": "App.Balance",
+    "sources": [
+      "desktop/app.go"
+    ],
+    "scope": {
+      "kind": "owner-state",
+      "resolver": "App.Balance",
+      "inputs": []
+    }
+  },
+  "BalanceForTab": {
+    "domain": "desktop/app.go",
+    "owner": "App.BalanceForTab",
+    "sources": [
+      "desktop/app.go"
+    ],
+    "scope": {
+      "kind": "owner-inputs",
+      "resolver": "App.BalanceForTab",
+      "inputs": [
+        "tabID"
+      ]
+    }
+  },
+  "BotRuntimeStatus": {
+    "domain": "desktop/bot_runtime_app.go",
+    "owner": "App.BotRuntimeStatus",
+    "sources": [
+      "desktop/bot_runtime_app.go"
+    ],
+    "scope": {
+      "kind": "owner-state",
+      "resolver": "App.BotRuntimeStatus",
+      "inputs": []
+    }
+  },
+  "Cancel": {
+    "domain": "desktop/app.go",
+    "owner": "App.Cancel",
+    "sources": [
+      "desktop/app.go"
+    ],
+    "scope": {
+      "kind": "owner-state",
+      "resolver": "App.Cancel",
+      "inputs": []
+    }
+  },
+  "CancelJob": {
+    "domain": "desktop/app.go",
+    "owner": "App.CancelJob",
+    "sources": [
+      "desktop/app.go"
+    ],
+    "scope": {
+      "kind": "owner-inputs",
+      "resolver": "App.CancelJob",
+      "inputs": [
+        "jobID"
+      ]
+    }
+  },
+  "CancelJobForTab": {
+    "domain": "desktop/app.go",
+    "owner": "App.CancelJobForTab",
+    "sources": [
+      "desktop/app.go"
+    ],
+    "scope": {
+      "kind": "owner-inputs",
+      "resolver": "App.CancelJobForTab",
+      "inputs": [
+        "tabID",
+        "jobID"
+      ]
+    }
+  },
+  "CancelJobsForTab": {
+    "domain": "desktop/background_runtime.go",
+    "owner": "App.CancelJobsForTab",
+    "sources": [
+      "desktop/background_runtime.go"
+    ],
+    "scope": {
+      "kind": "owner-inputs",
+      "resolver": "App.CancelJobsForTab",
+      "inputs": [
+        "tabID",
+        "jobIDs"
+      ]
+    }
+  },
+  "CancelRemoteTab": {
+    "domain": "desktop/remote_tab.go",
+    "owner": "App.CancelRemoteTab",
+    "sources": [
+      "desktop/remote_tab.go"
+    ],
+    "scope": {
+      "kind": "owner-inputs",
+      "resolver": "App.CancelRemoteTab",
+      "inputs": [
+        "tabID"
+      ]
+    }
+  },
+  "CancelRemoteTabJobs": {
+    "domain": "desktop/remote_tab_commands.go",
+    "owner": "App.CancelRemoteTabJobs",
+    "sources": [
+      "desktop/remote_tab_commands.go"
+    ],
+    "scope": {
+      "kind": "owner-inputs",
+      "resolver": "App.CancelRemoteTabJobs",
+      "inputs": [
+        "tabID",
+        "jobIDs"
+      ]
+    }
+  },
+  "CancelShellInstall": {
+    "domain": "desktop/shell_support.go",
+    "owner": "App.CancelShellInstall",
+    "sources": [
+      "desktop/shell_support.go"
+    ],
+    "scope": {
+      "kind": "owner-state",
+      "resolver": "App.CancelShellInstall",
+      "inputs": []
+    }
+  },
+  "CancelTab": {
+    "domain": "desktop/app.go",
+    "owner": "App.CancelTab",
+    "sources": [
+      "desktop/app.go"
+    ],
+    "scope": {
+      "kind": "owner-inputs",
+      "resolver": "App.CancelTab",
+      "inputs": [
+        "tabID"
+      ]
+    }
+  },
+  "CancelTabWithInboxItems": {
+    "domain": "desktop/inbox_app.go",
+    "owner": "App.CancelTabWithInboxItems",
+    "sources": [
+      "desktop/inbox_app.go"
+    ],
+    "scope": {
+      "kind": "owner-inputs",
+      "resolver": "App.CancelTabWithInboxItems",
+      "inputs": [
+        "tabID",
+        "itemIDs"
+      ]
+    }
+  },
+  "CancelTabWithInboxItemsResult": {
+    "domain": "desktop/inbox_app.go",
+    "owner": "App.CancelTabWithInboxItemsResult",
+    "sources": [
+      "desktop/inbox_app.go"
+    ],
+    "scope": {
+      "kind": "owner-inputs",
+      "resolver": "App.CancelTabWithInboxItemsResult",
+      "inputs": [
+        "tabID",
+        "itemIDs"
+      ]
+    }
+  },
+  "CancelTask": {
+    "domain": "desktop/app.go",
+    "owner": "App.CancelTask",
+    "sources": [
+      "desktop/app.go"
+    ],
+    "scope": {
+      "kind": "owner-inputs",
+      "resolver": "App.CancelTask",
+      "inputs": [
+        "taskID",
+        "expectedVersion",
+        "reason",
+        "idemKey"
+      ]
+    }
+  },
+  "CancelTaskByKey": {
+    "domain": "desktop/task_catalog.go",
+    "owner": "App.CancelTaskByKey",
+    "sources": [
+      "desktop/task_catalog.go"
+    ],
+    "scope": {
+      "kind": "owner-inputs",
+      "resolver": "App.CancelTaskByKey",
+      "inputs": [
+        "req"
+      ]
+    }
+  },
+  "CancelTaskForTab": {
+    "domain": "desktop/app.go",
+    "owner": "App.CancelTaskForTab",
+    "sources": [
+      "desktop/app.go"
+    ],
+    "scope": {
+      "kind": "owner-inputs",
+      "resolver": "App.CancelTaskForTab",
+      "inputs": [
+        "tabID",
+        "taskID",
+        "expectedVersion",
+        "reason",
+        "idemKey"
+      ]
+    }
+  },
+  "CancelTrySubagentProfile": {
+    "domain": "desktop/subagents_app.go",
+    "owner": "App.CancelTrySubagentProfile",
+    "sources": [
+      "desktop/subagents_app.go"
+    ],
+    "scope": {
+      "kind": "owner-state",
+      "resolver": "App.CancelTrySubagentProfile",
+      "inputs": []
+    }
+  },
+  "Capabilities": {
+    "domain": "desktop/app.go",
+    "owner": "App.Capabilities",
+    "sources": [
+      "desktop/app.go"
+    ],
+    "scope": {
+      "kind": "owner-state",
+      "resolver": "App.Capabilities",
+      "inputs": []
+    }
+  },
+  "CapabilityDiagnostics": {
+    "domain": "desktop/capdiag_app.go",
+    "owner": "App.CapabilityDiagnostics",
+    "sources": [
+      "desktop/capdiag_app.go"
+    ],
+    "scope": {
+      "kind": "owner-inputs",
+      "resolver": "App.CapabilityDiagnostics",
+      "inputs": [
+        "includeSessionRuntime"
+      ]
+    }
+  },
+  "CaptureInboxTarget": {
+    "domain": "desktop/inbox_target.go",
+    "owner": "App.CaptureInboxTarget",
+    "sources": [
+      "desktop/inbox_target.go"
+    ],
+    "scope": {
+      "kind": "owner-inputs",
+      "resolver": "App.CaptureInboxTarget",
+      "inputs": [
+        "tabID",
+        "expectedPath"
+      ]
+    }
+  },
+  "CheckRemotePlatform": {
+    "domain": "desktop/remote_platform.go",
+    "owner": "App.CheckRemotePlatform",
+    "sources": [
+      "desktop/remote_platform.go"
+    ],
+    "scope": {
+      "kind": "owner-inputs",
+      "resolver": "App.CheckRemotePlatform",
+      "inputs": [
+        "hostID"
+      ]
+    }
+  },
+  "CheckUpdate": {
+    "domain": "desktop/updater_app.go",
+    "owner": "App.CheckUpdate",
+    "sources": [
+      "desktop/updater_app.go"
+    ],
+    "scope": {
+      "kind": "owner-inputs",
+      "resolver": "App.CheckUpdate",
+      "inputs": [
+        "selectedChannel"
+      ]
+    }
+  },
+  "Checkpoints": {
+    "domain": "desktop/app.go",
+    "owner": "App.Checkpoints",
+    "sources": [
+      "desktop/app.go"
+    ],
+    "scope": {
+      "kind": "owner-state",
+      "resolver": "App.Checkpoints",
+      "inputs": []
+    }
+  },
+  "CheckpointsForTab": {
+    "domain": "desktop/app.go",
+    "owner": "App.CheckpointsForTab",
+    "sources": [
+      "desktop/app.go"
+    ],
+    "scope": {
+      "kind": "owner-inputs",
+      "resolver": "App.CheckpointsForTab",
+      "inputs": [
+        "tabID"
+      ]
+    }
+  },
+  "ChooseRecoveryBranch": {
+    "domain": "desktop/recovery_lineage.go",
+    "owner": "App.ChooseRecoveryBranch",
+    "sources": [
+      "desktop/recovery_lineage.go"
+    ],
+    "scope": {
+      "kind": "owner-inputs",
+      "resolver": "App.ChooseRecoveryBranch",
+      "inputs": [
+        "req"
+      ]
+    }
+  },
+  "CleanRecoveryLineage": {
+    "domain": "desktop/recovery_lineage.go",
+    "owner": "App.CleanRecoveryLineage",
+    "sources": [
+      "desktop/recovery_lineage.go"
+    ],
+    "scope": {
+      "kind": "owner-inputs",
+      "resolver": "App.CleanRecoveryLineage",
+      "inputs": [
+        "req"
+      ]
+    }
+  },
+  "CleanRemoteLegacyWorkbenchData": {
+    "domain": "desktop/remote_legacy_cleanup.go",
+    "owner": "App.CleanRemoteLegacyWorkbenchData",
+    "sources": [
+      "desktop/remote_legacy_cleanup.go"
+    ],
+    "scope": {
+      "kind": "owner-inputs",
+      "resolver": "App.CleanRemoteLegacyWorkbenchData",
+      "inputs": [
+        "target"
+      ]
+    }
+  },
+  "ClearBotSecret": {
+    "domain": "desktop/settings_app.go",
+    "owner": "App.ClearBotSecret",
+    "sources": [
+      "desktop/settings_app.go"
+    ],
+    "scope": {
+      "kind": "owner-inputs",
+      "resolver": "App.ClearBotSecret",
+      "inputs": [
+        "envName"
+      ]
+    }
+  },
+  "ClearGoalForTab": {
+    "domain": "desktop/app.go",
+    "owner": "App.ClearGoalForTab",
+    "sources": [
+      "desktop/app.go"
+    ],
+    "scope": {
+      "kind": "owner-inputs",
+      "resolver": "App.ClearGoalForTab",
+      "inputs": [
+        "tabID"
+      ]
+    }
+  },
+  "ClearMCPServerAuthentication": {
+    "domain": "desktop/mcp_oauth.go",
+    "owner": "App.ClearMCPServerAuthentication",
+    "sources": [
+      "desktop/mcp_oauth.go"
+    ],
+    "scope": {
+      "kind": "owner-inputs",
+      "resolver": "App.ClearMCPServerAuthentication",
+      "inputs": [
+        "name"
+      ]
+    }
+  },
+  "ClearProviderKey": {
+    "domain": "desktop/settings_app.go",
+    "owner": "App.ClearProviderKey",
+    "sources": [
+      "desktop/settings_app.go"
+    ],
+    "scope": {
+      "kind": "owner-inputs",
+      "resolver": "App.ClearProviderKey",
+      "inputs": [
+        "apiKeyEnv"
+      ]
+    }
+  },
+  "ClearRemoteTabSession": {
+    "domain": "desktop/remote_tab_commands.go",
+    "owner": "App.ClearRemoteTabSession",
+    "sources": [
+      "desktop/remote_tab_commands.go"
+    ],
+    "scope": {
+      "kind": "owner-inputs",
+      "resolver": "App.ClearRemoteTabSession",
+      "inputs": [
+        "tabID"
+      ]
+    }
+  },
+  "ClearSession": {
+    "domain": "desktop/session_clear.go",
+    "owner": "App.ClearSession",
+    "sources": [
+      "desktop/session_clear.go"
+    ],
+    "scope": {
+      "kind": "owner-state",
+      "resolver": "App.ClearSession",
+      "inputs": []
+    }
+  },
+  "ClearSessionForTab": {
+    "domain": "desktop/session_clear.go",
+    "owner": "App.ClearSessionForTab",
+    "sources": [
+      "desktop/session_clear.go"
+    ],
+    "scope": {
+      "kind": "owner-inputs",
+      "resolver": "App.ClearSessionForTab",
+      "inputs": [
+        "tabID"
+      ]
+    }
+  },
+  "CloseMainWindow": {
+    "domain": "desktop/window_controls.go",
+    "owner": "App.CloseMainWindow",
+    "sources": [
+      "desktop/window_controls.go"
+    ],
+    "scope": {
+      "kind": "owner-state",
+      "resolver": "App.CloseMainWindow",
+      "inputs": []
+    }
+  },
+  "CloseMergedWorktreeTab": {
+    "domain": "desktop/delivery_worktree.go",
+    "owner": "App.CloseMergedWorktreeTab",
+    "sources": [
+      "desktop/delivery_worktree.go"
+    ],
+    "scope": {
+      "kind": "owner-inputs",
+      "resolver": "App.CloseMergedWorktreeTab",
+      "inputs": [
+        "request"
+      ]
+    }
+  },
+  "CloseRemoteTab": {
+    "domain": "desktop/remote_tab_registry.go",
+    "owner": "App.CloseRemoteTab",
+    "sources": [
+      "desktop/remote_tab_registry.go"
+    ],
+    "scope": {
+      "kind": "owner-inputs",
+      "resolver": "App.CloseRemoteTab",
+      "inputs": [
+        "tabID"
+      ]
+    }
+  },
+  "CloseTab": {
+    "domain": "desktop/tabs.go",
+    "owner": "App.CloseTab",
+    "sources": [
+      "desktop/tabs.go"
+    ],
+    "scope": {
+      "kind": "owner-inputs",
+      "resolver": "App.CloseTab",
+      "inputs": [
+        "tabID"
+      ]
+    }
+  },
+  "CloseTabWithPolicy": {
+    "domain": "desktop/background_runtime.go",
+    "owner": "App.CloseTabWithPolicy",
+    "sources": [
+      "desktop/background_runtime.go"
+    ],
+    "scope": {
+      "kind": "owner-inputs",
+      "resolver": "App.CloseTabWithPolicy",
+      "inputs": [
+        "tabID",
+        "policy"
+      ]
+    }
+  },
+  "CloseTerminalForTab": {
+    "domain": "desktop/terminal.go",
+    "owner": "App.CloseTerminalForTab",
+    "sources": [
+      "desktop/terminal.go"
+    ],
+    "scope": {
+      "kind": "owner-inputs",
+      "resolver": "App.CloseTerminalForTab",
+      "inputs": [
+        "tabID",
+        "sessionID"
+      ]
+    }
+  },
+  "Commands": {
+    "domain": "desktop/app.go",
+    "owner": "App.Commands",
+    "sources": [
+      "desktop/app.go"
+    ],
+    "scope": {
+      "kind": "owner-state",
+      "resolver": "App.Commands",
+      "inputs": []
+    }
+  },
+  "CommitRewindForTab": {
+    "domain": "desktop/rewind_tab.go",
+    "owner": "App.CommitRewindForTab",
+    "sources": [
+      "desktop/rewind_tab.go"
+    ],
+    "scope": {
+      "kind": "owner-inputs",
+      "resolver": "App.CommitRewindForTab",
+      "inputs": [
+        "tabID",
+        "planID",
+        "turn",
+        "scope"
+      ]
+    }
+  },
+  "CommitWorkspaceFileRevertForTab": {
+    "domain": "desktop/app.go",
+    "owner": "App.CommitWorkspaceFileRevertForTab",
+    "sources": [
+      "desktop/app.go"
+    ],
+    "scope": {
+      "kind": "owner-inputs",
+      "resolver": "App.CommitWorkspaceFileRevertForTab",
+      "inputs": [
+        "tabID",
+        "planID",
+        "resolution"
+      ]
+    }
+  },
+  "Compact": {
+    "domain": "desktop/app.go",
+    "owner": "App.Compact",
+    "sources": [
+      "desktop/app.go"
+    ],
+    "scope": {
+      "kind": "owner-state",
+      "resolver": "App.Compact",
+      "inputs": []
+    }
+  },
+  "CompactForTab": {
+    "domain": "desktop/app.go",
+    "owner": "App.CompactForTab",
+    "sources": [
+      "desktop/app.go"
+    ],
+    "scope": {
+      "kind": "owner-inputs",
+      "resolver": "App.CompactForTab",
+      "inputs": [
+        "tabID"
+      ]
+    }
+  },
+  "CompactRemoteTab": {
+    "domain": "desktop/remote_tab_commands.go",
+    "owner": "App.CompactRemoteTab",
+    "sources": [
+      "desktop/remote_tab_commands.go"
+    ],
+    "scope": {
+      "kind": "owner-inputs",
+      "resolver": "App.CompactRemoteTab",
+      "inputs": [
+        "tabID",
+        "instructions"
+      ]
+    }
+  },
+  "ConfirmAction": {
+    "domain": "desktop/app.go",
+    "owner": "App.ConfirmAction",
+    "sources": [
+      "desktop/app.go"
+    ],
+    "scope": {
+      "kind": "owner-inputs",
+      "resolver": "App.ConfirmAction",
+      "inputs": [
+        "req"
+      ]
+    }
+  },
+  "ConfirmRemoteHostKey": {
+    "domain": "desktop/remote_app.go",
+    "owner": "App.ConfirmRemoteHostKey",
+    "sources": [
+      "desktop/remote_app.go"
+    ],
+    "scope": {
+      "kind": "owner-inputs",
+      "resolver": "App.ConfirmRemoteHostKey",
+      "inputs": [
+        "hostID",
+        "accept"
+      ]
+    }
+  },
+  "ConfirmRemoteSecret": {
+    "domain": "desktop/remote_app.go",
+    "owner": "App.ConfirmRemoteSecret",
+    "sources": [
+      "desktop/remote_app.go"
+    ],
+    "scope": {
+      "kind": "owner-inputs",
+      "resolver": "App.ConfirmRemoteSecret",
+      "inputs": [
+        "hostID",
+        "promptID",
+        "secret",
+        "accept"
+      ]
+    }
+  },
+  "ConnectKey": {
+    "domain": "desktop/app.go",
+    "owner": "App.ConnectKey",
+    "sources": [
+      "desktop/app.go"
+    ],
+    "scope": {
+      "kind": "owner-inputs",
+      "resolver": "App.ConnectKey",
+      "inputs": [
+        "apiKey"
+      ]
+    }
+  },
+  "ConnectRemoteHost": {
+    "domain": "desktop/remote_app.go",
+    "owner": "App.ConnectRemoteHost",
+    "sources": [
+      "desktop/remote_app.go"
+    ],
+    "scope": {
+      "kind": "owner-inputs",
+      "resolver": "App.ConnectRemoteHost",
+      "inputs": [
+        "id"
+      ]
+    }
+  },
+  "ContextPanel": {
+    "domain": "desktop/tabs.go",
+    "owner": "App.ContextPanel",
+    "sources": [
+      "desktop/tabs.go"
+    ],
+    "scope": {
+      "kind": "owner-inputs",
+      "resolver": "App.ContextPanel",
+      "inputs": [
+        "tabID"
+      ]
+    }
+  },
+  "ContextUsageForTab": {
+    "domain": "desktop/app.go",
+    "owner": "App.ContextUsageForTab",
+    "sources": [
+      "desktop/app.go"
+    ],
+    "scope": {
+      "kind": "owner-inputs",
+      "resolver": "App.ContextUsageForTab",
+      "inputs": [
+        "tabID"
+      ]
+    }
+  },
+  "CopyThemePack": {
+    "domain": "desktop/theme_app.go",
+    "owner": "App.CopyThemePack",
+    "sources": [
+      "desktop/theme_app.go"
+    ],
+    "scope": {
+      "kind": "owner-inputs",
+      "resolver": "App.CopyThemePack",
+      "inputs": [
+        "sourceID",
+        "newID",
+        "newName"
+      ]
+    }
+  },
+  "CreateBlankProject": {
+    "domain": "desktop/blank_project.go",
+    "owner": "App.CreateBlankProject",
+    "sources": [
+      "desktop/blank_project.go"
+    ],
+    "scope": {
+      "kind": "owner-inputs",
+      "resolver": "App.CreateBlankProject",
+      "inputs": [
+        "parentDir",
+        "projectName"
+      ]
+    }
+  },
+  "CreateDeliveryWorktree": {
+    "domain": "desktop/delivery_worktree.go",
+    "owner": "App.CreateDeliveryWorktree",
+    "sources": [
+      "desktop/delivery_worktree.go"
+    ],
+    "scope": {
+      "kind": "owner-inputs",
+      "resolver": "App.CreateDeliveryWorktree",
+      "inputs": [
+        "workspaceRoot"
+      ]
+    }
+  },
+  "CreateIsolatedWorktree": {
+    "domain": "desktop/delivery_worktree.go",
+    "owner": "App.CreateIsolatedWorktree",
+    "sources": [
+      "desktop/delivery_worktree.go"
+    ],
+    "scope": {
+      "kind": "owner-inputs",
+      "resolver": "App.CreateIsolatedWorktree",
+      "inputs": [
+        "workspaceRoot"
+      ]
+    }
+  },
+  "CreateSubagentProfile": {
+    "domain": "desktop/subagents_app.go",
+    "owner": "App.CreateSubagentProfile",
+    "sources": [
+      "desktop/subagents_app.go"
+    ],
+    "scope": {
+      "kind": "owner-inputs",
+      "resolver": "App.CreateSubagentProfile",
+      "inputs": [
+        "input"
+      ]
+    }
+  },
+  "CreateTerminalForTab": {
+    "domain": "desktop/terminal.go",
+    "owner": "App.CreateTerminalForTab",
+    "sources": [
+      "desktop/terminal.go"
+    ],
+    "scope": {
+      "kind": "owner-inputs",
+      "resolver": "App.CreateTerminalForTab",
+      "inputs": [
+        "tabID",
+        "rel",
+        "shellID"
+      ]
+    }
+  },
+  "CreateTopic": {
+    "domain": "desktop/tabs.go",
+    "owner": "App.CreateTopic",
+    "sources": [
+      "desktop/tabs.go"
+    ],
+    "scope": {
+      "kind": "owner-inputs",
+      "resolver": "App.CreateTopic",
+      "inputs": [
+        "scope",
+        "workspaceRoot",
+        "title"
+      ]
+    }
+  },
+  "CurrentTaskSessionID": {
+    "domain": "desktop/app.go",
+    "owner": "App.CurrentTaskSessionID",
+    "sources": [
+      "desktop/app.go"
+    ],
+    "scope": {
+      "kind": "owner-state",
+      "resolver": "App.CurrentTaskSessionID",
+      "inputs": []
+    }
+  },
+  "DeleteInboxItem": {
+    "domain": "desktop/inbox_app.go",
+    "owner": "App.DeleteInboxItem",
+    "sources": [
+      "desktop/inbox_app.go"
+    ],
+    "scope": {
+      "kind": "owner-inputs",
+      "resolver": "App.DeleteInboxItem",
+      "inputs": [
+        "tabID",
+        "id"
+      ]
+    }
+  },
+  "DeleteProvider": {
+    "domain": "desktop/provider_access_removal.go",
+    "owner": "App.DeleteProvider",
+    "sources": [
+      "desktop/provider_access_removal.go"
+    ],
+    "scope": {
+      "kind": "owner-inputs",
+      "resolver": "App.DeleteProvider",
+      "inputs": [
+        "name"
+      ]
+    }
+  },
+  "DeleteRecoveryCopy": {
+    "domain": "desktop/app.go",
+    "owner": "App.DeleteRecoveryCopy",
+    "sources": [
+      "desktop/app.go"
+    ],
+    "scope": {
+      "kind": "owner-inputs",
+      "resolver": "App.DeleteRecoveryCopy",
+      "inputs": [
+        "path"
+      ]
+    }
+  },
+  "DeleteRemotePath": {
+    "domain": "desktop/remote_app.go",
+    "owner": "App.DeleteRemotePath",
+    "sources": [
+      "desktop/remote_app.go"
+    ],
+    "scope": {
+      "kind": "owner-inputs",
+      "resolver": "App.DeleteRemotePath",
+      "inputs": [
+        "hostID",
+        "path",
+        "recursive"
+      ]
+    }
+  },
+  "DeleteRemoteProjectSession": {
+    "domain": "desktop/remote_tab_commands.go",
+    "owner": "App.DeleteRemoteProjectSession",
+    "sources": [
+      "desktop/remote_tab_commands.go"
+    ],
+    "scope": {
+      "kind": "owner-inputs",
+      "resolver": "App.DeleteRemoteProjectSession",
+      "inputs": [
+        "hostID",
+        "workspace",
+        "name"
+      ]
+    }
+  },
+  "DeleteSession": {
+    "domain": "desktop/app.go",
+    "owner": "App.DeleteSession",
+    "sources": [
+      "desktop/app.go"
+    ],
+    "scope": {
+      "kind": "owner-inputs",
+      "resolver": "App.DeleteSession",
+      "inputs": [
+        "path"
+      ]
+    }
+  },
+  "DeleteSubagentProfile": {
+    "domain": "desktop/subagents_app.go",
+    "owner": "App.DeleteSubagentProfile",
+    "sources": [
+      "desktop/subagents_app.go"
+    ],
+    "scope": {
+      "kind": "owner-inputs",
+      "resolver": "App.DeleteSubagentProfile",
+      "inputs": [
+        "name",
+        "scope"
+      ]
+    }
+  },
+  "DeleteThemePack": {
+    "domain": "desktop/theme_app.go",
+    "owner": "App.DeleteThemePack",
+    "sources": [
+      "desktop/theme_app.go"
+    ],
+    "scope": {
+      "kind": "owner-inputs",
+      "resolver": "App.DeleteThemePack",
+      "inputs": [
+        "id"
+      ]
+    }
+  },
+  "DeleteTopic": {
+    "domain": "desktop/tabs.go",
+    "owner": "App.DeleteTopic",
+    "sources": [
+      "desktop/tabs.go"
+    ],
+    "scope": {
+      "kind": "owner-inputs",
+      "resolver": "App.DeleteTopic",
+      "inputs": [
+        "topicID"
+      ]
+    }
+  },
+  "DeliveryWorktreeAvailability": {
+    "domain": "desktop/delivery_worktree.go",
+    "owner": "App.DeliveryWorktreeAvailability",
+    "sources": [
+      "desktop/delivery_worktree.go"
+    ],
+    "scope": {
+      "kind": "owner-inputs",
+      "resolver": "App.DeliveryWorktreeAvailability",
+      "inputs": [
+        "workspaceRoot"
+      ]
+    }
+  },
+  "DesktopStartupSettings": {
+    "domain": "desktop/settings_app.go",
+    "owner": "App.DesktopStartupSettings",
+    "sources": [
+      "desktop/settings_app.go"
+    ],
+    "scope": {
+      "kind": "owner-state",
+      "resolver": "App.DesktopStartupSettings",
+      "inputs": []
+    }
+  },
+  "DiagnoseBotConnection": {
+    "domain": "desktop/bot_connection_app.go",
+    "owner": "App.DiagnoseBotConnection",
+    "sources": [
+      "desktop/bot_connection_app.go"
+    ],
+    "scope": {
+      "kind": "owner-inputs",
+      "resolver": "App.DiagnoseBotConnection",
+      "inputs": [
+        "id"
+      ]
+    }
+  },
+  "DisableThemePack": {
+    "domain": "desktop/theme_app.go",
+    "owner": "App.DisableThemePack",
+    "sources": [
+      "desktop/theme_app.go"
+    ],
+    "scope": {
+      "kind": "owner-state",
+      "resolver": "App.DisableThemePack",
+      "inputs": []
+    }
+  },
+  "DisconnectRemoteHost": {
+    "domain": "desktop/remote_app.go",
+    "owner": "App.DisconnectRemoteHost",
+    "sources": [
+      "desktop/remote_app.go"
+    ],
+    "scope": {
+      "kind": "owner-inputs",
+      "resolver": "App.DisconnectRemoteHost",
+      "inputs": [
+        "id"
+      ]
+    }
+  },
+  "DismissTodoBatchForTab": {
+    "domain": "desktop/todo_dismissal.go",
+    "owner": "App.DismissTodoBatchForTab",
+    "sources": [
+      "desktop/todo_dismissal.go"
+    ],
+    "scope": {
+      "kind": "owner-inputs",
+      "resolver": "App.DismissTodoBatchForTab",
+      "inputs": [
+        "tabID",
+        "batchKey"
+      ]
+    }
+  },
+  "Effort": {
+    "domain": "desktop/app.go",
+    "owner": "App.Effort",
+    "sources": [
+      "desktop/app.go"
+    ],
+    "scope": {
+      "kind": "owner-state",
+      "resolver": "App.Effort",
+      "inputs": []
+    }
+  },
+  "EffortForTab": {
+    "domain": "desktop/app.go",
+    "owner": "App.EffortForTab",
+    "sources": [
+      "desktop/app.go"
+    ],
+    "scope": {
+      "kind": "owner-inputs",
+      "resolver": "App.EffortForTab",
+      "inputs": [
+        "tabID"
+      ]
+    }
+  },
+  "EnqueueInboxFollowup": {
+    "domain": "desktop/inbox_app.go",
+    "owner": "App.EnqueueInboxFollowup",
+    "sources": [
+      "desktop/inbox_app.go"
+    ],
+    "scope": {
+      "kind": "owner-inputs",
+      "resolver": "App.EnqueueInboxFollowup",
+      "inputs": [
+        "tabID",
+        "display",
+        "submit",
+        "idempotency"
+      ]
+    }
+  },
+  "EnqueueInboxFollowupForTarget": {
+    "domain": "desktop/inbox_target.go",
+    "owner": "App.EnqueueInboxFollowupForTarget",
+    "sources": [
+      "desktop/inbox_target.go"
+    ],
+    "scope": {
+      "kind": "owner-inputs",
+      "resolver": "App.EnqueueInboxFollowupForTarget",
+      "inputs": [
+        "target",
+        "display",
+        "submit",
+        "invocations",
+        "key"
+      ]
+    }
+  },
+  "EnqueueInboxFollowupWithInvocations": {
+    "domain": "desktop/inbox_app.go",
+    "owner": "App.EnqueueInboxFollowupWithInvocations",
+    "sources": [
+      "desktop/inbox_app.go"
+    ],
+    "scope": {
+      "kind": "owner-inputs",
+      "resolver": "App.EnqueueInboxFollowupWithInvocations",
+      "inputs": [
+        "tabID",
+        "display",
+        "submit",
+        "invocations",
+        "idempotency"
+      ]
+    }
+  },
+  "EnqueueInboxSteer": {
+    "domain": "desktop/inbox_app.go",
+    "owner": "App.EnqueueInboxSteer",
+    "sources": [
+      "desktop/inbox_app.go"
+    ],
+    "scope": {
+      "kind": "owner-inputs",
+      "resolver": "App.EnqueueInboxSteer",
+      "inputs": [
+        "tabID",
+        "display",
+        "submit",
+        "idempotency"
+      ]
+    }
+  },
+  "EnqueueInboxSteerForTurn": {
+    "domain": "desktop/inbox_app.go",
+    "owner": "App.EnqueueInboxSteerForTurn",
+    "sources": [
+      "desktop/inbox_app.go"
+    ],
+    "scope": {
+      "kind": "owner-inputs",
+      "resolver": "App.EnqueueInboxSteerForTurn",
+      "inputs": [
+        "tabID",
+        "turnID",
+        "display",
+        "submit",
+        "idempotency"
+      ]
+    }
+  },
+  "EnsureBlankSurface": {
+    "domain": "desktop/tabs.go",
+    "owner": "App.EnsureBlankSurface",
+    "sources": [
+      "desktop/tabs.go"
+    ],
+    "scope": {
+      "kind": "owner-inputs",
+      "resolver": "App.EnsureBlankSurface",
+      "inputs": [
+        "scope",
+        "workspaceRoot"
+      ]
+    }
+  },
+  "EnsureBlankTab": {
+    "domain": "desktop/tabs.go",
+    "owner": "App.EnsureBlankTab",
+    "sources": [
+      "desktop/tabs.go"
+    ],
+    "scope": {
+      "kind": "owner-inputs",
+      "resolver": "App.EnsureBlankTab",
+      "inputs": [
+        "scope",
+        "workspaceRoot"
+      ]
+    }
+  },
+  "EnsureRemoteProjectSessions": {
+    "domain": "desktop/remote_listing.go",
+    "owner": "App.EnsureRemoteProjectSessions",
+    "sources": [
+      "desktop/remote_listing.go"
+    ],
+    "scope": {
+      "kind": "owner-inputs",
+      "resolver": "App.EnsureRemoteProjectSessions",
+      "inputs": [
+        "hostID",
+        "workspace"
+      ]
+    }
+  },
+  "ExportScrollDiagnostics": {
+    "domain": "desktop/scroll_diagnostics_export.go",
+    "owner": "App.ExportScrollDiagnostics",
+    "sources": [
+      "desktop/scroll_diagnostics_export.go"
+    ],
+    "scope": {
+      "kind": "owner-inputs",
+      "resolver": "App.ExportScrollDiagnostics",
+      "inputs": [
+        "payload"
+      ]
+    }
+  },
+  "ExportThemePack": {
+    "domain": "desktop/theme_app.go",
+    "owner": "App.ExportThemePack",
+    "sources": [
+      "desktop/theme_app.go"
+    ],
+    "scope": {
+      "kind": "owner-inputs",
+      "resolver": "App.ExportThemePack",
+      "inputs": [
+        "id",
+        "destPath"
+      ]
+    }
+  },
+  "ExtensionActions": {
+    "domain": "desktop/extensions_app.go",
+    "owner": "App.ExtensionActions",
+    "sources": [
+      "desktop/extensions_app.go"
+    ],
+    "scope": {
+      "kind": "owner-inputs",
+      "resolver": "App.ExtensionActions",
+      "inputs": [
+        "tabID"
+      ]
+    }
+  },
+  "ExternalOpeners": {
+    "domain": "desktop/external_opener.go",
+    "owner": "App.ExternalOpeners",
+    "sources": [
+      "desktop/external_opener.go"
+    ],
+    "scope": {
+      "kind": "owner-state",
+      "resolver": "App.ExternalOpeners",
+      "inputs": []
+    }
+  },
+  "ExternalOpenersForTab": {
+    "domain": "desktop/external_opener.go",
+    "owner": "App.ExternalOpenersForTab",
+    "sources": [
+      "desktop/external_opener.go"
+    ],
+    "scope": {
+      "kind": "owner-inputs",
+      "resolver": "App.ExternalOpenersForTab",
+      "inputs": [
+        "tabID"
+      ]
+    }
+  },
+  "FetchAllProviderModelCatalogs": {
+    "domain": "desktop/settings_app.go",
+    "owner": "App.FetchAllProviderModelCatalogs",
+    "sources": [
+      "desktop/settings_app.go"
+    ],
+    "scope": {
+      "kind": "owner-inputs",
+      "resolver": "App.FetchAllProviderModelCatalogs",
+      "inputs": [
+        "providers"
+      ]
+    }
+  },
+  "FetchAllProviderModels": {
+    "domain": "desktop/settings_app.go",
+    "owner": "App.FetchAllProviderModels",
+    "sources": [
+      "desktop/settings_app.go"
+    ],
+    "scope": {
+      "kind": "owner-inputs",
+      "resolver": "App.FetchAllProviderModels",
+      "inputs": [
+        "providers"
+      ]
+    }
+  },
+  "FetchProviderModelCatalog": {
+    "domain": "desktop/settings_app.go",
+    "owner": "App.FetchProviderModelCatalog",
+    "sources": [
+      "desktop/settings_app.go"
+    ],
+    "scope": {
+      "kind": "owner-inputs",
+      "resolver": "App.FetchProviderModelCatalog",
+      "inputs": [
+        "p"
+      ]
+    }
+  },
+  "FetchProviderModelCatalogDraft": {
+    "domain": "desktop/provider_settings_probe.go",
+    "owner": "App.FetchProviderModelCatalogDraft",
+    "sources": [
+      "desktop/provider_settings_probe.go"
+    ],
+    "scope": {
+      "kind": "owner-inputs",
+      "resolver": "App.FetchProviderModelCatalogDraft",
+      "inputs": [
+        "p",
+        "key"
+      ]
+    }
+  },
+  "FetchProviderModels": {
+    "domain": "desktop/settings_app.go",
+    "owner": "App.FetchProviderModels",
+    "sources": [
+      "desktop/settings_app.go"
+    ],
+    "scope": {
+      "kind": "owner-inputs",
+      "resolver": "App.FetchProviderModels",
+      "inputs": [
+        "p"
+      ]
+    }
+  },
+  "FinalizeWorktreeMerge": {
+    "domain": "desktop/delivery_worktree.go",
+    "owner": "App.FinalizeWorktreeMerge",
+    "sources": [
+      "desktop/delivery_worktree.go"
+    ],
+    "scope": {
+      "kind": "owner-inputs",
+      "resolver": "App.FinalizeWorktreeMerge",
+      "inputs": [
+        "request"
+      ]
+    }
+  },
+  "Forget": {
+    "domain": "desktop/app.go",
+    "owner": "App.Forget",
+    "sources": [
+      "desktop/app.go"
+    ],
+    "scope": {
+      "kind": "owner-inputs",
+      "resolver": "App.Forget",
+      "inputs": [
+        "name"
+      ]
+    }
+  },
+  "ForgetForTab": {
+    "domain": "desktop/app.go",
+    "owner": "App.ForgetForTab",
+    "sources": [
+      "desktop/app.go"
+    ],
+    "scope": {
+      "kind": "owner-inputs",
+      "resolver": "App.ForgetForTab",
+      "inputs": [
+        "tabID",
+        "name"
+      ]
+    }
+  },
+  "ForgetRemoteTab": {
+    "domain": "desktop/remote_tab_commands.go",
+    "owner": "App.ForgetRemoteTab",
+    "sources": [
+      "desktop/remote_tab_commands.go"
+    ],
+    "scope": {
+      "kind": "owner-inputs",
+      "resolver": "App.ForgetRemoteTab",
+      "inputs": [
+        "tabID",
+        "name"
+      ]
+    }
+  },
+  "Fork": {
+    "domain": "desktop/app.go",
+    "owner": "App.Fork",
+    "sources": [
+      "desktop/app.go"
+    ],
+    "scope": {
+      "kind": "owner-inputs",
+      "resolver": "App.Fork",
+      "inputs": [
+        "turn"
+      ]
+    }
+  },
+  "ForkForTab": {
+    "domain": "desktop/app.go",
+    "owner": "App.ForkForTab",
+    "sources": [
+      "desktop/app.go"
+    ],
+    "scope": {
+      "kind": "owner-inputs",
+      "resolver": "App.ForkForTab",
+      "inputs": [
+        "tabID",
+        "turn"
+      ]
+    }
+  },
+  "ForkRemoteTab": {
+    "domain": "desktop/remote_tab_commands.go",
+    "owner": "App.ForkRemoteTab",
+    "sources": [
+      "desktop/remote_tab_commands.go"
+    ],
+    "scope": {
+      "kind": "owner-inputs",
+      "resolver": "App.ForkRemoteTab",
+      "inputs": [
+        "tabID",
+        "turn",
+        "name"
+      ]
+    }
+  },
+  "ForkWorktreeForTab": {
+    "domain": "desktop/app.go",
+    "owner": "App.ForkWorktreeForTab",
+    "sources": [
+      "desktop/app.go"
+    ],
+    "scope": {
+      "kind": "owner-inputs",
+      "resolver": "App.ForkWorktreeForTab",
+      "inputs": [
+        "tabID",
+        "turn"
+      ]
+    }
+  },
+  "GetActiveThemePack": {
+    "domain": "desktop/theme_app.go",
+    "owner": "App.GetActiveThemePack",
+    "sources": [
+      "desktop/theme_app.go"
+    ],
+    "scope": {
+      "kind": "owner-state",
+      "resolver": "App.GetActiveThemePack",
+      "inputs": []
+    }
+  },
+  "GetDesktopShellStatus": {
+    "domain": "desktop/desktop_shell_status.go",
+    "owner": "App.GetDesktopShellStatus",
+    "sources": [
+      "desktop/desktop_shell_status.go"
+    ],
+    "scope": {
+      "kind": "owner-state",
+      "resolver": "App.GetDesktopShellStatus",
+      "inputs": []
+    }
+  },
+  "GetDesktopZoomFactor": {
+    "domain": "desktop/zoom_factor.go",
+    "owner": "App.GetDesktopZoomFactor",
+    "sources": [
+      "desktop/zoom_factor.go"
+    ],
+    "scope": {
+      "kind": "owner-state",
+      "resolver": "App.GetDesktopZoomFactor",
+      "inputs": []
+    }
+  },
+  "GetHistoryIndexStatus": {
+    "domain": "desktop/history_catalog.go",
+    "owner": "App.GetHistoryIndexStatus",
+    "sources": [
+      "desktop/history_catalog.go"
+    ],
+    "scope": {
+      "kind": "owner-state",
+      "resolver": "App.GetHistoryIndexStatus",
+      "inputs": []
+    }
+  },
+  "GetHistorySearchContext": {
+    "domain": "desktop/history_catalog.go",
+    "owner": "App.GetHistorySearchContext",
+    "sources": [
+      "desktop/history_catalog.go"
+    ],
+    "scope": {
+      "kind": "owner-inputs",
+      "resolver": "App.GetHistorySearchContext",
+      "inputs": [
+        "req"
+      ]
+    }
+  },
+  "GetModelSettingsApplication": {
+    "domain": "desktop/model_settings_api.go",
+    "owner": "App.GetModelSettingsApplication",
+    "sources": [
+      "desktop/model_settings_api.go"
+    ],
+    "scope": {
+      "kind": "owner-state",
+      "resolver": "App.GetModelSettingsApplication",
+      "inputs": []
+    }
+  },
+  "GetModelSettingsRequest": {
+    "domain": "desktop/model_settings_api.go",
+    "owner": "App.GetModelSettingsRequest",
+    "sources": [
+      "desktop/model_settings_api.go"
+    ],
+    "scope": {
+      "kind": "owner-inputs",
+      "resolver": "App.GetModelSettingsRequest",
+      "inputs": [
+        "requestID"
+      ]
+    }
+  },
+  "GetPinnedFilesForTab": {
+    "domain": "desktop/pinned_files.go",
+    "owner": "App.GetPinnedFilesForTab",
+    "sources": [
+      "desktop/pinned_files.go"
+    ],
+    "scope": {
+      "kind": "owner-inputs",
+      "resolver": "App.GetPinnedFilesForTab",
+      "inputs": [
+        "tabID"
+      ]
+    }
+  },
+  "GetProjectGroups": {
+    "domain": "desktop/project_tree_organization.go",
+    "owner": "App.GetProjectGroups",
+    "sources": [
+      "desktop/project_tree_organization.go"
+    ],
+    "scope": {
+      "kind": "owner-inputs",
+      "resolver": "App.GetProjectGroups",
+      "inputs": [
+        "scope",
+        "workspaceRoot"
+      ]
+    }
+  },
+  "GetProjectTreeRuntimeSnapshot": {
+    "domain": "desktop/project_tree_runtime.go",
+    "owner": "App.GetProjectTreeRuntimeSnapshot",
+    "sources": [
+      "desktop/project_tree_runtime.go"
+    ],
+    "scope": {
+      "kind": "owner-state",
+      "resolver": "App.GetProjectTreeRuntimeSnapshot",
+      "inputs": []
+    }
+  },
+  "GetProjectTreeSnapshot": {
+    "domain": "desktop/session_catalog.go",
+    "owner": "App.GetProjectTreeSnapshot",
+    "sources": [
+      "desktop/session_catalog.go"
+    ],
+    "scope": {
+      "kind": "owner-state",
+      "resolver": "App.GetProjectTreeSnapshot",
+      "inputs": []
+    }
+  },
+  "GetRecoveryLineage": {
+    "domain": "desktop/recovery_lineage.go",
+    "owner": "App.GetRecoveryLineage",
+    "sources": [
+      "desktop/recovery_lineage.go"
+    ],
+    "scope": {
+      "kind": "owner-inputs",
+      "resolver": "App.GetRecoveryLineage",
+      "inputs": [
+        "key"
+      ]
+    }
+  },
+  "GetRuntimeStateSnapshot": {
+    "domain": "desktop/runtime_state.go",
+    "owner": "App.GetRuntimeStateSnapshot",
+    "sources": [
+      "desktop/runtime_state.go"
+    ],
+    "scope": {
+      "kind": "owner-state",
+      "resolver": "App.GetRuntimeStateSnapshot",
+      "inputs": []
+    }
+  },
+  "GetSessionCatalogStatus": {
+    "domain": "desktop/session_catalog_runtime.go",
+    "owner": "App.GetSessionCatalogStatus",
+    "sources": [
+      "desktop/session_catalog_runtime.go"
+    ],
+    "scope": {
+      "kind": "owner-state",
+      "resolver": "App.GetSessionCatalogStatus",
+      "inputs": []
+    }
+  },
+  "GetSessionVersionState": {
+    "domain": "desktop/recovery_lineage.go",
+    "owner": "App.GetSessionVersionState",
+    "sources": [
+      "desktop/recovery_lineage.go"
+    ],
+    "scope": {
+      "kind": "owner-inputs",
+      "resolver": "App.GetSessionVersionState",
+      "inputs": [
+        "key"
+      ]
+    }
+  },
+  "GetTask": {
+    "domain": "desktop/app.go",
+    "owner": "App.GetTask",
+    "sources": [
+      "desktop/app.go"
+    ],
+    "scope": {
+      "kind": "owner-inputs",
+      "resolver": "App.GetTask",
+      "inputs": [
+        "taskID"
+      ]
+    }
+  },
+  "GetTaskCatalogStatus": {
+    "domain": "desktop/task_catalog.go",
+    "owner": "App.GetTaskCatalogStatus",
+    "sources": [
+      "desktop/task_catalog.go"
+    ],
+    "scope": {
+      "kind": "owner-state",
+      "resolver": "App.GetTaskCatalogStatus",
+      "inputs": []
+    }
+  },
+  "GetThemeExperience": {
+    "domain": "desktop/theme_app.go",
+    "owner": "App.GetThemeExperience",
+    "sources": [
+      "desktop/theme_app.go"
+    ],
+    "scope": {
+      "kind": "owner-state",
+      "resolver": "App.GetThemeExperience",
+      "inputs": []
+    }
+  },
+  "GetToolRecoveryForTab": {
+    "domain": "desktop/tool_recovery.go",
+    "owner": "App.GetToolRecoveryForTab",
+    "sources": [
+      "desktop/tool_recovery.go"
+    ],
+    "scope": {
+      "kind": "owner-inputs",
+      "resolver": "App.GetToolRecoveryForTab",
+      "inputs": [
+        "tabID"
+      ]
+    }
+  },
+  "GetTopicSummary": {
+    "domain": "desktop/session_catalog_runtime.go",
+    "owner": "App.GetTopicSummary",
+    "sources": [
+      "desktop/session_catalog_runtime.go"
+    ],
+    "scope": {
+      "kind": "owner-inputs",
+      "resolver": "App.GetTopicSummary",
+      "inputs": [
+        "key"
+      ]
+    }
+  },
+  "GetWorktreeStatus": {
+    "domain": "desktop/delivery_worktree.go",
+    "owner": "App.GetWorktreeStatus",
+    "sources": [
+      "desktop/delivery_worktree.go"
+    ],
+    "scope": {
+      "kind": "owner-inputs",
+      "resolver": "App.GetWorktreeStatus",
+      "inputs": [
+        "tabID"
+      ]
+    }
+  },
+  "GitBranches": {
+    "domain": "desktop/workspace_changes.go",
+    "owner": "App.GitBranches",
+    "sources": [
+      "desktop/workspace_changes.go"
+    ],
+    "scope": {
+      "kind": "owner-state",
+      "resolver": "App.GitBranches",
+      "inputs": []
+    }
+  },
+  "GitBranchesForTab": {
+    "domain": "desktop/workspace_git_branches.go",
+    "owner": "App.GitBranchesForTab",
+    "sources": [
+      "desktop/workspace_git_branches.go"
+    ],
+    "scope": {
+      "kind": "owner-inputs",
+      "resolver": "App.GitBranchesForTab",
+      "inputs": [
+        "tabID",
+        "workspaceRoot"
+      ]
+    }
+  },
+  "GitCheckout": {
+    "domain": "desktop/workspace_changes.go",
+    "owner": "App.GitCheckout",
+    "sources": [
+      "desktop/workspace_changes.go"
+    ],
+    "scope": {
+      "kind": "owner-inputs",
+      "resolver": "App.GitCheckout",
+      "inputs": [
+        "branch"
+      ]
+    }
+  },
+  "GitCheckoutForTab": {
+    "domain": "desktop/workspace_git_branches.go",
+    "owner": "App.GitCheckoutForTab",
+    "sources": [
+      "desktop/workspace_git_branches.go"
+    ],
+    "scope": {
+      "kind": "owner-inputs",
+      "resolver": "App.GitCheckoutForTab",
+      "inputs": [
+        "tabID",
+        "workspaceRoot",
+        "branch"
+      ]
+    }
+  },
+  "GitCreateBranch": {
+    "domain": "desktop/workspace_changes.go",
+    "owner": "App.GitCreateBranch",
+    "sources": [
+      "desktop/workspace_changes.go"
+    ],
+    "scope": {
+      "kind": "owner-inputs",
+      "resolver": "App.GitCreateBranch",
+      "inputs": [
+        "name"
+      ]
+    }
+  },
+  "GitCreateBranchForTab": {
+    "domain": "desktop/workspace_git_branches.go",
+    "owner": "App.GitCreateBranchForTab",
+    "sources": [
+      "desktop/workspace_git_branches.go"
+    ],
+    "scope": {
+      "kind": "owner-inputs",
+      "resolver": "App.GitCreateBranchForTab",
+      "inputs": [
+        "tabID",
+        "workspaceRoot",
+        "name"
+      ]
+    }
+  },
+  "HeartbeatGenerateID": {
+    "domain": "desktop/heartbeat.go",
+    "owner": "App.HeartbeatGenerateID",
+    "sources": [
+      "desktop/heartbeat.go"
+    ],
+    "scope": {
+      "kind": "owner-state",
+      "resolver": "App.HeartbeatGenerateID",
+      "inputs": []
+    }
+  },
+  "HeartbeatListTasks": {
+    "domain": "desktop/heartbeat.go",
+    "owner": "App.HeartbeatListTasks",
+    "sources": [
+      "desktop/heartbeat.go"
+    ],
+    "scope": {
+      "kind": "owner-state",
+      "resolver": "App.HeartbeatListTasks",
+      "inputs": []
+    }
+  },
+  "HeartbeatReloadConfig": {
+    "domain": "desktop/heartbeat.go",
+    "owner": "App.HeartbeatReloadConfig",
+    "sources": [
+      "desktop/heartbeat.go"
+    ],
+    "scope": {
+      "kind": "owner-state",
+      "resolver": "App.HeartbeatReloadConfig",
+      "inputs": []
+    }
+  },
+  "HeartbeatReloadTasks": {
+    "domain": "desktop/heartbeat.go",
+    "owner": "App.HeartbeatReloadTasks",
+    "sources": [
+      "desktop/heartbeat.go"
+    ],
+    "scope": {
+      "kind": "owner-state",
+      "resolver": "App.HeartbeatReloadTasks",
+      "inputs": []
+    }
+  },
+  "HeartbeatSaveConfig": {
+    "domain": "desktop/heartbeat.go",
+    "owner": "App.HeartbeatSaveConfig",
+    "sources": [
+      "desktop/heartbeat.go"
+    ],
+    "scope": {
+      "kind": "owner-inputs",
+      "resolver": "App.HeartbeatSaveConfig",
+      "inputs": [
+        "update"
+      ]
+    }
+  },
+  "HeartbeatSaveTasks": {
+    "domain": "desktop/heartbeat.go",
+    "owner": "App.HeartbeatSaveTasks",
+    "sources": [
+      "desktop/heartbeat.go"
+    ],
+    "scope": {
+      "kind": "owner-inputs",
+      "resolver": "App.HeartbeatSaveTasks",
+      "inputs": [
+        "tasks"
+      ]
+    }
+  },
+  "HeartbeatTriggerNow": {
+    "domain": "desktop/heartbeat.go",
+    "owner": "App.HeartbeatTriggerNow",
+    "sources": [
+      "desktop/heartbeat.go"
+    ],
+    "scope": {
+      "kind": "owner-inputs",
+      "resolver": "App.HeartbeatTriggerNow",
+      "inputs": [
+        "id"
+      ]
+    }
+  },
+  "History": {
+    "domain": "desktop/app.go",
+    "owner": "App.History",
+    "sources": [
+      "desktop/app.go"
+    ],
+    "scope": {
+      "kind": "owner-state",
+      "resolver": "App.History",
+      "inputs": []
+    }
+  },
+  "HistoryCheckpointTurnsForTab": {
+    "domain": "desktop/app.go",
+    "owner": "App.HistoryCheckpointTurnsForTab",
+    "sources": [
+      "desktop/app.go"
+    ],
+    "scope": {
+      "kind": "owner-inputs",
+      "resolver": "App.HistoryCheckpointTurnsForTab",
+      "inputs": [
+        "tabID"
+      ]
+    }
+  },
+  "HistoryContentForTab": {
+    "domain": "desktop/history_slice.go",
+    "owner": "App.HistoryContentForTab",
+    "sources": [
+      "desktop/history_slice.go"
+    ],
+    "scope": {
+      "kind": "owner-inputs",
+      "resolver": "App.HistoryContentForTab",
+      "inputs": [
+        "tabID",
+        "ref",
+        "chunkIndex"
+      ]
+    }
+  },
+  "HistoryForTab": {
+    "domain": "desktop/app.go",
+    "owner": "App.HistoryForTab",
+    "sources": [
+      "desktop/app.go"
+    ],
+    "scope": {
+      "kind": "owner-inputs",
+      "resolver": "App.HistoryForTab",
+      "inputs": [
+        "tabID"
+      ]
+    }
+  },
+  "HistoryPage": {
+    "domain": "desktop/app.go",
+    "owner": "App.HistoryPage",
+    "sources": [
+      "desktop/app.go"
+    ],
+    "scope": {
+      "kind": "owner-inputs",
+      "resolver": "App.HistoryPage",
+      "inputs": [
+        "beforeTurn",
+        "limit"
+      ]
+    }
+  },
+  "HistoryPageForTab": {
+    "domain": "desktop/app.go",
+    "owner": "App.HistoryPageForTab",
+    "sources": [
+      "desktop/app.go"
+    ],
+    "scope": {
+      "kind": "owner-inputs",
+      "resolver": "App.HistoryPageForTab",
+      "inputs": [
+        "tabID",
+        "beforeTurn",
+        "limit"
+      ]
+    }
+  },
+  "HistorySliceForTab": {
+    "domain": "desktop/history_slice.go",
+    "owner": "App.HistorySliceForTab",
+    "sources": [
+      "desktop/history_slice.go"
+    ],
+    "scope": {
+      "kind": "owner-inputs",
+      "resolver": "App.HistorySliceForTab",
+      "inputs": [
+        "tabID",
+        "req"
+      ]
+    }
+  },
+  "HooksSettings": {
+    "domain": "desktop/hooks_settings_app.go",
+    "owner": "App.HooksSettings",
+    "sources": [
+      "desktop/hooks_settings_app.go"
+    ],
+    "scope": {
+      "kind": "owner-inputs",
+      "resolver": "App.HooksSettings",
+      "inputs": [
+        "scope"
+      ]
+    }
+  },
+  "ImportThemePack": {
+    "domain": "desktop/theme_app.go",
+    "owner": "App.ImportThemePack",
+    "sources": [
+      "desktop/theme_app.go"
+    ],
+    "scope": {
+      "kind": "owner-inputs",
+      "resolver": "App.ImportThemePack",
+      "inputs": [
+        "sourcePath",
+        "replace"
+      ]
+    }
+  },
+  "InboxHasItems": {
+    "domain": "desktop/inbox_app.go",
+    "owner": "App.InboxHasItems",
+    "sources": [
+      "desktop/inbox_app.go"
+    ],
+    "scope": {
+      "kind": "owner-inputs",
+      "resolver": "App.InboxHasItems",
+      "inputs": [
+        "tabID"
+      ]
+    }
+  },
+  "InboxSnapshot": {
+    "domain": "desktop/inbox_app.go",
+    "owner": "App.InboxSnapshot",
+    "sources": [
+      "desktop/inbox_app.go"
+    ],
+    "scope": {
+      "kind": "owner-inputs",
+      "resolver": "App.InboxSnapshot",
+      "inputs": [
+        "tabID"
+      ]
+    }
+  },
+  "InspectWorktreeMerge": {
+    "domain": "desktop/delivery_worktree.go",
+    "owner": "App.InspectWorktreeMerge",
+    "sources": [
+      "desktop/delivery_worktree.go"
+    ],
+    "scope": {
+      "kind": "owner-inputs",
+      "resolver": "App.InspectWorktreeMerge",
+      "inputs": [
+        "tabID"
+      ]
+    }
+  },
+  "InstallMCPServer": {
+    "domain": "desktop/app.go",
+    "owner": "App.InstallMCPServer",
+    "sources": [
+      "desktop/app.go"
+    ],
+    "scope": {
+      "kind": "owner-inputs",
+      "resolver": "App.InstallMCPServer",
+      "inputs": [
+        "in"
+      ]
+    }
+  },
+  "InstallPlugin": {
+    "domain": "desktop/plugin_packages_app.go",
+    "owner": "App.InstallPlugin",
+    "sources": [
+      "desktop/plugin_packages_app.go"
+    ],
+    "scope": {
+      "kind": "owner-inputs",
+      "resolver": "App.InstallPlugin",
+      "inputs": [
+        "source",
+        "opts"
+      ]
+    }
+  },
+  "InstallShellSupport": {
+    "domain": "desktop/shell_support.go",
+    "owner": "App.InstallShellSupport",
+    "sources": [
+      "desktop/shell_support.go"
+    ],
+    "scope": {
+      "kind": "owner-inputs",
+      "resolver": "App.InstallShellSupport",
+      "inputs": [
+        "id"
+      ]
+    }
+  },
+  "InterruptTurnForTab": {
+    "domain": "desktop/turn_runtime_api.go",
+    "owner": "App.InterruptTurnForTab",
+    "sources": [
+      "desktop/turn_runtime_api.go"
+    ],
+    "scope": {
+      "kind": "owner-inputs",
+      "resolver": "App.InterruptTurnForTab",
+      "inputs": [
+        "tabID",
+        "turnID"
+      ]
+    }
+  },
+  "InterruptTurnWithInboxItemsForTab": {
+    "domain": "desktop/turn_runtime_api.go",
+    "owner": "App.InterruptTurnWithInboxItemsForTab",
+    "sources": [
+      "desktop/turn_runtime_api.go"
+    ],
+    "scope": {
+      "kind": "owner-inputs",
+      "resolver": "App.InterruptTurnWithInboxItemsForTab",
+      "inputs": [
+        "tabID",
+        "turnID",
+        "itemIDs"
+      ]
+    }
+  },
+  "InvokeExtensionAction": {
+    "domain": "desktop/extensions_app.go",
+    "owner": "App.InvokeExtensionAction",
+    "sources": [
+      "desktop/extensions_app.go"
+    ],
+    "scope": {
+      "kind": "owner-inputs",
+      "resolver": "App.InvokeExtensionAction",
+      "inputs": [
+        "tabID",
+        "name",
+        "args"
+      ]
+    }
+  },
+  "IsMainWindowMaximised": {
+    "domain": "desktop/window_controls.go",
+    "owner": "App.IsMainWindowMaximised",
+    "sources": [
+      "desktop/window_controls.go"
+    ],
+    "scope": {
+      "kind": "owner-state",
+      "resolver": "App.IsMainWindowMaximised",
+      "inputs": []
+    }
+  },
+  "IsolatedWorktreeAvailability": {
+    "domain": "desktop/delivery_worktree.go",
+    "owner": "App.IsolatedWorktreeAvailability",
+    "sources": [
+      "desktop/delivery_worktree.go"
+    ],
+    "scope": {
+      "kind": "owner-inputs",
+      "resolver": "App.IsolatedWorktreeAvailability",
+      "inputs": [
+        "workspaceRoot"
+      ]
+    }
+  },
+  "Jobs": {
+    "domain": "desktop/app.go",
+    "owner": "App.Jobs",
+    "sources": [
+      "desktop/app.go"
+    ],
+    "scope": {
+      "kind": "owner-state",
+      "resolver": "App.Jobs",
+      "inputs": []
+    }
+  },
+  "JobsForTab": {
+    "domain": "desktop/app.go",
+    "owner": "App.JobsForTab",
+    "sources": [
+      "desktop/app.go"
+    ],
+    "scope": {
+      "kind": "owner-inputs",
+      "resolver": "App.JobsForTab",
+      "inputs": [
+        "tabID"
+      ]
+    }
+  },
+  "ListDir": {
+    "domain": "desktop/app.go",
+    "owner": "App.ListDir",
+    "sources": [
+      "desktop/app.go"
+    ],
+    "scope": {
+      "kind": "owner-inputs",
+      "resolver": "App.ListDir",
+      "inputs": [
+        "rel"
+      ]
+    }
+  },
+  "ListDirForTab": {
+    "domain": "desktop/app.go",
+    "owner": "App.ListDirForTab",
+    "sources": [
+      "desktop/app.go"
+    ],
+    "scope": {
+      "kind": "owner-inputs",
+      "resolver": "App.ListDirForTab",
+      "inputs": [
+        "tabID",
+        "rel"
+      ]
+    }
+  },
+  "ListHistorySessions": {
+    "domain": "desktop/history_catalog.go",
+    "owner": "App.ListHistorySessions",
+    "sources": [
+      "desktop/history_catalog.go"
+    ],
+    "scope": {
+      "kind": "owner-inputs",
+      "resolver": "App.ListHistorySessions",
+      "inputs": [
+        "req"
+      ]
+    }
+  },
+  "ListProjectGroups": {
+    "domain": "desktop/project_tree_organization.go",
+    "owner": "App.ListProjectGroups",
+    "sources": [
+      "desktop/project_tree_organization.go"
+    ],
+    "scope": {
+      "kind": "owner-inputs",
+      "resolver": "App.ListProjectGroups",
+      "inputs": [
+        "scope",
+        "workspaceRoot"
+      ]
+    }
+  },
+  "ListProjectTopics": {
+    "domain": "desktop/topic_state_catalog.go",
+    "owner": "App.ListProjectTopics",
+    "sources": [
+      "desktop/topic_state_catalog.go"
+    ],
+    "scope": {
+      "kind": "owner-inputs",
+      "resolver": "App.ListProjectTopics",
+      "inputs": [
+        "req"
+      ]
+    }
+  },
+  "ListProjectTree": {
+    "domain": "desktop/session_catalog_runtime.go",
+    "owner": "App.ListProjectTree",
+    "sources": [
+      "desktop/session_catalog_runtime.go"
+    ],
+    "scope": {
+      "kind": "owner-state",
+      "resolver": "App.ListProjectTree",
+      "inputs": []
+    }
+  },
+  "ListRemoteDir": {
+    "domain": "desktop/remote_app.go",
+    "owner": "App.ListRemoteDir",
+    "sources": [
+      "desktop/remote_app.go"
+    ],
+    "scope": {
+      "kind": "owner-inputs",
+      "resolver": "App.ListRemoteDir",
+      "inputs": [
+        "hostID",
+        "path"
+      ]
+    }
+  },
+  "ListRemoteProjects": {
+    "domain": "desktop/remote_project_registry.go",
+    "owner": "App.ListRemoteProjects",
+    "sources": [
+      "desktop/remote_project_registry.go"
+    ],
+    "scope": {
+      "kind": "owner-state",
+      "resolver": "App.ListRemoteProjects",
+      "inputs": []
+    }
+  },
+  "ListSessions": {
+    "domain": "desktop/app.go",
+    "owner": "App.ListSessions",
+    "sources": [
+      "desktop/app.go"
+    ],
+    "scope": {
+      "kind": "owner-state",
+      "resolver": "App.ListSessions",
+      "inputs": []
+    }
+  },
+  "ListSessionsForTab": {
+    "domain": "desktop/app.go",
+    "owner": "App.ListSessionsForTab",
+    "sources": [
+      "desktop/app.go"
+    ],
+    "scope": {
+      "kind": "owner-inputs",
+      "resolver": "App.ListSessionsForTab",
+      "inputs": [
+        "tabID"
+      ]
+    }
+  },
+  "ListTabs": {
+    "domain": "desktop/tabs.go",
+    "owner": "App.ListTabs",
+    "sources": [
+      "desktop/tabs.go"
+    ],
+    "scope": {
+      "kind": "owner-state",
+      "resolver": "App.ListTabs",
+      "inputs": []
+    }
+  },
+  "ListTaskEventPage": {
+    "domain": "desktop/task_catalog.go",
+    "owner": "App.ListTaskEventPage",
+    "sources": [
+      "desktop/task_catalog.go"
+    ],
+    "scope": {
+      "kind": "owner-inputs",
+      "resolver": "App.ListTaskEventPage",
+      "inputs": [
+        "req"
+      ]
+    }
+  },
+  "ListTaskEventsForTab": {
+    "domain": "desktop/app.go",
+    "owner": "App.ListTaskEventsForTab",
+    "sources": [
+      "desktop/app.go"
+    ],
+    "scope": {
+      "kind": "owner-inputs",
+      "resolver": "App.ListTaskEventsForTab",
+      "inputs": [
+        "tabID",
+        "taskID",
+        "afterSequence"
+      ]
+    }
+  },
+  "ListTaskPage": {
+    "domain": "desktop/task_catalog.go",
+    "owner": "App.ListTaskPage",
+    "sources": [
+      "desktop/task_catalog.go"
+    ],
+    "scope": {
+      "kind": "owner-inputs",
+      "resolver": "App.ListTaskPage",
+      "inputs": [
+        "req"
+      ]
+    }
+  },
+  "ListTasks": {
+    "domain": "desktop/app.go",
+    "owner": "App.ListTasks",
+    "sources": [
+      "desktop/app.go"
+    ],
+    "scope": {
+      "kind": "owner-state",
+      "resolver": "App.ListTasks",
+      "inputs": []
+    }
+  },
+  "ListTasksForSession": {
+    "domain": "desktop/app.go",
+    "owner": "App.ListTasksForSession",
+    "sources": [
+      "desktop/app.go"
+    ],
+    "scope": {
+      "kind": "owner-inputs",
+      "resolver": "App.ListTasksForSession",
+      "inputs": [
+        "sessionID"
+      ]
+    }
+  },
+  "ListTasksForTab": {
+    "domain": "desktop/app.go",
+    "owner": "App.ListTasksForTab",
+    "sources": [
+      "desktop/app.go"
+    ],
+    "scope": {
+      "kind": "owner-inputs",
+      "resolver": "App.ListTasksForTab",
+      "inputs": [
+        "tabID"
+      ]
+    }
+  },
+  "ListThemePacks": {
+    "domain": "desktop/theme_app.go",
+    "owner": "App.ListThemePacks",
+    "sources": [
+      "desktop/theme_app.go"
+    ],
+    "scope": {
+      "kind": "owner-state",
+      "resolver": "App.ListThemePacks",
+      "inputs": []
+    }
+  },
+  "ListTrashedSessions": {
+    "domain": "desktop/app.go",
+    "owner": "App.ListTrashedSessions",
+    "sources": [
+      "desktop/app.go"
+    ],
+    "scope": {
+      "kind": "owner-state",
+      "resolver": "App.ListTrashedSessions",
+      "inputs": []
+    }
+  },
+  "ListWorkspaces": {
+    "domain": "desktop/app.go",
+    "owner": "App.ListWorkspaces",
+    "sources": [
+      "desktop/app.go"
+    ],
+    "scope": {
+      "kind": "owner-state",
+      "resolver": "App.ListWorkspaces",
+      "inputs": []
+    }
+  },
+  "LookupInboxFollowupForTarget": {
+    "domain": "desktop/inbox_target.go",
+    "owner": "App.LookupInboxFollowupForTarget",
+    "sources": [
+      "desktop/inbox_target.go"
+    ],
+    "scope": {
+      "kind": "owner-inputs",
+      "resolver": "App.LookupInboxFollowupForTarget",
+      "inputs": [
+        "target",
+        "key"
+      ]
+    }
+  },
+  "MCPAppCallToolForTab": {
+    "domain": "desktop/mcp_apps_app.go",
+    "owner": "App.MCPAppCallToolForTab",
+    "sources": [
+      "desktop/mcp_apps_app.go"
+    ],
+    "scope": {
+      "kind": "owner-inputs",
+      "resolver": "App.MCPAppCallToolForTab",
+      "inputs": [
+        "tabID",
+        "instanceToken",
+        "toolName",
+        "args"
+      ]
+    }
+  },
+  "MCPAppResourceDigest": {
+    "domain": "desktop/mcp_apps_app.go",
+    "owner": "App.MCPAppResourceDigest",
+    "sources": [
+      "desktop/mcp_apps_app.go"
+    ],
+    "scope": {
+      "kind": "owner-inputs",
+      "resolver": "App.MCPAppResourceDigest",
+      "inputs": [
+        "instanceToken"
+      ]
+    }
+  },
+  "MCPAppResourceDigestForTab": {
+    "domain": "desktop/mcp_apps_app.go",
+    "owner": "App.MCPAppResourceDigestForTab",
+    "sources": [
+      "desktop/mcp_apps_app.go"
+    ],
+    "scope": {
+      "kind": "owner-inputs",
+      "resolver": "App.MCPAppResourceDigestForTab",
+      "inputs": [
+        "tabID",
+        "instanceToken"
+      ]
+    }
+  },
+  "MCPCapabilityMatrix": {
+    "domain": "desktop/mcp_capability_view_app.go",
+    "owner": "App.MCPCapabilityMatrix",
+    "sources": [
+      "desktop/mcp_capability_view_app.go"
+    ],
+    "scope": {
+      "kind": "owner-state",
+      "resolver": "App.MCPCapabilityMatrix",
+      "inputs": []
+    }
+  },
+  "MCPCloseAppInstanceForTab": {
+    "domain": "desktop/mcp_apps_app.go",
+    "owner": "App.MCPCloseAppInstanceForTab",
+    "sources": [
+      "desktop/mcp_apps_app.go"
+    ],
+    "scope": {
+      "kind": "owner-inputs",
+      "resolver": "App.MCPCloseAppInstanceForTab",
+      "inputs": [
+        "tabID",
+        "instanceToken"
+      ]
+    }
+  },
+  "MCPMarketplace": {
+    "domain": "desktop/app.go",
+    "owner": "App.MCPMarketplace",
+    "sources": [
+      "desktop/app.go"
+    ],
+    "scope": {
+      "kind": "owner-inputs",
+      "resolver": "App.MCPMarketplace",
+      "inputs": [
+        "query"
+      ]
+    }
+  },
+  "MCPMarketplaceResolve": {
+    "domain": "desktop/app.go",
+    "owner": "App.MCPMarketplaceResolve",
+    "sources": [
+      "desktop/app.go"
+    ],
+    "scope": {
+      "kind": "owner-inputs",
+      "resolver": "App.MCPMarketplaceResolve",
+      "inputs": [
+        "registryName"
+      ]
+    }
+  },
+  "MCPOpenAppInstanceForTab": {
+    "domain": "desktop/mcp_apps_app.go",
+    "owner": "App.MCPOpenAppInstanceForTab",
+    "sources": [
+      "desktop/mcp_apps_app.go"
+    ],
+    "scope": {
+      "kind": "owner-inputs",
+      "resolver": "App.MCPOpenAppInstanceForTab",
+      "inputs": [
+        "tabID",
+        "server",
+        "tool",
+        "generation",
+        "callID",
+        "resourceURI"
+      ]
+    }
+  },
+  "MCPOpenAppLinkForTab": {
+    "domain": "desktop/mcp_apps_app.go",
+    "owner": "App.MCPOpenAppLinkForTab",
+    "sources": [
+      "desktop/mcp_apps_app.go"
+    ],
+    "scope": {
+      "kind": "owner-inputs",
+      "resolver": "App.MCPOpenAppLinkForTab",
+      "inputs": [
+        "tabID",
+        "instanceToken",
+        "rawURL"
+      ]
+    }
+  },
+  "MCPServers": {
+    "domain": "desktop/app.go",
+    "owner": "App.MCPServers",
+    "sources": [
+      "desktop/app.go"
+    ],
+    "scope": {
+      "kind": "owner-state",
+      "resolver": "App.MCPServers",
+      "inputs": []
+    }
+  },
+  "Memory": {
+    "domain": "desktop/app.go",
+    "owner": "App.Memory",
+    "sources": [
+      "desktop/app.go"
+    ],
+    "scope": {
+      "kind": "owner-state",
+      "resolver": "App.Memory",
+      "inputs": []
+    }
+  },
+  "MemoryForTab": {
+    "domain": "desktop/app.go",
+    "owner": "App.MemoryForTab",
+    "sources": [
+      "desktop/app.go"
+    ],
+    "scope": {
+      "kind": "owner-inputs",
+      "resolver": "App.MemoryForTab",
+      "inputs": [
+        "tabID"
+      ]
+    }
+  },
+  "MemoryRevisions": {
+    "domain": "desktop/app.go",
+    "owner": "App.MemoryRevisions",
+    "sources": [
+      "desktop/app.go"
+    ],
+    "scope": {
+      "kind": "owner-inputs",
+      "resolver": "App.MemoryRevisions",
+      "inputs": [
+        "ref"
+      ]
+    }
+  },
+  "MemoryRevisionsForTab": {
+    "domain": "desktop/app.go",
+    "owner": "App.MemoryRevisionsForTab",
+    "sources": [
+      "desktop/app.go"
+    ],
+    "scope": {
+      "kind": "owner-inputs",
+      "resolver": "App.MemoryRevisionsForTab",
+      "inputs": [
+        "tabID",
+        "ref"
+      ]
+    }
+  },
+  "MemorySuggestions": {
+    "domain": "desktop/memory_suggestions.go",
+    "owner": "App.MemorySuggestions",
+    "sources": [
+      "desktop/memory_suggestions.go"
+    ],
+    "scope": {
+      "kind": "owner-state",
+      "resolver": "App.MemorySuggestions",
+      "inputs": []
+    }
+  },
+  "MemorySuggestionsForTab": {
+    "domain": "desktop/memory_suggestions.go",
+    "owner": "App.MemorySuggestionsForTab",
+    "sources": [
+      "desktop/memory_suggestions.go"
+    ],
+    "scope": {
+      "kind": "owner-inputs",
+      "resolver": "App.MemorySuggestionsForTab",
+      "inputs": [
+        "tabID"
+      ]
+    }
+  },
+  "MergeWorktreeBack": {
+    "domain": "desktop/delivery_worktree.go",
+    "owner": "App.MergeWorktreeBack",
+    "sources": [
+      "desktop/delivery_worktree.go"
+    ],
+    "scope": {
+      "kind": "owner-inputs",
+      "resolver": "App.MergeWorktreeBack",
+      "inputs": [
+        "request"
+      ]
+    }
+  },
+  "Meta": {
+    "domain": "desktop/app.go",
+    "owner": "App.Meta",
+    "sources": [
+      "desktop/app.go"
+    ],
+    "scope": {
+      "kind": "owner-state",
+      "resolver": "App.Meta",
+      "inputs": []
+    }
+  },
+  "MetaForTab": {
+    "domain": "desktop/app.go",
+    "owner": "App.MetaForTab",
+    "sources": [
+      "desktop/app.go"
+    ],
+    "scope": {
+      "kind": "owner-inputs",
+      "resolver": "App.MetaForTab",
+      "inputs": [
+        "tabID"
+      ]
+    }
+  },
+  "MigrateDesktopPreferences": {
+    "domain": "desktop/settings_preferences.go",
+    "owner": "App.MigrateDesktopPreferences",
+    "sources": [
+      "desktop/settings_preferences.go"
+    ],
+    "scope": {
+      "kind": "owner-inputs",
+      "resolver": "App.MigrateDesktopPreferences",
+      "inputs": [
+        "language",
+        "theme",
+        "style"
+      ]
+    }
+  },
+  "MinimiseMainWindow": {
+    "domain": "desktop/window_controls.go",
+    "owner": "App.MinimiseMainWindow",
+    "sources": [
+      "desktop/window_controls.go"
+    ],
+    "scope": {
+      "kind": "owner-state",
+      "resolver": "App.MinimiseMainWindow",
+      "inputs": []
+    }
+  },
+  "MkdirRemote": {
+    "domain": "desktop/remote_app.go",
+    "owner": "App.MkdirRemote",
+    "sources": [
+      "desktop/remote_app.go"
+    ],
+    "scope": {
+      "kind": "owner-inputs",
+      "resolver": "App.MkdirRemote",
+      "inputs": [
+        "hostID",
+        "path"
+      ]
+    }
+  },
+  "Models": {
+    "domain": "desktop/app.go",
+    "owner": "App.Models",
+    "sources": [
+      "desktop/app.go"
+    ],
+    "scope": {
+      "kind": "owner-state",
+      "resolver": "App.Models",
+      "inputs": []
+    }
+  },
+  "ModelsForTab": {
+    "domain": "desktop/model_catalog.go",
+    "owner": "App.ModelsForTab",
+    "sources": [
+      "desktop/model_catalog.go"
+    ],
+    "scope": {
+      "kind": "owner-inputs",
+      "resolver": "App.ModelsForTab",
+      "inputs": [
+        "tabID"
+      ]
+    }
+  },
+  "MoveInboxItem": {
+    "domain": "desktop/inbox_app.go",
+    "owner": "App.MoveInboxItem",
+    "sources": [
+      "desktop/inbox_app.go"
+    ],
+    "scope": {
+      "kind": "owner-inputs",
+      "resolver": "App.MoveInboxItem",
+      "inputs": [
+        "tabID",
+        "id",
+        "toIndex"
+      ]
+    }
+  },
+  "NeedsOnboarding": {
+    "domain": "desktop/app.go",
+    "owner": "App.NeedsOnboarding",
+    "sources": [
+      "desktop/app.go"
+    ],
+    "scope": {
+      "kind": "owner-state",
+      "resolver": "App.NeedsOnboarding",
+      "inputs": []
+    }
+  },
+  "NewSession": {
+    "domain": "desktop/session_new.go",
+    "owner": "App.NewSession",
+    "sources": [
+      "desktop/session_new.go"
+    ],
+    "scope": {
+      "kind": "owner-state",
+      "resolver": "App.NewSession",
+      "inputs": []
+    }
+  },
+  "NewSessionForTab": {
+    "domain": "desktop/session_new.go",
+    "owner": "App.NewSessionForTab",
+    "sources": [
+      "desktop/session_new.go"
+    ],
+    "scope": {
+      "kind": "owner-inputs",
+      "resolver": "App.NewSessionForTab",
+      "inputs": [
+        "tabID"
+      ]
+    }
+  },
+  "OpenChannelSessionForTab": {
+    "domain": "desktop/app.go",
+    "owner": "App.OpenChannelSessionForTab",
+    "sources": [
+      "desktop/app.go"
+    ],
+    "scope": {
+      "kind": "owner-inputs",
+      "resolver": "App.OpenChannelSessionForTab",
+      "inputs": [
+        "tabID",
+        "path"
+      ]
+    }
+  },
+  "OpenChannelSessionPageForTab": {
+    "domain": "desktop/app.go",
+    "owner": "App.OpenChannelSessionPageForTab",
+    "sources": [
+      "desktop/app.go"
+    ],
+    "scope": {
+      "kind": "owner-inputs",
+      "resolver": "App.OpenChannelSessionPageForTab",
+      "inputs": [
+        "tabID",
+        "path",
+        "limit"
+      ]
+    }
+  },
+  "OpenDownloadPage": {
+    "domain": "desktop/updater_app.go",
+    "owner": "App.OpenDownloadPage",
+    "sources": [
+      "desktop/updater_app.go"
+    ],
+    "scope": {
+      "kind": "owner-state",
+      "resolver": "App.OpenDownloadPage",
+      "inputs": []
+    }
+  },
+  "OpenGlobalTab": {
+    "domain": "desktop/tabs.go",
+    "owner": "App.OpenGlobalTab",
+    "sources": [
+      "desktop/tabs.go"
+    ],
+    "scope": {
+      "kind": "owner-inputs",
+      "resolver": "App.OpenGlobalTab",
+      "inputs": [
+        "topicID"
+      ]
+    }
+  },
+  "OpenLocalPath": {
+    "domain": "desktop/open_local_path.go",
+    "owner": "App.OpenLocalPath",
+    "sources": [
+      "desktop/open_local_path.go"
+    ],
+    "scope": {
+      "kind": "owner-inputs",
+      "resolver": "App.OpenLocalPath",
+      "inputs": [
+        "path"
+      ]
+    }
+  },
+  "OpenLocalPathInExternalOpener": {
+    "domain": "desktop/external_opener.go",
+    "owner": "App.OpenLocalPathInExternalOpener",
+    "sources": [
+      "desktop/external_opener.go"
+    ],
+    "scope": {
+      "kind": "owner-inputs",
+      "resolver": "App.OpenLocalPathInExternalOpener",
+      "inputs": [
+        "path",
+        "id"
+      ]
+    }
+  },
+  "OpenProjectTab": {
+    "domain": "desktop/tabs.go",
+    "owner": "App.OpenProjectTab",
+    "sources": [
+      "desktop/tabs.go"
+    ],
+    "scope": {
+      "kind": "owner-inputs",
+      "resolver": "App.OpenProjectTab",
+      "inputs": [
+        "workspaceRoot",
+        "topicID"
+      ]
+    }
+  },
+  "OpenRemoteProjectTab": {
+    "domain": "desktop/remote_projects.go",
+    "owner": "App.OpenRemoteProjectTab",
+    "sources": [
+      "desktop/remote_projects.go"
+    ],
+    "scope": {
+      "kind": "owner-inputs",
+      "resolver": "App.OpenRemoteProjectTab",
+      "inputs": [
+        "hostID",
+        "workspace",
+        "opts"
+      ]
+    }
+  },
+  "OpenRemoteWorkspace": {
+    "domain": "desktop/remote_app.go",
+    "owner": "App.OpenRemoteWorkspace",
+    "sources": [
+      "desktop/remote_app.go"
+    ],
+    "scope": {
+      "kind": "owner-inputs",
+      "resolver": "App.OpenRemoteWorkspace",
+      "inputs": [
+        "hostID",
+        "workspace"
+      ]
+    }
+  },
+  "OpenTaskSessionByKey": {
+    "domain": "desktop/task_catalog.go",
+    "owner": "App.OpenTaskSessionByKey",
+    "sources": [
+      "desktop/task_catalog.go"
+    ],
+    "scope": {
+      "kind": "owner-inputs",
+      "resolver": "App.OpenTaskSessionByKey",
+      "inputs": [
+        "req"
+      ]
+    }
+  },
+  "OpenTaskSessionForTab": {
+    "domain": "desktop/app.go",
+    "owner": "App.OpenTaskSessionForTab",
+    "sources": [
+      "desktop/app.go"
+    ],
+    "scope": {
+      "kind": "owner-inputs",
+      "resolver": "App.OpenTaskSessionForTab",
+      "inputs": [
+        "tabID",
+        "taskID"
+      ]
+    }
+  },
+  "OpenTopicSession": {
+    "domain": "desktop/tabs.go",
+    "owner": "App.OpenTopicSession",
+    "sources": [
+      "desktop/tabs.go"
+    ],
+    "scope": {
+      "kind": "owner-inputs",
+      "resolver": "App.OpenTopicSession",
+      "inputs": [
+        "scope",
+        "workspaceRoot",
+        "topicID",
+        "sessionPath"
+      ]
+    }
+  },
+  "OpenUserConfigPath": {
+    "domain": "desktop/settings_app.go",
+    "owner": "App.OpenUserConfigPath",
+    "sources": [
+      "desktop/settings_app.go"
+    ],
+    "scope": {
+      "kind": "owner-state",
+      "resolver": "App.OpenUserConfigPath",
+      "inputs": []
+    }
+  },
+  "OpenWorkspaceInExternalOpenerForTab": {
+    "domain": "desktop/external_opener.go",
+    "owner": "App.OpenWorkspaceInExternalOpenerForTab",
+    "sources": [
+      "desktop/external_opener.go"
+    ],
+    "scope": {
+      "kind": "owner-inputs",
+      "resolver": "App.OpenWorkspaceInExternalOpenerForTab",
+      "inputs": [
+        "tabID",
+        "id"
+      ]
+    }
+  },
+  "OpenWorkspacePathForTab": {
+    "domain": "desktop/app.go",
+    "owner": "App.OpenWorkspacePathForTab",
+    "sources": [
+      "desktop/app.go"
+    ],
+    "scope": {
+      "kind": "owner-inputs",
+      "resolver": "App.OpenWorkspacePathForTab",
+      "inputs": [
+        "tabID",
+        "rel"
+      ]
+    }
+  },
+  "PauseGoalForTab": {
+    "domain": "desktop/app.go",
+    "owner": "App.PauseGoalForTab",
+    "sources": [
+      "desktop/app.go"
+    ],
+    "scope": {
+      "kind": "owner-inputs",
+      "resolver": "App.PauseGoalForTab",
+      "inputs": [
+        "tabID"
+      ]
+    }
+  },
+  "PauseRemoteTabGoal": {
+    "domain": "desktop/remote_tab_commands.go",
+    "owner": "App.PauseRemoteTabGoal",
+    "sources": [
+      "desktop/remote_tab_commands.go"
+    ],
+    "scope": {
+      "kind": "owner-inputs",
+      "resolver": "App.PauseRemoteTabGoal",
+      "inputs": [
+        "tabID"
+      ]
+    }
+  },
+  "PendingPromptIdentitiesForTab": {
+    "domain": "desktop/decision_runtime_api.go",
+    "owner": "App.PendingPromptIdentitiesForTab",
+    "sources": [
+      "desktop/decision_runtime_api.go"
+    ],
+    "scope": {
+      "kind": "owner-inputs",
+      "resolver": "App.PendingPromptIdentitiesForTab",
+      "inputs": [
+        "tabID"
+      ]
+    }
+  },
+  "PickBlankProjectParent": {
+    "domain": "desktop/blank_project.go",
+    "owner": "App.PickBlankProjectParent",
+    "sources": [
+      "desktop/blank_project.go"
+    ],
+    "scope": {
+      "kind": "owner-state",
+      "resolver": "App.PickBlankProjectParent",
+      "inputs": []
+    }
+  },
+  "PickExportFile": {
+    "domain": "desktop/app.go",
+    "owner": "App.PickExportFile",
+    "sources": [
+      "desktop/app.go"
+    ],
+    "scope": {
+      "kind": "owner-inputs",
+      "resolver": "App.PickExportFile",
+      "inputs": [
+        "defaultFilename",
+        "mimeType"
+      ]
+    }
+  },
+  "PickPluginFolder": {
+    "domain": "desktop/app.go",
+    "owner": "App.PickPluginFolder",
+    "sources": [
+      "desktop/app.go"
+    ],
+    "scope": {
+      "kind": "owner-state",
+      "resolver": "App.PickPluginFolder",
+      "inputs": []
+    }
+  },
+  "PickRemoteIdentityFile": {
+    "domain": "desktop/remote_dialog.go",
+    "owner": "App.PickRemoteIdentityFile",
+    "sources": [
+      "desktop/remote_dialog.go"
+    ],
+    "scope": {
+      "kind": "owner-state",
+      "resolver": "App.PickRemoteIdentityFile",
+      "inputs": []
+    }
+  },
+  "PickSkillFolder": {
+    "domain": "desktop/app.go",
+    "owner": "App.PickSkillFolder",
+    "sources": [
+      "desktop/app.go"
+    ],
+    "scope": {
+      "kind": "owner-state",
+      "resolver": "App.PickSkillFolder",
+      "inputs": []
+    }
+  },
+  "PickThemeBackground": {
+    "domain": "desktop/theme_app.go",
+    "owner": "App.PickThemeBackground",
+    "sources": [
+      "desktop/theme_app.go"
+    ],
+    "scope": {
+      "kind": "owner-state",
+      "resolver": "App.PickThemeBackground",
+      "inputs": []
+    }
+  },
+  "PickWorkspace": {
+    "domain": "desktop/app.go",
+    "owner": "App.PickWorkspace",
+    "sources": [
+      "desktop/app.go"
+    ],
+    "scope": {
+      "kind": "owner-state",
+      "resolver": "App.PickWorkspace",
+      "inputs": []
+    }
+  },
+  "PinFileForTab": {
+    "domain": "desktop/pinned_files.go",
+    "owner": "App.PinFileForTab",
+    "sources": [
+      "desktop/pinned_files.go"
+    ],
+    "scope": {
+      "kind": "owner-inputs",
+      "resolver": "App.PinFileForTab",
+      "inputs": [
+        "tabID",
+        "relPath"
+      ]
+    }
+  },
+  "PlanPluginInstall": {
+    "domain": "desktop/plugin_packages_app.go",
+    "owner": "App.PlanPluginInstall",
+    "sources": [
+      "desktop/plugin_packages_app.go"
+    ],
+    "scope": {
+      "kind": "owner-inputs",
+      "resolver": "App.PlanPluginInstall",
+      "inputs": [
+        "source",
+        "opts"
+      ]
+    }
+  },
+  "Platform": {
+    "domain": "desktop/app.go",
+    "owner": "App.Platform",
+    "sources": [
+      "desktop/app.go"
+    ],
+    "scope": {
+      "kind": "owner-state",
+      "resolver": "App.Platform",
+      "inputs": []
+    }
+  },
+  "PluginDoctor": {
+    "domain": "desktop/plugin_packages_app.go",
+    "owner": "App.PluginDoctor",
+    "sources": [
+      "desktop/plugin_packages_app.go"
+    ],
+    "scope": {
+      "kind": "owner-inputs",
+      "resolver": "App.PluginDoctor",
+      "inputs": [
+        "name"
+      ]
+    }
+  },
+  "Plugins": {
+    "domain": "desktop/plugin_packages_app.go",
+    "owner": "App.Plugins",
+    "sources": [
+      "desktop/plugin_packages_app.go"
+    ],
+    "scope": {
+      "kind": "owner-state",
+      "resolver": "App.Plugins",
+      "inputs": []
+    }
+  },
+  "PollBotConnectionInstall": {
+    "domain": "desktop/bot_connection_app.go",
+    "owner": "App.PollBotConnectionInstall",
+    "sources": [
+      "desktop/bot_connection_app.go"
+    ],
+    "scope": {
+      "kind": "owner-inputs",
+      "resolver": "App.PollBotConnectionInstall",
+      "inputs": [
+        "installID"
+      ]
+    }
+  },
+  "PrepareWorktreeMerge": {
+    "domain": "desktop/delivery_worktree.go",
+    "owner": "App.PrepareWorktreeMerge",
+    "sources": [
+      "desktop/delivery_worktree.go"
+    ],
+    "scope": {
+      "kind": "owner-inputs",
+      "resolver": "App.PrepareWorktreeMerge",
+      "inputs": [
+        "tabID"
+      ]
+    }
+  },
+  "PreviewRewindForTab": {
+    "domain": "desktop/app.go",
+    "owner": "App.PreviewRewindForTab",
+    "sources": [
+      "desktop/app.go"
+    ],
+    "scope": {
+      "kind": "owner-inputs",
+      "resolver": "App.PreviewRewindForTab",
+      "inputs": [
+        "tabID",
+        "turn",
+        "scope"
+      ]
+    }
+  },
+  "PreviewSession": {
+    "domain": "desktop/app.go",
+    "owner": "App.PreviewSession",
+    "sources": [
+      "desktop/app.go"
+    ],
+    "scope": {
+      "kind": "owner-inputs",
+      "resolver": "App.PreviewSession",
+      "inputs": [
+        "path"
+      ]
+    }
+  },
+  "PreviewWorkspaceFileRevertForTab": {
+    "domain": "desktop/app.go",
+    "owner": "App.PreviewWorkspaceFileRevertForTab",
+    "sources": [
+      "desktop/app.go"
+    ],
+    "scope": {
+      "kind": "owner-inputs",
+      "resolver": "App.PreviewWorkspaceFileRevertForTab",
+      "inputs": [
+        "tabID",
+        "path"
+      ]
+    }
+  },
+  "PurgeRecoveryCopy": {
+    "domain": "desktop/app.go",
+    "owner": "App.PurgeRecoveryCopy",
+    "sources": [
+      "desktop/app.go"
+    ],
+    "scope": {
+      "kind": "owner-inputs",
+      "resolver": "App.PurgeRecoveryCopy",
+      "inputs": [
+        "path"
+      ]
+    }
+  },
+  "PurgeTrashedSession": {
+    "domain": "desktop/app.go",
+    "owner": "App.PurgeTrashedSession",
+    "sources": [
+      "desktop/app.go"
+    ],
+    "scope": {
+      "kind": "owner-inputs",
+      "resolver": "App.PurgeTrashedSession",
+      "inputs": [
+        "path"
+      ]
+    }
+  },
+  "QuerySessionTakeover": {
+    "domain": "desktop/session_takeover.go",
+    "owner": "App.QuerySessionTakeover",
+    "sources": [
+      "desktop/session_takeover.go"
+    ],
+    "scope": {
+      "kind": "owner-inputs",
+      "resolver": "App.QuerySessionTakeover",
+      "inputs": [
+        "tabID"
+      ]
+    }
+  },
+  "ReadFile": {
+    "domain": "desktop/app.go",
+    "owner": "App.ReadFile",
+    "sources": [
+      "desktop/app.go"
+    ],
+    "scope": {
+      "kind": "owner-inputs",
+      "resolver": "App.ReadFile",
+      "inputs": [
+        "rel"
+      ]
+    }
+  },
+  "ReadFileForTab": {
+    "domain": "desktop/app.go",
+    "owner": "App.ReadFileForTab",
+    "sources": [
+      "desktop/app.go"
+    ],
+    "scope": {
+      "kind": "owner-inputs",
+      "resolver": "App.ReadFileForTab",
+      "inputs": [
+        "tabID",
+        "rel"
+      ]
+    }
+  },
+  "ReadInboxItem": {
+    "domain": "desktop/inbox_app.go",
+    "owner": "App.ReadInboxItem",
+    "sources": [
+      "desktop/inbox_app.go"
+    ],
+    "scope": {
+      "kind": "owner-inputs",
+      "resolver": "App.ReadInboxItem",
+      "inputs": [
+        "tabID",
+        "id"
+      ]
+    }
+  },
+  "ReadRemoteFile": {
+    "domain": "desktop/remote_app.go",
+    "owner": "App.ReadRemoteFile",
+    "sources": [
+      "desktop/remote_app.go"
+    ],
+    "scope": {
+      "kind": "owner-inputs",
+      "resolver": "App.ReadRemoteFile",
+      "inputs": [
+        "hostID",
+        "path"
+      ]
+    }
+  },
+  "RebuildHistoryIndex": {
+    "domain": "desktop/history_catalog.go",
+    "owner": "App.RebuildHistoryIndex",
+    "sources": [
+      "desktop/history_catalog.go"
+    ],
+    "scope": {
+      "kind": "owner-state",
+      "resolver": "App.RebuildHistoryIndex",
+      "inputs": []
+    }
+  },
+  "RebuildSessionCatalog": {
+    "domain": "desktop/session_catalog_rebuild.go",
+    "owner": "App.RebuildSessionCatalog",
+    "sources": [
+      "desktop/session_catalog_rebuild.go"
+    ],
+    "scope": {
+      "kind": "owner-state",
+      "resolver": "App.RebuildSessionCatalog",
+      "inputs": []
+    }
+  },
+  "RebuildTaskCatalog": {
+    "domain": "desktop/task_catalog.go",
+    "owner": "App.RebuildTaskCatalog",
+    "sources": [
+      "desktop/task_catalog.go"
+    ],
+    "scope": {
+      "kind": "owner-state",
+      "resolver": "App.RebuildTaskCatalog",
+      "inputs": []
+    }
+  },
+  "ReclaimRemoteTabSession": {
+    "domain": "desktop/remote_tab.go",
+    "owner": "App.ReclaimRemoteTabSession",
+    "sources": [
+      "desktop/remote_tab.go"
+    ],
+    "scope": {
+      "kind": "owner-inputs",
+      "resolver": "App.ReclaimRemoteTabSession",
+      "inputs": [
+        "tabID"
+      ]
+    }
+  },
+  "ReconcileRecoveryVersions": {
+    "domain": "desktop/recovery_lineage.go",
+    "owner": "App.ReconcileRecoveryVersions",
+    "sources": [
+      "desktop/recovery_lineage.go"
+    ],
+    "scope": {
+      "kind": "owner-inputs",
+      "resolver": "App.ReconcileRecoveryVersions",
+      "inputs": [
+        "key"
+      ]
+    }
+  },
+  "ReconnectMCPServer": {
+    "domain": "desktop/app.go",
+    "owner": "App.ReconnectMCPServer",
+    "sources": [
+      "desktop/app.go"
+    ],
+    "scope": {
+      "kind": "owner-inputs",
+      "resolver": "App.ReconnectMCPServer",
+      "inputs": [
+        "name"
+      ]
+    }
+  },
+  "RecordUIPerf": {
+    "domain": "desktop/uiperf_app.go",
+    "owner": "App.RecordUIPerf",
+    "sources": [
+      "desktop/uiperf_app.go"
+    ],
+    "scope": {
+      "kind": "owner-inputs",
+      "resolver": "App.RecordUIPerf",
+      "inputs": [
+        "signals"
+      ]
+    }
+  },
+  "RecoveryCheckpointEnabled": {
+    "domain": "desktop/app.go",
+    "owner": "App.RecoveryCheckpointEnabled",
+    "sources": [
+      "desktop/app.go"
+    ],
+    "scope": {
+      "kind": "owner-state",
+      "resolver": "App.RecoveryCheckpointEnabled",
+      "inputs": []
+    }
+  },
+  "RecoveryCheckpointEnabledTab": {
+    "domain": "desktop/app.go",
+    "owner": "App.RecoveryCheckpointEnabledTab",
+    "sources": [
+      "desktop/app.go"
+    ],
+    "scope": {
+      "kind": "owner-inputs",
+      "resolver": "App.RecoveryCheckpointEnabledTab",
+      "inputs": [
+        "_"
+      ]
+    }
+  },
+  "RefreshInboxItem": {
+    "domain": "desktop/inbox_app.go",
+    "owner": "App.RefreshInboxItem",
+    "sources": [
+      "desktop/inbox_app.go"
+    ],
+    "scope": {
+      "kind": "owner-inputs",
+      "resolver": "App.RefreshInboxItem",
+      "inputs": [
+        "tabID",
+        "id"
+      ]
+    }
+  },
+  "RefreshSkills": {
+    "domain": "desktop/app.go",
+    "owner": "App.RefreshSkills",
+    "sources": [
+      "desktop/app.go"
+    ],
+    "scope": {
+      "kind": "owner-state",
+      "resolver": "App.RefreshSkills",
+      "inputs": []
+    }
+  },
+  "RegisterNavigationIntent": {
+    "domain": "desktop/navigation_intent.go",
+    "owner": "App.RegisterNavigationIntent",
+    "sources": [
+      "desktop/navigation_intent.go"
+    ],
+    "scope": {
+      "kind": "owner-inputs",
+      "resolver": "App.RegisterNavigationIntent",
+      "inputs": [
+        "token"
+      ]
+    }
+  },
+  "ReloadCommands": {
+    "domain": "desktop/app.go",
+    "owner": "App.ReloadCommands",
+    "sources": [
+      "desktop/app.go"
+    ],
+    "scope": {
+      "kind": "owner-state",
+      "resolver": "App.ReloadCommands",
+      "inputs": []
+    }
+  },
+  "ReloadRuntime": {
+    "domain": "desktop/settings_app.go",
+    "owner": "App.ReloadRuntime",
+    "sources": [
+      "desktop/settings_app.go"
+    ],
+    "scope": {
+      "kind": "owner-inputs",
+      "resolver": "App.ReloadRuntime",
+      "inputs": [
+        "tabID"
+      ]
+    }
+  },
+  "ReloadSettings": {
+    "domain": "desktop/settings_app.go",
+    "owner": "App.ReloadSettings",
+    "sources": [
+      "desktop/settings_app.go"
+    ],
+    "scope": {
+      "kind": "owner-state",
+      "resolver": "App.ReloadSettings",
+      "inputs": []
+    }
+  },
+  "ReloadUserConfig": {
+    "domain": "desktop/settings_app.go",
+    "owner": "App.ReloadUserConfig",
+    "sources": [
+      "desktop/settings_app.go"
+    ],
+    "scope": {
+      "kind": "owner-state",
+      "resolver": "App.ReloadUserConfig",
+      "inputs": []
+    }
+  },
+  "Remember": {
+    "domain": "desktop/app.go",
+    "owner": "App.Remember",
+    "sources": [
+      "desktop/app.go"
+    ],
+    "scope": {
+      "kind": "owner-inputs",
+      "resolver": "App.Remember",
+      "inputs": [
+        "scope",
+        "note"
+      ]
+    }
+  },
+  "RememberForTab": {
+    "domain": "desktop/app.go",
+    "owner": "App.RememberForTab",
+    "sources": [
+      "desktop/app.go"
+    ],
+    "scope": {
+      "kind": "owner-inputs",
+      "resolver": "App.RememberForTab",
+      "inputs": [
+        "tabID",
+        "scope",
+        "note"
+      ]
+    }
+  },
+  "RemoteConnectionStatuses": {
+    "domain": "desktop/remote_app.go",
+    "owner": "App.RemoteConnectionStatuses",
+    "sources": [
+      "desktop/remote_app.go"
+    ],
+    "scope": {
+      "kind": "owner-state",
+      "resolver": "App.RemoteConnectionStatuses",
+      "inputs": []
+    }
+  },
+  "RemoteForwards": {
+    "domain": "desktop/remote_app.go",
+    "owner": "App.RemoteForwards",
+    "sources": [
+      "desktop/remote_app.go"
+    ],
+    "scope": {
+      "kind": "owner-inputs",
+      "resolver": "App.RemoteForwards",
+      "inputs": [
+        "hostID"
+      ]
+    }
+  },
+  "RemoteHosts": {
+    "domain": "desktop/remote_app.go",
+    "owner": "App.RemoteHosts",
+    "sources": [
+      "desktop/remote_app.go"
+    ],
+    "scope": {
+      "kind": "owner-state",
+      "resolver": "App.RemoteHosts",
+      "inputs": []
+    }
+  },
+  "RemoteLastWorkspace": {
+    "domain": "desktop/remote_prefs.go",
+    "owner": "App.RemoteLastWorkspace",
+    "sources": [
+      "desktop/remote_prefs.go"
+    ],
+    "scope": {
+      "kind": "owner-inputs",
+      "resolver": "App.RemoteLastWorkspace",
+      "inputs": [
+        "hostID"
+      ]
+    }
+  },
+  "RemoteProjectSessions": {
+    "domain": "desktop/remote_listing.go",
+    "owner": "App.RemoteProjectSessions",
+    "sources": [
+      "desktop/remote_listing.go"
+    ],
+    "scope": {
+      "kind": "owner-inputs",
+      "resolver": "App.RemoteProjectSessions",
+      "inputs": [
+        "hostID",
+        "workspace"
+      ]
+    }
+  },
+  "RemoteServerLogs": {
+    "domain": "desktop/remote_app.go",
+    "owner": "App.RemoteServerLogs",
+    "sources": [
+      "desktop/remote_app.go"
+    ],
+    "scope": {
+      "kind": "owner-inputs",
+      "resolver": "App.RemoteServerLogs",
+      "inputs": [
+        "hostID",
+        "workspace",
+        "tailLines"
+      ]
+    }
+  },
+  "RemoteServerStatus": {
+    "domain": "desktop/remote_app.go",
+    "owner": "App.RemoteServerStatus",
+    "sources": [
+      "desktop/remote_app.go"
+    ],
+    "scope": {
+      "kind": "owner-inputs",
+      "resolver": "App.RemoteServerStatus",
+      "inputs": [
+        "hostID",
+        "workspace"
+      ]
+    }
+  },
+  "RemoteTabBranches": {
+    "domain": "desktop/remote_tab_commands.go",
+    "owner": "App.RemoteTabBranches",
+    "sources": [
+      "desktop/remote_tab_commands.go"
+    ],
+    "scope": {
+      "kind": "owner-inputs",
+      "resolver": "App.RemoteTabBranches",
+      "inputs": [
+        "tabID"
+      ]
+    }
+  },
+  "RemoteTabSkills": {
+    "domain": "desktop/remote_tab_commands.go",
+    "owner": "App.RemoteTabSkills",
+    "sources": [
+      "desktop/remote_tab_commands.go"
+    ],
+    "scope": {
+      "kind": "owner-inputs",
+      "resolver": "App.RemoteTabSkills",
+      "inputs": [
+        "tabID"
+      ]
+    }
+  },
+  "RemoteTabSnapshot": {
+    "domain": "desktop/remote_tab_snapshot.go",
+    "owner": "App.RemoteTabSnapshot",
+    "sources": [
+      "desktop/remote_tab_snapshot.go"
+    ],
+    "scope": {
+      "kind": "owner-inputs",
+      "resolver": "App.RemoteTabSnapshot",
+      "inputs": [
+        "tabID"
+      ]
+    }
+  },
+  "RemoteTabStatus": {
+    "domain": "desktop/remote_tab_snapshot.go",
+    "owner": "App.RemoteTabStatus",
+    "sources": [
+      "desktop/remote_tab_snapshot.go"
+    ],
+    "scope": {
+      "kind": "owner-inputs",
+      "resolver": "App.RemoteTabStatus",
+      "inputs": [
+        "tabID"
+      ]
+    }
+  },
+  "RemoveMCPServer": {
+    "domain": "desktop/app.go",
+    "owner": "App.RemoveMCPServer",
+    "sources": [
+      "desktop/app.go"
+    ],
+    "scope": {
+      "kind": "owner-inputs",
+      "resolver": "App.RemoveMCPServer",
+      "inputs": [
+        "name"
+      ]
+    }
+  },
+  "RemovePermissionRule": {
+    "domain": "desktop/settings_app.go",
+    "owner": "App.RemovePermissionRule",
+    "sources": [
+      "desktop/settings_app.go"
+    ],
+    "scope": {
+      "kind": "owner-inputs",
+      "resolver": "App.RemovePermissionRule",
+      "inputs": [
+        "list",
+        "rule"
+      ]
+    }
+  },
+  "RemovePlugin": {
+    "domain": "desktop/plugin_packages_app.go",
+    "owner": "App.RemovePlugin",
+    "sources": [
+      "desktop/plugin_packages_app.go"
+    ],
+    "scope": {
+      "kind": "owner-inputs",
+      "resolver": "App.RemovePlugin",
+      "inputs": [
+        "name"
+      ]
+    }
+  },
+  "RemoveProviderAccess": {
+    "domain": "desktop/provider_access_removal.go",
+    "owner": "App.RemoveProviderAccess",
+    "sources": [
+      "desktop/provider_access_removal.go"
+    ],
+    "scope": {
+      "kind": "owner-inputs",
+      "resolver": "App.RemoveProviderAccess",
+      "inputs": [
+        "name"
+      ]
+    }
+  },
+  "RemoveProviderAccesses": {
+    "domain": "desktop/provider_access_removal.go",
+    "owner": "App.RemoveProviderAccesses",
+    "sources": [
+      "desktop/provider_access_removal.go"
+    ],
+    "scope": {
+      "kind": "owner-inputs",
+      "resolver": "App.RemoveProviderAccesses",
+      "inputs": [
+        "rawNames"
+      ]
+    }
+  },
+  "RemoveRemoteForward": {
+    "domain": "desktop/remote_app.go",
+    "owner": "App.RemoveRemoteForward",
+    "sources": [
+      "desktop/remote_app.go"
+    ],
+    "scope": {
+      "kind": "owner-inputs",
+      "resolver": "App.RemoveRemoteForward",
+      "inputs": [
+        "hostID",
+        "forwardID"
+      ]
+    }
+  },
+  "RemoveRemoteHost": {
+    "domain": "desktop/remote_app.go",
+    "owner": "App.RemoveRemoteHost",
+    "sources": [
+      "desktop/remote_app.go"
+    ],
+    "scope": {
+      "kind": "owner-inputs",
+      "resolver": "App.RemoveRemoteHost",
+      "inputs": [
+        "id"
+      ]
+    }
+  },
+  "RemoveRemoteProject": {
+    "domain": "desktop/remote_project_registry.go",
+    "owner": "App.RemoveRemoteProject",
+    "sources": [
+      "desktop/remote_project_registry.go"
+    ],
+    "scope": {
+      "kind": "owner-inputs",
+      "resolver": "App.RemoveRemoteProject",
+      "inputs": [
+        "hostID",
+        "workspace"
+      ]
+    }
+  },
+  "RemoveSkillPath": {
+    "domain": "desktop/app.go",
+    "owner": "App.RemoveSkillPath",
+    "sources": [
+      "desktop/app.go"
+    ],
+    "scope": {
+      "kind": "owner-inputs",
+      "resolver": "App.RemoveSkillPath",
+      "inputs": [
+        "path"
+      ]
+    }
+  },
+  "RemoveWorkspace": {
+    "domain": "desktop/app.go",
+    "owner": "App.RemoveWorkspace",
+    "sources": [
+      "desktop/app.go"
+    ],
+    "scope": {
+      "kind": "owner-inputs",
+      "resolver": "App.RemoveWorkspace",
+      "inputs": [
+        "dir"
+      ]
+    }
+  },
+  "RenameProject": {
+    "domain": "desktop/tabs.go",
+    "owner": "App.RenameProject",
+    "sources": [
+      "desktop/tabs.go"
+    ],
+    "scope": {
+      "kind": "owner-inputs",
+      "resolver": "App.RenameProject",
+      "inputs": [
+        "workspaceRoot",
+        "title"
+      ]
+    }
+  },
+  "RenameProviderConnections": {
+    "domain": "desktop/settings_app.go",
+    "owner": "App.RenameProviderConnections",
+    "sources": [
+      "desktop/settings_app.go"
+    ],
+    "scope": {
+      "kind": "owner-inputs",
+      "resolver": "App.RenameProviderConnections",
+      "inputs": [
+        "names",
+        "displayName"
+      ]
+    }
+  },
+  "RenameRemotePath": {
+    "domain": "desktop/remote_app.go",
+    "owner": "App.RenameRemotePath",
+    "sources": [
+      "desktop/remote_app.go"
+    ],
+    "scope": {
+      "kind": "owner-inputs",
+      "resolver": "App.RenameRemotePath",
+      "inputs": [
+        "hostID",
+        "oldPath",
+        "newPath"
+      ]
+    }
+  },
+  "RenameRemoteProjectSession": {
+    "domain": "desktop/remote_tab_commands.go",
+    "owner": "App.RenameRemoteProjectSession",
+    "sources": [
+      "desktop/remote_tab_commands.go"
+    ],
+    "scope": {
+      "kind": "owner-inputs",
+      "resolver": "App.RenameRemoteProjectSession",
+      "inputs": [
+        "hostID",
+        "workspace",
+        "name",
+        "title"
+      ]
+    }
+  },
+  "RenameSession": {
+    "domain": "desktop/app.go",
+    "owner": "App.RenameSession",
+    "sources": [
+      "desktop/app.go"
+    ],
+    "scope": {
+      "kind": "owner-inputs",
+      "resolver": "App.RenameSession",
+      "inputs": [
+        "path",
+        "title"
+      ]
+    }
+  },
+  "RenameSessionHead": {
+    "domain": "desktop/session_heads.go",
+    "owner": "App.RenameSessionHead",
+    "sources": [
+      "desktop/session_heads.go"
+    ],
+    "scope": {
+      "kind": "owner-inputs",
+      "resolver": "App.RenameSessionHead",
+      "inputs": [
+        "path",
+        "headID",
+        "name"
+      ]
+    }
+  },
+  "RenameTerminalForTab": {
+    "domain": "desktop/terminal.go",
+    "owner": "App.RenameTerminalForTab",
+    "sources": [
+      "desktop/terminal.go"
+    ],
+    "scope": {
+      "kind": "owner-inputs",
+      "resolver": "App.RenameTerminalForTab",
+      "inputs": [
+        "tabID",
+        "sessionID",
+        "title"
+      ]
+    }
+  },
+  "RenameTopic": {
+    "domain": "desktop/tabs.go",
+    "owner": "App.RenameTopic",
+    "sources": [
+      "desktop/tabs.go"
+    ],
+    "scope": {
+      "kind": "owner-inputs",
+      "resolver": "App.RenameTopic",
+      "inputs": [
+        "topicID",
+        "title"
+      ]
+    }
+  },
+  "ReorderProjects": {
+    "domain": "desktop/tabs.go",
+    "owner": "App.ReorderProjects",
+    "sources": [
+      "desktop/tabs.go"
+    ],
+    "scope": {
+      "kind": "owner-inputs",
+      "resolver": "App.ReorderProjects",
+      "inputs": [
+        "workspaceRoots"
+      ]
+    }
+  },
+  "ReorderTabs": {
+    "domain": "desktop/tabs.go",
+    "owner": "App.ReorderTabs",
+    "sources": [
+      "desktop/tabs.go"
+    ],
+    "scope": {
+      "kind": "owner-inputs",
+      "resolver": "App.ReorderTabs",
+      "inputs": [
+        "tabIDs"
+      ]
+    }
+  },
+  "ReorderTopics": {
+    "domain": "desktop/project_tree_organization.go",
+    "owner": "App.ReorderTopics",
+    "sources": [
+      "desktop/project_tree_organization.go"
+    ],
+    "scope": {
+      "kind": "owner-inputs",
+      "resolver": "App.ReorderTopics",
+      "inputs": [
+        "scope",
+        "workspaceRoot",
+        "orderedTopicIDs"
+      ]
+    }
+  },
+  "ReplayPendingPromptIdentitiesForTab": {
+    "domain": "desktop/decision_runtime_api.go",
+    "owner": "App.ReplayPendingPromptIdentitiesForTab",
+    "sources": [
+      "desktop/decision_runtime_api.go"
+    ],
+    "scope": {
+      "kind": "owner-inputs",
+      "resolver": "App.ReplayPendingPromptIdentitiesForTab",
+      "inputs": [
+        "tabID"
+      ]
+    }
+  },
+  "ReplayPendingPrompts": {
+    "domain": "desktop/app.go",
+    "owner": "App.ReplayPendingPrompts",
+    "sources": [
+      "desktop/app.go"
+    ],
+    "scope": {
+      "kind": "owner-state",
+      "resolver": "App.ReplayPendingPrompts",
+      "inputs": []
+    }
+  },
+  "ReplayPendingPromptsForTab": {
+    "domain": "desktop/app.go",
+    "owner": "App.ReplayPendingPromptsForTab",
+    "sources": [
+      "desktop/app.go"
+    ],
+    "scope": {
+      "kind": "owner-inputs",
+      "resolver": "App.ReplayPendingPromptsForTab",
+      "inputs": [
+        "tabID"
+      ]
+    }
+  },
+  "ReplayRemoteTabPrompts": {
+    "domain": "desktop/remote_tab_commands.go",
+    "owner": "App.ReplayRemoteTabPrompts",
+    "sources": [
+      "desktop/remote_tab_commands.go"
+    ],
+    "scope": {
+      "kind": "owner-inputs",
+      "resolver": "App.ReplayRemoteTabPrompts",
+      "inputs": [
+        "tabID"
+      ]
+    }
+  },
+  "ReportCrash": {
+    "domain": "desktop/crash_app.go",
+    "owner": "App.ReportCrash",
+    "sources": [
+      "desktop/crash_app.go"
+    ],
+    "scope": {
+      "kind": "owner-inputs",
+      "resolver": "App.ReportCrash",
+      "inputs": [
+        "kind",
+        "detail"
+      ]
+    }
+  },
+  "ReportDesktopWebViewReady": {
+    "domain": "desktop/app.go",
+    "owner": "App.ReportDesktopWebViewReady",
+    "sources": [
+      "desktop/app.go"
+    ],
+    "scope": {
+      "kind": "owner-state",
+      "resolver": "App.ReportDesktopWebViewReady",
+      "inputs": []
+    }
+  },
+  "RequeueTaskByKey": {
+    "domain": "desktop/task_catalog.go",
+    "owner": "App.RequeueTaskByKey",
+    "sources": [
+      "desktop/task_catalog.go"
+    ],
+    "scope": {
+      "kind": "owner-inputs",
+      "resolver": "App.RequeueTaskByKey",
+      "inputs": [
+        "req"
+      ]
+    }
+  },
+  "RequeueTaskForTab": {
+    "domain": "desktop/app.go",
+    "owner": "App.RequeueTaskForTab",
+    "sources": [
+      "desktop/app.go"
+    ],
+    "scope": {
+      "kind": "owner-inputs",
+      "resolver": "App.RequeueTaskForTab",
+      "inputs": [
+        "tabID",
+        "taskID",
+        "expectedVersion",
+        "idemKey"
+      ]
+    }
+  },
+  "ResetProviderPresetAccess": {
+    "domain": "desktop/settings_app.go",
+    "owner": "App.ResetProviderPresetAccess",
+    "sources": [
+      "desktop/settings_app.go"
+    ],
+    "scope": {
+      "kind": "owner-inputs",
+      "resolver": "App.ResetProviderPresetAccess",
+      "inputs": [
+        "id"
+      ]
+    }
+  },
+  "ResetThemePack": {
+    "domain": "desktop/theme_app.go",
+    "owner": "App.ResetThemePack",
+    "sources": [
+      "desktop/theme_app.go"
+    ],
+    "scope": {
+      "kind": "owner-state",
+      "resolver": "App.ResetThemePack",
+      "inputs": []
+    }
+  },
+  "ResizeTerminalForTab": {
+    "domain": "desktop/terminal.go",
+    "owner": "App.ResizeTerminalForTab",
+    "sources": [
+      "desktop/terminal.go"
+    ],
+    "scope": {
+      "kind": "owner-inputs",
+      "resolver": "App.ResizeTerminalForTab",
+      "inputs": [
+        "tabID",
+        "sessionID",
+        "cols",
+        "rows"
+      ]
+    }
+  },
+  "ResolveMarkdownImageForTab": {
+    "domain": "desktop/markdown_image_resolver.go",
+    "owner": "App.ResolveMarkdownImageForTab",
+    "sources": [
+      "desktop/markdown_image_resolver.go"
+    ],
+    "scope": {
+      "kind": "owner-inputs",
+      "resolver": "App.ResolveMarkdownImageForTab",
+      "inputs": [
+        "tabID",
+        "source"
+      ]
+    }
+  },
+  "ResolvePlanDecision": {
+    "domain": "desktop/app.go",
+    "owner": "App.ResolvePlanDecision",
+    "sources": [
+      "desktop/app.go"
+    ],
+    "scope": {
+      "kind": "owner-inputs",
+      "resolver": "App.ResolvePlanDecision",
+      "inputs": [
+        "id",
+        "action"
+      ]
+    }
+  },
+  "ResolvePlanDecisionTab": {
+    "domain": "desktop/app.go",
+    "owner": "App.ResolvePlanDecisionTab",
+    "sources": [
+      "desktop/app.go"
+    ],
+    "scope": {
+      "kind": "owner-inputs",
+      "resolver": "App.ResolvePlanDecisionTab",
+      "inputs": [
+        "tabID",
+        "id",
+        "action"
+      ]
+    }
+  },
+  "ResolvePlanDecisionTabForTurn": {
+    "domain": "desktop/decision_runtime_api.go",
+    "owner": "App.ResolvePlanDecisionTabForTurn",
+    "sources": [
+      "desktop/decision_runtime_api.go"
+    ],
+    "scope": {
+      "kind": "owner-inputs",
+      "resolver": "App.ResolvePlanDecisionTabForTurn",
+      "inputs": [
+        "tabID",
+        "turnID",
+        "runtimeEpoch",
+        "id",
+        "action"
+      ]
+    }
+  },
+  "ResolvePromptForTab": {
+    "domain": "desktop/decision_runtime_api.go",
+    "owner": "App.ResolvePromptForTab",
+    "sources": [
+      "desktop/decision_runtime_api.go"
+    ],
+    "scope": {
+      "kind": "owner-inputs",
+      "resolver": "App.ResolvePromptForTab",
+      "inputs": [
+        "tabID",
+        "promptID",
+        "turnID",
+        "runtimeEpoch",
+        "kind",
+        "answer"
+      ]
+    }
+  },
+  "ResolveRecovery": {
+    "domain": "desktop/app.go",
+    "owner": "App.ResolveRecovery",
+    "sources": [
+      "desktop/app.go"
+    ],
+    "scope": {
+      "kind": "owner-inputs",
+      "resolver": "App.ResolveRecovery",
+      "inputs": [
+        "id",
+        "action",
+        "feedback"
+      ]
+    }
+  },
+  "ResolveRecoveryTab": {
+    "domain": "desktop/app.go",
+    "owner": "App.ResolveRecoveryTab",
+    "sources": [
+      "desktop/app.go"
+    ],
+    "scope": {
+      "kind": "owner-inputs",
+      "resolver": "App.ResolveRecoveryTab",
+      "inputs": [
+        "tabID",
+        "id",
+        "action",
+        "feedback"
+      ]
+    }
+  },
+  "ResolveRecoveryTabForTurn": {
+    "domain": "desktop/decision_runtime_api.go",
+    "owner": "App.ResolveRecoveryTabForTurn",
+    "sources": [
+      "desktop/decision_runtime_api.go"
+    ],
+    "scope": {
+      "kind": "owner-inputs",
+      "resolver": "App.ResolveRecoveryTabForTurn",
+      "inputs": [
+        "tabID",
+        "turnID",
+        "runtimeEpoch",
+        "id",
+        "action",
+        "feedback"
+      ]
+    }
+  },
+  "ResolveRemoteTabPlanDecision": {
+    "domain": "desktop/remote_tab.go",
+    "owner": "App.ResolveRemoteTabPlanDecision",
+    "sources": [
+      "desktop/remote_tab.go"
+    ],
+    "scope": {
+      "kind": "owner-inputs",
+      "resolver": "App.ResolveRemoteTabPlanDecision",
+      "inputs": [
+        "tabID",
+        "callID",
+        "action",
+        "feedback"
+      ]
+    }
+  },
+  "ResolveToolRecoveryForTab": {
+    "domain": "desktop/tool_recovery.go",
+    "owner": "App.ResolveToolRecoveryForTab",
+    "sources": [
+      "desktop/tool_recovery.go"
+    ],
+    "scope": {
+      "kind": "owner-inputs",
+      "resolver": "App.ResolveToolRecoveryForTab",
+      "inputs": [
+        "tabID",
+        "req"
+      ]
+    }
+  },
+  "ResolveWorkspacePathForTab": {
+    "domain": "desktop/workspace_path.go",
+    "owner": "App.ResolveWorkspacePathForTab",
+    "sources": [
+      "desktop/workspace_path.go"
+    ],
+    "scope": {
+      "kind": "owner-inputs",
+      "resolver": "App.ResolveWorkspacePathForTab",
+      "inputs": [
+        "tabID",
+        "rel"
+      ]
+    }
+  },
+  "RestartApplication": {
+    "domain": "desktop/zoom_factor.go",
+    "owner": "App.RestartApplication",
+    "sources": [
+      "desktop/zoom_factor.go"
+    ],
+    "scope": {
+      "kind": "owner-state",
+      "resolver": "App.RestartApplication",
+      "inputs": []
+    }
+  },
+  "RestoreArchivedMemory": {
+    "domain": "desktop/app.go",
+    "owner": "App.RestoreArchivedMemory",
+    "sources": [
+      "desktop/app.go"
+    ],
+    "scope": {
+      "kind": "owner-inputs",
+      "resolver": "App.RestoreArchivedMemory",
+      "inputs": [
+        "archivePath"
+      ]
+    }
+  },
+  "RestoreArchivedMemoryForTab": {
+    "domain": "desktop/app.go",
+    "owner": "App.RestoreArchivedMemoryForTab",
+    "sources": [
+      "desktop/app.go"
+    ],
+    "scope": {
+      "kind": "owner-inputs",
+      "resolver": "App.RestoreArchivedMemoryForTab",
+      "inputs": [
+        "tabID",
+        "archivePath"
+      ]
+    }
+  },
+  "RestoreGraphiteAppearance": {
+    "domain": "desktop/theme_app.go",
+    "owner": "App.RestoreGraphiteAppearance",
+    "sources": [
+      "desktop/theme_app.go"
+    ],
+    "scope": {
+      "kind": "owner-state",
+      "resolver": "App.RestoreGraphiteAppearance",
+      "inputs": []
+    }
+  },
+  "RestoreMemoryRevision": {
+    "domain": "desktop/app.go",
+    "owner": "App.RestoreMemoryRevision",
+    "sources": [
+      "desktop/app.go"
+    ],
+    "scope": {
+      "kind": "owner-inputs",
+      "resolver": "App.RestoreMemoryRevision",
+      "inputs": [
+        "ref",
+        "revision"
+      ]
+    }
+  },
+  "RestoreMemoryRevisionForTab": {
+    "domain": "desktop/app.go",
+    "owner": "App.RestoreMemoryRevisionForTab",
+    "sources": [
+      "desktop/app.go"
+    ],
+    "scope": {
+      "kind": "owner-inputs",
+      "resolver": "App.RestoreMemoryRevisionForTab",
+      "inputs": [
+        "tabID",
+        "ref",
+        "revision"
+      ]
+    }
+  },
+  "RestoreSession": {
+    "domain": "desktop/app.go",
+    "owner": "App.RestoreSession",
+    "sources": [
+      "desktop/app.go"
+    ],
+    "scope": {
+      "kind": "owner-inputs",
+      "resolver": "App.RestoreSession",
+      "inputs": [
+        "path"
+      ]
+    }
+  },
+  "ResumeGoalForTab": {
+    "domain": "desktop/app.go",
+    "owner": "App.ResumeGoalForTab",
+    "sources": [
+      "desktop/app.go"
+    ],
+    "scope": {
+      "kind": "owner-inputs",
+      "resolver": "App.ResumeGoalForTab",
+      "inputs": [
+        "tabID"
+      ]
+    }
+  },
+  "ResumeRemoteTabGoal": {
+    "domain": "desktop/remote_tab_commands.go",
+    "owner": "App.ResumeRemoteTabGoal",
+    "sources": [
+      "desktop/remote_tab_commands.go"
+    ],
+    "scope": {
+      "kind": "owner-inputs",
+      "resolver": "App.ResumeRemoteTabGoal",
+      "inputs": [
+        "tabID"
+      ]
+    }
+  },
+  "ResumeSession": {
+    "domain": "desktop/app.go",
+    "owner": "App.ResumeSession",
+    "sources": [
+      "desktop/app.go"
+    ],
+    "scope": {
+      "kind": "owner-inputs",
+      "resolver": "App.ResumeSession",
+      "inputs": [
+        "path"
+      ]
+    }
+  },
+  "ResumeSessionForTab": {
+    "domain": "desktop/app.go",
+    "owner": "App.ResumeSessionForTab",
+    "sources": [
+      "desktop/app.go"
+    ],
+    "scope": {
+      "kind": "owner-inputs",
+      "resolver": "App.ResumeSessionForTab",
+      "inputs": [
+        "tabID",
+        "path"
+      ]
+    }
+  },
+  "ResumeSessionPage": {
+    "domain": "desktop/app.go",
+    "owner": "App.ResumeSessionPage",
+    "sources": [
+      "desktop/app.go"
+    ],
+    "scope": {
+      "kind": "owner-inputs",
+      "resolver": "App.ResumeSessionPage",
+      "inputs": [
+        "path",
+        "limit"
+      ]
+    }
+  },
+  "ResumeSessionPageForTab": {
+    "domain": "desktop/app.go",
+    "owner": "App.ResumeSessionPageForTab",
+    "sources": [
+      "desktop/app.go"
+    ],
+    "scope": {
+      "kind": "owner-inputs",
+      "resolver": "App.ResumeSessionPageForTab",
+      "inputs": [
+        "tabID",
+        "path",
+        "limit"
+      ]
+    }
+  },
+  "RetryInboxItem": {
+    "domain": "desktop/inbox_app.go",
+    "owner": "App.RetryInboxItem",
+    "sources": [
+      "desktop/inbox_app.go"
+    ],
+    "scope": {
+      "kind": "owner-inputs",
+      "resolver": "App.RetryInboxItem",
+      "inputs": [
+        "tabID",
+        "id"
+      ]
+    }
+  },
+  "RetryModelSettingsApplication": {
+    "domain": "desktop/model_settings_api.go",
+    "owner": "App.RetryModelSettingsApplication",
+    "sources": [
+      "desktop/model_settings_api.go"
+    ],
+    "scope": {
+      "kind": "owner-inputs",
+      "resolver": "App.RetryModelSettingsApplication",
+      "inputs": [
+        "tabID"
+      ]
+    }
+  },
+  "RetrySessionRecovery": {
+    "domain": "desktop/recovery_lineage.go",
+    "owner": "App.RetrySessionRecovery",
+    "sources": [
+      "desktop/recovery_lineage.go"
+    ],
+    "scope": {
+      "kind": "owner-inputs",
+      "resolver": "App.RetrySessionRecovery",
+      "inputs": [
+        "req"
+      ]
+    }
+  },
+  "RevealBackgroundRuntime": {
+    "domain": "desktop/background_runtime.go",
+    "owner": "App.RevealBackgroundRuntime",
+    "sources": [
+      "desktop/background_runtime.go"
+    ],
+    "scope": {
+      "kind": "owner-inputs",
+      "resolver": "App.RevealBackgroundRuntime",
+      "inputs": [
+        "tabID"
+      ]
+    }
+  },
+  "RevealPath": {
+    "domain": "desktop/app.go",
+    "owner": "App.RevealPath",
+    "sources": [
+      "desktop/app.go"
+    ],
+    "scope": {
+      "kind": "owner-inputs",
+      "resolver": "App.RevealPath",
+      "inputs": [
+        "path"
+      ]
+    }
+  },
+  "RevealWorkspacePathForTab": {
+    "domain": "desktop/app.go",
+    "owner": "App.RevealWorkspacePathForTab",
+    "sources": [
+      "desktop/app.go"
+    ],
+    "scope": {
+      "kind": "owner-inputs",
+      "resolver": "App.RevealWorkspacePathForTab",
+      "inputs": [
+        "tabID",
+        "rel"
+      ]
+    }
+  },
+  "RevealWorkspaceWriterForTab": {
+    "domain": "desktop/background_runtime.go",
+    "owner": "App.RevealWorkspaceWriterForTab",
+    "sources": [
+      "desktop/background_runtime.go"
+    ],
+    "scope": {
+      "kind": "owner-inputs",
+      "resolver": "App.RevealWorkspaceWriterForTab",
+      "inputs": [
+        "tabID"
+      ]
+    }
+  },
+  "Rewind": {
+    "domain": "desktop/app.go",
+    "owner": "App.Rewind",
+    "sources": [
+      "desktop/app.go"
+    ],
+    "scope": {
+      "kind": "owner-inputs",
+      "resolver": "App.Rewind",
+      "inputs": [
+        "turn",
+        "scope"
+      ]
+    }
+  },
+  "RewindForTab": {
+    "domain": "desktop/app.go",
+    "owner": "App.RewindForTab",
+    "sources": [
+      "desktop/app.go"
+    ],
+    "scope": {
+      "kind": "owner-inputs",
+      "resolver": "App.RewindForTab",
+      "inputs": [
+        "tabID",
+        "turn",
+        "scope"
+      ]
+    }
+  },
+  "RewindRemoteTab": {
+    "domain": "desktop/remote_tab.go",
+    "owner": "App.RewindRemoteTab",
+    "sources": [
+      "desktop/remote_tab.go"
+    ],
+    "scope": {
+      "kind": "owner-inputs",
+      "resolver": "App.RewindRemoteTab",
+      "inputs": [
+        "tabID",
+        "checkpointID",
+        "scope"
+      ]
+    }
+  },
+  "RunShellForTab": {
+    "domain": "desktop/app.go",
+    "owner": "App.RunShellForTab",
+    "sources": [
+      "desktop/app.go"
+    ],
+    "scope": {
+      "kind": "owner-inputs",
+      "resolver": "App.RunShellForTab",
+      "inputs": [
+        "tabID",
+        "command"
+      ]
+    }
+  },
+  "RuntimeDoctor": {
+    "domain": "desktop/rebuild_runtime.go",
+    "owner": "App.RuntimeDoctor",
+    "sources": [
+      "desktop/rebuild_runtime.go"
+    ],
+    "scope": {
+      "kind": "owner-state",
+      "resolver": "App.RuntimeDoctor",
+      "inputs": []
+    }
+  },
+  "SaveClipboardImage": {
+    "domain": "desktop/app.go",
+    "owner": "App.SaveClipboardImage",
+    "sources": [
+      "desktop/app.go"
+    ],
+    "scope": {
+      "kind": "owner-state",
+      "resolver": "App.SaveClipboardImage",
+      "inputs": []
+    }
+  },
+  "SaveDoc": {
+    "domain": "desktop/app.go",
+    "owner": "App.SaveDoc",
+    "sources": [
+      "desktop/app.go"
+    ],
+    "scope": {
+      "kind": "owner-inputs",
+      "resolver": "App.SaveDoc",
+      "inputs": [
+        "path",
+        "body"
+      ]
+    }
+  },
+  "SaveDocForTab": {
+    "domain": "desktop/app.go",
+    "owner": "App.SaveDocForTab",
+    "sources": [
+      "desktop/app.go"
+    ],
+    "scope": {
+      "kind": "owner-inputs",
+      "resolver": "App.SaveDocForTab",
+      "inputs": [
+        "tabID",
+        "path",
+        "body"
+      ]
+    }
+  },
+  "SaveExportFile": {
+    "domain": "desktop/app.go",
+    "owner": "App.SaveExportFile",
+    "sources": [
+      "desktop/app.go"
+    ],
+    "scope": {
+      "kind": "owner-inputs",
+      "resolver": "App.SaveExportFile",
+      "inputs": [
+        "path",
+        "payload",
+        "base64Encoded"
+      ]
+    }
+  },
+  "SaveExportImageFiles": {
+    "domain": "desktop/app.go",
+    "owner": "App.SaveExportImageFiles",
+    "sources": [
+      "desktop/app.go"
+    ],
+    "scope": {
+      "kind": "owner-inputs",
+      "resolver": "App.SaveExportImageFiles",
+      "inputs": [
+        "path",
+        "payloads"
+      ]
+    }
+  },
+  "SaveHooksSettings": {
+    "domain": "desktop/hooks_settings_app.go",
+    "owner": "App.SaveHooksSettings",
+    "sources": [
+      "desktop/hooks_settings_app.go"
+    ],
+    "scope": {
+      "kind": "owner-inputs",
+      "resolver": "App.SaveHooksSettings",
+      "inputs": [
+        "scope",
+        "hooks"
+      ]
+    }
+  },
+  "SaveHooksSettingsForRoot": {
+    "domain": "desktop/hooks_settings_app.go",
+    "owner": "App.SaveHooksSettingsForRoot",
+    "sources": [
+      "desktop/hooks_settings_app.go"
+    ],
+    "scope": {
+      "kind": "owner-inputs",
+      "resolver": "App.SaveHooksSettingsForRoot",
+      "inputs": [
+        "scope",
+        "projectRoot",
+        "hooks"
+      ]
+    }
+  },
+  "SaveLocalPathAs": {
+    "domain": "desktop/external_opener.go",
+    "owner": "App.SaveLocalPathAs",
+    "sources": [
+      "desktop/external_opener.go"
+    ],
+    "scope": {
+      "kind": "owner-inputs",
+      "resolver": "App.SaveLocalPathAs",
+      "inputs": [
+        "path"
+      ]
+    }
+  },
+  "SavePastedFile": {
+    "domain": "desktop/app.go",
+    "owner": "App.SavePastedFile",
+    "sources": [
+      "desktop/app.go"
+    ],
+    "scope": {
+      "kind": "owner-inputs",
+      "resolver": "App.SavePastedFile",
+      "inputs": [
+        "name",
+        "dataURL"
+      ]
+    }
+  },
+  "SavePastedImage": {
+    "domain": "desktop/app.go",
+    "owner": "App.SavePastedImage",
+    "sources": [
+      "desktop/app.go"
+    ],
+    "scope": {
+      "kind": "owner-inputs",
+      "resolver": "App.SavePastedImage",
+      "inputs": [
+        "dataURL"
+      ]
+    }
+  },
+  "SaveProvider": {
+    "domain": "desktop/settings_app.go",
+    "owner": "App.SaveProvider",
+    "sources": [
+      "desktop/settings_app.go"
+    ],
+    "scope": {
+      "kind": "owner-inputs",
+      "resolver": "App.SaveProvider",
+      "inputs": [
+        "p"
+      ]
+    }
+  },
+  "SaveProviderKey": {
+    "domain": "desktop/settings_app.go",
+    "owner": "App.SaveProviderKey",
+    "sources": [
+      "desktop/settings_app.go"
+    ],
+    "scope": {
+      "kind": "owner-inputs",
+      "resolver": "App.SaveProviderKey",
+      "inputs": [
+        "apiKeyEnv",
+        "value"
+      ]
+    }
+  },
+  "SaveProviderModelCatalogs": {
+    "domain": "desktop/settings_app.go",
+    "owner": "App.SaveProviderModelCatalogs",
+    "sources": [
+      "desktop/settings_app.go"
+    ],
+    "scope": {
+      "kind": "owner-inputs",
+      "resolver": "App.SaveProviderModelCatalogs",
+      "inputs": [
+        "updates"
+      ]
+    }
+  },
+  "SaveProviderWithKey": {
+    "domain": "desktop/settings_app.go",
+    "owner": "App.SaveProviderWithKey",
+    "sources": [
+      "desktop/settings_app.go"
+    ],
+    "scope": {
+      "kind": "owner-inputs",
+      "resolver": "App.SaveProviderWithKey",
+      "inputs": [
+        "p",
+        "key"
+      ]
+    }
+  },
+  "SaveSessionGroups": {
+    "domain": "desktop/project_tree_organization.go",
+    "owner": "App.SaveSessionGroups",
+    "sources": [
+      "desktop/project_tree_organization.go"
+    ],
+    "scope": {
+      "kind": "owner-inputs",
+      "resolver": "App.SaveSessionGroups",
+      "inputs": [
+        "scope",
+        "workspaceRoot",
+        "groups"
+      ]
+    }
+  },
+  "SaveSessionGroupsVersioned": {
+    "domain": "desktop/project_tree_organization.go",
+    "owner": "App.SaveSessionGroupsVersioned",
+    "sources": [
+      "desktop/project_tree_organization.go"
+    ],
+    "scope": {
+      "kind": "owner-inputs",
+      "resolver": "App.SaveSessionGroupsVersioned",
+      "inputs": [
+        "scope",
+        "workspaceRoot",
+        "expectedRevision",
+        "groups"
+      ]
+    }
+  },
+  "SaveThemePack": {
+    "domain": "desktop/theme_app.go",
+    "owner": "App.SaveThemePack",
+    "sources": [
+      "desktop/theme_app.go"
+    ],
+    "scope": {
+      "kind": "owner-inputs",
+      "resolver": "App.SaveThemePack",
+      "inputs": [
+        "input"
+      ]
+    }
+  },
+  "SaveWindowState": {
+    "domain": "desktop/window_state.go",
+    "owner": "App.SaveWindowState",
+    "sources": [
+      "desktop/window_state.go"
+    ],
+    "scope": {
+      "kind": "owner-inputs",
+      "resolver": "App.SaveWindowState",
+      "inputs": [
+        "state"
+      ]
+    }
+  },
+  "ScanPromptHistory": {
+    "domain": "desktop/app.go",
+    "owner": "App.ScanPromptHistory",
+    "sources": [
+      "desktop/app.go"
+    ],
+    "scope": {
+      "kind": "owner-inputs",
+      "resolver": "App.ScanPromptHistory",
+      "inputs": [
+        "rawRequest"
+      ]
+    }
+  },
+  "ScanRemoteLegacyWorkbenchData": {
+    "domain": "desktop/remote_legacy_cleanup.go",
+    "owner": "App.ScanRemoteLegacyWorkbenchData",
+    "sources": [
+      "desktop/remote_legacy_cleanup.go"
+    ],
+    "scope": {
+      "kind": "owner-state",
+      "resolver": "App.ScanRemoteLegacyWorkbenchData",
+      "inputs": []
+    }
+  },
+  "ScanSSHConfig": {
+    "domain": "desktop/remote_app.go",
+    "owner": "App.ScanSSHConfig",
+    "sources": [
+      "desktop/remote_app.go"
+    ],
+    "scope": {
+      "kind": "owner-state",
+      "resolver": "App.ScanSSHConfig",
+      "inputs": []
+    }
+  },
+  "SearchFileRefs": {
+    "domain": "desktop/app.go",
+    "owner": "App.SearchFileRefs",
+    "sources": [
+      "desktop/app.go"
+    ],
+    "scope": {
+      "kind": "owner-inputs",
+      "resolver": "App.SearchFileRefs",
+      "inputs": [
+        "query"
+      ]
+    }
+  },
+  "SearchFileRefsForTab": {
+    "domain": "desktop/app.go",
+    "owner": "App.SearchFileRefsForTab",
+    "sources": [
+      "desktop/app.go"
+    ],
+    "scope": {
+      "kind": "owner-inputs",
+      "resolver": "App.SearchFileRefsForTab",
+      "inputs": [
+        "tabID",
+        "query"
+      ]
+    }
+  },
+  "SearchHistoryContent": {
+    "domain": "desktop/history_catalog.go",
+    "owner": "App.SearchHistoryContent",
+    "sources": [
+      "desktop/history_catalog.go"
+    ],
+    "scope": {
+      "kind": "owner-inputs",
+      "resolver": "App.SearchHistoryContent",
+      "inputs": [
+        "req"
+      ]
+    }
+  },
+  "SetActiveSessionVersion": {
+    "domain": "desktop/recovery_lineage.go",
+    "owner": "App.SetActiveSessionVersion",
+    "sources": [
+      "desktop/recovery_lineage.go"
+    ],
+    "scope": {
+      "kind": "owner-inputs",
+      "resolver": "App.SetActiveSessionVersion",
+      "inputs": [
+        "req"
+      ]
+    }
+  },
+  "SetActiveTab": {
+    "domain": "desktop/tab_selection.go",
+    "owner": "App.SetActiveTab",
+    "sources": [
+      "desktop/tab_selection.go"
+    ],
+    "scope": {
+      "kind": "owner-inputs",
+      "resolver": "App.SetActiveTab",
+      "inputs": [
+        "tabID"
+      ]
+    }
+  },
+  "SetAgentParams": {
+    "domain": "desktop/settings_app.go",
+    "owner": "App.SetAgentParams",
+    "sources": [
+      "desktop/settings_app.go"
+    ],
+    "scope": {
+      "kind": "owner-inputs",
+      "resolver": "App.SetAgentParams",
+      "inputs": [
+        "temperature",
+        "maxSteps",
+        "plannerMaxSteps",
+        "systemPrompt"
+      ]
+    }
+  },
+  "SetAgentPreset": {
+    "domain": "desktop/app.go",
+    "owner": "App.SetAgentPreset",
+    "sources": [
+      "desktop/app.go"
+    ],
+    "scope": {
+      "kind": "owner-inputs",
+      "resolver": "App.SetAgentPreset",
+      "inputs": [
+        "preset"
+      ]
+    }
+  },
+  "SetAgentPresetForTab": {
+    "domain": "desktop/app.go",
+    "owner": "App.SetAgentPresetForTab",
+    "sources": [
+      "desktop/app.go"
+    ],
+    "scope": {
+      "kind": "owner-inputs",
+      "resolver": "App.SetAgentPresetForTab",
+      "inputs": [
+        "tabID",
+        "preset"
+      ]
+    }
+  },
+  "SetAutoApproveTools": {
+    "domain": "desktop/app.go",
+    "owner": "App.SetAutoApproveTools",
+    "sources": [
+      "desktop/app.go"
+    ],
+    "scope": {
+      "kind": "owner-inputs",
+      "resolver": "App.SetAutoApproveTools",
+      "inputs": [
+        "on"
+      ]
+    }
+  },
+  "SetAutoPlan": {
+    "domain": "desktop/settings_app.go",
+    "owner": "App.SetAutoPlan",
+    "sources": [
+      "desktop/settings_app.go"
+    ],
+    "scope": {
+      "kind": "owner-inputs",
+      "resolver": "App.SetAutoPlan",
+      "inputs": [
+        "mode"
+      ]
+    }
+  },
+  "SetBotConnectionToolApprovalMode": {
+    "domain": "desktop/settings_app.go",
+    "owner": "App.SetBotConnectionToolApprovalMode",
+    "sources": [
+      "desktop/settings_app.go"
+    ],
+    "scope": {
+      "kind": "owner-inputs",
+      "resolver": "App.SetBotConnectionToolApprovalMode",
+      "inputs": [
+        "connID",
+        "mode"
+      ]
+    }
+  },
+  "SetBotDingtalkToolApprovalMode": {
+    "domain": "desktop/settings_app.go",
+    "owner": "App.SetBotDingtalkToolApprovalMode",
+    "sources": [
+      "desktop/settings_app.go"
+    ],
+    "scope": {
+      "kind": "owner-inputs",
+      "resolver": "App.SetBotDingtalkToolApprovalMode",
+      "inputs": [
+        "mode"
+      ]
+    }
+  },
+  "SetBotSecret": {
+    "domain": "desktop/settings_app.go",
+    "owner": "App.SetBotSecret",
+    "sources": [
+      "desktop/settings_app.go"
+    ],
+    "scope": {
+      "kind": "owner-inputs",
+      "resolver": "App.SetBotSecret",
+      "inputs": [
+        "envName",
+        "value"
+      ]
+    }
+  },
+  "SetBotSettings": {
+    "domain": "desktop/settings_app.go",
+    "owner": "App.SetBotSettings",
+    "sources": [
+      "desktop/settings_app.go"
+    ],
+    "scope": {
+      "kind": "owner-inputs",
+      "resolver": "App.SetBotSettings",
+      "inputs": [
+        "b"
+      ]
+    }
+  },
+  "SetBypass": {
+    "domain": "desktop/app.go",
+    "owner": "App.SetBypass",
+    "sources": [
+      "desktop/app.go"
+    ],
+    "scope": {
+      "kind": "owner-inputs",
+      "resolver": "App.SetBypass",
+      "inputs": [
+        "on"
+      ]
+    }
+  },
+  "SetCloseBehavior": {
+    "domain": "desktop/settings_preferences.go",
+    "owner": "App.SetCloseBehavior",
+    "sources": [
+      "desktop/settings_preferences.go"
+    ],
+    "scope": {
+      "kind": "owner-inputs",
+      "resolver": "App.SetCloseBehavior",
+      "inputs": [
+        "mode"
+      ]
+    }
+  },
+  "SetCollaborationModeForTab": {
+    "domain": "desktop/app.go",
+    "owner": "App.SetCollaborationModeForTab",
+    "sources": [
+      "desktop/app.go"
+    ],
+    "scope": {
+      "kind": "owner-inputs",
+      "resolver": "App.SetCollaborationModeForTab",
+      "inputs": [
+        "tabID",
+        "mode"
+      ]
+    }
+  },
+  "SetCompactRatio": {
+    "domain": "desktop/settings_app.go",
+    "owner": "App.SetCompactRatio",
+    "sources": [
+      "desktop/settings_app.go"
+    ],
+    "scope": {
+      "kind": "owner-inputs",
+      "resolver": "App.SetCompactRatio",
+      "inputs": [
+        "ratio"
+      ]
+    }
+  },
+  "SetComposerProfileForTab": {
+    "domain": "desktop/app.go",
+    "owner": "App.SetComposerProfileForTab",
+    "sources": [
+      "desktop/app.go"
+    ],
+    "scope": {
+      "kind": "owner-inputs",
+      "resolver": "App.SetComposerProfileForTab",
+      "inputs": [
+        "tabID",
+        "collaborationMode",
+        "toolApprovalMode",
+        "goal"
+      ]
+    }
+  },
+  "SetConnectionKey": {
+    "domain": "desktop/settings_app.go",
+    "owner": "App.SetConnectionKey",
+    "sources": [
+      "desktop/settings_app.go"
+    ],
+    "scope": {
+      "kind": "owner-inputs",
+      "resolver": "App.SetConnectionKey",
+      "inputs": [
+        "name",
+        "value"
+      ]
+    }
+  },
+  "SetDefaultAutoRecoveryCheckpoint": {
+    "domain": "desktop/settings_app.go",
+    "owner": "App.SetDefaultAutoRecoveryCheckpoint",
+    "sources": [
+      "desktop/settings_app.go"
+    ],
+    "scope": {
+      "kind": "owner-inputs",
+      "resolver": "App.SetDefaultAutoRecoveryCheckpoint",
+      "inputs": [
+        "_"
+      ]
+    }
+  },
+  "SetDefaultModel": {
+    "domain": "desktop/settings_app.go",
+    "owner": "App.SetDefaultModel",
+    "sources": [
+      "desktop/settings_app.go"
+    ],
+    "scope": {
+      "kind": "owner-inputs",
+      "resolver": "App.SetDefaultModel",
+      "inputs": [
+        "ref"
+      ]
+    }
+  },
+  "SetDefaultToolApprovalMode": {
+    "domain": "desktop/settings_app.go",
+    "owner": "App.SetDefaultToolApprovalMode",
+    "sources": [
+      "desktop/settings_app.go"
+    ],
+    "scope": {
+      "kind": "owner-inputs",
+      "resolver": "App.SetDefaultToolApprovalMode",
+      "inputs": [
+        "mode"
+      ]
+    }
+  },
+  "SetDesktopAppearance": {
+    "domain": "desktop/settings_preferences.go",
+    "owner": "App.SetDesktopAppearance",
+    "sources": [
+      "desktop/settings_preferences.go"
+    ],
+    "scope": {
+      "kind": "owner-inputs",
+      "resolver": "App.SetDesktopAppearance",
+      "inputs": [
+        "theme",
+        "style"
+      ]
+    }
+  },
+  "SetDesktopCheckUpdates": {
+    "domain": "desktop/settings_preferences.go",
+    "owner": "App.SetDesktopCheckUpdates",
+    "sources": [
+      "desktop/settings_preferences.go"
+    ],
+    "scope": {
+      "kind": "owner-inputs",
+      "resolver": "App.SetDesktopCheckUpdates",
+      "inputs": [
+        "enabled"
+      ]
+    }
+  },
+  "SetDesktopConversationWidth": {
+    "domain": "desktop/settings_preferences.go",
+    "owner": "App.SetDesktopConversationWidth",
+    "sources": [
+      "desktop/settings_preferences.go"
+    ],
+    "scope": {
+      "kind": "owner-inputs",
+      "resolver": "App.SetDesktopConversationWidth",
+      "inputs": [
+        "width"
+      ]
+    }
+  },
+  "SetDesktopCurrency": {
+    "domain": "desktop/settings_preferences.go",
+    "owner": "App.SetDesktopCurrency",
+    "sources": [
+      "desktop/settings_preferences.go"
+    ],
+    "scope": {
+      "kind": "owner-inputs",
+      "resolver": "App.SetDesktopCurrency",
+      "inputs": [
+        "currency"
+      ]
+    }
+  },
+  "SetDesktopLanguage": {
+    "domain": "desktop/settings_preferences.go",
+    "owner": "App.SetDesktopLanguage",
+    "sources": [
+      "desktop/settings_preferences.go"
+    ],
+    "scope": {
+      "kind": "owner-inputs",
+      "resolver": "App.SetDesktopLanguage",
+      "inputs": [
+        "lang"
+      ]
+    }
+  },
+  "SetDesktopLayoutStyle": {
+    "domain": "desktop/settings_preferences.go",
+    "owner": "App.SetDesktopLayoutStyle",
+    "sources": [
+      "desktop/settings_preferences.go"
+    ],
+    "scope": {
+      "kind": "owner-inputs",
+      "resolver": "App.SetDesktopLayoutStyle",
+      "inputs": [
+        "style"
+      ]
+    }
+  },
+  "SetDesktopMetrics": {
+    "domain": "desktop/settings_preferences.go",
+    "owner": "App.SetDesktopMetrics",
+    "sources": [
+      "desktop/settings_preferences.go"
+    ],
+    "scope": {
+      "kind": "owner-inputs",
+      "resolver": "App.SetDesktopMetrics",
+      "inputs": [
+        "enabled"
+      ]
+    }
+  },
+  "SetDesktopTelemetry": {
+    "domain": "desktop/settings_preferences.go",
+    "owner": "App.SetDesktopTelemetry",
+    "sources": [
+      "desktop/settings_preferences.go"
+    ],
+    "scope": {
+      "kind": "owner-inputs",
+      "resolver": "App.SetDesktopTelemetry",
+      "inputs": [
+        "enabled"
+      ]
+    }
+  },
+  "SetDesktopTerminalTheme": {
+    "domain": "desktop/settings_preferences.go",
+    "owner": "App.SetDesktopTerminalTheme",
+    "sources": [
+      "desktop/settings_preferences.go"
+    ],
+    "scope": {
+      "kind": "owner-inputs",
+      "resolver": "App.SetDesktopTerminalTheme",
+      "inputs": [
+        "theme"
+      ]
+    }
+  },
+  "SetDesktopUpdateChannel": {
+    "domain": "desktop/settings_preferences.go",
+    "owner": "App.SetDesktopUpdateChannel",
+    "sources": [
+      "desktop/settings_preferences.go"
+    ],
+    "scope": {
+      "kind": "owner-inputs",
+      "resolver": "App.SetDesktopUpdateChannel",
+      "inputs": [
+        "channel"
+      ]
+    }
+  },
+  "SetDesktopZoomFactor": {
+    "domain": "desktop/zoom_factor.go",
+    "owner": "App.SetDesktopZoomFactor",
+    "sources": [
+      "desktop/zoom_factor.go"
+    ],
+    "scope": {
+      "kind": "owner-inputs",
+      "resolver": "App.SetDesktopZoomFactor",
+      "inputs": [
+        "factor"
+      ]
+    }
+  },
+  "SetDisplayMode": {
+    "domain": "desktop/reasoning_display_app.go",
+    "owner": "App.SetDisplayMode",
+    "sources": [
+      "desktop/reasoning_display_app.go"
+    ],
+    "scope": {
+      "kind": "owner-inputs",
+      "resolver": "App.SetDisplayMode",
+      "inputs": [
+        "arg0"
+      ]
+    }
+  },
+  "SetEffort": {
+    "domain": "desktop/app.go",
+    "owner": "App.SetEffort",
+    "sources": [
+      "desktop/app.go"
+    ],
+    "scope": {
+      "kind": "owner-inputs",
+      "resolver": "App.SetEffort",
+      "inputs": [
+        "level"
+      ]
+    }
+  },
+  "SetEffortForTab": {
+    "domain": "desktop/app.go",
+    "owner": "App.SetEffortForTab",
+    "sources": [
+      "desktop/app.go"
+    ],
+    "scope": {
+      "kind": "owner-inputs",
+      "resolver": "App.SetEffortForTab",
+      "inputs": [
+        "tabID",
+        "level"
+      ]
+    }
+  },
+  "SetExpandThinking": {
+    "domain": "desktop/reasoning_display_app.go",
+    "owner": "App.SetExpandThinking",
+    "sources": [
+      "desktop/reasoning_display_app.go"
+    ],
+    "scope": {
+      "kind": "owner-inputs",
+      "resolver": "App.SetExpandThinking",
+      "inputs": [
+        "arg0"
+      ]
+    }
+  },
+  "SetGoal": {
+    "domain": "desktop/app.go",
+    "owner": "App.SetGoal",
+    "sources": [
+      "desktop/app.go"
+    ],
+    "scope": {
+      "kind": "owner-inputs",
+      "resolver": "App.SetGoal",
+      "inputs": [
+        "goal"
+      ]
+    }
+  },
+  "SetGoalForTab": {
+    "domain": "desktop/app.go",
+    "owner": "App.SetGoalForTab",
+    "sources": [
+      "desktop/app.go"
+    ],
+    "scope": {
+      "kind": "owner-inputs",
+      "resolver": "App.SetGoalForTab",
+      "inputs": [
+        "tabID",
+        "goal"
+      ]
+    }
+  },
+  "SetInboxPaused": {
+    "domain": "desktop/inbox_app.go",
+    "owner": "App.SetInboxPaused",
+    "sources": [
+      "desktop/inbox_app.go"
+    ],
+    "scope": {
+      "kind": "owner-inputs",
+      "resolver": "App.SetInboxPaused",
+      "inputs": [
+        "tabID",
+        "paused"
+      ]
+    }
+  },
+  "SetMCPServerEnabled": {
+    "domain": "desktop/app.go",
+    "owner": "App.SetMCPServerEnabled",
+    "sources": [
+      "desktop/app.go"
+    ],
+    "scope": {
+      "kind": "owner-inputs",
+      "resolver": "App.SetMCPServerEnabled",
+      "inputs": [
+        "name",
+        "enabled"
+      ]
+    }
+  },
+  "SetMCPServerTier": {
+    "domain": "desktop/app.go",
+    "owner": "App.SetMCPServerTier",
+    "sources": [
+      "desktop/app.go"
+    ],
+    "scope": {
+      "kind": "owner-inputs",
+      "resolver": "App.SetMCPServerTier",
+      "inputs": [
+        "name",
+        "tier"
+      ]
+    }
+  },
+  "SetMaxParallelWriters": {
+    "domain": "desktop/settings_app.go",
+    "owner": "App.SetMaxParallelWriters",
+    "sources": [
+      "desktop/settings_app.go"
+    ],
+    "scope": {
+      "kind": "owner-inputs",
+      "resolver": "App.SetMaxParallelWriters",
+      "inputs": [
+        "n"
+      ]
+    }
+  },
+  "SetMaxSubagentConcurrency": {
+    "domain": "desktop/settings_app.go",
+    "owner": "App.SetMaxSubagentConcurrency",
+    "sources": [
+      "desktop/settings_app.go"
+    ],
+    "scope": {
+      "kind": "owner-inputs",
+      "resolver": "App.SetMaxSubagentConcurrency",
+      "inputs": [
+        "n"
+      ]
+    }
+  },
+  "SetMaxSubagentDepth": {
+    "domain": "desktop/settings_app.go",
+    "owner": "App.SetMaxSubagentDepth",
+    "sources": [
+      "desktop/settings_app.go"
+    ],
+    "scope": {
+      "kind": "owner-inputs",
+      "resolver": "App.SetMaxSubagentDepth",
+      "inputs": [
+        "depth"
+      ]
+    }
+  },
+  "SetMode": {
+    "domain": "desktop/app.go",
+    "owner": "App.SetMode",
+    "sources": [
+      "desktop/app.go"
+    ],
+    "scope": {
+      "kind": "owner-inputs",
+      "resolver": "App.SetMode",
+      "inputs": [
+        "mode"
+      ]
+    }
+  },
+  "SetModeForTab": {
+    "domain": "desktop/app.go",
+    "owner": "App.SetModeForTab",
+    "sources": [
+      "desktop/app.go"
+    ],
+    "scope": {
+      "kind": "owner-inputs",
+      "resolver": "App.SetModeForTab",
+      "inputs": [
+        "tabID",
+        "mode"
+      ]
+    }
+  },
+  "SetModel": {
+    "domain": "desktop/app.go",
+    "owner": "App.SetModel",
+    "sources": [
+      "desktop/app.go"
+    ],
+    "scope": {
+      "kind": "owner-inputs",
+      "resolver": "App.SetModel",
+      "inputs": [
+        "name"
+      ]
+    }
+  },
+  "SetModelForTab": {
+    "domain": "desktop/app.go",
+    "owner": "App.SetModelForTab",
+    "sources": [
+      "desktop/app.go"
+    ],
+    "scope": {
+      "kind": "owner-inputs",
+      "resolver": "App.SetModelForTab",
+      "inputs": [
+        "tabID",
+        "name"
+      ]
+    }
+  },
+  "SetNetwork": {
+    "domain": "desktop/settings_app.go",
+    "owner": "App.SetNetwork",
+    "sources": [
+      "desktop/settings_app.go"
+    ],
+    "scope": {
+      "kind": "owner-inputs",
+      "resolver": "App.SetNetwork",
+      "inputs": [
+        "n"
+      ]
+    }
+  },
+  "SetPermissionMode": {
+    "domain": "desktop/settings_app.go",
+    "owner": "App.SetPermissionMode",
+    "sources": [
+      "desktop/settings_app.go"
+    ],
+    "scope": {
+      "kind": "owner-inputs",
+      "resolver": "App.SetPermissionMode",
+      "inputs": [
+        "mode"
+      ]
+    }
+  },
+  "SetPlanMode": {
+    "domain": "desktop/app.go",
+    "owner": "App.SetPlanMode",
+    "sources": [
+      "desktop/app.go"
+    ],
+    "scope": {
+      "kind": "owner-inputs",
+      "resolver": "App.SetPlanMode",
+      "inputs": [
+        "on"
+      ]
+    }
+  },
+  "SetPlannerModel": {
+    "domain": "desktop/settings_app.go",
+    "owner": "App.SetPlannerModel",
+    "sources": [
+      "desktop/settings_app.go"
+    ],
+    "scope": {
+      "kind": "owner-inputs",
+      "resolver": "App.SetPlannerModel",
+      "inputs": [
+        "ref"
+      ]
+    }
+  },
+  "SetPluginEnabled": {
+    "domain": "desktop/plugin_packages_app.go",
+    "owner": "App.SetPluginEnabled",
+    "sources": [
+      "desktop/plugin_packages_app.go"
+    ],
+    "scope": {
+      "kind": "owner-inputs",
+      "resolver": "App.SetPluginEnabled",
+      "inputs": [
+        "name",
+        "enabled"
+      ]
+    }
+  },
+  "SetPreferredExternalOpener": {
+    "domain": "desktop/external_opener.go",
+    "owner": "App.SetPreferredExternalOpener",
+    "sources": [
+      "desktop/external_opener.go"
+    ],
+    "scope": {
+      "kind": "owner-inputs",
+      "resolver": "App.SetPreferredExternalOpener",
+      "inputs": [
+        "id"
+      ]
+    }
+  },
+  "SetProjectColor": {
+    "domain": "desktop/tabs.go",
+    "owner": "App.SetProjectColor",
+    "sources": [
+      "desktop/tabs.go"
+    ],
+    "scope": {
+      "kind": "owner-inputs",
+      "resolver": "App.SetProjectColor",
+      "inputs": [
+        "workspaceRoot",
+        "color"
+      ]
+    }
+  },
+  "SetProjectPinned": {
+    "domain": "desktop/tabs.go",
+    "owner": "App.SetProjectPinned",
+    "sources": [
+      "desktop/tabs.go"
+    ],
+    "scope": {
+      "kind": "owner-inputs",
+      "resolver": "App.SetProjectPinned",
+      "inputs": [
+        "workspaceRoot",
+        "pinned"
+      ]
+    }
+  },
+  "SetProviderKey": {
+    "domain": "desktop/settings_app.go",
+    "owner": "App.SetProviderKey",
+    "sources": [
+      "desktop/settings_app.go"
+    ],
+    "scope": {
+      "kind": "owner-inputs",
+      "resolver": "App.SetProviderKey",
+      "inputs": [
+        "apiKeyEnv",
+        "value"
+      ]
+    }
+  },
+  "SetProviderWebSearch": {
+    "domain": "desktop/settings_app.go",
+    "owner": "App.SetProviderWebSearch",
+    "sources": [
+      "desktop/settings_app.go"
+    ],
+    "scope": {
+      "kind": "owner-inputs",
+      "resolver": "App.SetProviderWebSearch",
+      "inputs": [
+        "names",
+        "enabled"
+      ]
+    }
+  },
+  "SetQualityFloor": {
+    "domain": "desktop/quality_floor.go",
+    "owner": "App.SetQualityFloor",
+    "sources": [
+      "desktop/quality_floor.go"
+    ],
+    "scope": {
+      "kind": "owner-inputs",
+      "resolver": "App.SetQualityFloor",
+      "inputs": [
+        "floor"
+      ]
+    }
+  },
+  "SetQualityFloorForTab": {
+    "domain": "desktop/quality_floor.go",
+    "owner": "App.SetQualityFloorForTab",
+    "sources": [
+      "desktop/quality_floor.go"
+    ],
+    "scope": {
+      "kind": "owner-inputs",
+      "resolver": "App.SetQualityFloorForTab",
+      "inputs": [
+        "tabID",
+        "floor"
+      ]
+    }
+  },
+  "SetReasoningDisplayMode": {
+    "domain": "desktop/reasoning_display_app.go",
+    "owner": "App.SetReasoningDisplayMode",
+    "sources": [
+      "desktop/reasoning_display_app.go"
+    ],
+    "scope": {
+      "kind": "owner-inputs",
+      "resolver": "App.SetReasoningDisplayMode",
+      "inputs": [
+        "mode"
+      ]
+    }
+  },
+  "SetReasoningLanguage": {
+    "domain": "desktop/settings_app.go",
+    "owner": "App.SetReasoningLanguage",
+    "sources": [
+      "desktop/settings_app.go"
+    ],
+    "scope": {
+      "kind": "owner-inputs",
+      "resolver": "App.SetReasoningLanguage",
+      "inputs": [
+        "lang"
+      ]
+    }
+  },
+  "SetRecoveryCheckpointEnabled": {
+    "domain": "desktop/app.go",
+    "owner": "App.SetRecoveryCheckpointEnabled",
+    "sources": [
+      "desktop/app.go"
+    ],
+    "scope": {
+      "kind": "owner-inputs",
+      "resolver": "App.SetRecoveryCheckpointEnabled",
+      "inputs": [
+        "_"
+      ]
+    }
+  },
+  "SetRecoveryCheckpointEnabledTab": {
+    "domain": "desktop/app.go",
+    "owner": "App.SetRecoveryCheckpointEnabledTab",
+    "sources": [
+      "desktop/app.go"
+    ],
+    "scope": {
+      "kind": "owner-inputs",
+      "resolver": "App.SetRecoveryCheckpointEnabledTab",
+      "inputs": [
+        "_",
+        "_"
+      ]
+    }
+  },
+  "SetRemoteProjectTitle": {
+    "domain": "desktop/remote_tab_commands.go",
+    "owner": "App.SetRemoteProjectTitle",
+    "sources": [
+      "desktop/remote_tab_commands.go"
+    ],
+    "scope": {
+      "kind": "owner-inputs",
+      "resolver": "App.SetRemoteProjectTitle",
+      "inputs": [
+        "hostID",
+        "workspace",
+        "title"
+      ]
+    }
+  },
+  "SetRemoteSessionPinned": {
+    "domain": "desktop/remote_tab_commands.go",
+    "owner": "App.SetRemoteSessionPinned",
+    "sources": [
+      "desktop/remote_tab_commands.go"
+    ],
+    "scope": {
+      "kind": "owner-inputs",
+      "resolver": "App.SetRemoteSessionPinned",
+      "inputs": [
+        "hostID",
+        "workspace",
+        "name",
+        "pinned"
+      ]
+    }
+  },
+  "SetRemoteTabComposerProfile": {
+    "domain": "desktop/remote_tab.go",
+    "owner": "App.SetRemoteTabComposerProfile",
+    "sources": [
+      "desktop/remote_tab.go"
+    ],
+    "scope": {
+      "kind": "owner-inputs",
+      "resolver": "App.SetRemoteTabComposerProfile",
+      "inputs": [
+        "tabID",
+        "collaborationMode",
+        "toolApprovalMode",
+        "goal"
+      ]
+    }
+  },
+  "SetRemoteTabEffort": {
+    "domain": "desktop/remote_tab_commands.go",
+    "owner": "App.SetRemoteTabEffort",
+    "sources": [
+      "desktop/remote_tab_commands.go"
+    ],
+    "scope": {
+      "kind": "owner-inputs",
+      "resolver": "App.SetRemoteTabEffort",
+      "inputs": [
+        "tabID",
+        "level"
+      ]
+    }
+  },
+  "SetRemoteTabGoal": {
+    "domain": "desktop/remote_tab.go",
+    "owner": "App.SetRemoteTabGoal",
+    "sources": [
+      "desktop/remote_tab.go"
+    ],
+    "scope": {
+      "kind": "owner-inputs",
+      "resolver": "App.SetRemoteTabGoal",
+      "inputs": [
+        "tabID",
+        "goal"
+      ]
+    }
+  },
+  "SetRemoteTabModel": {
+    "domain": "desktop/remote_tab_commands.go",
+    "owner": "App.SetRemoteTabModel",
+    "sources": [
+      "desktop/remote_tab_commands.go"
+    ],
+    "scope": {
+      "kind": "owner-inputs",
+      "resolver": "App.SetRemoteTabModel",
+      "inputs": [
+        "tabID",
+        "ref"
+      ]
+    }
+  },
+  "SetRemoteTabPlanMode": {
+    "domain": "desktop/remote_tab_commands.go",
+    "owner": "App.SetRemoteTabPlanMode",
+    "sources": [
+      "desktop/remote_tab_commands.go"
+    ],
+    "scope": {
+      "kind": "owner-inputs",
+      "resolver": "App.SetRemoteTabPlanMode",
+      "inputs": [
+        "tabID",
+        "on"
+      ]
+    }
+  },
+  "SetRemoteTabQualityFloor": {
+    "domain": "desktop/remote_tab.go",
+    "owner": "App.SetRemoteTabQualityFloor",
+    "sources": [
+      "desktop/remote_tab.go"
+    ],
+    "scope": {
+      "kind": "owner-inputs",
+      "resolver": "App.SetRemoteTabQualityFloor",
+      "inputs": [
+        "tabID",
+        "floor"
+      ]
+    }
+  },
+  "SetRemoteTabToolApprovalMode": {
+    "domain": "desktop/remote_tab.go",
+    "owner": "App.SetRemoteTabToolApprovalMode",
+    "sources": [
+      "desktop/remote_tab.go"
+    ],
+    "scope": {
+      "kind": "owner-inputs",
+      "resolver": "App.SetRemoteTabToolApprovalMode",
+      "inputs": [
+        "tabID",
+        "mode"
+      ]
+    }
+  },
+  "SetSandbox": {
+    "domain": "desktop/settings_app.go",
+    "owner": "App.SetSandbox",
+    "sources": [
+      "desktop/settings_app.go"
+    ],
+    "scope": {
+      "kind": "owner-inputs",
+      "resolver": "App.SetSandbox",
+      "inputs": [
+        "bash",
+        "network",
+        "workspaceRoot",
+        "allowWrite",
+        "shell"
+      ]
+    }
+  },
+  "SetSessionExperience": {
+    "domain": "desktop/reasoning_display_app.go",
+    "owner": "App.SetSessionExperience",
+    "sources": [
+      "desktop/reasoning_display_app.go"
+    ],
+    "scope": {
+      "kind": "owner-inputs",
+      "resolver": "App.SetSessionExperience",
+      "inputs": [
+        "mode"
+      ]
+    }
+  },
+  "SetShellPreference": {
+    "domain": "desktop/shell_support.go",
+    "owner": "App.SetShellPreference",
+    "sources": [
+      "desktop/shell_support.go"
+    ],
+    "scope": {
+      "kind": "owner-inputs",
+      "resolver": "App.SetShellPreference",
+      "inputs": [
+        "prefer"
+      ]
+    }
+  },
+  "SetSkillEnabled": {
+    "domain": "desktop/app.go",
+    "owner": "App.SetSkillEnabled",
+    "sources": [
+      "desktop/app.go"
+    ],
+    "scope": {
+      "kind": "owner-inputs",
+      "resolver": "App.SetSkillEnabled",
+      "inputs": [
+        "name",
+        "enabled"
+      ]
+    }
+  },
+  "SetSkillImplicitInvocation": {
+    "domain": "desktop/app.go",
+    "owner": "App.SetSkillImplicitInvocation",
+    "sources": [
+      "desktop/app.go"
+    ],
+    "scope": {
+      "kind": "owner-inputs",
+      "resolver": "App.SetSkillImplicitInvocation",
+      "inputs": [
+        "enabled"
+      ]
+    }
+  },
+  "SetSkillPathEnabled": {
+    "domain": "desktop/app.go",
+    "owner": "App.SetSkillPathEnabled",
+    "sources": [
+      "desktop/app.go"
+    ],
+    "scope": {
+      "kind": "owner-inputs",
+      "resolver": "App.SetSkillPathEnabled",
+      "inputs": [
+        "path",
+        "enabled"
+      ]
+    }
+  },
+  "SetStatusBarItems": {
+    "domain": "desktop/settings_preferences.go",
+    "owner": "App.SetStatusBarItems",
+    "sources": [
+      "desktop/settings_preferences.go"
+    ],
+    "scope": {
+      "kind": "owner-inputs",
+      "resolver": "App.SetStatusBarItems",
+      "inputs": [
+        "items"
+      ]
+    }
+  },
+  "SetStatusBarStyle": {
+    "domain": "desktop/settings_preferences.go",
+    "owner": "App.SetStatusBarStyle",
+    "sources": [
+      "desktop/settings_preferences.go"
+    ],
+    "scope": {
+      "kind": "owner-inputs",
+      "resolver": "App.SetStatusBarStyle",
+      "inputs": [
+        "style"
+      ]
+    }
+  },
+  "SetSubagentEffort": {
+    "domain": "desktop/settings_app.go",
+    "owner": "App.SetSubagentEffort",
+    "sources": [
+      "desktop/settings_app.go"
+    ],
+    "scope": {
+      "kind": "owner-inputs",
+      "resolver": "App.SetSubagentEffort",
+      "inputs": [
+        "level"
+      ]
+    }
+  },
+  "SetSubagentModel": {
+    "domain": "desktop/settings_app.go",
+    "owner": "App.SetSubagentModel",
+    "sources": [
+      "desktop/settings_app.go"
+    ],
+    "scope": {
+      "kind": "owner-inputs",
+      "resolver": "App.SetSubagentModel",
+      "inputs": [
+        "ref"
+      ]
+    }
+  },
+  "SetSubagentProfileEffort": {
+    "domain": "desktop/settings_app.go",
+    "owner": "App.SetSubagentProfileEffort",
+    "sources": [
+      "desktop/settings_app.go"
+    ],
+    "scope": {
+      "kind": "owner-inputs",
+      "resolver": "App.SetSubagentProfileEffort",
+      "inputs": [
+        "name",
+        "level"
+      ]
+    }
+  },
+  "SetSubagentProfileModel": {
+    "domain": "desktop/settings_app.go",
+    "owner": "App.SetSubagentProfileModel",
+    "sources": [
+      "desktop/settings_app.go"
+    ],
+    "scope": {
+      "kind": "owner-inputs",
+      "resolver": "App.SetSubagentProfileModel",
+      "inputs": [
+        "name",
+        "ref"
+      ]
+    }
+  },
+  "SetTokenMode": {
+    "domain": "desktop/app.go",
+    "owner": "App.SetTokenMode",
+    "sources": [
+      "desktop/app.go"
+    ],
+    "scope": {
+      "kind": "owner-inputs",
+      "resolver": "App.SetTokenMode",
+      "inputs": [
+        "mode"
+      ]
+    }
+  },
+  "SetTokenModeForTab": {
+    "domain": "desktop/app.go",
+    "owner": "App.SetTokenModeForTab",
+    "sources": [
+      "desktop/app.go"
+    ],
+    "scope": {
+      "kind": "owner-inputs",
+      "resolver": "App.SetTokenModeForTab",
+      "inputs": [
+        "tabID",
+        "mode"
+      ]
+    }
+  },
+  "SetToolApprovalMode": {
+    "domain": "desktop/app.go",
+    "owner": "App.SetToolApprovalMode",
+    "sources": [
+      "desktop/app.go"
+    ],
+    "scope": {
+      "kind": "owner-inputs",
+      "resolver": "App.SetToolApprovalMode",
+      "inputs": [
+        "mode"
+      ]
+    }
+  },
+  "SetToolApprovalModeForTab": {
+    "domain": "desktop/app.go",
+    "owner": "App.SetToolApprovalModeForTab",
+    "sources": [
+      "desktop/app.go"
+    ],
+    "scope": {
+      "kind": "owner-inputs",
+      "resolver": "App.SetToolApprovalModeForTab",
+      "inputs": [
+        "tabID",
+        "mode"
+      ]
+    }
+  },
+  "SetTopicPinned": {
+    "domain": "desktop/tabs.go",
+    "owner": "App.SetTopicPinned",
+    "sources": [
+      "desktop/tabs.go"
+    ],
+    "scope": {
+      "kind": "owner-inputs",
+      "resolver": "App.SetTopicPinned",
+      "inputs": [
+        "topicID",
+        "pinned"
+      ]
+    }
+  },
+  "SetTrayLocale": {
+    "domain": "desktop/settings_preferences.go",
+    "owner": "App.SetTrayLocale",
+    "sources": [
+      "desktop/settings_preferences.go"
+    ],
+    "scope": {
+      "kind": "owner-inputs",
+      "resolver": "App.SetTrayLocale",
+      "inputs": [
+        "locale"
+      ]
+    }
+  },
+  "SetVisionModel": {
+    "domain": "desktop/settings_app.go",
+    "owner": "App.SetVisionModel",
+    "sources": [
+      "desktop/settings_app.go"
+    ],
+    "scope": {
+      "kind": "owner-inputs",
+      "resolver": "App.SetVisionModel",
+      "inputs": [
+        "ref"
+      ]
+    }
+  },
+  "SetWebSearchModel": {
+    "domain": "desktop/settings_web_search_model.go",
+    "owner": "App.SetWebSearchModel",
+    "sources": [
+      "desktop/settings_web_search_model.go"
+    ],
+    "scope": {
+      "kind": "owner-inputs",
+      "resolver": "App.SetWebSearchModel",
+      "inputs": [
+        "ref"
+      ]
+    }
+  },
+  "Settings": {
+    "domain": "desktop/settings_app.go",
+    "owner": "App.Settings",
+    "sources": [
+      "desktop/settings_app.go"
+    ],
+    "scope": {
+      "kind": "owner-state",
+      "resolver": "App.Settings",
+      "inputs": []
+    }
+  },
+  "SkillsSettings": {
+    "domain": "desktop/app.go",
+    "owner": "App.SkillsSettings",
+    "sources": [
+      "desktop/app.go"
+    ],
+    "scope": {
+      "kind": "owner-state",
+      "resolver": "App.SkillsSettings",
+      "inputs": []
+    }
+  },
+  "SlashArgs": {
+    "domain": "desktop/slash_args.go",
+    "owner": "App.SlashArgs",
+    "sources": [
+      "desktop/slash_args.go"
+    ],
+    "scope": {
+      "kind": "owner-inputs",
+      "resolver": "App.SlashArgs",
+      "inputs": [
+        "input"
+      ]
+    }
+  },
+  "StartBotConnectionInstall": {
+    "domain": "desktop/bot_connection_app.go",
+    "owner": "App.StartBotConnectionInstall",
+    "sources": [
+      "desktop/bot_connection_app.go"
+    ],
+    "scope": {
+      "kind": "owner-inputs",
+      "resolver": "App.StartBotConnectionInstall",
+      "inputs": [
+        "provider",
+        "domain"
+      ]
+    }
+  },
+  "StartTopicActivation": {
+    "domain": "desktop/topic_activation.go",
+    "owner": "App.StartTopicActivation",
+    "sources": [
+      "desktop/topic_activation.go"
+    ],
+    "scope": {
+      "kind": "owner-inputs",
+      "resolver": "App.StartTopicActivation",
+      "inputs": [
+        "req"
+      ]
+    }
+  },
+  "StartTurnForTab": {
+    "domain": "desktop/turn_runtime_api.go",
+    "owner": "App.StartTurnForTab",
+    "sources": [
+      "desktop/turn_runtime_api.go"
+    ],
+    "scope": {
+      "kind": "owner-inputs",
+      "resolver": "App.StartTurnForTab",
+      "inputs": [
+        "tabID",
+        "input",
+        "submissionID"
+      ]
+    }
+  },
+  "Steer": {
+    "domain": "desktop/app.go",
+    "owner": "App.Steer",
+    "sources": [
+      "desktop/app.go"
+    ],
+    "scope": {
+      "kind": "owner-inputs",
+      "resolver": "App.Steer",
+      "inputs": [
+        "text"
+      ]
+    }
+  },
+  "SteerForTab": {
+    "domain": "desktop/app.go",
+    "owner": "App.SteerForTab",
+    "sources": [
+      "desktop/app.go"
+    ],
+    "scope": {
+      "kind": "owner-inputs",
+      "resolver": "App.SteerForTab",
+      "inputs": [
+        "tabID",
+        "text"
+      ]
+    }
+  },
+  "SteerInboxItem": {
+    "domain": "desktop/inbox_app.go",
+    "owner": "App.SteerInboxItem",
+    "sources": [
+      "desktop/inbox_app.go"
+    ],
+    "scope": {
+      "kind": "owner-inputs",
+      "resolver": "App.SteerInboxItem",
+      "inputs": [
+        "tabID",
+        "itemID"
+      ]
+    }
+  },
+  "SteerInboxItemForTurn": {
+    "domain": "desktop/inbox_app.go",
+    "owner": "App.SteerInboxItemForTurn",
+    "sources": [
+      "desktop/inbox_app.go"
+    ],
+    "scope": {
+      "kind": "owner-inputs",
+      "resolver": "App.SteerInboxItemForTurn",
+      "inputs": [
+        "tabID",
+        "turnID",
+        "itemID"
+      ]
+    }
+  },
+  "SteerRemoteTab": {
+    "domain": "desktop/remote_tab_commands.go",
+    "owner": "App.SteerRemoteTab",
+    "sources": [
+      "desktop/remote_tab_commands.go"
+    ],
+    "scope": {
+      "kind": "owner-inputs",
+      "resolver": "App.SteerRemoteTab",
+      "inputs": [
+        "tabID",
+        "input"
+      ]
+    }
+  },
+  "StopRemoteServer": {
+    "domain": "desktop/remote_server_stop.go",
+    "owner": "App.StopRemoteServer",
+    "sources": [
+      "desktop/remote_server_stop.go"
+    ],
+    "scope": {
+      "kind": "owner-inputs",
+      "resolver": "App.StopRemoteServer",
+      "inputs": [
+        "hostID",
+        "workspace"
+      ]
+    }
+  },
+  "StopTask": {
+    "domain": "desktop/app.go",
+    "owner": "App.StopTask",
+    "sources": [
+      "desktop/app.go"
+    ],
+    "scope": {
+      "kind": "owner-inputs",
+      "resolver": "App.StopTask",
+      "inputs": [
+        "taskID",
+        "expectedVersion",
+        "reason",
+        "idemKey"
+      ]
+    }
+  },
+  "StopTaskByKey": {
+    "domain": "desktop/task_catalog.go",
+    "owner": "App.StopTaskByKey",
+    "sources": [
+      "desktop/task_catalog.go"
+    ],
+    "scope": {
+      "kind": "owner-inputs",
+      "resolver": "App.StopTaskByKey",
+      "inputs": [
+        "req"
+      ]
+    }
+  },
+  "StopTaskForTab": {
+    "domain": "desktop/app.go",
+    "owner": "App.StopTaskForTab",
+    "sources": [
+      "desktop/app.go"
+    ],
+    "scope": {
+      "kind": "owner-inputs",
+      "resolver": "App.StopTaskForTab",
+      "inputs": [
+        "tabID",
+        "taskID",
+        "expectedVersion",
+        "reason",
+        "idemKey"
+      ]
+    }
+  },
+  "StorageSettings": {
+    "domain": "desktop/storage_app.go",
+    "owner": "App.StorageSettings",
+    "sources": [
+      "desktop/storage_app.go"
+    ],
+    "scope": {
+      "kind": "owner-state",
+      "resolver": "App.StorageSettings",
+      "inputs": []
+    }
+  },
+  "Submit": {
+    "domain": "desktop/app.go",
+    "owner": "App.Submit",
+    "sources": [
+      "desktop/app.go"
+    ],
+    "scope": {
+      "kind": "owner-inputs",
+      "resolver": "App.Submit",
+      "inputs": [
+        "input"
+      ]
+    }
+  },
+  "SubmitDeliveryRecoveryToTab": {
+    "domain": "desktop/app.go",
+    "owner": "App.SubmitDeliveryRecoveryToTab",
+    "sources": [
+      "desktop/app.go"
+    ],
+    "scope": {
+      "kind": "owner-inputs",
+      "resolver": "App.SubmitDeliveryRecoveryToTab",
+      "inputs": [
+        "tabID",
+        "display",
+        "input"
+      ]
+    }
+  },
+  "SubmitDeliveryRecoveryToTabWithID": {
+    "domain": "desktop/turn_submission_app.go",
+    "owner": "App.SubmitDeliveryRecoveryToTabWithID",
+    "sources": [
+      "desktop/turn_submission_app.go"
+    ],
+    "scope": {
+      "kind": "owner-inputs",
+      "resolver": "App.SubmitDeliveryRecoveryToTabWithID",
+      "inputs": [
+        "tabID",
+        "display",
+        "input",
+        "submissionID"
+      ]
+    }
+  },
+  "SubmitDisplay": {
+    "domain": "desktop/app.go",
+    "owner": "App.SubmitDisplay",
+    "sources": [
+      "desktop/app.go"
+    ],
+    "scope": {
+      "kind": "owner-inputs",
+      "resolver": "App.SubmitDisplay",
+      "inputs": [
+        "display",
+        "input"
+      ]
+    }
+  },
+  "SubmitDisplayToTab": {
+    "domain": "desktop/app.go",
+    "owner": "App.SubmitDisplayToTab",
+    "sources": [
+      "desktop/app.go"
+    ],
+    "scope": {
+      "kind": "owner-inputs",
+      "resolver": "App.SubmitDisplayToTab",
+      "inputs": [
+        "tabID",
+        "display",
+        "input"
+      ]
+    }
+  },
+  "SubmitDisplayToTabWithID": {
+    "domain": "desktop/turn_submission_app.go",
+    "owner": "App.SubmitDisplayToTabWithID",
+    "sources": [
+      "desktop/turn_submission_app.go"
+    ],
+    "scope": {
+      "kind": "owner-inputs",
+      "resolver": "App.SubmitDisplayToTabWithID",
+      "inputs": [
+        "tabID",
+        "display",
+        "input",
+        "submissionID"
+      ]
+    }
+  },
+  "SubmitEditedDisplayToTab": {
+    "domain": "desktop/app.go",
+    "owner": "App.SubmitEditedDisplayToTab",
+    "sources": [
+      "desktop/app.go"
+    ],
+    "scope": {
+      "kind": "owner-inputs",
+      "resolver": "App.SubmitEditedDisplayToTab",
+      "inputs": [
+        "tabID",
+        "display",
+        "input",
+        "original"
+      ]
+    }
+  },
+  "SubmitEditedDisplayToTabWithID": {
+    "domain": "desktop/turn_submission_app.go",
+    "owner": "App.SubmitEditedDisplayToTabWithID",
+    "sources": [
+      "desktop/turn_submission_app.go"
+    ],
+    "scope": {
+      "kind": "owner-inputs",
+      "resolver": "App.SubmitEditedDisplayToTabWithID",
+      "inputs": [
+        "tabID",
+        "display",
+        "input",
+        "original",
+        "submissionID"
+      ]
+    }
+  },
+  "SubmitExtensionForm": {
+    "domain": "desktop/extensions_app.go",
+    "owner": "App.SubmitExtensionForm",
+    "sources": [
+      "desktop/extensions_app.go"
+    ],
+    "scope": {
+      "kind": "owner-inputs",
+      "resolver": "App.SubmitExtensionForm",
+      "inputs": [
+        "tabID",
+        "pluginID",
+        "surfaceID",
+        "values"
+      ]
+    }
+  },
+  "SubmitInitialGoalToTab": {
+    "domain": "desktop/app.go",
+    "owner": "App.SubmitInitialGoalToTab",
+    "sources": [
+      "desktop/app.go"
+    ],
+    "scope": {
+      "kind": "owner-inputs",
+      "resolver": "App.SubmitInitialGoalToTab",
+      "inputs": [
+        "tabID",
+        "goal",
+        "display",
+        "input",
+        "invocations",
+        "collaborationMode",
+        "toolApprovalMode"
+      ]
+    }
+  },
+  "SubmitInitialGoalToTabWithID": {
+    "domain": "desktop/turn_submission_app.go",
+    "owner": "App.SubmitInitialGoalToTabWithID",
+    "sources": [
+      "desktop/turn_submission_app.go"
+    ],
+    "scope": {
+      "kind": "owner-inputs",
+      "resolver": "App.SubmitInitialGoalToTabWithID",
+      "inputs": [
+        "tabID",
+        "goal",
+        "display",
+        "input",
+        "invocations",
+        "collaborationMode",
+        "toolApprovalMode",
+        "submissionID"
+      ]
+    }
+  },
+  "SubmitInvocationsToTab": {
+    "domain": "desktop/app.go",
+    "owner": "App.SubmitInvocationsToTab",
+    "sources": [
+      "desktop/app.go"
+    ],
+    "scope": {
+      "kind": "owner-inputs",
+      "resolver": "App.SubmitInvocationsToTab",
+      "inputs": [
+        "tabID",
+        "display",
+        "input",
+        "invocations"
+      ]
+    }
+  },
+  "SubmitInvocationsToTabWithID": {
+    "domain": "desktop/turn_submission_app.go",
+    "owner": "App.SubmitInvocationsToTabWithID",
+    "sources": [
+      "desktop/turn_submission_app.go"
+    ],
+    "scope": {
+      "kind": "owner-inputs",
+      "resolver": "App.SubmitInvocationsToTabWithID",
+      "inputs": [
+        "tabID",
+        "display",
+        "input",
+        "invocations",
+        "submissionID"
+      ]
+    }
+  },
+  "SubmitRemoteTab": {
+    "domain": "desktop/remote_tab.go",
+    "owner": "App.SubmitRemoteTab",
+    "sources": [
+      "desktop/remote_tab.go"
+    ],
+    "scope": {
+      "kind": "owner-inputs",
+      "resolver": "App.SubmitRemoteTab",
+      "inputs": [
+        "tabID",
+        "text"
+      ]
+    }
+  },
+  "SubmitRemoteTabExtensionForm": {
+    "domain": "desktop/remote_tab.go",
+    "owner": "App.SubmitRemoteTabExtensionForm",
+    "sources": [
+      "desktop/remote_tab.go"
+    ],
+    "scope": {
+      "kind": "owner-inputs",
+      "resolver": "App.SubmitRemoteTabExtensionForm",
+      "inputs": [
+        "tabID",
+        "pluginID",
+        "surfaceID",
+        "values"
+      ]
+    }
+  },
+  "SubmitToTab": {
+    "domain": "desktop/app.go",
+    "owner": "App.SubmitToTab",
+    "sources": [
+      "desktop/app.go"
+    ],
+    "scope": {
+      "kind": "owner-inputs",
+      "resolver": "App.SubmitToTab",
+      "inputs": [
+        "tabID",
+        "input"
+      ]
+    }
+  },
+  "SubmitToTabWithID": {
+    "domain": "desktop/turn_submission_app.go",
+    "owner": "App.SubmitToTabWithID",
+    "sources": [
+      "desktop/turn_submission_app.go"
+    ],
+    "scope": {
+      "kind": "owner-inputs",
+      "resolver": "App.SubmitToTabWithID",
+      "inputs": [
+        "tabID",
+        "input",
+        "submissionID"
+      ]
+    }
+  },
+  "SummarizeFrom": {
+    "domain": "desktop/app.go",
+    "owner": "App.SummarizeFrom",
+    "sources": [
+      "desktop/app.go"
+    ],
+    "scope": {
+      "kind": "owner-inputs",
+      "resolver": "App.SummarizeFrom",
+      "inputs": [
+        "turn"
+      ]
+    }
+  },
+  "SummarizeFromForTab": {
+    "domain": "desktop/app.go",
+    "owner": "App.SummarizeFromForTab",
+    "sources": [
+      "desktop/app.go"
+    ],
+    "scope": {
+      "kind": "owner-inputs",
+      "resolver": "App.SummarizeFromForTab",
+      "inputs": [
+        "tabID",
+        "turn"
+      ]
+    }
+  },
+  "SummarizeRemoteTab": {
+    "domain": "desktop/remote_tab_commands.go",
+    "owner": "App.SummarizeRemoteTab",
+    "sources": [
+      "desktop/remote_tab_commands.go"
+    ],
+    "scope": {
+      "kind": "owner-inputs",
+      "resolver": "App.SummarizeRemoteTab",
+      "inputs": [
+        "tabID",
+        "turn",
+        "mode"
+      ]
+    }
+  },
+  "SummarizeUpTo": {
+    "domain": "desktop/app.go",
+    "owner": "App.SummarizeUpTo",
+    "sources": [
+      "desktop/app.go"
+    ],
+    "scope": {
+      "kind": "owner-inputs",
+      "resolver": "App.SummarizeUpTo",
+      "inputs": [
+        "turn"
+      ]
+    }
+  },
+  "SummarizeUpToForTab": {
+    "domain": "desktop/app.go",
+    "owner": "App.SummarizeUpToForTab",
+    "sources": [
+      "desktop/app.go"
+    ],
+    "scope": {
+      "kind": "owner-inputs",
+      "resolver": "App.SummarizeUpToForTab",
+      "inputs": [
+        "tabID",
+        "turn"
+      ]
+    }
+  },
+  "SwitchWorkspace": {
+    "domain": "desktop/app.go",
+    "owner": "App.SwitchWorkspace",
+    "sources": [
+      "desktop/app.go"
+    ],
+    "scope": {
+      "kind": "owner-inputs",
+      "resolver": "App.SwitchWorkspace",
+      "inputs": [
+        "dir"
+      ]
+    }
+  },
+  "SyncRuntimeState": {
+    "domain": "desktop/remote_runtime_state.go",
+    "owner": "App.SyncRuntimeState",
+    "sources": [
+      "desktop/remote_runtime_state.go"
+    ],
+    "scope": {
+      "kind": "owner-state",
+      "resolver": "App.SyncRuntimeState",
+      "inputs": []
+    }
+  },
+  "TakeoverSession": {
+    "domain": "desktop/session_takeover.go",
+    "owner": "App.TakeoverSession",
+    "sources": [
+      "desktop/session_takeover.go"
+    ],
+    "scope": {
+      "kind": "owner-inputs",
+      "resolver": "App.TakeoverSession",
+      "inputs": [
+        "tabID",
+        "mode"
+      ]
+    }
+  },
+  "TerminalOutputForTab": {
+    "domain": "desktop/terminal.go",
+    "owner": "App.TerminalOutputForTab",
+    "sources": [
+      "desktop/terminal.go"
+    ],
+    "scope": {
+      "kind": "owner-inputs",
+      "resolver": "App.TerminalOutputForTab",
+      "inputs": [
+        "tabID",
+        "sessionID"
+      ]
+    }
+  },
+  "TerminalWorkspaceForTab": {
+    "domain": "desktop/terminal.go",
+    "owner": "App.TerminalWorkspaceForTab",
+    "sources": [
+      "desktop/terminal.go"
+    ],
+    "scope": {
+      "kind": "owner-inputs",
+      "resolver": "App.TerminalWorkspaceForTab",
+      "inputs": [
+        "tabID"
+      ]
+    }
+  },
+  "TestBotConnection": {
+    "domain": "desktop/bot_connection_app.go",
+    "owner": "App.TestBotConnection",
+    "sources": [
+      "desktop/bot_connection_app.go"
+    ],
+    "scope": {
+      "kind": "owner-inputs",
+      "resolver": "App.TestBotConnection",
+      "inputs": [
+        "id",
+        "target"
+      ]
+    }
+  },
+  "TestDingtalkBot": {
+    "domain": "desktop/bot_connection_app.go",
+    "owner": "App.TestDingtalkBot",
+    "sources": [
+      "desktop/bot_connection_app.go"
+    ],
+    "scope": {
+      "kind": "owner-state",
+      "resolver": "App.TestDingtalkBot",
+      "inputs": []
+    }
+  },
+  "TestProviderModel": {
+    "domain": "desktop/provider_settings_probe.go",
+    "owner": "App.TestProviderModel",
+    "sources": [
+      "desktop/provider_settings_probe.go"
+    ],
+    "scope": {
+      "kind": "owner-inputs",
+      "resolver": "App.TestProviderModel",
+      "inputs": [
+        "p",
+        "model",
+        "key"
+      ]
+    }
+  },
+  "ToggleMaximiseMainWindow": {
+    "domain": "desktop/window_controls.go",
+    "owner": "App.ToggleMaximiseMainWindow",
+    "sources": [
+      "desktop/window_controls.go"
+    ],
+    "scope": {
+      "kind": "owner-state",
+      "resolver": "App.ToggleMaximiseMainWindow",
+      "inputs": []
+    }
+  },
+  "ToolResultForTab": {
+    "domain": "desktop/app.go",
+    "owner": "App.ToolResultForTab",
+    "sources": [
+      "desktop/app.go"
+    ],
+    "scope": {
+      "kind": "owner-inputs",
+      "resolver": "App.ToolResultForTab",
+      "inputs": [
+        "tabID",
+        "toolID"
+      ]
+    }
+  },
+  "TrashTopic": {
+    "domain": "desktop/topic_archive.go",
+    "owner": "App.TrashTopic",
+    "sources": [
+      "desktop/topic_archive.go"
+    ],
+    "scope": {
+      "kind": "owner-inputs",
+      "resolver": "App.TrashTopic",
+      "inputs": [
+        "topicID"
+      ]
+    }
+  },
+  "TrustProjectHooks": {
+    "domain": "desktop/hooks_settings_app.go",
+    "owner": "App.TrustProjectHooks",
+    "sources": [
+      "desktop/hooks_settings_app.go"
+    ],
+    "scope": {
+      "kind": "owner-state",
+      "resolver": "App.TrustProjectHooks",
+      "inputs": []
+    }
+  },
+  "TrustProjectHooksForRoot": {
+    "domain": "desktop/hooks_settings_app.go",
+    "owner": "App.TrustProjectHooksForRoot",
+    "sources": [
+      "desktop/hooks_settings_app.go"
+    ],
+    "scope": {
+      "kind": "owner-inputs",
+      "resolver": "App.TrustProjectHooksForRoot",
+      "inputs": [
+        "root"
+      ]
+    }
+  },
+  "TrySubagentProfile": {
+    "domain": "desktop/subagents_app.go",
+    "owner": "App.TrySubagentProfile",
+    "sources": [
+      "desktop/subagents_app.go"
+    ],
+    "scope": {
+      "kind": "owner-inputs",
+      "resolver": "App.TrySubagentProfile",
+      "inputs": [
+        "input",
+        "task"
+      ]
+    }
+  },
+  "TurnCheckLog": {
+    "domain": "desktop/workspace_turn_changes.go",
+    "owner": "App.TurnCheckLog",
+    "sources": [
+      "desktop/workspace_turn_changes.go"
+    ],
+    "scope": {
+      "kind": "owner-inputs",
+      "resolver": "App.TurnCheckLog",
+      "inputs": [
+        "tabID",
+        "sessionPath",
+        "toolID",
+        "resultID"
+      ]
+    }
+  },
+  "TurnEventsForTab": {
+    "domain": "desktop/turn_runtime_api.go",
+    "owner": "App.TurnEventsForTab",
+    "sources": [
+      "desktop/turn_runtime_api.go"
+    ],
+    "scope": {
+      "kind": "owner-inputs",
+      "resolver": "App.TurnEventsForTab",
+      "inputs": [
+        "tabID",
+        "afterSeq"
+      ]
+    }
+  },
+  "UndoRewindForTab": {
+    "domain": "desktop/rewind_tab.go",
+    "owner": "App.UndoRewindForTab",
+    "sources": [
+      "desktop/rewind_tab.go"
+    ],
+    "scope": {
+      "kind": "owner-inputs",
+      "resolver": "App.UndoRewindForTab",
+      "inputs": [
+        "tabID",
+        "transactionID"
+      ]
+    }
+  },
+  "UnpinFileForTab": {
+    "domain": "desktop/pinned_files.go",
+    "owner": "App.UnpinFileForTab",
+    "sources": [
+      "desktop/pinned_files.go"
+    ],
+    "scope": {
+      "kind": "owner-inputs",
+      "resolver": "App.UnpinFileForTab",
+      "inputs": [
+        "tabID",
+        "relPath"
+      ]
+    }
+  },
+  "UpdateInboxItem": {
+    "domain": "desktop/inbox_app.go",
+    "owner": "App.UpdateInboxItem",
+    "sources": [
+      "desktop/inbox_app.go"
+    ],
+    "scope": {
+      "kind": "owner-inputs",
+      "resolver": "App.UpdateInboxItem",
+      "inputs": [
+        "tabID",
+        "id",
+        "display",
+        "submit"
+      ]
+    }
+  },
+  "UpdateMCPServer": {
+    "domain": "desktop/app.go",
+    "owner": "App.UpdateMCPServer",
+    "sources": [
+      "desktop/app.go"
+    ],
+    "scope": {
+      "kind": "owner-inputs",
+      "resolver": "App.UpdateMCPServer",
+      "inputs": [
+        "name",
+        "in"
+      ]
+    }
+  },
+  "UpdatePlugin": {
+    "domain": "desktop/plugin_packages_app.go",
+    "owner": "App.UpdatePlugin",
+    "sources": [
+      "desktop/plugin_packages_app.go"
+    ],
+    "scope": {
+      "kind": "owner-inputs",
+      "resolver": "App.UpdatePlugin",
+      "inputs": [
+        "name"
+      ]
+    }
+  },
+  "UpdateRemoteHost": {
+    "domain": "desktop/remote_app.go",
+    "owner": "App.UpdateRemoteHost",
+    "sources": [
+      "desktop/remote_app.go"
+    ],
+    "scope": {
+      "kind": "owner-inputs",
+      "resolver": "App.UpdateRemoteHost",
+      "inputs": [
+        "id",
+        "in"
+      ]
+    }
+  },
+  "UpdateSubagentProfile": {
+    "domain": "desktop/subagents_app.go",
+    "owner": "App.UpdateSubagentProfile",
+    "sources": [
+      "desktop/subagents_app.go"
+    ],
+    "scope": {
+      "kind": "owner-inputs",
+      "resolver": "App.UpdateSubagentProfile",
+      "inputs": [
+        "name",
+        "scope",
+        "input"
+      ]
+    }
+  },
+  "UpgradeDeepSeekProviderAccess": {
+    "domain": "desktop/settings_app.go",
+    "owner": "App.UpgradeDeepSeekProviderAccess",
+    "sources": [
+      "desktop/settings_app.go"
+    ],
+    "scope": {
+      "kind": "owner-inputs",
+      "resolver": "App.UpgradeDeepSeekProviderAccess",
+      "inputs": [
+        "name"
+      ]
+    }
+  },
+  "UsageStats": {
+    "domain": "desktop/stats_app.go",
+    "owner": "App.UsageStats",
+    "sources": [
+      "desktop/stats_app.go"
+    ],
+    "scope": {
+      "kind": "owner-inputs",
+      "resolver": "App.UsageStats",
+      "inputs": [
+        "req"
+      ]
+    }
+  },
+  "Version": {
+    "domain": "desktop/updater_app.go",
+    "owner": "App.Version",
+    "sources": [
+      "desktop/updater_app.go"
+    ],
+    "scope": {
+      "kind": "owner-state",
+      "resolver": "App.Version",
+      "inputs": []
+    }
+  },
+  "WorkspaceChangeDetail": {
+    "domain": "desktop/workspace_changes.go",
+    "owner": "App.WorkspaceChangeDetail",
+    "sources": [
+      "desktop/workspace_changes.go"
+    ],
+    "scope": {
+      "kind": "owner-inputs",
+      "resolver": "App.WorkspaceChangeDetail",
+      "inputs": [
+        "tabID",
+        "path"
+      ]
+    }
+  },
+  "WorkspaceChanges": {
+    "domain": "desktop/workspace_changes.go",
+    "owner": "App.WorkspaceChanges",
+    "sources": [
+      "desktop/workspace_changes.go"
+    ],
+    "scope": {
+      "kind": "owner-inputs",
+      "resolver": "App.WorkspaceChanges",
+      "inputs": [
+        "tabID"
+      ]
+    }
+  },
+  "WorkspaceConflictForTab": {
+    "domain": "desktop/background_runtime.go",
+    "owner": "App.WorkspaceConflictForTab",
+    "sources": [
+      "desktop/background_runtime.go"
+    ],
+    "scope": {
+      "kind": "owner-inputs",
+      "resolver": "App.WorkspaceConflictForTab",
+      "inputs": [
+        "tabID"
+      ]
+    }
+  },
+  "WorkspaceGitCommitDetail": {
+    "domain": "desktop/workspace_changes.go",
+    "owner": "App.WorkspaceGitCommitDetail",
+    "sources": [
+      "desktop/workspace_changes.go"
+    ],
+    "scope": {
+      "kind": "owner-inputs",
+      "resolver": "App.WorkspaceGitCommitDetail",
+      "inputs": [
+        "tabID",
+        "hash",
+        "path"
+      ]
+    }
+  },
+  "WorkspaceGitHistory": {
+    "domain": "desktop/workspace_changes.go",
+    "owner": "App.WorkspaceGitHistory",
+    "sources": [
+      "desktop/workspace_changes.go"
+    ],
+    "scope": {
+      "kind": "owner-inputs",
+      "resolver": "App.WorkspaceGitHistory",
+      "inputs": [
+        "tabID",
+        "path"
+      ]
+    }
+  },
+  "WorkspaceGitStatsForTab": {
+    "domain": "desktop/workspace_git_branches.go",
+    "owner": "App.WorkspaceGitStatsForTab",
+    "sources": [
+      "desktop/workspace_git_branches.go"
+    ],
+    "scope": {
+      "kind": "owner-inputs",
+      "resolver": "App.WorkspaceGitStatsForTab",
+      "inputs": [
+        "tabID",
+        "workspaceRoot"
+      ]
+    }
+  },
+  "WorkspaceRevisionForTab": {
+    "domain": "desktop/workspace_watch.go",
+    "owner": "App.WorkspaceRevisionForTab",
+    "sources": [
+      "desktop/workspace_watch.go"
+    ],
+    "scope": {
+      "kind": "owner-inputs",
+      "resolver": "App.WorkspaceRevisionForTab",
+      "inputs": [
+        "tabID"
+      ]
+    }
+  },
+  "WorkspaceTurnChangeDetail": {
+    "domain": "desktop/workspace_turn_changes.go",
+    "owner": "App.WorkspaceTurnChangeDetail",
+    "sources": [
+      "desktop/workspace_turn_changes.go"
+    ],
+    "scope": {
+      "kind": "owner-inputs",
+      "resolver": "App.WorkspaceTurnChangeDetail",
+      "inputs": [
+        "tabID",
+        "sessionPath",
+        "turn",
+        "resultID",
+        "path"
+      ]
+    }
+  },
+  "WorkspaceTurnChanges": {
+    "domain": "desktop/workspace_turn_changes.go",
+    "owner": "App.WorkspaceTurnChanges",
+    "sources": [
+      "desktop/workspace_turn_changes.go"
+    ],
+    "scope": {
+      "kind": "owner-inputs",
+      "resolver": "App.WorkspaceTurnChanges",
+      "inputs": [
+        "tabID",
+        "sessionPath",
+        "turn",
+        "resultID"
+      ]
+    }
+  },
+  "WriteRemoteFile": {
+    "domain": "desktop/remote_app.go",
+    "owner": "App.WriteRemoteFile",
+    "sources": [
+      "desktop/remote_app.go"
+    ],
+    "scope": {
+      "kind": "owner-inputs",
+      "resolver": "App.WriteRemoteFile",
+      "inputs": [
+        "hostID",
+        "path",
+        "body",
+        "expectMtimeUnix"
+      ]
+    }
+  },
+  "WriteTerminalForTab": {
+    "domain": "desktop/terminal_worktree_admission.go",
+    "owner": "App.WriteTerminalForTab",
+    "sources": [
+      "desktop/terminal_worktree_admission.go"
+    ],
+    "scope": {
+      "kind": "owner-inputs",
+      "resolver": "App.WriteTerminalForTab",
+      "inputs": [
+        "tabID",
+        "sessionID",
+        "data"
+      ]
+    }
+  }
+}

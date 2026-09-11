@@ -145,6 +145,92 @@ func TestReplaceFileCrossDeviceCopiesImmediately(t *testing.T) {
 	}
 }
 
+func TestAtomicWriteFileStrictSyncsParentDir(t *testing.T) {
+	calls := 0
+	restore := SetSyncParentDirForTest(func(path string) error {
+		calls++
+		return syncParentDir(path)
+	})
+	t.Cleanup(restore)
+
+	dir := t.TempDir()
+	dest := filepath.Join(dir, "pointer.json")
+	if err := AtomicWriteFileStrict(dest, []byte(`{"ok":true}`), 0o644); err != nil {
+		t.Fatalf("AtomicWriteFileStrict: %v", err)
+	}
+	if calls != 1 {
+		t.Fatalf("parent dir sync calls = %d, want 1", calls)
+	}
+	if got, err := os.ReadFile(dest); err != nil || string(got) != `{"ok":true}` {
+		t.Fatalf("dest = %q, err=%v", got, err)
+	}
+}
+
+func TestAtomicWriteFileStrictDirSyncFailureStillPublishes(t *testing.T) {
+	// Rename already committed the new file; dir fsync failure must not look
+	// like a pre-publish failure or callers will fork memory from disk.
+	restore := SetSyncParentDirForTest(func(string) error {
+		return errors.New("injected parent dir fsync failure")
+	})
+	t.Cleanup(restore)
+
+	dir := t.TempDir()
+	dest := filepath.Join(dir, "pointer.json")
+	if err := os.WriteFile(dest, []byte("old"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := AtomicWriteFileStrict(dest, []byte("new"), 0o644); err != nil {
+		t.Fatalf("post-publish dir sync must not fail the write: %v", err)
+	}
+	if got, err := os.ReadFile(dest); err != nil || string(got) != "new" {
+		t.Fatalf("dest = %q, err=%v, want published new content", got, err)
+	}
+}
+
+func TestAtomicWriteFileStrictSyncsRelativeParentDir(t *testing.T) {
+	// Relative destinations resolve to "."; that parent must still be synced.
+	cwd, err := os.Getwd()
+	if err != nil {
+		t.Fatal(err)
+	}
+	dir := t.TempDir()
+	if err := os.Chdir(dir); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = os.Chdir(cwd) })
+
+	synced := ""
+	restore := SetSyncParentDirForTest(func(path string) error {
+		synced = filepath.Dir(path)
+		return syncParentDir(path)
+	})
+	t.Cleanup(restore)
+
+	if err := AtomicWriteFileStrict("pointer.json", []byte(`{"ok":true}`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if synced != "." {
+		t.Fatalf("synced parent = %q, want \".\"", synced)
+	}
+	if got, err := os.ReadFile("pointer.json"); err != nil || string(got) != `{"ok":true}` {
+		t.Fatalf("dest = %q, err=%v", got, err)
+	}
+}
+
+func TestAtomicWriteFileDoesNotRequireParentDirSync(t *testing.T) {
+	// Non-strict path keeps the historical file-only durability contract.
+	restore := SetSyncParentDirForTest(func(string) error {
+		t.Fatal("AtomicWriteFile must not require parent-dir sync")
+		return nil
+	})
+	t.Cleanup(restore)
+
+	path := filepath.Join(t.TempDir(), "config.toml")
+	if err := AtomicWriteFile(path, []byte("ok"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+}
+
 func TestAtomicWriteFileStrictCrossDeviceKeepsExistingDestination(t *testing.T) {
 	oldRename := renameFile
 	renameFile = func(oldpath, newpath string) error {
@@ -268,5 +354,107 @@ func TestAtomicCreateFilePublishesCompleteContent(t *testing.T) {
 	}
 	if got, err := os.ReadFile(path); err != nil || string(got) != "confirmed" {
 		t.Fatalf("created target = %q, %v", got, err)
+	}
+}
+
+func TestAtomicOverwriteFileKeepsExecutableBit(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("windows does not carry a POSIX executable bit")
+	}
+	path := filepath.Join(t.TempDir(), "build.sh")
+	if err := os.WriteFile(path, []byte("#!/bin/sh\nold\n"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := AtomicOverwriteFile(path, []byte("#!/bin/sh\nnew\n"), 0o644); err != nil {
+		t.Fatalf("AtomicOverwriteFile: %v", err)
+	}
+	info, err := os.Stat(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if perm := info.Mode().Perm(); perm != 0o755 {
+		t.Fatalf("perm = %o, want 755 — the script lost its executable bit", perm)
+	}
+}
+
+func TestAtomicOverwriteFileWritesThroughSymlink(t *testing.T) {
+	dir := t.TempDir()
+	target := filepath.Join(dir, "real.txt")
+	link := filepath.Join(dir, "link.txt")
+	if err := os.WriteFile(target, []byte("old"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(target, link); err != nil {
+		t.Skipf("symlinks unavailable: %v", err)
+	}
+
+	if err := AtomicOverwriteFile(link, []byte("new"), 0o644); err != nil {
+		t.Fatalf("AtomicOverwriteFile: %v", err)
+	}
+	if info, err := os.Lstat(link); err != nil || info.Mode()&os.ModeSymlink == 0 {
+		t.Fatalf("link was replaced by a regular file: mode=%v err=%v", info.Mode(), err)
+	}
+	if got, err := os.ReadFile(target); err != nil || string(got) != "new" {
+		t.Fatalf("target content = %q, %v — the write did not reach the link target", got, err)
+	}
+}
+
+func TestAtomicOverwriteFileUsesDefaultPermForNewFile(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "fresh.txt")
+	if err := AtomicOverwriteFile(path, []byte("x"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	info, err := os.Stat(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if perm := info.Mode().Perm(); runtime.GOOS != "windows" && perm != 0o600 {
+		t.Fatalf("perm = %o, want 600", perm)
+	}
+}
+
+// The claim's whole value is that exactly one caller can win it, so the copy
+// fallback ReplaceFile takes for undoable renames must never apply here: a copy
+// would leave both claimants holding the record.
+func TestClaimRenameNeverFallsBackToCopy(t *testing.T) {
+	oldBase, oldMax := replaceRetryBase, maxReplaceRetries
+	replaceRetryBase, maxReplaceRetries = 0, 2
+	t.Cleanup(func() { replaceRetryBase, maxReplaceRetries = oldBase, oldMax })
+
+	dir := t.TempDir()
+	src := filepath.Join(dir, "record.json")
+	if err := os.WriteFile(src, []byte("payload"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	dst := filepath.Join(dir, "blocked")
+	if err := os.Mkdir(dst, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := ClaimRename(src, dst); err == nil {
+		t.Fatal("want an error when the claim cannot rename")
+	}
+	if entries, err := os.ReadDir(dst); err != nil || len(entries) != 0 {
+		t.Fatalf("destination directory = %v, %v — the claim copied into it", entries, err)
+	}
+	if got, err := os.ReadFile(src); err != nil || string(got) != "payload" {
+		t.Fatalf("source = %q, %v — a failed claim must leave the record in place", got, err)
+	}
+}
+
+// A source that has already been claimed by someone else is the loser of a
+// race, not a lock worth waiting out.
+func TestClaimRenameDoesNotRetryWhenSourceIsGone(t *testing.T) {
+	oldBase := replaceRetryBase
+	replaceRetryBase = 10 * time.Second
+	t.Cleanup(func() { replaceRetryBase = oldBase })
+
+	dir := t.TempDir()
+	start := time.Now()
+	err := ClaimRename(filepath.Join(dir, "taken.json"), filepath.Join(dir, "taken.json.claimed"))
+	if err == nil {
+		t.Fatal("want an error when the record is already claimed")
+	}
+	if elapsed := time.Since(start); elapsed > time.Second {
+		t.Errorf("lost claim took %v — it retried a race it had already lost", elapsed)
 	}
 }

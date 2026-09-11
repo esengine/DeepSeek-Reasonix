@@ -10,7 +10,7 @@ import (
 	"testing"
 )
 
-// --- write_file extended tests ---
+// write_file extended tests
 
 func TestWriteFileCreatesParentDirs(t *testing.T) {
 	dir := t.TempDir()
@@ -29,6 +29,27 @@ func TestWriteFileOverwrites(t *testing.T) {
 	got, _ := os.ReadFile(f)
 	if string(got) != "new" {
 		t.Errorf("after overwrite = %q", got)
+	}
+}
+
+func TestWriteFileRecordsLocalPrior(t *testing.T) {
+	f := filepath.Join(t.TempDir(), "receipt.txt")
+	if err := os.WriteFile(f, []byte("old"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	var gotPath string
+	var gotPrior []byte
+	var gotHadPrior bool
+	w := writeFile{receipt: func(path string, hadPrior bool, prior []byte) {
+		gotPath = path
+		gotHadPrior = hadPrior
+		gotPrior = append([]byte(nil), prior...)
+	}}
+	if _, err := w.Execute(context.Background(), argsJSON(t, map[string]any{"path": f, "content": "new"})); err != nil {
+		t.Fatal(err)
+	}
+	if gotPath != f || !gotHadPrior || string(gotPrior) != "old" {
+		t.Fatalf("receipt = path:%q hadPrior:%v prior:%q", gotPath, gotHadPrior, gotPrior)
 	}
 }
 
@@ -81,7 +102,7 @@ func TestWriteFileInvalidArgs(t *testing.T) {
 	}
 }
 
-// --- move_file tests ---
+// move_file tests
 
 func TestMoveFileMovesIntoParentDir(t *testing.T) {
 	dir := t.TempDir()
@@ -244,7 +265,7 @@ func TestMoveFileFallsBackForCrossDeviceRename(t *testing.T) {
 	}
 }
 
-// --- edit_file extended tests ---
+// edit_file extended tests
 
 func TestEditFileNotFound(t *testing.T) {
 	f := filepath.Join(t.TempDir(), "missing.txt")
@@ -392,7 +413,7 @@ func TestEditFileInvalidArgs(t *testing.T) {
 	}
 }
 
-// --- multi_edit extended tests ---
+// multi_edit extended tests
 
 func TestMultiEditEmptyEdits(t *testing.T) {
 	f := filepath.Join(t.TempDir(), "a.txt")
@@ -506,7 +527,7 @@ func TestMultiEditChained(t *testing.T) {
 	}
 }
 
-// --- confine tests ---
+// confine tests
 
 func TestConfineRejectsEscape(t *testing.T) {
 	dir := t.TempDir()
@@ -534,7 +555,7 @@ func TestConfineEmptyRootsAllowsAll(t *testing.T) {
 	}
 }
 
-// --- resolveIn tests ---
+// resolveIn tests
 
 func TestResolveInAbsolute(t *testing.T) {
 	abs := filepath.Join(t.TempDir(), "absolute", "path")

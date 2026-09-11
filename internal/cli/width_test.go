@@ -37,7 +37,7 @@ func TestVisibleWidthGraphemeClusters(t *testing.T) {
 // preserves ANSI escapes as zero width, and leaves in-width lines untouched.
 func TestClampWidthHardwrap(t *testing.T) {
 	// CJK hard-breaks at the column boundary (each is 2 cols); no line over width.
-	for _, line := range strings.Split(clampWidth("中文字", 4), "\n") {
+	for line := range strings.SplitSeq(clampWidth("中文字", 4), "\n") {
 		if visibleWidth(line) > 4 {
 			t.Errorf("cjk line %q exceeds width 4 (got %d)", line, visibleWidth(line))
 		}
@@ -55,7 +55,7 @@ func TestClampWidthHardwrap(t *testing.T) {
 	}
 
 	// Every wrapped line stays within the column budget.
-	for _, line := range strings.Split(clampWidth(strings.Repeat("中", 10), 6), "\n") {
+	for line := range strings.SplitSeq(clampWidth(strings.Repeat("中", 10), 6), "\n") {
 		if visibleWidth(line) > 6 {
 			t.Errorf("line %q exceeds width 6 (got %d)", line, visibleWidth(line))
 		}

@@ -2,10 +2,13 @@
 package doctor
 
 import (
+	"bufio"
+	"encoding/json"
 	"fmt"
 	"io"
 	"net/url"
 	"os"
+	"os/user"
 	"path/filepath"
 	"runtime"
 	"strings"
@@ -73,10 +76,32 @@ type LSPReport struct {
 }
 
 type SessionsReport struct {
-	Dir   string `json:"dir,omitempty"`
-	Count int    `json:"count"`
-	Bytes int64  `json:"bytes"`
-	Error string `json:"error,omitempty"`
+	Dir      string                  `json:"dir,omitempty"`
+	Count    int                     `json:"count"`
+	Bytes    int64                   `json:"bytes"`
+	Recovery RecoveryLifecycleReport `json:"recovery"`
+	Error    string                  `json:"error,omitempty"`
+}
+
+// RecoveryLifecycleReport contains aggregate-only local diagnostics. It never
+// copies session paths, topic IDs, titles, previews, or message content from
+// the per-session conflict logs into a shareable doctor report.
+type RecoveryLifecycleReport struct {
+	Events                    int `json:"events"`
+	PhysicalVersionsCreated   int `json:"physical_versions_created"`
+	DiskAdoptions             int `json:"disk_adoptions"`
+	ShutdownRecoveries        int `json:"shutdown_recoveries"`
+	ClassifiedCovered         int `json:"classified_covered"`
+	ClassifiedAdopted         int `json:"classified_adopted"`
+	ClassifiedPreferred       int `json:"classified_preferred"`
+	ClassifiedDiverged        int `json:"classified_diverged"`
+	CleanupMoved              int `json:"cleanup_moved"`
+	CleanupKept               int `json:"cleanup_kept"`
+	CleanupSkippedInUse       int `json:"cleanup_skipped_in_use"`
+	CleanupRevalidationFailed int `json:"cleanup_revalidation_failed"`
+	RepeatedEvents            int `json:"repeated_events"`
+	MaxTopicOccurrences       int `json:"max_topic_occurrences"`
+	InvalidRecords            int `json:"invalid_records"`
 }
 
 type SandboxReport struct {
@@ -148,6 +173,12 @@ func Collect(opts Options) Report {
 	if bashConfigIgnored {
 		warnings = append(warnings, `config requests [sandbox] bash = "enforce", but Windows does not provide an OS-level Bash sandbox; the setting is fixed to "off" and bash runs unconfined`)
 	}
+	// Supervised deployments sometimes override HOME onto a service config dir
+	// while Reasonix isolation should use REASONIX_HOME. Do not rewrite
+	// subprocess HOME automatically (#7600 rejected); surface the mismatch.
+	if warn := homeIsolationWarning(); warn != "" {
+		warnings = append(warnings, warn)
+	}
 	report := Report{
 		Version: opts.Version,
 		OS:      runtime.GOOS,
@@ -185,13 +216,14 @@ func Collect(opts Options) Report {
 		Warnings: warnings,
 	}
 	// Skill / MCP capability health (optional diagnostics; never fail doctor).
-	if skStore := skill.New(skill.Options{ProjectRoot: cwd}); skStore != nil {
+	if skStore := skill.DiagnosticStore(cwd, "", "", cfg); skStore != nil {
 		report.Warnings = append(report.Warnings, CollectSkillHealthWarnings(SkillHealthOptions{
 			Skills:  skStore.List(),
 			Plugins: cfg.Plugins,
 		})...)
 	}
 	report.Sessions.Dir = redactHome(report.Sessions.Dir)
+	report.Warnings = appendRecoveryWarnings(report.Warnings, report.Sessions.Recovery)
 	for i := range cfg.Providers {
 		p := cfg.Providers[i]
 		models := p.ModelList()
@@ -220,6 +252,13 @@ func Collect(opts Options) Report {
 		})
 	}
 	return report
+}
+
+func appendRecoveryWarnings(warnings []string, recovery RecoveryLifecycleReport) []string {
+	if recovery.RepeatedEvents == 0 {
+		return warnings
+	}
+	return append(warnings, "the same logical session produced repeated recovery events in one application run; treat this as a high-priority concurrent-writer signal")
 }
 
 func RenderText(r Report) string {
@@ -269,6 +308,25 @@ func RenderText(r Report) string {
 	fmt.Fprintf(&b, "  dir          %s\n", valueOr(r.Sessions.Dir, "unavailable"))
 	fmt.Fprintf(&b, "  saved        %d\n", r.Sessions.Count)
 	fmt.Fprintf(&b, "  bytes        %d\n", r.Sessions.Bytes)
+	fmt.Fprintf(&b, "  recovery     %d events, %d versions created, %d disk adoptions, %d shutdown recoveries\n",
+		r.Sessions.Recovery.Events, r.Sessions.Recovery.PhysicalVersionsCreated,
+		r.Sessions.Recovery.DiskAdoptions, r.Sessions.Recovery.ShutdownRecoveries)
+	if classified := r.Sessions.Recovery.ClassifiedCovered + r.Sessions.Recovery.ClassifiedAdopted +
+		r.Sessions.Recovery.ClassifiedPreferred + r.Sessions.Recovery.ClassifiedDiverged; classified > 0 {
+		fmt.Fprintf(&b, "  recovery classifications  covered:%d adopted:%d preferred:%d diverged:%d\n",
+			r.Sessions.Recovery.ClassifiedCovered, r.Sessions.Recovery.ClassifiedAdopted,
+			r.Sessions.Recovery.ClassifiedPreferred, r.Sessions.Recovery.ClassifiedDiverged)
+	}
+	if cleanup := r.Sessions.Recovery.CleanupMoved + r.Sessions.Recovery.CleanupKept +
+		r.Sessions.Recovery.CleanupSkippedInUse + r.Sessions.Recovery.CleanupRevalidationFailed; cleanup > 0 {
+		fmt.Fprintf(&b, "  recovery cleanup  moved:%d kept:%d in-use:%d revalidation-failed:%d\n",
+			r.Sessions.Recovery.CleanupMoved, r.Sessions.Recovery.CleanupKept,
+			r.Sessions.Recovery.CleanupSkippedInUse, r.Sessions.Recovery.CleanupRevalidationFailed)
+	}
+	if r.Sessions.Recovery.RepeatedEvents > 0 {
+		fmt.Fprintf(&b, "  recovery concurrency signal  %d repeated events (max topic occurrence %d)\n",
+			r.Sessions.Recovery.RepeatedEvents, r.Sessions.Recovery.MaxTopicOccurrences)
+	}
 	if r.Sessions.Error != "" {
 		fmt.Fprintf(&b, "  warning      %s\n", r.Sessions.Error)
 	}
@@ -328,7 +386,75 @@ func collectSessions(dir string) SessionsReport {
 	}); err != nil && !os.IsNotExist(err) {
 		r.Error = err.Error()
 	}
+	r.Recovery = collectRecoveryLifecycle(dir)
 	return r
+}
+
+type recoveryLifecycleRecord struct {
+	Outcome          string `json:"outcome"`
+	ExistingRecovery bool   `json:"existing_recovery"`
+	Occurrence       int    `json:"occurrence"`
+	Repeated         bool   `json:"repeated_in_process"`
+}
+
+func collectRecoveryLifecycle(dir string) RecoveryLifecycleReport {
+	report := RecoveryLifecycleReport{}
+	_ = filepath.WalkDir(dir, func(path string, entry os.DirEntry, walkErr error) error {
+		if walkErr != nil || entry.IsDir() || !strings.HasSuffix(entry.Name(), ".conflicts.jsonl") {
+			return nil
+		}
+		file, err := os.Open(path)
+		if err != nil {
+			return nil
+		}
+		defer file.Close()
+		scanner := bufio.NewScanner(file)
+		for scanner.Scan() {
+			var record recoveryLifecycleRecord
+			if err := json.Unmarshal(scanner.Bytes(), &record); err != nil || strings.TrimSpace(record.Outcome) == "" {
+				report.InvalidRecords++
+				continue
+			}
+			report.Events++
+			switch record.Outcome {
+			case "forked_recovery_branch", "forked_file_lock_recovery", "moved_to_stable_recovery":
+				if !record.ExistingRecovery {
+					report.PhysicalVersionsCreated++
+				}
+			case "classified_covered":
+				report.ClassifiedCovered++
+			case "classified_adopted":
+				report.ClassifiedAdopted++
+			case "classified_preferred":
+				report.ClassifiedPreferred++
+			case "classified_diverged":
+				report.ClassifiedDiverged++
+			case "cleanup_moved":
+				report.CleanupMoved++
+			case "cleanup_kept":
+				report.CleanupKept++
+			case "cleanup_skipped_in_use":
+				report.CleanupSkippedInUse++
+			case "cleanup_revalidation_failed":
+				report.CleanupRevalidationFailed++
+			}
+			if record.Outcome == "adopted_newer_disk_transcript" ||
+				record.Outcome == "recovery_not_needed_adopted_disk_transcript" {
+				report.DiskAdoptions++
+			}
+			if record.Outcome == "forked_file_lock_recovery" {
+				report.ShutdownRecoveries++
+			}
+			if record.Repeated || record.Occurrence > 1 {
+				report.RepeatedEvents++
+			}
+			if record.Occurrence > report.MaxTopicOccurrences {
+				report.MaxTopicOccurrences = record.Occurrence
+			}
+		}
+		return nil
+	})
+	return report
 }
 
 func pluginTarget(p config.PluginEntry) string {
@@ -357,6 +483,46 @@ func valueOr(s, fallback string) string {
 		return fallback
 	}
 	return s
+}
+
+// homeIsolationWarning detects a process HOME that differs from the OS account
+// home while REASONIX_HOME is unset. Services should keep the real account HOME
+// and isolate Reasonix state with REASONIX_HOME instead of rewriting HOME.
+func homeIsolationWarning() string {
+	if strings.TrimSpace(os.Getenv("REASONIX_HOME")) != "" {
+		return ""
+	}
+	envHome := strings.TrimSpace(os.Getenv("HOME"))
+	if envHome == "" {
+		// Windows services often set USERPROFILE rather than HOME.
+		envHome = strings.TrimSpace(os.Getenv("USERPROFILE"))
+	}
+	if envHome == "" {
+		return ""
+	}
+	acct, err := user.Current()
+	if err != nil || acct == nil || strings.TrimSpace(acct.HomeDir) == "" {
+		return ""
+	}
+	envClean := filepath.Clean(envHome)
+	acctClean := filepath.Clean(acct.HomeDir)
+	if samePathFold(envClean, acctClean) {
+		return ""
+	}
+	// Do not embed either absolute path: when HOME is overridden, redactHome
+	// cannot mask the account home, and shareable doctor output must stay free
+	// of machine-local identity.
+	return "process HOME differs from the OS account home; keep the real account HOME for services and isolate Reasonix with REASONIX_HOME"
+}
+
+func samePathFold(a, b string) bool {
+	if a == b {
+		return true
+	}
+	if runtime.GOOS == "windows" {
+		return strings.EqualFold(a, b)
+	}
+	return false
 }
 
 // redactHome rewrites a path under the user's home directory to start with "~",

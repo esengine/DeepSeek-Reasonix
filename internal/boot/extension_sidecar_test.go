@@ -23,7 +23,7 @@ import (
 
 // Boot-level fake sidecar (re-exec helper-process pattern, mirroring the
 // sidecar package's own tests): the boot test binary re-executes itself with
-// REASONIX_BOOT_FAKE_SIDECAR=1 and speaks Extension Protocol v1 over
+// REASONIX_BOOT_FAKE_SIDECAR=1 and speaks Extension Protocol v2 over
 // stdin/stdout. REASONIX_BOOT_FAKE_INIT_RESULT overrides the initialize
 // result; REASONIX_BOOT_FAKE_MODE=ignore_shutdown keeps the process alive
 // through extension/shutdown. Intercept steering for the dispatch tests:
@@ -82,7 +82,7 @@ func TestExtensionFakeSidecarHelperProcess(t *testing.T) {
 
 func runBootFakeSidecar(stdin io.Reader, stdout io.Writer) {
 	if pidFile := strings.TrimSpace(os.Getenv(bootFakeEnvPIDFile)); pidFile != "" {
-		_ = os.WriteFile(pidFile, []byte(fmt.Sprintf("%d", os.Getpid())), 0o644)
+		_ = os.WriteFile(pidFile, fmt.Appendf(nil, "%d", os.Getpid()), 0o644)
 	}
 	if os.Getenv(bootFakeEnvExitImmediately) == "1" {
 		os.Exit(0)
@@ -103,10 +103,10 @@ func runBootFakeSidecar(stdin io.Reader, stdout io.Writer) {
 	}
 	initResult := strings.TrimSpace(os.Getenv(bootFakeEnvInitResult))
 	if initResult == "" && providerMode {
-		initResult = fmt.Sprintf(`{"protocolVersion":"1","name":"boot-fake","version":"1.0.0","stateSchemaVersion":0,"providers":[%s]}`, providerDescriptor())
+		initResult = fmt.Sprintf(`{"protocolVersion":"2","name":"boot-fake","version":"1.0.0","stateSchemaVersion":0,"providers":[%s]}`, providerDescriptor())
 	}
 	if initResult == "" {
-		initResult = `{"protocolVersion":"1","name":"boot-fake","version":"1.0.0","stateSchemaVersion":0}`
+		initResult = `{"protocolVersion":"2","name":"boot-fake","version":"1.0.0","stateSchemaVersion":0}`
 	}
 	ignoreShutdown := os.Getenv(bootFakeEnvMode) == "ignore_shutdown"
 
@@ -264,7 +264,7 @@ func bootFakeLogEvent(rawParams json.RawMessage) {
 	fmt.Fprintf(f, "%s %s\n", params.Event, string(params.Payload))
 }
 
-// installBootFakePlugin installs an enabled v1 runtime package (the
+// installBootFakePlugin installs an enabled v2 runtime package (the
 // re-executed test binary) into the pluginpkg state under home.
 func installBootFakePlugin(t *testing.T, home, name string, runtime map[string]any) {
 	t.Helper()
@@ -290,7 +290,7 @@ func installBootFakePlugin(t *testing.T, home, name string, runtime map[string]a
 		t.Fatalf("MkdirAll: %v", err)
 	}
 	manifest, err := json.Marshal(map[string]any{
-		"apiVersion": pluginpkg.ManifestAPIVersionV1,
+		"apiVersion": pluginpkg.ManifestAPIVersionV2,
 		"name":       name,
 		"version":    "1.0.0",
 		"runtime":    runtime,
@@ -325,6 +325,38 @@ func bootWithFakePlugin(t *testing.T, name string, runtime map[string]any) *Buil
 	return res
 }
 
+func TestBootIsolatesIncompatibleExternalPlugin(t *testing.T) {
+	isolateConfigHome(t)
+	dir := robustTempDir(t)
+	t.Chdir(dir)
+	writeRuntimeFixture(t, dir)
+
+	root := robustTempDir(t)
+	if err := os.WriteFile(filepath.Join(root, pluginpkg.NativeManifest), []byte(`{"name":"irmia-devkit","version":"1.0.0"}`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	home := config.ReasonixHomeDir()
+	if err := pluginpkg.Upsert(home, pluginpkg.InstalledPlugin{Name: "irmia-devkit", Root: root, Enabled: true}); err != nil {
+		t.Fatal(err)
+	}
+
+	res, err := BuildRuntime(context.Background(), Options{})
+	if err != nil {
+		t.Fatalf("incompatible plugin blocked core controller: %v", err)
+	}
+	t.Cleanup(res.Controller.Close)
+	if res.Controller == nil || res.Extensions != nil {
+		t.Fatalf("build result = %#v, want core controller without extensions", res)
+	}
+	state, err := pluginpkg.LoadState(home)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(state.Plugins) != 1 || state.Plugins[0].Status != pluginpkg.PluginStatusDisabledIncompatible {
+		t.Fatalf("plugin state = %#v", state.Plugins)
+	}
+}
+
 func TestBootStartsExtensionSidecar(t *testing.T) {
 	res := bootWithFakePlugin(t, "bootplugin", map[string]any{
 		"intercepts": []string{"input.receive"},
@@ -332,8 +364,8 @@ func TestBootStartsExtensionSidecar(t *testing.T) {
 	if res.Extensions == nil {
 		t.Fatal("BuildRuntime returned no extension manager")
 	}
-	if res.Runtime == nil || res.Runtime.Len() != 1 {
-		t.Fatalf("runtime set holds %d closers, want 1 (the sidecar manager)", res.Runtime.Len())
+	if res.Runtime == nil || res.Runtime.Len() < 1 {
+		t.Fatalf("runtime set holds %d effects, want at least the sidecar manager", res.Runtime.Len())
 	}
 	client := res.Extensions.Client("bootplugin")
 	if client == nil {
@@ -409,7 +441,8 @@ func TestBootFailsWhenRequiredRuntimeFails(t *testing.T) {
 	writeRuntimeFixture(t, dir)
 	installBootFakePlugin(t, config.ReasonixHomeDir(), "required-broken", map[string]any{
 		"required": true,
-		"env":      map[string]string{bootFakeEnvInitResult: `{"protocolVersion":"2","name":"x","version":"1","stateSchemaVersion":0}`},
+		// Extension Protocol v1 is rejected by the v2 host.
+		"env": map[string]string{bootFakeEnvInitResult: `{"protocolVersion":"1","name":"x","version":"1","stateSchemaVersion":0}`},
 	})
 	_, err := BuildRuntime(context.Background(), Options{})
 	if err == nil {
@@ -423,7 +456,7 @@ func TestBootFailsWhenRequiredRuntimeFails(t *testing.T) {
 
 func TestBootOptionalRuntimeFailureDegradesToWarning(t *testing.T) {
 	res := bootWithFakePlugin(t, "optional-broken", map[string]any{
-		"env": map[string]string{bootFakeEnvInitResult: `{"protocolVersion":"2","name":"x","version":"1","stateSchemaVersion":0}`},
+		"env": map[string]string{bootFakeEnvInitResult: `{"protocolVersion":"1","name":"x","version":"1","stateSchemaVersion":0}`},
 	})
 	// Optional failure: boot succeeds, no manager, empty runtime set.
 	if res.Extensions != nil {
@@ -476,6 +509,112 @@ func TestRebuildRetiresOldSidecars(t *testing.T) {
 
 	newRes.Controller.Close()
 	waitForCond(t, "new sidecar exit", 10*time.Second, newClient.Exited)
+}
+
+// TestExplicitReloadReplacesUnchangedSidecar pins the linked-development
+// contract: a user-requested reload must start a fresh process even when the
+// manifest graph is unchanged. The provider-visible prefix stays stable when
+// the replacement contributes identical bytes.
+func TestExplicitReloadReplacesUnchangedSidecar(t *testing.T) {
+	isolateConfigHome(t)
+	dir := robustTempDir(t)
+	t.Chdir(dir)
+	writeRuntimeFixture(t, dir)
+	pidFile := filepath.Join(dir, "linked-sidecar.pid")
+	installBootFakePlugin(t, config.ReasonixHomeDir(), "linkedplugin", map[string]any{
+		"env": map[string]string{bootFakeEnvPIDFile: pidFile},
+	})
+
+	oldRes, err := BuildRuntime(context.Background(), Options{})
+	if err != nil {
+		t.Fatalf("BuildRuntime: %v", err)
+	}
+	oldPID := readFakePID(t, pidFile)
+	if err := os.Remove(pidFile); err != nil {
+		oldRes.Controller.Close()
+		t.Fatalf("remove first-generation PID file: %v", err)
+	}
+	newRes, err := RebuildFrom(context.Background(), oldRes, Options{
+		RuntimeReload: RuntimeReload{ForceFullRebuild: true},
+	})
+	if err != nil {
+		oldRes.Controller.Close()
+		t.Fatalf("RebuildFrom: %v", err)
+	}
+	t.Cleanup(newRes.Controller.Close)
+
+	oldClient := oldRes.Extensions.Client("linkedplugin")
+	newClient := newRes.Extensions.Client("linkedplugin")
+	if oldClient == nil || newClient == nil {
+		t.Fatal("both generations must have a sidecar client")
+	}
+	if oldClient == newClient {
+		t.Fatal("explicit reload adopted the outgoing sidecar instead of starting a replacement")
+	}
+	newPID := readFakePID(t, pidFile)
+	if newPID == oldPID {
+		t.Fatalf("explicit reload kept sidecar PID %d", oldPID)
+	}
+	if oldClient.Exited() {
+		t.Fatal("outgoing sidecar exited before the replacement controller published")
+	}
+	if oldRes.Snapshot.CacheHash() != newRes.Snapshot.CacheHash() {
+		t.Fatalf("unchanged extension bytes changed cache hash: old=%s new=%s", oldRes.Snapshot.CacheHash(), newRes.Snapshot.CacheHash())
+	}
+
+	oldRes.Controller.Close()
+	waitForCond(t, "outgoing sidecar exit", 10*time.Second, oldClient.Exited)
+	if newClient.Exited() {
+		t.Fatal("replacement sidecar exited with the outgoing controller")
+	}
+}
+
+// TestExplicitReloadSidecarFailureKeepsOldProcess proves that forcing a fresh
+// linked process does not weaken reload failure atomicity. The replacement can
+// fail before publish while the previous process keeps answering requests.
+func TestExplicitReloadSidecarFailureKeepsOldProcess(t *testing.T) {
+	isolateConfigHome(t)
+	dir := robustTempDir(t)
+	t.Chdir(dir)
+	writeRuntimeFixture(t, dir)
+	installBootFakePlugin(t, config.ReasonixHomeDir(), "stable-linked", map[string]any{
+		"required": true,
+	})
+
+	oldRes, err := BuildRuntime(context.Background(), Options{})
+	if err != nil {
+		t.Fatalf("BuildRuntime: %v", err)
+	}
+	t.Cleanup(oldRes.Controller.Close)
+	oldClient := oldRes.Extensions.Client("stable-linked")
+	if oldClient == nil {
+		t.Fatal("first build has no sidecar client")
+	}
+
+	// Keep the declared graph identical while making the linked program fail on
+	// its next launch. Without the explicit-restart instruction, RebuildFrom
+	// would adopt oldClient and incorrectly report success.
+	installBootFakePlugin(t, config.ReasonixHomeDir(), "stable-linked", map[string]any{
+		"required": true,
+		"env":      map[string]string{bootFakeEnvExitImmediately: "1"},
+	})
+	_, err = RebuildFrom(context.Background(), oldRes, Options{
+		RuntimeReload: RuntimeReload{ForceFullRebuild: true},
+	})
+	if err == nil {
+		t.Fatal("explicit reload succeeded after the replacement sidecar failed")
+	}
+	var requiredErr *sidecar.RequiredStartError
+	if !errors.As(err, &requiredErr) {
+		t.Fatalf("reload error %v is not a RequiredStartError", err)
+	}
+	if oldClient.Exited() || oldRes.Runtime.Closed() {
+		t.Fatal("failed explicit reload retired the outgoing runtime")
+	}
+	result, interceptErr := oldClient.Intercept(context.Background(), protocol.EventSessionStart, json.RawMessage(`{}`), 5*time.Second)
+	if interceptErr != nil || result.Decision != protocol.DecisionContinue {
+		t.Fatalf("outgoing sidecar after failed reload = %+v, %v", result, interceptErr)
+	}
 }
 
 func waitForCond(t *testing.T, what string, timeout time.Duration, cond func() bool) {

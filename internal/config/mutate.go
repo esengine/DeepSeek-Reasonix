@@ -8,6 +8,7 @@ import (
 	osuser "os/user"
 	"path/filepath"
 	"runtime"
+	"slices"
 	"sort"
 	"strings"
 	"sync"
@@ -164,16 +165,16 @@ func lockConfigFilesEdits(paths ...string) (func(), error) {
 	unlockFiles := make([]func(), 0, len(lockPaths))
 	for _, lockPath := range lockPaths {
 		if err := os.MkdirAll(filepath.Dir(lockPath), 0o700); err != nil {
-			for i := len(unlockFiles) - 1; i >= 0; i-- {
-				unlockFiles[i]()
+			for _, v := range slices.Backward(unlockFiles) {
+				v()
 			}
 			userEditMu.Unlock()
 			return nil, fmt.Errorf("lock config edits: create lock directory: %w", err)
 		}
 		unlockFile, err := acquireConfigEditLockPath(ctx, lockPath)
 		if err != nil {
-			for i := len(unlockFiles) - 1; i >= 0; i-- {
-				unlockFiles[i]()
+			for _, v := range slices.Backward(unlockFiles) {
+				v()
 			}
 			userEditMu.Unlock()
 			return nil, fmt.Errorf("lock config edits: %w", err)
@@ -186,8 +187,8 @@ func lockConfigFilesEdits(paths ...string) (func(), error) {
 	return func() {
 		once.Do(func() {
 			clearPins()
-			for i := len(unlockFiles) - 1; i >= 0; i-- {
-				unlockFiles[i]()
+			for _, v := range slices.Backward(unlockFiles) {
+				v()
 			}
 			userEditMu.Unlock()
 		})

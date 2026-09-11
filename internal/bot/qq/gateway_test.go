@@ -75,6 +75,35 @@ func TestHandleDispatchC2CUsesUserOpenID(t *testing.T) {
 	}
 }
 
+func TestHandleDispatchPublicGuildMessageUsesGuildChatType(t *testing.T) {
+	a := &adapter{
+		logger: slog.New(slog.NewTextHandler(io.Discard, nil)),
+		msgCh:  make(chan bot.InboundMessage, 1),
+	}
+	raw, err := json.Marshal(map[string]any{
+		"id":         "msg-1",
+		"content":    "hello",
+		"channel_id": "channel-1",
+		"author": map[string]string{
+			"member_openid": "member-1",
+			"username":      "user",
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	a.handleDispatch(gatewayPayload{T: "AT_MESSAGE_CREATE", D: raw})
+
+	msg := <-a.msgCh
+	if msg.ChatType != bot.ChatGuild {
+		t.Fatalf("chat type = %q, want %q", msg.ChatType, bot.ChatGuild)
+	}
+	if msg.ChatID != "channel-1" {
+		t.Fatalf("chat id = %q, want channel-1", msg.ChatID)
+	}
+}
+
 func TestQQSendURLDirectMessage(t *testing.T) {
 	got := qqSendURL(bot.OutboundMessage{ChatType: bot.ChatDirect, ChatID: "guild-1"})
 	want := fmt.Sprintf("%s/v2/dms/%s/messages", qqBaseURL, "guild-1")

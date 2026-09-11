@@ -62,7 +62,7 @@ export function ShortcutsCheatsheet({
   if (!open) return null;
 
   return (
-    <div className="drawer-backdrop shortcuts-cheatsheet-backdrop" onClick={onClose} role="presentation">
+    <div className="drawer-backdrop shortcuts-cheatsheet-backdrop" data-app-overlay="" onClick={onClose} role="presentation">
       <aside
         className="drawer drawer--wide shortcuts-cheatsheet"
         role="dialog"

@@ -24,6 +24,7 @@ func IsSessionTranscriptName(name string) bool {
 	name = strings.TrimSpace(name)
 	return strings.HasSuffix(name, ".jsonl") &&
 		!strings.HasSuffix(name, ".events.jsonl") &&
+		!strings.HasSuffix(name, ".turns.jsonl") &&
 		!strings.HasSuffix(name, ".conflicts.jsonl") &&
 		!strings.HasSuffix(name, ".guardian.jsonl")
 }
@@ -36,6 +37,29 @@ func SessionRecoveryState(sessionPath string) string {
 		return ""
 	}
 	return sessionStem(sessionPath) + ".recovery.json"
+}
+
+// SessionContext is the context-projection / compaction-state sidecar
+// (<id>.context.json). It holds the model-visible projection and cache
+// telemetry; transcript authority remains with the native event log once one
+// exists, with the primary .jsonl retained as its compatibility checkpoint.
+func SessionContext(sessionPath string) string {
+	sessionPath = strings.TrimSpace(sessionPath)
+	if sessionPath == "" {
+		return ""
+	}
+	return sessionStem(sessionPath) + ".context.json"
+}
+
+// SessionPinnedContext is the optional desktop pinned-workspace-context
+// sidecar (<id>.pinned-context.json). Older versions ignore it while keeping
+// the primary transcript fully readable.
+func SessionPinnedContext(sessionPath string) string {
+	sessionPath = strings.TrimSpace(sessionPath)
+	if sessionPath == "" {
+		return ""
+	}
+	return sessionStem(sessionPath) + ".pinned-context.json"
 }
 
 // sessionStem strips the .jsonl suffix so a sidecar sits beside the session as
@@ -82,6 +106,35 @@ func SessionEventLogDamaged(sessionPath string) string {
 	return SessionEventLog(sessionPath) + ".damaged"
 }
 
+// SessionEventLogRotating marks a schema-2 log whose rotation is between
+// reading the old file and publishing the new one; unlocked appenders wait
+// for it to clear before trusting that their bytes reached the current log.
+func SessionEventLogRotating(sessionPath string) string {
+	if sessionPath == "" {
+		return ""
+	}
+	return SessionEventLog(sessionPath) + ".rotating"
+}
+
+// SessionTurnEventLog is the append-only local runtime lifecycle ledger
+// (<id>.turns.jsonl). It is independent from the provider transcript so old
+// readers can continue to consume the primary session unchanged.
+func SessionTurnEventLog(sessionPath string) string {
+	if sessionPath == "" {
+		return ""
+	}
+	return sessionStem(sessionPath) + ".turns.jsonl"
+}
+
+// SessionTurnEventLogDamaged preserves a corrupt/torn ledger tail before the
+// valid prefix is truncated back into service.
+func SessionTurnEventLogDamaged(sessionPath string) string {
+	if sessionPath == "" {
+		return ""
+	}
+	return SessionTurnEventLog(sessionPath) + ".damaged"
+}
+
 // SessionEventIndex is the listing/checkpoint index for the event log
 // (<id>.event-index.json). It contains derived offsets and digests, not the
 // transcript body.
@@ -90,6 +143,17 @@ func SessionEventIndex(sessionPath string) string {
 		return ""
 	}
 	return sessionStem(sessionPath) + ".event-index.json"
+}
+
+// SessionDisplayIndex is the paging sidecar for the transcript
+// (<id>.display-index.json). It contains per-message byte offsets, roles, and
+// turn boundaries derived from the transcript, never message bodies, so a
+// reader can page a huge history without parsing whole session files.
+func SessionDisplayIndex(sessionPath string) string {
+	if sessionPath == "" {
+		return ""
+	}
+	return sessionStem(sessionPath) + ".display-index.json"
 }
 
 // SessionConflictLog is the append-only diagnostic log for snapshot conflict
@@ -144,6 +208,16 @@ func SessionJobsDir(sessionPath string) string {
 	return sessionStem(sessionPath) + ".jobs"
 }
 
+// SessionInboxDir is the durable session-level instruction inbox
+// (<id>.inbox/). Manifest metadata and frozen prompt blobs live here.
+func SessionInboxDir(sessionPath string) string {
+	sessionPath = strings.TrimSpace(sessionPath)
+	if sessionPath == "" {
+		return ""
+	}
+	return sessionStem(sessionPath) + ".inbox"
+}
+
 // SessionCleanupPending is the delayed-cleanup marker (<id>.cleanup-pending.json).
 func SessionCleanupPending(sessionPath string) string {
 	sessionPath = strings.TrimSpace(sessionPath)
@@ -154,7 +228,8 @@ func SessionCleanupPending(sessionPath string) string {
 }
 
 // SessionSidecarFiles returns every regular-file sidecar owned by a session
-// transcript: branch meta, goal state, event/index logs, and diagnostic logs.
+// transcript: branch meta, goal state, event/index logs, pinned context, and
+// diagnostic logs.
 // Every surface that deletes a session (desktop trash, /clear, serve, ACP)
 // must remove all of these — the event log is the authoritative transcript, so
 // leaving it behind both leaks the "deleted" conversation and lets LoadSession
@@ -170,8 +245,14 @@ func SessionSidecarFiles(sessionPath string) []string {
 		SessionGoalState(sessionPath),
 		SessionEventLog(sessionPath),
 		SessionEventLogDamaged(sessionPath),
+		SessionEventLogRotating(sessionPath),
+		SessionTurnEventLog(sessionPath),
+		SessionTurnEventLogDamaged(sessionPath),
 		SessionEventIndex(sessionPath),
+		SessionDisplayIndex(sessionPath),
 		SessionConflictLog(sessionPath),
 		SessionRecoveryState(sessionPath),
+		SessionContext(sessionPath),
+		SessionPinnedContext(sessionPath),
 	}
 }

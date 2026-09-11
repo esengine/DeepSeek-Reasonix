@@ -41,6 +41,13 @@ func TestEffortNormalization(t *testing.T) {
 		{deepseek, "", "high"}, // DeepSeek default depth
 	}
 	for _, tc := range tests {
+		if tc.base == mimo && strings.EqualFold(tc.effort, "max") {
+			_, err := New(provider.Config{BaseURL: tc.base, Model: "m", Extra: map[string]any{"effort": tc.effort}})
+			if err == nil {
+				t.Fatal("max must not clamp to high")
+			}
+			continue
+		}
 		if got := newClient(t, tc.base, tc.effort).effort; got != tc.want {
 			t.Errorf("base=%s effort=%q: got %q, want %q", tc.base, tc.effort, got, tc.want)
 		}
@@ -166,7 +173,7 @@ func TestExplicitSupportedEffortsRejectUndeclaredEffort(t *testing.T) {
 				APIKey:  "k",
 				Extra:   tc.extra,
 			})
-			if err == nil || !strings.Contains(err.Error(), "supported_efforts") {
+			if err == nil || !strings.Contains(err.Error(), "UNSUPPORTED_REASONING_EFFORT") {
 				t.Fatalf("New error = %v, want supported_efforts rejection", err)
 			}
 		})
@@ -174,7 +181,7 @@ func TestExplicitSupportedEffortsRejectUndeclaredEffort(t *testing.T) {
 }
 
 func TestImplicitOnlySupportedEffortsKeepBuiltInValidation(t *testing.T) {
-	p, err := New(provider.Config{
+	_, err := New(provider.Config{
 		Name:    "generic",
 		BaseURL: "https://gateway.example.com/v1",
 		Model:   "reasoning-model",
@@ -184,11 +191,8 @@ func TestImplicitOnlySupportedEffortsKeepBuiltInValidation(t *testing.T) {
 			"supported_efforts": []string{"", " auto ", " "},
 		},
 	})
-	if err != nil {
-		t.Fatalf("New: %v", err)
-	}
-	if got := p.(*client).effort; got != "high" {
-		t.Fatalf("effort = %q, want built-in max-to-high clamp", got)
+	if err == nil {
+		t.Fatal("an empty declaration must not enable or clamp max")
 	}
 }
 
@@ -197,7 +201,7 @@ func TestEffortInvalidRejected(t *testing.T) {
 		Name: "p", BaseURL: "https://api.xiaomimimo.com/v1", Model: "m", APIKey: "k",
 		Extra: map[string]any{"effort": "turbo"},
 	})
-	if err == nil || !strings.Contains(err.Error(), "low, medium, or high") {
+	if err == nil || !strings.Contains(err.Error(), "UNSUPPORTED_REASONING_EFFORT") {
 		t.Fatalf("expected a low/medium/high validation error, got: %v", err)
 	}
 }

@@ -81,7 +81,7 @@ func TestWriteCallerContextAbortLeavesConnectionAlive(t *testing.T) {
 	wire := <-drained
 
 	var ping bool
-	for _, line := range strings.Split(strings.TrimSpace(string(wire)), "\n") {
+	for line := range strings.SplitSeq(strings.TrimSpace(string(wire)), "\n") {
 		if strings.TrimSpace(line) == "" {
 			continue
 		}
@@ -162,8 +162,7 @@ func TestQueuedFrameCancelledBeforeStartNeverLands(t *testing.T) {
 func TestNotifyAfterGracefulCloseFails(t *testing.T) {
 	serverToClientR, serverToClientW := io.Pipe()
 	conn := NewConn(serverToClientR, io.Discard, Options{Name: "close-notify-test"})
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
+	ctx := t.Context()
 	serveDone := make(chan error, 1)
 	go func() { serveDone <- conn.Serve(ctx) }()
 
@@ -176,7 +175,7 @@ func TestNotifyAfterGracefulCloseFails(t *testing.T) {
 		t.Fatalf("Serve on graceful EOF: %v", err)
 	}
 
-	for i := 0; i < 20; i++ {
+	for i := range 20 {
 		if err := conn.Notify("after/close", nil); err == nil {
 			t.Fatalf("attempt %d: post-close Notify reported success for a dropped frame", i)
 		}

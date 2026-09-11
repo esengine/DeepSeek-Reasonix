@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"maps"
 	"os"
 	"strings"
 	"testing"
@@ -32,9 +33,7 @@ func bootWithProviderPlugin(t *testing.T, name string, runtime map[string]any) *
 		bootFakeEnvProvider:   "1",
 	}
 	if extra, ok := runtime["env"].(map[string]string); ok {
-		for k, v := range extra {
-			env[k] = v
-		}
+		maps.Copy(env, extra)
 	}
 	runtime["env"] = env
 	return bootWithFakePlugin(t, name, runtime)

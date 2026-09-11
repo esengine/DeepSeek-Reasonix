@@ -11,6 +11,7 @@ import (
 	tea "charm.land/bubbletea/v2"
 
 	"reasonix/internal/agent"
+	"reasonix/internal/config"
 	"reasonix/internal/control"
 	"reasonix/internal/event"
 	"reasonix/internal/provider"
@@ -34,8 +35,8 @@ func TestResumeDispatchOpensPicker(t *testing.T) {
 	if m.resumePick == nil {
 		t.Fatal("bare /resume should open the picker")
 	}
-	if len(m.resumePick.sessions) != 2 {
-		t.Fatalf("picker should have 2 sessions, got %d", len(m.resumePick.sessions))
+	if len(m.resumePick.entries) != 2 {
+		t.Fatalf("picker should have 2 sessions, got %d", len(m.resumePick.entries))
 	}
 	out := strings.Join(m.transcript, "\n")
 	if strings.Contains(out, "alpha prompt") || strings.Contains(out, "beta prompt") {
@@ -119,10 +120,13 @@ func TestRunResumeKeepsCompletedIndexStableAcrossRecoveryGC(t *testing.T) {
 	if err != nil {
 		t.Fatalf("save recovery branch: %v", err)
 	}
-	covered := agent.NewSession("")
-	covered.Messages = append([]provider.Message(nil), stale.Snapshot()...)
+	covered, err := agent.LoadSession(parentPath)
+	if err != nil {
+		t.Fatalf("load recovery parent: %v", err)
+	}
+	covered.Replace(append([]provider.Message(nil), stale.Snapshot()...))
 	covered.Add(provider.Message{Role: provider.RoleUser, Content: "later parent turn"})
-	if err := covered.Save(parentPath); err != nil {
+	if err := covered.SaveRewrite(parentPath); err != nil {
 		t.Fatalf("cover recovery branch in parent: %v", err)
 	}
 	recoveryMeta, ok, err := agent.LoadBranchMeta(recovery.Path)
@@ -182,7 +186,7 @@ func TestRunResumeKeepsCompletedIndexStableAcrossRecoveryGC(t *testing.T) {
 func TestCapResumeSessionGroupsDoesNotSplitRecoveryFamily(t *testing.T) {
 	base := time.Date(2026, 8, 3, 12, 0, 0, 0, time.UTC)
 	sessions := make([]agent.SessionInfo, 0, 12)
-	for i := 0; i < 9; i++ {
+	for i := range 9 {
 		sessions = append(sessions, agent.SessionInfo{
 			Path:    filepath.Join("/sessions", "standalone-"+strconv.Itoa(i)+".jsonl"),
 			ModTime: base.Add(time.Duration(20-i) * time.Minute),
@@ -248,8 +252,8 @@ func TestResumePickerNavigateAndSelect(t *testing.T) {
 	if m.resumePick == nil {
 		t.Fatal("bare /resume should open the picker")
 	}
-	if len(m.resumePick.sessions) != 2 {
-		t.Fatalf("picker should have 2 sessions, got %d", len(m.resumePick.sessions))
+	if len(m.resumePick.entries) != 2 {
+		t.Fatalf("picker should have 2 sessions, got %d", len(m.resumePick.entries))
 	}
 
 	// The first session (default selection) is the most recent, which is b.jsonl.
@@ -337,7 +341,7 @@ func TestResumeDispatchSwitchesAndReplays(t *testing.T) {
 func TestResumeWhileScrolledUpPinsViewportToBottom(t *testing.T) {
 	dir := t.TempDir()
 	active := agent.NewSession("sys")
-	for i := 0; i < 18; i++ {
+	for i := range 18 {
 		active.Add(provider.Message{Role: provider.RoleUser, Content: "active prompt " + strconv.Itoa(i)})
 	}
 	exec := agent.New(nil, nil, active, agent.Options{}, event.Discard)
@@ -486,5 +490,52 @@ func TestRunResumeSwitchesSession(t *testing.T) {
 	hist := ctrl.History()
 	if len(hist) == 0 || hist[len(hist)-1].Content != "other prompt" {
 		t.Fatalf("history not loaded from target: %+v", hist)
+	}
+}
+
+// TestResumeEntriesIncludeOtherProjects proves the picker surfaces the newest
+// session of other known projects (#9477): a user who worked here over SSH
+// resumes from any directory, not only the original workspace root.
+func TestResumeEntriesIncludeOtherProjects(t *testing.T) {
+	currentDir := t.TempDir()
+	current := filepath.Join(currentDir, "current.jsonl")
+	saveResumeTestSession(t, current, "current project work")
+
+	otherRoot := t.TempDir()
+	otherDir := config.ProjectSessionDir(otherRoot)
+	if otherDir == "" {
+		t.Skip("project session dir unavailable")
+	}
+	if err := os.MkdirAll(otherDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(config.ReasonixHomeDir(), "desktop-projects.json"),
+		[]byte(`{"projects":[{"root":`+strconv.Quote(filepath.ToSlash(otherRoot))+`}]}`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	other := filepath.Join(otherDir, "other.jsonl")
+	saveResumeTestSession(t, other, "other project work")
+
+	entries := resumeEntries(currentDir)
+	if len(entries) != 2 {
+		t.Fatalf("resumeEntries = %d entries, want current + other project", len(entries))
+	}
+	if entries[0].project != "" || entries[0].session.Path != current {
+		t.Fatalf("first entry = %+v, want the current directory session", entries[0])
+	}
+	if entries[1].project == "" {
+		t.Fatalf("second entry = %+v, want a project label for the other project", entries[1])
+	}
+	if entries[1].session.Path != other {
+		t.Fatalf("second entry path = %q, want %q", entries[1].session.Path, other)
+	}
+}
+
+func saveResumeTestSession(t *testing.T, path, content string) {
+	t.Helper()
+	s := agent.NewSession("sys")
+	s.Add(provider.Message{Role: provider.RoleUser, Content: content})
+	if err := s.Save(path); err != nil {
+		t.Fatal(err)
 	}
 }

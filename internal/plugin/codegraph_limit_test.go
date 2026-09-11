@@ -9,7 +9,7 @@ func TestAcquireCodeGraphSlotCapsInstances(t *testing.T) {
 	}
 
 	releases := make([]func(), 0, maxCodeGraphInstances)
-	for i := 0; i < maxCodeGraphInstances; i++ {
+	for i := range maxCodeGraphInstances {
 		release, err := acquireCodeGraphSlot()
 		if err != nil {
 			t.Fatalf("acquire %d within cap should succeed: %v", i, err)

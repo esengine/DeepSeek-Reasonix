@@ -4,9 +4,13 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
+	"maps"
 	"os"
 	"path/filepath"
+	"reflect"
 	"strings"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -34,7 +38,7 @@ func TestCompatibilityRewindRequiresConfirmationForPartialCoverage(t *testing.T)
 		WorkspaceRoot: root,
 		Sink:          event.Discard,
 	})
-	c.beginCheckpoint("edit partial.txt")
+	c.beginCheckpoint(context.Background(), "edit partial.txt")
 	c.mutationObserver.BeforeMutation("partial.txt", "write_file", checkpoint.CaptureBeforeMutation)
 	if err := os.WriteFile(path, []byte("after"), 0o644); err != nil {
 		t.Fatal(err)
@@ -250,16 +254,161 @@ func TestRewindConversationSucceedsWithLiveBoundary(t *testing.T) {
 		t.Fatalf("Rewind with a live boundary: %v", err)
 	}
 	if got := len(ag.Session().Messages); got != boundary {
-		t.Fatalf("session truncated to %d messages, want boundary %d", got, boundary)
+		t.Fatalf("switched session = %d messages, want boundary %d", got, boundary)
 	}
 	ok := false
 	for _, e := range *events {
-		if e.Kind == event.Notice && strings.Contains(e.Text, "rewound conversation") {
+		if e.Kind == event.Notice && strings.Contains(e.Text, "forked conversation") {
 			ok = true
 		}
 	}
 	if !ok {
-		t.Fatal("expected a conversation-rewind success notice")
+		t.Fatal("expected a conversation-fork success notice")
+	}
+}
+
+func TestCompatibilityRewindTransfersLeaseBeforeForkSwitch(t *testing.T) {
+	t.Setenv(agent.SessionLogSchemaEnv, "v1")
+	c, ag, _ := runTwoTurns(t)
+	originalPath := c.SessionPath()
+	keeper := NewSessionLeaseKeeper()
+	defer keeper.Release()
+	if err := keeper.Rebind(originalPath); err != nil {
+		t.Fatal(err)
+	}
+	if err := keeper.BindControllerAuthority(c); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := c.Rewind(1, RewindConversation); err != nil {
+		t.Fatalf("Rewind: %v", err)
+	}
+	targetPath := c.SessionPath()
+	if targetPath == originalPath {
+		t.Fatal("conversation rewind did not switch to its fork")
+	}
+	if got := keeper.HeldPath(); got != agent.CanonicalSessionPath(targetPath) {
+		t.Fatalf("keeper path = %q, want %q", got, agent.CanonicalSessionPath(targetPath))
+	}
+	if auth := ag.Session().WriteAuthority(); auth == nil || !auth.Covers(targetPath) {
+		t.Fatal("fork was published without target write authority")
+	}
+	old, err := agent.TryAcquireSessionLease(originalPath)
+	if err != nil {
+		t.Fatalf("parent lease remained held after switch: %v", err)
+	}
+	old.Release()
+}
+
+func TestPositionalCompressionPreservesCheckpointLineage(t *testing.T) {
+	c, ag, _ := runTwoTurns(t)
+	sess := ag.Session()
+	sess.Add(provider.Message{Role: provider.RoleAssistant, Content: strings.Repeat("large completed output ", 240)})
+	beforeMessages := sess.Snapshot()
+	beforeRewrite := sess.RewriteVersion()
+	beforeRevision := atomic.LoadInt64(&c.sessionRevision)
+	c.checkpoints.mu.Lock()
+	beforeBounds := make(map[int]int, len(c.checkpoints.bound))
+	maps.Copy(beforeBounds, c.checkpoints.bound)
+	c.checkpoints.mu.Unlock()
+
+	if err := c.SummarizeFrom(context.Background(), 0); err != nil {
+		t.Fatalf("SummarizeFrom: %v", err)
+	}
+	if !reflect.DeepEqual(sess.Snapshot(), beforeMessages) {
+		t.Fatal("positional compression changed canonical history")
+	}
+	if got := sess.RewriteVersion(); got != beforeRewrite {
+		t.Fatalf("rewrite version = %d, want unchanged %d", got, beforeRewrite)
+	}
+	if got := atomic.LoadInt64(&c.sessionRevision); got != beforeRevision {
+		t.Fatalf("controller session revision = %d, want unchanged %d", got, beforeRevision)
+	}
+	c.checkpoints.mu.Lock()
+	afterBounds := make(map[int]int, len(c.checkpoints.bound))
+	maps.Copy(afterBounds, c.checkpoints.bound)
+	c.checkpoints.mu.Unlock()
+	if !reflect.DeepEqual(afterBounds, beforeBounds) {
+		t.Fatalf("checkpoint boundaries changed: before=%v after=%v", beforeBounds, afterBounds)
+	}
+	state, ok, err := agent.LoadCompactionState(c.SessionPath())
+	if err != nil || !ok {
+		t.Fatalf("load projection sidecar: ok=%v err=%v", ok, err)
+	}
+	if state.LastReceipt == nil || state.LastReceipt.Trigger != agent.CompactionTriggerManual || state.Projection.ProjectionVersion == 0 {
+		t.Fatalf("projection state = %+v", state)
+	}
+	if _, ok := c.checkpoints.boundary(1); !ok {
+		t.Fatal("conversation rewind boundary disappeared after compression")
+	}
+	plan, err := c.PrepareRewind(1, RewindConversation)
+	if err != nil || !plan.CanConversation {
+		t.Fatalf("conversation rewind unavailable after compression: plan=%+v err=%v", plan, err)
+	}
+	if err := c.SummarizeFrom(context.Background(), 0); err == nil || !strings.Contains(err.Error(), "no longer present in the model context") {
+		t.Fatalf("second positional compression error = %v, want folded-boundary explanation", err)
+	}
+}
+
+// TestTailRewindKeepsCompactionProjection covers the desktop edit flow at its
+// final boundary: edit = conversation rewind + resubmit. A rewind whose
+// boundary lands in the live tail (past the fold start) must keep the
+// compaction projection instead of ballooning the context back to the
+// pre-compaction transcript and re-paying a full summary.
+func TestTailRewindKeepsCompactionProjection(t *testing.T) {
+	dir := t.TempDir()
+	prov := &scriptedTurns{turns: [][]provider.Chunk{
+		textTurn("first answer"),
+		textTurn("second answer"),
+	}}
+	ag := agent.New(prov, tool.NewRegistry(), agent.NewSession("sys"), agent.Options{
+		ContextWindow: 10_000, CompactRatio: 0.80, RecentKeep: 2,
+	}, event.Discard)
+	c := New(Options{
+		Runner:     ag,
+		Executor:   ag,
+		SessionDir: dir,
+		Label:      "test",
+		Sink:       event.Discard,
+	})
+	c.SetSessionPath(agent.NewSessionPath(dir, "test"))
+	ctx := context.Background()
+	if err := c.runTurnWithRaw(ctx, "first prompt", "first prompt"); err != nil {
+		t.Fatalf("turn 1: %v", err)
+	}
+	big := strings.Repeat("line\n", 200)
+	sess := ag.Session()
+	for i := range 40 {
+		id := fmt.Sprintf("bulk-%d", i)
+		sess.Add(provider.Message{Role: provider.RoleAssistant, ToolCalls: []provider.ToolCall{{ID: id, Name: "read_file", Arguments: "{}"}}})
+		sess.Add(provider.Message{Role: provider.RoleTool, ToolCallID: id, Name: "read_file", Content: big})
+	}
+	if err := c.runTurnWithRaw(ctx, "second prompt", "second prompt"); err != nil {
+		t.Fatalf("turn 2: %v", err)
+	}
+	if err := ag.CompactNow(ctx, ""); err != nil {
+		t.Fatalf("compact: %v", err)
+	}
+	before := ag.ContextMaintenanceSnapshot()
+	if before.ProjectionVersion == 0 || before.ProjectedTokens >= before.FoldTrigger {
+		t.Fatalf("pre-rewind snapshot = %+v, want an installed projection under the fold trigger", before)
+	}
+
+	c.checkpoints.mu.Lock()
+	lastTurn := c.checkpoints.turn - 1
+	c.checkpoints.mu.Unlock()
+	if err := c.Rewind(lastTurn, RewindConversation); err != nil {
+		t.Fatalf("tail rewind: %v", err)
+	}
+
+	after := ag.ContextMaintenanceSnapshot()
+	if after.ProjectionVersion != before.ProjectionVersion {
+		t.Fatalf("projection version %d -> %d, want the fold kept across a tail-only rewind",
+			before.ProjectionVersion, after.ProjectionVersion)
+	}
+	if after.ProjectedTokens >= after.FoldTrigger {
+		t.Fatalf("post-rewind view %d tokens at or above fold %d, want the compacted size kept",
+			after.ProjectedTokens, after.FoldTrigger)
 	}
 }
 
@@ -281,7 +430,7 @@ func TestEditPromptPersistsOriginalPrompt(t *testing.T) {
 			msgs := loaded.Snapshot()
 			if len(msgs) >= 2 {
 				last := msgs[len(msgs)-2]
-				if last.Role == provider.RoleUser && last.Content == "edited prompt" {
+				if last.Role == provider.RoleUser && agent.StripTransientUserBlocks(last.Content) == "edited prompt" {
 					break
 				}
 			}
@@ -293,7 +442,7 @@ func TestEditPromptPersistsOriginalPrompt(t *testing.T) {
 	}
 	msgs := loaded.Snapshot()
 	last := msgs[len(msgs)-2]
-	if last.Role != provider.RoleUser || last.Content != "edited prompt" {
+	if last.Role != provider.RoleUser || agent.StripTransientUserBlocks(last.Content) != "edited prompt" {
 		t.Fatalf("last user message = %+v, want edited prompt", last)
 	}
 	if !last.Edited || last.Original != "second prompt" {

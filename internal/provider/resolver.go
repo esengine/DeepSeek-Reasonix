@@ -9,22 +9,23 @@ import (
 // process boundaries. It intentionally contains no endpoint, credential,
 // header, proxy, or environment-variable information.
 type Descriptor struct {
-	Ref                            string   `json:"ref"`
-	DisplayName                    string   `json:"displayName,omitempty"`
-	Model                          string   `json:"model,omitempty"`
-	ContextWindow                  int      `json:"contextWindow,omitempty"`
-	PricingCurrency                string   `json:"pricingCurrency,omitempty"`
-	CacheHitPerMillion             float64  `json:"cacheHitPerMillion,omitempty"`
-	InputPerMillion                float64  `json:"inputPerMillion,omitempty"`
-	OutputPerMillion               float64  `json:"outputPerMillion,omitempty"`
-	Vision                         bool     `json:"vision,omitempty"`
-	Tools                          bool     `json:"tools,omitempty"`
-	Reasoning                      bool     `json:"reasoning,omitempty"`
-	Efforts                        []string `json:"efforts,omitempty"`
-	DefaultEffort                  string   `json:"defaultEffort,omitempty"`
-	ToolCallReasoning              bool     `json:"toolCallReasoning,omitempty"`
-	ReasoningRoundTrip             bool     `json:"reasoningRoundTrip,omitempty"`
-	WarnOnMissingToolCallReasoning bool     `json:"warnOnMissingToolCallReasoning,omitempty"`
+	Ref                            string          `json:"ref"`
+	DisplayName                    string          `json:"displayName,omitempty"`
+	Model                          string          `json:"model,omitempty"`
+	ContextWindow                  int             `json:"contextWindow,omitempty"`
+	PricingCurrency                string          `json:"pricingCurrency,omitempty"`
+	CacheHitPerMillion             float64         `json:"cacheHitPerMillion,omitempty"`
+	InputPerMillion                float64         `json:"inputPerMillion,omitempty"`
+	OutputPerMillion               float64         `json:"outputPerMillion,omitempty"`
+	Vision                         bool            `json:"vision,omitempty"`
+	InputModalities                []ModelModality `json:"inputModalities,omitempty"`
+	Tools                          bool            `json:"tools,omitempty"`
+	Reasoning                      bool            `json:"reasoning,omitempty"`
+	Efforts                        []string        `json:"efforts,omitempty"`
+	DefaultEffort                  string          `json:"defaultEffort,omitempty"`
+	ToolCallReasoning              bool            `json:"toolCallReasoning,omitempty"`
+	ReasoningRoundTrip             bool            `json:"reasoningRoundTrip,omitempty"`
+	WarnOnMissingToolCallReasoning bool            `json:"warnOnMissingToolCallReasoning,omitempty"`
 }
 
 // Selection identifies a catalog provider and an optional session-local

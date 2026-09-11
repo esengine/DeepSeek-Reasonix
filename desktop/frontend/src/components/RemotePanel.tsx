@@ -1,10 +1,11 @@
+import { useAppNavigationStore } from "../store/appNavigation";
 import { useCallback, useEffect, useRef, useState, type ReactNode } from "react";
 
 import { app } from "../lib/bridge";
 import { useT } from "../lib/i18n";
 import { isRemoteDegradedWarning, isRemoteTerminalFailure, remoteConnectionErrorSummaryKey } from "../lib/remoteErrors";
 import { resolveRemoteWorkspace } from "../lib/remoteWorkspace";
-import { useOverlayStore } from "../store/overlays";
+import { publishNavigationIntent } from "../lib/useNavigationIntentFence";
 import { useRemoteStore, type RemoteExplorerTab } from "../store/remote";
 import type { RemoteDirEntry, RemoteForwardView } from "../lib/types";
 import { CodeViewer } from "./CodeViewer";
@@ -21,7 +22,7 @@ export function RemotePanel({ onClose }: { onClose: () => void }) {
   const tab = useRemoteStore((s) => s.explorerTab);
   const setTab = useRemoteStore((s) => s.setExplorerTab);
   const status = useRemoteStore((s) => (hostId ? s.statuses[hostId] : undefined));
-  const setSettingsTarget = useOverlayStore((s) => s.setSettingsTarget);
+  const setSettingsTarget = useAppNavigationStore((s) => s.setSettingsTarget);
 
   if (!hostId) return null;
   const connected = status?.state === "connected" || status?.state === "degraded";
@@ -328,7 +329,7 @@ function RemotePortsTab({ hostId, connected }: { hostId: string; connected: bool
 
 function RemoteServerTab({ hostId, connected, defaultWorkspace }: { hostId: string; connected: boolean; defaultWorkspace?: string }) {
   const t = useT();
-  const server = useRemoteStore((s) => s.servers[hostId]);
+  const hostServers = useRemoteStore((s) => s.servers[hostId]);
   const setServer = useRemoteStore((s) => s.setServer);
   const [workspace, setWorkspace] = useState("");
   const [logs, setLogs] = useState("");
@@ -347,16 +348,34 @@ function RemoteServerTab({ hostId, connected, defaultWorkspace }: { hostId: stri
         }
       })
       .catch(() => undefined);
-    void app.RemoteServerStatus(hostId).then(setServer);
     return () => {
       cancelled = true;
     };
-  }, [defaultWorkspace, hostId, setServer]);
+  }, [defaultWorkspace, hostId]);
+
+  // The panel manages one workspace at a time: the input value, or the host's
+  // first registered serve while the input is still empty.
+  const statusWorkspace = workspace || Object.keys(hostServers ?? {})[0] || "";
+  const server = statusWorkspace ? hostServers?.[statusWorkspace] : undefined;
+
+  useEffect(() => {
+    if (!statusWorkspace) return;
+    let cancelled = false;
+    void app.RemoteServerStatus(hostId, statusWorkspace)
+      .then((s) => {
+        if (!cancelled) setServer(s);
+      })
+      .catch(() => undefined);
+    return () => {
+      cancelled = true;
+    };
+  }, [hostId, statusWorkspace, setServer]);
 
   const refreshLogs = async () => {
+    if (!statusWorkspace) return;
     logsOpen.current = true;
     try {
-      setLogs(await app.RemoteServerLogs(hostId, 200));
+      setLogs(await app.RemoteServerLogs(hostId, statusWorkspace, 200));
       setActionErr("");
     } catch (e) {
       setLogs("");
@@ -367,6 +386,7 @@ function RemoteServerTab({ hostId, connected, defaultWorkspace }: { hostId: stri
   const start = async () => {
     try {
       setActionErr("");
+      await publishNavigationIntent("remote-workspace");
       await app.OpenRemoteWorkspace(hostId, workspace);
     } catch (e) {
       setActionErr(String(e));
@@ -374,9 +394,10 @@ function RemoteServerTab({ hostId, connected, defaultWorkspace }: { hostId: stri
   };
 
   const stop = async () => {
+    if (!statusWorkspace) return;
     try {
       setActionErr("");
-      await app.StopRemoteServer(hostId);
+      await app.StopRemoteServer(hostId, statusWorkspace);
     } catch (e) {
       setActionErr(String(e));
     }

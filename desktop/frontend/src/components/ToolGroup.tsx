@@ -1,9 +1,11 @@
-import { memo, useRef, useState } from "react";
+import { memo, useEffect, useRef, useState } from "react";
 import { ChevronRight } from "lucide-react";
 import { useT } from "../lib/i18n";
-import { useGSAPCollapse } from "../lib/useGSAPCollapse";
+import { useCollapseAnimation } from "../lib/useCollapseAnimation";
 import type { Item } from "../lib/useController";
 import { ToolCard } from "./ToolCard";
+import { useTranscriptUserResizeIntent } from "./TranscriptLayoutIntentContext";
+import { useWorkProcessPresentation } from "../lib/sessionExperience";
 
 type ToolItem = Extract<Item, { kind: "tool" }>;
 
@@ -15,7 +17,7 @@ const MODIFY_TOOLS = new Set(["write_file", "edit_file", "multi_edit", "move_fil
 const DELEGATE_TOOLS = new Set(["task", "run_skill", "explore", "research", "review", "security_review"]);
 
 export function toolGroupKind(item: ToolItem): ToolGroupKind | null {
-  if (item.parentId || item.name === "todo_write" || item.name === "exit_plan_mode") return null;
+  if (item.parentId || item.name === "todo_write" || item.name === "exit_plan_mode" || item.name === "web_search") return null;
   if (SHELL_TOOLS.has(item.name)) return "shell";
   if (EXPLORE_TOOLS.has(item.name)) return "explore";
   if (MODIFY_TOOLS.has(item.name)) return "modify";
@@ -92,6 +94,7 @@ function toolDisplayName(name: string): string {
     case "read_file": return "Read";
     case "ls": return "List";
     case "web_fetch": return "Web Fetch";
+    case "web_search": return "Search";
     case "code_index": return "Code Index";
     case "write_file": return "Write";
     case "edit_file": return "Edit";
@@ -119,15 +122,28 @@ export const ToolGroup = memo(function ToolGroup({
   tabId?: string;
 }) {
   const t = useT();
-  const [open, setOpen] = useState(false);
+  const beginUserResize = useTranscriptUserResizeIntent();
+  const presentation = useWorkProcessPresentation();
+  const [open, setOpen] = useState(presentation.keepExpandedAfterCompletion);
+  const previousExperience = useRef(presentation.experience);
+  useEffect(() => {
+    if (previousExperience.current === presentation.experience) return;
+    previousExperience.current = presentation.experience;
+    setOpen(presentation.keepExpandedAfterCompletion);
+  }, [presentation.experience, presentation.keepExpandedAfterCompletion]);
   const bodyRef = useRef<HTMLDivElement>(null);
-  useGSAPCollapse(bodyRef, open);
+  useCollapseAnimation(bodyRef, open);
 
   if (items.length === 0) return null;
 
   return (
-    <div className={`tool-group tool-group--${kind}${open ? " tool-group--open" : ""}`} data-kind={kind} data-entrance={items[0]?.id}>
-      <button type="button" className="tool-group__head" onClick={() => setOpen((value) => !value)} aria-expanded={open}>
+    <div
+      className={`tool-group tool-group--${kind}${open ? " tool-group--open" : ""}`}
+      data-kind={kind}
+      data-entrance={items[0]?.id}
+      data-transcript-layout-variant={open ? "tool-group-expanded" : "tool-group-collapsed"}
+    >
+      <button type="button" className="tool-group__head" onClick={() => { beginUserResize(); setOpen((value) => !value); }} aria-expanded={open}>
         <span className="tool-group__title">{titleFor(kind, t)}</span>
         <span className="tool-group__summary">{groupSummary(kind, items, t)}</span>
         <ChevronRight className={`tool-group__chevron${open ? " tool-group__chevron--open" : ""}`} size={12} />

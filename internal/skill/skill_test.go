@@ -811,12 +811,7 @@ func sameStrings(a, b []string) bool {
 }
 
 func containsString(ss []string, want string) bool {
-	for _, s := range ss {
-		if s == want {
-			return true
-		}
-	}
-	return false
+	return slices.Contains(ss, want)
 }
 
 func TestInvalidNamesSkipped(t *testing.T) {
@@ -1044,7 +1039,7 @@ func TestManualInvocationSkillExcludedFromIndex(t *testing.T) {
 
 func TestApplyIndexTruncates(t *testing.T) {
 	var skills []Skill
-	for i := 0; i < 200; i++ {
+	for range 200 {
 		skills = append(skills, Skill{Name: "skill" + strings.Repeat("x", 20), Description: strings.Repeat("d", 50)})
 	}
 	out := ApplyIndex("BASE", skills)

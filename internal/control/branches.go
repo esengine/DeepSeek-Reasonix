@@ -33,7 +33,19 @@ func (c *Controller) BranchTreeText() string {
 	if err != nil {
 		return "branches: " + err.Error()
 	}
-	return FormatBranchTree(branches, agent.BranchID(c.SessionPath()))
+	return FormatBranchTree(branches, c.CurrentBranchID())
+}
+
+// CurrentBranchID is the tree id of the branch the controller is on: a head
+// id inside a schema-2 log, or the file id on the main head and for schema-1
+// sessions, whose branches are files.
+func (c *Controller) CurrentBranchID() string {
+	if c.headBranchSession() != nil {
+		if ref, ok := c.SessionHead(); ok && ref.HeadID != "" && ref.HeadID != agent.SessionMainHead {
+			return ref.HeadID
+		}
+	}
+	return agent.BranchID(c.SessionPath())
 }
 
 func FormatBranchTree(branches []agent.BranchInfo, currentID string) string {
@@ -99,10 +111,7 @@ func branchTitle(b agent.BranchInfo, depth int) string {
 	if label, ok := structuredBranchLabel(title); ok {
 		return label
 	}
-	maxRunes := 32 - depth*4
-	if maxRunes < 18 {
-		maxRunes = 18
-	}
+	maxRunes := max(32-depth*4, 18)
 	title = oneLineBranch(title, maxRunes)
 	if title == "" {
 		return "(untitled)"

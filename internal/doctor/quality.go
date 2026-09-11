@@ -168,6 +168,10 @@ func summarizeQualityTranscript(messages []provider.Message) QualityTranscript {
 	var out QualityTranscript
 	out.Messages = len(messages)
 	for _, message := range messages {
+		if agent.IsPinnedContextRevision(message) {
+			out.Messages--
+			continue
+		}
 		switch message.Role {
 		case provider.RoleUser:
 			out.UserMessages++

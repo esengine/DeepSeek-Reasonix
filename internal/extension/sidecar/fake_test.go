@@ -22,7 +22,7 @@ import (
 
 // Re-exec fake sidecar (the standard Go helper-process pattern): the test
 // binary re-executes itself with REASONIX_FAKE_SIDECAR=1 and speaks the real
-// Extension Protocol v1 over stdin/stdout. Behavior is steered through env:
+// Extension Protocol v2 over stdin/stdout. Behavior is steered through env:
 //
 //		REASONIX_FAKE_SIDECAR=1            enable the helper
 //		REASONIX_FAKE_INIT_RESULT          raw JSON InitializeResult to answer with
@@ -67,7 +67,7 @@ type fakeExternalizedField struct {
 
 func fakeModes() map[string]bool {
 	out := map[string]bool{}
-	for _, mode := range strings.Split(os.Getenv(fakeEnvMode), ",") {
+	for mode := range strings.SplitSeq(os.Getenv(fakeEnvMode), ",") {
 		if mode = strings.TrimSpace(mode); mode != "" {
 			out[mode] = true
 		}
@@ -79,7 +79,7 @@ func fakeInitResult() json.RawMessage {
 	if raw := strings.TrimSpace(os.Getenv(fakeEnvInitResult)); raw != "" {
 		return json.RawMessage(raw)
 	}
-	return json.RawMessage(`{"protocolVersion":"1","name":"fake-sidecar","version":"1.0.0","stateSchemaVersion":0}`)
+	return json.RawMessage(`{"protocolVersion":"2","name":"fake-sidecar","version":"1.0.0","stateSchemaVersion":0}`)
 }
 
 func runFakeSidecar(stdin io.Reader, stdout io.Writer) {
@@ -93,7 +93,7 @@ func runFakeSidecar(stdin io.Reader, stdout io.Writer) {
 		// Push well past the 16 KiB tail so only the end survives, then leave
 		// a credential-looking line at the very end — it must be retained by
 		// the ring and redacted before surfacing.
-		for i := 0; i < 32*1024; i++ {
+		for i := range 32 * 1024 {
 			fmt.Fprintf(os.Stderr, "flood line %d padding padding padding\n", i)
 		}
 		fmt.Fprintln(os.Stderr, "boot failed: api_key=sk-abcdef1234567890SECRETKEY is invalid")

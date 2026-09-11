@@ -1,0 +1,4 @@
+prompt = "This directory contains an eventlog/ package with a README, plus raw.txt holding one `kind name` pair per line. Create rebuild.py so that `python3 rebuild.py` appends every raw.txt line, in order, to a Log at path events.log using the package. Do not write events.log by hand."
+class = "api-integration"
+max_steps = 20
+timeout_sec = 300

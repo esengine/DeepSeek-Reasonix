@@ -11,6 +11,7 @@ import (
 
 	"reasonix/internal/config"
 	"reasonix/internal/skill"
+	"reasonix/internal/tool"
 )
 
 func TestBuildReviewTask(t *testing.T) {
@@ -126,7 +127,8 @@ func TestBuildReviewSubagentRegistryEnforcesReadOnlySkill(t *testing.T) {
 		t.Fatal("read-only review bash wrapper must report ReadOnly")
 	}
 	out, err := bash.Execute(context.Background(), json.RawMessage(`{"command":"rm -rf tmp"}`))
-	if err != nil || !strings.HasPrefix(out, "blocked:") {
-		t.Fatalf("write-capable command should be blocked as tool output, got %q, %v", out, err)
+	msg, blocked := tool.BlockedMessage(err)
+	if !blocked || !strings.HasPrefix(msg, "blocked:") {
+		t.Fatalf("write-capable command should raise a host refusal, got %q, %v", out, err)
 	}
 }

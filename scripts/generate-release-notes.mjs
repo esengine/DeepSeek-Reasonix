@@ -9,6 +9,7 @@ import { loadCatalog, upsertRelease, validateCatalog } from "./release-notes.mjs
 const repoRoot = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const apiBase = process.env.DEEPSEEK_API_BASE || "https://api.deepseek.com";
 const model = process.env.DEEPSEEK_MODEL || "deepseek-v4-pro";
+const releaseTargetOrder = ["desktop", "cli", "site", "service"];
 
 function parseArgs(argv) {
   const values = {};
@@ -66,6 +67,47 @@ async function githubJson(path, { allowMissing = false } = {}) {
   return response.json();
 }
 
+async function githubList(path) {
+  const items = [];
+  for (let page = 1; ; page += 1) {
+    const separator = path.includes("?") ? "&" : "?";
+    const batch = await githubJson(`${path}${separator}per_page=100&page=${page}`);
+    items.push(...batch);
+    if (batch.length < 100) return items;
+  }
+}
+
+export function inferPullTargetHints(labels, files) {
+  const labelSet = new Set(labels);
+  const targets = new Set();
+  const add = (target) => targets.add(target);
+  const hasPath = (pattern) => files.some((path) => pattern.test(path));
+
+  const explicitlyDesktop = labelSet.has("desktop");
+  const explicitlyCLI = labelSet.has("tui") || labelSet.has("cli");
+  if (explicitlyDesktop) add("desktop");
+  if (explicitlyCLI) add("cli");
+  if (hasPath(/^desktop\//)) add("desktop");
+  if (hasPath(/^(?:internal\/cli\/|cmd\/)/)) add("cli");
+  if (hasPath(/^site\//)) add("site");
+  if (hasPath(/^(?:workers\/|\.github\/|scripts\/|release-notes\/)/)) add("service");
+
+  const hasSharedProductCode = files.some((path) =>
+    /^(?:internal\/|sdk\/|npm\/)/.test(path) &&
+    !/^internal\/cli\//.test(path) &&
+    !/^internal\/telemetry\//.test(path),
+  );
+  if (!explicitlyDesktop && !explicitlyCLI && hasSharedProductCode) {
+    add("desktop");
+    add("cli");
+  }
+  if (!targets.size) {
+    add("desktop");
+    add("cli");
+  }
+  return releaseTargetOrder.filter((target) => targets.has(target));
+}
+
 async function collectPullRequests(repository, commits) {
   const numbers = new Set(prNumbersFromCommits(commits));
   const associated = await Promise.all(
@@ -73,13 +115,41 @@ async function collectPullRequests(repository, commits) {
   );
   for (const pulls of associated) for (const pull of pulls || []) numbers.add(pull.number);
   const pulls = await Promise.all([...numbers].map((number) => githubJson(`/repos/${repository}/pulls/${number}`, { allowMissing: true })));
-  return pulls.filter(Boolean).map((pull) => ({
-    number: pull.number,
-    title: pull.title,
-    body: String(pull.body || "").slice(0, 2000),
-    author: pull.user?.login || "",
-    labels: (pull.labels || []).map((label) => label.name),
+  return Promise.all(pulls.filter(Boolean).map(async (pull) => {
+    const labels = (pull.labels || []).map((label) => label.name);
+    const files = (await githubList(`/repos/${repository}/pulls/${pull.number}/files`)).map((file) => file.filename);
+    return {
+      number: pull.number,
+      title: pull.title,
+      body: String(pull.body || "").slice(0, 2000),
+      author: pull.user?.login || "",
+      labels,
+      changedFileCount: files.length,
+      files: files.slice(0, 200),
+      targetHints: inferPullTargetHints(labels, files),
+    };
   }));
+}
+
+function releaseItems(release) {
+  return [
+    ...(release.highlights || []),
+    ...["new", "improved", "fixed"].flatMap((kind) => release.changes?.[kind] || []),
+    ...(release.upgrade || []),
+    ...(release.risks || []),
+  ];
+}
+
+function normalizeReleaseTargets(release) {
+  for (const item of releaseItems(release)) {
+    if (!Array.isArray(item.targets)) continue;
+    item.targets.sort((a, b) => releaseTargetOrder.indexOf(a) - releaseTargetOrder.indexOf(b));
+  }
+  const targets = new Set(releaseItems(release).flatMap((item) => item.targets || []));
+  release.surfaces = [
+    ...releaseTargetOrder.filter((target) => targets.has(target)),
+    ...[...targets].filter((target) => !releaseTargetOrder.includes(target)).sort(),
+  ];
 }
 
 function collectDocLinks(from, repository, to) {
@@ -130,17 +200,17 @@ async function askDeepSeek(payload, retry = true) {
           role: "system",
           content: `You are Reasonix's release editor. Return one JSON object with a \"release\" property. Write factual, user-facing product release notes in equivalent English and Simplified Chinese. Group changes by user outcome, not by commit. Never invent capabilities, migrations, risks, PR numbers, contributors, URLs, or metrics. Every highlight and change must cite one or more supplied PR numbers. Use this exact release shape:
 {
-  \"version\": \"semver\", \"date\": \"YYYY-MM-DD\", \"channel\": \"stable|prerelease\",
+  \"version\": \"semver\", \"date\": \"YYYY-MM-DD\", \"channel\": \"stable|prerelease\", \"targetingVersion\": 1,
   \"title\": {\"en\":\"\",\"zh\":\"\"}, \"summary\": {\"en\":\"\",\"zh\":\"\"},
-  \"surfaces\": [\"desktop\"],
+  \"surfaces\": [\"desktop\",\"cli\"],
   \"guides\": [{\"title\":{\"en\":\"\",\"zh\":\"\"},\"body\":{\"en\":\"\",\"zh\":\"\"},\"href\":\"https://...\"}],
-  \"highlights\": [{\"kind\":\"new|improved|fixed|security\",\"title\":{\"en\":\"\",\"zh\":\"\"},\"body\":{\"en\":\"\",\"zh\":\"\"},\"refs\":[123]}],
+  \"highlights\": [{\"kind\":\"new|improved|fixed|security\",\"targets\":[\"desktop\",\"cli\"],\"title\":{\"en\":\"\",\"zh\":\"\"},\"body\":{\"en\":\"\",\"zh\":\"\"},\"refs\":[123]}],
   \"changes\": {\"new\":[],\"improved\":[],\"fixed\":[]},
-  \"upgrade\": [{\"level\":\"info|warning\",\"title\":{\"en\":\"\",\"zh\":\"\"},\"body\":{\"en\":\"\",\"zh\":\"\"},\"refs\":[123]}],
-  \"risks\": [{\"title\":{\"en\":\"\",\"zh\":\"\"},\"body\":{\"en\":\"\",\"zh\":\"\"},\"refs\":[123]}],
+  \"upgrade\": [{\"level\":\"info|warning\",\"targets\":[\"desktop\"],\"title\":{\"en\":\"\",\"zh\":\"\"},\"body\":{\"en\":\"\",\"zh\":\"\"},\"refs\":[123]}],
+  \"risks\": [{\"targets\":[\"cli\"],\"title\":{\"en\":\"\",\"zh\":\"\"},\"body\":{\"en\":\"\",\"zh\":\"\"},\"refs\":[123]}],
   \"contributors\": [], \"links\": {\"github\":\"https://...\",\"compare\":\"https://...\",\"download\":\"https://...\"}
 }
-Return guides only for supplied documentation URLs. Mention upgrade action or risk only when explicitly supported; otherwise use empty arrays. Output JSON only.`,
+Every highlight, change, upgrade note, and risk must have a non-empty \"targets\" array using only this canonical order: desktop, cli, site, service. Use each PR's targetHints as deterministic candidates, then choose the user-visible delivery target supported by its labels, changed files, title, and body. Shared product-core behavior belongs to both desktop and cli. Website-only work belongs to site; hosted workers and release infrastructure belong to service and must not be marked as a client update merely because a client file accompanies the server change. Set top-level surfaces to the canonical union of all item targets. Return guides only for supplied documentation URLs. Mention upgrade action or risk only when explicitly supported; otherwise use empty arrays. Output JSON only.`,
         },
         { role: "user", content: `Create the release record from these public GitHub sources:\n${JSON.stringify(payload)}` },
       ],
@@ -201,6 +271,7 @@ async function main() {
     documentationUrls: docLinks,
   };
   const release = await askDeepSeek(source);
+  release.targetingVersion = 1;
   release.version = version;
   release.releaseId = version;
   release.baseVersion = baseVersion;
@@ -232,13 +303,16 @@ async function main() {
       : "https://reasonix.io/?download=desktop&channel=stable#start",
   };
   release.guides = (release.guides || []).filter((guide) => docLinks.includes(guide.href));
+  normalizeReleaseTargets(release);
   assertGroundedRefs(release, new Set(pulls.map((pull) => pull.number)));
   validateCatalog({ schemaVersion: 1, releases: [release] });
   await upsertRelease(release);
   console.log(`Generated bilingual release notes for v${version} from ${pulls.length} pull request(s).`);
 }
 
-main().catch((error) => {
-  console.error(error.message);
-  process.exitCode = 1;
-});
+if (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
+  main().catch((error) => {
+    console.error(error.message);
+    process.exitCode = 1;
+  });
+}

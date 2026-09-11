@@ -6,7 +6,6 @@ import (
 	"io"
 	"os"
 	"strings"
-	"sync/atomic"
 	"testing"
 	"time"
 
@@ -79,7 +78,12 @@ func TestProjectTreeSplitsMultipleRuntimeSessionsInSameTopic(t *testing.T) {
 	app := NewApp()
 	runnerA := &blockingRunner{started: make(chan struct{}), release: make(chan struct{})}
 	runnerB := &blockingRunner{started: make(chan struct{}), release: make(chan struct{})}
-	ctrlA := control.New(control.Options{Runner: runnerA, SessionDir: dir, SessionPath: sessionA, Label: "a", Sink: event.Discard})
+	asks := make(chan struct{}, 1)
+	ctrlA := control.New(control.Options{Runner: runnerA, SessionDir: dir, SessionPath: sessionA, Label: "a", Sink: event.FuncSink(func(e event.Event) {
+		if e.Kind == event.AskRequest {
+			asks <- struct{}{}
+		}
+	})})
 	ctrlB := control.New(control.Options{Runner: runnerB, SessionDir: dir, SessionPath: sessionB, Label: "b", Sink: event.Discard})
 	defer ctrlA.Close()
 	defer ctrlB.Close()
@@ -117,6 +121,18 @@ func TestProjectTreeSplitsMultipleRuntimeSessionsInSameTopic(t *testing.T) {
 	ctrlB.Submit("block B")
 	<-runnerA.started
 	<-runnerB.started
+	askCtx, cancelAsk := context.WithCancel(t.Context())
+	askDone := make(chan struct{})
+	go func() {
+		defer close(askDone)
+		_, _ = ctrlA.Ask(askCtx, []event.AskQuestion{{ID: "choice", Prompt: "Choose"}})
+	}()
+	defer func() { cancelAsk(); <-askDone }()
+	select {
+	case <-asks:
+	case <-time.After(3 * time.Second):
+		t.Fatal("waiting prompt was not committed")
+	}
 
 	nodes := app.ListProjectTree()
 	if len(nodes) != 1 || len(nodes[0].Children) != 1 {
@@ -142,6 +158,7 @@ func TestProjectTreeSplitsMultipleRuntimeSessionsInSameTopic(t *testing.T) {
 
 	close(runnerA.release)
 	close(runnerB.release)
+	cancelAsk()
 	waitNotRunning(t, ctrlA)
 	waitNotRunning(t, ctrlB)
 }
@@ -224,10 +241,17 @@ func TestProjectTreeShowsBackgroundJobStatus(t *testing.T) {
 func TestBackgroundJobNoticeForcesProjectTreeRefresh(t *testing.T) {
 	isolateDesktopUserDirs(t)
 
-	var refreshes int32
 	app := NewApp()
-	app.projectTreeChangedHook = func() {
-		atomic.AddInt32(&refreshes, 1)
+	app.ctx = context.Background()
+	legacyInvalidations := 0
+	app.projectTreeChangedHook = func() { legacyInvalidations++ }
+	events := make(chan ProjectTreeRuntimeSnapshot, 1)
+	app.runtimeEvents.emit = func(_ context.Context, name string, payload ...any) {
+		if name == "project-tree:runtime-changed" && len(payload) == 1 {
+			if snapshot, ok := payload[0].(ProjectTreeRuntimeSnapshot); ok {
+				events <- snapshot
+			}
+		}
 	}
 	app.tabs["job"] = &WorkspaceTab{
 		ID:          "job",
@@ -239,8 +263,16 @@ func TestBackgroundJobNoticeForcesProjectTreeRefresh(t *testing.T) {
 	sink := &tabEventSink{tabID: "job", app: app}
 
 	sink.Emit(event.Event{Kind: event.Notice, Level: event.LevelInfo, Text: "background bash finished: bash-1"})
-	if got := atomic.LoadInt32(&refreshes); got != 1 {
-		t.Fatalf("project-tree refreshes = %d, want 1 for background job finish notice", got)
+	if legacyInvalidations != 0 {
+		t.Fatalf("catalog/legacy invalidations = %d, want 0 for runtime-only status", legacyInvalidations)
+	}
+	select {
+	case snapshot := <-events:
+		if snapshot.Revision == 0 || snapshot.Topics == nil {
+			t.Fatalf("runtime snapshot = %+v, want versioned non-nil projection", snapshot)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("background job finish notice emitted no project-tree runtime snapshot")
 	}
 }
 
@@ -255,14 +287,14 @@ func waitNoJobs(t *testing.T, ctrl control.SessionAPI) {
 	}
 }
 
-func TestTopicActivityStatusPresentsReadinessAsPaused(t *testing.T) {
+func TestTopicActivityStatusPresentsReadinessSeparatelyFromPause(t *testing.T) {
 	readiness := event.Event{
 		Kind:    event.TurnDone,
 		Err:     &agent.FinalReadinessError{Attempts: 3, Reason: "missing verification"},
 		Outcome: event.TurnOutcomeFinalReadiness,
 	}
-	if status, ok := topicActivityStatusFromEvent(readiness); !ok || status != topicStatusPaused {
-		t.Fatalf("readiness turn end = (%q, %v), want (%q, true)", status, ok, topicStatusPaused)
+	if status, ok := topicActivityStatusFromEvent(readiness); !ok || status != topicStatusAwaitingDelivery {
+		t.Fatalf("readiness turn end = (%q, %v), want (%q, true)", status, ok, topicStatusAwaitingDelivery)
 	}
 	recoveryPause := event.Event{
 		Kind:    event.TurnDone,
@@ -277,5 +309,20 @@ func TestTopicActivityStatusPresentsReadinessAsPaused(t *testing.T) {
 	}
 	if status, ok := topicActivityStatusFromEvent(event.Event{Kind: event.TurnDone}); !ok || status != "" {
 		t.Fatalf("clean turn end = (%q, %v), want cleared status", status, ok)
+	}
+}
+
+func TestCatalogRuntimeStatusPreservesDeliveryCheckWhenIdle(t *testing.T) {
+	got := catalogRuntimeStatus(topicStatusAwaitingDelivery, control.RuntimeStatus{})
+	if got != topicStatusAwaitingDelivery {
+		t.Fatalf("idle delivery check = %q, want %q", got, topicStatusAwaitingDelivery)
+	}
+	got = catalogRuntimeStatus(topicStatusAwaitingDelivery, control.RuntimeStatus{Running: true})
+	if got != topicStatusThinking {
+		t.Fatalf("running delivery check = %q, want %q", got, topicStatusThinking)
+	}
+	got = catalogRuntimeStatus(topicStatusPaused, control.RuntimeStatus{})
+	if got != topicStatusPaused {
+		t.Fatalf("idle recovery pause = %q, want %q", got, topicStatusPaused)
 	}
 }

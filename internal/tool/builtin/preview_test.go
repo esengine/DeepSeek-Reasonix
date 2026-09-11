@@ -90,7 +90,7 @@ func TestPreviewMatchesExecute(t *testing.T) {
 			if !ok {
 				t.Fatalf("%s not a Previewer", tc.tool.Name())
 			}
-			change, err := prev.Preview(argsJSON(t, tc.args(pf)))
+			change, err := prev.Preview(context.Background(), argsJSON(t, tc.args(pf)))
 			if err != nil {
 				t.Fatalf("Preview: %v", err)
 			}
@@ -127,7 +127,7 @@ func TestPreviewMatchesExecute(t *testing.T) {
 func TestPreviewKindAndTally(t *testing.T) {
 	// write_file to a nonexistent path is a create.
 	nf := filepath.Join(t.TempDir(), "new.txt")
-	c, err := writeFile{}.Preview(argsJSON(t, map[string]any{"path": nf, "content": "a\nb\nc\n"}))
+	c, err := writeFile{}.Preview(context.Background(), argsJSON(t, map[string]any{"path": nf, "content": "a\nb\nc\n"}))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -141,7 +141,7 @@ func TestPreviewKindAndTally(t *testing.T) {
 	// edit_file on an existing file is a modify with balanced tallies.
 	ef := filepath.Join(t.TempDir(), "e.txt")
 	os.WriteFile(ef, []byte("one\ntwo\nthree\n"), 0o644)
-	c, err = editFile{}.Preview(argsJSON(t, map[string]any{"path": ef, "old_string": "two", "new_string": "TWO"}))
+	c, err = editFile{}.Preview(context.Background(), argsJSON(t, map[string]any{"path": ef, "old_string": "two", "new_string": "TWO"}))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -159,11 +159,11 @@ func TestPreviewMirrorsErrors(t *testing.T) {
 	f := filepath.Join(t.TempDir(), "x.txt")
 	os.WriteFile(f, []byte("x x x"), 0o644)
 
-	if _, err := (editFile{}).Preview(argsJSON(t, map[string]any{"path": f, "old_string": "x", "new_string": "y"})); err == nil {
+	if _, err := (editFile{}).Preview(context.Background(), argsJSON(t, map[string]any{"path": f, "old_string": "x", "new_string": "y"})); err == nil {
 		t.Error("expected not-unique error from Preview")
 	}
 	missing := filepath.Join(t.TempDir(), "nope.txt")
-	if _, err := (editFile{}).Preview(argsJSON(t, map[string]any{"path": missing, "old_string": "a", "new_string": "b"})); err == nil {
+	if _, err := (editFile{}).Preview(context.Background(), argsJSON(t, map[string]any{"path": missing, "old_string": "a", "new_string": "b"})); err == nil {
 		t.Error("expected read error for missing file")
 	}
 }

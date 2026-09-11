@@ -15,6 +15,7 @@ import (
 	"path/filepath"
 	"regexp"
 	"runtime"
+	"slices"
 	"strings"
 
 	fileencoding "reasonix/internal/fileutil/encoding"
@@ -48,6 +49,7 @@ type Config struct {
 	UI               UIConfig            `toml:"ui"`
 	CLI              CLIConfig           `toml:"cli"`
 	Desktop          DesktopConfig       `toml:"desktop"`
+	Billing          BillingConfig       `toml:"billing"`
 	Telemetry        TelemetryConfig     `toml:"telemetry"`
 	Notifications    NotificationsConfig `toml:"notifications"`
 	Agent            AgentConfig         `toml:"agent"`
@@ -75,11 +77,38 @@ type Config struct {
 	pluginPackageOwners        map[string]string
 	pluginPackageSkillOwners   map[string][]string
 	pluginPackageAgentOwners   map[string][]string
-	editLoadErr                error
+	// explicitProjectSkillKeys records project-level skill fields that the
+	// settings UI intentionally owns even when their value equals the built-in
+	// default. It is transient edit metadata and is never serialized directly.
+	explicitProjectSkillKeys map[string]bool
+	stagedModelCredentials   []string
+	editLoadErr              error
 	// loadWarnings are non-fatal issues observed while loading config (corrupt
 	// user/project files recovered via last-known-good or defaults). They never
 	// rewrite the original file; the UI may surface them for doctor repair.
-	loadWarnings []string
+	loadWarnings      []string
+	openCodeGoJournal *openCodeGoJournal
+}
+
+// KeepProjectSkillKey marks a skill field as an intentional project override.
+// An explicit empty/false project value must still be written so it can
+// override a non-default user setting in the layered configuration.
+func (c *Config) KeepProjectSkillKey(key string) error {
+	key = strings.TrimSpace(key)
+	switch key {
+	case "paths", "excluded_paths", "disabled_skills", "disable_implicit_invocation", "max_depth":
+	default:
+		return fmt.Errorf("unknown project skill key %q", key)
+	}
+	if c.explicitProjectSkillKeys == nil {
+		c.explicitProjectSkillKeys = make(map[string]bool)
+	}
+	c.explicitProjectSkillKeys[key] = true
+	return nil
+}
+
+func (c *Config) keepsProjectSkillKey(key string) bool {
+	return c != nil && c.explicitProjectSkillKeys[key]
 }
 
 type promptFileSource uint8
@@ -234,6 +263,7 @@ type UIConfig struct {
 	ShortcutLayout string `toml:"shortcut_layout"` // classic|desktop; accepted for compatibility
 	CloseBehavior  string `toml:"close_behavior"`  // legacy desktop close behavior; prefer desktop.close_behavior
 	ShowReasoning  bool   `toml:"show_reasoning"`  // Ctrl+O / /verbose: show thinking text in CLI; false = collapsed
+	ShowTurnUsage  bool   `toml:"show_turn_usage"` // show per-request token/cost receipts in the CLI/TUI transcript
 	CursorShape    string `toml:"cursor_shape"`    // block|underline|bar; empty defaults to bar
 }
 
@@ -247,57 +277,12 @@ type CLIConfig struct {
 	UpdateChannel string `toml:"update_channel"`
 }
 
-// DesktopConfig controls desktop-only UI preferences. It is intentionally
-// separate from top-level language and [ui] so desktop choices do not affect CLI
-// language, terminal colours, or provider-visible prompt/request data.
-type DesktopConfig struct {
-	Language                string   `toml:"language"`                   // auto|en|zh; empty/auto = browser/OS auto-detect
-	Currency                string   `toml:"currency"`                   // user-global auto|CNY|USD pricing preference shared by desktop and CLI
-	LayoutStyle             string   `toml:"layout_style"`               // classic|workbench|creation; desktop layout style
-	Theme                   string   `toml:"theme"`                      // auto|dark|light; empty resolves to auto
-	ThemeStyle              string   `toml:"theme_style"`                // graphite|aurora|slate|carbon|nocturne|amber and legacy aliases
-	TerminalTheme           string   `toml:"terminal_theme"`             // auto|dark|light; auto follows the desktop app theme
-	ExternalOpener          string   `toml:"external_opener"`            // preferred installed app used by the desktop Open control
-	CloseBehavior           string   `toml:"close_behavior"`             // quit|background; desktop window close behavior
-	DisplayMode             string   `toml:"display_mode"`               // standard|compact (legacy "minimal" maps to compact); transcript display mode
-	StatusBarStyle          string   `toml:"status_bar_style"`           // icon|text; desktop status bar metric labels
-	StatusBarItems          []string `toml:"status_bar_items"`           // ordered visible desktop status bar items
-	DefaultToolApprovalMode string   `toml:"default_tool_approval_mode"` // ask|auto|yolo; defaults to auto for newly-created desktop sessions
-	CheckUpdates            *bool    `toml:"check_updates"`              // startup update checks; nil keeps the default enabled
-	// UpdateChannel is a legacy compatibility field. It is accepted on read but
-	// ignored and omitted from future canonical writes.
-	UpdateChannel     string   `toml:"update_channel"`
-	Telemetry         *bool    `toml:"telemetry"`          // anonymous launch ping plus scrubbed next-launch native crash diagnostics; nil keeps the default enabled
-	Metrics           *bool    `toml:"metrics"`            // aggregate desktop metrics (anonymous signal/bucket counts, including lifecycle health; no content); nil keeps the default enabled
-	ProviderAccess    []string `toml:"provider_access"`    // desktop-only list of provider entries shown in Settings > Model > Access
-	ExpandThinking    bool     `toml:"expand_thinking"`    // true = show reasoning text expanded by default; false = collapsed
-	ConversationWidth string   `toml:"conversation_width"` // standard|full; max transcript width; empty = standard
-}
-
-// DesktopExternalOpener returns the user-selected external opener id. The
-// desktop shell resolves it against applications installed on the current OS;
-// an empty or unavailable id safely falls back to the platform file manager.
-func (c *Config) DesktopExternalOpener() string {
-	if c == nil {
-		return ""
-	}
-	return strings.ToLower(strings.TrimSpace(c.Desktop.ExternalOpener))
-}
-
 // NotificationsConfig controls optional system notifications for CLI chat/run.
 type NotificationsConfig struct {
 	Enabled         bool `toml:"enabled"`
 	TurnDone        bool `toml:"turn_done"`
 	ApprovalRequest bool `toml:"approval_request"`
 	AskRequest      bool `toml:"ask_request"`
-}
-
-// EnvironmentConfig controls the stable startup environment block injected into
-// the model-facing prompt. Enabled nil means the default (enabled); Tools maps a
-// tool name to an explicit executable path when PATH probing is not enough.
-type EnvironmentConfig struct {
-	Enabled *bool             `toml:"enabled"`
-	Tools   map[string]string `toml:"tools"`
 }
 
 // EnvironmentEnabled reports whether startup environment probing should feed the
@@ -359,12 +344,11 @@ func normalizeThemeStyle(style string) string {
 	}
 }
 
+// The retired "classic" style normalizes to workbench, like any other value
+// this build does not know, so a config written before the style was removed
+// keeps working and the Go side and the UI agree on what it means.
 func normalizeDesktopLayoutStyle(style string) string {
 	switch strings.ToLower(strings.TrimSpace(style)) {
-	case "classic":
-		return "classic"
-	case "workbench", "workspace":
-		return "workbench"
 	case "creation":
 		return "creation"
 	default:
@@ -447,8 +431,9 @@ func (c *Config) DesktopTerminalTheme() string {
 	}
 }
 
-// DesktopLayoutStyle normalizes the desktop layout style. New installs default
-// to workbench; explicit classic remains respected.
+// DesktopLayoutStyle defaults to workbench. The retired "classic" value is
+// normalized on read rather than migrated to disk: nothing behaves differently
+// for it, so there is no rewritten value worth persisting.
 func (c *Config) DesktopLayoutStyle() string {
 	if strings.EqualFold(strings.TrimSpace(c.Desktop.ThemeStyle), "workbench") && strings.TrimSpace(c.Desktop.LayoutStyle) == "" {
 		return "workbench"
@@ -469,19 +454,6 @@ func (c *Config) DesktopCloseBehavior() string {
 // UICloseBehavior is the legacy name for DesktopCloseBehavior.
 func (c *Config) UICloseBehavior() string {
 	return c.DesktopCloseBehavior()
-}
-
-// DesktopDisplayMode normalizes the transcript display mode. Default is
-// "standard" (flat rendering, no folding).
-func (c *Config) DesktopDisplayMode() string {
-	switch strings.ToLower(strings.TrimSpace(c.Desktop.DisplayMode)) {
-	case "standard":
-		return "standard"
-	case "compact", "minimal":
-		return "compact"
-	default:
-		return "standard"
-	}
 }
 
 // DesktopConversationWidth returns the normalized desktop conversation width.
@@ -517,15 +489,18 @@ func (c *Config) DesktopDefaultToolApprovalMode() string {
 }
 
 // DesktopStatusBarStyle normalizes the desktop status bar metric label style.
-// Default is "text"; explicit "icon" preserves the user's compact choice.
+// Unmigrated configurations adopt icon labels once; later choices are preserved.
 func (c *Config) DesktopStatusBarStyle() string {
+	if !c.Desktop.StatusBarStyleInitialized {
+		return "icon"
+	}
 	switch strings.ToLower(strings.TrimSpace(c.Desktop.StatusBarStyle)) {
 	case "icon":
 		return "icon"
 	case "text":
 		return "text"
 	default:
-		return "text"
+		return "icon"
 	}
 }
 
@@ -537,6 +512,9 @@ var defaultDesktopStatusBarItems = []string{
 	"cache_avg",
 	"session_tokens",
 	"turn_tokens",
+	"turn_tps",
+	"turn_output_tokens",
+	"turn_cache_tokens",
 	"turn_cost",
 	"session_turns",
 	"context",
@@ -748,6 +726,7 @@ type BotConfig struct {
 	QQ                 QQBotConfig           `toml:"qq"`
 	Feishu             FeishuBotConfig       `toml:"feishu"`
 	Weixin             WeixinBotConfig       `toml:"weixin"`
+	Dingtalk           DingtalkBotConfig     `toml:"dingtalk"`
 	Routes             []BotRouteConfig      `toml:"routes"`
 	Connections        []BotConnectionConfig `toml:"connections"`
 	// DesktopWatchers persists /desktop watch subscriptions so god-view
@@ -767,9 +746,10 @@ type BotDesktopWatcherConfig struct {
 }
 
 type BotSelfUserIDs struct {
-	QQ     []string `toml:"qq"`
-	Feishu []string `toml:"feishu"`
-	Weixin []string `toml:"weixin"`
+	QQ       []string `toml:"qq"`
+	Feishu   []string `toml:"feishu"`
+	Weixin   []string `toml:"weixin"`
+	Dingtalk []string `toml:"dingtalk"`
 }
 
 type BotControlConfig struct {
@@ -792,20 +772,24 @@ type BotRouteConfig struct {
 
 // BotAllowlist 控制哪些用户可以使用 bot。
 type BotAllowlist struct {
-	Enabled         bool     `toml:"enabled"`
-	AllowAll        bool     `toml:"allow_all"`
-	QQUsers         []string `toml:"qq_users"`
-	FeishuUsers     []string `toml:"feishu_users"`
-	WeixinUsers     []string `toml:"weixin_users"`
-	QQApprovers     []string `toml:"qq_approvers"`
-	FeishuApprovers []string `toml:"feishu_approvers"`
-	WeixinApprovers []string `toml:"weixin_approvers"`
-	QQAdmins        []string `toml:"qq_admins"`
-	FeishuAdmins    []string `toml:"feishu_admins"`
-	WeixinAdmins    []string `toml:"weixin_admins"`
-	QQGroups        []string `toml:"qq_groups"`
-	FeishuGroups    []string `toml:"feishu_groups"`
-	WeixinGroups    []string `toml:"weixin_groups"`
+	Enabled           bool     `toml:"enabled"`
+	AllowAll          bool     `toml:"allow_all"`
+	QQUsers           []string `toml:"qq_users"`
+	FeishuUsers       []string `toml:"feishu_users"`
+	WeixinUsers       []string `toml:"weixin_users"`
+	QQApprovers       []string `toml:"qq_approvers"`
+	FeishuApprovers   []string `toml:"feishu_approvers"`
+	WeixinApprovers   []string `toml:"weixin_approvers"`
+	QQAdmins          []string `toml:"qq_admins"`
+	FeishuAdmins      []string `toml:"feishu_admins"`
+	WeixinAdmins      []string `toml:"weixin_admins"`
+	QQGroups          []string `toml:"qq_groups"`
+	FeishuGroups      []string `toml:"feishu_groups"`
+	WeixinGroups      []string `toml:"weixin_groups"`
+	DingtalkUsers     []string `toml:"dingtalk_users"`
+	DingtalkApprovers []string `toml:"dingtalk_approvers"`
+	DingtalkAdmins    []string `toml:"dingtalk_admins"`
+	DingtalkGroups    []string `toml:"dingtalk_groups"`
 }
 
 type BotPairingConfig struct {
@@ -860,6 +844,25 @@ type WeixinBotConfig struct {
 	AccountID string `toml:"account_id"`
 	TokenEnv  string `toml:"token_env"` // 环境变量名，如 WEIXIN_BOT_TOKEN
 	APIBase   string `toml:"api_base"`  // iLink API base URL
+}
+
+// DingtalkBotConfig 钉钉企业内部应用机器人（Stream 模式）配置。
+type DingtalkBotConfig struct {
+	Enabled          bool            `toml:"enabled"`
+	ClientID         string          `toml:"client_id"`          // 钉钉应用 AppKey（ClientID）
+	ClientSecret     string          `toml:"client_secret"`      // 钉钉应用 AppSecret（ClientSecret）
+	ClientIDEnv      string          `toml:"client_id_env"`      // 环境变量名，如 DINGTALK_CLIENT_ID
+	SecretEnv        string          `toml:"secret_env"`         // 环境变量名，如 DINGTALK_CLIENT_SECRET
+	BotName          string          `toml:"bot_name"`           // 机器人昵称；群聊 @ 剥离时匹配
+	RequireMention   bool            `toml:"require_mention"`    // 群聊是否必须 @ 机器人
+	Model            string          `toml:"model"`              // 会话模型；空 = 全局默认
+	ToolApprovalMode string          `toml:"tool_approval_mode"` // ask|auto|yolo；空 = 全局默认
+	WorkspaceRoot    string          `toml:"workspace_root"`     // 会话工作目录；空 = 启动 Bot 时的 cwd
+	Access           BotAccessConfig `toml:"access"`             // 该渠道访问控制（allowlist）
+	// SessionMappings 直配渠道的会话绑定（与 [[bot.connections]] 同构）。
+	// legacy [bot.dingtalk] 没有 connection 记录，/new 旋转后的新会话路径
+	// 持久化在这里，重启后仍能恢复（见 botruntime.rememberInbound）。
+	SessionMappings []BotConnectionSessionMapping `toml:"session_mappings"`
 }
 
 // BotConnectionConfig is the desktop-friendly connection record for IM bot
@@ -1009,12 +1012,22 @@ func (c *Config) NetworkProxyMode() string {
 // the global roots. ExcludedPaths hides matching discovery roots without deleting
 // folders. ~, relative paths, and ${VAR} expansion are supported. DisabledSkills
 // hides named skills from the agent prompt, slash invocation, and skill tools
-// while keeping them manageable.
+// while keeping them manageable. DisableImplicitInvocation keeps skills
+// discoverable to the host for explicit /skill use and management, but hides
+// their index and model-facing invocation tools.
 type SkillsConfig struct {
-	Paths          []string `toml:"paths"`
-	ExcludedPaths  []string `toml:"excluded_paths"`
-	DisabledSkills []string `toml:"disabled_skills"`
-	MaxDepth       int      `toml:"max_depth"`
+	Paths                     []string `toml:"paths"`
+	ExcludedPaths             []string `toml:"excluded_paths"`
+	DisabledSkills            []string `toml:"disabled_skills"`
+	DisableImplicitInvocation bool     `toml:"disable_implicit_invocation"`
+	MaxDepth                  int      `toml:"max_depth"`
+}
+
+// ImplicitSkillInvocationEnabled reports whether the model may discover and
+// invoke skills without an explicit user slash command. The zero value keeps
+// the historical default enabled for old configs.
+func (c *Config) ImplicitSkillInvocationEnabled() bool {
+	return c == nil || !c.Skills.DisableImplicitInvocation
 }
 
 // SkillCustomPaths returns the configured custom skill roots with ${VAR}
@@ -1229,14 +1242,18 @@ type AgentConfig struct {
 	// Deprecated compatibility fields. Old TOML and desktop clients may still
 	// send them, but config loading normalizes both to zero and rendering omits
 	// them. One-off CLI and unattended bot limits remain separate controls.
-	MaxSteps            int     `toml:"max_steps"`
-	PlannerMaxSteps     int     `toml:"planner_max_steps"`
-	Temperature         float64 `toml:"temperature"`
-	PlannerModel        string  `toml:"planner_model"`
+	MaxSteps        int     `toml:"max_steps"`
+	PlannerMaxSteps int     `toml:"planner_max_steps"`
+	Temperature     float64 `toml:"temperature"`
+	PlannerModel    string  `toml:"planner_model"`
+	WebSearchModel  string  `toml:"web_search_model"` // empty or auto preserves automatic search selection
+	// VisionModel is empty (off), "auto", or a canonical provider/model ref
+	// used to summarize images before a text-only executor turn.
+	VisionModel         string  `toml:"vision_model"`
 	GuardianModel       string  `toml:"guardian_model"`
 	GuardianTemperature float64 `toml:"guardian_temperature"`
-	// RecoveryModel optionally names a dedicated model for the independent
-	// recovery reviewer. Empty falls back to GuardianModel, then the main model.
+	// RecoveryModel names the optional recovery reviewer. Empty leaves
+	// rule-only recovery; it is not implied by guardian or the main model.
 	RecoveryModel string `toml:"recovery_model"`
 	// RecoveryTemperature is accepted from older configs but ignored. Auto
 	// Guard review is deterministic at temperature zero.
@@ -1246,6 +1263,13 @@ type AgentConfig struct {
 	SubagentEffort      string            `toml:"subagent_effort"`
 	SubagentEfforts     map[string]string `toml:"subagent_efforts"`
 	MaxSubagentDepth    int               `toml:"max_subagent_depth"`
+	// TaskCostBudget lands a task on one summary once it spends this much.
+	TaskCostBudget float64 `toml:"task_cost_budget"`
+	// TaskTimeBudgetMinutes is the same gate on wall clock. Both ship off.
+	TaskTimeBudgetMinutes float64 `toml:"task_time_budget_minutes"`
+	// GoalTokenBudget bounds an unattended Goal loop by cumulative tokens.
+	// Off unless set: a Goal runs until it finishes or you stop it.
+	GoalTokenBudget int `toml:"goal_token_budget"`
 	// MaxSubagentConcurrency bounds how many sub-agents (task, fleet items,
 	// profile skills, nested children) may run at once in one session.
 	// 0 means the default (6). Values outside 1–32 are clamped on load.
@@ -1270,14 +1294,15 @@ type AgentConfig struct {
 	// Deprecated compatibility field paired with AutoPlan. Old TOML remains
 	// readable, but loading clears it and rendering omits it.
 	AutoPlanClassifier string `toml:"auto_plan_classifier"`
-	// Compaction window fractions: soft = notice only, compact = trigger, force = hard ceiling.
+	// Soft/snip/force are retired compatibility keys; only CompactRatio is active.
 	SoftCompactRatio    float64 `toml:"soft_compact_ratio"`
 	ToolResultSnipRatio float64 `toml:"tool_result_snip_ratio"`
 	CompactRatio        float64 `toml:"compact_ratio"`
 	CompactForceRatio   float64 `toml:"compact_force_ratio"`
-	// Keep controls which compactable messages stay verbatim beyond the current
-	// user-fact/digest floor and recent tail. Empty uses the conservative default
-	// of keeping error tool results.
+	// ContextEditing is retired; native tool clearing is no longer an auto path.
+	ContextEditing string `toml:"context_editing"`
+	// Keep and RecentKeep are deprecated compatibility fields. They remain
+	// readable and writable but Harness-style compaction ignores them.
 	Keep       []string `toml:"keep"`
 	RecentKeep int      `toml:"recent_keep"`
 	// ColdResumePrune elides stale tool results when a session reopens past the
@@ -1286,20 +1311,25 @@ type AgentConfig struct {
 	// PlanModeReadOnlyCommands is retained for old config/session round trips. Main
 	// Plan bash calls now use the ordinary Permissions classifier and Sandbox.
 	PlanModeReadOnlyCommands []string `toml:"plan_mode_read_only_commands"`
+	LegacyAnchorSafetyGate   bool     `toml:"legacy_anchor_safety_gate"`  // user-global rollback to the full-read guard
+	CompletionValidation     string   `toml:"completion_validation"`      // retired; retained for old config reads
+	CompletionEvaluatorModel string   `toml:"completion_evaluator_model"` // retired; ignored
 }
 
 // ProviderEntry declares a model provider instance. ContextWindow is the model's
 // token budget; the harness compacts older history as a turn's prompt approaches
 // it (see agent compaction). 0 disables compaction for the instance.
 type ProviderEntry struct {
+	DisplayName   string            `toml:"display_name,omitempty"` // UI label; Name remains the stable routing identity.
 	Name          string            `toml:"name"`
 	Kind          string            `toml:"kind"`
 	BaseURL       string            `toml:"base_url"`
-	ChatURL       string            `toml:"chat_url"`
-	Model         string            `toml:"model"`      // a single model (back-compat)
-	Models        []string          `toml:"models"`     // a vendor's model list (one base_url/key, many models)
-	ModelsURL     string            `toml:"models_url"` // auto-fetch models from this URL on startup
-	Default       string            `toml:"default"`    // default model when Models is set (else Models[0])
+	ChatURL       string            `toml:"chat_url"`    // legacy OpenAI chat endpoint override; retained with its historical semantics
+	RequestURL    string            `toml:"request_url"` // exact provider request URL written by current settings UI
+	Model         string            `toml:"model"`       // a single model (back-compat)
+	Models        []string          `toml:"models"`      // a vendor's model list (one base_url/key, many models)
+	ModelsURL     string            `toml:"models_url"`  // auto-fetch models from this URL on startup
+	Default       string            `toml:"default"`     // default model when Models is set (else Models[0])
 	APIKeyEnv     string            `toml:"api_key_env"`
 	PresetID      string            `toml:"preset_id"`      // curated preset identity; UI-only metadata, not sent to model providers.
 	PresetVersion int               `toml:"preset_version"` // curated preset schema version for future migrations.
@@ -1312,17 +1342,27 @@ type ProviderEntry struct {
 	ResponsesMode string `toml:"responses_mode"`
 	// ResponsesStateful is the legacy boolean form retained for config
 	// compatibility. ResponsesMode wins when both are present.
-	ResponsesStateful *bool `toml:"responses_stateful"`
-	resolvedAPIKey    string
-	resolvedSource    CredentialSource
-	BalanceURL        string `toml:"balance_url"` // optional; a provider-specific wallet-balance endpoint (DeepSeek: https://api.deepseek.com/user/balance). Empty = no balance readout.
-	ContextWindow     int    `toml:"context_window"`
-	// MaxOutputTokens is a protocol-neutral total output budget. Zero lets the
-	// provider choose a safe default, a positive value is explicit, and a
-	// negative value omits optional wire limits. Anthropic still requires one.
+	ResponsesStateful  *bool `toml:"responses_stateful"`
+	resolvedAPIKey     string
+	credentialsFrozen  bool
+	credentialProxyURL string // runtime-only loopback transport, never persisted
+	resolvedSource     CredentialSource
+	BalanceURL         string `toml:"balance_url"` // optional; a provider-specific wallet-balance endpoint (DeepSeek: https://api.deepseek.com/user/balance). Empty = no balance readout.
+	ContextWindow      int    `toml:"context_window"`
+	// MaxOutputTokens is a protocol-neutral total output budget for one turn.
+	// Zero means official DeepSeek omits the field (server 384K ceiling) and
+	// other vendors keep their own defaults. Effort selects thinking depth only.
+	// A positive value is an explicit cost cap. A negative value omits optional
+	// wire limits when the protocol allows; official DeepSeek Anthropic still
+	// sends 384K because max_tokens is mandatory. Never feeds compact_ratio.
 	MaxOutputTokens int                          `toml:"max_output_tokens"`
 	Price           *provider.Pricing            `toml:"price"`  // legacy/provider-wide fallback
 	Prices          map[string]*provider.Pricing `toml:"prices"` // optional per-model prices; keys are model ids
+	// BillingCurrency is the frozen list-price currency (ISO-4217). Independent
+	// of [billing].display_currency; switching display never rewrites this.
+	BillingCurrency string `toml:"billing_currency"`
+	// BillingMode is payg (default) or subscription_equivalent (e.g. MiMo Token Plan).
+	BillingMode string `toml:"billing_mode"`
 
 	persistedOfficialCurrency string
 
@@ -1341,33 +1381,30 @@ type ProviderEntry struct {
 	// and image tokens are heavy — gating keeps text-only flows cheap (the prompt
 	// prefix is byte-identical with no image, so the cache is unaffected either way).
 	Vision bool `toml:"vision"`
-	// VisionModels narrows image input support to specific models in a multi-model
-	// provider. This lets one provider expose both text-only and multimodal chat
-	// models without enabling image payloads for every model.
+	// VisionModels is legacy; new settings use model-level ModelOverrides.Vision.
+	// Keep this field readable for existing configurations.
 	VisionModels []string `toml:"vision_models"`
 	// VisionDetail sets the openai image_url detail hint (low|high); empty = auto
 	// (the field is omitted). "low" caps an image to a fixed ~85 tokens for cheap
 	// coarse reads; ignored by providers without the knob (e.g. anthropic).
 	VisionDetail string `toml:"vision_detail"`
-	// WebSearch controls the provider-executed web_search tool for compatible
-	// Anthropic and Responses endpoints. Nil lets official DeepSeek endpoints use
-	// their product default; non-nil preserves an explicit user choice across
-	// config rewrites. DeepSeek returns web_search_tool_result blocks on the
-	// Anthropic wire and response.web_search_call events on the Responses wire.
+	// WebSearch enables independent search with this account. Nil uses the
+	// official DeepSeek default; explicit values and legacy native search
+	// history survive config rewrites.
 	WebSearch *bool `toml:"web_search"`
 	// ReasoningProtocol selects the request shape for OpenAI-compatible reasoning
 	// models. Empty/auto uses the model capability registry plus endpoint
-	// heuristics; glm selects GLM's thinking.type toggle; none disables automatic
-	// reasoning controls for this provider.
+	// heuristics. Explicit values select DeepSeek, GLM, Kimi K3, or standard
+	// OpenAI reasoning contracts; none disables automatic reasoning controls.
 	ReasoningProtocol string `toml:"reasoning_protocol"`
 	// SupportedEfforts lists the /effort levels this provider/model exposes.
-	// When non-empty, it overrides the built-in defaults derived from
-	// Kind/BaseURL and makes /effort configurable. "auto" is the implicit
-	// prefix — always accepted. DefaultEffort resolves it; omit DefaultEffort
-	// (or set one outside this list) to fall back to SupportedEfforts[0].
+	// Non-empty values override built-in Kind/BaseURL defaults except for fixed
+	// Kimi K3 reasoning. "auto" is the implicit prefix — always accepted.
+	// DefaultEffort resolves it; omit DefaultEffort (or set one outside this
+	// list) to fall back to SupportedEfforts[0].
 	SupportedEfforts []string `toml:"supported_efforts"`
 	// DefaultEffort is the /effort level used when the user picks "auto" or
-	// has not set Effort. Ignored when SupportedEfforts is empty.
+	// has not set Effort. Ignored for empty SupportedEfforts or fixed Kimi K3.
 	DefaultEffort string `toml:"default_effort"`
 	// ModelOverrides customizes capability metadata after ResolveModel selects a
 	// concrete model from a multi-model provider. Use it when a gateway exposes
@@ -1491,12 +1528,7 @@ func (e *ProviderEntry) DefaultModel() string {
 
 // HasModel reports whether m is one of the provider's models.
 func (e *ProviderEntry) HasModel(m string) bool {
-	for _, x := range e.ModelList() {
-		if x == m {
-			return true
-		}
-	}
-	return false
+	return slices.Contains(e.ModelList(), m)
 }
 
 // PriceForModel returns the configured per-1M-token price for model. Per-model
@@ -1555,11 +1587,6 @@ func (e *ProviderEntry) modelOverrideForModel(model string) (ProviderModelOverri
 	}
 	if ov, ok := e.ModelOverrides[model]; ok {
 		return ov, true
-	}
-	for k, ov := range e.ModelOverrides {
-		if strings.EqualFold(strings.TrimSpace(k), model) {
-			return ov, true
-		}
 	}
 	return ProviderModelOverride{}, false
 }
@@ -1703,49 +1730,6 @@ func (s MCPConfigSource) ProjectScoped() bool {
 	return s == MCPSourceProjectConfig || s == MCPSourceProjectMCPJSON
 }
 
-// PluginEntry declares an external MCP server. Type selects the transport:
-// "stdio" (default) launches Command/Args/Env as a subprocess; "http"
-// (a.k.a. streamable-http) and "sse" connect to a remote URL with optional
-// static Headers. String fields support ${VAR} / ${VAR:-default} expansion so
-// secrets (bearer tokens, keys) come from the environment, not the file. The
-// fields mirror Claude Code's mcpServers spec, so entries can come from either
-// reasonix.toml's [[plugins]] or a project-root .mcp.json (see loadMCPJSON).
-type PluginEntry struct {
-	Name    string            `toml:"name"`
-	Type    string            `toml:"type"` // "stdio" (default) | "http" | "sse"
-	Command string            `toml:"command"`
-	Args    []string          `toml:"args"`
-	Env     map[string]string `toml:"env"`
-	URL     string            `toml:"url"`
-	Headers map[string]string `toml:"headers"`
-	// StartupTimeoutSeconds overrides [tools].mcp_startup_timeout_seconds for
-	// initialize + tools/list. Zero keeps the global/default cap.
-	StartupTimeoutSeconds int `toml:"startup_timeout_seconds"`
-	// CallTimeoutSeconds overrides the default per-call deadline for this MCP
-	// server. Zero falls back to [tools].mcp_call_timeout_seconds.
-	CallTimeoutSeconds int `toml:"call_timeout_seconds"`
-	// ToolTimeoutSeconds overrides the per-call deadline for raw MCP tool names
-	// from this server. Keys are server-local tool names, not model-visible
-	// mcp__server__tool names.
-	ToolTimeoutSeconds map[string]int `toml:"tool_timeout_seconds"`
-	// AutoStart controls whether the server connects during session startup.
-	// Nil preserves historical behavior: configured servers start automatically.
-	AutoStart *bool `toml:"auto_start"`
-	// Tier is a legacy compatibility field. New config rendering omits it; enabled
-	// MCP servers connect automatically in the background unless auto_start=false.
-	// Historical values are accepted for old files:
-	//   "eager"      — blocks startup until the handshake completes; required for
-	//                  servers whose tools the system prompt depends on.
-	//   "lazy"       — legacy alias for background.
-	//   "background" — placeholder + spawn fired at boot but not waited on;
-	//                  swap happens once the spawn finishes.
-	// Empty defaults to "background" so enabled MCPs connect automatically
-	// without blocking chat. Unknown non-empty values fall back to "background".
-	Tier         string          `toml:"tier"`
-	Source       MCPConfigSource `toml:"-" json:"-"`
-	expansionEnv map[string]string
-}
-
 func (e PluginEntry) ShouldAutoStart() bool {
 	return e.AutoStart == nil || *e.AutoStart
 }
@@ -1824,11 +1808,12 @@ const LanguagePolicy = `Reply in the same language the user is using in their mo
 // Default returns the built-in default configuration.
 func Default() *Config {
 	return &Config{
-		ConfigVersion:    5,
+		ConfigVersion:    10,
 		DefaultModel:     "deepseek-flash",
 		CredentialsStore: CredentialsStoreAuto,
-		UI:               UIConfig{Theme: "auto"},
+		UI:               UIConfig{Theme: "auto", ShowTurnUsage: true},
 		Desktop:          DesktopConfig{DefaultToolApprovalMode: "auto", ConversationWidth: "standard"},
+		Billing:          BillingConfig{},
 		Notifications: NotificationsConfig{
 			Enabled:         false,
 			TurnDone:        true,
@@ -1839,13 +1824,15 @@ func Default() *Config {
 			SystemPrompt: DefaultSystemPrompt,
 			// Normal interactive execution has no configurable total round cap. It
 			// is bounded by adaptive progress guards and context compaction instead.
-			MaxSteps:               0,
-			PlannerMaxSteps:        0,
-			AutoPlan:               "off",
-			SoftCompactRatio:       0.5,
-			ToolResultSnipRatio:    0.6,
-			CompactRatio:           0.8,
-			CompactForceRatio:      0.9,
+			MaxSteps:        0,
+			PlannerMaxSteps: 0,
+			AutoPlan:        "off",
+			// Soft/snip/force are load-only compatibility; CompactRatio alone drives maintenance.
+			SoftCompactRatio:       0,
+			ToolResultSnipRatio:    0,
+			CompactRatio:           0.80,
+			CompactForceRatio:      0,
+			ContextEditing:         "",
 			MaxSubagentDepth:       2,
 			MaxSubagentConcurrency: 6,
 			MaxParallelWriters:     3,
@@ -1865,7 +1852,7 @@ func Default() *Config {
 		Network: NetworkConfig{ProxyMode: netclient.ModeAuto},
 		Bot: BotConfig{
 			ToolApprovalMode:   "ask",
-			MaxSteps:           25,
+			MaxSteps:           0,
 			DebounceMs:         1500,
 			QueueMode:          "steer",
 			QueueCap:           20,
@@ -1876,11 +1863,28 @@ func Default() *Config {
 			Allowlist:          BotAllowlist{Enabled: true},
 			QQ:                 QQBotConfig{AppSecretEnv: "QQ_BOT_APP_SECRET"},
 			Feishu:             FeishuBotConfig{Domain: "feishu", AppSecretEnv: "FEISHU_BOT_APP_SECRET", Mode: "webhook", WebhookPort: 8080, RequireMention: true},
+			Dingtalk:           DingtalkBotConfig{RequireMention: true},
 			Weixin:             WeixinBotConfig{AccountID: "default", TokenEnv: "WEIXIN_BOT_TOKEN", APIBase: "https://ilinkai.weixin.qq.com"},
 		},
+		// Main conversations use Chat Completions; independent web_search uses
+		// the official Messages endpoint with the same account.
 		Providers: []ProviderEntry{
-			{Name: "deepseek-flash", Kind: "openai", BaseURL: "https://api.deepseek.com", Model: "deepseek-v4-flash", APIKeyEnv: "DEEPSEEK_API_KEY", BalanceURL: "https://api.deepseek.com/user/balance", ContextWindow: 1_000_000, Price: deepSeekV4FlashPriceUSD()},
-			{Name: "deepseek-pro", Kind: "openai", BaseURL: "https://api.deepseek.com", Model: "deepseek-v4-pro", APIKeyEnv: "DEEPSEEK_API_KEY", BalanceURL: "https://api.deepseek.com/user/balance", ContextWindow: 1_000_000, Price: deepSeekV4ProPriceUSD()},
+			{
+				Name: "deepseek-flash", Kind: "openai", BaseURL: "https://api.deepseek.com",
+				Model: "deepseek-v4-flash", APIKeyEnv: "DEEPSEEK_API_KEY",
+				BalanceURL: "https://api.deepseek.com/user/balance", Thinking: "enabled",
+				WebSearch: boolPointer(true), SupportedEfforts: []string{"disabled", "low", "high", "max"}, DefaultEffort: "high",
+				ContextWindow: 1_000_000, Price: deepSeekV4FlashPriceUSD(),
+				BillingCurrency: "USD", BillingMode: "payg",
+			},
+			{
+				Name: "deepseek-pro", Kind: "openai", BaseURL: "https://api.deepseek.com",
+				Model: "deepseek-v4-pro", APIKeyEnv: "DEEPSEEK_API_KEY",
+				BalanceURL: "https://api.deepseek.com/user/balance", Thinking: "enabled",
+				WebSearch: boolPointer(true), SupportedEfforts: []string{"disabled", "low", "high", "max"}, DefaultEffort: "high",
+				ContextWindow: 1_000_000, Price: deepSeekV4ProPriceUSD(),
+				BillingCurrency: "USD", BillingMode: "payg",
+			},
 		},
 	}
 }
@@ -1914,10 +1918,24 @@ func (c *Config) Provider(name string) (*ProviderEntry, bool) {
 // without duplicating base_url/api_key_env. Single-`model` entries still resolve
 // by provider name, keeping older configs working unchanged.
 func (c *Config) ResolveModel(ref string) (*ProviderEntry, bool) {
+	if entry, ok := c.resolveCurrentModel(ref); ok {
+		return entry, true
+	}
+	target, err := c.resolveOpenCodeGoAlias(ref, false)
+	if err != nil || target == ref {
+		return nil, false
+	}
+	return c.resolveCurrentModel(target)
+}
+
+func (c *Config) resolveCurrentModel(ref string) (*ProviderEntry, bool) {
 	if ref == "" {
 		return nil, false
 	}
 	if access := desktopProviderAccessMap(c.Desktop.ProviderAccess); len(access) > 0 {
+		if access["deepseek"] && !canCanonicalizeLegacyDeepSeekProviders(c) {
+			delete(access, "deepseek")
+		}
 		ref = retargetDesktopOfficialRef(ref, access)
 	}
 	// "provider/model"
@@ -1957,6 +1975,9 @@ func (c *Config) ResolveModel(ref string) (*ProviderEntry, bool) {
 // configured provider — so preference isn't overwritten by iteration order.
 func (c *Config) ResolveModelWithFallback(ref string) (resolvedRef string, fallback bool, ok bool) {
 	ref = strings.TrimSpace(ref)
+	if c.ModelReferenceError(ref) != nil {
+		return "", false, false
+	}
 	if ref != "" {
 		if e, found := c.ResolveModel(ref); found {
 			return e.Name + "/" + e.Model, false, true
@@ -2071,7 +2092,7 @@ func (e *ProviderEntry) APIKey() string {
 	if e == nil {
 		return ""
 	}
-	if e.resolvedAPIKey != "" {
+	if e.credentialsFrozen || e.resolvedAPIKey != "" {
 		return e.resolvedAPIKey
 	}
 	if e.APIKeyEnv == "" {

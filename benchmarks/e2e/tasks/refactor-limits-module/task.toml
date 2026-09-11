@@ -1,0 +1,7 @@
+prompt = """quota.py and uploader.py hardcode the same magic numbers: 3 retry attempts and 8_388_608 max upload bytes. Refactor:
+- create limits.py defining MAX_RETRIES and MAX_UPLOAD_BYTES
+- quota.py and uploader.py must read the values from limits instead of hardcoding them
+- behavior must stay identical"""
+class = "refactor"
+max_steps = 20
+timeout_sec = 300

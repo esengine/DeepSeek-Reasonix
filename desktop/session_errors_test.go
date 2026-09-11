@@ -51,7 +51,7 @@ func TestFriendlySessionFileErrorMapsBlockedFileErrors(t *testing.T) {
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
 			got := friendlySessionFileError(tc.err)
-			if got != tc.want {
+			if !errors.Is(got, tc.want) {
 				t.Fatalf("friendlySessionFileError() = %v, want %v", got, tc.want)
 			}
 			if strings.Contains(got.Error(), secret) {
@@ -66,14 +66,17 @@ func TestFriendlySessionFileErrorPassesThroughOtherErrors(t *testing.T) {
 		t.Fatalf("nil should stay nil, got %v", err)
 	}
 	plain := errors.New("plain failure")
-	if got := friendlySessionFileError(plain); got != plain {
+	if got := friendlySessionFileError(plain); !errors.Is(got, plain) {
 		t.Fatalf("plain error rewritten to %v", got)
 	}
-	if got := friendlySessionFileError(errSessionBusyElsewhere); got != errSessionBusyElsewhere {
+	if got := friendlySessionFileError(errSessionBusyElsewhere); !errors.Is(got, errSessionBusyElsewhere) {
 		t.Fatalf("sanitized busy error rewritten to %v", got)
 	}
+	if got := friendlySessionFileError(agent.ErrSessionFileLockHeld); !errors.Is(got, errSessionBusyElsewhere) {
+		t.Fatalf("bounded session file lock error = %v, want %v", got, errSessionBusyElsewhere)
+	}
 	notExist := &os.PathError{Op: "lstat", Path: "gone.jsonl", Err: syscall.ENOENT}
-	if got := friendlySessionFileError(notExist); got != error(notExist) {
+	if got := friendlySessionFileError(notExist); !errors.Is(got, error(notExist)) {
 		t.Fatalf("not-exist error rewritten to %v", got)
 	}
 }
@@ -83,7 +86,7 @@ func TestFriendlySessionLoadErrorPreservesBudgetAndSanitizesDecoderDetails(t *te
 	limitErr := &agent.SessionReplayLimitError{
 		Path: path, Resource: "encoded_bytes", Value: 200, Limit: 100,
 	}
-	if got := friendlySessionLoadError(limitErr); got != limitErr {
+	if got := friendlySessionLoadError(limitErr); !errors.Is(got, limitErr) {
 		t.Fatalf("budget error = %v, want original path-free error", got)
 	}
 	if strings.Contains(limitErr.Error(), path) {

@@ -2,6 +2,7 @@
 
 import {
   apiKeyEnvFromProviderName,
+  createLatestRequestGate,
   inferredVisionModels,
   isLikelyChatModel,
   isLikelyVisionModel,
@@ -14,7 +15,9 @@ import {
   providerModelContextWindowDrafts,
   providerModelContextWindowIsSmall,
   providerRequiresKey,
+  removeProviderAccessesForMock,
 } from "../lib/providerModels";
+import type { ProviderView } from "../lib/types";
 
 let passed = 0;
 let failed = 0;
@@ -30,6 +33,21 @@ function eq(a: unknown, b: unknown, label: string) {
 }
 
 console.log("\nprovider model refresh");
+
+const requestGate = createLatestRequestGate();
+const firstRefresh = requestGate.begin("builtin:deepseek");
+const secondRefresh = requestGate.begin("builtin:deepseek");
+eq(
+  [requestGate.isCurrent("builtin:deepseek", firstRefresh), requestGate.isCurrent("builtin:deepseek", secondRefresh)],
+  [false, true],
+  "newer grouped-provider refresh invalidates an older in-flight completion",
+);
+requestGate.cancel("builtin:deepseek");
+eq(
+  requestGate.isCurrent("builtin:deepseek", secondRefresh),
+  false,
+  "provider edits invalidate an in-flight model refresh before it can publish stale state",
+);
 
 eq(
   mergedFetchedProviderModels(["coding-pro"], ["coding-pro", "chat", "vision"]),
@@ -133,6 +151,7 @@ const contextOverrides = [
     defaultEffort: "",
     vision: null,
     contextWindow: 32768,
+    maxOutputTokens: -1,
   },
   {
     model: "long-model",
@@ -173,6 +192,29 @@ eq(
   mergeProviderModelContextWindows([], ["invalid-model"], { "invalid-model": "Infinity" }),
   [],
   "drops non-finite model context values before crossing the desktop bridge",
+);
+
+eq(
+  mergeProviderModelContextWindows([
+    {
+      model: "output-only",
+      reasoningProtocol: "",
+      supportedEfforts: [],
+      defaultEffort: "",
+      vision: null,
+      maxOutputTokens: 4096,
+    },
+  ], ["output-only"], { "output-only": "" }),
+  [{
+    model: "output-only",
+    reasoningProtocol: "",
+    supportedEfforts: [],
+    defaultEffort: "",
+    vision: null,
+    contextWindow: 0,
+    maxOutputTokens: 4096,
+  }],
+  "keeps output-only model overrides while editing context windows",
 );
 
 eq(
@@ -236,6 +278,22 @@ eq(
   ],
   [false, true, true, false, true],
   "separates provider selectability from key presence for no-auth providers",
+);
+
+const mockProviders = [
+  { name: "deepseek", builtIn: true, added: true },
+  { name: "custom", builtIn: false, added: true },
+] as ProviderView[];
+const removedMockProviders = removeProviderAccessesForMock(mockProviders, ["deepseek", "custom"]);
+eq(
+  removedMockProviders.map(({ name, added }) => ({ name, added })),
+  [{ name: "deepseek", added: false }],
+  "mock access removal hides built-ins and deletes custom providers",
+);
+eq(
+  mockProviders.map(({ name, added }) => ({ name, added })),
+  [{ name: "deepseek", added: true }, { name: "custom", added: true }],
+  "mock access removal does not mutate the previous settings snapshot",
 );
 
 console.log(`\n${passed} passed, ${failed} failed, ${passed + failed} total`);

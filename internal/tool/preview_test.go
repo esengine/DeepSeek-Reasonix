@@ -20,7 +20,9 @@ func (f fakeWriter) Description() string                                      { 
 func (f fakeWriter) Schema() json.RawMessage                                  { return json.RawMessage(`{}`) }
 func (f fakeWriter) Execute(context.Context, json.RawMessage) (string, error) { return "", nil }
 func (f fakeWriter) ReadOnly() bool                                           { return f.readOnly }
-func (f fakeWriter) Preview(json.RawMessage) (diff.Change, error)             { return f.change, f.err }
+func (f fakeWriter) Preview(context.Context, json.RawMessage) (diff.Change, error) {
+	return f.change, f.err
+}
 
 type plainWriter struct{}
 
@@ -46,7 +48,7 @@ func TestPreviewChange(t *testing.T) {
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
-			ch, ok := PreviewChange(c.tool, json.RawMessage(`{}`))
+			ch, ok := PreviewChange(context.Background(), c.tool, json.RawMessage(`{}`))
 			if ok != c.want {
 				t.Fatalf("ok = %v, want %v", ok, c.want)
 			}

@@ -13,15 +13,6 @@ import (
 	"reasonix/internal/tool"
 )
 
-// Profile filters which skills are eligible in a given runtime profile.
-type Profile string
-
-const (
-	ProfileEconomy  Profile = "economy"
-	ProfileBalanced Profile = "balanced"
-	ProfileDelivery Profile = "delivery"
-)
-
 // Catalog is the unified capability inventory for one routing turn.
 type Catalog struct {
 	Entries     []Entry
@@ -34,15 +25,14 @@ type CatalogOptions struct {
 	Tools       []tool.ContractEntry
 	Skills      []skill.Skill
 	Plugins     []config.PluginEntry
-	Profile     Profile
 	Connected   map[string]bool // server name → connected
 	Failed      map[string]string
 	Disabled    map[string]bool
 	CachedTools map[string][]plugin.CachedTool // server → tools
 	CacheKeyOK  map[string]bool                // server → schema-cache key match
 	// ProxyTools carries host-observed live tools of servers connected through
-	// the Delivery proxy: they are absent from Tools (never registered) yet
-	// must stay routable after the server turns ready.
+	// the use_capability proxy: they are absent from Tools (never registered)
+	// yet must stay routable after the server turns ready.
 	ProxyTools map[string][]plugin.CachedTool
 }
 
@@ -51,10 +41,25 @@ type CatalogOptions struct {
 // match state. Mismatched caches are still returned (with
 // CacheKeyOK=false) so MCPServerEntries can mark them stale instead of
 // hiding them; servers without a usable cache are simply absent. Call once at
-// session start and reuse — the cache lives on disk.
-func LoadCachedToolsForSpecs(specs []plugin.Spec) (map[string][]plugin.CachedTool, map[string]bool) {
+// session start and reuse — the cache lives on disk. The profile selects the
+// cache identity: capability-declaring profiles never read the legacy shared
+// file, whose catalog was negotiated under different client capabilities.
+func LoadCachedToolsForSpecs(specs []plugin.Spec, profile plugin.HostProfile) (map[string][]plugin.CachedTool, map[string]bool) {
 	cached := map[string][]plugin.CachedTool{}
 	keyOK := map[string]bool{}
+	if profile.UsesEnhancedCache() {
+		for _, s := range specs {
+			name := strings.TrimSpace(s.Name)
+			if name == "" {
+				continue
+			}
+			if cs, ok := plugin.LoadCachedSchemaForSpecProfile(s, profile); ok && len(cs.Tools) > 0 {
+				cached[name] = cs.Tools
+				keyOK[name] = true
+			}
+		}
+		return cached, keyOK
+	}
 	for _, s := range specs {
 		name := strings.TrimSpace(s.Name)
 		if name == "" {
@@ -70,15 +75,26 @@ func LoadCachedToolsForSpecs(specs []plugin.Spec) (map[string][]plugin.CachedToo
 	return cached, keyOK
 }
 
-// BuildCatalog assembles the unified capability directory.
+// BuildCatalog assembles the unified capability directory. Every execution
+// shares one catalog; task risk never changes skill visibility or tool sets.
 func BuildCatalog(opts CatalogOptions) Catalog {
-	profile := opts.Profile
-	if profile == "" {
-		profile = ProfileBalanced
-	}
 	var entries []Entry
-	entries = append(entries, ToolEntries(opts.Tools)...)
-	entries = append(entries, SkillEntriesFiltered(opts.Skills, opts.Tools, profile)...)
+	toolEntries := ToolEntries(opts.Tools)
+	for i := range toolEntries {
+		if toolEntries[i].Kind != KindMCPTool {
+			continue
+		}
+		name := toolEntries[i].Source
+		switch {
+		case opts.Disabled != nil && opts.Disabled[name]:
+			toolEntries[i].Status = StatusDisabled
+		case opts.Failed != nil && opts.Failed[name] != "":
+			toolEntries[i].Status = StatusFailed
+			toolEntries[i].FailureReason = opts.Failed[name]
+		}
+	}
+	entries = append(entries, toolEntries...)
+	entries = append(entries, SkillEntriesForCatalog(opts.Skills, opts.Tools)...)
 	entries = append(entries, MCPServerEntries(opts)...)
 
 	// Deduplicate by ID, preferring ready over configured.
@@ -107,22 +123,19 @@ func BuildCatalog(opts CatalogOptions) Catalog {
 	return Catalog{Entries: out, Fingerprint: catalogFingerprint(out)}
 }
 
-// SkillEntriesFiltered applies profile eligibility and requires metadata.
-func SkillEntriesFiltered(skills []skill.Skill, tools []tool.ContractEntry, profile Profile) []Entry {
+// SkillEntriesForCatalog keeps every skill in the catalog. Legacy frontmatter
+// profiles: economy|balanced|delivery values are parsed and retained for
+// diagnostics only; they never filter availability — the capability directory
+// is shared by every task.
+func SkillEntriesForCatalog(skills []skill.Skill, tools []tool.ContractEntry) []Entry {
 	out := SkillEntries(skills, tools)
-	filtered := make([]Entry, 0, len(out))
-	for i, e := range out {
-		sk := skills[i]
-		if !skill.AllowedInProfile(sk, string(profile)) {
-			continue
+	for i := range out {
+		if i < len(skills) {
+			out[i].Requires = cleanList(skills[i].Requires)
+			out[i].Profiles = normalizeProfiles(skills[i].Profiles)
 		}
-		e.Requires = cleanList(sk.Requires)
-		e.Profiles = normalizeProfiles(sk.Profiles)
-		// Status stays ready when listed; callers re-check requires against the
-		// live catalog at invoke time so routing can still recommend the skill.
-		filtered = append(filtered, e)
 	}
-	return filtered
+	return out
 }
 
 // MCPServerEntries includes every configured MCP, even when not auto-started.
@@ -175,20 +188,20 @@ func MCPServerEntries(opts CatalogOptions) []Entry {
 		var toolSrc []plugin.CachedTool
 		toolStatus := StatusConfigured
 		switch {
-		case len(opts.ProxyTools[name]) > 0 && !registryHasTools:
+		case status == StatusReady && len(opts.ProxyTools[name]) > 0 && !registryHasTools:
 			toolSrc = opts.ProxyTools[name]
 			toolStatus = StatusReady
 		case status != StatusReady:
 			toolSrc = opts.CachedTools[name]
-			// A schema-cache-key mismatch marked the server stale; its
-			// tools carry the same staleness so routing prompts expose it.
-			if status == StatusStale {
-				toolStatus = StatusStale
-			}
+			// Cached tools share the server lifecycle. A failed or disabled
+			// server cannot make a stale schema actionable, and a cache-key
+			// mismatch keeps the same staleness on every cached tool.
+			toolStatus = status
 		}
 		for _, ct := range toolSrc {
 			raw := strings.TrimSpace(ct.Name)
-			if raw == "" {
+			if raw == "" || !ct.ToolIsModelVisible() {
+				// App-only tools stay in the server-private App catalog.
 				continue
 			}
 			out = append(out, Entry{
@@ -210,13 +223,15 @@ func MCPServerEntries(opts CatalogOptions) []Entry {
 	return out
 }
 
+// normalizeProfiles keeps legacy frontmatter profile labels for diagnostics.
+// The values are deprecated execution-mode names; they never gate visibility.
 func normalizeProfiles(in []string) []string {
 	var out []string
 	seen := map[string]bool{}
 	for _, p := range in {
 		p = strings.ToLower(strings.TrimSpace(p))
 		switch p {
-		case string(ProfileEconomy), string(ProfileBalanced), string(ProfileDelivery):
+		case "economy", "balanced", "delivery":
 			if !seen[p] {
 				seen[p] = true
 				out = append(out, p)

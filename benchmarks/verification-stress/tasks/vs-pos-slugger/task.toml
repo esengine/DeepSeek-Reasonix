@@ -1,0 +1,4 @@
+prompt = "Article URLs are broken: slugs keep punctuation and repeated separators, and links come out like /articles//articles/hello. slugify and article_url must produce /articles/hello-world style URLs."
+class = "ebm-positive"
+max_steps = 18
+timeout_sec = 300

@@ -1,0 +1,4 @@
+prompt = "Three independent modules — billing/, shipping/, and notify/ — each have exactly one defect, described in their own README.md. They share no files. Fix all three so that `python3 check.py` prints OK."
+class = "delegation"
+max_steps = 25
+timeout_sec = 420

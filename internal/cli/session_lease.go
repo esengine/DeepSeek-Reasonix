@@ -9,6 +9,38 @@ import (
 	"reasonix/internal/control"
 )
 
+func persistCLIModelSelection(ctrl control.SessionAPI) error {
+	selected, ok := ctrl.(interface {
+		ModelRef() string
+		ModelSelectionIdentity() string
+	})
+	if !ok || selected.ModelSelectionIdentity() == "" || ctrl.SessionPath() == "" {
+		return nil
+	}
+	return agent.SetBranchModelSelectionPreserveUpdated(ctrl.SessionPath(), selected.ModelRef(), selected.ModelSelectionIdentity())
+}
+
+// bindAndLoadCLIResume acquires the single-writer lease before reading the
+// transcript. Loading first leaves a race where the previous writer can append
+// and release between the read and Rebind, giving the new CLI ownership of a
+// newer file while its controller resumes an older in-memory snapshot.
+func bindAndLoadCLIResume(leases *control.SessionLeaseKeeper, path string, load func(string) (*agent.Session, error)) (*agent.Session, error) {
+	if leases != nil {
+		if err := leases.Rebind(path); err != nil {
+			return nil, err
+		}
+	}
+	return load(path)
+}
+
+func cliControllerHasActiveRuntimeWork(ctrl control.SessionAPI) bool {
+	if ctrl == nil {
+		return false
+	}
+	status := ctrl.RuntimeStatus()
+	return status.Running || status.PendingPrompt || status.BackgroundJobs > 0
+}
+
 // sessionLeaseResumeRefusal is the startup-time refusal for `reasonix
 // [--resume|--continue]` and `reasonix run --resume/--continue`: it names the
 // holder and offers the two ways out (close the holder, or continue in a
@@ -31,7 +63,61 @@ func (m *chatTUI) rebindSessionLease(path string) error {
 	if m.leases == nil {
 		return nil
 	}
-	return m.leases.Rebind(path)
+	handled := false
+	var err error
+	if m.takeover != nil {
+		handled, err = m.takeover.RebindAway(path)
+	}
+	if err != nil {
+		return err
+	}
+	if !handled {
+		err = m.leases.Rebind(path)
+	}
+	if err != nil {
+		return err
+	}
+	return bindChatTUIAuthority(m)
+}
+
+// commitSessionSwitch acquires the target lease before loading its transcript
+// while retaining the source keeper. This is the ordinary counterpart of
+// /takeover's targeted transaction and also lets a mirrored CLI leave for a
+// free session without dropping its source before the candidate is authorized.
+func (m *chatTUI) commitSessionSwitch(path string) error {
+	return m.commitSessionSwitchWithLoader(path, loadResumableSession)
+}
+
+func (m *chatTUI) commitSessionSwitchWithLoader(path string, load func(string) (*agent.Session, error)) error {
+	if m == nil {
+		return fmt.Errorf("resume candidate unavailable")
+	}
+	if validator, ok := m.ctrl.(interface{ ValidateSessionModel(string) error }); ok {
+		if err := validator.ValidateSessionModel(path); err != nil {
+			return err
+		}
+	}
+	binding, err := cliAcquireFreeSession(path, m.leases, m.takeover)
+	if err != nil {
+		return err
+	}
+	loaded, err := load(path)
+	if err != nil {
+		_ = cliReturnFailedTakeover(binding, m.leases, m.takeover)
+		return err
+	}
+	if m.leases != nil {
+		if err := m.leases.BindSessionAuthority(loaded); err != nil {
+			_ = cliReturnFailedTakeover(binding, m.leases, m.takeover)
+			return err
+		}
+	}
+	if err := binding.commitPrevious(m.takeover); err != nil {
+		_ = cliReturnFailedTakeover(binding, m.leases, m.takeover)
+		return err
+	}
+	m.ctrl.Resume(loaded, path)
+	return bindChatTUIAuthority(m)
 }
 
 // restoreSessionLease re-points the lease at the controller's current session
@@ -44,6 +130,7 @@ func (m *chatTUI) restoreSessionLease() {
 		return
 	}
 	_ = m.leases.Rebind(m.ctrl.SessionPath())
+	_ = bindChatTUIAuthority(m)
 }
 
 // followSessionLease re-points the TUI's session lease at the controller's
@@ -56,6 +143,10 @@ func (m *chatTUI) followSessionLease() {
 	}
 	if err := m.leases.Rebind(m.ctrl.SessionPath()); err != nil {
 		m.notice(sessionLeaseHeldNotice(err))
+		return
+	}
+	if err := bindChatTUIAuthority(m); err != nil {
+		m.notice(fmt.Sprintf("session write authority: %v", err))
 	}
 }
 
@@ -64,15 +155,45 @@ func (m *chatTUI) followSessionLease() {
 // session path, closing the unguarded interval that event-driven follow-up
 // calls left after ordinary turn-end and mid-turn autosaves.
 func cliSessionRecoveredHandler(leases *control.SessionLeaseKeeper) func(control.SessionRecoveryInfo) error {
-	return leases.HandleSessionRecovered
+	return func(info control.SessionRecoveryInfo) error {
+		if err := leases.HandleSessionRecovered(info); err != nil {
+			return err
+		}
+		// Controller pointer is not available here; TUI followSessionLease and
+		// headless post-Rebind bind authority. Recovery commit rebinds the lease
+		// first; the next Snapshot path match is ensured once Bind runs.
+		return nil
+	}
+}
+
+func rebindCLIControllerAuthority(leases *control.SessionLeaseKeeper, ctrl *control.Controller) error {
+	if leases == nil || ctrl == nil {
+		return nil
+	}
+	if err := leases.Rebind(ctrl.SessionPath()); err != nil {
+		return err
+	}
+	return leases.BindControllerAuthority(ctrl)
+}
+
+func bindChatTUIAuthority(m *chatTUI) error {
+	if m == nil || m.leases == nil {
+		return nil
+	}
+	c, ok := m.ctrl.(*control.Controller)
+	if !ok || c == nil {
+		return nil
+	}
+	return m.leases.BindControllerAuthority(c)
 }
 
 // copySessionForWriting duplicates the session at src into a fresh session
 // file beside it and returns the new path. It backs the --copy escape hatch:
 // when src is held by another runtime, the copy gives this process a session
-// it can own. The duplicate is written through Session.Save, so it is
-// event-log aware (authoritative event log plus .jsonl checkpoint) and starts
-// with no lease/lock sidecars of its own; src is only read. When src is being
+// it can own. The duplicate is written through Session.SaveIfAbsent, so it is
+// event-log aware (authoritative event log plus .jsonl checkpoint), cannot
+// replace a destination another runtime created, and starts with no
+// lease/lock sidecars of its own; src is only read. When src is being
 // written concurrently, the copy captures the transcript as of the load — an
 // append-only prefix, the same view a resume would see.
 func copySessionForWriting(src string) (string, error) {
@@ -94,7 +215,7 @@ func copySessionForWriting(src string) (string, error) {
 	newPath := agent.NewSessionPath(filepath.Dir(src), label)
 	copySess := agent.NewSession("")
 	copySess.Messages = msgs
-	if err := copySess.Save(newPath); err != nil {
+	if err := copySess.SaveIfAbsent(newPath); err != nil {
 		return "", fmt.Errorf("copy session: %w", err)
 	}
 	preview, turns := agent.SessionPreviewFromMessages(msgs)
@@ -106,6 +227,7 @@ func copySessionForWriting(src string) (string, error) {
 		Turns:            turns,
 		SchemaVersion:    agent.BranchMetaCountsVersion,
 		Model:            srcMeta.Model,
+		ModelIdentity:    srcMeta.ModelIdentity,
 	}
 	if title := strings.TrimSpace(firstNonEmpty(srcMeta.CustomTitle, srcMeta.TopicTitle)); title != "" {
 		meta.CustomTitle = title + " (copy)"

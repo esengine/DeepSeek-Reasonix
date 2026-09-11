@@ -348,6 +348,7 @@ func (m *chatTUI) refreshSkillPickerData() {
 	st := m.skillStore()
 	skills := st.List()
 	m.skills = skills
+	m.invalidateSlashCatalog()
 	if m.skillPick != nil {
 		sorted := sortedSkills(skills)
 		m.skillPick.skills = sorted

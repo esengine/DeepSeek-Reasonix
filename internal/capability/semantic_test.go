@@ -70,3 +70,17 @@ func TestSemanticRouterRecordsPricedUsage(t *testing.T) {
 		t.Fatalf("usage event model ref = %q", usageEvent.ModelRef)
 	}
 }
+
+func TestMergeSemanticIDsSkipsUnavailableEntries(t *testing.T) {
+	catalog := Catalog{Entries: []Entry{
+		{ID: "mcp-tool:failed", Kind: KindMCPTool, Status: StatusFailed},
+		{ID: "mcp-server:disabled", Kind: KindMCPServer, Status: StatusDisabled},
+		{ID: "skill:ready", Kind: KindSkill, Status: StatusReady},
+	}}
+	decision := mergeSemanticIDs(RouteDecision{}, catalog, []string{
+		"mcp-tool:failed", "mcp-server:disabled", "skill:ready",
+	}, "test")
+	if len(decision.Candidates) != 1 || decision.Candidates[0].Entry.ID != "skill:ready" {
+		t.Fatalf("semantic candidates = %+v, want only ready entry", decision.Candidates)
+	}
+}

@@ -383,10 +383,7 @@ func (m *chatTUI) composerCaretAt(screenX, screenY int, clamp bool) (composerCar
 		relY = m.input.Height() - 1
 	}
 	rows := m.composerRows()
-	visualRow := m.composerViewOffset() + relY
-	if visualRow < 0 {
-		visualRow = 0
-	}
+	visualRow := max(m.composerViewOffset()+relY, 0)
 	if visualRow >= len(rows) {
 		visualRow = len(rows) - 1
 	}
@@ -398,7 +395,7 @@ func (m *chatTUI) setComposerCursor(offset int) {
 	rows := m.composerRows()
 	caret := composerCaretForOffset(rows, offset)
 	m.input.MoveToBegin()
-	for i := 0; i < caret.visualRow; i++ {
+	for range caret.visualRow {
 		m.input.CursorDown()
 	}
 	m.input.SetCursorColumn(caret.logicalCol)

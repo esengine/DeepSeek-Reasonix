@@ -6,6 +6,7 @@ import { DiagnosticsSettingsPage } from "../components/DiagnosticsSettingsPage";
 import type { AppBindings } from "../lib/bridge";
 import { LocaleProvider } from "../lib/i18n";
 import type { CapabilityDiagnosticsReport, SettingsTab } from "../lib/types";
+import { installDesktopHostStub } from "./desktopHostStub";
 
 function ok(value: unknown, message: string) {
   if (!value) throw new Error(message);
@@ -126,7 +127,7 @@ console.log("diagnostics settings page");
   // Prefer English labels for stable button text assertions.
   window.localStorage.setItem("reasonix-lang", "en");
 
-  window.go = {
+  const desktopStub = installDesktopHostStub(({
     main: {
       App: {
         CapabilityDiagnostics: async (includeSessionRuntime: boolean) => {
@@ -135,7 +136,7 @@ console.log("diagnostics settings page");
         },
       } as Partial<AppBindings> as AppBindings,
     },
-  };
+  }).main.App);
 
   const rootEl = document.getElementById("root");
   if (!rootEl) throw new Error("missing root");
@@ -160,6 +161,9 @@ console.log("diagnostics settings page");
   ok(calls[0] === false, "initial load must request static report (includeSessionRuntime=false)");
   ok((rootEl.textContent || "").includes("skill.missing_description"), "warnings must render");
   ok(rootEl.querySelector(".diag-summary"), "health summary must render");
+  const frontendToggle = rootEl.querySelector('[data-testid="frontend-diagnostics-settings"] [role="switch"]');
+  ok(frontendToggle, "frontend diagnostics switch must be visible in the production diagnostics settings page");
+  ok(frontendToggle?.getAttribute("aria-checked") === "false", "frontend diagnostics switch starts off");
 
   const runtimeToggle = rootEl.querySelector('input[type="checkbox"]') as HTMLInputElement | null;
   ok(runtimeToggle, "runtime toggle must exist");
@@ -213,13 +217,13 @@ console.log("diagnostics settings page");
   nullArrays.plugins = { packages: null };
   nullArrays.mcp = { servers: null };
 
-  window.go = {
+  const desktopStub = installDesktopHostStub(({
     main: {
       App: {
         CapabilityDiagnostics: async () => nullArrays as unknown as CapabilityDiagnosticsReport,
       } as Partial<AppBindings> as AppBindings,
     },
-  };
+  }).main.App);
 
   const rootEl = document.getElementById("root");
   if (!rootEl) throw new Error("missing root");

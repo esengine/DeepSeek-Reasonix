@@ -6,10 +6,12 @@ import (
 	"fmt"
 	"regexp"
 	"strings"
+	"time"
 
 	"reasonix/internal/i18n"
 	"reasonix/internal/provider"
 	"reasonix/internal/secrets"
+	"reasonix/internal/turnevent"
 )
 
 // explainError maps a provider HTTP failure to an actionable, localized message
@@ -19,31 +21,80 @@ func explainError(err error) error {
 	if err == nil {
 		return nil
 	}
+	// Filesystem errors can satisfy net.Error on some platforms. Preserve the
+	// storage sentinel before provider retry classification so a poisoned WAL
+	// is never reported as a model-stream disconnect.
+	if errors.Is(err, turnevent.ErrTurnLedgerUnavailable) {
+		return err
+	}
+	// The exhausted wait wraps its transport cause; explain the wait itself
+	// before the connect/status branches below explain that cause instead.
+	if wait := provider.AsRecoveryWaitExhausted(err); wait != nil {
+		return &explainedError{msg: explainRecoveryWait(wait), cause: err}
+	}
 	if provider.IsStreamInterrupted(err) {
-		return fmt.Errorf("model stream interrupted after recovery attempts: %s. The partial response was kept; retry or ask Reasonix to continue", err.Error())
+		return &explainedError{msg: fmt.Sprintf("model stream interrupted after recovery attempts: %s. The partial response was kept; retry or ask Reasonix to continue", err.Error()), cause: err}
 	}
 	if provider.IsConnReset(err) {
-		return fmt.Errorf("model stream disconnected before completion after retry attempts: %s. Check the provider/proxy connection, then retry or ask Reasonix to continue", err.Error())
+		return &explainedError{msg: fmt.Sprintf("model stream disconnected before completion after retry attempts: %s. Check the provider/proxy connection, then retry or ask Reasonix to continue", err.Error()), cause: err}
+	}
+	// An overflow without token numbers has nothing to quote; the generic 400
+	// branch below keeps the provider's own reason instead of zeros.
+	if limit := provider.AsContextLimitError(err); limit != nil && limit.WindowTokens > 0 {
+		msg := fmt.Sprintf(i18n.M.ProviderErrContextOverflowFmt, limit.PromptTokens, limit.CompletionTokens, limit.RequestedTokens, limit.WindowTokens)
+		if reason := apiErrorReason(limit.APIError); reason != "" {
+			msg = fmt.Sprintf("%s\n%s", msg, reason)
+		}
+		label := ""
+		if limit.APIError != nil {
+			label = provider.ProviderDisplayLabel(limit.APIError.Provider, limit.APIError.ProviderDisplayName, limit.APIError.Protocol)
+		}
+		return &explainedError{msg: providerFailureMessage(label, limit.APIError, msg), cause: err}
+	}
+	if quota := provider.AsQuotaError(err); quota != nil {
+		label := provider.ProviderDisplayLabel(quota.Provider, quota.ProviderDisplayName, quota.Protocol)
+		return &explainedError{msg: fmt.Sprintf(i18n.M.ProviderErrQuotaExhaustedFmt, label, quota.Status), cause: err}
 	}
 	var apiErr *provider.APIError
 	if errors.As(err, &apiErr) {
+		label := provider.ProviderDisplayLabel(apiErr.Provider, apiErr.ProviderDisplayName, apiErr.Protocol)
+		if provider.IsOpaqueBadRequest(err) {
+			if trace := provider.DiagnoseFailure(err).TraceID; trace != "" {
+				return &explainedError{msg: providerFailureMessage(label, apiErr, fmt.Sprintf("%s\nTrace ID: %s", i18n.M.ProviderErrReasonMissing, trace)), cause: err}
+			}
+			return &explainedError{msg: providerFailureMessage(label, apiErr, i18n.M.ProviderErrReasonMissing), cause: err}
+		}
 		if msg := providerContentSafetyMessage(apiErr); msg != "" {
 			if reason := apiErrorReason(apiErr); reason != "" {
-				return fmt.Errorf("%s\n%s", msg, reason)
+				msg = fmt.Sprintf("%s\n%s", msg, reason)
 			}
-			return errors.New(msg)
+			return &explainedError{msg: providerFailureMessage(label, apiErr, msg), cause: err}
 		}
 		msg := i18n.M.ProviderStatusMessage(apiErr.Status)
 		if msg == "" {
 			return err
 		}
 		if reason := apiErrorReason(apiErr); reason != "" {
-			return fmt.Errorf("%s\n%s", msg, reason)
+			msg = fmt.Sprintf("%s\n%s", msg, reason)
 		}
-		return errors.New(msg)
+		return &explainedError{msg: providerFailureMessage(label, apiErr, msg), cause: err}
 	}
 	var authErr *provider.AuthError
 	if errors.As(err, &authErr) {
+		label := provider.ProviderDisplayLabel(authErr.Provider, authErr.ProviderDisplayName, authErr.Protocol)
+		reason := redactAuthReason(providerBodyReason(authErr.Body))
+		if modelFormatMismatchReason(reason) {
+			details := []string{i18n.M.ProviderErrModelFormatMismatch}
+			lower := strings.ToLower(reason)
+			isOpenCodeGo := strings.Contains(strings.ToLower(authErr.Provider), "opencode-go") || strings.EqualFold(authErr.KeyEnv, "OPENCODE_GO_API_KEY")
+			if isOpenCodeGo && strings.Contains(lower, "grok-4.5") && strings.Contains(lower, "format anthropic") {
+				details = append(details, i18n.M.ProviderErrOpenCodeGoGrokRoute)
+			}
+			if reason != "" {
+				details = append(details, reason)
+			}
+			return &explainedError{msg: providerFailureMessage(label, authErr, strings.Join(details, "\n")), cause: err}
+		}
 		msg := i18n.M.ProviderErrAuth
 		if authErr.HasKey {
 			msg = i18n.M.ProviderErrAuthRejected
@@ -57,12 +108,56 @@ func explainError(err error) error {
 		// Relays explain *why* auth failed in the body ("token expired", key
 		// not entitled to the model) — as diagnostic here as on APIError, but
 		// auth bodies also echo credentials, so scrub key material first.
-		if reason := redactAuthReason(providerBodyReason(authErr.Body)); reason != "" {
-			return fmt.Errorf("%s\n%s", msg, reason)
+		if reason != "" {
+			msg = fmt.Sprintf("%s\n%s", msg, reason)
 		}
-		return errors.New(msg)
+		return &explainedError{msg: providerFailureMessage(label, authErr, msg), cause: err}
 	}
 	return err
+}
+
+func providerFailureMessage(label string, source any, message string) string {
+	hasDisplayIdentity := false
+	switch value := source.(type) {
+	case *provider.APIError:
+		hasDisplayIdentity = value != nil && (strings.TrimSpace(value.ProviderDisplayName) != "" || strings.TrimSpace(value.Protocol) != "")
+	case *provider.AuthError:
+		hasDisplayIdentity = value != nil && (strings.TrimSpace(value.ProviderDisplayName) != "" || strings.TrimSpace(value.Protocol) != "")
+	}
+	if !hasDisplayIdentity || strings.TrimSpace(label) == "" {
+		return message
+	}
+	return label + ": " + message
+}
+
+// explainedError shows the localized message while keeping the typed cause
+// reachable, so DiagnoseFailure on the TurnDone error still classifies it.
+type explainedError struct {
+	msg   string
+	cause error
+}
+
+func (e *explainedError) Error() string { return e.msg }
+func (e *explainedError) Unwrap() error { return e.cause }
+
+func explainRecoveryWait(wait *provider.RecoveryWaitExhaustedError) string {
+	lines := []string{fmt.Sprintf(i18n.M.ProviderErrWaitExhaustedFmt, wait.Waited.Round(time.Second))}
+	var apiErr *provider.APIError
+	switch {
+	case errors.As(wait.Cause, &apiErr):
+		lines = append(lines, fmt.Sprintf("HTTP %d", apiErr.Status))
+		if reason := apiErrorReason(apiErr); reason != "" {
+			lines = append(lines, reason)
+		}
+	case wait.Cause != nil:
+		lines = append(lines, wait.Cause.Error())
+	}
+	return strings.Join(lines, "\n")
+}
+
+func modelFormatMismatchReason(reason string) bool {
+	lower := strings.ToLower(strings.TrimSpace(reason))
+	return strings.Contains(lower, "model") && strings.Contains(lower, "not supported for format")
 }
 
 // apiErrorReason returns the provider's verbatim reason for a failed request —

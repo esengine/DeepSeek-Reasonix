@@ -49,7 +49,7 @@ func TestDeleteSubagentsByParentSweepsEventLogLeftovers(t *testing.T) {
 	}
 }
 
-func TestSubagentForceSaveStaysSingleFile(t *testing.T) {
+func TestSubagentSaveUsesDurableEventLog(t *testing.T) {
 	sessionDir := t.TempDir()
 	subDir := filepath.Join(sessionDir, "subagents")
 	if err := os.MkdirAll(subDir, 0o755); err != nil {
@@ -63,7 +63,10 @@ func TestSubagentForceSaveStaysSingleFile(t *testing.T) {
 	if err := s.Save(path); err != nil {
 		t.Fatalf("second Save: %v", err)
 	}
-	if _, err := os.Stat(store.SessionEventLog(path)); !os.IsNotExist(err) {
-		t.Fatalf("repeated force saves created an event log (err=%v)", err)
+	if _, err := os.Stat(store.SessionEventLog(path)); err != nil {
+		t.Fatalf("subagent event log missing after save: %v", err)
+	}
+	if _, err := os.Stat(store.SessionEventIndex(path)); err != nil {
+		t.Fatalf("subagent event index missing after save: %v", err)
 	}
 }

@@ -43,7 +43,8 @@ type SubagentScheduler struct {
 
 	activeTotal   int
 	activeWriters int
-	activeClaims  []WritePathSet
+	activeLive    []liveClaim
+	nextClaimID   int64
 	// parentClaims are write paths held by the parent agent during a write-tool
 	// Execute. They block overlapping subagent claims without consuming a
 	// subagent concurrency slot (parent is not a subagent).
@@ -57,6 +58,7 @@ type schedulerWaiter struct {
 	req    AcquireRequest
 	ready  chan struct{}
 	failed error
+	id     int64
 }
 
 // NewSubagentScheduler builds a scheduler with the given limits (normalized).
@@ -80,22 +82,28 @@ func (s *SubagentScheduler) Limits() (total, writers int) {
 // The returned release function must be called exactly once when the sub-agent
 // finishes. release is safe to call even if Acquire returns an error (no-op).
 func (s *SubagentScheduler) Acquire(ctx context.Context, req AcquireRequest) (release func(), err error) {
+	release, _, err = s.AcquireWithID(ctx, req)
+	return release, err
+}
+
+// AcquireWithID is Acquire plus the live claim id used by Realize/MarkOpaque.
+func (s *SubagentScheduler) AcquireWithID(ctx context.Context, req AcquireRequest) (release func(), claimID int64, err error) {
 	noop := func() {}
 	if s == nil {
-		return noop, nil
+		return noop, 0, nil
 	}
 	if ctx == nil {
 		ctx = context.Background()
 	}
 
 	s.mu.Lock()
-	if ok, reason := s.canStartLocked(req); ok {
-		s.activateLocked(req)
+	if ok, reason := s.canStartIncomingLocked(req); ok {
+		id := s.activateLocked(req)
 		s.mu.Unlock()
-		return s.makeRelease(req), nil
+		return s.makeReleaseID(id), id, nil
 	} else if req.Nested {
 		s.mu.Unlock()
-		return noop, fmt.Errorf("subagent concurrency limit reached (%s); nested subagents fail fast to avoid parent/child slot deadlock", reason)
+		return noop, 0, fmt.Errorf("subagent concurrency limit reached (%s); nested subagents fail fast to avoid parent/child slot deadlock", reason)
 	}
 
 	w := &schedulerWaiter{req: req, ready: make(chan struct{})}
@@ -105,22 +113,22 @@ func (s *SubagentScheduler) Acquire(ctx context.Context, req AcquireRequest) (re
 	select {
 	case <-w.ready:
 		if w.failed != nil {
-			return noop, w.failed
+			return noop, 0, w.failed
 		}
-		return s.makeRelease(req), nil
+		return s.makeReleaseID(w.id), w.id, nil
 	case <-ctx.Done():
 		s.mu.Lock()
 		s.removeWaiterLocked(w)
+		s.pumpWaitersLocked()
 		s.mu.Unlock()
-		// If we were activated between cancel and remove, release.
 		select {
 		case <-w.ready:
 			if w.failed == nil {
-				s.makeRelease(req)()
+				s.makeReleaseID(w.id)()
 			}
 		default:
 		}
-		return noop, ctx.Err()
+		return noop, 0, ctx.Err()
 	}
 }
 
@@ -134,6 +142,58 @@ func (s *SubagentScheduler) TryClaimWritePaths(paths WritePathSet) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	return s.conflictLocked(paths)
+}
+
+// Realize records path-bound writes against an active claim. Directory and
+// whole-workspace declarations shrink to the realized files when no opaque
+// mutation has occurred. Same-file realizes from two live writers fail.
+func (s *SubagentScheduler) Realize(id int64, paths WritePathSet) error {
+	if s == nil || id == 0 || paths.Empty() {
+		return nil
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	idx := s.liveIndexLocked(id)
+	if idx < 0 {
+		return fmt.Errorf("write path is claimed by a running background subagent; wait for it to finish before writing the same path")
+	}
+	claim := s.activeLive[idx]
+	if claim.opaque {
+		return nil
+	}
+	nextPaths := mergeRealized(claim.realized, paths)
+	next := fileReservation(claim.declared.WorkspaceRoot, nextPaths)
+	if err := s.conflictAgainstOthersLocked(id, next); err != nil {
+		return err
+	}
+	claim.realized = nextPaths
+	s.activeLive[idx] = claim
+	s.pumpWaitersLocked()
+	return nil
+}
+
+// MarkOpaque upgrades a live claim to a whole-workspace reservation (bash/MCP).
+func (s *SubagentScheduler) MarkOpaque(id int64) error {
+	if s == nil || id == 0 {
+		return nil
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	idx := s.liveIndexLocked(id)
+	if idx < 0 {
+		return fmt.Errorf("write path is claimed by a running background subagent; wait for it to finish before writing the same path")
+	}
+	claim := s.activeLive[idx]
+	if claim.opaque {
+		return nil
+	}
+	next := wholeReservation(claim.declared.WorkspaceRoot)
+	if err := s.conflictAgainstOthersLocked(id, next); err != nil {
+		return err
+	}
+	claim.opaque = true
+	s.activeLive[idx] = claim
+	return nil
 }
 
 // ReserveParentWrite holds paths against overlapping subagent claims for the
@@ -172,39 +232,74 @@ func (s *SubagentScheduler) ActiveWriterClaims() []WritePathSet {
 	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	out := make([]WritePathSet, 0, len(s.activeClaims)+len(s.parentClaims))
-	out = append(out, s.activeClaims...)
+	out := make([]WritePathSet, 0, len(s.activeLive)+len(s.parentClaims))
+	for _, live := range s.activeLive {
+		if !live.writer {
+			continue
+		}
+		res := live.reservation()
+		if res.Empty() {
+			if live.declared.Empty() {
+				continue
+			}
+			res = live.declared
+		}
+		out = append(out, res)
+	}
 	out = append(out, s.parentClaims...)
 	return out
 }
 
 func (s *SubagentScheduler) conflictLocked(paths WritePathSet) error {
+	if paths.WholeWorkspace {
+		for _, live := range s.activeLive {
+			if live.writer {
+				return fmt.Errorf("write path is claimed by a running background subagent; wait for it to finish before writing the same path")
+			}
+		}
+	}
+	return s.conflictAgainstOthersLocked(0, paths)
+}
+
+func (s *SubagentScheduler) conflictAgainstOthersLocked(skipID int64, paths WritePathSet) error {
 	if paths.Empty() {
 		return nil
 	}
-	for _, active := range s.activeClaims {
-		if active.Overlaps(paths) {
+	for _, live := range s.activeLive {
+		if live.id == skipID {
+			continue
+		}
+		if ScheduleOverlaps(live.reservation(), paths) {
 			return fmt.Errorf("write path is claimed by a running background subagent; wait for it to finish before writing the same path")
 		}
 	}
 	for _, active := range s.parentClaims {
-		if active.Overlaps(paths) {
+		if ScheduleOverlaps(active, paths) {
 			return fmt.Errorf("write path is claimed by another parent write in progress")
 		}
 	}
 	return nil
 }
 
-func (s *SubagentScheduler) makeRelease(req AcquireRequest) func() {
+func (s *SubagentScheduler) makeReleaseID(id int64) func() {
 	var once sync.Once
 	return func() {
 		once.Do(func() {
 			s.mu.Lock()
-			s.deactivateLocked(req)
+			s.deactivateIDLocked(id)
 			s.pumpWaitersLocked()
 			s.mu.Unlock()
 		})
 	}
+}
+
+func (s *SubagentScheduler) liveIndexLocked(id int64) int {
+	for i, live := range s.activeLive {
+		if live.id == id {
+			return i
+		}
+	}
+	return -1
 }
 
 func (s *SubagentScheduler) canStartLocked(req AcquireRequest) (bool, string) {
@@ -217,41 +312,49 @@ func (s *SubagentScheduler) canStartLocked(req AcquireRequest) (bool, string) {
 	if s.activeWriters >= s.maxWriters {
 		return false, fmt.Sprintf("writer concurrency %d/%d", s.activeWriters, s.maxWriters)
 	}
-	for _, active := range s.activeClaims {
-		if active.Overlaps(req.WritePaths) {
+	if req.WritePaths.WholeWorkspace {
+		for _, live := range s.activeLive {
+			if live.writer {
+				return false, "whole-workspace claim conflicts with a running writer"
+			}
+		}
+	}
+	for _, live := range s.activeLive {
+		if ScheduleOverlaps(req.WritePaths, live.reservation()) {
 			return false, "write path conflict with a running subagent"
 		}
 	}
 	for _, active := range s.parentClaims {
-		if active.Overlaps(req.WritePaths) {
+		if ScheduleOverlaps(req.WritePaths, active) {
 			return false, "write path conflict with a parent write in progress"
 		}
 	}
 	return true, ""
 }
 
-func (s *SubagentScheduler) activateLocked(req AcquireRequest) {
+func (s *SubagentScheduler) activateLocked(req AcquireRequest) int64 {
 	s.activeTotal++
+	s.nextClaimID++
+	id := s.nextClaimID
 	if req.Writer {
 		s.activeWriters++
-		if !req.WritePaths.Empty() {
-			s.activeClaims = append(s.activeClaims, req.WritePaths)
-		}
 	}
+	s.activeLive = append(s.activeLive, liveClaim{id: id, writer: req.Writer, declared: req.WritePaths})
+	return id
 }
 
-func (s *SubagentScheduler) deactivateLocked(req AcquireRequest) {
+func (s *SubagentScheduler) deactivateIDLocked(id int64) {
+	idx := s.liveIndexLocked(id)
+	if idx < 0 {
+		return
+	}
 	if s.activeTotal > 0 {
 		s.activeTotal--
 	}
-	if req.Writer {
-		if s.activeWriters > 0 {
-			s.activeWriters--
-		}
-		if !req.WritePaths.Empty() {
-			s.activeClaims = removeClaim(s.activeClaims, req.WritePaths)
-		}
+	if s.activeLive[idx].writer && s.activeWriters > 0 {
+		s.activeWriters--
 	}
+	s.activeLive = append(s.activeLive[:idx], s.activeLive[idx+1:]...)
 }
 
 func (s *SubagentScheduler) pumpWaitersLocked() {
@@ -259,13 +362,23 @@ func (s *SubagentScheduler) pumpWaitersLocked() {
 		return
 	}
 	remaining := s.waiters[:0]
+	// A blocked whole-workspace writer is a FIFO barrier for later writers,
+	// while read-only work may still use otherwise available capacity.
+	wholeWriterPending := false
 	for _, w := range s.waiters {
+		if wholeWriterPending && w.req.Writer {
+			remaining = append(remaining, w)
+			continue
+		}
 		if ok, _ := s.canStartLocked(w.req); ok {
-			s.activateLocked(w.req)
+			w.id = s.activateLocked(w.req)
 			close(w.ready)
 			continue
 		}
 		remaining = append(remaining, w)
+		if w.req.Writer && w.req.WritePaths.WholeWorkspace {
+			wholeWriterPending = true
+		}
 	}
 	s.waiters = remaining
 }

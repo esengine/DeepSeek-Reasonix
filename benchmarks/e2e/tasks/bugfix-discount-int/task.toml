@@ -1,0 +1,4 @@
+prompt = "discounted(price_cents, percent) in pricing.py never applies the discount. Fix it (integer cents, round the discount down)."
+class = "atomic-bugfix"
+max_steps = 12
+timeout_sec = 180

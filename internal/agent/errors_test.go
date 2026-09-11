@@ -20,9 +20,9 @@ func TestPauseClassNamesEachGuard(t *testing.T) {
 		want string
 	}{
 		{&maxStepsPause{steps: 40, key: "max_steps"}, "max_steps"},
-		{&todoStallPause{rounds: 12}, "todo_stall"},
 		{&FinalReadinessError{Attempts: 3}, "final_readiness"},
 		{&RecoveryPauseError{Message: "paused"}, "recovery_paused"},
+		{&IncompleteReadError{Reason: "continuation ignored"}, "incomplete_read"},
 		{fmt.Errorf("wrapped: %w", &maxStepsPause{steps: 5}), "max_steps"},
 		{errors.New("provider 500"), ""},
 		{nil, ""},
@@ -30,5 +30,12 @@ func TestPauseClassNamesEachGuard(t *testing.T) {
 		if got := PauseClass(tc.err); got != tc.want {
 			t.Errorf("PauseClass(%v) = %q, want %q", tc.err, got, tc.want)
 		}
+	}
+}
+
+func TestIncompleteReadIsAHostOwnedRecoverablePause(t *testing.T) {
+	info, ok := InspectRunPause(&IncompleteReadError{Reason: "continuation ignored"})
+	if !ok || info.Kind != "incomplete_read" || !info.HostOwned || info.Reason != "continuation ignored" {
+		t.Fatalf("InspectRunPause = %+v, %v", info, ok)
 	}
 }

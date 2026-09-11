@@ -228,7 +228,7 @@ func suggestMemories(set *memory.Set, sessions []suggestionSession) []MemorySugg
 	var out []MemorySuggestion
 	for _, sess := range sessions {
 		for _, msg := range sess.Messages {
-			if msg.Role != provider.RoleUser {
+			if !agent.IsUserAuthoredTurnMessage(msg) {
 				continue
 			}
 			statement, reason := extractMemoryStatement(agent.UserMessageText(msg))
@@ -443,7 +443,7 @@ func workflowEvidence(cat workflowCategory, sessions []suggestionSession) []stri
 	var evidence []string
 	for _, sess := range sessions {
 		for _, msg := range sess.Messages {
-			if msg.Role != provider.RoleUser {
+			if !agent.IsUserAuthoredTurnMessage(msg) {
 				continue
 			}
 			text := oneLine(agent.UserMessageText(msg))

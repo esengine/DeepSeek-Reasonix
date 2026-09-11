@@ -7,16 +7,16 @@ import (
 )
 
 func TestProtocolConstants(t *testing.T) {
-	if ProtocolID != "reasonix.extension.v1" {
+	if ProtocolID != "reasonix.extension.v2" {
 		t.Fatalf("ProtocolID = %q", ProtocolID)
 	}
-	if ProtocolMajor != 1 || ProtocolVersion != "1" {
+	if ProtocolMajor != 2 || ProtocolVersion != "2" {
 		t.Fatalf("ProtocolMajor/ProtocolVersion = %d/%q", ProtocolMajor, ProtocolVersion)
 	}
 }
 
 func TestCompareProtocolVersion(t *testing.T) {
-	if err := CompareProtocolVersion(ProtocolID, "1"); err != nil {
+	if err := CompareProtocolVersion(ProtocolID, "2"); err != nil {
 		t.Fatalf("exact match rejected: %v", err)
 	}
 	tests := []struct {
@@ -25,11 +25,11 @@ func TestCompareProtocolVersion(t *testing.T) {
 		version string
 		reason  ErrorReason
 	}{
-		{"wrong id", "reasonix.extension.v2", "1", ErrUnsupportedVersion},
-		{"empty id", "", "1", ErrUnsupportedVersion},
-		{"wrong major", ProtocolID, "2", ErrUnsupportedVersion},
+		{"wrong id", "reasonix.extension.v1", "2", ErrUnsupportedVersion},
+		{"empty id", "", "2", ErrUnsupportedVersion},
+		{"wrong major", ProtocolID, "1", ErrUnsupportedVersion},
 		{"zero major", ProtocolID, "0", ErrUnsupportedVersion},
-		{"non-numeric version", ProtocolID, "v1", ErrProtocolError},
+		{"non-numeric version", ProtocolID, "v2", ErrProtocolError},
 		{"empty version", ProtocolID, "", ErrProtocolError},
 	}
 	for _, tt := range tests {

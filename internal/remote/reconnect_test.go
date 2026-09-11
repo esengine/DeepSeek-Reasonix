@@ -3,6 +3,7 @@ package remote
 import (
 	"context"
 	"math/rand"
+	"slices"
 	"sync"
 	"testing"
 	"time"
@@ -190,17 +191,12 @@ func snapshot(mu *sync.Mutex, s *[]Status) []Status {
 }
 
 func containsStatus(states []Status, want Status) bool {
-	for _, s := range states {
-		if s == want {
-			return true
-		}
-	}
-	return false
+	return slices.Contains(states, want)
 }
 
 func waitForWaiters(t *testing.T, c *fakeClock, n int) {
 	t.Helper()
-	for i := 0; i < 200; i++ {
+	for range 200 {
 		if c.pendingWaiters() >= n {
 			return
 		}

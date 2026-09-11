@@ -21,21 +21,23 @@ import (
 // freezes the terminal boundary (LastSeq) and a gap timer converts a missing
 // tail chunk into an interruption instead of a hang.
 type extensionStream struct {
-	client        ProviderClient
-	out           chan provider.Chunk
-	done          chan struct{}
-	abortDelivery chan struct{}
-	nextSeq       int64
-	pending       map[int64]provider.Chunk
-	ended         bool
-	endSeq        int64
-	endError      string
-	interrupted   bool
-	gapTimer      bool
-	closeOnce     sync.Once
-	delivery      []provider.Chunk
-	deliveryWake  chan struct{}
-	deliveryFinal bool
+	client                ProviderClient
+	out                   chan provider.Chunk
+	done                  chan struct{}
+	abortDelivery         chan struct{}
+	nextSeq               int64
+	pending               map[int64]provider.Chunk
+	ended                 bool
+	endSeq                int64
+	endError              string
+	interrupted           bool
+	gapTimer              bool
+	closeOnce             sync.Once
+	delivery              []provider.Chunk
+	deliveryWake          chan struct{}
+	deliveryFinal         bool
+	activity              chan struct{}
+	unregisterDrainCancel func()
 }
 
 // deliveryQueueLimit bounds the per-stream delivery queue without applying
@@ -52,8 +54,17 @@ const pendingWindowLimit = 256
 
 // RouteStreamChunk implements sidecar.StreamRouter. Unknown stream IDs are
 // dropped with a debug log — a sidecar can legitimately race a late chunk
-// against the host's cancel or its own crash teardown.
+// against the host's cancel or its own crash teardown. Stale-generation
+// chunks (after publish of a newer runtime) are also dropped.
 func (r *Resolver) RouteStreamChunk(p protocol.StreamChunkParams) {
+	gen := p.Generation
+	if gen == 0 {
+		gen = p.Chunk.Generation
+	}
+	if r.owner.Gate.DropStale(gen, "provider_chunk") {
+		slog.Debug("providerext: dropping stale-generation chunk", "stream", p.StreamID, "seq", p.Seq, "generation", gen)
+		return
+	}
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	stream := r.streams[p.StreamID]
@@ -61,6 +72,7 @@ func (r *Resolver) RouteStreamChunk(p protocol.StreamChunkParams) {
 		slog.Debug("providerext: dropping chunk for unknown stream", "stream", p.StreamID, "seq", p.Seq)
 		return
 	}
+	signalStreamActivity(stream)
 	if p.Seq < stream.nextSeq {
 		return // duplicate or already delivered
 	}
@@ -91,6 +103,7 @@ func (r *Resolver) RouteStreamEnd(p protocol.StreamEndParams) {
 		slog.Debug("providerext: dropping stream end for unknown stream", "stream", p.StreamID)
 		return
 	}
+	signalStreamActivity(stream)
 	if stream.ended {
 		if stream.endSeq != p.LastSeq || stream.endError != p.Error || stream.interrupted != p.Interrupted {
 			r.finishLocked(p.StreamID, stream, provider.Chunk{Type: provider.ChunkError, Err: &provider.StreamInterruptedError{
@@ -122,6 +135,16 @@ func (r *Resolver) RouteStreamEnd(p protocol.StreamEndParams) {
 		go r.expireGap(p.StreamID, stream)
 	}
 	r.mu.Unlock()
+}
+
+func signalStreamActivity(stream *extensionStream) {
+	if stream == nil || stream.activity == nil {
+		return
+	}
+	select {
+	case stream.activity <- struct{}{}:
+	default:
+	}
 }
 
 // flushLocked delivers every contiguous pending chunk, then completes the
@@ -175,6 +198,10 @@ func (r *Resolver) finishLocked(id string, stream *extensionStream, terminal pro
 	}
 	delete(r.streams, id)
 	stream.closeOnce.Do(func() {
+		if stream.unregisterDrainCancel != nil {
+			stream.unregisterDrainCancel()
+			stream.unregisterDrainCancel = nil
+		}
 		if terminal.Err != nil || terminal.Type != 0 {
 			stream.delivery = append(stream.delivery, terminal)
 		}

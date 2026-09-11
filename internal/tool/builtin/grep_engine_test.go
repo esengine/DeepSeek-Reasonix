@@ -10,6 +10,7 @@ import (
 	"testing"
 	"time"
 
+	fileenc "reasonix/internal/fileutil/encoding"
 	"reasonix/internal/sandbox"
 )
 
@@ -136,5 +137,28 @@ func TestGrepRipgrepFallsBackWhenForbidReadIsNotSandboxed(t *testing.T) {
 	}
 	if strings.Contains(out, "secret") {
 		t.Fatalf("fallback grep leaked forbidden matches:\n%s", out)
+	}
+}
+
+func TestGrepNativeStreamsUTF16WithAndWithoutBOM(t *testing.T) {
+	content := strings.Repeat("ordinary line\n", 20000) + "needle UTF16-END\n"
+	cases := []struct {
+		name string
+		kind fileenc.Kind
+	}{
+		{"le-bom", fileenc.UTF16LE}, {"be-bom", fileenc.UTF16BE},
+		{"le-no-bom", fileenc.UTF16LENoBOM}, {"be-no-bom", fileenc.UTF16BENoBOM},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			path := filepath.Join(t.TempDir(), "windows-utf16.txt")
+			if err := os.WriteFile(path, fileenc.Encode(content, tc.kind), 0o644); err != nil {
+				t.Fatal(err)
+			}
+			out := runTool(t, grepTool{}, map[string]any{"pattern": "UTF16-END", "path": path})
+			if !strings.Contains(out, "20001:needle UTF16-END") || strings.Contains(out, "\x00") {
+				t.Fatalf("native UTF-16 grep output=%q", out)
+			}
+		})
 	}
 }

@@ -1,0 +1,4 @@
+prompt = "common/money.py now requires a second argument: fmt_amount(cents, currency). Every call site under pkgs/alpha, pkgs/beta and pkgs/gamma still passes one argument and is broken. Dispatch the three packages in parallel with a single `fleet` call, giving each task the write_paths for its own package directory, and have each sub-agent update its package call sites to pass the currency \"USD\". Then confirm `python3 check.py` prints OK."
+class = "delegation"
+max_steps = 60
+timeout_sec = 900

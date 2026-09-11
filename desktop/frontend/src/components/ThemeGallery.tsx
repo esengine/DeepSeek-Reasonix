@@ -1,3 +1,4 @@
+import { SettingsOptions } from "./SettingsOptions";
 import { useCallback, useEffect, useId, useLayoutEffect, useMemo, useRef, useState, type KeyboardEvent as ReactKeyboardEvent } from "react";
 import { createPortal } from "react-dom";
 import { ArrowLeft, Check, CircleHelp, Copy, Download, ImagePlus, MoreHorizontal, Pencil, Plus, Trash2, Upload, X } from "lucide-react";
@@ -159,7 +160,7 @@ function ThemePreviewControls({
     <div className="theme-gallery__preview-controls">
       <div className="theme-gallery__preview-control">
         <span className="theme-gallery__preview-label">{t("settings.themeGallery.appearancePreview")}</span>
-        <div className="set-seg" role="radiogroup" aria-label={t("settings.themeGallery.appearancePreview")}>
+        <SettingsOptions className="set-seg" role="radiogroup" aria-label={t("settings.themeGallery.appearancePreview")}>
           <button
             type="button"
             role="radio"
@@ -182,7 +183,7 @@ function ThemePreviewControls({
           >
             {t("settings.themeDark")}
           </button>
-        </div>
+        </SettingsOptions>
       </div>
       <div className="theme-gallery__preview-control">
         <span className="theme-gallery__preview-label">
@@ -197,7 +198,7 @@ function ThemePreviewControls({
             </button>
           </Tooltip>
         </span>
-        <div className="set-seg" role="radiogroup" aria-label={t("settings.themeGallery.scenePreview")}>
+        <SettingsOptions className="set-seg" role="radiogroup" aria-label={t("settings.themeGallery.scenePreview")}>
           <button
             type="button"
             role="radio"
@@ -220,7 +221,7 @@ function ThemePreviewControls({
           >
             {t("settings.themeGallery.sceneTask")}
           </button>
-        </div>
+        </SettingsOptions>
       </div>
     </div>
   );
@@ -1005,11 +1006,11 @@ function ThemeEditorInline({
     return out;
   }, [state.tokens]);
 
-  const appLayoutClass = ["app--classic", "app--workbench", "app--creation"]
+  const appLayoutClass = ["app--workbench", "app--creation"]
     .find((className) => document.querySelector(`.${className}`)) || "";
 
   return createPortal(
-    <div className="theme-gallery__editor-overlay">
+    <div className="theme-gallery__editor-overlay" data-app-overlay="">
       <div
         ref={editorRef}
         className={`theme-editor theme-gallery__editor${appLayoutClass ? ` ${appLayoutClass}` : ""}`}
@@ -1045,25 +1046,25 @@ function ThemeEditorInline({
               <h3>{t("settings.themeEditor.layout")}</h3>
               <div className="theme-editor__setting-row">
                 <span>{t("settings.themeLibrary.fieldBase")}</span>
-                <div className="set-seg theme-editor__base-styles">
+                <SettingsOptions className="set-seg theme-editor__base-styles">
                   {THEME_STYLES.map((s) => (
                     <button key={s} type="button" className={`set-seg__btn${state.baseStyle === s ? " set-seg__btn--on" : ""}`} disabled={busy} onClick={() => onChange({ baseStyle: s })}>{t(`settings.style.${s}.zh` as never)}</button>
                   ))}
-                </div>
+                </SettingsOptions>
               </div>
               <div className="theme-editor__setting-row">
                 <span>{t("settings.themeLibrary.fieldRecipes")}</span>
                 <div className="theme-editor__recipe-groups">
-                  <div className="set-seg">
+                  <SettingsOptions className="set-seg">
                     {(["comfortable", "compact"] as const).map((density) => (
                       <button key={density} type="button" className={`set-seg__btn${state.recipes.density === density ? " set-seg__btn--on" : ""}`} onClick={() => onChange({ recipes: { ...state.recipes, density } })}>{t(`settings.themeEditor.density.${density}` as never)}</button>
                     ))}
-                  </div>
-                  <div className="set-seg">
+                  </SettingsOptions>
+                  <SettingsOptions className="set-seg">
                     {(["square", "soft", "round"] as const).map((corners) => (
                       <button key={corners} type="button" className={`set-seg__btn${state.recipes.corners === corners ? " set-seg__btn--on" : ""}`} onClick={() => onChange({ recipes: { ...state.recipes, corners } })}>{t(`settings.themeEditor.corners.${corners}` as never)}</button>
                     ))}
-                  </div>
+                  </SettingsOptions>
                 </div>
               </div>
             </section>
@@ -1071,11 +1072,11 @@ function ThemeEditorInline({
             <section className="theme-editor__section">
               <div className="theme-editor__section-head">
                 <h3>{t("settings.themeEditor.colors")}</h3>
-                <div className="set-seg">
+                <SettingsOptions className="set-seg">
                   {(["light", "dark"] as const).map((mode) => (
                     <button key={mode} type="button" className={`set-seg__btn${state.tokenMode === mode ? " set-seg__btn--on" : ""}`} onClick={() => onChange({ tokenMode: mode })}>{mode === "light" ? t("settings.themeLight") : t("settings.themeDark")}</button>
                   ))}
-                </div>
+                </SettingsOptions>
               </div>
               {TOKEN_GROUPS.map((group) => (
                 <div key={group.labelKey} className="theme-editor__token-group">
@@ -1261,9 +1262,9 @@ function SceneImageEditor({
           <div className="theme-editor__setting-block">
             <div className="theme-editor__setting-row">
               <span>{t("settings.themeEditor.safeArea")}</span>
-              <div className="set-seg" role="radiogroup" aria-label={t("settings.themeEditor.safeArea")}>
+              <SettingsOptions className="set-seg" role="radiogroup" aria-label={t("settings.themeEditor.safeArea")}>
                 {(["left", "center", "right"] as const).map((area) => <button key={area} type="button" role="radio" aria-checked={safeArea === area} className={`set-seg__btn${safeArea === area ? " set-seg__btn--on" : ""}`} onClick={() => onPatch({ safeArea: area })}>{t(`settings.themeEditor.safeArea.${area}` as never)}</button>)}
-              </div>
+              </SettingsOptions>
             </div>
             <p className="theme-editor__setting-hint">{t("settings.themeEditor.safeAreaHint")}</p>
           </div>

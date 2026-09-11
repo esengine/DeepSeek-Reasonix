@@ -2,7 +2,7 @@
 
 Write [Reasonix](https://github.com/esengine/DeepSeek-Reasonix) extensions in
 Go. An extension is a small sidecar process speaking **Extension Protocol
-v1** (`reasonix.extension.v1`) over stdio: Reasonix launches it, hands it the
+v2** (`reasonix.extension.v2`) over stdio: Reasonix launches it, hands it the
 initialize handshake, and then drives intercepts, event observation,
 extension-hosted provider streams, and structured UI surfaces.
 
@@ -16,7 +16,7 @@ go get github.com/esengine/DeepSeek-Reasonix/sdk/go@v1.0.0
 
 Requires Go 1.23+. SDK releases use immutable `sdk/go/vX.Y.Z` repository
 tags; `sdk/go/v1.0.0` is published with the first product release containing
-Extension Protocol v1. Before that tag exists, develop against a source
+Extension Protocol v2. Before that tag exists, develop against a source
 checkout instead of depending on an unversioned API.
 
 ## Minimal example
@@ -81,7 +81,7 @@ to stdout. stderr remains available for diagnostics.
 ## Runnable example
 
 [`examples/starterextension`](examples/starterextension/README.md) is the
-copyable first extension: it includes a Manifest v1 file, a minimal sidecar,
+copyable first extension: it includes a Manifest v2 file, a minimal sidecar,
 cross-platform build commands, linked installation, `/reload`, and a visible
 input-rewrite check.
 
@@ -93,13 +93,17 @@ card on session start, a form prompt behind the `demo` action), and a clean
 bounded shutdown — all in one small stdlib-only program.
 
 ```sh
-go build -o /tmp/fullsidecar ./examples/fullsidecar
+mkdir -p /tmp/full-sidecar/bin
+cp ./examples/fullsidecar/reasonix-plugin.json /tmp/full-sidecar/
+go build -o /tmp/full-sidecar/bin/full-sidecar ./examples/fullsidecar
 ```
 
-The binary speaks the protocol on stdin/stdout, so install it as a plugin
-package runtime (or point the host-side conformance suite at it) rather than
-running it interactively. It is driven end-to-end against the real host by
-`internal/extension/conformance` in the Reasonix repository.
+The resulting directory is a complete Manifest v2 plugin package. The binary
+speaks the protocol on stdin/stdout, so install the directory as a plugin
+package (or point the host-side conformance suite at it) rather than running
+the binary interactively. It is installed into a temporary Reasonix home and
+driven end-to-end against the real host by `internal/extension/conformance` in
+the Reasonix repository.
 
 ## Generated wire types
 
@@ -117,8 +121,8 @@ constructors, enum helpers) lives in `types_ext.go`.
 
 ## Stability
 
-Extension Protocol v1's compatibility promise applies: within major version
-1, only optional fields, new enum values, and new methods are added; existing
+Extension Protocol v2's compatibility promise applies: within major version
+2, only optional fields, new enum values, and new methods are added; existing
 required fields, method names, directions, limits, error reasons, and
-semantics never change. This SDK tracks that contract — upgrading within v1
-never breaks a compiled extension.
+semantics never change. This SDK tracks that contract — compatible SDK updates
+that target protocol v2 do not break a compiled extension.

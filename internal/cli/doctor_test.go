@@ -5,8 +5,11 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"testing"
+
+	"reasonix/internal/config"
 )
 
 func TestDoctorCommandPrintsJSON(t *testing.T) {
@@ -33,6 +36,78 @@ func TestRunDispatchesDoctor(t *testing.T) {
 	})
 	if !strings.Contains(out, "reasonix dispatch-version doctor") {
 		t.Fatalf("doctor output missing header:\n%s", out)
+	}
+}
+
+func TestDoctorSessionsIsReadOnly(t *testing.T) {
+	cache := t.TempDir()
+	t.Setenv("REASONIX_CACHE_HOME", cache)
+	out := captureStdout(t, func() {
+		if rc := doctorCommand([]string{"sessions", "--json"}, "test-version"); rc != 0 {
+			t.Fatalf("doctor sessions rc = %d, want 0", rc)
+		}
+	})
+	var decoded map[string]any
+	if err := json.Unmarshal([]byte(out), &decoded); err != nil {
+		t.Fatalf("doctor sessions output: %v\n%s", err, out)
+	}
+	if _, err := os.Stat(filepath.Join(cache, "session-catalog", "v1.sqlite")); !os.IsNotExist(err) {
+		t.Fatalf("doctor sessions created or changed catalog: %v", err)
+	}
+}
+
+func TestSessionsReindexRebuildsOnlyCatalog(t *testing.T) {
+	cache := t.TempDir()
+	home := t.TempDir()
+	sessions := filepath.Join(home, "sessions")
+	t.Setenv("REASONIX_CACHE_HOME", cache)
+	t.Setenv("REASONIX_HOME", home)
+	if err := os.MkdirAll(sessions, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	path := filepath.Join(sessions, "keep.jsonl")
+	body := []byte(`{"role":"user","content":"keep me"}` + "\n")
+	if err := os.WriteFile(path, body, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	out := captureStdout(t, func() {
+		if rc := sessionsCommand([]string{"reindex", "--dir", sessions, "--json"}); rc != 0 {
+			t.Fatalf("sessions reindex rc = %d, want 0", rc)
+		}
+	})
+	if !json.Valid([]byte(out)) {
+		t.Fatalf("sessions reindex output is not JSON: %s", out)
+	}
+	got, err := os.ReadFile(path)
+	if err != nil || string(got) != string(body) {
+		t.Fatalf("authoritative transcript changed: err=%v got=%q", err, got)
+	}
+}
+
+func TestDefaultSessionCatalogTargetsIncludeDesktopProjects(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("REASONIX_HOME", home)
+	projectRoot := filepath.Join(t.TempDir(), "project")
+	projects := `{"projects":[{"root":` + strconv.Quote(projectRoot) + `}]}`
+	if err := os.WriteFile(filepath.Join(home, "desktop-projects.json"), []byte(projects), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	targets := defaultSessionCatalogTargets()
+	want := map[string]string{
+		filepath.Clean(filepath.Join(home, "sessions")):                                   "global",
+		filepath.Clean(config.ProjectSessionDir(filepath.Join(home, "global-workspace"))): "global",
+		filepath.Clean(config.ProjectSessionDir(projectRoot)):                             "project",
+	}
+	if len(targets) != len(want) {
+		t.Fatalf("targets = %#v, want %d entries", targets, len(want))
+	}
+	for _, target := range targets {
+		if scope, ok := want[target.Path]; !ok || target.Scope != scope {
+			t.Fatalf("unexpected target %#v (want %#v)", target, want)
+		}
+		if target.Scope == "project" && target.WorkspaceRoot != projectRoot {
+			t.Fatalf("project target lost workspace root: %#v", target)
+		}
 	}
 }
 

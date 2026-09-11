@@ -109,6 +109,7 @@ type wsClient struct {
 }
 
 func (a *adapter) gatewayLoop(ctx context.Context) {
+	selectedIntents := qqPrivateIdentifyIntents
 	bot.RunWithRetry(ctx, a.logger, "qq gateway", bot.RetryConfig{}, func(ctx context.Context) error {
 		token, err := a.getAccessToken(ctx)
 		if err != nil {
@@ -117,7 +118,10 @@ func (a *adapter) gatewayLoop(ctx context.Context) {
 		// connectGateway blocks for the connection's lifetime, returning on
 		// disconnect or error; RunWithRetry handles the cancellation-aware
 		// backoff and reconnect.
-		return a.connectGateway(ctx, token)
+		_, err = connectQQGatewayWithIntentFallback(ctx, token, &selectedIntents, a.connectGateway, func() {
+			a.logger.Warn("qq private-guild intent rejected; retrying with public-guild events")
+		})
+		return err
 	})
 }
 
@@ -146,7 +150,7 @@ func (a *adapter) getAccessToken(ctx context.Context) (string, error) {
 		return "", err
 	}
 
-	req, err := http.NewRequestWithContext(ctx, "POST", qqTokenURL, bytes.NewReader(body))
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, qqTokenURL, bytes.NewReader(body))
 	if err != nil {
 		return "", err
 	}
@@ -214,7 +218,7 @@ func qqExpiresInSeconds(value any) (int, error) {
 	}
 }
 
-func (a *adapter) connectGateway(ctx context.Context, token string) error {
+func (a *adapter) connectGateway(ctx context.Context, token string, intents int) error {
 	gatewayURL, err := a.getGatewayURL(ctx, token)
 	if err != nil {
 		return err
@@ -256,7 +260,7 @@ func (a *adapter) connectGateway(ctx context.Context, token string) error {
 	// Identify
 	identify := identifyData{
 		Token:   fmt.Sprintf("QQBot %s", token),
-		Intents: 1<<0 | 1<<1 | 1<<9 | 1<<10 | 1<<12 | 1<<25 | 1<<26,
+		Intents: intents,
 		Shard:   [2]int{0, 1},
 		Properties: properties{
 			OS:      "linux",
@@ -273,20 +277,19 @@ func (a *adapter) connectGateway(ctx context.Context, token string) error {
 	if err := decoder.Decode(&msg); err != nil {
 		return fmt.Errorf("read ready: %w", err)
 	}
-	if msg.Op == opDispatch && msg.T == "READY" {
-		var ready struct {
-			SessionID string `json:"session_id"`
-		}
-		if err := json.Unmarshal(msg.D, &ready); err != nil {
-			return fmt.Errorf("decode ready: %w", err)
-		}
-		ws.sessionID = ready.SessionID
-		a.sessionID = ready.SessionID
-		a.seq = msg.S
-		a.logger.Info("qq gateway ready", "sandbox", a.cfg.Sandbox, "heartbeat_ms", ws.heartbeatMs)
-	} else {
-		a.logger.Warn("qq gateway expected ready event", "op", msg.Op, "event", msg.T)
+	if err := validateQQReadyPayload(msg); err != nil {
+		return err
 	}
+	var ready struct {
+		SessionID string `json:"session_id"`
+	}
+	if err := json.Unmarshal(msg.D, &ready); err != nil {
+		return fmt.Errorf("decode ready: %w", err)
+	}
+	ws.sessionID = ready.SessionID
+	a.sessionID = ready.SessionID
+	a.seq = msg.S
+	a.logger.Info("qq gateway ready", "sandbox", a.cfg.Sandbox, "heartbeat_ms", ws.heartbeatMs)
 
 	// 启动 heartbeat
 	heartbeatCtx, heartbeatCancel := context.WithCancel(ctx)
@@ -421,7 +424,7 @@ func (a *adapter) apiBaseURL() string {
 }
 
 func (a *adapter) getGatewayURL(ctx context.Context, token string) (string, error) {
-	req, err := http.NewRequestWithContext(ctx, "GET", a.apiBaseURL()+"/gateway", nil)
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, a.apiBaseURL()+"/gateway", nil)
 	if err != nil {
 		return "", err
 	}
@@ -616,7 +619,7 @@ func (a *adapter) sendMessageChunk(ctx context.Context, msg bot.OutboundMessage,
 			}
 			rows = append(rows, map[string]any{"buttons": buttons})
 		}
-		payload["keyboard"] = map[string]interface{}{
+		payload["keyboard"] = map[string]any{
 			"content": rows,
 		}
 		return a.sendMessagePayload(ctx, msg, payload, seq)
@@ -643,7 +646,7 @@ func (a *adapter) sendMessagePayload(ctx context.Context, msg bot.OutboundMessag
 	url := a.qqSendURL(msg)
 
 	body, _ := json.Marshal(payload)
-	req, err := http.NewRequestWithContext(ctx, "POST", url, bytes.NewBuffer(body))
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, url, bytes.NewBuffer(body))
 	if err != nil {
 		return bot.SendResult{}, err
 	}

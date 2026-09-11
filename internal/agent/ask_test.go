@@ -13,11 +13,50 @@ import (
 
 type recordingAsker struct {
 	questions []event.AskQuestion
+	calls     int
 }
 
 func (r *recordingAsker) Ask(_ context.Context, questions []event.AskQuestion) ([]event.AskAnswer, error) {
+	r.calls++
 	r.questions = questions
 	return []event.AskAnswer{{QuestionID: "q1", Selected: []string{"Keep going"}}}, nil
+}
+
+func TestAskToolReusesAcceptedDecisionAndRejectsSpoofedID(t *testing.T) {
+	turn := &turnRuntime{}
+	asker := &recordingAsker{}
+	ctx := withTurnState(withCallContext(context.Background(), "call", event.Discard, asker, false), turn)
+	args := []byte(`{"decision_id":"dec-original","questions":[{"header":"Direction","question":"Which path?","options":[{"label":"Keep going"},{"label":"Stop"}]}]}`)
+	if _, err := NewAskTool().Execute(ctx, args); err != nil {
+		t.Fatalf("first ask: %v", err)
+	}
+	if asker.calls != 1 {
+		t.Fatalf("asker calls = %d", asker.calls)
+	}
+	second, err := NewAskTool().Execute(ctx, []byte(`{"decision_id":"dec-original","questions":[{"header":"Direction","question":"Which path?","options":[{"label":"Keep going"},{"label":"Stop"}]}]}`))
+	if err != nil || !strings.Contains(second, "dec-original") || asker.calls != 1 {
+		t.Fatalf("repeat clarification = %q err=%v calls=%d", second, err, asker.calls)
+	}
+	rephrased, err := NewAskTool().Execute(ctx, []byte(`{"questions":[{"header":"Direction","question":"Please choose the direction now.","options":[{"label":"Keep going"},{"label":"Stop"}]}]}`))
+	if err != nil || !strings.Contains(rephrased, "same ambiguity") || !strings.Contains(rephrased, "dec-original") || asker.calls != 1 {
+		t.Fatalf("rephrased clarification = %q err=%v calls=%d", rephrased, err, asker.calls)
+	}
+	if _, err := NewAskTool().Execute(ctx, []byte(`{"questions":[{"header":"Environment","question":"Which deployment target?","options":[{"label":"Staging"},{"label":"Production"}]}]}`)); err != nil {
+		t.Fatalf("unrelated clarification should remain available: %v", err)
+	}
+	if asker.calls != 2 {
+		t.Fatalf("unrelated clarification calls = %d, want 2", asker.calls)
+	}
+	_, err = NewAskTool().Execute(ctx, []byte(`{"decision_id":"dec-spoofed","new_evidence":"changed","questions":[{"header":"Again","question":"Ask again?","options":[{"label":"Yes"},{"label":"No"}]}]}`))
+	if err == nil || !strings.Contains(err.Error(), "unknown decision_id") || asker.calls != 2 {
+		t.Fatalf("spoofed decision: err=%v calls=%d", err, asker.calls)
+	}
+	if _, err := NewAskTool().Execute(ctx, []byte(`{"decision_id":"dec-original","new_evidence":"new failing test","questions":[{"header":"Again","question":"Reconsider?","options":[{"label":"Keep going"},{"label":"Stop"}]}]}`)); err != nil {
+		t.Fatalf("evidence-backed reopen: %v", err)
+	}
+	if asker.calls != 3 {
+		t.Fatalf("reopened asker calls = %d, want 3", asker.calls)
+	}
 }
 
 func TestAskToolRejectsBlankOptionLabels(t *testing.T) {
@@ -118,7 +157,7 @@ func TestAskToolProviderContractStable(t *testing.T) {
 	tool := NewAskTool()
 	contract := tool.Description() + "\n" + string(provider.CanonicalizeSchema(tool.Schema()))
 	got := fmt.Sprintf("%x", sha256.Sum256([]byte(contract)))
-	const want = "f4c6efe84da2e964b3f8566b1f0921ca88812ae3ecfba46185d0439ae4f4c2a5"
+	const want = "3d78ec412ccb8ae4034e1d6f84c3a6dec54fe7aa4b70f8c15f3067495da8413e"
 	if got != want {
 		t.Fatalf("ask provider contract hash = %s, want %s; tool description or canonical schema changed", got, want)
 	}

@@ -3,6 +3,7 @@ package main
 import (
 	"encoding/json"
 	"fmt"
+	"maps"
 	"path/filepath"
 	"regexp"
 	"strings"
@@ -84,7 +85,7 @@ type ThemePackManifest struct {
 	Recipes        ThemePackRecipes          `json:"recipes"`
 	Background     *ThemePackBackground      `json:"background,omitempty"`
 	TaskBackground *ThemePackSceneBackground `json:"taskBackground,omitempty"`
-	Extra          map[string]interface{}    `json:"-"` // rejected on parse when present as unknown top-level
+	Extra          map[string]any            `json:"-"` // rejected on parse when present as unknown top-level
 }
 
 // ThemePackTokens holds optional light/dark semantic color overrides.
@@ -603,9 +604,7 @@ func copyStringMap(in map[string]string) map[string]string {
 		return nil
 	}
 	out := make(map[string]string, len(in))
-	for k, v := range in {
-		out[k] = v
-	}
+	maps.Copy(out, in)
 	return out
 }
 

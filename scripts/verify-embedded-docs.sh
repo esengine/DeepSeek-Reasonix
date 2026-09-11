@@ -37,7 +37,9 @@ cleanup() {
 trap cleanup EXIT
 
 binary="$tmp_dir/reasonix"
-ldflags="-s -w -X main.version=$version -X reasonix/internal/productdocs.linkedVersion=$version -X reasonix/internal/productdocs.linkedRevision=$revision"
+build_time_utc="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+git_commit="$(printf '%s' "$revision" | cut -c1-12)"
+ldflags="-s -w -X main.version=$version -X main.gitCommit=$git_commit -X main.buildTimeUTC=$build_time_utc -X reasonix/internal/productdocs.linkedVersion=$version -X reasonix/internal/productdocs.linkedRevision=$revision"
 (
 	cd "$repo_root"
 	CGO_ENABLED=0 go build -trimpath -ldflags="$ldflags" -o "$binary" ./cmd/reasonix

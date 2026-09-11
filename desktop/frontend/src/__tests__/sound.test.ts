@@ -1,6 +1,21 @@
 // Run: tsx src/__tests__/sound.test.ts
 
-import { attentionChimeEventKey, clearAttentionChimeKeys, shouldPlayAttentionChimeForEvent } from "../lib/sound";
+import {
+  DEFAULT_NOTIFICATION_VOLUME,
+  NOTIFICATION_VOLUME_STORAGE_KEY,
+  attentionChimeEventKey,
+  clearAttentionChimeKeys,
+  getNotificationVolume,
+  notificationWavGain,
+  notificationVolumeToGain,
+  normalizeNotificationVolume,
+  playAttentionChime,
+  playSuccessChime,
+  setAttentionPreference,
+  setNotificationVolume,
+  setSuccessPreference,
+  shouldPlayAttentionChimeForEvent,
+} from "../lib/sound";
 
 let passed = 0;
 let failed = 0;
@@ -16,6 +31,82 @@ function eq(a: unknown, b: unknown, label: string) {
 }
 
 console.log("\nsound notifications");
+
+const storedValues = new Map<string, string>();
+Object.defineProperty(globalThis, "localStorage", {
+  configurable: true,
+  value: {
+    getItem(key: string) { return storedValues.get(key) ?? null; },
+    setItem(key: string, value: string) { storedValues.set(key, value); },
+    removeItem(key: string) { storedValues.delete(key); },
+    clear() { storedValues.clear(); },
+  },
+});
+
+{
+  eq(getNotificationVolume(), DEFAULT_NOTIFICATION_VOLUME, "legacy installs without a saved volume upgrade to the 70% default");
+  eq(setNotificationVolume(85), 85, "notification volume saves a user-selected percentage");
+  eq(storedValues.get(NOTIFICATION_VOLUME_STORAGE_KEY), "85", "notification volume persists in its dedicated storage key");
+  eq(getNotificationVolume(), 85, "saved notification volume round-trips");
+  eq(setNotificationVolume(140), 100, "notification volume clamps values above 100%");
+  eq(setNotificationVolume(-10), 0, "notification volume clamps values below 0%");
+  storedValues.set(NOTIFICATION_VOLUME_STORAGE_KEY, "not-a-number");
+  eq(getNotificationVolume(), DEFAULT_NOTIFICATION_VOLUME, "invalid persisted volume recovers to the default");
+  eq(normalizeNotificationVolume(72.6), 73, "notification volume normalizes fractional values to an integer percentage");
+  eq(notificationVolumeToGain(70), 0.7, "notification volume converts percentages to Web Audio gain");
+  const normalizedWavGains = [
+    notificationWavGain("positive", 1),
+    notificationWavGain("correct", 1),
+    notificationWavGain("start", 1),
+    notificationWavGain("back", 1),
+  ];
+  eq(normalizedWavGains.join(","), "0.62,0.85,1,0.7", "bundled WAVs use their measured loudness-normalization trims");
+  eq(Math.max(...normalizedWavGains), 1, "WAV normalization never boosts a source above its recorded peak");
+  eq(notificationWavGain("start", 0.7), 0.7, "the master volume scales a normalized WAV after its source trim");
+}
+
+{
+  const synthPeaks: number[] = [];
+  class FakeAudioContext {
+    destination = {};
+    createOscillator() {
+      return {
+        type: "sine",
+        frequency: { setValueAtTime() {} },
+        connect() {},
+        start() {},
+        stop() {},
+      };
+    }
+    createGain() {
+      return {
+        gain: {
+          setValueAtTime() {},
+          linearRampToValueAtTime(value: number) { synthPeaks.push(value); },
+          exponentialRampToValueAtTime() {},
+        },
+        connect() {},
+      };
+    }
+    close() {}
+  }
+  Object.defineProperty(globalThis, "AudioContext", { configurable: true, value: FakeAudioContext });
+  const maxPeak = () => Math.round(Math.max(...synthPeaks) * 1000) / 1000;
+
+  setSuccessPreference("synth");
+  setAttentionPreference("synth");
+  setNotificationVolume(DEFAULT_NOTIFICATION_VOLUME);
+  playSuccessChime();
+  eq(maxPeak(), 0.245, "the 70% upgrade default raises the synthesized success peak above the legacy level");
+  synthPeaks.length = 0;
+  playAttentionChime();
+  eq(maxPeak(), 0.28, "the 70% upgrade default keeps attention at least as audible as success");
+  synthPeaks.length = 0;
+  setNotificationVolume(0);
+  playSuccessChime();
+  playAttentionChime();
+  eq(synthPeaks.length, 0, "0% prevents synthesized notifications from creating audio nodes");
+}
 
 {
   eq(attentionChimeEventKey({ kind: "approval_request", tabId: "tab-a", approval: { id: "approval-1" } }), "approval:tab-a:approval-1", "approval request builds a tab-scoped chime key");

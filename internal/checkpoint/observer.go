@@ -224,14 +224,15 @@ func (o *MutationObserver) BeforeMutationFromChange(ch diff.Change, tool string)
 	})
 }
 
-// AfterMutation re-reads the path after a tool attempt (success or failure) and
-// records the after fingerprint under Reasonix ownership.
-func (o *MutationObserver) AfterMutation(path, tool string) {
+// AfterMutation re-reads the path after a tool attempt (success or failure),
+// records the after fingerprint under Reasonix ownership, and reports whether
+// the captured workspace content actually changed.
+func (o *MutationObserver) AfterMutation(path, tool string) bool {
 	if o == nil || o.store == nil || path == "" {
-		return
+		return false
 	}
 	seq := o.seq.Add(1)
-	o.store.CaptureAfter(path, CaptureAfterOpts{
+	return o.store.CaptureAfter(path, CaptureAfterOpts{
 		Seq:           seq,
 		Tool:          tool,
 		Source:        CaptureAfterMutation,
