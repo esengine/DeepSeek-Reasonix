@@ -325,10 +325,10 @@ func (h *Hub) Open(ctx context.Context, req OpenRequest) (*Runtime, error) {
 		return nil, err
 	}
 	if path := strings.TrimSpace(req.SessionPath); path != "" {
-		if _, err := srv.resumeInto(path); err != nil {
+		if status, err := srv.resumeInto(path); err != nil {
 			built.Controller.Close()
 			leases.Release()
-			return nil, err
+			return nil, keepRefusalStatus(status, err)
 		}
 	}
 	rt := &Runtime{ID: h.nextID(), Root: root, Server: srv, Events: bc, leases: leases}
@@ -496,7 +496,10 @@ func (h *Hub) openRuntime(w http.ResponseWriter, r *http.Request) {
 	}
 	rt, err := h.Open(r.Context(), req)
 	if err != nil {
-		writeErr(w, http.StatusConflict, err)
+		// Every refusal Open produces carries its own status; what is left is
+		// a pane the kernel could not build, which is ours and not a clash.
+		// 409 as the catch-all dressed a missing transcript as a held one.
+		writeErr(w, http.StatusInternalServerError, err)
 		return
 	}
 	writeJSON(w, rt.view())

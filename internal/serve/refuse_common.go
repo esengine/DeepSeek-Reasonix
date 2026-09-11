@@ -13,18 +13,19 @@ import (
 // http.Error calls cost: the same "bad body" phrased twelve ways, none of them
 // translatable.
 const (
-	codeBadBody        = "request.bad_body"
-	codeMissingField   = "request.missing_field"
-	codeNotFound       = "request.not_found"
-	codeUnknownProject = "project.unknown"
-	codeSessionInUse   = "busy.session_in_use"
-	codeBadValue       = "request.bad_value"
-	codeSessionBusy    = "busy.session_running"
-	codeSessionBadName = "session.bad_name"
-	codeSessionBadPath = "session.bad_path"
-	codeSessionOutside = "session.outside_dir"
-	codeSessionActive  = "busy.session_active"
-	codeSwitchModel    = "busy.switch_model"
+	codeBadBody           = "request.bad_body"
+	codeMissingField      = "request.missing_field"
+	codeNotFound          = "request.not_found"
+	codeUnknownProject    = "project.unknown"
+	codeSessionInUse      = "busy.session_in_use"
+	codeBadValue          = "request.bad_value"
+	codeSessionBusy       = "busy.session_running"
+	codeSessionBadName    = "session.bad_name"
+	codeSessionBadPath    = "session.bad_path"
+	codeSessionOutside    = "session.outside_dir"
+	codeSessionActive     = "busy.session_active"
+	codeSwitchModel       = "busy.switch_model"
+	codeSessionOpenFailed = "session.open_failed"
 )
 
 // badBody refuses a request whose body did not parse. The parse error itself is

@@ -66,6 +66,19 @@ func busyErr(code, message string) error {
 	return refusal(http.StatusConflict, code, errors.New(message), nil)
 }
 
+// keepRefusalStatus carries the status its producer chose onto an error with no
+// code of its own, so a caller cannot fold it into whatever fallback it passes.
+// resumeInto answers with "the status a refusal deserves" so the hub and the
+// /resume handler refuse alike; dropping it let a transcript that no longer
+// exists be reported as one another window was holding.
+func keepRefusalStatus(status int, err error) error {
+	var c *coded
+	if err == nil || errors.As(err, &c) {
+		return err
+	}
+	return refusal(status, codeSessionOpenFailed, err, nil)
+}
+
 // writeErr turns an error into a response. One carrying a code reaches the
 // frontend as one, a config file the kernel could not read keeps its own code
 // wherever it surfaces, and anything else keeps the old shape, so adoption is
