@@ -2,7 +2,8 @@ package bootstrap
 
 import (
 	"fmt"
-	"strings"
+
+	"reasonix/internal/remote"
 )
 
 // StatePaths are the absolute remote-side paths for one workspace's serve
@@ -22,7 +23,7 @@ type StatePaths struct {
 // single quotes as '\”. This is the only quoting used for remote command
 // operands; every interpolated path/workspace passes through it.
 func shellQuote(s string) string {
-	return "'" + strings.ReplaceAll(s, "'", `'\''`) + "'"
+	return remote.ShellQuote(s)
 }
 
 // LaunchCommand starts a detached serve with shell-quoted operands, 0600 log,

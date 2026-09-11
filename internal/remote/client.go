@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"math/rand"
+	"strings"
 	"sync"
 	"time"
 
@@ -199,7 +200,19 @@ type ExecResult struct {
 	ExitCode int
 }
 
-// Exec runs cmd via `sh -c` on a fresh session and collects its output.
+// ShellQuote single-quote-escapes s for a POSIX shell so hostile contents
+// (spaces, quotes, `; rm -rf ~`) cannot break out of the quoted argument.
+// Shared with the bootstrap package so the escaping rule cannot drift into a
+// divergence that opens an injection hole.
+func ShellQuote(s string) string {
+	return "'" + strings.ReplaceAll(s, "'", `'\''`) + "'"
+}
+
+// Exec runs a one-shot remote command via explicit POSIX-sh execution: the
+// script is fed through the session's stdin and the remote side runs plain
+// `sh`. sshd runs session commands via the user's login shell (tcsh, csh,
+// zsh, …), which may not parse POSIX-sh quoting (issue #8130); keeping the
+// outer command to `sh` leaves nothing for the login shell to misinterpret.
 func (c *Client) Exec(ctx context.Context, cmd string) (ExecResult, error) {
 	cl, err := c.SSH()
 	if err != nil {
@@ -218,9 +231,10 @@ func (c *Client) Exec(ctx context.Context, cmd string) (ExecResult, error) {
 		}
 		defer sess.Close()
 		var stdout, stderr bytes.Buffer
+		sess.Stdin = strings.NewReader(cmd)
 		sess.Stdout = &stdout
 		sess.Stderr = &stderr
-		runErr := sess.Run(cmd)
+		runErr := sess.Run("sh")
 		out := ExecResult{Stdout: stdout.Bytes(), Stderr: stderr.Bytes()}
 		if runErr != nil {
 			var ee *ssh.ExitError
