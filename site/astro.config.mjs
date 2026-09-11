@@ -10,6 +10,7 @@ export default defineConfig({
   build: { assets: 'static' },
   integrations: [sitemap({
     filter: (page) => !/\/changelog\/(?:stable|preview)\/?$/.test(page) &&
-      !/\/changelog\/v\d+\.\d+\.\d+-/.test(page),
+      !/\/changelog\/v\d+\.\d+\.\d+-/.test(page) &&
+      !/\/(?:login|register|forgot|reset|account|device|u)\/?$/.test(page),
   })],
 });
