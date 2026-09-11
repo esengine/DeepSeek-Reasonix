@@ -1,3 +1,4 @@
+import type { HistorySwitchPhases } from "./sessionDiagnostics";
 import type { ProviderCatalog } from "./providerCatalogTypes";
 export type { SettingsView } from "./settingsViewTypes";
 export type { ProviderProtocolEndpoint, ProviderCatalog, ProviderPresetView } from "./providerCatalogTypes";
@@ -893,6 +894,9 @@ export interface HistoryPage {
   hasOlder: boolean;
   revision?: number;
   digest?: string;
+  /** Present only on a page a session switch built; carries the switch's
+   *  content-free phase breakdown. */
+  switch?: HistorySwitchPhases | null;
 }
 
 // ── Two-phase topic activation (desktop/topic_activation.go) ────────────────

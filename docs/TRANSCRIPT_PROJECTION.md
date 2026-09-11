@@ -42,6 +42,14 @@ Desktop exposes `TranscriptSnapshotForTab`, `TranscriptPageForTab`,
 `/transcript/snapshot`, `/transcript/page`, `/transcript/content`, and
 `/transcript/replay` behind its existing authentication and host checks.
 
+`ResumeTranscriptSessionForTab` and `OpenChannelTranscriptSessionForTab` return
+switch-phase diagnostics after adoption, without building a legacy history page.
+The frontend records these only after the matching snapshot commits, including
+a separate snapshot-install duration. An older host returning no diagnostics is
+reported as unknown (`duplicateLoadCount: null`), never as proof of zero repeats.
+Legacy page callers reuse a preload only if it matches the controller's captured
+history digest; a changed, fully persisted runtime triggers a fresh durable read.
+
 Each snapshot includes protocol version, snapshot ID, session/head/rewrite/runtime
 identity, projection revision, covered-through sequence, records, active owners,
 and pending runtime prompts. Page and content requests carry the same snapshot

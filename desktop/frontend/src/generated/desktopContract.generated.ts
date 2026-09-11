@@ -3,7 +3,7 @@
 
 export const DESKTOP_PROTOCOL_VERSION = 1;
 
-export const DESKTOP_CONTRACT_DIGEST = "sha256:e57d611f7394f55fbf2905d219877029eb3a5e1cfde77693c386bf1eb67ef36f";
+export const DESKTOP_CONTRACT_DIGEST = "sha256:09e42772bf1f9f5619f90a36c16fcd4b2ab5ebf73655fe73bc39d8cf4ae59f08";
 
 export const DESKTOP_COMMANDS = [
   "AIRenameSession",
@@ -2030,6 +2030,7 @@ export interface HistoryPage {
   hasOlder: boolean;
   revision?: number;
   digest?: string;
+  switch?: HistorySwitchPhases | null;
 }
 
 export interface HistorySearchContextLine {
@@ -2123,6 +2124,19 @@ export interface HistorySliceRequest {
   turns: number;
   entries: number;
   bytes: number;
+}
+
+export interface HistorySwitchPhases {
+  resolveMs: number;
+  loadMs: number;
+  rebindMs: number;
+  historyMs: number;
+  totalMs: number;
+  loadedMessages: number;
+  loadedBytes: number;
+  historyEntries: number;
+  durableReads: number;
+  outcome: string;
 }
 
 export interface HookConfigView {
@@ -4639,7 +4653,7 @@ export interface GeneratedDesktopCommands {
   NewSessionForTab(arg0: string): Promise<void>;
   OpenChannelSessionForTab(arg0: string, arg1: string): Promise<Message[]>;
   OpenChannelSessionPageForTab(arg0: string, arg1: string, arg2: number): Promise<HistoryPage>;
-  OpenChannelTranscriptSessionForTab(arg0: string, arg1: string): Promise<void>;
+  OpenChannelTranscriptSessionForTab(arg0: string, arg1: string): Promise<HistorySwitchPhases>;
   OpenDownloadPage(): Promise<void>;
   OpenGlobalTab(arg0: string): Promise<TabMeta>;
   OpenLocalPath(arg0: string): Promise<void>;
@@ -4770,7 +4784,7 @@ export interface GeneratedDesktopCommands {
   ResumeSessionForTab(arg0: string, arg1: string): Promise<Message[]>;
   ResumeSessionPage(arg0: string, arg1: number): Promise<HistoryPage>;
   ResumeSessionPageForTab(arg0: string, arg1: string, arg2: number): Promise<HistoryPage>;
-  ResumeTranscriptSessionForTab(arg0: string, arg1: string): Promise<void>;
+  ResumeTranscriptSessionForTab(arg0: string, arg1: string): Promise<HistorySwitchPhases>;
   RetryInboxItem(arg0: string, arg1: string): Promise<void>;
   RetryModelSettingsApplication(arg0: string): Promise<ModelSettingsResult>;
   RetrySessionRecovery(arg0: RecoveryPreferenceRequest): Promise<void>;

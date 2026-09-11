@@ -3,6 +3,7 @@
 // enforces that boundary.
 import type { AppBindings } from "./bridge";
 import type { DesktopBrowserHost } from "./browserHost";
+import type { NativePerformanceActions, ProcessDiagnosticsSnapshot } from "./processDiagnostics";
 
 export type DesktopHostKind = "electron" | "none";
 export type WindowTheme = "system" | "light" | "dark";
@@ -61,7 +62,8 @@ export interface ReasonixDesktopHost {
   readonly platform: { os: "darwin" | "windows" | "linux"; arch: string; versions: Record<string, string> };
   invoke(method: string, args: unknown[]): Promise<unknown>;
   on(name: string, cb: (...args: unknown[]) => void): () => void;
-  native: {
+  native: NativePerformanceActions & {
+    processDiagnostics?(): Promise<ProcessDiagnosticsSnapshot | null>;
     openExternal(url: string): Promise<void>;
     clipboard: { writeText(text: string): Promise<boolean>; readText(): Promise<string> };
     window: {
@@ -94,7 +96,8 @@ export interface DesktopHost {
   kind: DesktopHostKind;
   app: AppBindings | undefined;
   events: { on(name: string, cb: (...args: unknown[]) => void): () => void };
-  native: {
+  native: NativePerformanceActions & {
+    processDiagnostics?(): Promise<ProcessDiagnosticsSnapshot | null>;
     openExternal(url: string): void;
     clipboardWriteText(text: string): Promise<boolean>;
     clipboardReadText(): Promise<string>;
@@ -213,6 +216,10 @@ const electronHostFrom = (host: ReasonixDesktopHost): DesktopHost => {
       setAppZoom: (factor) => host.native.window.setAppZoom(factor),
     resetAppZoom: () => host.native.window.resetAppZoom(),
       graphics: host.native.graphics,
+      ...(host.native.processDiagnostics ? { processDiagnostics: () => host.native.processDiagnostics!() } : {}),
+      ...(host.native.captureRendererProfile ? { captureRendererProfile: (id?: string) => host.native.captureRendererProfile!(id) } : {}),
+      ...(host.native.cancelRendererProfile ? { cancelRendererProfile: (id?: string) => host.native.cancelRendererProfile!(id) } : {}),
+      ...(host.native.exportHeapSnapshot ? { exportHeapSnapshot: () => host.native.exportHeapSnapshot!() } : {}),
       browserControl: host.native.browserControl,
       onFilesDropped: (cb) => {
         installElectronDropHandlers();

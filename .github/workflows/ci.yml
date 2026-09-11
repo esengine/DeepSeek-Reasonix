@@ -614,6 +614,10 @@ jobs:
       - name: Test native macOS signing coverage
         run: node --test packaging/sign-macos.test.mjs
 
+      - name: Test bounded Electron diagnostics
+        timeout-minutes: 3
+        run: node electron/scripts/performance-smoke.mjs
+
       # The production desktop build uses CGO. Keep the explicit unavailable
       # backend buildable as a fail-closed portability contract instead of
       # silently falling back to kqueue's per-file descriptor usage.
@@ -720,6 +724,25 @@ jobs:
       - name: Smoke-test Electron native startup
         timeout-minutes: 3
         run: node packaging/smoke.mjs build/electron/windows-amd64/app --service build/bin/reasonix-desktop.exe
+
+      - name: Test bounded Electron diagnostics
+        timeout-minutes: 3
+        run: node electron/scripts/performance-smoke.mjs
+
+      - name: Measure Electron diagnostic overhead
+        timeout-minutes: 10
+        run: node electron/scripts/performance-benchmark.mjs
+
+      - name: Upload diagnostic benchmark evidence
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: diagnostic-overhead-windows
+          if-no-files-found: ignore
+          retention-days: 7
+          path: |
+            desktop/electron/artifacts/performance/overhead.json
+            desktop/electron/artifacts/performance/diagnostic-report.png
 
       - name: test (Windows desktop and update helper)
         # Normal wall time is 6-7 minutes; a loaded runner has exceeded 15 with

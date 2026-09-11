@@ -3565,28 +3565,40 @@ func (a *App) OpenChannelSessionPageForTab(tabID, path string, limit int) (Histo
 }
 
 func (a *App) openChannelSessionForTranscript(tabID, path string, limit int, includeHistory bool) (HistoryPage, error) {
+	started := time.Now()
+	phases := HistorySwitchPhases{Outcome: "ok"}
+	defer func() { logSessionSwitchPhases(phases, started) }()
 	tab, ctrl := a.tabAndCtrlByID(tabID)
 	if tab == nil || ctrl == nil {
+		phases.Outcome = "tab_not_ready"
 		return HistoryPage{}, fmt.Errorf("tab is not ready")
 	}
+	resolveStarted := time.Now()
 	sessionPath, _, err := validateChannelSessionPath(controllerSessionDir(ctrl), path)
 	if err != nil {
+		phases.Outcome = "invalid_path"
 		return HistoryPage{}, err
 	}
+	phases.ResolveMs = elapsedMs(resolveStarted)
+
+	loadStarted := time.Now()
+	phases.DurableReads++
 	loaded, err := loadResumableSession(sessionPath)
+	if err != nil {
+		phases.Outcome = "load_failed"
+		return HistoryPage{}, err
+	}
+	phases.LoadMs = elapsedMs(loadStarted)
+	phases.LoadedCount = loaded.Len()
+	phases.LoadedBytes = sessionFileBytes(sessionPath)
+
+	page, err := a.switchToLoadedSessionPage(tab, loaded, sessionPath, true, includeHistory, limit, &phases)
 	if err != nil {
 		return HistoryPage{}, err
 	}
-	if sessionRuntimeKey(tab.currentSessionPath()) != sessionRuntimeKey(sessionPath) {
-		if err := a.rebindTabToLoadedSessionPath(tab, sessionPath, loaded); err != nil {
-			return HistoryPage{}, err
-		}
-	}
-	a.setTabReadOnly(tab.ID, true)
-	if !includeHistory {
-		return HistoryPage{}, nil
-	}
-	return a.HistoryPageForTab(tab.ID, 0, limit), nil
+	phases.TotalMs = elapsedMs(started)
+	page.Switch = &phases
+	return page, nil
 }
 
 func (a *App) rebindTabToSessionPath(tab *WorkspaceTab, sessionPath string) error {
@@ -5003,13 +5015,33 @@ const (
 )
 
 type HistoryPage struct {
-	Messages   []HistoryMessage `json:"messages"`
-	StartTurn  int              `json:"startTurn"`
-	EndTurn    int              `json:"endTurn"`
-	TotalTurns int              `json:"totalTurns"`
-	HasOlder   bool             `json:"hasOlder"`
-	Revision   int64            `json:"revision,omitempty"`
-	Digest     string           `json:"digest,omitempty"`
+	Messages   []HistoryMessage     `json:"messages"`
+	StartTurn  int                  `json:"startTurn"`
+	EndTurn    int                  `json:"endTurn"`
+	TotalTurns int                  `json:"totalTurns"`
+	HasOlder   bool                 `json:"hasOlder"`
+	Revision   int64                `json:"revision,omitempty"`
+	Digest     string               `json:"digest,omitempty"`
+	Switch     *HistorySwitchPhases `json:"switch,omitempty"`
+}
+
+// HistorySwitchPhases records a session adoption and optional legacy page.
+// It carries durations, counts and sizes, never paths or message content.
+// Snapshot adoption leaves HistoryMs and HistoryCount zero; the frontend
+// measures its authoritative snapshot separately. A changed controller may
+// require another durable read instead of reusing an obsolete preload.
+type HistorySwitchPhases struct {
+	ResolveMs    int64 `json:"resolveMs"`
+	LoadMs       int64 `json:"loadMs"`
+	RebindMs     int64 `json:"rebindMs"`
+	HistoryMs    int64 `json:"historyMs"`
+	TotalMs      int64 `json:"totalMs"`
+	LoadedCount  int   `json:"loadedMessages"`
+	LoadedBytes  int64 `json:"loadedBytes"`
+	HistoryCount int   `json:"historyEntries"`
+	// DurableReads counts target log reads, including refreshes after preload invalidation.
+	DurableReads int    `json:"durableReads"`
+	Outcome      string `json:"outcome"`
 }
 
 // historyProviderMessagesWithPersistedTimes overlays legacy event-record
@@ -5082,18 +5114,60 @@ func (a *App) HistoryPageForTab(tabID string, beforeTurn, limit int) HistoryPage
 		}
 		return page
 	}
-	dir := controllerSessionDir(ctrl)
-	path := ctrl.SessionPath()
+	page, _ := historyPageForController(tab, ctrl, nil, "", beforeTurn, limit)
+	return page
+}
+
+// historyPageForController converts the controller's log into one visible page.
+// preloaded is a read of this controller's own session that the caller already
+// paid for (a session switch loads the target to build the replacement
+// controller); nil makes this read the durable log itself.
+func historyPageForController(tab *WorkspaceTab, ctrl control.SessionAPI, preloaded *agent.Session, preloadedPath string, beforeTurn, limit int) (HistoryPage, bool) {
 	msgs := ctrl.History()
+	durable, readLog := durableHistorySnapshot(ctrl, preloaded, preloadedPath, msgs)
+	if durable != nil {
+		msgs = durable
+	}
+	return historyPageFromMessagesForTab(tab, ctrl, msgs, beforeTurn, limit), readLog
+}
+
+// durableHistorySnapshot returns the durable transcript while the controller is
+// idle and fully persisted, so a stale in-memory log cannot hide an
+// assistant/tool suffix written after restart or cross-runtime recovery. It
+// returns nil when the controller's own log is already the source of truth.
+// Reuse preloaded only when it still describes the controller's captured
+// history. A reused runtime can have committed more work since that read.
+func durableHistorySnapshot(ctrl control.SessionAPI, preloaded *agent.Session, preloadedPath string, current []provider.Message) ([]provider.Message, bool) {
 	status := ctrl.RuntimeStatus()
-	if !status.Running && !status.PendingPrompt && !ctrl.SessionHasUnsavedChanges() && strings.TrimSpace(path) != "" {
-		// Once the foreground turn is idle, the durable event log is the source
-		// of truth. Re-reading it prevents a stale controller snapshot from
-		// hiding an assistant/tool suffix after restart or cross-runtime recovery.
-		if loaded, err := agent.LoadSession(path); err == nil && loaded != nil {
-			msgs = loaded.Snapshot()
+	path := strings.TrimSpace(ctrl.SessionPath())
+	if status.Running || status.PendingPrompt || ctrl.SessionHasUnsavedChanges() || path == "" {
+		return nil, false
+	}
+	if preloaded != nil && sessionRuntimeKey(preloadedPath) == sessionRuntimeKey(path) {
+		// A same-session or detached controller can finish and persist after the
+		// preload. Path equality alone does not prove it still owns this cut.
+		loadedDigest, loadedErr := preloaded.ContentDigest()
+		currentDigest, currentErr := agent.ContentDigestForMessages(current)
+		if loadedErr == nil && currentErr == nil && loadedDigest == currentDigest {
+			return preloaded.Snapshot(), false
 		}
 	}
+	loaded, err := agent.LoadSession(path)
+	if err != nil || loaded == nil {
+		return nil, false
+	}
+	return loaded.Snapshot(), true
+}
+
+// historyPageFromMessagesForTab renders a page from messages already in hand.
+// Session switching reuses the snapshot it loaded to build the replacement
+// controller instead of re-reading and re-converting the same idle transcript.
+func historyPageFromMessagesForTab(tab *WorkspaceTab, ctrl control.SessionAPI, msgs []provider.Message, beforeTurn, limit int) HistoryPage {
+	if tab == nil || ctrl == nil {
+		return HistoryPage{Messages: []HistoryMessage{}}
+	}
+	dir := controllerSessionDir(ctrl)
+	path := ctrl.SessionPath()
 	page := historyPageFromProviderMessages(
 		msgs,
 		sessionDisplayResolver(dir, path),

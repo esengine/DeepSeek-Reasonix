@@ -1,7 +1,6 @@
 // Run: tsx src/__tests__/crash-reporting.test.ts
 
 import {
-  aggregateLongTaskProfile,
   buildCrashPayload,
   buildPerformancePayload,
   formatLongTaskAttribution,
@@ -23,7 +22,6 @@ import {
   shouldRecordLongTaskSample,
   topFrameFromStack,
   type PerformanceSnapshot,
-  type ProfilerTrace,
 } from "../lib/crash";
 import { writeClipboardText } from "../lib/clipboard";
 import { installObjectHasOwnPolyfill } from "../lib/compat";
@@ -189,6 +187,12 @@ const perf: PerformanceSnapshot = {
   connection: { effectiveType: "4g", rttMs: 50, downlinkMbps: 20, saveData: false },
 };
 const perfPayload = buildPerformancePayload(perf);
+const processReport = formatPerformanceContext({ ...perf, cpuProfile: { status: "unavailable" }, processes: {
+  scope: "electron", samples: [{ ageMs: 10, intervalMs: null, processes: [{ pid: 42, type: "Tab", cpuPercent: null, workingSetMb: 200, privateMb: null }] }],
+} });
+eq(processReport.includes("Go service excluded"), true, "report identifies incomplete process coverage");
+eq(processReport.includes("PID 42 Tab: CPU unavailable"), true, "missing CPU is not reported as zero");
+eq(processReport.includes("CPU profile after trigger: unavailable"), true, "missing profiler is explicit and does not claim to reconstruct the event");
 eq(perfPayload.kind, "performance", "performance pressure reports use performance kind");
 eq(perfPayload.source, "frontend.performance", "performance pressure reports identify source");
 eq(perfPayload.label, "performance.lag", "performance pressure reports partition by stable pressure label");
@@ -243,38 +247,6 @@ eq(
   "surfaces cross-context culprits with their container",
 );
 
-const trace: ProfilerTrace = {
-  resources: ["wails://wails/assets/vendor-markdown.js"],
-  frames: [
-    { name: "post", resourceId: 0, line: 1, column: 130216 },
-    { name: "tick", resourceId: 0, line: 9 },
-    { name: "" },
-  ],
-  stacks: [{ frameId: 0 }, { frameId: 1, parentId: 0 }, { frameId: 2 }],
-  samples: [
-    { timestamp: 1_000, stackId: 0 },
-    { timestamp: 1_010, stackId: 0 },
-    { timestamp: 1_020, stackId: 1 },
-    { timestamp: 5_000, stackId: 0 }, // outside every long-task window
-    { timestamp: 1_030 }, // idle sample without a stack
-    { timestamp: 1_040, stackId: 2 },
-  ],
-};
-eq(
-  aggregateLongTaskProfile(trace, [{ startMs: 990, durationMs: 100 }]),
-  [
-    { label: "post (wails://wails/assets/vendor-markdown.js:1:130216)", samples: 2 },
-    { label: "tick (wails://wails/assets/vendor-markdown.js:9)", samples: 1 },
-    { label: "(anonymous)", samples: 1 },
-  ],
-  "counts leaf frames for samples inside long-task windows",
-);
-eq(aggregateLongTaskProfile(trace, []), [], "returns nothing without long-task windows");
-eq(
-  aggregateLongTaskProfile(trace, [{ startMs: 990, durationMs: 100 }], 1),
-  [{ label: "post (wails://wails/assets/vendor-markdown.js:1:130216)", samples: 2 }],
-  "caps the frame list at maxFrames",
-);
 
 const framesSnapshot: PerformanceSnapshot = {
   ...perf,

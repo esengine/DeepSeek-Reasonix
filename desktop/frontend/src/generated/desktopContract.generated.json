@@ -6718,6 +6718,10 @@
           "kind": "string"
         }
       ],
+      "result": {
+        "kind": "object",
+        "ref": "main.HistorySwitchPhases"
+      },
       "returnsError": true,
       "scope": {
         "inputs": [
@@ -10118,6 +10122,10 @@
           "kind": "string"
         }
       ],
+      "result": {
+        "kind": "object",
+        "ref": "main.HistorySwitchPhases"
+      },
       "returnsError": true,
       "scope": {
         "inputs": [
@@ -23443,6 +23451,17 @@
           "type": {
             "kind": "string"
           }
+        },
+        {
+          "name": "switch",
+          "optional": true,
+          "type": {
+            "elem": {
+              "kind": "object",
+              "ref": "main.HistorySwitchPhases"
+            },
+            "kind": "nullable"
+          }
         }
       ]
     },
@@ -23900,6 +23919,70 @@
           "name": "bytes",
           "type": {
             "kind": "integer"
+          }
+        }
+      ]
+    },
+    "main.HistorySwitchPhases": {
+      "fields": [
+        {
+          "name": "resolveMs",
+          "type": {
+            "kind": "integer"
+          }
+        },
+        {
+          "name": "loadMs",
+          "type": {
+            "kind": "integer"
+          }
+        },
+        {
+          "name": "rebindMs",
+          "type": {
+            "kind": "integer"
+          }
+        },
+        {
+          "name": "historyMs",
+          "type": {
+            "kind": "integer"
+          }
+        },
+        {
+          "name": "totalMs",
+          "type": {
+            "kind": "integer"
+          }
+        },
+        {
+          "name": "loadedMessages",
+          "type": {
+            "kind": "integer"
+          }
+        },
+        {
+          "name": "loadedBytes",
+          "type": {
+            "kind": "integer"
+          }
+        },
+        {
+          "name": "historyEntries",
+          "type": {
+            "kind": "integer"
+          }
+        },
+        {
+          "name": "durableReads",
+          "type": {
+            "kind": "integer"
+          }
+        },
+        {
+          "name": "outcome",
+          "type": {
+            "kind": "string"
           }
         }
       ]

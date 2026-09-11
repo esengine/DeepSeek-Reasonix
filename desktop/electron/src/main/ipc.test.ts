@@ -33,6 +33,8 @@ test("renderer invokes are gated by sender identity and the contract allowlist",
   const trustedSender = { id: 1 };
   const trustedFrame = {};
   const invoked: Array<{ method: string; args: unknown[] }> = [];
+  let diagnosticReads = 0;
+  const performanceCalls: string[] = [];
   registerRendererIpc({
     ipcMain,
     contract: parseContract({ digest: "sha256:a", commands: ["OpenProjectTab"] }),
@@ -50,6 +52,13 @@ test("renderer invokes are gated by sender identity and the contract allowlist",
       resetAppZoom: async () => 1,
     },
     serviceState: () => ({ phase: "ready" as const, generation: "g-test" }),
+    processDiagnostics: () => { diagnosticReads++; return { scope: "electron", samples: [] }; },
+    performance: {
+      captureRendererProfile: async () => { performanceCalls.push("capture"); return { status: "captured" }; },
+      cancelRendererProfile: () => { performanceCalls.push("cancel"); },
+      exportHeapSnapshot: async () => { performanceCalls.push("heap"); return { status: "cancelled" }; },
+      dispose() {},
+    },
     invoke: async (method, args) => {
       invoked.push({ method, args });
       if (method === "OpenProjectTab" && args[0] === "/missing") throw new Error("workspace not found");
@@ -62,6 +71,19 @@ test("renderer invokes are gated by sender identity and the contract allowlist",
   const invoke = handlers.get(IPC.invoke);
   assert.ok(invoke);
   const trusted = { sender: trustedSender, senderFrame: trustedFrame };
+  const diagnostics = handlers.get(IPC.processDiagnostics)!;
+  assert.deepEqual(await diagnostics({ sender: trustedSender, senderFrame: {} }), { ok: false, message: "untrusted sender" });
+  assert.equal(diagnosticReads, 0);
+  assert.deepEqual(await diagnostics(trusted), { ok: true, value: { scope: "electron", samples: [] } });
+  assert.equal(diagnosticReads, 1);
+  for (const channel of [IPC.captureRendererProfile, IPC.cancelRendererProfile, IPC.exportHeapSnapshot]) {
+    assert.deepEqual(await handlers.get(channel)!({ sender: trustedSender, senderFrame: {} }), { ok: false, message: "untrusted sender" });
+  }
+  assert.deepEqual(performanceCalls, []);
+  await handlers.get(IPC.cancelRendererProfile)!(trusted);
+  assert.deepEqual(performanceCalls, [], "unscoped IPC cancellation is ignored");
+  for (const channel of [IPC.captureRendererProfile, IPC.cancelRendererProfile, IPC.exportHeapSnapshot]) await handlers.get(channel)!(trusted, "test-request");
+  assert.deepEqual(performanceCalls, ["capture", "cancel", "heap"]);
   assert.deepEqual(await invoke({ sender: { id: 9 }, senderFrame: trustedFrame }, "OpenProjectTab", ["/p"]), { ok: false, message: "untrusted sender" });
   assert.deepEqual(await invoke({ sender: trustedSender, senderFrame: {} }, "OpenProjectTab", ["/p"]), { ok: false, message: "untrusted sender" });
   assert.deepEqual(await invoke(trusted, "OpenProjectTab", ["/p"]), { ok: true, value: { opened: "/p" } });

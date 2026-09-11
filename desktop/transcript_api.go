@@ -9,14 +9,20 @@ import (
 
 // ResumeTranscriptSessionForTab adopts a session without materializing a legacy
 // history response. The caller obtains its bounded page from TranscriptSnapshotForTab.
-func (a *App) ResumeTranscriptSessionForTab(tabID, path string) error {
-	_, err := a.resumeSessionForTranscript(tabID, path, 0, false)
-	return err
+func (a *App) ResumeTranscriptSessionForTab(tabID, path string) (HistorySwitchPhases, error) {
+	page, err := a.resumeSessionForTranscript(tabID, path, 0, false)
+	if page.Switch == nil {
+		return HistorySwitchPhases{}, err
+	}
+	return *page.Switch, err
 }
 
-func (a *App) OpenChannelTranscriptSessionForTab(tabID, path string) error {
-	_, err := a.openChannelSessionForTranscript(tabID, path, 0, false)
-	return err
+func (a *App) OpenChannelTranscriptSessionForTab(tabID, path string) (HistorySwitchPhases, error) {
+	page, err := a.openChannelSessionForTranscript(tabID, path, 0, false)
+	if page.Switch == nil {
+		return HistorySwitchPhases{}, err
+	}
+	return *page.Switch, err
 }
 
 func (a *App) transcriptAPIForTab(tabID string) (control.TranscriptProjectionAPI, func() bool, error) {

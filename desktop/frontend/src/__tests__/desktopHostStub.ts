@@ -4,10 +4,13 @@
 // host.invoke through it, and mutating the table between calls is observed
 // immediately (mirroring how the retired window.go seam behaved).
 import type { AppBindings } from "../lib/bridge";
+import type { NativePerformanceActions, ProcessDiagnosticsSnapshot } from "../lib/processDiagnostics";
 import type { DesktopBrowserHost } from "../lib/browserHost";
 import type { BrowserControlApi, BrowserControlState, ChromeImportOutcome, ReasonixDesktopHost } from "../lib/desktopHost";
 
 export interface DesktopHostStubOptions {
+  performance?: NativePerformanceActions;
+  processDiagnostics?: () => Promise<ProcessDiagnosticsSnapshot | null>;
   /** Maps a dropped File to its native path, mirroring the preload. */
   getPathForFile?: (file: File) => string;
   /** Records native clipboard writes; clipboardWriteResult gates success. */
@@ -100,6 +103,8 @@ export function installDesktopHostStub(commands: object, options: DesktopHostStu
       return () => set.delete(cb);
     },
     native: {
+      ...options.performance,
+      ...(options.processDiagnostics ? { processDiagnostics: options.processDiagnostics } : {}),
       openExternal: (url) => {
         options.externalOpens?.push(url);
         return Promise.resolve();

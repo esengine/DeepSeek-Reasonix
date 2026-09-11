@@ -190,6 +190,10 @@ contextBridge.exposeInMainWorld("reasonixDesktop", {
   invoke: (method: string, args: unknown[]) => call(IPC.invoke, method, Array.isArray(args) ? args : []),
   on,
   native: {
+    processDiagnostics: () => call(IPC.processDiagnostics),
+    captureRendererProfile: (requestId?: string) => call(IPC.captureRendererProfile, requestId),
+    cancelRendererProfile: (requestId?: string) => call(IPC.cancelRendererProfile, requestId),
+    exportHeapSnapshot: () => call(IPC.exportHeapSnapshot),
     openExternal: (url: string) => call(IPC.openExternal, url).then(() => undefined),
     clipboard: {
       writeText: (text: string) => call(IPC.clipboardWrite, text).then((ok) => ok === true),

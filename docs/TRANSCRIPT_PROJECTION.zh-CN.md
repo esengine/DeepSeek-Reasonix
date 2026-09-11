@@ -32,6 +32,12 @@ Desktop 提供 `TranscriptSnapshotForTab`、`TranscriptPageForTab`、
 主机检查下提供对应的 GET `/transcript/snapshot`、`/transcript/page`、
 `/transcript/content`、`/transcript/replay`。
 
+`ResumeTranscriptSessionForTab` 和 `OpenChannelTranscriptSessionForTab` 在绑定后
+返回切换阶段诊断，不生成旧历史页。前端只在对应快照提交后记录这些数据，并单独统计
+快照安装耗时。旧宿主不返回诊断时，`duplicateLoadCount` 为 `null`（未知），不能
+将缺失测量当作零次重复读取。旧分页调用只有在预载摘要与控制器捕获的历史一致时才复用；
+运行时已完成并保存了更新内容时，会重新读取持久化历史。
+
 快照携带协议版本、快照 ID、会话／会话头／重写代次／运行时代次、投影修订号、
 已覆盖事件序号、显示记录、活动记录及待处理提示。分页和正文请求绑定同一个
 快照 ID；回放绑定完整身份和最后提交的序号。快照被回收时返回 `stale`，身份或

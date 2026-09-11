@@ -3,7 +3,10 @@ package main
 import (
 	"context"
 	"fmt"
+	"log/slog"
+	"os"
 	"strings"
+	"time"
 
 	"reasonix/internal/agent"
 	"reasonix/internal/sessioncatalog"
@@ -106,10 +109,17 @@ func (a *App) resumeSessionPageForTab(tabID, path string, limit int) (HistoryPag
 }
 
 func (a *App) resumeSessionForTranscript(tabID, path string, limit int, includeHistory bool) (HistoryPage, error) {
+	started := time.Now()
+	phases := HistorySwitchPhases{Outcome: "ok"}
+	defer func() { logSessionSwitchPhases(phases, started) }()
 	tab, ctrl := a.tabAndCtrlByID(tabID)
 	if tab == nil || ctrl == nil {
+		phases.Outcome = "tab_not_ready"
 		return HistoryPage{}, fmt.Errorf("tab is not ready")
 	}
+	// Resolve the continuation before the first read so the loaded session, the
+	// rebound path, and the returned fingerprint all name the same file.
+	resolveStarted := time.Now()
 	if continued := a.continuePathForOpen(path); continued != "" {
 		current := tab.currentSessionPath()
 		if !tab.hasActiveRuntimeWork() || sessionRuntimeKey(current) != sessionRuntimeKey(path) {
@@ -118,22 +128,91 @@ func (a *App) resumeSessionForTranscript(tabID, path string, limit int, includeH
 	}
 	sessionPath, _, err := validateSessionPath(controllerSessionDir(ctrl), path)
 	if err != nil {
+		phases.Outcome = "invalid_path"
 		return HistoryPage{}, err
 	}
+	phases.ResolveMs = elapsedMs(resolveStarted)
+
+	loadStarted := time.Now()
+	phases.DurableReads++
 	loaded, err := loadResumableSession(sessionPath)
+	if err != nil {
+		phases.Outcome = "load_failed"
+		return HistoryPage{}, err
+	}
+	phases.LoadMs = elapsedMs(loadStarted)
+	phases.LoadedCount = loaded.Len()
+	phases.LoadedBytes = sessionFileBytes(sessionPath)
+
+	page, err := a.switchToLoadedSessionPage(tab, loaded, sessionPath, false, includeHistory, limit, &phases)
 	if err != nil {
 		return HistoryPage{}, err
 	}
+	phases.TotalMs = elapsedMs(started)
+	page.Switch = &phases
+	return page, nil
+}
+
+// switchToLoadedSessionPage commits tab onto a session that is already loaded
+// and optionally builds a legacy page from a matching preload. Modern callers
+// take their first screen from the authoritative transcript snapshot instead.
+func (a *App) switchToLoadedSessionPage(tab *WorkspaceTab, loaded *agent.Session, sessionPath string, readOnly, includeHistory bool, limit int, phases *HistorySwitchPhases) (HistoryPage, error) {
+	rebindStarted := time.Now()
 	if sessionRuntimeKey(tab.currentSessionPath()) != sessionRuntimeKey(sessionPath) {
 		if err := a.rebindTabToLoadedSessionPath(tab, sessionPath, loaded); err != nil {
+			phases.Outcome = "rebind_failed"
 			return HistoryPage{}, err
 		}
 	}
-	a.setTabReadOnly(tab.ID, false)
-	if !includeHistory {
-		return HistoryPage{}, nil
+	a.setTabReadOnly(tab.ID, readOnly)
+	// The rebind republishes tab.Ctrl; a nil controller here means the switch did
+	// not commit, and the caller must keep the previous surface recoverable.
+	_, reboundCtrl := a.tabAndCtrlByID(tab.ID)
+	if reboundCtrl == nil {
+		phases.Outcome = "controller_missing"
+		return HistoryPage{}, fmt.Errorf("tab is not ready after session rebind")
 	}
-	return a.HistoryPageForTab(tab.ID, 0, limit), nil
+	phases.RebindMs = elapsedMs(rebindStarted)
+	if !includeHistory {
+		return HistoryPage{Messages: []HistoryMessage{}}, nil
+	}
+
+	buildStarted := time.Now()
+	page, durableRead := historyPageForController(tab, reboundCtrl, loaded, sessionPath, 0, limit)
+	phases.HistoryMs = elapsedMs(buildStarted)
+	if durableRead {
+		phases.DurableReads++
+	}
+	phases.HistoryCount = len(page.Messages)
+	return page, nil
+}
+
+func elapsedMs(started time.Time) int64 {
+	return time.Since(started).Milliseconds()
+}
+
+// sessionFileBytes reports the durable log size for switch diagnostics. Only the
+// size leaves this function; the path is never logged with it.
+func sessionFileBytes(path string) int64 {
+	if info, err := os.Stat(path); err == nil && !info.IsDir() {
+		return info.Size()
+	}
+	return 0
+}
+
+func logSessionSwitchPhases(phases HistorySwitchPhases, started time.Time) {
+	slog.Debug("desktop: session switch",
+		"outcome", phases.Outcome,
+		"resolve_ms", phases.ResolveMs,
+		"load_ms", phases.LoadMs,
+		"rebind_ms", phases.RebindMs,
+		"history_ms", phases.HistoryMs,
+		"total_ms", elapsedMs(started),
+		"loaded_messages", phases.LoadedCount,
+		"loaded_bytes", phases.LoadedBytes,
+		"history_entries", phases.HistoryCount,
+		"durable_reads", phases.DurableReads,
+	)
 }
 
 func (a *App) retargetOpenTabsToContinuations() {

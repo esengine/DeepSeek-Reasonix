@@ -295,6 +295,66 @@ and `ChromeImportOutcome` is either `{ ok: true, profile, cookies, skipped }` or
 `profile-not-found`, `cookies-unreadable`, `safe-storage-denied`,
 `safe-storage-unavailable`, `unsupported-platform`.
 
+## Performance diagnostics
+
+The optional native calls below are restricted to the trusted app main frame.
+Older shells may omit them. No persisted user-data format changes or migrations
+are required.
+
+- `processDiagnostics()` returns `{scope: "electron", samples, growth}`.
+  Samples contain age, nullable CPU interval, process PID/type/creation time,
+  nullable CPU percentage, working set and private memory in MiB, and a
+  truncation flag. Sampling is limited to once per 30 seconds in the foreground
+  and once per 60 seconds otherwise. Retention is at most 12 snapshots and five
+  minutes, with at most 128 processes per snapshot. No titles, URLs or process
+  names are collected. Electron-managed processes only; Go is excluded.
+- `captureRendererProfile(requestId?)` records the current renderer through CDP for
+  five seconds at a requested 10 ms sample interval. It returns a status,
+  duration and at most eight app-script self-time summaries. Normal documents
+  do not enable JS self-profiling. Capture is single-flight, requires the
+  foreground window, observes a ten-minute cooldown, and allows at most three
+  attempts per shell lifetime. Existing debugger/DevTools sessions are not
+  taken over. Blur, hide, navigation, renderer loss or cancellation stops it.
+- `cancelRendererProfile(requestId)` cancels only the matching capture; unscoped
+  renderer cancellation is ignored. This also fences delayed requests across
+  long suspension/resume gaps. Each CDP command has a
+  1.5 second deadline and the owned debugger is released on every terminal path.
+  Analysis runs in a disposable Worker with a 32 MiB old-generation limit,
+  1.5 second deadline, and input limits of 20,000 nodes / 100,000 samples.
+  Raw profiles never enter the UI report.
+- `exportHeapSnapshot()` requires a user-confirmed native warning and save
+  dialog. It saves locally without uploading, and accepts no renderer-supplied
+  path. Snapshots may contain code, chats and secrets and can pause the renderer
+  or use substantial disk space. Electron cannot preempt a snapshot: its busy
+  lease remains held until the actual operation settles.
+
+A memory growth signal requires a continuous PID plus creation-time identity,
+at least five readings spanning two minutes, and three recent readings exceeding
+the initial two-reading baseline by both 256 MiB and 50%. Private memory is used
+when available throughout; otherwise working set is used. This is an observation
+of sustained growth, not proof of a leak or exclusive physical RAM ownership.
+
+Reports appear immediately. Process enrichment waits at most 750 ms; a bounded
+CPU capture can update the same report later. The UI abandons capture enrichment
+after 12 seconds and requests cancellation. These are asynchronous deadlines,
+not preemptive limits on synchronous work. Dismissed reports never reappear.
+The report distinguishes post-trigger samples from the already-ended long task.
+User-requested heap capture suppresses pressure alerts during capture and for
+the normal five-second settling grace afterward.
+
+From `desktop/electron`, run `node scripts/performance-smoke.mjs` to verify the
+production owner, Worker, report enrichment and local heap snapshot with an
+isolated native fixture. `node scripts/performance-benchmark.mjs` compares off,
+lightweight monitoring and short capture in three fresh-process trials each.
+All modes use the same renderer bundle and runtime mode selection. Activity
+signals are pinned and background throttling disabled for unattended native
+measurement. Host event tests separately cover the production focus and
+navigation cancellation policy; the smoke verifies actual CDP and ASAR paths.
+It records CPU time where available, frame timings, working sets and metric
+collection cost in `artifacts/performance/overhead.json`. This synthetic
+benchmark is not a reproduction of the Windows user workload. Field comparison
+must still cover startup, extended use, foreground return and closing tabs.
+
 ## Security boundaries
 
 - The application window: sandbox on, context isolation on, Node integration

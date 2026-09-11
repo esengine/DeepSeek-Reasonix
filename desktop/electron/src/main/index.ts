@@ -24,6 +24,8 @@ import { reasonixHome } from "./home.js";
 import { buildHostCallTable, dispatchHostCall, type ScreenInfo } from "./hostCalls.js";
 import { firstExisting, iconCandidates } from "./icons.js";
 import { registerRendererIpc } from "./ipc.js";
+import { ProcessDiagnostics } from "./processDiagnostics.js";
+import { createPerformanceHost } from "./performanceHost.js";
 import { QuitSequencer } from "./lifecycle.js";
 import { createLogger, errorText, RotatingFile } from "./log.js";
 import { installApplicationMenu } from "./menu.js";
@@ -341,7 +343,15 @@ function bootstrap(dataHome: string): void {
     session.defaultSession.setPermissionRequestHandler((contents, permission, callback) => {
       callback(mainWindow.isTrustedSender(contents, contents.mainFrame) && MAIN_WINDOW_PERMISSIONS.has(permission));
     });
+    const diagnostics = new ProcessDiagnostics(() => app.getAppMetrics(), undefined, () => Boolean(mainWindow.browserWindow?.isVisible() && mainWindow.browserWindow?.isFocused()));
+    const performanceHost = createPerformanceHost({ window: () => mainWindow.browserWindow, dialog, workerPath: join(__dirname, "profile-analysis.cjs"), locale: () => app.getLocale() });
+    diagnostics.sample();
+    const diagnosticsTimer = setInterval(() => diagnostics.sample(), 30_000);
+    diagnosticsTimer.unref();
+    app.once("will-quit", () => { clearInterval(diagnosticsTimer); performanceHost.dispose(); });
     registerRendererIpc({
+      processDiagnostics: () => diagnostics.snapshot(),
+      performance: performanceHost,
       ipcMain,
       contract,
       window: mainWindow,

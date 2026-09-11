@@ -1,5 +1,6 @@
 import type { HistoryMessage, TurnEventReplayView, TurnStatus, WireEvent, WireCompletionSummary } from "./types";
 import type { TranscriptIdentity, TranscriptSnapshotBoundary } from "./turnEventProjection";
+import type { HistorySwitchPhases } from "./sessionDiagnostics";
 
 export interface TranscriptContentRef {
   snapshotId: string;
@@ -47,6 +48,6 @@ export interface TranscriptProtocolBindings {
   RemoteTranscriptPageForTab?(tabId: string, request: TranscriptPageRequest): Promise<TranscriptSnapshot>;
   RemoteTranscriptContentForTab?(tabId: string, request: TranscriptContentRef & { offset: number }): Promise<TranscriptContentChunk>;
   RemoteTranscriptReplayForTab?(tabId: string, request: TranscriptReplayRequest): Promise<TranscriptReplay>;
-  ResumeTranscriptSessionForTab?(tabID: string, path: string): Promise<void>;
-  OpenChannelTranscriptSessionForTab?(tabID: string, path: string): Promise<void>;
+  ResumeTranscriptSessionForTab?(tabID: string, path: string): Promise<HistorySwitchPhases | void>;
+  OpenChannelTranscriptSessionForTab?(tabID: string, path: string): Promise<HistorySwitchPhases | void>;
 }

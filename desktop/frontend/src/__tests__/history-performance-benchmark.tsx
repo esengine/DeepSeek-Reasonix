@@ -4,6 +4,10 @@
 // Synthetic, privacy-safe benchmark for long restored histories. It logs counts,
 // byte lengths, and elapsed times only; it never uses real conversation content.
 
+import {
+  noteActivationRequested, noteActivationSettled, noteActivationStarted,
+  noteResumeHistoryPage, noteTranscriptRowCounts, resetSessionDiagnostics, sessionPipelineDiagnostics,
+} from "../lib/sessionDiagnostics";
 import { historyMessagesToItems, initialState, reducer, type Item } from "../lib/useController";
 import { buildTurnGroups, compactQuestionText, scrollVersion, type TurnGroup } from "../lib/transcriptGrouping";
 import type { HistoryMessage } from "../lib/types";
@@ -208,6 +212,61 @@ if (!full10KB || full10KB.itemStringBytes * 10 >= full10KB.jsonBytes) {
 if (!archived10KB || archived10KB.itemStringBytes * 5 >= archived10KB.jsonBytes) {
   failures.push("restored archived tool results retained too much source text");
 }
+
+// ── Session-switch diagnostics ───────────────────────────────────────────────
+// These fixtures verify diagnostic interpretation, not physical disk reads.
+// The desktop switch tests exercise the real load and snapshot entry points.
+// Missing evidence must remain unknown instead of passing a zero-repeat gate.
+const switchMessages = syntheticHistory(cases[1]);
+const switchPhases = {
+  resolveMs: 1, loadMs: 12, rebindMs: 30, historyMs: 9, totalMs: 52,
+  loadedMessages: switchMessages.length, loadedBytes: 65_536,
+  historyEntries: switchMessages.length, durableReads: 1, outcome: "ok",
+};
+
+resetSessionDiagnostics();
+noteActivationRequested("switch-ticket");
+noteActivationStarted("switch-ticket", "tab-switch");
+noteActivationSettled("switch-ticket", "ready");
+noteResumeHistoryPage({ messages: switchMessages, switch: switchPhases }, switchPhases.totalMs);
+noteTranscriptRowCounts(40, switchMessages.length);
+const pipelined = sessionPipelineDiagnostics();
+process.stdout.write(`\n${JSON.stringify({
+  activation: pipelined.activation,
+  history: pipelined.history,
+  mountedRows: pipelined.mountedRows,
+  duplicateLoadCount: pipelined.duplicateLoadCount,
+}, null, 2)}\n`);
+
+if (pipelined.duplicateLoadCount !== 0) {
+  failures.push(`switch performed duplicate durable loads: ${pipelined.duplicateLoadCount}`);
+}
+if (pipelined.history?.source !== "resume-loaded") {
+  failures.push(`switch history source = ${pipelined.history?.source}, want resume-loaded`);
+}
+if (pipelined.history?.entries !== switchMessages.length) {
+  failures.push(`switch history entries = ${pipelined.history?.entries}, want ${switchMessages.length}`);
+}
+if (pipelined.activation?.totalMs === undefined || pipelined.activation.startingToReadyMs === undefined) {
+  failures.push("activation phases were not derived from the ticket");
+}
+if (pipelined.mountedRows?.mounted !== 40 || pipelined.mountedRows.total !== switchMessages.length) {
+  failures.push("mounted row counts were not reported");
+}
+// The gate has to be able to fail, or it proves nothing: a switch that rebuilt
+// its first screen from a second read reports two.
+noteResumeHistoryPage({ messages: switchMessages, switch: { ...switchPhases, durableReads: 2 } }, switchPhases.totalMs);
+if (sessionPipelineDiagnostics().duplicateLoadCount !== 1) {
+  failures.push("duplicate-load gate did not observe a second durable read");
+}
+resetSessionDiagnostics();
+if (sessionPipelineDiagnostics().duplicateLoadCount !== null) {
+  failures.push("missing switch evidence must remain unknown");
+}
+noteResumeHistoryPage({ messages: switchMessages, switch: switchPhases }, 60, 8);
+if (sessionPipelineDiagnostics().resumeHistory?.source !== "transcript-snapshot" || sessionPipelineDiagnostics().resumeSnapshotMs !== 8) failures.push("modern snapshot timing is missing");
+noteResumeHistoryPage({ messages: [] }, 1, 1);
+if (sessionPipelineDiagnostics().duplicateLoadCount !== null || sessionPipelineDiagnostics().resumeSwitch) failures.push("an uninstrumented response retained old switch evidence");
 
 if (failures.length > 0) {
   for (const failure of failures) process.stderr.write(`FAIL ${failure}\n`);

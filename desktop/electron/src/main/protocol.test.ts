@@ -3,7 +3,7 @@ import { mkdirSync, mkdtempSync, rmSync, statSync, writeFileSync } from "node:fs
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { after, before, test } from "node:test";
-import { isForwardedPath, resolveDistRoot, routeAppRequest } from "./protocol.js";
+import { isForwardedPath, registerAppProtocol, resolveDistRoot, routeAppRequest } from "./protocol.js";
 
 let dist = "";
 const isFile = (path: string) => {
@@ -14,6 +14,18 @@ const isFile = (path: string) => {
   }
 };
 const route = (url: string) => routeAppRequest(url, dist, isFile);
+
+test("normal app documents do not pre-enable a profiling engine", async () => {
+  let handler!: (request: Request) => Promise<Response> | Response;
+  registerAppProtocol({
+    protocol: { handle: (_scheme, callback) => { handler = callback; } },
+    fetch: async () => new Response("forwarded"), distRoot: dist, resources: () => null,
+    log: { info() {}, warn() {}, error() {} },
+  });
+  const response = await handler(new Request("reasonix://app/"));
+  assert.equal(response.headers.get("Document-Policy"), null);
+  await response.text();
+});
 
 before(() => {
   dist = mkdtempSync(join(tmpdir(), "reasonix-dist-"));

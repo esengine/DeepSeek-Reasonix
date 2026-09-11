@@ -3245,6 +3245,11 @@ export const en = {
   "crash.privacyNote": "The report contains only the error text above (user names in paths removed) plus app version and OS.",
   "performanceReport.title": "Reasonix noticed a responsiveness issue",
   "performanceReport.dismiss": "Dismiss",
+  "performanceReport.memoryTitle": "Reasonix noticed sustained memory growth",
+  "performanceReport.heapFailed": "Heap snapshot could not be saved",
+  "performanceReport.saveHeap": "Save heap snapshot…",
+  "performanceReport.heapSaved": "Heap snapshot saved",
+  "performanceReport.diagnosticBusy": "Diagnostic in progress — try again shortly",
   "performanceReport.privacyNote": "Before upload, the desktop scrubber removes paths and secrets. The diagnostic is intended to contain timing, memory, network state, sampled app function names, recent breadcrumbs, app version, and OS.",
 
   // mock / demo seed data (browser dev only)
