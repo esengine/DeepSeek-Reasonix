@@ -57,7 +57,9 @@ jobs:
           # Posting stays off until this repository variable is set to "true", so
           # merging the sweeper cannot start commenting on its own.
           ENABLED: ${{ vars.STALE_SWEEP_ENABLED }}
-          REQUESTED_DRY_RUN: ${{ github.event.inputs.dry_run || 'true' }}
+          # Manual dispatch dry-runs by default (the input default above); only
+          # scheduled runs act for real, and only once ENABLED is "true".
+          REQUESTED_DRY_RUN: ${{ github.event.inputs.dry_run || 'false' }}
         run: |
           set -euo pipefail
           args=(--limit "$LIMIT")
