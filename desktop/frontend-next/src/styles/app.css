@@ -303,27 +303,31 @@
   @starting-style {
     .menu:not([hidden]) { opacity: 0; transform: translateY(-4px) scaleY(.985) }
   }
-  .projmenu { top: calc(100% + 7px); left: 0; transform-origin: top left }
+  /* Still the composer's policy menu, which is not a Picker and stays in place. */
   .modemenu { bottom: calc(100% + 9px); left: 0; transform-origin: bottom left; width: max-content; max-width: 420px }
-  /* The two rules above fix which side opens and never flip when there is no room.
-     Anchor positioning lets the browser pick the side and recompute on scroll.
-     Only one picker is expanded at a time, so hanging the name on [aria-expanded]
-     keeps it unique and anchor-scope is not needed. Engines without this block
-     fall back to the calc() rules above, which have been in use all along. */
   @supports (position-try-fallbacks: flip-block) {
     .picker > button[aria-expanded="true"] { anchor-name: --pick }
-    .projmenu, .modemenu { position-anchor: --pick; position-try-fallbacks: flip-block }
-    /* The fallback is load-bearing, not belt and braces. anchor-name hangs on
-       [aria-expanded="true"], and that flips the instant the menu is asked to
-       close — while the menu is still on screen fading out. With no anchor left
-       to resolve, an anchor() without a fallback invalidates the whole
+    .modemenu { position-anchor: --pick; position-try-fallbacks: flip-block }
+    /* The fallback is load-bearing. anchor-name hangs on [aria-expanded="true"],
+       which flips the instant the menu is asked to close — while it is still on
+       screen fading out. An anchor() with no fallback invalidates the whole
        declaration, and the menu drops to the bottom of the window before it
-       disappears. 100% is what the non-anchored rules above already use. */
-    .projmenu { top: calc(anchor(bottom, 100%) + 7px); bottom: auto }
+       disappears. 100% is what the non-anchored rule above already uses. */
     .modemenu { bottom: calc(anchor(top, 100%) + 9px); top: auto }
   }
   .modemenu .mi .lb, .modemenu .mi.head .lb { white-space: nowrap }
   .modemenu .mi .rt { margin-left: auto; padding-left: 14px; white-space: nowrap }
+
+  /* A Picker's menu is rendered into the body, so left/top are measured and
+     written inline and nothing above the trigger can take its level with it.
+     Anchor positioning resolves the side and follows the scroller, but it
+     cannot lift a menu out of an ancestor's stacking context — which is what
+     a transcript card drawing over this one needs. */
+  .portmenu { position: fixed; z-index: 60; top: 0; left: 0 }
+  .pm-down { transform-origin: top left }
+  .pm-up { transform-origin: bottom left; width: max-content; max-width: 420px }
+  .pm-up .mi .lb, .pm-up .mi.head .lb { white-space: nowrap }
+  .pm-up .mi .rt { margin-left: auto; padding-left: 14px; white-space: nowrap }
 
   .mi {
     position: relative;
@@ -959,7 +963,6 @@
   .tab .n { font: var(--w-reg) var(--fs-micro) var(--mono); color: var(--ghost); margin-left: 5px; font-variant-numeric: tabular-nums }
   /* 诊断入口靠右：它不是第三个目的地，是另一层。 */
   .tabs > .picker { margin-left: auto }
-  .tabs .picker .projmenu { left: auto; right: 0; transform-origin: top right }
   .tab.more { display: inline-flex; align-items: center; gap: 5px }
   .tab.more .cv { font: var(--w-reg) var(--fs-micro) var(--ui); color: var(--faint); font-style: normal; transition: transform var(--t-card) var(--ease) }
   .tab.more[aria-expanded="true"] .cv { transform: rotate(180deg) }

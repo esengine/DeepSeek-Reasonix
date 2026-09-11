@@ -192,6 +192,7 @@ describe("composer attachments", () => {
 
 it("keeps every segment after the provider in a namespaced model id", async () => {
   const { container } = draw({ st: status({ modelRef: "relay/anthropic/claude-sonnet" }) });
-  await waitFor(() => expect(container.querySelector('[data-action="model.select"]')).toBeTruthy());
+  // The rows are the ready signal, and a Picker renders them into the body.
+    await waitFor(() => expect(document.querySelector('[data-action="model.select"]')).toBeTruthy());
   expect(container.querySelector(".turntools > .picker > .mode")?.textContent).toContain("anthropic/claude-sonnet");
 });

@@ -172,3 +172,30 @@ describe("the menu is reachable without a pointer", () => {
     expect(onPick).toHaveBeenCalledWith("traj");
   });
 });
+
+// Reported from use: with a transcript on screen, the opened menu was drawn
+// under the cards and its rows could not be clicked. Nothing in the transcript
+// outranks it — the menu is z-index 30 and the highest card is 5 — so what was
+// happening is that the menu's level was never the transcript's to compare
+// against: a stacking context anywhere above the bar holds the whole menu at
+// that ancestor's level, and the scroller, being the later sibling, paints over
+// it and takes the presses. An entrance animation's fill transform and a card's
+// paint containment both make one, which is why RewindControl's menu was moved
+// out of the flow for the same reason.
+//
+// Rendering it outside the bar is what removes the dependency: the assertion is
+// that it is not under the trigger any more, not that some particular ancestor
+// is innocent today.
+describe("where the detail menu is rendered", () => {
+  it("is outside the bar, so no ancestor of the bar can hold its level down", async () => {
+    const { container } = draw();
+    await userEvent.click(screen.getByRole("button", { name: /运行详情/ }));
+
+    const menu = document.querySelector(".menu[role='menu']:not([hidden])");
+    expect(menu, "the menu opened").toBeTruthy();
+    expect(container.contains(menu as Node), "and not inside the bar").toBe(false);
+    expect(menu?.parentElement).toBe(document.body);
+    // Its rows are reachable where it now lives.
+    expect(document.querySelectorAll(".menu[role='menu']:not([hidden]) button.mi").length).toBeGreaterThan(0);
+  });
+});

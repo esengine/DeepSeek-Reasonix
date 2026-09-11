@@ -81,6 +81,9 @@ export function PaneNav({ view, onPick, done, steps, nodes, rows }: {
         // things a person can do.
         data-action="pane.view"
         place="top"
+        // Right-aligned: it is the last thing on the bar, and a menu wider than
+        // the trigger has the room on that side, not past the window edge.
+        align="end"
         current={detail ?? undefined}
         items={items}
         onPick={(to) => onPick(to as PaneView)}

@@ -47,8 +47,9 @@ describe("what the composer shows when nothing is unusual", () => {
   // The model has no baseline to fall back to, so every value of it is a real
   // choice and it stays.
   it("keeps the model, which has no default to recede to", async () => {
-    const { container } = draw();
-    await waitFor(() => expect(container.querySelector('[data-action="model.select"]')).toBeTruthy());
+    draw();
+    // A Picker renders its rows into the body, so that is where the choice is.
+    await waitFor(() => expect(document.querySelector('[data-action="model.select"]')).toBeTruthy());
   });
 
   // Model and turn policy are one semantic boundary, regardless of whether a

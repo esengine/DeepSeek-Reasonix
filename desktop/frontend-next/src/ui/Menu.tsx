@@ -1,5 +1,7 @@
-import { Fragment, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
+import { Fragment, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from "react";
+import { createPortal } from "react-dom";
 import { t } from "../i18n";
+import { placeInViewport, zoom } from "./place";
 
 export interface MenuItem {
   value: string;
@@ -25,6 +27,9 @@ interface Props {
   current?: string;
   onPick: (value: string) => void;
   place: "top" | "bottom";
+  // Which edge of the trigger the menu lines up with. It is stated here because
+  // the menu no longer sits under a positioned ancestor a stylesheet can reach.
+  align?: "start" | "end";
   className?: string;
   title?: string;
   // The choice already made is being applied and has not landed. Marked on the
@@ -37,7 +42,7 @@ interface Props {
 // carry theirs: the action's identity is written at the call site, and the
 // answer this menu gives is the item's own value.
 export function Picker({
-  label, items, current, onPick, place, className, title, pending, ...id
+  label, items, current, onPick, place, align = "start", className, title, pending, ...id
 }: Props & { [K in `data-${string}`]?: string }) {
   const [open, setOpen] = useState(false);
   const [query, setQuery] = useState("");
@@ -60,8 +65,11 @@ export function Picker({
     }
     if (filtering) find.current?.focus();
     else menu.current?.querySelector<HTMLElement>("button.mi")?.focus();
+    // The menu is not inside the wrapper any more, so without asking it too a
+    // press on one of its own rows would read as a press outside.
     const onDown = (e: MouseEvent) => {
-      if (!wrap.current?.contains(e.target as Node)) setOpen(false);
+      const at = e.target as Node;
+      if (!wrap.current?.contains(at) && !menu.current?.contains(at)) setOpen(false);
     };
     // Esc unwinds one layer at a time: the menu first, the run only once no
     // menu is left, so the capture phase has to stop it reaching the app.
@@ -78,6 +86,48 @@ export function Picker({
       removeEventListener("keydown", onKey, true);
     };
   }, [open, filtering]);
+
+  // Measured rather than anchored, because the menu is rendered into the body
+  // and has no positioned ancestor left to hang on. It is rendered there so no
+  // ancestor can take its z-index down with it: a stacking context anywhere
+  // above — an entrance animation's fill transform, a card's paint containment
+  // — traps the menu at that ancestor's level and the transcript draws over it.
+  const put = useCallback(() => {
+    const anchor = btn.current?.getBoundingClientRect();
+    const el = menu.current;
+    if (!anchor || !el || el.hidden) return;
+    // The layout box, not the painted one: the entrance transition is running
+    // while this measures, and its scaleY would place the menu by a size it is
+    // on its way out of. offsetWidth is in CSS pixels where a client rect is on
+    // screen, so it is scaled to meet the anchor's units.
+    const s = zoom();
+    const box = { width: el.offsetWidth * s, height: el.offsetHeight * s };
+    const under = anchor.bottom + 7;
+    const over = anchor.top - box.height - 9;
+    const down = place === "top";
+    const fits = down ? under + box.height <= innerHeight - 6 : over >= 6;
+    const at = placeInViewport(
+      { x: align === "end" ? anchor.right - box.width : anchor.left, y: fits === down ? under : over },
+      box,
+      { width: innerWidth, height: innerHeight },
+      s,
+    );
+    el.style.left = `${at.left}px`;
+    el.style.top = `${at.top}px`;
+  }, [align, place]);
+
+  useLayoutEffect(() => {
+    if (!open) return;
+    put();
+    const again = () => put();
+    // Capture, because the scroller that moves the trigger is not the window.
+    addEventListener("scroll", again, true);
+    addEventListener("resize", again);
+    return () => {
+      removeEventListener("scroll", again, true);
+      removeEventListener("resize", again);
+    };
+  }, [open, put, shown.length]);
 
   // Headings are divs and never take focus, so walking the buttons is what
   // keeps one arrow press from landing on nothing.
@@ -123,59 +173,62 @@ export function Picker({
       >
         {label}
       </button>
-      <div
-        ref={menu}
-        className={place === "top" ? "menu projmenu" : "menu modemenu"}
-        role="menu"
-        hidden={!open}
-        onKeyDown={arrows}
-      >
-        {filtering && (
-          <input
-            ref={find}
-            className="mfind"
-            value={query}
-            placeholder={`筛选 ${choosable} 项`}
-            aria-label={t("筛选")}
-            spellCheck={false}
-            onChange={(e) => setQuery(e.target.value)}
-            onKeyDown={(e) => {
-              if (e.key !== "Enter" || !lead) return;
-              e.preventDefault();
-              take(lead);
-            }}
-          />
-        )}
-        {shown.map((it, i) => (
-          <Fragment key={it.value}>
-            {it.divide && i > 0 && <div className="div" />}
-            {it.header ? (
-              <div className="mi head">
-                <span className="lb">{it.label}</span>
-                {it.right && <span className="rt">{it.right}</span>}
-              </div>
-            ) : (
-              <button
-                {...id}
-                data-value={it.value}
-                className={it.plain ? "mi plain" : "mi"}
-                role="menuitem"
-                data-on={it.value === current ? "" : undefined}
-                data-lead={it.value === lead ? "" : undefined}
-                onClick={() => take(it.value)}
-              >
-                <span className="dot" />
-                <span className="tx">
+      {createPortal(
+        <div
+          ref={menu}
+          className={place === "top" ? "menu portmenu pm-down" : "menu portmenu pm-up"}
+          role="menu"
+          hidden={!open}
+          onKeyDown={arrows}
+        >
+          {filtering && (
+            <input
+              ref={find}
+              className="mfind"
+              value={query}
+              placeholder={`筛选 ${choosable} 项`}
+              aria-label={t("筛选")}
+              spellCheck={false}
+              onChange={(e) => setQuery(e.target.value)}
+              onKeyDown={(e) => {
+                if (e.key !== "Enter" || !lead) return;
+                e.preventDefault();
+                take(lead);
+              }}
+            />
+          )}
+          {shown.map((it, i) => (
+            <Fragment key={it.value}>
+              {it.divide && i > 0 && <div className="div" />}
+              {it.header ? (
+                <div className="mi head">
                   <span className="lb">{it.label}</span>
-                  {it.desc && <span className="ds">{it.desc}</span>}
-                </span>
-                {it.right && <span className="rt">{it.right}</span>}
-              </button>
-            )}
-          </Fragment>
-        ))}
-        {filtering && shown.length === 0 && <div className="mnone">{t("没有匹配的项")}</div>}
-      </div>
+                  {it.right && <span className="rt">{it.right}</span>}
+                </div>
+              ) : (
+                <button
+                  {...id}
+                  data-value={it.value}
+                  className={it.plain ? "mi plain" : "mi"}
+                  role="menuitem"
+                  data-on={it.value === current ? "" : undefined}
+                  data-lead={it.value === lead ? "" : undefined}
+                  onClick={() => take(it.value)}
+                >
+                  <span className="dot" />
+                  <span className="tx">
+                    <span className="lb">{it.label}</span>
+                    {it.desc && <span className="ds">{it.desc}</span>}
+                  </span>
+                  {it.right && <span className="rt">{it.right}</span>}
+                </button>
+              )}
+            </Fragment>
+          ))}
+          {filtering && shown.length === 0 && <div className="mnone">{t("没有匹配的项")}</div>}
+        </div>,
+        document.body,
+      )}
     </div>
   );
 }
