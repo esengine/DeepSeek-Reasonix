@@ -54,12 +54,26 @@ func TestControllerFreezesTurnResultBeforeTerminalPublication(t *testing.T) {
 			}
 			executor := agent.New(nil, tool.NewRegistry(), session, agent.Options{}, event.Discard)
 			events := make(chan event.Event, 2)
+			releaseTerminal := make(chan struct{})
+			var cancelDone chan struct{}
 			c := New(Options{Runner: runner, Executor: executor, WorkspaceRoot: root, SessionDir: dir, SessionPath: filepath.Join(dir, "session.jsonl"), Sink: event.FuncSink(func(e event.Event) {
 				if e.Kind == event.TurnDone {
 					events <- e
+					// Keep publication open while the test inspects the frozen result.
+					<-releaseTerminal
 				}
 			})})
-			t.Cleanup(c.Close)
+			t.Cleanup(func() {
+				defer c.Close()
+				close(releaseTerminal)
+				if cancelDone != nil {
+					<-cancelDone
+				}
+				c.Cancel()
+				// TurnDone delivery precedes the ledger projection acknowledgement.
+				waitIdle(t, c)
+				c.autosaveWG.Wait()
+			})
 			runner.write = func() error {
 				store := c.checkpoints.storeRef()
 				store.CaptureBefore("file.txt", checkpoint.CaptureBeforeOpts{})
@@ -76,7 +90,12 @@ func TestControllerFreezesTurnResultBeforeTerminalPublication(t *testing.T) {
 				t.Fatal("runner not started")
 			}
 			if mode == "cancel" {
-				c.Cancel()
+				// Cancel can wait behind the held terminal event on the sink lane.
+				cancelDone = make(chan struct{})
+				go func() {
+					c.Cancel()
+					close(cancelDone)
+				}()
 			}
 			done := receiveCheckpointTurnDone(t, events)
 			requireCheckpointTurn(t, done, 0)

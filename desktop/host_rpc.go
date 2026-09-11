@@ -15,7 +15,6 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
-	goruntime "runtime"
 	"runtime/debug"
 	"slices"
 	"strings"
@@ -185,17 +184,9 @@ func runHostRPC(app *App, stdin io.Reader, stdout io.Writer) int {
 func hostRPCHooks(ctx context.Context, app *App, bridge *hostShellBridge, resources hostrpc.Resources) hostrpc.Hooks {
 	return hostrpc.Hooks{
 		Hello: func(hostrpc.HelloParams) (hostrpc.HelloResult, error) {
-			width, height := initialDesktopWindowSize()
 			return hostrpc.HelloResult{
 				Resources: resources,
-				Window: &hostrpc.WindowGeometry{
-					Width:      width,
-					Height:     height,
-					MinWidth:   desktopWindowMinWidth,
-					MinHeight:  desktopWindowMinHeight,
-					Frameless:  desktopWindowFrameless(goruntime.GOOS),
-					ZoomFactor: initialDesktopZoomFactor(),
-				},
+				Window:    initialDesktopWindowGeometry(),
 			}, nil
 		},
 		Start:    func(context.Context) error { app.startup(ctx); return nil },

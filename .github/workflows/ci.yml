@@ -822,6 +822,10 @@ jobs:
         timeout-minutes: 3
         run: node packaging/smoke.mjs build/electron/windows-amd64/app --service build/bin/reasonix-desktop.exe
 
+      - name: Test native window geometry on Windows
+        timeout-minutes: 2
+        run: node electron/scripts/window-geometry-smoke.mjs
+
       - name: Test bounded Electron diagnostics
         timeout-minutes: 3
         run: node electron/scripts/performance-smoke.mjs

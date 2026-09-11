@@ -56,8 +56,21 @@ fails with `-32002 not_ready`.
 ```
 
 `window` is the initial main-window geometry Go derives from the saved state
-and platform rules; the shell creates the window hidden with it and Go later
-positions, maximises and shows it through `host/window.*` from `domReady`.
+and platform rules. Optional `position: {x, y}` carries the saved origin (zero
+and negative coordinates are valid); omission requests centering. The shell
+selects the matching display and fits the rectangle to its DIP work area before
+creating the hidden window. Go later maximises and shows it from `domReady`,
+without overriding the shell's corrected position. Persistence always captures
+the normal-state rectangle, separately from the maximised flag; legacy oversized
+rectangles are fitted rather than resetting every maximised entry to defaults.
+While minimized, the shell retains its last non-minimized snapshot because
+native normal-bounds queries can otherwise expose the maximized frame.
+
+The persisted JSON shape is unchanged. Older shells ignore the optional hello
+position; newer shells accept its omission. Ship shell and service together:
+mixed development builds do not provide the complete restore fix. Downgrading
+can reintroduce the old geometry bug, and older readers may reject negative
+origins below their previous validation floor.
 
 Failure codes are terminal: the shell shows the real error and offers
 "open logs" and "quit". It never falls back to the browser mock.

@@ -28,14 +28,11 @@ const (
 	// maxWindowDimension rejects corrupt or absurd sizes without relying on live
 	// monitor queries during save/shutdown.
 	maxWindowDimension = 100_000
-	// Windows frameless/bordered windows often report a small negative origin
-	// (commonly -8,-8) when docked to the primary display edge. Treat those as
-	// legitimate positions rather than "off-screen" corruption.
-	minWindowOrigin = -100
 	// When a monitor is unplugged the saved origin may sit well outside the
-	// remaining virtual desktop. Positions beyond this soft bound are rejected
-	// at restore time so the window is re-centered.
+	// remaining virtual desktop. Only reject absurd values here; the shell
+	// checks visibility against actual display origins and work areas.
 	maxWindowOriginAbs = 100_000
+	minWindowOrigin    = -maxWindowOriginAbs
 )
 
 var (
@@ -98,22 +95,6 @@ func validateWindowState(s DesktopWindowState) error {
 		return fmt.Errorf("window y %d out of range [%d, %d]", s.Y, minWindowOrigin, maxWindowOriginAbs)
 	}
 	return nil
-}
-
-// windowPositionRestorable reports whether a saved origin is safe to apply.
-// Slightly negative coordinates (Windows border insets) are accepted; large
-// off-screen positions force a center fallback.
-func windowPositionRestorable(s DesktopWindowState, maxScreenW, maxScreenH int) bool {
-	if s.X < minWindowOrigin || s.Y < minWindowOrigin {
-		return false
-	}
-	if maxScreenW > 0 && s.X > maxScreenW*2 {
-		return false
-	}
-	if maxScreenH > 0 && s.Y > maxScreenH*2 {
-		return false
-	}
-	return true
 }
 
 func rememberWindowState(s DesktopWindowState) {

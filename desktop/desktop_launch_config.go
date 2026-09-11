@@ -1,5 +1,11 @@
 package main
 
+import (
+	goruntime "runtime"
+
+	"reasonix/desktop/internal/hostrpc"
+)
+
 const (
 	defaultDesktopWindowWidth  = 1240
 	defaultDesktopWindowHeight = 720
@@ -17,17 +23,17 @@ func desktopWindowFrameless(goos string) bool {
 	return goos == "windows"
 }
 
-// initialDesktopWindowSize returns the startup size for the main window,
-// restoring the saved geometry when present.
-func initialDesktopWindowSize() (int, int) {
-	width, height := defaultDesktopWindowWidth, defaultDesktopWindowHeight
-	if saved, ok := loadWindowState(); ok {
-		if saved.Width > 0 {
-			width = saved.Width
-		}
-		if saved.Height > 0 {
-			height = saved.Height
-		}
+// initialDesktopWindowGeometry reads one saved rectangle. The shell fits it to
+// the current displays before creation, regardless of the saved maximise flag.
+func initialDesktopWindowGeometry() *hostrpc.WindowGeometry {
+	geometry := &hostrpc.WindowGeometry{
+		Width: defaultDesktopWindowWidth, Height: defaultDesktopWindowHeight,
+		MinWidth: desktopWindowMinWidth, MinHeight: desktopWindowMinHeight,
+		Frameless: desktopWindowFrameless(goruntime.GOOS), ZoomFactor: initialDesktopZoomFactor(),
 	}
-	return width, height
+	if saved, ok := loadWindowState(); ok {
+		geometry.Width, geometry.Height = saved.Width, saved.Height
+		geometry.Position = &hostrpc.WindowPosition{X: saved.X, Y: saved.Y}
+	}
+	return geometry
 }

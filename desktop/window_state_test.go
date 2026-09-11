@@ -40,18 +40,19 @@ func TestParseWindowStateJSONCorruptPayload(t *testing.T) {
 	}
 }
 
-func TestWindowPositionRestorableAllowsBorderAndRejectsOffscreen(t *testing.T) {
-	border := DesktopWindowState{Width: 1240, Height: 720, X: -8, Y: -8}
-	if !windowPositionRestorable(border, 1920, 1080) {
-		t.Fatal("border origin should restore")
+func TestWindowStateRoundTripNegativeDisplayOrigin(t *testing.T) {
+	seedWindowStateFile(t, DesktopWindowState{Width: 1100, Height: 700, X: -1800, Y: -900, Maximised: true})
+	saved, ok := loadWindowState()
+	if !ok {
+		t.Fatal("negative monitor origin rejected")
 	}
-	offscreen := DesktopWindowState{Width: 1240, Height: 720, X: 10_000, Y: 40}
-	if windowPositionRestorable(offscreen, 1920, 1080) {
-		t.Fatal("far off-screen origin should not restore")
+	app := NewApp()
+	if err := app.SaveWindowState(saved); err != nil {
+		t.Fatal(err)
 	}
-	tooNegative := DesktopWindowState{Width: 1240, Height: 720, X: -200, Y: 40}
-	if windowPositionRestorable(tooNegative, 1920, 1080) {
-		t.Fatal("deeply negative origin should not restore")
+	restored, ok := loadWindowState()
+	if !ok || restored != saved {
+		t.Fatalf("round trip: %+v", restored)
 	}
 }
 

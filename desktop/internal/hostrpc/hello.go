@@ -86,12 +86,19 @@ type Resources struct {
 // WindowGeometry is the initial main-window geometry the shell creates
 // the hidden window with.
 type WindowGeometry struct {
-	Width      int     `json:"width"`
-	Height     int     `json:"height"`
-	MinWidth   int     `json:"minWidth"`
-	MinHeight  int     `json:"minHeight"`
-	Frameless  bool    `json:"frameless"`
-	ZoomFactor float64 `json:"zoomFactor"`
+	Position   *WindowPosition `json:"position,omitempty"`
+	Width      int             `json:"width"`
+	Height     int             `json:"height"`
+	MinWidth   int             `json:"minWidth"`
+	MinHeight  int             `json:"minHeight"`
+	Frameless  bool            `json:"frameless"`
+	ZoomFactor float64         `json:"zoomFactor"`
+}
+
+// WindowPosition is optional: an absent saved position asks the shell to center.
+type WindowPosition struct {
+	X int `json:"x"`
+	Y int `json:"y"`
 }
 
 func mismatch(code int, name, message string, detail map[string]any) error {

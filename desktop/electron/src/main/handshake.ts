@@ -32,6 +32,7 @@ export interface HelloParams {
 }
 
 export interface HelloWindow {
+  position?: { x: number; y: number };
   width: number;
   height: number;
   minWidth: number;
@@ -121,6 +122,10 @@ export function validateHelloResult(value: unknown): HelloResult {
   };
   if (geometry.width < 1 || geometry.height < 1 || geometry.minWidth < 1 || geometry.minHeight < 1) {
     throw new HandshakeError("hello result: window geometry must be positive");
+  }
+  if (window.position !== undefined) {
+    const position = record(window.position, "result.window.position");
+    geometry.position = { x: num(position, "x", "result.window.position"), y: num(position, "y", "result.window.position") };
   }
   return {
     protocolVersion,

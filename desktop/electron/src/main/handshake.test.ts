@@ -51,6 +51,16 @@ test("invalid hello results are rejected with a precise message", () => {
   assert.throws(() => validateHelloResult("nope"), /result must be an object/);
 });
 
+test("optional saved position survives handshake including zero and negative origins", () => {
+  assert.equal(validateHelloResult(goodResult).window.position, undefined);
+  for (const position of [{ x: 0, y: 0 }, { x: -1800, y: -900 }]) {
+    assert.deepEqual(validateHelloResult({ ...goodResult, window: { ...goodResult.window, position } }).window.position, position);
+  }
+  for (const position of [{ x: 1 }, { x: NaN, y: 0 }, { x: 0, y: Infinity }]) {
+    assert.throws(() => validateHelloResult({ ...goodResult, window: { ...goodResult.window, position } }), /position/);
+  }
+});
+
 test("handshake failures map every documented code and keep the real error text", () => {
   for (const [name, code] of Object.entries(HANDSHAKE_CODES)) {
     const failure = describeHandshakeFailure(new RpcError(code, `real text for ${name}`));

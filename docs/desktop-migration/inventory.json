@@ -3309,7 +3309,7 @@
       "kind": "command",
       "name": "SaveWindowState",
       "detail": "(state DesktopWindowState) error",
-      "location": "desktop/window_state.go:146",
+      "location": "desktop/window_state.go:127",
       "class": "keep-business",
       "owner": "hostrpc desktop/invoke"
     },
@@ -4992,7 +4992,7 @@
     {
       "kind": "persistence",
       "name": "desktop-window.json",
-      "location": "desktop/window_state.go:49",
+      "location": "desktop/window_state.go:46",
       "class": "keep-business",
       "owner": "format unchanged; read by both shells"
     },

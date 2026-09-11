@@ -184,30 +184,30 @@ func seedWindowStateFile(t *testing.T, state DesktopWindowState) {
 	}
 }
 
-func TestRestoreWindowGeometryAppliesSavedPosition(t *testing.T) {
+func TestRestoreWindowGeometryPreservesShellPosition(t *testing.T) {
 	seedWindowStateFile(t, DesktopWindowState{Width: 1280, Height: 800, X: 40, Y: 50})
 	app, host := newRecordingHostApp(t)
 	host.screens = []nativeScreen{{Width: 1920, Height: 1080, Primary: true, Scale: 1}}
 	app.restoreWindowGeometry()
-	assertHostCalls(t, host, "Screens", "SetWindowPosition(40,50)")
+	assertHostCalls(t, host)
 	if app.backgroundMaximised.Load() {
 		t.Fatal("a non-maximised state must not arm the maximise-before-show plan")
 	}
 }
 
-func TestRestoreWindowGeometryCentersOffscreenPosition(t *testing.T) {
+func TestRestoreWindowGeometryPreservesShellOffscreenCorrection(t *testing.T) {
 	seedWindowStateFile(t, DesktopWindowState{Width: 1280, Height: 800, X: 50_000, Y: 50})
 	app, host := newRecordingHostApp(t)
 	host.screens = []nativeScreen{{Width: 1920, Height: 1080, Primary: true, Scale: 1}}
 	app.restoreWindowGeometry()
-	assertHostCalls(t, host, "Screens", "CenterWindow")
+	assertHostCalls(t, host)
 }
 
-func TestRestoreWindowGeometryCentersWithoutSavedState(t *testing.T) {
+func TestRestoreWindowGeometryPreservesShellDefaultPosition(t *testing.T) {
 	seedWindowStateFile(t, DesktopWindowState{})
 	app, host := newRecordingHostApp(t)
 	app.restoreWindowGeometry()
-	assertHostCalls(t, host, "CenterWindow")
+	assertHostCalls(t, host)
 }
 
 func TestRestoreWindowGeometryMaximisedFollowsPlatformOrdering(t *testing.T) {
@@ -215,17 +215,18 @@ func TestRestoreWindowGeometryMaximisedFollowsPlatformOrdering(t *testing.T) {
 	app, host := newRecordingHostApp(t)
 	host.screens = []nativeScreen{{Width: 1920, Height: 1080}}
 	app.restoreWindowGeometry()
+	// The shell owns the restore rectangle; Go only applies presentation state.
 	if goruntime.GOOS == "windows" {
-		assertHostCalls(t, host, "Screens", "SetWindowPosition(40,50)")
+		assertHostCalls(t, host)
 		if !app.backgroundMaximised.Load() {
 			t.Fatal("Windows must defer maximise to the presentation plan")
 		}
 		return
 	}
-	assertHostCalls(t, host, "Screens", "SetWindowPosition(40,50)", "MaximiseWindow")
+	assertHostCalls(t, host, "MaximiseWindow")
 }
 
-func TestDOMReadyRestoresGeometryBeforePresenting(t *testing.T) {
+func TestDOMReadyPreservesShellGeometryWhenPresenting(t *testing.T) {
 	seedWindowStateFile(t, DesktopWindowState{Width: 1280, Height: 800, X: 40, Y: 50})
 	app, host := newRecordingHostApp(t)
 	host.screens = []nativeScreen{{Width: 1920, Height: 1080}}
@@ -233,8 +234,8 @@ func TestDOMReadyRestoresGeometryBeforePresenting(t *testing.T) {
 	calls := host.callNames()
 	position := slices.Index(calls, "SetWindowPosition(40,50)")
 	show := slices.Index(calls, "ShowWindow")
-	if position < 0 || show < 0 || position > show {
-		t.Fatalf("domReady must restore geometry before presenting, got %q", calls)
+	if position >= 0 || slices.Contains(calls, "CenterWindow") || show < 0 {
+		t.Fatalf("domReady must preserve shell geometry when presenting, got %q", calls)
 	}
 }
 

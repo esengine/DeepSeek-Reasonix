@@ -72,8 +72,9 @@ context_window = 1000000
 # max_output_tokens = 32768   # ordinary coding / cost control
 # max_output_tokens = 65536   # heavy reasoning / long tool loops
 # max_output_tokens = 131072  # only after repeated finish_reason=length
-# Optional per-model context budgets. Omitted models inherit context_window.
-# model_overrides = { "deepseek-v4-flash" = { context_window = 1000000 } }
+# Optional per-model budgets. Omitted models inherit context_window and
+# max_output_tokens from the provider above.
+# model_overrides = { "deepseek-v4-flash" = { context_window = 1000000, max_output_tokens = 32768 } }
 # Official list prices are frozen per provider (billing_currency). Display
 # currency ([billing].display_currency) never rewrites these tables.
 # billing_currency = "USD"   # frozen list-price currency: CNY|USD

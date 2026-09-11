@@ -345,7 +345,10 @@ func normalizedModelOverrides(overrides map[string]ProviderModelOverride) map[st
 			ov.ContextWindow = 0
 		}
 
-		if ov.ReasoningProtocol == "" && len(ov.SupportedEfforts) == 0 && ov.DefaultEffort == "" && ov.Vision == nil && ov.ContextWindow == 0 {
+		// One definition of "empty", shared with the renderer. The inline copy
+		// that used to live here omitted MaxOutputTokens, so the loader dropped
+		// an override the renderer would have written back out.
+		if modelOverrideEmpty(ov) {
 			continue
 		}
 		out[model] = ov
