@@ -77,13 +77,11 @@ func (s *Server) resumeInto(path string) (int, error) {
 	if err := s.ctl().Snapshot(); err != nil {
 		slog.Warn("serve: snapshot before resume", "err", err)
 	}
-	// Refuse to bind a session another runtime is writing (a desktop window,
-	// another CLI); on success the lease now guards the resume target.
+	// Take the write lease when it is free. A session another runtime writes
+	// opens read-only rather than being refused: the lease stops two windows
+	// writing one transcript over each other, and reading is not that.
 	if s.leases != nil {
-		if err := s.leases.Rebind(realPath); err != nil {
-			if errors.Is(err, agent.ErrSessionLeaseHeld) {
-				return http.StatusConflict, refusal(http.StatusConflict, "session.in_use", errors.New(sessionInUseError(err)), nil)
-			}
+		if _, err := s.leases.Attach(realPath); err != nil {
 			return http.StatusInternalServerError, fmt.Errorf("session lease: %w", err)
 		}
 	}

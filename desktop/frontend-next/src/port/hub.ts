@@ -24,6 +24,10 @@ export interface RuntimeView {
   // Set only on a pane whose kernel runs on another machine, naming it. Absence
   // is what marks a pane as this machine's own, so the common case stays plain.
   host?: string;
+  // Set on a pane showing a conversation another window or process holds the
+  // write lease for. It reads and scrolls like any other; what it cannot do is
+  // add to it.
+  readOnly?: boolean;
 }
 
 export interface TreeSession {

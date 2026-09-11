@@ -195,6 +195,10 @@ type RuntimeView struct {
 	// Set only on a pane driven over SSH. Its absence is what tells the
 	// frontend the pane is this machine's own — the common case stays unmarked.
 	Host string `json:"host,omitempty"`
+	// Set on a pane whose conversation another window holds the write lease
+	// for. It reads like any other; what it cannot do is add to it — said here
+	// so the composer can say so before a line is typed, not after.
+	ReadOnly bool `json:"readOnly,omitempty"`
 }
 
 // NewHub returns an empty hub. Adopt or Open publishes the first runtime.
@@ -450,7 +454,22 @@ func (rt *Runtime) view() RuntimeView {
 		Root:        ctrl.WorkspaceRoot(),
 		Name:        fileutil.RootName(ctrl.WorkspaceRoot()),
 		SessionPath: ctrl.SessionPath(),
+		ReadOnly:    !rt.writable(),
 	}
+}
+
+// writable reports whether this pane holds the write lease for the session it
+// is showing. Derived rather than stored: the keeper either holds that path or
+// it does not, and a pane with no session yet has nothing to be held out of.
+func (rt *Runtime) writable() bool {
+	if rt.Server == nil {
+		return true
+	}
+	path := strings.TrimSpace(rt.Server.Controller().SessionPath())
+	if path == "" || rt.leases == nil {
+		return true
+	}
+	return rt.leases.HeldPath() == agent.CanonicalSessionPath(path)
 }
 
 // Handler routes hub endpoints and mounts every runtime under /rt/{id}/. Auth,

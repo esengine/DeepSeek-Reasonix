@@ -733,7 +733,7 @@ function PaneView({ port, rt, title, active, visible, sideHost, side, onFocus, o
             </div>
           )}
         </div>
-        <Composer port={port} status={status} running={s.running} focus={askFocus} onSubmit={submit} onChanged={refreshStatus} onError={fail} />
+        <Composer port={port} status={status} running={s.running} focus={askFocus} onSubmit={submit} onChanged={refreshStatus} onError={fail} readOnly={rt.readOnly} />
         {/* Below the box, under a ceiling of their own. Both arrive unbidden and
             both are dismissed one at a time, so nothing else bounds how many can
             be on screen at once. */}

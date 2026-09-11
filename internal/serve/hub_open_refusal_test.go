@@ -82,9 +82,11 @@ func TestOpenPaneOnADeletedSessionSaysItIsGoneNotHeld(t *testing.T) {
 	}
 }
 
-// The other half: a session a live holder really is writing must still refuse
-// as in-use, or the fix above would have bought clarity by losing the guard.
-func TestOpenPaneStillRefusesASessionAnotherRuntimeHolds(t *testing.T) {
+// The other half. A session a live holder is writing now opens rather than
+// being refused — reading it is not what the lease protects against — and the
+// guard that matters moves to where the writing is: no lease means no
+// authority, and turn admission and every save already refuse without one.
+func TestOpenPaneReadsASessionAnotherRuntimeHolds(t *testing.T) {
 	hubBootEnv(t)
 	root := testenv.TempDir(t)
 	h := NewHub(HubOptions{})
@@ -101,10 +103,11 @@ func TestOpenPaneStillRefusesASessionAnotherRuntimeHolds(t *testing.T) {
 	defer lease.Release()
 
 	status, body := openPane(t, srv, root, held)
-	if status != http.StatusConflict {
-		t.Errorf("a genuinely held session = %d, want 409 (body %s)", status, body)
+	if status != http.StatusOK {
+		t.Fatalf("opening a session held elsewhere = %d, want 200 (body %s)", status, body)
 	}
-	if got := refusalCodeOf(t, body); got != "session.in_use" {
-		t.Errorf("refusal code = %q, want session.in_use (body %s)", got, body)
+	// The holder still holds it: the pane that just opened took nothing.
+	if !agent.SessionLeaseHeldByOtherRuntime(held) && lease.Path() == "" {
+		t.Error("the holder's lease did not survive the read-only open")
 	}
 }

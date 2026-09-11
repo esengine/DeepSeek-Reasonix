@@ -41,6 +41,10 @@ interface Props {
   onSubmit: (text: string) => Promise<boolean>;
   onChanged: () => void;
   onError: (e: unknown) => void;
+  // Set when another window or process holds this conversation's write lease.
+  // The record still reads; what it will not take is another line — said here,
+  // before one is typed, rather than by refusing it afterwards.
+  readOnly?: boolean;
 }
 
 // What is riding along with this turn. An attachment travels as bytes or a path
@@ -98,7 +102,7 @@ function releaseChip(c: Chip) {
 let chipSeq = 0;
 const chipId = () => `c${++chipSeq}`;
 
-export function Composer({ port, status, running, focus, onSubmit, onChanged, onError }: Props) {
+export function Composer({ port, status, running, focus, onSubmit, onChanged, onError, readOnly }: Props) {
   const [text, setText] = useState("");
   // The caret decides which token is being completed, so it is state here
   // rather than something read off the element when a menu happens to open.
@@ -344,7 +348,7 @@ export function Composer({ port, status, running, focus, onSubmit, onChanged, on
   const hasDraft = text.trim().length > 0 || shots.some((c) => c.k === "paste" || c.state === "ready");
   const lines = countLines(text);
   const showCount = text.length >= 240 || lines > 3;
-  const sendDisabled = submitting || stopping || adding || failed || !hasDraft;
+  const sendDisabled = submitting || stopping || adding || failed || !hasDraft || !!readOnly;
   const warnPictures = status?.vision === false && shots.some((c) => c.k === "attachment" && c.state === "ready" && isPicture(c));
 
   return (
@@ -458,13 +462,13 @@ export function Composer({ port, status, running, focus, onSubmit, onChanged, on
           ref={box}
           rows={1}
           value={text}
-          placeholder={t("描述任务、问题或要改的内容…")}
+          placeholder={readOnly ? t("这个会话正在别处运行，这里只能看") : t("描述任务、问题或要改的内容…")}
           role="combobox"
           aria-label={t("任务输入")}
           aria-describedby={guide}
           aria-keyshortcuts="Enter Shift+Enter"
           aria-busy={submitting}
-          readOnly={submitting}
+          readOnly={submitting || !!readOnly}
           aria-expanded={menu.open}
           aria-controls={menu.open ? completionId : undefined}
           aria-autocomplete="list"

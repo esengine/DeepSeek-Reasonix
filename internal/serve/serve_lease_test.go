@@ -29,10 +29,11 @@ func saveServeTestSession(t *testing.T, path string) {
 	}
 }
 
-// TestResumeRefusedWhenSessionLeaseHeld proves POST /resume refuses to bind a
-// session another runtime holds, keeps the server on its current session, and
-// reports the shared holder wording.
-func TestResumeRefusedWhenSessionLeaseHeld(t *testing.T) {
+// POST /resume opens a session another runtime is writing rather than refusing
+// it, and what it opens carries no lease. That no lease means no write is held
+// one layer down, where the save path is:
+// control.TestReadOnlyAttachmentCannotWriteTheTranscript.
+func TestResumeReadsASessionAnotherRuntimeHolds(t *testing.T) {
 	dir := testenv.TempDir(t)
 	active := filepath.Join(dir, "active.jsonl")
 	held := filepath.Join(dir, "held.jsonl")
@@ -66,25 +67,23 @@ func TestResumeRefusedWhenSessionLeaseHeld(t *testing.T) {
 		t.Fatal(err)
 	}
 	respBody, _ := readAll(resp)
-	if resp.StatusCode != http.StatusConflict {
-		t.Fatalf("held resume status = %d, want 409 (body %q)", resp.StatusCode, respBody)
+	if resp.StatusCode != http.StatusNoContent {
+		t.Fatalf("resume of a held session = %d, want 204 (body %q)", resp.StatusCode, respBody)
 	}
-	// The holder here is this very process, so the refusal must not send the
-	// reader looking for a second window; it still has to name a holder.
-	if !strings.Contains(respBody, "already open elsewhere in this Reasonix") {
-		t.Fatalf("held resume body = %q, want the same-process holder wording", respBody)
+	if got, want := agent.CanonicalSessionPath(ctrl.SessionPath()), agent.CanonicalSessionPath(held); got != want {
+		t.Fatalf("session path after resume = %q, want the session asked for %q", got, want)
 	}
-	if strings.Contains(respBody, "another Reasonix process") {
-		t.Fatalf("held resume body blames a separate process for our own lease: %q", respBody)
+	// Opened, and holding nothing: the writer keeps its lease, and this pane
+	// has no authority to bind.
+	if got := leases.HeldPath(); got != "" {
+		t.Fatalf("lease after a read-only resume = %q, want none", got)
 	}
-	if strings.Contains(respBody, held) {
-		t.Fatalf("held resume body leaks the session path: %q", respBody)
-	}
-	if got := filepath.Clean(ctrl.SessionPath()); got != filepath.Clean(active) {
-		t.Fatalf("session path after refused resume = %q, want active %q", got, active)
-	}
-	if got, want := leases.HeldPath(), agent.CanonicalSessionPath(active); got != want {
-		t.Fatalf("lease after refused resume = %q, want %q", got, want)
+	// The writer still has it: asking for it again is refused. (Not
+	// SessionLeaseHeldByOtherRuntime — the holder here is this same test
+	// process, and that helper answers false for our own by design.)
+	if again, err := agent.TryAcquireSessionLease(held); err == nil {
+		again.Release()
+		t.Error("the holder's lease did not survive the read-only resume")
 	}
 }
 

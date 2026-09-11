@@ -63,6 +63,44 @@ func (k *SessionLeaseKeeper) Rebind(path string) error {
 	return nil
 }
 
+// Attach points the keeper at path and reports whether it may write. A session
+// another runtime holds attaches read-only rather than being refused: the lease
+// protects the write-back, not the reading, and an attachment carrying no lease
+// binds no authority — which turn admission and every save already refuse
+// without. Callers about to write want Rebind, where read-only is no answer.
+func (k *SessionLeaseKeeper) Attach(path string) (writable bool, err error) {
+	if k == nil {
+		return false, nil
+	}
+	k.mu.Lock()
+	defer k.mu.Unlock()
+	if strings.TrimSpace(path) == "" {
+		k.releaseLocked()
+		return true, nil
+	}
+	if k.lease != nil && k.lease.Path() == agent.CanonicalSessionPath(path) {
+		return true, nil
+	}
+	lease, err := agent.TryAcquireSessionLease(path)
+	if err != nil {
+		reclaimed, reclaimErr := reclaimOwnSessionLease(path, err)
+		if reclaimErr != nil {
+			if !errors.Is(err, agent.ErrSessionLeaseHeld) {
+				return false, err
+			}
+			// Held by a live runtime. Drop whatever this keeper held so the
+			// controller's authority is cleared with it: read-only here means
+			// no authority, which is what makes every save fail closed.
+			k.releaseLocked()
+			return false, nil
+		}
+		lease = reclaimed
+	}
+	k.releaseLocked()
+	k.lease = lease
+	return true, nil
+}
+
 // reclaimOwnSessionLease recovers a lease this process dropped without
 // releasing, whose stranded owner entry then refuses every later bind while
 // naming this very process as the holder. Only our own leftover is taken: a
