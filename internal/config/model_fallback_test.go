@@ -320,3 +320,81 @@ func TestRemoveProviderClearsOptionalRefsWithoutFallback(t *testing.T) {
 		t.Fatal("subagent_models.review should be removed")
 	}
 }
+
+func TestRemovePluginModelRefsMigratesRefs(t *testing.T) {
+	c := testModelFallbackConfig(t)
+	c.DefaultModel = "plugin/commandcode/commandcode/deepseek-v4-flash"
+	c.Agent.PlannerModel = "plugin/commandcode/commandcode/deepseek-v4-pro"
+	c.Agent.SubagentModel = "prov-b/model-b1"
+	c.Agent.SubagentModels = map[string]string{
+		"review":  "plugin/commandcode/commandcode/deepseek-v4-flash",
+		"explore": "plugin/other/other/model",
+	}
+
+	if !c.RemovePluginModelRefs("commandcode") {
+		t.Fatal("RemovePluginModelRefs should report a change")
+	}
+	if c.DefaultModel != "prov-a" {
+		t.Fatalf("default_model = %q, want prov-a", c.DefaultModel)
+	}
+	if c.Agent.PlannerModel != "prov-a" {
+		t.Fatalf("planner_model = %q, want prov-a", c.Agent.PlannerModel)
+	}
+	if c.Agent.SubagentModel != "prov-b/model-b1" {
+		t.Fatalf("unaffected subagent_model changed to %q", c.Agent.SubagentModel)
+	}
+	if c.Agent.SubagentModels["review"] != "prov-a" {
+		t.Fatalf("subagent_models.review = %q, want prov-a", c.Agent.SubagentModels["review"])
+	}
+	if c.Agent.SubagentModels["explore"] != "plugin/other/other/model" {
+		t.Fatalf("ref of another plugin changed to %q", c.Agent.SubagentModels["explore"])
+	}
+}
+
+func TestRemovePluginModelRefsClearsRefsWithoutFallback(t *testing.T) {
+	c := testModelFallbackConfig(t)
+	c.Providers = nil
+	c.DefaultModel = "plugin/commandcode/commandcode/deepseek-v4-flash"
+	c.Agent.SubagentModels = map[string]string{"review": "plugin/commandcode/commandcode/deepseek-v4-pro"}
+
+	if !c.RemovePluginModelRefs("commandcode") {
+		t.Fatal("RemovePluginModelRefs should report a change")
+	}
+	if c.DefaultModel != "" {
+		t.Fatalf("default_model = %q, want cleared", c.DefaultModel)
+	}
+	if _, ok := c.Agent.SubagentModels["review"]; ok {
+		t.Fatal("subagent_models.review should be removed")
+	}
+}
+
+func TestRemovePluginModelRefsLeavesUnrelatedConfig(t *testing.T) {
+	c := testModelFallbackConfig(t)
+	c.DefaultModel = "prov-a/model-a1"
+	c.Agent.PlannerModel = "plugin/other/other/model"
+
+	if c.RemovePluginModelRefs("commandcode") {
+		t.Fatal("RemovePluginModelRefs should report no change")
+	}
+	if c.DefaultModel != "prov-a/model-a1" {
+		t.Fatalf("default_model = %q, want unchanged", c.DefaultModel)
+	}
+	if c.Agent.PlannerModel != "plugin/other/other/model" {
+		t.Fatalf("planner_model = %q, want unchanged", c.Agent.PlannerModel)
+	}
+	if c.RemovePluginModelRefs("") {
+		t.Fatal("empty plugin id should report no change")
+	}
+}
+
+func TestRemovePluginModelRefsKeepsProviderNamedLikePlugin(t *testing.T) {
+	c := testModelFallbackConfig(t)
+	c.DefaultModel = "prov-a"
+
+	if c.RemovePluginModelRefs("prov-a") {
+		t.Fatal("a bare provider ref must not be treated as a plugin ref")
+	}
+	if c.DefaultModel != "prov-a" {
+		t.Fatalf("default_model = %q, want unchanged", c.DefaultModel)
+	}
+}
