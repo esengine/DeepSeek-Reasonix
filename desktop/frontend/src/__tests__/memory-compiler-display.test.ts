@@ -40,5 +40,18 @@ ok(
   "cuts a dangling/truncated block instead of leaking raw JSON",
 );
 
+for (const tag of ["autoresearch-evidence", "autoresearch-runtime", "active-goal"]) {
+  const stripped = stripMemoryCompilerExecution(`before\n<${tag}>internal metadata</${tag}>\nafter`);
+  ok(stripped === "before\nafter", `removes a complete ${tag} block`);
+}
+
+const danglingGoal = stripMemoryCompilerExecution("visible\n<active-goal>internal metadata");
+ok(danglingGoal === "visible\n", "cuts a dangling active-goal block");
+
+for (const marker of ["[goal:complete]", "[goal:continue]", "[goal:blocked:waiting for approval]"]) {
+  const stripped = stripMemoryCompilerExecution(`visible\n${marker}\nafter`);
+  ok(stripped === "visible\nafter", `removes ${marker}`);
+}
+
 console.log(`\n${passed} passed, ${failed} failed`);
 if (failed > 0) process.exit(1);
