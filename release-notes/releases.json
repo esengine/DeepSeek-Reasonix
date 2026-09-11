@@ -167,38 +167,6 @@
             "refs": [
               9911
             ]
-          },
-          {
-            "targets": [
-              "desktop"
-            ],
-            "title": {
-              "en": "Per-model context windows",
-              "zh": "逐模型上下文窗口"
-            },
-            "body": {
-              "en": "Added model_overrides.<model>.context_window to set per-model context limits for shared provider endpoints.",
-              "zh": "新增 model_overrides.<model>.context_window，可为共享提供商端点设置逐模型上下文限制。"
-            },
-            "refs": [
-              6677
-            ]
-          },
-          {
-            "targets": [
-              "desktop"
-            ],
-            "title": {
-              "en": "DeepSeek Flash reasoning effort",
-              "zh": "DeepSeek Flash 思考深度"
-            },
-            "body": {
-              "en": "Added a model-level reasoning effort control with Automatic, disabled, low, high, and max options for DeepSeek Flash.",
-              "zh": "为 DeepSeek Flash 新增模型级思考深度控制，提供自动、禁用、低、高、最大选项。"
-            },
-            "refs": [
-              10117
-            ]
           }
         ],
         "improved": [
@@ -252,40 +220,6 @@
           },
           {
             "targets": [
-              "desktop",
-              "cli"
-            ],
-            "title": {
-              "en": "Job state grouping",
-              "zh": "任务状态分组"
-            },
-            "body": {
-              "en": "Grouped Job scalar state by lifetime to reduce struct complexity without behavior change.",
-              "zh": "按生命周期归类 Job 标量状态，降低结构复杂度，行为不变。"
-            },
-            "refs": [
-              9915
-            ]
-          },
-          {
-            "targets": [
-              "desktop",
-              "cli"
-            ],
-            "title": {
-              "en": "Model override empty check unified",
-              "zh": "模型覆盖空判断统一"
-            },
-            "body": {
-              "en": "Unified the empty model override predicate so max_output_tokens is correctly retained.",
-              "zh": "统一模型覆盖空判断，使 max_output_tokens 得以正确保留。"
-            },
-            "refs": [
-              10094
-            ]
-          },
-          {
-            "targets": [
               "desktop"
             ],
             "title": {
@@ -298,23 +232,6 @@
             },
             "refs": [
               9981
-            ]
-          },
-          {
-            "targets": [
-              "desktop",
-              "cli"
-            ],
-            "title": {
-              "en": "Fact-driven execution",
-              "zh": "事实驱动执行"
-            },
-            "body": {
-              "en": "Replaced task-mode routing with fact-driven execution for more predictable agent behavior.",
-              "zh": "用事实驱动执行替代任务模式路由，使代理行为更可预测。"
-            },
-            "refs": [
-              8930
             ]
           }
         ],
@@ -472,7 +389,6 @@
       "risks": [],
       "contributors": [
         "SivanCola",
-        "github-actions[bot]",
         "boscocp",
         "SauronSkywalker",
         "Linearl",
