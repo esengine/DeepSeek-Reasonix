@@ -67,6 +67,11 @@ trap cleanup EXIT
 
 cd "$ROOT/desktop"
 
+if [ "$os" = "darwin" ]; then
+	# Wails owns the macOS framework/linker selection.
+	export MACOSX_DEPLOYMENT_TARGET="${MACOSX_DEPLOYMENT_TARGET:-12.3}"
+fi
+
 # build_guard produces the one-shot legacy migrator still named reasonix-guard
 # in compatibility payloads for 1.18–1.19.1 updaters. Source is intentionally
 # separate from the removed Guard recovery product.
