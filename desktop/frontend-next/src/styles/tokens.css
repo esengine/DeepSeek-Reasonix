@@ -63,6 +63,13 @@
       inset 0 1px 0 rgb(255 255 255 / .9),
       0 16px 40px -14px rgb(23 30 45 / .2),
       0 4px 12px -8px rgb(23 30 45 / .14);
+    /* What the machine said and what the assistant wrote are two things, so
+       they are two faces. One mix served both, and it stepped down from
+       --raised while the column actually lays --surface: measured, the step
+       came to 2.7 L in dark — just past the line where a layer is visible.
+       Declared apart, they also separate apart: machine output by the step
+       (cut into the page), a code listing by its line (it has been set). */
+    --face-sunk: oklch(95% .008 255); --face-code: oklch(97.6% .005 255);
     --accent: #A76200; --accent-fg: #FFF; --accent-wash: #FFF2DC;
     --net: oklch(50.8% .172 267); --net-wash: oklch(94.8% .026 264);
     --deleg: oklch(50.4% .092 211); --deleg-wash: oklch(94.8% .020 210);
@@ -189,6 +196,7 @@
     --warn: oklch(75% .135 48); --add: var(--ok); --del: var(--err);
     --accent-ink: var(--accent); --warn-ink: var(--warn);
     --ok-ink: var(--ok); --err-ink: var(--err);
+    --face-sunk: oklch(12.4% .014 255); --face-code: oklch(15.6% .015 255);
     --float: oklch(25.5% .018 255); --float-hi: oklch(31% .020 255);
     --shadow-float:
       inset 0 1px 0 rgb(255 255 255 / .06),
@@ -209,6 +217,7 @@
     --warn: oklch(75% .135 48); --add: var(--ok); --del: var(--err);
     --accent-ink: var(--accent); --warn-ink: var(--warn);
     --ok-ink: var(--ok); --err-ink: var(--err);
+    --face-sunk: oklch(12.4% .014 255); --face-code: oklch(15.6% .015 255);
     --float: oklch(25.5% .018 255); --float-hi: oklch(31% .020 255);
     --shadow-float:
       inset 0 1px 0 rgb(255 255 255 / .06),
@@ -226,6 +235,7 @@
     --ok: oklch(51.9% .107 154); --err: oklch(54.2% .165 28);
     --warn: oklch(57.5% .118 45); --add: var(--ok); --del: var(--err);
     --accent-ink: #8B5100; --warn-ink: oklch(51% .120 45); --ok-ink: #286F44; --err-ink: #AF362E;
+    --face-sunk: oklch(95% .008 255); --face-code: oklch(97.6% .005 255);
     --float: oklch(100% 0 255); --float-hi: oklch(94.2% .010 255);
     --shadow-float:
       inset 0 1px 0 rgb(255 255 255 / .9),

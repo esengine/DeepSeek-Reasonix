@@ -1,5 +1,7 @@
-import { memo, useEffect, useState } from "react";
+import { isValidElement, memo, useEffect, useState, type ReactNode } from "react";
 import ReactMarkdown from "react-markdown";
+import { t } from "../i18n";
+import { CopyButton } from "./CopyButton";
 import remarkGfm from "remark-gfm";
 import remarkMath from "remark-math";
 import { remarkTrimAutolink } from "./autolink";
@@ -133,6 +135,26 @@ function cutsOf(md: string): number[] {
   return cuts;
 }
 
+// The fence's own info string, as rehype leaves it on the <code>. Absent for an
+// indented block, which is why the tag is conditional rather than defaulted to
+// a guess at the language.
+function langOf(node: ReactNode): string {
+  if (!isValidElement(node)) return "";
+  const cn = (node.props as { className?: string }).className ?? "";
+  return /language-([\w.+#-]+)/.exec(cn)?.[1] ?? "";
+}
+
+// What gets copied is the source, so it is read back off the rendered tree
+// rather than off the block's markdown — by here the fence markers and the
+// info string are gone, and a balanced tail fence was never typed at all.
+function textOf(node: ReactNode): string {
+  if (typeof node === "string") return node;
+  if (typeof node === "number") return String(node);
+  if (Array.isArray(node)) return node.map(textOf).join("");
+  if (isValidElement(node)) return textOf((node.props as { children?: ReactNode }).children);
+  return "";
+}
+
 const Block = memo(function Block({ src, math, emoji, tail }: { src: string; math: Plugin | null; emoji: Plugin | null; tail?: boolean }) {
   // Inside the memo, so a settled block normalises once instead of per chunk.
   const body = normalizeMath(tail ? balanceFences(src) : src);
@@ -148,7 +170,12 @@ const Block = memo(function Block({ src, math, emoji, tail }: { src: string; mat
             {children}
           </a>
         ),
-        pre: ({ children }) => <pre className="term">{children}</pre>,
+        pre: ({ children }) => (
+          <div className="code-wrap" data-lang={langOf(children) || undefined}>
+            <pre className="term">{children}</pre>
+            <CopyButton text={textOf(children)} className="code-copy" label={t("复制这段代码")} />
+          </div>
+        ),
         table: ({ children }) => (
           <div className="md-tw">
             <table>{children}</table>
@@ -175,7 +202,9 @@ export function Markdown({ text, streaming }: { text: string; streaming?: boolea
     at = c;
   }
   return (
-    <div className="md">
+    // Same rule the answer's own copy follows: while it is still arriving,
+    // handing a listing over would hand over something that was never said.
+    <div className="md" data-live={streaming ? "" : undefined}>
       {parts.map((p, i) => (
         <Block key={i} src={p} math={math} emoji={emoji} />
       ))}

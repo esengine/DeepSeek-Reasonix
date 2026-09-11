@@ -1528,7 +1528,20 @@
   /* 回答是这一轮的产出，不是又一条时间线。--muted 是留给过程的，正文用
      --text；符号退成一个记号，不再是一枚有环有底的按钮。正文仍然全铺（理由
      见 .out .txt 上面那段），所以份量只能靠字色和留白来分。 */
-  .call[data-k="say"] > .g .sym { background: none; box-shadow: none }
+  /* Filled, and in the reading ink: a 1.5-stroke ring at --ghost is where "not
+     a button" had gone all the way to "not there", and the answer is the one
+     thing on the rail that carries the turn. Still no ground and no ring, so
+     it stays a mark rather than becoming the button again. */
+  .call[data-k="say"] > .g .sym { background: none; box-shadow: none; color: var(--text) }
+  .call[data-k="say"] > .g .sym svg { fill: currentColor }
+  /* Every other mark fills its 28px cell, so the rail reads as running behind
+     them. A mark that does not fill it leaves the run broken above and below —
+     which reads as the line having stopped, not as a node sitting on it. This
+     is the segment the cell would have covered. */
+  .call[data-k="say"] > .g {
+    background: linear-gradient(color-mix(in srgb, var(--border) 88%, transparent) 0 0)
+                no-repeat 50% 0 / 2px 16px;
+  }
   .call[data-k="say"] > .c { padding: var(--y-panel) 0 }
   .call[data-k="say"] > .c > .out > .txt { color: var(--text); line-height: 1.78 }
 
@@ -1593,7 +1606,12 @@
   .call > .g .sym[data-done] { animation: symdone var(--m-panel) }
   @keyframes symdone { 0% { transform: scale(1) } 38% { transform: scale(.86) } 100% { transform: scale(1) } }
   .hl .nm { font: var(--w-med) var(--fs-ui) var(--ui); color: var(--text) }
-  .call[data-k="say"] .hl .nm, .call[data-k="me"] .hl .nm { font-size: var(--fs-meta); font-family: var(--mono); font-weight: var(--w-med); letter-spacing: var(--track-lead); text-transform: uppercase; color: var(--faint) }
+  /* A tool's headline names the call, which is the only way to know which one
+     it is. The turn anchor and the answer had one too, and it named the
+     speaker — which the mark in the gutter has already said, a column to the
+     left, on the same line. The row stays for what only it can carry (a queued
+     line's standing, the way back to this turn) and collapses when empty. */
+  .hl:empty { display: none }
   .hl .arg { font: var(--w-reg) var(--fs-ui) var(--mono); color: var(--muted); min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap }
   .hl .tag { font: var(--w-med) var(--fs-micro) var(--mono); letter-spacing: var(--track-cap); text-transform: uppercase; padding: 1.5px 5px; border-radius: var(--r-xs); color: var(--faint); background: var(--overlay) }
   /* 来源比工具名重要：这一步是外部服务干的，颜色跟 mcp 卡的色相一致 */
@@ -1707,16 +1725,35 @@
 
   /* 正文底下的动作行。复制入口这个窗口原来一个都没有（只能走系统右键菜单），
      所以它常驻，不跟 .stepctl 一样 hover 才浮现 —— 找不到的入口等于没加。 */
-  .acts { display: flex; gap: 6px; margin-top: 7px }
+  /* Aligned to the prose it belongs to, and pulled back by its own padding so
+     the glyph starts on the text's left edge rather than a step inside it.
+     Qualified by .out because an unqualified `.acts` further down this sheet —
+     written for the action that sits at the end of a server row, and left
+     unscoped — otherwise wins on source order and adds its row-end margin
+     here, which is the 14px this was stepped in by. */
+  .out .acts { display: flex; gap: 6px; margin-top: 9px; margin-inline-start: -7px }
   .copy {
+    display: inline-flex; align-items: center; gap: 5px;
     border: 0; background: transparent; color: var(--ghost); cursor: pointer;
-    font: var(--w-med) var(--fs-micro) var(--mono); letter-spacing: var(--track-cap); padding: 2px 6px;
-    border-radius: var(--r-xs); transition: color var(--m-line), background var(--m-line);
+    font: var(--w-med) var(--fs-micro) var(--mono); letter-spacing: var(--track-cap); padding: 4px 7px;
+    border-radius: var(--r-sm); transition: color var(--m-line), background var(--m-line);
+  }
+  /* Set in prose, an unbounded word reads as one more line of it — this one had
+     the paragraph's own left edge and nothing else, which is why it read as a
+     stray list item. The mark is what makes it an offer rather than a sentence;
+     the ground arrives under the pointer, where a control answers. */
+  .copy-i {
+    width: 12.5px; height: 12.5px; flex: none; display: block; fill: none;
+    stroke: currentColor; stroke-width: 1.5; stroke-linecap: round; stroke-linejoin: round;
   }
   .copy:hover { background: var(--overlay); color: var(--text) }
   .copy:focus-visible { outline: 2px solid var(--focus); outline-offset: 1px }
   .copy[data-state="done"] { color: var(--ok) }
   .copy[data-state="failed"] { color: var(--warn-ink) }
+  /* In the listing's corner there is no room for the word, and none needed:
+     the block it sits on is what it would have named. */
+  .code-copy span { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%) }
+  .code-copy { padding: 5px }
   /* 一步没成，读起来不能和正常输出一样。挡下来和跑失败在事件里分不开，所以
      用告警而不是错误 —— 说「这一步有问题」，不替它断定是哪一种。 */
   .out .txt.bad { padding-left: 10px; border-left: 2px solid var(--warn) }
@@ -1791,12 +1828,12 @@
     white-space: pre-wrap; overflow-wrap: anywhere;
   }
 
-  /* 凹进去一档：中栏底是 --raised，这一块掺进 --page 就自然低半档，深浅两套
-     共用一个配方，因为 page 本来就在 surface 下面。 */
+  /* What the machine said, cut into the page. It separates by the step alone —
+     a line around it as well would make it a cell — so the step has to carry
+     the whole job; see --face-sunk for what the mix here used to leave it. */
   .term {
     margin-top: 8px; padding: 11px 13px 12px; border-radius: var(--r-lg);
-    background: color-mix(in srgb, var(--page) 72%, var(--surface));
-    box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--border) 52%, transparent);
+    background: var(--face-sunk);
     font: var(--w-reg) var(--fs-ui)/19px var(--mono); color: var(--muted); overflow-x: auto;
   }
   .term-l { white-space: pre }
@@ -4590,10 +4627,54 @@
     margin: 0 0 .7em; padding: 2px 0 2px 11px;
     border-left: 2px solid var(--border); color: var(--faint);
   }
-  /* Inline code is already specced by .out .txt code; only the block needs
-     saying, and that is .term — the same box every tool result renders in. */
-  .md pre.term { margin: 0 0 .7em }
+  /* A listing the assistant wrote is not a tool result, and it used to render
+     in the box that every tool result renders in — same fill, same edge, no
+     way to tell an answer from the evidence under it. It separates by its line
+     instead of by the step, which is also the half that survives in light,
+     where there is no room left above --surface to raise anything. */
+  /* The frame is what the corner is measured against: the listing scrolls
+     sideways, and anything positioned inside it slides out of view with the
+     code. */
+  .code-wrap { position: relative; margin: 0 0 .7em }
+  .code-wrap > pre.term {
+    margin: 0; padding-top: 22px;
+    background: var(--face-code); border: 1px solid var(--border);
+    /* A listing is set for reading, and 8 is the terminal's column rule, not
+       typography's: tab-indented Go reaches the right edge of this width two
+       levels in. Machine output keeps 8, where it is what the emitter aligned
+       against. */
+    tab-size: 4;
+  }
   .md pre.term code { font: inherit; color: inherit; white-space: pre }
+  /* The language sits in that top padding rather than over the first line, and
+     hands the corner to the copy control while the pointer is on the block:
+     both answer "what is this", one after the other, so neither needs a row of
+     its own. */
+  .code-wrap::after {
+    content: attr(data-lang); position: absolute; top: 6px; inset-inline-end: 12px;
+    font: var(--w-med) var(--fs-micro) var(--mono); letter-spacing: var(--track-cap);
+    text-transform: uppercase; color: var(--ghost); transition: opacity var(--m-line);
+    pointer-events: none;
+  }
+  .code-wrap:hover::after, .code-wrap:focus-within::after { opacity: 0 }
+  .code-copy {
+    position: absolute; top: 4px; inset-inline-end: 6px; opacity: 0;
+    transition: opacity var(--m-line), color var(--m-line), background var(--m-line);
+  }
+  .code-wrap:hover > .code-copy, .code-copy:focus-visible { opacity: 1 }
+  .md[data-live] .code-copy { display: none }
+  /* The prose's own copy is permanent because an entry point nobody can find
+     is an entry point nobody added. A pointer is what makes the corner an
+     affordance here, so where there is none the control has to stand, and the
+     language gives the corner up for good rather than on hover. */
+  @media (hover: none) {
+    .code-copy { opacity: 1 }
+    .code-wrap::after { opacity: 0 }
+  }
+  /* Not decoration: the block is the one thing in the prose that answers a
+     pointer, and its edge is how it says so before the corner fills in. */
+  .code-wrap > pre.term { transition: border-color var(--m-line) }
+  .code-wrap:hover > pre.term { border-color: color-mix(in oklab, var(--border), var(--muted) 34%) }
   .md mark { background: var(--accent-wash); color: var(--text); padding: 0 2px; border-radius: var(--r-xs) }
   .md sub, .md sup { font-size: .75em; line-height: 0 }
   .md kbd {
@@ -5151,7 +5232,16 @@
   /* Two marks, not four: the fill says which row, the bar says it from the edge
      where the eye is already travelling down the list. A ring at 12% accent on
      top of a fill adds a fourth reading of one state. */
-  .wsrow[data-open] { background: var(--accent-wash); color: var(--text) }
+  /* --accent-wash is mixed against --raised, and the rail lays --page, which
+     sits only 4 L below it: the fill half of that pair measured ΔL 0.8 in
+     light, so the row was being said by the bar alone. Carrying a little of
+     the hue itself moves it away from the ground in both schemes — the wash is
+     lighter than --page in light and darker in dark, and --accent is on the
+     far side of it either way. */
+  .wsrow[data-open] {
+    background: color-mix(in oklab, var(--accent-wash), var(--accent) 9%);
+    color: var(--text);
+  }
   .wsrow[data-open]::before {
     content: ""; position: absolute; left: 0; top: 5px; bottom: 5px; width: 2px;
     border-radius: 2px; background: var(--accent);

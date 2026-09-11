@@ -38,9 +38,6 @@ export function SayCard({ item }: { item: Extract<Item, { t: "say" }> }) {
         <span className="line" />
       </div>
       <div className="c">
-        <div className="hl">
-          <span className="nm">{t("助手")}</span>
-        </div>
         <div className="out">
           {item.reasoning && (
             <details className="think" open={open} onToggle={(e) => setOpen(e.currentTarget.open)}>

@@ -26,13 +26,26 @@ for (const scheme of ["dark", "light"]) {
   await page.waitForTimeout(300);
 
   const found = await page.evaluate((minL) => {
-    // sRGB to OKLab, lightness only: a layer is read from light and dark, not
-    // from hue.
+    // Lightness only: a layer is read from light and dark, not from hue.
+    //
+    // Three notations reach this, and only one of them is 0-255. Every fill in
+    // this interface comes from an oklch token and stays oklch in the computed
+    // value, where the three numbers are L, C and H — read as rgb/255, the hue
+    // lands in the blue channel at 255/255 and every colour in the tree
+    // returns the same 45.2. Equal parent and child then read as a fill that
+    // never claimed to be a layer, which is the one case exempted below, so
+    // this guard passed by examining nothing for as long as it has existed.
     const lum = (rgb) => {
       const m = rgb.match(/[\d.]+/g);
       if (!m) return null;
+      // L is already the answer there; a percentage is the same number, and
+      // the unit has to be read off the source rather than off the digits.
+      const ok = /^okl(?:ch|ab)\(\s*([\d.]+)(%?)/.exec(rgb);
+      if (ok) return Number(ok[1]) * (ok[2] ? 1 : 100);
+      // color(srgb r g b) carries 0-1; rgb()/rgba() carries 0-255.
+      const unit = rgb.startsWith("color(");
       const [r, g, b] = m.slice(0, 3).map((v) => {
-        const c = Number(v) / 255;
+        const c = unit ? Number(v) : Number(v) / 255;
         return c <= 0.04045 ? c / 12.92 : ((c + 0.055) / 1.055) ** 2.4;
       });
       const l = Math.cbrt(0.4122214708 * r + 0.5363325363 * g + 0.0514459929 * b);

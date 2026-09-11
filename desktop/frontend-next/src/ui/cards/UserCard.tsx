@@ -32,7 +32,6 @@ export function UserCard({
       </div>
       <div className="c">
         <div className="hl user-hl">
-          <span className="nm">{t("任务")}</span>
           {item.pending && (
             <span className="pend">
               {item.queued === "followup" ? t("排队中 · 本轮结束后发送") : t("排队中 · 下一个工具边界送达")}
