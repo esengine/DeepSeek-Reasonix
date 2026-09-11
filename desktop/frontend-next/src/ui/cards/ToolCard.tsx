@@ -117,7 +117,7 @@ export function ToolCard({
           {tag && <span className="tag" title={tagHint(tool)}>{tag}</span>}
           {arg && <span className={streaming ? "arg shim" : "arg"}>{arg}</span>}
           {bad && <span className="fail">{badLabel}</span>}
-          <Cost tools={[tool]} />
+          <Cost tools={[tool]} running={running} />
         </div>
         <div className="out">
           {/* A takeover replaces what the body shows, never the frame around

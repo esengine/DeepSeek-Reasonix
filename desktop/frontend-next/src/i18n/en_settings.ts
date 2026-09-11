@@ -273,6 +273,7 @@ export const EN_SETTINGS: Record<string, string> = {
   "写进仓库": "Commit to the repo",
   "设置　⌘,": "Settings　⌘,",
   "这一步留在上下文里的估算 token": "Estimated tokens this step leaves in context",
+  "这一步已经跑了多久": "How long this step has been running",
   "关闭这个面板": "Close this pane",
   "窗口": "Window",
   "最小化": "Minimize",

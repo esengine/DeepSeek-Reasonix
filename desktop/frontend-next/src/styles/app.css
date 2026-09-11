@@ -1610,6 +1610,9 @@
 
   .cost { margin-left: auto; display: inline-flex; align-items: baseline; gap: 7px; font: var(--w-reg) var(--fs-meta) var(--mono); color: var(--ghost); font-variant-numeric: tabular-nums; white-space: nowrap; flex: none }
   .cost .hit { color: var(--ok) }
+  /* 还在跑的那个读数。它跟落定的时长同一个槽、同一种字，所以调用结束时数字只是
+     停住，而不是凭空出现一个别处来的值。颜色比落定值实一档：它是此刻的事实。 */
+  .cost .live { color: var(--faint) }
   /* 墙钟也画成一段：数字要一个个读，长短是扫出来的。条右端贴着数字，所以一
      列卡的条右对齐，左端参差就是这一轮的耗时分布。 */
   .cost .took {
@@ -2910,8 +2913,7 @@
 
 
   @media (prefers-reduced-motion: reduce) {
-    .pip, .caret, .shim { animation: none !important; opacity: 1 !important }
-    .shim { background: none; color: var(--text); -webkit-text-fill-color: currentColor }
+    .pip, .caret { animation: none !important; opacity: 1 !important }
     .glowring { display: none }
     .pane[data-run="running"] .compose::after { border-color: var(--net) }
     .pane[data-run="halt"] .compose::after { border-color: var(--accent) }
