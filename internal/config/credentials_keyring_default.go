@@ -12,8 +12,10 @@ import (
 
 // legacyKeyringProbe reads one legacy credential from the platform keyring.
 // keyring.ErrNotFound (and empty values) are absent; other errors stay error.
-// ctx is checked before the call so a shared batch budget can stop the scan;
-// platform Get is not context-aware on these OSes.
+// The platform Get is not context-aware on these OSes, so the lookup is run
+// under the shared migration budget via legacyKeyringGetBounded: a wedged OS
+// keyring (locked macOS login keychain, hung Windows Credential Manager) must
+// not hang `serve` forever, and headless boxes must not stall startup.
 func legacyKeyringProbe(ctx context.Context, key string) legacyKeyringOutcome {
 	key = strings.TrimSpace(key)
 	if key == "" {
@@ -22,7 +24,12 @@ func legacyKeyringProbe(ctx context.Context, key string) legacyKeyringOutcome {
 	if err := ctx.Err(); err != nil {
 		return legacyKeyringOutcome{Status: legacyKeyringTimeout}
 	}
-	value, err := keyring.Get(credentialsKeyringService, key)
+	value, err, timedOut := legacyKeyringGetBounded(ctx, func() (string, error) {
+		return keyring.Get(credentialsKeyringService, key)
+	})
+	if timedOut {
+		return legacyKeyringOutcome{Status: legacyKeyringTimeout}
+	}
 	if err != nil {
 		if errors.Is(err, keyring.ErrNotFound) {
 			return legacyKeyringOutcome{Status: legacyKeyringAbsent}

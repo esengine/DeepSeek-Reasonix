@@ -3,6 +3,7 @@ package config
 import (
 	"context"
 	"encoding/base64"
+	"errors"
 	"strings"
 	"sync"
 	"testing"
@@ -225,5 +226,73 @@ func TestLegacyKeyringMarkerUsesRawURLBase64(t *testing.T) {
 	other := legacyKeyringMigrationMarkerPath("A_B_C_")
 	if path == other {
 		t.Fatalf("marker collision between %q and A_B_C_", key)
+	}
+}
+
+func TestLegacyKeyringGetBoundedReturnsValue(t *testing.T) {
+	ctx, cancel := context.WithTimeout(context.Background(), time.Second)
+	defer cancel()
+
+	value, err, timedOut := legacyKeyringGetBounded(ctx, func() (string, error) {
+		return "sk-secret", nil
+	})
+	if timedOut || err != nil || value != "sk-secret" {
+		t.Fatalf("value=%q err=%v timedOut=%v, want found value", value, err, timedOut)
+	}
+}
+
+func TestLegacyKeyringGetBoundedReturnsError(t *testing.T) {
+	ctx, cancel := context.WithTimeout(context.Background(), time.Second)
+	defer cancel()
+
+	probeErr := errors.New("platform keychain unavailable")
+	value, err, timedOut := legacyKeyringGetBounded(ctx, func() (string, error) {
+		return "", probeErr
+	})
+	if timedOut || !errors.Is(err, probeErr) || value != "" {
+		t.Fatalf("value=%q err=%v timedOut=%v, want wrapped error", value, err, timedOut)
+	}
+}
+
+// TestLegacyKeyringGetBoundedTimesOutHangingGet: the whole point of #8129 —
+// an uncancellable platform Get (locked macOS keychain, hung Windows
+// Credential Manager) must not hang migration forever, even though the OS
+// call itself cannot be interrupted.
+func TestLegacyKeyringGetBoundedTimesOutHangingGet(t *testing.T) {
+	ctx, cancel := context.WithTimeout(context.Background(), 40*time.Millisecond)
+	defer cancel()
+
+	done := make(chan bool, 1)
+	go func() {
+		value, err, timedOut := legacyKeyringGetBounded(ctx, func() (string, error) {
+			<-ctx.Done() // platform Get never returns; it only notices when the OS does
+			return "", errors.New("eventually wedged")
+		})
+		done <- timedOut && err == nil && value == ""
+	}()
+	select {
+	case ok := <-done:
+		if !ok {
+			t.Fatal("hanging get did not report timeout")
+		}
+	case <-time.After(250 * time.Millisecond):
+		t.Fatal("hanging get exceeded the shared budget")
+	}
+}
+
+// TestLegacyKeyringGetBoundedNeverDemotesFoundValue pins the helper's
+// responsibility boundary: when the result channel wins the select, the value
+// is returned as-is. Demotion of a found value to timeout must never happen
+// here (only the per-platform probe may classify err as timeout), even if ctx
+// expires in the same instant the result arrives.
+func TestLegacyKeyringGetBoundedNeverDemotesFoundValue(t *testing.T) {
+	ctx, cancel := context.WithTimeout(context.Background(), time.Second)
+	defer cancel()
+
+	value, err, timedOut := legacyKeyringGetBounded(ctx, func() (string, error) {
+		return "late-but-real", nil
+	})
+	if timedOut || err != nil || value != "late-but-real" {
+		t.Fatalf("value=%q err=%v timedOut=%v, want found value preserved", value, err, timedOut)
 	}
 }

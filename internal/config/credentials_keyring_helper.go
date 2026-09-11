@@ -25,6 +25,35 @@ type legacyKeyringOutcome struct {
 	Value  string
 }
 
+// legacyKeyringGetBounded runs one uncancellable keyring lookup under ctx's
+// budget. A buffered channel lets a late result be dropped without blocking
+// the probe goroutine; the caller-side wait is bounded even though the OS
+// call itself cannot be interrupted. On timeout the probe goroutine may stay
+// blocked inside the OS call until the keyring answers (macOS may pop a GUI
+// prompt) — that is inherent to an uncancellable API and only leaks a parked
+// goroutine that exits on its own once the OS returns. timedOut reports that
+// the budget expired before the lookup returned. A result that won the select
+// race is returned as-is: err-vs-timeout classification stays in the
+// per-platform probe, keeping the pre-existing semantics (a found value is
+// not demoted to timeout).
+func legacyKeyringGetBounded(ctx context.Context, get func() (string, error)) (value string, err error, timedOut bool) {
+	type result struct {
+		value string
+		err   error
+	}
+	ch := make(chan result, 1)
+	go func() {
+		v, e := get()
+		ch <- result{value: v, err: e}
+	}()
+	select {
+	case <-ctx.Done():
+		return "", nil, true
+	case r := <-ch:
+		return r.value, r.err, false
+	}
+}
+
 // lookupLegacyKeyringBatch probes keys under a single shared deadline in-process.
 // There is no external helper entrypoint: secrets never leave the process via
 // stdout or a caller-controlled REASONIX_HOME dump path.
