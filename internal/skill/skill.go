@@ -143,6 +143,11 @@ type Options struct {
 	ExcludedPaths    []string
 	DisabledNames    []string
 	MaxDepth         int
+	// SuppressWarnings quiets noisy third-party skill loading warnings (for
+	// example the missing-description warning) without changing which skills
+	// load or their index content. On-demand diagnostics (reasonix doctor)
+	// are unaffected.
+	SuppressWarnings bool
 	DisableBuiltins  bool // suppress shipped built-ins (test-only knob)
 	// DisableDiscovery returns an empty store without probing project, custom,
 	// global, plugin, or built-in skill sources. It is a test-only isolation knob.
@@ -164,6 +169,7 @@ type Store struct {
 	excludedPaths    map[string]bool
 	disabled         map[string]bool
 	maxDepth         int
+	suppressWarnings bool
 	disableBuiltins  bool
 	disableDiscovery bool
 	stderr           io.Writer
@@ -222,6 +228,7 @@ func New(opts Options) *Store {
 		excludedPaths:    excluded,
 		disabled:         disabledNameSet(opts.DisabledNames),
 		maxDepth:         normalizeMaxDepth(opts.MaxDepth),
+		suppressWarnings: opts.SuppressWarnings,
 		disableBuiltins:  opts.DisableBuiltins,
 		disableDiscovery: opts.DisableDiscovery,
 		stderr:           stderr,
@@ -872,7 +879,7 @@ func (s *Store) parseSkill(path, stem string, scope Scope, requireSkillMarker bo
 		name = v
 	}
 	desc := strings.TrimSpace(fm[skillFrontmatterDescription])
-	if desc == "" {
+	if desc == "" && !s.suppressWarnings {
 		fmt.Fprintf(s.stderr, "warning: skill %q at %s has no description: — it will load but won't appear in the skills index\n", name, path)
 	}
 	sk := Skill{
