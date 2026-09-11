@@ -279,3 +279,17 @@ test("the installer stamps the shortcuts it created without launching the deskto
   assert.match(nsi.slice(maintenance, maintenance + 350), /Pop \$0/);
   assert.match(nsi.slice(maintenance, maintenance + 350), /shortcut identity repair failed/);
 });
+
+test("installer unlock checks do not create or lock missing release entries", () => {
+  const nsi = read("build/windows/installer/project.nsi");
+  const body = nsi.slice(nsi.indexOf("Function reasonix.waitForExecutableUnlock"), nsi.indexOf("FunctionEnd", nsi.indexOf("Function reasonix.waitForExecutableUnlock")));
+  const opens = [...body.matchAll(/FileOpen \$1 "([^"]+)" a/g)];
+  assert.equal(opens.length, 6);
+  for (const open of opens) {
+    const preceding = body.slice(0, open.index);
+    const guard = `IfFileExists "${open[1]}" 0 `;
+    const at = preceding.lastIndexOf(guard);
+    assert.ok(at >= 0, `missing existence guard for ${open[1]}`);
+    assert.match(preceding.slice(at), /^IfFileExists [^\n]+\r?\n\s+ClearErrors\s+$/);
+  }
+});

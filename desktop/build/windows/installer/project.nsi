@@ -401,6 +401,7 @@ Function reasonix.waitForExecutableUnlock
    StrCpy $3 40
 reasonix_unlock_check:
    StrCpy $2 0
+   IfFileExists "$INSTDIR\${PRODUCT_EXECUTABLE}" 0 reasonix_unlock_versioned
    ClearErrors
    FileOpen $1 "$INSTDIR\${PRODUCT_EXECUTABLE}" a
    IfErrors reasonix_unlock_stable_locked
@@ -409,6 +410,8 @@ reasonix_unlock_check:
 reasonix_unlock_stable_locked:
    StrCpy $2 1
 reasonix_unlock_versioned:
+   IfFileExists "$INSTDIR\versions\v${INFO_PRODUCTVERSION}\${PRODUCT_EXECUTABLE}" 0 reasonix_unlock_guard
+   ClearErrors
    FileOpen $1 "$INSTDIR\versions\v${INFO_PRODUCTVERSION}\${PRODUCT_EXECUTABLE}" a
    IfErrors reasonix_unlock_versioned_locked
    FileClose $1
@@ -416,6 +419,8 @@ reasonix_unlock_versioned:
 reasonix_unlock_versioned_locked:
    StrCpy $2 1
 reasonix_unlock_guard:
+   IfFileExists "$INSTDIR\${REASONIX_GUARD}" 0 reasonix_unlock_launcher
+   ClearErrors
    FileOpen $1 "$INSTDIR\${REASONIX_GUARD}" a
    IfErrors reasonix_unlock_guard_locked
    FileClose $1
@@ -423,6 +428,8 @@ reasonix_unlock_guard:
 reasonix_unlock_guard_locked:
    StrCpy $2 1
 reasonix_unlock_launcher:
+   IfFileExists "$INSTDIR\${REASONIX_LAUNCHER}" 0 reasonix_unlock_cli
+   ClearErrors
    FileOpen $1 "$INSTDIR\${REASONIX_LAUNCHER}" a
    IfErrors reasonix_unlock_launcher_locked
    FileClose $1
@@ -430,6 +437,8 @@ reasonix_unlock_launcher:
 reasonix_unlock_launcher_locked:
    StrCpy $2 1
 reasonix_unlock_cli:
+   IfFileExists "$INSTDIR\${REASONIX_CLI}" 0 reasonix_unlock_portable
+   ClearErrors
    FileOpen $1 "$INSTDIR\${REASONIX_CLI}" a
    IfErrors reasonix_unlock_cli_locked
    FileClose $1
@@ -437,6 +446,8 @@ reasonix_unlock_cli:
 reasonix_unlock_cli_locked:
    StrCpy $2 1
 reasonix_unlock_portable:
+   IfFileExists "$INSTDIR\${REASONIX_PORTABLE_ENTRY}" 0 reasonix_unlock_result
+   ClearErrors
    FileOpen $1 "$INSTDIR\${REASONIX_PORTABLE_ENTRY}" a
    IfErrors reasonix_unlock_portable_locked
    FileClose $1
