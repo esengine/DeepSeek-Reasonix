@@ -4,6 +4,7 @@ import (
 	"crypto/sha256"
 	"fmt"
 	"os"
+	"os/user"
 	"path/filepath"
 	"sort"
 	"strings"
@@ -207,7 +208,11 @@ func (c *Config) CredentialEnvNames() []string {
 	for _, name := range names {
 		seen[name] = true
 	}
-	if file, ok := readDotEnvFile(UserCredentialsPath()); ok {
+	collect := func(path string) {
+		file, ok := readDotEnvFile(path)
+		if !ok {
+			return
+		}
 		for name := range file.Values {
 			name = strings.TrimSpace(name)
 			if !isCredentialKey(name) || seen[name] {
@@ -216,6 +221,10 @@ func (c *Config) CredentialEnvNames() []string {
 			seen[name] = true
 			names = append(names, name)
 		}
+	}
+	collect(UserCredentialsPath())
+	for _, p := range homeCredentialFallbackPaths() {
+		collect(p)
 	}
 	sort.Strings(names)
 	return names
@@ -266,6 +275,48 @@ func loadCredentialStoreForRoot(root string) {
 	if p := UserCredentialsPath(); p != "" {
 		loadDotEnvFileAs(p, CredentialSource{Kind: CredentialSourceCredentials, Path: p, Label: "Reasonix credentials (.env)"})
 	}
+	for _, p := range homeCredentialFallbackPaths() {
+		loadDotEnvFileAs(p, CredentialSource{Kind: CredentialSourceHomeEnv, Path: p, Label: "user home .env"})
+	}
+}
+
+// currentAccountHome resolves the OS account's home from the user database
+// (not $HOME). A var so tests can stub it.
+var currentAccountHome = func() string {
+	u, err := user.Current()
+	if err != nil {
+		return ""
+	}
+	return strings.TrimSpace(u.HomeDir)
+}
+
+// homeCredentialFallbackPaths lists user-level .env fallbacks probed after the
+// primary Reasonix credentials file: $HOME/.env first, then the OS account
+// home's .env (covers launchers and services that override HOME). Fallbacks
+// never override keys that are already set — loadDotEnvFileAs skips existing
+// keys for non-"credentials" sources — so precedence is: Reasonix credentials
+// file > process environment > $HOME/.env > account home .env.
+func homeCredentialFallbackPaths() []string {
+	primary := UserCredentialsPath()
+	seen := map[string]bool{}
+	var paths []string
+	add := func(path string) {
+		if path == "" || seen[path] {
+			return
+		}
+		seen[path] = true
+		if primary != "" && samePath(path, primary) {
+			return
+		}
+		paths = append(paths, path)
+	}
+	if home := strings.TrimSpace(os.Getenv("HOME")); home != "" {
+		add(filepath.Join(home, ".env"))
+	}
+	if home := currentAccountHome(); home != "" {
+		add(filepath.Join(home, ".env"))
+	}
+	return paths
 }
 
 // StoreCredentialLines stores KEY=value assignments in Reasonix's global .env
@@ -609,6 +660,13 @@ func storedCredentialValue(key string) (string, CredentialSource, bool) {
 	if p := UserCredentialsPath(); p != "" {
 		if value, ok := envFileValue(p, key); ok && value != "" {
 			return value, CredentialSource{Kind: CredentialSourceCredentials, Path: p, Label: "Reasonix credentials (.env)"}, true
+		}
+	}
+	// User-level fallbacks, same probe order as loadCredentialStoreForRoot:
+	// $HOME/.env, then the OS account home's .env.
+	for _, p := range homeCredentialFallbackPaths() {
+		if value, ok := envFileValue(p, key); ok && value != "" {
+			return value, CredentialSource{Kind: CredentialSourceHomeEnv, Path: p, Label: "user home .env"}, true
 		}
 	}
 	return "", CredentialSource{}, false

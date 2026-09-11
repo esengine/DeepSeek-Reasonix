@@ -9,7 +9,7 @@ import (
 	fileencoding "reasonix/internal/fileutil/encoding"
 )
 
-func TestLoadDotEnvDoesNotImportProjectOrHomeEnv(t *testing.T) {
+func TestLoadDotEnvImportsHomeEnvFallbackButNotProjectEnv(t *testing.T) {
 	cwd := t.TempDir()
 	home := t.TempDir()
 
@@ -25,6 +25,10 @@ func TestLoadDotEnvDoesNotImportProjectOrHomeEnv(t *testing.T) {
 	t.Setenv("REASONIX_CREDENTIALS_STORE", "file")
 	t.Setenv("USERPROFILE", home) // os.UserHomeDir reads HOME on Unix and USERPROFILE on Windows.
 
+	prev := currentAccountHome
+	currentAccountHome = func() string { return home }
+	t.Cleanup(func() { currentAccountHome = prev })
+
 	// Start clean so the file values are what land (Setenv auto-restores).
 	t.Setenv("KEY_CWD", "")
 	os.Unsetenv("KEY_CWD")
@@ -38,16 +42,122 @@ func TestLoadDotEnvDoesNotImportProjectOrHomeEnv(t *testing.T) {
 	if got := os.Getenv("KEY_CWD"); got != "" {
 		t.Errorf("project .env key was imported into process env: KEY_CWD=%q", got)
 	}
-	if got := os.Getenv("KEY_HOME"); got != "" {
-		t.Errorf("home .env key was loaded: KEY_HOME=%q", got)
+	// The user home .env is a credential fallback: it fills keys that neither
+	// the primary credentials file nor the process environment provides.
+	if got := os.Getenv("KEY_HOME"); got != "from_home" {
+		t.Errorf("home .env fallback not loaded: KEY_HOME=%q want from_home", got)
 	}
-	if got := os.Getenv("KEY_SHARED"); got != "" {
-		t.Errorf("project/home .env shared key was imported: KEY_SHARED=%q", got)
+	if got := os.Getenv("KEY_SHARED"); got != "home_loses" {
+		t.Errorf("project .env must stay unimported; home fallback should win: KEY_SHARED=%q want home_loses", got)
 	}
 }
 
-// TestLoadDotEnvReadsGlobalCredentials proves `reasonix setup`'s target — the
-// reasonix-owned credentials file under Reasonix home — is loaded from any
+// TestLoadDotEnvHomeEnvFallbackPrecedence pins the credential precedence:
+// Reasonix credentials file > process environment > $HOME/.env fallback.
+func TestLoadDotEnvHomeEnvFallbackPrecedence(t *testing.T) {
+	cwd := t.TempDir()
+	home := t.TempDir()
+	credHome := t.TempDir()
+
+	t.Chdir(cwd)
+	t.Setenv("HOME", home)
+	t.Setenv("USERPROFILE", home)
+	t.Setenv("REASONIX_HOME", credHome)
+	t.Setenv("REASONIX_CREDENTIALS_STORE", "file")
+
+	prev := currentAccountHome
+	currentAccountHome = func() string { return home }
+	t.Cleanup(func() { currentAccountHome = prev })
+
+	if err := os.WriteFile(filepath.Join(credHome, ".env"), []byte("KEY_PRIMARY=from_credentials\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(home, ".env"), []byte("KEY_PRIMARY=from_home\nKEY_HOME_ONLY=from_home\nKEY_ENV=from_home\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	t.Setenv("KEY_ENV", "from_env") // process environment must beat the home fallback
+	t.Setenv("KEY_PRIMARY", "")
+	os.Unsetenv("KEY_PRIMARY")
+	t.Setenv("KEY_HOME_ONLY", "")
+	os.Unsetenv("KEY_HOME_ONLY")
+
+	loadDotEnv()
+
+	if got := os.Getenv("KEY_PRIMARY"); got != "from_credentials" {
+		t.Errorf("primary credentials file should win over home fallback: KEY_PRIMARY=%q", got)
+	}
+	if got := os.Getenv("KEY_HOME_ONLY"); got != "from_home" {
+		t.Errorf("home fallback should fill unset keys: KEY_HOME_ONLY=%q", got)
+	}
+	if got := os.Getenv("KEY_ENV"); got != "from_env" {
+		t.Errorf("process environment should win over home fallback: KEY_ENV=%q", got)
+	}
+}
+
+// TestLoadDotEnvFallsBackToAccountHomeEnv covers launchers/services that
+// override HOME: when $HOME has no .env, the OS account home's .env is probed.
+func TestLoadDotEnvFallsBackToAccountHomeEnv(t *testing.T) {
+	cwd := t.TempDir()
+	fakeHome := t.TempDir()
+	acctHome := t.TempDir()
+	credHome := t.TempDir()
+
+	t.Chdir(cwd)
+	t.Setenv("HOME", fakeHome)
+	t.Setenv("USERPROFILE", fakeHome)
+	t.Setenv("REASONIX_HOME", credHome)
+	t.Setenv("REASONIX_CREDENTIALS_STORE", "file")
+
+	prev := currentAccountHome
+	currentAccountHome = func() string { return acctHome }
+	t.Cleanup(func() { currentAccountHome = prev })
+
+	if err := os.WriteFile(filepath.Join(acctHome, ".env"), []byte("KEY_ACCT=from_account_home\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("KEY_ACCT", "")
+	os.Unsetenv("KEY_ACCT")
+
+	loadDotEnv()
+
+	if got := os.Getenv("KEY_ACCT"); got != "from_account_home" {
+		t.Errorf("account home .env fallback not loaded: KEY_ACCT=%q want from_account_home", got)
+	}
+}
+
+// TestStoredCredentialValueFallsBackToHomeEnv pins the file-lookup side of
+// credential resolution (Validate/APIKey): a key absent from the Reasonix
+// credentials file resolves from the user home .env fallback.
+func TestStoredCredentialValueFallsBackToHomeEnv(t *testing.T) {
+	home := t.TempDir()
+	credHome := t.TempDir()
+	t.Setenv("HOME", home)
+	t.Setenv("USERPROFILE", home)
+	t.Setenv("REASONIX_HOME", credHome)
+	t.Setenv("REASONIX_CREDENTIALS_STORE", "file")
+
+	prev := currentAccountHome
+	currentAccountHome = func() string { return home }
+	t.Cleanup(func() { currentAccountHome = prev })
+
+	if err := os.WriteFile(filepath.Join(home, ".env"), []byte("KEY_LOOKUP=from_home\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	value, source, ok := storedCredentialValue("KEY_LOOKUP")
+	if !ok || value != "from_home" {
+		t.Fatalf("storedCredentialValue = %q,%v, want from_home,true", value, ok)
+	}
+	if source.Kind != CredentialSourceHomeEnv {
+		t.Fatalf("source kind = %q, want %q", source.Kind, CredentialSourceHomeEnv)
+	}
+	if _, _, ok := storedCredentialValue("KEY_MISSING"); ok {
+		t.Fatal("unknown key should not resolve")
+	}
+}
+
+// TestLoadDotEnvReadsGlobalCredentials proves `reasonix setup`'s target — the// reasonix-owned credentials file under Reasonix home — is loaded from any
 // working directory and wins over a project ./.env on a shared key.
 func TestLoadDotEnvReadsGlobalCredentials(t *testing.T) {
 	cwd := t.TempDir()
