@@ -324,6 +324,22 @@
               "desktop"
             ],
             "title": {
+              "en": "Transcript duplication and skipped messages",
+              "zh": "聊天记录重复与消息丢失"
+            },
+            "body": {
+              "en": "History snapshots and the live event stream now share one projection, so reopening a session no longer duplicates messages or drops events that arrived while the replay cursor advanced.",
+              "zh": "历史快照与实时事件流现共用同一套投影，重新打开会话不再出现消息重复，也不再丢失重放游标推进期间到达的事件。"
+            },
+            "refs": [
+              9983
+            ]
+          },
+          {
+            "targets": [
+              "desktop"
+            ],
+            "title": {
               "en": "Compact receipt visibility",
               "zh": "压缩回执可见性"
             },
