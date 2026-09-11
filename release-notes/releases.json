@@ -2,6 +2,446 @@
   "schemaVersion": 1,
   "releases": [
     {
+      "version": "1.38.7",
+      "date": "2026-09-11",
+      "channel": "stable",
+      "targetingVersion": 1,
+      "title": {
+        "en": "Reasonix 1.38.7",
+        "zh": "Reasonix 1.38.7"
+      },
+      "summary": {
+        "en": "Desktop reliability and usability improvements, including Windows startup fixes, browser controls, and transcript layout corrections.",
+        "zh": "桌面端可靠性与易用性改进，包括 Windows 启动修复、浏览器控制以及聊天记录布局修正。"
+      },
+      "surfaces": [
+        "desktop",
+        "cli"
+      ],
+      "guides": [
+        {
+          "title": {
+            "en": "Windows App Identity",
+            "zh": "Windows 应用身份"
+          },
+          "body": {
+            "en": "How Reasonix Desktop isolates its Windows taskbar identity from Studio and manages shortcuts.",
+            "zh": "Reasonix 桌面端如何隔离其 Windows 任务栏身份与 Studio，并管理快捷方式。"
+          },
+          "href": "https://github.com/esengine/DeepSeek-Reasonix/blob/fbc8a8f3688f1c0c4f6ea4751e7bdaed24b96ba1/docs/WINDOWS_APP_IDENTITY.md"
+        },
+        {
+          "title": {
+            "en": "Windows Startup Recovery",
+            "zh": "Windows 启动恢复"
+          },
+          "body": {
+            "en": "Design and acceptance gates for recovering from stale desktop shells on Windows.",
+            "zh": "Windows 上从失效桌面壳恢复的设计与验收标准。"
+          },
+          "href": "https://github.com/esengine/DeepSeek-Reasonix/blob/fbc8a8f3688f1c0c4f6ea4751e7bdaed24b96ba1/docs/WINDOWS_STARTUP_RECOVERY.md"
+        },
+        {
+          "title": {
+            "en": "Desktop Browser",
+            "zh": "桌面浏览器"
+          },
+          "body": {
+            "en": "Built-in browser control settings and Chrome sign-in import.",
+            "zh": "内置浏览器控制设置与 Chrome 登录状态导入。"
+          },
+          "href": "https://github.com/esengine/DeepSeek-Reasonix/blob/fbc8a8f3688f1c0c4f6ea4751e7bdaed24b96ba1/docs/DESKTOP_BROWSER.md"
+        },
+        {
+          "title": {
+            "en": "Transcript Projection",
+            "zh": "聊天记录投影"
+          },
+          "body": {
+            "en": "Unified history snapshot and live event projection for transcripts.",
+            "zh": "聊天记录的历史快照与实时事件统一投影。"
+          },
+          "href": "https://github.com/esengine/DeepSeek-Reasonix/blob/fbc8a8f3688f1c0c4f6ea4751e7bdaed24b96ba1/docs/TRANSCRIPT_PROJECTION.md"
+        },
+        {
+          "title": {
+            "en": "Checkpoints",
+            "zh": "检查点"
+          },
+          "body": {
+            "en": "Configurable rewind snapshot retention.",
+            "zh": "可配置的回溯快照保留策略。"
+          },
+          "href": "https://github.com/esengine/DeepSeek-Reasonix/blob/fbc8a8f3688f1c0c4f6ea4751e7bdaed24b96ba1/docs/CHECKPOINTS.md"
+        }
+      ],
+      "highlights": [
+        {
+          "kind": "new",
+          "targets": [
+            "desktop"
+          ],
+          "title": {
+            "en": "Built-in browser control settings",
+            "zh": "内置浏览器控制设置"
+          },
+          "body": {
+            "en": "A new Browser control page in Settings Centre lets you enable the built-in browser, import Chrome sign-in state, manage certificate verification, and clear browser data.",
+            "zh": "设置中心新增“浏览器控制”页面，可启用内置浏览器、导入 Chrome 登录状态、管理证书验证并清除浏览器数据。"
+          },
+          "refs": [
+            10080
+          ]
+        },
+        {
+          "kind": "improved",
+          "targets": [
+            "desktop"
+          ],
+          "title": {
+            "en": "Windows startup and window reliability",
+            "zh": "Windows 启动与窗口可靠性"
+          },
+          "body": {
+            "en": "Fixes for stale shell recovery, taskbar identity isolation, console flash, and window geometry persistence.",
+            "zh": "修复失效壳恢复、任务栏身份隔离、启动黑框闪现以及窗口几何信息持久化问题。"
+          },
+          "refs": [
+            10115,
+            10130,
+            10111,
+            10128
+          ]
+        },
+        {
+          "kind": "fixed",
+          "targets": [
+            "desktop"
+          ],
+          "title": {
+            "en": "Transcript layout and command visibility",
+            "zh": "聊天记录布局与命令可见性"
+          },
+          "body": {
+            "en": "Long content no longer overflows the chat pane, and expanded shell tool cards show the complete command.",
+            "zh": "长内容不再溢出聊天面板，展开的终端工具卡显示完整命令。"
+          },
+          "refs": [
+            10137,
+            6298,
+            9860
+          ]
+        },
+        {
+          "kind": "fixed",
+          "targets": [
+            "cli"
+          ],
+          "title": {
+            "en": "UTF-8 clipboard copy from WSL",
+            "zh": "WSL 下 UTF-8 剪贴板复制"
+          },
+          "body": {
+            "en": "Copying Chinese or other UTF-8 text from WSL no longer produces garbled characters.",
+            "zh": "从 WSL 复制中文或其他 UTF-8 文本不再出现乱码。"
+          },
+          "refs": [
+            10074
+          ]
+        }
+      ],
+      "changes": {
+        "new": [
+          {
+            "targets": [
+              "desktop"
+            ],
+            "title": {
+              "en": "Built-in browser control settings",
+              "zh": "内置浏览器控制设置"
+            },
+            "body": {
+              "en": "Added a Browser control page with agent capability switch, Chrome sign-in import, certificate policy, and cache/data clearing.",
+              "zh": "新增浏览器控制页面，包含代理能力开关、Chrome 登录导入、证书策略以及缓存/数据清除。"
+            },
+            "refs": [
+              10080
+            ]
+          },
+          {
+            "targets": [
+              "desktop",
+              "cli"
+            ],
+            "title": {
+              "en": "Configurable checkpoint retention",
+              "zh": "可配置的检查点保留策略"
+            },
+            "body": {
+              "en": "Rewind snapshot retention limits can now be set via [checkpoints] retain_turns and blob_quota_bytes.",
+              "zh": "回溯快照保留上限现可通过 [checkpoints] 的 retain_turns 和 blob_quota_bytes 配置。"
+            },
+            "refs": [
+              9911
+            ]
+          }
+        ],
+        "improved": [
+          {
+            "targets": [
+              "desktop"
+            ],
+            "title": {
+              "en": "Windows startup recovery",
+              "zh": "Windows 启动恢复"
+            },
+            "body": {
+              "en": "Added explicit shell lifecycle and recovery state model to handle stale shells and locked entry points.",
+              "zh": "新增显式壳生命周期与恢复状态模型，处理失效壳与锁定入口点。"
+            },
+            "refs": [
+              10115
+            ]
+          },
+          {
+            "targets": [
+              "desktop"
+            ],
+            "title": {
+              "en": "Windows taskbar identity isolation",
+              "zh": "Windows 任务栏身份隔离"
+            },
+            "body": {
+              "en": "Desktop now uses io.reasonix.desktop for shell, launcher, service, shortcuts, and notifications, preventing grouping with Studio.",
+              "zh": "桌面端现使用 io.reasonix.desktop 作为壳、启动器、服务、快捷方式与通知的身份，避免与 Studio 分组。"
+            },
+            "refs": [
+              10130
+            ]
+          },
+          {
+            "targets": [
+              "desktop"
+            ],
+            "title": {
+              "en": "Window geometry persistence",
+              "zh": "窗口几何信息持久化"
+            },
+            "body": {
+              "en": "Restore rectangle now preserves valid custom geometry instead of the maximized frame, preventing oversized windows.",
+              "zh": "还原矩形现保留有效自定义几何信息而非最大化框架，避免窗口过大。"
+            },
+            "refs": [
+              10128
+            ]
+          },
+          {
+            "targets": [
+              "desktop"
+            ],
+            "title": {
+              "en": "Session switch diagnostics",
+              "zh": "会话切换诊断"
+            },
+            "body": {
+              "en": "Session-switch snapshots are validated and load phases are reported for better performance measurement.",
+              "zh": "会话切换快照经过校验，并报告加载阶段以改进性能测量。"
+            },
+            "refs": [
+              10120
+            ]
+          },
+          {
+            "targets": [
+              "desktop"
+            ],
+            "title": {
+              "en": "Bounded performance profiling",
+              "zh": "限时性能采样"
+            },
+            "body": {
+              "en": "Performance diagnostics now use bounded sampling and profiling to identify stalls and memory growth without continuous CPU profiling.",
+              "zh": "性能诊断现采用限时采样与分析，识别卡顿与内存增长，无需持续 CPU 分析。"
+            },
+            "refs": [
+              10124
+            ]
+          },
+          {
+            "targets": [
+              "desktop"
+            ],
+            "title": {
+              "en": "DeepSeek Flash reasoning effort",
+              "zh": "DeepSeek Flash 思考深度"
+            },
+            "body": {
+              "en": "Added model-level reasoning effort control for DeepSeek Flash aliases.",
+              "zh": "为 DeepSeek Flash 别名新增模型级思考深度控制。"
+            },
+            "refs": [
+              10117
+            ]
+          },
+          {
+            "targets": [
+              "desktop",
+              "cli"
+            ],
+            "title": {
+              "en": "Model override empty detection",
+              "zh": "模型覆盖空判断统一"
+            },
+            "body": {
+              "en": "Unified empty model override detection to include MaxOutputTokens, fixing silent dropping of per-model output token limits.",
+              "zh": "统一空模型覆盖判断以包含 MaxOutputTokens，修复逐模型输出令牌限制被静默丢弃的问题。"
+            },
+            "refs": [
+              10094
+            ]
+          },
+          {
+            "targets": [
+              "desktop",
+              "cli"
+            ],
+            "title": {
+              "en": "Capability phase metrics",
+              "zh": "能力阶段指标"
+            },
+            "body": {
+              "en": "Fixed capability_phases duration buckets to report actual time spent in each phase.",
+              "zh": "修复 capability_phases 耗时桶，使其报告各阶段实际耗时。"
+            },
+            "refs": [
+              9981
+            ]
+          }
+        ],
+        "fixed": [
+          {
+            "targets": [
+              "desktop"
+            ],
+            "title": {
+              "en": "Compact receipt visibility",
+              "zh": "压缩回执可见性"
+            },
+            "body": {
+              "en": "The /compact receipt now stays visible outside the process fold instead of being hidden.",
+              "zh": "/compact 回执现保持在进程折叠之外可见，不再被隐藏。"
+            },
+            "refs": [
+              10132
+            ]
+          },
+          {
+            "targets": [
+              "desktop"
+            ],
+            "title": {
+              "en": "Transcript overflow",
+              "zh": "聊天记录溢出"
+            },
+            "body": {
+              "en": "Long content no longer expands the transcript beyond the chat pane.",
+              "zh": "长内容不再使聊天记录超出聊天面板。"
+            },
+            "refs": [
+              10137
+            ]
+          },
+          {
+            "targets": [
+              "desktop"
+            ],
+            "title": {
+              "en": "Long word wrapping",
+              "zh": "长词换行"
+            },
+            "body": {
+              "en": "Long words and function names in assistant messages and reasoning now wrap correctly.",
+              "zh": "助手消息与思考过程中的长词和函数名现可正确换行。"
+            },
+            "refs": [
+              6298
+            ]
+          },
+          {
+            "targets": [
+              "desktop"
+            ],
+            "title": {
+              "en": "Shell command disclosure",
+              "zh": "终端命令完整显示"
+            },
+            "body": {
+              "en": "Expanded shell tool cards now show the complete command above the output.",
+              "zh": "展开的终端工具卡现于输出上方显示完整命令。"
+            },
+            "refs": [
+              9860
+            ]
+          },
+          {
+            "targets": [
+              "cli"
+            ],
+            "title": {
+              "en": "WSL clipboard encoding",
+              "zh": "WSL 剪贴板编码"
+            },
+            "body": {
+              "en": "Copying UTF-8 text from WSL now preserves encoding, fixing garbled Chinese characters.",
+              "zh": "从 WSL 复制 UTF-8 文本现保留编码，修复中文乱码。"
+            },
+            "refs": [
+              10074
+            ]
+          },
+          {
+            "targets": [
+              "desktop"
+            ],
+            "title": {
+              "en": "Windows console flash",
+              "zh": "Windows 启动黑框闪现"
+            },
+            "body": {
+              "en": "Launching the desktop from a shortcut no longer briefly opens a console window.",
+              "zh": "从快捷方式启动桌面端不再短暂弹出控制台窗口。"
+            },
+            "refs": [
+              10111
+            ]
+          }
+        ]
+      },
+      "upgrade": [],
+      "risks": [],
+      "contributors": [
+        "SivanCola",
+        "SauronSkywalker",
+        "Linearl",
+        "lengxiaouser",
+        "boscocp"
+      ],
+      "links": {
+        "github": "https://github.com/esengine/DeepSeek-Reasonix/releases/tag/desktop-v1.38.7",
+        "compare": "https://github.com/esengine/DeepSeek-Reasonix/compare/desktop-v1.38.6...desktop-v1.38.7",
+        "download": "https://reasonix.io/?download=desktop&channel=stable#start"
+      },
+      "releaseId": "1.38.7",
+      "baseVersion": "1.38.7",
+      "status": "reviewed",
+      "previousRelease": "1.38.6",
+      "builds": {
+        "cli": "v1.38.7",
+        "desktop": "v1.38.7",
+        "npm": "1.38.7"
+      }
+    },
+    {
       "version": "1.38.6",
       "date": "2026-09-11",
       "channel": "stable",
@@ -63,7 +503,9 @@
       "upgrade": [
         {
           "level": "warning",
-          "targets": ["desktop"],
+          "targets": [
+            "desktop"
+          ],
           "title": {
             "en": "Install the full package to recover startup",
             "zh": "安装完整包恢复启动"
@@ -72,12 +514,17 @@
             "en": "If v1.38.5 cannot open, download and install the v1.38.6 full package. Do not clear your configuration or session data. Users moving from v1.38.3 or an older Wails release must also install the full package manually for the first Electron upgrade; the old updater cannot install the new layout.",
             "zh": "如果 v1.38.5 无法打开，请下载并安装 v1.38.6 完整包，无需清理配置或会话数据。从 v1.38.3 或更早 Wails 版本首次升级到 Electron 时，也需要手动安装完整包；旧版更新器无法安装新的目录结构。"
           },
-          "refs": [10089]
+          "refs": [
+            10089
+          ]
         }
       ],
       "risks": [
         {
-          "targets": ["desktop", "cli"],
+          "targets": [
+            "desktop",
+            "cli"
+          ],
           "title": {
             "en": "OpenCode Go Responses search limitation remains",
             "zh": "OpenCode Go Responses 搜索限制仍然存在"
@@ -86,7 +533,10 @@
             "en": "This startup hotfix does not change the previously reported OpenCode Go Responses native-search limitation. Use the Anthropic search route verified for v1.38.5 when web search is needed.",
             "zh": "本次启动修复未改变此前已报告的 OpenCode Go Responses 原生搜索限制。需要联网搜索时，请使用 v1.38.5 已验证的 Anthropic 搜索路径。"
           },
-          "refs": [10015, 10081]
+          "refs": [
+            10015,
+            10081
+          ]
         }
       ],
       "contributors": [
