@@ -18,6 +18,8 @@ import { RemoteAsk } from "./RemoteAsk";
 import { RemoteHosts } from "./RemoteHosts";
 import type { RemoteAsk as RemoteAskT, RemoteHost } from "../port/remote";
 import { RailSearch } from "./railsearch";
+import { Boundary } from "./Boundary";
+import { SettingsUnavailable } from "./SettingsUnavailable";
 import { useMachineBooks } from "./machinebooks";
 import { Workspaces } from "./Workspaces";
 import { Sky } from "./Sky";
@@ -739,6 +741,10 @@ export function App({ hub }: { hub: HubPort }) {
       </div>
 
       {settings && activePort && (
+        // The transcript's lazy markdown has had this since it was written; the
+        // settings chunk is the other deferred route and had a Suspense with
+        // nothing behind it, so a chunk that never arrives took the window.
+        <Boundary fallback={<SettingsUnavailable onClose={hidePrefs} />}>
         <Suspense fallback={<div className="prefs" aria-busy="true" />}>
           <Settings
             hub={hub}
@@ -762,6 +768,7 @@ export function App({ hub }: { hub: HubPort }) {
             reloadAccount={reloadAccount}
           />
         </Suspense>
+        </Boundary>
       )}
     </div>
   );

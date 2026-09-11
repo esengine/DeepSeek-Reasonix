@@ -2,6 +2,11 @@
 // alone — one catalogue is still the model, and this file is read as its
 // continuation: same keying by Chinese source text, same grouping by screen.
 export const EN_SETTINGS: Record<string, string> = {
+  "设置没能打开": "Settings did not open",
+  "重新载入": "Reload",
+  "这一页是单独取的，这次没取到": "This screen is fetched on its own, and this time it did not arrive",
+  "多半是更新换掉了这个窗口正在用的那份文件。重新载入窗口即可，当前会话与正在跑的回合都不受影响。":
+    "An update most likely replaced the file this window was using. Reloading the window is enough — your session and any running turn are unaffected.",
   // 找设置，以及改它要付什么
   "搜索设置…": "Search settings…",
   "搜索设置": "Search settings",
