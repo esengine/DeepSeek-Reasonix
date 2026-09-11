@@ -8,7 +8,6 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
-	"strings"
 	"testing"
 	"time"
 )
@@ -70,7 +69,9 @@ if ($Action -eq 'create') {
 	if err := json.Unmarshal(output, &got); err != nil {
 		t.Fatalf("read shortcut: %v: %s", err, output)
 	}
-	if !strings.EqualFold(got.Target, launcher) || got.ID != "io.reasonix.desktop" || got.Arguments != `--session "workspace name"` {
+	targetInfo, targetErr := os.Stat(got.Target)
+	launcherInfo, launcherErr := os.Stat(launcher)
+	if targetErr != nil || launcherErr != nil || !os.SameFile(targetInfo, launcherInfo) || got.ID != "io.reasonix.desktop" || got.Arguments != `--session "workspace name"` {
 		t.Fatalf("maintenance shortcut = %+v", got)
 	}
 }

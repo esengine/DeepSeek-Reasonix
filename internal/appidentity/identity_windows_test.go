@@ -7,7 +7,6 @@ import (
 	"os/exec"
 	"path/filepath"
 	"runtime"
-	"strings"
 	"syscall"
 	"testing"
 	"unsafe"
@@ -171,7 +170,7 @@ func TestRepairOwnedShortcutLeavesSeparateReasonix053InstallUntouched(t *testing
 	if idErr != nil {
 		t.Fatal(idErr)
 	}
-	if !strings.EqualFold(filepath.Clean(gotTarget), filepath.Clean(legacyTarget)) {
+	if !migrationSamePath(gotTarget, legacyTarget) {
 		t.Fatalf("legacy shortcut target = %q, want %q", gotTarget, legacyTarget)
 	}
 	if gotID != legacyTauriAppUserModelID {

@@ -329,7 +329,12 @@ func migrationAssertUnchanged(t *testing.T, path, root string) {
 }
 
 func migrationSamePath(left, right string) bool {
-	return strings.EqualFold(filepath.Clean(left), filepath.Clean(right))
+	if strings.EqualFold(filepath.Clean(left), filepath.Clean(right)) {
+		return true
+	}
+	leftInfo, leftErr := os.Stat(left)
+	rightInfo, rightErr := os.Stat(right)
+	return leftErr == nil && rightErr == nil && os.SameFile(leftInfo, rightInfo)
 }
 
 func TestRepairShortcutsLeavesReadOnlyShortcutByteIdentical(t *testing.T) {
