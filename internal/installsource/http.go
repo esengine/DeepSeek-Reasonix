@@ -21,7 +21,7 @@ const defaultFetchLimit = 2 << 20
 
 // fetchText performs a bounded GET on sourceURL using the tool's HTTP client.
 // It applies defaultFetchTimeout unless the caller's context already has a
-// tighter deadline, and never reads more than defaultFetchLimit bytes.
+// tighter deadline, and rejects bodies larger than defaultFetchLimit bytes.
 func (t *installSourceTool) fetchText(ctx context.Context, sourceURL string) (string, error) {
 	if _, hasDeadline := ctx.Deadline(); !hasDeadline {
 		var cancel context.CancelFunc
@@ -46,10 +46,13 @@ func (t *installSourceTool) fetchText(ctx context.Context, sourceURL string) (st
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
 		return "", newErr(ErrSourceUnreadable, "%s: HTTP %d", sourceURL, resp.StatusCode)
 	}
-	limited := io.LimitReader(resp.Body, defaultFetchLimit)
+	limited := io.LimitReader(resp.Body, defaultFetchLimit+1)
 	body, err := io.ReadAll(limited)
 	if err != nil {
 		return "", newErr(ErrSourceUnreadable, "%s: read body: %v", sourceURL, err)
+	}
+	if len(body) > defaultFetchLimit {
+		return "", newErr(ErrSourceUnreadable, "%s: body exceeds %d-byte limit", sourceURL, defaultFetchLimit)
 	}
 	return string(body), nil
 }
