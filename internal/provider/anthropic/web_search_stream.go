@@ -52,13 +52,13 @@ type streamContentBlock struct {
 	Content   json.RawMessage `json:"content"`
 }
 
-func beginContentBlock(index int, block *streamContentBlock, tools map[int]*provider.ToolCall, searches *searchStream) *provider.Chunk {
+func beginContentBlock(index int, block *streamContentBlock, tools map[int]*streamedToolCall, searches *searchStream) *provider.Chunk {
 	if block == nil {
 		return nil
 	}
 	switch block.Type {
 	case "tool_use":
-		tc := &provider.ToolCall{ID: block.ID, Name: block.Name}
+		tc := &streamedToolCall{ToolCall: provider.ToolCall{ID: block.ID, Name: block.Name}}
 		tools[index] = tc
 		return &provider.Chunk{Type: provider.ChunkToolCallStart, ToolCall: &provider.ToolCall{ID: tc.ID, Name: tc.Name}}
 	case "server_tool_use":
