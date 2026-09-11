@@ -60,12 +60,34 @@ func (c *Config) expandVars(s string) string {
 }
 
 // ExpandedPlugin returns a copy of e with ${VAR} references expanded across the
-// command, args, env values, url, and header values — the fields Claude Code
-// also expands. The entry itself is left untouched.
+// command, dir, args, env, url, and header values — the fields Claude Code also
+// expands. The entry itself is left untouched.
 func (e PluginEntry) ExpandedPlugin() PluginEntry {
-	lookup := scopedEnvLookup(e.expansionEnv)
+	return e.expandedPlugin(scopedEnvLookup(e.expansionEnv))
+}
+
+// ExpandedPluginForWorkspace returns a copy of e with ${VAR} references
+// expanded; WORKSPACE_ROOT and REASONIX_WORKSPACE resolve to the session root
+// before the environment is consulted.
+func (e PluginEntry) ExpandedPluginForWorkspace(root string) PluginEntry {
+	base := scopedEnvLookup(e.expansionEnv)
+	lookup := func(name string) (string, bool) {
+		if workspaceRootVar(name) && strings.TrimSpace(root) != "" {
+			return root, true
+		}
+		return base(name)
+	}
+	return e.expandedPlugin(lookup)
+}
+
+func workspaceRootVar(name string) bool {
+	return name == "WORKSPACE_ROOT" || name == "REASONIX_WORKSPACE"
+}
+
+func (e PluginEntry) expandedPlugin(lookup envLookup) PluginEntry {
 	out := e
 	out.Command = expandVarsWithLookup(e.Command, lookup)
+	out.Dir = expandVarsWithLookup(e.Dir, lookup)
 	out.URL = expandVarsWithLookup(e.URL, lookup)
 	if len(e.Args) > 0 {
 		out.Args = make([]string, len(e.Args))
