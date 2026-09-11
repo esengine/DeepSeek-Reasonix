@@ -1,11 +1,13 @@
 package cli
 
 import (
+	"context"
 	"fmt"
 	"os"
 	"os/exec"
 	"runtime"
 	"strings"
+	"time"
 
 	"github.com/atotto/clipboard"
 
@@ -42,10 +44,15 @@ func isWSLFor(goos string, getenv func(string) string) bool {
 }
 
 func writeWSLClipboardText(text string) error {
-	cmd := newWSLClipboardCommand(text)
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	cmd := newWSLClipboardCommand(ctx, text)
 	var stderr strings.Builder
 	cmd.Stderr = &stderr
 	if err := cmd.Run(); err != nil {
+		if ctx.Err() != nil {
+			return fmt.Errorf("write WSL clipboard: %w", ctx.Err())
+		}
 		if detail := strings.TrimSpace(stderr.String()); detail != "" {
 			return fmt.Errorf("write WSL clipboard: %w: %s", err, detail)
 		}
@@ -54,7 +61,7 @@ func writeWSLClipboardText(text string) error {
 	return nil
 }
 
-func newWSLClipboardCommand(text string) *exec.Cmd {
+func newWSLClipboardCommand(ctx context.Context, text string) *exec.Cmd {
 	args := []string{
 		"powershell.exe",
 		"-NoProfile",
@@ -71,7 +78,10 @@ func newWSLClipboardCommand(text string) *exec.Cmd {
 	case clipboardCommandAvailable("xsel"):
 		args = []string{"xsel", "--input", "--clipboard"}
 	}
-	cmd := proc.Command(args[0], args[1:]...)
+	cmd := proc.CommandContext(ctx, args[0], args[1:]...)
+	proc.SetCancelKillsTree(cmd)
+	// Bound pipe draining too, if an interop child inherits an output handle.
+	cmd.WaitDelay = time.Second
 	cmd.Stdin = strings.NewReader(text)
 	return cmd
 }

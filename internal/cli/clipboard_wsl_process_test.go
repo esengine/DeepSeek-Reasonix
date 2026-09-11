@@ -1,11 +1,14 @@
 package cli
 
 import (
+	"context"
+	"errors"
 	"os"
 	"path/filepath"
 	"runtime"
 	"strings"
 	"testing"
+	"time"
 )
 
 func TestWSLClipboardPreservesLinuxBackends(t *testing.T) {
@@ -62,6 +65,32 @@ func TestWSLClipboardBridgeProcess(t *testing.T) {
 			assertWSLClipboardFile(t, "CLIPBOARD_TEST_TEXT", text)
 		})
 	}
+}
+
+func TestWSLClipboardCommandCancellation(t *testing.T) {
+	dir := setupWSLClipboardProcessTest(t)
+	installWSLClipboardFixture(t, dir, "powershell.exe", "echo ready >&2\nexec /bin/sleep 60\n")
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	cmd := newWSLClipboardCommand(ctx, "中文")
+	// Cancel only after the child is running, without relying on startup timing.
+	cmd.Stderr = clipboardCancelWriter{cancel: cancel}
+	if err := cmd.Run(); err == nil {
+		t.Fatal("a canceled clipboard command succeeded")
+	}
+	if !errors.Is(ctx.Err(), context.Canceled) {
+		t.Fatalf("command did not respond to cancellation: %v", ctx.Err())
+	}
+	if cmd.ProcessState == nil {
+		t.Fatal("canceled clipboard child was not reaped")
+	}
+}
+
+type clipboardCancelWriter struct{ cancel context.CancelFunc }
+
+func (w clipboardCancelWriter) Write(p []byte) (int, error) {
+	w.cancel()
+	return len(p), nil
 }
 
 func setupWSLClipboardProcessTest(t *testing.T) string {

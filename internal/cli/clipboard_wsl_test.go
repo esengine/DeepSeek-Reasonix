@@ -1,6 +1,7 @@
 package cli
 
 import (
+	"context"
 	"io"
 	"strings"
 	"testing"
@@ -11,7 +12,7 @@ func TestWSLClipboardCommandPreservesUTF8Text(t *testing.T) {
 	t.Setenv("WAYLAND_DISPLAY", "")
 	for _, text := range []string{"中文测试", "hello", "你好 🚀"} {
 		t.Run(text, func(t *testing.T) {
-			cmd := newWSLClipboardCommand(text)
+			cmd := newWSLClipboardCommand(context.Background(), text)
 			if got := cmd.Args[0]; got != "powershell.exe" {
 				t.Fatalf("command = %q, want powershell.exe", got)
 			}
