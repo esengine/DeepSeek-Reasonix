@@ -2952,6 +2952,8 @@ export const zh: Record<DictKey, string> = {
   "questionNav.label": "问题导航",
   "questionNav.progress": "问题 {current} / {total}",
   "questionNav.notLoaded": "第 {n} 个问题（点击加载）",
+  "questionNav.up": "上一个问题",
+  "questionNav.down": "下一个问题",
   "compaction.working": "正在压缩对话…",
   "compaction.title": "上下文已压缩",
   "compaction.messages": "{n} 条消息",

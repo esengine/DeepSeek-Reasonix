@@ -2949,6 +2949,8 @@ export const en = {
   "questionNav.label": "Question navigation",
   "questionNav.progress": "Question {current} / {total}",
   "questionNav.notLoaded": "Question {n} (click to load)",
+  "questionNav.up": "Previous question",
+  "questionNav.down": "Next question",
   "compaction.working": "Compacting conversation…",
   "compaction.title": "Context compacted",
   "compaction.messages": "{n} messages",

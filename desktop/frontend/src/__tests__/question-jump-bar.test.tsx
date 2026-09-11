@@ -142,6 +142,95 @@ await act(async () => {
 eq(jumps.at(-1)?.turn, unloadedTurn, "a long aggregated rail still targets the exact unloaded question");
 eq(jumps.at(-1)?.loaded, false, "an unloaded aggregate target keeps the lazy-load contract");
 
+// ── Arrow stepping ──────────────────────────────────────────────────────────
+// The rail now exposes up/down chevron arrows that step one question at a time
+// and stay disabled at the first/last section.
+{
+  const arrowJumps: QuestionAnchor[] = [];
+  let arrowKey = 0;
+  function ArrowController({ total, initialActive }: { total: number; initialActive: number | null }) {
+    const [activeTurn, setActiveTurn] = React.useState<number | null>(initialActive);
+    return (
+      <QuestionJumpBar
+        loadedQuestions={questions}
+        totalQuestions={total}
+        activeTurn={activeTurn}
+        onJump={(question) => {
+          arrowJumps.push(question);
+          setActiveTurn(question.turn);
+        }}
+      />
+    );
+  }
+  const renderArrows = async (total: number, active: number | null) => {
+    arrowKey += 1;
+    await act(async () => {
+      root.render(
+        <LocaleProvider>
+          <ArrowController key={arrowKey} total={total} initialActive={active} />
+        </LocaleProvider>,
+      );
+      await flushTimers();
+    });
+  };
+  const arrowState = () => {
+    const up = document.querySelector(".jump-arrow--up") as HTMLButtonElement | null;
+    const down = document.querySelector(".jump-arrow--down") as HTMLButtonElement | null;
+    return { up: up?.disabled, down: down?.disabled };
+  };
+  const setArrowBar = () => {
+    const arrowBar = document.querySelector(".jump-bar") as HTMLElement;
+    arrowBar.getBoundingClientRect = () => rect(0, 240, 56);
+    return arrowBar;
+  };
+
+  await renderArrows(3, 2); // tail active
+  setArrowBar();
+  eq(arrowState().up, false, "up arrow enabled from the tail");
+  eq(arrowState().down, true, "down arrow disabled at the last section");
+  await act(async () => {
+    (document.querySelector(".jump-arrow--up") as HTMLButtonElement).click();
+    await flushTimers();
+  });
+  eq(arrowJumps.at(-1)?.turn, 1, "up arrow steps to the previous question");
+  eq(arrowJumps.at(-1)?.id, "u2", "up arrow emits the loaded previous question");
+
+  await renderArrows(3, 0); // first active
+  setArrowBar();
+  eq(arrowState().up, true, "up arrow disabled at the first section");
+  eq(arrowState().down, false, "down arrow enabled from the first section");
+  await act(async () => {
+    (document.querySelector(".jump-arrow--down") as HTMLButtonElement).click();
+    await flushTimers();
+  });
+  eq(arrowJumps.at(-1)?.turn, 1, "down arrow steps to the next question");
+
+  // Single question: both arrows disabled, no jump on click.
+  await renderArrows(1, 0);
+  setArrowBar();
+  eq(arrowState().up, true, "single section disables the up arrow");
+  eq(arrowState().down, true, "single section disables the down arrow");
+  const beforeSingle = arrowJumps.length;
+  await act(async () => {
+    (document.querySelector(".jump-arrow--up") as HTMLButtonElement).click();
+    (document.querySelector(".jump-arrow--down") as HTMLButtonElement).click();
+    await flushTimers();
+  });
+  eq(arrowJumps.length, beforeSingle, "disabled arrows at a single section emit no jump");
+
+  // Unknown active (null) treats the position as the tail: up enabled, down not.
+  await renderArrows(4, null);
+  setArrowBar();
+  eq(arrowState().up, false, "null active (treated as tail) enables up");
+  eq(arrowState().down, true, "null active (treated as tail) disables down");
+  const beforeNull = arrowJumps.length;
+  await act(async () => {
+    (document.querySelector(".jump-arrow--up") as HTMLButtonElement).click();
+    await flushTimers();
+  });
+  eq(arrowJumps.at(-1)?.turn, 2, "null active (treated as tail) + up steps to the previous question");
+  eq(arrowJumps.length, beforeNull + 1, "null active + up emits exactly one jump");
+}
 await act(async () => root.unmount());
 dom.window.close();
 

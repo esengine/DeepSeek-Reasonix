@@ -2182,6 +2182,8 @@ export const zhTW: Record<DictKey, string> = {
   "questionNav.label": "問題導航",
   "questionNav.progress": "問題 {current} / {total}",
   "questionNav.notLoaded": "第 {n} 個問題（點擊載入）",
+  "questionNav.up": "上一個問題",
+  "questionNav.down": "下一個問題",
   "compaction.working": "正在壓縮對話…",
   "compaction.title": "上下文已壓縮",
   "compaction.messages": "{n} 條訊息",
