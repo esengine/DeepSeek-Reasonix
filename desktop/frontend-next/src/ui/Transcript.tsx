@@ -70,6 +70,16 @@ interface Props {
 // hundred blocks rather than tens of thousands.
 const BLOCK = 48;
 
+// What a block nobody has scrolled to yet stands in with, per entry, until this
+// transcript has measured one of its own. It was 96px, and the shortest card
+// that exists measures 119 (median 199, mean 216): every unreached block was
+// short by more than half, so the content grew as the reader scrolled back
+// through it — 18kpx over 140 wheel steps, measured — and the indicator that
+// divides by that height slid backwards while they were still scrolling up.
+// A seed, not a constant: card heights differ by an order of magnitude between
+// a one-line read and a twenty-line diff, and no single number fits both.
+const SEED_PER_ENTRY = 216;
+
 // A streamed delta rewrites the last card and leaves every earlier one at the
 // same identity, so the settled head is cut into blocks that keep their array
 // identity across frames — that is what lets each block memo instead of being
@@ -110,6 +120,7 @@ export function Transcript({ items, entering, onEntered, revision, waiting, scro
   const [pinned, setPinned] = useState(true);
   const end = useRef<HTMLDivElement>(null);
   const flow = useRef<HTMLDivElement>(null);
+  const sizing = useRef({ px: SEED_PER_ENTRY, n: 0 });
   // Read from observer callbacks that must not be torn down and rebuilt every
   // time the reader crosses the bottom.
   const at = useRef(pinned);
@@ -457,6 +468,7 @@ export function Transcript({ items, entering, onEntered, revision, waiting, scro
             // mounts without waiting for the observer's first callback.
             eager={i === blocks.length - 1}
             keep={held.has(i)}
+            sizing={sizing}
             {...rowProps}
           />
         ))}
@@ -478,6 +490,7 @@ const Block = memo(function Block({
   watch,
   eager,
   keep,
+  sizing,
   ...rowProps
 }: {
   items: Item[];
@@ -487,6 +500,10 @@ const Block = memo(function Block({
   // The selection reaches into this block, so it stays mounted however far
   // off-screen it scrolls.
   keep: boolean;
+  // What an unmeasured block stands in with, learned from the ones this
+  // transcript has already laid out. A ref, so reading it costs no render and
+  // passing it does not defeat the memo.
+  sizing: RefObject<{ px: number; n: number }>;
 } & RowHandlers) {
   const box = useRef<HTMLDivElement>(null);
   const [near, setNear] = useState(eager);
@@ -496,15 +513,23 @@ const Block = memo(function Block({
 
   // Measured while mounted so the placeholder that replaces it is exactly as
   // tall — otherwise unmounting above the viewport would jerk the scroll.
+  // What it measures also feeds the estimate the blocks nobody has reached yet
+  // stand in with; a running mean over a bounded window, so a transcript that
+  // changes character partway (short reads, then long diffs) follows it.
   useLayoutEffect(() => {
-    if (near && box.current) tall.current = box.current.offsetHeight;
+    if (!near || !box.current) return;
+    tall.current = box.current.offsetHeight;
+    if (items.length === 0 || tall.current === 0) return;
+    const s = sizing.current;
+    s.n += 1;
+    s.px += (tall.current / items.length - s.px) / Math.min(s.n, 12);
   });
 
   return (
     <div
       className="chunk"
       ref={box}
-      style={near || keep ? undefined : { height: `${tall.current || items.length * 96}px` }}
+      style={near || keep ? undefined : { height: `${tall.current || items.length * sizing.current.px}px` }}
     >
       {(near || keep) && items.map((it) => <Row key={it.id} it={it} {...rowProps} cp={checkpoints.get(it.id)} />)}
     </div>
