@@ -48,10 +48,13 @@ function Assert-Ready {
 }
 
 try {
-  $attempt = Start-Process $launcher -PassThru
-  if (-not $attempt.WaitForExit(40000) -or $attempt.ExitCode -ne 0) { throw 'Stable launcher failed or timed out' }
+  $attempt = Start-Process $launcher -PassThru -RedirectStandardOutput (Join-Path $EvidenceDirectory 'launcher.stdout.log') -RedirectStandardError (Join-Path $EvidenceDirectory 'launcher.stderr.log')
+  $null = $attempt.Handle
+  if (-not $attempt.WaitForExit(40000)) { throw 'Stable launcher timed out; inspect launcher logs' }
+  if ($attempt.ExitCode -ne 0) { throw ('Stable launcher failed: exit=' + $attempt.ExitCode + '; ' + (Get-Content (Join-Path $EvidenceDirectory 'launcher.stderr.log') -Raw)) }
   $first = Assert-Ready
   $again = Start-Process $launcher -PassThru
+  $null = $again.Handle
   if (-not $again.WaitForExit(40000) -or $again.ExitCode -ne 0) { throw 'Second launch failed or timed out' }
   $second = Assert-Ready
   if ($first.Shell.Id -ne $second.Shell.Id -or $first.Service.Id -ne $second.Service.Id -or $first.Status.generation -ne $second.Status.generation) { throw 'Second launch replaced the healthy instance' }

@@ -236,7 +236,8 @@ func verify(root, profile, expected string) error {
 	}
 	deadline := time.Now().Add(startupTimeout)
 	for {
-		list, err := inspect(root, profile, false)
+		list, err := waitForInspectable(func() ([]*process, error) { return inspect(root, profile, false) },
+			func() time.Duration { return time.Until(deadline) }, time.Sleep)
 		if err != nil {
 			return err
 		}

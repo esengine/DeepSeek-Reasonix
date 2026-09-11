@@ -366,7 +366,9 @@ func inspect(root, profile string, all bool) ([]*process, error) {
 		p, err := openProcess(e.ProcessID, e.ParentProcessID)
 		if err != nil {
 			if errors.Is(err, windows.ERROR_ACCESS_DENIED) {
-				return fail(outcome(UnknownOwner, "access denied while identifying candidate PID %d", e.ProcessID))
+				if denied := deniedCandidate(e.ProcessID, processList); denied != nil {
+					return fail(denied)
+				}
 			}
 			continue
 		}
@@ -416,6 +418,22 @@ func inspect(root, profile string, all bool) ([]*process, error) {
 		found = append(found, p)
 	}
 	return found, nil
+}
+
+// Windows can deny opening a terminating process from an older snapshot.
+// Only its confirmed disappearance permits skipping it; live unknown owners
+// and failed snapshot refreshes must still stop launch or recovery.
+func deniedCandidate(pid uint32, snapshot func() ([]windows.ProcessEntry32, error)) error {
+	entries, err := snapshot()
+	if err != nil {
+		return outcome(UnknownOwner, "cannot refresh candidate PID %d after access denial: %v", pid, err)
+	}
+	for _, entry := range entries {
+		if entry.ProcessID == pid {
+			return outcome(UnknownOwner, "access denied while identifying candidate PID %d", pid)
+		}
+	}
+	return nil
 }
 
 func preparePaths(root, home string) (string, string, error) {
