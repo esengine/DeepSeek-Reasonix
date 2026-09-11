@@ -1111,22 +1111,29 @@
   .srail-view:active { cursor: grabbing }
   .srail-view:focus-visible { outline: 2px solid var(--focus); outline-offset: 2px; opacity: 1 }
   .pane:hover .srail-view { opacity: 1; background: color-mix(in srgb, var(--text) 10%, transparent) }
+  /* 命中框比线宽得多也高得多：要点的是一条 2px 的线，而没人该去瞄准它。
+     步距 9px 时相邻两个的框会叠，后面的压住前面的 —— 谁在上面由 --lit 定，
+     所以指针指的那个总在最上层。 */
   .srail-m {
     position: absolute; right: 15px; width: 39px; height: 18px; margin-top: -9px;
     display: flex; align-items: center; justify-content: flex-end;
     border: 0; padding: 0; background: none; cursor: pointer;
+    z-index: calc(1 + var(--lit, 0) * 10);
   }
+  /* --lit 是这一条离焦点有多近（1 是焦点本身，0 是够远的）。长度和浓淡都从
+     它算：静止时它处处为 0，于是一列刻度人人等长、一样淡。 */
   .srail-m > i {
-    margin-right: 3px; border-radius: var(--r-sm); background: var(--ghost); opacity: .38;
-    transform-origin: right center;
-    transition: opacity var(--m-line), background-color var(--m-line), transform var(--m-line) ;
+    --lit: 0;
+    width: calc(11px + 15px * var(--lit)); height: 2px; flex: none;
+    margin-right: 3px; border-radius: var(--r-pill); background: var(--ghost);
+    opacity: calc(.3 + .55 * var(--lit));
+    transition: width var(--m-line), opacity var(--m-line), background-color var(--m-line);
   }
   .srail-m:focus-visible > i { outline: 2px solid var(--focus); outline-offset: 3px }
-  .srail-m[data-close] > i { opacity: .9; transform: scaleX(1.35) }
-  .srail-m[data-on] > i { opacity: 1; background: var(--accent); transform: scaleX(2.1) scaleY(1.25) }
+  .srail-m[data-on] > i { background: var(--accent) }
   /* 平时几乎不存在：指针靠近这一侧才浮出来 */
-  .pane:hover .srail-m > i { opacity: .68 }
-  .srail:hover ~ .srail-peek, .srail:hover .srail-m > i { opacity: 1 }
+  .pane:hover .srail-m > i { opacity: calc(.46 + .54 * var(--lit)) }
+  .srail:hover ~ .srail-peek { opacity: 1 }
 
   .srail-peek {
     position: absolute; right: 48px; z-index: 5; width: 300px; padding: 9px 11px;

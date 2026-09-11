@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState, type RefObject } from "react";
+import { useCallback, useEffect, useRef, useState, type CSSProperties, type RefObject } from "react";
 import { t } from "../i18n";
 
 export interface RailMark {
@@ -7,7 +7,8 @@ export interface RailMark {
   // Which block holds it and where inside that block, because the block is what
   // survives virtualisation: an unmounted one is a placeholder with the right
   // height, so its position is known even when the message itself has no node.
-  // Position in the transcript, counted in entries — see fractionsOf.
+  // Position in the transcript, in entries. The rail no longer places by it
+  // (see layout), but a jump still lands by block and offset.
   at: number;
   // Which block holds it, for a jump: the block is what exists while the
   // message itself is unmounted.
@@ -33,15 +34,35 @@ interface Props {
   bound: boolean;
 }
 
-// Where a mark sits, as a fraction of the transcript. Counted in entries, not
-// pixels: a block mounting swaps its estimated height for its real one, which
-// moves every pixel-derived position on the rail a little — under a drag that
-// reads as the marks sliding around while the content underneath is still.
-// Entries do not move. They are also the better measure of "how long was that
-// turn": how much it produced, rather than how tall it happens to render.
-function fractionsOf(marks: RailMark[], total: number): number[] {
-  if (total <= 0) return marks.map(() => 0);
-  return marks.map((m) => Math.min(1, m.at / total));
+// The rail is a fisheye, not a map. Marks sit together in the middle at a fixed
+// step, so the list reads as a list — placing them by their position in the
+// transcript drew how much each turn produced instead, and a turn that ran
+// twenty tools landed ten times further from its neighbour than one that ran
+// two (measured: gaps from 14 to 171px). Where the reader is in the transcript
+// is what the viewport box already says; this is what you asked, in order.
+const STEP = 9;
+const PAD = 26;
+
+// Length and weight fall away from whichever mark the pointer has picked out,
+// and every mark is the same until one is picked. A cosine rather than a line:
+// a linear falloff has a corner at the focus, which reads as the neighbours
+// being a different kind of thing rather than the same thing further away.
+const REACH = 5;
+
+function layout(count: number, rail: number) {
+  if (count <= 0) return { tops: [] as number[], step: STEP };
+  const room = Math.max(0, rail - PAD * 2);
+  const step = count > 1 ? Math.min(STEP, room / (count - 1)) : STEP;
+  const span = (count - 1) * step;
+  const start = rail / 2 - span / 2;
+  return { tops: Array.from({ length: count }, (_, i) => start + i * step), step };
+}
+
+/** How strongly a mark answers the focus: 1 at it, 0 beyond REACH. */
+function pull(i: number, focus: number): number {
+  if (focus < 0) return 0;
+  const d = Math.abs(i - focus);
+  return d > REACH ? 0 : (Math.cos((Math.PI * d) / REACH) + 1) / 2;
 }
 
 export function Rail({ marks, total, scroll, flow, onJump, onGrab, bound }: Props) {
@@ -65,7 +86,7 @@ export function Rail({ marks, total, scroll, flow, onJump, onGrab, bound }: Prop
     const rail = root.clientHeight;
     box.style.setProperty("--rail-h", rail + "px");
     geom.current = { content: root.scrollHeight || 1, rail };
-    setTops(fractionsOf(marks, total).map((f) => f * rail));
+    setTops(layout(marks.length, rail).tops);
     setView({
       top: (root.scrollTop / (root.scrollHeight || 1)) * rail,
       height: Math.max(16, (root.clientHeight / (root.scrollHeight || 1)) * rail),
@@ -133,9 +154,13 @@ export function Rail({ marks, total, scroll, flow, onJump, onGrab, bound }: Prop
         pick = here.current + (up ? -1 : 1);
       } else {
         // Nothing walked yet: start from whichever mark the viewport is nearest,
-        // which is the one fraction of the transcript it is showing.
+        // which is the one fraction of the transcript it is showing. Measured
+        // against where each message sits in the transcript, not against the
+        // rail — the rail is a cluster in the middle and its geometry says
+        // nothing about how far down the record a mark is.
         const seen = Math.min(1, root.scrollTop / Math.max(1, root.scrollHeight - root.clientHeight));
-        const near = tops.reduce((best, y, i) => (Math.abs(y / Math.max(1, geom.current.rail) - seen) < Math.abs(tops[best] / Math.max(1, geom.current.rail) - seen) ? i : best), 0);
+        const place = (i: number) => marks[i].at / Math.max(1, total);
+        const near = marks.reduce((best, _m, i) => (Math.abs(place(i) - seen) < Math.abs(place(best) - seen) ? i : best), 0);
         pick = up ? near : Math.min(near + 1, tops.length - 1);
       }
       if (pick < 0 || pick >= marks.length) return;
@@ -147,7 +172,7 @@ export function Rail({ marks, total, scroll, flow, onJump, onGrab, bound }: Prop
     };
     addEventListener("keydown", onKey);
     return () => removeEventListener("keydown", onKey);
-  }, [bound, tops, marks, scroll, onJump]);
+  }, [bound, tops, marks, total, scroll, onJump]);
 
   // The pointer's y decides which mark it means. Hitting a three-pixel line is
   // not a thing anyone should have to do, and a mark that moved under the
@@ -162,7 +187,11 @@ export function Rail({ marks, total, scroll, flow, onJump, onGrab, bound }: Prop
         best = i;
       }
     });
-    setAt(dist <= 120 ? best : -1);
+    // Anywhere in the cluster picks the nearest, plus a margin outside it so
+    // the ends are no harder to reach than the middle. It was 120px, from when
+    // the marks were spread over the whole track and the nearest one could be
+    // that far; they now sit within a step of each other.
+    setAt(dist <= 40 ? best : -1);
   };
 
   // Dragging the viewport box scrolls, because it is now the only scroll
@@ -246,22 +275,27 @@ export function Rail({ marks, total, scroll, flow, onJump, onGrab, bound }: Prop
             onGrab();
           }}
         />
-        {marks.map((m, i) => (
-          <button
-            key={m.id}
-            className="srail-m"
-            style={{ top: tops[i] ?? 0 }}
-            data-on={i === at ? "" : undefined}
-            data-close={at >= 0 && Math.abs(i - at) === 1 && Math.abs((tops[i] ?? 0) - (tops[at] ?? 0)) < 46 ? "" : undefined}
-            aria-label={m.text.slice(0, 40)}
-            onFocus={() => setAt(i)}
-            onBlur={() => setAt(-1)}
-            onClick={() => onJump(m)}
-          >
-            {/* 会动的是这条线，按钮本身不动 —— 它一动就会从指针底下跑掉 */}
-            <i style={{ height: Math.min(3 + m.files * 1.6, 9), width: Math.min(10 + m.files * 3, 26) }} />
-          </button>
-        ))}
+        {marks.map((m, i) => {
+          const lit = pull(i, at);
+          return (
+            <button
+              key={m.id}
+              className="srail-m"
+              style={{ top: tops[i] ?? 0 }}
+              data-on={i === at ? "" : undefined}
+              aria-label={m.text.slice(0, 40)}
+              onFocus={() => setAt(i)}
+              onBlur={() => setAt(-1)}
+              onClick={() => onJump(m)}
+            >
+              {/* 会动的是这条线，按钮本身不动 —— 它一动就会从指针底下跑掉。
+                  长度和浓淡都是到焦点的距离的函数，静止时人人相等：尺寸原来
+                  跟着这一轮碰过的文件数走，那让一列本该等价的入口长短不一，
+                  而「碰了几个文件」这句话悬停时就在旁边说得清楚。 */}
+              <i style={{ "--lit": lit.toFixed(3) } as CSSProperties} />
+            </button>
+          );
+        })}
       </nav>
       {/* 贴着轨道两端的那几条，预览要收进容器里 —— 否则它会被裁掉一半 */}
       {shown && (
