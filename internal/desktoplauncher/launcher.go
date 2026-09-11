@@ -19,6 +19,13 @@ import (
 // Run resolves the active desktop, performs the one-time legacy handoff when
 // needed, and starts the desktop process.
 func Run(args []string, buildVersion string) int {
+	if len(args) > 0 && args[0] == "--repair-shortcuts" {
+		if err := repairInstallerShortcuts(args[1:], ResolveInstallRoot, appidentity.RepairShortcuts); err != nil {
+			fmt.Fprintln(os.Stderr, "error: repair Windows shortcut integration:", err)
+			return 1
+		}
+		return 0
+	}
 	if len(args) == 1 {
 		switch args[0] {
 		case "version", "--version", "-v":
@@ -203,4 +210,5 @@ func usage() {
 	fmt.Println("usage: reasonix-launcher [args...]")
 	fmt.Println("  Starts the active Reasonix desktop from current.json.")
 	fmt.Println("  Legacy --safe-mode / launch --detach tokens are ignored.")
+	fmt.Println("  --repair-shortcuts <absolute.lnk...> repairs owned installer shortcuts without launching.")
 }

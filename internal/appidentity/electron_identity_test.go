@@ -4,7 +4,6 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
-	"runtime"
 	"strings"
 	"testing"
 )
@@ -48,11 +47,11 @@ func TestElectronShellAdoptsAppUserModelID(t *testing.T) {
 
 func electronShellIdentitySources(t *testing.T) (identity, main string) {
 	t.Helper()
-	_, file, _, ok := runtime.Caller(0)
-	if !ok {
-		t.Fatal("runtime.Caller failed")
+	packageDir, err := os.Getwd()
+	if err != nil {
+		t.Fatal(err)
 	}
 	// internal/appidentity -> repo root
-	dir := filepath.Join(filepath.Dir(file), "..", "..", "desktop", "electron", "src", "main")
+	dir := filepath.Join(packageDir, "..", "..", "desktop", "electron", "src", "main")
 	return filepath.Join(dir, "appIdentity.ts"), filepath.Join(dir, "index.ts")
 }

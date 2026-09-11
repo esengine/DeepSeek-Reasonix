@@ -271,3 +271,11 @@ test("the NSIS script installs the Electron tree with both payload modes and no 
   assert.match(nsi, /RMDir \/r "\$INSTDIR\\versions"/);
   assert.match(nsi, /File "\/oname=uninstall\.exe" "\$\{ARG_REASONIX_SIGNED_UNINSTALLER\}"/);
 });
+
+test("the installer stamps the shortcuts it created without launching the desktop", () => {
+  const nsi = read("build/windows/installer/project.nsi");
+  const maintenance = nsi.indexOf('--repair-shortcuts "$SMPROGRAMS\\${INFO_PRODUCTNAME}.lnk" "$DESKTOP\\${INFO_PRODUCTNAME}.lnk"');
+  assert.ok(maintenance > nsi.indexOf('CreateShortCut "$DESKTOP\\${INFO_PRODUCTNAME}.lnk"'), "maintenance follows shortcut creation");
+  assert.match(nsi.slice(maintenance, maintenance + 350), /Pop \$0/);
+  assert.match(nsi.slice(maintenance, maintenance + 350), /shortcut identity repair failed/);
+});

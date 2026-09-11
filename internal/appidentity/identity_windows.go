@@ -13,6 +13,8 @@ import (
 	"unsafe"
 
 	"golang.org/x/sys/windows"
+
+	"reasonix/internal/installlayout"
 )
 
 const (
@@ -163,15 +165,24 @@ func RepairOwnedShortcuts(installRoot string) error {
 		return nil
 	}
 	paths, discoveryErr := shortcutCandidates(installRoot)
+	return errors.Join(discoveryErr, RepairShortcuts(installRoot, paths))
+}
+
+// RepairShortcuts repairs only existing links whose targets belong to installRoot.
+// Installer callers pass the exact paths created in their selected shell context.
+func RepairShortcuts(installRoot string, paths []string) error {
 	if len(paths) == 0 {
-		return discoveryErr
+		return nil
+	}
+	if err := validateShortcutPaths(installRoot, paths); err != nil {
+		return err
 	}
 
 	runtime.LockOSThread()
 	defer runtime.UnlockOSThread()
 	uninitialize, err := initializeCOM()
 	if err != nil {
-		return errors.Join(discoveryErr, err)
+		return err
 	}
 	defer uninitialize()
 
@@ -179,7 +190,7 @@ func RepairOwnedShortcuts(installRoot string) error {
 	for _, path := range paths {
 		info, err := os.Lstat(path)
 		if err != nil {
-			if !os.IsNotExist(err) && reasonixShortcutName(path) {
+			if !os.IsNotExist(err) {
 				repairErr = errors.Join(repairErr, err)
 			}
 			continue
@@ -189,16 +200,14 @@ func RepairOwnedShortcuts(installRoot string) error {
 		}
 		changed, err := repairOwnedShortcut(path, installRoot)
 		if err != nil {
-			if reasonixShortcutName(path) {
-				repairErr = errors.Join(repairErr, fmt.Errorf("%s: %w", path, err))
-			}
+			repairErr = errors.Join(repairErr, fmt.Errorf("%s: %w", path, err))
 			continue
 		}
 		if changed {
 			notifyShortcutChanged(path)
 		}
 	}
-	return errors.Join(discoveryErr, repairErr)
+	return repairErr
 }
 
 func shortcutCandidates(installRoot string) ([]string, error) {
@@ -235,13 +244,19 @@ func shortcutCandidates(installRoot string) ([]string, error) {
 	add(filepath.Join(installRoot, "Reasonix.lnk"))
 	var resultErr error
 	resultErr = errors.Join(resultErr, addReasonixLinks(installRoot))
-	for _, folderID := range []*windows.KNOWNFOLDERID{windows.FOLDERID_Desktop, windows.FOLDERID_Programs} {
+	for _, folderID := range []*windows.KNOWNFOLDERID{
+		windows.FOLDERID_Desktop, windows.FOLDERID_Programs,
+		windows.FOLDERID_PublicDesktop, windows.FOLDERID_CommonPrograms,
+	} {
 		folder, err := knownFolderPath(folderID, windows.KF_FLAG_DEFAULT)
 		if err != nil {
 			resultErr = errors.Join(resultErr, err)
 			continue
 		}
-		add(filepath.Join(folder, "Reasonix.lnk"))
+		resultErr = errors.Join(resultErr, addReasonixLinks(folder))
+		if folderID == windows.FOLDERID_Programs || folderID == windows.FOLDERID_CommonPrograms {
+			resultErr = errors.Join(resultErr, addReasonixLinks(filepath.Join(folder, "Reasonix")))
+		}
 	}
 	roaming, err := knownFolderPath(windows.FOLDERID_RoamingAppData, windows.KF_FLAG_DEFAULT)
 	if err != nil {
@@ -277,59 +292,36 @@ func repairOwnedShortcut(path, installRoot string) (bool, error) {
 	if err != nil {
 		return false, err
 	}
-	if currentID == AppUserModelID {
+	icon, _, err := shortcut.iconLocation()
+	if err != nil {
+		return false, err
+	}
+	plan := planShortcutRepair(target, icon, currentID, installRoot, installlayout.HasCurrent(installRoot))
+	if plan == (shortcutRepair{}) {
 		return false, nil
 	}
-	if err := shortcut.setAppUserModelID(AppUserModelID); err != nil {
+	if plan.target != "" {
+		if err := shortcut.setString(shortcut.link.VTable.SetPath, plan.target); err != nil {
+			return false, err
+		}
+		if err := shortcut.setString(shortcut.link.VTable.SetWorkingDirectory, installRoot); err != nil {
+			return false, err
+		}
+	}
+	if plan.icon != "" {
+		if err := shortcut.setIconLocation(plan.icon, 0); err != nil {
+			return false, err
+		}
+	}
+	if plan.identity != "" {
+		if err := shortcut.writeAppUserModelID(plan.identity); err != nil {
+			return false, err
+		}
+	}
+	if err := shortcut.save(); err != nil {
 		return false, err
 	}
 	return true, nil
-}
-
-func ownedShortcutTarget(target, installRoot string) bool {
-	target = filepath.Clean(strings.TrimSpace(target))
-	installRoot = filepath.Clean(strings.TrimSpace(installRoot))
-	if target == "." || target == "" || installRoot == "." || installRoot == "" {
-		return false
-	}
-	for _, candidate := range []string{
-		filepath.Join(installRoot, "reasonix-launcher.exe"),
-		filepath.Join(installRoot, "Reasonix.exe"),
-		filepath.Join(installRoot, "reasonix-desktop.exe"),
-	} {
-		if sameWindowsPathOrFile(target, candidate) {
-			return true
-		}
-	}
-	rel, err := filepath.Rel(installRoot, target)
-	if err == nil && rel != "." && rel != ".." && !strings.HasPrefix(rel, ".."+string(filepath.Separator)) {
-		parts := strings.Split(rel, string(filepath.Separator))
-		if len(parts) == 3 && strings.EqualFold(parts[0], "versions") &&
-			strings.EqualFold(parts[2], "reasonix-desktop.exe") {
-			return true
-		}
-	}
-	versionDir := filepath.Dir(target)
-	versionsDir := filepath.Dir(versionDir)
-	return strings.EqualFold(filepath.Base(target), "reasonix-desktop.exe") &&
-		strings.EqualFold(filepath.Base(versionsDir), "versions") &&
-		sameWindowsFile(filepath.Dir(versionsDir), installRoot)
-}
-
-func sameWindowsPathOrFile(left, right string) bool {
-	if strings.EqualFold(filepath.Clean(left), filepath.Clean(right)) {
-		return true
-	}
-	if !strings.EqualFold(filepath.Base(left), filepath.Base(right)) {
-		return false
-	}
-	return sameWindowsFile(left, right)
-}
-
-func sameWindowsFile(left, right string) bool {
-	leftInfo, leftErr := os.Stat(left)
-	rightInfo, rightErr := os.Stat(right)
-	return leftErr == nil && rightErr == nil && os.SameFile(leftInfo, rightInfo)
 }
 
 func loadShortcut(path string, mode uint32) (*loadedShortcut, error) {
@@ -399,13 +391,23 @@ func (s *loadedShortcut) appUserModelID() (string, error) {
 		return "", err
 	}
 	defer clearPropVariant(&value)
-	if value.VariantType != vtLPWSTR || value.Value == nil {
+	if value.VariantType == 0 {
 		return "", nil
+	}
+	if value.VariantType != vtLPWSTR || value.Value == nil {
+		return "", fmt.Errorf("unsupported shortcut AppUserModelID type %d", value.VariantType)
 	}
 	return windows.UTF16PtrToString(value.Value), nil
 }
 
 func (s *loadedShortcut) setAppUserModelID(id string) error {
+	if err := s.writeAppUserModelID(id); err != nil {
+		return err
+	}
+	return s.save()
+}
+
+func (s *loadedShortcut) writeAppUserModelID(id string) error {
 	idPtr, err := windows.UTF16PtrFromString(id)
 	if err != nil {
 		return err
@@ -430,7 +432,11 @@ func (s *loadedShortcut) setAppUserModelID(id string) error {
 	if err := checkHRESULT("IPropertyStore.SetValue", hr); err != nil {
 		return err
 	}
-	hr, _, _ = syscall.SyscallN(s.store.VTable.Commit, uintptr(unsafe.Pointer(s.store)))
+	return nil
+}
+
+func (s *loadedShortcut) save() error {
+	hr, _, _ := syscall.SyscallN(s.store.VTable.Commit, uintptr(unsafe.Pointer(s.store)))
 	if err := checkHRESULT("IPropertyStore.Commit", hr); err != nil {
 		return err
 	}

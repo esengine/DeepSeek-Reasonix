@@ -13,7 +13,7 @@ import { browserLayoutInDIP } from "./browser/layout.js";
 import { BrowserSurfaceManager, SHARED_PARTITION } from "./browser/surfaceManager.js";
 import { BrowserControlStore, loadBrowserControlBootstrap, type BrowserSession } from "./browserControl.js";
 import { BrowserControlHost } from "./browserControlHost.js";
-import { applyAppUserModelId } from "./appIdentity.js";
+import { applyAppUserModelId, registerTaskbarRelaunch } from "./appIdentity.js";
 import { loadBuildIdentity } from "./buildIdentity.js";
 import type { CookieSink } from "./chromeImport.js";
 import { emptyContract, loadContract, type LoadedContract } from "./contract.js";
@@ -50,6 +50,7 @@ function safeDirName(value: string): string {
 app.setName("Reasonix");
 // Must precede the first BrowserWindow: the taskbar reads the identity once.
 applyAppUserModelId(app, process.platform);
+registerTaskbarRelaunch(app, process.platform, process.execPath, app.isPackaged);
 const dev = (process.env.REASONIX_DEV ?? "").trim() !== "";
 const home = reasonixHome({ env: process.env, platform: process.platform, homedir, cwd: () => process.cwd() });
 if (home === "") {

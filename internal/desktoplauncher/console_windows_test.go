@@ -42,7 +42,7 @@ func TestMain(m *testing.M) {
 	fmt.Printf("console-state %s %d %d\n", name, cp, window)
 	switch name {
 	case "reasonix-launcher.exe", "Reasonix.exe":
-		os.Exit(Run(nil, "test"))
+		os.Exit(Run(os.Args[1:], "test"))
 	default:
 		panic("unexpected console test executable: " + name)
 	}

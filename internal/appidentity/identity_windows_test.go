@@ -7,6 +7,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"runtime"
+	"strings"
 	"syscall"
 	"testing"
 	"unsafe"
@@ -15,7 +16,7 @@ import (
 )
 
 func TestOwnedShortcutTargetCoversStableAndVersionedEntries(t *testing.T) {
-	root := filepath.Join(`C:\Program Files`, "Reasonix")
+	root := t.TempDir()
 	tests := []struct {
 		target string
 		want   bool
@@ -67,7 +68,12 @@ func TestOwnedShortcutTargetAcceptsVersionedDesktopThroughJunction(t *testing.T)
 	}
 	target := filepath.Join(junction, "versions", "v1.20.0", "reasonix-desktop.exe")
 	if !ownedShortcutTarget(target, root) {
-		t.Fatalf("junction target %q was not recognised under %q", target, root)
+		resolvedRoot, rootErr := existingShortcutPath(root)
+		resolvedTarget, targetErr := resolveShortcutTarget(target)
+		linkTarget, linkErr := os.Readlink(junction)
+		_, statErr := os.Stat(target)
+		t.Logf("junction value=%q (%v), target stat=%v", linkTarget, linkErr, statErr)
+		t.Fatalf("junction target %q was not recognised under %q; resolved root=%q (%v), target=%q (%v)", target, root, resolvedRoot, rootErr, resolvedTarget, targetErr)
 	}
 }
 
@@ -165,7 +171,7 @@ func TestRepairOwnedShortcutLeavesSeparateReasonix053InstallUntouched(t *testing
 	if idErr != nil {
 		t.Fatal(idErr)
 	}
-	if !sameWindowsPathOrFile(gotTarget, legacyTarget) {
+	if !strings.EqualFold(filepath.Clean(gotTarget), filepath.Clean(legacyTarget)) {
 		t.Fatalf("legacy shortcut target = %q, want %q", gotTarget, legacyTarget)
 	}
 	if gotID != legacyTauriAppUserModelID {

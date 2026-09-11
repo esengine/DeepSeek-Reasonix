@@ -30,7 +30,7 @@ func OpenFileBeneath(root, rel string) (*os.File, error) {
 		return nil, fmt.Errorf("open workspace root: %w", err)
 	}
 	defer rootFile.Close()
-	rootFinal, err := confinedWindowsFinalPath(windows.Handle(rootFile.Fd()))
+	rootFinal, err := FinalWindowsPath(windows.Handle(rootFile.Fd()))
 	if err != nil {
 		return nil, fmt.Errorf("resolve workspace root: %w", err)
 	}
@@ -39,7 +39,7 @@ func OpenFileBeneath(root, rel string) (*os.File, error) {
 	if err != nil {
 		return nil, err
 	}
-	targetFinal, err := confinedWindowsFinalPath(windows.Handle(file.Fd()))
+	targetFinal, err := FinalWindowsPath(windows.Handle(file.Fd()))
 	if err != nil {
 		file.Close()
 		return nil, fmt.Errorf("resolve workspace file: %w", err)
@@ -52,7 +52,9 @@ func OpenFileBeneath(root, rel string) (*os.File, error) {
 	return file, nil
 }
 
-func confinedWindowsFinalPath(handle windows.Handle) (string, error) {
+// FinalWindowsPath returns the DOS/UNC path of an open file or directory,
+// resolving directory junctions through the authoritative Windows handle.
+func FinalWindowsPath(handle windows.Handle) (string, error) {
 	size := uint32(256)
 	for {
 		buf := make([]uint16, size)
