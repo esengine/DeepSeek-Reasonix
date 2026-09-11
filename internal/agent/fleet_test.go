@@ -223,6 +223,22 @@ func TestFleetSchemaStableAndBounds(t *testing.T) {
 	}
 }
 
+func TestFleetDescribesFileGrainedWritePaths(t *testing.T) {
+	description := (&FleetTool{}).Description()
+	for _, want := range []string{
+		"prefer individual file paths over whole directories",
+		"broad directory claims needlessly serialize writers for disjoint files",
+	} {
+		if !strings.Contains(description, want) {
+			t.Fatalf("fleet description missing %q: %s", want, description)
+		}
+	}
+	schema := string((&FleetTool{}).Schema())
+	if want := "prefer individual file paths"; !strings.Contains(schema, want) {
+		t.Fatalf("fleet schema missing %q: %s", want, schema)
+	}
+}
+
 func TestFleetRejectsSingleTaskAndPathConflict(t *testing.T) {
 	root := t.TempDir()
 	task := newTestTaskTool(t, &mockProvider{name: "sub"}, tool.NewRegistry(), "sys", "", "", nil).
