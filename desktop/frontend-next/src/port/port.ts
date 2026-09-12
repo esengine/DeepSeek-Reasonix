@@ -265,6 +265,11 @@ export interface AgentPort {
   // Returns an unsubscribe. A browser tab has no shell to report progress, so
   // it never fires there.
   onUpdateProgress(cb: (p: UpdateProgress) => void): () => void;
+  // Says this launch works, which is what retires the update it booted from:
+  // the swap is done by a process that cannot judge the result, so the rollback
+  // material is kept until the application that came up says so. A launch that
+  // booted from no update has nothing to retire and succeeds anyway.
+  acknowledgeLaunchHealth(): Promise<void>;
   account(): Promise<AccountState>;
   accountLogin(): Promise<DeviceGrant>;
   accountPoll(deviceCode: string): Promise<{ status: "pending" | "complete"; slowDown?: boolean }>;

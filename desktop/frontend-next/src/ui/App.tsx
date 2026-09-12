@@ -4,6 +4,7 @@ import { t } from "../i18n";
 import type { AccountState, AgentPort, Appearance as Look, ProviderSetup, ThemePack } from "../port/port";
 import type { HubPort, RuntimeView, TreeWorkspace } from "../port/hub";
 import { Chrome } from "./Chrome";
+import { useLaunchHealth } from "./launchhealth";
 import { Nav } from "./Nav";
 import { AccountRow } from "./AccountRow";
 import { swapping } from "./swap";
@@ -31,6 +32,7 @@ import { Welcome } from "./Welcome";
 const Settings = lazy(async () => ({ default: (await import("./Settings")).Settings }));
 
 const NO_REPORT: PaneReport = { status: null, title: "", steer: 0, run: "idle", live: false, cost: "" };
+
 
 // 度量栏默认展开，收起是用户的选择 —— 那个选择跟主题一样留在盘上，不然拖一下
 // 窗口或者重开一次就被顶回展开。
@@ -224,6 +226,8 @@ export function App({ hub }: { hub: HubPort }) {
     return map;
   }, [hub, runtimes]);
   const activePort = panePorts.get(active) ?? panePorts.values().next().value ?? null;
+
+  useLaunchHealth(activePort, setup, welcomed);
 
   useEffect(() => {
     if (!activePort) return;

@@ -241,7 +241,7 @@ export class MockPort extends MockTheme implements AgentPort {
   async markWelcomed(): Promise<void> { this.welcomed = true; }
 
   async pinVersion(): Promise<void> {}
-
+  async acknowledgeLaunchHealth(): Promise<void> {} // booted from no update
   async goToVersion(): Promise<void> {
     throw new Error("演示模式不会真的安装版本");
   }

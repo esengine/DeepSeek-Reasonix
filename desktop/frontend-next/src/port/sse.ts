@@ -252,6 +252,18 @@ export class SsePort extends SseTheme implements AgentPort {
     if (!res.ok) await SsePort.fail("/update/install", res);
   }
 
+  // Failure is silent on purpose. Nothing the user asked for is happening here,
+  // there is nothing for them to do about it, and the two ordinary answers are
+  // both non-events: a kernel with no update capability has no route, and a
+  // launch that booted from no update has nothing to retire.
+  async acknowledgeLaunchHealth(): Promise<void> {
+    try {
+      await fetch("/update/health", { method: "POST", credentials: "same-origin" });
+    } catch {
+      // Offline, or the kernel went away. The next launch asks again.
+    }
+  }
+
   // Pulled, not subscribed. Progress is a projection: a missed frame costs
   // nothing the next read does not restore, and the last thing an install does
   // is end the process that would have been streaming it. A subscription would
