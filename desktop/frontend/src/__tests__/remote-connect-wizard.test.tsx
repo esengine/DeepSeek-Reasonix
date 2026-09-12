@@ -307,6 +307,12 @@ ok(!document.querySelector(".remote-wizard__suggest-list"), "picking a suggestio
 ok(document.activeElement === hostInput, "picking a suggestion restores focus to the host input");
 const keyInput = [...document.querySelectorAll<HTMLInputElement>("input")].find((i) => i.value.includes("id_ed25519"));
 ok(Boolean(keyInput), "saved key auth switches the form to key mode with the identity file");
+const installChoice = () => document.querySelector<HTMLButtonElement>('.remote-wizard__install [aria-pressed="true"]');
+ok(installChoice()?.textContent?.trim() === "Automatic", "saved auto install policy remains selected");
+await act(async () => { buttonByText("Use installed CLI")?.click(); });
+ok(installChoice()?.textContent?.trim() === "Use installed CLI", "never policy is visible and selectable");
+await act(async () => { buttonByText("Automatic")?.click(); });
+
 await act(async () => {
   document.querySelector<HTMLButtonElement>(".remote-wizard__pick-btn")?.click();
   await flush();

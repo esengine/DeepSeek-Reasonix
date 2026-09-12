@@ -601,25 +601,24 @@ export function RemoteConnectWizard({
                 )}
                 <div className="remote-wizard__field">
                   <span>{t("remoteWizard.downloadMethod")}</span>
-                  <SettingsOptions className="remote-wizard__seg" layout="fill" aria-label={t("remoteWizard.downloadMethod")}>
-                    <button
-                      type="button"
-                      className="provider-add-segmented__item"
-                      aria-pressed={form.serveInstall === "upload"}
-                      disabled={busy}
-                      onClick={() => set("serveInstall", "upload")}
-                    >
-                      {t("remoteWizard.downloadUpload")}
-                    </button>
-                    <button
-                      type="button"
-                      className="provider-add-segmented__item"
-                      aria-pressed={form.serveInstall === "npm"}
-                      disabled={busy}
-                      onClick={() => set("serveInstall", "npm")}
-                    >
-                      {t("remoteWizard.downloadRemote")}
-                    </button>
+                  <SettingsOptions className="remote-wizard__seg remote-wizard__install" layout="fill" aria-label={t("remoteWizard.downloadMethod")}>
+                    {([
+                      ["auto", "remoteWizard.downloadAuto"],
+                      ["upload", "remoteWizard.downloadUpload"],
+                      ["npm", "remoteWizard.downloadRemote"],
+                      ["never", "remoteWizard.downloadNever"],
+                    ] as const).map(([value, label]) => (
+                      <button
+                        key={value}
+                        type="button"
+                        className="provider-add-segmented__item"
+                        aria-pressed={form.serveInstall === value}
+                        disabled={busy}
+                        onClick={() => set("serveInstall", value)}
+                      >
+                        {t(label)}
+                      </button>
+                    ))}
                   </SettingsOptions>
                 </div>
                 <div className="remote-wizard__field">

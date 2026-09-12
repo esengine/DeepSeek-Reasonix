@@ -157,6 +157,8 @@ export const zh: Record<DictKey, string> = {
   "remoteWizard.authPassword": "密码",
   "remoteWizard.authKey": "私钥",
   "remoteWizard.downloadMethod": "资源下载方式",
+  "remoteWizard.downloadAuto": "自动选择",
+  "remoteWizard.downloadNever": "使用已安装的 CLI",
   "remoteWizard.downloadRemote": "远端服务下载",
   "remoteWizard.downloadUpload": "本地下载后上传",
   "remoteWizard.suggestions": "已保存的 SSH 连接",
