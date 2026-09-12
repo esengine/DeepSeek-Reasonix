@@ -52,12 +52,15 @@ homebrew_casks:
     commit_author:
       name: reasonix
       email: reasonix@deepseek.com
-    hooks:
-      post:
-        install: |
-          if OS.mac?
-            system_command "/usr/bin/xattr", args: ["-dr", "com.apple.quarantine", "#{staged_path}/reasonix"]
-          end
+    # The CLI archive is not notarized, so the cask still strips quarantine.
+    # GoReleaser's hooks field renders the deprecated `postflight do` stanza;
+    # emit Homebrew's `postflight_steps` directly until upstream supports it.
+    custom_block: |
+      postflight_steps do
+        if OS.mac?
+          system_command "/usr/bin/xattr", args: ["-dr", "com.apple.quarantine", "#{staged_path}/reasonix"]
+        end
+      end
 
 release:
   prerelease: auto

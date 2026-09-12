@@ -1652,6 +1652,12 @@ for workflow in release.yml release-npm.yml release-desktop.yml; do
 done
 grep -Fq 'reasonix/internal/productdocs.linkedVersion={{ .Tag }}' "$repo_root/.goreleaser.yaml"
 grep -Fq 'reasonix/internal/productdocs.linkedRevision={{ .Commit }}' "$repo_root/.goreleaser.yaml"
+# The Homebrew cask must keep stripping quarantine from the unsigned CLI, but
+# through Homebrew's current postflight_steps stanza, never the deprecated
+# `postflight do` that GoReleaser's hooks field renders.
+sed -n '/^homebrew_casks:/,/^release:/p' "$repo_root/.goreleaser.yaml" | grep -Fq 'postflight_steps do'
+sed -n '/^homebrew_casks:/,/^release:/p' "$repo_root/.goreleaser.yaml" | grep -Fq 'com.apple.quarantine'
+! sed -n '/^homebrew_casks:/,/^release:/p' "$repo_root/.goreleaser.yaml" | grep -Eq '^\s+hooks:|^\s+post:'
 grep -Fq 'reasonix/internal/productdocs.linkedVersion=${binaryVersion}' "$repo_root/npm/build.mjs"
 grep -Fq 'product_docs_ldflags="-X reasonix/internal/productdocs.linkedVersion=$VERSION' \
 	"$repo_root/scripts/desktop-build.sh"
