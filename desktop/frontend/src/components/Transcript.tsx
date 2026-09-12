@@ -94,6 +94,7 @@ export type TranscriptProps = {
   rewindDisabled?: boolean;
   running?: boolean;
   questionNavigator?: boolean;
+  showFloatingControls?: boolean;
   welcomeVariant?: "default" | "creation";
   creationMode?: boolean;
   actionHoverMenus?: boolean;
@@ -120,7 +121,7 @@ export function Transcript(props: TranscriptProps) {
     items, live: liveProp, liveStore, tabId, geometrySessionKey, footerHeight = 0,
     onPrompt, onDeliveryContinue, onAcceptDelivery, onOpenChanges, onOpenVerification,
     onEditPrompt, onRewind, checkpoints = EMPTY_CHECKPOINTS, actionPending = false,
-    rewindDisabled = false, running = false, questionNavigator = true,
+    rewindDisabled = false, running = false, questionNavigator = true, showFloatingControls = true,
     welcomeVariant = "default", creationMode = false, actionHoverMenus = false,
     rewindSignal = 0, revealSignal = 0, hydrating = false, hasOlderHistory = false, stableHistoryPaging = false,
     historyStartTurn = 0, historyTotalTurns = 0, loadingOlderHistory = false,
@@ -347,7 +348,7 @@ export function Transcript(props: TranscriptProps) {
     });
   }, [hasOlderHistory, hydrating, snapshot, loadingOlderHistory, olderHistoryError, projection.completedBlocks.length, requestOlder, running, stableHistoryPaging, surfaceKey, transcriptKernel]);
 
-  const showQuestionNav = questionNavigator && totalQuestions >= QUESTION_NAV_MIN_COUNT;
+  const showQuestionNav = showFloatingControls && questionNavigator && totalQuestions >= QUESTION_NAV_MIN_COUNT;
   const selectionSnapshot = useSyncExternalStore(transcriptSelectionStore.subscribe, transcriptSelectionStore.getSnapshot, transcriptSelectionStore.getSnapshot);
   const protectedBlockKeys = useMemo(() => {
     const keys = new Set<string>();
@@ -361,7 +362,8 @@ export function Transcript(props: TranscriptProps) {
     return keys;
   }, [blocks, selectionSnapshot, transcriptKernel.anchor]);
   const jumpBottomVisible = Boolean(
-    !isAtBottom
+    showFloatingControls
+      && !isAtBottom
       && scrollElement
       && hasTranscriptScrollableRange(scrollElement),
   );
@@ -372,7 +374,7 @@ export function Transcript(props: TranscriptProps) {
     <TranscriptLayoutIntentProvider value={() => { beginStructural("display-change"); }}>
     <TranscriptScrollWriteProvider value={writeOffset}>
       <div className="transcript-shell" aria-busy={loadingOlderHistory || undefined} data-protected-blocks={protectedBlockKeys.size}>
-        {tabId && <Suspense fallback={null}><ToolRecoveryPanel key={resolvedSessionKey} tabId={tabId} sessionKey={resolvedSessionKey} running={running} refreshKey={items.length} onResume={() => onPrompt?.(t("toolRecovery.resumePrompt"))} /></Suspense>}
+        {showFloatingControls && tabId && <Suspense fallback={null}><ToolRecoveryPanel key={resolvedSessionKey} tabId={tabId} sessionKey={resolvedSessionKey} running={running} refreshKey={items.length} onResume={() => onPrompt?.(t("toolRecovery.resumePrompt"))} /></Suspense>}
         {empty ? (
           <div className={`transcript transcript--empty${creationMode ? " transcript--creation-scrollbar" : ""}`} ref={setScroller} aria-busy={hydrating || undefined}>
             {hydrating ? <div className="transcript__loading" role="status" aria-live="polite"><Loader2 className="transcript__loading-icon" aria-hidden="true" /><span>{t("common.loading")}</span></div>
@@ -428,8 +430,8 @@ export function Transcript(props: TranscriptProps) {
         {!empty && showQuestionNav && <Suspense fallback={null}><TranscriptQuestionNavigator ref={questionNavigatorRef} kernel={transcriptKernel}
           requestOlder={requestOlder} loadingOlderHistory={loadingOlderHistory} running={running && !stableHistoryPaging} loadedByTurn={loadedByTurn}
           jump={jumpToLoadedQuestion} questions={questions} totalQuestions={totalQuestions} activeTurn={activeQuestion} /></Suspense>}
-        {!empty && <button type="button" className="transcript__jump-bottom" hidden={!jumpBottomVisible} onClick={() => { endStaleGesture(); scrollToBottom(); }} aria-label={t("transcript.jumpToBottom")} title={t("transcript.jumpToBottom")}><ArrowDown size={18} strokeWidth={2.2} aria-hidden="true" /></button>}
-        {FrontendDiagnosticsPanel && <Suspense fallback={null}><FrontendDiagnosticsPanel scrollElement={scrollElement} totalRows={allRows.length} /></Suspense>}
+        {showFloatingControls && !empty && <button type="button" className="transcript__jump-bottom" hidden={!jumpBottomVisible} onClick={() => { endStaleGesture(); scrollToBottom(); }} aria-label={t("transcript.jumpToBottom")} title={t("transcript.jumpToBottom")}><ArrowDown size={18} strokeWidth={2.2} aria-hidden="true" /></button>}
+        {showFloatingControls && FrontendDiagnosticsPanel && <Suspense fallback={null}><FrontendDiagnosticsPanel scrollElement={scrollElement} totalRows={allRows.length} /></Suspense>}
       </div>
     </TranscriptScrollWriteProvider>
     </TranscriptLayoutIntentProvider>

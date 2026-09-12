@@ -130,6 +130,7 @@ export function ChatPaneRegion(props: ChatPaneRegionProps) {
                 checkpoints={state.checkpoints}
                 actionPending={state.messageAction != null}
                 rewindDisabled={rewindDisabled}
+                showFloatingControls={false}
                 running={state.running || rewind.committing}
                 turnStartAt={state.turnStartAt}
                 contentRevision={state.historyLayoutRevision}

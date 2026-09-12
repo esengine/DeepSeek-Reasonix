@@ -72,6 +72,7 @@ export function RemoteSessionSurface({ tab, session, surfaceCommitToken, onSurfa
         surfaceCommitToken={surfaceCommitToken}
         onSurfacePaintReady={onSurfacePaintReady}
         running={session.transcript.running}
+        showFloatingControls={false}
         hasOlderHistory={session.transcript.historyHasOlder}
         stableHistoryPaging={session.syncMode === "snapshot"}
         historyStartTurn={session.transcript.historyStartTurn}
