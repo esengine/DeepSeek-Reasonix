@@ -153,6 +153,8 @@ export const zhTW: Record<DictKey, string> = {
   "remoteWizard.authPassword": "密碼",
   "remoteWizard.authKey": "私鑰",
   "remoteWizard.downloadMethod": "資源下載方式",
+  "remoteWizard.downloadAuto": "自動選擇",
+  "remoteWizard.downloadNever": "使用已安裝的 CLI",
   "remoteWizard.downloadRemote": "遠端下載",
   "remoteWizard.downloadUpload": "本地下載上傳",
   "remoteWizard.suggestions": "已儲存的 SSH 連線",

@@ -162,6 +162,8 @@ export const en = {
   "remoteWizard.authPassword": "Password",
   "remoteWizard.authKey": "Key file",
   "remoteWizard.downloadMethod": "CLI download method",
+  "remoteWizard.downloadAuto": "Automatic",
+  "remoteWizard.downloadNever": "Use installed CLI",
   "remoteWizard.downloadRemote": "Download on remote",
   "remoteWizard.downloadUpload": "Download locally & upload",
   "remoteWizard.suggestions": "Saved SSH connections",
