@@ -19,7 +19,13 @@ func render(results []result) string {
 	if len(results) > 0 && results[0].CacheArm != "" && results[0].CacheArm != benchmarkCacheCold {
 		cache = " · " + results[0].CacheArm + "-cache"
 	}
-	return fmt.Sprintf("## 🤖 Reasonix e2e benchmark (arm `%s`%s)\n\n", arm, cache) + renderBody(results)
+	// Two postures produce otherwise identical headers, so an arm that dropped
+	// the approval gate has to say so where the numbers are read.
+	posture := ""
+	if len(results) > 0 && results[0].Permission != "" && results[0].Permission != benchmarkPermissionAuto {
+		posture = " · " + results[0].Permission + "-permission"
+	}
+	return fmt.Sprintf("## 🤖 Reasonix e2e benchmark (arm `%s`%s%s)\n\n", arm, cache, posture) + renderBody(results)
 }
 
 // suiteStats aggregates result entries; ran/pass1 count tasks (first

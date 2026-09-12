@@ -169,6 +169,9 @@ type result struct {
 	// CacheArm records whether the run was cold (fresh session) or warm
 	// (prefix pre-warmed in the same workdir), so arms never get mixed.
 	CacheArm string `json:"cache_arm,omitempty"`
+	// Permission records the agent permission posture the arm ran under
+	// ("" = the unattended auto default), so postures never get mixed.
+	Permission string `json:"permission,omitempty"`
 	// Effort records the reasoning-effort override the arm ran with ("" =
 	// model default), the adaptive-reasoning-budget experiment axis.
 	Effort string `json:"effort,omitempty"`
@@ -244,7 +247,7 @@ func main() {
 	runID := flag.String("run-id", "reasonix", "swebench mode: run id passed to the official harness")
 	harnessPy := flag.String("harness-python", "python3", "swebench mode: interpreter with the swebench package installed")
 	dataset := flag.String("dataset", "princeton-nlp/SWE-bench_Verified", "swebench mode: dataset name")
-	permission := flag.String("permission", "auto", "swebench mode: agent permission posture (auto | yolo)")
+	permission := flag.String("permission", "auto", "suite/swebench modes: agent permission posture (auto | yolo)")
 	network := flag.String("network", "", "swebench mode: docker network for agent containers; must have no off-box route")
 	proxyURL := flag.String("proxy", "", "swebench mode: the only egress the agent gets, expected to allowlist just the model API")
 	workers := flag.Int("workers", 4, "swebench mode: parallel grader workers")
@@ -338,7 +341,7 @@ func main() {
 
 	meterSource, faults, segments, steers := pressure.settings()
 	runSuiteMode(suiteConfig{
-		bin: *bin, model: *model, arm: arm, budget: *budget,
+		bin: *bin, model: *model, arm: arm, budget: *budget, permission: *permission,
 		trajDir: *trajDir, forcePlanner: *forcePlanner, attempts: *attempts, anchor: anchor,
 		cacheArm: cache, effort: *effort, checkpoints: *checkpoints, policy: *policyFlag,
 		forkCapture: *forkCapture, meterConfig: meterSource, meterFaults: faults, segments: segments, steers: steers,
@@ -346,6 +349,10 @@ func main() {
 }
 
 func runSuiteMode(cfg suiteConfig, suite, taskFilter, outMD, outJSON string) {
+	if _, err := permissionFlag(cfg.permission); err != nil {
+		fmt.Fprintln(os.Stderr, err)
+		os.Exit(2)
+	}
 	tasks, err := loadTasks(suite)
 	if err != nil {
 		fmt.Fprintln(os.Stderr, "load suite:", err)
@@ -472,6 +479,7 @@ func filterTasks(tasks []task, filter string) ([]task, error) {
 // model, ablation arm, cache arm, and reasoning effort.
 type suiteConfig struct {
 	bin, model, cacheArm, effort string
+	permission                   string // agent posture: auto (unattended default) | yolo
 	arm                          ablation.Set
 	anchor                       string
 	policy, forkCapture          string
@@ -527,7 +535,7 @@ func runSuite(cfg suiteConfig, tasks []task) []result {
 // then drops in verify.sh and runs it as the grader. The grader is added only
 // after the run so the agent can't read the answer key.
 func runTask(cfg suiteConfig, t task) result {
-	r := result{task: t, Profile: benchmarkProfileStandard, CacheArm: cfg.cacheArm, Effort: cfg.effort}
+	r := result{task: t, Profile: benchmarkProfileStandard, CacheArm: cfg.cacheArm, Effort: cfg.effort, Permission: cfg.permission}
 	r.Arm = cfg.arm.Arm()
 	r.Anchor = cfg.anchor
 	t.Prompt = anchorPrompt(cfg.anchor, t)
@@ -640,8 +648,9 @@ func runTask(cfg suiteConfig, t task) result {
 
 func buildRunTaskArgs(cfg suiteConfig, metricsPath, trajectoryPath string, maxSteps int, prompt string) []string {
 	// Benchmarks are unattended and their fixtures require ordinary workspace
-	// writes. Auto still honors explicit ask/deny rules and the sandbox boundary.
-	args := []string{"run", "--auto", "--metrics", metricsPath}
+	// writes. Auto keeps the dynamic-shell gate, which denies inline interpreter
+	// code because no human can approve it; yolo is the posture that drops it.
+	args := []string{"run", suitePermissionArg(cfg.permission), "--metrics", metricsPath}
 	if trajectoryPath != "" {
 		args = append(args, "--trajectory", trajectoryPath)
 	}

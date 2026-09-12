@@ -322,7 +322,9 @@ Prerequisites: a `reasonix` binary (or `go run ./cmd/reasonix` …) with a
 configured provider. The harness invokes the agent as
 `reasonix run --auto --metrics <path> [--model NAME] [--max-steps N] [--profile delivery] [--ablate ARM] <prompt>`
 inside a temp copy of the task's `workdir/`; the `--auto` flag is deliberate so
-unattended fixture writes are allowed.
+unattended fixture writes are allowed. It is the default posture, not the only
+one — `-permission yolo` swaps it for `--permission-mode=bypassPermissions`, and
+the report header then names the arm.
 
 ```sh
 # Run the committed suite, report to stdout
@@ -362,6 +364,7 @@ own outcome).
 | `-anchor` | `blind` | Suite mode: which hypothesis the agent holds before it looks at anything — `blind` (none, the control) \| `correct` \| `wrong`. The seeded arms prefix each prompt with the task's authored seed and **skip** tasks that have none, so an unseeded control run never lands in a seeded denominator. Results carry `anchor`. See [Anchor resistance](#anchor-resistance). |
 | `-cache` | `cold` | Suite mode: `cold` runs each task as a fresh session (the fair cross-agent comparison arm); `warm` primes the provider prefix cache with a one-step run in the same workdir first, measuring the long-lived-session steady state. Never mix arms in one report — compare them with `-mode compare cold.json warm.json`. |
 | `-budget` | `800000` | Abort once total tokens cross this (`0` = no cap). Remaining tasks are reported as skipped. |
+| `-permission` | `auto` | Suite and SWE-bench modes: agent permission posture — `auto` (unattended default) \| `yolo`. Under `auto` the dynamic-shell gate denies inline interpreter code (`python -c`, `node -e`) because no human can approve it, so a run measures that policy alongside the agent; `yolo` drops the gate for comparisons against harnesses that have none. Never mix postures in one report. |
 | `-meter` | *(off)* | Suite mode: route the benchmarked provider through the neutral measuring proxy, using this `config.toml` as the source. Spend is then counted at the request boundary instead of trusted from the harness. See [Neutral metering](#neutral-metering). |
 | `-faults` | *(none)* | Suite mode: inject provider failures through the meter — absolute indices (`3:429`) and/or a cadence that scales with the run (`every:5:500`). Requires `-meter`. See [Fault recovery](#fault-recovery). |
 | `-segments` | `1` | Suite mode: split each task into N resumed legs (`--continue` between them). The step budget is **divided**, never multiplied. See [Segmented runs](#segmented-runs). |
@@ -418,8 +421,9 @@ go run ./cmd/e2ebench -mode swebench \
   -network reasonix-eval -proxy http://127.0.0.1:8080
 ```
 
-SWE-bench mode accepts the `-model`, `-profile`, `-ablate`, `-permission`,
-`-workers`, `-dataset`, `-run-id`, `-harness-python`, and `-keep-images` flags;
+SWE-bench mode accepts the `-model`, `-profile`, `-ablate`, `-permission`
+(shared with suite mode), `-workers`, `-dataset`, `-run-id`, `-harness-python`,
+and `-keep-images` flags;
 its report is produced by the official harness rather than the suite JSON
 writer.
 
@@ -472,8 +476,8 @@ go run ./benchmarks/context-maintenance-e2e comprehension
 ## See also
 
 - [`docs/CLI.md`](../docs/CLI.md) — the `reasonix run` flags the e2e harness
-  passes through (`--auto`, `--metrics`, `--model`, `--max-steps`,
-  `--profile`, `--ablate`).
+  passes through (`--auto` or `--permission-mode`, `--metrics`, `--model`,
+  `--max-steps`, `--profile`, `--ablate`).
 - [`cmd/e2ebench/main.go`](../cmd/e2ebench/main.go) — suite runner and report
   renderer.
 
