@@ -27,13 +27,15 @@ func (a *App) reconcileRemoteTabReclaimOwnership(
 			return
 		}
 		locallyOwned := takeoverViewLocallyOwned(view)
+		blocked := view.Holder == "other" && !view.Mirrored
 		a.remoteTabMu.Lock()
 		current := a.remoteTabs[tabID]
-		if !stillCurrent(current) || current.session.takenOver == locallyOwned {
+		if !stillCurrent(current) || (current.session.takenOver == locallyOwned && current.session.reclaimBlocked == blocked) {
 			a.remoteTabMu.Unlock()
 			return
 		}
 		current.session.takenOver = locallyOwned
+		current.session.reclaimBlocked = blocked
 		meta := remoteTabMetaLocked(current)
 		a.remoteTabMu.Unlock()
 		a.emitRemoteEvent("remote-tab:updated", meta)

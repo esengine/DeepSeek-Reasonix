@@ -272,15 +272,16 @@ type cliTakeoverManager struct {
 
 	// Lock order is returnMu -> sendMu -> mu. Emit only takes mu, so the model
 	// event sink never waits for an HTTP request.
-	returnMu sync.Mutex
-	sendMu   sync.Mutex
-	mu       sync.Mutex
-	binding  *cliTakeoverBinding
-	revision uint64
-	failures int
-	ctrl     control.SessionAPI
-	queue    eventwire.MirrorQueue
-	pending  []*cliPendingReturn
+	returnMu      sync.Mutex
+	sendMu        sync.Mutex
+	mu            sync.Mutex
+	binding       *cliTakeoverBinding
+	revision      uint64
+	failures      int
+	discoverAfter time.Time
+	ctrl          control.SessionAPI
+	queue         eventwire.MirrorQueue
+	pending       []*cliPendingReturn
 	// retirePending is a deterministic failure-injection seam for the pending
 	// return retry loop. Production calls RetireDetachedForHandoff directly.
 	retirePending func(*control.SessionLeaseKeeper, string, string) error
@@ -495,7 +496,11 @@ func (m *cliTakeoverManager) pushLocked(heartbeat bool) bool {
 		return false
 	}
 	binding, _, _, revision := m.snapshot()
-	if binding == nil || binding.client == nil || binding.grant.MirrorID == "" {
+	if binding == nil {
+		m.adoptOwnedSessionLocked()
+		return true
+	}
+	if binding.client == nil || binding.grant.MirrorID == "" {
 		return true
 	}
 	frames := m.drain()
@@ -702,11 +707,19 @@ func (m *cliTakeoverManager) returnLeaseFor(expected *cliTakeoverBinding, revisi
 // one. It lets /resume and related TUI switches keep their original failure
 // atomicity while still honoring Serve's reverse reservation.
 func (m *cliTakeoverManager) RebindAway(path string) (bool, error) {
-	if m == nil {
+	if m == nil || m.leases == nil {
 		return false, nil
 	}
+	m.sendMu.Lock()
 	binding, _, _, _ := m.snapshot()
-	if binding == nil || m.returned.Load() || agent.CanonicalSessionPath(binding.path) == agent.CanonicalSessionPath(path) {
+	if binding == nil || m.returned.Load() {
+		// Discovery cannot register the old path between this check and Rebind.
+		err := m.leases.Rebind(path)
+		m.sendMu.Unlock()
+		return true, err
+	}
+	m.sendMu.Unlock()
+	if agent.CanonicalSessionPath(binding.path) == agent.CanonicalSessionPath(path) {
 		return false, nil
 	}
 	err := m.returnCurrentMirror(binding.path, func(current *cliTakeoverBinding) error {
@@ -719,6 +732,12 @@ func (m *cliTakeoverManager) RebindAway(path string) (bool, error) {
 // acquired target stays in leases while the source binding remains detached
 // and live until the caller has loaded and authorized the candidate session.
 func cliAcquireFreeSession(path string, leases *control.SessionLeaseKeeper, manager *cliTakeoverManager) (*cliTakeoverBinding, error) {
+	// Serialize discovery with the source binding snapshot and lease move.
+	// An in-flight /adopt must either become priorMirror or see the new lease.
+	if manager != nil {
+		manager.sendMu.Lock()
+		defer manager.sendMu.Unlock()
+	}
 	if leases == nil {
 		return &cliTakeoverBinding{path: path}, nil
 	}

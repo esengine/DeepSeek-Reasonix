@@ -79,6 +79,7 @@ for (const signal of ["SIGINT", "SIGTERM"]) {
 }
 
 try {
+  await waitForExit(start(process.execPath, ["scripts/build-remote-cli.mjs"]), "Remote CLI build");
   await mkdir(dirname(servicePath), { recursive: true });
   console.log("==> Building Reasonix desktop service");
   await waitForExit(start("go", ["build", "-o", servicePath, "."]), "Go build");

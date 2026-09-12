@@ -69,6 +69,8 @@ let resolveRaceSnapshot: ((value: { history: unknown[]; status: unknown }) => vo
 const resolveStateRaceSnapshots: Array<(value: { history: unknown[]; status: unknown }) => void> = [];
 let rotationSnapshotCalls = 0;
 let resolveRotationReconcile: ((value: { history: unknown[]; status: unknown }) => void) | undefined;
+let identitySnapshotCalls = 0;
+let resolveIdentitySnapshot: ((value: { history: unknown[]; status: unknown }) => void) | undefined;
 const desktopStub = installDesktopHostStub(({ main: { App: {
   async RegisterNavigationIntent(token: string) { tape.push(`navigation:${token}`); },
   async RemoteTabSnapshot(tabId: string) {
@@ -86,6 +88,14 @@ const desktopStub = installDesktopHostStub(({ main: { App: {
 				history: [{ role: "assistant", content: rotationSnapshotCalls === 1 ? "initial session" : rotationSnapshotCalls === 3 ? "fresh rotated session" : "fresh reconciled turn" }],
 				status: { running: false, label: "Rotation", plan: false, toolApprovalMode: "ask", goal: "" },
 			};
+		}
+		if (tabId === "tab-session-identity") {
+			identitySnapshotCalls += 1;
+			if (identitySnapshotCalls === 1) return {
+				history: [{ role: "assistant", content: "previous session" }],
+				status: { running: false, label: "Previous", plan: false, toolApprovalMode: "ask", goal: "" },
+			};
+			return new Promise<{ history: unknown[]; status: unknown }>((resolve) => { resolveIdentitySnapshot = resolve; });
 		}
 		if (tabId === "tab-tool-history") return {
 			history: [
@@ -777,6 +787,40 @@ ok(rotationProbe?.transcript.items.some((item) => item.kind === "assistant" && i
 	&& !rotationProbe.transcript.items.some((item) => item.kind === "assistant" && item.text === "stale previous session"),
 	"session generation fence rejects stale history and hands reconciliation to the new generation");
 await act(async () => rotationRoot.unmount());
+
+// One remote workspace reuses its tab id across /new and resume. The durable
+// path is therefore part of the hook identity: while the replacement history
+// is still loading, no row from the previous session may remain visible.
+let identityProbe: RemoteSessionApi | undefined;
+function IdentityProbe({ sessionPath }: { sessionPath: string }) {
+	identityProbe = useRemoteSession("tab-session-identity", "ready", sessionPath);
+	return null;
+}
+const identityRoot = createRoot(document.createElement("div"));
+await act(async () => {
+	identityRoot.render(<LocaleProvider><IdentityProbe sessionPath="/sessions/previous.jsonl" /></LocaleProvider>);
+	await flush();
+});
+ok(identityProbe?.transcript.items.some((item) => item.kind === "assistant" && item.text === "previous session") === true,
+	"remote session identity starts with its own hydrated transcript");
+await act(async () => {
+	identityRoot.render(<LocaleProvider><IdentityProbe sessionPath="/sessions/fresh.jsonl" /></LocaleProvider>);
+	await Promise.resolve();
+});
+ok(identityProbe?.hydrated === false
+	&& !identityProbe.transcript.items.some((item) => item.kind === "assistant" && item.text === "previous session"),
+	"a new session path clears the previous transcript before replacement hydration settles");
+await act(async () => {
+	resolveIdentitySnapshot?.({
+		history: [{ role: "assistant", content: "fresh session" }],
+		status: { running: false, label: "Fresh", plan: false, toolApprovalMode: "ask", goal: "" },
+	});
+	await flush();
+});
+ok(identityProbe?.hydrated === true
+	&& identityProbe.transcript.items.some((item) => item.kind === "assistant" && item.text === "fresh session") === true,
+	"replacement session hydration completes on the reused tab");
+await act(async () => identityRoot.unmount());
 
 // Pending prompt frames retained by Desktop are replayed by the next snapshot,
 // which restores decisions missed while the tab had no frontend listener.

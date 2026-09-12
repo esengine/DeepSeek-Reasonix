@@ -140,22 +140,36 @@ func installViaNPM(ctx context.Context, conn Conn, minVersion string) (bin, vers
 	return loc, ver, nil
 }
 
-// installViaUpload uploads the local reasonix binary when the remote platform
-// matches the local one. Cross-platform release download is a documented V1
-// limitation: use serve_install = npm for a differing remote platform.
+// installViaUpload uses a same-platform CLI or obtains bytes for the remote
+// platform from the caller's verified release/development artifact provider.
 func installViaUpload(ctx context.Context, conn Conn, fs *sftpfs.FS, opts Options, home, goos, goarch, uploaded string) (bin, version string, err error) {
-	if opts.LocalBinary == "" {
-		return "", "", fmt.Errorf("bootstrap: upload strategy needs the local reasonix binary path")
-	}
-	if opts.LocalGOOS != goos || opts.LocalGOARCH != goarch {
-		return "", "", fmt.Errorf("bootstrap: cannot upload: local binary is %s/%s but remote is %s/%s; use serve_install = npm",
-			opts.LocalGOOS, opts.LocalGOARCH, goos, goarch)
-	}
-	data, rerr := os.ReadFile(opts.LocalBinary)
-	if rerr != nil {
-		return "", "", fmt.Errorf("bootstrap: read local binary: %w", rerr)
+	data, err := uploadBinaryBytes(ctx, opts, goos, goarch)
+	if err != nil {
+		return "", "", err
 	}
 	return installBinaryBytes(ctx, conn, fs, data, opts.MinVersion, home, uploaded)
+}
+
+func uploadBinaryBytes(ctx context.Context, opts Options, goos, goarch string) ([]byte, error) {
+	if opts.LocalBinary != "" && opts.LocalGOOS == goos && opts.LocalGOARCH == goarch {
+		data, err := os.ReadFile(opts.LocalBinary)
+		if err != nil {
+			return nil, fmt.Errorf("bootstrap: read local binary: %w", err)
+		}
+		return data, nil
+	}
+	if opts.FetchBinary != nil {
+		data, err := opts.FetchBinary(ctx, opts.ProductVersion, goos, goarch)
+		if err != nil {
+			return nil, fmt.Errorf("bootstrap: obtain upload CLI for %s/%s: %w", goos, goarch, err)
+		}
+		return data, nil
+	}
+	if opts.LocalBinary == "" {
+		return nil, fmt.Errorf("bootstrap: upload strategy needs a Reasonix CLI for %s/%s", goos, goarch)
+	}
+	return nil, fmt.Errorf("bootstrap: cannot upload: local binary is %s/%s but remote is %s/%s; no target-platform CLI provider is configured",
+		opts.LocalGOOS, opts.LocalGOARCH, goos, goarch)
 }
 
 func installBinaryBytes(ctx context.Context, conn Conn, fs *sftpfs.FS, data []byte, minVersion, home, uploaded string) (bin, version string, err error) {

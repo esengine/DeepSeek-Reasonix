@@ -72,6 +72,11 @@ var leaseHeldByForeignRuntime = agent.SessionLeaseHeldByOtherRuntime
 // the leading sentence to surface the read-only state.
 const errSessionTakenOver = "session is taken over by a local Reasonix window and is read-only here; use POST /reclaim to take it back"
 
+var (
+	reasonixSessionHolderProcess   = platformReasonixSessionHolderProcess
+	terminateReasonixSessionHolder = platformTerminateReasonixSessionHolder
+)
+
 // mirroredSession is Serve's bookkeeping for a session whose lease a local
 // runtime now holds. Serve answers reads from the transcript file and mirrors
 // the writer's frames to subscribers, but must not mutate the session.
@@ -276,8 +281,10 @@ type ownershipView struct {
 	Mirrored         bool   `json:"mirrored"`
 	ReclaimRequested bool   `json:"reclaimRequested"`
 	TakenOver        bool   `json:"takenOver"`
+	Reclaimable      bool   `json:"reclaimable"`
 	HolderPID        int    `json:"holderPid,omitempty"`
 	HolderHost       string `json:"holderHost,omitempty"`
+	HolderKind       string `json:"holderKind,omitempty"`
 }
 
 // ownership reports who currently writes a session, whether a remote SSE
@@ -297,8 +304,9 @@ func (s *Server) ownership(w http.ResponseWriter, r *http.Request) {
 		view.Holder = "external"
 		view.Mirrored = true
 		view.TakenOver = true
+		view.Reclaimable = true
 		view.ReclaimRequested = m.reclaimRequested
-		s.appendServeIdentity(&view)
+		s.appendExternalIdentity(&view, realPath, m.targetWriterID, "tui")
 		writeJSON(w, view)
 		return
 	}
@@ -320,11 +328,25 @@ func (s *Server) ownership(w http.ResponseWriter, r *http.Request) {
 	}
 	if leaseHeldByForeignRuntime(realPath) {
 		view.Holder = "other"
+		view.TakenOver = true
+		view.Reclaimable = foreignSessionForceReclaimable(realPath, "")
+		if info, err := agent.LoadSessionLeaseInfo(realPath); err == nil && info != nil {
+			view.HolderPID, view.HolderHost = info.PID, info.Hostname
+		}
+		view.HolderKind = "process"
 	}
 	if view.Holder == "" {
 		view.Holder = "free"
 	}
 	writeJSON(w, view)
+}
+
+func (s *Server) appendExternalIdentity(view *ownershipView, path, writerID, kind string) {
+	info, err := agent.LoadSessionLeaseInfo(path)
+	if err != nil || info == nil || info.WriterID != writerID {
+		return
+	}
+	view.HolderPID, view.HolderHost, view.HolderKind = info.PID, info.Hostname, kind
 }
 
 func (s *Server) appendServeIdentity(view *ownershipView) {
@@ -647,27 +669,29 @@ func (s *Server) reclaim(w http.ResponseWriter, r *http.Request) {
 			w.WriteHeader(http.StatusNoContent)
 			return
 		}
-		// A session held by a local process that was never adopted (the adopt
-		// can fail silently) has no mirror forwarder to signal. The reclaim
-		// can only wait for the lease to free — cap it short so the caller
-		// gets actionable feedback instead of a two-minute hang.
 		if leaseHeldByForeignRuntime(realPath) {
-			slog.Info("serve: reclaim on un-mirrored foreign-held session (adopter absent)",
-				"session", canonical)
-			deadline := time.Now().Add(10 * time.Second)
-			for leaseHeldByForeignRuntime(realPath) {
-				if time.Now().After(deadline) {
-					http.Error(w, "session is held by a local Reasonix window that never registered a mirror; close that window or retry after it exits", http.StatusConflict)
-					return
-				}
+			if !body.Force {
+				http.Error(w, "session writer has not connected session sharing; retry with force after confirming the holder", http.StatusConflict)
+				return
+			}
+			if err := terminateForeignSessionWriter(realPath, ""); err != nil {
+				http.Error(w, "force reclaim session writer: "+err.Error(), http.StatusConflict)
+				return
+			}
+			deadline := time.Now().Add(timeout)
+			for leaseHeldByForeignRuntime(realPath) && time.Now().Before(deadline) {
 				time.Sleep(handoffPollInterval)
 			}
-			s.bindMu.Lock()
-			defer s.bindMu.Unlock()
-			s.resumeSession(w, r, realPath)
-			return
+			if leaseHeldByForeignRuntime(realPath) {
+				http.Error(w, "forced session writer did not release the session lock", http.StatusConflict)
+				return
+			}
 		}
-		http.Error(w, "session is not held by any known runtime", http.StatusConflict)
+		// The unregistered writer may have exited since the client's last
+		// status read. Resume under the ordinary lease admission checks.
+		s.bindMu.Lock()
+		defer s.bindMu.Unlock()
+		s.resumeSession(w, r, realPath)
 		return
 	}
 	m.reclaimRequested = true
@@ -684,7 +708,19 @@ func (s *Server) reclaim(w http.ResponseWriter, r *http.Request) {
 	slog.Info("serve: reclaim requested", "session", canonical, "mode", string(mode))
 
 	deadline := time.Now().Add(timeout)
+	forceAt := deadline
+	if body.Force {
+		forceAt = time.Now().Add(min(3*time.Second, timeout/3))
+	}
+	forced := false
 	for leaseHeldByForeignRuntime(realPath) {
+		if body.Force && !forced && !time.Now().Before(forceAt) {
+			if err := terminateForeignSessionWriter(realPath, m.targetWriterID); err != nil {
+				http.Error(w, "force reclaim session writer: "+err.Error(), http.StatusConflict)
+				return
+			}
+			forced = true
+		}
 		if time.Now().After(deadline) {
 			http.Error(w, "local writer did not yield the session; retry", http.StatusConflict)
 			return
@@ -966,10 +1002,50 @@ func (s *Server) externalStatusView(path string) map[string]any {
 		"pendingPrompt":    false,
 		"backgroundJobs":   0,
 		"takenOver":        true,
+		"reclaimable":      foreignSessionForceReclaimable(path, ""),
 		"sessionName":      strings.TrimSuffix(filepath.Base(path), ".jsonl"),
 		"sessionPath":      agent.CanonicalSessionPath(path),
 	}
+	appendExternalStatusIdentity(sess, path, "", "process")
 	return sess
+}
+
+func foreignSessionForceReclaimable(path, expectedWriterID string) bool {
+	info, err := agent.LoadSessionLeaseInfo(path)
+	if err != nil || info == nil || info.PID <= 0 || info.PID == os.Getpid() ||
+		(expectedWriterID != "" && info.WriterID != expectedWriterID) {
+		return false
+	}
+	host, _ := os.Hostname()
+	if info.Hostname != "" && host != "" && !strings.EqualFold(strings.TrimSpace(info.Hostname), strings.TrimSpace(host)) {
+		return false
+	}
+	return reasonixSessionHolderProcess(info.PID)
+}
+
+func terminateForeignSessionWriter(path, expectedWriterID string) error {
+	info, err := agent.LoadSessionLeaseInfo(path)
+	if err != nil || info == nil {
+		return fmt.Errorf("holder identity unavailable")
+	}
+	return validateAndTerminateSessionWriter(info, expectedWriterID)
+}
+
+func validateAndTerminateSessionWriter(info *agent.SessionLeaseInfo, expectedWriterID string) error {
+	if info.PID <= 0 || info.PID == os.Getpid() {
+		return fmt.Errorf("invalid holder PID %d", info.PID)
+	}
+	if expectedWriterID != "" && info.WriterID != expectedWriterID {
+		return fmt.Errorf("holder generation changed")
+	}
+	host, _ := os.Hostname()
+	if info.Hostname != "" && host != "" && !strings.EqualFold(strings.TrimSpace(info.Hostname), strings.TrimSpace(host)) {
+		return fmt.Errorf("holder is on %q, not this host", info.Hostname)
+	}
+	if !reasonixSessionHolderProcess(info.PID) {
+		return fmt.Errorf("PID %d is not a verified Reasonix process", info.PID)
+	}
+	return terminateReasonixSessionHolder(info.PID)
 }
 
 // mirrorStatusView renders the status payload for a mirrored session selected
@@ -988,13 +1064,29 @@ func (s *Server) mirrorStatusView(path string) map[string]any {
 		"pendingPrompt":    false,
 		"backgroundJobs":   0,
 		"takenOver":        true,
+		"reclaimable":      true,
 		"sessionName":      strings.TrimSuffix(filepath.Base(path), ".jsonl"),
 		"sessionPath":      agent.CanonicalSessionPath(path),
 	}
 	if ok {
 		sess["reclaimRequested"] = m.reclaimRequested
+		appendExternalStatusIdentity(sess, path, m.targetWriterID, "tui")
 	}
 	return sess
+}
+
+func appendExternalStatusIdentity(view map[string]any, path, writerID, kind string) {
+	info, err := agent.LoadSessionLeaseInfo(path)
+	if err != nil || info == nil || (writerID != "" && info.WriterID != writerID) {
+		return
+	}
+	if info.PID > 0 {
+		view["holderPid"] = info.PID
+	}
+	if host := strings.TrimSpace(info.Hostname); host != "" {
+		view["holderHost"] = host
+	}
+	view["holderKind"] = kind
 }
 
 // mirrorEnd is the local writer's farewell: it has closed its tab and dropped

@@ -182,7 +182,7 @@ func (a *App) GetRuntimeStateSnapshot() RuntimeStateProjection {
 	a.remoteTabMu.Lock()
 	for _, tab := range a.remoteTabs {
 		freshness := "synced"
-		if tab.state != "ready" || tab.session.takenOver || tab.runtime.syncFailed || tab.runtimeUnknown[tab.routing.currentPath] != 0 {
+		if tab.state != "ready" || tab.runtime.syncFailed || tab.runtimeUnknown[tab.routing.currentPath] != 0 {
 			freshness = "unknown"
 		}
 		state := tab.runtimeStates[tab.routing.currentPath]
@@ -200,7 +200,7 @@ func (a *App) GetRuntimeStateSnapshot() RuntimeStateProjection {
 				continue
 			}
 			freshness := "synced"
-			if tab.state != "ready" || tab.session.takenOver || tab.runtime.syncFailed || tab.runtimeUnknown[path] != 0 {
+			if tab.state != "ready" || tab.runtime.syncFailed || tab.runtimeUnknown[path] != 0 {
 				freshness = "unknown"
 			}
 			next.Sessions = append(next.Sessions, RuntimeSessionState{TabID: tab.id, Scope: "remote", HostID: tab.ref.HostID, WorkspaceRoot: tab.ref.Workspace,

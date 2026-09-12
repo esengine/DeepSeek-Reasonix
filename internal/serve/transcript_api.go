@@ -24,8 +24,10 @@ func (s *Server) transcriptRead(w http.ResponseWriter, r *http.Request, read fun
 	ctrl := s.ctl()
 	path := agent.CanonicalSessionPath(ctrl.SessionPath())
 	if raw := r.URL.Query().Get("session"); raw != "" {
-		requested, err := s.resolveSessionPath(raw)
-		if err != nil || agent.CanonicalSessionPath(requested) != path {
+		// This is an in-memory controller read, not a file open. A fresh /new
+		// reserves its path before the first transcript save, so filesystem
+		// existence cannot be a prerequisite for reading its empty projection.
+		if path == "" || agent.CanonicalSessionPath(raw) != path {
 			http.Error(w, "transcript session is not bound to this runtime", http.StatusConflict)
 			return
 		}

@@ -5,6 +5,7 @@ import { app } from "../lib/bridge";
 import { useT } from "../lib/i18n";
 import { useRemoteNavigationCommand } from "../lib/remoteNavigationCommands";
 import { useRemoteStore, waitForRemoteConnection } from "../store/remote";
+import { SettingsOptions } from "./SettingsOptions";
 import { RemoteStatusChip } from "./RemoteHostsPage";
 import type { RemoteDirEntry, RemoteHostInput, RemoteHostView } from "../lib/types";
 
@@ -522,10 +523,11 @@ export function RemoteConnectWizard({
                   </label>
                   <div className="remote-wizard__field">
                     <span>{t("remoteWizard.authMethod")}</span>
-                    <div className="provider-add-segmented remote-wizard__seg" role="group" aria-label={t("remoteWizard.authMethod")}>
+                    <SettingsOptions className="remote-wizard__seg" layout="fill" aria-label={t("remoteWizard.authMethod")}>
                       <button
                         type="button"
-                        className={`provider-add-segmented__item${authMode === "password" ? " provider-add-segmented__item--active" : ""}`}
+                        className="provider-add-segmented__item"
+                        aria-pressed={authMode === "password"}
                         disabled={busy}
                         onClick={() => setAuthMode("password")}
                       >
@@ -533,13 +535,14 @@ export function RemoteConnectWizard({
                       </button>
                       <button
                         type="button"
-                        className={`provider-add-segmented__item${authMode === "key" ? " provider-add-segmented__item--active" : ""}`}
+                        className="provider-add-segmented__item"
+                        aria-pressed={authMode === "key"}
                         disabled={busy}
                         onClick={() => setAuthMode("key")}
                       >
                         {t("remoteWizard.authKey")}
                       </button>
-                    </div>
+                    </SettingsOptions>
                   </div>
                 </div>
                 {authMode === "password" ? (
@@ -598,31 +601,33 @@ export function RemoteConnectWizard({
                 )}
                 <div className="remote-wizard__field">
                   <span>{t("remoteWizard.downloadMethod")}</span>
-                  <div className="provider-add-segmented remote-wizard__seg" role="group" aria-label={t("remoteWizard.downloadMethod")}>
-                    <button
-                      type="button"
-                      className={`provider-add-segmented__item${form.serveInstall === "upload" ? " provider-add-segmented__item--active" : ""}`}
-                      disabled={busy}
-                      onClick={() => set("serveInstall", "upload")}
-                    >
-                      {t("remoteWizard.downloadUpload")}
-                    </button>
-                    <button
-                      type="button"
-                      className={`provider-add-segmented__item${form.serveInstall === "npm" ? " provider-add-segmented__item--active" : ""}`}
-                      disabled={busy}
-                      onClick={() => set("serveInstall", "npm")}
-                    >
-                      {t("remoteWizard.downloadRemote")}
-                    </button>
-                  </div>
+                  <SettingsOptions className="remote-wizard__seg remote-wizard__install" layout="fill" aria-label={t("remoteWizard.downloadMethod")}>
+                    {([
+                      ["auto", "remoteWizard.downloadAuto"],
+                      ["upload", "remoteWizard.downloadUpload"],
+                      ["npm", "remoteWizard.downloadRemote"],
+                      ["never", "remoteWizard.downloadNever"],
+                    ] as const).map(([value, label]) => (
+                      <button
+                        key={value}
+                        type="button"
+                        className="provider-add-segmented__item"
+                        aria-pressed={form.serveInstall === value}
+                        disabled={busy}
+                        onClick={() => set("serveInstall", value)}
+                      >
+                        {t(label)}
+                      </button>
+                    ))}
+                  </SettingsOptions>
                 </div>
                 <div className="remote-wizard__field">
                   <span>{t("remote.host.credentialMode")}</span>
-                  <div className="provider-add-segmented remote-wizard__seg" role="group" aria-label={t("remote.host.credentialMode")}>
+                  <SettingsOptions className="remote-wizard__seg" layout="fill" aria-label={t("remote.host.credentialMode")}>
                     <button
                       type="button"
-                      className={`provider-add-segmented__item${form.credentialMode !== "local-proxy" ? " provider-add-segmented__item--active" : ""}`}
+                      className="provider-add-segmented__item"
+                      aria-pressed={form.credentialMode !== "local-proxy"}
                       disabled={busy}
                       onClick={() => set("credentialMode", "remote")}
                     >
@@ -630,13 +635,14 @@ export function RemoteConnectWizard({
                     </button>
                     <button
                       type="button"
-                      className={`provider-add-segmented__item${form.credentialMode === "local-proxy" ? " provider-add-segmented__item--active" : ""}`}
+                      className="provider-add-segmented__item"
+                      aria-pressed={form.credentialMode === "local-proxy"}
                       disabled={busy}
                       onClick={() => set("credentialMode", "local-proxy")}
                     >
                       {t("remote.host.credentialModeLocalProxy")}
                     </button>
-                  </div>
+                  </SettingsOptions>
                 </div>
                 </div>
               </>

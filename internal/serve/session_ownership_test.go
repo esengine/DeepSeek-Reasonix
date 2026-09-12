@@ -808,8 +808,12 @@ func TestMirroredStatusAndHistoryBySession(t *testing.T) {
 		t.Fatalf("spectator history = %d %q, want the writer's turn", status, body)
 	}
 	status, body = f.get(t, "/status?runtime=1&session="+filepath.ToSlash(other))
-	if status != http.StatusOK || !strings.Contains(body, `"takenOver":true`) {
+	if status != http.StatusOK || !strings.Contains(body, `"takenOver":true`) ||
+		!strings.Contains(body, `"holderKind":"tui"`) || !strings.Contains(body, `"holderPid":`) {
 		t.Fatalf("spectator status = %d %q, want takenOver", status, body)
+	}
+	if view := f.ownershipView(t, other); view.HolderKind != "tui" || view.HolderPID == 0 || view.HolderHost == "" {
+		t.Fatalf("mirrored owner identity = %+v", view)
 	}
 }
 
@@ -960,5 +964,27 @@ func TestAutoReclaimCompletesOutstandingReclaim(t *testing.T) {
 			t.Fatalf("stale mirror with outstanding reclaim was never cleared: %+v", f.ownershipView(t, other))
 		}
 		time.Sleep(10 * time.Millisecond)
+	}
+}
+
+func TestForceReclaimValidatesAndTerminatesExactReasonixHolder(t *testing.T) {
+	host, _ := os.Hostname()
+	previousCheck, previousTerminate := reasonixSessionHolderProcess, terminateReasonixSessionHolder
+	t.Cleanup(func() {
+		reasonixSessionHolderProcess = previousCheck
+		terminateReasonixSessionHolder = previousTerminate
+	})
+	checked, terminated := 0, 0
+	reasonixSessionHolderProcess = func(pid int) bool { checked = pid; return pid == 424242 }
+	terminateReasonixSessionHolder = func(pid int) error { terminated = pid; return nil }
+	info := &agent.SessionLeaseInfo{PID: 424242, Hostname: host, WriterID: "writer-generation"}
+	if err := validateAndTerminateSessionWriter(info, "writer-generation"); err != nil {
+		t.Fatal(err)
+	}
+	if checked != info.PID || terminated != info.PID {
+		t.Fatalf("force reclaim checked=%d terminated=%d", checked, terminated)
+	}
+	if err := validateAndTerminateSessionWriter(info, "different-generation"); err == nil {
+		t.Fatal("force reclaim accepted a changed writer generation")
 	}
 }

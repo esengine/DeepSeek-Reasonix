@@ -31493,10 +31493,38 @@
           }
         },
         {
+          "name": "reclaimBlocked",
+          "optional": true,
+          "type": {
+            "kind": "boolean"
+          }
+        },
+        {
           "name": "takenOver",
           "optional": true,
           "type": {
             "kind": "boolean"
+          }
+        },
+        {
+          "name": "holderPid",
+          "optional": true,
+          "type": {
+            "kind": "integer"
+          }
+        },
+        {
+          "name": "holderHost",
+          "optional": true,
+          "type": {
+            "kind": "string"
+          }
+        },
+        {
+          "name": "holderKind",
+          "optional": true,
+          "type": {
+            "kind": "string"
           }
         },
         {

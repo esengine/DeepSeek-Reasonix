@@ -5,6 +5,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"net/url"
+	"os"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -15,6 +16,49 @@ import (
 	"reasonix/internal/provider"
 	"reasonix/internal/transcript"
 )
+
+func TestTranscriptNewSessionBeforeFirstSave(t *testing.T) {
+	dir := t.TempDir()
+	bc := NewBroadcaster()
+	previous := agent.NewSession("system")
+	previous.Add(provider.Message{Role: provider.RoleUser, Content: "previous conversation"})
+	previous.Add(provider.Message{Role: provider.RoleAssistant, Content: "previous reply"})
+	previousPath := filepath.Join(dir, "previous.jsonl")
+	if err := previous.Save(previousPath); err != nil {
+		t.Fatal(err)
+	}
+	ctrl := control.New(control.Options{Executor: agent.New(nil, nil, previous, agent.Options{}, bc), SessionDir: dir, SessionPath: previousPath, Sink: bc})
+	defer ctrl.Close()
+	server := httptest.NewServer(New(ctrl, bc, config.ServeConfig{}).Handler())
+	defer server.Close()
+	response, err := http.Post(server.URL+"/new", "application/json", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	response.Body.Close()
+	path := response.Header.Get(sessionPathHeader)
+	if response.StatusCode != http.StatusNoContent || path == "" {
+		t.Fatalf("new: status=%d path=%q", response.StatusCode, path)
+	}
+	if _, err := os.Stat(path); !os.IsNotExist(err) {
+		t.Fatalf("fresh transcript should not exist yet: %v", err)
+	}
+	response, err = http.Get(server.URL + "/transcript/snapshot?session=" + url.QueryEscape(path))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer response.Body.Close()
+	if response.StatusCode != http.StatusOK {
+		t.Fatalf("fresh snapshot: status=%d", response.StatusCode)
+	}
+	var snap transcript.Snapshot
+	if err := json.NewDecoder(response.Body).Decode(&snap); err != nil {
+		t.Fatal(err)
+	}
+	if len(snap.Records) != 0 || snap.Identity.SessionID != agent.BranchID(path) {
+		t.Fatalf("fresh snapshot: %+v", snap)
+	}
+}
 
 func TestTranscriptHTTPBindsSessionAndImmutableContent(t *testing.T) {
 	dir := t.TempDir()

@@ -108,6 +108,7 @@ export function useActiveRemoteSession(
 const legacyRemotePolicyNotice = createLegacyRemotePolicyNoticeTracker();
 
 export function useRemoteSession(tabId: string | undefined, initial?: RemoteTabStateValue, sessionPath?: string): RemoteSessionApi {
+	const sessionIdentity = sessionPath?.trim() ?? "";
   const runtimeState = useRuntimeSession(tabId, sessionPath);
   const [state, setState] = useState<RemoteTabStateValue>(initial === "disconnected" ? "connecting" : (initial ?? "connecting"));
   const [error, setError] = useState("");
@@ -515,7 +516,11 @@ export function useRemoteSession(tabId: string | undefined, initial?: RemoteTabS
       offState();
       offEvent();
     };
-  }, [applyRemoteStatus, tabId]);
+  // A remote workspace deliberately reuses one tab while /new, /clear, and
+  // resume replace its durable session. Recreate the hydration scope when that
+  // identity changes so a failed read can never leave the previous transcript
+  // rendered under the new-session row.
+  }, [applyRemoteStatus, sessionIdentity, tabId]);
 
   // The runtime projection owns liveness. Feed a confirmed completion through
   // the shared reducer so the transcript and live store settle together. A

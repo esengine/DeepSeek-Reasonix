@@ -726,6 +726,8 @@ func runAgent(args []string, version string) int {
 	}
 	if takeoverBinding != nil {
 		takeoverManager.Activate(takeoverBinding)
+	} else {
+		takeoverManager.ObserveOwnedSession()
 	}
 	reclaimCLIRecoveryBranches(ctrl.SessionDir())
 
@@ -1229,6 +1231,8 @@ func chatREPL(args []string, version string) int {
 	takeoverManager.AttachController(ctrl)
 	if takeoverBinding != nil {
 		takeoverManager.Activate(takeoverBinding)
+	} else {
+		takeoverManager.ObserveOwnedSession()
 	}
 	if cfg != nil {
 		m.outputStyle = cfg.Agent.OutputStyle    // shown as the active entry in /output-style

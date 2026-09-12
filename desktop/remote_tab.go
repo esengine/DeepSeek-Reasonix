@@ -259,6 +259,7 @@ func (a *App) commitRemoteTabAttachResponse(tabID string, tab *remoteTab, gen, r
 		commitRemoteTabAttachRoute(current, target.Path, reset)
 	}
 	current.session.takenOver = target.TakenOver
+	current.session.reclaimBlocked = false
 	if name := strings.TrimSpace(target.Name); name != "" {
 		current.session.name = name
 	}
@@ -635,16 +636,15 @@ func (a *App) ReclaimRemoteTabSession(tabID string) error {
 	}
 	a.remoteTabMu.Lock()
 	observedTab := a.remoteTabs[tabID]
-	observedGen, observedRuntimeRevision, observedSelectionRevision := uint64(0), uint64(0), uint64(0)
+	observedGen, observedSelectionRevision := uint64(0), uint64(0)
 	if observedTab != nil {
 		observedGen = observedTab.gen
-		observedRuntimeRevision = observedTab.runtime.revision
 		observedSelectionRevision = observedTab.selectionRevision
 	}
 	a.remoteTabMu.Unlock()
 	stillCurrent := func(tab *remoteTab) bool {
 		return tab != nil && tab == observedTab && tab.client == client && tab.gen == observedGen &&
-			tab.runtime.revision == observedRuntimeRevision && tab.selectionRevision == observedSelectionRevision &&
+			tab.selectionRevision == observedSelectionRevision &&
 			agent.CanonicalSessionPath(tab.routing.currentPath) == agent.CanonicalSessionPath(expectedPath)
 	}
 	reconcileOwnership := func() { a.reconcileRemoteTabReclaimOwnership(tabID, client, base, expectedPath, stillCurrent) }
@@ -655,7 +655,8 @@ func (a *App) ReclaimRemoteTabSession(tabID string) error {
 	defer cancel()
 	body, _ := json.Marshal(map[string]any{
 		"sessionPath": expectedPath,
-		"mode":        "wait",
+		"mode":        "interrupt",
+		"force":       true,
 		"timeoutMs":   15000,
 	})
 	resp, err := serveDo(ctx, client, http.MethodPost, serveURL(base, "/reclaim"), body)
@@ -681,12 +682,20 @@ func (a *App) ReclaimRemoteTabSession(tabID string) error {
 	a.remoteTabMu.Lock()
 	if tab := a.remoteTabs[tabID]; stillCurrent(tab) {
 		tab.session.takenOver = false
+		tab.session.reclaimBlocked = false
+		tab.session.holderPID, tab.session.holderHost, tab.session.holderKind = 0, "", ""
+		tab.runtime.revision++ // Invalidate status reads begun before ownership returned.
 		meta := remoteTabMetaLocked(tab)
 		a.remoteTabMu.Unlock()
 		a.emitRemoteEvent("remote-tab:updated", meta)
 	} else {
 		a.remoteTabMu.Unlock()
 	}
+	// A successful reclaim changes the readable transcript source from the
+	// external writer's file view back to Serve's controller. Republish ready
+	// for this tab so the mounted surface reloads history under its existing
+	// session/selection fences without navigating the user.
+	a.emitRemoteEvent(fmt.Sprintf("remote-tab:%s:state", tabID), RemoteTabStateView{State: "ready"})
 	a.goRemoteTabSafe("reclaimStatusRefresh", func() { _, _ = a.RemoteTabStatus(tabID) })
 	return nil
 }
