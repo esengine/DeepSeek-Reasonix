@@ -463,6 +463,13 @@ jobs:
           xvfb-run -a node desktop/packaging/smoke.mjs \
             desktop/build/bin/app --service desktop/build/bin/reasonix-desktop
 
+      # Same tree, no handed-over service path: a shell started directly (pinned
+      # taskbar icon, double-click) must find reasonix-desktop beside app/.
+      - name: Smoke-test packaged Linux startup without a configured service
+        if: runner.os == 'Linux'
+        run: |
+          xvfb-run -a node desktop/packaging/smoke.mjs desktop/build/bin/app
+
       # Sign every executable that users actually run before rebuilding the
       # portable archive and NSIS installer. Signing only the finished NSIS
       # container leaves reasonix-desktop.exe and its sidecars unsigned after

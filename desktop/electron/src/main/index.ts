@@ -33,6 +33,7 @@ import { record } from "./params.js";
 import { APP_INDEX_URL, APP_SCHEME, registerAppProtocol, resolveDistRoot } from "./protocol.js";
 import { RemoteWindowHost } from "./remoteWindows.js";
 import { ServiceSupervisor } from "./service.js";
+import { resolveServiceBinary } from "./serviceBinary.js";
 import { claimShellInstance } from "./singleInstance.js";
 import { TrayHost } from "./tray.js";
 import { DEFAULT_GEOMETRY, MainWindow } from "./window.js";
@@ -110,8 +111,8 @@ function bootstrap(dataHome: string): void {
   const zoomStore = new AppZoomStore(join(dataHome, "electron-app-zoom.json"), join(dataHome, "desktop-zoom.json"));
   const icons = iconCandidates({ platform: process.platform, appPath: app.getAppPath(), resourcesPath: process.resourcesPath, packaged: app.isPackaged });
   const windowIcon = process.platform === "darwin" ? undefined : (firstExisting(icons.window) ?? undefined);
-  const serviceBinary = (process.env.REASONIX_DESKTOP_SERVICE ?? "").trim()
-    || join(process.resourcesPath, "service", process.platform === "win32" ? "reasonix-desktop.exe" : "reasonix-desktop");
+  const serviceLookup = resolveServiceBinary({ env: process.env, platform: process.platform, execPath: process.execPath, resourcesPath: process.resourcesPath });
+  const serviceBinary = serviceLookup.binary;
 
   let domReadyGeneration = "";
 
@@ -503,7 +504,8 @@ function bootstrap(dataHome: string): void {
       zoomOut: () => { void mainWindow.stepAppZoom(-1); },
       resetZoom: () => { void mainWindow.resetAppZoom(); },
     });
-    log.info(`shell starting: service ${serviceBinary}, ui ${appURL}, dist ${distRoot}, home ${dataHome}`);
+    const probed = serviceLookup.probed.length > 0 ? ` (probed ${serviceLookup.probed.join(", ")})` : "";
+    log.info(`shell starting: service ${serviceBinary}${probed}, ui ${appURL}, dist ${distRoot}, home ${dataHome}`);
     return service.start().catch(() => undefined);
   }).catch((error: unknown) => {
     log.error(`shell bootstrap failed: ${errorText(error)}`);
