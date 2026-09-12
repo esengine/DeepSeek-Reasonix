@@ -1,0 +1,22 @@
+  PASS model replay starts with hydrated transcript blocks
+  PASS real model selection preserves source transcript, Composer draft and writable readiness
+  PASS workbench layout renders from the authoritative startup snapshot
+  PASS creation layout preserves the Composer draft and mount
+  PASS workbench layout preserves the Composer draft and mount
+  PASS layout variants and management-page visits retain Sidebar, Composer, actual WorkspacePanel/tree and file preview identity
+  PASS open terminal drawer exposes one keyboard resizer
+  PASS open terminal compacts the shared footer without remounting Composer
+  PASS terminal drawer lifecycle preserves the Composer draft
+  PASS closed warm terminal remains mounted and hidden
+  PASS closed warm terminal is inert and leaves keyboard navigation
+  PASS same-project session switching preserves the Sidebar project tree (not WorkspacePanel)
+  PASS same-project session switching preserves actual WorkspacePanel, tree, preview DOM and selected file
+  PASS the six AppRuntimeEffects subscriptions remain singular (6)
+  PASS instrumented operation owners report zero active operations (not yet all App operations)
+  PASS remote project selection adopts its source workspace and authoritative hydrated surface
+  PASS global New Session stays on the remote workspace instead of opening a local blank
+  PASS local/remote navigation and remote New Session preserve the Composer DOM identity
+  PASS subsequent local navigation owns the surface; remote events do not reclaim it
+  PASS ordinary source-bound send and native Stop preserve Composer identity and restore writable readiness
+  PASS layout replay emits no page errors (0)
+app browser lifecycle gate passed

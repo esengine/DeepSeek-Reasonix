@@ -46,7 +46,7 @@ Object.defineProperty(navigator, "clipboard", { configurable: true, value: {
   writeText: async (text: string) => { copied.push(text); },
 } });
 const commands = {
-  onPrompt: noAction, onDeliveryContinue: undefined, onAcceptDelivery: undefined,
+  onPrompt: noAction, onFork: undefined, onDeliveryContinue: undefined, onAcceptDelivery: undefined,
   onOpenChanges: undefined, onOpenVerification: undefined, onEditPrompt: undefined,
   onRewind: undefined, onLoadOlderHistory: undefined, onSurfacePaintReady: undefined,
 };
@@ -77,11 +77,11 @@ function Fixture() {
   }, [options.width, revision]);
   const transcript: ChatPaneTranscriptInput = {
     state: { ...initialState, items, running: options.streaming }, items, tabId: "layout-fixture", geometrySessionKey: "layout-fixture",
-    footerHeight: 100, revealSignal: undefined, invocationMetadata: undefined, surfaceCommitToken: undefined,
+    footerHeight: 100, invocationMetadata: undefined, surfaceCommitToken: undefined,
     liveStore: undefined, transcriptHydrating: false, navigationDataReady: true, readOnly: false,
     controllerReady: true, hydratePlaceholderActive: false, clearContextPending: false,
     creation: options.layout === "creation", availability: { kind: "ready", source: "history" },
-    rewind: { stateActive: false, committing: false, signal: undefined },
+    rewind: { stateActive: false, committing: false },
   };
   return <div className={"app app--windows app--windows-frameless app--" + options.layout} data-fixture-revision={revision}>
     <div className={`layout${options.sidebar ? "" : " layout--sidebar-collapsed"}${options.dock ? " layout--workspace-open" : ""}`}

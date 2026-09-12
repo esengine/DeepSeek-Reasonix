@@ -56,6 +56,9 @@ func RestoreCheckpoint(state Checkpoint, identity Identity) (*Projection, error)
 		return nil, err
 	}
 	p.runtime = owned.Runtime
+	if p.runtime.StartedAt > 0 {
+		p.startedTurnID = p.runtime.TurnID
+	}
 	for _, attempt := range owned.ActiveAttempts {
 		p.attempts[attempt.ID] = attempt
 	}

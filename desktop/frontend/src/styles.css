@@ -3360,8 +3360,7 @@ a[href] {
      independent of readable content width. */
   --transcript-inline-pad: 32px;
   position: relative;
-  /* TranscriptKernel owns logical anchors and applies at most one structural
-     correction per geometry revision. */
+  /* ChatScrollController owns reading anchors and programmatic scroll writes. */
   overflow-anchor: none;
   height: 100%;
   overflow-y: auto;
@@ -3445,144 +3444,6 @@ a[href] {
   margin-right: auto;
 }
 
-/* ── Transcript projection and window adapter ───────────────────── */
-.transcript__projection,
-.transcript__block,
-.transcript__resident-tail {
-  position: relative;
-}
-.transcript > .transcript__projection {
-  max-width: none;
-  margin-left: 0;
-  margin-right: 0;
-}
-.transcript__block {
-  display: flow-root;
-}
-.transcript__window-item {
-  box-sizing: border-box;
-  width: 100%;
-}
-.transcript__row {
-  position: relative;
-  display: flow-root;
-  box-sizing: border-box;
-  padding-left: var(--transcript-inline-pad, 32px);
-  padding-right: var(--transcript-inline-pad, 32px);
-}
-.transcript__header {
-  display: flow-root;
-  box-sizing: border-box;
-  width: 100%;
-  padding-left: var(--transcript-inline-pad, 32px);
-  padding-right: var(--transcript-inline-pad, 32px);
-}
-.transcript__header > * {
-  max-width: var(--maxw);
-  margin-left: auto;
-  margin-right: auto;
-}
-.transcript__older-status {
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  gap: 8px;
-  min-height: 36px;
-  color: var(--fg-faint);
-  font-size: 12px;
-}
-.transcript__older-status .btn {
-  flex-shrink: 0;
-}
-.transcript__older-spinner {
-  flex-shrink: 0;
-  animation: spin 0.8s linear infinite;
-}
-.transcript-selection-overlay {
-  position: absolute;
-  inset: 0;
-  z-index: var(--z-local-handle);
-  pointer-events: none;
-  overflow: visible;
-}
-.transcript-selection-overlay__rect {
-  position: absolute;
-  display: block;
-  border-radius: 2px;
-  background: color-mix(in srgb, Highlight 34%, transparent);
-}
-.transcript__row > * {
-  max-width: var(--maxw);
-  margin-left: auto;
-  margin-right: auto;
-}
-.transcript__row > *:first-child {
-  margin-top: 0;
-}
-.history-preview__body .transcript__row > * {
-  max-width: none;
-}
-/* Keep the lazy Markdown source readable while the parser resolves the real
-   parser result. The row itself remains free to measure once the marker is
-   removed; no manual-scroll path writes a forced row height. */
-.transcript__row .msg--assistant .msg__body > .md[data-transcript-geometry-pending] {
-  box-sizing: border-box;
-  height: max(0px, calc(var(--transcript-row-estimate) - 32px));
-  overflow: hidden;
-}
-/* Offscreen blocks are unmounted by the window adapter, so content-visibility
-   culling is redundant inside rows — and skipping it keeps offsetHeight
-   measurements exact instead of contain-intrinsic-size placeholders. */
-.transcript__row .msg,
-.transcript__row .turn-collapse,
-.transcript__row .tool,
-.transcript__row .process-card,
-.transcript__row .readonly-batch,
-.transcript__row .tool-group,
-.transcript__row .md > * {
-  content-visibility: visible;
-  contain-intrinsic-size: none;
-}
-.transcript__jump-bottom:not([hidden]) {
-  position: absolute;
-  left: 50%;
-  bottom: 34px;
-  z-index: var(--z-inline-sticky);
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  width: 38px;
-  height: 38px;
-  padding: 0;
-  border: 1px solid color-mix(in srgb, var(--accent) 22%, var(--border));
-  border-radius: 999px;
-  background: color-mix(in srgb, var(--bg-elev) 92%, var(--accent-soft));
-  color: var(--fg);
-  box-shadow: var(--shadow-2);
-  cursor: pointer;
-  pointer-events: auto;
-  transform: translateX(-50%);
-  transition:
-    transform 0.12s ease,
-    background 0.12s ease,
-    border-color 0.12s ease,
-    color 0.12s ease,
-    box-shadow 0.12s ease,
-    opacity 0.12s ease;
-}
-.transcript__jump-bottom:hover {
-  transform: translate(-50%, -1px);
-  border-color: color-mix(in srgb, var(--accent) 40%, var(--border));
-  background: color-mix(in srgb, var(--bg-elev-2) 88%, var(--accent-soft));
-  color: var(--accent);
-  box-shadow: 0 12px 30px color-mix(in srgb, var(--accent) 18%, transparent);
-}
-.transcript__jump-bottom:focus-visible {
-  outline: none;
-  box-shadow:
-    var(--focus-ring),
-    var(--shadow-2);
-}
 .transcript--empty {
   container-type: size;
   display: flex;
@@ -3888,110 +3749,6 @@ a[href] {
   white-space: nowrap;
 }
 
-.transcript-shell > .jump-bar {
-  position: absolute;
-  top: 50%;
-  right: 0;
-  z-index: var(--z-inline-sticky);
-  max-width: none;
-  margin: 0;
-  transform: translate(4px, -50%);
-}
-.jump-bar {
-  z-index: var(--z-inline-sticky);
-  display: flex;
-  flex-direction: column;
-  align-items: flex-end;
-  width: 56px;
-  height: 240px;
-  padding: 0 12px;
-  opacity: 0;
-  pointer-events: none;
-  animation: jump-bar-in 0.18s ease-out 0.08s forwards;
-}
-.jump-scroll {
-  position: relative;
-  width: 32px;
-  height: 100%;
-  cursor: pointer;
-  pointer-events: auto;
-  outline: none;
-}
-.jump-item {
-  position: absolute;
-  left: 0;
-  display: flex;
-  align-items: center;
-  justify-content: flex-end;
-  width: 32px;
-  height: 3px;
-  transform: translateY(-50%);
-  pointer-events: none;
-}
-.jump-scroll:focus-visible {
-  border-radius: 4px;
-  box-shadow: 0 0 0 3px var(--accent-soft);
-}
-.jump-dot {
-  pointer-events: none;
-  height: 3px;
-  border-radius: 2px;
-  background: var(--border);
-  transition:
-    background 200ms,
-    width 400ms cubic-bezier(0.34, 1.56, 0.64, 1),
-    box-shadow 150ms;
-}
-.jump-scroll[data-density="compact"] .jump-dot {
-  height: 2px;
-}
-.jump-scroll[data-density="packed"] .jump-dot {
-  height: 1px;
-}
-.jump-item[data-loaded="false"] .jump-dot {
-  background: color-mix(in srgb, var(--border) 55%, transparent);
-}
-.jump-dot[data-d="0"] {
-  background: var(--accent);
-}
-.jump-dot[data-d="1"] {
-  background: color-mix(in srgb, var(--accent) 60%, transparent);
-}
-.jump-dot[data-d="2"] {
-  background: color-mix(in srgb, var(--accent) 35%, transparent);
-}
-.jump-preview {
-  position: absolute;
-  right: 100%;
-  top: 0;
-  max-width: 240px;
-  margin-right: 12px;
-  padding: 4px 8px;
-  overflow: hidden;
-  border: 1px solid var(--border);
-  border-radius: 6px;
-  background: var(--bg-elev);
-  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.18);
-  color: var(--fg);
-  font-size: 12px;
-  line-height: 1.35;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-  pointer-events: none;
-  transform: translateY(-50%);
-}
-.jump-text {
-  display: block;
-  overflow: hidden;
-  text-overflow: ellipsis;
-}
-@keyframes jump-bar-in {
-  to {
-    opacity: 1;
-    transform: translate(0, -50%);
-  }
-}
-
 .welcome {
   --welcome-brand-width: 240px;
   --welcome-brand-height: 56px;
@@ -4177,13 +3934,6 @@ a[href] {
   content-visibility: auto;
   contain-intrinsic-size: 1px 60px;
 }
-/* The transcript window adapter already bounds mounted blocks. A second
- * content-visibility viewport would replace real measurements with an
- * intrinsic placeholder, so keep it only for non-transcript message lists. */
-.transcript__row .msg {
-  content-visibility: visible;
-  contain-intrinsic-size: auto;
-}
 .msg--user {
   display: flex;
   flex-direction: column;
@@ -4199,76 +3949,6 @@ a[href] {
   padding: 10px 16px;
   position: relative;
   box-shadow: var(--chat-user-shadow);
-}
-.msg--user .msg__body--editing {
-  width: min(82%, 680px);
-  min-width: min(420px, 82%);
-  padding: 14px 16px 16px;
-  border-radius: 18px;
-}
-.msg-edit {
-  display: flex;
-  flex-direction: column;
-  gap: 12px;
-}
-.msg-edit__attachments {
-  margin-bottom: 0;
-}
-.msg-edit__input {
-  width: 100%;
-  min-height: 78px;
-  padding: 0;
-  border: none;
-  outline: none;
-  resize: vertical;
-  background: transparent;
-  color: inherit;
-  font: inherit;
-  font-size: var(--text-lg);
-  font-weight: 450;
-  line-height: 1.65;
-  white-space: pre-wrap;
-}
-.msg-edit__input:disabled {
-  opacity: 0.72;
-}
-.msg-edit__actions {
-  display: flex;
-  align-items: center;
-  justify-content: flex-end;
-  gap: 8px;
-}
-.msg-edit__btn {
-  min-height: 34px;
-  padding: 0 14px;
-  border: 1px solid var(--button-border);
-  border-radius: var(--button-radius);
-  background: var(--button-bg);
-  color: var(--button-fg);
-  font: inherit;
-  font-size: var(--text-md);
-  font-weight: 650;
-  line-height: 1;
-  transition: color 0.12s, background 0.12s, border-color 0.12s, opacity 0.12s;
-}
-.msg-edit__btn:hover:not(:disabled),
-.msg-edit__btn:focus-visible:not(:disabled) {
-  background: var(--button-bg-hover);
-  border-color: var(--button-border-hover);
-}
-.msg-edit__btn--primary {
-  border-color: var(--control-primary-bg);
-  background: var(--control-primary-bg);
-  color: var(--control-primary-fg);
-}
-.msg-edit__btn--primary:hover:not(:disabled),
-.msg-edit__btn--primary:focus-visible:not(:disabled) {
-  border-color: var(--accent-strong);
-  background: var(--accent-strong);
-}
-.msg-edit__btn:disabled {
-  cursor: not-allowed;
-  opacity: 0.52;
 }
 .msg-meta {
   display: flex;
@@ -5408,41 +5088,6 @@ button.reasoning-summary:focus-visible {
   overflow-y: hidden;
   margin: 0 0 12px;
 }
-/* Large tables default to an in-flow preview; expand mounts the virtual
-/* Large tables default to an in-flow preview; expand mounts the virtual
-   scroller only when the user opts in (see MarkdownTable.tsx). */
-.md-table-fold {
-  display: flex;
-  flex-direction: column;
-  gap: 8px;
-  margin: 0 0 12px;
-}
-.md-table-fold > .md-table-scroll,
-.md-table-fold > .md-table-virtual {
-  margin-bottom: 0;
-}
-.md-table-fold__toggle {
-  --reasonix-draggable: no-drag;
-  align-self: flex-start;
-  margin: 0;
-  padding: 4px 10px;
-  border: 1px solid var(--border);
-  border-radius: 999px;
-  background: var(--bg-soft);
-  color: var(--fg-dim);
-  font-size: var(--text-xs, 12px);
-  line-height: 1.4;
-  cursor: pointer;
-}
-.md-table-fold__toggle:hover {
-  color: var(--fg);
-  border-color: color-mix(in srgb, var(--accent) 28%, var(--border));
-  background: color-mix(in srgb, var(--accent-soft) 40%, var(--bg-soft));
-}
-.md-table-fold__toggle:focus-visible {
-  outline: 2px solid color-mix(in srgb, var(--accent) 55%, transparent);
-  outline-offset: 2px;
-}
 .md table {
   border-collapse: collapse;
   margin: 0 0 12px;
@@ -5466,43 +5111,6 @@ button.reasoning-summary:focus-visible {
 .md th {
   background: var(--bg-soft);
   font-weight: var(--font-weight-strong);
-}
-/* Row-virtualized oversized markdown tables (see MarkdownTable.tsx): the
-/* Row-virtualized oversized markdown tables (see MarkdownTable.tsx): the
-   wrapper owns vertical scroll, the thead stays pinned, and body rows are
-   absolutely positioned by the virtualizer. Flex rows keep header/body cells
-   column-aligned without a full-table layout pass. Marked data-nested-scroll
-   so transcript wheel handoff promotes edge gestures to .transcript. */
-.md-table-virtual {
-  overflow-y: auto;
-  overflow-x: auto;
-  overscroll-behavior: contain;
-  margin: 0 0 12px;
-  border: 1px solid var(--border);
-  border-radius: 6px;
-}
-.md-table-virtual table {
-  display: block;
-  margin: 0;
-  overflow: visible;
-  border-collapse: collapse;
-  width: 100%;
-}
-.md-table-virtual thead {
-  position: sticky;
-  top: 0;
-  z-index: var(--z-local-raised);
-  background: var(--bg-soft);
-}
-.md-table-virtual tr {
-  display: flex;
-  width: 100%;
-}
-.md-table-virtual th,
-.md-table-virtual td {
-  flex: 1 1 0;
-  min-width: 0;
-  overflow-wrap: anywhere;
 }
 .md-status-list {
   display: none;
@@ -8184,6 +7792,22 @@ body > .mermaid-diagram--fullscreen {
   font-weight: 650;
   line-height: 16px;
 }
+.composer-access-menu__heading {
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+.composer-access-menu__badge {
+  flex: 0 0 auto;
+  padding: 1px 6px;
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--ok) 14%, transparent);
+  color: var(--ok);
+  font-size: 10px;
+  font-weight: 650;
+  line-height: 16px;
+}
 .composer-access-menu__desc {
   min-width: 0;
   color: var(--fg-faint);
@@ -9121,6 +8745,122 @@ body > .mermaid-diagram--fullscreen {
 }
 .reasonix-confirm-dialog__actions .btn { min-width: 84px; }
 .reasonix-confirm-dialog__actions .btn--danger { font-weight: 600; }
+
+/* DeepSeek Harness-style explicit acknowledgement gate for Full access. */
+.risk-confirmation {
+  --reasonix-draggable: no-drag;
+  position: fixed;
+  inset: 0;
+  z-index: var(--z-overlay-backdrop);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 24px;
+}
+.risk-confirmation__mask {
+  position: absolute;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.24);
+  backdrop-filter: blur(2px);
+}
+.risk-confirmation__dialog {
+  position: relative;
+  z-index: var(--z-app-content);
+  display: flex;
+  flex-direction: column;
+  gap: 20px;
+  width: min(440px, 100%);
+  max-height: calc(100vh - 48px);
+  overflow: hidden;
+  border: 1px solid var(--border-soft);
+  border-radius: 24px;
+  background: var(--bg-elev);
+  color: var(--fg);
+  box-shadow: 0 22px 64px rgba(0, 0, 0, 0.22);
+}
+@supports (height: 100dvh) {
+  .risk-confirmation__dialog { max-height: calc(100dvh - 48px); }
+}
+.risk-confirmation__content {
+  min-height: 0;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+}
+.risk-confirmation__header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 22px 18px 12px 24px;
+}
+.risk-confirmation__header h2 {
+  margin: 0;
+  color: var(--fg);
+  font-size: 16px;
+  font-weight: 600;
+  line-height: 24px;
+}
+.risk-confirmation__close {
+  display: inline-flex;
+  flex: none;
+  align-items: center;
+  justify-content: center;
+  width: 30px;
+  height: 30px;
+  padding: 0;
+  border: 0;
+  border-radius: 8px;
+  background: transparent;
+  color: var(--fg-dim);
+  cursor: pointer;
+}
+.risk-confirmation__close:hover { background: var(--bg-hover, rgba(128, 128, 128, 0.08)); color: var(--fg); }
+.risk-confirmation__close:focus-visible,
+.risk-confirmation__acknowledgement input:focus-visible { outline: none; box-shadow: var(--focus-ring); }
+.risk-confirmation__close:disabled { cursor: default; opacity: 0.52; }
+.risk-confirmation__body { padding: 0 24px; }
+.risk-confirmation__warning {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  color: var(--fg-dim);
+  font-size: var(--font-control);
+  line-height: 1.6;
+}
+.risk-confirmation__warning > svg {
+  flex: none;
+  margin-top: 2px;
+  color: var(--err);
+}
+.risk-confirmation__warning p { margin: 0; }
+.risk-confirmation__acknowledgement {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  margin-top: 20px;
+  color: var(--fg);
+  font-size: var(--font-control);
+  line-height: 22px;
+  cursor: pointer;
+}
+.risk-confirmation__acknowledgement input {
+  flex: none;
+  width: 16px;
+  height: 16px;
+  margin: 3px 0 0;
+  accent-color: var(--control-primary-bg);
+  cursor: pointer;
+}
+.risk-confirmation__acknowledgement input:disabled { cursor: default; }
+.risk-confirmation__footer {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 8px;
+  padding: 0 24px 24px;
+}
+.risk-confirmation__cancel { min-width: 72px; }
+.risk-confirmation__confirm { min-width: 136px; }
 .blank-project-backdrop {
   --reasonix-draggable: no-drag;
   z-index: var(--z-overlay-backdrop);
@@ -10811,6 +10551,50 @@ body > .mermaid-diagram--fullscreen {
   align-items: center;
   gap: 6px;
 }
+.workspace-document-tabs {
+  flex: 0 0 auto;
+  display: flex;
+  min-width: 0;
+  gap: 2px;
+  overflow-x: auto;
+  padding: 4px 8px 0;
+  border-bottom: 1px solid var(--border-soft);
+  scrollbar-width: thin;
+}
+.workspace-document-tab {
+  display: inline-flex;
+  min-width: 0;
+  max-width: 190px;
+  align-items: center;
+  border: 1px solid transparent;
+  border-bottom: 0;
+  border-radius: 7px 7px 0 0;
+  color: var(--fg-faint);
+}
+.workspace-document-tab.is-active {
+  border-color: var(--border-soft);
+  background: var(--workspace-preview-bg);
+  color: var(--fg);
+}
+.workspace-document-tab > button {
+  display: inline-flex;
+  min-width: 0;
+  align-items: center;
+  gap: 5px;
+  padding: 5px 7px;
+  border: 0;
+  background: transparent;
+  color: inherit;
+}
+.workspace-document-tab > button:first-child span {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.workspace-document-tab > button:last-child {
+  flex: 0 0 auto;
+  padding-left: 2px;
+}
 .workspace-recent-menu {
   width: min(260px, calc(100vw - 24px));
   padding: 7px;
@@ -11016,6 +10800,52 @@ body > .mermaid-diagram--fullscreen {
   min-height: 520px;
   border: 0;
   background: var(--bg);
+}
+.workspace-media--html {
+  display: block;
+  height: 100%;
+  min-height: 520px;
+  border: 0;
+  background: #fff;
+}
+.workspace-media--audio,
+.workspace-media--video {
+  display: grid;
+  min-height: 100%;
+  place-items: center;
+  padding: 20px;
+}
+.workspace-media--audio audio { width: min(560px, 100%); }
+.workspace-media--video video { width: 100%; max-height: 100%; background: #000; }
+
+.workspace-csv-preview {
+  min-width: 0;
+  height: 100%;
+  overflow: auto;
+  padding: 12px;
+}
+.workspace-csv-preview table {
+  min-width: 100%;
+  border-collapse: collapse;
+  font-size: 12px;
+  line-height: 1.45;
+}
+.workspace-csv-preview th,
+.workspace-csv-preview td {
+  max-width: 360px;
+  padding: 7px 10px;
+  border: 1px solid var(--border-soft);
+  overflow: hidden;
+  text-align: left;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.workspace-csv-preview th {
+  position: sticky;
+  top: 0;
+  z-index: var(--z-inline-sticky);
+  background: var(--panel);
+  font-weight: 600;
 }
 .workspace-note {
   margin-bottom: 10px;
@@ -22181,9 +22011,6 @@ body > .mermaid-diagram--fullscreen {
     --transcript-inline-pad: 16px;
     padding: 18px 0 28px;
   }
-  .jump-bar {
-    display: none;
-  }
   .footer {
     padding: 10px 16px 8px;
   }
@@ -22532,19 +22359,7 @@ body > .mermaid-diagram--fullscreen {
 
 @media (prefers-reduced-motion: reduce) {
   .app--darwin .sidebar,
-  .app--darwin .layout,
-  
-  
-  
-  
-  
-  
-  
-  
-  
-  
-  
-  {
+  .app--darwin .layout {
     transition: none;
     animation: none;
   }
@@ -24050,16 +23865,12 @@ body > .mermaid-diagram--fullscreen {
 }
 :root[data-theme-style] .sidebar--workbench .project-tree__topic:hover .project-tree__topic-actions,
 :root[data-theme-style] .sidebar--workbench .project-tree__topic:focus-within .project-tree__topic-actions,
-:root[data-theme-style] .sidebar--workbench .project-tree__topic--menu-open .project-tree__topic-actions,
-
-{
+:root[data-theme-style] .sidebar--workbench .project-tree__topic--menu-open .project-tree__topic-actions {
   transform: translateY(-50%) translateX(0);
 }
 :root[data-theme-style] .sidebar--workbench .project-tree__topic:hover .project-tree__topic-side,
 :root[data-theme-style] .sidebar--workbench .project-tree__topic:focus-within .project-tree__topic-side,
-:root[data-theme-style] .sidebar--workbench .project-tree__topic--menu-open .project-tree__topic-side,
-
-{
+:root[data-theme-style] .sidebar--workbench .project-tree__topic--menu-open .project-tree__topic-side {
   transform: translateX(0);
 }
 
@@ -26941,16 +26752,16 @@ body > .mermaid-diagram--fullscreen {
   transform: translateY(-2px);
 }
 
-:root[data-theme-style] .msg {
+:root[data-theme-style] .msg:not(.chat-transcript .msg) {
   margin: 16px auto;
   animation: graphite-message-in var(--dur-slow) var(--ease-out) both;
 }
 
-:root[data-theme-style] .msg[data-history-restore] {
+:root[data-theme-style] .msg:not(.chat-transcript .msg)[data-history-restore] {
   animation: none;
 }
 
-:root[data-theme-style] .msg--user:not(.msg--im-source) .msg__body:not(.msg__body--editing) {
+:root[data-theme-style] .msg--user:not(.chat-transcript .msg--user):not(.msg--im-source) .msg__body:not(.msg__body--editing) {
   max-width: min(80%, 650px);
   padding: 11px 15px;
   border: 1px solid var(--chat-user-border);
@@ -26960,7 +26771,7 @@ body > .mermaid-diagram--fullscreen {
   box-shadow: var(--app-graphite-shadow);
 }
 
-:root[data-theme-style] .msg--assistant .msg__body {
+:root[data-theme-style] .msg--assistant:not(.chat-transcript .msg--assistant) .msg__body {
   color: var(--fg);
   font-size: var(--font-content);
   line-height: 1.85;
@@ -27033,11 +26844,11 @@ body > .mermaid-diagram--fullscreen {
 }
 
 :root[data-theme-style] .process-card.tool .process-card__kind,
-:root[data-theme-style] .msg--assistant > .process-card[data-tone="violet"] .process-card__kind {
+:root[data-theme-style] .msg--assistant:not(.chat-transcript .msg--assistant) > .process-card[data-tone="violet"] .process-card__kind {
   display: none;
 }
 
-:root[data-theme-style] .msg--assistant > .process-card[data-tone="violet"] .process-card__name {
+:root[data-theme-style] .msg--assistant:not(.chat-transcript .msg--assistant) > .process-card[data-tone="violet"] .process-card__name {
   color: var(--fg);
   font-family: inherit;
   font-size: var(--text-md);
@@ -27804,7 +27615,7 @@ body > .mermaid-diagram--fullscreen {
 
 :root[data-theme-style] .workspace-preview__body .code,
 :root[data-theme-style] .workspace-preview__body .code-block,
-:root[data-theme-style] .workspace-preview__body .md {
+:root[data-theme-style] .workspace-preview__body .md:not(.chat-transcript .md) {
   border-radius: 0;
 }
 
@@ -27821,7 +27632,7 @@ body > .mermaid-diagram--fullscreen {
   padding: 0;
 }
 
-:root[data-theme-style] .workspace-preview__body .md {
+:root[data-theme-style] .workspace-preview__body .md:not(.chat-transcript .md) {
   padding: 2px 14px 18px;
   background: transparent;
 }
@@ -28820,9 +28631,7 @@ body > .mermaid-diagram--fullscreen {
 
 .sidebar--workbench .project-tree__topic:hover .project-tree__topic-actions,
 .sidebar--workbench .project-tree__topic:focus-within .project-tree__topic-actions,
-.sidebar--workbench .project-tree__topic--menu-open .project-tree__topic-actions,
-
-{
+.sidebar--workbench .project-tree__topic--menu-open .project-tree__topic-actions {
   opacity: 1;
   pointer-events: auto;
   transform: translateY(-50%) translateX(0);
@@ -28831,10 +28640,7 @@ body > .mermaid-diagram--fullscreen {
 .sidebar--workbench .project-tree__topic:hover .project-tree__topic-side,
 .sidebar--workbench .project-tree__topic:focus-within .project-tree__topic-side,
 .sidebar--workbench .project-tree__topic--menu-open .project-tree__topic-side,
-.sidebar--workbench .project-tree__topic--unread .project-tree__topic-side,
-
-
-{
+.sidebar--workbench .project-tree__topic--unread .project-tree__topic-side {
   opacity: 0;
   transform: translateX(-3px);
 }
@@ -28876,8 +28682,7 @@ body > .mermaid-diagram--fullscreen {
 }
 
 .sidebar--workbench .project-tree__topic-action--pinned,
-.sidebar--workbench .project-tree__topic-action--pinned:hover,
-{
+.sidebar--workbench .project-tree__topic-action--pinned:hover {
   color: var(--accent);
   border-color: color-mix(in srgb, var(--accent) 30%, transparent);
   background: var(--accent-soft);
@@ -28888,8 +28693,7 @@ body > .mermaid-diagram--fullscreen {
 }
 
 .sidebar--workbench .project-tree__topic-action:disabled,
-.sidebar--workbench .project-tree__topic-action:disabled:hover,
-{
+.sidebar--workbench .project-tree__topic-action:disabled:hover {
   cursor: not-allowed;
   opacity: 0.4;
   color: var(--fg-faint);
@@ -31402,65 +31206,6 @@ body > .mermaid-diagram--fullscreen {
   box-shadow: none;
 }
 
-/* Creation: hide native chat scrollbar and use a controllable custom rail.
-/* Creation: hide native chat scrollbar and use a controllable custom rail.
-   Native WebView2 thumb hover-size is unreliable; custom thumb can snap thick/thin.
-   Keep this scrolling layer opaque too: transparent transcript backgrounds can
-   leave stale turn-action pixels behind when message nodes are removed (#6359). */
-.app--creation .transcript.transcript--creation-scrollbar,
-:root[data-theme-style] .app--creation .transcript.transcript--creation-scrollbar {
-  background-color: var(--bg);
-  scrollbar-width: none;
-  scrollbar-color: transparent transparent;
-}
-
-.app--creation .transcript.transcript--creation-scrollbar::-webkit-scrollbar,
-:root[data-theme-style] .app--creation .transcript.transcript--creation-scrollbar::-webkit-scrollbar {
-  width: 0 !important;
-  height: 0 !important;
-  display: none !important;
-  background: transparent !important;
-}
-
-.app--creation .transcript__scrollbar,
-:root[data-theme-style] .app--creation .transcript__scrollbar {
-  --reasonix-draggable: no-drag;
-  position: absolute;
-  top: 0;
-  /* Hug the chat/right-dock seam; keep only a tiny air gap. */
-  right: 0;
-  bottom: 0;
-  z-index: var(--z-inline-sticky);
-  /* Narrow rail: still easy to hit, without a wide empty track. */
-  width: 10px;
-  pointer-events: auto;
-}
-
-.app--creation .transcript__scrollbar-thumb,
-:root[data-theme-style] .app--creation .transcript__scrollbar-thumb {
-  position: absolute;
-  /* Pin to the right edge of the rail so it sits next to the dock border. */
-  right: 1px;
-  left: auto;
-  width: 3px;
-  border-radius: 999px;
-  background: color-mix(in srgb, var(--fg-faint) 42%, transparent);
-  cursor: grab;
-  transition: none;
-  touch-action: none;
-}
-
-.app--creation .transcript__scrollbar--hot .transcript__scrollbar-thumb,
-.app--creation .transcript__scrollbar-thumb:active,
-:root[data-theme-style] .app--creation .transcript__scrollbar--hot .transcript__scrollbar-thumb,
-:root[data-theme-style] .app--creation .transcript__scrollbar-thumb:active {
-  /* Mild thicken only: 3 → 5. */
-  width: 5px;
-  right: 0;
-  background: color-mix(in srgb, var(--fg-dim) 64%, transparent);
-  cursor: grabbing;
-}
-
 .app--creation .transcript--empty {
   justify-content: center;
   padding: 24px 32px clamp(180px, 22vh, 260px);
@@ -31496,8 +31241,8 @@ body > .mermaid-diagram--fullscreen {
   overflow: visible;
 }
 
-.app--creation .msg--user:not(.msg--im-source) .msg__body:not(.msg__body--editing),
-:root[data-theme-style] .app--creation .msg--user:not(.msg--im-source) .msg__body:not(.msg__body--editing) {
+.app--creation .msg--user:not(.chat-transcript .msg--user):not(.msg--im-source) .msg__body:not(.msg__body--editing),
+:root[data-theme-style] .app--creation .msg--user:not(.chat-transcript .msg--user):not(.msg--im-source) .msg__body:not(.msg__body--editing) {
   border: 1px solid var(--chat-user-border);
   border-radius: 9px;
   padding: 7px 14px;
@@ -31506,8 +31251,8 @@ body > .mermaid-diagram--fullscreen {
   box-shadow: var(--chat-user-shadow);
 }
 
-.app--creation .msg--user:not(.msg--im-source) .msg__body:not(.msg__body--editing)::after,
-:root[data-theme-style] .app--creation .msg--user:not(.msg--im-source) .msg__body:not(.msg__body--editing)::after {
+.app--creation .msg--user:not(.chat-transcript .msg--user):not(.msg--im-source) .msg__body:not(.msg__body--editing)::after,
+:root[data-theme-style] .app--creation .msg--user:not(.chat-transcript .msg--user):not(.msg--im-source) .msg__body:not(.msg__body--editing)::after {
   content: "";
   position: absolute;
   top: 50%;
@@ -31520,8 +31265,8 @@ body > .mermaid-diagram--fullscreen {
   transform: translateY(-50%) rotate(45deg);
 }
 
-.app--creation .msg--user:not(.msg--im-source) .msg__text,
-:root[data-theme-style] .app--creation .msg--user:not(.msg--im-source) .msg__text {
+.app--creation .msg--user:not(.chat-transcript .msg--user):not(.msg--im-source) .msg__text,
+:root[data-theme-style] .app--creation .msg--user:not(.chat-transcript .msg--user):not(.msg--im-source) .msg__text {
   color: inherit;
   font-weight: 500;
   line-height: 1.35;
@@ -31537,10 +31282,10 @@ body > .mermaid-diagram--fullscreen {
   transition: opacity 0.14s, transform 0.14s;
 }
 
-.app--creation .msg--user:hover .msg-meta,
-.app--creation .msg--user:focus-within .msg-meta,
-:root[data-theme-style] .app--creation .msg--user:hover .msg-meta,
-:root[data-theme-style] .app--creation .msg--user:focus-within .msg-meta {
+.app--creation .msg--user:not(.chat-transcript .msg--user):hover .msg-meta,
+.app--creation .msg--user:not(.chat-transcript .msg--user):focus-within .msg-meta,
+:root[data-theme-style] .app--creation .msg--user:not(.chat-transcript .msg--user):hover .msg-meta,
+:root[data-theme-style] .app--creation .msg--user:not(.chat-transcript .msg--user):focus-within .msg-meta {
   opacity: 1;
   transform: translateY(0);
 }
@@ -31555,13 +31300,13 @@ body > .mermaid-diagram--fullscreen {
   background: transparent;
 }
 
-.app--creation .msg--assistant:has(+ .turn-actions),
-:root[data-theme-style] .app--creation .msg--assistant:has(+ .turn-actions) {
+.app--creation .msg--assistant:not(.chat-transcript .msg--assistant):has(+ .turn-actions),
+:root[data-theme-style] .app--creation .msg--assistant:not(.chat-transcript .msg--assistant):has(+ .turn-actions) {
   margin-bottom: 0;
 }
 
-.app--creation .msg--assistant .msg__body,
-:root[data-theme-style] .app--creation .msg--assistant .msg__body {
+.app--creation .msg--assistant:not(.chat-transcript .msg--assistant) .msg__body,
+:root[data-theme-style] .app--creation .msg--assistant:not(.chat-transcript .msg--assistant) .msg__body {
   color: color-mix(in srgb, var(--fg) 96%, var(--bg));
   font-family: var(--font-content-family);
   font-size: var(--font-content);
@@ -31569,70 +31314,70 @@ body > .mermaid-diagram--fullscreen {
   letter-spacing: 0.005em;
 }
 
-:root[data-theme="light"] .app--creation .msg--assistant .msg__body {
+:root[data-theme="light"] .app--creation .msg--assistant:not(.chat-transcript .msg--assistant) .msg__body {
   color: color-mix(in srgb, var(--fg) 90%, var(--bg));
 }
 
 @media (prefers-color-scheme: light) {
-  :root:not([data-theme]) .app--creation .msg--assistant .msg__body {
+  :root:not([data-theme]) .app--creation .msg--assistant:not(.chat-transcript .msg--assistant) .msg__body {
     color: color-mix(in srgb, var(--fg) 90%, var(--bg));
   }
 }
 
-.app--creation .md,
-:root[data-theme-style] .app--creation .md {
+.app--creation .md:not(.chat-transcript .md),
+:root[data-theme-style] .app--creation .md:not(.chat-transcript .md) {
   font-family: var(--font-content-family);
 }
 
-.app--creation .md p,
-:root[data-theme-style] .app--creation .md p {
+.app--creation .md:not(.chat-transcript .md) p,
+:root[data-theme-style] .app--creation .md:not(.chat-transcript .md) p {
   margin: 0 0 10px;
 }
 
-.app--creation .md h1,
-.app--creation .md h2,
-.app--creation .md h3,
-.app--creation .md h4,
-:root[data-theme-style] .app--creation .md h1,
-:root[data-theme-style] .app--creation .md h2,
-:root[data-theme-style] .app--creation .md h3,
-:root[data-theme-style] .app--creation .md h4 {
+.app--creation .md:not(.chat-transcript .md) h1,
+.app--creation .md:not(.chat-transcript .md) h2,
+.app--creation .md:not(.chat-transcript .md) h3,
+.app--creation .md:not(.chat-transcript .md) h4,
+:root[data-theme-style] .app--creation .md:not(.chat-transcript .md) h1,
+:root[data-theme-style] .app--creation .md:not(.chat-transcript .md) h2,
+:root[data-theme-style] .app--creation .md:not(.chat-transcript .md) h3,
+:root[data-theme-style] .app--creation .md:not(.chat-transcript .md) h4 {
   margin: 18px 0 8px;
   color: color-mix(in srgb, var(--fg) 92%, var(--bg));
   font-weight: 650;
   line-height: 1.36;
 }
 
-.app--creation .md ul,
-.app--creation .md ol,
-:root[data-theme-style] .app--creation .md ul,
-:root[data-theme-style] .app--creation .md ol {
+.app--creation .md:not(.chat-transcript .md) ul,
+.app--creation .md:not(.chat-transcript .md) ol,
+:root[data-theme-style] .app--creation .md:not(.chat-transcript .md) ul,
+:root[data-theme-style] .app--creation .md:not(.chat-transcript .md) ol {
   margin: 0 0 10px;
   padding-left: 20px;
 }
 
-.app--creation .md li,
-:root[data-theme-style] .app--creation .md li {
+.app--creation .md:not(.chat-transcript .md) li,
+:root[data-theme-style] .app--creation .md:not(.chat-transcript .md) li {
   margin: 2px 0;
 }
 
-.app--creation .msg--assistant .md .code-block,
-:root[data-theme-style] .app--creation .msg--assistant .md .code-block {
+.app--creation .msg--assistant:not(.chat-transcript .msg--assistant) .md .code-block,
+:root[data-theme-style] .app--creation .msg--assistant:not(.chat-transcript .msg--assistant) .md .code-block {
   margin: 10px 0 16px;
 }
 
-.app--creation .msg--assistant .md .md-plain-block--split > .code-block,
-:root[data-theme-style] .app--creation .msg--assistant .md .md-plain-block--split > .code-block {
+.app--creation .msg--assistant:not(.chat-transcript .msg--assistant) .md .md-plain-block--split > .code-block,
+:root[data-theme-style] .app--creation .msg--assistant:not(.chat-transcript .msg--assistant) .md .md-plain-block--split > .code-block {
   display: none;
 }
 
-.app--creation .msg--assistant .md .md-plain-block__diagram,
-:root[data-theme-style] .app--creation .msg--assistant .md .md-plain-block__diagram {
+.app--creation .msg--assistant:not(.chat-transcript .msg--assistant) .md .md-plain-block__diagram,
+:root[data-theme-style] .app--creation .msg--assistant:not(.chat-transcript .msg--assistant) .md .md-plain-block__diagram {
   margin: 10px 0 8px;
 }
 
-.app--creation .msg--assistant .md .md-plain-block__diagram .code:not([data-lang]),
-:root[data-theme-style] .app--creation .msg--assistant .md .md-plain-block__diagram .code:not([data-lang]) {
+.app--creation .msg--assistant:not(.chat-transcript .msg--assistant) .md .md-plain-block__diagram .code:not([data-lang]),
+:root[data-theme-style] .app--creation .msg--assistant:not(.chat-transcript .msg--assistant) .md .md-plain-block__diagram .code:not([data-lang]) {
   font-family: var(--font-code-family);
   font-size: var(--font-code);
   letter-spacing: 0;
@@ -31641,16 +31386,16 @@ body > .mermaid-diagram--fullscreen {
   word-break: normal;
 }
 
-.app--creation .msg--assistant .md .md-status-list,
-:root[data-theme-style] .app--creation .msg--assistant .md .md-status-list {
+.app--creation .msg--assistant:not(.chat-transcript .msg--assistant) .md .md-status-list,
+:root[data-theme-style] .app--creation .msg--assistant:not(.chat-transcript .msg--assistant) .md .md-status-list {
   display: grid;
   gap: 7px;
   margin: 10px 0 16px;
   padding: 2px 0 2px 2px;
 }
 
-.app--creation .msg--assistant .md .md-status-list__item,
-:root[data-theme-style] .app--creation .msg--assistant .md .md-status-list__item {
+.app--creation .msg--assistant:not(.chat-transcript .msg--assistant) .md .md-status-list__item,
+:root[data-theme-style] .app--creation .msg--assistant:not(.chat-transcript .msg--assistant) .md .md-status-list__item {
   display: grid;
   grid-template-columns: 7px minmax(0, 1fr);
   gap: 11px;
@@ -31663,8 +31408,8 @@ body > .mermaid-diagram--fullscreen {
   line-height: 1.58;
 }
 
-.app--creation .msg--assistant .md .md-status-list__dot,
-:root[data-theme-style] .app--creation .msg--assistant .md .md-status-list__dot {
+.app--creation .msg--assistant:not(.chat-transcript .msg--assistant) .md .md-status-list__dot,
+:root[data-theme-style] .app--creation .msg--assistant:not(.chat-transcript .msg--assistant) .md .md-status-list__dot {
   width: 6px;
   height: 6px;
   margin-top: 0.68em;
@@ -31673,14 +31418,14 @@ body > .mermaid-diagram--fullscreen {
   box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent) 11%, transparent);
 }
 
-.app--creation .msg--assistant .md .md-status-list__text,
-:root[data-theme-style] .app--creation .msg--assistant .md .md-status-list__text {
+.app--creation .msg--assistant:not(.chat-transcript .msg--assistant) .md .md-status-list__text,
+:root[data-theme-style] .app--creation .msg--assistant:not(.chat-transcript .msg--assistant) .md .md-status-list__text {
   min-width: 0;
   overflow-wrap: anywhere;
 }
 
-.app--creation .msg--assistant .md .code:not([data-lang]),
-:root[data-theme-style] .app--creation .msg--assistant .md .code:not([data-lang]) {
+.app--creation .msg--assistant:not(.chat-transcript .msg--assistant) .md .code:not([data-lang]),
+:root[data-theme-style] .app--creation .msg--assistant:not(.chat-transcript .msg--assistant) .md .code:not([data-lang]) {
   width: max-content;
   max-width: 100%;
   margin: 0;
@@ -31705,8 +31450,8 @@ body > .mermaid-diagram--fullscreen {
   word-break: break-word;
 }
 
-.app--creation .msg--assistant .md .code:not([data-lang]) + .code-block__copy,
-:root[data-theme-style] .app--creation .msg--assistant .md .code:not([data-lang]) + .code-block__copy {
+.app--creation .msg--assistant:not(.chat-transcript .msg--assistant) .md .code:not([data-lang]) + .code-block__copy,
+:root[data-theme-style] .app--creation .msg--assistant:not(.chat-transcript .msg--assistant) .md .code:not([data-lang]) + .code-block__copy {
   top: 2px;
   right: 2px;
   color: color-mix(in srgb, var(--fg-faint) 58%, var(--bg));
@@ -31714,24 +31459,24 @@ body > .mermaid-diagram--fullscreen {
   background: transparent;
 }
 
-.app--creation .msg--assistant .md .code:not([data-lang]) code,
-.app--creation .msg--assistant .md .code:not([data-lang]) span,
-:root[data-theme-style] .app--creation .msg--assistant .md .code:not([data-lang]) code,
-:root[data-theme-style] .app--creation .msg--assistant .md .code:not([data-lang]) span {
+.app--creation .msg--assistant:not(.chat-transcript .msg--assistant) .md .code:not([data-lang]) code,
+.app--creation .msg--assistant:not(.chat-transcript .msg--assistant) .md .code:not([data-lang]) span,
+:root[data-theme-style] .app--creation .msg--assistant:not(.chat-transcript .msg--assistant) .md .code:not([data-lang]) code,
+:root[data-theme-style] .app--creation .msg--assistant:not(.chat-transcript .msg--assistant) .md .code:not([data-lang]) span {
   font: inherit;
   letter-spacing: inherit;
 }
 
-.app--creation .msg--assistant .md .code[data-lang="bash"],
-.app--creation .msg--assistant .md .code[data-lang="shell"],
-.app--creation .msg--assistant .md .code[data-lang="sh"],
-.app--creation .msg--assistant .md .code[data-lang="powershell"],
-.app--creation .msg--assistant .md .code[data-lang="pwsh"],
-:root[data-theme-style] .app--creation .msg--assistant .md .code[data-lang="bash"],
-:root[data-theme-style] .app--creation .msg--assistant .md .code[data-lang="shell"],
-:root[data-theme-style] .app--creation .msg--assistant .md .code[data-lang="sh"],
-:root[data-theme-style] .app--creation .msg--assistant .md .code[data-lang="powershell"],
-:root[data-theme-style] .app--creation .msg--assistant .md .code[data-lang="pwsh"] {
+.app--creation .msg--assistant:not(.chat-transcript .msg--assistant) .md .code[data-lang="bash"],
+.app--creation .msg--assistant:not(.chat-transcript .msg--assistant) .md .code[data-lang="shell"],
+.app--creation .msg--assistant:not(.chat-transcript .msg--assistant) .md .code[data-lang="sh"],
+.app--creation .msg--assistant:not(.chat-transcript .msg--assistant) .md .code[data-lang="powershell"],
+.app--creation .msg--assistant:not(.chat-transcript .msg--assistant) .md .code[data-lang="pwsh"],
+:root[data-theme-style] .app--creation .msg--assistant:not(.chat-transcript .msg--assistant) .md .code[data-lang="bash"],
+:root[data-theme-style] .app--creation .msg--assistant:not(.chat-transcript .msg--assistant) .md .code[data-lang="shell"],
+:root[data-theme-style] .app--creation .msg--assistant:not(.chat-transcript .msg--assistant) .md .code[data-lang="sh"],
+:root[data-theme-style] .app--creation .msg--assistant:not(.chat-transcript .msg--assistant) .md .code[data-lang="powershell"],
+:root[data-theme-style] .app--creation .msg--assistant:not(.chat-transcript .msg--assistant) .md .code[data-lang="pwsh"] {
   width: max-content;
   max-width: 100%;
   margin: 7px 0 13px;
@@ -31749,16 +31494,16 @@ body > .mermaid-diagram--fullscreen {
   box-shadow: none;
 }
 
-.app--creation .msg--assistant .md .code[data-lang="bash"]::before,
-.app--creation .msg--assistant .md .code[data-lang="shell"]::before,
-.app--creation .msg--assistant .md .code[data-lang="sh"]::before,
-.app--creation .msg--assistant .md .code[data-lang="powershell"]::before,
-.app--creation .msg--assistant .md .code[data-lang="pwsh"]::before,
-:root[data-theme-style] .app--creation .msg--assistant .md .code[data-lang="bash"]::before,
-:root[data-theme-style] .app--creation .msg--assistant .md .code[data-lang="shell"]::before,
-:root[data-theme-style] .app--creation .msg--assistant .md .code[data-lang="sh"]::before,
-:root[data-theme-style] .app--creation .msg--assistant .md .code[data-lang="powershell"]::before,
-:root[data-theme-style] .app--creation .msg--assistant .md .code[data-lang="pwsh"]::before {
+.app--creation .msg--assistant:not(.chat-transcript .msg--assistant) .md .code[data-lang="bash"]::before,
+.app--creation .msg--assistant:not(.chat-transcript .msg--assistant) .md .code[data-lang="shell"]::before,
+.app--creation .msg--assistant:not(.chat-transcript .msg--assistant) .md .code[data-lang="sh"]::before,
+.app--creation .msg--assistant:not(.chat-transcript .msg--assistant) .md .code[data-lang="powershell"]::before,
+.app--creation .msg--assistant:not(.chat-transcript .msg--assistant) .md .code[data-lang="pwsh"]::before,
+:root[data-theme-style] .app--creation .msg--assistant:not(.chat-transcript .msg--assistant) .md .code[data-lang="bash"]::before,
+:root[data-theme-style] .app--creation .msg--assistant:not(.chat-transcript .msg--assistant) .md .code[data-lang="shell"]::before,
+:root[data-theme-style] .app--creation .msg--assistant:not(.chat-transcript .msg--assistant) .md .code[data-lang="sh"]::before,
+:root[data-theme-style] .app--creation .msg--assistant:not(.chat-transcript .msg--assistant) .md .code[data-lang="powershell"]::before,
+:root[data-theme-style] .app--creation .msg--assistant:not(.chat-transcript .msg--assistant) .md .code[data-lang="pwsh"]::before {
   content: "$";
   position: absolute;
   top: 9px;
@@ -31767,23 +31512,23 @@ body > .mermaid-diagram--fullscreen {
   font-weight: 700;
 }
 
-.app--creation .msg--assistant .md .code[data-lang="powershell"]::before,
-.app--creation .msg--assistant .md .code[data-lang="pwsh"]::before,
-:root[data-theme-style] .app--creation .msg--assistant .md .code[data-lang="powershell"]::before,
-:root[data-theme-style] .app--creation .msg--assistant .md .code[data-lang="pwsh"]::before {
+.app--creation .msg--assistant:not(.chat-transcript .msg--assistant) .md .code[data-lang="powershell"]::before,
+.app--creation .msg--assistant:not(.chat-transcript .msg--assistant) .md .code[data-lang="pwsh"]::before,
+:root[data-theme-style] .app--creation .msg--assistant:not(.chat-transcript .msg--assistant) .md .code[data-lang="powershell"]::before,
+:root[data-theme-style] .app--creation .msg--assistant:not(.chat-transcript .msg--assistant) .md .code[data-lang="pwsh"]::before {
   content: ">";
 }
 
-.app--creation .msg--assistant .md .code[data-lang="bash"] + .code-block__copy,
-.app--creation .msg--assistant .md .code[data-lang="shell"] + .code-block__copy,
-.app--creation .msg--assistant .md .code[data-lang="sh"] + .code-block__copy,
-.app--creation .msg--assistant .md .code[data-lang="powershell"] + .code-block__copy,
-.app--creation .msg--assistant .md .code[data-lang="pwsh"] + .code-block__copy,
-:root[data-theme-style] .app--creation .msg--assistant .md .code[data-lang="bash"] + .code-block__copy,
-:root[data-theme-style] .app--creation .msg--assistant .md .code[data-lang="shell"] + .code-block__copy,
-:root[data-theme-style] .app--creation .msg--assistant .md .code[data-lang="sh"] + .code-block__copy,
-:root[data-theme-style] .app--creation .msg--assistant .md .code[data-lang="powershell"] + .code-block__copy,
-:root[data-theme-style] .app--creation .msg--assistant .md .code[data-lang="pwsh"] + .code-block__copy {
+.app--creation .msg--assistant:not(.chat-transcript .msg--assistant) .md .code[data-lang="bash"] + .code-block__copy,
+.app--creation .msg--assistant:not(.chat-transcript .msg--assistant) .md .code[data-lang="shell"] + .code-block__copy,
+.app--creation .msg--assistant:not(.chat-transcript .msg--assistant) .md .code[data-lang="sh"] + .code-block__copy,
+.app--creation .msg--assistant:not(.chat-transcript .msg--assistant) .md .code[data-lang="powershell"] + .code-block__copy,
+.app--creation .msg--assistant:not(.chat-transcript .msg--assistant) .md .code[data-lang="pwsh"] + .code-block__copy,
+:root[data-theme-style] .app--creation .msg--assistant:not(.chat-transcript .msg--assistant) .md .code[data-lang="bash"] + .code-block__copy,
+:root[data-theme-style] .app--creation .msg--assistant:not(.chat-transcript .msg--assistant) .md .code[data-lang="shell"] + .code-block__copy,
+:root[data-theme-style] .app--creation .msg--assistant:not(.chat-transcript .msg--assistant) .md .code[data-lang="sh"] + .code-block__copy,
+:root[data-theme-style] .app--creation .msg--assistant:not(.chat-transcript .msg--assistant) .md .code[data-lang="powershell"] + .code-block__copy,
+:root[data-theme-style] .app--creation .msg--assistant:not(.chat-transcript .msg--assistant) .md .code[data-lang="pwsh"] + .code-block__copy {
   top: 5px;
   right: 5px;
   color: color-mix(in srgb, var(--fg-faint) 58%, var(--bg));
@@ -31791,16 +31536,16 @@ body > .mermaid-diagram--fullscreen {
   background: color-mix(in srgb, var(--bg-elev-2) 28%, var(--bg));
 }
 
-.app--creation .md blockquote,
-:root[data-theme-style] .app--creation .md blockquote {
+.app--creation .md:not(.chat-transcript .md) blockquote,
+:root[data-theme-style] .app--creation .md:not(.chat-transcript .md) blockquote {
   margin: 2px 0 12px;
   padding: 2px 12px;
   border-left-color: color-mix(in srgb, var(--border) 74%, var(--bg));
   color: color-mix(in srgb, var(--fg-dim) 88%, var(--bg));
 }
 
-.app--creation .md table,
-:root[data-theme-style] .app--creation .md table {
+.app--creation .md:not(.chat-transcript .md) table,
+:root[data-theme-style] .app--creation .md:not(.chat-transcript .md) table {
   display: table;
   width: 100%;
   max-width: 100%;
@@ -31816,10 +31561,10 @@ body > .mermaid-diagram--fullscreen {
   line-height: 1.5;
 }
 
-.app--creation .md th,
-.app--creation .md td,
-:root[data-theme-style] .app--creation .md th,
-:root[data-theme-style] .app--creation .md td {
+.app--creation .md:not(.chat-transcript .md) th,
+.app--creation .md:not(.chat-transcript .md) td,
+:root[data-theme-style] .app--creation .md:not(.chat-transcript .md) th,
+:root[data-theme-style] .app--creation .md:not(.chat-transcript .md) td {
   border: 0;
   border-right: 1px solid color-mix(in srgb, var(--border-soft) 84%, var(--bg));
   border-bottom: 1px solid color-mix(in srgb, var(--border-soft) 84%, var(--bg));
@@ -31829,17 +31574,17 @@ body > .mermaid-diagram--fullscreen {
   white-space: normal;
 }
 
-.app--creation .md th:first-child,
-.app--creation .md td:first-child,
-:root[data-theme-style] .app--creation .md th:first-child,
-:root[data-theme-style] .app--creation .md td:first-child {
+.app--creation .md:not(.chat-transcript .md) th:first-child,
+.app--creation .md:not(.chat-transcript .md) td:first-child,
+:root[data-theme-style] .app--creation .md:not(.chat-transcript .md) th:first-child,
+:root[data-theme-style] .app--creation .md:not(.chat-transcript .md) td:first-child {
   width: 108px;
 }
 
-.app--creation .md th .md-code,
-.app--creation .md td .md-code,
-:root[data-theme-style] .app--creation .md th .md-code,
-:root[data-theme-style] .app--creation .md td .md-code {
+.app--creation .md:not(.chat-transcript .md) th .md-code,
+.app--creation .md:not(.chat-transcript .md) td .md-code,
+:root[data-theme-style] .app--creation .md:not(.chat-transcript .md) th .md-code,
+:root[data-theme-style] .app--creation .md:not(.chat-transcript .md) td .md-code {
   display: inline-block;
   max-width: 100%;
   overflow: hidden;
@@ -31848,22 +31593,22 @@ body > .mermaid-diagram--fullscreen {
   white-space: nowrap;
 }
 
-.app--creation .md th,
-:root[data-theme-style] .app--creation .md th {
+.app--creation .md:not(.chat-transcript .md) th,
+:root[data-theme-style] .app--creation .md:not(.chat-transcript .md) th {
   background: color-mix(in srgb, var(--bg-elev-2) 62%, var(--bg));
   color: color-mix(in srgb, var(--fg) 88%, var(--bg));
   font-weight: 650;
 }
 
-.app--creation .md tr:last-child > th,
-.app--creation .md tr:last-child > td,
-:root[data-theme-style] .app--creation .md tr:last-child > th,
-:root[data-theme-style] .app--creation .md tr:last-child > td {
+.app--creation .md:not(.chat-transcript .md) tr:last-child > th,
+.app--creation .md:not(.chat-transcript .md) tr:last-child > td,
+:root[data-theme-style] .app--creation .md:not(.chat-transcript .md) tr:last-child > th,
+:root[data-theme-style] .app--creation .md:not(.chat-transcript .md) tr:last-child > td {
   border-bottom: 0;
 }
 
-.app--creation .md tr > :last-child,
-:root[data-theme-style] .app--creation .md tr > :last-child {
+.app--creation .md:not(.chat-transcript .md) tr > :last-child,
+:root[data-theme-style] .app--creation .md:not(.chat-transcript .md) tr > :last-child {
   border-right: 0;
 }
 
@@ -32273,11 +32018,11 @@ body > .mermaid-diagram--fullscreen {
   pointer-events: none;
 }
 
-.app--creation .msg--assistant:hover + .turn-actions,
+.app--creation .msg--assistant:not(.chat-transcript .msg--assistant):hover + .turn-actions,
 .app--creation .turn-actions:hover,
 .app--creation .turn-actions:focus-within,
 .app--creation .turn-actions--open,
-:root[data-theme-style] .app--creation .msg--assistant:hover + .turn-actions,
+:root[data-theme-style] .app--creation .msg--assistant:not(.chat-transcript .msg--assistant):hover + .turn-actions,
 :root[data-theme-style] .app--creation .turn-actions:hover,
 :root[data-theme-style] .app--creation .turn-actions:focus-within,
 :root[data-theme-style] .app--creation .turn-actions--open {
@@ -33954,7 +33699,7 @@ body > .mermaid-diagram--fullscreen {
 :root[data-theme-pack][data-theme-has-bg="true"][data-theme-scene="home"] .app:not(.app--creation) .context-panel__type-overview,
 :root[data-theme-pack][data-theme-has-bg="true"][data-theme-scene="home"] .app:not(.app--creation) .context-panel__view-switch,
 :root[data-theme-pack][data-theme-has-bg="true"][data-theme-scene="home"] .app:not(.app--creation) .mermaid-diagram,
-:root[data-theme-pack][data-theme-has-bg="true"][data-theme-scene="home"] .app:not(.app--creation) .md th,
+:root[data-theme-pack][data-theme-has-bg="true"][data-theme-scene="home"] .app:not(.app--creation) .md:not(.chat-transcript .md) th,
 :root[data-theme-pack][data-theme-has-bg="true"][data-theme-scene="home"] .app:not(.app--creation) .md-code,
 :root[data-theme-pack][data-theme-has-bg="true"][data-theme-scene="home"] .app:not(.app--creation) .copybtn,
 :root[data-theme-pack][data-theme-has-bg="true"][data-theme-scene="home"] .app:not(.app--creation) .msg-meta__btn,
@@ -33993,7 +33738,7 @@ body > .mermaid-diagram--fullscreen {
 :root[data-theme-pack][data-theme-has-bg="true"][data-theme-scene="home"] .app:not(.app--creation) .composer__btn--send.composer__btn--steer {
   background: color-mix(in srgb, color-mix(in srgb, var(--control-primary-bg) 16%, var(--bg-elev-2)) var(--theme-pane-child-pct, 80%), transparent) !important;
 }
-:root[data-theme-pack][data-theme-has-bg="true"][data-theme-scene="home"] .app:not(.app--creation) .msg--user .msg__body {
+:root[data-theme-pack][data-theme-has-bg="true"][data-theme-scene="home"] .app:not(.app--creation) .msg--user:not(.chat-transcript .msg--user) .msg__body {
   background: color-mix(in srgb, var(--chat-user-bg) var(--theme-pane-child-pct, 80%), transparent) !important;
 }
 :root[data-theme-pack][data-theme-has-bg="true"][data-theme-scene="home"] .app:not(.app--creation) .approval-reason {
@@ -34080,7 +33825,7 @@ body > .mermaid-diagram--fullscreen {
 :root[data-theme-pack][data-theme-has-bg="true"][data-theme-scene="task"] .app:not(.app--creation) .context-panel__type-overview,
 :root[data-theme-pack][data-theme-has-bg="true"][data-theme-scene="task"] .app:not(.app--creation) .context-panel__view-switch,
 :root[data-theme-pack][data-theme-has-bg="true"][data-theme-scene="task"] .app:not(.app--creation) .mermaid-diagram,
-:root[data-theme-pack][data-theme-has-bg="true"][data-theme-scene="task"] .app:not(.app--creation) .md th,
+:root[data-theme-pack][data-theme-has-bg="true"][data-theme-scene="task"] .app:not(.app--creation) .md:not(.chat-transcript .md) th,
 :root[data-theme-pack][data-theme-has-bg="true"][data-theme-scene="task"] .app:not(.app--creation) .md-code,
 :root[data-theme-pack][data-theme-has-bg="true"][data-theme-scene="task"] .app:not(.app--creation) .copybtn,
 :root[data-theme-pack][data-theme-has-bg="true"][data-theme-scene="task"] .app:not(.app--creation) .msg-meta__btn,
@@ -34118,7 +33863,7 @@ body > .mermaid-diagram--fullscreen {
 :root[data-theme-pack][data-theme-has-bg="true"][data-theme-scene="task"] .app:not(.app--creation) .composer__btn--send.composer__btn--steer {
   background: color-mix(in srgb, color-mix(in srgb, var(--control-primary-bg) 16%, var(--bg-elev-2)) var(--theme-pane-task-child-pct, 98%), transparent) !important;
 }
-:root[data-theme-pack][data-theme-has-bg="true"][data-theme-scene="task"] .app:not(.app--creation) .msg--user .msg__body {
+:root[data-theme-pack][data-theme-has-bg="true"][data-theme-scene="task"] .app:not(.app--creation) .msg--user:not(.chat-transcript .msg--user) .msg__body {
   background: color-mix(in srgb, var(--chat-user-bg) var(--theme-pane-task-child-pct, 98%), transparent) !important;
 }
 :root[data-theme-pack][data-theme-has-bg="true"][data-theme-scene="task"] .app:not(.app--creation) .approval-reason {
@@ -34203,7 +33948,7 @@ body > .mermaid-diagram--fullscreen {
 :root[data-theme-pack][data-theme-has-bg="true"] .app:not(.app--creation) .context-panel__type-overview,
 :root[data-theme-pack][data-theme-has-bg="true"] .app:not(.app--creation) .context-panel__view-switch,
 :root[data-theme-pack][data-theme-has-bg="true"] .app:not(.app--creation) .mermaid-diagram,
-:root[data-theme-pack][data-theme-has-bg="true"] .app:not(.app--creation) .md th,
+:root[data-theme-pack][data-theme-has-bg="true"] .app:not(.app--creation) .md:not(.chat-transcript .md) th,
 :root[data-theme-pack][data-theme-has-bg="true"] .app:not(.app--creation) .md-code,
 :root[data-theme-pack][data-theme-has-bg="true"] .app:not(.app--creation) .copybtn,
 :root[data-theme-pack][data-theme-has-bg="true"] .app:not(.app--creation) .msg-meta__btn,
@@ -34242,7 +33987,7 @@ body > .mermaid-diagram--fullscreen {
 :root[data-theme-pack][data-theme-has-bg="true"] .app:not(.app--creation) .composer__btn--send.composer__btn--steer {
   background: color-mix(in srgb, color-mix(in srgb, var(--control-primary-bg) 16%, var(--bg-elev-2)) 80%, transparent) !important;
 }
-:root[data-theme-pack][data-theme-has-bg="true"] .app:not(.app--creation) .msg--user .msg__body {
+:root[data-theme-pack][data-theme-has-bg="true"] .app:not(.app--creation) .msg--user:not(.chat-transcript .msg--user) .msg__body {
   background: color-mix(in srgb, var(--chat-user-bg) 80%, transparent) !important;
 }
 :root[data-theme-pack][data-theme-has-bg="true"] .app:not(.app--creation) .approval-reason {
@@ -36296,6 +36041,12 @@ body > .mermaid-diagram--fullscreen {
   background: var(--bg-elev-2);
   color: var(--fg);
 }
+.remote-tree__presented {
+  width: 100%;
+  margin-bottom: 6px;
+  border-bottom: 1px solid var(--border-soft);
+  font-weight: 600;
+}
 .remote-tree__empty {
   color: var(--fg-faint);
   font-size: var(--text-xs);
@@ -37306,14 +37057,14 @@ body > .mermaid-diagram--fullscreen {
 }
 :root .composer-menu-surface.context-ring-popover { min-width: min(260px, calc(100vw - 16px)); }
 :root .composer-menu-surface .composer-access-menu__title { overflow-wrap: anywhere; }
-:root .composer-choice--permission-auto { color: var(--ok); }
+:root .composer-choice--permission-workspace-write { color: var(--ok); }
 :root { --composer-permission-ask: #60a5fa; }
 :root[data-theme="light"] { --composer-permission-ask: #2563eb; }
 @media (prefers-color-scheme: light) {
   :root:not([data-theme="dark"]) { --composer-permission-ask: #2563eb; }
 }
-:root .composer-choice--permission-ask { color: var(--composer-permission-ask); }
-:root .composer-choice--permission-yolo { color: var(--err); }
+:root .composer-choice--permission-read-only { color: var(--composer-permission-ask); }
+:root .composer-choice--permission-danger-full-access { color: var(--err); }
 /* Right-dock launcher + tab container (ported from the right-dock redesign). */
 
 

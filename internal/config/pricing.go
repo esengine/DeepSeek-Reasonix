@@ -370,7 +370,9 @@ func ResetOfficialProviderPricingOnUpgrade(path string) (bool, error) {
 }
 
 func shouldMarkWindowsBashSandboxDefaultUpgrade(fromVersion int) bool {
-	return runtimeGOOS == "windows" && fromVersion < windowsBashSandboxDefaultConfigVersion
+	// The native backend is available again. Preserve old explicit values, and
+	// stop migrating Windows enforcement to the retired unconfined default.
+	return false
 }
 
 func resetWindowsBashSandboxDefaultOnUpgrade(c *Config) {

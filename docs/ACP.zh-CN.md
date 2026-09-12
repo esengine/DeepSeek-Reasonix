@@ -106,9 +106,9 @@ Reasonix 把互不相关的选择拆成独立控制轴，而不是混在一个 m
 | 协作模式 | `normal`、`plan`、`goal` | `modes` 和 `session/set_mode` |
 | 模型 | 已配置的 `provider/model` | id 为 `model` 的 `configOptions` |
 | 推理强度 | provider 支持的等级或 `auto` | id 为 `effort` 的 `configOptions` |
-| 工具审批 | `ask`、`auto`、`yolo` | id 为 `tool_approval` 的 `configOptions` |
+| 权限模式 | `read-only`、`workspace-write`、`danger-full-access` | id 为 `tool_approval` 的 `configOptions` |
 
-模型、推理强度和工具审批统一使用 `session/set_config_option`。它的参数是
+模型、推理强度和权限模式统一使用 `session/set_config_option`。它的参数是
 `sessionId`、`configId` 和 `value`，其中 `configId` 取 `configOptions` 中该选项的
 `id`：
 
@@ -120,7 +120,7 @@ Reasonix 把互不相关的选择拆成独立控制轴，而不是混在一个 m
   "params": {
     "sessionId": "session-id",
     "configId": "tool_approval",
-    "value": "yolo"
+    "value": "workspace-write"
   }
 }
 ```
@@ -129,16 +129,16 @@ Reasonix 把互不相关的选择拆成独立控制轴，而不是混在一个 m
 数组；id 未知时返回 `-32602 InvalidParams`。
 
 切换模型或推理强度时会重建会话 Controller，同时保留历史和其他控制轴；
-工具审批只更新 gate，不重建 Controller。
+权限模式只更新统一权限运行时，不重建 Controller。
 
 执行模式已移除。兼容期内，仍发送 `configId` 为 `agent_preset` 或 `work_mode`
 （含旧别名 `profile`、`runtime_profile`、`token_mode`）的
 `session/set_config_option` 请求会得到成功的空操作：不切换、不重建，返回值中的
 `deprecatedNotice` 会说明自适应标准执行。
 
-旧客户端仍可使用 `session/set_model`。`session/set_mode` 也继续接受 legacy 值
-`default` 和 `auto`，分别表示“常规 + 询问”和“常规 + Yolo”；新客户端应使用上面的
-独立 selector。
+旧客户端仍可使用 `session/set_model`。旧权限值只在协议兼容边界迁移：`ask` 映射为
+`read-only`，`auto` 与 `yolo` 映射为 `workspace-write`；未知值失败关闭。新客户端应
+使用上面的独立 selector，`danger-full-access` 只能由用户主动选择。
 
 ## Prompt、更新与审批
 

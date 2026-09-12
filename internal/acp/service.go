@@ -17,6 +17,7 @@ import (
 	"time"
 
 	"reasonix/internal/agent"
+	"reasonix/internal/config"
 	"reasonix/internal/control"
 	"reasonix/internal/event"
 	"reasonix/internal/extension/uihub"
@@ -662,7 +663,7 @@ func (s *service) sessionNew(ctx context.Context, raw json.RawMessage) (any, err
 	if err != nil {
 		return nil, &RPCError{Code: ErrInternal, Message: "session/new: " + err.Error()}
 	}
-	cfgState = withToolApprovalConfig(cfgState, control.ToolApprovalAsk)
+	cfgState = withToolApprovalConfig(cfgState, control.ToolApprovalWorkspaceWrite)
 	runtimeState, err := s.sessionRuntimeState(ctx, SessionRuntimeStateParams{
 		Cwd: cwd, Model: cfgState.Model, RuntimeProfile: cfgState.RuntimeProfile,
 	})
@@ -693,6 +694,11 @@ func (s *service) sessionNew(ctx context.Context, raw json.RawMessage) (any, err
 		return nil, &RPCError{Code: ErrInternal, Message: "session/new: " + err.Error()}
 	}
 	ctrl.EnableInteractiveApproval()
+	// The session metadata and advertised selector both start in workspace-write.
+	// Apply the same preset to the controller before admitting the first turn so
+	// a later same-value reconciliation cannot look like a permission change and
+	// cancel work that was already admitted under the advertised boundary.
+	ctrl.SetToolApprovalMode(control.ToolApprovalWorkspaceWrite)
 	sink.bindControllerPrompts(ctrl, sessionParams.MCPInteractions)
 
 	now := time.Now().UTC()
@@ -705,7 +711,7 @@ func (s *service) sessionNew(ctx context.Context, raw json.RawMessage) (any, err
 		model:            cfgState.Model,
 		effortOverride:   cloneStringPtr(cfgState.EffortOverride),
 		runtimeProfile:   cfgState.RuntimeProfile,
-		toolApprovalMode: control.ToolApprovalAsk,
+		toolApprovalMode: control.ToolApprovalWorkspaceWrite,
 		runtimeState:     runtimeState,
 		status:           newStatusTelemetry(),
 		modeID:           sessionModeNormal,
@@ -800,12 +806,12 @@ func (s *service) sessionSetMode(ctx context.Context, raw json.RawMessage) (any,
 		ctrl.SetPlanMode(false)
 	case sessionModeLegacyDefault:
 		nextMode = sessionModeNormal
-		legacyApproval = control.ToolApprovalAsk
+		legacyApproval = control.ToolApprovalReadOnly
 		ctrl.SetPlanMode(false)
 		ctrl.ClearGoal()
 	case sessionModeLegacyAuto:
 		nextMode = sessionModeNormal
-		legacyApproval = control.ToolApprovalYolo
+		legacyApproval = control.ToolApprovalWorkspaceWrite
 		ctrl.SetPlanMode(false)
 		ctrl.ClearGoal()
 	default:
@@ -1025,6 +1031,9 @@ func (s *service) openExistingSession(ctx context.Context, method, id, cwdParam 
 		return SessionConfigState{}, sessionLeaseBindError(method, err)
 	}
 	toolApprovalMode := normalizeACPToolApprovalMode(saved.ToolApprovalMode)
+	if strings.TrimSpace(saved.ToolApprovalMode) == "" {
+		toolApprovalMode = control.ToolApprovalWorkspaceWrite
+	}
 	ctrl.SetToolApprovalMode(toolApprovalMode)
 	modeID := normalizeACPCollaborationMode(saved.CollaborationMode)
 	goalDraftMode := false
@@ -2305,14 +2314,7 @@ func (s *acpSession) currentToolApprovalMode() string {
 }
 
 func normalizeACPToolApprovalMode(mode string) string {
-	switch strings.ToLower(strings.TrimSpace(mode)) {
-	case control.ToolApprovalAuto:
-		return control.ToolApprovalAuto
-	case control.ToolApprovalYolo:
-		return control.ToolApprovalYolo
-	default:
-		return control.ToolApprovalAsk
-	}
+	return config.NormalizeToolApprovalMode(mode)
 }
 
 func normalizeACPCollaborationMode(mode string) string {
@@ -2330,14 +2332,14 @@ func withToolApprovalConfig(state SessionConfigState, mode string) SessionConfig
 	mode = normalizeACPToolApprovalMode(mode)
 	option := SessionConfigOption{
 		ID:           "tool_approval",
-		Name:         "Tool Approval",
+		Name:         "Permissions",
 		Category:     "tool_approval",
 		Type:         "select",
 		CurrentValue: mode,
 		Options: []SessionConfigSelectOption{
-			{Value: control.ToolApprovalAsk, Name: "Ask", Description: "Ask before permission-gated tool calls"},
-			{Value: control.ToolApprovalAuto, Name: "Auto", Description: "Follow configured permission rules without fallback prompts"},
-			{Value: control.ToolApprovalYolo, Name: "Yolo", Description: "Approve tool calls except protected decisions"},
+			{Value: control.ToolApprovalReadOnly, Name: "Read only", Description: "Read files; ask before writes and external side effects"},
+			{Value: control.ToolApprovalWorkspaceWrite, Name: "Workspace access", Description: "Write inside the workspace and private session temp directory"},
+			{Value: control.ToolApprovalDangerFullAccess, Name: "Full access", Description: "Skip ordinary prompts while explicit deny rules remain active"},
 		},
 	}
 	for i := range state.ConfigOptions {

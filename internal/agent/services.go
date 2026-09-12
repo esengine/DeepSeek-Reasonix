@@ -53,6 +53,9 @@ type agentServices struct {
 	// sandboxEscape can ask the user whether one shell command may rerun
 	// unconfined after the OS sandbox failed to start.
 	sandboxEscape sandbox.EscapeApprover
+	// permissionPreset returns the host-authoritative execution preset for each
+	// call. Keeping it host-only avoids tool-schema and prompt-prefix churn.
+	permissionPreset func() string
 	// configWrite can ask the user whether a file tool may write a
 	// Reasonix-managed config file outside the workspace roots.
 	configWrite tool.ConfigWriteApprover

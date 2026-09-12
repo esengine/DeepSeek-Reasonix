@@ -9,10 +9,83 @@ import (
 	"testing"
 	"unicode/utf8"
 
+	"reasonix/internal/billing"
 	"reasonix/internal/event"
 	"reasonix/internal/eventwire"
 	"reasonix/internal/turnevent"
 )
+
+func TestProjectionAttachesCompletedTurnUsageAndTimingToFinalAnswer(t *testing.T) {
+	p, err := NewProjection(testIdentity, nil, 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	apply := func(sequence uint64, kind string, createdAt int64, wire eventwire.Event, status event.TurnStatus) {
+		t.Helper()
+		wire.Kind = kind
+		if err := p.Apply(turnevent.Envelope{SessionID: "session", RuntimeEpoch: "runtime", TurnID: "turn", Sequence: sequence, Kind: kind, Status: status, CreatedAt: createdAt, Event: wire}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	apply(1, "turn_started", 1_000, eventwire.Event{}, event.TurnInProgress)
+	apply(2, "message", 1_500, eventwire.Event{MessageID: "answer", Text: "done"}, event.TurnInProgress)
+	apply(3, "usage", 2_000, eventwire.Event{Usage: &eventwire.Usage{
+		PromptTokens: 100_000, CompletionTokens: 2_000, TotalTokens: 102_000,
+		CacheHitTokens: 80_000, CacheMissTokens: 20_000, ReasoningTokens: 1_000,
+		CostQuote: &billing.CostQuote{ModelRef: "deepseek-official/deepseek-flash"},
+	}}, event.TurnInProgress)
+	apply(4, "usage", 3_000, eventwire.Event{Usage: &eventwire.Usage{
+		PromptTokens: 80_000, CompletionTokens: 3_225, TotalTokens: 83_225,
+		CacheHitTokens: 75_520, CacheMissTokens: 4_480, ReasoningTokens: 909,
+		CostQuote: &billing.CostQuote{ModelRef: "deepseek-official/deepseek-flash"},
+	}}, event.TurnInProgress)
+	apply(5, "turn_done", 4_000, eventwire.Event{}, event.TurnCompleted)
+
+	records := snapshot(t, p).Records
+	if len(records) != 1 {
+		t.Fatalf("records = %d, want 1", len(records))
+	}
+	message := records[0].Message
+	if message.CreatedAt != 1_500 || message.TurnDurationMs != 3_000 {
+		t.Fatalf("message timing = created %d duration %d", message.CreatedAt, message.TurnDurationMs)
+	}
+	usage := message.TurnUsage
+	if usage == nil || usage.TotalTokens != 185_225 || usage.UncachedInputTokens != 24_480 || usage.OutputTokens != 5_225 {
+		t.Fatalf("turn usage = %+v", usage)
+	}
+	if usage.CacheReadTokens == nil || *usage.CacheReadTokens != 155_520 || usage.ReasoningTokens == nil || *usage.ReasoningTokens != 1_909 {
+		t.Fatalf("turn usage optional buckets = %+v", usage)
+	}
+	if !reflect.DeepEqual(usage.Routes, []string{"deepseek-official/deepseek-flash"}) {
+		t.Fatalf("routes = %v", usage.Routes)
+	}
+}
+
+func TestProjectionQueuedStatusDoesNotReusePreviousTurnStart(t *testing.T) {
+	p, err := NewProjection(testIdentity, nil, 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	apply := func(sequence uint64, turnID, kind string, createdAt int64, wire eventwire.Event, status event.TurnStatus) {
+		t.Helper()
+		wire.Kind = kind
+		if err := p.Apply(turnevent.Envelope{SessionID: "session", RuntimeEpoch: "runtime", TurnID: turnID, Sequence: sequence, Kind: kind, Status: status, CreatedAt: createdAt, Event: wire}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	apply(1, "first", "turn_started", 1_000, eventwire.Event{}, event.TurnInProgress)
+	apply(2, "first", "message", 1_500, eventwire.Event{MessageID: "first-answer", Text: "first"}, event.TurnInProgress)
+	apply(3, "first", "turn_done", 2_000, eventwire.Event{}, event.TurnCompleted)
+	apply(4, "second", "turn_status", 100_000, eventwire.Event{}, event.TurnQueued)
+	apply(5, "second", "turn_started", 100_000, eventwire.Event{}, event.TurnInProgress)
+	apply(6, "second", "message", 101_000, eventwire.Event{MessageID: "second-answer", Text: "second"}, event.TurnInProgress)
+	apply(7, "second", "turn_done", 102_500, eventwire.Event{}, event.TurnCompleted)
+
+	records := snapshot(t, p).Records
+	if got := records[len(records)-1].Message.TurnDurationMs; got != 2_500 {
+		t.Fatalf("second turn duration = %d, want 2500", got)
+	}
+}
 
 var testIdentity = Identity{SessionID: "session", HeadID: "head", RuntimeEpoch: "runtime", RewriteEpoch: 1}
 

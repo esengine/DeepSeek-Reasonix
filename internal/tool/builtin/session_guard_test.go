@@ -342,7 +342,7 @@ func TestBashAppendsSessionDataHint(t *testing.T) {
 	b := ConfineBash(sandbox.Spec{Mode: "off"}, guard)
 
 	args, _ := json.Marshal(map[string]string{"command": "echo " + cliSession})
-	out, err := b.Execute(context.Background(), args)
+	out, err := b.Execute(fullAccessBashTestContext(t.Context()), args)
 	if err != nil {
 		t.Fatalf("bash: %v", err)
 	}
@@ -351,7 +351,7 @@ func TestBashAppendsSessionDataHint(t *testing.T) {
 	}
 	// An ordinary command stays clean.
 	args, _ = json.Marshal(map[string]string{"command": "echo hello"})
-	out, err = b.Execute(context.Background(), args)
+	out, err = b.Execute(fullAccessBashTestContext(t.Context()), args)
 	if err != nil {
 		t.Fatalf("bash: %v", err)
 	}

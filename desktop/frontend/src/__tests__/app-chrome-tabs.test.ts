@@ -15,7 +15,6 @@ const topicShortcutOwnerSource = readFileSync(resolve(testDir, "../app-runtime/u
 const runtimeHandlersSource = readFileSync(resolve(testDir, "../app-runtime/useRuntimeEventHandlers.ts"), "utf8");
 const sessionNavigationSource = readFileSync(resolve(testDir, "../app-runtime/useSessionNavigationCommands.ts"), "utf8");
 const chromeCommandsSource = readFileSync(resolve(testDir, "../app-runtime/useAppChromeCommands.ts"), "utf8");
-const desktopNavigationSource = readFileSync(resolve(testDir, "../app-runtime/useDesktopNavigation.ts"), "utf8");
 const dockToggleSource = readFileSync(resolve(testDir, "../app-shell/DockToggleButton.tsx"), "utf8");
 const chatPaneSource = readFileSync(resolve(testDir, "../app-shell/ChatPaneRegion.tsx"), "utf8");
 const transcriptSurfaceSource = readFileSync(resolve(testDir, "../app-runtime/useTranscriptSurfaceProjection.ts"), "utf8");
@@ -263,19 +262,10 @@ ok(
 
 // The app tab strip that consumed the tab reveal signal is gone; the transcript
 // keeps its own cell and the shared reveal still has to bump both independently.
-ok(
-  /const \[transcriptRevealSignal, setTranscriptRevealSignal\] = useState\(0\);/.test(appSource) &&
-    /revealSignal=\{transcript\.revealSignal\}/.test(chatPaneSource) &&
-    /input\.setTabRevealSignal\(value => value \+ 1\); input\.setTranscriptRevealSignal\(value => value \+ 1\);/.test(desktopNavigationSource),
-  "transcript bottom reveal keeps its own signal and still settles with the shared reveal",
-);
+ok(!appSource.includes("transcriptRevealSignal"), "retired transcript reveal state is removed");
 
 
-ok(
-  /aria-label=\{t\("transcript\.jumpToBottom"\)\}/.test(transcriptSource) &&
-    /title=\{t\("transcript\.jumpToBottom"\)\}/.test(transcriptSource),
-  "jump-to-bottom affordance uses localized transcript text",
-);
+ok(transcriptSource.includes('t("chat.toLatest")'), "jump-to-bottom affordance uses localized transcript text");
 
 ok(
   /setActive\(items\.length > 0 \? 0 : -1\)/.test(commandPaletteSource),

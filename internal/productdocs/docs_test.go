@@ -329,7 +329,7 @@ func TestSearchPrefersRelevantChineseAndEnglishSections(t *testing.T) {
 	}
 	tl := &docsTool{catalog: c}
 
-	zh, err := tl.search(context.Background(), "工具权限 Auto Yolo 自动批准", "auto", "all", 5)
+	zh, err := tl.search(context.Background(), "工具权限 仅可查看 工作区内修改 完全权限", "auto", "all", 5)
 	if err != nil {
 		t.Fatalf("Chinese search: %v", err)
 	}

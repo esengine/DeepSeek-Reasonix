@@ -7,7 +7,7 @@
 <a href="./GUIDE.zh-CN.md">通用指南</a>
 
 > 面向桌面端和 CLI 用户。本文说明如何连接飞书、Lark、微信和 QQ 机器人，
-> 如何在 IM 里使用 Reasonix，以及审批、问答、YOLO 和常用命令的交互方式。
+> 如何在 IM 里使用 Reasonix，以及权限、授权、问答和常用命令的交互方式。
 
 ## 目录
 
@@ -18,7 +18,7 @@
 - [使用流程](#使用流程)
 - [四种渠道的交互差异](#四种渠道的交互差异)
 - [命令速查](#命令速查)
-- [审批与 YOLO](#审批与-yolo)
+- [权限与授权](#权限与授权)
 - [升级后是否需要重新绑定](#升级后是否需要重新绑定)
 - [排障](#排障)
 
@@ -33,7 +33,7 @@ Reasonix 或 `reasonix bot start` 进程在本机执行同一套模型、工具�
 - 让 Reasonix 查代码、读文档、解释错误、整理结论。
 - 在 IM 中触发工具调用，并把执行过程和结果回传到聊天窗口。
 - 遇到写文件、执行命令等敏感操作时，在 IM 中审批或拒绝。
-- 对临时测试任务开启 YOLO，跳过普通工具审批。
+- 按会话选择“仅可查看／工作区内修改／完全权限”。
 - 打开桌面端对应 IM 会话，继续查看上下文、成本、tokens 和工具轨迹。
 
 ## 在哪里运行
@@ -45,7 +45,7 @@ Bot gateway 是一套共享的 Go runtime。核心行为在 Windows、macOS 和 
 目前有两个入口：
 
 - **桌面端 runtime**：在 **设置 -> 机器人** 中配置。桌面端会启动 gateway，
-  在应用内维护状态，持久化每个连接的工具审批模式变化，并允许打开匹配的
+  在应用内维护状态，持久化每个连接的权限模式变化，并允许打开匹配的
   本地 IM 会话。
 - **CLI runtime**：执行 `reasonix bot start` 启动无界面长期进程。它复用
   与桌面端相同的配置、白名单、路由、队列设置、配对存储、适配器和
@@ -93,7 +93,7 @@ flowchart LR
 5. 给 Lark Bot 发送消息。
 
 飞书和 Lark 使用同一套能力，但作为两个独立连接保存。你可以给它们设置不同
-模型、工作目录或工具审批模式。Bot 文本回复会以独立 Interactive Card JSON
+模型、工作目录或权限模式。Bot 文本回复会以独立 Interactive Card JSON
 2.0 markdown 发送，避免飞书/Lark 平台级引用前缀，同时保留 CommonMark
 格式；如果卡片超过平台限制，Reasonix 会自动降级为纯文本。
 
@@ -188,7 +188,7 @@ reasonix bot pairing reject CODE
 ```
 
 如果配置了 `qq_admins`、`feishu_admins`、`weixin_admins` 或对应
-`*_approvers`，`/yolo`、`/mode` 等运行模式命令只允许 admin 使用；
+`*_approvers`，`/mode` 等权限模式命令只允许 admin 使用；
 `/projects`、`/use project`、`/sessions`、`/attach session` 和
 `/search all` 也只允许 admin 使用。`/approve` 和 `/deny` 只允许 approver
 或 admin 使用。没有配置角色列表时，为兼容旧配置，已允许的用户保持原有
@@ -272,7 +272,7 @@ sequenceDiagram
 
 ![飞书审批卡片示意](./assets/bot-feishu-approval.svg)
 
-![Lark 开启 YOLO 示意](./assets/bot-lark-yolo.svg)
+![Lark 权限选择示意](./assets/bot-lark-yolo.svg)
 
 ![微信文字命令示意](./assets/bot-weixin-text-commands.svg)
 
@@ -297,21 +297,17 @@ sequenceDiagram
 | 命令 | 作用 | 示例 |
 | --- | --- | --- |
 | `/help` | 查看可用命令 | `/help` |
-| `/status` | 查看活跃任务、队列、工具审批模式和连接健康 | `/status` |
+| `/status` | 查看活跃任务、队列、权限模式和连接健康 | `/status` |
 | `/stop` | 停止当前任务 | `/stop` |
 | `/new` | 开始新会话 | `/new` |
 | `/reset` | 重置当前会话 | `/reset` |
 | `/approve <id>` | 批准待审批操作 | `/approve 1` |
 | `/deny <id>` | 拒绝待审批操作 | `/deny 1` |
 | `/answer <id> <选项>` | 回答 Ask 问题 | `/answer ask-1 2` |
-| `/yolo` | 开启 YOLO | `/yolo` |
-| `/yolo on` | 开启 YOLO | `/yolo on` |
-| `/yolo off` | 切回询问模式 | `/yolo off` |
-| `/yolo auto` | 切换到自动审批模式 | `/yolo auto` |
-| `/yolo status` | 查看当前工具审批模式 | `/yolo status` |
-| `/mode yolo` | 切换到 YOLO | `/mode yolo` |
-| `/mode ask` | 切换到询问模式 | `/mode ask` |
-| `/mode auto` | 切换到自动模式 | `/mode auto` |
+| `/mode read-only` | 切换为仅可查看 | `/mode read-only` |
+| `/mode workspace-write` | 切换为工作区内修改 | `/mode workspace-write` |
+| `/mode danger-full-access` | 切换为完全权限 | `/mode danger-full-access` |
+| `/mode status` | 查看当前权限 | `/mode status` |
 | `/queue status` | 查看当前队列模式 | `/queue status` |
 | `/queue steer` | 运行中消息作为当前任务补充 | `/queue steer` |
 | `/queue followup` | 运行中消息排队为后续回合 | `/queue followup` |
@@ -370,19 +366,18 @@ Reasonix。保存失败的附件会在 IM 中提示，文本内容仍会继续�
 Feishu、Weixin、QQ 适配器当前仍以文本事件为主，普通 IM 附件抽取可以继续在
 适配器层补齐。
 
-## 审批与 YOLO
+## 权限与授权
 
-Reasonix 的机器人沿用桌面端权限系统。默认是询问模式：写文件、执行命令等
-敏感工具调用会先请求确认。
+Reasonix 的机器人沿用桌面端权限系统，默认使用工作区内修改。工作区和会话私有临时目录内的普通操作直接执行，越界操作才请求范围明确的授权。
 
 ```mermaid
 flowchart TD
   A["模型准备调用工具"] --> B{"是否命中 deny 规则"}
   B -- "是" --> C["直接拒绝"]
-  B -- "否" --> D{"工具审批模式"}
-  D -- "询问 Ask" --> E["向 IM 发送审批"]
-  D -- "自动 Auto" --> F["策略允许时自动放行"]
-  D -- "YOLO" --> G["普通工具审批自动放行"]
+  B -- "否" --> D{"权限预设"}
+  D -- "仅可查看" --> E["写入或副作用时请求授权"]
+  D -- "工作区内修改" --> F["边界内直接执行"]
+  D -- "完全权限" --> G["跳过常规授权"]
   E --> H{"用户选择"}
   H -- "允许" --> I["执行工具"]
   H -- "拒绝" --> J["停止该操作"]
@@ -390,20 +385,7 @@ flowchart TD
   G --> I
 ```
 
-记忆审批的边界很重要：
-
-- Auto 会跳过 `remember`/`forget` 的默认 fallback 审批，但显式 `ask` 和 `deny`
-  规则仍生效。
-- YOLO 会跳过普通工具审批，包括 `remember`/`forget`。
-- YOLO 不会跳过硬性 `deny` 规则。
-- YOLO 不会自动回答模型提出的 Ask 问题。
-- YOLO 不会自动批准计划模式里的计划批准。
-
-建议：
-
-- 临时调试、可信项目、需要快速连续读写时，可以用 `/yolo`。
-- 做高风险操作、生产代码或不确定任务时，用 `/mode ask` 切回询问模式。
-- 想减少普通审批但保留策略判断（包括显式记忆规则）时，用 `/mode auto`。
+显式 `deny` 在三种预设下都生效。权限预设不会回答模型提出的 `ask` 问题，也不会替用户批准计划。临时授权只有“允许一次”和“本会话允许此范围”，不会持久化到机器人连接或项目配置。
 
 ## 升级后是否需要重新绑定
 
@@ -437,7 +419,7 @@ flowchart TD
 | QQ 按钮提示失败 | 与飞书/Lark 相同 —— 直接发送卡片里的命令，例如 `/approve <id>` 或 `/deny <id>`。 |
 | 微信回复 `1` 没反应 | 只有存在待审批或 Ask 时数字快捷回复才生效；也可以使用完整命令。 |
 | QQ 回复 `1` 没反应 | 与微信相同 —— 只有存在待审批或 Ask 时数字快捷回复才生效；也可以使用完整命令。 |
-| 想确认当前模式 | 发送 `/status` 或 `/yolo status`。 |
+| 想确认当前模式 | 发送 `/status` 或 `/mode status`。 |
 | 想重新开始上下文 | 发送 `/new` 或 `/reset`。 |
 | 想停止当前任务 | 发送 `/stop`。 |
 

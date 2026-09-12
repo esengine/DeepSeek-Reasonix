@@ -36,6 +36,31 @@ func TestWritableRootSetSnapshotAndMissing(t *testing.T) {
 	}
 }
 
+func TestWritableRootSetRevokesOnlyExactSessionRoot(t *testing.T) {
+	root := t.TempDir()
+	one := filepath.Join(root, "one")
+	two := filepath.Join(root, "two")
+	for _, dir := range []string{one, two} {
+		if err := os.MkdirAll(dir, 0o755); err != nil {
+			t.Fatal(err)
+		}
+	}
+	set := NewWritableRootSet(nil)
+	set.GrantSession([]string{one, two})
+	if !set.RevokeSession(one) {
+		t.Fatal("expected exact session root to be revoked")
+	}
+	if set.Covers(one) {
+		t.Fatal("revoked root remains writable")
+	}
+	if !set.Covers(two) {
+		t.Fatal("revoking one root removed an unrelated grant")
+	}
+	if set.RevokeSession(one) {
+		t.Fatal("second revocation should report no change")
+	}
+}
+
 func TestWritableRootSetReplaceBaselineKeepsSession(t *testing.T) {
 	a := t.TempDir()
 	b := t.TempDir()

@@ -1,0 +1,37 @@
+[
+  {
+    "browser": "electron",
+    "complete": false,
+    "samples": [],
+    "errors": [],
+    "version": "44.2.0",
+    "platform": "darwin",
+    "arch": "arm64",
+    "nativeThumb": {
+      "track": {
+        "x": 1917,
+        "top": 0,
+        "bottom": 908,
+        "before": 12044,
+        "gutter": 0
+      },
+      "after": {
+        "top": 12044,
+        "mode": "reader",
+        "events": [
+          {
+            "type": "pointerdown",
+            "top": 12044,
+            "target": true
+          },
+          {
+            "type": "pointerup",
+            "top": 12044,
+            "target": true
+          }
+        ]
+      }
+    },
+    "failure": "TimeoutError: page.waitForFunction: Timeout 30000ms exceeded."
+  }
+]

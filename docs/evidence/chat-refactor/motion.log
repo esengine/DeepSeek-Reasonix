@@ -1,0 +1,51 @@
+
+> reasonix-desktop-frontend@0.0.0 test:motion <repo>/desktop/frontend
+> node scripts/check-motion-ci-contract.mjs && node scripts/check-waapi-contract.mjs --self-test && tsx src/__tests__/native-motion.test.tsx && tsx src/__tests__/approval-animation.test.tsx
+
+motion-ci-contract: browser gates and packaged Electron startup are separate release gates without production smoke instrumentation
+waapi-contract: 8 self-tests passed
+waapi-contract: production Web Animations options use explicit CSS-compatible easing
+
+native motion fallbacks
+  PASS  tail append preserves transcript entrance reset key
+  PASS  history prepend changes transcript entrance reset key
+  PASS  tab switch changes transcript entrance reset key
+  PASS  reveal signal changes transcript entrance reset key
+  PASS  collapse passes a CSS easing to Element.animate
+  PASS  collapse waits for native completion
+  PASS  finish and late cancel settle collapse only once
+  PASS  finished open state uses auto height
+  PASS  rejected collapse animation runs its completion fallback
+  PASS  rejected collapse animation exposes content
+  PASS  direction reversal cancels the previous animation
+  PASS  superseded open callback is suppressed
+  PASS  unexpected cancellation settles the active direction
+  PASS  cancelled close reaches zero height
+  PASS  stable entrance reset key animates an appended row
+  PASS  entrance animation uses the shared CSS easing
+  PASS  finished entrance exposes the row
+  PASS  changed reset key pre-seeds restored rows without animation
+  PASS  append after a reset animates normally
+  PASS  deferred virtual history does not animate with a new append
+  PASS  only the genuinely appended virtual row animates
+  PASS  a rejected entrance does not prevent later entries from attempting motion
+  PASS  rejected entrance exposes the first row
+  PASS  rejected entrance exposes later rows
+  PASS  transition content mounts while open
+  PASS  transition content remains mounted during close delay
+  PASS  transition content unmounts without transitionend
+
+27 passed, 0 failed, 27 total
+
+approval shelf animation
+  PASS  shelf exit passes a valid CSS easing to Element.animate
+  PASS  approval waits for the shelf exit animation
+  PASS  approval starts one shelf exit animation
+  PASS  finish and late cancel submit the approval only once
+  PASS  finished animation preserves the selected approval
+  PASS  cancelled shelf animation still submits the approval once
+  PASS  a rejected animation is not retried by a second confirm
+  PASS  a rejected animation falls back to one approval submission
+  PASS  animation fallback preserves the selected approval
+
+9 passed, 0 failed, 9 total

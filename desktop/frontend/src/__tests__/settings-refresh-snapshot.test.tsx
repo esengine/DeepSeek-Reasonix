@@ -85,16 +85,10 @@ regionalTypography.code = {
 applyTypographyPreferences(regionalTypography);
 const regionalCodeFont = document.documentElement.style.getPropertyValue("--typography-code-font");
 
-const settingsSnapshots = [
-  baseSettings("standard"),
-  { ...baseSettings("standard"), sessionExperience: "deep" as const },
-  { ...baseSettings("standard"), sessionExperience: "deep" as const },
-];
+const settingsSnapshots = [baseSettings("standard")];
 let settingsCalls = 0;
 let setDisplayModeCalls = 0;
 let setSessionExperienceCalls = 0;
-let rejectSessionExperience = false;
-let onChangedSettings: SettingsView | undefined;
 
 const desktopStub = installDesktopHostStub(({
   main: {
@@ -105,7 +99,6 @@ const desktopStub = installDesktopHostStub(({
       },
       SetSessionExperience: async () => {
         setSessionExperienceCalls += 1;
-        if (rejectSessionExperience) throw new Error("session experience persistence failed");
       },
     } as Partial<AppBindings> as AppBindings,
   }}).main.App);
@@ -121,23 +114,18 @@ await act(async () => {
         initialTab="general"
         desktopPlatform="linux"
         onClose={() => {}}
-        onChanged={(settings?: SettingsView) => {
-          onChangedSettings = settings;
-        }}
+        onChanged={() => {}}
       />
     </LocaleProvider>,
   );
   await flushPromises();
 });
 
-const deepButton = Array.from(document.querySelectorAll("button")).find((button) => button.textContent?.trim() === "Deep") as HTMLButtonElement | undefined;
-if (!deepButton) throw new Error("deep session experience button did not render");
 const generalFieldLabels = Array.from(rootEl.querySelectorAll(".settings-section__body > .settings-field .settings-field__label"))
   .map((label) => label.textContent?.trim());
 eq(generalFieldLabels[0], "Desktop style", "general settings place desktop style first");
 eq(document.querySelectorAll(".step-limit-control").length, 0, "general settings hide executor and planner step-limit controls");
-eq(rootEl.querySelectorAll('[role="radiogroup"]').length > 0, true, "session experience exposes an accessible choice group");
-ok(rootEl.textContent?.includes("Session experience") === true, "general settings render the canonical session experience field");
+ok(!rootEl.textContent?.includes("Session experience"), "general settings remove the retired session experience field");
 ok(!rootEl.textContent?.includes("Conversation density"), "general settings do not render the retired density field");
 ok(!rootEl.textContent?.includes("Thinking content"), "general settings do not render the retired reasoning field");
 ok(!rootEl.textContent?.includes("After the turn"), "general settings do not render the retired fold field");
@@ -145,30 +133,9 @@ ok(!document.body.textContent?.includes("step limit"), "general settings keep au
 ok(!document.body.textContent?.includes("Automatic plan mode"), "general settings omit the retired automatic Plan Mode control");
 ok(!document.body.textContent?.includes("planning defaults"), "general settings omit retired automatic Plan Mode copy");
 
-await act(async () => {
-  deepButton.click();
-  await flushPromises();
-});
-
-eq(setSessionExperienceCalls, 1, "session experience mutation is invoked once");
+eq(setSessionExperienceCalls, 0, "removed session experience cannot invoke its legacy mutation");
 eq(setDisplayModeCalls, 0, "legacy display mode mutation is not invoked");
-eq(settingsCalls, 2, "settings panel reads Settings only for initial load and post-save reload");
-ok(onChangedSettings?.sessionExperience === "deep", "onChanged receives the post-save SettingsView snapshot");
-
-const standardButton = Array.from(document.querySelectorAll("button"))
-  .find((button) => button.textContent?.trim() === "Standard") as HTMLButtonElement | undefined;
-if (!standardButton) throw new Error("standard session experience button did not render");
-rejectSessionExperience = true;
-await act(async () => {
-  standardButton.click();
-  await flushPromises();
-});
-eq(setSessionExperienceCalls, 2, "failed session experience mutation is invoked once");
-eq(settingsCalls, 3, "failed save still reloads the authoritative Settings snapshot");
-ok(onChangedSettings?.sessionExperience === "deep", "failed save publishes the authoritative backend value");
-const refreshedDeepButton = Array.from(document.querySelectorAll("button"))
-  .find((button) => button.textContent?.trim() === "Deep") as HTMLButtonElement | undefined;
-eq(refreshedDeepButton?.getAttribute("aria-checked"), "true", "failed save reconciles the segmented control from the backend snapshot");
+eq(settingsCalls, 1, "settings panel reads Settings once for its initial snapshot");
 
 await act(async () => {
   root.unmount();
@@ -421,7 +388,7 @@ await act(async () => {
   retryButton.click();
   await flushPromises();
 });
-await waitFor("settings retry success", () => Boolean(Array.from(document.querySelectorAll("button")).find((button) => button.textContent?.trim() === "Deep")));
+await waitFor("settings retry success", () => document.body.textContent?.includes("Desktop style") === true);
 
 eq(failingSettingsCalls, 2, "settings retry calls Settings again");
 ok(document.body.textContent?.includes("Settings could not be loaded.") === false, "settings retry clears the load error");
@@ -460,14 +427,11 @@ await act(async () => {
   );
   await flushPromises();
 });
-await waitFor("Windows Bash sandbox control", () => document.body.textContent?.includes("This setting is fixed to off.") === true);
+await waitFor("Windows permission boundary settings", () => document.body.textContent?.includes("Effective write roots") === true);
 
-const windowsBashSelect = Array.from(windowsSandboxRootEl.querySelectorAll<HTMLButtonElement>("button.settings-select")).find(select => select.value === "off");
-if (!windowsBashSelect) throw new Error("Windows Bash sandbox select did not render");
-ok(windowsBashSelect.disabled, "Windows Bash sandbox selector is disabled");
-eq(windowsBashSelect.value, "off", "Windows Bash sandbox selector is fixed to off");
-ok(windowsBashSelect.getAttribute("aria-expanded") === "false", "Windows Bash sandbox selector cannot open");
-eq(windowsSetSandboxCalls, 0, "Windows immutable Bash sandbox state does not save enforce");
+ok(windowsSandboxRootEl.textContent?.includes("/work") === true, "Windows shows the effective workspace write boundary");
+ok(!windowsSandboxRootEl.textContent?.includes("This setting is fixed to off."), "Windows removes the legacy Bash sandbox mode control");
+eq(windowsSetSandboxCalls, 0, "rendering Windows permission boundaries does not mutate sandbox settings");
 
 await act(async () => {
   windowsSandboxRoot.unmount();

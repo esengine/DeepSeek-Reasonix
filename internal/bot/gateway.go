@@ -73,7 +73,7 @@ type GatewayConfig struct {
 	// recovered the controller for an inbound remote. Hosts may persist the
 	// concrete session ID or keep the remote as a read-only channel.
 	OnSessionReady func(InboundMessage, string) error
-	// OnToolApprovalModeChange persists a remote IM request such as /yolo on.
+	// OnToolApprovalModeChange persists a remote IM /mode request.
 	// The gateway updates the live session and in-memory defaults first; this
 	// callback lets desktop save the chosen connection mode to user config.
 	OnToolApprovalModeChange func(InboundMessage, string) error
@@ -1599,13 +1599,13 @@ func (gw *BotGateway) handleSlashCommandCore(ctx context.Context, adapter Adapte
 		state.ctrl.AnswerQuestion(askID, answers)
 		_ = gw.sendText(ctx, adapter, msg, "已提交回答。")
 
-	case strings.HasPrefix(msg.Text, "/yolo") || strings.HasPrefix(msg.Text, "/mode"):
+	case strings.HasPrefix(msg.Text, "/mode"):
 		if !gw.requireCommandRole(ctx, adapter, msg, "admin") {
 			return
 		}
 		mode, statusOnly, ok := parseToolApprovalModeCommand(msg.Text)
 		if !ok {
-			_ = gw.sendText(ctx, adapter, msg, "用法: /yolo on|off|auto|status，或 /mode yolo|ask|auto")
+			_ = gw.sendText(ctx, adapter, msg, "用法: /mode read-only|workspace-write|danger-full-access|status")
 			return
 		}
 		if statusOnly {
@@ -2059,11 +2059,6 @@ func parseToolApprovalModeCommand(text string) (mode string, statusOnly bool, ok
 	}
 	cmd := strings.ToLower(strings.TrimSpace(parts[0]))
 	switch cmd {
-	case "/yolo":
-		if len(parts) == 1 {
-			return control.ToolApprovalYolo, false, true
-		}
-		return parseToolApprovalModeArg(parts[1])
 	case "/mode":
 		if len(parts) == 1 {
 			return "", true, true
@@ -2078,12 +2073,12 @@ func parseToolApprovalModeArg(arg string) (mode string, statusOnly bool, ok bool
 	switch strings.ToLower(strings.TrimSpace(arg)) {
 	case "status", "state", "show", "状态", "查看":
 		return "", true, true
-	case "on", "enable", "enabled", "true", "1", "yolo", "full", "full-access", "bypass", "开启", "打开":
-		return control.ToolApprovalYolo, false, true
-	case "off", "disable", "disabled", "false", "0", "ask", "询问", "关闭":
-		return control.ToolApprovalAsk, false, true
-	case "auto", "自动":
-		return control.ToolApprovalAuto, false, true
+	case "danger-full-access", "full", "full-access", "完全权限":
+		return control.ToolApprovalDangerFullAccess, false, true
+	case "read-only", "readonly", "ask", "仅可查看":
+		return control.ToolApprovalReadOnly, false, true
+	case "workspace-write", "workspace", "auto", "yolo", "工作区内修改":
+		return control.ToolApprovalWorkspaceWrite, false, true
 	default:
 		return "", false, false
 	}
@@ -2147,28 +2142,28 @@ func (gw *BotGateway) currentToolApprovalMode(key string, msg InboundMessage) st
 
 func (gw *BotGateway) toolApprovalModeStatusText(key string, msg InboundMessage) string {
 	mode := gw.currentToolApprovalMode(key, msg)
-	return fmt.Sprintf("当前工具审批模式：%s\n用法：/yolo on|off|auto|status，或 /mode yolo|ask|auto", toolApprovalModeLabel(mode))
+	return fmt.Sprintf("当前权限：%s\n用法：/mode read-only|workspace-write|danger-full-access|status", toolApprovalModeLabel(mode))
 }
 
 func toolApprovalModeChangedText(mode string) string {
 	switch normalizeBotToolApprovalMode(mode) {
-	case control.ToolApprovalYolo:
-		return "已开启 YOLO：普通工具审批将自动放行；Ask 问题和计划批准仍会等待确认。"
-	case control.ToolApprovalAuto:
-		return "已切换为自动模式：策略允许的工具会自动放行，仍保留需要询问或拒绝的规则。"
+	case control.ToolApprovalDangerFullAccess:
+		return "已切换为完全权限：普通工具审批将自动放行，显式禁止仍然生效。"
+	case control.ToolApprovalWorkspaceWrite:
+		return "已切换为工作区内修改：工作区与会话临时目录可写，越界操作需要授权。"
 	default:
-		return "已切回询问模式：工具执行前会请求确认。"
+		return "已切换为仅可查看：读取可直接执行，写入与外部副作用需要授权。"
 	}
 }
 
 func toolApprovalModeLabel(mode string) string {
 	switch normalizeBotToolApprovalMode(mode) {
-	case control.ToolApprovalYolo:
-		return "YOLO"
-	case control.ToolApprovalAuto:
-		return "自动"
+	case control.ToolApprovalDangerFullAccess:
+		return "完全权限"
+	case control.ToolApprovalWorkspaceWrite:
+		return "工作区内修改"
 	default:
-		return "询问"
+		return "仅可查看"
 	}
 }
 
@@ -2715,7 +2710,7 @@ func (gw *BotGateway) sessionOptionsForMessage(msg InboundMessage) (model string
 
 func (gw *BotGateway) sessionOptionsForResolvedOverride(msg InboundMessage, override sessionRuntimeOverride, enabled bool) (model string, workspaceRoot string, toolApprovalMode string) {
 	// cfg.ToolApprovalMode / Channels / ConnectionChannels are rewritten under
-	// gw.mu at runtime (/yolo, UpdateConnectionToolApprovalMode), so snapshot them
+	// gw.mu at runtime (/mode, UpdateConnectionToolApprovalMode), so snapshot them
 	// under a short lock and resolve outside it. Copying the ChannelConfig value is enough: writers
 	// replace whole map entries and never mutate SessionMappings in place.
 	gw.mu.Lock()
@@ -2857,20 +2852,14 @@ func normalizeBotToolApprovalMode(mode string) string {
 	if value := normalizeOptionalBotToolApprovalMode(mode); value != "" {
 		return value
 	}
-	return control.ToolApprovalAsk
+	return control.ToolApprovalWorkspaceWrite
 }
 
 func normalizeOptionalBotToolApprovalMode(mode string) string {
-	switch strings.ToLower(strings.TrimSpace(mode)) {
-	case control.ToolApprovalAsk:
-		return control.ToolApprovalAsk
-	case control.ToolApprovalAuto:
-		return control.ToolApprovalAuto
-	case control.ToolApprovalYolo, "full", "full-access", "bypass":
-		return control.ToolApprovalYolo
-	default:
+	if strings.TrimSpace(mode) == "" {
 		return ""
 	}
+	return config.NormalizeToolApprovalMode(mode)
 }
 
 func (gw *BotGateway) sendText(ctx context.Context, adapter Adapter, msg InboundMessage, text string) error {

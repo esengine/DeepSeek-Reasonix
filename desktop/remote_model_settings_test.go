@@ -625,11 +625,9 @@ func TestAppendRemoteModelSettingsFreshTabStaysPending(t *testing.T) {
 	}
 }
 
-// SubmitRemoteTab must only deliver an unrevisioned turn to the connection the
-// legacy admission was recorded for: a replaced generation re-admits against
-// the new target before the request leaves, and the Serve never receives the
-// optional expected-model-settings header on this path.
-func TestSubmitRemoteTabFencesLegacyAdmissionToItsTarget(t *testing.T) {
+// A legacy Serve remains available for history, but cannot execute a new turn
+// until it advertises the permission-presets-v1 contract.
+func TestSubmitRemoteTabRejectsLegacyServeWithoutPermissionPresets(t *testing.T) {
 	isolateDesktopUserDirs(t)
 	submits := make(chan string, 4)
 	serve := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -663,29 +661,15 @@ func TestSubmitRemoteTabFencesLegacyAdmissionToItsTarget(t *testing.T) {
 	app.remoteRuntime = kernel
 	app.remoteMu.Unlock()
 
-	if err := app.SubmitRemoteTab(tab.id, "first turn"); err != nil {
-		t.Fatalf("legacy submit failed: %v", err)
+	err := app.SubmitRemoteTab(tab.id, "first turn")
+	if err == nil || !strings.Contains(err.Error(), "permission-presets-v1") {
+		t.Fatalf("legacy submit error = %v, want permission-presets-v1 upgrade requirement", err)
 	}
-	// A reconnect replaced the target generation; the next submit re-admits
-	// against it before delivering the turn.
-	app.remoteTabMu.Lock()
-	tab.gen = 2
-	app.remoteTabMu.Unlock()
-	if err := app.SubmitRemoteTab(tab.id, "second turn"); err != nil {
-		t.Fatalf("submit after reconnect failed: %v", err)
-	}
-	if kernel.switches != 2 {
-		t.Fatalf("replaced generation was not re-admitted, switches=%d", kernel.switches)
+	if kernel.switches != 0 {
+		t.Fatalf("legacy target reached model admission before permission rejection, switches=%d", kernel.switches)
 	}
 	close(submits)
-	seen := 0
-	for header := range submits {
-		seen++
-		if header != "" {
-			t.Fatalf("legacy submit carried a model-settings revision header: %q", header)
-		}
-	}
-	if seen != 2 {
-		t.Fatalf("expected both turns delivered, got %d", seen)
+	if seen := len(submits); seen != 0 {
+		t.Fatalf("legacy Serve received %d submit requests, want none", seen)
 	}
 }

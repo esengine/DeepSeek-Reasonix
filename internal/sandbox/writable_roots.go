@@ -85,6 +85,32 @@ func (s *WritableRootSet) SessionRoots() []string {
 	return append([]string(nil), s.session...)
 }
 
+// RevokeSession removes one exact session-approved root. Ancestor and child
+// grants are deliberately left alone so revocation cannot broaden or silently
+// reshape another authorization.
+func (s *WritableRootSet) RevokeSession(dir string) bool {
+	if s == nil {
+		return false
+	}
+	dir = canonicalDir(dir)
+	if dir == "" || dir == "." || !filepath.IsAbs(dir) {
+		return false
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	removed := false
+	kept := s.session[:0]
+	for _, root := range s.session {
+		if sameWritePath(root, dir) {
+			removed = true
+			continue
+		}
+		kept = append(kept, root)
+	}
+	s.session = append([]string(nil), kept...)
+	return removed
+}
+
 // Snapshot returns baseline plus session grants, collapsed.
 func (s *WritableRootSet) Snapshot() []string {
 	if s == nil {

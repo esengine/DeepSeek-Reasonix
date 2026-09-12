@@ -44,7 +44,8 @@ func TestBashMergesLoginShellPath(t *testing.T) {
 	b := bash{shell: sandbox.Shell{Kind: sandbox.ShellBash, Path: "/bin/sh"}}
 	args, _ := json.Marshal(map[string]string{"command": "reasonix-path-probe"})
 
-	out, err := b.Execute(context.Background(), args)
+	ctx := sandbox.WithPermissionPreset(context.Background(), "danger-full-access")
+	out, err := b.Execute(ctx, args)
 	if err != nil {
 		t.Fatalf("command should resolve through merged login-shell PATH: %v (out=%q)", err, out)
 	}

@@ -18,7 +18,7 @@ import { CopyButton } from "../CopyButton";
 // the COMPLETE plain text immediately and swap in highlighted HTML from an
 // idle callback; the skip caps (MAX_HIGHLIGHT_BYTES / MAX_HIGHLIGHT_LINES)
 // remain the plain-forever policy. Either way nothing is ever truncated.
-const HljsCode = memo(function HljsCode({ value, language, scrollMode, maxHeight, sourceSize }: EditorProps) {
+const HljsCode = memo(function HljsCode({ value, copyValue, language, scrollMode, maxHeight, sourceSize }: EditorProps) {
   const syntaxHighlight = useMemo(
     () => shouldHighlightSource(value, sourceSize),
     [sourceSize, value],
@@ -60,7 +60,7 @@ const HljsCode = memo(function HljsCode({ value, language, scrollMode, maxHeight
       >
         <code dangerouslySetInnerHTML={{ __html: html }} />
       </pre>
-      <CopyButton text={value} className="code-block__copy" />
+      <CopyButton text={copyValue ?? value} className="code-block__copy" />
     </div>
   );
 });

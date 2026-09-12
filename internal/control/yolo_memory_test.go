@@ -46,7 +46,7 @@ func TestMemoryApprovalStillPromptsUnderAsk(t *testing.T) {
 		t.Fatal("memory approval must remain pending under ask")
 	}
 
-	c.Approve(approval.ID, true, true, true)
+	c.Approve(approval.ID, true, true, false)
 	select {
 	case err := <-errs:
 		t.Fatalf("requestApproval: %v", err)
@@ -174,7 +174,7 @@ func TestToolApprovalModeYoloBypassesMemoryAskAndHonorsDeny(t *testing.T) {
 	}
 }
 
-func TestSetAutoApproveToolsDrainsPendingMemoryApproval(t *testing.T) {
+func TestSetAutoApproveToolsDoesNotResolvePendingMemoryApproval(t *testing.T) {
 	approvalRequests := make(chan event.Approval, 1)
 	c := New(Options{
 		Sink: event.FuncSink(func(e event.Event) {
@@ -195,8 +195,9 @@ func TestSetAutoApproveToolsDrainsPendingMemoryApproval(t *testing.T) {
 		done <- allow
 	}()
 
+	var approval event.Approval
 	select {
-	case <-approvalRequests:
+	case approval = <-approvalRequests:
 	case <-time.After(30 * time.Second):
 		t.Fatal("memory approval request was not emitted")
 	}
@@ -207,11 +208,12 @@ func TestSetAutoApproveToolsDrainsPendingMemoryApproval(t *testing.T) {
 	case err := <-errs:
 		t.Fatalf("requestApproval: %v", err)
 	case allow := <-done:
-		if !allow {
-			t.Fatal("pending memory approval should be allowed when YOLO turns on")
-		}
-	case <-time.After(30 * time.Second):
-		t.Fatal("pending memory approval stayed blocked after YOLO turned on")
+		t.Fatalf("legacy permission change answered pending memory approval: allow=%v", allow)
+	case <-time.After(50 * time.Millisecond):
+	}
+	c.Approve(approval.ID, true, false, false)
+	if allow := <-done; !allow {
+		t.Fatal("manual approval should allow memory write")
 	}
 }
 
@@ -238,16 +240,22 @@ func TestToolApprovalModeAutoDrainsPendingMemoryFallback(t *testing.T) {
 	}
 
 	drained := c.ApplyToolApprovalMode(ToolApprovalAuto)
-	if len(drained) != 1 || drained[0] != approval.ID {
-		t.Fatalf("auto drained ids = %v, want [%s]", drained, approval.ID)
+	if len(drained) != 0 {
+		t.Fatalf("workspace preset resolved old memory approval: %v", drained)
 	}
 	select {
 	case allow := <-done:
-		if !allow {
-			t.Fatal("auto should allow a pending fallback memory approval")
+		t.Fatalf("preset switch resolved pending memory approval: allow=%v", allow)
+	default:
+	}
+	c.Approve(approval.ID, false, false, false)
+	select {
+	case allow := <-done:
+		if allow {
+			t.Fatal("cleanup denial unexpectedly allowed memory operation")
 		}
 	case <-time.After(30 * time.Second):
-		t.Fatal("pending fallback memory approval stayed blocked under auto")
+		t.Fatal("pending memory approval did not resolve after denial")
 	}
 }
 

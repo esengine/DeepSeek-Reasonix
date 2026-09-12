@@ -305,14 +305,14 @@ console.log("\napproval modal file references");
       id: "plan-mode-read-only-command-zh",
       tool: "plan_mode_read_only_command",
       subject: "Trust \"gh issue view\" as a read-only command prefix while planning\nCommand: gh issue view 5867 --json title",
-      reason: "This bash command is not in Reasonix's built-in read-only set. Confirm only if this exact prefix is read-only for planning and research. Auto/YOLO approval cannot answer this trust prompt.",
+      reason: "This bash command is not in Reasonix's built-in read-only set. Confirm only if this exact prefix is read-only for planning and research. Permission presets cannot answer this trust prompt.",
     },
   });
 
   const text = document.body.textContent ?? "";
   ok(text.includes("计划模式只读命令"), "plan-mode read-only command approval localizes tool label in Chinese UI");
   ok(text.includes("在计划模式中信任 \"gh issue view\" 为只读命令前缀"), "plan-mode read-only command approval localizes subject in Chinese UI");
-  ok(text.includes("不在 Reasonix 内置只读集合中"), "plan-mode read-only command approval localizes reason in Chinese UI");
+  ok(text.includes("当前权限模式之外"), "plan-mode read-only command approval localizes reason in Chinese UI");
 
   await act(async () => {
     root.unmount();
@@ -331,14 +331,14 @@ console.log("\napproval modal file references");
       id: "dynamic-bash-zh",
       tool: "bash",
       subject: "python3 -c \"print('hello')\"",
-      reason: "Matched permission rule: ask Bash(python3:*)\nThis command uses nested or indirect shell execution. Auto and broad allow rules cannot verify the inner command; approve this exact command or use YOLO.",
+      reason: "Matched permission rule: ask Bash(python3:*)\nThis command requests access outside the active permission preset. Review the target and approve only the precise scope required.",
     },
   });
 
   const text = document.body.textContent ?? "";
   ok(text.includes("命中权限规则：ask Bash(python3:*)"), "approval identifies the exact matched permission rule");
-  ok(text.includes("嵌套或间接执行"), "dynamic Bash approval explains the matched safety boundary in Chinese");
-  ok(text.includes("精确命令"), "dynamic Bash approval tells the user how to grant the command");
+  ok(text.includes("当前权限模式之外"), "Bash approval explains the active permission boundary in Chinese");
+  ok(text.includes("精确范围"), "Bash approval tells the user to grant only the required scope");
 
   await act(async () => {
     root.unmount();
@@ -437,20 +437,20 @@ console.log("\napproval modal file references");
   ok(document.querySelector(".prompt-shelf__meta") == null, "tool approval omits duplicate subject metadata");
   // Subject is always visible; reason expands when short enough / via Details.
   const actions = [...document.querySelectorAll(".prompt-shelf__actions .prompt-action")] as HTMLElement[];
-  eq(actions.length, 4, "ordinary tool approval exposes four select-then-confirm options");
+  eq(actions.length, 3, "ordinary tool approval exposes once, session, and deny options");
   ok(actions[0]?.classList.contains("prompt-action--selected"), "default selection is allow once");
   eq(
-    actions[2]?.getAttribute("title"),
-    "Save as a persistent matching rule; future sessions stop asking for matching calls.",
-    "persistent option carries a native title fallback",
+    actions[1]?.getAttribute("title"),
+    "Allow matching calls until this session ends; resets on restart.",
+    "session option carries a native title fallback",
   );
   ok(document.querySelector(".decision-confirm-bar__confirm") != null, "decision surface shows an explicit confirm button");
 
   await act(async () => {
-    actions[2].click();
+    actions[1].click();
     await flushTimers();
   });
-  ok(actions[2]?.classList.contains("prompt-action--selected"), "clicking an option only changes selection");
+  ok(actions[1]?.classList.contains("prompt-action--selected"), "clicking an option only changes selection");
   eq(
     document.querySelectorAll(".prompt-action--selected").length >= 1,
     true,

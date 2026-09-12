@@ -1,0 +1,11 @@
+{
+  "date": "2026-09-12",
+  "platform": "Darwin",
+  "machine": "arm64",
+  "baseCommit": "0e5319ad145b2c40dd2601ac0d7be0782556114b",
+  "branch": "fix/harness-chat-transcript",
+  "workingTreeChanges": true,
+  "harnessReference": "c291e7961a",
+  "node": "v24.19.0",
+  "scope": "Production chat/Composer fixtures, real application composition with mock transports, actual isolated Electron host. Not a packaged native-IME soak."
+}

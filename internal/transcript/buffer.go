@@ -115,6 +115,35 @@ func (buffer *Buffer) Messages() []Message {
 	return out
 }
 
+func (buffer *Buffer) attachTurnStats(turnID string, usage *TurnUsage, durationMs, completedAt int64) {
+	for _, row := range slices.Backward(buffer.messages) {
+		if row.message.TurnID != turnID || row.message.Role != "assistant" {
+			continue
+		}
+		if !row.content.hasNonWhitespace() && !row.reasoning.hasNonWhitespace() {
+			continue
+		}
+		if usage != nil {
+			copy := *usage
+			copy.Routes = append([]string(nil), usage.Routes...)
+			if usage.CacheReadTokens != nil {
+				value := *usage.CacheReadTokens
+				copy.CacheReadTokens = &value
+			}
+			if usage.ReasoningTokens != nil {
+				value := *usage.ReasoningTokens
+				copy.ReasoningTokens = &value
+			}
+			row.message.TurnUsage = &copy
+		}
+		row.message.TurnDurationMs = durationMs
+		if row.message.CreatedAt == 0 {
+			row.message.CreatedAt = completedAt
+		}
+		return
+	}
+}
+
 func (buffer *Buffer) Apply(e event.Event) {
 	start := len(buffer.messages)
 	defer buffer.stampAppliedMessages(e, start)
@@ -265,6 +294,7 @@ func (buffer *Buffer) applyToolResult(e event.Event) {
 		ToolName:        toolName,
 		Content:         display,
 		ToolResultError: errPreview,
+		PresentedFiles:  append([]provider.PresentedFile(nil), e.Tool.PresentedFiles...),
 	}
 	if callID != "" {
 		for _, row := range buffer.messages {

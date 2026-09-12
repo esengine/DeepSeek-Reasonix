@@ -88,8 +88,7 @@ try {
       clearContextPending: false, creation: false, availability: projectSessionAvailability({ local: failedLocal }),
       rewind: { stateActive: false, committing: false, signal: undefined }, revealSignal: 0, invocationMetadata: undefined,
       surfaceCommitToken: undefined, liveStore: undefined }} onRetryHistory={async () => { retries++; }}
-    commands={{ onPrompt: noop, onDeliveryContinue: noop, onAcceptDelivery: noop, onOpenChanges: noop, onOpenVerification: noop,
-      onEditPrompt: noop, onRewind: noop, onLoadOlderHistory: async () => false, onSurfacePaintReady: noop }} /></LocaleProvider>));
+    commands={{ onPrompt: noop, onFork: noop, onLoadOlderHistory: async () => false, onSurfacePaintReady: noop }} /></LocaleProvider>));
   const recovery = document.querySelector(".session-recovery")!;
   assert.ok(recovery, "actual local chat region renders history recovery");
   assert.equal(recovery.closest("main"), null, "history retry is outside the main transcript collapse");

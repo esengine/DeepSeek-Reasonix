@@ -17,7 +17,6 @@ import (
 
 	"mvdan.cc/sh/v3/syntax"
 
-	"reasonix/internal/i18n"
 	"reasonix/internal/jobs"
 	"reasonix/internal/proc"
 	"reasonix/internal/sandbox"
@@ -36,10 +35,7 @@ func init() { tool.RegisterBuiltin(bash{}) }
 
 var bashShellPATH = cachedBashShellPATH
 
-var (
-	bashSandboxCommand             = sandbox.Command
-	bashSandboxEscapePromptEnabled = func() bool { return runtime.GOOS == "windows" }
-)
+var bashSandboxCommand = sandbox.Command
 
 // cachedBashShellPATH memoizes the login-shell PATH probe per login shell so a
 // shell isn't spawned on every bash tool call (the probe runs up to three
@@ -100,6 +96,8 @@ type bashParams struct {
 	PreserveBackgroundProcesses bool     `json:"preserve_background_processes"`
 	AdditionalWriteDirs         []string `json:"additional_write_dirs,omitempty"`
 	Justification               string   `json:"justification,omitempty"`
+	SandboxPermissions          string   `json:"sandbox_permissions,omitempty"`
+	DenialID                    string   `json:"denial_id,omitempty"`
 }
 
 func (bash) Name() string { return "bash" }
@@ -362,45 +360,23 @@ func (b bash) prepareLaunch(ctx context.Context, sh sandbox.Shell, command strin
 	// bashSandboxCommand is injectable for tests; production points at
 	// sandbox.Command. Attach SessionTemp so Linux bwrap binds the private dir.
 	spec := b.specForCall(ctx)
-	spec.SessionTemp = sessionDir
+	effectiveSessionDir := sessionDir
+	spec.SessionTemp = effectiveSessionDir
 	argv, wrapped := bashSandboxCommand(spec, sh, command)
-	linuxSB := wrapped && sessionDir != "" && runtime.GOOS == "linux"
+	linuxSB := wrapped && effectiveSessionDir != "" && runtime.GOOS == "linux"
 	prepared := sandbox.Prepared{
 		Argv:           argv,
 		Wrapped:        wrapped,
-		SessionTemp:    sessionDir,
-		EnvOverrides:   sandbox.SessionTempEnv(sessionDir, linuxSB),
+		SessionTemp:    effectiveSessionDir,
+		EnvOverrides:   sandbox.SessionTempEnv(effectiveSessionDir, linuxSB),
 		LinuxSandboxed: linuxSB,
 	}
 
-	if b.sb.Enforce() && bashSandboxEscapeSessionAllowed(ctx, command, rawArgs) {
-		prepared.Argv = unconfinedShellArgv(sh, command)
-		prepared.Wrapped = false
-		// Escaped commands still inherit private temp env vars pointing at the
-		// host private directory (no virtual /tmp mapping).
-		prepared.LinuxSandboxed = false
-		prepared.EnvOverrides = sandbox.SessionTempEnv(sessionDir, false)
-	} else if b.sb.Enforce() && !prepared.Wrapped {
-		allow, reason, err := approveBashSandboxEscape(ctx, command, rawArgs, i18n.M.SandboxEscapeWrapReason)
-		if err != nil {
-			if lease != nil {
-				lease.Release()
-			}
-			return sandbox.Prepared{}, nil, err
+	if spec.Enforce() && !prepared.Wrapped {
+		if lease != nil {
+			lease.Release()
 		}
-		if !allow {
-			if lease != nil {
-				lease.Release()
-			}
-			if reason != "" {
-				return sandbox.Prepared{}, nil, fmt.Errorf("%s", reason)
-			}
-			return sandbox.Prepared{}, nil, fmt.Errorf("%s", sandbox.UnavailableMessage())
-		}
-		prepared.Argv = unconfinedShellArgv(sh, command)
-		prepared.Wrapped = false
-		prepared.LinuxSandboxed = false
-		prepared.EnvOverrides = sandbox.SessionTempEnv(sessionDir, false)
+		return sandbox.Prepared{}, nil, fmt.Errorf("%s", sandbox.UnavailableMessage())
 	}
 	return prepared, lease, nil
 }
@@ -438,40 +414,6 @@ func appendSessionDataHint(out, hint string) string {
 func unconfinedShellArgv(sh sandbox.Shell, command string) []string {
 	argv, _ := sandbox.Command(sandbox.Spec{}, sh, command)
 	return argv
-}
-
-func approveBashSandboxEscape(ctx context.Context, command string, args json.RawMessage, reason string) (bool, string, error) {
-	if !bashSandboxEscapePromptEnabled() {
-		return false, "", nil
-	}
-	approver, ok := sandbox.EscapeApproverFrom(ctx)
-	if !ok {
-		return false, "", nil
-	}
-	return approver.ApproveSandboxEscape(ctx, sandbox.EscapeRequest{
-		Command: command,
-		Args:    append(json.RawMessage(nil), args...),
-		Reason:  reason,
-	})
-}
-
-func bashSandboxEscapeSessionAllowed(ctx context.Context, command string, args json.RawMessage) bool {
-	if !bashSandboxEscapePromptEnabled() {
-		return false
-	}
-	approver, ok := sandbox.EscapeApproverFrom(ctx)
-	if !ok {
-		return false
-	}
-	checker, ok := approver.(sandbox.EscapeSessionChecker)
-	if !ok {
-		return false
-	}
-	return checker.SandboxEscapeSessionAllowed(ctx, sandbox.EscapeRequest{
-		Command: command,
-		Args:    append(json.RawMessage(nil), args...),
-		Reason:  i18n.M.SandboxEscapeRuntimeReason,
-	})
 }
 
 // runForegroundDetailed uses the shared shellrun collector so model bash and

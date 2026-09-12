@@ -34,6 +34,7 @@ func TestBashCancelKillsWindowsChildProcessTree(t *testing.T) {
 	args, _ := json.Marshal(map[string]any{"command": command})
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
+	ctx = fullAccessBashTestContext(ctx)
 
 	done := make(chan error, 1)
 	go func() {
@@ -81,7 +82,7 @@ func TestBashWindowsReapsChildAfterForegroundShellExit(t *testing.T) {
 
 	out, err := (bash{
 		shell: sandbox.Shell{Kind: sandbox.ShellPowerShell, Path: powershell},
-	}).Execute(context.Background(), args)
+	}).Execute(fullAccessBashTestContext(t.Context()), args)
 	childPID := waitForWindowsPIDFile(t, pidFile)
 	if err != nil {
 		killWindowsPID(childPID)
@@ -110,6 +111,7 @@ func TestBashCancelKillsGitBashHereDocPython(t *testing.T) {
 	args, _ := json.Marshal(map[string]any{"command": command})
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
+	ctx = fullAccessBashTestContext(ctx)
 
 	done := make(chan error, 1)
 	go func() {

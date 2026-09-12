@@ -15,7 +15,6 @@ type approvalChoice struct {
 	label           string
 	allow           bool
 	allowForSession bool
-	persistToConfig bool
 	exitPlan        bool
 }
 
@@ -35,13 +34,13 @@ func approvalChoices(a *event.Approval) []approvalChoice {
 	case a.Tool == planApprovalTool:
 		decisions = []approvalChoice{{allow: true}, {}, {exitPlan: true}}
 	case a.Kind == event.ApprovalKindWriteAccess || a.WriteAccess != nil:
-		decisions = []approvalChoice{{allow: true}, {allow: true, allowForSession: true}, {allow: true, allowForSession: true, persistToConfig: true}, {}}
+		decisions = []approvalChoice{{allow: true}, {allow: true, allowForSession: true}, {}}
 	case fresh && freshApprovalAllowsSession(a.Tool):
 		decisions = []approvalChoice{{allow: true}, {allow: true, allowForSession: true}, {}}
 	case fresh:
 		decisions = []approvalChoice{{allow: true}, {}}
 	default:
-		decisions = []approvalChoice{{allow: true}, {allow: true, allowForSession: true}, {allow: true, allowForSession: true, persistToConfig: true}, {}}
+		decisions = []approvalChoice{{allow: true}, {allow: true, allowForSession: true}, {}}
 	}
 	labels := approvalChoiceLabels(a)
 	for i := range decisions {
@@ -66,8 +65,7 @@ func approvalChoiceLabels(a *event.Approval) []string {
 		choices = i18n.M.PlanApprovalChoices
 	} else if !fresh {
 		sessionRule := permission.SessionGrantRuleForScope(a.Tool, a.Subject)
-		persistentRule := permission.RememberRuleForScope(a.Tool, a.Subject)
-		choices = fmt.Sprintf(i18n.M.ToolApprovalChoices, sessionRule, persistentRule)
+		choices = fmt.Sprintf(i18n.M.ToolApprovalChoices, sessionRule)
 	}
 	switch a.Tool {
 	case control.SandboxEscapeApprovalTool:
@@ -82,7 +80,7 @@ func approvalChoiceLabels(a *event.Approval) []string {
 	}
 	if !fresh && a.Tool == "bash" && permission.BashCommandPrefix(a.Subject) != "" {
 		rule := permission.RememberRuleForScope(a.Tool, a.Subject)
-		choices = fmt.Sprintf(i18n.M.BashPrefixChoices, rule, rule)
+		choices = fmt.Sprintf(i18n.M.BashPrefixChoices, rule)
 	}
 	var labels []string
 	for line := range strings.SplitSeq(choices, "\n") {

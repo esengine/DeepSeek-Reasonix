@@ -1572,7 +1572,7 @@ func TestApplyUserConfigUpgradesOnStartupVersion3NonWindowsAdvancesToV5(t *testi
 	}
 }
 
-func TestApplyUserConfigUpgradesOnStartupWindowsBashEnforceDefaultsOffOnce(t *testing.T) {
+func TestApplyUserConfigUpgradesOnStartupWindowsBashEnforceRemainsEnforced(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "config.toml")
 	setRuntimeGOOS(t, "windows")
 
@@ -1594,13 +1594,13 @@ func TestApplyUserConfigUpgradesOnStartupWindowsBashEnforceDefaultsOffOnce(t *te
 	if got.ConfigVersion != Default().ConfigVersion {
 		t.Fatalf("config_version = %d, want %d", got.ConfigVersion, Default().ConfigVersion)
 	}
-	if got.Sandbox.Bash != "off" || got.BashMode() != "off" {
-		t.Fatalf("Windows bash mode after migration = raw %q effective %q, want off/off", got.Sandbox.Bash, got.BashMode())
+	if got.Sandbox.Bash != "enforce" || got.BashMode() != "enforce" {
+		t.Fatalf("Windows bash mode after migration = raw %q effective %q, want enforce/enforce", got.Sandbox.Bash, got.BashMode())
 	}
 
 	got.Sandbox.Bash = "enforce"
-	if got.BashMode() != "off" {
-		t.Fatalf("manual Windows enforce should still resolve off before save, got %q", got.BashMode())
+	if got.BashMode() != "enforce" {
+		t.Fatalf("manual Windows enforce should remain enforce before save, got %q", got.BashMode())
 	}
 	if err := got.SaveTo(path); err != nil {
 		t.Fatalf("SaveTo manual enforce: %v", err)
@@ -1613,8 +1613,8 @@ func TestApplyUserConfigUpgradesOnStartupWindowsBashEnforceDefaultsOffOnce(t *te
 		t.Fatal("v4 config should not be migrated again after user attempts to re-enable enforce")
 	}
 	got = LoadForEdit(path)
-	if got.Sandbox.Bash != "off" || got.BashMode() != "off" {
-		t.Fatalf("manual Windows enforce after save = raw %q effective %q, want off/off", got.Sandbox.Bash, got.BashMode())
+	if got.Sandbox.Bash != "enforce" || got.BashMode() != "enforce" {
+		t.Fatalf("manual Windows enforce after save = raw %q effective %q, want enforce/enforce", got.Sandbox.Bash, got.BashMode())
 	}
 }
 

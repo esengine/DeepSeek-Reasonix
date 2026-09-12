@@ -1,10 +1,11 @@
-import { lazy, Suspense, type ComponentProps, type KeyboardEvent, type PointerEvent, type ReactNode } from "react";
+import { lazy, Suspense, useSyncExternalStore, type ComponentProps, type KeyboardEvent, type PointerEvent, type ReactNode } from "react";
 import type { Translator } from "../lib/i18n";
 import type { RightDockMode } from "../store/layout";
 import type { TabItem } from "../store/activityBar";
 import { useActivityBarStore } from "../store/activityBar";
 import { readWorkspaceTreeMemory, workspaceViewMemoryKey } from "../lib/workspaceViewMemory";
 import { useDockViewRequests } from "./useDockViewRequests";
+import { presentedFileRequestSnapshot, subscribePresentedFileRequest } from "../lib/presentedFileNavigation";
 
 // The tab strip, its drag state machine and the add menu are a deferred
 // surface: the dock is closed on most launches, so keep them out of the
@@ -53,7 +54,18 @@ export function WorkspaceDockRegion(props: WorkspaceDockRegionProps) {
   const loadedRoot = useActivityBarStore(state => state.workspaceRoot);
   const activeTabId = useActivityBarStore(state => state.activeTabId);
   const projectReady = loadedRoot === (props.workspaceRoot ?? props.workspace.cwd ?? "");
-  const requests = useDockViewRequests(props.workspaceKey, visible && projectReady ? activeTabId : null, props.workspace);
+  const presentedRequest = useSyncExternalStore(subscribePresentedFileRequest, presentedFileRequestSnapshot, presentedFileRequestSnapshot);
+  const presentedReveal = presentedRequest && presentedRequest.ref.tabId === props.workspace.tabId
+    ? {
+        id: presentedRequest.id,
+        path: presentedRequest.ref.path,
+        toolCallId: presentedRequest.ref.source === "presented" ? presentedRequest.ref.toolCallId : undefined,
+        source: presentedRequest.action === "source",
+        action: presentedRequest.action,
+      }
+    : null;
+  const incomingWorkspace = presentedReveal ? { ...props.workspace, revealPathRequest: presentedReveal } : props.workspace;
+  const requests = useDockViewRequests(props.workspaceKey, visible && projectReady ? activeTabId : null, incomingWorkspace);
 
   const renderTab = (tab: TabItem): ReactNode => {
     if (!projectReady) return null;

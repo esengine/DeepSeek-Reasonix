@@ -25,6 +25,7 @@
 | `move_file` | false | 移动或重命名文件。 |
 | `multi_edit` | false | 对单个文件原子应用多个编辑。 |
 | `notebook_edit` | false | 编辑 Jupyter notebook 的单个 cell。 |
+| `present` | true | 在文件写入后、最终回答前，把 1～8 个现有文件声明为用户可打开的成果。宿主会原子校验全部路径，只记录路径和可选说明，不复制、执行、上传文件，也不把文件字节放入模型结果。 |
 | `read_file` | true | 按可分页的行号格式读取文本文件。`intent` 声明意图：`inspect`（无范围时的默认，有界预览）、`range`（有 offset/limit 时的默认，指定窗口）、`full`（扫描全文并分页到结尾）。续页时把结果里的 `cursor` 原样传回，由宿主定位到确切的下一位，无需自行计算 offset。无依赖的读取应同轮下发。 |
 | `todo_write` | true | 替换由模型维护的任务列表，状态描述实际进度，不要求串行执行或宿主签收。 |
 | `update_goal` | true | 报告活动 Goal 的模型判断：continue、complete 或 blocked。completion 是模型声明；正常结束和身份校验仍生效，真实检查独立保留，无 evaluator 或质量门禁。 |

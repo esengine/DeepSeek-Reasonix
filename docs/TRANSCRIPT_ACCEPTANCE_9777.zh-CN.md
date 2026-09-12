@@ -1,5 +1,7 @@
 # Transcript 切换验收
 
+> 本文是已退役渲染器的历史验收记录。当前实现及结果见[自然文档流架构](TRANSCRIPT_ARCHITECTURE.zh-CN.md)与[聊天改造验收](CHAT_REFACTOR_ACCEPTANCE.zh-CN.md)。
+
 [English](TRANSCRIPT_ACCEPTANCE_9777.md)
 
 #9777 的渲染器切片原子替换旧引擎，同时包含已挂载块 ResizeObserver 所有权、

@@ -4,7 +4,7 @@
 
 Use the **+** menu to attach content or enable Plan or Goal mode. Reasonix uses
 one standard execution behavior; there is no delivery-quality selector or
-mode chip. Approval policy remains a separate Ask/Auto/Yolo menu. Model and
+mode chip. Permission remains a separate Read only/Workspace write/Full access menu. Model and
 reasoning effort have independent selectors; unsupported models hide effort.
 The status bar no longer repeats the model name. Its turn cost uses two decimal
 places; detailed cost values retain their existing precision.

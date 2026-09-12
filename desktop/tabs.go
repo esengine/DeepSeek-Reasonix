@@ -23,6 +23,7 @@ import (
 	"reasonix/internal/fileutil"
 	"reasonix/internal/notify"
 	"reasonix/internal/provider"
+	"reasonix/internal/sessiontitle"
 	"reasonix/internal/store"
 	"reasonix/internal/turnevent"
 	"slices"
@@ -2534,7 +2535,7 @@ func (a *App) ensureBlankTab(scope, workspaceRoot string) (TabMeta, error) {
 	inheritedModel := defaultModel
 	var inheritedEffort *string
 	inheritedFloor := tabQualityFloor(workspaceRoot, a.activeTabLocked().qualityFloorSafe())
-	inheritedMode := tabModeFromAxes(false, defaultToolApprovalMode == control.ToolApprovalYolo)
+	inheritedMode := tabModeFromAxes(false, defaultToolApprovalMode == control.ToolApprovalDangerFullAccess)
 	inheritedToolApprovalMode := defaultToolApprovalMode
 	inheritedDisabledMCP := map[string]ServerView{}
 	var inheritedMCPOrder []string
@@ -5710,23 +5711,17 @@ func topicTitleRoot(scope, workspaceRoot string) string {
 
 func (a *App) forkTopicTitle(title string) string {
 	base := strings.TrimSpace(title)
-	if base == "" || isDefaultTopicTitle(base) || base == "Global" {
+	if base == "" || isDefaultTopicTitle(base) {
 		switch a.desktopLocale.Load() {
 		case desktopLocaleEn:
-			return "Forked session"
+			base = defaultTopicTitleEn
 		case desktopLocaleZhTW:
-			return "分叉會話"
+			base = defaultTopicTitleZhTW
 		default:
-			return "分叉会话"
+			base = defaultTopicTitle
 		}
 	}
-	if strings.HasSuffix(base, " · 分叉") || strings.HasSuffix(base, " · fork") {
-		return base
-	}
-	if a.desktopLocale.Load() == desktopLocaleEn {
-		return base + " · fork"
-	}
-	return base + " · 分叉"
+	return sessiontitle.IncreaseFork(base)
 }
 
 type sessionRecoveryEvent struct {
@@ -6985,7 +6980,7 @@ func currentTabCollaborationMode(tab *WorkspaceTab) string {
 
 func currentTabToolApprovalMode(tab *WorkspaceTab) string {
 	if tab == nil {
-		return control.ToolApprovalAsk
+		return control.ToolApprovalWorkspaceWrite
 	}
 	if tab.Ctrl != nil {
 		return tab.Ctrl.ToolApprovalMode()
@@ -7143,7 +7138,7 @@ func (s tabRuntimeSnapshot) normalizedRuntime() normalizedTabRuntime {
 }
 
 func (r normalizedTabRuntime) tabMode() string {
-	return tabModeFromAxes(r.collaborationMode == "plan", r.toolApprovalMode == control.ToolApprovalYolo)
+	return tabModeFromAxes(r.collaborationMode == "plan", r.toolApprovalMode == control.ToolApprovalDangerFullAccess)
 }
 
 func applyNormalizedRuntimeToTabLocked(tab *WorkspaceTab, runtime normalizedTabRuntime) {
@@ -7161,33 +7156,21 @@ func applyNormalizedRuntimeToTabLocked(tab *WorkspaceTab, runtime normalizedTabR
 }
 
 func normalizeToolApprovalMode(mode string) string {
-	switch strings.ToLower(strings.TrimSpace(mode)) {
-	case control.ToolApprovalAuto:
-		return control.ToolApprovalAuto
-	case control.ToolApprovalYolo, "full", "full-access", "bypass":
-		return control.ToolApprovalYolo
-	default:
-		return control.ToolApprovalAsk
-	}
+	return config.NormalizeToolApprovalMode(mode)
 }
 
 func persistedToolApprovalMode(mode string) string {
-	switch normalizeToolApprovalMode(mode) {
-	case control.ToolApprovalAuto, control.ToolApprovalYolo:
-		return normalizeToolApprovalMode(mode)
-	default:
-		return ""
-	}
+	return normalizeToolApprovalMode(mode)
 }
 
-// persistedTabMode is the composer mode saved with a tab so it survives reload
-// and app relaunch. plan, yolo, and plan-yolo are remembered (a restored yolo
-// tab keeps its status-bar indicator); "normal" is the default and isn't
-// persisted. (#3517)
+// persistedTabMode stores only the collaboration axis. Permission now has its
+// own authoritative ToolApprovalMode field, so new state must never encode it
+// again through the legacy yolo/plan-yolo values. Legacy readers still accept
+// those values during migration.
 func persistedTabMode(mode string) string {
 	switch normalizeTabMode(mode) {
-	case "plan", "yolo", "plan-yolo":
-		return normalizeTabMode(mode)
+	case "plan", "plan-yolo":
+		return "plan"
 	}
 	return ""
 }
@@ -7544,7 +7527,7 @@ func defaultTabSessionProfile() tabSessionProfile {
 		tokenMode:        boot.TokenModeFull,
 		qualityFloor:     control.QualityFloorStandard,
 		mode:             "normal",
-		toolApprovalMode: control.ToolApprovalAsk,
+		toolApprovalMode: control.ToolApprovalWorkspaceWrite,
 	}
 }
 
@@ -7555,8 +7538,8 @@ func tabSessionProfileFromMeta(sessionPath string, meta agent.BranchMeta) tabSes
 	profile.qualityFloor = control.QualityFloorStandard
 	profile.mode = normalizeTabMode(meta.Mode)
 	profile.toolApprovalMode = normalizeToolApprovalMode(meta.ToolApprovalMode)
-	if profile.toolApprovalMode == control.ToolApprovalAsk && tabModeHasAutoApproveTools(meta.Mode) {
-		profile.toolApprovalMode = control.ToolApprovalYolo
+	if profile.toolApprovalMode == control.ToolApprovalReadOnly && tabModeHasAutoApproveTools(meta.Mode) {
+		profile.toolApprovalMode = control.ToolApprovalWorkspaceWrite
 	}
 	profile.goal = runningTabSessionGoal(sessionPath, meta.Goal)
 	return profile
@@ -7577,10 +7560,10 @@ func applyTabSessionProfile(tab *WorkspaceTab, profile tabSessionProfile) {
 	tab.qualityFloor = profile.qualityFloor
 	tab.mode = normalizeTabMode(profile.mode)
 	tab.toolApprovalMode = normalizeToolApprovalMode(profile.toolApprovalMode)
-	if tab.toolApprovalMode == control.ToolApprovalAsk && tabModeHasAutoApproveTools(tab.mode) {
-		tab.toolApprovalMode = control.ToolApprovalYolo
+	if tab.toolApprovalMode == control.ToolApprovalReadOnly && tabModeHasAutoApproveTools(tab.mode) {
+		tab.toolApprovalMode = control.ToolApprovalWorkspaceWrite
 	}
-	tab.mode = tabModeFromAxes(tabModeHasPlan(tab.mode), tab.toolApprovalMode == control.ToolApprovalYolo)
+	tab.mode = tabModeFromAxes(tabModeHasPlan(tab.mode), tab.toolApprovalMode == control.ToolApprovalDangerFullAccess)
 	tab.goal = strings.TrimSpace(profile.goal)
 }
 

@@ -587,6 +587,13 @@ func TestE2EApprovalRoundTrip(t *testing.T) {
 	defer stop()
 
 	sid := openSession(t, client)
+	if resp := client.call(t, "session/set_config_option", SetSessionConfigOptionParams{
+		SessionID: sid,
+		ConfigID:  "tool_approval",
+		Value:     control.ToolApprovalReadOnly,
+	}); resp.Error != nil {
+		t.Fatalf("set read-only permission: %+v", resp.Error)
+	}
 	promptCh := client.callAsync("session/prompt", SessionPromptParams{
 		SessionID: sid,
 		Prompt:    []ContentBlock{{Type: "text", Text: "write README.md"}},

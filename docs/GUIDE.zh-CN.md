@@ -26,6 +26,7 @@ Provider 模型能力元数据见
 - [桌面端 Hooks](./DESKTOP_HOOKS.zh-CN.md)
 - [快捷键](#快捷键)
 - [权限与沙盒](#权限与沙盒)
+- [文件成果与 `present` 工具](./PRESENT_TOOL.zh-CN.md)
 - [能力诊断](#能力诊断)
 - [插件（MCP）](#插件mcp)
 - [斜杠命令](#斜杠命令)
@@ -393,9 +394,7 @@ Thinking 覆盖选项：
 ## 快捷键
 
 这里按使用端来写，因为用户通常是先知道“我现在在桌面端/CLI”，再找对应按键。
-桌面端仍用 `Shift+Tab` 切换 Plan；CLI 则用它在 Ask、Auto、Plan 之间循环。
-桌面端默认用 macOS 的 `Cmd+Y` 或 Windows/Linux 的 `Ctrl+Y` 切换 YOLO；
-如果在 Windows/Linux 上改绑了 YOLO，`Ctrl+Y` 会成为输入框的标准重做兼容键。
+`Shift+Tab` 只切换 Plan 协作流程。权限预设必须在输入框菜单中显式选择，输入快捷键不会改变权限。
 桌面端粘贴继续走系统快捷键；CLI 则把终端原生文本粘贴和应用接管的图片粘贴拆成不同快捷键。
 
 `[ui].shortcut_layout` 仍被接受以兼容旧配置，但下面的快捷键行为已经跨布局统一。
@@ -435,10 +434,9 @@ CLI/TUI 文本输入可通过 `[ui].cursor_shape` 设置光标形状，支持 `u
 | --- | --- | --- |
 | `Enter` | 发送当前消息 | IME 组合输入确认不会被截获。 |
 | `Shift+Enter` | 插入换行 | 输入框保持焦点。 |
-| `Shift+Tab` | 切换 Plan 开/关 | Plan 只改变“先规划”的工作流；内置 writer 仍走当前 Ask/Auto/YOLO 与 Sandbox，MCP writer/destructive 目标在整个规划阶段保持硬阻断。 |
+| `Shift+Tab` | 切换 Plan 开/关 | Plan 只改变“先规划”的工作流，当前权限预设保持不变。 |
 | macOS `Cmd+Z`，Windows/Linux `Ctrl+Z` | 撤销输入框中的最近一次编辑 | 普通键入继续由 WebView 原生历史管理；Reasonix 接管的粘贴、剪切、折叠块和结构化 token 会作为完整事务恢复。 |
-| macOS `Cmd+Shift+Z`，Windows/Linux `Ctrl+Shift+Z` | 重做输入框中的最近一次编辑 | Windows/Linux 改绑 YOLO 后也可使用 `Ctrl+Y`。 |
-| `Cmd+Y` / `Ctrl+Y`（默认） | 切换 YOLO 开/关 | 关闭 YOLO 时会尽量恢复之前的 Ask/Auto 基底；当前绑定可在 **设置 → 快捷键** 查看。 |
+| macOS `Cmd+Shift+Z`，Windows/Linux `Ctrl+Shift+Z` | 重做输入框中的最近一次编辑 | 使用平台原生编辑历史。 |
 | macOS `Cmd+V`，Windows/Linux `Ctrl+V` | 粘贴剪贴板内容 | 剪贴板图片会作为附件加入；图片也可以拖进输入框。官方 DeepSeek 的 `deepseek-flash` 与 `deepseek-v4-flash` 原生支持图片；V4 Pro 仍是纯文本。 |
 | 输入边界处的普通 `Up` / `Down` | 回放更旧或更新的已提交提示词 | 带修饰键的方向键和原生文本导航仍交给 textarea。 |
 | 运行中按 `Esc` | 取消当前 turn | 如果后端尚未开始回复，会恢复草稿。 |
@@ -450,8 +448,8 @@ CLI/TUI 文本输入可通过 `[ui].cursor_shape` 设置光标形状，支持 `u
 | 斜杠、`@` 或 past-chat 菜单中的 `Up` / `Down` | 移动高亮项 | past-chat 搜索框使用同一套导航键。 |
 | 这些菜单中的 `Enter` / `Tab` | 接受高亮项 | 类似目录的条目可能继续打开下一层菜单。 |
 | 这些菜单中的 `Esc` | 关闭当前菜单或退出 past-chat 搜索 | 关闭后可继续正常输入。 |
-| Ask / Auto / YOLO 审批控件 | 直接选择工具审批姿态 | 点击操作不受快捷键规则影响。 |
-| 工具审批卡片 | `Left` / `Right`、`Enter`、`1`-`4`、`Esc` | 移动高亮动作、确认当前高亮、直接选择编号动作，或拒绝。默认高亮是“允许一次”。 |
+| 仅可查看 / 工作区内修改 / 完全权限 | 选择当前会话权限预设 | 设置页只控制新会话默认值。 |
+| 工具审批卡片 | `Left` / `Right`、`Enter`、`1`-`3`、`Esc` | 在允许一次、本会话允许和拒绝之间移动。默认高亮是“允许一次”。 |
 | 计划审批卡片 | `Left` / `Right`、`Enter`、`1`-`3`、`Esc` | 在“修改计划 / 开始执行 / 退出计划”之间移动。默认高亮是“开始执行”。 |
 | Plan 控件 | 切换 Plan 开/关 | 和 `Shift+Tab` 是同一个模式。 |
 | 协作菜单里的 Goal | 启动、查看或清除 Goal | Goal 不进入任何快捷键循环。 |
@@ -463,7 +461,7 @@ CLI/TUI 文本输入可通过 `[ui].cursor_shape` 设置光标形状，支持 `u
 对话。使用 `/theme auto|light|dark` 选择背景模式，也可运行不带参数的 `/theme` 查看
 命名配色，再用 `/theme <style>` 选择强调色。
 
-响应式底栏左侧保留当前 Ask/Auto/Plan 或 YOLO 姿态和交互状态；终端较宽时，模型、推理
+响应式底栏左侧保留当前权限预设、Plan 状态和交互状态；终端较宽时，模型、推理
 强度作为一组靠右显示，第二行按可用性显示 Git 标识、缓存命中率、上下文占用、
 压缩余量、后台任务和余额。“就绪”只表示输入框空闲，并不是模型健康检查；选择器、审批、
 图片粘贴、shell 模式等活动会替换这个状态。窄终端会按完整信息组移动、换行或压缩。
@@ -496,9 +494,8 @@ CLI/TUI 文本输入可通过 `[ui].cursor_shape` 设置光标形状，支持 `u
 
 | 按键或命令 | 作用 | 说明 |
 | --- | --- | --- |
-| `Shift+Tab` | 按 Ask → Auto → Plan → Ask 循环 | YOLO 不进入这个输入模式循环；底部状态栏会显示当前模式。 |
-| `Ctrl+Y` | 切换 YOLO 开/关 | 关闭 YOLO 时会尽量恢复之前的 Ask/Auto 基底。终端若能转发 Command/Super，也可能识别 `Cmd+Y`，但稳定可用的是 `Ctrl+Y`。 |
-| `--yolo`、`--dangerously-skip-permissions` | 启动时进入 YOLO | 和 `Ctrl+Y` 是同一个运行时模式。 |
+| `Shift+Tab` | 切换 Plan 开/关 | 当前权限预设保持不变。 |
+| `--permission-mode read-only|workspace-write|danger-full-access` | 选择启动权限 | 新会话默认使用 `workspace-write`。 |
 | `/theme [auto|light|dark|style]` | 查看或切换 CLI 主题 | 不带参数会列出背景模式和命名配色。选择会保存到用户配置；单次运行可用 `REASONIX_THEME` 和 `REASONIX_THEME_STYLE` 覆盖。 |
 | `Ctrl+O` | 切换详细 reasoning 显示 | 也可通过 `/verbose` 使用。 |
 | `Ctrl+B` | 展开或收起较长 shell 输出 | 较长 shell 输出的提示行也可点击；全屏 TUI 开启鼠标接管时，文本选区由应用内处理。 |
@@ -510,42 +507,36 @@ CLI/TUI 文本输入可通过 `[ui].cursor_shape` 设置光标形状，支持 `u
 | 上下文 | 按键 | 作用 |
 | --- | --- | --- |
 | 斜杠或 `@` 补全 | `Up` / `Down`、`Ctrl+P` / `Ctrl+N`、`Tab` / `Enter`、`Esc` | 移动、接受或关闭补全菜单。 |
-| 工具审批提示 | `y`/`1`、`a`/`2`、`p`/`3`、`n`/`4`、`Enter`、`Esc`、`Ctrl+C` | 允许一次、本会话允许、持久允许、拒绝、默认允许一次、拒绝，或取消当前 turn。 |
+| 工具审批提示 | `y`/`1`、`a`/`2`、`n`/`3`、`Enter`、`Esc`、`Ctrl+C` | 允许一次、本会话允许、拒绝，或取消当前 turn。 |
 | Ask 问题卡 | `Up`/`Down` 或 `j`/`k`、`Left`/`Right` 或 `h`/`l`、`Space`、`Enter`、`1`-`9`、`Esc`、`Ctrl+C` | 导航答案/问题标签、切换多选、提交/激活、选择编号选项、关闭，或取消当前 turn。 |
 | Rewind 选择器 | `Up`/`Down` 或 `j`/`k`、`Enter`、`b`、`c`、`d`、`f`、`s`、`u`、`Esc` | 选择 turn，应用 both/conversation/code/fork/summarize 动作，或返回/关闭。 |
 | 模型、provider 或 Resume 选择器 | `Up`/`Down` 或 `Ctrl+P`/`Ctrl+N`；搜索词为空时可用 `j`/`k`；输入文字过滤；`Enter`；`Esc` | 搜索、选择或关闭选择器；开始搜索后 `j`/`k` 会作为查询字符输入；`/provider` 会继续打开该 provider 的模型列表。 |
 | MCP 导入选择器 | `Up`/`Down` 或 `j`/`k`、`Space`、`Enter`、`Esc` / `Ctrl+C` | 移动、勾选服务器、导入勾选服务器，或取消。 |
 | MCP 管理器 | `Up`/`Down` 或 `j`/`k`、`Enter`、`Left`/`Right` 或 `h`/`l`、`r`、数字键、`q` / `Ctrl+C` | 导航服务器列表/详情、刷新、选择动作，或关闭。 |
-| `/clear` 确认 | 方向键或 `j`/`k` / `Tab`、`Enter`、`y`、`n`、`Esc` / `Ctrl+C` | 在 Clear/Cancel 间切换、确认清空，或取消。YOLO 模式下 `/clear` 直接清空，不再询问。 |
+| `/clear` 确认 | 方向键或 `j`/`k` / `Tab`、`Enter`、`y`、`n`、`Esc` / `Ctrl+C` | 在 Clear/Cancel 间切换、确认清空，或取消。 |
 
 模式含义：
 
 | 模式 | 含义 |
 | --- | --- |
-| Ask | writer 兜底审批时询问。 |
-| Auto | 自动放行兜底审批，包括交互式 `remember`/`forget`；显式 `ask` / `deny` 规则仍生效。 |
-| YOLO | 跳过普通工具审批，包括 `remember`/`forget`；`deny`、用户 `ask` 问题和计划批准提示仍会等待。 |
-| Plan | 先规划，批准前硬阻断状态修改，包括 Yolo、代理工具和子 agent。批准后按普通任务执行，权限和 Sandbox 继续生效。 |
+| 仅可查看 | 读取工作区；写入和外部副作用需要范围明确的授权。 |
+| 工作区内修改 | 可写工作区与会话私有临时目录，是默认权限。 |
+| 完全权限 | 取消普通文件围栏和常规确认；显式禁止与受保护应用状态仍生效。 |
+| Plan | 先规划，批准前硬阻断状态修改，包括完全权限、代理工具和子 agent。批准后按普通任务执行，权限和 Sandbox 继续生效。 |
 | Goal | 持续追一个已保存目标，直到完成、阻塞或清除。 |
 
 ## 权限与沙盒
 
-权限逐次调用把关：`deny` > `ask` > `allow` > 兜底。Bash 和文件修改都要审核；
-只读工具一般不需要。审核规则不是按“按钮文案”存，而是按权限规则匹配，比如
-`Bash(npm run build)`、`Bash(npm run test:*)`、`Edit(docs/**)` 这种形式。
-`reasonix` 会在 writer 调用前征求同意（普通工具为 `1` 本次 · `2` 本会话允许此范围 · `3` 总是允许此范围（保存） · `4` 拒绝；Bash 可额外选择命令前缀授权）；
-其中 Bash 默认按具体命令记，也可按安全推导出的命令前缀记（如 `Bash(go test:*)`）；文件编辑类工具的本会话授权按编辑能力记，持久授权则写入 `Edit(<path>)` 文件路径规则；
-参数/算术展开、赋值、不含嵌套执行的 heredoc、文件重定向和 glob 不能复用裸 `Bash`、前缀或 glob Allow；用户保存时写入整条 `Bash=<literal>`，但它们仍按普通 fallback 执行，因此 Auto 不会额外询问。命令/进程替换、动态命令名、`eval`、`source`、Shell `-c`、运行时内联代码和无法解析的结构默认强制人工；无头 Ask/Auto/DontAsk 会拒绝这类未精确授权的命令，YOLO 可以绕过。高级用户可设置 `[permissions] allow_dynamic_bash = true`，让 Allow fallback（包括 Auto）覆盖这类动态命令；显式 `ask` 与 `deny` 规则仍然优先。由于无头运行没有审批界面，默认 Ask 对普通 writer fallback 和显式 ask 规则也会 fail closed；无人值守自动化需要放行普通 writer 时，使用 `reasonix run --auto ...`、`-y` 或 `--permission-mode auto`。配置的 `ask` 与 `deny` 始终优先。
+当前权限预设为 Bash、文件工具、后台进程和子智能体提供同一套强制边界。工作区内修改模式下，构建、测试、管道、命令替换和内联脚本不会因为语法而弹出确认，写入仍被限制在工作区和会话私有临时目录。越界写入只能选择“允许一次”或“本会话允许此范围”，不再提供永久授权。
 
-Ask 不是只读模式：writer 获得批准后仍会执行。Permissions 决定放行或询问，Sandbox 才是强制能力边界。
-Sandbox 是授权之后的第二层边界，不能替代命令解析，也不能把无法证明静态安全的命令变成可自动授权命令。
+显式 `deny` 规则始终优先。已安装的 MCP 和插件在工作区内修改模式下被视为已授权；仅可查看模式中的未知副作用能力仍需授权。平台沙盒不可用时，受限预设失败关闭，不提供无沙箱重试。
 
 权限是**策略**（哪些调用放行/询问），**沙盒**是**强制**：这是两层机制。已经放行的调用
 仍然不能写出已批准的根目录。文件写工具
 （`write_file` / `edit_file` / `multi_edit` / `move_file`）拒绝 `[sandbox] workspace_root`
 之外的任何路径（默认当前目录，编辑不出项目），并解析符号链接与 `..`，使链接无法
-打洞越界。写出工作区时走交互式「扩展写入范围」审批（仅本次 / 本会话 / 写入项目
-`reasonix.toml` / 拒绝），不会退化成无沙箱执行。Bash 必须用 `additional_write_dirs`
+打洞越界。写出工作区时走交互式「扩展写入范围」审批（仅本次 / 本会话 / 拒绝），
+不会退化成无沙箱执行。Bash 必须用 `additional_write_dirs`
 加上 `justification` 声明所需目录；宿主不会从命令文本猜测路径。无头 `reasonix run`
 不会弹审批：请传 `--add-dir` 或配置 `[sandbox].allow_write`。整个用户主目录可以在
 强警告后批准；文件系统根和 Reasonix 会话/状态目录不能通过动态流程批准。`forbid_read` 可选地隐藏敏感文件或目录，使 agent 的读文件、列目录和搜索工具不能读取或列出它们；
@@ -745,7 +736,7 @@ RPC 调用。两者都可按服务器覆盖。
 并可通过 `run_skill` 调用（正文按需加载；只有索引行进入缓存稳定前缀）。配置或能力排障时
 用 `/reasonix-guide`，它会引导运行 `reasonix doctor capabilities`（见
 [能力诊断](./CAPABILITY_DIAGNOSTICS.zh-CN.md)）。
-`/new` 会开启新会话，同时保存之前的 transcript 供历史记录和恢复使用；`/clear` 会丢弃当前上下文且不保存——默认需二次确认，但在 YOLO 模式下会立即清空（YOLO 本就承诺跳过确认）。
+`/new` 会开启新会话，同时保存之前的 transcript 供历史记录和恢复使用；`/clear` 会丢弃当前上下文且不保存，并要求二次确认。
 `/tree` 查看已保存的对话分支，`/branch [name]` 从当前对话末端分支，`/branch <turn> [name]`
 从较早的 checkpoint 轮次分支，`/switch <id|name>` 切换到另一个分支。**自定义命令**
 是放在 `.reasonix/commands/`（项目）或 `~/.reasonix/commands/`（用户）下的 Markdown 文件——
@@ -795,10 +786,7 @@ Context Engine v2 把上下文分成两个用途不同的层：
 字符追加到本轮 user turn。这段动态后缀不会改写 cache-stable system prompt 或工具 schema。
 运行 `/memory recall` 可查看选中的 ID、score、原因、freshness、预算和 suppressed 决定。
 
-新的、有界、非敏感 project/reference 事实可以零配置自动创建，不弹审批。在 Ask 下，全局事实、
-用户偏好、feedback、更新、重复项、敏感/超长内容，以及所有 `forget` 仍需显式确认。交互式 Auto
-把这些记忆工具作为普通 fallback 处理，并保留显式 `ask` / `deny`；交互式 YOLO 会绕过记忆 ask
-审批，但仍遵守 deny。存储层会把自动创建授权强制为 create-only，因此并发出现的新事实也不会被覆盖。顶层 headless controller 可使用同一条
+新的、有界、非敏感 project/reference 事实可以零配置自动创建，不弹审批。其余记忆变更遵循当前权限预设和显式 `ask` / `deny` 规则。存储层会把自动创建授权强制为 create-only，因此并发出现的新事实也不会被覆盖。顶层 headless controller 可使用同一条
 一次性低风险创建路径；子智能体和不拥有该作用域 controller 的 headless surface 会 fail closed。
 
 `forget` 只归档，不永久删除。每次更新都会快照上一 revision；恢复旧版本或 archive 时总会创建
@@ -1063,7 +1051,7 @@ reasoning-language 写项目级覆盖时，才给 shell 命令加 `--local`。
 见 [`COLLABORATION_MODES.zh-CN.md`](./COLLABORATION_MODES.zh-CN.md)。没有自动
 任务模式或可选质量底线；模型根据用户要求、项目说明和实际反馈判断是否完成；宿主不生成质量验收义务。
 
-桌面端“工具权限”里的询问、自动和 Yolo 模式的区别与使用场景，
+桌面端“工具权限”里的仅可查看、工作区内修改和完全权限的区别与使用场景，
 见 [`TOOL_APPROVAL_MODES.zh-CN.md`](./TOOL_APPROVAL_MODES.zh-CN.md)。
 
 分离 session（让各模型前缀缓存稳定）背后的取舍见

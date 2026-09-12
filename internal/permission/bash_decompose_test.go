@@ -255,9 +255,9 @@ func TestPolicyDecideCompoundBashUsesWriterFallback(t *testing.T) {
 		want Decision
 	}{
 		{
-			name: "auto writer fallback asks for dynamic compound bash segments",
+			name: "workspace writer fallback allows dynamic compound bash segments",
 			mode: "allow",
-			want: Ask,
+			want: Allow,
 		},
 		{
 			name: "ask writer fallback still prompts for uncovered compound bash segments",

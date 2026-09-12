@@ -769,13 +769,13 @@ func TestGatewaySessionOptionsUseConnectionToolApprovalOverride(t *testing.T) {
 		Platform:     PlatformFeishu,
 		ConnectionID: "feishu-lark",
 	})
-	if model != "lark-model" || mode != "yolo" {
-		t.Fatalf("lark session options = model %q mode %q, want lark-model/yolo", model, mode)
+	if model != "lark-model" || mode != control.ToolApprovalWorkspaceWrite {
+		t.Fatalf("lark session options = model %q mode %q, want lark-model/workspace-write", model, mode)
 	}
 
 	model, _, mode = gw.sessionOptionsForMessage(InboundMessage{Platform: PlatformFeishu})
-	if model != "platform-model" || mode != "ask" {
-		t.Fatalf("platform session options = model %q mode %q, want platform-model/ask", model, mode)
+	if model != "platform-model" || mode != control.ToolApprovalReadOnly {
+		t.Fatalf("platform session options = model %q mode %q, want platform-model/read-only", model, mode)
 	}
 }
 
@@ -1203,7 +1203,7 @@ func TestGatewayCloseSessionStateReleasesSessionLease(t *testing.T) {
 	lease.Release()
 }
 
-func TestGatewayYoloCommandUpdatesCurrentSessionAndConnectionDefault(t *testing.T) {
+func TestGatewayFullAccessCommandUpdatesCurrentSessionAndConnectionDefault(t *testing.T) {
 	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
 	var persistedMode string
 	var persistedConnection string
@@ -1226,7 +1226,7 @@ func TestGatewayYoloCommandUpdatesCurrentSessionAndConnectionDefault(t *testing.
 		ChatType:     ChatDM,
 		ChatID:       "chat",
 		UserID:       "user",
-		Text:         "/yolo on",
+		Text:         "/mode danger-full-access",
 	}
 	key := BuildSessionKey(msg.Session())
 	ctrl := control.New(control.Options{})
@@ -1235,18 +1235,18 @@ func TestGatewayYoloCommandUpdatesCurrentSessionAndConnectionDefault(t *testing.
 
 	gw.handleSlashCommand(context.Background(), adapter, key, msg)
 
-	if got := ctrl.ToolApprovalMode(); got != control.ToolApprovalYolo {
-		t.Fatalf("current session mode = %q, want yolo", got)
+	if got := ctrl.ToolApprovalMode(); got != control.ToolApprovalDangerFullAccess {
+		t.Fatalf("current session mode = %q, want danger-full-access", got)
 	}
-	if got := gw.cfg.ConnectionChannels["feishu-lark"].ToolApprovalMode; got != control.ToolApprovalYolo {
-		t.Fatalf("connection default mode = %q, want yolo", got)
+	if got := gw.cfg.ConnectionChannels["feishu-lark"].ToolApprovalMode; got != control.ToolApprovalDangerFullAccess {
+		t.Fatalf("connection default mode = %q, want danger-full-access", got)
 	}
-	if persistedConnection != "feishu-lark" || persistedMode != control.ToolApprovalYolo {
-		t.Fatalf("persisted = %q/%q, want feishu-lark/yolo", persistedConnection, persistedMode)
+	if persistedConnection != "feishu-lark" || persistedMode != control.ToolApprovalDangerFullAccess {
+		t.Fatalf("persisted = %q/%q, want feishu-lark/danger-full-access", persistedConnection, persistedMode)
 	}
 	sent := adapter.sentMessages()
-	if len(sent) != 1 || !strings.Contains(sent[0].Text, "已开启 YOLO") {
-		t.Fatalf("sent = %#v, want yolo confirmation", sent)
+	if len(sent) != 1 || !strings.Contains(sent[0].Text, "已切换为完全权限") {
+		t.Fatalf("sent = %#v, want full-access confirmation", sent)
 	}
 }
 
@@ -1433,7 +1433,7 @@ func TestGatewayAskReplyUnblocksWedgedTurn(t *testing.T) {
 	}
 }
 
-func TestGatewayModeCommandSupportsAskAutoAndStatus(t *testing.T) {
+func TestGatewayModeCommandSupportsPermissionPresetsAndStatus(t *testing.T) {
 	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
 	gw := NewGateway(GatewayConfig{
 		ConnectionChannels: map[string]ChannelConfig{
@@ -1451,16 +1451,16 @@ func TestGatewayModeCommandSupportsAskAutoAndStatus(t *testing.T) {
 	}
 	key := BuildSessionKey(msg.Session())
 
-	msg.Text = "/mode auto"
+	msg.Text = "/mode workspace-write"
 	gw.handleSlashCommand(context.Background(), adapter, key, msg)
-	if got := gw.cfg.ConnectionChannels["weixin-weixin"].ToolApprovalMode; got != control.ToolApprovalAuto {
-		t.Fatalf("/mode auto default = %q, want auto", got)
+	if got := gw.cfg.ConnectionChannels["weixin-weixin"].ToolApprovalMode; got != control.ToolApprovalWorkspaceWrite {
+		t.Fatalf("/mode workspace-write default = %q, want workspace-write", got)
 	}
 
-	msg.Text = "/yolo off"
+	msg.Text = "/mode read-only"
 	gw.handleSlashCommand(context.Background(), adapter, key, msg)
-	if got := gw.cfg.ConnectionChannels["weixin-weixin"].ToolApprovalMode; got != control.ToolApprovalAsk {
-		t.Fatalf("/yolo off default = %q, want ask", got)
+	if got := gw.cfg.ConnectionChannels["weixin-weixin"].ToolApprovalMode; got != control.ToolApprovalReadOnly {
+		t.Fatalf("/mode read-only default = %q, want read-only", got)
 	}
 
 	msg.Text = "/mode"
@@ -1469,12 +1469,12 @@ func TestGatewayModeCommandSupportsAskAutoAndStatus(t *testing.T) {
 	if len(sent) != 3 {
 		t.Fatalf("sent count = %d, want 3", len(sent))
 	}
-	if !strings.Contains(sent[2].Text, "当前工具审批模式：询问") {
-		t.Fatalf("status = %q, want ask status", sent[2].Text)
+	if !strings.Contains(sent[2].Text, "当前权限：仅可查看") {
+		t.Fatalf("status = %q, want read-only status", sent[2].Text)
 	}
 }
 
-func TestGatewayHelpMentionsYoloCommands(t *testing.T) {
+func TestGatewayHelpMentionsPermissionPresetCommands(t *testing.T) {
 	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
 	gw := NewGateway(GatewayConfig{}, nil, logger)
 	adapter := newFakeAdapter(PlatformFeishu, "fake-feishu")
@@ -1486,8 +1486,8 @@ func TestGatewayHelpMentionsYoloCommands(t *testing.T) {
 	if len(sent) != 1 {
 		t.Fatalf("sent count = %d, want 1", len(sent))
 	}
-	if !strings.Contains(sent[0].Text, "/yolo on|off|auto|status") || !strings.Contains(sent[0].Text, "/mode yolo|ask|auto") {
-		t.Fatalf("help = %q, want yolo commands", sent[0].Text)
+	if !strings.Contains(sent[0].Text, "/mode read-only|workspace-write|danger-full-access|status") {
+		t.Fatalf("help = %q, want permission preset commands", sent[0].Text)
 	}
 	if !strings.Contains(sent[0].Text, "/projects") || !strings.Contains(sent[0].Text, "/attach session") || !strings.Contains(sent[0].Text, "/search all") {
 		t.Fatalf("help = %q, want project/session commands", sent[0].Text)
@@ -1964,7 +1964,7 @@ func TestGatewayUnknownDMGetsPairingCode(t *testing.T) {
 	}
 }
 
-func TestGatewayAdminRoleRequiredForYoloWhenConfigured(t *testing.T) {
+func TestGatewayAdminRoleRequiredForFullAccessWhenConfigured(t *testing.T) {
 	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
 	gw := NewGateway(GatewayConfig{
 		Allowlist: AllowlistConfig{
@@ -1979,7 +1979,7 @@ func TestGatewayAdminRoleRequiredForYoloWhenConfigured(t *testing.T) {
 		ChatType: ChatDM,
 		ChatID:   "chat",
 		UserID:   "user",
-		Text:     "/yolo on",
+		Text:     "/mode danger-full-access",
 	}
 	key := BuildSessionKey(msg.Session())
 
@@ -2261,24 +2261,24 @@ func TestGatewaySessionOptionsUseChannelOverride(t *testing.T) {
 	if model != "feishu-model" || root != "/feishu" {
 		t.Fatalf("feishu options = %q,%q; want channel override", model, root)
 	}
-	if mode != "ask" {
-		t.Fatalf("feishu tool approval mode = %q, want ask", mode)
+	if mode != control.ToolApprovalWorkspaceWrite {
+		t.Fatalf("feishu tool approval mode = %q, want workspace-write", mode)
 	}
 
 	model, root, mode = gw.sessionOptionsForMessage(InboundMessage{Platform: PlatformWeixin})
 	if model != "global-model" || root != "/weixin" {
 		t.Fatalf("weixin options = %q,%q; want global model and channel root", model, root)
 	}
-	if mode != "ask" {
-		t.Fatalf("weixin tool approval mode = %q, want ask", mode)
+	if mode != control.ToolApprovalWorkspaceWrite {
+		t.Fatalf("weixin tool approval mode = %q, want workspace-write", mode)
 	}
 
 	model, root, mode = gw.sessionOptionsForMessage(InboundMessage{Platform: PlatformQQ})
 	if model != "global-model" || root != "/global" {
 		t.Fatalf("qq options = %q,%q; want global defaults", model, root)
 	}
-	if mode != "ask" {
-		t.Fatalf("qq tool approval mode = %q, want ask", mode)
+	if mode != control.ToolApprovalWorkspaceWrite {
+		t.Fatalf("qq tool approval mode = %q, want workspace-write", mode)
 	}
 }
 
@@ -2299,8 +2299,8 @@ func TestGatewaySessionOptionsPreferConnectionOverride(t *testing.T) {
 	if model != "lark-model" || root != "/lark" {
 		t.Fatalf("lark options = %q,%q; want connection override", model, root)
 	}
-	if mode != "ask" {
-		t.Fatalf("lark tool approval mode = %q, want ask", mode)
+	if mode != control.ToolApprovalWorkspaceWrite {
+		t.Fatalf("lark tool approval mode = %q, want workspace-write", mode)
 	}
 }
 
@@ -2327,8 +2327,8 @@ func TestGatewaySessionOptionsPreferConnectionSessionMappingWorkspace(t *testing
 		ChatID:       "group-1",
 		UserID:       "user-1",
 	})
-	if model != "global-model" || root != "/mapped" || mode != "ask" {
-		t.Fatalf("mapped options = %q,%q,%q; want global model, mapped workspace, ask", model, root, mode)
+	if model != "global-model" || root != "/mapped" || mode != control.ToolApprovalWorkspaceWrite {
+		t.Fatalf("mapped options = %q,%q,%q; want global model, mapped workspace, workspace-write", model, root, mode)
 	}
 
 	_, root, _ = gw.sessionOptionsForMessage(InboundMessage{
@@ -2419,11 +2419,11 @@ func TestGatewaySessionOptionsPreferRemoteRouteOverride(t *testing.T) {
 	}, nil, logger)
 
 	model, root, mode := gw.sessionOptionsForMessage(InboundMessage{Platform: PlatformFeishu, ConnectionID: "feishu-lark", ChatType: ChatGroup, ChatID: "group-1"})
-	if model != "route-model" || root != "/route" || mode != "yolo" {
+	if model != "route-model" || root != "/route" || mode != control.ToolApprovalWorkspaceWrite {
 		t.Fatalf("route options = %q,%q,%q; want route override", model, root, mode)
 	}
 	model, root, mode = gw.sessionOptionsForMessage(InboundMessage{Platform: PlatformFeishu, ConnectionID: "feishu-lark", ChatType: ChatGroup, ChatID: "group-2"})
-	if model != "lark-model" || root != "/lark" || mode != "auto" {
+	if model != "lark-model" || root != "/lark" || mode != control.ToolApprovalWorkspaceWrite {
 		t.Fatalf("non-matching options = %q,%q,%q; want connection override", model, root, mode)
 	}
 }

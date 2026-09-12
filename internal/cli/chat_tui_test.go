@@ -324,8 +324,7 @@ func TestTranscriptViewportSizing(t *testing.T) {
 }
 
 // TestStatusLineWrapAccounting proves that computeStatusLineCount correctly
-// predicts the rendered row count of the status block (working + mode/state line
-// + data line) when wrapping is triggered on a narrow terminal, and that
+// predicts the rendered row count of the compact status block and that
 // bottomRows reserves the right height so the viewport fills the screen without
 // overlap.
 func TestStatusLineWrapAccounting(t *testing.T) {
@@ -336,9 +335,8 @@ func TestStatusLineWrapAccounting(t *testing.T) {
 	m0, _ := m.Update(tea.WindowSizeMsg{Width: 30, Height: 12})
 	m = m0.(chatTUI)
 
-	// At width 30 the status block should be detectably wrapped.
-	if m.statusLineCount <= 2 {
-		t.Fatalf("statusLineCount on a narrow terminal (30 cols) = %d, want > 2 (wrapping should be detected)", m.statusLineCount)
+	if m.statusLineCount < 1 {
+		t.Fatalf("statusLineCount on a narrow terminal (30 cols) = %d, want at least one row", m.statusLineCount)
 	}
 
 	// Verify the height budget covers the full screen.
@@ -1099,7 +1097,6 @@ func TestApprovalChoicesPreserveDecisionSemantics(t *testing.T) {
 			want: []approvalChoice{
 				{allow: true},
 				{allow: true, allowForSession: true},
-				{allow: true, allowForSession: true, persistToConfig: true},
 				{},
 			},
 		},
@@ -3703,15 +3700,12 @@ func TestDynamicBashApprovalChoicesUseExactLiteralRules(t *testing.T) {
 	const command = "git status $(touch /tmp/reasonix-dynamic-approval)"
 	approval := &event.Approval{Tool: "bash", Subject: command}
 	choices := approvalChoices(approval)
-	if len(choices) != 4 {
-		t.Fatalf("dynamic Bash choices = %+v, want ordinary four-choice approval", choices)
+	if len(choices) != 3 {
+		t.Fatalf("dynamic Bash choices = %+v, want once/session/deny", choices)
 	}
 	want := "Bash=" + command
 	if !strings.Contains(choices[1].label, want) {
 		t.Fatalf("session choice = %q, want exact rule %q", choices[1].label, want)
-	}
-	if !strings.Contains(choices[2].label, want) {
-		t.Fatalf("persistent choice = %q, want exact rule %q", choices[2].label, want)
 	}
 }
 
@@ -4200,7 +4194,7 @@ func TestDesktopShortcutLayoutShiftTabClearsGoalWhenEnteringPlan(t *testing.T) {
 	}
 }
 
-func TestDesktopShortcutLayoutCtrlYTogglesYolo(t *testing.T) {
+func TestDesktopShortcutLayoutCtrlYDoesNotChangePermission(t *testing.T) {
 	m := newTestChatTUI()
 	m.ctrl = control.New(control.Options{})
 	m.cfg = config.Default()
@@ -4211,18 +4205,12 @@ func TestDesktopShortcutLayoutCtrlYTogglesYolo(t *testing.T) {
 	ctrlY := tea.KeyPressMsg{Code: 'y', Mod: tea.ModCtrl}
 	out, _ := m.Update(ctrlY)
 	m = out.(chatTUI)
-	if got := m.ctrl.ToolApprovalMode(); got != control.ToolApprovalYolo {
-		t.Fatalf("Ctrl+Y approval mode = %q, want yolo", got)
-	}
-
-	out, _ = m.Update(ctrlY)
-	m = out.(chatTUI)
 	if got := m.ctrl.ToolApprovalMode(); got != control.ToolApprovalAsk {
-		t.Fatalf("second Ctrl+Y approval mode = %q, want ask", got)
+		t.Fatalf("Ctrl+Y changed permission mode to %q", got)
 	}
 }
 
-func TestDesktopShortcutLayoutCtrlYRestoresAutoAfterYolo(t *testing.T) {
+func TestDesktopShortcutLayoutCtrlYPreservesWorkspacePermission(t *testing.T) {
 	m := newTestChatTUI()
 	m.ctrl = control.New(control.Options{})
 	m.ctrl.SetToolApprovalMode(control.ToolApprovalAuto)
@@ -4234,18 +4222,12 @@ func TestDesktopShortcutLayoutCtrlYRestoresAutoAfterYolo(t *testing.T) {
 	ctrlY := tea.KeyPressMsg{Code: 'y', Mod: tea.ModCtrl}
 	out, _ := m.Update(ctrlY)
 	m = out.(chatTUI)
-	if got := m.ctrl.ToolApprovalMode(); got != control.ToolApprovalYolo {
-		t.Fatalf("Ctrl+Y approval mode = %q, want yolo", got)
-	}
-
-	out, _ = m.Update(ctrlY)
-	m = out.(chatTUI)
 	if got := m.ctrl.ToolApprovalMode(); got != control.ToolApprovalAuto {
-		t.Fatalf("second Ctrl+Y approval mode = %q, want restored auto", got)
+		t.Fatalf("Ctrl+Y changed workspace permission mode to %q", got)
 	}
 }
 
-func TestClassicShortcutLayoutCtrlYTogglesYolo(t *testing.T) {
+func TestClassicShortcutLayoutCtrlYDoesNotChangePermission(t *testing.T) {
 	m := newTestChatTUI()
 	m.ctrl = control.New(control.Options{})
 	m.cfg = config.Default()
@@ -4254,23 +4236,14 @@ func TestClassicShortcutLayoutCtrlYTogglesYolo(t *testing.T) {
 	}
 
 	ctrlY := tea.KeyPressMsg{Code: 'y', Mod: tea.ModCtrl}
-	out, cmd := m.Update(ctrlY)
-	if cmd != nil {
-		t.Fatal("Ctrl+Y should toggle YOLO directly, not return a paste command")
-	}
-	m = out.(chatTUI)
-	if got := m.ctrl.ToolApprovalMode(); got != control.ToolApprovalYolo {
-		t.Fatalf("Ctrl+Y approval mode = %q, want yolo", got)
-	}
-
-	out, _ = m.Update(ctrlY)
+	out, _ := m.Update(ctrlY)
 	m = out.(chatTUI)
 	if got := m.ctrl.ToolApprovalMode(); got != control.ToolApprovalAsk {
-		t.Fatalf("second Ctrl+Y approval mode = %q, want ask", got)
+		t.Fatalf("Ctrl+Y changed permission mode to %q", got)
 	}
 }
 
-func TestPrimaryYShortcutRestoresAutoUnderClassicShortcutLayout(t *testing.T) {
+func TestPrimaryYShortcutPreservesWorkspacePermission(t *testing.T) {
 	m := newTestChatTUI()
 	m.ctrl = control.New(control.Options{})
 	m.ctrl.SetToolApprovalMode(control.ToolApprovalAuto)
@@ -4282,14 +4255,8 @@ func TestPrimaryYShortcutRestoresAutoUnderClassicShortcutLayout(t *testing.T) {
 	cmdY := tea.KeyPressMsg{Code: 'y', Mod: tea.ModSuper}
 	out, _ := m.Update(cmdY)
 	m = out.(chatTUI)
-	if got := m.ctrl.ToolApprovalMode(); got != control.ToolApprovalYolo {
-		t.Fatalf("Cmd/Super+Y approval mode = %q, want yolo", got)
-	}
-
-	out, _ = m.Update(cmdY)
-	m = out.(chatTUI)
 	if got := m.ctrl.ToolApprovalMode(); got != control.ToolApprovalAuto {
-		t.Fatalf("second Cmd/Super+Y approval mode = %q, want restored auto", got)
+		t.Fatalf("Cmd/Super+Y changed workspace permission mode to %q", got)
 	}
 }
 
@@ -4339,7 +4306,7 @@ func TestShiftTabCyclesSafeModesUnderClassicShortcutLayout(t *testing.T) {
 	}
 }
 
-func TestShiftTabLeavesDontAskForAskMode(t *testing.T) {
+func TestLegacyDontAskDisplaysAndCyclesAsReadOnly(t *testing.T) {
 	m := newTestChatTUI()
 	m.ctrl = control.New(control.Options{})
 	m.ctrl.SetToolApprovalMode(control.ToolApprovalDontAsk)
@@ -4347,13 +4314,13 @@ func TestShiftTabLeavesDontAskForAskMode(t *testing.T) {
 	if err := m.cfg.SetUIShortcutLayout("desktop"); err != nil {
 		t.Fatal(err)
 	}
-	if got := m.modeTagText(); got != "Don't Ask" {
+	if got := m.modeTagText(); got != "Read only" {
 		t.Fatalf("dontAsk mode tag = %q", got)
 	}
 
 	m.cycleMode()
 	if got := m.ctrl.ToolApprovalMode(); got != control.ToolApprovalAsk {
-		t.Fatalf("Shift+Tab from dontAsk = %q, want ask", got)
+		t.Fatalf("Shift+Tab from legacy dontAsk = %q, want read-only", got)
 	}
 }
 

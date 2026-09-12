@@ -375,8 +375,8 @@ func TestRenderTOMLRoundTrips(t *testing.T) {
 	if want := []string{"model", "balance", "cache"}; !reflect.DeepEqual(got.Desktop.StatusBarItems, want) {
 		t.Errorf("desktop.status_bar_items = %v, want %v", got.Desktop.StatusBarItems, want)
 	}
-	if got.DesktopDefaultToolApprovalMode() != "auto" {
-		t.Errorf("desktop.default_tool_approval_mode = %q, want auto", got.DesktopDefaultToolApprovalMode())
+	if got.DesktopDefaultToolApprovalMode() != "workspace-write" {
+		t.Errorf("desktop.default_tool_approval_mode = %q, want workspace-write", got.DesktopDefaultToolApprovalMode())
 	}
 	if got.Desktop.CheckUpdates == nil || *got.Desktop.CheckUpdates {
 		t.Errorf("desktop.check_updates = %+v, want false", got.Desktop.CheckUpdates)
@@ -399,8 +399,8 @@ func TestRenderTOMLRoundTrips(t *testing.T) {
 	if len(got.Bot.Connections) != 1 || got.Bot.Connections[0].Model != "deepseek-pro" || got.Bot.Connections[0].WorkspaceRoot != "/tmp/reasonix-bot" {
 		t.Errorf("bot connection not preserved: %+v", got.Bot.Connections)
 	}
-	if got.Bot.ToolApprovalMode != "auto" || got.Bot.Connections[0].ToolApprovalMode != "yolo" {
-		t.Errorf("bot tool approval mode not preserved: bot=%q connection=%q", got.Bot.ToolApprovalMode, got.Bot.Connections[0].ToolApprovalMode)
+	if got.Bot.ToolApprovalMode != "workspace-write" || got.Bot.Connections[0].ToolApprovalMode != "workspace-write" {
+		t.Errorf("bot tool approval mode not migrated: bot=%q connection=%q", got.Bot.ToolApprovalMode, got.Bot.Connections[0].ToolApprovalMode)
 	}
 	if !got.Bot.Control.Enabled || got.Bot.Control.Addr != "127.0.0.1:39001" || got.Bot.Control.TokenEnv != "BOT_CONTROL_TOKEN" {
 		t.Errorf("bot control not preserved: %+v", got.Bot.Control)
@@ -786,14 +786,14 @@ func TestScopedRenderSeparatesUserAndProjectConfig(t *testing.T) {
 	c.Desktop.CloseBehavior = "background"
 	c.Desktop.StatusBarStyle = "text"
 	c.Desktop.StatusBarStyleInitialized = true
-	c.Desktop.DefaultToolApprovalMode = "auto"
+	c.Desktop.DefaultToolApprovalMode = "workspace-write"
 	c.Desktop.CheckUpdates = boolPtr(false)
 	c.Desktop.UpdateChannel = "preview"
 	c.Agent.RecoveryModel = "deepseek-pro"
 	c.Agent.RecoveryTemperature = 0.2
 
 	user := RenderTOMLForScope(c, RenderScopeUser)
-	for _, want := range []string{"config_version = 10", "[desktop]", `currency = "CNY"`, "[billing]", `display_currency = "CNY"`, `theme = "dark"`, `terminal_theme = "auto"`, `close_behavior = "background"`, `status_bar_style = "text"`, `default_tool_approval_mode = "auto"`, `check_updates = false`, `recovery_model = "deepseek-pro"`, "[notifications]", "[tools.shell]"} {
+	for _, want := range []string{"config_version = 10", "[desktop]", `currency = "CNY"`, "[billing]", `display_currency = "CNY"`, `theme = "dark"`, `terminal_theme = "auto"`, `close_behavior = "background"`, `status_bar_style = "text"`, `default_tool_approval_mode = "workspace-write"`, `check_updates = false`, `recovery_model = "deepseek-pro"`, "[notifications]", "[tools.shell]"} {
 		if !strings.Contains(user, want) {
 			t.Fatalf("user render missing %q:\n%s", want, user)
 		}
@@ -1288,20 +1288,20 @@ func TestRenderTOMLDefaultStepsOmitted(t *testing.T) {
 	}
 }
 
-func TestRenderTOMLWindowsSandboxDefaultAndExplicitEnforceDisabled(t *testing.T) {
+func TestRenderTOMLWindowsSandboxDefaultsToEnforce(t *testing.T) {
 	isolateUserConfigHome(t)
 	setRuntimeGOOS(t, "windows")
 
 	defaultRendered := RenderTOMLForScope(Default(), RenderScopeUser)
-	if !strings.Contains(defaultRendered, `bash    = "off"`) {
-		t.Fatalf("Windows default user config should render bash off:\n%s", defaultRendered)
+	if !strings.Contains(defaultRendered, `bash    = "enforce"`) {
+		t.Fatalf("Windows default user config should render bash enforce:\n%s", defaultRendered)
 	}
 
 	cfg := Default()
 	cfg.Sandbox.Bash = "enforce"
 	delta := RenderTOMLProjectDelta(cfg)
 	if strings.Contains(delta, `[sandbox]`) || strings.Contains(delta, `bash = `) {
-		t.Fatalf("Windows explicit enforce should not render as an effective project delta:\n%s", delta)
+		t.Fatalf("Windows explicit default enforce should remain omitted from project delta:\n%s", delta)
 	}
 }
 

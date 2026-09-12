@@ -1,0 +1,226 @@
+/* Overlay slot, like the back-to-bottom control: the rail floats
+   over the transcript's right gutter without extending scrollHeight. */
+ .dsh-TurnNavigator-slot {
+  position: absolute;
+  inset: 0 12px 0 auto;
+  width: 28px;
+  z-index: 7;
+  pointer-events: none;
+}
+.dsh-TurnNavigator-frame {
+  --turn-natural-height: 0px;
+  --turn-natural-position: 0px;
+  --turn-rail-inset: 6px;
+  --turn-preview-height: 100px;
+  position: absolute;
+  top: 50%;
+  right: 0;
+  width: 28px;
+  height: min(var(--turn-natural-height), max(0px, calc(100% - 64px)), 420px);
+  cursor: pointer;
+  pointer-events: auto;
+  transform: translateY(-50%);
+}
+
+/* The frame's inner scroller: no visible scrollbar, no scroll chaining into
+   the transcript, and gradient fades over the ends that can still scroll. */
+.dsh-TurnNavigator-scroller {
+  position: absolute;
+  inset: 0;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  scrollbar-width: none;
+}
+
+.dsh-TurnNavigator-scroller::-webkit-scrollbar {
+  display: none;
+}
+
+.dsh-TurnNavigator-fadeTop {
+  mask-image: linear-gradient(to bottom, transparent 0, #000 24px, #000 100%);
+}
+
+.dsh-TurnNavigator-fadeBottom {
+  mask-image: linear-gradient(to bottom, #000 0, #000 calc(100% - 24px), transparent 100%);
+}
+
+.dsh-TurnNavigator-fadeTop.dsh-TurnNavigator-fadeBottom {
+  mask-image: linear-gradient(
+    to bottom,
+    transparent 0,
+    #000 24px,
+    #000 calc(100% - 24px),
+    transparent 100%
+  );
+}
+
+.dsh-TurnNavigator-marks {
+  position: relative;
+  height: var(--turn-natural-height);
+}
+
+.dsh-TurnNavigator-markPosition {
+  position: absolute;
+  top: calc(var(--turn-natural-position) + var(--turn-rail-inset));
+  right: 0;
+  left: 0;
+  height: 10px;
+  transform: translateY(-50%);
+  transition: top 220ms cubic-bezier(0.2, 0.8, 0.2, 1);
+  animation: dsh-turn-mark-enter 150ms ease-out;
+}
+
+/* The rail owns pointer input for the whole column, so a mark is a keyboard
+   destination that paints one tick — never a mouse target of its own. */
+.dsh-TurnNavigator-mark {
+  position: absolute;
+  /* As wide as the longest tick, right-aligned with it: the focus ring below
+     then wraps the tick instead of the rail's full pointer column. */
+  inset: 0 0 0 auto;
+  width: 20px;
+  padding: 0;
+  border: 0;
+  border-radius: 8px;
+  background: transparent;
+  cursor: pointer;
+  pointer-events: none;
+}
+
+.dsh-TurnNavigator-mark::before {
+  position: absolute;
+  top: 50%;
+  right: 0;
+  width: 12px;
+  height: 2px;
+  border-radius: 2px;
+  background: var(--border);
+  content: '';
+  transform: translateY(-50%);
+  transition: width 140ms ease, background-color 140ms ease;
+}
+
+/* Ordered before hover/active so those states keep their stronger tick. */
+.dsh-TurnNavigator-markUnloaded::before {
+  width: 8px;
+  opacity: 0.6;
+}
+
+.dsh-TurnNavigator-markPreview::before {
+  width: 18px;
+}
+
+.dsh-TurnNavigator-markBusy::before {
+  animation: dsh-turn-mark-busy 1s ease-in-out infinite;
+}
+
+.dsh-TurnNavigator-markActive::before {
+  width: 20px;
+  background: var(--accent);
+}
+
+/* Preserve the v1.38.7 question rail's theme hierarchy while retaining the
+   Harness fixed-pitch geometry: the hovered mark and its two neighbours fade
+   through the configured accent, and the resting active mark stays accented. */
+.dsh-TurnNavigator-mark[data-preview-distance='2']::before {
+  background: color-mix(in srgb, var(--accent) 35%, transparent);
+}
+
+.dsh-TurnNavigator-mark[data-preview-distance='1']::before {
+  background: color-mix(in srgb, var(--accent) 60%, transparent);
+}
+
+.dsh-TurnNavigator-mark[data-preview-distance='0']::before {
+  background: var(--accent);
+}
+
+/* Keyboard focus outranks both resting states: the tick takes the brand color
+   the rest of the rail never uses, and a hairline ring keeps it legible
+   against a busy transcript. */
+.dsh-TurnNavigator-mark:focus-visible::before {
+  width: 20px;
+  background: var(--accent);
+}
+
+.dsh-TurnNavigator-mark:focus-visible {
+  outline: 1px solid var(--accent);
+  outline-offset: 2px;
+}
+
+.dsh-TurnNavigator-preview {
+  position: absolute;
+  /* Centered on its mark. Mark positions live in the scrolled ladder, so the
+     frame-level preview subtracts the scroller's offset, then holds clear of
+     both frame ends. */
+  top: clamp(
+    0px,
+    calc(
+      var(--turn-natural-position) + var(--turn-rail-inset)
+      - var(--turn-scroll-top, 0px) - var(--turn-preview-height) / 2
+    ),
+    calc(100% - var(--turn-preview-height))
+  );
+  right: calc(100% + 10px);
+  box-sizing: border-box;
+  width: min(300px, calc(100cqw - 120px));
+  max-height: var(--turn-preview-height);
+  overflow: hidden;
+  padding: 10px 12px;
+  border: 0;
+  border-radius: 10px;
+  color: var(--dsw-alias-label-primary);
+  background: var(--bg-elev);
+  box-shadow: 0 4px 20px #0002;
+  pointer-events: none;
+  animation: dsh-turn-preview-enter 120ms ease-out;
+  transition: top 140ms cubic-bezier(0.2, 0.8, 0.2, 1);
+}
+
+.dsh-TurnNavigator-previewPrompt,
+.dsh-TurnNavigator-previewResponse {
+  display: -webkit-box;
+  overflow: hidden;
+  -webkit-box-orient: vertical;
+}
+
+.dsh-TurnNavigator-previewPrompt {
+  font: 600 13px/20px var(--font-ui);
+  -webkit-line-clamp: 1;
+}
+
+.dsh-TurnNavigator-previewResponse {
+  margin-top: 4px;
+  color: var(--dsw-alias-label-caption);
+  font: 400 12px/18px var(--font-ui);
+  -webkit-line-clamp: 3;
+}
+
+@keyframes dsh-turn-mark-enter {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+
+@keyframes dsh-turn-preview-enter {
+  from { opacity: 0; transform: translateX(4px); }
+  to { opacity: 1; transform: translateX(0); }
+}
+
+@keyframes dsh-turn-mark-busy {
+  0%,
+  100% { opacity: 1; }
+  50% { opacity: 0.35; }
+}
+
+
+
+@media (prefers-reduced-motion: reduce) {
+  .dsh-TurnNavigator-frame,
+  .dsh-TurnNavigator-scroller,
+  .dsh-TurnNavigator-markPosition,
+  .dsh-TurnNavigator-mark::before,
+  .dsh-TurnNavigator-markBusy::before,
+  .dsh-TurnNavigator-preview {
+    transition: none;
+    animation: none;
+    scroll-behavior: auto;
+  }
+}

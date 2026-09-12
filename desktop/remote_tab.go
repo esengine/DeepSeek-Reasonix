@@ -15,6 +15,7 @@ import (
 	"time"
 
 	"reasonix/internal/agent"
+	"reasonix/internal/control"
 	"reasonix/internal/event"
 )
 
@@ -45,7 +46,8 @@ func (a *App) attachRemoteTabServe(ctx context.Context, tabID, base, token, inst
 	if err != nil {
 		return false, err
 	}
-	if err := serveHandshake(callCtx, client, base, token); err != nil {
+	capabilities, err := serveHandshakeCapabilities(callCtx, client, base, token)
+	if err != nil {
 		log.Printf("[remote] attachRemoteTabServe: handshake FAILED tab=%s base=%q err=%v", tabID, base, err)
 		return false, err
 	}
@@ -55,6 +57,14 @@ func (a *App) attachRemoteTabServe(ctx context.Context, tabID, base, token, inst
 	if tab == nil {
 		return false, fmt.Errorf("remote tab %q closed during bootstrap", tabID)
 	}
+	a.remoteTabMu.Lock()
+	if current := a.remoteTabs[tabID]; current == tab {
+		tab.capabilities = make(map[string]bool, len(capabilities))
+		for _, capability := range capabilities {
+			tab.capabilities[capability] = true
+		}
+	}
+	a.remoteTabMu.Unlock()
 	tab.sessionMu.Lock()
 	defer tab.sessionMu.Unlock()
 
@@ -714,6 +724,14 @@ func (a *App) SubmitRemoteTab(tabID, text string) error {
 }
 
 func (a *App) SubmitRemoteTabWithSubmission(tabID, text, submissionID string) error {
+	// Report the connection state before capability negotiation so a tab that
+	// has not finished bootstrap is never misdiagnosed as a legacy Serve.
+	if _, _, _, err := a.remoteTabCommandTarget(tabID); err != nil {
+		return err
+	}
+	if err := a.requireRemotePermissionPresets(tabID); err != nil {
+		return err
+	}
 	for {
 		revision, admittedGen, err := a.ensureRemoteModelSettings(tabID)
 		if err != nil {
@@ -748,9 +766,9 @@ func (a *App) CancelRemoteTab(tabID string) error {
 	return servePostForSession(ctx, client, serveURL(base, "/cancel"), nil, expectedPath)
 }
 
-// ApproveRemoteTab answers a tool-approval request. Serve takes
-// {id, allow, session, persist}; preserve the same once/session/persistent
-// scopes exposed by the local approval surface.
+// ApproveRemoteTab answers a tool-approval request. Only one-shot and scoped
+// session grants are supported; durable approval rules were intentionally
+// removed from the permission model.
 func (a *App) ApproveRemoteTab(tabID, callID, decision string) error {
 	client, base, expectedPath, err := a.remoteTabCommandTarget(tabID)
 	if err != nil {
@@ -759,19 +777,19 @@ func (a *App) ApproveRemoteTab(tabID, callID, decision string) error {
 	ctx, cancel := commandContext(a)
 	defer cancel()
 	decision = strings.ToLower(strings.TrimSpace(decision))
-	allow, session, persist := false, false, false
+	allow, session := false, false
 	switch decision {
 	case "allow", "once":
 		allow = true
 	case "session":
 		allow, session = true, true
 	case "persist", "persistent", "project":
-		allow, session, persist = true, true, true
+		return fmt.Errorf("permanent remote approval is no longer supported")
 	case "deny":
 	default:
 		return fmt.Errorf("invalid remote approval decision %q", decision)
 	}
-	body, _ := json.Marshal(map[string]any{"id": callID, "allow": allow, "session": session, "persist": persist})
+	body, _ := json.Marshal(map[string]any{"id": callID, "allow": allow, "session": session, "persist": false})
 	if err := servePostForSession(ctx, client, serveURL(base, "/approve"), body, expectedPath); err != nil {
 		return err
 	}
@@ -864,28 +882,64 @@ func (a *App) RewindRemoteTab(tabID, checkpointID, scope string) error {
 }
 
 func (a *App) SetRemoteTabToolApprovalMode(tabID, mode string) error {
-	client, base, expectedPath, err := a.remoteTabCommandTarget(tabID)
-	if err != nil {
+	if err := a.requireRemotePermissionPresets(tabID); err != nil {
 		return err
 	}
 	ctx, cancel := commandContext(a)
 	defer cancel()
-	body, _ := json.Marshal(map[string]string{"mode": mode})
-	return servePostForSession(ctx, client, serveURL(base, "/tool-approval-mode"), body, expectedPath)
+	client, base, expectedPath, err := a.remoteTabCommandTarget(tabID)
+	if err != nil {
+		return err
+	}
+	snapshot, err := remotePermissionSnapshot(ctx, client, base, expectedPath)
+	if err != nil {
+		return err
+	}
+	_, err = setRemotePermissionPresetAt(ctx, client, base, expectedPath, mode, snapshot.Revision)
+	return err
+}
+
+func setRemotePermissionPresetAt(ctx context.Context, client *http.Client, base, expectedPath, mode string, revision uint64) (control.PermissionSnapshot, error) {
+	var snapshot control.PermissionSnapshot
+	body, _ := json.Marshal(map[string]any{"preset": mode, "expectedRevision": revision})
+	resp, err := serveDoForSession(ctx, client, http.MethodPost, serveURL(base, "/permission/preset"), body, expectedPath)
+	if err != nil {
+		return snapshot, err
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		data, _ := io.ReadAll(io.LimitReader(resp.Body, 4<<10))
+		return snapshot, fmt.Errorf("set remote permission preset: status %d: %s", resp.StatusCode, strings.TrimSpace(string(data)))
+	}
+	var envelope struct {
+		Snapshot control.PermissionSnapshot `json:"snapshot"`
+	}
+	if err := json.NewDecoder(io.LimitReader(resp.Body, 1<<20)).Decode(&envelope); err != nil {
+		return snapshot, fmt.Errorf("decode remote permission update: %w", err)
+	}
+	return envelope.Snapshot, nil
 }
 
 func (a *App) SetRemoteTabComposerProfile(tabID, collaborationMode, toolApprovalMode, goal string) ([]string, error) {
+	if err := a.requireRemotePermissionPresets(tabID); err != nil {
+		return nil, err
+	}
 	client, base, expectedPath, err := a.remoteTabCommandTarget(tabID)
 	if err != nil {
 		return nil, err
 	}
-	body, _ := json.Marshal(map[string]any{
-		"collaborationMode": collaborationMode,
-		"toolApprovalMode":  toolApprovalMode,
-		"goal":              goal,
-	})
 	ctx, cancel := commandContext(a)
 	defer cancel()
+	snapshot, err := remotePermissionSnapshot(ctx, client, base, expectedPath)
+	if err != nil {
+		return nil, err
+	}
+	body, _ := json.Marshal(map[string]any{
+		"collaborationMode":          collaborationMode,
+		"toolApprovalMode":           toolApprovalMode,
+		"goal":                       goal,
+		"expectedPermissionRevision": snapshot.Revision,
+	})
 	resp, err := serveDoForSession(ctx, client, http.MethodPost, serveURL(base, "/composer-profile"), body, expectedPath)
 	if err != nil {
 		return nil, err
@@ -908,6 +962,55 @@ func (a *App) SetRemoteTabComposerProfile(tabID, collaborationMode, toolApproval
 		return nil, fmt.Errorf("decode remote composer profile response: %w", err)
 	}
 	return result.DrainedApprovalIDs, nil
+}
+
+func remotePermissionSnapshot(ctx context.Context, client *http.Client, base, expectedPath string) (control.PermissionSnapshot, error) {
+	var snapshot control.PermissionSnapshot
+	resp, err := serveDoForSession(ctx, client, http.MethodGet, serveURL(base, "/permission"), nil, expectedPath)
+	if err != nil {
+		return snapshot, err
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		data, _ := io.ReadAll(io.LimitReader(resp.Body, 4<<10))
+		return snapshot, fmt.Errorf("query remote permission snapshot: status %d: %s", resp.StatusCode, strings.TrimSpace(string(data)))
+	}
+	if err := json.NewDecoder(io.LimitReader(resp.Body, 1<<20)).Decode(&snapshot); err != nil {
+		return snapshot, fmt.Errorf("decode remote permission snapshot: %w", err)
+	}
+	return snapshot, nil
+}
+
+func revokeRemotePermissionGrantAt(ctx context.Context, client *http.Client, base, expectedPath, scope, target string, revision uint64) (control.PermissionSnapshot, error) {
+	var snapshot control.PermissionSnapshot
+	body, _ := json.Marshal(map[string]any{"scope": scope, "target": target, "expectedRevision": revision})
+	resp, err := serveDoForSession(ctx, client, http.MethodPost, serveURL(base, "/permission/grants/revoke"), body, expectedPath)
+	if err != nil {
+		return snapshot, err
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		data, _ := io.ReadAll(io.LimitReader(resp.Body, 4<<10))
+		return snapshot, fmt.Errorf("revoke remote permission grant: status %d: %s", resp.StatusCode, strings.TrimSpace(string(data)))
+	}
+	if err := json.NewDecoder(io.LimitReader(resp.Body, 1<<20)).Decode(&snapshot); err != nil {
+		return snapshot, fmt.Errorf("decode remote permission revocation: %w", err)
+	}
+	return snapshot, nil
+}
+
+func (a *App) requireRemotePermissionPresets(tabID string) error {
+	a.remoteTabMu.Lock()
+	tab := a.remoteTabs[tabID]
+	supported := tab != nil && tab.capabilities["permission-presets-v1"]
+	a.remoteTabMu.Unlock()
+	if tab == nil {
+		return fmt.Errorf("remote tab %q is not open", tabID)
+	}
+	if !supported {
+		return fmt.Errorf("this remote Reasonix Serve is read-only because it does not support permission-presets-v1; upgrade the remote service to run tools or change permissions")
+	}
+	return nil
 }
 
 func (a *App) SetRemoteTabGoal(tabID, goal string) error {

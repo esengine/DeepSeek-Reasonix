@@ -1,11 +1,11 @@
-import { lazy, memo, startTransition, Suspense, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
+import { lazy, memo, startTransition, Suspense, useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
+import { t } from "../lib/i18n";
 
 async function loadMarkdownView<T>(component: Promise<T>): Promise<T> {
   await import("./MarkdownImage.css");
   return component;
 }
 
-const MarkdownRenderer = lazy(() => loadMarkdownView(import("./MarkdownRenderer")));
 let historyView: typeof import("./MarkdownHistory").default | undefined;
 let historyViewPromise: Promise<typeof import("./MarkdownHistory")> | undefined;
 export function preloadMarkdownHistory(): Promise<typeof import("./MarkdownHistory")> {
@@ -342,139 +342,20 @@ export function useRenderedMarkdownText(text: string, streaming: boolean, holdId
   return renderedText;
 }
 
-const StreamingMarkdownTail = memo(function StreamingMarkdownTail({ text }: { text: string }) {
-  const elementRef = useRef<HTMLDivElement>(null);
-  const previousTextRef = useRef("");
-
-  useLayoutEffect(() => {
-    const element = elementRef.current;
-    if (!element) return;
-    const previousText = previousTextRef.current;
-    const previous = splitStreamingTailFence(previousText);
-    const next = splitStreamingTailFence(text);
-    // Append-only fast paths keep per-frame updates to one text-node append.
-    if (next && previous && next.head === previous.head && next.lang === previous.lang && next.code.startsWith(previous.code)) {
-      const textNode = element.querySelector("code")?.firstChild;
-      if (textNode?.nodeType === Node.TEXT_NODE) {
-        (textNode as Text).appendData(next.code.slice(previous.code.length));
-        previousTextRef.current = text;
-        return;
-      }
-    }
-    if (!next && !previous && text.startsWith(previousText)) {
-      const textNode = element.firstChild;
-      if (element.childNodes.length === 1 && textNode?.nodeType === Node.TEXT_NODE) {
-        (textNode as Text).appendData(text.slice(previousText.length));
-        previousTextRef.current = text;
-        return;
-      }
-    }
-    element.textContent = "";
-    if (next) {
-      if (next.head) element.appendChild(document.createTextNode(next.head));
-      const pre = document.createElement("pre");
-      pre.className = "code md--stream-tail-code";
-      if (next.lang) pre.setAttribute("data-lang", next.lang);
-      const code = document.createElement("code");
-      code.textContent = next.code;
-      pre.appendChild(code);
-      element.appendChild(pre);
-    } else {
-      element.textContent = text;
-    }
-    previousTextRef.current = text;
-  }, [text]);
-
-  return <div ref={elementRef} className="md md--stream-tail" data-transcript-selection-source-fallback />;
-});
-
 export const Markdown = memo(function Markdown({
-  text,
-  plainStatusBlocks = false,
-  streaming = false,
-  cacheKey,
-  wasStreamed,
-}: {
-  text: string;
-  plainStatusBlocks?: boolean;
-  streaming?: boolean;
-  /** Stable transcript item key shared by live-footer and virtualized hosts. */
-  cacheKey?: string;
-  /** The item originated in the live renderer, even if this is a remount. */
-  wasStreamed?: boolean;
-}) {
-  // legacyMode: the worker/inline pipeline failed (Worker unavailable AND the
-  // in-process parse threw) — fall back to the pre-Phase-E behavior:
-  // the idle-time main-thread finalization below parses the full document.
-  const [legacyMode, setLegacyMode] = useState(false);
-  const handleWorkerError = useCallback(() => setLegacyMode(true), []);
-  // While the worker owns the final parse of a completed stream, hold the
-  // idle finalization so the full document is not ALSO parsed main-thread.
-  const holdIdleFinalization = !streaming && !legacyMode;
-  const renderedText = useRenderedMarkdownText(text, streaming, holdIdleFinalization);
-  const sections = useMemo(() => splitStableMarkdownSections(renderedText), [renderedText]);
-  const pendingText = (streaming || text.length >= STREAMING_TAIL_THRESHOLD) && text.startsWith(renderedText)
-    ? text.slice(renderedText.length)
-    : "";
-  // A row that ever streamed keeps its already-parsed committed sections as
-  // the parse-in-flight fallback; a fresh history mount shows the full text
-  // as plain first (never truncated) until worker blocks swap in.
-  const wasStreamingRef = useRef(Boolean(wasStreamed));
-  if (streaming) wasStreamingRef.current = true;
-  // Finalize timing parity with the old idle path: measure from stream
-  // completion (or mount, for history) to the worker blocks swapping in.
-  const finalizeStartRef = useRef(0);
-  const finalizeLengthRef = useRef(0);
-  useEffect(() => {
-    if (streaming || legacyMode || finalizeStartRef.current > 0) return;
-    if (text.length < STREAMING_TAIL_THRESHOLD) return;
-    finalizeStartRef.current = performance.now();
-    finalizeLengthRef.current = text.length;
-  }, [streaming, legacyMode, text]);
-  const handleWorkerParsed = useCallback(() => {
-    if (finalizeStartRef.current === 0) return;
-    performance.measure("reasonix:markdown-finalize", {
-      start: finalizeStartRef.current,
-      end: performance.now(),
-      detail: { textLength: finalizeLengthRef.current },
-    });
-    finalizeStartRef.current = 0;
-    finalizeLengthRef.current = 0;
-  }, []);
-
-  const committedView = (
-    <>
-      <Suspense fallback={<div className="md" data-transcript-geometry-pending data-transcript-selection-source-fallback>{renderedText}</div>}>
-        {sections.length === 1 ? (
-          <MarkdownRenderer text={renderedText} plainStatusBlocks={plainStatusBlocks} />
-        ) : (
-          <div className="md" data-markdown-sections={sections.length}>
-            {sections.map((section, index) => (
-              <MarkdownRenderer key={index} text={section} plainStatusBlocks={plainStatusBlocks} bare />
-            ))}
-          </div>
-        )}
-      </Suspense>
-      {pendingText && <StreamingMarkdownTail text={pendingText} />}
-    </>
-  );
-
-  if (streaming || legacyMode) return committedView;
-
-  const MarkdownHistory = historyView ?? LazyMarkdownHistory;
-  const historyFallback = wasStreamingRef.current
-    ? committedView
-    : <div className="md" data-transcript-geometry-pending data-transcript-selection-source-fallback>{text}</div>;
-  return (
-    <Suspense fallback={historyFallback}>
-      <MarkdownHistory
-        text={text}
-        plainStatusBlocks={plainStatusBlocks}
-        cacheKey={cacheKey}
-        fallback={historyFallback}
-        onParsed={handleWorkerParsed}
-        onError={handleWorkerError}
-      />
-    </Suspense>
-  );
+  text, plainStatusBlocks = false, streaming = false, cacheKey,
+}: { text: string; plainStatusBlocks?: boolean; streaming?: boolean; cacheKey?: string; wasStreamed?: boolean }) {
+  const renderedText = useRenderedMarkdownText(text, streaming, false);
+  const [failed, setFailed] = useState<string>();
+  const onError = useCallback(() => setFailed(text), [text]);
+  const History = historyView ?? LazyMarkdownHistory;
+  const fallback = <div className="md" style={{ whiteSpace: "pre-wrap" }}>{text}</div>;
+  if (failed === text) return <><span className="chat-notice" role="status">{t("chat.parseFailed")}</span>{fallback}</>;
+  return <Suspense fallback={fallback}>
+    <History text={streaming ? renderedText : text} streaming={streaming}
+      plainStatusBlocks={plainStatusBlocks} cacheKey={cacheKey}
+      fallback={<span style={{ whiteSpace: "pre-wrap" }}>{streaming ? renderedText : text}</span>} onError={onError} />
+    {streaming && text.startsWith(renderedText) && text.length > renderedText.length &&
+      <span className="md" style={{ whiteSpace: "pre-wrap" }}>{text.slice(renderedText.length)}</span>}
+  </Suspense>;
 });

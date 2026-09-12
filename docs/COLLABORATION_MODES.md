@@ -20,13 +20,22 @@ continuation immediately. There is no independent completion evaluator.
 Restored and forked Goals need explicit activation. Cancellation, user input,
 permission waits, errors and explicit budgets retain their boundaries.
 
+Plan, Goal, permission, sandbox, and the task contract are independent states.
+Read only, Workspace write, and Full access keep their public meanings. The tool
+catalog stays stable so the prompt cache stays warm. The Harness minimal preset
+is not a task complexity mode.
+
 ## Permissions and results
 
-Ask / Auto / Yolo, sandbox restrictions and explicit prohibitions remain action
-controls. They do not certify task quality. Tool results retain actual failures,
+Read only / Workspace write / Full access, sandbox restrictions and explicit
+prohibitions remain action controls. They do not certify task quality. Tool results retain actual failures,
 exit codes and interruptions. Checks that precede later edits are stale.
 Model completion declarations and execution facts are distinct; unfinished
 todos are not automatically marked complete.
+
+Plan mode is a workflow instruction, not a permission boundary. Writes stay
+hard-blocked until the plan is approved, even under Full access. `complete_step` waits
+for approval.
 
 See [execution semantics and migration](EXECUTION_MODEL_SIMPLIFICATION.md) and
 [task instructions](TASK_CONTRACT.md). Tool ordering and serialization stay

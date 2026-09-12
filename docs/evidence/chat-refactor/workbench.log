@@ -1,0 +1,19 @@
+[bench] scenario A: 5 cold opens of the markdown-heavy session…
+  PASS  A first-paint P95: 44.0ms (gate 100ms)
+  PASS  A interactive P95: 238.2ms (gate 300ms)
+[bench] scenario B: 100 alternating switches (warmup 6)…
+  PASS  B switch latency P95 (click→target session rendered): 295.8ms (gate 300ms)
+  PASS  B activation ready P95: 18.9ms (gate 300ms)
+  PASS  B input-event P95 (INP-ish): 16.0ms (gate 200ms)
+  PASS  B long-task P95: 0.0ms (gate 50ms)
+  PASS  B long-task max: 0.0ms (gate 500ms)
+  PASS  B markdown Worker completed parses (minimum): 1.0 (gate 1)
+  PASS  B markdown Worker max parse: 67.9ms (gate 3000ms)
+  PASS  B settled renderer task time: 0.6% (gate 3%)
+  PASS  B retained heap growth: 3.6MiB (gate 20MiB)
+  PASS  B cache: body bytes within budget: 1.7MiB (gate 32MiB)
+  PASS  B cache: markdown bytes within budget: 1.9MiB (gate 16MiB)
+  PASS  B cache: resident sessions: 1.0 (gate 3)
+  PASS  B DOM node growth vs warmup baseline: 0.0% (gate 10%)
+
+[bench] verdict: PASS (0 gates failed) — results in bench/results.json

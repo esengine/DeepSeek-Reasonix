@@ -38,7 +38,7 @@ try {
     tabId="remote-A" sessionKey="remote-A" collaborationMode="normal" toolApprovalMode="ask" goal="" ready
     onSend={() => { calls.push("send"); }} onSteer={async (text, tab) => { calls.push(`steer:${tab}:${text}`); }}
     onCancel={noop} onCycleMode={noop} onSetMode={noop} onSetCollaborationMode={noop}
-    onSetToolApprovalMode={noop} onToggleYoloApprovalMode={noop} onClearGoal={noop}
+    onSetToolApprovalMode={noop} onClearGoal={noop}
     onSwitchModel={noop} onSetEffort={noop} insertRequest={{ id: 1, text: "remote guidance", mode: "replace" }}
   /></ToastProvider></LocaleProvider>));
   const input = document.querySelector<HTMLInputElement>("input[type=file]")!;

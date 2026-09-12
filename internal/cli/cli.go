@@ -40,6 +40,7 @@ import (
 	"reasonix/internal/plugin"
 	"reasonix/internal/provider"
 	"reasonix/internal/provider/openai"
+	"reasonix/internal/sandbox"
 	"reasonix/internal/serve"
 	"reasonix/internal/sessiontemp"
 	"reasonix/internal/telemetry"
@@ -65,6 +66,10 @@ func Run(args []string, version string) int {
 // RunWithBuildInfo is the full CLI entry with optional build metadata for
 // `reasonix version --verbose` / `--json`.
 func RunWithBuildInfo(args []string, info BuildInfo) int {
+	sandbox.RegisterHelperDispatch()
+	if len(args) > 0 && args[0] == sandbox.WindowsHelperCommand {
+		return sandbox.RunWindowsSandboxHelper(args[1:], os.Stdin, os.Stdout, os.Stderr)
+	}
 	info = info.withDefaults()
 	version := info.Version
 	// Usage recording is asynchronous so provider/UI paths never wait on disk.
@@ -324,24 +329,24 @@ type cliPermissionMode struct {
 
 func parsePermissionMode(value string) (cliPermissionMode, error) {
 	switch strings.ToLower(strings.TrimSpace(value)) {
-	case "", "default", "ask":
-		return cliPermissionMode{approval: control.ToolApprovalAsk}, nil
-	case "auto":
-		return cliPermissionMode{approval: control.ToolApprovalAuto}, nil
+	case "", "default", "workspace-write":
+		return cliPermissionMode{approval: control.ToolApprovalWorkspaceWrite}, nil
+	case "read-only":
+		return cliPermissionMode{approval: control.ToolApprovalReadOnly}, nil
+	case "danger-full-access":
+		return cliPermissionMode{approval: control.ToolApprovalDangerFullAccess}, nil
+	case "ask", "manual":
+		return cliPermissionMode{approval: control.ToolApprovalReadOnly}, nil
+	case "auto", "bypasspermissions", "bypass-permissions", "yolo":
+		return cliPermissionMode{approval: control.ToolApprovalWorkspaceWrite}, nil
 	case "acceptedits", "accept-edits":
-		return cliPermissionMode{approval: control.ToolApprovalAsk, allow: []string{
-			"write_file", "edit_file", "multi_edit", "move_file", "notebook_edit", "delete_range", "delete_symbol",
-		}}, nil
-	case "manual":
-		return cliPermissionMode{approval: control.ToolApprovalAsk}, nil
+		return cliPermissionMode{approval: control.ToolApprovalWorkspaceWrite}, nil
 	case "dontask", "dont-ask":
-		return cliPermissionMode{approval: control.ToolApprovalDontAsk}, nil
+		return cliPermissionMode{approval: control.ToolApprovalReadOnly}, nil
 	case "plan":
 		return cliPermissionMode{approval: control.ToolApprovalAsk, plan: true}, nil
-	case "bypasspermissions", "bypass-permissions", "yolo":
-		return cliPermissionMode{approval: control.ToolApprovalYolo}, nil
 	default:
-		return cliPermissionMode{}, fmt.Errorf("unknown permission mode %q (want manual, ask, auto, acceptEdits, dontAsk, plan, or bypassPermissions)", value)
+		return cliPermissionMode{}, fmt.Errorf("unknown permission mode %q (want read-only, workspace-write, danger-full-access, or plan)", value)
 	}
 }
 
@@ -352,7 +357,7 @@ func resolveRunPermissionMode(value string, auto, modeExplicit bool) (string, er
 	if modeExplicit {
 		return "", errors.New("--auto/-y cannot be combined with --permission-mode")
 	}
-	return "auto", nil
+	return "workspace-write", nil
 }
 
 func applyPermissionMode(ctrl *control.Controller, mode cliPermissionMode) {
@@ -479,8 +484,9 @@ func runAgent(args []string, version string) int {
 	copySession := fs.Bool("copy", false, "with --resume/--continue: duplicate the session and continue in the copy (escape hatch when the original is held by another Reasonix process)")
 	takeover := fs.Bool("takeover", false, "with --resume/--continue: when a resident serve on this machine holds the session, take it over instead of refusing")
 	effort := fs.String("effort", "", "session reasoning effort override")
-	permissionMode := fs.String("permission-mode", "ask", "permission mode: manual | ask | auto | acceptEdits | dontAsk | plan | bypassPermissions")
-	autoApprove := fs.BoolP("auto", "y", false, "explicitly auto-approve ordinary writer fallbacks (alias for --permission-mode auto)")
+	permissionMode := fs.String("permission-mode", "workspace-write", "permission mode: read-only | workspace-write | danger-full-access")
+	autoApprove := fs.BoolP("auto", "y", false, "deprecated compatibility flag; uses workspace-write")
+	_ = fs.MarkHidden("auto")
 	printOnly := fs.BoolP("print", "p", false, "print only the final response")
 	eventsJSONL := fs.Bool("events-jsonl", false, "emit a redacted structured event stream as JSONL")
 	outputFormat := fs.String("output-format", "text", "output format: text | json | stream-json")
@@ -679,7 +685,7 @@ func runAgent(args []string, version string) int {
 	// skill sub-agents, the planner runner) gets the same contract as the parent
 	// executor, not just the top-level one. Default/ask fails closed because no
 	// UI can answer; unattended writes require explicit --auto/-y,
-	// --permission-mode auto, or yolo.
+	// legacy permission aliases.
 	overrides := cliBuildOverrides{
 		Preset:               deprecatedMode,
 		Effort:               effortOverride,
@@ -973,11 +979,13 @@ func chatREPL(args []string, version string) int {
 	resume := fs.StringP("resume", "r", "", "resume by session ID/query, or open the picker when no value is given")
 	fs.Lookup("resume").NoOptDefVal = resumePickerSentinel
 	copySession := fs.Bool("copy", false, "with --resume/--continue: duplicate the selected session and continue in the copy (escape hatch when the original is held by another Reasonix process)")
-	yolo := fs.Bool("dangerously-skip-permissions", false, "YOLO: auto-approve approval-gated tool calls this session; same runtime mode as Ctrl+Y")
-	fs.BoolVar(yolo, "yolo", false, "alias for --dangerously-skip-permissions")
+	legacyYolo := fs.Bool("dangerously-skip-permissions", false, "deprecated: use --permission-mode danger-full-access")
+	fs.BoolVar(legacyYolo, "yolo", false, "deprecated alias; migrates to workspace-write")
+	_ = fs.MarkHidden("dangerously-skip-permissions")
+	_ = fs.MarkHidden("yolo")
 	dir := fs.String("dir", "", "change to this directory first (project root); config, sandbox and file tools resolve from here")
 	effort := fs.String("effort", "", "session reasoning effort override")
-	permissionMode := fs.String("permission-mode", "ask", "permission mode: manual | ask | auto | acceptEdits | dontAsk | plan | bypassPermissions")
+	permissionMode := fs.String("permission-mode", "workspace-write", "permission mode: read-only | workspace-write | danger-full-access | plan")
 	var additionalDirs []string
 	fs.StringArrayVar(&additionalDirs, "add-dir", nil, "allow tool access to an additional directory (repeatable)")
 	var allowedToolValues []string
@@ -1214,10 +1222,10 @@ func chatREPL(args []string, version string) int {
 	// task tool) keep their headless gate from setup — no UI to prompt through.
 	ctrl.EnableInteractiveApproval()
 	applyPermissionMode(ctrl, permissions)
-	// YOLO: skip ordinary tool approval requests for the session (deny rules and
-	// fresh reviews still apply; ask questions and plan approvals still wait).
-	if *yolo {
-		ctrl.SetAutoApproveTools(true)
+	// Legacy bypass flags migrate conservatively to the workspace preset. Full
+	// access is only reachable through an explicit canonical preset selection.
+	if *legacyYolo {
+		ctrl.SetToolApprovalMode(control.ToolApprovalWorkspaceWrite)
 	}
 
 	m := newChatTUI(ctrl, missing, eventCh, termW)
@@ -1277,7 +1285,7 @@ func chatREPL(args []string, version string) int {
 	// goal/recovery state, lifecycle). Same construction inputs as
 	// buildController so the replacement matches this session's launch wiring;
 	// the CLI holds no SharedHost, so each rebuild owns its plugin host.
-	m.bindRuntimeRebuilder(*maxSteps, sink, *yolo, overrides, cliProfileBuildOptions)
+	m.bindRuntimeRebuilder(*maxSteps, sink, false, overrides, cliProfileBuildOptions)
 	if effortOverride != nil {
 		m.effortLevel = *effortOverride
 	}

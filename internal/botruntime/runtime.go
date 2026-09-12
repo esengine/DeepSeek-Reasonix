@@ -14,6 +14,7 @@ import (
 	"reasonix/internal/bot/qq"
 	"reasonix/internal/bot/weixin"
 	"reasonix/internal/config"
+	"reasonix/internal/permissionpreset"
 )
 
 // EnabledPlatforms resolves the requested channel list against the saved config.
@@ -305,16 +306,10 @@ func RouteConfigs(routes []config.BotRouteConfig, includeModel bool, includeWork
 }
 
 func normalizeToolApprovalMode(mode string) string {
-	switch strings.ToLower(strings.TrimSpace(mode)) {
-	case "ask":
-		return "ask"
-	case "auto":
-		return "auto"
-	case "yolo", "full", "full-access", "bypass":
-		return "yolo"
-	default:
+	if strings.TrimSpace(mode) == "" {
 		return ""
 	}
+	return string(permissionpreset.Normalize(mode))
 }
 
 // MergeLegacyDingtalkChannel merges the legacy [bot.dingtalk] runtime options

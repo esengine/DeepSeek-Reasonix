@@ -4,6 +4,8 @@ export type CodeScrollMode = "expand" | "bounded";
 
 export interface EditorProps {
   value: string;
+  /** Complete source when the displayed code is a folded preview. */
+  copyValue?: string;
   language?: string;
   readOnly?: boolean;
   scrollMode?: CodeScrollMode;

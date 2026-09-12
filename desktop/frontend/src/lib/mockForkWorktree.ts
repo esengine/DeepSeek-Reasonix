@@ -5,6 +5,15 @@ export function mockForkWorktree(tab: TabMeta): ForkWorktreeResultView {
   return { tab: { ...tab, workspaceRoot: `${tab.workspaceRoot}-worktree` }, isolated: true, branch: "reasonix/delivery-mock" };
 }
 
+export function increaseMockForkTitle(title: string): string {
+  const base = title.trim();
+  const ascii = /^(.*) \(([0-9]+)\)$/.exec(base);
+  if (ascii) return `${ascii[1]} (${BigInt(ascii[2]) + 1n})`;
+  const fullwidth = /^(.*)（([0-9]+)）$/.exec(base);
+  if (fullwidth) return `${fullwidth[1]}（${BigInt(fullwidth[2]) + 1n}）`;
+  return `${base} (1)`;
+}
+
 interface MockForkBindings extends ForkBindings {
   Fork(turn: number): Promise<TabMeta>;
 }
@@ -22,7 +31,7 @@ export function makeMockForkBindings(
       ...active,
       id: `tab_fork_${stamp}`,
       topicId: `topic_fork_${stamp}`,
-      topicTitle: `${active.topicTitle || defaultTitle} · fork`,
+      topicTitle: increaseMockForkTitle(active.topicTitle || defaultTitle),
       active: true,
       running: false,
     };

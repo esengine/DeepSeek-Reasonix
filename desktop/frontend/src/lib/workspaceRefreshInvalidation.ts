@@ -16,6 +16,8 @@ interface WorkspaceRefreshInvalidationOptions {
   open: boolean;
   openDirsRef: { current: Set<string> };
   refreshSelected: () => unknown;
+  deferSelectedRefresh?: boolean;
+  onSelectedInvalidated?: () => void;
   selectedPath: string | null;
   setSearchResults: (value: null) => void;
   viewMode: string;
@@ -76,6 +78,8 @@ export function useWorkspaceRefreshInvalidation({
   open,
   openDirsRef,
   refreshSelected,
+  deferSelectedRefresh = false,
+  onSelectedInvalidated,
   selectedPath,
   setSearchResults,
   viewMode,
@@ -104,7 +108,10 @@ export function useWorkspaceRefreshInvalidation({
     const affectsSelected = workspaceRefresh.allPaths || !selectedPath || changes.some((change) =>
       change.path === selectedPath || change.oldPath === selectedPath || selectedPath.startsWith(`${change.path}/`),
     );
-    if (actions.content && (actions.forceVisible || affectsSelected) && selectedPath) void refreshSelected();
+    if (actions.content && (actions.forceVisible || affectsSelected) && selectedPath) {
+      if (deferSelectedRefresh) onSelectedInvalidated?.();
+      else void refreshSelected();
+    }
     if (actions.tree && (actions.forceVisible || workspaceRefresh.allPaths || changes.length > 0)) {
       const affectedDirs = workspaceRefresh.allPaths
         ? openDirsRef.current
@@ -133,6 +140,8 @@ export function useWorkspaceRefreshInvalidation({
     open,
     openDirsRef,
     refreshSelected,
+    deferSelectedRefresh,
+    onSelectedInvalidated,
     selectedPath,
     setSearchResults,
     viewMode,

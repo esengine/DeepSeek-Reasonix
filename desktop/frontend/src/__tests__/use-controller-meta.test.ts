@@ -400,8 +400,8 @@ eq(sameMeta(meta({ collaborationMode: "normal" }), meta({ collaborationMode: "pl
 
 {
   const preserved = metaFromTab(tab({ toolApprovalMode: "" }), meta({ toolApprovalMode: "auto", autoApproveTools: false }));
-  eq(preserved.toolApprovalMode, "auto", "blank tab snapshot preserves explicit auto approval mode");
-  eq(preserved.autoApproveTools, false, "blank tab snapshot does not silently resurrect yolo approval");
+  eq(preserved.toolApprovalMode, "workspace-write", "blank tab snapshot migrates legacy auto to workspace write");
+  eq(preserved.autoApproveTools, false, "blank tab snapshot does not silently enable full access");
   const todos = [{ content: "Keep task state", status: "in_progress" }];
   const withTodos = metaFromTab(tab(), meta({ canonicalTodos: todos }));
   eq(withTodos.canonicalTodos, todos, "optimistic tab metadata preserves canonical todos for the same session");

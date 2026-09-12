@@ -31,7 +31,7 @@
   "Tools": [
     {
       "name": "ask",
-      "description": "Ask the user one or more multiple-choice questions when you hit a decision that is genuinely theirs to make — one you can't resolve from the request, the code, or sensible defaults. The frontend shows the options for the user to pick; their choices are returned to you. Prefer this over asking in prose for any real fork (which approach, which library, scope). Don't use it for decisions with an obvious default — pick the sensible option and proceed. Tool-approval modes such as YOLO do not answer these questions for the user. Each question has a short `header` (a tab label), the `question` text, 2-4 `options` (each a `label` and optional `description`; put any recommended option first), and `multiSelect` when more than one may apply.",
+      "description": "Ask the user one or more multiple-choice questions when you hit a decision that is genuinely theirs to make — one you can't resolve from the request, the code, or sensible defaults. The frontend shows the options for the user to pick; their choices are returned to you. Prefer this over asking in prose for any real fork (which approach, which library, scope). Don't use it for decisions with an obvious default — pick the sensible option and proceed. Permission presets do not answer these questions for the user. Each question has a short `header` (a tab label), the `question` text, 2-4 `options` (each a `label` and optional `description`; put any recommended option first), and `multiSelect` when more than one may apply.",
       "parameters": {
         "properties": {
           "decision_id": {
@@ -115,8 +115,12 @@
             "description": "Shell command to execute",
             "type": "string"
           },
+          "denial_id": {
+            "description": "Host-issued denial identifier required when retrying with danger-full-access.",
+            "type": "string"
+          },
           "justification": {
-            "description": "Required when additional_write_dirs is non-empty. Explain why those directories must be writable.",
+            "description": "Required when additional_write_dirs or sandbox_permissions is set. Explain why the access is needed.",
             "type": "string"
           },
           "preserve_background_processes": {
@@ -126,6 +130,14 @@
           "run_in_background": {
             "description": "Run detached: returns a job id immediately and keeps running across turns (no foreground timeout). Read new output with bash_output, wait with wait, stop it with kill_shell. Use for long-running commands like servers, watchers, or builds you don't need to block on.",
             "type": "boolean"
+          },
+          "sandbox_permissions": {
+            "description": "Optional per-call permission escalation. Use workspace-write for an authorized write while the session is read-only. danger-full-access is accepted only after a host-recorded denial and explicit authorization.",
+            "enum": [
+              "workspace-write",
+              "danger-full-access"
+            ],
+            "type": "string"
           }
         },
         "required": [

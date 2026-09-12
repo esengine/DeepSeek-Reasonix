@@ -1,0 +1,74 @@
+/* Ported from DeepSeek Harness c291e7961a (MIT). */
+/* Ongoing blue has no alias token (state-business-primary is the 500 step,
+ * not this 450) — component-level var pinned to the static scale instead. */
+.dsh-StateDot-dot,
+.dsh-StateDot-matrix {
+  --dsh-state-ongoing: var(--dsw-static-deepseek-450);
+}
+
+/* Solid states: same-color halo via a 0.10-opacity outer layer (::before)
+ * with a 6/10-scale solid core. Layer color rides currentColor set per state. */
+.dsh-StateDot-dot {
+  position: relative;
+  display: inline-block;
+  flex: none;
+}
+
+.dsh-StateDot-dot::before {
+  content: '';
+  position: absolute;
+  inset: 0;
+  border-radius: 50%;
+  corner-shape: round;
+  background: currentColor;
+  opacity: 0.1;
+}
+
+.dsh-StateDot-dot::after {
+  content: '';
+  position: absolute;
+  inset: 20%;
+  border-radius: 50%;
+  corner-shape: round;
+  background: currentColor;
+}
+
+.dsh-StateDot-dot[data-state='done'] {
+  color: var(--dsw-alias-state-success-primary);
+}
+
+.dsh-StateDot-dot[data-state='warning'] {
+  color: var(--dsw-alias-state-warn-primary);
+}
+
+.dsh-StateDot-dot[data-state='error'] {
+  color: var(--dsw-alias-state-error-primary);
+}
+
+/* Idle is the absence of activity, not a fourth outcome: it stays on the
+ * tertiary label color so it recedes beside the three outcome colors. */
+.dsh-StateDot-dot[data-state='idle'] {
+  color: var(--dsw-alias-label-tertiary);
+}
+
+/* Pixel chase: each outer cell holds a discrete brightness step (flat keyframe
+ * holds, no tweening — the retro feel), peaking when the chase hits it and
+ * decaying over the next three cells. Phase offsets come from per-rect
+ * animation-delay (index * -125ms) set inline by the component. */
+.dsh-StateDot-matrix {
+  flex: none;
+  color: var(--dsh-state-ongoing);
+}
+
+.dsh-StateDot-cell {
+  fill: currentColor;
+  opacity: 0.15;
+  animation: dsh-state-dot-chase 1s infinite;
+}
+
+@keyframes dsh-state-dot-chase {
+  0%, 12.4% { opacity: 1; }
+  12.5%, 24.9% { opacity: 0.6; }
+  25%, 37.4% { opacity: 0.35; }
+  37.5%, 100% { opacity: 0.15; }
+}

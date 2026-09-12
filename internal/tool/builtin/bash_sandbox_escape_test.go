@@ -2,12 +2,9 @@ package builtin
 
 import (
 	"context"
-	"encoding/json"
 	"strings"
 	"testing"
 
-	"reasonix/internal/event"
-	"reasonix/internal/jobs"
 	"reasonix/internal/sandbox"
 )
 
@@ -29,10 +26,7 @@ func (f *fakeSandboxEscapeApprover) SandboxEscapeSessionAllowed(ctx context.Cont
 	return f.sessionAllowed
 }
 
-func TestBashSandboxUnavailableCanEscapeOnceWithApproval(t *testing.T) {
-	restore := forceWindowsSandboxEscapeTestMode(t)
-	defer restore()
-
+func TestBashSandboxUnavailableFailsClosedEvenWithLegacyApprover(t *testing.T) {
 	sh := sandbox.ResolveShell("", "", nil)
 	oldCommand := bashSandboxCommand
 	bashSandboxCommand = func(spec sandbox.Spec, sh sandbox.Shell, command string) ([]string, bool) {
@@ -44,27 +38,15 @@ func TestBashSandboxUnavailableCanEscapeOnceWithApproval(t *testing.T) {
 	ctx := sandbox.WithEscapeApprover(context.Background(), approver)
 	args := argsJSON(t, map[string]any{"command": echoForShell(sh, "escaped")})
 	out, err := (bash{sb: sandbox.Spec{Mode: "enforce"}, shell: sh}).Execute(ctx, args)
-	if err != nil {
-		t.Fatalf("Execute returned error after approved escape: %v (out=%q)", err, out)
+	if err == nil || !strings.Contains(err.Error(), "sandbox requested but unavailable") {
+		t.Fatalf("Execute = (%q, %v), want fail-closed sandbox error", out, err)
 	}
-	if !strings.Contains(out, "escaped") {
-		t.Fatalf("output = %q, want escaped command output", out)
-	}
-	if len(approver.calls) != 1 {
-		t.Fatalf("approval calls = %d, want 1", len(approver.calls))
-	}
-	if approver.calls[0].Command != echoForShell(sh, "escaped") {
-		t.Fatalf("approval command = %q", approver.calls[0].Command)
-	}
-	if !json.Valid(approver.calls[0].Args) {
-		t.Fatalf("approval args are not valid JSON: %q", approver.calls[0].Args)
+	if len(approver.calls) != 0 {
+		t.Fatalf("legacy escape approver was called %d times", len(approver.calls))
 	}
 }
 
 func TestBashSandboxUnavailableStaysClosedWithoutApprover(t *testing.T) {
-	restore := forceWindowsSandboxEscapeTestMode(t)
-	defer restore()
-
 	sh := sandbox.ResolveShell("", "", nil)
 	oldCommand := bashSandboxCommand
 	bashSandboxCommand = func(spec sandbox.Spec, sh sandbox.Shell, command string) ([]string, bool) {
@@ -81,10 +63,7 @@ func TestBashSandboxUnavailableStaysClosedWithoutApprover(t *testing.T) {
 	}
 }
 
-func TestBashSandboxEscapeDenialBlocksUnconfinedRun(t *testing.T) {
-	restore := forceWindowsSandboxEscapeTestMode(t)
-	defer restore()
-
+func TestBashSandboxUnavailableDoesNotOpenLegacyDenialPrompt(t *testing.T) {
 	sh := sandbox.ResolveShell("", "", nil)
 	oldCommand := bashSandboxCommand
 	bashSandboxCommand = func(spec sandbox.Spec, sh sandbox.Shell, command string) ([]string, bool) {
@@ -98,18 +77,15 @@ func TestBashSandboxEscapeDenialBlocksUnconfinedRun(t *testing.T) {
 	if err == nil {
 		t.Fatalf("Execute succeeded after denied escape, out=%q", out)
 	}
-	if !strings.Contains(err.Error(), "declined escape") {
-		t.Fatalf("error = %v, want denial reason", err)
+	if !strings.Contains(err.Error(), "sandbox requested but unavailable") {
+		t.Fatalf("error = %v, want fail-closed sandbox reason", err)
 	}
-	if len(approver.calls) != 1 {
-		t.Fatalf("approval calls = %d, want 1", len(approver.calls))
+	if len(approver.calls) != 0 {
+		t.Fatalf("legacy escape approver was called %d times", len(approver.calls))
 	}
 }
 
-func TestBashSandboxEscapeSessionGrantRunsForegroundUnconfinedBeforeWrapper(t *testing.T) {
-	restore := forceWindowsSandboxEscapeTestMode(t)
-	defer restore()
-
+func TestBashLegacySessionEscapeCannotBypassForegroundSandbox(t *testing.T) {
 	sh := sandbox.ResolveShell("", "", nil)
 	oldCommand := bashSandboxCommand
 	bashSandboxCommand = func(spec sandbox.Spec, sh sandbox.Shell, command string) ([]string, bool) {
@@ -122,78 +98,15 @@ func TestBashSandboxEscapeSessionGrantRunsForegroundUnconfinedBeforeWrapper(t *t
 	approver := &fakeSandboxEscapeApprover{sessionAllowed: true}
 	ctx := sandbox.WithEscapeApprover(context.Background(), approver)
 	out, err := (bash{sb: sandbox.Spec{Mode: "enforce"}, shell: sh}).Execute(ctx, argsJSON(t, map[string]any{"command": echoForShell(sh, "session-rerun")}))
-	if err != nil {
-		t.Fatalf("Execute returned error with session escape: %v (out=%q)", err, out)
-	}
-	if !strings.Contains(out, "session-rerun") {
-		t.Fatalf("output = %q, want unconfined command output", out)
-	}
-	if strings.Contains(out, "windows sandbox: boom") {
-		t.Fatalf("output should not come from sandbox helper, got %q", out)
+	if err == nil || !strings.Contains(out, "windows sandbox: boom") {
+		t.Fatalf("Execute = (%q, %v), want enforced sandbox failure", out, err)
 	}
 	if len(approver.calls) != 0 {
 		t.Fatalf("fresh approval calls = %d, want 0", len(approver.calls))
 	}
-	if len(approver.sessionChecks) != 1 {
-		t.Fatalf("session checks = %d, want 1", len(approver.sessionChecks))
+	if len(approver.sessionChecks) != 0 {
+		t.Fatalf("legacy session grant was consulted %d times", len(approver.sessionChecks))
 	}
-}
-
-func TestBashSandboxEscapeSessionGrantRunsBackgroundUnconfinedBeforeWrapper(t *testing.T) {
-	restore := forceWindowsSandboxEscapeTestMode(t)
-	defer restore()
-
-	sh := sandbox.ResolveShell("", "", nil)
-	oldCommand := bashSandboxCommand
-	bashSandboxCommand = func(spec sandbox.Spec, sh sandbox.Shell, command string) ([]string, bool) {
-		if spec.Enforce() {
-			return unconfinedShellArgv(sh, windowsSandboxFailureForShell(sh)), true
-		}
-		return unconfinedShellArgv(sh, command), false
-	}
-	defer func() { bashSandboxCommand = oldCommand }()
-
-	approver := &fakeSandboxEscapeApprover{sessionAllowed: true}
-	jm := jobs.NewManager(event.Discard)
-	defer jm.Close()
-	ctx := jobs.WithManager(context.Background(), jm)
-	ctx = jobs.WithSession(ctx, "session-a")
-	ctx = sandbox.WithEscapeApprover(ctx, approver)
-
-	out, err := (bash{sb: sandbox.Spec{Mode: "enforce"}, shell: sh}).Execute(ctx, argsJSON(t, map[string]any{
-		"command":           echoForShell(sh, "background-real"),
-		"run_in_background": true,
-	}))
-	if err != nil {
-		t.Fatalf("Execute returned error starting background job with session escape: %v (out=%q)", err, out)
-	}
-	jobID := backgroundJobIDFromStartOutput(t, out)
-	results := jm.WaitForSession(context.Background(), "session-a", []string{jobID}, 5)
-	if len(results) != 1 {
-		t.Fatalf("wait results = %d, want 1", len(results))
-	}
-	if results[0].Status != jobs.Done {
-		t.Fatalf("job status = %s, want %s (output=%q)", results[0].Status, jobs.Done, results[0].Output)
-	}
-	if !strings.Contains(results[0].Output, "background-real") {
-		t.Fatalf("job output = %q, want unconfined command output", results[0].Output)
-	}
-	if strings.Contains(results[0].Output, "windows sandbox: boom") {
-		t.Fatalf("job output should not come from sandbox helper, got %q", results[0].Output)
-	}
-	if len(approver.calls) != 0 {
-		t.Fatalf("fresh approval calls = %d, want 0", len(approver.calls))
-	}
-	if len(approver.sessionChecks) != 1 {
-		t.Fatalf("session checks = %d, want 1", len(approver.sessionChecks))
-	}
-}
-
-func forceWindowsSandboxEscapeTestMode(t *testing.T) func() {
-	t.Helper()
-	old := bashSandboxEscapePromptEnabled
-	bashSandboxEscapePromptEnabled = func() bool { return true }
-	return func() { bashSandboxEscapePromptEnabled = old }
 }
 
 func echoForShell(sh sandbox.Shell, text string) string {
@@ -208,19 +121,4 @@ func windowsSandboxFailureForShell(sh sandbox.Shell) string {
 		return "Write-Error 'windows sandbox: boom'; exit 126"
 	}
 	return "printf 'windows sandbox: boom\\n' >&2; exit 126"
-}
-
-func backgroundJobIDFromStartOutput(t *testing.T, out string) string {
-	t.Helper()
-	const prefix = `Started background job "`
-	_, after, ok := strings.Cut(out, prefix)
-	if !ok {
-		t.Fatalf("start output = %q, want background job id", out)
-	}
-	rest := after
-	end := strings.IndexByte(rest, '"')
-	if end < 0 {
-		t.Fatalf("start output = %q, want closing quote for background job id", out)
-	}
-	return rest[:end]
 }

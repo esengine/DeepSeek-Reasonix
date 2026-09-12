@@ -422,35 +422,43 @@ func TestSetAutoPlanRejectsRetiredModes(t *testing.T) {
 
 func TestSetDesktopDefaultToolApprovalMode(t *testing.T) {
 	c := Default()
-	if got := c.DesktopDefaultToolApprovalMode(); got != "auto" {
-		t.Fatalf("desktop default tool approval mode = %q, want built-in auto", got)
+	if got := c.DesktopDefaultToolApprovalMode(); got != "workspace-write" {
+		t.Fatalf("desktop default tool approval mode = %q, want workspace-write", got)
 	}
-	for _, mode := range []string{"ask", "auto", "yolo"} {
+	for _, tc := range []struct{ in, want string }{
+		{"read-only", "read-only"},
+		{"workspace-write", "workspace-write"},
+		{"danger-full-access", "danger-full-access"},
+		{"ask", "read-only"},
+		{"auto", "workspace-write"},
+		{"yolo", "workspace-write"},
+	} {
+		mode := tc.in
 		if err := c.SetDesktopDefaultToolApprovalMode(mode); err != nil {
 			t.Fatalf("SetDesktopDefaultToolApprovalMode(%q): %v", mode, err)
 		}
-		if c.DesktopDefaultToolApprovalMode() != mode {
-			t.Fatalf("desktop default tool approval mode = %q, want %q", c.DesktopDefaultToolApprovalMode(), mode)
+		if c.DesktopDefaultToolApprovalMode() != tc.want {
+			t.Fatalf("desktop default tool approval mode = %q, want %q", c.DesktopDefaultToolApprovalMode(), tc.want)
 		}
 	}
 	if err := c.SetDesktopDefaultToolApprovalMode("full-access"); err != nil {
 		t.Fatalf("legacy full-access should be accepted: %v", err)
 	}
-	if c.DesktopDefaultToolApprovalMode() != "yolo" {
-		t.Fatalf("legacy full-access should save as yolo, got %q", c.DesktopDefaultToolApprovalMode())
+	if c.DesktopDefaultToolApprovalMode() != "danger-full-access" {
+		t.Fatalf("legacy full-access should save as danger-full-access, got %q", c.DesktopDefaultToolApprovalMode())
 	}
 	if err := c.SetDesktopDefaultToolApprovalMode("maybe"); err == nil {
 		t.Fatal("expected error for invalid desktop default tool approval mode")
 	}
 }
 
-func TestLoadForEditMissingDesktopApprovalDefaultsAuto(t *testing.T) {
+func TestLoadForEditMissingDesktopApprovalDefaultsWorkspaceWrite(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "config.toml")
 	if err := os.WriteFile(path, []byte("config_version = 4\n"), 0o600); err != nil {
 		t.Fatalf("write config: %v", err)
 	}
-	if got := LoadForEdit(path).DesktopDefaultToolApprovalMode(); got != "auto" {
-		t.Fatalf("missing desktop default tool approval mode = %q, want auto", got)
+	if got := LoadForEdit(path).DesktopDefaultToolApprovalMode(); got != "workspace-write" {
+		t.Fatalf("missing desktop default tool approval mode = %q, want workspace-write", got)
 	}
 }
 
@@ -2566,7 +2574,7 @@ func TestSaveToExistingProjectRemovesPluginDeltaWithOnlyForeignSources(t *testin
 	}
 }
 
-func TestSaveToExistingProjectRemovesIneffectiveWindowsBashEnforce(t *testing.T) {
+func TestSaveToExistingProjectPreservesWindowsBashEnforce(t *testing.T) {
 	setRuntimeGOOS(t, "windows")
 	projectPath := filepath.Join(t.TempDir(), "reasonix.toml")
 	if err := os.WriteFile(projectPath, []byte("[sandbox]\nbash = \"enforce\"\n"), 0o644); err != nil {
@@ -2582,15 +2590,15 @@ func TestSaveToExistingProjectRemovesIneffectiveWindowsBashEnforce(t *testing.T)
 	if err != nil {
 		t.Fatalf("read project config: %v", err)
 	}
-	if strings.Contains(string(body), `[sandbox]`) || strings.Contains(string(body), `bash = "enforce"`) {
-		t.Fatalf("ineffective Windows project bash enforce should be removed:\n%s", body)
+	if !strings.Contains(string(body), `[sandbox]`) || !strings.Contains(string(body), `bash = "enforce"`) {
+		t.Fatalf("Windows native sandbox setting should be preserved:\n%s", body)
 	}
 	if _, err := toml.Decode(string(body), &Config{}); err != nil {
 		t.Fatalf("saved project config does not parse: %v", err)
 	}
 }
 
-func TestSaveToExistingProjectRemovesIneffectiveWindowsBashEnforceWhenTargetIsOff(t *testing.T) {
+func TestSaveToExistingProjectCanDisableWindowsBashEnforce(t *testing.T) {
 	setRuntimeGOOS(t, "windows")
 	projectPath := filepath.Join(t.TempDir(), "reasonix.toml")
 	if err := os.WriteFile(projectPath, []byte("[sandbox]\nbash = \"enforce\"\n"), 0o644); err != nil {
@@ -2606,15 +2614,15 @@ func TestSaveToExistingProjectRemovesIneffectiveWindowsBashEnforceWhenTargetIsOf
 	if err != nil {
 		t.Fatalf("read project config: %v", err)
 	}
-	if strings.Contains(string(body), `[sandbox]`) || strings.Contains(string(body), `bash = "enforce"`) {
-		t.Fatalf("ineffective Windows project bash enforce should be removed even when the target mode is raw off:\n%s", body)
+	if strings.Contains(string(body), `bash = "enforce"`) {
+		t.Fatalf("Windows sandbox mode should no longer remain enforce after disabling it:\n%s", body)
 	}
 	if _, err := toml.Decode(string(body), &Config{}); err != nil {
 		t.Fatalf("saved project config does not parse: %v", err)
 	}
 }
 
-func TestSaveToExistingProjectRemovesOnlyIneffectiveWindowsBashEnforce(t *testing.T) {
+func TestSaveToExistingProjectPreservesWindowsBashEnforceAndNetwork(t *testing.T) {
 	setRuntimeGOOS(t, "windows")
 	projectPath := filepath.Join(t.TempDir(), "reasonix.toml")
 	if err := os.WriteFile(projectPath, []byte("[sandbox]\nbash = \"enforce\"\nnetwork = true\n"), 0o644); err != nil {
@@ -2630,8 +2638,8 @@ func TestSaveToExistingProjectRemovesOnlyIneffectiveWindowsBashEnforce(t *testin
 	if err != nil {
 		t.Fatalf("read project config: %v", err)
 	}
-	if strings.Contains(string(body), `bash = "enforce"`) {
-		t.Fatalf("ineffective Windows project bash enforce should be removed:\n%s", body)
+	if !strings.Contains(string(body), `bash = "enforce"`) {
+		t.Fatalf("Windows native sandbox setting should be preserved:\n%s", body)
 	}
 	if !strings.Contains(string(body), `[sandbox]`) || !strings.Contains(string(body), `network = true`) {
 		t.Fatalf("other sandbox fields should be preserved:\n%s", body)

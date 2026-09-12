@@ -6,17 +6,44 @@
 // (*policy*): a permitted command still cannot escape the box.
 //
 // macOS uses Seatbelt via sandbox-exec and Linux uses bubblewrap when available.
-// Windows does not currently provide an OS-level bash sandbox and resolves the
-// product setting to off. When enforce is requested but no OS sandbox backend
-// is available, the bash tool fails closed instead of running the command
-// unwrapped.
+// Windows uses the bundled restricted-token/AppContainer helper and Job Object.
+// When an OS sandbox backend is unavailable, restricted presets fail closed
+// instead of running the command unwrapped.
 // Confining the in-process file-writer built-ins is handled separately, in
 // package tool/builtin.
 package sandbox
 
 import (
+	"crypto/sha256"
+	"encoding/hex"
 	"runtime"
+	"sync/atomic"
+	"time"
 )
+
+// WindowsHelperCommand is the private subprocess entry point for the native
+// Windows sandbox. Host binaries must register and dispatch it before normal
+// startup so an enforced launch can never fall through into an unconfined GUI
+// or CLI process.
+const WindowsHelperCommand = "__reasonix_windows_sandbox"
+
+var helperDispatchRegistered atomic.Bool
+
+func RegisterHelperDispatch() { helperDispatchRegistered.Store(true) }
+
+const windowsSandboxFailureMarkerPrefix = "__reasonix_windows_sandbox_failure__:"
+
+func WindowsSandboxFailureMarker(payload string) string {
+	sum := sha256.Sum256([]byte(payload))
+	return windowsSandboxFailureMarkerPrefix + hex.EncodeToString(sum[:])
+}
+
+func WindowsSandboxFailureMarkerFromCommand(argv []string) (string, bool) {
+	if len(argv) < 4 || argv[1] != WindowsHelperCommand || argv[2] == "" || argv[3] != "--" {
+		return "", false
+	}
+	return WindowsSandboxFailureMarker(argv[2]), true
+}
 
 // Spec describes how to confine one command. The zero value (Mode == "") does
 // not enforce, so an unconfigured caller runs commands unchanged.
@@ -24,6 +51,9 @@ type Spec struct {
 	// Mode is "enforce" to wrap the command, anything else (incl. "off" and "")
 	// to run it unwrapped.
 	Mode string
+	// ReadOnly removes every ordinary writable mount/allowance. It is distinct
+	// from an empty WriteRoots slice, whose historical meaning is unconfigured.
+	ReadOnly bool
 	// WriteRoots are directories the command may write to (the workspace root
 	// plus any configured extras). Platforms may add command-scoped temp/cache
 	// roots so builds and package managers keep working without broad writes.
@@ -37,7 +67,7 @@ type Spec struct {
 	// WriteRoots and ignore this platform-specific distinction.
 	AppContainerWriteRoots []string
 	// DirectWrites marks a raw-argv launch as a write-capable command. On
-	// Windows this selects the low-integrity writer lane; it is deliberately
+	// Windows this selects the WRITE_RESTRICTED writer lane; it is deliberately
 	// false for ordinary read-only helpers such as rg.
 	DirectWrites bool
 	// ForbidReadRoots are files or directories the command may not read from
@@ -68,6 +98,10 @@ type Spec struct {
 	// even when a broader WriteRoot such as the user's home directory would
 	// otherwise cover them.
 	ProtectedWriteRoots []string
+	// WindowsLockWait bounds native ACL coordination. A short foreground
+	// default avoids hanging an approval; background launches may opt into a
+	// larger value. Other platforms ignore it.
+	WindowsLockWait time.Duration
 }
 
 // Enforce reports whether the spec asks for confinement.
@@ -84,13 +118,13 @@ func UnavailableMessage() string {
 func UnavailableRemediation() string {
 	switch runtime.GOOS {
 	case "linux":
-		return "Install bubblewrap (`bwrap`) or set [sandbox] bash = \"off\" in config.toml / Settings -> Sandbox to restore pre-1.16 unconfined shell execution."
+		return "Install bubblewrap (`bwrap`), or explicitly select Full access for an unconfined session."
 	case "darwin":
-		return "Ensure `sandbox-exec` is installed and usable (the host must allow `sandbox_apply`), or set [sandbox] bash = \"off\" in config.toml / Settings -> Sandbox to restore pre-1.16 unconfined shell execution."
+		return "Ensure `sandbox-exec` is installed and usable (the host must allow `sandbox_apply`), or explicitly select Full access for an unconfined session."
 	case "windows":
-		return "Windows does not currently provide a Reasonix OS-level Bash sandbox; the effective setting is fixed to \"off\" and shell commands run unconfined."
+		return "The native Windows restricted-token/AppContainer sandbox is unavailable. Restricted permission modes refuse to run unconfined; explicitly select Full access only when unconfined execution is intended."
 	default:
-		return "Set [sandbox] bash = \"off\" in config.toml / Settings -> Sandbox to run shell commands unconfined on this platform."
+		return "Restricted permission presets are unavailable on this platform; explicitly select Full access only when unconfined execution is intended."
 	}
 }
 

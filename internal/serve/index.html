@@ -446,7 +446,6 @@ input,textarea{font:inherit;color:inherit}
       <div class="welcome__hints">
         <span><kbd>/</kbd> __('hint_commands')</span>
         <span><kbd>Shift+Tab</kbd> __('hint_mode')</span>
-        <span><kbd>Ctrl+Y</kbd> __('hint_yolo')</span>
         <span><kbd>Esc&times;2</kbd> __('hint_rewind')</span>
       </div>
       <div class="welcome__examples">
@@ -477,7 +476,11 @@ input,textarea{font:inherit;color:inherit}
       <ul class="todos__list" id="todos-list"></ul>
     </div>
     <div class="toolbar">
-      <button class="toolbar__btn toolbar__btn--ok" id="btn-auto" title="__('auto_mode')">
+      <button class="toolbar__btn" id="btn-read" title="__('read_mode')">
+        <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M2 12s3.5-7 10-7 10 7 10 7-3.5 7-10 7S2 12 2 12z"/><circle cx="12" cy="12" r="3"/></svg>
+        __('read_only')
+      </button>
+      <button class="toolbar__btn toolbar__btn--ok" id="btn-work" title="__('auto_mode')">
         <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><path d="M8 12l2 2 4-4"/></svg>
         __('auto')
       </button>
@@ -485,7 +488,7 @@ input,textarea{font:inherit;color:inherit}
         <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M2 3h6a4 4 0 0 1 4 4v14a3 3 0 0 0-3-3H2z"/><path d="M22 3h-6a4 4 0 0 0-4 4v14a3 3 0 0 1 3-3h7z"/></svg>
         __('plan')
       </button>
-      <button class="toolbar__btn" id="btn-bypass" title="__('yolo_mode')">
+      <button class="toolbar__btn" id="btn-full" title="__('yolo_mode')">
         <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M13 2L3 14h9l-1 8 10-12h-9l1-8z"/></svg>
         __('yolo')
       </button>
@@ -700,25 +703,23 @@ const __T = {
     'session': 'Allow for session',
     'session_command': 'Command for session',
     'session_prefix': 'Command prefix for session',
-    'persist_command': 'Always allow command (save)',
-    'persist_prefix': 'Always allow command prefix (save)',
-    'persist_edit': 'Always allow edits (save)',
-    'persist_tool': 'Always allow (save)',
     'session_edit': 'Edits for session',
     'session_tool': 'Tool for session',
     'deny': 'Deny',
-    'auto_mode': 'Auto mode (auto-approve fallback approvals)',
+    'read_mode': 'Read-only permission',
+    'read_only': 'Read only',
+    'auto_mode': 'Workspace access',
     'plan_mode': 'Plan first; permissions and sandbox still apply',
-    'yolo_mode': 'YOLO mode (auto-approve tool approvals; ask and plan still wait)',
+    'yolo_mode': 'Full access (explicit deny rules still apply)',
     'goal_mode_desc': 'Goal mode — type a task for the agent to pursue autonomously',
     'goal_mode': 'Goal mode',
     'goal_placeholder': 'Describe your goal...',
     'goal_active': 'Active goal',
     'goal_exit': 'Exit goal mode',
-    'auto': 'Auto',
+    'auto': 'Workspace',
     'plan': 'Plan',
     'goal_btn': 'Goal',
-    'yolo': 'YOLO',
+    'yolo': 'Full access',
     'send': 'Send (Enter)',
     'cancel': 'Cancel (Esc)',
     'cancel_plain': 'Cancel',
@@ -749,7 +750,6 @@ const __T = {
     'welcome_tag': 'AI coding agent',
     'hint_commands': '/ commands',
     'hint_mode': 'Plan',
-    'hint_yolo': 'YOLO',
     'hint_rewind': 'Esc×2 rewind',
     'example_explain': 'Explain the project structure',
     'example_fix': 'Find and fix any bugs',
@@ -855,25 +855,23 @@ const __T = {
     'session': '本会话允许',
     'session_command': '本会话允许此命令',
     'session_prefix': '本会话允许命令前缀',
-    'persist_command': '总是允许此命令（保存）',
-    'persist_prefix': '总是允许命令前缀（保存）',
-    'persist_edit': '总是允许编辑（保存）',
-    'persist_tool': '总是允许（保存）',
     'session_edit': '本会话允许编辑',
     'session_tool': '本会话允许此工具',
     'deny': '拒绝',
-    'auto_mode': '自动模式（自动批准兜底审批）',
+    'read_mode': '仅可查看',
+    'read_only': '仅可查看',
+    'auto_mode': '工作区内修改',
     'plan_mode': '先规划；权限与沙箱仍然生效',
-    'yolo_mode': 'YOLO 模式（自动批准工具权限；ask 和计划仍会等待）',
+    'yolo_mode': '完全权限（显式禁止仍然生效）',
     'goal_mode_desc': '目标模式 — 输入任务让代理自主执行',
     'goal_mode': '目标模式',
     'goal_placeholder': '描述你的目标...',
     'goal_active': '活跃目标',
     'goal_exit': '退出目标模式',
-    'auto': '自动',
+    'auto': '工作区内修改',
     'plan': '计划',
     'goal_btn': '目标',
-    'yolo': 'YOLO',
+    'yolo': '完全权限',
     'send': '发送 (Enter)',
     'cancel': '取消 (Esc)',
     'cancel_plain': '取消',
@@ -904,7 +902,6 @@ const __T = {
     'welcome_tag': 'AI 编码助手',
     'hint_commands': '/ 命令',
     'hint_mode': '计划',
-    'hint_yolo': 'YOLO',
     'hint_rewind': 'Esc×2 回退',
     'example_explain': '解释项目结构',
     'example_fix': '查找并修复错误',
@@ -987,7 +984,7 @@ const __authReady = bootstrapFragmentToken();
 window.fetch = (...args) => __authReady.then(() => __nativeFetch(...args));
 
 // ── state ──
-let running = false, planMode = false, bypassMode = false, toolApprovalMode = 'ask', yoloRestoreMode = 'ask';
+let running = false, planMode = false, toolApprovalMode = 'workspace-write';
 let goalMode = false, goalActive = false, goalText = '';
 let currentMsg = null, currentText = null, currentReasoning = null;
 let turnStartAt = 0, turnTokens = 0, tickTimer = null, retryStatus = null;
@@ -1363,17 +1360,9 @@ function renderExtensionSurface(p) {
 function approvalSessionLabel(a) {
   return __('session')+' '+approvalSessionRule(a);
 }
-function approvalPersistentLabel(a) {
-  return __('persist_tool')+' '+approvalPersistentRule(a);
-}
 function approvalSessionRule(a) {
   if (a.tool === 'bash' && a.subject) return 'Bash('+String(a.subject).trim()+')';
   if (['write_file','edit_file','multi_edit','move_file','notebook_edit','delete_range','delete_symbol'].includes(a.tool)) return 'Edit';
-  return a.tool;
-}
-function approvalPersistentRule(a) {
-  if (a.tool === 'bash' && a.subject) return 'Bash('+String(a.subject).trim()+')';
-  if (['write_file','edit_file','multi_edit','move_file','notebook_edit','delete_range','delete_symbol'].includes(a.tool)) return a.subject ? 'Edit('+String(a.subject).trim()+')' : 'Edit';
   return a.tool;
 }
 function bashCommandPrefix(subject) {
@@ -1415,32 +1404,23 @@ function showApproval(a) {
   ];
   if (hasPrefix) {
     actions.push('<button class="approval__btn approval__btn--allow" data-allow="true" data-session="true" data-scope="prefix"><span class="approval__key">A</span> '+escHtml(__('session')+' '+prefixRule)+'</button>');
-    actions.push('<button class="approval__btn approval__btn--allow" data-allow="true" data-session="true" data-persist="true" data-scope="prefix"><span class="approval__key">P</span> '+escHtml(__('persist_tool')+' '+prefixRule)+'</button>');
   } else {
     actions.push('<button class="approval__btn approval__btn--allow" data-allow="true" data-session="true"><span class="approval__key">A</span> '+escHtml(approvalSessionLabel(a))+'</button>');
-    actions.push('<button class="approval__btn approval__btn--allow" data-allow="true" data-session="true" data-persist="true"><span class="approval__key">P</span> '+escHtml(approvalPersistentLabel(a))+'</button>');
   }
   actions.push('<button class="approval__btn approval__btn--deny" data-allow="false"><span class="approval__key">N</span> '+__('deny')+'</button>');
   d.innerHTML='<div class="approval__header"><svg class="approval__icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"/><line x1="12" y1="9" x2="12" y2="13"/><line x1="12" y1="17" x2="12.01" y2="17"/></svg><span class="approval__title">'+__('approval_title')+'</span></div><div class="approval__subject">'+escHtml(a.tool)+(a.subject?' — '+escHtml(a.subject):'')+'</div><div class="approval__actions">'+actions.join('')+'</div>';
   log.appendChild(d);scrollDown(true);
-  // The advertised Y/A/P/N keys need a non-text-entry target (isPlainKey), but
-  // the composer is autofocused, so in the default state every shortcut would
-  // just type into the draft. Move focus onto the card so the keys route here —
-  // unless the user is mid-entry (a non-empty composer draft, or any other
-  // text field such as the session search): stealing focus there would turn
-  // their next keystroke into an unintended approval. Cleanup hands focus back
-  // to the composer only when it still sits inside the card, so a user who
-  // deliberately moved elsewhere is not yanked back.
-  d.tabIndex=-1;
-  if(!isTextEntry(document.activeElement)||(document.activeElement===input&&!input.value))d.focus({preventScroll:true});
-  const cleanup=()=>{pendingPrompts=pendingPrompts.filter(f=>f!==cleanup);const hadFocus=d.contains(document.activeElement);d.remove();document.removeEventListener('keydown',onkey);if(hadFocus)input.focus();};
+  // Approval cards never steal focus from the composer or an active IME. The
+  // advertised keys remain available after the user explicitly focuses a card
+  // action; otherwise typing continues to edit the draft.
+  const cleanup=()=>{pendingPrompts=pendingPrompts.filter(f=>f!==cleanup);d.remove();document.removeEventListener('keydown',onkey);};
   pendingPrompts.push(cleanup);
-  const resolve=payload=>{post('/approve',Object.assign({id:a.id},payload));cleanup();};
-  d.querySelectorAll('.approval__btn').forEach(btn=>{btn.onclick=()=>resolve({allow:btn.dataset.allow==='true',session:btn.dataset.session==='true',persist:btn.dataset.persist==='true',scope:btn.dataset.scope||''});});
+  const resolve=payload=>{post('/approve',Object.assign({id:a.id,generation:a.generation||0,permissionRevision:a.permissionRevision||0},payload));cleanup();};
+  d.querySelectorAll('.approval__btn').forEach(btn=>{btn.onclick=()=>resolve({allow:btn.dataset.allow==='true',session:btn.dataset.session==='true',scope:btn.dataset.scope||''});});
   // A consumed shortcut must preventDefault: cleanup refocuses the composer
   // synchronously, and the keystroke's default text insertion runs after
   // keydown — without it the approving key lands in the draft as a stray char.
-  const onkey=e=>{if(!isPlainKey(e))return; const k=e.key.toLowerCase(); let payload=null;if(k==='y'||k==='1'){payload={allow:true,session:false};}else if(k==='a'||k==='2'){payload={allow:true,session:true};}else if(hasPrefix&&k==='3'){payload={allow:true,session:true,scope:'prefix'};}else if(k==='p'||(!hasPrefix&&k==='3')||(hasPrefix&&k==='4')){payload={allow:true,session:true,persist:true,scope:hasPrefix?'prefix':''};}else if(k==='n'||k==='escape'||(!hasPrefix&&k==='4')||(hasPrefix&&k==='5')){payload={allow:false,session:false};}if(payload){e.preventDefault();resolve(payload);}};
+  const onkey=e=>{if(!d.contains(document.activeElement)||!isPlainKey(e))return; const k=e.key.toLowerCase(); let payload=null;if(k==='y'||k==='1'){payload={allow:true,session:false};}else if(k==='a'||k==='2'){payload={allow:true,session:true,scope:hasPrefix?'prefix':''};}else if(k==='n'||k==='escape'||k==='3'){payload={allow:false,session:false};}if(payload){e.preventDefault();resolve(payload);}};
   document.addEventListener('keydown',onkey);
 }
 
@@ -1671,9 +1651,8 @@ function fetchStatus(){
     if(welcomeCwd)welcomeCwd.textContent=(s.cwd||'-').replace(/^.*\//,'');
     // sync mode UI without triggering POST (server is source of truth)
     planMode=!!s.plan;
-    toolApprovalMode=s.toolApprovalMode || ((s.autoApproveTools??s.bypass)?'yolo':'ask');
-    bypassMode=toolApprovalMode==='yolo';
-    if(!bypassMode&&toolApprovalMode==='auto')yoloRestoreMode='auto';
+    const rawPermission=s.toolApprovalMode || 'workspace-write';
+    toolApprovalMode=rawPermission==='ask'?'read-only':(rawPermission==='auto'||rawPermission==='yolo'?'workspace-write':rawPermission);
     updateModeButtons();
     if(s.window){const pct=Math.min(100,Math.round(s.used/s.window*100));ctxFill.style.width=pct+'%';ctxFill.style.background=pct>85?'var(--warning)':pct>95?'var(--danger)':'var(--accent)';ctxUsed.textContent=fmtTok(s.used)+' tok';ctxWindow.textContent=fmtTok(s.window)+' tok';}
     // goal state
@@ -1864,7 +1843,7 @@ function closeDeleteSession() {
 // ── input handling ──
 async function syncModeBeforeSubmit(){
   await post('/plan',{on:planMode});
-    await post('/tool-approval-mode',{mode:bypassMode?'yolo':toolApprovalMode});
+  await post('/tool-approval-mode',{mode:toolApprovalMode});
   // If goalMode is on, we'll send as /goal command — no separate POST needed
 }
 async function send(){
@@ -1916,16 +1895,15 @@ input.addEventListener('keydown',e=>{
 // shift+tab mode cycle
 document.addEventListener('keydown',e=>{
   if(e.target===input&&e.key==='Tab'&&e.shiftKey){e.preventDefault();cycleMode();return;}
-  if(e.target===input&&(e.key==='y'||e.key==='Y')&&(e.ctrlKey||e.metaKey)&&!e.altKey&&!e.shiftKey){e.preventDefault();toggleYolo();return;}
   if(e.key==='/'&&isPlainKey(e)){e.preventDefault();input.focus();return;}
 });
 
-// mode helpers — Shift+Tab toggles Plan; Ctrl+Y toggles YOLO separately.
+// Permission presets are explicit; Shift+Tab remains the Plan shortcut.
 function updateModeButtons(){
-  const auto=!bypassMode&&toolApprovalMode==='auto';
-  $('#btn-auto').classList.toggle('toolbar__btn--ok',auto);
+  $('#btn-read').classList.toggle('toolbar__btn--ok',toolApprovalMode==='read-only');
+  $('#btn-work').classList.toggle('toolbar__btn--ok',toolApprovalMode==='workspace-write');
   $('#btn-plan').classList.toggle('toolbar__btn--active',planMode);
-  $('#btn-bypass').classList.toggle('toolbar__btn--danger',bypassMode);
+  $('#btn-full').classList.toggle('toolbar__btn--danger',toolApprovalMode==='danger-full-access');
   $('#btn-goal').classList.toggle('toolbar__btn--goal',goalMode&&!goalActive);
   $('#btn-goal').classList.toggle('toolbar__btn--goal-active',goalActive);
 }
@@ -1940,11 +1918,10 @@ function updateGoalUI(){
   }
   input.placeholder=goalMode?__('goal_placeholder'):__('placeholder');
 }
-async function setToolApprovalMode(mode){toolApprovalMode=mode;bypassMode=mode==='yolo';updateModeButtons();await post('/tool-approval-mode',{mode});}
+async function setToolApprovalMode(mode){toolApprovalMode=mode;updateModeButtons();await post('/tool-approval-mode',{mode});}
 async function setPlan(on){planMode=on;updateModeButtons();await post('/plan',{on});}
 async function cycleMode(){if(goalMode){goalMode=false;updateGoalUI();return;}await setPlan(!planMode);setTimeout(fetchStatus,200);}
-async function toggleYolo(){if(bypassMode){const restore=yoloRestoreMode==='auto'?'auto':'ask';await setToolApprovalMode(restore);}else{yoloRestoreMode=toolApprovalMode==='auto'?'auto':'ask';await setToolApprovalMode('yolo');}setTimeout(fetchStatus,200);}
-async function setMode(m){if(m==='auto')await setToolApprovalMode('auto');else if(m==='plan')await setPlan(!planMode);else if(m==='yolo')await toggleYolo();else if(m==='goal')toggleGoalMode();}
+async function setMode(m){if(m==='read-only'||m==='workspace-write'||m==='danger-full-access')await setToolApprovalMode(m);else if(m==='plan')await setPlan(!planMode);else if(m==='goal')toggleGoalMode();}
 function toggleGoalMode(){
   if(goalActive){
     // Clear active goal
@@ -2010,9 +1987,10 @@ $('#todos-head').onclick=function(e){
 // toolbar buttons
 btnSend.onclick=()=>void send();
 btnStop.onclick=()=>post('/cancel');
-$('#btn-auto').onclick=()=>void setMode('auto');
+$('#btn-read').onclick=()=>void setMode('read-only');
+$('#btn-work').onclick=()=>void setMode('workspace-write');
 $('#btn-plan').onclick=()=>void setPlan(!planMode);
-$('#btn-bypass').onclick=()=>void toggleYolo();
+$('#btn-full').onclick=()=>void setMode('danger-full-access');
 $('#btn-goal').onclick=()=>toggleGoalMode();
 $('#goal-chip').onclick=()=>toggleGoalMode();
 $('#btn-new').onclick=()=>{if(running)return;post('/new').then(()=>{log.innerHTML='';log.appendChild(welcome);showWelcome();hasVisibleHistory=false;checkpointCount=0;todosState=[];todosDismissed=false;renderTodoPanel();resetCumulativeStats();loadSessions();updateActionAvailability();});};

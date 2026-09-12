@@ -88,7 +88,7 @@ func TestPowerShellCmdletDenyPrefixIsCaseInsensitive(t *testing.T) {
 	}
 }
 
-func TestPolicyDynamicBashRequiresExplicitApproval(t *testing.T) {
+func TestPolicyDynamicBashFollowsPresetAndExplicitRules(t *testing.T) {
 	const command = "git status $(touch /tmp/reasonix-permission-bypass)"
 
 	tests := []struct {
@@ -96,14 +96,14 @@ func TestPolicyDynamicBashRequiresExplicitApproval(t *testing.T) {
 		p    Policy
 		want Decision
 	}{
-		{name: "writer fallback allow cannot bypass", p: New("allow", nil, nil, nil), want: Ask},
+		{name: "workspace fallback allows inside sandbox", p: New("allow", nil, nil, nil), want: Allow},
 		{name: "explicit dynamic fallback opt-in", p: New("allow", nil, nil, nil).WithAllowDynamicBashFallback(true), want: Allow},
 		{name: "dynamic opt-in still requires allow fallback", p: New("ask", nil, nil, nil).WithAllowDynamicBashFallback(true), want: Ask},
 		{name: "dynamic opt-in keeps ask precedence", p: New("allow", nil, []string{"Bash(git*)"}, nil).WithAllowDynamicBashFallback(true), want: Ask},
 		{name: "dynamic opt-in keeps deny precedence", p: New("allow", nil, nil, []string{"Bash(git*)"}).WithAllowDynamicBashFallback(true), want: Deny},
-		{name: "bare allow cannot bypass", p: New("ask", []string{"Bash"}, nil, nil), want: Ask},
-		{name: "ordinary glob cannot bypass", p: New("ask", []string{"Bash(git*)"}, nil, nil), want: Ask},
-		{name: "legacy prefix cannot bypass", p: New("ask", []string{"Bash(git *)"}, nil, nil), want: Ask},
+		{name: "bare allow remains bounded by sandbox", p: New("ask", []string{"Bash"}, nil, nil), want: Ask},
+		{name: "ordinary glob does not grant an indirect command", p: New("ask", []string{"Bash(git*)"}, nil, nil), want: Ask},
+		{name: "legacy prefix does not grant an indirect command", p: New("ask", []string{"Bash(git *)"}, nil, nil), want: Ask},
 		{name: "session glob cannot bypass", p: New("ask", nil, nil, nil).WithSessionAllow([]string{"Bash(git*)"}), want: Ask},
 		{name: "explicit ask remains ask", p: New("allow", []string{"Bash"}, []string{"Bash(git*)"}, nil), want: Ask},
 		{name: "raw deny wins", p: New("allow", []string{"Bash"}, nil, []string{"Bash(git*)"}), want: Deny},
@@ -129,7 +129,7 @@ func TestPolicyRawBashPrefixMatchesDynamicSpacing(t *testing.T) {
 	}
 }
 
-func TestPolicyDynamicBashShapesRequireExplicitApproval(t *testing.T) {
+func TestPolicyDynamicBashShapesFollowWorkspaceFallback(t *testing.T) {
 	p := New("allow", []string{"Bash"}, nil, nil)
 	for _, command := range []string{
 		"git status `touch /tmp/x`",
@@ -142,8 +142,8 @@ func TestPolicyDynamicBashShapesRequireExplicitApproval(t *testing.T) {
 		`bash -c "touch /tmp/x"`,
 		`python3 -c "open('x','w').close()"`,
 	} {
-		if got := p.DecideSubject("bash", true, command); got != Ask {
-			t.Errorf("DecideSubject(%q) = %v, want Ask", command, got)
+		if got := p.DecideSubject("bash", true, command); got != Allow {
+			t.Errorf("DecideSubject(%q) = %v, want Allow", command, got)
 		}
 	}
 }

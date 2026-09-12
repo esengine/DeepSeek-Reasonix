@@ -3718,7 +3718,7 @@ func TestMemoryApprovalRequestShowsRememberPayload(t *testing.T) {
 		t.Fatalf("approval subject should be compact for TUI rendering, got %q", approval.Subject)
 	}
 
-	c.Approve(approval.ID, true, true, true)
+	c.Approve(approval.ID, true, true, false)
 	select {
 	case msg := <-result:
 		if msg != "" {
@@ -3729,7 +3729,7 @@ func TestMemoryApprovalRequestShowsRememberPayload(t *testing.T) {
 	}
 }
 
-func TestGuardianCannotAutoAllowFreshHumanApprovalTools(t *testing.T) {
+func TestFreshHumanApprovalToolsBypassGuardianAndWaitForUser(t *testing.T) {
 	guardianProv := &recordingProvider{
 		name:    "guardian",
 		streams: [][]provider.Chunk{textTurn(`{"risk_level":"low","user_authorization":"high","outcome":"allow","rationale":"authorized memory update"}`)},
@@ -3769,8 +3769,8 @@ func TestGuardianCannotAutoAllowFreshHumanApprovalTools(t *testing.T) {
 	if approval.Tool != "remember" {
 		t.Fatalf("approval tool = %q, want remember", approval.Tool)
 	}
-	if len(guardianProv.requests) != 1 {
-		t.Fatalf("guardian reviews = %d, want 1", len(guardianProv.requests))
+	if len(guardianProv.requests) != 0 {
+		t.Fatalf("guardian reviews = %d, want 0; approval has one authoritative user decision path", len(guardianProv.requests))
 	}
 	select {
 	case got := <-done:
@@ -3778,7 +3778,7 @@ func TestGuardianCannotAutoAllowFreshHumanApprovalTools(t *testing.T) {
 	case <-time.After(50 * time.Millisecond):
 	}
 
-	c.Approve(approval.ID, true, true, true)
+	c.Approve(approval.ID, true, true, false)
 	select {
 	case got := <-done:
 		if got.err != nil || !got.allow || got.remember {
@@ -4147,81 +4147,72 @@ func TestApprovalSessionGrantCanScopeBashToCommandPrefix(t *testing.T) {
 	}
 }
 
-func TestApprovalPersistentBashPrefixRememberRule(t *testing.T) {
+func TestApprovalRejectsPersistentScopeAndAcceptsSessionScope(t *testing.T) {
 	ids := make(chan string, 1)
-	var remembered string
-	var notices []string
 	c := New(Options{
 		Sink: event.FuncSink(func(e event.Event) {
 			if e.Kind == event.ApprovalRequest {
 				ids <- e.Approval.ID
 			}
-			if e.Kind == event.Notice {
-				notices = append(notices, e.Text)
-			}
 		}),
-		OnRemember: func(rule string) RememberResult {
-			remembered = rule
-			return RememberResult{Rule: rule, Path: "reasonix.toml", Saved: true}
-		},
 	})
+	result := make(chan error, 1)
 	go func() {
-		c.Approve(<-ids, true, true, true)
+		allow, remember, err := gateApprover{c}.Approve(context.Background(), "bash", "go test ./...", nil)
+		if err == nil && (!allow || remember) {
+			err = fmt.Errorf("unexpected result allow=%v remember=%v", allow, remember)
+		}
+		result <- err
 	}()
-
-	allow, remember, err := gateApprover{c}.Approve(context.Background(), "bash", "go test ./...", nil)
-	if err != nil || !allow || remember {
-		t.Fatalf("Approve = (%v,%v,%v), want allow with controller-managed persistence", allow, remember, err)
+	id := <-ids
+	if err := c.approveChecked(id, true, true, true); err == nil || !strings.Contains(err.Error(), "permanent approval") {
+		t.Fatalf("persistent approval error = %v", err)
 	}
-	if remembered != "Bash(go test:*)" {
-		t.Fatalf("remembered rule = %q, want Bash(go test:*)", remembered)
+	if err := c.approveChecked(id, true, true, false); err != nil {
+		t.Fatalf("session approval: %v", err)
 	}
-	if len(notices) != 1 || !strings.Contains(notices[0], "Bash(go test:*)") || !strings.Contains(notices[0], "reasonix.toml") {
-		t.Fatalf("notices = %v, want saved rule notice", notices)
+	if err := <-result; err != nil {
+		t.Fatal(err)
 	}
 }
 
-func TestApprovalPersistenceFailureKeepsSessionGrant(t *testing.T) {
-	ids := make(chan string, 1)
-	var notices []event.Event
+func TestApprovalSessionScopeDoesNotPersistRules(t *testing.T) {
+	ids := make(chan string, 2)
 	prompts := 0
+	remembered := false
 	c := New(Options{
 		Sink: event.FuncSink(func(e event.Event) {
 			if e.Kind == event.ApprovalRequest {
 				prompts++
 				ids <- e.Approval.ID
 			}
-			if e.Kind == event.Notice {
-				notices = append(notices, e)
-			}
 		}),
 		OnRemember: func(rule string) RememberResult {
-			return RememberResult{Rule: rule, Path: "reasonix.toml", Err: errors.New("disk unavailable")}
+			remembered = true
+			return RememberResult{Rule: rule, Path: "reasonix.toml", Saved: true}
 		},
 	})
 	go func() {
-		c.Approve(<-ids, true, true, true)
+		c.Approve(<-ids, true, true, false)
 	}()
 
 	for i := range 2 {
 		allow, remember, err := gateApprover{c}.Approve(context.Background(), "bash", "go test ./...", nil)
 		if err != nil || !allow || remember {
-			t.Fatalf("Approve call %d = (%v,%v,%v), want session-allowed despite persistence failure", i, allow, remember, err)
+			t.Fatalf("Approve call %d = (%v,%v,%v), want session authorization", i, allow, remember, err)
 		}
 	}
 	if prompts != 1 {
-		t.Fatalf("approval prompts = %d, want one because failed persistence must retain the session grant", prompts)
+		t.Fatalf("approval prompts = %d, want one session-scoped prompt", prompts)
 	}
-	if len(notices) != 1 || notices[0].Level != event.LevelWarn || !strings.Contains(notices[0].Text, "disk unavailable") {
-		t.Fatalf("notices = %+v, want one persistence failure warning", notices)
+	if remembered {
+		t.Fatal("session authorization must not persist a permission rule")
 	}
 }
 
-func TestPlanModeReadOnlyTrustApprovalPersistsBashCommandTrust(t *testing.T) {
+func TestPlanModeReadOnlyTrustApprovalGrantsSessionCommandTrust(t *testing.T) {
 	ids := make(chan string, 2)
 	var approval event.Approval
-	var notices []string
-	var rememberedPrefix string
 	prompts := 0
 	c := New(Options{
 		Sink: event.FuncSink(func(e event.Event) {
@@ -4230,18 +4221,11 @@ func TestPlanModeReadOnlyTrustApprovalPersistsBashCommandTrust(t *testing.T) {
 				approval = e.Approval
 				ids <- e.Approval.ID
 			}
-			if e.Kind == event.Notice {
-				notices = append(notices, e.Text)
-			}
 		}),
-		OnRememberPlanModeReadOnlyCommand: func(prefix string) PlanModeReadOnlyCommandTrustResult {
-			rememberedPrefix = prefix
-			return PlanModeReadOnlyCommandTrustResult{Prefix: prefix, Path: "reasonix.toml", Saved: true}
-		},
 	})
 
 	go func() {
-		c.Approve(<-ids, true, true, true)
+		c.Approve(<-ids, true, true, false)
 	}()
 	req := agent.PlanModeReadOnlyTrustRequest{
 		ToolName: agent.PlanModeReadOnlyCommandApprovalTool,
@@ -4253,14 +4237,8 @@ func TestPlanModeReadOnlyTrustApprovalPersistsBashCommandTrust(t *testing.T) {
 	if err != nil || !allow || reason != "" {
 		t.Fatalf("CheckPlanModeReadOnlyTrust = (%v,%q,%v), want allow", allow, reason, err)
 	}
-	if approval.Tool != agent.PlanModeReadOnlyCommandApprovalTool || !strings.Contains(approval.Subject, `Trust "gh issue view"`) || !strings.Contains(approval.Subject, "gh issue view 5867") || !strings.Contains(approval.Reason, "Auto/YOLO") {
+	if approval.Tool != agent.PlanModeReadOnlyCommandApprovalTool || !strings.Contains(approval.Subject, `Trust "gh issue view"`) || !strings.Contains(approval.Subject, "gh issue view 5867") || !strings.Contains(approval.Reason, "Permission presets") {
 		t.Fatalf("approval = %+v, want plan-mode bash read-only command trust prompt", approval)
-	}
-	if rememberedPrefix != "gh issue view" {
-		t.Fatalf("remembered prefix = %q, want gh issue view", rememberedPrefix)
-	}
-	if len(notices) != 1 || !strings.Contains(notices[0], "gh issue view") {
-		t.Fatalf("notices = %v, want read-only command trust saved notice", notices)
 	}
 
 	ctx, cancel := context.WithTimeout(context.Background(), 200*time.Millisecond)
@@ -4354,7 +4332,7 @@ func TestPlanModeReadOnlyCommandTrustApprovalIgnoresToolAutoApproval(t *testing.
 			}
 		}),
 	})
-	c.SetAutoApproveTools(true)
+	c.SetToolApprovalMode(ToolApprovalDangerFullAccess)
 
 	type trustResult struct {
 		allow  bool

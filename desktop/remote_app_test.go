@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -228,6 +229,10 @@ func (f *fakeRemoteKernel) ListDir(context.Context, string, string) ([]RemoteDir
 }
 func (f *fakeRemoteKernel) ReadFile(context.Context, string, string) (RemoteFilePreview, error) {
 	return RemoteFilePreview{Body: "hi"}, nil
+}
+func (f *fakeRemoteKernel) DownloadFile(_ context.Context, _ string, _ string, dst io.Writer) (int64, error) {
+	n, err := io.WriteString(dst, "hi")
+	return int64(n), err
 }
 func (f *fakeRemoteKernel) WriteFile(context.Context, string, string, string, int64) (RemoteWriteResult, error) {
 	return f.writeResult, nil

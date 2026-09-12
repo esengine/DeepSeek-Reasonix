@@ -29,6 +29,7 @@ type historyMessage struct {
 	ToolCalls        []historyToolCall                `json:"toolCalls,omitempty"`
 	ToolCallID       string                           `json:"toolCallId,omitempty"`
 	ToolName         string                           `json:"toolName,omitempty"`
+	PresentedFiles   []provider.PresentedFile         `json:"presentedFiles,omitempty"`
 }
 
 func historyMessages(msgs []provider.Message) []historyMessage {
@@ -64,6 +65,9 @@ func historyMessages(msgs []provider.Message) []historyMessage {
 		if m.Role == provider.RoleTool {
 			hm.ToolCallID = m.ToolCallID
 			hm.ToolName = m.Name
+			if m.Name == "present" {
+				hm.PresentedFiles = provider.PresentedFileList(m.PresentedFiles)
+			}
 		}
 		out = append(out, hm)
 	}

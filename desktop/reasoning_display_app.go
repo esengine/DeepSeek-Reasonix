@@ -57,7 +57,7 @@ func (a *App) defaultSettingsView() SettingsView {
 		DesktopTheme: "auto", DesktopThemeStyle: "graphite", DesktopTerminalTheme: "auto",
 		CloseBehavior: "background", DisplayMode: "standard", ReasoningDisplayMode: "auto",
 		StatusBarStyle: "icon", StatusBarItems: config.DefaultDesktopStatusBarItems(), SessionExperience: "standard",
-		DefaultToolApprovalMode: "auto", CheckUpdates: true, UpdateChannel: "stable",
+		DefaultToolApprovalMode: "workspace-write", CheckUpdates: true, UpdateChannel: "stable",
 		Telemetry: true, Metrics: true, ExpandThinking: false, ConversationWidth: "standard",
 	}
 }

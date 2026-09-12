@@ -31,7 +31,7 @@ export class ElectronGuestViewFactory implements GuestViewFactory {
         sandbox: true,
         contextIsolation: true,
         nodeIntegration: false,
-        nodeIntegrationInSubFrames: true,
+        nodeIntegrationInSubFrames: false,
         nodeIntegrationInWorker: false,
         webviewTag: false,
         spellcheck: true,

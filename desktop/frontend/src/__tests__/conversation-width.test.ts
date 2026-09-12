@@ -73,11 +73,7 @@ ok(attrs.get("data-conversation-width") === "full", "active width is exposed on 
 ok(storage.get(CONVERSATION_WIDTH_STORAGE_KEY) === "full", "applied width refreshes the early-paint cache");
 
 ok(stylesSource.includes("--maxw-inner: 100%;"), "nested transcript content uses an unbounded inner width");
-ok(
-  /\.transcript__row\s*>\s*\*\s*\{[^}]*max-width:\s*var\(--maxw\)/s.test(stylesSource) &&
-    /\.readonly-batch__body\s*>\s*\*,\s*\.turn-collapse__body\s*>\s*\*\s*\{[^}]*max-width:\s*var\(--maxw-inner\)/s.test(stylesSource),
-  "virtual rows and nested transcript containers do not compound the outer percentage width",
-);
+ok(readFileSync(resolve(testDir, "../components/ChatTranscript.css"), "utf8").includes("max-width: 800px"), "chat column has its own width independent of legacy preferences");
 ok(!stylesSource.includes("--maxw: 90%;"), "stylesheets cannot reintroduce the narrow 90 percent override");
 
 ok(

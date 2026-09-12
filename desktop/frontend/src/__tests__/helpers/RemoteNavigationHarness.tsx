@@ -14,7 +14,7 @@ export function RemoteNavigationHarness({ children }: { children: ReactNode }) {
   const { openRemoteProject } = useDesktopNavigation({ visible: { tabId: "fixture", sessionKey: "fixture" },
     noteIntent: () => { const seq = ++sequence.current; fence.registerNavigationIntent(seq); return seq; },
     beginSurface: noop, settleSurface: noop, showChat: noop,
-    setTabRevealSignal: noop, setTranscriptRevealSignal: noop, setProjectRevision: noop, setHistory: noop, t: useT(), showToast: noop,
+    setTabRevealSignal: noop, setProjectRevision: noop, setHistory: noop, t: useT(), showToast: noop,
     ports: { registeredNavigationIntent: fence.registeredNavigationIntent, isNavigationIntentCurrent: seq => seq === sequence.current,
       openRemoteProject: app.OpenRemoteProjectTab, switchRemoteTab: async () => {},
       activateTopic: unavailable, openTopicSession: unavailable, openGlobalTab: unavailable, openProjectTab: unavailable,

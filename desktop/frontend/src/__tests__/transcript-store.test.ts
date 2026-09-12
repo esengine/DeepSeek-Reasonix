@@ -442,9 +442,12 @@ console.log("\ntranscript store");
   const changes: string[] = [];
   store.subscribe("tab-c", (change) => changes.push(...Object.keys(change.patches)));
   const first = await store.loadLatest("tab-c", "/s/c.jsonl", { turns: 12 });
-  // The newest page's refs auto-resolve (asynchronously after the projection).
+  // ChatContentLoader owns automatic body reads and the four-request budget.
+  // The store must not eagerly bypass it or load closed thought/tool fields.
   await new Promise((resolve) => setTimeout(resolve, 0));
-  eq(backend.contentCalls.length, 2, "refs in the newest page auto-fetch their chunks");
+  eq(backend.contentCalls.length, 0, "newest-page references stay lazy until the view requests them");
+  eq(store.hasContentReference("tab-c", "s1:r0:m1:o0", "content"), true, "the view can distinguish a missing full value from an unreferenced body");
+  await store.requestFullContent("tab-c", "s1:r0:m1:o0", "content");
   eq(first?.hasOlder, false, "fixture fits in one page");
   const assistant = (store.peek("tab-c", "/s/c.jsonl")?.items ?? []).find((item) => item.kind === "assistant");
   eq(assistant?.kind === "assistant" && assistant.text, full, "resolved full content replaces the inline preview");
@@ -506,15 +509,17 @@ console.log("\ntranscript store");
   const store = new TranscriptStore(backend);
   backend.contentGate = deferred<HistoryContentChunk>();
   const staleGate = backend.contentGate;
-  const first = store.loadLatest("tab-l", "/s/l.jsonl", { turns: 12 });
+  await store.loadLatest("tab-l", "/s/l.jsonl", { turns: 12 });
+  const first = store.requestFullContent("tab-l", "s1:r0:m1:o0", "content");
   await new Promise((resolve) => setTimeout(resolve, 0));
-  eq(backend.contentCalls.length, 1, "auto-fetch of the first load is in flight");
+  eq(backend.contentCalls.length, 1, "the requested first-generation content is in flight");
   // A fresh load (session switch/rebind) bumps the generation while the first
   // load's content request is still awaiting its chunk.
   const reload = store.loadLatest("tab-l", "/s/l.jsonl", { turns: 12 });
   staleGate.resolve({ entryId: "s1:r0:m1:o0", field: "content", chunk: 0, chunks: 2, data: "STALE", done: true, stale: false });
   await first;
   await reload;
+  await store.requestFullContent("tab-l", "s1:r0:m1:o0", "content");
   await new Promise((resolve) => setTimeout(resolve, 0));
   const assistant = (store.peek("tab-l", "/s/l.jsonl")?.items ?? []).find((item) => item.kind === "assistant");
   eq(assistant?.kind === "assistant" && assistant.text, full, "late content chunk from a previous generation is discarded");
@@ -571,6 +576,40 @@ console.log("\ntranscript store");
     expectedDigest: "digest-3",
   });
   eq(compatible?.revisionKnown, true, "positive legacy slice revision implies a known canonical identity");
+}
+
+// Legacy tool references are call-specific and never expand hidden siblings or
+// retain fetched full bodies in the controller's contribution map.
+{
+  const args = "a".repeat(70000), output = "o".repeat(80000);
+  const backend = new FakeBackend([
+    { role: "user", content: "read" },
+    { role: "assistant", content: "", toolCalls: [
+      { id: "one", name: "bash", arguments: "args preview" }, { id: "two", name: "bash", arguments: "other preview" },
+    ] },
+    { role: "tool", toolCallId: "one", content: "output preview" },
+  ]);
+  const slice = backend.slice(0, 3);
+  slice.entries![1].refs = ["one", "two"].map(toolCallId => ({ entryId: "s1:r0:m1:o0", toolCallId, field: "toolArguments", size: args.length, chunks: 1, revision: 1, digest: "d" }));
+  slice.entries![2].refs = [{ entryId: "s1:r0:m2:o0", field: "content", size: output.length, chunks: 1, revision: 1, digest: "d" }];
+  backend.HistorySliceForTab = async () => slice;
+  let reads = 0;
+  backend.HistoryContentForTab = async (_, ref) => {
+    if (ref.toolCallId === "two") throw new Error("unopened call must stay lazy");
+    reads++;
+    return { entryId: ref.entryId, field: ref.field, chunk: 0, chunks: 1, data: ref.field === "content" ? output : args, done: true, stale: false };
+  };
+  const store = new TranscriptStore(backend);
+  const view = await store.loadLatest("legacy", "/legacy");
+  const item = view?.items.find((item): item is Extract<Item, { kind: "tool" }> => item.kind === "tool" && item.id === "one");
+  if (!item) throw new Error("legacy tool missing");
+  for (let attempt = 0; attempt < 2; attempt++) {
+    const value = JSON.parse((await store.requestToolContent("legacy", item, { args: item.args, output: item.output }))!);
+    eq(value.args, args, "legacy tool parameters load completely");
+    eq(value.output, output, "legacy tool output loads completely");
+  }
+  eq(reads, 4, "reopening reads only the selected tool's two references");
+  eq(store.peek("legacy", "/legacy")?.items.find(candidate => candidate.id === "one"), item, "full details leave the preview Item unchanged");
 }
 
 console.log(`\n${passed} passed, ${failed} failed`);

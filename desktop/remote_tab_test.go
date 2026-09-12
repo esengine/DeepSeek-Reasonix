@@ -123,6 +123,7 @@ func newFakeServe(t *testing.T, token string, sessions []serveSessionEntry) *fak
 			return
 		}
 		http.SetCookie(w, &http.Cookie{Name: "reasonix_token", Value: fs.token, Path: "/", HttpOnly: true})
+		w.Header().Set(serveCapabilitiesHeader, "permission-presets-v1,present-files-v1")
 		w.WriteHeader(http.StatusNoContent)
 	})
 	mux.HandleFunc("POST /new", func(w http.ResponseWriter, r *http.Request) {
@@ -297,10 +298,15 @@ func newFakeServe(t *testing.T, token string, sessions []serveSessionEntry) *fak
 				_, _ = io.WriteString(w, `{"drainedApprovalIDs":["approval-1"]}`)
 				return
 			}
+			if path == "/permission/preset" {
+				w.Header().Set("Content-Type", "application/json")
+				_, _ = io.WriteString(w, `{"snapshot":{"sessionId":"remote-session","generation":1,"revision":8,"preset":"workspace-write","workspaceRoot":"/workspace","grants":[],"capabilities":{"backend":"seatbelt","enforcement":"full","supportedPresets":["read-only","workspace-write","danger-full-access"]}}}`)
+				return
+			}
 			w.WriteHeader(http.StatusNoContent)
 		}
 	}
-	for _, path := range []string{"/submit", "/cancel", "/approve", "/plan-decision", "/answer", "/extension-form", "/rewind", "/goal", "/goal/pause", "/goal/resume", "/jobs/cancel", "/inbox/items", "/tool-approval-mode", "/composer-profile", "/delete-session", "/model", "/effort", "/quality-floor", "/plan", "/compact", "/fork", "/summarize", "/forget", "/clear"} {
+	for _, path := range []string{"/submit", "/cancel", "/approve", "/plan-decision", "/answer", "/extension-form", "/rewind", "/goal", "/goal/pause", "/goal/resume", "/jobs/cancel", "/inbox/items", "/permission/preset", "/composer-profile", "/delete-session", "/model", "/effort", "/quality-floor", "/plan", "/compact", "/fork", "/summarize", "/forget", "/clear"} {
 		mux.HandleFunc("POST "+path, command(path))
 	}
 	snapshot := func(path, payload string) {
@@ -341,6 +347,7 @@ func newFakeServe(t *testing.T, token string, sessions []serveSessionEntry) *fak
 	snapshot("/models", `{"current":"remote/chat","label":"chat","models":[{"ref":"remote/chat","provider":"remote","model":"chat","active":true}]}`)
 	snapshot("/commands", `[{"name":"remote-review","description":"Review remotely","kind":"custom","group":"skills"}]`)
 	snapshot("/pending-prompts", `[{"kind":"approval_request","approval":{"id":"approval-1","tool":"bash"}}]`)
+	snapshot("/permission", `{"sessionId":"remote-session","generation":1,"revision":7,"preset":"workspace-write","workspaceRoot":"/workspace","grants":[],"capabilities":{"backend":"seatbelt","enforcement":"full","supportedPresets":["read-only","workspace-write","danger-full-access"]}}`)
 	mux.HandleFunc("GET /status", func(w http.ResponseWriter, r *http.Request) {
 		fs.record(r.Method, "/status", "")
 		fs.mu.Lock()

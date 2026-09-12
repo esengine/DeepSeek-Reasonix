@@ -149,6 +149,10 @@ func writeAllowDirs(roots []string) []string {
 }
 
 func writeAllowDirsForSpec(spec Spec) []string {
+	if spec.ReadOnly {
+		// Preserve device compatibility without granting host file writes.
+		return []string{"/dev/null"}
+	}
 	roots := spec.WriteRoots
 	dirs := append([]string{}, roots...)
 	dirs = append(dirs, "/dev")

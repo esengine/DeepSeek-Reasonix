@@ -96,19 +96,25 @@ func TestDefaultTopicTitleVariantsRemainPersistenceSentinels(t *testing.T) {
 	}
 }
 
-func TestForkTopicTitleUsesDesktopLocale(t *testing.T) {
+func TestForkTopicTitleUsesHarnessNumbering(t *testing.T) {
 	app := &App{}
 	app.setDesktopLocale("en")
-	if got := app.forkTopicTitle("New session"); got != "Forked session" {
+	if got := app.forkTopicTitle("New session"); got != "New session (1)" {
 		t.Fatalf("English fork title = %q", got)
 	}
 	app.setDesktopLocale("zh-TW")
-	if got := app.forkTopicTitle(defaultTopicTitle); got != "分叉會話" {
+	if got := app.forkTopicTitle(defaultTopicTitle); got != "新的會話 (1)" {
 		t.Fatalf("Traditional Chinese fork title = %q", got)
 	}
 	app.desktopLocale.Store(desktopLocaleUnknown)
-	if got := app.forkTopicTitle(""); got != "分叉会话" {
+	if got := app.forkTopicTitle(""); got != "新的会话 (1)" {
 		t.Fatalf("legacy fallback fork title = %q", got)
+	}
+	if got := app.forkTopicTitle("Roadmap (1)"); got != "Roadmap (2)" {
+		t.Fatalf("numbered fork title = %q", got)
+	}
+	if got := app.forkTopicTitle("计划（9）"); got != "计划（10）" {
+		t.Fatalf("fullwidth numbered fork title = %q", got)
 	}
 }
 

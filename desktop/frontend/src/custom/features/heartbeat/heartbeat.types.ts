@@ -18,7 +18,7 @@ export interface HeartbeatTask {
   newConversationEachRun?: boolean; // true = create new topic each run
   runHistory?: HeartbeatRun[];      // recent executions (oldest first)
   createdAt?: number;
-  approvalMode?: "ask" | "auto" | "yolo"; // empty defaults to "yolo"
+  approvalMode?: "read-only" | "workspace-write" | "danger-full-access" | "ask" | "auto" | "yolo";
   timeWindowStart?: string; // "HH:MM" — interval tasks only run after this time
   timeWindowEnd?: string;   // "HH:MM" — interval tasks only run before this time
   notifyChannels?: boolean; // true = push to bot channels; false/nil = skip

@@ -251,7 +251,7 @@ export function HeartbeatView({ onOpenTopic, active = true, onBack = () => {} }:
       prompt: "",
       interval: "30m",
       enabled: true,
-      approvalMode: "yolo",
+      approvalMode: "workspace-write",
       newConversationEachRun: false,
       notifyChannels: false,
     }, intent);
@@ -288,7 +288,7 @@ export function HeartbeatView({ onOpenTopic, active = true, onBack = () => {} }:
         // 生成失败时使用本地 fallback id
       }
       // 推荐卡片只打开编辑器，不直接创建并启用任务：预置 prompt 可能涉及
-      // 读取对话/扫描本地文件/访问网络等敏感操作，默认禁用 + ask 审批，
+      // 读取对话/扫描本地文件/访问网络等敏感操作，默认禁用并仅可查看，
       // 由用户在编辑器中确认作用域与权限后再启用。
       const task: HeartbeatTask = {
         id,
@@ -296,7 +296,7 @@ export function HeartbeatView({ onOpenTopic, active = true, onBack = () => {} }:
         prompt: sug.prompt,
         interval: sug.interval,
         enabled: false,
-        approvalMode: "ask",
+        approvalMode: "read-only",
         newConversationEachRun: false,
         notifyChannels: false,
         scope: "global",

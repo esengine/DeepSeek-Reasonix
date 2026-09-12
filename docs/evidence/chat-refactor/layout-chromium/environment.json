@@ -1,0 +1,8 @@
+{
+  "engine": "chromium",
+  "platform": "darwin",
+  "versions": {
+    "chromium": "153.0.8010.12"
+  },
+  "sourceCommit": "0e5319ad1"
+}

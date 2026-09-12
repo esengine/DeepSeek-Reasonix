@@ -31,7 +31,7 @@ function fallbackCopyText(value: string): boolean {
       selection.removeAllRanges();
       for (const range of ranges) selection.addRange(range);
     }
-    if (activeElement instanceof HTMLElement) activeElement.focus();
+    if (activeElement instanceof HTMLElement) activeElement.focus({ preventScroll: true });
   }
   return ok;
 }
@@ -53,8 +53,7 @@ async function writeClipboardText(value: string): Promise<void> {
 }
 
 // CopyButton copies text to the clipboard on click and briefly flips to a check.
-// Clipboard writes are best-effort across browser dev and the desktop shell, so
-// the visible acknowledgement stays tied to the user action.
+// Acknowledgement follows successful content resolution and clipboard write.
 export function CopyButton({
   text,
   getText,
@@ -70,20 +69,28 @@ export function CopyButton({
 }) {
   const t = useT();
   const [copied, setCopied] = useState(false);
+  const [pending, setPending] = useState(false);
+  const [failed, setFailed] = useState(false);
+  const epochRef = useRef(0);
   const timerRef = useRef<number | null>(null);
   const actionLabel = label ?? t("msg.copy");
-  const stateLabel = copied ? t("msg.copied") : actionLabel;
+  const stateLabel = pending ? t("chat.loading") : failed ? t("richLink.copyFailed") : copied ? t("msg.copied") : actionLabel;
 
   useEffect(() => {
     return () => {
+      epochRef.current++;
       if (timerRef.current != null) window.clearTimeout(timerRef.current);
     };
   }, []);
 
   const copy = async () => {
+    const epoch = epochRef.current;
+    setPending(true); setFailed(false);
     try {
       const value = getText ? await getText() : text ?? "";
-      void writeClipboardText(value).catch(() => {});
+      if (epoch !== epochRef.current) return;
+      await writeClipboardText(value);
+      if (epoch !== epochRef.current) return;
       setCopied(true);
       if (timerRef.current != null) window.clearTimeout(timerRef.current);
       timerRef.current = window.setTimeout(() => {
@@ -91,7 +98,9 @@ export function CopyButton({
         timerRef.current = null;
       }, 1200);
     } catch {
-      /* clipboard unavailable */
+      if (epoch === epochRef.current) setFailed(true);
+    } finally {
+      if (epoch === epochRef.current) setPending(false);
     }
   };
   return (
@@ -102,8 +111,10 @@ export function CopyButton({
         className ?? "",
       ].filter(Boolean).join(" ")}
       onClick={copy}
+      disabled={pending}
+      aria-busy={pending}
       aria-label={stateLabel}
-      title={actionLabel}
+      title={stateLabel}
       type="button"
     >
       {copied ? <Check size={13} /> : <Copy size={13} />}

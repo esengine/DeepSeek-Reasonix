@@ -33,7 +33,7 @@ export function RemoteSessionSurface({ tab, session, surfaceCommitToken, onSurfa
   const extensionForm = session.transcript.extensionForm;
   const [actionError, setActionError] = useState("");
   const [extensionFormBusy, setExtensionFormBusy] = useState(false);
-  useEffect(() => { setActionError(""); setExtensionFormBusy(false); }, [session.state, tab.id]);
+  useEffect(() => { setActionError(""); setExtensionFormBusy(false); }, [session.state, session.surfaceGeneration, tab.id]);
   const runAction = async (action: () => Promise<unknown>, propagate = false): Promise<void> => {
     setActionError("");
     try {
@@ -66,25 +66,23 @@ export function RemoteSessionSurface({ tab, session, surfaceCommitToken, onSurfa
       {!ready && !hasContent ? <SessionRecoveryPlaceholder availability={availability} /> : <Transcript
         items={session.transcript.items}
         live={session.transcript.live}
+        liveStore={session.liveStore}
         tabId={tab.id}
-        revealSignal={session.surfaceGeneration}
+        hostId={tab.remote.hostId}
+        geometrySessionKey={`${tab.id}:${session.surfaceGeneration}`}
         hydrating={!session.hydrated && !hasContent}
         surfaceCommitToken={surfaceCommitToken}
         onSurfacePaintReady={onSurfacePaintReady}
         running={session.transcript.running}
         hasOlderHistory={session.transcript.historyHasOlder}
-        stableHistoryPaging={session.syncMode === "snapshot"}
         historyStartTurn={session.transcript.historyStartTurn}
-        historyTotalTurns={session.transcript.historyTotalTurns}
         loadingOlderHistory={session.transcript.historyOlderLoading}
         olderHistoryError={session.transcript.historyOlderError}
         onLoadOlderHistory={session.loadOlderHistory}
-        contentRevision={session.transcript.historyLayoutRevision}
-        historyMutation={session.transcript.historyMutation}
         checkpoints={session.transcript.checkpoints}
         onPrompt={(display, submit = display) => runAction(() => session.submit(submit, display))}
-        onRewind={(turn, scope) => runAction(() => session.rewind(turn, scope))}
-        rewindDisabled={session.running || !ready}
+        onFork={(turn) => runAction(() => session.rewind(turn, "fork"))}
+        rewindDisabled={Boolean(tab.readOnly || session.running || !ready)}
       />}
 
       {ready && approval ? (

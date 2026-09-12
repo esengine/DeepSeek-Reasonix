@@ -424,7 +424,7 @@ func (s *updateSink) requestPermission(ctx context.Context, a event.Approval) {
 		Options: options,
 	}
 
-	allow, session, persist := false, false, false
+	allow, session := false, false
 	if raw, err := s.conn.Request(ctx, "session/request_permission", params); err == nil {
 		var res PermissionRequestResult
 		if json.Unmarshal(raw, &res) == nil && res.Outcome.Outcome == "selected" {
@@ -433,8 +433,6 @@ func (s *updateSink) requestPermission(ctx context.Context, a event.Approval) {
 				allow = true
 			case "reasonix_write_session":
 				allow, session = true, true
-			case "reasonix_write_project":
-				allow, session, persist = true, true, true
 			case "reasonix_write_deny":
 			case string(OptAllowOnce):
 				allow = true
@@ -443,14 +441,13 @@ func (s *updateSink) requestPermission(ctx context.Context, a event.Approval) {
 			}
 		}
 	}
-	s.approve(a.ID, allow, session, persist)
+	s.approve(a.ID, allow, session, false)
 }
 
 func writeAccessApprovalOptions() []PermissionOption {
 	return []PermissionOption{
 		{OptionID: "reasonix_write_once", Name: "Allow once", Kind: OptAllowOnce},
 		{OptionID: "reasonix_write_session", Name: "Allow these directories for this session", Kind: OptAllowAlways},
-		{OptionID: "reasonix_write_project", Name: "Add to project allow_write", Kind: OptAllowAlways},
 		{OptionID: "reasonix_write_deny", Name: "Reject", Kind: OptRejectOnce},
 	}
 }
@@ -458,8 +455,9 @@ func writeAccessApprovalOptions() []PermissionOption {
 // permissionMeta carries Reasonix-owned structured data that an ACP supervisor
 // may trust independently from model-supplied rawInput. A foreground bash call
 // receives argv only when the command is a single static command: shell
-// expansion, control operators, redirects, assignments, and background jobs all
-// fail closed and remain interactive.
+// expansion, control operators, redirects, assignments, and background jobs are
+// omitted from this advisory argv field; execution still follows the active
+// permission preset and OS sandbox rather than the command's syntax shape.
 func (s *updateSink) permissionMeta(a event.Approval) map[string]any {
 	reasonix := map[string]any{
 		"approvalId": a.ID,

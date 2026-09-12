@@ -19,23 +19,23 @@ console.log("\nbridge mock approval mode");
 
 eq(
   mockToolApprovalModeAfterModeChange("auto", "plan"),
-  "auto",
-  "legacy plan switch keeps explicit auto approval mode",
+  "workspace-write",
+  "legacy auto migrates to workspace-write during a plan switch",
 );
 eq(
   mockToolApprovalModeAfterModeChange("auto", "normal"),
-  "auto",
-  "legacy normal switch keeps explicit auto approval mode",
+  "workspace-write",
+  "legacy auto migrates to workspace-write during a normal switch",
 );
 eq(
   mockToolApprovalModeAfterModeChange("ask", "yolo"),
-  "yolo",
-  "legacy yolo switch still enables yolo approval mode",
+  "workspace-write",
+  "legacy yolo mode migrates conservatively to workspace-write",
 );
 eq(
   mockToolApprovalModeAfterModeChange("yolo", "plan"),
-  "ask",
-  "legacy non-yolo switch clears yolo back to ask",
+  "workspace-write",
+  "legacy yolo state never silently enables full access",
 );
 
 console.log(`\n${passed} passed, ${failed} failed`);

@@ -66,7 +66,7 @@ const css = readFileSync(stylesPath, "utf8");
 ok(selectorPresent(css, ".code-block__wrap:hover .code-block__copy"), "hover reveal targets the wrapper");
 notOk(selectorPresent(css, ".code:hover .code-block__copy"), "hover reveal no longer depends on pre descendants");
 ok(
-  selectorPresent(css, ".app--creation .msg--assistant .md .code:not([data-lang]) + .code-block__copy"),
+  selectorPresent(css, ".app--creation .msg--assistant:not(.chat-transcript .msg--assistant) .md .code:not([data-lang]) + .code-block__copy"),
   "creation unlabelled code button styles target sibling copy buttons",
 );
 notOk(
@@ -74,7 +74,7 @@ notOk(
   "creation unlabelled code styles do not target descendants inside pre",
 );
 ok(
-  selectorPresent(css, '.app--creation .msg--assistant .md .code[data-lang="bash"] + .code-block__copy'),
+  selectorPresent(css, '.app--creation .msg--assistant:not(.chat-transcript .msg--assistant) .md .code[data-lang="bash"] + .code-block__copy'),
   "creation shell code button styles target sibling copy buttons",
 );
 notOk(

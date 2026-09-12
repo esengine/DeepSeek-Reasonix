@@ -2,8 +2,10 @@ package serve
 
 import (
 	"context"
+	"path/filepath"
 	"testing"
 
+	"reasonix/internal/agent"
 	"reasonix/internal/config"
 	"reasonix/internal/provider"
 )
@@ -83,6 +85,39 @@ func TestSessionTitleCachesByFirstMessageAcrossMtimeChanges(t *testing.T) {
 	}
 	if len(freshProv.requests) != 0 {
 		t.Fatalf("fresh server regenerated persisted title %d time(s)", len(freshProv.requests))
+	}
+}
+
+func TestCacheForkTitleUsesHarnessNumbering(t *testing.T) {
+	dir := t.TempDir()
+	sourcePath := filepath.Join(dir, "source.jsonl")
+	childPath := filepath.Join(dir, "child.jsonl")
+	messages := []provider.Message{
+		{Role: provider.RoleSystem, Content: "system"},
+		{Role: provider.RoleUser, Content: "plan the roadmap"},
+		{Role: provider.RoleAssistant, Content: "done"},
+	}
+	for _, path := range []string{sourcePath, childPath} {
+		session := agent.NewSession("")
+		session.Replace(messages)
+		if err := session.Save(path); err != nil {
+			t.Fatalf("save %s: %v", path, err)
+		}
+	}
+
+	prov := &recordingTitleProvider{}
+	s := &Server{titleProv: prov, titles: newTitleCache(dir)}
+	first, _ := agent.SessionPreview(sourcePath)
+	s.titles.put(filepath.Base(sourcePath), "Roadmap (1)", titleSource(first), agent.SessionContentModTime(sourcePath).UnixNano())
+
+	s.cacheForkTitle(sourcePath, childPath)
+	childFirst, _ := agent.SessionPreview(childPath)
+	got := s.sessionTitle(context.Background(), filepath.Base(childPath), childFirst, agent.SessionContentModTime(childPath).UnixNano())
+	if got != "Roadmap (2)" {
+		t.Fatalf("child title = %q, want %q", got, "Roadmap (2)")
+	}
+	if len(prov.requests) != 0 {
+		t.Fatalf("fork title triggered %d title-generation request(s)", len(prov.requests))
 	}
 }
 

@@ -22,6 +22,7 @@ func completeDesktopShutdown(tracker *desktopLifecycleTracker, body func()) {
 }
 
 func (a *App) shutdownBody() {
+	a.stopWorkspacePreviewOrigin()
 	if a.topicState != nil {
 		defer a.topicState.close()
 	}

@@ -44,18 +44,18 @@ func testbedShell(command string) []string {
 		"source /opt/miniconda3/bin/activate && conda activate testbed && cd /testbed && " + command}
 }
 
-// permissionFlag maps a benchmark permission posture onto the CLI flag. auto is
-// the unattended default. The alternative posture exists because comparable
-// harnesses run without the dynamic-shell gate, so measuring against them under
-// the gate measures our permission policy rather than the agent.
+// permissionFlag maps the benchmark preset onto the same public CLI contract
+// used by every other entry point.
 func permissionFlag(mode string) (string, error) {
 	switch mode {
-	case "", "auto":
-		return "--permission-mode=auto", nil
-	case "yolo":
-		return "--permission-mode=bypassPermissions", nil
+	case "", "workspace-write":
+		return "--permission-mode=workspace-write", nil
+	case "read-only":
+		return "--permission-mode=read-only", nil
+	case "danger-full-access":
+		return "--permission-mode=danger-full-access", nil
 	default:
-		return "", fmt.Errorf("unknown permission mode %q (want auto or yolo)", mode)
+		return "", fmt.Errorf("unknown permission preset %q (want read-only, workspace-write, or danger-full-access)", mode)
 	}
 }
 

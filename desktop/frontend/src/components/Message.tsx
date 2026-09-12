@@ -1,30 +1,23 @@
-import { createContext, lazy, memo, Suspense, useCallback, useContext, useEffect, useMemo, useRef, useState } from "react";
-import type { FormEvent, KeyboardEvent as ReactKeyboardEvent } from "react";
-import { BrainCircuit, ChevronDown, FileText, Folder, GitBranch, Image, MessageSquare, Pencil, RotateCcw, ScrollText } from "lucide-react";
+import { createContext, lazy, memo, Suspense, useCallback, useContext, useEffect, useMemo, useState } from "react";
+import { BrainCircuit, FileText, Folder, Image, MessageSquare } from "lucide-react";
 import { Markdown } from "./Markdown";
 import { CopyButton } from "./CopyButton";
-import { ComposerContextCard } from "./ComposerContextCard";
-import { formatAttachmentRefForDisplay, formatAttachmentRefForSubmit, parseAttachmentRefsForDisplay, sortDisplayAttachments } from "../lib/attachmentDisplay";
-import type { DisplayAttachment } from "../lib/attachmentDisplay";
+import { parseAttachmentRefsForDisplay, sortDisplayAttachments } from "../lib/attachmentDisplay";
 import { app } from "../lib/bridge";
-import { replaySubmitTextPreservingSelectedContext } from "../lib/editReplay";
 import { useT } from "../lib/i18n";
 import { ImageViewer } from "./ImageViewer";
 import { Tooltip } from "./Tooltip";
-import { useWorkProcessPresentation } from "../lib/sessionExperience";
 import { stripMemoryCompilerExecution } from "../lib/memoryCompilerDisplay";
 import { invocationSegmentsFromMessage, type InvocationMetadataMap } from "../lib/invocationDisplay";
-import { messageActionLabelKey, type MessageActionScope } from "../lib/messageActions";
 import type { Item } from "../lib/useController";
-import type { CheckpointMeta } from "../lib/types";
 import { InvocationBadge } from "./InvocationBadge";
 import { CodeViewer } from "./CodeViewer";
 import { formatSelectionLabels, languageFor, parseSelectedTextContext, stripSelectionLabels } from "../lib/selectedTextContext";
+import type { PresentedFileView } from "../lib/chatViewSource";
+import { PresentedFileLinkProvider } from "./PresentedFileLinkContext";
 
-const AssistantReasoningPanel = lazy(() => import("./AssistantReasoningPanel").then((module) => ({ default: module.AssistantReasoningPanel })));
 const MemoryCitations = lazy(() => import("./MemoryCitations").then((module) => ({ default: module.MemoryCitations })));
 const SearchSourcesPanel = lazy(() => import("./SearchSourcesPanel").then((module) => ({ default: module.SearchSourcesPanel }))); type AssistantItem = Extract<Item, { kind: "assistant" }>;
-export type TurnActionMenu = "summary" | "rewind" | "fork";
 export const InvocationMetadataContext = createContext<InvocationMetadataMap>({});
 type ImSourceMessage = {
   provider: string;
@@ -73,18 +66,6 @@ function attachmentIcon(kind: "image" | "file" | "folder") {
   if (kind === "image") return <Image size={15} />;
   if (kind === "folder") return <Folder size={15} />;
   return <FileText size={15} />;
-}
-
-function mergeDisplayAttachments(existing: DisplayAttachment[], incoming: DisplayAttachment[]): DisplayAttachment[] {
-  if (incoming.length === 0) return existing;
-  const seen = new Set(existing.map((attachment) => attachment.path));
-  const merged = [...existing];
-  for (const attachment of incoming) {
-    if (seen.has(attachment.path)) continue;
-    seen.add(attachment.path);
-    merged.push(attachment);
-  }
-  return merged;
 }
 
 type PastedBlockInfo = {
@@ -164,8 +145,6 @@ export function UserMessage({
   anchorId,
   id,
   createdAt,
-  onEdit,
-  editDisabled = false,
 }: {
   text: string;
   submitText?: string;
@@ -174,8 +153,6 @@ export function UserMessage({
   anchorId?: string;
   id?: string;
   createdAt?: number;
-  onEdit?: (turn: number, displayText: string, submitText?: string) => boolean | void | Promise<boolean | void>;
-  editDisabled?: boolean;
 }) {
   const t = useT();
   const invocationMetadata = useContext(InvocationMetadataContext);
@@ -192,12 +169,6 @@ export function UserMessage({
   const orderedAttachments = sortDisplayAttachments(attachments);
   const sourceLabel = imSource ? imSourceLabel(imSource, t) : "";
   const sentAt = createdAt === undefined ? null : messageDate(createdAt);
-  const canEdit = turn !== undefined && onEdit !== undefined && !editDisabled;
-  const [editing, setEditing] = useState(false);
-  const [draftText, setDraftText] = useState(editableDisplayText);
-  const [draftAttachments, setDraftAttachments] = useState<DisplayAttachment[]>(attachments);
-  const [editSubmitting, setEditSubmitting] = useState(false);
-  const editRef = useRef<HTMLTextAreaElement>(null);
   const [imagePreviews, setImagePreviews] = useState<Record<string, string>>({});
   const [imageViewer, setImageViewer] = useState<{ open: boolean; url: string; name: string }>({ open: false, url: "", name: "" });
   const openImageViewer = useCallback(async (path: string, name: string) => {
@@ -269,91 +240,10 @@ export function UserMessage({
       [key]: !prev[key],
     }));
   };
-  const orderedDraftAttachments = sortDisplayAttachments(draftAttachments);
   const imagePreviewKey = orderedAttachments
-    .concat(orderedDraftAttachments)
     .filter((attachment) => attachment.kind === "image" && attachment.source === "attachment")
     .map((attachment) => attachment.path)
     .join("\n");
-
-  useEffect(() => {
-    if (editing) return;
-    const parsed = parseAttachmentRefsForDisplay(editableActionText);
-    setDraftText(parsed.text);
-    setDraftAttachments(parsed.attachments);
-  }, [editableActionText, editing]);
-
-  useEffect(() => {
-    if (!editing) return;
-    requestAnimationFrame(() => {
-      const node = editRef.current;
-      if (!node) return;
-      node.focus();
-      node.selectionStart = node.selectionEnd = node.value.length;
-    });
-  }, [editing]);
-
-  const startEdit = () => {
-    if (!canEdit) return;
-    const parsed = parseAttachmentRefsForDisplay(editableActionText);
-    setDraftText(parsed.text);
-    setDraftAttachments(parsed.attachments);
-    setEditing(true);
-  };
-
-  const cancelEdit = () => {
-    const parsed = parseAttachmentRefsForDisplay(editableActionText);
-    setDraftText(parsed.text);
-    setDraftAttachments(parsed.attachments);
-    setEditing(false);
-  };
-
-  const updateDraftText = (value: string) => {
-    const parsed = parseAttachmentRefsForDisplay(value);
-    if (parsed.attachments.length > 0) {
-      setDraftText(parsed.text);
-      setDraftAttachments((prev) => mergeDisplayAttachments(prev, parsed.attachments));
-      return;
-    }
-    setDraftText(value);
-  };
-
-  const removeDraftAttachment = (path: string) => {
-    setDraftAttachments((prev) => prev.filter((attachment) => attachment.path !== path));
-  };
-
-  const submitEdit = async (event?: FormEvent) => {
-    event?.preventDefault();
-    if (!canEdit || editSubmitting) return;
-    const parsedDraft = parseAttachmentRefsForDisplay(draftText);
-    const nextAttachments = sortDisplayAttachments(mergeDisplayAttachments(draftAttachments, parsedDraft.attachments));
-    const bodyText = parsedDraft.text.trim();
-    const displayRefs = nextAttachments.map(formatAttachmentRefForDisplay).join(" ");
-    const submitRefs = nextAttachments.map(formatAttachmentRefForSubmit).join(" ");
-    const nextEditable = [bodyText, displayRefs].filter(Boolean).join(bodyText && displayRefs ? " " : "");
-    const next = [nextEditable, selectionLabels].filter(Boolean).join(nextEditable && selectionLabels ? " " : "");
-    const fallbackSubmit = [bodyText, submitRefs].filter(Boolean).join(bodyText && submitRefs ? " " : "");
-    const submit = replaySubmitTextPreservingSelectedContext(submitText, editableActionText, nextEditable, fallbackSubmit);
-    if (!next) return;
-    setEditSubmitting(true);
-    try {
-      const ok = await onEdit?.(turn as number, next, submit);
-      if (ok !== false) setEditing(false);
-    } finally {
-      setEditSubmitting(false);
-    }
-  };
-
-  const onEditKeyDown = (event: ReactKeyboardEvent<HTMLTextAreaElement>) => {
-    if (event.key === "Escape") {
-      event.preventDefault();
-      cancelEdit();
-      return;
-    }
-    if (event.key === "Enter" && (event.metaKey || event.ctrlKey)) {
-      void submitEdit();
-    }
-  };
 
   useEffect(() => {
     const paths = imagePreviewKey ? imagePreviewKey.split("\n") : [];
@@ -382,55 +272,8 @@ export function UserMessage({
       data-history-restore={id && id.startsWith("h") ? "" : undefined}
       data-entrance={id || undefined}
     >
-      <div className={`msg__body${editing ? " msg__body--editing" : ""}`} data-transcript-selectable="message">
-        {editing ? (
-          <form className="msg-edit" onSubmit={(event) => void submitEdit(event)}>
-            {orderedDraftAttachments.length > 0 && (
-              <div className="msg-edit__attachments composer-context" aria-label={t("composer.contextItems")}>
-                {orderedDraftAttachments.map((attachment) => {
-                  const imagePreview = attachment.kind === "image" ? imagePreviews[attachment.path] : undefined;
-                  const imageOnly = Boolean(imagePreview) && orderedDraftAttachments.every((item) => item.kind === "image" && imagePreviews[item.path]);
-                  return (
-                    <ComposerContextCard
-                      key={attachment.path}
-                      variant={attachment.source === "workspace" ? "workspace" : "attachment"}
-                      tooltipLabel={imagePreview ? `${t("imageViewer.clickToPreview")} — ${attachment.path}` : attachment.source === "workspace" ? formatAttachmentRefForSubmit(attachment) : attachment.path}
-                      removeLabel={attachment.source === "workspace" ? t("composer.removeReference") : t("composer.removeImage")}
-                      removeDisabled={editSubmitting}
-                      onRemove={() => removeDraftAttachment(attachment.path)}
-                      previewUrl={imagePreview}
-                      onImageClick={imagePreview ? () => openImageViewer(attachment.path, attachment.name) : undefined}
-                      imageOnly={imageOnly}
-                      folder={attachment.kind === "folder"}
-                      label={attachment.kind === "folder" ? `${attachment.name}/` : attachment.name}
-                      name={attachment.name}
-                      meta={attachment.ext || t("msg.fileAttachment")}
-                      icon={attachment.kind === "image" ? <Image size={20} /> : undefined}
-                    />
-                  );
-                })}
-              </div>
-            )}
-            <textarea
-              ref={editRef}
-              className="msg-edit__input"
-              value={draftText}
-              rows={Math.max(2, Math.min(8, draftText.split(/\r?\n/).length))}
-              aria-label={t("common.edit")}
-              disabled={editSubmitting}
-              onChange={(event) => updateDraftText(event.target.value)}
-              onKeyDown={onEditKeyDown}
-            />
-            <div className="msg-edit__actions">
-              <button className="msg-edit__btn" type="button" disabled={editSubmitting} onClick={cancelEdit}>
-                {t("common.cancel")}
-              </button>
-              <button className="msg-edit__btn msg-edit__btn--primary" type="submit" disabled={editSubmitting || (draftText.trim() === "" && draftAttachments.length === 0 && selectedTextEntries.length === 0)}>
-                {t("msg.editSend")}
-              </button>
-            </div>
-          </form>
-        ) : imSource ? (
+      <div className="msg__body" data-transcript-selectable="message">
+        {imSource ? (
           <div className="im-source-card">
             <div className="im-source-card__head" data-transcript-selection-ignore>
               <MessageSquare size={14} />
@@ -539,8 +382,7 @@ export function UserMessage({
           </div>
         )}
       </div>
-      {!editing && (
-        <div className="msg-meta" role="group" aria-label={t("rewind.label")}>
+      <div className="msg-meta" role="group" aria-label={t("msg.copy")}>
           {sentAt && (
             <time className="msg-meta__time" dateTime={sentAt.toISOString()} title={sentAt.toLocaleString()}>
               {formatMessageTime(sentAt)}
@@ -552,272 +394,21 @@ export function UserMessage({
             </span>
           )}
           <CopyButton text={actionText} label={t("msg.copy")} showInlineLabel={false} className="msg-meta__btn msg-meta__copy" />
-          {onEdit && (
-            <button
-              className="msg-meta__btn"
-              type="button"
-              aria-label={t("common.edit")}
-              title={t("common.edit")}
-              disabled={!canEdit}
-              onClick={startEdit}
-            >
-              <Pencil size={14} />
-            </button>
-          )}
-        </div>
-      )}
+      </div>
     </div>
   );
 }
 
-export function TurnActions({
-  text,
-  turn,
-  openMenu,
-  onOpenMenu,
-  onRewind,
-  checkpoint,
-  actionPending = false,
-  rewindDisabled = false,
-  hoverMenus = false,
-  isLastTurn = false,
-}: {
-  text: string;
-  turn?: number;
-  openMenu?: TurnActionMenu | null;
-  onOpenMenu?: (menu: TurnActionMenu | null) => void;
-  onRewind?: (turn: number, scope: MessageActionScope) => void;
-  checkpoint?: CheckpointMeta;
-  actionPending?: boolean;
-  rewindDisabled?: boolean;
-  hoverMenus?: boolean;
-  /** true when this is the last user turn — disables "summarize after" */
-  isLastTurn?: boolean;
-}) {
-  const t = useT();
-  const [confirmScope, setConfirmScope] = useState<MessageActionScope | null>(null);
-  const canAct = onRewind != null && turn != null;
-  const actionDisabledReason = (scope: string): string => {
-    if (rewindDisabled || actionPending) return t("rewind.disabledRunning");
-    if (!checkpoint) return t("rewind.disabledNoCheckpoint");
-    if ((scope === "fork" || scope === "fork-worktree" || scope === "summ-from" || scope === "conversation") && !checkpoint.canConversation) {
-      return t("rewind.disabledNoBoundary");
-    }
-    if (scope === "summ-from" && isLastTurn) {
-      return t("rewind.disabledNoLater");
-    }
-    if (scope === "summ-upto") {
-      if (!checkpoint.canConversation) return t("rewind.disabledNoBoundary");
-      if ((turn ?? 0) <= 0) return t("rewind.disabledNoEarlier");
-    }
-    if (scope === "code" && !checkpoint.canCode) return t("rewind.disabledNoCode");
-    if (scope === "both") {
-      if (!checkpoint.canConversation) return t("rewind.disabledNoBoundary");
-      if (!checkpoint.canCode) return t("rewind.disabledNoCode");
-    }
-    return "";
-  };
-  const actionLabel = (scope: MessageActionScope): string => t(messageActionLabelKey(scope, confirmScope === scope));
-  const actionMeta = (scope: MessageActionScope): string => {
-    const total = checkpoint?.fileCount ?? checkpoint?.files?.length ?? 0;
-    if ((scope === "code" || scope === "both") && total > 0) {
-      const turnCount = checkpoint?.turnFileCount ?? 0;
-      if (turnCount > 0 && turnCount < total) {
-        return `${t("rewind.filesChanged", { count: total })} (${t("rewind.turnFiles", { count: turnCount })})`;
-      }
-      return t("rewind.filesChanged", { count: total });
-    }
-    return "";
-  };
-  const actionTooltipLabel = (scope: MessageActionScope) => {
-    const reason = actionDisabledReason(scope);
-    if (reason) return <span>{reason}</span>;
-    const files = checkpoint?.files ?? [];
-    const total = checkpoint?.fileCount ?? files.length;
-    if ((scope === "code" || scope === "both") && total > 0) {
-      const hidden = Math.max(0, total - files.length);
-      return (
-        <div className="rewind__files-tooltip">
-          {files.map((file) => (
-            <div key={file}>{file.split(/[/\\]/).pop() || file}</div>
-          ))}
-          {hidden > 0 && <div>+{hidden}</div>}
-        </div>
-      );
-    }
-    return undefined;
-  };
-  const runAction = (scope: MessageActionScope) => {
-    setConfirmScope(null);
-    onOpenMenu?.(null);
-    onRewind?.(turn as number, scope);
-  };
-  const selectRewind = (scope: MessageActionScope) => {
-    if (actionDisabledReason(scope)) return;
-    if (confirmScope !== scope) {
-      setConfirmScope(scope);
-      return;
-    }
-    runAction(scope);
-  };
-  const renderAction = (scope: MessageActionScope, danger = false) => {
-    const disabledReason = actionDisabledReason(scope);
-    const meta = actionMeta(scope);
-    const tipLabel = actionTooltipLabel(scope);
-    const button = (
-      <button
-        className={[
-          "rewind__menu-item",
-          danger ? "rewind__menu-danger" : "",
-          confirmScope === scope ? "rewind__menu-confirm" : "",
-        ].filter(Boolean).join(" ")}
-        type="button"
-        disabled={Boolean(disabledReason)}
-        {...(tipLabel ? {} : { title: disabledReason || undefined })}
-        onClick={() => selectRewind(scope)}
-      >
-        <span>{actionLabel(scope)}</span>
-        {meta && <span className="rewind__menu-meta">{meta}</span>}
-      </button>
-    );
-    return tipLabel ? <Tooltip key={scope} label={tipLabel} side="top" block fill>{button}</Tooltip> : button;
-  };
-  const forkDisabledReason = canAct ? actionDisabledReason("fork") : "";
-  const toggleMenu = (menu: TurnActionMenu) => {
-    setConfirmScope(null);
-    onOpenMenu?.(openMenu === menu ? null : menu);
-  };
-  const openHoverMenu = (menu: TurnActionMenu) => {
-    if (!hoverMenus || openMenu === menu) return;
-    setConfirmScope(null);
-    onOpenMenu?.(menu);
-  };
-  return (
-    <div className={`turn-actions${openMenu ? " turn-actions--open" : ""}${hoverMenus ? " turn-actions--hover-menu" : ""}`}>
-      {text.trim() && <CopyButton text={text} label={t("msg.copy")} />}
-      {canAct && (
-        <>
-          <div
-            className={`turn-actions__group${openMenu === "fork" ? " turn-actions__group--open" : ""}`}
-            onMouseEnter={() => openHoverMenu("fork")}
-          >
-            <button
-              className={`turn-actions__btn${confirmScope === "fork" || confirmScope === "fork-worktree" ? " turn-actions__btn--confirm" : ""}`}
-              type="button"
-              disabled={Boolean(forkDisabledReason)}
-              aria-haspopup="menu"
-              aria-expanded={openMenu === "fork"}
-              title={forkDisabledReason || t("rewind.forkTooltip")}
-              onClick={() => toggleMenu("fork")}
-            >
-              <GitBranch size={13} />
-              <span className="turn-actions__label-inline">
-                <span>{confirmScope === "fork-worktree" ? actionLabel("fork-worktree") : (confirmScope === "fork" ? actionLabel("fork") : t("rewind.fork"))}</span>
-                <ChevronDown size={12} />
-              </span>
-            </button>
-            {openMenu === "fork" && (
-              <div className="rewind__menu turn-actions__menu" role="menu">
-                {renderAction("fork-worktree")}
-                {renderAction("fork")}
-              </div>
-            )}
-          </div>
-          <div
-            className={`turn-actions__group${openMenu === "summary" ? " turn-actions__group--open" : ""}`}
-            onMouseEnter={() => openHoverMenu("summary")}
-          >
-            <button
-              className="turn-actions__btn"
-              type="button"
-              aria-haspopup="menu"
-              aria-expanded={openMenu === "summary"}
-              onClick={() => toggleMenu("summary")}
-            >
-              <ScrollText size={13} />
-              <span className="turn-actions__label-inline">
-                <span>{t("turnActions.summary")}</span>
-                <ChevronDown size={12} />
-              </span>
-            </button>
-            {openMenu === "summary" && (
-              <div className="rewind__menu turn-actions__menu" role="menu">
-                {rewindDisabled && <div className="rewind__menu-hint">{t("rewind.disabledRunning")}</div>}
-                {!rewindDisabled && !checkpoint && <div className="rewind__menu-hint">{t("rewind.disabledNoCheckpoint")}</div>}
-                {renderAction("summ-from")}
-                {renderAction("summ-upto")}
-              </div>
-            )}
-          </div>
-          <div
-            className={`turn-actions__group${openMenu === "rewind" ? " turn-actions__group--open" : ""}`}
-            onMouseEnter={() => openHoverMenu("rewind")}
-          >
-            <button
-              className="turn-actions__btn"
-              type="button"
-              aria-haspopup="menu"
-              aria-expanded={openMenu === "rewind"}
-              onClick={() => toggleMenu("rewind")}
-            >
-              <RotateCcw size={13} />
-              <span className="turn-actions__label-inline">
-                <span>{t("turnActions.rewind")}</span>
-                <ChevronDown size={12} />
-              </span>
-            </button>
-            {openMenu === "rewind" && (
-              <div className="rewind__menu turn-actions__menu" role="menu">
-                {rewindDisabled && <div className="rewind__menu-hint">{t("rewind.disabledRunning")}</div>}
-                {!rewindDisabled && !checkpoint && <div className="rewind__menu-hint">{t("rewind.disabledNoCheckpoint")}</div>}
-                {renderAction("conversation")}
-                {renderAction("code")}
-                {renderAction("both", true)}
-              </div>
-            )}
-          </div>
-        </>
-      )}
-    </div>
-  );
-}
-
-export const AssistantMessage = memo(function AssistantMessage({
-  item,
-  defaultExpanded = false,
-  expandWhileStreaming = false,
-  creationMode = false,
-}: {
-  item: AssistantItem;
-  defaultExpanded?: boolean;
-  /** false in compact mode: completed steps fold away, so auto-open + fold reads as flicker. */
-  expandWhileStreaming?: boolean;
-  creationMode?: boolean;
-}) {
-  const presentation = useWorkProcessPresentation();
+export const AssistantMessage = memo(function AssistantMessage({ item, presentedFiles = [], tabId, hostId }: { item: AssistantItem; presentedFiles?: readonly PresentedFileView[]; tabId?: string; hostId?: string }) {
   const hasText = item.streaming || item.text.trim() !== "";
   const hasFootnotes = Boolean(item.searchSources?.length);
-  const processOnly = Boolean(item.reasoning) && !hasText && !hasFootnotes;
-  const processWithText = Boolean(item.reasoning) && (hasText || hasFootnotes);
-  const reasoningFallback = <div className="reasoning reasoning--loading" data-expanded={defaultExpanded || presentation.keepExpandedAfterCompletion || (item.streaming && (presentation.showWhileRunning || expandWhileStreaming)) ? "" : undefined} aria-hidden />;
   return (
-    <div className={`msg msg--assistant${processOnly ? " msg--process-only" : ""}${processWithText ? " msg--process-with-text" : ""}`} data-history-restore={item.id.startsWith("h") ? "" : undefined} data-entrance={item.id}>
-      {item.reasoning && (
-        <Suspense fallback={reasoningFallback}>
-          <AssistantReasoningPanel item={item} defaultExpanded={defaultExpanded} expandWhileStreaming={expandWhileStreaming} />
-        </Suspense>
-      )}
+    <div className="msg msg--assistant" data-history-restore={item.id.startsWith("h") ? "" : undefined} data-entrance={item.id}>
       {(hasText || hasFootnotes) && (
         <div className="msg__body" data-transcript-selectable="message">
-          {hasText && (
-            <Markdown
-              text={item.text}
-              plainStatusBlocks={creationMode}
-              streaming={item.streaming}
-              cacheKey={item.id}
-              wasStreamed={item.wasStreamed}
-            />
-          )}
+          {hasText && <PresentedFileLinkProvider files={presentedFiles} tabId={tabId} hostId={hostId}>
+            <Markdown text={item.text} streaming={item.streaming} cacheKey={item.id} wasStreamed={item.wasStreamed} />
+          </PresentedFileLinkProvider>}
           <Suspense fallback={null}><SearchSourcesPanel sources={item.searchSources} /></Suspense>
         </div>
       )}

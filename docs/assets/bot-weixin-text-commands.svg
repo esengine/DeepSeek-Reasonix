@@ -32,5 +32,5 @@
   <circle cx="698" cy="434" r="6" fill="#ffaa33"/>
   <text x="718" y="442" fill="#e9eef8" font-family="Inter, Arial, sans-serif" font-size="18">Ask: send /answer ask-1 2.</text>
   <rect x="684" y="494" width="418" height="52" rx="14" fill="#242933"/>
-  <text x="710" y="527" fill="#ffffff" font-family="Menlo, Consolas, monospace" font-size="18">/yolo status</text>
+  <text x="710" y="527" fill="#ffffff" font-family="Menlo, Consolas, monospace" font-size="18">/mode status</text>
 </svg>

@@ -1,15 +1,15 @@
 import type { ComponentProps } from "react";
 import { Transcript } from "../components/Transcript";
-import { TranscriptKernelClockContext } from "../lib/useTranscriptKernel";
-import type { TranscriptKernelClock } from "../lib/transcriptKernel";
+import type { TranscriptTestClock } from "./transcript-test-clock";
 
 export function TranscriptTestSurface({
   viewportHeight,
   rowHeight,
   kernelClock,
   ...props
-}: ComponentProps<typeof Transcript> & { viewportHeight: number; rowHeight: number; kernelClock?: TranscriptKernelClock }) {
+}: ComponentProps<typeof Transcript> & { viewportHeight: number; rowHeight: number; kernelClock?: TranscriptTestClock }) {
   void viewportHeight;
   void rowHeight;
-  return <TranscriptKernelClockContext.Provider value={kernelClock}><Transcript {...props} /></TranscriptKernelClockContext.Provider>;
+  void kernelClock;
+  return <Transcript {...props} />;
 }

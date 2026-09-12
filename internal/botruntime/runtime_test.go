@@ -60,8 +60,8 @@ func TestMergeLegacyDingtalkChannel(t *testing.T) {
 	if plat.Model != "deepseek/deepseek-v4-flash" {
 		t.Fatalf("channel model = %q, want deepseek/deepseek-v4-flash", plat.Model)
 	}
-	if plat.ToolApprovalMode != "yolo" {
-		t.Fatalf("channel tool_approval_mode = %q, want yolo", plat.ToolApprovalMode)
+	if plat.ToolApprovalMode != "workspace-write" {
+		t.Fatalf("channel tool_approval_mode = %q, want workspace-write", plat.ToolApprovalMode)
 	}
 	if plat.WorkspaceRoot != "/tmp/work" {
 		t.Fatalf("channel workspace_root = %q, want /tmp/work", plat.WorkspaceRoot)
@@ -494,18 +494,18 @@ func TestConnectionChannelConfigsPreserveToolApprovalMode(t *testing.T) {
 	}
 
 	byConnection := ConnectionChannelConfigs(connections, true, true)
-	if got := byConnection["feishu-feishu"].ToolApprovalMode; got != "auto" {
-		t.Fatalf("feishu tool approval mode = %q, want auto", got)
+	if got := byConnection["feishu-feishu"].ToolApprovalMode; got != "workspace-write" {
+		t.Fatalf("feishu tool approval mode = %q, want workspace-write", got)
 	}
-	if got := byConnection["feishu-lark"].ToolApprovalMode; got != "yolo" {
-		t.Fatalf("lark tool approval mode = %q, want yolo", got)
+	if got := byConnection["feishu-lark"].ToolApprovalMode; got != "workspace-write" {
+		t.Fatalf("lark tool approval mode = %q, want workspace-write", got)
 	}
-	if got := byConnection["weixin-weixin"].ToolApprovalMode; got != "ask" {
-		t.Fatalf("weixin tool approval mode = %q, want explicit ask override", got)
+	if got := byConnection["weixin-weixin"].ToolApprovalMode; got != "read-only" {
+		t.Fatalf("weixin tool approval mode = %q, want explicit read-only override", got)
 	}
 
 	byPlatform := ChannelConfigs(connections, true, true)
-	if got := byPlatform[bot.PlatformFeishu].ToolApprovalMode; got != "yolo" {
+	if got := byPlatform[bot.PlatformFeishu].ToolApprovalMode; got != "workspace-write" {
 		t.Fatalf("platform feishu tool approval mode = %q, want last enabled Feishu/Lark override", got)
 	}
 }
@@ -562,7 +562,7 @@ func TestRouteConfigsPreserveRemoteOverrides(t *testing.T) {
 	if got.ConnectionID != "feishu-lark" || got.Platform != bot.PlatformFeishu || got.ChatType != bot.ChatGroup || got.ChatID != "group-1" {
 		t.Fatalf("route match fields = %+v, want trimmed remote match", got)
 	}
-	if got.Channel.Model != "route-model" || got.Channel.WorkspaceRoot != "/route" || got.Channel.ToolApprovalMode != "yolo" {
+	if got.Channel.Model != "route-model" || got.Channel.WorkspaceRoot != "/route" || got.Channel.ToolApprovalMode != "danger-full-access" {
 		t.Fatalf("route channel = %+v, want normalized overrides", got.Channel)
 	}
 }

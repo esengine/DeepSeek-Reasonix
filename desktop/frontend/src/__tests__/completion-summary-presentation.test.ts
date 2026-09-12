@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { completionSummaryPresentation, normalizeCompletionSummary } from "../lib/completionSummary";
 import { mergeTurnResult, normalizeTurnChanges, turnChangeText, turnCheckState } from "../lib/turnResult";
 import { historicalResultNotice, withTurnResult, withRunningChecks } from "../lib/completionResultState";
-import { partitionTurnItems } from "../lib/transcriptRows";
+import { ChatSource } from "../lib/chatViewSource";
 import { initialState, reducer, type State, type Item } from "../lib/useController";
 import { t } from "../lib/i18n";
 import type { TurnChanges } from "../lib/types";
@@ -43,8 +43,10 @@ const history = historicalResultNotice({ role: "notice", content: "", completion
 assert.equal(history?.completionSummary?.receipt?.diff?.id, diff.id);
 assert.equal(history?.completionSummary?.checkpointTurn, 0);
 const answer: Item = { kind: "assistant", id: "a0", text: "done", reasoning: "", streaming: false };
-const outside = partitionTurnItems([history!, answer]).flatMap(p => p.outsideItems);
-assert.deepEqual(outside.map(i => i.id), ["a0", "history"], "sidecar placement preserves a result footer");
+const source = new ChatSource("completion-results");
+source.update({ items: [user, history!, answer], running: false, hydrating: false, hasOlder: false, loadingOlder: false });
+assert.equal(source.getNodeSnapshot("history")?.kind, "notice", "historical results survive as ordinary records");
+source.dispose();
 for (const phase of ["checking", "verifying", "working", "reviewing"]) {
   const plain: State = { ...initialState, items: [user], seq: 1 };
   const next = reducer(plain, { type: "event", e: { kind: "turn_phase", phase } });

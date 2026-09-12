@@ -8,6 +8,10 @@ import "encoding/json"
 type WriteAccessDeclaration struct {
 	Directories   []string
 	Justification string
+	// RequestedPreset is a stable, tool-declared per-call escalation request.
+	// The host remains authoritative and may reject it before execution.
+	RequestedPreset string
+	DenialID        string
 }
 
 // WriteAccessDeclarer is implemented by built-in tools that can name the local

@@ -1,7 +1,6 @@
 package builtin
 
 import (
-	"context"
 	"encoding/json"
 	"os"
 	"os/exec"
@@ -30,7 +29,7 @@ func runPS(t *testing.T, command string) (string, error) {
 	t.Helper()
 	b := bash{shell: sandbox.Shell{Kind: sandbox.ShellPowerShell, Path: powershellPath(t)}}
 	args, _ := json.Marshal(map[string]string{"command": command})
-	return b.Execute(context.Background(), args)
+	return b.Execute(sandbox.WithPermissionPreset(t.Context(), "danger-full-access"), args)
 }
 
 func TestBashPowerShellRunsNativeCommand(t *testing.T) {
@@ -59,7 +58,7 @@ func TestBashPowerShellRejectsChaining(t *testing.T) {
 	b := bash{shell: sandbox.Shell{Kind: sandbox.ShellPowerShell, Path: "powershell"}}
 	for _, cmd := range []string{"echo a && echo b", "echo a || echo b"} {
 		args, _ := json.Marshal(map[string]string{"command": cmd})
-		out, err := b.Execute(context.Background(), args)
+		out, err := b.Execute(sandbox.WithPermissionPreset(t.Context(), "danger-full-access"), args)
 		if err == nil {
 			t.Errorf("%q should be rejected on powershell, got out=%q", cmd, out)
 		} else if !strings.Contains(err.Error(), "PowerShell") {
@@ -86,7 +85,7 @@ func TestBashPwshAllowsChaining(t *testing.T) {
 	// pwsh (PowerShell 7+) parses && — the guard must not block it.
 	b := bash{shell: sandbox.Shell{Kind: sandbox.ShellPowerShell, Path: "pwsh"}}
 	args, _ := json.Marshal(map[string]string{"command": "echo a && echo b"})
-	_, err := b.Execute(context.Background(), args)
+	_, err := b.Execute(sandbox.WithPermissionPreset(t.Context(), "danger-full-access"), args)
 	if err != nil && strings.Contains(err.Error(), "does not parse") {
 		t.Errorf("pwsh should not be blocked by the chaining guard: %v", err)
 	}
@@ -156,7 +155,7 @@ func assertPowerShellDetailedContract(t *testing.T, psPath string) {
 	argsOK, _ := json.Marshal(map[string]string{
 		"command": "Get-Content -LiteralPath .\\标记.txt -Encoding utf8; Write-Output '中文-ok'",
 	})
-	res, err := b.ExecuteDetailed(context.Background(), argsOK)
+	res, err := b.ExecuteDetailed(sandbox.WithPermissionPreset(t.Context(), "danger-full-access"), argsOK)
 	if err != nil {
 		t.Fatalf("success path: %v out=%q", err, res.Output)
 	}
@@ -196,7 +195,7 @@ func assertPowerShellDetailedContract(t *testing.T, psPath string) {
 
 	// Non-zero exit: preserve real code and execution failure phase.
 	argsFail, _ := json.Marshal(map[string]string{"command": "exit 17"})
-	fail, err := b.ExecuteDetailed(context.Background(), argsFail)
+	fail, err := b.ExecuteDetailed(sandbox.WithPermissionPreset(t.Context(), "danger-full-access"), argsFail)
 	if err == nil {
 		t.Fatal("exit 17 should error")
 	}
@@ -212,7 +211,7 @@ func TestBashPowerShell51PreflightRejectsAndAndDetailed(t *testing.T) {
 	// Runs on every OS: pure preflight, no process launch.
 	b := bash{shell: sandbox.Shell{Kind: sandbox.ShellPowerShell, Path: "powershell"}}
 	args, _ := json.Marshal(map[string]string{"command": "echo a && echo b"})
-	res, err := b.ExecuteDetailed(context.Background(), args)
+	res, err := b.ExecuteDetailed(sandbox.WithPermissionPreset(t.Context(), "danger-full-access"), args)
 	if err == nil {
 		t.Fatal("expected preflight rejection")
 	}

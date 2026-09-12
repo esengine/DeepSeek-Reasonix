@@ -1,19 +1,17 @@
 import { useEffect, type Dispatch, type MutableRefObject, type SetStateAction } from "react";
 import type { TabMeta } from "../lib/types";
 import { hydrateComposerProfileFromMeta, hydrateComposerProfilesFromTabs, pruneUserPlanModeIntents, type ComposerProfile, type UserPlanModeIntents } from "../lib/composerProfile";
-import type { RestorableToolApprovalMode } from "../lib/toolApprovalMode";
 
 export function useTabProjectionLifecycle(input: {
   tabs: readonly TabMeta[];
   activeTabId?: string | null;
   activeMeta: TabMeta | null | undefined;
   meta: Parameters<typeof hydrateComposerProfileFromMeta>[2] | null | undefined;
-  yoloRestoreRef: MutableRefObject<Record<string, RestorableToolApprovalMode>>;
   planIntentsRef: MutableRefObject<UserPlanModeIntents>;
   setOrder: Dispatch<SetStateAction<string[]>>;
   setProfiles: Dispatch<SetStateAction<Record<string, ComposerProfile>>>;
 }) {
-  const { tabs, activeTabId, meta, yoloRestoreRef, planIntentsRef, setOrder, setProfiles } = input;
+  const { tabs, activeTabId, meta, planIntentsRef, setOrder, setProfiles } = input;
   useEffect(() => {
     const ids = tabs.map((tab) => tab.id);
     setOrder((current) => {
@@ -22,12 +20,9 @@ export function useTabProjectionLifecycle(input: {
       return next.join("\u0000") === current.join("\u0000") ? current : next;
     });
     const present = new Set(ids);
-    for (const id of Object.keys(yoloRestoreRef.current)) {
-      if (!present.has(id)) delete yoloRestoreRef.current[id];
-    }
     planIntentsRef.current = pruneUserPlanModeIntents(planIntentsRef.current, present);
     setProfiles((current) => hydrateComposerProfilesFromTabs(current, [...tabs]));
-  }, [planIntentsRef, setOrder, setProfiles, tabs, yoloRestoreRef]);
+  }, [planIntentsRef, setOrder, setProfiles, tabs]);
 
   useEffect(() => {
     if (!activeTabId || !meta) return;

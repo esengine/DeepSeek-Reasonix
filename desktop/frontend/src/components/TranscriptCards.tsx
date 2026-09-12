@@ -4,12 +4,13 @@
 import { useState } from "react";
 import { CheckCheck, ChevronRight, CirclePlay, ClipboardCheck, FileSearch, Info, TriangleAlert } from "lucide-react";
 import { useT } from "../lib/i18n";
-import type { CompactionItem, NoticeItem } from "../lib/transcriptRows";
+import type { Item } from "../lib/useController";
+type CompactionItem = Extract<Item, { kind: "compaction" }>;
+type NoticeItem = Extract<Item, { kind: "notice" }>;
 import type { WireCompletionSummary } from "../lib/types";
 import { TurnResultSummary } from "./TurnResultSummary";
 import { STEER_NOTICE_PREFIX } from "../lib/useController";
 import { ProcessCompactIcon, ProcessPhaseIcon } from "./ProcessCard";
-import { useTranscriptUserResizeIntent } from "./TranscriptLayoutIntentContext";
 
 export function PhaseCard({ id, text }: { id: string; text: string }) {
   return <div className="phase" data-entrance={id}><ProcessPhaseIcon size={12} /><span>{text}</span></div>;
@@ -107,7 +108,12 @@ export function NoticeCard({ item, onAction, onAccept, onOpenVerification, actio
             ) : null}
           </div>
         ) : null}
-        {item.detail ? (
+        {result ? (
+          <details className="notice-line__details">
+            <summary>{t("notice.details")}</summary>
+            <pre>{JSON.stringify(result, null, 2)}</pre>
+          </details>
+        ) : item.detail ? (
           <details className="notice-line__details">
             <summary>{t("notice.details")}</summary>
             <div>{item.detail}</div>
@@ -121,13 +127,12 @@ export function NoticeCard({ item, onAction, onAccept, onOpenVerification, actio
 export function CompactionCard({ item }: { item: CompactionItem }) {
   const t = useT();
   const [open, setOpen] = useState(false);
-  const beginUserResize = useTranscriptUserResizeIntent();
   if (item.pending) {
     return <div className="compaction compaction--pending" data-entrance={item.id} data-transcript-layout-variant="static"><ProcessCompactIcon size={12} /><span>{t("compaction.working")}</span></div>;
   }
   return (
     <div className="compaction" data-entrance={item.id} data-transcript-layout-variant={open ? "compaction-expanded" : "compaction-collapsed"}>
-      <button type="button" className="compaction__head" onClick={() => { beginUserResize(); setOpen((v) => !v); }} aria-expanded={open}>
+      <button type="button" className="compaction__head" onClick={() => {  setOpen((v) => !v); }} aria-expanded={open}>
         <ProcessCompactIcon size={12} />
         <span>{t("compaction.title")}</span>
         <span className="compaction__meta">{t("compaction.messages", { n: item.messages })}{item.trigger ? ` · ${item.trigger}` : ""}</span>

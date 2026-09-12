@@ -21,7 +21,6 @@ export type ShortcutAction =
   | "textSize.increase"
   | "textSize.decrease"
   | "textSize.reset"
-  | "toolApproval.yolo"
   | "shortcuts.show"
   | "topic.goto.1"
   | "topic.goto.2"
@@ -216,15 +215,6 @@ export const SHORTCUT_DEFINITIONS: readonly ShortcutDefinition[] = [
     descriptionKey: "shortcuts.desc.textSizeReset",
     defaults: modCombo("0"),
     preventDefault: true,
-  },
-  {
-    action: "toolApproval.yolo",
-    section: "tools",
-    labelKey: "shortcuts.action.yoloToggle",
-    descriptionKey: "shortcuts.desc.yoloToggle",
-    defaults: modCombo("y"),
-    preventDefault: true,
-    allowInEditable: true,
   },
   {
     action: "shortcuts.show",

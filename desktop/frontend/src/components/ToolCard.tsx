@@ -44,8 +44,7 @@ import { isBatchedReadOnlyTool, isTerminalSubagentPhase, type Item, type Subagen
 import type { Translator } from "../lib/i18n";
 import { ReadOnlyBatch } from "./ReadOnlyBatch";
 import { useWorkProcessPresentation } from "../lib/sessionExperience";
-import { useTranscriptUserResizeIntent } from "./TranscriptLayoutIntentContext";
-import { resolveToolCardDefaultOpen } from "../lib/transcriptRowGeometry";
+import { resolveToolCardDefaultOpen } from "../lib/toolCardDisclosure";
 import { useArchivedToolData } from "../lib/useArchivedToolData";
 import type { SearchSourcePresentation } from "../lib/searchSourcesPresentation";
 
@@ -225,7 +224,6 @@ function splitPreview(text: string, n: number): { preview: string; total: number
 // the sub-agent's work is visible as it happens.
 export const ToolCard = memo(function ToolCard({ item, subcalls, tabId, displayName }: { item: ToolItem; subcalls?: ToolItem[]; tabId?: string; displayName?: string }) {
   const t = useT();
-  const beginUserResize = useTranscriptUserResizeIntent();
   const nested = subcalls ?? [];
   const hasNested = nested.length > 0;
   const isSubagent = SUBAGENT_TOOLS.has(item.name);
@@ -415,7 +413,7 @@ export const ToolCard = memo(function ToolCard({ item, subcalls, tabId, displayN
         type="button"
         className="tool__head"
         data-running={item.status === "running" ? "" : undefined}
-        onClick={() => { if (hasBody) { beginUserResize(); setUserOpen(!open); } }}
+        onClick={() => { if (hasBody) {  setUserOpen(!open); } }}
         aria-expanded={hasBody ? open : undefined}
         aria-label={a11yLabel}
       >
@@ -459,7 +457,7 @@ export const ToolCard = memo(function ToolCard({ item, subcalls, tabId, displayN
         {open && (fullDataLoading || fullDataFailed) && (
           <div className="tool__data-status" role={fullDataFailed ? "alert" : "status"}>
             <span>{t(fullDataFailed ? "tool.loadFailed" : "common.loading")}</span>
-            {fullDataFailed && tabId && <button type="button" className="btn btn--small" onClick={() => { beginUserResize(); retryFullData(); }}>{t("common.retry")}</button>}
+            {fullDataFailed && tabId && <button type="button" className="btn btn--small" onClick={() => {  retryFullData(); }}>{t("common.retry")}</button>}
           </div>
         )}
 
@@ -481,14 +479,14 @@ export const ToolCard = memo(function ToolCard({ item, subcalls, tabId, displayN
               showReasoning={presentation.showWhileRunning}
               reasoningOpen={subagentReasoningOpen}
               onReasoningToggle={() => {
-                beginUserResize();
+
                 subagentReasoningUserOverridden.current = true;
                 const next = !subagentReasoningOpen;
                 if (next) setUserOpen(true);
                 setSubagentReasoningOpen(next);
               }}
               onReasoningOpen={() => {
-                beginUserResize();
+
                 subagentReasoningUserOverridden.current = true;
                 setUserOpen(true);
                 setSubagentReasoningOpen(true);
@@ -547,7 +545,7 @@ export const ToolCard = memo(function ToolCard({ item, subcalls, tabId, displayN
           <>
             <CodeViewer value={showAll ? shellOutput! : shellPreview.preview} maxHeight={showAll ? 480 : 260} />
             {shellPreview.hasMore && !showAll && (
-              <button className="tool__showall" onClick={() => { beginUserResize(); setShowAll(true); }}>
+              <button className="tool__showall" onClick={() => {  setShowAll(true); }}>
                 {t("tool.showAllLines", { n: shellPreview.total })}
               </button>
             )}
@@ -624,7 +622,7 @@ export const ToolCard = memo(function ToolCard({ item, subcalls, tabId, displayN
                 <button
                   type="button"
                   className="tool__err-toggle"
-                  onClick={() => { beginUserResize(); setShowErrorDetails((value) => !value); }}
+                  onClick={() => {  setShowErrorDetails((value) => !value); }}
                   aria-expanded={showErrorDetails}
                 >
                   <ChevronRight className={`tool__err-toggle-icon${showErrorDetails ? " tool__err-toggle-icon--open" : ""}`} size={12} aria-hidden="true" />

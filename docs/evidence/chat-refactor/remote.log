@@ -1,0 +1,448 @@
+
+> reasonix-desktop-frontend@0.0.0 test:remote <repo>/desktop/frontend
+> tsx src/__tests__/remote-workspace-launch.test.ts && tsx src/__tests__/remote-store.test.ts && tsx src/__tests__/remote-error-ux.test.tsx && tsx src/__tests__/remote-hosts-page.test.tsx && node --import ./scripts/css-stub-register.mjs --import tsx src/__tests__/remote-connect-wizard.test.tsx && tsx src/__tests__/add-project-entries.test.ts && tsx src/__tests__/remote-secret-dialog.test.tsx && node --import ./scripts/svg-stub-register.mjs --import tsx src/__tests__/remote-server-panel.test.tsx && node --import ./scripts/svg-stub-register.mjs --import tsx src/__tests__/remote-session-surface.test.tsx && tsx src/__tests__/remote-running-reconcile.test.ts && tsx src/__tests__/remote-project-tree.test.tsx && tsx src/__tests__/remote-session-cache.test.ts && tsx src/__tests__/remote-tab-opened.test.tsx && tsx src/__tests__/statusbar-workspace.test.tsx
+
+
+Remote workspace launch generations
+  PASS  opening host B does not cancel host A
+  PASS  host B keeps its own current request
+  PASS  a newer request supersedes the same host
+  PASS  the latest same-host request stays current
+  PASS  superseding host A does not cancel host B
+
+5 passed, 0 failed, 5 total
+  PASS  configured hosts hydrate persistent UI state
+  PASS  pending_hostkey sets fingerprint
+  PASS  stale dialog cannot clear newer fingerprint
+  PASS  resolution clears fingerprint
+  PASS  status recorded
+  PASS  pending_secret opens the one-shot credential dialog
+  PASS  status contains no credential plaintext
+  PASS  stale credential dialog cannot clear a newer prompt
+  PASS  one key prompt cannot clear the next key prompt
+  PASS  opaque prompt ID protects sequential prompts with identical metadata
+  PASS  credential resolution clears the prompt
+  PASS  setStatuses hydrates
+  PASS  attempt preserved
+  PASS  hydration preserves newer live status
+  PASS  hydration fills missing status
+  PASS  connection failures can request the anchored status popover
+  PASS  repeated failures create a fresh popover request
+  PASS  stale popover completion cannot clear a newer request
+  PASS  matching popover request is consumed
+  PASS  structured mismatch is recognized without parsing raw error text
+  PASS  mismatch uses the localized safe summary
+  PASS  legacy degraded status falls back to the warning summary
+  PASS  connection waiter resolves on live connected status
+  PASS  connection waiter rejects the host error without waiting for timeout
+  PASS  connection waiter exposes a typed timeout for recovery UI
+  PASS  connection timeout does not forge a backend terminal state
+  PASS  mock fan-out delivers status
+  PASS  unsubscribe stops delivery
+  PASS  first workspace keeps its entry
+  PASS  second workspace gets its own entry
+  PASS  updating one workspace leaves the other untouched
+  PASS  updated workspace reflects the new state
+
+32 passed, 0 failed
+  PASS  terminal connection failure opens the anchored Remote SSH popover
+  PASS  popover uses a localized security summary
+  PASS  primary error card hides machine-local diagnostics
+  PASS  key-details action opens the security dialog
+  PASS  security dialog shows the presented fingerprint
+  PASS  security dialog shows the conflicting known_hosts record
+  PASS  degraded connection uses a warning card
+  PASS  degraded warning explains that SSH remains connected
+  PASS  degraded warning does not claim the connection failed
+
+9 passed, 0 failed
+
+Remote SSH host settings
+  PASS  remove opens the in-app confirmation dialog
+  PASS  confirmation identifies the host being removed
+  PASS  host is not removed before confirmation
+  PASS  Cancel keeps the host and closes the dialog
+  PASS  edit form exposes password and private-key passphrase fields
+  PASS  saved credentials are represented without returning plaintext to the UI
+  PASS  explicit clear action is staged until Save
+  PASS  edit form offers the credential-mode select
+  PASS  save carries the chosen credential mode (got ["local-proxy"])
+  PASS  confirmed removal invokes the backend exactly once
+  PASS  host list refreshes after removal
+  PASS  legacy data card is hidden when no legacy files exist
+  PASS  legacy data card appears when legacy files are detected
+  PASS  legacy card shows the mirror file count
+  PASS  legacy card names the trust file
+  PASS  confirmed mirror cleanup calls the backend once
+  PASS  card hides after both artifacts are cleaned
+  PASS  cancelled cleanup does not call the backend
+
+18 passed, 0 failed
+
+Remote connect wizard (three steps)
+  PASS  stepper rail lists all three steps
+  PASS  step 1 is current on open
+  PASS  no step is done on open
+  PASS  auth, download, and credential mode use segmented sliders
+  PASS  config step shows the host input
+  PASS  host input uses an exact explicit label
+  PASS  opening the dialog focuses the first field
+  PASS  Shift+Tab from the first field wraps to the last action
+  PASS  Tab from the last action wraps to the first field
+  PASS  empty form reports host, username, and password
+  PASS  footer alert uses the warning mark
+  PASS  host field exposes the saved-connections arrow
+  PASS  saved-connections arrow stays outside the host label
+  PASS  arrow advertises its saved-host menu
+  PASS  arrow starts collapsed
+  PASS  focusing the host input alone no longer opens the list
+  PASS  clicking the arrow lists saved SSH connections
+  PASS  arrow reflects the expanded state
+  PASS  dropdown leads with the saved-connections caption
+  PASS  saved hosts use menu semantics
+  PASS  every saved host is exposed as a menu item
+  PASS  opening the menu moves focus to the first saved host
+  PASS  ArrowDown moves focus to the next saved host
+  PASS  Escape closes the keyboard-opened menu
+  PASS  Escape restores focus to the saved-host arrow
+  PASS  picking a suggestion prefills the host
+  PASS  picking a suggestion closes the list
+  PASS  picking a suggestion restores focus to the host input
+  PASS  saved key auth switches the form to key mode with the identity file
+  PASS  identity-file action uses the native desktop picker
+  PASS  native picker returns the absolute identity-file path
+  PASS  saved password host keeps a keep-existing placeholder
+  PASS  typing in the host field does not filter the dropdown
+  PASS  a pointer press on the host field keeps the list open
+  PASS  a pointer press outside the field closes the list
+  PASS  Escape closes the open list
+  PASS  Escape with the list open keeps the wizard open
+  PASS  Escape from a saved host restores focus to the arrow
+  PASS  clicking the open arrow toggles the list shut
+  PASS  no saved hosts hides the arrow entirely
+  PASS  the arrow returns once hosts exist again
+  PASS  picking gpu-box from the reopened list restores its host
+  PASS  next on a picked host updates it instead of adding a duplicate
+  PASS  no AddRemoteHost for a saved host
+  PASS  connecting step streams the deployment log
+  PASS  failed connect surfaces the kernel error
+  PASS  retry action is offered after a failed connect
+  PASS  Tab after a step transition returns focus to the dialog
+  PASS  retry keeps the wizard busy while the connection is pending
+  PASS  a connected host runs the platform check before the workspace step
+  PASS  an unsupported OS keeps the wizard on the connecting step
+  PASS  the platform failure surfaces the kernel error
+  PASS  directory browsing never starts for an unsupported host
+  PASS  retry stays available after a platform rejection
+  PASS  step 1 turns done (green check) after advancing
+  PASS  step 3 is current after connecting
+  PASS  workspace picker starts at RemoteLastWorkspace path
+  PASS  directory entries render
+  PASS  files render in the tree next to folders
+  PASS  clicking a file highlights the row
+  PASS  clicking a file selects its parent directory as the workspace
+  PASS  drilling into a directory lists its children
+  PASS  workspace step has no create-folder controls
+  PASS  newer directory response renders first
+  PASS  stale directory response cannot overwrite the latest path
+  PASS  finish opens the selected workspace in a new remote session tab
+  PASS  finish registers navigation before opening the remote tab
+  PASS  finish pins the selected remote workspace
+  PASS  the workspace is pinned before its session tab opens
+  PASS  the project tree refreshes after the session tab opens
+  PASS  wizard closes after a successful finish
+  PASS  a merged finish opens the canonical workspace through the navigation owner
+  PASS  wizard host form offers the credential-mode segmented control
+  PASS  local-proxy segment highlights when selected
+  PASS  a new host is added (label defaults to the host)
+  PASS  AddRemoteHost carries the chosen credential mode (got local-proxy)
+  PASS  rollback only removes a pin the wizard actually added (a merge owns none)
+  PASS  a merged finish notifies through onMerged
+
+78 passed, 0 failed
+
+Add-project entry matrix
+  PASS  workbench + menu offers the remote connection item wired to the wizard flow
+  PASS  workbench + menu keeps blank project and existing folder before remote connection
+  PASS  classic/creation + button opens a menu instead of the direct picker
+  PASS  classic/creation + menu is the two-item local/remote list
+  PASS  empty state pairs the local action with a remote connection action
+  PASS  remote wizard loads lazily through useProjectCreation
+  PASS  removed sidebar quick button leaves no JSX behind
+  PASS  no creation.sidebar.remote usage in App.tsx
+  PASS  creation.sidebar.remote removed from locale #1
+  PASS  projectTree.remoteConnection present in locale #1
+  PASS  creation.sidebar.remote removed from locale #2
+  PASS  projectTree.remoteConnection present in locale #2
+  PASS  creation.sidebar.remote removed from locale #3
+  PASS  projectTree.remoteConnection present in locale #3
+
+14 passed, 0 failed
+
+Remote SSH one-shot credential prompt
+  PASS  password request opens a masked input dialog
+  PASS  dialog identifies the SSH target
+  PASS  submit sends the prompt ID and secret once to the native bridge
+  PASS  resolved prompt is removed from shared UI state
+  PASS  secret plaintext is never rendered into the page
+
+5 passed, 0 failed
+
+Remote SSH Server tab (Open Remote Web)
+  PASS  server tab shows the unified Open Remote Web entry
+  PASS  server tab states that providers, API keys, and sessions are managed by the remote Reasonix configuration
+  PASS  Serve progress renders while starting
+  PASS  Open Remote Web is disabled while Serve is starting
+  PASS  Serve ready state renders
+  PASS  Open Remote Web is enabled once Serve is ready
+  PASS  Open Remote Web calls OpenRemoteWorkspace with the last workspace (got [{"hostId":"box","workspace":"/srv/app"}])
+  PASS  Open Remote Web registers navigation before launch
+  PASS  fresh host defaults its workspace to the SSH login home
+  PASS  Open Remote Web is enabled for a fresh host
+  PASS  fresh host opens the SSH login home (got [{"hostId":"box","workspace":"/srv/app"},{"hostId":"bare","workspace":"~"}])
+  PASS  status is fetched per workspace (the input's workspace)
+  PASS  stop targets the managed workspace (got [{"hostId":"box","workspace":"/srv/app"}])
+  PASS  switching the workspace keeps the other ready serve manageable
+  PASS  stop follows the workspace switch (got [{"hostId":"box","workspace":"/srv/app"},{"hostId":"box","workspace":"/srv/web"}])
+  PASS  both workspaces keep independent entries in the store
+
+16 passed, 0 failed, 16 total
+
+Remote session surface + hook
+An empty string ("") was passed to the src attribute. This may cause the browser to download the whole page again over the network. To fix this, either do not render the element at all or pass null to src instead of an empty string.
+  PASS  no bespoke log rows — the shared Transcript owns rendering
+  PASS  the surface renders no composer of its own
+  PASS  serve text frames render through the local transcript pipeline
+  PASS  reasoning renders through the local pipeline
+  PASS  a ready transition re-syncs the snapshot (session reset / reconnect path)
+  PASS  the re-synced snapshot replaces the old session content
+  PASS  turn_done refreshes remote goal/runtime status
+An empty string ("") was passed to the src attribute. This may cause the browser to download the whole page again over the network. To fix this, either do not render the element at all or pass null to src instead of an empty string.
+  PASS  approval card renders
+  PASS  approval subject renders
+  PASS  remote approval exposes session and persistent scopes
+  PASS  session grant forwards its approval scope
+  PASS  approval card clears after deciding
+  PASS  remote plan revision uses the specialized decision endpoint and preserves feedback
+  PASS  remote plan decisions never collapse into generic approval booleans
+  PASS  a failed approval command preserves the decision card
+  PASS  a failed approval command surfaces an actionable error
+  PASS  ask card renders
+  PASS  ask prompt renders
+  PASS  selecting an option keeps the ask open until explicit submit
+  PASS  a failed remote Ask answer preserves the card, surfaces the error, and re-enables retry
+  PASS  a successful remote Ask retry resubmits the complete answer and clears the card
+  PASS  custom AskCard text serializes as the remote question selection
+  PASS  remote extension form renders on the shared surface
+  PASS  remote extension form submits through the Serve proxy
+  PASS  remote extension form clears after an accepted submission
+  PASS  disconnect fixture has visible transcript content before connection loss
+  PASS  serve_down renders the warning state
+  PASS  recovery controls are outside the collapsible transcript main
+  PASS  disconnect retains the already loaded transcript
+  PASS  serve error detail renders
+  PASS  serve_down retry preserves the backend's parked session target
+  PASS  serve_down retry registers navigation before reopening the remote tab
+  PASS  serve_down retry failures render on the surface
+  PASS  live disconnected events do not render the placeholder
+  PASS  live disconnected events show connecting instead
+  PASS  live disconnected events trigger backend revival
+  PASS  restored shells recover through the authoritative snapshot when the ready event is missed
+  PASS  restored disconnected shells trigger backend revival
+  PASS  a successful fenced snapshot recovers a ready event missed before listener mount
+  PASS  snapshot status hydrates the authoritative remote composer profile
+  PASS  snapshot status hydrates effort and rewind checkpoints
+  PASS  remote hydration exposes the Serve command catalog instead of local commands
+  PASS  snapshot status hydrates remote context, usage, balance, cost, and jobs
+  PASS  goal-setting commands remain conversational turns
+  PASS  goal status and lifecycle actions remain synchronous management commands
+  PASS  session-changing management commands request authoritative rehydration
+  PASS  pending status recovers an SSE-dropped prompt through Serve
+  PASS  remote live-store notifications drive the shared composer ticker
+  PASS  turn_done refreshes goal status without replacing the transcript surface
+  PASS  turn_done reconciles durable history after dropped Serve frames
+  PASS  an answered approval cannot clear the next prompt
+  PASS  an answered ask cannot clear the next prompt
+  PASS  submit adds the optimistic user bubble through the shared reducer
+  PASS  management commands dispatch without conversational admission and refresh status
+  PASS  management commands do not add an optimistic user turn
+  PASS  remote compact waits for the dedicated endpoint and rehydrates history
+  PASS  session-changing management commands replace history from an authoritative snapshot
+  PASS  session-changing management commands still avoid an optimistic user turn
+  PASS  metadata-only remote commands preserve the transcript generation and viewport
+  PASS  status-only refresh updates goal status and quality floor
+  PASS  model switching refreshes the authoritative remote profile before the next turn
+  PASS  command forwarded: submit:tab-remote-2:run tests
+  PASS  command forwarded: cancel:tab-remote-2
+  PASS  command forwarded: approve:tab-remote-2:call-1:allow
+  PASS  command forwarded: answer:tab-remote-2:ask-1:[{"QuestionID":"q1","Selected":["yes"]}]
+  PASS  command forwarded: rewind:tab-remote-2:3:code
+  PASS  command forwarded: fork:tab-remote-2:3:
+  PASS  command forwarded: summarize:tab-remote-2:3:from
+  PASS  command forwarded: summarize:tab-remote-2:3:upto
+  PASS  command forwarded: model:tab-remote-2:remote/new-model
+  PASS  command forwarded: effort:tab-remote-2:high
+  PASS  command forwarded: quality-floor:tab-remote-2:delivery
+  PASS  command forwarded: pause-goal:tab-remote-2
+  PASS  command forwarded: resume-goal:tab-remote-2
+  PASS  command forwarded: steer:tab-remote-2:narrow the change
+  PASS  command forwarded: cancel-jobs:tab-remote-2:job-remote
+  PASS  switching remote tabs clears the previous model label before hydration
+  PASS  missing aggregate status is fetched before the remote composer becomes ready
+  PASS  remote history retains expandable tool args and output without a local rehydrate endpoint
+  PASS  exhausted ready-session hydration exposes a retryable error
+  PASS  explicit hydration retry recovers the surface
+  PASS  hydration replays concurrently delivered remote events
+  PASS  a ready generation re-hydrates after discarding the stale in-flight snapshot
+  PASS  ready-to-ready rotation hydrates the adopted session while old reconciliation is pending
+  PASS  session generation fence rejects stale history and hands reconciliation to the new generation
+  PASS  snapshot replays a prompt emitted while the remote tab was inactive
+  PASS  snapshot replays an extension form emitted while the remote tab was inactive
+  PASS  a remote mode transaction preserves approvals it did not drain
+  PASS  a remote mode transaction clears the exact approval it auto-allowed
+  PASS  unknown runtime does not settle a stream
+  PASS  finishing does not settle the transcript before completion
+  PASS  idle evidence for a previous turn cannot settle the current turn
+  PASS  another selected session cannot settle the current transcript
+  PASS  lost-completion fixture includes an active retry
+  PASS  trusted idle settles transcript, live stream, and turn activity together
+  PASS  lost completion restores durable content and removes the actual active DOM state
+  PASS  ordinary idle revisions do not repeatedly reload history
+  PASS  a newer idle revision of the old turn cannot settle an optimistic submission
+  PASS  old idle remains fenced after the next turn_started
+  PASS  history reconciliation cannot replace a newer streaming turn
+  PASS  late telemetry from the settled turn does not discard durable history
+
+101 passed, 0 failed
+  PASS  optimistic submit sets running
+  PASS  send_failed clears running
+  PASS  send_failed clears turnActive
+  PASS  send_failed marks the bubble failed
+  PASS  send_failed adds a notice
+  PASS  stale send_failed leaves a live turn running
+  PASS  turn_started sets running
+  PASS  turn_interrupted clears running
+  PASS  turn_interrupted clears turnActive
+  PASS  turn_interrupted clears cancellable
+  PASS  turn_interrupted adds a notice
+  PASS  turn_interrupted is a no-op when idle
+  PASS  provider_unreachable adds exactly one notice
+  PASS  repeat provider_unreachable replaces the notice
+  PASS  next turn clears the channel notice
+  PASS  idle /status snapshot clears running
+  PASS  idle /status snapshot clears turnActive
+  PASS  running /status snapshot restores running
+
+18 passed, 0 failed
+
+Remote project tree wiring
+  PASS  active remote group expansion uses host-qualified identity instead of local workspace fallback
+  PASS  session rows open the matching in-app remote session
+  PASS  remote group children render with the active workspace and session identity
+  PASS  sessions are fetched through the bridge
+  PASS  session fetch waits for a connected host
+  PASS  the remote menu exposes new-session, browser, stop, and unpin actions
+  PASS  remote groups swap out the local project menu
+  PASS  separate remote window registers its intent before switching the external surface
+  PASS  unpin removes the registration and refreshes the tree
+  PASS  the group row badge reflects the workspace-specific serve state
+  PASS  session fetches fence stale results, retain rows on passive failures, and clear recovered group errors
+  PASS  an explicit session refresh preserves the last successful rows and cache when Serve fails
+  PASS  remote command palettes hide local-only terminal and runtime reload actions
+  PASS  synthetic blank remote sessions still invoke rename, pin, and delete mutations
+  PASS  remote tab metadata updates refresh the affected session group
+  PASS  remote exports use the visible remote transcript
+  PASS  remote todo shelf projects the visible transcript without calling the local dismissal backend
+  PASS  the bridge exposes the explicit-intent ensure listing
+  PASS  a group click cold-starts the serve through the deduped, generation-fenced ensure listing
+  PASS  an explicit expand refreshes remote rows even when an optimistic cache exists
+  PASS  active remote ancestors come from the merged tree and host-qualified group identity
+  PASS  active synthesized remote rows are marked read when the merged session tree arrives
+  PASS  remote groups render retryable connect/error rows instead of going silent
+  PASS  session switches resume in the background behind a generation guard
+  PASS  remote groups never reach ListProjectTopics with their virtual root
+
+25 passed, 0 failed
+  PASS  restores a current versioned snapshot
+  PASS  does not persist a transient blank session with a generated path
+  PASS  expires stale snapshots
+  PASS  removes an expired snapshot from storage
+  PASS  invalidates the legacy unversioned array schema
+  PASS  removes an invalid legacy snapshot
+  PASS  rejects malformed optional row fields
+  PASS  removes a malformed versioned snapshot
+  PASS  normalizes Go-omitted zero-value title and turns
+  PASS  explicit removal clears an unpinned project cache
+
+10 remote session cache assertions passed.
+
+Remote tab opened/updated routing
+  PASS  opened events seed the new remote tab metadata
+  PASS  opened notifications cannot acquire navigation ownership
+  PASS  metadata updates patch the remote tab
+  PASS  metadata updates never steal focus
+  PASS  remote activation waits for navigation registration before backend focus
+  PASS  remote activation updates the selected tab
+  PASS  remote activation still binds backend focus
+  PASS  remote activation bypasses local history hydration
+  PASS  restored shell observes terminal state republished during activation
+
+9 passed, 0 failed
+
+status bar workspace
+  PASS  model-only migration keeps one workspace item
+  PASS  removed model with unknown entries remains compact
+  PASS  migration preserves valid order and merges branch duplicates
+  PASS  missing or invalid configuration retains defaults
+  PASS  missing or invalid configuration retains defaults
+  PASS  missing or invalid configuration retains defaults
+  PASS  migration stays compact after save and reload
+  PASS  workspace is a default configurable status item
+  PASS  branch is merged into the workspace setting
+  PASS  legacy workspace items merge at their first configured position
+  PASS  context status preserves a just-over-limit percentage
+  PASS  context status does not clamp an over-limit percentage to 100 percent
+  PASS  disconnected SSH entry keeps its full accessible status
+  PASS  disconnected SSH entry uses the compact idle treatment
+  PASS  disconnected SSH entry renders only the compact SSH label
+  PASS  window-level SSH entry leads the status bar
+  PASS  SSH entry includes host and connected state text
+  PASS  connected SSH entry renders a state dot
+  PASS  connected SSH entry renders the host without redundant state text
+  PASS  SSH entry keeps a recoverable failure summary visible
+  PASS  failed SSH entry keeps the failure visible in the status bar
+  PASS  status entry keeps raw connection diagnostics out of primary chrome
+  PASS  degraded SSH remains connected with a warning state
+  PASS  degraded SSH is not mislabeled as a failed connection
+  PASS  workspace path stays out of the visible branch label
+  PASS  workspace chip does not display sandbox path
+  PASS  git branch remains visible
+  PASS  workspace can be hidden by status item config
+  PASS  git branch can be hidden by status item config
+  PASS  combined chip shows only the current branch
+  PASS  legacy items render one combined chip
+  PASS  workspace path is not a separate visible label when a branch is available
+  PASS  legacy model setting cannot restore the removed model entry
+  PASS  status bar renders only configured status items, not mode indicators
+  PASS  status bar hides the operational jobs entry while idle
+  PASS  running background jobs remain visible outside configurable metrics
+  PASS  background jobs entry exposes the running count
+  PASS  a running detached task remains visible without child jobs
+  PASS  a jobless active runtime contributes to the recovery count
+  PASS  autoresearch is not a configurable status bar UI item
+  PASS  estimated token and cost metrics use an approximation marker
+  PASS  empty estimated metrics remain a plain dash
+  PASS  completed TPS uses provider-output time
+  PASS  fallback TPS is visibly marked as estimated
+  PASS  per-request TPS wins over the completed turn value
+  PASS  sub-one request TPS replaces the stale turn fallback
+  PASS  unmeasured latest requests clear the stale turn fallback
+  PASS  background jobs popover routes Stop to the selected job
+  PASS  global jobs route Stop to the owning detached task
+  PASS  global jobs can reopen the exact detached task
+  PASS  pending-prompt runtime explains why it remains active
+  PASS  a pending-prompt runtime can be reopened without child jobs
+  PASS  local jobs show in the status bar total
+  PASS  local background jobs remain visible
+
+54 passed, 0 failed, 54 total

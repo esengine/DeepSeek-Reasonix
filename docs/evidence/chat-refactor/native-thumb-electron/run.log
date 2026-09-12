@@ -1,0 +1,11 @@
+node:internal/modules/run_main:107
+    triggerUncaughtException(
+    ^
+
+page.waitForFunction: Timeout 30000ms exceeded.
+    at <repo>/desktop/frontend/bench/chat-transcript.mjs:71:20 {
+  log: [],
+  name: 'TimeoutError'
+}
+
+Node.js v24.19.0

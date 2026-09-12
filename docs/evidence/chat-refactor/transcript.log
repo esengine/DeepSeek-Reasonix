@@ -1,0 +1,395 @@
+
+> reasonix-desktop-frontend@0.0.0 test:transcript <repo>/desktop/frontend
+> tsx src/__tests__/chat-view-source.test.ts && tsx src/__tests__/chat-content-loader.test.ts && tsx src/__tests__/chat-details-race.test.tsx && tsx src/__tests__/markdown-natural-flow.test.tsx && tsx src/__tests__/chat-natural-flow.test.tsx && tsx src/__tests__/chat-scroll-controller.test.ts && tsx src/__tests__/markdown-pipeline.test.tsx && tsx src/__tests__/markdown-worker-client.test.ts && tsx src/__tests__/transcript-store.test.ts && tsx src/__tests__/transcript-snapshot-client.test.ts && tsx src/__tests__/transcript-scroll-diagnostics.test.ts && tsx src/__tests__/typography-overflow-contract.test.ts && tsx src/__tests__/nested-scroll-handoff.test.ts
+
+chat view: stable streaming, settlement, prepend, fold, incomplete history and disposal passed
+chat content: concurrency, deduplication, generation and cleanup races passed
+tool details: old target completion cannot overwrite the current drawer; session replacement closes details
+markdown natural flow: worker races, stable DOM/selection, final references, cache and complete blocks passed
+chat natural flow: process disclosure, details, 60-commit cascade and session isolation passed
+chat scroll: reader intent, prepend, growth, jump, no-op and stale observer tests passed
+
+markdown pipeline parity
+  PASS  code-fence fixture exceeds 100KB
+  PASS  headingsAndProse: pipeline render matches react-markdown
+  PASS  headingsAndProse: sliced blocks render identically (3 blocks)
+  PASS  gfmTable: pipeline render matches react-markdown
+  PASS  gfmTable: sliced blocks render identically (1 blocks)
+  PASS  taskList: pipeline render matches react-markdown
+  PASS  taskList: sliced blocks render identically (1 blocks)
+  PASS  strikethroughAutolink: pipeline render matches react-markdown
+  PASS  strikethroughAutolink: sliced blocks render identically (1 blocks)
+  PASS  mathInline: pipeline render matches react-markdown
+  PASS  mathInline: sliced blocks render identically (1 blocks)
+  PASS  mathBlockRepair: pipeline render matches react-markdown
+  PASS  mathBlockRepair: sliced blocks render identically (4 blocks)
+  PASS  mathInlinePipe: pipeline render matches react-markdown
+  PASS  mathInlinePipe: sliced blocks render identically (1 blocks)
+  PASS  footnotes: pipeline render matches react-markdown
+  PASS  footnotes: sliced blocks render identically (2 blocks)
+  PASS  crossBlockRefs: pipeline render matches react-markdown
+  PASS  crossBlockRefs: sliced blocks render identically (5 blocks)
+  PASS  mermaidFence: pipeline render matches react-markdown
+  PASS  mermaidFence: sliced blocks render identically (1 blocks)
+  PASS  bigCodeFence: pipeline render matches react-markdown
+  PASS  bigCodeFence: sliced blocks render identically (1 blocks)
+  PASS  cjk: pipeline render matches react-markdown
+  PASS  cjk: sliced blocks render identically (2 blocks)
+  PASS  rawHtml: pipeline render matches react-markdown
+  PASS  rawHtml: sliced blocks render identically (1 blocks)
+  PASS  unsafeAndFileLinks: pipeline render matches react-markdown
+  PASS  unsafeAndFileLinks: sliced blocks render identically (1 blocks)
+  PASS  manyBlocks: pipeline render matches react-markdown
+  PASS  manyBlocks: sliced blocks render identically (80 blocks)
+  PASS  empty fenced blocks do not render phantom code cards
+  PASS  text around empty fenced blocks remains visible
+  PASS  non-empty comment code blocks remain visible
+  PASS  non-empty comment code keeps its code-block surface
+  PASS  block keys are stable indexes
+  PASS  footnote section is the trailing block
+  PASS  footnote reference links survive slicing
+  PASS  footnote definition anchors survive slicing
+  PASS  urlTransform parity for "https://example.com/a?b=c#d"
+  PASS  urlTransform parity for "http://example.com"
+  PASS  urlTransform parity for "mailto:user@example.com"
+  PASS  urlTransform parity for "javascript:alert(1)"
+  PASS  urlTransform parity for "vbscript:x"
+  PASS  urlTransform parity for "data:text/html,boom"
+  PASS  urlTransform parity for "./relative/path"
+  PASS  urlTransform parity for "../up"
+  PASS  urlTransform parity for "/absolute"
+  PASS  urlTransform parity for "#fragment"
+  PASS  urlTransform parity for "query?only"
+  PASS  urlTransform parity for "ftp://example.com/file"
+  PASS  urlTransform parity for "file:///etc/passwd"
+  PASS  urlTransform parity for "HTTPS://EXAMPLE.COM/upper"
+  PASS  urlTransform parity for "ircs://irc.example.com/chan"
+  PASS  urlTransform parity for "xmpp:user@example.com"
+  PASS  urlTransform parity for "a:b:c"
+  PASS  urlTransform parity for ""
+  PASS  urlTransform parity for "C:\\src\\app.ts"
+  PASS  authority-form UNC survives pipeline URL sanitization
+  PASS  authority-form UNC href survives HAST rendering
+  PASS  unsafe local URL is blanked: file://./PhysicalDrive0
+  PASS  unsafe local URL is blanked: file:////?/C:/Windows
+  PASS  unsafe local URL is blanked: file:///C:/safe.txt:payload
+  PASS  unsafe local URL is blanked: file:///tmp/report.md?download=1
+  PASS  unsafe local URL is blanked: file:///tmp/report.md#section
+  PASS  content revision is deterministic
+  PASS  content revision distinguishes texts
+  PASS  hast byte estimate is positive and bounded
+  PASS  hast byte estimate grows with content
+
+markdown selection projection
+  PASS  selection projection preserves readable structure, code, tables, CJK, emoji and LaTeX
+  PASS  native DOM selection includes Unicode, links and complete code text
+  PASS  selection revision fingerprints projected UTF-16 text
+  PASS  large plain table uses the virtual table representation
+  PASS  virtual table projection includes rows that never mount in the DOM
+
+74 passed, 0 failed, 74 total
+
+markdown worker client
+  PASS  request posted to the worker
+  PASS  response resolves with the full parse result
+  PASS  pending map drains after a response
+  PASS  cancelled parse resolves undefined
+  PASS  cancelling active work terminates the stale parser
+  PASS  late response for a cancelled id is dropped
+  PASS  parse cancelled during worker startup resolves undefined
+  PASS  no pending entry survives an early cancel
+  PASS  worker parse error rejects with its message
+  PASS  pending map drains after an error
+  PASS  crashed worker rejects stranded requests
+  PASS  a fresh parse recreates the worker after a crash
+  PASS  recreated worker serves the retry
+  PASS  fallback resolves the parse result without a Worker
+  PASS  fallback receives the exact source text
+  PASS  dispose settles a pending request (1)
+  PASS  dispose settles a pending request (2)
+  PASS  dispose terminates the worker
+  PASS  dispose drains the pending map
+  PASS  parse after dispose resolves undefined immediately
+  PASS  no pending-request growth across 100 mixed cycles
+  PASS  no unhandled rejections across 100 mixed cycles
+  PASS  every cycle issued exactly one request
+  PASS  worker queue runs only one parse at a time
+  PASS  request ids increase monotonically
+
+25 passed, 0 failed, 25 total
+
+transcript store
+  PASS  paged read pause equals live and legacy history presentation
+  PASS  reloading a pause does not duplicate its card
+  PASS  latest page projects items
+  PASS  latest page reports older history
+  PASS  history user items retain their absolute turn for complete-session navigation
+  PASS  every paged user item carries an absolute history turn
+  PASS  paged concatenation equals single-shot conversion (228 items from 286 messages)
+  PASS  newest page item ids are stable across prepends
+  PASS  item ids are unique across the full projection
+  PASS  10,000-turn target paging reaches the first page
+  PASS  10,000-turn target paging respects both turn and production entry bounds
+  PASS  10,000-turn target paging performs the expected bounded backend calls
+  PASS  targeted pages use the backend's bounded 1000-entry capacity
+  PASS  10,000-turn target paging preserves every question
+  PASS  10,000-turn target paging lands on absolute turn one
+  PASS  10,000-turn target paging keeps the tail coordinate
+  PASS  10,000-turn target paging keeps item ids unique
+  PASS  10,000-turn transcript stays within the production history body budget
+  PASS  10,000-turn targeted paging completes within 10s (1190.8ms)
+  PASS  result row converts standalone before its call pages in
+  PASS  standalone result keeps the toolCallId item id
+  PASS  older page prepends
+  PASS  the standalone result item is superseded by the merged call item
+  PASS  exactly one tool item after the merge (no duplicate)
+  PASS  merged tool item takes the call's args
+  PASS  merged tool item takes the result's output
+  PASS  merged tool item is done
+  PASS  merged projection equals single-shot conversion
+  PASS  append contributes the new rows' items
+  PASS  append keeps existing item ids
+  PASS  append grows the projection
+  PASS  three sessions resident at the cap
+  PASS  fourth session evicts the least-recently-used one
+  PASS  new session stays resident
+  PASS  pinned sessions do not count toward the resident cap
+  PASS  pinned live session survives eviction
+  PASS  oldest unpinned session evicts instead
+  PASS  evicted session re-opens via a fresh slice fetch
+  PASS  re-opened session restores its full projection
+  PASS  history body budget holds across sessions
+  PASS  byte budget evicts the oldest by weight
+  PASS  newest session survives byte-budget eviction
+  PASS  markdown cache returns stored value
+  PASS  markdown LRU evicts the least-recently-used entry
+  PASS  recently read markdown entry survives
+  PASS  markdown entries key on entryId + revision
+  PASS  active selection pins its markdown projection
+  PASS  newest-page references stay lazy until the view requests them
+  PASS  the view can distinguish a missing full value from an unreferenced body
+  PASS  fixture fits in one page
+  PASS  resolved full content replaces the inline preview
+  PASS  content resolution notifies subscribers with item patches
+  PASS  resolved content is served from the record
+  PASS  resolved content is not re-fetched
+  PASS  stale ref keeps the inline preview
+  PASS  latest page still projects
+  PASS  superseded load discards its late response
+  PASS  the latest load wins
+  PASS  evicted session discards its late response
+  PASS  evicted records never land
+  PASS  the requested first-generation content is in flight
+  PASS  late content chunk from a previous generation is discarded
+  PASS  stale cursor triggers a latest-page reload
+  PASS  reload replaces with the fresh newest page
+  PASS  paging resumes after the reload
+  PASS  older page prepends after reload
+  PASS  matching canonical fingerprint reuses the resident projection
+  PASS  resident projection retains its canonical revision
+  PASS  changed same-path fingerprint bypasses the resident projection
+  PASS  fresh projection adopts the advanced canonical digest
+  PASS  positive legacy slice revision implies a known canonical identity
+  PASS  legacy tool parameters load completely
+  PASS  legacy tool output loads completely
+  PASS  legacy tool parameters load completely
+  PASS  legacy tool output loads completely
+  PASS  reopening reads only the selected tool's two references
+  PASS  full details leave the preview Item unchanged
+
+77 passed, 0 failed
+transcript snapshot client races, independent concurrent fields and complete tool details: ok
+transcript scroll diagnostics tests passed
+
+typography overflow contract
+  PASS  chat content can shrink beside the dock launcher
+  PASS  completed markdown wraps the same long tokens as the stream tail
+  PASS  reasoning wraps long tokens
+  PASS  inline reasoning wraps long tokens
+  PASS  .md pre retains its own wrapping contract
+  PASS  .md pre code retains its own wrapping contract
+  PASS  .md table retains its own wrapping contract
+  PASS  .md .katex retains its own wrapping contract
+  PASS  only complete commands opt into code wrapping
+  PASS  commands wrap continuous tokens
+  PASS  command loading and loaded views share the height cap
+  PASS  text-size presets include the large accessibility step
+  PASS  legacy sans alias stays synced with UI font
+  PASS  xxlarge has a real scale bump
+  PASS  status bar dock height scales with interface text size
+  PASS  layout reserves scaled status bar height
+  PASS  app height follows the live viewport height variable
+  PASS  empty transcript can scroll instead of clipping
+  PASS  welcome empty state is not clipped by its own box
+  PASS  non-transcript markdown still culls offscreen blocks with a 72px placeholder
+  PASS  natural chat uses real Markdown geometry
+  PASS  chat has one readable column
+  PASS  chat uses native vertical scrolling
+  PASS  normal chat inset is 24px
+  PASS  narrow chat inset is 16px
+  PASS  narrow details cover the chat surface
+  PASS  empty-state auto margins apply only to the welcome content
+  PASS  empty-state generic children do not receive auto margins
+  PASS  fixed status bar height follows the scaled dock token
+  PASS  status bar min-height follows the scaled dock token
+  PASS  brand list scrolls independently
+  PASS  provider detail can shrink within its column
+  PASS  long model IDs wrap within the detail
+  PASS  provider model rows grow with their content
+  PASS  provider model cards do not force undersized rows
+  PASS  provider model cards contain overflowing controls
+  PASS  compaction choices fit the settings control width
+  PASS  compaction rows align radio, label, percentage and explanation
+  PASS  compaction rows retain a stable click target
+  PASS  compaction explanations can shrink and wrap
+  PASS  percentage suffix remains visible beside the editable value
+  PASS  status bar keeps metrics on one row
+  PASS  status bar hides vertical overflow
+  PASS  .statusbar__model clips long text
+  PASS  .statusbar__model uses ellipsis
+  PASS  .statusbar__model stays on one line
+  PASS  .sidebar-im__summary-label clips long text
+  PASS  .sidebar-im__summary-label uses ellipsis
+  PASS  .sidebar-im__summary-label stays on one line
+  PASS  .sidebar-im__summary-status clips long text
+  PASS  .sidebar-im__summary-status uses ellipsis
+  PASS  .sidebar-im__summary-status stays on one line
+  PASS  .workbench-dock__tab-label clips long text
+  PASS  .workbench-dock__tab-label uses ellipsis
+  PASS  .workbench-dock__tab-label stays on one line
+  PASS  .workspace-files__scope-title clips long text
+  PASS  .workspace-files__scope-title uses ellipsis
+  PASS  .workspace-files__scope-title stays on one line
+  PASS  .workspace-files__scope-meta clips long text
+  PASS  .workspace-files__scope-meta uses ellipsis
+  PASS  .workspace-files__scope-meta stays on one line
+  PASS  .context-panel__section-head span clips long text
+  PASS  .context-panel__section-head span uses ellipsis
+  PASS  .context-panel__section-head span stays on one line
+  PASS  .context-panel__metric span clips long text
+  PASS  .context-panel__metric span uses ellipsis
+  PASS  .context-panel__metric span stays on one line
+  PASS  .context-panel__metric strong clips long text
+  PASS  .context-panel__metric strong uses ellipsis
+  PASS  .context-panel__metric strong stays on one line
+  PASS  .app--creation .context-panel__mini-stat-label clips long text
+  PASS  .app--creation .context-panel__mini-stat-label uses ellipsis
+  PASS  .app--creation .context-panel__mini-stat-label stays on one line
+  PASS  .app--creation .context-panel__mini-stat strong clips long text
+  PASS  .app--creation .context-panel__mini-stat strong uses ellipsis
+  PASS  .app--creation .context-panel__mini-stat strong stays on one line
+  PASS  .topbar__model clips long text
+  PASS  .topbar__model uses ellipsis
+  PASS  .topbar__model stays on one line
+  PASS  .composer-modebar__item span clips long text
+  PASS  .composer-modebar__item span uses ellipsis
+  PASS  .composer-modebar__item span stays on one line
+  PASS  .composer-more-menu__item span clips long text
+  PASS  .composer-more-menu__item span uses ellipsis
+  PASS  .composer-more-menu__item span stays on one line
+  PASS  creation dock skips zero-width grid interpolation on open
+  PASS  creation overview usage card disables inherited entrance animation
+  PASS  creation overview rows avoid edge-pinned value alignment
+  PASS  creation overview rows avoid the spacer grid that pushes values to the edge
+  PASS  creation overview values are not capped to a fixed 14ch width
+  PASS  session metric labels and rate badges share a compact header row
+  PASS  rate badges remain visible without truncating the amount row
+  PASS  rate badge labels stay intact
+  PASS  chat mode switcher contains enlarged labels
+  PASS  task method selector keeps its current state visible at narrow widths
+  PASS  task method selector truncates its value only when constrained
+  PASS  model selector uses the shared control weight
+  PASS  execution policy and model settings have a compact visual divider
+  PASS  composer enters icon-only mode before model and effort controls overlap
+  PASS  approval mode switcher shrinks with its compact composer container
+  PASS  ask approval restores the solid semantic fill
+  PASS  auto approval keeps high-contrast text on its solid fill
+  PASS  yolo approval restores the solid warning fill
+  PASS  task method menu uses the shared menu width
+  PASS  menu descriptions can wrap onto a second line
+  PASS  menu descriptions no longer use single-line ellipsis
+  PASS  task method selector uses the shared keyboard focus ring
+  PASS  model and effort selectors use the shared keyboard focus ring
+  PASS  active permission options retain keyboard focus feedback
+  PASS  creation assistant body text follows the conversation text size
+  PASS  themed assistant body text follows the conversation text size
+  PASS  creation assistant body follows the conversation font family
+  PASS  creation markdown follows the conversation font family
+  PASS  creation composer input follows the composer text size
+  PASS  interface text resolves its own exact regional size
+  PASS  conversation text resolves its own exact regional size
+  PASS  composer text resolves its own exact regional size
+  PASS  code text resolves its own exact regional size
+  PASS  code blocks keep the regional code font
+  PASS  inline code keeps the regional code font
+  PASS  nested code text inherits the regional code font
+  PASS  line-numbered code text inherits its viewer font
+  PASS  line-numbered code viewers use the regional code font
+  PASS  diff text follows the global scale until the code region is customized
+  PASS  message metadata keeps its regional size
+  PASS  composer metadata keeps the regional font
+  PASS  status bar keeps the regional font
+  PASS  conversation preview uses the exact conversation size
+  PASS  interface preview uses the exact interface size
+  PASS  composer preview uses the exact composer size
+  PASS  code preview uses the exact code size
+  PASS  metadata preview uses the exact supporting-text size
+  PASS  live preview renders the selected region's exact size
+  PASS  creation reasoning keeps the conversation font
+  PASS  creation tool names keep the code font
+  PASS  creation rules do not hardcode bare px font sizes (except font-size:0)
+  PASS  creation context-ring popover (portaled to body) follows interface text size
+  PASS  context-ring popover rules do not hardcode bare px font sizes (except font-size:0)
+  PASS  collapsed creation tool bodies keep mounted content clipped
+  PASS  collapsed creation tool bodies do not paint hidden tool text
+  PASS  composer compact controls activate at the capped theme width
+  PASS  markdown table wrapper scrolls horizontally
+  PASS  markdown table wrapper does not nest vertical scroll
+  PASS  markdown tables stay in document flow for trackpad Y
+  PASS  code blocks scroll horizontally instead of widening the layout
+  PASS  code blocks do not nest vertical scroll by default
+  PASS  settings center stacks navigation before the modal is too narrow
+  PASS  settings fields collapse to one column at the mid-width breakpoint
+  PASS  settings modal only becomes fullscreen at the narrow breakpoint
+  PASS  narrow workbench layout hides side panels and keeps chat single-column
+  PASS  .reasoning__head font size follows the text-size scale
+  PASS  .turn-collapse__reasoning-head font size follows the text-size scale
+  PASS  .process-card__head font size follows the text-size scale
+  PASS  .tool__difflabel font size follows the text-size scale
+  PASS  .msg-memory-citations font size follows the text-size scale
+  PASS  .msg-memory-citations__source font size follows the text-size scale
+  PASS  .msg-memory-citations__note font size follows the text-size scale
+  PASS  .msg-attachment__name font size follows the text-size scale
+  PASS  .msg-attachment__meta font size follows the text-size scale
+  PASS  .msg-pasted-head font size follows the text-size scale
+  PASS  .msg-pasted-expanded font size follows the text-size scale
+  PASS  .msg__send-failed font size follows the text-size scale
+  PASS  :root[data-theme-style] .process-card__kind font size follows the text-size scale
+  PASS  :root[data-theme-style] .msg--assistant > .process-card[data-tone="violet"] .process-card__name font size follows the text-size scale
+
+164 passed, 0 failed, 164 total
+
+nested scroll handoff
+  PASS  nested can scroll up from mid-body
+  PASS  nested can scroll down from mid-body
+  PASS  nested cannot scroll up at top
+  PASS  nested cannot scroll down at bottom
+  PASS  horizontal-only wrapper cannot scroll vertically
+  PASS  wheel-up at nested top should handoff to parent
+  PASS  wheel-up mid nested should not handoff
+  PASS  wheel over horizontal-only table wrapper handoffs vertical to parent
+  PASS  edge wheel is preventDefaulted
+  PASS  edge wheel promotes deltaY onto parent scrollTop
+  PASS  edge handoff notifies parent scroll intent
+  PASS  edge handoff reports normalized direction to the parent controller
+  PASS  latched gesture continues on parent
+  PASS  latched wheel keeps applying to parent
+  PASS  latched handoff keeps reporting normalized direction
+  PASS  mid nested wheel is left to the browser after latch expires
+  PASS  mid nested wheel does not move parent after latch expires
+  PASS  line-mode wheel deltas use a stable pixel fallback
+  PASS  page-mode wheel deltas use the transcript viewport height
+  PASS  line-mode handoff applies normalized pixels instead of raw lines
+  PASS  page-mode handoff applies one viewport page
+
+21 passed, 0 failed

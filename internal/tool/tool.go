@@ -101,6 +101,36 @@ type ImageTool interface {
 	ExecuteWithImages(ctx context.Context, args json.RawMessage) (text string, images []string, err error)
 }
 
+// PresentedFile is host-only metadata emitted by the built-in present tool.
+// Path is the exact stable resource reference recorded in the conversation; it
+// may be relative to the session workspace or an authorized absolute path.
+// File bytes never travel through this structure or provider requests.
+type PresentedFile struct {
+	Path        string `json:"path"`
+	Description string `json:"description,omitempty"`
+}
+
+type presentedFilesCollectorKey struct{}
+
+// WithPresentedFilesCollector installs the per-call collector consumed by the
+// agent after a successful execution. Keeping this out of the model-visible
+// result lets presentation metadata share the tool-result commit boundary.
+func WithPresentedFilesCollector(ctx context.Context) (context.Context, func() []PresentedFile) {
+	var files []PresentedFile
+	ctx = context.WithValue(ctx, presentedFilesCollectorKey{}, &files)
+	return ctx, func() []PresentedFile { return append([]PresentedFile(nil), files...) }
+}
+
+// RecordPresentedFiles publishes a validated, successful present result to the
+// current call collector. It is intentionally a no-op outside an agent call.
+func RecordPresentedFiles(ctx context.Context, files []PresentedFile) {
+	target, _ := ctx.Value(presentedFilesCollectorKey{}).(*[]PresentedFile)
+	if target == nil {
+		return
+	}
+	*target = append((*target)[:0], files...)
+}
+
 // PlanModeClassifier is an optional capability a Tool may implement to declare
 // its stance on running during the planning phase. It is deliberately distinct
 // from ReadOnly(): a tool can be side-effect-free yet belong only to the

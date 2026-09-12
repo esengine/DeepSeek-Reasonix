@@ -224,7 +224,7 @@ async function rendererTaskDuration(cdp) {
 const INTERACTIVE_FN = () => {
   const input = document.querySelector("textarea.composer__input:not([aria-hidden=true])");
   const inputReady = Boolean(input && !input.disabled);
-  const rows = document.querySelectorAll(".transcript__row").length;
+  const rows = document.querySelectorAll(".chat-node").length;
   return inputReady && rows > 0;
 };
 
@@ -283,7 +283,7 @@ async function settleMarkdownMounts(page, timeoutMs = 10_000) {
   try {
     await page.waitForFunction(() => (
       [...document.querySelectorAll(".transcript [data-markdown-blocks]")].every((element) => (
-        Number(element.getAttribute("data-markdown-visible-blocks")) > 0
+        Number(element.getAttribute("data-markdown-blocks")) > 0
       ))
     ), undefined, { timeout: timeoutMs, polling: 100 });
   } catch (error) {

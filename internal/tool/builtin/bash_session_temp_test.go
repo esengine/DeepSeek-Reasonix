@@ -35,6 +35,7 @@ func TestBashSharesSessionTempAcrossCalls(t *testing.T) {
 
 	for _, tc := range shells {
 		t.Run(tc.name, func(t *testing.T) {
+			ctx := sandbox.WithPermissionPreset(t.Context(), "danger-full-access")
 			m := sessiontemp.NewWithRoot(t.TempDir())
 			m.Retain()
 			defer m.Release()
@@ -57,11 +58,11 @@ func TestBashSharesSessionTempAcrossCalls(t *testing.T) {
 				writeCmd = `if (($env:TMPDIR -ne $env:TMP) -or ($env:TMPDIR -ne $env:TEMP)) { throw 'temporary environment variables differ' }; Set-Content -Path (Join-Path $env:TEMP '` + marker + `') -Value 'shared' -NoNewline`
 				readCmd = `Get-Content -Raw (Join-Path $env:TEMP '` + marker + `')`
 			}
-			if _, err := b.Execute(context.Background(), argsJSON(t, map[string]any{"command": writeCmd})); err != nil {
+			if _, err := b.Execute(ctx, argsJSON(t, map[string]any{"command": writeCmd})); err != nil {
 				t.Fatalf("write: %v", err)
 			}
 
-			out, err := b.Execute(context.Background(), argsJSON(t, map[string]any{"command": readCmd}))
+			out, err := b.Execute(ctx, argsJSON(t, map[string]any{"command": readCmd}))
 			if err != nil {
 				t.Fatalf("read: %v", err)
 			}

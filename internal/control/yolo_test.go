@@ -40,7 +40,7 @@ func TestAutoApproveToolsStillRequiresExplicitPlanApproval(t *testing.T) {
 			}
 		}),
 	})
-	c.SetAutoApproveTools(true)
+	c.SetToolApprovalMode(ToolApprovalDangerFullAccess)
 	c.SetPlanMode(true)
 
 	input := "实现 issue #2395：新增配置项、自动判断复杂任务、补测试和文档"
@@ -99,7 +99,7 @@ func TestRequestApprovalHonorsAutoApproveTools(t *testing.T) {
 			}
 		}),
 	})
-	c.SetAutoApproveTools(true)
+	c.SetToolApprovalMode(ToolApprovalDangerFullAccess)
 
 	done := make(chan bool, 1)
 	go func() {
@@ -176,7 +176,7 @@ func TestToolApprovalModeDontAskDeniesWithoutPrompt(t *testing.T) {
 	}
 }
 
-func TestToolApprovalModeAutoDrainsPendingFallbackApproval(t *testing.T) {
+func TestLegacyAutoMigrationDoesNotApprovePendingFallback(t *testing.T) {
 	approvalRequests := make(chan event.Approval, 1)
 	c := New(Options{
 		Policy: permission.New("ask", nil, nil, nil),
@@ -198,8 +198,9 @@ func TestToolApprovalModeAutoDrainsPendingFallbackApproval(t *testing.T) {
 		done <- allow
 	}()
 
+	var approval event.Approval
 	select {
-	case <-approvalRequests:
+	case approval = <-approvalRequests:
 	case <-time.After(30 * time.Second):
 		t.Fatal("approval request was not emitted")
 	}
@@ -208,13 +209,21 @@ func TestToolApprovalModeAutoDrainsPendingFallbackApproval(t *testing.T) {
 
 	select {
 	case err := <-errs:
+		t.Fatalf("requestApproval returned unexpectedly: %v", err)
+	case allow := <-done:
+		t.Fatalf("legacy auto migration resolved pending approval unexpectedly: allow=%v", allow)
+	case <-time.After(50 * time.Millisecond):
+	}
+	c.Approve(approval.ID, true, true, false)
+	select {
+	case err := <-errs:
 		t.Fatalf("requestApproval: %v", err)
 	case allow := <-done:
 		if !allow {
-			t.Fatal("pending fallback approval should be allowed when auto approval turns on")
+			t.Fatal("manual session approval returned deny")
 		}
 	case <-time.After(30 * time.Second):
-		t.Fatal("pending fallback approval stayed blocked after auto approval turned on")
+		t.Fatal("pending fallback approval stayed blocked after manual approval")
 	}
 	if c.AutoApproveTools() {
 		t.Fatal("auto mode must not report as YOLO")
@@ -295,7 +304,7 @@ func TestPlanApprovalIgnoresAutoApproveTools(t *testing.T) {
 			}
 		}),
 	})
-	c.SetAutoApproveTools(true)
+	c.SetToolApprovalMode(ToolApprovalDangerFullAccess)
 
 	done := make(chan bool, 1)
 	errs := make(chan error, 1)
@@ -339,10 +348,9 @@ func TestPlanApprovalIgnoresAutoApproveTools(t *testing.T) {
 	}
 }
 
-// TestSetAutoApproveToolsAllowsPendingApproval covers the desktop case where the
-// approval card is already visible, then the user switches to YOLO/full access.
-// Turning tool auto-approval on must unblock that pending tool gate too.
-func TestSetAutoApproveToolsAllowsPendingApproval(t *testing.T) {
+// Legacy SetAutoApproveTools conservatively maps to workspace access and must
+// not answer an approval created under an older permission revision.
+func TestSetAutoApproveToolsDoesNotResolvePendingApproval(t *testing.T) {
 	c, ids, _ := approvalIDs()
 
 	done := make(chan bool, 1)
@@ -356,8 +364,9 @@ func TestSetAutoApproveToolsAllowsPendingApproval(t *testing.T) {
 		done <- allow
 	}()
 
+	var approvalID string
 	select {
-	case <-ids:
+	case approvalID = <-ids:
 	case <-time.After(30 * time.Second):
 		t.Fatal("approval request was not emitted")
 	}
@@ -368,14 +377,15 @@ func TestSetAutoApproveToolsAllowsPendingApproval(t *testing.T) {
 	case err := <-errs:
 		t.Fatalf("requestApproval: %v", err)
 	case allow := <-done:
-		if !allow {
-			t.Fatal("pending approval should be allowed when tool auto-approval turns on")
-		}
-	case <-time.After(30 * time.Second):
-		t.Fatal("pending approval stayed blocked after tool auto-approval turned on")
+		t.Fatalf("legacy mode change answered pending approval: allow=%v", allow)
+	case <-time.After(50 * time.Millisecond):
 	}
-	if !c.AutoApproveTools() {
-		t.Fatal("tool auto-approval should remain on after draining pending approvals")
+	if c.AutoApproveTools() || c.ToolApprovalMode() != ToolApprovalWorkspaceWrite {
+		t.Fatalf("legacy mode = %q full=%v, want workspace-write without full access", c.ToolApprovalMode(), c.AutoApproveTools())
+	}
+	c.Approve(approvalID, true, false, false)
+	if allow := <-done; !allow {
+		t.Fatal("manual approval should allow")
 	}
 }
 
@@ -388,7 +398,7 @@ func TestSandboxEscapeApprovalIgnoresAutoApproveTools(t *testing.T) {
 			}
 		}),
 	})
-	c.SetAutoApproveTools(true)
+	c.SetToolApprovalMode(ToolApprovalDangerFullAccess)
 
 	type escapeResult struct {
 		allow  bool
@@ -421,7 +431,7 @@ func TestSandboxEscapeApprovalIgnoresAutoApproveTools(t *testing.T) {
 	case <-time.After(50 * time.Millisecond):
 	}
 
-	c.Approve(approval.ID, true, true, true)
+	c.Approve(approval.ID, true, true, false)
 	select {
 	case got := <-done:
 		if got.err != nil || !got.allow || got.reason != "" {
@@ -485,8 +495,8 @@ func TestSetAutoApproveToolsDoesNotDrainPendingPlanApproval(t *testing.T) {
 		t.Fatalf("SetAutoApproveTools must not auto-answer pending plan approval; got allow=%v", allow)
 	case <-time.After(50 * time.Millisecond):
 	}
-	if !c.AutoApproveTools() {
-		t.Fatal("tool auto-approval should turn on while plan approval stays pending")
+	if c.AutoApproveTools() || c.ToolApprovalMode() != ToolApprovalWorkspaceWrite {
+		t.Fatalf("legacy mode = %q full=%v, want workspace-write", c.ToolApprovalMode(), c.AutoApproveTools())
 	}
 
 	c.Approve(approval.ID, true, false, false)
@@ -546,8 +556,8 @@ func TestSetAutoApproveToolsDoesNotDrainPendingPlanModeReadOnlyCommandTrust(t *t
 		t.Fatalf("SetAutoApproveTools must not auto-answer plan-mode bash read-only command trust; got %+v", got)
 	case <-time.After(50 * time.Millisecond):
 	}
-	if !c.AutoApproveTools() {
-		t.Fatal("tool auto-approval should turn on while plan-mode bash read-only command trust stays pending")
+	if c.AutoApproveTools() || c.ToolApprovalMode() != ToolApprovalWorkspaceWrite {
+		t.Fatalf("legacy mode = %q full=%v, want workspace-write", c.ToolApprovalMode(), c.AutoApproveTools())
 	}
 
 	c.Approve(approval.ID, true, false, false)
@@ -561,10 +571,9 @@ func TestSetAutoApproveToolsDoesNotDrainPendingPlanModeReadOnlyCommandTrust(t *t
 	}
 }
 
-// TestSetModeYoloDrainsPendingApproval is the SetMode-path twin of the
-// SetAutoApproveTools case: applying YOLO atomically must also unblock an
-// approval already waiting.
-func TestSetModeYoloDrainsPendingApproval(t *testing.T) {
+// The legacy combined mode API no longer grants full access and cannot answer
+// an approval already waiting under another snapshot.
+func TestSetModeLegacyPermissionDoesNotResolvePendingApproval(t *testing.T) {
 	c, ids, _ := approvalIDs()
 
 	done := make(chan bool, 1)
@@ -573,8 +582,9 @@ func TestSetModeYoloDrainsPendingApproval(t *testing.T) {
 		done <- allow
 	}()
 
+	var approvalID string
 	select {
-	case <-ids:
+	case approvalID = <-ids:
 	case <-time.After(30 * time.Second):
 		t.Fatal("approval request was not emitted")
 	}
@@ -583,18 +593,16 @@ func TestSetModeYoloDrainsPendingApproval(t *testing.T) {
 
 	select {
 	case allow := <-done:
-		if !allow {
-			t.Fatal("pending approval should be auto-allowed when SetMode turns YOLO on")
-		}
-	case <-time.After(30 * time.Second):
-		t.Fatal("pending approval stayed blocked after SetMode(false, true)")
+		t.Fatalf("legacy SetMode answered pending approval: allow=%v", allow)
+	case <-time.After(50 * time.Millisecond):
+	}
+	c.Approve(approvalID, true, false, false)
+	if allow := <-done; !allow {
+		t.Fatal("manual approval should allow")
 	}
 }
 
-// TestSetModeAppliesBothGates checks SetMode sets plan and tool auto-approval
-// together so the composer never has to sequence two calls and risk a
-// half-applied window.
-func TestSetModeAppliesBothGates(t *testing.T) {
+func TestSetModeLegacyAppliesPlanAndWorkspacePermission(t *testing.T) {
 	c, _, _ := approvalIDs()
 
 	c.SetMode(true, false)
@@ -603,13 +611,13 @@ func TestSetModeAppliesBothGates(t *testing.T) {
 	}
 
 	c.SetMode(false, true)
-	if c.PlanMode() || !c.AutoApproveTools() {
-		t.Fatalf("yolo mode: plan=%v autoApproveTools=%v, want false/true", c.PlanMode(), c.AutoApproveTools())
+	if c.PlanMode() || c.AutoApproveTools() || c.ToolApprovalMode() != ToolApprovalWorkspaceWrite {
+		t.Fatalf("legacy write mode: plan=%v permission=%q", c.PlanMode(), c.ToolApprovalMode())
 	}
 
 	c.SetMode(true, true)
-	if !c.PlanMode() || !c.AutoApproveTools() {
-		t.Fatalf("plan + yolo mode: plan=%v autoApproveTools=%v, want true/true", c.PlanMode(), c.AutoApproveTools())
+	if !c.PlanMode() || c.AutoApproveTools() || c.ToolApprovalMode() != ToolApprovalWorkspaceWrite {
+		t.Fatalf("legacy plan mode: plan=%v permission=%q", c.PlanMode(), c.ToolApprovalMode())
 	}
 
 	c.SetMode(false, false)
@@ -636,8 +644,8 @@ func TestApplyModeUsesRunnerPlanPropagationOnce(t *testing.T) {
 	if runner.calls != 1 || !runner.last {
 		t.Fatalf("runner SetPlanMode calls=%d last=%v, want 1/true", runner.calls, runner.last)
 	}
-	if !c.PlanMode() || c.ToolApprovalMode() != ToolApprovalYolo {
-		t.Fatalf("controller plan=%v approval=%q, want true/yolo", c.PlanMode(), c.ToolApprovalMode())
+	if !c.PlanMode() || c.ToolApprovalMode() != ToolApprovalWorkspaceWrite {
+		t.Fatalf("controller plan=%v approval=%q, want true/workspace-write after legacy migration", c.PlanMode(), c.ToolApprovalMode())
 	}
 	c.SetPlanMode(false)
 	if runner.calls != 2 || runner.last {
@@ -691,7 +699,7 @@ func (t plannerUnsafeReadTool) Execute(context.Context, json.RawMessage) (string
 	return "executed", nil
 }
 
-func TestApplyModePropagatesPlanToCoordinatorPlannerAndKeepsYolo(t *testing.T) {
+func TestApplyModePropagatesPlanToCoordinatorPlannerAndMigratesLegacyYolo(t *testing.T) {
 	plannerCalls := 0
 	plannerTools := agent.PlannerToolRegistry(tool.NewRegistry())
 	plannerTools.Add(plannerUnsafeReadTool{calls: &plannerCalls})
@@ -711,8 +719,8 @@ func TestApplyModePropagatesPlanToCoordinatorPlannerAndKeepsYolo(t *testing.T) {
 	if plannerCalls != 0 {
 		t.Fatalf("planner phase-only tool executed %d times, want 0 while Plan is active", plannerCalls)
 	}
-	if !c.PlanMode() || c.ToolApprovalMode() != ToolApprovalYolo {
-		t.Fatalf("after run plan=%v approval=%q, want true/yolo", c.PlanMode(), c.ToolApprovalMode())
+	if !c.PlanMode() || c.ToolApprovalMode() != ToolApprovalWorkspaceWrite {
+		t.Fatalf("after run plan=%v approval=%q, want true/workspace-write", c.PlanMode(), c.ToolApprovalMode())
 	}
 }
 
@@ -874,7 +882,7 @@ func TestSetAutoApproveToolsDoesNotDrainPendingAsk(t *testing.T) {
 	done := askController(t, c, sampleAskQuestions())
 	ask := waitAskRequest(t, askCh)
 
-	c.SetAutoApproveTools(true)
+	c.SetToolApprovalMode(ToolApprovalDangerFullAccess)
 
 	select {
 	case result := <-done:
@@ -975,7 +983,7 @@ func TestAskSerializesBehindPromptLockEvenWithAutoApproveTools(t *testing.T) {
 	}
 
 	// Enable tool auto-approval while Ask is queued behind promptMu.
-	c.SetAutoApproveTools(true)
+	c.SetToolApprovalMode(ToolApprovalDangerFullAccess)
 	select {
 	case ask := <-askCh:
 		t.Fatalf("tool auto-approval must not let Ask bypass promptMu; got %#v", ask)
@@ -1084,12 +1092,10 @@ func TestAskSerializesBehindPromptLockEvenWithBypass(t *testing.T) {
 	}
 }
 
-// TestApplyToolApprovalModeReportsDrainedIDs pins the drain-report contract
-// the desktop frontend relies on (#6432): a posture switch returns exactly
-// the pending approval ids it auto-allowed, so the UI dismisses those cards
-// and keeps the ones still pending here. Fresh user decisions (plan) never
-// drain, and auto keeps approvals an allow policy would not cover.
-func TestApplyToolApprovalModeReportsDrainedIDs(t *testing.T) {
+// TestApplyToolApprovalModeDoesNotAuthorizePendingApprovals pins the preset
+// revision contract: changing the boundary never turns an older prompt into
+// an authorization. New calls evaluate the new preset from a fresh snapshot.
+func TestApplyToolApprovalModeDoesNotAuthorizePendingApprovals(t *testing.T) {
 	c := New(Options{
 		Policy: permission.New("ask", nil, []string{"bash(git commit*)"}, nil),
 	})
@@ -1099,16 +1105,13 @@ func TestApplyToolApprovalModeReportsDrainedIDs(t *testing.T) {
 	planID, planReply := c.approval.registerDecision(planApprovalTool, "", "", true, false)
 
 	drained := c.ApplyToolApprovalMode(ToolApprovalAuto)
-	if len(drained) != 1 || drained[0] != autoOKID {
-		t.Fatalf("auto drained = %v, want [%s]", drained, autoOKID)
+	if len(drained) != 0 {
+		t.Fatalf("workspace preset resolved old approvals: %v", drained)
 	}
 	select {
 	case r := <-autoOKReply:
-		if !r.allow {
-			t.Fatal("auto-drained approval must be auto-allowed")
-		}
+		t.Fatalf("workspace preset resolved old approval: %+v", r)
 	default:
-		t.Fatal("auto-drained approval reply not signaled")
 	}
 	select {
 	case <-askRuleReply:
@@ -1117,16 +1120,13 @@ func TestApplyToolApprovalModeReportsDrainedIDs(t *testing.T) {
 	}
 
 	drained = c.ApplyToolApprovalMode(ToolApprovalYolo)
-	if len(drained) != 1 || drained[0] != askRuleID {
-		t.Fatalf("yolo drained = %v, want [%s]", drained, askRuleID)
+	if len(drained) != 0 {
+		t.Fatalf("full-access preset resolved old approvals: %v", drained)
 	}
 	select {
 	case r := <-askRuleReply:
-		if !r.allow {
-			t.Fatal("yolo-drained approval must be auto-allowed")
-		}
+		t.Fatalf("full-access preset resolved old approval: %+v", r)
 	default:
-		t.Fatal("yolo-drained approval reply not signaled")
 	}
 
 	// The fresh plan decision survives both switches and stays pending.
@@ -1138,4 +1138,8 @@ func TestApplyToolApprovalModeReportsDrainedIDs(t *testing.T) {
 	if !c.approval.hasPending() {
 		t.Fatalf("plan approval %s should still be pending", planID)
 	}
+	// Clean up the synthetic pending approvals without granting them.
+	c.Approve(autoOKID, false, false, false)
+	c.Approve(askRuleID, false, false, false)
+	c.Approve(planID, false, false, false)
 }

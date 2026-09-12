@@ -60,7 +60,7 @@ func cliCompletionRootSpec() cliCompletionSpec {
 	resume := completionFlag("--resume -r", cliCompletionOptionalValue) // optional QUERY
 	effort := completionFlag("--effort", cliCompletionStaticValue, "auto", "low", "medium", "high", "max")
 	permissionMode := completionFlag("--permission-mode", cliCompletionStaticValue,
-		"manual", "ask", "auto", "acceptEdits", "dontAsk", "plan", "bypassPermissions")
+		"read-only", "workspace-write", "danger-full-access", "plan")
 	help := completionFlag("--help -h", cliCompletionNoValue)
 
 	interactiveFlags := []cliCompletionFlag{
@@ -69,7 +69,6 @@ func cliCompletionRootSpec() cliCompletionSpec {
 		completionFlag("--continue -c", cliCompletionNoValue),
 		resume,
 		completionFlag("--copy", cliCompletionNoValue),
-		completionFlag("--dangerously-skip-permissions --yolo", cliCompletionNoValue),
 		completionFlag("--dir", cliCompletionPathValue),
 		effort, permissionMode,
 		completionFlag("--add-dir", cliCompletionPathValue),
@@ -88,7 +87,6 @@ func cliCompletionRootSpec() cliCompletionSpec {
 		runResume,
 		completionFlag("--copy", cliCompletionNoValue),
 		effort, permissionMode,
-		completionFlag("--auto -y", cliCompletionNoValue),
 		completionFlag("--print -p", cliCompletionNoValue),
 		completionFlag("--events-jsonl", cliCompletionNoValue),
 		completionFlag("--output-format", cliCompletionStaticValue, "text", "json", "stream-json"),
@@ -104,7 +102,6 @@ func cliCompletionRootSpec() cliCompletionSpec {
 		completionFlag("--continue -c", cliCompletionNoValue),
 		resume,
 		completionFlag("--copy", cliCompletionNoValue),
-		completionFlag("--dangerously-skip-permissions --yolo", cliCompletionNoValue),
 		permissionMode,
 		effort,
 		completionFlag("--dir", cliCompletionPathValue),

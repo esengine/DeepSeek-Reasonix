@@ -12,6 +12,7 @@ import { app, onEvent, onReady, onRuntimeRebuilt, onTabMeta, onTopicActivation }
 import { startControllerEventRecovery } from "./controllerEventRecovery";
 import { metaFromTab } from "./controllerTabMeta";
 import { tokensFromQuarters, unbilledOutputTokens } from "./turnMetrics";
+import { normalizeToolApprovalMode } from "./types";
 export { metaFromTab } from "./controllerTabMeta";
 import { invalidateCache } from "./composerHistory";
 import { formatInboxCancelError } from "./inboxError";
@@ -35,7 +36,7 @@ import { applyLiveSegments, coalesceStreamDeltas, completeLiveReasoning, type St
 import { assistantHasContent, ensureActiveAssistant, ensureAssistant, removeEmptyAssistantItems } from "./assistantItems";
 import { getTranscriptStore } from "./transcriptStore";
 import { snapshotRecords, transcriptPageState, transcriptSnapshotState } from "./transcriptSnapshotState";
-import { resolveSnapshotItems, StaleCut, TranscriptSnapshotClient } from "./transcriptSnapshotClient";
+import { resolveSnapshotItems, resolveSnapshotTool, StaleCut, TranscriptSnapshotClient } from "./transcriptSnapshotClient";
 import type { TranscriptSnapshot } from "./transcriptProtocol";
 import { recordFrontendDiagnostic } from "./frontendDiagnosticBridge";
 import { uiPerfTracker } from "./uiPerf";
@@ -97,6 +98,7 @@ import type {
   WireExtensionStatus,
   WireExtensionSurface,
   WireTool,
+  TurnUsage,
   WireUsage,
   WireShellExecution,
 } from "./types";
@@ -277,7 +279,7 @@ const HISTORY_PAGE_TURNS = 60;
 export type TurnPhaseName = "working" | "checking" | "verifying" | "reviewing" | string;
 export type Item =
   | { kind: "user"; id: string; messageId?: string; submissionId?: string; text: string; submitText?: string; failed?: boolean; createdAt?: number; checkpointTurn?: number; historyTurn?: number }
-  | { kind: "assistant"; id: string; text: string; reasoning: string; streaming: boolean; wasStreamed?: true; reasoningComplete?: boolean; reasoningDurationMs?: number; workDurationMs?: number; memoryCitations?: MemoryCitation[]; searchSources?: SearchSource[] }
+  | { kind: "assistant"; id: string; text: string; reasoning: string; streaming: boolean; wasStreamed?: true; reasoningComplete?: boolean; reasoningDurationMs?: number; workDurationMs?: number; turnDurationMs?: number; turnUsage?: TurnUsage; tokensPerSecond?: number; createdAt?: number; memoryCitations?: MemoryCitation[]; searchSources?: SearchSource[] }
   | { kind: "phase"; id: string; text: string }
   | { kind: "notice"; id: string; level: "info" | "warn"; text: string; detail?: string; code?: string; title?: string; variant?: "delivery" | "completion"; action?: "continue_delivery" | "open_changes" | "recover_context"; recoveryId?: string; completionSummary?: WireCompletionSummary; decisionReceipt?: WireDecisionReceipt; missing?: string[]; inboxItemId?: string }
   | {
@@ -309,6 +311,7 @@ export type Item =
       fileDiff?: ToolFileDiff; // previewed whole-file diff from writer dispatch
       isShell?: boolean; // bash tool or !command — structured shell card presentation
       execution?: WireShellExecution; // local shell metadata
+      presentedFiles?: import("./types").PresentedFile[];
       parentId?: string; // a sub-agent call nests under the `task` call with this id
       profile?: { model?: string; effort?: string }; // subagent model/effort from tool event
       argChars?: number; // args still streaming from the model: cumulative chars received
@@ -499,6 +502,8 @@ export interface State extends ReadStatusHost {
   promptEpoch: number;
   turnTokens: number;
   turnTotalTokens: number;
+  /** Per-request usage folded into the active UI turn for the answer footer. */
+  turnUsage?: TurnUsage;
   turnCost: number;
   turnRateBand?: AggregatedRateBand;
   // Cumulative argument characters of the tool call currently streaming its
@@ -611,6 +616,22 @@ function usageTotalTokens(usage?: WireUsage): number {
   if (usage.totalTokens > 0) return usage.totalTokens;
   const promptTokens = usage.promptTokens || usage.cacheHitTokens + usage.cacheMissTokens;
   return Math.max(0, promptTokens + usage.completionTokens);
+}
+
+function mergeChatTurnUsage(current: TurnUsage | undefined, usage: WireUsage | undefined): TurnUsage | undefined {
+  if (!usage) return current;
+  const route = usage.costQuote?.modelRef?.trim();
+  const routes = current?.routes ? [...current.routes] : [];
+  if (route && !routes.includes(route)) routes.push(route);
+  const hasCacheBuckets = usage.cacheHitTokens > 0 || usage.cacheMissTokens > 0;
+  return {
+    uncachedInputTokens: (current?.uncachedInputTokens ?? 0) + (hasCacheBuckets ? usage.cacheMissTokens : usage.promptTokens),
+    outputTokens: (current?.outputTokens ?? 0) + usage.completionTokens,
+    totalTokens: (current?.totalTokens ?? 0) + usageTotalTokens(usage),
+    cacheReadTokens: (current?.cacheReadTokens ?? 0) + usage.cacheHitTokens,
+    reasoningTokens: (current?.reasoningTokens ?? 0) + (usage.reasoningTokens ?? 0),
+    routes: routes.length ? routes : undefined,
+  };
 }
 // Clock used to order live prompt events against runtime snapshot fetches.
 // Monotonic (immune to wall-clock jumps) with sub-millisecond resolution, so
@@ -909,7 +930,7 @@ function endPromptWaitIfIdle(s: State, now = Date.now()): State {
   return endPromptWait(s, now);
 }
 
-function resetTurnTiming(now = Date.now()): Pick<State, "turnStartAt" | "turnDoneAt" | "turnWaitAccumMs" | "promptWaitStartedAt" | "turnTokens" | "turnTotalTokens" | "turnOutputTokens" | "turnOutputChars" | "turnOutputCharsAtUsage" | "turnOutputEstimated" | "turnModelActiveAt" | "turnModelActiveMs" | "turnCost" | "turnRateBand" | "turnArgChars" | "pendingRequestModelMs"> {
+function resetTurnTiming(now = Date.now()): Pick<State, "turnStartAt" | "turnDoneAt" | "turnWaitAccumMs" | "promptWaitStartedAt" | "turnTokens" | "turnTotalTokens" | "turnUsage" | "turnOutputTokens" | "turnOutputChars" | "turnOutputCharsAtUsage" | "turnOutputEstimated" | "turnModelActiveAt" | "turnModelActiveMs" | "turnCost" | "turnRateBand" | "turnArgChars" | "pendingRequestModelMs"> {
   return {
     turnStartAt: now,
     turnDoneAt: 0,
@@ -917,6 +938,7 @@ function resetTurnTiming(now = Date.now()): Pick<State, "turnStartAt" | "turnDon
     promptWaitStartedAt: undefined,
     turnTokens: 0,
     turnTotalTokens: 0,
+    turnUsage: undefined,
     turnOutputTokens: 0,
     turnOutputChars: 0,
     turnOutputCharsAtUsage: 0,
@@ -1552,6 +1574,7 @@ function applyEvent(s: State, e: WireEvent, preserveToolPayloads = false): State
             summary,
             isShell: existing.isShell || existing.name === "bash" || t.name === "bash",
             execution: t.execution ?? existing.execution,
+            presentedFiles: t.presentedFiles ?? existing.presentedFiles,
             subagentOutcome: t.subagentRef || t.subagentStatus
               ? [t.subagentRef, t.subagentStatus, t.subagentErrorCode, t.subagentRetryable] as const
               : existing.subagentOutcome,
@@ -1615,9 +1638,10 @@ function applyEvent(s: State, e: WireEvent, preserveToolPayloads = false): State
       const sessionCost = settled.sessionCost + usageCost;
       const sessionCurrency = e.usage?.currency || settled.sessionCurrency || "¥";
       const usage = updateContextGauge ? e.usage : settled.usage;
+      const turnUsage = mergeChatTurnUsage(settled.turnUsage, e.usage);
       // The completed round's usage now accounts for the streamed tool-call
       // arguments, so drop the live estimate rather than double-count it.
-      return { ...settled, usage, context: { ...settled.context, used, sessionTokens }, turnTokens, turnOutputTokens, turnOutputCharsAtUsage, turnOutputEstimated, turnTotalTokens, turnCost, turnRateBand, turnArgChars: updateContextGauge ? 0 : settled.turnArgChars, sessionTokens, sessionCost, sessionCurrency, usageSeq: settled.usageSeq + 1, lastRequestTps, pendingRequestModelMs: updateContextGauge ? undefined : settled.pendingRequestModelMs };
+      return { ...settled, usage, context: { ...settled.context, used, sessionTokens }, turnTokens, turnOutputTokens, turnOutputCharsAtUsage, turnOutputEstimated, turnTotalTokens, turnUsage, turnCost, turnRateBand, turnArgChars: updateContextGauge ? 0 : settled.turnArgChars, sessionTokens, sessionCost, sessionCurrency, usageSeq: settled.usageSeq + 1, lastRequestTps, pendingRequestModelMs: updateContextGauge ? undefined : settled.pendingRequestModelMs };
     }
     case "read_status":
       return applyReadStatusEvent(s, e);
@@ -1713,6 +1737,10 @@ function applyEvent(s: State, e: WireEvent, preserveToolPayloads = false): State
       const now = Date.now();
       s = snapshotCompletedTurnTelemetry(s, now);
       const workDurationMs = s.turnDoneAt ? Math.max(1, s.turnDoneAt - s.turnStartAt - (s.lastTurnWaitAccumMs ?? 0)) : undefined;
+      const turnDurationMs = s.turnDoneAt && s.turnStartAt > 0 ? Math.max(1, s.turnDoneAt - s.turnStartAt) : undefined;
+      const tokensPerSecond = s.lastTurnOutputTokens > 0 && s.lastTurnModelMs > 0
+        ? s.lastTurnOutputTokens / (s.lastTurnModelMs / 1000)
+        : undefined;
       const completedItems = removeEmptyAssistantItems(s.items.map((it) => {
         if (it.kind === "assistant") {
           const completedLive = s.live?.id === it.id ? completeLiveReasoning(s.live, now) : undefined;
@@ -1735,7 +1763,14 @@ function applyEvent(s: State, e: WireEvent, preserveToolPayloads = false): State
       }
       const finalized = completedItems.map((it, index) =>
         it.kind === "assistant" && index === lastAssistantIndex
-          ? { ...it, workDurationMs: Math.max(it.workDurationMs ?? 0, workDurationMs ?? 0) || undefined }
+          ? {
+              ...it,
+              workDurationMs: Math.max(it.workDurationMs ?? 0, workDurationMs ?? 0) || undefined,
+              turnDurationMs: Math.max(it.turnDurationMs ?? 0, turnDurationMs ?? 0) || undefined,
+              turnUsage: s.turnUsage,
+              tokensPerSecond,
+              createdAt: it.createdAt ?? now,
+            }
           : it,
       );
       // A todo-only readiness card is retracted once the turn's own items
@@ -2579,15 +2614,16 @@ export function useController() {
     });
     const unsubscribeContent = getTranscriptStore().registerContentResolver(tabId, async (entryId, field) => {
       try {
+      if (field === "tool") return await resolveSnapshotTool(snapshotClient, tabId, entryId, () => statesRef.current.get(tabId));
       const record = await resolveSnapshotItems(snapshotClient, tabId, entryId, () => statesRef.current.get(tabId), historyMessagesToItems,
-        (patches) => dispatchTo(tabId, { type: "history_items_patch", patches }));
+        (patches) => dispatchTo(tabId, { type: "history_items_patch", patches }), field);
       return field === "reasoning" ? record?.message.reasoning : record?.message.content;
       } catch (error) {
         if (!(error instanceof StaleCut)) throw error;
         const path = statesRef.current.get(tabId)?.meta?.sessionPath;
         await snapshotClient.load(tabId, (snapshot) => dispatchTo(tabId, { type: "transcript_snapshot", snapshot }),
           () => statesRef.current.get(tabId)?.meta?.sessionPath === path);
-        return undefined;
+        throw error;
       }
     }, () => snapshotClient.installed(tabId));
     transcriptSubscriptions.current.set(tabId, () => { unsubscribe(); unsubscribeContent(); });
@@ -3865,7 +3901,13 @@ export function useController() {
     // numeric id (#6432 round 4).
     const epoch = statesRef.current.get(tabId)?.promptEpoch ?? 0;
     dispatchTo(tabId, { type: "clearApproval" });
-    resolvePromptForTab(app, tabId, id, "approval", { allow, session, persist }, promptState?.approval?.turnId ?? promptState?.activeTurnId, promptState?.approval?.runtimeEpoch ?? runtimeEpochByTabRef.current.get(tabId)).catch((error) => handlePromptFailure(dispatchTo, tabId, id, epoch, error, "approval"));
+    resolvePromptForTab(app, tabId, id, "approval", {
+      allow,
+      session,
+      persist,
+      generation: promptState?.approval?.generation,
+      permissionRevision: promptState?.approval?.permissionRevision,
+    }, promptState?.approval?.turnId ?? promptState?.activeTurnId, promptState?.approval?.runtimeEpoch ?? runtimeEpochByTabRef.current.get(tabId)).catch((error) => handlePromptFailure(dispatchTo, tabId, id, epoch, error, "approval"));
   }, [dispatchTo]);
 
   const approve = useCallback((id: string, allow: boolean, session: boolean, persist: boolean) => {
@@ -3964,13 +4006,10 @@ export function useController() {
 
   const setToolApprovalModeForTab = useCallback(async (tabId: string, mode: ToolApprovalMode): Promise<void> => {
     if (!tabId) return;
-    const epoch = statesRef.current.get(tabId)?.promptEpoch ?? 0;
-    // Backend reports auto-allowed pending approvals; the rest stay visible.
-    const drained = await app.SetToolApprovalModeForTab(tabId, mode).catch(() => undefined);
-    const ids = Array.isArray(drained) ? drained : [];
-    if (ids.length) dispatchTo(tabId, { type: "approval_drained", ids, epoch });
+	const current = await app.PermissionSnapshotForTab(tabId);
+	await app.SetPermissionPresetForTab(tabId, normalizeToolApprovalMode(mode), current.revision);
     await refreshMetaForTab(tabId);
-  }, [dispatchTo, refreshMetaForTab]);
+  }, [refreshMetaForTab]);
 
   const setToolApprovalMode = useCallback(async (mode: ToolApprovalMode): Promise<void> => {
     if (!activeTabId) return;

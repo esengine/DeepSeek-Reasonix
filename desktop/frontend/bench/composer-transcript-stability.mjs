@@ -59,7 +59,7 @@ async function waitForTail(page) {
         clientHeight: transcript.clientHeight,
         distance: transcript.scrollHeight - transcript.scrollTop - transcript.clientHeight,
         mode: transcript.dataset.scrollMode,
-        jumpBottom: Boolean(document.querySelector(".transcript__jump-bottom:not([hidden])")),
+        jumpBottom: Boolean(document.querySelector(".chat-to-bottom:not([hidden])")),
       } : null;
     });
     throw new Error(`composer fixture did not reach the physical tail (${JSON.stringify(state)})`, { cause: error });
@@ -160,7 +160,7 @@ try {
   ), undefined, { timeout: 30_000 });
   await page.waitForFunction(() => !document.querySelector(".transcript-navigation-overlay"), undefined, { timeout: 30_000 });
 
-  await clickIfVisible(page, ".transcript__jump-bottom");
+  await clickIfVisible(page, ".chat-to-bottom");
   await waitForTail(page);
 
   const input = page.locator("textarea.composer__input:not(.composer__input--measure)");
@@ -188,7 +188,7 @@ try {
   ));
   assert(maxReverse <= 1, `ordinary input/delete never displaces scrollTop away from the tail (${maxReverse.toFixed(1)}px)`);
   assert(geometryChanges.length === 0, `ordinary input/delete keeps transcript geometry stable (${geometryChanges.length} changes)`);
-  assert(result.final.mode === "tail-follow" && result.final.distance <= 4,
+  assert(result.final.mode === "tail" && result.final.distance <= 4,
     `ordinary input/delete finishes at the physical tail (${result.final.distance.toFixed(1)}px)`);
 
   // Locate the exact character that causes a visual line wrap at this viewport,
@@ -222,7 +222,7 @@ try {
     `a real line wrap moves only toward the new tail (${wrapBaseline.top.toFixed(1)}px → ${wrapResult.final.top.toFixed(1)}px)`);
   assert(wrapDistinctTops.length <= 2,
     `a real line wrap performs at most one visible tail adjustment (${JSON.stringify(wrapDistinctTops)})`);
-  assert(wrapResult.final.mode === "tail-follow" && wrapResult.final.distance <= 4,
+  assert(wrapResult.final.mode === "tail" && wrapResult.final.distance <= 4,
     `a real line wrap settles at the physical tail (${wrapResult.final.distance.toFixed(1)}px)`);
 
   // Reader mode is user-owned: editing a draft while reading upward must not
@@ -234,8 +234,27 @@ try {
   if (!transcriptBox) throw new Error("transcript has no visible bounding box");
   await page.mouse.move(transcriptBox.x + transcriptBox.width / 2, transcriptBox.y + transcriptBox.height / 2);
   await page.mouse.wheel(0, -600);
-  await page.waitForFunction(() => document.querySelector(".transcript")?.dataset.scrollMode === "manual", undefined, { timeout: 5_000 });
+  await page.waitForFunction(() => document.querySelector(".transcript")?.dataset.scrollMode === "reader", undefined, { timeout: 5_000 });
   await page.waitForTimeout(150);
+  await transcript.focus();
+  const beforeKey = await transcript.evaluate(element => element.scrollTop);
+  await page.keyboard.press("PageUp");
+  await page.waitForFunction(before => document.querySelector(".transcript").scrollTop < before - 20, beforeKey);
+  assert(await transcript.getAttribute("data-scroll-mode") === "reader", "native PageUp retains reader ownership");
+  const touch = await page.context().newCDPSession(page);
+  await touch.send("Emulation.setTouchEmulationEnabled", { enabled: true, maxTouchPoints: 1 });
+  const x = transcriptBox.x + transcriptBox.width / 2, y = transcriptBox.y + transcriptBox.height / 3;
+  const beforeTouch = await transcript.evaluate(element => element.scrollTop);
+  await touch.send("Input.dispatchTouchEvent", { type: "touchStart", touchPoints: [{ x, y }] });
+  for (let step = 1; step <= 6; step++) {
+    await touch.send("Input.dispatchTouchEvent", { type: "touchMove", touchPoints: [{ x, y: y + step * 20 }] });
+    await page.waitForTimeout(20);
+  }
+  await touch.send("Input.dispatchTouchEvent", { type: "touchEnd", touchPoints: [] });
+  await page.waitForFunction(before => document.querySelector(".transcript").scrollTop < before - 20, beforeTouch);
+  await page.waitForTimeout(500);
+  assert(await transcript.getAttribute("data-scroll-mode") === "reader", "browser touch scrolling retains reader ownership");
+  await touch.send("Emulation.setTouchEmulationEnabled", { enabled: false }); await touch.detach();
   await input.focus();
   const readerBaseline = await resetScrollProbe(page);
   await input.type("z");
@@ -244,11 +263,11 @@ try {
   const readerResult = await readScrollProbe(page);
   const readerDeviation = Math.max(0, ...readerResult.samples.map((sample) => Math.abs(sample.top - readerBaseline.top)));
   assert(readerDeviation <= 1, `editing while reading upward preserves scrollTop (${readerDeviation.toFixed(1)}px deviation)`);
-  assert(readerResult.final.mode === "manual", "editing while reading upward preserves manual reader ownership");
+  assert(readerResult.final.mode === "reader", "editing while reading upward preserves manual reader ownership");
 
   // A saved manual composer height uses the same off-flow mirror. Once the
   // resize itself settles, ordinary edits must leave reader geometry untouched.
-  await clickIfVisible(page, ".transcript__jump-bottom");
+  await clickIfVisible(page, ".chat-to-bottom");
   await waitForTail(page);
   const resizeHandle = page.locator(".composer-resize-handle");
   await resizeHandle.focus();
@@ -296,7 +315,7 @@ try {
   const imeResult = await readScrollProbe(page);
   const imeReverse = imeBaseline.top - Math.min(imeBaseline.top, ...imeResult.samples.map((sample) => sample.top));
   assert(imeReverse <= 1, `IME composition does not reverse scrollTop (${imeReverse.toFixed(1)}px)`);
-  assert(imeResult.final.mode === "tail-follow" && imeResult.final.distance <= 4,
+  assert(imeResult.final.mode === "tail" && imeResult.final.distance <= 4,
     `IME composition finishes at the physical tail (${imeResult.final.distance.toFixed(1)}px)`);
   assert(pageErrors.length === 0, `browser reports no page errors (${pageErrors.length})`);
 } finally {

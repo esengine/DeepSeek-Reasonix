@@ -295,6 +295,9 @@ async function createInlineMarkdownWorker(): Promise<MarkdownWorkerLike> {
 
 let singleton: MarkdownWorkerClient | null = null;
 let leases = 0;
+// Process-lifetime numeric diagnostics survive worker release without retaining
+// tasks, source text or ASTs. pending/fallback still describe the live instance.
+const retired = { completed: 0, parseMs: 0, maxParseMs: 0, workerFailures: 0 };
 
 export function getMarkdownWorkerClient(): MarkdownWorkerClient {
   if (!singleton) singleton = new MarkdownWorkerClient();
@@ -310,6 +313,11 @@ export function releaseMarkdownWorkerClient(): void {
   if (leases === 0) return;
   leases -= 1;
   if (leases === 0 && singleton) {
+    const stats = singleton.stats();
+    retired.completed += stats.completed;
+    retired.parseMs += stats.avgParseMs * stats.completed;
+    retired.maxParseMs = Math.max(retired.maxParseMs, stats.maxParseMs);
+    retired.workerFailures += stats.workerFailures;
     singleton.dispose();
     singleton = null;
   }
@@ -331,6 +339,10 @@ export function setMarkdownWorkerClientForTest(client: MarkdownWorkerClient | nu
 
 // Diagnostics provider: lets crash.ts/bench read worker counters without an
 // eager import of this lazy-chunk module.
-registerMarkdownWorkerDiagnostics(() =>
-  singleton?.stats() ?? { pending: 0, completed: 0, avgParseMs: 0, maxParseMs: 0, fallbackActive: false, workerFailures: 0 },
-);
+registerMarkdownWorkerDiagnostics(() => {
+  const current = singleton?.stats() ?? { pending: 0, completed: 0, avgParseMs: 0, maxParseMs: 0, fallbackActive: false, workerFailures: 0 };
+  const completed = retired.completed + current.completed;
+  return { ...current, completed,
+    avgParseMs: completed ? (retired.parseMs + current.completed * current.avgParseMs) / completed : 0,
+    maxParseMs: Math.max(retired.maxParseMs, current.maxParseMs), workerFailures: retired.workerFailures + current.workerFailures };
+});

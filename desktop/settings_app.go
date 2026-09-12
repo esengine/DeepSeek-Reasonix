@@ -2278,8 +2278,8 @@ func (a *App) SetAutoPlan(mode string) error {
 	return config.Default().SetAutoPlan(mode)
 }
 
-// SetDefaultToolApprovalMode updates the global Ask/Auto/YOLO default used only
-// for newly-created desktop sessions. Existing tabs keep their persisted mode.
+// SetDefaultToolApprovalMode updates the permission preset used only for newly
+// created desktop sessions. Existing tabs keep their persisted preset.
 func (a *App) SetDefaultToolApprovalMode(mode string) error {
 	return a.applyConfigOnly(func(c *config.Config) error {
 		return c.SetDesktopDefaultToolApprovalMode(mode)

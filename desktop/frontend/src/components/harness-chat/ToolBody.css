@@ -1,0 +1,146 @@
+/* Expanded-body scroll wrapper for the run_code CodeBlock; the IN/OUT card
+   and the terminal card scroll INSIDE their own surface instead, so the
+   scrollbar sits within the rounded card. */
+.dsh-ToolRow-bodyScroll {
+  max-height: 260px;
+  overflow-y: auto;
+}
+
+/* Expanded input/output card (figma 1249:35657): the code-block surface and
+   radius from the TerminalBlock/CodeBlock family. The card itself is a plain
+   column — the padding and the IN/OUT gutter-label grid live on each section
+   so the divider spans the full card width and each section scrolls alone. */
+.dsh-ToolRow-ioCard {
+  display: flex;
+  flex-direction: column;
+  margin: 4px 0 4px 4px;
+  border: 0.5px solid var(--dsw-alias-border-l1);
+  border-radius: 12px;
+  background: var(--dsw-alias-markdown-code-block);
+  font: var(--dsw-font-markdown-code-block-small);
+}
+
+/* One card section (IN or OUT): the gutter-label grid, capped and scrolling
+   independently so a long input never buries a short output (and vice versa). */
+.dsh-ToolRow-ioSection {
+  display: grid;
+  grid-template-columns: max-content 1fr;
+  column-gap: 14px;
+  align-items: baseline;
+  padding: 12px 16px;
+  max-height: 150px;
+  overflow-y: auto;
+}
+
+/* Card-internal scrollbar: a 2px transparent border clips the thumb inward so
+   it floats off the rounded card edge instead of hugging it (the terminal
+   card's own output scroller carries the same treatment in TerminalBlock). */
+.dsh-ToolRow-ioSection::-webkit-scrollbar-thumb {
+  border: 2px solid transparent;
+  background-clip: padding-box;
+  border-radius: 6px;
+}
+
+/* Track end-margins keep the thumb's travel out of the rounded corners. */
+.dsh-ToolRow-ioSection::-webkit-scrollbar-track {
+  margin: 6px 0;
+}
+
+/* Caption (not tertiary): one step dimmer than the payload text so the
+   gutter labels read as labels, not as part of the content. Sticky against
+   the section's own scroll so the label stays readable while its payload
+   scrolls underneath (top 0 = the section's padding edge inside the
+   scrollport; start-aligned because sticky needs a block-start anchor). */
+.dsh-ToolRow-ioLabel {
+  position: sticky;
+  top: 0;
+  align-self: start;
+  color: var(--dsw-alias-label-caption);
+}
+
+/* l2 hairline between the IN and OUT sections, spanning the full card width
+   (it sits between the padded sections, not inside their grid). */
+.dsh-ToolRow-ioDivider {
+  flex: none;
+  height: 0.5px;
+  background: var(--dsw-alias-border-l2);
+}
+
+.dsh-ToolRow-ioText {
+  min-width: 0;
+  white-space: pre-wrap;
+  word-break: break-word;
+  color: var(--dsw-alias-label-secondary);
+}
+
+/* A failed call's OUT text shares the collapsed summary's error color. */
+.dsh-ToolRow-ioText[data-error] {
+  color: var(--dsw-alias-state-error-primary);
+}
+
+/* The block-shaped expanded bodies: the code variant's run_code program
+   through CodeBlock (shiki-highlighted TypeScript), a terminal card's command
+   output through TerminalBlock, a diff card through DiffBlock, a read card's
+   line-numbered window through ReadBlock, a search card's grouped matches or
+   path list through SearchBlock, and a web card's citation/source list through
+   WebBlock. All are drawn by the shared primitive, so only the row's
+   indentation is this file's concern — the margin also replaces each
+   primitive's own standalone vertical spacing with the flow's row rhythm. */
+.dsh-ToolRow-codeBody,
+.dsh-ToolRow-terminalBody,
+.dsh-ToolRow-diffBody,
+.dsh-ToolRow-readBody,
+.dsh-ToolRow-imageBody,
+.dsh-ToolRow-searchBody,
+.dsh-ToolRow-webBody {
+  margin: 4px 0 4px 4px;
+}
+
+/* The recovery footer for a capped search: the result text (its `Full … stored
+   at …` locator) below the card in the muted tone, since the card holds only the
+   retained rows. Same column indent as the card body. */
+.dsh-ToolRow-searchRecovery {
+  margin: 4px 0 4px 4px;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  font: var(--dsw-font-xs-13);
+  color: var(--dsw-alias-label-tertiary);
+}
+
+/* The image card's in-card label: the view's replacement title, else the
+   shortened path — the same role ReadBlock's own label plays, so the presentation
+   contract's replacement-title rule is honoured here too. */
+.dsh-ToolRow-imageLabel {
+  margin-bottom: 4px;
+  overflow-wrap: anywhere;
+  font: var(--dsw-font-sm-13);
+  color: var(--dsw-alias-label-secondary);
+}
+
+/* The image card's own result text (media type, dimensions, byte size) under the
+   gallery, in the same muted tone the search recovery footer uses. Always
+   rendered: the attachment presentation slot is optional, so when nothing
+   occupies it the gallery is empty and this line is the only evidence an image
+   was returned. The enclosing .dsh-ToolRow-imageBody already carries the row indent. */
+.dsh-ToolRow-imageMeta {
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  font: var(--dsw-font-xs-13);
+  color: var(--dsw-alias-label-tertiary);
+}
+
+/* In-row code renders at the smaller code size (12/18) via each primitive's
+   rebindable content-font seam; standalone markdown code blocks keep 13/22. */
+.dsh-ToolRow-codeBody {
+  --dsl-code-block-content-font: var(--dsw-font-markdown-code-block-small);
+}
+
+/* The terminal card scrolls its OUTPUT inside its own surface (same l1
+   hairline as the IN/OUT card): the banner stays pinned and the scrollbar
+   never rides over it. 224px = the 260px card cap minus the ~36px banner. */
+.dsh-ToolRow-terminalBody {
+  --dsl-terminal-font: var(--dsw-font-markdown-code-block-small);
+  --dsl-terminal-line-height: 18px;
+  --dsl-terminal-output-max-height: 224px;
+  border: 0.5px solid var(--dsw-alias-border-l1);
+}

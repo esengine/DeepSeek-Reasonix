@@ -1,77 +1,49 @@
 import assert from "node:assert/strict";
-import React, { act, useState } from "react";
+import React, { act } from "react";
 import { createRoot } from "react-dom/client";
 import { JSDOM } from "jsdom";
 import { SessionExperienceSettings } from "../components/SessionExperienceSettings";
 import { LocaleProvider, t } from "../lib/i18n";
-import { getSessionExperience } from "../lib/sessionExperience";
 import type { SettingsView } from "../lib/types";
 import { installDesktopHostStub } from "./desktopHostStub";
 
 const dom = new JSDOM("<div id='root'></div>", { url: "http://localhost" });
 Object.assign(globalThis, { window: dom.window, document: dom.window.document, localStorage: dom.window.localStorage,
   CustomEvent: dom.window.CustomEvent, IS_REACT_ACT_ENVIRONMENT: true });
-let backend: SettingsView = { sessionExperience: "standard" } as SettingsView;
-let release!: () => void;
-let failed = false;
 const writes: string[] = [];
-installDesktopHostStub({ SetSessionExperience: async (mode: string) => {
-  writes.push(mode);
-  await new Promise<void>(resolve => { release = resolve; });
-  if (failed) throw new Error("write failed");
-  backend = { ...backend, sessionExperience: mode as "deep" | "standard" };
-} });
-let completion: Promise<boolean>;
-let reload!: () => void;
-function SettingsHost() {
-  const [snapshot, setSnapshot] = useState(backend);
-  const [busy, setBusy] = useState(false);
-  reload = () => setSnapshot({ ...backend });
-  // Exercise the component's shared apply/reload boundary, not a guessed rollback.
-  const apply = (write: () => Promise<unknown>) => {
-    setBusy(true);
-    completion = (async () => {
-      try { await write(); return true; } catch { return false; }
-      finally { reload(); setBusy(false); }
-    })();
-    return completion;
-  };
-  return <SessionExperienceSettings snapshot={snapshot} busy={busy} apply={apply} />;
-}
+let legacyWrites = 0;
+installDesktopHostStub({ SetSessionExperience: async () => { legacyWrites++; },
+  SetDefaultToolApprovalMode: async (mode: string) => { writes.push(mode); } });
 const root = createRoot(document.getElementById("root")!);
-const groupButtons = (label: string) => {
-  const group = [...document.querySelectorAll<HTMLElement>("[role=radiogroup]")]
-    .find(candidate => candidate.getAttribute("aria-label") === label);
-  assert.ok(group, `missing radio group: ${label}`);
-  return [...group.querySelectorAll<HTMLButtonElement>("[role=radio]")];
-};
-const buttons = () => groupButtons(t("settings.sessionExperience"));
-const approvalButtons = () => groupButtons(t("settings.defaultToolApprovalMode"));
+const apply = async (write: () => Promise<unknown>) => { await write(); return true; };
 try {
-  await act(async () => root.render(<LocaleProvider><SettingsHost /></LocaleProvider>));
-  assert.equal(buttons().length, 2);
-  assert.equal(approvalButtons().length, 3, "approval choices remain a separate group");
-  assert.equal(buttons()[0].getAttribute("aria-checked"), "true");
-  await act(async () => buttons()[1].click());
-  assert.equal(getSessionExperience(), "deep");
-  assert.ok(buttons().every(button => button.disabled));
-  assert.ok(approvalButtons().every(button => button.disabled), "shared busy state also protects approval choices");
-  await act(async () => { release(); await completion; });
-  assert.equal(buttons()[1].getAttribute("aria-checked"), "true");
+  for (const mode of ["standard", "deep"] as const) {
+    await act(async () => root.render(<LocaleProvider><SessionExperienceSettings snapshot={{ sessionExperience: mode, defaultToolApprovalMode: "workspace-write" } as SettingsView} busy={false} apply={apply} /></LocaleProvider>));
+    const groups = [...document.querySelectorAll<HTMLElement>("[role=radiogroup]")];
+    assert.ok(!groups.some(group => group.getAttribute("aria-label") === t("settings.sessionExperience")), "legacy display preference has no settings control");
+    const approval = groups.find(group => group.getAttribute("aria-label") === t("settings.defaultToolApprovalMode"))!;
+    assert.equal(approval.querySelectorAll("[role=radio]").length, 3);
+    await act(async () => approval.querySelectorAll<HTMLButtonElement>("button")[0].click());
+  }
+  assert.deepEqual(writes, ["read-only", "read-only"], "permission settings send the selected preset to the host");
+  assert.equal(legacyWrites, 0, "opening settings never rewrites the persisted legacy preference");
 
-  failed = true;
-  await act(async () => buttons()[0].click());
-  assert.equal(getSessionExperience(), "standard");
-  await act(async () => { release(); await completion; });
-  assert.equal(getSessionExperience(), "deep", "failed write reloads even when backend returns the same previous value");
-  assert.equal(buttons()[1].getAttribute("aria-checked"), "true");
-  assert.deepEqual(writes, ["deep", "standard"]);
+  await act(async () => root.render(<LocaleProvider><SessionExperienceSettings snapshot={{ defaultToolApprovalMode: "workspace-write" } as SettingsView} busy={false} apply={apply} /></LocaleProvider>));
+  const approval = [...document.querySelectorAll<HTMLElement>("[role=radiogroup]")]
+    .find(group => group.getAttribute("aria-label") === t("settings.defaultToolApprovalMode"))!;
+  await act(async () => approval.querySelectorAll<HTMLButtonElement>("button")[2].click());
+  assert.deepEqual(writes, ["read-only", "read-only"], "selecting a Full access default does not persist before confirmation");
+  const dialog = document.querySelector<HTMLElement>('[role="dialog"]')!;
+  assert.ok(dialog.textContent?.includes(t("permission.fullAccessConfirm.title")));
+  const enable = [...dialog.querySelectorAll<HTMLButtonElement>("button")]
+    .find(button => button.textContent?.includes(t("permission.fullAccessConfirm.enable")))!;
+  assert.equal(enable.disabled, true, "default Full access stays disabled until risk acknowledgement");
+  await act(async () => dialog.querySelector<HTMLInputElement>('input[type="checkbox"]')!.click());
+  assert.equal(enable.disabled, false);
+  await act(async () => enable.click());
+  assert.deepEqual(writes, ["read-only", "read-only", "danger-full-access"], "confirmed Full access becomes the new-session default");
 
-  backend = { ...backend, sessionExperience: undefined };
-  await act(async () => reload());
-  assert.equal(getSessionExperience(), "standard");
-  assert.equal(buttons()[0].getAttribute("aria-checked"), "true");
-  assert.equal(buttons()[0].tabIndex, 0, "both segment buttons remain keyboard reachable");
-  assert.equal(buttons()[1].tabIndex, 0);
-  console.log("session experience controls: success, failure snapshot, busy state, legacy backend and keyboard reachability passed");
+  await act(async () => root.render(<LocaleProvider><SessionExperienceSettings snapshot={{} as SettingsView} busy apply={apply} /></LocaleProvider>));
+  assert.ok([...document.querySelectorAll<HTMLButtonElement>("[role=radio]")].every(button => button.disabled));
+  console.log("settings: retired conversation display control, preserved approval and busy states passed");
 } finally { await act(async () => root.unmount()); dom.window.close(); }

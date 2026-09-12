@@ -44,7 +44,7 @@ const ports: Parameters<typeof useDesktopNavigation>[0]["ports"] = {
 function Probe({ visible = "A" }: { visible?: string }) {
   useRemoteTabOpened(meta => { calls.push(`resource:${meta.id}`); }, () => {});
   api = useDesktopNavigation({ visible: { tabId: visible, sessionKey: visible }, ports,
-    setTabRevealSignal: () => { calls.push("reveal-tab"); }, setTranscriptRevealSignal: () => { calls.push("reveal-transcript"); },
+    setTabRevealSignal: () => { calls.push("reveal-tab"); },
     setProjectRevision: () => { calls.push("project"); }, setHistory: () => { calls.push("history-close"); },
     t: ((key: string) => key) as Translator, showToast: message => { calls.push(`notice:${message}`); },
     noteIntent: () => ++intent, beginSurface: seq => { calls.push(`begin:${seq}`); },

@@ -34,13 +34,6 @@ export function writeAccessDecisionActions(
     },
     {
       key: "3",
-      label: t("approval.writeAccessProject"),
-      desc: t("approval.writeAccessProjectDesc"),
-      kind: "submit",
-      run: () => onAnswer(true, true, true),
-    },
-    {
-      key: "4",
       label: t("approval.deny"),
       desc: t("approval.denyDesc"),
       tone: "danger",

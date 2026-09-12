@@ -32,6 +32,28 @@ function ev(s: typeof initialState, e: WireEvent) {
   return reducer(s, { type: "event", e });
 }
 
+// Completed answer chrome receives the full UI-turn aggregate, including
+// auxiliary requests, while the provider-speed calculation stays executor-only.
+{
+  let s = { ...initialState, running: true, turnActive: true, turnStartAt: Date.now() - 29_000 };
+  s = ev(s, { kind: "text", messageId: "usage-answer", text: "answer" } as WireEvent);
+  s = ev(s, { kind: "usage", usage: {
+    promptTokens: 100, completionTokens: 20, totalTokens: 120, cacheHitTokens: 80, cacheMissTokens: 20,
+    reasoningTokens: 10, costQuote: { modelRef: "deepseek-official/deepseek-flash" },
+  } } as WireEvent);
+  s = ev(s, { kind: "usage", usage: {
+    promptTokens: 50, completionTokens: 5, totalTokens: 55, cacheHitTokens: 40, cacheMissTokens: 10,
+    source: "subagent", costQuote: { modelRef: "deepseek-official/deepseek-flash" },
+  } } as WireEvent);
+  s = ev(s, { kind: "turn_done" } as WireEvent);
+  const answer = [...s.items].reverse().find(item => item.kind === "assistant");
+  eq(answer?.kind === "assistant" ? answer.turnUsage?.totalTokens : 0, 175, "turn footer aggregates all usage events");
+  eq(answer?.kind === "assistant" ? answer.turnUsage?.cacheReadTokens : 0, 120, "turn footer aggregates cache reads");
+  eq(answer?.kind === "assistant" ? answer.turnUsage?.routes?.join(",") : "", "deepseek-official/deepseek-flash", "turn footer deduplicates model routes");
+  eq(answer?.kind === "assistant" ? Boolean(answer.createdAt) : false, true, "completed answer receives its display timestamp");
+  eq(answer?.kind === "assistant" ? (answer.turnDurationMs ?? 0) >= 29_000 : false, true, "completed answer receives wall-clock turn duration");
+}
+
 // Desktop keeps ordinary completion receipts off the transcript, but retains
 // details for the change panel and surfaces actionable gaps as a short notice.
 {

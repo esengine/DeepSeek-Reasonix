@@ -75,6 +75,7 @@ func (w Workspace) Tools(enabled ...string) []tool.Tool {
 
 	overrides := map[string]tool.Tool{
 		"view_image":    viewImage{workDir: w.Dir, paths: w.ReadPaths, forbidRoots: forbidRoots},
+		"present":       present{workDir: w.Dir, paths: w.ReadPaths, forbidRoots: forbidRoots},
 		"read_file":     readFile{workDir: w.Dir, paths: w.ReadPaths, forbidRoots: forbidRoots, overlay: w.FileOverlay},
 		"write_file":    writeFile{workDir: w.Dir, roots: roots, guard: w.SessionGuard, managed: w.ManagedConfig, overlay: w.FileOverlay, receipt: w.FileWriteReceipt},
 		"edit_file":     editFile{workDir: w.Dir, roots: roots, guard: w.SessionGuard, managed: w.ManagedConfig, overlay: w.FileOverlay},

@@ -9,13 +9,15 @@ import (
 
 // PromptAnswerView is the Wails-safe union for all interactive cards.
 type PromptAnswerView struct {
-	Questions []QuestionAnswer `json:"questions,omitempty"`
-	Allow     bool             `json:"allow,omitempty"`
-	Session   bool             `json:"session,omitempty"`
-	Persist   bool             `json:"persist,omitempty"`
-	Action    string           `json:"action,omitempty"`
-	Feedback  string           `json:"feedback,omitempty"`
-	Content   map[string]any   `json:"content,omitempty"`
+	Questions          []QuestionAnswer `json:"questions,omitempty"`
+	Allow              bool             `json:"allow,omitempty"`
+	Session            bool             `json:"session,omitempty"`
+	Persist            bool             `json:"persist,omitempty"`
+	Action             string           `json:"action,omitempty"`
+	Feedback           string           `json:"feedback,omitempty"`
+	Content            map[string]any   `json:"content,omitempty"`
+	Generation         uint64           `json:"generation,omitempty"`
+	PermissionRevision uint64           `json:"permissionRevision,omitempty"`
 }
 
 type PromptIdentityView struct {
@@ -69,7 +71,7 @@ func (a *App) ResolvePromptForTab(tabID, promptID, turnID, runtimeEpoch, kind st
 	}
 	return resolver.ResolvePromptExact(
 		control.PromptIdentity{PromptID: promptID, TurnID: turnID, RuntimeEpoch: runtimeEpoch, Kind: control.PromptKind(kind)},
-		control.PromptAnswer{Questions: questions, Allow: answer.Allow, Session: answer.Session, Persist: answer.Persist, Action: answer.Action, Feedback: answer.Feedback, Content: answer.Content},
+		control.PromptAnswer{Questions: questions, Allow: answer.Allow, Session: answer.Session, Persist: answer.Persist, Action: answer.Action, Feedback: answer.Feedback, Content: answer.Content, Generation: answer.Generation, PermissionRevision: answer.PermissionRevision},
 	)
 }
 

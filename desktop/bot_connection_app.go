@@ -17,6 +17,7 @@ import (
 	"reasonix/internal/bot/weixin"
 	"reasonix/internal/botruntime"
 	"reasonix/internal/config"
+	"reasonix/internal/control"
 )
 
 type BotConnectionCredentialView struct {
@@ -614,7 +615,7 @@ func (a *App) upsertBotConnection(conn config.BotConnectionConfig, updateLegacy 
 		conn.Status = "connected"
 	}
 	if normalizeBotConnectionToolApprovalMode(conn.ToolApprovalMode) == "" {
-		conn.ToolApprovalMode = "ask"
+		conn.ToolApprovalMode = control.ToolApprovalWorkspaceWrite
 	}
 	if conn.ID == "" {
 		conn.ID = connectionID(conn.Provider, conn.Domain)
@@ -838,7 +839,7 @@ func botConnectionConfig(view BotConnectionView) config.BotConnectionConfig {
 		Enabled:          view.Enabled,
 		Status:           strings.TrimSpace(view.Status),
 		Model:            strings.TrimSpace(view.Model),
-		ToolApprovalMode: firstNonEmptyBot(normalizeBotConnectionToolApprovalMode(view.ToolApprovalMode), "ask"),
+		ToolApprovalMode: firstNonEmptyBot(normalizeBotConnectionToolApprovalMode(view.ToolApprovalMode), control.ToolApprovalWorkspaceWrite),
 		WorkspaceRoot:    strings.TrimSpace(view.WorkspaceRoot),
 		Access:           botAccessConfigFromView(view.Access),
 		Credential: config.BotConnectionCredential{
@@ -855,16 +856,10 @@ func botConnectionConfig(view BotConnectionView) config.BotConnectionConfig {
 }
 
 func normalizeBotConnectionToolApprovalMode(mode string) string {
-	switch strings.ToLower(strings.TrimSpace(mode)) {
-	case "ask":
-		return "ask"
-	case "auto":
-		return "auto"
-	case "yolo", "full", "full-access", "bypass":
-		return "yolo"
-	default:
+	if strings.TrimSpace(mode) == "" {
 		return ""
 	}
+	return config.NormalizeToolApprovalMode(mode)
 }
 
 func botConnectionConfigs(views []BotConnectionView) []config.BotConnectionConfig {

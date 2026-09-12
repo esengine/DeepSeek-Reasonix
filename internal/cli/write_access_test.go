@@ -1,7 +1,6 @@
 package cli
 
 import (
-	"strings"
 	"testing"
 
 	"reasonix/internal/event"
@@ -10,12 +9,11 @@ import (
 func TestWriteAccessApprovalChoicesPreserveScopes(t *testing.T) {
 	got := approvalChoices(&event.Approval{
 		Tool: "bash", Kind: event.ApprovalKindWriteAccess,
-		WriteAccess: &event.WriteAccessApproval{Directories: []string{"/tmp/out"}, PersistAllowed: true},
+		WriteAccess: &event.WriteAccessApproval{Directories: []string{"/tmp/out"}},
 	})
 	want := []approvalChoice{
 		{allow: true},
 		{allow: true, allowForSession: true},
-		{allow: true, allowForSession: true, persistToConfig: true},
 		{},
 	}
 	if len(got) != len(want) {
@@ -28,7 +26,7 @@ func TestWriteAccessApprovalChoicesPreserveScopes(t *testing.T) {
 		}
 	}
 	labels := approvalChoiceLabels(&event.Approval{Kind: event.ApprovalKindWriteAccess})
-	if len(labels) != 4 || !strings.Contains(strings.ToLower(labels[2]), "project") {
+	if len(labels) != 3 {
 		t.Fatalf("write-access labels = %v", labels)
 	}
 }

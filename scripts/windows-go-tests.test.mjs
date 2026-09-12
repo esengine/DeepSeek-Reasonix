@@ -6,7 +6,7 @@ import { isolatedGroups, selectPackages, testArgs } from "./windows-go-tests.mjs
 const packages = ["reasonix/cmd/reasonix", "reasonix/internal/agent", "reasonix/internal/agent/testutil",
   "reasonix/internal/agentpreset", "reasonix/internal/boot", "reasonix/internal/control",
   "reasonix/internal/control/child", "reasonix/internal/extension/sidecar", "reasonix/internal/proc",
-  "reasonix/internal/newpackage", "reasonix/tools/repolint"];
+  "reasonix/internal/newpackage", "reasonix/internal/winsandbox", "reasonix/tools/repolint"];
 
 test("the full Windows groups cover every package exactly once, including new packages", () => {
   const grouped = ["full", ...isolatedGroups].flatMap(group => selectPackages(packages, group));
@@ -16,7 +16,7 @@ test("the full Windows groups cover every package exactly once, including new pa
 });
 
 test("PR smoke keeps platform coverage without duplicating isolated suites", () => {
-  assert.deepEqual(selectPackages(packages, "smoke"), ["reasonix/cmd/reasonix", "reasonix/internal/extension/sidecar", "reasonix/internal/proc"]);
+  assert.deepEqual(selectPackages(packages, "smoke"), ["reasonix/cmd/reasonix", "reasonix/internal/extension/sidecar", "reasonix/internal/proc", "reasonix/internal/winsandbox"]);
   for (const group of isolatedGroups) {
     assert.deepEqual(testArgs(packages, group).slice(0, 4), ["test", "-p", "1", "-timeout=8m"]);
   }

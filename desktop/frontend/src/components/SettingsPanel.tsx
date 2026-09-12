@@ -392,7 +392,7 @@ export function SettingsPanel({
     label: settingsTabLabel(id, t),
     meta: s ? settingsTabMeta(id, s, t) : "",
     searchTerms: id === "general" ? [
-      "settings.desktopLayoutStyle", "settings.language", "settings.currency", "settings.sessionExperience",
+      "settings.desktopLayoutStyle", "settings.language", "settings.currency",
       "settings.closeBehavior",
       "settings.defaultToolApprovalMode", "settings.sound", "settings.statusBarStyle", "settings.statusBarItems",
       "settings.hardwareAcceleration", "GPU", "白屏", "闪烁", "渲染",
@@ -634,7 +634,7 @@ function settingsTabMeta(id: SettingsTab, s: SettingsView, t: ReturnType<typeof 
     case "models":
       return settingsModelMeta(s, t);
     case "general":
-      return `${s.sessionExperience === "deep" ? t("settings.sessionExperience.deep") : t("settings.sessionExperience.standard")} · ${desktopLayoutStyleLabel(normalizeDesktopLayoutStyle(s.desktopLayoutStyle), t)}`;
+      return desktopLayoutStyleLabel(normalizeDesktopLayoutStyle(s.desktopLayoutStyle), t);
     case "providers":
       return t("settings.providerCount", { n: s.providers.length });
     case "bots":
@@ -660,9 +660,9 @@ function settingsTabMeta(id: SettingsTab, s: SettingsView, t: ReturnType<typeof 
     case "network":
       return proxyModeLabel(normalizeProxyMode(s.network.proxyMode), t);
     case "permissions":
-      return permissionModeLabel(s.permissions.mode, t);
+      return "";
     case "sandbox":
-      return sandboxModeLabel(s.sandbox.bash, t);
+      return "";
     case "appearance": return t("settings.appearanceMeta");
     case "storage": return t("settings.storageMeta");
     case "browser": return t("settings.browserMeta");
@@ -882,8 +882,8 @@ const REASONING_PROTOCOLS: readonly string[] = ["", "deepseek", "glm", "kimi-k3"
 const THINKING_MODES: readonly string[] = ["", "enabled", "disabled", "adaptive"];
 const PROXY_TYPES = ["http", "https", "socks5", "socks5h"] as const;
 const LANGUAGE_PREFS: LangPref[] = ["", "zh", "en"];
-const TOOL_APPROVAL_MODES = ["ask", "auto", "yolo"] as const;
-const BOT_TOOL_APPROVAL_MODES = ["", "ask", "auto", "yolo"] as const;
+const TOOL_APPROVAL_MODES = ["read-only", "workspace-write", "danger-full-access"] as const;
+const BOT_TOOL_APPROVAL_MODES = ["", "read-only", "workspace-write", "danger-full-access"] as const;
 const BOT_QUEUE_MODES = ["steer", "followup", "collect", "interrupt"] as const;
 const BOT_QUEUE_DROPS = ["summarize", "old", "new"] as const;
 const BOT_ROUTE_CHAT_TYPES = ["", "dm", "group", "guild", "direct", "thread"] as const;
@@ -1119,7 +1119,7 @@ function defaultBotSettings(): BotSettingsView {
   return {
     enabled: false,
     model: "",
-    toolApprovalMode: "ask",
+    toolApprovalMode: "workspace-write",
     maxSteps: 0,
     debounceMs: 1500,
     queueMode: "steer",
@@ -1163,7 +1163,7 @@ function defaultBotSettings(): BotSettingsView {
       dingtalkAdmins: [],
       dingtalkGroups: [],
     },
-    qq: { enabled: false, appId: "", appSecretEnv: "QQ_BOT_APP_SECRET", secretSet: false, sandbox: false, model: "", toolApprovalMode: "ask", workspaceRoot: "", access: defaultBotAccess() },
+    qq: { enabled: false, appId: "", appSecretEnv: "QQ_BOT_APP_SECRET", secretSet: false, sandbox: false, model: "", toolApprovalMode: "workspace-write", workspaceRoot: "", access: defaultBotAccess() },
     feishu: {
       enabled: false,
       domain: "feishu",
@@ -1337,13 +1337,15 @@ function normalizeBotConnection(raw: any) {
   };
 }
 
-function normalizeBotToolApprovalMode(mode: unknown, allowEmpty = false): "ask" | "auto" | "yolo" | "" {
+function normalizeBotToolApprovalMode(mode: unknown, allowEmpty = false): "read-only" | "workspace-write" | "danger-full-access" | "" {
   const raw = String(mode ?? "").trim().toLowerCase();
-  if (raw === "") return allowEmpty ? "" : "ask";
-  if (raw === "ask") return "ask";
-  if (raw === "auto") return "auto";
-  if (raw === "yolo" || raw === "full" || raw === "full-access" || raw === "bypass") return "yolo";
-  return allowEmpty ? "" : "ask";
+  if (raw === "") return allowEmpty ? "" : "workspace-write";
+  if (raw === "read-only" || raw === "ask") return "read-only";
+  if (raw === "workspace-write" || raw === "auto" || raw === "yolo") return "workspace-write";
+  if (raw === "danger-full-access" || raw === "full" || raw === "full-access" || raw === "bypass") return "danger-full-access";
+  // A non-empty unknown value is an incompatible permission contract. Keep it
+  // fail-closed even for per-connection settings that otherwise allow inherit.
+  return "read-only";
 }
 
 function normalizeBotMappingScope(scope: unknown, workspaceRoot: unknown): "global" | "project" {
@@ -1590,21 +1592,6 @@ function statusBarItemLabel(id: StatusBarItemId, t: ReturnType<typeof useT>): st
 
 function closeBehaviorLabel(mode: CloseBehavior, t: ReturnType<typeof useT>): string {
   return mode === "quit" ? t("settings.closeBehavior.quit") : t("settings.closeBehavior.background");
-}
-
-function permissionModeLabel(mode: string, t: ReturnType<typeof useT>): string {
-  switch (mode) {
-    case "allow":
-      return t("settings.modeAllowShort");
-    case "deny":
-      return t("settings.modeDenyShort");
-    default:
-      return t("settings.modeAskShort");
-  }
-}
-
-function sandboxModeLabel(mode: string, t: ReturnType<typeof useT>): string {
-  return mode === "off" ? t("settings.bashOffShort") : t("settings.bashEnforceShort");
 }
 
 function providerKindLabel(kind: string, _t: ReturnType<typeof useT>): string {
@@ -2586,7 +2573,7 @@ function BotsSection({ s, busy, apply, initialFocus }: BotsSectionProps) {
     const env = draft.qq.appSecretEnv.trim() || DEFAULT_QQ_SECRET_ENV;
     const nextDraft = botDraftWithDerivedGatewayState({
       ...draft,
-      qq: { enabled: false, appId: "", appSecretEnv: DEFAULT_QQ_SECRET_ENV, secretSet: false, sandbox: false, model: "", toolApprovalMode: "ask", workspaceRoot: "", access: defaultBotAccess() },
+      qq: { enabled: false, appId: "", appSecretEnv: DEFAULT_QQ_SECRET_ENV, secretSet: false, sandbox: false, model: "", toolApprovalMode: "workspace-write", workspaceRoot: "", access: defaultBotAccess() },
     });
     await apply(async () => {
       await app.SetBotSettings(nextDraft);
@@ -2602,7 +2589,7 @@ function BotsSection({ s, busy, apply, initialFocus }: BotsSectionProps) {
   const selectedDiagnostic = selectedConnection ? diagnostics[selectedConnection.id] : undefined;
   const selectedDiagnosticDetail = diagnosticReportDetail(selectedDiagnostic);
   const selectedConnectionRemote = selectedConnection ? firstConnectionRemote(selectedConnection) : "";
-  const selectedConnectionToolApprovalMode = selectedConnection ? normalizeBotToolApprovalMode(selectedConnection.toolApprovalMode) : "ask";
+  const selectedConnectionToolApprovalMode = selectedConnection ? normalizeBotToolApprovalMode(selectedConnection.toolApprovalMode) : "workspace-write";
   const simpleAccessMode = draft.allowlist.allowAll ? "everyone" : "trusted";
   const connectedPlatforms = new Set<BotPlatformKey>();
   if (qqAdded) connectedPlatforms.add("qq");
@@ -6568,21 +6555,6 @@ export function ProviderEditor({
 function PermissionsSection({ s, busy, apply }: SectionProps) {
   const t = useT();
   return (
-    <>
-    <SettingsSection title={t("settings.permissions")} description={t("settings.permissionsModeHint")}>
-      <SettingsField label={t("settings.writerMode")}>
-        <SettingsSelect
-          className="mem-select set-grow"
-          value={s.permissions.mode}
-          disabled={busy}
-          onValueChange={(value) => void apply(() => app.SetPermissionMode(value))}
-        >
-          <option value="ask">{t("settings.modeAsk")}</option>
-          <option value="allow">{t("settings.modeAllow")}</option>
-          <option value="deny">{t("settings.modeDeny")}</option>
-        </SettingsSelect>
-      </SettingsField>
-    </SettingsSection>
     <SettingsSection title={t("settings.permissionRules")} description={t("settings.ruleForm")}>
       <div className="set-rules-grid">
         {(["deny", "ask", "allow"] as const).map((list) => (
@@ -6597,7 +6569,6 @@ function PermissionsSection({ s, busy, apply }: SectionProps) {
         ))}
       </div>
     </SettingsSection>
-    </>
   );
 }
 
@@ -6992,15 +6963,6 @@ function SandboxSection({ s, busy, apply, windows }: SectionProps & { windows: b
       }
     >
       <ShellInterpreterFields sb={sb} windows={windows} busy={busy} setShell={(prefer) => void apply(() => app.SetShellPreference(prefer))} reloadSession={() => void reloadSession()} />
-      <SettingsField label={t("settings.bashSandbox")} hint={windows ? t("settings.bashUnavailableWindows") : undefined}>
-        {/* Windows has no OS-level Bash backend and config.BashModeForGOOS fixes
-            the effective value to off. Keep the control visibly immutable and
-            omit enforce so the UI cannot imply a dormant capability. */}
-        <SettingsSelect className="mem-select set-grow" value={windows ? "off" : sb.bash} disabled={busy || windows} onValueChange={(value) => void set({ bash: value })}>
-          {!windows && <option value="enforce">{t("settings.bashEnforce")}</option>}
-          <option value="off">{t("settings.bashOff")}</option>
-        </SettingsSelect>
-      </SettingsField>
       <SettingsField label={t("settings.allowNetwork")}>
         <label className="set-check set-check--inline">
           <input type="checkbox" checked={sb.network} disabled={busy} onChange={(e) => void set({ network: e.target.checked })} />

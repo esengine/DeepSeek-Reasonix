@@ -317,9 +317,9 @@ func TestStatusFooterUsesReadableLocalizedHintAndWrapsCleanly(t *testing.T) {
 	for _, tt := range []struct {
 		lang, compact, session string
 	}{
-		{lang: "en", compact: "Shift+Tab ask/auto/plan · Ctrl+Y YOLO", session: "MODEL deepseek-v4-flash   EFFORT auto"},
-		{lang: "zh", compact: "Shift+Tab 询问/自动/计划 · Ctrl+Y YOLO", session: "模型 deepseek-v4-flash   强度 auto"},
-		{lang: "zh-TW", compact: "Shift+Tab 詢問/自動/計畫 · Ctrl+Y YOLO", session: "模型 deepseek-v4-flash   強度 auto"},
+		{lang: "en", compact: "Shift+Tab read-only/workspace/plan", session: "MODEL deepseek-v4-flash   EFFORT auto"},
+		{lang: "zh", compact: "Shift+Tab 仅可查看/工作区内修改/计划", session: "模型 deepseek-v4-flash   强度 auto"},
+		{lang: "zh-TW", compact: "Shift+Tab 僅可查看/工作區內修改/計畫", session: "模型 deepseek-v4-flash   強度 auto"},
 	} {
 		t.Run(tt.lang, func(t *testing.T) {
 			i18n.DetectLanguage(tt.lang)
@@ -350,7 +350,7 @@ func TestStatusFooterUsesReadableLocalizedHintAndWrapsCleanly(t *testing.T) {
 			}
 
 			narrow := ansi.Strip(m.renderStatusBlock(primary, 24))
-			if strings.Contains(narrow, "Shift+Tab") || strings.Contains(narrow, "Ctrl+Y") {
+			if strings.Contains(narrow, "Shift+Tab") {
 				t.Fatalf("shortcut help should yield when readable key names cannot fit:\n%s", narrow)
 			}
 			if !strings.Contains(narrow, ansi.Strip(footerValue(i18n.M.ChatStatusIdle))) {

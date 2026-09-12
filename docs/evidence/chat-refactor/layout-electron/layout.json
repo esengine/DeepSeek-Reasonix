@@ -1,0 +1,2483 @@
+[
+  {
+    "label": "full-width long code",
+    "viewport": 1920,
+    "chat": {
+      "left": 236,
+      "right": 1920,
+      "width": 1684
+    },
+    "content": {
+      "left": 236,
+      "right": 1920,
+      "width": 1684
+    },
+    "documentWidth": 1920,
+    "dockOpen": false,
+    "clientWidth": 1684,
+    "scrollWidth": 1684,
+    "userBubbles": [
+      {
+        "left": 1165.8515625,
+        "right": 1478,
+        "width": 312.1484375
+      },
+      {
+        "left": 1165.8515625,
+        "right": 1478,
+        "width": 312.1484375
+      }
+    ],
+    "launcher": null
+  },
+  {
+    "label": "creation/standard/760",
+    "viewport": 760,
+    "chat": {
+      "left": 0,
+      "right": 760,
+      "width": 760
+    },
+    "content": {
+      "left": 0,
+      "right": 760,
+      "width": 760
+    },
+    "documentWidth": 760,
+    "dockOpen": false,
+    "clientWidth": 760,
+    "scrollWidth": 760,
+    "userBubbles": [
+      {
+        "left": 423.8515625,
+        "right": 736,
+        "width": 312.1484375
+      },
+      {
+        "left": 423.8515625,
+        "right": 736,
+        "width": 312.1484375
+      }
+    ],
+    "launcher": null
+  },
+  {
+    "label": "creation/standard/820",
+    "viewport": 820,
+    "chat": {
+      "left": 0,
+      "right": 820,
+      "width": 820
+    },
+    "content": {
+      "left": 0,
+      "right": 820,
+      "width": 820
+    },
+    "documentWidth": 820,
+    "dockOpen": false,
+    "clientWidth": 820,
+    "scrollWidth": 820,
+    "userBubbles": [
+      {
+        "left": 483.8515625,
+        "right": 796,
+        "width": 312.1484375
+      },
+      {
+        "left": 483.8515625,
+        "right": 796,
+        "width": 312.1484375
+      }
+    ],
+    "launcher": null
+  },
+  {
+    "label": "creation/standard/1000",
+    "viewport": 1000,
+    "chat": {
+      "left": 236,
+      "right": 1000,
+      "width": 764
+    },
+    "content": {
+      "left": 236,
+      "right": 1000,
+      "width": 764
+    },
+    "documentWidth": 1000,
+    "dockOpen": false,
+    "clientWidth": 764,
+    "scrollWidth": 764,
+    "userBubbles": [
+      {
+        "left": 663.8515625,
+        "right": 976,
+        "width": 312.1484375
+      },
+      {
+        "left": 663.8515625,
+        "right": 976,
+        "width": 312.1484375
+      }
+    ],
+    "launcher": null
+  },
+  {
+    "label": "creation/standard/1280",
+    "viewport": 1280,
+    "chat": {
+      "left": 236,
+      "right": 1280,
+      "width": 1044
+    },
+    "content": {
+      "left": 236,
+      "right": 1280,
+      "width": 1044
+    },
+    "documentWidth": 1280,
+    "dockOpen": false,
+    "clientWidth": 1044,
+    "scrollWidth": 1044,
+    "userBubbles": [
+      {
+        "left": 845.8515625,
+        "right": 1158,
+        "width": 312.1484375
+      },
+      {
+        "left": 845.8515625,
+        "right": 1158,
+        "width": 312.1484375
+      }
+    ],
+    "launcher": null
+  },
+  {
+    "label": "creation/standard/1920",
+    "viewport": 1920,
+    "chat": {
+      "left": 236,
+      "right": 1920,
+      "width": 1684
+    },
+    "content": {
+      "left": 236,
+      "right": 1920,
+      "width": 1684
+    },
+    "documentWidth": 1920,
+    "dockOpen": false,
+    "clientWidth": 1684,
+    "scrollWidth": 1684,
+    "userBubbles": [
+      {
+        "left": 1165.8515625,
+        "right": 1478,
+        "width": 312.1484375
+      },
+      {
+        "left": 1165.8515625,
+        "right": 1478,
+        "width": 312.1484375
+      }
+    ],
+    "launcher": null
+  },
+  {
+    "label": "creation/full/760",
+    "viewport": 760,
+    "chat": {
+      "left": 0,
+      "right": 760,
+      "width": 760
+    },
+    "content": {
+      "left": 0,
+      "right": 760,
+      "width": 760
+    },
+    "documentWidth": 760,
+    "dockOpen": false,
+    "clientWidth": 760,
+    "scrollWidth": 760,
+    "userBubbles": [
+      {
+        "left": 423.8515625,
+        "right": 736,
+        "width": 312.1484375
+      },
+      {
+        "left": 423.8515625,
+        "right": 736,
+        "width": 312.1484375
+      }
+    ],
+    "launcher": null
+  },
+  {
+    "label": "creation/full/820",
+    "viewport": 820,
+    "chat": {
+      "left": 0,
+      "right": 820,
+      "width": 820
+    },
+    "content": {
+      "left": 0,
+      "right": 820,
+      "width": 820
+    },
+    "documentWidth": 820,
+    "dockOpen": false,
+    "clientWidth": 820,
+    "scrollWidth": 820,
+    "userBubbles": [
+      {
+        "left": 483.8515625,
+        "right": 796,
+        "width": 312.1484375
+      },
+      {
+        "left": 483.8515625,
+        "right": 796,
+        "width": 312.1484375
+      }
+    ],
+    "launcher": null
+  },
+  {
+    "label": "creation/full/1000",
+    "viewport": 1000,
+    "chat": {
+      "left": 236,
+      "right": 1000,
+      "width": 764
+    },
+    "content": {
+      "left": 236,
+      "right": 1000,
+      "width": 764
+    },
+    "documentWidth": 1000,
+    "dockOpen": false,
+    "clientWidth": 764,
+    "scrollWidth": 764,
+    "userBubbles": [
+      {
+        "left": 663.8515625,
+        "right": 976,
+        "width": 312.1484375
+      },
+      {
+        "left": 663.8515625,
+        "right": 976,
+        "width": 312.1484375
+      }
+    ],
+    "launcher": null
+  },
+  {
+    "label": "creation/full/1280",
+    "viewport": 1280,
+    "chat": {
+      "left": 236,
+      "right": 1280,
+      "width": 1044
+    },
+    "content": {
+      "left": 236,
+      "right": 1280,
+      "width": 1044
+    },
+    "documentWidth": 1280,
+    "dockOpen": false,
+    "clientWidth": 1044,
+    "scrollWidth": 1044,
+    "userBubbles": [
+      {
+        "left": 845.8515625,
+        "right": 1158,
+        "width": 312.1484375
+      },
+      {
+        "left": 845.8515625,
+        "right": 1158,
+        "width": 312.1484375
+      }
+    ],
+    "launcher": null
+  },
+  {
+    "label": "creation/full/1920",
+    "viewport": 1920,
+    "chat": {
+      "left": 236,
+      "right": 1920,
+      "width": 1684
+    },
+    "content": {
+      "left": 236,
+      "right": 1920,
+      "width": 1684
+    },
+    "documentWidth": 1920,
+    "dockOpen": false,
+    "clientWidth": 1684,
+    "scrollWidth": 1684,
+    "userBubbles": [
+      {
+        "left": 1165.8515625,
+        "right": 1478,
+        "width": 312.1484375
+      },
+      {
+        "left": 1165.8515625,
+        "right": 1478,
+        "width": 312.1484375
+      }
+    ],
+    "launcher": null
+  },
+  {
+    "label": "workbench/standard/760",
+    "viewport": 760,
+    "chat": {
+      "left": 0,
+      "right": 760,
+      "width": 760
+    },
+    "content": {
+      "left": 0,
+      "right": 760,
+      "width": 760
+    },
+    "documentWidth": 760,
+    "dockOpen": false,
+    "clientWidth": 760,
+    "scrollWidth": 760,
+    "userBubbles": [
+      {
+        "left": 421.8515625,
+        "right": 736,
+        "width": 314.1484375
+      },
+      {
+        "left": 421.8515625,
+        "right": 736,
+        "width": 314.1484375
+      }
+    ],
+    "launcher": null
+  },
+  {
+    "label": "workbench/standard/820",
+    "viewport": 820,
+    "chat": {
+      "left": 0,
+      "right": 820,
+      "width": 820
+    },
+    "content": {
+      "left": 0,
+      "right": 820,
+      "width": 820
+    },
+    "documentWidth": 820,
+    "dockOpen": false,
+    "clientWidth": 820,
+    "scrollWidth": 820,
+    "userBubbles": [
+      {
+        "left": 481.8515625,
+        "right": 796,
+        "width": 314.1484375
+      },
+      {
+        "left": 481.8515625,
+        "right": 796,
+        "width": 314.1484375
+      }
+    ],
+    "launcher": null
+  },
+  {
+    "label": "workbench/standard/1000",
+    "viewport": 1000,
+    "chat": {
+      "left": 300,
+      "right": 1000,
+      "width": 700
+    },
+    "content": {
+      "left": 300,
+      "right": 1000,
+      "width": 700
+    },
+    "documentWidth": 1000,
+    "dockOpen": false,
+    "clientWidth": 700,
+    "scrollWidth": 700,
+    "userBubbles": [
+      {
+        "left": 661.8515625,
+        "right": 976,
+        "width": 314.1484375
+      },
+      {
+        "left": 661.8515625,
+        "right": 976,
+        "width": 314.1484375
+      }
+    ],
+    "launcher": null
+  },
+  {
+    "label": "workbench/standard/1280",
+    "viewport": 1280,
+    "chat": {
+      "left": 300,
+      "right": 1280,
+      "width": 980
+    },
+    "content": {
+      "left": 300,
+      "right": 1280,
+      "width": 980
+    },
+    "documentWidth": 1280,
+    "dockOpen": false,
+    "clientWidth": 980,
+    "scrollWidth": 980,
+    "userBubbles": [
+      {
+        "left": 875.8515625,
+        "right": 1190,
+        "width": 314.1484375
+      },
+      {
+        "left": 875.8515625,
+        "right": 1190,
+        "width": 314.1484375
+      }
+    ],
+    "launcher": null
+  },
+  {
+    "label": "workbench/standard/1920",
+    "viewport": 1920,
+    "chat": {
+      "left": 300,
+      "right": 1920,
+      "width": 1620
+    },
+    "content": {
+      "left": 300,
+      "right": 1920,
+      "width": 1620
+    },
+    "documentWidth": 1920,
+    "dockOpen": false,
+    "clientWidth": 1620,
+    "scrollWidth": 1620,
+    "userBubbles": [
+      {
+        "left": 1195.8515625,
+        "right": 1510,
+        "width": 314.1484375
+      },
+      {
+        "left": 1195.8515625,
+        "right": 1510,
+        "width": 314.1484375
+      }
+    ],
+    "launcher": null
+  },
+  {
+    "label": "workbench/full/760",
+    "viewport": 760,
+    "chat": {
+      "left": 0,
+      "right": 760,
+      "width": 760
+    },
+    "content": {
+      "left": 0,
+      "right": 760,
+      "width": 760
+    },
+    "documentWidth": 760,
+    "dockOpen": false,
+    "clientWidth": 760,
+    "scrollWidth": 760,
+    "userBubbles": [
+      {
+        "left": 421.8515625,
+        "right": 736,
+        "width": 314.1484375
+      },
+      {
+        "left": 421.8515625,
+        "right": 736,
+        "width": 314.1484375
+      }
+    ],
+    "launcher": null
+  },
+  {
+    "label": "workbench/full/820",
+    "viewport": 820,
+    "chat": {
+      "left": 0,
+      "right": 820,
+      "width": 820
+    },
+    "content": {
+      "left": 0,
+      "right": 820,
+      "width": 820
+    },
+    "documentWidth": 820,
+    "dockOpen": false,
+    "clientWidth": 820,
+    "scrollWidth": 820,
+    "userBubbles": [
+      {
+        "left": 481.8515625,
+        "right": 796,
+        "width": 314.1484375
+      },
+      {
+        "left": 481.8515625,
+        "right": 796,
+        "width": 314.1484375
+      }
+    ],
+    "launcher": null
+  },
+  {
+    "label": "workbench/full/1000",
+    "viewport": 1000,
+    "chat": {
+      "left": 300,
+      "right": 1000,
+      "width": 700
+    },
+    "content": {
+      "left": 300,
+      "right": 1000,
+      "width": 700
+    },
+    "documentWidth": 1000,
+    "dockOpen": false,
+    "clientWidth": 700,
+    "scrollWidth": 700,
+    "userBubbles": [
+      {
+        "left": 661.8515625,
+        "right": 976,
+        "width": 314.1484375
+      },
+      {
+        "left": 661.8515625,
+        "right": 976,
+        "width": 314.1484375
+      }
+    ],
+    "launcher": null
+  },
+  {
+    "label": "workbench/full/1280",
+    "viewport": 1280,
+    "chat": {
+      "left": 300,
+      "right": 1280,
+      "width": 980
+    },
+    "content": {
+      "left": 300,
+      "right": 1280,
+      "width": 980
+    },
+    "documentWidth": 1280,
+    "dockOpen": false,
+    "clientWidth": 980,
+    "scrollWidth": 980,
+    "userBubbles": [
+      {
+        "left": 875.8515625,
+        "right": 1190,
+        "width": 314.1484375
+      },
+      {
+        "left": 875.8515625,
+        "right": 1190,
+        "width": 314.1484375
+      }
+    ],
+    "launcher": null
+  },
+  {
+    "label": "workbench/full/1920",
+    "viewport": 1920,
+    "chat": {
+      "left": 300,
+      "right": 1920,
+      "width": 1620
+    },
+    "content": {
+      "left": 300,
+      "right": 1920,
+      "width": 1620
+    },
+    "documentWidth": 1920,
+    "dockOpen": false,
+    "clientWidth": 1620,
+    "scrollWidth": 1620,
+    "userBubbles": [
+      {
+        "left": 1195.8515625,
+        "right": 1510,
+        "width": 314.1484375
+      },
+      {
+        "left": 1195.8515625,
+        "right": 1510,
+        "width": 314.1484375
+      }
+    ],
+    "launcher": null
+  },
+  {
+    "label": "sidebar=false/dock=false",
+    "viewport": 1920,
+    "chat": {
+      "left": 289.578125,
+      "right": 1920,
+      "width": 1630.421875
+    },
+    "content": {
+      "left": 289.578125,
+      "right": 1680,
+      "width": 1390.421875
+    },
+    "documentWidth": 1920,
+    "dockOpen": false,
+    "clientWidth": 1390,
+    "scrollWidth": 1390,
+    "userBubbles": [
+      {
+        "left": 1070.640625,
+        "right": 1384.7890625,
+        "width": 314.1484375
+      },
+      {
+        "left": 1070.640625,
+        "right": 1384.7890625,
+        "width": 314.1484375
+      }
+    ],
+    "launcher": {
+      "left": 1680,
+      "right": 1912,
+      "width": 232
+    }
+  },
+  {
+    "label": "sidebar=false/dock=true",
+    "viewport": 1920,
+    "chat": {
+      "left": 260.4296875,
+      "right": 1909.5859375,
+      "width": 1649.15625
+    },
+    "content": {
+      "left": 260.4296875,
+      "right": 1909.5859375,
+      "width": 1649.15625
+    },
+    "documentWidth": 1920,
+    "dockOpen": true,
+    "clientWidth": 1649,
+    "scrollWidth": 1649,
+    "userBubbles": [
+      {
+        "left": 1170.859375,
+        "right": 1485.0078125,
+        "width": 314.1484375
+      },
+      {
+        "left": 1170.859375,
+        "right": 1485.0078125,
+        "width": 314.1484375
+      }
+    ],
+    "launcher": {
+      "left": 1669.5859375,
+      "right": 1901.5859375,
+      "width": 232
+    }
+  },
+  {
+    "label": "sidebar=true/dock=false",
+    "viewport": 1920,
+    "chat": {
+      "left": 244.171875,
+      "right": 1890.4609375,
+      "width": 1646.2890625
+    },
+    "content": {
+      "left": 244.171875,
+      "right": 1650.4609375,
+      "width": 1406.2890625
+    },
+    "documentWidth": 1920,
+    "dockOpen": false,
+    "clientWidth": 1406,
+    "scrollWidth": 1406,
+    "userBubbles": [
+      {
+        "left": 1033.1640625,
+        "right": 1347.3125,
+        "width": 314.1484375
+      },
+      {
+        "left": 1033.1640625,
+        "right": 1347.3125,
+        "width": 314.1484375
+      }
+    ],
+    "launcher": {
+      "left": 1650.4609375,
+      "right": 1882.4609375,
+      "width": 232
+    }
+  },
+  {
+    "label": "sidebar=true/dock=true",
+    "viewport": 1920,
+    "chat": {
+      "left": 250.03125,
+      "right": 1883.140625,
+      "width": 1633.109375
+    },
+    "content": {
+      "left": 250.03125,
+      "right": 1883.140625,
+      "width": 1633.109375
+    },
+    "documentWidth": 1920,
+    "dockOpen": true,
+    "clientWidth": 1633,
+    "scrollWidth": 1633,
+    "userBubbles": [
+      {
+        "left": 1152.4375,
+        "right": 1466.5859375,
+        "width": 314.1484375
+      },
+      {
+        "left": 1152.4375,
+        "right": 1466.5859375,
+        "width": 314.1484375
+      }
+    ],
+    "launcher": {
+      "left": 1643.140625,
+      "right": 1875.140625,
+      "width": 232
+    }
+  },
+  {
+    "label": "launcher threshold 1009",
+    "viewport": 1009,
+    "chat": {
+      "left": 199.859375,
+      "right": 967.3671875,
+      "width": 767.5078125
+    },
+    "content": {
+      "left": 199.859375,
+      "right": 967.3671875,
+      "width": 767.5078125
+    },
+    "documentWidth": 1009,
+    "dockOpen": false,
+    "clientWidth": 768,
+    "scrollWidth": 768,
+    "userBubbles": [
+      {
+        "left": 631.21875,
+        "right": 943.3671875,
+        "width": 312.1484375
+      },
+      {
+        "left": 631.21875,
+        "right": 943.3671875,
+        "width": 312.1484375
+      }
+    ],
+    "launcher": null
+  },
+  {
+    "label": "launcher threshold 1010",
+    "viewport": 1010,
+    "chat": {
+      "left": 0,
+      "right": 1010,
+      "width": 1010
+    },
+    "content": {
+      "left": 0,
+      "right": 770,
+      "width": 770
+    },
+    "documentWidth": 1010,
+    "dockOpen": false,
+    "clientWidth": 770,
+    "scrollWidth": 770,
+    "userBubbles": [
+      {
+        "left": 433.8515625,
+        "right": 746,
+        "width": 312.1484375
+      },
+      {
+        "left": 433.8515625,
+        "right": 746,
+        "width": 312.1484375
+      }
+    ],
+    "launcher": {
+      "left": 770,
+      "right": 1002,
+      "width": 232
+    }
+  },
+  {
+    "label": "launcher threshold 1011",
+    "viewport": 1011,
+    "chat": {
+      "left": 0,
+      "right": 1011,
+      "width": 1011
+    },
+    "content": {
+      "left": 0,
+      "right": 771,
+      "width": 771
+    },
+    "documentWidth": 1011,
+    "dockOpen": false,
+    "clientWidth": 771,
+    "scrollWidth": 771,
+    "userBubbles": [
+      {
+        "left": 434.8515625,
+        "right": 747,
+        "width": 312.1484375
+      },
+      {
+        "left": 434.8515625,
+        "right": 747,
+        "width": 312.1484375
+      }
+    ],
+    "launcher": {
+      "left": 771,
+      "right": 1003,
+      "width": 232
+    }
+  },
+  {
+    "label": "content replacement 0",
+    "viewport": 1011,
+    "chat": {
+      "left": 0,
+      "right": 1011,
+      "width": 1011
+    },
+    "content": {
+      "left": 0,
+      "right": 1011,
+      "width": 1011
+    },
+    "documentWidth": 1011,
+    "dockOpen": false,
+    "clientWidth": 1011,
+    "scrollWidth": 1011,
+    "userBubbles": [
+      {
+        "left": 593.3515625,
+        "right": 905.5,
+        "width": 312.1484375
+      },
+      {
+        "left": 593.3515625,
+        "right": 905.5,
+        "width": 312.1484375
+      }
+    ],
+    "launcher": null
+  },
+  {
+    "label": "content replacement 1",
+    "viewport": 1011,
+    "chat": {
+      "left": 0,
+      "right": 1011,
+      "width": 1011
+    },
+    "content": {
+      "left": 0,
+      "right": 1011,
+      "width": 1011
+    },
+    "documentWidth": 1011,
+    "dockOpen": false,
+    "clientWidth": 1011,
+    "scrollWidth": 1011,
+    "userBubbles": [
+      {
+        "left": 593.3515625,
+        "right": 905.5,
+        "width": 312.1484375
+      },
+      {
+        "left": 593.3515625,
+        "right": 905.5,
+        "width": 312.1484375
+      }
+    ],
+    "launcher": null
+  },
+  {
+    "label": "content replacement 2",
+    "viewport": 1011,
+    "chat": {
+      "left": 0,
+      "right": 1011,
+      "width": 1011
+    },
+    "content": {
+      "left": 0,
+      "right": 1011,
+      "width": 1011
+    },
+    "documentWidth": 1011,
+    "dockOpen": false,
+    "clientWidth": 1011,
+    "scrollWidth": 1011,
+    "userBubbles": [
+      {
+        "left": 593.3515625,
+        "right": 905.5,
+        "width": 312.1484375
+      },
+      {
+        "left": 593.3515625,
+        "right": 905.5,
+        "width": 312.1484375
+      }
+    ],
+    "launcher": null
+  },
+  {
+    "label": "content replacement 3",
+    "viewport": 1011,
+    "chat": {
+      "left": 0,
+      "right": 1011,
+      "width": 1011
+    },
+    "content": {
+      "left": 0,
+      "right": 1011,
+      "width": 1011
+    },
+    "documentWidth": 1011,
+    "dockOpen": false,
+    "clientWidth": 1011,
+    "scrollWidth": 1011,
+    "userBubbles": [
+      {
+        "left": 593.3515625,
+        "right": 905.5,
+        "width": 312.1484375
+      },
+      {
+        "left": 593.3515625,
+        "right": 905.5,
+        "width": 312.1484375
+      }
+    ],
+    "launcher": null
+  },
+  {
+    "label": "accumulated long session",
+    "viewport": 1011,
+    "chat": {
+      "left": 0,
+      "right": 1011,
+      "width": 1011
+    },
+    "content": {
+      "left": 0,
+      "right": 1011,
+      "width": 1011
+    },
+    "documentWidth": 1011,
+    "dockOpen": false,
+    "clientWidth": 1011,
+    "scrollWidth": 1011,
+    "userBubbles": [
+      {
+        "left": 593.3515625,
+        "right": 905.5,
+        "width": 312.1484375
+      },
+      {
+        "left": 593.3515625,
+        "right": 905.5,
+        "width": 312.1484375
+      },
+      {
+        "left": 593.3515625,
+        "right": 905.5,
+        "width": 312.1484375
+      },
+      {
+        "left": 593.3515625,
+        "right": 905.5,
+        "width": 312.1484375
+      },
+      {
+        "left": 593.3515625,
+        "right": 905.5,
+        "width": 312.1484375
+      },
+      {
+        "left": 593.3515625,
+        "right": 905.5,
+        "width": 312.1484375
+      },
+      {
+        "left": 593.3515625,
+        "right": 905.5,
+        "width": 312.1484375
+      },
+      {
+        "left": 593.3515625,
+        "right": 905.5,
+        "width": 312.1484375
+      },
+      {
+        "left": 593.3515625,
+        "right": 905.5,
+        "width": 312.1484375
+      },
+      {
+        "left": 593.3515625,
+        "right": 905.5,
+        "width": 312.1484375
+      },
+      {
+        "left": 585.5625,
+        "right": 905.5,
+        "width": 319.9375
+      },
+      {
+        "left": 586.6015625,
+        "right": 905.5,
+        "width": 318.8984375
+      },
+      {
+        "left": 585.5625,
+        "right": 905.5,
+        "width": 319.9375
+      },
+      {
+        "left": 585.5625,
+        "right": 905.5,
+        "width": 319.9375
+      },
+      {
+        "left": 585.5625,
+        "right": 905.5,
+        "width": 319.9375
+      },
+      {
+        "left": 585.5625,
+        "right": 905.5,
+        "width": 319.9375
+      },
+      {
+        "left": 585.5625,
+        "right": 905.5,
+        "width": 319.9375
+      },
+      {
+        "left": 585.5625,
+        "right": 905.5,
+        "width": 319.9375
+      },
+      {
+        "left": 585.5625,
+        "right": 905.5,
+        "width": 319.9375
+      },
+      {
+        "left": 585.5625,
+        "right": 905.5,
+        "width": 319.9375
+      },
+      {
+        "left": 585.5625,
+        "right": 905.5,
+        "width": 319.9375
+      },
+      {
+        "left": 585.5625,
+        "right": 905.5,
+        "width": 319.9375
+      },
+      {
+        "left": 585.5625,
+        "right": 905.5,
+        "width": 319.9375
+      },
+      {
+        "left": 585.5625,
+        "right": 905.5,
+        "width": 319.9375
+      },
+      {
+        "left": 585.5625,
+        "right": 905.5,
+        "width": 319.9375
+      },
+      {
+        "left": 585.5625,
+        "right": 905.5,
+        "width": 319.9375
+      },
+      {
+        "left": 585.5625,
+        "right": 905.5,
+        "width": 319.9375
+      },
+      {
+        "left": 585.5625,
+        "right": 905.5,
+        "width": 319.9375
+      },
+      {
+        "left": 585.5625,
+        "right": 905.5,
+        "width": 319.9375
+      },
+      {
+        "left": 585.5625,
+        "right": 905.5,
+        "width": 319.9375
+      },
+      {
+        "left": 585.5625,
+        "right": 905.5,
+        "width": 319.9375
+      },
+      {
+        "left": 585.5625,
+        "right": 905.5,
+        "width": 319.9375
+      },
+      {
+        "left": 585.5625,
+        "right": 905.5,
+        "width": 319.9375
+      },
+      {
+        "left": 585.5625,
+        "right": 905.5,
+        "width": 319.9375
+      },
+      {
+        "left": 585.5625,
+        "right": 905.5,
+        "width": 319.9375
+      },
+      {
+        "left": 585.5625,
+        "right": 905.5,
+        "width": 319.9375
+      },
+      {
+        "left": 585.5625,
+        "right": 905.5,
+        "width": 319.9375
+      },
+      {
+        "left": 585.5625,
+        "right": 905.5,
+        "width": 319.9375
+      },
+      {
+        "left": 585.5625,
+        "right": 905.5,
+        "width": 319.9375
+      },
+      {
+        "left": 585.5625,
+        "right": 905.5,
+        "width": 319.9375
+      },
+      {
+        "left": 585.5625,
+        "right": 905.5,
+        "width": 319.9375
+      },
+      {
+        "left": 585.5625,
+        "right": 905.5,
+        "width": 319.9375
+      },
+      {
+        "left": 585.5625,
+        "right": 905.5,
+        "width": 319.9375
+      },
+      {
+        "left": 585.5625,
+        "right": 905.5,
+        "width": 319.9375
+      },
+      {
+        "left": 585.5625,
+        "right": 905.5,
+        "width": 319.9375
+      },
+      {
+        "left": 585.5625,
+        "right": 905.5,
+        "width": 319.9375
+      },
+      {
+        "left": 585.5625,
+        "right": 905.5,
+        "width": 319.9375
+      },
+      {
+        "left": 585.5625,
+        "right": 905.5,
+        "width": 319.9375
+      },
+      {
+        "left": 585.5625,
+        "right": 905.5,
+        "width": 319.9375
+      },
+      {
+        "left": 585.5625,
+        "right": 905.5,
+        "width": 319.9375
+      },
+      {
+        "left": 585.5625,
+        "right": 905.5,
+        "width": 319.9375
+      },
+      {
+        "left": 585.5625,
+        "right": 905.5,
+        "width": 319.9375
+      },
+      {
+        "left": 585.5625,
+        "right": 905.5,
+        "width": 319.9375
+      },
+      {
+        "left": 585.5625,
+        "right": 905.5,
+        "width": 319.9375
+      },
+      {
+        "left": 585.5625,
+        "right": 905.5,
+        "width": 319.9375
+      },
+      {
+        "left": 585.5625,
+        "right": 905.5,
+        "width": 319.9375
+      },
+      {
+        "left": 585.5625,
+        "right": 905.5,
+        "width": 319.9375
+      },
+      {
+        "left": 585.5625,
+        "right": 905.5,
+        "width": 319.9375
+      },
+      {
+        "left": 585.5625,
+        "right": 905.5,
+        "width": 319.9375
+      },
+      {
+        "left": 585.5625,
+        "right": 905.5,
+        "width": 319.9375
+      },
+      {
+        "left": 585.5625,
+        "right": 905.5,
+        "width": 319.9375
+      },
+      {
+        "left": 585.5625,
+        "right": 905.5,
+        "width": 319.9375
+      },
+      {
+        "left": 585.5625,
+        "right": 905.5,
+        "width": 319.9375
+      },
+      {
+        "left": 585.5625,
+        "right": 905.5,
+        "width": 319.9375
+      },
+      {
+        "left": 585.5625,
+        "right": 905.5,
+        "width": 319.9375
+      },
+      {
+        "left": 585.5625,
+        "right": 905.5,
+        "width": 319.9375
+      },
+      {
+        "left": 585.5625,
+        "right": 905.5,
+        "width": 319.9375
+      },
+      {
+        "left": 585.5625,
+        "right": 905.5,
+        "width": 319.9375
+      },
+      {
+        "left": 585.5625,
+        "right": 905.5,
+        "width": 319.9375
+      },
+      {
+        "left": 585.5625,
+        "right": 905.5,
+        "width": 319.9375
+      },
+      {
+        "left": 585.5625,
+        "right": 905.5,
+        "width": 319.9375
+      },
+      {
+        "left": 585.5625,
+        "right": 905.5,
+        "width": 319.9375
+      },
+      {
+        "left": 585.5625,
+        "right": 905.5,
+        "width": 319.9375
+      },
+      {
+        "left": 585.5625,
+        "right": 905.5,
+        "width": 319.9375
+      },
+      {
+        "left": 585.5625,
+        "right": 905.5,
+        "width": 319.9375
+      },
+      {
+        "left": 585.5625,
+        "right": 905.5,
+        "width": 319.9375
+      },
+      {
+        "left": 585.5625,
+        "right": 905.5,
+        "width": 319.9375
+      },
+      {
+        "left": 585.5625,
+        "right": 905.5,
+        "width": 319.9375
+      },
+      {
+        "left": 585.5625,
+        "right": 905.5,
+        "width": 319.9375
+      },
+      {
+        "left": 585.5625,
+        "right": 905.5,
+        "width": 319.9375
+      },
+      {
+        "left": 585.5625,
+        "right": 905.5,
+        "width": 319.9375
+      },
+      {
+        "left": 585.5625,
+        "right": 905.5,
+        "width": 319.9375
+      },
+      {
+        "left": 585.5625,
+        "right": 905.5,
+        "width": 319.9375
+      },
+      {
+        "left": 585.5625,
+        "right": 905.5,
+        "width": 319.9375
+      },
+      {
+        "left": 585.5625,
+        "right": 905.5,
+        "width": 319.9375
+      },
+      {
+        "left": 585.5625,
+        "right": 905.5,
+        "width": 319.9375
+      },
+      {
+        "left": 585.5625,
+        "right": 905.5,
+        "width": 319.9375
+      },
+      {
+        "left": 585.5625,
+        "right": 905.5,
+        "width": 319.9375
+      },
+      {
+        "left": 585.5625,
+        "right": 905.5,
+        "width": 319.9375
+      },
+      {
+        "left": 585.5625,
+        "right": 905.5,
+        "width": 319.9375
+      },
+      {
+        "left": 585.5625,
+        "right": 905.5,
+        "width": 319.9375
+      },
+      {
+        "left": 585.5625,
+        "right": 905.5,
+        "width": 319.9375
+      },
+      {
+        "left": 585.5625,
+        "right": 905.5,
+        "width": 319.9375
+      },
+      {
+        "left": 585.5625,
+        "right": 905.5,
+        "width": 319.9375
+      },
+      {
+        "left": 585.5625,
+        "right": 905.5,
+        "width": 319.9375
+      },
+      {
+        "left": 585.5625,
+        "right": 905.5,
+        "width": 319.9375
+      },
+      {
+        "left": 585.5625,
+        "right": 905.5,
+        "width": 319.9375
+      },
+      {
+        "left": 585.5625,
+        "right": 905.5,
+        "width": 319.9375
+      },
+      {
+        "left": 585.5625,
+        "right": 905.5,
+        "width": 319.9375
+      },
+      {
+        "left": 585.5625,
+        "right": 905.5,
+        "width": 319.9375
+      },
+      {
+        "left": 577.78125,
+        "right": 905.5,
+        "width": 327.71875
+      },
+      {
+        "left": 577.78125,
+        "right": 905.5,
+        "width": 327.71875
+      },
+      {
+        "left": 577.78125,
+        "right": 905.5,
+        "width": 327.71875
+      },
+      {
+        "left": 577.78125,
+        "right": 905.5,
+        "width": 327.71875
+      },
+      {
+        "left": 577.78125,
+        "right": 905.5,
+        "width": 327.71875
+      },
+      {
+        "left": 577.78125,
+        "right": 905.5,
+        "width": 327.71875
+      },
+      {
+        "left": 577.78125,
+        "right": 905.5,
+        "width": 327.71875
+      },
+      {
+        "left": 577.78125,
+        "right": 905.5,
+        "width": 327.71875
+      },
+      {
+        "left": 577.78125,
+        "right": 905.5,
+        "width": 327.71875
+      },
+      {
+        "left": 577.78125,
+        "right": 905.5,
+        "width": 327.71875
+      },
+      {
+        "left": 578.8203125,
+        "right": 905.5,
+        "width": 326.6796875
+      },
+      {
+        "left": 579.859375,
+        "right": 905.5,
+        "width": 325.640625
+      },
+      {
+        "left": 578.8203125,
+        "right": 905.5,
+        "width": 326.6796875
+      },
+      {
+        "left": 578.8203125,
+        "right": 905.5,
+        "width": 326.6796875
+      },
+      {
+        "left": 578.8203125,
+        "right": 905.5,
+        "width": 326.6796875
+      },
+      {
+        "left": 578.8203125,
+        "right": 905.5,
+        "width": 326.6796875
+      },
+      {
+        "left": 578.8203125,
+        "right": 905.5,
+        "width": 326.6796875
+      },
+      {
+        "left": 578.8203125,
+        "right": 905.5,
+        "width": 326.6796875
+      },
+      {
+        "left": 578.8203125,
+        "right": 905.5,
+        "width": 326.6796875
+      },
+      {
+        "left": 578.8203125,
+        "right": 905.5,
+        "width": 326.6796875
+      }
+    ],
+    "launcher": null
+  },
+  {
+    "label": "return to loaded tail",
+    "viewport": 1011,
+    "chat": {
+      "left": 0,
+      "right": 1011,
+      "width": 1011
+    },
+    "content": {
+      "left": 0,
+      "right": 1011,
+      "width": 1011
+    },
+    "documentWidth": 1011,
+    "dockOpen": false,
+    "clientWidth": 1011,
+    "scrollWidth": 1011,
+    "userBubbles": [
+      {
+        "left": 593.3515625,
+        "right": 905.5,
+        "width": 312.1484375
+      },
+      {
+        "left": 593.3515625,
+        "right": 905.5,
+        "width": 312.1484375
+      },
+      {
+        "left": 593.3515625,
+        "right": 905.5,
+        "width": 312.1484375
+      },
+      {
+        "left": 593.3515625,
+        "right": 905.5,
+        "width": 312.1484375
+      },
+      {
+        "left": 593.3515625,
+        "right": 905.5,
+        "width": 312.1484375
+      },
+      {
+        "left": 593.3515625,
+        "right": 905.5,
+        "width": 312.1484375
+      },
+      {
+        "left": 593.3515625,
+        "right": 905.5,
+        "width": 312.1484375
+      },
+      {
+        "left": 593.3515625,
+        "right": 905.5,
+        "width": 312.1484375
+      },
+      {
+        "left": 593.3515625,
+        "right": 905.5,
+        "width": 312.1484375
+      },
+      {
+        "left": 593.3515625,
+        "right": 905.5,
+        "width": 312.1484375
+      },
+      {
+        "left": 585.5625,
+        "right": 905.5,
+        "width": 319.9375
+      },
+      {
+        "left": 586.6015625,
+        "right": 905.5,
+        "width": 318.8984375
+      },
+      {
+        "left": 585.5625,
+        "right": 905.5,
+        "width": 319.9375
+      },
+      {
+        "left": 585.5625,
+        "right": 905.5,
+        "width": 319.9375
+      },
+      {
+        "left": 585.5625,
+        "right": 905.5,
+        "width": 319.9375
+      },
+      {
+        "left": 585.5625,
+        "right": 905.5,
+        "width": 319.9375
+      },
+      {
+        "left": 585.5625,
+        "right": 905.5,
+        "width": 319.9375
+      },
+      {
+        "left": 585.5625,
+        "right": 905.5,
+        "width": 319.9375
+      },
+      {
+        "left": 585.5625,
+        "right": 905.5,
+        "width": 319.9375
+      },
+      {
+        "left": 585.5625,
+        "right": 905.5,
+        "width": 319.9375
+      },
+      {
+        "left": 585.5625,
+        "right": 905.5,
+        "width": 319.9375
+      },
+      {
+        "left": 585.5625,
+        "right": 905.5,
+        "width": 319.9375
+      },
+      {
+        "left": 585.5625,
+        "right": 905.5,
+        "width": 319.9375
+      },
+      {
+        "left": 585.5625,
+        "right": 905.5,
+        "width": 319.9375
+      },
+      {
+        "left": 585.5625,
+        "right": 905.5,
+        "width": 319.9375
+      },
+      {
+        "left": 585.5625,
+        "right": 905.5,
+        "width": 319.9375
+      },
+      {
+        "left": 585.5625,
+        "right": 905.5,
+        "width": 319.9375
+      },
+      {
+        "left": 585.5625,
+        "right": 905.5,
+        "width": 319.9375
+      },
+      {
+        "left": 585.5625,
+        "right": 905.5,
+        "width": 319.9375
+      },
+      {
+        "left": 585.5625,
+        "right": 905.5,
+        "width": 319.9375
+      },
+      {
+        "left": 585.5625,
+        "right": 905.5,
+        "width": 319.9375
+      },
+      {
+        "left": 585.5625,
+        "right": 905.5,
+        "width": 319.9375
+      },
+      {
+        "left": 585.5625,
+        "right": 905.5,
+        "width": 319.9375
+      },
+      {
+        "left": 585.5625,
+        "right": 905.5,
+        "width": 319.9375
+      },
+      {
+        "left": 585.5625,
+        "right": 905.5,
+        "width": 319.9375
+      },
+      {
+        "left": 585.5625,
+        "right": 905.5,
+        "width": 319.9375
+      },
+      {
+        "left": 585.5625,
+        "right": 905.5,
+        "width": 319.9375
+      },
+      {
+        "left": 585.5625,
+        "right": 905.5,
+        "width": 319.9375
+      },
+      {
+        "left": 585.5625,
+        "right": 905.5,
+        "width": 319.9375
+      },
+      {
+        "left": 585.5625,
+        "right": 905.5,
+        "width": 319.9375
+      },
+      {
+        "left": 585.5625,
+        "right": 905.5,
+        "width": 319.9375
+      },
+      {
+        "left": 585.5625,
+        "right": 905.5,
+        "width": 319.9375
+      },
+      {
+        "left": 585.5625,
+        "right": 905.5,
+        "width": 319.9375
+      },
+      {
+        "left": 585.5625,
+        "right": 905.5,
+        "width": 319.9375
+      },
+      {
+        "left": 585.5625,
+        "right": 905.5,
+        "width": 319.9375
+      },
+      {
+        "left": 585.5625,
+        "right": 905.5,
+        "width": 319.9375
+      },
+      {
+        "left": 585.5625,
+        "right": 905.5,
+        "width": 319.9375
+      },
+      {
+        "left": 585.5625,
+        "right": 905.5,
+        "width": 319.9375
+      },
+      {
+        "left": 585.5625,
+        "right": 905.5,
+        "width": 319.9375
+      },
+      {
+        "left": 585.5625,
+        "right": 905.5,
+        "width": 319.9375
+      },
+      {
+        "left": 585.5625,
+        "right": 905.5,
+        "width": 319.9375
+      },
+      {
+        "left": 585.5625,
+        "right": 905.5,
+        "width": 319.9375
+      },
+      {
+        "left": 585.5625,
+        "right": 905.5,
+        "width": 319.9375
+      },
+      {
+        "left": 585.5625,
+        "right": 905.5,
+        "width": 319.9375
+      },
+      {
+        "left": 585.5625,
+        "right": 905.5,
+        "width": 319.9375
+      },
+      {
+        "left": 585.5625,
+        "right": 905.5,
+        "width": 319.9375
+      },
+      {
+        "left": 585.5625,
+        "right": 905.5,
+        "width": 319.9375
+      },
+      {
+        "left": 585.5625,
+        "right": 905.5,
+        "width": 319.9375
+      },
+      {
+        "left": 585.5625,
+        "right": 905.5,
+        "width": 319.9375
+      },
+      {
+        "left": 585.5625,
+        "right": 905.5,
+        "width": 319.9375
+      },
+      {
+        "left": 585.5625,
+        "right": 905.5,
+        "width": 319.9375
+      },
+      {
+        "left": 585.5625,
+        "right": 905.5,
+        "width": 319.9375
+      },
+      {
+        "left": 585.5625,
+        "right": 905.5,
+        "width": 319.9375
+      },
+      {
+        "left": 585.5625,
+        "right": 905.5,
+        "width": 319.9375
+      },
+      {
+        "left": 585.5625,
+        "right": 905.5,
+        "width": 319.9375
+      },
+      {
+        "left": 585.5625,
+        "right": 905.5,
+        "width": 319.9375
+      },
+      {
+        "left": 585.5625,
+        "right": 905.5,
+        "width": 319.9375
+      },
+      {
+        "left": 585.5625,
+        "right": 905.5,
+        "width": 319.9375
+      },
+      {
+        "left": 585.5625,
+        "right": 905.5,
+        "width": 319.9375
+      },
+      {
+        "left": 585.5625,
+        "right": 905.5,
+        "width": 319.9375
+      },
+      {
+        "left": 585.5625,
+        "right": 905.5,
+        "width": 319.9375
+      },
+      {
+        "left": 585.5625,
+        "right": 905.5,
+        "width": 319.9375
+      },
+      {
+        "left": 585.5625,
+        "right": 905.5,
+        "width": 319.9375
+      },
+      {
+        "left": 585.5625,
+        "right": 905.5,
+        "width": 319.9375
+      },
+      {
+        "left": 585.5625,
+        "right": 905.5,
+        "width": 319.9375
+      },
+      {
+        "left": 585.5625,
+        "right": 905.5,
+        "width": 319.9375
+      },
+      {
+        "left": 585.5625,
+        "right": 905.5,
+        "width": 319.9375
+      },
+      {
+        "left": 585.5625,
+        "right": 905.5,
+        "width": 319.9375
+      },
+      {
+        "left": 585.5625,
+        "right": 905.5,
+        "width": 319.9375
+      },
+      {
+        "left": 585.5625,
+        "right": 905.5,
+        "width": 319.9375
+      },
+      {
+        "left": 585.5625,
+        "right": 905.5,
+        "width": 319.9375
+      },
+      {
+        "left": 585.5625,
+        "right": 905.5,
+        "width": 319.9375
+      },
+      {
+        "left": 585.5625,
+        "right": 905.5,
+        "width": 319.9375
+      },
+      {
+        "left": 585.5625,
+        "right": 905.5,
+        "width": 319.9375
+      },
+      {
+        "left": 585.5625,
+        "right": 905.5,
+        "width": 319.9375
+      },
+      {
+        "left": 585.5625,
+        "right": 905.5,
+        "width": 319.9375
+      },
+      {
+        "left": 585.5625,
+        "right": 905.5,
+        "width": 319.9375
+      },
+      {
+        "left": 585.5625,
+        "right": 905.5,
+        "width": 319.9375
+      },
+      {
+        "left": 585.5625,
+        "right": 905.5,
+        "width": 319.9375
+      },
+      {
+        "left": 585.5625,
+        "right": 905.5,
+        "width": 319.9375
+      },
+      {
+        "left": 585.5625,
+        "right": 905.5,
+        "width": 319.9375
+      },
+      {
+        "left": 585.5625,
+        "right": 905.5,
+        "width": 319.9375
+      },
+      {
+        "left": 585.5625,
+        "right": 905.5,
+        "width": 319.9375
+      },
+      {
+        "left": 585.5625,
+        "right": 905.5,
+        "width": 319.9375
+      },
+      {
+        "left": 585.5625,
+        "right": 905.5,
+        "width": 319.9375
+      },
+      {
+        "left": 585.5625,
+        "right": 905.5,
+        "width": 319.9375
+      },
+      {
+        "left": 585.5625,
+        "right": 905.5,
+        "width": 319.9375
+      },
+      {
+        "left": 585.5625,
+        "right": 905.5,
+        "width": 319.9375
+      },
+      {
+        "left": 585.5625,
+        "right": 905.5,
+        "width": 319.9375
+      },
+      {
+        "left": 585.5625,
+        "right": 905.5,
+        "width": 319.9375
+      },
+      {
+        "left": 577.78125,
+        "right": 905.5,
+        "width": 327.71875
+      },
+      {
+        "left": 577.78125,
+        "right": 905.5,
+        "width": 327.71875
+      },
+      {
+        "left": 577.78125,
+        "right": 905.5,
+        "width": 327.71875
+      },
+      {
+        "left": 577.78125,
+        "right": 905.5,
+        "width": 327.71875
+      },
+      {
+        "left": 577.78125,
+        "right": 905.5,
+        "width": 327.71875
+      },
+      {
+        "left": 577.78125,
+        "right": 905.5,
+        "width": 327.71875
+      },
+      {
+        "left": 577.78125,
+        "right": 905.5,
+        "width": 327.71875
+      },
+      {
+        "left": 577.78125,
+        "right": 905.5,
+        "width": 327.71875
+      },
+      {
+        "left": 577.78125,
+        "right": 905.5,
+        "width": 327.71875
+      },
+      {
+        "left": 577.78125,
+        "right": 905.5,
+        "width": 327.71875
+      },
+      {
+        "left": 578.8203125,
+        "right": 905.5,
+        "width": 326.6796875
+      },
+      {
+        "left": 579.859375,
+        "right": 905.5,
+        "width": 325.640625
+      },
+      {
+        "left": 578.8203125,
+        "right": 905.5,
+        "width": 326.6796875
+      },
+      {
+        "left": 578.8203125,
+        "right": 905.5,
+        "width": 326.6796875
+      },
+      {
+        "left": 578.8203125,
+        "right": 905.5,
+        "width": 326.6796875
+      },
+      {
+        "left": 578.8203125,
+        "right": 905.5,
+        "width": 326.6796875
+      },
+      {
+        "left": 578.8203125,
+        "right": 905.5,
+        "width": 326.6796875
+      },
+      {
+        "left": 578.8203125,
+        "right": 905.5,
+        "width": 326.6796875
+      },
+      {
+        "left": 578.8203125,
+        "right": 905.5,
+        "width": 326.6796875
+      },
+      {
+        "left": 578.8203125,
+        "right": 905.5,
+        "width": 326.6796875
+      }
+    ],
+    "launcher": null
+  },
+  {
+    "label": "streaming long prose",
+    "viewport": 1011,
+    "chat": {
+      "left": 0,
+      "right": 1011,
+      "width": 1011
+    },
+    "content": {
+      "left": 0,
+      "right": 1011,
+      "width": 1011
+    },
+    "documentWidth": 1011,
+    "dockOpen": false,
+    "clientWidth": 1011,
+    "scrollWidth": 1011,
+    "userBubbles": [
+      {
+        "left": 593.3515625,
+        "right": 905.5,
+        "width": 312.1484375
+      }
+    ],
+    "launcher": null
+  },
+  {
+    "label": "completed long prose",
+    "viewport": 1011,
+    "chat": {
+      "left": 0,
+      "right": 1011,
+      "width": 1011
+    },
+    "content": {
+      "left": 0,
+      "right": 1011,
+      "width": 1011
+    },
+    "documentWidth": 1011,
+    "dockOpen": false,
+    "clientWidth": 1011,
+    "scrollWidth": 1011,
+    "userBubbles": [
+      {
+        "left": 593.3515625,
+        "right": 905.5,
+        "width": 312.1484375
+      }
+    ],
+    "launcher": null
+  },
+  {
+    "label": "fresh history long prose",
+    "viewport": 1011,
+    "chat": {
+      "left": 236,
+      "right": 1011,
+      "width": 775
+    },
+    "content": {
+      "left": 236,
+      "right": 1011,
+      "width": 775
+    },
+    "documentWidth": 1011,
+    "dockOpen": false,
+    "clientWidth": 775,
+    "scrollWidth": 775,
+    "userBubbles": [
+      {
+        "left": 674.8515625,
+        "right": 987,
+        "width": 312.1484375
+      }
+    ],
+    "launcher": null
+  },
+  {
+    "label": "wide table and math",
+    "viewport": 1011,
+    "chat": {
+      "left": 236,
+      "right": 1011,
+      "width": 775
+    },
+    "content": {
+      "left": 236,
+      "right": 1011,
+      "width": 775
+    },
+    "documentWidth": 1011,
+    "dockOpen": false,
+    "clientWidth": 775,
+    "scrollWidth": 775,
+    "userBubbles": [
+      {
+        "left": 674.8515625,
+        "right": 987,
+        "width": 312.1484375
+      }
+    ],
+    "launcher": null
+  },
+  {
+    "label": "overlay tool details",
+    "viewport": 1011,
+    "chat": {
+      "left": 236,
+      "right": 1011,
+      "width": 775
+    },
+    "content": {
+      "left": 236,
+      "right": 1011,
+      "width": 775
+    },
+    "documentWidth": 1011,
+    "dockOpen": false,
+    "clientWidth": 775,
+    "scrollWidth": 775,
+    "userBubbles": [
+      {
+        "left": 674.8515625,
+        "right": 987,
+        "width": 312.1484375
+      }
+    ],
+    "launcher": null
+  },
+  {
+    "label": "native Electron zoom 0.8",
+    "viewport": 1600,
+    "chat": {
+      "left": 235.99609375,
+      "right": 1600,
+      "width": 1364.00390625
+    },
+    "content": {
+      "left": 235.99609375,
+      "right": 1600,
+      "width": 1364.00390625
+    },
+    "documentWidth": 1600,
+    "dockOpen": false,
+    "clientWidth": 1364,
+    "scrollWidth": 1364,
+    "userBubbles": [
+      {
+        "left": 1006.611328125,
+        "right": 1317.998046875,
+        "width": 311.38671875
+      },
+      {
+        "left": 1006.611328125,
+        "right": 1317.998046875,
+        "width": 311.38671875
+      }
+    ],
+    "launcher": null
+  },
+  {
+    "label": "native Electron zoom 1",
+    "viewport": 1280,
+    "chat": {
+      "left": 236,
+      "right": 1280,
+      "width": 1044
+    },
+    "content": {
+      "left": 236,
+      "right": 1280,
+      "width": 1044
+    },
+    "documentWidth": 1280,
+    "dockOpen": false,
+    "clientWidth": 1044,
+    "scrollWidth": 1044,
+    "userBubbles": [
+      {
+        "left": 845.8515625,
+        "right": 1158,
+        "width": 312.1484375
+      },
+      {
+        "left": 845.8515625,
+        "right": 1158,
+        "width": 312.1484375
+      }
+    ],
+    "launcher": null
+  },
+  {
+    "label": "native Electron zoom 1.25",
+    "viewport": 1024,
+    "chat": {
+      "left": 236,
+      "right": 1024,
+      "width": 788
+    },
+    "content": {
+      "left": 236,
+      "right": 1024,
+      "width": 788
+    },
+    "documentWidth": 1024,
+    "dockOpen": false,
+    "clientWidth": 788,
+    "scrollWidth": 788,
+    "userBubbles": [
+      {
+        "left": 688.25,
+        "right": 1000,
+        "width": 311.75
+      },
+      {
+        "left": 688.25,
+        "right": 1000,
+        "width": 311.75
+      }
+    ],
+    "launcher": null
+  }
+]

@@ -1,0 +1,5 @@
+
+> reasonix-desktop-frontend@0.0.0 test:transcript-electron <repo>/desktop/frontend
+> node bench/transcript-layout.mjs --electron
+
+PASS transcript width (Electron): 42 geometry scenarios

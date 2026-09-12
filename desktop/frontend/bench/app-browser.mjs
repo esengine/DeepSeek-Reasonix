@@ -52,10 +52,13 @@ try {
   await page.waitForFunction(() => document.querySelector('.transcript')?.textContent?.includes('ASYNC LAYOUT EXPANSION COMPLETE'));
   await composer.fill("layout-owned draft");
   // Raw Markdown fallbacks become parsed DOM asynchronously. History preservation
-  // means stable block identity/content revision, not identical transient textContent.
-  const transcriptIdentity = () => [...document.querySelectorAll('[data-transcript-block-key]')].map(node => ({
-    key: node.getAttribute('data-transcript-block-key'), revision: node.getAttribute('data-transcript-content-revision'),
-  }));
+  // means stable node identity, not identical transient textContent.
+  const transcriptIdentity = () => {
+    const nodes = [...document.querySelectorAll('[data-chat-anchor-key]')];
+    window.__modelTranscriptNodes ??= nodes;
+    return nodes.map((node, index) => ({ key: node.dataset.chatAnchorKey, kind: node.dataset.chatKind,
+      sameHost: node === window.__modelTranscriptNodes[index] }));
+  };
   const transcriptBeforeModel = await page.evaluate(transcriptIdentity);
   assert(transcriptBeforeModel.length > 0, 'model replay starts with hydrated transcript blocks');
   await page.locator('.modelsw__trigger:not(.effortsw__trigger)').click();
@@ -155,7 +158,7 @@ try {
   const sentText = 'App source-bound submission fixture';
   await composer.fill(sentText);
   await composer.press('Enter');
-  await page.locator('[data-row-kind="user"]').filter({ hasText: sentText }).waitFor();
+  await page.locator('[data-chat-kind="user"]').filter({ hasText: sentText }).waitFor();
   await page.locator('.composer__btn--stop').click();
   await page.locator('.composer__btn--stop').waitFor({ state: 'hidden' });
   await page.waitForFunction(() => document.querySelector('textarea.composer__input:not([aria-hidden=true])')?.disabled === false);

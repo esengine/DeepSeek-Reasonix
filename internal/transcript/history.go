@@ -112,7 +112,8 @@ func defaultHistoryRows(m provider.Message, messageIndex int, opts HistoryOption
 		return nil
 	}
 	row := Message{MessageID: m.ID, Role: string(m.Role), Content: m.Content, CreatedAt: m.CreatedAt,
-		WorkDurationMs: m.WorkDurationMs, MemoryCitations: m.MemoryCitations, Execution: m.ToolExecution}
+		WorkDurationMs: m.WorkDurationMs, MemoryCitations: m.MemoryCitations, Execution: m.ToolExecution,
+		PresentedFiles: provider.PresentedFileList(m.PresentedFiles)}
 	if m.LocalOnly {
 		row.Role = "assistant"
 	}

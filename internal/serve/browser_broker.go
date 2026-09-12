@@ -17,8 +17,10 @@ import (
 // Capability tokens advertised on the /auth/token handshake reply so a
 // desktop can tell what this serve supports without a second round trip.
 const (
-	capabilitiesHeader = "X-Reasonix-Serve-Capabilities"
-	capabilityBrowser  = "browser"
+	capabilitiesHeader          = "X-Reasonix-Serve-Capabilities"
+	capabilityBrowser           = "browser"
+	capabilityPermissionPresets = "permission-presets-v1"
+	capabilityPresentFiles      = "present-files-v1"
 )
 
 // BrowserBroker is Serve's end of the desktop browser broker: one HTTP
@@ -219,7 +221,7 @@ func (s *Server) browserBroker() *BrowserBroker {
 
 // capabilities lists what the handshake advertises to the desktop.
 func (s *Server) capabilities() []string {
-	var caps []string
+	caps := []string{capabilityPermissionPresets, capabilityPresentFiles}
 	if s.buildOptions.BrowserExecutor != nil {
 		caps = append(caps, capabilityBrowser)
 	}

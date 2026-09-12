@@ -106,7 +106,7 @@ async function renderComposer(props: Partial<Parameters<typeof Composer>[0]> = {
   let currentProps: Parameters<typeof Composer>[0] = {
     running: false,
     collaborationMode: "normal" as CollaborationMode,
-    toolApprovalMode: "ask" as ToolApprovalMode,
+    toolApprovalMode: "workspace-write" as ToolApprovalMode,
     goal: "",
     cwd: "/repo",
     modelLabel: "DeepSeek-R1",
@@ -121,8 +121,7 @@ async function renderComposer(props: Partial<Parameters<typeof Composer>[0]> = {
     onSetToolApprovalMode: (mode) => {
       calls.approvalModes.push(mode);
     },
-    onToggleYoloApprovalMode: () => {},
-    onClearGoal: () => {},
+        onClearGoal: () => {},
     onSwitchModel: () => {},
     onSetEffort: () => {},
     ready: true,
@@ -187,7 +186,7 @@ console.log("\ncomposer run strip");
 // Idle: no strip, no stop button, plain send arrow.
 {
   const dom = installDom();
-  const { root, calls } = await renderComposer();
+  const { root, calls, rerender } = await renderComposer({ workspaceRoot: "/repo" });
 
   eq(document.querySelector(".composer-run-strip"), null, "idle composer renders no run strip");
   eq(document.querySelector(".composer__btn--stop"), null, "idle composer renders no stop button");
@@ -197,13 +196,90 @@ console.log("\ncomposer run strip");
     document.querySelector<HTMLButtonElement>(".composer-meta__control--approval button")?.click();
     await flushTimers();
   });
-  const yolo = document.querySelectorAll<HTMLButtonElement>('[role="menuitemradio"]')[2];
-  ok(yolo !== null, "approval menu exposes Yolo alongside Ask and Auto");
+  const fullAccess = document.querySelectorAll<HTMLButtonElement>('[role="menuitemradio"]')[2];
+  ok(fullAccess !== null, "permission menu exposes Read only, Workspace write, and Full access");
   await act(async () => {
-    yolo?.click();
+    fullAccess?.click();
     await flushTimers();
   });
-  eq(calls.approvalModes.at(-1), "yolo", "the visible Yolo option selects Yolo approval");
+  eq(calls.approvalModes.length, 0, "selecting Full access waits for explicit risk acknowledgement");
+  const dialog = document.querySelector<HTMLElement>('[role="dialog"]');
+  ok(dialog?.textContent?.includes("Enable Full access?"), "Full access opens the Harness-style risk confirmation");
+  const checkbox = dialog?.querySelector<HTMLInputElement>('input[type="checkbox"]');
+  const enable = Array.from(dialog?.querySelectorAll<HTMLButtonElement>("button") ?? [])
+    .find(button => button.textContent?.includes("Enable Full access"));
+  ok(Boolean(checkbox), "risk confirmation includes the explicit acknowledgement checkbox");
+  ok(Boolean(enable?.disabled), "Full access stays disabled before acknowledgement");
+  await act(async () => {
+    checkbox?.click();
+    await flushTimers();
+  });
+  eq(enable?.disabled, false, "acknowledgement enables the Full access action");
+  await act(async () => {
+    enable?.click();
+    await flushTimers();
+  });
+  eq(calls.approvalModes.at(-1), "danger-full-access", "confirmed Full access reaches the session permission owner");
+  eq(document.querySelector('[role="dialog"]'), null, "confirmation closes after submission");
+
+  await act(async () => {
+    document.querySelector<HTMLButtonElement>(".composer-meta__control--approval button")?.click();
+    await flushTimers();
+    document.querySelectorAll<HTMLButtonElement>('[role="menuitemradio"]')[2]?.click();
+    await flushTimers();
+  });
+  eq(document.querySelector('[role="dialog"]'), null,
+    "a project that already acknowledged Full access does not show the warning again");
+  eq(calls.approvalModes.length, 2,
+    "remembered project acknowledgement selects Full access immediately");
+
+  await rerender({ cwd: "/another-project/subdirectory", workspaceRoot: "/another-project" });
+  await act(async () => {
+    document.querySelector<HTMLButtonElement>(".composer-meta__control--approval button")?.click();
+    await flushTimers();
+    document.querySelectorAll<HTMLButtonElement>('[role="menuitemradio"]')[2]?.click();
+    await flushTimers();
+  });
+  const cancelledDialog = document.querySelector<HTMLElement>('[role="dialog"]');
+  ok(cancelledDialog !== null, "a different project still requires its own Full access confirmation");
+  const cancelledCheckbox = cancelledDialog?.querySelector<HTMLInputElement>('input[type="checkbox"]');
+  await act(async () => {
+    cancelledCheckbox?.click();
+    Array.from(cancelledDialog?.querySelectorAll<HTMLButtonElement>("button") ?? [])
+      .find(button => button.textContent?.trim() === "Cancel")?.click();
+    await flushTimers();
+  });
+  eq(calls.approvalModes.length, 2, "cancelling a later Full access attempt does not submit another change");
+
+  await act(async () => {
+    document.querySelector<HTMLButtonElement>(".composer-meta__control--approval button")?.click();
+    await flushTimers();
+    document.querySelectorAll<HTMLButtonElement>('[role="menuitemradio"]')[2]?.click();
+    await flushTimers();
+  });
+  eq(document.querySelector<HTMLInputElement>('[role="dialog"] input[type="checkbox"]')?.checked, false,
+    "a new Full access attempt never reuses an earlier acknowledgement");
+
+  await rerender({ disabled: true });
+  eq(document.querySelector('[role="dialog"]'), null,
+    "locking the composer closes a pending Full access confirmation");
+  eq(calls.approvalModes.length, 2,
+    "locking the composer cannot submit a pending Full access change");
+
+  await rerender({ disabled: false });
+  await act(async () => {
+    document.querySelector<HTMLButtonElement>(".composer-meta__control--approval button")?.click();
+    await flushTimers();
+    document.querySelectorAll<HTMLButtonElement>('[role="menuitemradio"]')[2]?.click();
+    await flushTimers();
+  });
+  ok(document.querySelector('[role="dialog"]') !== null,
+    "Full access confirmation can reopen after the composer unlocks");
+  await rerender({ tabId: "next-tab", sessionKey: "next-session" });
+  eq(document.querySelector('[role="dialog"]'), null,
+    "switching sessions closes a pending Full access confirmation");
+  eq(calls.approvalModes.length, 2,
+    "switching sessions cannot approve the previous session's Full access change");
 
   await act(async () => {
     root.unmount();
@@ -288,7 +364,7 @@ console.log("\ncomposer run strip");
   const send = document.querySelector<HTMLButtonElement>(".composer__btn--send");
   eq(document.querySelector(".composer-profile-trigger"), null, "runtime transition has no execution-setting control");
   ok(Boolean(task?.disabled), "runtime transition disables Goal mode changes");
-  ok(approvals.length === 1 && approvals.every((button) => button.disabled), "runtime transition disables Ask/Auto/Yolo changes");
+  ok(approvals.length === 1 && approvals.every((button) => button.disabled), "runtime transition disables permission preset changes");
   ok(Boolean(send?.disabled), "runtime transition disables submit");
 
   await act(async () => {

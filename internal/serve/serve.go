@@ -31,6 +31,7 @@ import (
 	"reasonix/internal/plugin"
 	"reasonix/internal/provider"
 	"reasonix/internal/sandbox"
+	"reasonix/internal/sessiontitle"
 	"reasonix/internal/stats"
 	"reasonix/internal/store"
 )
@@ -583,6 +584,9 @@ func (s *Server) handler() http.Handler {
 	mux.HandleFunc("POST /fork", s.fork)
 	mux.HandleFunc("POST /summarize", s.foregroundMutation(s.summarize))
 	mux.HandleFunc("POST /tool-approval-mode", s.foregroundMutation(s.toolApprovalMode))
+	mux.HandleFunc("GET /permission", s.permissionSnapshot)
+	mux.HandleFunc("POST /permission/preset", s.foregroundMutation(s.permissionPreset))
+	mux.HandleFunc("POST /permission/grants/revoke", s.foregroundMutation(s.permissionGrantRevoke))
 	mux.HandleFunc("POST /providers/reload", s.providersReload)
 	mux.HandleFunc("POST /browser/broker", s.browserBrokerRebind)
 	mux.HandleFunc("POST /auto-approve-tools", s.foregroundMutation(s.autoApproveTools))
@@ -804,25 +808,34 @@ func (s *Server) cancel(w http.ResponseWriter, _ *http.Request) {
 
 func (s *Server) approve(w http.ResponseWriter, r *http.Request) {
 	var body struct {
-		ID      string `json:"id"`
-		Allow   bool   `json:"allow"`
-		Session bool   `json:"session"`
-		Persist bool   `json:"persist"`
+		ID                 string `json:"id"`
+		Allow              bool   `json:"allow"`
+		Session            bool   `json:"session"`
+		Persist            bool   `json:"persist"`
+		Generation         uint64 `json:"generation"`
+		PermissionRevision uint64 `json:"permissionRevision"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&body); err != nil || body.ID == "" {
 		http.Error(w, "missing id", http.StatusBadRequest)
 		return
 	}
+	if body.Persist {
+		http.Error(w, "permanent approval is no longer supported", http.StatusBadRequest)
+		return
+	}
 	scope := sandbox.ApprovalScopeOnce
 	if body.Allow {
-		switch {
-		case body.Persist:
-			scope = sandbox.ApprovalScopeProject
-		case body.Session:
+		if body.Session {
 			scope = sandbox.ApprovalScopeSession
 		}
 	}
-	if err := s.ctl().ResolveApproval(body.ID, body.Allow, scope); err != nil {
+	var err error
+	if ctrl, ok := s.ctl().(*control.Controller); ok && (body.Generation != 0 || body.PermissionRevision != 0) {
+		err = ctrl.ResolveApprovalAt(body.ID, body.Allow, scope, body.Generation, body.PermissionRevision)
+	} else {
+		err = s.ctl().ResolveApproval(body.ID, body.Allow, scope)
+	}
+	if err != nil {
 		http.Error(w, err.Error(), http.StatusServiceUnavailable)
 		return
 	}
@@ -972,6 +985,7 @@ func (s *Server) fork(w http.ResponseWriter, r *http.Request) {
 	if s.rejectMirroredForegroundLocked(w) {
 		return
 	}
+	sourcePath := s.ctl().SessionPath()
 	path, err := s.ctl().ForkNamed(body.Turn, body.Name)
 	if err != nil {
 		if control.IsSessionRotationBusy(err) {
@@ -985,6 +999,7 @@ func (s *Server) fork(w http.ResponseWriter, r *http.Request) {
 		s.setControllerPath(ctrl, ctrl.SessionPath())
 	}
 	s.bc.ResetSessionPath(s.ctl().SessionPath())
+	s.cacheForkTitle(sourcePath, s.ctl().SessionPath())
 	// The controller switched to the fork (a fresh path); the lease follows it.
 	if err := s.rebindSessionLease(s.ctl().SessionPath()); err != nil {
 		http.Error(w, sessionInUseError(err), http.StatusConflict)
@@ -993,6 +1008,43 @@ func (s *Server) fork(w http.ResponseWriter, r *http.Request) {
 	// path is the session the controller is on now; branch is what the fork
 	// created: the same path for a file fork, a head id inside a schema-2 log.
 	writeJSON(w, map[string]string{"path": s.ctl().SessionPath(), "branch": path})
+}
+
+// cacheForkTitle gives a file-backed fork the same visible numbering as the
+// source conversation without introducing a title-generation request into the
+// fork transaction. If the source already has a generated title, reuse it;
+// otherwise use the same preview fallback shown by the session list.
+func (s *Server) cacheForkTitle(sourcePath, childPath string) {
+	if strings.TrimSpace(sourcePath) == "" || strings.TrimSpace(childPath) == "" || agent.CanonicalSessionPath(sourcePath) == agent.CanonicalSessionPath(childPath) {
+		return
+	}
+	sourceName := filepath.Base(sourcePath)
+	sourceFirst, sourceTurns, sourceCached := agent.SessionPreviewCached(sourcePath)
+	if !sourceCached {
+		sourceFirst, sourceTurns = agent.SessionPreview(sourcePath)
+	}
+	if sourceTurns == 0 {
+		return
+	}
+	sourceMod := agent.SessionContentModTime(sourcePath).UnixNano()
+	source := titleSource(sourceFirst)
+	sourceTitle, ok := s.titles.get(sourceName, source, sourceMod)
+	if !ok {
+		sourceTitle = previewTitle(source)
+	}
+	childTitle := sessiontitle.IncreaseFork(sourceTitle)
+	if childTitle == "" {
+		return
+	}
+	childName := filepath.Base(childPath)
+	childFirst, childTurns, childCached := agent.SessionPreviewCached(childPath)
+	if !childCached {
+		childFirst, childTurns = agent.SessionPreview(childPath)
+	}
+	if childTurns == 0 {
+		return
+	}
+	s.titles.put(childName, childTitle, titleSource(childFirst), agent.SessionContentModTime(childPath).UnixNano())
 }
 
 // summarize runs summarize-from or summarize-up-to on a turn.
@@ -1022,7 +1074,8 @@ func (s *Server) summarize(w http.ResponseWriter, r *http.Request) {
 	w.WriteHeader(http.StatusNoContent)
 }
 
-// autoApproveTools toggles YOLO/full-access tool auto-approval.
+// autoApproveTools is a legacy compatibility endpoint. New clients set the
+// canonical permission preset through /permission-preset.
 func (s *Server) autoApproveTools(w http.ResponseWriter, r *http.Request) {
 	var body struct {
 		On bool `json:"on"`
@@ -1035,8 +1088,8 @@ func (s *Server) autoApproveTools(w http.ResponseWriter, r *http.Request) {
 	w.WriteHeader(http.StatusNoContent)
 }
 
-// toolApprovalMode selects ask, auto, or yolo approval behavior for interactive
-// frontends. Plan remains a separate workflow governed by the selected mode.
+// toolApprovalMode selects the canonical permission preset for interactive
+// frontends. Legacy values are accepted only for conservative migration.
 func (s *Server) toolApprovalMode(w http.ResponseWriter, r *http.Request) {
 	var body struct {
 		Mode string `json:"mode"`
@@ -1045,17 +1098,79 @@ func (s *Server) toolApprovalMode(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "bad body", http.StatusBadRequest)
 		return
 	}
-	switch strings.ToLower(strings.TrimSpace(body.Mode)) {
-	case control.ToolApprovalAsk, control.ToolApprovalAuto, control.ToolApprovalYolo:
-		s.ctl().SetToolApprovalMode(body.Mode)
+	raw := strings.ToLower(strings.TrimSpace(body.Mode))
+	switch raw {
+	case "read-only", "workspace-write", "danger-full-access", "ask", "auto", "yolo", "full", "full-access", "bypass":
+		s.ctl().SetToolApprovalMode(config.NormalizeToolApprovalMode(raw))
 	default:
-		http.Error(w, "mode must be ask, auto, or yolo", http.StatusBadRequest)
+		http.Error(w, "mode must be read-only, workspace-write, or danger-full-access", http.StatusBadRequest)
 		return
 	}
 	w.WriteHeader(http.StatusNoContent)
 }
 
-// bypass is the legacy HTTP endpoint for YOLO/full-access tool auto-approval.
+func (s *Server) permissionSnapshot(w http.ResponseWriter, _ *http.Request) {
+	ctrl, ok := s.ctl().(*control.Controller)
+	if !ok {
+		http.Error(w, "permission snapshot is unavailable", http.StatusNotImplemented)
+		return
+	}
+	w.Header().Set("Content-Type", "application/json")
+	_ = json.NewEncoder(w).Encode(ctrl.PermissionSnapshot())
+}
+
+func (s *Server) permissionPreset(w http.ResponseWriter, r *http.Request) {
+	ctrl, ok := s.ctl().(*control.Controller)
+	if !ok {
+		http.Error(w, "permission presets are unavailable", http.StatusNotImplemented)
+		return
+	}
+	var body struct {
+		Preset           string `json:"preset"`
+		ExpectedRevision uint64 `json:"expectedRevision"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+		http.Error(w, "bad body", http.StatusBadRequest)
+		return
+	}
+	snapshot, drained, err := ctrl.SetPermissionPreset(body.Preset, body.ExpectedRevision)
+	if err != nil {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusConflict)
+		_ = json.NewEncoder(w).Encode(map[string]any{"error": err.Error(), "snapshot": snapshot})
+		return
+	}
+	w.Header().Set("Content-Type", "application/json")
+	_ = json.NewEncoder(w).Encode(map[string]any{"snapshot": snapshot, "resolvedApprovalIds": drained})
+}
+
+func (s *Server) permissionGrantRevoke(w http.ResponseWriter, r *http.Request) {
+	ctrl, ok := s.ctl().(*control.Controller)
+	if !ok {
+		http.Error(w, "permission grants are unavailable", http.StatusNotImplemented)
+		return
+	}
+	var body struct {
+		Scope            string `json:"scope"`
+		Target           string `json:"target"`
+		ExpectedRevision uint64 `json:"expectedRevision"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+		http.Error(w, "bad body", http.StatusBadRequest)
+		return
+	}
+	snapshot, err := ctrl.RevokeSessionGrant(body.Scope, body.Target, body.ExpectedRevision)
+	if err != nil {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusConflict)
+		_ = json.NewEncoder(w).Encode(map[string]any{"error": err.Error(), "snapshot": snapshot})
+		return
+	}
+	w.Header().Set("Content-Type", "application/json")
+	_ = json.NewEncoder(w).Encode(snapshot)
+}
+
+// bypass is the legacy HTTP alias for autoApproveTools.
 func (s *Server) bypass(w http.ResponseWriter, r *http.Request) {
 	s.autoApproveTools(w, r)
 }

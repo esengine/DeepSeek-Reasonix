@@ -274,8 +274,8 @@ function windowsSettings(overrides: {
     await flushPromises();
   });
   await waitFor("macOS shell inventory", () => rootEl.textContent?.includes("POSIX sh") === true);
-  ok(rootEl.textContent?.includes("Bash") === true && rootEl.textContent?.includes("zsh") === true,
-    "macOS detection reports Bash and zsh");
+  ok(rootEl.textContent?.includes("zsh") === true && rootEl.textContent?.includes("POSIX sh") === true,
+    "macOS detection reports native zsh and POSIX sh");
   ok(!rootEl.textContent?.includes("brew install bash") && !rootEl.textContent?.includes("Bash is not detected"),
     "macOS native zsh fallback does not request a Bash install");
   ok(rootEl.textContent?.includes("Git") === true && rootEl.textContent?.includes("brew install git") === true,

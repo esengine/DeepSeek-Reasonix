@@ -236,13 +236,14 @@ type Tool struct {
 	// ResolvedName/CapabilityID describe the real target behind a stable proxy
 	// while Name/Args remain the provider-visible call. They are optional local
 	// display metadata and never enter provider requests.
-	ResolvedName string
-	CapabilityID string
-	Output       string // ToolResult: the result text fed to the model
-	Err          string // ToolResult: non-empty when the call failed or was blocked
-	ReadOnly     bool
-	Truncated    bool  // ToolResult: Output was head+tailed before display/model
-	DurationMs   int64 // ToolResult: wall-clock execution time in milliseconds
+	ResolvedName   string
+	CapabilityID   string
+	Output         string // ToolResult: the result text fed to the model
+	Err            string // ToolResult: non-empty when the call failed or was blocked
+	PresentedFiles []provider.PresentedFile
+	ReadOnly       bool
+	Truncated      bool  // ToolResult: Output was head+tailed before display/model
+	DurationMs     int64 // ToolResult: wall-clock execution time in milliseconds
 	// StartedAt/EndedAt are unix-millisecond execution bounds (ToolResult).
 	// Zero when the call never ran (dependency-skipped, cancelled, synthetic).
 	StartedAt int64

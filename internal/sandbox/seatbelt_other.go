@@ -113,6 +113,9 @@ func bwrapBaseArgs(spec Spec) []string {
 		"--proc", "/proc",
 	}
 	args = append(args, bwrapTmpMountArgs(spec)...)
+	if spec.ReadOnly {
+		return append(args, bwrapForbidReadArgs(spec.ForbidReadRoots)...)
+	}
 	if spec.Network {
 		// Re-allow network by removing the network namespace.
 		args = args[1:] // drop --unshare-net
@@ -191,6 +194,9 @@ func resolveProtectedWriteRoots(roots []string) []string {
 }
 
 func bwrapTmpMountArgs(spec Spec) []string {
+	if spec.ReadOnly {
+		return nil
+	}
 	if dir := strings.TrimSpace(spec.SessionTemp); dir != "" {
 		return []string{"--bind", dir, "/tmp"}
 	}

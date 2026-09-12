@@ -57,6 +57,7 @@ import (
 	"reasonix/internal/taskcatalog"
 	"reasonix/internal/taskmonitor"
 	"reasonix/internal/tool"
+	"reasonix/internal/tool/builtin"
 	"reasonix/internal/transcript"
 )
 
@@ -323,9 +324,10 @@ type App struct {
 	tray                *desktopTray
 	desktopShell        desktopShellRuntimeState
 
-	mediaTokens *mediaTokenStore
-	botInstalls map[string]*botInstallSession
-	botRuntime  *desktopBotRuntime
+	mediaTokens    *mediaTokenStore
+	presentPreview *workspacePreviewOrigin
+	botInstalls    map[string]*botInstallSession
+	botRuntime     *desktopBotRuntime
 	// botBridge gives the embedded bot gateway a god view over desktop
 	// sessions (/desktop commands). Set once in NewApp before any tab exists,
 	// read-only afterwards, so tabEventSink.Emit reads it without a lock.
@@ -454,6 +456,7 @@ func NewApp() *App {
 		catalogReconcileJobs: map[string]*desktopCatalogReconcileJob{},
 		detachedSessions:     map[string]*WorkspaceTab{},
 		mediaTokens:          newMediaTokenStore(),
+		presentPreview:       newWorkspacePreviewOrigin(),
 		botInstalls:          map[string]*botInstallSession{},
 		botRuntime:           newDesktopBotRuntime(),
 		remoteWindows:        newRemoteWindowRegistry(),
@@ -1727,19 +1730,19 @@ func applyTabModeToController(ctrl control.SessionAPI, mode string) []string {
 	if ctrl == nil {
 		return nil
 	}
-	plan, yolo := false, false
+	plan := false
 	switch normalizeTabMode(mode) {
 	case "plan":
 		plan = true
 	case "yolo":
-		yolo = true
+		// Legacy persisted Yolo is conservatively migrated to workspace-write.
 	case "plan-yolo":
-		plan, yolo = true, true
+		plan = true
 	}
 	if applier, ok := ctrl.(modeApplier); ok {
-		return applier.ApplyMode(plan, yolo)
+		return applier.ApplyMode(plan, false)
 	}
-	ctrl.SetMode(plan, yolo)
+	ctrl.SetMode(plan, false)
 	return nil
 }
 
@@ -1790,28 +1793,31 @@ func (a *App) SetComposerProfileForTab(tabID, collaborationMode, toolApprovalMod
 		a.mu.Unlock()
 		return []string{}, fmt.Errorf("tab is no longer available")
 	}
-	tab.toolApprovalMode = toolApprovalMode
-	if goal != "" {
-		tab.goal = goal
-		tab.mode = tabModeFromAxes(false, toolApprovalMode == control.ToolApprovalYolo)
-	} else {
-		tab.goal = ""
-		tab.mode = tabModeFromAxes(collaborationMode == "plan", toolApprovalMode == control.ToolApprovalYolo)
-	}
 	ctrl := tab.Ctrl
-	mode := tab.mode
-	goal = tab.goal
 	tabIDForSave := tab.ID
 	a.mu.Unlock()
 
-	if ctrl != nil {
-		ctrl.SetPlanMode(tabModeHasPlan(mode))
+	plan := collaborationMode == "plan" && goal == ""
+	var drained []string
+	if concrete, ok := ctrl.(*control.Controller); ok && concrete != nil {
+		var err error
+		drained, err = concrete.ApplyComposerProfileAt(plan, toolApprovalMode, goal, concrete.PermissionSnapshot().Revision)
+		if err != nil {
+			return []string{}, err
+		}
+	} else {
+		if ctrl != nil {
+			ctrl.SetPlanMode(plan)
+		}
+		drained = applyTabToolApprovalModeToController(ctrl, toolApprovalMode)
+		syncTabGoalToController(ctrl, goal)
 	}
-	drained := applyTabToolApprovalModeToController(ctrl, toolApprovalMode)
-	syncTabGoalToController(ctrl, goal)
 
 	a.mu.Lock()
 	if a.tabs[tabIDForSave] == tab {
+		tab.toolApprovalMode = toolApprovalMode
+		tab.goal = goal
+		tab.mode = tabModeFromAxes(plan, toolApprovalMode == control.ToolApprovalDangerFullAccess)
 		a.saveTabsLocked()
 	}
 	a.mu.Unlock()
@@ -6718,15 +6724,12 @@ func (a *App) PauseGoalForTab(tabID string) bool {
 	return ctrl != nil && ctrl.PauseGoal()
 }
 
-// SetAutoApproveTools toggles YOLO/full-access tool auto-approval:
-// approval-gated tool calls run without asking, while ask questions and plan
-// approvals still wait for the user. Runtime-only — not written to config.
+// SetAutoApproveTools is retained for older desktop bundles. Both legacy
+// states migrate to workspace-write; full access must be selected explicitly
+// through SetToolApprovalModeForTab.
 func (a *App) SetAutoApproveTools(on bool) {
-	if on {
-		a.SetToolApprovalModeForTab("", control.ToolApprovalYolo)
-		return
-	}
-	a.SetToolApprovalModeForTab("", control.ToolApprovalAsk)
+	_ = on
+	a.SetToolApprovalModeForTab("", control.ToolApprovalWorkspaceWrite)
 }
 
 // SetBypass is the legacy Wails binding for SetAutoApproveTools.
@@ -6755,7 +6758,7 @@ func (a *App) SetToolApprovalModeForTab(tabID, mode string) []string {
 		return nil
 	}
 	tab.toolApprovalMode = mode
-	tab.mode = tabModeFromAxes(plan, mode == control.ToolApprovalYolo)
+	tab.mode = tabModeFromAxes(plan, mode == control.ToolApprovalDangerFullAccess)
 	ctrl := tab.Ctrl
 	tabIDForSave := tab.ID
 	a.mu.Unlock()
@@ -6766,6 +6769,98 @@ func (a *App) SetToolApprovalModeForTab(tabID, mode string) []string {
 	}
 	a.mu.Unlock()
 	return drained
+}
+
+// PermissionSnapshotForTab returns the authoritative preset, capability and
+// same-session grant state for one desktop session.
+func (a *App) PermissionSnapshotForTab(tabID string) (control.PermissionSnapshot, error) {
+	if a.isRemoteTab(tabID) {
+		if err := a.requireRemotePermissionPresets(tabID); err != nil {
+			return control.PermissionSnapshot{}, err
+		}
+		client, base, expectedPath, err := a.remoteTabCommandTarget(tabID)
+		if err != nil {
+			return control.PermissionSnapshot{}, err
+		}
+		ctx, cancel := commandContext(a)
+		defer cancel()
+		return remotePermissionSnapshot(ctx, client, base, expectedPath)
+	}
+	tab := a.tabByID(tabID)
+	if tab == nil {
+		return control.PermissionSnapshot{}, fmt.Errorf("tab not found")
+	}
+	ctrl, ok := a.controllerForTab(tab).(*control.Controller)
+	if !ok || ctrl == nil {
+		return control.PermissionSnapshot{}, fmt.Errorf("permission snapshot is unavailable")
+	}
+	return ctrl.PermissionSnapshot(), nil
+}
+
+// SetPermissionPresetForTab applies a revision-checked permission update so a
+// stale renderer cannot approve against a newer session state.
+func (a *App) SetPermissionPresetForTab(tabID, preset string, expectedRevision uint64) (control.PermissionSnapshot, error) {
+	if a.isRemoteTab(tabID) {
+		if err := a.requireRemotePermissionPresets(tabID); err != nil {
+			return control.PermissionSnapshot{}, err
+		}
+		client, base, expectedPath, err := a.remoteTabCommandTarget(tabID)
+		if err != nil {
+			return control.PermissionSnapshot{}, err
+		}
+		ctx, cancel := commandContext(a)
+		defer cancel()
+		return setRemotePermissionPresetAt(ctx, client, base, expectedPath, preset, expectedRevision)
+	}
+	tab := a.tabByID(tabID)
+	if tab == nil {
+		return control.PermissionSnapshot{}, fmt.Errorf("tab not found")
+	}
+	tab.turnStartMu.Lock()
+	defer tab.turnStartMu.Unlock()
+	ctrl, ok := a.controllerForTab(tab).(*control.Controller)
+	if !ok || ctrl == nil {
+		return control.PermissionSnapshot{}, fmt.Errorf("permission presets are unavailable")
+	}
+	snapshot, _, err := ctrl.SetPermissionPreset(preset, expectedRevision)
+	if err != nil {
+		return snapshot, err
+	}
+	a.mu.Lock()
+	if a.tabs[tab.ID] == tab {
+		tab.toolApprovalMode = snapshot.Preset
+		tab.mode = tabModeFromAxes(tabModeHasPlan(tab.mode), snapshot.Preset == control.ToolApprovalDangerFullAccess)
+		a.saveTabsLocked()
+	}
+	a.mu.Unlock()
+	return snapshot, nil
+}
+
+// RevokePermissionGrantForTab removes one exact same-session authorization.
+func (a *App) RevokePermissionGrantForTab(tabID, scope, target string, expectedRevision uint64) (control.PermissionSnapshot, error) {
+	if a.isRemoteTab(tabID) {
+		if err := a.requireRemotePermissionPresets(tabID); err != nil {
+			return control.PermissionSnapshot{}, err
+		}
+		client, base, expectedPath, err := a.remoteTabCommandTarget(tabID)
+		if err != nil {
+			return control.PermissionSnapshot{}, err
+		}
+		ctx, cancel := commandContext(a)
+		defer cancel()
+		return revokeRemotePermissionGrantAt(ctx, client, base, expectedPath, scope, target, expectedRevision)
+	}
+	tab := a.tabByID(tabID)
+	if tab == nil {
+		return control.PermissionSnapshot{}, fmt.Errorf("tab not found")
+	}
+	tab.turnStartMu.Lock()
+	defer tab.turnStartMu.Unlock()
+	ctrl, ok := a.controllerForTab(tab).(*control.Controller)
+	if !ok || ctrl == nil {
+		return control.PermissionSnapshot{}, fmt.Errorf("permission grants are unavailable")
+	}
+	return ctrl.RevokeSessionGrant(scope, target, expectedRevision)
 }
 
 // CommandInfo describes one available slash command for the composer's "/" menu.
@@ -9938,15 +10033,30 @@ type DirEntry struct {
 
 // FilePreview is a bounded, read-only file payload for the workspace side panel.
 type FilePreview struct {
-	Path      string `json:"path"`
-	Body      string `json:"body"`
-	Size      int64  `json:"size"`
-	Truncated bool   `json:"truncated"`
-	Binary    bool   `json:"binary"`
-	Kind      string `json:"kind,omitempty"`
-	Mime      string `json:"mime,omitempty"`
-	URL       string `json:"url,omitempty"`
-	Err       string `json:"err,omitempty"`
+	Path       string `json:"path"`
+	Body       string `json:"body"`
+	Size       int64  `json:"size"`
+	Truncated  bool   `json:"truncated"`
+	Binary     bool   `json:"binary"`
+	Version    string `json:"version,omitempty"`
+	NextOffset int64  `json:"nextOffset,omitempty"`
+	Kind       string `json:"kind,omitempty"`
+	Mime       string `json:"mime,omitempty"`
+	URL        string `json:"url,omitempty"`
+	Err        string `json:"err,omitempty"`
+}
+
+// PresentedTextPage is one version-fenced UTF-8 continuation for a declared
+// text deliverable. Pages append to a single document; callers must discard a
+// page when Version differs from the first preview.
+type PresentedTextPage struct {
+	Path       string `json:"path"`
+	Body       string `json:"body"`
+	Offset     int64  `json:"offset"`
+	NextOffset int64  `json:"nextOffset"`
+	Size       int64  `json:"size"`
+	HasMore    bool   `json:"hasMore"`
+	Version    string `json:"version"`
 }
 
 type WorkspaceChangeView struct {
@@ -9980,16 +10090,31 @@ type WorkspaceChangeDetailView struct {
 }
 
 const filePreviewLimit = 2 * 1024 * 1024 // 2 MiB — full file preview for the workspace panel
+const presentedTextPageLimit = 512 * 1024
 const fileRefSearchLimit = 20
 
 var previewMediaMIMEs = map[string]string{
+	".aac":  "audio/aac",
 	".bmp":  "image/bmp",
+	".flac": "audio/flac",
 	".gif":  "image/gif",
+	".htm":  "text/html; charset=utf-8",
+	".html": "text/html; charset=utf-8",
 	".jpeg": "image/jpeg",
 	".jpg":  "image/jpeg",
+	".m4a":  "audio/mp4",
+	".m4v":  "video/mp4",
+	".mov":  "video/quicktime",
+	".mp3":  "audio/mpeg",
+	".mp4":  "video/mp4",
+	".oga":  "audio/ogg",
+	".ogg":  "audio/ogg",
+	".ogv":  "video/ogg",
 	".pdf":  "application/pdf",
 	".png":  "image/png",
 	".svg":  "image/svg+xml",
+	".wav":  "audio/wav",
+	".webm": "video/webm",
 	".webp": "image/webp",
 }
 
@@ -10009,6 +10134,10 @@ func trimUTF8PartialSuffix(data []byte) []byte {
 	return data
 }
 
+func workspaceFileVersion(info os.FileInfo) string {
+	return fmt.Sprintf("%d:%d", info.Size(), info.ModTime().UnixNano())
+}
+
 func previewMediaKind(path string) (kind string, mime string) {
 	mime = previewMediaMIMEs[strings.ToLower(filepath.Ext(path))]
 	if mime == "" {
@@ -10017,8 +10146,17 @@ func previewMediaKind(path string) (kind string, mime string) {
 	if strings.HasPrefix(mime, "image/") {
 		return "image", mime
 	}
+	if strings.HasPrefix(mime, "audio/") {
+		return "audio", mime
+	}
+	if strings.HasPrefix(mime, "video/") {
+		return "video", mime
+	}
 	if mime == "application/pdf" {
 		return "pdf", mime
+	}
+	if strings.HasPrefix(mime, "text/html") {
+		return "html", mime
 	}
 	return "", ""
 }
@@ -10217,12 +10355,15 @@ func (a *App) ReadFile(rel string) FilePreview {
 
 // ReadFileForTab returns a preview resolved against the requested tab.
 func (a *App) ReadFileForTab(tabID, rel string) FilePreview {
-	out := FilePreview{Path: rel}
 	path, ok, err := a.workspaceOrExternalPathForTab(tabID, rel)
 	if err != nil || !ok {
-		out.Err = "invalid path"
-		return out
+		return FilePreview{Path: rel, Err: "invalid path"}
 	}
+	return a.readFilePathForTab(tabID, rel, path, false)
+}
+
+func (a *App) readFilePathForTab(tabID, displayPath, path string, forceSource bool) FilePreview {
+	out := FilePreview{Path: displayPath}
 	info, err := os.Stat(path)
 	if err != nil {
 		out.Err = err.Error()
@@ -10237,8 +10378,31 @@ func (a *App) ReadFileForTab(tabID, rel string) FilePreview {
 		return out
 	}
 	out.Size = info.Size()
-	if kind, mime := previewMediaKind(path); kind != "" {
-		token := a.ensureMediaTokenStore().create(path, info.Name(), mime, kind, info.Size(), info.ModTime())
+	out.Version = workspaceFileVersion(info)
+	if kind, mime := previewMediaKind(path); kind != "" && !forceSource {
+		var token string
+		store := a.ensureMediaTokenStore()
+		if kind == "html" {
+			allowedRoot := filepath.Dir(path)
+			if root, _, found := a.workspaceTargetForTab(tabID); found {
+				if base, baseErr := workspaceBaseFromRoot(root); baseErr == nil {
+					if relative, relativeErr := filepath.Rel(base, path); relativeErr == nil && relative != ".." && !strings.HasPrefix(relative, ".."+string(filepath.Separator)) {
+						allowedRoot = base
+					}
+				}
+			}
+			token, err = store.createHTML(path, allowedRoot, info.Name(), mime, info)
+			if err != nil {
+				out.Err = err.Error()
+				return out
+			}
+		} else {
+			token = store.create(path, info.Name(), mime, kind, info.Size(), info.ModTime())
+		}
+		// Document tabs explicitly revoke their token on close. A two-hour
+		// ceiling keeps long-running HTML/media previews alive without leaving
+		// abandoned capabilities unbounded after a renderer crash.
+		store.extend(token, 2*time.Hour)
 		out.Kind = kind
 		out.Mime = mime
 		out.URL = "/__reasonix_workspace_media/" + token + "/" + url.PathEscape(info.Name())
@@ -10290,6 +10454,7 @@ func (a *App) ReadFileForTab(tabID, rel string) FilePreview {
 	// or LossyUTF8, producing mojibake or a false binary classification.
 	if out.Truncated {
 		data = trimUTF8PartialSuffix(data)
+		out.NextOffset = int64(len(data))
 	}
 	enc, _ := fileenc.Detect(data)
 	if enc == fileenc.LossyUTF8 {
@@ -10298,6 +10463,266 @@ func (a *App) ReadFileForTab(tabID, rel string) FilePreview {
 	}
 	out.Body = string(fileenc.Decode(data, enc))
 	return out
+}
+
+func (a *App) presentedPathForTab(tabID, toolCallID, requested string) (string, error) {
+	result := a.ToolResultForTab(tabID, toolCallID)
+	if !presentedFileDeclared(result, requested) {
+		return "", os.ErrPermission
+	}
+	root, _, found := a.workspaceTargetForTab(tabID)
+	if !found {
+		return "", os.ErrPermission
+	}
+	declared := requested
+	var resolved string
+	if path, ok, err := a.workspaceOrExternalPathForTab(tabID, declared); err == nil && ok {
+		resolved = path
+	} else {
+		if !filepath.IsAbs(declared) {
+			return "", os.ErrPermission
+		}
+		resolved = filepath.Clean(declared)
+	}
+	resolved, err := validatePresentedReadPath(resolved)
+	if err != nil {
+		return "", err
+	}
+	if !presentedReadPolicyAllows(root, resolved) {
+		return "", os.ErrPermission
+	}
+	return resolved, nil
+}
+
+func presentedReadPolicyAllows(workspaceRoot, resolved string) bool {
+	cfg, err := config.LoadForRootWithoutCredentialsReadOnly(workspaceRoot)
+	if err != nil {
+		return false
+	}
+	return !builtin.ReadPathForbidden(boot.RuntimeForbidReadRoots(cfg, workspaceRoot), resolved)
+}
+
+func validatePresentedReadPath(path string) (string, error) {
+	info, err := os.Lstat(path)
+	if err != nil {
+		return "", err
+	}
+	if info.Mode()&os.ModeSymlink != 0 || !info.Mode().IsRegular() {
+		return "", os.ErrInvalid
+	}
+	return path, nil
+}
+
+func presentedFileDeclared(result *control.ToolResultData, requested string) bool {
+	if result == nil || result.Name != "present" || strings.TrimSpace(requested) == "" {
+		return false
+	}
+	for _, file := range result.PresentedFiles {
+		if file.Path == requested {
+			return true
+		}
+	}
+	return false
+}
+
+// ReadPresentedFileForTab resolves a resource through the trusted metadata of
+// the built-in present call. This permits an explicitly declared absolute file
+// without turning the generic workspace reader into an arbitrary-path API.
+func (a *App) ReadPresentedFileForTab(tabID, toolCallID, path string) FilePreview {
+	resolved, err := a.presentedPathForTab(tabID, toolCallID, path)
+	if err != nil {
+		return FilePreview{Path: path, Err: err.Error()}
+	}
+	return a.readFilePathForTab(tabID, path, resolved, false)
+}
+
+func (a *App) ReadPresentedFileSourceForTab(tabID, toolCallID, path string) FilePreview {
+	resolved, err := a.presentedPathForTab(tabID, toolCallID, path)
+	if err != nil {
+		return FilePreview{Path: path, Err: err.Error()}
+	}
+	return a.readFilePathForTab(tabID, path, resolved, true)
+}
+
+// ReadPresentedTextPageForTab appends a bounded UTF-8 page to a trusted
+// present preview. The expected version prevents a reader from joining bytes
+// from two revisions when the file changes between requests.
+func (a *App) ReadPresentedTextPageForTab(tabID, toolCallID, path string, offset int64, expectedVersion string) (PresentedTextPage, error) {
+	resolved, err := a.presentedPathForTab(tabID, toolCallID, path)
+	if err != nil {
+		return PresentedTextPage{}, err
+	}
+	return readPresentedTextPage(resolved, path, offset, expectedVersion)
+}
+
+func readPresentedTextPage(resolved, displayPath string, offset int64, expectedVersion string) (PresentedTextPage, error) {
+	f, err := os.Open(resolved)
+	if err != nil {
+		return PresentedTextPage{}, err
+	}
+	defer f.Close()
+	info, err := f.Stat()
+	if err != nil {
+		return PresentedTextPage{}, err
+	}
+	current, err := os.Lstat(resolved)
+	if err != nil || current.Mode()&os.ModeSymlink != 0 || !os.SameFile(info, current) {
+		return PresentedTextPage{}, os.ErrPermission
+	}
+	version := workspaceFileVersion(info)
+	if expectedVersion == "" || expectedVersion != version {
+		return PresentedTextPage{}, fmt.Errorf("file changed; reload before loading more")
+	}
+	if offset < 0 || offset > info.Size() {
+		return PresentedTextPage{}, os.ErrInvalid
+	}
+	if _, err := f.Seek(offset, io.SeekStart); err != nil {
+		return PresentedTextPage{}, err
+	}
+	buf := make([]byte, presentedTextPageLimit+utf8.UTFMax)
+	n, readErr := f.Read(buf)
+	if readErr != nil && !errors.Is(readErr, io.EOF) {
+		return PresentedTextPage{}, readErr
+	}
+	data := buf[:n]
+	if len(data) > presentedTextPageLimit {
+		data = trimUTF8PartialSuffix(data[:presentedTextPageLimit])
+	}
+	if bytes.Contains(data, []byte{0}) || !utf8.Valid(data) {
+		return PresentedTextPage{}, fmt.Errorf("additional pages require UTF-8 text")
+	}
+	next := offset + int64(len(data))
+	if next == offset && next < info.Size() {
+		return PresentedTextPage{}, fmt.Errorf("could not advance text page")
+	}
+	after, err := f.Stat()
+	if err != nil || workspaceFileVersion(after) != version {
+		return PresentedTextPage{}, fmt.Errorf("file changed; reload before loading more")
+	}
+	return PresentedTextPage{
+		Path: displayPath, Body: string(data), Offset: offset, NextOffset: next,
+		Size: info.Size(), HasMore: next < info.Size(), Version: version,
+	}, nil
+}
+
+// CreateWorkspaceBrowserPreviewForTab returns a loopback-only URL for a
+// validated preview resource. The browser never receives file:// or the app's
+// privileged resource origin.
+func (a *App) CreateWorkspaceBrowserPreviewForTab(tabID, rel string) (string, error) {
+	preview := a.ReadFileForTab(tabID, rel)
+	if preview.Err != "" {
+		return "", errors.New(preview.Err)
+	}
+	if preview.URL == "" {
+		return "", errors.New("this file type cannot be opened in the built-in browser")
+	}
+	origin, err := a.ensureWorkspacePreviewOrigin()
+	if err != nil {
+		return "", err
+	}
+	a.extendWorkspaceBrowserPreviewToken(preview.URL)
+	return origin + preview.URL, nil
+}
+
+func (a *App) CreatePresentedBrowserPreviewForTab(tabID, toolCallID, path string) (string, error) {
+	preview := a.ReadPresentedFileForTab(tabID, toolCallID, path)
+	if preview.Err != "" {
+		return "", errors.New(preview.Err)
+	}
+	if preview.URL == "" {
+		return "", errors.New("this file type cannot be opened in the built-in browser")
+	}
+	origin, err := a.ensureWorkspacePreviewOrigin()
+	if err != nil {
+		return "", err
+	}
+	a.extendWorkspaceBrowserPreviewToken(preview.URL)
+	return origin + preview.URL, nil
+}
+
+func (a *App) extendWorkspaceBrowserPreviewToken(resourceURL string) {
+	const prefix = "/__reasonix_workspace_media/"
+	trimmed := strings.TrimPrefix(resourceURL, prefix)
+	if trimmed == resourceURL {
+		return
+	}
+	token := strings.SplitN(trimmed, "/", 2)[0]
+	if token != "" {
+		a.ensureMediaTokenStore().extend(token, 2*time.Hour)
+	}
+}
+
+// RevokeWorkspaceBrowserPreview invalidates only URLs minted by this app's
+// unprivileged preview origin. Browser tab close calls this best-effort.
+func (a *App) RevokeWorkspaceBrowserPreview(rawURL string) {
+	u, err := url.Parse(rawURL)
+	if err != nil {
+		return
+	}
+	a.mu.RLock()
+	p := a.presentPreview
+	a.mu.RUnlock()
+	if p == nil {
+		return
+	}
+	p.mu.Lock()
+	origin := p.origin
+	p.mu.Unlock()
+	if origin == "" || u.Scheme+"://"+u.Host != origin {
+		return
+	}
+	a.revokeWorkspaceMediaPath(u.Path)
+}
+
+// RevokeWorkspaceMediaPreview releases a relative resource capability used by
+// the document workspace when its renderer unmounts or changes files.
+func (a *App) RevokeWorkspaceMediaPreview(resourceURL string) {
+	u, err := url.Parse(resourceURL)
+	if err != nil || u.Scheme != "" || u.Host != "" {
+		return
+	}
+	a.revokeWorkspaceMediaPath(u.Path)
+}
+
+func (a *App) revokeWorkspaceMediaPath(resourcePath string) {
+	const prefix = "/__reasonix_workspace_media/"
+	trimmed := strings.TrimPrefix(resourcePath, prefix)
+	if trimmed == resourcePath {
+		return
+	}
+	if token := strings.SplitN(trimmed, "/", 2)[0]; token != "" {
+		a.ensureMediaTokenStore().revoke(token)
+	}
+}
+
+func (a *App) OpenPresentedPathForTab(tabID, toolCallID, path string) error {
+	resolved, err := a.presentedPathForTab(tabID, toolCallID, path)
+	if err != nil {
+		return err
+	}
+	return openWorkspacePath(resolved)
+}
+
+// ResolvePresentedPathForTab returns the source host's absolute path only
+// after revalidating the trusted present result and the current read policy.
+func (a *App) ResolvePresentedPathForTab(tabID, toolCallID, path string) (string, error) {
+	return a.presentedPathForTab(tabID, toolCallID, path)
+}
+
+func (a *App) RevealPresentedPathForTab(tabID, toolCallID, path string) error {
+	resolved, err := a.presentedPathForTab(tabID, toolCallID, path)
+	if err != nil {
+		return err
+	}
+	return revealPath(resolved)
+}
+
+func (a *App) SavePresentedPathAsForTab(tabID, toolCallID, path string) (string, error) {
+	resolved, err := a.presentedPathForTab(tabID, toolCallID, path)
+	if err != nil {
+		return "", err
+	}
+	return a.SaveLocalPathAs(resolved)
 }
 
 // OpenWorkspacePathForTab opens a path resolved against the requested tab.
@@ -10316,6 +10741,16 @@ func (a *App) RevealWorkspacePathForTab(tabID, rel string) error {
 		return os.ErrInvalid
 	}
 	return revealPath(path)
+}
+
+// SaveWorkspacePathAsForTab copies a session-scoped workspace or authorized
+// external file to a destination chosen by the user.
+func (a *App) SaveWorkspacePathAsForTab(tabID, rel string) (string, error) {
+	path, ok, err := a.workspaceOrExternalPathForTab(tabID, rel)
+	if err != nil || !ok {
+		return "", os.ErrInvalid
+	}
+	return a.SaveLocalPathAs(path)
 }
 
 // RevealPath shows an arbitrary absolute path in the native file manager.

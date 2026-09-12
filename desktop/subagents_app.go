@@ -361,8 +361,7 @@ func (a *App) TrySubagentProfile(input SubagentProfileInput, task string) (strin
 
 	// The headless gate enforces the user's configured permission rules. A
 	// subagent has no UI to answer an Ask decision, so deny and ask both block.
-	policy := permission.New(cfg.Permissions.Mode, cfg.Permissions.Allow, cfg.Permissions.Ask, cfg.Permissions.Deny).
-		WithAllowDynamicBashFallback(cfg.Permissions.AllowDynamicBash)
+	policy := permission.New(cfg.Permissions.Mode, cfg.Permissions.Allow, cfg.Permissions.Ask, cfg.Permissions.Deny)
 
 	result, err := agent.RunReadOnlySubAgentWithSession(runCtx, prov, reg, agent.NewSession(prompt), task, agent.Options{
 		MaxSteps:      12,

@@ -610,7 +610,7 @@ export const frontendDiagnostics = createFrontendDiagnostics();
 export function frontendDiagnosticSample(element: HTMLElement | null, totalRows?: number): EventFields | null {
   if (!element) return null;
   const viewport = element.getBoundingClientRect();
-  const rows = element.querySelectorAll<HTMLElement>(".transcript__row");
+  const rows = element.querySelectorAll<HTMLElement>(".chat-node");
   let firstVisibleIndex: number | undefined;
   let firstVisibleTop: number | undefined;
   for (const row of rows) {

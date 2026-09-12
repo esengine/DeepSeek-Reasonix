@@ -2,11 +2,15 @@ package main
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"net"
+	"net/http"
 	"os"
 	"os/exec"
+	"path"
 	"path/filepath"
 	"runtime"
 	"strings"
@@ -14,6 +18,7 @@ import (
 	"sync/atomic"
 	"time"
 
+	"reasonix/internal/agent"
 	"reasonix/internal/config"
 	"reasonix/internal/netclient"
 	"reasonix/internal/remote"
@@ -167,6 +172,7 @@ type remoteKernel interface {
 
 	ListDir(ctx context.Context, hostID, path string) ([]RemoteDirEntry, error)
 	ReadFile(ctx context.Context, hostID, path string) (RemoteFilePreview, error)
+	DownloadFile(ctx context.Context, hostID, path string, dst io.Writer) (int64, error)
 	WriteFile(ctx context.Context, hostID, path, body string, expectMtime int64) (RemoteWriteResult, error)
 	Mkdir(ctx context.Context, hostID, path string) error
 	Rename(ctx context.Context, hostID, oldPath, newPath string) error
@@ -446,6 +452,291 @@ func (a *App) ReadRemoteFile(hostID, path string) (RemoteFilePreview, error) {
 		return RemoteFilePreview{}, err
 	}
 	return rt.ReadFile(a.bootContext(), hostID, path)
+}
+
+// SaveRemoteFileAs streams a remote file directly to a user-selected local
+// destination. It never interprets the remote path as a local system path.
+func (a *App) SaveRemoteFileAs(hostID, remotePath string) (string, error) {
+	return a.saveRemoteFileAs(hostID, remotePath)
+}
+
+// SaveRemotePresentedFileAs requires the remote path to come from the trusted
+// metadata of the matching built-in present call before it opens a local save
+// dialog. The SSH host remains the source of bytes.
+func (a *App) SaveRemotePresentedFileAs(tabID, hostID, toolCallID, remotePath string) (string, error) {
+	fence, err := a.requireRemotePresentedFiles(tabID, hostID)
+	if err != nil {
+		return "", err
+	}
+	snapshot, err := a.RemoteTabSnapshot(tabID)
+	if err != nil {
+		return "", err
+	}
+	if !a.remotePresentedFilesFenceCurrent(fence) {
+		return "", fmt.Errorf("remote file selection changed while validating the presented file")
+	}
+	if !remotePresentedFileDeclared(snapshot.History, toolCallID, remotePath) {
+		return "", os.ErrPermission
+	}
+	return a.saveRemoteFileAs(hostID, remotePath)
+}
+
+// ResolveRemotePresentedPathForTab returns the absolute coordinate on the
+// remote source host. The trusted history and route generation are checked;
+// the resulting remote path is never passed to a local system-open API.
+func (a *App) ResolveRemotePresentedPathForTab(tabID, hostID, toolCallID, remotePath string) (string, error) {
+	fence, err := a.requireRemotePresentedFiles(tabID, hostID)
+	if err != nil {
+		return "", err
+	}
+	snapshot, err := a.RemoteTabSnapshot(tabID)
+	if err != nil {
+		return "", err
+	}
+	if !a.remotePresentedFilesFenceCurrent(fence) {
+		return "", fmt.Errorf("remote file selection changed while validating the presented file")
+	}
+	if !remotePresentedFileDeclared(snapshot.History, toolCallID, remotePath) {
+		return "", os.ErrPermission
+	}
+	return remotePresentedAbsolutePath(fence.tab.ref.Workspace, remotePath), nil
+}
+
+// ResolveRemoteWorkspacePathForTab binds a derived workspace artifact to the
+// authenticated remote tab that produced it. Unlike a presented file this has
+// no present-call grant, so only paths contained by the tab workspace resolve.
+func (a *App) ResolveRemoteWorkspacePathForTab(tabID, hostID, toolCallID, remotePath string) (string, error) {
+	fence, err := a.requireRemoteWorkspaceArtifact(tabID, hostID)
+	if err != nil {
+		return "", err
+	}
+	snapshot, err := a.RemoteTabSnapshot(tabID)
+	if err != nil {
+		return "", err
+	}
+	if !a.remotePresentedFilesFenceCurrent(fence) || !remoteWorkspaceArtifactDeclared(snapshot.History, toolCallID, remotePath) {
+		return "", os.ErrPermission
+	}
+	return confinedRemoteWorkspacePath(fence.tab.ref.Workspace, remotePath)
+}
+
+func confinedRemoteWorkspacePath(workspace, requested string) (string, error) {
+	workspace = strings.TrimSpace(workspace)
+	requested = strings.TrimSpace(requested)
+	if workspace == "" || requested == "" {
+		return "", os.ErrPermission
+	}
+	windows := isWindowsAbsolutePath(workspace) || strings.Contains(workspace, `\`)
+	normalize := func(value string) string {
+		clean := path.Clean(strings.ReplaceAll(value, `\`, "/"))
+		if windows {
+			clean = strings.ToLower(clean)
+		}
+		return strings.TrimRight(clean, "/")
+	}
+	root := normalize(workspace)
+	target := requested
+	if !path.IsAbs(requested) && !filepath.IsAbs(requested) && !isWindowsAbsolutePath(requested) {
+		target = strings.TrimRight(workspace, `/\`) + "/" + strings.TrimLeft(requested, `/\`)
+	}
+	canonical := normalize(target)
+	if canonical != root && !strings.HasPrefix(canonical, root+"/") {
+		return "", os.ErrPermission
+	}
+	if windows {
+		return strings.ReplaceAll(path.Clean(strings.ReplaceAll(target, `\`, "/")), "/", `\`), nil
+	}
+	return path.Clean(target), nil
+}
+
+func remotePresentedAbsolutePath(workspace, presented string) string {
+	presented = strings.TrimSpace(presented)
+	workspace = strings.TrimSpace(workspace)
+	if path.IsAbs(presented) || filepath.IsAbs(presented) || isWindowsAbsolutePath(presented) {
+		return presented
+	}
+	if isWindowsAbsolutePath(workspace) || strings.Contains(workspace, `\`) {
+		return strings.TrimRight(workspace, `/\`) + `\` + strings.TrimLeft(strings.ReplaceAll(presented, "/", `\`), `/\`)
+	}
+	return path.Join(workspace, presented)
+}
+
+func isWindowsAbsolutePath(value string) bool {
+	drive := len(value) >= 3 && ((value[0] >= 'A' && value[0] <= 'Z') || (value[0] >= 'a' && value[0] <= 'z')) && value[1] == ':' && (value[2] == '\\' || value[2] == '/')
+	return drive || strings.HasPrefix(value, `\\`)
+}
+
+type remotePresentedFilesFence struct {
+	tab               *remoteTab
+	tabID             string
+	hostID            string
+	client            *http.Client
+	base              string
+	generation        uint64
+	selectionRevision uint64
+	sessionPath       string
+}
+
+// requireRemotePresentedFiles binds an action to the same authenticated remote
+// tab and host that produced the deliverable. A path from the renderer is only
+// a locator; the trusted present record is re-read from remote history below.
+func (a *App) requireRemotePresentedFiles(tabID, hostID string) (remotePresentedFilesFence, error) {
+	fence, err := a.requireRemoteWorkspaceArtifact(tabID, hostID)
+	if err != nil {
+		return remotePresentedFilesFence{}, err
+	}
+	if !fence.tab.capabilities["present-files-v1"] {
+		return remotePresentedFilesFence{}, fmt.Errorf("this remote Reasonix Serve does not support present-files-v1")
+	}
+	return fence, nil
+}
+
+func (a *App) requireRemoteWorkspaceArtifact(tabID, hostID string) (remotePresentedFilesFence, error) {
+	a.remoteTabMu.Lock()
+	defer a.remoteTabMu.Unlock()
+	tab := a.remoteTabs[tabID]
+	valid := tab != nil && tab.ref.HostID == hostID && tab.client != nil && tab.state == "ready" &&
+		strings.TrimSpace(tab.routing.currentPath) != "" && tab.routing.rehydratingPath == ""
+	if !valid {
+		return remotePresentedFilesFence{}, os.ErrPermission
+	}
+	return remotePresentedFilesFence{
+		tab:               tab,
+		tabID:             tabID,
+		hostID:            hostID,
+		client:            tab.client,
+		base:              tab.base,
+		generation:        tab.gen,
+		selectionRevision: tab.selectionRevision,
+		sessionPath:       tab.routing.currentPath,
+	}, nil
+}
+
+func remoteWorkspaceArtifactDeclared(history json.RawMessage, toolCallID, requested string) bool {
+	if strings.TrimSpace(toolCallID) == "" || strings.TrimSpace(requested) == "" {
+		return false
+	}
+	var messages []struct {
+		Role       string `json:"role"`
+		ToolCallID string `json:"toolCallId"`
+		ToolName   string `json:"toolName"`
+		ToolError  string `json:"toolResultError"`
+		ToolCalls  []struct {
+			ID        string `json:"id"`
+			Name      string `json:"name"`
+			Arguments string `json:"arguments"`
+		} `json:"toolCalls"`
+	}
+	if json.Unmarshal(history, &messages) != nil {
+		return false
+	}
+	declared := false
+	toolName := ""
+	for _, message := range messages {
+		for _, call := range message.ToolCalls {
+			if call.ID != toolCallID {
+				continue
+			}
+			field := "path"
+			switch call.Name {
+			case "write_file", "edit_file", "multi_edit", "notebook_edit", "delete_range", "delete_symbol":
+			case "move_file":
+				field = "destination_path"
+			default:
+				continue
+			}
+			var args map[string]any
+			if json.Unmarshal([]byte(call.Arguments), &args) == nil && args[field] == requested {
+				declared, toolName = true, call.Name
+			}
+		}
+	}
+	if !declared {
+		return false
+	}
+	for _, message := range messages {
+		if message.Role == "tool" && message.ToolCallID == toolCallID && message.ToolName == toolName && message.ToolError == "" {
+			return true
+		}
+	}
+	return false
+}
+
+func (a *App) remotePresentedFilesFenceCurrent(fence remotePresentedFilesFence) bool {
+	a.remoteTabMu.Lock()
+	defer a.remoteTabMu.Unlock()
+	current := a.remoteTabs[fence.tabID]
+	return current != nil && current == fence.tab && current.ref.HostID == fence.hostID &&
+		current.client == fence.client && current.base == fence.base && current.gen == fence.generation &&
+		current.selectionRevision == fence.selectionRevision && current.state == "ready" &&
+		current.routing.rehydratingPath == "" &&
+		agent.CanonicalSessionPath(current.routing.currentPath) == agent.CanonicalSessionPath(fence.sessionPath)
+}
+
+func remotePresentedFileDeclared(history json.RawMessage, toolCallID, requested string) bool {
+	if strings.TrimSpace(toolCallID) == "" || strings.TrimSpace(requested) == "" {
+		return false
+	}
+	var messages []struct {
+		Role           string `json:"role"`
+		ToolCallID     string `json:"toolCallId"`
+		ToolName       string `json:"toolName"`
+		PresentedFiles []struct {
+			Path string `json:"path"`
+		} `json:"presentedFiles"`
+	}
+	if json.Unmarshal(history, &messages) != nil {
+		return false
+	}
+	for _, message := range messages {
+		if message.Role != "tool" || message.ToolName != "present" || message.ToolCallID != toolCallID {
+			continue
+		}
+		for _, file := range message.PresentedFiles {
+			if file.Path == requested {
+				return true
+			}
+		}
+	}
+	return false
+}
+
+func (a *App) saveRemoteFileAs(hostID, remotePath string) (string, error) {
+	if a.ctx == nil {
+		return "", nil
+	}
+	target, err := a.nativeHost().SaveFileDialog(a.ctx, nativeDialogOptions{
+		Title: "Save remote file as", DefaultFilename: path.Base(remotePath), CanCreateDirectories: true,
+	})
+	if err != nil || target == "" {
+		return "", err
+	}
+	rt, err := a.remoteRT()
+	if err != nil {
+		return "", err
+	}
+	tmp, err := os.CreateTemp(filepath.Dir(target), ".reasonix-remote-download-*")
+	if err != nil {
+		return "", err
+	}
+	tmpPath := tmp.Name()
+	defer os.Remove(tmpPath)
+	if _, err = rt.DownloadFile(a.bootContext(), hostID, remotePath, tmp); err != nil {
+		_ = tmp.Close()
+		return "", err
+	}
+	if err = tmp.Sync(); err == nil {
+		err = tmp.Close()
+	} else {
+		_ = tmp.Close()
+	}
+	if err != nil {
+		return "", err
+	}
+	if err = os.Rename(tmpPath, target); err != nil {
+		return "", err
+	}
+	return target, nil
 }
 
 func (a *App) WriteRemoteFile(hostID, path, body string, expectMtimeUnix int64) (RemoteWriteResult, error) {
@@ -1180,6 +1471,18 @@ func (m *desktopRemoteManager) ReadFile(ctx context.Context, hostID, path string
 		prev.Body = string(data)
 	}
 	return prev, nil
+}
+
+func (m *desktopRemoteManager) DownloadFile(ctx context.Context, hostID, remotePath string, dst io.Writer) (int64, error) {
+	c, err := m.fs(ctx, hostID)
+	if err != nil {
+		return 0, err
+	}
+	fsys, err := c.SFTP()
+	if err != nil {
+		return 0, err
+	}
+	return fsys.Download(ctx, remotePath, dst)
 }
 
 func (m *desktopRemoteManager) WriteFile(ctx context.Context, hostID, path, body string, expectMtime int64) (RemoteWriteResult, error) {

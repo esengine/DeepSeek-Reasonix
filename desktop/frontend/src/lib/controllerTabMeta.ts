@@ -8,7 +8,7 @@ export function metaFromTab(tab: TabMeta, existing?: Meta): Meta {
     modeHasAutoApproveTools(tab.mode),
     (tab.toolApprovalMode ?? "").trim() === "" ? existing?.toolApprovalMode : undefined,
   );
-  const autoApproveTools = toolApprovalMode === "yolo";
+  const autoApproveTools = toolApprovalMode === "danger-full-access";
   return {
     label: tab.label || existing?.label || "",
     ready: tab.ready,

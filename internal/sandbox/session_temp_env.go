@@ -4,7 +4,13 @@ import "runtime"
 
 // SessionTempEnvKeys are the standard temporary-directory environment variables
 // Reasonix overrides for session-private temporary directories.
-var SessionTempEnvKeys = []string{"TMPDIR", "TMP", "TEMP"}
+var SessionTempEnvKeys = []string{
+	"TMPDIR", "TMP", "TEMP",
+	// Build tools commonly write to host-global caches even when their inputs
+	// and outputs stay inside the workspace. Keep those writes session-private
+	// so normal builds do not need an approval or broaden the sandbox.
+	"XDG_CACHE_HOME", "NPM_CONFIG_CACHE", "npm_config_cache", "GOCACHE",
+}
 
 // SessionTempEnv returns KEY=value overrides for the session-private temporary
 // directory. When linuxSandboxed is true (Linux bwrap with SessionTemp bound at

@@ -11,9 +11,10 @@ import { useHeartbeatT } from "./heartbeat.i18n";
 import { changeHeartbeatFrequency, describeCron, formatCronNext, formatRelativeTime, isCronExpr, nextCronRunAt, type HeartbeatFrequencyType } from "./heartbeat.presentation";
 import type { HeartbeatTask } from "./heartbeat.types";
 
-function normalizeMode(mode: "ask" | "auto" | "yolo" | undefined): "ask" | "auto" | "yolo" {
-  if (mode === "ask" || mode === "auto" || mode === "yolo") return mode;
-  return "yolo"; // default
+function normalizeMode(mode: HeartbeatTask["approvalMode"]): "read-only" | "workspace-write" | "danger-full-access" {
+  if (mode === "read-only" || mode === "ask") return "read-only";
+  if (mode === "danger-full-access") return "danger-full-access";
+  return "workspace-write";
 }
 
 export function TaskEditor({
@@ -359,31 +360,28 @@ export function TaskEditor({
           <label>{t("heartbeat.fieldApprovalMode")}</label>
           <div className="set-seg" style={{ alignSelf: "flex-start" }}>
             <button
-              className={`set-seg__btn${normalizeMode(draft.approvalMode) === "ask" ? " set-seg__btn--on" : ""}`}
-              onClick={() => setDraft((prev) => ({ ...prev, approvalMode: "ask" }))}
-              title={t("heartbeat.approvalModeAskTooltip")}
+              className={`set-seg__btn${normalizeMode(draft.approvalMode) === "read-only" ? " set-seg__btn--on" : ""}`}
+              onClick={() => setDraft((prev) => ({ ...prev, approvalMode: "read-only" }))}
             >
-              {t("heartbeat.approvalModeAsk")}
+              {t("heartbeat.permissionReadOnly")}
             </button>
             <button
-              className={`set-seg__btn${normalizeMode(draft.approvalMode) === "auto" ? " set-seg__btn--on" : ""}`}
-              onClick={() => setDraft((prev) => ({ ...prev, approvalMode: "auto" }))}
-              title={t("heartbeat.approvalModeAutoTooltip")}
+              className={`set-seg__btn${normalizeMode(draft.approvalMode) === "workspace-write" ? " set-seg__btn--on" : ""}`}
+              onClick={() => setDraft((prev) => ({ ...prev, approvalMode: "workspace-write" }))}
             >
-              {t("heartbeat.approvalModeAuto")}
+              {t("heartbeat.permissionWorkspaceWrite")}
             </button>
             <button
-              className={`set-seg__btn${normalizeMode(draft.approvalMode) === "yolo" ? " set-seg__btn--on" : ""}`}
-              onClick={() => setDraft((prev) => ({ ...prev, approvalMode: "yolo" }))}
-              title={t("heartbeat.approvalModeYoloTooltip")}
+              className={`set-seg__btn${normalizeMode(draft.approvalMode) === "danger-full-access" ? " set-seg__btn--on" : ""}`}
+              onClick={() => setDraft((prev) => ({ ...prev, approvalMode: "danger-full-access" }))}
             >
-              {t("heartbeat.approvalModeYolo")}
+              {t("heartbeat.permissionFullAccess")}
             </button>
           </div>
           <span className="heartbeat-editor__mode-hint">
-            {normalizeMode(draft.approvalMode) === "yolo" ? t("heartbeat.approvalModeYoloHint") :
-             normalizeMode(draft.approvalMode) === "auto" ? t("heartbeat.approvalModeAutoHint") :
-             t("heartbeat.approvalModeAskHint")}
+            {normalizeMode(draft.approvalMode) === "danger-full-access" ? t("heartbeat.permissionFullAccessHint") :
+             normalizeMode(draft.approvalMode) === "workspace-write" ? t("heartbeat.permissionWorkspaceWriteHint") :
+             t("heartbeat.permissionReadOnlyHint")}
           </span>
         </div>
 

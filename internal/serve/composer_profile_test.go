@@ -33,10 +33,10 @@ func TestServeComposerProfileAndCheckedAnswer(t *testing.T) {
 		defer resp.Body.Close()
 		return resp.StatusCode
 	}
-	if got := post("/composer-profile", `{"collaborationMode":"plan","toolApprovalMode":"yolo","goal":""}`); got != http.StatusOK {
+	if got := post("/composer-profile", `{"collaborationMode":"plan","toolApprovalMode":"danger-full-access","goal":""}`); got != http.StatusOK {
 		t.Fatalf("composer profile status = %d, want 200", got)
 	}
-	if !ctrl.PlanMode() || ctrl.ToolApprovalMode() != control.ToolApprovalYolo || ctrl.Goal() != "" {
+	if !ctrl.PlanMode() || ctrl.ToolApprovalMode() != control.ToolApprovalDangerFullAccess || ctrl.Goal() != "" {
 		t.Fatalf("composer profile = plan:%v approval:%q goal:%q", ctrl.PlanMode(), ctrl.ToolApprovalMode(), ctrl.Goal())
 	}
 	api.err = errors.New("ledger unavailable")

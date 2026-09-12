@@ -125,7 +125,6 @@ async function renderComposer(props: Partial<Parameters<typeof Composer>[0]> = {
     onSetMode: () => {},
     onSetCollaborationMode: (_mode: CollaborationMode) => {},
     onSetToolApprovalMode: () => {},
-    onToggleYoloApprovalMode: () => {},
     onClearGoal: () => {},
     onSwitchModel: () => {},
     onSetEffort: () => {},
@@ -746,12 +745,7 @@ console.log("\ncomposer session draft");
     await flushTimers();
   });
   saveCustomShortcut("toolApproval.yolo", { key: "z", ctrl: true });
-  let yoloToggles = 0;
-  const { root } = await renderComposer({
-    onToggleYoloApprovalMode: () => {
-      yoloToggles += 1;
-    },
-  });
+  const { root } = await renderComposer();
   await act(async () => {
     textarea().dispatchEvent(textPasteEvent("pasted"));
     await flushTimers();
@@ -768,7 +762,6 @@ console.log("\ncomposer session draft");
   });
   eq(undoPaste.defaultPrevented, true, "legacy Ctrl+Z YOLO binding yields to composer undo while editing");
   eq(textarea().value, "", "legacy Ctrl+Z YOLO binding still undoes the paste");
-  eq(yoloToggles, 0, "legacy Ctrl+Z YOLO binding does not toggle YOLO while editing");
 
   await act(async () => {
     saveCustomShortcut("toolApproval.yolo", { key: "z", ctrl: true, shift: true });
@@ -787,7 +780,6 @@ console.log("\ncomposer session draft");
   });
   eq(legacyRedo.defaultPrevented, true, "legacy Ctrl+Shift+Z YOLO binding yields to composer redo while editing");
   eq(textarea().value, "pasted", "legacy Ctrl+Shift+Z YOLO binding still redoes the paste");
-  eq(yoloToggles, 0, "legacy Ctrl+Shift+Z YOLO binding does not toggle YOLO while editing");
 
   await act(async () => {
     saveCustomShortcut("toolApproval.yolo", { key: "u", ctrl: true });
@@ -813,7 +805,6 @@ console.log("\ncomposer session draft");
   });
   eq(ctrlYRedo.defaultPrevented, true, "Ctrl+Y redoes the paste when the YOLO shortcut is rebound");
   eq(textarea().value, "pasted", "Ctrl+Y restores the programmatic paste");
-  eq(yoloToggles, 0, "Ctrl+Y does not toggle YOLO after that action is rebound");
 
   await act(async () => {
     resetCustomShortcuts();
@@ -829,9 +820,8 @@ console.log("\ncomposer session draft");
     textarea().dispatchEvent(defaultCtrlY);
     await flushTimers();
   });
-  eq(defaultCtrlY.defaultPrevented, true, "default Ctrl+Y remains reserved for the YOLO shortcut");
-  eq(yoloToggles, 1, "default Ctrl+Y still toggles YOLO exactly once");
-  eq(textarea().value, "pasted", "the YOLO shortcut does not mutate composer history");
+  eq(defaultCtrlY.defaultPrevented, true, "default Ctrl+Y remains reserved while the legacy permission shortcut is retired");
+  eq(textarea().value, "pasted", "the retired shortcut does not mutate composer history");
 
   await act(async () => root.unmount());
   resetCustomShortcuts();

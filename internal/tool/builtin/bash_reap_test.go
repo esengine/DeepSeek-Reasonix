@@ -68,9 +68,10 @@ func TestBashPreservesExplicitNoHupDisown(t *testing.T) {
 	dir := t.TempDir()
 	pidFile := filepath.Join(dir, "pid")
 	command := "nohup sleep 60 >/dev/null 2>&1 & echo $! > " + shellQuote(pidFile) + "; disown"
+	ctx := sandbox.WithPermissionPreset(context.Background(), "danger-full-access")
 	out, err := (bash{
 		shell: sandbox.Shell{Kind: sandbox.ShellBash, Path: bashPath},
-	}).Execute(context.Background(), argsJSON(t, map[string]any{"command": command}))
+	}).Execute(ctx, argsJSON(t, map[string]any{"command": command}))
 	if err != nil {
 		t.Fatalf("bash Execute failed: %v (out=%q)", err, out)
 	}

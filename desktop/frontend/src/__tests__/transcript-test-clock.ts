@@ -1,6 +1,6 @@
-import type { TranscriptKernelClock } from "../lib/transcriptKernel";
 
-export class TranscriptTestClock implements TranscriptKernelClock {
+
+export class TranscriptTestClock {
   time = 0;
   private sequence = 0;
   frames = new Map<number, FrameRequestCallback>();

@@ -13,6 +13,7 @@ import (
 	"reasonix/internal/event"
 	"reasonix/internal/i18n"
 	"reasonix/internal/permission"
+	"reasonix/internal/permissionpreset"
 )
 
 // Approve answers a pending ApprovalRequest by ID. It remains the compatibility
@@ -22,6 +23,9 @@ func (c *Controller) Approve(id string, allow, session, persist bool) {
 }
 
 func (c *Controller) approveChecked(id string, allow, session, persist bool) error {
+	if allow && persist {
+		return fmt.Errorf("permanent approval is no longer supported; allow once or for this session")
+	}
 	if pending := c.approval.peek(id); pending.reply != nil && pending.kind == writeAccessKind {
 		return c.ResolveApproval(id, allow, scopeFromApprove(allow, session, persist))
 	}
@@ -90,10 +94,10 @@ type approvalManager struct {
 	granted                  map[string]bool
 	planModeReadOnlyCommands map[string]bool
 	nextID                   int
-	// toolApprovalMode is the runtime approval posture: "ask" prompts, "auto"
-	// lets the policy auto-approve the writer fallback while preserving ask/deny
-	// rules, and "yolo" skips ordinary tool prompts while deny rules and fresh
-	// decisions remain enforced.
+	// toolApprovalMode is the canonical runtime permission preset. Read-only
+	// asks for mutation authorization, workspace-write permits confined work,
+	// and danger-full-access skips ordinary prompts while explicit deny rules
+	// and fresh decisions remain enforced.
 	toolApprovalMode string
 	// approvalTimeout bounds how long requestApproval/Ask block on a user
 	// decision. Zero means wait indefinitely (correct for an interactive
@@ -181,17 +185,17 @@ func BuildHeadlessApprovalGate(policy permission.Policy, mode string) *freshHuma
 		return NewHeadlessPermissionGate(policy)
 	}
 	switch normalizeToolApprovalMode(mode) {
-	case ToolApprovalYolo:
+	case ToolApprovalDangerFullAccess:
 		policy.Mode = permission.Allow
-		return &freshHumanHeadlessGate{gate: permission.NewGate(policy, nil), dynamicBashBypass: true}
-	case ToolApprovalAuto:
+		return &freshHumanHeadlessGate{gate: permission.NewGate(policy, nil)}
+	case ToolApprovalWorkspaceWrite:
 		policy.Mode = permission.Allow
 		return &freshHumanHeadlessGate{gate: permission.NewGate(policy, denyPermissionApprover{})}
 	case ToolApprovalDontAsk:
 		policy.Mode = permission.Deny
 		return &freshHumanHeadlessGate{gate: permission.NewGate(policy, denyPermissionApprover{})}
 	default:
-		policy.Mode = permission.Ask
+		policy.Mode = permission.Deny
 		return &freshHumanHeadlessGate{gate: permission.NewGate(policy, denyPermissionApprover{})}
 	}
 }
@@ -249,7 +253,6 @@ func (g *SharedHeadlessGate) ExplicitlyDenies(toolName string, args json.RawMess
 
 type freshHumanHeadlessGate struct {
 	gate                    *permission.Gate
-	dynamicBashBypass       bool
 	allowLowRiskFreshAction func(toolName string, args json.RawMessage) bool
 }
 
@@ -261,11 +264,6 @@ func (g *freshHumanHeadlessGate) Check(ctx context.Context, toolName string, arg
 			return true, "", nil
 		}
 		return false, "this tool requires fresh human approval and cannot run in a non-interactive session. Use an interactive session or a user-initiated memory command.", nil
-	}
-	if strings.EqualFold(toolName, "bash") && permission.BashSubjectRequiresExplicitApproval(permission.Subject(args)) {
-		if g.gate.Policy.Decide(toolName, readOnly, args) != permission.Allow && !g.dynamicBashBypass {
-			return false, "this dynamic shell command requires human approval and cannot run in a non-interactive session. Inline interpreter code (python -c, node -e) is blocked because the host cannot audit it; write the code to a file with write_file and run that file instead (e.g. `python repro.py`), or use read_file/grep for inspection. The user can also switch to an interactive session or YOLO mode.", nil
-		}
 	}
 	return g.gate.Check(ctx, toolName, args, readOnly)
 }
@@ -302,10 +300,13 @@ func (a *approvalManager) preApprovedForDecisionOptions(tool, subject string, ar
 	return a.bypassAllowsLocked(tool, subject, args) || a.sessionGrantAllowsLocked(tool, subject)
 }
 
-func (a *approvalManager) preApprovedForRequiredHuman(tool, subject string) bool {
+// preApprovedForExactSession is used for a retry that crosses the active
+// sandbox boundary. It deliberately avoids the normal Bash prefix expansion:
+// authorizing one failed command must not authorize a different invocation.
+func (a *approvalManager) preApprovedForExactSession(tool, subject string) bool {
 	a.mu.Lock()
 	defer a.mu.Unlock()
-	return a.toolApprovalMode == ToolApprovalYolo || a.sessionGrantAllowsLocked(tool, subject)
+	return a.granted[exactSessionGrantRule(tool, subject)]
 }
 
 // register allocates an approval ID, records the pending prompt, and returns the
@@ -382,6 +383,21 @@ func (a *approvalManager) grantSession(tool, subject string) {
 	a.granted[permission.SessionGrantRuleForScope(tool, subject)] = true
 }
 
+func (a *approvalManager) grantExactSession(tool, subject string) {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	a.granted[exactSessionGrantRule(tool, subject)] = true
+}
+
+func exactSessionGrantRule(tool, subject string) string {
+	tool = strings.TrimSpace(tool)
+	subject = strings.TrimSpace(subject)
+	if strings.EqualFold(tool, "bash") && subject != "" {
+		return "Bash=" + subject
+	}
+	return permission.SessionGrantRuleForScope(tool, subject)
+}
+
 func (a *approvalManager) planModeReadOnlyCommandTrusted(prefix string) bool {
 	prefix = normalizePlanModeReadOnlyCommandPrefix(prefix)
 	if prefix == "" {
@@ -400,6 +416,32 @@ func (a *approvalManager) grantPlanModeReadOnlyCommand(prefix string) {
 	a.mu.Lock()
 	defer a.mu.Unlock()
 	a.planModeReadOnlyCommands[prefix] = true
+}
+
+func (a *approvalManager) revokeSessionAuthorization(scope, target string) bool {
+	target = strings.TrimSpace(target)
+	if target == "" {
+		return false
+	}
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	switch strings.TrimSpace(scope) {
+	case "tool":
+		if !a.granted[target] {
+			return false
+		}
+		delete(a.granted, target)
+		return true
+	case "command-prefix":
+		target = normalizePlanModeReadOnlyCommandPrefix(target)
+		if target == "" || !a.planModeReadOnlyCommands[target] {
+			return false
+		}
+		delete(a.planModeReadOnlyCommands, target)
+		return true
+	default:
+		return false
+	}
 }
 
 // SessionAuthorizations is the same-session tool-grant and Plan-mode
@@ -659,19 +701,12 @@ func (a *approvalManager) mode() string {
 	return normalizeToolApprovalMode(a.toolApprovalMode)
 }
 
-// setMode applies a (pre-normalized) posture and drains any pending approvals
-// the new posture should auto-allow, returning them for the caller to signal
-// {allow:true} after unlocking.
+// setMode applies a pre-normalized posture. Existing prompts remain tied to
+// the revision that created them and are invalidated by the controller.
 func (a *approvalManager) setMode(mode string) []drainedApproval {
 	a.mu.Lock()
 	defer a.mu.Unlock()
 	a.toolApprovalMode = mode
-	switch mode {
-	case ToolApprovalAuto:
-		return a.drainLocked(false)
-	case ToolApprovalYolo:
-		return a.drainLocked(true)
-	}
 	return nil
 }
 
@@ -778,43 +813,14 @@ type drainedApproval struct {
 	reply chan approvalReply
 }
 
-// drainLocked removes every pending approval the new posture should auto-allow
-// and returns them; caller holds a.mu and sends {allow:true} after unlocking.
-func (a *approvalManager) drainLocked(includeExplicitAsk bool) []drainedApproval {
-	pending := make([]drainedApproval, 0, len(a.approvals))
-	for id, approval := range a.approvals {
-		memoryBypass := isMemoryApprovalTool(approval.tool) && (a.toolApprovalMode == ToolApprovalYolo ||
-			a.toolApprovalMode == ToolApprovalAuto && approval.autoDrain)
-		if approval.kind == writeAccessKind {
-			continue
-		}
-		if (approval.fresh || requiresFreshApprovalTool(approval.tool)) && !memoryBypass {
-			continue
-		}
-		if approval.requireHuman && !includeExplicitAsk {
-			continue
-		}
-		if !includeExplicitAsk && !approval.autoDrain {
-			continue
-		}
-		delete(a.approvals, id)
-		pending = append(pending, drainedApproval{id: id, reply: approval.reply})
-	}
-	return pending
-}
-
 // pure approval helpers
 
 func normalizeToolApprovalMode(mode string) string {
 	switch strings.ToLower(strings.TrimSpace(mode)) {
-	case ToolApprovalAuto, "approve", "allow":
-		return ToolApprovalAuto
 	case "dontask", "dont-ask", "deny":
 		return ToolApprovalDontAsk
-	case ToolApprovalYolo, "full", "full-access", "bypass":
-		return ToolApprovalYolo
 	default:
-		return ToolApprovalAsk
+		return string(permissionpreset.Normalize(mode))
 	}
 }
 

@@ -1,0 +1,18 @@
+  PASS  fixture starts with an existing multiline draft (82.0px)
+  PASS  ordinary input/delete never displaces scrollTop away from the tail (0.0px)
+  PASS  ordinary input/delete keeps transcript geometry stable (0 changes)
+  PASS  ordinary input/delete finishes at the physical tail (0.0px)
+  PASS  fixture crosses exactly one visual line boundary (82.0px → 94.0px)
+  PASS  a real line wrap moves only toward the new tail (44529.0px → 44541.0px)
+  PASS  a real line wrap performs at most one visible tail adjustment ([44529,44541])
+  PASS  a real line wrap settles at the physical tail (0.0px)
+  PASS  native PageUp retains reader ownership
+  PASS  browser touch scrolling retains reader ownership
+  PASS  editing while reading upward preserves scrollTop (0.0px deviation)
+  PASS  editing while reading upward preserves manual reader ownership
+  PASS  fixture enters user-resized composer mode
+  PASS  editing a user-resized composer does not reverse scrollTop (0.0px)
+  PASS  editing a user-resized composer keeps transcript geometry stable
+  PASS  IME composition does not reverse scrollTop (0.0px)
+  PASS  IME composition finishes at the physical tail (0.0px)
+  PASS  browser reports no page errors (0)

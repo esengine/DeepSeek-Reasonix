@@ -20,4 +20,7 @@ export interface WireApproval {
   write_access?: WireWriteAccessApproval;
   turnId?: string;
   runtimeEpoch?: string;
+	/** Runtime and permission snapshot that emitted this request. */
+	generation?: number;
+	permissionRevision?: number;
 }

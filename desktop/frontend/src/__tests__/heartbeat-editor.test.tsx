@@ -182,14 +182,14 @@ await act(async () => {
 });
 ok(document.querySelector<HTMLInputElement>('[aria-label="Title"]')?.value === "Daily review", "recommendation keeps its prefilled editor open");
 ok(document.body.textContent?.includes("Select a task to view details") !== true, "recommendation is not cleared by the missing-task cleanup effect");
-ok(button("Ask")?.classList.contains("set-seg__btn--on") === true, "recommendation defaults to ask approval");
+ok(button("Read only")?.classList.contains("set-seg__btn--on") === true, "recommendation defaults to read-only approval");
 ok(button("Global") != null, "recommendation remains a new draft with editable scope");
 await act(async () => {
   button("Save")?.click();
   await flush();
 });
 ok(savedUpdate?.tasks?.[0]?.enabled === false, "recommendation stays disabled until the user explicitly enables it");
-ok(savedUpdate?.tasks?.[0]?.approvalMode === "ask", "recommendation persists the safe ask approval default");
+ok(savedUpdate?.tasks?.[0]?.approvalMode === "read-only", "recommendation persists the read-only approval default");
 
 saveShouldFail = true;
 await act(async () => {

@@ -8,7 +8,6 @@ import { useGoalActionHandler } from "./lib/goalAction";
 import { useActiveRemoteSession } from "./lib/useRemoteSession";
 import { useWarmTerminalPanel } from "./lib/useWarmTerminalPanel";
 import { setReasoningDisplayPending } from "./lib/reasoningDisplayPreference";
-import type { RestorableToolApprovalMode } from "./lib/toolApprovalMode";
 import type { ComposerProfile, UserPlanModeIntents } from "./lib/composerProfile";
 import type { TabMeta } from "./lib/types";
 import type { HistoryViewState } from "./app-runtime/historyViewProjection";
@@ -45,7 +44,6 @@ export function AppRuntime() {
   const { showToast } = useToast();
   const { runGoalAction, handleGoalActionError } = useGoalActionHandler();
   const [composerProfilesByTab, setComposerProfilesByTab] = useState<Record<string, ComposerProfile>>({});
-  const yoloRestoreToolApprovalModesRef = useRef<Record<string, RestorableToolApprovalMode>>({});
   const userPlanModeByTabRef = useRef<UserPlanModeIntents>({});
   const [tabMetas, setTabMetas] = useState<TabMeta[]>([]);
   const [tabOrderIds, setTabOrderIds] = useState<string[]>([]);
@@ -85,7 +83,6 @@ export function AppRuntime() {
   }));
   const shell = useAppShellStores();
   const [tabRevealSignal, setTabRevealSignal] = useState(0);
-  const [transcriptRevealSignal, setTranscriptRevealSignal] = useState(0);
   const [histView, setHistView] = useState<HistoryViewState | null>(null);
   const [sidebarImDetailConnectionId, setSidebarImDetailConnectionId] = useState("");
   const [topicTimeFilter, setTopicTimeFilter] = useTopicTimeFilter();
@@ -112,10 +109,10 @@ export function AppRuntime() {
     surface: navigationSurface,
     stores: {
       composerProfilesByTab, setComposerProfilesByTab, tabMetas, setTabMetas, tabOrderIds, setTabOrderIds,
-      yoloRestoreToolApprovalModesRef, userPlanModeByTabRef,
+      userPlanModeByTabRef,
     },
     local: {
-      setHistView, setTabRevealSignal, setTranscriptRevealSignal,
+      setHistView, setTabRevealSignal,
       sidebarImDetailConnectionId, setSidebarImDetailConnectionId,
       workspaceScopeActiveTabRef, workspaceControllerEpoch, setWorkspaceControllerEpoch,
       dockRefreshKey, setDockRefreshKey, fileRefRefreshKey, setFileRefRefreshKey, projectRevision, setProjectRevision,
@@ -154,7 +151,7 @@ export function AppRuntime() {
       local={{
         tasksOpen, setTasksOpen, topicTimeFilter, setTopicTimeFilter,
         sidebarImDetailConnectionId, setSidebarImDetailConnectionId,
-        tabRevealSignal, transcriptRevealSignal, histView,
+        tabRevealSignal, histView,
         projectRevision, dockRefreshKey, composerFileRefRefreshKey, refreshComposerFileRefs,
         terminalContentVisible, terminalFitEnabled, prefetchTerminalPanel,
       }}

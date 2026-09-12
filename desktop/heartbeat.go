@@ -18,7 +18,6 @@ import (
 	"math/rand"
 	"os"
 	"path/filepath"
-	"strings"
 	"sync"
 	"time"
 
@@ -26,6 +25,7 @@ import (
 	"reasonix/internal/control"
 	"reasonix/internal/event"
 	"reasonix/internal/filelock"
+	"reasonix/internal/permissionpreset"
 	"reasonix/internal/secrets"
 )
 
@@ -45,7 +45,7 @@ type HeartbeatTask struct {
 	NewConversationEachRun bool           `json:"newConversationEachRun,omitempty"` // true = create new topic every run
 	RunHistory             []HeartbeatRun `json:"runHistory,omitempty"`             // recent executions (oldest first, capped)
 	CreatedAt              int64          `json:"createdAt,omitempty"`
-	ApprovalMode           string         `json:"approvalMode"`              // "ask" | "auto" | "yolo"; empty defaults to "yolo"
+	ApprovalMode           string         `json:"approvalMode"`              // read-only | workspace-write | danger-full-access; empty defaults to workspace-write
 	TimeWindowStart        string         `json:"timeWindowStart,omitempty"` // "HH:MM" — interval tasks only run after this time (inclusive)
 	TimeWindowEnd          string         `json:"timeWindowEnd,omitempty"`   // "HH:MM" — interval tasks only run before this time (exclusive)
 	NotifyChannels         *bool          `json:"notifyChannels,omitempty"`  // true = push to bot channels; nil/false = skip
@@ -227,16 +227,10 @@ func (e *HeartbeatEngine) tick() {
 }
 
 // normalizeHeartbeatApprovalMode returns a valid approval mode for the task.
-// Empty or unknown values default to "yolo" so that scheduled tasks run
-// without interrupting the user for permission prompts.
+// Empty values default to workspace-write. Legacy values are conservatively
+// migrated by the shared permission-preset normalizer.
 func normalizeHeartbeatApprovalMode(mode string) string {
-	normalized := strings.ToLower(strings.TrimSpace(mode))
-	switch normalized {
-	case "ask", "auto", "yolo":
-		return normalized
-	default:
-		return "yolo"
-	}
+	return string(permissionpreset.NormalizeDefault(mode))
 }
 
 type heartbeatRuntimeStatus interface {
@@ -443,7 +437,7 @@ func (e *HeartbeatEngine) executeTaskOwned(t HeartbeatTask) HeartbeatTask {
 	}
 
 	// Set the task's approval mode only after confirming the controller is idle.
-	// SetToolApprovalModeForTab may drain pending approvals for auto/yolo modes,
+	// Applying the task preset rotates the permission revision before execution,
 	// so applying it to a busy reused topic would accidentally approve a previous
 	// turn instead of preparing this heartbeat prompt.
 	mode := normalizeHeartbeatApprovalMode(t.ApprovalMode)

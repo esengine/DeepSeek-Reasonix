@@ -1,0 +1,15 @@
+PASS finishing hides Stop
+PASS finishing has no animated run marker
+PASS failed enqueue preserves draft
+PASS phase transition keeps receipt confirmation action
+PASS retry only queries the original durable idempotency key
+PASS background jobs keep project activity visible
+PASS last job completion clears project activity
+PASS remote finishing queues the next input and clears it after receipt
+PASS remote disconnect blocks send while preserving unknown state
+PASS unknown remote state hides Stop
+PASS remote reconnect restores authoritative execution controls
+PASS remote completion removes the run control
+PASS trusted idle without turn_done settles the real transcript and reconciles durable history
+PASS local switch retains ownership after remote runtime frames
+PASS runtime scenarios produce no browser errors:

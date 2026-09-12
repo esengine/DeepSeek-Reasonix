@@ -83,6 +83,7 @@ func TestBashHereDocIssue5624CommandsReturnPromptly(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			ctx, cancel := context.WithTimeout(context.Background(), 8*time.Second)
 			defer cancel()
+			ctx = fullAccessBashTestContext(ctx)
 
 			done := make(chan struct {
 				out     string

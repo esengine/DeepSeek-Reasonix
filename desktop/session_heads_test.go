@@ -82,6 +82,7 @@ func newSchemaTwoTabFixture(t *testing.T) schemaTwoTabFixture {
 	app.tabs["test"].Scope = "project"
 	app.tabs["test"].WorkspaceRoot = root
 	app.tabs["test"].TopicID = "topic_heads"
+	app.tabs["test"].TopicTitle = "Source topic"
 	t.Cleanup(ctrl.Close)
 	if _, ok := ctrl.SessionHead(); !ok {
 		t.Fatal("fixture session must be schema 2")
@@ -104,27 +105,44 @@ func transcriptFilesIn(t *testing.T, dir string) int {
 	return n
 }
 
-func TestForkForTabSwitchesSchemaTwoTabInPlace(t *testing.T) {
+func TestForkForTabCreatesIndependentTabFromSchemaTwo(t *testing.T) {
 	fx := newSchemaTwoTabFixture(t)
 	meta, err := fx.app.ForkForTab("test", 1)
 	if err != nil {
 		t.Fatalf("ForkForTab: %v", err)
 	}
-	if meta.ID != "test" || !meta.Active || meta.SessionPath != fx.path || meta.SessionGeneration != 1 {
-		t.Fatalf("fork meta = id %q active %v path %q generation %d, want the source tab rehydrated in place", meta.ID, meta.Active, meta.SessionPath, meta.SessionGeneration)
+	if meta.ID == "" || meta.ID == "test" || !meta.Active || meta.SessionPath == "" || meta.SessionPath == fx.path {
+		t.Fatalf("fork meta = id %q active %v path %q, want an independent active tab", meta.ID, meta.Active, meta.SessionPath)
 	}
-	if len(fx.app.tabs) != 1 || fx.ctrl.SessionPath() != fx.path {
-		t.Fatalf("tabs = %d path %q, want one tab on the same log", len(fx.app.tabs), fx.ctrl.SessionPath())
+	if meta.TopicTitle != "Source topic (1)" {
+		t.Fatalf("fork title = %q, want Harness-style numbering", meta.TopicTitle)
 	}
-	if got := len(fx.ctrl.History()); got != 3 {
-		t.Fatalf("history after fork = %d, want the prefix before turn 1", got)
+	if len(fx.app.tabs) != 2 || fx.ctrl.SessionPath() != fx.path {
+		t.Fatalf("tabs = %d source path %q, want source plus an independent child", len(fx.app.tabs), fx.ctrl.SessionPath())
+	}
+	if got := len(fx.ctrl.History()); got != 5 {
+		t.Fatalf("source history after fork = %d, want all 5 messages unchanged", got)
+	}
+	forked, err := agent.LoadSession(meta.SessionPath)
+	if err != nil {
+		t.Fatalf("load fork session: %v", err)
+	}
+	if got := len(forked.Messages); got != 3 {
+		t.Fatalf("fork history = %d, want the prefix before turn 1", got)
+	}
+	branch, ok, err := agent.LoadBranchMeta(meta.SessionPath)
+	if err != nil || !ok {
+		t.Fatalf("load fork branch metadata: ok=%v err=%v", ok, err)
+	}
+	if branch.ParentID != agent.BranchID(fx.path) || branch.ForkTurn != 1 || branch.ForkMessageIndex != 3 || branch.TopicTitle != "Source topic (1)" {
+		t.Fatalf("fork branch metadata = %+v", branch)
 	}
 	heads, err := agent.ListSessionHeads(fx.path)
-	if err != nil || len(heads) != 2 || heads[1].Kind != agent.HeadKindFork || !heads[1].Selected || heads[0].MessageCount != 5 {
+	if err != nil || len(heads) != 1 || !heads[0].Selected || heads[0].MessageCount != 5 {
 		t.Fatalf("heads = %+v err=%v", heads, err)
 	}
-	if got := transcriptFilesIn(t, filepath.Dir(fx.path)); got != 1 {
-		t.Fatalf("transcript files = %d, want the fork inside the existing log", got)
+	if got := transcriptFilesIn(t, filepath.Dir(fx.path)); got != 2 {
+		t.Fatalf("transcript files = %d, want source and child logs", got)
 	}
 }
 
@@ -176,7 +194,10 @@ func TestCommitRewindForTabSwitchesSchemaTwoTabInPlace(t *testing.T) {
 
 func TestChooseRecoveryBranchSwitchesOpenTabHeadInPlace(t *testing.T) {
 	fx := newSchemaTwoTabFixture(t)
-	if _, err := fx.app.ForkForTab("test", 1); err != nil {
+	// Recovery-head navigation remains an in-log operation. Create that fixture
+	// directly through the controller; the user-facing chat fork now creates an
+	// independent session and is covered above.
+	if _, err := fx.ctrl.ForkNamed(1, ""); err != nil {
 		t.Fatal(err)
 	}
 	heads, _ := agent.ListSessionHeads(fx.path)
@@ -188,7 +209,7 @@ func TestChooseRecoveryBranchSwitchesOpenTabHeadInPlace(t *testing.T) {
 	if got := len(fx.ctrl.History()); got != 5 || fx.ctrl.SessionPath() != fx.path {
 		t.Fatalf("after choosing main: history %d path %q", got, fx.ctrl.SessionPath())
 	}
-	if gen := fx.app.tabs["test"].SessionGeneration; gen != 2 {
+	if gen := fx.app.tabs["test"].SessionGeneration; gen != 1 {
 		t.Fatalf("session generation = %d, want a bump per head switch", gen)
 	}
 	if err := fx.app.RenameSessionHead(fx.path, fork, "alternative"); err != nil {

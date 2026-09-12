@@ -1,0 +1,49 @@
+/* Ported from DeepSeek Harness c291e7961a; MIT, see LICENSE. */
+.dsh-TurnProcessNodeView-root {
+  box-sizing: border-box;
+  display: flex;
+  align-items: center;
+  width: 100%;
+  min-width: 0;
+  height: 33px;
+  padding: 0 0 8px;
+  border: none;
+  border-bottom: 0.5px solid var(--dsw-alias-border-l2);
+  background: none;
+  color: var(--dsw-alias-label-secondary);
+  cursor: pointer;
+  text-align: left;
+}
+
+.dsh-TurnProcessNodeView-root:not([data-open]) {
+  margin-bottom: 8px;
+}
+
+.dsh-TurnProcessNodeView-chevron {
+  flex: none;
+  width: 16px;
+  height: 16px;
+  margin-left: 6px;
+  color: var(--dsw-alias-label-tertiary);
+  transform: rotate(-90deg);
+  transition: transform 100ms ease;
+}
+
+.dsh-TurnProcessNodeView-root[data-open] .dsh-TurnProcessNodeView-chevron {
+  transform: rotate(0deg);
+}
+
+.dsh-TurnProcessNodeView-label {
+  min-width: 0;
+  overflow: hidden;
+  font-size: 14px;
+  line-height: 24px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .dsh-TurnProcessNodeView-chevron {
+    transition: none;
+  }
+}

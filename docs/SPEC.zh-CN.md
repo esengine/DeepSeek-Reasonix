@@ -209,11 +209,9 @@ transcript，仅在唯一自动阈值被跨越时安装 provider 可见的短 **
 项目级版本，stale 内容会降权。这不会修改稳定 system prompt 或工具 schema。
 
 拥有当前项目 store 的父 controller（包括顶层 headless）只有在新事实有界、非敏感、纯创建，且明确属于 project/reference 时才能
-免确认保存。Ask 下，全局事实、偏好、feedback、更新、重复项、敏感/超长内容和所有 `forget` 仍需
-新鲜人工确认。交互式 Auto 把 `remember`/`forget` 作为普通策略 fallback，默认放行并保留显式
-`ask` / `deny`；交互式 YOLO 会绕过记忆 ask 审批，除非命中显式 deny。
+免确认保存。其他记忆写入遵循当前权限预设并保留显式 `ask` / `deny`；完全权限会跳过普通授权请求，除非命中显式 deny。
 Guardian、permission hook 仍不能代为批准；子智能体和不拥有该作用域 controller 的 headless surface
-会 fail closed，无头 YOLO 也只保留上述 create-only 例外。事实带有不变 ID、单调 revision、时间、type 与 scope；更新先快照旧版本，
+会 fail closed，无头执行也只保留上述 create-only 例外。事实带有不变 ID、单调 revision、时间、type 与 scope；更新先快照旧版本，
 restore 与 archive recovery 会创建更高 revision，并拒绝路径逃逸、符号链接、冲突和覆盖。
 详细约定见 [`SESSION_MEMORY_RETRIEVAL.zh-CN.md`](SESSION_MEMORY_RETRIEVAL.zh-CN.md)。
 
@@ -231,12 +229,12 @@ func (p Policy) Decide(toolName string, readOnly bool, args json.RawMessage) Dec
 
 - rule 可以是 `Tool` 或 `Tool(specifier)`，例如 `Bash(go test:*)`、`Edit(docs/**)`；`Bash=<literal>` 是整条 Bash 命令的精确授权格式，其中 glob 与 Shell 元字符都按普通字符匹配。
 - 优先级为 `deny > ask > allow > fallback`；只读工具 fallback 为 Allow，写工具 fallback 使用 `Mode`。
-- 交互模式中的 Ask 由用户选择单次允许、session scope 允许、持久允许或拒绝；显式 Deny 在所有模式下都不可绕过。
-- 非交互 `reasonix run` 与无头子智能体没有审批界面：默认 Ask/manual 对普通 writer fallback 与显式 ask 规则失败关闭；Auto 只放行普通 writer fallback，显式 ask 仍拒绝；YOLO 可越过普通 Ask，但不能越过 deny、Sandbox，或计划/沙箱逃逸/受管配置写入这类强制新鲜人工审批。交互式 Auto 会放行 `remember`/`forget` 的默认 fallback 并保留显式 ask/deny；交互式 YOLO 会绕过记忆 ask 审批但仍遵守 deny。所有无头模式对其余记忆变更仍 fail closed，只保留有界 create-only project/reference 例外。无人值守自动化需要普通 writer 自主执行时，使用现有的 `--auto` / `-y`。
-- 动态 Bash 分两级：参数/算术展开、赋值、不含嵌套执行的 heredoc、普通文件重定向与 Shell glob 不能复用裸 `Bash`、前缀或 glob Allow，保存时只生成 `Bash=<literal>`，但仍遵循普通 fallback，因此 Auto 与获批计划窗口可无提示执行。命令/进程替换、动态命令名、无法解析结构，以及 `eval`、`source`、Shell `-c`、PowerShell/cmd 命令字符串、运行时内联代码参数属于嵌套/间接执行；默认情况下交互 Ask/Auto 必须人工批准，Guardian 与 hook allow 不能代替，无头 Ask/Auto/DontAsk 直接拒绝，只有完全相同的 literal 或 YOLO 可以绕过。高级用户可设置 `[permissions] allow_dynamic_bash = true`，让 Allow fallback（包括 Auto）覆盖这类动态命令；显式 `ask` 与 `deny` 规则仍然优先。
+- 交互授权只有单次允许、本会话允许当前范围和拒绝；会话授权绑定具体命令、规范目录或服务器能力，不写入项目配置。
+- 非交互 `reasonix run` 与无头子智能体没有授权界面：当前预设不覆盖的操作失败关闭。显式 `deny` 在所有预设下都不可绕过。
+- 管道、命令替换、重定向、Shell `-c` 和运行时内联代码都遵循同一个权限预设和 OS 沙盒，不再因为语法形式单独触发审批。
 - 安装 MCP server 即授权其全部工具，不再有 server、raw tool、writer 或 destructive 的第二套审批策略；项目 `reasonix.toml` 与 `.mcp.json` 声明同样默认可信，不需要额外启动确认，显式全局 `deny` 仍然优先。全局安装写入用户 `config.toml`，项目声明保留在原项目文件；同名时项目覆盖全局，项目内部 `reasonix.toml` 高于 `.mcp.json`。编辑写回当前生效来源，删除高优先级声明后露出下一层。`readOnlyHint` 与 `destructiveHint` 仅用于调度、Plan/严格只读边界及缓存到实时安全分类复核，不会新增逐调用审批。严格只读子智能体 registry 仍仅暴露已授权且 `readOnlyHint: true`、无 `destructiveHint` 的 MCP；双模型 Planner 通过固定 `use_capability` 代理（从不暴露直接 `mcp__*` schema）调用已授权、非 destructive 的 MCP，不再要求 `readOnlyHint`，destructive 工具留给 Executor。Balanced 双模型的 Executor 使用独立 frontend 复用同一稳定代理，因此 Planner 发现的 capability ID 可在 handoff 后直接执行，同时保持两侧 ledger/audit 隔离。分发前代理会再次复核当前 controller 的 enable、授权和完整运行时连接身份；共享 Host 中仅 server 同名不构成复用权限。
-- Plan 是协作流程，不等于全工具只读。普通 built-in 与 Bash 仍走 Ask/Auto/YOLO 和 Sandbox；独立双模型 Planner 允许已授权、非 destructive 的 MCP（即使没有 `readOnlyHint`），但在规划阶段持续阻止 destructive 与未授权目标；没有独立 Planner 的单模型 Plan 仍阻止 MCP writer/destructive。
-- Plan 只能由用户显式选择进入，与当前工具审批姿态相互独立；普通聊天不会自动切换到 Plan。Auto/YOLO 不会回答 `ask`，也不会替用户批准 `exit_plan_mode`，获批计划的短期自动执行窗口也不会自动批准后续计划或嵌套/间接 Bash。
+- Plan 是协作流程，不等于权限预设。普通 built-in 与 Bash 继续遵循当前预设和 Sandbox；独立双模型 Planner 允许已授权、非 destructive 的 MCP（即使没有 `readOnlyHint`），但在规划阶段持续阻止 destructive 与未授权目标；没有独立 Planner 的单模型 Plan 仍阻止 MCP writer/destructive。
+- Plan 只能由用户显式选择进入，与当前权限预设相互独立；普通聊天不会自动切换到 Plan。权限预设不会回答 `ask`，也不会替用户批准 `exit_plan_mode`，获批计划的短期自动执行窗口也不会自动批准后续计划或嵌套/间接 Bash。
 - 桌面端协作模式分为 `normal`、`plan` 和 `goal`。Goal 默认不设模型轮数、跨 Run turn 数、墙钟时长或数字式无进展边界，会持续推进直到完成、真实用户/外部阻塞、用户停止/暂停、不可恢复外部错误或用户显式预算耗尽。相同宿主失败、零新增证据与 Todo 停滞阈值只触发重新规划，不产生 `goal_run_budget` 或 `goal_stuck` 暂停。Goal 范围的新颖证据允许新的读取/搜索结果推进任务，但拒绝完全相同的工具、参数和结果重复。未配置相应预算时，累计 turn、token、真实 provider 请求数和实际工作时间只做观测。正数 `[agent].goal_token_budget`、`max_steps`、时间或成本预算仍是用户可选的可恢复边界；Goal token 预算默认 `0`（关闭），从 `budget_spend` 恢复会授予新的预算切片且不清零累计统计；`task_time_budget_minutes = 0`（以及兼容的负数）表示关闭时间边界。旧简单/写入/研究参数仅为兼容元数据，所有目标共用同一个 Goal FSM、宿主 receipt、readiness 检查和有界 evaluator。普通聊天不会隐式切换协作模式；旧 `.reasonix/autoresearch/.../` 目录只读，显式旧路径可恢复为普通 Goal。
 
 ### 3.8 Slash command
@@ -451,7 +449,7 @@ auth_mode = "none"
 原生 CLI 更新器始终安装最新的严格 `vX.Y.Z` 正式版。1.x 期间仍解析旧渠道配置与
 参数，但统一指向正式版，并在后续保存配置时省略这些字段。
 
-`[sandbox]` 是权限策略之下的强制执行层。权限策略和沙箱边界是两层机制。交互会话可以用「扩展写入范围」审批（仅本次 / 本会话 / 写入项目 `reasonix.toml` / 拒绝）按需扩大可写根；文件工具会自动申请目标父目录，Bash 必须声明 `additional_write_dirs` 和 `justification`。无头 `reasonix run` 缺少目录时 fail closed，请使用 `--add-dir` 或 `[sandbox].allow_write`。`${HOME}` 可在强警告后批准；文件系统根和 Reasonix 会话/状态目录不能通过动态流程批准。file writer 默认限制在 workspace root、Reasonix 用户配置目录和 `allow_write`；`forbid_read` 可阻止读取敏感路径。macOS 使用 Seatbelt，Linux 使用 bubblewrap；若声明 enforce 但平台 backend 不可用，Bash 应拒绝执行而不是静默降级。Windows 当前没有 OS 级 Bash sandbox，file tool 的路径限制仍然生效。
+权限预设直接选择强制沙盒边界。交互会话可以用「扩展写入范围」授权（仅本次 / 本会话 / 拒绝）按需扩大可写根；文件工具会申请目标父目录，Bash 必须声明 `additional_write_dirs` 和 `justification`。无头 `reasonix run` 缺少目录时失败关闭。file writer 默认限制在 workspace root、会话私有临时目录和显式授权根；`forbid_read` 可阻止读取敏感路径。macOS 使用 Seatbelt，Linux 使用 bubblewrap，Windows 使用受限令牌、ACL 和 Job Object；受限 backend 不可用时拒绝执行，不无约束回退。
 
 `[serve]` 控制 `reasonix serve` 的 browser frontend。默认 `auth_mode = "none"` 仅适合 loopback；暴露到其他机器时必须使用 token 或 password。只有位于可信 reverse proxy 后方时才能启用 `behind_proxy`。
 
@@ -484,7 +482,5 @@ MCP 启动与单次工具调用使用不同生命周期。调用方只短暂等�
 
 ## 9. 路线图（当前范围之外）
 
-- 完成 Sandbox Phase 1 的 escape prompt：检测 sandbox 不可用或拒绝时，提供一次明确、受权限控制的非 sandbox 重试。
 - MCP long tail：`headersHelper`、更多 `.mcp.json` scope、tool-search 延迟加载、`list_changed`、channel、elicitation、root，以及可提供 provider 的插件。
 - 增加 Anthropic-native provider kind，用于验证 registry 不依赖单一 wire format，并支持原生 prompt cache control。
-- 把“始终允许”规则持久化到项目配置，以及为 `reasonix run` 提供 session 级权限覆盖。

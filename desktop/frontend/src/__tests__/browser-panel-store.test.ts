@@ -3,7 +3,7 @@ import assert from "node:assert/strict";
 
 import { normalizeAddress, zoomStep } from "../lib/browserAddress";
 import type { BrowserDownloadView, BrowserTabView, DesktopBrowserHost } from "../lib/browserHost";
-import { selectActiveTab, selectAddress, USER_TASK_ID, useBrowserPanelStore } from "../lib/browserPanelStore";
+import { selectActiveTab, selectAddress, USER_TASK_ID, useBrowserPanelStore, waitForBrowserHost } from "../lib/browserPanelStore";
 
 const tab = (overrides: Partial<BrowserTabView>): BrowserTabView => ({
   id: "t", taskId: "A", url: "https://example.com/", title: "Example", loading: false, canGoBack: false, canGoForward: false,
@@ -53,6 +53,16 @@ const notices: string[] = [];
 const notify = (message: string) => { notices.push(message); };
 
 console.log("\nbrowser panel store");
+
+{
+  reset();
+  const fake = fakeHost();
+  const pending = waitForBrowserHost(500);
+  const detach = store().attach(fake.host, notify);
+  assert.equal(await pending, fake.host, "host readiness resolves from the store subscription without animation-frame polling");
+  detach();
+  console.log("  PASS  browser host readiness subscription");
+}
 
 {
   reset();

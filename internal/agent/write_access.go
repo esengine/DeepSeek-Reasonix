@@ -43,6 +43,7 @@ type WriteAccessDecision struct {
 	Reason           string
 	PerCallRoots     []string
 	SkipOrdinaryGate bool
+	PermissionPreset string
 }
 
 // WriteAccessGate authorizes extra writable directories before a tool runs.
@@ -99,6 +100,10 @@ func (a *Agent) SetWriteRoots(set *sandbox.WritableRootSet) {
 	a.svc.writeRoots = set
 }
 
+func (a *Agent) SetPermissionPresetProvider(provider func() string) {
+	a.svc.permissionPreset = provider
+}
+
 func (c *Coordinator) SetWriteAccessGate(g WriteAccessGate) {
 	if c == nil {
 		return
@@ -120,6 +125,18 @@ func (c *Coordinator) SetWriteRoots(set *sandbox.WritableRootSet) {
 	}
 	if c.executor != nil {
 		c.executor.SetWriteRoots(set)
+	}
+}
+
+func (c *Coordinator) SetPermissionPresetProvider(provider func() string) {
+	if c == nil {
+		return
+	}
+	if c.plannerAgent != nil {
+		c.plannerAgent.SetPermissionPresetProvider(provider)
+	}
+	if c.executor != nil {
+		c.executor.SetPermissionPresetProvider(provider)
 	}
 }
 
@@ -182,6 +199,7 @@ func (a *Agent) applyWriteAccess(ctx context.Context, plan *toolCallPlan) (toolO
 	}
 	plan.perCallWriteRoots = dec.PerCallRoots
 	plan.skipOrdinaryGate = dec.SkipOrdinaryGate
+	plan.permissionPreset = dec.PermissionPreset
 	return toolOutcome{}, false
 }
 
@@ -233,6 +251,11 @@ func (a *Agent) stateRoot() string {
 }
 
 func (a *Agent) stampWriteRoots(ctx context.Context, plan *toolCallPlan) context.Context {
+	if plan.permissionPreset != "" {
+		ctx = sandbox.WithPermissionPreset(ctx, plan.permissionPreset)
+	} else if a != nil && a.svc.permissionPreset != nil {
+		ctx = sandbox.WithPermissionPreset(ctx, a.svc.permissionPreset())
+	}
 	if len(plan.perCallWriteRoots) > 0 {
 		ctx = sandbox.WithPerCallWriteRoots(ctx, plan.perCallWriteRoots)
 	}

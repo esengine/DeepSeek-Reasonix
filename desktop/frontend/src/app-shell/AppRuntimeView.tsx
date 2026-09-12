@@ -74,7 +74,6 @@ export type AppRuntimeViewProps = {
     sidebarImDetailConnectionId: string;
     setSidebarImDetailConnectionId: React.Dispatch<React.SetStateAction<string>>;
     tabRevealSignal: number;
-    transcriptRevealSignal: number;
     histView: HistoryViewState | null;
     projectRevision: number;
     dockRefreshKey: number;
@@ -320,7 +319,6 @@ export function AppRuntimeView(props: AppRuntimeViewProps) {
               tabId: session.transcript.visibleTranscriptTabId,
               geometrySessionKey: session.transcript.visibleTranscriptGeometryKey,
               footerHeight,
-              revealSignal: local.transcriptRevealSignal,
               invocationMetadata: session.transcript.visibleTranscriptTabId ? session.invocation.invocationMetadataByTab[session.transcript.visibleTranscriptTabId] : undefined,
               surfaceCommitToken: core.surface.surfaceCommitToken,
               liveStore: core.liveStore,
@@ -333,17 +331,12 @@ export function AppRuntimeView(props: AppRuntimeViewProps) {
               creation: sidebarCreation,
               emptyHero: session.transcript.emptyHero,
               availability: session.transcript.availability,
-              rewind: { stateActive: session.sessionUndo.rewindState != null, committing: session.sessionUndo.rewindCommitting, signal: session.sessionUndo.rewindSignal },
+              rewind: { stateActive: session.sessionUndo.rewindState != null, committing: session.sessionUndo.rewindCommitting },
             }}
             onRetryHistory={() => runtime.sessionActions.retrySessionHistory(activeTabId)}
             commands={{
               onPrompt: session.transcript.handleTranscriptPrompt,
-              onDeliveryContinue: () => void session.delivery.handleDeliveryContinue(),
-              onAcceptDelivery: session.controlCommands.handleAcceptDelivery,
-              onOpenChanges: session.turnVerificationCommands.openTurnChanges,
-              onOpenVerification: session.turnVerificationCommands.openTurnVerification,
-              onEditPrompt: session.sessionUndo.handleEditPrompt,
-              onRewind: session.sessionUndo.handleMessageAction,
+              onFork: (turn) => session.sessionUndo.handleMessageAction(turn, "fork"),
               onLoadOlderHistory: session.transcript.handleLoadOlderHistory,
               onSurfacePaintReady: session.transcript.handleSurfacePaintReady,
             }}
@@ -477,7 +470,6 @@ export function AppRuntimeView(props: AppRuntimeViewProps) {
         cwd: state.meta?.cwd,
         paletteItems: navigation.paletteCommands.paletteItems,
         startupSplashHold,
-        selectionEnabled: Boolean(activeTabId && !activeTab?.readOnly && !decisionSurface && !sidebarImDetailConnection && !session.hydratePlaceholderActive),
         automationTopic: session.automation.openAutomationTopic,
         shell,
         history: navigation.historyCommands,
@@ -485,7 +477,6 @@ export function AppRuntimeView(props: AppRuntimeViewProps) {
         chrome: chromeCommands,
         onboarding: navigation.onboardingCommands,
         worktree: navigation.worktreeMergeCommands,
-        onAddSelectedText: session.insertCommands.addSelectedTextToComposer,
         prefillSubagentCommand: session.insertCommands.prefillSubagentCommand,
         sessionActions: {
           previewSession: runtime.sessionActions.previewSession,

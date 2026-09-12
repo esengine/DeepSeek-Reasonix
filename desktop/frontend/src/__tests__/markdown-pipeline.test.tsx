@@ -25,7 +25,6 @@ import {
   sliceHastBlocks,
   type MarkdownBlock,
 } from "../lib/markdownPipeline";
-import { projectTranscriptSelectableDom } from "../lib/transcriptSelectionDom";
 
 let passed = 0;
 let failed = 0;
@@ -73,7 +72,9 @@ function projectRenderedBlocks(blocks: MarkdownBlock[]): string {
   globalThis.Element = dom.window.Element;
   globalThis.HTMLElement = dom.window.HTMLElement;
   const root = dom.window.document.getElementById("root") as HTMLElement;
-  const projected = projectTranscriptSelectableDom(root).text;
+  const selection = dom.window.getSelection()!;
+  selection.selectAllChildren(root);
+  const projected = selection.toString();
   dom.window.close();
   return projected;
 }
@@ -231,11 +232,9 @@ console.log("\nmarkdown selection projection");
     "标题 😀\n段落 链接文字 与 $x^2$。\n内联 粗体 斜体。\n第一项\n第二项\nconst value = 1;\n名称\t值\n一\t1",
     "selection projection preserves readable structure, code, tables, CJK, emoji and LaTeX",
   );
-  eq(
-    result.selectionText,
-    projectRenderedBlocks(result.blocks),
-    "selection projection uses the same UTF-16 text as the rendered DOM adapter",
-  );
+  const selected = projectRenderedBlocks(result.blocks);
+  ok(selected.includes("标题 😀") && selected.includes("链接文字") && selected.includes("const value = 1;"),
+    "native DOM selection includes Unicode, links and complete code text");
   eq(result.selectionRevision, markdownContentRevision(result.selectionText), "selection revision fingerprints projected UTF-16 text");
 }
 

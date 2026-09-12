@@ -69,6 +69,9 @@ type toolOutcome struct {
 	// mcpApp is the optional MCP Apps presentation; provider-excluded like
 	// execution, persisted for Desktop cards.
 	mcpApp *provider.MCPAppPresentation
+	// presentedFiles is trusted host metadata from a successful built-in
+	// present call. It shares the persisted tool-result commit boundary.
+	presentedFiles []provider.PresentedFile
 	// recoveryGeneration is the gate generation captured before execution so
 	// ObserveResult can ignore stale results after a mode switch.
 	recoveryGeneration uint64

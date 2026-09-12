@@ -19,6 +19,11 @@ type Approval struct {
 	Recovery    *RecoveryApproval
 	WriteAccess *WriteAccessApproval
 	TurnID      string
+	// Generation and PermissionRevision bind a decision to the exact runtime
+	// permission snapshot that emitted it. New clients echo both values when
+	// resolving; older clients remain fenced by turn/runtime identity.
+	Generation         uint64
+	PermissionRevision uint64
 }
 
 // ApprovalKindWriteAccess is the Approval.Kind value for directory expansion.

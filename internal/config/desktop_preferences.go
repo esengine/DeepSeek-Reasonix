@@ -18,7 +18,7 @@ type DesktopConfig struct {
 	StatusBarStyle            string   `toml:"status_bar_style"`             // icon|text; desktop status bar metric labels
 	StatusBarStyleInitialized bool     `toml:"status_bar_style_initialized"` // one-time icon default upgrade; later choices are user-owned
 	StatusBarItems            []string `toml:"status_bar_items"`             // ordered visible desktop status bar items
-	DefaultToolApprovalMode   string   `toml:"default_tool_approval_mode"`   // ask|auto|yolo; defaults to auto for newly-created desktop sessions
+	DefaultToolApprovalMode   string   `toml:"default_tool_approval_mode"`   // read-only|workspace-write|danger-full-access; defaults to workspace-write
 	CheckUpdates              *bool    `toml:"check_updates"`                // startup update checks; nil keeps the default enabled
 	// UpdateChannel is a legacy compatibility field. It is accepted on read but
 	// ignored and omitted from future canonical writes.

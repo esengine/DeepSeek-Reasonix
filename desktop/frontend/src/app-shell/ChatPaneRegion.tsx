@@ -18,7 +18,6 @@ export type ChatPaneTranscriptInput = {
   tabId: TranscriptProps["tabId"];
   geometrySessionKey: TranscriptProps["geometrySessionKey"];
   footerHeight: TranscriptProps["footerHeight"];
-  revealSignal: TranscriptProps["revealSignal"];
   invocationMetadata: TranscriptProps["invocationMetadata"];
   surfaceCommitToken: TranscriptProps["surfaceCommitToken"];
   liveStore: TranscriptProps["liveStore"];
@@ -34,7 +33,6 @@ export type ChatPaneTranscriptInput = {
   rewind: {
     stateActive: boolean;
     committing: boolean;
-    signal: TranscriptProps["rewindSignal"];
   };
 };
 
@@ -55,12 +53,7 @@ export type ChatPaneRegionProps = {
   onRetryHistory: () => Promise<unknown>;
   commands: {
     onPrompt: TranscriptProps["onPrompt"];
-    onDeliveryContinue: TranscriptProps["onDeliveryContinue"];
-    onAcceptDelivery: TranscriptProps["onAcceptDelivery"];
-    onOpenChanges: TranscriptProps["onOpenChanges"];
-    onOpenVerification: TranscriptProps["onOpenVerification"];
-    onEditPrompt: TranscriptProps["onEditPrompt"];
-    onRewind: TranscriptProps["onRewind"];
+    onFork: TranscriptProps["onFork"];
     onLoadOlderHistory: TranscriptProps["onLoadOlderHistory"];
     onSurfacePaintReady: TranscriptProps["onSurfacePaintReady"];
   };
@@ -121,29 +114,15 @@ export function ChatPaneRegion(props: ChatPaneRegionProps) {
                 geometrySessionKey={transcript.geometrySessionKey}
                 footerHeight={transcript.footerHeight}
                 onPrompt={commands.onPrompt}
-                onDeliveryContinue={commands.onDeliveryContinue}
-                onAcceptDelivery={commands.onAcceptDelivery}
-                onOpenChanges={commands.onOpenChanges}
-                onOpenVerification={commands.onOpenVerification}
-                onEditPrompt={commands.onEditPrompt}
-                onRewind={commands.onRewind}
+                onFork={commands.onFork}
                 checkpoints={state.checkpoints}
                 actionPending={state.messageAction != null}
                 rewindDisabled={rewindDisabled}
                 running={state.running || rewind.committing}
                 turnStartAt={state.turnStartAt}
-                contentRevision={state.historyLayoutRevision}
-                historyMutation={state.historyMutation}
-                welcomeVariant={transcript.creation || transcript.emptyHero ? "creation" : "default"}
-                creationMode={transcript.creation}
-                actionHoverMenus={transcript.creation && !transcript.hydratePlaceholderActive && !transitioning}
-                rewindSignal={rewind.signal}
-                revealSignal={transcript.revealSignal}
                 hydrating={transcript.transcriptHydrating || (transitioning && !transcript.navigationDataReady)}
                 hasOlderHistory={!transitioning && state.historyHasOlder && !rewind.stateActive}
-                stableHistoryPaging={state.transcriptProtocol === 1}
                 historyStartTurn={state.historyStartTurn}
-                historyTotalTurns={state.historyTotalTurns}
                 loadingOlderHistory={state.historyOlderLoading}
                 olderHistoryError={state.historyOlderError}
                 onLoadOlderHistory={commands.onLoadOlderHistory}

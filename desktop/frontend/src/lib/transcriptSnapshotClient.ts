@@ -6,21 +6,29 @@ import type { Item, State } from "./useController";
 
 export async function resolveSnapshotItems(client: TranscriptSnapshotClient, tabId: string, entryId: string,
   getState: () => State | undefined, convert: (messages: HistoryMessage[], prefix: string) => { items: Item[] },
-  commit: (patches: Record<string, Item>) => void): Promise<TranscriptRecord | undefined> {
+  commit: (patches: Record<string, Item>) => void, field?: string): Promise<TranscriptRecord | undefined> {
   let resolved: TranscriptRecord | undefined;
   for (let attempt = 0; attempt < 8; attempt++) {
   const before = new Map(getState()?.items.map((item) => [item.id, item]));
   const requested = before.get(entryId);
   const canonicalId = requested?.kind === "user" && requested.messageId ? `m:${requested.messageId}` : entryId;
-  const record = await client.content(tabId, canonicalId);
+  const record = await client.content(tabId, canonicalId, field);
   if (!record) return resolved;
   const converted = convert([{ ...record.message, recordId: record.id }], "snapshot:");
   const current = getState();
   const patches: Record<string, Item> = {};
   for (const item of converted.items) {
     const existing = current && matchingSnapshotItem(current.items, item);
-    if (existing && existing === before.get(existing.id)) patches[existing.id] = item.kind === "tool" && existing.kind === "tool"
-      ? { ...existing, ...(record.message.role === "tool" ? { output: item.output } : { args: item.args }) } : { ...item, id: existing.id };
+    const expected = existing && before.get(existing.id);
+    // Body and thought references can finish independently. An unrelated field
+    // patch must not discard this field's complete content as an obsolete read.
+    const unchanged = existing === expected || (field && existing?.kind === "assistant" && expected?.kind === "assistant"
+      && existing.streaming === expected.streaming && (field === "reasoning" ? existing.reasoning === expected.reasoning : existing.text === expected.text));
+    if (existing && unchanged) patches[existing.id] = item.kind === "tool" && existing.kind === "tool"
+      ? { ...existing, ...(record.message.role === "tool" ? { output: item.output } : { args: item.args }) }
+      : field && item.kind === "assistant" && existing.kind === "assistant"
+        ? { ...existing, ...(field === "reasoning" ? { reasoning: item.reasoning } : { text: item.text }) }
+        : { ...item, id: existing.id };
   }
   commit(patches);
   if (Object.keys(patches).length === 0) return resolved;
@@ -28,6 +36,31 @@ export async function resolveSnapshotItems(client: TranscriptSnapshotClient, tab
   resolved = record;
   }
   return resolved;
+}
+
+/** React remote state commits can batch two independently resolved fields. */
+export function rebaseSnapshotContentPatches(state: State, patches: Record<string, Item>, field: string): Record<string, Item> {
+  const current = new Map(state.items.map(item => [item.id, item]));
+  return Object.fromEntries(Object.entries(patches).map(([id, patch]) => {
+    const existing = current.get(id);
+    return [id, existing?.kind === "assistant" && patch.kind === "assistant"
+      ? { ...existing, ...(field === "reasoning" ? { reasoning: patch.reasoning } : { text: patch.text }) } : patch];
+  }));
+}
+
+/** Raw immutable tool fields bypass Item's deliberate preview/archive limits. */
+export async function resolveSnapshotTool(client: TranscriptSnapshotClient, tabId: string, id: string,
+  getState: () => State | undefined): Promise<string | undefined> {
+  const item = getState()?.items.find(item => item.id === id);
+  if (item?.kind !== "tool") return undefined;
+  const value = { args: item.args, output: item.output, error: item.error, diff: item.fileDiff };
+  for (const record of await client.toolContent(tabId, id)) {
+    const call = record.message.toolCalls?.find(call => call.id === id);
+    if (call) value.args = call.arguments;
+    if (record.message.role === "tool" && record.message.toolCallId === id) value.output = record.message.content;
+  }
+  if (getState()?.items.find(current => current.id === id) !== item) throw new Error("Tool content changed; retry");
+  return JSON.stringify(value, null, 2);
 }
 
 export interface SnapshotTransport {
@@ -57,7 +90,22 @@ export class TranscriptSnapshotClient {
 
   acceptContent(tabId: string, record: TranscriptRecord) {
     const cut = this.cuts.get(tabId);
-    if (cut?.records.has(record.id)) cut.records.delete(record.id);
+    const old = cut?.records.get(record.id);
+    if (!cut || !old) return;
+    const remaining = new Set(record.refs.map(ref => JSON.stringify(ref.path)));
+    const resolved = old.refs.filter(ref => !remaining.has(JSON.stringify(ref.path)));
+    for (const ref of resolved) {
+      let target = old.message as unknown as Record<string, unknown>;
+      let value = record.message as unknown as Record<string, unknown>;
+      for (const key of ref.path.slice(0, -1)) {
+        target = target[key] as Record<string, unknown>;
+        value = value[key] as Record<string, unknown>;
+      }
+      const key = ref.path[ref.path.length - 1];
+      target[key] = value[key];
+    }
+    old.refs = old.refs.filter(ref => remaining.has(JSON.stringify(ref.path)));
+    if (!old.refs.length && !old.message.toolCalls?.length && old.message.role !== "tool") cut.records.delete(record.id);
   }
 
   observeEvent(tabId: string, event: WireEvent) {
@@ -74,8 +122,8 @@ export class TranscriptSnapshotClient {
     for (const [tabId, cut] of [...this.cuts.entries()].reverse()) {
       if (this.pinned(tabId)) continue;
       unpinned++;
-      // Only unresolved previews are retained here. Full bodies live in the
-      // mounted transcript; resolving a record releases its client cache.
+      // Keep unresolved previews and immutable tool records needed to reopen
+      // details. Fetched tool bodies belong only to the mounted drawer.
       for (const record of cut.records.values()) bytes += JSON.stringify(record).length * 2;
       if (unpinned > 3 || bytes > 32 * 1024 * 1024) this.cuts.delete(tabId);
     }
@@ -108,7 +156,7 @@ export class TranscriptSnapshotClient {
         }
         if (!valid()) return false;
         const cut = { snapshot: { ...snapshot, records: [], activeRecords: [] },
-          records: new Map(records.filter((record) => record.refs?.length).map((record) => [record.id, record])), touched: new Set<string>() };
+          records: new Map(records.filter((record) => record.refs?.length || record.message.toolCalls?.length || record.message.role === "tool").map((record) => [record.id, record])), touched: new Set<string>() };
         return this.projector.installSnapshot(lease, snapshot, () => {
           commit(snapshot);
           this.cuts.set(tabId, cut);
@@ -134,29 +182,49 @@ export class TranscriptSnapshotClient {
     const records = snapshotRecords({ ...page, activeRecords: [] }).filter((record) => !cut.touched.has(record.id) &&
       !cut.touched.has(`m:${record.message.messageId}`) && !cut.touched.has(`tool:${record.message.toolCallId}`));
     commit({ ...page, records, activeRecords: [] });
-    for (const record of records) if (record.refs?.length && !cut.records.has(record.id)) cut.records.set(record.id, record);
+    for (const record of records) if ((record.refs?.length || record.message.toolCalls?.length || record.message.role === "tool") && !cut.records.has(record.id)) cut.records.set(record.id, record);
     cut.snapshot = { ...cut.snapshot, before: page.before, hasOlder: page.hasOlder };
     return "loaded";
   }
 
+  /** Read detached full tool data without expanding controller Items or retaining
+   * fetched bodies. Retain the cut's small references so reopening can read again. */
+  async toolContent(tabId: string, itemId: string): Promise<TranscriptRecord[]> {
+    const cut = this.cuts.get(tabId);
+    if (!cut || cut.expired) { if (this.installed(tabId)) throw new StaleCut(); return []; }
+    const records = [...cut.records.values()].filter(record => record.message.toolCallId === itemId || record.message.toolCalls?.some(call => call.id === itemId));
+    const results: TranscriptRecord[] = [];
+    for (const record of records) {
+      const resolved: TranscriptRecord = JSON.parse(JSON.stringify(record));
+      await this.resolveRecord(tabId, resolved, () => this.cuts.get(tabId) === cut, ref =>
+        record.message.role === "tool" ? ref.path[0] === "content" :
+          ref.path[0] === "toolCalls" && record.message.toolCalls?.[Number(ref.path[1])]?.id === itemId);
+      if (this.cuts.get(tabId) !== cut || cut.touched.has(record.id) || cut.touched.has(`tool:${itemId}`) || cut.touched.has(`m:${record.message.messageId}`)) throw new StaleCut();
+      results.push(resolved);
+    }
+    return results;
+  }
+
   /** Resolve one immutable record. Caller fences patches against item identity
    * changes while this read is in flight, including streamed mutations. */
-  async content(tabId: string, itemId: string): Promise<TranscriptRecord | undefined> {
+  async content(tabId: string, itemId: string, field?: string): Promise<TranscriptRecord | undefined> {
     const cut = this.cuts.get(tabId);
     if (!cut || cut.expired) { if (this.installed(tabId)) throw new StaleCut(); return undefined; }
-    const record = [...cut.records.values()].find((entry) => entry.refs?.length && !cut.touched.has(entry.id) &&
+    const accepts = (ref: TranscriptContentRef) => !field || (field === "tool" ? ref.path[0] === "toolCalls" || ref.path[0] === "content" : ref.path[0] === field);
+    const record = [...cut.records.values()].find((entry) => entry.refs?.some(accepts) && !cut.touched.has(entry.id) &&
       !cut.touched.has(`m:${entry.message.messageId}`) && !cut.touched.has(`tool:${entry.message.toolCallId}`) && (itemId === entry.id || itemId === `record:${entry.id}` ||
       (entry.message.messageId && itemId === `m:${entry.message.messageId}`) ||
       itemId === entry.message.toolCallId || entry.message.toolCalls?.some((tool) => tool.id === itemId)));
     if (!record || !record.refs?.length) return undefined;
     const reads = cut.reads ??= new Map();
-    let pending = reads.get(record.id);
+    const readKey = `${record.id}:${field ?? "*"}`;
+    let pending = reads.get(readKey);
     if (!pending) {
       const detached: TranscriptRecord = JSON.parse(JSON.stringify(record));
-      pending = this.resolveRecord(tabId, detached, () => this.cuts.get(tabId) === cut).then(() => detached);
-      reads.set(record.id, pending);
+      pending = this.resolveRecord(tabId, detached, () => this.cuts.get(tabId) === cut, accepts).then(() => detached);
+      reads.set(readKey, pending);
       const request = pending;
-      const cleanup = () => { if (reads.get(record.id) === request) reads.delete(record.id); };
+      const cleanup = () => { if (reads.get(readKey) === request) reads.delete(readKey); };
       void pending.then(cleanup, cleanup);
     }
     let detached: TranscriptRecord;
@@ -167,8 +235,9 @@ export class TranscriptSnapshotClient {
     return detached;
   }
 
-  private async resolveRecord(tabId: string, record: TranscriptRecord, current: () => boolean) {
+  private async resolveRecord(tabId: string, record: TranscriptRecord, current: () => boolean, accepts: (ref: TranscriptContentRef) => boolean = () => true) {
     for (const ref of record.refs ?? []) {
+      if (!accepts(ref)) continue;
       let offset = 0;
       const chunks: string[] = [];
       for (;;) {
@@ -192,6 +261,6 @@ export class TranscriptSnapshotClient {
       if (!key || key === "__proto__" || key === "constructor" || key === "prototype" || !target || typeof target !== "object") throw new Error("invalid transcript content path");
       (target as Record<string, unknown>)[key] = chunks.join("");
     }
-    record.refs = [];
+    record.refs = record.refs.filter(ref => !accepts(ref));
   }
 }

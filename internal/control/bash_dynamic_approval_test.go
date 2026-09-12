@@ -45,13 +45,13 @@ func assertDynamicApprovalPending(t *testing.T, done <-chan dynamicApprovalResul
 	}
 }
 
-func TestDynamicBashRequiresInteractiveHumanInAutoAndApprovedPlan(t *testing.T) {
+func TestDynamicBashUsesTheSamePresetDecisionAsOtherCommands(t *testing.T) {
 	for _, tt := range []struct {
-		name  string
-		setup func(*Controller)
+		name string
+		mode string
 	}{
-		{name: "auto", setup: func(c *Controller) { c.SetToolApprovalMode(ToolApprovalAuto) }},
-		{name: "approved plan", setup: func(c *Controller) { c.approval.setPlanAutoApprove(true) }},
+		{name: "workspace write", mode: ToolApprovalWorkspaceWrite},
+		{name: "full access", mode: ToolApprovalDangerFullAccess},
 	} {
 		t.Run(tt.name, func(t *testing.T) {
 			approvals := make(chan event.Approval, 1)
@@ -60,30 +60,16 @@ func TestDynamicBashRequiresInteractiveHumanInAutoAndApprovedPlan(t *testing.T) 
 					approvals <- e.Approval
 				}
 			})})
-			tt.setup(c)
-
-			done := requestDynamicBashApproval(c)
-			var approval event.Approval
+			c.SetToolApprovalMode(tt.mode)
+			args := json.RawMessage(`{"command":"git status $(touch /tmp/reasonix-dynamic-approval)"}`)
+			allow, reason, err := c.newInteractiveGate().Check(context.Background(), "bash", args, false)
+			if err != nil || !allow || reason != "" {
+				t.Fatalf("preset decision = (%v,%q,%v), want allow", allow, reason, err)
+			}
 			select {
-			case approval = <-approvals:
-			case <-time.After(30 * time.Second):
-				t.Fatal("dynamic Bash approval prompt was not emitted")
-			}
-			if approval.Fresh {
-				t.Fatal("dynamic Bash must keep the ordinary four-choice approval UI")
-			}
-			if approval.Reason != dynamicBashApprovalReason {
-				t.Fatalf("dynamic Bash approval reason = %q, want actionable classification", approval.Reason)
-			}
-			assertDynamicApprovalPending(t, done)
-			c.Approve(approval.ID, true, false, false)
-			select {
-			case got := <-done:
-				if got.err != nil || !got.allow {
-					t.Fatalf("manual approval = %+v, want allow", got)
-				}
-			case <-time.After(30 * time.Second):
-				t.Fatal("dynamic Bash approval stayed blocked")
+			case approval := <-approvals:
+				t.Fatalf("dynamic Bash unexpectedly prompted: %+v", approval)
+			default:
 			}
 		})
 	}
@@ -131,7 +117,7 @@ func TestExactOnlyBashDoesNotPromptInAutoOrApprovedPlan(t *testing.T) {
 	}
 }
 
-func TestDynamicBashPendingApprovalOnlyYoloCanDrain(t *testing.T) {
+func TestPermissionModeChangeDoesNotAutoApprovePendingRequest(t *testing.T) {
 	approvals := make(chan event.Approval, 1)
 	c := New(Options{Sink: event.FuncSink(func(e event.Event) {
 		if e.Kind == event.ApprovalRequest {
@@ -144,20 +130,17 @@ func TestDynamicBashPendingApprovalOnlyYoloCanDrain(t *testing.T) {
 	case <-time.After(30 * time.Second):
 		t.Fatal("dynamic Bash approval prompt was not emitted")
 	}
-	c.SetToolApprovalMode(ToolApprovalAuto)
+	c.SetToolApprovalMode(ToolApprovalWorkspaceWrite)
 	assertDynamicApprovalPending(t, done)
-	c.SetToolApprovalMode(ToolApprovalYolo)
-	select {
-	case got := <-done:
-		if got.err != nil || !got.allow {
-			t.Fatalf("YOLO-drained approval = %+v, want allow", got)
-		}
-	case <-time.After(30 * time.Second):
-		t.Fatal("YOLO did not drain dynamic Bash approval")
+	c.SetToolApprovalMode(ToolApprovalDangerFullAccess)
+	assertDynamicApprovalPending(t, done)
+	c.Approve("1", false, false, false)
+	if got := <-done; got.err != nil || got.allow {
+		t.Fatalf("explicit denial after mode changes = %+v, want deny", got)
 	}
 }
 
-func TestDynamicBashExactSessionAndPersistentGrants(t *testing.T) {
+func TestDynamicBashExactSessionGrantIsNotPersisted(t *testing.T) {
 	approvals := make(chan event.Approval, 2)
 	remembered := make(chan string, 1)
 	c := New(Options{
@@ -174,15 +157,10 @@ func TestDynamicBashExactSessionAndPersistentGrants(t *testing.T) {
 
 	done := requestDynamicBashApproval(c)
 	approval := <-approvals
-	c.Approve(approval.ID, true, true, true)
+	c.Approve(approval.ID, true, true, false)
 	if got := <-done; got.err != nil || !got.allow {
 		t.Fatalf("initial approval = %+v, want allow", got)
 	}
-	wantRule := "Bash=" + dynamicBashCommand
-	if got := <-remembered; got != wantRule {
-		t.Fatalf("remembered rule = %q, want %q", got, wantRule)
-	}
-
 	allow, _, err := gateApprover{c}.Approve(context.Background(), "bash", dynamicBashCommand, nil)
 	if err != nil || !allow {
 		t.Fatalf("exact session grant = (%v,%v), want allow", allow, err)
@@ -191,6 +169,11 @@ func TestDynamicBashExactSessionAndPersistentGrants(t *testing.T) {
 	case approval := <-approvals:
 		t.Fatalf("exact session grant unexpectedly prompted: %+v", approval)
 	case <-time.After(50 * time.Millisecond):
+	}
+	select {
+	case got := <-remembered:
+		t.Fatalf("session grant was persisted as %q", got)
+	default:
 	}
 
 	old := c.SessionAuthorizations()
@@ -202,15 +185,17 @@ func TestDynamicBashExactSessionAndPersistentGrants(t *testing.T) {
 	}
 }
 
-func TestDynamicBashHookAllowCannotReplaceHumanButDenyStillApplies(t *testing.T) {
+func TestDynamicBashHookDecisionAppliesWithoutSyntaxSpecialCase(t *testing.T) {
 	allowJSON := `{"hookSpecificOutput":{"hookEventName":"PermissionRequest","decision":{"behavior":"allow"}}}`
 	c, ids := wildcardClaudePermissionHookController(t, 0, allowJSON)
 	done := requestDynamicBashApproval(c)
-	id := waitApprovalID(t, ids)
-	assertDynamicApprovalPending(t, done)
-	c.Approve(id, true, false, false)
 	if got := <-done; got.err != nil || !got.allow {
-		t.Fatalf("manual approval after hook allow = %+v, want allow", got)
+		t.Fatalf("hook allow = %+v, want allow", got)
+	}
+	select {
+	case id := <-ids:
+		t.Fatalf("hook allow unexpectedly emitted approval %s", id)
+	default:
 	}
 
 	c, ids = wildcardClaudePermissionHookController(t, 2, "")
@@ -260,7 +245,7 @@ func TestHeadlessDynamicBashApprovalModes(t *testing.T) {
 		want bool
 	}{
 		{mode: ToolApprovalAsk},
-		{mode: ToolApprovalAuto},
+		{mode: ToolApprovalAuto, want: true},
 		{mode: ToolApprovalDontAsk},
 		{mode: ToolApprovalYolo, want: true},
 	} {
@@ -269,8 +254,8 @@ func TestHeadlessDynamicBashApprovalModes(t *testing.T) {
 			if err != nil || allow != tt.want {
 				t.Fatalf("headless %s = (%v,%q,%v), want allow=%v", tt.mode, allow, reason, err, tt.want)
 			}
-			if !tt.want && !strings.Contains(reason, "requires human approval") {
-				t.Fatalf("headless %s reason = %q", tt.mode, reason)
+			if !tt.want && strings.TrimSpace(reason) == "" {
+				t.Fatalf("headless %s returned no denial reason", tt.mode)
 			}
 		})
 	}

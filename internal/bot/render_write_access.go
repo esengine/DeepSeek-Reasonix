@@ -16,7 +16,6 @@ func writeAccessKeyboard(id string) *InlineKeyboard {
 		Buttons: []InlineKeyboardButton{
 			{ID: "allow_once", Label: "允许一次", Style: 1, CallbackID: "/approve " + id},
 			{ID: "allow_session", Label: "本会话允许", Style: 0, CallbackID: "/approve-session " + id},
-			{ID: "allow_project", Label: "加入项目", Style: 0, CallbackID: "/approve-project " + id},
 			{ID: "deny", Label: "拒绝", Style: 2, CallbackID: "/deny " + id},
 		},
 	}}}
@@ -31,7 +30,6 @@ func writeAccessCard(a event.Approval, chatType ChatType, userID string) *Intera
 				"actions": []map[string]any{
 					{"tag": "button", "text": map[string]string{"tag": "plain_text", "content": "允许一次"}, "type": "primary", "value": cardActionValue("/approve "+a.ID, chatType, userID)},
 					{"tag": "button", "text": map[string]string{"tag": "plain_text", "content": "本会话允许"}, "type": "default", "value": cardActionValue("/approve-session "+a.ID, chatType, userID)},
-					{"tag": "button", "text": map[string]string{"tag": "plain_text", "content": "加入项目"}, "type": "default", "value": cardActionValue("/approve-project "+a.ID, chatType, userID)},
 					{"tag": "button", "text": map[string]string{"tag": "plain_text", "content": "拒绝"}, "type": "danger", "value": cardActionValue("/deny "+a.ID, chatType, userID)},
 				},
 			}},
@@ -61,6 +59,6 @@ func renderWriteAccessText(a event.Approval) string {
 			b.WriteString("此选择也会授权当前匹配操作。\n")
 		}
 	}
-	fmt.Fprintf(&b, "\nID: `%s`\n回复 1 允许一次，2 本会话允许，3 加入项目，4 拒绝。", a.ID)
+	fmt.Fprintf(&b, "\nID: `%s`\n回复 1 允许一次，2 本会话允许，3 拒绝。", a.ID)
 	return b.String()
 }

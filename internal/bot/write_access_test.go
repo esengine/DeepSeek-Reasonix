@@ -29,11 +29,7 @@ func TestGatewayNormalizesWriteAccessShortcuts(t *testing.T) {
 		t.Fatalf("write-access 2 = %q,%v; want /approve-session 7", got, ok)
 	}
 	got, ok = gw.normalizeApprovalShortcut(key, "3")
-	if !ok || got != "/approve-project 7" {
-		t.Fatalf("write-access 3 = %q,%v; want /approve-project 7", got, ok)
-	}
-	got, ok = gw.normalizeApprovalShortcut(key, "4")
 	if !ok || got != "/deny 7" {
-		t.Fatalf("write-access 4 = %q,%v; want /deny 7", got, ok)
+		t.Fatalf("write-access 3 = %q,%v; want /deny 7", got, ok)
 	}
 }

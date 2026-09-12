@@ -1,0 +1,206 @@
+/* Ported from DeepSeek Harness c291e7961a (MIT). */
+.dsh-TerminalBlock-block {
+  --dsl-terminal-radius: 12px;
+  --dsl-terminal-line-height: 22px;
+  /* Rebindable by consumers (CodeBlock's --dsl-code-block-content-font
+     pattern): a surface wanting the smaller code size rebinds this together
+     with --dsl-terminal-line-height on its own container. */
+  --dsl-terminal-font: var(--dsw-font-markdown-code-block);
+  /* The card's own left inset, holding the run-state dot in a column of its own
+     so it never competes with the commands for horizontal space. */
+  --dsl-terminal-gutter: 30px;
+
+  position: relative;
+  margin: 16px 0;
+  /* The gutter is the card's OWN padding, not a margin: every consumer rewrites
+     `margin` wholesale (each render site sets its own indent), which silently
+     cancelled the reservation and let the dot fall outside the card into a
+     container that clips it. Owning the reservation here keeps the invariant
+     with the component that depends on it. */
+  padding-left: var(--dsl-terminal-gutter);
+  color: var(--dsw-alias-label-primary);
+  background: var(--dsw-alias-markdown-code-block);
+  border-radius: var(--dsl-terminal-radius);
+  /* Clip the banner to the card's own radius: when a consumer adds a border,
+     the banner's equal corner radius no longer nests inside it and leaves a
+     notch at the corner. Nothing inside renders out of the box. */
+  overflow: hidden;
+}
+
+/* The status pill and copy control top-align to the FIRST prompt row (their
+   heights are capped to the prompt line, so on a multi-line command they sit
+   with the first command instead of floating mid-banner). */
+.dsh-TerminalBlock-header {
+  display: flex;
+  align-items: flex-start;
+  gap: 12px;
+  /* Pulled back across the card's gutter padding so the banner spans the FULL
+     surface, then re-inset by the same amount so the prompt text and the dot
+     keep their positions. The banner shares the card's own surface (no banner
+     token): the l2 divider below is the section boundary. */
+  margin-left: calc(-1 * var(--dsl-terminal-gutter));
+  padding: 9px 14px 9px var(--dsl-terminal-gutter);
+  border-top-left-radius: var(--dsl-terminal-radius);
+  border-top-right-radius: var(--dsl-terminal-radius);
+  /* A long multi-line command scrolls inside the banner (same cap as the
+     IN/OUT card's sections) instead of pushing the output off screen. */
+  max-height: 150px;
+  overflow-y: auto;
+}
+
+/* Banner scrollbar floats off the card edge like the output's. */
+.dsh-TerminalBlock-header::-webkit-scrollbar-thumb {
+  border: 2px solid transparent;
+  background-clip: padding-box;
+  border-radius: 6px;
+}
+
+.dsh-TerminalBlock-header::-webkit-scrollbar-track {
+  margin: 6px;
+}
+
+/* Full-width l2 hairline between the command banner and the body — the same
+   divider the IN/OUT card draws between its sections. A running card is
+   banner-only, so it draws none. */
+.dsh-TerminalBlock-block:not([data-running]) .dsh-TerminalBlock-header {
+  border-bottom: 0.5px solid var(--dsw-alias-border-l2);
+}
+
+/* One row per command line. The prompt column is the only element allowed to
+   shrink; the status pill and the copy control keep their intrinsic width. */
+.dsh-TerminalBlock-prompt {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  flex: 1;
+  font: var(--dsl-terminal-font);
+}
+
+.dsh-TerminalBlock-promptLine {
+  position: relative;
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  min-width: 0;
+  line-height: var(--dsl-terminal-line-height);
+}
+
+/* Out of flow inside the card's own gutter padding, so the reservation and the
+   dot move together and no consumer margin can pull them apart; the dot neither
+   indents its command nor depends on the command's text metrics to line up.
+   Centered against the row's line box, not the code font's baseline. */
+.dsh-TerminalBlock-runState {
+  position: absolute;
+  left: calc(-1 * var(--dsl-terminal-gutter) + 8px);
+  top: 50%;
+  transform: translateY(-50%);
+}
+
+/* The dot is aria-hidden; this is its text label for assistive technology. */
+.dsh-TerminalBlock-runStateLabel {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip-path: inset(50%);
+  white-space: nowrap;
+}
+
+.dsh-TerminalBlock-cwd {
+  flex: none;
+  color: var(--dsw-alias-label-tertiary);
+}
+
+/* `pre`, not `nowrap`: the prompt row renders the command verbatim, and
+   `nowrap` collapses the repeated spaces, tabs, and alignment of an indented
+   continuation. Both hold the single row and the ellipsis. */
+.dsh-TerminalBlock-command {
+  min-width: 0;
+  color: var(--dsw-alias-label-primary);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: pre;
+}
+
+/* Capped to the prompt's line height (Pill's own 24px height would exceed a
+   smaller-font prompt row and stretch the banner). Sticky against the
+   banner's own scroll so the pill and the copy control stay in reach while a
+   long command scrolls underneath. */
+.dsh-TerminalBlock-status {
+  flex: none;
+  position: sticky;
+  top: 0;
+  height: var(--dsl-terminal-line-height);
+  color: var(--dsw-alias-state-error-primary);
+}
+
+.dsh-TerminalBlock-copyButton {
+  flex: none;
+  position: sticky;
+  top: 0;
+  /* Card surface, not transparent: the control is sticky over the banner's
+     own scroll, so scrolled command text must not bleed through it. */
+  background-color: var(--dsw-alias-markdown-code-block);
+  border: none;
+  padding: 0;
+  margin: 0;
+  color: var(--dsw-alias-label-secondary);
+  cursor: pointer;
+  font: var(--dsw-font-xs-13);
+  line-height: var(--dsl-terminal-line-height);
+}
+
+/* Vertical scrolling lives on the OUTPUT, not the card root: a root scroller
+   would run its scrollbar over the banner (and the copy control), while here
+   the banner stays pinned and the bar sits inside the output's right padding.
+   Unset, the max-height is none and the auto overflow never engages. */
+.dsh-TerminalBlock-output {
+  max-height: var(--dsl-terminal-output-max-height, none);
+  padding: 12px 14px 12px 0;
+  font: var(--dsl-terminal-font);
+  overflow-x: auto;
+  overflow-y: auto;
+}
+
+/* Both output scrollbars (vertical cap, horizontal pre overflow) float 2px
+   off the card edge: a transparent border clips the thumb inward so it never
+   hugs the rounded corner. */
+.dsh-TerminalBlock-output::-webkit-scrollbar-thumb {
+  border: 2px solid transparent;
+  background-clip: padding-box;
+  border-radius: 6px;
+}
+
+/* Track end-margins keep the thumb's travel out of the card's rounded
+   corners in both directions. */
+.dsh-TerminalBlock-output::-webkit-scrollbar-track {
+  margin: 6px;
+}
+
+/* No wrapping, no word-break: alignment is the payload of terminal output. */
+.dsh-TerminalBlock-line {
+  min-height: var(--dsl-terminal-line-height);
+  white-space: pre;
+}
+
+.dsh-TerminalBlock-expand {
+  display: block;
+  width: 100%;
+  padding: 0;
+  border: none;
+  background-color: transparent;
+  color: var(--dsw-alias-label-tertiary);
+  cursor: pointer;
+  font: inherit;
+  text-align: left;
+}
+
+.dsh-TerminalBlock-expand:hover {
+  color: var(--dsw-alias-label-secondary);
+}
+
+.dsh-TerminalBlock-empty {
+  padding: 12px 14px 12px 0;
+  font: var(--dsl-terminal-font);
+  color: var(--dsw-alias-label-tertiary);
+}

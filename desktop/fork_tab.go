@@ -95,15 +95,10 @@ func (a *App) forkForTabWithOptions(tabID string, turn int, isolateWorkspace boo
 		}
 	}
 
-	if _, ok := ctrl.SessionHead(); ok && !result.Isolated {
-		// A schema-2 log forks into a new head of the same log and the source
-		// tab moves onto it; the previous chain stays selectable as a version.
-		if _, err := ctrl.ForkNamed(turn, ""); err != nil {
-			return ForkWorktreeResultView{}, err
-		}
-		result.Tab = a.tabMetaAfterHeadSwitch(sourceTab)
-		return result, nil
-	}
+	// Chat forks always become independent sessions so the source remains in
+	// the sidebar and the child can be addressed, renamed, and reopened on its
+	// own. This also applies to schema-2 transcripts; in-log heads remain an
+	// implementation detail for recovery and rewind operations.
 	newPath, err := ctrl.ForkSession(turn, "")
 	if err != nil {
 		return ForkWorktreeResultView{}, a.rollbackUnusedForkWorktree(created, err)

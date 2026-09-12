@@ -199,7 +199,7 @@ func (f *fakeTerminal) RunCommand(_ context.Context, command, _ string, _ time.D
 func TestBashRoutesToClientTerminal(t *testing.T) {
 	term := &fakeTerminal{out: "client says hi", ok: true}
 	b := bash{workDir: t.TempDir(), terminal: term}
-	out, err := b.Execute(context.Background(), json.RawMessage(`{"command":"echo hi"}`))
+	out, err := b.Execute(fullAccessBashTestContext(t.Context()), json.RawMessage(`{"command":"echo hi"}`))
 	if err != nil || out != "client says hi" {
 		t.Fatalf("Execute = %q, %v", out, err)
 	}
@@ -211,7 +211,7 @@ func TestBashRoutesToClientTerminal(t *testing.T) {
 func TestBashTerminalFallsBackWhenUnhandled(t *testing.T) {
 	term := &fakeTerminal{ok: false}
 	b := bash{workDir: t.TempDir(), terminal: term}
-	out, err := b.Execute(context.Background(), json.RawMessage(`{"command":"printf local"}`))
+	out, err := b.Execute(fullAccessBashTestContext(t.Context()), json.RawMessage(`{"command":"printf local"}`))
 	if err != nil || !strings.Contains(out, "local") {
 		t.Fatalf("unhandled terminal must fall back to local execution; got %q, %v", out, err)
 	}
@@ -235,7 +235,7 @@ func TestBashTerminalSkippedWhenEnvFilteringEnabled(t *testing.T) {
 	b := bash{workDir: t.TempDir(), terminal: term}
 	// The client terminal spawns with its own unfiltered environment, so an
 	// enabled [secrets].filter_subprocess_env must force local execution.
-	out, err := b.Execute(context.Background(), json.RawMessage(`{"command":"printf local"}`))
+	out, err := b.Execute(fullAccessBashTestContext(t.Context()), json.RawMessage(`{"command":"printf local"}`))
 	if err != nil || !strings.Contains(out, "local") {
 		t.Fatalf("env filtering must fall back to local execution; got %q, %v", out, err)
 	}

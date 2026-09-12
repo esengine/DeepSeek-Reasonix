@@ -10,6 +10,8 @@ import type {
 import {
   ChevronDown,
   ChevronRight,
+  Code2,
+  Eye,
   FileText,
   FolderTree,
   FolderX,
@@ -82,6 +84,7 @@ import { Tooltip } from "./Tooltip";
 import { AnchoredPopover } from "./AnchoredPopover";
 import { MarkdownImageTabContext } from "./MarkdownImageContext";
 import { WorkspaceMediaPreview } from "./WorkspaceMediaPreview";
+import { WorkspaceCsvPreview } from "./WorkspaceCsvPreview";
 import { buildWorkspacePathBreadcrumbs, WorkspacePathBreadcrumbs } from "./WorkspacePathBreadcrumbs";
 import { WorkspaceTreeRow, type WorkspaceTreeRowData } from "./WorkspaceTreeRow";
 import { WorkspaceTreeMenu } from "./WorkspaceTreeMenu";
@@ -103,7 +106,20 @@ const WORKSPACE_DUAL_PANEL_TARGET_WIDTH = WORKSPACE_TREE_DEFAULT_WIDTH + WORKSPA
 const WORKSPACE_CONTEXT_MENU_SELECTION_HEIGHT = 48;
 const WORKSPACE_MAX_PREVIEW_TABS = 5;
 
-type WorkspaceRevealRequest = { id: number; path: string };
+function isAbsoluteDisplayPath(path: string): boolean {
+  return path.startsWith("/") || path.startsWith("\\\\") || /^[A-Za-z]:[\\/]/.test(path);
+}
+
+function formatWorkspaceSource(path: string, body: string): string {
+  if (!/\.json$/i.test(path)) return body;
+  try {
+    return JSON.stringify(JSON.parse(body), null, 2);
+  } catch {
+    return body;
+  }
+}
+
+type WorkspaceRevealRequest = { id: number; path: string; toolCallId?: string; source?: boolean; action?: "preview" | "reveal-tree" | "source" };
 export { WORKSPACE_TURN_VERIFICATION_ID } from "./WorkspaceTurnVerification";
 export type WorkspaceVerificationRevealRequest = { id: number; summary: WireCompletionSummary; tabId: string; turnStartAt: number; currentSummary?: WireCompletionSummary; sessionPath?: string; view?: "changes" | "checks" };
 type WorkspaceFileListRequest = { id: number; paths: string[] };
@@ -230,6 +246,16 @@ export function WorkspacePanel({
     (initialWorkspaceMemory?.recentPaths ?? []).slice(0, WORKSPACE_MAX_PREVIEW_TABS),
   );
   const [previewResource, setPreviewResource] = useState(() => emptyKeyedResource<FilePreview>());
+  const [presentedTextTail, setPresentedTextTail] = useState<{
+    key: string;
+    version: string;
+    body: string;
+    nextOffset: number;
+    hasMore: boolean;
+    loading: boolean;
+    error?: string;
+  } | null>(null);
+  const [sourcePaths, setSourcePaths] = useState<Set<string>>(() => new Set());
   const [viewMode, setViewMode] = useState<"files" | "changed">(initialViewMode);
   const selectedPath = viewMode === "changed" ? selectedChangePath : selectedFilePath;
   // Both creation and regular workspaces use the same three-layer change view;
@@ -257,6 +283,7 @@ export function WorkspacePanel({
   const [recentOpen, setRecentOpen] = useState(false);
   const [codeSearchRequestPending, setCodeSearchRequestPending] = useState(false);
   const [codeSearchRequestPath, setCodeSearchRequestPath] = useState<string | null>(null);
+  const [presentedFileStale, setPresentedFileStale] = useState(false);
   /** Changes overview: commit history is secondary and starts collapsed. */
   const [commitHistoryOpen, setCommitHistoryOpen] = useState(false);
   const lastPreviewModeActiveRef = useRef<boolean | null>(null);
@@ -274,6 +301,7 @@ export function WorkspacePanel({
   const changeDetailRequestIdRef = useRef(0);
   const gitHistoryRequestIdRef = useRef(0);
   const previewRequestIdRef = useRef(0);
+  const textPageRequestIdRef = useRef(0);
   const commitDetailRequestIdRef = useRef(0);
   const dirLoadGenerationRef = useRef(0);
   const dirLoadRequestIdsRef = useRef<Record<string, number>>({});
@@ -281,6 +309,7 @@ export function WorkspacePanel({
   const recentAnchorRef = useRef<HTMLButtonElement>(null);
   const openDirsRef = useRef(openDirs);
   const pendingTreeRevealPathRef = useRef<string | null>(null);
+  const presentedToolCallByPathRef = useRef(new Map<string, string>());
   const lastRestoredMemoryKeyRef = useRef(workspaceMemoryKey);
   const memoryRestorePendingRef = useRef(false);
   const workingTreeRefreshSchedulerRef = useRef<ReturnType<typeof createWorkspaceRefreshScheduler> | null>(null);
@@ -292,12 +321,33 @@ export function WorkspacePanel({
     gitMetaRefreshSchedulerRef.current = createWorkspaceRefreshScheduler(750);
   }
   currentWorkspaceScopeKeyRef.current = workspaceScopeKey;
-  const previewKey = selectedPath ? `${workspaceScopeKey}\u0000preview\u0000${selectedPath}` : null;
+  const selectedPresentedToolCallId = selectedPath ? presentedToolCallByPathRef.current.get(selectedPath) : undefined;
+  const sourceOverride = selectedPath ? sourcePaths.has(selectedPath) : false;
+  const previewKey = selectedPath ? `${workspaceScopeKey}\u0000preview\u0000${sourceOverride ? "source" : "preview"}\u0000${selectedPresentedToolCallId ?? ""}\u0000${selectedPath}` : null;
   const changeDetailKey = selectedPath ? `${workspaceScopeKey}\u0000change\u0000${selectedPath}` : null;
   const gitHistoryKey = `${workspaceScopeKey}\u0000history\u0000${selectedPath ?? ""}`;
   const preview = previewKey && previewResource.key === previewKey ? previewResource.data : null;
   const loadingPreview = previewKey != null && previewResource.key === previewKey && previewResource.status === "refreshing";
   const previewErr = previewKey && previewResource.key === previewKey ? previewResource.error : "";
+  const activePresentedTextTail = previewKey && preview?.version && presentedTextTail?.key === previewKey && presentedTextTail.version === preview.version
+    ? presentedTextTail
+    : null;
+  const previewBody = preview ? preview.body + (activePresentedTextTail?.body ?? "") : "";
+  const presentedTextPaginationAvailable = Boolean(
+    selectedPresentedToolCallId && preview?.version && (activePresentedTextTail?.nextOffset ?? preview?.nextOffset ?? 0) > 0,
+  );
+
+  useEffect(() => {
+    const resourceURL = preview?.url;
+    return () => {
+      if (resourceURL) void app.RevokeWorkspaceMediaPreview(resourceURL);
+    };
+  }, [preview?.url]);
+
+  useEffect(() => {
+    textPageRequestIdRef.current++;
+    setPresentedTextTail(null);
+  }, [previewKey, preview?.version]);
   const changeDetail = changeDetailKey && changeDetailResource.key === changeDetailKey ? changeDetailResource.data : null;
   const loadingChangeDetail = changeDetailKey != null && changeDetailResource.key === changeDetailKey && changeDetailResource.status === "refreshing";
   const changeDetailErr = changeDetailKey && changeDetailResource.key === changeDetailKey ? changeDetailResource.error : "";
@@ -486,7 +536,7 @@ export function WorkspacePanel({
   }, [expandedCommit, selectedPath, open, workspaceScopeKey, workspaceTabId]);
 
   const selectFile = useCallback(
-    (path: string, targetMode: "files" | "changed" = viewMode) => {
+    (path: string, targetMode: "files" | "changed" = viewMode, presentedToolCallId?: string) => {
       const initializeSplit = shouldInitializeWorkspaceSplitOnFileSelect({
         previewVisible: openTabs.length > 0 || selectedPath !== null,
         treeVisible,
@@ -505,6 +555,8 @@ export function WorkspacePanel({
         setTreeWidthMode("even");
       }
       pendingTreeRevealPathRef.current = path;
+      if (presentedToolCallId) presentedToolCallByPathRef.current.set(path, presentedToolCallId);
+      else if (!presentedToolCallByPathRef.current.has(path)) presentedToolCallByPathRef.current.delete(path);
       if (targetMode === "changed") setSelectedChangePath(path);
       else setSelectedFilePath(path);
       setScopedFilePaths((current) => {
@@ -518,7 +570,7 @@ export function WorkspacePanel({
       setFilter("");
       setOpenTabs((tabs) => [...tabs.filter((tab) => tab !== path), path].slice(-WORKSPACE_MAX_PREVIEW_TABS));
       setRecentPaths((paths) => [...paths.filter((p) => p !== path), path].slice(-WORKSPACE_MAX_PREVIEW_TABS));
-      const dirs = parentDirs(path);
+      const dirs = isAbsoluteDisplayPath(path) ? [] : parentDirs(path);
       updateOpenDirs((prev) => new Set([...Array.from(prev), ...dirs]));
       dirs.forEach((dir) => void loadDir(dir));
     },
@@ -543,6 +595,8 @@ export function WorkspacePanel({
     setFilter(readWorkspaceTreeMemory(workspaceMemoryKey)?.filter ?? "");
     setScopedFilePaths(null);
     setScopedChangeRows(null);
+    setSourcePaths(new Set());
+    presentedToolCallByPathRef.current.clear();
     setTreeVisible(true);
     void loadDir("");
   }, [cwd, loadDir, open, workspaceMemoryKey]);
@@ -702,12 +756,21 @@ export function WorkspacePanel({
     lastRevealRequestIdRef.current = revealPathRequest.id;
     dismissedRevealRequestIdRef.current = null;
     setViewMode("files");
-    setTreeVisible(true);
+    if (revealPathRequest.action === "reveal-tree") setTreeVisible(true);
     setScopedFilePaths(null);
     setScopedChangeRows(null);
     setExpandedCommit(null);
     setCommitDetail(null);
-    selectFile(revealPathRequest.path, "files");
+    selectFile(revealPathRequest.path, "files", revealPathRequest.toolCallId);
+    setSourcePaths((current) => {
+      const next = new Set(current);
+      if (revealPathRequest.source) next.add(revealPathRequest.path);
+      else next.delete(revealPathRequest.path);
+      return next;
+    });
+    if (revealPathRequest.toolCallId && isAbsoluteDisplayPath(revealPathRequest.path)) {
+      setScopedFilePaths([revealPathRequest.path]);
+    }
   }, [open, revealPathRequest, selectFile, selectedPath, viewMode]);
 
   useEffect(() => {
@@ -825,14 +888,21 @@ export function WorkspacePanel({
 
   const refreshSelected = useCallback(() => {
     if (!selectedPath) return;
+    setPresentedFileStale(false);
     const requestId = ++previewRequestIdRef.current;
     const requestScopeKey = workspaceScopeKey;
     const requestPath = selectedPath;
-    const requestKey = `${requestScopeKey}\u0000preview\u0000${requestPath}`;
+    const presentedToolCallId = presentedToolCallByPathRef.current.get(requestPath);
+    const forceSource = sourcePaths.has(requestPath);
+    const requestKey = `${requestScopeKey}\u0000preview\u0000${forceSource ? "source" : "preview"}\u0000${presentedToolCallId ?? ""}\u0000${requestPath}`;
     let live = true;
     setPreviewResource((current) => beginKeyedResourceRequest(current, requestKey, requestId, workspaceRefresh.revisions.content));
-    app
-      .ReadFileForTab(workspaceTabId, requestPath)
+    const read = presentedToolCallId
+      ? forceSource
+        ? app.ReadPresentedFileSourceForTab(workspaceTabId, presentedToolCallId, requestPath)
+        : app.ReadPresentedFileForTab(workspaceTabId, presentedToolCallId, requestPath)
+      : app.ReadFileForTab(workspaceTabId, requestPath);
+    read
       .then((next) => {
         if (live && previewRequestIdRef.current === requestId && currentWorkspaceScopeKeyRef.current === requestScopeKey) {
           setPreviewResource((current) => resolveKeyedResourceRequest(current, requestKey, requestId, next, workspaceRefresh.revisions.content));
@@ -846,7 +916,54 @@ export function WorkspacePanel({
     return () => {
       live = false;
     };
-  }, [selectedPath, workspaceRefresh.revisions.content, workspaceScopeKey, workspaceTabId]);
+  }, [selectedPath, sourcePaths, workspaceRefresh.revisions.content, workspaceScopeKey, workspaceTabId]);
+
+  const loadMorePresentedText = useCallback(async () => {
+    if (!previewKey || !preview || !selectedPath || !selectedPresentedToolCallId || !preview.version) return;
+    const prior = activePresentedTextTail;
+    const offset = prior?.nextOffset ?? preview.nextOffset ?? 0;
+    if (offset <= 0 || prior?.hasMore === false) return;
+    const requestId = ++textPageRequestIdRef.current;
+    const requestScopeKey = workspaceScopeKey;
+    const version = preview.version;
+    setPresentedTextTail({
+      key: previewKey,
+      version,
+      body: prior?.body ?? "",
+      nextOffset: offset,
+      hasMore: prior?.hasMore ?? true,
+      loading: true,
+    });
+    try {
+      const page = await app.ReadPresentedTextPageForTab(
+        workspaceTabId,
+        selectedPresentedToolCallId,
+        selectedPath,
+        offset,
+        version,
+      );
+      if (textPageRequestIdRef.current !== requestId || currentWorkspaceScopeKeyRef.current !== requestScopeKey) return;
+      setPresentedTextTail({
+        key: previewKey,
+        version,
+        body: (prior?.body ?? "") + page.body,
+        nextOffset: page.nextOffset,
+        hasMore: page.hasMore,
+        loading: false,
+      });
+    } catch (err) {
+      if (textPageRequestIdRef.current !== requestId || currentWorkspaceScopeKeyRef.current !== requestScopeKey) return;
+      setPresentedTextTail({
+        key: previewKey,
+        version,
+        body: prior?.body ?? "",
+        nextOffset: offset,
+        hasMore: true,
+        loading: false,
+        error: String((err as Error)?.message ?? err),
+      });
+    }
+  }, [activePresentedTextTail, preview, previewKey, selectedPath, selectedPresentedToolCallId, workspaceScopeKey, workspaceTabId]);
 
   useEffect(() => {
     if (!open || !selectedPath) return;
@@ -854,6 +971,7 @@ export function WorkspacePanel({
   }, [open, refreshSelected, selectedPath]);
 
   useWorkspaceRefreshInvalidation({ commitHistoryOpen,
+    deferSelectedRefresh: Boolean(selectedPresentedToolCallId),
     filter,
     gitMetaSchedulerRef: gitMetaRefreshSchedulerRef,
     loadChangeDetail,
@@ -863,6 +981,7 @@ export function WorkspacePanel({
     open,
     openDirsRef,
     refreshSelected,
+    onSelectedInvalidated: () => setPresentedFileStale(true),
     selectedPath,
     setSearchResults,
     viewMode,
@@ -1168,7 +1287,16 @@ export function WorkspacePanel({
     });
   }, [compactProbeKey, loadDir, open]);
 
-  const searchPlaceholder = t(scopedFilePaths ? "workspace.filterReferencedFiles" : changedMode ? "workspace.filterChanges" : "workspace.filter");
+  const externalFileScope = scopedFilePaths?.some(isAbsoluteDisplayPath) ?? false;
+  const searchPlaceholder = t(
+    scopedFilePaths
+      ? externalFileScope
+        ? "workspace.filterExternalFiles"
+        : "workspace.filterReferencedFiles"
+      : changedMode
+        ? "workspace.filterChanges"
+        : "workspace.filter",
+  );
 
   const filePreviewActive = openTabs.length > 0 || selectedPath !== null;
   const changeDetailActive = changedMode && expandedCommit !== null;
@@ -1281,6 +1409,18 @@ export function WorkspacePanel({
     setRecentOpen(false);
     setTreeVisible(true);
   }, [changeRevealRequest, openTabs, revealPathRequest, selectedFilePath, viewMode]);
+
+  const closePreviewTab = useCallback((path: string) => {
+    setOpenTabs((tabs) => {
+      const next = tabs.filter((tab) => tab !== path);
+      if (selectedFilePath === path) setSelectedFilePath(next.length ? next[next.length - 1] : null);
+      return next;
+    });
+    if (selectedFilePath === path) {
+      setPreviewResource(emptyKeyedResource());
+      setPresentedFileStale(false);
+    }
+  }, [selectedFilePath]);
 
   const setSavedTreeWidth = useCallback(
     (width: number) => {
@@ -1469,6 +1609,12 @@ export function WorkspacePanel({
   };
 
   const isMarkdown = selectedPath?.toLowerCase().endsWith(".md") ?? false;
+  const isCSV = selectedPath ? /\.(?:csv|tsv)$/i.test(selectedPath) : false;
+  const canTogglePresentedSource = Boolean(
+    selectedPath && selectedPresentedToolCallId && /\.(?:html?|md|markdown|csv|tsv)$/i.test(selectedPath),
+  );
+  const renderedAsMarkdown = isMarkdown && !sourceOverride;
+  const renderedAsCSV = isCSV && !sourceOverride;
   const codePreviewActive = Boolean(
     selectedPath &&
       !changedMode &&
@@ -1478,7 +1624,8 @@ export function WorkspacePanel({
       !preview.err &&
       !preview.kind &&
       !preview.binary &&
-      !isMarkdown,
+      !renderedAsMarkdown &&
+      !renderedAsCSV,
   );
   // The preview body must keep its flex-column layout while a code file is
   // loading. Switching it to the padded block layout mid-load and back again
@@ -1486,7 +1633,8 @@ export function WorkspacePanel({
   const codePreviewLayoutActive = Boolean(
     selectedFilePath &&
       !changedMode &&
-      !isMarkdown &&
+      !renderedAsMarkdown &&
+      !renderedAsCSV &&
       !previewErr &&
       !preview?.err &&
       !preview?.kind &&
@@ -1555,6 +1703,36 @@ export function WorkspacePanel({
           </div>
 
           <div className="workspace-preview__window-actions">
+            {canTogglePresentedSource && selectedPath && (
+              <>
+                <Tooltip label={t("workspace.previewMode")}>
+                  <button
+                    className={`workspace-iconbtn${sourceOverride ? "" : " workspace-iconbtn--on"}`}
+                    type="button"
+                    aria-label={t("workspace.previewMode")}
+                    aria-pressed={!sourceOverride}
+                    onClick={() => setSourcePaths((current) => {
+                      const next = new Set(current);
+                      next.delete(selectedPath);
+                      return next;
+                    })}
+                  >
+                    <Eye size={15} />
+                  </button>
+                </Tooltip>
+                <Tooltip label={t("workspace.sourceMode")}>
+                  <button
+                    className={`workspace-iconbtn${sourceOverride ? " workspace-iconbtn--on" : ""}`}
+                    type="button"
+                    aria-label={t("workspace.sourceMode")}
+                    aria-pressed={sourceOverride}
+                    onClick={() => setSourcePaths((current) => new Set(current).add(selectedPath))}
+                  >
+                    <Code2 size={15} />
+                  </button>
+                </Tooltip>
+              </>
+            )}
             {codePreviewActive && (
               <Tooltip label={t("workspace.searchPlaceholder")}>
                 <button
@@ -1625,6 +1803,19 @@ export function WorkspacePanel({
             </div>
           </AnchoredPopover>
         </header>
+        {!changedMode && openTabs.length > 1 && (
+          <nav className="workspace-document-tabs" aria-label={t("workspace.openFiles")}>
+            {openTabs.map((path) => (
+              <span key={path} className={`workspace-document-tab${selectedFilePath === path ? " is-active" : ""}`} title={path}>
+                <button type="button" onClick={() => selectFile(path, "files", presentedToolCallByPathRef.current.get(path))}>
+                  <FileText size={12} />
+                  <span>{basename(path)}</span>
+                </button>
+                <button type="button" aria-label={t("workspace.closePreview")} onClick={() => closePreviewTab(path)}><X size={11} /></button>
+              </span>
+            ))}
+          </nav>
+        )}
 
         <div
           className={`workspace-preview__body${codePreviewLayoutActive ? " workspace-preview__body--code" : ""}`}
@@ -1939,19 +2130,52 @@ export function WorkspacePanel({
               {/no such file|not found|enoent/i.test(previewErr || preview?.err || "") ? t("workspace.fileDeleted") : (previewErr || preview?.err)}
             </div>
           ) : preview?.kind ? (
-            <WorkspaceMediaPreview preview={preview} />
+            <>
+              {presentedFileStale && (
+                <div className="workspace-resource-status" role="status">
+                  <span>{t("workspace.fileUpdated")}</span>
+                  <button type="button" className="btn btn--small" onClick={() => void refreshSelected()}>{t("workspace.reload")}</button>
+                </div>
+              )}
+              {loadingPreview && <div className="workspace-resource-status" role="status">{t("workspace.loading")}</div>}
+              {previewErr && <div className="workspace-resource-status workspace-resource-status--error">{previewErr}</div>}
+              <WorkspaceMediaPreview preview={preview} />
+            </>
           ) : preview?.binary ? (
             <div className="workspace-empty">{t("workspace.binary")}</div>
           ) : preview ? (
             <>
+              {presentedFileStale && (
+                <div className="workspace-resource-status" role="status">
+                  <span>{t("workspace.fileUpdated")}</span>
+                  <button type="button" className="btn btn--small" onClick={() => void refreshSelected()}>{t("workspace.reload")}</button>
+                </div>
+              )}
               {loadingPreview && <div className="workspace-resource-status" role="status">{t("workspace.loading")}</div>}
               {previewErr && <div className="workspace-resource-status workspace-resource-status--error">{previewErr}</div>}
-              {preview.truncated && <div className="workspace-note">{t("workspace.truncated")}</div>}
-              {isMarkdown ? (
-                <Markdown text={preview.body} />
+              {preview.truncated && !presentedTextPaginationAvailable && <div className="workspace-note">{t("workspace.truncated")}</div>}
+              {presentedTextPaginationAvailable && (
+                <div className="workspace-note workspace-note--pagination">
+                  {activePresentedTextTail?.error && <span className="workspace-resource-status--error">{activePresentedTextTail.error}</span>}
+                  {(activePresentedTextTail?.hasMore ?? preview.truncated) ? (
+                    <button
+                      type="button"
+                      className="btn btn--small"
+                      disabled={activePresentedTextTail?.loading}
+                      onClick={() => void loadMorePresentedText()}
+                    >
+                      {activePresentedTextTail?.loading ? t("workspace.loading") : t("workspace.loadMore")}
+                    </button>
+                  ) : <span>{t("workspace.fullFileLoaded")}</span>}
+                </div>
+              )}
+              {renderedAsMarkdown ? (
+                <Markdown text={previewBody} />
+              ) : renderedAsCSV ? (
+                <WorkspaceCsvPreview body={previewBody} delimiter={/\.tsv$/i.test(selectedPath) ? "\t" : ","} />
               ) : (
                 <CodeViewer
-                  value={preview.body || " "}
+                  value={formatWorkspaceSource(selectedPath, previewBody) || " "}
                   language={languageFor(selectedPath)}
                   scrollMode="expand"
                   sourceSize={preview.size}
@@ -2061,7 +2285,9 @@ export function WorkspacePanel({
         </div>
         {scopedFilePaths && (
           <div className="workspace-files__scope">
-            <span className="workspace-files__scope-title">{t("context.referencedFiles")}</span>
+            <span className="workspace-files__scope-title">
+              {t(externalFileScope ? "workspace.externalFiles" : "context.referencedFiles")}
+            </span>
             <span className="workspace-files__scope-meta">{t("context.readMeta", { count: scopedFilePaths.length })}</span>
             <Tooltip label={t("workspace.clearFileScope")}>
               <button

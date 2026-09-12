@@ -292,13 +292,15 @@ var (
 
 // PromptAnswer is the transport-neutral union used by exact prompt resolve.
 type PromptAnswer struct {
-	Questions []event.AskAnswer
-	Allow     bool
-	Session   bool
-	Persist   bool
-	Action    string
-	Feedback  string
-	Content   map[string]any
+	Questions          []event.AskAnswer
+	Allow              bool
+	Session            bool
+	Persist            bool
+	Action             string
+	Feedback           string
+	Content            map[string]any
+	Generation         uint64
+	PermissionRevision uint64
 }
 
 // ResolvePromptExact is the single controller-owned decision boundary. The
@@ -339,6 +341,14 @@ func (c *Controller) ResolvePromptExact(identity PromptIdentity, answer PromptAn
 	}
 	if owned.RuntimeEpoch != identity.RuntimeEpoch {
 		return ErrPromptStaleRuntime
+	}
+	if identity.Kind == PromptApproval {
+		if answer.Generation != 0 && answer.Generation != c.runtimeGeneration {
+			return ErrPromptStaleRuntime
+		}
+		if answer.PermissionRevision != 0 && answer.PermissionRevision != c.permissionRevision.Load() {
+			return ErrPromptStaleRuntime
+		}
 	}
 	return c.promptOwner.Resolve(identity, answer)
 }

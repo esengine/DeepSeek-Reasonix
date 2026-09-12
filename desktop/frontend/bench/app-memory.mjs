@@ -97,15 +97,23 @@ async function enterSafety(page) {
   await page.evaluate(() => {
     const transcript = document.querySelector(".transcript");
     if (!(transcript instanceof HTMLElement)) throw new Error("transcript viewport missing");
+    window.__reasonixMemoryScrollWrites = [];
+    window.__REASONIX_TRANSCRIPT_SCROLL_WRITE__ = (write) => window.__reasonixMemoryScrollWrites.push(write);
     Object.defineProperty(transcript, "scrollHeight", { configurable: true, get: () => Number.NaN });
-    transcript.dispatchEvent(new Event("scroll"));
+    const probe = document.createElement("span");
+    probe.hidden = true;
+    probe.dataset.memoryScrollProbe = "true";
+    transcript.querySelector(".chat-column")?.append(probe);
   });
   await timings.measure("safety.ready", () => page.waitForFunction(() => (
-    document.querySelector(".transcript__projection")?.getAttribute("data-transcript-safe-fallback") === "true"
+    window.__reasonixMemoryScrollWrites?.some((write) => write.rejectedReason === "invalid-geometry")
   ), undefined, { timeout: 15_000, polling: "raf" }));
   await page.evaluate(() => {
     const transcript = document.querySelector(".transcript");
     if (transcript instanceof HTMLElement) delete transcript.scrollHeight;
+    transcript?.querySelector("[data-memory-scroll-probe]")?.remove();
+    delete window.__REASONIX_TRANSCRIPT_SCROLL_WRITE__;
+    delete window.__reasonixMemoryScrollWrites;
   });
   await settleFrames(page);
 }

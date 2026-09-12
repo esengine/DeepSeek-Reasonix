@@ -21,7 +21,7 @@ try {
   const status = await app.RemoteTabStatus(remote.id) as Record<string, unknown>;
   assert.equal(status.sessionPath, renewed.sessionPath);
   assert.equal(status.plan, false);
-  assert.equal(status.toolApprovalMode, "ask");
+  assert.equal(status.toolApprovalMode, "workspace-write");
   assert.equal(status.goal, "");
   assert.deepEqual((await app.RemoteTabSnapshot(remote.id)).status, status, "snapshot and status share the authoritative composer profile");
   await app.SetActiveTab(local.id);

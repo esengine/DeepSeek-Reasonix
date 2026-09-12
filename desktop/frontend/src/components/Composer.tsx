@@ -4,7 +4,7 @@ import { pendingFollowups, confirmFollowup, followupNotSubmitted, followupSessio
 import { useAppNavigationStore } from "../store/appNavigation";
 import { lazy, Suspense, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
 import type { CSSProperties, ClipboardEvent, DragEvent, KeyboardEvent, MouseEvent as ReactMouseEvent, PointerEvent as ReactPointerEvent } from "react";
-import { ArrowRight, ArrowUp, Brain, Check, CornerDownRight, Eye, FileText, Folder, Lightbulb, List, MessageSquare, Plus, Search, Shield, ShieldAlert, ShieldCheck, Square, Target, Trash2, X } from "lucide-react";
+import { ArrowRight, ArrowUp, Brain, Check, CornerDownRight, Eye, FileText, Folder, Lightbulb, List, MessageSquare, Plus, Search, Square, Target, Trash2, X } from "lucide-react";
 import { asArray } from "../lib/array";
 import { filterAtMatches } from "../lib/atMatches";
 import { DedupIndex, sha256 } from "../lib/attachDedup";
@@ -21,7 +21,7 @@ import { canUsePromptHistory, composerEnterAction, composerEscapeAction, compose
 import { cacheGeneration, loadOlder } from "../lib/composerHistory";
 import { sessionTurnsLabel } from "../lib/sessionTurnsPresentation";
 import { useI18n, type Translator } from "../lib/i18n";
-import { detectShortcutPlatform, formatShortcutCombo, isReservedComposerHistoryShortcut, matchesShortcut, useShortcutComboLabel } from "../lib/keyboardShortcuts";
+import { detectShortcutPlatform, formatShortcutCombo, matchesShortcut, useShortcutComboLabel } from "../lib/keyboardShortcuts";
 import { fallbackCopyText } from "../lib/clipboard";
 import {
   commandAvailableAtSlashPosition,
@@ -44,7 +44,8 @@ import { observeComposerMenuViewport } from "../lib/composerMenuViewport";
 import { resolveComposerContentSizing } from "../lib/composerSizing";
 import { useToast } from "../lib/toast";
 import { readStatusLabel, turnPhaseStatusLabel } from "../lib/readStatus";
-import { type CollaborationMode, type CommandInfo, type ComposerInsertRequest, type ContextInfo, type DirEntry, type EffortInfo, type GoalRuntime, type HistoryMessage, type Mode, type PromptHistoryEntry, type SessionMeta, type SessionReference, type SlashArgItem, type SlashArgsResult, type ToolApprovalMode, type BalanceInfo, type WireReadStatus } from "../lib/types";
+import { fullAccessProjectConfirmationKey } from "../lib/fullAccessConfirmation";
+import { normalizeToolApprovalMode, type CollaborationMode, type CommandInfo, type ComposerInsertRequest, type ContextInfo, type DirEntry, type EffortInfo, type GoalRuntime, type HistoryMessage, type Mode, type PromptHistoryEntry, type SessionMeta, type SessionReference, type SlashArgItem, type SlashArgsResult, type ToolApprovalMode, type BalanceInfo, type WireReadStatus } from "../lib/types";
 import { ComposerPinnedFilesShelf } from "./ComposerPinnedFilesShelf";
 import {
   formatWorkspaceReference,
@@ -56,6 +57,7 @@ import { SlashMenu, sortSlashCommandsForMenu } from "./SlashMenu";
 import { ArgMenu } from "./ArgMenu";
 import { ANCHORED_POPOVER_CLOSE_MS, AnchoredPopover } from "./AnchoredPopover";
 import { ComposerChoice } from "./ComposerChoice";
+import { PermissionPresetChoice } from "./PermissionPresetChoice";
 const ModelSwitcher = lazy(() => import("./ModelSwitcher").then((module) => ({ default: module.ModelSwitcher })));
 import { Tooltip } from "./Tooltip";
 const RecoveryWaitBanner = lazy(() => import("./RecoveryWaitBanner").then((module) => ({ default: module.RecoveryWaitBanner })));
@@ -548,6 +550,7 @@ export function Composer({
   goalStatus,
   goalRuntime,
   cwd,
+  workspaceRoot,
   modelLabel,
   commandCatalog,
   imageInputEnabled = true,
@@ -563,7 +566,6 @@ export function Composer({
   onSetMode,
   onSetCollaborationMode,
   onSetToolApprovalMode,
-  onToggleYoloApprovalMode,
   onClearGoal,
   onPauseGoal,
   onResumeGoal,
@@ -630,6 +632,7 @@ export function Composer({
   goalStatus?: string;
   goalRuntime?: GoalRuntime;
   cwd?: string;
+  workspaceRoot?: string;
   modelLabel: string;
   commandCatalog?: readonly CommandInfo[];
   imageInputEnabled?: boolean;
@@ -651,7 +654,6 @@ export function Composer({
   onSetMode: (mode: Mode) => void;
   onSetCollaborationMode: (mode: CollaborationMode) => void;
   onSetToolApprovalMode: (mode: ToolApprovalMode) => void;
-  onToggleYoloApprovalMode: () => void;
   onClearGoal: () => void;
   onPauseGoal: () => void;
   onResumeGoal: () => void;
@@ -737,7 +739,11 @@ export function Composer({
   const sendComboLabel = useShortcutComboLabel("composer.send");
   const undoComboLabel = useShortcutComboLabel("composer.undo");
   const redoComboLabel = useShortcutComboLabel("composer.redo");
-  const yoloComboLabel = useShortcutComboLabel("toolApproval.yolo");
+  const permissionPreset = normalizeToolApprovalMode(toolApprovalMode);
+  const fullAccessConfirmationKey = fullAccessProjectConfirmationKey({
+    workspacePath: workspaceRoot || inboxWorkspace || cwd,
+    remoteHostId: inboxHostId,
+  });
   const draftKey = sessionKey || tabId || DEFAULT_COMPOSER_DRAFT_KEY;
   const runtimeState = useRuntimeSession(tabId, inboxSessionPath);
   const finishing = runtimeState.finishing;
@@ -3393,16 +3399,6 @@ export function Composer({
       return;
     }
 
-    if (
-      !composing
-      && !isReservedComposerHistoryShortcut(e.nativeEvent, shortcutPlatform)
-      && matchesShortcut(e.nativeEvent, "toolApproval.yolo", shortcutPlatform)
-    ) {
-      e.preventDefault();
-      onToggleYoloApprovalMode();
-      return;
-    }
-
     syncPromptHistoryGeneration();
 
     const inputSelection = getComposerSelection();
@@ -4573,16 +4569,14 @@ export function Composer({
               </div>
             )}
             {!heroMode && <div className="composer-meta__control composer-meta__control--approval">
-              <ComposerChoice key={`approval-${tabId}`} label={toolApprovalMode === "yolo" ? "Yolo" : t(toolApprovalMode === "ask" ? "composer.accessAskShort" : "common.auto")}
-                showChevron
-                icon={toolApprovalMode === "yolo" ? <ShieldAlert size={16} /> : toolApprovalMode === "auto" ? <ShieldCheck size={16} /> : <Shield size={16} />}
-                tone={`composer-choice--permission-${toolApprovalMode}`}
-                value={toolApprovalMode} disabled={approvalBarDisabled} onPick={value => chooseApprovalMode(value as ToolApprovalMode)}
-                options={[
-                  { value: "ask", label: t("composer.accessAskShort"), icon: <Shield size={18} />, description: t("composer.accessAskDesc") },
-                  { value: "auto", label: t("common.auto"), icon: <ShieldCheck size={18} />, description: t("composer.accessAutoDesc") },
-                  { value: "yolo", label: "Yolo", icon: <ShieldAlert size={18} />, description: t("composer.accessYoloDesc"), title: t("composer.accessYoloTitle", { shortcut: yoloComboLabel }) },
-                ]} />
+              <PermissionPresetChoice
+                key={`approval-${tabId}`}
+                value={permissionPreset}
+                disabled={approvalBarDisabled}
+                scopeKey={`${tabId ?? ""}:${sessionKey ?? ""}:${workspaceScopeKey ?? ""}`}
+                projectConfirmationKey={fullAccessConfirmationKey}
+                onPick={chooseApprovalMode}
+              />
             </div>}
             {!heroMode && collaborationMode !== "normal" && (
               <div className="composer-meta__control composer-meta__control--intent">

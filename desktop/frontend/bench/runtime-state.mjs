@@ -120,7 +120,8 @@ try {
   await publish("idle", {}, true);
   await page.locator(".composer-run-strip").waitFor({ state: "hidden" });
   check(await page.locator(".composer__btn--stop").count() === 0, "remote completion removes the run control");
-  await page.waitForFunction(() => !document.querySelector('.remote-surface [data-transcript-block-phase="active"]'));
+  await page.waitForFunction(() => !document.querySelector('.remote-surface .chat-running')
+    && !document.querySelector('.remote-surface .transcript')?.textContent?.includes("runtime missing completion fixture"));
   check(await page.locator(".remote-surface").getByText("runtime missing completion fixture", { exact: true }).count() === 0,
     "trusted idle without turn_done settles the real transcript and reconciles durable history");
   await page.locator('.project-tree__topic-main:has-text("bench:geometry")').click();

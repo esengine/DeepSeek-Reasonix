@@ -536,10 +536,10 @@ func TestParsePermissionModeClaudeAliases(t *testing.T) {
 	tests := map[string]cliPermissionMode{
 		"ask":               {approval: control.ToolApprovalAsk},
 		"manual":            {approval: control.ToolApprovalAsk},
-		"acceptEdits":       {approval: control.ToolApprovalAsk, allow: []string{"write_file", "edit_file", "multi_edit", "move_file", "notebook_edit", "delete_range", "delete_symbol"}},
-		"dontAsk":           {approval: control.ToolApprovalDontAsk},
+		"acceptEdits":       {approval: control.ToolApprovalWorkspaceWrite},
+		"dontAsk":           {approval: control.ToolApprovalReadOnly},
 		"plan":              {approval: control.ToolApprovalAsk, plan: true},
-		"bypassPermissions": {approval: control.ToolApprovalYolo},
+		"bypassPermissions": {approval: control.ToolApprovalWorkspaceWrite},
 	}
 	for input, want := range tests {
 		got, err := parsePermissionMode(input)
@@ -553,8 +553,8 @@ func TestResolveRunPermissionModeRequiresExplicitAuto(t *testing.T) {
 	if got, err := resolveRunPermissionMode("ask", false, false); err != nil || got != "ask" {
 		t.Fatalf("default run permission mode = (%q, %v), want ask", got, err)
 	}
-	if got, err := resolveRunPermissionMode("ask", true, false); err != nil || got != "auto" {
-		t.Fatalf("-y run permission mode = (%q, %v), want auto", got, err)
+	if got, err := resolveRunPermissionMode("ask", true, false); err != nil || got != "workspace-write" {
+		t.Fatalf("legacy -y run permission mode = (%q, %v), want workspace-write", got, err)
 	}
 	if got, err := resolveRunPermissionMode("dontAsk", true, true); err == nil || got != "" {
 		t.Fatalf("combined permission flags = (%q, %v), want conflict", got, err)

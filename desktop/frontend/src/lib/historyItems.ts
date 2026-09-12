@@ -128,6 +128,9 @@ export function historyMessagesToItems(messages: HistoryMessage[], idPrefix: str
         content: m.content,
         reasoning: m.reasoning,
         workDurationMs: m.workDurationMs,
+        turnDurationMs: m.turnDurationMs,
+        turnUsage: m.turnUsage,
+        createdAt: m.createdAt,
         memoryCitations: memoryCitations.length > 0 ? memoryCitations : undefined,
         serverSearch: m.serverSearch,
       });
@@ -137,7 +140,7 @@ export function historyMessagesToItems(messages: HistoryMessage[], idPrefix: str
         seq++;
       }
 			if (m.pending && !built.some((item) => item.kind === "assistant")) {
-				items.push({ kind: "assistant", id: messageItemId ?? recordItemId, text: m.content, reasoning: m.reasoning ?? "", streaming: true });
+				items.push({ kind: "assistant", id: messageItemId ?? recordItemId, text: m.content, reasoning: m.reasoning ?? "", streaming: true, createdAt: m.createdAt });
 				seq++;
 			}
       const toolCalls = m.toolCalls ?? [];
@@ -171,6 +174,7 @@ export function historyMessagesToItems(messages: HistoryMessage[], idPrefix: str
           fileDiff,
           isShell: tc.name === "bash" || (tc.id || "").startsWith("shell-"),
           execution: result?.execution,
+          presentedFiles: result?.presentedFiles,
         });
         seq++;
       }
@@ -192,6 +196,7 @@ export function historyMessagesToItems(messages: HistoryMessage[], idPrefix: str
         dataArchived: m.toolResultArchived || undefined,
         isShell: (m.toolName || "") === "bash" || (m.toolCallId || "").startsWith("shell-"),
         execution: m.execution,
+        presentedFiles: m.presentedFiles,
       });
       seq++;
       continue;

@@ -1,0 +1,1 @@
+export default {"add": "dsh-DiffBlock-add", "block": "dsh-DiffBlock-block", "body": "dsh-DiffBlock-body", "copyButton": "dsh-DiffBlock-copyButton", "del": "dsh-DiffBlock-del", "expand": "dsh-DiffBlock-expand", "footer": "dsh-DiffBlock-footer", "gap": "dsh-DiffBlock-gap", "line": "dsh-DiffBlock-line", "path": "dsh-DiffBlock-path"};

@@ -7598,7 +7598,7 @@ func TestForkCreatesActiveTabWithoutSwitchingSourceController(t *testing.T) {
 	if got := len(ctrl.History()); got != 5 {
 		t.Fatalf("source history len after fork = %d, want 5", got)
 	}
-	if got, want := meta.TopicTitle, "Source topic · 分叉"; got != want {
+	if got, want := meta.TopicTitle, "Source topic (1)"; got != want {
 		t.Fatalf("fork topic title = %q, want %q", got, want)
 	}
 
@@ -7624,7 +7624,7 @@ func TestForkCreatesActiveTabWithoutSwitchingSourceController(t *testing.T) {
 			if m.ParentID != agent.BranchID(path) || m.ForkTurn != 1 || m.ForkMessageIndex != 3 {
 				t.Fatalf("fork branch meta = %+v, want parent %q turn 1 index 3", m, agent.BranchID(path))
 			}
-			if m.Scope != "project" || m.WorkspaceRoot != workspace || m.TopicTitle != "Source topic · 分叉" {
+			if m.Scope != "project" || m.WorkspaceRoot != workspace || m.TopicTitle != "Source topic (1)" {
 				t.Fatalf("fork topic meta = %+v", m)
 			}
 		}

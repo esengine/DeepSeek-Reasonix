@@ -376,6 +376,17 @@ func TestServeApproveMissingID(t *testing.T) {
 	if resp2.StatusCode != http.StatusBadRequest {
 		t.Errorf("approve bad json = %d, want 400", resp2.StatusCode)
 	}
+
+	// Permanent approval was removed from the protocol. Reject it before trying
+	// to resolve an ID so legacy clients cannot accidentally persist a grant.
+	resp3, err := http.Post(srv.URL+"/approve", "application/json", strings.NewReader(`{"id":"legacy","allow":true,"persist":true}`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	resp3.Body.Close()
+	if resp3.StatusCode != http.StatusBadRequest {
+		t.Errorf("approve persistent grant = %d, want 400", resp3.StatusCode)
+	}
 }
 
 func TestServeCompactEndpoint(t *testing.T) {

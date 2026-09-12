@@ -1,7 +1,6 @@
 // Run: tsx src/__tests__/tool-subject.test.ts
 
 import { subjectOf } from "../lib/tools";
-import { toolGroupKind } from "../components/ToolGroup";
 import { historyMessagesToItems, isBatchedReadOnlyTool, isReadOnlyTool } from "../lib/useController";
 import type { HistoryMessage } from "../lib/types";
 
@@ -30,21 +29,9 @@ eq(
 eq(subjectOf("use_capability", JSON.stringify({ action: "list" })), "list", "use_capability list falls back to action");
 
 const capabilityArgs = JSON.stringify({ action: "call", capability_id: "mcp-tool:db/write" });
-eq(
-  toolGroupKind({ kind: "tool", id: "reader", name: "use_capability", args: capabilityArgs, readOnly: true, status: "done" }),
-  "explore",
-  "resolved read-only MCP groups as research",
-);
-eq(
-  toolGroupKind({ kind: "tool", id: "writer", name: "use_capability", args: capabilityArgs, readOnly: false, status: "done" }),
-  "modify",
-  "resolved writer MCP stays in the modify group",
-);
-eq(
-  toolGroupKind({ kind: "tool", id: "s1", name: "web_search", args: `{"query":"bitcoin"}`, readOnly: true, status: "done" }),
-  null,
-  "provider web search is not grouped with explore tools",
-);
+
+
+
 
 const history = historyMessagesToItems([{
   role: "assistant",

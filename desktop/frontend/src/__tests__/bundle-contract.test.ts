@@ -155,7 +155,7 @@ ok(
   "Markdown wrapper keeps markdown/math vendor code out of the initial chunk",
 );
 ok(
-  markdownSource.includes('import("./MarkdownRenderer")'),
+  markdownSource.includes('import("./MarkdownHistory")'),
   "Markdown wrapper loads markdown renderer on demand",
 );
 ok(

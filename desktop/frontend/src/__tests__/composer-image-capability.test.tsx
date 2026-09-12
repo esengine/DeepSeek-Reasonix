@@ -121,8 +121,7 @@ async function renderComposer(props: Partial<Parameters<typeof Composer>[0]> = {
     onSetMode: () => {},
     onSetCollaborationMode: (_mode: CollaborationMode) => {},
     onSetToolApprovalMode: () => {},
-    onToggleYoloApprovalMode: () => {},
-    onClearGoal: () => {},
+        onClearGoal: () => {},
     onSwitchModel: () => {},
     onSetEffort: () => {},
 
@@ -387,25 +386,18 @@ console.log("\ncomposer image capability");
   });
   const { root, paint } = renderUserMessage("check @[photo.png](.reasonix/attachments/mock.png)", {
     turn: 1,
-    onEdit: () => true,
   });
   await paint();
   await waitFor(() => Boolean(document.querySelector(".msg-attachment--image img")));
-  const edit = document.querySelector("button.msg-meta__btn:not(.msg-meta__copy)") as HTMLButtonElement | null;
-  if (!edit) throw new Error("missing message edit button");
-  await act(async () => {
-    edit.click();
-    await flushTimers();
-  });
-  await waitFor(() => Boolean(document.querySelector(".msg-edit .composer-context__thumb img")));
-  const thumb = document.querySelector(".msg-edit .composer-context__thumb") as HTMLElement | null;
-  if (!thumb) throw new Error("missing edit image thumbnail");
+  ok(!document.querySelector("button.msg-meta__btn:not(.msg-meta__copy)"), "sent messages expose copy without the retired edit entry");
+  const thumb = document.querySelector(".msg-attachment--image") as HTMLElement | null;
+  if (!thumb) throw new Error("missing sent image thumbnail");
   await act(async () => {
     thumb.click();
     await flushTimers();
   });
   await waitFor(imageViewerOpen);
-  ok(imageViewerOpen(), "edit message image thumbnail opens the image viewer");
+  ok(imageViewerOpen(), "sent image thumbnail remains previewable without message editing");
 
   await act(async () => {
     root.unmount();

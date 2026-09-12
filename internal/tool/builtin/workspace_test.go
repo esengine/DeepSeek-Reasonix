@@ -101,7 +101,7 @@ func TestWorkspaceMoveFileBindsAndConfines(t *testing.T) {
 func TestWorkspaceBashDir(t *testing.T) {
 	dir := t.TempDir()
 	b := byName(Workspace{Dir: dir}.Tools())["bash"]
-	out, err := b.Execute(context.Background(), argsJSON(t, map[string]any{"command": "pwd"}))
+	out, err := b.Execute(fullAccessBashTestContext(t.Context()), argsJSON(t, map[string]any{"command": "pwd"}))
 	if err != nil {
 		t.Fatalf("bash: %v", err)
 	}

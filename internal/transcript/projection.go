@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"slices"
 	"sort"
 	"sync"
 
@@ -37,6 +38,7 @@ type Runtime struct {
 	StartedAt         int64                        `json:"startedAt,omitempty"`
 	PendingEvents     []eventwire.Event            `json:"pendingEvents"`
 	CompletionSummary *eventwire.CompletionSummary `json:"completionSummary,omitempty"`
+	TurnUsage         *TurnUsage                   `json:"turnUsage,omitempty"`
 }
 
 type Boundary struct {
@@ -58,6 +60,7 @@ type Projection struct {
 	covered       uint64
 	buffer        Buffer
 	runtime       Runtime
+	startedTurnID string
 	attempts      map[string]ActiveAttempt
 	prompts       map[string]eventwire.Event
 	snapshots     map[string]frozenSnapshot
@@ -152,18 +155,21 @@ func (p *Projection) Apply(envelope turnevent.Envelope) error {
 		}
 	}
 	w := owned.Event
-	previousTurn := p.runtime.TurnID
 	p.runtime.TurnID, p.runtime.Status = owned.TurnID, owned.Status
 	p.runtime.SubmissionID = owned.SubmissionID
 	switch owned.Kind {
 	case "turn_started":
 		p.retireRecoveryNotices()
-		if previousTurn != owned.TurnID || p.runtime.StartedAt == 0 {
+		if p.startedTurnID != owned.TurnID || p.runtime.StartedAt == 0 {
 			p.runtime.StartedAt = owned.CreatedAt
+			p.startedTurnID = owned.TurnID
 		}
 		p.runtime.Phase = ""
 		p.runtime.CompletionSummary = nil
+		p.runtime.TurnUsage = nil
 		p.buffer.completion = nil
+	case "usage":
+		p.runtime.TurnUsage = mergeTurnUsage(p.runtime.TurnUsage, w.Usage)
 	case "turn_phase":
 		p.runtime.Phase = w.Phase
 	case "completion_summary":
@@ -187,6 +193,11 @@ func (p *Projection) Apply(envelope turnevent.Envelope) error {
 	case "prompt_answered":
 		delete(p.prompts, owned.ItemID)
 	case "turn_done":
+		durationMs := int64(0)
+		if p.runtime.StartedAt > 0 && owned.CreatedAt >= p.runtime.StartedAt {
+			durationMs = owned.CreatedAt - p.runtime.StartedAt
+		}
+		p.buffer.attachTurnStats(owned.TurnID, p.runtime.TurnUsage, durationMs, owned.CreatedAt)
 		clear(p.prompts)
 		clear(p.attempts)
 		if owned.TranscriptDigest != "" {
@@ -197,6 +208,43 @@ func (p *Projection) Apply(envelope turnevent.Envelope) error {
 	p.covered = owned.Sequence
 	p.revision++
 	return nil
+}
+
+func mergeTurnUsage(current *TurnUsage, usage *eventwire.Usage) *TurnUsage {
+	if usage == nil {
+		return current
+	}
+	if current == nil {
+		zero := 0
+		current = &TurnUsage{CacheReadTokens: &zero, ReasoningTokens: &zero}
+	}
+	current.UncachedInputTokens += usage.CacheMissTokens
+	if usage.CacheMissTokens == 0 && usage.CacheHitTokens == 0 {
+		current.UncachedInputTokens += usage.PromptTokens
+	}
+	current.OutputTokens += usage.CompletionTokens
+	requestTotal := usage.TotalTokens
+	if requestTotal <= 0 {
+		requestTotal = usage.PromptTokens + usage.CompletionTokens
+	}
+	current.TotalTokens += requestTotal
+	cacheRead := valueOrZero(current.CacheReadTokens) + usage.CacheHitTokens
+	current.CacheReadTokens = &cacheRead
+	reasoning := valueOrZero(current.ReasoningTokens) + usage.ReasoningTokens
+	current.ReasoningTokens = &reasoning
+	if usage.CostQuote != nil && usage.CostQuote.ModelRef != "" {
+		if !slices.Contains(current.Routes, usage.CostQuote.ModelRef) {
+			current.Routes = append(current.Routes, usage.CostQuote.ModelRef)
+		}
+	}
+	return current
+}
+
+func valueOrZero(value *int) int {
+	if value == nil {
+		return 0
+	}
+	return *value
 }
 
 // SetRuntimeEpoch is called only by the controller's idle routing boundary.

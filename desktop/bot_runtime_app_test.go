@@ -76,14 +76,14 @@ func TestDesktopBotChannelsWithLegacyQQConfig(t *testing.T) {
 	if !ok {
 		t.Fatalf("platform QQ channel missing: %+v", channels)
 	}
-	if channel.Model != "qq-model" || channel.ToolApprovalMode != "auto" || channel.WorkspaceRoot != "/tmp/qq-project" {
+	if channel.Model != "qq-model" || channel.ToolApprovalMode != "workspace-write" || channel.WorkspaceRoot != "/tmp/qq-project" {
 		t.Fatalf("platform channel = %+v, want QQ-specific runtime fields", channel)
 	}
 	connectionChannel, ok := connectionChannels["qq"]
 	if !ok {
 		t.Fatalf("connection QQ channel missing: %+v", connectionChannels)
 	}
-	if connectionChannel.Model != "qq-model" || connectionChannel.ToolApprovalMode != "auto" || connectionChannel.WorkspaceRoot != "/tmp/qq-project" {
+	if connectionChannel.Model != "qq-model" || connectionChannel.ToolApprovalMode != "workspace-write" || connectionChannel.WorkspaceRoot != "/tmp/qq-project" {
 		t.Fatalf("connection channel = %+v, want QQ-specific runtime fields", connectionChannel)
 	}
 }

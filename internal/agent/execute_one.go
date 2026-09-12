@@ -446,7 +446,9 @@ func (a *Agent) applyRecoveryAndPermission(ctx context.Context, plan *toolCallPl
 	// (mcp_connect__*) skip ordinary Ask/Auto/dontAsk gates. Only explicit denyand live authorization apply —
 	// first connect of an installed server mustnot re-prompt under headless or partial-auto policies.
 	gate := a.svc.gateSnapshot()
-	if isInstalledMCPTool(plan.execTool) || isMCPLifecycleConnectTarget(plan.execTool) {
+	trustedMCP := isInstalledMCPTool(plan.execTool) || isMCPLifecycleConnectTarget(plan.execTool)
+	readOnlyPresetNeedsGate := a.svc.permissionPreset != nil && a.svc.permissionPreset() == "read-only" && !plan.readOnly
+	if trustedMCP && !readOnlyPresetNeedsGate {
 		if !mcpServerAuthorized(plan.execTool) {
 			return toolOutcome{
 				output:  "blocked: this project MCP server identity has not been authorized; approve the server from a parent session and retry",
@@ -481,6 +483,12 @@ func (a *Agent) applyRecoveryAndPermission(ctx context.Context, plan *toolCallPl
 				blocked: true,
 				errMsg:  "blocked by permission policy",
 			}, true
+		}
+		// A write explicitly authorized while the session is read-only runs this
+		// one call in the workspace sandbox. The session preset itself stays
+		// read-only; session-scoped approval only reuses the same narrow grant.
+		if !plan.readOnly && a.svc.permissionPreset != nil && a.svc.permissionPreset() == "read-only" {
+			plan.permissionPreset = "workspace-write"
 		}
 	}
 	return toolOutcome{}, false
@@ -533,6 +541,7 @@ func (a *Agent) prepareToolExecution(ctx context.Context, plan *toolCallPlan) (t
 		cctx = mcpinteraction.WithBroker(cctx, a.svc.interactionBroker)
 	}
 	cctx, plan.mcpApp = tool.WithMCPAppCollector(cctx)
+	cctx, plan.presentedFiles = tool.WithPresentedFilesCollector(cctx)
 	cctx = WithSubagentDepth(cctx, a.subagentDepth)
 	if a.task.ledger != nil {
 		cctx = evidence.WithLedger(cctx, a.task.ledger)
@@ -687,6 +696,11 @@ func (a *Agent) finishToolExecution(ctx context.Context, plan *toolCallPlan) too
 	out := toolOutcome{
 		runState: runState, output: body, images: images, visionSummary: visionSummary, truncated: truncMsg != "" || original != "", truncMsg: truncMsg,
 		execution: execution, mcpApp: toProviderMCPApp(plan.mcpApp), recoveryGeneration: recoveryGen,
+	}
+	if plan.presentedFiles != nil {
+		for _, file := range plan.presentedFiles() {
+			out.presentedFiles = append(out.presentedFiles, provider.PresentedFile{Path: file.Path, Description: file.Description})
+		}
 	}
 	if original != "" {
 		out.rawOutput = original

@@ -1,5 +1,6 @@
 import { noteTranscriptScrollWrite, recordTranscriptScrollDiagnostic } from "./transcriptScrollProbe";
-import type { TranscriptWriteRequest, TranscriptWriteResult } from "./transcriptKernel";
+type TranscriptWriteRequest = { session: string; generation: number; transactionId: number; geometryRevision: number; owner: "tail-follow" | "restore"; intent: "tail" | "reader"; offset: number };
+type TranscriptWriteResult = { accepted: boolean; offset: number; changed?: boolean; reason?: string };
 
 /** The only production owner allowed to mutate the native Transcript scroll
  * position. Every adapter, gesture, and transaction routes through this class. */

@@ -38,7 +38,6 @@ func TestRemoteTabCommandsForwardedToServe(t *testing.T) {
 		{"cancel", func() error { return a.CancelRemoteTab(meta.ID) }, "POST /cancel {}"},
 		{"approve", func() error { return a.ApproveRemoteTab(meta.ID, "call-1", "allow") }, `POST /approve {"allow":true,"id":"call-1","persist":false,"session":false}`},
 		{"approve-session", func() error { return a.ApproveRemoteTab(meta.ID, "call-2", "session") }, `POST /approve {"allow":true,"id":"call-2","persist":false,"session":true}`},
-		{"approve-persist", func() error { return a.ApproveRemoteTab(meta.ID, "call-3", "persist") }, `POST /approve {"allow":true,"id":"call-3","persist":true,"session":true}`},
 		{"approve-deny", func() error { return a.ApproveRemoteTab(meta.ID, "call-4", "deny") }, `POST /approve {"allow":false,"id":"call-4","persist":false,"session":false}`},
 		{"plan-start", func() error { return a.ResolveRemoteTabPlanDecision(meta.ID, "plan-1", "start_execution", "") }, `POST /plan-decision {"action":"start_execution","feedback":"","id":"plan-1"}`},
 		{"plan-revise", func() error {
@@ -48,11 +47,11 @@ func TestRemoteTabCommandsForwardedToServe(t *testing.T) {
 			return a.AnswerRemoteTab(meta.ID, "ask-1", []RemoteAskAnswer{{QuestionID: "question-1", Selected: []string{"yes"}}})
 		}, `POST /answer {"answers":[{"QuestionID":"question-1","Selected":["yes"]}],"id":"ask-1"}`},
 		{"rewind", func() error { return a.RewindRemoteTab(meta.ID, "3", "code") }, `POST /rewind {"scope":"code","turn":3}`},
-		{"approval-mode", func() error { return a.SetRemoteTabToolApprovalMode(meta.ID, "auto") }, `POST /tool-approval-mode {"mode":"auto"}`},
+		{"permission-preset", func() error { return a.SetRemoteTabToolApprovalMode(meta.ID, "workspace-write") }, `POST /permission/preset {"expectedRevision":7,"preset":"workspace-write"}`},
 		{"composer-profile", func() (err error) {
-			profileDrained, err = a.SetRemoteTabComposerProfile(meta.ID, "plan", "auto", "")
+			profileDrained, err = a.SetRemoteTabComposerProfile(meta.ID, "plan", "workspace-write", "")
 			return
-		}, `POST /composer-profile {"collaborationMode":"plan","goal":"","toolApprovalMode":"auto"}`},
+		}, `POST /composer-profile {"collaborationMode":"plan","expectedPermissionRevision":7,"goal":"","toolApprovalMode":"workspace-write"}`},
 		{"goal", func() error { return a.SetRemoteTabGoal(meta.ID, "ship it") }, `POST /goal {"goal":"ship it"}`},
 		{"effort", func() error { return a.SetRemoteTabEffort(meta.ID, "high") }, `POST /effort {"level":"high"}`},
 		{"pause-goal", func() error { return a.PauseRemoteTabGoal(meta.ID) }, "POST /goal/pause {}"},

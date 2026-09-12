@@ -1,0 +1,85 @@
+/* Ported from DeepSeek Harness c291e7961a; MIT, see LICENSE. */
+/* Shared disclosure header: [16px leading] gap 6 [title 13/24] at the default
+   size. The Settings font-size preference moves the row through the
+   body-published axis: title size follows the secondary tier
+   (--dsh-content-font-size-secondary: one step under the body — setting −1 at
+   ≤14, setting −2 above), and the row height, leading box, and glyph edge
+   shift by the body px delta so the icon keeps its optical share of the
+   line. */
+
+.dsh-DisclosureRow-root {
+  display: flex;
+  flex-direction: column;
+  width: 100%;
+  min-width: 0;
+}
+
+.dsh-DisclosureRow-row {
+  position: relative;
+  overflow: hidden;
+  display: flex;
+  align-items: center;
+  height: calc(24px + var(--dsh-content-font-delta, 0px));
+  min-width: 0;
+}
+
+.dsh-DisclosureRow-row[data-expandable] {
+  cursor: pointer;
+}
+
+.dsh-DisclosureRow-leading {
+  position: relative;
+  flex: none;
+  width: calc(16px + var(--dsh-content-font-delta, 0px));
+  height: calc(16px + var(--dsh-content-font-delta, 0px));
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  margin-right: 6px;
+  padding: 0;
+  border: none;
+  background: none;
+  color: var(--dsw-alias-label-tertiary);
+}
+
+/* Flow-row glyphs render at 14px inside the 16px box; the CSS edge overrides
+   each svg's own width/height attributes so every registered icon scales
+   without a per-callsite size prop. StateDot (its svg carries data-state)
+   stays at its fixed figma size — it is a status mark, not text furniture. */
+.dsh-DisclosureRow-leading svg:not([data-state]) {
+  width: calc(14px + var(--dsh-content-font-delta, 0px));
+  height: calc(14px + var(--dsh-content-font-delta, 0px));
+}
+
+button.leading {
+  cursor: pointer;
+}
+
+.dsh-DisclosureRow-iconIdle {
+  display: inline-flex;
+  opacity: 1;
+  transition: opacity 100ms ease;
+}
+
+.dsh-DisclosureRow-chevronHover {
+  position: absolute;
+  inset: 0;
+  margin: auto;
+  opacity: 0;
+  transition: opacity 100ms ease;
+}
+
+.dsh-DisclosureRow-row:hover .dsh-DisclosureRow-iconIdle {
+  opacity: 0;
+}
+
+.dsh-DisclosureRow-row:hover .dsh-DisclosureRow-chevronHover {
+  opacity: 1;
+}
+
+.dsh-DisclosureRow-title {
+  flex: none;
+  font-size: var(--dsh-content-font-size-secondary, 13px);
+  line-height: calc(24px + var(--dsh-content-font-delta, 0px));
+  color: var(--dsw-alias-label-secondary);
+}

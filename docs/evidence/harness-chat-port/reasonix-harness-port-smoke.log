@@ -1,0 +1,5 @@
+PASS  handshake ready after 3.1s: desktop service ready: generation g-727953828c98f8e9, pid 71668
+PASS  renderer invokes the production service: Version=v0.0.0-dev
+PASS  shell pid 71637 and Go service pid 71668 still running after 2s hold
+PASS  normal app quit completed; shell pid 71637 exited
+PASS  Go service pid 71668 exited with the shell

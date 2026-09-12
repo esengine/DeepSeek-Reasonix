@@ -374,14 +374,12 @@ when the sole automatic threshold is crossed.
   budgets. This never mutates the stable system prompt or tool schemas.
 - The owning controller may auto-allow only a bounded, non-sensitive,
   create-only project/reference `remember`, including in a top-level headless
-  run. In Ask, global facts, preferences, feedback, updates, duplicates,
-  sensitive/oversized content, and every `forget` require a fresh human
-  approval. Interactive Auto treats `remember` and `forget` as normal policy
-  fallback while preserving explicit `ask` and `deny` rules. Interactive YOLO
-  bypasses memory ask prompts unless an explicit deny rule matches.
+  run. Other memory writes follow the active permission preset and preserve
+  explicit `ask` and `deny` rules. Full access bypasses ordinary prompts unless
+  an explicit deny rule matches.
   Guardian/safety review cannot answer these prompts on the user's
   behalf. Sub-agents and headless surfaces without the owning scoped
-  controller fail closed, including headless YOLO except for the create-only
+  controller fail closed, including headless execution except for the create-only
   path above. The approval request includes a compact preview, while
   external notification hooks only receive the tool name.
 - Facts carry immutable IDs, monotonic revisions, timestamps, type, and scope.
@@ -440,41 +438,20 @@ func (p Policy) Decide(toolName string, readOnly bool, args json.RawMessage) Dec
   known keys — `command` (bash), `path` / `file_path` (file tools), `pattern`
   (grep/glob) — so tools need not change. A rule whose subject the args don't
   expose only matches in its bare `Tool` form.
-- **Dynamic Bash.** Parameter/arithmetic expansions, assignments, heredocs, unproved
-  redirects, and shell globs cannot reuse bare Bash, prefix, or glob allows;
-  remembered approvals are exact `Bash=<literal>` rules. They still follow the
-  normal posture fallback, so Auto and an approved-plan window may execute them
-  without prompting. Nested or indirect execution is stricter: command and
-  process substitution, a dynamic command name, parse failures, `eval`,
-  `source`, shell `-c`, PowerShell/cmd command strings, and runtime inline-code
-  flags require a human in interactive Ask/Auto. Guardian, allowing hooks, and
-  the approved-plan window cannot answer that decision; only an identical exact
-  grant or YOLO can bypass it by default. The advanced
-  `[permissions] allow_dynamic_bash = true` opt-in lets an Allow fallback,
-  including Auto, cover this class; explicit `ask` and `deny` rules retain
-  precedence.
+- **Shell syntax.** Pipes, substitutions, redirects, shell `-c`, and runtime
+  inline-code flags follow the active permission preset and OS sandbox. Syntax
+  never creates a separate approval rule. Explicit `deny` rules and exact
+  session grants continue to match the canonical command subject.
 - **Precedence.** `deny` > `ask` > `allow` > fallback. Fallback is `Allow` for
   read-only tools and `Mode` (default `Ask`) for writers. `deny` always wins, so
   a broad `allow = ["Bash"]` can still be carved by `deny = ["Bash(rm -rf*)"]`;
   conversely `ask` overrides a broad `allow` to force a prompt on a risky subset.
-- **Resolving `Ask`.** The interactive front-end (the chat TUI) prompts the user
-  — allow once / allow this approval scope for the session / always allow this
-  approval scope / deny — via an `Approver`. For Bash, the default scope is the
-  concrete command subject, and the user may choose a conservative command-prefix
-  scope when available (for example `Bash(go test:*)`) so similar invocations in
-  the same session or saved config do not prompt again. For file-mutation tools,
-  a session grant covers editing for the rest of the session while a persisted
-  grant is path-scoped when a path is available, stored as `Edit(<path>)` so all
-  built-in file-mutating tools share it. A
-  non-interactive run
-  (`reasonix run`, a sub-agent, anything with no TTY / no approver) cannot prompt.
-  Its explicit posture therefore resolves without blocking: Ask/manual fails
-  closed, Auto allows only ordinary writer fallback, and YOLO may bypass ordinary
-  Ask decisions. Nested or indirect Bash remains stricter: headless
-  Ask/Auto/DontAsk reject it unless an identical literal grant exists; YOLO or
-  `allow_dynamic_bash = true` with an Allow fallback may opt out. A `Deny` is a
-  hard block in *every* mode: the tool never executes and the model receives a
-  "blocked" result it can adapt to (the same shape as a plan-mode refusal).
+- **Resolving authorization.** The interactive frontend offers allow once,
+  allow the displayed scope for this session, or deny. Session grants bind an
+  exact command, canonical directory, or server capability and are never written
+  to project configuration. A non-interactive run cannot prompt and therefore
+  fails closed when its preset does not cover the operation. A `Deny` is a hard
+  block in every preset.
 - **MCP authorization.** Installing an MCP server authorizes all of its tools;
   there is no second server, raw-tool, writer, or destructive approval policy.
   Project configuration is trusted the same way and requires no separate launch
@@ -501,8 +478,9 @@ func (p Policy) Decide(toolName string, readOnly bool, args json.RawMessage) Dec
   destructive targets and readers from unauthorized servers for the entire
   planning phase. A single-model Plan without the dedicated Planner continues
   to block MCP writer/destructive targets while Plan is active.
-  Ordinary built-in and Bash calls then use the same Ask/Auto/YOLO, explicit
-  `ask`/`deny`, and Sandbox path as Standard mode. A third-party MCP
+  Ordinary built-in and Bash calls then use the same Read only, Workspace
+  access, or Full access preset, explicit `ask`/`deny`, and OS sandbox path as
+  Standard mode. A third-party MCP
   `readOnlyHint` affects dispatch classification and strict-child eligibility,
   but not the dedicated Planner's non-destructive trust path. Once the server is
   installed or declared in project configuration, all non-destructive
@@ -514,19 +492,12 @@ func (p Policy) Decide(toolName string, readOnly bool, args json.RawMessage) Dec
   writer-capable `task` and skill execution remain permission-gated instead of
   Plan-blocked, and their child turns inherit the Plan workflow marker and
   explicit phase opt-outs.
-- **User decisions are separate from tool approvals.** Runtime tool approval has
-  three user-facing postures: `ask` ("需要批准"), `auto` ("自动批准"), and
-  `yolo` ("Yolo批准"). `auto` lets the permission policy auto-approve the writer
-  and interactive memory fallback while preserving explicit ask/deny rules;
-  `yolo` skips ordinary tool permission prompts for approval-gated tools such
-  as writers, Bash, and explicit interactive `remember`/`forget` ask prompts.
-  Explicit deny rules and forced fresh reviews
-  for plans, sandbox escapes, and managed config writes still apply. Nested or indirect Bash
-  commands require a human in interactive Ask/Auto even during the approved-plan
-  window; ordinary expansions, assignments, redirects, and globs continue under
-  Auto fallback but cannot inherit reusable Bash rules. YOLO is the sole mode
-  bypass for the human-required class, while an identical exact literal remains
-  an ordinary explicit authorization.
+- **User decisions are separate from tool approvals.** Runtime permission has
+  three presets: `read-only`, `workspace-write`, and `danger-full-access`.
+  Workspace write is the default and confines local mutations to the workspace
+  and private session temporary directory. Full access skips ordinary prompts
+  and filesystem confinement while explicit deny and protected state remain.
+  Shell syntax does not alter the selected preset.
   Neither posture answers `ask` questions or approves `exit_plan_mode` plans.
   Plan Mode is entered only through an explicit user choice and remains
   independent of the active tool-approval posture. After a user approves a
@@ -576,19 +547,19 @@ func (p Policy) Decide(toolName string, readOnly bool, args json.RawMessage) Dec
   the active goal in the desktop UI so the collaboration mode remains one of
   the three choices, while the underlying tool approval posture is preserved.
 
-| Tool approval posture | Tool approvals | Plan approval | `ask` questions |
+| Permission preset | Tool authorization | Plan approval | `ask` questions |
 | --- | --- | --- | --- |
-| Need approval / `ask` | Follow permission policy (`Ask` prompts interactively) | Waits for user | Waits for user |
-| Auto approve / `auto` | Writer fallback and interactive `remember`/`forget` fallback auto-allowed; explicit ask/deny rules still apply | Waits for user | Waits for user |
-| YOLO approval / `yolo` | Ordinary prompts auto-allowed, including `remember`/`forget`; deny rules and plan/sandbox/config reviews remain | Waits for user | Waits for user |
-| Approved-plan execution window | Approved plan's writer fallback is auto-allowed; explicit `ask` / `deny` rules remain | Future plans still wait | Waits for user |
+| Read only / `read-only` | Reads are allowed; writes and external side effects require a scoped authorization | Waits for user | Waits for user |
+| Workspace access / `workspace-write` | Workspace and private session temp writes run inside the OS sandbox; boundary crossings require authorization | Waits for user | Waits for user |
+| Full access / `danger-full-access` | Ordinary prompts are skipped; explicit deny rules and protected-state constraints remain | Waits for user | Waits for user |
+| Approved-plan execution window | The approved plan may execute only within the active preset; explicit `ask` / `deny` rules remain | Future plans still wait | Waits for user |
 
-Out of the box (`mode = "ask"`, no rules), interactive `reasonix` prompts before
-each writer/bash call and `reasonix run` fails closed on those calls because it
-has no approver. Use `reasonix run --auto ...` / `-y` to allow ordinary writer
-fallback in unattended automation; `--permission-mode auto` is equivalent.
-Explicit `ask` rules still fail closed under Auto, and `deny` rules harden every
-posture.
+Out of the box, new sessions use `workspace-write`: workspace and private
+session-temp operations run in the OS sandbox without prompting. Use
+`--permission-mode read-only` for inspection-only automation or explicitly
+select `--permission-mode danger-full-access` when unrestricted local access is
+required. Explicit `ask` rules still require authorization, and `deny` rules
+harden every preset.
 
 ### 3.8 Slash commands (`internal/command`)
 
@@ -1246,11 +1217,8 @@ behavior. The escape-prompt and broader OS support are Phase 1's remainder (§9)
 - Sandbox Phase 1: an OS-level jail for `bash` so commands — not just the
   file-writer built-ins (Phase 0) — are confined to the workspace. **Seatbelt on
   macOS and bubblewrap on Linux ship, on by default when available** (see §5).
-  Remaining: the escape-prompt — detect sandbox-unavailable or sandbox-denied failures and
-  offer an explicit, permission-gated unconfined rerun (in `reasonix run`, the
-  command just fails and the model adapts), which completes the "allow inside the
-  box, prompt at its edge" model. With this in place, "always allow" rule
-  persistence becomes optional rather than load-bearing.
+  Restricted presets fail closed when the platform sandbox cannot be established;
+  Reasonix never offers an unconfined retry as a fallback.
 - MCP long tail (deferred deliberately): `headersHelper` auth for remote
   servers; the remaining `.mcp.json` scopes
   (local / user — project scope shipped, see §5); tool-search deferral;
@@ -1258,5 +1226,3 @@ behavior. The escape-prompt and broader OS support are Phase 1's remainder (§9)
   provide *providers*, not just tools.
 - An Anthropic-native provider `kind` (native prompt-cache control), proving the
   registry generalises beyond one wire format.
-- "Always allow" persistence writing learned rules back to project config; a
-  per-session permission override flag for `reasonix run`.

@@ -7,7 +7,6 @@ import { installPerformancePressureMonitor } from "./lib/crash";
 import { installGlobalCrashHandlers } from "./lib/globalCrashHandlers";
 import { desktopHost } from "./lib/desktopHost";
 import { installBreadcrumbConsoleHook } from "./lib/breadcrumbs";
-import { installMessageSelectionCopy } from "./lib/messageSelectionCopy";
 import { installPerfDebugHook } from "./lib/perfDebug";
 import { LocaleProvider, preloadDetectedLocale } from "./lib/i18n";
 import { ToastProvider } from "./lib/toast";
@@ -68,7 +67,6 @@ function prewarmFontFallbacks() {
 }
 prewarmFontFallbacks();
 
-installMessageSelectionCopy(document);
 
 // Inside the desktop shell, suppress the webview's default right-click menu — its
 // Reload / Back / Inspect entries are easy to hit by accident and can reset or
@@ -78,7 +76,7 @@ installMessageSelectionCopy(document);
 if (desktopHost().kind !== "none") {
   window.addEventListener("contextmenu", (e) => {
     const target = e.target as HTMLElement | null;
-    if (!target?.closest("input, textarea") && !target?.closest(".terminal-view")) e.preventDefault();
+    if (!target?.closest("input, textarea, .chat-transcript") && !target?.closest(".terminal-view")) e.preventDefault();
   });
 }
 

@@ -1,5 +1,7 @@
 # Transcript cutover acceptance
 
+> Historical evidence for the retired renderer. Current architecture and acceptance are documented in [Natural-flow chat](TRANSCRIPT_ARCHITECTURE.md) and [chat refactor acceptance](CHAT_REFACTOR_ACCEPTANCE.md).
+
 [简体中文](TRANSCRIPT_ACCEPTANCE_9777.zh-CN.md)
 
 The renderer slice of #9777 replaces the legacy engine atomically. It includes

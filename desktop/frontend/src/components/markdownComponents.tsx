@@ -5,17 +5,28 @@
 //
 // Fenced code blocks go through CodeViewer for syntax highlighting; inline
 // code is a styled <code>. Mermaid fences lazy-load the diagram renderer.
-// Links open in the system browser via RichMarkdownLink. Oversized tables
-// virtualize their body rows.
+// Links open in the system browser via RichMarkdownLink. Tables use natural
+// document flow; large code fences have an explicit disclosure.
 
-import { lazy, Suspense } from "react";
+import { lazy, Suspense, useMemo, useState, type ReactNode } from "react";
 import type { Components } from "react-markdown";
 import { CodeViewer } from "./CodeViewer";
 import { RichMarkdownLink } from "./githubLink";
 import { MarkdownTable } from "./MarkdownTable";
 import { MarkdownImage } from "./MarkdownImage";
+import { t } from "../lib/i18n";
+import { usePresentedFileLink } from "./PresentedFileLinkContext";
 
 const MermaidDiagram = lazy(() => import("./MermaidDiagram"));
+
+function MarkdownCode({ value, language }: { value: string; language?: string }) {
+  const [expanded, setExpanded] = useState(false);
+  const lines = useMemo(() => value.split("\n"), [value]);
+  const large = lines.length > 200;
+  return <><CodeViewer value={large && !expanded ? lines.slice(0, 200).join("\n") : value} copyValue={value} language={language} scrollMode="expand" />
+    {large && <div className="chat-code-fold"><button className="btn" aria-expanded={expanded} onClick={() => setExpanded(!expanded)}>{t(expanded ? "chat.collapseCode" : "chat.expandCode")}</button></div>}
+  </>;
+}
 
 const STATUS_MARKER_RE = /(?:✅|☑|☒|✔️?|✓|\[[xX ]\])/;
 const STATUS_MARKER_GLOBAL_RE = /(?:✅|☑|☒|✔️?|✓|\[[xX ]\])/g;
@@ -109,11 +120,17 @@ export function createComponents(plainStatusBlocks: boolean): Components {
           );
         }
         if (!match && plainStatusBlocks) return <PlainMarkdownBlock text={text.replace(/\n$/, "")} />;
-        return <CodeViewer value={value} language={lang} scrollMode="bounded" maxHeight="min(60vh, 28rem)" />;
+        return <MarkdownCode value={value} language={lang} />;
       }
-      return <code className="md-code">{children}</code>;
+      return <InlineMarkdownCode text={text}>{children}</InlineMarkdownCode>;
     },
     a: ({ href, children }) => <RichMarkdownLink href={href}>{children}</RichMarkdownLink>,
     img: ({ src, alt, title }) => <MarkdownImage src={src} alt={alt} title={title} />,
   };
+}
+
+function InlineMarkdownCode({ text, children }: { text: string; children: ReactNode }) {
+  const file = usePresentedFileLink(text);
+  if (!file) return <code className="md-code">{children}</code>;
+  return <button type="button" className="md-code md-code--presented-file" title={file.path} onClick={file.open}>{children}</button>;
 }

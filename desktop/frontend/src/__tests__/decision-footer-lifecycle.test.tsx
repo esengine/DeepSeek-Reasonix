@@ -29,7 +29,7 @@ const composer: Props["composer"] = { hidden: false, inert: false, hero: false, 
   running: false, collaborationMode: "normal", toolApprovalMode: "ask", goal: "", cwd: "/fixture",
   modelLabel: "fixture-model", ready: true,
   onSend: noop, onCancel: noop, onCycleMode: noop, onSetMode: noop,
-  onSetCollaborationMode: noop, onSetToolApprovalMode: noop, onToggleYoloApprovalMode: noop,
+  onSetCollaborationMode: noop, onSetToolApprovalMode: noop,
   onClearGoal: noop, onSwitchModel: noop, onSetEffort: noop,
   insertRequest: { id: 1, text: "retained draft", mode: "replace" },
 } };

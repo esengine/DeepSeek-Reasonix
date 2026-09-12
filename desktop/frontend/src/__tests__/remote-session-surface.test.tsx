@@ -299,8 +299,8 @@ await act(async () => {
   ok(Boolean(dialog), "approval card renders");
   ok(dialog?.textContent?.includes("rm -rf /tmp/junk") === true, "approval subject renders");
   ok(dialog?.textContent?.includes("Allow matching for this session") === true
-    && dialog?.textContent?.includes("Always allow matching operations") === true,
-  "remote approval exposes session and persistent scopes");
+    && dialog?.textContent?.includes("Always allow matching operations") !== true,
+  "remote approval exposes only once and session scopes");
   await act(async () => {
     [...dialog!.querySelectorAll<HTMLButtonElement>(".prompt-action")].find((b) => b.textContent?.includes("Allow matching for this session"))?.click();
     await flush();
@@ -488,7 +488,7 @@ function HookProbe({ tabId = "tab-remote-2" }: { tabId?: string }) { probe = use
 const probeRoot = createRoot(document.createElement("div"));
 await act(async () => { probeRoot.render(<LocaleProvider><HookProbe /></LocaleProvider>); await flush(); });
 ok(probe?.state === "ready", "a successful fenced snapshot recovers a ready event missed before listener mount");
-ok(probe?.composerProfile?.collaborationMode === "plan" && probe?.composerProfile?.toolApprovalMode === "auto" && probe.goalRuntime?.tokensUsed === 321,
+ok(probe?.composerProfile?.collaborationMode === "plan" && probe?.composerProfile?.toolApprovalMode === "workspace-write" && probe.goalRuntime?.tokensUsed === 321,
   "snapshot status hydrates the authoritative remote composer profile");
 ok(probe?.effort?.current === "high" && probe?.transcript.checkpoints[0]?.turn === 3
   && probe?.transcript.checkpoints[0]?.fileCount === 2 && probe?.transcript.checkpoints[0]?.files.length === 1,
@@ -651,7 +651,7 @@ await act(async () => {
   await flush();
 });
 ok(fallbackProbe?.hydrated === true && fallbackProbe.composerProfile?.collaborationMode === "plan"
-  && fallbackProbe.composerProfile.toolApprovalMode === "yolo"
+  && fallbackProbe.composerProfile.toolApprovalMode === "workspace-write"
   && tape.includes("status:tab-status-fallback"),
   "missing aggregate status is fetched before the remote composer becomes ready");
 await act(async () => fallbackRoot.unmount());

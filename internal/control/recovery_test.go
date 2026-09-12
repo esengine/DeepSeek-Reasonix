@@ -262,7 +262,7 @@ func TestLegacyApproveResolvesWaiterOnlyPlanTransition(t *testing.T) {
 			if e.Kind == event.ApprovalRequest && e.Approval.Kind == recovery.ApprovalKindRecovery {
 				approvalID = e.Approval.ID
 				// Simulate a legacy client that only knows Approve.
-				c.Approve(e.Approval.ID, true, true, true) // session/persist must be ignored
+				c.Approve(e.Approval.ID, true, true, false) // session scope is ignored for recovery decisions
 			}
 		}),
 	})

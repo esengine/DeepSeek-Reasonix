@@ -501,14 +501,14 @@ func TestTrySubagentProfileRequiresTaskAndPrompt(t *testing.T) {
 	}
 }
 
-func TestTrySubagentProfilePermissionGateFailsClosedOnAsk(t *testing.T) {
-	gate := trySubagentPermissionGate(permission.New("ask", nil, nil, nil))
+func TestTrySubagentProfilePermissionGateFailsClosedInReadOnly(t *testing.T) {
+	gate := trySubagentPermissionGate(permission.New("read-only", nil, nil, nil))
 	allow, reason, err := gate.Check(context.Background(), "write_file", json.RawMessage(`{"path":"result.txt"}`), false)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if allow || !strings.Contains(reason, "user declined") {
-		t.Fatalf("headless Ask gate = (%v, %q), want fail-closed denial", allow, reason)
+	if allow || !strings.Contains(reason, "denied") {
+		t.Fatalf("headless read-only gate = (%v, %q), want fail-closed denial", allow, reason)
 	}
 
 	allow, reason, err = gate.Check(context.Background(), "read_file", json.RawMessage(`{"path":"input.txt"}`), true)

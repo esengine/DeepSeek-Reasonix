@@ -244,7 +244,7 @@ func main() {
 	runID := flag.String("run-id", "reasonix", "swebench mode: run id passed to the official harness")
 	harnessPy := flag.String("harness-python", "python3", "swebench mode: interpreter with the swebench package installed")
 	dataset := flag.String("dataset", "princeton-nlp/SWE-bench_Verified", "swebench mode: dataset name")
-	permission := flag.String("permission", "auto", "swebench mode: agent permission posture (auto | yolo)")
+	permission := flag.String("permission", "workspace-write", "swebench mode: agent permission preset (read-only | workspace-write | danger-full-access)")
 	network := flag.String("network", "", "swebench mode: docker network for agent containers; must have no off-box route")
 	proxyURL := flag.String("proxy", "", "swebench mode: the only egress the agent gets, expected to allowlist just the model API")
 	workers := flag.Int("workers", 4, "swebench mode: parallel grader workers")

@@ -97,10 +97,12 @@ func TestCLICompletionListsCommandFlags(t *testing.T) {
 	}
 
 	got = cliCompletionCandidatesWithValues(root, 1, []string{"reasonix", "--d"}, values)
-	for _, want := range []string{"--dir", "--dangerously-skip-permissions"} {
-		if !containsCompletionValue(got, want) {
-			t.Errorf("root flag completion missing %q: %v", want, got)
-		}
+	if !containsCompletionValue(got, "--dir") {
+		t.Errorf("root flag completion missing %q: %v", "--dir", got)
+	}
+	got = cliCompletionCandidatesWithValues(root, 1, []string{"reasonix", "--p"}, values)
+	if !containsCompletionValue(got, "--permission-mode") {
+		t.Errorf("root flag completion missing %q: %v", "--permission-mode", got)
 	}
 
 	got = cliCompletionCandidatesWithValues(root, 3, []string{"reasonix", "mcp", "add", "--h"}, values)

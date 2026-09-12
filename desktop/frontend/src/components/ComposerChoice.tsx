@@ -8,7 +8,7 @@ export function ComposerChoice({ label, ariaLabel, icon, showChevron, value, opt
   showChevron?: boolean;
   icon?: ReactNode;
   value: string;
-  options: { value: string; label: string; description?: string; icon?: ReactNode; title?: string }[];
+  options: { value: string; label: string; badge?: string; description?: string; icon?: ReactNode; title?: string }[];
   disabled?: boolean;
   onPick: (value: string) => void;
   tone?: string;
@@ -26,7 +26,8 @@ export function ComposerChoice({ label, ariaLabel, icon, showChevron, value, opt
           data-value={option.value} title={option.title}
           aria-checked={value === option.value} className={`composer-access-menu__item${value === option.value ? " composer-access-menu__item--active" : ""}`}
           onClick={() => { setOpen(false); onPick(option.value); }}>
-          {option.icon}<span className="composer-access-menu__copy"><span className="composer-access-menu__title">{option.label}</span>
+          {option.icon}<span className="composer-access-menu__copy"><span className="composer-access-menu__heading"><span className="composer-access-menu__title">{option.label}</span>
+            {option.badge && <span className="composer-access-menu__badge">{option.badge}</span>}</span>
             {option.description && <span className="composer-access-menu__desc">{option.description}</span>}</span>
           {value === option.value && <Check size={14} />}
         </button>)}

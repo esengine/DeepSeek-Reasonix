@@ -261,7 +261,7 @@ eq(decisionSurfaceMockFromInput(LONG_DECISION_OPTIONS_MOCK_TRIGGER), null, "long
   });
 
   const actions = [...document.querySelectorAll(".prompt-shelf__actions .prompt-action")] as HTMLButtonElement[];
-  eq(actions.length, 4, "ordinary tool approval has four options");
+  eq(actions.length, 3, "ordinary tool approval has once, session-scoped, and deny options");
   ok(actions[0].classList.contains("prompt-action--selected"), "default selection is allow once");
   ok(Boolean(actions[0].title), "tool approval keeps the complete option description in a desktop tooltip");
   const toolDescriptionToggle = document.querySelector(".prompt-shelf__footnote .prompt-action__description-toggle") as HTMLButtonElement | null;
@@ -298,11 +298,11 @@ eq(decisionSurfaceMockFromInput(LONG_DECISION_OPTIONS_MOCK_TRIGGER), null, "long
   eq(toolDescriptionToggle.getAttribute("aria-expanded"), "true", "tool approval disclosure announces its expanded state");
 
   await act(async () => {
-    actions[3].click();
+    actions[2].click();
     await flushTimers();
   });
   eq(answers.length, 0, "clicking deny only selects");
-  ok(actions[3].classList.contains("prompt-action--selected"), "deny becomes selected");
+  ok(actions[2].classList.contains("prompt-action--selected"), "deny becomes selected");
 
   const confirm = document.querySelector(".decision-confirm-bar__confirm") as HTMLButtonElement;
   await act(async () => {
@@ -1031,10 +1031,10 @@ eq(decisionSurfaceMockFromInput(LONG_DECISION_OPTIONS_MOCK_TRIGGER), null, "long
   await paint(approval);
   const actions = () => [...document.querySelectorAll(".prompt-shelf__actions .prompt-action")] as HTMLButtonElement[];
   await act(async () => {
-    actions()[3].click();
+    actions()[2].click();
     await flushTimers();
   });
-  ok(actions()[3].classList.contains("prompt-action--selected"), "deny selected on first prompt");
+  ok(actions()[2].classList.contains("prompt-action--selected"), "deny selected on first prompt");
 
   await paint({ id: "a2", tool: "bash", subject: "echo 2" });
   ok(actions()[0].classList.contains("prompt-action--selected"), "new prompt id resets selection to allow once");

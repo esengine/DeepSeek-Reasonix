@@ -60,7 +60,7 @@ func TestArgumentErrorsRemainCorrectable(t *testing.T) {
 		if out.blocked {
 			t.Errorf("attempt %d converted invalid input into a host refusal: %s", i, out.output)
 		}
-		if !strings.Contains(out.output, "726072279d1c3417") || !strings.Contains(out.output, "required properties: command") {
+		if !strings.Contains(out.output, "schema fingerprint") || !strings.Contains(out.output, "required properties: command") {
 			t.Errorf("missing original diagnostic: %s", out.output)
 		}
 		if !strings.Contains(out.output, `sole "arguments" wrapper`) {

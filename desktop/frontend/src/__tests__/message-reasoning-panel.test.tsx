@@ -1,287 +1,33 @@
-// Run: tsx src/__tests__/message-reasoning-panel.test.tsx
+import assert from "node:assert/strict";
+import { act } from "react";
+import { createTranscriptHarness } from "./transcript-dom-harness";
+import { applySessionExperience } from "../lib/sessionExperience";
+import type { Item } from "../lib/useController";
 
-import { JSDOM } from "jsdom";
-import { registerHooks } from "node:module";
-import React, { act } from "react";
-import { createRoot } from "react-dom/client";
-import { LocaleProvider } from "../lib/i18n";
-import { AssistantMessage } from "../components/Message";
-import { setReasoningSummaryEnabled } from "../lib/reasoningSummaryPreference";
-import { applyReasoningDisplayMode } from "../lib/reasoningDisplayPreference";
-import { applySessionExperience, hydrateSessionExperience } from "../lib/sessionExperience";
-
-registerHooks({
-  resolve(specifier, context, nextResolve) {
-    if (specifier.endsWith(".css")) {
-      return nextResolve("./asset-stub-for-tests.ts", { ...context, parentURL: import.meta.url });
-    }
-    return nextResolve(specifier, context);
-  },
-});
-
-let passed = 0;
-let failed = 0;
-
-function ok(value: boolean, label: string) {
-  if (value) {
-    process.stdout.write(`  PASS  ${label}\n`);
-    passed += 1;
-  } else {
-    process.stdout.write(`  FAIL  ${label}\n`);
-    failed += 1;
+const harness = await createTranscriptHarness({ deterministic: true });
+const user: Item = { kind: "user", id: "u", text: "question" };
+const answer: Item = { kind: "assistant", id: "a", text: "", reasoning: "first line\n\nlatest line", streaming: true };
+try {
+  for (const mode of ["standard", "deep"] as const) {
+    await act(async () => applySessionExperience(mode));
+    await harness.render([user, answer], { running: true });
+    await harness.settle();
+    const heading = harness.container.querySelector<HTMLElement>(".chat-reasoning [data-disclosure-row]")!;
+    assert.ok(heading.textContent?.includes("latest line"));
+    assert.equal(heading.getAttribute("aria-expanded"), "false", "old display preferences cannot auto-open thought bodies");
+    assert.equal(harness.container.querySelector(".chat-reasoning__body"), null);
   }
+  const heading = harness.container.querySelector<HTMLElement>(".chat-reasoning [data-disclosure-row]")!;
+  await act(async () => heading.click());
+  assert.ok(harness.container.querySelector(".chat-reasoning__body"));
+  await harness.render([user, { ...answer, reasoning: "first line\n\nnew line", streaming: false, reasoningDurationMs: 1200 }]);
+  await harness.settle();
+  assert.equal(heading.getAttribute("aria-expanded"), "true", "manual disclosure survives settlement");
+  assert.ok(!heading.textContent?.includes("latest line"), "expanded row does not repeat its summary");
+  await act(async () => heading.click());
+  assert.equal(harness.container.querySelector(".chat-reasoning__body"), null, "collapsed content is unmounted");
+  console.log("thought presentation: latest/first line, duration, manual disclosure and legacy preference independence passed");
+} finally {
+  await act(async () => applySessionExperience("standard"));
+  await harness.unmount(); await harness.close();
 }
-
-console.log("\nmessage reasoning panel");
-
-const dom = new JSDOM("<!doctype html><html><body><div id=\"root\"></div></body></html>", {
-  pretendToBeVisual: true,
-  url: "http://localhost/",
-});
-(globalThis as typeof globalThis & { IS_REACT_ACT_ENVIRONMENT: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
-globalThis.window = dom.window as unknown as Window & typeof globalThis;
-globalThis.document = dom.window.document;
-Object.defineProperty(globalThis, "navigator", { configurable: true, value: { ...dom.window.navigator, language: "en-US" } });
-globalThis.Node = dom.window.Node;
-globalThis.Element = dom.window.Element;
-globalThis.HTMLElement = dom.window.HTMLElement;
-globalThis.Event = dom.window.Event;
-globalThis.CustomEvent = dom.window.CustomEvent;
-globalThis.MouseEvent = dom.window.MouseEvent;
-globalThis.localStorage = dom.window.localStorage;
-globalThis.requestAnimationFrame = dom.window.requestAnimationFrame.bind(dom.window);
-globalThis.cancelAnimationFrame = dom.window.cancelAnimationFrame.bind(dom.window);
-
-const rootEl = document.getElementById("root");
-if (!rootEl) throw new Error("missing root");
-const root = createRoot(rootEl);
-
-hydrateSessionExperience("standard");
-
-type ReasoningItem = React.ComponentProps<typeof AssistantMessage>["item"];
-
-async function render(item: ReasoningItem, props: { defaultExpanded?: boolean } = {}) {
-  await act(async () => {
-    root.render(
-      <LocaleProvider>
-        <AssistantMessage key={item.id} item={item} defaultExpanded={props.defaultExpanded} />
-      </LocaleProvider>,
-    );
-  });
-}
-
-async function click(el: Element | null | undefined) {
-  await act(async () => {
-    el?.dispatchEvent(new dom.window.MouseEvent("click", { bubbles: true }));
-    await new Promise((resolve) => setTimeout(resolve, 0));
-  });
-}
-
-// Completed reasoning: collapsed to a one-line summary, Markdown stays
-// unmounted until the user asks for it.
-await render({
-  kind: "assistant",
-  id: "a1",
-  text: "",
-  reasoning: "initial plan\n\n**important trace**\n\n- line one\n- line two\n\n`inline code`",
-  streaming: false,
-  reasoningComplete: true,
-  reasoningDurationMs: 2_600,
-});
-
-const header = document.querySelector<HTMLButtonElement>(".reasoning__head");
-ok(Boolean(header), "completed reasoning renders a toggle header");
-ok(header?.textContent?.includes("thinking") ?? false, "header keeps the reasoning label");
-ok(header?.textContent?.includes("lasted 3s") ?? false, "header shows rounded reasoning duration");
-ok(!document.querySelector(".reasoning__body"), "completed reasoning is collapsed by default");
-ok(!document.querySelector(".reasoning .md"), "collapsed reasoning mounts no Markdown");
-
-const summary = document.querySelector<HTMLButtonElement>(".reasoning-summary");
-ok(summary?.tagName === "BUTTON", "collapsed reasoning shows a clickable summary");
-ok(summary?.textContent === "initial plan", "completed summary is the first non-blank line");
-
-await click(summary);
-ok(document.querySelector(".reasoning__body")?.textContent?.includes("line two") ?? false, "clicking the summary expands the reasoning body");
-ok(document.querySelector(".reasoning__body strong")?.textContent === "important trace", "reasoning renders Markdown emphasis");
-ok(document.querySelectorAll(".reasoning__body li").length === 2, "reasoning renders Markdown lists");
-ok(document.querySelector(".reasoning__body .md-code")?.textContent === "inline code", "reasoning renders Markdown inline code");
-ok(!document.querySelector(".reasoning-summary"), "expanded reasoning hides the summary");
-
-await click(document.querySelector(".reasoning__head"));
-ok(!document.querySelector(".reasoning__body"), "clicking the header collapses the reasoning body again");
-await click(document.querySelector(".reasoning__head"));
-ok(document.querySelector(".reasoning__body")?.textContent?.includes("line two") ?? false, "clicking the header expands the reasoning body");
-
-// Standard shows the complete process while it is running.
-const streamingLine = "a".repeat(220);
-await render({
-  kind: "assistant",
-  id: "a2",
-  text: "",
-  reasoning: `first thought\n\n${streamingLine}LATEST_TOKEN`,
-  streaming: true,
-  reasoningComplete: false,
-});
-ok(Boolean(document.querySelector(".reasoning__body")), "standard experience expands reasoning while it streams");
-ok(!document.querySelector(".reasoning-summary"), "running reasoning never substitutes a collapsed summary");
-ok(document.querySelector(".reasoning__body")?.textContent?.endsWith("LATEST_TOKEN") ?? false, "streaming body retains the newest tail of a long line");
-ok(document.querySelector(".reasoning__head")?.hasAttribute("data-running") ?? false, "header keeps the running state");
-
-await render({
-  kind: "assistant",
-  id: "a2",
-  text: "",
-  reasoning: `first thought\n\n${streamingLine}LATEST_TOKEN_NEXT`,
-  streaming: true,
-  reasoningComplete: false,
-});
-ok(
-  document.querySelector(".reasoning__body")?.textContent?.endsWith("LATEST_TOKEN_NEXT") ?? false,
-  "streaming body updates when more text reaches the same long line",
-);
-
-// defaultExpanded keeps the previous always-open behavior.
-await render({
-  kind: "assistant",
-  id: "a3",
-  text: "",
-  reasoning: "initial plan\n\n**important trace**",
-  streaming: false,
-  reasoningComplete: true,
-}, { defaultExpanded: true });
-ok(document.querySelector(".reasoning__body strong")?.textContent === "important trace", "defaultExpanded renders the full Markdown directly");
-ok(!document.querySelector(".reasoning-summary"), "defaultExpanded skips the summary");
-
-// The removed summary preference remains a compatibility surface, but cannot
-// override the canonical Standard experience.
-await act(async () => {
-  setReasoningSummaryEnabled(false);
-});
-await render({
-  kind: "assistant",
-  id: "a4",
-  text: "",
-  reasoning: "initial plan\n\n**important trace**",
-  streaming: false,
-  reasoningComplete: true,
-});
-ok(Boolean(document.querySelector(".reasoning-summary")), "legacy summary toggle cannot hide the Standard completion summary");
-ok(!document.querySelector(".reasoning__body"), "legacy summary toggle keeps completed Markdown lazy");
-await click(document.querySelector(".reasoning__head"));
-ok(document.querySelector(".reasoning__body strong")?.textContent === "important trace", "the heading still opens full Markdown after a legacy toggle");
-await act(async () => {
-  setReasoningSummaryEnabled(true);
-});
-await render({
-  kind: "assistant",
-  id: "a5",
-  text: "",
-  reasoning: "initial plan\n\n**important trace**",
-  streaming: false,
-  reasoningComplete: true,
-});
-ok(Boolean(document.querySelector(".reasoning-summary")), "legacy summary enable leaves the canonical preview intact");
-
-await act(async () => {
-  hydrateSessionExperience("standard");
-});
-await render({
-  kind: "assistant",
-  id: "a-auto",
-  text: "",
-  reasoning: "live thought",
-  streaming: true,
-  reasoningComplete: false,
-});
-ok(Boolean(document.querySelector(".reasoning__body")), "standard mode opens reasoning while it streams");
-
-await render({
-  kind: "assistant",
-  id: "a-auto",
-  text: "answer",
-  reasoning: "live thought",
-  streaming: true,
-  reasoningComplete: true,
-});
-ok(Boolean(document.querySelector(".reasoning__body")), "standard mode keeps reasoning open after its first answer token while the turn streams");
-ok(!document.querySelector(".reasoning-summary"), "active turn does not replace full reasoning with a summary");
-
-await render({
-  kind: "assistant",
-  id: "a-auto",
-  text: "answer",
-  reasoning: "live thought",
-  streaming: false,
-  reasoningComplete: true,
-});
-ok(!document.querySelector(".reasoning__body"), "standard mode closes untouched reasoning after completion");
-ok(Boolean(document.querySelector(".reasoning-summary")), "standard mode leaves a summary after completion");
-
-await render({
-  kind: "assistant",
-  id: "a-auto-manual",
-  text: "",
-  reasoning: "manual thought",
-  streaming: true,
-  reasoningComplete: false,
-});
-await click(document.querySelector(".reasoning__head"));
-await click(document.querySelector(".reasoning__head"));
-await render({
-  kind: "assistant",
-  id: "a-auto-manual",
-  text: "answer",
-  reasoning: "manual thought",
-  streaming: false,
-  reasoningComplete: true,
-});
-ok(Boolean(document.querySelector(".reasoning__body")), "manual reasoning expansion survives standard completion");
-
-await act(async () => {
-  applySessionExperience("deep");
-});
-await render({
-  kind: "assistant",
-  id: "a-expanded",
-  text: "",
-  reasoning: "kept thought",
-  streaming: false,
-  reasoningComplete: true,
-});
-ok(Boolean(document.querySelector(".reasoning__body")), "deep mode keeps completed reasoning open");
-ok(!document.querySelector(".reasoning-summary"), "deep mode never falls back to a summary");
-await click(document.querySelector(".reasoning__head"));
-ok(!document.querySelector(".reasoning__body"), "a manual collapse still wins inside deep mode");
-
-await act(async () => {
-  applyReasoningDisplayMode("hidden");
-});
-await render({
-  kind: "assistant",
-  id: "a-hidden",
-  text: "answer",
-  reasoning: "not shown",
-  streaming: false,
-  reasoningComplete: true,
-});
-ok(Boolean(document.querySelector(".reasoning")), "legacy hidden mode maps to Standard instead of removing reasoning");
-await render({
-  kind: "assistant",
-  id: "a-hidden-only",
-  text: "",
-  reasoning: "reasoning-only work",
-  streaming: false,
-  reasoningComplete: true,
-});
-ok(Boolean(document.querySelector(".msg")), "legacy hidden mode keeps reasoning-only work reachable");
-await act(async () => {
-  applySessionExperience("standard");
-});
-
-await act(async () => {
-  root.unmount();
-});
-dom.window.close();
-
-console.log(`\n${passed} passed, ${failed} failed`);
-if (failed > 0) process.exit(1);

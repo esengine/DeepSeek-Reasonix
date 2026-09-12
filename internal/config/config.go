@@ -20,6 +20,7 @@ import (
 
 	fileencoding "reasonix/internal/fileutil/encoding"
 	"reasonix/internal/netclient"
+	"reasonix/internal/permissionpreset"
 	"reasonix/internal/provider"
 )
 
@@ -310,9 +311,9 @@ func (c *Config) UIThemeStyle() string {
 	return normalizeThemeStyle(c.UI.ThemeStyle)
 }
 
-// UIShortcutLayout normalizes the legacy CLI shortcut layout setting. It is kept
-// for compatibility; Shift+Tab toggles Plan and Ctrl+Y toggles YOLO in both
-// layouts.
+// UIShortcutLayout normalizes the legacy CLI shortcut layout setting. It is
+// retained for configuration compatibility; permission presets are selected
+// explicitly and are not encoded in this layout.
 func (c *Config) UIShortcutLayout() string {
 	switch strings.ToLower(strings.TrimSpace(c.UI.ShortcutLayout)) {
 	case "desktop", "dual", "dual-axis", "dual_axis":
@@ -466,27 +467,20 @@ func (c *Config) DesktopConversationWidth() string {
 	return "standard"
 }
 
-// NormalizeToolApprovalMode returns the canonical desktop/session tool approval
-// posture. Unknown or missing values fall back to ask for safety.
+// NormalizeToolApprovalMode returns the canonical execution permission preset.
+// Legacy ask/auto/yolo values are migrated conservatively.
 func NormalizeToolApprovalMode(mode string) string {
-	switch strings.ToLower(strings.TrimSpace(mode)) {
-	case "auto":
-		return "auto"
-	case "yolo", "full", "full-access", "bypass":
-		return "yolo"
-	default:
-		return "ask"
-	}
+	return string(permissionpreset.Normalize(mode))
 }
 
-// DesktopDefaultToolApprovalMode is the Ask/Auto/YOLO default used only when
-// creating a new desktop session. Existing tabs and restored sessions keep their
-// own persisted runtime state.
+// DesktopDefaultToolApprovalMode is the permission preset for new desktop
+// sessions. An omitted value defaults to workspace-write; restored legacy
+// values use the conservative migration in permissionpreset.Normalize.
 func (c *Config) DesktopDefaultToolApprovalMode() string {
 	if c == nil {
-		return "ask"
+		return string(permissionpreset.WorkspaceWrite)
 	}
-	return NormalizeToolApprovalMode(c.Desktop.DefaultToolApprovalMode)
+	return string(permissionpreset.NormalizeDefault(c.Desktop.DefaultToolApprovalMode))
 }
 
 // DesktopStatusBarStyle normalizes the desktop status bar metric label style.
@@ -867,7 +861,7 @@ type DingtalkBotConfig struct {
 	BotName          string          `toml:"bot_name"`           // 机器人昵称；群聊 @ 剥离时匹配
 	RequireMention   bool            `toml:"require_mention"`    // 群聊是否必须 @ 机器人
 	Model            string          `toml:"model"`              // 会话模型；空 = 全局默认
-	ToolApprovalMode string          `toml:"tool_approval_mode"` // ask|auto|yolo；空 = 全局默认
+	ToolApprovalMode string          `toml:"tool_approval_mode"` // read-only|workspace-write|danger-full-access；空 = 全局默认
 	WorkspaceRoot    string          `toml:"workspace_root"`     // 会话工作目录；空 = 启动 Bot 时的 cwd
 	Access           BotAccessConfig `toml:"access"`             // 该渠道访问控制（allowlist）
 	// SessionMappings 直配渠道的会话绑定（与 [[bot.connections]] 同构）。
@@ -1223,13 +1217,10 @@ func (c *Config) BashMode() string {
 }
 
 // BashModeForGOOS normalises the bash-sandbox mode for tests and cross-platform
-// rendering. Windows has no OS-level Bash sandbox and forces the effective mode
-// off, even when older configs explicitly requested "enforce". macOS/Linux keep
-// the existing explicit-mode behavior.
-func (c *Config) BashModeForGOOS(goos string) string {
-	if goos == "windows" {
-		return "off"
-	}
+// rendering. All supported desktop platforms default to enforcement; backend
+// capability is checked at launch and restricted presets fail closed when it
+// is unavailable.
+func (c *Config) BashModeForGOOS(_ string) string {
 	switch strings.TrimSpace(c.Sandbox.Bash) {
 	case "enforce":
 		return "enforce"
@@ -1823,7 +1814,7 @@ func Default() *Config {
 		DefaultModel:     "deepseek-flash",
 		CredentialsStore: CredentialsStoreAuto,
 		UI:               UIConfig{Theme: "auto", ShowTurnUsage: true},
-		Desktop:          DesktopConfig{DefaultToolApprovalMode: "auto", ConversationWidth: "standard"},
+		Desktop:          DesktopConfig{DefaultToolApprovalMode: "workspace-write", ConversationWidth: "standard"},
 		Billing:          BillingConfig{},
 		Notifications: NotificationsConfig{
 			Enabled:         false,
@@ -1848,21 +1839,20 @@ func Default() *Config {
 			MaxSubagentConcurrency: 6,
 			MaxParallelWriters:     3,
 		},
-		// Mode "ask" with no rules keeps `reasonix run` autonomous (no TTY → ask
-		// resolves to allow) while `reasonix` prompts before writers. Users add
-		// deny/allow rules to harden or quiet specific tools.
+		// The policy fallback remains an internal rule-engine input. The active
+		// PermissionPreset supplies the user-facing execution posture, while
+		// explicit deny/ask/allow rules remain authoritative refinements.
 		Permissions: PermissionsConfig{Mode: "ask"},
-		// Sandbox uses platform defaults: macOS/Linux jail bash by default;
-		// Windows has no OS-level Bash sandbox and always forces bash off.
-		// Network=true here so an absent [sandbox] in a user's file keeps egress
-		// (zero value would wrongly deny it).
+		// Restricted permission presets select the platform sandbox at runtime:
+		// Seatbelt on macOS, bubblewrap on Linux, and the restricted-token helper
+		// on Windows. Network=true preserves normal egress inside that boundary.
 		Sandbox: SandboxConfig{Network: true},
 		// LSP tools on by default, but dormant until a language server is on PATH;
 		// a missing server yields an install hint rather than an error.
 		LSP:     LSPConfig{Enabled: true},
 		Network: NetworkConfig{ProxyMode: netclient.ModeAuto},
 		Bot: BotConfig{
-			ToolApprovalMode:   "ask",
+			ToolApprovalMode:   "workspace-write",
 			MaxSteps:           0,
 			DebounceMs:         1500,
 			QueueMode:          "steer",

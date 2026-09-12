@@ -144,7 +144,7 @@ one mode selector:
 | Collaboration mode | `normal`, `plan`, `goal` | `modes` and `session/set_mode` |
 | Model | Configured `provider/model` entries | `configOptions` with id `model` |
 | Reasoning effort | Provider-supported levels or `auto` | `configOptions` with id `effort` |
-| Tool approval | `ask`, `auto`, `yolo` | `configOptions` with id `tool_approval` |
+| Permission preset | `read-only`, `workspace-write`, `danger-full-access` | `configOptions` with id `tool_approval` |
 
 Use `session/set_config_option` for model, effort, and tool approval.
 Its parameters are `sessionId`, `configId` and `value`, where `configId` is the
@@ -158,7 +158,7 @@ Its parameters are `sessionId`, `configId` and `value`, where `configId` is the
   "params": {
     "sessionId": "session-id",
     "configId": "tool_approval",
-    "value": "yolo"
+    "value": "danger-full-access"
   }
 }
 ```
@@ -180,9 +180,10 @@ The returned `configOptions` list does not advertise these retired selectors or
 no-op, while unknown values still return `InvalidParams`.
 
 For older clients, `session/set_model` remains available. The legacy
-`session/set_mode` values `default` and `auto` are also accepted as Normal + Ask
-and Normal + Yolo respectively; new clients should use the independent
-selectors above.
+`session/set_mode` values `default` and `auto` are also accepted as Normal +
+Read only and Normal + Workspace access respectively; new clients should use
+the independent selectors above. Legacy permission values are accepted only as
+input migration aliases and are never advertised in `configOptions`.
 
 ## Prompts, updates, and approvals
 

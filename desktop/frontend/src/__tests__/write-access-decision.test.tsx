@@ -70,11 +70,10 @@ ok(document.body.textContent?.includes("install the user-requested local command
 ok(document.body.textContent?.includes("entire home directory"), "home grant shows the high-risk warning");
 ok(document.body.textContent?.includes("also authorizes the current matching"), "merged Ask permission is explained");
 const actions = [...document.querySelectorAll(".prompt-shelf__actions .prompt-action")] as HTMLButtonElement[];
-eq(actions.length, 4, "write-access approval has four options");
+eq(actions.length, 3, "write-access approval has once, session, and deny options");
 ok(actions[0].textContent?.includes("Allow once"), "first option is allow once");
 ok(actions[1].textContent?.includes("this session"), "second option is session grant");
-ok(actions[2].textContent?.includes("project"), "third option persists to the project");
-ok(actions[3].textContent?.includes("Deny"), "fourth option is deny");
+ok(actions[2].textContent?.includes("Deny"), "third option is deny");
 await act(async () => {
   actions[1].click();
   await flushTimers();

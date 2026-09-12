@@ -155,6 +155,14 @@ func confineRead(forbidRoots []string, target string) bool {
 	return false
 }
 
+// ReadPathForbidden applies the same resolved-path deny policy used by the
+// built-in readers. Host-side viewers call this when they re-open a resource
+// recorded by a trusted tool result so a later configuration or sensitive-file
+// policy change cannot be bypassed by an old presentation card.
+func ReadPathForbidden(forbidRoots []string, target string) bool {
+	return confineRead(realRoots(forbidRoots), target)
+}
+
 func sensitiveReadPath(abs string) bool {
 	clean := filepath.Clean(abs)
 	name := strings.ToLower(filepath.Base(clean))

@@ -1,0 +1,143 @@
+.dsh-WebBlock-block {
+  --dsl-web-radius: 12px;
+
+  margin: 16px 0;
+  padding: 12px 14px;
+  color: var(--dsw-alias-label-primary);
+  background: var(--dsw-alias-markdown-code-block);
+  border-radius: var(--dsl-web-radius);
+}
+
+/* The provider answer reads as body prose above the citation list; its own
+   MarkdownText margins are trimmed so the list sits tight under it. */
+.dsh-WebBlock-answer {
+  margin-bottom: 8px;
+}
+
+.dsh-WebBlock-answer > div > :first-child {
+  margin-top: 0;
+}
+
+.dsh-WebBlock-answer > div > :last-child {
+  margin-bottom: 0;
+}
+
+/* The citation list: ordered so each source reads as a numbered reference. The
+   whole list — the sources the tool returned, matching what the model saw —
+   renders here; a max-height caps the card so a long list scrolls in place
+   rather than growing the card unbounded. The height is a design constant of the
+   card's geometry, not a deployment choice, so it lives here rather than a plugin
+   config field.
+
+   `overflow-y` makes this a scroll container, which also clips inline-start
+   overflow: a marker wider than `padding-left` loses its leading digits with no
+   way to scroll them back. Markers are right-aligned to the content edge, so the
+   padding must fit the widest one the list can produce. `searchMaxResults` is an
+   unbounded positive integer, so the padding is sized in `em` — against this
+   element's own font, the one a marker inherits — to hold a three-digit marker
+   (`999. ` measures 2.35em in the app font stack) plus the gap the one-digit
+   case already had. */
+.dsh-WebBlock-sources {
+  margin: 0;
+  padding-left: 2.5em;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  max-height: 320px;
+  overflow-y: auto;
+}
+
+.dsh-WebBlock-source {
+  min-width: 0;
+}
+
+.dsh-WebBlock-sourceLink {
+  color: var(--dsw-alias-link);
+  font-size: 14px;
+  font-weight: 500;
+  line-height: 20px;
+  word-break: break-word;
+  text-decoration: none;
+}
+
+/* Leading URL glyph inside source and fetch links; rides the link color.
+   1.1em follows each link's own font size. */
+.dsh-WebBlock-linkIcon {
+  width: 1.1em;
+  height: 1.1em;
+  vertical-align: -0.25em;
+  margin-right: 5px;
+}
+
+.dsh-WebBlock-sourceLink:hover,
+.dsh-WebBlock-sourceLink:focus-visible {
+  text-decoration: underline dotted;
+  text-underline-offset: 3px;
+}
+
+.dsh-WebBlock-snippet {
+  margin-top: 2px;
+  color: var(--dsw-alias-label-secondary);
+  font-size: 13px;
+  line-height: 19px;
+  word-break: break-word;
+}
+
+.dsh-WebBlock-published {
+  margin-top: 2px;
+  color: var(--dsw-alias-label-tertiary);
+  font: var(--dsw-font-xs-13);
+}
+
+.dsh-WebBlock-truncated {
+  margin-top: 8px;
+  color: var(--dsw-alias-label-tertiary);
+  font: var(--dsw-font-xs-13);
+}
+
+.dsh-WebBlock-empty {
+  color: var(--dsw-alias-label-secondary);
+  font: var(--dsw-font-xs-13);
+}
+
+/* The fetch card is a compact summary: the URL over a status/truncation row. */
+.dsh-WebBlock-fetch {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.dsh-WebBlock-fetchUrl {
+  color: var(--dsw-alias-link);
+  font-family: var(--ds-font-family-code);
+  font-size: 13px;
+  font-weight: 500;
+  line-height: 19px;
+  word-break: break-all;
+  text-decoration: none;
+}
+
+.dsh-WebBlock-fetchUrl:hover,
+.dsh-WebBlock-fetchUrl:focus-visible {
+  text-decoration: underline dotted;
+  text-underline-offset: 3px;
+}
+
+.dsh-WebBlock-fetchMeta {
+  display: flex;
+  align-items: baseline;
+  gap: 12px;
+}
+
+.dsh-WebBlock-status {
+  color: var(--dsw-alias-label-secondary);
+  font: var(--dsw-font-xs-13);
+}
+
+/* The fetch card's truncation note sits inline beside the status, so it drops
+   the search card's top margin. */
+.dsh-WebBlock-fetch .dsh-WebBlock-truncated {
+  margin-top: 0;
+}
+
+.dsh-WebBlock-sourceLink > a, .dsh-WebBlock-fetchUrl > a { color: inherit; font: inherit; }

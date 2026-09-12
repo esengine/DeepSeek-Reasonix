@@ -40,7 +40,6 @@ export function useDesktopNavigation(input: {
   visible: SessionResource;
   ports: Omit<DesktopNavigationPorts, "reveal" | "projectChanged" | "closeHistory" | "notice" | "applyHistorySessions">;
   setTabRevealSignal: Dispatch<SetStateAction<number>>;
-  setTranscriptRevealSignal: Dispatch<SetStateAction<number>>;
   setProjectRevision: Dispatch<SetStateAction<number>>;
   setHistory: Dispatch<SetStateAction<HistoryViewState | null>>;
   t: Translator;
@@ -51,7 +50,7 @@ export function useDesktopNavigation(input: {
   showChat(): void;
 }) {
   const operations = useResourceOperations({ visible: input.visible });
-  const reveal = useCommittedCommand(() => { input.setTabRevealSignal(value => value + 1); input.setTranscriptRevealSignal(value => value + 1); });
+  const reveal = useCommittedCommand(() => { input.setTabRevealSignal(value => value + 1); });
   const projectChanged = useCommittedCommand(() => input.setProjectRevision(value => value + 1));
   const closeHistory = useCommittedCommand(() => input.setHistory(null));
   const applyHistorySessions = useCommittedCommand((sessions: SessionMeta[]) => input.setHistory(current => refreshHistoryProjection(current, sessions)));

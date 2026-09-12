@@ -33,13 +33,11 @@ export function buildOverlayHostProps(input: {
   cwd: string | undefined;
   paletteItems: OverlayPalette["view"]["items"];
   startupSplashHold: boolean;
-  selectionEnabled: boolean;
   history: HistoryCommands;
   navigation: NavigationCommands;
   chrome: ChromeCommands;
   onboarding: OnboardingCommands;
   worktree: WorktreeMergeCommands;
-  onAddSelectedText: (text: string) => void;
   prefillSubagentCommand: (command: string) => void;
 
   sessionActions: {
@@ -89,13 +87,6 @@ export function buildOverlayHostProps(input: {
     startup: shell.startupSplashVisible ? {
       view: { hold: input.startupSplashHold }, commands: { onDone: () => shell.setStartupSplashVisible(false) },
     } : undefined,
-    selection: {
-      view: {
-        enabled: input.selectionEnabled,
-        resetKey: input.activeTabId ?? "",
-      },
-      commands: { onAddToChat: input.onAddSelectedText },
-    },
     worktree: worktree.worktreeMergeTabId ? {
       view: { tabId: worktree.worktreeMergeTabId, isOpen: true },
       commands: { onClose: worktree.closeWorktreeMerge, onMerged: worktree.handleWorktreeMerged },

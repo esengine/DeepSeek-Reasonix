@@ -8,35 +8,36 @@ import (
 
 // Tool is the JSON form of an event.Tool.
 type Tool struct {
-	RunState          provider.ToolRunState `json:"runState,omitempty"`
-	Diagnostic        json.RawMessage       `json:"diagnostic,omitempty"`
-	Verifying         bool                  `json:"verifying,omitempty"`
-	ID                string                `json:"id,omitempty"`
-	Name              string                `json:"name"`
-	Args              string                `json:"args,omitempty" externalizable:"true"`
-	ResolvedName      string                `json:"resolvedName,omitempty"`
-	CapabilityID      string                `json:"capabilityId,omitempty"`
-	Output            string                `json:"output,omitempty" externalizable:"true"`
-	Err               string                `json:"err,omitempty" externalizable:"true"`
-	ReadOnly          bool                  `json:"readOnly"`
-	Truncated         bool                  `json:"truncated,omitempty"`
-	DurationMs        int64                 `json:"durationMs,omitempty"`
-	StartedAt         int64                 `json:"startedAt,omitempty"` // unix ms; zero when the call never ran
-	EndedAt           int64                 `json:"endedAt,omitempty"`
-	Partial           bool                  `json:"partial,omitempty"`
-	ArgChars          int                   `json:"argChars,omitempty"`
-	Refreshed         bool                  `json:"refreshed,omitempty"`
-	ParentID          string                `json:"parentId,omitempty"`
-	AttemptID         string                `json:"attemptId,omitempty"` // host-local stream_attempt id for speculative partials
-	SubagentRef       string                `json:"subagentRef,omitempty"`
-	SubagentStatus    string                `json:"subagentStatus,omitempty"`
-	SubagentErrorCode string                `json:"subagentErrorCode,omitempty"`
-	SubagentRetryable bool                  `json:"subagentRetryable,omitempty"`
-	Diff              string                `json:"diff,omitempty" externalizable:"true"`
-	Added             int                   `json:"added,omitempty"`
-	Removed           int                   `json:"removed,omitempty"`
-	Profile           *Profile              `json:"profile,omitempty"`
-	Execution         *ShellExecution       `json:"execution,omitempty"`
+	RunState          provider.ToolRunState    `json:"runState,omitempty"`
+	Diagnostic        json.RawMessage          `json:"diagnostic,omitempty"`
+	Verifying         bool                     `json:"verifying,omitempty"`
+	ID                string                   `json:"id,omitempty"`
+	Name              string                   `json:"name"`
+	Args              string                   `json:"args,omitempty" externalizable:"true"`
+	ResolvedName      string                   `json:"resolvedName,omitempty"`
+	CapabilityID      string                   `json:"capabilityId,omitempty"`
+	Output            string                   `json:"output,omitempty" externalizable:"true"`
+	Err               string                   `json:"err,omitempty" externalizable:"true"`
+	ReadOnly          bool                     `json:"readOnly"`
+	Truncated         bool                     `json:"truncated,omitempty"`
+	DurationMs        int64                    `json:"durationMs,omitempty"`
+	StartedAt         int64                    `json:"startedAt,omitempty"` // unix ms; zero when the call never ran
+	EndedAt           int64                    `json:"endedAt,omitempty"`
+	Partial           bool                     `json:"partial,omitempty"`
+	ArgChars          int                      `json:"argChars,omitempty"`
+	Refreshed         bool                     `json:"refreshed,omitempty"`
+	ParentID          string                   `json:"parentId,omitempty"`
+	AttemptID         string                   `json:"attemptId,omitempty"` // host-local stream_attempt id for speculative partials
+	SubagentRef       string                   `json:"subagentRef,omitempty"`
+	SubagentStatus    string                   `json:"subagentStatus,omitempty"`
+	SubagentErrorCode string                   `json:"subagentErrorCode,omitempty"`
+	SubagentRetryable bool                     `json:"subagentRetryable,omitempty"`
+	Diff              string                   `json:"diff,omitempty" externalizable:"true"`
+	Added             int                      `json:"added,omitempty"`
+	Removed           int                      `json:"removed,omitempty"`
+	Profile           *Profile                 `json:"profile,omitempty"`
+	Execution         *ShellExecution          `json:"execution,omitempty"`
+	PresentedFiles    []provider.PresentedFile `json:"presentedFiles,omitempty"`
 }
 
 func toWireTool(in event.Tool) *Tool {
@@ -55,6 +56,7 @@ func toWireTool(in event.Tool) *Tool {
 		Diff: in.Diff, Added: in.Added, Removed: in.Removed,
 		SubagentRef: in.SubagentRef, SubagentStatus: in.SubagentStatus,
 		SubagentErrorCode: in.SubagentErrorCode, SubagentRetryable: in.SubagentRetryable,
+		PresentedFiles: append([]provider.PresentedFile(nil), in.PresentedFiles...),
 	}
 	if in.Profile != nil {
 		wt.Profile = &Profile{Model: in.Profile.Model, Effort: in.Profile.Effort}

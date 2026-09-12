@@ -1214,7 +1214,7 @@ func (g *Gate) RecordDiagnosis(taskID, note string) {
 
 func (g *Gate) activeMode() bool {
 	mode := strings.ToLower(strings.TrimSpace(g.opts.Mode()))
-	return mode == "auto"
+	return mode == "auto" || mode == "workspace-write"
 }
 
 func (g *Gate) recoveryGuidanceLocked(st *taskRuntime) string {

@@ -81,8 +81,11 @@ type remoteTab struct {
 	client *http.Client
 	base   string
 	token  string
-	gen    uint64
-	cancel context.CancelFunc
+	// capabilities are fixed by the authenticated serve handshake. Missing
+	// permission-presets-v1 means history-only compatibility with an old serve.
+	capabilities map[string]bool
+	gen          uint64
+	cancel       context.CancelFunc
 	// attachedGen marks a pump that survived the open/session-entry barrier.
 	// It stays internal so ListTabs never exposes a transient non-wire state.
 	attachedGen uint64

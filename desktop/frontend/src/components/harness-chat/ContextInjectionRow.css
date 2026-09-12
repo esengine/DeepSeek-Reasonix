@@ -1,0 +1,65 @@
+/* Ported from DeepSeek Harness c291e7961a; MIT, see LICENSE. */
+/* Figma 10:2482: 24px Tool calls header, 4px gap, 141px code block cap.
+   SystemPromptRow reuses this sheet so both disclosures share one body. */
+
+.dsh-ContextInjectionRow-root {
+  min-width: 0;
+}
+
+.dsh-ContextInjectionRow-root[data-open] {
+  padding-bottom: 4px;
+}
+
+.dsh-ContextInjectionRow-chevron {
+  color: var(--dsw-alias-label-secondary);
+}
+
+/* Separator and producer name beside the role title: ToolRow's summary geometry,
+   so the two disclosure rows keep one 24px rhythm and one separator shape. */
+.dsh-ContextInjectionRow-sep {
+  flex: none;
+  width: 2px;
+  height: 2px;
+  margin: 0 8px;
+  border-radius: 1px;
+  background: var(--dsw-alias-label-caption);
+}
+
+.dsh-ContextInjectionRow-source {
+  flex: none;
+  min-width: 0;
+  overflow: hidden;
+  color: var(--dsw-alias-label-tertiary);
+  font-size: var(--dsh-content-font-size-secondary, 13px);
+  line-height: calc(24px + var(--dsh-content-font-delta, 0px));
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* A notice's one-line account: the reason it rarely needs expanding. */
+.dsh-ContextInjectionRow-summary {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  color: var(--dsw-alias-label-tertiary);
+  font-size: var(--dsh-content-font-size-secondary, 13px);
+  line-height: calc(24px + var(--dsh-content-font-delta, 0px));
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.dsh-ContextInjectionRow-body {
+  box-sizing: border-box;
+  /* Indent under the title, which starts at leading (16 + delta) + gap 6. */
+  width: calc(100% - 22px - var(--dsh-content-font-delta, 0px));
+  max-height: 141px;
+  margin: 4px 0 0 calc(22px + var(--dsh-content-font-delta, 0px));
+  overflow: auto;
+  padding: 10px 16px 12px 12px;
+  border: none;
+  border-radius: 8px;
+  background: var(--dsw-alias-markdown-code-block);
+  color: var(--dsw-alias-label-tertiary);
+  /* Figma 10:2482 code text: the form bodies inherit it from the scrollport. */
+  font: 400 11px/16px var(--ds-font-family-code);
+}

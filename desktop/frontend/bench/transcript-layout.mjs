@@ -13,7 +13,7 @@ const { chromium, _electron } = await import("playwright");
 const electronEngine = process.argv.includes("--electron");
 if (electronEngine) process.env.REASONIX_SHELL = "electron";
 const output = await mkdtemp(path.join(tmpdir(), "reasonix-layout-build-"));
-const evidence = process.env.REASONIX_LAYOUT_ARTIFACTS;
+const evidence = process.env.REASONIX_LAYOUT_ARTIFACTS ?? process.env.REASONIX_LAYOUT_EVIDENCE;
 const samples = [];
 let server;
 let browser;
@@ -54,7 +54,7 @@ try {
   const errors = [];
   page.on("pageerror", error => { errors.push(error.message); console.error(error.message); });
   await page.goto(url);
-  await page.waitForSelector(".transcript__row .code").catch(async error => {
+  await page.waitForSelector(".chat-node .code").catch(async error => {
     console.error((await page.locator("body").innerText()).slice(0, 1200));
     throw error;
   });
@@ -84,6 +84,7 @@ try {
         launcher: launcher ? rect(launcher) : null };
     });
     samples.push({ label, ...sample });
+    if (sample.scrollWidth > sample.clientWidth + 1) console.error(label, sample, await page.locator(".chat-flow-scroll").evaluate(root => [...root.querySelectorAll("*")].filter(el => el.getBoundingClientRect().right > root.getBoundingClientRect().right + 1).slice(0, 12).map(el => ({ class: el.className, width: el.getBoundingClientRect().width, css: { width: getComputedStyle(el).width, minWidth: getComputedStyle(el).minWidth, padding: getComputedStyle(el).padding, box: getComputedStyle(el).boxSizing, overflow: getComputedStyle(el).overflow } }))));
     assert.ok(sample.content.right <= sample.chat.right + 1, label + ": content column fits chat");
     assert.ok(sample.documentWidth <= sample.viewport + 1, label + ": document stays inside viewport");
     assert.ok(sample.scrollWidth <= sample.clientWidth + 1, label + ": transcript has no horizontal overflow");
@@ -135,30 +136,20 @@ try {
   const motion = await page.evaluate(() => { window.layoutMotion.active = false; return window.layoutMotion.widths; });
   assert.ok(motion.length > 4 && Math.max(...motion) - Math.min(...motion) <= 1, "content changes never shift the column between frames");
   await configure({ turns: 120, long: true });
-  await page.waitForSelector('[data-transcript-render-mode="windowed"]');
-  await measure("windowed long session");
-  await page.locator(".transcript").hover();
-  let sawLongHistory = false;
-  for (let index = 0; index < 16; index++) {
-    await page.mouse.wheel(0, -1800);
-    await page.evaluate(() => new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve))));
-    await measure("windowed history scroll " + index);
-    sawLongHistory ||= await page.locator(".transcript code").evaluateAll(elements => elements.some(element => element.textContent.includes("abcdefghij".repeat(60))));
-    if (await page.locator(".transcript").evaluate(element => element.scrollTop <= 1)) break;
-  }
-  assert.ok(sawLongHistory, "long cold content enters the mounted window");
-  await page.locator(".transcript__jump-bottom").click();
-  await page.waitForFunction(() => {
-    const transcript = document.querySelector(".transcript");
-    return transcript.scrollHeight - transcript.scrollTop - transcript.clientHeight <= 4;
-  });
-  await page.waitForFunction(() => ![...document.querySelectorAll(".transcript code")].some(element => element.textContent.includes("abcdefghij".repeat(60))));
-  await measure("long cold content leaves the window");
+  await page.waitForFunction(() => document.querySelectorAll('[data-chat-kind="user"]').length === 120);
+  await measure("accumulated long session");
+  await page.locator('[data-nav-turn="user-10"]').focus();
+  await page.locator('[data-nav-turn="user-10"]').press("Enter");
+  await page.waitForFunction(() => [...document.querySelectorAll(".transcript code")].some(element => element.textContent.includes("abcdefghij".repeat(60))));
+  await page.locator('[data-nav-turn="user-119"]').focus();
+  await page.locator('[data-nav-turn="user-119"]').press("Enter");
+  assert.equal(await page.locator('[data-chat-kind="user"]').count(), 120, "reading never unmounts loaded history");
+  await measure("return to loaded tail");
   await configure({ turns: 1, text: "prefix ", streaming: true });
-  await page.waitForSelector(".msg--assistant .md");
+  await page.waitForSelector(".msg--assistant .msg__body");
   const prose = "prefix " + "abcdefghij".repeat(60);
   await configure({ text: prose });
-  await page.waitForSelector(".md--stream-tail");
+  await page.waitForSelector(".msg--assistant .msg__body");
   await measure("streaming long prose");
   await configure({ streaming: false });
   await page.waitForSelector(".md[data-markdown-blocks] p");
@@ -169,7 +160,7 @@ try {
   assert.ok(paragraph.scrollWidth <= paragraph.width + 1, "completed prose wraps inside its own column");
   assert.equal(paragraph.text, prose, "wrapping never changes source text");
   await page.reload();
-  await page.waitForSelector(".transcript__row .code");
+  await page.waitForSelector(".chat-node .code");
   await configure({ turns: 1, text: prose });
   await page.waitForSelector(".md[data-markdown-blocks] p");
   await measure("fresh history long prose");
@@ -183,82 +174,28 @@ try {
   assert.ok(code.scrollWidth > code.width, "long code remains locally scrollable");
   assert.equal(await page.locator(".katex").first().evaluate(element => getComputedStyle(element).overflowWrap), "normal");
   await configure({ turns: 1, text: null, shell: true });
-  // Creation groups completed shell calls. Open the visible parent first;
-  // Playwright can otherwise scroll a clipped descendant inside a closed fold.
-  const closedGroup = page.locator('.tool-group__head[aria-expanded="false"]');
-  if (await closedGroup.count()) {
-    await closedGroup.click();
-    await page.locator(".tool-group__body").evaluate(async element => {
-      await Promise.allSettled(element.getAnimations().map(animation => animation.finished));
-    });
-  }
-  await page.waitForSelector(".tool__head");
-  assert.equal(await page.locator(".tool__command").count(), 0, "collapsed command does not mount a viewer");
-  await page.locator(".tool__head").click();
-  await page.waitForSelector(".tool__command .code");
-  await page.locator(".tool__command").evaluate(async element => {
-    const animations = [];
-    for (let parent = element; parent; parent = parent.parentElement) {
-      animations.push(...parent.getAnimations().filter(animation => Number.isFinite(animation.effect?.getComputedTiming().endTime)));
-    }
-    await Promise.allSettled(animations.map(animation => animation.finished));
-  });
-  await measure("expanded shell command");
-  const commandBox = await page.locator(".tool__command pre").evaluate(element => ({
-    width: element.clientWidth, scrollWidth: element.scrollWidth, height: element.clientHeight,
-    whitespace: getComputedStyle(element).whiteSpace, text: element.textContent,
+  await page.locator(".chat-tool [data-disclosure-row]").click();
+  await page.locator(".dsh-ToolRow-inspectButton").click();
+  await page.waitForSelector(".chat-details");
+  // The unified details host opens on the result tab. The raw-record tab is
+  // the contract that contains both the command arguments and full output.
+  await page.locator(".chat-details__tabs [role='tab']").last().click();
+  // The production tool payload is lazy-loaded. Electron can paint the drawer
+  // before that chunk resolves, so wait for the preview instead of sampling
+  // the Suspense fallback as if it were final content.
+  await page.waitForFunction(() => document.querySelector(".chat-details__body")?.textContent?.includes("END_OF_COMMAND"));
+  await measure("overlay tool details");
+  const commandBox = await page.locator(".chat-details__body").evaluate(element => ({
+    width: element.clientWidth, scrollWidth: element.scrollWidth, text: element.textContent,
   }));
-  assert.equal(commandBox.whitespace, "pre-wrap");
-  assert.ok(commandBox.scrollWidth <= commandBox.width + 1 && commandBox.height <= 240, "complete command wraps in a bounded viewport");
-  assert.ok(commandBox.text.includes("END_OF_COMMAND"), "command tail is mounted without truncation");
-  const commandAncestors = await page.locator(".tool__command pre").evaluate(element => {
-    const rows = [];
-    for (let parent = element; parent; parent = parent.parentElement) {
-      const rect = parent.getBoundingClientRect();
-      rows.push({ className: parent.className, top: rect.top, bottom: rect.bottom, height: rect.height,
-        clientHeight: parent.clientHeight, scrollHeight: parent.scrollHeight, scrollTop: parent.scrollTop,
-        overflowY: getComputedStyle(parent).overflowY, style: parent.getAttribute("style") });
-    }
-    return rows;
-  });
-  if (evidence) { await mkdir(evidence, { recursive: true }); await writeFile(path.join(evidence, "command-ancestors.json"), JSON.stringify(commandAncestors, null, 2)); }
-  for (const ancestor of commandAncestors.slice(1)) {
-    if (ancestor.overflowY !== "visible") {
-      assert.ok(ancestor.top <= commandAncestors[0].top + 1 && ancestor.bottom >= commandAncestors[0].bottom - 1,
-        "expanded command is not clipped by " + ancestor.className);
-    }
-  }
-  const outputView = page.locator(".tool__body .code-block").filter({ hasText: "OUTPUT_STAYS_VISIBLE" });
-  assert.equal(await outputView.locator("pre").evaluate(element => getComputedStyle(element).whiteSpace), "pre", "output preserves its original lines");
-  await page.locator(".tool__command pre").hover();
-  await page.mouse.wheel(0, 800);
-  await page.waitForFunction(() => {
-    const pre = document.querySelector(".tool__command pre");
-    return pre.scrollTop + pre.clientHeight >= pre.scrollHeight - 2;
-  });
-  const tailVisible = await page.locator(".tool__command pre").evaluate(pre => {
-    const walker = document.createTreeWalker(pre.querySelector("code"), NodeFilter.SHOW_TEXT);
-    const nodes = [];
-    while (walker.nextNode()) nodes.push(walker.currentNode);
-    let remaining = "END_OF_COMMAND".length;
-    const range = document.createRange();
-    range.setEnd(nodes.at(-1), nodes.at(-1).textContent.length);
-    for (const node of nodes.toReversed()) {
-      if (node.textContent.length >= remaining) { range.setStart(node, node.textContent.length - remaining); break; }
-      remaining -= node.textContent.length;
-    }
-    const bounds = pre.getBoundingClientRect();
-    return range.toString() === "END_OF_COMMAND" && [...range.getClientRects()].every(rect =>
-      rect.left >= bounds.left - 1 && rect.right <= bounds.right + 1 && rect.top >= bounds.top - 1 && rect.bottom <= bounds.bottom + 1);
-  });
-  assert.ok(tailVisible, "native nested scrolling exposes the complete command's last characters");
-  await page.locator(".tool__command").hover();
-  await page.locator(".tool__command .copybtn").click();
+  assert.ok(commandBox.scrollWidth <= commandBox.width + 1, "long tool parameters wrap inside the overlay");
+  assert.ok(commandBox.text.includes("END_OF_COMMAND"), "tool parameter preview retains command tail");
+  await page.locator(".chat-details .copybtn").click();
   await page.waitForFunction(() => window.transcriptLayoutFixture.copied.length === 1);
-  assert.equal(await page.evaluate(() => window.transcriptLayoutFixture.copied[0]), await page.evaluate(() => window.transcriptLayoutFixture.command), "copy preserves the original command");
-  if (evidence) { await mkdir(evidence, { recursive: true }); await page.screenshot({ path: path.join(evidence, "command.png") }); }
-  await page.locator(".tool__head").click();
-  assert.equal(await page.locator(".tool__command").count(), 0);
+  const copiedCommand = await page.evaluate(() => JSON.parse(JSON.parse(window.transcriptLayoutFixture.copied[0]).args).command);
+  assert.equal(copiedCommand, await page.evaluate(() => window.transcriptLayoutFixture.command), "copy loads the exact complete tool payload");
+  await page.keyboard.press("Escape");
+  assert.equal(await page.locator(".chat-details").count(), 0);
   if (electronApp) {
     await setViewport({ width: 1280, height: 900 });
     await configure({ shell: false, text: null, turns: 2, long: true });

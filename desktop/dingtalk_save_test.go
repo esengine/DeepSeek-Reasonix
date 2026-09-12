@@ -149,7 +149,7 @@ func TestSetBotSettingsDingtalkRuntimeOptionsRoundTrip(t *testing.T) {
 		BotName:          "安博特",
 		RequireMention:   true,
 		Model:            "deepseek-flash/deepseek-v4-flash",
-		ToolApprovalMode: "yolo",
+		ToolApprovalMode: "danger-full-access",
 		WorkspaceRoot:    "/tmp/probe-ws",
 	}
 	if err := cfg.SaveTo(config.UserConfigPath()); err != nil {
@@ -161,11 +161,11 @@ func TestSetBotSettingsDingtalkRuntimeOptionsRoundTrip(t *testing.T) {
 	if view.Dingtalk.Model != "deepseek-flash/deepseek-v4-flash" {
 		t.Fatalf("view model = %q, want deepseek-flash", view.Dingtalk.Model)
 	}
-	if view.Dingtalk.ToolApprovalMode != "yolo" {
-		t.Fatalf("view approval = %q, want yolo", view.Dingtalk.ToolApprovalMode)
+	if view.Dingtalk.ToolApprovalMode != "danger-full-access" {
+		t.Fatalf("view permission preset = %q, want danger-full-access", view.Dingtalk.ToolApprovalMode)
 	}
 	view.Dingtalk.Model = "deepseek-flash/deepseek-v4-flash"
-	view.Dingtalk.ToolApprovalMode = "yolo"
+	view.Dingtalk.ToolApprovalMode = "danger-full-access"
 	view.Dingtalk.WorkspaceRoot = "/tmp/probe-ws"
 	if err := app.SetBotSettings(view); err != nil {
 		t.Fatalf("SetBotSettings: %v", err)
@@ -175,8 +175,8 @@ func TestSetBotSettingsDingtalkRuntimeOptionsRoundTrip(t *testing.T) {
 	if got.Bot.Dingtalk.Model != "deepseek-flash/deepseek-v4-flash" {
 		t.Fatalf("model = %q, want deepseek-flash (render must persist)", got.Bot.Dingtalk.Model)
 	}
-	if got.Bot.Dingtalk.ToolApprovalMode != "yolo" {
-		t.Fatalf("toolApprovalMode = %q, want yolo (render must persist)", got.Bot.Dingtalk.ToolApprovalMode)
+	if got.Bot.Dingtalk.ToolApprovalMode != "danger-full-access" {
+		t.Fatalf("toolApprovalMode = %q, want danger-full-access (render must persist)", got.Bot.Dingtalk.ToolApprovalMode)
 	}
 	if got.Bot.Dingtalk.WorkspaceRoot != "/tmp/probe-ws" {
 		t.Fatalf("workspaceRoot = %q, want /tmp/probe-ws (render must persist)", got.Bot.Dingtalk.WorkspaceRoot)

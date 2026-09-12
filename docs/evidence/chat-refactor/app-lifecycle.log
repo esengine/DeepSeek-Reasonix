@@ -1,0 +1,161 @@
+
+> reasonix-desktop-frontend@0.0.0 test:app-lifecycle <repo>/desktop/frontend
+> tsx src/__tests__/app-lifecycle.test.tsx && tsx src/__tests__/committed-command-lifecycle.test.tsx && tsx src/__tests__/committed-command-execution.test.tsx && tsx src/__tests__/navigation-surface-lifecycle.test.tsx && tsx src/__tests__/app-lifecycle-probe.test.ts && tsx src/__tests__/subscription-scope.test.ts && tsx src/__tests__/composer-source-operations.test.tsx && tsx src/__tests__/session-prompt-lifecycle.test.tsx && tsx src/__tests__/desktop-preferences-lifecycle.test.tsx && tsx src/__tests__/onboarding-commands.test.tsx && tsx src/__tests__/topicbar-actions-lifecycle.test.tsx && tsx src/__tests__/decision-slots-lifecycle.test.tsx && tsx src/__tests__/session-experience-settings.test.tsx && tsx src/__tests__/project-topic-lifecycle.test.tsx && tsx src/__tests__/conversation-projection.test.ts && tsx src/__tests__/remote-composer-presentation.test.tsx && tsx src/__tests__/remote-composer-commands.test.tsx && tsx src/__tests__/terminal-panel-commands.test.tsx && tsx src/__tests__/workspace-panel-commands.test.tsx && tsx src/__tests__/desktop-navigation-lifecycle.test.tsx && tsx src/__tests__/runtime-status-lifecycle.test.tsx && tsx src/__tests__/session-control-commands.test.ts && tsx src/__tests__/automation-navigation-lifecycle.test.tsx && tsx src/__tests__/mock-remote-catalog.test.ts && node --import ./scripts/svg-stub-register.mjs --import tsx src/__tests__/topicbar-region.test.tsx && tsx src/__tests__/controller-profile-lifecycle.test.tsx && tsx src/__tests__/session-submission-lifecycle.test.tsx && tsx src/__tests__/pending-plan-revision-lifecycle.test.tsx && tsx src/__tests__/session-undo-lifecycle.test.tsx && tsx src/__tests__/session-clear-commands.test.tsx && tsx src/__tests__/turn-verification-commands.test.tsx && tsx src/__tests__/delivery-continue-commands.test.tsx && tsx src/__tests__/active-tab-mirror.test.tsx && tsx src/__tests__/windows-maximised-sync.test.tsx && tsx src/__tests__/topic-summary-commands.test.tsx && tsx src/__tests__/worktree-merge-commands.test.tsx && tsx src/__tests__/composer-insert-commands.test.tsx && node --test bench/app-memory-evidence.test.mjs && node --test bench/app-memory-shards.test.mjs bench/app-memory-paths.test.mjs && node --test scripts/check-app-layers.test.mjs && node --test scripts/check-desktop-host-boundary.test.mjs && node --test scripts/shell-css.test.mjs && node --test scripts/check-css-syntax.test.mjs
+
+PASS App committed commands and source-bound operation ownership are lifecycle safe
+PASS unmount revokes command authority synchronously
+PASS normal passive setup does not invalidate layout-started work
+PASS committed capture/executor separates source input from lifecycle-owned effects
+PASS navigation receipts are unique, source-bound, and consumed exactly once
+PASS lifecycle probe exposes retained cohorts and duplicate cleanup
+PASS subscription scopes fence queued notifications and release all resources
+composer source operations: source isolation, ABA, identity replacement, lanes, finally and disposal passed
+session prompts: source, prompt identity, replacement, ABA, supersession and disposal passed
+desktop preferences: lightweight snapshot, legacy mirror, warning revision and disposal passed
+onboarding commands: model access, completion, dismissal and disposal passed
+topicbar lifecycle: 128 replacements retain one action group and no orphan DOM
+decision slots: independent Suspense preserves visible siblings and focus
+session experience controls: success, failure snapshot, busy state, legacy backend and keyboard reachability passed
+project/topic commands: stable entry, targeted rename, independent lanes, ABA, cancel and disposal passed
+conversation projection: shared source identity, remote telemetry isolation and local-tool layout policy passed
+remote Composer: real file control, native drop boundary and running guidance preserve source routing
+remote composer commands: management routing, source Goal/send, byte preservation, runtime ports and disposal passed
+terminal commands: remote capability, warm mount exclusion, native key routing and disposal passed
+workspace commands: scoped restoration, Creation, preview/maximize, remote requests and synchronous disposal passed
+desktop navigation: queue ownership, ABA, IM hydrate, dirty-worktree warning, tab resume, failure and disposal passed
+runtime polling: single flight, deterministic timers, terminal counts, source replacement and synchronous disposal passed
+session control commands: canonical background target, active target, replacement, navigation and disposal passed
+automation navigation: accepted-target return, page ABA, exact finally and disposal passed
+mock remote catalog: open, refresh, model, new session, selection and close agree
+An empty string ("") was passed to the src attribute. This may cause the browser to download the whole page again over the network. To fix this, either do not render the element at all or pass null to src instead of an empty string.
+topicbar region: DOM structure, source commands, focus, rename keys and action identity passed
+controller profile lifecycle: committed source, replacement, ordering, ABA, ready restore and disposal passed
+session submission lifecycle: source continuations, Goal atomicity/bytes, replacement, failure, read-only and disposal passed
+pending plan revision lifecycle: source queues, request identity, replacement, ABA and disposal passed
+An update to Probe inside a test was not wrapped in act(...).
+
+When testing, code that causes React state updates should be wrapped into act(...):
+
+act(() => {
+  /* fire events that update state */
+});
+/* assert on the output */
+
+This ensures that you're testing the behavior the user would see in the browser. Learn more at https://react.dev/link/wrap-tests-with-act
+An update to Probe inside a test was not wrapped in act(...).
+
+When testing, code that causes React state updates should be wrapped into act(...):
+
+act(() => {
+  /* fire events that update state */
+});
+/* assert on the output */
+
+This ensures that you're testing the behavior the user would see in the browser. Learn more at https://react.dev/link/wrap-tests-with-act
+session undo lifecycle: code transaction retention, banners, failed rewinds and edit gates passed
+session clear commands: pending lifecycle, local/remote chains, failure notices and empty-target gate passed
+turn verification commands: dock reveal, sequenced requests and reset lifecycle passed
+delivery continue commands: ready gate, goal resume chain, stale-ownership fence and empty-target gate passed
+active tab mirror: commit-following writes, async reads and unmount release passed
+windows maximised sync: lifecycle gating, listener sync, generation fence and store ownership passed
+topic summary commands: identity memo, single-flight fetch, revision refetch and failure clearing passed
+worktree merge commands: overlay state, receipt gate, intent fences and close/finalize chain passed
+composer insert commands: routing, plan-revision target, selection trimming and terminal output chains passed
+✔ deliberately retained cohorts remain detectable even when totals are constant (0.828833ms)
+✔ probe overflow, duplicate IDs and cleanup underflow invalidate evidence (0.085208ms)
+✔ stable owner counters alone cannot establish whole-App retention attribution (0.594709ms)
+✔ a stable tail cannot hide growth earlier in the post-GC sequence (0.077208ms)
+✔ missing or non-finite native counters are invalid evidence (0.101584ms)
+✔ subscriptions retained after a round trip require attribution (0.070125ms)
+✔ persistent post-baseline cohorts remain a qualification blocker (0.051875ms)
+✔ the automated gate blocks on screening failures, not the offline attribution duty (0.107417ms)
+✔ a mid-sequence excursion that fully returns to baseline is an observation, not a blocker (0.079875ms)
+✔ a displaced final tail remains a persistent blocker (0.107917ms)
+✔ an explicit settled tail sample is the authoritative resting state (0.103542ms)
+✔ an unsettled baseline is reported instead of being judged as displacement (0.076875ms)
+✔ an unsettled baseline still blocks sustained growth away from a low point (0.061667ms)
+✔ a settled baseline keeps the displacement check (0.084458ms)
+✔ native objects are not automatically detached DOM (0.121125ms)
+ℹ tests 15
+ℹ suites 0
+ℹ pass 15
+ℹ fail 0
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 42.599292
+✔ all frontend consumers, configuration and tests trigger the soak (0.352292ms)
+✔ known independent backend and documentation changes skip only this mock frontend soak (0.181125ms)
+✔ repository tooling, workflows and the Electron shell do not reach the browser-mocked bundle (0.057542ms)
+✔ unknown paths fail closed and cannot be hidden by a documentation change (0.427167ms)
+✔ three independent full shards preserve the complete protocol and offline attribution (1.719875ms)
+✔ one complete process never satisfies the aggregate protocol (0.208625ms)
+✔ aggregate rejects duplicate shard (0.273208ms)
+✔ aggregate rejects different commit (0.140625ms)
+✔ aggregate rejects different build (0.111917ms)
+✔ aggregate rejects dirty source (0.1035ms)
+✔ aggregate rejects another workflow attempt (0.129042ms)
+✔ aggregate rejects different fixture (0.098041ms)
+✔ aggregate rejects old hydration protocol (0.092833ms)
+✔ aggregate rejects short cycles (0.1115ms)
+✔ aggregate rejects missing checkpoint (0.08675ms)
+✔ aggregate rejects missing heap snapshot (0.112208ms)
+✔ aggregate rejects different browser (0.100708ms)
+✔ aggregate rejects missing checks (0.116ms)
+✔ aggregate rejects page error (0.403ms)
+✔ aggregate rejects persistent DOM drift despite claimed pass (0.148ms)
+✔ aggregate rejects unfinished operations despite claimed pass (0.107416ms)
+✔ aggregate rejects missing token identity (0.139042ms)
+✔ requested head and manifest protocol must match (0.12075ms)
+ℹ tests 23
+ℹ suites 0
+ℹ pass 23
+ℹ fail 0
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 43.850541
+PASS AST layer checks resolve runtime edges and reject transitive boundary violations
+✔ scripts/check-app-layers.test.mjs (144.538375ms)
+ℹ tests 1
+ℹ suites 0
+ℹ pass 1
+ℹ fail 0
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 148.027292
+PASS desktop host boundary gate flags shell-global access outside lib/desktopHost.ts
+✔ scripts/check-desktop-host-boundary.test.mjs (135.853084ms)
+ℹ tests 1
+ℹ suites 0
+ℹ pass 1
+ℹ fail 0
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 139.371208
+✔ browser build keeps the custom property byte-for-byte (0.3585ms)
+✔ electron build rewrites every drag declaration (0.726375ms)
+✔ electron keeps chrome no-drag but does not punch the titlebar with transcript boxes (0.466417ms)
+✔ chrome selector does not match unrelated topicbar or topbar class names (0.0605ms)
+✔ electron stylesheet rewrite leaves transcript boxes out of app-region (7.805708ms)
+✔ shell selection is explicit (0.201958ms)
+ℹ tests 6
+ℹ suites 0
+ℹ pass 6
+ℹ fail 0
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 48.186791
+check-css-syntax: orphaned-selector guard contracts hold
+✔ scripts/check-css-syntax.test.mjs (29.392209ms)
+ℹ tests 1
+ℹ suites 0
+ℹ pass 1
+ℹ fail 0
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 33.022791

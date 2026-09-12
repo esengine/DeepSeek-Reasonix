@@ -19,6 +19,7 @@ func TestBackgroundBashWaitAndOutput(t *testing.T) {
 	m := jobs.NewManager(event.Discard)
 	defer m.Close()
 	ctx := jobs.WithManager(context.Background(), m)
+	ctx = fullAccessBashTestContext(ctx)
 
 	start, err := bash{}.Execute(ctx, []byte(`{"command":"printf hello; sleep 0.3","run_in_background":true}`))
 	if err != nil {
@@ -152,6 +153,7 @@ func TestBackgroundKill(t *testing.T) {
 	m := jobs.NewManager(event.Discard)
 	defer m.Close()
 	ctx := jobs.WithManager(context.Background(), m)
+	ctx = fullAccessBashTestContext(ctx)
 
 	if _, err := (bash{}).Execute(ctx, []byte(`{"command":"sleep 120","run_in_background":true}`)); err != nil {
 		t.Fatalf("bash background: %v", err)

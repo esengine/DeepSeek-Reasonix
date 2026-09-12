@@ -405,7 +405,7 @@ const context: ContextInfo = { used: 0, window: 100, sessionTokens: 0 };
 const effortInfo: EffortInfo = { supported: true, current: "auto", default: "auto", levels: ["auto"] };
 let holdNextListTabs: Promise<void> | undefined;
 let modeDrain: ReturnType<typeof deferred<string[]>> | undefined;
-let toolApprovalModeDrain: ReturnType<typeof deferred<string[]>> | undefined;
+let permissionPresetDrain: ReturnType<typeof deferred<void>> | undefined;
 let composerProfileDrain: ReturnType<typeof deferred<string[]>> | undefined;
 let composerProfileCalls = 0;
 let rejectNextComposerProfile = false;
@@ -434,7 +434,35 @@ const desktopStub = installDesktopHostStub(({
       ReplayPendingPrompts: async () => {},
       SetActiveTab: async () => {},
       SetModeForTab: async () => modeDrain?.promise ?? [],
-      SetToolApprovalModeForTab: async () => toolApprovalModeDrain?.promise ?? [],
+      PermissionSnapshotForTab: async () => ({
+        sessionId: "session-a",
+        generation: 1,
+        revision: 1,
+        preset: "workspace-write",
+        workspaceRoot: "/repo",
+        grants: [],
+        capabilities: {
+          backend: "seatbelt",
+          enforcement: "full",
+          supportedPresets: ["read-only", "workspace-write", "danger-full-access"],
+        },
+      }),
+      SetPermissionPresetForTab: async () => {
+        await (permissionPresetDrain?.promise ?? Promise.resolve());
+        return {
+          sessionId: "session-a",
+          generation: 1,
+          revision: 2,
+          preset: "workspace-write",
+          workspaceRoot: "/repo",
+          grants: [],
+          capabilities: {
+            backend: "seatbelt",
+            enforcement: "full",
+            supportedPresets: ["read-only", "workspace-write", "danger-full-access"],
+          },
+        };
+      },
       SetComposerProfileForTab: async () => {
         composerProfileCalls += 1;
         if (rejectNextComposerProfile) {
@@ -599,10 +627,10 @@ eq(controller?.state.running, false, "fresh idle snapshot releases the blocked s
     desktopStub.emit("agent:event", { kind: "approval_request", tabId: "tab-a", approval: { id: toolApprovalID, tool: "bash", subject: "old tool-approval prompt" } } as WireEvent);
     await flushPromises();
   });
-  toolApprovalModeDrain = deferred<string[]>();
+  permissionPresetDrain = deferred<void>();
   let toolSwitchPromise: Promise<void> | undefined;
   await act(async () => {
-    toolSwitchPromise = controller?.setToolApprovalModeForTab("tab-a", "auto");
+    toolSwitchPromise = controller?.setToolApprovalModeForTab("tab-a", "workspace-write");
     await flushPromises();
   });
   await act(async () => {
@@ -611,11 +639,11 @@ eq(controller?.state.running, false, "fresh idle snapshot releases the blocked s
     await flushPromises();
   });
   await act(async () => {
-    toolApprovalModeDrain?.resolve([toolApprovalID]);
+    permissionPresetDrain?.resolve();
     await toolSwitchPromise;
     await flushPromises();
   });
-  eq(controller?.state.approval?.subject, "new tool-approval prompt", "a late SetToolApprovalModeForTab drain cannot dismiss a new same-id prompt");
+  eq(controller?.state.approval?.subject, "new tool-approval prompt", "a late SetPermissionPresetForTab drain cannot dismiss a new same-id prompt");
 
   const profileApprovalID = "profile-drain-1";
   await act(async () => {

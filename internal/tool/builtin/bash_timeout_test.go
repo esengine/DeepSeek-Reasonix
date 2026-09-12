@@ -16,7 +16,7 @@ func TestBashForegroundTimeoutConfig(t *testing.T) {
 	b := bash{shell: sh, timeout: 150 * time.Millisecond}
 
 	start := time.Now()
-	out, err := b.Execute(context.Background(), argsJSON(t, map[string]any{"command": longSleepCommand(sh)}))
+	out, err := b.Execute(fullAccessBashTestContext(t.Context()), argsJSON(t, map[string]any{"command": longSleepCommand(sh)}))
 	elapsed := time.Since(start)
 	if err == nil {
 		t.Fatalf("expected timeout error, got nil (out=%q)", out)
@@ -33,6 +33,7 @@ func TestBashExplicitZeroTimeoutDoesNotCapForeground(t *testing.T) {
 	sh := sandbox.ResolveShell("", "", nil)
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
+	ctx = fullAccessBashTestContext(ctx)
 
 	start := time.Now()
 	out, err := (bash{shell: sh, timeout: 0}).Execute(ctx, argsJSON(t, map[string]any{"command": oneSecondCommand(sh)}))
@@ -52,7 +53,7 @@ func TestWorkspacePassesBashTimeout(t *testing.T) {
 	sh := sandbox.ResolveShell("", "", nil)
 	b := byName(Workspace{Dir: t.TempDir(), BashTimeout: 150 * time.Millisecond}.Tools())["bash"]
 
-	out, err := b.Execute(context.Background(), argsJSON(t, map[string]any{"command": longSleepCommand(sh)}))
+	out, err := b.Execute(fullAccessBashTestContext(t.Context()), argsJSON(t, map[string]any{"command": longSleepCommand(sh)}))
 	if err == nil {
 		t.Fatalf("expected workspace bash timeout, got nil (out=%q)", out)
 	}

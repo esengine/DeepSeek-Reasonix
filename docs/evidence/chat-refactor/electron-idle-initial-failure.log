@@ -1,0 +1,18 @@
+node:internal/modules/run_main:107
+    triggerUncaughtException(
+    ^
+
+AssertionError [ERR_ASSERTION]: settled layout queue converges
+
+6 !== 5
+
+    at file://<repo>/desktop/frontend/bench/chat-transcript.mjs:168:14 {
+  generatedMessage: false,
+  code: 'ERR_ASSERTION',
+  actual: 6,
+  expected: 5,
+  operator: 'strictEqual',
+  diff: 'simple'
+}
+
+Node.js v24.19.0

@@ -6,7 +6,7 @@ export const isolatedGroups = ["agent", "boot", "control"];
 const smokeRoots = [
   "appidentity", "checkpoint", "cli", "desktoplauncher", "extension/sidecar",
   "filelock", "fileutil", "hook", "instruction", "mcplaunch", "notify", "proc",
-  "remote", "repair", "sandbox", "sessioncatalog", "sysproxy", "workspacelease",
+  "remote", "repair", "sandbox", "sessioncatalog", "sysproxy", "winsandbox", "workspacelease",
 ].map(name => `reasonix/internal/${name}`).concat("reasonix/cmd");
 const beneath = (pkg, root) => pkg === root || pkg.startsWith(`${root}/`);
 

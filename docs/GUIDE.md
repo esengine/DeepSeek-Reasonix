@@ -26,6 +26,7 @@ Provider model capability metadata is documented in
 - [Desktop hooks](#desktop-hooks)
 - [Keyboard shortcuts](#keyboard-shortcuts)
 - [Permissions & sandbox](#permissions--sandbox)
+- [File deliverables and the `present` tool](./PRESENT_TOOL.md)
 - [Capability diagnostics](#capability-diagnostics)
 - [Plugins (MCP)](#plugins-mcp)
 - [Slash commands](#slash-commands)
@@ -493,12 +494,11 @@ loading model are documented in [the Chinese desktop hooks guide](./DESKTOP_HOOK
 ## Keyboard shortcuts
 
 Shortcuts are documented by client because users usually look for the keys that
-work in the surface they are using. Desktop keeps its Plan toggle, while the CLI
-cycles Ask, Auto, and Plan with `Shift+Tab`. Desktop uses `Cmd+Y` on macOS or
-`Ctrl+Y` elsewhere for YOLO by default. If YOLO is rebound on Windows/Linux,
-`Ctrl+Y` becomes the standard composer redo fallback. Desktop paste stays on the
-platform paste key; in the CLI, terminal-native text paste and
-application-owned image paste use separate shortcuts.
+work in the surface they are using. `Shift+Tab` toggles the Plan collaboration
+workflow. Permission presets are selected explicitly from the composer menu and
+are never changed by a typing shortcut. Desktop paste stays on the platform
+paste key; in the CLI, terminal-native text paste and application-owned image
+paste use separate shortcuts.
 
 `[ui].shortcut_layout` is still accepted for old configs, but the shortcut
 behavior below is unified across layouts.
@@ -544,10 +544,9 @@ Composer shortcuts:
 | --- | --- | --- |
 | `Enter` | Sends the current message | IME composition confirmation is left alone. |
 | `Shift+Enter` | Inserts a newline | The composer keeps focus. |
-| `Shift+Tab` | Toggles Plan on/off | Plan changes the workflow instruction; built-in writers keep the active Ask/Auto/YOLO and Sandbox boundary, while MCP writer/destructive targets stay hard-blocked for the whole planning phase. |
+| `Shift+Tab` | Toggles Plan on/off | Plan changes the workflow instruction while the selected permission preset remains active. |
 | `Cmd+Z` on macOS, `Ctrl+Z` on Windows/Linux | Undoes the latest composer edit | Native typing stays in the WebView history; Reasonix-managed paste, cut, folded blocks, and structured tokens are restored as complete transactions. |
-| `Cmd+Shift+Z` on macOS, `Ctrl+Shift+Z` on Windows/Linux | Redoes the latest composer edit | On Windows/Linux, `Ctrl+Y` is also accepted after the YOLO shortcut has been rebound. |
-| `Cmd+Y` / `Ctrl+Y` (default) | Toggles YOLO on/off | Turning YOLO off restores the previous Ask/Auto base when known. The current binding is shown in **Settings → Shortcuts**. |
+| `Cmd+Shift+Z` on macOS, `Ctrl+Shift+Z` on Windows/Linux | Redoes the latest composer edit | Uses the platform-native editing history. |
 | `Cmd+V` on macOS, `Ctrl+V` on Windows/Linux | Pastes clipboard content | Clipboard images are attached; images can also be dropped into the composer. On official DeepSeek, `deepseek-flash` and `deepseek-v4-flash` accept images natively; V4 Pro stays text-only. |
 | Plain `Up` / `Down` at the prompt boundary | Recalls older or newer submitted prompts | Modified arrows and native text navigation stay with the textarea. |
 | `Esc` while a turn is running | Cancels the running turn | If the turn has not produced a response yet, the draft is restored. |
@@ -559,8 +558,8 @@ Menus and controls:
 | `Up` / `Down` in slash, `@`, or past-chat menus | Moves the highlighted item | Past-chat search uses the same navigation keys. |
 | `Enter` / `Tab` in those menus | Accepts the highlighted item | Directory-like entries can keep the menu open for the next level. |
 | `Esc` in those menus | Closes the current menu or returns from past-chat search | Regular typing continues after the menu closes. |
-| Ask / Auto / YOLO approval controls | Picks the tool approval posture directly | Clicking these controls is unchanged by keyboard shortcuts. |
-| Tool approval card | `Left` / `Right`, `Enter`, `1`-`4`, `Esc` | Move the highlighted action, confirm it, pick a numbered action, or deny. The default highlighted action is Allow once. |
+| Read only / Workspace write / Full access | Selects the current session permission preset | Settings controls only the default for new sessions. |
+| Tool approval card | `Left` / `Right`, `Enter`, `1`-`3`, `Esc` | Move between Allow once, Allow for this session, and Deny. The default is Allow once. |
 | Plan approval card | `Left` / `Right`, `Enter`, `1`-`3`, `Esc` | Move between Revise plan, Start execution, and Exit plan. The default highlighted action is Start execution. |
 | Plan control | Toggles Plan on/off | Same mode as `Shift+Tab`. |
 | Goal item in the collaboration menu | Starts, views, or clears Goal | Goal is not in any keyboard cycle. |
@@ -574,7 +573,7 @@ cursor, while wheel events in the transcript keep scrolling the conversation.
 Use `/theme auto|light|dark` to select the background mode, or `/theme <style>`
 to select one of the named accent palettes shown by bare `/theme`.
 
-The responsive footer keeps the active Ask/Auto/Plan or YOLO posture and current
+The responsive footer keeps the active permission preset, Plan state, and current
 interaction state on the left. On wider terminals, model and effort
 stay together on the right; a second row shows available Git identity, cache hit
 rate, context use, compaction headroom, jobs, and balance. `ready` is the idle
@@ -616,9 +615,8 @@ Mode and display shortcuts:
 
 | Key or command | What it does | Notes |
 | --- | --- | --- |
-| `Shift+Tab` | Cycles Ask → Auto → Plan → Ask | YOLO remains outside this composer-mode cycle; the footer shows the active mode. |
-| `Ctrl+Y` | Toggles YOLO on/off | Turning YOLO off restores the previous Ask/Auto base when known. Terminals that forward Command/Super may also send `Cmd+Y`, but `Ctrl+Y` is the reliable terminal shortcut. |
-| `--yolo`, `--dangerously-skip-permissions` | Starts chat in YOLO | Same runtime mode as `Ctrl+Y`. |
+| `Shift+Tab` | Toggles Plan on/off | The active permission preset does not change. |
+| `--permission-mode read-only|workspace-write|danger-full-access` | Selects the initial permission preset | New sessions default to `workspace-write`. |
 | `/theme [auto|light|dark|style]` | Shows or switches the CLI theme | Bare `/theme` lists background modes and named accent palettes. The choice is saved to the user config; `REASONIX_THEME` and `REASONIX_THEME_STYLE` can override it for one run. |
 | `Ctrl+O` | Toggles verbose reasoning display | Also available through `/verbose`. |
 | `Ctrl+B` | Expands or collapses long shell output | Long shell-output hint lines can also be clicked in the transcript; text selection is handled in-app while the full-screen TUI has mouse reporting enabled. |
@@ -636,47 +634,32 @@ Picker and approval shortcuts:
 | Model, provider, or resume picker | `Up`/`Down` or `Ctrl+P`/`Ctrl+N`; `j`/`k` while search is empty; type to filter; `Enter`; `Esc` | Search, select an item, or close the picker. Once search input starts, `j`/`k` become query text. `/provider` opens that provider's model list. |
 | MCP import picker | `Up`/`Down` or `j`/`k`, `Space`, `Enter`, `Esc` / `Ctrl+C` | Move, select servers, import selected servers, or cancel. |
 | MCP manager | `Up`/`Down` or `j`/`k`, `Enter`, `Left`/`Right` or `h`/`l`, `r`, number keys, `q` / `Ctrl+C` | Navigate server lists/details, refresh, choose actions, or close. |
-| `/clear` confirmation | Arrow keys or `j`/`k` / `Tab`, `Enter`, `y`, `n`, `Esc` / `Ctrl+C` | Toggle Clear/Cancel, confirm clear, or cancel. In YOLO mode `/clear` clears immediately without asking. |
+| `/clear` confirmation | Arrow keys or `j`/`k` / `Tab`, `Enter`, `y`, `n`, `Esc` / `Ctrl+C` | Toggle Clear/Cancel, confirm clear, or cancel. |
 
 Mode meanings:
 
 | Mode | Meaning |
 | --- | --- |
-| Ask | Prompts for fallback writer approvals. |
-| Auto | Auto-allows fallback approvals, including interactive `remember`/`forget`; explicit `ask` / `deny` rules still apply. |
-| YOLO | Skips ordinary tool approval prompts, including `remember`/`forget`; `deny`, user `ask` questions, and plan approval prompts still wait. |
-| Plan | Plans before implementation. State-changing actions are blocked until approval, including Yolo, proxy tools, and subagents. After approval, ordinary permissions and Sandbox rules still apply. |
+| Read only | Reads the workspace; writes and external side effects require a scoped authorization. |
+| Workspace write | Writes inside the workspace and private session temporary directory. This is the default. |
+| Full access | Removes ordinary filesystem confinement and prompts; explicit deny rules and protected application state still apply. |
+| Plan | Plans before implementation. State-changing actions are blocked until approval, including Full access, proxy tools, and subagents. After approval, ordinary permissions and sandbox rules still apply. |
 | Goal | Pursues a saved objective until complete, blocked, or cleared. |
 
 ## Permissions & sandbox
 
-Permissions gate each tool call: `deny` > `ask` > `allow` > fallback. Bash and
-file mutation tools require approval by default; read-only tools generally do
-not. Approvals are stored and matched as permission rules, not button labels:
-for example `Bash(npm run build)`, `Bash(npm run test:*)`, and `Edit(docs/**)`.
-`reasonix` can grant Bash as an exact command or as a conservative command
-prefix (for example `Bash(go test:*)`), while file-editing tools share session
-edit grants and persist path-scoped rules such as `Edit(src/app.go)`.
-Parameter/arithmetic expansions, assignments, heredocs, file redirects, and globs cannot reuse a bare
-Bash, prefix, or glob allow; a user-approved reusable choice saves the whole
-command as `Bash=<literal>`. They still follow normal fallback, so Auto executes
-them without an extra prompt. Command/process substitution, a dynamic command
-name, `eval`, `source`, shell `-c`, inline runtime code, and unparseable forms
-require a human in interactive Ask/Auto. Headless Ask/Auto/DontAsk reject that
-nested/indirect class unless an exact literal exists; YOLO may bypass it.
-Advanced users can set `[permissions] allow_dynamic_bash = true` to let an
-Allow fallback, including Auto, cover that class; explicit `ask` and `deny`
-rules still take precedence.
-Because a headless run has no approval UI, the default Ask posture also fails
-closed on ordinary writer fallback and explicit ask rules. Use
-`reasonix run --auto ...`, `-y`, or `--permission-mode auto` when unattended
-automation should allow ordinary writer fallback; configured `ask` and `deny`
-rules always remain authoritative.
+The active permission preset supplies the enforced filesystem boundary for
+Bash, file tools, background processes, and subagents. `workspace-write` runs
+ordinary builds, tests, pipes, command substitutions, and inline scripts without
+syntax-based prompts while confining writes to the workspace and private session
+temporary directory. A write outside that boundary can be allowed once or for
+the displayed directory during the current session. Permanent approval is not
+offered.
 
-Ask is not read-only: after approval, a writer can still run. Permissions decide
-whether to allow or prompt; the Sandbox is the enforced capability boundary.
-The sandbox remains a second boundary after authorization; confinement cannot
-make ambiguous command parsing safe to authorize automatically.
+Configured `deny` rules always win. Installed MCP servers and plugins are trusted
+in `workspace-write`; unknown side-effect capabilities in `read-only` still need
+authorization. If the platform sandbox is unavailable, restricted presets fail
+closed instead of offering an unconfined retry.
 
 Permissions are *policy* (which calls to allow / prompt). The **sandbox** is
 *enforcement*: they are two layers. A permitted call still cannot write outside
@@ -948,9 +931,7 @@ locally — `/help` lists them all. Built-in **skills** such as `/init`,
 at `reasonix doctor capabilities` (see
 [Capability diagnostics](./CAPABILITY_DIAGNOSTICS.md)). `/new` starts a new
 session while saving the previous transcript for history/resume; `/clear`
-discards the current context without saving it — it asks for confirmation,
-except in YOLO mode where it clears immediately (YOLO already opts out of
-confirmations). `/tree`
+discards the current context without saving it and asks for confirmation. `/tree`
 shows saved conversation branches, `/branch [name]` forks the current
 conversation tip, `/branch <turn> [name]` forks from an earlier checkpointed
 turn, and `/switch <id|name>` loads another branch. **Custom commands** are
@@ -1014,13 +995,10 @@ schemas. Use `/memory recall` to see the selected IDs, scores, reasons,
 freshness, budget, and suppression decision.
 
 New, bounded, non-sensitive project/reference facts can be created
-automatically with no setup or approval click. In Ask, global facts, user
-preferences, feedback, updates, duplicates, sensitive/oversized content, and
-every `forget` require explicit confirmation. Interactive Auto treats these
-memory tools as normal fallback operations while preserving explicit `ask` and
-`deny` rules; interactive YOLO bypasses memory ask prompts but still honors
-deny. The storage layer makes the automatic create grant create-only, so it
-cannot overwrite a fact that appears concurrently.
+automatically with no setup or approval click. Other memory changes follow the
+active permission preset and explicit `ask` / `deny` rules. The storage layer
+makes the automatic create grant create-only, so it cannot overwrite a fact
+that appears concurrently.
 A top-level headless controller may use the same one-shot low-risk create path;
 sub-agents and headless surfaces without the owning scoped controller fail closed.
 

@@ -1,0 +1,106 @@
+/* Ported from DeepSeek Harness c291e7961a; MIT, see LICENSE. */
+.dsh-ReasoningRow-root {
+  display: flex;
+  flex-direction: column;
+}
+
+.dsh-ReasoningRow-root:not([data-expanded]) {
+  contain: size layout;
+  height: calc(24px + var(--dsh-content-font-delta, 0px));
+}
+
+.dsh-ReasoningRow-row {
+  position: relative;
+  overflow: hidden;
+}
+
+.dsh-ReasoningRow-root[data-state='running'] .dsh-ReasoningRow-row::after {
+  content: '';
+  position: absolute;
+  inset-block: 0;
+  left: 0;
+  width: 300px;
+  background: linear-gradient(
+    90deg,
+    transparent 0%,
+    color-mix(in srgb, var(--dsw-alias-bg-base) 60%, transparent) 55%,
+    transparent 100%
+  );
+  animation: dsh-reasoning-row-sweep 2.6s ease-out infinite;
+  pointer-events: none;
+}
+
+@keyframes dsh-reasoning-row-sweep {
+  0% { left: -300px; }
+  90%, 100% { left: 100%; }
+}
+
+.dsh-ReasoningRow-leading {
+  flex-shrink: 0;
+}
+
+.dsh-ReasoningRow-chevron {
+  color: var(--dsw-alias-label-secondary);
+}
+
+.dsh-ReasoningRow-title {
+  font-weight: 400;
+}
+
+.dsh-ReasoningRow-separator {
+  flex: none;
+  width: 2px;
+  height: 2px;
+  margin: 0 8px;
+  border-radius: 1px;
+  background: var(--dsw-alias-label-caption);
+}
+
+/* Think text reads the secondary tier — one step under the body size
+   (setting −1 at ≤14, setting −2 above), shared with every flow-row title
+   and summary. */
+.dsh-ReasoningRow-summary {
+  min-width: 0;
+  overflow: hidden;
+  flex: 1 1 auto;
+  color: var(--dsw-alias-label-tertiary);
+  font-size: var(--dsh-content-font-size-secondary, 13px);
+  line-height: calc(20px + var(--dsh-content-font-delta-secondary, 0px));
+  white-space: nowrap;
+}
+
+.dsh-ReasoningRow-summaryText {
+  display: block;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.dsh-ReasoningRow-summary[data-follow-end] {
+  display: flex;
+  justify-content: flex-end;
+}
+
+.dsh-ReasoningRow-summary[data-follow-end] .dsh-ReasoningRow-summaryText {
+  flex: 0 0 auto;
+  width: max-content;
+  min-width: 100%;
+  overflow: visible;
+  text-align: start;
+  text-overflow: clip;
+}
+
+.dsh-ReasoningRow-thinkBody {
+  /* Indent under the title, which starts at leading (16 + delta) + gap 6. */
+  padding: 4px 0 4px calc(22px + var(--dsh-content-font-delta, 0px));
+  color: var(--dsw-alias-label-tertiary);
+  font-size: var(--dsh-content-font-size-secondary, 13px);
+  line-height: calc(20px + var(--dsh-content-font-delta-secondary, 0px));
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .dsh-ReasoningRow-root[data-state='running'] .dsh-ReasoningRow-row::after {
+    animation: none;
+  }
+}

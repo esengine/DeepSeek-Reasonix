@@ -6,7 +6,7 @@ import { app, onRemoteTabEvent, onRemoteTabState } from "./bridge";
 import type { CancelOutcome } from "./inboxCancel";
 import { historyMessagesToItems, initialState, reducer, type ControllerLiveStore, type State } from "./useController";
 import { TurnEventProjector } from "./turnEventProjection";
-import { resolveSnapshotItems, StaleCut, TranscriptSnapshotClient } from "./transcriptSnapshotClient";
+import { rebaseSnapshotContentPatches, resolveSnapshotItems, resolveSnapshotTool, StaleCut, TranscriptSnapshotClient } from "./transcriptSnapshotClient";
 import { getTranscriptStore } from "./transcriptStore";
 import { isAuthoritativeRemoteStatus, remoteCheckpoints, remoteComposerState, remoteGoalRuntime, remoteStatusToAction, type RemoteStatus } from "./remoteStatus";
 import type { CollaborationMode, CommandInfo, EffortInfo, GoalRuntime, GoalStatus, HistoryMessage, QualityFloor, RemoteTabStateValue, TabMeta, ToolApprovalMode, WireEvent } from "./types";
@@ -225,13 +225,14 @@ export function useRemoteSession(tabId: string | undefined, initial?: RemoteTabS
     projector.bindReset(async () => loadModern());
     const offContent = getTranscriptStore().registerContentResolver(tabId, async (entryId, field) => {
       try {
+      if (field === "tool") return await resolveSnapshotTool(snapshots, tabId, entryId, () => cancelled ? undefined : transcriptRef.current);
       const record = await resolveSnapshotItems(snapshots, tabId, entryId, () => cancelled ? undefined : transcriptRef.current, historyMessagesToItems,
-        (patches) => setTranscript((current) => reducer(current, { type: "history_items_patch", patches })));
+        (patches) => setTranscript((current) => reducer(current, { type: "history_items_patch", patches: rebaseSnapshotContentPatches(current, patches, field) })), field);
       return field === "reasoning" ? record?.message.reasoning : record?.message.content;
       } catch (error) {
         if (!(error instanceof StaleCut)) throw error;
         await loadModern();
-        return undefined;
+        throw error;
       }
     }, () => modern);
     olderRef.current = async () => {

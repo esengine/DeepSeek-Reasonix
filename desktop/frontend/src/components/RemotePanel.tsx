@@ -1,11 +1,12 @@
 import { useAppNavigationStore } from "../store/appNavigation";
-import { useCallback, useEffect, useRef, useState, type ReactNode } from "react";
+import { useCallback, useEffect, useRef, useState, useSyncExternalStore, type ReactNode } from "react";
 
 import { app } from "../lib/bridge";
 import { useT } from "../lib/i18n";
 import { isRemoteDegradedWarning, isRemoteTerminalFailure, remoteConnectionErrorSummaryKey } from "../lib/remoteErrors";
 import { resolveRemoteWorkspace } from "../lib/remoteWorkspace";
 import { publishNavigationIntent } from "../lib/useNavigationIntentFence";
+import { presentedFileRequestSnapshot, subscribePresentedFileRequest } from "../lib/presentedFileNavigation";
 import { useRemoteStore, type RemoteExplorerTab } from "../store/remote";
 import type { RemoteDirEntry, RemoteForwardView } from "../lib/types";
 import { CodeViewer } from "./CodeViewer";
@@ -23,6 +24,11 @@ export function RemotePanel({ onClose }: { onClose: () => void }) {
   const setTab = useRemoteStore((s) => s.setExplorerTab);
   const status = useRemoteStore((s) => (hostId ? s.statuses[hostId] : undefined));
   const setSettingsTarget = useAppNavigationStore((s) => s.setSettingsTarget);
+  const presentedRequest = useSyncExternalStore(
+    subscribePresentedFileRequest,
+    presentedFileRequestSnapshot,
+    presentedFileRequestSnapshot,
+  );
 
   if (!hostId) return null;
   const connected = status?.state === "connected" || status?.state === "degraded";
@@ -86,7 +92,13 @@ export function RemotePanel({ onClose }: { onClose: () => void }) {
       </nav>
 
       <div className="remote-panel__body">
-        {tab === "files" && <RemoteFilesTab hostId={hostId} connected={connected} />}
+        {tab === "files" && (
+          <RemoteFilesTab
+            hostId={hostId}
+            connected={connected}
+            revealRequest={presentedRequest?.ref.hostId === hostId ? presentedRequest : null}
+          />
+        )}
         {tab === "ports" && <RemotePortsTab hostId={hostId} connected={connected} />}
         {tab === "server" && <RemoteServerTab hostId={hostId} connected={connected} defaultWorkspace={host?.defaultWorkspace} />}
       </div>
@@ -96,11 +108,16 @@ export function RemotePanel({ onClose }: { onClose: () => void }) {
 
 // ── Files tab: lean lazy tree + preview/edit ──
 
-function RemoteFilesTab({ hostId, connected }: { hostId: string; connected: boolean }) {
+function RemoteFilesTab({ hostId, connected, revealRequest }: {
+  hostId: string;
+  connected: boolean;
+  revealRequest: { id: number; ref: { path: string; source: "presented" | "workspace" }; action: "preview" | "reveal-tree" | "source" } | null;
+}) {
   const t = useT();
   const [entriesByDir, setEntriesByDir] = useState<Record<string, RemoteDirEntry[]>>({});
   const [openDirs, setOpenDirs] = useState<Set<string>>(new Set());
   const [selected, setSelected] = useState<string | null>(null);
+  const [presentedSelection, setPresentedSelection] = useState<string | null>(null);
   const [loadErr, setLoadErr] = useState("");
   const rootPath = "."; // remote home; RealPath resolves it server-side
 
@@ -120,6 +137,32 @@ function RemoteFilesTab({ hostId, connected }: { hostId: string; connected: bool
   useEffect(() => {
     if (connected) void loadDir(rootPath);
   }, [connected, loadDir]);
+
+  const lastRevealID = useRef(0);
+  useEffect(() => {
+    if (!connected || !revealRequest || revealRequest.id === lastRevealID.current) return;
+    lastRevealID.current = revealRequest.id;
+    const target = revealRequest.ref.path;
+    setSelected(target);
+    setPresentedSelection(revealRequest.ref.source === "presented" ? target : null);
+
+    const slashPath = target.replaceAll("\\\\", "/");
+    const parts = slashPath.split("/").filter(Boolean);
+    const absolute = slashPath.startsWith("/");
+    const ancestors: string[] = [];
+    for (let i = 1; i < parts.length; i += 1) {
+      ancestors.push(`${absolute ? "/" : ""}${parts.slice(0, i).join("/")}`);
+    }
+    const requestID = revealRequest.id;
+    void (async () => {
+      for (const dir of ancestors) {
+        if (lastRevealID.current !== requestID) return;
+        await loadDir(dir);
+        if (lastRevealID.current !== requestID) return;
+        setOpenDirs(prev => new Set(prev).add(dir));
+      }
+    })();
+  }, [connected, loadDir, revealRequest]);
 
   const toggleDir = (path: string) => {
     setOpenDirs((prev) => {
@@ -166,16 +209,33 @@ function RemoteFilesTab({ hostId, connected }: { hostId: string; connected: bool
     <div className="remote-files">
       <div className="remote-files__tree" role="tree">
         {loadErr && <p className="remote-panel__error" role="alert">{loadErr}</p>}
+        {presentedSelection && (
+          <button
+            className="remote-tree__row is-selected remote-tree__presented"
+            onClick={() => setSelected(presentedSelection)}
+            role="treeitem"
+            title={presentedSelection}
+          >
+            {presentedSelection.split(/[\\/]/).filter(Boolean).slice(-1)[0] || presentedSelection}
+          </button>
+        )}
         <ul>{renderDir(rootPath, 0)}</ul>
       </div>
       <div className="remote-files__view">
-        {selected ? <RemoteFileView hostId={hostId} path={selected} connected={connected} /> : null}
+        {selected ? (
+          <RemoteFileView
+            hostId={hostId}
+            path={selected}
+            connected={connected}
+            forceReadOnly={selected === presentedSelection}
+          />
+        ) : null}
       </div>
     </div>
   );
 }
 
-function RemoteFileView({ hostId, path, connected }: { hostId: string; path: string; connected: boolean }) {
+function RemoteFileView({ hostId, path, connected, forceReadOnly = false }: { hostId: string; path: string; connected: boolean; forceReadOnly?: boolean }) {
   const t = useT();
   const [body, setBody] = useState("");
   const [draft, setDraft] = useState<string | null>(null);
@@ -200,7 +260,7 @@ function RemoteFileView({ hostId, path, connected }: { hostId: string; path: str
     void load();
   }, [load]);
 
-  const editable = connected && !binary && !truncated && !err;
+  const editable = !forceReadOnly && connected && !binary && !truncated && !err;
   const dirty = draft !== null && draft !== body;
 
   const save = async (force: boolean) => {

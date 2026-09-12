@@ -4,7 +4,6 @@ import { useT } from "../lib/i18n";
 import { useCollapseAnimation } from "../lib/useCollapseAnimation";
 import type { Item } from "../lib/useController";
 import { ToolCard } from "./ToolCard";
-import { useTranscriptUserResizeIntent } from "./TranscriptLayoutIntentContext";
 import { useWorkProcessPresentation } from "../lib/sessionExperience";
 
 type ToolItem = Extract<Item, { kind: "tool" }>;
@@ -17,7 +16,6 @@ type ReadOnlyBatchProps = {
 
 export const ReadOnlyBatch = memo(function ReadOnlyBatch({ items, subcalls, tabId }: ReadOnlyBatchProps) {
   const t = useT();
-  const beginUserResize = useTranscriptUserResizeIntent();
   const presentation = useWorkProcessPresentation();
   const [open, setOpen] = useState(presentation.keepExpandedAfterCompletion);
   const userOverridden = useRef(false);
@@ -49,7 +47,7 @@ export const ReadOnlyBatch = memo(function ReadOnlyBatch({ items, subcalls, tabI
       data-entrance={items[0]?.id}
       data-transcript-layout-variant={open ? "tool-batch-expanded" : "tool-batch-collapsed"}
     >
-      <button type="button" className="reasoning__head" onClick={() => { beginUserResize(); userOverridden.current = true; setOpen((v) => !v); }} aria-expanded={open}>
+      <button type="button" className="reasoning__head" onClick={() => {  userOverridden.current = true; setOpen((v) => !v); }} aria-expanded={open}>
         <ChevronRight className={`reasoning__chevron${open ? " reasoning__chevron--open" : ""}`} size={12} />
         <span className="readonly-batch__label" data-creation-label={t("creation.toolCallsLabel")}>{label}</span>
       </button>

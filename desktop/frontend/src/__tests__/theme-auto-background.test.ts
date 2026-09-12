@@ -7,6 +7,7 @@ import { fileURLToPath } from "node:url";
 const testDir = dirname(fileURLToPath(import.meta.url));
 const themeSource = readFileSync(resolve(testDir, "../lib/theme.ts"), "utf8");
 const stylesSource = readFileSync(resolve(testDir, "../styles.css"), "utf8");
+const chatTranscriptSource = readFileSync(resolve(testDir, "../components/ChatTranscript.css"), "utf8");
 
 let passed = 0;
 let failed = 0;
@@ -96,23 +97,12 @@ ok(
   "auto light mode keeps workbench panel surfaces aligned with forced light mode",
 );
 
-const creationAssistantLightRule = ':root[data-theme="light"] .app--creation .msg--assistant .msg__body';
-const creationAssistantAutoLightRule = ':root:not([data-theme]) .app--creation .msg--assistant .msg__body';
-const creationAssistantLightIndex = stylesSource.indexOf(creationAssistantLightRule);
-const creationAssistantAutoLightIndex = stylesSource.indexOf(creationAssistantAutoLightRule);
-const creationAssistantLightBlock = blockAfter(stylesSource, creationAssistantLightRule);
-const creationAssistantAutoLightBlock = blockAfter(stylesSource, creationAssistantAutoLightRule);
-
-ok(creationAssistantLightIndex >= 0, "creation assistant text has an explicit light-mode color adjustment");
-ok(
-  creationAssistantAutoLightIndex > creationAssistantLightIndex,
-  "creation assistant text mirrors the light-mode color adjustment for auto light mode",
-);
-ok(
-  creationAssistantLightBlock.includes("color-mix(in srgb, var(--fg) 90%, var(--bg))") &&
-    creationAssistantAutoLightBlock.includes("color-mix(in srgb, var(--fg) 90%, var(--bg))"),
-  "creation assistant auto light text color matches forced light mode",
-);
+const transcriptBlock = blockAfter(chatTranscriptSource, ".chat-transcript");
+const assistantBlock = blockAfter(chatTranscriptSource, '.chat-node[data-chat-kind="assistant"]');
+ok(transcriptBlock.includes("color: var(--fg)"), "new transcript inherits the active theme foreground token");
+ok(assistantBlock.includes("color: var(--fg)"), "assistant nodes use the active theme foreground token");
+ok(!chatTranscriptSource.includes("color-mix(in srgb, var(--fg) 90%, var(--bg))"),
+  "assistant text no longer needs a creation-mode light-theme override");
 
 console.log(`\n${passed} passed, ${failed} failed, ${passed + failed} total`);
 if (failed > 0) process.exit(1);

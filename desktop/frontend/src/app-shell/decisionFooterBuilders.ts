@@ -250,7 +250,7 @@ export type ComposerSurfaceInput = {
     submitDisabledReason?: string;
   };
   base: ComposerBase;
-  tab: { readOnly?: boolean; sessionPath?: string; remote?: { hostId: string; workspace: string } } | undefined;
+  tab: { readOnly?: boolean; sessionPath?: string; workspaceRoot?: string; remote?: { hostId: string; workspace: string } } | undefined;
   tabId: string | undefined;
   profile: ReturnType<typeof useComposerProfileProjection>;
   router: { handleSend: ComposerProps["onSend"]; handleSteer: ComposerProps["onSteer"] };
@@ -292,6 +292,7 @@ export function buildComposerSurface(input: ComposerSurfaceInput): DecisionFoote
       toolApprovalMode: profile.toolApprovalMode,
       goal: profile.goal,
       tabId: input.tabId,
+      workspaceRoot: input.tab?.workspaceRoot,
       onSend: view.remote ? remoteComposer.send : router.handleSend,
       onInvocationMetadataChange: input.onInvocationMetadataChange,
       onSteer: router.handleSteer,
@@ -300,7 +301,6 @@ export function buildComposerSurface(input: ComposerSurfaceInput): DecisionFoote
       onSetMode: modes.applyMode,
       onSetCollaborationMode: goals.setCollaborationModeFromUi,
       onSetToolApprovalMode: modes.applyToolApprovalMode,
-      onToggleYoloApprovalMode: modes.toggleYoloApprovalMode,
       onClearGoal: goals.clearGoalFromUi,
       onPauseGoal: remoteGoal.pauseGoal,
       onResumeGoal: remoteGoal.resumeGoal,

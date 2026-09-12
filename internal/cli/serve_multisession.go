@@ -35,6 +35,10 @@ func setupCLIMultiSessionProfile(ctx context.Context, model string, maxSteps int
 	opts := cliProfileBuildOptions(model, maxSteps, false, tag, cliBuildOverrides{
 		Preset: preset, OnSessionRecovered: cliSessionRecoveredHandler(leases),
 	})
+	// A chat fork is a user-visible child conversation. Keep it in its own
+	// transcript so remote project listings can show both the source and child,
+	// matching the desktop and DeepSeek Harness behavior.
+	opts.FileBranchesOnly = true
 	if broker != nil {
 		// The initial controller's tools go through the session-scoped view;
 		// the raw broker is what SetControllerBuildOptions keeps so later

@@ -71,9 +71,9 @@ func RenderTOMLForScope(c *Config, scope RenderScope) string {
 			b.WriteString("# theme_style = \"graphite\"   # graphite|aurora|slate|carbon|nocturne|amber and legacy aliases\n")
 		}
 		if layout := c.UIShortcutLayout(); layout != "classic" {
-			fmt.Fprintf(&b, "shortcut_layout = %q   # classic|desktop; compatibility setting; Shift+Tab toggles Plan, Ctrl+Y toggles YOLO\n", layout)
+			fmt.Fprintf(&b, "shortcut_layout = %q   # classic|desktop; compatibility setting; Shift+Tab cycles read-only/workspace/plan\n", layout)
 		} else {
-			b.WriteString("# shortcut_layout = \"desktop\"   # classic|desktop; compatibility setting; Shift+Tab toggles Plan, Ctrl+Y toggles YOLO\n")
+			b.WriteString("# shortcut_layout = \"desktop\"   # classic|desktop; compatibility setting; Shift+Tab cycles read-only/workspace/plan\n")
 		}
 		if strings.TrimSpace(c.UI.CursorShape) != "" {
 			fmt.Fprintf(&b, "cursor_shape = %q   # block|underline|bar; text input cursor shape\n", c.UICursorShape())
@@ -121,7 +121,7 @@ func RenderTOMLForScope(c *Config, scope RenderScope) string {
 		fmt.Fprintf(&b, "status_bar_style = %q   # desktop: icon|text metric labels in the bottom status bar\n", c.DesktopStatusBarStyle())
 		b.WriteString("status_bar_style_initialized = true   # icon default upgrade applied; preserve later user choices\n")
 		fmt.Fprintf(&b, "status_bar_items = %s   # desktop: ordered visible bottom status bar items\n", renderStringArray(c.DesktopStatusBarItems()))
-		fmt.Fprintf(&b, "default_tool_approval_mode = %q   # desktop: Ask/Auto/YOLO default for newly-created sessions\n", c.DesktopDefaultToolApprovalMode())
+		fmt.Fprintf(&b, "default_tool_approval_mode = %q   # desktop: read-only/workspace-write/danger-full-access default for new sessions\n", c.DesktopDefaultToolApprovalMode())
 		fmt.Fprintf(&b, "check_updates = %v   # desktop: check for new versions on startup\n", c.DesktopCheckUpdates())
 		fmt.Fprintf(&b, "telemetry = %v   # desktop: anonymous launch ping + scrubbed next-launch native crash diagnostics; never content\n", c.DesktopTelemetry())
 		fmt.Fprintf(&b, "metrics = %v   # desktop: aggregate quality/lifecycle metrics (anonymous signal/bucket counts); never content\n", c.DesktopMetrics())
@@ -457,11 +457,6 @@ func RenderTOMLForScope(c *Config, scope RenderScope) string {
 		mode = "ask"
 	}
 	fmt.Fprintf(&b, "mode  = %q\n", mode)
-	if c.Permissions.AllowDynamicBash {
-		b.WriteString("allow_dynamic_bash = true   # advanced: let mode=allow cover command substitution and interpreter -c/-e\n")
-	} else {
-		b.WriteString("# allow_dynamic_bash = false   # advanced opt-in; deny/ask and exact rules still take precedence\n")
-	}
 	b.WriteString(renderRuleList("deny", c.Permissions.Deny, `["Bash(rm -rf*)", "Bash(git push*)"]   # hard-blocked in every mode`))
 	b.WriteString(renderRuleList("allow", c.Permissions.Allow, `["Bash(go test:*)", "Bash(git status:*)"]   # never prompted`))
 	b.WriteString(renderRuleList("ask", c.Permissions.Ask, `["Edit(src/**)"]   # force a prompt even if otherwise allowed`))
@@ -471,8 +466,8 @@ func RenderTOMLForScope(c *Config, scope RenderScope) string {
 	b.WriteString("# Confine tool blast radius. File-writers (write_file/edit_file/multi_edit/move_file)\n")
 	b.WriteString("# may only write under workspace_root (empty = current dir) and allow_write extras.\n")
 	b.WriteString("# bash = \"enforce\" jails each command in an OS sandbox when available;\n")
-	b.WriteString("# without one, bash execution is refused. Empty defaults to enforce on macOS/Linux.\n")
-	b.WriteString("# Windows has no OS-level Bash sandbox and fixes bash = \"off\".\n")
+	b.WriteString("# without one, restricted permission modes refuse bash execution. Empty defaults to enforce.\n")
+	b.WriteString("# macOS uses Seatbelt, Linux uses bubblewrap, and Windows uses a restricted token/AppContainer.\n")
 	b.WriteString("# network allows sandboxed bash egress.\n")
 	if c.Sandbox.WorkspaceRoot != "" {
 		fmt.Fprintf(&b, "workspace_root = %q\n", c.Sandbox.WorkspaceRoot)
@@ -513,9 +508,9 @@ func RenderTOMLForScope(c *Config, scope RenderScope) string {
 			b.WriteString("# model = \"\"   # empty = default_model\n")
 		}
 		if c.Bot.ToolApprovalMode != "" {
-			fmt.Fprintf(&b, "tool_approval_mode = %q   # ask|auto|yolo; yolo skips tool approvals only\n", c.Bot.ToolApprovalMode)
+			fmt.Fprintf(&b, "tool_approval_mode = %q   # read-only|workspace-write|danger-full-access\n", NormalizeToolApprovalMode(c.Bot.ToolApprovalMode))
 		} else {
-			b.WriteString("# tool_approval_mode = \"ask\"   # ask|auto|yolo; ask and plan decisions still wait\n")
+			b.WriteString("# tool_approval_mode = \"workspace-write\"   # default permission for bot sessions\n")
 		}
 		fmt.Fprintf(&b, "max_steps = %d\n", c.Bot.MaxSteps)
 		fmt.Fprintf(&b, "debounce_ms = %d\n", c.Bot.DebounceMs)
@@ -604,7 +599,7 @@ func RenderTOMLForScope(c *Config, scope RenderScope) string {
 			fmt.Fprintf(&b, "model = %q\n", strings.TrimSpace(c.Bot.QQ.Model))
 		}
 		if strings.TrimSpace(c.Bot.QQ.ToolApprovalMode) != "" {
-			fmt.Fprintf(&b, "tool_approval_mode = %q\n", strings.TrimSpace(c.Bot.QQ.ToolApprovalMode))
+			fmt.Fprintf(&b, "tool_approval_mode = %q\n", NormalizeToolApprovalMode(c.Bot.QQ.ToolApprovalMode))
 		}
 		if strings.TrimSpace(c.Bot.QQ.WorkspaceRoot) != "" {
 			fmt.Fprintf(&b, "workspace_root = %q\n", strings.TrimSpace(c.Bot.QQ.WorkspaceRoot))
@@ -641,7 +636,7 @@ func RenderTOMLForScope(c *Config, scope RenderScope) string {
 			fmt.Fprintf(&b, "model = %q\n", strings.TrimSpace(c.Bot.Dingtalk.Model))
 		}
 		if strings.TrimSpace(c.Bot.Dingtalk.ToolApprovalMode) != "" {
-			fmt.Fprintf(&b, "tool_approval_mode = %q\n", strings.TrimSpace(c.Bot.Dingtalk.ToolApprovalMode))
+			fmt.Fprintf(&b, "tool_approval_mode = %q\n", NormalizeToolApprovalMode(c.Bot.Dingtalk.ToolApprovalMode))
 		}
 		if strings.TrimSpace(c.Bot.Dingtalk.WorkspaceRoot) != "" {
 			fmt.Fprintf(&b, "workspace_root = %q\n", strings.TrimSpace(c.Bot.Dingtalk.WorkspaceRoot))
@@ -664,7 +659,7 @@ func RenderTOMLForScope(c *Config, scope RenderScope) string {
 				fmt.Fprintf(&b, "model = %q\n", conn.Model)
 			}
 			if conn.ToolApprovalMode != "" {
-				fmt.Fprintf(&b, "tool_approval_mode = %q\n", conn.ToolApprovalMode)
+				fmt.Fprintf(&b, "tool_approval_mode = %q\n", NormalizeToolApprovalMode(conn.ToolApprovalMode))
 			}
 			if conn.WorkspaceRoot != "" {
 				fmt.Fprintf(&b, "workspace_root = %q\n", conn.WorkspaceRoot)
@@ -1129,9 +1124,6 @@ func RenderTOMLProjectDelta(c *Config) string {
 		if mode != "ask" {
 			fmt.Fprintf(&b, "mode = %q\n", mode)
 		}
-		if c.Permissions.AllowDynamicBash {
-			b.WriteString("allow_dynamic_bash = true\n")
-		}
 		if len(c.Permissions.Deny) > 0 {
 			fmt.Fprintf(&b, "deny = %s\n", renderStringArray(c.Permissions.Deny))
 		}
@@ -1154,8 +1146,7 @@ func RenderTOMLProjectDelta(c *Config) string {
 			fmt.Fprintf(&sandboxBuf, "allow_write = %s\n", renderStringArray(c.Sandbox.AllowWrite))
 		}
 		// Only persist a bash mode when its effective value differs from the
-		// platform default. On Windows, even explicit "enforce" currently
-		// resolves to "off", so project configs should not imply otherwise.
+		// cross-platform default.
 		if strings.TrimSpace(c.Sandbox.Bash) != "" && c.BashMode() != d.BashModeForGOOS(runtimeGOOS) {
 			fmt.Fprintf(&sandboxBuf, "bash = %q\n", c.BashMode())
 		}
@@ -1709,7 +1700,7 @@ func renderBotRoute(b *strings.Builder, route BotRouteConfig) {
 		fmt.Fprintf(b, "model = %q\n", strings.TrimSpace(route.Model))
 	}
 	if strings.TrimSpace(route.ToolApprovalMode) != "" {
-		fmt.Fprintf(b, "tool_approval_mode = %q\n", strings.TrimSpace(route.ToolApprovalMode))
+		fmt.Fprintf(b, "tool_approval_mode = %q\n", NormalizeToolApprovalMode(route.ToolApprovalMode))
 	}
 	if strings.TrimSpace(route.WorkspaceRoot) != "" {
 		fmt.Fprintf(b, "workspace_root = %q\n", strings.TrimSpace(route.WorkspaceRoot))

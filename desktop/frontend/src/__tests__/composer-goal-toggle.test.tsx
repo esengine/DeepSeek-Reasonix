@@ -127,8 +127,7 @@ async function renderComposer(props: Partial<Parameters<typeof Composer>[0]> = {
     onSetMode: () => {},
     onSetCollaborationMode: (mode) => calls.setCollaborationMode.push(mode),
     onSetToolApprovalMode: () => {},
-    onToggleYoloApprovalMode: () => {},
-    onClearGoal: () => {
+        onClearGoal: () => {
       calls.clearGoal += 1;
     },
     onSwitchModel: () => {},

@@ -94,8 +94,7 @@ export async function renderComposer(props: Partial<Parameters<typeof Composer>[
     onSetMode: () => {},
     onSetCollaborationMode: () => {},
     onSetToolApprovalMode: () => {},
-    onToggleYoloApprovalMode: () => {},
-    onClearGoal: () => {},
+        onClearGoal: () => {},
     onSwitchModel: () => {},
     onSetEffort: () => {},
 

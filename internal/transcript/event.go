@@ -72,6 +72,7 @@ func EventFromEnvelope(envelope turnevent.Envelope) (event.Event, bool) {
 			AttemptID: w.Tool.AttemptID, FileDiff: event.FileDiff{Diff: w.Tool.Diff, Added: w.Tool.Added, Removed: w.Tool.Removed},
 			SubagentRef: w.Tool.SubagentRef, SubagentStatus: w.Tool.SubagentStatus,
 			SubagentErrorCode: w.Tool.SubagentErrorCode, SubagentRetryable: w.Tool.SubagentRetryable,
+			PresentedFiles: append([]provider.PresentedFile(nil), w.Tool.PresentedFiles...),
 		}
 	}
 	if len(w.MemoryCitations) > 0 {

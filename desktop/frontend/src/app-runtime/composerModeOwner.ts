@@ -15,7 +15,6 @@ export type ComposerModePorts = {
   drainRemote: (tabId: string, ids: string[]) => void;
   patch: (tabId: string, patch: Partial<Omit<ComposerProfile, "pending">>, fields: ComposerProfileField[]) => void;
   rememberPlan: (tabId: string, enabled: boolean) => void;
-  rememberApproval: (tabId: string, previous: ToolApprovalMode, next: ToolApprovalMode) => void;
 };
 export type ComposerModeInput = {
   target: SessionResource;
@@ -69,7 +68,6 @@ export async function executeComposerMode(input: ComposerModeInput, authority: S
       if (authority.ownsUI()) ports.drainRemote(tabId, ids);
     } else await ports.setApproval(tabId, request.mode);
     authority.checkpoint();
-    ports.rememberApproval(tabId, input.toolApprovalMode, request.mode);
   }
   authority.checkpoint();
   ports.patch(tabId, patch, fields);

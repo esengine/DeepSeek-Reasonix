@@ -19,6 +19,7 @@ function ok(value: boolean, label: string) {
 console.log("\nworkspace selection isolation");
 
 const changeDetailPaths: string[] = [];
+const readFilePaths: string[] = [];
 const { dom, root, rerender } = await renderFilesWorkspace({
   ListDirForTab: async (_tabId, dir) => dir === "" ? [{ name: "notes.txt", isDir: false }] : [],
   WorkspaceChanges: async () => ({
@@ -29,7 +30,10 @@ const { dom, root, rerender } = await renderFilesWorkspace({
     changeDetailPaths.push(path);
     return { source: "git", diff: "changed diff" };
   },
-  ReadFileForTab: async (_tabId, path) => ({ path, body: "file preview", size: 12, truncated: false, binary: false }),
+  ReadFileForTab: async (_tabId, path) => {
+    readFilePaths.push(path);
+    return { path, body: "file preview", size: 12, truncated: false, binary: false };
+  },
 });
 
 await waitFor("files view entry", () => document.body.textContent?.includes("notes.txt") === true);
@@ -38,6 +42,7 @@ await act(async () => {
     ?.dispatchEvent(new window.MouseEvent("click", { bubbles: true }));
   await flushPromises();
 });
+await waitFor("selected file read", () => readFilePaths.includes("notes.txt"));
 await waitFor("selected file preview", () => document.body.textContent?.includes("file preview") === true);
 
 await rerender({ initialViewMode: "changed" });

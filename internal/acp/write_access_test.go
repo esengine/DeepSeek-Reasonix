@@ -16,11 +16,10 @@ func TestUpdateSinkWriteAccessOptionsMapScopes(t *testing.T) {
 			t.Fatalf("permission params: %v", err)
 		}
 		assertACPv1PermissionOptionKinds(t, p.Options)
-		if len(p.Options) != 4 ||
+		if len(p.Options) != 3 ||
 			p.Options[0].OptionID != "reasonix_write_once" || p.Options[0].Kind != OptAllowOnce ||
 			p.Options[1].OptionID != "reasonix_write_session" || p.Options[1].Kind != OptAllowAlways ||
-			p.Options[2].OptionID != "reasonix_write_project" || p.Options[2].Kind != OptAllowAlways ||
-			p.Options[3].OptionID != "reasonix_write_deny" || p.Options[3].Kind != OptRejectOnce {
+			p.Options[2].OptionID != "reasonix_write_deny" || p.Options[2].Kind != OptRejectOnce {
 			t.Fatalf("write-access options = %+v", p.Options)
 		}
 		meta, _ := p.ToolCall.Meta["reasonix.io"].(map[string]any)
@@ -28,7 +27,7 @@ func TestUpdateSinkWriteAccessOptionsMapScopes(t *testing.T) {
 			t.Fatalf("meta = %+v", meta)
 		}
 		res, _ := json.Marshal(PermissionRequestResult{
-			Outcome: PermissionOutcome{Outcome: "selected", OptionID: "reasonix_write_project"},
+			Outcome: PermissionOutcome{Outcome: "selected", OptionID: "reasonix_write_session"},
 		})
 		return res, nil
 	}}
@@ -43,7 +42,7 @@ func TestUpdateSinkWriteAccessOptionsMapScopes(t *testing.T) {
 	}})
 	select {
 	case c := <-got:
-		if c != (approveCall{id: "wa-1", allow: true, session: true, persist: true}) {
+		if c != (approveCall{id: "wa-1", allow: true, session: true}) {
 			t.Fatalf("approve = %+v", c)
 		}
 	case <-time.After(2 * time.Second):

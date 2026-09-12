@@ -1,0 +1,28 @@
+/* Ported from DeepSeek Harness c291e7961a (MIT). */
+.dsh-Pill-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  height: 24px;
+  padding: 0 8px;
+  border: none;
+  border-radius: 12px;
+  font-size: 12px;
+  line-height: 18px;
+  color: var(--dsw-alias-label-secondary);
+  background: var(--dsw-alias-bg-layer-2);
+}
+
+.dsh-Pill-interactive {
+  cursor: pointer;
+}
+
+.dsh-Pill-interactive:hover {
+  background: var(--dsw-alias-interactive-bg-hover);
+}
+
+.dsh-Pill-active {
+  color: var(--dsw-alias-label-primary);
+  background: var(--dsw-alias-button-ghost-active-fill);
+  box-shadow: inset 0 0 0 1px var(--dsw-alias-button-ghost-active-border);
+}

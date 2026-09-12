@@ -171,8 +171,8 @@ and DeepSeek prefix-cache–oriented design.
 - **stdio MCP connections are persistent.** This fixes stateful servers that
   lost browser/session state when writer calls received a fresh process.
 - **Plan mode and permission policy are now independent**: Plan directs the
-  model to plan first. Ordinary built-in and Bash calls still use the active
-  Ask/Auto/YOLO rules and Sandbox, while installed MCP and proxy-resolved MCP
+  model to plan first. Ordinary built-in and Bash calls use the active Read
+  only, Workspace access, or Full access preset and its OS sandbox, while installed MCP and proxy-resolved MCP
   writer/destructive targets plus readers from unauthorized servers stay hard-blocked for the
   whole planning phase. Explicit execution-phase tools such as `complete_step` also
   remain unavailable until plan approval. `plan_mode_read_only_commands` is

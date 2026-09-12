@@ -249,6 +249,9 @@ function convertRecord(
       content: m.content,
       reasoning: m.reasoning,
       workDurationMs: m.workDurationMs,
+      turnDurationMs: m.turnDurationMs,
+      turnUsage: m.turnUsage,
+      createdAt: m.createdAt,
       memoryCitations: memoryCitations.length > 0 ? memoryCitations : undefined,
       serverSearch: m.serverSearch,
     }));
@@ -311,6 +314,7 @@ function convertRecord(
         fileDiff,
         isShell: tc.name === "bash" || (tc.id || "").startsWith("shell-"),
         execution: result?.execution,
+        presentedFiles: result?.presentedFiles,
       });
     }
     return { items, claims, unresolvedIds, pendingPositional, matches };
@@ -332,6 +336,7 @@ function convertRecord(
       dataArchived: m.toolResultArchived || undefined,
       isShell: (m.toolName || "") === "bash" || (m.toolCallId || "").startsWith("shell-"),
       execution: m.execution,
+      presentedFiles: m.presentedFiles,
     });
     return { items, claims, unresolvedIds, pendingPositional, matches };
   }
@@ -793,7 +798,6 @@ export class TranscriptStore {
     session.revision = slice.revision ?? 0;
     session.revisionKnown = sliceRevisionKnown(slice);
     session.digest = slice.digest ?? "";
-    this.autoFetchRefs(session);
     this.enforceBudgets();
     if (this.sessions.get(key) !== session) return undefined; // evicted by the budget
     return this.projectionOf(session);
@@ -881,6 +885,51 @@ export class TranscriptStore {
    * into the record. Late (generation-stale) responses are discarded; a stale
    * chunk marks the ref stale and keeps the inline preview.
    */
+  hasContentResolver(tabId: string): boolean { return Boolean(this.contentResolvers.active(tabId)); }
+
+  hasContentReference(tabId: string, entryId: string, field: string): boolean {
+    entryId = resolveTranscriptEntryAlias(this.sessions.values(), tabId, entryId);
+    return Boolean(this.sessionForEntry(tabId, entryId)?.byId.get(entryId)?.refs.some(ref => ref.field === field));
+  }
+
+  /** Detached legacy tool reads use the exact call reference, not a field-only
+   * cache key shared by several calls. Full bodies belong to the drawer. */
+  async requestToolContent(tabId: string, item: Extract<Item, { kind: "tool" }>, value: Record<string, unknown>): Promise<string | undefined> {
+    const session = [...this.sessions.values()].find(session => session.tabId === tabId &&
+      [...session.contributions.values()].some(items => items.some(candidate => candidate.id === item.id)));
+    if (!session) return undefined;
+    const entryId = [...session.contributions].find(([, items]) => items.some(candidate => candidate.id === item.id))?.[0];
+    const record = entryId && session.byId.get(entryId);
+    if (!record) return undefined;
+    const calls = record.message.toolCalls ?? [];
+    const callIndex = calls.findIndex((call, index) => itemIdForToolCall(call.id, `he:${record.entryId}:tc${index}`) === item.id);
+    const call = calls[callIndex];
+    const resultId = session.matchTables.get(record.entryId)?.get(callIndex);
+    const result = resultId ? session.byId.get(resultId) : record.message.role === "tool" ? record : undefined;
+    const generation = session.generation;
+    const refs = [
+      ...record.refs.filter(ref => call && ref.toolCallId === call.id && (ref.field === "toolArguments" || ref.field === "toolDiff")),
+      ...(result?.refs.filter(ref => ref.field === "content" || ref.field === "toolResultError") ?? []),
+    ];
+    if (refs.some(ref => ref.field === "toolArguments" || ref.field === "toolDiff") && !call?.id && calls.filter(call => !call.id).length > 1) throw new Error("Ambiguous legacy tool reference");
+    const full = { ...value };
+    for (const ref of refs) {
+      let data = "";
+      for (let index = 0; index < Math.max(1, ref.chunks); index++) {
+        const chunk = await this.backend.HistoryContentForTab(tabId, ref, index);
+        if (this.sessions.get(session.key) !== session || generation !== session.generation || chunk.stale) throw new Error("Tool reference expired; retry");
+        data += chunk.data ?? "";
+        if (chunk.done) break;
+      }
+      if (new TextEncoder().encode(data).byteLength !== ref.size) throw new Error("Incomplete tool content");
+      if (ref.field === "toolArguments") full.args = data;
+      else if (ref.field === "content") full.output = data;
+      else if (ref.field === "toolResultError") full.error = data;
+      else full.diff = call ? fileDiffFromWire({ ...call, diff: data }) ?? data : data;
+    }
+    return JSON.stringify(full, null, 2);
+  }
+
   async requestFullContent(tabId: string, entryId: string, field: string): Promise<string | undefined> {
     const resolver = this.contentResolvers.active(tabId);
     if (resolver) return resolver.resolve(entryId, field);
@@ -921,30 +970,12 @@ export class TranscriptStore {
       return data;
     })();
     const entry = { generation, promise: request };
-    request.finally(() => {
+    const release = () => {
       if (session.pendingContent.get(pendingKey) === entry) session.pendingContent.delete(pendingKey);
-    });
+    };
+    void request.then(release, release);
     session.pendingContent.set(pendingKey, entry);
     return request;
-  }
-
-  /**
-   * Resolve every unresolved ref field of an entry. The rendering layer calls
-   * this when a history-backed row mounts (mount implies near-viewport with
-   * the virtual list's overscan); entries without refs no-op.
-   */
-  requestEntryFullContent(tabId: string | undefined, entryId: string): void {
-    if (!tabId) return;
-    const resolver = this.contentResolvers.active(tabId);
-    if (resolver) { void resolver.resolve(entryId, "content").catch(() => {}); return; }
-    entryId = resolveTranscriptEntryAlias(this.sessions.values(), tabId, entryId);
-    const session = this.sessionForEntry(tabId, entryId);
-    const rec = session?.byId.get(entryId);
-    if (!session || !rec) return;
-    for (const ref of rec.refs) {
-      if (rec.resolved?.[ref.field] || rec.staleRefs?.[ref.field]) continue;
-      void this.requestFullContent(session.tabId, entryId, ref.field).catch(() => {});
-    }
   }
 
   private reconvertAndNotify(session: SessionTranscript, rec: TranscriptRecord): void {
@@ -968,15 +999,6 @@ export class TranscriptStore {
     for (const item of conversion.items) patches[item.id] = item;
     const change: TranscriptContentChange = { tabId: session.tabId, patches };
     for (const listener of listeners) listener(change);
-  }
-
-  /** Newest-page refs resolve eagerly so the visible transcript is complete. */
-  private autoFetchRefs(session: SessionTranscript): void {
-    for (const rec of session.records) {
-      for (const ref of rec.refs) {
-        void this.requestFullContent(session.tabId, rec.entryId, ref.field).catch(() => {});
-      }
-    }
   }
 
   // ── markdown cache (populated by the rendering/worker phase) ──────────────

@@ -5,7 +5,7 @@ import { installDesktopHostStub } from "./desktopHostStub";
 
 Object.defineProperty(globalThis, "window", { configurable: true, value: {} });
 installDesktopHostStub({});
-const [{ TurnEventProjector }, { TranscriptSnapshotClient, resolveSnapshotItems }, { initialState, reducer, historyMessagesToItems }] = await Promise.all([
+const [{ TurnEventProjector }, { TranscriptSnapshotClient, resolveSnapshotItems, resolveSnapshotTool, rebaseSnapshotContentPatches }, { initialState, reducer, historyMessagesToItems }] = await Promise.all([
   import("../lib/turnEventProjection"), import("../lib/transcriptSnapshotClient"), import("../lib/useController"),
 ]);
 function deferred<T>() {
@@ -184,4 +184,83 @@ const transport: SnapshotTransport = { snapshot: async () => cut(), page: async 
   assert.equal(state.live?.text, "prefix suffix");
 }
 
-console.log("transcript snapshot client races: ok");
+// Full body loading must not eagerly resolve thought content from the same record.
+{
+  const requests: string[] = [];
+  const snapshot = cut({ activeAttempts: [], runtime: { pendingEvents: [] }, records: [{ id: "m:finished", order: 0,
+    message: { role: "assistant", messageId: "finished", content: "body preview", reasoning: "thought preview" },
+    refs: ["content", "reasoning"].map(field => ({ snapshotId: "cut-1", recordId: "m:finished", path: [field], bytes: 4 })) }] });
+  let state = initialState;
+  const projector = new TurnEventProjector(quietTransport);
+  const client = new TranscriptSnapshotClient({ ...transport, snapshot: async () => snapshot,
+    content: async (_, ref) => { requests.push(ref.path[0]); return { data: ref.path[0] === "content" ? "body" : "mind", nextOffset: 4, done: true, stale: false }; } }, projector);
+  await client.load("lazy", snapshot => { state = reducer(state, { type: "transcript_snapshot", snapshot }); });
+  const id = state.items[0].id;
+  const resolve = (field: string) => resolveSnapshotItems(client, "lazy", id, () => state, historyMessagesToItems,
+    patches => { state = reducer(state, { type: "history_items_patch", patches }); }, field);
+  await resolve("content");
+  assert.deepEqual(requests, ["content"]);
+  assert.ok(state.items[0].kind === "assistant" && state.items[0].text === "body" && state.items[0].reasoning === "thought preview");
+  await resolve("reasoning");
+  assert.deepEqual(requests, ["content", "reasoning"]);
+  assert.ok(state.items[0].kind === "assistant" && state.items[0].text === "body" && String(state.items[0].reasoning) === "mind");
+  client.release("lazy");
+}
+// Full tool details bypass archived Item previews, never mutate them, and remain
+// available after closing/reopening without caching the fetched body in the cut.
+for (const referenced of [false, true]) {
+  const args = JSON.stringify({ command: "x".repeat(70000) });
+  const output = "result".repeat(14000);
+  const snapshot = cut({ activeAttempts: [], runtime: { pendingEvents: [] }, records: [
+    { id: "m:call", order: 0, message: { role: "assistant", messageId: "call", content: "body preview", toolCalls: [
+      { id: "tool-full", name: "bash", arguments: referenced ? "args preview" : args }, { id: "unopened-tool", name: "read_file", arguments: "other preview" }] },
+      refs: referenced ? [
+        { snapshotId: "cut-1", recordId: "m:call", path: ["toolCalls", "0", "arguments"], bytes: args.length },
+        { snapshotId: "cut-1", recordId: "m:call", path: ["toolCalls", "1", "arguments"], bytes: 4 },
+        { snapshotId: "cut-1", recordId: "m:call", path: ["content"], bytes: 4 },
+      ] : [] },
+    { id: "m:result", order: 1, message: { role: "tool", toolCallId: "tool-full", content: referenced ? "output preview" : output },
+      refs: referenced ? [{ snapshotId: "cut-1", recordId: "m:result", path: ["content"], bytes: output.length }] : [] },
+  ] });
+  let state = initialState;
+  let reads = 0;
+  const client = new TranscriptSnapshotClient({ ...transport, snapshot: async () => snapshot,
+    content: async (_, ref) => { reads++; const text = ref.path[0] === "content" ? output : args;
+      return { data: text, nextOffset: text.length, done: true, stale: false }; } }, new TurnEventProjector(quietTransport));
+  await client.load("tools", snapshot => { state = reducer(state, { type: "transcript_snapshot", snapshot }); });
+  const original = state.items.find(item => item.id === "tool-full");
+  for (let attempt = 0; attempt < 2; attempt++) {
+    const value = JSON.parse((await resolveSnapshotTool(client, "tools", "tool-full", () => state))!);
+    assert.equal(value.args, args);
+    assert.equal(value.output, output);
+    assert.equal(state.items.find(item => item.id === "tool-full"), original, "details do not expand or replace source Items");
+  }
+  assert.equal(reads, referenced ? 4 : 0, "reopening rereads only this tool's references, without resolving other calls or assistant content");
+  client.release("tools");
+}
+// Independent fields must survive both immediate local commits and batched
+// remote React commits, regardless of the other field changing Item identity.
+for (const batched of [false, true]) {
+  const body = deferred<import("../lib/transcriptProtocol").TranscriptContentChunk>();
+  const thought = deferred<import("../lib/transcriptProtocol").TranscriptContentChunk>();
+  const snapshot = cut({ activeAttempts: [], runtime: { pendingEvents: [] }, records: [{ id: "m:parallel", order: 0,
+    message: { role: "assistant", messageId: "parallel", content: "body preview", reasoning: "thought preview" },
+    refs: ["content", "reasoning"].map(field => ({ snapshotId: "cut-1", recordId: "m:parallel", path: [field], bytes: 4 })) }] });
+  let state = initialState;
+  const queued: Array<() => void> = [];
+  const client = new TranscriptSnapshotClient({ ...transport, snapshot: async () => snapshot,
+    content: async (_, ref) => ref.path[0] === "content" ? body.promise : thought.promise }, new TurnEventProjector(quietTransport));
+  await client.load("parallel", snapshot => { state = reducer(state, { type: "transcript_snapshot", snapshot }); });
+  const read = (field: string) => resolveSnapshotItems(client, "parallel", "m:parallel", () => state, historyMessagesToItems, patches => {
+    const commit = () => { state = reducer(state, { type: "history_items_patch", patches: rebaseSnapshotContentPatches(state, patches, field) }); };
+    if (batched) queued.push(commit); else commit();
+  }, field);
+  const bodyRead = read("content"), thoughtRead = read("reasoning");
+  body.resolve({ data: "body", nextOffset: 4, done: true, stale: false }); await bodyRead;
+  thought.resolve({ data: "mind", nextOffset: 4, done: true, stale: false }); await thoughtRead;
+  queued.forEach(commit => commit());
+  assert.ok(state.items[0].kind === "assistant" && state.items[0].text === "body" && state.items[0].reasoning === "mind",
+    batched ? "remote commits retain both complete fields" : "local field resolution survives an unrelated Item update");
+  client.release("parallel");
+}
+console.log("transcript snapshot client races, independent concurrent fields and complete tool details: ok");

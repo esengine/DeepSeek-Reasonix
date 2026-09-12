@@ -35,7 +35,7 @@ const profileFields: ComposerProfileField[] = ["collaborationMode", "toolApprova
 export const defaultComposerProfile: ComposerProfile = Object.freeze({
   collaborationMode: "normal",
   goalDraftMode: false,
-  toolApprovalMode: "ask",
+  toolApprovalMode: "workspace-write",
   goal: "",
   qualityFloor: "standard",
   pending: {},
@@ -54,7 +54,7 @@ function profileWithPending(profile: Omit<ComposerProfile, "pending">, pending: 
 
 function fallbackToolApprovalMode(rawMode: string | undefined, fallback?: ToolApprovalMode | null): ToolApprovalMode | undefined {
   if ((rawMode ?? "").trim() !== "") return undefined;
-  return fallback === "auto" ? "auto" : undefined;
+  return fallback ? normalizeToolApprovalMode(fallback) : undefined;
 }
 
 export function composerProfileFromTab(tab?: TabMeta | null, fallback?: ToolApprovalMode | null): ComposerProfile {
@@ -67,7 +67,7 @@ export function composerProfileFromTab(tab?: TabMeta | null, fallback?: ToolAppr
     toolApprovalMode: normalizeToolApprovalMode(
       tab.toolApprovalMode,
       legacyMode,
-      tab.toolApprovalMode === "yolo",
+      false,
       fallbackToolApprovalMode(tab.toolApprovalMode, fallback),
     ),
     goal,
@@ -200,7 +200,7 @@ export function patchComposerProfile(
 }
 
 export function composerProfileMode(profile: ComposerProfile): Mode {
-  return modeFromAxes(profile.collaborationMode === "plan", profile.toolApprovalMode === "yolo");
+  return modeFromAxes(profile.collaborationMode === "plan", normalizeToolApprovalMode(profile.toolApprovalMode) === "danger-full-access");
 }
 
 export function displayedComposerProfileCollaborationMode(profile: ComposerProfile): CollaborationMode {
@@ -217,7 +217,7 @@ export function composerProfileWithMode(mode: Mode): Partial<Omit<ComposerProfil
   return {
     collaborationMode: modeHasPlan(mode) ? "plan" : "normal",
     goalDraftMode: false,
-    toolApprovalMode: modeHasAutoApproveTools(mode) ? "yolo" : "ask",
+    toolApprovalMode: modeHasAutoApproveTools(mode) ? "workspace-write" : "read-only",
     goal: "",
   };
 }

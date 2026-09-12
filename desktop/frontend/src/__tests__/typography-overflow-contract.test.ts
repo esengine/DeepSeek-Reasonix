@@ -3,7 +3,6 @@
 import { readFileSync } from "node:fs";
 import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
-import { JSDOM } from "jsdom";
 import { TEXT_SIZES } from "../lib/textSize";
 
 const testDir = dirname(fileURLToPath(import.meta.url));
@@ -11,6 +10,7 @@ const styles = [
   readFileSync(resolve(testDir, "../components/ProviderCatalogPicker.css"), "utf8"),
   readFileSync(resolve(testDir, "../styles.css"), "utf8"),
   readFileSync(resolve(testDir, "../components/CompactRatioSettings.css"), "utf8"),
+  readFileSync(resolve(testDir, "../components/ChatTranscript.css"), "utf8"),
 ].join("\n").replace(/\/\*[\s\S]*?\*\//g, "");
 
 let passed = 0;
@@ -115,65 +115,12 @@ ok(
   /\.md\s*>\s*:where\([^)]*p[^)]*ul[^)]*ol[^)]*\)\s*\{[^}]*content-visibility:\s*auto;[^}]*contain-intrinsic-size:\s*auto 72px;/.test(styles),
   "non-transcript markdown still culls offscreen blocks with a 72px placeholder",
 );
-ok(
-  /\.transcript__row\s+\.md\s*>\s*\*\s*(?:,[^{]*)?\{[^}]*content-visibility:\s*visible;[^}]*contain-intrinsic-size:\s*none;/.test(styles),
-  "virtual transcript rows do not measure markdown through 72px placeholders",
-);
-ok(
-  hasDeclaration(".transcript__row .msg", "content-visibility", "visible") &&
-    hasDeclaration(".transcript__row .turn-collapse", "content-visibility", "visible"),
-  "virtual transcript cards stay measurable after the markdown override",
-);
-
-function paddingSides(value: string) {
-  const parts = value.trim().split(/\s+/);
-  if (parts.length === 1) return { right: parts[0], left: parts[0] };
-  if (parts.length === 2 || parts.length === 3) return { right: parts[1], left: parts[1] };
-  return { right: parts[1], left: parts[3] };
-}
-function isZeroPad(value: string | undefined) {
-  return value === undefined || value === "0" || value === "0px";
-}
-for (const block of matchingBlocks(".transcript")) {
-  const shorthand = /(?:^|;)\s*padding\s*:\s*([^;]+)/.exec(block);
-  if (shorthand) {
-    const sides = paddingSides(shorthand[1]);
-    ok(
-      isZeroPad(sides.left) && isZeroPad(sides.right),
-      `transcript scroller padding stays vertical-only (${shorthand[1].trim()})`,
-    );
-  }
-  const padLeft = /(?:^|;)\s*padding-left\s*:\s*([^;]+)/.exec(block);
-  const padRight = /(?:^|;)\s*padding-right\s*:\s*([^;]+)/.exec(block);
-  ok(isZeroPad(padLeft?.[1].trim()), "transcript scroller does not set padding-left");
-  ok(isZeroPad(padRight?.[1].trim()), "transcript scroller does not set padding-right");
-}
-ok(hasDeclaration(".transcript", "--transcript-inline-pad", "32px"), "default transcript inline inset is 32px");
-ok(hasDeclaration(".transcript", "--transcript-inline-pad", "16px"), "narrow viewports tighten the transcript inline inset");
-eq(finalDeclaration(".transcript__row", "padding-left"), "var(--transcript-inline-pad, 32px)", "virtual rows own the left inset");
-eq(finalDeclaration(".transcript__row", "padding-right"), "var(--transcript-inline-pad, 32px)", "virtual rows own the right inset");
-eq(finalDeclaration(".transcript__header", "padding-left"), "var(--transcript-inline-pad, 32px)", "load-older header uses the same inline inset");
-eq(finalDeclaration(".transcript--empty", "padding"), "16px 32px", "empty transcript keeps its own horizontal inset");
-
-{
-  const stylesheet = readFileSync(resolve(testDir, "../styles.css"), "utf8");
-  const dom = new JSDOM(
-    `<!doctype html><html><head><style>${stylesheet}</style></head><body>
-      <div class="transcript__row"><div class="md"><p id="inside">inside</p></div></div>
-      <div class="md"><p id="outside">outside</p></div>
-    </body></html>`,
-    { pretendToBeVisual: true },
-  );
-  const inside = dom.window.getComputedStyle(dom.window.document.getElementById("inside")!);
-  const outside = dom.window.getComputedStyle(dom.window.document.getElementById("outside")!);
-  // jsdom may not implement content-visibility; treat an empty computed value
-  // as "engine gap" and still require the source contract above.
-  if (inside.contentVisibility || outside.contentVisibility) {
-    eq(inside.contentVisibility, "visible", "computed style keeps transcript markdown measurable");
-    eq(outside.contentVisibility, "auto", "computed style still culls markdown outside the transcript");
-  }
-  dom.window.close();
-}
+ok(hasDeclaration(".chat-transcript .md > *", "content-visibility", "visible"), "natural chat uses real Markdown geometry");
+eq(finalDeclaration(".chat-transcript .chat-column", "max-width"), "800px", "chat has one readable column");
+eq(finalDeclaration(".chat-transcript .chat-surface > .chat-flow-scroll.transcript", "overflow-y"), "auto", "chat uses native vertical scrolling");
+ok(hasDeclaration(".chat-transcript .chat-surface > .chat-flow-scroll.transcript", "padding", "24px"), "normal chat inset is 24px");
+ok(hasDeclaration(".chat-transcript .chat-surface > .chat-flow-scroll.transcript", "padding", "24px 16px 16px"), "narrow chat inset is 16px");
+eq(finalDeclaration(".chat-details", "width"), "100%", "narrow details cover the chat surface");
 ok(
   hasDeclaration(".transcript--empty > .welcome", "margin-block", "auto"),
   "empty-state auto margins apply only to the welcome content",
@@ -276,22 +223,22 @@ eq(finalDeclaration(".composer-task-mode-trigger:focus-visible", "box-shadow"), 
 eq(finalDeclaration(".composer-meta .modelsw__trigger:focus-visible", "box-shadow"), "var(--focus-ring)", "model and effort selectors use the shared keyboard focus ring");
 eq(finalDeclaration(":root[data-theme-style] .composer-modebar__item--active:focus-visible", "box-shadow"), "var(--focus-ring)", "active permission options retain keyboard focus feedback");
 eq(
-  finalDeclaration(".app--creation .msg--assistant .msg__body", "font-size"),
+  finalDeclaration(".app--creation .msg--assistant:not(.chat-transcript .msg--assistant) .msg__body", "font-size"),
   "var(--font-content)",
   "creation assistant body text follows the conversation text size",
 );
 eq(
-  finalDeclaration(":root[data-theme-style] .msg--assistant .msg__body", "font-size"),
+  finalDeclaration(":root[data-theme-style] .msg--assistant:not(.chat-transcript .msg--assistant) .msg__body", "font-size"),
   "var(--font-content)",
   "themed assistant body text follows the conversation text size",
 );
 eq(
-  finalDeclaration(".app--creation .msg--assistant .msg__body", "font-family"),
+  finalDeclaration(".app--creation .msg--assistant:not(.chat-transcript .msg--assistant) .msg__body", "font-family"),
   "var(--font-content-family)",
   "creation assistant body follows the conversation font family",
 );
 eq(
-  finalDeclaration(".app--creation .md", "font-family"),
+  finalDeclaration(".app--creation .md:not(.chat-transcript .md)", "font-family"),
   "var(--font-content-family)",
   "creation markdown follows the conversation font family",
 );
@@ -411,8 +358,7 @@ ok(
 eq(finalDeclaration(".md-table-scroll", "overflow-x"), "auto", "markdown table wrapper scrolls horizontally");
 eq(finalDeclaration(".md-table-scroll", "overflow-y"), "hidden", "markdown table wrapper does not nest vertical scroll");
 eq(finalDeclaration(".md table", "overflow"), "visible", "markdown tables stay in document flow for trackpad Y");
-eq(finalDeclaration(".md-table-fold", "display"), "flex", "large tables use a fold stack for preview + expand");
-eq(finalDeclaration(".md-table-fold__toggle", "cursor"), "pointer", "table expand control is clickable");
+eq(finalDeclaration(".chat-stat-dialog", "font"), "13px/1.5 var(--font-ui)", "portaled turn statistics use a root-owned font token");
 eq(finalDeclaration(".code", "overflow-x"), "auto", "code blocks scroll horizontally instead of widening the layout");
 eq(finalDeclaration(".code", "overflow-y"), "hidden", "code blocks do not nest vertical scroll by default");
 ok(
@@ -444,11 +390,9 @@ for (const selector of [
   ".msg-attachment__meta",
   ".msg-pasted-head",
   ".msg-pasted-expanded",
-  ".msg-edit__input",
-  ".msg-edit__btn",
   ".msg__send-failed",
   ":root[data-theme-style] .process-card__kind",
-  ':root[data-theme-style] .msg--assistant > .process-card[data-tone="violet"] .process-card__name',
+  ':root[data-theme-style] .msg--assistant:not(.chat-transcript .msg--assistant) > .process-card[data-tone="violet"] .process-card__name',
 ]) {
   const size = finalDeclaration(selector, "font-size");
   ok(size !== undefined && !/^[0-9.]+px$/.test(size), `${selector} font size follows the text-size scale`);

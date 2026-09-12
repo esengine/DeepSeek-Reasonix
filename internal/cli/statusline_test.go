@@ -123,10 +123,10 @@ func TestIdleStatuslineIsCompact(t *testing.T) {
 
 	content := renderStatuslineView(t, false)
 	plain := bottomStatusPlain(content)
-	if !strings.Contains(plain, "Auto") || !strings.Contains(plain, "ready") {
+	if !strings.Contains(plain, "Workspace") || !strings.Contains(plain, "ready") {
 		t.Fatalf("idle status line missing mode status:\n%s", plain)
 	}
-	if !strings.Contains(plain, "Shift+Tab ask/auto/plan · Ctrl+Y YOLO") {
+	if !strings.Contains(plain, "Shift+Tab read-only/workspace/plan") {
 		t.Fatalf("idle status line missing plan-toggle hint:\n%s", plain)
 	}
 	for _, old := range []string{"Shift-Tab", "Ctrl-O", "Ctrl-D", "Enter sends", "Esc clears/exits state", "PgUp/PgDn"} {
@@ -134,29 +134,29 @@ func TestIdleStatuslineIsCompact(t *testing.T) {
 			t.Fatalf("idle status line should not contain %q:\n%s", old, plain)
 		}
 	}
-	if strings.Contains(plain, "[auto]") {
+	if strings.Contains(plain, "[Workspace]") {
 		t.Fatalf("idle status line should use pill label, not bracketed tag:\n%s", plain)
 	}
 	if !strings.Contains(content, "\x1b[48;2;245;158;11m") {
-		t.Fatalf("Auto status line should use amber pill background, got:\n%q", content)
+		t.Fatalf("Workspace status line should use amber pill background, got:\n%q", content)
 	}
 }
 
-func TestYoloStatuslineUsesDangerPill(t *testing.T) {
+func TestFullAccessStatuslineUsesDangerPill(t *testing.T) {
 	defer restoreThemeForTest(activeColorProfile, activeCLITheme)
 	activeColorProfile = colorprofile.TrueColor
 	i18n.DetectLanguage("en")
 
 	content := renderStatuslineView(t, true)
 	plain := bottomStatusPlain(content)
-	if !strings.Contains(plain, "YOLO") || !strings.Contains(plain, "approvals skipped") || !strings.Contains(plain, "Shift+Tab ask/auto/plan · Ctrl+Y YOLO") {
-		t.Fatalf("YOLO status line missing warning text:\n%s", plain)
+	if !strings.Contains(plain, "Full access") || !strings.Contains(plain, "full access") || !strings.Contains(plain, "Shift+Tab read-only/workspace/plan") {
+		t.Fatalf("full-access status line missing warning text:\n%s", plain)
 	}
-	if strings.Contains(plain, "[YOLO]") {
-		t.Fatalf("YOLO status line should use a pill label, not bracketed tag:\n%s", plain)
+	if strings.Contains(plain, "[Full access]") {
+		t.Fatalf("full-access status line should use a pill label, not bracketed tag:\n%s", plain)
 	}
 	if !strings.Contains(content, "\x1b[48;2;229;72;77m") {
-		t.Fatalf("YOLO status line should use danger pill background, got:\n%q", content)
+		t.Fatalf("full-access status line should use danger pill background, got:\n%q", content)
 	}
 }
 
@@ -167,7 +167,7 @@ func TestPlanStatuslineUsesBluePill(t *testing.T) {
 
 	content := renderPlanStatuslineView(t)
 	plain := bottomStatusPlain(content)
-	if !strings.Contains(plain, "Plan") || !strings.Contains(plain, "ready") || !strings.Contains(plain, "Shift+Tab ask/auto/plan · Ctrl+Y YOLO") {
+	if !strings.Contains(plain, "Plan") || !strings.Contains(plain, "ready") || !strings.Contains(plain, "Shift+Tab read-only/workspace/plan") {
 		t.Fatalf("plan status line missing mode status:\n%s", plain)
 	}
 	if !strings.Contains(content, "\x1b[48;2;37;99;235m") {
@@ -181,10 +181,10 @@ func TestStatuslineCycleHintFollowsLanguage(t *testing.T) {
 
 	content := renderStatuslineView(t, false)
 	plain := bottomStatusPlain(content)
-	if !strings.Contains(plain, "Auto") || !strings.Contains(plain, "就绪") || !strings.Contains(plain, "Shift+Tab 询问/自动/计划 · Ctrl+Y YOLO") {
+	if !strings.Contains(plain, "Workspace") || !strings.Contains(plain, "就绪") || !strings.Contains(plain, "Shift+Tab 仅可查看/工作区内修改/计划") {
 		t.Fatalf("localized plan-toggle hint missing:\n%s", plain)
 	}
-	if strings.Contains(plain, "ready") || strings.Contains(plain, "Shift+Tab ask/auto/plan · Ctrl+Y YOLO") {
+	if strings.Contains(plain, "ready") || strings.Contains(plain, "Shift+Tab read-only/workspace/plan") {
 		t.Fatalf("localized status line should not fall back to English:\n%s", plain)
 	}
 }
@@ -194,7 +194,7 @@ func TestDesktopShortcutStatuslineUsesPlanToggleHint(t *testing.T) {
 
 	content := renderStatuslineViewWithShortcutLayout(t, "desktop")
 	plain := bottomStatusPlain(content)
-	if !strings.Contains(plain, "Ask") || !strings.Contains(plain, "Shift+Tab ask/auto/plan · Ctrl+Y YOLO") {
+	if !strings.Contains(plain, "Read only") || !strings.Contains(plain, "Shift+Tab read-only/workspace/plan") {
 		t.Fatalf("desktop shortcut status line missing unified plan-toggle hint:\n%s", plain)
 	}
 }
@@ -307,7 +307,11 @@ func renderStatuslineView(t *testing.T, yolo bool) string {
 	t.Helper()
 
 	ctrl := control.New(control.Options{})
-	ctrl.SetAutoApproveTools(yolo)
+	if yolo {
+		ctrl.SetToolApprovalMode(control.ToolApprovalDangerFullAccess)
+	} else {
+		ctrl.SetToolApprovalMode(control.ToolApprovalWorkspaceWrite)
+	}
 	m := newChatTUI(ctrl, "", make(chan event.Event, 1), 80)
 	next, _ := m.Update(tea.WindowSizeMsg{Width: 80, Height: 24})
 	return next.(chatTUI).View().Content
