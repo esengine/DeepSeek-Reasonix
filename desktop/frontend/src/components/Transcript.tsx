@@ -1,4 +1,4 @@
-import {
+import { startTransition,
   lazy,
   Suspense,
   useCallback,
@@ -165,7 +165,7 @@ export function Transcript(props: TranscriptProps) {
   useLayoutEffect(() => {
     if (foldSurfaceRef.current === resolvedSessionKey) return;
     foldSurfaceRef.current = resolvedSessionKey;
-    setFolds(readTranscriptFoldOverrides(resolvedSessionKey, segmentStates));
+    startTransition(() => setFolds(readTranscriptFoldOverrides(resolvedSessionKey, segmentStates)));
   }, [resolvedSessionKey, segmentStates]);
   useEffect(() => onSessionExperienceWillChange(() => {
     beginStructural("display-change");
@@ -173,11 +173,11 @@ export function Transcript(props: TranscriptProps) {
   useEffect(() => {
     const preferenceChanged = experienceRef.current !== experience;
     experienceRef.current = experience;
-    setFolds((previous) => {
+    startTransition(() => setFolds((previous) => {
       const next = reconcileFoldEntries(previous, segmentStates, experience, preferenceChanged);
       if (next) replaceTranscriptFoldOverrides(resolvedSessionKey, next);
       return next ?? previous;
-    });
+    }));
   }, [experience, resolvedSessionKey, segmentStates]);
 
   const subcallsByParent = useMemo(() => {

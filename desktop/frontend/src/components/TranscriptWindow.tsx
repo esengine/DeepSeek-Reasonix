@@ -1,7 +1,7 @@
 import { TranscriptPresentationProvider } from "./TranscriptPresentationContext";
 import { useNativeViewportSnapshot } from "../lib/useTranscriptNativeViewport";
 import { useVirtualizer } from "@tanstack/react-virtual";
-import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from "react";
+import { startTransition, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import type { LogicalAnchor, TranscriptKernel } from "../lib/transcriptKernel";
 import type { ProjectionViewProps } from "./TranscriptProjectionView";
 import { TranscriptMeasurementLedger } from "../lib/transcriptMeasurementLedger";
@@ -160,7 +160,10 @@ export default function TranscriptWindow({
   }, [geometry, origin]);
   useLayoutEffect(() => {
     if (!minimumResidentKey || currentResidentIndex >= 0) return;
-    setResidentStartKey(minimumResidentKey);
+    // Boundary repair closes inside the same commit the React 19 nested-update
+    // fuse measures; a transition lane keeps legitimate geometry cascades from
+    // being mistaken for a render loop.
+    startTransition(() => setResidentStartKey(minimumResidentKey));
   }, [currentResidentIndex, minimumResidentKey]);
   useLayoutEffect(() => {
     const validKeys = new Set(projection.completedBlocks.map((block) => block.key));
@@ -189,7 +192,7 @@ export default function TranscriptWindow({
     // DOM, so the virtual prefix replaces the resident prefix without a
     // transient extent change for the native scroller.
     measurementLedger.commit(residentChanges);
-    setResidentStartKey(projection.completedBlocks[nextResidentIndex]?.key ?? minimumResidentKey);
+    startTransition(() => setResidentStartKey(projection.completedBlocks[nextResidentIndex]?.key ?? minimumResidentKey));
   }, [kernel.anchor, measurementLedger, minimumResidentIndex, minimumResidentKey, nativeViewport.scrollTop, projection.completedBlocks, protectedBlockKeys, residentStartIndex, scrollElement]);
   useEffect(() => {
     if (!pinnedJumpBlockKey || !scrollElement) return;
@@ -198,11 +201,11 @@ export default function TranscriptWindow({
     if (!target) return;
     const viewport = scrollElement.getBoundingClientRect();
     const rect = target.getBoundingClientRect();
-    if (rect.bottom >= viewport.top && rect.top <= viewport.bottom) onPinnedJumpVisible();
+    if (rect.bottom >= viewport.top && rect.top <= viewport.bottom) startTransition(onPinnedJumpVisible);
   }, [onPinnedJumpVisible, pinnedJumpBlockKey, rangeRevision, scrollElement]);
   const surfaceGeneration = kernel.generation;
   const [measurementRevision, setMeasurementRevision] = useState(0);
-  const presentationChanged = useCallback(() => setMeasurementRevision(value => value + 1), []);
+  const presentationChanged = useCallback(() => startTransition(() => setMeasurementRevision(value => value + 1)), []);
   const presentation = useMemo(() => ({ gestureActive: kernel.userGestureActive, windowed: true, geometryChanged: presentationChanged }),
     [kernel.userGestureActive, presentationChanged]);
   useLayoutEffect(() => {
@@ -287,7 +290,10 @@ export default function TranscriptWindow({
       if (!kernel.userGestureActive) {
         // Ordinary content growth belongs to the input-captured anchor;
         // a newly enlarged preceding DOM block must not replace that owner.
-        onGeometryWillChange(releaseOrigin ? originAnchor : undefined);
+        // The restore transaction is created synchronously; only its React
+        // revision update takes a transition lane so commit-phase work cannot
+        // accumulate the nested-update fuse.
+        startTransition(() => { onGeometryWillChange(releaseOrigin ? originAnchor : undefined); });
         windowOrigin.current = 0;
       } else if (common && commonTop != null && published.some(change => firstMeasurements.has(change.key))) {
         const key = common.dataset.transcriptBlockKey!;
@@ -301,15 +307,20 @@ export default function TranscriptWindow({
       // cache and rebuilds the entire prefix, allowing previously committed
       // off-screen measurements to reflow the current native viewport. These
       // synchronous resize notifications complete in one browser task, so
-      // React can expose only the final prefix snapshot to paint.
-      for (const change of published) {
-        const index = coldIndexByKey.get(change.key);
-        if (index != null) virtualizer.resizeItem(index, change.size);
-      }
-      // A layout-effect state update closes the batch before paint; do not
-      // depend on TanStack's asynchronous notification scheduling. Geometry
-      // acknowledges this same batch instead of retaining the older prefix.
-      setMeasurementRevision(revision => revision + 1);
+      // React can expose only the final prefix snapshot to paint. Cache
+      // mutations stay synchronous inside the transition scope; only their
+      // rerender dispatches leave the interactive lane, so a long legitimate
+      // materialization cascade cannot trip React's nested-update fuse.
+      startTransition(() => {
+        for (const change of published) {
+          const index = coldIndexByKey.get(change.key);
+          if (index != null) virtualizer.resizeItem(index, change.size);
+        }
+        // A layout-effect state update closes the batch before paint; do not
+        // depend on TanStack's asynchronous notification scheduling. Geometry
+        // acknowledges this same batch instead of retaining the older prefix.
+        setMeasurementRevision(revision => revision + 1);
+      });
       return;
     }
   }, [coldIndexByKey, fullDOMFallback, kernel.intent, kernel.userGestureActive, logicalAnchorIndex, measuredItems, measurementLedger, measurementRevision, nativeViewport.clientHeight, nativeViewport.scrollTop, onGeometryChange, onGeometryWillChange, projection.activeBlock?.measurementRevision, rangeRevision, scrollElement, split.resident, virtualItems, virtualizer, origin, scrollMargin, totalSize]);
@@ -322,7 +333,7 @@ export default function TranscriptWindow({
     if (measurementNeedsRender.current) return;
     const beforePaint = geometry.measurementCommitted;
     if (beforePaint) pendingMeasurementCommit.current = false;
-    onGeometryChange(geometry.covered, beforePaint);
+    startTransition(() => onGeometryChange(geometry.covered, beforePaint));
   }, [geometry, onGeometryChange]);
 
   // Safety disables range eviction, not the last trustworthy prefix. Reflowing
