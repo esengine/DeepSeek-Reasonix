@@ -156,6 +156,10 @@ jobs:
     name: publish npm
     needs: [authorize, signpath-preflight]
     if: ${{ always() && !cancelled() && needs.authorize.result == 'success' && (needs.signpath-preflight.result == 'success' || needs.signpath-preflight.result == 'skipped') && (github.event_name != 'workflow_dispatch' || inputs.publish_npm) }}
+    # A reusable workflow only receives permissions the caller grants here.
+    permissions:
+      contents: read
+      id-token: write
     uses: ./.github/workflows/release-npm.yml
     with:
       channel: stable

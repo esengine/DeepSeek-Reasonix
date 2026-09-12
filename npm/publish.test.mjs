@@ -148,6 +148,7 @@ test("fills a partially published package set before advancing canary", (t) => {
   const publishes = fx.calls.filter(({ args }) => args[0] === "publish");
   assert.equal(publishes.length, 1);
   assert.equal(publishes[0].cwd, fx.packages[1].dir);
+  assert.ok(publishes[0].args.includes("--provenance"), "every publish attaches a provenance attestation");
   for (const { name } of fx.packages) {
     assert.equal(fx.registry.get(name).tags.get("canary"), "1.5.0-canary.42");
     assert.equal(fx.registry.get(name).tags.has("canary-staging"), false);

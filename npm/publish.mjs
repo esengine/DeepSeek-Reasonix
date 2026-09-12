@@ -231,7 +231,7 @@ function ensurePackage(
   log(`publish ${entry.name}@${version} (${stagingTag})`);
   try {
     runner(
-      ["publish", "--access", "public", "--tag", stagingTag],
+      ["publish", "--access", "public", "--provenance", "--tag", stagingTag],
       { cwd: entry.dir, inherit: true },
     );
   } catch (error) {

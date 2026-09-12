@@ -143,6 +143,11 @@ jobs:
     needs: cache-guard
     if: ${{ always() && !cancelled() && needs.cache-guard.result == 'success' }}
     runs-on: ubuntu-latest
+    # id-token lets npm publish --provenance attach a Sigstore attestation; the
+    # registry token still authenticates the publish itself.
+    permissions:
+      contents: read
+      id-token: write
     # Orchestrated releases have already passed their GitHub environment
     # approval. Direct prereleases and manual Stable recovery pass release-gate.
     steps:
