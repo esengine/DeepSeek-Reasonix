@@ -122,7 +122,11 @@ For the first release after this change, independently prove:
   `latest == canary == next`;
 - R2 immutable and latest manifests are byte-identical and every URL works;
 - Homebrew and reasonix.io show the same version;
-- old bridge clients can upgrade to the official release.
+- old bridge clients can upgrade to the official release;
+- a v1.38.3 or older desktop reports `unsupported install_layout
+  "electron-v1" (keeping current version)` with its installation untouched,
+  and the reasonix.io `#start` section shows the manual full-package notice
+  for those clients.
 
 The release is incomplete until every public surface reaches a terminal,
 verified state.

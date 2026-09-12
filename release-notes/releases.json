@@ -385,7 +385,25 @@
           }
         ]
       },
-      "upgrade": [],
+      "upgrade": [
+        {
+          "level": "warning",
+          "targets": [
+            "desktop"
+          ],
+          "title": {
+            "en": "First upgrade from v1.38.3 or earlier requires the full package",
+            "zh": "从 v1.38.3 或更早版本首次升级需手动安装完整包"
+          },
+          "body": {
+            "en": "Desktops on v1.38.3 or an older Wails release cannot update in-app across the Electron shell change: their updater stops with \"unsupported install_layout electron-v1 (keeping current version)\" and leaves the installation untouched. Quit Reasonix and install the full Windows installer, macOS DMG, or Linux .deb/tar.gz from the download page. Configuration, sessions and history are kept.",
+            "zh": "v1.38.3 或更早 Wails 版本的桌面端无法通过应用内更新跨越 Electron 壳切换：更新器会提示“unsupported install_layout electron-v1 (keeping current version)”并保持现有安装不变。请退出 Reasonix，从下载页安装完整的 Windows 安装程序、macOS DMG 或 Linux .deb/tar.gz。配置、会话与历史记录原样保留。"
+          },
+          "refs": [
+            10089
+          ]
+        }
+      ],
       "risks": [],
       "contributors": [
         "SivanCola",

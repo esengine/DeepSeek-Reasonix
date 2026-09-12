@@ -336,6 +336,10 @@ const ld = {
           <button type="button" data-copy="sudo xattr -rd com.apple.quarantine /Applications/Reasonix.app">Copy</button>
           <a href={`${base}/docs/#macos-quarantine`}><span class="l-en">When to use this →</span><span class="l-zh">查看适用场景 →</span></a>
         </div>
+        <div class="dl-help">
+          <strong><span class="l-en">Updating from 1.38.3 or earlier?</span><span class="l-zh">从 1.38.3 或更早版本升级?</span></strong>
+          <span><span class="l-en">The in-app updater cannot cross the Electron shell change and reports <code>unsupported install_layout "electron-v1"</code>. Quit Reasonix, then install the full package above (Windows installer, macOS DMG, Linux .deb or tar.gz) over the current version. Configuration, sessions and history are kept.</span><span class="l-zh">应用内更新无法跨越 Electron 壳切换,会提示 <code>unsupported install_layout "electron-v1"</code>。请退出 Reasonix,然后用上方的完整安装包(Windows 安装程序、macOS DMG、Linux .deb 或 tar.gz)覆盖安装。配置、会话与历史记录原样保留。</span></span>
+        </div>
       </div>
 
       <div class="dl-pane" id="download-pane-cli" data-pane="cli" role="tabpanel" aria-labelledby="download-tab-cli" hidden>

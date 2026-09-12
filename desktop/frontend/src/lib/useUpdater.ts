@@ -44,7 +44,9 @@ export function classifyUpdateError(message: string): UpdateErrorDisposition {
   if (/pending update already exists|could not safely finish the previous update|handoff backup|awaiting startup health|discard the previous update|previous update is still completing/.test(low)) {
     return "recovery";
   }
-  if (/authorization failed|manual update required|pkexec|sudo apt install/.test(low)) {
+  // An unknown install_layout is a deliberate migration boundary: retrying
+  // never helps, only the full package from the download page does.
+  if (/authorization failed|manual update required|pkexec|sudo apt install|unsupported install_layout/.test(low)) {
     return "manual";
   }
   return "retryable";

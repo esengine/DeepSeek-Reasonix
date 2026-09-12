@@ -123,6 +123,7 @@ ok(classifyUpdateError("prepare update: a pending update already exists") === "r
 ok(classifyUpdateError("prepare update: recover existing handoff backup: operation not permitted") === "recovery", "macOS backup permission errors require recovery fallback");
 ok(classifyUpdateError("update recovery: the previous update is still completing its startup health check; wait briefly and try again, or discard the previous update") === "recovery", "awaiting-health errors require recovery fallback");
 ok(classifyUpdateError("update: manual update required") === "manual", "manual-only errors prefer the official download");
+ok(classifyUpdateError('update: fetch manifest: https://dl.reasonix.io/latest/latest.json: platforms darwin-arm64 asset: unsupported install_layout "electron-v1" (keeping current version)') === "manual", "install layout boundaries prefer the official download");
 ok(classifyUpdateError("connection reset by peer") === "retryable", "transient errors remain retryable");
 
 await act(async () => {
