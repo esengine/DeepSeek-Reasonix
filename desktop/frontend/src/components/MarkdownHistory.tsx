@@ -197,7 +197,7 @@ export const MarkdownHistory = memo(function MarkdownHistory({
 
   useEffect(() => {
     if (initial) {
-      if (stableCacheKey && initial.result) {
+      if (initial.result) {
         const result = initial.result;
         getTranscriptStore().setMarkdown(stableCacheKey, revision, {
           source: text, blocks: result.blocks, selectionText: result.selectionText,
@@ -214,15 +214,17 @@ export const MarkdownHistory = memo(function MarkdownHistory({
     handle.promise
       .then((result) => {
         if (cancelled || !result) return;
-        if (stableCacheKey) {
-          getTranscriptStore().setMarkdown(stableCacheKey, revision, {
-            source: text,
-            blocks: result.blocks,
-            selectionText: result.selectionText,
-            selectionRevision: result.selectionRevision,
-            bytes: text.length * 2 + result.selectionText.length * 2 + estimateHastBytes(result.blocks),
-          });
-        }
+        // Unconditional: the key is the content revision, so it is always
+        // available. An identity-keyed cache had to skip this write whenever the
+        // row had no stable id at hand, which is exactly when the parse is most
+        // likely to be thrown away and repeated.
+        getTranscriptStore().setMarkdown(stableCacheKey, revision, {
+          source: text,
+          blocks: result.blocks,
+          selectionText: result.selectionText,
+          selectionRevision: result.selectionRevision,
+          bytes: text.length * 2 + result.selectionText.length * 2 + estimateHastBytes(result.blocks),
+        });
         const next = { text, blocks: result.blocks };
         const commit = () => {
           if (cancelled) return;

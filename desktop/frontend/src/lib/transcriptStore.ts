@@ -981,15 +981,15 @@ export class TranscriptStore {
 
   // ── markdown cache (populated by the rendering/worker phase) ──────────────
 
-  getMarkdown(entryId: string, revision: number): ParsedMarkdownValue | undefined {
+  getMarkdown(entryId: string | undefined, revision: number): ParsedMarkdownValue | undefined {
     return this.markdown.get(entryId, revision);
   }
 
-  setMarkdown(entryId: string, revision: number, value: ParsedMarkdownValue): void {
+  setMarkdown(entryId: string | undefined, revision: number, value: ParsedMarkdownValue): void {
     this.markdown.set(entryId, revision, value);
   }
 
-  pinMarkdown(entryId: string, revision: number): () => void {
+  pinMarkdown(entryId: string | undefined, revision: number): () => void {
     return this.markdown.pin(entryId, revision);
   }
 

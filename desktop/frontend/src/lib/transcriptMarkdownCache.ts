@@ -18,11 +18,24 @@ export class TranscriptMarkdownCache {
 
   constructor(readonly budgetBytes: number) {}
 
-  private key(entryId: string, revision: number): string {
-    return `${entryId}@${revision}`;
+  /**
+   * The cache key is the content revision alone.
+   *
+   * The parsed value is a pure function of the source text - the worker takes
+   * nothing else, and `revision` is already a fingerprint of that text - so the
+   * revision identifies the entry by itself. Keying on a row id as well only loses
+   * hits: a row's id is a function of which host is rendering it (`p3`/`c1`/`e12`
+   * while live, `he:<entryId>` or `m:<messageId>` once it is history), so every
+   * transition between hosts changed the key and discarded the parse.
+   *
+   * Identical text therefore shares one entry, which is correct - identical text
+   * parses identically - and the stored `source` is still compared on read.
+   */
+  private key(_entryId: string | undefined, revision: number): string {
+    return `md:${revision}`;
   }
 
-  get(entryId: string, revision: number): ParsedMarkdownValue | undefined {
+  get(entryId: string | undefined, revision: number): ParsedMarkdownValue | undefined {
     const key = this.key(entryId, revision);
     const entry = this.entries.get(key);
     if (!entry) return undefined;
@@ -31,7 +44,7 @@ export class TranscriptMarkdownCache {
     return entry.value;
   }
 
-  set(entryId: string, revision: number, value: ParsedMarkdownValue): void {
+  set(entryId: string | undefined, revision: number, value: ParsedMarkdownValue): void {
     const key = this.key(entryId, revision);
     const previous = this.entries.get(key);
     if (previous) this.bytes -= previous.bytes;
@@ -41,7 +54,7 @@ export class TranscriptMarkdownCache {
     this.enforceBudget();
   }
 
-  pin(entryId: string, revision: number): () => void {
+  pin(entryId: string | undefined, revision: number): () => void {
     const key = this.key(entryId, revision);
     this.pins.set(key, (this.pins.get(key) ?? 0) + 1);
     let released = false;

@@ -29,16 +29,16 @@ export function userMessageSelectionText(text: string, submitText?: string): str
 async function markdownSelectionText(sourceText: string, entryId?: string): Promise<string> {
   const revision = contentRevision(sourceText);
   const store = getTranscriptStore();
-  const cached = entryId ? store.getMarkdown(entryId, revision) : undefined;
+  // The cache is keyed by content revision, so it answers whether or not this row
+  // has a stable id - the id is only passed through for readability at the call.
+  const cached = store.getMarkdown(entryId, revision);
   if (cached?.source === sourceText) return cached.selectionText;
 
   try {
     const result = await getMarkdownWorkerClient().parse(sourceText).promise;
     if (!result) return sourceText;
-    if (entryId) {
-      const bytes = sourceText.length * 2 + result.selectionText.length * 2 + estimateHastBytes(result.blocks);
-      store.setMarkdown(entryId, revision, { source: sourceText, ...result, bytes });
-    }
+    const bytes = sourceText.length * 2 + result.selectionText.length * 2 + estimateHastBytes(result.blocks);
+    store.setMarkdown(entryId, revision, { source: sourceText, ...result, bytes });
     return result.selectionText;
   } catch {
     try {
