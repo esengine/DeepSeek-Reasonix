@@ -17,6 +17,21 @@ func installerVersionNames() []string {
 	return names
 }
 
+// writeFlatUnit lays out a pre-migration release root the way the portable
+// archives ship it: the CLI carries its flat name, not the versioned one.
+func writeFlatUnit(t *testing.T, root, label string) {
+	t.Helper()
+	names := []string{installlayout.DesktopBinaryName(), installlayout.FlatCLIBinaryName()}
+	if runtime.GOOS == "windows" {
+		names = append(names, installlayout.UpdateHelperBinaryName())
+	}
+	for _, name := range names {
+		if err := os.WriteFile(filepath.Join(root, name), []byte(label+"-"+name), 0o755); err != nil {
+			t.Fatal(err)
+		}
+	}
+}
+
 func writeInstallerStaging(t *testing.T, root, label string, includeLauncher bool) string {
 	t.Helper()
 	staging := filepath.Join(root, "versions", ".installer-"+label)
@@ -48,12 +63,7 @@ func writeInstallerStaging(t *testing.T, root, label string, includeLauncher boo
 
 func TestMigrateFlatInstallToVersioned(t *testing.T) {
 	root := t.TempDir()
-	// Flat release unit.
-	for _, name := range installlayout.AllowedVersionMembers() {
-		if err := os.WriteFile(filepath.Join(root, name), []byte("flat-"+name), 0o755); err != nil {
-			t.Fatal(err)
-		}
-	}
+	writeFlatUnit(t, root, "flat")
 	// Thin launcher entry must already exist (packaging places it). Use a
 	// non-executable marker so startLauncher fails closed without hanging.
 	_ = os.WriteFile(filepath.Join(root, "reasonix-launcher"), []byte("launcher"), 0o644)
@@ -73,9 +83,14 @@ func TestMigrateFlatInstallToVersioned(t *testing.T) {
 	if err != nil || ptr.ActiveVersion != "v1.20.0" {
 		t.Fatalf("pointer=%+v err=%v", ptr, err)
 	}
-	// Flat desktop must be cleaned up after successful activation.
-	if _, err := os.Stat(filepath.Join(root, installlayout.DesktopBinaryName())); !os.IsNotExist(err) {
-		t.Fatal("flat desktop should be removed after migration")
+	// Flat desktop and CLI must be cleaned up after successful activation.
+	for _, name := range []string{installlayout.DesktopBinaryName(), installlayout.FlatCLIBinaryName()} {
+		if _, err := os.Stat(filepath.Join(root, name)); !os.IsNotExist(err) {
+			t.Fatalf("flat %s should be removed after migration", name)
+		}
+	}
+	if _, err := os.Stat(filepath.Join(root, "versions", "v1.20.0", installlayout.CLIBinaryName())); err != nil {
+		t.Fatalf("versioned CLI missing after migration: %v", err)
 	}
 	// Active desktop lives under versions/.
 	if _, err := installlayout.ActiveDesktopPath(root); err != nil {
@@ -105,11 +120,7 @@ func TestMigrateRefusesCorruptCurrentPointerWithoutOverwritingIt(t *testing.T) {
 	if err := os.WriteFile(current, corrupt, 0o644); err != nil {
 		t.Fatal(err)
 	}
-	for _, name := range installlayout.AllowedVersionMembers() {
-		if err := os.WriteFile(filepath.Join(root, name), []byte("stale-"+name), 0o755); err != nil {
-			t.Fatal(err)
-		}
-	}
+	writeFlatUnit(t, root, "stale")
 	if err := migrateWithRelaunch(root, "v1.20.0", true); err == nil {
 		t.Fatal("corrupt current.json was treated as an absent pointer")
 	}

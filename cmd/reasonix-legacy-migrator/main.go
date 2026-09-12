@@ -163,6 +163,7 @@ func migrateWithRelaunch(installRoot, activeVersion string, relaunch bool) error
 
 	desktopName := installlayout.DesktopBinaryName()
 	cliName := installlayout.CLIBinaryName()
+	flatCLIName := installlayout.FlatCLIBinaryName()
 	helperName := installlayout.UpdateHelperBinaryName()
 	flatDesktop := filepath.Join(installRoot, desktopName)
 	if _, err := os.Lstat(flatDesktop); err != nil {
@@ -172,13 +173,12 @@ func migrateWithRelaunch(installRoot, activeVersion string, relaunch bool) error
 	members := []installlayout.Member{
 		{Name: desktopName, Path: flatDesktop},
 	}
-	if p := optionalRegular(filepath.Join(installRoot, cliName)); p != "" {
+	// The flat root ships the CLI under its portable name; the version
+	// directory whitelist only admits the versioned member name.
+	if p := optionalRegular(filepath.Join(installRoot, flatCLIName)); p != "" {
 		members = append(members, installlayout.Member{Name: cliName, Path: p})
 	} else {
-		// CLI may be absent on some portable trees; synthesize from desktop only
-		// is not allowed — require the whitelist. Prefer copying desktop as a
-		// last-resort placeholder is forbidden; fail closed.
-		return fmt.Errorf("migrate: flat CLI binary %s is required", cliName)
+		return fmt.Errorf("migrate: flat CLI binary %s is required", flatCLIName)
 	}
 	requiredNames := []string{desktopName, cliName}
 	if runtime.GOOS == "windows" {
@@ -465,7 +465,7 @@ func cleanupLegacyFlatFiles(installRoot string) error {
 	// active. Never delete the thin launcher or current.json.
 	names := []string{
 		installlayout.DesktopBinaryName(),
-		installlayout.CLIBinaryName(),
+		installlayout.FlatCLIBinaryName(),
 		installlayout.UpdateHelperBinaryName(),
 	}
 	if runtime.GOOS == "windows" {

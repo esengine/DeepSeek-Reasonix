@@ -266,6 +266,21 @@ func CLIBinaryNameFor(goos string) string {
 	return "reasonix-cli"
 }
 
+// FlatCLIBinaryName is the CLI executable base name in a flat install root
+// before migration. Unix archives ship it as "reasonix" beside the desktop
+// binary; only Windows uses the versioned name there.
+func FlatCLIBinaryName() string {
+	return FlatCLIBinaryNameFor(runtime.GOOS)
+}
+
+// FlatCLIBinaryNameFor returns the flat-root CLI name for an explicit target OS.
+func FlatCLIBinaryNameFor(goos string) string {
+	if goos == "windows" {
+		return "reasonix-cli.exe"
+	}
+	return "reasonix"
+}
+
 // UpdateHelperBinaryName is the platform-specific update helper name.
 func UpdateHelperBinaryName() string {
 	if runtime.GOOS == "windows" {
