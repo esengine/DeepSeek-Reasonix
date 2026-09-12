@@ -110,9 +110,14 @@ await page.waitForTimeout(500);
 const back = await geom();
 check("回到最新可用", back.h - back.top - back.c < 60, `距底 ${(back.h - back.top - back.c).toFixed(0)}px`);
 
-// 6) 切到轨迹再切回，记录仍在且仍贴底。
-await page.locator('[role="tab"]').nth(1).click();
-await page.waitForTimeout(300);
+// 6) 切到轨迹再切回，记录仍在且仍贴底。轨迹不在标签条上了：时间线、事件轨迹、
+//     运行图三个视图收进了「运行详情」那个下拉，标签条只剩对话和任务。原来点
+//     nth(1) 点的是「任务」，于是这条断言从那次重构起就在一个没有 table.traj 的
+//     页面上数行 —— 一直是 0，而它排在一条更早就超时的断言后面，从没跑到过。
+await page.locator(".tab.more").click();
+await page.waitForTimeout(200);
+await page.getByRole("menuitem", { name: "事件轨迹" }).click();
+await page.waitForTimeout(400);
 const trajRows = await page.locator("table.traj tbody tr").count();
 check("轨迹页有内容", trajRows > 50, `${trajRows} 行`);
 await page.screenshot({ path: `${SHOTS}/3-轨迹页.png` });
@@ -179,7 +184,15 @@ check("「撤回」的命中框够大", (reach?.高 ?? 0) >= 28, `命中高 ${re
 //      这条断言量的是结果：四角都点得到。
 await page.locator(".compose textarea").first().fill("守卫用的一句话");
 await page.locator(".compose textarea").first().press("Enter");
-await page.waitForTimeout(1600);
+await page.waitForTimeout(900);
+// 回退入口只挂在认领了某条消息的行上（state/checkpoints：认不出是哪一轮就不给
+// 入口，因为回退不可撤销）。认领靠 turn_started 带来的 msgIndex，而这个台架的
+// 整个前提是「事件流归驱动」——BenchPort 覆盖了 subscribe，固件自己的帧一个都
+// 到不了界面。所以这一帧得由驱动补，跟它喂其它帧一样；少了它，这条断言等的是
+// 一个按设计永远不会出现的按钮。msgIndex 用固件的算法：第 n 轮是 n*2-1。
+await page.evaluate(() => window.__feed({ kind: "turn_started", authoredTurn: 1, msgIndex: 1 }));
+await page.waitForTimeout(700);
+check("回退入口挂到了它认领的那一轮上", (await page.locator(".rewind button").count()) > 0);
 await page.locator(".rewind button").first().click();
 await page.waitForTimeout(500);
 const clip = await page.evaluate(() => {

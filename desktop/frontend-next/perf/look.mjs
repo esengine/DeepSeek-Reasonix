@@ -97,7 +97,16 @@ await page.waitForTimeout(400);
 const zoom = await page.evaluate(() => document.documentElement.style.zoom);
 await page.screenshot({ path: `${SHOTS}/look-2-放大后.png` });
 
-// 3) 字体：写一个名字进去
+// 3) 字体：写一个名字进去。字体两槽在「高级」折叠区里，合起来的时候
+// details 的内容浏览器不渲染 —— 上面那些判据是拿 DOM 的 .click() 点的，不过
+// 可见性这一关，所以它们一路绿着，而第一个真正的用户动作（往框里打字）撞上
+// 它。展开一次，后面两槽共用。
+await page.evaluate(() => {
+  const box = document.querySelector("details.advset");
+  if (box && !box.open) box.open = true;
+});
+await page.waitForTimeout(300);
+check("字体设置所在的高级区能展开", await page.locator(".fontrow .fontown").first().isVisible());
 await page.locator(".fontrow .fontown").first().fill("Georgia");
 await page.waitForTimeout(600);
 const ui = await rootVar("--ui");
