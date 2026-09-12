@@ -48,8 +48,8 @@ func writeInstallerStaging(t *testing.T, root, label string, includeLauncher boo
 
 func TestMigrateFlatInstallToVersioned(t *testing.T) {
 	root := t.TempDir()
-	// Flat release unit.
-	for _, name := range installlayout.AllowedVersionMembers() {
+	// Flat release unit, named the way a portable archive actually ships it.
+	for _, name := range installlayout.FlatMemberNames() {
 		if err := os.WriteFile(filepath.Join(root, name), []byte("flat-"+name), 0o755); err != nil {
 			t.Fatal(err)
 		}
@@ -105,7 +105,7 @@ func TestMigrateRefusesCorruptCurrentPointerWithoutOverwritingIt(t *testing.T) {
 	if err := os.WriteFile(current, corrupt, 0o644); err != nil {
 		t.Fatal(err)
 	}
-	for _, name := range installlayout.AllowedVersionMembers() {
+	for _, name := range installlayout.FlatMemberNames() {
 		if err := os.WriteFile(filepath.Join(root, name), []byte("stale-"+name), 0o755); err != nil {
 			t.Fatal(err)
 		}

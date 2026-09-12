@@ -54,7 +54,7 @@ func TestInstallerRejectsIncompleteShellBeforePointerCommit(t *testing.T) {
 
 func TestPortableFirstLaunchMigrationCarriesShellIntoActiveVersion(t *testing.T) {
 	root := t.TempDir()
-	for _, name := range installlayout.AllowedVersionMembers() {
+	for _, name := range installlayout.FlatMemberNames() {
 		if err := os.WriteFile(filepath.Join(root, name), []byte(name), 0755); err != nil {
 			t.Fatal(err)
 		}

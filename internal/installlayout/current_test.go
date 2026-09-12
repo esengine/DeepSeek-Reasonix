@@ -143,3 +143,36 @@ func TestHasActiveShell(t *testing.T) {
 		t.Fatal("shell tree not detected beside the active desktop")
 	}
 }
+
+// CLIBinaryName is a cross-subsystem contract, not an internal detail: the
+// desktop probes exactly this name for its bundled CLI (desktop/remote_app.go,
+// desktop/updater.go) and the Linux updater publishes it beside
+// reasonix-desktop (desktop/updater_linux_tree.go). Assert the literal so a
+// rename cannot stay green by agreeing with itself.
+func TestCLIBinaryNameMatchesTheReleaseContract(t *testing.T) {
+	want := "reasonix"
+	if runtime.GOOS == "windows" {
+		want = "reasonix-cli.exe" // "Reasonix.exe" collides with "reasonix.exe" there.
+	}
+	if got := CLIBinaryName(); got != want {
+		t.Fatalf("CLIBinaryName() = %q, want %q", got, want)
+	}
+}
+
+// A flat portable archive carries the same CLI name the version directory gets,
+// which is also the name the desktop looks for beside itself.
+func TestFlatMemberNamesMatchThePortableArchive(t *testing.T) {
+	want := []string{DesktopBinaryName(), "reasonix"}
+	if runtime.GOOS == "windows" {
+		want = []string{DesktopBinaryName(), "reasonix-cli.exe", UpdateHelperBinaryName()}
+	}
+	got := FlatMemberNames()
+	if len(got) != len(want) {
+		t.Fatalf("FlatMemberNames() = %v, want %v", got, want)
+	}
+	for i := range want {
+		if got[i] != want[i] {
+			t.Fatalf("FlatMemberNames() = %v, want %v", got, want)
+		}
+	}
+}

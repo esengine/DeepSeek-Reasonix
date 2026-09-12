@@ -251,13 +251,25 @@ func DesktopBinaryName() string {
 	return "reasonix-desktop"
 }
 
-// CLIBinaryName is the platform-specific CLI executable base name inside a
-// version directory.
+// CLIBinaryName is the platform-specific CLI executable base name, the same in
+// a flat portable tree and inside a version directory. Unix ships "reasonix";
+// Windows uses "reasonix-cli.exe" because "Reasonix.exe" and "reasonix.exe"
+// collide on a case-insensitive filesystem.
 func CLIBinaryName() string {
 	if runtime.GOOS == "windows" {
 		return "reasonix-cli.exe"
 	}
-	return "reasonix-cli"
+	return "reasonix"
+}
+
+// FlatMemberNames is the member set a flat portable tree carries before the
+// legacy migrator moves it into a version directory.
+func FlatMemberNames() []string {
+	names := []string{DesktopBinaryName(), CLIBinaryName()}
+	if runtime.GOOS == "windows" {
+		names = append(names, UpdateHelperBinaryName())
+	}
+	return names
 }
 
 // UpdateHelperBinaryName is the platform-specific update helper name.
