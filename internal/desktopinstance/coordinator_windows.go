@@ -188,7 +188,7 @@ func CheckInstallVacant(root, home string) error {
 
 // PrepareInstall holds process coordination until the caller commits or aborts.
 func PrepareInstall(root, home string, interactive bool) (release func(), resultErr error) {
-	finish := attemptLog(home, "prepare-install", root)
+	finish := AttemptLog(home, "prepare-install", root)
 	defer func() { finish(resultErr) }()
 	root, profile, err := preparePaths(root, home)
 	if err != nil {
@@ -275,7 +275,7 @@ func verify(root, profile, expected string) error {
 
 // LaunchAndVerify serializes handoff and never treats launcher exit as readiness.
 func LaunchAndVerify(root, home string, interactive bool, start func() error, args ...string) (resultErr error) {
-	finish := attemptLog(home, "launch", root)
+	finish := AttemptLog(home, "launch", root)
 	defer func() { finish(resultErr) }()
 	root, profile, err := preparePaths(root, home)
 	if err != nil {

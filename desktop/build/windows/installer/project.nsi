@@ -185,6 +185,12 @@ LangString reasonixUpdateTitle ${LANG_TRADCHINESE} "正在更新 Reasonix"
 LangString reasonixUpdateSubtitle ${LANG_ENGLISH} "Installing the verified update. Reasonix will restart automatically."
 LangString reasonixUpdateSubtitle ${LANG_SIMPCHINESE} "正在安装已验证的更新，完成后 Reasonix 将自动重启。"
 LangString reasonixUpdateSubtitle ${LANG_TRADCHINESE} "正在安裝已驗證的更新，完成後 Reasonix 將自動重新啟動。"
+LangString reasonixActivateBusy ${LANG_ENGLISH} "Reasonix is still running or another installation is in progress. Close it and click Retry. Details: %APPDATA%\reasonix\desktop-shell\logs\recovery.log"
+LangString reasonixActivateBusy ${LANG_SIMPCHINESE} "Reasonix 仍在运行，或另一个安装正在进行。请关闭后点击“重试”。详情见 %APPDATA%\reasonix\desktop-shell\logs\recovery.log"
+LangString reasonixActivateBusy ${LANG_TRADCHINESE} "Reasonix 仍在執行，或另一個安裝正在進行。請關閉後點擊「重試」。詳情見 %APPDATA%\reasonix\desktop-shell\logs\recovery.log"
+LangString reasonixActivateLocked ${LANG_ENGLISH} "Reasonix could not activate the release, often because a file was temporarily locked by antivirus or sync software. Wait a moment and click Retry. Details: %APPDATA%\reasonix\desktop-shell\logs\recovery.log"
+LangString reasonixActivateLocked ${LANG_SIMPCHINESE} "Reasonix 无法启用新版本，通常是文件被杀毒或同步软件临时锁定。请稍候再点击“重试”。详情见 %APPDATA%\reasonix\desktop-shell\logs\recovery.log"
+LangString reasonixActivateLocked ${LANG_TRADCHINESE} "Reasonix 無法啟用新版本，通常是檔案被防毒或同步軟體暫時鎖定。請稍候再點擊「重試」。詳情見 %APPDATA%\reasonix\desktop-shell\logs\recovery.log"
 
 ## Preserve the first-pass generated uninstaller so the release workflow can
 ## Authenticode-sign it together with the other installed payload files.
@@ -550,18 +556,32 @@ reasonix_normal_install:
     StrCpy $R7 ""
     IfSilent +2 0
     StrCpy $R7 "--interactive-recovery"
+reasonix_layout_activate:
     nsExec::ExecToLog /OEM '"$PLUGINSDIR\${REASONIX_LAYOUT_INSTALLER}" --install-root "$INSTDIR" --version "v${INFO_PRODUCTVERSION}" --activate-staging "$R9" --no-relaunch $R7'
     Pop $0
     StrCmp $0 "0" reasonix_layout_activated
     DetailPrint "Reasonix layout activation failed with exit code $0; the previous version remains active."
+    ; 1602 is the user's own cancel in the recovery dialog. Every other failure
+    ; keeps $R9 so Retry re-runs the activator against the same verified files;
+    ; the exit code is set only once the attempt is truly abandoned.
+    StrCmp $0 "1602" reasonix_activation_cancelled
+    IfSilent reasonix_activation_failed 0
+    StrCmp $0 "1618" reasonix_activation_busy_prompt reasonix_activation_locked_prompt
+reasonix_activation_busy_prompt:
+    MessageBox MB_ICONEXCLAMATION|MB_RETRYCANCEL "$(reasonixActivateBusy)" IDRETRY reasonix_layout_activate
+    Goto reasonix_activation_failed
+reasonix_activation_locked_prompt:
+    MessageBox MB_ICONEXCLAMATION|MB_RETRYCANCEL "$(reasonixActivateLocked)" IDRETRY reasonix_layout_activate
+reasonix_activation_failed:
     RMDir /r "$R9"
     StrCmp $0 "1618" 0 +3
     SetErrorLevel 1618
     Goto reasonix_activation_abort
-    StrCmp $0 "1602" 0 +3
-    SetErrorLevel 1602
-    Goto reasonix_activation_abort
     SetErrorLevel 1
+    Goto reasonix_activation_abort
+reasonix_activation_cancelled:
+    RMDir /r "$R9"
+    SetErrorLevel 1602
 reasonix_activation_abort:
     Abort "Reasonix could not activate the verified release. The previous version was left unchanged."
 

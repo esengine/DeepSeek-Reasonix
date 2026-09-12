@@ -289,6 +289,10 @@ test("the NSIS script installs the Electron tree with both payload modes and no 
   assert.match(nsi, /!define PRODUCT_EXECUTABLE "\$\{INFO_PROJECTNAME\}\.exe"/);
   assert.match(nsi, /RMDir \/r "\$INSTDIR\\versions"/);
   assert.match(nsi, /File "\/oname=uninstall\.exe" "\$\{ARG_REASONIX_SIGNED_UNINSTALLER\}"/);
+  const activation = nsi.slice(nsi.indexOf("Reasonix layout activator output:"));
+  const retry = activation.indexOf('MessageBox MB_ICONEXCLAMATION|MB_RETRYCANCEL "$(reasonixActivateLocked)" IDRETRY reasonix_layout_activate');
+  assert.ok(retry > 0, "activation failure offers Retry against the kept staging directory");
+  assert.ok(activation.indexOf('RMDir /r "$R9"') > retry, "staging is discarded only after the user gives up");
 });
 
 test("the installer stamps the shortcuts it created without launching the desktop", () => {

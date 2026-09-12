@@ -12,7 +12,7 @@ import (
 
 // Diagnostics stay on this computer and contain no business configuration.
 // Each recovery log and its single backup are bounded to approximately 1 MiB.
-func attemptLog(home, action, root string) func(error) {
+func AttemptLog(home, action, root string) func(error) {
 	id := fmt.Sprintf("%x", randomID())
 	writeRecoveryLog(home, fmt.Sprintf("attempt=%s action=%s root=%q phase=begin", id, action, root))
 	return func(err error) {

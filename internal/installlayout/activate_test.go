@@ -262,24 +262,31 @@ func TestCleanupStaleStaging(t *testing.T) {
 	}
 	old := filepath.Join(versions, ".staging-v1.20.0-old")
 	fresh := filepath.Join(versions, ".staging-v1.20.0-fresh")
-	if err := os.Mkdir(old, 0o755); err != nil {
-		t.Fatal(err)
-	}
-	if err := os.Mkdir(fresh, 0o755); err != nil {
-		t.Fatal(err)
+	oldReplaced := filepath.Join(versions, "v1.19.0.replaced-old")
+	freshReplaced := filepath.Join(versions, "v1.19.0.replaced-fresh")
+	for _, dir := range []string{old, fresh, oldReplaced, freshReplaced} {
+		if err := os.Mkdir(dir, 0o755); err != nil {
+			t.Fatal(err)
+		}
 	}
 	oldTime := time.Now().Add(-48 * time.Hour)
-	if err := os.Chtimes(old, oldTime, oldTime); err != nil {
-		t.Fatal(err)
+	for _, dir := range []string{old, oldReplaced} {
+		if err := os.Chtimes(dir, oldTime, oldTime); err != nil {
+			t.Fatal(err)
+		}
 	}
 	if err := CleanupStaleStaging(root, 24*time.Hour); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := os.Stat(old); !os.IsNotExist(err) {
-		t.Fatal("old staging should be removed")
+	for _, dir := range []string{old, oldReplaced} {
+		if _, err := os.Stat(dir); !os.IsNotExist(err) {
+			t.Fatalf("%s should be removed", filepath.Base(dir))
+		}
 	}
-	if _, err := os.Stat(fresh); err != nil {
-		t.Fatal("fresh staging should remain")
+	for _, dir := range []string{fresh, freshReplaced} {
+		if _, err := os.Stat(dir); err != nil {
+			t.Fatalf("%s should remain", filepath.Base(dir))
+		}
 	}
 }
 

@@ -125,9 +125,10 @@ func ActivateVersion(req ActivationRequest) error {
 	stagingName := StagingDirName(req.Version, nonce)
 	stagingPath := filepath.Join(versionsRoot, stagingName)
 	rootStagingPath := filepath.Join(versionsRoot, ".root-"+stagingName)
-	// Always start clean for this request id/nonce.
-	_ = os.RemoveAll(stagingPath)
-	_ = os.RemoveAll(rootStagingPath)
+	// Always start clean for this request id/nonce: a retried installer reuses
+	// both names, so a lingering scanner lock here would fail every attempt.
+	_ = removeAllRetry(stagingPath)
+	_ = removeAllRetry(rootStagingPath)
 	if err := os.Mkdir(stagingPath, 0o755); err != nil {
 		return fmt.Errorf("installlayout: create staging dir: %w", err)
 	}
@@ -170,32 +171,21 @@ func ActivateVersion(req ActivationRequest) error {
 		// A previous partial publish of the same version is replaced only from
 		// staging after validation. Never swap current.json first.
 		versionBackup = finalPath + ".replaced-" + nonce
-		_ = os.RemoveAll(versionBackup)
-		if err := os.Rename(finalPath, versionBackup); err != nil {
+		_ = removeAllRetry(versionBackup)
+		if err := renameRetry(finalPath, versionBackup); err != nil {
 			return fmt.Errorf("installlayout: displace existing version dir: %w", err)
 		}
 	} else if !os.IsNotExist(err) {
 		return fmt.Errorf("installlayout: inspect version dir: %w", err)
 	}
 
-	if err := os.Rename(stagingPath, finalPath); err != nil {
+	if err := renameRetry(stagingPath, finalPath); err != nil {
 		if versionBackup != "" {
-			_ = os.Rename(versionBackup, finalPath)
+			_ = renameRetry(versionBackup, finalPath)
 		}
 		return fmt.Errorf("installlayout: publish version directory: %w", err)
 	}
-	rollbackVersion := func() error {
-		var rollbackErr error
-		if err := os.RemoveAll(finalPath); err != nil {
-			rollbackErr = errors.Join(rollbackErr, err)
-		}
-		if versionBackup != "" {
-			if err := os.Rename(versionBackup, finalPath); err != nil {
-				rollbackErr = errors.Join(rollbackErr, err)
-			}
-		}
-		return rollbackErr
-	}
+	rollbackVersion := versionRollback(finalPath, versionBackup)
 
 	rollbackRoots, commitRoots, err := publishRootEntries(installRoot, rootStagingPath, req.RootMembers)
 	if err != nil {
@@ -227,9 +217,24 @@ func ActivateVersion(req ActivationRequest) error {
 	committed = true
 	commitRoots()
 	if versionBackup != "" {
-		_ = os.RemoveAll(versionBackup)
+		_ = removeAllRetry(versionBackup)
 	}
 	return nil
+}
+
+func versionRollback(finalPath, versionBackup string) func() error {
+	return func() error {
+		var rollbackErr error
+		if err := removeAllRetry(finalPath); err != nil {
+			rollbackErr = errors.Join(rollbackErr, err)
+		}
+		if versionBackup != "" {
+			if err := renameRetry(versionBackup, finalPath); err != nil {
+				rollbackErr = errors.Join(rollbackErr, err)
+			}
+		}
+		return rollbackErr
+	}
 }
 
 func publishRootEntries(installRoot, stagingRoot string, members []Member) (rollback func() error, commit func(), err error) {
@@ -250,11 +255,11 @@ func publishRootEntries(installRoot, stagingRoot string, members []Member) (roll
 		var rollbackErr error
 		for _, v := range slices.Backward(replacements) {
 			r := v
-			if err := os.Remove(r.destination); err != nil && !os.IsNotExist(err) {
+			if err := removeRetry(r.destination); err != nil && !os.IsNotExist(err) {
 				rollbackErr = errors.Join(rollbackErr, err)
 			}
 			if r.hadOriginal {
-				if err := os.Rename(r.backup, r.destination); err != nil {
+				if err := renameRetry(r.backup, r.destination); err != nil {
 					rollbackErr = errors.Join(rollbackErr, err)
 				}
 			}
@@ -271,7 +276,7 @@ func publishRootEntries(installRoot, stagingRoot string, members []Member) (roll
 				_ = rollbackFn()
 				return nil, nil, fmt.Errorf("installlayout: root entry %s is not a regular file", name)
 			}
-			if err := os.Rename(destination, r.backup); err != nil {
+			if err := renameRetry(destination, r.backup); err != nil {
 				_ = rollbackFn()
 				return nil, nil, fmt.Errorf("installlayout: back up root entry %s: %w", name, err)
 			}
@@ -281,7 +286,7 @@ func publishRootEntries(installRoot, stagingRoot string, members []Member) (roll
 			return nil, nil, fmt.Errorf("installlayout: inspect root entry %s: %w", name, statErr)
 		}
 		replacements = append(replacements, r)
-		if err := os.Rename(source, destination); err != nil {
+		if err := renameRetry(source, destination); err != nil {
 			rollbackErr := rollbackFn()
 			return nil, nil, errors.Join(
 				fmt.Errorf("installlayout: publish root entry %s: %w", name, err),
@@ -289,7 +294,7 @@ func publishRootEntries(installRoot, stagingRoot string, members []Member) (roll
 			)
 		}
 	}
-	return rollbackFn, func() { _ = os.RemoveAll(backupRoot) }, nil
+	return rollbackFn, func() { _ = removeAllRetry(backupRoot) }, nil
 }
 
 func wrapRollbackError(label string, err error) error {
@@ -413,8 +418,11 @@ func copyFileRegular(src, dst string, mode os.FileMode) error {
 		return err
 	}
 	defer in.Close()
-	out, err := os.OpenFile(dst, os.O_CREATE|os.O_EXCL|os.O_WRONLY, mode)
-	if err != nil {
+	var out *os.File
+	if err := retryTransient(func() (openErr error) {
+		out, openErr = os.OpenFile(dst, os.O_CREATE|os.O_EXCL|os.O_WRONLY, mode)
+		return openErr
+	}); err != nil {
 		return err
 	}
 	closed := false
@@ -470,8 +478,9 @@ func stagingNonce(requestID string) (string, error) {
 	return hex.EncodeToString(raw[:]), nil
 }
 
-// CleanupStaleStaging removes versions/.staging-* directories older than maxAge.
-// Safe to call anytime; never touches published version directories or current.json.
+// CleanupStaleStaging removes versions/.staging-* and *.replaced-* directories
+// older than maxAge. Safe to call anytime; never touches published version
+// directories or current.json.
 func CleanupStaleStaging(installRoot string, maxAge time.Duration) error {
 	installRoot, err := cleanInstallRoot(installRoot)
 	if err != nil {
@@ -491,7 +500,7 @@ func CleanupStaleStaging(installRoot string, maxAge time.Duration) error {
 	cutoff := time.Now().Add(-maxAge)
 	for _, e := range entries {
 		name := e.Name()
-		if !strings.HasPrefix(name, ".staging-") {
+		if !strings.HasPrefix(name, ".staging-") && !strings.Contains(name, ".replaced-") {
 			continue
 		}
 		path := filepath.Join(versionsRoot, name)

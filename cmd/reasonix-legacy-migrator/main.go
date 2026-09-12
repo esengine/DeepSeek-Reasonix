@@ -316,21 +316,26 @@ func activateInstallerStagingWithRecovery(installRoot, activeVersion, stagingRoo
 		requiredRootNames = append(requiredRootNames, alias)
 	}
 
-	release, err := desktopinstance.PrepareInstall(installRoot, config.ReasonixHomeDir(), interactive)
+	home := config.ReasonixHomeDir()
+	release, err := desktopinstance.PrepareInstall(installRoot, home, interactive)
 	if err != nil {
 		return err
 	}
 	defer release()
-	if err := installlayout.ActivateVersion(installlayout.ActivationRequest{
+	// The installer only shows an exit code; the recovery log keeps the reason.
+	finish := desktopinstance.AttemptLog(home, "activate-staging", installRoot)
+	err = installlayout.ActivateVersion(installlayout.ActivationRequest{
 		InstallRoot:       installRoot,
 		Version:           activeVersion,
 		RequestID:         "signed-installer-" + activeVersion,
-		CheckProcesses:    func() error { return desktopinstance.CheckInstallVacant(installRoot, config.ReasonixHomeDir()) },
+		CheckProcesses:    func() error { return desktopinstance.CheckInstallVacant(installRoot, home) },
 		Members:           members,
 		RequiredNames:     requiredNames,
 		RootMembers:       rootMembers,
 		RequiredRootNames: requiredRootNames,
-	}); err != nil {
+	})
+	finish(err)
+	if err != nil {
 		return fmt.Errorf("activate signed installer staging: %w", err)
 	}
 	return nil

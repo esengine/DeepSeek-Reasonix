@@ -123,6 +123,14 @@ func TestWindowsInstallerScriptWaitsBeforeCopyingExecutable(t *testing.T) {
 		`nsExec::ExecToLog /OEM`,
 		`Reasonix layout activator output:`,
 		`--activate-staging "$R9" --no-relaunch`,
+		`LangString reasonixActivateBusy ${LANG_ENGLISH}`,
+		`LangString reasonixActivateBusy ${LANG_SIMPCHINESE}`,
+		`LangString reasonixActivateBusy ${LANG_TRADCHINESE}`,
+		`LangString reasonixActivateLocked ${LANG_ENGLISH}`,
+		`LangString reasonixActivateLocked ${LANG_SIMPCHINESE}`,
+		`LangString reasonixActivateLocked ${LANG_TRADCHINESE}`,
+		`MessageBox MB_ICONEXCLAMATION|MB_RETRYCANCEL "$(reasonixActivateBusy)" IDRETRY reasonix_layout_activate`,
+		`MessageBox MB_ICONEXCLAMATION|MB_RETRYCANCEL "$(reasonixActivateLocked)" IDRETRY reasonix_layout_activate`,
 		`File "/oname=${REASONIX_PAYLOAD_MANIFEST}" "${REASONIX_PAYLOAD_MANIFEST}"`,
 		`File "/oname=${REASONIX_PAYLOAD_SIGNATURE}" "${REASONIX_PAYLOAD_SIGNATURE}"`,
 		`Delete "$INSTDIR\${REASONIX_UPDATE_HELPER}"`,
@@ -138,6 +146,16 @@ func TestWindowsInstallerScriptWaitsBeforeCopyingExecutable(t *testing.T) {
 	finishPage := strings.Index(script, "!insertmacro MUI_PAGE_FINISH")
 	if finishPageHook < 0 || finishPage < 0 || finishPageHook > finishPage {
 		t.Fatalf("update-only finish page hook must be attached to MUI_PAGE_FINISH (hook=%d page=%d)", finishPageHook, finishPage)
+	}
+	activation := script[strings.Index(script, "Reasonix layout activator output:"):]
+	retryPrompt := strings.Index(activation, `IDRETRY reasonix_layout_activate`)
+	discardStaging := strings.Index(activation, `RMDir /r "$R9"`)
+	silentAbort := strings.Index(activation, "IfSilent reasonix_activation_failed 0")
+	if retryPrompt < 0 || discardStaging < 0 || retryPrompt > discardStaging || silentAbort < 0 || silentAbort > retryPrompt {
+		t.Fatalf("activation failure must offer Retry before discarding the staged files, and silent installs must skip the prompt (retry=%d discard=%d silent=%d)", retryPrompt, discardStaging, silentAbort)
+	}
+	if levelBeforePrompt := strings.Index(activation, "SetErrorLevel"); levelBeforePrompt < retryPrompt {
+		t.Fatalf("SetErrorLevel must follow the Retry prompt so a successful retry exits 0 (level=%d retry=%d)", levelBeforePrompt, retryPrompt)
 	}
 	wait := strings.Index(script, "Call reasonix.waitForExecutableUnlock")
 	copyFiles := strings.Index(script, "reasonix_normal_install:")
