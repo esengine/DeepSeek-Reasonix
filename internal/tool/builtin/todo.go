@@ -62,10 +62,16 @@ func (todoWrite) Schema() json.RawMessage {
 // laying out a plan as todos is exactly the point.
 func (todoWrite) ReadOnly() bool { return true }
 
-func (todoWrite) Execute(ctx context.Context, args json.RawMessage) (string, error) {
+func (todoWrite) Execute(ctx context.Context, args json.RawMessage) (output string, err error) {
 	var p struct {
 		Todos []todoItem `json:"todos"`
 	}
+	// 每个校验失败都带上宿主当前清单，模型即使丢失了压缩前的历史也能重试。
+	defer func() {
+		if err != nil {
+			err = withTodoStateHint(ctx, err, p.Todos)
+		}
+	}()
 	if err := json.Unmarshal(args, &p); err != nil {
 		return "", fmt.Errorf("invalid args: %w", err)
 	}
@@ -107,6 +113,24 @@ func (todoWrite) Execute(ctx context.Context, args json.RawMessage) (string, err
 	}
 	return fmt.Sprintf("Todos updated: %d total — %d completed, %d in progress, %d pending.",
 		len(p.Todos), done, active, pending), nil
+}
+
+// withTodoStateHint appends a complete JSON snapshot to validation errors.
+// Prefer the host baseline; when no baseline exists, expose the submitted
+// list so malformed serial-state errors remain actionable.
+func withTodoStateHint(ctx context.Context, err error, submitted []todoItem) error {
+	if err == nil {
+		return nil
+	}
+	current := todoBaseline(ctx)
+	if len(current) == 0 && len(submitted) > 0 {
+		current = toEvidenceTodos(submitted)
+	}
+	snapshot, marshalErr := json.Marshal(current)
+	if marshalErr != nil {
+		return err
+	}
+	return fmt.Errorf("%w; current todo list: %s", err, snapshot)
 }
 
 // verifyUniqueStepIDs keeps a step id an identity: two items claiming the same
