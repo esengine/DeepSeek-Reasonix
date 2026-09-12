@@ -99,17 +99,23 @@ func NormalizeWritePaths(workspaceRoot string, raw []string) (WritePathSet, erro
 
 type subagentWriteClaimKey struct{}
 
-// WithSubagentWriteClaim carries a child's declared write claim into its run so
-// the host can audit, after the fact, that every mutation it observed fell
-// inside the claim the scheduler parallelized on.
-func WithSubagentWriteClaim(ctx context.Context, claims WritePathSet) context.Context {
-	return context.WithValue(ctx, subagentWriteClaimKey{}, claims)
+// WithSubagentWriteGrant carries a child's write grant into its run. The grant
+// itself rather than a snapshot: the tools bound into the run widen it while
+// the run is going, and the audit at the end has to see what was added.
+func WithSubagentWriteGrant(ctx context.Context, grant *WriteGrant) context.Context {
+	return context.WithValue(ctx, subagentWriteClaimKey{}, grant)
 }
 
-// SubagentWriteClaim returns the write claim of the running child, if any.
+// SubagentWriteGrant returns the running child's grant, or nil outside one.
+func SubagentWriteGrant(ctx context.Context) *WriteGrant {
+	grant, _ := ctx.Value(subagentWriteClaimKey{}).(*WriteGrant)
+	return grant
+}
+
+// SubagentWriteClaim returns everything the running child is allowed to write,
+// declared and granted, which is what the host audits mutations against.
 func SubagentWriteClaim(ctx context.Context) WritePathSet {
-	claims, _ := ctx.Value(subagentWriteClaimKey{}).(WritePathSet)
-	return claims
+	return SubagentWriteGrant(ctx).Scope()
 }
 
 // WholeWorkspaceWriteClaim claims the entire workspace for a writer that did

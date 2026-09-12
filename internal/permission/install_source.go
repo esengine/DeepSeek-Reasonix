@@ -35,5 +35,8 @@ const selfExtendHumanRisk = "high:"
 // resident process, a lifecycle hook, or an external server. An explicit allow
 // rule for that plan's ticket still wins — that is how the line gets moved.
 func subjectRequiresHuman(toolName, subject string) bool {
+	if widensWriteFence(toolName) {
+		return true
+	}
 	return canonicalRuleTool(toolName) == "install_source" && strings.HasPrefix(subject, selfExtendHumanRisk)
 }

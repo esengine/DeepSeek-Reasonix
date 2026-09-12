@@ -694,7 +694,11 @@ func (t *TaskTool) RunProfileSpec(ctx context.Context, spec ProfileExecSpec) (re
 		return "", err
 	}
 
-	subReg, err := t.subRegistryFor(&spec, childDepth)
+	// What this run may write, over its whole life. The tools bound below hold
+	// it and widen it with the user's answer; the audit at the end reads the
+	// same object, so a path the user granted is not reported as an escape.
+	writeGrant := NewWriteGrant(spec.Grant.WritePaths)
+	subReg, err := t.subRegistryFor(&spec, childDepth, writeGrant)
 	if err != nil {
 		return "", err
 	}
@@ -761,7 +765,7 @@ func (t *TaskTool) RunProfileSpec(ctx context.Context, spec ProfileExecSpec) (re
 		if spec.Grant.ReadOnly {
 			return t.runReadOnlySubSession(withUpstream(runCtx, spec.Context.Upstream), spec.Task.Objective, subReg, sink, maxSteps, prov, pricing, ctxWin, run.Session, childDepth, recoveryTaskID, usageModelRef, mutationObserver, "read_only_"+spec.Worker.Kind, grant)
 		}
-		return t.runSubSession(withUpstream(WithSubagentWriteClaim(runCtx, spec.Grant.WritePaths), spec.Context.Upstream), spec.Task.Objective, subReg, sink, maxSteps, prov, pricing, ctxWin, run.Session, childDepth, recoveryTaskID, usageModelRef, mutationObserver, spec.Worker.Kind, grant)
+		return t.runSubSession(withUpstream(WithSubagentWriteGrant(runCtx, writeGrant), spec.Context.Upstream), spec.Task.Objective, subReg, sink, maxSteps, prov, pricing, ctxWin, run.Session, childDepth, recoveryTaskID, usageModelRef, mutationObserver, spec.Worker.Kind, grant)
 	}
 
 	if spec.Sched.RunInBackground {

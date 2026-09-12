@@ -28,7 +28,7 @@ func TestBindWritePathsRebindsBashWriteRoots(t *testing.T) {
 	}, builtin.SessionDataGuard{}))
 	reg.Add(foregroundOnlyBash{inner: mustGet(t, reg, "bash")})
 
-	bound, removed := BindWritePaths(reg, claim, root, true)
+	bound, removed := BindWritePaths(reg, NewWriteGrant(claim), nil, NewSubagentScheduler(4, 2), root, true)
 	if len(removed) != 0 {
 		t.Fatalf("removed = %v, want none", removed)
 	}
@@ -36,7 +36,7 @@ func TestBindWritePathsRebindsBashWriteRoots(t *testing.T) {
 		t.Fatal("bash should be kept when sandbox can rebind")
 	}
 
-	_, removed = BindWritePaths(reg, claim, root, false)
+	_, removed = BindWritePaths(reg, NewWriteGrant(claim), nil, NewSubagentScheduler(4, 2), root, false)
 	if len(removed) != 1 || removed[0] != "bash" {
 		t.Fatalf("removed = %v, want [bash]", removed)
 	}
@@ -59,7 +59,7 @@ func TestBindWritePathsKeepsCapabilitySchemaButBlocksResolvedWriter(t *testing.T
 	}}
 	reg := tool.NewRegistry()
 	reg.Add(proxy)
-	bound, removed := BindWritePaths(reg, claim, root, false)
+	bound, removed := BindWritePaths(reg, NewWriteGrant(claim), nil, NewSubagentScheduler(4, 2), root, false)
 	if len(removed) != 0 {
 		t.Fatalf("removed = %v, want stable proxy retained", removed)
 	}
@@ -99,7 +99,7 @@ func TestBindWritePathsAllowsResolvedReadOnlyCapability(t *testing.T) {
 		ReadOnly:    true,
 		Args:        json.RawMessage(`{}`),
 	}})
-	bound, _ := BindWritePaths(reg, claim, root, false)
+	bound, _ := BindWritePaths(reg, NewWriteGrant(claim), nil, NewSubagentScheduler(4, 2), root, false)
 	a := New(nil, bound, NewSession("sys"), Options{}, event.Discard)
 	out := a.executeOne(context.Background(), &a.turn, provider.ToolCall{
 		ID: "reader", Name: "use_capability",
@@ -149,7 +149,7 @@ func TestParentWriteReservationBlocksOverlappingSubagentAcquire(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	release, err := sched.ReserveParentWrite(claim)
+	release, err := sched.ReserveWrite(claim)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -198,7 +198,7 @@ func TestParentWriteReservationClosesTOCTOU(t *testing.T) {
 			close(parentStarted)
 			return
 		}
-		release, err := sched.ReserveParentWrite(claim)
+		release, err := sched.ReserveWrite(claim)
 		if err != nil {
 			t.Errorf("ReserveParentWrite: %v", err)
 			close(parentStarted)

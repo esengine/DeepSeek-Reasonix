@@ -3,6 +3,7 @@ package agent
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"os"
 	"path/filepath"
 	"strings"
@@ -31,17 +32,21 @@ func boundWriterFixture(t *testing.T) (root string, writer tool.Tool, inner *rec
 	inner = &recordingWriter{name: "write_file", writesPaths: true}
 	reg := tool.NewRegistry()
 	reg.Add(inner)
-	bound, _ := BindWritePaths(reg, claim, root, false)
+	bound, _ := BindWritePaths(reg, NewWriteGrant(claim), nil, NewSubagentScheduler(4, 2), root, false)
 	return root, mustGet(t, bound, "write_file"), inner
 }
 
+// The fixture above binds no gate, which is the case these fixtures are about:
+// with nobody to ask, widening cannot be granted, so every escape below is
+// still refused and the inner writer never runs. A run that could widen its own
+// fence wherever the host happened to have no approver would not be confined.
 func mustRejectWrite(t *testing.T, writer tool.Tool, inner *recordingWriter, args string) {
 	t.Helper()
 	out, err := writer.Execute(context.Background(), json.RawMessage(args))
 	if err == nil {
 		t.Fatalf("write %s was allowed (result %q); it escapes the declared write_paths", args, out)
 	}
-	if !strings.Contains(err.Error(), "outside this subagent's declared write_paths") {
+	if !errors.Is(err, ErrWriteFenceClosed) {
 		t.Fatalf("unexpected rejection reason: %v", err)
 	}
 	if inner.calls != 0 {
@@ -79,7 +84,7 @@ func TestWriteClaimChecksMoveDestination(t *testing.T) {
 	inner := &recordingWriter{name: "move_file", writesPaths: true}
 	reg := tool.NewRegistry()
 	reg.Add(inner)
-	bound, _ := BindWritePaths(reg, claim, root, false)
+	bound, _ := BindWritePaths(reg, NewWriteGrant(claim), nil, NewSubagentScheduler(4, 2), root, false)
 	mover := mustGet(t, bound, "move_file")
 
 	args := `{"source_path":` + jsonPath(filepath.Join(root, "auth", "a.go")) +
@@ -102,7 +107,7 @@ func TestWriteClaimDropsUnbindableWriters(t *testing.T) {
 	reg := tool.NewRegistry()
 	reg.Add(&recordingWriter{name: "deploy_release"})
 	reg.Add(&recordingWriter{name: "read_notes", readOnly: true})
-	bound, removed := BindWritePaths(reg, claim, root, false)
+	bound, removed := BindWritePaths(reg, NewWriteGrant(claim), nil, NewSubagentScheduler(4, 2), root, false)
 	if _, ok := bound.Get("deploy_release"); ok {
 		t.Fatal("an unbindable writer survived the write_paths boundary")
 	}

@@ -13,7 +13,7 @@ import (
 // for the grant, and the write claim bound into the tools that must honour it.
 // The report tool is not here: it carries a permission, and a permission is
 // issued once the execution it belongs to exists (see attachReviewReport).
-func (t *TaskTool) subRegistryFor(spec *ProfileExecSpec, childDepth int) (*tool.Registry, error) {
+func (t *TaskTool) subRegistryFor(spec *ProfileExecSpec, childDepth int, grant *WriteGrant) (*tool.Registry, error) {
 	toolNames, err := IntersectToolLists(t.parentReg, spec.Grant.ProfileTools, spec.Grant.CallTools)
 	if err != nil {
 		return nil, err
@@ -30,7 +30,7 @@ func (t *TaskTool) subRegistryFor(spec *ProfileExecSpec, childDepth int) (*tool.
 		// boundary, and preserves the session's existing tool boundaries.
 		if !spec.Grant.WritePaths.Empty() && !spec.Grant.WritePaths.WholeWorkspace {
 			keepBash := t.bashCanEnforceWriteRoots()
-			bound, removed := BindWritePaths(subReg, spec.Grant.WritePaths, t.workspaceRoot, keepBash)
+			bound, removed := BindWritePaths(subReg, grant, t.gate, t.scheduler, t.workspaceRoot, keepBash)
 			subReg = bound
 			if len(removed) > 0 && subReg.Len() == 0 {
 				return nil, fmt.Errorf("no path-bound write tools available after dropping unbound writers: %s", strings.Join(removed, ", "))

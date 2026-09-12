@@ -176,12 +176,12 @@ func (s *SubagentScheduler) TryClaimWritePaths(paths WritePathSet) error {
 	return s.conflictLocked(paths)
 }
 
-// ReserveParentWrite holds paths against overlapping subagent claims for the
-// duration of a parent write-tool Execute. It does not consume subagent
-// concurrency slots. On conflict it fails immediately (parent cannot queue
-// behind background jobs mid-tool-call). release must be called once when the
-// write finishes so queued subagents can proceed.
-func (s *SubagentScheduler) ReserveParentWrite(paths WritePathSet) (release func(), err error) {
+// ReserveWrite holds paths against every live claim for one write-tool Execute,
+// without taking a slot. Used by the parent, which declares nothing up front,
+// and by a run writing a path granted after it started — which the scheduler
+// never proved against the runs already going. Both fail rather than queue: a
+// caller inside a tool call holding paths is the shape a deadlock needs.
+func (s *SubagentScheduler) ReserveWrite(paths WritePathSet) (release func(), err error) {
 	noop := func() {}
 	if s == nil || paths.Empty() {
 		return noop, nil

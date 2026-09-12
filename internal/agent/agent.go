@@ -964,7 +964,7 @@ func (a *Agent) reserveParentWrite(runTool tool.Tool, args json.RawMessage, read
 	if err != nil {
 		return noop, err
 	}
-	return a.svc.writeScheduler.ReserveParentWrite(claim)
+	return a.svc.writeScheduler.ReserveWrite(claim)
 }
 
 // Run appends the user input and drives the tool loop until the model returns a

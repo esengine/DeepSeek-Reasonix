@@ -7,6 +7,7 @@ import (
 	"path/filepath"
 	"strings"
 
+	"reasonix/internal/permission"
 	"reasonix/internal/tool"
 	"reasonix/internal/tool/builtin"
 )
@@ -16,7 +17,9 @@ import (
 // are dropped from the parallel-writer registry instead (see BindWritePaths).
 type pathBoundWriter struct {
 	inner   tool.Tool
-	claims  WritePathSet
+	grant   *WriteGrant
+	gate    Gate
+	sched   *SubagentScheduler
 	workDir string
 }
 
@@ -78,17 +81,69 @@ func (w pathBoundWriter) PlanModeSafe() bool {
 	return false
 }
 
+// Execute confines the write to this run's grant. A path outside it is a
+// question rather than a refusal — what a run must touch is not always knowable
+// before it reads anything — and the question goes to the user, never to the
+// parent: a model approving its own reach is not a fence. Paths are the
+// resolved ones, so a symlink names the file the write would really land on.
 func (w pathBoundWriter) Execute(ctx context.Context, args json.RawMessage) (string, error) {
 	paths, err := extractWritePathsFromArgs(w.inner.Name(), w.workDir, args)
 	if err != nil {
 		return "", err
 	}
-	for _, p := range paths {
-		if !w.claims.AllowsPath(p) {
-			return "", fmt.Errorf("write path %q is outside this subagent's declared write_paths", p)
+	declared := w.grant.Declared()
+	var held []func()
+	defer func() {
+		for _, release := range held {
+			release()
 		}
+	}()
+	for _, p := range paths {
+		// Inside what was declared: the scheduler proved non-overlap before
+		// anything started, and there is nothing left to ask or to reserve.
+		if declared.AllowsPath(p) {
+			continue
+		}
+		if !w.grant.Allows(p) {
+			if err := w.askToWiden(ctx, p); err != nil {
+				return "", err
+			}
+		}
+		// Granted or not, every write outside the declared set reserves: a
+		// grant says this run may be here, never that another may not.
+		release, err := w.sched.ReserveWrite(WritePathSet{Paths: []string{p}})
+		if err != nil {
+			return "", fmt.Errorf("%w: %s", ErrWritePathBusy, p)
+		}
+		held = append(held, release)
 	}
 	return w.inner.Execute(ctx, args)
+}
+
+// askToWiden puts one path to the user and records the answer. With no gate
+// there is nobody to ask, and an unanswerable question is a refusal: a run that
+// could widen its own fence whenever the host happened to have no approver
+// would not be confined at all.
+func (w pathBoundWriter) askToWiden(ctx context.Context, path string) error {
+	if w.gate == nil {
+		return fmt.Errorf("%w: %s", ErrWriteFenceClosed, path)
+	}
+	subject, err := json.Marshal(map[string]string{"path": path})
+	if err != nil {
+		return err
+	}
+	allow, reason, err := w.gate.Check(ctx, permission.ExtendWritePaths, subject, false)
+	if err != nil {
+		return err
+	}
+	if !allow {
+		if reason = strings.TrimSpace(reason); reason != "" {
+			return fmt.Errorf("%w: %s (%s)", ErrWriteFenceClosed, path, reason)
+		}
+		return fmt.Errorf("%w: %s", ErrWriteFenceClosed, path)
+	}
+	w.grant.Add(path)
+	return nil
 }
 
 // pathBoundWriterNames are built-in tools whose arguments expose file paths we
@@ -107,11 +162,12 @@ var pathBoundWriterNames = map[string]bool{
 // the claim and non-path-scoped writer tools (MCP/custom) are dropped.
 // Bash is kept only when keepBash is true AND its OS sandbox WriteRoots can be
 // re-bound to the claim roots; otherwise bash is removed.
-func BindWritePaths(reg *tool.Registry, claims WritePathSet, workDir string, keepBash bool) (bound *tool.Registry, removed []string) {
+func BindWritePaths(reg *tool.Registry, grant *WriteGrant, gate Gate, sched *SubagentScheduler, workDir string, keepBash bool) (bound *tool.Registry, removed []string) {
 	bound = tool.NewRegistry()
 	if reg == nil {
 		return bound, nil
 	}
+	claims := grant.Declared()
 	if claims.Empty() {
 		for _, name := range reg.Names() {
 			if tl, ok := reg.Get(name); ok {
@@ -153,7 +209,7 @@ func BindWritePaths(reg *tool.Registry, claims WritePathSet, workDir string, kee
 			continue
 		}
 		if pathBoundWriterNames[name] {
-			bound.Add(pathBoundWriter{inner: tl, claims: claims, workDir: workDir})
+			bound.Add(pathBoundWriter{inner: tl, grant: grant, gate: gate, sched: sched, workDir: workDir})
 			continue
 		}
 		// MCP / custom writers cannot be path-scoped reliably.

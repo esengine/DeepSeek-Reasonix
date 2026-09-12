@@ -7,6 +7,10 @@ import { useState } from "react";
 // The Tool name the kernel puts on a plan gate; its own comment says frontends
 // key their plan UI on it. `kind` says the same thing on newer kernels.
 const PLAN_TOOL = "exit_plan_mode";
+// Widening a delegated run's write confinement. Not a tool the run calls: the
+// answer moves the fence rather than performing anything, so the card says that
+// instead of "about to run extend_write_paths".
+const FENCE_TOOL = "extend_write_paths";
 
 import type { PlanAction } from "../../port/session";
 export type { PlanAction };
@@ -40,12 +44,12 @@ export function ApprovalCard({ item, onApprove, onPlan }: Props) {
       </div>
       <div className="c">
         <div className="hl">
-          <span className="nm">{t("即将执行")}</span>
+          <span className="nm">{item.a.tool === FENCE_TOOL ? t("要求扩大可改范围") : t("即将执行")}</span>
         </div>
         <div className="out">
           <div className="apv" data-sealed={sealed ? item.verdict : undefined} aria-busy={!!submitting}>
             <div className="apv-hd">
-              <span className="tool">{item.a.tool}</span>
+              <span className="tool">{item.a.tool === FENCE_TOOL ? t("这个子任务声明之外的文件") : item.a.tool}</span>
               <span className="sub" title={item.a.subject}>{item.a.subject}</span>
             </div>
             {item.a.reason && <div className="apv-dt">{item.a.reason}</div>}
