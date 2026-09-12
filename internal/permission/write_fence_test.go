@@ -82,3 +82,58 @@ func TestOrdinaryWritesStillRunWithNobodyToAsk(t *testing.T) {
 		t.Error("an ordinary write was refused with no approver; that is not what this branch is for")
 	}
 }
+
+// "Don't ask again" answers a question about one subject. Granting the bare
+// tool name would answer every other subject it will ever have — approving one
+// file would open every file, including ones no prompt ever named.
+func TestSessionGrantForTheFenceNamesThePath(t *testing.T) {
+	granted := "/ws/internal/foo/bar.go"
+	rule := SessionGrantRuleForScope(ExtendWritePaths, granted)
+
+	if !RuleMatchesString(rule, ExtendWritePaths, granted) {
+		t.Errorf("rule %q does not cover the path it was granted for", rule)
+	}
+	for _, other := range []string{
+		"/home/user/.ssh/authorized_keys",
+		"/ws/.git/hooks/pre-commit",
+		"/ws/secrets/key.pem",
+	} {
+		if RuleMatchesString(rule, ExtendWritePaths, other) {
+			t.Errorf("rule %q also covers %s; one approval opened the whole fence", rule, other)
+		}
+	}
+}
+
+// The same defect on the tiering that was already there: a session grant taken
+// on a low-risk install plan must not answer for a high-risk one, or the grade
+// that exists to return high-risk plans to a person is bypassed by approving a
+// harmless one first.
+func TestSessionGrantForAnInstallPlanNamesTheTicket(t *testing.T) {
+	rule := SessionGrantRuleForScope("install_source", "low:sha256:abc")
+	if !RuleMatchesString(rule, "install_source", "low:sha256:abc") {
+		t.Errorf("rule %q does not cover the plan it was granted for", rule)
+	}
+	if RuleMatchesString(rule, "install_source", "high:sha256:def") {
+		t.Errorf("rule %q covers a high-risk ticket; approving a low-risk plan disarmed the grade", rule)
+	}
+}
+
+// The guard over the two lists above: anything whose authorization can turn on
+// its subject has to be granted by subject, or a bare-tool grant silently
+// answers a decision nobody made. A tool added to one and not the other is the
+// way this regresses.
+func TestEverySubjectSensitiveToolIsSubjectScoped(t *testing.T) {
+	// Subjects chosen to make each tool's human-required branch fire.
+	sensitive := map[string]string{
+		ExtendWritePaths:  "/ws/any/path",
+		installSourceTool: selfExtendHumanRisk + "sha256:abc",
+	}
+	for tool, subject := range sensitive {
+		if !subjectRequiresHuman(tool, subject) {
+			t.Errorf("%s no longer requires a human for %q; this table is stale", tool, subject)
+		}
+		if !subjectScopedGrant(tool) {
+			t.Errorf("%s decides on its subject but grants by bare tool name; one approval would cover every subject", tool)
+		}
+	}
+}

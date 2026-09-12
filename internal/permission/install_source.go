@@ -29,6 +29,9 @@ func InstallSourceIsPlanOnly(args json.RawMessage) bool {
 // installsource's TestHighRiskPlanAsksEvenUnderBlanketAllow holds the two together.
 const selfExtendHumanRisk = "high:"
 
+// installSourceTool is the rule-name form self-extension is decided under.
+const installSourceTool = "install_source"
+
 // subjectRequiresHuman reports a call that comes back to the user even when the
 // fallback mode allows everything. "Allow every write" is a statement about
 // this workspace's files, never permission for the agent to give itself a
@@ -38,5 +41,5 @@ func subjectRequiresHuman(toolName, subject string) bool {
 	if widensWriteFence(toolName) {
 		return true
 	}
-	return canonicalRuleTool(toolName) == "install_source" && strings.HasPrefix(subject, selfExtendHumanRisk)
+	return canonicalRuleTool(toolName) == installSourceTool && strings.HasPrefix(subject, selfExtendHumanRisk)
 }

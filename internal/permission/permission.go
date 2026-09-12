@@ -742,7 +742,7 @@ func SessionGrantRuleForScope(toolName, subject string) string {
 	if IsFileMutationTool(toolName) {
 		return "Edit"
 	}
-	return toolName
+	return sessionGrantRule(toolName, subject)
 }
 
 // BashCommandPrefix returns a conservative prefix rule for "similar command"

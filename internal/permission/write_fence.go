@@ -7,6 +7,21 @@ package permission
 // moves, not whether one write happens.
 const ExtendWritePaths = "extend_write_paths"
 
+// subjectScopedTools are the tools whose authorization reads their subject, so
+// a session grant for one must name the subject it was given for: a bare-tool
+// grant matches every other subject, and for these that is a different
+// decision — one path would open every path, and a low-risk install plan would
+// cover a high-risk one. Held by TestEverySubjectSensitiveToolIsSubjectScoped.
+var subjectScopedTools = map[string]bool{
+	ExtendWritePaths:  true,
+	installSourceTool: true,
+}
+
+// subjectScopedGrant reports a tool a session grant may not cover by name alone.
+func subjectScopedGrant(toolName string) bool {
+	return subjectScopedTools[canonicalRuleTool(toolName)]
+}
+
 // widensWriteFence reports a request to move a confinement rather than act
 // inside one. It always returns to the user whatever the fallback says: "allow
 // every write" speaks for this workspace's files, not for redrawing the
@@ -25,4 +40,14 @@ func unattendedAsk(toolName string) (bool, string, error) {
 		return false, "widening this run's write paths needs a person, and no approver is attached to this session", nil
 	}
 	return true, "", nil
+}
+
+// sessionGrantRule is the rule a session grant records for tools that are not
+// bash or a file mutation. Approving one of these answered for that subject,
+// never for the tool, so the subject stays in the rule.
+func sessionGrantRule(toolName, subject string) string {
+	if subject != "" && subjectScopedGrant(toolName) {
+		return toolName + "=" + subject
+	}
+	return toolName
 }
