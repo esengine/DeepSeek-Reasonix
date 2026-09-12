@@ -2,7 +2,6 @@ package permission
 
 import (
 	"encoding/json"
-	"strings"
 )
 
 // InstallSourceIsPlanOnly reports an install_source call that only produces a
@@ -38,8 +37,6 @@ const installSourceTool = "install_source"
 // resident process, a lifecycle hook, or an external server. An explicit allow
 // rule for that plan's ticket still wins — that is how the line gets moved.
 func subjectRequiresHuman(toolName, subject string) bool {
-	if widensWriteFence(toolName) {
-		return true
-	}
-	return canonicalRuleTool(toolName) == installSourceTool && strings.HasPrefix(subject, selfExtendHumanRisk)
+	asks, ok := subjectSensitiveTools[canonicalRuleTool(toolName)]
+	return ok && asks(subject)
 }

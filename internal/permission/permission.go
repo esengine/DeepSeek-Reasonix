@@ -640,7 +640,7 @@ func (g *Gate) Check(ctx context.Context, toolName string, args json.RawMessage,
 		return false, reason, nil
 	case Ask:
 		if g.Approver == nil {
-			return unattendedAsk(toolName)
+			return unattendedAsk(toolName, args)
 		}
 		subject := Subject(args)
 		allow, remember, approverReason, err := g.approve(ctx, toolName, subject, args, ruleReason)

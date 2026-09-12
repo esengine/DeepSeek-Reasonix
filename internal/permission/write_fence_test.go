@@ -118,22 +118,37 @@ func TestSessionGrantForAnInstallPlanNamesTheTicket(t *testing.T) {
 	}
 }
 
-// The guard over the two lists above: anything whose authorization can turn on
-// its subject has to be granted by subject, or a bare-tool grant silently
-// answers a decision nobody made. A tool added to one and not the other is the
-// way this regresses.
-func TestEverySubjectSensitiveToolIsSubjectScoped(t *testing.T) {
-	// Subjects chosen to make each tool's human-required branch fire.
-	sensitive := map[string]string{
-		ExtendWritePaths:  "/ws/any/path",
-		installSourceTool: selfExtendHumanRisk + "sha256:abc",
+// The guard over the single declaration. Membership carries three consequences
+// and nothing re-states them, so a tool cannot arrive with one and not the
+// others — what can still go wrong is an entry whose question is never true,
+// which would sit in the table looking like protection while granting none.
+func TestEverySubjectSensitiveToolActuallyAsksSomething(t *testing.T) {
+	if len(subjectSensitiveTools) == 0 {
+		t.Fatal("the table is empty; every consequence below would pass by examining nothing")
 	}
-	for tool, subject := range sensitive {
-		if !subjectRequiresHuman(tool, subject) {
-			t.Errorf("%s no longer requires a human for %q; this table is stale", tool, subject)
+	// One subject per tool that must reach a person. A tool whose question is
+	// never true for any of these is either mis-declared or has no branch left.
+	probes := map[string][]string{
+		ExtendWritePaths:  {"/ws/any/path"},
+		installSourceTool: {selfExtendHumanRisk + "sha256:abc"},
+	}
+	for tool := range subjectSensitiveTools {
+		subjects, ok := probes[tool]
+		if !ok {
+			t.Errorf("%s is declared subject-sensitive but this guard has no subject to probe it with", tool)
+			continue
+		}
+		reached := false
+		for _, subject := range subjects {
+			if subjectRequiresHuman(tool, subject) {
+				reached = true
+			}
+		}
+		if !reached {
+			t.Errorf("%s never requires a person for any probed subject; it is in the table but protects nothing", tool)
 		}
 		if !subjectScopedGrant(tool) {
-			t.Errorf("%s decides on its subject but grants by bare tool name; one approval would cover every subject", tool)
+			t.Errorf("%s grants by bare tool name despite deciding on its subject", tool)
 		}
 	}
 }
@@ -169,5 +184,40 @@ func TestASubjectScopedGrantStillCoversItsOwnSubject(t *testing.T) {
 func TestABareGrantStillWorksForOrdinaryTools(t *testing.T) {
 	if !SessionGrantMatches("read_file", "read_file", "/ws/anything.go") {
 		t.Error("a bare grant stopped covering an ordinary tool; that answer was never ambiguous")
+	}
+}
+
+// The other half of the no-approver hole, and the older one: a high-risk
+// self-extension plan is exactly what the grading exists to put in front of a
+// person, and under YOLO — which is built with no approver — it was granted
+// without one ever seeing it. Membership in the table is what fixes both at
+// once; this pins the half that was not about the write fence.
+func TestAHighRiskInstallPlanIsRefusedWhenThereIsNobodyToAsk(t *testing.T) {
+	gate := NewGate(Policy{Mode: Allow}, nil)
+	// apply is what makes this the execution rather than the preview; a
+	// plan-only call reads the source and is allowed before Ask is reached.
+	args := json.RawMessage(`{"apply":true,"planId":"` + selfExtendHumanRisk + `sha256:abc"}`)
+
+	allow, reason, err := gate.Check(context.Background(), installSourceTool, args, false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if allow {
+		t.Error("a high-risk self-extension plan was granted with no approver attached")
+	}
+	if strings.TrimSpace(reason) == "" {
+		t.Error("the refusal says nothing about why")
+	}
+}
+
+// And a low-risk plan is unaffected: the grade is what decides, not the tool.
+func TestALowRiskInstallPlanStillRunsUnattended(t *testing.T) {
+	gate := NewGate(Policy{Mode: Allow}, nil)
+	allow, _, err := gate.Check(context.Background(), installSourceTool, json.RawMessage(`{"apply":true,"planId":"low:sha256:abc"}`), false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !allow {
+		t.Error("a low-risk plan was refused unattended; the grade exists so that it need not be")
 	}
 }
