@@ -200,9 +200,8 @@ func (a *Agent) compressVisibleRange(
 		return result, nil
 	}
 
-	res, err := a.foldToSummaryMode(ctx, prepared.fold, prepared.instructions, prepared.inputMode)
+	res, tele, err := a.foldSummaryWithChunkedFallback(ctx, trigger, nil, prepared.fold, prepared.instructions, result.SourceTokens, prepared.inputMode)
 	summary := res.Text
-	tele := compactionTelemetryFromSummary(trigger, a.CacheState(), result.SourceTokens, res)
 	if err != nil {
 		tele.Error = err.Error()
 		a.emitCompactionTelemetry(tele)
@@ -429,46 +428,12 @@ func compactionTelemetryFromSummary(trigger, cacheState string, sourceTokens int
 	return tele
 }
 
-// foldSummaryWithChunkedFallback retries summary size failures through the
-// resilient fragment/tree-reduce path used for over-length sessions.
-func (a *Agent) foldSummaryWithChunkedFallback(ctx context.Context, trigger string, fold []provider.Message, instructions string, sourceTokens int, inputMode string) (foldSummary, CompactionTelemetry, error) {
-	res, tele, err := a.foldSummaryWithTelemetry(ctx, trigger, fold, instructions, sourceTokens, inputMode)
-	if err == nil || !chunkedFallbackApplies(err, inputMode) {
-		return res, tele, err
-	}
-	chunked, chunkedErr := a.chunkedFoldSummary(ctx, fold, instructions, nil)
-	chunked.Usage = mergeSamplingUsage(res.Usage, chunked.Usage)
-	chunked.Spans += res.Spans
-	if chunked.FoldTokens <= 0 {
-		chunked.FoldTokens = res.FoldTokens
-	}
-	if chunked.RequestID == "" {
-		chunked.RequestID = res.RequestID
-	}
-	if chunkedErr != nil {
-		tele = compactionTelemetryFromSummary(trigger, a.CacheState(), sourceTokens, chunked)
-		tele.Error = fmt.Sprintf("%v (chunked fallback: %v)", err, chunkedErr)
-		return chunked, tele, chunkedErr
-	}
-	return chunked, compactionTelemetryFromSummary(trigger, a.CacheState(), sourceTokens, chunked), nil
-}
-
-// chunkedFallbackApplies reports a size failure the fragment path can fix. A
-// provider overflow qualifies only once the transcript form has failed too;
-// before that a re-planned replay is one request instead of many.
-func chunkedFallbackApplies(err error, inputMode string) bool {
-	if provider.AsContextLimitError(err) != nil {
-		return inputMode == SummaryInputSlim
-	}
-	return summarySizeFailure(err)
-}
-
 // compact writes a context projection; trigger stays "auto"/"manual" for UI cards.
-func (a *Agent) summarizeFold(ctx context.Context, trigger string, fold []provider.Message, instructions string, sourceTokens int, inputMode string, req foldRequest) (foldSummary, CompactionTelemetry, error) {
-	if req.allowChunked {
-		return a.foldSummaryWithChunkedFallback(ctx, trigger, fold, instructions, sourceTokens, inputMode)
+func (a *Agent) summarizeFold(ctx context.Context, trigger string, prefix, fold []provider.Message, instructions string, sourceTokens int, inputMode string, allowChunked bool) (foldSummary, CompactionTelemetry, error) {
+	if allowChunked {
+		return a.foldSummaryWithChunkedFallback(ctx, trigger, prefix, fold, instructions, sourceTokens, inputMode)
 	}
-	return a.foldSummaryWithTelemetry(ctx, trigger, fold, instructions, sourceTokens, inputMode)
+	return a.foldSummaryWithTelemetry(ctx, trigger, prefix, fold, instructions, sourceTokens, inputMode)
 }
 
 func (a *Agent) compactToProjectionLocked(ctx context.Context, trigger, instructions string, req foldRequest) (CompactionOutcome, error) {
@@ -543,7 +508,19 @@ func (a *Agent) compactToProjectionLocked(ctx context.Context, trigger, instruct
 	sourceTokens := a.estimatedVisibleRequestTokens(msgs)
 	inputMode := summaryInputModeFor(req, regionHadPinnedRevision,
 		providerVisibleFingerprint(modelInputMessages(fold)) != originalFoldHash)
-	res, tele, err := a.summarizeFold(ctx, trigger, fold, instructions, sourceTokens, inputMode, req)
+	summaryPrefix, foldExtra, foldAnchors := a.summaryFoldPlan(msgs, head, start)
+	if providerVisibleFingerprint(modelInputMessages(fold)) != originalFoldHash {
+		// An extension rewrote the fold: the rewritten bytes must be sent and
+		// read literally — anchor locating inside the frozen prefix would
+		// summarize the pre-rewrite text. Quality wins over cache here.
+		summaryPrefix = msgs[:head]
+		foldExtra = fold
+		foldAnchors = ""
+	}
+	if foldAnchors != "" {
+		instructions += foldAnchors
+	}
+	res, tele, err := a.summarizeFold(ctx, trigger, summaryPrefix, foldExtra, instructions, sourceTokens, inputMode, req.allowChunked)
 	if err != nil {
 		a.emitCompactionTelemetry(tele)
 		a.emitCompactionAborted(trigger)
@@ -557,33 +534,45 @@ func (a *Agent) compactToProjectionLocked(ctx context.Context, trigger, instruct
 		return CompactionNoop, err
 	}
 
-	// The projection body freezes only prefix + digest + kept messages; the
-	// verbatim tail splices live from canonical[start:] so tail-side rewrites
-	// (rewind truncation, snips) stay visible without rebuilding the fold.
-	projMsgs := checkpointProjectionMessages(msgs, head, kept, summary)
-	if len(bodySuffix) > 0 {
-		projMsgs = append(projMsgs, projectionMessagesPreservingPinnedContext(bodySuffix)...)
-	}
-	tele.UserTurnsKept, tele.UserTurnsDropped = retention.Kept, retention.Dropped
-	projMsgs, spliced, projTokens, err := a.preparePinnedCheckpointCandidate(trigger, projMsgs, canonical, covered, sourceTokens, &tele)
+	projMsgs, spliced, projTokens, err := a.prepareCheckpointBody(trigger, msgs, kept, canonical, bodySuffix, head, covered, sourceTokens, summary, retention, &tele)
 	if err != nil {
-		a.emitCompactionAborted(trigger)
 		return CompactionNoop, err
 	}
 	viewOutputHash := providerVisibleFingerprint(modelInputMessages(spliced))
-	_, err = a.commitSummaryProjection(summaryProjectionCommit{
+	return a.installSummaryCheckpoint(trigger, summaryProjectionCommit{
 		canonical: canonical, fold: fold, projected: projMsgs, result: res,
 		transcriptVersion: transcriptVersion, projectionVersion: startProjectionVersion,
 		generation: startGeneration, activeTurn: activeTurn, trigger: trigger,
 		summary: summary, inputHash: viewInputHash, outputHash: viewOutputHash,
 		sourceTokens: sourceTokens, projectionTokens: projTokens, covered: covered,
-	})
-	if err != nil {
+		// Persist the wire form (normalized): a resumed process re-normalizes
+		// the restored bytes inside summaryRequest, so they must already match
+		// what this request actually sent.
+		wirePrefix: a.normalizeModelRequestMessages(summaryPrefix),
+		wireTools:  a.summaryRequestToolsForCommit(summaryPrefix),
+	}, summary, len(fold))
+}
+
+// prepareCheckpointBody assembles the checkpoint body and verifies its
+// savings. The verbatim tail splices live from canonical[covered:], so
+// tail-side rewrites stay visible without rebuilding the fold.
+func (a *Agent) prepareCheckpointBody(trigger string, msgs, kept, canonical, bodySuffix []provider.Message, head, covered, sourceTokens int, summary string, retention userTurnRetention, tele *CompactionTelemetry) ([]provider.Message, []provider.Message, int, error) {
+	projMsgs := checkpointProjectionMessages(msgs, head, kept, summary)
+	if len(bodySuffix) > 0 {
+		projMsgs = append(projMsgs, projectionMessagesPreservingPinnedContext(bodySuffix)...)
+	}
+	tele.UserTurnsKept, tele.UserTurnsDropped = retention.Kept, retention.Dropped
+	return a.preparePinnedCheckpointCandidate(trigger, projMsgs, canonical, covered, sourceTokens, tele)
+}
+
+// installSummaryCheckpoint CAS-installs the checkpoint and emits the done event.
+func (a *Agent) installSummaryCheckpoint(trigger string, commit summaryProjectionCommit, summary string, foldCount int) (CompactionOutcome, error) {
+	if _, err := a.commitSummaryProjection(commit); err != nil {
 		a.emitCompactionAborted(trigger)
 		return CompactionNoop, err
 	}
 	a.svc.sink.Emit(event.Event{Kind: event.CompactionDone, Compaction: event.Compaction{
-		Trigger: trigger, Messages: len(fold), Summary: summary,
+		Trigger: trigger, Messages: foldCount, Summary: summary,
 	}})
 	return CompactionInstalled, nil
 }
@@ -718,8 +707,8 @@ func latestSessionContextIndex(messages []provider.Message) int {
 }
 
 // runCompactionSummary uses the single local summarizer path for every provider.
-func (a *Agent) runCompactionSummary(ctx context.Context, fold []provider.Message, instructions string) (summary, mode string, usage *provider.Usage, providerReqID string, err error) {
-	summary, usage, err = a.summarizeOnce(ctx, fold, instructions)
+func (a *Agent) runCompactionSummary(ctx context.Context, prefix, fold []provider.Message, instructions string) (summary, mode string, usage *provider.Usage, providerReqID string, err error) {
+	summary, usage, err = a.summarizeOnce(ctx, prefix, fold, instructions)
 	if err != nil {
 		return "", CompactionModeSummarized, usage, "", err
 	}

@@ -152,21 +152,25 @@ func (a *Agent) recordContextMaintenanceOutcome(inputHash, trigger, action, stat
 	a.emitContextMaintenance(state.LastReceipt)
 }
 
-func (a *Agent) emitCompactionTelemetry(t CompactionTelemetry) {
-	detail := fmt.Sprintf("trigger=%s mode=%s summary_input=%s cache=%s src=%d fold=%d spans=%d proj=%d in=%d out=%d hit=%d miss=%d write=%d reqs=%d user_kept=%d user_dropped=%d",
+func compactionDetailString(t CompactionTelemetry) string {
+	detail := fmt.Sprintf("trigger=%s mode=%s summary_input=%s cache=%s src=%d fold=%d spans=%d proj=%d in=%d out=%d hit=%d miss=%d write=%d reqs=%d user_kept=%d user_dropped=%d view_fp=%s wire_fp=%s tools_count=%d tools_fp=%s tools_source=%s pref_hash=%s pref_len=%d wire_len=%d wire_diff=%s",
 		t.Trigger, t.Mode, t.SummaryInputMode, t.CacheState, t.SourceTokens, t.FoldTokens, t.Spans, t.ProjectionTokens,
 		t.InputTokens, t.OutputTokens, t.CacheHitTokens, t.CacheMissTokens, t.CacheWriteTokens, t.RequestCount,
-		t.UserTurnsKept, t.UserTurnsDropped)
+		t.UserTurnsKept, t.UserTurnsDropped, t.ViewFP, t.WireFP, t.ToolsCount, t.ToolsFP, t.ToolsSource, t.PrefixHash,
+		t.PrefLen, t.WireLen, t.WireDiff)
 	if t.ProviderRequestID != "" {
 		detail += " provider_request_id=" + t.ProviderRequestID
 	}
+	return detail
+}
+
+func (a *Agent) emitCompactionTelemetry(t CompactionTelemetry) {
+	detail := compactionDetailString(t)
 	if t.Error != "" {
-		// CompactionModeDegraded remains readable for legacy telemetry, although
-		// new summarizer failures never install a degraded projection.
 		if t.Mode != CompactionModeDegraded {
-			slog.Warn("agent: compaction failed", "detail", detail+" err_type="+t.Error)
-			return
+			slog.Warn("agent: compaction failed", "detail", detail, "err_type", t.Error)
 		}
+		// Failed compactions still emit so the stats recorder persists them.
 		detail += " err_type=" + t.Error
 	}
 	a.svc.sink.Emit(event.Event{Kind: event.Notice, Level: event.LevelInfo, Text: "compaction telemetry", Detail: detail})

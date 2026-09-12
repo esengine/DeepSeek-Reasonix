@@ -26,13 +26,16 @@ func prepareForObservedUsage(a *Agent, ctx context.Context, usage *provider.Usag
 // fakeProvider returns a fixed reply and records the messages it was asked to
 // complete, so tests can drive summarization without a network call.
 type fakeProvider struct {
-	reply          string
-	reasoningReply string // set (with empty reply) to emit ChunkReasoning: thinking-model shape
-	reasoningTool  bool   // with reasoningReply: also open a tool call, the shape that stays rejected
-	promptTokens   int
-	got            []provider.Message
-	streamErr      error // when set, Stream emits a ChunkError instead of the reply
-	hang           bool  // when true, Stream returns a channel that never sends or closes
+	reply        string
+	promptTokens int
+	got          []provider.Message
+	reqs         []provider.Request // full request surface, incl. Tools
+	streamErr    error              // when set, Stream emits a ChunkError instead of the reply
+	hang         bool               // when true, Stream returns a channel that never sends or closes
+	// reasoningReply (set with empty reply) emits ChunkReasoning: the
+	// thinking-model shape; reasoningTool that also opens a tool call.
+	reasoningReply string
+	reasoningTool  bool
 }
 
 func (f *fakeProvider) Name() string { return "fake" }
@@ -43,6 +46,7 @@ func (f *fakeProvider) ContextBudgetPolicy() provider.ContextBudgetPolicy {
 
 func (f *fakeProvider) Stream(_ context.Context, req provider.Request) (<-chan provider.Chunk, error) {
 	f.got = req.Messages
+	f.reqs = append(f.reqs, req)
 	if f.hang {
 		return make(chan provider.Chunk), nil
 	}
@@ -180,7 +184,7 @@ func TestSummarizeRespectsContextCancel(t *testing.T) {
 	a := New(&fakeProvider{hang: true}, tool.NewRegistry(), &Session{}, Options{}, event.Discard)
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel()
-	if _, _, err := a.summarize(ctx, []provider.Message{{Role: provider.RoleUser, Content: "x"}}, ""); err == nil {
+	if _, _, err := a.summarize(ctx, nil, []provider.Message{{Role: provider.RoleUser, Content: "x"}}, ""); err == nil {
 		t.Fatal("summarize must return when ctx is cancelled, not hang")
 	}
 }

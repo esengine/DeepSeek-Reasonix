@@ -336,7 +336,7 @@ func TestSummarizeOnceDoesNotRetry(t *testing.T) {
 		usage2:   &provider.Usage{PromptTokens: 11, CompletionTokens: 3, TotalTokens: 14, RequestCount: 1},
 	}
 	a := New(fp, tool.NewRegistry(), NewSession("sys"), Options{}, event.Discard)
-	_, _, err := a.summarizeOnce(context.Background(), []provider.Message{
+	_, _, err := a.summarizeOnce(context.Background(), nil, []provider.Message{
 		{Role: provider.RoleUser, Content: "fold me"},
 	}, "")
 	if err == nil {

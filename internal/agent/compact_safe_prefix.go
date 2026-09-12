@@ -31,7 +31,7 @@ func (a *Agent) maximumSafeSummaryPrefixEnd(msgs []provider.Message, head, end i
 	}
 	fits := func(candidate int) bool {
 		fold, _ := withoutPinnedContextRevisions(msgs[head:candidate])
-		request := a.summaryRequest(fold, instructions)
+		request := a.summaryRequest(msgs[:head], fold, instructions)
 		return a.estimatedRequestTokens(request) <= maxPromptTokens
 	}
 	if fits(end) {
@@ -75,7 +75,7 @@ func (a *Agent) validateSafeSummaryRequest(fold []provider.Message, instructions
 	if !enforce {
 		return nil
 	}
-	request := a.summaryRequest(fold, instructions)
+	request := a.summaryRequest(nil, fold, instructions)
 	if slim {
 		request = a.slimSummaryRequest(fold, instructions)
 	}

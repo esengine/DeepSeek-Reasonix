@@ -181,6 +181,7 @@ func (a *Agent) LoadProjectionSidecar(sessionPath string) {
 	}
 	a.sess.compactionState = st
 	if valid {
+		a.restoreFrozenWire(st)
 		a.sess.checkpointState = "restored"
 		if needsNormalization {
 			if err := a.persistCompactionStateLocked(); err != nil {
@@ -191,6 +192,17 @@ func (a *Agent) LoadProjectionSidecar(sessionPath string) {
 		a.sess.checkpointState = "none"
 	}
 	a.sess.compactionMu.Unlock()
+}
+
+// restoreFrozenWire re-adopts the sidecar's frozen main-request unit as this
+// process's prefix, so the first post-resume compaction replays the
+// provider-cached bytes instead of a cropped view.
+func (a *Agent) restoreFrozenWire(st CompactionState) {
+	if len(st.LastWireMessages) == 0 {
+		return
+	}
+	a.sess.lastMainReq.Store(&mainRequestBytes{messages: st.LastWireMessages, tools: st.LastWireTools})
+	a.sess.setWireFP(providerVisibleFingerprint(st.LastWireMessages))
 }
 
 // lineageKeyCompatible reports whether a stored PromptCacheKey still belongs to
@@ -257,6 +269,34 @@ func (a *Agent) SetSessionPath(path string) {
 	a.sess.compactionMu.Lock()
 	a.sess.path = path
 	a.sess.compactionMu.Unlock()
+}
+
+// ModelVisibleFingerprint fingerprints the agent's current model-visible view.
+// Resume telemetry compares it across reopens to separate view divergence from
+// server-side cache expiry.
+func (a *Agent) ModelVisibleFingerprint() string {
+	if a == nil {
+		return ""
+	}
+	return providerVisibleFingerprint(modelInputMessages(a.modelVisibleMessages()))
+}
+
+// ProjectionCoveredMatch reports whether the sidecar projection's covered
+// prefix byte-matches the transcript. True means the first send after resume
+// transmits projection + tail instead of the full history.
+func (a *Agent) ProjectionCoveredMatch() (match bool, covered int) {
+	if a == nil || a.sess.conversation == nil {
+		return false, 0
+	}
+	msgs, _ := a.sess.conversation.snapshotMessagesVersion()
+	a.sess.compactionMu.Lock()
+	st := a.sess.compactionState
+	a.sess.compactionMu.Unlock()
+	covered = st.Projection.CoveredCount
+	if covered <= 0 || covered > len(msgs) || st.Projection.CoveredPrefixHash == "" {
+		return false, covered
+	}
+	return coveredPrefixHash(msgs, covered) == st.Projection.CoveredPrefixHash, covered
 }
 
 // SessionPath returns the bound transcript path.

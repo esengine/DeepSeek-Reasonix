@@ -158,7 +158,7 @@ func TestSummarizerReasoningClampKeepsValidUTF8(t *testing.T) {
 	sess := foldableSessionOverForce(6)
 	a := agentOverForce(t, &fakeProvider{reasoningReply: strings.Repeat("上下文摘要要点。", 3000)}, sess)
 
-	summary, _, err := a.summarize(context.Background(), sess.Messages[1:], "")
+	summary, _, err := a.summarize(context.Background(), nil, sess.Messages[1:], "")
 	if err != nil {
 		t.Fatalf("summarize = %v", err)
 	}

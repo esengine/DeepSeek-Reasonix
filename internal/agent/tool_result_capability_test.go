@@ -442,7 +442,7 @@ func TestProviderRequestsNeverUploadToolRawContent(t *testing.T) {
 		{Role: provider.RoleTool, ToolCallID: "call-1", Name: "read", Content: "bounded", RawContent: rawSentinel},
 	}
 	a := New(nil, tool.NewRegistry(), &Session{Messages: msgs}, Options{}, event.Discard)
-	req := a.summaryRequest(msgs, "")
+	req := a.summaryRequest(nil, msgs, "")
 	b, err := json.Marshal(req)
 	if err != nil {
 		t.Fatal(err)

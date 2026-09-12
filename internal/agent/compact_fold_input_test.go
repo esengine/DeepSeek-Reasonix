@@ -51,7 +51,7 @@ func (p *deadlineInspectProvider) Stream(ctx context.Context, _ provider.Request
 func TestSummaryDoesNotAddInternalWallClockDeadline(t *testing.T) {
 	prov := &deadlineInspectProvider{}
 	a := New(prov, tool.NewRegistry(), &Session{Messages: []provider.Message{{Role: provider.RoleSystem, Content: "sys"}}}, Options{}, event.Discard)
-	if _, err := a.foldToSummary(context.Background(), []provider.Message{{Role: provider.RoleUser, Content: "old"}}, ""); err != nil {
+	if _, err := a.foldToSummary(context.Background(), nil, []provider.Message{{Role: provider.RoleUser, Content: "old"}}, ""); err != nil {
 		t.Fatal(err)
 	}
 	if prov.hadDeadline {
@@ -67,7 +67,7 @@ func TestSummaryCollectorStoresOnlyVisibleText(t *testing.T) {
 		{Type: provider.ChunkDone},
 	}}
 	a := New(prov, tool.NewRegistry(), NewSession("system"), Options{}, event.Discard)
-	got, _, err := a.summarize(context.Background(), []provider.Message{{Role: provider.RoleUser, Content: "old"}}, "")
+	got, _, err := a.summarize(context.Background(), nil, []provider.Message{{Role: provider.RoleUser, Content: "old"}}, "")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -102,7 +102,7 @@ func TestSummaryCollectorRejectsEmptyAndLengthLimitedOutput(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			prov := &summaryChunksProvider{chunks: tc.chunks}
 			a := New(prov, tool.NewRegistry(), NewSession("system"), Options{}, event.Discard)
-			if _, _, err := a.summarize(context.Background(), []provider.Message{{Role: provider.RoleUser, Content: "old"}}, ""); err == nil || !strings.Contains(err.Error(), tc.want) {
+			if _, _, err := a.summarize(context.Background(), nil, []provider.Message{{Role: provider.RoleUser, Content: "old"}}, ""); err == nil || !strings.Contains(err.Error(), tc.want) {
 				t.Fatalf("summarize error = %v, want %q", err, tc.want)
 			}
 		})
@@ -120,7 +120,7 @@ func TestSummaryRequestReplaysSystemToolsAndSelectedPrefix(t *testing.T) {
 	}
 	a := New(prov, reg, &Session{Messages: append([]provider.Message{system}, fold...)}, Options{ContextWindow: 100_000, MaxOutputTokens: 1024}, event.Discard)
 
-	if _, err := a.foldToSummary(context.Background(), fold, "keep exact identifiers"); err != nil {
+	if _, err := a.foldToSummary(context.Background(), nil, fold, "keep exact identifiers"); err != nil {
 		t.Fatalf("foldToSummary: %v", err)
 	}
 	if len(prov.got) != 1 {
@@ -181,7 +181,7 @@ func TestFoldUnderBudgetIsSummarizedVerbatimInOneCall(t *testing.T) {
 	a := newFoldAgent(t, 200000, prov)
 	fold := foldOfToolResults(3, 40)
 
-	res, err := a.foldToSummary(context.Background(), fold, "")
+	res, err := a.foldToSummary(context.Background(), nil, fold, "")
 	if err != nil {
 		t.Fatalf("foldToSummary: %v", err)
 	}
@@ -198,7 +198,7 @@ func TestManualFoldDoesNotPrivatelyShortenToolResults(t *testing.T) {
 	a := newFoldAgent(t, 24000, prov)
 	fold := foldOfToolResults(6, 300)
 
-	res, err := a.foldToSummary(context.Background(), fold, "")
+	res, err := a.foldToSummary(context.Background(), nil, fold, "")
 	if err != nil {
 		t.Fatalf("foldToSummary: %v", err)
 	}
@@ -221,7 +221,7 @@ func TestHugeFoldNeverMultiSpan(t *testing.T) {
 	a := newFoldAgent(t, 32000, prov)
 	fold := foldOfToolResults(80, 800)
 
-	res, err := a.foldToSummary(context.Background(), fold, "focus on the parser")
+	res, err := a.foldToSummary(context.Background(), nil, fold, "focus on the parser")
 	if err != nil {
 		// Failure without a second attempt is acceptable for an unfittable fold.
 		if len(prov.got) != 0 {
@@ -242,7 +242,7 @@ func TestNoContextWindowLeavesTheFoldUnbounded(t *testing.T) {
 	a := New(prov, nil, &Session{}, Options{}, event.Discard)
 	fold := foldOfToolResults(40, 400)
 
-	res, err := a.foldToSummary(context.Background(), fold, "")
+	res, err := a.foldToSummary(context.Background(), nil, fold, "")
 	if err != nil {
 		// Without a window the input budget is 0 and the single-call path
 		// refuses before paying for a request.
@@ -259,7 +259,7 @@ func TestNoContextWindowLeavesTheFoldUnbounded(t *testing.T) {
 func TestSummarizeOnceNoRetry(t *testing.T) {
 	prov := &failOnceProvider{}
 	a := newFoldAgent(t, 200000, prov)
-	_, _, err := a.summarizeOnce(context.Background(), []provider.Message{
+	_, _, err := a.summarizeOnce(context.Background(), nil, []provider.Message{
 		{Role: provider.RoleUser, Content: "hello"},
 	}, "")
 	if err == nil {

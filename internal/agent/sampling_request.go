@@ -96,11 +96,15 @@ func (a *Agent) prepareSamplingRequest(ctx context.Context) (samplingRequest, er
 		}
 		shape := a.requestCalibrationShape(rebuilt.req)
 		a.sess.output.activeReqShape.Store(&shape)
-		return samplingRequest{req: freezeProviderRequest(rebuilt.req)}, nil
+		wire := freezeProviderRequest(rebuilt.req)
+		a.saveMainRequest(wire.Messages, wire.Tools)
+		return samplingRequest{req: wire}, nil
 	}
 	shape := a.requestCalibrationShape(frozen.req)
 	a.sess.output.activeReqShape.Store(&shape)
-	return samplingRequest{req: freezeProviderRequest(frozen.req)}, nil
+	wire := freezeProviderRequest(frozen.req)
+	a.saveMainRequest(wire.Messages, wire.Tools)
+	return samplingRequest{req: wire}, nil
 }
 
 func (a *Agent) buildSamplingRequest(ctx context.Context, trigger string) (samplingRequest, error) {

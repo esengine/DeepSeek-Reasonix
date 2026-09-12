@@ -25,6 +25,18 @@ type sessionRuntime struct {
 
 	missingReasoning missingReasoningWatch
 
+	// lastWireFP: normalized bytes actually sent last request; vs the next
+	// wire fp it separates payload divergence from server-side expiry.
+	lastWireFP atomic.Pointer[string]
+
+	// lastMainReq freezes the last sampling request's provider-visible unit
+	// (messages AND tool schemas): the server caches all three as one prefix.
+	lastMainReq atomic.Pointer[mainRequestBytes]
+
+	// lastMainReqPersist is the last time the frozen main-request bytes were
+	// written to the sidecar (unix nano), throttling fresh-wire refreshes.
+	lastMainReqPersist atomic.Int64
+
 	// reasoningReplayStrongProjection records the provider-visible history cutoff
 	// after thinking-400 repair; later messages use normal replay. Its anchor
 	// resolves the cutoff after old tool-result messages are removed.
@@ -73,6 +85,9 @@ func (r *sessionRuntime) reset(s *Session) {
 	r.missingReasoning = missingReasoningWatch{}
 	r.reasoningReplayStrongProjection = 0
 	r.reasoningReplayStrongProjectionAnchor = ""
+	r.lastWireFP.Store(nil)
+	r.lastMainReq.Store(nil) // a new conversation starts with no sent prefix
+	r.lastMainReqPersist.Store(0)
 	r.compactionMu.Lock()
 	r.compactionState = CompactionState{} // lineage change; disk reloaded on Resume
 	r.cacheState = CacheStateUnknown
@@ -93,6 +108,19 @@ func (r *sessionRuntime) clearReasoningReplayStrongProjection() {
 	}
 	r.reasoningReplayStrongProjection = 0
 	r.reasoningReplayStrongProjectionAnchor = ""
+}
+
+// wireFP returns the fingerprint of the normalized bytes sent last request.
+func (r *sessionRuntime) wireFP() string {
+	if p := r.lastWireFP.Load(); p != nil {
+		return *p
+	}
+	return ""
+}
+
+// setWireFP records the normalized bytes about to go on the wire.
+func (r *sessionRuntime) setWireFP(fp string) {
+	r.lastWireFP.Store(&fp)
 }
 
 // session returns the bound conversation under the lock that guards the

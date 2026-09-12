@@ -382,21 +382,56 @@ func compactionInstructionWithFocus(instructions string) string {
 	return instruction
 }
 
-// summaryRequest builds the exact cache-aligned request shape used by
-// summarize. Keeping planning and execution on this shared builder prevents a
-// supposedly safe overflow fold from being rejected only after it is selected.
-func (a *Agent) summaryRequest(region []provider.Message, instructions string) provider.Request {
-	prefix := append([]provider.Message(nil), region...)
-	if len(prefix) == 0 || prefix[0].Role != provider.RoleSystem {
+// summaryRequestToolsForCommit returns the tool schemas the commit-time
+// summary request will send: frozen when a full frozen unit exists, else the
+// live registry. Telemetry uses it to attribute tool-seam divergence.
+func (a *Agent) summaryRequestToolsForCommit(prefix []provider.Message) []provider.ToolSchema {
+	if saved := a.savedMainRequest(); saved != nil && len(saved.messages) > 0 && len(saved.tools) > 0 {
+		return saved.tools
+	}
+	if a.svc.tools != nil {
+		return a.providerToolSchemas()
+	}
+	return nil
+}
+
+// summaryToolsSource reports which tool set a summary request will send and
+// where it came from: the frozen main-request set, the live registry fallback,
+// or none. Mirrors summaryRequest's choice so telemetry can attribute a
+// system-only cache hit to a tool-seam fork.
+func (a *Agent) summaryToolsSource() ([]provider.ToolSchema, string) {
+	if saved := a.savedMainRequest(); saved != nil && len(saved.messages) > 0 && len(saved.tools) > 0 {
+		return saved.tools, "frozen"
+	}
+	if a.svc.tools != nil {
+		return a.providerToolSchemas(), "live"
+	}
+	return nil, "none"
+}
+
+// summaryRequest builds the cache-aligned summary request: the verbatim
+// prefix (already in the provider's prefix cache from ordinary requests)
+// precedes the fold region so the fold lands at the same byte position the
+// server cached it at. When a frozen main request exists, its bytes AND its
+// frozen tool schemas are replayed — the server caches system+tools+messages
+// as one unit, and the live tool set drifts (MCP registration) between the
+// main request and the summary request. Keeping planning and execution on
+// this shared builder prevents a supposedly safe overflow fold from being
+// rejected only after it is selected.
+func (a *Agent) summaryRequest(prefix, region []provider.Message, instructions string) provider.Request {
+	msgs := append(append([]provider.Message(nil), prefix...), region...)
+	if len(msgs) == 0 || msgs[0].Role != provider.RoleSystem {
 		visible := a.modelVisibleMessages()
 		if len(visible) > 0 && visible[0].Role == provider.RoleSystem {
-			prefix = append([]provider.Message{visible[0]}, prefix...)
+			msgs = append([]provider.Message{visible[0]}, msgs...)
 		}
 	}
-	messages := a.normalizeModelRequestMessages(prefix)
+	messages := a.normalizeModelRequestMessages(msgs)
 	messages = append(messages, HostGeneratedUserMessage(compactionInstructionWithFocus(instructions)))
 	var schemas []provider.ToolSchema
-	if a.svc.tools != nil {
+	if saved := a.savedMainRequest(); saved != nil && len(saved.messages) > 0 && len(saved.tools) > 0 {
+		schemas = saved.tools
+	} else if a.svc.tools != nil {
 		schemas = a.providerToolSchemas()
 	}
 	return provider.Request{
@@ -409,8 +444,8 @@ func (a *Agent) summaryRequest(region []provider.Message, instructions string) p
 
 // summarize asks the executor's own provider to distill a replayed prefix into
 // a briefing. instructions is optional /compact focus + PreCompact text.
-func (a *Agent) summarize(ctx context.Context, region []provider.Message, instructions string) (string, *provider.Usage, error) {
-	req := a.summaryRequest(region, instructions)
+func (a *Agent) summarize(ctx context.Context, prefix, region []provider.Message, instructions string) (string, *provider.Usage, error) {
+	req := a.summaryRequest(prefix, region, instructions)
 	summary, usage, err := a.runSummaryRequest(ctx, req)
 	a.observeSummaryOutcome(req, usage, err)
 	return summary, usage, err
@@ -491,8 +526,8 @@ func (a *Agent) runSummaryRequest(ctx context.Context, req provider.Request) (su
 // summarizeOnce performs exactly one application-layer summary request.
 // Timeouts, empty results, stream errors, and output truncation all fail once
 // with no second attempt.
-func (a *Agent) summarizeOnce(ctx context.Context, fold []provider.Message, instructions string) (string, *provider.Usage, error) {
-	return a.summarize(ctx, fold, instructions)
+func (a *Agent) summarizeOnce(ctx context.Context, prefix, fold []provider.Message, instructions string) (string, *provider.Usage, error) {
+	return a.summarize(ctx, prefix, fold, instructions)
 }
 
 // renderTranscript flattens messages into a bounded transcript for the

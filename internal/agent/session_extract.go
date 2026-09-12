@@ -128,7 +128,7 @@ func (r *chunkedSummaryRun) summarize(ctx context.Context, fold []provider.Messa
 		return foldSummary{}, err
 	}
 	r.calls++
-	res, err := r.a.foldToSummary(ctx, fold, instructions)
+	res, err := r.a.foldToSummary(ctx, nil, fold, instructions)
 	r.usage = mergeSamplingUsage(r.usage, res.Usage)
 	return res, err
 }

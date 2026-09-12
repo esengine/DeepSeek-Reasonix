@@ -49,6 +49,11 @@ type record struct {
 	Total      int       `json:"total,omitempty"`
 	Requests   int       `json:"requests,omitempty"` // provider requests represented by this row
 	Turn       bool      `json:"turn,omitempty"`     // true for TurnDone marker rows
+	// PrefixHash fingerprints the sent request prefix (CacheDiagnostics),
+	// distinguishing a miss from a changed prefix vs server-side expiry.
+	PrefixHash    string   `json:"prefix_hash,omitempty"`
+	PrefixChanged bool     `json:"prefix_changed,omitempty"`
+	PrefixReasons []string `json:"prefix_reasons,omitempty"`
 	// Cost quote fields (additive; older readers ignore them).
 	UsageSource        string   `json:"usage_source,omitempty"`
 	CostAmount         string   `json:"cost_amount,omitempty"`     // original amount decimal

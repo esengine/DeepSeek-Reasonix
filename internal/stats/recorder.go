@@ -136,7 +136,7 @@ func (r *Recorder) Emit(e event.Event) {
 	if r != nil && r.writer != nil && e.Kind == event.Usage {
 		r.recordUsage(e)
 	} else if r != nil && r.writer != nil && e.Kind == event.GuardianAssessment && e.Guardian.Usage != nil {
-		r.recordProviderUsage(e.ModelRef, e.Guardian.Usage, nil, "")
+		r.recordProviderUsage(e.ModelRef, e.Guardian.Usage, nil, "", nil)
 	} else if r != nil && r.writer != nil && e.Kind == event.TurnDone {
 		r.recordTurnCompletion()
 	}
@@ -247,10 +247,10 @@ func (r *Recorder) RecordSubagentLifecycle(info event.SubagentLifecycleInfo) {
 }
 
 func (r *Recorder) recordUsage(e event.Event) {
-	r.recordProviderUsage(e.ModelRef, e.Usage, e.CostQuote, e.UsageSource)
+	r.recordProviderUsage(e.ModelRef, e.Usage, e.CostQuote, e.UsageSource, e.CacheDiagnostics)
 }
 
-func (r *Recorder) recordProviderUsage(modelRef string, usage *provider.Usage, quote *billing.CostQuote, usageSource string) {
+func (r *Recorder) recordProviderUsage(modelRef string, usage *provider.Usage, quote *billing.CostQuote, usageSource string, diag *event.CacheDiagnostics) {
 	if usage == nil || (usage.TotalTokens <= 0 && usage.RequestCount <= 0) {
 		return
 	}
@@ -300,6 +300,11 @@ func (r *Recorder) recordProviderUsage(modelRef string, usage *provider.Usage, q
 		if v, ok := quote.Valuations["USD"]; ok {
 			rec.ValuationUSD = v.Money.Amount
 		}
+	}
+	if diag != nil {
+		rec.PrefixHash = diag.PrefixHash
+		rec.PrefixChanged = diag.PrefixChanged
+		rec.PrefixReasons = diag.PrefixChangeReasons
 	}
 	r.dispatcher.enqueue(rec)
 }
