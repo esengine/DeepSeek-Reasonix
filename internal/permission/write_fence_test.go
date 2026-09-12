@@ -137,3 +137,37 @@ func TestEverySubjectSensitiveToolIsSubjectScoped(t *testing.T) {
 		}
 	}
 }
+
+// A grant recorded before grants carried subjects names only the tool, and it
+// has been standing for an answer nobody gave: the user approved one plan, and
+// the rule kept the tool. It stops covering anything for these tools, which
+// asks once more instead of carrying that forward.
+func TestABareSessionGrantNoLongerAnswersForEverySubject(t *testing.T) {
+	for _, tool := range []string{ExtendWritePaths, installSourceTool} {
+		stale := tool // what the old code recorded
+		for _, subject := range []string{"low:sha256:abc", "high:sha256:def", "/ws/secrets/key.pem"} {
+			if SessionGrantMatches(stale, tool, subject) {
+				t.Errorf("stale grant %q still covers %s %q", stale, tool, subject)
+			}
+		}
+	}
+}
+
+// The grants this records now keep working, for exactly what they name.
+func TestASubjectScopedGrantStillCoversItsOwnSubject(t *testing.T) {
+	rule := SessionGrantRuleForScope(installSourceTool, "low:sha256:abc")
+	if !SessionGrantMatches(rule, installSourceTool, "low:sha256:abc") {
+		t.Errorf("grant %q does not cover the ticket it was given for", rule)
+	}
+	if SessionGrantMatches(rule, installSourceTool, "high:sha256:def") {
+		t.Errorf("grant %q covers a different ticket", rule)
+	}
+}
+
+// Everything else is unchanged: a bare grant for a tool whose authorization
+// does not read its subject is still exactly what the user agreed to.
+func TestABareGrantStillWorksForOrdinaryTools(t *testing.T) {
+	if !SessionGrantMatches("read_file", "read_file", "/ws/anything.go") {
+		t.Error("a bare grant stopped covering an ordinary tool; that answer was never ambiguous")
+	}
+}

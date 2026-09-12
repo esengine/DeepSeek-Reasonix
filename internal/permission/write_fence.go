@@ -1,6 +1,8 @@
 // write_fence.go — widening a delegated run's write confinement.
 package permission
 
+import "strings"
+
 // ExtendWritePaths is the capability a delegated run asks for when it needs to
 // write outside the paths it declared. It is not one of the run's tools: the
 // subject is the path being asked for, and the answer decides whether the fence
@@ -50,4 +52,21 @@ func sessionGrantRule(toolName, subject string) string {
 		return toolName + "=" + subject
 	}
 	return toolName
+}
+
+// SessionGrantMatches reports whether a recorded grant covers this call, and is
+// stricter than RuleMatchesString where the tool decides on its subject: a
+// bare-tool grant there predates grants carrying subjects and stands for an
+// answer nobody gave — one plan was approved, the rule kept the tool. It now
+// covers nothing, so the question is asked once more. See ruleNamesSubject.
+func SessionGrantMatches(rule, toolName, subject string) bool {
+	if subjectScopedGrant(toolName) && !ruleNamesSubject(rule) {
+		return false
+	}
+	return RuleMatchesString(rule, toolName, subject)
+}
+
+func ruleNamesSubject(rule string) bool {
+	r, ok := ParseRule(rule)
+	return ok && strings.TrimSpace(r.Subject) != ""
 }

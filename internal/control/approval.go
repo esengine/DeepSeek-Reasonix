@@ -578,7 +578,7 @@ func (a *approvalManager) sessionGrantAllowsLocked(tool, subject string) bool {
 		return false
 	}
 	for rule := range a.granted {
-		if permission.RuleMatchesString(rule, tool, subject) {
+		if permission.SessionGrantMatches(rule, tool, subject) {
 			return true
 		}
 	}
