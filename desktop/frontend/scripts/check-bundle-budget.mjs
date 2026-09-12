@@ -53,7 +53,7 @@ const appShellCSSGzip = appShellCSS.reduce((total, path) => total + gzipBytes(pa
 const largestInitialJS = Math.max(...initialJS.map(gzipBytes));
 const largestInitialJSRaw = Math.max(...initialJS.map((path) => statSync(path).size));
 const localeChunks = readdirSync(resolve(distDir, "assets"))
-  .filter((name) => /^(?:zh|zh-TW)-.+\.js$/.test(name))
+  .filter((name) => /^(?:zh|zh-TW|es)-.+\.js$/.test(name))
   .map((name) => resolve(distDir, "assets", name));
 
 console.log("\nbundle budgets");
@@ -236,8 +236,8 @@ if (initialCSS.length > 0) {
 // card, branch switcher, tab strip, add menu, empty-state picker and the
 // spacer that starts the panel below the topic bar).
 assertBudget("deferred app-shell CSS gzip", appShellCSSGzip, 121.2 * 1024);
-if (localeChunks.length !== 2) {
-  throw new Error(`expected 2 on-demand Chinese locale chunks, found ${localeChunks.length}`);
+if (localeChunks.length !== 3) {
+  throw new Error(`expected 3 on-demand locale chunks (zh, zh-TW, es), found ${localeChunks.length}`);
 }
 for (const path of localeChunks) {
   const name = basename(path);
@@ -314,7 +314,12 @@ for (const path of localeChunks) {
   // 64606 / 65349 B, so both dialect ceilings ratchet to the next tenth.
   // Model-application copy on the read-pause base measures 64734 / 65499 B,
   // adding 128 / 150 B. Retain only the next one-decimal ceiling.
-  const budget = name.startsWith("zh-TW-") ? 64.0 * 1024 : 63.3 * 1024;
+  // Spanish (es-419) prose is longer per key than Chinese: the full 3,234-key
+  // dictionary measures 58071 B (56.710 KiB) gzip. Keep the next one-decimal
+  // ceiling with bounded headroom like the dialects above.
+  const budget = name.startsWith("zh-TW-") ? 64.0 * 1024
+    : name.startsWith("zh-") ? 63.3 * 1024
+    : 56.8 * 1024;
   assertBudget(`${name} gzip`, gzipBytes(path), budget);
 }
 
