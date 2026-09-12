@@ -5,6 +5,7 @@ import { dirname, join } from "node:path";
 import { test } from "node:test";
 import { fileURLToPath } from "node:url";
 import {
+  checkEntryModes,
   checkMembers,
   inferArtifactKind,
   listZipEntries,
@@ -13,6 +14,7 @@ import {
   packagerOptions,
   parseSigningFileList,
   parseTarget,
+  parseVerboseListing,
   PRODUCT,
   readProductIdentity,
   requiredMembers,
@@ -255,6 +257,37 @@ test("zip listing reads the central directory without extracting", () => {
   } finally {
     rmSync(dir, { recursive: true, force: true });
   }
+});
+
+test("Linux listings reject a private app directory and unreadable files", () => {
+  const deb = parseVerboseListing([
+    "drwxr-xr-x root/root         0 2026-09-05 10:00 ./",
+    "drwxr-xr-x root/root         0 2026-09-05 10:00 ./usr/lib/reasonix/app/",
+    "-rwxr-xr-x root/root 123456789 2026-09-05 10:00 ./usr/lib/reasonix/app/Reasonix",
+    "-rwsr-xr-x root/root    123456 2026-09-05 10:00 ./usr/lib/reasonix/app/chrome-sandbox",
+    "lrwxrwxrwx root/root         0 2026-09-05 10:00 ./usr/lib/reasonix/app/link -> Reasonix",
+  ]);
+  assert.deepEqual(deb.map((row) => row.name), ["./", "./usr/lib/reasonix/app/", "./usr/lib/reasonix/app/Reasonix", "./usr/lib/reasonix/app/chrome-sandbox", "./usr/lib/reasonix/app/link"]);
+  assert.deepEqual(checkEntryModes(deb, "linux-deb"), []);
+  assert.deepEqual(checkMembers(deb.map((row) => row.name), "linux-deb").forbidden, []);
+
+  const privateApp = parseVerboseListing(["drwx------ root/root 0 2026-09-05 10:00 ./usr/lib/reasonix/app/"]);
+  assert.deepEqual(checkEntryModes(privateApp, "linux-deb"), ["./usr/lib/reasonix/app/ has mode drwx------; directories must be drwxr-xr-x"]);
+  const privateFile = parseVerboseListing(["-rw-r----- root/root 10 2026-09-05 10:00 ./usr/lib/reasonix/app/resources/app.asar"]);
+  assert.deepEqual(checkEntryModes(privateFile, "linux-deb"), ["./usr/lib/reasonix/app/resources/app.asar has mode -rw-r-----; files must be world-readable"]);
+  const foreignOwner = parseVerboseListing(["-rwxr-xr-x runner/docker 10 2026-09-05 10:00 ./usr/bin/reasonix-desktop"]);
+  assert.deepEqual(checkEntryModes(foreignOwner, "linux-deb"), ["./usr/bin/reasonix-desktop is owned by runner/docker; package members must be root/root"]);
+
+  const tar = parseVerboseListing([
+    "drwxr-xr-x runner/docker 0 2026-09-05 10:00:00 app/",
+    "-rwxr-xr-x runner/docker 42 2026-09-05 10:00:00 reasonix-desktop",
+  ]);
+  assert.deepEqual(checkEntryModes(tar, "linux-tar"), []);
+  assert.throws(() => parseVerboseListing(["drwxr-xr-x  0 runner docker 0 Sep  5 10:00 app/"]), /unrecognised listing line/);
+});
+
+test("the packaged app directory is made world-readable before Linux packaging", () => {
+  assert.match(read("packaging/package.mjs"), /chmodSync\(bundle, 0o755\)/);
 });
 
 test("the Linux package inputs install the Electron tree beside the update helper", () => {

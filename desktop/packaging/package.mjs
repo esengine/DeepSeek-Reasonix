@@ -7,7 +7,7 @@
 // usage: node desktop/packaging/package.mjs <os/arch> <version> [channel]
 import { defaultSanitizePackageJson, packager } from "@electron/packager";
 import { execFileSync } from "node:child_process";
-import { cpSync, existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, renameSync, rmSync, writeFileSync } from "node:fs";
+import { chmodSync, cpSync, existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, renameSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -127,6 +127,9 @@ try {
   mkdirSync(outDir, { recursive: true });
   const bundle = target.os === "darwin" ? join(outDir, `${PRODUCT.name}.app`) : join(outDir, "app");
   renameSync(target.os === "darwin" ? join(finalPath, `${PRODUCT.name}.app`) : finalPath, bundle);
+  // The packager stages the app tree in a mkdtemp directory (0700) and renames
+  // it into place; dpkg installs that mode as root:root, hiding app/ from users.
+  if (target.os !== "darwin") chmodSync(bundle, 0o755);
   rmSync(options.out, { recursive: true, force: true });
 
   if (target.os === "windows") {

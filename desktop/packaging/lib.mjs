@@ -277,6 +277,33 @@ export function checkMembers(entries, kind) {
   };
 }
 
+// GNU tar -tv and dpkg-deb -c share this column layout; bsdtar does not, so an
+// unrecognised line fails instead of silently dropping the mode check.
+const VERBOSE_LISTING = /^([-dl][rwxsStT-]{9})\s+(\S+)\s+\d+\s+\d{4}-\d{2}-\d{2}\s+\d{2}:\d{2}(?::\d{2})?\s+(.*)$/;
+
+export function parseVerboseListing(lines) {
+  return lines.map((line) => {
+    const match = VERBOSE_LISTING.exec(line);
+    if (!match) throw new Error(`unrecognised listing line: ${JSON.stringify(line)}`);
+    const [, mode, owner, rest] = match;
+    const name = mode.startsWith("l") ? rest.split(" -> ")[0] : rest;
+    return { mode, owner, name };
+  });
+}
+
+const DIRECTORY_MODE = /^drwxr-xr-x$/;
+
+export function checkEntryModes(rows, kind) {
+  const errors = [];
+  for (const { mode, owner, name } of rows) {
+    if (mode.startsWith("l")) continue;
+    if (mode.startsWith("d") && !DIRECTORY_MODE.test(mode)) errors.push(`${name} has mode ${mode}; directories must be drwxr-xr-x`);
+    if (mode.startsWith("-") && mode[7] !== "r") errors.push(`${name} has mode ${mode}; files must be world-readable`);
+    if (kind === "linux-deb" && owner !== "root/root") errors.push(`${name} is owned by ${owner}; package members must be root/root`);
+  }
+  return errors;
+}
+
 export function validateMacServiceLink(appDir) {
   const link = join(appDir, "Contents", "MacOS", PRODUCT.serviceExecutable);
   const expectedTarget = `../Resources/service/${PRODUCT.serviceExecutable}`;
