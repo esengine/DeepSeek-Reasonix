@@ -134,6 +134,26 @@ func TestTodoWriteRejectsDroppingCurrentTodoWithoutReplacementAuth(t *testing.T)
 	}
 }
 
+func TestTodoWriteValidationErrorIncludesCurrentTodoList(t *testing.T) {
+	ledger := evidence.NewLedger()
+	ledger.Record(evidence.Receipt{
+		ToolName: "todo_write",
+		Success:  true,
+		Todos: []evidence.TodoItem{
+			{Content: "Inspect environment", Status: "completed", StepID: "step-1"},
+			{Content: "Write code", Status: "in_progress", StepID: "step-2"},
+		},
+	})
+	ctx := evidence.WithLedger(context.Background(), ledger)
+	_, err := (todoWrite{}).Execute(ctx, json.RawMessage(`{"todos":[{"content":"Write code","status":"in_progress","step_id":"step-2"}]}`))
+	if err == nil || !strings.Contains(err.Error(), "current todo list") {
+		t.Fatalf("validation error = %v, want a full current-list hint", err)
+	}
+	if !strings.Contains(err.Error(), `"Inspect environment"`) || !strings.Contains(err.Error(), `"step-1"`) {
+		t.Fatalf("validation error omitted the canonical list: %v", err)
+	}
+}
+
 func TestTodoWriteApprovedPlanReplacementPreservesCompletedHistory(t *testing.T) {
 	ledger := evidence.NewLedger()
 	ledger.Record(evidence.Receipt{

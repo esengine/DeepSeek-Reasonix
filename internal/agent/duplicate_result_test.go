@@ -30,6 +30,15 @@ func TestDedupeUsesRawResultBeforeLossySummary(t *testing.T) {
 	}
 }
 
+func TestTodoWriteResultIsNeverHiddenAsGenericDuplicate(t *testing.T) {
+	a := &Agent{}
+	first, _, _ := a.boundProviderVisibleResult("Todos updated: 2 total — 0 completed, 1 in progress, 1 pending.", "todo_write", "c1")
+	second, _, _ := a.boundProviderVisibleResult("Todos updated: 2 total — 0 completed, 1 in progress, 1 pending.", "todo_write", "c2")
+	if first != second || strings.Contains(second, "duplicate tool result") {
+		t.Fatalf("todo_write acknowledgement was deduped: first=%q second=%q", first, second)
+	}
+}
+
 func TestResolvedSkipOutcomeDedupesRepeatedLocalDiscovery(t *testing.T) {
 	a := &Agent{}
 	result := `{"id":"mcp-tool:server/read","input_schema":{"type":"object"}}`
