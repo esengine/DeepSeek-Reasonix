@@ -314,12 +314,12 @@ for (const path of localeChunks) {
   // 64606 / 65349 B, so both dialect ceilings ratchet to the next tenth.
   // Model-application copy on the read-pause base measures 64734 / 65499 B,
   // adding 128 / 150 B. Retain only the next one-decimal ceiling.
-  // Spanish (es-419) prose is longer per key than Chinese: the full 3,234-key
-  // dictionary measures 58071 B (56.710 KiB) gzip. Keep the next one-decimal
+  // Spanish (es-419) prose is longer per key than Chinese: the full 3,332-key
+  // dictionary measures 59567 B (58.171 KiB) gzip. Keep the next one-decimal
   // ceiling with bounded headroom like the dialects above.
   const budget = name.startsWith("zh-TW-") ? 64.0 * 1024
     : name.startsWith("zh-") ? 63.3 * 1024
-    : 56.8 * 1024;
+    : 58.3 * 1024;
   assertBudget(`${name} gzip`, gzipBytes(path), budget);
 }
 
