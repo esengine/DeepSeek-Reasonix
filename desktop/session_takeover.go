@@ -45,8 +45,11 @@ type SessionTakeoverView struct {
 	RemoteAttached bool   `json:"remoteAttached"`
 	Running        bool   `json:"running"`
 	Mirrored       bool   `json:"mirrored"`
+	Reclaimable    *bool  `json:"reclaimable,omitempty"`
 	HolderPID      int    `json:"holderPid,omitempty"`
 	HolderHost     string `json:"holderHost,omitempty"`
+	HolderKind     string `json:"holderKind,omitempty"`
+	HolderWriterID string `json:"holderWriterId,omitempty"`
 }
 
 type takeoverGrant struct {

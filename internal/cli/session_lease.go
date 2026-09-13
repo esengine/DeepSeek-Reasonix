@@ -117,7 +117,11 @@ func (m *chatTUI) commitSessionSwitchWithLoader(path string, load func(string) (
 		return err
 	}
 	m.ctrl.Resume(loaded, path)
-	return bindChatTUIAuthority(m)
+	if err := bindChatTUIAuthority(m); err != nil {
+		return err
+	}
+	m.takeover.ObserveOwnedSession()
+	return nil
 }
 
 // restoreSessionLease re-points the lease at the controller's current session
@@ -141,13 +145,11 @@ func (m *chatTUI) followSessionLease() {
 	if m.leases == nil {
 		return
 	}
-	if err := m.leases.Rebind(m.ctrl.SessionPath()); err != nil {
+	if err := m.rebindSessionLease(m.ctrl.SessionPath()); err != nil {
 		m.notice(sessionLeaseHeldNotice(err))
 		return
 	}
-	if err := bindChatTUIAuthority(m); err != nil {
-		m.notice(fmt.Sprintf("session write authority: %v", err))
-	}
+	m.takeover.ObserveOwnedSession()
 }
 
 // cliSessionRecoveredHandler moves the single-session CLI lease during the

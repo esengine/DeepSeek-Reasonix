@@ -583,6 +583,7 @@ export function useAppSessionComposition(input: AppSessionCompositionInput) {
   const bannerCommands = useSessionBannerCommands({
     remote: Boolean(activeTab?.remote),
     reloadConfigWarnings,
+	showError: (message) => showToast(message, "error", { durationMs: 8000 }),
   });
 
   const workspacePanelCommands = useWorkspacePanelCommands({

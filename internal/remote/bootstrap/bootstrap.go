@@ -53,7 +53,7 @@ type Options struct {
 	LocalGOOS      string                                                        // GOOS of LocalBinary
 	LocalGOARCH    string                                                        // GOARCH of LocalBinary
 	ProductVersion string                                                        // exact local release used for a cross-platform official download
-	FetchBinary    func(context.Context, string, string, string) ([]byte, error) // local verified release fetcher
+	FetchBinary    func(context.Context, string, string, string) ([]byte, error) // verified release or staged development artifact for the target platform
 	MinVersion     string                                                        // minimum acceptable remote version
 	Progress       func(step, detail string)                                     // optional progress callback
 	Clock          func() time.Time                                              // nil => time.Now

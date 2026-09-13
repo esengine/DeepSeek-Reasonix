@@ -237,6 +237,26 @@ Whether a binary is usable is decided by a capability probe, not a version
 number: an older binary missing any required serve capability is treated as
 missing and upgraded. `serve_install = "never"` forbids all installation.
 
+Saved connections first reuse a compatible live Serve or an existing remote
+binary; an installation policy does not force an upgrade on every connection.
+With `upload`, Desktop uses its local CLI when the platform matches, otherwise
+it obtains the CLI for the remote platform from the verified release provider.
+Development builds use a staged artifact instead of downloading a release:
+`node desktop/scripts/build-remote-cli.mjs linux/amd64` writes it alongside the
+service under `remote-cli/linux-amd64/reasonix`. Both `./dev` and
+`pnpm --dir desktop dev:desktop` prepare this target automatically. Set
+`REASONIX_DEV_REMOTE_TARGETS=linux/amd64,linux/arm64` to prepare other targets.
+Rebuild these artifacts after changing the CLI. Missing development artifacts
+produce an error with the exact build command; the saved policy is preserved.
+
+A new session can load its empty transcript before its first file save. Serve
+validates these reads against the bound controller identity, not file existence.
+For older Serve builds that reject this with a session-binding conflict, Desktop
+retries identity-bearing transcript reads only after checking the current path;
+it verifies both the returned session ID and the current path afterward. A
+different session or a late response after switching is rejected. Content chunks
+never use this compatibility retry because they do not carry session identity.
+
 **Remote state files** (remote `~/.reasonix/remote/`): `serve-<slug>.json`
 (pid, bound loopback address, workspace), `serve-<slug>.token` (0600),
 `serve-<slug>.port`, `serve-<slug>.pid`, `serve-<slug>.log`.
@@ -261,9 +281,9 @@ seconds of inactivity.
   resuming that session is refused and the UI reports "session in use".
 - **Handoff**: a local window on the serve host may take over the foreground
   session. Serve then degrades to a read-only mirror that forwards the local
-  writer's frames in real time; 30 seconds without a writer heartbeat
-  reclaims the session automatically, and an explicit reclaim is always
-  possible. The desktop remote tab enters spectator mode and shows a reclaim
+  writer's frames in real time. A cooperative writer can return ownership
+  through **Take back**. Missing heartbeats do not override a live writer's
+  session lock. The desktop remote tab enters spectator mode and shows a reclaim
   banner.
 - The desktop project tree lists the workspace's remote sessions. Selecting a
   row resumes that exact session in the shared transcript and composer
@@ -282,6 +302,29 @@ a read-only spectator. It continues receiving the live transcript and offers
 a **Take back** action:
 
 ![The remote-session tab becomes a read-only spectator and offers Take back](./assets/remote-session-spectator-reclaim.png)
+
+### Resuming in the remote TUI
+
+A CLI started on the remote host discovers the workspace's resident Serve and
+registers its owned session for sharing. This also applies to ordinary
+`--resume`, `--continue`, and interactive `/resume`; `/takeover` is only needed
+when Serve already holds the target session. Discovery retries if Serve starts
+later. The desktop can open the same session, read its history, and observe live
+output without changing the session currently selected in another tab.
+
+**Take back** shows the registered TUI's host and PID, asks for confirmation,
+interrupts active work, and returns its write lease. The TUI then exits its
+session; the desktop becomes writable only after Serve has acquired and loaded
+the returned session. Switching sessions in the TUI returns the old mirror and
+registers the new session.
+
+An older CLI or an unregistered process can hold a session without a sharing
+connection. When its lease identifies a live Reasonix executable on the Serve
+host, the desktop shows that host and PID and can force-stop the verified holder
+after confirmation. Serve still waits for the OS lock to be released before it
+loads the session. An unverifiable holder stays read-only and must be exited in
+the remote terminal or window. Updating a binary does not update an
+already-running TUI process.
 
 ## Desktop remote work
 
@@ -393,7 +436,7 @@ never re-prompt; a desktop restart requires entering them again.
 | Suspected incompatible older serve | A failed capability probe upgrades automatically; if needed, `remote serve stop` then reconnect to force a fresh bootstrap |
 | `connect` stuck bootstrapping | Concurrent bootstraps are serialized by a remote file lock that expires after at most 60 seconds; retry shortly |
 | Session reports "in use" | Another process holds the session's lease (another window or serve). Exit from that side or wait for the holder to release |
-| Remote tab switched to spectator mode | A local window on the serve host took over the session; it auto-reclaims after 30 s without a heartbeat, or use the reclaim banner |
+| Remote tab switched to spectator mode | A remote terminal or window owns the session. Use Take back to interrupt a registered TUI or a verified local Reasonix holder; otherwise exit the unverifiable holder there and reopen the session |
 | `local-proxy` model calls failing | The watchdog heals automatically; confirm the desktop is online and SSH is connected. Never hand-edit the managed remote provider block |
 | Authentication failure keeps coming back | Auth failure is terminal and never retried. Check the `.env` slots and key passphrase, or switch to the SSH agent |
 | Windows local side | The CLI and desktop are supported, but V1 cannot use the OpenSSH named-pipe agent; configure an identity file or password. Remote hosts must still be Linux/macOS |

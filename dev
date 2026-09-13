@@ -42,6 +42,7 @@ echo "  vite:     http://127.0.0.1:$vite_port"
 echo "  service:  $service"
 
 mkdir -p "$(dirname "$service")"
+node "$desktop_dir/scripts/build-remote-cli.mjs"
 (cd "$desktop_dir" && go build -o "$service" .)
 
 # The Vite dev server hot-reloads the frontend; the Electron shell loads it via

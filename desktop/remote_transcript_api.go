@@ -6,7 +6,9 @@ import (
 	"io"
 	"net/http"
 	"net/url"
+	"strings"
 
+	"reasonix/internal/agent"
 	"reasonix/internal/control"
 	"reasonix/internal/transcript"
 )
@@ -39,22 +41,56 @@ func (a *App) remoteTranscriptRead(tabID, route string, request any, destination
 	}
 	ctx, cancel := commandContext(a)
 	defer cancel()
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, serveURL(base, route)+"?"+query.Encode(), nil)
+	read := func() (int, []byte, error) {
+		req, err := http.NewRequestWithContext(ctx, http.MethodGet, serveURL(base, route)+"?"+query.Encode(), nil)
+		if err != nil {
+			return 0, nil, err
+		}
+		response, err := client.Do(req)
+		if err != nil {
+			return 0, nil, err
+		}
+		defer response.Body.Close()
+		const maxResponseBytes = transcript.MaxResponseBytes
+		body, err := io.ReadAll(io.LimitReader(response.Body, maxResponseBytes+1))
+		if err != nil {
+			return 0, nil, err
+		}
+		if len(body) > maxResponseBytes {
+			return 0, nil, fmt.Errorf("remote transcript response exceeds limit")
+		}
+		return response.StatusCode, body, nil
+	}
+	status, body, err := read()
 	if err != nil {
 		return false, err
 	}
-	response, err := client.Do(req)
-	if err != nil {
-		return false, err
-	}
-	defer response.Body.Close()
-	const maxResponseBytes = transcript.MaxResponseBytes
-	body, err := io.ReadAll(io.LimitReader(response.Body, maxResponseBytes+1))
-	if err != nil {
-		return false, err
-	}
-	if len(body) > maxResponseBytes {
-		return false, fmt.Errorf("remote transcript response exceeds limit")
+	// Older Serve resolves ?session through an on-disk file check. A fresh
+	// session has no file yet. Retry only identity-bearing reads and require
+	// the returned projection to prove it belongs to the requested session.
+	// Content chunks do not carry identity and cannot use this compatibility path.
+	identityRetry := status == http.StatusConflict && sessionPath != "" && route != "/transcript/content" &&
+		strings.TrimSpace(string(body)) == "transcript session is not bound to this runtime"
+	if identityRetry {
+		matchesPath := func() bool {
+			data, err := serveGet(ctx, client, serveURL(base, "/status"))
+			var current struct {
+				SessionPath string `json:"sessionPath"`
+			}
+			return err == nil && json.Unmarshal(data, &current) == nil && current.SessionPath == sessionPath
+		}
+		if !matchesPath() {
+			return false, fmt.Errorf("remote transcript session does not match the requested session")
+		}
+		query.Del("session")
+		status, body, err = read()
+		if err != nil {
+			return false, err
+		}
+		var bound transcript.Boundary
+		if status != http.StatusOK || json.Unmarshal(body, &bound) != nil || bound.ProtocolVersion != transcript.ProtocolVersion || bound.Identity.SessionID != agent.BranchID(sessionPath) || !matchesPath() {
+			return false, fmt.Errorf("remote transcript session does not match the requested session")
+		}
 	}
 	a.remoteTabMu.Lock()
 	current := a.remoteTabs[tabID]
@@ -63,12 +99,21 @@ func (a *App) remoteTranscriptRead(tabID, route string, request any, destination
 	if !valid {
 		return false, fmt.Errorf("remote transcript response belongs to a replaced session")
 	}
-	switch response.StatusCode {
+	switch status {
 	case http.StatusNotFound, http.StatusMethodNotAllowed, http.StatusNotImplemented:
 		return false, nil
 	case http.StatusOK:
 	default:
-		return false, fmt.Errorf("remote transcript read failed (HTTP %d)", response.StatusCode)
+		// A Serve can advertise the transcript routes while its selected
+		// controller cannot restore the projection sidecar (for example, after a
+		// newer TUI wrote the session event schema). Negotiate down to /history
+		// instead of trapping the whole remote surface behind a retryable 409.
+		// Other conflicts, especially a session-path mismatch, remain fatal.
+		if status == http.StatusConflict &&
+			strings.HasPrefix(strings.TrimSpace(string(body)), "transcript projection is unavailable") {
+			return false, nil
+		}
+		return false, fmt.Errorf("remote transcript read failed (HTTP %d)", status)
 	}
 	// Old Serve builds may route an unknown GET to their HTML index. Only
 	// explicit protocol data enables the new projection; versions are not guessed.

@@ -201,6 +201,23 @@ ok(railItems().length === 3, "stepper rail lists all three steps");
 ok(railItems()[0]?.className.includes("--current") === true, "step 1 is current on open");
 ok(railItems().every((item) => !item.className.includes("--done")), "no step is done on open");
 ok(document.querySelectorAll(".remote-wizard__seg").length === 3, "auth, download, and credential mode use segmented sliders");
+for (const group of document.querySelectorAll<HTMLElement>(".remote-wizard__seg")) {
+  const choices = [...group.querySelectorAll<HTMLButtonElement>("button")];
+  const selected = choices.filter(button => button.getAttribute("aria-pressed") === "true");
+  ok(selected.length === 1 && selected[0].dataset.selected === "true", "each initial choice has accessible and styled selection");
+  ok(group.classList.contains("settings-options"), "wizard uses the shared selection stylesheet");
+}
+const initialFocus = document.activeElement as HTMLElement;
+const authChoices = [...document.querySelectorAll<HTMLButtonElement>(".remote-wizard__seg") [0].querySelectorAll("button")];
+await act(async () => {
+  authChoices[0].focus();
+  authChoices[0].dispatchEvent(new KeyboardEvent("keydown", { key: "ArrowRight", bubbles: true }));
+});
+ok(authChoices[1].getAttribute("aria-pressed") === "true" && authChoices[1].dataset.selected === "true", "keyboard selection updates the auth highlight");
+ok(authChoices[0].dataset.selected === "false", "previous auth choice loses its highlight");
+await act(async () => { authChoices[0].click(); });
+initialFocus.focus();
+
 const hostInput = document.querySelector<HTMLInputElement>(".remote-wizard__suggest input");
 ok(Boolean(hostInput), "config step shows the host input");
 ok(
@@ -290,6 +307,12 @@ ok(!document.querySelector(".remote-wizard__suggest-list"), "picking a suggestio
 ok(document.activeElement === hostInput, "picking a suggestion restores focus to the host input");
 const keyInput = [...document.querySelectorAll<HTMLInputElement>("input")].find((i) => i.value.includes("id_ed25519"));
 ok(Boolean(keyInput), "saved key auth switches the form to key mode with the identity file");
+const installChoice = () => document.querySelector<HTMLButtonElement>('.remote-wizard__install [aria-pressed="true"]');
+ok(installChoice()?.textContent?.trim() === "Automatic", "saved auto install policy remains selected");
+await act(async () => { buttonByText("Use installed CLI")?.click(); });
+ok(installChoice()?.textContent?.trim() === "Use installed CLI", "never policy is visible and selectable");
+await act(async () => { buttonByText("Automatic")?.click(); });
+
 await act(async () => {
   document.querySelector<HTMLButtonElement>(".remote-wizard__pick-btn")?.click();
   await flush();
@@ -533,7 +556,7 @@ await act(async () => {
     localProxy?.click();
     await Promise.resolve();
   });
-  ok(localProxy?.className.includes("--active") === true, "local-proxy segment highlights when selected");
+  ok(localProxy?.getAttribute("aria-pressed") === "true" && localProxy?.dataset.selected === "true", "local-proxy segment highlights when selected");
 }
 await act(async () => {
   buttonByText("Next")?.click();

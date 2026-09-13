@@ -166,7 +166,8 @@ func TestEnsureServeReusesLiveProcess(t *testing.T) {
 	if err := os.MkdirAll(paths.Dir, 0o755); err != nil {
 		t.Fatal(err)
 	}
-	st := ServeState{PID: 777, Addr: "127.0.0.1:5000", Workspace: root, ServeCaps: ServeCapsToken, TokenFile: paths.TokenFile}
+	// A previously saved connection must retain its reuse path across desktop updates.
+	st := ServeState{PID: 777, Addr: "127.0.0.1:5000", Workspace: root, ServeCaps: "reasonix-serve-caps-20260826a", TokenFile: paths.TokenFile}
 	data, _ := MarshalState(st)
 	if err := os.WriteFile(paths.StateJSON, data, 0o600); err != nil {
 		t.Fatal(err)

@@ -104,6 +104,11 @@ export function buildSessionStatusBannerProps(input: {
   return {
     t: input.t,
     takenOver: Boolean(input.activeTab?.takenOver),
+    reclaimBlocked: Boolean(input.activeTab?.reclaimBlocked),
+    reclaimSessionPath: input.activeTab?.sessionPath ?? "",
+	holderPid: input.activeTab?.holderPid,
+	holderHost: input.activeTab?.holderHost,
+	holderKind: input.activeTab?.holderKind,
     reclaimTabId: input.activeTab?.id ?? "",
     reclaimBusyTabId: shell.reclaimBusyTab,
     onReclaim: banners.reclaimSession,

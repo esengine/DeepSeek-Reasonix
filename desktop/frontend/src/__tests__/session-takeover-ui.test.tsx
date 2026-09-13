@@ -64,8 +64,8 @@ if (!host) throw new Error("missing root");
 const root = createRoot(host);
 const reclaimed: string[] = [];
 const flush = () => new Promise((resolve) => setTimeout(resolve, 20));
-const renderBanner = (tabId: string, busyTabId: string | null = null) => act(async () => {
-  root.render(<LocaleProvider><RemoteReclaimBanner tabId={tabId} busyTabId={busyTabId} onReclaim={(id) => reclaimed.push(id)} /></LocaleProvider>);
+const renderBanner = (tabId: string, busyTabId: string | null = null, reclaimBlocked = false) => act(async () => {
+  root.render(<LocaleProvider><RemoteReclaimBanner tabId={tabId} busyTabId={busyTabId} reclaimBlocked={reclaimBlocked} onReclaim={(id) => reclaimed.push(id)} /></LocaleProvider>);
 });
 
 await renderBanner("tab-a");
@@ -77,6 +77,12 @@ await act(async () => document.querySelector<HTMLButtonElement>(".banner button"
 ok(reclaimed.length === 1 && reclaimed[0] === "tab-b", "second click reclaims only the armed tab");
 await renderBanner("tab-b", "tab-a");
 ok(document.querySelector<HTMLButtonElement>(".banner button")?.disabled === true, "any reclaim in progress disables the active reclaim button");
+
+await renderBanner("tab-b", null, true);
+ok(document.querySelector(".banner button") === null, "unregistered writer does not offer a nonfunctional reclaim action");
+ok(document.querySelector(".banner__msg")?.textContent?.includes("has not connected session sharing") === true, "unregistered writer explains how to reopen the session");
+await renderBanner("tab-b", null, false);
+ok(document.querySelector(".banner button") !== null, "mirror registration restores the reclaim action");
 
 let closes = 0;
 await act(async () => {

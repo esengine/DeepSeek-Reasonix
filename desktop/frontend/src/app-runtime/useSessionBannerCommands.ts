@@ -9,7 +9,11 @@ export type ConfigWarningsReload = (warnings: string[], revision: number) => voi
  * release-notes link. Banner state (busy tab, dialog, provider gate) lives on
  * the overlay store.
  */
-export function useSessionBannerCommands(options: { remote: boolean; reloadConfigWarnings: ConfigWarningsReload }) {
+export function useSessionBannerCommands(options: {
+	remote: boolean;
+	reloadConfigWarnings: ConfigWarningsReload;
+	showError: (message: string) => void;
+}) {
   const reclaimBusyTab = useOverlayStore((state) => state.reclaimBusyTab);
   const setReclaimBusyTab = useOverlayStore((state) => state.setReclaimBusyTab);
   const setTakeoverDialogTab = useOverlayStore((state) => state.setTakeoverDialogTab);
@@ -18,7 +22,7 @@ export function useSessionBannerCommands(options: { remote: boolean; reloadConfi
     if (reclaimBusyTab) return;
     setReclaimBusyTab(tabId);
     (options.remote ? app.ReclaimRemoteTabSession(tabId) : app.TakeoverSession(tabId, "wait"))
-      .catch((error) => console.warn("[takeover] reclaim failed", error))
+	  .catch((error) => options.showError(error instanceof Error ? error.message : String(error)))
       .finally(() => setReclaimBusyTab(null));
   });
 

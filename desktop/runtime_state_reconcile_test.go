@@ -104,6 +104,22 @@ func TestRemoteRuntimeLegacyRecoveryConfirmsOnlySelectedSession(t *testing.T) {
 	}
 }
 
+func TestRemoteTakeoverDoesNotMasqueradeAsConnectionFailure(t *testing.T) {
+	isolateDesktopUserDirs(t)
+	a, tab := remoteRuntimeTestApp(nil)
+	current := remoteRuntimeTestSnapshot("writer", 2, "idle")
+	background := remoteRuntimeTestSnapshot("writer", 1, "idle")
+	acceptRemoteRuntimeStateLocked(tab, runtimeRemoteTestPath, current, true)
+	acceptRemoteRuntimeStateLocked(tab, "/sessions/background.jsonl", background, true)
+	tab.session.takenOver = true
+
+	for _, session := range a.GetRuntimeStateSnapshot().Sessions {
+		if session.Freshness != "synced" {
+			t.Fatalf("takeover marked %q as disconnected: %+v", session.SessionPath, session)
+		}
+	}
+}
+
 func TestRuntimeProjectionDoesNotReadPreviewFiles(t *testing.T) {
 	isolateDesktopUserDirs(t)
 	dir := t.TempDir()
