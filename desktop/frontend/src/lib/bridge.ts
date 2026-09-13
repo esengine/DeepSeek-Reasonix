@@ -5059,7 +5059,6 @@ function makeMockApp(): AppBindings {
     async SetTrayLocale(_locale: "en" | "zh" | "zh-TW" | "es") {},
     async SetAutoApproveTools(_on: boolean) {
       await this.SetToolApprovalMode("workspace-write");
->>>>>>> 853f85cd0 (feat(desktop): ship the Spanish UI dictionary and wire the es locale)
     },
     async SetBypass(on: boolean) {
       await this.SetAutoApproveTools(on);
