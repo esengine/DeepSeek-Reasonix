@@ -161,8 +161,8 @@
               "zh": "目标生命周期对齐"
             },
             "body": {
-              "en": "Goal mode now uses a versioned lifecycle service with explicit CAS-checked transitions.",
-              "zh": "目标模式现在使用带版本的生命周期服务，并具有显式的 CAS 检查转换。"
+            "en": "Goal state changes now reject stale actions, helping preserve user pauses and prevent overlapping continuation rounds.",
+            "zh": "目标状态变更现在会拒绝过期操作，保留用户暂停状态，并防止多个续跑轮次重叠。"
             },
             "refs": [
               10247
@@ -186,6 +186,18 @@
           }
         ],
         "fixed": [
+          {
+            "targets": ["desktop"],
+            "title": {
+              "en": "Portable package first launch",
+              "zh": "修复便携包首次启动"
+            },
+            "body": {
+              "en": "The first-run migrator now finds the CLI under its portable-package filename.",
+              "zh": "首次启动迁移程序现在能按便携包内的正确文件名找到 CLI。"
+            },
+            "refs": [10214]
+          },
           {
             "targets": [
               "desktop",
@@ -260,8 +272,8 @@
               "zh": "Linux 包权限"
             },
             "body": {
-              "en": "Linux packages now install a world-readable app directory.",
-              "zh": "Linux 包现在安装世界可读的应用目录。"
+              "en": "Linux packages now let normal users read and enter the application directory.",
+              "zh": "修复 Linux 安装包的应用目录权限，普通用户可以正常读取并进入该目录。"
             },
             "refs": [
               10213
@@ -288,6 +300,19 @@
       "upgrade": [
         {
           "level": "warning",
+          "targets": ["desktop", "cli"],
+          "title": {
+            "en": "Session migration and downgrades",
+            "zh": "会话迁移与降级说明"
+          },
+          "body": {
+            "en": "Existing sessions migrate into a separate v4 directory when continued; their original files remain unchanged. Older versions cannot read new v4 history, so update Desktop and CLI together. Browsing or migrating a session does not automatically resume its Goal or restore approvals.",
+            "zh": "继续旧会话时会迁移到独立的 v4 目录，原始文件保持不变。旧版本无法读取新增的 v4 历史，请同步更新桌面端和 CLI。浏览或迁移会话不会自动续跑目标，也不会恢复执行批准。"
+          },
+          "refs": [10257]
+        },
+        {
+          "level": "warning",
           "targets": [
             "desktop"
           ],
@@ -304,7 +329,21 @@
           ]
         }
       ],
-      "risks": [],
+      "risks": [
+        {
+          "level": "warning",
+          "targets": ["desktop", "cli"],
+          "title": {
+            "en": "First index build for very large sessions",
+            "zh": "超大会话首次建立索引需要时间"
+          },
+          "body": {
+            "en": "The reference 1 GiB history test took about 115 seconds to build its first index. Index construction is cancellable; this measurement is not a session size limit.",
+            "zh": "参考测试中，1 GiB 历史的首次索引构建耗时约 115 秒。构建可以取消，该测量值不代表会话容量上限。"
+          },
+          "refs": [10257]
+        }
+      ],
       "contributors": [
         "SivanCola",
         "github-actions[bot]"
