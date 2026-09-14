@@ -209,6 +209,16 @@ reasonix remote fs put ./patch.diff gpu-box:'~/projects/app/patch.diff'
 二进制是否可用由能力探测决定而非版本号：缺少所需 serve 能力的旧二进制
 会被当作缺失并升级。`serve_install = "never"` 禁止任何安装。
 
+**版本差异与手动更新**：复用以能力探针为准，健康的 serve 会一直停留在
+安装时的 release，直到被显式替换。桌面端会显示记录在案的 serve 版本；
+当它落后于桌面端时，远程会话内会出现横幅，提供**更新**或**忽略**（按
+serve 版本记忆，serve 被替换后重新提示），右侧停靠栏远程面板的 server
+标签页也显示版本并提供同样的更新入口。更新会停驻会话标签页、停止
+serve，并按桌面端的精确 release 重跑安装阶梯——先同平台上传，再官方
+release 下载，最后固定到该版本的 `npm`（而非最新版）——并在重启前校验
+装到的版本。更新会中断进行中的任务（横幅需第二次点击确认）；更新失败
+时会重启原有 serve 并重新挂回标签页，工作区继续以旧版本可用。
+
 **远端状态文件**（远端 `~/.reasonix/remote/`）：`serve-<slug>.json`（pid、
 绑定的回环地址、工作区）、`serve-<slug>.token`（0600）、`serve-<slug>.port`、
 `serve-<slug>.pid`、`serve-<slug>.log`。
@@ -267,6 +277,9 @@ fragment 中，不会随请求进入服务器日志；旧版 serve 自动回退 
   （指明 `known_hosts` 文件与行号）、接管收回横幅。
 - **Web 窗口**：独立子进程承载 serve 的 Web UI；登录票据写入一次性 0600
   文件（2 分钟有效），不进 argv；每个主机单实例。
+- **Serve 更新**：当远端 serve 落后于桌面端时，会话横幅与远程面板的
+  server 标签页提供确认后的一键更新，目标为桌面端的精确 release
+  （见"远端 serve 进程"）。
 
 ### 界面示例
 

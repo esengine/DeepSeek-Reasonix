@@ -105,6 +105,9 @@ export function buildSessionStatusBannerProps(input: {
     t: input.t,
     takenOver: Boolean(input.activeTab?.takenOver),
     reclaimTabId: input.activeTab?.id ?? "",
+    serveUpdate: input.activeTab?.remote
+      ? { hostId: input.activeTab.remote.hostId, workspace: input.activeTab.remote.workspace }
+      : null,
     reclaimBusyTabId: shell.reclaimBusyTab,
     onReclaim: banners.reclaimSession,
     leaseBlocked: input.leaseBlocked,

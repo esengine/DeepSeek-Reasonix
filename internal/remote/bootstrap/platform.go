@@ -2,6 +2,7 @@ package bootstrap
 
 import (
 	"fmt"
+	"strconv"
 	"strings"
 )
 
@@ -66,11 +67,29 @@ func looksLikeSemver(v string) bool {
 }
 
 // CompareVersions returns -1, 0, or 1 comparing dotted numeric versions.
-// Pre-release suffixes (after '-') are ignored for ordering. Non-numeric or
-// missing segments compare as 0.
+// Numeric segments compare numerically; when they are equal, a version
+// without a pre-release suffix outranks one with it, and pre-release
+// identifiers compare per semver (numeric identifiers compare numerically
+// and rank below alphanumeric ones, which compare lexically). Missing
+// segments compare as 0.
 func CompareVersions(a, b string) int {
-	as := versionSegments(a)
-	bs := versionSegments(b)
+	if c := compareVersionSegments(a, b); c != 0 {
+		return c
+	}
+	ap, bp := prereleaseOf(a), prereleaseOf(b)
+	switch {
+	case ap == "" && bp == "":
+		return 0
+	case ap == "":
+		return 1
+	case bp == "":
+		return -1
+	}
+	return comparePrerelease(ap, bp)
+}
+
+func compareVersionSegments(a, b string) int {
+	as, bs := versionSegments(a), versionSegments(b)
 	for i := 0; i < len(as) || i < len(bs); i++ {
 		var av, bv int
 		if i < len(as) {
@@ -87,6 +106,63 @@ func CompareVersions(a, b string) int {
 		}
 	}
 	return 0
+}
+
+func prereleaseOf(v string) string {
+	if _, suffix, ok := strings.Cut(v, "-"); ok {
+		return suffix
+	}
+	return ""
+}
+
+func comparePrerelease(a, b string) int {
+	as := strings.Split(a, ".")
+	bs := strings.Split(b, ".")
+	for i := 0; i < len(as) || i < len(bs); i++ {
+		if i >= len(as) {
+			return -1
+		}
+		if i >= len(bs) {
+			return 1
+		}
+		if c := comparePrereleaseIdent(as[i], bs[i]); c != 0 {
+			return c
+		}
+	}
+	return 0
+}
+
+func comparePrereleaseIdent(a, b string) int {
+	an, bn := numericIdent(a), numericIdent(b)
+	switch {
+	case an && bn:
+		ai, _ := strconv.Atoi(a)
+		bi, _ := strconv.Atoi(b)
+		switch {
+		case ai < bi:
+			return -1
+		case ai > bi:
+			return 1
+		}
+		return 0
+	case an:
+		return -1
+	case bn:
+		return 1
+	}
+	return strings.Compare(a, b)
+}
+
+func numericIdent(s string) bool {
+	if s == "" {
+		return false
+	}
+	for _, r := range s {
+		if r < '0' || r > '9' {
+			return false
+		}
+	}
+	return true
 }
 
 func versionSegments(v string) []int {

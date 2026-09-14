@@ -4,6 +4,7 @@ import { useCallback, useEffect, useRef, useState, useSyncExternalStore, type Re
 
 import { app } from "../lib/bridge";
 import { useT } from "../lib/i18n";
+import { InlineConfirmButton } from "./InlineConfirmButton";
 import { isRemoteDegradedWarning, isRemoteTerminalFailure, remoteConnectionErrorSummaryKey } from "../lib/remoteErrors";
 import { resolveRemoteWorkspace } from "../lib/remoteWorkspace";
 import { publishNavigationIntent } from "../lib/useNavigationIntentFence";
@@ -491,15 +492,27 @@ function RemoteServerTab({ hostId, connected, defaultWorkspace }: { hostId: stri
     }
   };
 
+  const update = async () => {
+    if (!statusWorkspace) return;
+    try {
+      setActionErr("");
+      await app.UpdateRemoteServer(hostId, statusWorkspace);
+    } catch (e) {
+      setActionErr(String(e));
+    }
+  };
+
   const state = server?.state ?? "stopped";
-  const busy = ["starting", "detect", "install", "waiting_lock", "launch", "health_check", "reuse"].includes(state);
+  const busy = ["starting", "detect", "install", "waiting_lock", "launch", "health_check", "updating", "reuse"].includes(state);
   const stateLabel = state === "ready"
     ? t("remote.server.state.ready")
-    : state === "error"
-      ? t("remote.server.state.error")
-      : busy
-        ? t("remote.server.state.starting")
-        : t("remote.server.state.stopped");
+    : state === "updating"
+      ? t("remote.server.state.updating")
+      : state === "error"
+        ? t("remote.server.state.error")
+        : busy
+          ? t("remote.server.state.starting")
+          : t("remote.server.state.stopped");
   const canManageServer = connected && Boolean(server?.workspace) && state !== "stopped";
   return (
     <div className="remote-server">
@@ -516,6 +529,7 @@ function RemoteServerTab({ hostId, connected, defaultWorkspace }: { hostId: stri
       </label>
       <div className="remote-server__status">
         {stateLabel}
+        {server?.serveVersion ? ` · v${server.serveVersion}` : ""}
         {server?.message ? ` — ${server.message}` : ""}
         {server?.error ? ` — ${server.error}` : ""}
         {actionErr ? ` — ${actionErr}` : ""}
@@ -527,6 +541,16 @@ function RemoteServerTab({ hostId, connected, defaultWorkspace }: { hostId: stri
         <button className="btn" disabled={!canManageServer || busy} onClick={() => void stop()}>
           {t("remote.server.stop")}
         </button>
+        {server?.updateAvailable === true && (
+          <InlineConfirmButton
+            label={t("remote.server.update")}
+            confirmLabel={t("remote.serveUpdate.confirm")}
+            cancelLabel={t("remote.serveUpdate.cancel")}
+            disabled={!canManageServer || busy}
+            danger
+            onConfirm={() => void update()}
+          />
+        )}
         <button className="btn btn--ghost" disabled={!canManageServer} onClick={() => void refreshLogs()}>
           {t("remote.server.logs")}
         </button>

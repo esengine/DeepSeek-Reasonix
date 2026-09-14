@@ -237,6 +237,20 @@ Whether a binary is usable is decided by a capability probe, not a version
 number: an older binary missing any required serve capability is treated as
 missing and upgraded. `serve_install = "never"` forbids all installation.
 
+**Version drift and manual updates**: reuse is capability-gated, so a healthy
+serve stays on the release it was installed with until it is explicitly
+replaced. The desktop surfaces the recorded serve version; when it is older
+than the desktop, a banner in the remote session offers **Update** or
+**Ignore** (remembered per serve version; a replaced serve re-prompts), and
+the right-dock Remote panel's server tab shows the version with the same
+update entry. Updating parks the session tabs, stops the serve, and reruns
+the install ladder for the desktop's exact release - same-platform upload
+first, then the official release download, then `npm` pinned to that version
+(instead of latest) - verifying the installed version before relaunching.
+In-flight turns are interrupted (the banner arms for a second confirming
+click); a failed update reattaches the tabs by relaunching the previous
+serve, so the workspace keeps working on the old version.
+
 **Remote state files** (remote `~/.reasonix/remote/`): `serve-<slug>.json`
 (pid, bound loopback address, workspace), `serve-<slug>.token` (0600),
 `serve-<slug>.port`, `serve-<slug>.pid`, `serve-<slug>.log`.
@@ -309,6 +323,10 @@ a **Take back** action:
 - **Web window**: a separate child process hosts the serve web UI; the login
   ticket is written to a one-shot 0600 file (valid for 2 minutes) instead of
   argv, one instance per host.
+- **Serve updates**: when the remote serve is older than the desktop, the
+  session banner and the Remote panel's server tab offer a confirmed
+  in-place update to the desktop's exact release (see "The remote serve
+  process").
 
 ### Desktop walkthrough
 

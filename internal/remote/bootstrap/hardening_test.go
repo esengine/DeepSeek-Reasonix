@@ -109,7 +109,7 @@ func TestAutoInstallPreservesNPMFailureWhenNoUploadBinaryExists(t *testing.T) {
 			return ok("")
 		}
 	})
-	_, _, err := ensureBinary(context.Background(), conn, conn.fs, Options{Install: InstallAuto}, root, "linux", "amd64", pathsFor(root, root))
+	_, _, _, err := ensureBinary(context.Background(), conn, conn.fs, Options{Install: InstallAuto}, root, "linux", "amd64", pathsFor(root, root))
 	if err == nil {
 		t.Fatal("auto install unexpectedly succeeded")
 	}
@@ -136,7 +136,7 @@ func TestAutoInstallDownloadsVerifiedCrossPlatformBinaryAfterNPMFailure(t *testi
 		}
 	})
 	fetched := false
-	bin, _, err := ensureBinary(context.Background(), conn, conn.fs, Options{
+	bin, _, _, err := ensureBinary(context.Background(), conn, conn.fs, Options{
 		Install: InstallAuto, LocalBinary: "/local/reasonix", LocalGOOS: "darwin", LocalGOARCH: "arm64",
 		ProductVersion: "v1.2.3",
 		FetchBinary: func(_ context.Context, version, goos, goarch string) ([]byte, error) {
@@ -178,7 +178,7 @@ func TestUploadInstallProbesFreshBinaryBeforeStalePathCandidate(t *testing.T) {
 			return ok("")
 		}
 	})
-	bin, _, err := ensureBinary(context.Background(), conn, conn.fs, Options{
+	bin, _, _, err := ensureBinary(context.Background(), conn, conn.fs, Options{
 		Install: InstallUpload, LocalBinary: local, LocalGOOS: "linux", LocalGOARCH: "amd64",
 	}, root, "linux", "amd64", pathsFor(root, root))
 	if err != nil {
@@ -207,7 +207,7 @@ func TestNPMInstallProbesFreshGlobalBinaryBeforeStalePathCandidate(t *testing.T)
 			return ok("")
 		}
 	})
-	bin, _, err := ensureBinary(context.Background(), conn, conn.fs, Options{Install: InstallNPM}, root, "linux", "amd64", pathsFor(root, root))
+	bin, _, _, err := ensureBinary(context.Background(), conn, conn.fs, Options{Install: InstallNPM}, root, "linux", "amd64", pathsFor(root, root))
 	if err != nil {
 		t.Fatal(err)
 	}

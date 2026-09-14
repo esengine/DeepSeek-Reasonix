@@ -1,6 +1,7 @@
 import { lazy, Suspense } from "react";
 import type { Translator } from "../lib/i18n";
 import { RemoteReclaimBanner } from "../components/RemoteReclaimBanner";
+import { RemoteServeUpdateBanner } from "../components/RemoteServeUpdateBanner";
 import { UpdateBanner } from "../components/UpdateBanner";
 
 const SessionTakeoverDialog = lazy(() => import("../components/SessionTakeoverDialog").then((module) => ({ default: module.SessionTakeoverDialog })));
@@ -11,6 +12,8 @@ export type SessionStatusBannersProps = {
   reclaimTabId: string;
   reclaimBusyTabId: string | null;
   onReclaim: (tabId: string) => void;
+  /** Active remote session's serve identity; null on local tabs. */
+  serveUpdate: { hostId: string; workspace: string } | null;
   leaseBlocked: { tabId: string; message: string } | null;
   startupError: string | undefined;
   takeoverDialogTabId: string | null;
@@ -38,6 +41,9 @@ export function SessionStatusBanners(props: SessionStatusBannersProps) {
           busyTabId={props.reclaimBusyTabId}
           onReclaim={props.onReclaim}
         />
+      ) : null}
+      {props.serveUpdate ? (
+        <RemoteServeUpdateBanner hostId={props.serveUpdate.hostId} workspace={props.serveUpdate.workspace} />
       ) : null}
       {props.leaseBlocked ? (
         <div className="banner banner--error">

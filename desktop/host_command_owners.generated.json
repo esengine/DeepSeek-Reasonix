@@ -8765,6 +8765,21 @@
       ]
     }
   },
+  "UpdateRemoteServer": {
+    "domain": "desktop/remote_server_update.go",
+    "owner": "App.UpdateRemoteServer",
+    "sources": [
+      "desktop/remote_server_update.go"
+    ],
+    "scope": {
+      "kind": "owner-inputs",
+      "resolver": "App.UpdateRemoteServer",
+      "inputs": [
+        "hostID",
+        "workspace"
+      ]
+    }
+  },
   "UpdateSubagentProfile": {
     "domain": "desktop/subagents_app.go",
     "owner": "App.UpdateSubagentProfile",

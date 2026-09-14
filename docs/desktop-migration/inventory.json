@@ -157,7 +157,7 @@
       "kind": "command",
       "name": "AddRemoteForward",
       "detail": "(hostID string, in RemoteForwardInput) (RemoteForwardView, error)",
-      "location": "desktop/remote_app.go:782",
+      "location": "desktop/remote_app.go:787",
       "class": "keep-business",
       "owner": "hostrpc desktop/invoke"
     },
@@ -165,7 +165,7 @@
       "kind": "command",
       "name": "AddRemoteHost",
       "detail": "(in RemoteHostInput) (RemoteHostView, error)",
-      "location": "desktop/remote_app.go:309",
+      "location": "desktop/remote_app.go:314",
       "class": "keep-business",
       "owner": "hostrpc desktop/invoke"
     },
@@ -717,7 +717,7 @@
       "kind": "command",
       "name": "ConfirmRemoteHostKey",
       "detail": "(hostID string, accept bool) error",
-      "location": "desktop/remote_app.go:422",
+      "location": "desktop/remote_app.go:427",
       "class": "keep-business",
       "owner": "hostrpc desktop/invoke"
     },
@@ -725,7 +725,7 @@
       "kind": "command",
       "name": "ConfirmRemoteSecret",
       "detail": "(hostID string, promptID string, secret string, accept bool) error",
-      "location": "desktop/remote_app.go:433",
+      "location": "desktop/remote_app.go:438",
       "class": "keep-business",
       "owner": "hostrpc desktop/invoke"
     },
@@ -741,7 +741,7 @@
       "kind": "command",
       "name": "ConnectRemoteHost",
       "detail": "(id string) error",
-      "location": "desktop/remote_app.go:351",
+      "location": "desktop/remote_app.go:356",
       "class": "keep-business",
       "owner": "hostrpc desktop/invoke"
     },
@@ -869,7 +869,7 @@
       "kind": "command",
       "name": "DeleteRemotePath",
       "detail": "(hostID string, path string, recursive bool) error",
-      "location": "desktop/remote_app.go:766",
+      "location": "desktop/remote_app.go:771",
       "class": "keep-business",
       "owner": "hostrpc desktop/invoke"
     },
@@ -949,7 +949,7 @@
       "kind": "command",
       "name": "DisconnectRemoteHost",
       "detail": "(id string) error",
-      "location": "desktop/remote_app.go:396",
+      "location": "desktop/remote_app.go:401",
       "class": "keep-business",
       "owner": "hostrpc desktop/invoke"
     },
@@ -1701,7 +1701,7 @@
       "kind": "command",
       "name": "ListRemoteDir",
       "detail": "(hostID string, path string) ([]RemoteDirEntry, error)",
-      "location": "desktop/remote_app.go:441",
+      "location": "desktop/remote_app.go:446",
       "class": "keep-business",
       "owner": "hostrpc desktop/invoke"
     },
@@ -1989,7 +1989,7 @@
       "kind": "command",
       "name": "MkdirRemote",
       "detail": "(hostID string, path string) error",
-      "location": "desktop/remote_app.go:750",
+      "location": "desktop/remote_app.go:755",
       "class": "keep-business",
       "owner": "hostrpc desktop/invoke"
     },
@@ -2125,7 +2125,7 @@
       "kind": "command",
       "name": "OpenRemoteWorkspace",
       "detail": "(hostID string, workspace string) error",
-      "location": "desktop/remote_app.go:811",
+      "location": "desktop/remote_app.go:816",
       "class": "keep-business",
       "owner": "hostrpc desktop/invoke"
     },
@@ -2421,7 +2421,7 @@
       "kind": "command",
       "name": "ReadRemoteFile",
       "detail": "(hostID string, path string) (RemoteFilePreview, error)",
-      "location": "desktop/remote_app.go:449",
+      "location": "desktop/remote_app.go:454",
       "class": "keep-business",
       "owner": "hostrpc desktop/invoke"
     },
@@ -2573,7 +2573,7 @@
       "kind": "command",
       "name": "RemoteConnectionStatuses",
       "detail": "() []RemoteConnectionStatusView",
-      "location": "desktop/remote_app.go:414",
+      "location": "desktop/remote_app.go:419",
       "class": "keep-business",
       "owner": "hostrpc desktop/invoke"
     },
@@ -2581,7 +2581,7 @@
       "kind": "command",
       "name": "RemoteForwards",
       "detail": "(hostID string) ([]RemoteForwardView, error)",
-      "location": "desktop/remote_app.go:774",
+      "location": "desktop/remote_app.go:779",
       "class": "keep-business",
       "owner": "hostrpc desktop/invoke"
     },
@@ -2589,7 +2589,7 @@
       "kind": "command",
       "name": "RemoteHosts",
       "detail": "() ([]RemoteHostView, error)",
-      "location": "desktop/remote_app.go:301",
+      "location": "desktop/remote_app.go:306",
       "class": "keep-business",
       "owner": "hostrpc desktop/invoke"
     },
@@ -2621,7 +2621,7 @@
       "kind": "command",
       "name": "RemoteServerLogs",
       "detail": "(hostID string, workspace string, tailLines int) (string, error)",
-      "location": "desktop/remote_app.go:857",
+      "location": "desktop/remote_app.go:862",
       "class": "keep-business",
       "owner": "hostrpc desktop/invoke"
     },
@@ -2629,7 +2629,7 @@
       "kind": "command",
       "name": "RemoteServerStatus",
       "detail": "(hostID string, workspace string) (RemoteServerView, error)",
-      "location": "desktop/remote_app.go:849",
+      "location": "desktop/remote_app.go:854",
       "class": "keep-business",
       "owner": "hostrpc desktop/invoke"
     },
@@ -2765,7 +2765,7 @@
       "kind": "command",
       "name": "RemoveRemoteForward",
       "detail": "(hostID string, forwardID string) error",
-      "location": "desktop/remote_app.go:790",
+      "location": "desktop/remote_app.go:795",
       "class": "keep-business",
       "owner": "hostrpc desktop/invoke"
     },
@@ -2773,7 +2773,7 @@
       "kind": "command",
       "name": "RemoveRemoteHost",
       "detail": "(id string) error",
-      "location": "desktop/remote_app.go:325",
+      "location": "desktop/remote_app.go:330",
       "class": "keep-business",
       "owner": "hostrpc desktop/invoke"
     },
@@ -2821,7 +2821,7 @@
       "kind": "command",
       "name": "RenameRemotePath",
       "detail": "(hostID string, oldPath string, newPath string) error",
-      "location": "desktop/remote_app.go:758",
+      "location": "desktop/remote_app.go:763",
       "class": "keep-business",
       "owner": "hostrpc desktop/invoke"
     },
@@ -3053,7 +3053,7 @@
       "kind": "command",
       "name": "ResolveRemotePresentedPathForTab",
       "detail": "(tabID string, hostID string, toolCallID string, remotePath string) (string, error)",
-      "location": "desktop/remote_app.go:487",
+      "location": "desktop/remote_app.go:492",
       "class": "keep-business",
       "owner": "hostrpc desktop/invoke"
     },
@@ -3069,7 +3069,7 @@
       "kind": "command",
       "name": "ResolveRemoteWorkspacePathForTab",
       "detail": "(tabID string, hostID string, toolCallID string, remotePath string) (string, error)",
-      "location": "desktop/remote_app.go:508",
+      "location": "desktop/remote_app.go:513",
       "class": "keep-business",
       "owner": "hostrpc desktop/invoke"
     },
@@ -3453,7 +3453,7 @@
       "kind": "command",
       "name": "SaveRemoteFileAs",
       "detail": "(hostID string, remotePath string) (string, error)",
-      "location": "desktop/remote_app.go:459",
+      "location": "desktop/remote_app.go:464",
       "class": "keep-business",
       "owner": "hostrpc desktop/invoke"
     },
@@ -3461,7 +3461,7 @@
       "kind": "command",
       "name": "SaveRemotePresentedFileAs",
       "detail": "(tabID string, hostID string, toolCallID string, remotePath string) (string, error)",
-      "location": "desktop/remote_app.go:466",
+      "location": "desktop/remote_app.go:471",
       "class": "keep-business",
       "owner": "hostrpc desktop/invoke"
     },
@@ -3525,7 +3525,7 @@
       "kind": "command",
       "name": "ScanSSHConfig",
       "detail": "() ([]RemoteHostInput, error)",
-      "location": "desktop/remote_app.go:343",
+      "location": "desktop/remote_app.go:348",
       "class": "keep-business",
       "owner": "hostrpc desktop/invoke"
     },
@@ -4837,7 +4837,15 @@
       "kind": "command",
       "name": "UpdateRemoteHost",
       "detail": "(id string, in RemoteHostInput) (RemoteHostView, error)",
-      "location": "desktop/remote_app.go:317",
+      "location": "desktop/remote_app.go:322",
+      "class": "keep-business",
+      "owner": "hostrpc desktop/invoke"
+    },
+    {
+      "kind": "command",
+      "name": "UpdateRemoteServer",
+      "detail": "(hostID string, workspace string) error",
+      "location": "desktop/remote_server_update.go:6",
       "class": "keep-business",
       "owner": "hostrpc desktop/invoke"
     },
@@ -4949,7 +4957,7 @@
       "kind": "command",
       "name": "WriteRemoteFile",
       "detail": "(hostID string, path string, body string, expectMtimeUnix int64) (RemoteWriteResult, error)",
-      "location": "desktop/remote_app.go:742",
+      "location": "desktop/remote_app.go:747",
       "class": "keep-business",
       "owner": "hostrpc desktop/invoke"
     },
@@ -5013,21 +5021,21 @@
     {
       "kind": "event",
       "name": "remote:forwards",
-      "location": "desktop/remote_app.go:296",
+      "location": "desktop/remote_app.go:301",
       "class": "keep-business",
       "owner": "desktop/event frame (seq + generation), same payload"
     },
     {
       "kind": "event",
       "name": "remote:server",
-      "location": "desktop/remote_app.go:294",
+      "location": "desktop/remote_app.go:299",
       "class": "keep-business",
       "owner": "desktop/event frame (seq + generation), same payload"
     },
     {
       "kind": "event",
       "name": "remote:status",
-      "location": "desktop/remote_app.go:231",
+      "location": "desktop/remote_app.go:236",
       "class": "keep-business",
       "owner": "desktop/event frame (seq + generation), same payload"
     },

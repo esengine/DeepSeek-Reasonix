@@ -9,10 +9,8 @@ import (
 	"net"
 	"net/http"
 	"os"
-	"os/exec"
 	"path"
 	"path/filepath"
-	"runtime"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -144,13 +142,15 @@ type RemoteForwardView struct {
 }
 
 type RemoteServerView struct {
-	HostID     string `json:"hostId"`
-	Workspace  string `json:"workspace"`
-	State      string `json:"state"`
-	Message    string `json:"message,omitempty"`
-	LocalURL   string `json:"localUrl,omitempty"`
-	InstanceID string `json:"instanceId,omitempty"`
-	Error      string `json:"error,omitempty"`
+	HostID          string `json:"hostId"`
+	Workspace       string `json:"workspace"`
+	State           string `json:"state"`
+	Message         string `json:"message,omitempty"`
+	LocalURL        string `json:"localUrl,omitempty"`
+	InstanceID      string `json:"instanceId,omitempty"`
+	ServeVersion    string `json:"serveVersion,omitempty"`
+	UpdateAvailable bool   `json:"updateAvailable,omitempty"`
+	Error           string `json:"error,omitempty"`
 }
 
 // ── Kernel seam ──
@@ -183,6 +183,11 @@ type remoteKernel interface {
 	RemoveForward(hostID, forwardID string) error
 
 	EnsureServer(ctx context.Context, hostID, workspace string) (RemoteServerView, string, error)
+	// UpdateServer stops the serve and re-ensures it with ForceUpgrade; the
+	// caller must warn that in-flight turns are interrupted.
+	UpdateServer(ctx context.Context, hostID, workspace string) (RemoteServerView, string, error)
+	// HostConnected reports a live managed connection for the host.
+	HostConnected(hostID string) bool
 	SwitchCredentialProxyModel(ctx context.Context, hostID, workspace, currentRef, nextRef, expectedPath string) error
 	StopServer(hostID, workspace string) error
 	ServerStatus(hostID, workspace string) RemoteServerView
@@ -1696,36 +1701,6 @@ func hasUsableServeForward(entries []forward.Entry, name, targetAddr, localURL s
 		}
 	}
 	return false
-}
-
-func desktopCLIBinaryPath() string {
-	packagedName, commandName := desktopCLIBinaryNames(runtime.GOOS)
-	candidates := []string{}
-	if exe, err := os.Executable(); err == nil {
-		dir := filepath.Dir(exe)
-		candidates = append(candidates, filepath.Join(dir, packagedName))
-	}
-	if found, err := exec.LookPath(commandName); err == nil {
-		candidates = append(candidates, found)
-	}
-	for _, candidate := range candidates {
-		st, err := os.Stat(candidate)
-		if err != nil || !st.Mode().IsRegular() {
-			continue
-		}
-		if runtime.GOOS != "windows" && st.Mode().Perm()&0o111 == 0 {
-			continue
-		}
-		return candidate
-	}
-	return ""
-}
-
-func desktopCLIBinaryNames(goos string) (packaged, command string) {
-	if goos == "windows" {
-		return "reasonix-cli.exe", "reasonix.exe"
-	}
-	return "reasonix", "reasonix"
 }
 
 func desktopNormalizeBind(bind string) string {

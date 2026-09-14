@@ -786,6 +786,7 @@ export interface AppBindings extends ToolRecoveryBindings, ModelSettingsBindings
   PickRemoteIdentityFile(): Promise<string>;
   CheckRemotePlatform(hostId: string): Promise<void>;
   StopRemoteServer(hostId: string, workspace: string): Promise<void>;
+  UpdateRemoteServer(hostId: string, workspace: string): Promise<void>;
   RemoteServerStatus(hostId: string, workspace: string): Promise<RemoteServerView>;
   RemoteServerLogs(hostId: string, workspace: string, tailLines: number): Promise<string>;
   RemoteLastWorkspace(hostId: string): Promise<string>;
@@ -806,7 +807,7 @@ export type _CheckGenToApp = AssertNever<Exclude<DesktopCommandName, keyof AppBi
 // Must match desktop/app.go's eventChannel constant.
 const EVENT_CHANNEL = "agent:event";
 
-function hostEvents(name: string, cb: (...args: unknown[]) => void): (() => void) | null {
+export function hostEvents(name: string, cb: (...args: unknown[]) => void): (() => void) | null {
   const host = desktopHost();
   return host.kind === "none" ? null : host.events.on(name, cb);
 }
@@ -822,52 +823,9 @@ export function onEvent(cb: (e: WireEvent) => void): () => void {
   return hostEvents(EVENT_CHANNEL, (payload) => cb(payload as WireEvent)) ?? mockSubscribe(cb);
 }
 
-export interface TerminalOutputEvent {
-  id: string;
-  data: string;
-}
-
-export interface TerminalExitEvent {
-  id: string;
-  exitCode: number;
-  removed?: boolean;
-}
-
-function terminalEventPayload<T>(payload: unknown): T | null {
-  if (!payload || typeof payload !== "object") return null;
-  return payload as T;
-}
-
-export function onTerminalOutput(cb: (event: TerminalOutputEvent) => void): () => void {
-  const off = hostEvents("terminal:output", (payload) => {
-    const event = terminalEventPayload<TerminalOutputEvent>(payload);
-    if (event?.id && typeof event.data === "string") cb(event);
-  });
-  if (off) return off;
-  mockTerminalOutputListeners.add(cb);
-  return () => mockTerminalOutputListeners.delete(cb);
-}
-
-export function onTerminalExit(cb: (event: TerminalExitEvent) => void): () => void {
-  const off = hostEvents("terminal:exit", (payload) => {
-    const event = terminalEventPayload<TerminalExitEvent>(payload);
-    if (event?.id && typeof event.exitCode === "number") cb(event);
-  });
-  if (off) return off;
-  mockTerminalExitListeners.add(cb);
-  return () => mockTerminalExitListeners.delete(cb);
-}
-
-const mockTerminalOutputListeners = new Set<(event: TerminalOutputEvent) => void>();
-const mockTerminalExitListeners = new Set<(event: TerminalExitEvent) => void>();
-
-export function __emitMockTerminalOutput(event: TerminalOutputEvent): void {
-  mockTerminalOutputListeners.forEach((listener) => listener(event));
-}
-
-export function __emitMockTerminalExit(event: TerminalExitEvent): void {
-  mockTerminalExitListeners.forEach((listener) => listener(event));
-}
+export { onTerminalOutput, onTerminalExit, __emitMockTerminalOutput, __emitMockTerminalExit } from "./bridgeTerminalEvents";
+export type { TerminalOutputEvent, TerminalExitEvent } from "./bridgeTerminalEvents";
+import { __emitMockTerminalOutput, __emitMockTerminalExit } from "./bridgeTerminalEvents";
 
 // onUpdaterProgress subscribes to the auto-updater's progress events (a separate
 // channel from the agent stream); returns an unsubscribe. Must match the event
@@ -5705,6 +5663,10 @@ function makeMockApp(): AppBindings {
     async CheckRemotePlatform() {},
     async StopRemoteServer(hostId, workspace) {
       __emitMockRemote("server", { hostId, workspace, state: "stopped" });
+    },
+    async UpdateRemoteServer(hostId, workspace) {
+      __emitMockRemote("server", { hostId, workspace, state: "updating", message: "stopping serve" });
+      __emitMockRemote("server", { hostId, workspace, state: "ready", serveVersion: "9.9.9" });
     },
     async RemoteServerStatus(hostId, workspace) {
       return { hostId, workspace, state: "stopped" };

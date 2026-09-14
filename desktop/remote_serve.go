@@ -148,6 +148,13 @@ func (m *desktopRemoteManager) EnsureServer(ctx context.Context, hostID, workspa
 	// the state and launch duplicate/orphan serve processes.
 	mh.serveMu.Lock()
 	defer mh.serveMu.Unlock()
+	return m.ensureServerLocked(ctx, mh, hostID, workspace, false)
+}
+
+// ensureServerLocked runs the ensure path with mh.serveMu held so
+// UpdateServer can stop and replace a serve atomically; forceUpgrade skips
+// fast-reuse and the bootstrap locate fast-path.
+func (m *desktopRemoteManager) ensureServerLocked(ctx context.Context, mh *managedHost, hostID, workspace string, forceUpgrade bool) (RemoteServerView, string, error) {
 	m.mu.Lock()
 	if m.hosts[hostID] != mh {
 		m.mu.Unlock()
@@ -161,9 +168,11 @@ func (m *desktopRemoteManager) EnsureServer(ctx context.Context, hostID, workspa
 	}
 	m.mu.Unlock()
 	c := mh.client
-	if m.readyServeReusable(ctx, c, mh, hostID, workspace, previousServer, previousToken, previousAddr) {
-		m.startCredentialWatchdogIfEnabled(mh, hostID, workspace)
-		return previousServer, previousToken, nil
+	if !forceUpgrade {
+		if m.readyServeReusable(ctx, c, mh, hostID, workspace, previousServer, previousToken, previousAddr) {
+			m.startCredentialWatchdogIfEnabled(mh, hostID, workspace)
+			return previousServer, previousToken, nil
+		}
 	}
 	opCtx, cancel := managedOperationContext(ctx, mh)
 	defer cancel()
@@ -194,6 +203,7 @@ func (m *desktopRemoteManager) EnsureServer(ctx context.Context, hostID, workspa
 		ProductVersion:  version,
 		FetchBinary:     m.fetchRemoteBinary,
 		MinVersion:      bootstrap.MinServeVersion,
+		ForceUpgrade:    forceUpgrade,
 		CredentialProxy: credOpts,
 		BrowserBroker:   m.browserBrokerCallback(c, hostID, mh),
 		Progress: func(step, detail string) {
@@ -212,6 +222,8 @@ func (m *desktopRemoteManager) EnsureServer(ctx context.Context, hostID, workspa
 	if res.Reused && previousServer.State == "ready" && previousServer.Workspace == workspace &&
 		hasUsableServeForward(c.Forwards().List(), serveForwardName(workspace), res.State.Addr, previousServer.LocalURL) {
 		previousServer.InstanceID = remoteServeInstanceID(res.State)
+		previousServer.ServeVersion = res.State.Version
+		previousServer.UpdateAvailable = remoteServeUpdateAvailable(res.State.Version)
 		if !m.publishServerIfCurrent(hostID, mh, previousServer, res.Token, res.State.Addr) {
 			return RemoteServerView{}, "", fmt.Errorf("host %q connection was replaced", hostID)
 		}
@@ -236,7 +248,10 @@ func (m *desktopRemoteManager) EnsureServer(ctx context.Context, hostID, workspa
 		return view, "", ferr
 	}
 	localURL := fmt.Sprintf("http://%s/", bound)
-	view := RemoteServerView{HostID: hostID, Workspace: workspace, State: "ready", LocalURL: localURL, InstanceID: remoteServeInstanceID(res.State)}
+	view := RemoteServerView{
+		HostID: hostID, Workspace: workspace, State: "ready", LocalURL: localURL, InstanceID: remoteServeInstanceID(res.State),
+		ServeVersion: res.State.Version, UpdateAvailable: remoteServeUpdateAvailable(res.State.Version),
+	}
 	if !m.publishServerIfCurrent(hostID, mh, view, res.Token, res.State.Addr) {
 		_ = c.Forwards().Remove(serveForwardName(workspace))
 		return RemoteServerView{}, "", fmt.Errorf("host %q connection was replaced", hostID)

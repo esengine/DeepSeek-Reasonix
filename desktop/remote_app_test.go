@@ -155,6 +155,8 @@ type fakeRemoteKernel struct {
 	ensureToken       string
 	ensureErr         error
 	ensureCalls       int
+	updateCalls       int
+	hostDisconnected  bool
 	snapshotMiss      bool
 	switchProxyErr    error
 	switchProxyCalls  [][5]string
@@ -249,6 +251,11 @@ func (f *fakeRemoteKernel) EnsureServer(context.Context, string, string) (Remote
 	f.ensureCalls++
 	return f.ensureView, f.ensureToken, f.ensureErr
 }
+func (f *fakeRemoteKernel) UpdateServer(context.Context, string, string) (RemoteServerView, string, error) {
+	f.updateCalls++
+	return f.ensureView, f.ensureToken, f.ensureErr
+}
+func (f *fakeRemoteKernel) HostConnected(string) bool { return !f.hostDisconnected }
 func (f *fakeRemoteKernel) SwitchCredentialProxyModel(_ context.Context, hostID, workspace, currentRef, nextRef, expectedPath string) error {
 	f.switchProxyCalls = append(f.switchProxyCalls, [5]string{hostID, workspace, currentRef, nextRef, expectedPath})
 	return f.switchProxyErr

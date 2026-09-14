@@ -63,7 +63,7 @@ func TestCompareVersions(t *testing.T) {
 		{"1.10.0", "1.9.0", 1},
 		{"2.0.0", "1.99.99", 1},
 		{"1.9", "1.9.0", 0},
-		{"1.9.1-rc.1", "1.9.1", 0}, // pre-release ignored for ordering
+		{"1.9.1-rc.1", "1.9.1", -1}, // a release outranks its prereleases
 	}
 	for _, c := range cases {
 		if got := CompareVersions(c.a, c.b); got != c.want {

@@ -16204,6 +16204,32 @@
     },
     {
       "cancellation": "before-dispatch",
+      "domain": "desktop/remote_server_update.go",
+      "name": "UpdateRemoteServer",
+      "owner": "App.UpdateRemoteServer",
+      "params": [
+        {
+          "kind": "string"
+        },
+        {
+          "kind": "string"
+        }
+      ],
+      "returnsError": true,
+      "scope": {
+        "inputs": [
+          "hostID",
+          "workspace"
+        ],
+        "kind": "owner-inputs",
+        "resolver": "App.UpdateRemoteServer"
+      },
+      "sources": [
+        "desktop/remote_server_update.go"
+      ]
+    },
+    {
+      "cancellation": "before-dispatch",
       "domain": "desktop/subagents_app.go",
       "name": "UpdateSubagentProfile",
       "owner": "App.UpdateSubagentProfile",
@@ -30380,6 +30406,20 @@
           "optional": true,
           "type": {
             "kind": "string"
+          }
+        },
+        {
+          "name": "serveVersion",
+          "optional": true,
+          "type": {
+            "kind": "string"
+          }
+        },
+        {
+          "name": "updateAvailable",
+          "optional": true,
+          "type": {
+            "kind": "boolean"
           }
         },
         {

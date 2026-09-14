@@ -17,6 +17,7 @@ export type RemoteServerState =
   | "launch"
   | "health_check"
   | "ready"
+  | "updating"
   | "error"
   | "stopped"
   | "reuse";
@@ -212,6 +213,8 @@ export interface RemoteServerView {
   state: RemoteServerState;
   message?: string;
   localUrl?: string;
+  serveVersion?: string;
+  updateAvailable?: boolean;
   error?: string;
 }
 
