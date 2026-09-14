@@ -84,9 +84,9 @@ type editReplacementReceipt struct {
 // applyOldStringEdit is the shared edit_file/multi_edit/Preview contract. It
 // preserves the exact-match rule first, then falls back to a narrow fuzzy match
 // for the mismatches read_file commonly introduces or hides: trailing
-// whitespace, tab-vs-spaces indentation, and copied read_file line prefixes.
-// Non-replace_all edits still require exactly one match, including fuzzy
-// matches.
+// whitespace, tab-vs-spaces indentation, copied read_file line prefixes, and a
+// blank-line run reproduced at a different length. Non-replace_all edits still
+// require exactly one match, including fuzzy matches.
 func applyOldStringEdit(content, oldString, newString string, replaceAll bool) editApplyResult {
 	old, newStr := matchLineEndings(content, oldString, newString)
 	if replaceAll {
@@ -227,8 +227,13 @@ func fuzzyEditRanges(content, old string) []editRange {
 	}
 	contentLines := splitLineSegments(content)
 	oldLines := splitLineSegments(old)
-	if len(oldLines) == 0 || len(oldLines) > len(contentLines) {
+	if len(oldLines) == 0 {
 		return nil
+	}
+	if len(oldLines) > len(contentLines) {
+		// Equal-length window modes cannot match here, but a blank-line run
+		// reproduced longer than the file's still can.
+		return blankRunRanges(contentLines, oldLines)
 	}
 
 	oldHasReadPrefixes := allLinesHaveReadFilePrefix(oldLines)
@@ -264,7 +269,73 @@ func fuzzyEditRanges(content, old string) []editRange {
 			return ranges
 		}
 	}
-	return nil
+	return blankRunRanges(contentLines, oldLines)
+}
+
+// blankRunRanges matches old against content treating each run of blank lines as
+// a single unit, so a caller that reproduces one blank line where the file has
+// two still lands on the intended span. Non-blank lines keep the exact-match
+// rule (modulo trailing whitespace), and a missing blank line never matches a
+// present one: only a run's length is free, never its presence. This is a
+// standalone last resort, not a fuzzyMode: it deliberately does not also expand
+// tabs or strip read_file prefixes, so a span that drifted in two dimensions at
+// once still fails. The replacement comes from new_string, so an edit accepted
+// here writes the caller's blank-line spacing, not the file's.
+func blankRunRanges(contentLines, oldLines []lineSegment) []editRange {
+	c := blankRunTokens(contentLines)
+	o := blankRunTokens(oldLines)
+	if len(o) == 0 || len(o) > len(c) {
+		return nil
+	}
+	var ranges []editRange
+	for i := 0; i+len(o) <= len(c); {
+		if blankRunWindowMatches(c[i:i+len(o)], o) {
+			last := c[i+len(o)-1]
+			ranges = append(ranges, editRange{
+				start: c[i].start,
+				end:   fuzzyWindowEnd(last.lastLine, o[len(o)-1].lastLine),
+			})
+			i += len(o)
+			continue
+		}
+		i++
+	}
+	return ranges
+}
+
+func blankRunWindowMatches(window, old []blankRunToken) bool {
+	for i, tok := range window {
+		if tok.blank != old[i].blank || (!old[i].blank && tok.text != old[i].text) {
+			return false
+		}
+	}
+	return true
+}
+
+// blankRunToken is one non-blank line, or one whole run of consecutive blank
+// lines collapsed into a single token spanning the run.
+type blankRunToken struct {
+	text     string
+	blank    bool
+	start    int
+	lastLine lineSegment
+}
+
+func blankRunTokens(lines []lineSegment) []blankRunToken {
+	var out []blankRunToken
+	for _, line := range lines {
+		body := strings.TrimSuffix(line.raw, "\n")
+		if strings.TrimSpace(body) == "" {
+			if n := len(out); n > 0 && out[n-1].blank {
+				out[n-1].lastLine = line
+				continue
+			}
+			out = append(out, blankRunToken{blank: true, start: line.start, lastLine: line})
+			continue
+		}
+		out = append(out, blankRunToken{text: strings.TrimRight(body, " \t\r"), start: line.start, lastLine: line})
+	}
+	return out
 }
 
 func fuzzyWindowMatches(contentWindow, oldLines []lineSegment, normOld []string, mode fuzzyMode) bool {
