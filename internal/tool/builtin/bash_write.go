@@ -95,9 +95,6 @@ func (b bash) specForCall(ctx context.Context) sandbox.Spec {
 		spec.WriteRoots = nil
 		spec.MinimalWrites = true
 	case permissionpreset.WorkspaceWrite:
-		// Permission presets own the enforcement decision. A legacy
-		// [sandbox].bash="off" cannot silently turn workspace access into an
-		// unconfined shell.
 		spec.Mode = "enforce"
 		spec.ReadOnly = false
 		spec.MinimalWrites = true
@@ -105,6 +102,13 @@ func (b bash) specForCall(ctx context.Context) sandbox.Spec {
 			spec.WriteRoots = []string{b.workDir}
 		}
 	case permissionpreset.DangerFullAccess:
+		spec.Mode = "off"
+		spec.ReadOnly = false
+	}
+	// An explicit [sandbox].bash="off" disables OS enforcement for this session
+	// regardless of the permission preset. Under an outer sandbox
+	// (landrun/Landlock) bash must stay unconfined to remain effective.
+	if b.sb.Mode == "off" {
 		spec.Mode = "off"
 		spec.ReadOnly = false
 	}

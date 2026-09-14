@@ -204,3 +204,44 @@ func TestUnavailablePermissionBackendOnlyOffersFullAccess(t *testing.T) {
 		t.Fatalf("unavailable backend advertised active isolation: %+v", got)
 	}
 }
+
+// TestPermissionCapabilitiesSkipBackendProbeWhenBashOff proves a bash=off
+// session never queries (or executes) the sandbox backend when it builds its
+// permission snapshot — the probe must be gated on enforcement, not run for
+// every snapshot read.
+func TestPermissionCapabilitiesSkipBackendProbeWhenBashOff(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("windows keeps probing the AppContainer backend regardless of bash mode")
+	}
+	restore := sandboxAvailable
+	t.Cleanup(func() { sandboxAvailable = restore })
+	probed := false
+	sandboxAvailable = func() bool { probed = true; return false }
+
+	c := newOwnedTestController(t, Options{Policy: permission.New("allow", nil, nil, nil)})
+	c.PermissionSnapshot()
+	if probed {
+		t.Fatal("bash=off session probed the sandbox backend")
+	}
+}
+
+// TestPermissionCapabilitiesProbeBackendWhenBashEnforced is the counterpart:
+// when the session requests enforcement the probe still runs.
+func TestPermissionCapabilitiesProbeBackendWhenBashEnforced(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("windows probe path is unconditional")
+	}
+	restore := sandboxAvailable
+	t.Cleanup(func() { sandboxAvailable = restore })
+	probed := false
+	sandboxAvailable = func() bool { probed = true; return true }
+
+	c := newOwnedTestController(t, Options{Policy: permission.New("allow", nil, nil, nil), BashSandboxRequested: true})
+	got := c.PermissionSnapshot()
+	if !probed {
+		t.Fatal("bash=enforce session did not probe the sandbox backend")
+	}
+	if got.Capabilities.Enforcement != "full" {
+		t.Fatalf("enforcement = %q, want full", got.Capabilities.Enforcement)
+	}
+}

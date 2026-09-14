@@ -39,8 +39,19 @@ type PermissionSnapshot struct {
 	Capabilities  PermissionCapabilities `json:"capabilities"`
 }
 
-func platformPermissionCapabilities() PermissionCapabilities {
-	return permissionCapabilitiesForPlatform(runtime.GOOS, sandbox.Available(), sandbox.UnavailableMessage())
+// sandboxAvailable probes the platform sandbox backend. It is a package var so
+// tests can assert the probe is skipped (and never executes a backend binary)
+// for a bash=off session.
+var sandboxAvailable = sandbox.Available
+
+// platformPermissionCapabilities reports the backend's preset support, probing
+// it only when the session could use it. A bash=off session (Linux/macOS) never
+// queries the backend binary; Windows confines tools regardless, so it probes.
+func (c *Controller) platformPermissionCapabilities() PermissionCapabilities {
+	if c != nil && !c.writeAccess.bashSandboxRequested && runtime.GOOS != "windows" {
+		return permissionCapabilitiesForPlatform(runtime.GOOS, true, "")
+	}
+	return permissionCapabilitiesForPlatform(runtime.GOOS, sandboxAvailable(), sandbox.UnavailableMessage())
 }
 
 func permissionCapabilitiesForPlatform(goos string, available bool, unavailableReason string) PermissionCapabilities {
@@ -101,7 +112,7 @@ func (c *Controller) PermissionSnapshot() PermissionSnapshot {
 		SessionID: agent.BranchID(c.SessionPath()), Generation: c.runtimeGeneration,
 		Revision: c.permissionRevision.Load(), Preset: c.ToolApprovalMode(),
 		WorkspaceRoot: strings.TrimSpace(c.workspaceRoot), Grants: grants,
-		Capabilities: platformPermissionCapabilities(),
+		Capabilities: c.platformPermissionCapabilities(),
 	}
 }
 
@@ -129,7 +140,7 @@ func (c *Controller) SetPermissionPreset(preset string, expectedRevision uint64)
 	if !permissionpreset.Valid(raw) {
 		return c.PermissionSnapshot(), nil, fmt.Errorf("permission preset must be read-only, workspace-write, or danger-full-access")
 	}
-	capabilities := platformPermissionCapabilities()
+	capabilities := c.platformPermissionCapabilities()
 	if !slices.Contains(capabilities.SupportedPresets, raw) {
 		return c.PermissionSnapshot(), nil, fmt.Errorf("permission preset %q is unavailable: %s", raw, capabilities.UnavailableReason)
 	}
