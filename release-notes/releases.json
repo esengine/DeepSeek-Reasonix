@@ -197,7 +197,19 @@
             ]
           }
         ],
-        "fixed": [
+      "fixed": [
+        {
+          "targets": ["desktop", "cli"],
+          "title": {
+            "en": "Session shutdown and Windows recovery",
+            "zh": "修复会话关闭与 Windows 恢复"
+          },
+          "body": {
+            "en": "Session shutdown no longer races background state reads. Windows path case changes reuse the same session writer, and failed session switches release their previous file handles.",
+            "zh": "修复会话关闭与后台状态读取之间的数据竞争。Windows 路径大小写变化会复用同一个会话写入器，会话切换失败后也会正确释放此前的文件句柄。"
+          },
+          "refs": [10263]
+        },
           {
             "targets": ["desktop"],
             "title": {
