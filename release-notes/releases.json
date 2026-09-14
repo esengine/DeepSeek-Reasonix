@@ -152,6 +152,18 @@
         ],
         "improved": [
           {
+            "targets": ["desktop", "cli"],
+            "title": {
+              "en": "Simpler file editing and recovery",
+              "zh": "简化文件编辑与错误恢复"
+            },
+            "body": {
+              "en": "File edits check the version observed by a read, while ordinary tool errors no longer block unrelated work behind proof or recovery-confirmation gates. Permission policy, sandboxing and Plan approval remain enforced. Unknown external effects are recorded without automatically replaying them.",
+              "zh": "文件编辑会核对读取时观察到的版本；普通工具错误不再通过证据或恢复确认门禁阻塞后续工作。权限策略、沙箱和计划批准仍然生效。结果未知的外部操作会保留记录，不会自动重放。"
+            },
+            "refs": [10223, 10209, 10198]
+          },
+          {
             "targets": [
               "desktop",
               "cli"
@@ -298,6 +310,19 @@
         ]
       },
       "upgrade": [
+        {
+          "level": "warning",
+          "targets": ["desktop", "cli"],
+          "title": {
+            "en": "Tool changes may reset the prompt cache once",
+            "zh": "工具变更可能使提示缓存首次失效"
+          },
+          "body": {
+            "en": "Retired proof tools and updated tool schemas change the request prefix after upgrading. A one-time cache miss is expected; subsequent turns retain stable tool ordering and prefixes.",
+            "zh": "旧证据工具的移除和工具描述变更会改变升级后的请求前缀，首次请求可能无法复用原有缓存；后续轮次保持稳定的工具顺序和前缀。"
+          },
+          "refs": [10223]
+        },
         {
           "level": "warning",
           "targets": ["desktop", "cli"],
