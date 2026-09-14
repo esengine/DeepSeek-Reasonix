@@ -2,6 +2,329 @@
   "schemaVersion": 1,
   "releases": [
     {
+      "version": "1.38.8",
+      "date": "2026-09-14",
+      "channel": "stable",
+      "targetingVersion": 1,
+      "title": {
+        "en": "Reasonix 1.38.8",
+        "zh": "Reasonix 1.38.8"
+      },
+      "summary": {
+        "en": "Desktop reliability and usability improvements, including unified session persistence, Goal lifecycle fixes, and installer updates.",
+        "zh": "桌面端可靠性与易用性改进，包括统一会话持久化、目标生命周期修复和安装程序更新。"
+      },
+      "surfaces": [
+        "desktop",
+        "cli"
+      ],
+      "guides": [
+        {
+          "title": {
+            "en": "Session Storage v4",
+            "zh": "会话存储 v4"
+          },
+          "body": {
+            "en": "Learn about the new session storage format and migration.",
+            "zh": "了解新的会话存储格式和迁移。"
+          },
+          "href": "https://github.com/esengine/DeepSeek-Reasonix/blob/1e2d403eeca42c66f496364c1531c6c3794a6f7e/docs/session-storage-v4.md"
+        },
+        {
+          "title": {
+            "en": "Session v4 Implementation Report",
+            "zh": "会话 v4 实现报告"
+          },
+          "body": {
+            "en": "Detailed implementation report for session v4.",
+            "zh": "会话 v4 的详细实现报告。"
+          },
+          "href": "https://github.com/esengine/DeepSeek-Reasonix/blob/1e2d403eeca42c66f496364c1531c6c3794a6f7e/docs/session-v4-implementation-report.md"
+        }
+      ],
+      "highlights": [
+        {
+          "kind": "new",
+          "targets": [
+            "desktop",
+            "cli"
+          ],
+          "title": {
+            "en": "Unified session persistence with bounded large-history recovery",
+            "zh": "统一会话持久化并支持大会话恢复"
+          },
+          "body": {
+            "en": "Sessions now use a canonical storage service with a new v4 format, enabling large history recovery without the previous 128 MiB replay ceiling.",
+            "zh": "会话现在使用规范存储服务和新的 v4 格式，支持大会话恢复，不再受之前 128 MiB 重放上限限制。"
+          },
+          "refs": [
+            10257
+          ]
+        },
+        {
+          "kind": "fixed",
+          "targets": [
+            "desktop",
+            "cli"
+          ],
+          "title": {
+            "en": "Goal lifecycle recovery and host controls",
+            "zh": "修复目标生命周期恢复与宿主控制"
+          },
+          "body": {
+            "en": "Restored Goal objectives are preserved across recovery turns, and lifecycle mutations are fenced on durable error-aware APIs.",
+            "zh": "恢复的目标在恢复轮次中得以保留，生命周期变更通过持久化错误感知 API 进行防护。"
+          },
+          "refs": [
+            10249
+          ]
+        },
+        {
+          "kind": "improved",
+          "targets": [
+            "desktop"
+          ],
+          "title": {
+            "en": "Desktop model and workspace navigation",
+            "zh": "优化桌面端模型与工作区导航"
+          },
+          "body": {
+            "en": "The model picker now offers provider filters, favorites, and catalog-wide search, and the workspace dock opens Overview when empty.",
+            "zh": "模型选择器现在提供提供商筛选、收藏和全目录搜索，工作区停靠栏为空时自动打开概览。"
+          },
+          "refs": [
+            10196
+          ]
+        },
+        {
+          "kind": "fixed",
+          "targets": [
+            "desktop"
+          ],
+          "title": {
+            "en": "Desktop updates and slimmer native packages",
+            "zh": "修复桌面更新并精简原生安装包"
+          },
+          "body": {
+            "en": "macOS updates now resolve the app bundle correctly, and native packages are significantly smaller.",
+            "zh": "macOS 更新现在能正确解析应用包，原生安装包体积显著减小。"
+          },
+          "refs": [
+            10194
+          ]
+        }
+      ],
+      "changes": {
+        "new": [
+          {
+            "targets": [
+              "desktop",
+              "cli"
+            ],
+            "title": {
+              "en": "Unified session persistence",
+              "zh": "统一会话持久化"
+            },
+            "body": {
+              "en": "Sessions now use a canonical storage service with a new v4 format, enabling large history recovery without the previous 128 MiB replay ceiling.",
+              "zh": "会话现在使用规范存储服务和新的 v4 格式，支持大会话恢复，不再受之前 128 MiB 重放上限限制。"
+            },
+            "refs": [
+              10257
+            ]
+          },
+          {
+            "targets": [
+              "desktop"
+            ],
+            "title": {
+              "en": "Model picker redesign",
+              "zh": "模型选择器重新设计"
+            },
+            "body": {
+              "en": "The model picker now offers provider filters, favorites, and catalog-wide search.",
+              "zh": "模型选择器现在提供提供商筛选、收藏和全目录搜索。"
+            },
+            "refs": [
+              10196
+            ]
+          }
+        ],
+        "improved": [
+          {
+            "targets": [
+              "desktop",
+              "cli"
+            ],
+            "title": {
+              "en": "Goal lifecycle alignment",
+              "zh": "目标生命周期对齐"
+            },
+            "body": {
+              "en": "Goal mode now uses a versioned lifecycle service with explicit CAS-checked transitions.",
+              "zh": "目标模式现在使用带版本的生命周期服务，并具有显式的 CAS 检查转换。"
+            },
+            "refs": [
+              10247
+            ]
+          },
+          {
+            "targets": [
+              "desktop"
+            ],
+            "title": {
+              "en": "Startup hint for slow launches",
+              "zh": "慢启动时显示启动提示"
+            },
+            "body": {
+              "en": "Fast launches open directly; slower launches show a lightweight startup hint.",
+              "zh": "快速启动直接打开应用；较慢的启动会显示轻量级启动提示。"
+            },
+            "refs": [
+              10172
+            ]
+          }
+        ],
+        "fixed": [
+          {
+            "targets": [
+              "desktop",
+              "cli"
+            ],
+            "title": {
+              "en": "Goal lifecycle recovery",
+              "zh": "目标生命周期恢复"
+            },
+            "body": {
+              "en": "Restored Goal objectives are preserved across recovery turns, and lifecycle mutations are fenced on durable error-aware APIs.",
+              "zh": "恢复的目标在恢复轮次中得以保留，生命周期变更通过持久化错误感知 API 进行防护。"
+            },
+            "refs": [
+              10249
+            ]
+          },
+          {
+            "targets": [
+              "desktop"
+            ],
+            "title": {
+              "en": "Desktop updates and slimmer packages",
+              "zh": "桌面更新和更小的安装包"
+            },
+            "body": {
+              "en": "macOS updates now resolve the app bundle correctly, and native packages are significantly smaller.",
+              "zh": "macOS 更新现在能正确解析应用包，原生安装包体积显著减小。"
+            },
+            "refs": [
+              10194
+            ]
+          },
+          {
+            "targets": [
+              "desktop"
+            ],
+            "title": {
+              "en": "Installer retries scanner-locked files",
+              "zh": "安装程序重试扫描器锁定的文件"
+            },
+            "body": {
+              "en": "Windows installer now retries transient file locks and offers a Retry option.",
+              "zh": "Windows 安装程序现在会重试瞬态文件锁，并提供重试选项。"
+            },
+            "refs": [
+              10219
+            ]
+          },
+          {
+            "targets": [
+              "desktop"
+            ],
+            "title": {
+              "en": "Direct launch finds service",
+              "zh": "直接启动可找到服务"
+            },
+            "body": {
+              "en": "Launching Reasonix.exe directly now correctly locates the desktop service.",
+              "zh": "直接启动 Reasonix.exe 现在能正确定位桌面服务。"
+            },
+            "refs": [
+              10215
+            ]
+          },
+          {
+            "targets": [
+              "desktop"
+            ],
+            "title": {
+              "en": "Linux package permissions",
+              "zh": "Linux 包权限"
+            },
+            "body": {
+              "en": "Linux packages now install a world-readable app directory.",
+              "zh": "Linux 包现在安装世界可读的应用目录。"
+            },
+            "refs": [
+              10213
+            ]
+          },
+          {
+            "targets": [
+              "desktop"
+            ],
+            "title": {
+              "en": "Transcript no-drag fix",
+              "zh": "修复对话区拖动问题"
+            },
+            "body": {
+              "en": "Transcript no-drag no longer punches through the Electron titlebar.",
+              "zh": "对话区 no-drag 不再穿透 Electron 标题栏。"
+            },
+            "refs": [
+              10154
+            ]
+          }
+        ]
+      },
+      "upgrade": [
+        {
+          "level": "warning",
+          "targets": [
+            "desktop"
+          ],
+          "title": {
+            "en": "Manual update required for pre-1.38.4 clients",
+            "zh": "1.38.4 之前的客户端需要手动更新"
+          },
+          "body": {
+            "en": "Desktops on v1.38.3 or older cannot update in-app and must install the full package manually.",
+            "zh": "v1.38.3 或更早版本的桌面端无法在应用内更新，必须手动安装完整包。"
+          },
+          "refs": [
+            10218
+          ]
+        }
+      ],
+      "risks": [],
+      "contributors": [
+        "SivanCola",
+        "github-actions[bot]"
+      ],
+      "links": {
+        "github": "https://github.com/esengine/DeepSeek-Reasonix/releases/tag/desktop-v1.38.8",
+        "compare": "https://github.com/esengine/DeepSeek-Reasonix/compare/desktop-v1.38.7...desktop-v1.38.8",
+        "download": "https://reasonix.io/?download=desktop&channel=stable#start"
+      },
+      "releaseId": "1.38.8",
+      "baseVersion": "1.38.8",
+      "status": "reviewed",
+      "previousRelease": "1.38.7",
+      "builds": {
+        "cli": "v1.38.8",
+        "desktop": "v1.38.8",
+        "npm": "1.38.8"
+      }
+    },
+    {
       "version": "1.38.7",
       "date": "2026-09-11",
       "channel": "stable",
