@@ -19,6 +19,12 @@ var sessionReset = map[string]bool{
 	"cacheHit":         true,
 	"cacheMiss":        true,
 	"missingReasoning": true,
+	// The frozen main-request unit belongs to the conversation that sent it; a
+	// new conversation starts with no sent prefix (lastWireFP/lastMainReq) and
+	// no persisted-wire timestamp (lastMainReqPersist).
+	"lastWireFP":         true,
+	"lastMainReq":        true,
+	"lastMainReqPersist": true,
 	// A strong-projection repair belongs to the corrupted conversation; a new
 	// conversation starts without it.
 	"reasoningReplayStrongProjection":       true,

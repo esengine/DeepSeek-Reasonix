@@ -1,6 +1,7 @@
 package agent
 
 import (
+	"bytes"
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
@@ -121,6 +122,21 @@ const (
 	CompactionNoop
 )
 
+// toolsFingerprint fingerprints a tool schema set. A system-only summary hit
+// means the prefix broke at the tool seam; this hash distinguishes the frozen
+// main-request set from the live registry in that diagnosis.
+func toolsFingerprint(tools []provider.ToolSchema) string {
+	if len(tools) == 0 {
+		return ""
+	}
+	b, err := json.Marshal(tools)
+	if err != nil {
+		return ""
+	}
+	sum := sha256.Sum256(b)
+	return hex.EncodeToString(sum[:16])
+}
+
 // CompactionState is the session context sidecar payload.
 type CompactionState struct {
 	SchemaVersion      int                        `json:"schema_version"`
@@ -140,9 +156,13 @@ type CompactionState struct {
 	// NativeContextEditingAccepted latches the first successful native request.
 	// ContextEditingFallbackLocal persists the only allowed request-shape switch:
 	// an explicit unsupported response before that latch was set.
-	NativeContextEditingAccepted bool      `json:"native_context_editing_accepted,omitempty"`
-	ContextEditingFallbackLocal  bool      `json:"context_editing_fallback_local,omitempty"`
-	UpdatedAt                    time.Time `json:"updated_at"`
+	NativeContextEditingAccepted bool `json:"native_context_editing_accepted,omitempty"`
+	ContextEditingFallbackLocal  bool `json:"context_editing_fallback_local,omitempty"`
+	// LastWireMessages/LastWireTools freeze the most recent main request's
+	// provider-visible unit so a resumed process replays the cached prefix.
+	LastWireMessages []provider.Message    `json:"last_wire_messages,omitempty"`
+	LastWireTools    []provider.ToolSchema `json:"last_wire_tools,omitempty"`
+	UpdatedAt        time.Time             `json:"updated_at"`
 }
 
 // CompactionTelemetry is the structured observability record for one
@@ -166,6 +186,15 @@ type CompactionTelemetry struct {
 	RequestCount      int    `json:"request_count"`
 	ProviderRequestID string `json:"provider_request_id,omitempty"`
 	SummaryInputMode  string `json:"summary_input_mode,omitempty"`
+	ViewFP            string `json:"view_fp,omitempty"`     // fold view fingerprint (resume-divergence diagnosis)
+	WireFP            string `json:"wire_fp,omitempty"`     // normalized bytes actually sent (vs view_fp)
+	ToolsCount        int    `json:"tools_count,omitempty"` // tool schema set the summary sent
+	ToolsFP           string `json:"tools_fp,omitempty"`
+	ToolsSource       string `json:"tools_source,omitempty"` // frozen | live | none
+	PrefixHash        string `json:"pref_hash,omitempty"`    // summarize-prefix fingerprint (drift vs expiry)
+	PrefLen           int    `json:"pref_len,omitempty"`     // messages the summary prefix carries
+	WireLen           int    `json:"wire_len,omitempty"`     // messages the frozen wire unit carries
+	WireDiff          string `json:"wire_diff,omitempty"`    // first field diverging from the frozen bytes
 	Error             string `json:"error,omitempty"`
 }
 
@@ -199,7 +228,39 @@ func LoadCompactionState(sessionPath string) (CompactionState, bool, error) {
 	if st.SchemaVersion == 0 {
 		st.SchemaVersion = compactionStateSchemaV1
 	}
+	// Load must undo the writer's pretty-print for the frozen wire form's
+	// json.RawMessage bytes; re-compact them so the resumed frozen wire unit
+	// byte-matches the main request the provider actually cached.
+	compactSidecarRawMessages(&st)
 	return st, true, nil
+}
+
+// compactSidecarRawMessages compacts RawMessage bytes inside the frozen wire
+// form: pretty-printing the outer structure must not rewrite them, they are
+// part of the provider-cached prefix and must survive the round trip
+// byte-exact.
+func compactSidecarRawMessages(st *CompactionState) {
+	compact := func(raw json.RawMessage) json.RawMessage {
+		if len(raw) == 0 {
+			return raw
+		}
+		var buf bytes.Buffer
+		if err := json.Compact(&buf, raw); err != nil {
+			return raw
+		}
+		return append(json.RawMessage(nil), buf.Bytes()...)
+	}
+	for i := range st.LastWireMessages {
+		for j := range st.LastWireMessages[i].ResponsesItems {
+			st.LastWireMessages[i].ResponsesItems[j] = compact(st.LastWireMessages[i].ResponsesItems[j])
+		}
+		for j := range st.LastWireMessages[i].ServerSearch {
+			st.LastWireMessages[i].ServerSearch[j].Raw = compact(st.LastWireMessages[i].ServerSearch[j].Raw)
+		}
+	}
+	for i := range st.LastWireTools {
+		st.LastWireTools[i].Parameters = compact(st.LastWireTools[i].Parameters)
+	}
 }
 
 // SaveCompactionState writes the sidecar via strict atomic publish (temp +
@@ -218,6 +279,7 @@ func SaveCompactionState(sessionPath string, st CompactionState) error {
 	if st.UpdatedAt.IsZero() {
 		st.UpdatedAt = time.Now().UTC()
 	}
+	compactSidecarRawMessages(&st)
 	// LastReceipt is authoritative. Drop mirrored top-level last_*/blocked_*
 	// writer fields so new sidecars do not re-emit the pre-v3 dual schema.
 	// Old files with those keys still decode into the struct for readers.

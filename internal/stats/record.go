@@ -49,6 +49,11 @@ type record struct {
 	Total      int       `json:"total,omitempty"`
 	Requests   int       `json:"requests,omitempty"` // provider requests represented by this row
 	Turn       bool      `json:"turn,omitempty"`     // true for TurnDone marker rows
+	// PrefixHash fingerprints the sent request prefix (CacheDiagnostics),
+	// distinguishing a miss from a changed prefix vs server-side expiry.
+	PrefixHash    string   `json:"prefix_hash,omitempty"`
+	PrefixChanged bool     `json:"prefix_changed,omitempty"`
+	PrefixReasons []string `json:"prefix_reasons,omitempty"`
 	// Cost quote fields (additive; older readers ignore them).
 	UsageSource        string   `json:"usage_source,omitempty"`
 	CostAmount         string   `json:"cost_amount,omitempty"`     // original amount decimal
@@ -73,6 +78,58 @@ type record struct {
 	ValuationUSD string `json:"valuation_usd,omitempty"`
 	// SelectedCost is a float compatibility mirror of SelectedAmount.
 	SelectedCost float64 `json:"selected_cost,omitempty"`
+	// Compaction records one context-compaction pass (agent compaction
+	// telemetry). Nil on usage/turn rows; Query aggregation skips them.
+	Compaction *CompactionRecord `json:"compaction,omitempty"`
+}
+
+// CompactionRecord is the structured form of the agent's compaction telemetry
+// detail line: a failed pass can be diagnosed from the stats file alone, and
+// RequestID links back to provider logs when present.
+type CompactionRecord struct {
+	Trigger   string `json:"trigger,omitempty"`
+	Mode      string `json:"mode,omitempty"`
+	Cache     string `json:"cache,omitempty"`
+	SourceTok int    `json:"src,omitempty"`
+	FoldTok   int    `json:"fold,omitempty"`
+	Spans     int    `json:"spans,omitempty"`
+	ProjTok   int    `json:"proj,omitempty"`
+	InputTok  int    `json:"in,omitempty"`
+	OutTok    int    `json:"out,omitempty"`
+	HitTok    int    `json:"hit,omitempty"`
+	MissTok   int    `json:"miss,omitempty"`
+	WriteTok  int    `json:"write,omitempty"`
+	Reqs      int    `json:"reqs,omitempty"`
+	// UserTurnsKept/Dropped split the retained turns against those folded into
+	// the summary-only region past the retention budget.
+	UserTurnsKept    int `json:"user_kept,omitempty"`
+	UserTurnsDropped int `json:"user_dropped,omitempty"`
+	// Results/SavedChars describe a no-AI fast compression pass (mode=prune):
+	// elided tool results, saved chars; Status records the pass outcome
+	// (installed/noop/aborted/refused).
+	Results    int    `json:"results,omitempty"`
+	SavedChars int    `json:"saved_chars,omitempty"`
+	Status     string `json:"status,omitempty"`
+	Reason     string `json:"reason,omitempty"`
+	// TokPerChar is the usage-calibrated token/char factor at fold time
+	// (0 until a turn reports usage). It makes src/proj values verifiable:
+	// src ≈ chars × tpc. Fast-compress (prune) passes leave it zero.
+	TokPerChar float64 `json:"tpc,omitempty"`
+	RequestID  string  `json:"provider_request_id,omitempty"`
+	Error      string  `json:"err_type,omitempty"`
+	// Wire-shape fingerprints: the bytes actually sent (wire_fp) against the
+	// fold meant to be sent (view_fp), plus the tool set that rode along.
+	// Together they separate "the prefix expired" from "it was rewritten".
+	SummaryInputMode string `json:"summary_input,omitempty"`
+	ViewFP           string `json:"view_fp,omitempty"`
+	WireFP           string `json:"wire_fp,omitempty"`
+	ToolsCount       int    `json:"tools_count,omitempty"`
+	ToolsFP          string `json:"tools_fp,omitempty"`
+	ToolsSource      string `json:"tools_source,omitempty"`
+	PrefixFP         string `json:"pref_hash,omitempty"`
+	PrefLen          int    `json:"pref_len,omitempty"`
+	WireLen          int    `json:"wire_len,omitempty"`
+	WireDiff         string `json:"wire_diff,omitempty"`
 }
 
 // Writer appends records to the daily stats file for a given stats dir.

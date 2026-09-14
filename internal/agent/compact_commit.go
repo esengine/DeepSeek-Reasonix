@@ -18,6 +18,10 @@ type summaryProjectionCommit struct {
 	// covered is the canonical length the frozen projection body represents;
 	// messages past it splice live from the transcript.
 	covered int
+	// wirePrefix/wireTools persist the exact provider-cached unit this
+	// checkpoint replayed, so a resumed process sends the same bytes.
+	wirePrefix []provider.Message
+	wireTools  []provider.ToolSchema
 }
 
 // commitSummaryProjection CAS-installs a checkpoint under compactionMu:
@@ -82,5 +86,9 @@ func (a *Agent) summaryProjectionState(commit summaryProjectionCommit) Compactio
 			ViewInputHash: commit.inputHash, ViewOutputHash: commit.outputHash, CreatedAt: now,
 		},
 		LastReceipt: receipt, UpdatedAt: now,
+		// Preserve the exact prefix the summary request replayed (the
+		// provider-cached unit): a resumed process replays the same bytes.
+		LastWireMessages: commit.wirePrefix,
+		LastWireTools:    commit.wireTools,
 	}
 }

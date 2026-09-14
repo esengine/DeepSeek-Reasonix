@@ -254,7 +254,7 @@ func TestSlimSummaryRequestIsBoundedAndToolFree(t *testing.T) {
 		{Role: provider.RoleTool, ToolCallID: "c1", Name: "read_file", Content: body, Images: []string{"data:image/png;base64,AAAA"}},
 	}
 
-	replay := a.summaryRequest(fold, "")
+	replay := a.summaryRequest(nil, fold, "")
 	if len(replay.Tools) == 0 {
 		t.Fatal("replay form must carry the tool schemas the sampling request uses")
 	}
