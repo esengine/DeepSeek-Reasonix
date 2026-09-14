@@ -2,6 +2,7 @@ package cli
 
 import (
 	"fmt"
+	"slices"
 	"strings"
 	"unicode"
 
@@ -13,6 +14,8 @@ import (
 	"github.com/yuin/goldmark/parser"
 	"github.com/yuin/goldmark/text"
 	"github.com/yuin/goldmark/util"
+
+	"reasonix/internal/event"
 )
 
 // mdRenderer turns the model's markdown answer into ANSI-styled terminal text
@@ -307,6 +310,10 @@ func (r *mdRenderer) renderList(buf *strings.Builder, n *ast.List, src []byte, i
 }
 
 func (r *mdRenderer) renderFenced(buf *strings.Builder, n ast.Node, src []byte, indent int) {
+	if fc, ok := n.(*ast.FencedCodeBlock); ok && !r.copyMode && isDiffFence(fc, src) {
+		r.renderDiffFence(buf, fc, src, indent)
+		return
+	}
 	prefix := strings.Repeat(" ", indent) + dim("│ ")
 	if r.copyMode {
 		prefix = copyOmitSpan(prefix)
@@ -319,6 +326,137 @@ func (r *mdRenderer) renderFenced(buf *strings.Builder, n ast.Node, src []byte, 
 		buf.WriteString("\n")
 	}
 	buf.WriteString("\n")
+}
+
+// isDiffFence reports whether a fence's info string asks for a unified diff.
+// Copy mode keeps the plain rail path so the copied text stays byte-identical
+// to the fence source (the diff rows carry render-only gutter/line numbers).
+func isDiffFence(fc *ast.FencedCodeBlock, src []byte) bool {
+	if fc.Info == nil {
+		return false
+	}
+	switch string(fc.Info.Segment.Value(src)) {
+	case "diff", "patch":
+		return true
+	}
+	return false
+}
+
+func (r *mdRenderer) renderDiffFence(buf *strings.Builder, fc *ast.FencedCodeBlock, src []byte, indent int) {
+	prefix := strings.Repeat(" ", indent)
+	width := max(r.width-indent, 8)
+	for _, sec := range splitDiffSections(diffFenceText(fc, src)) {
+		path := diffFencePath(sec)
+		if header := diffFenceHeader(path, countDiff(sec)); header != "" {
+			buf.WriteString(prefix)
+			buf.WriteString(header)
+			buf.WriteString("\n")
+		}
+		for _, row := range diffBody(event.FileDiff{Diff: sec}, path, width, 0) {
+			buf.WriteString(prefix)
+			buf.WriteString(row)
+			buf.WriteString("\n")
+		}
+	}
+	buf.WriteString("\n")
+}
+
+func diffFenceText(fc *ast.FencedCodeBlock, src []byte) string {
+	var b strings.Builder
+	for i := range fc.Lines().Len() {
+		l := fc.Lines().At(i)
+		b.WriteString(strings.TrimRight(string(l.Value(src)), "\n"))
+		b.WriteByte('\n')
+	}
+	return b.String()
+}
+
+// diffFenceHeader names the file and its +/- tally, standing in for the tool
+// card's header line (a prose fence carries no tool name or args).
+func diffFenceHeader(path string, d event.FileDiff) string {
+	var parts []string
+	if path != "" {
+		parts = append(parts, bold(accent(path)))
+	}
+	if stat := diffStat(d); stat != "" {
+		parts = append(parts, stat)
+	}
+	return strings.Join(parts, "  ")
+}
+
+// splitDiffSections cuts a fence body into per-file sections so each gets its
+// own header, and drops each section's preamble (git's "diff --git"/"index"
+// lines) so the returned text starts at the "--- "/"+++ " pair diffBody drops.
+func splitDiffSections(diff string) []string {
+	lines := strings.Split(strings.TrimRight(diff, "\n"), "\n")
+	gitStyle := slices.ContainsFunc(lines, func(l string) bool { return strings.HasPrefix(l, "diff --git ") })
+	var sections []string
+	var cur []string
+	for i, ln := range lines {
+		if len(cur) > 0 && diffSectionStart(lines, i, gitStyle) {
+			sections = append(sections, strings.Join(cur, "\n")+"\n")
+			cur = nil
+		}
+		cur = append(cur, ln)
+	}
+	if len(cur) > 0 {
+		sections = append(sections, strings.Join(cur, "\n")+"\n")
+	}
+	out := make([]string, 0, len(sections))
+	for _, sec := range sections {
+		out = append(out, trimDiffPreamble(sec))
+	}
+	return out
+}
+
+// diffSectionStart reports whether lines[i] opens a new file section. With
+// git-style fences the "diff --git " line is authoritative; otherwise the
+// "--- "/"+++ " pair is, requiring the lookahead so a removed "-- x" line
+// (rendered "--- x") cannot start a section on its own.
+func diffSectionStart(lines []string, i int, gitStyle bool) bool {
+	if gitStyle {
+		return strings.HasPrefix(lines[i], "diff --git ")
+	}
+	return strings.HasPrefix(lines[i], "--- ") && i+1 < len(lines) && strings.HasPrefix(lines[i+1], "+++ ")
+}
+
+func trimDiffPreamble(section string) string {
+	lines := strings.Split(section, "\n")
+	for i, ln := range lines {
+		if strings.HasPrefix(ln, "--- ") {
+			return strings.Join(lines[i:], "\n")
+		}
+	}
+	return section
+}
+
+// countDiff tallies a section's added/removed rows for the header stat, using
+// the same positional header-pair drop as diffBody.
+func countDiff(section string) event.FileDiff {
+	lines := strings.Split(strings.TrimRight(section, "\n"), "\n")
+	if len(lines) >= 2 && strings.HasPrefix(lines[0], "--- ") && strings.HasPrefix(lines[1], "+++ ") {
+		lines = lines[2:]
+	}
+	var d event.FileDiff
+	for _, ln := range lines {
+		switch {
+		case strings.HasPrefix(ln, "+++ "), strings.HasPrefix(ln, "--- "):
+		case strings.HasPrefix(ln, "+"):
+			d.Added++
+		case strings.HasPrefix(ln, "-"):
+			d.Removed++
+		}
+	}
+	return d
+}
+
+func diffFencePath(diff string) string {
+	for line := range strings.SplitSeq(diff, "\n") {
+		if rest, ok := strings.CutPrefix(line, "+++ b/"); ok {
+			return strings.TrimSpace(rest)
+		}
+	}
+	return ""
 }
 
 func (r *mdRenderer) renderBlockquote(buf *strings.Builder, n *ast.Blockquote, src []byte, indent int) {
