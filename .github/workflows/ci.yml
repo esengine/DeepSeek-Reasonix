@@ -228,7 +228,7 @@ jobs:
 
       # Only main-v2 pushes save, one job per OS and module, so the cache
       # stays a few pushes deep instead of churning on every pull request.
-      - uses: actions/cache/save@v4
+      - uses: actions/cache/save@v6
         if: always() && env.RUN_STEPS == 'true' && runner.os != 'Windows' && github.event_name == 'push' && steps.gocache.outputs.key != ''
         with:
           path: ${{ steps.gocache.outputs.paths }}
@@ -374,7 +374,7 @@ jobs:
 
       # Only main-v2 pushes save, one job per OS and module, so the cache
       # stays a few pushes deep instead of churning on every pull request.
-      - uses: actions/cache/save@v4
+      - uses: actions/cache/save@v6
         if: always() && github.event_name == 'push' && steps.gocache.outputs.key != ''
         with:
           path: ${{ steps.gocache.outputs.paths }}
@@ -793,7 +793,7 @@ jobs:
 
       # Only main-v2 pushes save, one job per OS and module, so the cache
       # stays a few pushes deep instead of churning on every pull request.
-      - uses: actions/cache/save@v4
+      - uses: actions/cache/save@v6
         if: always() && github.event_name == 'push' && steps.gocache.outputs.key != ''
         with:
           path: ${{ steps.gocache.outputs.paths }}
@@ -855,7 +855,7 @@ jobs:
 
       # Only main-v2 pushes save, one job per OS and module, so the cache
       # stays a few pushes deep instead of churning on every pull request.
-      - uses: actions/cache/save@v4
+      - uses: actions/cache/save@v6
         if: always() && github.event_name == 'push' && steps.gocache.outputs.key != ''
         with:
           path: ${{ steps.gocache.outputs.paths }}
@@ -981,7 +981,7 @@ jobs:
 
       # Only main-v2 pushes save, one job per OS and module, so the cache
       # stays a few pushes deep instead of churning on every pull request.
-      - uses: actions/cache/save@v4
+      - uses: actions/cache/save@v6
         if: always() && github.event_name == 'push' && steps.gocache.outputs.key != ''
         with:
           path: ${{ steps.gocache.outputs.paths }}

@@ -536,7 +536,7 @@ jobs:
       - name: Submit Windows payload for Authenticode signing
         if: runner.os == 'Windows' && env.HAS_SIGNPATH == 'true' && steps.payload-checkpoint.outputs.exists == 'false'
         id: submit-windows-payload
-        uses: signpath/github-action-submit-signing-request@v2
+        uses: signpath/github-action-submit-signing-request@v3
         with:
           api-token: ${{ secrets.SIGNPATH_API_TOKEN }}
           organization-id: ${{ secrets.SIGNPATH_ORGANIZATION_ID }}
@@ -645,7 +645,7 @@ jobs:
       - name: Submit installer for Authenticode signing
         if: runner.os == 'Windows' && env.HAS_SIGNPATH == 'true' && steps.installer-checkpoint.outputs.exists == 'false'
         id: submit-windows-installer
-        uses: signpath/github-action-submit-signing-request@v2
+        uses: signpath/github-action-submit-signing-request@v3
         with:
           api-token: ${{ secrets.SIGNPATH_API_TOKEN }}
           organization-id: ${{ secrets.SIGNPATH_ORGANIZATION_ID }}
