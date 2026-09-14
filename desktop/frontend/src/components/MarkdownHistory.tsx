@@ -32,7 +32,10 @@ const MarkdownHistory = memo(function MarkdownHistory({ text, streaming = false,
     return () => observer.disconnect();
   }, [visible]);
   const components = useMemo(() => createComponents(plainStatusBlocks), [plainStatusBlocks]);
-  const cached = useMemo(() => cacheKey ? getTranscriptStore().getMarkdown(cacheKey, revision) : undefined, [cacheKey, revision]);
+  // The cache is keyed by content revision (see TranscriptMarkdownCache.key), so
+  // it answers whether or not this row carries a stable id — the cacheKey prop
+  // stays for readability/debugging only (#10143).
+  const cached = useMemo(() => getTranscriptStore().getMarkdown(cacheKey, revision), [cacheKey, revision]);
   useEffect(() => {
     if (!visible && !streaming) return;
     if (cached?.blocks) { onParsed?.(); return; }
@@ -47,7 +50,11 @@ const MarkdownHistory = memo(function MarkdownHistory({ text, streaming = false,
         stable[index] && JSON.stringify(stable[index]) === JSON.stringify(block) ? stable[index] : block);
       previous.current = result;
       setParsed({ text, result });
-      if (cacheKey && !streaming) getTranscriptStore().setMarkdown(cacheKey, revision, {
+      // Unconditional (except while streaming): the key is the content
+      // revision, so it is always available. An identity-keyed cache had to skip
+      // this write whenever the row had no stable id at hand, which is exactly
+      // when the parse is most likely to be thrown away and repeated (#10143).
+      if (!streaming) getTranscriptStore().setMarkdown(cacheKey, revision, {
         source: text, blocks: result.blocks, selectionText: result.selectionText,
         selectionRevision: result.selectionRevision,
         bytes: text.length * 2 + result.selectionText.length * 2 + estimateHastBytes(result.blocks),
