@@ -99,10 +99,16 @@ globalThis.MouseEvent = dom.window.MouseEvent;
 let scheduledRefreshes = 0;
 const unsubscribeRefresh = subscribeToUpdateRefresh(() => {
   scheduledRefreshes += 1;
-}, 60_000);
+}, 60_000, 30);
 window.dispatchEvent(new Event("focus"));
 document.dispatchEvent(new Event("visibilitychange"));
-ok(scheduledRefreshes === 2, "visible focus and visibility changes schedule update refreshes");
+ok(
+  scheduledRefreshes === 1,
+  "focus and visibility changes coalesce into one refresh inside the throttle window",
+);
+await new Promise((resolve) => setTimeout(resolve, 40));
+window.dispatchEvent(new Event("focus"));
+ok(scheduledRefreshes === 2, "a window event after the throttle window schedules a new refresh");
 unsubscribeRefresh();
 window.dispatchEvent(new Event("focus"));
 ok(scheduledRefreshes === 2, "update refresh listeners are removed on cleanup");
