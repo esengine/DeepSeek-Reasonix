@@ -261,8 +261,17 @@ func New(cfg provider.Config) (provider.Provider, error) {
 		maxOutputTokens: maxOutputTokens,
 		effort:          effort,
 		http:            httpClient,
-		idleTimeout:     defaultStreamIdleTimeout,
+		idleTimeout:     streamIdleTimeoutOr(cfg, defaultStreamIdleTimeout),
 	}, nil
+}
+
+// streamIdleTimeoutOr returns the configured stream-idle watchdog window, or
+// def when the provider entry leaves it unset.
+func streamIdleTimeoutOr(cfg provider.Config, def time.Duration) time.Duration {
+	if d := provider.StreamIdleTimeout(cfg); d > 0 {
+		return d
+	}
+	return def
 }
 
 func newHTTPClient(cfg provider.Config) (*http.Client, error) {

@@ -337,6 +337,9 @@ func RenderTOMLForScope(c *Config, scope RenderScope) string {
 				b.WriteString("# max_output_tokens = 65536   # optional cost cap\n")
 				b.WriteString("# max_output_tokens = 131072  # optional cost cap\n")
 			}
+			if p.StreamIdleTimeoutSeconds != nil {
+				fmt.Fprintf(&b, "stream_idle_timeout_seconds = %d   # abort and retry a stream idle (no bytes) for this many seconds; unset = 300\n", *p.StreamIdleTimeoutSeconds)
+			}
 			if p.Price != nil {
 				fmt.Fprintf(&b, "price       = %s   # provider-wide fallback, per 1M tokens\n", renderPricingInline(p.Price))
 			}
@@ -993,6 +996,9 @@ func RenderTOMLProjectDelta(c *Config) string {
 			}
 			if p.MaxOutputTokens != 0 {
 				fmt.Fprintf(&b, "max_output_tokens = %d\n", p.MaxOutputTokens)
+			}
+			if p.StreamIdleTimeoutSeconds != nil {
+				fmt.Fprintf(&b, "stream_idle_timeout_seconds = %d\n", *p.StreamIdleTimeoutSeconds)
 			}
 			if p.Price != nil {
 				fmt.Fprintf(&b, "price       = %s\n", renderPricingInline(p.Price))
