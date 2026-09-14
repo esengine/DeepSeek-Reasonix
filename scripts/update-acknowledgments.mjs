@@ -35,6 +35,7 @@ const top = contributors.slice(0, 20).map((c, index) => ({
 
 await updateReadme('README.md', renderTable(top));
 await updateReadme('README.zh-CN.md', renderTable(top));
+await updateReadme('README.es.md', renderTable(top));
 
 function renderTable(rows) {
   const header = '| Contributor | Contributor | Contributor | Contributor |\n| --- | --- | --- | --- |';
