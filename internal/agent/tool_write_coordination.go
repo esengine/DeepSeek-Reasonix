@@ -19,7 +19,7 @@ func (a *Agent) prepareWriteCoordination(ctx context.Context, plan *toolCallPlan
 			plan.runArgs = json.RawMessage(`{}`)
 		}
 	}
-	if (plan.effects.WorkspaceMutation || plan.hooksMayMutateWorkspace) && a.svc.workspaceLease != nil {
+	if (plan.effects.WorkspaceMutation || hookNeedsWorkspaceWriteGuard(plan)) && a.svc.workspaceLease != nil {
 		release, err := a.acquireWorkspaceLease(ctx, plan)
 		if err != nil {
 			return toolOutcome{
@@ -38,7 +38,7 @@ func (a *Agent) prepareWriteCoordination(ctx context.Context, plan *toolCallPlan
 }
 
 func (a *Agent) reserveCoordinatedParentWrite(plan *toolCallPlan) (func(), error) {
-	if plan.hooksMayMutateWorkspace &&
+	if hookNeedsWorkspaceWriteGuard(plan) &&
 		a.svc.writeScheduler != nil && a.subagentDepth == 0 {
 		claim, err := WholeWorkspaceWriteClaim(a.writeWorkspaceRoot)
 		if err != nil {
@@ -56,7 +56,7 @@ func (a *Agent) acquireWorkspaceLease(ctx context.Context, plan *toolCallPlan) (
 	}
 	// Tool hooks are arbitrary user shell code, so their write surface cannot be
 	// narrowed to the concrete tool's path arguments.
-	if plan.hooksMayMutateWorkspace {
+	if hookNeedsWorkspaceWriteGuard(plan) {
 		return a.svc.workspaceLease.HoldWrite(ctx)
 	}
 	name := plan.runTool.Name()
@@ -72,6 +72,16 @@ func (a *Agent) acquireWorkspaceLease(ctx context.Context, plan *toolCallPlan) (
 	return a.svc.workspaceLease.HoldWrite(ctx)
 }
 
+// hookNeedsWorkspaceWriteGuard 判断一个调用是否需要为可写 hook 保留工作区保护。
+// 只读工具和管理后台任务的工具必须保持可用，否则后台写入任务会连 wait、kill_shell
+// 等用于观察或终止任务的调用一起阻塞，形成无法自救的等待环。
+func hookNeedsWorkspaceWriteGuard(plan *toolCallPlan) bool {
+	if plan == nil || !plan.hooksMayMutateWorkspace || plan.readOnly || plan.runTool == nil {
+		return false
+	}
+	return plan.effects.WorkspaceMutation || parentWriteGuardTarget(plan.runTool.Name())
+}
+
 func (a *Agent) applyLiveWriteReservation(ctx context.Context, plan *toolCallPlan) (toolOutcome, bool) {
 	if a == nil || plan == nil || a.svc.writeScheduler == nil || plan.runTool == nil {
 		return toolOutcome{}, false
@@ -81,7 +91,7 @@ func (a *Agent) applyLiveWriteReservation(ctx context.Context, plan *toolCallPla
 		return toolOutcome{}, false
 	}
 	name := plan.runTool.Name()
-	if plan.hooksMayMutateWorkspace {
+	if hookNeedsWorkspaceWriteGuard(plan) {
 		if err := a.svc.writeScheduler.MarkOpaque(id); err != nil {
 			return writeClaimBlockedOutcome(err), true
 		}

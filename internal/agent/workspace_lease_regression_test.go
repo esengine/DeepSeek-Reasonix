@@ -181,7 +181,7 @@ func TestWritableHooksUseWorkspaceLease(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	writer := &workspaceLeaseTestTool{name: "lease_reader", readOnly: true}
+	writer := &workspaceLeaseTestTool{name: "lease_reader", readOnly: false}
 	hooks := &workspaceWritingHooks{path: protected}
 	a := deliveryLeaseTestAgent(t, writerOwner, writer)
 	a.writeWorkspaceRoot = root
@@ -216,7 +216,7 @@ func TestWritableHooksReserveWholeParentWorkspace(t *testing.T) {
 		t.Fatal(err)
 	}
 	hooks := &parentClaimProbeHooks{scheduler: scheduler, claim: hookClaim}
-	writer := &recordingWriter{name: "lease_reader", readOnly: true}
+	writer := &recordingWriter{name: "lease_reader", readOnly: false}
 	a := deliveryLeaseTestAgent(t, nil, writer)
 	a.svc.hooks = hooks
 	a.svc.writeScheduler = scheduler
@@ -263,4 +263,54 @@ func TestWritableHooksSerializeReadOnlyToolBatch(t *testing.T) {
 		t.Fatalf("executions first=%d second=%d hooks=%d, want 1/1/2",
 			first.calls.Load(), second.calls.Load(), hooks.calls.Load())
 	}
+}
+
+func TestWritableHooksKeepReadAndManagementToolsAvailableDuringBackgroundWrite(t *testing.T) {
+	root := t.TempDir()
+	scheduler := NewSubagentScheduler(4, 2)
+	release, _, err := scheduler.AcquireWithID(context.Background(), AcquireRequest{
+		Writer:     true,
+		WritePaths: mustWholeWorkspaceClaim(t, root),
+		Label:      "background writer",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer release()
+
+	hooks := &workspaceWritingHooks{path: filepath.Join(root, "hook-side.go")}
+	readFile := &workspaceLeaseTestTool{name: "read_file", readOnly: true}
+	wait := &workspaceLeaseTestTool{name: "wait", readOnly: true}
+	killShell := &workspaceLeaseTestTool{name: "kill_shell", readOnly: false}
+	writer := &workspaceLeaseTestTool{name: "write_file", readOnly: false}
+	a := deliveryLeaseTestAgent(t, nil, readFile, wait, killShell, writer)
+	a.svc.hooks = hooks
+	a.svc.writeScheduler = scheduler
+	a.writeWorkspaceRoot = root
+
+	// 只读和管理调用必须能在后台写入任务运行时继续执行，否则无法观察或终止任务。
+	for _, call := range []provider.ToolCall{
+		providerToolCall("read", readFile.Name()),
+		providerToolCall("wait", wait.Name()),
+		providerToolCall("kill", killShell.Name()),
+	} {
+		out := a.executeOne(context.Background(), &a.turn, call)
+		if out.blocked || out.errMsg != "" {
+			t.Fatalf("%s was blocked by hook write coordination: %+v", call.Name, out)
+		}
+	}
+
+	out := a.executeOne(context.Background(), &a.turn, providerToolCall("write", writer.Name()))
+	if !out.blocked || out.errMsg == "" {
+		t.Fatalf("workspace writer was not blocked by background claim: %+v", out)
+	}
+}
+
+func mustWholeWorkspaceClaim(t *testing.T, root string) WritePathSet {
+	t.Helper()
+	claim, err := WholeWorkspaceWriteClaim(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return claim
 }
