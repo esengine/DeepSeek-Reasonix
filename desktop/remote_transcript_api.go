@@ -180,11 +180,7 @@ func (a *App) remoteSessionHistoryRead(tabID, route string, query url.Values, de
 		a.remoteTabMu.Unlock()
 		return false, fmt.Errorf("remote session history runtime changed")
 	}
-	requiredCapability := serveCapabilitySessions
-	if route == "/session-history/content" {
-		requiredCapability = serveCapabilitySessionContentV1
-	}
-	if !tab.capabilities[requiredCapability] {
+	if !tab.capabilities[serveCapabilitySessionContentV1] {
 		a.remoteTabMu.Unlock()
 		return false, nil
 	}

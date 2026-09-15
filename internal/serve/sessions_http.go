@@ -25,6 +25,9 @@ type sessionListEntry struct {
 	Running    bool   `json:"running,omitempty"`
 	TakenOver  bool   `json:"takenOver,omitempty"`
 	MtimeMilli int64  `json:"mtimeMilli"`
+
+	Preview       string `json:"preview,omitempty"`
+	MetadataReady bool   `json:"metadataReady,omitempty"`
 }
 
 // sessions lists saved sessions with event-log-aware titles and turn counts.
@@ -94,7 +97,9 @@ func (s *Server) sessions(w http.ResponseWriter, r *http.Request) {
 					row := sessionListEntry{
 						HostID: info.Ref.HostID, SessionID: info.Ref.SessionID, Name: info.SessionID,
 						Title: info.Title, Turns: info.Turns, MtimeMilli: info.CreatedAt.UnixMilli(),
-						Current: bound && info.Ref == runtime.Ref(),
+						Current:       bound && info.Ref == runtime.Ref(),
+						Preview:       info.Preview,
+						MetadataReady: info.MetadataStatus == session.MetadataReady,
 					}
 					// Canonical rows carry no legacy preview fallback; without
 					// one a chatted session lists as an untitled blank until

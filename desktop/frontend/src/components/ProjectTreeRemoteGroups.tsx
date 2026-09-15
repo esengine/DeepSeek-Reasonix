@@ -79,7 +79,7 @@ export function mergeRemoteSessionsIntoTree(
   return tree.map((node) => {
     if (!node.remote) return node;
     const rows = sessions[remoteProjectKey(node.remote)] ?? [];
-    const remoteChildren = rows.filter((r) => r.current || r.turns || r.title || r.pinned || !r.sessionId).map((row): ProjectNode => {
+    const remoteChildren = rows.map((row): ProjectNode => {
       const identity = remoteSessionIdentity(row);
       const session = runtime?.sessions.find(session => session.hostId === node.remote!.hostId && session.workspaceRoot === node.remote!.workspace && (
         row.sessionId ? session.sessionId === row.sessionId : session.sessionPath === row.path

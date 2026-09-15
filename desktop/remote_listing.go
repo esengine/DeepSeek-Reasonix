@@ -38,6 +38,9 @@ type serveSessionEntry struct {
 	Running    bool   `json:"running"`
 	TakenOver  bool   `json:"takenOver,omitempty"`
 	MtimeMilli int64  `json:"mtimeMilli"`
+
+	Preview       string `json:"preview,omitempty"`
+	MetadataReady bool   `json:"metadataReady,omitempty"`
 }
 
 type serveHTTPStatusError struct {
@@ -425,10 +428,11 @@ func (a *App) remoteProjectSessions(ctx context.Context, client *http.Client, ba
 			title = override
 		}
 		// A never-chatted canonical session is the remote analog of a local
-		// blank: local blanks disappear when unused, so hide these rows from
-		// the tree instead of letting opened-but-unused sessions pile up as
-		// duplicate "new session" entries.
-		if e.SessionID != "" && !e.Current && e.Turns == 0 && title == "" {
+		// blank: local blanks disappear when unused, so hide these rows.
+		// MetadataStatus gates the check: a session whose catalog has not
+		// rebuilt (stale turns/title) stays visible until it definitively
+		// has no turns and no preview.
+		if e.SessionID != "" && !e.Current && e.Turns == 0 && title == "" && e.Preview == "" && e.MetadataReady {
 			continue
 		}
 		current := e.Current
