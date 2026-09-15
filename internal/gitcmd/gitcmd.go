@@ -24,11 +24,13 @@ package gitcmd
 import (
 	"bufio"
 	"context"
+	"fmt"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"runtime"
 	"slices"
+	"strconv"
 	"strings"
 
 	"reasonix/internal/proc"
@@ -260,11 +262,84 @@ func CommandWithConfig(ctx context.Context, dir string, extraConfig []string, ar
 // config that sets core.sshCommand is a plugin-trust concern, not one this
 // diff-oriented baseline can address (see the package residual note).
 func Env() []string {
-	return append(secrets.ProcessEnv(),
+	return WithConfigEnv(append(secrets.ProcessEnv(),
 		// Read-only probes must not take the index lock.
 		"GIT_OPTIONAL_LOCKS=0",
 		// Fail fast instead of blocking on a credential prompt for a terminal
 		// the TUI owns and the desktop app does not have.
 		"GIT_TERMINAL_PROMPT=0",
-	)
+	))
+}
+
+// envConfig is git config every git subprocess Reasonix starts must see,
+// layered over the user's own ~/.gitconfig through git's environment-config
+// mechanism (GIT_CONFIG_COUNT/GIT_CONFIG_KEY_n/GIT_CONFIG_VALUE_n, equivalent
+// to -c on the command line, git >= 2.31). It applies to the agent's own git
+// invocations too, which the Args -c baseline does not reach.
+//
+// rebase.abbreviateCommands=false pins the interactive-rebase todo to the long
+// command words. Reasonix's agent rewrites that todo by matching the leading
+// command name, so a user whose git config sets abbreviateCommands=true would
+// otherwise get a "p" the rewrite does not recognize. Forcing the long form
+// makes the todo match the assumption Reasonix already makes, for every user,
+// without editing the user's config file.
+var envConfig = [][2]string{
+	{"rebase.abbreviateCommands", "false"},
+}
+
+// WithConfigEnv returns env with git's environment-config entries appended so a
+// git subprocess inherits envConfig on top of the user's own configuration. An
+// existing GIT_CONFIG_COUNT is extended rather than overwritten, so any
+// GIT_CONFIG_KEY_n/GIT_CONFIG_VALUE_n pairs already in env survive. Git older
+// than 2.31 ignores these variables, leaving the user's config in effect.
+func WithConfigEnv(env []string) []string {
+	if len(envConfig) == 0 {
+		return env
+	}
+	count := 0
+	if v, ok := envValue(env, "GIT_CONFIG_COUNT"); ok {
+		if n, err := strconv.Atoi(strings.TrimSpace(v)); err == nil && n > 0 {
+			count = n
+		}
+	}
+	out := make([]string, 0, len(env)+2*len(envConfig)+1)
+	replaced := false
+	for _, kv := range env {
+		k, _, ok := strings.Cut(kv, "=")
+		if ok && envKeyEqual(k, "GIT_CONFIG_COUNT") {
+			if !replaced {
+				out = append(out, fmt.Sprintf("GIT_CONFIG_COUNT=%d", count+len(envConfig)))
+				replaced = true
+			}
+			continue
+		}
+		out = append(out, kv)
+	}
+	if !replaced {
+		out = append(out, fmt.Sprintf("GIT_CONFIG_COUNT=%d", count+len(envConfig)))
+	}
+	for i, kv := range envConfig {
+		out = append(out, fmt.Sprintf("GIT_CONFIG_KEY_%d=%s", count+i, kv[0]))
+		out = append(out, fmt.Sprintf("GIT_CONFIG_VALUE_%d=%s", count+i, kv[1]))
+	}
+	return out
+}
+
+// envValue returns the last value for key in env. Keys compare the way the OS
+// does: case-insensitively on Windows, exactly elsewhere.
+func envValue(env []string, key string) (string, bool) {
+	for _, entry := range slices.Backward(env) {
+		k, v, ok := strings.Cut(entry, "=")
+		if ok && envKeyEqual(k, key) {
+			return v, true
+		}
+	}
+	return "", false
+}
+
+func envKeyEqual(a, b string) bool {
+	if runtime.GOOS == "windows" {
+		return strings.EqualFold(a, b)
+	}
+	return a == b
 }

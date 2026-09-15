@@ -85,6 +85,20 @@ func TestBashCommandEnvKeepsTokensByDefault(t *testing.T) {
 	}
 }
 
+// Agent-run git must see Reasonix's config baseline (e.g. the interactive
+// rebase todo always uses the long command words), regardless of the user's
+// ~/.gitconfig, so the rewrite the agent performs matches what it assumes.
+func TestBashCommandEnvForcesGitConfig(t *testing.T) {
+	env := strings.Join(bashCommandEnv(context.Background()), "\n")
+	// Assert on the pair rather than a fixed index: a developer's own
+	// environment may already carry GIT_CONFIG_COUNT/KEY_n entries.
+	if !strings.Contains(env, "GIT_CONFIG_COUNT=") ||
+		!strings.Contains(env, "=rebase.abbreviateCommands") ||
+		!strings.Contains(env, "=false") {
+		t.Fatalf("bash env missing forced git config:\n%s", env)
+	}
+}
+
 func TestParseShellPATH(t *testing.T) {
 	const marker = "__REASONIX_BASH_PATH__="
 	cases := []struct {

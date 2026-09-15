@@ -17,6 +17,7 @@ import (
 
 	"mvdan.cc/sh/v3/syntax"
 
+	"reasonix/internal/gitcmd"
 	"reasonix/internal/jobs"
 	"reasonix/internal/persistentshell"
 	"reasonix/internal/proc"
@@ -618,16 +619,18 @@ func commandPreview(cmd string) string {
 
 func bashCommandEnv(ctx context.Context) []string {
 	env := secrets.ProcessEnv()
-	if runtime.GOOS == "windows" {
-		return env
-	}
-	currentPath, _ := envValue(env, "PATH")
-	if shellPath := strings.TrimSpace(bashShellPATH(ctx)); shellPath != "" {
-		if merged := mergePathLists(shellPath, currentPath); merged != currentPath {
-			env = setEnvValue(env, "PATH", merged)
+	if runtime.GOOS != "windows" {
+		currentPath, _ := envValue(env, "PATH")
+		if shellPath := strings.TrimSpace(bashShellPATH(ctx)); shellPath != "" {
+			if merged := mergePathLists(shellPath, currentPath); merged != currentPath {
+				env = setEnvValue(env, "PATH", merged)
+			}
 		}
 	}
-	return env
+	// Force the git config Reasonix relies on (e.g. rebase.abbreviateCommands)
+	// onto every git the command starts, so agent-run git matches what Reasonix
+	// assumes regardless of the user's ~/.gitconfig.
+	return gitcmd.WithConfigEnv(env)
 }
 
 func defaultBashShellPATH(ctx context.Context) string {
