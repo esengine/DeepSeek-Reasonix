@@ -2,6 +2,569 @@
   "schemaVersion": 1,
   "releases": [
     {
+      "version": "1.38.9",
+      "date": "2026-09-15",
+      "channel": "stable",
+      "targetingVersion": 1,
+      "title": {
+        "en": "Desktop 1.38.9: Session reliability, persistent bash, and CDP browser",
+        "zh": "桌面版 1.38.9：会话可靠性、持久化 bash 与 CDP 浏览器"
+      },
+      "summary": {
+        "en": "This release focuses on session persistence and recovery, adds persistent bash sessions and a CDP browser backend, and improves file navigation and transcript navigation.",
+        "zh": "本次发布聚焦会话持久化与恢复，新增持久化 bash 会话和 CDP 浏览器后端，并改进文件导航与对话导航。"
+      },
+      "surfaces": [
+        "desktop",
+        "cli"
+      ],
+      "guides": [
+        {
+          "title": {
+            "en": "Desktop Session v5",
+            "zh": "桌面会话 v5"
+          },
+          "body": {
+            "en": "Learn about the new SessionID-only persistence architecture for desktop sessions.",
+            "zh": "了解桌面会话全新的仅 SessionID 持久化架构。"
+          },
+          "href": "https://github.com/esengine/DeepSeek-Reasonix/blob/8f93ea2b2ed8b74a5af279642bcaf4eff45d6d08/docs/desktop-session-v5.md"
+        },
+        {
+          "title": {
+            "en": "CDP Browser Backend",
+            "zh": "CDP 浏览器后端"
+          },
+          "body": {
+            "en": "Documentation for the new CDP browser backend available for CLI, Serve, and headless sessions.",
+            "zh": "面向 CLI、Serve 和无头会话的全新 CDP 浏览器后端文档。"
+          },
+          "href": "https://github.com/esengine/DeepSeek-Reasonix/blob/8f93ea2b2ed8b74a5af279642bcaf4eff45d6d08/docs/BROWSER_CDP.md"
+        },
+        {
+          "title": {
+            "en": "Dock File Navigation",
+            "zh": "Dock 文件导航"
+          },
+          "body": {
+            "en": "Details on the command-driven file navigation ownership model.",
+            "zh": "命令驱动的文件导航所有权模型详情。"
+          },
+          "href": "https://github.com/esengine/DeepSeek-Reasonix/blob/8f93ea2b2ed8b74a5af279642bcaf4eff45d6d08/docs/DOCK_FILE_NAVIGATION.md"
+        },
+        {
+          "title": {
+            "en": "Resource Governance Upgrade",
+            "zh": "资源治理升级"
+          },
+          "body": {
+            "en": "How desktop session resources are bounded and managed.",
+            "zh": "桌面会话资源如何受限与管理。"
+          },
+          "href": "https://github.com/esengine/DeepSeek-Reasonix/blob/8f93ea2b2ed8b74a5af279642bcaf4eff45d6d08/docs/RESOURCE_GOVERNANCE_UPGRADE.md"
+        },
+        {
+          "title": {
+            "en": "Transcript Outline Navigation",
+            "zh": "对话大纲导航"
+          },
+          "body": {
+            "en": "Design and acceptance record for the complete turn navigator.",
+            "zh": "完整轮次导航器的设计与验收记录。"
+          },
+          "href": "https://github.com/esengine/DeepSeek-Reasonix/blob/8f93ea2b2ed8b74a5af279642bcaf4eff45d6d08/docs/TRANSCRIPT_OUTLINE_NAVIGATION.md"
+        },
+        {
+          "title": {
+            "en": "Persistent Turn Fork Report",
+            "zh": "持久化轮次分叉报告"
+          },
+          "body": {
+            "en": "Report on forking completed turns from the persisted session log.",
+            "zh": "从持久化会话日志分叉已完成轮次的报告。"
+          },
+          "href": "https://github.com/esengine/DeepSeek-Reasonix/blob/8f93ea2b2ed8b74a5af279642bcaf4eff45d6d08/docs/persistent-turn-fork-report.md"
+        },
+        {
+          "title": {
+            "en": "Session Fast Recovery",
+            "zh": "会话快速恢复"
+          },
+          "body": {
+            "en": "How fast recovery and independent history work.",
+            "zh": "快速恢复与独立历史的工作原理。"
+          },
+          "href": "https://github.com/esengine/DeepSeek-Reasonix/blob/8f93ea2b2ed8b74a5af279642bcaf4eff45d6d08/docs/session-fast-recovery.md"
+        }
+      ],
+      "highlights": [
+        {
+          "kind": "new",
+          "targets": [
+            "desktop"
+          ],
+          "title": {
+            "en": "SessionID-only desktop persistence",
+            "zh": "仅 SessionID 的桌面持久化"
+          },
+          "body": {
+            "en": "Desktop sessions now use a single SessionID-based persistence architecture, preventing sessions from disappearing and improving reliability across restarts.",
+            "zh": "桌面会话现采用基于单一 SessionID 的持久化架构，防止会话丢失并提升重启后的可靠性。"
+          },
+          "refs": [
+            10326
+          ]
+        },
+        {
+          "kind": "new",
+          "targets": [
+            "desktop",
+            "cli"
+          ],
+          "title": {
+            "en": "Persistent bash sessions",
+            "zh": "持久化 bash 会话"
+          },
+          "body": {
+            "en": "Foreground bash calls now share a session-scoped PTY, so cd, exported variables, and shell functions persist across calls.",
+            "zh": "前台 bash 调用现共享会话级 PTY，因此 cd、导出变量和 shell 函数可在多次调用间保持。"
+          },
+          "refs": [
+            10327
+          ]
+        },
+        {
+          "kind": "new",
+          "targets": [
+            "desktop",
+            "cli"
+          ],
+          "title": {
+            "en": "CDP browser backend",
+            "zh": "CDP 浏览器后端"
+          },
+          "body": {
+            "en": "CLI, Serve, and headless sessions can now use the same browser tools as the Electron shell via a new CDP backend.",
+            "zh": "CLI、Serve 和无头会话现可通过新的 CDP 后端使用与 Electron 外壳相同的浏览器工具。"
+          },
+          "refs": [
+            10328
+          ]
+        },
+        {
+          "kind": "improved",
+          "targets": [
+            "desktop"
+          ],
+          "title": {
+            "en": "Complete turn navigator",
+            "zh": "完整轮次导航器"
+          },
+          "body": {
+            "en": "The turn navigator now indexes the entire conversation, not just loaded turns, allowing you to jump to any turn.",
+            "zh": "轮次导航器现索引整个对话而非仅已加载的轮次，可跳转到任意轮次。"
+          },
+          "refs": [
+            10276
+          ]
+        },
+        {
+          "kind": "improved",
+          "targets": [
+            "desktop"
+          ],
+          "title": {
+            "en": "File references in chat answers",
+            "zh": "聊天回答中的文件引用"
+          },
+          "body": {
+            "en": "Files mentioned in chat answers are now resolved and previewable, including SVG code blocks.",
+            "zh": "聊天回答中提到的文件现可解析并预览，包括 SVG 代码块。"
+          },
+          "refs": [
+            10277
+          ]
+        },
+        {
+          "kind": "fixed",
+          "targets": [
+            "desktop"
+          ],
+          "title": {
+            "en": "Dock file navigation lifecycle",
+            "zh": "Dock 文件导航生命周期"
+          },
+          "body": {
+            "en": "Fixed races and render loops when opening files from the Dock, ensuring stable navigation.",
+            "zh": "修复从 Dock 打开文件时的竞态与渲染循环，确保导航稳定。"
+          },
+          "refs": [
+            10268,
+            10280
+          ]
+        },
+        {
+          "kind": "fixed",
+          "targets": [
+            "desktop"
+          ],
+          "title": {
+            "en": "Anchored overlay lifecycle",
+            "zh": "锚定弹层生命周期"
+          },
+          "body": {
+            "en": "Fixed model selector and other overlays flashing or staying open after their trigger disappears.",
+            "zh": "修复模型选择器及其他弹层在触发器消失后闪烁或保持打开的问题。"
+          },
+          "refs": [
+            10275
+          ]
+        },
+        {
+          "kind": "fixed",
+          "targets": [
+            "desktop"
+          ],
+          "title": {
+            "en": "Session history recovery on model startup failure",
+            "zh": "模型启动失败时的会话历史恢复"
+          },
+          "body": {
+            "en": "Session history remains visible even if the saved model connection fails to start.",
+            "zh": "即使保存的模型连接启动失败，会话历史仍保持可见。"
+          },
+          "refs": [
+            10287
+          ]
+        },
+        {
+          "kind": "fixed",
+          "targets": [
+            "desktop"
+          ],
+          "title": {
+            "en": "Fork completed turns from persisted log",
+            "zh": "从持久化日志分叉已完成轮次"
+          },
+          "body": {
+            "en": "The branch button now correctly enables for completed turns based on durable session state.",
+            "zh": "分支按钮现根据持久化会话状态正确启用已完成轮次。"
+          },
+          "refs": [
+            10284
+          ]
+        },
+        {
+          "kind": "fixed",
+          "targets": [
+            "desktop"
+          ],
+          "title": {
+            "en": "Windows startup console flash",
+            "zh": "Windows 启动控制台闪窗"
+          },
+          "body": {
+            "en": "The Windows desktop service no longer flashes a console window during startup.",
+            "zh": "Windows 桌面服务启动时不再闪现控制台窗口。"
+          },
+          "refs": [
+            10230
+          ]
+        }
+      ],
+      "changes": {
+        "new": [
+          {
+            "targets": [
+              "desktop"
+            ],
+            "title": {
+              "en": "SessionID-only desktop persistence",
+              "zh": "仅 SessionID 的桌面持久化"
+            },
+            "body": {
+              "en": "Desktop sessions now use a single SessionID-based persistence architecture, preventing sessions from disappearing and improving reliability across restarts.",
+              "zh": "桌面会话现采用基于单一 SessionID 的持久化架构，防止会话丢失并提升重启后的可靠性。"
+            },
+            "refs": [
+              10326
+            ]
+          },
+          {
+            "targets": [
+              "desktop",
+              "cli"
+            ],
+            "title": {
+              "en": "Persistent bash sessions",
+              "zh": "持久化 bash 会话"
+            },
+            "body": {
+              "en": "Foreground bash calls now share a session-scoped PTY, so cd, exported variables, and shell functions persist across calls.",
+              "zh": "前台 bash 调用现共享会话级 PTY，因此 cd、导出变量和 shell 函数可在多次调用间保持。"
+            },
+            "refs": [
+              10327
+            ]
+          },
+          {
+            "targets": [
+              "desktop",
+              "cli"
+            ],
+            "title": {
+              "en": "CDP browser backend",
+              "zh": "CDP 浏览器后端"
+            },
+            "body": {
+              "en": "CLI, Serve, and headless sessions can now use the same browser tools as the Electron shell via a new CDP backend.",
+              "zh": "CLI、Serve 和无头会话现可通过新的 CDP 后端使用与 Electron 外壳相同的浏览器工具。"
+            },
+            "refs": [
+              10328
+            ]
+          }
+        ],
+        "improved": [
+          {
+            "targets": [
+              "desktop"
+            ],
+            "title": {
+              "en": "Complete turn navigator",
+              "zh": "完整轮次导航器"
+            },
+            "body": {
+              "en": "The turn navigator now indexes the entire conversation, not just loaded turns, allowing you to jump to any turn.",
+              "zh": "轮次导航器现索引整个对话而非仅已加载的轮次，可跳转到任意轮次。"
+            },
+            "refs": [
+              10276
+            ]
+          },
+          {
+            "targets": [
+              "desktop"
+            ],
+            "title": {
+              "en": "File references in chat answers",
+              "zh": "聊天回答中的文件引用"
+            },
+            "body": {
+              "en": "Files mentioned in chat answers are now resolved and previewable, including SVG code blocks.",
+              "zh": "聊天回答中提到的文件现可解析并预览，包括 SVG 代码块。"
+            },
+            "refs": [
+              10277
+            ]
+          },
+          {
+            "targets": [
+              "desktop"
+            ],
+            "title": {
+              "en": "Bounded desktop session resources",
+              "zh": "受限的桌面会话资源"
+            },
+            "body": {
+              "en": "Desktop session resources are now bounded to prevent excessive memory and CPU usage in long sessions.",
+              "zh": "桌面会话资源现受限，防止长会话中内存和 CPU 占用过高。"
+            },
+            "refs": [
+              10295
+            ]
+          },
+          {
+            "targets": [
+              "desktop"
+            ],
+            "title": {
+              "en": "Fast session recovery and independent history",
+              "zh": "快速会话恢复与独立历史"
+            },
+            "body": {
+              "en": "Sessions now recover faster and history/search databases are independent, so missing derived data doesn't block recent messages.",
+              "zh": "会话恢复更快，历史/搜索数据库独立，缺失派生数据不会阻塞最近消息。"
+            },
+            "refs": [
+              10267
+            ]
+          },
+          {
+            "targets": [
+              "desktop",
+              "cli"
+            ],
+            "title": {
+              "en": "Harness-style turn loop",
+              "zh": "Harness 式轮次循环"
+            },
+            "body": {
+              "en": "Session execution now uses a single turn loop authority, fixing cancel races and improving rebuild stability.",
+              "zh": "会话执行现采用单一轮次循环权威，修复取消竞态并提升重建稳定性。"
+            },
+            "refs": [
+              10291
+            ]
+          }
+        ],
+        "fixed": [
+          {
+            "targets": [
+              "desktop"
+            ],
+            "title": {
+              "en": "Dock file navigation lifecycle",
+              "zh": "Dock 文件导航生命周期"
+            },
+            "body": {
+              "en": "Fixed races and render loops when opening files from the Dock, ensuring stable navigation.",
+              "zh": "修复从 Dock 打开文件时的竞态与渲染循环，确保导航稳定。"
+            },
+            "refs": [
+              10268,
+              10280
+            ]
+          },
+          {
+            "targets": [
+              "desktop"
+            ],
+            "title": {
+              "en": "Anchored overlay lifecycle",
+              "zh": "锚定弹层生命周期"
+            },
+            "body": {
+              "en": "Fixed model selector and other overlays flashing or staying open after their trigger disappears.",
+              "zh": "修复模型选择器及其他弹层在触发器消失后闪烁或保持打开的问题。"
+            },
+            "refs": [
+              10275
+            ]
+          },
+          {
+            "targets": [
+              "desktop"
+            ],
+            "title": {
+              "en": "Session history recovery on model startup failure",
+              "zh": "模型启动失败时的会话历史恢复"
+            },
+            "body": {
+              "en": "Session history remains visible even if the saved model connection fails to start.",
+              "zh": "即使保存的模型连接启动失败，会话历史仍保持可见。"
+            },
+            "refs": [
+              10287
+            ]
+          },
+          {
+            "targets": [
+              "desktop"
+            ],
+            "title": {
+              "en": "Fork completed turns from persisted log",
+              "zh": "从持久化日志分叉已完成轮次"
+            },
+            "body": {
+              "en": "The branch button now correctly enables for completed turns based on durable session state.",
+              "zh": "分支按钮现根据持久化会话状态正确启用已完成轮次。"
+            },
+            "refs": [
+              10284
+            ]
+          },
+          {
+            "targets": [
+              "desktop"
+            ],
+            "title": {
+              "en": "Windows startup console flash",
+              "zh": "Windows 启动控制台闪窗"
+            },
+            "body": {
+              "en": "The Windows desktop service no longer flashes a console window during startup.",
+              "zh": "Windows 桌面服务启动时不再闪现控制台窗口。"
+            },
+            "refs": [
+              10230
+            ]
+          },
+          {
+            "targets": [
+              "desktop",
+              "cli"
+            ],
+            "title": {
+              "en": "Edit blocks file race fix",
+              "zh": "编辑块文件竞态修复"
+            },
+            "body": {
+              "en": "Fixed file system race conditions in edit blocks, preventing data loss.",
+              "zh": "修复编辑块中的文件系统竞态条件，防止数据丢失。"
+            },
+            "refs": [
+              301
+            ]
+          },
+          {
+            "targets": [
+              "desktop",
+              "cli"
+            ],
+            "title": {
+              "en": "Session capacity writer lease release",
+              "zh": "会话容量写者租约释放"
+            },
+            "body": {
+              "en": "Fixed a Windows file lock issue in session capacity tooling.",
+              "zh": "修复会话容量工具中的 Windows 文件锁问题。"
+            },
+            "refs": [
+              10325
+            ]
+          },
+          {
+            "targets": [
+              "desktop"
+            ],
+            "title": {
+              "en": "Windows test job repairs",
+              "zh": "Windows 测试任务修复"
+            },
+            "body": {
+              "en": "Fixed multiple issues causing Windows CI test failures.",
+              "zh": "修复导致 Windows CI 测试失败的多个问题。"
+            },
+            "refs": [
+              10321
+            ]
+          }
+        ]
+      },
+      "upgrade": [],
+      "risks": [],
+      "contributors": [
+        "SivanCola",
+        "esengine",
+        "Yizking"
+      ],
+      "links": {
+        "github": "https://github.com/esengine/DeepSeek-Reasonix/releases/tag/desktop-v1.38.9",
+        "compare": "https://github.com/esengine/DeepSeek-Reasonix/compare/desktop-v1.38.8...desktop-v1.38.9",
+        "download": "https://reasonix.io/?download=desktop&channel=stable#start"
+      },
+      "releaseId": "1.38.9",
+      "baseVersion": "1.38.9",
+      "status": "reviewed",
+      "previousRelease": "1.38.8",
+      "builds": {
+        "cli": "v1.38.9",
+        "desktop": "v1.38.9",
+        "npm": "1.38.9"
+      }
+    },
+    {
       "version": "1.38.8",
       "date": "2026-09-14",
       "channel": "stable",
