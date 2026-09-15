@@ -2,6 +2,7 @@ package boot
 
 import (
 	"reasonix/internal/agentpreset"
+	"reasonix/internal/plugin"
 	"reasonix/internal/tool"
 )
 
@@ -105,6 +106,11 @@ func applyUnifiedProviderToolSurface(reg *tool.Registry) {
 	}
 	allow := make([]string, 0, 16)
 	for _, name := range UnifiedProviderToolNames() {
+		if _, ok := reg.Get(name); ok {
+			allow = append(allow, name)
+		}
+	}
+	for _, name := range plugin.MCPResourceToolNames() {
 		if _, ok := reg.Get(name); ok {
 			allow = append(allow, name)
 		}

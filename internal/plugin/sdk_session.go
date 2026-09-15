@@ -739,6 +739,15 @@ func invokeSDKMethod(ctx context.Context, session *mcpsdk.ClientSession, method 
 			items = append(items, item)
 		}
 		return marshal(map[string]any{"resources": items}, nil)
+	case "resources/templates/list":
+		items := make([]*mcpsdk.ResourceTemplate, 0)
+		for item, err := range session.ResourceTemplates(ctx, nil) {
+			if err != nil {
+				return nil, err
+			}
+			items = append(items, item)
+		}
+		return marshal(map[string]any{"resourceTemplates": items}, nil)
 	case "resources/read":
 		var typed mcpsdk.ReadResourceParams
 		if err := decode(&typed); err != nil {
@@ -752,7 +761,7 @@ func invokeSDKMethod(ctx context.Context, session *mcpsdk.ClientSession, method 
 
 func safeToReplayMCPMethod(method string) bool {
 	switch method {
-	case "initialize", "ping", "tools/list", "prompts/list", "prompts/get", "resources/list", "resources/read":
+	case "initialize", "ping", "tools/list", "prompts/list", "prompts/get", "resources/list", "resources/templates/list", "resources/read":
 		return true
 	default:
 		return false

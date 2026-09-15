@@ -27,6 +27,9 @@ type Sections struct {
 	Workspace        string
 	BackgroundMemory string
 	SkillsCatalog    string
+	// MCPServers is last so connecting or failing a server does not rewrite
+	// the more stable environment/workspace/memory prefix inside the snapshot.
+	MCPServers string
 }
 
 // Snapshot is one validated session-context envelope. Content is the exact
@@ -58,6 +61,7 @@ type Diagnostics struct {
 	Workspace        SectionStat
 	BackgroundMemory SectionStat
 	SkillsCatalog    SectionStat
+	MCPServers       SectionStat
 }
 
 // PolicyBlock is the cache-stable system instruction that defines the
@@ -85,6 +89,7 @@ func Build(sections Sections) Snapshot {
 	appendSection(&body, "Workspace", sections.Workspace)
 	appendSection(&body, "Background memory", sections.BackgroundMemory)
 	appendSection(&body, "Skills catalog", sections.SkillsCatalog)
+	appendSection(&body, "MCP servers", sections.MCPServers)
 	bodyText := body.String()
 	digest := digestOf(bodyText)
 	content := openTag + "\n" + bodyText + "\n\n" + digestPrefix + digest + "\n" + closeTag
@@ -135,6 +140,7 @@ func SectionDiagnostics(snapshot Snapshot) Diagnostics {
 		Workspace:        sectionStat(snapshot.Sections.Workspace),
 		BackgroundMemory: sectionStat(snapshot.Sections.BackgroundMemory),
 		SkillsCatalog:    sectionStat(snapshot.Sections.SkillsCatalog),
+		MCPServers:       sectionStat(snapshot.Sections.MCPServers),
 	}
 }
 
@@ -204,8 +210,12 @@ func appendSection(body *strings.Builder, heading, value string) {
 }
 
 func sectionManifest(sections Sections) string {
-	return fmt.Sprintf("Section lengths: Environment=%d; Workspace=%d; Background memory=%d; Skills catalog=%d",
+	base := fmt.Sprintf("Section lengths: Environment=%d; Workspace=%d; Background memory=%d; Skills catalog=%d",
 		len(sections.Environment), len(sections.Workspace), len(sections.BackgroundMemory), len(sections.SkillsCatalog))
+	if sections.MCPServers == "" {
+		return base
+	}
+	return fmt.Sprintf("%s; MCP servers=%d", base, len(sections.MCPServers))
 }
 
 func appendTextPart(parts []Part, text string) []Part {
@@ -224,6 +234,7 @@ func normalizeSections(sections Sections) Sections {
 	sections.Workspace = normalizeSection(sections.Workspace, "Workspace")
 	sections.BackgroundMemory = normalizeSection(sections.BackgroundMemory, "Background memory")
 	sections.SkillsCatalog = normalizeSection(sections.SkillsCatalog, "Skills catalog")
+	sections.MCPServers = normalizeSection(sections.MCPServers, "MCP servers")
 	return sections
 }
 
@@ -266,6 +277,7 @@ func parseFramedSections(body string) (Sections, bool) {
 		{"Workspace", func(s *Sections, v string) { s.Workspace = v }},
 		{"Background memory", func(s *Sections, v string) { s.BackgroundMemory = v }},
 		{"Skills catalog", func(s *Sections, v string) { s.SkillsCatalog = v }},
+		{"MCP servers", func(s *Sections, v string) { s.MCPServers = v }},
 	}
 	var sections Sections
 	for i, spec := range specs {
@@ -300,11 +312,11 @@ func parseFramedSections(body string) (Sections, bool) {
 	return sections, payload == ""
 }
 
-func parseSectionManifest(line string) ([4]int, bool) {
-	want := [...]string{"Environment", "Workspace", "Background memory", "Skills catalog"}
-	var lengths [4]int
+func parseSectionManifest(line string) ([5]int, bool) {
+	want := [...]string{"Environment", "Workspace", "Background memory", "Skills catalog", "MCP servers"}
+	var lengths [5]int
 	parts := strings.Split(line, "; ")
-	if len(parts) != len(want) {
+	if len(parts) != 4 && len(parts) != 5 {
 		return lengths, false
 	}
 	for i, part := range parts {
@@ -338,6 +350,7 @@ func parseSections(body string) (Sections, bool) {
 		{"## Workspace\n\n", func(s *Sections, v string) { s.Workspace = v }},
 		{"## Background memory\n\n", func(s *Sections, v string) { s.BackgroundMemory = v }},
 		{"## Skills catalog\n\n", func(s *Sections, v string) { s.SkillsCatalog = v }},
+		{"## MCP servers\n\n", func(s *Sections, v string) { s.MCPServers = v }},
 	}
 	var sections Sections
 	nextSpec := 0

@@ -5,6 +5,7 @@ func (c *Client) close() {
 		return
 	}
 	c.closeOnce.Do(func() {
+		serverInstructions.Delete(c)
 		c.closed.Store(true)
 		c.refresh.mu.Lock()
 		c.refresh.closed = true

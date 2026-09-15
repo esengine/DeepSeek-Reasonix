@@ -2381,7 +2381,7 @@ command = "reasonix-missing-mockmcp"
 		t.Fatalf("requests = %d, want 1", len(reqs))
 	}
 	req := reqs[0]
-	wantTools := unifiedBootToolNames()
+	wantTools := withMCPResourceToolNames(unifiedBootToolNames())
 	if got := toolSchemaNames(req.Tools); !reflect.DeepEqual(got, wantTools) {
 		t.Fatalf("light first request tool order changed\ngot  %v\nwant %v", got, wantTools)
 	}

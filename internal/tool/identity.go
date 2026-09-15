@@ -38,6 +38,9 @@ const (
 	HostTask                       = "task"
 	HostUseCapability              = "use_capability"
 	HostWebSearch                  = "web_search"
+	HostListMCPResources           = "list_mcp_resources"
+	HostListMCPResourceTemplates   = "list_mcp_resource_templates"
+	HostReadMCPResource            = "read_mcp_resource"
 )
 
 // KnownToolNames combines compile-time built-ins with host-managed identities.
@@ -77,6 +80,9 @@ func KnownToolNames() []string {
 		HostTask,
 		HostUseCapability,
 		HostWebSearch,
+		HostListMCPResources,
+		HostListMCPResourceTemplates,
+		HostReadMCPResource,
 	}
 	for _, t := range Builtins() {
 		names = append(names, t.Name())

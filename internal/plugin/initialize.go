@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"log/slog"
+	"strings"
 )
 
 func (c *Client) initialize(ctx context.Context) error {
@@ -16,11 +17,13 @@ func (c *Client) initialize(ctx context.Context) error {
 	var ir struct {
 		ProtocolVersion string                     `json:"protocolVersion"`
 		Capabilities    map[string]json.RawMessage `json:"capabilities"`
+		Instructions    string                     `json:"instructions"`
 	}
 	if err := json.Unmarshal(res, &ir); err != nil {
 		slog.Warn("plugin: parse initialize capabilities", "server", c.name, "err", err)
 	}
 	c.protocolVersion = ir.ProtocolVersion
+	setServerInstructions(c, strings.TrimSpace(ir.Instructions))
 	toolsCapability, hasTools := ir.Capabilities["tools"]
 	c.capabilities.tools = hasTools
 	c.capabilities.toolsListChanged = false

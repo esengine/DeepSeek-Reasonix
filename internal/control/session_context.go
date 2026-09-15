@@ -27,6 +27,11 @@ func (c *Controller) withTurnContext(ctx context.Context, realUserTurn bool) con
 		executorSections.SkillsCatalog = skill.CatalogBlock(sk)
 		plannerSections.SkillsCatalog = skill.ReadOnlyCatalogBlock(sk)
 	}
+	if host := c.mcp.hostRef(); host != nil {
+		guide := host.ServerGuide()
+		executorSections.MCPServers = guide
+		plannerSections.MCPServers = guide
+	}
 	bundle := agent.TurnContextBundle{
 		Executor:      sessioncontext.Build(executorSections),
 		Planner:       sessioncontext.Build(plannerSections),
