@@ -891,9 +891,16 @@ func (s *Server) history(w http.ResponseWriter, r *http.Request) {
 		// Select the exact foreground or detached controller so compatibility
 		// clients cannot silently render the wrong session after a resume.
 		s.bindMu.Lock()
-		defer s.bindMu.Unlock()
 		ctrl := s.resolveReadControllerLocked(raw)
+		s.bindMu.Unlock()
 		if ctrl == nil {
+			// The identity is not bound here — typically handed off to a local
+			// writer. The durable event log is the shared source of truth, so
+			// serve the committed message tail cold instead of failing.
+			if msgs, ok := s.identityColdHistory(raw); ok {
+				writeJSONCached(w, r, historyMessages(msgs))
+				return
+			}
 			http.Error(w, "transcript session is not bound to this runtime", http.StatusConflict)
 			return
 		}
@@ -1314,6 +1321,16 @@ func (s *Server) resumeIdentitySession(w http.ResponseWriter, r *http.Request, h
 	}
 	ref, err := ctrl.OpenSession(r.Context(), session.SessionRef{HostID: hostID, SessionID: strings.TrimSpace(sessionID)})
 	if err != nil {
+		// A local runtime owns the writer: mount the caller as a read-only
+		// spectator instead of failing the attach — the same contract the
+		// legacy path offers for handed-off transcripts. The taken-over header
+		// lets clients distinguish this from an ordinary attach.
+		if errors.Is(err, session.ErrWriterOwned) {
+			w.Header().Set(sessionIDHeader, strings.TrimSpace(sessionID))
+			w.Header().Set(sessionTakenOverHeader, "writer")
+			w.WriteHeader(http.StatusNoContent)
+			return
+		}
 		http.Error(w, "open session: "+err.Error(), http.StatusConflict)
 		return
 	}
@@ -1505,6 +1522,14 @@ func (s *Server) models(w http.ResponseWriter, _ *http.Request) {
 // status returns a combined status snapshot. The desktop's runtime-only path
 // skips provider balance IO while retaining all reconciliation fields.
 func (s *Server) status(w http.ResponseWriter, r *http.Request) {
+	// A spectator watching a final-format identity a local runtime owns gets
+	// the read-only identity view; a foreground-bound identity falls through to
+	// the authoritative controller snapshot below.
+	if raw := r.URL.Query().Get("session"); isSessionIDRoute(raw) {
+		if s.statusIdentityOverride(w, raw) {
+			return
+		}
+	}
 	// A spectator watching a session a local runtime owns selects it
 	// explicitly; report the file-backed read-only view instead of the
 	// foreground controller's.

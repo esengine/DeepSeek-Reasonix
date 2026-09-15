@@ -14,6 +14,7 @@ import (
 const (
 	sessionPathHeader           = "X-Reasonix-Session-Path"
 	sessionIDHeader             = "X-Reasonix-Session-ID"
+	sessionTakenOverHeader      = "X-Reasonix-Taken-Over"
 	expectedSessionPathHeader   = "X-Reasonix-Expected-Session-Path"
 	expectedSessionIDHeader     = "X-Reasonix-Expected-Session-ID"
 	expectedModelSettingsHeader = "X-Reasonix-Expected-Model-Settings"

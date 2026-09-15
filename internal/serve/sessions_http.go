@@ -100,6 +100,7 @@ func (s *Server) sessions(w http.ResponseWriter, r *http.Request) {
 						Current:       bound && info.Ref == runtime.Ref(),
 						Preview:       info.Preview,
 						MetadataReady: info.MetadataStatus == session.MetadataReady,
+						TakenOver:     s.sessionMirrored(remoteSessionIDQueryPrefix + info.Ref.SessionID),
 					}
 					// Canonical rows carry no legacy preview fallback; without
 					// one a chatted session lists as an untitled blank until
