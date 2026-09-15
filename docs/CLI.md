@@ -255,9 +255,15 @@ and does **not** imply USD. Mixed original currencies no longer fail the run:
 `display_complete` is false, and `original_costs`/`original_totals` list per-ISO
 totals so clients never invent a cross-currency sum.
 
+`total_saved` and `saved_feedback` expose the estimated savings from prefix cache hits
+(e.g., `saved ¥0.15 via prefix cache`) in structured `run` results when available.
+
 Global display preference is `[billing].display_currency` (`auto|CNY|USD`);
-legacy `[desktop].currency` still migrates. Provider list prices use each
-entry's frozen `billing_currency` and are never rewritten by display switches.
+legacy `[desktop].currency` still migrates. When set to `CNY`, TUI status bars, turn receipts,
+and CLI run outputs display official RMB valuations and symbols (`¥`) matching the official
+price catalog instead of defaulting to list prices (`US$`). Prefix cache ROI feedback
+is also reflected directly in turn receipts and the persistent TUI status bar.
+Provider list prices use each entry's frozen `billing_currency` and are never rewritten by display switches.
 Diagnose with `reasonix doctor billing`.
 
 Execution failures use `subtype: "error_during_execution"` and

@@ -3553,48 +3553,6 @@ func cacheRateLabel(format string, hit, denom int) string {
 	return fmt.Sprintf(format, fmt.Sprintf("%.2f%%", float64(hit)*100/float64(denom)))
 }
 
-// cacheTag renders both prompt cache-hit rates for the status line —
-// "turn hit 88.00% · avg 78.00%": the single-turn rate (latest turn, the higher/steeper
-// number on a non-compacting DeepSeek session) and the session-aggregate rate
-// Σhit/Σ(hit+miss) (the steadier, cost-oriented number that matches the legacy
-// dashboard). "" before any cache tokens have been reported.
-func (m chatTUI) cacheStatus() (body string, rate float64, ok bool) {
-	now := ""
-	nowRate := 0.0
-	if u := m.ctrl.LastUsage(); u != nil {
-		// Only render when the provider actually reports cache token fields:
-		// falling back to PromptTokens as the denominator painted a bogus
-		// "turn hit 0.00%" for providers with no prompt-cache support.
-		now = cacheRateLabel(i18n.M.ChatStatusCacheNowFmt, u.CacheHitTokens, u.CacheHitTokens+u.CacheMissTokens)
-		if denom := u.CacheHitTokens + u.CacheMissTokens; denom > 0 {
-			nowRate = float64(u.CacheHitTokens) * 100 / float64(denom)
-		}
-	}
-	avg := ""
-	avgRate := 0.0
-	if hit, miss := m.ctrl.SessionCache(); hit+miss > 0 {
-		avg = cacheRateLabel(i18n.M.ChatStatusCacheAvgFmt, hit, hit+miss)
-		avgRate = float64(hit) * 100 / float64(hit+miss)
-	}
-	switch {
-	case now != "" && avg != "":
-		return now + " · " + avg, avgRate, true
-	case now != "":
-		return now, nowRate, true
-	case avg != "":
-		return avg, avgRate, true
-	}
-	return "", 0, false
-}
-
-func (m chatTUI) cacheTag() string {
-	body, _, ok := m.cacheStatus()
-	if !ok {
-		return ""
-	}
-	return dim(body)
-}
-
 // jobsTag shows the count of running background jobs in the status line. Job
 // start/finish emit Notices that arrive on eventCh and re-render the frame, so
 // the count stays current without a dedicated tick.
