@@ -542,7 +542,42 @@
           }
         ]
       },
-      "upgrade": [],
+      "upgrade": [
+        {
+          "level": "warning",
+          "targets": [
+            "desktop"
+          ],
+          "title": {
+            "en": "Manual download required for this desktop release",
+            "zh": "本次桌面版需要手动下载安装"
+          },
+          "body": {
+            "en": "Code signing is temporarily unavailable, so this desktop release is published for manual download on every platform and automatic updates stay on the previous version. Windows packages carry no Reasonix Authenticode signature and may show an unknown-publisher warning; detached minisign signatures and SHA-256 checksums are still published for every artifact. CLI and npm distribution are unaffected.",
+            "zh": "由于代码签名服务暂不可用，本次桌面版所有平台均以手动下载方式发布，自动更新保留在上一版本。Windows 安装包不含 Reasonix Authenticode 签名，系统可能提示未知发布者；每个产物仍提供 minisign 签名和 SHA-256 校验值。CLI 和 npm 发布不受影响。"
+          },
+          "refs": [
+            10352
+          ]
+        },
+        {
+          "level": "warning",
+          "targets": [
+            "desktop"
+          ],
+          "title": {
+            "en": "Desktop Session v5 and downgrades",
+            "zh": "桌面会话 v5 与降级说明"
+          },
+          "body": {
+            "en": "Desktop sessions move to SessionID-only storage. The migrator reads existing v4 and legacy history without modifying it, so downgrading keeps your earlier sessions, but sessions created only under v5 are not visible to older releases. Protocol 9 is a hard desktop shell/host boundary; update the desktop app and CLI together.",
+            "zh": "桌面会话改为仅按 SessionID 存储。迁移器只读取而不修改既有 v4 与旧版历史，因此降级后原有会话仍在；但仅在 v5 下新建的会话，旧版本无法看到。Protocol 9 是桌面外壳与宿主的硬边界，请同步更新桌面端与 CLI。"
+          },
+          "refs": [
+            10326
+          ]
+        }
+      ],
       "risks": [],
       "contributors": [
         "SivanCola",
