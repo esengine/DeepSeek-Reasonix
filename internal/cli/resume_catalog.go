@@ -78,16 +78,13 @@ func canonicalResumeHidden(info session.SessionInfo) bool {
 }
 
 // canonicalResumeDisplayInfo projects a catalog row onto the picker's legacy
-// row shape: the v4 directory stands in for the transcript path, the title
-// (or first-user-message preview) stands in for the preview text, and the
-// event-log revision time drives recency ordering.
+// row shape: the v4 directory stands in for the transcript path, the event-log
+// revision time drives recency ordering, and a model-set catalog title rides
+// the custom-title slot so sessionPickerLabel prefers it over the preview.
 func canonicalResumeDisplayInfo(info session.SessionInfo) agent.SessionInfo {
-	preview := strings.TrimSpace(info.Title)
-	if preview == "" {
-		preview = strings.TrimSpace(info.Preview)
-	}
 	return agent.SessionInfo{
-		Path: info.Path, Preview: preview, Turns: info.Turns,
+		Path: info.Path, Preview: strings.TrimSpace(info.Preview),
+		CustomTitle: strings.TrimSpace(info.Title), Turns: info.Turns,
 		ModTime: info.UpdatedAt, CountsKnown: true,
 	}
 }
@@ -180,19 +177,21 @@ func mergedResumeEntries(sessionDir string, limit int) []resumeEntry {
 		return nil
 	}
 	canonical := canonicalResumeEntries(context.Background(), sessionDir)
-	migrated, _ := migratedLegacyIndex(sessionDir, canonical)
+	bySource, byTarget := migratedLegacyIndex(sessionDir, canonical)
 	sessions, err := agent.ListSessions(sessionDir)
 	if err != nil {
 		sessions = nil
 	}
-	legacy := make([]agent.SessionInfo, 0, len(sessions))
+	legacyByPath := make(map[string]agent.SessionInfo, len(sessions))
 	legacyIDs := make(map[string]struct{}, len(sessions))
+	legacy := make([]agent.SessionInfo, 0, len(sessions))
 	for _, info := range sessions {
-		if _, hidden := migrated[agent.CanonicalSessionPath(info.Path)]; hidden {
+		legacyByPath[agent.CanonicalSessionPath(info.Path)] = info
+		legacyIDs[agent.BranchID(info.Path)] = struct{}{}
+		if _, hidden := bySource[agent.CanonicalSessionPath(info.Path)]; hidden {
 			continue
 		}
 		legacy = append(legacy, info)
-		legacyIDs[agent.BranchID(info.Path)] = struct{}{}
 	}
 	visibleCanonical := make([]resumeEntry, 0, len(canonical))
 	for _, entry := range canonical {
@@ -201,6 +200,22 @@ func mergedResumeEntries(sessionDir string, limit int) []resumeEntry {
 		// plumbing, not a second conversation: fold it into the legacy row.
 		if _, mirrored := legacyIDs[entry.target.ref.SessionID]; mirrored {
 			continue
+		}
+		// Mirror the Serve listing's migration borrow: until the catalog row
+		// grows its own title, the frozen source's label identifies the same
+		// conversation on both surfaces.
+		if source, migrated := byTarget[entry.target.ref.SessionID]; migrated {
+			if legacy, ok := legacyByPath[source]; ok {
+				if entry.session.CustomTitle == "" {
+					entry.session.CustomTitle = firstNonEmpty(legacy.CustomTitle, legacy.TopicTitle, legacy.Preview)
+				}
+				if entry.session.Turns == 0 {
+					entry.session.Turns = legacy.Turns
+				}
+				if legacy.ModTime.After(entry.session.ModTime) {
+					entry.session.ModTime = legacy.ModTime
+				}
+			}
 		}
 		visibleCanonical = append(visibleCanonical, entry)
 	}
