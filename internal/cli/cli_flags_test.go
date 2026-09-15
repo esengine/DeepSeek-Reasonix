@@ -132,8 +132,8 @@ func TestResolveSessionQueryByMachineSessionID(t *testing.T) {
 	}
 
 	got, err := resolveSessionQuery(dir, machineID)
-	if err != nil || got != path {
-		t.Fatalf("resolve by machine id = (%q, %v), want %q", got, err, path)
+	if err != nil || got.path != path || got.canonical() {
+		t.Fatalf("resolve by machine id = (%+v, %v), want %q", got, err, path)
 	}
 	missing := "session_" + strings.Repeat("0", 32)
 	if _, err := resolveSessionQuery(dir, missing); err == nil || !strings.Contains(err.Error(), "no session") {
@@ -147,12 +147,12 @@ func TestResolveSessionQueryByIDAndPreview(t *testing.T) {
 	_ = saveQueryTestSession(t, dir, "beta-session.jsonl", "improve terminal picker")
 
 	got, err := resolveSessionQuery(dir, "alpha-session")
-	if err != nil || got != first {
-		t.Fatalf("resolve by ID = (%q, %v), want %q", got, err, first)
+	if err != nil || got.path != first || got.canonical() {
+		t.Fatalf("resolve by ID = (%+v, %v), want %q", got, err, first)
 	}
 	got, err = resolveSessionQuery(dir, "provider configuration")
-	if err != nil || got != first {
-		t.Fatalf("resolve by preview = (%q, %v), want %q", got, err, first)
+	if err != nil || got.path != first || got.canonical() {
+		t.Fatalf("resolve by preview = (%+v, %v), want %q", got, err, first)
 	}
 	if _, err := resolveSessionQuery(dir, "session"); err == nil || !strings.Contains(err.Error(), "ambiguous") {
 		t.Fatalf("ambiguous query error = %v", err)

@@ -129,6 +129,15 @@ func (s *Server) sessions(w http.ResponseWriter, r *http.Request) {
 	// the authoritative open/delete identity, while borrowing the old preview
 	// title until its asynchronous catalog metadata is ready.
 	migration := loadMigrationIndex(canonicalRows)
+	// The engine mirrors an in-flight legacy transcript into a final-format
+	// event log whose session id is the legacy branch id. Such a mirror is
+	// plumbing, not a second conversation; fold it into the legacy row. The
+	// current row stays listed even when it is that mirror, so the active
+	// session keeps its tree badge.
+	legacyBranchIDs := make(map[string]struct{}, len(legacyByPath))
+	for path := range legacyByPath {
+		legacyBranchIDs[agent.BranchID(path)] = struct{}{}
+	}
 	out := make([]sessionListEntry, 0, len(legacyRows)+len(canonicalRows))
 	for _, row := range legacyRows {
 		if _, migrated := migration.bySource[agent.CanonicalSessionPath(row.Path)]; migrated {
@@ -138,6 +147,11 @@ func (s *Server) sessions(w http.ResponseWriter, r *http.Request) {
 	}
 	for i := range canonicalRows {
 		row := &canonicalRows[i].row
+		if !row.Current {
+			if _, mirrored := legacyBranchIDs[row.SessionID]; mirrored {
+				continue
+			}
+		}
 		if source, ok := migration.byTarget[row.SessionID]; ok {
 			if legacy, exists := legacyByPath[source]; exists {
 				if row.Title == "" {
