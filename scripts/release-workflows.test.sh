@@ -37,6 +37,12 @@ assert "HAS_SIGNPATH: ${{ secrets.SIGNPATH_API_TOKEN != '' && !inputs.desktop_ma
 assert desktop.index('name: Validate signing mode') < desktop.index('name: Build and package')
 assert "inputs.orchestrated }}\" != \"true\"" in desktop
 assert 'manual-download only' in desktop
+# The public disclosure names the release it belongs to and normalizes the
+# v prefix, so it can never print a doubled version or a stale one.
+disclosure = desktop.split('name: Disclose manual Desktop distribution', 1)[1].split('- name:', 1)[0]
+assert 'version="v${MANUAL_VERSION#v}"' in disclosure
+assert 'This ${version} desktop release' in disclosure
+assert 'v${MANUAL_VERSION}' not in disclosure
 manual_exit = desktop.index('if [ "$DESKTOP_MANUAL_ONLY" = "true" ]; then', desktop.index('name: Mirror immutable assets'))
 assert manual_exit < desktop.index('validate_current_pointer()', manual_exit)
 assert 'pointer_moved=false' in desktop[manual_exit:manual_exit + 350]

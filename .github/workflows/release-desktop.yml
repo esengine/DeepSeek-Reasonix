@@ -990,13 +990,16 @@ jobs:
         env:
           MANUAL_VERSION: ${{ needs.resolve.outputs.version }}
         run: |
+          # resolve emits the version with its v prefix; normalize so the public
+          # disclosure cannot print "vv1.38.9" if that convention ever changes.
+          version="v${MANUAL_VERSION#v}"
           cat >> /tmp/release-notes.md <<NOTES
 
           ## Manual desktop downloads / 桌面版手动下载
 
-          This v${MANUAL_VERSION} desktop release is manual-download only on every platform. Windows packages do not carry Reasonix Authenticode signatures because SignPath signing is unavailable; Windows may show an unknown-publisher warning. Detached minisign signatures and SHA-256 checksums remain available. Desktop automatic-update channels are unchanged by this release and keep serving their previous version. CLI and npm distribution are unaffected.
+          This ${version} desktop release is manual-download only on every platform. Windows packages do not carry Reasonix Authenticode signatures because SignPath signing is unavailable; Windows may show an unknown-publisher warning. Detached minisign signatures and SHA-256 checksums remain available. Desktop automatic-update channels are unchanged by this release and keep serving their previous version. CLI and npm distribution are unaffected.
 
-          本次 v${MANUAL_VERSION} 桌面版所有平台均需手动下载安装。因 SignPath 签名服务暂不可用，Windows 包不含 Reasonix Authenticode 签名，系统可能显示未知发布者提示；仍提供 minisign 签名和 SHA-256 校验。本次发布不改变桌面自动更新通道，其仍指向此前版本；CLI 和 npm 正常发布。
+          本次 ${version} 桌面版所有平台均需手动下载安装。因 SignPath 签名服务暂不可用，Windows 包不含 Reasonix Authenticode 签名，系统可能显示未知发布者提示；仍提供 minisign 签名和 SHA-256 校验。本次发布不改变桌面自动更新通道，其仍指向此前版本；CLI 和 npm 正常发布。
           NOTES
 
       - name: Publish GitHub release
