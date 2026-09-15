@@ -30,6 +30,8 @@ var sessionReset = map[string]bool{
 	"todoMu":                                true,
 	"todoState":                             true,
 	"todoWritten":                           true,
+	"imageOffloadMu":                        true,
+	"imageOffload":                          true,
 }
 
 // sessionCarryOver names the fields reset deliberately leaves alone, each with
@@ -41,8 +43,9 @@ var sessionCarryOver = map[string]bool{
 	"checkpointState": true, // preflight rebinds with the transcript
 	// lastPrefixShape survives the swap today; the next request compares its
 	// prefix against the replaced conversation's shape. Left as found here.
-	"lastPrefixShape":     true,
-	"haveLastPrefixShape": true,
+	"lastPrefixShape":      true,
+	"haveLastPrefixShape":  true,
+	"imageOffloadRecorder": true, // controller wiring; survives conversation swap
 }
 
 func sessionRuntimeFields(t *testing.T) map[string]bool {
