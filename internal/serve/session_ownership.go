@@ -1000,7 +1000,7 @@ func (s *Server) reclaimIdentity(w http.ResponseWriter, r *http.Request, body ha
 			}
 			s.bindMu.Lock()
 			defer s.bindMu.Unlock()
-			s.reclaimIdentityLocked(w, r, route, ref, mirroredSession{})
+			s.reclaimIdentityLocked(w, r.Context(), route, ref, mirroredSession{})
 			return
 		}
 		http.Error(w, "session is not held by any known runtime", http.StatusConflict)
@@ -1039,14 +1039,14 @@ func (s *Server) reclaimIdentity(w http.ResponseWriter, r *http.Request, body ha
 		http.Error(w, "mirror generation changed during reclaim", http.StatusConflict)
 		return
 	}
-	s.reclaimIdentityLocked(w, r, route, ref, current)
+	s.reclaimIdentityLocked(w, r.Context(), route, ref, current)
 }
 
 // reclaimIdentityLocked re-owns a final-format identity. OpenSession both
 // acquires the writer lease and republishes the foreground; only then does the
 // mirror entry clear. Callers hold bindMu. An empty mirror ID marks an
 // un-mirrored foreign holder that has since released.
-func (s *Server) reclaimIdentityLocked(w http.ResponseWriter, r *http.Request, route string, ref session.SessionRef, mirror mirroredSession) {
+func (s *Server) reclaimIdentityLocked(w http.ResponseWriter, ctx context.Context, route string, ref session.SessionRef, mirror mirroredSession) {
 	if mirror.mirrorID != "" {
 		s.touchMirrored(route, mirror.mirrorID, mirrorPhaseRecovering)
 	}
@@ -1061,7 +1061,7 @@ func (s *Server) reclaimIdentityLocked(w http.ResponseWriter, r *http.Request, r
 			return
 		}
 	}
-	if _, err := concrete.OpenSession(r.Context(), ref); err != nil {
+	if _, err := concrete.OpenSession(ctx, ref); err != nil {
 		if errors.Is(err, session.ErrWriterOwned) {
 			http.Error(w, "local writer still holds the session; retry", http.StatusConflict)
 		} else {
@@ -1559,7 +1559,7 @@ func (s *Server) mirrorEndIdentity(w http.ResponseWriter, r *http.Request, route
 		http.Error(w, "mirror generation changed", http.StatusConflict)
 		return
 	}
-	s.reclaimIdentityLocked(w, r, route, ref, current)
+	s.reclaimIdentityLocked(w, r.Context(), route, ref, current)
 }
 
 // maybeAutoReclaimMirrored recovers a mirror whose writer vanished without
@@ -1598,7 +1598,13 @@ func (s *Server) maybeAutoReclaimMirrored(path string) {
 			return
 		}
 		recorder := &statusRecorder{header: http.Header{}}
-		s.reclaimMirroredLocked(recorder, path, current)
+		if isSessionIDRoute(path) {
+			if ref, _, err := s.resolveSessionIdentity(path); err == nil {
+				s.reclaimIdentityLocked(recorder, context.Background(), path, ref, current)
+			}
+		} else {
+			s.reclaimMirroredLocked(recorder, path, current)
+		}
 		if recorder.status >= http.StatusBadRequest {
 			slog.Warn("serve: auto-reclaim of stale mirror failed", "session", path, "status", recorder.status)
 			return
