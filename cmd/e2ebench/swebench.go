@@ -44,21 +44,6 @@ func testbedShell(command string) []string {
 		"source /opt/miniconda3/bin/activate && conda activate testbed && cd /testbed && " + command}
 }
 
-// permissionFlag maps the benchmark preset onto the same public CLI contract
-// used by every other entry point.
-func permissionFlag(mode string) (string, error) {
-	switch mode {
-	case "", "workspace-write":
-		return "--permission-mode=workspace-write", nil
-	case "read-only":
-		return "--permission-mode=read-only", nil
-	case "danger-full-access":
-		return "--permission-mode=danger-full-access", nil
-	default:
-		return "", fmt.Errorf("unknown permission preset %q (want read-only, workspace-write, or danger-full-access)", mode)
-	}
-}
-
 func swebenchAgentArgs(metricsPath, model, permission string, arm ablation.Set, maxSteps int, prompt string) []string {
 	posture, err := permissionFlag(permission)
 	if err != nil {

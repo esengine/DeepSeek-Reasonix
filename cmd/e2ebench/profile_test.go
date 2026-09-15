@@ -11,7 +11,7 @@ func TestBuildRunTaskArgsEnablesUnattendedWorkspaceWrites(t *testing.T) {
 	cfg := suiteConfig{model: "e2e"}
 	got := buildRunTaskArgs(cfg, "metrics.json", "run.trajectory.jsonl", 12, "fix it")
 	want := []string{
-		"run", "--auto", "--metrics", "metrics.json",
+		"run", "--permission-mode=workspace-write", "--metrics", "metrics.json",
 		"--trajectory", "run.trajectory.jsonl",
 		"--model", "e2e", "--max-steps", "12", "fix it",
 	}
@@ -23,7 +23,7 @@ func TestBuildRunTaskArgsEnablesUnattendedWorkspaceWrites(t *testing.T) {
 func TestBuildRunTaskArgsPassesTheAblationArmThrough(t *testing.T) {
 	cfg := suiteConfig{arm: ablation.New(ablation.Evidence, ablation.Planner)}
 	got := buildRunTaskArgs(cfg, "m.json", "", 0, "fix it")
-	want := []string{"run", "--auto", "--metrics", "m.json", "--ablate", "evidence,planner", "fix it"}
+	want := []string{"run", "--permission-mode=workspace-write", "--metrics", "m.json", "--ablate", "evidence,planner", "fix it"}
 	if !reflect.DeepEqual(got, want) {
 		t.Fatalf("ablated args = %v, want %v", got, want)
 	}
@@ -32,7 +32,7 @@ func TestBuildRunTaskArgsPassesTheAblationArmThrough(t *testing.T) {
 func TestBuildRunTaskArgsPassesEffortThroughWithoutLegacyMode(t *testing.T) {
 	cfg := suiteConfig{effort: "low"}
 	got := buildRunTaskArgs(cfg, "m.json", "", 0, "fix it")
-	want := []string{"run", "--auto", "--metrics", "m.json", "--effort", "low", "fix it"}
+	want := []string{"run", "--permission-mode=workspace-write", "--metrics", "m.json", "--effort", "low", "fix it"}
 	if !reflect.DeepEqual(got, want) {
 		t.Fatalf("effort args = %v, want %v", got, want)
 	}

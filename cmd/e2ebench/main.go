@@ -169,6 +169,9 @@ type result struct {
 	// CacheArm records whether the run was cold (fresh session) or warm
 	// (prefix pre-warmed in the same workdir), so arms never get mixed.
 	CacheArm string `json:"cache_arm,omitempty"`
+	// Permission records the agent permission preset the arm ran under
+	// ("" = the workspace-write default), so postures never get mixed.
+	Permission string `json:"permission,omitempty"`
 	// Effort records the reasoning-effort override the arm ran with ("" =
 	// model default), the adaptive-reasoning-budget experiment axis.
 	Effort string `json:"effort,omitempty"`
@@ -244,7 +247,7 @@ func main() {
 	runID := flag.String("run-id", "reasonix", "swebench mode: run id passed to the official harness")
 	harnessPy := flag.String("harness-python", "python3", "swebench mode: interpreter with the swebench package installed")
 	dataset := flag.String("dataset", "princeton-nlp/SWE-bench_Verified", "swebench mode: dataset name")
-	permission := flag.String("permission", "workspace-write", "swebench mode: agent permission preset (read-only | workspace-write | danger-full-access)")
+	permission := flag.String("permission", benchmarkPermissionDefault, "suite/swebench modes: agent permission preset (read-only | workspace-write | danger-full-access)")
 	network := flag.String("network", "", "swebench mode: docker network for agent containers; must have no off-box route")
 	proxyURL := flag.String("proxy", "", "swebench mode: the only egress the agent gets, expected to allowlist just the model API")
 	workers := flag.Int("workers", 4, "swebench mode: parallel grader workers")
@@ -338,7 +341,7 @@ func main() {
 
 	meterSource, faults, segments, steers := pressure.settings()
 	runSuiteMode(suiteConfig{
-		bin: *bin, model: *model, arm: arm, budget: *budget,
+		bin: *bin, model: *model, arm: arm, budget: *budget, permission: *permission,
 		trajDir: *trajDir, forcePlanner: *forcePlanner, attempts: *attempts, anchor: anchor,
 		cacheArm: cache, effort: *effort, checkpoints: *checkpoints, policy: *policyFlag,
 		forkCapture: *forkCapture, meterConfig: meterSource, meterFaults: faults, segments: segments, steers: steers,
@@ -346,6 +349,10 @@ func main() {
 }
 
 func runSuiteMode(cfg suiteConfig, suite, taskFilter, outMD, outJSON string) {
+	if _, err := permissionFlag(cfg.permission); err != nil {
+		fmt.Fprintln(os.Stderr, err)
+		os.Exit(2)
+	}
 	tasks, err := loadTasks(suite)
 	if err != nil {
 		fmt.Fprintln(os.Stderr, "load suite:", err)
@@ -472,6 +479,7 @@ func filterTasks(tasks []task, filter string) ([]task, error) {
 // model, ablation arm, cache arm, and reasoning effort.
 type suiteConfig struct {
 	bin, model, cacheArm, effort string
+	permission                   string // agent preset: read-only | workspace-write | danger-full-access
 	arm                          ablation.Set
 	anchor                       string
 	policy, forkCapture          string
@@ -488,6 +496,18 @@ type suiteConfig struct {
 	steers   map[int]string
 }
 
+// newResult stamps the experiment axes every row of a report shares. A row the
+// suite never ran still belongs to the arm it was skipped under: the report
+// reads the axes off the results, so a skipped leading row that carried none
+// used to label the whole run with the historical defaults.
+func newResult(cfg suiteConfig, t task) result {
+	return result{
+		task: t, Profile: benchmarkProfileStandard,
+		Arm: cfg.arm.Arm(), Anchor: cfg.anchor,
+		CacheArm: cfg.cacheArm, Effort: cfg.effort, Permission: cfg.permission,
+	}
+}
+
 // runSuite runs each task in order until the token budget is exhausted;
 // remaining tasks are reported as skipped rather than silently dropped. Each
 // task retries up to attempts times, stopping at the first passing attempt;
@@ -498,7 +518,9 @@ func runSuite(cfg suiteConfig, tasks []task) []result {
 	total := 0
 	for _, t := range tasks {
 		if cfg.budget > 0 && total >= cfg.budget {
-			results = append(results, result{task: t, Profile: benchmarkProfileStandard, Skipped: true, Note: "skipped: token budget reached"})
+			skipped := newResult(cfg, t)
+			skipped.Skipped, skipped.Note = true, "skipped: token budget reached"
+			results = append(results, skipped)
 			continue
 		}
 		if skipped, ok := anchorSkip(cfg, t); ok {
@@ -527,9 +549,7 @@ func runSuite(cfg suiteConfig, tasks []task) []result {
 // then drops in verify.sh and runs it as the grader. The grader is added only
 // after the run so the agent can't read the answer key.
 func runTask(cfg suiteConfig, t task) result {
-	r := result{task: t, Profile: benchmarkProfileStandard, CacheArm: cfg.cacheArm, Effort: cfg.effort}
-	r.Arm = cfg.arm.Arm()
-	r.Anchor = cfg.anchor
+	r := newResult(cfg, t)
 	t.Prompt = anchorPrompt(cfg.anchor, t)
 	if cfg.forcePlanner {
 		// Leading directive matched by the planner gate's
@@ -640,16 +660,25 @@ func runTask(cfg suiteConfig, t task) result {
 
 func buildRunTaskArgs(cfg suiteConfig, metricsPath, trajectoryPath string, maxSteps int, prompt string) []string {
 	// Benchmarks are unattended and their fixtures require ordinary workspace
-	// writes. Auto still honors explicit ask/deny rules and the sandbox boundary.
-	args := []string{"run", "--auto", "--metrics", metricsPath}
+	// writes. That posture keeps the dynamic-shell gate, which denies inline
+	// interpreter code because no human can approve it; danger-full-access drops it.
+	args := []string{"run", mustPermissionFlag(cfg.permission), "--metrics", metricsPath}
 	if trajectoryPath != "" {
 		args = append(args, "--trajectory", trajectoryPath)
 	}
-	if cfg.model != "" {
-		args = append(args, "--model", cfg.model)
-	}
+	args = appendPrefixShapingArgs(args, cfg)
 	if maxSteps > 0 {
 		args = append(args, "--max-steps", fmt.Sprint(maxSteps))
+	}
+	return append(args, prompt)
+}
+
+// appendPrefixShapingArgs adds the flags that rewrite the provider-visible
+// prefix. The warm primer and the graded run both go through it because a
+// primer built from a different set warms a prefix the graded run never sends.
+func appendPrefixShapingArgs(args []string, cfg suiteConfig) []string {
+	if cfg.model != "" {
+		args = append(args, "--model", cfg.model)
 	}
 	if cfg.effort != "" {
 		args = append(args, "--effort", cfg.effort)
@@ -659,7 +688,7 @@ func buildRunTaskArgs(cfg suiteConfig, metricsPath, trajectoryPath string, maxSt
 	if !cfg.arm.Empty() {
 		args = append(args, "--ablate", cfg.arm.String())
 	}
-	return append(args, prompt)
+	return args
 }
 
 // buildSegmentArgs is buildRunTaskArgs for one leg: a resumed leg adds
@@ -674,26 +703,28 @@ func buildSegmentArgs(cfg suiteConfig, seg segment, metricsPath, trajectoryPath 
 	return append(args[:len(args)-1:len(args)-1], "--continue", args[len(args)-1])
 }
 
+// buildWarmPrefixArgs is buildRunTaskArgs for the ungraded primer: the same
+// posture and prefix-shaping flags, one step, and no metrics or trajectory
+// because the primer's cost is deliberately untracked. The posture is not
+// merely prefix shaping — the primer mutates the same task workdir the graded
+// run is about to be scored in, so it must run under the preset the caller
+// selected rather than a hard-coded one.
+func buildWarmPrefixArgs(cfg suiteConfig) []string {
+	args := []string{"run", mustPermissionFlag(cfg.permission)}
+	args = appendPrefixShapingArgs(args, cfg)
+	return append(args, "--max-steps", "1", "Reply with exactly: ok")
+}
+
 // warmPrefix primes the provider prefix cache for work's session shape with a
 // minimal one-step run before the graded run starts its clock. Its cost is
 // deliberately untracked: the warm arm measures a long-lived session's steady
 // state, not the price of reaching it. Prefix-shaping flags (model, effort,
-// ablation, cwd) must match the graded invocation exactly.
+// ablation, cwd) and the permission posture must match the graded invocation
+// exactly.
 func warmPrefix(cfg suiteConfig, work string) {
 	ctx, cancel := context.WithTimeout(context.Background(), 90*time.Second)
 	defer cancel()
-	args := []string{"run", "--auto", "--max-steps", "1"}
-	if cfg.model != "" {
-		args = append(args, "--model", cfg.model)
-	}
-	if cfg.effort != "" {
-		args = append(args, "--effort", cfg.effort)
-	}
-	if !cfg.arm.Empty() {
-		args = append(args, "--ablate", cfg.arm.String())
-	}
-	args = append(args, "Reply with exactly: ok")
-	cmd := exec.CommandContext(ctx, cfg.bin, args...)
+	cmd := exec.CommandContext(ctx, cfg.bin, buildWarmPrefixArgs(cfg)...)
 	cmd.Dir = work
 	cmd.Stdout = os.Stderr
 	cmd.Stderr = os.Stderr
