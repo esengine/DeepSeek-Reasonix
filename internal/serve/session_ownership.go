@@ -1535,8 +1535,10 @@ func (s *Server) mirrorEnd(w http.ResponseWriter, r *http.Request) {
 }
 
 // mirrorEndIdentity handles the local writer's farewell for a final-format
-// identity: once the writer lock is free the session returns to the remote
-// side immediately instead of waiting for the next /reclaim.
+// identity. The farewell is sent before process exit by the writer's return
+// transaction, so a still-held writer lock is expected, not an error: accept
+// it and let the outstanding reclaim (or the stale auto-reclaim) finish when
+// the lock drops with the process. Only an already-free lock re-owns now.
 func (s *Server) mirrorEndIdentity(w http.ResponseWriter, r *http.Request, route, mirrorID string) {
 	ref, dir, err := s.resolveSessionIdentity(route)
 	if err != nil {
@@ -1549,7 +1551,7 @@ func (s *Server) mirrorEndIdentity(w http.ResponseWriter, r *http.Request, route
 		return
 	}
 	if session.ProbeWriterHeld(dir) {
-		http.Error(w, "local writer still holds the session; release it before ending the mirror", http.StatusConflict)
+		w.WriteHeader(http.StatusNoContent)
 		return
 	}
 	s.bindMu.Lock()

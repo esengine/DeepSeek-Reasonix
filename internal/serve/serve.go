@@ -1524,11 +1524,15 @@ func (s *Server) models(w http.ResponseWriter, _ *http.Request) {
 func (s *Server) status(w http.ResponseWriter, r *http.Request) {
 	// A spectator watching a final-format identity a local runtime owns gets
 	// the read-only identity view; a foreground-bound identity falls through to
-	// the authoritative controller snapshot below.
+	// the authoritative controller snapshot below — remembering the selector so
+	// the snapshot answers ownership explicitly (a spectator pin must clear the
+	// moment this serve owns the identity again, not only when it loses it).
+	identityRoute := ""
 	if raw := r.URL.Query().Get("session"); isSessionIDRoute(raw) {
 		if s.statusIdentityOverride(w, raw) {
 			return
 		}
+		identityRoute = strings.TrimSpace(raw)
 	}
 	// A spectator watching a session a local runtime owns selects it
 	// explicitly; report the file-backed read-only view instead of the
@@ -1587,6 +1591,12 @@ func (s *Server) status(w http.ResponseWriter, r *http.Request) {
 			sess["hostId"] = ref.HostID
 			sess["sessionId"] = ref.SessionID
 		}
+	}
+	if identityRoute != "" {
+		// The poller selected an identity explicitly: answer ownership both
+		// ways. Without an explicit false after a reclaim, clients that only
+		// apply present fields keep a stale spectator pin forever.
+		sess["takenOver"] = s.sessionMirrored(identityRoute)
 	}
 	if sessionPath != "" && store.IsSessionTranscriptName(filepath.Base(sessionPath)) {
 		sess["sessionName"] = strings.TrimSuffix(filepath.Base(sessionPath), ".jsonl")

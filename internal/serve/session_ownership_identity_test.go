@@ -201,6 +201,20 @@ func TestIdentityReclaimReattachesForeground(t *testing.T) {
 	if resp.StatusCode != http.StatusNoContent {
 		t.Fatalf("reclaim status = %d body %s", resp.StatusCode, raw)
 	}
+	// After the reclaim the identity-selected status must answer ownership
+	// explicitly false: clients apply present fields only, so an omitted
+	// takenOver would pin the spectator banner forever.
+	resp, raw = serveBody(t, http.MethodGet, ts.URL+"/status?session="+route, "")
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("post-reclaim status code = %d body %s", resp.StatusCode, raw)
+	}
+	var reclaimed map[string]any
+	if err := json.Unmarshal([]byte(raw), &reclaimed); err != nil {
+		t.Fatal(err)
+	}
+	if taken, _ := reclaimed["takenOver"].(bool); taken {
+		t.Fatalf("post-reclaim status still reports takenOver: %v", reclaimed)
+	}
 	if ref, bound := ctrl.SessionRef(); !bound || ref != current {
 		t.Fatalf("foreground ref after reclaim = %+v (bound %v), want %+v", ref, bound, current)
 	}
@@ -223,6 +237,39 @@ func TestIdentityHandoffRefusesForeignHolder(t *testing.T) {
 	resp, raw := serveBody(t, http.MethodPost, ts.URL+"/handoff", `{"sessionPath":"session-id:does-not-exist","targetWriterId":"taker","force":true}`)
 	if resp.StatusCode != http.StatusBadRequest {
 		t.Fatalf("unknown identity handoff status = %d body %s", resp.StatusCode, raw)
+	}
+	retireExclusiveForeground(t, ctrl, service)
+}
+
+// TestIdentityMirrorEndAcceptsLiveWriter pins the farewell contract: the
+// writer's return transaction sends mirror-end before process exit, so the
+// writer lock is still held and the serve must accept (204) instead of 409ing
+// a call its own protocol ordering requires.
+func TestIdentityMirrorEndAcceptsLiveWriter(t *testing.T) {
+	_, ctrl, service, current := newExclusiveSessionServe(t)
+	root := identityRoot(t, service, current)
+	lifecycle := newLifecycleTestServer(t, ctrl, NewBroadcaster(), config.ServeConfig{})
+	ts := httptest.NewServer(lifecycle.Handler())
+	defer ts.Close()
+	route := "session-id:" + current.SessionID
+
+	resp, raw := serveBody(t, http.MethodPost, ts.URL+"/handoff", `{"sessionPath":"`+route+`","targetWriterId":"taker-writer","force":true,"mode":"wait","timeoutMs":2000}`)
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("handoff status = %d body %s", resp.StatusCode, raw)
+	}
+	var grant mirrorGrant
+	if err := json.Unmarshal([]byte(raw), &grant); err != nil {
+		t.Fatal(err)
+	}
+	writer := openIdentityWriter(t, root, current)
+	defer writer.Close(t.Context())
+
+	resp, raw = serveBody(t, http.MethodPost, ts.URL+"/mirror-end", `{"sessionPath":"`+route+`","mirrorId":"`+grant.MirrorID+`"}`)
+	if resp.StatusCode != http.StatusNoContent {
+		t.Fatalf("mirror-end with live writer status = %d body %s", resp.StatusCode, raw)
+	}
+	if ref, bound := ctrl.SessionRef(); bound && ref == current {
+		t.Fatal("mirror-end re-owned the identity under a live writer")
 	}
 	retireExclusiveForeground(t, ctrl, service)
 }
