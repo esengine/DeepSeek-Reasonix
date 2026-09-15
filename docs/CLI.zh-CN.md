@@ -203,6 +203,7 @@ reasonix run "运行测试" --output-format stream-json
   "duration_ms": 123,
   "num_turns": 1,
   "result": "...",
+  "result_from_reasoning": false,
   "session_id": "...",
   "total_cost": 0,
   "currency": "CNY",
@@ -215,6 +216,11 @@ reasonix run "运行测试" --output-format stream-json
   }
 }
 ```
+
+`result_from_reasoning` 仅在本轮以空的可见消息结束、因而 `result` 改为承载本轮
+推理文本时出现且为 `true`。思考型模型可能把答案完全写在推理通道里；没有这个字段，
+调用方无法把那段文本与真正的可见回答区分开，而没有这个回退时 `result` 会是 `""`、
+`-p` 会什么都不打印。模型给出可见文本时（即通常情况）该字段被省略。
 
 `total_cost` 仅在形成单一 `selected` 展示金额时存在（ISO 代码见 `currency`）。有
 `cost_quote` 时优先读它：含原币费用、`original_totals`、发生时的官方双区域
