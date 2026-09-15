@@ -86,66 +86,7 @@ func (l *Ledger) Add(q CostQuote, tokens UsageTokens, occurred time.Time) {
 		// Fresh quote valuations are kept; we re-aggregate Original via sums.
 		ent.Quote.Valuations = cloneValuations(q.Valuations)
 	} else {
-		// A bucket with more than one occurrence no longer has a single rating
-		// instant even though its fingerprint keeps the rate band homogeneous.
-		ent.Quote.RatedAt = ""
-		// Sum original when same currency; otherwise retain deterministic
-		// per-currency buckets. Once a bucketed entry exists, keep adding into
-		// those buckets so later same-currency calls are not lost.
-		if len(ent.Quote.OriginalTotals) > 0 {
-			ent.Quote.OriginalTotals = mergeOriginalTotals(ent.Quote.OriginalTotals, q)
-			ent.Quote.CostComplete = true
-			ent.Quote.DisplayComplete = false
-			ent.Quote.Complete = false
-			ent.Quote.DisplayStatus = DisplayStatusBucketed
-			ent.Quote.AggregateMode = AggregateModeCurrencyBuckets
-			ent.Quote.IncompleteReason = "mixed_original_currencies"
-		} else {
-			sum, err := AddMoney(ent.Quote.Original, q.Original)
-			if err != nil {
-				ent.Quote.OriginalTotals = mergeOriginalTotals([]Money{ent.Quote.Original}, q)
-				ent.Quote.CostComplete = true
-				ent.Quote.DisplayComplete = false
-				ent.Quote.Complete = false
-				ent.Quote.DisplayStatus = DisplayStatusBucketed
-				ent.Quote.AggregateMode = AggregateModeCurrencyBuckets
-				ent.Quote.IncompleteReason = "mixed_original_currencies"
-			} else {
-				ent.Quote.Original = sum
-			}
-		}
-		for code, v := range q.Valuations {
-			code = NormalizeCurrency(code)
-			if prev, ok := ent.Quote.Valuations[code]; ok {
-				added, err := AddMoney(prev.Money, v.Money)
-				if err == nil {
-					prev.Money = added
-					if v.Stale {
-						prev.Stale = true
-					}
-					ent.Quote.Valuations[code] = prev
-				}
-			} else {
-				if ent.Quote.Valuations == nil {
-					ent.Quote.Valuations = map[string]Valuation{}
-				}
-				ent.Quote.Valuations[code] = v
-			}
-		}
-		if q.Estimated {
-			ent.Quote.Estimated = true
-		}
-		if !q.Complete {
-			ent.Quote.DisplayComplete = false
-			ent.Quote.Complete = false
-			if ent.Quote.IncompleteReason == "" {
-				ent.Quote.IncompleteReason = q.IncompleteReason
-			}
-		}
-		ent.Quote.CostComplete = ent.Quote.CostComplete && q.CostComplete
-		if ent.Quote.DisplayStatus != DisplayStatusBucketed {
-			ent.Quote.DisplayStatus = q.DisplayStatus
-		}
+		mergeLedgerEntryQuote(&ent.Quote, q)
 	}
 	ent.PromptTokens += tokens.PromptTokens
 	ent.CompletionTokens += tokens.CompletionTokens
@@ -161,6 +102,83 @@ func (l *Ledger) Add(q CostQuote, tokens UsageTokens, occurred time.Time) {
 		ent.OccurredAt = occurred
 	}
 	l.Entries[key] = ent
+}
+
+func mergeLedgerEntryQuote(target *CostQuote, q CostQuote) {
+	// A bucket with more than one occurrence no longer has a single rating
+	// instant even though its fingerprint keeps the rate band homogeneous.
+	target.RatedAt = ""
+	// Sum original when same currency; otherwise retain deterministic
+	// per-currency buckets. Once a bucketed entry exists, keep adding into
+	// those buckets so later same-currency calls are not lost.
+	if len(target.OriginalTotals) > 0 {
+		target.OriginalTotals = mergeOriginalTotals(target.OriginalTotals, q)
+		target.CostComplete = true
+		target.DisplayComplete = false
+		target.Complete = false
+		target.DisplayStatus = DisplayStatusBucketed
+		target.AggregateMode = AggregateModeCurrencyBuckets
+		target.IncompleteReason = "mixed_original_currencies"
+	} else {
+		sum, err := AddMoney(target.Original, q.Original)
+		if err != nil {
+			target.OriginalTotals = mergeOriginalTotals([]Money{target.Original}, q)
+			target.CostComplete = true
+			target.DisplayComplete = false
+			target.Complete = false
+			target.DisplayStatus = DisplayStatusBucketed
+			target.AggregateMode = AggregateModeCurrencyBuckets
+			target.IncompleteReason = "mixed_original_currencies"
+		} else {
+			target.Original = sum
+			if target.Saved != nil && q.Saved != nil {
+				if savedSum, err := AddMoney(*target.Saved, *q.Saved); err == nil {
+					target.Saved = &savedSum
+				}
+			} else if q.Saved != nil {
+				target.Saved = q.Saved
+			}
+		}
+	}
+	for code, v := range q.Valuations {
+		code = NormalizeCurrency(code)
+		if prev, ok := target.Valuations[code]; ok {
+			added, err := AddMoney(prev.Money, v.Money)
+			if err == nil {
+				prev.Money = added
+				if prev.Saved != nil && v.Saved != nil {
+					if savedSum, err := AddMoney(*prev.Saved, *v.Saved); err == nil {
+						prev.Saved = &savedSum
+					}
+				} else if v.Saved != nil {
+					prev.Saved = v.Saved
+				}
+				if v.Stale {
+					prev.Stale = true
+				}
+				target.Valuations[code] = prev
+			}
+		} else {
+			if target.Valuations == nil {
+				target.Valuations = map[string]Valuation{}
+			}
+			target.Valuations[code] = v
+		}
+	}
+	if q.Estimated {
+		target.Estimated = true
+	}
+	if !q.Complete {
+		target.DisplayComplete = false
+		target.Complete = false
+		if target.IncompleteReason == "" {
+			target.IncompleteReason = q.IncompleteReason
+		}
+	}
+	target.CostComplete = target.CostComplete && q.CostComplete
+	if target.DisplayStatus != DisplayStatusBucketed {
+		target.DisplayStatus = q.DisplayStatus
+	}
 }
 
 func mergeOriginalTotals(existing []Money, q CostQuote) []Money {

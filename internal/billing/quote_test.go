@@ -1,6 +1,7 @@
 package billing
 
 import (
+	"strings"
 	"testing"
 	"time"
 )
@@ -159,5 +160,113 @@ func TestLedgerMixedOriginalBucketsContinueAccumulating(t *testing.T) {
 	q := l.Total("")
 	if len(q.OriginalTotals) != 2 || q.OriginalTotals[0].Amount != "4" || q.OriginalTotals[1].Amount != "2" || q.Selected != nil {
 		t.Fatalf("ledger buckets = %+v", q)
+	}
+}
+
+func TestCacheSavedAmountAndFeedback(t *testing.T) {
+	rates := RateCard{CacheHit: 0.10, Input: 3.0, Output: 9.0, Currency: "CNY"}
+	u := UsageTokens{PromptTokens: 1000, CacheHitTokens: 800, CacheMissTokens: 200}
+	saved := CacheSavedAmount(rates, u)
+	// (3.0 - 0.10) * 800 / 1e6 = 2.9 * 800 / 1e6 = 0.00232 CNY
+	if saved.Float64() <= 0 {
+		t.Fatalf("expected positive savings, got %v", saved)
+	}
+	m := MoneyOf(saved, "CNY")
+	feedback := FormatSavedFeedback(m)
+	if feedback != "saved ¥0.0023 via prefix cache" {
+		t.Fatalf("FormatSavedFeedback = %q, want %q", feedback, "saved ¥0.0023 via prefix cache")
+	}
+
+	m2 := MoneyOf(NewAmountFromFloat(0.12), "CNY")
+	if fb := FormatSavedFeedback(m2); fb != "saved ¥0.12 via prefix cache" {
+		t.Fatalf("FormatSavedFeedback(0.12) = %q, want %q", fb, "saved ¥0.12 via prefix cache")
+	}
+
+	mUSD := MoneyOf(NewAmountFromFloat(0.05), "USD")
+	if fb := FormatSavedFeedback(mUSD); fb != "saved $0.05 via prefix cache" {
+		t.Fatalf("FormatSavedFeedback(0.05 USD) = %q, want %q", fb, "saved $0.05 via prefix cache")
+	}
+
+	// zero cache hit gives Zero savings and empty feedback
+	zeroSaved := CacheSavedAmount(rates, UsageTokens{PromptTokens: 1000, CacheHitTokens: 0})
+	if zeroSaved != Zero {
+		t.Fatalf("expected Zero savings, got %v", zeroSaved)
+	}
+	if fb := FormatSavedFeedback(MoneyOf(zeroSaved, "CNY")); fb != "" {
+		t.Fatalf("expected empty feedback for zero, got %q", fb)
+	}
+}
+
+func TestBuildQuoteSavedWithOfficialValuationAndDisplay(t *testing.T) {
+	in := testInput("USD", "deepseek", "deepseek-v4-flash")
+	in.Usage = UsageTokens{PromptTokens: 100_000, CacheHitTokens: 80_000, CacheMissTokens: 20_000, CompletionTokens: 5_000}
+	in.DisplayCurrency = "CNY"
+	q := BuildQuote(in)
+
+	if q.Original.Currency != "USD" {
+		t.Fatalf("original currency = %q, want USD", q.Original.Currency)
+	}
+	if q.Selected == nil || q.Selected.Currency != "CNY" {
+		t.Fatalf("selected = %+v, want CNY", q.Selected)
+	}
+	if q.Saved == nil || q.Saved.Currency != "CNY" {
+		t.Fatalf("saved = %+v, want CNY", q.Saved)
+	}
+	if q.Saved.Float64() <= 0 {
+		t.Fatalf("expected positive CNY saved, got %v", q.Saved.Float64())
+	}
+	if fb := q.SavedFeedback(); !strings.HasPrefix(fb, "saved ¥") || !strings.Contains(fb, "via prefix cache") {
+		t.Fatalf("q.SavedFeedback() = %q, want saved ¥... via prefix cache", fb)
+	}
+}
+
+func TestAggregateQuotesAccumulatesSaved(t *testing.T) {
+	in1 := testInput("USD", "deepseek", "deepseek-v4-flash")
+	in1.Usage = UsageTokens{PromptTokens: 100_000, CacheHitTokens: 50_000, CacheMissTokens: 50_000}
+	in1.DisplayCurrency = "CNY"
+	q1 := BuildQuote(in1)
+
+	in2 := testInput("USD", "deepseek", "deepseek-v4-flash")
+	in2.Usage = UsageTokens{PromptTokens: 100_000, CacheHitTokens: 50_000, CacheMissTokens: 50_000}
+	in2.DisplayCurrency = "CNY"
+	q2 := BuildQuote(in2)
+
+	agg := AggregateQuotes([]CostQuote{q1, q2}, "CNY")
+	if agg.Selected == nil || agg.Selected.Currency != "CNY" {
+		t.Fatalf("agg.Selected = %+v", agg.Selected)
+	}
+	if agg.Saved == nil || agg.Saved.Currency != "CNY" {
+		t.Fatalf("agg.Saved = %+v", agg.Saved)
+	}
+	expectedSaved := q1.Saved.AmountValue().Add(q2.Saved.AmountValue())
+	if agg.Saved.AmountValue() != expectedSaved {
+		t.Fatalf("agg.Saved = %v, want %v", agg.Saved.AmountValue(), expectedSaved)
+	}
+}
+
+func TestResolveCatalogIdentityNormalization(t *testing.T) {
+	for _, tt := range []struct {
+		inProvider string
+		inModel    string
+		inRef      string
+		wantProv   string
+		wantModel  string
+	}{
+		{inProvider: "deepseek", inModel: "deepseek", wantProv: "deepseek", wantModel: "deepseek-v4-flash"},
+		{inProvider: "deepseek", inModel: "deepseek-chat", wantProv: "deepseek", wantModel: "deepseek-v4-flash"},
+		{inProvider: "deepseek", inModel: "deepseek-reasoner", wantProv: "deepseek", wantModel: "deepseek-v4-pro"},
+		{inRef: "deepseek/deepseek-chat", wantProv: "deepseek", wantModel: "deepseek-v4-flash"},
+		{inRef: "deepseek", wantProv: "deepseek", wantModel: "deepseek-v4-flash"},
+		{inRef: "deepseek/deepseek-v4-flash", wantProv: "deepseek", wantModel: "deepseek-v4-flash"},
+		{inRef: "deepseek/deepseek-v4-pro", wantProv: "deepseek", wantModel: "deepseek-v4-pro"},
+	} {
+		p, m := resolveCatalogIdentity(QuoteInput{
+			ProviderKind: tt.inProvider,
+			ModelID:      tt.inModel,
+			ModelRef:     tt.inRef,
+		})
+		if p != tt.wantProv || m != tt.wantModel {
+			t.Errorf("resolveCatalogIdentity(%+v) = (%q, %q), want (%q, %q)", tt, p, m, tt.wantProv, tt.wantModel)
+		}
 	}
 }

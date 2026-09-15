@@ -30,6 +30,9 @@ func buildRunSink(format runOutputFormat, printOnly, showThinking bool, metricsP
 	var chain runSinkChain
 	if printOnly || format != runOutputText {
 		chain.resultOutput = newRunOutputSink(os.Stdout, format)
+		if cfg != nil {
+			chain.resultOutput.SetDisplayCurrency(cfg.ExplicitDisplayCurrency())
+		}
 		chain.sink = chain.resultOutput
 	} else {
 		var renderer agent.Renderer

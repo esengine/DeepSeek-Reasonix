@@ -9,6 +9,7 @@ import (
 	"github.com/charmbracelet/x/ansi"
 
 	"reasonix/internal/billing"
+	"reasonix/internal/config"
 	"reasonix/internal/control"
 	"reasonix/internal/event"
 	"reasonix/internal/i18n"
@@ -590,5 +591,83 @@ func TestStatusFooterHeightCountUsesRenderedLayout(t *testing.T) {
 	want := strings.Count(m.renderStatusBlock(primary, m.width), "\n") + 1
 	if got := m.computeStatusLineCount(m.width); got != want {
 		t.Fatalf("computed status rows = %d, rendered rows = %d", got, want)
+	}
+}
+
+func TestTurnReceiptShowsPrefixCacheSavedFeedback(t *testing.T) {
+	defer restoreThemeForTest(activeColorProfile, activeCLITheme)
+	defer i18n.DetectLanguage("en")
+	activeColorProfile = colorprofile.NoTTY
+	configureCLITheme("dark")
+	i18n.DetectLanguage("en")
+
+	u := &provider.Usage{PromptTokens: 1000, TotalTokens: 1000, CacheHitTokens: 800}
+	savedMoney := billing.Money{Amount: "0.15", Currency: "CNY"}
+	q := &billing.CostQuote{
+		Original:     billing.Money{Amount: "0.50", Currency: "CNY"},
+		Saved:        &savedMoney,
+		CostComplete: true,
+	}
+	got := ansi.Strip(renderQuotedTurnReceipt(u, q, nil))
+	if !strings.Contains(got, "saved ¥0.15 via prefix cache") {
+		t.Fatalf("receipt = %q, want 'saved ¥0.15 via prefix cache'", got)
+	}
+}
+
+func TestAddSessionCostQuoteWithDisplayCurrencyCNY(t *testing.T) {
+	usd := billing.Money{Amount: "0.30", Currency: "USD"}
+	cny := billing.Money{Amount: "2.00", Currency: "CNY"}
+	usdSaved := billing.Money{Amount: "0.06", Currency: "USD"}
+	cnySaved := billing.Money{Amount: "0.40", Currency: "CNY"}
+	quote := &billing.CostQuote{
+		Original: usd,
+		Saved:    &usdSaved,
+		Valuations: map[string]billing.Valuation{
+			"USD": {Money: usd, Saved: &usdSaved, Basis: billing.BasisIdentity},
+			"CNY": {Money: cny, Saved: &cnySaved, Basis: billing.BasisOfficialTable},
+		},
+		CostComplete:    true,
+		DisplayComplete: true,
+		Complete:        true,
+	}
+	var m chatTUI
+	m.cfg = &config.Config{
+		Billing: config.BillingConfig{DisplayCurrency: "CNY"},
+	}
+
+	m.addSessionCostQuote(quote)
+	if m.sessionCostQuote == nil {
+		t.Fatal("sessionCostQuote is nil")
+	}
+	if m.sessionCostQuote.Selected == nil || m.sessionCostQuote.Selected.Currency != "CNY" {
+		t.Fatalf("selected currency = %+v, want CNY", m.sessionCostQuote.Selected)
+	}
+	if m.sessionCostQuote.Saved == nil || m.sessionCostQuote.Saved.Currency != "CNY" {
+		t.Fatalf("saved currency = %+v, want CNY", m.sessionCostQuote.Saved)
+	}
+	status := ansi.Strip(m.sessionCostStatus())
+	if !strings.Contains(status, "¥2.0000") {
+		t.Fatalf("session cost status = %q, want ¥2.0000", status)
+	}
+}
+
+func TestCacheStatusIncludesSavedFeedback(t *testing.T) {
+	ctrl := cacheTagCtrl{last: &provider.Usage{CacheHitTokens: 800, CacheMissTokens: 200}, hit: 800, miss: 200}
+	savedMoney := billing.Money{Amount: "0.12", Currency: "CNY"}
+	m := chatTUI{
+		ctrl: ctrl,
+		sessionCostQuote: &billing.CostQuote{
+			Saved: &savedMoney,
+		},
+	}
+	body, rate, ok := m.cacheStatus()
+	if !ok {
+		t.Fatal("cacheStatus not ok")
+	}
+	if rate <= 0 {
+		t.Fatalf("rate = %v, want > 0", rate)
+	}
+	if !strings.Contains(body, "saved ¥0.12 via prefix cache") {
+		t.Fatalf("body = %q, want 'saved ¥0.12 via prefix cache'", body)
 	}
 }

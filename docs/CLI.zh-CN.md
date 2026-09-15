@@ -227,8 +227,10 @@ reasonix run "运行测试" --output-format stream-json
 `display_complete=false`，并用 `original_costs`/`original_totals` 给出各原币明细，
 绝不伪造跨币种合计。
 
+`total_saved` 与 `saved_feedback` 提供基于前缀缓存命中节省的预估金额与反馈文本（如 `saved ¥0.15 via prefix cache`），供结构化 `run` 结果使用。
+
 全局展示偏好为 `[billing].display_currency`（`auto|CNY|USD`）；旧
-`[desktop].currency` 仍会迁移。供应商原币价表由各条目冻结的 `billing_currency`
+`[desktop].currency` 仍会迁移。当设置为 `CNY` 时，TUI 状态栏、每轮收据（turn receipt）及 CLI 运行输出将正确展示官方人民币目录价格与符号（`¥`），不再固定显示原币 `US$`；同时在 TUI 状态栏缓存区与轮次收据中输出前缀缓存节省金额（Cache ROI 反馈）。供应商原币价表由各条目冻结的 `billing_currency`
 决定，切换展示币种不会改写价表。可用 `reasonix doctor billing` 排查。
 
 执行失败时使用 `subtype: "error_during_execution"` 和 `is_error: true`。

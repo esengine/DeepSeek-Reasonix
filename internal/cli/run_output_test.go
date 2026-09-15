@@ -311,3 +311,47 @@ func TestClassifyRunCompletion(t *testing.T) {
 		t.Fatalf("success completion = %+v", got)
 	}
 }
+
+func TestRunOutputJSONWithDisplayCurrencyCNYAndSavings(t *testing.T) {
+	var out bytes.Buffer
+	sink := newRunOutputSink(&out, runOutputJSON)
+	sink.SetDisplayCurrency("CNY")
+	sink.Emit(event.Event{
+		Kind:     event.Usage,
+		ModelRef: "deepseek-chat",
+		Usage: &provider.Usage{
+			PromptTokens:     1_000_000,
+			CacheHitTokens:   800_000,
+			CacheMissTokens:  200_000,
+			CompletionTokens: 100_000,
+		},
+		Pricing: &provider.Pricing{
+			Currency: "USD",
+			Input:    0.3,
+			CacheHit: 0.006,
+			Output:   1.2,
+		},
+	})
+	if err := sink.Finalize("test-session", time.Now(), nil); err != nil {
+		t.Fatal(err)
+	}
+	var result runResult
+	if err := json.Unmarshal(out.Bytes(), &result); err != nil {
+		t.Fatalf("decode result: %v", err)
+	}
+	if result.Currency != "CNY" {
+		t.Fatalf("currency = %q, want CNY", result.Currency)
+	}
+	if result.TotalCost <= 0 {
+		t.Fatalf("total_cost = %v, want > 0", result.TotalCost)
+	}
+	if result.TotalSaved <= 0 {
+		t.Fatalf("total_saved = %v, want > 0", result.TotalSaved)
+	}
+	if !strings.Contains(result.SavedFeedback, "saved ¥") || !strings.Contains(result.SavedFeedback, "via prefix cache") {
+		t.Fatalf("saved_feedback = %q, want 'saved ¥... via prefix cache'", result.SavedFeedback)
+	}
+	if feedback := sink.SavedFeedback(); feedback != result.SavedFeedback {
+		t.Fatalf("sink.SavedFeedback() = %q, want %q", feedback, result.SavedFeedback)
+	}
+}
