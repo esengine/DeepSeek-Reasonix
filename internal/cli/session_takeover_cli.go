@@ -161,8 +161,29 @@ func cliTakeoverHeldSession(sessionPath string, leaseErr error, leases *control.
 	}
 	record := cliServeForPID(pid)
 	if record == nil {
-		return nil, fmt.Errorf("%w; holder pid %d is not a resident serve on this machine", agent.ErrSessionLeaseHeld, pid)
+		// The holder PID does not match any discovered serve (stale state
+		// file, serve restart). The holder is on this machine, so try every
+		// local serve: the one holding the session will accept the handoff.
+		records := discoverCLIServes()
+		if len(records) == 0 {
+			return nil, fmt.Errorf("%w; holder pid %d is not a resident serve on this machine and no local serve is running", agent.ErrSessionLeaseHeld, pid)
+		}
+		var lastErr error
+		for i := range records {
+			binding, err := cliTakeoverFromServe(sessionPath, &records[i], leases, manager)
+			if err == nil {
+				return binding, nil
+			}
+			lastErr = err
+		}
+		return nil, lastErr
 	}
+	return cliTakeoverFromServe(sessionPath, record, leases, manager)
+}
+
+// cliTakeoverFromServe executes the handoff against one specific serve.
+func cliTakeoverFromServe(sessionPath string, record *cliServeRecord, leases *control.SessionLeaseKeeper, manager *cliTakeoverManager) (*cliTakeoverBinding, error) {
+	pid := record.pid
 	ctx, cancel := context.WithTimeout(context.Background(), cliTakeoverTimeout+15*time.Second)
 	defer cancel()
 	client, err := cliServeClient(ctx, *record)
@@ -210,14 +231,14 @@ func cliTakeoverHeldSession(sessionPath string, leaseErr error, leases *control.
 	return binding, nil
 }
 
-// cliSessionTakeoverCandidate reports whether leaseErr points at a resident
-// serve on this machine — the case where a takeover offer makes sense.
+// cliSessionTakeoverCandidate reports whether leaseErr carries enough lease
+// info to identify the holder — the case where a takeover offer makes sense.
+// The holder does not have to be a discovered serve: the serve's state file
+// PID can drift (restart, desktop reconnect), and the takeover execution
+// falls back to trying every local serve when the PID does not match.
 func cliSessionTakeoverCandidate(leaseErr error) bool {
 	var leaseError *agent.SessionLeaseError
-	if !errors.As(leaseErr, &leaseError) || leaseError == nil || leaseError.Info == nil {
-		return false
-	}
-	return cliServeForPID(leaseError.Info.PID) != nil
+	return errors.As(leaseErr, &leaseError) && leaseError != nil && leaseError.Info != nil
 }
 
 // promptSessionTakeover asks on the terminal (pre-TUI startup) whether to take
