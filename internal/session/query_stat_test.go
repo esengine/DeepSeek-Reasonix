@@ -1,6 +1,9 @@
 package session
 
-import "testing"
+import (
+	"path/filepath"
+	"testing"
+)
 
 func TestQueryStatReturnsHeaderBackedIdentityWithoutReadingHistory(t *testing.T) {
 	service, err := NewService("local", NewFilesystemPersistence(t.TempDir()))
@@ -19,7 +22,9 @@ func TestQueryStatReturnsHeaderBackedIdentityWithoutReadingHistory(t *testing.T)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if info.Ref != runtime.Ref() || info.CWD != "/workspace" || info.Origin != SessionOriginNew {
+	// Headers record CWD in OS-native form, so the expectation is cleaned the
+	// same way the writer cleans it instead of assuming POSIX separators.
+	if info.Ref != runtime.Ref() || info.CWD != filepath.Clean("/workspace") || info.Origin != SessionOriginNew {
 		t.Fatalf("stat = %#v", info)
 	}
 }

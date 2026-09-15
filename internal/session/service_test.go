@@ -550,7 +550,8 @@ func TestServiceImportValidatesSelfContainedContentAndPublishesAtomically(t *tes
 	if err != nil {
 		t.Fatal(err)
 	}
-	if headerInfo.CWD != "/workspace" || headerInfo.Origin != SessionOriginCanonicalImport {
+	// Headers record CWD in OS-native form; clean the expectation the same way.
+	if headerInfo.CWD != filepath.Clean("/workspace") || headerInfo.Origin != SessionOriginCanonicalImport {
 		t.Fatalf("imported header = %+v", headerInfo)
 	}
 	remapped, err := headerTarget.ImportWithHeader(t.Context(), bundle, CreateOptions{SessionID: "migr-conflict", CWD: "/workspace", Origin: SessionOriginCanonicalImport})

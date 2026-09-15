@@ -2,6 +2,7 @@ package session
 
 import (
 	"context"
+	"errors"
 	"sync"
 	"testing"
 	"time"
@@ -72,10 +73,19 @@ func TestRebuildSlotsCancelDoesNotDropGrant(t *testing.T) {
 	slots.release()
 	select {
 	case err := <-errCh:
-		// A grant that races cancellation still returns nil: the caller owns
-		// a slot and must release it.
-		if err != nil {
-			t.Fatalf("cancelled acquire returned %v; grant must win", err)
+		// cancel happens before release, so either interleaving is correct.
+		// What must never happen is a lost grant: if the waiter reports
+		// cancellation it must not have consumed the freed slot, and if it
+		// reports success it owns the slot and must release it.
+		if err == nil {
+			slots.release()
+			break
+		}
+		if !errors.Is(err, context.Canceled) {
+			t.Fatalf("cancelled acquire returned %v, want context.Canceled", err)
+		}
+		if !slots.tryAcquire() {
+			t.Fatal("cancelled acquire consumed the freed slot")
 		}
 		slots.release()
 	case <-time.After(5 * time.Second):

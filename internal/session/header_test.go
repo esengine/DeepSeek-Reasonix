@@ -5,6 +5,7 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	goruntime "runtime"
 	"testing"
 )
 
@@ -38,9 +39,11 @@ func TestFilesystemPersistenceCreatesImmutableSessionHeader(t *testing.T) {
 		header.Origin != SessionOriginFork || header.CreatedAt.IsZero() {
 		t.Fatalf("header = %#v", header)
 	}
+	// Windows has no POSIX permission bits and always reports 0666 for a
+	// regular file, so assert the owner-only mode only where the OS can carry it.
 	if info, err := os.Stat(headerPath); err != nil {
 		t.Fatalf("Stat: %v", err)
-	} else if info.Mode().Perm() != 0o600 {
+	} else if goruntime.GOOS != "windows" && info.Mode().Perm() != 0o600 {
 		t.Fatalf("header mode = %o, want 600", info.Mode().Perm())
 	}
 

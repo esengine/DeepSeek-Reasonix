@@ -78,7 +78,8 @@ func TestContinueImportedResolvesPairedHistoryStructurally(t *testing.T) {
 		t.Fatalf("resolved import = %+v", result)
 	}
 	info, err := NewFilesystemPersistence(targetRoot).Stat(t.Context(), result.TargetID)
-	if err != nil || info.CWD != "/workspace" || info.Origin != SessionOriginLegacyImport {
+	// Headers record CWD in OS-native form; clean the expectation the same way.
+	if err != nil || info.CWD != filepath.Clean("/workspace") || info.Origin != SessionOriginLegacyImport {
 		t.Fatalf("imported header = %+v, %v", info, err)
 	}
 }
