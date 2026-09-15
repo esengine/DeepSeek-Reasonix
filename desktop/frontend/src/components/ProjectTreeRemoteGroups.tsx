@@ -79,21 +79,14 @@ export function mergeRemoteSessionsIntoTree(
   return tree.map((node) => {
     if (!node.remote) return node;
     const rows = sessions[remoteProjectKey(node.remote)] ?? [];
-    const remoteChildren = rows.flatMap((row): ProjectNode[] => {
-      // A never-chatted canonical session is the remote analog of a local
-      // blank: local blanks disappear when unused, so drop these rows at the
-      // render layer - the render filter covers cached listings too, not
-      // only freshly ensured ones.
-      if (row.sessionId?.trim() && !row.current && !row.turns && !row.title?.trim() && !row.pinned) {
-        return [];
-      }
+    const remoteChildren = rows.filter((r) => r.current || r.turns || r.title || r.pinned || !r.sessionId).map((row): ProjectNode => {
       const identity = remoteSessionIdentity(row);
       const session = runtime?.sessions.find(session => session.hostId === node.remote!.hostId && session.workspaceRoot === node.remote!.workspace && (
         row.sessionId ? session.sessionId === row.sessionId : session.sessionPath === row.path
       ));
       const state = selectRuntime(session, failed);
       const status = state.unknown ? "unknown" : state.known && state.kind !== "idle" && state.kind !== "legacy" ? state.kind : undefined;
-      return [{
+      return ({
       key: `remote-session-${node.remote!.hostId}-${node.remote!.workspace}-${identity}`,
       kind: "topic",
       label: remoteSessionLabel(row, t),
@@ -107,7 +100,8 @@ export function mergeRemoteSessionsIntoTree(
       pinned: row.pinned,
       remoteSession: { hostId: node.remote!.hostId, workspace: node.remote!.workspace, name: row.name, path: row.path, sessionId: row.sessionId, title: row.title, current: row.current },
       children: [],
-    }]; });
+    });
+    });
     return { ...node, children: [...remoteChildren, ...(node.children ?? [])] };
   });
 }
