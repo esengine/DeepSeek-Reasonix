@@ -448,16 +448,6 @@ func loadResumableSession(path string) (*agent.Session, error) {
 	return agent.LoadSession(path)
 }
 
-var newNotificationSender = func() notify.Sender { return notify.NewPlatformSender() }
-
-// withNotifications adds system notifications to CLI event streams when configured.
-func withNotifications(sink event.Sink, cfg *config.Config) event.Sink {
-	if cfg == nil || !cfg.Notifications.Enabled {
-		return sink
-	}
-	return notify.NewSink(sink, newNotificationSender(), cfg.Notifications)
-}
-
 // registerContinueFlag registers --continue with its -c shorthand. The
 // shorthand must go through BoolP (pflag shorthand), not BoolVar: BoolVar
 // registers "c" as a long flag name, which leaves "-c" unparseable
@@ -740,7 +730,7 @@ func runAgent(args []string, version string) int {
 	reporter.RecordRecovery(ctrl.DrainRecoveryMetrics())
 	completion := classifyRunCompletion(runErr)
 	if cfg != nil {
-		notify.SendEvent(newNotificationSender(), cfg.Notifications, event.Event{
+		notify.SendEvent(notificationSenderForConfig(cfg.Notifications), cfg.Notifications, event.Event{
 			Kind:    event.TurnDone,
 			Err:     runErr,
 			Outcome: completion.outcome,
