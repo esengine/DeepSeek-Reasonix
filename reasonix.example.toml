@@ -12,6 +12,7 @@ theme = "auto"   # auto|dark|light; controls CLI colors only; REASONIX_THEME can
 # theme_style = "graphite"   # graphite|aurora|slate|carbon|nocturne|amber and legacy aliases
 # shortcut_layout = "desktop"   # classic|desktop; compatibility setting; Shift+Tab cycles read-only/workspace/YOLO/plan; Ctrl+Y toggles YOLO
 # cursor_shape = "bar"   # block|underline|bar; text input cursor shape; slim default avoids covering CJK characters
+# commandmode = "vi"   # ""|vi; "vi" gives the CLI prompt a vi command mode (Esc enters command mode, ^C interrupts a stream, ^D exits)
 show_turn_usage = true   # CLI/TUI: show per-request token and cost receipts in transcript scrollback
 
 [desktop]

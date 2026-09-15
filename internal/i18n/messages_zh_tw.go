@@ -81,7 +81,7 @@ var ChineseTraditional = Messages{
 
 	ChatThinking:                           "思考中…",
 	ChatThoughtForFmt:                      "思考了 %d 秒",
-	ChatStatusThinkingFmt:                  "%s 思考中… (%d 秒 · Esc 取消)",
+	ChatStatusThinkingFmt:                  "%s 思考中… (%d 秒 · 中斷鍵取消)",
 	TurnPhaseWorking:                       "工作中",
 	ReadStatusReadingFmt:                   "正在讀取 %s",
 	ReadStatusCoveredFmt:                   "正在讀取 %s · 已涵蓋 %s 行",
@@ -106,7 +106,7 @@ var ChineseTraditional = Messages{
 	ChatSubagentProgressFmt:                "%s · %d 秒 · %d 秒前",
 	ChatSubagentProgressDoneFmt:            "%s · %d 秒",
 	ChatSubagentPreviewLabel:               "▎",
-	ChatStatusRetryingFmt:                  "%s 正在重試 (%d/%d)… (Esc 取消)",
+	ChatStatusRetryingFmt:                  "%s 正在重試 (%d/%d)… (中斷鍵取消)",
 	ChatStatusCancellingFmt:                "%s 正在停止… (%d 秒 · Ctrl+C 退出)",
 	ChatStatusIdle:                         "就緒",
 	ChatStatusCycleHint:                    "Shift+Tab 循環僅可查看/工作區內修改/YOLO/計畫 · Ctrl+Y YOLO",

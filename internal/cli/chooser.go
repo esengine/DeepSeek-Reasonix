@@ -94,6 +94,11 @@ func (m chatTUI) handleChooserKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 		m.chooser = nil
 		return m, nil
 	case "esc":
+		// vi mode ignores Esc on the ask question card: it does not dismiss.
+		// Only ^C cancels the ask.
+		if m.viActive() {
+			return m, nil
+		}
 		return m.chooserAnswer(nil) // dismiss → empty answer
 	case "left", "h":
 		if c.tab > 0 {

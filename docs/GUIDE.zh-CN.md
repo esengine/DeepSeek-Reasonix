@@ -496,6 +496,7 @@ CLI/TUI 文本输入可通过 `[ui].cursor_shape` 设置光标形状，支持 `u
 | `Shift+Tab` | 按“仅可查看 → 工作区内修改 → YOLO → Plan”循环 | YOLO 设置 `danger-full-access`；离开 Plan 后回到仅可查看。 |
 | `Ctrl+Y` | 切换 YOLO | 进入 YOLO 时设置 `danger-full-access`；再按一次恢复之前的安全权限预设。 |
 | `--permission-mode read-only|workspace-write|danger-full-access` | 选择启动权限 | 新会话默认使用 `workspace-write`。 |
+| `[ui].commandmode = "vi"` | 让输入框进入 vi 命令模式 | `Esc` 进入命令模式，而不再中止正在运行的回合；此时只有 `Ctrl+C` 会中断。若已输入文本，`Ctrl+C` 会先把草稿原样存入提示历史再清空输入框，可用 `Up` 召回。未设置或 `""` 保持默认，即 `Esc` 中止正在运行的回合。 |
 | `/theme [auto|light|dark|style]` | 查看或切换 CLI 主题 | 不带参数会列出背景模式和命名配色。选择会保存到用户配置；单次运行可用 `REASONIX_THEME` 和 `REASONIX_THEME_STYLE` 覆盖。 |
 | `Ctrl+O` | 切换详细 reasoning 显示 | 也可通过 `/verbose` 使用。 |
 | `Ctrl+B` | 展开或收起较长 shell 输出 | 较长 shell 输出的提示行也可点击；全屏 TUI 开启鼠标接管时，文本选区由应用内处理。 |
