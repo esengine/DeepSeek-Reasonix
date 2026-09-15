@@ -470,3 +470,12 @@
   color: var(--fg-dim);
   overflow-wrap: anywhere;
 }
+
+:root .settings-options.remote-wizard__install {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  height: auto;
+}
+:root .settings-options.remote-wizard__install > button {
+  min-height: 30px;
+}
