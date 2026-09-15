@@ -31,6 +31,11 @@ for workflow in (stable, desktop):
     # cannot drift between the orchestrator, the publisher, and the release.
     assert 'scripts/manual-desktop-exception.sh validate' in workflow
 assert '7278072720a2dc7a31cce0eec18c1eacc149c0e0' in exception
+verifier = (root / 'scripts/verify-stable-release-artifacts.sh').read_text()
+# Postflight reads the same allowlist and asserts the update pointers never
+# serve the manual release, instead of naming one release's prior version.
+assert 'manual-desktop-exception.sh" validate "$desktop_tag"' in verifier
+assert '1.38.8' not in verifier and 'v1.38.7' not in verifier
 assert 'inputs.allow_recovery' in stable.split('name: Restrict manual Desktop distribution', 1)[1].split('- name:', 1)[0]
 assert stable.count('desktop_manual_only: ${{ inputs.desktop_manual_only || false }}') == 2
 assert "HAS_SIGNPATH: ${{ secrets.SIGNPATH_API_TOKEN != '' && !inputs.desktop_manual_only }}" in desktop

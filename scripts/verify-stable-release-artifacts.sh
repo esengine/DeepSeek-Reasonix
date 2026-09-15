@@ -6,6 +6,7 @@ repository="${RELEASE_REPOSITORY:?RELEASE_REPOSITORY is required}"
 version="${RELEASE_VERSION:?RELEASE_VERSION is required}"
 cli_tag="${CLI_TAG:?CLI_TAG is required}"
 desktop_tag="${DESKTOP_TAG:?DESKTOP_TAG is required}"
+script_dir="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
 attempts="${VERIFY_ATTEMPTS:-6}"
 delay="${VERIFY_DELAY_SECONDS:-10}"
 
@@ -51,11 +52,17 @@ jq -e '
 ' "$tmp_dir/desktop.json" >/dev/null
 
 if [ "${DESKTOP_MANUAL_ONLY:-false}" = "true" ]; then
-	[ "$version" = "1.38.8" ] || exit 1
-	# Both updater entry points must still serve the prior signed release.
-	gh api "repos/$repository/releases/latest" --jq .tag_name | grep -Fx 'desktop-v1.38.7'
+	bash "$script_dir/manual-desktop-exception.sh" validate "$desktop_tag"
+	# Neither updater entry point may serve the manual release: the exception
+	# publishes downloads without advancing automatic updates. Assert that
+	# invariant rather than one release's prior version.
+	gh_latest="$(gh api "repos/$repository/releases/latest" --jq .tag_name)"
+	if [ "$gh_latest" = "$desktop_tag" ]; then
+		echo "::error::GitHub latest advanced to the manual release $desktop_tag" >&2
+		exit 1
+	fi
 	curl -fsSL https://dl.reasonix.io/latest/latest.json > "$tmp_dir/desktop-pointer.json"
-	jq -e '.version == "v1.38.7"' "$tmp_dir/desktop-pointer.json" >/dev/null
+	jq -e --arg v "v$version" '.version != $v' "$tmp_dir/desktop-pointer.json" >/dev/null
 	gh release view "$desktop_tag" --repo "$repository" --json body --jq .body | grep -F 'manual-download only'
 fi
 
