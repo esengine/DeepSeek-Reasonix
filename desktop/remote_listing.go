@@ -109,11 +109,13 @@ const expectedModelSettingsHeader = "X-Reasonix-Expected-Model-Settings"
 const remoteSessionIDRoutePrefix = "session-id:"
 
 func remoteSessionIdentityRoute(path, sessionID string) string {
-	if path = strings.TrimSpace(path); path != "" {
-		return path
-	}
+	// A session the Serve migrated into the identity catalog keeps its legacy
+	// path only as a read-only artifact; the identity is the live route.
 	if sessionID = strings.TrimSpace(sessionID); sessionID != "" {
 		return remoteSessionIDRoutePrefix + sessionID
+	}
+	if path = strings.TrimSpace(path); path != "" {
+		return path
 	}
 	return ""
 }
@@ -159,6 +161,18 @@ type serveSessionIdentity struct {
 func servePostSessionIdentityForSession(ctx context.Context, client *http.Client, url string, body []byte, expectedPath string) (serveSessionIdentity, error) {
 	if body == nil {
 		body = []byte("{}")
+	}
+	if strings.HasSuffix(strings.TrimRight(url, "/"), "/resume") {
+		var request struct {
+			Path      string `json:"path"`
+			SessionID string `json:"sessionId"`
+		}
+		if err := json.Unmarshal(body, &request); err != nil {
+			return serveSessionIdentity{}, fmt.Errorf("invalid remote resume request: %w", err)
+		}
+		if strings.TrimSpace(request.Path) == "" && strings.TrimSpace(request.SessionID) == "" {
+			return serveSessionIdentity{}, fmt.Errorf("remote resume requires a session path or sessionId")
+		}
 	}
 	resp, err := serveDoForSession(ctx, client, http.MethodPost, url, body, expectedPath)
 	if err != nil {
@@ -410,6 +424,13 @@ func (a *App) remoteProjectSessions(ctx context.Context, client *http.Client, ba
 		if override := prefs.SessionTitles[prefKey]; override != "" {
 			title = override
 		}
+		// A never-chatted canonical session is the remote analog of a local
+		// blank: local blanks disappear when unused, so hide these rows from
+		// the tree instead of letting opened-but-unused sessions pile up as
+		// duplicate "new session" entries.
+		if e.SessionID != "" && !e.Current && e.Turns == 0 && title == "" {
+			continue
+		}
 		current := e.Current
 		route := remoteSessionRoute(e)
 		if preferLiveCurrent {
@@ -433,9 +454,9 @@ func (a *App) remoteProjectSessions(ctx context.Context, client *http.Client, ba
 		// transcript save. Synthesize it from the live route rather than reset,
 		// which status clears as soon as Serve names the not-yet-listed session.
 		a.remoteTabMu.Lock()
-		listedPaths := make(map[string]bool, len(entries))
+		listedRoutes := make(map[string]bool, len(entries))
 		for _, e := range entries {
-			listedPaths[e.Path] = true
+			listedRoutes[remoteSessionIdentityRoute(strings.TrimSpace(e.Path), strings.TrimSpace(e.SessionID))] = true
 		}
 		var blank *RemoteSessionView
 		for _, tab := range a.remoteTabs {
@@ -449,7 +470,7 @@ func (a *App) remoteProjectSessions(ctx context.Context, client *http.Client, ba
 			// yet. Unknown path (a legacy /new without a path header): blank
 			// while the fresh-session marker is still set.
 			if path := tab.routing.currentPath; path != "" {
-				if !listedPaths[path] {
+				if !listedRoutes[path] {
 					blank = &RemoteSessionView{Name: "", Path: path, Title: tab.topicTitle, Current: true, Running: tab.runtime.running, LastActivityAt: time.Now().UnixMilli()}
 				}
 			} else if tab.session.reset {

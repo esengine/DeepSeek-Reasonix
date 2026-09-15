@@ -1,6 +1,7 @@
 export type SessionIdentityInput = {
   tabId?: string;
   sessionPath?: string;
+  sessionId?: string;
   sessionGeneration?: number;
   scope?: string;
   workspaceRoot?: string;
@@ -9,6 +10,10 @@ export type SessionIdentityInput = {
 
 /** Runtime session identity; intentionally distinct from draft/workspace keys. */
 export function sessionIdentityKey(input: SessionIdentityInput): string {
+  const sessionId = (input.sessionId ?? "").trim();
+  if (sessionId) {
+    return ["session-id", input.tabId ?? "", sessionId].join("\u0000");
+  }
   const sessionPath = (input.sessionPath ?? "").trim();
   if (sessionPath) {
     return ["session", sessionPath, String(input.sessionGeneration ?? 0)].join("\u0000");

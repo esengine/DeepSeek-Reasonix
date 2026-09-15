@@ -16,6 +16,36 @@ export function remoteProjectKey(ref: RemoteTabRefView): string {
   return `${ref.hostId}\u0000${ref.workspace}`;
 }
 
+// Canonical remote sessions may not have a legacy transcript path. Use the
+// immutable session ID first so React keys, topic IDs, and action lookups do
+// not collapse a canonical row into a path-only or blank row.
+export function remoteSessionIdentity(row: Pick<RemoteSessionView, "sessionId" | "path" | "name">): string {
+  return row.sessionId?.trim() || row.path?.trim() || row.name?.trim() || "new";
+}
+
+// Mutations still use the historical bridge argument named `name`, but that
+// argument is an identity token, not the visible title. Canonical rows must
+// use sessionId; legacy rows retain their stable basename.
+export function remoteSessionActionIdentity(remote: Pick<RemoteSessionView, "sessionId" | "name" | "path">): string {
+  // Keep the legacy name fallback for old Serve rows, but never fall back to
+  // path: the synthetic current row may have a path while still being a
+  // blank, non-catalogued session.
+  const legacyIdentity = remote.name || remote.sessionId || "";
+  const explicit = remote.sessionId?.trim() || legacyIdentity.trim();
+  if (explicit) return explicit;
+  const route = remote.path?.trim() || "";
+  return route.startsWith("session-id:") ? route.slice("session-id:".length).trim() : "";
+}
+
+export function remoteSessionLabel(row: Pick<RemoteSessionView, "sessionId" | "name" | "title">, t: Translator): string {
+  const title = row.title?.trim();
+  if (title) return title;
+  // Canonical rows use `name` as an identity compatibility field, which is
+  // the opaque session ID. Never expose that ID as the visible topic label.
+  if (row.sessionId?.trim()) return t("projectTree.newTopic");
+  return row.name?.trim() || t("projectTree.newTopic");
+}
+
 export function useRemoteRuntimeTree(tree: ProjectNode[], sessions: Record<string, RemoteSessionView[]>, t: Translator) {
   const runtime = useSyncExternalStore(runtimeStateStore.subscribe, runtimeStateStore.getSnapshot);
   const failed = useSyncExternalStore(runtimeStateStore.subscribe, runtimeStateStore.getFailed);
@@ -49,27 +79,35 @@ export function mergeRemoteSessionsIntoTree(
   return tree.map((node) => {
     if (!node.remote) return node;
     const rows = sessions[remoteProjectKey(node.remote)] ?? [];
-    const remoteChildren = rows.map((row): ProjectNode => {
+    const remoteChildren = rows.flatMap((row): ProjectNode[] => {
+      // A never-chatted canonical session is the remote analog of a local
+      // blank: local blanks disappear when unused, so drop these rows at the
+      // render layer - the render filter covers cached listings too, not
+      // only freshly ensured ones.
+      if (row.sessionId?.trim() && !row.current && !row.turns && !row.title?.trim() && !row.pinned) {
+        return [];
+      }
+      const identity = remoteSessionIdentity(row);
       const session = runtime?.sessions.find(session => session.hostId === node.remote!.hostId && session.workspaceRoot === node.remote!.workspace && (
         row.sessionId ? session.sessionId === row.sessionId : session.sessionPath === row.path
       ));
       const state = selectRuntime(session, failed);
       const status = state.unknown ? "unknown" : state.known && state.kind !== "idle" && state.kind !== "legacy" ? state.kind : undefined;
-      return ({
-      key: `remote-session-${node.remote!.hostId}-${node.remote!.workspace}-${row.name}`,
+      return [{
+      key: `remote-session-${node.remote!.hostId}-${node.remote!.workspace}-${identity}`,
       kind: "topic",
-      label: row.title || row.name || t("projectTree.newTopic"),
+      label: remoteSessionLabel(row, t),
       root: node.remote!.workspace,
-      topicId: `${node.remote!.hostId}\u0000${node.remote!.workspace}\u0000${row.name}`,
+      topicId: `${node.remote!.hostId}\u0000${node.remote!.workspace}\u0000${identity}`,
       sessionPath: row.path,
       turns: row.turns,
       running: state.known ? state.unknown ? false : Boolean(state.running || session!.state.pendingPrompt || session!.state.backgroundJobs) : row.running,
       status: status as ProjectNode["status"],
       lastActivityAt: row.lastActivityAt,
       pinned: row.pinned,
-      remoteSession: { hostId: node.remote!.hostId, workspace: node.remote!.workspace, name: row.name, path: row.path, sessionId: row.sessionId, title: row.title },
+      remoteSession: { hostId: node.remote!.hostId, workspace: node.remote!.workspace, name: row.name, path: row.path, sessionId: row.sessionId, title: row.title, current: row.current },
       children: [],
-    }); });
+    }]; });
     return { ...node, children: [...remoteChildren, ...(node.children ?? [])] };
   });
 }
@@ -80,17 +118,21 @@ export function useRemoteSessionActions(
   reportError: (error: unknown) => void,
 ) {
   const index = useMemo(() => {
-    const next = new Map<string, { hostId: string; workspace: string; name: string }>();
+    const next = new Map<string, { hostId: string; workspace: string; name: string; path?: string; sessionId?: string }>();
     for (const [groupKey, rows] of Object.entries(sessions)) {
       const [hostId, workspace] = groupKey.split("\u0000");
-      for (const row of rows) next.set(`${hostId}\u0000${workspace}\u0000${row.name}`, { hostId, workspace, name: row.name });
+      for (const row of rows) {
+        next.set(`${hostId}\u0000${workspace}\u0000${remoteSessionIdentity(row)}`, {
+          hostId, workspace, name: row.name, path: row.path, sessionId: row.sessionId,
+        });
+      }
     }
     return next;
   }, [sessions]);
   const resolve = useCallback((topicId: string) => index.get(topicId), [index]);
   const mutate = useCallback(async (
     topicId: string,
-    action: (remote: { hostId: string; workspace: string; name: string }) => Promise<unknown>,
+    action: (remote: { hostId: string; workspace: string; name: string; path?: string; sessionId?: string }) => Promise<unknown>,
   ) => {
     const remote = index.get(topicId);
     if (!remote) return false;
@@ -104,7 +146,14 @@ export function useRemoteSessionActions(
   }, [index, refresh]);
   const remove = useCallback(async (topicId: string, local: () => Promise<unknown>) => {
     try {
-      if (await mutate(topicId, (remote) => app.DeleteRemoteProjectSession(remote.hostId, remote.workspace, remote.name))) return;
+      if (await mutate(topicId, (remote) => {
+        const identity = remoteSessionActionIdentity(remote);
+        // A blank, not-yet-catalogued session has no identity the Serve can
+        // delete; the deterministic "name required" rejection would only
+        // surface as a broken trash action.
+        if (!identity) return Promise.resolve();
+        return app.DeleteRemoteProjectSession(remote.hostId, remote.workspace, identity);
+      })) return;
       await local();
     } catch (error) {
       reportError(error);

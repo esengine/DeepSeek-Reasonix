@@ -264,9 +264,14 @@ func (a *App) syncRemoteRuntimeConnection(conn remoteRuntimeConnection) error {
 	for _, session := range payload.Sessions {
 		state, decodeErr := decodeRemoteRuntimeState(session.State)
 		_, duplicate := states[session.SessionPath]
-		if decodeErr != nil || session.SessionPath == "" || duplicate {
+		if decodeErr != nil || duplicate {
 			a.markRemoteRuntimeSyncFailed(conn.targets, true)
 			return fmt.Errorf("invalid runtime state synchronization payload")
+		}
+		if session.SessionPath == "" {
+			// An identity session a Serve has not routed yet reports no legacy
+			// path; skip it instead of failing the whole reconciliation.
+			continue
 		}
 		states[session.SessionPath] = state
 	}

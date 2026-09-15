@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
+	"strings"
 
 	"reasonix/internal/agent"
 	"reasonix/internal/control"
@@ -256,8 +257,10 @@ func (s *Server) sessionHistoryLocate(w http.ResponseWriter, r *http.Request) {
 // without colliding with a genuine read failure, which must stay a conflict.
 var errTranscriptCapabilityMissing = errors.New("transcript capability is missing")
 
-// transcriptRead binds each read to the selected controller. A file mirror
-// cannot claim a live event cursor and explicitly declines this protocol.
+// transcriptRead binds each read to the controller that owns the referenced
+// session: the foreground when the reference is absent or matches it, else
+// the detached session holding that identity or path. A file mirror cannot
+// claim a live event cursor and explicitly declines this protocol.
 func (s *Server) transcriptRead(w http.ResponseWriter, r *http.Request, read func(control.TranscriptProjectionAPI) (any, error)) {
 	s.transcriptBoundRead(w, r, func(ctrl control.SessionAPI) (any, error) {
 		api, ok := ctrl.(control.TranscriptProjectionAPI)
@@ -275,17 +278,16 @@ func (s *Server) transcriptRead(w http.ResponseWriter, r *http.Request, read fun
 func (s *Server) transcriptBoundRead(w http.ResponseWriter, r *http.Request, read func(control.SessionAPI) (any, error)) {
 	s.bindMu.Lock()
 	defer s.bindMu.Unlock()
-	ctrl := s.ctl()
-	path := agent.CanonicalSessionPath(ctrl.SessionPath())
-	if raw := r.URL.Query().Get("session"); raw != "" {
-		requested, err := s.resolveSessionPath(raw)
-		if err != nil || agent.CanonicalSessionPath(requested) != path {
-			http.Error(w, "transcript session is not bound to this runtime", http.StatusConflict)
+	raw := strings.TrimSpace(r.URL.Query().Get("session"))
+	if raw != "" && !strings.HasPrefix(raw, remoteSessionIDQueryPrefix) {
+		if resolved, err := s.resolveSessionPath(raw); err == nil && s.sessionMirrored(agent.CanonicalSessionPath(resolved)) {
+			http.Error(w, "transcript projection is unavailable", http.StatusNotImplemented)
 			return
 		}
 	}
-	if s.sessionMirrored(path) {
-		http.Error(w, "transcript projection is unavailable", http.StatusNotImplemented)
+	ctrl := s.resolveReadControllerLocked(raw)
+	if ctrl == nil {
+		http.Error(w, "transcript session is not bound to this runtime", http.StatusConflict)
 		return
 	}
 	value, err := read(ctrl)
@@ -300,6 +302,63 @@ func (s *Server) transcriptBoundRead(w http.ResponseWriter, r *http.Request, rea
 	w.Header().Set("Cache-Control", "no-store")
 	w.Header().Set("Content-Type", "application/json")
 	_ = json.NewEncoder(w).Encode(value)
+}
+
+// resolveReadControllerLocked returns the controller a transcript read
+// targets. An empty reference selects the foreground; an identity or path
+// reference selects the foreground when it matches, otherwise the detached
+// session holding it. bindMu must be held; detachedMu nests inside it.
+func (s *Server) resolveReadControllerLocked(raw string) control.SessionAPI {
+	foreground := s.ctl()
+	if raw == "" {
+		return foreground
+	}
+	if id, ok := strings.CutPrefix(raw, remoteSessionIDQueryPrefix); ok {
+		if controllerBoundToIdentity(foreground, id) {
+			return foreground
+		}
+		s.detachedMu.Lock()
+		defer s.detachedMu.Unlock()
+		for _, detached := range s.detached {
+			if controllerBoundToIdentity(detached.ctrl, id) {
+				return detached.ctrl
+			}
+		}
+		return nil
+	}
+	path := agent.CanonicalSessionPath(raw)
+	if resolved, err := s.resolveSessionPath(raw); err == nil {
+		path = agent.CanonicalSessionPath(resolved)
+	}
+	if agent.CanonicalSessionPath(foreground.SessionPath()) == path {
+		return foreground
+	}
+	s.detachedMu.Lock()
+	defer s.detachedMu.Unlock()
+	for _, detached := range s.detached {
+		if agent.CanonicalSessionPath(detached.ctrl.SessionPath()) == path {
+			return detached.ctrl
+		}
+	}
+	return nil
+}
+
+// remoteSessionIDQueryPrefix marks a session reference as an identity ID
+// rather than a legacy transcript path; it matches the desktop's routing
+// prefix for exclusive identity sessions.
+const remoteSessionIDQueryPrefix = "session-id:"
+
+// controllerBoundToIdentity reports whether ctrl currently runs the exclusive
+// identity session the caller referenced.
+func controllerBoundToIdentity(ctrl control.SessionAPI, id string) bool {
+	ref, ok := ctrl.(interface {
+		SessionRef() (session.SessionRef, bool)
+	})
+	if !ok {
+		return false
+	}
+	bound, has := ref.SessionRef()
+	return has && bound.SessionID == id
 }
 
 func transcriptRequest(w http.ResponseWriter, r *http.Request, dst any) bool {

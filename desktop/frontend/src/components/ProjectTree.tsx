@@ -26,7 +26,7 @@ import { summarizeProjectTreeSessions } from "../lib/projectTreeDiagnostics";
 import { GLOBAL_PROJECT_ORDER_KEY, ProjectTreeFolderActivity, ProjectTreeGroupRows, applyProjectOrder, projectTreeProjectRoots, reorderedProjectRoots, useProjectTreeOrganization, type ProjectDropPosition } from "./ProjectTreeOrganization";
 import { ProjectTreeSessionArchiveMenu } from "./ProjectTreeSessionArchiveMenu";
 import { ProjectTreeHeaderAddControl, ProjectTreeRemoteAction, projectTreeHeaderAddItems } from "./ProjectTreeAddControls";
-import { activeRemoteProjectAncestorKeys, buildRemoteProjectMenuItems, useRemoteRuntimeTree, openRemoteSessionNode, remoteProjectKey, remoteServeBadgeState, renameRemoteProjectTitle, RemoteProjectEmptyState, useRemoteProjectGroups, useRemoteSessionActions } from "./ProjectTreeRemoteGroups";
+import { activeRemoteProjectAncestorKeys, buildRemoteProjectMenuItems, useRemoteRuntimeTree, openRemoteSessionNode, remoteProjectKey, remoteServeBadgeState, renameRemoteProjectTitle, RemoteProjectEmptyState, remoteSessionActionIdentity, useRemoteProjectGroups, useRemoteSessionActions } from "./ProjectTreeRemoteGroups";
 import type { ProjectTreeProps } from "./ProjectTreeProps";
 
 function projectNodeKey(node: ProjectNode, depth: number): string {
@@ -533,12 +533,12 @@ export function ProjectTree({
   useEffect(() => {
     const markActive = (nodes: ProjectNode[]) => {
       for (const node of nodes) {
-        if (topicIsActive(node, activeScope, activeWorkspaceRoot, activeTopicId, activeSessionPath)) markNodeRead(node);
+        if (topicIsActive(node, activeScope, activeWorkspaceRoot, activeTopicId, activeSessionPath, activeRemote)) markNodeRead(node);
         markActive(asArray(node.children));
       }
     };
     markActive(treeWithRemoteSessions);
-  }, [activeScope, activeSessionPath, activeTopicId, activeWorkspaceRoot, markNodeRead, treeWithRemoteSessions]);
+  }, [activeRemote, activeScope, activeSessionPath, activeTopicId, activeWorkspaceRoot, markNodeRead, treeWithRemoteSessions]);
 
   useEffect(() => {
     try {
@@ -762,7 +762,7 @@ export function ProjectTree({
     setEditingTopic(null);
     if (!title) return;
     try {
-      if (await remoteSessionActions.mutate(topicId, (remote) => app.RenameRemoteProjectSession(remote.hostId, remote.workspace, remote.name, title))) return;
+      if (await remoteSessionActions.mutate(topicId, (remote) => app.RenameRemoteProjectSession(remote.hostId, remote.workspace, remoteSessionActionIdentity(remote), title))) return;
       if (onRenameTopic) await onRenameTopic(topicId, title);
       else await app.RenameTopic(topicId, title);
       // Paint the new label immediately; the catalog event round-trip can lag.
@@ -804,7 +804,7 @@ export function ProjectTree({
     setMenuNodeKey(null);
     setMenuPoint(null);
     try {
-      if (await remoteSessionActions.mutate(topicId, (remote) => app.SetRemoteSessionPinned(remote.hostId, remote.workspace, remote.name, pinned))) return;
+      if (await remoteSessionActions.mutate(topicId, (remote) => app.SetRemoteSessionPinned(remote.hostId, remote.workspace, remoteSessionActionIdentity(remote), pinned))) return;
       await app.SetTopicPinned(topicId, pinned);
       await refresh();
       await onTopicsChanged?.();
@@ -986,7 +986,7 @@ export function ProjectTree({
       queryActive: query.trim().length > 0,
       timeFilterActive: timeFilter !== "all",
       projectNodeKey,
-      isActive: (node) => topicIsActive(node, activeScope, activeWorkspaceRoot, activeTopicId, activeSessionPath),
+      isActive: (node) => topicIsActive(node, activeScope, activeWorkspaceRoot, activeTopicId, activeSessionPath, activeRemote),
       isUnread: (node) => projectTreeTopicHasUnreadActivity(node, readActivity, activeScope, activeWorkspaceRoot, activeTopicId, activeSessionPath, readBaselineAt),
     });
     return {
@@ -1010,7 +1010,7 @@ export function ProjectTree({
       treeRevision: latestRevisionRef.current,
       organizationRevision,
     };
-  }, [activeScope, activeSessionPath, activeTopicId, activeWorkspaceRoot, catalogStatus, expanded, organizationRevision, query, readActivity, readBaselineAt, timeFilter, tree, variant, visibleTree]);
+  }, [activeRemote, activeScope, activeSessionPath, activeTopicId, activeWorkspaceRoot, catalogStatus, expanded, organizationRevision, query, readActivity, readBaselineAt, timeFilter, tree, variant, visibleTree]);
 
   useProjectTreeFrontendDiagnostics(projectTreeDiagnosticSnapshot);
 
@@ -1030,7 +1030,7 @@ export function ProjectTree({
       const scope = openRequest?.scope ?? "project";
       const scopeClass = scope === "global" ? " project-tree__topic--global" : " project-tree__topic--project";
       const accentStyle = projectAccentStyle(node.projectColor, scope === "global" ? "var(--project-tree-global-accent)" : undefined);
-      const active = topicIsActive(node, activeScope, activeWorkspaceRoot, activeTopicId, activeSessionPath);
+      const active = topicIsActive(node, activeScope, activeWorkspaceRoot, activeTopicId, activeSessionPath, activeRemote);
       const label = (node.label || node.topicId || "Untitled").replace(/^●\s*/, "");
       const activityAt = node.lastActivityAt || node.createdAt || 0;
       // Every variant is a single-line row with the activity time on the right;
@@ -1107,7 +1107,8 @@ export function ProjectTree({
           key: "trash",
           icon: <Archive className={topicTrashing ? "project-tree__archive-spinner" : undefined} size={13} />,
           label: confirmArchiveTarget === archiveTargetKey ? t("history.confirmMoveToTrash") : t("history.moveToTrash"),
-          disabled: archiveBlocked || topicTrashing,
+          disabled: archiveBlocked || topicTrashing
+            || Boolean(node.remoteSession && (node.remoteSession.current || !remoteSessionActionIdentity(node.remoteSession))),
           danger: true,
           onSelect: () => {
             if (confirmArchiveTarget === archiveTargetKey) void trashTopicAny(topicId);

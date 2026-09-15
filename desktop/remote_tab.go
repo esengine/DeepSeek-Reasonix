@@ -573,13 +573,17 @@ func (a *App) remoteTabCommandTarget(tabID string) (*http.Client, string, string
 	tab := a.remoteTabs[tabID]
 	var client *http.Client
 	var base, expectedPath string
-	usable := tab != nil && tab.client != nil && tab.state == "ready"
+	switching := tab != nil && tab.routing.rehydratingPath != ""
+	usable := tab != nil && tab.client != nil && tab.state == "ready" && !switching
 	if usable {
 		client, base = tab.client, tab.base
 		expectedPath = tab.routing.currentPath
 	}
 	a.remoteTabMu.Unlock()
 	if !usable {
+		if switching {
+			return nil, "", "", fmt.Errorf("remote tab %q is switching sessions; wait for it to become ready", tabID)
+		}
 		return nil, "", "", fmt.Errorf("remote tab %q is not connected", tabID)
 	}
 	return client, base, expectedPath, nil

@@ -129,6 +129,7 @@ func TestRemoteTabRestoreBuildsDisconnectedShells(t *testing.T) {
 		RemoteTabs: []desktopRemoteTabEntry{
 			{ID: "r-1", HostID: "box", Workspace: "~/app", TopicTitle: "Fix bug", SessionName: "s1", SessionPath: "/remote/sessions/s1.jsonl"},
 			{ID: "r-2", HostID: "box", Workspace: "~/web", SessionPath: "/remote/sessions/blank.jsonl", SessionReset: true},
+			{ID: "r-3", HostID: "box", Workspace: "~/canonical", TopicTitle: "canonical-session-id", SessionName: "canonical-session-id", SessionID: "canonical-session-id"},
 			{ID: "", HostID: "box", Workspace: "~/skip"},
 			{ID: "local-1", HostID: "box", Workspace: "~/dup"},
 		},
@@ -139,7 +140,7 @@ func TestRemoteTabRestoreBuildsDisconnectedShells(t *testing.T) {
 
 	a.remoteTabMu.Lock()
 	defer a.remoteTabMu.Unlock()
-	if len(a.remoteTabs) != 2 || a.remoteTabs["r-1"] == nil || a.remoteTabs["r-2"] == nil {
+	if len(a.remoteTabs) != 3 || a.remoteTabs["r-1"] == nil || a.remoteTabs["r-2"] == nil || a.remoteTabs["r-3"] == nil {
 		t.Fatalf("restored shells = %+v", a.remoteTabs)
 	}
 	for id, tab := range a.remoteTabs {
@@ -153,14 +154,17 @@ func TestRemoteTabRestoreBuildsDisconnectedShells(t *testing.T) {
 	if got := a.remoteTabs["r-1"].topicTitle; got != "Fix bug" {
 		t.Fatalf("restored title = %q, want the persisted one", got)
 	}
+	if got := a.remoteTabs["r-3"].topicTitle; got != remoteWorkspaceName("~/canonical") {
+		t.Fatalf("canonical identity leaked into restored title = %q, want workspace fallback", got)
+	}
 	if tab := a.remoteTabs["r-1"]; tab.session.newSession || tab.session.name != "s1" || tab.session.path != "/remote/sessions/s1.jsonl" {
 		t.Fatalf("restored session identity = %+v", tab.session)
 	}
 	if tab := a.remoteTabs["r-2"]; !tab.session.newSession || !tab.session.reset || tab.session.path != "/remote/sessions/blank.jsonl" {
 		t.Fatalf("restored blank session identity = %+v", tab.session)
 	}
-	if got := strings.Join(a.remoteTabLayout.order, ","); got != "r-2,r-1" {
-		t.Fatalf("restored remote order = %q, want r-2,r-1", got)
+	if got := strings.Join(a.remoteTabLayout.order, ","); got != "r-2,r-1,r-3" {
+		t.Fatalf("restored remote order = %q, want r-2,r-1,r-3", got)
 	}
 	if a.remoteTabLayout.activeID != "" {
 		t.Fatalf("remoteActiveTabID = %q, want local startup surface", a.remoteTabLayout.activeID)

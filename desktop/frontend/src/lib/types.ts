@@ -575,6 +575,7 @@ export interface TabMeta extends RemoteTabMetaFields {
   topicId: string;
   topicTitle: string;
   sessionPath?: string;
+  sessionId?: string;
   sessionRevision?: number;
   sessionDigest?: string;
   sessionGeneration?: number;
@@ -1041,6 +1042,7 @@ export interface Meta extends RemoteSessionMetaFields {
   startupErr?: string;
   eventChannel: string;
   sessionPath?: string;
+  sessionId?: string;
   sessionRevision?: number;
   sessionDigest?: string;
   sessionGeneration?: number;

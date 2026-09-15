@@ -35,7 +35,8 @@ export function startControllerEventRecovery(ports: ControllerRecoveryPorts, sub
       for (const tab of tabs) {
         if (!scope.bindings.has(tab.id)) continue;
         const meta = ports.meta(tab.id);
-        const changedSession = meta?.sessionPath !== tab.sessionPath || meta?.sessionGeneration !== tab.sessionGeneration;
+        const changedSession = meta?.sessionId !== tab.sessionId
+          || meta?.sessionPath !== tab.sessionPath || meta?.sessionGeneration !== tab.sessionGeneration;
         ports.prepare(tab);
         if (changedSession || hydrating.has(tab.id)) {
           hydrating.add(tab.id);

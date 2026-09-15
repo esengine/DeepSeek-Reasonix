@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"os"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -14,6 +15,106 @@ import (
 	"reasonix/internal/event"
 	"reasonix/internal/session"
 )
+
+func TestSessionsDeduplicatesMigratedLegacySource(t *testing.T) {
+	legacyDir := t.TempDir()
+	v4Root := filepath.Join(t.TempDir(), "sessions-v4")
+	service, err := session.NewService("serve-test", session.NewFilesystemPersistence(v4Root))
+	if err != nil {
+		t.Fatal(err)
+	}
+	exec := agent.New(nil, nil, agent.NewSession("system"), agent.Options{}, event.Discard)
+	ctrl := control.New(control.Options{Executor: exec, SessionDir: legacyDir, SessionService: service, ExclusiveSession: true})
+	if _, err := ctrl.BindFreshSession(t.Context(), "current"); err != nil {
+		t.Fatal(err)
+	}
+	target, err := service.Create(t.Context(), session.CreateOptions{SessionID: "canonical-target"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := service.Close(t.Context(), target.Ref()); err != nil {
+		t.Fatal(err)
+	}
+	legacy := filepath.Join(legacyDir, "old.jsonl")
+	if err := os.WriteFile(legacy, []byte(`{"role":"user","content":"old"}`+"\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	mapping := session.MigrationMapping{
+		SchemaVersion: session.SchemaVersion,
+		Entries:       []session.MigrationEntry{{SourcePath: agent.CanonicalSessionPath(legacy), TargetID: "canonical-target"}},
+	}
+	data, err := json.Marshal(mapping)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(v4Root, "migration-map.json"), data, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(ctrl.Close)
+	srv := newLifecycleTestServer(t, ctrl, NewBroadcaster(), config.ServeConfig{})
+	recorder := httptest.NewRecorder()
+	srv.sessions(recorder, httptest.NewRequest(http.MethodGet, "/sessions", nil))
+	var rows []sessionListEntry
+	if err := json.Unmarshal(recorder.Body.Bytes(), &rows); err != nil {
+		t.Fatal(err)
+	}
+	for _, row := range rows {
+		if row.Name == "old" || agent.CanonicalSessionPath(row.Path) == agent.CanonicalSessionPath(legacy) {
+			t.Fatalf("migrated legacy row was not deduplicated: %+v", rows)
+		}
+	}
+	found := false
+	for _, row := range rows {
+		if row.SessionID == "canonical-target" {
+			found = true
+		}
+	}
+	if !found {
+		t.Fatalf("canonical target missing from sessions: %+v", rows)
+	}
+}
+
+func TestDeleteSessionDeletesCanonicalIdentity(t *testing.T) {
+	legacyDir := t.TempDir()
+	v4Root := filepath.Join(t.TempDir(), "sessions-v4")
+	service, err := session.NewService("serve-test", session.NewFilesystemPersistence(v4Root))
+	if err != nil {
+		t.Fatal(err)
+	}
+	exec := agent.New(nil, nil, agent.NewSession("system"), agent.Options{}, event.Discard)
+	ctrl := control.New(control.Options{Executor: exec, SessionDir: legacyDir, SessionService: service, ExclusiveSession: true})
+	current, err := ctrl.BindFreshSession(t.Context(), "current")
+	if err != nil {
+		t.Fatal(err)
+	}
+	target, err := service.Create(t.Context(), session.CreateOptions{SessionID: "canonical-target"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := service.Close(t.Context(), target.Ref()); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(ctrl.Close)
+	srv := httptest.NewServer(newLifecycleTestServer(t, ctrl, NewBroadcaster(), config.ServeConfig{}).Handler())
+	defer srv.Close()
+	post := func(body string) int {
+		resp, err := http.Post(srv.URL+"/delete-session", "application/json", strings.NewReader(body))
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer resp.Body.Close()
+		return resp.StatusCode
+	}
+	if got := post(`{"name":"` + current.SessionID + `","sessionId":"` + current.SessionID + `"}`); got != http.StatusConflict {
+		t.Fatalf("active canonical delete status = %d, want 409", got)
+	}
+	if got := post(`{"name":"canonical-target","sessionId":"canonical-target"}`); got != http.StatusNoContent {
+		t.Fatalf("canonical delete status = %d, want 204", got)
+	}
+	if _, err := os.Stat(filepath.Join(v4Root, "canonical-target")); !os.IsNotExist(err) {
+		t.Fatalf("canonical session still exists or stat failed unexpectedly: %v", err)
+	}
+}
 
 func newExclusiveSessionServe(t *testing.T) (*Server, *control.Controller, *session.Service, session.SessionRef) {
 	t.Helper()
@@ -120,6 +221,30 @@ func TestExclusiveV3MissingResumeDoesNotCreateOrReplaceCurrent(t *testing.T) {
 	}
 	if _, err := service.Query().Snapshot(t.Context(), session.SessionRef{HostID: "serve-test", SessionID: "missing"}); err == nil {
 		t.Fatal("missing Open created a session")
+	}
+}
+
+func TestExclusiveV3ResumeNameFallbackUsesCanonicalIdentity(t *testing.T) {
+	srv, ctrl, service, current := newExclusiveSessionServe(t)
+	target, err := service.Create(t.Context(), session.CreateOptions{SessionID: "named-target"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := service.Close(t.Context(), target.Ref()); err != nil {
+		t.Fatal(err)
+	}
+
+	resume := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodPost, "/resume", strings.NewReader(`{"name":"named-target"}`))
+	srv.resume(resume, req)
+	if resume.Code != http.StatusNoContent {
+		t.Fatalf("name fallback status = %d: %s", resume.Code, resume.Body.String())
+	}
+	if got := resume.Header().Get(sessionIDHeader); got != "named-target" {
+		t.Fatalf("name fallback session id = %q", got)
+	}
+	if got, ok := ctrl.SessionRef(); !ok || got.HostID != current.HostID || got.SessionID != "named-target" {
+		t.Fatalf("controller identity after name fallback = %+v, bound=%v", got, ok)
 	}
 }
 
