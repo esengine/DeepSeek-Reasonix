@@ -1,6 +1,10 @@
 package notify
 
 import (
+	"fmt"
+	"strings"
+	"time"
+
 	"reasonix/internal/config"
 	"reasonix/internal/event"
 )
@@ -19,9 +23,10 @@ type Sender interface {
 // Sink forwards every event to inner and mirrors configured attention events to sender.
 type Sink struct {
 	event.AuditForwarder
-	inner  event.Sink
-	sender Sender
-	cfg    config.NotificationsConfig
+	inner         event.Sink
+	sender        Sender
+	cfg           config.NotificationsConfig
+	turnStartedAt time.Time
 }
 
 // NewSink wraps an existing event sink with best-effort notification delivery.
@@ -33,6 +38,20 @@ func NewSink(inner event.Sink, sender Sender, cfg config.NotificationsConfig) *S
 func (s *Sink) Emit(e event.Event) {
 	if s.inner != nil {
 		s.inner.Emit(e)
+	}
+	switch e.Kind {
+	case event.TurnStarted:
+		s.turnStartedAt = time.Now()
+		return
+	case event.TurnDone:
+		var elapsed time.Duration
+		if !s.turnStartedAt.IsZero() {
+			elapsed = time.Since(s.turnStartedAt)
+			s.turnStartedAt = time.Time{}
+		}
+		if s.cfg.MinDurationSec > 0 && elapsed < time.Duration(s.cfg.MinDurationSec)*time.Second {
+			return
+		}
 	}
 	SendEvent(s.sender, s.cfg, e)
 }
@@ -58,12 +77,40 @@ func message(cfg config.NotificationsConfig, e event.Event) (Message, bool) {
 		}
 	case event.ApprovalRequest:
 		if cfg.ApprovalRequest {
-			return Message{Title: "Reasonix", Body: "Approval needed"}, true
+			body := "Approval needed"
+			if e.Approval.Tool != "" {
+				tool := strings.TrimSpace(e.Approval.Tool)
+				subject := strings.TrimSpace(e.Approval.Subject)
+				if subject != "" {
+					body = fmt.Sprintf("Approval needed: %s (%s)", tool, truncateSubject(subject, 40))
+				} else {
+					body = fmt.Sprintf("Approval needed: %s", tool)
+				}
+			}
+			return Message{Title: "Reasonix", Body: body}, true
 		}
 	case event.AskRequest:
 		if cfg.AskRequest {
-			return Message{Title: "Reasonix", Body: "Question needs your answer"}, true
+			body := "Question needs your answer"
+			if len(e.Ask.Questions) > 0 {
+				q := e.Ask.Questions[0]
+				text := strings.TrimSpace(q.Prompt)
+				if text == "" {
+					text = strings.TrimSpace(q.Header)
+				}
+				if text != "" {
+					body = fmt.Sprintf("Question: %s", truncateSubject(text, 50))
+				}
+			}
+			return Message{Title: "Reasonix", Body: body}, true
 		}
 	}
 	return Message{}, false
+}
+
+func truncateSubject(s string, maxLen int) string {
+	if len(s) <= maxLen {
+		return s
+	}
+	return s[:maxLen-3] + "..."
 }
