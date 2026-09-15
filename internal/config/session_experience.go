@@ -7,12 +7,17 @@ import (
 
 // SessionExperience is the single user-facing desktop presentation preference.
 // It intentionally combines the old transcript density, reasoning display, and
-// process-fold controls into two complete reading strategies.
+// process-fold controls into complete reading strategies.
+//
+//	standard — show the work process while the turn runs; collapse when done
+//	deep     — show the full work process live and keep it expanded
+//	concise  — keep the work process collapsed while the turn runs (summary only)
 type SessionExperience string
 
 const (
 	SessionExperienceStandard SessionExperience = "standard"
 	SessionExperienceDeep     SessionExperience = "deep"
+	SessionExperienceConcise  SessionExperience = "concise"
 )
 
 // DesktopSessionExperience returns the canonical desktop preference. Missing
@@ -25,6 +30,8 @@ func (c *Config) DesktopSessionExperience() string {
 	switch strings.ToLower(strings.TrimSpace(c.Desktop.SessionExperience)) {
 	case string(SessionExperienceDeep):
 		return string(SessionExperienceDeep)
+	case string(SessionExperienceConcise):
+		return string(SessionExperienceConcise)
 	case string(SessionExperienceStandard):
 		return string(SessionExperienceStandard)
 	default:
@@ -61,7 +68,15 @@ func (c *Config) SetDesktopSessionExperience(mode string) error {
 		c.Desktop.ReasoningDisplayMode = "expanded"
 		c.Desktop.ExpandThinking = true
 		return nil
+	case string(SessionExperienceConcise):
+		// Concise keeps work-process chrome collapsed; reasoning stays auto so a
+		// user can still open thinking when they need it.
+		c.Desktop.SessionExperience = string(SessionExperienceConcise)
+		c.Desktop.DisplayMode = string(SessionExperienceStandard)
+		c.Desktop.ReasoningDisplayMode = "auto"
+		c.Desktop.ExpandThinking = false
+		return nil
 	default:
-		return fmt.Errorf("session experience %q: must be standard|deep", mode)
+		return fmt.Errorf("session experience %q: must be standard|deep|concise", mode)
 	}
 }

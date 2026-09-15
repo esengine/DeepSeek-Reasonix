@@ -13,6 +13,9 @@ func (c *Config) DesktopReasoningDisplayMode() string {
 	if c != nil && strings.EqualFold(strings.TrimSpace(c.Desktop.SessionExperience), string(SessionExperienceStandard)) {
 		return "auto"
 	}
+	if c != nil && strings.EqualFold(strings.TrimSpace(c.Desktop.SessionExperience), string(SessionExperienceConcise)) {
+		return "auto"
+	}
 	raw := strings.ToLower(strings.TrimSpace(c.Desktop.ReasoningDisplayMode))
 	switch raw {
 	case "hidden", "summary", "auto", "expanded":
@@ -29,6 +32,9 @@ func (c *Config) DesktopReasoningDisplayModeExplicit() bool {
 		return true
 	}
 	if c != nil && strings.EqualFold(strings.TrimSpace(c.Desktop.SessionExperience), string(SessionExperienceStandard)) {
+		return true
+	}
+	if c != nil && strings.EqualFold(strings.TrimSpace(c.Desktop.SessionExperience), string(SessionExperienceConcise)) {
 		return true
 	}
 	switch strings.ToLower(strings.TrimSpace(c.Desktop.ReasoningDisplayMode)) {
@@ -71,6 +77,6 @@ func renderDesktopReasoningDisplayMode(b *strings.Builder, c *Config) {
 
 func renderDesktopSessionExperience(b *strings.Builder, c *Config) {
 	if strings.TrimSpace(c.Desktop.SessionExperience) != "" {
-		fmt.Fprintf(b, "session_experience = %q   # desktop: standard|deep transcript experience\n", c.DesktopSessionExperience())
+		fmt.Fprintf(b, "session_experience = %q   # desktop: standard|deep|concise transcript experience\n", c.DesktopSessionExperience())
 	}
 }

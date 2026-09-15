@@ -72,7 +72,7 @@ func (a *App) SetReasoningDisplayMode(mode string) error {
 	})
 }
 
-// SetSessionExperience persists the canonical two-state desktop presentation.
+// SetSessionExperience persists the canonical desktop presentation (standard|deep|concise).
 func (a *App) SetSessionExperience(mode string) error {
 	return a.applyConfigOnly(func(c *config.Config) error { return c.SetDesktopSessionExperience(mode) })
 }

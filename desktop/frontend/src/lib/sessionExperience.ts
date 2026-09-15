@@ -1,10 +1,13 @@
 import { useMemo, useSyncExternalStore } from "react";
 
-export type SessionExperience = "standard" | "deep";
+// standard — show the work process while the turn runs; collapse when done
+// deep     — show the full work process live and keep it expanded
+// concise  — keep the work process collapsed while the turn runs
+export type SessionExperience = "standard" | "deep" | "concise";
 
 export type WorkProcessPresentation = {
   experience: SessionExperience;
-  showWhileRunning: true;
+  showWhileRunning: boolean;
   keepExpandedAfterCompletion: boolean;
 };
 
@@ -17,7 +20,9 @@ const listeners = new Set<() => void>();
 const beforeChangeListeners = new Set<(previous: SessionExperience, next: SessionExperience) => void>();
 
 function normalize(value: unknown): SessionExperience {
-  return value === "deep" ? "deep" : "standard";
+  if (value === "deep") return "deep";
+  if (value === "concise") return "concise";
+  return "standard";
 }
 
 function emit(): void {
@@ -90,7 +95,8 @@ export function onSessionExperienceWillChange(
 export function resolveWorkProcessPresentation(value: SessionExperience): WorkProcessPresentation {
   return {
     experience: value,
-    showWhileRunning: true,
+    // Concise never live-expands tool chrome while the turn is running.
+    showWhileRunning: value !== "concise",
     keepExpandedAfterCompletion: value === "deep",
   };
 }

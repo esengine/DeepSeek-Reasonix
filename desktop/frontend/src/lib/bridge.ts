@@ -656,7 +656,7 @@ export interface AppBindings extends ForkTargetsBindings, ToolRecoveryBindings, 
   TestBotConnection(id: string, target?: string): Promise<BotConnectionDiagnostic>;
   TestDingtalkBot(): Promise<BotConnectionDiagnostic>;
   SetCloseBehavior(mode: string): Promise<void>;
-  SetSessionExperience(mode: "standard" | "deep"): Promise<void>;
+  SetSessionExperience(mode: "standard" | "deep" | "concise"): Promise<void>;
   SetDisplayMode(mode: string): Promise<void>;
   SetStatusBarStyle(style: string): Promise<void>;
   SetStatusBarItems(items: string[]): Promise<void>; SetReasoningDisplayMode(mode: "hidden" | "summary" | "auto" | "expanded"): Promise<void>;

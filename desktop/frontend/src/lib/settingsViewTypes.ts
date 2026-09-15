@@ -30,7 +30,7 @@ export interface SettingsView {
   desktopThemeStyle: string;
   desktopTerminalTheme: string; // "auto" follows app | "dark" | "light"
   closeBehavior: string; // "background" | "quit"
-  displayMode: string; sessionExperience?: "standard" | "deep"; reasoningDisplayMode: string; reasoningDisplayModeExplicit?: boolean;
+  displayMode: string; sessionExperience?: "standard" | "deep" | "concise"; reasoningDisplayMode: string; reasoningDisplayModeExplicit?: boolean;
   statusBarStyle: string; // "icon" | "text"
   statusBarItems: string[]; // ordered visible status bar item ids
   defaultToolApprovalMode: ToolApprovalMode | string; // default for newly-created sessions

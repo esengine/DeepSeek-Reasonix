@@ -634,7 +634,7 @@ function settingsTabMeta(id: SettingsTab, s: SettingsView, t: ReturnType<typeof 
     case "models":
       return settingsModelMeta(s, t);
     case "general":
-      return desktopLayoutStyleLabel(normalizeDesktopLayoutStyle(s.desktopLayoutStyle), t);
+      return `${s.sessionExperience === "deep" ? t("settings.sessionExperience.deep") : s.sessionExperience === "concise" ? t("settings.sessionExperience.concise") : t("settings.sessionExperience.standard")} · ${desktopLayoutStyleLabel(normalizeDesktopLayoutStyle(s.desktopLayoutStyle), t)}`;
     case "providers":
       return t("settings.providerCount", { n: s.providers.length });
     case "bots":
@@ -1519,7 +1519,7 @@ function normalizeSettingsView(view: SettingsView | null | undefined): SettingsV
     desktopThemeStyle: normalizeThemeStyleForTheme(view.desktopThemeStyle, normalizeThemePreference(view.desktopTheme)),
     desktopTerminalTheme: normalizeTerminalThemePreference(view.desktopTerminalTheme),
     closeBehavior: normalizeCloseBehavior(view.closeBehavior),
-    sessionExperience: view.sessionExperience === "deep" ? "deep" : "standard",
+    sessionExperience: view.sessionExperience === "deep" ? "deep" : view.sessionExperience === "concise" ? "concise" : "standard",
     displayMode: "standard",
     statusBarStyle: normalizeStatusBarStyle(view.statusBarStyle),
     statusBarItems: normalizeStatusBarItems(view.statusBarItems),

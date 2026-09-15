@@ -2949,6 +2949,8 @@ export const zhTW: Record<DictKey, string> = {
   "settings.sessionExperienceHint": "選擇工作執行時與完成後的工作過程顯示方式。",
   "settings.sessionExperience.standard": "標準",
   "settings.sessionExperience.deep": "深入",
+  "settings.sessionExperience.concise": "簡潔",
+  "settings.sessionExperience.conciseHint": "工作過程中也保持收起，只看摘要；需要時再展開。",
   "settings.sessionExperience.standardHint": "執行時顯示工作過程，完成後自動收起。",
   "settings.sessionExperience.deepHint": "即時顯示完整工作過程，完成後保持展開。",
   "settings.statusBarStyle": "底部資訊欄樣式",

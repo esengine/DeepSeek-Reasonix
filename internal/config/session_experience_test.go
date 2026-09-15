@@ -31,6 +31,7 @@ func TestSetDesktopSessionExperienceSynchronizesCompatibilityFields(t *testing.T
 	}{
 		{mode: "standard", reasoning: "auto"},
 		{mode: "deep", reasoning: "expanded"},
+		{mode: "concise", reasoning: "auto"},
 	}
 	for _, tt := range tests {
 		t.Run(tt.mode, func(t *testing.T) {

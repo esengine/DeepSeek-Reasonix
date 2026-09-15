@@ -34,12 +34,22 @@ check(getSessionExperience() === "standard", "invalid startup values normalize t
 check(resolveWorkProcessPresentation("standard").keepExpandedAfterCompletion === false, "standard collapses completed work");
 check(resolveWorkProcessPresentation("deep").showWhileRunning === true, "deep shows work while running");
 check(resolveWorkProcessPresentation("deep").keepExpandedAfterCompletion === true, "deep keeps completed work expanded");
+// Concise never live-expands while the turn runs.
+check(resolveWorkProcessPresentation("concise").showWhileRunning === false, "concise hides work while running");
+check(resolveWorkProcessPresentation("concise").keepExpandedAfterCompletion === false, "concise collapses completed work");
 
 applySessionExperience("deep");
 check(getSessionExperience() === "deep", "apply persists deep");
 check(localStorage.getItem("reasonix-session-experience") === "deep", "canonical localStorage key stores deep");
 check(localStorage.getItem("reasonix-display-mode") === "standard", "compatibility density mirror stays standard");
 check(localStorage.getItem("reasonix-process-fold") === "expanded", "deep mirrors the old expanded fold value");
+
+applySessionExperience("concise");
+check(getSessionExperience() === "concise", "apply persists concise");
+check(localStorage.getItem("reasonix-session-experience") === "concise", "canonical localStorage key stores concise");
+check(localStorage.getItem("reasonix-process-fold") === "auto", "concise mirrors auto fold (collapsed)");
+hydrateSessionExperience("concise");
+check(getSessionExperience() === "concise", "hydrate accepts concise from the backend");
 
 // An authoritative startup snapshot must win over a stale local optimistic value.
 hydrateSessionExperience("standard");

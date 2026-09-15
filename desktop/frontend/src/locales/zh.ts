@@ -1939,6 +1939,8 @@ export const zh: Record<DictKey, string> = {
   "settings.sessionExperienceHint": "选择任务运行时和完成后的工作过程展示方式。",
   "settings.sessionExperience.standard": "标准",
   "settings.sessionExperience.deep": "深入",
+  "settings.sessionExperience.concise": "简洁",
+  "settings.sessionExperience.conciseHint": "工作过程中也保持收起，只看摘要；需要时再展开。",
   "settings.sessionExperience.standardHint": "运行时显示工作过程，完成后自动收起。",
   "settings.sessionExperience.deepHint": "实时展示完整工作过程，完成后保持展开。",
   "settings.statusBarStyle": "底部信息栏样式",

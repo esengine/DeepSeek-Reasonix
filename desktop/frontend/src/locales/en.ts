@@ -1937,6 +1937,8 @@ export const en = {
   "settings.sessionExperienceHint": "Choose how the work process appears while a task runs and after it finishes.",
   "settings.sessionExperience.standard": "Standard",
   "settings.sessionExperience.deep": "Deep",
+  "settings.sessionExperience.concise": "Concise",
+  "settings.sessionExperience.conciseHint": "Keep work collapsed while a turn runs; expand only when you need the detail.",
   "settings.sessionExperience.standardHint": "Show the work process while running, then collapse it when complete.",
   "settings.sessionExperience.deepHint": "Show the full work process live and keep it expanded when complete.",
   "settings.statusBarStyle": "Bottom status bar style",

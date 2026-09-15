@@ -36,7 +36,7 @@ export function createDesktopPreferencesMock(settings: SettingsView) {
     },
     async SetDesktopConversationWidth(width: string) { settings.conversationWidth = width; },
     async SetReasoningDisplayMode(mode: "hidden" | "summary" | "auto" | "expanded") { applyMockLegacyReasoningMode(settings, mode); },
-    async SetSessionExperience(mode: "standard" | "deep") { applyMockSessionExperience(settings, mode); },
+    async SetSessionExperience(mode: "standard" | "deep" | "concise") { applyMockSessionExperience(settings, mode); },
     async SetExpandThinking() { applyMockSessionExperience(settings, "standard"); },
     async MigrateDesktopPreferences(language: string, theme: string, style: string) {
       if (!settings.desktopLanguage) settings.desktopLanguage = language === "en" || language === "zh" || language === "zh-TW" ? language : "";
