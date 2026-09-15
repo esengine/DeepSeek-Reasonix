@@ -245,7 +245,10 @@ func (a *App) GetRuntimeStateSnapshot() RuntimeStateProjection {
 				continue
 			}
 			freshness := "synced"
-			if tab.state != "ready" || tab.session.takenOver || tab.runtime.syncFailed || tab.runtimeUnknown[path] != 0 {
+			// Only the foreground can be interrupted; a background session
+			// that was synced keeps its last-known idle state even while the
+			// serve re-registers it as detached after a foreground switch.
+			if path == tab.routing.currentPath && (tab.state != "ready" || tab.session.takenOver || tab.runtime.syncFailed || tab.runtimeUnknown[path] != 0) {
 				freshness = "unknown"
 			}
 			next.Sessions = append(next.Sessions, RuntimeSessionState{TabID: tab.id, Scope: "remote", HostID: tab.ref.HostID, WorkspaceRoot: tab.ref.Workspace,
