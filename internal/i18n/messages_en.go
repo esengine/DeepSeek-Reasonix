@@ -45,6 +45,7 @@ var English = Messages{
 	ReadCompleted:                    "Reasonix finished recovering the complete file read.",
 	ReadRestrictedStrategyFmt:        "read_file switched to restricted strategy: estimated_tokens=%d budget_tokens=%d",
 	ContextRecoveryAdjustBudget:      "Adjusted the output budget to fit the shared context window.",
+	PromptTruncatedByServerNotice:    "The provider accepted this request but silently dropped part of the prompt, so the model did not receive the full instructions or tool definitions. Raise the server's own context length (for Ollama: OLLAMA_CONTEXT_LENGTH, or a Modelfile num_ctx), then set context_window to match.",
 	ContextRecoveryCompacted:         "Compacted context after a shared-window overflow and retried.",
 	PlannerFallback:                  "Planner failed; continuing this turn with the executor only.",
 	PlannerSafetyFallback:            "Planner stopped at a safety boundary without a final plan; continuing this turn with the executor.",

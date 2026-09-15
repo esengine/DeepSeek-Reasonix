@@ -48,4 +48,5 @@ const (
 	NoticeCodeSessionReclaimed                                  = "session_reclaimed"
 	NoticeCodeReasoningReplayRepair                             = "reasoning_replay_repair"
 	NoticeCodeTurnStalled                                       = "turn_stalled"
+	NoticeCodePromptTruncatedByServer                           = "prompt_truncated_by_server"
 )

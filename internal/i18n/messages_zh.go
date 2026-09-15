@@ -46,6 +46,7 @@ var Chinese = Messages{
 	ReadCompleted:                    "Reasonix 已恢复该文件的完整读取。",
 	ReadRestrictedStrategyFmt:        "read_file 已切换为受限策略：estimated_tokens=%d budget_tokens=%d",
 	ContextRecoveryAdjustBudget:      "已调整输出预算以适配共享上下文窗口。",
+	PromptTruncatedByServerNotice:    "服务端接受了该请求，但静默丢弃了部分提示词，模型没有收到完整的指令或工具定义。请调大服务端自身的上下文长度（Ollama：OLLAMA_CONTEXT_LENGTH 或 Modelfile 的 num_ctx），再把 context_window 设为相同的值。",
 	ContextRecoveryCompacted:         "共享窗口溢出，已压缩上下文并重试。",
 	PlannerFallback:                  "规划器失败，本轮仅由主模型继续。",
 	PlannerSafetyFallback:            "规划器在安全边界处停止且未给出最终计划，本轮由主模型继续。",

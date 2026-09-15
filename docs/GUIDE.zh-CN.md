@@ -373,6 +373,35 @@ compaction，短上下文模型也不会在 Reasonix 清理前被服务端拒绝
 `128000`；如果服务商明确标注 `131072`，则按该精确值填写。小于 16384 时界面会
 显示非阻断警告，因为过小的窗口可能导致频繁 compaction 并降低缓存命中率。
 
+### 自建运行时：以运行时的上限为准，而非模型的上限
+
+对本地服务端，真正约束请求的是**运行时配置的上下文长度**，它通常远低于模型的
+训练上限。以 Ollama 为例：除非设置 `OLLAMA_CONTEXT_LENGTH` 或在 Modelfile 中写入
+`PARAMETER num_ctx`，否则一律使用自身 4096 的默认值——262K 上下文的模型按 4096
+运行是常态。其 OpenAI 兼容的 `/v1` 接口没有 `num_ctx` 字段，因此无法按请求调整，
+只能在服务端设置。
+
+提示词超出该上限时，各运行时的行为并不相同：
+
+| 运行时 | 提示词超限时 |
+| --- | --- |
+| Ollama | 返回 `200 OK`，**静默截断**提示词 |
+| LM Studio | 取决于其上下文溢出策略；`truncateMiddle` 与 `rollingWindow` 会静默截断，且 OpenAI 兼容客户端无法按请求选择该策略 |
+| llama.cpp server | HTTP 400，`the request exceeds the available context size` |
+| vLLM | HTTP 400，`the engine prompt length ... exceeds the max_model_len` |
+
+后两者会明确报错，因此你能看见。真正危险的是静默的那两种，因为症状看上去完全
+不像截断：
+
+- 模型忽略工具，或调用根本不存在的工具名——工具 schema 是 prefix 中最大的一块，
+  也是最先被截掉的部分；
+- 回答得像是从未看到 system prompt 或你真正的问题；
+- 整体表现像是模型能力差，而不是服务端配置错误。
+
+Reasonix 会依据服务端上报的 token 计数识别被静默截断的提示词，并在每个会话中
+警告一次。请先检查服务端——`ollama ps` 会显示每个已加载模型实际使用的上下文
+大小——再把 **上下文窗口** 设为同一数值。
+
 模型能力模式选项：
 
 | 选项 | 作用 |
