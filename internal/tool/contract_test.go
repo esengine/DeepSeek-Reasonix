@@ -40,6 +40,29 @@ func TestBuiltinToolContractDocumentation(t *testing.T) {
 	}
 }
 
+// BenchmarkBuiltinToolContractBaseline records the size and export cost of the
+// single canonical provider contract. Any future harness projection must beat
+// this baseline in model-facing A/B tests without duplicating tool execution.
+func BenchmarkBuiltinToolContractBaseline(b *testing.B) {
+	r := tool.NewRegistry()
+	for _, builtin := range tool.Builtins() {
+		r.Add(builtin)
+	}
+
+	schemas := r.Schemas()
+	contractBytes := 0
+	for _, schema := range schemas {
+		contractBytes += len(schema.Name) + len(schema.Description) + len(schema.Parameters)
+	}
+	b.ReportAllocs()
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		_ = r.Schemas()
+	}
+	b.ReportMetric(float64(len(schemas)), "tools")
+	b.ReportMetric(float64(contractBytes), "contract_bytes")
+}
+
 func boolString(v bool) string {
 	if v {
 		return "true"
