@@ -112,6 +112,53 @@ func TestEnvDisablesPromptsAndKeepsSSHUsable(t *testing.T) {
 	}
 }
 
+func TestWithConfigEnvForcesRebaseAbbreviateCommands(t *testing.T) {
+	env := WithConfigEnv([]string{"PATH=/usr/bin"})
+	want := map[string]string{
+		"GIT_CONFIG_COUNT":   "1",
+		"GIT_CONFIG_KEY_0":   "rebase.abbreviateCommands",
+		"GIT_CONFIG_VALUE_0": "false",
+	}
+	for k, v := range want {
+		if !slices.Contains(env, k+"="+v) {
+			t.Fatalf("env = %v, want %s=%s", env, k, v)
+		}
+	}
+	if !slices.Contains(env, "PATH=/usr/bin") {
+		t.Fatalf("env = %v, must preserve the base environment", env)
+	}
+}
+
+// A caller that already uses git's environment-config mechanism must keep its
+// own entries: WithConfigEnv appends after the existing count instead of
+// overwriting it.
+func TestWithConfigEnvExtendsExistingCount(t *testing.T) {
+	base := []string{
+		"GIT_CONFIG_COUNT=2",
+		"GIT_CONFIG_KEY_0=user.name",
+		"GIT_CONFIG_VALUE_0=Someone",
+		"GIT_CONFIG_KEY_1=core.pager",
+		"GIT_CONFIG_VALUE_1=cat",
+	}
+	env := WithConfigEnv(base)
+	for _, want := range []string{
+		"GIT_CONFIG_COUNT=3",
+		"GIT_CONFIG_KEY_0=user.name",
+		"GIT_CONFIG_VALUE_0=Someone",
+		"GIT_CONFIG_KEY_1=core.pager",
+		"GIT_CONFIG_VALUE_1=cat",
+		"GIT_CONFIG_KEY_2=rebase.abbreviateCommands",
+		"GIT_CONFIG_VALUE_2=false",
+	} {
+		if !slices.Contains(env, want) {
+			t.Fatalf("env = %v, want %s", env, want)
+		}
+	}
+	if slices.Contains(env, "GIT_CONFIG_COUNT=2") {
+		t.Fatalf("env = %v, must not keep the stale count", env)
+	}
+}
+
 // The invariant this package exists for: a repository's own config names a
 // command in core.fsmonitor, and inspecting that repository must not run it.
 // git executes fsmonitor during an index refresh, which a plain status does.
