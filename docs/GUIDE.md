@@ -619,6 +619,7 @@ Mode and display shortcuts:
 | `Shift+Tab` | Cycles Read only → Workspace write → YOLO → Plan | YOLO applies `danger-full-access`; leaving Plan returns to Read only. |
 | `Ctrl+Y` | Toggles YOLO | Entering YOLO applies `danger-full-access`; pressing it again restores the prior safe permission preset. |
 | `--permission-mode read-only|workspace-write|danger-full-access` | Selects the initial permission preset | New sessions default to `workspace-write`. |
+| `[ui].commandmode = "vi"` | Opts the composer into a vi command mode | `Esc` enters command mode instead of stopping a running turn; only `Ctrl+C` interrupts. With text already typed, `Ctrl+C` saves the draft to the prompt history and clears it, so `Up` recalls it. Unset or `""` keeps the default, where `Esc` stops a running turn. |
 | `/theme [auto|light|dark|style]` | Shows or switches the CLI theme | Bare `/theme` lists background modes and named accent palettes. The choice is saved to the user config; `REASONIX_THEME` and `REASONIX_THEME_STYLE` can override it for one run. |
 | `Ctrl+O` | Toggles verbose reasoning display | Also available through `/verbose`. |
 | `Ctrl+B` | Expands or collapses long shell output | Long shell-output hint lines can also be clicked in the transcript; text selection is handled in-app while the full-screen TUI has mouse reporting enabled. |
