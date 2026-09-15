@@ -73,10 +73,9 @@ func TestRebuildSlotsCancelDoesNotDropGrant(t *testing.T) {
 	slots.release()
 	select {
 	case err := <-errCh:
-		// cancel happens before release, so either interleaving is correct.
-		// What must never happen is a lost grant: if the waiter reports
-		// cancellation it must not have consumed the freed slot, and if it
-		// reports success it owns the slot and must release it.
+		// cancel precedes release, so either interleaving is correct; what must
+		// never happen is a lost grant. A cancelled waiter leaves the freed
+		// slot available, and a successful one owns it and must release it.
 		if err == nil {
 			slots.release()
 			break
