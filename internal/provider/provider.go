@@ -18,6 +18,7 @@ import (
 	"sort"
 	"strings"
 	"syscall"
+	"time"
 	"unicode"
 
 	"reasonix/internal/nilutil"
@@ -1086,6 +1087,15 @@ type Config struct {
 
 // Factory builds a Provider from a resolved Config.
 type Factory func(cfg Config) (Provider, error)
+
+// StreamIdleTimeout returns the configured stream-idle watchdog window from a
+// resolved Config, or 0 when unset so the adapter keeps its own default.
+func StreamIdleTimeout(cfg Config) time.Duration {
+	if d, ok := cfg.Extra["stream_idle_timeout"].(time.Duration); ok && d > 0 {
+		return d
+	}
+	return 0
+}
 
 var registry = map[string]Factory{}
 

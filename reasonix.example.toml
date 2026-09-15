@@ -72,6 +72,10 @@ context_window = 1000000
 # max_output_tokens = 32768   # ordinary coding / cost control
 # max_output_tokens = 65536   # heavy reasoning / long tool loops
 # max_output_tokens = 131072  # only after repeated finish_reason=length
+# Stream-idle watchdog: abort and retry when a started stream sends no bytes for
+# this many seconds. Unset keeps the 300s default; set it just above the
+# endpoint's observed time-to-first-token (e.g. 8) to fail fast on a stalled stream.
+# stream_idle_timeout_seconds = 8
 # Optional per-model budgets. Omitted models inherit context_window and
 # max_output_tokens from the provider above.
 # model_overrides = { "deepseek-v4-flash" = { context_window = 1000000, max_output_tokens = 32768 } }
