@@ -220,7 +220,7 @@ func (a *App) resumeRemoteTabSessionPathForOpenSelection(tabID, name, sessionPat
 			if mounted.SessionID != "" {
 				target.SessionID = mounted.SessionID
 			}
-			target.TakenOver = strings.TrimSpace(mounted.Path) != ""
+			target.TakenOver = mounted.TakenOver || strings.TrimSpace(mounted.Path) != ""
 		}
 		title := strings.TrimSpace(target.Title)
 		if title == "" {

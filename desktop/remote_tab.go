@@ -104,7 +104,13 @@ func (a *App) attachRemoteTabServe(ctx context.Context, tabID, base, token, inst
 			enterOpts.SessionName, enterOpts.SessionPath, enterOpts.SessionID, enterOpts.SessionTitle = target.Name, target.Path, target.SessionID, target.Title
 		}
 		target, err = enterRemoteSessionTarget(callCtx, client, base, enterOpts)
-		entered = err == nil
+		entered = err == nil && !target.TakenOver
+	}
+	if err == nil && target.TakenOver && entered == false {
+		// The serve mounted this caller as a read-only spectator (another
+		// runtime owns the session writer). The tab stays attached to render
+		// the file/mirrored view and the take-back banner drives /reclaim.
+		log.Printf("[remote] attachRemoteTabServe: enterRemoteSession SPECTATOR (writer owned elsewhere) tab=%s session=%q", tabID, remoteSessionRoute(target))
 	}
 	if err != nil {
 		// A busy serve refuses session transitions with 409 but retains its
@@ -713,17 +719,22 @@ func (a *App) ReclaimRemoteTabSession(tabID string) error {
 
 // remoteSessionTakenOver reports whether a session-entry refusal means the
 // session is owned by a local runtime on the serve host. The tab then
-// attaches as a read-only spectator instead of dying with the 409. Both
-// refusal shapes match: the explicit takeover wording (mirrored session) and
-// the plain lease wording ("in use by another Reasonix process" — the holder
-// is a local window/CLI whose transcript the file-backed /history serves
-// anyway, and whose lease /reclaim can take back).
+// attaches as a read-only spectator instead of dying with the 409. All three
+// refusal shapes match: the explicit takeover wording (mirrored session), the
+// plain lease wording ("in use by another Reasonix process" — the holder is a
+// local window/CLI whose transcript the file-backed /history serves anyway,
+// and whose lease /reclaim can take back), and the final-format writer
+// wording ("session writer is owned by another runtime" — the identity's
+// writer.lock lives with a local runtime).
 func remoteSessionTakenOver(err error) bool {
 	if err == nil {
 		return false
 	}
 	msg := err.Error()
 	if strings.Contains(msg, "taken over by a local Reasonix") {
+		return true
+	}
+	if strings.Contains(msg, "writer is owned by another runtime") {
 		return true
 	}
 	return strings.Contains(msg, "in use by another Reasonix process")

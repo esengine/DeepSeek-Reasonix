@@ -159,7 +159,10 @@ func servePostSessionPath(ctx context.Context, client *http.Client, url string, 
 type serveSessionIdentity struct {
 	Path      string
 	SessionID string
+	TakenOver bool
 }
+
+const sessionTakenOverHeader = "X-Reasonix-Taken-Over"
 
 func servePostSessionIdentityForSession(ctx context.Context, client *http.Client, url string, body []byte, expectedPath string) (serveSessionIdentity, error) {
 	if body == nil {
@@ -184,7 +187,13 @@ func servePostSessionIdentityForSession(ctx context.Context, client *http.Client
 	defer resp.Body.Close()
 	data, _ := io.ReadAll(io.LimitReader(resp.Body, 4<<10))
 	if resp.StatusCode >= 200 && resp.StatusCode < 300 {
-		return serveSessionIdentity{Path: strings.TrimSpace(resp.Header.Get("X-Reasonix-Session-Path")), SessionID: strings.TrimSpace(resp.Header.Get("X-Reasonix-Session-ID"))}, nil
+		return serveSessionIdentity{
+			Path:      strings.TrimSpace(resp.Header.Get("X-Reasonix-Session-Path")),
+			SessionID: strings.TrimSpace(resp.Header.Get("X-Reasonix-Session-ID")),
+			// A 204 with the taken-over header means the serve mounted this
+			// caller as a read-only spectator: another runtime owns the writer.
+			TakenOver: strings.TrimSpace(resp.Header.Get(sessionTakenOverHeader)) != "",
+		}, nil
 	}
 	return serveSessionIdentity{}, &serveHTTPStatusError{
 		url: url, statusCode: resp.StatusCode, message: strings.TrimSpace(string(data)),

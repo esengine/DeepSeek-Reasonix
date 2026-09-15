@@ -98,7 +98,7 @@ func enterRemoteSessionTarget(ctx context.Context, client *http.Client, base str
 		if identity.SessionID != "" {
 			sessionID = identity.SessionID
 		}
-		return serveSessionEntry{Name: name, SessionID: sessionID, Title: strings.TrimSpace(opts.SessionTitle), Current: true}, nil
+		return serveSessionEntry{Name: name, SessionID: sessionID, Title: strings.TrimSpace(opts.SessionTitle), Current: true, TakenOver: identity.TakenOver}, nil
 	}
 	if sessionPath := strings.TrimSpace(opts.SessionPath); sessionPath != "" {
 		body, err := remoteSessionResumeBody(serveSessionEntry{Name: name, Path: sessionPath})
@@ -140,7 +140,7 @@ func enterRemoteSessionTarget(ctx context.Context, client *http.Client, base str
 		if identity.SessionID != "" {
 			session.SessionID = identity.SessionID
 		}
-		session.TakenOver = strings.TrimSpace(identity.Path) != ""
+		session.TakenOver = identity.TakenOver || strings.TrimSpace(identity.Path) != ""
 		return session, nil
 	}
 	return serveSessionEntry{}, fmt.Errorf("remote session %q not found", name)
