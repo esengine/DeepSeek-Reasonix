@@ -286,7 +286,29 @@ function topicMatchesActiveIdentity(node: ProjectNode, activeScope?: string, act
   return activeScope === "project" && activeTopicId === node.topicId && activeWorkspaceRoot === node.root;
 }
 
-export function topicIsActive(node: ProjectNode, activeScope?: string, activeWorkspaceRoot?: string, activeTopicId?: string, activeSessionPath?: string): boolean {
+type ActiveRemoteSessionIdentity = {
+  hostId: string;
+  workspace: string;
+  sessionId?: string;
+};
+
+function remoteTopicMatchesActiveSession(node: ProjectNode, activeRemote?: ActiveRemoteSessionIdentity): boolean {
+  const remote = node.remoteSession;
+  const active = activeRemote;
+  if (!remote || !active || remote.hostId !== active.hostId || remote.workspace !== active.workspace) return false;
+  const sessionID = active.sessionId?.trim();
+  if (!sessionID) return false;
+  return remote.sessionId?.trim() === sessionID || (!remote.sessionId?.trim() && remote.name.trim() === sessionID);
+}
+
+export function topicIsActive(
+  node: ProjectNode,
+  activeScope?: string,
+  activeWorkspaceRoot?: string,
+  activeTopicId?: string,
+  activeSessionPath?: string,
+  activeRemote?: ActiveRemoteSessionIdentity,
+): boolean {
   if (isRuntimeSessionNode(node)) {
     return Boolean(node.sessionPath && activeSessionPath && activeSessionPath === node.sessionPath);
   }
@@ -296,7 +318,10 @@ export function topicIsActive(node: ProjectNode, activeScope?: string, activeWor
   // same absolute session path. Their synthesized rows already carry a
   // host-qualified topicId, so never let the generic path fallback mark a row
   // from another host active.
-  if (node.remoteSession) return topicMatchesActiveIdentity(node, activeScope, activeWorkspaceRoot, activeTopicId);
+  if (node.remoteSession) {
+    if (remoteTopicMatchesActiveSession(node, activeRemote)) return true;
+    return topicMatchesActiveIdentity(node, activeScope, activeWorkspaceRoot, activeTopicId);
+  }
   if (topicMatchesActiveIdentity(node, activeScope, activeWorkspaceRoot, activeTopicId)) return true;
   return Boolean(node.sessionPath && activeSessionPath && activeSessionPath === node.sessionPath);
 }

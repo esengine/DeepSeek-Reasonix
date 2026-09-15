@@ -703,3 +703,23 @@ func TestEnterRemoteSessionUnknownName(t *testing.T) {
 		t.Fatalf("err = %v, want unknown session error", err)
 	}
 }
+
+func TestRemoteSessionResumeBodyUsesCanonicalIdentity(t *testing.T) {
+	body, err := remoteSessionResumeBody(serveSessionEntry{Name: "chat-title", SessionID: "stable-session"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	var got map[string]string
+	if err := json.Unmarshal(body, &got); err != nil {
+		t.Fatal(err)
+	}
+	if got["sessionId"] != "stable-session" || got["path"] != "" || got["name"] != "chat-title" {
+		t.Fatalf("canonical resume body = %v", got)
+	}
+}
+
+func TestRemoteSessionResumeBodyRejectsMissingIdentity(t *testing.T) {
+	if _, err := remoteSessionResumeBody(serveSessionEntry{Name: "unresolved"}); err == nil || !strings.Contains(err.Error(), "no resumable identity") {
+		t.Fatalf("missing identity error = %v", err)
+	}
+}

@@ -128,7 +128,7 @@ func (a *App) resumeRemoteTabSessionPathForOpenSelection(tabID, name, sessionPat
 			// previously fell through to "return false" — the user's click
 			// was silently dropped because the SSH tunnel wasn't ready yet.
 			requeueRemoteTabOpenSelectionLocked(tab, &remoteTabPendingOpenSelection{
-				name: strings.TrimSpace(name), path: strings.TrimSpace(sessionPath), title: strings.TrimSpace(sessionTitle),
+				name: strings.TrimSpace(name), sessionID: strings.TrimSpace(tab.session.sessionID), path: strings.TrimSpace(sessionPath), title: strings.TrimSpace(sessionTitle),
 				revision: selectionRevision, deferred: true, identityCommitted: true, previous: previous,
 			})
 			a.remoteTabMu.Unlock()
@@ -139,6 +139,13 @@ func (a *App) resumeRemoteTabSessionPathForOpenSelection(tabID, name, sessionPat
 	}
 	consumeQueuedRemoteTabOpenSelectionLocked(tab, selectionRevision)
 	client, base, gen := tab.client, tab.base, tab.gen
+	requestedSessionID := ""
+	if strings.TrimSpace(sessionPath) == "" && strings.TrimSpace(name) != "" && strings.TrimSpace(tab.session.name) == strings.TrimSpace(name) {
+		// Canonical rows have no legacy path. When a reused shell has already
+		// committed the selected row, carry its stable ID into /resume instead
+		// of resolving the display/name token through the listing.
+		requestedSessionID = strings.TrimSpace(tab.session.sessionID)
+	}
 	failureRoute := remoteTabProvisionalResume{
 		targetPath: tab.routing.currentPath, pathRevision: tab.routing.pathRevision,
 		selectionRevision: tab.selectionRevision, previousSelection: previous,
@@ -150,6 +157,8 @@ func (a *App) resumeRemoteTabSessionPathForOpenSelection(tabID, name, sessionPat
 	var target serveSessionEntry
 	if sessionPath != "" {
 		target = serveSessionEntry{Name: strings.TrimSpace(name), Path: strings.TrimSpace(sessionPath), Title: strings.TrimSpace(sessionTitle)}
+	} else if requestedSessionID != "" {
+		target = serveSessionEntry{Name: strings.TrimSpace(name), SessionID: requestedSessionID, Title: strings.TrimSpace(sessionTitle)}
 	} else {
 		entries, err := serveSessions(ctx, client, base)
 		if err != nil {
@@ -163,7 +172,10 @@ func (a *App) resumeRemoteTabSessionPathForOpenSelection(tabID, name, sessionPat
 		}
 	}
 	if targetRoute := remoteSessionRoute(target); targetRoute != "" {
-		body, _ := json.Marshal(map[string]string{"path": target.Path, "hostId": target.HostID, "sessionId": target.SessionID})
+		body, err := remoteSessionResumeBody(target)
+		if err != nil {
+			return a.completeRemoteTabResumeFailure(tabID, tab, client, gen, failureRoute, err.Error())
+		}
 		// /resume may reattach a controller already producing frames. Route them
 		// before the request returns so the all-session pump does not discard its
 		// handoff output or prompt replay as background work.
@@ -208,7 +220,7 @@ func (a *App) resumeRemoteTabSessionPathForOpenSelection(tabID, name, sessionPat
 			if mounted.SessionID != "" {
 				target.SessionID = mounted.SessionID
 			}
-			target.TakenOver = strings.TrimSpace(mounted.Path) != ""
+			target.TakenOver = mounted.TakenOver || strings.TrimSpace(mounted.Path) != ""
 		}
 		title := strings.TrimSpace(target.Title)
 		if title == "" {
@@ -250,7 +262,10 @@ func (a *App) DeleteRemoteProjectSession(hostID, workspace, name string) error {
 	defer done()
 	ctx, cancel := commandContext(a)
 	defer cancel()
-	body, _ := json.Marshal(map[string]string{"name": name})
+	// Keep the legacy basename for older Serve builds, but also send the
+	// immutable identity. Canonical sessions live under sessions-v4/<id>/ and
+	// cannot be removed by the old name.jsonl-only endpoint.
+	body, _ := json.Marshal(map[string]string{"name": name, "sessionId": strings.TrimSpace(name)})
 	return servePost(ctx, client, serveURL(base, "/delete-session"), body)
 }
 
@@ -571,7 +586,8 @@ func (a *App) refreshRemoteTabTitle(tabID string) {
 		return
 	}
 	for _, entry := range entries {
-		if !entry.Current || expectedPath != "" && strings.TrimSpace(entry.Path) != strings.TrimSpace(expectedPath) {
+		entryRoute := remoteSessionIdentityRoute(strings.TrimSpace(entry.Path), strings.TrimSpace(entry.SessionID))
+		if !entry.Current || expectedPath != "" && entryRoute != strings.TrimSpace(expectedPath) {
 			continue
 		}
 		entry.Name = strings.TrimSpace(entry.Name)

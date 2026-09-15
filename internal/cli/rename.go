@@ -20,7 +20,7 @@ func (m *chatTUI) runRenameCommand(input string) {
 		return
 	}
 
-	sessions := recentSessions(m.ctrl.SessionDir())
+	sessions := mergedResumeEntries(m.ctrl.SessionDir(), resumeListCap)
 	title := ""
 	targetPath := ""
 
@@ -32,7 +32,12 @@ func (m *chatTUI) runRenameCommand(input string) {
 			m.notice(fmt.Sprintf(i18n.M.ResumeBadIndexFmt, len(sessions)))
 			return
 		}
-		targetPath = sessions[idx-1].Path
+		picked := sessions[idx-1]
+		if picked.target.canonical() {
+			m.notice("rename: final-format sessions are renamed from the session title API, not the legacy sidecar")
+			return
+		}
+		targetPath = picked.session.Path
 		title = strings.TrimSpace(strings.TrimPrefix(input, args[0]+" "+args[1]))
 	} else {
 		// "/rename <new title>" -- rename the current session.

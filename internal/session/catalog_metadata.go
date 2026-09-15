@@ -44,6 +44,79 @@ func catalogMetadataPath(cacheDir string) string {
 	return filepath.Join(cacheDir, "catalog-metadata.json")
 }
 
+// firstUserPreview returns the first user-authored text suitable as a list
+// preview. Host-injected directives (session-context snapshot, reasoning
+// language) ride the first user turn: Origin is the authoritative
+// provenance, with text recognition only for legacy records recorded before
+// the field existed. Injections are also prepended to real user turns, so
+// RawContent - the user's exact text - is preferred over Content.
+func firstUserPreview(messages []provider.Message) string {
+	for _, message := range messages {
+		if message.Role != provider.RoleUser {
+			continue
+		}
+		if message.Origin == provider.MessageOriginHost {
+			continue
+		}
+		text := strings.TrimSpace(message.RawContent)
+		if text == "" {
+			text = strings.TrimSpace(message.Content)
+		}
+		text = stripLeadingInjectedBlocks(text)
+		if text == "" {
+			continue
+		}
+		return messagePreview(provider.Message{Content: text})
+	}
+	return ""
+}
+
+// previewInjectedTags lists the leading block tags hosts prepend to user
+// turns. Keep in sync with agent.TransientUserBlockTags; session cannot
+// import agent (agent imports session), so the list is duplicated with this
+// pointer back.
+var previewInjectedTags = []string{"session-context", "reasoning-language", "response-language", "memory-update", "background-jobs", "active-goal", "hook-context", "capability-route", "interrupted-turn-recovery", "execution-policy"}
+
+// stripLeadingInjectedBlocks removes well-formed leading <tag>...</tag>
+// blocks the host injected before the user's own words, so a preview never
+// leaks host directives regardless of how they were recorded.
+func stripLeadingInjectedBlocks(text string) string {
+	for {
+		rest, stripped := stripOneLeadingInjectedBlock(text)
+		if !stripped {
+			return text
+		}
+		text = rest
+	}
+}
+
+func stripOneLeadingInjectedBlock(text string) (string, bool) {
+	s := strings.TrimLeft(text, " \t\r\n")
+	for _, tag := range previewInjectedTags {
+		open := "<" + tag + ">"
+		openAttr := "<" + tag + " "
+		var start int
+		if strings.HasPrefix(s, open) {
+			start = len(open)
+		} else if strings.HasPrefix(s, openAttr) {
+			if i := strings.Index(s, ">"); i >= 0 {
+				start = i + 1
+			} else {
+				continue
+			}
+		} else {
+			continue
+		}
+		close := "</" + tag + ">"
+		end := strings.Index(s[start:], close)
+		if end < 0 {
+			continue
+		}
+		return strings.TrimLeft(s[start+end+len(close):], " \t\r\n"), true
+	}
+	return text, false
+}
+
 func metadataFromProjection(manifest Manifest, sequence uint64, projection Projection) catalogMetadata {
 	metadata := catalogMetadata{
 		Version: catalogMetadataVersion, Codec: Codec, SessionID: manifest.SessionID,
@@ -55,12 +128,7 @@ func metadataFromProjection(manifest Manifest, sequence uint64, projection Proje
 			metadata.Turns++
 		}
 	}
-	for _, message := range projection.Messages {
-		if message.Role == provider.RoleUser && strings.TrimSpace(message.Content) != "" {
-			metadata.Preview = messagePreview(message)
-			break
-		}
-	}
+	metadata.Preview = firstUserPreview(projection.Messages)
 	return metadata
 }
 

@@ -681,6 +681,15 @@ func TestRemoteTabCommandRejectsUnknownOrUnreadyTab(t *testing.T) {
 	if err := a.SubmitRemoteTab("booting", "hi"); err == nil || !strings.Contains(err.Error(), "not connected") {
 		t.Fatalf("unready tab err = %v, want not connected", err)
 	}
+	a.remoteTabMu.Lock()
+	a.remoteTabs["switching"] = &remoteTab{
+		id: "switching", state: "ready", client: &http.Client{},
+		routing: remoteTabSessionRouting{currentPath: "session-id:old", rehydratingPath: "session-id:new"},
+	}
+	a.remoteTabMu.Unlock()
+	if err := a.SubmitRemoteTab("switching", "hi"); err == nil || !strings.Contains(err.Error(), "switching sessions") {
+		t.Fatalf("session-switching tab err = %v, want switching-session guard", err)
+	}
 }
 
 // TestModelsForTabRemoteUsesDesktopCatalog: a remote tab's model switcher

@@ -60,6 +60,23 @@ func preflightRemoteSessionTarget(ctx context.Context, client *http.Client, base
 	return serveSessionEntry{}, fmt.Errorf("remote session %q not found", name)
 }
 
+// remoteSessionResumeBody is the single request builder for /resume. The
+// identity catalog deliberately leaves Path empty for canonical sessions, so
+// callers must carry SessionID through instead of serializing an empty path.
+// Name is retained as a compatibility hint for Serve versions that can
+// resolve a listed session by name.
+func remoteSessionResumeBody(target serveSessionEntry) ([]byte, error) {
+	if remoteSessionRoute(target) == "" {
+		return nil, fmt.Errorf("remote session %q has no resumable identity", strings.TrimSpace(target.Name))
+	}
+	return json.Marshal(map[string]string{
+		"path":      strings.TrimSpace(target.Path),
+		"hostId":    strings.TrimSpace(target.HostID),
+		"sessionId": strings.TrimSpace(target.SessionID),
+		"name":      strings.TrimSpace(target.Name),
+	})
+}
+
 func enterRemoteSessionTarget(ctx context.Context, client *http.Client, base string, opts RemoteTabOpenOptions) (serveSessionEntry, error) {
 	name := strings.TrimSpace(opts.SessionName)
 	if opts.NewSession {
@@ -70,7 +87,7 @@ func enterRemoteSessionTarget(ctx context.Context, client *http.Client, base str
 		return serveSessionEntry{Path: identity.Path, SessionID: identity.SessionID, Current: true}, nil
 	}
 	if sessionID := strings.TrimSpace(opts.SessionID); sessionID != "" {
-		body, err := json.Marshal(map[string]string{"sessionId": sessionID})
+		body, err := remoteSessionResumeBody(serveSessionEntry{Name: name, SessionID: sessionID})
 		if err != nil {
 			return serveSessionEntry{}, err
 		}
@@ -81,10 +98,10 @@ func enterRemoteSessionTarget(ctx context.Context, client *http.Client, base str
 		if identity.SessionID != "" {
 			sessionID = identity.SessionID
 		}
-		return serveSessionEntry{Name: name, SessionID: sessionID, Title: strings.TrimSpace(opts.SessionTitle), Current: true}, nil
+		return serveSessionEntry{Name: name, SessionID: sessionID, Title: strings.TrimSpace(opts.SessionTitle), Current: true, TakenOver: identity.TakenOver}, nil
 	}
 	if sessionPath := strings.TrimSpace(opts.SessionPath); sessionPath != "" {
-		body, err := json.Marshal(map[string]string{"path": sessionPath})
+		body, err := remoteSessionResumeBody(serveSessionEntry{Name: name, Path: sessionPath})
 		if err != nil {
 			return serveSessionEntry{}, err
 		}
@@ -111,7 +128,7 @@ func enterRemoteSessionTarget(ctx context.Context, client *http.Client, base str
 		if session.Name != name {
 			continue
 		}
-		body, err := json.Marshal(map[string]string{"path": session.Path, "hostId": session.HostID, "sessionId": session.SessionID})
+		body, err := remoteSessionResumeBody(session)
 		if err != nil {
 			return serveSessionEntry{}, err
 		}
@@ -123,7 +140,7 @@ func enterRemoteSessionTarget(ctx context.Context, client *http.Client, base str
 		if identity.SessionID != "" {
 			session.SessionID = identity.SessionID
 		}
-		session.TakenOver = strings.TrimSpace(identity.Path) != ""
+		session.TakenOver = identity.TakenOver || strings.TrimSpace(identity.Path) != ""
 		return session, nil
 	}
 	return serveSessionEntry{}, fmt.Errorf("remote session %q not found", name)

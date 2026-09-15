@@ -1,6 +1,7 @@
 package serve
 
 import (
+	"encoding/json"
 	"net/http"
 	"os"
 	"path/filepath"
@@ -9,6 +10,7 @@ import (
 
 	"reasonix/internal/agent"
 	"reasonix/internal/control"
+	"reasonix/internal/session"
 	"reasonix/internal/store"
 )
 
@@ -23,22 +25,25 @@ type sessionListEntry struct {
 	Running    bool   `json:"running,omitempty"`
 	TakenOver  bool   `json:"takenOver,omitempty"`
 	MtimeMilli int64  `json:"mtimeMilli"`
+
+	Preview       string `json:"preview,omitempty"`
+	MetadataReady bool   `json:"metadataReady,omitempty"`
 }
 
 // sessions lists saved sessions with event-log-aware titles and turn counts.
 func (s *Server) sessions(w http.ResponseWriter, r *http.Request) {
 	ctrl := s.ctl()
 	dir := ctrl.SessionDir()
-	if dir == "" {
-		writeJSON(w, []any{})
-		return
-	}
-	entries, err := os.ReadDir(dir)
-	if os.IsNotExist(err) {
-		entries = nil
-	} else if err != nil {
-		writeJSON(w, []any{})
-		return
+	var entries []os.DirEntry
+	if dir != "" {
+		var err error
+		entries, err = os.ReadDir(dir)
+		if os.IsNotExist(err) {
+			entries = nil
+		} else if err != nil {
+			writeJSON(w, []any{})
+			return
+		}
 	}
 	current := agent.CanonicalSessionPath(ctrl.SessionPath())
 	running := map[string]bool{}
@@ -47,7 +52,8 @@ func (s *Server) sessions(w http.ResponseWriter, r *http.Request) {
 		running[filepath.Clean(path)] = controllerHasActiveRuntimeWork(detached.ctrl)
 	}
 	s.detachedMu.Unlock()
-	out := make([]sessionListEntry, 0, len(entries))
+	legacyRows := make([]sessionListEntry, 0, len(entries))
+	legacyByPath := make(map[string]sessionListEntry, len(entries))
 	for _, entry := range entries {
 		if entry.IsDir() || !store.IsSessionTranscriptName(entry.Name()) {
 			continue
@@ -77,28 +83,154 @@ func (s *Server) sessions(w http.ResponseWriter, r *http.Request) {
 			row.Turns = turns
 			row.Title = s.sessionTitle(r.Context(), entry.Name(), first, mtime.UnixNano())
 		}
-		out = append(out, row)
+		legacyRows = append(legacyRows, row)
+		legacyByPath[cleanPath] = row
 	}
+	canonicalRows := make([]canonicalSessionRow, 0)
 	if concrete, ok := ctrl.(*control.Controller); ok {
 		if service := concrete.SessionService(); service != nil {
 			_, runtime, bound := concrete.SessionBinding()
 			page, listErr := service.Query().List(r.Context(), "", 100)
 			if listErr == nil {
+				canonicalRows = make([]canonicalSessionRow, 0, len(page.Sessions))
 				for _, info := range page.Sessions {
 					row := sessionListEntry{
 						HostID: info.Ref.HostID, SessionID: info.Ref.SessionID, Name: info.SessionID,
 						Title: info.Title, Turns: info.Turns, MtimeMilli: info.CreatedAt.UnixMilli(),
-						Current: bound && info.Ref == runtime.Ref(),
+						Current:       bound && info.Ref == runtime.Ref(),
+						Preview:       info.Preview,
+						MetadataReady: info.MetadataStatus == session.MetadataReady,
+						TakenOver:     s.sessionMirrored(remoteSessionIDQueryPrefix + info.Ref.SessionID),
+					}
+					// Canonical rows carry no legacy preview fallback; without
+					// one a chatted session lists as an untitled blank until
+					// the model renames it. Fall back to the first user
+					// message, mirroring the legacy row's previewTitle.
+					if strings.TrimSpace(row.Title) == "" && strings.TrimSpace(info.Preview) != "" {
+						preview := []rune(strings.TrimSpace(info.Preview))
+						if len(preview) > 50 {
+							row.Title = string(preview[:47]) + "..."
+						} else {
+							row.Title = string(preview)
+						}
 					}
 					if live, exists := service.Runtime(info.Ref); exists {
 						phase := live.Snapshot().Phase
 						row.Running = phase.Busy()
 					}
-					out = append(out, row)
+					canonicalRows = append(canonicalRows, canonicalSessionRow{row: row, info: info})
 				}
 			}
 		}
 	}
+	// Migration deliberately preserves the old transcript, so a host can
+	// contain both the source .jsonl and its canonical session directory. The
+	// source is not a second user-visible session once the migration map proves
+	// there is exactly one canonical target for it. Keep the canonical row as
+	// the authoritative open/delete identity, while borrowing the old preview
+	// title until its asynchronous catalog metadata is ready.
+	migration := loadMigrationIndex(canonicalRows)
+	// The engine mirrors an in-flight legacy transcript into a final-format
+	// event log whose session id is the legacy branch id. Such a mirror is
+	// plumbing, not a second conversation; fold it into the legacy row. The
+	// current row stays listed even when it is that mirror, so the active
+	// session keeps its tree badge.
+	legacyBranchIDs := make(map[string]struct{}, len(legacyByPath))
+	for path := range legacyByPath {
+		legacyBranchIDs[agent.BranchID(path)] = struct{}{}
+	}
+	out := make([]sessionListEntry, 0, len(legacyRows)+len(canonicalRows))
+	for _, row := range legacyRows {
+		if _, migrated := migration.bySource[agent.CanonicalSessionPath(row.Path)]; migrated {
+			continue
+		}
+		out = append(out, row)
+	}
+	for i := range canonicalRows {
+		row := &canonicalRows[i].row
+		if !row.Current {
+			if _, mirrored := legacyBranchIDs[row.SessionID]; mirrored {
+				continue
+			}
+		}
+		if source, ok := migration.byTarget[row.SessionID]; ok {
+			if legacy, exists := legacyByPath[source]; exists {
+				if row.Title == "" {
+					row.Title = legacy.Title
+				}
+				if row.Turns == 0 {
+					row.Turns = legacy.Turns
+				}
+				if row.MtimeMilli < legacy.MtimeMilli {
+					row.MtimeMilli = legacy.MtimeMilli
+				}
+			}
+		}
+		out = append(out, *row)
+	}
 	sort.SliceStable(out, func(i, j int) bool { return out[i].MtimeMilli > out[j].MtimeMilli })
 	writeJSON(w, out)
+}
+
+type canonicalSessionRow struct {
+	row  sessionListEntry
+	info session.SessionInfo
+}
+
+type migrationSourceIndex struct {
+	bySource map[string]struct{}
+	byTarget map[string]string
+}
+
+// loadMigrationIndex returns only unambiguous source->target mappings.
+// Multiple canonical targets can legitimately be produced from one legacy DAG
+// head, in which case hiding the source would remove a still-distinct view.
+func loadMigrationIndex(rows []canonicalSessionRow) migrationSourceIndex {
+	index := migrationSourceIndex{bySource: map[string]struct{}{}, byTarget: map[string]string{}}
+	canonicalIDs := make(map[string]struct{}, len(rows))
+	roots := make(map[string]struct{})
+	for _, row := range rows {
+		if row.row.SessionID != "" {
+			canonicalIDs[row.row.SessionID] = struct{}{}
+		}
+		if path := strings.TrimSpace(row.info.Path); path != "" {
+			roots[filepath.Dir(filepath.Clean(path))] = struct{}{}
+		}
+	}
+	targetsBySource := make(map[string][]string)
+	for root := range roots {
+		data, err := os.ReadFile(filepath.Join(root, "migration-map.json"))
+		if err != nil {
+			continue
+		}
+		var mapping session.MigrationMapping
+		if json.Unmarshal(data, &mapping) != nil || mapping.SchemaVersion != session.SchemaVersion {
+			continue
+		}
+		for _, entry := range mapping.Entries {
+			source := agent.CanonicalSessionPath(entry.SourcePath)
+			target := strings.TrimSpace(entry.TargetID)
+			if source == "" || target == "" {
+				continue
+			}
+			if _, exists := canonicalIDs[target]; !exists {
+				continue
+			}
+			seen := false
+			for _, existing := range targetsBySource[source] {
+				seen = seen || existing == target
+			}
+			if !seen {
+				targetsBySource[source] = append(targetsBySource[source], target)
+			}
+		}
+	}
+	for source, targets := range targetsBySource {
+		if len(targets) != 1 {
+			continue
+		}
+		index.bySource[source] = struct{}{}
+		index.byTarget[targets[0]] = source
+	}
+	return index
 }

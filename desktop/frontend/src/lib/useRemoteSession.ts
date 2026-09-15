@@ -102,22 +102,22 @@ export function useActiveRemoteSession(
 ) {
 	const t = useT();
 	const active = Boolean(activeTab?.remote);
-	const session = useRemoteSession(active && activeTab ? activeTab.id : undefined, activeTab?.remoteState, activeTab?.sessionPath);
+	const session = useRemoteSession(active && activeTab ? activeTab.id : undefined, activeTab?.remoteState, activeTab?.sessionPath, activeTab?.sessionId);
 	const composer = useRemoteComposer(session, showToast);
 	useEffect(() => {
 		if (!activeTab?.remote || !activeTab.id) return;
     const legacyQuality = session.transcript.items.some(item => item.kind === "notice" && (item.code === "final_readiness" || item.variant === "delivery"));
-		const key = `${activeTab.id}\u0000${activeTab.sessionPath ?? ""}`;
+		const key = `${activeTab.id}\u0000${activeTab.sessionId ?? ""}\u0000${activeTab.sessionPath ?? ""}`;
     const notice = legacyRemotePolicyNotice(key, session.composerProfile?.qualityFloor, session.goalRuntime?.stopCause, legacyQuality);
     if (notice) showToast(t(notice), "warn");
-	}, [activeTab?.remote, activeTab?.id, activeTab?.sessionPath, session.composerProfile?.qualityFloor, session.transcript.items, session.goalRuntime?.stopCause, showToast, t]);
+	}, [activeTab?.remote, activeTab?.id, activeTab?.sessionId, activeTab?.sessionPath, session.composerProfile?.qualityFloor, session.transcript.items, session.goalRuntime?.stopCause, showToast, t]);
 	return { active, session, ready: active && session.state === "ready" && session.hydrated && Boolean(session.composerProfile), ...composer };
 }
 
 const legacyRemotePolicyNotice = createLegacyRemotePolicyNoticeTracker();
 
-export function useRemoteSession(tabId: string | undefined, initial?: RemoteTabStateValue, sessionPath?: string): RemoteSessionApi {
-  const runtimeState = useRuntimeSession(tabId, sessionPath);
+export function useRemoteSession(tabId: string | undefined, initial?: RemoteTabStateValue, sessionPath?: string, sessionId?: string): RemoteSessionApi {
+  const runtimeState = useRuntimeSession(tabId, sessionPath, sessionId);
   const [state, setState] = useState<RemoteTabStateValue>(initial === "disconnected" ? "connecting" : (initial ?? "connecting"));
   const [error, setError] = useState("");
   const [transcript, setTranscriptState] = useState<State>(initialState);
@@ -558,7 +558,7 @@ export function useRemoteSession(tabId: string | undefined, initial?: RemoteTabS
       offState();
       offEvent();
     };
-  }, [applyRemoteStatus, tabId]);
+  }, [applyRemoteStatus, sessionId, sessionPath, tabId]);
 
   // The runtime projection owns liveness. Feed a confirmed completion through
   // the shared reducer so the transcript and live store settle together. A

@@ -384,3 +384,9 @@ func sectionStat(value string) SectionStat {
 func digestOf(body string) string {
 	return fmt.Sprintf("%x", sha256.Sum256([]byte(body)))
 }
+
+// IsSnapshot reports whether content is a host-injected session-context
+// snapshot rather than something the user typed.
+func IsSnapshot(content string) bool {
+	return strings.HasPrefix(content, openTag)
+}

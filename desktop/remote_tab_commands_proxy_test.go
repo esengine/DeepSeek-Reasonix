@@ -2,8 +2,32 @@ package main
 
 import (
 	"slices"
+	"strings"
 	"testing"
 )
+
+func TestDeleteRemoteProjectSessionSendsCanonicalIdentity(t *testing.T) {
+	fs := newFakeServe(t, "s3cret", nil)
+	kernel := &fakeRemoteKernel{
+		statuses:    []RemoteConnectionStatusView{{HostID: "box", State: "connected"}},
+		ensureView:  RemoteServerView{HostID: "box", State: "ready", LocalURL: fs.server.URL},
+		ensureToken: "s3cret",
+	}
+	seedBridgeTestHost(t, "box")
+	a := &App{remoteRuntime: kernel}
+	meta := openReadyRemoteTab(t, a, RemoteTabOpenOptions{NewSession: true})
+	defer cleanupRemoteTabPumps(t, a)
+	if err := a.DeleteRemoteProjectSession("box", "~/app", "canonical-target"); err != nil {
+		t.Fatal(err)
+	}
+	want := `POST /delete-session {"name":"canonical-target","sessionId":"canonical-target"}`
+	if !slices.Contains(fs.recorded(), want) {
+		t.Fatalf("delete request missing canonical identity: %v", fs.recorded())
+	}
+	if strings.TrimSpace(meta.ID) == "" {
+		t.Fatal("remote tab id is empty")
+	}
+}
 
 // TestRemoteTabCommandsForwardedToServe pins that every command binding
 // reaches the right serve endpoint with the mapped body.

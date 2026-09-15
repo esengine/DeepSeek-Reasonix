@@ -97,7 +97,7 @@ export function createMockRemoteProjects(tabs: MockRemoteTabCatalog): {
       return (sessions[key(hostId, workspace)] ?? []).map((row) => ({ ...row }));
     },
     async SetRemoteSessionPinned(hostId, workspace, name, pinned) {
-      const row = (sessions[key(hostId, workspace)] ?? []).find((item) => item.name === name);
+      const row = (sessions[key(hostId, workspace)] ?? []).find((item) => (item.sessionId || item.name) === name);
       if (row) row.pinned = pinned;
     },
     async SetRemoteProjectTitle(hostId, workspace, title) {
@@ -105,11 +105,11 @@ export function createMockRemoteProjects(tabs: MockRemoteTabCatalog): {
       if (project) project.title = title.trim() || undefined;
     },
     async RenameRemoteProjectSession(hostId, workspace, name, title) {
-      const row = (sessions[key(hostId, workspace)] ?? []).find((item) => item.name === name);
+      const row = (sessions[key(hostId, workspace)] ?? []).find((item) => (item.sessionId || item.name) === name);
       if (row) row.title = title.trim();
     },
     async DeleteRemoteProjectSession(hostId, workspace, name) {
-      sessions[key(hostId, workspace)] = (sessions[key(hostId, workspace)] ?? []).filter((item) => item.name !== name);
+      sessions[key(hostId, workspace)] = (sessions[key(hostId, workspace)] ?? []).filter((item) => (item.sessionId || item.name) !== name);
     },
     async CloseRemoteTab(tabId) { tabs.remove(tabId); },
     async SubmitRemoteTab(tabId, text) {

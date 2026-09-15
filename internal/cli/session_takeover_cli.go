@@ -50,11 +50,15 @@ type cliTakeoverGrant struct {
 }
 
 type cliTakeoverBinding struct {
-	path        string
-	record      cliServeRecord
-	client      *http.Client
-	grant       cliTakeoverGrant
-	previous    *control.SessionLeaseKeeper
+	path string
+	// canonical marks a final-format identity route ("session-id:<id>") as the
+	// binding's key: there is no transcript path lease to move, ownership is
+	// the session directory's writer lock and it releases with the process.
+	canonical  bool
+	record     cliServeRecord
+	client     *http.Client
+	grant      cliTakeoverGrant
+	previous   *control.SessionLeaseKeeper
 	priorMirror *cliTakeoverBinding
 }
 
@@ -161,8 +165,29 @@ func cliTakeoverHeldSession(sessionPath string, leaseErr error, leases *control.
 	}
 	record := cliServeForPID(pid)
 	if record == nil {
-		return nil, fmt.Errorf("%w; holder pid %d is not a resident serve on this machine", agent.ErrSessionLeaseHeld, pid)
+		// The holder PID does not match any discovered serve (stale state
+		// file, serve restart). The holder is on this machine, so try every
+		// local serve: the one holding the session will accept the handoff.
+		records := discoverCLIServes()
+		if len(records) == 0 {
+			return nil, fmt.Errorf("%w; holder pid %d is not a resident serve on this machine and no local serve is running", agent.ErrSessionLeaseHeld, pid)
+		}
+		var lastErr error
+		for i := range records {
+			binding, err := cliTakeoverFromServe(sessionPath, &records[i], leases, manager)
+			if err == nil {
+				return binding, nil
+			}
+			lastErr = err
+		}
+		return nil, lastErr
 	}
+	return cliTakeoverFromServe(sessionPath, record, leases, manager)
+}
+
+// cliTakeoverFromServe executes the handoff against one specific serve.
+func cliTakeoverFromServe(sessionPath string, record *cliServeRecord, leases *control.SessionLeaseKeeper, manager *cliTakeoverManager) (*cliTakeoverBinding, error) {
+	pid := record.pid
 	ctx, cancel := context.WithTimeout(context.Background(), cliTakeoverTimeout+15*time.Second)
 	defer cancel()
 	client, err := cliServeClient(ctx, *record)
@@ -210,14 +235,14 @@ func cliTakeoverHeldSession(sessionPath string, leaseErr error, leases *control.
 	return binding, nil
 }
 
-// cliSessionTakeoverCandidate reports whether leaseErr points at a resident
-// serve on this machine — the case where a takeover offer makes sense.
+// cliSessionTakeoverCandidate reports whether leaseErr carries enough lease
+// info to identify the holder — the case where a takeover offer makes sense.
+// The holder does not have to be a discovered serve: the serve's state file
+// PID can drift (restart, desktop reconnect), and the takeover execution
+// falls back to trying every local serve when the PID does not match.
 func cliSessionTakeoverCandidate(leaseErr error) bool {
 	var leaseError *agent.SessionLeaseError
-	if !errors.As(leaseErr, &leaseError) || leaseError == nil || leaseError.Info == nil {
-		return false
-	}
-	return cliServeForPID(leaseError.Info.PID) != nil
+	return errors.As(leaseErr, &leaseError) && leaseError != nil && leaseError.Info != nil
 }
 
 // promptSessionTakeover asks on the terminal (pre-TUI startup) whether to take
@@ -694,6 +719,11 @@ func (m *cliTakeoverManager) returnLeaseFor(expected *cliTakeoverBinding, revisi
 		expectedPath = expected.path
 	}
 	return m.returnMirrorTransaction(expectedPath, true, true, func(current *cliTakeoverBinding) error {
+		if current.canonical {
+			// The canonical writer lock releases with the process; the flushed
+			// snapshot above is the only durable step the reservation covered.
+			return nil
+		}
 		return m.leases.ReleaseForHandoff(current.grant.SourceWriterID, current.grant.ReturnHandoffID)
 	})
 }
@@ -710,6 +740,9 @@ func (m *cliTakeoverManager) RebindAway(path string) (bool, error) {
 		return false, nil
 	}
 	err := m.returnCurrentMirror(binding.path, func(current *cliTakeoverBinding) error {
+		if current.canonical {
+			return nil
+		}
 		return m.leases.RebindReturningCurrent(path, current.grant.SourceWriterID, current.grant.ReturnHandoffID)
 	})
 	return true, err

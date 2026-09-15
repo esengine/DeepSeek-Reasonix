@@ -21,6 +21,15 @@ type RemoteTranscriptSnapshot struct {
 }
 
 func (a *App) remoteTranscriptRead(tabID, route string, request any, destination any) (bool, error) {
+	return a.remoteTranscriptReadAttempt(tabID, route, request, destination, true)
+}
+
+// remoteTranscriptReadAttempt retries one 409 after refreshing the remote
+// tab's authoritative session identity. A Serve session can rotate while the
+// desktop is hydrating (for example after a model switch); retrying the old
+// route just repeats the conflict, while a status refresh updates the route
+// to the identity that the next request must use.
+func (a *App) remoteTranscriptReadAttempt(tabID, route string, request, destination any, refreshOnConflict bool) (bool, error) {
 	client, base, err := a.remoteTabCommandClient(tabID)
 	if err != nil {
 		return false, err
@@ -42,20 +51,22 @@ func (a *App) remoteTranscriptRead(tabID, route string, request any, destination
 		query.Set("session", sessionPath)
 	}
 	ctx, cancel := commandContext(a)
-	defer cancel()
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, serveURL(base, route)+"?"+query.Encode(), nil)
 	if err != nil {
+		cancel()
 		return false, err
 	}
 	response, err := client.Do(req)
 	if err != nil {
+		cancel()
 		return false, err
 	}
-	defer response.Body.Close()
 	const maxResponseBytes = transcript.MaxResponseBytes
-	body, err := io.ReadAll(io.LimitReader(response.Body, maxResponseBytes+1))
-	if err != nil {
-		return false, err
+	body, readErr := io.ReadAll(io.LimitReader(response.Body, maxResponseBytes+1))
+	response.Body.Close()
+	cancel()
+	if readErr != nil {
+		return false, readErr
 	}
 	if len(body) > maxResponseBytes {
 		return false, fmt.Errorf("remote transcript response exceeds limit")
@@ -70,6 +81,13 @@ func (a *App) remoteTranscriptRead(tabID, route string, request any, destination
 	switch response.StatusCode {
 	case http.StatusNotFound, http.StatusMethodNotAllowed, http.StatusNotImplemented:
 		return false, nil
+	case http.StatusConflict:
+		if refreshOnConflict {
+			if _, refreshErr := a.RemoteTabStatus(tabID); refreshErr == nil {
+				return a.remoteTranscriptReadAttempt(tabID, route, request, destination, false)
+			}
+		}
+		return false, fmt.Errorf("remote transcript read failed (HTTP %d)", response.StatusCode)
 	case http.StatusOK:
 	default:
 		return false, fmt.Errorf("remote transcript read failed (HTTP %d)", response.StatusCode)

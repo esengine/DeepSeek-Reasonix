@@ -14,6 +14,7 @@ import (
 const (
 	sessionPathHeader           = "X-Reasonix-Session-Path"
 	sessionIDHeader             = "X-Reasonix-Session-ID"
+	sessionTakenOverHeader      = "X-Reasonix-Taken-Over"
 	expectedSessionPathHeader   = "X-Reasonix-Expected-Session-Path"
 	expectedSessionIDHeader     = "X-Reasonix-Expected-Session-ID"
 	expectedModelSettingsHeader = "X-Reasonix-Expected-Model-Settings"
@@ -52,12 +53,27 @@ func (s *Server) expectedSessionErrorLocked(r *http.Request) error {
 }
 
 func (s *Server) expectedSessionPathErrorLocked(rawExpected string) error {
-	expected := agent.CanonicalSessionPath(strings.TrimSpace(rawExpected))
+	expected := strings.TrimSpace(rawExpected)
 	if expected == "" {
 		return nil
 	}
+	// Identity sessions carry no legacy path: their session-id reference is
+	// compared against the bound controller's exclusive identity, matching
+	// the Expected-Session-ID header protocol.
+	if id, ok := strings.CutPrefix(expected, remoteSessionIDQueryPrefix); ok {
+		identity, hasIdentity := s.ctl().(control.IdentityLifecycle)
+		if !hasIdentity {
+			return errExpectedSessionChanged
+		}
+		ref, bound := identity.SessionRef()
+		if !bound || ref.SessionID != id {
+			return errExpectedSessionChanged
+		}
+		return nil
+	}
+	canonical := agent.CanonicalSessionPath(expected)
 	actual := agent.CanonicalSessionPath(strings.TrimSpace(s.ctl().SessionPath()))
-	if actual != expected {
+	if actual != canonical {
 		return errExpectedSessionChanged
 	}
 	return nil

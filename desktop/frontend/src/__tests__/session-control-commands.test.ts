@@ -8,6 +8,22 @@ import { sessionIdentityKey } from "../app-runtime/sessionTarget";
 
 const dom = new JSDOM("<div id='root'></div>");
 Object.assign(globalThis, { window: dom.window, document: dom.window.document, IS_REACT_ACT_ENVIRONMENT: true });
+assert.notEqual(
+  sessionIdentityKey({ tabId: "remote", sessionId: "session-a" }),
+  sessionIdentityKey({ tabId: "remote", sessionId: "session-b" }),
+  "canonical remote session IDs must fence reused remote tabs separately",
+);
+const legacyLocalKey = sessionIdentityKey({ tabId: "local", sessionPath: "/sessions/local.jsonl", sessionGeneration: 3 });
+assert.equal(
+  sessionIdentityKey({ tabId: "local", sessionPath: "/sessions/local.jsonl", sessionGeneration: 3, sessionId: "" }),
+  legacyLocalKey,
+  "legacy local sessions keep their path+generation identity when no ID exists",
+);
+assert.notEqual(
+  sessionIdentityKey({ tabId: "local", sessionPath: "", sessionGeneration: 3, sessionId: "local-v3" }),
+  legacyLocalKey,
+  "canonical local sessions use their immutable ID only when the v3 identity is present",
+);
 const resource = (tabId: string, generation = 1): SessionResource => ({ tabId,
   sessionKey: sessionIdentityKey({ tabId, sessionPath: `/${tabId}`, sessionGeneration: generation }) });
 const a = resource("A"), b = resource("B");

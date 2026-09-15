@@ -1,6 +1,7 @@
 package cli
 
 import (
+	"errors"
 	"fmt"
 	"strings"
 
@@ -9,6 +10,7 @@ import (
 
 	"reasonix/internal/agent"
 	"reasonix/internal/i18n"
+	"reasonix/internal/session"
 )
 
 // resumePicker is an in-chat overlay for "/resume" that lets the user pick a
@@ -34,7 +36,7 @@ func (m *chatTUI) openResumePicker() {
 	active := m.ctrl.SessionPath()
 	activeIdx := -1
 	for i, entry := range entries {
-		if entry.session.Path == active {
+		if entry.session.Path == active || resumeEntryIsActive(m.ctrl, entry) {
 			activeIdx = i
 			break
 		}
@@ -112,9 +114,9 @@ func (m chatTUI) applyResumePick() (tea.Model, tea.Cmd) {
 	if r == nil || r.sel < 0 || r.sel >= len(r.entries) {
 		return m, nil
 	}
-	target := r.entries[r.sel].session
+	target := r.entries[r.sel]
 	m.resumePick = nil
-	if target.Path == m.ctrl.SessionPath() {
+	if resumeEntryIsActive(m.ctrl, target) {
 		m.notice(i18n.M.ResumeAlreadyActive)
 		return m, nil
 	}
@@ -129,11 +131,23 @@ func (m chatTUI) applyResumePick() (tea.Model, tea.Cmd) {
 		return m, nil
 	}
 	m.followSessionLease()
-	if err := m.commitSessionSwitch(target.Path); err != nil {
+	if target.target.canonical() {
+		if err := m.commitCanonicalSessionSwitch(target.target.ref); err != nil {
+			m.restoreSessionLease()
+			if errors.Is(err, session.ErrWriterOwned) {
+				m.pendingTakeoverPath = cliCanonicalRoute(target.target.ref.SessionID)
+				m.notice("resume: " + sessionWriterHeldNotice())
+				m.notice("run /takeover to take this session over")
+				return m, nil
+			}
+			m.notice("resume: " + err.Error())
+			return m, nil
+		}
+	} else if err := m.commitSessionSwitch(target.session.Path); err != nil {
 		m.notice("resume: " + sessionLeaseHeldNotice(err))
 		if cliSessionTakeoverCandidate(err) {
-			m.pendingTakeoverPath = target.Path
-			m.notice("run /takeover to take this session over from the resident serve")
+			m.pendingTakeoverPath = target.session.Path
+			m.notice("run /takeover to take this session over")
 		}
 		return m, nil
 	}

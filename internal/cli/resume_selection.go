@@ -2,6 +2,7 @@ package cli
 
 import (
 	"context"
+	"errors"
 	"strings"
 
 	"reasonix/internal/agent"
@@ -65,16 +66,26 @@ func resumeWithPersistedSelection(ctrl *control.Controller, session *agent.Sessi
 	return persistCLIModelSelection(ctrl)
 }
 
-// commitResumedSession is a no-op without a resume path, so callers need no
+// commitResumedSession is a no-op without a resume target, so callers need no
 // second guard around the takeover handover.
-func commitResumedSession(binding *cliTakeoverBinding, manager *cliTakeoverManager, ctrl *control.Controller, session *agent.Session, path string) error {
-	if strings.TrimSpace(path) == "" {
+func commitResumedSession(binding *cliTakeoverBinding, manager *cliTakeoverManager, ctrl *control.Controller, session *agent.Session, target cliResumeTarget) error {
+	if target.empty() {
 		return nil
+	}
+	if target.canonical() {
+		// Final-format sessions have no transcript path to lease or load; the
+		// controller attaches to the identity and the session service's writer
+		// lease decides ownership.
+		if !ctrl.UsesExclusiveSession() {
+			return errors.New("resuming a final-format session requires the session engine")
+		}
+		_, err := ctrl.OpenSession(context.Background(), target.ref)
+		return err
 	}
 	if err := binding.commitPrevious(manager); err != nil {
 		return err
 	}
-	return resumeWithPersistedSelection(ctrl, session, path)
+	return resumeWithPersistedSelection(ctrl, session, target.path)
 }
 
 // prepareServeSessionPath picks serve's auto-save target: reuse the resumed

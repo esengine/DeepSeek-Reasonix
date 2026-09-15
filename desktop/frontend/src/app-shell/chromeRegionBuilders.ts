@@ -75,7 +75,10 @@ export function buildSidebarRegionProps(input: {
     projectTree: {
       activeScope: input.projectTree.activeTab?.scope, activeWorkspaceRoot: input.projectTree.activeTab?.workspaceRoot,
       activeTopicId: input.projectTree.activeTab?.topicId, activeSessionPath: input.projectTree.activeTab?.sessionPath,
-      activeRemote: input.projectTree.activeTab?.remote, imTopicSources: input.projectTree.imTopicSources, onOpenTopic: commands.onOpenTopic,
+      activeRemote: input.projectTree.activeTab?.remote
+        ? { ...input.projectTree.activeTab.remote, sessionId: input.projectTree.activeTab.sessionId }
+        : undefined,
+      imTopicSources: input.projectTree.imTopicSources, onOpenTopic: commands.onOpenTopic,
       onCreateTopic: topics.onCreateTopic, onCreateIsolatedWorktree: topics.onCreateIsolatedWorktree,
       onTopicsChanged: topics.refreshProjectsAndTabs, onRenameTopic: topics.renameTopic, refreshSignal: input.projectTree.refreshSignal,
       onAddProject: topics.onAddProject,

@@ -120,4 +120,8 @@ func TestRemoteTabTopicIDSeparatorShape(t *testing.T) {
 	if named != "box\x00~/app\x00s1" {
 		t.Fatalf("named topic id = %q, want box\\0~/app\\0s1", named)
 	}
+	canonical := remoteTabTopicID(&remoteTab{ref: RemoteTabRef{HostID: "box", Workspace: "~/app"}, session: remoteTabSessionState{name: "legacy-name", sessionID: "canonical-id"}})
+	if canonical != "box\x00~/app\x00canonical-id" {
+		t.Fatalf("canonical topic id = %q, want immutable session identity", canonical)
+	}
 }
