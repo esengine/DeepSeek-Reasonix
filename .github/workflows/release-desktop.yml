@@ -95,12 +95,12 @@ on:
         default: ""
         type: string
       desktop_manual_only:
-        description: "One-time approved v1.38.8 manual Desktop recovery"
+        description: "Approved manual Desktop distribution: unsigned Windows, no update pointer move"
         required: false
         default: false
         type: boolean
       reuse_manual_artifacts:
-        description: "Reuse the exact verified v1.38.8 manual producer run"
+        description: "Reuse the exact verified v1.38.8 manual producer run (v1.38.8 only)"
         required: false
         default: false
         type: boolean
@@ -241,8 +241,13 @@ jobs:
             exit 1
           fi
           if [ "${{ inputs.desktop_manual_only }}" = "true" ]; then
-            if [ "${{ inputs.orchestrated }}" != "true" ] || [ "${{ inputs.channel }}" != "stable" ] || [ "${{ needs.resolve.outputs.tag }}" != "desktop-v1.38.8" ] || [ "${{ needs.resolve.outputs.sha }}" != "7278072720a2dc7a31cce0eec18c1eacc149c0e0" ]; then
-              echo "::error::manual Desktop exception is restricted to the approved immutable v1.38.8 candidate"
+            if [ "${{ inputs.orchestrated }}" != "true" ] || [ "${{ inputs.channel }}" != "stable" ]; then
+              echo "::error::manual Desktop exception requires the approved stable orchestrator"
+              exit 1
+            fi
+            if ! bash scripts/manual-desktop-exception.sh validate \
+              "${{ needs.resolve.outputs.tag }}" "${{ needs.resolve.outputs.sha }}"; then
+              echo "::error::manual Desktop exception is restricted to approved candidates"
               exit 1
             fi
           fi
@@ -431,7 +436,7 @@ jobs:
           rm -f "$RUNNER_TEMP/cert.p12"
 
       # Official automatic-update releases require Authenticode. The guarded
-      # v1.38.8 manual-only recovery retains minisign without advancing updates.
+      # manual-only exception retains minisign without advancing updates.
       - name: Require Windows Authenticode signing
         if: runner.os == 'Windows' && github.repository == 'esengine/DeepSeek-Reasonix' && !inputs.desktop_manual_only
         run: |
@@ -978,16 +983,20 @@ jobs:
           APPROVED_SHA: ${{ inputs.approved_sha }}
         run: bash scripts/verify-release-tag.sh
 
+      # Name the release being published instead of a fixed version, so the
+      # disclosure cannot outlive or misdescribe the exception it belongs to.
       - name: Disclose manual Desktop distribution
         if: ${{ inputs.desktop_manual_only }}
+        env:
+          MANUAL_VERSION: ${{ needs.resolve.outputs.version }}
         run: |
-          cat >> /tmp/release-notes.md <<'NOTES'
+          cat >> /tmp/release-notes.md <<NOTES
 
           ## Manual desktop downloads / 桌面版手动下载
 
-          This v1.38.8 desktop release is manual-download only on every platform. Windows packages do not carry Reasonix Authenticode signatures because SignPath signing is unavailable; Windows may show an unknown-publisher warning. Detached minisign signatures and SHA-256 checksums remain available. Desktop automatic-update channels remain on v1.38.7. CLI and npm distribution are unaffected.
+          This v${MANUAL_VERSION} desktop release is manual-download only on every platform. Windows packages do not carry Reasonix Authenticode signatures because SignPath signing is unavailable; Windows may show an unknown-publisher warning. Detached minisign signatures and SHA-256 checksums remain available. Desktop automatic-update channels are unchanged by this release and keep serving their previous version. CLI and npm distribution are unaffected.
 
-          本次 v1.38.8 桌面版所有平台均需手动下载安装。因 SignPath 签名服务暂不可用，Windows 包不含 Reasonix Authenticode 签名，系统可能显示未知发布者提示；仍提供 minisign 签名和 SHA-256 校验。桌面自动更新通道保留在 v1.38.7，CLI 和 npm 正常发布。
+          本次 v${MANUAL_VERSION} 桌面版所有平台均需手动下载安装。因 SignPath 签名服务暂不可用，Windows 包不含 Reasonix Authenticode 签名，系统可能显示未知发布者提示；仍提供 minisign 签名和 SHA-256 校验。本次发布不改变桌面自动更新通道，其仍指向此前版本；CLI 和 npm 正常发布。
           NOTES
 
       - name: Publish GitHub release

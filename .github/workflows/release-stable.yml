@@ -39,12 +39,12 @@ on:
         default: true
         type: boolean
       desktop_manual_only:
-        description: "One-time v1.38.8 recovery: unsigned Windows, manual Desktop downloads only"
+        description: "Approved exception: unsigned Windows, manual Desktop downloads only"
         required: false
         default: false
         type: boolean
       reuse_manual_artifacts:
-        description: "Recover the verified v1.38.8 artifacts from run 34816299501"
+        description: "Recover the verified v1.38.8 artifacts from run 34816299501 (v1.38.8 only)"
         required: false
         default: false
         type: boolean
@@ -92,12 +92,16 @@ jobs:
           RELEASE_TAG: ${{ inputs.tag || github.ref_name }}
           ALLOW_STABLE_RECOVERY: ${{ inputs.allow_recovery }}
         run: bash scripts/resolve-stable-release.sh
-      - name: Restrict manual Desktop recovery
+      # scripts/manual-desktop-exception.sh owns which tags may ship without
+      # Windows Authenticode. A tag approved before its candidate exists keeps
+      # the normal candidate and push-CI validation below.
+      - name: Restrict manual Desktop distribution
         if: ${{ inputs.desktop_manual_only }}
         run: |
-          test "${{ inputs.allow_recovery }}" = "true"
-          test "${{ steps.release.outputs.cli_tag }}" = "v1.38.8"
-          test "${{ steps.release.outputs.sha }}" = "7278072720a2dc7a31cce0eec18c1eacc149c0e0"
+          bash scripts/manual-desktop-exception.sh validate \
+            "${{ steps.release.outputs.desktop_tag }}" \
+            "${{ steps.release.outputs.sha }}" \
+            "${{ inputs.allow_recovery }}"
       - name: Revalidate normal release candidate and exact push CI
         if: ${{ !inputs.allow_recovery }}
         env:

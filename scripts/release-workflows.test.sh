@@ -3,6 +3,7 @@ set -euo pipefail
 
 repo_root="$(git rev-parse --show-toplevel)"
 node --test "$repo_root/scripts/verify-manual-desktop-producer.test.mjs"
+bash "$repo_root/scripts/manual-desktop-exception.test.sh"
 test_root="$(mktemp -d "${TMPDIR:-/tmp}/reasonix-release-workflow-test.XXXXXX")"
 cleanup() {
 	case "$test_root" in
@@ -22,10 +23,15 @@ root = pathlib.Path(sys.argv[1])
 stable = (root / '.github/workflows/release-stable.yml').read_text()
 desktop = (root / '.github/workflows/release-desktop.yml').read_text()
 publisher = (root / 'scripts/publish-desktop-github-release.sh').read_text()
+exception = (root / 'scripts/manual-desktop-exception.sh').read_text()
 for workflow in (stable, desktop):
     block = workflow.split('      desktop_manual_only:', 1)[1].split('\n\n', 1)[0]
     assert 'default: false' in block
-    assert '7278072720a2dc7a31cce0eec18c1eacc149c0e0' in workflow
+    # One owner decides which tags may skip Authenticode, so an exception
+    # cannot drift between the orchestrator, the publisher, and the release.
+    assert 'scripts/manual-desktop-exception.sh validate' in workflow
+assert '7278072720a2dc7a31cce0eec18c1eacc149c0e0' in exception
+assert 'inputs.allow_recovery' in stable.split('name: Restrict manual Desktop distribution', 1)[1].split('- name:', 1)[0]
 assert stable.count('desktop_manual_only: ${{ inputs.desktop_manual_only || false }}') == 2
 assert "HAS_SIGNPATH: ${{ secrets.SIGNPATH_API_TOKEN != '' && !inputs.desktop_manual_only }}" in desktop
 assert desktop.index('name: Validate signing mode') < desktop.index('name: Build and package')
@@ -37,7 +43,8 @@ assert 'pointer_moved=false' in desktop[manual_exit:manual_exit + 350]
 attach = desktop.split('name: Attach desktop manifest to matching CLI release', 1)[1].split('env:', 1)[0]
 assert '!inputs.desktop_manual_only' in attach
 manual_publish = publisher.split('if [ "${DESKTOP_MANUAL_ONLY:-false}" = "true" ]; then', 1)[1].split('elif', 1)[0]
-assert 'desktop-v1.38.8' in manual_publish and 'args+=(--latest=false)' in manual_publish
+assert 'manual-desktop-exception.sh" validate "$tag"' in manual_publish
+assert 'args+=(--latest=false)' in manual_publish
 assert 'name: Sign artifacts (minisign)' in desktop
 PY
 [ "$(grep -Ec '^    environment: release$' "$repo_root/.github/workflows/release-stable.yml")" = "1" ]
