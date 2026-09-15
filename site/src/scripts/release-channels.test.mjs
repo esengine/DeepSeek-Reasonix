@@ -25,16 +25,30 @@ function cliAssets(tag, missing = []) {
 
 const desktopSHA256 = "a".repeat(64);
 
+// Every approved manual tag is probed. Selection must stay "newest that
+// actually resolves", so listing the next tag early cannot downgrade the page.
+const manualTagOf = (url) => (url.match(/desktop-v\d+\.\d+\.\d+/) || [])[0];
+
 test("manual desktop downloads advance independently and yield to future stable releases", async () => {
   for (const stableVersion of ["v1.38.7", "v1.38.8", "v1.39.0"]) {
-    const model = await fetchDesktopDownloadModel(async (url) => ({
-      ok: true,
-      json: async () => desktopManifest(url.includes("desktop-v1.38.9") ? "v1.38.9" : stableVersion),
-    }));
+    const model = await fetchDesktopDownloadModel(async (url) => {
+      const tag = manualTagOf(url);
+      return { ok: true, json: async () => desktopManifest(tag ? tag.slice("desktop-".length) : stableVersion) };
+    });
     const expected = stableVersion === "v1.39.0" ? stableVersion : "v1.38.9";
     assert.equal(model.version, expected);
     assert.ok(Object.values(model.assets).every((url) => url.includes(`desktop-${expected}/`)));
   }
+});
+
+test("an approved manual tag that is not published yet cannot downgrade the page", async () => {
+  const model = await fetchDesktopDownloadModel(async (url) => {
+    const tag = manualTagOf(url);
+    if (tag === "desktop-v1.38.9") throw new Error("not published yet");
+    if (tag === "desktop-v1.38.8") return { ok: true, json: async () => desktopManifest("v1.38.8") };
+    return { ok: true, json: async () => desktopManifest("v1.38.7") };
+  });
+  assert.equal(model.version, "v1.38.8");
 });
 
 test("manual desktop downloads survive CDN failure through the exact published GitHub release", async () => {
@@ -53,7 +67,7 @@ test("manual desktop downloads survive CDN failure through the exact published G
 test("invalid manual release cannot replace a validated stable download", async () => {
   const model = await fetchDesktopDownloadModel(async (url) => ({
     ok: true,
-    json: async () => url.includes("desktop-v1.38.9") ? {} : desktopManifest("v1.38.7"),
+    json: async () => manualTagOf(url) ? {} : desktopManifest("v1.38.7"),
   }));
   assert.equal(model.version, "v1.38.7");
   assert.equal(await fetchDesktopDownloadModel(async () => { throw new Error("offline"); }), null);

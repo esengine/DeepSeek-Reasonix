@@ -308,8 +308,13 @@ export async function fetchFirstJSON(urls, fetchImpl = fetch, accept = () => tru
   throw new Error(`release data unavailable (${failures.join("; ")})`);
 }
 
-// v1.38.9 is published for manual download while the updater stays on its prior version.
-// Compare with the live stable release so this exception cannot pin future downloads.
+// Desktop releases published for manual download while the updater stays on its
+// prior version; scripts/manual-desktop-exception.sh owns the same approval list
+// for publication. Every entry is probed and the newest one that actually
+// resolves wins, so adding the next tag before it is published cannot downgrade
+// the page, and a later signed stable release still supersedes all of them.
+const MANUAL_DESKTOP_TAGS = ["desktop-v1.38.8", "desktop-v1.38.9"];
+
 export async function fetchDesktopDownloadModel(fetchImpl = fetch) {
   const load = async (manifestURLs, releaseURL) => {
     try {
@@ -327,9 +332,10 @@ export async function fetchDesktopDownloadModel(fetchImpl = fetch) {
       "https://dl.reasonix.io/latest/latest.json",
       "https://crash.reasonix.io/v1/desktop/releases/stable/latest.json",
     ], "https://api.github.com/repos/esengine/DeepSeek-Reasonix/releases/latest"),
-    load([
-      "https://dl.reasonix.io/desktop-v1.38.9/latest.json",
-    ], "https://api.github.com/repos/esengine/DeepSeek-Reasonix/releases/tags/desktop-v1.38.9"),
+    ...MANUAL_DESKTOP_TAGS.map((tag) => load(
+      [`https://dl.reasonix.io/${tag}/latest.json`],
+      `https://api.github.com/repos/esengine/DeepSeek-Reasonix/releases/tags/${tag}`,
+    )),
   ]);
   let selected = null;
   for (const result of results) {
