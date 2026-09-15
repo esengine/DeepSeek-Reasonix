@@ -1,6 +1,7 @@
 package cli
 
 import (
+	"errors"
 	"fmt"
 	"strings"
 
@@ -9,6 +10,7 @@ import (
 
 	"reasonix/internal/agent"
 	"reasonix/internal/i18n"
+	"reasonix/internal/session"
 )
 
 // resumePicker is an in-chat overlay for "/resume" that lets the user pick a
@@ -132,6 +134,12 @@ func (m chatTUI) applyResumePick() (tea.Model, tea.Cmd) {
 	if target.target.canonical() {
 		if err := m.commitCanonicalSessionSwitch(target.target.ref); err != nil {
 			m.restoreSessionLease()
+			if errors.Is(err, session.ErrWriterOwned) {
+				m.pendingTakeoverPath = cliCanonicalRoute(target.target.ref.SessionID)
+				m.notice("resume: " + sessionWriterHeldNotice())
+				m.notice("run /takeover to take this session over")
+				return m, nil
+			}
 			m.notice("resume: " + err.Error())
 			return m, nil
 		}

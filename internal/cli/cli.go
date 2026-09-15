@@ -42,6 +42,7 @@ import (
 	"reasonix/internal/provider/openai"
 	"reasonix/internal/sandbox"
 	"reasonix/internal/serve"
+	"reasonix/internal/session"
 	"reasonix/internal/sessiontemp"
 	"reasonix/internal/telemetry"
 
@@ -727,7 +728,13 @@ func runAgent(args []string, version string) int {
 	// precedence over --continue.
 	// --continue: resume the most recent saved session.
 	if err := commitResumedSession(takeoverBinding, takeoverManager, ctrl, resumeSession, resumeTarget); err != nil {
-		return cliTakeoverFailure(takeoverBinding, leases, takeoverManager, err)
+		if resumeTarget.canonical() && errors.Is(err, session.ErrWriterOwned) && *takeover {
+			if tErr := cliStartupCanonicalTakeover(ctrl, takeoverManager, resumeTarget); tErr != nil {
+				return cliTakeoverFailure(takeoverBinding, leases, takeoverManager, tErr)
+			}
+		} else {
+			return cliTakeoverFailure(takeoverBinding, leases, takeoverManager, err)
+		}
 	}
 	ctrl.EnsureSessionPath()
 	// Fresh sessions take the lease too (defensive: the path is brand new); a
@@ -1188,7 +1195,14 @@ func chatREPL(args []string, version string) int {
 	// file so closing/reopening keeps appending to the same history; a fresh
 	// session lands in a new file stamped with the model name.
 	if err := commitResumedSession(takeoverBinding, takeoverManager, ctrl, startupResumeSession, resumeTarget); err != nil {
-		return cliTakeoverFailure(takeoverBinding, leases, takeoverManager, err)
+		if resumeTarget.canonical() && errors.Is(err, session.ErrWriterOwned) &&
+			isInteractive() && promptSessionTakeover(err) {
+			if tErr := cliStartupCanonicalTakeover(ctrl, takeoverManager, resumeTarget); tErr != nil {
+				return cliTakeoverFailure(takeoverBinding, leases, takeoverManager, tErr)
+			}
+		} else {
+			return cliTakeoverFailure(takeoverBinding, leases, takeoverManager, err)
+		}
 	}
 	ctrl.EnsureSessionPath()
 	// Fresh sessions take the lease too (defensive: the path is brand new); a

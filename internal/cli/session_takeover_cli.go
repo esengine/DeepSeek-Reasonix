@@ -50,11 +50,15 @@ type cliTakeoverGrant struct {
 }
 
 type cliTakeoverBinding struct {
-	path        string
-	record      cliServeRecord
-	client      *http.Client
-	grant       cliTakeoverGrant
-	previous    *control.SessionLeaseKeeper
+	path string
+	// canonical marks a final-format identity route ("session-id:<id>") as the
+	// binding's key: there is no transcript path lease to move, ownership is
+	// the session directory's writer lock and it releases with the process.
+	canonical  bool
+	record     cliServeRecord
+	client     *http.Client
+	grant      cliTakeoverGrant
+	previous   *control.SessionLeaseKeeper
 	priorMirror *cliTakeoverBinding
 }
 
@@ -715,6 +719,11 @@ func (m *cliTakeoverManager) returnLeaseFor(expected *cliTakeoverBinding, revisi
 		expectedPath = expected.path
 	}
 	return m.returnMirrorTransaction(expectedPath, true, true, func(current *cliTakeoverBinding) error {
+		if current.canonical {
+			// The canonical writer lock releases with the process; the flushed
+			// snapshot above is the only durable step the reservation covered.
+			return nil
+		}
 		return m.leases.ReleaseForHandoff(current.grant.SourceWriterID, current.grant.ReturnHandoffID)
 	})
 }
@@ -731,6 +740,9 @@ func (m *cliTakeoverManager) RebindAway(path string) (bool, error) {
 		return false, nil
 	}
 	err := m.returnCurrentMirror(binding.path, func(current *cliTakeoverBinding) error {
+		if current.canonical {
+			return nil
+		}
 		return m.leases.RebindReturningCurrent(path, current.grant.SourceWriterID, current.grant.ReturnHandoffID)
 	})
 	return true, err

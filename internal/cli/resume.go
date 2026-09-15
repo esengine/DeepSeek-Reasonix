@@ -282,6 +282,12 @@ func (m *chatTUI) runResumeCommand(input string) {
 	if target.target.canonical() {
 		if err := m.commitCanonicalSessionSwitch(target.target.ref); err != nil {
 			m.restoreSessionLease()
+			if errors.Is(err, session.ErrWriterOwned) {
+				m.pendingTakeoverPath = cliCanonicalRoute(target.target.ref.SessionID)
+				m.notice("resume: " + sessionWriterHeldNotice())
+				m.notice("run /takeover to take this session over")
+				return
+			}
 			m.notice("resume: " + err.Error())
 			return
 		}
@@ -349,14 +355,18 @@ func (m *chatTUI) runTakeoverCommand(input string) {
 			}
 			picked := entries[idx-1]
 			if picked.target.canonical() {
-				m.notice("takeover: final-format sessions are guarded by their session writer; release the remote side and /resume again")
-				return
+				target = cliCanonicalRoute(picked.target.ref.SessionID)
+			} else {
+				target = picked.session.Path
 			}
-			target = picked.session.Path
 		}
 	}
 	if target == "" {
 		m.notice("takeover: no refused session; run /resume <n> first or pass an index")
+		return
+	}
+	if isCLICanonicalRoute(target) {
+		m.runCanonicalTakeoverCommand(target)
 		return
 	}
 	if m.ctrl.Running() {
