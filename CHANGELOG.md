@@ -8,6 +8,16 @@ branch.
 
 ### Added
 
+- **Official vision Files-first upload:** new official DeepSeek images upload
+  through the Files API (Chat `/files` or Messages `/v1/files`) and send
+  `file-id`s. The same compressed bytes reuse a home-scoped index keyed by
+  endpoint and API-key hash. Historical data URLs stay stored as-is; request
+  preparation promotes leftover data URLs only when every occurrence uploads.
+  Upload failure falls back to data URLs under 32 MiB. Tool schemas unchanged.
+- **官方视觉 Files 优先：** 新的官方 DeepSeek 图片经 Files API 上传并以 `file-id`
+  发送，按 endpoint 与 API key 哈希复用。已存 data URL 不改写；请求阶段仅在全部
+  能上传时提升为 file-id。上传失败且小于 32 MiB 时回退 data URL。工具 schema 不变。
+
 - **Live file observations:** structured file tools now protect mutations with
   a host-owned current-version observation. Any successful text window is
   sufficient, successful writes refresh the version, and external changes
@@ -63,6 +73,19 @@ branch.
   while a connection is busy.
 
 ### Fixed
+
+- **Official vision cost and offload:** new attachments encode to the DeepSeek
+  v41 request grid (no 1568 long-edge, 4096 clamp, JPEG quality 85 then 75/60
+  toward 2 MiB). Compact and window estimates price retained images with the
+  published 14px / 3:1 / 1024-token calculator instead of treating them as free.
+  A vision route that still exceeds 600 images or the Files/inline byte watermark
+  records optional `image/offload` events for a whole count/byte quantum of the
+  oldest input images, then retries; resume and fork keep the same omissions.
+  UI history, stored data URLs, and tool schemas are unchanged.
+- **官方视觉计费与省略：** 新附件按 DeepSeek v41 请求网格编码；压缩与窗口估算按
+  官方计价计入图片 token。仅在请求超过 600 张或 Files/inline 字节水位时，按量子
+  省略最旧输入图并写入可选 `image/offload` 后重试。resume/fork 保持同一省略集。
+  界面历史、已存 data URL 与工具 schema 不变。
 
 - **Read evidence recovery:** partial reads no longer freeze independent work
   or ordinary final answers. Explicit full reads retain bounded completion

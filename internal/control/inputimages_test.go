@@ -304,9 +304,58 @@ func TestControllerUploadsLargeOfficialDeepSeekImageViaFilesAPI(t *testing.T) {
 	if err := os.WriteFile(path, raw, 0o644); err != nil {
 		t.Fatal(err)
 	}
+	idx := provider.NewFileIndex(filepath.Join(t.TempDir(), "files-v1.json"))
+	provider.SetDefaultFileIndex(idx)
+	t.Cleanup(func() { provider.SetDefaultFileIndex(provider.NewFileIndex("")) })
 	c := &Controller{workspaceRoot: workspace, selection: modelSelection{ref: "deepseek/deepseek-v4-flash-vision-exp"}}
 	got := c.inputImages("look at @.reasonix/attachments/big.png")
 	if len(got) != 1 || got[0] != "file-api-uploaded0001" {
 		t.Fatalf("inputImages = %v, want uploaded file_id", got)
+	}
+	again := c.inputImages("look at @.reasonix/attachments/big.png")
+	if len(again) != 1 || again[0] != "file-api-uploaded0001" {
+		t.Fatalf("reuse = %v", again)
+	}
+}
+
+func TestControllerUploadsSmallOfficialDeepSeekImageViaFilesAPI(t *testing.T) {
+	workspace := t.TempDir()
+	t.Chdir(workspace)
+	cfg := config.Default()
+	cfg.DefaultModel = "deepseek/deepseek-v4-flash-vision-exp"
+	cfg.Providers = []config.ProviderEntry{{
+		Name:         "deepseek",
+		Kind:         "openai",
+		BaseURL:      "https://api.deepseek.com",
+		Models:       []string{"deepseek-v4-flash-vision-exp"},
+		VisionModels: []string{"deepseek-v4-flash-vision-exp"},
+		APIKeyEnv:    "DEEPSEEK_API_KEY",
+	}}
+	if err := cfg.SaveTo(filepath.Join(workspace, "reasonix.toml")); err != nil {
+		t.Fatal(err)
+	}
+	var uploads int
+	prevUpload := uploadVisionFile
+	uploadVisionFile = func(_ context.Context, u provider.FileUpload) (string, error) {
+		uploads++
+		if u.Protocol != "openai" || len(u.Data) == 0 {
+			t.Fatalf("upload = %+v", u)
+		}
+		return "file-api-smallupload01", nil
+	}
+	t.Cleanup(func() { uploadVisionFile = prevUpload })
+	provider.SetDefaultFileIndex(provider.NewFileIndex(filepath.Join(t.TempDir(), "files-v1.json")))
+	t.Cleanup(func() { provider.SetDefaultFileIndex(provider.NewFileIndex("")) })
+	path := filepath.Join(workspace, ".reasonix", "attachments", "tiny.png")
+	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(path, []byte("\x89PNG\r\n\x1a\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	c := &Controller{workspaceRoot: workspace, selection: modelSelection{ref: "deepseek/deepseek-v4-flash-vision-exp"}}
+	got := c.inputImages("look at @.reasonix/attachments/tiny.png")
+	if len(got) != 1 || got[0] != "file-api-smallupload01" || uploads != 1 {
+		t.Fatalf("small official image = %v uploads=%d, want Files id", got, uploads)
 	}
 }

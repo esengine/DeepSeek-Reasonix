@@ -5,6 +5,7 @@ import (
 	"sync/atomic"
 
 	"reasonix/internal/evidence"
+	"reasonix/internal/provider"
 )
 
 // sessionRuntime is the host state one conversation owns. Its lifetime sits
@@ -53,6 +54,11 @@ type sessionRuntime struct {
 	todoState   []evidence.TodoItem
 	todoWritten bool
 
+	imageOffloadMu       sync.Mutex
+	imageOffload         []provider.ImageOffloadTarget
+	imageOffloadRecorder func(provider.ImageOffloadPayload)
+	visionFilePromoter   func([]provider.Message) []provider.Message
+
 	// lastPrefixShape records the previous provider request's cacheable prefix
 	// so usage events can explain prefix churn on the next request. Carried
 	// across a conversation swap; see sessionCarryOver.
@@ -87,6 +93,9 @@ func (r *sessionRuntime) reset(s *Session) {
 	r.todoState = nil
 	r.todoWritten = false
 	r.todoMu.Unlock()
+	r.imageOffloadMu.Lock()
+	r.imageOffload = nil
+	r.imageOffloadMu.Unlock()
 }
 
 // clearReasoningReplayStrongProjection drops the process-local repair overlay.

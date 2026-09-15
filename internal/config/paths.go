@@ -44,6 +44,9 @@ func userConfigDir() string {
 	return reasonixHomeDir()
 }
 
+// HomeDir is the Reasonix user-home directory ($REASONIX_HOME or ~/.reasonix).
+func HomeDir() string { return reasonixHomeDir() }
+
 func reasonixHomeDir() string {
 	if dir := cleanEnvDir("REASONIX_HOME"); dir != "" {
 		return dir

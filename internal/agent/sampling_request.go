@@ -44,11 +44,15 @@ func (a *Agent) normalizeModelRequestMessages(msgs []provider.Message) []provide
 			requestMessages[i].Content = reTrailingExecutionPolicy.ReplaceAllString(requestMessages[i].Content, "")
 		}
 	}
-	return requestMessages
+	return a.applyImageOffload(requestMessages)
 }
 
 func (a *Agent) streamProviderRequest(ctx context.Context, req provider.Request) (<-chan provider.Chunk, error) {
 	if err := provider.ValidateModelTranscript(req.Messages); err != nil {
+		return nil, err
+	}
+	req.Messages = a.promoteVisionFiles(req.Messages)
+	if err := a.checkRetainedImages(req.Messages); err != nil {
 		return nil, err
 	}
 	if err := a.checkpointSession(ctx, CheckpointBeforeModel); err != nil {

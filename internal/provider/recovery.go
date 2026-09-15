@@ -52,6 +52,10 @@ func ClassifyRecovery(err error) RecoveryFailure {
 		f.Phase = "limit"
 		return f
 	}
+	if AsImageOffloadRequired(err) != nil {
+		f.Phase, f.Code = "limit", ImageOffloadRequiredCode
+		return f
+	}
 	if AsReasoningReplayError(err) != nil {
 		f.Phase = "protocol"
 		return f
