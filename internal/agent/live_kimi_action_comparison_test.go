@@ -115,7 +115,7 @@ func TestLiveKimiActionComparison(t *testing.T) {
 						reg.Add(f)
 						system := config.DefaultSystemPrompt + "\n\n" + config.UserDecisionPolicy + "\n\n" + config.WorkPracticePolicy + "\n\n" + config.LanguagePolicy
 						if candidate {
-							system += "\n\n" + config.KimiActionPolicy
+							system += "\n\n" + config.ModelActionPolicy
 						}
 						session := NewSession(system)
 						sink := &recordSink{}

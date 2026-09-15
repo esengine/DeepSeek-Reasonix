@@ -1115,10 +1115,8 @@ func cloneModelOverrideMap(in map[string]ProviderModelOverride) map[string]Provi
 	out := make(map[string]ProviderModelOverride, len(in))
 	for k, v := range in {
 		v.SupportedEfforts = append([]string(nil), v.SupportedEfforts...)
-		if v.Vision != nil {
-			vision := *v.Vision
-			v.Vision = &vision
-		}
+		v.Vision = overrideBool(nil, v.Vision)
+		v.ActionPolicy = overrideBool(nil, v.ActionPolicy)
 		out[k] = v
 	}
 	return out

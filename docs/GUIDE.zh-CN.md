@@ -391,6 +391,25 @@ Thinking 覆盖选项：
 | Disabled（关闭） | 对兼容 provider 发送 `thinking.type = "disabled"`。DeepSeek 风格 provider 下还会避免继续发送推理深度提示。 |
 | Adaptive（自适应） | 仅在服务文档明确支持 adaptive thinking 时使用，例如 MiniMax-M3 风格端点；语义是发送或保留 `thinking.type = "adaptive"`。 |
 
+### 只描述动作而不执行的模型
+
+小参数量与开源权重模型有时会只叙述计划而不真正调用工具，或者报告从未执行过的
+工作。按模型设置的 `action_policy` 覆盖项会在 system prompt 末尾追加一段说明，
+要求模型用它被允许的工具去执行，并且只依据真实的工具结果来声明完成：
+
+```toml
+[[providers]]
+name     = "ollama-local"
+kind     = "openai"
+base_url = "http://localhost:11434/v1"
+models   = ["qwen3:8b", "gemma3:12b"]
+
+model_overrides = { "qwen3:8b" = { context_window = 32768, action_policy = true } }
+```
+
+默认关闭，且不会从 model id 做任何推断：这段文字在每一轮都会占用 prompt token，
+因此是否开启由每个模型自行决定。
+
 ## 快捷键
 
 这里按使用端来写，因为用户通常是先知道“我现在在桌面端/CLI”，再找对应按键。
