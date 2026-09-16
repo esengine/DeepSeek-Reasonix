@@ -20,6 +20,8 @@
 /build/darwin/*
 !/build/darwin/entitlements.plist
 !/build/darwin/icon.icns
+
+!/build/darwin/appicon.png
 !/build/darwin/appicon.svg
 
 # Commit the hand-written Linux .deb packaging inputs and app icon assets. The

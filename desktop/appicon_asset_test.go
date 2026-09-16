@@ -45,6 +45,27 @@ func TestDarwinICNSUsesMacOSIconSafeArea(t *testing.T) {
 	}
 }
 
+// The development shell feeds this file to app.dock.setIcon, which draws the
+// whole canvas, so it must carry the same safe area as the bundle icns.
+func TestDarwinAppIconPNGUsesMacOSIconSafeArea(t *testing.T) {
+	f, err := os.Open("build/darwin/appicon.png")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer f.Close()
+
+	img, err := png.Decode(f)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got, want := img.Bounds(), image.Rect(0, 0, 1024, 1024); got != want {
+		t.Fatalf("macOS app icon bounds = %v, want %v", got, want)
+	}
+	if got, want := alphaBounds(img), image.Rect(100, 100, 924, 924); got != want {
+		t.Fatalf("macOS app icon visible bounds = %v, want %v", got, want)
+	}
+}
+
 func assertFullCanvasRoundedIcon(t *testing.T, img image.Image, size int) {
 	t.Helper()
 
