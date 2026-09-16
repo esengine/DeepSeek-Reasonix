@@ -229,6 +229,7 @@ The final structured object has this shape:
   "duration_ms": 123,
   "num_turns": 1,
   "result": "...",
+  "result_from_reasoning": false,
   "session_id": "...",
   "total_cost": 0,
   "currency": "USD",
@@ -241,6 +242,13 @@ The final structured object has this shape:
   }
 }
 ```
+
+`result_from_reasoning` is present, and `true`, when the turn finished with an
+empty visible message and `result` therefore carries the turn's reasoning
+instead. A thinking model may answer entirely in the reasoning channel; without
+the field a caller cannot tell that text apart from a visible answer, and
+without the fallback `result` would be `""` and `-p` would print nothing. It is
+omitted whenever the model emitted visible text, which is the ordinary case.
 
 `total_cost` is present only when a single `selected` display amount exists (ISO
 code in `currency`). Prefer the structured `cost_quote` field when present: it
