@@ -185,6 +185,7 @@ func incrementHistoryIndex(ctx context.Context, dir, path, sessionID string, rev
 	viewSequence := metadata.viewSequence
 	var buildErr error
 	progress, err := scanHistoryLog(ctx, log, metadata.logSize, metadata.durableSequence+1, revision.Size, content, func(commit Commit) bool {
+		state.commitTurn, state.commitTime = commit.TurnID, commit.CreatedAt.UnixMilli()
 		state.transactions = append(state.transactions, []any{commit.ID, commit.FirstSequence, commit.LastSequence(), commit.OperationID, commit.OperationHash, commit.TurnID, commit.CreatedAt.UTC().Format("2006-01-02T15:04:05.999999999Z07:00")})
 		for _, event := range commit.Events {
 			if event.Kind == "history/replace" {
@@ -392,6 +393,7 @@ func populateHistoryIndex(ctx context.Context, db *sql.DB, log *os.File, content
 		return beginChunk()
 	}
 	progress, err := scanHistoryLog(ctx, log, 0, 1, revision.Size, content, func(commit Commit) bool {
+		state.commitTurn, state.commitTime = commit.TurnID, commit.CreatedAt.UnixMilli()
 		state.transactions = append(state.transactions, []any{commit.ID, commit.FirstSequence, commit.LastSequence(), commit.OperationID, commit.OperationHash, commit.TurnID, commit.CreatedAt.UTC().Format("2006-01-02T15:04:05.999999999Z07:00")})
 		for _, event := range commit.Events {
 			if event.Kind == "history/replace" {
@@ -503,6 +505,9 @@ func insertHistoryRows(ctx context.Context, tx *sql.Tx, prefix string, columns i
 }
 
 func indexMessageEvent(ctx context.Context, content *sessioncontent.Store, state *historyBuildState, event Event) error {
+	if err := indexTurnEvent(ctx, content, state, event); err != nil {
+		return err
+	}
 	if event.Kind != "message/complete" && event.Kind != "message/upsert" && event.Kind != "message/retract" && event.Kind != "history/replace" && event.Kind != "legacy/import" {
 		return nil
 	}
@@ -538,6 +543,12 @@ func indexMessageEvent(ctx context.Context, content *sessioncontent.Store, state
 		if err := strictPayload(payload, &body); err != nil || body.Message == nil {
 			return damagedPayload(event, err)
 		}
+		message := body.Message
+		if state.commitTurn != "" && message.Role == provider.RoleAssistant && !message.LocalOnly && (strings.TrimSpace(message.Content) != "" || strings.TrimSpace(message.RawContent) != "") {
+			if _, err := state.tx.ExecContext(ctx, `UPDATE turn_summaries SET final_message_id=?,ended_at=MAX(ended_at,started_at+?) WHERE turn_id=?`, message.ID, message.WorkDurationMs, state.commitTurn); err != nil {
+				return err
+			}
+		}
 		return indexOneMessage(ctx, content, state, *body.Message, event.Sequence, event.Kind == "message/upsert")
 	case "history/replace", "legacy/import":
 		messages, err := replacementEventMessages(event, payload)
@@ -562,12 +573,32 @@ func replaceIndexedMessages(ctx context.Context, content *sessioncontent.Store, 
 	state.turns = map[string]int{}
 	// Keep each identity's version watermark when replacing its visible row.
 	// Retired versions remain in SQLite for fixed-snapshot readers.
+	legacyTurn := 0
+	var final *provider.Message
+	flushLegacyTurn := func() error {
+		if final == nil {
+			return nil
+		}
+		_, err := state.tx.ExecContext(ctx, `INSERT OR REPLACE INTO turn_summaries(turn_id,start_sequence,end_sequence,started_at,ended_at,final_message_id) VALUES(?,?,?,?,?,?)`, fmt.Sprintf("legacy:%d:%d", sequence, legacyTurn), sequence, sequence, 0, final.WorkDurationMs, final.ID)
+		return err
+	}
 	for _, message := range messages {
+		if message.Role == provider.RoleUser {
+			if err := flushLegacyTurn(); err != nil {
+				return err
+			}
+			legacyTurn++
+			final = nil
+		}
+		if message.Role == provider.RoleAssistant && !message.LocalOnly && (strings.TrimSpace(message.Content) != "" || strings.TrimSpace(message.RawContent) != "") {
+			copy := message
+			final = &copy
+		}
 		if err := indexOneMessage(ctx, content, state, message, sequence, false); err != nil {
 			return err
 		}
 	}
-	return nil
+	return flushLegacyTurn()
 }
 
 func indexOneMessage(ctx context.Context, content *sessioncontent.Store, state *historyBuildState, message provider.Message, sequence uint64, upsert bool) error {

@@ -407,7 +407,7 @@ await act(async () => {
   });
   await flushPromises();
 });
-eq(controller?.state.ask?.id, "ask-tab-ask", "Ask is visible before activation history hydrates");
+eq(controller?.state.ask?.id, undefined, "Ask waits for the consistent activation snapshot");
 await act(async () => {
   // Production emits agent:ready before topic:activation ready. Hold the
   // startup hydration open so activation-ready must supersede it without

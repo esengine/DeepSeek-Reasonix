@@ -141,9 +141,10 @@ await waitFor("history request", () => historyStarted && (desktopStub.events.get
 
 await act(async () => {
   desktopStub.emit("agent:event", { kind: "turn_started", tabId: tab.id });
+  desktopStub.emit("agent:event", { kind: "text", tabId: tab.id, messageId: "active", text: "active prefix" });
   await flushPromises();
 });
-ok(controller?.state.items.some((item) => item.kind === "assistant" && item.streaming) ?? false, "turn starts while history is pending");
+ok(controller?.state.transcriptConnection === "syncing", "frames wait for atomic baseline installation");
 
 historyGate.resolve(historySliceFromMessages(
   tab.id,

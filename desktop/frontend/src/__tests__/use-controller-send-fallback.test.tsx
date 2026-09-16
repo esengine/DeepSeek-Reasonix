@@ -143,6 +143,7 @@ const desktopStub = installDesktopHostStub(({
       },
       ResolvePromptForTab: async (tabId: string, promptId: string, turnId: string, _runtimeEpoch: string, _kind: string, answer: unknown) => {
         exactAnswerCalls.push({ tabId, turnId, promptId, answers: answer });
+        if (rejectAnswer && rejectAnswerMessage.includes("not the active turn")) desktopStub.emit("agent:event", { kind: "prompt_answered", tabId, itemId: promptId });
         if (rejectAnswer) throw new Error(rejectAnswerMessage);
       },
     } as Partial<AppBindings> as AppBindings,
@@ -298,7 +299,7 @@ await act(async () => {
   await flushPromises();
   await flushPromises();
 });
-eq(controller?.state.runtimeStatusSeq, 700, "baseline stores the backend sequence");
+eq(controller?.state.runtimeStatusSeq, 1, "baseline uses the business cut, never the old ledger sequence");
 eq(controller?.state.running, false, "first rejection settles to authoritative idle");
 await act(async () => {
   await controller?.send("second pre-admission rejection");

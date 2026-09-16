@@ -200,6 +200,27 @@ func TestCanonicalSessionHistoryHTTPUsesAuthorizedContentRanges(t *testing.T) {
 	if err := json.NewDecoder(openResponse.Body).Decode(&openView); err != nil || openResponse.StatusCode != http.StatusOK || len(openView.Recent.Entries) != 1 {
 		t.Fatalf("open status=%d view=%+v err=%v", openResponse.StatusCode, openView, err)
 	}
+	// Exercise the actual HTTP Follow contract against the canonical runtime,
+	// including subscription disposal rather than leaving a long poll behind.
+	followResponse, err := http.Get(server.URL + "/transcript/follow")
+	if err != nil {
+		t.Fatal(err)
+	}
+	var followed control.TranscriptFollowResponse
+	err = json.NewDecoder(followResponse.Body).Decode(&followed)
+	_ = followResponse.Body.Close()
+	if err != nil || followResponse.StatusCode != http.StatusOK || followed.ProtocolVersion != 2 || followed.Snapshot == nil || followed.History == nil || followed.History.Status != "ready" {
+		t.Fatalf("follow status=%d response=%+v error=%v", followResponse.StatusCode, followed, err)
+	}
+	closeRequest, _ := json.Marshal(transcript.FollowRequest{Subscription: followed.Subscription, Close: true})
+	closed, err := http.Get(server.URL + "/transcript/follow?request=" + url.QueryEscape(string(closeRequest)))
+	if err != nil {
+		t.Fatal(err)
+	}
+	_ = closed.Body.Close()
+	if closed.StatusCode != http.StatusOK {
+		t.Fatalf("close follow status=%d", closed.StatusCode)
+	}
 	var page canonical.MessageHistoryPage
 	for deadline := time.Now().Add(5 * time.Second); ; time.Sleep(time.Millisecond) {
 		response, requestErr := http.Get(server.URL + "/session-history/page?sessionId=canonical&limit=10")

@@ -105,10 +105,12 @@ func TestLargeTranscriptSwitchPhaseMeasurement(t *testing.T) {
 		t.Fatal(err)
 	}
 	started := time.Now()
-	snapshot, err := app.TranscriptSnapshotForTab(tab.ID, transcript.PageRequest{})
-	if err != nil || !snapshot.HasOlder {
+	follow, err := app.TranscriptFollowForTab(tab.ID, transcript.FollowRequest{})
+	if err != nil || follow.Snapshot == nil || follow.History == nil || !follow.History.HasOlder {
 		t.Fatalf("large snapshot: %v", err)
 	}
+	defer app.TranscriptFollowForTab(tab.ID, transcript.FollowRequest{Subscription: follow.Subscription, Close: true})
+	snapshot := follow.Snapshot
 	if phases.DurableReads != 1 || phases.HistoryCount != 0 {
 		t.Fatalf("large switch repeated history work: %+v", phases)
 	}

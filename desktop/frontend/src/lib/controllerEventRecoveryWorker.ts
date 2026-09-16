@@ -13,6 +13,7 @@ export interface ControllerRecoveryPorts {
   flush(): void;
   prepare(tab: TabMeta): void;
   runtime(tab: TabMeta, snapshotAt: number): void;
+  resynchronize?(tab: TabMeta): Promise<void>;
   reset(tabId: string): void;
   hydrate(tab: TabMeta, isCurrent: () => boolean): Promise<void>;
 }
@@ -56,6 +57,7 @@ export function startControllerEventRecovery(ports: ControllerRecoveryPorts, sub
           // The existing runtime projection requests missing durable turn
           // events and pending prompt presentation, never another invocation.
           ports.runtime(tab, scope.snapshotAt);
+          if (ports.resynchronize) void ports.resynchronize(tab).catch(failed);
         }
       }
     },

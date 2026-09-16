@@ -29,6 +29,10 @@ const shallowSame = (a: object, b: object) => Object.keys(a).length === Object.k
   && Object.entries(a).every(([key, value]) => value === (b as Record<string, unknown>)[key]);
 const foldViews = new Map<string, Set<string>>();
 const emptyChildren: readonly Extract<ChatNode, { kind: "tool" }>[] = [];
+function proxyAuditCall(item: Item): string | undefined {
+  if (item.kind !== "notice" || item.code !== "capability_proxy_audit") return undefined;
+  try { return (JSON.parse(item.detail ?? "{}") as { callId?: string }).callId || undefined; } catch { return undefined; }
+}
 
 /** A reconstructable presentation projection. Controller/history remain authoritative. */
 export class ChatSource implements ChatViewSource {
@@ -112,7 +116,8 @@ export class ChatSource implements ChatViewSource {
         this.put(node); present.add(node.key); groupPresent.push(node.key); if (visible) order.push(node.key);
       };
       if (current.user) add({ kind: "user", key: current.user.id, turnKey, item: current.user });
-      const answer = [...current.items].reverse().find(item => item.kind === "assistant" && item.text.trim()) as Extract<Item, { kind: "assistant" }> | undefined;
+      const answer = (current.items.find(item => item.kind === "assistant" && item.turnFinal)
+        ?? [...current.items].reverse().find(item => item.kind === "assistant" && item.turnFinal === undefined && item.text.trim())) as Extract<Item, { kind: "assistant" }> | undefined;
       const answerIndex = answer ? current.items.indexOf(answer) : -1;
       // Harness folds the completed process range, including recovered call errors.
       // Terminal failures/recovery prompts remain independent and prevent auto-fold.
@@ -120,7 +125,11 @@ export class ChatSource implements ChatViewSource {
         || item.kind === "tool" && item.status === "stopped"
         || item.kind === "notice" && (item.action === "recover_context"
           || index > answerIndex && !item.decisionReceipt && !item.completionSummary));
-      const members = current.items.flatMap(item => item.kind === "assistant"
+      const mergedAudits = new Set(current.items.filter(item => {
+        const call = proxyAuditCall(item);
+        return call && current.items.some(tool => tool.kind === "tool" && tool.id === call);
+      }).map(item => item.id));
+      const members = current.items.flatMap(item => mergedAudits.has(item.id) ? [] : item.kind === "assistant"
         ? [...(item !== answer ? [item.id] : []), `${item.id}:reasoning`]
         : item.kind === "notice" && (item.level === "warn" || item.action === "recover_context")
           || item.kind === "extension" && item.card.actions?.length ? [] : [item.id]);
@@ -140,7 +149,7 @@ export class ChatSource implements ChatViewSource {
         failureCount: calls.filter(item => item.status === "error" || item.error).length });
       for (const item of current.items) {
         if (item.kind === "assistant") add({ kind: "reasoning", key: `${item.id}:reasoning`, turnKey, item });
-        add({ kind: item.kind, key: item.id, turnKey, item } as ItemNode, !(item.kind === "tool" && item.parentId));
+        add({ kind: item.kind, key: item.id, turnKey, item } as ItemNode, !mergedAudits.has(item.id) && !(item.kind === "tool" && item.parentId));
       }
       const declarations = allCalls.filter(item => item.name === "present" && item.status === "done" && !item.error && item.presentedFiles?.length);
       const latestByPath = new Map<string, PresentedFileView>();
@@ -208,6 +217,10 @@ export class ChatSource implements ChatViewSource {
     this.flush();
   }
   toolChildren(id: string) { return this.children.get(id) ?? emptyChildren; }
+  toolAudits(id: string): string[] {
+    return [...this.nodes.values()].flatMap(node => node.kind === "notice" && proxyAuditCall(node.item) === id
+      ? [`${node.item.text}\n${node.item.detail ?? ""}`] : []);
+  }
   private schedule() {
     if (this.scheduled) return;
     this.scheduled = true;

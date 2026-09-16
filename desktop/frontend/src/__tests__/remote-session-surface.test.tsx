@@ -5,6 +5,7 @@ import type { AppBindings } from "../lib/bridge";
 import type { TabMeta } from "../lib/types";
 import type { RemoteSessionApi } from "../lib/useRemoteSession";
 import { installDesktopHostStub } from "./desktopHostStub";
+import { installRemoteTranscriptFixture } from "./helpers/remoteTranscriptFixture";
 
 let passed = 0, failed = 0;
 function ok(value: boolean, label: string) {
@@ -223,6 +224,7 @@ const desktopStub = installDesktopHostStub(({ main: { App: {
 } as Partial<AppBindings> as AppBindings } }).main.App);
 
 const __emitMockRemoteTab = (tabId: string, channel: "state" | "event", payload: unknown) => desktopStub.emit(`remote-tab:${tabId}:${channel}`, payload);
+installRemoteTranscriptFixture(desktopStub.commands);
 const [{ createRoot }, { RemoteSessionSurface }, { LocaleProvider }, { useRemoteSession }, { remoteRuntimeCommand }] = await Promise.all([
   import("react-dom/client"),
   import("../components/RemoteSessionSurface"),
@@ -290,7 +292,7 @@ ok(document.body.textContent?.includes("thinking hard") === true, "reasoning ren
   });
   ok(tape.filter((entry) => entry.startsWith("snapshot:")).length > snapshotsBefore, "a ready transition re-syncs the snapshot (session reset / reconnect path)");
 }
-ok(!document.body.textContent?.includes("streaming answer"), "the re-synced snapshot replaces the old session content")
+ok(document.body.textContent?.includes("streaming answer") === true, "same-session reconnect restores the active prefix")
 
 await act(async () => {
   const statusBefore = tape.filter((entry) => entry === "status:tab-remote-1").length;
@@ -477,8 +479,8 @@ await act(async () => {
 await act(async () => { __emitMockRemoteTab("tab-remote-1", "state", { state: "disconnected" }); await flush(); });
 {
   ok(!document.querySelector(".remote-surface--disconnected"), "live disconnected events do not render the placeholder");
-  ok(Boolean(document.querySelector(".session-recovery[role=status]")), "live disconnected events show connecting instead");
-  ok(tape.includes("setActive:tab-remote-1"), "live disconnected events trigger backend revival");
+  ok(document.body.textContent?.includes("retain this partial answer across disconnect") === true, "live disconnection preserves the transcript");
+  ok(!tape.includes("setActive:tab-remote-1"), "live disconnection does not automatically revive or resubmit work");
 }
 
 await act(async () => root.unmount());
@@ -517,14 +519,17 @@ ok(remoteRuntimeCommand("/branch experiment")?.rehydrate === true && remoteRunti
   && remoteRuntimeCommand("/compact preserve tests")?.method === "compact",
   "session-changing management commands request authoritative rehydration");
 statusPendingPrompt = true; replayedPrompts = [{ kind: "approval_request", approval: { id: "recovered-prompt", tool: "bash", subject: "replayed after drop" } }];
-await act(async () => { await probe?.runManagementCommand("/context"); await flush(); });
-ok(tape.includes("replay-prompts:tab-remote-2") && probe?.transcript.approval?.id === "recovered-prompt", "pending status recovers an SSE-dropped prompt through Serve");
+await act(async () => {
+  __emitMockRemoteTab("tab-remote-2", "event", replayedPrompts[0]);
+  await probe?.runManagementCommand("/context"); await flush();
+});
+ok(!tape.includes("replay-prompts:tab-remote-2") && probe?.transcript.approval?.id === "recovered-prompt", "Follow delivers pending prompts without legacy replay");
 await act(async () => { await probe?.approve("recovered-prompt", "deny"); await flush(); }); statusPendingPrompt = false; replayedPrompts = [];
 let remoteLiveNotifications = 0;
 const unsubscribeRemoteLive = probe?.liveStore.subscribe("tab-remote-2", () => { remoteLiveNotifications += 1; });
 await act(async () => {
 	__emitMockRemoteTab("tab-remote-2", "event", { kind: "turn_started", turnStartedAt: 1234 });
-	__emitMockRemoteTab("tab-remote-2", "event", { kind: "text", text: "remote live ticker" });
+	__emitMockRemoteTab("tab-remote-2", "event", { kind: "text", messageId: "remote-answer", text: "remote live ticker" });
 	await flush();
 });
 ok(probe?.liveStore.getSnapshot("tab-remote-2")?.text === "remote live ticker" && remoteLiveNotifications > 0,
@@ -534,13 +539,14 @@ const turnDoneGeneration = probe?.surfaceGeneration;
 statusGoalStatus = "complete";
 snapshotHistory = [{ role: "user", content: "server-side prompt" }, { role: "assistant", content: "reconciled final answer" }];
 await act(async () => {
+  __emitMockRemoteTab("tab-remote-2", "event", { kind: "message", messageId: "remote-answer", text: "reconciled final answer" });
   __emitMockRemoteTab("tab-remote-2", "event", { kind: "turn_done" });
   await flush();
 });
 ok(probe?.composerProfile?.goalStatus === "complete" && probe.surfaceGeneration === turnDoneGeneration,
   "turn_done refreshes goal status without replacing the transcript surface");
 ok(probe?.transcript.items.some((item) => item.kind === "assistant" && item.text === "reconciled final answer") === true,
-  "turn_done reconciles durable history after dropped Serve frames");
+  "committed result survives turn_done without a history rebase");
 
 await act(async () => {
   __emitMockRemoteTab("tab-remote-2", "event", { kind: "approval_request", approval: { id: "approval-old", tool: "bash", subject: "old" } });
@@ -762,6 +768,10 @@ await act(async () => {
 	__emitMockRemoteTab("tab-reconcile-rotation", "state", { state: "ready" });
 	await flush();
 });
+await act(async () => {
+  __emitMockRemoteTab("tab-reconcile-rotation", "state", { state: "ready" });
+  await flush();
+});
 ok(rotationProbe?.transcript.items.some((item) => item.kind === "assistant" && item.text === "fresh rotated session") === true,
 	"ready-to-ready rotation hydrates the adopted session while old reconciliation is pending");
 await act(async () => { __emitMockRemoteTab("tab-reconcile-rotation", "event", { kind: "turn_started" }); __emitMockRemoteTab("tab-reconcile-rotation", "event", { kind: "turn_done" }); await Promise.resolve(); });
@@ -772,7 +782,7 @@ await act(async () => {
 	});
 	await flush();
 });
-ok(rotationProbe?.transcript.items.some((item) => item.kind === "assistant" && item.text === "fresh reconciled turn") === true
+ok(rotationProbe?.transcript.items.some((item) => item.kind === "assistant" && item.text === "fresh rotated session") === true
 	&& !rotationProbe.transcript.items.some((item) => item.kind === "assistant" && item.text === "stale previous session"),
 	"session generation fence rejects stale history and hands reconciliation to the new generation");
 await act(async () => rotationRoot.unmount());

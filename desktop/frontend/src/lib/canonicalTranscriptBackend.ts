@@ -1,9 +1,15 @@
-import type { HistoryWindowPage, MessageHistoryPage, PersistentMessage } from "../generated/desktopContract.generated";
+import type { HistoryWindowPage, PersistentMessage } from "../generated/desktopContract.generated";
 import { asArray } from "./array";
 import { app } from "./bridge";
 import { HistoryPreparingError } from "./historyPreparation";
 import { canonicalUserDisplay } from "./canonicalUserDisplay";
 import type { HistoryContentChunk, HistoryContentRef, HistoryEntry, HistoryMessage, HistorySlice, HistorySliceRequest, HistoryWindowPageView, HistoryWindowRequestView, MemoryCitation } from "./types";
+
+const contentRecovery = new Map<string, () => void>();
+export function registerTranscriptContentRecovery(tabId: string, recover: () => void): () => void {
+  contentRecovery.set(tabId, recover);
+  return () => { if (contentRecovery.get(tabId) === recover) contentRecovery.delete(tabId); };
+}
 
 function asWireObject(value: unknown): Record<string, unknown> {
   return value && typeof value === "object" && !Array.isArray(value) ? value as Record<string, unknown> : {};
@@ -40,6 +46,10 @@ export function canonicalMessage(message: PersistentMessage, body: unknown): His
   const role = Boolean(raw.local_only) ? "assistant" : String(raw.role ?? message.role);
   const display = role === "user" ? canonicalUserDisplay(raw, message.preview ?? "") : { role, content: String(raw.content ?? raw.raw_content ?? message.preview ?? "") };
   return {
+    turnFinal: message.turnFinal ?? false,
+    samplingCount: message.samplingCount ?? undefined,
+    toolCount: message.toolCount ?? undefined,
+    turnDurationMs: message.turnDurationMs,
     role: display.role,
     messageId: String(raw.id ?? message.messageId),
     content: display.content,
@@ -97,21 +107,7 @@ function identityFor(tabId: string): TranscriptBindingIdentity {
   }
 }
 
-async function openSession(tabId: string) {
-  return identityFor(tabId) === "remote"
-    ? app.RemoteSessionOpenForTab(tabId)
-    : app.SessionOpenForTab(tabId);
-}
-
-async function historyPage(tabId: string, cursor: string, limit: number): Promise<MessageHistoryPage> {
-  return identityFor(tabId) === "remote"
-    ? app.RemoteSessionHistoryPageForTab(tabId, cursor, limit)
-    : app.SessionHistoryPageForTab(tabId, cursor, limit);
-}
-
-const locatorResetCursor = "reasonix:locator:newest";
-
-function entriesFor(messages: PersistentMessage[], snapshotSequence: number): HistoryEntry[] {
+export function entriesFor(messages: PersistentMessage[], snapshotSequence: number): HistoryEntry[] {
   return messages.map(persistent => {
     const entryId = `m:${persistent.messageId}`;
     return {
@@ -127,10 +123,6 @@ function entriesFor(messages: PersistentMessage[], snapshotSequence: number): Hi
   });
 }
 
-// Tabs whose binding answered "unsupported" once keep the protocol-7 path for
-// the rest of the session: an older Serve is not re-probed on every page.
-const windowUnsupportedTabs = new Set<string>();
-
 function unsupportedWindow(): HistoryWindowPageView {
   return {
     entries: [], status: "unsupported", olderCursor: "", newerCursor: "",
@@ -140,25 +132,21 @@ function unsupportedWindow(): HistoryWindowPageView {
 }
 
 export async function canonicalHistoryWindow(tabId: string, req: HistoryWindowRequestView): Promise<HistoryWindowPageView> {
-  if (windowUnsupportedTabs.has(tabId)) return unsupportedWindow();
   const remote = identityFor(tabId) === "remote";
   let page: HistoryWindowPage;
   if (remote) {
     if (typeof app.RemoteSessionHistoryWindowForTab !== "function") {
-      windowUnsupportedTabs.add(tabId);
       return unsupportedWindow();
     }
     page = await app.RemoteSessionHistoryWindowForTab(tabId, req);
   } else {
     if (typeof app.SessionHistoryWindowForTab !== "function") {
-      windowUnsupportedTabs.add(tabId);
       return unsupportedWindow();
     }
     page = await app.SessionHistoryWindowForTab(tabId, req);
   }
   const status = (page.status || "ready") as HistoryWindowPageView["status"];
   if (status === "unsupported") {
-    windowUnsupportedTabs.add(tabId);
     return unsupportedWindow();
   }
   const entries = entriesFor(asArray<PersistentMessage>(page.messages), page.snapshotSequence);
@@ -217,14 +205,20 @@ function requireReadyWindow(window: HistoryWindowPageView): HistorySlice | undef
 }
 
 export async function canonicalHistorySlice(tabId: string, req: HistorySliceRequest): Promise<HistorySlice> {
-  // Protocol 6 and older hosts expose only the windowed compatibility reader.
-  // Keep it available when their controller-backed snapshot cannot start.
-  if (typeof app.SessionOpenForTab !== "function") return app.HistorySliceForTab(tabId, req);
   const cursor = req.cursor ?? "";
-  const limit = Math.min(500, Math.max(1, req.entries ?? 100));
-  // A cursor names a position inside a window, so it pages through the window
-  // protocol in the direction the request asked for. Protocol 7 has no newer
-  // cursor at all, so a legacy binding simply cannot answer that direction.
+  const limit = Math.min(100, Math.max(1, req.entries ?? 32));
+  if (cursor.startsWith("reasonix:message:")) {
+    const [id, sequence, generation] = cursor.slice("reasonix:message:".length).split(":");
+    const messageId = decodeURIComponent(id);
+    const snapshotSequence = Number(sequence);
+    if (!Number.isSafeInteger(snapshotSequence) || snapshotSequence < 0 || generation === undefined) return staleSlice();
+    const window = await canonicalHistoryWindow(tabId, { anchor: "message", messageId, snapshotSequence,
+      generation: decodeURIComponent(generation), direction: req.newer ? "newer" : "older", limit });
+    const ready = requireReadyWindow(window);
+    if (!ready) throw new Error("Transcript v2 requires an updated Desktop and Serve");
+    return ready;
+  }
+  // A cursor names a position inside a fixed canonical history window.
   if (cursor !== "" || req.newer) {
     const window = await canonicalHistoryWindow(tabId, {
       anchor: "cursor",
@@ -234,50 +228,13 @@ export async function canonicalHistorySlice(tabId: string, req: HistorySliceRequ
     });
     const ready = requireReadyWindow(window);
     if (ready) return ready;
-    if (req.newer) return sliceFromWindow(unsupportedWindow(), "legacy-no-newer");
-    return legacyPageSlice(tabId, cursor, limit, "locator");
+    throw new Error("Transcript v2 requires an updated Desktop and Serve");
   }
-  // The newest page: the window carries the newer cursor that makes the
-  // resident window bidirectional, so prefer it wherever it is available.
+  // The newest page carries the cursor for the same bidirectional window.
   const window = await canonicalHistoryWindow(tabId, { anchor: "newest", direction: "older", limit });
   const ready = requireReadyWindow(window);
   if (ready) return { ...ready, source: "recent" };
-  return legacyPageSlice(tabId, "", limit, "recent");
-}
-
-async function legacyPageSlice(tabId: string, cursor: string, limit: number, source: string): Promise<HistorySlice> {
-  if (cursor === "") {
-    const view = await openSession(tabId);
-    const recent = asArray<PersistentMessage>(view.recent.entries);
-    if (view.recent) {
-      const entries = entriesFor(recent, view.snapshotSequence);
-      const turns = entries.map(entry => entry.turn).filter(turn => turn > 0);
-      const startTurn = turns.length > 0 ? Math.min(...turns) : 0;
-      const hasOlder = startTurn > 1 || (recent[0]?.position ?? 0) > 0;
-      return {
-        entries, nextCursor: hasOlder ? locatorResetCursor : "", hasOlder, hasNewer: false, newerCursor: "",
-        totalTurns: view.recent.totalTurns > 0 ? view.recent.totalTurns : (turns.length > 0 ? Math.max(...turns) : 0),
-        startTurn, endTurn: turns.length > 0 ? Math.max(...turns) : 0, stale: false,
-        revision: view.snapshotSequence, revisionKnown: view.snapshotSequence > 0,
-        digest: view.storageGeneration ?? view.recent.storageGeneration, source: "recent",
-      };
-    }
-  }
-  const reset = cursor === locatorResetCursor;
-  const page = await historyPage(tabId, reset ? "" : cursor, limit);
-  if (page.status === "preparing") throw new HistoryPreparingError();
-  if (page.status === "stale_cursor") return staleSlice();
-  if (page.status && page.status !== "ready") throw new Error(`Session history is ${page.status}`);
-  const entries = entriesFor(asArray<PersistentMessage>(page.messages), page.snapshotSequence);
-  const turns = entries.map(entry => entry.turn).filter(turn => turn > 0);
-  return {
-    entries, nextCursor: page.nextCursor ?? "", hasOlder: page.hasMore, hasNewer: false, newerCursor: "",
-    totalTurns: page.totalTurns ?? (turns.length > 0 ? Math.max(...turns) : 0),
-    startTurn: turns.length > 0 ? Math.min(...turns) : 0,
-    endTurn: turns.length > 0 ? Math.max(...turns) : 0, stale: false,
-    revision: page.snapshotSequence, revisionKnown: page.snapshotSequence > 0, digest: page.generation,
-    source: reset ? "locator-reset" : source,
-  };
+  throw new Error("Transcript v2 requires an updated Desktop and Serve");
 }
 
 function decodeBase64Bytes(data: string): Uint8Array {
@@ -286,14 +243,28 @@ function decodeBase64Bytes(data: string): Uint8Array {
 }
 
 export async function canonicalHistoryContent(tabID: string, ref: HistoryContentRef, chunkIndex: number): Promise<HistoryContentChunk> {
+  if (ref.transcriptRef) {
+    const recover = contentRecovery.get(tabID);
+    const read = identityFor(tabID) === "remote" ? app.RemoteTranscriptContentForTab : app.TranscriptContentForTab;
+    if (!read) throw new Error("Transcript v2 content is unavailable");
+    let offset = 0, data = "";
+    while (true) {
+      const chunk = await read(tabID, { ...ref.transcriptRef, offset });
+      if (chunk.stale) {
+        if (contentRecovery.get(tabID) === recover) recover?.();
+        throw new Error("Transcript content snapshot expired; synchronizing, retry after recovery");
+      }
+      data += chunk.data;
+      if (chunk.done) return { entryId: ref.entryId, field: ref.field, chunk: chunkIndex, chunks: 1, data, done: true, stale: false };
+      if (chunk.nextOffset <= offset) throw new Error("Transcript content did not advance");
+      offset = chunk.nextOffset;
+    }
+  }
   if (!ref.canonicalRef) return app.HistoryContentForTab(tabID, ref, chunkIndex);
   const offset = chunkIndex * (1 << 20);
-  let chunk;
-  try {
-    chunk = await app.SessionHistoryContentForTab(tabID, ref.canonicalRef, offset);
-  } catch (localError) {
-    try { chunk = await app.RemoteSessionHistoryContentForTab(tabID, ref.canonicalRef, offset); } catch { throw localError; }
-  }
+  const chunk = identityFor(tabID) === "remote"
+    ? await app.RemoteSessionHistoryContentForTab(tabID, ref.canonicalRef, offset)
+    : await app.SessionHistoryContentForTab(tabID, ref.canonicalRef, offset);
   const bytes = decodeBase64Bytes(chunk.data ?? "");
   let data = "";
   for (let start = 0; start < bytes.length; start += 0x8000) data += String.fromCharCode(...bytes.subarray(start, start + 0x8000));

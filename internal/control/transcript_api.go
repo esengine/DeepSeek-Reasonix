@@ -4,9 +4,9 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
-
-	"reasonix/internal/provider"
 	"reasonix/internal/session"
+	"time"
+
 	"reasonix/internal/transcript"
 	"reasonix/internal/turnevent"
 )
@@ -30,6 +30,66 @@ type TranscriptProjectionAPI interface {
 }
 
 var _ TranscriptProjectionAPI = (*Controller)(nil)
+
+type TranscriptFollowAPI interface {
+	TranscriptFollow(context.Context, transcript.FollowRequest) (TranscriptFollowResponse, error)
+}
+
+type TranscriptFollowResponse struct {
+	transcript.FollowResponse
+	History *session.HistoryWindowPage `json:"history,omitempty"`
+}
+
+func (c *Controller) TranscriptFollow(ctx context.Context, req transcript.FollowRequest) (TranscriptFollowResponse, error) {
+	service, runtime, exclusive := c.v3Binding()
+	if !exclusive || runtime == nil {
+		return TranscriptFollowResponse{}, ErrTranscriptProjectionUnavailable
+	}
+	view, err := runtime.FollowTranscript(ctx, req)
+	out := TranscriptFollowResponse{FollowResponse: view}
+	if err != nil || view.Snapshot == nil {
+		return out, err
+	}
+	// Make the frozen cut pageable even when accepted batches exceed the tail.
+	// The registered subscription queues concurrent commits during flush/read;
+	// no publisher lock is held.
+	cut := view.Snapshot.CoveredThroughSeq
+	if view.Snapshot.DurableSeq < cut {
+		receipt, flushErr := runtime.Session().Flush(ctx)
+		if flushErr != nil || receipt.DurableSequence < cut {
+			_, _ = runtime.Transcript().Follow(context.Background(), transcript.FollowRequest{Subscription: view.Subscription, Close: true})
+			if flushErr == nil {
+				flushErr = errors.New("transcript snapshot persistence is incomplete")
+			}
+			return out, flushErr
+		}
+		// Publish the new watermark in order, after already queued frames. Do
+		// not attach it to the older frozen view and then replay older watermarks.
+		runtime.Transcript().SetDurableSequence(receipt.DurableSequence)
+	}
+	var page session.HistoryWindowPage
+	for {
+		page, err = service.Query().ReadHistoryWindow(ctx, runtime.Ref(), session.HistoryWindowRequest{Anchor: "newest", Limit: 32, SnapshotSequence: &cut})
+		if err != nil || page.Status != "preparing" {
+			break
+		}
+		timer := time.NewTimer(10 * time.Millisecond)
+		select {
+		case <-ctx.Done():
+			timer.Stop()
+			err = ctx.Err()
+		case <-timer.C:
+		}
+		if err != nil {
+			break
+		}
+	}
+	if err != nil {
+		_, _ = runtime.Transcript().Follow(context.Background(), transcript.FollowRequest{Subscription: view.Subscription, Close: true})
+	}
+	out.History = &page
+	return out, err
+}
 
 // TranscriptOutlineAPI is an optional capability beside TranscriptProjectionAPI.
 // It is deliberately separate so an existing controller implementation keeps
@@ -66,12 +126,8 @@ func (c *Controller) BindTranscriptRuntimeEpoch(epoch string) {
 }
 
 func (c *Controller) transcriptProjection() (*transcript.Projection, error) {
-	if service, runtime, exclusive := c.v3Binding(); exclusive && service != nil && runtime != nil {
-		messages, err := service.Query().History(context.Background(), runtime.Ref())
-		if err != nil {
-			return nil, errors.Join(ErrTranscriptProjectionUnavailable, err)
-		}
-		return c.v3TranscriptProjection(runtime.StateSnapshot(), messages)
+	if _, runtime, exclusive := c.v3Binding(); exclusive && runtime != nil {
+		return runtime.Transcript(), nil
 	}
 	c.turnEvents.mu.RLock()
 	defer c.turnEvents.mu.RUnlock()
@@ -85,48 +141,6 @@ func (c *Controller) transcriptProjection() (*transcript.Projection, error) {
 		return nil, ErrTranscriptProjectionUnavailable
 	}
 	return c.turnEvents.projection, nil
-}
-
-func (c *Controller) v3TranscriptProjection(runtime session.RuntimeSnapshot, messages []provider.Message) (*transcript.Projection, error) {
-	sequence := runtime.Session.EventSequence
-	sessionID, epoch := runtime.Ref.SessionID, runtime.Epoch
-	c.turnEvents.mu.RLock()
-	if p := c.turnEvents.projection; p != nil && c.turnEvents.v3ProjectionSequence == sequence && c.turnEvents.v3ProjectionSession == sessionID && c.turnEvents.v3ProjectionEpoch == epoch {
-		c.turnEvents.mu.RUnlock()
-		return p, nil
-	}
-	c.turnEvents.mu.RUnlock()
-
-	rows := transcript.History(messages, transcript.HistoryOptions{
-		CheckpointTurns: c.CheckpointTurnsByMessageIndex(),
-		SubmitContent: func(m provider.Message) string {
-			return StripReferencedContextPrefix(StripComposePrefixes(m.Content))
-		},
-		UserContent: func(m provider.Message) string {
-			if m.RawContent != "" {
-				return m.RawContent
-			}
-			return StripReferencedContextPrefix(StripComposePrefixes(m.Content))
-		},
-	})
-	identity := transcript.Identity{SessionID: sessionID, RuntimeEpoch: epoch}
-	p, err := transcript.NewProjection(identity, rows, sequence)
-	if err != nil {
-		return nil, err
-	}
-	c.turnEvents.mu.Lock()
-	// Do not replace a newer cache produced while conversion ran.
-	if current := c.turnEvents.projection; current != nil && c.turnEvents.v3ProjectionSession == sessionID && c.turnEvents.v3ProjectionEpoch == epoch && c.turnEvents.v3ProjectionSequence > sequence {
-		p = current
-	} else {
-		c.turnEvents.projection = p
-		c.turnEvents.projectionErr = nil
-		c.turnEvents.v3ProjectionSequence = sequence
-		c.turnEvents.v3ProjectionSession = sessionID
-		c.turnEvents.v3ProjectionEpoch = epoch
-	}
-	c.turnEvents.mu.Unlock()
-	return p, nil
 }
 
 func (c *Controller) TranscriptSnapshot(req transcript.PageRequest) (transcript.Snapshot, error) {
@@ -177,15 +191,7 @@ func (c *Controller) TranscriptReplay(req TranscriptReplayRequest) (TranscriptRe
 
 func (c *Controller) transcriptReplay(req TranscriptReplayRequest) (TranscriptReplay, error) {
 	if _, runtime, exclusive := c.v3Binding(); exclusive && runtime != nil {
-		p, err := c.transcriptProjection()
-		if err != nil {
-			return TranscriptReplay{}, err
-		}
-		boundary := p.Boundary()
-		if boundary.Identity != req.Identity || req.After < boundary.CoveredThroughSeq {
-			return TranscriptReplay{Boundary: boundary, ReplayView: turnevent.ReplayView{Events: []turnevent.Envelope{}, ResetRequired: true, LatestSequence: boundary.CoveredThroughSeq}}, nil
-		}
-		return TranscriptReplay{Boundary: boundary, ReplayView: turnevent.ReplayView{Events: []turnevent.Envelope{}, LatestSequence: boundary.CoveredThroughSeq, NextAfterSequence: boundary.CoveredThroughSeq}}, nil
+		return TranscriptReplay{}, errors.New("transcript v2 requires Follow; legacy replay is unavailable")
 	}
 	c.turnEvents.commitMu.Lock()
 	defer c.turnEvents.commitMu.Unlock()

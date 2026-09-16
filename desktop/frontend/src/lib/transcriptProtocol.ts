@@ -67,6 +67,8 @@ export interface TranscriptReplayRequest { identity: TranscriptIdentity; after: 
 export interface TranscriptReplay extends TranscriptSnapshotBoundary, TurnEventReplayView {}
 
 export interface TranscriptProtocolBindings {
+  TranscriptFollowForTab(tabId: string, request: import("../generated/desktopContract.generated").FollowRequest): Promise<import("../generated/desktopContract.generated").TranscriptFollowResponse>;
+  RemoteTranscriptFollowForTab(tabId: string, request: import("../generated/desktopContract.generated").FollowRequest): Promise<import("../generated/desktopContract.generated").TranscriptFollowResponse>;
   TranscriptSnapshotForTab?(tabId: string, request: TranscriptPageRequest): Promise<TranscriptSnapshot>;
   TranscriptPageForTab?(tabId: string, request: TranscriptPageRequest): Promise<TranscriptSnapshot>;
   TranscriptContentForTab?(tabId: string, request: TranscriptContentRef & { offset: number }): Promise<TranscriptContentChunk>;
@@ -80,4 +82,10 @@ export interface TranscriptProtocolBindings {
   RemoteTranscriptReplayForTab?(tabId: string, request: TranscriptReplayRequest): Promise<TranscriptReplay>;
   ResumeTranscriptSessionForTab?(tabID: string, path: string): Promise<HistorySwitchPhases | void>;
   OpenChannelTranscriptSessionForTab?(tabID: string, path: string): Promise<HistorySwitchPhases | void>;
+}
+
+export interface TranscriptTurnMetadata {
+  samplingCount?: number;
+  toolCount?: number;
+  turnFinal?: boolean;
 }

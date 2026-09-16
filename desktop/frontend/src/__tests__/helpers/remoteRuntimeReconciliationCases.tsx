@@ -15,8 +15,8 @@ export async function runRemoteRuntimeCases({ commands, emitRemote: __emitMockRe
   flush: () => Promise<void>;
   setSnapshotHistory: (history: unknown[]) => void;
 }) {
-  // A lost turn_done must settle the actual shared Transcript from runtime
-  // evidence, while a late history response must not erase the next turn.
+  // Only the ordered Follow stream settles transcript activity. Ancillary
+  // status cannot replace its content or settle a newer turn.
   const { runtimeStateStore } = await import("../../lib/runtimeStateStore");
   let runtimeProbe: RemoteSessionApi;
   function RuntimeProbe() {
@@ -43,7 +43,7 @@ export async function runRemoteRuntimeCases({ commands, emitRemote: __emitMockRe
   }
   await act(async () => {
     __emitMockRemoteTab("tab-runtime", "event", { kind: "turn_started", turnId: "lost-turn" });
-    __emitMockRemoteTab("tab-runtime", "event", { kind: "text", text: "partial runtime answer" });
+    __emitMockRemoteTab("tab-runtime", "event", { kind: "text", messageId: "runtime-answer", text: "partial runtime answer" });
     await flush();
   });
   const beforeRuntimeHistory = tape.filter(entry => entry === "snapshot:tab-runtime").length;
@@ -60,51 +60,34 @@ export async function runRemoteRuntimeCases({ commands, emitRemote: __emitMockRe
     await flush();
   });
   ok(runtimeProbe!.transcript.retry !== undefined, "lost-completion fixture includes an active retry");
-  setSnapshotHistory([{ role: "assistant", content: "complete durable runtime answer" }]);
+  setSnapshotHistory([{ role: "assistant", content: "obsolete metadata history" }]);
   await publishRuntime("idle");
-  await act(async () => flush());
-  ok(!runtimeProbe!.running && !runtimeProbe!.transcript.running && !runtimeProbe!.transcript.turnActive
-    && runtimeProbe!.transcript.live === undefined && runtimeProbe!.transcript.retry === undefined,
-    "trusted idle settles transcript, live stream, and turn activity together");
-  ok(runtimeNode.textContent?.includes("complete durable runtime answer") === true
-    && !runtimeNode.querySelector('[data-transcript-block-phase="active"]'),
-    "lost completion restores durable content and removes the actual active DOM state");
-  await publishRuntime("idle");
-  ok(tape.filter(entry => entry === "snapshot:tab-runtime").length === beforeRuntimeHistory + 1,
-    "ordinary idle revisions do not repeatedly reload history");
-  await act(async () => { await runtimeProbe!.submit("next optimistic turn"); await flush(); });
-  await publishRuntime("idle");
-  ok(runtimeProbe!.transcript.running, "a newer idle revision of the old turn cannot settle an optimistic submission");
+  ok(runtimeProbe!.transcript.running && runtimeProbe!.transcript.live?.text === "partial runtime answer",
+    "ancillary idle cannot settle or erase an active Follow stream");
+  ok(tape.filter(entry => entry === "snapshot:tab-runtime").length === beforeRuntimeHistory,
+    "runtime metadata never initiates a completion history rebase");
+  await act(async () => {
+    __emitMockRemoteTab("tab-runtime", "event", { kind: "message", messageId: "runtime-answer", text: "complete durable runtime answer" });
+    __emitMockRemoteTab("tab-runtime", "event", { kind: "turn_done", turnId: "lost-turn" });
+    await flush();
+  });
+  ok(!runtimeProbe!.transcript.running && !runtimeProbe!.transcript.turnActive && runtimeProbe!.transcript.retry === undefined,
+    "Follow completion settles activity and retry together");
+  ok(runtimeNode.textContent?.includes("complete durable runtime answer") === true,
+    "committed final content remains visible after Follow completion");
   await act(async () => {
     __emitMockRemoteTab("tab-runtime", "event", { kind: "turn_started", turnId: "next-turn" });
     __emitMockRemoteTab("tab-runtime", "event", { kind: "text", text: "next live answer" });
     await flush();
   });
-  await publishRuntime("idle");
-  ok(runtimeProbe!.transcript.running, "old idle remains fenced after the next turn_started");
-  const originalSnapshot = commands.RemoteTabSnapshot;
-  let releaseRuntimeHistory: ((value: Awaited<ReturnType<AppBindings["RemoteTabSnapshot"]>>) => void) | undefined;
-  commands.RemoteTabSnapshot = async () => new Promise(resolve => { releaseRuntimeHistory = resolve; });
-  await publishRuntime("idle", "next-turn");
-  await act(async () => {
-    __emitMockRemoteTab("tab-runtime", "event", { kind: "turn_started", turnId: "third-turn" });
-    __emitMockRemoteTab("tab-runtime", "event", { kind: "text", text: "third live answer" });
-    await flush();
-    releaseRuntimeHistory?.({ history: [{ role: "assistant", content: "obsolete history" }] });
-    await flush();
-  });
-  ok(runtimeProbe!.transcript.running && runtimeProbe!.transcript.live?.text === "third live answer"
-    && !runtimeProbe!.transcript.items.some(item => item.kind === "assistant" && item.text === "obsolete history"),
-    "history reconciliation cannot replace a newer streaming turn");
-  await publishRuntime("idle", "third-turn");
-  await act(async () => {
-    __emitMockRemoteTab("tab-runtime", "event", { kind: "usage", turnId: "third-turn", usage: { promptTokens: 12, completionTokens: 3 } });
-    releaseRuntimeHistory?.({ history: [{ role: "assistant", content: "third durable answer" }] });
-    await flush();
-  });
-  ok(runtimeProbe!.transcript.items.some(item => item.kind === "assistant" && item.text === "third durable answer"),
-    "late telemetry from the settled turn does not discard durable history");
-  commands.RemoteTabSnapshot = originalSnapshot;
+  await publishRuntime("idle", "lost-turn");
+  ok(runtimeProbe!.transcript.running && runtimeProbe!.transcript.live?.text === "next live answer",
+    "old idle cannot settle the next Follow turn");
+  const beforeStatus = tape.filter(entry => entry === "snapshot:tab-runtime").length;
+  await act(async () => { await commands.RemoteTabStatus("tab-runtime"); await flush(); });
+  ok(tape.filter(entry => entry === "snapshot:tab-runtime").length === beforeStatus
+    && !runtimeNode.textContent?.includes("obsolete metadata history"),
+    "late status cannot replace the transcript with unrelated history");
   await act(async () => runtimeRoot.unmount());
   runtimeNode.remove();
 }

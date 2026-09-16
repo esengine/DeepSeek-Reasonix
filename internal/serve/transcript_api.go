@@ -15,6 +15,7 @@ import (
 )
 
 func (s *Server) registerTranscriptRoutes(mux *http.ServeMux) {
+	mux.HandleFunc("GET /transcript/follow", s.transcriptFollow)
 	mux.HandleFunc("GET /transcript/snapshot", s.transcriptSnapshot)
 	mux.HandleFunc("GET /transcript/page", s.transcriptSnapshot)
 	mux.HandleFunc("GET /transcript/content", s.transcriptContent)
@@ -274,21 +275,30 @@ func (s *Server) transcriptRead(w http.ResponseWriter, r *http.Request, read fun
 // silently answered with an empty page.
 func (s *Server) transcriptBoundRead(w http.ResponseWriter, r *http.Request, read func(control.SessionAPI) (any, error)) {
 	s.bindMu.Lock()
-	defer s.bindMu.Unlock()
 	ctrl := s.ctl()
 	path := agent.CanonicalSessionPath(ctrl.SessionPath())
 	if raw := r.URL.Query().Get("session"); raw != "" {
 		requested, err := s.resolveSessionPath(raw)
 		if err != nil || agent.CanonicalSessionPath(requested) != path {
+			s.bindMu.Unlock()
 			http.Error(w, "transcript session is not bound to this runtime", http.StatusConflict)
 			return
 		}
 	}
 	if s.sessionMirrored(path) {
+		s.bindMu.Unlock()
 		http.Error(w, "transcript projection is unavailable", http.StatusNotImplemented)
 		return
 	}
+	s.bindMu.Unlock()
 	value, err := read(ctrl)
+	s.bindMu.Lock()
+	current := s.ctl() == ctrl && agent.CanonicalSessionPath(ctrl.SessionPath()) == path
+	s.bindMu.Unlock()
+	if !current {
+		http.Error(w, "transcript runtime changed during read", http.StatusConflict)
+		return
+	}
 	if errors.Is(err, errTranscriptCapabilityMissing) {
 		http.Error(w, "transcript projection is unavailable", http.StatusNotImplemented)
 		return
@@ -300,6 +310,20 @@ func (s *Server) transcriptBoundRead(w http.ResponseWriter, r *http.Request, rea
 	w.Header().Set("Cache-Control", "no-store")
 	w.Header().Set("Content-Type", "application/json")
 	_ = json.NewEncoder(w).Encode(value)
+}
+
+func (s *Server) transcriptFollow(w http.ResponseWriter, r *http.Request) {
+	var req transcript.FollowRequest
+	if !transcriptRequest(w, r, &req) {
+		return
+	}
+	s.transcriptBoundRead(w, r, func(ctrl control.SessionAPI) (any, error) {
+		api, ok := ctrl.(control.TranscriptFollowAPI)
+		if !ok {
+			return nil, errTranscriptCapabilityMissing
+		}
+		return api.TranscriptFollow(r.Context(), req)
+	})
 }
 
 func transcriptRequest(w http.ResponseWriter, r *http.Request, dst any) bool {

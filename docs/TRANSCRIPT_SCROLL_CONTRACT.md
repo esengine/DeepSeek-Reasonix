@@ -83,8 +83,8 @@ History is a bounded window, not an ever-growing list.
 - History reads route by the tab's **binding identity**, resolved before the
   request from the tab metadata the controller already loads. A failed local
   call must never be answered by a remote service holding a different session.
-- A remote service that never negotiated `history-window-v1` answers with the
-  typed `unsupported` status and keeps its bounded protocol-7 pages. Permission,
+- Chat requires negotiated `transcript-v2` on Desktop and Serve. An older
+  service receives an upgrade error, without legacy chat fallback. Permission,
   corruption and network errors do not trigger a protocol downgrade.
 
 ## Generation fence

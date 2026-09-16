@@ -76,17 +76,19 @@ export function transcriptPageState(state: State, page: TranscriptSnapshot, conv
 
 /** One reducer transaction installs rows, runtime and the active attempt.
  * The event projector advances coverage only after this function commits. */
-export function transcriptSnapshotState(state: State, snapshot: TranscriptSnapshot, convert: Convert, applyEvent: ApplyEvent, clock: number): State {
+export function transcriptSnapshotState(state: State, snapshot: TranscriptSnapshot, convert: Convert, applyEvent: ApplyEvent, clock: number, projectedItems?: Item[]): State {
   const records = snapshotRecords(snapshot);
   const messages = records.map((record) => ({ ...record.message, recordId: record.id }));
-  const converted = convert(messages, "snapshot:");
-  const order = recordItemOrder(records, convert);
+  const converted = projectedItems ? { items: projectedItems, seq: state.seq } : convert(messages, "snapshot:");
+  const order = projectedItems ? Object.fromEntries(projectedItems.map((item, index) => [item.id, index])) : recordItemOrder(records, convert);
   const users = state.items.filter((item): item is Extract<Item, { kind: "user" }> => item.kind === "user");
   const items = converted.items.map((item) => {
     if (item.kind !== "user") return item;
     const mounted = matchingSnapshotItem(users, item);
     if (mounted && mounted.id !== item.id) { order[mounted.id] = order[item.id]; delete order[item.id]; }
-    return mounted ? { ...item, id: mounted.id } : item;
+    if (!mounted) return item;
+    const next = { ...item, id: mounted.id };
+    return Object.entries(next).every(([key, value]) => (mounted as unknown as Record<string, unknown>)[key] === value) ? mounted : next;
   });
   const represented = new Set(messages.map((message) => message.submissionId).filter(Boolean));
   if (snapshot.runtime.submissionId) represented.add(snapshot.runtime.submissionId);
@@ -101,7 +103,9 @@ export function transcriptSnapshotState(state: State, snapshot: TranscriptSnapsh
     assistantSegmentOrdinal: active ? 1 : 0,
     turnStartAt: snapshot.runtime.startedAt ?? (state.activeTurnId === snapshot.runtime.turnId ? state.turnStartAt : 0),
     resolvedPromptId: undefined,
-    items: [...items, ...optimistic],
+    items: [...items, ...optimistic, ...users.filter(user => user.failed && !items.some(item => item.id === user.id)),
+      ...state.items.filter(item => item.kind === "notice" && item.local)],
+    offscreenItems: undefined,
     seq: Math.max(state.seq, converted.seq),
     running: active || optimistic.length > 0,
     turnActive: active,

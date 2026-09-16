@@ -38,12 +38,14 @@ const (
 // the anchor the page covers ("older" ends at the anchor, "newer" starts at
 // it). Cursor anchors ignore MessageID/Turn.
 type HistoryWindowRequest struct {
-	Anchor    string `json:"anchor"`              // newest | message | turn | cursor
-	MessageID string `json:"messageId,omitempty"` // anchor=message
-	Turn      int    `json:"turn,omitempty"`      // anchor=turn
-	Cursor    string `json:"cursor,omitempty"`    // anchor=cursor
-	Direction string `json:"direction,omitempty"` // older (default) | newer
-	Limit     int    `json:"limit,omitempty"`
+	Generation       string  `json:"generation,omitempty"`
+	SnapshotSequence *uint64 `json:"snapshotSequence,omitempty"`
+	Anchor           string  `json:"anchor"`              // newest | message | turn | cursor
+	MessageID        string  `json:"messageId,omitempty"` // anchor=message
+	Turn             int     `json:"turn,omitempty"`      // anchor=turn
+	Cursor           string  `json:"cursor,omitempty"`    // anchor=cursor
+	Direction        string  `json:"direction,omitempty"` // older (default) | newer
+	Limit            int     `json:"limit,omitempty"`
 }
 
 // HistoryWindowPage is one bounded window of a fixed durable snapshot plus
@@ -159,6 +161,10 @@ func (q *Query) ReadHistoryWindow(ctx context.Context, ref SessionRef, req Histo
 		AnchorMessageID:  req.MessageID,
 		AnchorTurn:       req.Turn,
 	}
+	if req.Generation != "" && req.Generation != metadata.generation {
+		page.Status = "stale_cursor"
+		return page, nil
+	}
 	page, boundary, direction, err := resolveWindowAnchor(ctx, handle.DB, ref, req, anchor, metadata, page)
 	if err != nil || page.Status != "" {
 		// A typed status is the whole answer: stale_cursor and not_found are
@@ -168,6 +174,24 @@ func (q *Query) ReadHistoryWindow(ctx context.Context, ref SessionRef, req Histo
 	result, err := q.readHistoryWindowPage(ctx, handle.DB, filesystem, ref, metadata, page.SnapshotSequence, boundary, direction, req.Limit)
 	if err != nil {
 		return HistoryWindowPage{}, err
+	}
+	for i := range result.Messages {
+		message := &result.Messages[i]
+		var duration int64
+		var turnID string
+		err := handle.DB.QueryRowContext(ctx, `SELECT MAX(0,ended_at-started_at),turn_id FROM turn_summaries WHERE final_message_id=? AND end_sequence>0 AND end_sequence<=? AND start_sequence<=? LIMIT 1`, message.MessageID, result.SnapshotSequence, message.EventSequence).Scan(&duration, &turnID)
+		if err == nil {
+			message.TurnFinal, message.TurnDurationMs = true, duration
+			var samples, tools int
+			if err := handle.DB.QueryRowContext(ctx, `SELECT COUNT(CASE WHEN kind='assistant/attempt' THEN 1 END),COUNT(CASE WHEN kind='tool/call' THEN 1 END) FROM turn_counts WHERE turn_id=? AND sequence<=?`, turnID, result.SnapshotSequence).Scan(&samples, &tools); err != nil {
+				return HistoryWindowPage{}, err
+			}
+			if samples > 0 || tools > 0 {
+				message.SamplingCount, message.ToolCount = &samples, &tools
+			}
+		} else if !errors.Is(err, sql.ErrNoRows) {
+			return HistoryWindowPage{}, err
+		}
 	}
 	return attachWindowAnchor(result, page), nil
 }
@@ -188,8 +212,16 @@ func resolveWindowAnchor(
 	// Newest pages have no boundary above them; the read walks down from the end.
 	boundary := int64(^uint64(0) >> 1)
 	direction := req.Direction
+	cut := metadata.durableSequence
+	if req.SnapshotSequence != nil {
+		if *req.SnapshotSequence > cut {
+			page.Status = "stale_cursor"
+			return page, boundary, direction, nil
+		}
+		cut = *req.SnapshotSequence
+	}
 	if anchor == "newest" {
-		page.SnapshotSequence = metadata.durableSequence
+		page.SnapshotSequence = cut
 		return page, boundary, direction, nil
 	}
 	if anchor == "cursor" {
@@ -218,7 +250,7 @@ func resolveWindowAnchor(
 		page.SnapshotSequence = parsed.SnapshotSequence
 		return page, parsed.Boundary, parsed.Direction, nil
 	}
-	page.SnapshotSequence = metadata.durableSequence
+	page.SnapshotSequence = cut
 	var anchorPos int64
 	var err error
 	if anchor == "message" {

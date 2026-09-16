@@ -45,6 +45,7 @@ export async function verifyStaleHistoryFingerprint({
       { revision: 1, digest: "digest-l-v1" },
     ),
     hasOlder: true,
+    stale: true,
     nextCursor: btoa(JSON.stringify({ v: 1, before: 2 })),
   });
   await act(async () => {
@@ -54,7 +55,7 @@ export async function verifyStaleHistoryFingerprint({
   const state = getState();
   equal(state?.items.some((item) => item.kind === "user" && item.text === "stale older L") ?? false, false, "stale older page is discarded after session fingerprint changes");
   equal(state?.historyOlderLoading, false, "stale older page releases its loading state");
-  equal(state?.historyOlderError, "history identity changed", "stale older page enters the explicit retry state instead of silently auto-retrying");
+  equal(state?.historyOlderError, "history snapshot expired", "stale older page enters the explicit retry state instead of silently auto-retrying");
 }
 
 export async function verifyDeferredHistoryCloseRace({

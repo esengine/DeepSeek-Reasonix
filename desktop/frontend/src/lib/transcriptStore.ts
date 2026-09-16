@@ -1,12 +1,12 @@
+import type { HistoryPreparationWait } from "./historyPreparation";
 // Bounded transcript records with stable ids, lazy content, generation-aware paging, and weighted LRU eviction.
 import { asArray } from "./array";
 import { canonicalHistoryContent, canonicalHistorySlice, resolvedHistoryField } from "./canonicalTranscriptBackend";
-import type { HistoryPreparationWait } from "./historyPreparation";
 import { fetchPreparedHistorySlice } from "./transcriptHistoryFetch";
 import { registerTranscriptCacheDiagnostics } from "./sessionDiagnostics";
 import { TranscriptMarkdownCache, type ParsedMarkdownValue } from "./transcriptMarkdownCache";
 export type { ParsedMarkdownValue } from "./transcriptMarkdownCache";
-import type { Item } from "./useController";
+import type { Item, State } from "./useController";
 import { resolveTranscriptEntryAlias, TranscriptContentResolverRegistry } from "./transcriptContentResolver";
 import { applyResolvedField, convertRecord, entryToRecord, itemIdForToolCall, type RecordConversion, type TranscriptRecord } from "./transcriptRecordProjection";
 import { recordBytes } from "./transcriptRecordBytes";
@@ -14,123 +14,13 @@ import { appendLivePageEntries, type TranscriptWindowPage } from "./transcriptLi
 import { RESOURCE_BUDGETS } from "./resourceBudgets";
 import { fileDiffFromWire } from "./tools";
 import type {
-  HistoryContentChunk,
-  HistoryContentRef,
   HistoryEntry,
   HistorySlice,
   HistorySliceRequest,
 } from "./types";
 
-export interface TranscriptBackend {
-  HistorySliceForTab(tabID: string, req: HistorySliceRequest): Promise<HistorySlice>;
-  HistoryContentForTab(tabID: string, ref: HistoryContentRef, chunkIndex: number): Promise<HistoryContentChunk>;
-}
-
-export interface TranscriptStoreOptions {
-  /** Injectable preparation scheduler for deterministic lifecycle tests. */
-  preparationWait?: HistoryPreparationWait;
-  /** Resident sessions with records (unpinned). Default 3. */
-  maxResidentSessions?: number;
-  /** Total inline history body bytes across resident sessions. Default 32MiB. */
-  historyBodyBudgetBytes?: number;
-  /** Parsed-markdown cache budget. Default 16MiB. */
-  markdownBudgetBytes?: number;
-  /** Adjacent history pages retained per session, newest-side included. */
-  windowMaxPages?: number;
-  /** Entries grouped into one live-tail page before it becomes reclaimable. */
-  windowPageEntries?: number;
-}
-
-type HistoryReadOptions = { turns?: number; entries?: number; bytes?: number; current?: () => boolean };
-
-export interface TranscriptProjection {
-  items: Item[];
-  startTurn: number;
-  endTurn: number;
-  totalTurns: number;
-  hasOlder: boolean;
-  /** More history exists past the newer edge of the resident window. */
-  hasNewer: boolean;
-  revision: number;
-  revisionKnown: boolean;
-  digest: string;
-}
-
-export interface LoadOlderResult extends TranscriptProjection {
-  /** "prepend": page older items; "reload": cursor went stale, full latest replace. */
-  kind: "prepend" | "reload";
-  /** Items contributed by the older page (kind === "prepend"). */
-  prependItems: Item[];
-  /**
-   * Ids the caller must drop: items superseded by cross-page tool merges, plus
-   * every item on a page reclaimed to keep the window at its page budget.
-   */
-  removeIds: string[];
-}
-
-export interface LoadNewerResult extends TranscriptProjection {
-  /** "append": page newer items; "stale": the window predates a rebuild. */
-  kind: "append" | "stale";
-  /** Items contributed by the newer page (kind === "append"). */
-  appendItems: Item[];
-  /** Ids reclaimed from the older edge to keep the window bounded. */
-  removeIds: string[];
-}
-
-export interface AppendEntriesResult extends TranscriptProjection {
-  /** Ids reclaimed from the caller's mounted projection. */
-  removeIds: string[];
-}
-
-export interface TranscriptContentChange {
-  tabId: string;
-  /** Re-converted items keyed by their stable item id. */
-  patches: Record<string, Item>;
-}
-
-interface SessionTranscript {
-  key: string;
-  tabId: string;
-  sessionPath: string;
-  records: TranscriptRecord[];
-  byId: Map<string, TranscriptRecord>;
-  /** toolCallId -> result record entryId (first record wins, like resultByID). */
-  toolResultOwners: Map<string, string>;
-  /** entryId -> projected items of that record ([] when consumed). */
-  contributions: Map<string, Item[]>;
-  /** Result record entryIds folded into a call's tool item. */
-  consumed: Set<string>;
-  /** result entryId -> claimer (assistant) entryId. */
-  consumedBy: Map<string, string>;
-  /** toolCallId -> assistant record entryId whose call still lacks a result. */
-  unresolvedCalls: Map<string, string>;
-  /** assistant entryId -> unmatched positional call indexes. */
-  pendingPositional: Map<string, number[]>;
-  /** assistant entryId -> callIndex -> result entryId (for re-conversion). */
-  matchTables: Map<string, Map<number, string>>;
-  itemsCache: Item[] | null;
-  nextCursor: string;
-  hasOlder: boolean;
-  /** Resident window pages, oldest first. Empty until a page is loaded. */
-  pages: TranscriptWindowPage[];
-  /** Cursor fetching the page immediately newer than the resident window. */
-  newerCursor: string;
-  hasNewer: boolean;
-  /** Pages reclaimed from each end; diagnostics only. */
-  reclaimedOlder: number;
-  reclaimedNewer: number;
-  totalTurns: number;
-  startTurn: number;
-  endTurn: number;
-  revision: number;
-  revisionKnown: boolean;
-  digest: string;
-  generation: number;
-  bodyBytes: number;
-  olderInFlight: boolean;
-  newerInFlight: boolean;
-  pendingContent: Map<string, { generation: number; promise: Promise<string | undefined> }>;
-}
+import type { TranscriptBackend, TranscriptStoreOptions, TranscriptProjection, LoadOlderResult, LoadNewerResult, AppendEntriesResult, TranscriptContentChange, SessionTranscript, HistoryReadOptions } from "./transcriptStoreTypes";
+export type { TranscriptBackend, TranscriptStoreOptions, TranscriptProjection, LoadOlderResult, LoadNewerResult, AppendEntriesResult, TranscriptContentChange, SessionTranscript, HistoryReadOptions } from "./transcriptStoreTypes";
 
 const DEFAULT_MAX_RESIDENT_SESSIONS = 3;
 const DEFAULT_HISTORY_BODY_BUDGET = RESOURCE_BUDGETS.historyBodyBytes;
@@ -154,6 +44,52 @@ function compareRecords(a: Pick<TranscriptRecord, "order" | "entryId">, b: Pick<
 }
 
 export class TranscriptStore {
+  readonly states = new Map<string, State>();
+  private readonly stateListeners = new Map<string, Set<() => void>>();
+
+  subscribeState(tabId: string, listener: () => void): () => void {
+    let listeners = this.stateListeners.get(tabId);
+    if (!listeners) this.stateListeners.set(tabId, listeners = new Set());
+    listeners.add(listener);
+    return () => { listeners.delete(listener); if (!listeners.size) this.stateListeners.delete(tabId); };
+  }
+
+  setState(tabId: string, state: State): void {
+    if (this.states.get(tabId) === state) return;
+    this.states.set(tabId, state);
+    for (const listener of this.stateListeners.get(tabId) ?? []) listener();
+  }
+
+  /** Install the page that belongs to a Follow cut, without another read. */
+  installSlice(tabId: string, sessionPath: string, slice: HistorySlice): TranscriptProjection {
+    const key = sessionKeyFor(tabId, sessionPath);
+    const session = this.sessions.get(key) ?? this.newSession(key, tabId, sessionPath);
+    session.generation++;
+    session.canonicalV2 = true;
+    session.latestSequence = slice.revision;
+    this.sessions.set(key, session);
+    const entries = asArray<HistoryEntry>(slice.entries);
+    this.replaceRecords(session, entries);
+    session.pages = [];
+    appendLivePageEntries(session.pages, entries.map(entry => entry.entryId), this.windowPageEntries);
+    if (session.pages.length) {
+      session.pages[0].olderCursor = slice.nextCursor ?? "";
+      session.pages[session.pages.length - 1].newerCursor = slice.newerCursor ?? "";
+    }
+    session.nextCursor = slice.nextCursor ?? "";
+    session.newerCursor = slice.newerCursor ?? "";
+    session.hasOlder = Boolean(slice.hasOlder);
+    session.hasNewer = Boolean(slice.hasNewer);
+    session.totalTurns = slice.totalTurns ?? 0;
+    session.startTurn = slice.startTurn ?? 0;
+    session.endTurn = slice.endTurn ?? 0;
+    session.revision = slice.revision ?? 0;
+    session.revisionKnown = true;
+    session.digest = slice.digest ?? "";
+    this.touch(session);
+    this.enforceBudgets();
+    return this.projectionOf(session);
+  }
   private readonly contentResolvers = new TranscriptContentResolverRegistry();
   registerContentResolver(tabId: string, resolve: (entryId: string, field: string) => Promise<string | undefined>, enabled: () => boolean = () => true): () => void {
     return this.contentResolvers.register(tabId, resolve, enabled);
@@ -508,6 +444,31 @@ export class TranscriptStore {
     return this.sessions.get(session.key) === session ? { ...this.projectionOf(session), removeIds } : undefined;
   }
 
+  upsertEntries(tabId: string, sessionPath: string, entries: HistoryEntry[], commitSeq?: number): AppendEntriesResult | undefined {
+    const session = this.sessions.get(sessionKeyFor(tabId, sessionPath));
+    if (!session) return undefined;
+    session.latestSequence = Math.max(session.latestSequence ?? session.revision, commitSeq ?? 0);
+    // The reader owns a contiguous window. A remote tail must not evict it or
+    // create a false adjacency across an unloaded range. Accepted records stay
+    // reachable through canonical pagination; active prefixes live in State.
+    if (session.hasNewer) entries = entries.filter(entry => session.byId.has(entry.entryId));
+    const fresh = entries.filter(entry => !session.byId.has(entry.entryId));
+    const replacements = new Map(entries.map(entry => [entry.entryId, entry]));
+    const combined = session.records.map(record => replacements.get(record.entryId) ?? {
+      entryId: record.entryId, turn: record.turn, order: record.order, message: record.message, refs: record.refs,
+    });
+    combined.push(...fresh);
+    this.replaceRecords(session, combined);
+    appendLivePageEntries(session.pages, fresh.map(entry => entry.entryId), this.windowPageEntries);
+    const removeIds = this.trimWindow(session, "newer");
+    this.enforceBudgets();
+    return { ...this.projectionOf(session), removeIds };
+  }
+
+  isReadingHistory(tabId: string, sessionPath: string): boolean {
+    return Boolean(this.sessions.get(sessionKeyFor(tabId, sessionPath))?.hasNewer);
+  }
+
   /** Append newer entries (live tail / fresh suffix). */
   private appendRecords(session: SessionTranscript, entries: HistoryEntry[]): Item[] {
     const fresh: TranscriptRecord[] = [];
@@ -624,12 +585,14 @@ export class TranscriptStore {
       session.pages.shift();
       // The reclaimed page's own older cursor is now the window's head, so the
       // reader can page straight back into the range that was just dropped.
-      session.nextCursor = page.olderCursor;
+      const anchor = [...session.records].reverse().find(record => dropped.has(record.entryId) && record.message.messageId);
+      session.nextCursor = session.pages[0]?.olderCursor || (anchor ? `reasonix:message:${encodeURIComponent(anchor.message.messageId!)}:${session.latestSequence ?? session.revision}:${encodeURIComponent(session.digest)}:older` : page.olderCursor);
       session.hasOlder = true;
       session.reclaimedOlder += 1;
     } else {
       session.pages.pop();
-      session.newerCursor = page.newerCursor;
+      const anchor = session.records.find(record => dropped.has(record.entryId) && record.message.messageId);
+      session.newerCursor = session.pages[session.pages.length - 1]?.newerCursor || (anchor ? `reasonix:message:${encodeURIComponent(anchor.message.messageId!)}:${session.latestSequence ?? session.revision}:${encodeURIComponent(session.digest)}:newer` : page.newerCursor);
       session.hasNewer = true;
       session.reclaimedNewer += 1;
     }
@@ -741,6 +704,7 @@ export class TranscriptStore {
       const slice = await this.fetchSlice(tabId, { cursor: session.nextCursor, ...budget }, () => this.sessions.get(key) === session && session.generation === generation && (options.current?.() ?? true));
       if (!slice || this.sessions.get(key) !== session || session.generation !== generation) return undefined;
       if (slice.stale) {
+        if (session.canonicalV2) throw new Error("history snapshot expired");
         const projection = await this.loadLatest(tabId, sessionPath, options);
         return projection ? { ...projection, kind: "reload", prependItems: [], removeIds: [] } : undefined;
       }
@@ -759,6 +723,7 @@ export class TranscriptStore {
         return { ...this.projectionOf(session), kind: "reload", prependItems: [], removeIds: [] };
       }
       if (!this.sameFingerprint(session, slice)) {
+        if (session.canonicalV2) throw new Error("history identity changed");
         // A backend that raced a rewrite may return a fresh page instead of a
         // stale marker. Never prepend rows from a different canonical state.
         const projection = await this.loadLatest(tabId, sessionPath, options);
@@ -817,6 +782,13 @@ export class TranscriptStore {
       session.pages.push(this.pageFor(pageEntries, slice.nextCursor ?? "", slice.newerCursor ?? ""));
       session.newerCursor = slice.newerCursor ?? "";
       session.hasNewer = Boolean(slice.hasNewer) || session.newerCursor !== "";
+      if (!session.hasNewer && (session.latestSequence ?? 0) > slice.revision && pageEntries.length) {
+        const last = pageEntries[pageEntries.length - 1];
+        if (last.message.messageId) {
+          session.newerCursor = `reasonix:message:${encodeURIComponent(last.message.messageId)}:${session.latestSequence}:${encodeURIComponent(session.digest)}:newer`;
+          session.hasNewer = true;
+        }
+      }
       session.endTurn = slice.endTurn ?? session.endTurn;
       session.totalTurns = slice.totalTurns ?? session.totalTurns;
       const reclaimed = this.trimWindow(session, "newer");
@@ -843,6 +815,7 @@ export class TranscriptStore {
   }
 
   private sameFingerprint(session: SessionTranscript, slice: HistorySlice): boolean {
+    if (session.canonicalV2 && session.digest !== "") return session.digest === (slice.digest ?? "");
     return session.revision === (slice.revision ?? 0) &&
       session.revisionKnown === sliceRevisionKnown(slice) &&
       session.digest === (slice.digest ?? "");

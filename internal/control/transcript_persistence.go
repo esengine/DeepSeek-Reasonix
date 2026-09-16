@@ -9,6 +9,9 @@ import (
 )
 
 func (c *Controller) captureTranscriptCheckpoint(ledger *turnevent.Ledger, digest string) {
+	if c.sessionEngineEnabled() {
+		return
+	}
 	if digest == "" {
 		digest, _ = agent.ContentDigestForMessages(c.History())
 	}
@@ -34,6 +37,9 @@ func (c *Controller) captureTranscriptCheckpoint(ledger *turnevent.Ledger, diges
 // A delayed retry cannot overwrite a newer successful checkpoint with an old
 // one. No controller or projection lock is held during disk I/O.
 func (c *Controller) persistTranscriptCheckpoint(ledger *turnevent.Ledger) error {
+	if c.sessionEngineEnabled() {
+		return nil
+	}
 	c.turnEvents.persistMu.Lock()
 	defer c.turnEvents.persistMu.Unlock()
 	c.turnEvents.mu.RLock()

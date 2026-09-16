@@ -88,9 +88,9 @@ export function convertRecord(
     const memoryCitations = asArray<MemoryCitation>(message.memoryCitations);
     items.push(...historySearchAndAnswer(id, {
       content: message.content, reasoning: message.reasoning, workDurationMs: message.workDurationMs,
-      turnDurationMs: message.turnDurationMs, turnUsage: message.turnUsage, createdAt: message.createdAt,
+      turnFinal: message.turnFinal, samplingCount: message.samplingCount, toolCount: message.toolCount, turnDurationMs: message.turnDurationMs, turnUsage: message.turnUsage, createdAt: message.createdAt,
       memoryCitations: memoryCitations.length > 0 ? memoryCitations : undefined, serverSearch: message.serverSearch,
-    }));
+    }, rec.refs.length > 0));
     const toolCalls = message.toolCalls ?? [];
     let scan = (view.indexOf.get(rec.entryId) ?? -1) + 1;
     for (let callIndex = 0; callIndex < toolCalls.length; callIndex += 1) {
@@ -160,7 +160,7 @@ export function applyResolvedField(rec: TranscriptRecord, ref: HistoryContentRef
     case "canonicalMessage": {
       const bytes = Uint8Array.from(data, character => character.charCodeAt(0));
       const decoded = canonicalMessage(
-        { messageId: rec.entryId, position: rec.turn, version: 1, role: message.role, eventSequence: 0, visibleTurn: rec.turn },
+        { messageId: rec.entryId, position: rec.turn, version: 1, role: message.role, eventSequence: 0, visibleTurn: rec.turn, turnFinal: message.turnFinal, turnDurationMs: message.turnDurationMs, samplingCount: message.samplingCount, toolCount: message.toolCount },
         JSON.parse(new TextDecoder().decode(bytes)),
       );
       rec.message = { ...message, ...decoded };

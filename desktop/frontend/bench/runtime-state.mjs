@@ -121,10 +121,8 @@ try {
   await publish("idle", {}, true);
   await page.locator(".composer-run-strip").waitFor({ state: "hidden" });
   check(await page.locator(".composer__btn--stop").count() === 0, "remote completion removes the run control");
-  await page.waitForFunction(() => !document.querySelector('.remote-surface .chat-running')
-    && !document.querySelector('.remote-surface .transcript')?.textContent?.includes("runtime missing completion fixture"));
-  check(await page.locator(".remote-surface").getByText("runtime missing completion fixture", { exact: true }).count() === 0,
-    "trusted idle without turn_done settles the real transcript and reconciles durable history");
+  check(await page.locator(".remote-surface").getByText("runtime missing completion fixture", { exact: true }).count() === 1,
+    "ancillary idle cannot erase output before transcript v2 confirms completion");
   await selectSession(page, "bench:geometry");
   await page.waitForFunction(() => document.querySelector(".transcript")?.textContent?.includes("Geometry contract fixture complete."));
   check(await page.locator(".remote-surface").count() === 0, "local switch retains ownership after remote runtime frames");

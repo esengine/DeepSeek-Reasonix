@@ -550,9 +550,9 @@ eq(controller?.state.approval?.id, "plan-live", "a snapshot fetched before the p
 eq(controller?.state.pendingPrompt, true, "the prompt gate survives the stale reconciliation");
 eq(controller?.state.running, true, "the tab stays blocked on the user after the stale reconciliation");
 
-// A snapshot fetched after the event still reconciles: if the backend truly
-// has no pending prompt anymore, the zombie prompt is cleared.
+// Only an ordered backend terminal event can release the prompt gate.
 await act(async () => {
+  desktopStub.emit("agent:event", { kind: "turn_done", tabId: "tab-a" });
   await controller?.syncActiveTab(false);
   await flushPromises();
 });
@@ -586,10 +586,9 @@ eq(controller?.state.running, false, "fresh idle snapshot releases the blocked s
     await flushPromises();
   });
   eq(controller?.state.approval?.id, "plan-zombie", "the stale idle snapshot is rejected, the prompt survives for now");
-  // The backend reports idle (the prompt was resolved); the scheduled fresh
-  // reconcile refetches that truth and clears the zombie, unlocking input.
+  // Metadata cannot clear a prompt. Its resolution arrives on Follow.
   await act(async () => {
-    await new Promise((resolvePromise) => setTimeout(resolvePromise, 300));
+    desktopStub.emit("agent:event", { kind: "turn_done", tabId: "tab-a" });
     await flushPromises();
   });
   eq(controller?.state.approval?.id, undefined, "the scheduled fresh reconcile clears the zombie the stale rejection preserved");

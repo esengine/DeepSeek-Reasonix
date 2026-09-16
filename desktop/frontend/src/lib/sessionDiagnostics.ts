@@ -224,6 +224,12 @@ export function noteResumeHistoryPage(
   resumeSnapshotMs = snapshotMs;
 }
 
+export function noteTranscriptFollowSwitch(phases: HistorySwitchPhases | void, metrics: { entries: number; inlineBytes: number }, durationMs: number, snapshotMs: number): void {
+  lastResumeHistory = { ...metrics, durationMs, stale: false, source: "transcript-v2" };
+  resumeSwitchPhases = phases ? { ...phases } : null;
+  resumeSnapshotMs = snapshotMs;
+}
+
 /** Durable reads a switch made beyond the one that produced its first screen. */
 export function resumeSwitchDashboard(): { phases: HistorySwitchPhases | null; duplicateLoadCount: number | null } {
   if (!resumeSwitchPhases) return { phases: null, duplicateLoadCount: null };

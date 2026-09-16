@@ -5,6 +5,9 @@
 import type { DictKey } from "./en";
 
 export const zh: Record<DictKey, string> = {
+  "chat.syncing": "正在同步会话…",
+  "chat.turnCounts": "采样 {samples} 次 · 工具 {tools} 次",
+  "chat.disconnected": "连接中断，任务状态等待同步确认。",
   "chat.turnNavigation.label": "对话轮次",
   "chat.turnNavigation.jump": "跳转到第 {turn} 轮",
   "chat.turnNavigation.retry": "重新载入对话轮次",

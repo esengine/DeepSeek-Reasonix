@@ -43,6 +43,16 @@ func (p *Projection) applyTerminalNotices(e event.Event) {
 			Content: "The interrupted task can continue from valid context.", ProtocolRecovery: e.ProtocolRecovery})
 	}
 	for _, row := range rows {
+		present := false
+		for _, existing := range p.buffer.messages {
+			if existing.message.TurnID == e.TurnID && existing.message.Code == row.Code && row.Code != "" {
+				present = true
+				break
+			}
+		}
+		if present {
+			continue
+		}
 		row.RecordID = fmt.Sprintf("terminal:%s:%s", e.TurnID, row.Code)
 		row.TurnID, row.Source = e.TurnID, e.Source
 		p.buffer.messages = append(p.buffer.messages, &bufferedMessage{message: row})

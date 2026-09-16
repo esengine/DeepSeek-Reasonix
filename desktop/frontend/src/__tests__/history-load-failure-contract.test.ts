@@ -18,7 +18,7 @@ assert.match(controller, /applyHydrateErrorState|hydratePlaceholderItems/, "hydr
 assert.match(readFileSync(join(root, "lib/hydrateErrorState.ts"), "utf8"), /keptItems/, "hydrateErrorState preserves items");
 assert.match(controller, /throw new Error\(t\("history\.failedLoadHistory"\)\)/, "listSessions does not swallow failures as empty");
 assert.match(controller, /retrySessionHistory/, "retry path is exported");
-assert.match(controller, /shouldPreferResidentHistory\(resetSurface, options\.preserveCachedHistory\)/, "retry hydrates fetch instead of serving the resident snapshot");
+assert.match(controller, /startTranscriptFollow/, "retry establishes an authoritative Follow snapshot");
 assert.match(
   controller,
   /loadSessionDataForTab\(tabId, false, "startup", \{ preserveCachedHistory: true \}\)/,

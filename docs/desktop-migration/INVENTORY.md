@@ -6,7 +6,7 @@ Every entry carries one class: `keep-business` keeps its Go implementation and c
 
 | Kind | keep-business | migrate-host | delete-shell | total |
 | --- | ---: | ---: | ---: | ---: |
-| command | 641 | 17 | 0 | 658 |
+| command | 643 | 17 | 0 | 660 |
 | native-call | 0 | 0 | 0 | 0 |
 | event | 16 | 0 | 0 | 16 |
 | frontend-native | 0 | 0 | 0 | 0 |
@@ -16,7 +16,7 @@ Every entry carries one class: `keep-business` keeps its Go implementation and c
 | shell-file | 1 | 39 | 4 | 44 |
 | artifact | 5 | 0 | 0 | 5 |
 | ci-job | 26 | 0 | 0 | 26 |
-| **all** | | | | **782** |
+| **all** | | | | **784** |
 
 ## Desktop commands (Go `App` methods bound to the UI)
 
@@ -293,7 +293,7 @@ Every entry carries one class: `keep-business` keeps its Go implementation and c
 | `NewSessionForTab` | `(tabID string) error` | desktop/session_new.go:16 | keep-business (保留业务实现) | hostrpc desktop/invoke |
 | `OpenChannelSessionForTab` | `(tabID string, path string) ([]HistoryMessage, error)` | desktop/app.go:3624 | keep-business (保留业务实现) | hostrpc desktop/invoke |
 | `OpenChannelSessionPageForTab` | `(tabID string, path string, limit int) (HistoryPage, error)` | desktop/app.go:3659 | keep-business (保留业务实现) | hostrpc desktop/invoke |
-| `OpenChannelTranscriptSessionForTab` | `(tabID string, path string) (HistorySwitchPhases, error)` | desktop/transcript_api.go:20 | keep-business (保留业务实现) | hostrpc desktop/invoke |
+| `OpenChannelTranscriptSessionForTab` | `(tabID string, path string) (HistorySwitchPhases, error)` | desktop/transcript_api.go:21 | keep-business (保留业务实现) | hostrpc desktop/invoke |
 | `OpenDownloadPage` | `()` | desktop/updater_app.go:126 | keep-business (保留业务实现) | hostrpc desktop/invoke |
 | `OpenGlobalTab` | `(topicID string) (TabMeta, error)` | desktop/tabs.go:2386 | keep-business (保留业务实现) | hostrpc desktop/invoke |
 | `OpenLocalPath` | `(path string) error` | desktop/open_local_path.go:141 | keep-business (保留业务实现) | hostrpc desktop/invoke |
@@ -366,26 +366,27 @@ Every entry carries one class: `keep-business` keeps its Go implementation and c
 | `RemoteForwards` | `(hostID string) ([]RemoteForwardView, error)` | desktop/remote_app.go:774 | keep-business (保留业务实现) | hostrpc desktop/invoke |
 | `RemoteHosts` | `() ([]RemoteHostView, error)` | desktop/remote_app.go:301 | keep-business (保留业务实现) | hostrpc desktop/invoke |
 | `RemoteLastWorkspace` | `(hostID string) string` | desktop/remote_prefs.go:262 | keep-business (保留业务实现) | hostrpc desktop/invoke |
-| `RemoteLocateSessionMessageForTab` | `(tabID string, messageID string, snapshot uint64) (session.MessageLocation, error)` | desktop/remote_transcript_api.go:354 | keep-business (保留业务实现) | hostrpc desktop/invoke |
+| `RemoteLocateSessionMessageForTab` | `(tabID string, messageID string, snapshot uint64) (session.MessageLocation, error)` | desktop/remote_transcript_api.go:389 | keep-business (保留业务实现) | hostrpc desktop/invoke |
 | `RemoteProjectSessions` | `(hostID string, workspace string) ([]RemoteSessionView, error)` | desktop/remote_listing.go:370 | keep-business (保留业务实现) | hostrpc desktop/invoke |
-| `RemoteSearchSessionHistoryForTab` | `(tabID string, textQuery string, cursor string, limit int) (session.SearchHistoryPage, error)` | desktop/remote_transcript_api.go:338 | keep-business (保留业务实现) | hostrpc desktop/invoke |
+| `RemoteSearchSessionHistoryForTab` | `(tabID string, textQuery string, cursor string, limit int) (session.SearchHistoryPage, error)` | desktop/remote_transcript_api.go:373 | keep-business (保留业务实现) | hostrpc desktop/invoke |
 | `RemoteServerLogs` | `(hostID string, workspace string, tailLines int) (string, error)` | desktop/remote_app.go:857 | keep-business (保留业务实现) | hostrpc desktop/invoke |
 | `RemoteServerStatus` | `(hostID string, workspace string) (RemoteServerView, error)` | desktop/remote_app.go:849 | keep-business (保留业务实现) | hostrpc desktop/invoke |
-| `RemoteSessionHistoryContentForTab` | `(tabID string, ref sessioncontent.Ref, offset int64) (SessionHistoryContentChunk, error)` | desktop/remote_transcript_api.go:252 | keep-business (保留业务实现) | hostrpc desktop/invoke |
-| `RemoteSessionHistoryPageForTab` | `(tabID string, cursor string, limit int) (session.MessageHistoryPage, error)` | desktop/remote_transcript_api.go:234 | keep-business (保留业务实现) | hostrpc desktop/invoke |
-| `RemoteSessionHistoryWindowForTab` | `(tabID string, req session.HistoryWindowRequest) (session.HistoryWindowPage, error)` | desktop/remote_transcript_api.go:277 | keep-business (保留业务实现) | hostrpc desktop/invoke |
-| `RemoteSessionMessageFieldForTab` | `(tabID string, messageID string, version int, field string, offset int64, length int64) (session.MessageFieldPage, error)` | desktop/remote_transcript_api.go:315 | keep-business (保留业务实现) | hostrpc desktop/invoke |
-| `RemoteSessionOpenForTab` | `(tabID string) (session.SessionOpenView, error)` | desktop/remote_transcript_api.go:218 | keep-business (保留业务实现) | hostrpc desktop/invoke |
+| `RemoteSessionHistoryContentForTab` | `(tabID string, ref sessioncontent.Ref, offset int64) (SessionHistoryContentChunk, error)` | desktop/remote_transcript_api.go:287 | keep-business (保留业务实现) | hostrpc desktop/invoke |
+| `RemoteSessionHistoryPageForTab` | `(tabID string, cursor string, limit int) (session.MessageHistoryPage, error)` | desktop/remote_transcript_api.go:269 | keep-business (保留业务实现) | hostrpc desktop/invoke |
+| `RemoteSessionHistoryWindowForTab` | `(tabID string, req session.HistoryWindowRequest) (session.HistoryWindowPage, error)` | desktop/remote_transcript_api.go:312 | keep-business (保留业务实现) | hostrpc desktop/invoke |
+| `RemoteSessionMessageFieldForTab` | `(tabID string, messageID string, version int, field string, offset int64, length int64) (session.MessageFieldPage, error)` | desktop/remote_transcript_api.go:350 | keep-business (保留业务实现) | hostrpc desktop/invoke |
+| `RemoteSessionOpenForTab` | `(tabID string) (session.SessionOpenView, error)` | desktop/remote_transcript_api.go:253 | keep-business (保留业务实现) | hostrpc desktop/invoke |
 | `RemoteTabBranches` | `(tabID string) (json.RawMessage, error)` | desktop/remote_tab_commands.go:529 | keep-business (保留业务实现) | hostrpc desktop/invoke |
 | `RemoteTabMetadata` | `(tabID string) (RemoteTabSnapshot, error)` | desktop/remote_tab_snapshot.go:78 | keep-business (保留业务实现) | hostrpc desktop/invoke |
 | `RemoteTabSkills` | `(tabID string) (json.RawMessage, error)` | desktop/remote_tab_commands.go:533 | keep-business (保留业务实现) | hostrpc desktop/invoke |
 | `RemoteTabSnapshot` | `(tabID string) (RemoteTabSnapshot, error)` | desktop/remote_tab_snapshot.go:73 | keep-business (保留业务实现) | hostrpc desktop/invoke |
 | `RemoteTabStatus` | `(tabID string) (json.RawMessage, error)` | desktop/remote_tab_snapshot.go:168 | keep-business (保留业务实现) | hostrpc desktop/invoke |
-| `RemoteTranscriptContentForTab` | `(tabID string, req transcript.ContentRequest) (transcript.ContentChunk, error)` | desktop/remote_transcript_api.go:133 | keep-business (保留业务实现) | hostrpc desktop/invoke |
-| `RemoteTranscriptOutlineForTab` | `(tabID string, req transcript.OutlineRequest) (transcript.OutlinePage, error)` | desktop/remote_transcript_api.go:117 | keep-business (保留业务实现) | hostrpc desktop/invoke |
-| `RemoteTranscriptPageForTab` | `(tabID string, req transcript.PageRequest) (transcript.Snapshot, error)` | desktop/remote_transcript_api.go:103 | keep-business (保留业务实现) | hostrpc desktop/invoke |
-| `RemoteTranscriptReplayForTab` | `(tabID string, req control.TranscriptReplayRequest) (control.TranscriptReplay, error)` | desktop/remote_transcript_api.go:142 | keep-business (保留业务实现) | hostrpc desktop/invoke |
-| `RemoteTranscriptSnapshotForTab` | `(tabID string, req transcript.PageRequest) (RemoteTranscriptSnapshot, error)` | desktop/remote_transcript_api.go:94 | keep-business (保留业务实现) | hostrpc desktop/invoke |
+| `RemoteTranscriptContentForTab` | `(tabID string, req transcript.ContentRequest) (transcript.ContentChunk, error)` | desktop/remote_transcript_api.go:168 | keep-business (保留业务实现) | hostrpc desktop/invoke |
+| `RemoteTranscriptFollowForTab` | `(tabID string, req transcript.FollowRequest) (control.TranscriptFollowResponse, error)` | desktop/remote_transcript_api.go:113 | keep-business (保留业务实现) | hostrpc desktop/invoke |
+| `RemoteTranscriptOutlineForTab` | `(tabID string, req transcript.OutlineRequest) (transcript.OutlinePage, error)` | desktop/remote_transcript_api.go:152 | keep-business (保留业务实现) | hostrpc desktop/invoke |
+| `RemoteTranscriptPageForTab` | `(tabID string, req transcript.PageRequest) (transcript.Snapshot, error)` | desktop/remote_transcript_api.go:138 | keep-business (保留业务实现) | hostrpc desktop/invoke |
+| `RemoteTranscriptReplayForTab` | `(tabID string, req control.TranscriptReplayRequest) (control.TranscriptReplay, error)` | desktop/remote_transcript_api.go:177 | keep-business (保留业务实现) | hostrpc desktop/invoke |
+| `RemoteTranscriptSnapshotForTab` | `(tabID string, req transcript.PageRequest) (RemoteTranscriptSnapshot, error)` | desktop/remote_transcript_api.go:129 | keep-business (保留业务实现) | hostrpc desktop/invoke |
 | `RemoveMCPServer` | `(name string) error` | desktop/app.go:8638 | keep-business (保留业务实现) | hostrpc desktop/invoke |
 | `RemovePermissionRule` | `(list string, rule string) error` | desktop/settings_app.go:2994 | keep-business (保留业务实现) | hostrpc desktop/invoke |
 | `RemovePlugin` | `(name string) error` | desktop/plugin_packages_app.go:227 | keep-business (保留业务实现) | hostrpc desktop/invoke |
@@ -450,7 +451,7 @@ Every entry carries one class: `keep-business` keeps its Go implementation and c
 | `ResumeSessionForTab` | `(tabID string, path string) ([]HistoryMessage, error)` | desktop/app.go:3550 | keep-business (保留业务实现) | hostrpc desktop/invoke |
 | `ResumeSessionPage` | `(path string, limit int) (HistoryPage, error)` | desktop/app.go:3539 | keep-business (保留业务实现) | hostrpc desktop/invoke |
 | `ResumeSessionPageForTab` | `(tabID string, path string, limit int) (HistoryPage, error)` | desktop/app.go:3543 | keep-business (保留业务实现) | hostrpc desktop/invoke |
-| `ResumeTranscriptSessionForTab` | `(tabID string, path string) (HistorySwitchPhases, error)` | desktop/transcript_api.go:12 | keep-business (保留业务实现) | hostrpc desktop/invoke |
+| `ResumeTranscriptSessionForTab` | `(tabID string, path string) (HistorySwitchPhases, error)` | desktop/transcript_api.go:13 | keep-business (保留业务实现) | hostrpc desktop/invoke |
 | `RetryInboxItem` | `(tabID string, id string) error` | desktop/inbox_app.go:435 | keep-business (保留业务实现) | hostrpc desktop/invoke |
 | `RetryModelSettingsApplication` | `(tabID string) ModelSettingsResult` | desktop/model_settings_api.go:498 | keep-business (保留业务实现) | hostrpc desktop/invoke |
 | `RetrySessionRecovery` | `(req RecoveryPreferenceRequest) error` | desktop/recovery_lineage.go:186 | keep-business (保留业务实现) | hostrpc desktop/invoke |
@@ -648,11 +649,12 @@ Every entry carries one class: `keep-business` keeps its Go implementation and c
 | `TestProviderModel` | `(p ProviderView, model string, key string) error` | desktop/provider_settings_probe.go:16 | keep-business (保留业务实现) | hostrpc desktop/invoke |
 | `ToggleMaximiseMainWindow` | `()` | desktop/window_controls.go:12 | migrate-host (迁移宿主实现) | `business in Go; native step through nativeHost host/*` |
 | `ToolResultForTab` | `(tabID string, toolID string) *control.ToolResultData` | desktop/app.go:2411 | keep-business (保留业务实现) | hostrpc desktop/invoke |
-| `TranscriptContentForTab` | `(tabID string, req transcript.ContentRequest) (transcript.ContentChunk, error)` | desktop/transcript_api.go:86 | keep-business (保留业务实现) | hostrpc desktop/invoke |
-| `TranscriptOutlineForTab` | `(tabID string, req transcript.OutlineRequest) (transcript.OutlinePage, error)` | desktop/transcript_api.go:70 | keep-business (保留业务实现) | hostrpc desktop/invoke |
-| `TranscriptPageForTab` | `(tabID string, req transcript.PageRequest) (transcript.Snapshot, error)` | desktop/transcript_api.go:63 | keep-business (保留业务实现) | hostrpc desktop/invoke |
-| `TranscriptReplayForTab` | `(tabID string, req control.TranscriptReplayRequest) (control.TranscriptReplay, error)` | desktop/transcript_api.go:98 | keep-business (保留业务实现) | hostrpc desktop/invoke |
-| `TranscriptSnapshotForTab` | `(tabID string, req transcript.PageRequest) (transcript.Snapshot, error)` | desktop/transcript_api.go:51 | keep-business (保留业务实现) | hostrpc desktop/invoke |
+| `TranscriptContentForTab` | `(tabID string, req transcript.ContentRequest) (transcript.ContentChunk, error)` | desktop/transcript_api.go:114 | keep-business (保留业务实现) | hostrpc desktop/invoke |
+| `TranscriptFollowForTab` | `(tabID string, req transcript.FollowRequest) (control.TranscriptFollowResponse, error)` | desktop/transcript_api.go:64 | keep-business (保留业务实现) | hostrpc desktop/invoke |
+| `TranscriptOutlineForTab` | `(tabID string, req transcript.OutlineRequest) (transcript.OutlinePage, error)` | desktop/transcript_api.go:98 | keep-business (保留业务实现) | hostrpc desktop/invoke |
+| `TranscriptPageForTab` | `(tabID string, req transcript.PageRequest) (transcript.Snapshot, error)` | desktop/transcript_api.go:91 | keep-business (保留业务实现) | hostrpc desktop/invoke |
+| `TranscriptReplayForTab` | `(tabID string, req control.TranscriptReplayRequest) (control.TranscriptReplay, error)` | desktop/transcript_api.go:126 | keep-business (保留业务实现) | hostrpc desktop/invoke |
+| `TranscriptSnapshotForTab` | `(tabID string, req transcript.PageRequest) (transcript.Snapshot, error)` | desktop/transcript_api.go:52 | keep-business (保留业务实现) | hostrpc desktop/invoke |
 | `TrashTopic` | `(topicID string) error` | desktop/topic_archive.go:30 | keep-business (保留业务实现) | hostrpc desktop/invoke |
 | `TrustProjectHooks` | `() error` | desktop/hooks_settings_app.go:91 | keep-business (保留业务实现) | hostrpc desktop/invoke |
 | `TrustProjectHooksForRoot` | `(root string) error` | desktop/hooks_settings_app.go:97 | keep-business (保留业务实现) | hostrpc desktop/invoke |

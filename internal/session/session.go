@@ -13,6 +13,7 @@ import (
 
 	"reasonix/internal/provider"
 	"reasonix/internal/sessioncontent"
+	"reasonix/internal/transcript"
 )
 
 // Session owns the live business state for one session identity: sequence
@@ -24,6 +25,7 @@ import (
 // mirrors DSH: accepting an event updates the projection and the UI, while the
 // binding batches the write-behind and Flush marks a semantic checkpoint.
 type Session struct {
+	transcript  *transcript.Projection
 	mu          sync.Mutex
 	id          string
 	manifest    Manifest
@@ -337,6 +339,7 @@ func (s *Session) CommitPrepared(prepared PreparedBatch) (Commit, error) {
 		_ = applyRecentCommit(&s.recentMessages, commit)
 		s.next = commit.LastSequence() + 1
 		s.operations[prepared.operationID] = compactOperationRecord(commit)
+		s.acceptTranscriptCommit(commit)
 	})
 	s.mu.Unlock()
 	if err != nil {

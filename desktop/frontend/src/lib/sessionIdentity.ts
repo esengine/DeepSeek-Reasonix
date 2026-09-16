@@ -12,6 +12,7 @@ export type SessionHydrationOptions<Item, SurfacePolicy extends string> = Sessio
   skipHistory?: boolean;
   placeholderItems?: Item[];
   preserveCachedHistory?: boolean;
+  freshSnapshot?: boolean;
   sessionRevision?: number;
   sessionDigest?: string;
   cancelHydrateGeneration?: number;

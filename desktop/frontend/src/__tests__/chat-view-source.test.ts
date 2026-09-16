@@ -129,3 +129,17 @@ assert.deepEqual(noAnswerTail.presentedFiles, [{ path: "result.pdf", toolCallId:
 assert.deepEqual(noAnswerTail.modifiedFiles, [{ path: "draft.txt", toolCallId: "write-only", operation: "written" }]);
 assert.ok(filesWithoutAnswer.getOrderSnapshot().includes("files-user:tail"));
 filesWithoutAnswer.dispose();
+
+const auditSource = new ChatSource("proxy-audit");
+auditSource.update({ ...input, running: false, items: [
+  { kind: "user", id: "audit-user", text: "inspect" },
+  { kind: "notice", id: "audit", code: "capability_proxy_audit", level: "info", text: "proxy target", detail: '{"callId":"call","target":"read"}' },
+  { kind: "tool", id: "call", name: "use_capability", args: "{}", readOnly: true, status: "done" },
+  { kind: "notice", id: "unassociated", code: "capability_proxy_audit", level: "info", text: "diagnostic only", detail: "{}" },
+] });
+assert.ok(!auditSource.getOrderSnapshot().includes("audit"), "paired audit must not duplicate the tool row");
+const auditProcess = auditSource.getNodeSnapshot("audit-user:process");
+assert.ok(auditProcess?.kind === "process" && !auditProcess.members.includes("audit"));
+assert.equal(auditSource.toolAudits("call").length, 1, "paired audit stays available in tool details");
+assert.ok(auditSource.getOrderSnapshot().includes("unassociated"), "unpaired audit remains available as diagnostics");
+auditSource.dispose();

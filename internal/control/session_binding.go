@@ -376,9 +376,6 @@ func (c *Controller) publishSessionRuntime(candidate *session.Runtime, prepared 
 	c.turnEvents.mu.Lock()
 	c.turnEvents.projection = nil
 	c.turnEvents.projectionErr = nil
-	c.turnEvents.v3ProjectionSequence = 0
-	c.turnEvents.v3ProjectionSession = ""
-	c.turnEvents.v3ProjectionEpoch = ""
 	c.turnEvents.mu.Unlock()
 	c.rebindCheckpoints("")
 	c.ResetPlannerSession()

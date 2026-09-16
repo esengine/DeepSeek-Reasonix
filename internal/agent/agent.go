@@ -1432,6 +1432,12 @@ func (a *Agent) streamWithFrozen(ctx context.Context, turn int, sink event.Sink,
 	}
 	for {
 		var chunk provider.Chunk
+		// Cancellation wins over already buffered provider tokens.
+		if ctx.Err() != nil {
+			stored, _ := finishReasoning()
+			usage = provider.UsageWithRequestAttemptCount(ctx, bestEffortStreamUsage(usage, text.Len(), reasoning.Len(), "interrupted"))
+			return collect(stored, ctx.Err())
+		}
 		select {
 		case <-ctx.Done():
 			stored, _ := finishReasoning()
@@ -1470,18 +1476,12 @@ func (a *Agent) streamWithFrozen(ctx context.Context, turn int, sink event.Sink,
 					// and what the closing Message event re-renders must agree.
 					display = finalReasoning
 				}
-				if finalText != "" || display != "" {
-					sink.Emit(event.Event{
-						Kind:      event.Message,
-						Text:      DisplayAssistantText(finalText),
-						Reasoning: display,
-					})
-				}
 				usage = provider.UsageWithRequestAttemptCount(ctx, usage)
 				// A clean terminal never reports partialToolStarted: the calls
 				// slice is now authoritative and the partial cards were merged.
 				return streamedTurn{
-					text: finalText, reasoning: finalReasoning, signature: finalSignature,
+					displayReasoning: display,
+					text:             finalText, reasoning: finalReasoning, signature: finalSignature,
 					reasoningID: meta.id, reasoningStatus: meta.status,
 					reasoningComplete: meta.complete,
 					reasoningState:    meta.state, thinkingBlocks: meta.blocks,
@@ -1628,51 +1628,6 @@ func upsertPartialToolCall(calls []provider.ToolCall, call provider.ToolCall) []
 	return append(calls, call)
 }
 
-func (a *Agent) recordInterruptedDisplay(text, reasoning string, calls []provider.ToolCall, pending bool, terminalErr error, workDurationMs int64) {
-	displayCalls := make([]provider.ToolCall, 0, len(calls))
-	interrupted := make([]string, 0, len(calls))
-	notStarted := make([]provider.InterruptedToolSummary, 0, len(calls))
-	seen := make(map[string]struct{}, len(calls))
-	for _, call := range calls {
-		name := strings.TrimSpace(call.Name)
-		key := call.ID + "\x00" + name
-		if _, ok := seen[key]; ok {
-			continue
-		}
-		seen[key] = struct{}{}
-		displayCalls = append(displayCalls, provider.ToolCall{ID: call.ID, Name: name})
-		if name != "" {
-			interrupted = append(interrupted, name)
-			notStarted = append(notStarted, provider.InterruptedToolSummary{ID: call.ID, Name: name})
-		}
-	}
-	terminalStatus := "interrupted"
-	var failureDiagnostic *provider.FailureDiagnostic
-	if terminalErr != nil && !errors.Is(terminalErr, context.Canceled) {
-		terminalStatus = "failed"
-		failureDiagnostic = provider.DiagnoseFailure(terminalErr)
-	}
-	_ = a.appendCommittedMessages(context.Background(), "interrupted-attempt", provider.Message{
-		Role:             provider.RoleTool,
-		Content:          text,
-		ReasoningContent: reasoning,
-		ToolCalls:        displayCalls,
-		ToolCallID:       provider.LocalOnlyToolID,
-		Name:             provider.LocalOnlyToolName,
-		WorkDurationMs:   workDurationMs,
-		LocalOnly:        true,
-		InterruptedTurn: &provider.InterruptedTurnRecovery{
-			TerminalStatus:          terminalStatus,
-			FailureDiagnostic:       failureDiagnostic,
-			Pending:                 pending,
-			InterruptedTools:        interrupted,
-			NotStartedTools:         notStarted,
-			DroppedPartialText:      strings.TrimSpace(text) != "",
-			DroppedPartialReasoning: strings.TrimSpace(reasoning) != "",
-		},
-	})
-}
-
 func (a *Agent) capturePrefixShape(schemas []provider.ToolSchema) PrefixShape {
 	return captureTurnContextShape(a.systemPrompt(), schemas, a.sess.conversation.RewriteVersion(), a.modelVisibleMessages())
 }
@@ -1774,7 +1729,7 @@ func (a *Agent) emitResolvedToolDispatch(ctx context.Context, c provider.ToolCal
 			DisplayName:  c.Name,
 			TargetName:   c.ResolvedName,
 			CapabilityID: c.CapabilityID,
-		})
+		}, c.ID)
 	}
 	a.svc.sink.Emit(event.Event{Kind: event.ToolDispatch, MessageID: messageIdentity(ctx), Tool: event.Tool{
 		ID:           c.ID,

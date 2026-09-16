@@ -415,6 +415,22 @@ console.log("\ntranscript store");
 
 // ── weighted LRU: count, pin, byte budget, re-open ──────────────────────────
 {
+  const store = new TranscriptStore(new FakeBackend([]));
+  const initial = store.installSlice("reader-v2", "/reader", {
+    entries: [{ entryId: "m:old", turn: 1, order: 0, message: { role: "user", content: "old reader page" }, refs: [] }],
+    nextCursor: "", newerCursor: "newer", hasOlder: false, hasNewer: true,
+    startTurn: 1, endTurn: 1, totalTurns: 100, revision: 1, digest: "generation", stale: false,
+  });
+  for (let sequence = 2; sequence < 130; sequence++) {
+    const updated = store.upsertEntries("reader-v2", "/reader", [{ entryId: `m:tail-${sequence}`, turn: sequence, order: sequence,
+      message: { role: "assistant", content: "committed tail" }, refs: [] }], sequence);
+    eq(updated?.items.length, initial.items.length, "distant commits do not replace or grow the reader window");
+    eq(updated?.items[0]?.id, initial.items[0]?.id, "reader anchor survives distant commits");
+  }
+  eq(store.peek("reader-v2", "/reader")?.hasNewer, true, "committed tail remains reachable by forward pagination");
+}
+
+{
   const backend = new FakeBackend([{ role: "user", content: "u" }, { role: "assistant", content: "a" }]);
   const store = new TranscriptStore(backend, { maxResidentSessions: 3 });
   await store.loadLatest("tab-1", "/s/1.jsonl");

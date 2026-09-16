@@ -1,3 +1,4 @@
+import type { TranscriptTurnMetadata } from "./transcriptProtocol";
 import type { HistorySwitchPhases } from "./sessionDiagnostics";
 import type { ProviderCatalog } from "./providerCatalogTypes";
 export type { SettingsView } from "./settingsViewTypes";
@@ -839,7 +840,7 @@ export interface ChangedFileInfo {
 }
 
 // Bound-method payloads (desktop/app.go).
-export interface HistoryMessage {
+export interface HistoryMessage extends TranscriptTurnMetadata {
 	historyTurn?: number;
 	recordId?: string;
 	attemptId?: string;

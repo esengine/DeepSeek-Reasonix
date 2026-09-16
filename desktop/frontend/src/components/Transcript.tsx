@@ -1,5 +1,6 @@
 import { lazy, Suspense, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
 import { ArrowDown } from "lucide-react";
+import { getTranscriptStore } from "../lib/transcriptStore";
 import type { ControllerLiveStore, HistoryLoadOutcome, HistoryLoadTrigger, Item, LiveStream } from "../lib/useController";
 import { forkTargetForAnswer, type ForkBlockReason, type ForkTargetSetView, type ForkTargetView } from "../lib/forkTargets";
 import type { InvocationMetadataMap } from "../lib/invocationDisplay";
@@ -64,6 +65,15 @@ export function Transcript(props: TranscriptProps) {
   return <ChatSession key={sessionKey} {...props} sessionKey={sessionKey} />;
 }
 
+function TranscriptConnection({ tabId }: { tabId?: string }) {
+  const store = getTranscriptStore();
+  const subscribe = useCallback((listener: () => void) => tabId ? store.subscribeState(tabId, listener) : () => {}, [store, tabId]);
+  const snapshot = useCallback(() => tabId ? store.states.get(tabId)?.transcriptConnection : undefined, [store, tabId]);
+  const status = useSyncExternalStore(subscribe, snapshot, snapshot);
+  const t = useT();
+  return status && status !== "connected" ? <p role="status">{t(status === "syncing" ? "chat.syncing" : "chat.disconnected")}</p> : null;
+}
+
 function ChatSession(props: TranscriptProps & { sessionKey: string }) {
   const { sessionKey, tabId, items, live, liveStore, running = false, hydrating = false,
     hasOlderHistory = false, hasNewerHistory = false, loadingOlderHistory = false, olderHistoryError,
@@ -92,11 +102,11 @@ function ChatSession(props: TranscriptProps & { sessionKey: string }) {
       create: onFork,
     } : undefined }), [openDetails, recover, onFork, props.forkTargets, props.forkBlocked]);
   useLayoutEffect(() => {
-    source.update({ items, live: liveStore?.getSnapshot(tabId) ?? live, running, hydrating,
+    source.update({ items, live: props.hasNewerHistory ? undefined : liveStore?.getSnapshot(tabId) ?? live, running, hydrating,
       hasOlder: hasOlderHistory, loadingOlder: loadingOlderHistory, error: olderHistoryError,
       startedAt: turnStartAt, historyStartTurn: props.historyStartTurn });
-  }, [source, items, live, liveStore, tabId, running, hydrating, hasOlderHistory, loadingOlderHistory, olderHistoryError, turnStartAt, props.historyStartTurn]);
-  useEffect(() => liveStore?.subscribe(tabId, () => source.updateLive(liveStore.getSnapshot(tabId))), [source, liveStore, tabId]);
+  }, [source, items, live, liveStore, tabId, running, hydrating, hasOlderHistory, loadingOlderHistory, olderHistoryError, turnStartAt, props.historyStartTurn, props.hasNewerHistory]);
+  useEffect(() => liveStore?.subscribe(tabId, () => source.updateLive(props.hasNewerHistory ? undefined : liveStore.getSnapshot(tabId))), [source, liveStore, tabId, props.hasNewerHistory]);
   useLayoutEffect(() => {
     if (scroller.current && column.current) scroll.attach(scroller.current, column.current);
     return () => scroll.dispose();
@@ -242,6 +252,7 @@ function ChatSession(props: TranscriptProps & { sessionKey: string }) {
           <div ref={scroller} className="transcript chat-flow-scroll" tabIndex={0} data-transcript-render-mode="full"
             data-transcript-hydrating={hydrating} data-scroll-mode={position.following ? "tail" : "reader"}>
             <div ref={column} className="chat-column">
+              <TranscriptConnection tabId={tabId} />
               {hydrating && <p role="status">{t("chat.loading")}</p>}
               {(hasOlderHistory || hasNewerHistory) && <div className="chat-history-window" role="status">
                 <span>{t("chat.historyRange", { start: Math.max(1, (props.historyStartTurn ?? 0) + 1), end: Math.max(1, props.historyEndTurn ?? props.totalTurns ?? 0), total: props.totalTurns ?? 0 })}</span>
@@ -253,8 +264,8 @@ function ChatSession(props: TranscriptProps & { sessionKey: string }) {
               <ChatNodeList key={source.sessionKey} source={source} mounts={mounts} loader={loader} scroll={scroll} actions={actions} tabId={tabId} hostId={props.hostId} />
               <ChatRunning source={source} />
               {hasNewerHistory && <div className="chat-history-newer">
-                <button className="btn" disabled={loadingNewerHistory || running} onClick={() => void loadPage("newer")}>{t(loadingNewerHistory ? "chat.loading" : "chat.loadNewer")}</button>
-                <button className="btn" disabled={loadingNewerHistory || running} onClick={() => void loadPage("latest")}>{t("chat.toLatest")}</button>
+                <button className="btn" disabled={loadingNewerHistory} onClick={() => void loadPage("newer")}>{t(loadingNewerHistory ? "chat.loading" : "chat.loadNewer")}</button>
+                <button className="btn" disabled={loadingNewerHistory} onClick={() => void loadPage("latest")}>{t("chat.toLatest")}</button>
               </div>}
               {newerHistoryError && <button className="btn" onClick={() => void loadPage("newer")}>{t("chat.loadFailed")}</button>}
             </div>

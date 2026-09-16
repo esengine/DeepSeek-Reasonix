@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"fmt"
 
 	"reasonix/internal/control"
@@ -56,6 +57,33 @@ func (a *App) TranscriptSnapshotForTab(tabID string, req transcript.PageRequest)
 	result, err := api.TranscriptSnapshot(req)
 	if !current() {
 		return transcript.Snapshot{}, fmt.Errorf("runtime changed while reading transcript")
+	}
+	return result, err
+}
+
+func (a *App) TranscriptFollowForTab(tabID string, req transcript.FollowRequest) (control.TranscriptFollowResponse, error) {
+	api, current, err := a.transcriptAPIForTab(tabID)
+	if err != nil {
+		return control.TranscriptFollowResponse{}, err
+	}
+	follow, ok := api.(control.TranscriptFollowAPI)
+	if !ok {
+		return control.TranscriptFollowResponse{}, control.ErrTranscriptProjectionUnavailable
+	}
+	// Follow is a subscription, not a bounded command. Its 25-second idle
+	// poll must not be cancelled by the 15-second command deadline.
+	ctx := a.bootContext()
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	ctx, cancel := context.WithCancel(ctx)
+	defer cancel()
+	result, err := follow.TranscriptFollow(ctx, req)
+	if !current() {
+		if result.Subscription != "" {
+			_, _ = follow.TranscriptFollow(context.Background(), transcript.FollowRequest{Subscription: result.Subscription, Close: true})
+		}
+		return control.TranscriptFollowResponse{}, fmt.Errorf("runtime changed while following transcript")
 	}
 	return result, err
 }

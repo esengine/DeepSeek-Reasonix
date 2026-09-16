@@ -115,9 +115,12 @@ func (buffer *Buffer) Messages() []Message {
 	return out
 }
 
-func (buffer *Buffer) attachTurnStats(turnID string, usage *TurnUsage, durationMs, completedAt int64) {
+func (buffer *Buffer) attachTurnStats(turnID string, usage *TurnUsage, durationMs, completedAt int64, finalMessageID string) {
 	for _, row := range slices.Backward(buffer.messages) {
 		if row.message.TurnID != turnID || row.message.Role != "assistant" {
+			continue
+		}
+		if finalMessageID != "" && row.message.MessageID != finalMessageID {
 			continue
 		}
 		if !row.content.hasNonWhitespace() && !row.reasoning.hasNonWhitespace() {

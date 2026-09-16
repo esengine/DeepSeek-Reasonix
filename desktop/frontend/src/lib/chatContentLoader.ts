@@ -12,7 +12,7 @@ export class ChatContentLoader {
   private pending = new Map<string, { item: Item; promise: Promise<string> }>();
   constructor(private tabId?: string, private resolve?: (item: Item, field: "content" | "reasoning" | "tool") => Promise<string>) {}
   activate() { this.closed = false; }
-  needsFullContent(item: Item, field: "reasoning" | "tool"): boolean {
+  needsFullContent(item: Item, field: "content" | "reasoning" | "tool"): boolean {
     if (field === "tool" && item.kind === "tool" && (item.dataArchived || item.truncated)) return true;
     const entry = historyEntryIdForItemId(item.id);
     return Boolean(entry && this.tabId && getTranscriptStore().hasContentReference(this.tabId, entry, field));

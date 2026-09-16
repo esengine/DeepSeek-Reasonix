@@ -31,6 +31,56 @@ func searchHistoryReady(t *testing.T, query *Query, ref SessionRef, text, cursor
 	}
 }
 
+// A rebuild may scan appends made after its initial stat. Its continuation
+// offset must describe the same completed commit as its sequence watermark.
+func TestHistoryIndexRebuildPairsScannedSequenceAndOffset(t *testing.T) {
+	root := filepath.Join(t.TempDir(), "sessions")
+	persistence := NewFilesystemPersistence(root)
+	service, err := NewService("local", persistence)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = service.CloseAll(context.Background()) })
+	runtime, err := service.Create(t.Context(), CreateOptions{SessionID: "rebuild-cut"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	appendMessage := func(id string) {
+		t.Helper()
+		payload, err := json.Marshal(map[string]any{"message": provider.Message{ID: id, Role: provider.RoleAssistant, Content: id}})
+		if err != nil {
+			t.Fatal(err)
+		}
+		if _, err = runtime.Session().AppendBatch(t.Context(), id, []Event{{Kind: "message/complete", Payload: payload}}); err != nil {
+			t.Fatal(err)
+		}
+		if _, err = runtime.Session().Flush(t.Context()); err != nil {
+			t.Fatal(err)
+		}
+	}
+	appendMessage("before-stat")
+	dir := filepath.Join(root, runtime.Ref().SessionID)
+	staleRevision, err := revisionOfLog(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	appendMessage("after-stat")
+	path := historyIndexPath(root, runtime.Ref().SessionID)
+	if err := rebuildHistoryIndex(t.Context(), dir, path, runtime.Ref().SessionID, staleRevision); err != nil {
+		t.Fatal(err)
+	}
+	appendMessage("after-scan")
+	page := historyPageReady(t, service.Query(), runtime.Ref(), "", 32)
+	if len(page.Messages) != 3 {
+		t.Fatalf("messages = %+v", page.Messages)
+	}
+	for i, id := range []string{"before-stat", "after-stat", "after-scan"} {
+		if page.Messages[i].MessageID != id {
+			t.Fatalf("message %d = %+v", i, page.Messages[i])
+		}
+	}
+}
+
 func waitHistoryPage(t *testing.T, query *Query, ref SessionRef, cursor string, limit int) (MessageHistoryPage, error) {
 	t.Helper()
 	deadline := time.Now().Add(5 * time.Second)

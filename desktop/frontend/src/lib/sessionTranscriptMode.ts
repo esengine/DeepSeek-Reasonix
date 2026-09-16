@@ -1,12 +1,5 @@
-import { app } from "./bridge";
 import type { TranscriptProjection } from "./transcriptStore";
 import type { Meta } from "./types";
-
-// Protocol 7 hosts use bounded recent/history reads. The snapshot client is
-// retained only for older hosts that lack the new reader capability.
-export function usesLegacyTranscriptSnapshots(): boolean {
-  return typeof app.SessionOpenForTab !== "function" && typeof app.TranscriptSnapshotForTab === "function";
-}
 
 export function historyFingerprintMatchesMeta(history: { revision: number; revisionKnown?: boolean; digest?: string }, meta: Meta): boolean {
   const expectedDigest = (meta.sessionDigest ?? "").trim();

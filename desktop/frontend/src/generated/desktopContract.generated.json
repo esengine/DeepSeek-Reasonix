@@ -9583,6 +9583,37 @@
     {
       "cancellation": "before-dispatch",
       "domain": "desktop/remote_transcript_api.go",
+      "name": "RemoteTranscriptFollowForTab",
+      "owner": "App.RemoteTranscriptFollowForTab",
+      "params": [
+        {
+          "kind": "string"
+        },
+        {
+          "kind": "object",
+          "ref": "transcript.FollowRequest"
+        }
+      ],
+      "result": {
+        "kind": "object",
+        "ref": "control.TranscriptFollowResponse"
+      },
+      "returnsError": true,
+      "scope": {
+        "inputs": [
+          "tabID",
+          "req"
+        ],
+        "kind": "owner-inputs",
+        "resolver": "App.RemoteTranscriptFollowForTab"
+      },
+      "sources": [
+        "desktop/remote_transcript_api.go"
+      ]
+    },
+    {
+      "cancellation": "before-dispatch",
+      "domain": "desktop/remote_transcript_api.go",
       "name": "RemoteTranscriptOutlineForTab",
       "owner": "App.RemoteTranscriptOutlineForTab",
       "params": [
@@ -16867,6 +16898,37 @@
     {
       "cancellation": "before-dispatch",
       "domain": "desktop/transcript_api.go",
+      "name": "TranscriptFollowForTab",
+      "owner": "App.TranscriptFollowForTab",
+      "params": [
+        {
+          "kind": "string"
+        },
+        {
+          "kind": "object",
+          "ref": "transcript.FollowRequest"
+        }
+      ],
+      "result": {
+        "kind": "object",
+        "ref": "control.TranscriptFollowResponse"
+      },
+      "returnsError": true,
+      "scope": {
+        "inputs": [
+          "tabID",
+          "req"
+        ],
+        "kind": "owner-inputs",
+        "resolver": "App.TranscriptFollowForTab"
+      },
+      "sources": [
+        "desktop/transcript_api.go"
+      ]
+    },
+    {
+      "cancellation": "before-dispatch",
+      "domain": "desktop/transcript_api.go",
       "name": "TranscriptOutlineForTab",
       "owner": "App.TranscriptOutlineForTab",
       "params": [
@@ -19416,6 +19478,60 @@
         }
       ]
     },
+    "control.TranscriptFollowResponse": {
+      "fields": [
+        {
+          "name": "protocolVersion",
+          "type": {
+            "kind": "integer"
+          }
+        },
+        {
+          "name": "subscription",
+          "type": {
+            "kind": "string"
+          }
+        },
+        {
+          "name": "snapshot",
+          "optional": true,
+          "type": {
+            "elem": {
+              "kind": "object",
+              "ref": "transcript.Snapshot"
+            },
+            "kind": "nullable"
+          }
+        },
+        {
+          "name": "changes",
+          "type": {
+            "elem": {
+              "kind": "object",
+              "ref": "transcript.Change"
+            },
+            "kind": "array"
+          }
+        },
+        {
+          "name": "resetRequired",
+          "type": {
+            "kind": "boolean"
+          }
+        },
+        {
+          "name": "history",
+          "optional": true,
+          "type": {
+            "elem": {
+              "kind": "object",
+              "ref": "session.HistoryWindowPage"
+            },
+            "kind": "nullable"
+          }
+        }
+      ]
+    },
     "control.TranscriptReplay": {
       "fields": [
         {
@@ -19445,6 +19561,12 @@
         },
         {
           "name": "coveredThroughSeq",
+          "type": {
+            "kind": "integer"
+          }
+        },
+        {
+          "name": "durableSeq",
           "type": {
             "kind": "integer"
           }
@@ -37750,6 +37872,23 @@
     "session.HistoryWindowRequest": {
       "fields": [
         {
+          "name": "generation",
+          "optional": true,
+          "type": {
+            "kind": "string"
+          }
+        },
+        {
+          "name": "snapshotSequence",
+          "optional": true,
+          "type": {
+            "elem": {
+              "kind": "integer"
+            },
+            "kind": "nullable"
+          }
+        },
+        {
           "name": "anchor",
           "type": {
             "kind": "string"
@@ -37968,6 +38107,40 @@
     },
     "session.PersistentMessage": {
       "fields": [
+        {
+          "name": "samplingCount",
+          "optional": true,
+          "type": {
+            "elem": {
+              "kind": "integer"
+            },
+            "kind": "nullable"
+          }
+        },
+        {
+          "name": "toolCount",
+          "optional": true,
+          "type": {
+            "elem": {
+              "kind": "integer"
+            },
+            "kind": "nullable"
+          }
+        },
+        {
+          "name": "turnFinal",
+          "optional": true,
+          "type": {
+            "kind": "boolean"
+          }
+        },
+        {
+          "name": "turnDurationMs",
+          "optional": true,
+          "type": {
+            "kind": "integer"
+          }
+        },
         {
           "name": "messageId",
           "type": {
@@ -38825,6 +38998,114 @@
           "type": {
             "kind": "string"
           }
+        },
+        {
+          "name": "turnId",
+          "type": {
+            "kind": "string"
+          }
+        },
+        {
+          "name": "nextIndex",
+          "type": {
+            "kind": "integer"
+          }
+        }
+      ]
+    },
+    "transcript.Change": {
+      "fields": [
+        {
+          "name": "runtime",
+          "optional": true,
+          "type": {
+            "elem": {
+              "kind": "object",
+              "ref": "transcript.Runtime"
+            },
+            "kind": "nullable"
+          }
+        },
+        {
+          "name": "attemptId",
+          "optional": true,
+          "type": {
+            "kind": "string"
+          }
+        },
+        {
+          "name": "index",
+          "type": {
+            "kind": "integer"
+          }
+        },
+        {
+          "name": "resultSeq",
+          "optional": true,
+          "type": {
+            "kind": "integer"
+          }
+        },
+        {
+          "name": "resultKind",
+          "optional": true,
+          "type": {
+            "kind": "string"
+          }
+        },
+        {
+          "name": "revision",
+          "type": {
+            "kind": "integer"
+          }
+        },
+        {
+          "name": "commitSeq",
+          "type": {
+            "kind": "integer"
+          }
+        },
+        {
+          "name": "durableSeq",
+          "type": {
+            "kind": "integer"
+          }
+        },
+        {
+          "name": "firstSeq",
+          "optional": true,
+          "type": {
+            "kind": "integer"
+          }
+        },
+        {
+          "name": "records",
+          "optional": true,
+          "type": {
+            "elem": {
+              "kind": "object",
+              "ref": "transcript.Message"
+            },
+            "kind": "array"
+          }
+        },
+        {
+          "name": "event",
+          "optional": true,
+          "type": {
+            "elem": {
+              "kind": "object",
+              "ref": "eventwire.Event"
+            },
+            "kind": "nullable"
+          }
+        },
+        {
+          "name": "resetRequired",
+          "optional": true,
+          "type": {
+            "kind": "boolean"
+          }
         }
       ]
     },
@@ -38920,6 +39201,31 @@
           "name": "offset",
           "type": {
             "kind": "integer"
+          }
+        }
+      ]
+    },
+    "transcript.FollowRequest": {
+      "fields": [
+        {
+          "name": "subscription",
+          "optional": true,
+          "type": {
+            "kind": "string"
+          }
+        },
+        {
+          "name": "afterRevision",
+          "optional": true,
+          "type": {
+            "kind": "integer"
+          }
+        },
+        {
+          "name": "close",
+          "optional": true,
+          "type": {
+            "kind": "boolean"
           }
         }
       ]
@@ -39376,6 +39682,12 @@
           }
         },
         {
+          "name": "durableSeq",
+          "type": {
+            "kind": "integer"
+          }
+        },
+        {
           "name": "entries",
           "type": {
             "elem": {
@@ -39503,6 +39815,32 @@
     "transcript.Runtime": {
       "fields": [
         {
+          "name": "finalMessageId",
+          "optional": true,
+          "type": {
+            "kind": "string"
+          }
+        },
+        {
+          "name": "durationMs",
+          "optional": true,
+          "type": {
+            "kind": "integer"
+          }
+        },
+        {
+          "name": "samplingCount",
+          "type": {
+            "kind": "integer"
+          }
+        },
+        {
+          "name": "toolCount",
+          "type": {
+            "kind": "integer"
+          }
+        },
+        {
           "name": "turnId",
           "optional": true,
           "type": {
@@ -39600,6 +39938,12 @@
         },
         {
           "name": "coveredThroughSeq",
+          "type": {
+            "kind": "integer"
+          }
+        },
+        {
+          "name": "durableSeq",
           "type": {
             "kind": "integer"
           }

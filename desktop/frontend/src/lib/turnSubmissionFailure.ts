@@ -22,7 +22,7 @@ export function reduceSubmitFailure(
     deliveryRecoveryActive: false,
     cancelRequested: false,
     seq: state.seq + 1,
-    items: [...removeEmptyAssistantItems(items), { kind: "notice", id: `n${state.seq}`, level: "warn", text: error } as Item],
+    items: [...(state.transcriptProtocol === 2 ? items : removeEmptyAssistantItems(items)), { kind: "notice", id: `n${state.seq}`, local: true, level: "warn", text: error } as Item],
   };
   return {
     ...next,

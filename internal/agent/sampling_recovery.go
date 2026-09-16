@@ -87,8 +87,11 @@ func (a *Agent) streamWithSamplingRecovery(parent context.Context, turn int) (te
 		result := a.runSamplingAttempt(ctx, turn, attemptSink, &state.frozen, id)
 		state.billable, _ = a.recordSamplingAttempt(state.billable, result)
 		if ctx.Err() != nil {
-			sink.Discard()
-			return streamedTurn{err: ctx.Err(), interrupted: true, usage: state.billable}
+			// A user cancellation settles the visible prefix as local display
+			// history. Dropping the attempt here loses the only complete prefix.
+			sink.Flush()
+			result.err, result.interrupted, result.usage = ctx.Err(), true, state.billable
+			return result
 		}
 		if result.err == nil {
 			retry, done := a.handleSamplingCandidate(&state, result, sink, attempt, id)
@@ -147,7 +150,7 @@ func (a *Agent) handleSamplingCandidate(s *samplingRecoveryState, result streame
 			a.recordRecoveredCandidate(result)
 		}
 		sink.Flush()
-		a.emitStreamAttempt(id, event.StreamAttemptCommit, attempt, "", nil)
+		result.settledAttemptID, result.settledAttempt = id, attempt
 		result.usage = finalizeSamplingUsage(s.billable, result.usage)
 		return false, result
 	}

@@ -105,6 +105,7 @@ const staleHistory = deferred<HistoryMessage[]>();
 const staleSessionMeta = deferred<Meta>();
 let newSessionCalls = 0;
 let backendCanonicalTodos = [{ content: "Old task", status: "in_progress" }];
+let backendHistory: HistoryMessage[] | undefined;
 let holdNextMeta = false;
 let staleMetaStarted = false;
 let backendRuntimeEpoch = "runtime-old";
@@ -147,7 +148,7 @@ const appStubTable = {
         return { messages, startTurn: 0, endTurn: messages.filter((message) => message.role === "user").length, totalTurns: messages.filter((message) => message.role === "user").length, hasOlder: false };
       },
       HistorySliceForTab: async (tabID: string, req: HistorySliceRequest) =>
-        historySliceFromMessages(tabID, await staleHistory.promise, req),
+        historySliceFromMessages(tabID, backendHistory ?? await staleHistory.promise, req),
       HistoryCheckpointTurnsForTab: async () => [],
       ReplayPendingPrompts: async () => {},
       ReplayPendingPromptsForTab: async (tabID: string) => {
@@ -168,8 +169,10 @@ const appStubTable = {
         if (tabID !== "tab-a") throw new Error(`unexpected new-session target ${tabID}`);
         newSessionCalls += 1;
         backendCanonicalTodos = [];
+        backendHistory = [];
       },
-      ResumeSessionPageForTab: async () => {
+      ResumeTranscriptSessionForTab: async () => {
+        backendHistory = [{ role: "user", content: "restore" }, { role: "assistant", content: "done" }];
         backendCanonicalTodos = [{ content: "Restored task", status: "completed" }];
         const oldEpoch = backendRuntimeEpoch;
         backendRuntimeEpoch = "runtime-resumed";
@@ -196,7 +199,8 @@ desktopStub.emit("agent:event", {
           hasOlder: false,
         };
       },
-      OpenChannelSessionPageForTab: async () => {
+      OpenChannelTranscriptSessionForTab: async () => {
+        backendHistory = [{ role: "user", content: "channel" }, { role: "assistant", content: "waiting" }];
         const oldEpoch = backendRuntimeEpoch;
         backendRuntimeEpoch = "runtime-channel";
         backendPendingPrompt = true;
@@ -287,7 +291,7 @@ await act(async () => {
   await flushPromises();
 });
 eq(resumeSurfaceSettled, false, "Resume releases navigation acquisition before target history settles");
-eq(controller?.state.ask?.id, "pre-response-resume", "Resume accepts the new-epoch ask and rejects the interleaved old-epoch ask before returning");
+eq(controller?.state.ask?.id, undefined, "Resume waits for a consistent Follow snapshot before presenting prompts");
 await act(async () => {
   resumeRPCGate.resolve();
   await resumeNavigation?.surfaceReady;
@@ -309,7 +313,7 @@ await act(async () => {
   channelNavigation = controller?.openChannelSession("/sessions/channel.jsonl", "tab-a");
   await flushPromises();
 });
-eq(controller?.state.ask?.id, "pre-response-channel", "channel-open accepts the new-epoch ask and rejects the interleaved old-epoch ask before returning");
+eq(controller?.state.ask?.id, undefined, "channel-open waits for a consistent Follow snapshot before presenting prompts");
 await act(async () => {
   channelRPCGate.resolve();
   await channelNavigation?.surfaceReady;
@@ -574,11 +578,9 @@ desktopStub.replaceCommands({
   ResumeSessionPageForTab: legacyRead, OpenChannelSessionPageForTab: legacyRead,
   ReplayPendingPrompts: async () => {},
   ReplayPendingPromptsForTab: async () => {},
-  TranscriptSnapshotForTab: async () => {
+  SessionHistoryWindowForTab: async () => {
     modernSnapshots++;
-    return { protocolVersion: 1, snapshotId: modernEpoch, identity: { sessionId: modernEpoch, headId: modernEpoch, rewriteEpoch: 0, runtimeEpoch: modernEpoch },
-      projectionRevision: 0, coveredThroughSeq: 0, records: [], activeRecords: [], runtime: { status: "completed", pendingEvents: [] },
-      activeAttempts: [], before: 0, hasOlder: false, totalRecords: 0, totalTurns: 0, stale: false };
+    return { status: "ready", snapshotSequence: 0, coverageSequence: 0, generation: modernEpoch, messages: [], totalTurns: 0, hasOlder: false, hasNewer: false };
   },
   NewSessionForTab: async () => modernReplace("modern-new"),
   ClearSessionForTab: async () => { modernReplace("modern-clear"); return { sessionPath: modernPath, sessionGeneration: 2 }; },
@@ -592,7 +594,7 @@ desktopStub.replaceCommands({
 controller = undefined;
 const modernRoot = createRoot(rootEl);
 await act(async () => { modernRoot.render(<Probe />); await flushPromises(); });
-await waitFor("modern startup snapshot", () => controller?.state.transcriptProtocol === 1);
+await waitFor("modern startup snapshot", () => controller?.state.transcriptProtocol === 2);
 const verifyModernSuffix = async (label: string) => {
   await act(async () => {
     desktopStub.emit("agent:event", { kind: "user_message", tabId: "tab-a", runtimeEpoch: modernEpoch,
@@ -612,12 +614,12 @@ await act(async () => { await controller?.clearSession(); await flushPromises();
 eq(controller?.state.items.length, 0, "modern clear installs its empty cut");
 await verifyModernSuffix("clear");
 await act(async () => { await controller?.resumeSession("/sessions/modern-resume.jsonl", "tab-a")?.surfaceReady; await flushPromises(); });
-eq(sessionPipelineDiagnostics().resumeHistory?.source, "transcript-snapshot", "modern resume records snapshot installation");
+eq(sessionPipelineDiagnostics().resumeHistory?.source, "transcript-v2", "modern resume records snapshot installation");
 eq(sessionPipelineDiagnostics().duplicateLoadCount, 0, "modern resume receives backend load evidence");
 ok(typeof sessionPipelineDiagnostics().resumeSnapshotMs === "number", "modern resume measures snapshot time separately");
 await verifyModernSuffix("resume");
 await act(async () => { await controller?.openChannelSession("/sessions/modern-channel.jsonl", "tab-a")?.surfaceReady; await flushPromises(); });
-eq(sessionPipelineDiagnostics().resumeHistory?.source, "transcript-snapshot", "modern channel records snapshot installation");
+eq(sessionPipelineDiagnostics().resumeHistory?.source, "transcript-v2", "modern channel records snapshot installation");
 await verifyModernSuffix("channel");
 eq(modernAdoptions, 2, "resume and channel use adoption without a legacy history payload");
 eq(modernSnapshots, 5, "each modern entry point obtains one authoritative cut");
@@ -631,18 +633,18 @@ eq(sessionPipelineDiagnostics().duplicateLoadCount, null, "pending switch does n
 await act(async () => { await controller?.resumeSession("/sessions/fast.jsonl", "tab-a")?.surfaceReady; await flushPromises(); });
 await act(async () => { slowModernGate.resolve(); await staleModern?.surfaceReady; await flushPromises(); });
 eq(sessionPipelineDiagnostics().resumeSwitch?.totalMs, modernPhases.totalMs, "stale modern adoption cannot overwrite committed diagnostics");
-eq(sessionPipelineDiagnostics().resumeHistory?.source, "transcript-snapshot", "modern race retains authoritative snapshot evidence");
+eq(sessionPipelineDiagnostics().resumeHistory?.source, "transcript-v2", "modern race retains authoritative snapshot evidence");
 
-desktopStub.commands.TranscriptSnapshotForTab = async () => { throw new Error("configured model is unavailable before controller startup"); };
+desktopStub.commands.TranscriptFollowForTab = async () => { throw new Error("configured model is unavailable before controller startup"); };
 desktopStub.commands.HistorySliceForTab = async (tabID: string, req: HistorySliceRequest) => { legacyReads++; return historySliceFromMessages(tabID, [{ role: "user", content: "recovered without controller" }], req); };
 await act(async () => {
   await controller?.retrySessionHistory("tab-a");
   await flushPromises();
 });
-ok(controller?.state.items.some((item) => item.kind === "user" && item.text === "recovered without controller") ?? false,
-  "failed modern snapshot falls back to controller-independent history");
-eq(legacyReads, 1, "snapshot failure performs one compatibility history read");
-eq(controller?.state.hydrateError, undefined, "successful history fallback clears the recovery error");
+ok(!(controller?.state.items.some((item) => item.kind === "user" && item.text === "recovered without controller") ?? false),
+  "failed Follow never falls back to a different protocol");
+eq(legacyReads, 0, "snapshot failure performs no compatibility history read");
+ok(Boolean(controller?.state.hydrateError), "failed synchronization remains visible");
 await act(async () => { modernRoot.unmount(); });
 // ── session switch: one history commit, composer bound to the new runtime ────
 // The switch shows the restored transcript as soon as its page lands, but the
@@ -683,16 +685,17 @@ desktopStub.replaceCommands({
     switchHistoryPageCalls += 1;
     return switchPage("full-history-refetch");
   },
-  HistorySliceForTab: async (tabID: string, req: HistorySliceRequest) => historySliceFromMessages(tabID, [], req),
+  HistorySliceForTab: async (tabID: string, req: HistorySliceRequest) => historySliceFromMessages(tabID, switchMetaPath ? [{ role: "user", content: switchMetaPath }] : [], req),
   HistoryCheckpointTurnsForTab: async () => [],
   ReplayPendingPrompts: async () => {},
   ReplayPendingPromptsForTab: async () => {},
-  ResumeSessionPageForTab: async (_tabID: string, path: string) => {
+  ResumeTranscriptSessionForTab: async (_tabID: string, path: string) => {
     switchResumeCalls += 1;
     if (path.includes("slow")) await slowSwitchGate.promise;
+    switchMetaPath = path;
     const page = switchPage(path);
     page.switch.totalMs = path.includes("slow") ? 500 : 4;
-    return page;
+    return page.switch;
   },
 });
 
@@ -725,7 +728,7 @@ eq(runtimeReadyForSubmit(controller?.state.meta), true, "composer re-enables onc
 eq(switchResumeCalls, 1, "a switch issues exactly one resume page request");
 eq(switchHistoryPageCalls, 0, "a switch does not refetch the full history page from the frontend");
 eq(sessionPipelineDiagnostics().duplicateLoadCount, 0, "switch reports no duplicate durable load");
-eq(sessionPipelineDiagnostics().resumeHistory?.source, "resume-loaded", "the switch's first screen is attributed to the resume page");
+eq(sessionPipelineDiagnostics().resumeHistory?.source, "transcript-v2", "the switch's first screen is attributed to Follow");
 
 let slowNav: NavigationResult<void> | undefined;
 let fastNav: NavigationResult<void> | undefined;
@@ -767,7 +770,7 @@ await act(async () => {
     CheckpointsForTab: async () => checkpoints, HistoryCheckpointTurnsForTab: async () => [], ForkTargetsForTab: async () => ({ targets: [], verifiable: false }),
     HistorySliceForTab: async (id: string, req: HistorySliceRequest) => historySliceFromMessages(id, [], req),
     ReplayPendingPrompts: async () => {}, ReplayPendingPromptsForTab: async () => {},
-    ResumeSessionPageForTab: async (_id: string, target: string) => { path = target; return switchPage(target); },
+    ResumeTranscriptSessionForTab: async (_id: string, target: string) => { path = target; return switchPage(target).switch; },
     StartTurnForTab: async () => { submissions.push(path); return { turnId: "wrong-source" }; },
   });
   const raceRoot = createRoot(document.createElement("div"));

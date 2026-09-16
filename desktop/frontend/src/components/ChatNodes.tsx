@@ -101,8 +101,8 @@ const ChatNodeSeat = memo(function ChatNodeSeat({ source, nodeKey, loader, scrol
   let body;
   switch (node.kind) {
     case "user": body = <ChatUser node={node} loader={loader} />; break;
-    case "assistant": body = node.item.text || node.item.searchSources?.length || node.item.memoryCitations?.length ? <ChatAnswer node={node} loader={loader} source={source} tabId={tabId} hostId={hostId} /> : null; break;
-    case "reasoning": body = node.item.reasoning ? <ChatReasoning node={node} loader={loader} source={source} scroll={scroll} /> : null; break;
+    case "assistant": body = node.item.text || node.item.searchSources?.length || node.item.memoryCitations?.length || loader.needsFullContent(node.item, "content") ? <ChatAnswer node={node} loader={loader} source={source} tabId={tabId} hostId={hostId} /> : null; break;
+    case "reasoning": body = node.item.reasoning || loader.needsFullContent(node.item, "reasoning") ? <ChatReasoning node={node} loader={loader} source={source} scroll={scroll} /> : null; break;
     case "process": body = <TurnProcessNodeView node={node} onToggle={() => { scroll.beforeChange(); source.toggleProcess(node.turnKey); }} />; break;
     case "tool": body = <ChatTool node={node} loader={loader} actions={actions} scroll={scroll} />; break;
     case "phase": body = <ContextInjectionRow title={t("chat.activity")} summary={node.item.text} beforeToggle={scroll.beforeChange}>{node.item.text}</ContextInjectionRow>; break;
@@ -120,6 +120,7 @@ function ChatNotice({ node, actions, scroll }: { node: Extract<ChatNode, { kind:
   const t = useT();
   const item = node.item;
   const summary = item.completionSummary;
+  if (item.code === "capability_proxy_audit") return <ChatDisclosure label={t("chat.details")}><pre>{item.text}{"\n"}{item.detail}</pre></ChatDisclosure>;
   // Empty delivery accounting is not a chat result. Keep meaningful records in details.
   if (summary && !summary.mutations && !summary.changed_files && !summary.checks_passed && !summary.checks_failed) return null;
   if (item.level === "warn" || item.action === "recover_context") return <div className="chat-notice" role="status" data-level={item.level}>
@@ -260,6 +261,7 @@ function ChatTurnTail({ node, source, actions, loader, tabId, hostId }: { node: 
       tokensPerSecond={answer!.item.tokensPerSecond}
     />}
     {answer!.item.createdAt != null && <time className="chat-actions__time" dateTime={new Date(answer!.item.createdAt).toISOString()}>{formatMessageClock(answer!.item.createdAt)}</time>}
+    {answer!.item.samplingCount !== undefined && <span>{t("chat.turnCounts", { samples: answer!.item.samplingCount, tools: answer!.item.toolCount ?? 0 })}</span>}
   </div>}
   </div>;
 }
@@ -333,7 +335,7 @@ export function ChatDetails({ source, nodeKey, loader, onClose, onNavigate }: { 
         {children.slice(0, visibleChildren).map(child => <button className="chat-tool" key={child.key} onClick={() => onNavigate(child.key)}>{child.item.resolvedName ?? child.item.name} · {child.item.status}</button>)}
         {children.length > visibleChildren && <button className="btn" data-testid="tool-children-more" onClick={() => setVisibleChildren(count => count + TOOL_RELATION_PAGE_SIZE)}>{t("chat.loadMoreTools", { count: Math.min(TOOL_RELATION_PAGE_SIZE, children.length - visibleChildren) })}</button>}
       </div>}
-      {activeTab === "raw" && <pre>{full ?? preview}</pre>}
+      {activeTab === "raw" && <><pre>{full ?? preview}</pre>{source.toolAudits(node.item.id).map((audit, index) => <pre key={index}>{audit}</pre>)}</>}
     </div>
   </aside>;
 }

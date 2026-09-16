@@ -40,15 +40,16 @@ assert.equal(hydrated.reasoning, "complete reasoning");
 
 const dom = new JSDOM("", { url: "http://localhost/" });
 globalThis.window = dom.window as unknown as Window & typeof globalThis;
-const stub = installDesktopHostStub({ SessionOpenForTab: async () => ({
-  ...view, recent: { ...view.recent, entries: [{ ...view.recent.entries[0], position: 50, visibleTurn: 4 }] },
+const stub = installDesktopHostStub({ SessionHistoryWindowForTab: async () => ({
+  messages: [{ ...view.recent.entries[0], position: 50, visibleTurn: 4 }], status: "ready", snapshotSequence: 0,
+  coverageSequence: 0, generation: "mock", totalTurns: 4, hasOlder: true, hasNewer: false, olderCursor: "older",
 }) });
 const limited = await canonicalHistorySlice("tab-1", { cursor: "" });
 assert.equal(limited.entries.length, 1);
 assert.equal(limited.hasOlder, true, "a byte-limited recent window still exposes older history");
 assert.ok(limited.nextCursor);
 assert.equal(limited.revisionKnown, false, "zero sequence does not invent a durable fingerprint");
-stub.commands.SessionOpenForTab = async () => ({ ...view, storageGeneration: "", recent: { ...view.recent, storageGeneration: "", entries: [] } });
+stub.commands.SessionHistoryWindowForTab = async () => ({ messages: [], status: "ready", snapshotSequence: 0, coverageSequence: 0, totalTurns: 0, hasOlder: false, hasNewer: false });
 const empty = await canonicalHistorySlice("tab-1", { cursor: "" });
 assert.equal(empty.entries.length, 0, "an empty recent snapshot does not require a locator read");
 stub.uninstall();

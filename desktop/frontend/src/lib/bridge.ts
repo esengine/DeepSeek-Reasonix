@@ -41,7 +41,7 @@ import type { ForkTargetsBindings } from "./forkTargets";
 import type { ToolRecoveryBindings } from "./toolRecovery";
 import type { ScrollDiagnosticBindings } from "./scrollDiagnosticBridge";
 import type { TranscriptProtocolBindings } from "./transcriptProtocol";
-import { makeMockSessionReaderBindings, type SessionReaderBindings } from "./sessionReaderBridge";
+import { makeMockSessionReaderBindings, publishMockTranscriptEvent, type SessionReaderBindings } from "./sessionReaderBridge";
 import { makeMockMCPAppBindings, type MCPAppBindings } from "./mcpAppBridge";
 import { makeMockPinnedContextBindings, type PinnedContextBindings } from "./pinnedContextBridge";
 import { createDesktopPreferencesMock } from "./desktopPreferencesMock";
@@ -1106,6 +1106,7 @@ function mockSubscribe(cb: (e: WireEvent) => void): () => void {
 
 function emit(e: WireEvent) {
   const event = mockScopedTabId && !e.tabId ? { ...e, tabId: mockScopedTabId } : e;
+  publishMockTranscriptEvent(event);
   listeners.forEach((l) => l(event));
 }
 

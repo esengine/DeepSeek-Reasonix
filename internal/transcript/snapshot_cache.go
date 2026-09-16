@@ -28,7 +28,7 @@ func (p *Projection) freezeLocked(id string) (*Projection, error) {
 	if cached, ok := p.snapshots[id]; ok {
 		return cached.projection, nil
 	}
-	frozen := &Projection{incarnation: p.incarnation, identity: p.identity, revision: p.revision, covered: p.covered,
+	frozen := &Projection{incarnation: p.incarnation, identity: p.identity, revision: p.revision, covered: p.covered, durable: p.durable,
 		runtime: p.runtime, attempts: maps.Clone(p.attempts), prompts: maps.Clone(p.prompts)}
 	frozen.buffer.userTurns = p.buffer.userTurns
 	used := 0

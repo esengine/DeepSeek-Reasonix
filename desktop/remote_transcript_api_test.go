@@ -23,6 +23,30 @@ func remoteTranscriptFixture(server *httptest.Server) (*App, *remoteTab) {
 	return &App{remoteTabs: map[string]*remoteTab{tab.id: tab}}, tab
 }
 
+func TestRemoteFollowRequiresV2WithoutLegacyProbe(t *testing.T) {
+	var requests atomic.Int64
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		requests.Add(1)
+		if r.URL.Path != "/transcript/follow" {
+			t.Errorf("unexpected legacy fallback: %s", r.URL.Path)
+		}
+		_ = json.NewEncoder(w).Encode(transcript.FollowResponse{ProtocolVersion: 2, Subscription: "sub", Changes: []transcript.Change{}})
+	}))
+	defer server.Close()
+	app, tab := remoteTranscriptFixture(server)
+	if _, err := app.RemoteTranscriptFollowForTab(tab.id, transcript.FollowRequest{}); err == nil || !strings.Contains(err.Error(), "upgrade") {
+		t.Fatalf("old Serve must produce upgrade error: %v", err)
+	}
+	if requests.Load() != 0 {
+		t.Fatal("unnegotiated server was probed")
+	}
+	tab.capabilities = map[string]bool{servecontract.TranscriptV2: true}
+	response, err := app.RemoteTranscriptFollowForTab(tab.id, transcript.FollowRequest{Subscription: "sub"})
+	if err != nil || response.ProtocolVersion != 2 || requests.Load() != 1 {
+		t.Fatalf("v2 follow: %+v, %v", response, err)
+	}
+}
+
 func TestRemoteTranscriptNegotiatesOldServeWithoutMutation(t *testing.T) {
 	for _, status := range []int{http.StatusNotFound, http.StatusMethodNotAllowed, http.StatusNotImplemented, http.StatusOK} {
 		t.Run(http.StatusText(status), func(t *testing.T) {

@@ -58,8 +58,8 @@ ok(!/ModalCloseButton autoFocus/.test(mergeModal), "merge modal captures its tri
 ok(/CloseMergedWorktreeTab\(request: CloseMergedWorktreeTabRequest\)/.test(bridge), "worktree close is a request-object bridge call");
 ok(/FinalizeWorktreeMerge\(request: WorktreeCleanupRequest\)/.test(bridge), "cleanup is a separate request-object bridge call");
 const fencedNavigationCalls = [
-  ["const resumeSession", "app.ResumeSessionPage"],
-  ["const openChannelSession", "app.OpenChannelSessionPageForTab"],
+  ["const resumeSession", "app.ResumeTranscriptSessionForTab"],
+  ["const openChannelSession", "app.OpenChannelTranscriptSessionForTab"],
   ["const pickWorkspace", "app.PickWorkspace"],
   ["const switchWorkspace", "app.SwitchWorkspace"],
   ["const switchTab", "app.SetActiveTab"],

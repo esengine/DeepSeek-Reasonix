@@ -38,11 +38,12 @@ export function historySearchSources(
 
 export function historySearchAndAnswer(
   id: string,
-  m: { content: string; reasoning?: string; workDurationMs?: number; turnDurationMs?: number; turnUsage?: Extract<Item, { kind: "assistant" }>["turnUsage"]; createdAt?: number; memoryCitations?: Extract<Item, { kind: "assistant" }>["memoryCitations"]; serverSearch?: { id?: string; query?: string; sources_status?: "available" | "not_provided"; results?: { title?: string; url?: string }[] }[] },
+  m: { content: string; reasoning?: string; turnFinal?: boolean; samplingCount?: number; toolCount?: number; workDurationMs?: number; turnDurationMs?: number; turnUsage?: Extract<Item, { kind: "assistant" }>["turnUsage"]; createdAt?: number; memoryCitations?: Extract<Item, { kind: "assistant" }>["memoryCitations"]; serverSearch?: { id?: string; query?: string; sources_status?: "available" | "not_provided"; results?: { title?: string; url?: string }[] }[] },
+  preserveEmpty = false,
 ): Item[] {
   const out: Item[] = historySearchCards(m.serverSearch);
   const searchSources = historySearchSources(m.serverSearch);
-  if (m.content.trim() !== "" || (m.reasoning ?? "").trim() !== "" || searchSources) {
+  if (preserveEmpty || m.content.trim() !== "" || (m.reasoning ?? "").trim() !== "" || searchSources) {
     out.push({
       kind: "assistant",
       id,
@@ -50,6 +51,9 @@ export function historySearchAndAnswer(
       reasoning: m.reasoning ?? "",
       streaming: false,
       workDurationMs: m.workDurationMs,
+      turnFinal: m.turnFinal,
+      samplingCount: m.samplingCount,
+      toolCount: m.toolCount,
       turnDurationMs: m.turnDurationMs,
       turnUsage: m.turnUsage,
       createdAt: m.createdAt,

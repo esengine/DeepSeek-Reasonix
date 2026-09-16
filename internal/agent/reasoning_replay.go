@@ -83,7 +83,11 @@ func (a *Agent) finishReasoningReplayOverflow(result streamedTurn, sink *deferre
 	}
 	result.usage = finalizeSamplingUsage(billable, result.usage)
 	terminal := a.finishUnreplayableReasoning(result, sink, issue)
-	a.emitReasoningReplayAttemptOutcome(attemptID, attempt, terminal.err)
+	if terminal.err != nil {
+		a.emitReasoningReplayAttemptOutcome(attemptID, attempt, terminal.err)
+	} else {
+		terminal.settledAttemptID, terminal.settledAttempt = attemptID, attempt
+	}
 	return terminal
 }
 

@@ -4,6 +4,9 @@
 // it at compile time), so adding a key here makes the build fail until zh has it.
 
 export const en = {
+  "chat.syncing": "Synchronizing conversation…",
+  "chat.turnCounts": "{samples} samples · {tools} tools",
+  "chat.disconnected": "Connection interrupted. Task status is awaiting synchronization.",
   "chat.turnNavigation.label": "Conversation turns",
   "chat.turnNavigation.jump": "Jump to turn {turn}",
   "chat.turnNavigation.retry": "Reload conversation turns",

@@ -8,6 +8,9 @@ import (
 	"sync"
 	"sync/atomic"
 	"time"
+
+	"reasonix/internal/event"
+	"reasonix/internal/transcript"
 )
 
 // SessionRef is the only execution identity used by the linear session
@@ -66,10 +69,11 @@ type CancelReceipt struct {
 // lifecycle lives in the bound turn-loop; persisted running events never
 // create a Runtime after process restart.
 type Runtime struct {
-	ref     SessionRef
-	epoch   string
-	session *Session
-	owner   *Service
+	transcript *transcript.Projection
+	ref        SessionRef
+	epoch      string
+	session    *Session
+	owner      *Service
 	// instance stamps the publish grant so a delayed owner can prove it still
 	// refers to the exact instance it published.
 	instance string
@@ -89,6 +93,39 @@ type Runtime struct {
 
 func newRuntime(ref SessionRef, session *Session) *Runtime {
 	runtime := &Runtime{ref: ref, epoch: randomID(), session: session, phase: RuntimeIdle}
+	session.mu.Lock()
+	baseline := session.recentMessages
+	if len(baseline) == 0 {
+		baseline = session.projection.Messages
+	}
+	if len(baseline) > 96 {
+		baseline = baseline[len(baseline)-96:]
+	}
+	runtime.transcript, _ = transcript.NewProjection(transcript.Identity{SessionID: ref.SessionID, RuntimeEpoch: runtime.epoch}, transcript.History(baseline, transcript.HistoryOptions{}), session.next-1)
+	durable := uint64(0)
+	if session.binding != nil {
+		durable, _, _ = session.binding.progress()
+	}
+	restored := transcript.Runtime{TurnID: session.projection.TurnID, Status: session.projection.TurnStatus, FinalMessageID: session.projection.CurrentTurnMessageID}
+	restored.SamplingCount, restored.ToolCount = len(session.projection.CurrentAttempts), len(session.projection.CurrentCalls)
+	if restored.TurnID != "" && !restored.Status.Terminal() {
+		// A persisted open turn is recovery evidence, not a running model.
+		restored.Status = event.TurnRecoveryRequired
+	}
+	if restored.TurnID == "" && len(session.projection.Turns) > 0 {
+		last := session.projection.Turns[len(session.projection.Turns)-1]
+		restored.TurnID, restored.FinalMessageID = last.TurnID, last.MessageID
+		restored.DurationMs = last.DurationMs
+		restored.SamplingCount, restored.ToolCount = last.SamplingCount, last.ToolCount
+	}
+	for _, message := range baseline {
+		if message.ID == restored.FinalMessageID {
+			restored.DurationMs = max(restored.DurationMs, message.WorkDurationMs)
+		}
+	}
+	runtime.transcript.RestoreRuntime(restored, durable)
+	session.transcript = runtime.transcript
+	session.mu.Unlock()
 	runtime.revision.Store(1)
 	return runtime
 }
@@ -189,6 +226,7 @@ func (r *Runtime) close(ctx context.Context) error {
 	r.activity = ""
 	r.revision.Add(1)
 	r.mu.Unlock()
+	r.transcript.CloseFollowers()
 	r.closeErr = r.session.close(context.Background())
 	close(r.closeDone)
 	return r.closeErr

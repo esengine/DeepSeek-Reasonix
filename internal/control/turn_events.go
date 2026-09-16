@@ -48,9 +48,6 @@ type turnEventState struct {
 	pendingCheckpoint          *transcript.Checkpoint
 	projectionPersistedThrough uint64
 	projectionWriteErr         error
-	v3ProjectionSequence       uint64
-	v3ProjectionSession        string
-	v3ProjectionEpoch          string
 	volatileTodos              []event.Todo
 	volatileTodoWritten        bool
 	// pendingExecutionCommit is prepared by an unpublished hot-rebuild
@@ -227,12 +224,7 @@ func (s *turnEventSink) persistAndPublish(e event.Event) error {
 	// Outside-turn notices are not lifecycle records and must pass through after
 	// bootstrap or a terminal event.
 	if ledger.ActiveTurnID() == "" {
-		if ledger.CurrentStatus() == event.TurnRecoveryRequired && lateBusinessEvent(e.Kind) {
-			return nil
-		}
-		s.c.refreshRuntimeState(e)
-		s.publishInner(e)
-		return nil
+		return s.publishOutsideTurn(ledger, e)
 	}
 	if e.Kind == event.TurnStarted && ledger.CurrentStatus() == event.TurnInProgress {
 		return nil
@@ -265,10 +257,20 @@ func (s *turnEventSink) persistAndPublish(e event.Event) error {
 	}
 	projectionSaved := true
 	if e.Kind == event.TurnDone {
+		if store := s.c.sessionEventStore(); store != nil {
+			if _, err := store.Flush(context.Background()); err != nil {
+				return err
+			}
+		}
 		s.c.captureTranscriptCheckpoint(ledger, envelope.TranscriptDigest)
 		if err := s.c.persistTranscriptCheckpoint(ledger); err != nil {
 			projectionSaved = false
 			slog.Warn("controller: persist transcript display checkpoint", "err", err)
+		}
+	}
+	if _, runtime, exclusive := s.c.v3Binding(); exclusive && runtime != nil {
+		if err := runtime.PublishTranscriptFrame(envelope); err != nil {
+			return err
 		}
 	}
 	s.c.refreshRuntimeState(stamped)
@@ -322,7 +324,8 @@ func (s *turnEventSink) commitEnvelope(ledger *turnevent.Ledger, e event.Event, 
 	s.c.turnEvents.mu.RLock()
 	projection := s.c.turnEvents.projection
 	s.c.turnEvents.mu.RUnlock()
-	if projection != nil {
+	_, _, exclusive := s.c.v3Binding()
+	if projection != nil && !exclusive {
 		if projectionErr := projection.Apply(envelope); projectionErr != nil {
 			s.c.turnEvents.mu.Lock()
 			s.c.turnEvents.projectionErr = projectionErr
@@ -349,10 +352,13 @@ func (s *turnEventDurableSink) EmitChecked(e event.Event) error {
 		return nil
 	}
 	if e.Kind == event.TurnDone && classifyCommitError(err) != commitOwnership {
+		s.owner.c.disarmGoalLifecycle("persistence-error")
 		s.owner.c.mu.Lock()
 		s.owner.c.enterRecoveryLocked("terminal_commit_failed")
 		s.owner.c.mu.Unlock()
-		s.owner.c.disarmGoalLifecycle("persistence-error")
+		if _, runtime, exclusive := s.owner.c.v3Binding(); exclusive && runtime != nil {
+			runtime.Transcript().PersistenceFailed()
+		}
 	}
 	// Async stream callers cannot observe checked errors. Fail the Turn here so
 	// a poisoned WAL immediately cancels provider, prompt, and process work.
