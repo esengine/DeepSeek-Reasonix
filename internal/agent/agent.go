@@ -785,6 +785,10 @@ type Options struct {
 	// uses the default guard; a negative value disables only this client guard.
 	// Provider output budgets are a separate protocol/model capability.
 	ReasoningByteLimit int
+	// MaxPerseverationRetries bounds nudge-and-retry attempts after a detected
+	// perseveration (= mindless repetition) loop. nil keeps the default (1); *0
+	// stops on the first loop; *N allows N retries. Negative values clamp to 0.
+	MaxPerseverationRetries *int
 	// MaxOutputTokens overrides the provider's configured/default total output
 	// budget. Zero delegates to the provider; a negative value asks optional
 	// protocols to omit the budget (Anthropic still requires max_tokens).
@@ -1009,6 +1013,7 @@ func New(prov provider.Provider, tools *tool.Registry, session *Session, opts Op
 	if reasoningByteLimit == 0 {
 		reasoningByteLimit = defaultReasoningByteLimit
 	}
+	perseverationMaxRetries := resolvePerseverationRetries(opts.MaxPerseverationRetries)
 	a := &Agent{
 		imageInput:    newImageInput(opts.ImageInput, prov),
 		imageResolver: opts.ImageRequestResolver,
@@ -1017,22 +1022,23 @@ func New(prov provider.Provider, tools *tool.Registry, session *Session, opts Op
 		reads:            readState{},
 		fileObservations: fileops.NewStore(),
 		agentConfig: agentConfig{
-			maxSteps:           opts.MaxSteps,
-			maxStepsKey:        maxStepsKey,
-			reasoningByteLimit: reasoningByteLimit,
-			maxOutputTokens:    opts.MaxOutputTokens,
-			temperature:        opts.Temperature,
-			usageSource:        usageSourceOrDefault(opts.UsageSource, event.UsageSourceExecutor),
-			modelRef:           strings.TrimSpace(opts.ModelRef),
-			workspaceID:        strings.TrimSpace(opts.WorkspaceID),
-			classifierTaskText: opts.ClassifierTaskText,
-			writeWorkspaceRoot: strings.TrimSpace(opts.WriteWorkspaceRoot),
-			subagentDepth:      subagentDepth,
-			maxSubagentDepth:   maxSubagentDepth,
-			contextWindow:      opts.ContextWindow,
-			compactRatio:       opts.CompactRatio,
-			recentKeep:         opts.RecentKeep,
-			archiveDir:         opts.ArchiveDir,
+			maxSteps:                opts.MaxSteps,
+			maxStepsKey:             maxStepsKey,
+			reasoningByteLimit:      reasoningByteLimit,
+			perseverationMaxRetries: perseverationMaxRetries,
+			maxOutputTokens:         opts.MaxOutputTokens,
+			temperature:             opts.Temperature,
+			usageSource:             usageSourceOrDefault(opts.UsageSource, event.UsageSourceExecutor),
+			modelRef:                strings.TrimSpace(opts.ModelRef),
+			workspaceID:             strings.TrimSpace(opts.WorkspaceID),
+			classifierTaskText:      opts.ClassifierTaskText,
+			writeWorkspaceRoot:      strings.TrimSpace(opts.WriteWorkspaceRoot),
+			subagentDepth:           subagentDepth,
+			maxSubagentDepth:        maxSubagentDepth,
+			contextWindow:           opts.ContextWindow,
+			compactRatio:            opts.CompactRatio,
+			recentKeep:              opts.RecentKeep,
+			archiveDir:              opts.ArchiveDir,
 		},
 		sess: sessionRuntime{
 			conversation: session,
@@ -1366,6 +1372,7 @@ func (a *Agent) streamWithFrozen(ctx context.Context, turn int, sink event.Sink,
 	var partialToolStarted bool
 	var maxArgChars int
 	var lastArgProgress time.Time
+	perseveration := newPerseverationGuard()
 	// collect packages the stream state accumulated so far; stored is the
 	// finishReasoning output that becomes the round-tripped reasoning.
 	collect := func(stored string, err error) streamedTurn {
@@ -1524,6 +1531,10 @@ func (a *Agent) streamWithFrozen(ctx context.Context, turn int, sink event.Sink,
 			}
 			usage = provider.UsageWithRequestAttemptCount(ctx, usage)
 			return collect(stored, chunk.Err)
+		}
+		// Cut off a degenerate generation loop before it burns the output budget.
+		if perseveration.observe(chunk.Text) {
+			return abortOnPerseveration(collect, finishReasoning)
 		}
 	}
 }

@@ -164,7 +164,7 @@ func TestMissingClientToolReasoningFailsBeforeExecution(t *testing.T) {
 }
 
 func TestReasoningOverflowIsSafeForReplayContracts(t *testing.T) {
-	long := strings.Repeat("思考", 32)
+	long := "思考过程需要逐条评估不同的选项，并保持每一步都有所不同，避免任何重复的片段。"
 	call := provider.ToolCall{ID: "c1", Name: "echo", Arguments: `{"text":"no"}`}
 	t.Run("client tool fails", func(t *testing.T) {
 		mp := testutil.NewMock("deepseek", testutil.Turn{Reasoning: long, ToolCalls: []provider.ToolCall{call}})

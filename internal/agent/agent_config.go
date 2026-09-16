@@ -9,10 +9,13 @@ type agentConfig struct {
 	maxSteps           int
 	maxStepsKey        string
 	reasoningByteLimit int
-	maxOutputTokens    int
-	temperature        float64
-	usageSource        string
-	modelRef           string
+	// perseverationMaxRetries is the nudge-and-retry budget after a detected
+	// generation loop; 0 disables the retry.
+	perseverationMaxRetries int
+	maxOutputTokens         int
+	temperature             float64
+	usageSource             string
+	modelRef                string
 	// workspaceID is a prompt-cache lineage component, so it must not move
 	// while an agent lives — a change would silently rekey the cache.
 	workspaceID string

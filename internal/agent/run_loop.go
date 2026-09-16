@@ -40,7 +40,11 @@ type streamedTurn struct {
 	partialToolStarted bool
 	partialCalls       []provider.ToolCall
 	maxArgChars        int // peak streaming tool-arg size for failed-attempt estimates
-	err                error
+	// perseverationAborted marks a stream the client-side perseveration guard cut
+	// short. It is a clean terminal (err == nil): the final-response path
+	// nudges and retries once, then stops for the user on a second strike.
+	perseverationAborted bool
+	err                  error
 }
 
 func (s streamedTurn) assistantMessage() provider.Message {
@@ -247,7 +251,7 @@ func (a *Agent) runToolLoop(ctx context.Context, state *turnRuntime) (runErr err
 		a.publishCommittedSample(streamed)
 
 		if len(calls) == 0 {
-			cont, ferr := a.handleFinalResponse(ctx, state, text, reasoning, usage)
+			cont, ferr := a.handleFinalResponse(ctx, state, text, reasoning, usage, streamed.perseverationAborted)
 			if !cont {
 				return ferr
 			}
@@ -314,7 +318,12 @@ func newStreamAttemptID(_ int) string {
 // readiness boundary, empty-final retry, executor handoff nudge, steer drain,
 // and final compaction. cont=true continues the tool loop; cont=false returns
 // err from Run (err may be nil for a clean final answer).
-func (a *Agent) handleFinalResponse(ctx context.Context, state *turnRuntime, text, reasoning string, usage *provider.Usage) (cont bool, err error) {
+func (a *Agent) handleFinalResponse(ctx context.Context, state *turnRuntime, text, reasoning string, usage *provider.Usage, perseverationAborted bool) (cont bool, err error) {
+	if perseverationAborted {
+		// A degenerate loop is a terminal for this attempt; the guard already
+		// stopped generation. Retry once with a nudge, or stop for the user.
+		return a.handlePerseverationAbort(ctx)
+	}
 	if state.graceRound {
 		// Explicit max_steps and spend budgets are user-selected boundaries.
 		// Preserve the summary, then return a resumable pause so Goal does not

@@ -62,6 +62,11 @@ type sessionRuntime struct {
 	// across a conversation swap; see sessionCarryOver.
 	lastPrefixShape     PrefixShape
 	haveLastPrefixShape bool
+
+	// perseverationStrikes counts consecutive degenerate-generation aborts with no
+	// successfully completed provider response in between. It gates the single
+	// nudge-and-retry: the first strike retries, the next one stops for the user.
+	perseverationStrikes int
 }
 
 // reset rebinds the runtime to a new conversation. Every field is named here or
@@ -93,6 +98,7 @@ func (r *sessionRuntime) reset(s *Session) {
 	r.todoState = nil
 	r.todoWritten = false
 	r.todoMu.Unlock()
+	r.perseverationStrikes = 0
 }
 
 // clearReasoningReplayStrongProjection drops the process-local repair overlay.

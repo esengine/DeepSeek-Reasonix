@@ -265,7 +265,7 @@ func (p *finiteReasoningThenTextProvider) Stream(ctx context.Context, _ provider
 
 func TestReasoningByteGuardDoesNotAbortTurn(t *testing.T) {
 	sink := &recordSink{}
-	reasoning := strings.Repeat("abcd", 64)
+	reasoning := nonRepeatingText(256)
 	prov := testutil.NewMock("m", testutil.Turn{Reasoning: reasoning, Text: "svg done"})
 	a := New(prov, tool.NewRegistry(), NewSession(""), Options{ReasoningByteLimit: 32}, sink)
 
@@ -284,7 +284,7 @@ func TestReasoningByteGuardDoesNotAbortTurn(t *testing.T) {
 
 func TestDefaultReasoningGuardAllowsFormer128KiBStream(t *testing.T) {
 	// 128KiB is ~32K estimated tokens — a legitimate DeepSeek V4 Pro think.
-	reasoning := strings.Repeat("abcd", 128*1024/4+1)
+	reasoning := nonRepeatingText(128 * 1024)
 	prov := testutil.NewMock("m", testutil.Turn{Reasoning: reasoning, Text: "svg done"})
 	a := New(prov, tool.NewRegistry(), NewSession(""), Options{}, event.Discard)
 	if err := a.Run(context.Background(), "draw the compound bow"); err != nil {

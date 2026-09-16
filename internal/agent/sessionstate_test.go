@@ -32,6 +32,7 @@ var sessionReset = map[string]bool{
 	"todoMu":                                true,
 	"todoState":                             true,
 	"todoWritten":                           true,
+	"perseverationStrikes":                  true,
 }
 
 // sessionCarryOver names the fields reset deliberately leaves alone, each with
