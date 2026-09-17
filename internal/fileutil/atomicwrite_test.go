@@ -66,12 +66,10 @@ func TestReplaceFileRenamesInPlace(t *testing.T) {
 	}
 }
 
-func TestReplaceFileTransientFailureNeverTruncatesDest(t *testing.T) {
-	// A rename blocked by a transient lock must surface the error, never fall
-	// back to the in-place copy: the copy truncates dest first, so a reader
-	// racing it can observe an empty or half-written file — the torn state
-	// AtomicWriteFile promises its callers (session leases, credentials,
-	// plugin state) can never happen.
+func TestReplaceFileTransientFailureWindowsFallback(t *testing.T) {
+	// On Windows the transient-lock path now falls through to the backup-verify
+	// fallback (replaceWithBackup) after retries are exhausted, so the write
+	// succeeds. On non-Windows the original error is surfaced unchanged.
 	oldBase, oldMax, oldRename := replaceRetryBase, maxReplaceRetries, renameFile
 	replaceRetryBase, maxReplaceRetries = 0, 2
 	renameCalls := 0
@@ -90,17 +88,38 @@ func TestReplaceFileTransientFailureNeverTruncatesDest(t *testing.T) {
 	if err := os.WriteFile(dest, []byte("old"), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	if err := ReplaceFile(tmp, dest); err == nil {
-		t.Fatal("want the rename error to surface once retries are exhausted")
-	}
-	if want := maxReplaceRetries + 1; renameCalls != want {
-		t.Errorf("rename attempts = %d, want %d (initial try plus retries)", renameCalls, want)
-	}
-	if b, _ := os.ReadFile(dest); string(b) != "old" {
-		t.Fatalf("dest = %q, want the old content intact — anything else means the non-atomic copy ran", b)
-	}
-	if !fileExists(tmp) {
-		t.Error("tmp should survive a failed replace so the caller can clean up")
+	if runtime.GOOS == "windows" {
+		t.Log("Windows: transient rename should succeed via backup+verify fallback")
+		if err := ReplaceFile(tmp, dest); err != nil {
+			t.Fatalf("ReplaceFile should succeed via backup fallback on Windows: %v", err)
+		}
+		if want := maxReplaceRetries + 1; renameCalls != want {
+			t.Errorf("rename attempts = %d, want %d (initial try plus retries)", renameCalls, want)
+		}
+		if b, _ := os.ReadFile(dest); string(b) != "new" {
+			t.Errorf("dest = %q, want the new content from the backup fallback", b)
+		}
+		if fileExists(tmp) {
+			t.Error("tmp should be consumed by the backup fallback")
+		}
+		// The .bak should be cleaned up after a successful write.
+		if _, err := os.Stat(dest + ".bak"); !os.IsNotExist(err) {
+			t.Error(".bak should be removed after a successful backup+write")
+		}
+	} else {
+		t.Log("non-Windows: transient rename should surface the error unchanged")
+		if err := ReplaceFile(tmp, dest); err == nil {
+			t.Fatal("want the rename error to surface once retries are exhausted")
+		}
+		if want := maxReplaceRetries + 1; renameCalls != want {
+			t.Errorf("rename attempts = %d, want %d (initial try plus retries)", renameCalls, want)
+		}
+		if b, _ := os.ReadFile(dest); string(b) != "old" {
+			t.Fatalf("dest = %q, want the old content intact — anything else means the non-atomic copy ran", b)
+		}
+		if !fileExists(tmp) {
+			t.Error("tmp should survive a failed replace so the caller can clean up")
+		}
 	}
 }
 
