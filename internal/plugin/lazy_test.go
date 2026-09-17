@@ -499,11 +499,11 @@ func TestLazyCacheMissAsyncSpawn(t *testing.T) {
 		t.Fatalf("first-Execute error %q should mention 'initializing' or 'next turn'", msg)
 	}
 
-	// Wait for the async spawn to complete (host.Add happens on the run()
-	// goroutine kicked by Execute). The goroutine swaps the registry itself, so
-	// the next model request sees the real schemas without another placeholder
-	// Execute call.
-	waitForServer(t, host, "mock", 5*time.Second)
+	// A retry waits on the lazy state machine's completion signal, so its return
+	// proves the registry swap has published the real tools.
+	if _, err := connect.Execute(ctx, json.RawMessage(`{}`)); err != nil {
+		t.Fatalf("second Execute after cache-miss spawn: %v", err)
+	}
 
 	if _, found := reg.Get("mcp__mock__connect"); found {
 		t.Errorf("connect stub should be removed after swap, names=%v", reg.Names())
