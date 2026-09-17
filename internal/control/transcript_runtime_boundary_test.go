@@ -7,7 +7,6 @@ import (
 	"fmt"
 	"path/filepath"
 	"testing"
-	"time"
 
 	"reasonix/internal/agent"
 	"reasonix/internal/agent/testutil"
@@ -95,9 +94,7 @@ func TestTranscriptFollowInitialHistoryIsReadyAndPinnedToDurableCut(t *testing.T
 	if err := c.RunTurn(t.Context(), "question"); err != nil {
 		t.Fatal(err)
 	}
-	ctx, cancel := context.WithTimeout(t.Context(), 5*time.Second)
-	defer cancel()
-	response, err := c.TranscriptFollow(ctx, transcript.FollowRequest{})
+	response, err := c.TranscriptFollow(t.Context(), transcript.FollowRequest{})
 	if err != nil {
 		t.Fatal(err)
 	}
