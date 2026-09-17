@@ -116,7 +116,7 @@
             "zh": "更快的本地历史加载"
           },
           "body": {
-            "en": "Local session history appears immediately when switching tabs, without waiting for runtime startup.",
+            "en": "Local session history appears immediately when switching tabs, without waiting for the runtime to start.",
             "zh": "切换标签页时，本地会话历史立即显示，无需等待运行时启动。"
           },
           "refs": [
@@ -146,24 +146,6 @@
         {
           "kind": "improved",
           "targets": [
-            "desktop",
-            "cli"
-          ],
-          "title": {
-            "en": "Unified model credential recovery",
-            "zh": "统一模型凭据恢复"
-          },
-          "body": {
-            "en": "Desktop and CLI now share credential-slot, receipt, and recovery services, preventing missing or rejected credentials from reaching new turns.",
-            "zh": "桌面端与 CLI 现在共享凭据槽、回执和恢复服务，防止缺失或被拒绝的凭据进入新对话轮次。"
-          },
-          "refs": [
-            10460
-          ]
-        },
-        {
-          "kind": "improved",
-          "targets": [
             "desktop"
           ],
           "title": {
@@ -171,8 +153,8 @@
             "zh": "可展开会话与工作区上下文"
           },
           "body": {
-            "en": "Sidebar now shows 5 conversations per project or group, expandable in batches, and new empty sessions include project and branch context.",
-            "zh": "侧栏现在每个项目或分组显示 5 个会话，可分批展开，新空会话包含项目和分支上下文。"
+            "en": "Sidebar now shows 5 conversations per project or group, expandable in batches, with project and branch context for new sessions.",
+            "zh": "侧栏现在每个项目或分组显示 5 个会话，可分批展开，新会话支持项目和分支上下文。"
           },
           "refs": [
             10426
@@ -184,12 +166,29 @@
             "desktop"
           ],
           "title": {
-            "en": "User message history pagination fixes",
-            "zh": "用户消息历史分页修复"
+            "en": "Preserve compacted context across restart",
+            "zh": "重启后保留压缩上下文"
           },
           "body": {
-            "en": "Sent messages no longer duplicate or disappear after confirmation, even when confirmation occurs outside the visible window.",
-            "zh": "已发送消息在确认后不再重复或消失，即使确认发生在可见窗口之外。"
+            "en": "Compacted model context now survives session switches, restarts, and legacy imports.",
+            "zh": "压缩后的模型上下文现在在切换会话、重启和导入旧会话后仍然保留。"
+          },
+          "refs": [
+            10430
+          ]
+        },
+        {
+          "kind": "fixed",
+          "targets": [
+            "desktop"
+          ],
+          "title": {
+            "en": "Fix user-message history pagination",
+            "zh": "修复用户消息历史分页"
+          },
+          "body": {
+            "en": "Sent messages no longer duplicate or disappear when history pages are reclaimed or confirmed outside the visible window.",
+            "zh": "发送的消息在历史页面回收或确认超出可见窗口时不再重复或消失。"
           },
           "refs": [
             10438
@@ -198,6 +197,22 @@
       ],
       "changes": {
         "new": [
+          {
+            "targets": [
+              "desktop"
+            ],
+            "title": {
+              "en": "Unified model credential recovery",
+              "zh": "统一模型凭据恢复"
+            },
+            "body": {
+              "en": "Desktop and CLI now share credential-slot, receipt, and recovery services, preventing missing credentials from reaching new turns.",
+              "zh": "桌面端与 CLI 现在共享凭据槽、回执和恢复服务，防止缺失凭据进入新对话轮次。"
+            },
+            "refs": [
+              10460
+            ]
+          },
           {
             "targets": [
               "desktop"
@@ -219,15 +234,15 @@
               "desktop"
             ],
             "title": {
-              "en": "Reject portable launches from remote storage",
-              "zh": "拦截便携版共享目录启动"
+              "en": "Background conversation notifications",
+              "zh": "后台对话通知"
             },
             "body": {
-              "en": "Windows portable launches from UNC or mapped drives are rejected with actionable guidance.",
-              "zh": "从 UNC 或映射驱动器启动 Windows 便携版会被拒绝，并提供可操作的指导。"
+              "en": "Background conversations now play attention sounds and show notifications without switching tabs.",
+              "zh": "后台对话现在无需切换标签页即可播放提示音并显示通知。"
             },
             "refs": [
-              10442
+              10382
             ]
           }
         ],
@@ -241,8 +256,8 @@
               "zh": "项目树展开与缓存逻辑"
             },
             "body": {
-              "en": "Project tree now uses a five-row initial window and five-row increments, with separate cache invalidation.",
-              "zh": "项目树现在使用五行初始窗口和五行增量，并分离缓存失效。"
+              "en": "Project tree now uses a five-row initial window and five-row increments, with separate cache invalidation from visibility.",
+              "zh": "项目树现在使用五行初始窗口和五行增量，缓存失效与可见性分离。"
             },
             "refs": [
               10447
@@ -253,12 +268,12 @@
               "desktop"
             ],
             "title": {
-              "en": "Default session sorting by creation time",
+              "en": "Default session sorting to creation time",
               "zh": "默认按创建时间排序"
             },
             "body": {
-              "en": "Existing workbench sort preferences are reset to creation time once on first launch.",
-              "zh": "首次启动时，现有工作台排序偏好会重置为创建时间。"
+              "en": "Existing workbench sort preferences reset to creation time once on first launch of this release.",
+              "zh": "此版本首次启动时，现有工作台排序偏好一次性重置为创建时间。"
             },
             "refs": [
               10444
@@ -269,15 +284,30 @@
               "desktop"
             ],
             "title": {
-              "en": "Canonical session unread state",
-              "zh": "规范会话未读状态"
+              "en": "Reject Windows portable launches from remote storage",
+              "zh": "拦截 Windows 便携版共享目录启动"
             },
             "body": {
-              "en": "Unread indicators now track a durable resultSequence, preventing false unread marks from metadata changes.",
-              "zh": "未读指示器现在跟踪持久化的 resultSequence，防止元数据更改导致错误的未读标记。"
+              "en": "Windows portable launches from UNC and mapped remote drives are now rejected before Electron starts.",
+              "zh": "现在在 Electron 启动前拒绝从 UNC 和映射远程驱动器启动 Windows 便携版。"
             },
             "refs": [
-              10424,
+              10442
+            ]
+          },
+          {
+            "targets": [
+              "desktop"
+            ],
+            "title": {
+              "en": "Fix catalog migration unread baseline",
+              "zh": "修复目录迁移的未读基线"
+            },
+            "body": {
+              "en": "Migrated history no longer shows blue attention dots due to placeholder read baselines.",
+              "zh": "迁移的历史记录不再因占位读取基线而显示蓝色未读点。"
+            },
+            "refs": [
               10428
             ]
           },
@@ -286,12 +316,28 @@
               "desktop"
             ],
             "title": {
-              "en": "Durable local session operations decoupled from tabs",
+              "en": "Fix canonical session unread state",
+              "zh": "修复规范会话未读状态"
+            },
+            "body": {
+              "en": "Unread state now tracks only visible terminal assistant results, not metadata changes.",
+              "zh": "未读状态现在只跟踪可见的终端助手结果，而不是元数据更改。"
+            },
+            "refs": [
+              10424
+            ]
+          },
+          {
+            "targets": [
+              "desktop"
+            ],
+            "title": {
+              "en": "Decouple durable local session operations from runtime tabs",
               "zh": "本地会话持久化操作与运行时解耦"
             },
             "body": {
-              "en": "Sidebar operations now resolve by explicit SessionRef, with target-scoped AI title generation.",
-              "zh": "侧栏操作现在通过显式 SessionRef 解析，AI 标题生成按目标范围进行。"
+              "en": "Session operations now resolve by explicit SessionRef, with improved title CAS and lifecycle guards.",
+              "zh": "会话操作现在通过显式 SessionRef 解析，改进了标题 CAS 和生命周期防护。"
             },
             "refs": [
               10409
@@ -302,15 +348,15 @@
               "desktop"
             ],
             "title": {
-              "en": "Compacted context preserved across restart",
-              "zh": "重启后保留压缩上下文"
+              "en": "Repair official provider endpoint protocol conflicts",
+              "zh": "自动修复官方供应商协议与端点冲突"
             },
             "body": {
-              "en": "Compacted model context now persists across session switches, restarts, and legacy imports.",
-              "zh": "压缩后的模型上下文现在在会话切换、重启和旧版导入后保持不变。"
+              "en": "Conflicting official provider protocol/endpoint settings are now repaired automatically when the URL uniquely matches a catalog route.",
+              "zh": "当 URL 唯一匹配目录路由时，现在会自动修复冲突的官方供应商协议/端点设置。"
             },
             "refs": [
-              10430
+              10411
             ]
           },
           {
@@ -318,108 +364,12 @@
               "desktop"
             ],
             "title": {
-              "en": "Background conversation notifications",
-              "zh": "后台对话通知"
+              "en": "Gate updater by stable build identity",
+              "zh": "按正式构建身份限制桌面更新器"
             },
             "body": {
-              "en": "Questions from background conversations now play attention sounds and show notifications without tab switching.",
-              "zh": "后台对话的问题现在会播放提示音并显示通知，无需切换标签页。"
-            },
-            "refs": [
-              10382
-            ]
-          },
-          {
-            "targets": [
-              "desktop"
-            ],
-            "title": {
-              "en": "Pause and recovery append-only",
-              "zh": "暂停与恢复改为追加式终结"
-            },
-            "body": {
-              "en": "Stopping a turn now uses append-only mutations, preventing history corruption.",
-              "zh": "停止对话轮次现在使用追加式变更，防止历史记录损坏。"
-            },
-            "refs": [
-              10383
-            ]
-          },
-          {
-            "targets": [
-              "desktop"
-            ],
-            "title": {
-              "en": "AI session rename for canonical history",
-              "zh": "迁移后会话 AI 重命名修复"
-            },
-            "body": {
-              "en": "AI rename now reads authored turns from canonical durable history, fixing failures on migrated conversations.",
-              "zh": "AI 重命名现在从规范持久历史中读取用户消息，修复了迁移会话上的失败。"
-            },
-            "refs": [
-              10389
-            ]
-          },
-          {
-            "targets": [
-              "desktop"
-            ],
-            "title": {
-              "en": "Transcript recovery and completion with Follow v2",
-              "zh": "统一会话同步与完成机制"
-            },
-            "body": {
-              "en": "Completed, cancelled, or reconnecting chats now preserve visible text and correct run state.",
-              "zh": "已完成、取消或重新连接的聊天现在保留可见文本和正确的运行状态。"
-            },
-            "refs": [
-              10385
-            ]
-          },
-          {
-            "targets": [
-              "desktop"
-            ],
-            "title": {
-              "en": "Workspace dock auto-collapse",
-              "zh": "关闭最后一个标签页后自动收起工作区"
-            },
-            "body": {
-              "en": "Closing the last workspace tab now collapses the right dock, returning space to the conversation.",
-              "zh": "关闭最后一个工作区标签页现在会收起右侧停靠栏，将空间还给对话。"
-            },
-            "refs": [
-              10388
-            ]
-          },
-          {
-            "targets": [
-              "desktop"
-            ],
-            "title": {
-              "en": "Command palette search moved to sidebar footer",
-              "zh": "命令面板搜索移至侧栏底部"
-            },
-            "body": {
-              "en": "The command palette search action now lives in the sidebar footer, preserving shortcuts.",
-              "zh": "命令面板搜索操作现在位于侧栏底部，保留快捷键。"
-            },
-            "refs": [
-              10390
-            ]
-          },
-          {
-            "targets": [
-              "desktop"
-            ],
-            "title": {
-              "en": "Updater gated by stable build identity",
-              "zh": "按正式构建身份限制更新器"
-            },
-            "body": {
-              "en": "Production updater is now gated behind exact stable channel and version, with six-hour throttle.",
-              "zh": "生产更新器现在受限于精确的稳定渠道和版本，并带有六小时节流。"
+              "en": "Updater is now disabled in canary, preview, test, dev, and prerelease builds, with automatic checks throttled to once per six hours.",
+              "zh": "更新器现在在 canary、preview、test、dev 和 prerelease 构建中禁用，自动检查限制为每六小时一次。"
             },
             "refs": [
               10406
@@ -430,33 +380,15 @@
               "desktop"
             ],
             "title": {
-              "en": "Official provider endpoint protocol repair",
-              "zh": "自动修复官方供应商协议冲突"
+              "en": "Unify session archive, trash and historical recovery",
+              "zh": "统一会话归档、回收站与历史恢复"
             },
             "body": {
-              "en": "Conflicting official provider protocols are repaired automatically when the request URL uniquely matches a catalog route.",
-              "zh": "当请求 URL 唯一匹配目录路由时，自动修复冲突的官方供应商协议。"
+              "en": "Archived sessions now use one durable lifecycle: normal session → Trash → restore or permanent deletion.",
+              "zh": "归档会话现在使用一个持久生命周期：正常会话 → 回收站 → 恢复或永久删除。"
             },
             "refs": [
-              10411
-            ]
-          }
-        ],
-        "fixed": [
-          {
-            "targets": [
-              "desktop"
-            ],
-            "title": {
-              "en": "Trash restore and permanent deletion serialization",
-              "zh": "串行化回收站恢复与永久删除"
-            },
-            "body": {
-              "en": "Trash deletion now keeps the original confirmation snapshot through refresh, lock waits, retries, and restart.",
-              "zh": "回收站删除现在在刷新、锁等待、重试和重启期间保留原始确认快照。"
-            },
-            "refs": [
-              10437
+              10396
             ]
           },
           {
@@ -464,60 +396,12 @@
               "desktop"
             ],
             "title": {
-              "en": "Catalog migration unread baseline",
-              "zh": "修复目录迁移的未读基线"
+              "en": "Restore legacy Desktop history without duplicate recovery copies",
+              "zh": "完善旧版对话迁移并排除重复恢复副本"
             },
             "body": {
-              "en": "Migrated history no longer shows false unread dots after catalog rebuild.",
-              "zh": "目录重建后，迁移的历史不再显示错误的未读点。"
-            },
-            "refs": [
-              10428
-            ]
-          },
-          {
-            "targets": [
-              "desktop"
-            ],
-            "title": {
-              "en": "Canonical history reuse across reopened tabs",
-              "zh": "修复重开会话的历史缓存复用"
-            },
-            "body": {
-              "en": "Warm history residents are now correctly rebound when the same session reopens under a new tab ID.",
-              "zh": "当同一会话在新标签 ID 下重新打开时，热历史缓存现在能正确重新绑定。"
-            },
-            "refs": [
-              10423
-            ]
-          },
-          {
-            "targets": [
-              "desktop"
-            ],
-            "title": {
-              "en": "Submission identity and persistent PowerShell",
-              "zh": "修复消息身份与持久 PowerShell"
-            },
-            "body": {
-              "en": "Duplicate message rendering and tool view disagreements are fixed; Windows agent uses persistent PowerShell.",
-              "zh": "修复了重复消息渲染和工具视图不一致；Windows 代理使用持久 PowerShell。"
-            },
-            "refs": [
-              10392
-            ]
-          },
-          {
-            "targets": [
-              "desktop"
-            ],
-            "title": {
-              "en": "Legacy Desktop history restoration",
-              "zh": "完善旧版对话迁移"
-            },
-            "body": {
-              "en": "Upgrades now discover and consolidate all legacy history without duplicate recovery copies.",
-              "zh": "升级现在能发现并整合所有旧版历史，不产生重复的恢复副本。"
+              "en": "Desktop upgrades now discover and consolidate legacy history across generations without duplicating recovery copies.",
+              "zh": "桌面升级现在跨代发现并整合旧版历史，不重复恢复副本。"
             },
             "refs": [
               10395
@@ -528,15 +412,210 @@
               "desktop"
             ],
             "title": {
-              "en": "SessionID-only Desktop persistence",
+              "en": "Fix submission identity and persistent PowerShell",
+              "zh": "修复消息身份、工具状态与持久 PowerShell"
+            },
+            "body": {
+              "en": "Single sends no longer render twice, and Windows Agent execution uses persistent PowerShell with structured completion.",
+              "zh": "单次发送不再渲染两次，Windows Agent 执行使用带结构化完成的持久 PowerShell。"
+            },
+            "refs": [
+              10392
+            ]
+          },
+          {
+            "targets": [
+              "desktop"
+            ],
+            "title": {
+              "en": "Move command palette search to sidebar footer",
+              "zh": "将命令面板搜索移至侧栏底部"
+            },
+            "body": {
+              "en": "Command palette search action moved from topic bar to the first sidebar footer slot.",
+              "zh": "命令面板搜索操作从主题栏移至侧栏底部的第一个插槽。"
+            },
+            "refs": [
+              10390
+            ]
+          },
+          {
+            "targets": [
+              "desktop"
+            ],
+            "title": {
+              "en": "Collapse workspace dock when last tab closes",
+              "zh": "关闭最后一个标签页后自动收起工作区"
+            },
+            "body": {
+              "en": "Closing the last workspace tab now collapses the entire right dock and returns its space to the conversation.",
+              "zh": "关闭最后一个工作区标签页现在会收起整个右侧停靠栏，并将其空间返回给对话。"
+            },
+            "refs": [
+              10388
+            ]
+          },
+          {
+            "targets": [
+              "desktop"
+            ],
+            "title": {
+              "en": "Fix AI session rename for canonical history",
+              "zh": "修复迁移后会话 AI 重命名失败"
+            },
+            "body": {
+              "en": "AI rename now reads authored turns from canonical durable history, fixing failures for migrated conversations.",
+              "zh": "AI 重命名现在从规范持久历史中读取用户消息，修复了迁移对话的重命名失败。"
+            },
+            "refs": [
+              10389
+            ]
+          },
+          {
+            "targets": [
+              "desktop"
+            ],
+            "title": {
+              "en": "Unify transcript recovery and completion with Follow v2",
+              "zh": "统一会话同步与完成机制"
+            },
+            "body": {
+              "en": "Completed, cancelled or reconnecting chats no longer lose visible text or show stale run state.",
+              "zh": "已完成、取消或重新连接的聊天不再丢失可见文本或显示过时的运行状态。"
+            },
+            "refs": [
+              10385
+            ]
+          },
+          {
+            "targets": [
+              "desktop"
+            ],
+            "title": {
+              "en": "Make pause and recovery append-only",
+              "zh": "暂停与恢复改为追加式终结"
+            },
+            "body": {
+              "en": "Stopping a turn and opening another conversation no longer leaves durable history unreadable.",
+              "zh": "停止一个轮次并打开另一个对话不再导致持久历史不可读。"
+            },
+            "refs": [
+              10383
+            ]
+          },
+          {
+            "targets": [
+              "desktop"
+            ],
+            "title": {
+              "en": "Restore ProjectTree and integrate session recovery fixes",
+              "zh": "恢复项目树并整合会话恢复修复"
+            },
+            "body": {
+              "en": "ProjectTree workbench sidebar restored, with session, history, chat-display, and terminal repairs integrated.",
+              "zh": "恢复了 ProjectTree 工作台侧栏，并整合了会话、历史、聊天显示和终端修复。"
+            },
+            "refs": [
+              10380
+            ]
+          },
+          {
+            "targets": [
+              "desktop"
+            ],
+            "title": {
+              "en": "Adopt SessionID-only Desktop persistence",
               "zh": "升级 Desktop SessionID 会话架构"
             },
             "body": {
-              "en": "Canonical sessions no longer disappear after switching or restart, thanks to SessionID-based persistence.",
-              "zh": "基于 SessionID 的持久化使规范会话在切换或重启后不再消失。"
+              "en": "Desktop canonical sessions now persist by SessionID only, preventing disappearance after switching or restart.",
+              "zh": "桌面规范会话现在仅按 SessionID 持久化，防止切换或重启后消失。"
             },
             "refs": [
               10326
+            ]
+          }
+        ],
+        "fixed": [
+          {
+            "targets": [
+              "desktop"
+            ],
+            "title": {
+              "en": "Keep migrated history stable through restart",
+              "zh": "保持迁移会话的身份并清除恢复后的错误提示"
+            },
+            "body": {
+              "en": "Startup and history continuation reuse the migrated session identity, preventing duplicate imports after metadata refresh. Successful history recovery also clears its error state without leaving a stale chat warning.",
+              "zh": "启动和继续读取历史时复用已迁移的会话身份，避免元数据刷新后重复导入。历史恢复成功后清除错误状态，不再残留错误的聊天警告。"
+            },
+            "refs": [
+              10472
+            ]
+          },
+          {
+            "targets": [
+              "desktop"
+            ],
+            "title": {
+              "en": "Stabilize Windows release validation",
+              "zh": "稳定 Windows 发版验证"
+            },
+            "body": {
+              "en": "Fixed Windows validation defects including POSIX-only tests running on Windows and shell probe cache poisoning.",
+              "zh": "修复了 Windows 验证缺陷，包括在 Windows 上运行仅限 POSIX 的测试和 shell 探测缓存污染。"
+            },
+            "refs": [
+              10468
+            ]
+          },
+          {
+            "targets": [
+              "desktop",
+              "cli"
+            ],
+            "title": {
+              "en": "Bound PowerShell cold-start handshake",
+              "zh": "统一 PowerShell 冷启动握手预算"
+            },
+            "body": {
+              "en": "PowerShell now gets a 30-second budget from process start through connection acceptance and ready-frame receipt.",
+              "zh": "PowerShell 现在从进程启动到连接接受和就绪帧接收有 30 秒预算。"
+            },
+            "refs": [
+              10464
+            ]
+          },
+          {
+            "targets": [
+              "desktop"
+            ],
+            "title": {
+              "en": "Fix canonical history reuse across reopened tabs",
+              "zh": "修复重开会话的历史缓存复用"
+            },
+            "body": {
+              "en": "Canonical history windows now reuse warm residents when the same session reopens under a new tab ID.",
+              "zh": "规范历史窗口现在在同一会话以新标签 ID 重新打开时复用热驻留。"
+            },
+            "refs": [
+              10423
+            ]
+          },
+          {
+            "targets": [
+              "desktop"
+            ],
+            "title": {
+              "en": "Serialize trash restore and permanent deletion",
+              "zh": "串行化回收站恢复与永久删除"
+            },
+            "body": {
+              "en": "Trash deletion now keeps the user's original confirmation snapshot through refresh, lock waits, retries, and restart.",
+              "zh": "回收站删除现在在刷新、锁等待、重试和重启期间保留用户的原始确认快照。"
+            },
+            "refs": [
+              10437
             ]
           }
         ]
@@ -552,8 +631,8 @@
             "zh": "会话注册表升级"
           },
           "body": {
-            "en": "Existing sessions are migrated to the new registry format on first launch; older clients cannot edit the upgraded registry.",
-            "zh": "首次启动时，现有会话会迁移到新的注册表格式；旧客户端无法编辑升级后的注册表。"
+            "en": "Existing sessions are migrated to the new registry format on first launch. Older clients cannot edit an upgraded v3 registry.",
+            "zh": "首次启动时，现有会话将迁移到新的注册表格式。旧客户端无法编辑升级后的 v3 注册表。"
           },
           "refs": [
             10440
@@ -566,19 +645,35 @@
           ],
           "title": {
             "en": "Windows installer identity",
-            "zh": "Windows 安装版本身份"
+            "zh": "Windows 安装程序身份"
           },
           "body": {
             "en": "Installed test builds intentionally replace the same product and share data; portable builds keep program files separate.",
-            "zh": "安装的测试构建有意替换同一产品并共享数据；便携版保持程序文件独立。"
+            "zh": "安装的测试构建有意替换同一产品并共享数据；便携构建保持程序文件独立。"
           },
           "refs": [
             10451
           ]
-        }
-      ],
-      "risks": [
+        },
         {
+          "level": "info",
+          "targets": [
+            "desktop"
+          ],
+          "title": {
+            "en": "Updater gating",
+            "zh": "更新器限制"
+          },
+          "body": {
+            "en": "Updater is disabled in non-stable builds. Stable updates remain explicit: checks only read metadata, and download/install begins after user action.",
+            "zh": "非稳定构建中更新器已禁用。稳定更新保持显式：检查仅读取元数据，下载/安装需用户操作后开始。"
+          },
+          "refs": [
+            10406
+          ]
+        },
+        {
+          "level": "warning",
           "targets": [
             "desktop"
           ],
@@ -587,14 +682,15 @@
             "zh": "降级需要新读取器"
           },
           "body": {
-            "en": "After upgrading storage revision, downgrading requires retaining the new reader or restoring a complete pre-upgrade backup.",
-            "zh": "升级存储修订后，降级需要保留新读取器或恢复完整的升级前备份。"
+            "en": "After pause/recovery changes, downgrading requires retaining the new reader or restoring a complete pre-upgrade backup.",
+            "zh": "暂停/恢复更改后，降级需要保留新读取器或恢复完整的升级前备份。"
           },
           "refs": [
             10383
           ]
         }
       ],
+      "risks": [],
       "contributors": [
         "SivanCola",
         "github-actions[bot]"
