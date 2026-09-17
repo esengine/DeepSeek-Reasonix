@@ -4,9 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"fmt"
-	"net/url"
 	"os"
-	"path/filepath"
 )
 
 // BackupExisting reads an existing database without running schema migrations.
@@ -20,12 +18,9 @@ func BackupExisting(ctx context.Context, path, destination string) error {
 	if !info.Mode().IsRegular() {
 		return fmt.Errorf("topic state is not a regular file")
 	}
-	u := url.URL{Scheme: "file", Path: filepath.ToSlash(path)}
-	q := u.Query()
-	q.Set("mode", "ro")
-	q.Add("_pragma", "busy_timeout(5000)")
-	u.RawQuery = q.Encode()
-	db, err := sql.Open("sqlite", u.String())
+	// diskFileDSN handles Windows drive letters (file:///C:/...); a bare
+	// file://C:/... URI fails with "invalid uri authority: C:".
+	db, err := sql.Open("sqlite", diskFileDSN(path)+"&mode=ro&_pragma=busy_timeout%285000%29")
 	if err != nil {
 		return err
 	}

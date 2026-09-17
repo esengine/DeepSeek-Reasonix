@@ -4,6 +4,8 @@ import (
 	"database/sql"
 	"os"
 	"path/filepath"
+	"runtime"
+	"strings"
 	"testing"
 )
 
@@ -32,5 +34,20 @@ func TestBackupExistingIncludesWALAndUnknownTables(t *testing.T) {
 	}
 	if err := BackupExisting(t.Context(), filepath.Join(t.TempDir(), "missing"), dest); !os.IsNotExist(err) {
 		t.Fatalf("missing source: %v", err)
+	}
+}
+
+// Windows drive paths must become file:///C:/... URIs; file://C:/... makes
+// SQLite reject the drive letter as an invalid URI authority.
+func TestBackupDSNHasNoURIAuthority(t *testing.T) {
+	if runtime.GOOS != "windows" {
+		t.Skip("drive-letter URI form only applies on Windows")
+	}
+	dsn := diskFileDSN(`C:\Users\苏\AppData\Roaming\reasonix\topics.sqlite`)
+	if strings.HasPrefix(dsn, "file://C:") {
+		t.Fatalf("DSN keeps the drive letter as a URI authority: %s", dsn)
+	}
+	if !strings.HasPrefix(dsn, "file:///C:/") {
+		t.Fatalf("DSN is not a file:///C:/ URI: %s", dsn)
 	}
 }
