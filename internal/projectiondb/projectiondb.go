@@ -181,10 +181,10 @@ func Open(ctx context.Context, opts OpenOptions) (*Handle, error) {
 	return &Handle{DB: db, Status: status}, nil
 }
 
-// diskFileDSN builds a cross-platform SQLite file URI. Windows drive paths must
+// DiskFileDSN builds a cross-platform SQLite file URI. Windows drive paths must
 // be file:///C:/...; a bare file:C:\... URI fails to open and previously forced
 // silent memory fallback during rebuild.
-func diskFileDSN(path string) string {
+func DiskFileDSN(path string) string {
 	abs, err := filepath.Abs(path)
 	if err != nil {
 		abs = path
@@ -207,7 +207,7 @@ func open(ctx context.Context, opts OpenOptions, mode Mode) (*sql.DB, error) {
 		dsn = fmt.Sprintf("file:reasonix-%s-%d-%d?mode=memory&cache=shared", url.PathEscape(opts.MemoryName),
 			opts.Now().UnixNano(), memoryDatabaseSequence.Add(1))
 	} else {
-		dsn = diskFileDSN(opts.Path)
+		dsn = DiskFileDSN(opts.Path)
 	}
 	db, err := sql.Open("sqlite", dsn)
 	if err != nil {
@@ -346,7 +346,7 @@ func Inspect(ctx context.Context, path string) Inspection {
 	}
 	out.Exists = true
 	out.Size = info.Size()
-	db, err := sql.Open("sqlite", diskFileDSN(path)+"&mode=ro&immutable=1")
+	db, err := sql.Open("sqlite", DiskFileDSN(path)+"&mode=ro&immutable=1")
 	if err != nil {
 		out.Error = err.Error()
 		return out

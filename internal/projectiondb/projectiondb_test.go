@@ -149,7 +149,7 @@ func TestRebuildCanRetainPreviousDatabaseForRollback(t *testing.T) {
 
 func TestDiskFileDSNUsesCrossPlatformURI(t *testing.T) {
 	t.Parallel()
-	dsn := diskFileDSN(filepath.Join(t.TempDir(), "catalog.sqlite"))
+	dsn := DiskFileDSN(filepath.Join(t.TempDir(), "catalog.sqlite"))
 	if !strings.HasPrefix(dsn, "file:") {
 		t.Fatalf("dsn=%q", dsn)
 	}

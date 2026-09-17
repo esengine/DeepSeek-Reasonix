@@ -7,7 +7,6 @@ import (
 	"encoding/hex"
 	"errors"
 	"fmt"
-	"net/url"
 	"os"
 	"path/filepath"
 	"runtime"
@@ -680,8 +679,7 @@ func Inspect(ctx context.Context, path string) (Status, error) {
 		status.LastError = inspection.Error
 		return status, nil
 	}
-	u := &url.URL{Scheme: "file", Path: path}
-	db, err := sql.Open("sqlite", u.String()+"?mode=ro&_pragma=busy_timeout%28150%29")
+	db, err := sql.Open("sqlite", projectiondb.DiskFileDSN(path)+"&mode=ro")
 	if err != nil {
 		return status, err
 	}
