@@ -388,6 +388,9 @@ func refreshCLIStyles() {
 	inputBoxStyle = withThemeBorderFG(lipgloss.NewStyle().
 		Border(lipgloss.NormalBorder(), true, false, true, false), activeCLITheme.accent).
 		PaddingLeft(1)
+	if colorOn() {
+		inputBoxStyle = inputBoxStyle.Background(themeLipColor(activeCLITheme.userBubbleBG))
+	}
 	todoPanelStyle = withThemeBorderFG(lipgloss.NewStyle().
 		Border(lipgloss.NormalBorder(), true, false, false, false), activeCLITheme.border).
 		PaddingLeft(1)
