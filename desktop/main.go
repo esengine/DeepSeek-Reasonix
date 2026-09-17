@@ -60,6 +60,11 @@ func main() {
 	if code, ok := runWindowsSandboxHelperIfRequested(os.Args); ok {
 		os.Exit(code)
 	}
+	// Contract generation is a build-time operation. Dispatch it before crash
+	// capture so packaging cannot create files in the operator's Reasonix home.
+	if dir, ok := emitContractDir(os.Args[1:]); ok {
+		os.Exit(runEmitContract(dir))
+	}
 	// Internal watcher-helper entry: the host-shared skill watch service
 	// re-enters this executable so Windows directory watching never runs
 	// in-process. Dispatch before any application initialization.

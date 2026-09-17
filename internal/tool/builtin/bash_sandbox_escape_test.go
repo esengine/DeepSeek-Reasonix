@@ -86,6 +86,7 @@ func TestBashSandboxUnavailableDoesNotOpenLegacyDenialPrompt(t *testing.T) {
 }
 
 func TestBashLegacySessionEscapeCannotBypassForegroundSandbox(t *testing.T) {
+	requirePOSIXShellTest(t)
 	sh := sandbox.ResolveShell("", "", nil)
 	oldCommand := bashSandboxCommand
 	bashSandboxCommand = func(spec sandbox.Spec, sh sandbox.Shell, command string) ([]string, bool) {

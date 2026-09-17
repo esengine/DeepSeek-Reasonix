@@ -16,6 +16,7 @@ import (
 // injected on the context, the wait tool collects its output, and bash_output
 // reads it — the same path the agent drives.
 func TestBackgroundBashWaitAndOutput(t *testing.T) {
+	requirePOSIXShellTest(t)
 	m := jobs.NewManager(event.Discard)
 	defer m.Close()
 	ctx := jobs.WithManager(context.Background(), m)
@@ -150,6 +151,7 @@ func TestWaitInPlanModeDefersBackgroundEvidence(t *testing.T) {
 
 // kill_shell terminates a long-running background job.
 func TestBackgroundKill(t *testing.T) {
+	requirePOSIXShellTest(t)
 	m := jobs.NewManager(event.Discard)
 	defer m.Close()
 	ctx := jobs.WithManager(context.Background(), m)

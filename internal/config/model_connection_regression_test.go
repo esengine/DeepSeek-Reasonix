@@ -3,6 +3,7 @@ package config
 import (
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 
@@ -148,6 +149,12 @@ func TestAuditRepairRefusesLinkedHome(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	if runtime.GOOS == "windows" {
+		if diagnosticStatus(report, "repair") != "failed" {
+			t.Fatalf("linked home repair status = %s, want failed", diagnosticStatus(report, "repair"))
+		}
+		return
+	}
 	info, err := os.Stat(path)
 	if err != nil {
 		t.Fatal(err)
@@ -169,7 +176,7 @@ func TestRepairPreservesCredentialContentsAndFileIdentity(t *testing.T) {
 		t.Fatal(err)
 	}
 	report, err := DiagnoseCredentials(CredentialDiagnosticOptions{Repair: true})
-	if err != nil || diagnosticStatus(report, "repair") != "passed" {
+	if err != nil || (runtime.GOOS != "windows" && diagnosticStatus(report, "repair") != "passed") {
 		t.Fatalf("repair: %+v, %v", report, err)
 	}
 	after, err := os.Stat(path)

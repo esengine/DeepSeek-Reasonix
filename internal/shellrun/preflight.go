@@ -70,7 +70,11 @@ func (c *probeFailures) check(ctx context.Context, req Request) *Result {
 	if req.Env == nil {
 		req.Env = os.Environ()
 	}
-	encoded, _ := json.Marshal([]any{req.ProbeArgv, req.Dir, req.Env})
+	probeTimeout := 10 * time.Second
+	if req.Timeout > 0 && req.Timeout < probeTimeout {
+		probeTimeout = req.Timeout
+	}
+	encoded, _ := json.Marshal([]any{req.ProbeArgv, req.Dir, req.Env, probeTimeout})
 	key := sha256.Sum256(encoded)
 	c.mu.Lock()
 	entry, ok := c.entries[key]
@@ -83,10 +87,7 @@ func (c *probeFailures) check(ctx context.Context, req Request) *Result {
 	probe.Argv, probe.ProbeArgv = req.ProbeArgv, nil
 	probe.CommandPreview = "shell startup and child-process preflight"
 	probe.Progress = nil
-	probe.Timeout = 10 * time.Second
-	if req.Timeout > 0 && req.Timeout < probe.Timeout {
-		probe.Timeout = req.Timeout
-	}
+	probe.Timeout = probeTimeout
 	probe.Track = false
 	probe.PreserveWaitDelay = false
 	r := RunForeground(ctx, probe)

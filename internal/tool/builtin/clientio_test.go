@@ -197,6 +197,7 @@ func (f *fakeTerminal) RunCommand(_ context.Context, command, _ string, _ time.D
 }
 
 func TestBashRoutesToClientTerminal(t *testing.T) {
+	requirePOSIXShellTest(t)
 	term := &fakeTerminal{out: "client says hi", ok: true}
 	b := bash{workDir: t.TempDir(), terminal: term}
 	out, err := b.Execute(fullAccessBashTestContext(t.Context()), json.RawMessage(`{"command":"echo hi"}`))

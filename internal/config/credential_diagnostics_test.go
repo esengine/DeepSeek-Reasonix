@@ -3,6 +3,7 @@ package config
 import (
 	"os"
 	"path/filepath"
+	"runtime"
 	"testing"
 )
 
@@ -83,7 +84,13 @@ func TestCredentialDiagnosticsProbeAndDryRunDoNotChangeCredential(t *testing.T) 
 	if string(raw) != "KEEP=secret\n" || before.Mode().Perm() != after.Mode().Perm() {
 		t.Fatalf("dry-run mutated credentials: mode %o -> %o, body %q", before.Mode().Perm(), after.Mode().Perm(), raw)
 	}
-	if diagnosticStatus(report, "directory_replace_probe") != "passed" || diagnosticStatus(report, "repair") != "passed" || len(report.Actions) == 0 {
+	if diagnosticStatus(report, "directory_replace_probe") != "passed" {
+		t.Fatalf("report = %+v", report)
+	}
+	// GitHub's elevated Windows runner creates temporary files owned by the
+	// built-in Administrators group, so repair correctly stays fail-closed even
+	// though the non-mutating directory probe remains valid there.
+	if runtime.GOOS != "windows" && (diagnosticStatus(report, "repair") != "passed" || len(report.Actions) == 0) {
 		t.Fatalf("report = %+v", report)
 	}
 }

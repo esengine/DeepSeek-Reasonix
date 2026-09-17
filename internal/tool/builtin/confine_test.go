@@ -352,6 +352,7 @@ func TestBashSandboxConfinement(t *testing.T) {
 }
 
 func TestBashEnforceRejectsWhenSandboxUnavailable(t *testing.T) {
+	requirePOSIXShellTest(t)
 	t.Setenv("PATH", t.TempDir())
 
 	exe, err := os.Executable()

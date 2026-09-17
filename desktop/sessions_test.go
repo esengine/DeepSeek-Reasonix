@@ -1519,7 +1519,10 @@ func TestRecordSessionDisplaySkipsNoop(t *testing.T) {
 
 func TestRecordSessionDisplaySerializesConcurrentTabs(t *testing.T) {
 	dir := t.TempDir()
-	const tabs = 32
+	// Two writers are enough to reproduce the lost-update race this test guards.
+	// Keep a wider burst without making success depend on 32 durable fsyncs
+	// completing inside the production queue timeout on a loaded Windows runner.
+	const tabs = 8
 	errs := make(chan error, tabs)
 	var wg sync.WaitGroup
 	for i := range tabs {

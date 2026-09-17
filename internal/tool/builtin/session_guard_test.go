@@ -337,6 +337,7 @@ func TestSessionDataGuardCommandHintRelativeFromStateRoot(t *testing.T) {
 }
 
 func TestBashAppendsSessionDataHint(t *testing.T) {
+	requirePOSIXShellTest(t)
 	root, cliSession, _ := stateRootFor(t)
 	guard := NewSessionDataGuard(root, nil)
 	b := ConfineBash(sandbox.Spec{Mode: "off"}, guard)

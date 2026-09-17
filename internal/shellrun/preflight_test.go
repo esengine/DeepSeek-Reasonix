@@ -8,6 +8,7 @@ import (
 	"reflect"
 	"strings"
 	"testing"
+	"time"
 
 	"reasonix/internal/proc"
 	"reasonix/internal/sandbox"
@@ -56,7 +57,9 @@ func TestPreflightFailureCacheSeparatesExecutionContexts(t *testing.T) {
 	cache.check(context.Background(), req)
 	req.ProbeArgv = []string{"sandbox-helper", "policy-B", "shell"}
 	cache.check(context.Background(), req)
-	if calls != 4 {
+	req.Timeout = 150 * time.Millisecond
+	cache.check(context.Background(), req)
+	if calls != 5 {
 		t.Fatalf("distinct execution contexts shared failure: %d", calls)
 	}
 }
