@@ -428,7 +428,8 @@
           },
           {
             "targets": [
-              "desktop"
+              "desktop",
+              "cli"
             ],
             "title": {
               "en": "Submission identity and persistent PowerShell",
@@ -670,7 +671,8 @@
           },
           {
             "targets": [
-              "desktop"
+              "desktop",
+              "cli"
             ],
             "title": {
               "en": "Windows path URIs fixed",
@@ -686,7 +688,8 @@
           },
           {
             "targets": [
-              "desktop"
+              "desktop",
+              "cli"
             ],
             "title": {
               "en": "PowerShell cold-start handshake bound",
@@ -772,7 +775,25 @@
           ]
         }
       ],
-      "risks": [],
+      "risks": [
+        {
+          "targets": [
+            "desktop",
+            "cli"
+          ],
+          "title": {
+            "en": "One-time Windows prompt cache refresh",
+            "zh": "Windows 提示词缓存会刷新一次"
+          },
+          "body": {
+            "en": "The updated PowerShell tool description can reduce cache reuse on the first Windows request after upgrading; later requests reuse the new stable prefix.",
+            "zh": "升级后首次 Windows 请求可能因 PowerShell 工具描述更新而降低缓存复用；后续请求会复用新的稳定前缀。"
+          },
+          "refs": [
+            10392
+          ]
+        }
+      ],
       "contributors": [
         "SivanCola",
         "github-actions[bot]"
