@@ -7,15 +7,16 @@
       "channel": "stable",
       "targetingVersion": 1,
       "title": {
-        "en": "Reasonix Desktop 1.38.10",
-        "zh": "Reasonix 桌面版 1.38.10"
+        "en": "Reasonix 1.38.10",
+        "zh": "Reasonix 1.38.10"
       },
       "summary": {
-        "en": "This release focuses on session reliability, Windows installer improvements, and transcript stability.",
-        "zh": "此版本重点提升会话可靠性、Windows 安装程序改进和对话记录稳定性。"
+        "en": "This release improves session reliability, Windows upgrades and agent execution, file-path handling, and transcript stability.",
+        "zh": "此版本重点提升会话可靠性、Windows 升级与 Agent 执行、文件路径处理和对话记录稳定性。"
       },
       "surfaces": [
-        "desktop"
+        "desktop",
+        "cli"
       ],
       "guides": [
         {
@@ -64,14 +65,14 @@
         },
         {
           "title": {
-            "en": "Transcript Projection",
-            "zh": "对话记录投影"
+            "en": "Windows Agent Shell",
+            "zh": "Windows Agent Shell"
           },
           "body": {
-            "en": "How transcript projection works for display and storage.",
-            "zh": "对话记录投影如何用于显示和存储。"
+            "en": "How persistent PowerShell preserves state and reports command completion on Windows.",
+            "zh": "了解持久 PowerShell 如何在 Windows 上保留状态并报告命令完成情况。"
           },
-          "href": "https://github.com/esengine/DeepSeek-Reasonix/blob/e38c581a8c465975d7c8c4766243303e11cb275b/docs/TRANSCRIPT_PROJECTION.md"
+          "href": "https://github.com/esengine/DeepSeek-Reasonix/blob/e38c581a8c465975d7c8c4766243303e11cb275b/docs/WINDOWS_AGENT_SHELL.md"
         },
         {
           "title": {
@@ -126,15 +127,16 @@
         {
           "kind": "fixed",
           "targets": [
-            "desktop"
+            "desktop",
+            "cli"
           ],
           "title": {
             "en": "Windows path and upgrade fixes",
             "zh": "Windows 路径和升级修复"
           },
           "body": {
-            "en": "Fixed issues with Windows paths, legacy session upgrades, and installer identity.",
-            "zh": "修复了 Windows 路径、旧会话升级和安装程序身份的问题。"
+            "en": "Fixed Windows file URIs, CLI diagnostics, legacy session upgrades, and installer identity.",
+            "zh": "修复了 Windows 文件 URI、CLI 诊断、旧会话升级和安装程序身份问题。"
           },
           "refs": [
             10459,
@@ -380,7 +382,8 @@
           },
           {
             "targets": [
-              "desktop"
+              "desktop",
+              "cli"
             ],
             "title": {
               "en": "Persistent PowerShell",
@@ -514,7 +517,25 @@
           ]
         }
       ],
-      "risks": [],
+      "risks": [
+        {
+          "targets": [
+            "desktop",
+            "cli"
+          ],
+          "title": {
+            "en": "One-time Windows prompt cache refresh",
+            "zh": "Windows 提示词缓存会刷新一次"
+          },
+          "body": {
+            "en": "The updated PowerShell tool description can reduce cache reuse on the first Windows request after upgrading; later requests reuse the new stable prefix.",
+            "zh": "升级后首次 Windows 请求可能因 PowerShell 工具描述更新而降低缓存复用；后续请求会复用新的稳定前缀。"
+          },
+          "refs": [
+            10392
+          ]
+        }
+      ],
       "contributors": [
         "SivanCola"
       ],
