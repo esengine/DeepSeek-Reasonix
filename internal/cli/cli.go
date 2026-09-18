@@ -474,7 +474,7 @@ func withNotifications(sink event.Sink, cfg *config.Config) event.Sink {
 // registers "c" as a long flag name, which leaves "-c" unparseable
 // ("unknown shorthand flag: 'c' in -c") while accidentally accepting "--c".
 func registerContinueFlag(fs *pflag.FlagSet) *bool {
-	return fs.BoolP("continue", "c", false, "resume the most recent saved session")
+	return fs.BoolP("continue", "c", false, "resume the most recent saved session, or start a fresh one when none exists")
 }
 
 func runAgent(args []string, version string) int {
@@ -586,6 +586,9 @@ func runAgent(args []string, version string) int {
 	if rc != 0 {
 		return rc
 	}
+	// --continue that found nothing falls through to a fresh session, so it
+	// must not be reported as "continue" in telemetry.
+	continued := *cont && !resumeTarget.empty()
 	resumePath := resumeTarget.path
 	if *copySession {
 		copied, err := copyResumableSession(*model, resumePath, cfg)
@@ -603,7 +606,7 @@ func runAgent(args []string, version string) int {
 		}
 		resumePath = copied
 	}
-	sessionMode := cliTelemetrySessionMode(*cont, strings.TrimSpace(*resume) != "", *copySession)
+	sessionMode := cliTelemetrySessionMode(continued, strings.TrimSpace(*resume) != "", *copySession)
 	reporter := startCLITelemetry(cfg, telemetry.Options{
 		Version: version, Interactive: false, CLIMode: "run",
 		PermissionMode: *permissionMode, SessionMode: sessionMode,
@@ -1029,6 +1032,9 @@ func chatREPL(args []string, version string) int {
 	if rc != 0 {
 		return rc
 	}
+	// --continue that found nothing falls through to a fresh session, so it
+	// must not be reported as "continue" in telemetry.
+	continued := *cont && !resumeTarget.empty()
 	resumePath := resumeTarget.path
 	if *copySession {
 		copied, err := copyResumableSession(*model, resumePath, cfg)
@@ -1039,7 +1045,7 @@ func chatREPL(args []string, version string) int {
 		fmt.Printf("continuing in a session copy: %s\n", copied)
 		resumePath = copied
 	}
-	sessionMode := cliTelemetrySessionMode(*cont, resumeValue != "", *copySession)
+	sessionMode := cliTelemetrySessionMode(continued, resumeValue != "", *copySession)
 	reporter := startCLITelemetry(cfg, telemetry.Options{
 		Version: version, Interactive: isInteractive(), CLIMode: "tui",
 		PermissionMode: *permissionMode, SessionMode: sessionMode,

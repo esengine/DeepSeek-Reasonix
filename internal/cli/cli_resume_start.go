@@ -83,14 +83,16 @@ func normalizedResumeFlag(resume string) string {
 }
 
 // continueResumeTarget implements --continue: sweep the recovery branches this
-// workspace left behind, then take the newest conversation.
+// workspace left behind, then take the newest conversation. Finding nothing is
+// not fatal — the caller falls through to a fresh session — so the miss is
+// reported and an empty target returned with a zero exit code.
 func continueResumeTarget() (cliResumeTarget, int) {
 	sessionDir := resolveCLISessionDir()
 	reclaimCLIRecoveryBranches(sessionDir)
 	target, ok := newestResumeTarget(sessionDir)
 	if !ok {
-		fmt.Fprintln(os.Stderr, i18n.M.NoSessionToResume)
-		return cliResumeTarget{}, 1
+		fmt.Fprintln(os.Stderr, i18n.M.NoSessionToResumeStartingNew)
+		return cliResumeTarget{}, 0
 	}
 	return target, 0
 }

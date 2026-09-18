@@ -28,7 +28,7 @@ reasonix --dir /path/to/project
 | `--max-steps N` | 为本次运行设置工具调用轮数上限；`0` 使用自动执行。 |
 | `--dir PATH` | 加载配置和工具前切换 workspace 根目录。 |
 | `--add-dir PATH` | 增加一个允许工具写入的目录；可重复传入。 |
-| `-c`、`--continue` | 恢复最近一次会话。 |
+| `-c`、`--continue` | 恢复最近一次会话；没有可恢复的会话时改为开新会话。 |
 | `-r`、`--resume [QUERY]` | 打开会话选择器，或恢复匹配的会话。 |
 | `--copy` | 复制要恢复的会话，并在可写副本中继续。 |
 | `--allowed-tools RULES` | 增加仅当前会话生效的权限 allow 规则；可重复传入，`--allowedTools` 是别名。 |
@@ -324,7 +324,8 @@ reasonix --resume <session-id>
 reasonix --resume provider-config --copy
 ```
 
-- `--continue` 立即恢复最新保存的会话。
+- `--continue` 立即恢复最新保存的会话。若没有任何已保存会话，会给出提示并改为
+  开启新会话，而不是直接失败。
 - 在交互式终端中，单独使用 `--resume` 会打开可搜索选择器。
 - `--resume QUERY` 接受精确 session ID 或路径，也支持唯一匹配标题或预览内容的
   子串。没有匹配或匹配不唯一时会返回明确错误。
