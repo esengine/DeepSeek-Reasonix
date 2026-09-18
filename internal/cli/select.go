@@ -3,9 +3,11 @@ package cli
 import (
 	"errors"
 	"fmt"
+	"io"
 	"os"
 	"strings"
 
+	"github.com/charmbracelet/x/ansi"
 	"golang.org/x/term"
 
 	"reasonix/internal/i18n"
@@ -19,13 +21,17 @@ type menuItem struct {
 	desc string
 }
 
-// termHeight returns the terminal's row count, falling back to 24 on error.
-func termHeight(fd int) int {
-	_, h, err := term.GetSize(fd)
-	if err != nil || h <= 0 {
-		return 24
+// termSize returns the terminal's column and row counts, falling back to the
+// classic 80×24 for any dimension the terminal fails to report.
+func termSize(fd int) (cols, rows int) {
+	cols, rows, err := term.GetSize(fd)
+	if err != nil || cols <= 0 {
+		cols = 80
 	}
-	return h
+	if err != nil || rows <= 0 {
+		rows = 24
+	}
+	return cols, rows
 }
 
 // fixedLines returns the number of non-item lines rendered each frame:
@@ -49,9 +55,45 @@ func maxViewport(totalItems, termRows int, searching bool) int {
 	return avail
 }
 
-// renderSearchBar draws the search input line when searching is active.
-func renderSearchBar(w *os.File, query string) {
-	fmt.Fprintf(w, "\r\033[K%s %s\n", accent("🔍"), query+"_")
+// menuFrame writes the lines of one selectOne/selectMany frame. Redraw moves
+// the cursor up by the number of lines written, so every line must occupy
+// exactly one terminal row: it starts on a cleared row at column 0, ends with
+// CR LF, and is clipped to the terminal width so it cannot soft-wrap. A line
+// that wraps takes an extra row, the cursor-up stops short of the frame's top,
+// and every keypress leaves the previous frame's first rows on screen.
+type menuFrame struct {
+	w    io.Writer
+	cols int // terminal width in cells; 0 leaves lines unclipped
+}
+
+// line prints s on a cleared row, clipped to the frame width with an ellipsis
+// marking the cut.
+func (f menuFrame) line(s string) {
+	if f.cols > 0 {
+		s = ansi.Truncate(s, f.cols, "…")
+	}
+	fmt.Fprintf(f.w, "\r\033[K%s\r\n", s)
+}
+
+// header prints the title row and the blank separator under it.
+func (f menuFrame) header(label, hint string) {
+	f.line(accent("▌") + " " + bold(label) + "  " + dim(hint))
+	f.line("")
+}
+
+// searchBar prints the query being typed while search mode is active.
+func (f menuFrame) searchBar(query string) {
+	f.line(accent("🔍") + " " + query + "_")
+}
+
+// row prints one entry: the current one in reverse video behind a ❯ marker,
+// the others indented with a dimmed description.
+func (f menuFrame) row(current bool, name, desc string) {
+	if current {
+		f.line(reverse(" ❯ " + name + " " + desc + " "))
+		return
+	}
+	f.line("   " + name + " " + dim(desc))
 }
 
 // filterMenuItems returns items whose name or desc contain the query (case-insensitive).
@@ -84,7 +126,8 @@ func selectOne(label string, items []menuItem) (int, error) {
 	defer term.Restore(fd, old)
 
 	w := os.Stdout
-	th := termHeight(fd)
+	cols, th := termSize(fd)
+	f := menuFrame{w: w, cols: cols}
 
 	// search state
 	searching := false
@@ -115,42 +158,37 @@ func selectOne(label string, items []menuItem) (int, error) {
 
 		// scroll-up indicator (always 1 line)
 		if n > 0 && scroll > 0 {
-			fmt.Fprintf(w, "\r\033[K%s\n", dim(fmt.Sprintf(i18n.M.SelectMoreAboveFmt, scroll)))
+			f.line(dim(fmt.Sprintf(i18n.M.SelectMoreAboveFmt, scroll)))
 		} else {
-			fmt.Fprintf(w, "\r\033[K\r\n")
+			f.line("")
 		}
 
 		// menu rows
 		end := min(scroll+vp, n)
 		for i := scroll; i < end; i++ {
 			it := filtered[i]
-			name := fmt.Sprintf("%-10s", it.name)
-			if i == sel {
-				fmt.Fprintf(w, "\r\033[K%s\r\n", reverse(fmt.Sprintf(" ❯ %s %s ", name, it.desc)))
-			} else {
-				fmt.Fprintf(w, "\r\033[K   %s %s\r\n", name, dim(it.desc))
-			}
+			f.row(i == sel, fmt.Sprintf("%-10s", it.name), it.desc)
 		}
 		// if fewer items than viewport, pad with blank lines so the frame
 		// height stays constant
 		for i := end - scroll; i < vp; i++ {
-			fmt.Fprintf(w, "\r\033[K\r\n")
+			f.line("")
 		}
 
 		// scroll-down indicator (always 1 line)
 		if n > 0 && end < n {
-			fmt.Fprintf(w, "\r\033[K%s\n", dim(fmt.Sprintf(i18n.M.SelectMoreBelowFmt, n-end)))
+			f.line(dim(fmt.Sprintf(i18n.M.SelectMoreBelowFmt, n-end)))
 		} else {
-			fmt.Fprintf(w, "\r\033[K\r\n")
+			f.line("")
 		}
 	}
 
 	drawHeader := func() {
 		if searching {
-			fmt.Fprintf(w, "\r\033[K%s %s  %s\r\n\r\n", accent("▌"), bold(label), dim(i18n.M.SelectSearchHint))
-			renderSearchBar(w, searchQuery)
+			f.header(label, i18n.M.SelectSearchHint)
+			f.searchBar(searchQuery)
 		} else {
-			fmt.Fprintf(w, "\r\033[K%s %s  %s\r\n\r\n", accent("▌"), bold(label), dim(i18n.M.SelectOneHint))
+			f.header(label, i18n.M.SelectOneHint)
 		}
 	}
 
@@ -267,7 +305,8 @@ func selectMany(label string, items []menuItem) ([]int, error) {
 	defer term.Restore(fd, old)
 
 	w := os.Stdout
-	th := termHeight(fd)
+	cols, th := termSize(fd)
+	f := menuFrame{w: w, cols: cols}
 
 	// search state
 	searching := false
@@ -297,9 +336,9 @@ func selectMany(label string, items []menuItem) ([]int, error) {
 		}
 
 		if n > 0 && scroll > 0 {
-			fmt.Fprintf(w, "\r\033[K%s\n", dim(fmt.Sprintf(i18n.M.SelectMoreAboveFmt, scroll)))
+			f.line(dim(fmt.Sprintf(i18n.M.SelectMoreAboveFmt, scroll)))
 		} else {
-			fmt.Fprintf(w, "\r\033[K\r\n")
+			f.line("")
 		}
 
 		end := min(scroll+vp, n)
@@ -310,30 +349,25 @@ func selectMany(label string, items []menuItem) ([]int, error) {
 			if checked[origIdx] {
 				box = "[x]"
 			}
-			name := fmt.Sprintf("%-14s", it.name)
-			if i == cur {
-				fmt.Fprintf(w, "\r\033[K%s\r\n", reverse(fmt.Sprintf(" ❯ %s %s %s ", box, name, it.desc)))
-			} else {
-				fmt.Fprintf(w, "\r\033[K   %s %s %s\r\n", box, name, dim(it.desc))
-			}
+			f.row(i == cur, box+" "+fmt.Sprintf("%-14s", it.name), it.desc)
 		}
 		for i := end - scroll; i < vp; i++ {
-			fmt.Fprintf(w, "\r\033[K\r\n")
+			f.line("")
 		}
 
 		if n > 0 && end < n {
-			fmt.Fprintf(w, "\r\033[K%s\n", dim(fmt.Sprintf(i18n.M.SelectMoreBelowFmt, n-end)))
+			f.line(dim(fmt.Sprintf(i18n.M.SelectMoreBelowFmt, n-end)))
 		} else {
-			fmt.Fprintf(w, "\r\033[K\r\n")
+			f.line("")
 		}
 	}
 
 	drawHeader := func() {
 		if searching {
-			fmt.Fprintf(w, "\r\033[K%s %s  %s\r\n\r\n", accent("▌"), bold(label), dim(i18n.M.SelectSearchHint))
-			renderSearchBar(w, searchQuery)
+			f.header(label, i18n.M.SelectSearchHint)
+			f.searchBar(searchQuery)
 		} else {
-			fmt.Fprintf(w, "\r\033[K%s %s  %s\r\n\r\n", accent("▌"), bold(label), dim(i18n.M.SelectManyHint))
+			f.header(label, i18n.M.SelectManyHint)
 		}
 	}
 

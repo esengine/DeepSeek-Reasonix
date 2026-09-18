@@ -1,7 +1,13 @@
 package cli
 
 import (
+	"bytes"
+	"fmt"
+	"os"
+	"strings"
 	"testing"
+
+	"github.com/charmbracelet/colorprofile"
 )
 
 func TestFrameLines(t *testing.T) {
@@ -122,5 +128,86 @@ func TestFilterMenuItems(t *testing.T) {
 	// No match.
 	if got := filterMenuItems(items, "claude"); len(got) != 0 {
 		t.Errorf("claude: got %d, want 0", len(got))
+	}
+}
+
+// A frame line that soft-wraps occupies more rows than redraw counts, so a
+// narrow terminal used to stack a fresh copy of the header and the wrapped
+// rows on every keypress. Every line the frame emits must fit its width.
+func TestMenuFrameLinesFitTerminalWidth(t *testing.T) {
+	prev := activeColorProfile
+	activeColorProfile = colorprofile.ANSI256
+	t.Cleanup(func() { activeColorProfile = prev })
+
+	items := []menuItem{
+		{name: "deepseek-pro", desc: "openai · 1 models · key missing"},
+		{name: "Add Anthropic-compatible provider", desc: "Add third-party Anthropic compatible model"},
+		{name: "中转站", desc: "自定义 OpenAI 兼容模型 · 密钥缺失"},
+	}
+	for _, cols := range []int{1, 8, 40, 60} {
+		var buf bytes.Buffer
+		f := menuFrame{w: &buf, cols: cols}
+		f.header("Provider configuration", "(↑/↓ · Enter · q to cancel; / to search)")
+		f.searchBar("a query that is much longer than the narrowest terminal")
+		for i, it := range items {
+			f.row(i == 0, fmt.Sprintf("%-10s", it.name), it.desc)
+		}
+		out := buf.String()
+		if strings.Count(out, "\n") != strings.Count(out, "\r\n") {
+			t.Errorf("cols=%d: a line ends with a bare LF, which leaves the cursor mid-row in raw mode", cols)
+		}
+		lines := strings.Split(strings.TrimSuffix(out, "\r\n"), "\r\n")
+		if got, want := len(lines), 3+len(items); got != want {
+			t.Fatalf("cols=%d: wrote %d lines, want %d", cols, got, want)
+		}
+		for _, line := range lines {
+			if !strings.HasPrefix(line, "\r\033[K") {
+				t.Errorf("cols=%d: line %q does not start on a cleared row", cols, line)
+			}
+			if w := visibleWidth(line); w > cols {
+				t.Errorf("cols=%d: line %q spans %d cells and would wrap", cols, line, w)
+			}
+		}
+	}
+}
+
+func TestMenuFrameClipsLongLinesWithEllipsis(t *testing.T) {
+	prev := activeColorProfile
+	activeColorProfile = colorprofile.ANSI256
+	t.Cleanup(func() { activeColorProfile = prev })
+
+	var buf bytes.Buffer
+	f := menuFrame{w: &buf, cols: 24}
+	f.row(true, "deepseek-pro", "openai · 1 models · key missing")
+	got := strings.TrimSuffix(buf.String(), "\r\n")
+	if !strings.HasSuffix(got, "…"+ansiReset) {
+		t.Errorf("clipped row %q should end with an ellipsis inside the reverse-video span", got)
+	}
+	if w := visibleWidth(got); w != 24 {
+		t.Errorf("clipped row spans %d cells, want 24", w)
+	}
+
+	buf.Reset()
+	f.row(false, "deepseek-pro", "openai")
+	if got := buf.String(); strings.Contains(got, "…") {
+		t.Errorf("row that fits was clipped: %q", got)
+	}
+
+	buf.Reset()
+	menuFrame{w: &buf, cols: 0}.row(true, "deepseek-pro", "openai · 1 models · key missing")
+	if got := buf.String(); strings.Contains(got, "…") {
+		t.Errorf("unknown width must leave the row unclipped: %q", got)
+	}
+}
+
+func TestTermSizeFallsBackToVT100(t *testing.T) {
+	r, w, err := os.Pipe()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer r.Close()
+	defer w.Close()
+	if cols, rows := termSize(int(r.Fd())); cols != 80 || rows != 24 {
+		t.Errorf("termSize(pipe) = %d×%d, want 80×24", cols, rows)
 	}
 }

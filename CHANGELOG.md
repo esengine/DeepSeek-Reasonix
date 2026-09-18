@@ -68,6 +68,11 @@ branch.
 
 ### Fixed
 
+- **Setup menus in narrow terminals:** `reasonix setup` and the other
+  arrow-key menus clip every row to the terminal width. A row that soft-wrapped
+  used to throw off the redraw, stacking a fresh copy of the header and the
+  wrapped rows on screen with each keypress.
+
 - **Read evidence recovery:** partial reads no longer freeze independent work
   or ordinary final answers. Explicit full reads retain bounded completion
   checks. Rejected edits track operation/version requirements so successful
