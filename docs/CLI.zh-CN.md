@@ -34,6 +34,7 @@ reasonix --dir /path/to/project
 | `--allowed-tools RULES` | 增加仅当前会话生效的权限 allow 规则；可重复传入，`--allowedTools` 是别名。 |
 | `--permission-mode MODE` | 以指定的权限姿态启动。 |
 | `--dangerously-skip-permissions` | 已弃用的兼容参数；会保守迁移为 `workspace-write`。进入 YOLO 请用 `--permission-mode danger-full-access`。 |
+| `--takeover` | 已弃用的兼容参数；原生会话由 session service 持有。 |
 
 适用时，参数可以放在 prompt 前面或后面。
 
@@ -326,15 +327,24 @@ reasonix --resume provider-config --copy
 
 - `--continue` 立即恢复最新保存的会话。
 - 在交互式终端中，单独使用 `--resume` 会打开可搜索选择器。
-- `--resume QUERY` 接受精确 session ID 或路径，也支持唯一匹配标题或预览内容的
-  子串。没有匹配或匹配不唯一时会返回明确错误。
+- `--resume QUERY` 接受精确 session ID，也支持唯一匹配标题或预览内容的子串。
+  没有匹配或匹配不唯一时会返回明确错误。
 - 为保持兼容，仍接受 `--resume=true` 和 `--resume=false`。
-- `--copy` 不修改原 transcript，而是在新的可写会话中继续。原会话已被另一个
-  Reasonix 进程占用时可以使用它。
+- `--copy` 不修改原会话，而是在新的可写会话中继续。原会话已被另一个 Reasonix
+  进程占用时可以使用它。
 
-一次性运行可用 `reasonix run --resume QUERY "任务"`，支持 session 文件路径、
-session ID，或来自 `--events-jsonl` / `reasonix session show --json` 的不透明
-machine session ID。Session lease 会阻止桌面端和 CLI 同时写入同一个 transcript。
+CLI 只读写当前的 `sessions-v4` 格式。启动时会运行一次性、自包含的迁移
+（`legacy_session_migration.go`）：把本机上所有旧格式会话（legacy JSONL 与
+`sessions-v3`，含当前项目、全局存储及其他已知项目）转换为 `sessions-v4`，然后
+删除旧来源。迁移会先把来源逐字节复制到 v4 目标的 `legacy/` 证据目录再删除；
+来源仍被其他进程占用或无法导入时保持原样。迁移后的会话保留来源原始的创建时间
+与最后活动时间，因此恢复时按会话实际发生的时间排序，而不是按导入时间；在记录
+这两个时间之前已发布的旧目标，会依据保留的 `legacy/` 证据修复一次。该桥接代码
+是临时的，所有安装升级完成后即删除。
+
+一次性运行可用 `reasonix run --resume QUERY "任务"`，接受相同的 session ID、
+标题或预览子串。原生会话由 session service 持有，被其他进程占用的会话会返回
+明确错误。
 
 ## 权限
 

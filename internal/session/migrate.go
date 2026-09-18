@@ -160,6 +160,14 @@ func freezeLegacyHead(ctx context.Context, sourcePath, legacyHeadID string, allo
 		_ = os.RemoveAll(freezeDir)
 		return nil, err
 	}
+	// The branch-metadata sidecar carries the source's own created/updated
+	// times; the source file mtime is the fallback when it is absent.
+	if !parsed.createdAt.IsZero() {
+		source.CreatedAt = parsed.createdAt
+	}
+	if !parsed.updatedAt.IsZero() {
+		source.UpdatedAt = parsed.updatedAt
+	}
 	return &frozenLegacyHead{
 		sourcePath: sourcePath, headID: legacyHeadID, source: source, artifacts: artifacts,
 		targetID:     migrationTargetID(sourcePath, source.SHA256, legacyHeadID),
@@ -179,6 +187,11 @@ type frozenLegacyParse struct {
 	modelMessages        []provider.Message
 	projectionDiagnostic string
 	goal                 map[string]any
+	// createdAt and updatedAt are the source session's own times, read from the
+	// legacy branch-metadata sidecar so the migrated target keeps its place in
+	// the timeline instead of sorting by import time.
+	createdAt time.Time
+	updatedAt time.Time
 }
 
 // parseFrozenLegacy reads the frozen artifacts from a private directory so the
@@ -246,6 +259,9 @@ func parseFrozenLegacy(ctx context.Context, artifacts []frozenArtifact, sourcePa
 	if modelRef, modelIdentity, ok := agent.LoadSessionModelSelection(frozenSourcePath); ok && strings.TrimSpace(modelRef) != "" {
 		parsed.modelRef, parsed.modelIdentity = strings.TrimSpace(modelRef), strings.TrimSpace(modelIdentity)
 	}
+	if meta, ok, metaErr := agent.LoadBranchMeta(frozenSourcePath); metaErr == nil && ok {
+		parsed.createdAt, parsed.updatedAt = meta.CreatedAt, meta.UpdatedAt
+	}
 	parsed.goal = sanitizedLegacyGoal(frozenSourcePath)
 	return parsed, nil
 }
@@ -307,7 +323,8 @@ func (f *frozenLegacyHead) publish(ctx context.Context, targetRoot string, optio
 		}
 	}()
 
-	manifest := Manifest{SchemaVersion: SchemaVersion, Codec: Codec, StorageRevision: StorageRevision, ContentRoot: sharedContentRoot, SessionID: f.targetID, CreatedAt: time.Now().UTC(), Source: &f.source}
+	createdAt, updatedAt := sourceActivityTimes(f.source)
+	manifest := Manifest{SchemaVersion: SchemaVersion, Codec: Codec, StorageRevision: StorageRevision, ContentRoot: sharedContentRoot, SessionID: f.targetID, CreatedAt: createdAt, Source: &f.source}
 	if err := writeImportedManifest(tmp, manifest, options); err != nil {
 		return MigrationResult{}, err
 	}
@@ -338,6 +355,9 @@ func (f *frozenLegacyHead) publish(ctx context.Context, targetRoot string, optio
 	}
 	if closeErr != nil {
 		return MigrationResult{}, closeErr
+	}
+	if err := stampLogActivity(logPathForManifest(tmp, manifest), updatedAt); err != nil {
+		return MigrationResult{}, err
 	}
 	if err := os.Rename(tmp, targetDir); err != nil {
 		return MigrationResult{}, fmt.Errorf("publish canonical session: %w", err)
@@ -546,6 +566,7 @@ func freezeLegacyArtifacts(ctx context.Context, sourcePath string) ([]frozenArti
 	seen := map[string]bool{}
 	artifacts := []frozenArtifact{}
 	foundSource := false
+	var sourceModTime time.Time
 	hash := sha256.New()
 	var total int64
 	for _, path := range paths {
@@ -574,6 +595,7 @@ func freezeLegacyArtifacts(ctx context.Context, sourcePath string) ([]frozenArti
 		artifacts = append(artifacts, frozenArtifact{path: path, frozenPath: frozenPath, mode: info.Mode().Perm(), size: info.Size()})
 		if path == sourcePath {
 			foundSource = true
+			sourceModTime = info.ModTime()
 		}
 	}
 	if !foundSource {
@@ -597,7 +619,10 @@ func freezeLegacyArtifacts(ctx context.Context, sourcePath string) ([]frozenArti
 		total += artifact.size
 	}
 	keep = true
-	return artifacts, Source{Path: sourcePath, Size: total, SHA256: hex.EncodeToString(hash.Sum(nil)), Version: "legacy"}, freezeDir, nil
+	return artifacts, Source{
+		Path: sourcePath, Size: total, SHA256: hex.EncodeToString(hash.Sum(nil)), Version: "legacy",
+		CreatedAt: sourceModTime, UpdatedAt: sourceModTime,
+	}, freezeDir, nil
 }
 
 func copyFrozenArtifact(ctx context.Context, source, target string, mode fs.FileMode) error {

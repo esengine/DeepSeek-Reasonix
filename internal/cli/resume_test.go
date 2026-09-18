@@ -12,22 +12,21 @@ import (
 
 	"reasonix/internal/agent"
 	"reasonix/internal/config"
-	"reasonix/internal/control"
 	"reasonix/internal/event"
-	"reasonix/internal/provider"
 )
 
 // TestResumeDispatchOpensPicker proves bare "/resume" opens the interactive
 // picker without duplicating the same list in transcript scrollback.
 func TestResumeDispatchOpensPicker(t *testing.T) {
+	isolateCLIConfigHome(t)
 	dir := t.TempDir()
-	saveTestSession(t, filepath.Join(dir, "a.jsonl"), "alpha prompt")
-	saveTestSession(t, filepath.Join(dir, "b.jsonl"), "beta prompt")
+	seedNativeTestSession(t, dir, "alpha prompt")
+	seedNativeTestSession(t, dir, "beta prompt")
 
 	exec := agent.New(nil, nil, agent.NewSession("sys"), agent.Options{}, event.Discard)
 	m := newTestChatTUI()
 	m.width = 80
-	m.ctrl = newOwnedTestController(t, control.Options{Executor: exec, SessionDir: dir, Label: "test"})
+	m.ctrl = newExclusiveTestController(t, dir, exec)
 
 	if cmd := m.runSlashCommand("/resume"); cmd != nil {
 		t.Fatal("/resume should not return a tea.Cmd")
@@ -69,120 +68,6 @@ func TestOrderResumeSessionsGroupsRecoveryCopiesAndPrefersNewestLeaf(t *testing.
 	}
 }
 
-func TestMostRecentSessionIgnoresRecoveryPickerLeafPreference(t *testing.T) {
-	dir := t.TempDir()
-	rootPath := filepath.Join(dir, "root.jsonl")
-	recoveryPath := filepath.Join(dir, "recovery.jsonl")
-	saveTestSession(t, rootPath, "latest parent prompt")
-	saveTestSession(t, recoveryPath, "older recovery prompt")
-
-	base := time.Date(2026, 8, 3, 12, 0, 0, 0, time.UTC)
-	if err := agent.SaveBranchMetaPreserveUpdated(rootPath, agent.BranchMeta{
-		ID: "root", CreatedAt: base, UpdatedAt: base.Add(4 * time.Minute),
-		SchemaVersion: agent.BranchMetaCountsVersion, Turns: 1, Preview: "latest parent prompt",
-	}); err != nil {
-		t.Fatalf("save root meta: %v", err)
-	}
-	if err := agent.SaveBranchMetaPreserveUpdated(recoveryPath, agent.BranchMeta{
-		ID: "recovery", ParentID: "root", Recovered: true,
-		CreatedAt: base, UpdatedAt: base.Add(3 * time.Minute),
-		SchemaVersion: agent.BranchMetaCountsVersion, Turns: 1, Preview: "older recovery prompt",
-	}); err != nil {
-		t.Fatalf("save recovery meta: %v", err)
-	}
-
-	grouped := recentSessions(dir)
-	if len(grouped) != 2 || grouped[0].Path != recoveryPath {
-		t.Fatalf("interactive resume order = %+v, want recovery leaf grouped first", grouped)
-	}
-	latest, ok := mostRecentSession(dir)
-	if !ok {
-		t.Fatal("mostRecentSession found no session")
-	}
-	if latest.Path != rootPath {
-		t.Fatalf("--continue session = %q, want chronologically newest %q", latest.Path, rootPath)
-	}
-}
-
-func TestRunResumeKeepsCompletedIndexStableAcrossRecoveryGC(t *testing.T) {
-	dir := t.TempDir()
-	parentPath := filepath.Join(dir, "recovery-parent.jsonl")
-	disk := agent.NewSession("sys")
-	disk.Add(provider.Message{Role: provider.RoleUser, Content: "shared prompt"})
-	disk.Add(provider.Message{Role: provider.RoleAssistant, Content: "disk answer"})
-	if err := disk.Save(parentPath); err != nil {
-		t.Fatalf("save parent: %v", err)
-	}
-	stale := agent.NewSession("sys")
-	stale.Add(provider.Message{Role: provider.RoleUser, Content: "shared prompt"})
-	stale.Add(provider.Message{Role: provider.RoleAssistant, Content: "recovered answer"})
-	recovery, err := stale.SaveRecoveryBranch(agent.RecoveryBranchOptions{OriginalPath: parentPath})
-	if err != nil {
-		t.Fatalf("save recovery branch: %v", err)
-	}
-	covered, err := agent.LoadSession(parentPath)
-	if err != nil {
-		t.Fatalf("load recovery parent: %v", err)
-	}
-	covered.Replace(append([]provider.Message(nil), stale.Snapshot()...))
-	covered.Add(provider.Message{Role: provider.RoleUser, Content: "later parent turn"})
-	if err := covered.SaveRewrite(parentPath); err != nil {
-		t.Fatalf("cover recovery branch in parent: %v", err)
-	}
-	recoveryMeta, ok, err := agent.LoadBranchMeta(recovery.Path)
-	if err != nil || !ok {
-		t.Fatalf("load recovery meta: ok=%v err=%v", ok, err)
-	}
-	recoveryMeta.UpdatedAt = time.Now().Add(-2 * agent.RecoveryGCGracePeriod)
-	if err := agent.SaveBranchMetaPreserveUpdated(recovery.Path, recoveryMeta); err != nil {
-		t.Fatalf("age recovery branch: %v", err)
-	}
-
-	targetPath := filepath.Join(dir, "wanted.jsonl")
-	saveTestSession(t, targetPath, "WANTED-SESSION")
-	targetMeta, ok, err := agent.LoadBranchMeta(targetPath)
-	if err != nil || !ok {
-		t.Fatalf("load target meta: ok=%v err=%v", ok, err)
-	}
-	targetMeta.UpdatedAt = time.Now().Add(-4 * agent.RecoveryGCGracePeriod)
-	if err := agent.SaveBranchMetaPreserveUpdated(targetPath, targetMeta); err != nil {
-		t.Fatalf("age target session: %v", err)
-	}
-
-	candidates, err := agent.ReclaimableRecoveryBranches(dir, time.Now(), agent.RecoveryGCGracePeriod)
-	if err != nil || len(candidates) != 1 || candidates[0] != recovery.Path {
-		t.Fatalf("recovery GC precondition = %v err=%v, want %q", candidates, err, recovery.Path)
-	}
-	sessions := recentSessions(dir)
-	targetIndex := 0
-	for i, session := range sessions {
-		if session.Path == targetPath {
-			targetIndex = i + 1
-		}
-	}
-	if targetIndex != len(sessions) || targetIndex < 2 {
-		t.Fatalf("target index = %d in %+v, want a trailing row shifted by GC", targetIndex, sessions)
-	}
-
-	active := agent.NewSession("sys")
-	active.Add(provider.Message{Role: provider.RoleUser, Content: "active prompt"})
-	exec := agent.New(nil, nil, active, agent.Options{}, event.Discard)
-	ctrl := newOwnedTestController(t, control.Options{Executor: exec, SessionDir: dir, Label: "test"})
-	ctrl.SetSessionPath(filepath.Join(dir, "active-unpersisted.jsonl"))
-	m := newTestChatTUI()
-	m.width = 80
-	m.ctrl = ctrl
-
-	m.runResumeCommand("/resume " + strconv.Itoa(targetIndex))
-
-	if got := ctrl.SessionPath(); got != targetPath {
-		t.Fatalf("session path = %q, want completed index target %q", got, targetPath)
-	}
-	if _, err := os.Stat(recovery.Path); err != nil {
-		t.Fatalf("numeric resume mutated its displayed session list: %v", err)
-	}
-}
-
 func TestCapResumeSessionGroupsDoesNotSplitRecoveryFamily(t *testing.T) {
 	base := time.Date(2026, 8, 3, 12, 0, 0, 0, time.UTC)
 	sessions := make([]agent.SessionInfo, 0, 12)
@@ -220,34 +105,21 @@ func TestSessionPickerLabelIdentifiesRecoveryParent(t *testing.T) {
 	}
 }
 
-// TestResumePickerNavigateAndSelect proves the picker's up/down navigation and
-// Enter to resume the selected session.
+// TestResumePickerNavigateAndSelect proves the picker's Enter resumes the
+// selected native session.
 func TestResumePickerNavigateAndSelect(t *testing.T) {
+	isolateCLIConfigHome(t)
 	dir := t.TempDir()
-	exec := agent.New(nil, nil, agent.NewSession("sys"), agent.Options{}, event.Discard)
-	ctrl := newOwnedTestController(t, control.Options{Executor: exec, SessionDir: dir, Label: "test"})
+	targetID := seedNativeTestSession(t, dir, "SECOND-SESSION-PROMPT")
+	seedNativeTestSession(t, dir, "first session prompt")
 
-	// Create two saved sessions.
-	aPath := filepath.Join(dir, "a.jsonl")
-	saveTestSession(t, aPath, "first session prompt")
-	bPath := filepath.Join(dir, "b.jsonl")
-	saveTestSession(t, bPath, "SECOND-SESSION-PROMPT")
-	// Pin distinct mtimes so b is unambiguously the most recent. Created back to
-	// back, the two files can land in the same filesystem mtime tick (seen on the
-	// CI Windows runner), which then tie-breaks to a.jsonl by path and flakes.
-	now := time.Now()
-	if err := os.Chtimes(aPath, now.Add(-2*time.Second), now.Add(-2*time.Second)); err != nil {
-		t.Fatal(err)
-	}
-	if err := os.Chtimes(bPath, now, now); err != nil {
-		t.Fatal(err)
-	}
+	exec := agent.New(nil, nil, agent.NewSession("sys"), agent.Options{}, event.Discard)
+	ctrl := newExclusiveTestController(t, dir, exec)
 
 	m := newTestChatTUI()
 	m.width = 80
 	m.ctrl = ctrl
 
-	// Open the picker via bare /resume.
 	m.runSlashCommand("/resume")
 	if m.resumePick == nil {
 		t.Fatal("bare /resume should open the picker")
@@ -255,14 +127,26 @@ func TestResumePickerNavigateAndSelect(t *testing.T) {
 	if len(m.resumePick.entries) != 2 {
 		t.Fatalf("picker should have 2 sessions, got %d", len(m.resumePick.entries))
 	}
+	sel := -1
+	for i, e := range m.resumePick.entries {
+		if id, ok := v4ResumeID(e.session.Path); ok && id == targetID {
+			sel = i
+		}
+	}
+	if sel < 0 {
+		t.Fatalf("target row missing from picker: %+v", m.resumePick.entries)
+	}
+	m.resumePick.sel = sel
+	if m.resumePick.quick != nil {
+		m.resumePick.quick.selected = sel
+	}
 
-	// The first session (default selection) is the most recent, which is b.jsonl.
-	// Press Enter to resume it.
 	next, _ := m.handleResumePickerKey(tea.KeyPressMsg{Code: tea.KeyEnter})
 	m = next.(chatTUI)
 
-	if got := ctrl.SessionPath(); got != bPath {
-		t.Fatalf("session path = %q, want %q", got, bPath)
+	ref, ok := ctrl.SessionRef()
+	if !ok || ref.SessionID != targetID {
+		t.Fatalf("resumed ref = %+v ok=%v, want session %q", ref, ok, targetID)
 	}
 	if out := strings.Join(m.transcript, "\n"); !strings.Contains(out, "SECOND-SESSION-PROMPT") {
 		t.Fatalf("transcript should replay the resumed session:\n%s", out)
@@ -275,12 +159,13 @@ func TestResumePickerNavigateAndSelect(t *testing.T) {
 // TestResumePickerEscDismisses proves pressing Esc closes the picker without
 // switching sessions.
 func TestResumePickerEscDismisses(t *testing.T) {
+	isolateCLIConfigHome(t)
 	dir := t.TempDir()
-	saveTestSession(t, filepath.Join(dir, "a.jsonl"), "alpha prompt")
+	seedNativeTestSession(t, dir, "alpha prompt")
 
 	exec := agent.New(nil, nil, agent.NewSession("sys"), agent.Options{}, event.Discard)
 	m := newTestChatTUI()
-	m.ctrl = newOwnedTestController(t, control.Options{Executor: exec, SessionDir: dir, Label: "test"})
+	m.ctrl = newExclusiveTestController(t, dir, exec)
 
 	m.runSlashCommand("/resume")
 	if m.resumePick == nil {
@@ -298,18 +183,13 @@ func TestResumePickerEscDismisses(t *testing.T) {
 // dispatcher and asserts the controller switched session AND the resumed
 // transcript was replayed into the scrollback.
 func TestResumeDispatchSwitchesAndReplays(t *testing.T) {
+	isolateCLIConfigHome(t)
 	dir := t.TempDir()
-	active := agent.NewSession("sys")
-	active.Add(provider.Message{Role: provider.RoleUser, Content: "active prompt"})
-	exec := agent.New(nil, nil, active, agent.Options{}, event.Discard)
-	ctrl := newOwnedTestController(t, control.Options{Executor: exec, SessionDir: dir, Label: "test"})
-	ctrl.SetSessionPath(filepath.Join(dir, "active.jsonl"))
-	if err := ctrl.Snapshot(); err != nil {
-		t.Fatal(err)
-	}
+	targetID := seedNativeTestSession(t, dir, "OTHER-SESSION-PROMPT")
+	seedNativeTestSession(t, dir, "first session prompt")
 
-	otherPath := filepath.Join(dir, "other.jsonl")
-	saveTestSession(t, otherPath, "OTHER-SESSION-PROMPT")
+	exec := agent.New(nil, nil, agent.NewSession("sys"), agent.Options{}, event.Discard)
+	ctrl := newExclusiveTestController(t, dir, exec)
 
 	m := newTestChatTUI()
 	m.width = 80
@@ -317,7 +197,7 @@ func TestResumeDispatchSwitchesAndReplays(t *testing.T) {
 
 	target := 0
 	for i, s := range recentSessions(dir) {
-		if s.Path == otherPath {
+		if id, ok := v4ResumeID(s.Path); ok && id == targetID {
 			target = i + 1
 		}
 	}
@@ -327,8 +207,9 @@ func TestResumeDispatchSwitchesAndReplays(t *testing.T) {
 
 	m.runSlashCommand("/resume " + strconv.Itoa(target))
 
-	if got := ctrl.SessionPath(); got != otherPath {
-		t.Fatalf("session path = %q, want %q", got, otherPath)
+	ref, ok := ctrl.SessionRef()
+	if !ok || ref.SessionID != targetID {
+		t.Fatalf("resumed ref = %+v ok=%v, want session %q", ref, ok, targetID)
 	}
 	if out := strings.Join(m.transcript, "\n"); !strings.Contains(out, "OTHER-SESSION-PROMPT") {
 		t.Fatalf("transcript should replay the resumed session:\n%s", out)
@@ -339,25 +220,25 @@ func TestResumeDispatchSwitchesAndReplays(t *testing.T) {
 // regression where a stale scroll offset was preserved if the user had read
 // back in the old transcript before resuming another session.
 func TestResumeWhileScrolledUpPinsViewportToBottom(t *testing.T) {
+	isolateCLIConfigHome(t)
 	dir := t.TempDir()
-	active := agent.NewSession("sys")
-	for i := range 18 {
-		active.Add(provider.Message{Role: provider.RoleUser, Content: "active prompt " + strconv.Itoa(i)})
+	activeID := nextNativeTestID()
+	prompts := make([]string, 18)
+	for i := range prompts {
+		prompts[i] = "active prompt " + strconv.Itoa(i)
 	}
-	exec := agent.New(nil, nil, active, agent.Options{}, event.Discard)
-	ctrl := newOwnedTestController(t, control.Options{Executor: exec, SessionDir: dir, Label: "test"})
-	activePath := filepath.Join(dir, "active.jsonl")
-	ctrl.SetSessionPath(activePath)
-	if err := ctrl.Snapshot(); err != nil {
+	seedNativeSessionMessages(t, dir, activeID, "", "", prompts...)
+	targetID := seedNativeTestSession(t, dir, "OTHER-SESSION-PROMPT")
+
+	exec := agent.New(nil, nil, agent.NewSession("sys"), agent.Options{}, event.Discard)
+	ctrl := newExclusiveTestController(t, dir, exec)
+	if err := resumeWithPersistedSelection(ctrl, v4ResumeLocator(activeID)); err != nil {
 		t.Fatal(err)
 	}
 
-	otherPath := filepath.Join(dir, "other.jsonl")
-	saveTestSession(t, otherPath, "OTHER-SESSION-PROMPT")
-
 	target := 0
 	for i, s := range recentSessions(dir) {
-		if s.Path == otherPath {
+		if id, ok := v4ResumeID(s.Path); ok && id == targetID {
 			target = i + 1
 		}
 	}
@@ -383,8 +264,9 @@ func TestResumeWhileScrolledUpPinsViewportToBottom(t *testing.T) {
 	cur.input.SetValue("/resume " + strconv.Itoa(target))
 	cur = adv(cur, tea.KeyPressMsg{Code: tea.KeyEnter})
 
-	if got := ctrl.SessionPath(); got != otherPath {
-		t.Fatalf("session path = %q, want %q", got, otherPath)
+	ref, ok := ctrl.SessionRef()
+	if !ok || ref.SessionID != targetID {
+		t.Fatalf("resumed ref = %+v ok=%v, want session %q", ref, ok, targetID)
 	}
 	out := strings.Join(cur.transcript, "\n")
 	if !strings.Contains(out, "OTHER-SESSION-PROMPT") {
@@ -398,25 +280,17 @@ func TestResumeWhileScrolledUpPinsViewportToBottom(t *testing.T) {
 	}
 }
 
-func saveTestSession(t *testing.T, path, prompt string) {
-	t.Helper()
-	s := agent.NewSession("sys")
-	s.Add(provider.Message{Role: provider.RoleUser, Content: prompt})
-	if err := s.Save(path); err != nil {
-		t.Fatal(err)
-	}
-}
-
 // TestResumeArgCompletionListsSessions proves "/resume " opens an indexed menu
 // of the saved sessions, mirroring the /switch branch completion.
 func TestResumeArgCompletionListsSessions(t *testing.T) {
+	isolateCLIConfigHome(t)
 	dir := t.TempDir()
-	saveTestSession(t, filepath.Join(dir, "a.jsonl"), "first")
-	saveTestSession(t, filepath.Join(dir, "b.jsonl"), "second")
+	seedNativeTestSession(t, dir, "first")
+	seedNativeTestSession(t, dir, "second")
 
 	exec := agent.New(nil, nil, agent.NewSession("sys"), agent.Options{}, event.Discard)
 	m := newTestChatTUI()
-	m.ctrl = newOwnedTestController(t, control.Options{Executor: exec, SessionDir: dir, Label: "test"})
+	m.ctrl = newExclusiveTestController(t, dir, exec)
 
 	m.input.SetValue("/resume ")
 	m.updateCompletion()
@@ -432,12 +306,13 @@ func TestResumeArgCompletionListsSessions(t *testing.T) {
 // non-descend command that still takes arguments) immediately opens the session
 // menu, rather than waiting for the next keystroke.
 func TestResumeAcceptChainsIntoSessionMenu(t *testing.T) {
+	isolateCLIConfigHome(t)
 	dir := t.TempDir()
-	saveTestSession(t, filepath.Join(dir, "a.jsonl"), "first")
+	seedNativeTestSession(t, dir, "first")
 
 	exec := agent.New(nil, nil, agent.NewSession("sys"), agent.Options{}, event.Discard)
 	m := newTestChatTUI()
-	m.ctrl = newOwnedTestController(t, control.Options{Executor: exec, SessionDir: dir, Label: "test"})
+	m.ctrl = newExclusiveTestController(t, dir, exec)
 
 	m.input.SetValue("/resu")
 	m.updateCompletion()
@@ -453,20 +328,13 @@ func TestResumeAcceptChainsIntoSessionMenu(t *testing.T) {
 // TestRunResumeSwitchesSession proves "/resume <n>" repoints the running
 // controller to the chosen saved session and loads its history.
 func TestRunResumeSwitchesSession(t *testing.T) {
+	isolateCLIConfigHome(t)
 	dir := t.TempDir()
+	targetID := seedNativeTestSession(t, dir, "other prompt")
+	seedNativeTestSession(t, dir, "first prompt")
 
-	active := agent.NewSession("sys")
-	active.Add(provider.Message{Role: provider.RoleUser, Content: "active prompt"})
-	exec := agent.New(nil, nil, active, agent.Options{}, event.Discard)
-	ctrl := newOwnedTestController(t, control.Options{Executor: exec, SessionDir: dir, Label: "test"})
-	activePath := filepath.Join(dir, "active.jsonl")
-	ctrl.SetSessionPath(activePath)
-	if err := ctrl.Snapshot(); err != nil {
-		t.Fatal(err)
-	}
-
-	otherPath := filepath.Join(dir, "other.jsonl")
-	saveTestSession(t, otherPath, "other prompt")
+	exec := agent.New(nil, nil, agent.NewSession("sys"), agent.Options{}, event.Discard)
+	ctrl := newExclusiveTestController(t, dir, exec)
 
 	m := newTestChatTUI()
 	m.width = 80
@@ -474,7 +342,7 @@ func TestRunResumeSwitchesSession(t *testing.T) {
 
 	target := 0
 	for i, s := range recentSessions(dir) {
-		if s.Path == otherPath {
+		if id, ok := v4ResumeID(s.Path); ok && id == targetID {
 			target = i + 1
 		}
 	}
@@ -484,8 +352,9 @@ func TestRunResumeSwitchesSession(t *testing.T) {
 
 	m.runResumeCommand("/resume " + strconv.Itoa(target))
 
-	if got := ctrl.SessionPath(); got != otherPath {
-		t.Fatalf("session path = %q, want %q", got, otherPath)
+	ref, ok := ctrl.SessionRef()
+	if !ok || ref.SessionID != targetID {
+		t.Fatalf("resumed ref = %+v ok=%v, want session %q", ref, ok, targetID)
 	}
 	hist := ctrl.History()
 	if len(hist) == 0 || hist[len(hist)-1].Content != "other prompt" {
@@ -497,9 +366,9 @@ func TestRunResumeSwitchesSession(t *testing.T) {
 // session of other known projects (#9477): a user who worked here over SSH
 // resumes from any directory, not only the original workspace root.
 func TestResumeEntriesIncludeOtherProjects(t *testing.T) {
+	isolateCLIConfigHome(t)
 	currentDir := t.TempDir()
-	current := filepath.Join(currentDir, "current.jsonl")
-	saveResumeTestSession(t, current, "current project work")
+	currentID := seedNativeTestSession(t, currentDir, "current project work")
 
 	otherRoot := t.TempDir()
 	otherDir := config.ProjectSessionDir(otherRoot)
@@ -513,29 +382,19 @@ func TestResumeEntriesIncludeOtherProjects(t *testing.T) {
 		[]byte(`{"projects":[{"root":`+strconv.Quote(filepath.ToSlash(otherRoot))+`}]}`), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	other := filepath.Join(otherDir, "other.jsonl")
-	saveResumeTestSession(t, other, "other project work")
+	otherID := seedNativeTestSession(t, otherDir, "other project work")
 
 	entries := resumeEntries(currentDir)
 	if len(entries) != 2 {
 		t.Fatalf("resumeEntries = %d entries, want current + other project", len(entries))
 	}
-	if entries[0].project != "" || entries[0].session.Path != current {
+	if entries[0].project != "" || entries[0].session.Path != v4ResumeLocator(currentID) {
 		t.Fatalf("first entry = %+v, want the current directory session", entries[0])
 	}
 	if entries[1].project == "" {
 		t.Fatalf("second entry = %+v, want a project label for the other project", entries[1])
 	}
-	if entries[1].session.Path != other {
-		t.Fatalf("second entry path = %q, want %q", entries[1].session.Path, other)
-	}
-}
-
-func saveResumeTestSession(t *testing.T, path, content string) {
-	t.Helper()
-	s := agent.NewSession("sys")
-	s.Add(provider.Message{Role: provider.RoleUser, Content: content})
-	if err := s.Save(path); err != nil {
-		t.Fatal(err)
+	if entries[1].session.Path != v4ResumeLocator(otherID) {
+		t.Fatalf("second entry path = %q, want %q", entries[1].session.Path, v4ResumeLocator(otherID))
 	}
 }

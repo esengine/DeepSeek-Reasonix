@@ -339,63 +339,6 @@ func TestRetiredWorkModeIsNoOpWithoutRebuildOrLeaseMove(t *testing.T) {
 	}
 }
 
-func TestResumeCommandKeepsLeaseOnRecoveryPathWhenTargetHeld(t *testing.T) {
-	t.Setenv(agent.SessionLogSchemaEnv, "v1")
-	dir := t.TempDir()
-	active := filepath.Join(dir, "resume-active-conflict.jsonl")
-	target := filepath.Join(dir, "resume-target.jsonl")
-	saveTestSession(t, target, "target session")
-
-	m := newTestChatTUI()
-	m.width = 80
-	m.ctrl = divergedSessionController(t, dir, active)
-	m.leases = control.NewSessionLeaseKeeper()
-	t.Cleanup(m.leases.Release)
-	if err := m.leases.Rebind(active); err != nil {
-		t.Fatalf("seed active lease: %v", err)
-	}
-	holdSessionLease(t, target)
-
-	m.runResumeCommand(fmt.Sprintf("/resume %d", resumeIndexForPath(t, dir, target)))
-
-	recoveryPath := m.ctrl.SessionPath()
-	if recoveryPath == "" || recoveryPath == active || recoveryPath == target || !strings.Contains(filepath.Base(recoveryPath), "-recovery-") {
-		t.Fatalf("session path after refused resume = %q, want recovery path distinct from active %q and target %q", recoveryPath, active, target)
-	}
-	if got, want := m.leases.HeldPath(), agent.CanonicalSessionPath(recoveryPath); got != want {
-		t.Fatalf("lease after refused resume = %q, want recovery path %q", got, want)
-	}
-}
-
-func TestResumePickerKeepsLeaseOnRecoveryPathWhenTargetHeld(t *testing.T) {
-	t.Setenv(agent.SessionLogSchemaEnv, "v1")
-	dir := t.TempDir()
-	active := filepath.Join(dir, "resume-picker-active-conflict.jsonl")
-	target := filepath.Join(dir, "resume-picker-target.jsonl")
-	saveTestSession(t, target, "target session")
-
-	m := newTestChatTUI()
-	m.ctrl = divergedSessionController(t, dir, active)
-	m.resumePick = &resumePicker{entries: []resumeEntry{{session: agent.SessionInfo{Path: target}}}, sel: 0}
-	m.leases = control.NewSessionLeaseKeeper()
-	t.Cleanup(m.leases.Release)
-	if err := m.leases.Rebind(active); err != nil {
-		t.Fatalf("seed active lease: %v", err)
-	}
-	holdSessionLease(t, target)
-
-	next, _ := m.applyResumePick()
-	m = next.(chatTUI)
-
-	recoveryPath := m.ctrl.SessionPath()
-	if recoveryPath == "" || recoveryPath == active || recoveryPath == target || !strings.Contains(filepath.Base(recoveryPath), "-recovery-") {
-		t.Fatalf("session path after refused picker resume = %q, want recovery path distinct from active %q and target %q", recoveryPath, active, target)
-	}
-	if got, want := m.leases.HeldPath(), agent.CanonicalSessionPath(recoveryPath); got != want {
-		t.Fatalf("lease after refused picker resume = %q, want recovery path %q", got, want)
-	}
-}
-
 func TestCompactDoneKeepsLeaseOnRecoveryPathAfterSnapshotConflict(t *testing.T) {
 	t.Setenv(agent.SessionLogSchemaEnv, "v1")
 	dir := t.TempDir()

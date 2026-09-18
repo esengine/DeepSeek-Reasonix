@@ -67,9 +67,10 @@ var ChineseTraditional = Messages{
 		"unreviewed_change":   "改動後再沒看過",
 		"declared_unverified": "自己申報未驗證",
 	},
-	NoSessionToResume: "沒有可恢復的會話 — 用 `reasonix` 開一個新的",
-	ResumeRequiresTTY: "--resume 需要互動式終端；用 --continue 直接恢復最近一次",
-	PickSessionLabel:  "恢復哪個會話？",
+	MigratedLegacySessionsFmt: "已將 %d 個舊格式會話遷移到目前會話格式",
+	NoSessionToResume:         "沒有可恢復的會話 — 用 `reasonix` 開一個新的",
+	ResumeRequiresTTY:         "--resume 需要互動式終端；用 --continue 直接恢復最近一次",
+	PickSessionLabel:          "恢復哪個會話？",
 
 	ResumeBusy:             "請先完成或取消當前這一輪再恢復會話",
 	ResumeBadIndexFmt:      "請選擇 1–%d 的會話（用 /resume 檢視列表）",
