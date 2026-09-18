@@ -35,7 +35,7 @@ authentication is incomplete.
 | `--max-steps N` | Set a one-off maximum tool-call round budget; `0` uses automatic execution. |
 | `--dir PATH` | Change the workspace root before loading config and tools. |
 | `--add-dir PATH` | Add another writable tool directory; repeat for multiple directories. |
-| `-c`, `--continue` | Resume the most recent session. |
+| `-c`, `--continue` | Resume the most recent session, or start a fresh one when none exists. |
 | `-r`, `--resume [QUERY]` | Open the session picker, or resume a matching session. |
 | `--copy` | Continue in a writable copy of the resumed session. |
 | `--allowed-tools RULES` | Add session-only permission allow rules. Repeatable; `--allowedTools` is an alias. |
@@ -368,7 +368,8 @@ reasonix --resume <session-id>
 reasonix --resume provider-config --copy
 ```
 
-- `--continue` resumes the newest saved session immediately.
+- `--continue` resumes the newest saved session immediately. When no saved
+  session exists it reports this and starts a fresh session instead of failing.
 - Bare `--resume` opens the searchable picker in an interactive terminal.
 - `--resume QUERY` accepts an exact session ID or path, or a unique title or
   preview substring. Missing and ambiguous matches fail with a descriptive

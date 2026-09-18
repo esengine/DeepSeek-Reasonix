@@ -10,7 +10,7 @@
     "marker": 0,
     "narrative": 63,
     "struct-state": 106,
-    "test-file-size": 64102
+    "test-file-size": 64123
   },
   "files": {
     "cmd/e2ebench/main.go": {
@@ -680,12 +680,12 @@
     "internal/cli/cli.go": {
       "complexity": 90,
       "essay": 22,
-      "file-size": 1974,
-      "function-size": 559
+      "file-size": 1985,
+      "function-size": 568
     },
     "internal/cli/cli_test.go": {
       "essay": 1,
-      "test-file-size": 1460
+      "test-file-size": 1484
     },
     "internal/cli/complete.go": {
       "essay": 1,

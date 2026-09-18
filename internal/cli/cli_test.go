@@ -568,6 +568,30 @@ func TestRunKeepsChatAndCodeCompatibilityAliases(t *testing.T) {
 	}
 }
 
+// --continue with no saved session reports the miss and starts a fresh session
+// instead of aborting. In the isolated home the run then stops at provider
+// resolution, which proves it advanced past the resume check.
+func TestRunContinueWithoutSessionsStartsFresh(t *testing.T) {
+	isolateCLIConfigHome(t)
+
+	var rc int
+	stderr := captureStderr(t, func() {
+		rc = runAgent([]string{"--continue", "hello"}, "test-version")
+	})
+	if strings.Contains(stderr, i18n.M.NoSessionToResume) {
+		t.Fatalf("--continue aborted on the missing-session check: %q", stderr)
+	}
+	if !strings.Contains(stderr, i18n.M.NoSessionToResumeStartingNew) {
+		t.Fatalf("--continue did not report the fresh-session fallback: %q", stderr)
+	}
+	if !strings.Contains(stderr, "provider") {
+		t.Fatalf("--continue did not reach provider resolution after the fallback: %q", stderr)
+	}
+	if rc == 0 {
+		t.Fatalf("run rc = 0, want non-zero (the isolated home has no provider)")
+	}
+}
+
 func TestRunMigratesLegacyConfigBeforeConfigOnlyCommands(t *testing.T) {
 	isolateCLIConfigHome(t)
 	legacyPath := filepath.Join(filepath.Dir(config.UserConfigPath()), "reasonix.toml")

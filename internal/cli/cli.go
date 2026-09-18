@@ -465,7 +465,7 @@ func withNotifications(sink event.Sink, cfg *config.Config) event.Sink {
 // registers "c" as a long flag name, which leaves "-c" unparseable
 // ("unknown shorthand flag: 'c' in -c") while accidentally accepting "--c".
 func registerContinueFlag(fs *pflag.FlagSet) *bool {
-	return fs.BoolP("continue", "c", false, "resume the most recent saved session")
+	return fs.BoolP("continue", "c", false, "resume the most recent saved session, or start a fresh one when none exists")
 }
 
 func runAgent(args []string, version string) int {
@@ -586,15 +586,21 @@ func runAgent(args []string, version string) int {
 		}
 		resumePath = resolved
 	}
+	// continued reports whether --continue actually found a session, so the
+	// telemetry session mode does not claim "continue" for a fresh fallback.
+	continued := false
 	if resumePath == "" && *cont {
 		sessionDir := resolveCLISessionDir()
 		reclaimCLIRecoveryBranches(sessionDir)
 		session, ok := mostRecentSession(sessionDir)
 		if !ok {
-			fmt.Fprintln(os.Stderr, i18n.M.NoSessionToResume)
-			return 1
+			// Nothing to continue: report it and fall through to a fresh
+			// session instead of aborting.
+			fmt.Fprintln(os.Stderr, i18n.M.NoSessionToResumeStartingNew)
+		} else {
+			resumePath = session.Path
+			continued = true
 		}
-		resumePath = session.Path
 	}
 	if *copySession && resumePath == "" {
 		fmt.Fprintln(os.Stderr, i18n.M.ErrorPrefix, "--copy requires --resume or --continue")
@@ -616,7 +622,7 @@ func runAgent(args []string, version string) int {
 		}
 		resumePath = copied
 	}
-	sessionMode := cliTelemetrySessionMode(*cont, strings.TrimSpace(*resume) != "", *copySession)
+	sessionMode := cliTelemetrySessionMode(continued, strings.TrimSpace(*resume) != "", *copySession)
 	reporter := startCLITelemetry(cfg, telemetry.Options{
 		Version: version, Interactive: false, CLIMode: "run",
 		PermissionMode: *permissionMode, SessionMode: sessionMode,
@@ -1036,6 +1042,9 @@ func chatREPL(args []string, version string) int {
 	// Decide whether we're starting fresh or resuming. --resume opens an
 	// interactive picker; --continue / -c jumps straight into the newest.
 	var resumePath string
+	// continued reports whether --continue actually found a session, so the
+	// telemetry session mode does not claim "continue" for a fresh fallback.
+	continued := false
 	resumeValue := strings.TrimSpace(*resume)
 	switch strings.ToLower(resumeValue) {
 	case "true":
@@ -1062,10 +1071,13 @@ func chatREPL(args []string, version string) int {
 		reclaimCLIRecoveryBranches(sessionDir)
 		session, ok := mostRecentSession(sessionDir)
 		if !ok {
-			fmt.Fprintln(os.Stderr, i18n.M.NoSessionToResume)
-			return 1
+			// Nothing to continue: report it and fall through to a fresh
+			// session instead of aborting.
+			fmt.Fprintln(os.Stderr, i18n.M.NoSessionToResumeStartingNew)
+		} else {
+			resumePath = session.Path
+			continued = true
 		}
-		resumePath = session.Path
 	}
 	if *copySession && resumePath == "" {
 		fmt.Fprintln(os.Stderr, i18n.M.ErrorPrefix, "--copy requires --resume or --continue")
@@ -1080,7 +1092,7 @@ func chatREPL(args []string, version string) int {
 		fmt.Printf("continuing in a session copy: %s\n", copied)
 		resumePath = copied
 	}
-	sessionMode := cliTelemetrySessionMode(*cont, resumeValue != "", *copySession)
+	sessionMode := cliTelemetrySessionMode(continued, resumeValue != "", *copySession)
 	reporter := startCLITelemetry(cfg, telemetry.Options{
 		Version: version, Interactive: isInteractive(), CLIMode: "tui",
 		PermissionMode: *permissionMode, SessionMode: sessionMode,
