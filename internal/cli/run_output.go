@@ -66,7 +66,9 @@ type runResult struct {
 	Currency   string  `json:"currency,omitempty"`
 	// TotalCostUSD is the released compatibility alias. It mirrors TotalCost;
 	// new consumers must pair TotalCost with Currency instead of assuming USD.
-	TotalCostUSD float64 `json:"total_cost_usd,omitempty"`
+	TotalCostUSD  float64 `json:"total_cost_usd,omitempty"`
+	TotalSaved    float64 `json:"total_saved,omitempty"`
+	SavedFeedback string  `json:"saved_feedback,omitempty"`
 	// CostComplete is false when mixed originals lack a shared display valuation.
 	CostComplete    bool   `json:"cost_complete"`
 	DisplayComplete bool   `json:"display_complete"`
@@ -157,6 +159,17 @@ func runAuthenticationMetadata(err error) (code, status string, actions []string
 	return code, status, actions
 }
 
+type runCostState struct {
+	cost            float64
+	currency        string
+	displayCurrency string
+	costComplete    bool
+	displayComplete bool
+	displayStatus   string
+	aggregateMode   string
+	sawQuote        bool
+}
+
 type runOutputSink struct {
 	mu                  sync.Mutex
 	format              runOutputFormat
@@ -164,14 +177,8 @@ type runOutputSink struct {
 	encoder             *json.Encoder
 	final               string
 	usage               runResultUsage
-	cost                float64
-	currency            string
-	costComplete        bool
-	displayComplete     bool
-	displayStatus       string
-	aggregateMode       string
+	costs               runCostState
 	originalTotals      []billing.Money
-	sawQuote            bool
 	originalCosts       map[string]float64
 	quoteLedger         *billing.Ledger
 	turns               int
@@ -193,6 +200,22 @@ func newRunOutputSink(out io.Writer, format runOutputFormat) *runOutputSink {
 	}
 }
 
+func (s *runOutputSink) SetDisplayCurrency(currency string) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.costs.displayCurrency = billing.NormalizeCurrency(currency)
+}
+
+func (s *runOutputSink) SavedFeedback() string {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.quoteLedger == nil || len(s.quoteLedger.Entries) == 0 {
+		return ""
+	}
+	agg := s.quoteLedger.Total(s.costs.displayCurrency)
+	return agg.SavedFeedback()
+}
+
 func (s *runOutputSink) Emit(e event.Event) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -207,16 +230,23 @@ func (s *runOutputSink) Emit(e event.Event) {
 		s.usage.Estimated = s.usage.Estimated || e.Usage.Estimated
 		q := e.CostQuote
 		if q == nil && e.Pricing != nil {
-			q = event.EnsureCostQuote(e, nil)
+			var qctx *event.QuoteContext
+			if s.costs.displayCurrency != "" {
+				qctx = &event.QuoteContext{DisplayCurrency: s.costs.displayCurrency}
+			}
+			q = event.EnsureCostQuote(e, qctx)
+		} else if q != nil && s.costs.displayCurrency != "" {
+			sel := q.WithSelected(s.costs.displayCurrency)
+			q = &sel
 		}
 		if q != nil {
-			s.sawQuote = true
+			s.costs.sawQuote = true
 			if !q.CostComplete {
-				s.costComplete = false
+				s.costs.costComplete = false
 			}
 			// First complete quote establishes complete=true.
 			if q.Complete && s.quoteLedger == nil {
-				s.costComplete = true
+				s.costs.costComplete = true
 			}
 			if s.originalCosts == nil {
 				s.originalCosts = map[string]float64{}
@@ -224,12 +254,12 @@ func (s *runOutputSink) Emit(e event.Event) {
 			if cur := billing.NormalizeCurrency(q.Original.Currency); cur != "" {
 				s.originalCosts[cur] += q.Original.Float64()
 			}
-			if q.Selected != nil && (s.currency == "" || s.currency == q.LegacyCurrencyCode()) {
-				s.cost += q.Selected.Float64()
-				s.currency = q.LegacyCurrencyCode()
+			if q.Selected != nil && (s.costs.currency == "" || s.costs.currency == q.LegacyCurrencyCode()) {
+				s.costs.cost += q.Selected.Float64()
+				s.costs.currency = q.LegacyCurrencyCode()
 			} else if q.Selected != nil {
-				s.currency = ""
-				s.cost = 0
+				s.costs.currency = ""
+				s.costs.cost = 0
 			}
 			if s.quoteLedger == nil {
 				s.quoteLedger = billing.NewLedger()
@@ -303,21 +333,27 @@ func (s *runOutputSink) Finalize(sessionID string, started time.Time, runErr err
 		turns = 1
 	}
 	var aggQuote *billing.CostQuote
+	var totalSaved float64
+	var savedFeedback string
 	if s.quoteLedger != nil && len(s.quoteLedger.Entries) > 0 {
-		agg := s.quoteLedger.Total("")
+		agg := s.quoteLedger.Total(s.costs.displayCurrency)
 		aggQuote = &agg
 		if agg.Selected != nil {
-			s.cost = agg.Selected.Float64()
-			s.currency = agg.LegacyCurrencyCode()
+			s.costs.cost = agg.Selected.Float64()
+			s.costs.currency = agg.LegacyCurrencyCode()
 		}
 		if agg.Selected == nil {
-			s.cost = 0
-			s.currency = ""
+			s.costs.cost = 0
+			s.costs.currency = ""
 		}
-		s.costComplete = agg.CostComplete
-		s.displayComplete = agg.DisplayComplete
-		s.displayStatus = agg.DisplayStatus
-		s.aggregateMode = agg.AggregateMode
+		if agg.Saved != nil {
+			totalSaved = agg.Saved.Float64()
+			savedFeedback = agg.SavedFeedback()
+		}
+		s.costs.costComplete = agg.CostComplete
+		s.costs.displayComplete = agg.DisplayComplete
+		s.costs.displayStatus = agg.DisplayStatus
+		s.costs.aggregateMode = agg.AggregateMode
 		if agg.OriginalTotals != nil {
 			s.originalTotals = append([]billing.Money(nil), agg.OriginalTotals...)
 		}
@@ -330,13 +366,15 @@ func (s *runOutputSink) Finalize(sessionID string, started time.Time, runErr err
 		NumTurns:        turns,
 		Result:          resultText,
 		SessionID:       sessionID,
-		TotalCost:       s.cost,
-		Currency:        s.currency,
-		TotalCostUSD:    s.cost,
-		CostComplete:    s.costComplete || (!s.sawQuote && s.currency != ""),
-		DisplayComplete: s.displayComplete,
-		DisplayStatus:   s.displayStatus,
-		AggregateMode:   s.aggregateMode,
+		TotalCost:       s.costs.cost,
+		Currency:        s.costs.currency,
+		TotalCostUSD:    s.costs.cost,
+		TotalSaved:      totalSaved,
+		SavedFeedback:   savedFeedback,
+		CostComplete:    s.costs.costComplete || (!s.costs.sawQuote && s.costs.currency != ""),
+		DisplayComplete: s.costs.displayComplete,
+		DisplayStatus:   s.costs.displayStatus,
+		AggregateMode:   s.costs.aggregateMode,
 		OriginalCosts:   s.originalCosts,
 		OriginalTotals:  s.originalTotals,
 		CostQuote:       aggQuote,

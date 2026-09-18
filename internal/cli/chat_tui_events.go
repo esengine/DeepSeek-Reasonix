@@ -172,9 +172,16 @@ func (m *chatTUI) ingestUsage(e event.Event) {
 	if e.Usage != nil {
 		m.turnTokens += e.Usage.CompletionTokens
 	}
-	m.addSessionCostQuote(e.CostQuote)
+	quote := e.CostQuote
+	if quote != nil {
+		if cur := m.displayCurrency(); cur != "" {
+			sel := quote.WithSelected(cur)
+			quote = &sel
+		}
+	}
+	m.addSessionCostQuote(quote)
 	if m.showTurnUsage {
-		if line := renderQuotedTurnReceipt(e.Usage, e.CostQuote, e.CacheDiagnostics); line != "" {
+		if line := renderQuotedTurnReceipt(e.Usage, quote, e.CacheDiagnostics); line != "" {
 			m.finalizeStreamed()
 			m.commitSpacer()
 			m.commitTranscriptSource(transcriptSource{kind: transcriptSourceTurnReceipt, raw: line})

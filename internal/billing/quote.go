@@ -81,6 +81,7 @@ type CostQuote struct {
 	OriginalTotals []Money              `json:"originalTotals,omitempty"`
 	Valuations     map[string]Valuation `json:"valuations,omitempty"`
 	Selected       *Money               `json:"selected,omitempty"`
+	Saved          *Money               `json:"saved,omitempty"`
 	BillingMode    string               `json:"billingMode,omitempty"`
 	Estimated      bool                 `json:"estimated"`
 	// CostComplete means usage and the price-book amount are known. It does not
@@ -107,6 +108,7 @@ type CostQuote struct {
 // Valuation is one currency view of a cost fact.
 type Valuation struct {
 	Money  Money         `json:"money"`
+	Saved  *Money        `json:"saved,omitempty"`
 	Basis  string        `json:"basis"`
 	Source string        `json:"source"`
 	AsOf   string        `json:"asOf"` // YYYY-MM-DD
@@ -254,9 +256,17 @@ func newQuoteBuildState(in QuoteInput) *quoteBuildState {
 		fingerprint = PricingFingerprint(in.Rates)
 	}
 	amount := OriginalCostAmount(in.Rates, in.Usage)
+	savedAmount := CacheSavedAmount(in.Rates, in.Usage)
+	var origSaved *Money
+	if savedAmount > 0 {
+		m := MoneyOf(savedAmount, currency)
+		origSaved = &m
+	}
 	q := CostQuote{
 		Original:           MoneyOf(amount, currency),
 		Valuations:         map[string]Valuation{},
+		Selected:           nil,
+		Saved:              origSaved,
 		BillingMode:        mode,
 		Estimated:          true,
 		CostComplete:       true,
@@ -274,7 +284,7 @@ func newQuoteBuildState(in QuoteInput) *quoteBuildState {
 		q.RatedAt = occurred.Format(time.RFC3339Nano)
 	}
 	q.Valuations[currency] = Valuation{
-		Money: q.Original, Basis: BasisIdentity,
+		Money: q.Original, Saved: origSaved, Basis: BasisIdentity,
 		Source: firstNonEmpty(in.CatalogSource, "rate_card"),
 		AsOf:   occurred.UTC().Format("2006-01-02"),
 	}
@@ -366,8 +376,16 @@ func (s *quoteBuildState) addOfficialValuation(target string) bool {
 	if !ok {
 		return false
 	}
+	peerCard := RateCardFromCatalog(peer)
+	peerSaved := CacheSavedAmount(peerCard, s.input.Usage)
+	var peerSavedMoney *Money
+	if peerSaved > 0 {
+		m := MoneyOf(peerSaved, target)
+		peerSavedMoney = &m
+	}
 	s.quote.Valuations[target] = Valuation{
-		Money: MoneyOf(OriginalCostAmount(RateCardFromCatalog(peer), s.input.Usage), target),
+		Money: MoneyOf(OriginalCostAmount(peerCard, s.input.Usage), target),
+		Saved: peerSavedMoney,
 		Basis: BasisOfficialTable, Source: peer.DocURL,
 		AsOf: s.occurred.UTC().Format("2006-01-02"),
 	}
@@ -377,6 +395,7 @@ func (s *quoteBuildState) addOfficialValuation(target string) bool {
 func (s *quoteBuildState) selectDisplay() {
 	if !s.quote.CostComplete {
 		s.quote.Selected = nil
+		s.quote.Saved = nil
 		s.quote.DisplayComplete = false
 		s.quote.Complete = false
 		s.quote.DisplayStatus = DisplayStatusUnavailable
@@ -386,17 +405,24 @@ func (s *quoteBuildState) selectDisplay() {
 	if display == "" {
 		selected := s.quote.Original
 		s.quote.Selected = &selected
+		if v, ok := s.quote.Valuations[s.currency]; ok && v.Saved != nil {
+			s.quote.Saved = v.Saved
+		}
 		return
 	}
 	if valuation, ok := s.quote.Valuations[display]; ok {
 		selected := valuation.Money
 		s.quote.Selected = &selected
+		s.quote.Saved = valuation.Saved
 		return
 	}
 	// The original price-book amount is still a valid cost fact. Keep it as a
 	// visible fallback and distinguish the display mismatch from no pricing.
 	selected := s.quote.Original
 	s.quote.Selected = &selected
+	if v, ok := s.quote.Valuations[s.currency]; ok && v.Saved != nil {
+		s.quote.Saved = v.Saved
+	}
 	s.quote.DisplayComplete = false
 	s.quote.Complete = false
 	s.quote.DisplayStatus = DisplayStatusFallbackOriginal
@@ -432,14 +458,24 @@ func (q CostQuote) SelectForDisplay(display string) (Money, bool) {
 // WithSelected returns a copy with Selected set for display.
 func (q CostQuote) WithSelected(display string) CostQuote {
 	out := q
-	if m, ok := q.SelectForDisplay(display); ok {
+	normalized := NormalizeCurrency(display)
+	if m, ok := q.SelectForDisplay(normalized); ok {
 		out.Selected = &m
+		cur := NormalizeCurrency(m.Currency)
+		if v, ok := out.Valuations[cur]; ok && v.Saved != nil {
+			out.Saved = v.Saved
+		} else if NormalizeCurrency(out.Original.Currency) == cur {
+			// Keep out.Saved if already in original currency
+		} else {
+			out.Saved = nil
+		}
 		if quoteHasCompleteCostFact(q) {
 			out.Complete = true
 			out.IncompleteReason = ""
 		}
 	} else {
 		out.Selected = nil
+		out.Saved = nil
 		out.Complete = false
 		if out.IncompleteReason == "" {
 			out.IncompleteReason = "display_unavailable"
@@ -487,18 +523,20 @@ func AggregateQuotes(quotes []CostQuote, display string) CostQuote {
 }
 
 type quoteAccumulator struct {
-	out               CostQuote
-	display           string
-	totals            map[string]Amount
-	originalCurrency  string
-	originalTotal     Amount
-	originalTotals    map[string]Amount
-	originalComplete  bool
-	costFactsComplete bool
-	displayComplete   bool
-	modes             map[string]struct{}
-	rateBands         map[string]struct{}
-	unknownRateBand   bool
+	out                CostQuote
+	display            string
+	totals             map[string]Amount
+	savedTotals        map[string]Amount
+	originalCurrency   string
+	originalTotal      Amount
+	originalSavedTotal Amount
+	originalTotals     map[string]Amount
+	originalComplete   bool
+	costFactsComplete  bool
+	displayComplete    bool
+	modes              map[string]struct{}
+	rateBands          map[string]struct{}
+	unknownRateBand    bool
 }
 
 func emptyAggregate(display string) CostQuote {
@@ -514,7 +552,7 @@ func emptyAggregate(display string) CostQuote {
 func newQuoteAccumulator(display string) *quoteAccumulator {
 	return &quoteAccumulator{
 		out:     CostQuote{Valuations: map[string]Valuation{}, Estimated: true},
-		display: NormalizeCurrency(display), totals: map[string]Amount{}, originalTotals: map[string]Amount{},
+		display: NormalizeCurrency(display), totals: map[string]Amount{}, savedTotals: map[string]Amount{}, originalTotals: map[string]Amount{},
 		originalComplete: true, costFactsComplete: true, displayComplete: true,
 		modes: map[string]struct{}{}, rateBands: map[string]struct{}{},
 	}
@@ -542,6 +580,13 @@ func (a *quoteAccumulator) add(quote CostQuote) {
 		a.out.RateDate = quote.RateDate
 	}
 	originalCurrency := NormalizeCurrency(quote.Original.Currency)
+	var origSaved Amount
+	if quote.Saved != nil && NormalizeCurrency(quote.Saved.Currency) == originalCurrency {
+		origSaved = quote.Saved.AmountValue()
+	} else if v, ok := quote.Valuations[originalCurrency]; ok && v.Saved != nil {
+		origSaved = v.Saved.AmountValue()
+	}
+	a.originalSavedTotal = a.originalSavedTotal.Add(origSaved)
 	if len(quote.OriginalTotals) > 0 {
 		for _, original := range quote.OriginalTotals {
 			a.addOriginal(original, NormalizeCurrency(original.Currency))
@@ -562,8 +607,13 @@ func (a *quoteAccumulator) add(quote CostQuote) {
 		a.addValuation(code, valuation)
 	}
 	if originalCurrency != "" && !originalIncluded {
+		var idSaved *Money
+		if origSaved > 0 {
+			m := MoneyOf(origSaved, originalCurrency)
+			idSaved = &m
+		}
 		a.addValuation(originalCurrency, Valuation{
-			Money: quote.Original, Basis: BasisIdentity, Source: "aggregate",
+			Money: quote.Original, Saved: idSaved, Basis: BasisIdentity, Source: "aggregate",
 			AsOf: time.Now().UTC().Format("2006-01-02"),
 		})
 	}
@@ -590,11 +640,18 @@ func (a *quoteAccumulator) addValuation(code string, valuation Valuation) {
 		return
 	}
 	a.totals[code] = a.totals[code].Add(valuation.Money.AmountValue())
+	if valuation.Saved != nil {
+		a.savedTotals[code] = a.savedTotals[code].Add(valuation.Saved.AmountValue())
+	}
 	current, found := a.out.Valuations[code]
 	if !found {
 		current = valuation
 	}
 	current.Money = MoneyOf(a.totals[code], code)
+	if a.savedTotals[code] > 0 {
+		s := MoneyOf(a.savedTotals[code], code)
+		current.Saved = &s
+	}
 	current.Stale = current.Stale || valuation.Stale
 	a.out.Valuations[code] = current
 }
@@ -635,6 +692,10 @@ func (a *quoteAccumulator) finish() CostQuote {
 	if a.display == "" && a.originalComplete && a.costFactsComplete {
 		selected := a.out.Original
 		a.out.Selected = &selected
+		if a.originalSavedTotal > 0 && a.originalCurrency != "" {
+			s := MoneyOf(a.originalSavedTotal, a.originalCurrency)
+			a.out.Saved = &s
+		}
 		a.out.DisplayComplete = true
 		a.out.Complete = true
 		a.out.DisplayStatus = DisplayStatusMatched
@@ -645,6 +706,9 @@ func (a *quoteAccumulator) finish() CostQuote {
 	if found && a.displayComplete && a.costFactsComplete {
 		selected := valuation.Money
 		a.out.Selected = &selected
+		if valuation.Saved != nil {
+			a.out.Saved = valuation.Saved
+		}
 		a.out.DisplayComplete = true
 		a.out.Complete = true
 		a.out.DisplayStatus = DisplayStatusMatched
@@ -663,6 +727,10 @@ func (a *quoteAccumulator) finish() CostQuote {
 	} else if a.originalComplete && a.originalCurrency != "" {
 		selected := a.out.Original
 		a.out.Selected = &selected
+		if a.originalSavedTotal > 0 {
+			s := MoneyOf(a.originalSavedTotal, a.originalCurrency)
+			a.out.Saved = &s
+		}
 		a.out.DisplayStatus = DisplayStatusFallbackOriginal
 		a.out.AggregateMode = AggregateModeSingleCurrency
 		a.out.IncompleteReason = firstNonEmpty(a.out.IncompleteReason, "display_unavailable")
@@ -674,69 +742,6 @@ func (a *quoteAccumulator) finish() CostQuote {
 	return a.out
 }
 
-// NormalizeQuote fills fields introduced after the first CostQuote wire shape.
-// It is used at every persistence and transport boundary so old telemetry and
-// old eventwire payloads remain safe without inventing a new amount.
-func NormalizeQuote(q CostQuote) CostQuote {
-	if !q.CostComplete && !q.DisplayComplete && q.Complete {
-		q.CostComplete = true
-		q.DisplayComplete = true
-	}
-	if q.DisplayStatus != "" && q.DisplayStatus != DisplayStatusMatched && q.DisplayStatus != DisplayStatusFallbackOriginal && q.DisplayStatus != DisplayStatusBucketed && q.DisplayStatus != DisplayStatusUnavailable {
-		q.DisplayStatus = ""
-	}
-	if q.AggregateMode != "" && q.AggregateMode != AggregateModeSingleCurrency && q.AggregateMode != AggregateModeCommonValuation && q.AggregateMode != AggregateModeCurrencyBuckets {
-		q.AggregateMode = ""
-	}
-	if q.RateBand != "" && q.RateBand != RateBandPeak && q.RateBand != RateBandOffPeak && q.RateBand != RateBandMixed {
-		q.RateBand = ""
-	}
-	if q.DisplayStatus == "" {
-		switch {
-		case q.Complete:
-			q.DisplayStatus = DisplayStatusMatched
-		case q.Original.Currency != "" && q.Original.Amount != "" && q.IncompleteReason != "no_price":
-			q.DisplayStatus = DisplayStatusFallbackOriginal
-		default:
-			q.DisplayStatus = DisplayStatusUnavailable
-		}
-	}
-	if q.AggregateMode == "" {
-		if len(q.OriginalTotals) > 1 {
-			q.AggregateMode = AggregateModeCurrencyBuckets
-		} else if q.Selected != nil {
-			q.AggregateMode = AggregateModeSingleCurrency
-		}
-	}
-	q.Complete = q.DisplayComplete
-	return q
-}
-
-// quoteHasCompleteCostFact separates a known original-currency charge from a
-// display-only valuation failure must not poison an exact original total,
-// while unpriced and unrecoverable legacy records stay incomplete in every
-// display currency.
-func quoteHasCompleteCostFact(q CostQuote) bool {
-	if q.CostComplete {
-		return true
-	}
-	switch q.IncompleteReason {
-	case "no_price", "missing_price_or_usage", "legacy_unrecoverable",
-		"legacy_wiped_or_zero", "legacy_invalid_amount", "mixed_original_currencies",
-		"incomplete_cost_fact":
-		return false
-	}
-	if q.Complete {
-		return true
-	}
-	currency := NormalizeCurrency(q.Original.Currency)
-	if currency == "" {
-		return false
-	}
-	valuation, ok := q.Valuations[currency]
-	return ok && SameCurrency(valuation.Money.Currency, currency)
-}
-
 func (a *quoteAccumulator) syncOriginalValuation() {
 	valuation, found := a.out.Valuations[a.originalCurrency]
 	if !found {
@@ -746,51 +751,9 @@ func (a *quoteAccumulator) syncOriginalValuation() {
 		}
 	}
 	valuation.Money = a.out.Original
+	if a.originalSavedTotal > 0 {
+		s := MoneyOf(a.originalSavedTotal, a.originalCurrency)
+		valuation.Saved = &s
+	}
 	a.out.Valuations[a.originalCurrency] = valuation
-}
-
-func firstNonEmpty(values ...string) string {
-	for _, v := range values {
-		if strings.TrimSpace(v) != "" {
-			return strings.TrimSpace(v)
-		}
-	}
-	return ""
-}
-
-func resolveCatalogIdentity(in QuoteInput) (provider, model string) {
-	provider = strings.ToLower(strings.TrimSpace(in.ProviderKind))
-	model = strings.TrimSpace(in.ModelID)
-	if model == "" {
-		ref := strings.TrimSpace(in.ModelRef)
-		if i := strings.LastIndex(ref, "/"); i >= 0 && i+1 < len(ref) {
-			model = ref[i+1:]
-			if provider == "" {
-				provider = strings.ToLower(ref[:i])
-			}
-		} else {
-			model = ref
-		}
-	}
-	// Normalize common provider name prefixes.
-	switch {
-	case strings.Contains(provider, "deepseek"):
-		provider = "deepseek"
-	case strings.Contains(provider, "longcat"):
-		provider = "longcat"
-	case strings.Contains(provider, "mimo"):
-		provider = "mimo"
-	}
-	if provider == "" {
-		// Infer from model id family.
-		switch {
-		case strings.HasPrefix(model, "deepseek"):
-			provider = "deepseek"
-		case strings.HasPrefix(model, "LongCat") || strings.HasPrefix(model, "longcat"):
-			provider = "longcat"
-		case strings.HasPrefix(model, "mimo"):
-			provider = "mimo"
-		}
-	}
-	return provider, model
 }

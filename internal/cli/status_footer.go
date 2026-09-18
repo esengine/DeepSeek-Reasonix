@@ -7,6 +7,7 @@ import (
 	"github.com/charmbracelet/x/ansi"
 
 	"reasonix/internal/billing"
+	"reasonix/internal/config"
 	"reasonix/internal/event"
 	"reasonix/internal/i18n"
 	"reasonix/internal/provider"
@@ -47,7 +48,13 @@ func footerMetric(label, value string) string {
 func renderTurnReceipt(u *provider.Usage, p *provider.Pricing, d *event.CacheDiagnostics) string {
 	var quote *billing.CostQuote
 	if u != nil && p != nil {
-		quote = event.EnsureCostQuote(event.Event{Kind: event.Usage, Usage: u, Pricing: p}, nil)
+		var qctx *event.QuoteContext
+		if cfg, err := config.LoadForRootReadOnly("."); err == nil && cfg != nil {
+			if cur := cfg.ExplicitDisplayCurrency(); cur != "" {
+				qctx = &event.QuoteContext{DisplayCurrency: cur}
+			}
+		}
+		quote = event.EnsureCostQuote(event.Event{Kind: event.Usage, Usage: u, Pricing: p}, qctx)
 	}
 	return renderQuotedTurnReceipt(u, quote, d)
 }
@@ -78,20 +85,25 @@ func renderQuotedTurnReceipt(u *provider.Usage, q *billing.CostQuote, d *event.C
 	if u.ReasoningTokens > 0 {
 		groups = append(groups, "reasoning "+shortTokens(u.ReasoningTokens))
 	}
-	if q != nil && q.CostComplete {
-		// Host quotes are estimates; never present a bare zero as real spend.
-		money := q.Original
-		if q.Selected != nil {
-			money = *q.Selected
+	if q != nil {
+		if q.CostComplete {
+			// Host quotes are estimates; never present a bare zero as real spend.
+			money := q.Original
+			if q.Selected != nil {
+				money = *q.Selected
+			}
+			cost := money.Float64()
+			if cost > 0 {
+				groups = append(groups, fmt.Sprintf("≈%s%.4f", billing.CurrencySymbol(money.Currency), cost))
+			} else {
+				groups = append(groups, "cost n/a")
+			}
+			if band := localizedRateBand(q.RateBand); band != "" {
+				groups = append(groups, band)
+			}
 		}
-		cost := money.Float64()
-		if cost > 0 {
-			groups = append(groups, fmt.Sprintf("≈%s%.4f", billing.CurrencySymbol(money.Currency), cost))
-		} else {
-			groups = append(groups, "cost n/a")
-		}
-		if band := localizedRateBand(q.RateBand); band != "" {
-			groups = append(groups, band)
+		if feedback := q.SavedFeedback(); feedback != "" {
+			groups = append(groups, feedback)
 		}
 	}
 	if u.Estimated {
@@ -149,8 +161,8 @@ func (m *chatTUI) addSessionCostQuote(next *billing.CostQuote) {
 	if m.sessionCostQuote != nil {
 		quotes = append([]billing.CostQuote{*m.sessionCostQuote}, quotes...)
 	}
-	display := ""
-	if next.Selected != nil {
+	display := m.displayCurrency()
+	if display == "" && next.Selected != nil {
 		display = next.Selected.Currency
 	}
 	total := billing.AggregateQuotes(quotes, display)
@@ -277,6 +289,70 @@ func (m chatTUI) statusModelWorkGroup(maxWidth int) string {
 		}
 	}
 	return footerHint(compactMiddle(ansi.Strip(full), maxWidth))
+}
+
+func (m chatTUI) displayCurrency() string {
+	if m.cfg != nil {
+		if cur := m.cfg.ExplicitDisplayCurrency(); cur != "" {
+			return cur
+		}
+	}
+	if cfg, err := config.LoadForRootReadOnly("."); err == nil && cfg != nil {
+		return cfg.ExplicitDisplayCurrency()
+	}
+	return ""
+}
+
+// cacheStatus renders the prompt cache-hit rate for the status line (and
+// dashboard). "" before any cache tokens have been reported.
+func (m chatTUI) cacheStatus() (body string, rate float64, ok bool) {
+	now := ""
+	nowRate := 0.0
+	if u := m.ctrl.LastUsage(); u != nil {
+		// Only render when the provider actually reports cache token fields:
+		// falling back to PromptTokens as the denominator painted a bogus
+		// "turn hit 0.00%" for providers with no prompt-cache support.
+		now = cacheRateLabel(i18n.M.ChatStatusCacheNowFmt, u.CacheHitTokens, u.CacheHitTokens+u.CacheMissTokens)
+		if denom := u.CacheHitTokens + u.CacheMissTokens; denom > 0 {
+			nowRate = float64(u.CacheHitTokens) * 100 / float64(denom)
+		}
+	}
+	avg := ""
+	avgRate := 0.0
+	if hit, miss := m.ctrl.SessionCache(); hit+miss > 0 {
+		avg = cacheRateLabel(i18n.M.ChatStatusCacheAvgFmt, hit, hit+miss)
+		avgRate = float64(hit) * 100 / float64(hit+miss)
+	}
+	saved := ""
+	if m.sessionCostQuote != nil {
+		saved = m.sessionCostQuote.SavedFeedback()
+	}
+	var parts []string
+	if now != "" {
+		parts = append(parts, now)
+	}
+	if avg != "" {
+		parts = append(parts, avg)
+	}
+	if saved != "" {
+		parts = append(parts, saved)
+	}
+	if len(parts) > 0 {
+		rate := avgRate
+		if rate == 0 && nowRate > 0 {
+			rate = nowRate
+		}
+		return strings.Join(parts, " · "), rate, true
+	}
+	return "", 0, false
+}
+
+func (m chatTUI) cacheTag() string {
+	body, _, ok := m.cacheStatus()
+	if !ok {
+		return ""
+	}
+	return dim(body)
 }
 
 func cacheStatusColor(rate float64) cliColor {
