@@ -71,6 +71,27 @@ func TestParsePreservesSectionMarkerInsideValue(t *testing.T) {
 	}
 }
 
+func TestMCPServersSectionIsOptionalAndLast(t *testing.T) {
+	without := Build(Sections{Workspace: "workspace"})
+	if strings.Contains(without.Content, "MCP servers") {
+		t.Fatalf("empty MCP section leaked into snapshot:\n%s", without.Content)
+	}
+	withMCP := Build(Sections{Workspace: "workspace", MCPServers: "Use list_mcp_resources with [\"docs\"]."})
+	if strings.Index(withMCP.Content, "## Workspace") > strings.Index(withMCP.Content, "## MCP servers") {
+		t.Fatalf("MCP servers must stay last:\n%s", withMCP.Content)
+	}
+	if !strings.Contains(withMCP.Content, "MCP servers=") {
+		t.Fatalf("MCP manifest missing:\n%s", withMCP.Content)
+	}
+	parsed, ok := Parse(withMCP.Content)
+	if !ok || parsed.Sections.MCPServers != "Use list_mcp_resources with [\"docs\"]." {
+		t.Fatalf("Parse MCP section = (%+v, %v)", parsed.Sections, ok)
+	}
+	if _, ok := Parse(without.Content); !ok {
+		t.Fatal("four-section snapshot must still parse")
+	}
+}
+
 func TestParseAcceptsLegacyV1Snapshot(t *testing.T) {
 	body := preamble + "\n\n## Workspace\n\nlegacy workspace"
 	legacy := openTag + "\n" + body + "\n\n" + digestPrefix + digestOf(body) + "\n" + closeTag
