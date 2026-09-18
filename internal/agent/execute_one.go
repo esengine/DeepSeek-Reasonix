@@ -335,7 +335,7 @@ func (a *Agent) prepareToolExecution(ctx context.Context, plan *toolCallPlan) (t
 	}
 	// Acquire the checkpoint barrier before preimage capture and any hook. It isheld through post hooks and
 	// AfterMutation so rewind cannot interleave withwriter-side user code.
-	if (plan.effects.WorkspaceMutation || plan.hooksMayMutateWorkspace) &&
+	if (plan.effects.WorkspaceMutation || hookNeedsWorkspaceWriteGuard(plan)) &&
 		a.svc.mutationObserver != nil && a.svc.mutationObserver.Store() != nil {
 		barrier := a.svc.mutationObserver.Store().Barrier()
 		if err := barrier.EnterWrite(); err != nil {
@@ -352,7 +352,7 @@ func (a *Agent) prepareToolExecution(ctx context.Context, plan *toolCallPlan) (t
 		a.observeBeforeMutation(ctx, plan)
 		plan.mutationObserved = plan.mutationPath != ""
 	}
-	if plan.hooksMayMutateWorkspace && a.svc.mutationObserver != nil {
+	if hookNeedsWorkspaceWriteGuard(plan) && a.svc.mutationObserver != nil {
 		a.svc.mutationObserver.RecordGap(checkpoint.CoverageGap{Reason: checkpoint.GapHookWrite, Tool: plan.evidenceName, Detail: "tool hook may write paths that are not declared by the tool"})
 	}
 	// Proxy tools fire hooks against the real MCP target name and arguments.
