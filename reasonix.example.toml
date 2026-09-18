@@ -33,6 +33,8 @@ enabled = false   # system notifications for CLI and desktop turns; default off
 turn_done = true   # notify when a turn finishes
 approval_request = true   # notify when a tool approval is waiting
 ask_request = true   # notify when a question is waiting
+# min_duration_sec = 10  # notify turn_done only for turns running longer than N seconds (0 = always notify)
+# terminal_bell = false  # trigger terminal bell (\a) and OSC 777/9 sequences on notification
 
 [agent]
 # system_prompt = "You are ..."   # custom persona/prompt; unset or empty = built-in default

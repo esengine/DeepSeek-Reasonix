@@ -4,13 +4,13 @@
     "commented-code": 0,
     "complexity": 1878,
     "essay": 1915,
-    "file-size": 100466,
+    "file-size": 100458,
     "function-size": 8031,
     "layering": 1,
     "marker": 0,
     "narrative": 63,
     "struct-state": 106,
-    "test-file-size": 64102
+    "test-file-size": 64061
   },
   "files": {
     "cmd/e2ebench/main.go": {
@@ -680,12 +680,12 @@
     "internal/cli/cli.go": {
       "complexity": 90,
       "essay": 22,
-      "file-size": 1974,
+      "file-size": 1964,
       "function-size": 559
     },
     "internal/cli/cli_test.go": {
       "essay": 1,
-      "test-file-size": 1460
+      "test-file-size": 1419
     },
     "internal/cli/complete.go": {
       "essay": 1,
@@ -807,7 +807,7 @@
     },
     "internal/config/config.go": {
       "essay": 21,
-      "file-size": 1516,
+      "file-size": 1518,
       "narrative": 2
     },
     "internal/config/credential_diagnostics.go": {

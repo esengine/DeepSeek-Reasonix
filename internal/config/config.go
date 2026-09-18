@@ -287,6 +287,8 @@ type NotificationsConfig struct {
 	TurnDone        bool `toml:"turn_done"`
 	ApprovalRequest bool `toml:"approval_request"`
 	AskRequest      bool `toml:"ask_request"`
+	MinDurationSec  int  `toml:"min_duration_sec"`
+	TerminalBell    bool `toml:"terminal_bell"`
 }
 
 // EnvironmentEnabled reports whether startup environment probing should feed the
