@@ -9,22 +9,25 @@ import (
 
 	xdraw "golang.org/x/image/draw"
 	_ "golang.org/x/image/webp" // register webp decoder
+
+	"reasonix/internal/provider"
 )
 
-// maxVisionDim caps the longest image side sent to a model. OpenAI and Anthropic
-// downscale to roughly this server-side anyway, so a larger upload only wastes
-// request bytes and image tokens without adding fidelity.
-const maxVisionDim = 1568
+const (
+	jpegVisionQuality    = 85
+	maxRequestImageBytes = 2 << 20
+)
+
+var jpegQualityLadder = []int{jpegVisionQuality, 75, 60}
 
 // maxDecodePixels guards against decompression-bomb attachments: a tiny file can
 // declare enormous dimensions. Beyond this we skip decoding and send as-is (still
 // bounded by the 64 MB file cap).
 const maxDecodePixels = 50_000_000
 
-// compressForVision downscales an oversized image to maxVisionDim and re-encodes
-// it — PNG/GIF stay lossless (screenshots, text, transparency), JPEG/WebP go to
-// JPEG. Best-effort: an undecodable format, a decode/encode failure, or an image
-// already within budget returns the original bytes and mime unchanged.
+// compressForVision downscales oversized images to the DeepSeek v41 request
+// grid. PNG/GIF stay lossless until they exceed 2 MiB, then JPEG 85/75/60 is
+// used. Undecodable or in-budget input is returned unchanged.
 func compressForVision(raw []byte, mime string) ([]byte, string) {
 	switch mime {
 	case "image/png", "image/jpeg", "image/gif", "image/webp":
@@ -35,37 +38,59 @@ func compressForVision(raw []byte, mime string) ([]byte, string) {
 	if err != nil || cfg.Width*cfg.Height > maxDecodePixels {
 		return raw, mime
 	}
-	if cfg.Width <= maxVisionDim && cfg.Height <= maxVisionDim {
-		return raw, mime // within budget — no point re-encoding
+	targetW, targetH := provider.DeepSeekRequestImageDimensions(cfg.Width, cfg.Height)
+	needsScale := cfg.Width > targetW || cfg.Height > targetH
+	if !needsScale && len(raw) <= maxRequestImageBytes {
+		return raw, mime
 	}
 	src, _, err := image.Decode(bytes.NewReader(raw))
 	if err != nil {
 		return raw, mime
 	}
-	w, h := scaledDims(cfg.Width, cfg.Height, maxVisionDim)
-	dst := image.NewRGBA(image.Rect(0, 0, w, h))
-	xdraw.CatmullRom.Scale(dst, dst.Bounds(), src, src.Bounds(), xdraw.Over, nil)
-
-	var buf bytes.Buffer
-	if mime == "image/png" || mime == "image/gif" {
-		if err := png.Encode(&buf, dst); err != nil {
-			return raw, mime
-		}
-		return buf.Bytes(), "image/png"
+	outImg := image.Image(src)
+	if needsScale {
+		dst := image.NewRGBA(image.Rect(0, 0, targetW, targetH))
+		xdraw.CatmullRom.Scale(dst, dst.Bounds(), src, src.Bounds(), xdraw.Over, nil)
+		outImg = dst
 	}
-	if err := jpeg.Encode(&buf, dst, &jpeg.Options{Quality: 85}); err != nil {
+	encoded, outMIME := encodeVisionImage(outImg, mime)
+	if encoded == nil {
 		return raw, mime
 	}
-	return buf.Bytes(), "image/jpeg"
+	return encoded, outMIME
 }
 
-// scaledDims returns dimensions with the longest side clamped to m, preserving
-// aspect ratio (each side at least 1px).
-func scaledDims(w, h, m int) (int, int) {
-	if w >= h {
-		nh := max(h*m/w, 1)
-		return m, nh
+func encodeVisionImage(img image.Image, mime string) ([]byte, string) {
+	if mime == "image/png" || mime == "image/gif" {
+		var buf bytes.Buffer
+		if err := png.Encode(&buf, img); err != nil {
+			return nil, mime
+		}
+		if buf.Len() <= maxRequestImageBytes {
+			return buf.Bytes(), "image/png"
+		}
 	}
-	nw := max(w*m/h, 1)
-	return nw, m
+	data, ok := encodeJPEGLadder(img)
+	if !ok {
+		return nil, mime
+	}
+	return data, "image/jpeg"
+}
+
+func encodeJPEGLadder(img image.Image) ([]byte, bool) {
+	var best []byte
+	for _, quality := range jpegQualityLadder {
+		var buf bytes.Buffer
+		if err := jpeg.Encode(&buf, img, &jpeg.Options{Quality: quality}); err != nil {
+			return nil, false
+		}
+		out := buf.Bytes()
+		if best == nil || len(out) < len(best) {
+			best = out
+		}
+		if len(out) <= maxRequestImageBytes {
+			return out, true
+		}
+	}
+	return best, best != nil
 }

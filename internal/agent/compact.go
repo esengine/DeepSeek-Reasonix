@@ -163,6 +163,7 @@ func estimateMessagesTokens(msgs []provider.Message) int {
 				total += estimateTextTokens(s)
 			})
 		}
+		total += provider.EstimateMessageImageTokens(m)
 	}
 	return total
 }
@@ -410,8 +411,23 @@ func (a *Agent) summaryRequest(region []provider.Message, instructions string) p
 // summarize asks the executor's own provider to distill a replayed prefix into
 // a briefing. instructions is optional /compact focus + PreCompact text.
 func (a *Agent) summarize(ctx context.Context, region []provider.Message, instructions string) (string, *provider.Usage, error) {
-	req := a.summaryRequest(region, instructions)
-	summary, usage, err := a.runSummaryRequest(ctx, req)
+	var (
+		req     provider.Request
+		summary string
+		usage   *provider.Usage
+		err     error
+	)
+	for range 8 {
+		if err = ctx.Err(); err != nil {
+			return "", nil, err
+		}
+		req = a.summaryRequest(region, instructions)
+		summary, usage, err = a.runSummaryRequest(ctx, req)
+		off := provider.AsImageOffloadRequired(err)
+		if off == nil || !a.recordImageOffloadCount(req.Messages, off.OffloadImages) {
+			break
+		}
+	}
 	a.observeSummaryOutcome(req, usage, err)
 	return summary, usage, err
 }
@@ -440,6 +456,9 @@ func (a *Agent) runSummaryRequest(ctx context.Context, req provider.Request) (su
 	}
 	if a.svc.prov == nil {
 		return "", usage, fmt.Errorf("summary unavailable")
+	}
+	if err := a.checkRetainedImages(req.Messages); err != nil {
+		return "", usage, err
 	}
 	ch, err := provider.StreamAuxiliary(provider.WithRecoverySleeper(ctx, recoverySleep), a.svc.prov, req)
 	if err != nil {

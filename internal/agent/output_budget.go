@@ -97,6 +97,7 @@ type requestCalibrationShape struct {
 	compactChars int64
 	cjkRunes     int64
 	cjkBytes     int64
+	imageTokens  int
 }
 
 // reset drops what belongs to the transcript being replaced. Prompt-token
@@ -113,8 +114,17 @@ func (a *Agent) setPromptTokenCalibration(promptTokens int, shape requestCalibra
 	if a == nil || promptTokens <= 0 || shape.requestChars <= 0 {
 		return
 	}
+	// Provider prompt tokens include vision. Keep the stored ratio on text so
+	// estimatedShapeTokens can add the current v41 image estimate separately.
+	textTokens := promptTokens
+	if shape.imageTokens > 0 {
+		textTokens = promptTokens - shape.imageTokens
+		if textTokens < 1 {
+			return
+		}
+	}
 	a.sess.output.promptCalibration.Store(&promptTokenCalibration{
-		promptTokens: promptTokens,
+		promptTokens: textTokens,
 		requestChars: shape.requestChars,
 		compactChars: shape.compactChars,
 		cjkRunes:     shape.cjkRunes,
@@ -249,11 +259,19 @@ func (a *Agent) requestCalibrationShape(req provider.Request) requestCalibration
 
 func requestCalibrationShapeWithPolicy(req provider.Request, policy provider.SharedWindowInputPolicy) requestCalibrationShape {
 	requestChars, cjkRunes, cjkBytes := requestCalibrationTextShape(req, policy)
+	imageTokens := 0
+	for _, msg := range req.Messages {
+		if msg.LocalOnly {
+			continue
+		}
+		imageTokens += provider.EstimateMessageImageTokens(msg)
+	}
 	return requestCalibrationShape{
 		requestChars: requestChars,
 		compactChars: int64(charsOfMessages(req.Messages)),
 		cjkRunes:     cjkRunes,
 		cjkBytes:     cjkBytes,
+		imageTokens:  imageTokens,
 	}
 }
 
@@ -344,13 +362,15 @@ func (a *Agent) estimatedRequestTokens(req provider.Request) int {
 }
 
 func (a *Agent) estimatedShapeTokens(shape requestCalibrationShape) int {
-	if shape.requestChars <= 0 {
-		return 0
+	text := 0
+	if shape.requestChars > 0 {
+		if calibrated, ok := a.calibratedPromptTokens(shape); ok {
+			text = calibrated
+		} else {
+			text = int(float64(shape.requestChars) * fallbackTokPerChar)
+		}
 	}
-	if calibrated, ok := a.calibratedPromptTokens(shape); ok {
-		return calibrated
-	}
-	return int(float64(shape.requestChars) * fallbackTokPerChar)
+	return text + shape.imageTokens
 }
 
 func isCJKRune(r rune) bool {

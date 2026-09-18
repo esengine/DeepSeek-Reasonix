@@ -68,6 +68,19 @@ branch.
 
 ### Fixed
 
+- **Official vision cost and offload:** new attachments encode to the DeepSeek
+  v41 request grid (no 1568 long-edge, 4096 clamp, JPEG quality 85 then 75/60
+  toward 2 MiB). Compact and window estimates price retained images with the
+  published 14px / 3:1 / 1024-token calculator instead of treating them as free.
+  A vision route that still exceeds 600 images or the Files/inline byte watermark
+  records optional `image/offload` events for a whole count/byte quantum of the
+  oldest input images, then retries; resume and fork keep the same omissions.
+  UI history, stored data URLs, and tool schemas are unchanged.
+- **官方视觉计费与省略：** 新附件按 DeepSeek v41 请求网格编码；压缩与窗口估算按
+  官方计价计入图片 token。仅在请求超过 600 张或 Files/inline 字节水位时，按量子
+  省略最旧输入图并写入可选 `image/offload` 后重试。resume/fork 保持同一省略集。
+  界面历史、已存 data URL 与工具 schema 不变。
+
 - **Read evidence recovery:** partial reads no longer freeze independent work
   or ordinary final answers. Explicit full reads retain bounded completion
   checks. Rejected edits track operation/version requirements so successful

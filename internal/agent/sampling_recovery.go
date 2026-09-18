@@ -188,6 +188,12 @@ func (a *Agent) trySamplingRepair(ctx context.Context, s *samplingRecoveryState,
 		a.emitStreamAttempt(id, event.StreamAttemptDiscard, attempt, "output_limit", result.err)
 		return true
 	}
+	if next, ok := a.recoverImageOffload(ctx, s.frozen, result.err); ok {
+		sink.Discard()
+		a.emitStreamAttempt(id, event.StreamAttemptDiscard, attempt, "image_offload", result.err)
+		s.frozen = next
+		return true
+	}
 	if next, ok, _ := a.recoverContextLimit(ctx, s.frozen, result.err, &s.context); ok {
 		sink.Discard()
 		a.emitStreamAttempt(id, event.StreamAttemptDiscard, attempt, "context_limit", result.err)

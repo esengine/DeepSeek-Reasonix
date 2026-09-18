@@ -112,9 +112,7 @@ func estimateSamplingRequestInputTokens(req provider.Request) int {
 		total += estimateTextTokens(msg.ReasoningSignature)
 		total += estimateTextTokens(msg.Name)
 		total += estimateTextTokens(msg.ToolCallID)
-		for _, image := range msg.Images {
-			total += estimateTextTokens(image)
-		}
+		total += provider.EstimateMessageImageTokens(msg)
 		for _, call := range msg.ToolCalls {
 			total += 8 + estimateTextTokens(call.ID) + estimateTextTokens(call.Name) + estimateTextTokens(call.Arguments)
 		}
