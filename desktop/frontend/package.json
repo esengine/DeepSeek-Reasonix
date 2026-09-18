@@ -60,7 +60,7 @@
     "test:chat-file-browser": "PLAYWRIGHT_BROWSERS_PATH=.pw-browsers node bench/chat-file-reference.mjs"
   },
   "dependencies": {
-    "@modelcontextprotocol/ext-apps": "1.7.5",
+    "@modelcontextprotocol/ext-apps": "2.0.0",
     "@tanstack/react-virtual": "^3.14.10",
     "@xterm/addon-fit": "0.11.0",
     "@xterm/xterm": "6.0.0",
