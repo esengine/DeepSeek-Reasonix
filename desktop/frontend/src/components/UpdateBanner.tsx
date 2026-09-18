@@ -4,22 +4,36 @@ import { useUpdater } from "../lib/useUpdater";
 
 const MB = 1024 * 1024;
 const UPDATE_REFRESH_INTERVAL_MS = 60 * 60 * 1000;
+// Focus/visibility toggles are cheap for the renderer but each refresh reaches
+// the update check, which holds the bridge for seconds. Coalesce them so that
+// moving between windows cannot queue one check per toggle.
+const UPDATE_REFRESH_MIN_EVENT_INTERVAL_MS = 5 * 60 * 1000;
 const mb = (n: number) => (n / MB).toFixed(1);
 
 export function subscribeToUpdateRefresh(
   refresh: () => void,
   intervalMs = UPDATE_REFRESH_INTERVAL_MS,
+  minEventIntervalMs = UPDATE_REFRESH_MIN_EVENT_INTERVAL_MS,
 ): () => void {
-  const refreshVisible = () => {
-    if (document.visibilityState === "visible") refresh();
+  // Separate gates per path: the interval is already sparse, while window
+  // events fire in bursts and are the ones that need the floor.
+  let lastEventRefreshAt: number | null = null;
+  const refreshIfDue = (minIntervalMs: number) => {
+    if (document.visibilityState !== "visible") return;
+    const now = Date.now();
+    if (minIntervalMs > 0 && lastEventRefreshAt !== null && now - lastEventRefreshAt < minIntervalMs) return;
+    lastEventRefreshAt = now;
+    refresh();
   };
-  const interval = window.setInterval(refreshVisible, intervalMs);
-  window.addEventListener("focus", refreshVisible);
-  document.addEventListener("visibilitychange", refreshVisible);
+  const onInterval = () => refreshIfDue(0);
+  const onWindowEvent = () => refreshIfDue(minEventIntervalMs);
+  const interval = window.setInterval(onInterval, intervalMs);
+  window.addEventListener("focus", onWindowEvent);
+  document.addEventListener("visibilitychange", onWindowEvent);
   return () => {
     window.clearInterval(interval);
-    window.removeEventListener("focus", refreshVisible);
-    document.removeEventListener("visibilitychange", refreshVisible);
+    window.removeEventListener("focus", onWindowEvent);
+    document.removeEventListener("visibilitychange", onWindowEvent);
   };
 }
 
