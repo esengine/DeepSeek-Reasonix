@@ -137,12 +137,15 @@ func preflightRoleReasoning(cfg *config.Config, opts Options, resolver provider.
 		}
 		if selection.effort != nil {
 			value := *selection.effort
+			fallback := false
 			if selection.inheritedEffort {
-				value, _ = config.ResolveInheritedEffort(&copy, value)
+				value, fallback = config.ResolveInheritedEffort(&copy, value)
 			}
-			copy.Effort, source = value, selection.source
-			if copy.Kind == "anthropic" && copy.Effort != "" && copy.Thinking == "" {
-				copy.Thinking = "adaptive"
+			if !fallback {
+				copy.Effort, source = value, selection.source
+				if copy.Kind == "anthropic" && copy.Effort != "" && copy.Thinking == "" {
+					copy.Thinking = "adaptive"
+				}
 			}
 		}
 		cap := config.ReasoningCapabilityForEntry(&copy)

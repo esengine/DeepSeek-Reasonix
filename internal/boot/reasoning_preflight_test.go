@@ -61,6 +61,44 @@ func TestRoleReasoningPreflightFallsBackOnlyForInheritedSubagentEffort(t *testin
 	}
 }
 
+func TestRoleReasoningPreflightInheritedFallbackKeepsProviderEffort(t *testing.T) {
+	cfg := config.Default()
+	cfg.DefaultModel = "parent/parent-model"
+	cfg.Agent.SubagentModel = "custom/some-model"
+	cfg.Agent.SubagentEffort = "max"
+	cfg.Providers = []config.ProviderEntry{
+		{
+			Name:             "parent",
+			Kind:             "openai",
+			BaseURL:          "https://parent.example.invalid/v1",
+			Model:            "parent-model",
+			Effort:           "high",
+			SupportedEfforts: []string{"high"},
+		},
+		{
+			Name:             "custom",
+			Kind:             "openai",
+			BaseURL:          "https://custom.example.invalid/v1",
+			Model:            "some-model",
+			Effort:           "low",
+			SupportedEfforts: []string{"high"},
+		},
+	}
+
+	err := preflightRoleReasoning(cfg, Options{Model: "parent/parent-model"}, nil, false)
+	var role *RoleReasoningError
+	var unsupported *provider.UnsupportedReasoningEffort
+	if !errors.As(err, &role) || !errors.As(err, &unsupported) {
+		t.Fatalf("provider effort should remain strict after inherited fallback, got %v", err)
+	}
+	if role.Role != "subagent" || role.Effort != "low" || role.Source != "providers.custom.effort" {
+		t.Fatalf("subagent provider effort = %+v", role)
+	}
+	if cfg.Agent.SubagentEffort != "max" {
+		t.Fatalf("preflight mutated stored global effort: %q", cfg.Agent.SubagentEffort)
+	}
+}
+
 func TestRoleReasoningPreflightKeepsPlannerEffortIndependent(t *testing.T) {
 	for _, model := range []string{"deepseek-v4-flash", "deepseek-v4-pro", "deepseek-v4-flash-vision-exp"} {
 		cfg := config.Default()
