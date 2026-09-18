@@ -2029,7 +2029,7 @@ export function ProjectTree({
   return (
     <div ref={projectTreeRef} className="project-tree">
       {searchVisible && (
-        <label className="project-tree__search">
+        <label className="project-tree__search" data-active={searchActive}>
           <Search size={14} />
           <input
             ref={searchInputRef}
