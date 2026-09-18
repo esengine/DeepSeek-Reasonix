@@ -29,7 +29,7 @@ const (
 // Older sessions only stored data URLs; HTTP URLs and Files API ids are additive.
 func ClassifyImage(s string) ImageKind {
 	s = strings.TrimSpace(s)
-	if s == "" {
+	if s == "" || s == ImageOffloadedRef {
 		return ImageNone
 	}
 	if _, _, ok := ParseImageDataURL(s); ok {

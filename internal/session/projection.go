@@ -51,6 +51,9 @@ type Projection struct {
 	TitleSequence uint64
 	ModelRef      string
 	ModelIdentity string
+	// ImageOffload is the accumulated optional omission overlay. Later
+	// ModelMessages replacements re-apply it so resume/fork keep the same set.
+	ImageOffload []provider.ImageOffloadTarget
 }
 
 type TurnBoundary struct {
@@ -83,7 +86,7 @@ var ProjectionKinds = map[string]bool{
 	"plan/state": true, "goal/state": true, "session/title": true, "session/config": true,
 	"model/context-replace": true, "history/replace": true,
 	"compaction": true, "runtime/recovery": true, "legacy/import": true,
-	"diagnostic": true,
+	"diagnostic": true, EventImageOffload: true,
 }
 
 var PrototypeProjectionKinds = func() map[string]bool {
@@ -175,6 +178,8 @@ func applyProjectionEvents(projection *Projection, commit Commit) error {
 			err = projectGoalState(projection, commit, ev)
 		case "diagnostic":
 			err = projectDiagnostic(projection, commit, ev)
+		case EventImageOffload:
+			err = projectImageOffload(projection, ev)
 		case "turn/end":
 			err = projectTurnEnd(projection, commit, ev)
 		}
@@ -189,6 +194,7 @@ func applyProjectionEvents(projection *Projection, commit Commit) error {
 	for index := closedBefore; index < len(projection.Turns); index++ {
 		projection.Turns[index].Availability = forkProjectionAvailability(*projection, projection.Turns[index].BoundarySequence)
 	}
+	applyAccumulatedImageOffload(projection)
 	return nil
 }
 
@@ -637,6 +643,7 @@ func cloneProjection(projection Projection) Projection {
 	}
 	projection.PlanState = cloneRaw(projection.PlanState)
 	projection.GoalState = cloneRaw(projection.GoalState)
+	projection.ImageOffload = cloneImageOffload(projection.ImageOffload)
 	return projection
 }
 

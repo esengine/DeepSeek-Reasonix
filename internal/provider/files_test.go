@@ -2,6 +2,7 @@ package provider
 
 import (
 	"context"
+	"fmt"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -10,7 +11,7 @@ import (
 )
 
 func TestUploadUserDataFileOpenAI(t *testing.T) {
-	var gotPurpose, gotAuth string
+	var gotPurpose, gotAuth, gotExpiry string
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path != "/files" || r.Method != http.MethodPost {
 			t.Errorf("request %s %s", r.Method, r.URL.Path)
@@ -20,6 +21,7 @@ func TestUploadUserDataFileOpenAI(t *testing.T) {
 			t.Fatal(err)
 		}
 		gotPurpose = r.FormValue("purpose")
+		gotExpiry = r.FormValue("expires_after[seconds]")
 		file, hdr, err := r.FormFile("file")
 		if err != nil {
 			t.Fatal(err)
@@ -47,8 +49,8 @@ func TestUploadUserDataFileOpenAI(t *testing.T) {
 	if id != "file-api-0a1b2c3d4e5f6071" {
 		t.Fatalf("id = %q", id)
 	}
-	if gotPurpose != "user_data" || gotAuth != "Bearer sk-test" {
-		t.Fatalf("purpose=%q auth=%q", gotPurpose, gotAuth)
+	if gotPurpose != "user_data" || gotAuth != "Bearer sk-test" || gotExpiry != fmt.Sprintf("%d", FileExpirySeconds) {
+		t.Fatalf("purpose=%q auth=%q expiry=%q", gotPurpose, gotAuth, gotExpiry)
 	}
 }
 

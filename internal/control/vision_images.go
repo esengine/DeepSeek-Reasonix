@@ -99,38 +99,85 @@ func (c *Controller) maybeUploadDataURL(filename, dataURL string) (string, error
 		return dataURL, nil
 	}
 	raw, err := base64.StdEncoding.DecodeString(payload)
-	if err != nil || len(raw) <= inlineImageLimit {
+	if err != nil {
 		return dataURL, nil
 	}
-	id, err := c.uploadOfficialVisionFile(filename, raw)
+	id, err := c.resolveOfficialVisionFile(filename, raw)
 	if err == nil {
 		return id, nil
 	}
-	if len(raw) > provider.MaxInlineImageBytes {
+	if len(raw) > inlineImageLimit {
 		return "", err
 	}
 	return dataURL, nil
 }
 
-func (c *Controller) uploadOfficialVisionFile(filename string, data []byte) (string, error) {
+func (c *Controller) bindVisionFilePromoter() {
+	if c == nil || c.executor == nil {
+		return
+	}
+	if home := config.HomeDir(); home != "" {
+		provider.SetDefaultFileIndex(provider.NewFileIndex(filepath.Join(home, "llm-deepseek", "files-v1.json")))
+	}
+	c.executor.SetVisionFilePromoter(c.promoteVisionFiles)
+}
+
+func (c *Controller) promoteVisionFiles(msgs []provider.Message) []provider.Message {
+	return provider.PromoteDataURLsToFiles(msgs, func(name string, raw []byte) (string, error) {
+		return c.resolveOfficialVisionFile(name, raw)
+	})
+}
+
+func (c *Controller) resolveOfficialVisionFile(filename string, data []byte) (string, error) {
+	entry, protocol, err := c.officialVisionUploadTarget()
+	if err != nil {
+		return "", err
+	}
+	scope := provider.FileScope(entry.BaseURL, entry.APIKey(), protocol)
+	variant := provider.FileVariant(data)
+	now := time.Now().UnixMilli()
+	margin := provider.FileRefreshMarginMs()
+	if rec, ok := provider.DefaultFileIndex().Lookup(scope, variant, now, margin); ok {
+		return rec.FileID, nil
+	}
+	id, err := c.uploadOfficialVisionFile(filename, data)
+	if err != nil {
+		return "", err
+	}
+	provider.DefaultFileIndex().Commit(provider.FileIndexRecord{
+		Scope: scope, Variant: variant, FileID: id, Bytes: len(data),
+		CreatedAt: now, ExpiresAt: provider.FileExpiryDeadline(now),
+	}, now, margin)
+	return id, nil
+}
+
+func (c *Controller) officialVisionUploadTarget() (*config.ProviderEntry, string, error) {
 	if c == nil {
-		return "", fmt.Errorf("files api: no session")
+		return nil, "", fmt.Errorf("files api: no session")
 	}
 	cfg, err := config.LoadForRoot(c.workspaceRoot)
 	if err != nil {
-		return "", err
+		return nil, "", err
 	}
 	ref := c.selection.ref
 	if ref == "" {
 		ref = cfg.DefaultModel
 	}
 	entry, ok := cfg.ResolveModel(ref)
-	if !ok || !openai.IsDeepSeek(entry.BaseURL) {
-		return "", fmt.Errorf("files api requires official DeepSeek")
+	if !ok || entry == nil || !openai.IsDeepSeek(entry.BaseURL) {
+		return nil, "", fmt.Errorf("files api requires official DeepSeek")
 	}
 	protocol := "openai"
 	if strings.EqualFold(entry.Kind, "anthropic") {
 		protocol = "anthropic"
+	}
+	return entry, protocol, nil
+}
+
+func (c *Controller) uploadOfficialVisionFile(filename string, data []byte) (string, error) {
+	entry, protocol, err := c.officialVisionUploadTarget()
+	if err != nil {
+		return "", err
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Minute)
 	defer cancel()

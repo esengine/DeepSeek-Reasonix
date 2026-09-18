@@ -57,6 +57,12 @@ func UploadUserDataFile(ctx context.Context, u FileUpload) (string, error) {
 	if err := writer.WriteField("purpose", "user_data"); err != nil {
 		return "", err
 	}
+	if err := writer.WriteField("expires_after[anchor]", "created_at"); err != nil {
+		return "", err
+	}
+	if err := writer.WriteField("expires_after[seconds]", fmt.Sprintf("%d", FileExpirySeconds)); err != nil {
+		return "", err
+	}
 	hdr := make(textproto.MIMEHeader)
 	hdr.Set("Content-Disposition", fmt.Sprintf(`form-data; name="file"; filename="%s"`, escapeQuotes(filename)))
 	hdr.Set("Content-Type", "application/octet-stream")
