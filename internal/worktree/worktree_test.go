@@ -16,6 +16,31 @@ func requireGit(t *testing.T) {
 	if _, err := exec.LookPath("git"); err != nil {
 		t.Skip("git is unavailable")
 	}
+	isolateGitConfig(t)
+}
+
+// isolateGitConfig detaches the test from the machine's git configuration.
+//
+// A machine with core.hooksPath set redirects `rev-parse --git-path
+// hooks/pre-commit` out of the temporary repository and into the developer's
+// own hooks directory, which the hook tests then overwrite. It also makes them
+// pass for the wrong reason: the hook they plant is not the one git would run.
+//
+// Set on the process, not per command, and only here: the code under test
+// spawns git itself and inherits os.Environ(), so per-command environment
+// would isolate the helpers and leave MergeBack's own invocations reading the
+// user file.
+//
+// An empty file rather than os.DevNull keeps the value an ordinary path on
+// every platform.
+func isolateGitConfig(t *testing.T) {
+	t.Helper()
+	empty := filepath.Join(t.TempDir(), "gitconfig")
+	if err := os.WriteFile(empty, nil, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("GIT_CONFIG_GLOBAL", empty)
+	t.Setenv("GIT_CONFIG_NOSYSTEM", "1")
 }
 
 func initRepo(t *testing.T) string {
@@ -25,7 +50,6 @@ func initRepo(t *testing.T) string {
 		t.Helper()
 		cmd := exec.Command("git", append([]string{"-C", repo}, args...)...)
 		cmd.Env = append(os.Environ(),
-			"GIT_CONFIG_NOSYSTEM=1",
 			"GIT_AUTHOR_NAME=Reasonix Test", "GIT_AUTHOR_EMAIL=reasonix@example.invalid",
 			"GIT_COMMITTER_NAME=Reasonix Test", "GIT_COMMITTER_EMAIL=reasonix@example.invalid")
 		out, err := cmd.CombinedOutput()
