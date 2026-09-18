@@ -269,6 +269,7 @@ type UIConfig struct {
 	ShowReasoning  bool   `toml:"show_reasoning"`  // Ctrl+O / /verbose: show thinking text in CLI; false = collapsed
 	ShowTurnUsage  bool   `toml:"show_turn_usage"` // show per-request token/cost receipts in the CLI/TUI transcript
 	CursorShape    string `toml:"cursor_shape"`    // block|underline|bar; empty defaults to bar
+	CommandMode    string `toml:"commandmode"`     // ""|vi; vi gives the composer a vi command mode (empty = insert-always)
 }
 
 // CLIConfig controls user-global native CLI behavior. It is separate from
@@ -337,6 +338,13 @@ func (c *Config) UICursorShape() string {
 	default:
 		return "bar"
 	}
+}
+
+// UICommandMode reports whether the composer should use a vi-style command
+// mode. Only the value "vi" enables it; any other value keeps the default
+// insert-always editing.
+func (c *Config) UICommandMode() bool {
+	return strings.ToLower(strings.TrimSpace(c.UI.CommandMode)) == "vi"
 }
 
 func normalizeThemeStyle(style string) string {

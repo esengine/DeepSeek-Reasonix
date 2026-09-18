@@ -74,6 +74,25 @@ func TestUICursorShapeNormalizes(t *testing.T) {
 	}
 }
 
+func TestUICommandMode(t *testing.T) {
+	c := Default()
+	for _, tt := range []struct {
+		in   string
+		want bool
+	}{
+		{"", false},
+		{"VI", true},
+		{" vi ", true},
+		{"emacs", false},
+		{"unknown", false},
+	} {
+		c.UI.CommandMode = tt.in
+		if got := c.UICommandMode(); got != tt.want {
+			t.Errorf("UICommandMode(%q) = %v, want %v", tt.in, got, tt.want)
+		}
+	}
+}
+
 func TestUICloseBehaviorNormalizes(t *testing.T) {
 	c := Default()
 	for _, tt := range []struct {

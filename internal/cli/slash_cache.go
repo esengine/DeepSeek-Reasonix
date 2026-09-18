@@ -110,6 +110,7 @@ func (m *chatTUI) endSlashArgSnapshotForKey(key string) string {
 }
 
 func (m *chatTUI) resetComposerInput() {
+	m.viCmd = false // leaving the composer (clear/submit) always returns to insert
 	m.input.Reset()
 	m.endSlashArgSnapshot()
 }

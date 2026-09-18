@@ -84,7 +84,7 @@ var English = Messages{
 
 	ChatThinking:                           "thinking…",
 	ChatThoughtForFmt:                      "thought for %ds",
-	ChatStatusThinkingFmt:                  "%s thinking… (%ds · Esc cancels)",
+	ChatStatusThinkingFmt:                  "%s thinking… (%ds · interrupt key cancels)",
 	TurnPhaseWorking:                       "working",
 	ReadStatusReadingFmt:                   "reading %s",
 	ReadStatusCoveredFmt:                   "reading %s · lines %s",
@@ -109,7 +109,7 @@ var English = Messages{
 	ChatSubagentProgressFmt:                "%s · %ds · %ds ago",
 	ChatSubagentProgressDoneFmt:            "%s · %ds",
 	ChatSubagentPreviewLabel:               "▎",
-	ChatStatusRetryingFmt:                  "%s retrying (%d/%d)… (Esc cancels)",
+	ChatStatusRetryingFmt:                  "%s retrying (%d/%d)… (interrupt key cancels)",
 	ChatStatusCancellingFmt:                "%s stopping… (%ds · Ctrl+C exits)",
 	ChatStatusIdle:                         "ready",
 	ChatStatusCycleHint:                    "Shift+Tab read-only/workspace/YOLO/plan · Ctrl+Y YOLO",

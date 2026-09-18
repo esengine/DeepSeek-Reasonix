@@ -93,6 +93,7 @@ type chatTUI struct {
 	usedPasteIDs         map[int]struct{}
 
 	state                 tuiState
+	viCmd                 bool // idle composer is in vi command (normal) mode, not insert
 	runStart              time.Time
 	elapsed               int
 	elapsedTickGeneration uint64
@@ -1361,6 +1362,11 @@ func (m chatTUI) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 					m.chooser.sel[m.chooser.tab] = map[int]bool{}
 					return m.chooserAdvance()
 				case "esc":
+					// vi mode ignores Esc while typing an ask answer: it does not
+					// back out and discard the draft. Only ^C cancels the ask.
+					if m.viActive() {
+						return m, nil
+					}
 					m.chooser.typing = false
 					m.resetComposerInput()
 					m.refreshInputPlaceholder()
@@ -1445,7 +1451,7 @@ func (m chatTUI) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				return m, nil
 			case "esc":
 				m.dismissCompletion()
-				if m.state == tuiRunning {
+				if m.state == tuiRunning && !m.viActive() {
 					break // a turn is running — also cancel it via the main Esc handler
 				}
 				return m, nil
@@ -1545,6 +1551,16 @@ func (m chatTUI) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if m.handleModeShortcut(msg.String()) {
 			return m, nil
 		}
+		// vi command mode (normal): single printable keys drive the caret and
+		// editing instead of inserting text (space included). Unrecognized keys
+		// are ignored rather than inserted; special keys (enter, esc, ^C, ^D,
+		// arrows, pgup/pgdn) fall through to the handlers below so submission
+		// and cancellation keep working.
+		if m.viInCommand() {
+			if s := msg.String(); len(s) == 1 || s == "space" {
+				return m.viCommandRune(msg, cmds)
+			}
+		}
 		switch m.endSlashArgSnapshotForKey(msg.String()) {
 		case "esc":
 			// "Back out" of the most specific in-progress state: un-send a just-sent
@@ -1555,6 +1571,21 @@ func (m chatTUI) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			// removed the YOLO half of this; plan mode was missed and is fixed
 			// here. Scrollback is the terminal's now, so there's no viewport to
 			// dismiss.
+			if m.viActive() {
+				// vi: Esc never interrupts a stream; on the idle prompt it enters
+				// command mode rather than clearing input or arming rewind. Like
+				// vim, leaving insert mode steps the caret one rune left.
+				if m.state != tuiIdle {
+					return m, nil
+				}
+				// Only leaving insert mode steps the caret one rune left; a
+				// further Esc while already in command mode is a no-op.
+				if !m.viCmd {
+					m.viMoveLeft()
+				}
+				m.viCmd = true
+				return m, nil
+			}
 			switch {
 			case m.state == tuiRunning && m.bubblePending:
 				m.unsendPending()
@@ -1601,6 +1632,42 @@ func (m chatTUI) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}
 			return m, nil
 		case "ctrl+c", "super+c", "meta+c":
+			if m.viActive() {
+				// vi: Ctrl+C interrupts a running stream and drops to the prompt.
+				// With typed text it saves the draft to the cmdline history and
+				// clears the prompt; an empty prompt only leaves command mode.
+				if sel.active && !sel.empty() {
+					m.sel = sel
+					text := m.selectedText()
+					m.sel = selection{}
+					cmds = append(cmds, m.copySelectionWithNotice(text))
+					return m, finalize(m, cmds)
+				}
+				if m.state == tuiRunning {
+					if m.bubblePending {
+						m.unsendPending() // server not yet replied — restore text
+					} else {
+						m.ctrl.Cancel()
+						if !m.ctrl.Running() {
+							m.state = tuiIdle
+							m.confirmBubbleSent()
+							m.noteWatchdogIdle()
+						}
+					}
+					return m, nil
+				}
+				if strings.TrimSpace(m.input.Value()) != "" {
+					m.rememberSubmittedInput(m.input.Value())
+					m.resetComposerInput()
+					m.pastedBlocks = nil
+					m.lastCtrlCAt = time.Time{}
+					return m, nil
+				}
+				if m.viCmd {
+					m.viCmd = false
+				}
+				return m, nil
+			}
 			if m.state == tuiRunning {
 				// Selection takes precedence: copy instead of cancel, same as idle.
 				if sel.active && !sel.empty() {
@@ -1650,6 +1717,16 @@ func (m chatTUI) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.notice(i18n.M.CtrlCQuitHint)
 			return m, finalize(m, nil)
 		case "ctrl+d":
+			// vi: Ctrl+D exits only while insert-mode editing a truly empty
+			// prompt (bash/readline EOF) — never from command mode or with any
+			// content. Ctrl+C is what interrupts a stream; a running turn is
+			// ignored here.
+			if m.viActive() {
+				if m.state == tuiIdle && !m.viCmd && m.input.Value() == "" {
+					return m, shutdownNow
+				}
+				return m, nil
+			}
 			// Compatible Ctrl+D: forward-delete when the composer has any
 			// raw content (including whitespace-only); only quit when idle
 			// with a truly empty composer (bash/readline-style EOF).
