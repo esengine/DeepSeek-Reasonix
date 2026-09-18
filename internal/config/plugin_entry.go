@@ -8,9 +8,11 @@ package config
 // fields mirror Claude Code's mcpServers spec, so entries can come from either
 // reasonix.toml's [[plugins]] or a project-root .mcp.json (see loadMCPJSON).
 type PluginEntry struct {
-	Name    string            `toml:"name"`
-	Type    string            `toml:"type"` // "stdio" (default) | "http" | "sse"
-	Command string            `toml:"command"`
+	Name    string `toml:"name"`
+	Type    string `toml:"type"` // "stdio" (default) | "http" | "sse"
+	Command string `toml:"command"`
+	// Dir is the stdio subprocess working directory; empty inherits Reasonix's CWD.
+	Dir     string            `toml:"dir"`
 	Args    []string          `toml:"args"`
 	Env     map[string]string `toml:"env"`
 	URL     string            `toml:"url"`
