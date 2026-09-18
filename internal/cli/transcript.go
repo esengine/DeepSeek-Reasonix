@@ -99,7 +99,9 @@ func (m *chatTUI) renderTranscriptSource(source transcriptSource, terminalWidth 
 	case transcriptSourceUser:
 		return renderUserBubble(source.raw, terminalWidth, source.planMode)
 	case transcriptSourceReasoning:
-		return reasoningBlock(source.raw, terminalWidth, source.maxLines)
+		// Content width, so a full row stops at the scrollbar column instead
+		// of soft-wrapping its last cell.
+		return reasoningBlock(source.raw, contentWidth, source.maxLines)
 	case transcriptSourceToolCard:
 		return toolCard(source.raw, source.aux, terminalWidth)
 	case transcriptSourceBanner:

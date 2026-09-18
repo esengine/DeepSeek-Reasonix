@@ -50,7 +50,7 @@ func (m chatTUI) buildCopyTranscript(contentWidth int) (string, int, bool) {
 		case transcriptSourceReplayBundle:
 			rendered = m.renderReplayBundleCopy(source, contentWidth, strconv.Itoa(i))
 		case transcriptSourceReasoning:
-			rendered = reasoningBlockCopy(source.raw, m.width, source.maxLines)
+			rendered = reasoningBlockCopy(source.raw, contentWidth, source.maxLines)
 		default:
 			rendered = m.transcript[i]
 			if source.copyRendered != "" {
@@ -306,20 +306,101 @@ func (m *chatTUI) rewriteConnectorBlock(index int, lines []string) {
 	m.setTranscriptBlock(index, connectorBlock(lines), source)
 }
 
-func reasoningBlockLines(raw string, width, maxLines int) []string {
-	w := max(width-len([]rune(connector)), 8)
-	var lines []string
+// thinkingWrapStep is how far a soft-wrapped continuation sits left of its
+// line's first word. The two-column step marks the line start without spending
+// a blank row, keeping the thinking block dense.
+const thinkingWrapStep = 2
+
+// reasoningRows renders raw thinking text into dim, width-wrapped rows. The
+// goal is information density: the thinking log streams into a tail-following
+// viewport, so spending a blank row on every paragraph break and wrapping full
+// rows one column short of the edge made a long chain of thought scroll past
+// quickly and read as sparse. Dropping the blank rows and packing every row to
+// the window edge fits more thinking per screen, so it scrolls more slowly.
+//
+// The gutter prefix is baked in per line: the block's first line gets the "⎿"
+// connector, every later source line aligns its first word under the
+// connector's text, and soft-wrapped overflow steps thinkingWrapStep columns
+// left. Each source line therefore reads as its own line — a list item or a new
+// sentence is not mistaken for a continuation — while a line's overflow still
+// marks the paragraph start above it. Wrapping accounts for each row's own
+// indent so no row exceeds width.
+//
+// Source blank lines separate prose paragraphs: the blank row is dropped between
+// two paragraphs. It is also dropped around a fenced code block — the fence's
+// own ``` delimiters already break the flow — but kept inside the fence, where a
+// blank line carries meaning.
+//
+// copyMode wraps each generated gutter in a copy-omit span so selection copy
+// keeps only the model's text (mirrors connectorBlockCopy).
+func reasoningRows(raw string, width, maxLines int, copyMode bool) []string {
+	paraIndent := len([]rune(connector)) // first word aligns under the connector text
+	wrapIndent := max(paraIndent-thinkingWrapStep, 0)
+	paraW := max(width-paraIndent, 8)
+	wrapW := max(width-wrapIndent, 8)
+	paraPrefix := strings.Repeat(" ", paraIndent)
+	wrapPrefix := strings.Repeat(" ", wrapIndent)
+
+	var rows []string
+	emit := func(prefix, text string) {
+		if copyMode {
+			prefix = copyOmitSpan(prefix)
+		}
+		rows = append(rows, prefix+dim(text))
+	}
+
+	firstLine := true
+	inFence := false
 	for ln := range strings.SplitSeq(strings.TrimRight(raw, "\n"), "\n") {
-		for wl := range strings.SplitSeq(ansi.Wrap(expandTabs(ln), w, ""), "\n") {
-			lines = append(lines, dim(wl))
+		trimmed := strings.TrimSpace(ln)
+		blank := trimmed == ""
+		fence := strings.HasPrefix(trimmed, "```")
+
+		if blank {
+			if inFence { // blank inside a fence: keep it
+				rows = append(rows, "")
+			}
+			continue
+		}
+
+		prefix := paraPrefix
+		if firstLine {
+			prefix = dim(connector)
+		}
+		for i, wl := range wrapHanging(expandTabs(ln), paraW, wrapW) {
+			if i == 0 {
+				emit(prefix, wl)
+			} else {
+				emit(wrapPrefix, wl)
+			}
+		}
+		firstLine = false
+		if fence {
+			inFence = !inFence
 		}
 	}
-	if maxLines > 0 && len(lines) > maxLines {
-		lines = lines[len(lines)-maxLines:]
+
+	if maxLines > 0 && len(rows) > maxLines {
+		rows = rows[len(rows)-maxLines:]
 	}
-	return lines
+	return rows
+}
+
+// wrapHanging wraps s so its first row fits firstW columns and every later row
+// fits contW (contW >= firstW), breaking at spaces. ansi.Wrap can only take one
+// width per call, so the line is wrapped at firstW, then its rejoined tail is
+// re-flowed at the wider contW — a plain re-wrap of the tail would preserve the
+// first pass's breaks. The two-column step is small enough that this stays cheap.
+func wrapHanging(s string, firstW, contW int) []string {
+	first := ansi.Wrap(s, max(firstW, 1), "")
+	i := strings.IndexByte(first, '\n')
+	if i < 0 {
+		return []string{first}
+	}
+	rest := strings.ReplaceAll(first[i+1:], "\n", " ")
+	return append([]string{first[:i]}, strings.Split(ansi.Wrap(rest, max(contW, 1), ""), "\n")...)
 }
 
 func reasoningBlockCopy(raw string, width, maxLines int) string {
-	return connectorBlockCopy(reasoningBlockLines(raw, width, maxLines))
+	return strings.Join(reasoningRows(raw, width, maxLines, true), "\n")
 }

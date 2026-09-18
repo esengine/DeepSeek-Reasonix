@@ -706,6 +706,13 @@ func transcriptContentWidth(termW int, nativeScrollback bool) int {
 	return max(termW, 1)
 }
 
+// transcriptWidth is the width a transcript block may occupy in the current
+// terminal. Block renderers must use it (not m.width) so a full row stops at the
+// scrollbar column instead of soft-wrapping its last cell.
+func (m chatTUI) transcriptWidth() int {
+	return transcriptContentWidth(m.width, m.nativeScrollback)
+}
+
 func configureChatTextarea(ti *textarea.Model) {
 	// Keep a stable two-cell input affordance, matching the prompt treatment in
 	// other coding TUIs. Continuation rows receive two spaces so text and the
@@ -2345,17 +2352,19 @@ func (m *chatTUI) streamReasoning(chunk string) {
 		m.reasoningView = m.reasoningView[:copy(m.reasoningView, m.reasoningView[drop:])]
 	}
 	raw := string(m.reasoningView)
-	m.setTranscriptBlock(m.reasoningTextIdx, reasoningBlock(raw, m.width, reasoningTailLines), transcriptSource{
+	m.setTranscriptBlock(m.reasoningTextIdx, reasoningBlock(raw, m.transcriptWidth(), reasoningTailLines), transcriptSource{
 		kind: transcriptSourceReasoning, raw: raw, maxLines: reasoningTailLines,
 	})
 }
 
 // reasoningBlock renders raw thinking text as dim, width-wrapped lines under a
-// "⎿" connector that ties the block to the "▎ thinking…" marker above it. A
-// positive maxLines keeps only the trailing visual lines (the live view); 0
-// renders all (verbose collapse).
+// "⎿" connector that ties the block to the "▎ thinking…" marker above it. The
+// layout is deliberately dense (see reasoningRows) so a long chain of thought
+// fits more per screen and scrolls past more slowly. A positive maxLines keeps
+// only the trailing visual lines (the live view); 0 renders all (verbose
+// collapse).
 func reasoningBlock(raw string, width, maxLines int) string {
-	return connectorBlock(reasoningBlockLines(raw, width, maxLines))
+	return strings.Join(reasoningRows(raw, width, maxLines, false), "\n")
 }
 
 // toolStreamTailLines caps how many trailing output lines a running tool shows;
@@ -2960,7 +2969,7 @@ func (m *chatTUI) commitReasoning() {
 			m.commitSpacer()
 			m.commitLine(dim(fmt.Sprintf("  ▎ "+i18n.M.ChatThoughtForFmt, secs)))
 			if m.showReasoning && strings.TrimSpace(m.reasoning.String()) != "" {
-				m.commitLine(reasoningBlock(m.reasoning.String(), m.width, 0))
+				m.commitLine(reasoningBlock(m.reasoning.String(), m.transcriptWidth(), 0))
 			}
 		}
 		m.reasoning.Reset()
@@ -2977,7 +2986,7 @@ func (m *chatTUI) commitReasoning() {
 	if m.reasoningTextIdx >= 0 {
 		if m.showReasoning && strings.TrimSpace(m.reasoning.String()) != "" {
 			raw := m.reasoning.String()
-			m.setTranscriptBlock(m.reasoningTextIdx, reasoningBlock(raw, m.width, 0), transcriptSource{
+			m.setTranscriptBlock(m.reasoningTextIdx, reasoningBlock(raw, m.transcriptWidth(), 0), transcriptSource{
 				kind: transcriptSourceReasoning, raw: raw,
 			})
 		} else {
