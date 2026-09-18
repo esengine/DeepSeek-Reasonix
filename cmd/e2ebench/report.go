@@ -9,17 +9,34 @@ import (
 )
 
 func render(results []result) string {
-	arm := "full"
-	if len(results) > 0 {
-		if results[0].Arm != "" {
-			arm = results[0].Arm
-		}
+	arm := reportAxis(results, func(r result) string { return r.Arm })
+	if arm == "" {
+		arm = "full"
 	}
 	cache := ""
-	if len(results) > 0 && results[0].CacheArm != "" && results[0].CacheArm != benchmarkCacheCold {
-		cache = " · " + results[0].CacheArm + "-cache"
+	if c := reportAxis(results, func(r result) string { return r.CacheArm }); c != "" && c != benchmarkCacheCold {
+		cache = " · " + c + "-cache"
 	}
-	return fmt.Sprintf("## 🤖 Reasonix e2e benchmark (arm `%s`%s)\n\n", arm, cache) + renderBody(results)
+	// Two postures produce otherwise identical headers, so an arm that dropped
+	// the approval gate has to say so where the numbers are read.
+	posture := ""
+	if p := reportAxis(results, func(r result) string { return r.Permission }); p != "" && p != benchmarkPermissionDefault {
+		posture = " · " + p + "-permission"
+	}
+	return fmt.Sprintf("## 🤖 Reasonix e2e benchmark (arm `%s`%s%s)\n\n", arm, cache, posture) + renderBody(results)
+}
+
+// reportAxis reads one experiment axis for the whole report. A run stamps the
+// same value on every row, including the skipped ones, but reports loaded from
+// older JSON have it only on rows that actually ran — so the first row that
+// carries a value decides, not the first row.
+func reportAxis(results []result, of func(result) string) string {
+	for _, r := range results {
+		if v := of(r); v != "" {
+			return v
+		}
+	}
+	return ""
 }
 
 // suiteStats aggregates result entries; ran/pass1 count tasks (first

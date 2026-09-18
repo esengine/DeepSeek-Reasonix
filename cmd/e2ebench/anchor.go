@@ -63,10 +63,10 @@ func anchorSkip(cfg suiteConfig, t task) (result, bool) {
 	if _, ok := t.seedFor(cfg.anchor); ok {
 		return result{}, false
 	}
-	return result{
-		task: t, Profile: benchmarkProfileStandard, Anchor: cfg.anchor, Skipped: true,
-		Note: "skipped: no seed_" + cfg.anchor + " authored for this task",
-	}, true
+	skipped := newResult(cfg, t)
+	skipped.Skipped = true
+	skipped.Note = "skipped: no seed_" + cfg.anchor + " authored for this task"
+	return skipped, true
 }
 
 // renderAnchor reports the arm and what it scored. Anchor resistance is only
