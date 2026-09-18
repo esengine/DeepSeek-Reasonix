@@ -610,15 +610,13 @@ eq(historyCalls.length, historyCallsBeforeReady, "agent ready with cached transc
 ok(controller?.state.items.some((item) => item.kind === "phase" && item.text === "Planner is thinking") ?? false, "agent ready keeps cached planner phase");
 ok(controller?.state.items.some((item) => item.kind === "assistant" && item.text === "Planner kept" && item.reasoning === "Planner notes") ?? false, "agent ready keeps cached planner answer");
 
-let tabCSendResolved = false;
+let tabCSendResolved = false, tabCSendPromise: Promise<void> | undefined;
 await act(async () => {
-  const sendPromise = controller?.sendToTab("tab-c", "streaming C");
-  sendPromise?.then(() => {
-    tabCSendResolved = true;
-  });
+  tabCSendPromise = controller?.sendToTab("tab-c", "streaming C");
+  tabCSendPromise?.then(() => { tabCSendResolved = true; });
   await flushPromises();
 });
-eq(tabCSendResolved, true, "sendToTab resolves after optimistic dispatch before backend submit completes");
+eq(tabCSendResolved, false, "sendToTab waits for backend admission before resolving");
 await act(async () => {
   await controller?.switchTab("tab-c", tabC);
   await flushPromises();
@@ -631,9 +629,10 @@ ok(Boolean(tabCSubmissionId) && tabCSubmissionId !== tabCUser?.localId, "opaque 
 ok(historyCalls.includes("tab-c"), "a running tab with no history page of its own still hydrates one");
 await act(async () => {
   submitTabCGate.resolve();
-  await submitTabCGate.promise;
+  await Promise.all([submitTabCGate.promise, tabCSendPromise]);
   await flushPromises();
 });
+eq(tabCSendResolved, true, "sendToTab resolves after backend admission succeeds");
 
 holdNextContextForD = true;
 await act(async () => {

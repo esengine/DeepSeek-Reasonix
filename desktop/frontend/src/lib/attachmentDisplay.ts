@@ -10,6 +10,7 @@ export interface DisplayAttachment {
   kind: "image" | "file" | "folder";
   source: "attachment" | "workspace";
   ext: string;
+  mime?: string;
 }
 
 function splitTrailingPunctuation(token: string): { core: string; suffix: string } {
@@ -27,6 +28,7 @@ export function baseName(path: string): string {
 }
 
 function isImageAttachmentRef(path: string): boolean {
+  if (path.startsWith("draft:") || path.startsWith("attachment:")) return true;
   const ext = attachmentExt(path);
   switch (ext) {
     case ".png":
@@ -132,6 +134,7 @@ export function sortDisplayAttachments<T extends { kind: "image" | "file" | "fol
 }
 
 function isDisplayReference(path: string): boolean {
+  if (path.startsWith("draft:") || path.startsWith("attachment:")) return true;
   if (path.startsWith(".reasonix/attachments/")) return true;
   if (path.endsWith("/")) return true;
   if (path.includes("/")) return true;
@@ -139,14 +142,14 @@ function isDisplayReference(path: string): boolean {
 }
 
 function displayAttachment(path: string, name: string): DisplayAttachment {
-  if (path.startsWith(".reasonix/attachments/")) {
+  if (path.startsWith("draft:") || path.startsWith("attachment:") || path.startsWith(".reasonix/attachments/")) {
     const kind = isImageAttachmentRef(path) ? "image" : "file";
     return {
       path,
       name,
       kind,
       source: "attachment",
-      ext: attachmentExt(path).replace(/^\./, "").toUpperCase(),
+      ext: attachmentExt(path.startsWith("attachment:") ? name : path).replace(/^\./, "").toUpperCase(),
     };
   }
   const isDir = path.endsWith("/");

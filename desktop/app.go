@@ -170,6 +170,7 @@ type App struct {
 	tabOrder    []string
 	activeTabID string
 	readyHook   func()
+	attachmentTargetState
 	// tabSelectionMu serializes cross-registry activation. A remote selection
 	// must not overtake the local-session snapshot that makes switching safe.
 	tabSelectionMu sync.Mutex
@@ -1109,26 +1110,27 @@ func (a *App) submitInitialGoalToLocalTab(
 	if goal == "" {
 		return []string{}, fmt.Errorf("goal is required")
 	}
-	if err := syncTabGoalToController(ctrl, goal); err != nil {
-		return []string{}, fmt.Errorf("activate goal: %w", err)
-	}
-	a.mu.Lock()
-	if a.tabs[tab.ID] != tab {
+	var drained []string
+	setup := func() error {
+		if err := syncTabGoalToController(ctrl, goal); err != nil {
+			return fmt.Errorf("activate goal: %w", err)
+		}
+		a.mu.Lock()
+		if a.tabs[tab.ID] != tab {
+			a.mu.Unlock()
+			return a.workspaceNotReadyErr(nil)
+		}
+		tab.toolApprovalMode = toolApprovalMode
+		tab.goal = goal
+		tab.mode = tabModeFromAxes(false, toolApprovalMode == control.ToolApprovalYolo)
+		a.saveTabsLocked()
 		a.mu.Unlock()
-		return []string{}, a.workspaceNotReadyErr(nil)
-	}
-	tab.toolApprovalMode = toolApprovalMode
-	tab.goal = goal
-	tab.mode = tabModeFromAxes(false, toolApprovalMode == control.ToolApprovalYolo)
-	a.saveTabsLocked()
-	a.mu.Unlock()
 
-	ctrl.SetPlanMode(false)
-	drained := applyTabToolApprovalModeToController(ctrl, toolApprovalMode)
-	if err := a.ensureTabTopicIndexedForUserTurn(tab); err != nil {
-		return []string{}, err
+		ctrl.SetPlanMode(false)
+		drained = applyTabToolApprovalModeToController(ctrl, toolApprovalMode)
+		return a.ensureTabTopicIndexedForUserTurn(tab)
 	}
-	if err := submitIdentified(ctrl, req, func() {
+	if err := submitIdentifiedWithSetup(ctrl, req, setup, func() {
 		if len(invocations) > 0 {
 			ctrl.SubmitInvocationDisplay(display, input, controlInvocationRequests(invocations))
 		} else {
@@ -5520,6 +5522,7 @@ func (state *historyMessageConvertState) convertHistoryMessage(
 		}
 	}
 	hm.ServerSearch = historyServerSearch(m.ServerSearch)
+	hm.Attachments = historyDisplayAttachments(m.ImageInputs)
 	if (m.Role == provider.RoleAssistant || m.LocalOnly) && len(m.ToolCalls) > 0 {
 		hm.ToolCalls = make([]HistoryToolCall, len(m.ToolCalls))
 		for i, tc := range m.ToolCalls {
@@ -5721,6 +5724,9 @@ func cloneHistoryMessages(in []HistoryMessage) []HistoryMessage {
 		}
 		if len(in[i].ToolCalls) > 0 {
 			out[i].ToolCalls = append([]HistoryToolCall(nil), in[i].ToolCalls...)
+		}
+		if len(in[i].Attachments) > 0 {
+			out[i].Attachments = append([]transcript.Attachment(nil), in[i].Attachments...)
 		}
 	}
 	return out
@@ -10692,54 +10698,6 @@ func (a *App) currentProviderEntryForTab(tabID string) (*config.ProviderEntry, e
 	return entry, nil
 }
 
-func (a *App) withActiveWorkspace(fn func() (string, error)) (string, error) {
-	var result string
-	err := a.withActiveWorkspaceDo(func() error {
-		var err error
-		result, err = fn()
-		return err
-	})
-	return result, err
-}
-
-func (a *App) withActiveWorkspaceDo(fn func() error) error {
-	root := a.activeWorkspaceRoot()
-	if root != "" && root != "." {
-		prev, err := os.Getwd()
-		if err != nil {
-			return err
-		}
-		if err := os.Chdir(root); err != nil {
-			return err
-		}
-		defer func() { _ = os.Chdir(prev) }()
-	}
-	return fn()
-}
-
-// SavePastedImage stores a browser clipboard image data URL under the active
-// tab's workspace .reasonix/attachments and returns the relative @-reference path.
-func (a *App) SavePastedImage(dataURL string) (string, error) {
-	return a.withActiveWorkspace(func() (string, error) {
-		return control.SaveImageDataURL(dataURL)
-	})
-}
-
-// SaveClipboardImage reads the native OS clipboard image under the active tab's
-// workspace .reasonix/attachments and returns the relative @-reference path.
-func (a *App) SaveClipboardImage() (string, error) {
-	return a.withActiveWorkspace(control.SaveClipboardImage)
-}
-
-// SavePastedFile stores a dropped non-image file (the browser exposes its bytes
-// as a data URL but not a real path) under the active tab's workspace
-// .reasonix/attachments and returns the relative @-reference path.
-func (a *App) SavePastedFile(name, dataURL string) (string, error) {
-	return a.withActiveWorkspace(func() (string, error) {
-		return control.SaveAttachmentDataURL(name, dataURL)
-	})
-}
-
 // PickExportFile opens the native save dialog and returns the selected path. It
 // returns "" when the user cancels.
 func (a *App) PickExportFile(defaultFilename, mimeType string) (string, error) {
@@ -11016,106 +10974,6 @@ func exportFileFilters(mimeType, ext string) []nativeFileFilter {
 		return []nativeFileFilter{{DisplayName: strings.ToUpper(strings.TrimPrefix(ext, ".")) + " files (*" + ext + ")", Pattern: "*" + ext}}
 	}
 	return []nativeFileFilter{{DisplayName: "All files (*.*)", Pattern: "*.*"}}
-}
-
-// AttachmentDataURL returns a safe data URL for a stored image attachment.
-func (a *App) AttachmentDataURL(path string) (string, error) {
-	return a.withActiveWorkspace(func() (string, error) {
-		return control.ImageDataURL(path)
-	})
-}
-
-// DroppedItem is one OS-dropped file resolved into a composer context entry: an
-// in-tree file becomes a workspace @reference (read in place, no copy), while an
-// outside directory becomes a session-scoped workspace @reference; an image or
-// out-of-tree file is copied into .reasonix/attachments.
-type DroppedItem struct {
-	Kind        string `json:"kind"` // "workspace" | "attachment"
-	Path        string `json:"path"`
-	IsDir       bool   `json:"isDir,omitempty"`
-	DisplayPath string `json:"displayPath,omitempty"`
-	PreviewURL  string `json:"previewUrl,omitempty"`
-}
-
-// AttachDropped turns an absolute path from the native file-drop bridge into a
-// composer context entry. Images are stored as attachments so the chip shows a
-// thumbnail; in-workspace files are referenced relatively (no copy); directories
-// outside the workspace are registered as current-session folder references;
-// files outside the workspace are copied into .reasonix/attachments.
-func (a *App) AttachDropped(path string) (DroppedItem, error) {
-	var item DroppedItem
-	err := a.withActiveWorkspaceDo(func() error {
-		info, err := os.Lstat(path)
-		if err != nil {
-			return err
-		}
-		if isImageExt(path) {
-			if rel, err := control.SaveImageFile(path); err == nil {
-				preview, _ := control.ImageDataURL(rel)
-				item = DroppedItem{Kind: "attachment", Path: rel, PreviewURL: preview}
-				return nil
-			}
-		}
-		if rel, ok := workspaceRelativeIn(path, a.activeWorkspaceRoot()); ok {
-			item = DroppedItem{Kind: "workspace", Path: rel, IsDir: info.IsDir()}
-			return nil
-		}
-		if info.IsDir() {
-			tab, ctrl := a.tabAndCtrlByID("")
-			if err := a.ensureTabControllerWorkspace(tab); err != nil {
-				return err
-			}
-			if tab != nil {
-				ctrl = a.controllerForTab(tab)
-			}
-			if ctrl == nil {
-				return fmt.Errorf("workspace is not ready")
-			}
-			token, displayPath, err := ctrl.RegisterExternalFolderRef(path)
-			if err != nil {
-				return err
-			}
-			item = DroppedItem{Kind: "workspace", Path: token, IsDir: true, DisplayPath: displayPath}
-			return nil
-		}
-		rel, err := control.SaveAttachmentFile(path)
-		if err != nil {
-			return err
-		}
-		item = DroppedItem{Kind: "attachment", Path: rel}
-		return nil
-	})
-	if err != nil {
-		return DroppedItem{}, err
-	}
-	return item, nil
-}
-
-func isImageExt(path string) bool {
-	switch strings.ToLower(filepath.Ext(path)) {
-	case ".png", ".jpg", ".jpeg", ".gif", ".webp":
-		return true
-	}
-	return false
-}
-
-func workspaceRelativeIn(path, workspaceRoot string) (string, bool) {
-	root := workspaceRoot
-	if !filepath.IsAbs(root) {
-		abs, err := filepath.Abs(root)
-		if err != nil {
-			return "", false
-		}
-		root = abs
-	}
-	rel, err := filepath.Rel(root, path)
-	if err != nil {
-		return "", false
-	}
-	if rel == ".." || strings.HasPrefix(rel, ".."+string(filepath.Separator)) || filepath.IsAbs(rel) {
-		return "", false
-	}
-	return filepath.ToSlash(rel), true
 }
 
 // memory panel (frontend ⇄ controller)

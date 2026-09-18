@@ -183,18 +183,6 @@ func classifyRef(token string, known map[string]bool, exists func(string) bool) 
 	return ref{}, false
 }
 
-func isAttachmentRef(token string) bool {
-	return strings.HasPrefix(filepath.ToSlash(token), ".reasonix/attachments/")
-}
-
-func isImageAttachmentRef(token string) bool {
-	switch strings.ToLower(filepath.Ext(token)) {
-	case ".png", ".jpg", ".jpeg", ".gif", ".webp", ".bmp", ".svg", ".tif", ".tiff":
-		return true
-	}
-	return false
-}
-
 // RegisterExternalFolderRef authorizes one dropped directory outside the
 // workspace as a structured @reference for this controller session. The returned
 // token is path-like and whitespace-free so it survives the existing @ token
@@ -512,6 +500,13 @@ func (c *Controller) detectRefsMode(line string, scopedOnly bool) []ref {
 		}
 		if r, ok := classifyVisionToken(tok); ok {
 			refs = append(refs, r)
+			continue
+		}
+		// Keep missing composer images resolvable so admission rejects the turn
+		// instead of silently sending only path text. Non-image attachments retain
+		// the existing best-effort reference behavior.
+		if isAttachmentRef(tok) && isImageAttachmentRef(tok) {
+			refs = append(refs, ref{kind: refImage, path: tok, raw: tok})
 			continue
 		}
 		if c.workspaceRoot != "" {

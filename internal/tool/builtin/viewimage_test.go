@@ -44,6 +44,34 @@ func TestViewImageWorkspaceAndConfinement(t *testing.T) {
 	}
 }
 
+func TestViewImageAttachmentUsesWorkspaceInsteadOfProcessCWD(t *testing.T) {
+	workspace := t.TempDir()
+	processDir := t.TempDir()
+	rel := filepath.Join(".reasonix", "attachments", "shared.png")
+	for root, bounds := range map[string]image.Rectangle{
+		workspace:  image.Rect(0, 0, 2, 3),
+		processDir: image.Rect(0, 0, 7, 9),
+	} {
+		path := filepath.Join(root, rel)
+		if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		var data bytes.Buffer
+		if err := png.Encode(&data, image.NewRGBA(bounds)); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(path, data.Bytes(), 0o600); err != nil {
+			t.Fatal(err)
+		}
+	}
+	t.Chdir(processDir)
+	tool := (Workspace{Dir: workspace}).Tools("view_image")[0].(tool.ImageTool)
+	out, _, err := tool.ExecuteWithImages(context.Background(), argsJSON(t, map[string]any{"path": filepath.ToSlash(rel)}))
+	if err != nil || !strings.Contains(out, "2x3") {
+		t.Fatalf("output=%q err=%v, want workspace image dimensions 2x3", out, err)
+	}
+}
+
 func TestViewImageRejectsInvalidInputs(t *testing.T) {
 	dir := t.TempDir()
 	for name, data := range map[string][]byte{"text.png": []byte("not an image"), "large.png": make([]byte, viewImageMaxBytes+1)} {

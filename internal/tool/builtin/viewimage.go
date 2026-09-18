@@ -1,26 +1,20 @@
 package builtin
 
 import (
-	"bytes"
 	"context"
 	"encoding/base64"
 	"encoding/json"
 	"fmt"
-	"image"
-	_ "image/gif"
-	_ "image/jpeg"
-	_ "image/png"
 	"io"
 	"os"
 	"strings"
 
-	_ "golang.org/x/image/webp"
+	"reasonix/internal/attachment"
 	"reasonix/internal/tool"
 )
 
 // Bound encoded payload size consistently with MCP image results.
 const viewImageMaxBytes = 3 << 20
-const viewImageMaxPixels = 40_000_000
 
 type viewImage struct {
 	workDir     string
@@ -86,16 +80,9 @@ func (v viewImage) ExecuteWithImages(ctx context.Context, args json.RawMessage) 
 	if err := ctx.Err(); err != nil {
 		return "", nil, err
 	}
-	cfg, format, err := image.DecodeConfig(bytes.NewReader(data))
+	mime, width, height, err := attachment.ValidateImage(data, "", attachment.ViewImagePolicy())
 	if err != nil {
 		return "", nil, fmt.Errorf("invalid or unsupported image: %w", err)
 	}
-	if cfg.Width <= 0 || cfg.Height <= 0 || int64(cfg.Width)*int64(cfg.Height) > viewImageMaxPixels {
-		return "", nil, fmt.Errorf("image exceeds 40 million pixel limit")
-	}
-	mime := map[string]string{"png": "image/png", "jpeg": "image/jpeg", "gif": "image/gif", "webp": "image/webp"}[format]
-	if mime == "" {
-		return "", nil, fmt.Errorf("unsupported image format %q", format)
-	}
-	return fmt.Sprintf("[image: %s, %dx%d] %s", mime, cfg.Width, cfg.Height, rp.DisplayPath), []string{"data:" + mime + ";base64," + base64.StdEncoding.EncodeToString(data)}, nil
+	return fmt.Sprintf("[image: %s, %dx%d] %s", mime, width, height, rp.DisplayPath), []string{"data:" + mime + ";base64," + base64.StdEncoding.EncodeToString(data)}, nil
 }

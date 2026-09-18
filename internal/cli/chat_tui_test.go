@@ -3303,7 +3303,7 @@ func TestFoldedPasteUsesPlaceholderAndExpandsOnSend(t *testing.T) {
 	}
 }
 
-func TestTextOnlyModelSendsPastedImageRefsForToolUse(t *testing.T) {
+func TestTextOnlyModelRejectsPastedImageWithoutVisionRoute(t *testing.T) {
 	workspace := t.TempDir()
 	writeTUIImageCapabilityConfig(t, workspace)
 	path := saveTestImageAttachment(t, workspace)
@@ -3333,19 +3333,11 @@ func TestTextOnlyModelSendsPastedImageRefsForToolUse(t *testing.T) {
 	}
 	model, _ = m.Update(msg)
 	m = model.(chatTUI)
-	waitForCLIEvent(t, events, event.TurnDone)
-
-	if len(runner.inputs) != 1 {
-		t.Fatalf("text-only model should send the image ref for tool use, inputs=%q", runner.inputs)
+	if len(runner.inputs) != 0 {
+		t.Fatalf("image without a vision route started a model: %q", runner.inputs)
 	}
-	if !strings.Contains(runner.inputs[0], "@"+path) {
-		t.Fatalf("runner input should retain the image ref context, got %q", runner.inputs[0])
-	}
-	if !strings.Contains(runner.inputs[0], "OCR/image/vision tool") {
-		t.Fatalf("runner input should mention tool-based image handling, got %q", runner.inputs[0])
-	}
-	if got := strings.Join(m.transcript, "\n"); strings.Contains(got, "will not receive images directly") {
-		t.Fatalf("text-only model should not block image refs that tools can read, transcript=%q", got)
+	if m.input.Value() != "describe [image #1] please" || len(m.pastedBlocks) != 1 {
+		t.Fatalf("rejected image lost its draft: input=%q pastes=%+v", m.input.Value(), m.pastedBlocks)
 	}
 }
 

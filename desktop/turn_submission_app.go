@@ -30,9 +30,22 @@ func (a *App) submissionAdmissionError(tabID string, req control.SubmissionReque
 }
 
 func submitIdentified(ctrl control.SessionAPI, req control.SubmissionRequest, submit func()) error {
-	if identified, ok := ctrl.(*control.Controller); ok && req.ID != "" && identified.ClassifySubmitRoute(req.Input) != control.SubmitManagementHandled {
+	return submitIdentifiedWithSetup(ctrl, req, nil, submit)
+}
+
+func submitIdentifiedWithSetup(ctrl control.SessionAPI, req control.SubmissionRequest, setup func() error, submit func()) error {
+	if identified, ok := ctrl.(*control.Controller); ok && identified.ClassifySubmitRoute(req.Input) != control.SubmitManagementHandled {
+		if setup != nil {
+			_, err := identified.SubmitIdentifiedWithSetup(req, setup)
+			return inboxBridgeError(err)
+		}
 		_, err := identified.SubmitIdentified(req)
-		return err
+		return inboxBridgeError(err)
+	}
+	if setup != nil {
+		if err := setup(); err != nil {
+			return err
+		}
 	}
 	submit()
 	return nil

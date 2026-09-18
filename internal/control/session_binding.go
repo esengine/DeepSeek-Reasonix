@@ -370,6 +370,7 @@ func (c *Controller) publishSessionRuntimeWithCommit(ctx context.Context, candid
 	c.sessionBinding = binding
 	c.exclusiveSession = true
 	c.v3BindingMu.Unlock()
+	c.bindAttachmentService()
 	c.bindExecutionControl()
 	if old != nil && old != candidate {
 		old.UnbindExecution(oldGen)

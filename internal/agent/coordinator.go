@@ -443,7 +443,7 @@ func (c *Coordinator) persistExecutorNoOp(ctx context.Context, input, plan, mess
 	if _, err := c.executor.AppendTurnContextAndUserChecked(ctx, provider.Message{
 		ID:   turnUserMessageID(ctx, c.executor.Session()),
 		Role: provider.RoleUser, Origin: inputMessageOrigin(ctx), Content: providerContent, RawContent: rawContent,
-		Images: userImages(ctx), CreatedAt: time.Now().UnixMilli(),
+		Images: userImages(ctx), ImageInputs: userImageInputs(ctx), CreatedAt: time.Now().UnixMilli(),
 	}); err != nil {
 		return err
 	}

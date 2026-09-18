@@ -1176,7 +1176,7 @@ func build(ctx context.Context, opts Options) (*BuildResult, error) {
 			WithProfileConfigResolvers(profileConfigModel, profileConfigEffort).
 			WithBashSandboxEnforced(bashSandboxEnforced).
 			WithCapabilityRuntime(capRuntime).
-			WithWriteRoots(writeRootSet)
+			WithWriteRoots(writeRootSet).WithImageRequestResolver(controllerImageResolver{ctrlRef.Load})
 	}
 	addTaskTool := func() string {
 		if opts.Ablation.Off(ablation.Subagent) {
@@ -1279,7 +1279,7 @@ func build(ctx context.Context, opts Options) (*BuildResult, error) {
 	// read_only_task, so they cannot write, install, mutate memory, resume/fork
 	// transcripts, or delegate further.
 	//
-	subagentSkillOptions := newSubagentSkillOptionsFactory(cfg.Agent, quoteCtx, headlessGate, keepPolicy, maxSubagentDepth, opts.Ablation, workspaceLease, writeRootSet)
+	subagentSkillOptions := newSubagentSkillOptionsFactory(cfg.Agent, quoteCtx, headlessGate, keepPolicy, maxSubagentDepth, opts.Ablation, workspaceLease, writeRootSet, childImageRouting{ctrlRef.Load, imageConfig})
 	readOnlySkillRunner := func(sctx context.Context, sk skill.Skill, task string, runOpts skill.SubagentRunOptions) (string, error) {
 		if strings.TrimSpace(runOpts.ContinueFrom) != "" || strings.TrimSpace(runOpts.ForkFrom) != "" {
 			return "", fmt.Errorf("read_only_skill does not support continue_from/fork_from")
@@ -1946,7 +1946,7 @@ func build(ctx context.Context, opts Options) (*BuildResult, error) {
 	// Goal evaluator is not implied by the main model, guardian, or recovery
 	// reviewer. Controllers that want one inject it explicitly; otherwise Goal
 	// uses the deterministic host policy.
-	ctrl := control.New(ctrlOpts)
+	ctrl := newControllerWithImageRoutes(ctrlOpts, cfg)
 	// Validate and consume retired role inputs without changing runtime policy.
 	_, _ = agentpreset.Normalize(firstNonEmpty(opts.AgentPreset, opts.TokenMode))
 	// Publish the controller to the extension UI hub's indirection: from here

@@ -82,6 +82,7 @@ func elideToolResult(m provider.Message) (provider.Message, bool) {
 	out.RawContent = ""
 	out.ProviderContent = ""
 	out.Images = nil
+	out.ImageInputs = nil
 	return out, true
 }
 

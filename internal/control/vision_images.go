@@ -83,7 +83,7 @@ func (c *Controller) visionLocalImageValue(pathName, baseDir string) (string, er
 		err     error
 	)
 	if isAttachmentRef(filepath.ToSlash(pathName)) {
-		dataURL, err = visionImageDataURL(pathName)
+		dataURL, err = visionImageDataURLInRoot(baseDir, pathName)
 	} else {
 		dataURL, err = visionFileImageDataURL(pathName, baseDir)
 	}

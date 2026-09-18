@@ -25,7 +25,11 @@ const (
 // runGuarded runs body under a fresh context, guarding concurrent turns.
 // Finishing-window arrivals park instead of dropping (see admissionResult).
 func (c *Controller) runGuarded(body func(ctx context.Context) error) admissionResult {
-	return c.admitGuardedTurn(body, false, true, nil, nil)
+	return c.runGuardedWithAdmission(body, turnAdmission{})
+}
+
+func (c *Controller) runGuardedWithAdmission(body func(ctx context.Context) error, admission turnAdmission) admissionResult {
+	return c.admitGuardedTurn(body, false, true, nil, nil, admission)
 }
 
 // runGuardedOrPark admits like runGuarded but parks the body while another
@@ -34,7 +38,7 @@ func (c *Controller) runGuarded(body func(ctx context.Context) error) admissionR
 // the FIFO drain in finishGuardedTurn delivers them the moment the current
 // turn finishes.
 func (c *Controller) runGuardedOrPark(body func(ctx context.Context) error) admissionResult {
-	return c.admitGuardedTurn(body, true, true, nil, nil)
+	return c.admitGuardedTurn(body, true, true, nil, nil, turnAdmission{})
 }
 
 // runGuardedInbox admits a durable item without parking it in volatile memory.
@@ -44,16 +48,16 @@ func (c *Controller) runGuardedInbox(body func(ctx context.Context) error, onSta
 		return turnDroppedRunning
 	}
 	defer c.submissions.mu.Unlock()
-	return c.admitGuardedTurn(body, false, false, onStart, nil)
+	return c.admitGuardedTurn(body, false, false, onStart, nil, turnAdmission{})
 }
 
 func (c *Controller) runGuardedGoalRound(reservation *goalRoundReservation, body func(ctx context.Context) error) admissionResult {
 	c.submissions.mu.Lock()
 	defer c.submissions.mu.Unlock()
-	return c.admitGuardedTurn(body, false, false, nil, reservation)
+	return c.admitGuardedTurn(body, false, false, nil, reservation, turnAdmission{})
 }
 
-func (c *Controller) admitGuardedTurn(body func(ctx context.Context) error, parkWhileRunning, parkWhileFinishing bool, onStart func(), goalRound *goalRoundReservation) admissionResult {
+func (c *Controller) admitGuardedTurn(body func(ctx context.Context) error, parkWhileRunning, parkWhileFinishing bool, onStart func(), goalRound *goalRoundReservation, admission turnAdmission) admissionResult {
 	if err := c.authentication.admissionError(); err != nil {
 		var authErr *AuthenticationError
 		_ = errors.As(err, &authErr)
@@ -63,6 +67,17 @@ func (c *Controller) admitGuardedTurn(body func(ctx context.Context) error, park
 		}
 		c.sink.Emit(event.Event{Kind: event.Notice, Level: event.LevelWarn, Code: code, Text: err.Error()})
 		return turnDroppedAuthentication
+	}
+	// Freeze before a turn can park. Delayed execution owns this immutable
+	// admission value and never consults temporary controller state.
+	prepared := admission.images
+	admissionCtx := admission.durableCtx
+	if admissionCtx == nil {
+		admissionCtx = context.Background()
+	}
+	run := body
+	body = func(ctx context.Context) error {
+		return run(contextWithPreparedImageReferences(ctx, prepared))
 	}
 	if err := c.ensureWriteAuthorityReady(); err != nil {
 		c.sink.Emit(event.Event{Kind: event.Notice, Level: event.LevelWarn, Text: "input was not accepted: this session is no longer writable — reopen it and try again"})
@@ -96,7 +111,7 @@ func (c *Controller) admitGuardedTurn(body func(ctx context.Context) error, park
 	if goalRound != nil {
 		kind = queuedGoal
 	}
-	item := queuedTurn{kind: kind, body: body, onStart: onStart, goalRound: goalRound}
+	item := queuedTurn{kind: kind, body: body, onStart: onStart, goalRound: goalRound, admissionCtx: admissionCtx}
 	switch c.turns.phase {
 	case session.RuntimeRunning:
 		if parkWhileRunning || c.turns.cancelRequested {
@@ -130,6 +145,6 @@ func (c *Controller) admitGuardedTurn(body func(ctx context.Context) error, park
 		onStart()
 	}
 	c.refreshRuntimeState(event.Event{})
-	c.spawnGuardedTurn(ctx, cancel, body, goalRound)
+	c.spawnGuardedTurn(ctx, cancel, item)
 	return turnStarted
 }

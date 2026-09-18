@@ -301,6 +301,12 @@ func encodeEnvelope(env PromptEnvelope) (data []byte, checksum string, size int6
 // reference materialization is deliberately excluded so a network retry does
 // not conflict merely because the referenced workspace changed meanwhile.
 func idempotencyRequestHash(env PromptEnvelope) (string, error) {
+	if env.FingerprintVersion != 0 {
+		if env.FingerprintVersion != 1 || len(env.RequestFingerprint) != 64 {
+			return "", fmt.Errorf("unsupported or invalid inbox request fingerprint; automatic replay is disabled")
+		}
+		return env.RequestFingerprint, nil
+	}
 	type stableInvocation struct {
 		Name    string            `json:"name,omitempty"`
 		Args    map[string]string `json:"args,omitempty"`
@@ -320,25 +326,27 @@ func idempotencyRequestHash(env PromptEnvelope) (string, error) {
 		})
 	}
 	stable := struct {
-		DisplayText  string             `json:"displayText"`
-		RawText      string             `json:"rawText"`
-		SubmitText   string             `json:"submitText"`
-		Invocations  []stableInvocation `json:"invocations,omitempty"`
-		Format       string             `json:"format,omitempty"`
-		Attachments  []string           `json:"attachments,omitempty"`
-		ExplicitRefs []string           `json:"explicitRefs,omitempty"`
-		Source       string             `json:"source,omitempty"`
-		Extra        map[string]string  `json:"extra,omitempty"`
+		DisplayText          string             `json:"displayText"`
+		RawText              string             `json:"rawText"`
+		SubmitText           string             `json:"submitText"`
+		Invocations          []stableInvocation `json:"invocations,omitempty"`
+		Format               string             `json:"format,omitempty"`
+		Attachments          []string           `json:"attachments,omitempty"`
+		AttachmentIdentities []string           `json:"attachmentIdentities,omitempty"`
+		ExplicitRefs         []string           `json:"explicitRefs,omitempty"`
+		Source               string             `json:"source,omitempty"`
+		Extra                map[string]string  `json:"extra,omitempty"`
 	}{
-		DisplayText:  env.DisplayText,
-		RawText:      env.RawText,
-		SubmitText:   env.SubmitText,
-		Invocations:  invocations,
-		Format:       env.Format,
-		Attachments:  env.Attachments,
-		ExplicitRefs: env.ExplicitRefs,
-		Source:       env.Source,
-		Extra:        env.Extra,
+		DisplayText:          env.DisplayText,
+		RawText:              env.RawText,
+		SubmitText:           env.SubmitText,
+		Invocations:          invocations,
+		Format:               env.Format,
+		Attachments:          env.Attachments,
+		AttachmentIdentities: env.AttachmentIdentities,
+		ExplicitRefs:         env.ExplicitRefs,
+		Source:               env.Source,
+		Extra:                env.Extra,
 	}
 	data, err := json.Marshal(stable)
 	if err != nil {

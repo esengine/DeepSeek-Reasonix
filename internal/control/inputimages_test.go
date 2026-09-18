@@ -3,14 +3,17 @@ package control
 import (
 	"bytes"
 	"context"
+	"errors"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
 
 	"reasonix/internal/agent"
+	"reasonix/internal/attachment"
 	"reasonix/internal/config"
 	"reasonix/internal/provider"
+	"reasonix/internal/sessioninbox"
 )
 
 func writeVisionTestConfig(t *testing.T, root string) {
@@ -37,7 +40,7 @@ func TestControllerInputImagesResolvesAttachment(t *testing.T) {
 	if err != nil {
 		t.Fatalf("SaveImageDataURL: %v", err)
 	}
-	urls := (&Controller{selection: modelSelection{ref: "custom/vision-pro"}}).inputImages("look at @" + ref)
+	urls := (&Controller{workspaceRoot: dir, selection: modelSelection{ref: "custom/vision-pro"}}).inputImages("look at @" + ref)
 	if len(urls) != 1 {
 		t.Fatalf("inputImages = %v, want one resolved data URL", urls)
 	}
@@ -50,6 +53,14 @@ func TestControllerInputImagesIgnoresNonAttachmentRefs(t *testing.T) {
 	t.Chdir(t.TempDir())
 	if urls := newOwnedTestController(t, Options{}).inputImages("plain text with @missing.png"); len(urls) != 0 {
 		t.Errorf("inputImages = %v, want none for a non-existent / non-attachment ref", urls)
+	}
+}
+
+func TestDetectRefsOnlyKeepsMissingImageAttachments(t *testing.T) {
+	c := &Controller{workspaceRoot: t.TempDir()}
+	refs := c.detectRefs("inspect @.reasonix/attachments/missing.png and @.reasonix/attachments/missing.pdf")
+	if len(refs) != 1 || refs[0].kind != refImage || refs[0].path != ".reasonix/attachments/missing.png" {
+		t.Fatalf("refs = %+v, want only the missing image attachment", refs)
 	}
 }
 
@@ -70,6 +81,221 @@ func TestControllerInputImagesResolvesWorkspaceImage(t *testing.T) {
 	}
 	if !strings.HasPrefix(urls[0], "data:image/png;base64,") {
 		t.Errorf("resolved url = %q, want a png data URL", urls[0])
+	}
+}
+
+func TestControllerInputImagesResolvesAttachmentOutsideProcessCWD(t *testing.T) {
+	workspace := t.TempDir()
+	processDir := t.TempDir()
+	writeVisionTestConfig(t, workspace)
+	path, err := SaveImageBytesInRoot(workspace, "image/png", mustBase64(t, tinyPNG))
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Chdir(processDir)
+	c := &Controller{workspaceRoot: workspace, selection: modelSelection{ref: "custom/vision-pro"}}
+	urls := c.inputImages("look at @" + filepath.ToSlash(path))
+	if len(urls) != 1 || !strings.HasPrefix(urls[0], "data:image/png;base64,") {
+		t.Fatalf("inputImages = %v, want one workspace-owned image", urls)
+	}
+}
+
+func TestSubmitIdentifiedRejectsMissingExplicitImageBeforeRunner(t *testing.T) {
+	workspace := t.TempDir()
+	runner := &recordingSessionRunner{session: agent.NewSession("sys")}
+	c := newOwnedTestController(t, Options{WorkspaceRoot: workspace, Runner: runner})
+	_, err := c.SubmitIdentified(SubmissionRequest{
+		Input: "inspect @.reasonix/attachments/missing.png", Display: "inspect image",
+	})
+	var failures ImageReferenceFailures
+	if !errors.As(err, &failures) || len(failures) != 1 || failures[0].Code != ImageReferenceMissing {
+		t.Fatalf("error = %#v, want one missing image failure", err)
+	}
+	if len(runner.inputs) != 0 {
+		t.Fatalf("runner inputs = %v, want no model call", runner.inputs)
+	}
+}
+
+func TestDirectAndEditedSubmissionsRejectMissingExplicitImageBeforeRunner(t *testing.T) {
+	const input = "inspect @.reasonix/attachments/missing.png"
+	for _, tc := range []struct {
+		name   string
+		submit func(*Controller)
+	}{
+		{name: "direct", submit: func(c *Controller) { c.SubmitDisplay("inspect image", input) }},
+		{name: "edited", submit: func(c *Controller) { c.SubmitEditedDisplay("inspect image", input, "old prompt") }},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			runner := &recordingSessionRunner{session: agent.NewSession("sys")}
+			c := newOwnedTestController(t, Options{WorkspaceRoot: t.TempDir(), Runner: runner})
+			tc.submit(c)
+			if len(runner.inputs) != 0 {
+				t.Fatalf("runner inputs = %v, want no model call", runner.inputs)
+			}
+		})
+	}
+}
+
+func TestPreparedAttachmentSurvivesWorkspaceFileDeletion(t *testing.T) {
+	workspace := t.TempDir()
+	ref, err := SaveImageBytesInRoot(workspace, "image/png", mustBase64(t, tinyPNG))
+	if err != nil {
+		t.Fatal(err)
+	}
+	c := newOwnedTestController(t, Options{WorkspaceRoot: workspace})
+	prepared, failures := c.prepareExplicitImageReferences("inspect @" + filepath.ToSlash(ref))
+	if len(failures) != 0 || len(prepared.inputs) != 1 {
+		t.Fatalf("prepared = %+v failures = %v", prepared, failures)
+	}
+	if err := os.Remove(filepath.Join(workspace, filepath.FromSlash(ref))); err != nil {
+		t.Fatal(err)
+	}
+	raw, err := c.attachmentService().ReadVerified(t.Context(), *prepared.inputs[0].Attachment)
+	if err != nil {
+		t.Fatalf("persisted original should survive workspace deletion: %v", err)
+	}
+	if len(raw) == 0 {
+		t.Fatal("persisted original was empty")
+	}
+	variant, err := c.attachmentService().PrepareVariant(t.Context(), *prepared.inputs[0].Attachment, attachment.VariantPolicyV1)
+	if err != nil {
+		t.Fatalf("variant rebuild after workspace deletion: %v", err)
+	}
+	if len(variant.Bytes) == 0 {
+		t.Fatal("rebuilt variant was empty")
+	}
+}
+
+func TestExplicitImagePreparationIsIndependentOfToolApprovalMode(t *testing.T) {
+	workspace := t.TempDir()
+	ref, err := SaveImageBytesInRoot(workspace, "image/png", mustBase64(t, tinyPNG))
+	if err != nil {
+		t.Fatal(err)
+	}
+	var want string
+	for _, mode := range []string{ToolApprovalWorkspaceWrite, ToolApprovalDangerFullAccess} {
+		t.Run(mode, func(t *testing.T) {
+			c := newOwnedTestController(t, Options{WorkspaceRoot: workspace})
+			c.SetToolApprovalMode(mode)
+			prepared, failures := c.prepareExplicitImageReferences("inspect @" + filepath.ToSlash(ref))
+			if len(failures) != 0 || len(prepared.ordered) != 1 {
+				t.Fatalf("prepared images = %v, failures = %v; want one frozen image", prepared.ordered, failures)
+			}
+			got := prepared.ordered[0]
+			if want == "" {
+				want = got
+			} else if got != want {
+				t.Fatal("permission profiles produced different image inputs")
+			}
+		})
+	}
+}
+
+func TestSubmitIdentifiedRejectsAllImagesWhenOneIsMissing(t *testing.T) {
+	workspace := t.TempDir()
+	valid, err := SaveImageBytesInRoot(workspace, "image/png", mustBase64(t, tinyPNG))
+	if err != nil {
+		t.Fatal(err)
+	}
+	runner := &recordingSessionRunner{session: agent.NewSession("sys")}
+	c := newOwnedTestController(t, Options{WorkspaceRoot: workspace, Runner: runner})
+	_, err = c.SubmitIdentified(SubmissionRequest{Input: "inspect @" + filepath.ToSlash(valid) + " @.reasonix/attachments/missing.png"})
+	var failures ImageReferenceFailures
+	if !errors.As(err, &failures) || len(failures) != 1 {
+		t.Fatalf("error = %#v, want partial-set rejection", err)
+	}
+	if len(runner.inputs) != 0 {
+		t.Fatalf("runner inputs = %v, want atomic rejection", runner.inputs)
+	}
+}
+
+func TestSubmitIdentifiedClassifiesExplicitImageFailuresBeforeRunner(t *testing.T) {
+	workspace := t.TempDir()
+	attachments := filepath.Join(workspace, ".reasonix", "attachments")
+	if err := os.MkdirAll(attachments, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(attachments, "corrupt.png"), []byte("not an image"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(workspace, ".reasonix", "outside.png"), mustBase64(t, tinyPNG), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	tooLarge := filepath.Join(attachments, "too-large.png")
+	if err := os.WriteFile(tooLarge, []byte("\x89PNG\r\n\x1a\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Truncate(tooLarge, maxImageAttachmentBytes+1); err != nil {
+		t.Fatal(err)
+	}
+	linkPath := filepath.Join(attachments, "link.png")
+	symlinkAvailable := os.Symlink(filepath.Join(workspace, ".reasonix", "outside.png"), linkPath) == nil
+
+	cases := []struct {
+		name string
+		ref  string
+		code ImageReferenceFailureCode
+	}{
+		{name: "corrupt", ref: ".reasonix/attachments/corrupt.png", code: ImageReferenceUnsupported},
+		{name: "traversal", ref: ".reasonix/attachments/../outside.png", code: ImageReferenceUnsafe},
+		{name: "too large", ref: ".reasonix/attachments/too-large.png", code: ImageReferenceTooLarge},
+	}
+	if symlinkAvailable {
+		cases = append(cases, struct {
+			name string
+			ref  string
+			code ImageReferenceFailureCode
+		}{name: "symlink", ref: ".reasonix/attachments/link.png", code: ImageReferenceUnsafe})
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			runner := &recordingSessionRunner{session: agent.NewSession("sys")}
+			c := newOwnedTestController(t, Options{WorkspaceRoot: workspace, Runner: runner})
+			_, err := c.SubmitIdentified(SubmissionRequest{Input: "inspect @" + tc.ref})
+			var failures ImageReferenceFailures
+			if !errors.As(err, &failures) || len(failures) != 1 || failures[0].Code != tc.code {
+				t.Fatalf("error = %#v, want one %s failure", err, tc.code)
+			}
+			if len(runner.inputs) != 0 {
+				t.Fatalf("runner inputs = %v, want no model call", runner.inputs)
+			}
+		})
+	}
+}
+
+func TestSubmitIdentifiedRejectsInvocationImageBeforePreparingInvocation(t *testing.T) {
+	workspace := t.TempDir()
+	runner := &recordingSessionRunner{session: agent.NewSession("sys")}
+	c := newOwnedTestController(t, Options{WorkspaceRoot: workspace, Runner: runner})
+	_, err := c.SubmitIdentified(SubmissionRequest{
+		Input:       "inspect @.reasonix/attachments/missing.png",
+		Invocations: []InvocationRequest{{Name: "missing-skill", Kind: "skill"}},
+	})
+	var failures ImageReferenceFailures
+	if !errors.As(err, &failures) || len(failures) != 1 || failures[0].Code != ImageReferenceMissing {
+		t.Fatalf("error = %#v, want image admission failure", err)
+	}
+	if len(runner.inputs) != 0 {
+		t.Fatalf("runner inputs = %v, want no model call", runner.inputs)
+	}
+}
+
+func TestEnqueueInboxRejectsMissingExplicitImageWithoutDurableItem(t *testing.T) {
+	dir := t.TempDir()
+	sessionPath := filepath.Join(dir, "session.jsonl")
+	c := newOwnedTestController(t, Options{
+		WorkspaceRoot: dir,
+		SessionDir:    dir,
+		SessionPath:   sessionPath,
+	})
+	_, err := c.EnqueueInbox(InboxRequest{Submit: "inspect @.reasonix/attachments/missing.png"})
+	var failures ImageReferenceFailures
+	if !errors.As(err, &failures) || len(failures) != 1 || failures[0].Code != ImageReferenceMissing {
+		t.Fatalf("error = %#v, want missing image failure", err)
+	}
+	if snap := c.InboxSnapshot(); len(snap.Items) != 0 {
+		t.Fatalf("rejected image submission created inbox items: %+v", snap.Items)
 	}
 }
 
@@ -268,7 +494,7 @@ func TestResolveRefsUnreadableImageDoesNotClaimAttached(t *testing.T) {
 
 	c := &Controller{workspaceRoot: dir, selection: modelSelection{ref: "custom/vision-pro"}}
 	block, errs := c.ResolveRefs(t.Context(), "look at @"+imagePath)
-	if len(errs) != 1 || !strings.Contains(errs[0], "between 1 byte and 64 MB") {
+	if len(errs) != 1 || (!strings.Contains(errs[0], "between 1 byte and 64 MB") && !strings.Contains(errs[0], "exceeds the allowed size") && !strings.Contains(errs[0], "size_limit")) {
 		t.Fatalf("ResolveRefs errors = %v, want unreadable-image error", errs)
 	}
 	if strings.Contains(block, "attached as visual input") {
@@ -304,20 +530,26 @@ func TestFreezeInboxReferencesResolvesLargeImageOnce(t *testing.T) {
 	if err := os.MkdirAll(filepath.Dir(imagePath), 0o755); err != nil {
 		t.Fatal(err)
 	}
-	raw := append([]byte("\x89PNG\r\n\x1a\n"), bytes.Repeat([]byte("x"), 8)...)
-	if err := os.WriteFile(imagePath, raw, 0o644); err != nil {
+	if err := os.WriteFile(imagePath, mustBase64(t, tinyPNG), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	c := &Controller{workspaceRoot: workspace, selection: modelSelection{ref: cfg.DefaultModel}}
-	block, images, errs := c.freezeInboxReferences(t.Context(), "look", []string{imagePath})
-	if len(errs) != 0 || len(images) != 1 || images[0] != "file-api-shared-resolution" {
-		t.Fatalf("resolved block/images/errors = %q / %v / %v", block, images, errs)
+	c := newOwnedTestController(t, Options{WorkspaceRoot: workspace})
+	c.selection.ref = cfg.DefaultModel
+	env := sessioninbox.PromptEnvelope{SubmitText: "look", ExplicitRefs: []string{filepath.ToSlash(filepath.Join(".reasonix", "attachments", "large.png"))}}
+	if err := c.freezeInboxEnvelopeReferences(t.Context(), &env, env.SubmitText, env.ExplicitRefs); err != nil {
+		t.Fatal(err)
 	}
-	if uploads != 1 {
-		t.Fatalf("image uploads = %d, want one shared resolution", uploads)
+	if len(env.ImageInputs) != 1 || env.ImageInputs[0].Kind != attachment.KindAttachment {
+		t.Fatalf("image inputs = %+v, want one persisted attachment", env.ImageInputs)
 	}
-	if !strings.Contains(block, "attached as visual input") {
-		t.Fatalf("successful shared resolution did not produce the visual-input note:\n%s", block)
+	if len(env.FrozenImages) != 0 {
+		t.Fatalf("frozen images = %v, want none before request preparation", env.FrozenImages)
+	}
+	if uploads != 0 {
+		t.Fatalf("image uploads = %d, want none until request preparation", uploads)
+	}
+	if !strings.Contains(env.FrozenRefBlock, "attached as visual input") {
+		t.Fatalf("successful freeze did not produce the visual-input note:\n%s", env.FrozenRefBlock)
 	}
 }
 

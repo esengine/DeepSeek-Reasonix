@@ -66,9 +66,18 @@ func (o *turnOrchestrator) runSubagentSkillGoalLoop(ctx context.Context, sk skil
 	return o.runSubagentSkillTurnsGoalLoop(ctx, []skill.Skill{sk}, task, raw, display, runner, planMode)
 }
 
-func (o *turnOrchestrator) runSubagentSkillTurnsGoalLoop(ctx context.Context, skills []skill.Skill, task, raw, display string, runner skill.SubagentRunner, planMode bool) error {
-	userImages, imageCandidates := o.c.resolveTurnImages(raw)
+func (o *turnOrchestrator) runSubagentSkillTurnsGoalLoop(ctx context.Context, skills []skill.Skill, task, raw, display string, runner skill.SubagentRunner, planMode bool, frozen ...[]string) error {
+	var userImages, imageCandidates []string
+	if len(frozen) > 0 {
+		imageCandidates = append([]string(nil), frozen[0]...)
+		if o.c.imageInputEnabled() {
+			userImages = append([]string(nil), imageCandidates...)
+		}
+	} else {
+		userImages, imageCandidates = o.c.resolveTurnImages(raw)
+	}
 	ctx = agent.WithSubagentImageCandidates(ctx, imageCandidates)
+	ctx = withPreparedTurnImages(ctx)
 	return o.runSubagentSkillTurns(ctx, skills, task, raw, display, runner, planMode, userImages, imageCandidates)
 }
 
@@ -118,7 +127,12 @@ func (o *turnOrchestrator) runSubagentSkillTurns(ctx context.Context, skills []s
 	if c.executor == nil {
 		return fmt.Errorf("subagent slash invocation requires an active session")
 	}
-	if _, err := c.executor.AppendTurnContextAndUserChecked(ctx, persistedUserTurn(input, firstNonEmpty(raw, task), images, time.Now().UnixMilli())); err != nil {
+	message := persistedUserTurn(input, firstNonEmpty(raw, task), images, time.Now().UnixMilli())
+	if prepared, ok := ctx.Value(preparedImageReferencesContextKey{}).(preparedImageReferences); ok && len(prepared.inputs) > 0 {
+		message.Images = nil
+		message.ImageInputs = prepared.inputs
+	}
+	if _, err := c.executor.AppendTurnContextAndUserChecked(ctx, message); err != nil {
 		return err
 	}
 
@@ -174,6 +188,7 @@ func (o *turnOrchestrator) runOrchestratedTurn(ctx context.Context, turn orchest
 	ctx = agent.WithUserImages(ctx, userImages)
 	ctx = agent.WithSubagentImageCandidates(ctx, imageCandidates)
 	ctx = agent.WithRawUserInput(ctx, turn.raw)
+	ctx = withPreparedTurnImages(ctx)
 	ctx = withTurnInputOrigin(ctx, turn.synthetic)
 	userMessageID := agent.NewMessageID()
 	if _, turnID, active := c.currentTurnToken(); active {

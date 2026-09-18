@@ -116,14 +116,24 @@ func (a *Agent) recordToolExecutionAudit(readOnly, parallel bool, startedAt, dur
 func (a *Agent) buildBatchToolResult(ctx context.Context, call provider.ToolCall, o toolOutcome) provider.Message {
 	state := outcomeRunState(o)
 	msg := provider.Message{Role: provider.RoleTool, Content: o.output, Images: o.images, VisionSummary: o.visionSummary, ToolCallID: call.ID, Name: call.Name, ToolRunState: state, ToolExecution: toProviderToolExecution(o.execution), PresentedFiles: provider.NewPresentedFilesMetadata(o.presentedFiles)}
-	if o.diagnostic != nil {
+	if len(o.images) > 0 && a.imageResolver != nil {
+		if inputs, err := a.imageResolver.PersistToolImages(ctx, o.images); err == nil && len(inputs) > 0 {
+			msg.ImageInputs = inputs
+			msg.Images = nil
+		} else if err != nil {
+			msg.Images = nil
+			msg.Content += "\n[Image persistence failed. The tool already executed; its text result remains valid. Do not repeat the original action to retry image processing.]"
+			msg.ToolDiagnostic, _ = json.Marshal(map[string]string{"code": "image_persistence_failed", "message": "Image persistence failed; completed tool text was preserved."})
+		}
+	}
+	if o.diagnostic != nil && len(msg.ToolDiagnostic) == 0 {
 		msg.ToolDiagnostic, _ = json.Marshal(o.diagnostic)
 	}
 	if o.rawOutput != "" && o.rawOutput != o.output {
 		msg.RawContent = o.rawOutput
 	}
 	if env, ok := a.finalizedReadEnvelope(ctx, call, o); ok {
-		if env.HasMore {
+		if env.HasMore && len(msg.ToolDiagnostic) == 0 {
 			msg.ToolDiagnostic, _ = json.Marshal(tool.OperationDiagnostic{Code: tool.ReadPartial, Path: env.Source.CanonicalPath, OperationID: call.ID, ActualSnapshot: env.Source.Snapshot, RequiredRanges: env.DeliveredRanges, Recovery: "continue with the next window only if the task requires more coverage"})
 		}
 		if raw, err := json.Marshal(env); err == nil {

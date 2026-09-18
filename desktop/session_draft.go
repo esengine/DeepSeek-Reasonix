@@ -176,13 +176,6 @@ func (a *App) ResumeDraftSubmission(operationID string, expectedRevision uint64)
 	return draftOperationView(op, a.metaForDraftSession(op.SessionID)), nil
 }
 
-type ComposerTarget struct {
-	Kind    string              `json:"kind"`
-	DraftID string              `json:"draftId,omitempty"`
-	TabID   string              `json:"tabId,omitempty"`
-	Session *session.SessionRef `json:"session,omitempty"`
-}
-
 func (a *App) draftStore() *draftstate.Store {
 	if a.desktopDrafts == nil {
 		a.desktopDrafts = draftstate.New(config.DesktopDraftStatePath())
@@ -370,7 +363,12 @@ func (a *App) ListSessionDraftSummaries() ([]SessionDraftSummary, error) {
 }
 
 func (a *App) DiscardSessionDraft(draftID string, revision uint64) error {
-	return a.draftStore().Discard(a.bootContext(), strings.TrimSpace(draftID), revision)
+	draftID = strings.TrimSpace(draftID)
+	if err := a.draftStore().Discard(a.bootContext(), draftID, revision); err != nil {
+		return err
+	}
+	a.releaseAttachmentStageOperations("draft:" + draftID + ":")
+	return nil
 }
 
 func (a *App) GetDraftContext(draftID string) (SessionDraftContextView, error) {
@@ -499,7 +497,7 @@ func (a *App) BeginDraftSubmission(request SessionDraftSubmissionRequest) (resul
 	durableAttempt := false
 	defer func() {
 		if resultErr != nil && !durableAttempt {
-			resultErr = fmt.Errorf("draft submission not admitted: %w", resultErr)
+			resultErr = draftAdmissionError(resultErr)
 		}
 	}()
 	if request.SnapshotVersion > draftstate.SnapshotVersion {
@@ -628,31 +626,6 @@ func draftBuiltinBehavior(input string) (behavior, name string) {
 		}
 	}
 	return "", name
-}
-
-func validateDraftAttachments(record draftstate.Draft) error {
-	var content struct {
-		Attachments []struct {
-			Path string `json:"path"`
-		} `json:"attachments"`
-	}
-	if err := json.Unmarshal([]byte(record.ContentJSON), &content); err != nil {
-		return fmt.Errorf("decode session draft attachments: %w", err)
-	}
-	root := record.WorkspaceRoot
-	if record.Scope != "project" {
-		root = globalWorkspaceRoot()
-	}
-	base, err := workspaceBaseFromRoot(root)
-	if err != nil {
-		return err
-	}
-	for _, attachment := range content.Attachments {
-		if err := control.ValidateAttachmentInRoot(base, attachment.Path); err != nil {
-			return fmt.Errorf("attachment %q is unavailable: %w", filepath.Base(attachment.Path), err)
-		}
-	}
-	return nil
 }
 
 func (a *App) GetDraftSubmission(operationID string) (SessionDraftSubmissionView, error) {
@@ -1223,7 +1196,7 @@ func (a *App) composerTargetWorkspace(target ComposerTarget) (string, control.Se
 	return base, ctrl, err
 }
 
-func (a *App) SavePastedImageForTarget(target ComposerTarget, dataURL string) (string, error) {
+func (a *App) SavePastedImageForComposerTarget(target ComposerTarget, dataURL string) (string, error) {
 	root, _, err := a.composerTargetWorkspace(target)
 	if err != nil {
 		return "", err
@@ -1240,7 +1213,7 @@ func (a *App) SavePastedImageForTarget(target ComposerTarget, dataURL string) (s
 	return control.SaveImageBytesInRoot(root, strings.TrimPrefix(before, "data:"), raw)
 }
 
-func (a *App) SavePastedFileForTarget(target ComposerTarget, name, dataURL string) (string, error) {
+func (a *App) SavePastedFileForComposerTarget(target ComposerTarget, name, dataURL string) (string, error) {
 	root, _, err := a.composerTargetWorkspace(target)
 	if err != nil {
 		return "", err
@@ -1256,7 +1229,7 @@ func (a *App) SavePastedFileForTarget(target ComposerTarget, name, dataURL strin
 	return control.SaveAttachmentBytesInRoot(root, name, raw)
 }
 
-func (a *App) SaveClipboardImageForTarget(target ComposerTarget) (string, error) {
+func (a *App) SaveClipboardImageForComposerTarget(target ComposerTarget) (string, error) {
 	root, _, err := a.composerTargetWorkspace(target)
 	if err != nil {
 		return "", err
@@ -1288,7 +1261,7 @@ func (a *App) SearchFileRefsForTarget(target ComposerTarget, query string) []Dir
 	return searchFileRefsForWorkspaceTarget(root, ctrl, query)
 }
 
-func (a *App) AttachmentDataURLForTarget(target ComposerTarget, rel string) (string, error) {
+func (a *App) AttachmentDataURLForComposerTarget(target ComposerTarget, rel string) (string, error) {
 	root, _, err := a.composerTargetWorkspace(target)
 	if err != nil {
 		return "", err
@@ -1296,7 +1269,7 @@ func (a *App) AttachmentDataURLForTarget(target ComposerTarget, rel string) (str
 	return control.ImageDataURLInRoot(root, rel)
 }
 
-func (a *App) AttachDroppedForTarget(target ComposerTarget, path string) (DroppedItem, error) {
+func (a *App) AttachDroppedForComposerTarget(target ComposerTarget, path string) (DroppedItem, error) {
 	root, _, err := a.composerTargetWorkspace(target)
 	if err != nil {
 		return DroppedItem{}, err

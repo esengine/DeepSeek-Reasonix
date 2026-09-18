@@ -1,11 +1,9 @@
-import { createContext, lazy, memo, Suspense, useCallback, useContext, useEffect, useMemo, useState } from "react";
-import { BrainCircuit, FileText, Folder, Image, MessageSquare } from "lucide-react";
+import { createContext, lazy, memo, Suspense, useContext, useMemo, useState } from "react";
+import { BrainCircuit, FileText, MessageSquare } from "lucide-react";
 import { Markdown } from "./Markdown";
 import { CopyButton } from "./CopyButton";
-import { parseAttachmentRefsForDisplay, sortDisplayAttachments } from "../lib/attachmentDisplay";
-import { app } from "../lib/bridge";
+import { parseAttachmentRefsForDisplay } from "../lib/attachmentDisplay";
 import { useT } from "../lib/i18n";
-import { ImageViewer } from "./ImageViewer";
 import { Tooltip } from "./Tooltip";
 import { stripMemoryCompilerExecution } from "../lib/memoryCompilerDisplay";
 import { invocationSegmentsFromMessage, type InvocationMetadataMap } from "../lib/invocationDisplay";
@@ -19,6 +17,7 @@ import { ChatFileTurnProvider } from "./ChatFileLinkContext";
 
 const MemoryCitations = lazy(() => import("./MemoryCitations").then((module) => ({ default: module.MemoryCitations })));
 const SearchSourcesPanel = lazy(() => import("./SearchSourcesPanel").then((module) => ({ default: module.SearchSourcesPanel }))); type AssistantItem = Extract<Item, { kind: "assistant" }>;
+const MessageAttachments = lazy(() => import("./MessageAttachments").then(module => ({ default: module.MessageAttachments })));
 export const InvocationMetadataContext = createContext<InvocationMetadataMap>({});
 type ImSourceMessage = {
   provider: string;
@@ -61,12 +60,6 @@ function imSourceLabel(source: ImSourceMessage, t: ReturnType<typeof useT>): str
   if (provider === "lark") return "Lark";
   if (provider === "weixin" || provider === "wechat") return t("settings.botWeixin");
   return t("settings.botFeishu");
-}
-
-function attachmentIcon(kind: "image" | "file" | "folder") {
-  if (kind === "image") return <Image size={15} />;
-  if (kind === "folder") return <Folder size={15} />;
-  return <FileText size={15} />;
 }
 
 type PastedBlockInfo = {
@@ -162,33 +155,13 @@ export function UserMessage({
   const hasMemoryCompiler = Boolean(submitText?.includes("<memory-compiler-execution>"));
   const selectedTextEntries = useMemo(() => parseSelectedTextContext(submitText), [submitText]);
   const editableActionText = stripSelectionLabels(actionText, selectedTextEntries);
-  const { text: editableDisplayText, attachments } = parseAttachmentRefsForDisplay(editableActionText);
+  const { text: editableDisplayText, attachments: parsedAttachments } = parseAttachmentRefsForDisplay(editableActionText);
   const selectionLabels = formatSelectionLabels(selectedTextEntries);
   const displayText = [editableDisplayText, selectionLabels].filter(Boolean).join(editableDisplayText && selectionLabels ? " " : "");
   const invocationSegments = imSource ? [] : invocationSegmentsFromMessage(displayText, submitText, invocationMetadata);
   const hasInvocationSegments = invocationSegments.some((segment) => segment.type === "invocation");
-  const orderedAttachments = sortDisplayAttachments(attachments);
   const sourceLabel = imSource ? imSourceLabel(imSource, t) : "";
   const sentAt = createdAt === undefined ? null : messageDate(createdAt);
-  const [imagePreviews, setImagePreviews] = useState<Record<string, string>>({});
-  const [imageViewer, setImageViewer] = useState<{ open: boolean; url: string; name: string }>({ open: false, url: "", name: "" });
-  const openImageViewer = useCallback(async (path: string, name: string) => {
-    let url = imagePreviews[path];
-    if (!url) {
-      try {
-        url = await app.AttachmentDataURL(path);
-        setImagePreviews((prev) => (prev[path] ? prev : { ...prev, [path]: url }));
-      } catch {
-        return;
-      }
-    }
-    setImageViewer({ open: true, url, name });
-  }, [imagePreviews]);
-
-  const closeImageViewer = useCallback(() => {
-    setImageViewer((prev) => (prev.open ? { ...prev, open: false } : prev));
-  }, []);
-
   const pasteBlocks = useMemo(() => parsePastedBlocks(displayText, submitText), [displayText, submitText]);
   const selectedTextBlocks = useMemo(() => parseSelectedTextBlocks(displayText, submitText), [displayText, submitText]);
   const [expandedBlockKeys, setExpandedBlockKeys] = useState<Record<string, boolean>>({});
@@ -241,28 +214,6 @@ export function UserMessage({
       [key]: !prev[key],
     }));
   };
-  const imagePreviewKey = orderedAttachments
-    .filter((attachment) => attachment.kind === "image" && attachment.source === "attachment")
-    .map((attachment) => attachment.path)
-    .join("\n");
-
-  useEffect(() => {
-    const paths = imagePreviewKey ? imagePreviewKey.split("\n") : [];
-    if (paths.length === 0) return;
-    let cancelled = false;
-    for (const path of paths) {
-      if (imagePreviews[path]) continue;
-      app.AttachmentDataURL(path)
-        .then((url) => {
-          if (cancelled) return;
-          setImagePreviews((prev) => (prev[path] ? prev : { ...prev, [path]: url }));
-        })
-        .catch(() => {});
-    }
-    return () => {
-      cancelled = true;
-    };
-  }, [imagePreviewKey]);
   return (
     <div
       className={`msg msg--user${imSource ? " msg--im-source" : ""}${failed ? " msg--user-failed" : ""}`}
@@ -338,50 +289,7 @@ export function UserMessage({
           </>
         )}
         {failed && <div className="msg__send-failed" data-transcript-selection-ignore>{t("msg.sendFailed")}</div>}
-        {orderedAttachments.length > 0 && (
-          <div className="msg-attachments" aria-label={t("msg.attachments")} data-transcript-selection-ignore>
-            {orderedAttachments.map((attachment, index) => {
-              const isImage = attachment.kind === "image";
-              const el = (
-                <div
-                  className={`msg-attachment msg-attachment--${attachment.kind}`}
-                  key={isImage ? undefined : `${attachment.path}:${index}`}
-                  title={isImage ? undefined : attachment.path}
-                  onClick={isImage ? () => openImageViewer(attachment.path, attachment.name) : undefined}
-                  role={isImage ? "button" : undefined}
-                  tabIndex={isImage ? 0 : undefined}
-                  onKeyDown={isImage ? (e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); openImageViewer(attachment.path, attachment.name); } } : undefined}
-                >
-                  <span className={`msg-attachment__icon msg-attachment__icon--${attachment.kind}`} aria-hidden="true">
-                    {isImage && imagePreviews[attachment.path] ? <img src={imagePreviews[attachment.path]} alt="" draggable={false} /> : attachmentIcon(attachment.kind)}
-                  </span>
-                  <span className="msg-attachment__main">
-                    <span className="msg-attachment__name">{attachment.name}</span>
-                    <span className="msg-attachment__meta">
-                      {attachment.kind === "folder"
-                        ? t("msg.folderReference")
-                        : `${attachment.ext || t("msg.fileAttachment")} · ${attachment.source === "workspace" ? t("msg.workspaceReference") : attachment.kind === "image" ? t("msg.imageAttachment") : t("msg.fileAttachment")}`}
-                    </span>
-                  </span>
-                </div>
-              );
-              if (isImage) {
-                return (
-                  <Tooltip key={`${attachment.path}:${index}`} label={t("imageViewer.clickToPreview")} block>
-                    {el}
-                  </Tooltip>
-                );
-              }
-              return el;
-            })}
-            <ImageViewer
-              open={imageViewer.open}
-              imageUrl={imageViewer.url}
-              imageName={imageViewer.name}
-              onClose={closeImageViewer}
-            />
-          </div>
-        )}
+        {parsedAttachments.length > 0 && <Suspense fallback={null}><MessageAttachments attachments={parsedAttachments} /></Suspense>}
       </div>
       <div className="msg-meta" role="group" aria-label={t("msg.copy")}>
           {sentAt && (

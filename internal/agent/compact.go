@@ -387,6 +387,11 @@ func compactionInstructionWithFocus(instructions string) string {
 // supposedly safe overflow fold from being rejected only after it is selected.
 func (a *Agent) summaryRequest(region []provider.Message, instructions string) provider.Request {
 	prefix := append([]provider.Message(nil), region...)
+	for i := range prefix {
+		if !a.imageInput.native && prefix[i].VisionSummary != nil {
+			prefix[i].ImageInputs = nil
+		}
+	}
 	if len(prefix) == 0 || prefix[0].Role != provider.RoleSystem {
 		visible := a.modelVisibleMessages()
 		if len(visible) > 0 && visible[0].Role == provider.RoleSystem {
@@ -419,6 +424,10 @@ func (a *Agent) summarize(ctx context.Context, region []provider.Message, instru
 // runSummaryRequest admits, sends, and drains one summary request.
 // Named returns so defer can attach RequestCount and still return usage.
 func (a *Agent) runSummaryRequest(ctx context.Context, req provider.Request) (summary string, usage *provider.Usage, err error) {
+	req.Messages, err = a.resolveRequestImages(ctx, req.Messages)
+	if err != nil {
+		return "", nil, err
+	}
 	ctx, cancel := context.WithCancel(ctx)
 	defer cancel()
 	ctx = provider.WithRequestAttemptCounter(ctx)

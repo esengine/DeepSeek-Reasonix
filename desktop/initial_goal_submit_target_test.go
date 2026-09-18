@@ -2,6 +2,8 @@ package main
 
 import (
 	"errors"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 
@@ -35,6 +37,45 @@ func TestSubmitInitialGoalStopsBeforeProviderWhenPersistenceFails(t *testing.T) 
 	}
 	if tab.goal != "" {
 		t.Fatalf("tab goal = %q, want unpublished", tab.goal)
+	}
+}
+
+func TestSubmitInitialGoalRejectsMissingImageBeforeGoalMutation(t *testing.T) {
+	workspace := t.TempDir()
+	ctrl := control.New(control.Options{WorkspaceRoot: workspace})
+	t.Cleanup(ctrl.Close)
+	tab := &WorkspaceTab{
+		ID:            "a",
+		Scope:         "project",
+		WorkspaceRoot: workspace,
+		TopicID:       "topic_a",
+		TopicTitle:    "A",
+		Ready:         true,
+		Ctrl:          ctrl,
+		disabledMCP:   map[string]ServerView{},
+	}
+	app := &App{tabs: map[string]*WorkspaceTab{"a": tab}, tabOrder: []string{"a"}, activeTabID: "a"}
+
+	_, err := app.SubmitInitialGoalToTab(
+		tab.ID,
+		"inspect the image",
+		"inspect missing.png",
+		"inspect @.reasonix/attachments/missing.png",
+		nil,
+		"normal",
+		"ask",
+	)
+	if err == nil || err.Error() != "reasonix_error:image_attachment_unreadable" {
+		t.Fatalf("error = %v, want stable image failure", err)
+	}
+	if tab.goal != "" || ctrl.Goal() != "" {
+		t.Fatalf("rejected image mutated goal: tab=%q controller=%q", tab.goal, ctrl.Goal())
+	}
+	if ctrl.Running() {
+		t.Fatal("rejected image started a turn")
+	}
+	if _, statErr := os.Stat(filepath.Join(workspace, ".reasonix", "attachments")); !os.IsNotExist(statErr) {
+		t.Fatalf("failed image read created attachment directory: %v", statErr)
 	}
 }
 

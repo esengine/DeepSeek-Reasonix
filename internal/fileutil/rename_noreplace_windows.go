@@ -1,6 +1,6 @@
 //go:build windows
 
-package repair
+package fileutil
 
 import (
 	"os"
@@ -8,7 +8,7 @@ import (
 	"golang.org/x/sys/windows"
 )
 
-func renameRepairNodeNoReplace(oldPath, newPath string) error {
+func RenameNoReplace(oldPath, newPath string) error {
 	from, err := windows.UTF16PtrFromString(oldPath)
 	if err != nil {
 		return &os.LinkError{Op: "rename", Old: oldPath, New: newPath, Err: err}

@@ -61,6 +61,24 @@ type Store struct {
 	root string
 }
 
+// ObjectWitness is a process-local observation of an immutable object. It is
+// suitable only for deciding whether a previously verified cache entry may be
+// reused; authorization remains the caller's responsibility.
+type ObjectWitness struct {
+	info        os.FileInfo
+	bytes       int64
+	modTimeNano int64
+	indexDigest string
+}
+
+func (w ObjectWitness) Same(other ObjectWitness) bool {
+	return w.info != nil && other.info != nil && w.bytes == other.bytes &&
+		w.modTimeNano == other.modTimeNano && w.indexDigest == other.indexDigest &&
+		os.SameFile(w.info, other.info)
+}
+
+func (w ObjectWitness) Valid() bool { return w.info != nil }
+
 func New(root string) *Store { return &Store{root: root} }
 
 func (s *Store) Root() string {
@@ -185,6 +203,32 @@ func (s *Store) Stat(ctx context.Context, ref Ref) (Ref, error) {
 		return Ref{}, err
 	}
 	return ref, nil
+}
+
+// Probe opens the object through the bounded content root and validates its
+// immutable integrity index without hashing the complete original.
+func (s *Store) Probe(ctx context.Context, ref Ref) (ObjectWitness, error) {
+	if err := validateRef(ref); err != nil {
+		return ObjectWitness{}, err
+	}
+	if err := ctx.Err(); err != nil {
+		return ObjectWitness{}, err
+	}
+	f, err := s.openRaw(ref)
+	if err != nil {
+		return ObjectWitness{}, err
+	}
+	defer f.Close()
+	info, err := f.Stat()
+	if err != nil {
+		return ObjectWitness{}, err
+	}
+	if ref.IndexDigest != "" {
+		if _, err := s.readIndex(ctx, ref); err != nil {
+			return ObjectWitness{}, err
+		}
+	}
+	return ObjectWitness{info: info, bytes: info.Size(), modTimeNano: info.ModTime().UnixNano(), indexDigest: ref.IndexDigest}, nil
 }
 
 // ReadRange reads exactly length bytes starting at offset after validating the

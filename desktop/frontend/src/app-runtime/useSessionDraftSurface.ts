@@ -318,7 +318,7 @@ export function useSessionDraftSurface(options: DraftSurfaceOptions) {
     const previewGeneration = entry.generation;
     void Promise.all(entry.content.attachments.map(async (attachment) => {
       try {
-        const previewUrl = await app.AttachmentDataURLForTarget({ kind: "draft", draftId: draft.id }, attachment.path);
+		const previewUrl = await app.AttachmentDataURLForComposerTarget({ kind: "draft", draftId: draft.id }, attachment.path);
         const current = entriesRef.current.get(draft.id);
         if (!current || current.lifecycle !== "active" || current.generation !== previewGeneration) return;
         current.content = {
@@ -817,7 +817,7 @@ export function useSessionDraftSurface(options: DraftSurfaceOptions) {
       let operation: SessionDraftSubmissionView;
       try { operation = await app.BeginDraftSubmission(request); }
       catch (error) {
-        if (String(error).includes("draft submission not admitted:")) throw error;
+        if (String(error).includes("draft submission not admitted:") || String(error).includes("reasonix_error:")) throw error;
         // A transport error does not prove that Begin failed. Keep the source
         // frozen while read-only reconciliation is unavailable.
         for (;;) {
@@ -837,7 +837,7 @@ export function useSessionDraftSurface(options: DraftSurfaceOptions) {
             // the exact request ID, whose backend lock serializes the decision.
             try { operation = await app.BeginDraftSubmission(request); }
             catch (retryError) {
-              if (String(retryError).includes("draft submission not admitted:")) throw retryError;
+              if (String(retryError).includes("draft submission not admitted:") || String(retryError).includes("reasonix_error:")) throw retryError;
               source.error = "Verifying whether the submission was received. Reconnecting…";
               publish(draftId);
               await new Promise(resolve => window.setTimeout(resolve, 2000));

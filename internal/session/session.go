@@ -252,6 +252,17 @@ func (s *Session) contentStore() *sessioncontent.Store {
 	return store.content
 }
 
+func (s *Session) ContentStore() *sessioncontent.Store { return s.contentStore() }
+
+func (s *Session) StorageGeneration() string {
+	if s == nil {
+		return ""
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.storageGeneration
+}
+
 // CommitPrepared appends an already validated batch under one short memory
 // lock. The persistence binding only receives an immutable batch into its
 // write-behind queue, so this never performs file I/O and never blocks on a

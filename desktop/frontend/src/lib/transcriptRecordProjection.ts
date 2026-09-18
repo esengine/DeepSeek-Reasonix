@@ -3,6 +3,7 @@ import { asArray } from "./array";
 import { canonicalMessage } from "./canonicalTranscriptBackend";
 import { historicalResultNotice } from "./completionResultState";
 import { historyNoticeItems } from "./controllerNotices";
+import { appendHistoryAttachmentRefs } from "./historyAttachmentRefs";
 import { historySearchAndAnswer } from "./searchTranscript";
 import { fileDiffFromWire, summarizeFileDiff } from "./tools";
 import { historyToolError, isReadOnlyTool, type Item } from "./useController";
@@ -92,7 +93,7 @@ function convertRecordBody(
   if (message.role === "user") {
     if (message.content.trim() !== "") {
       items.push({ kind: "user", id, messageId: message.messageId, submissionId: message.submissionId,
-        text: message.content, submitText: message.submitText, createdAt: message.createdAt,
+        text: appendHistoryAttachmentRefs(message.content, message.attachments), submitText: message.submitText, createdAt: message.createdAt,
         checkpointTurn: message.checkpointTurn, historyTurn: rec.turn > 0 ? rec.turn : undefined });
     }
     return { items, claims, unresolvedIds, pendingPositional, matches };

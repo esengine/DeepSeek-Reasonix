@@ -537,6 +537,7 @@ func recentDisplayMessage(message provider.Message) (json.RawMessage, error) {
 	preview.RawContent = ""
 	preview.ProviderContent = ""
 	preview.Images = nil
+	preview.ImageInputs = nil
 	preview.ResponsesItems = nil
 	preview.ThinkingBlocks = nil
 	if runes := []rune(preview.ReasoningContent); len(runes) > 4096 {

@@ -138,11 +138,12 @@ type Controller struct {
 	modelCapabilityResolver func(*config.ProviderEntry) config.ResolvedModelCapability
 	frozenImageInput        *bool
 	imageCapabilityChanged  func() bool
-	modelSettings           controllerModelSettings
-	prompt                  controllerPromptState
-	pinnedContextLoader     PinnedContextLoader
-	sessionContextStatic    sessioncontext.Sections
-	sessionDir              string
+	controllerAttachmentState
+	modelSettings        controllerModelSettings
+	prompt               controllerPromptState
+	pinnedContextLoader  PinnedContextLoader
+	sessionContextStatic sessioncontext.Sections
+	sessionDir           string
 	controllerSessionBinding
 	// managedSessionEvents is set for hosts that publish controllers only after
 	// a session-lease handoff. An unpublished replacement may read the shared
@@ -536,8 +537,9 @@ type externalFolderToolRefs interface {
 // lets the controller mint and rotate session files; Host/Commands are surfaced
 // to frontends that resolve MCP prompts and slash commands.
 type Options struct {
-	Runner   agent.Runner
-	Executor *agent.Agent
+	ImageRouteConfig *config.Config
+	Runner           agent.Runner
+	Executor         *agent.Agent
 	// Authentication is the frozen runtime credential snapshot's initial
 	// admission state. An empty value remains Ready for source compatibility.
 	Authentication         AuthenticationState
@@ -854,10 +856,17 @@ func New(opts Options) *Controller {
 	}
 	c.authentication.initialForModel = opts.AuthenticationForModel
 	c.initializeOwnedResources(opts)
+	c.bindAttachmentService()
+	if opts.ImageRouteConfig != nil {
+		c.imageRoutesOnce.Do(func() { c.captureImageRoutes(opts.ImageRouteConfig) })
+	}
 	return c
 }
 
 func (c *Controller) initializeOwnedResources(opts Options) {
+	if c.executor != nil {
+		c.executor.SetImageRequestResolver(c)
+	}
 	c.goalUsageTee.setLifecycleUsageRecorder(c.recordGoalLifecycleUsage)
 	c.installGoalLifecycle(opts.SessionRuntime)
 	c.managedSessionEvents.Store(opts.OnSessionTransition != nil)
@@ -1176,7 +1185,9 @@ func (c *Controller) Send(input string) {
 
 // SendWithRaw starts a turn with separate model input and raw prompt text.
 func (c *Controller) SendWithRaw(input, raw string) {
-	c.runGuarded(func(ctx context.Context) error { return c.runGoalLoopWithRaw(ctx, input, raw) })
+	_, _ = c.submitIdentifiedWithSetup(SubmissionRequest{Input: input, Display: raw}, nil, func(admission turnAdmission) {
+		c.runGuardedWithAdmission(func(ctx context.Context) error { return c.runGoalLoopWithRaw(ctx, input, raw) }, admission)
+	})
 }
 
 // planApprovalTool is the Tool name on the ApprovalRequest the controller emits
@@ -1225,20 +1236,6 @@ func (c *Controller) runTurn(ctx context.Context, input string) error {
 	return c.runGoalLoopWithRaw(ctx, input, input)
 }
 
-// RunTurn executes one foreground turn synchronously through the same lifecycle
-// used by interactive frontends: transient memory/background-job
-// composition, checkpoints, hooks, and plan approval. It is for transports that
-// need a blocking request/response boundary, such as ACP session/prompt.
-func (c *Controller) RunTurn(ctx context.Context, input string) error {
-	err := c.runSynchronousTurn(ctx, nil, func(runCtx context.Context) error {
-		return c.runTurn(runCtx, input)
-	})
-	if err != nil {
-		return err
-	}
-	return c.waitForGoalTerminal(ctx)
-}
-
 func (c *Controller) runTurnWithRaw(ctx context.Context, input, raw string) error {
 	return c.runTurnWithRawDisplay(ctx, input, raw, "")
 }
@@ -1272,16 +1269,16 @@ func (c *Controller) runTurnWithRawDisplay(ctx context.Context, input, raw, disp
 	return newTurnOrchestrator(c).runTurnWithRawDisplay(ctx, input, raw, display)
 }
 
-func (c *Controller) runSubagentSkillSlash(sk skill.Skill, task, raw, display string) {
+func (c *Controller) runSubagentSkillSlash(sk skill.Skill, task, raw, display string, admission turnAdmission) {
 	sk = c.skills.prepare(sk)
-	c.runGuarded(func(ctx context.Context) error {
+	c.runGuardedWithAdmission(func(ctx context.Context) error {
 		planMode := c.PlanMode()
 		runner := c.skillRunner
 		if runner == nil {
 			return fmt.Errorf("subagent skill runner is unavailable for /%s", sk.Name)
 		}
 		return newTurnOrchestrator(c).runSubagentSkillGoalLoop(ctx, sk, task, raw, display, runner, planMode)
-	})
+	}, admission)
 }
 
 func (c *Controller) stopGoal(status string) {
@@ -1320,53 +1317,6 @@ func (c *Controller) SubmitHTTP(input string) {
 	c.submitHTTP(input, "")
 }
 
-// SubmitHTTPFormat is SubmitHTTP with an optional structured-output format
-// ("json_object") applied to the turn's completion requests. Empty format
-// behaves exactly like SubmitHTTP. A format attached to a slash command,
-// or other non-turn input is discarded; @reference turns preserve it because
-// the format is bound to every submitted turn rather than a global slot.
-func (c *Controller) SubmitHTTPFormat(input, format string) {
-	// format 绑定到本次提交的 turn（随请求参数传递），不再写入 Controller
-	// 全局一次性槽——评审 #7234 第 2 点：全局槽存在跨请求串用的逻辑竞态
-	// （后提交的 JSON 请求先写槽，更早的普通请求先启动消费掉）。
-	f := strings.TrimSpace(format)
-	if f != "" && isNonTurnHTTPInput(input) {
-		f = "" // 非 turn 输入（slash 命令/! 前缀）不携带 format
-	}
-	// @ 引用 turn（FileRefLine/SlashPathLineRef 等）同样绑定 format——
-	// runRefTurnWithFormat 族 wrapper 注入 ctx（review fix7234and7168：
-	// format 是每个被接纳 turn 的属性，统一架构）。
-	c.submitHTTPWithFormat(input, "", f)
-}
-
-// isNonTurnHTTPInput reports inputs that never reach the agent turn loop, so a
-// structured-output request attached to them would otherwise leak into the
-// next real turn (the format slot is consumed only by runGoalLoopWithRawDisplay).
-func isNonTurnHTTPInput(input string) bool {
-	trimmed := strings.TrimSpace(input)
-	if trimmed == "" {
-		return true
-	}
-	// Memory quick-add / remember shortcuts and goal commands bypass turns.
-	if _, ok := MemoryQuickAddNote(trimmed); ok {
-		return true
-	}
-	if _, ok := RememberCommandNote(trimmed); ok {
-		return true
-	}
-	// "!" shell commands are rejected by submitHTTP before the turn loop
-	// (403 over HTTP); a format attached to them would never be consumed.
-	if strings.HasPrefix(trimmed, "!") {
-		return true
-	}
-	// Slash commands are management verbs (/compact /new /clear /model ...)
-	// or notices, not completion turns.
-	if strings.HasPrefix(trimmed, "/") {
-		return true
-	}
-	return false
-}
-
 // SubmitDisplay runs input as a turn while remembering the user-facing display
 // text for transcript replay when controller-side composition expands input.
 func (c *Controller) SubmitDisplay(display, input string) {
@@ -1381,14 +1331,14 @@ func (c *Controller) SubmitInvocationDisplay(display, input string, invocations 
 }
 
 func (c *Controller) submitInvocations(input, display string, requests []InvocationRequest) {
-	c.submissions.mu.Lock()
-	defer c.releaseSubmissionAdmission()
-	c.submitInvocationsLocked(input, display, requests)
+	_, _ = c.submitIdentifiedWithSetup(SubmissionRequest{Input: input, Display: display, Invocations: requests}, nil, func(admission turnAdmission) {
+		c.submitInvocationsLocked(input, display, requests, admission)
+	})
 }
 
-func (c *Controller) submitInvocationsLocked(input, display string, requests []InvocationRequest) {
+func (c *Controller) submitInvocationsLocked(input, display string, requests []InvocationRequest, admission turnAdmission) {
 	if len(requests) == 0 {
-		c.submitLocked(input, display, "")
+		c.submitLocked(input, display, "", admission)
 		return
 	}
 	prepared, err := c.prepareInvocationTurn(input, requests)
@@ -1396,9 +1346,9 @@ func (c *Controller) submitInvocationsLocked(input, display string, requests []I
 		c.notice(err.Error())
 		return
 	}
-	c.runGuarded(func(ctx context.Context) error {
+	c.runGuardedWithAdmission(func(ctx context.Context) error {
 		return c.runPreparedInvocationTurn(ctx, prepared, input, input, display, nil)
-	})
+	}, admission)
 }
 
 type preparedInvocationTurn struct {
@@ -1467,6 +1417,7 @@ func (c *Controller) runPreparedInvocationTurn(
 		display,
 		runner,
 		c.PlanMode(),
+		frozenImages,
 	)
 }
 
@@ -1481,18 +1432,18 @@ func (c *Controller) SubmitEditedDisplay(display, input, original string) {
 // commands. It still resolves references, so callers can submit trusted
 // user-authored prompt text without expanding the command surface.
 func (c *Controller) SubmitUserTurn(input, display string) {
-	c.submissions.mu.Lock()
-	defer c.releaseSubmissionAdmission()
-	c.runRefTurn(input, display)
+	_, _ = c.submitIdentifiedWithSetup(SubmissionRequest{Input: input, Display: display}, nil, func(admission turnAdmission) {
+		c.runRefTurnWithAdmission(input, display, admission)
+	})
 }
 
 func (c *Controller) submit(input, display, editedOriginal string) {
-	c.submissions.mu.Lock()
-	defer c.releaseSubmissionAdmission()
-	c.submitLocked(input, display, editedOriginal)
+	_, _ = c.submitIdentifiedWithSetup(SubmissionRequest{Input: input, Display: display, Original: editedOriginal}, nil, func(admission turnAdmission) {
+		c.submitLocked(input, display, editedOriginal, admission)
+	})
 }
 
-func (c *Controller) submitLocked(input, display, editedOriginal string) {
+func (c *Controller) submitLocked(input, display, editedOriginal string, admission turnAdmission) {
 	trimmed := strings.TrimSpace(input)
 	if note, ok := MemoryQuickAddNote(trimmed); ok {
 		c.rememberProjectNote(note)
@@ -1502,14 +1453,14 @@ func (c *Controller) submitLocked(input, display, editedOriginal string) {
 		c.rememberProjectNote(note)
 		return
 	}
-	if c.applyGoalCommand(trimmed, display) {
+	if c.applyGoalCommandWithAdmission(trimmed, display, admission) {
 		return
 	}
 	if strings.HasPrefix(trimmed, "!") {
 		c.RunShell(trimmed[1:])
 		return
 	}
-	c.submitCommandOrTurn(trimmed, input, display, false, editedOriginal, "")
+	c.submitCommandOrTurn(trimmed, input, display, false, editedOriginal, "", admission)
 }
 
 func (c *Controller) submitHTTP(input, display string) {
@@ -1517,12 +1468,12 @@ func (c *Controller) submitHTTP(input, display string) {
 }
 
 func (c *Controller) submitHTTPWithFormat(input, display, format string) {
-	c.submissions.mu.Lock()
-	defer c.releaseSubmissionAdmission()
-	c.submitHTTPWithFormatLocked(input, display, format)
+	_, _ = c.submitIdentifiedWithSetup(SubmissionRequest{Input: input, Display: display, HTTP: true, Format: format}, nil, func(admission turnAdmission) {
+		c.submitHTTPWithFormatLocked(input, display, format, admission)
+	})
 }
 
-func (c *Controller) submitHTTPWithFormatLocked(input, display, format string) {
+func (c *Controller) submitHTTPWithFormatLocked(input, display, format string, admission turnAdmission) {
 	trimmed := strings.TrimSpace(input)
 	if note, ok := MemoryQuickAddNote(trimmed); ok {
 		c.rememberProjectNote(note)
@@ -1532,50 +1483,50 @@ func (c *Controller) submitHTTPWithFormatLocked(input, display, format string) {
 		c.rememberProjectNote(note)
 		return
 	}
-	if c.applyGoalCommand(trimmed, display) {
+	if c.applyGoalCommandWithAdmission(trimmed, display, admission) {
 		return
 	}
 	if strings.HasPrefix(trimmed, "!") {
 		c.notice("shell commands are unavailable from this frontend")
 		return
 	}
-	c.submitCommandOrTurn(trimmed, input, display, true, "", format)
+	c.submitCommandOrTurn(trimmed, input, display, true, "", format, admission)
 }
 
-func (c *Controller) submitCommandOrTurnReady(trimmed, input, display string, scopedRefsOnly bool, editedOriginal, format string) {
+func (c *Controller) submitCommandOrTurnReady(trimmed, input, display string, scopedRefsOnly bool, editedOriginal, format string, admission turnAdmission) {
 	runRefTurn := func(input, display string) {
-		c.runRefTurnWithFormat(input, display, format)
+		c.runRefTurnWithFormat(input, display, format, admission)
 	}
 	runRefTurnWithRefs := func(input, refLine, display string) {
-		c.runRefTurnWithRefsFormat(input, refLine, display, format)
+		c.runRefTurnWithRefsFormat(input, refLine, display, format, admission)
 	}
 	runGoalLoop := func(ctx context.Context, input, raw, display string) error {
 		return c.runGoalLoopWithRawDisplay(c.withTurnFormat(ctx, format), input, raw, display)
 	}
 	if scopedRefsOnly {
 		runRefTurn = func(input, display string) {
-			c.runScopedRefTurnWithFormat(input, display, format)
+			c.runScopedRefTurnWithFormat(input, display, format, admission)
 		}
 		runRefTurnWithRefs = func(input, refLine, display string) {
-			c.runScopedRefTurnWithRefsFormat(input, refLine, display, format)
+			c.runScopedRefTurnWithRefsFormat(input, refLine, display, format, admission)
 		}
 	}
 	if strings.TrimSpace(editedOriginal) != "" {
 		runRefTurn = func(input, display string) {
-			c.runEditedRefTurnWithFormat(input, display, editedOriginal, format)
+			c.runEditedRefTurnWithFormat(input, display, editedOriginal, format, admission)
 		}
 		runRefTurnWithRefs = func(input, refLine, display string) {
-			c.runEditedRefTurnWithRefsFormat(input, refLine, display, editedOriginal, format)
+			c.runEditedRefTurnWithRefsFormat(input, refLine, display, editedOriginal, format, admission)
 		}
 		runGoalLoop = func(ctx context.Context, input, raw, display string) error {
 			return c.runEditedGoalLoopWithRawDisplay(ctx, input, raw, display, editedOriginal)
 		}
 	}
 	if id, guidance, ok := ParseProtocolRecoveryCommand(trimmed); ok {
-		c.submitProtocolRecoveryLocked(id, guidance)
+		c.submitProtocolRecoveryLocked(id, guidance, admission)
 		return
 	}
-	if c.submitFinalReadinessCommand(trimmed, display) {
+	if c.submitFinalReadinessCommand(trimmed, display, admission) {
 		return
 	}
 	switch {
@@ -1597,7 +1548,7 @@ func (c *Controller) submitCommandOrTurnReady(trimmed, input, display string, sc
 	case trimmed == "/clear":
 		c.runSessionVerb(c.ClearSession, "context cleared", "clear context failed: ")
 	case strings.HasPrefix(trimmed, "/mcp__"):
-		c.runGuarded(func(ctx context.Context) error {
+		c.runGuardedWithAdmission(func(ctx context.Context) error {
 			sent, found, err := c.MCPPrompt(ctx, trimmed)
 			if err != nil {
 				return err
@@ -1607,7 +1558,7 @@ func (c *Controller) submitCommandOrTurnReady(trimmed, input, display string, sc
 				return nil
 			}
 			return runGoalLoop(ctx, sent, sent, display)
-		})
+		}, admission)
 	case SlashCodeCommentLine(trimmed):
 		// Slash-prefixed code comments are prompt text, not slash commands.
 		runRefTurn(input, display)
@@ -1667,7 +1618,7 @@ func (c *Controller) submitCommandOrTurnReady(trimmed, input, display string, sc
 			c.applyPlanExec(trimmed, display)
 			return
 		case "/prometheus":
-			c.applyPrometheus(trimmed, display)
+			c.applyPrometheus(trimmed, display, admission)
 			return
 		}
 		if c.managementNotice(trimmed) {
@@ -1684,21 +1635,21 @@ func (c *Controller) submitCommandOrTurnReady(trimmed, input, display string, sc
 				}
 				return
 			}
-			c.runGuarded(func(ctx context.Context) error {
+			c.runGuardedWithAdmission(func(ctx context.Context) error {
 				sent, err := docsCommandPrompt(ctx, query)
 				if err != nil {
 					return fmt.Errorf("docs: %w", err)
 				}
 				return runGoalLoop(ctx, sent, sent, display)
-			})
+			}, admission)
 			return
 		}
 		// A custom command wins over a skill of the same name; both resolve to a
 		// turn. Built-ins and their explicit Reasonix namespace are handled above.
 		if sent, ok := c.CustomCommand(trimmed); ok {
-			c.runGuarded(func(ctx context.Context) error {
+			c.runGuardedWithAdmission(func(ctx context.Context) error {
 				return runGoalLoop(ctx, sent, sent, display)
-			})
+			}, admission)
 			return
 		}
 		if sk, task, ok := c.resolveSkillInvocation(trimmed); ok {
@@ -1707,13 +1658,13 @@ func (c *Controller) submitCommandOrTurnReady(trimmed, input, display string, sc
 					c.notice("usage: /" + sk.Name + " <task>")
 					return
 				}
-				c.runSubagentSkillSlash(sk, task, trimmed, display)
+				c.runSubagentSkillSlash(sk, task, trimmed, display, admission)
 				return
 			}
 			sent := c.skills.render(sk, task)
-			c.runGuarded(func(ctx context.Context) error {
+			c.runGuardedWithAdmission(func(ctx context.Context) error {
 				return runGoalLoop(ctx, sent, sent, display)
-			})
+			}, admission)
 			return
 		}
 		// Unknown slash input is prose more often than a typo ("/etc/hosts
@@ -1750,7 +1701,7 @@ const prometheusPrompt = "You are Prometheus, a strategic planner. Interview the
 
 // applyPrometheus starts an interactive planning interview, inspired by OMO's
 // Prometheus agent. It enters goal mode with a structured interview prompt.
-func (c *Controller) applyPrometheus(input, display string) {
+func (c *Controller) applyPrometheus(input, display string, admission turnAdmission) {
 	args := strings.TrimSpace(strings.TrimPrefix(input, "/prometheus"))
 	if args == "" || args == "--strict" {
 		c.notice("usage: /prometheus <your task description>")
@@ -1767,9 +1718,9 @@ func (c *Controller) applyPrometheus(input, display string) {
 	c.GoalStrict(strict)
 	c.notice("prometheus: starting planning interview")
 	if c.runner != nil {
-		c.runGuarded(func(ctx context.Context) error {
+		c.runGuardedWithAdmission(func(ctx context.Context) error {
 			return c.runGoalLoopWithRawDisplay(ctx, prompt, prompt, display)
-		})
+		}, admission)
 	}
 }
 
@@ -1797,12 +1748,16 @@ func shellCommandPreview(command string) string {
 // lock with model turns — only one can run at a time. User-invoked "!" commands
 // run without the OS sandbox (the user typed the command explicitly).
 func (c *Controller) RunShell(command string) {
+	c.runShell(command, turnAdmission{})
+}
+
+func (c *Controller) runShell(command string, admission turnAdmission) {
 	command = strings.TrimSpace(command)
 	if command == "" {
 		c.notice(i18n.M.ShellExecEmpty)
 		return
 	}
-	c.runGuarded(func(ctx context.Context) error {
+	c.runGuardedWithAdmission(func(ctx context.Context) error {
 		sh := c.shell
 		if sh.Path == "" {
 			sh = sandbox.ResolveShell("", "", nil)
@@ -1899,70 +1854,79 @@ func (c *Controller) RunShell(command string) {
 			},
 		})
 		return nil
-	})
+	}, admission)
 }
 
 // runRefTurn resolves a line's @references into a context block and starts a
 // turn with it prepended (or the raw line when nothing resolved).
 func (c *Controller) runRefTurn(input, display string) {
-	c.runRefTurnWithRefs(input, input, display)
+	c.runRefTurnWithAdmission(input, display, turnAdmission{})
+}
+
+func (c *Controller) runRefTurnWithAdmission(input, display string, admission turnAdmission) {
+	c.runRefTurnWithRefs(input, input, display, admission)
 }
 
 // runRefTurnWithFormat runs a reference turn with a structured-output
 // format bound to its context (symmetric with runGoalLoop's withTurnFormat
 // injection — format is a property of every accepted turn, not just the
 // plain-goal path; review #7234 binds format to the accepted turn).
-func (c *Controller) runRefTurnWithFormat(input, display, format string) {
-	c.runGuarded(func(ctx context.Context) error {
-		return c.runRefTurnWithResolverSync(c.withTurnFormat(ctx, format), input, input, display, "", c.resolveUnscopedRefsForTurn)
-	})
+func (c *Controller) runRefTurnWithFormat(input, display, format string, admission turnAdmission) {
+	c.runPreparedRefTurn(input, input, display, "", c.resolveUnscopedRefsForTurn, func(ctx context.Context) context.Context {
+		return c.withTurnFormat(ctx, format)
+	}, admission)
 }
 
-func (c *Controller) runScopedRefTurnWithFormat(input, display, format string) {
-	c.runGuarded(func(ctx context.Context) error {
-		return c.runRefTurnWithResolverSync(c.withTurnFormat(ctx, format), input, input, display, "", c.resolveScopedRefsForTurn)
-	})
+func (c *Controller) runScopedRefTurnWithFormat(input, display, format string, admission turnAdmission) {
+	c.runPreparedRefTurn(input, input, display, "", c.resolveScopedRefsForTurn, func(ctx context.Context) context.Context {
+		return c.withTurnFormat(ctx, format)
+	}, admission)
 }
 
-func (c *Controller) runRefTurnWithRefsFormat(input, refLine, display, format string) {
-	c.runGuarded(func(ctx context.Context) error {
-		return c.runRefTurnWithResolverSync(c.withTurnFormat(ctx, format), input, refLine, display, "", c.resolveUnscopedRefsForTurn)
-	})
+func (c *Controller) runRefTurnWithRefsFormat(input, refLine, display, format string, admission turnAdmission) {
+	c.runPreparedRefTurn(input, refLine, display, "", c.resolveUnscopedRefsForTurn, func(ctx context.Context) context.Context {
+		return c.withTurnFormat(ctx, format)
+	}, admission)
 }
 
-func (c *Controller) runScopedRefTurnWithRefsFormat(input, refLine, display, format string) {
-	c.runGuarded(func(ctx context.Context) error {
-		return c.runRefTurnWithResolverSync(c.withTurnFormat(ctx, format), input, refLine, display, "", c.resolveScopedRefsForTurn)
-	})
+func (c *Controller) runScopedRefTurnWithRefsFormat(input, refLine, display, format string, admission turnAdmission) {
+	c.runPreparedRefTurn(input, refLine, display, "", c.resolveScopedRefsForTurn, func(ctx context.Context) context.Context {
+		return c.withTurnFormat(ctx, format)
+	}, admission)
 }
 
-func (c *Controller) runEditedRefTurnWithFormat(input, display, original, format string) {
-	c.runGuarded(func(ctx context.Context) error {
-		return c.runRefTurnWithResolverSync(c.withTurnFormat(ctx, format), input, input, display, original, c.resolveUnscopedRefsForTurn)
-	})
+func (c *Controller) runEditedRefTurnWithFormat(input, display, original, format string, admission turnAdmission) {
+	c.runPreparedRefTurn(input, input, display, original, c.resolveUnscopedRefsForTurn, func(ctx context.Context) context.Context {
+		return c.withTurnFormat(ctx, format)
+	}, admission)
 }
 
-func (c *Controller) runEditedRefTurnWithRefsFormat(input, refLine, display, original, format string) {
-	c.runGuarded(func(ctx context.Context) error {
-		return c.runRefTurnWithResolverSync(c.withTurnFormat(ctx, format), input, refLine, display, original, c.resolveUnscopedRefsForTurn)
-	})
+func (c *Controller) runEditedRefTurnWithRefsFormat(input, refLine, display, original, format string, admission turnAdmission) {
+	c.runPreparedRefTurn(input, refLine, display, original, c.resolveUnscopedRefsForTurn, func(ctx context.Context) context.Context {
+		return c.withTurnFormat(ctx, format)
+	}, admission)
 }
 
 // runRefTurnWithRefs resolves references from refLine while preserving input as
 // the user's actual prompt text. This lets compiler diagnostics such as
 // "/path/File.kt:12: error" attach @/path/File.kt without rewriting the error.
-func (c *Controller) runRefTurnWithRefs(input, refLine, display string) {
-	c.runRefTurnWithResolver(input, refLine, display, c.resolveUnscopedRefsForTurn)
+func (c *Controller) runRefTurnWithRefs(input, refLine, display string, admission turnAdmission) {
+	c.runRefTurnWithResolver(input, refLine, display, c.resolveUnscopedRefsForTurn, admission)
 }
 
-func (c *Controller) runRefTurnWithResolver(input, refLine, display string, resolve func(context.Context, string) resolvedReferences) {
-	c.runGuarded(func(ctx context.Context) error {
-		return c.runRefTurnWithResolverSync(ctx, input, refLine, display, "", resolve)
-	})
+func (c *Controller) runRefTurnWithResolver(input, refLine, display string, resolve func(context.Context, string) resolvedReferences, admission turnAdmission) {
+	c.runPreparedRefTurn(input, refLine, display, "", resolve, func(ctx context.Context) context.Context { return ctx }, admission)
 }
 
 func (c *Controller) runRefTurnWithResolverSync(ctx context.Context, input, refLine, display, original string, resolve func(context.Context, string) resolvedReferences) error {
 	resolved := resolve(ctx, refLine)
+	return c.runResolvedRefTurnSync(ctx, input, display, original, resolved)
+}
+
+func (c *Controller) runResolvedRefTurnSync(ctx context.Context, input, display, original string, resolved resolvedReferences) error {
+	if len(resolved.imageErrs) > 0 {
+		return ImageReferenceFailures(resolved.imageErrs)
+	}
 	for _, e := range resolved.errs {
 		c.notice(e)
 	}
@@ -2039,56 +2003,6 @@ func (c *Controller) runReady(ctx context.Context, input string) (err error) {
 	}
 	err = c.runModelTurn(ctx, modelInput)
 	return err
-}
-
-// RunSubagentProfile executes one named runAs=subagent skill synchronously and
-// returns only its final answer. It is the headless CLI counterpart to explicit
-// slash invocation: the child keeps an isolated session, while the caller owns
-// stdout rendering and exit status. readOnly selects the preview-safe runner
-// used by `reasonix subagent try`.
-func (c *Controller) RunSubagentProfile(ctx context.Context, name, task string, readOnly bool) (string, error) {
-	ctx = c.withAuthentication(ctx)
-	if err := c.authentication.admissionError(); err != nil {
-		return "", err
-	}
-	name = strings.TrimSpace(name)
-	task = strings.TrimSpace(task)
-	if name == "" {
-		return "", fmt.Errorf("subagent name is required")
-	}
-	if task == "" {
-		return "", fmt.Errorf("subagent task is required")
-	}
-	sk, ok := c.skills.bySlashName(name)
-	if !ok {
-		return "", fmt.Errorf("unknown or disabled subagent profile %q", name)
-	}
-	if sk.RunAs != skill.RunSubagent {
-		return "", fmt.Errorf("skill %q is not runAs=subagent", name)
-	}
-	sk = c.skills.prepare(sk)
-	runner := c.skillRunner
-	if readOnly {
-		runner = c.readOnlySkillRunner
-	}
-	if runner == nil {
-		return "", fmt.Errorf("subagent skill runner is unavailable for %q", name)
-	}
-
-	c.maybeSessionStart(ctx)
-	parentSession := c.parentSessionID()
-	ctx = agent.WithParentSession(ctx, parentSession)
-	ctx = jobs.WithSession(ctx, parentSession)
-	ctx = c.withTurnImages(ctx, task)
-	ctx = agent.WithResponseLanguagePreference(ctx, c.responseLanguage)
-	ctx = agent.WithReasoningLanguagePreference(ctx, c.reasoningLanguage)
-	ctx = agent.WithSubagentDepth(ctx, 0)
-	answer, err := runner(ctx, sk, task, skill.SubagentRunOptions{HostInitiated: true})
-	c.authentication.recordFailure(err, c.ModelRef())
-	if err != nil {
-		return "", err
-	}
-	return tool.GuardSubagentHostDecisionText(answer), nil
 }
 
 // beginRotation claims the session-rotation gate. It fails if a turn is running

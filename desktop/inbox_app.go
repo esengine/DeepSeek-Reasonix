@@ -26,6 +26,10 @@ func inboxBridgeError(err error) error {
 	if err == nil {
 		return nil
 	}
+	var imageFailures control.ImageReferenceFailures
+	if errors.As(err, &imageFailures) {
+		return &inboxCodedError{code: "image_attachment_unreadable", cause: err}
+	}
 	known := []struct {
 		target error
 		code   string

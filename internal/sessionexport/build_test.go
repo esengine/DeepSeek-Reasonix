@@ -1,16 +1,85 @@
 package sessionexport
 
 import (
+	"bytes"
 	"context"
+	"encoding/base64"
 	"encoding/json"
 	"fmt"
 	"os"
 	"path/filepath"
+	"reasonix/internal/attachment"
 	"reasonix/internal/provider"
 	"reasonix/internal/session"
+	"reasonix/internal/sessioncontent"
 	"strings"
 	"testing"
 )
+
+const exportAttachmentPNG = "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg=="
+
+func TestBuildStagesAndRendersAuthorizedImageInputs(t *testing.T) {
+	root := filepath.Join(t.TempDir(), "sessions")
+	service, err := session.NewService("local", session.NewFilesystemPersistence(root))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer service.CloseAll(context.Background())
+	runtime, err := service.Create(t.Context(), session.CreateOptions{SessionID: "images"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	raw, err := base64.StdEncoding.DecodeString(exportAttachmentPNG)
+	if err != nil {
+		t.Fatal(err)
+	}
+	contentRef, err := runtime.Session().ContentStore().Put(t.Context(), bytes.NewReader(raw), sessioncontent.Metadata{MediaType: "image/png", Name: "shot.png"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	message := provider.Message{ID: "user-image", Role: provider.RoleUser, Content: "inspect", Images: []string{"https://example.test/legacy.png"}, ImageInputs: []attachment.ImageInput{{
+		Kind:       attachment.KindAttachment,
+		Attachment: &attachment.AttachmentRef{Version: attachment.RefVersion, Content: contentRef, Width: 1, Height: 1, DisplayName: "shot.png"},
+	}}}
+	payload, _ := json.Marshal(map[string]any{"message": message})
+	if _, err = runtime.Session().AppendBatch(t.Context(), "user-image", []session.Event{{Kind: "message/complete", Payload: payload}}); err != nil {
+		t.Fatal(err)
+	}
+	snapshot, err := service.Query().CaptureExportSnapshot(t.Context(), runtime.Ref())
+	if err != nil {
+		t.Fatal(err)
+	}
+	dir := t.TempDir()
+	if _, err = Build(t.Context(), service.Query(), snapshot, dir, nil); err != nil {
+		t.Fatal(err)
+	}
+	staged, err := os.ReadFile(filepath.Join(dir, "attachments", contentRef.Digest))
+	if err != nil || !bytes.Equal(staged, raw) {
+		t.Fatalf("staged attachment mismatch: %v", err)
+	}
+	markdown, err := os.ReadFile(filepath.Join(dir, "markdown"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	wantDataURL := attachment.DataURL("image/png", raw)
+	if !strings.Contains(string(markdown), "![attachment](https://example.test/legacy.png)") || !strings.Contains(string(markdown), "![attachment]("+wantDataURL+")") {
+		t.Fatalf("markdown did not preserve legacy and durable images: %s", markdown)
+	}
+	var document struct {
+		Items []Item `json:"items"`
+	}
+	jsonBody, err := os.ReadFile(filepath.Join(dir, "json"))
+	if err != nil || json.Unmarshal(jsonBody, &document) != nil {
+		t.Fatalf("read json export: %v", err)
+	}
+	if len(document.Items) != 1 {
+		t.Fatalf("items = %d", len(document.Items))
+	}
+	images, ok := document.Items[0]["images"].([]any)
+	if !ok || len(images) != 2 || images[0] != "https://example.test/legacy.png" || images[1] != wantDataURL {
+		t.Fatalf("export images = %#v", document.Items[0]["images"])
+	}
+}
 
 func TestBuildFullSnapshotAcrossPagesAndLargeTools(t *testing.T) {
 	service, err := session.NewService("local", session.NewFilesystemPersistence(filepath.Join(t.TempDir(), "sessions")))

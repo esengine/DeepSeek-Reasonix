@@ -34,7 +34,7 @@ const (
 	// StorageRevision distinguishes the final v4 layout from unpublished v4
 	// drafts. Physical layout changes are migration boundaries even when the
 	// logical codec remains v4.
-	StorageRevision = 2
+	StorageRevision = 3
 	// Codec identifies the current framed linear session format. Earlier linear
 	// and prototype stores are immutable migration inputs.
 	Codec             = V4Codec
@@ -438,7 +438,7 @@ func openExistingHandle(dir, sessionID string, opts OpenOptions) (*Store, error)
 		}
 	}
 	// Upgrade only after the exclusive writer validated the complete log. Old
-	// readers reject revision 2 before using caches or accepting new writes.
+	// readers reject a newer revision before using caches or accepting new writes.
 	manifest.StorageRevision = StorageRevision
 	manifest.WriterGeneration++
 	if err := writeManifestFile(manifestPath, manifest); err != nil {
@@ -732,7 +732,7 @@ func supportedStoredManifest(manifest Manifest) bool {
 
 func currentStoredManifest(manifest Manifest) bool {
 	return manifest.SchemaVersion == SchemaVersion && manifest.Codec == Codec &&
-		(manifest.StorageRevision == 1 || manifest.StorageRevision == StorageRevision)
+		manifest.StorageRevision >= 1 && manifest.StorageRevision <= StorageRevision
 }
 
 func readStoredManifest(path string) (Manifest, error) {

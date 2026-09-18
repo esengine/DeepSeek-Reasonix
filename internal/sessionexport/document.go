@@ -4,6 +4,7 @@ package sessionexport
 
 import (
 	"bufio"
+	"bytes"
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
@@ -17,6 +18,7 @@ import (
 	"unicode/utf8"
 
 	"reasonix/internal/agent"
+	"reasonix/internal/attachment"
 	"reasonix/internal/provider"
 	"reasonix/internal/session"
 	"reasonix/internal/transcript"
@@ -89,7 +91,7 @@ func BuildForRef(ctx context.Context, q *session.Query, ref session.SessionRef, 
 		return nil, err
 	}
 	attribution := map[string]int{"sharedHost": 0, "diskCache": 0, "remote": 0, "networkCalls": 0}
-	w := &documentWriter{items: enc, md: md, blocks: blockEncoder, doc: doc, attribution: attribution, progress: progress}
+	w := &documentWriter{ctx: ctx, query: q, sessionRef: ref, items: enc, md: md, blocks: blockEncoder, doc: doc, attribution: attribution, progress: progress}
 	err = q.VisitExportMessagesForRef(ctx, ref, snapshot, func(record session.PersistentMessage) error { return w.writeRecord(record, dir) })
 	if err != nil {
 		return nil, err
@@ -109,6 +111,9 @@ func BuildForRef(ctx context.Context, q *session.Query, ref session.SessionRef, 
 }
 
 type documentWriter struct {
+	ctx         context.Context
+	query       *session.Query
+	sessionRef  session.SessionRef
 	items       *json.Encoder
 	md          io.Writer
 	blocks      *json.Encoder
@@ -213,7 +218,13 @@ func (w *documentWriter) writeRow(record session.PersistentMessage, m provider.M
 	switch row.Role {
 	case "user":
 		item["text"] = agent.UserMessageText(m)
-		item["images"] = m.Images
+		images, err := w.exportImages(m, dir)
+		if err != nil {
+			return err
+		}
+		if len(images) > 0 {
+			item["images"] = images
+		}
 	case "assistant":
 		return w.writeAssistant(record, row, item, dir)
 	case "tool":
@@ -235,6 +246,93 @@ func (w *documentWriter) writeRow(record session.PersistentMessage, m provider.M
 		return err
 	}
 	return nil
+}
+
+func (w *documentWriter) exportImages(m provider.Message, dir string) ([]string, error) {
+	images := append([]string(nil), m.Images...)
+	for _, input := range m.ImageInputs {
+		if err := w.ctx.Err(); err != nil {
+			return nil, err
+		}
+		switch input.Kind {
+		case attachment.KindURL:
+			if err := input.Validate(); err != nil {
+				return nil, err
+			}
+			images = append(images, input.URL)
+		case attachment.KindAttachment:
+			if err := input.Validate(); err != nil {
+				return nil, err
+			}
+			dataURL, err := w.stageAttachment(input.Attachment, dir)
+			if err != nil {
+				return nil, err
+			}
+			images = append(images, dataURL)
+		case attachment.KindFiles:
+			if err := input.Validate(); err != nil {
+				return nil, err
+			}
+			return nil, fmt.Errorf("session export: provider file image %q has no portable original", input.FilesID)
+		default:
+			return nil, fmt.Errorf("session export: unsupported image input kind %q", input.Kind)
+		}
+	}
+	return images, nil
+}
+
+func (w *documentWriter) stageAttachment(ref *attachment.AttachmentRef, dir string) (string, error) {
+	if ref == nil {
+		return "", errors.New("session export: missing attachment reference")
+	}
+	attachmentsDir := filepath.Join(dir, "attachments")
+	if err := os.MkdirAll(attachmentsDir, 0700); err != nil {
+		return "", err
+	}
+	path := filepath.Join(attachmentsDir, ref.Content.Digest)
+	file, err := os.OpenFile(path, os.O_CREATE|os.O_EXCL|os.O_WRONLY, 0600)
+	if errors.Is(err, os.ErrExist) {
+		body, readErr := os.ReadFile(path)
+		if readErr != nil {
+			return "", readErr
+		}
+		if int64(len(body)) != ref.Content.Bytes {
+			return "", errors.New("session export: staged attachment size changed")
+		}
+		return attachment.DataURL(ref.MIME(), body), nil
+	}
+	if err != nil {
+		return "", err
+	}
+	success := false
+	defer func() {
+		_ = file.Close()
+		if !success {
+			_ = os.Remove(path)
+		}
+	}()
+	var body bytes.Buffer
+	for offset := int64(0); offset < ref.Content.Bytes; {
+		chunk, total, readErr := w.query.ReadSessionAttachment(w.ctx, w.sessionRef, ref.Content.Digest, offset, min(int64(1<<20), ref.Content.Bytes-offset))
+		if readErr != nil {
+			return "", fmt.Errorf("session export: read attachment %q: %w", attachment.NormalizeDisplayName(ref.DisplayName), readErr)
+		}
+		if total != ref.Content.Bytes || len(chunk) == 0 {
+			return "", errors.New("session export: attachment size changed")
+		}
+		if _, err = file.Write(chunk); err != nil {
+			return "", err
+		}
+		if _, err = body.Write(chunk); err != nil {
+			return "", err
+		}
+		offset += int64(len(chunk))
+	}
+	if err = errors.Join(file.Sync(), file.Close()); err != nil {
+		return "", err
+	}
+	success = true
+	return attachment.DataURL(ref.MIME(), body.Bytes()), nil
 }
 func (w *documentWriter) writeAssistant(record session.PersistentMessage, row transcript.Message, item Item, dir string) error {
 	if err := w.writeSearch(row, item); err != nil {

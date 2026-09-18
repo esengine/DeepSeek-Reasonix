@@ -1,5 +1,3 @@
-// Run: tsx src/__tests__/composer-session-draft.test.tsx
-
 import { JSDOM } from "jsdom";
 import React from "react";
 import { act } from "react";
@@ -103,6 +101,7 @@ function installBridgeApp(methods: Record<string, unknown>) {
     SearchFileRefs: async () => [],
     SearchFileRefsForTab: async () => [],
     SearchFileRefsForTarget: async () => [],
+		CaptureAttachmentTarget: async () => ({ token: "test-attachment-target", capabilities: ["attachments-v2"] }), ReleaseAttachmentTarget: async () => {},
     AttachmentDataURLForTarget: async (_target: unknown, path: string) => path,
     ...methods,
   });

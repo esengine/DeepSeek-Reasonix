@@ -1,5 +1,3 @@
-// Run: tsx src/__tests__/composer-goal-toggle.test.tsx
-
 import { JSDOM } from "jsdom";
 import React from "react";
 import { act } from "react";
@@ -160,6 +158,7 @@ function mockApp(methods: Partial<AppBindings>, stubOptions?: DesktopHostStubOpt
         Models: async () => [],
         ModelsForTab: async () => [],
         SlashArgs: async () => ({ items: [], from: 0 }),
+        CaptureAttachmentTarget: async () => ({ token: "goal-attachment-target", capabilities: ["attachments-v2"] }), ReleaseAttachmentTarget: async () => {},
         ...methods,
       } as Partial<AppBindings> as AppBindings,
     },

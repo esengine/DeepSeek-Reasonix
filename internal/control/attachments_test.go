@@ -190,6 +190,98 @@ func TestImageDataURLRejectsOutsideAttachmentDir(t *testing.T) {
 	}
 }
 
+func TestImageDataURLInRootIgnoresProcessWorkingDirectory(t *testing.T) {
+	workspace := t.TempDir()
+	processDir := t.TempDir()
+	path, err := SaveImageBytesInRoot(workspace, "image/png", mustBase64(t, tinyPNG))
+	if err != nil {
+		t.Fatalf("SaveImageBytesInRoot: %v", err)
+	}
+	t.Chdir(processDir)
+	got, err := ImageDataURLInRoot(workspace, path)
+	if err != nil {
+		t.Fatalf("ImageDataURLInRoot: %v", err)
+	}
+	if !strings.HasPrefix(got, "data:image/png;base64,") {
+		t.Fatalf("data URL = %q, want png", got)
+	}
+	if _, err := os.Stat(filepath.Join(processDir, ".reasonix")); !os.IsNotExist(err) {
+		t.Fatalf("read created process-local attachment state: %v", err)
+	}
+}
+
+func TestAttachmentRootAPIsRejectManagedDirectorySymlinks(t *testing.T) {
+	for _, component := range []string{".reasonix", "attachments"} {
+		t.Run(component, func(t *testing.T) {
+			workspace := t.TempDir()
+			outside := t.TempDir()
+			var link string
+			if component == ".reasonix" {
+				if err := os.MkdirAll(filepath.Join(outside, "attachments"), 0o755); err != nil {
+					t.Fatal(err)
+				}
+				link = filepath.Join(workspace, ".reasonix")
+			} else {
+				if err := os.MkdirAll(filepath.Join(workspace, ".reasonix"), 0o755); err != nil {
+					t.Fatal(err)
+				}
+				link = filepath.Join(workspace, ".reasonix", "attachments")
+			}
+			if err := os.Symlink(outside, link); err != nil {
+				t.Skipf("symlink unsupported: %v", err)
+			}
+			if _, err := ImageDataURLInRoot(workspace, ".reasonix/attachments/image.png"); err == nil || !strings.Contains(err.Error(), "symlink") {
+				t.Fatalf("read through managed directory symlink = %v, want symlink rejection", err)
+			}
+			if _, err := SaveImageBytesInRoot(workspace, "image/png", mustBase64(t, tinyPNG)); err == nil || !strings.Contains(err.Error(), "symlink") {
+				t.Fatalf("write through managed directory symlink = %v, want symlink rejection", err)
+			}
+		})
+	}
+}
+
+func TestImageDataURLInRootKeepsSameRelativeNameIsolated(t *testing.T) {
+	firstRoot := t.TempDir()
+	secondRoot := t.TempDir()
+	rel := filepath.Join(".reasonix", "attachments", "same.png")
+	for _, root := range []string{firstRoot, secondRoot} {
+		if err := os.MkdirAll(filepath.Join(root, filepath.Dir(rel)), 0o755); err != nil {
+			t.Fatal(err)
+		}
+	}
+	first := mustBase64(t, tinyPNG)
+	second := append([]byte(nil), first...)
+	second[len(second)-1] ^= 1
+	if err := os.WriteFile(filepath.Join(firstRoot, rel), first, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(secondRoot, rel), second, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	one, err := ImageDataURLInRoot(firstRoot, filepath.ToSlash(rel))
+	if err != nil {
+		t.Fatal(err)
+	}
+	two, err := ImageDataURLInRoot(secondRoot, filepath.ToSlash(rel))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if one == two {
+		t.Fatal("same attachment name in two workspaces resolved to the same bytes")
+	}
+}
+
+func TestImageDataURLInRootDoesNotCreateMissingAttachmentDirectory(t *testing.T) {
+	workspace := t.TempDir()
+	_, err := ImageDataURLInRoot(workspace, ".reasonix/attachments/missing.png")
+	if !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("error = %v, want not exist", err)
+	}
+	if _, err := os.Stat(filepath.Join(workspace, ".reasonix")); !os.IsNotExist(err) {
+		t.Fatalf("read created attachment directory: %v", err)
+	}
+}
+
 func TestImageDataURLRejectsSymlinkFile(t *testing.T) {
 	t.Chdir(t.TempDir())
 	if err := ensureAttachmentRoot(); err != nil {

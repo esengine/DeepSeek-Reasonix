@@ -25,10 +25,11 @@ func newSubagentSkillOptionsFactory(
 	ablationSet ablation.Set,
 	lease *workspacelease.Owner,
 	writeRoots *sandbox.WritableRootSet,
+	imageRoutes ...childImageRouting,
 ) func(context.Context, int, *provider.Pricing, int, int) agent.Options {
 	home, stateRoot := userHomeDir(), config.MemoryUserDir()
 	return func(ctx context.Context, steps int, price *provider.Pricing, ctxWin, childDepth int) agent.Options {
-		return agent.Options{
+		opts := agent.Options{
 			MaxSteps: steps, Temperature: cfg.Temperature, Pricing: price, QuoteContext: quoteCtx, UsageSource: event.UsageSourceSubagent,
 			Gate: gate, ContextWindow: ctxWin, RecentKeep: cfg.RecentKeep,
 			SoftCompactRatio: cfg.SoftCompactRatio, ToolResultSnipRatio: cfg.ToolResultSnipRatio,
@@ -39,6 +40,11 @@ func newSubagentSkillOptionsFactory(
 			Ablation: ablationSet, WorkspaceLease: lease, WriteRoots: writeRoots,
 			DisableWriteAccessExpand: true, HomeDir: home, StateRoot: stateRoot,
 		}
+		if len(imageRoutes) > 0 {
+			opts.ImageRequestResolver = imageRoutes[0].controller()
+			opts.ImageInput = imageRoutes[0].config
+		}
+		return opts
 	}
 }
 

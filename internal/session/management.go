@@ -11,6 +11,7 @@ import (
 	"path/filepath"
 	"strings"
 
+	"reasonix/internal/attachment"
 	"reasonix/internal/filelock"
 	"reasonix/internal/sessioncontent"
 )
@@ -239,24 +240,38 @@ func copyExportContentClosure(ctx context.Context, source, target string, manife
 		return err
 	}
 	defer log.Close()
+	sourceContent := contentStoreForSessionDir(source)
 	refs := map[string]sessioncontent.Ref{}
-	if err := scanV4CommitFileRefs(ctx, log, 0, 1, nil, nil, func(_ int64, commit Commit) bool {
+	var payloadErr error
+	if err := scanV4CommitFileRefs(ctx, log, 0, 1, sourceContent, nil, func(_ int64, commit Commit) bool {
 		for _, event := range commit.Events {
 			if event.PayloadRef != nil {
 				key := fmt.Sprintf("%s:%d:%s", event.PayloadRef.Digest, event.PayloadRef.Bytes, event.PayloadRef.IndexDigest)
 				refs[key] = *event.PayloadRef
+			}
+			payload := event.Payload
+			if len(payload) == 0 && event.PayloadRef != nil {
+				payload, payloadErr = resolveContentPayload(ctx, sourceContent, *event.PayloadRef)
+				if payloadErr != nil {
+					return false
+				}
+			}
+			for _, extra := range attachment.CollectJSONRefs(payload) {
+				refs[contentRefKey(extra)] = extra
 			}
 		}
 		return true
 	}); err != nil {
 		return err
 	}
-	sourceContent := contentStoreForSessionDir(source)
+	if payloadErr != nil {
+		return payloadErr
+	}
 	targetContent := sessioncontent.New(filepath.Join(target, ".content-v1"))
 	for _, ref := range refs {
 		reader, err := sourceContent.Open(ctx, ref)
 		if err != nil {
-			return err
+			return fmt.Errorf("%w: missing exported content %s", ErrDamagedStore, ref.Digest)
 		}
 		published, putErr := targetContent.Put(ctx, reader, sessioncontent.Metadata{MediaType: ref.MediaType, Name: ref.Name})
 		closeErr := reader.Close()

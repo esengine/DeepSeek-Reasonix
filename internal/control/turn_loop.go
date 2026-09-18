@@ -25,6 +25,9 @@ type queuedTurn struct {
 	body      func(ctx context.Context) error
 	onStart   func()
 	goalRound *goalRoundReservation
+	// admissionCtx is only used for the synchronous durability boundary. The
+	// model turn has its own controller-owned context and survives RPC return.
+	admissionCtx context.Context
 }
 
 // turnLoop is the session-scoped execution authority. Controller.mu guards it.
@@ -202,7 +205,13 @@ func ActivateSessionAPIReplacement(old, next SessionAPI) error {
 		return nil
 	}
 	concreteOld, _ := old.(*Controller)
-	return ActivateControllerReplacement(concreteOld, concreteNext)
+	if err := ActivateControllerReplacement(concreteOld, concreteNext); err != nil {
+		return err
+	}
+	if concreteOld != nil && concreteOld.attachmentScope() != "" && concreteOld.attachmentScope() == concreteNext.attachmentScope() && concreteOld.workspaceRoot == concreteNext.workspaceRoot {
+		concreteOld.attachmentService().Drafts().CopyScopeTo(concreteOld.attachmentScope(), concreteNext.attachmentService().Drafts())
+	}
+	return nil
 }
 
 func (c *Controller) unbindExecutionControl(runtime *session.Runtime) {
@@ -316,9 +325,13 @@ func (c *Controller) enterRecoveryLocked(reason string) {
 	}
 }
 
-func (c *Controller) spawnGuardedTurn(ctx context.Context, cancel context.CancelFunc, body func(ctx context.Context) error, goalRound *goalRoundReservation) {
+func (c *Controller) spawnGuardedTurn(ctx context.Context, cancel context.CancelFunc, item queuedTurn) {
 	ctx, completion := withGuardedTurnCompletion(ctx)
-	body = c.prepareTurnAdmissionWithGoalRound(body, goalRound)
+	admissionCtx := item.admissionCtx
+	if admissionCtx == nil {
+		admissionCtx = context.Background()
+	}
+	body := c.prepareTurnAdmissionWithGoalRound(admissionCtx, item.body, item.goalRound)
 	if ledger := c.turnEventLedger(); ledger != nil {
 		c.mu.Lock()
 		c.turns.turnID = ledger.ActiveTurnID()
@@ -331,19 +344,19 @@ func (c *Controller) spawnGuardedTurn(ctx context.Context, cancel context.Cancel
 	go func() {
 		defer cancel()
 		defer func() {
-			c.finishGoalRoundActivity(goalRound)
+			c.finishGoalRoundActivity(item.goalRound)
 			c.kickGoalDriver()
 		}()
 		defer func() {
 			if r := recover(); r != nil {
 				err := fmt.Errorf("internal error: %v", r)
-				goalRound.setResult(err, false)
+				item.goalRound.setResult(err, false)
 				c.finishGuardedTurn(err, completion)
 			}
 		}()
 		err := body(ctx)
-		if goalRound != nil {
-			goalRound.setResult(err, errors.Is(ctx.Err(), context.Canceled) && c.CancelRequested())
+		if item.goalRound != nil {
+			item.goalRound.setResult(err, errors.Is(ctx.Err(), context.Canceled) && c.CancelRequested())
 		}
 		c.finishGuardedTurn(explainError(err), completion)
 	}()
@@ -472,7 +485,7 @@ func (c *Controller) finishGuardedTurn(err error, completion *guardedTurnComplet
 		if next.onStart != nil {
 			next.onStart()
 		}
-		c.spawnGuardedTurn(ctx, cancel, next.body, next.goalRound)
+		c.spawnGuardedTurn(ctx, cancel, next)
 		c.refreshRuntimeState(event.Event{})
 	}()
 	c.emitTurnDoneEvent(err, cancelRequested, completion)
