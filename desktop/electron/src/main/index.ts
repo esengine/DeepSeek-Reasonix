@@ -22,7 +22,7 @@ import { renderFailurePage, type ShellAction } from "./failurePage.js";
 import { buildHelloParams, describeHandshakeFailure, validateHelloResult, type HelloResult, type HandshakeFailure } from "./handshake.js";
 import { reasonixHome } from "./home.js";
 import { buildHostCallTable, dispatchHostCall, type ScreenInfo } from "./hostCalls.js";
-import { firstExisting, iconCandidates } from "./icons.js";
+import { firstExisting, iconCandidates, shouldOverrideDockIcon } from "./icons.js";
 import { registerRendererIpc } from "./ipc.js";
 import { ProcessDiagnostics } from "./processDiagnostics.js";
 import { createPerformanceHost } from "./performanceHost.js";
@@ -110,7 +110,7 @@ function bootstrap(dataHome: string): void {
   const appURL = devURL !== "" ? devURL : APP_INDEX_URL;
   const zoomStore = new AppZoomStore(join(dataHome, "electron-app-zoom.json"), join(dataHome, "desktop-zoom.json"));
   const icons = iconCandidates({ platform: process.platform, appPath: app.getAppPath(), resourcesPath: process.resourcesPath, packaged: app.isPackaged });
-  const windowIcon = process.platform === "darwin" ? undefined : (firstExisting(icons.window) ?? undefined);
+  const windowIcon = process.platform === "darwin" ? undefined : (firstExisting(icons.app) ?? undefined);
   const serviceLookup = resolveServiceBinary({ env: process.env, platform: process.platform, execPath: process.execPath, resourcesPath: process.resourcesPath });
   const serviceBinary = serviceLookup.binary;
 
@@ -427,8 +427,8 @@ function bootstrap(dataHome: string): void {
 
   void app.whenReady().then(() => {
     if (lifecycle.isQuitting) return;
-    if (process.platform === "darwin") {
-      const dockIcon = firstExisting(icons.window);
+    if (shouldOverrideDockIcon({ platform: process.platform, packaged: app.isPackaged })) {
+      const dockIcon = firstExisting(icons.app);
       if (dockIcon && app.dock) app.dock.setIcon(dockIcon);
     }
     registerAppProtocol({
