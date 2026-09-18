@@ -17,6 +17,7 @@ import (
 	"runtime"
 	"slices"
 	"strings"
+	"time"
 
 	fileencoding "reasonix/internal/fileutil/encoding"
 	"reasonix/internal/netclient"
@@ -1426,6 +1427,19 @@ type ProviderEntry struct {
 	// CacheTTLMinutes overrides the vendor-default prefix-cache retention used by
 	// cold-resume prune. Zero uses the vendor default (DeepSeek/unknown 24h, DashScope/Anthropic 5m).
 	CacheTTLMinutes int `toml:"cache_ttl_minutes"`
+	// StreamIdleTimeoutSeconds caps how long a started stream may go without any
+	// bytes before it is treated as dropped and replayed. Unset or <= 0 keeps the
+	// adapter default (300s); set it just above the endpoint's observed TTFT.
+	StreamIdleTimeoutSeconds *int `toml:"stream_idle_timeout_seconds"`
+}
+
+// StreamIdleTimeout returns the configured stream-idle watchdog window, or 0 to
+// use the adapter default.
+func (e *ProviderEntry) StreamIdleTimeout() time.Duration {
+	if e == nil || e.StreamIdleTimeoutSeconds == nil || *e.StreamIdleTimeoutSeconds <= 0 {
+		return 0
+	}
+	return time.Duration(*e.StreamIdleTimeoutSeconds) * time.Second
 }
 
 // ModelList returns the models this provider exposes: the explicit `models` list,

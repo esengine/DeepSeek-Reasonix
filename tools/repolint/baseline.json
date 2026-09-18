@@ -2,10 +2,10 @@
   "limits": {
     "banner": 13,
     "commented-code": 0,
-    "complexity": 1878,
+    "complexity": 1880,
     "essay": 1915,
-    "file-size": 100466,
-    "function-size": 8031,
+    "file-size": 100520,
+    "function-size": 8037,
     "layering": 1,
     "marker": 0,
     "narrative": 63,
@@ -807,7 +807,7 @@
     },
     "internal/config/config.go": {
       "essay": 21,
-      "file-size": 1516,
+      "file-size": 1530,
       "narrative": 2
     },
     "internal/config/credential_diagnostics.go": {
@@ -859,10 +859,10 @@
       "test-file-size": 112
     },
     "internal/config/render.go": {
-      "complexity": 228,
+      "complexity": 230,
       "essay": 2,
-      "file-size": 961,
-      "function-size": 912
+      "file-size": 967,
+      "function-size": 918
     },
     "internal/config/render_test.go": {
       "test-file-size": 757
@@ -1218,6 +1218,7 @@
     "internal/provider/anthropic/anthropic.go": {
       "complexity": 23,
       "essay": 25,
+      "file-size": 6,
       "function-size": 87,
       "struct-state": 5
     },
@@ -1227,7 +1228,7 @@
     "internal/provider/openai/openai.go": {
       "complexity": 53,
       "essay": 25,
-      "file-size": 481,
+      "file-size": 490,
       "function-size": 181,
       "struct-state": 9
     },
@@ -1239,12 +1240,12 @@
     },
     "internal/provider/provider.go": {
       "essay": 7,
-      "file-size": 325
+      "file-size": 335
     },
     "internal/provider/responses/responses.go": {
       "complexity": 49,
       "essay": 2,
-      "file-size": 15,
+      "file-size": 24,
       "function-size": 161,
       "struct-state": 5
     },

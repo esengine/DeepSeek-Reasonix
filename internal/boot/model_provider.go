@@ -83,6 +83,8 @@ func newProviderWithSearchMode(e *config.ProviderEntry, proxy netclient.ProxySpe
 			// Keep nil as nil so the responses provider can vendor-detect its
 			// default instead of accidentally treating every endpoint as stateful.
 			"stateful": e.ResponsesStateful,
+			// Stream-idle watchdog window; 0 lets the adapter keep its default.
+			"stream_idle_timeout": e.StreamIdleTimeout(),
 		},
 	})
 }

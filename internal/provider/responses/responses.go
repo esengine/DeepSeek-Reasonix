@@ -186,8 +186,17 @@ func New(cfg Config) provider.Provider {
 		vendor: vendor, caps: cap, mode: cfg.mode(), sessionCache: sessionCache, search: provider.SearchPolicy{NativeEnabled: cfg.WebSearch, ClientEnabled: clientWebSearch}, maxOutputTokens: maxOutputTokens,
 		vision:    vision,
 		modelInfo: modelInfo,
-		http:      httpClient, idleTimeout: defaultStreamIdleTimeout,
+		http:      httpClient, idleTimeout: responsesStreamIdleTimeout(cfg),
 	}
+}
+
+// responsesStreamIdleTimeout returns the configured stream-idle watchdog window,
+// or the adapter default when the provider entry leaves it unset.
+func responsesStreamIdleTimeout(cfg Config) time.Duration {
+	if d := provider.StreamIdleTimeout(provider.Config{Extra: cfg.Extra}); d > 0 {
+		return d
+	}
+	return defaultStreamIdleTimeout
 }
 
 func (c *client) ModelInfo() provider.ModelInfo {
