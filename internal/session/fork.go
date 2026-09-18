@@ -123,6 +123,17 @@ var ErrForkActiveAuthority = errors.New("session: fork boundary retains active r
 // commit to fit.
 var ErrForkBoundaryNotAtomic = errors.New("session: fork cut is not an atomic batch boundary")
 
+func forkStorageRevision(prefix []Commit) int {
+	for _, commit := range prefix {
+		for _, event := range commit.Events {
+			if event.Kind == "model/image-isolation" {
+				return MaxStorageRevision
+			}
+		}
+	}
+	return StorageRevision
+}
+
 func writeForkChild(ctx context.Context, parentDir, parentID string, prefix []Commit, childDir, childID string, throughSequence uint64) (Manifest, error) {
 	childDir = filepath.Clean(strings.TrimSpace(childDir))
 	childID = strings.TrimSpace(childID)
@@ -169,7 +180,7 @@ func writeForkChild(ctx context.Context, parentDir, parentID string, prefix []Co
 	}
 	digest := sha256.Sum256(log.Bytes())
 	manifest := Manifest{
-		SchemaVersion: SchemaVersion, Codec: Codec, StorageRevision: StorageRevision, ContentRoot: sharedContentRoot, SessionID: childID, CreatedAt: time.Now().UTC(),
+		SchemaVersion: SchemaVersion, Codec: Codec, StorageRevision: forkStorageRevision(prefix), ContentRoot: sharedContentRoot, SessionID: childID, CreatedAt: time.Now().UTC(),
 		InheritedEvents: throughSequence,
 		Source:          &Source{Path: parentDir, Size: int64(log.Len()), SHA256: hex.EncodeToString(digest[:]), Version: Codec},
 	}

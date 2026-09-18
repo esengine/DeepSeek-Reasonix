@@ -1,18 +1,17 @@
 package cdp
 
 import (
-	"bytes"
 	"context"
 	"encoding/base64"
 	"encoding/json"
 	"fmt"
-	"image/png"
 	"os"
 	"path/filepath"
 	"strconv"
 	"strings"
 	"time"
 
+	"reasonix/internal/attachment"
 	"reasonix/internal/browser"
 )
 
@@ -58,9 +57,16 @@ func (e *Executor) Screenshot(ctx context.Context, req browser.ScreenshotRequest
 	if err := e.conn.call(ctx, p.session, "Page.captureScreenshot", params, &out); err != nil {
 		return browser.Screenshot{}, fmt.Errorf("capture screenshot: %w", err)
 	}
-	data, err := base64.StdEncoding.DecodeString(out.Data)
+	if strings.TrimSpace(out.Data) != out.Data || out.Data == "" {
+		return browser.Screenshot{}, fmt.Errorf("decode screenshot: non-canonical base64")
+	}
+	data, err := base64.StdEncoding.Strict().DecodeString(out.Data)
+	if err != nil || base64.StdEncoding.EncodeToString(data) != out.Data {
+		return browser.Screenshot{}, fmt.Errorf("decode screenshot: invalid base64")
+	}
+	mime, width, height, err := attachment.ValidateImage(data, "image/png", attachment.DefaultPolicy())
 	if err != nil {
-		return browser.Screenshot{}, fmt.Errorf("decode screenshot: %w", err)
+		return browser.Screenshot{}, fmt.Errorf("validate screenshot: %w", err)
 	}
 	// The tab's registered ID, not the caller's argument: a screenshot names a
 	// file, and only IDs this executor minted may reach a path.
@@ -72,11 +78,7 @@ func (e *Executor) Screenshot(ctx context.Context, req browser.ScreenshotRequest
 	if err := os.WriteFile(path, data, 0o600); err != nil {
 		return browser.Screenshot{}, fmt.Errorf("write screenshot: %w", err)
 	}
-	shot := browser.Screenshot{Path: path, MIME: "image/png"}
-	if cfg, err := png.DecodeConfig(bytes.NewReader(data)); err == nil {
-		shot.Width, shot.Height = cfg.Width, cfg.Height
-	}
-	return shot, nil
+	return browser.Screenshot{Path: path, MIME: mime, Width: width, Height: height}, nil
 }
 
 // captureParams turns the request into a capture region. Element and full-page

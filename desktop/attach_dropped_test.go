@@ -6,6 +6,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -77,6 +78,199 @@ func TestSavePastedImageUsesActiveWorkspaceRoot(t *testing.T) {
 	if !strings.HasPrefix(preview, "data:image/png;base64,") {
 		t.Fatalf("preview = %q, want png data URL", preview)
 	}
+}
+
+func TestReadSessionAttachmentForTabRequiresCanonicalSession(t *testing.T) {
+	app := &App{
+		tabs: map[string]*WorkspaceTab{
+			"a": {ID: "a", WorkspaceRoot: t.TempDir(), SessionGeneration: 1},
+		},
+		activeTabID: "a",
+	}
+	if _, err := app.ReadSessionAttachmentForTab("a", strings.Repeat("ab", 32), 0); err == nil {
+		t.Fatal("ReadSessionAttachmentForTab accepted a tab without a canonical session")
+	}
+}
+
+func TestStageImageForTabRequiresBoundController(t *testing.T) {
+	app := &App{
+		tabs: map[string]*WorkspaceTab{
+			"a": {ID: "a", WorkspaceRoot: t.TempDir()},
+		},
+		activeTabID: "a",
+	}
+	if _, err := app.StageImageForTab("a", "op-1", "shot.png", "image/png", "data:image/png;base64,"+desktopTinyPNG); err == nil {
+		t.Fatal("StageImageForTab accepted a tab without a session controller")
+	}
+}
+
+func TestLegacyAttachmentRPCRejectsMissingTarget(t *testing.T) {
+	t.Chdir(t.TempDir())
+	app := &App{tabs: map[string]*WorkspaceTab{}}
+	if _, err := app.SavePastedImage("data:image/png;base64," + desktopTinyPNG); err == nil {
+		t.Fatal("legacy attachment RPC fell back to the process working directory")
+	}
+	if _, err := os.Stat(filepath.Join(".reasonix", "attachments")); !os.IsNotExist(err) {
+		t.Fatalf("missing target created a process-relative attachment directory: %v", err)
+	}
+}
+
+func TestGlobalAttachmentRPCUsesStableGlobalWorkspace(t *testing.T) {
+	isolateDesktopUserDirs(t)
+	launchRoot := t.TempDir()
+	t.Chdir(launchRoot)
+	app := &App{
+		tabs:        map[string]*WorkspaceTab{"global": {ID: "global", Scope: "global"}},
+		activeTabID: "global",
+	}
+	rel, err := app.SavePastedImage("data:image/png;base64," + desktopTinyPNG)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := os.Stat(filepath.Join(globalWorkspaceRoot(), filepath.FromSlash(rel))); err != nil {
+		t.Fatalf("global attachment missing from stable global workspace: %v", err)
+	}
+	if _, err := os.Stat(filepath.Join(launchRoot, filepath.FromSlash(rel))); !os.IsNotExist(err) {
+		t.Fatalf("global attachment was written under process cwd: %v", err)
+	}
+}
+
+func TestSavePastedImageForTabKeepsCapturedWorkspaceAcrossActiveSwitch(t *testing.T) {
+	launchRoot := t.TempDir()
+	projectA := t.TempDir()
+	projectB := t.TempDir()
+	t.Chdir(launchRoot)
+	app := &App{
+		tabs: map[string]*WorkspaceTab{
+			"a": {ID: "a", WorkspaceRoot: projectA},
+			"b": {ID: "b", WorkspaceRoot: projectB},
+		},
+		activeTabID: "a",
+	}
+	app.attachmentIOHook = func() {
+		app.mu.Lock()
+		app.activeTabID = "b"
+		app.mu.Unlock()
+	}
+
+	before, err := os.Getwd()
+	if err != nil {
+		t.Fatal(err)
+	}
+	got, err := app.SavePastedImageForTab("a", "data:image/png;base64,"+desktopTinyPNG)
+	if err != nil {
+		t.Fatalf("SavePastedImageForTab: %v", err)
+	}
+	after, err := os.Getwd()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if before != after {
+		t.Fatalf("process cwd changed from %q to %q", before, after)
+	}
+	if _, err := os.Stat(filepath.Join(projectA, filepath.FromSlash(got))); err != nil {
+		t.Fatalf("captured workspace attachment missing: %v", err)
+	}
+	if _, err := os.Stat(filepath.Join(projectB, filepath.FromSlash(got))); !os.IsNotExist(err) {
+		t.Fatalf("attachment drifted to active workspace B: %v", err)
+	}
+}
+
+func TestAttachmentDataURLForTabIsolatesSameRelativePath(t *testing.T) {
+	projectA := t.TempDir()
+	projectB := t.TempDir()
+	rel := ".reasonix/attachments/shared.png"
+	rawA, err := base64.StdEncoding.DecodeString(desktopTinyPNG)
+	if err != nil {
+		t.Fatal(err)
+	}
+	rawB := append([]byte(nil), rawA...)
+	rawB[len(rawB)-1] ^= 1
+	for root, raw := range map[string][]byte{projectA: rawA, projectB: rawB} {
+		path := filepath.Join(root, filepath.FromSlash(rel))
+		if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(path, raw, 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	app := &App{tabs: map[string]*WorkspaceTab{
+		"a": {ID: "a", WorkspaceRoot: projectA},
+		"b": {ID: "b", WorkspaceRoot: projectB},
+	}}
+
+	one, err := app.AttachmentDataURLForTab("a", rel)
+	if err != nil {
+		t.Fatal(err)
+	}
+	two, err := app.AttachmentDataURLForTab("b", rel)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if one == two {
+		t.Fatal("same relative attachment path resolved to the same workspace bytes")
+	}
+}
+
+func TestSavePastedImageForTabRejectsClosedTargetAndRemovesWrite(t *testing.T) {
+	projectRoot := t.TempDir()
+	tab := &WorkspaceTab{ID: "a", WorkspaceRoot: projectRoot}
+	app := &App{tabs: map[string]*WorkspaceTab{"a": tab}, activeTabID: "a"}
+	var once sync.Once
+	app.attachmentIOHook = func() {
+		once.Do(func() {
+			app.mu.Lock()
+			delete(app.tabs, "a")
+			app.mu.Unlock()
+		})
+	}
+
+	if _, err := app.SavePastedImageForTab("a", "data:image/png;base64,"+desktopTinyPNG); err == nil {
+		t.Fatal("closed attachment target was accepted")
+	}
+	entries, err := os.ReadDir(filepath.Join(projectRoot, ".reasonix", "attachments"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(entries) != 0 {
+		t.Fatalf("rejected attachment write left files: %v", entries)
+	}
+}
+
+func TestAttachmentDataURLForTabRejectsReplacedRuntime(t *testing.T) {
+	projectRoot := t.TempDir()
+	rel, err := control.SaveImageBytesInRoot(projectRoot, "image/png", mustDecodeBase64(t, desktopTinyPNG))
+	if err != nil {
+		t.Fatal(err)
+	}
+	first := control.New(control.Options{WorkspaceRoot: projectRoot})
+	second := control.New(control.Options{WorkspaceRoot: projectRoot})
+	t.Cleanup(first.Close)
+	t.Cleanup(second.Close)
+	tab := &WorkspaceTab{ID: "a", WorkspaceRoot: projectRoot, Ctrl: first}
+	app := &App{tabs: map[string]*WorkspaceTab{"a": tab}, activeTabID: "a"}
+	var once sync.Once
+	app.attachmentIOHook = func() {
+		once.Do(func() {
+			app.mu.Lock()
+			tab.Ctrl = second
+			app.mu.Unlock()
+		})
+	}
+
+	if _, err := app.AttachmentDataURLForTab("a", rel); err == nil {
+		t.Fatal("preview from replaced runtime was accepted")
+	}
+}
+
+func mustDecodeBase64(t *testing.T, value string) []byte {
+	t.Helper()
+	raw, err := base64.StdEncoding.DecodeString(value)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return raw
 }
 
 func TestSavePastedImageUsesPinnedSessionOwnerBeforeStaleWorkspaceRoot(t *testing.T) {
@@ -218,8 +412,12 @@ func TestAttachDroppedInWorkspaceReferencesInPlace(t *testing.T) {
 	if err := os.WriteFile(target, []byte("body"), 0o644); err != nil {
 		t.Fatal(err)
 	}
+	app := &App{
+		tabs:        map[string]*WorkspaceTab{"project": {ID: "project", WorkspaceRoot: cwd}},
+		activeTabID: "project",
+	}
 
-	got, err := (&App{}).AttachDropped(target)
+	got, err := app.AttachDropped(target)
 	if err != nil {
 		t.Fatalf("AttachDropped: %v", err)
 	}
@@ -241,8 +439,12 @@ func TestAttachDroppedOutsideWorkspaceCopiesToAttachments(t *testing.T) {
 	if err := os.Chdir(root); err != nil {
 		t.Fatal(err)
 	}
+	app := &App{
+		tabs:        map[string]*WorkspaceTab{"project": {ID: "project", WorkspaceRoot: root}},
+		activeTabID: "project",
+	}
 
-	got, err := (&App{}).AttachDropped(outside)
+	got, err := app.AttachDropped(outside)
 	if err != nil {
 		t.Fatalf("AttachDropped: %v", err)
 	}
@@ -264,8 +466,12 @@ func TestAttachDroppedImageStoresThumbnail(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(cwd, "shot.png"), png, 0o644); err != nil {
 		t.Fatal(err)
 	}
+	app := &App{
+		tabs:        map[string]*WorkspaceTab{"project": {ID: "project", WorkspaceRoot: cwd}},
+		activeTabID: "project",
+	}
 
-	got, err := (&App{}).AttachDropped(filepath.Join(cwd, "shot.png"))
+	got, err := app.AttachDropped(filepath.Join(cwd, "shot.png"))
 	if err != nil {
 		t.Fatalf("AttachDropped: %v", err)
 	}

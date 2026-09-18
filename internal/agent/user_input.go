@@ -3,11 +3,14 @@ package agent
 import (
 	"context"
 
+	"reasonix/internal/attachment"
 	"reasonix/internal/provider"
 )
 
 type rawUserInputKey struct{}
 type subagentImageCandidatesKey struct{}
+type subagentImageInputsKey struct{}
+type userImageInputsContextKey struct{}
 type visionSummaryContextKey struct{}
 
 // WithRawUserInput keeps user-authored text separate from host-rendered turn
@@ -52,6 +55,45 @@ func SubagentImageCandidates(ctx context.Context) []string {
 	}
 	images, _ := ctx.Value(subagentImageCandidatesKey{}).([]string)
 	return append([]string(nil), images...)
+}
+
+// WithSubagentImageInputs carries durable attachment refs from the parent
+// turn. A vision-capable child resolves them through the inherited request
+// resolver instead of inheriting already-wired data URLs.
+func WithSubagentImageInputs(ctx context.Context, inputs []attachment.ImageInput) context.Context {
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	return context.WithValue(ctx, subagentImageInputsKey{}, attachment.CloneImageInputs(inputs))
+}
+
+// SubagentImageInputs returns the parent-admitted image refs a child may
+// persist on its user message. Empty when the parent only had legacy Images.
+func SubagentImageInputs(ctx context.Context) []attachment.ImageInput {
+	if ctx == nil {
+		return nil
+	}
+	inputs, _ := ctx.Value(subagentImageInputsKey{}).([]attachment.ImageInput)
+	return attachment.CloneImageInputs(inputs)
+}
+
+func WithUserImageInputs(ctx context.Context, inputs []attachment.ImageInput) context.Context {
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	return context.WithValue(ctx, userImageInputsContextKey{}, attachment.CloneImageInputs(inputs))
+}
+
+func userImageInputs(ctx context.Context) []attachment.ImageInput {
+	inputs, _ := ctx.Value(userImageInputsContextKey{}).([]attachment.ImageInput)
+	return attachment.CloneImageInputs(inputs)
+}
+
+func withSubagentTurnImages(ctx context.Context) context.Context {
+	if inputs := SubagentImageInputs(ctx); len(inputs) > 0 {
+		return WithUserImageInputs(ctx, inputs)
+	}
+	return WithUserImages(ctx, SubagentImageCandidates(ctx))
 }
 
 // WithVisionSummary carries a hidden image-understanding result into the

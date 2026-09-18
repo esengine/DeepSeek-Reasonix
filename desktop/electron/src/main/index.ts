@@ -149,8 +149,7 @@ function bootstrap(dataHome: string): void {
         .catch((error: unknown) => log.warn(`domReady failed: ${errorText(error)}`))
         .then(attach);
     },
-    onCloseRequested: async () => record(await service.request("desktop/beforeClose", { reason: "window" })).prevent === true,
-    onCloseAllowed: () => lifecycle.approve(),
+    onCloseRequested: () => lifecycle.requestClose("window"),
     onShellAction: (action: ShellAction) => {
       if (action === "open-logs") void shell.openPath(logsDir);
       else if (action === "restart") {
@@ -250,6 +249,7 @@ function bootstrap(dataHome: string): void {
     // Website views go first: a WebContents closing after its window is
     // gone is the ordering that left orphaned renderers in the prototype.
     onCloseAllowed: () => mainWindow.allowClose(),
+    onClosePrevented: (reason) => { if (reason === "window") mainWindow.hide(); },
     cleanup: [
       { name: "browser views", run: () => browser.destroyAll() },
       { name: "remote windows", run: () => remote.closeAll() },

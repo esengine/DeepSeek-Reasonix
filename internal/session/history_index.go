@@ -145,12 +145,11 @@ func incrementHistoryIndex(ctx context.Context, dir, path, sessionID string, rev
 	if err != nil {
 		return false, err
 	}
-	if !metadata.canIncrement(sessionID, revision, generation) {
-		return false, nil
-	}
-
 	manifest, err := readManifest(filepath.Join(dir, "manifest.json"))
 	if err != nil || manifest.Codec != Codec {
+		return false, nil
+	}
+	if !metadata.canIncrement(sessionID, revision, generation, manifest.StorageRevision) {
 		return false, nil
 	}
 	log, err := os.Open(logPathForManifest(dir, manifest))
@@ -302,19 +301,7 @@ func historyIndexCurrent(ctx context.Context, dir, path, sessionID string, revis
 	if err != nil || !strings.HasPrefix(values["generation"], identity.Generation+":") {
 		return false
 	}
-	return values["session_id"] == sessionID && values["log_size"] == fmt.Sprint(revision.Size) && values["log_mtime_ns"] == fmt.Sprint(revision.ModTimeNS) && values["storage_revision"] == fmt.Sprint(StorageRevision) && values["projection_version"] == fmt.Sprint(historyIndexVersion)
-}
-
-func historyProjectionGeneration(dir string, viewSequence uint64) (string, error) {
-	manifest, err := readStoredManifest(filepath.Join(dir, "manifest.json"))
-	if err != nil {
-		return "", err
-	}
-	identity, err := readStorageIdentity(dir, manifest)
-	if err != nil {
-		return "", err
-	}
-	return fmt.Sprintf("%s:%d", identity.Generation, viewSequence), nil
+	return values["session_id"] == sessionID && values["log_size"] == fmt.Sprint(revision.Size) && values["log_mtime_ns"] == fmt.Sprint(revision.ModTimeNS) && values["storage_revision"] == fmt.Sprint(manifest.StorageRevision) && values["projection_version"] == fmt.Sprint(historyIndexVersion)
 }
 
 func rebuildHistoryIndex(ctx context.Context, dir, path, sessionID string, revision logRevision) error {
@@ -338,9 +325,8 @@ func populateHistoryIndex(ctx context.Context, db *sql.DB, log *os.File, content
 	if err != nil {
 		return err
 	}
-	// Keep SQLite's derived-data working set explicit. The history database
-	// may be many GiB, but neither its page cache nor temporary sort state
-	// belongs in the runtime's cumulative memory footprint.
+	// Keep SQLite's derived-data working set explicit: even a multi-GiB history
+	// must not retain its page cache in the runtime's cumulative memory.
 	// Rebuild writes an unpublished, disposable replacement beside the live
 	// index. Avoid WAL and durability work for that private file; Rebuild
 	// validates it before one atomic publish, and the event log remains the
@@ -439,7 +425,11 @@ func populateHistoryIndex(ctx context.Context, db *sql.DB, log *os.File, content
 		return err
 	}
 	generation = strings.TrimSuffix(generation, ":0") + fmt.Sprintf(":%d", viewSequence)
-	metadata := map[string]string{"session_id": sessionID, "log_size": fmt.Sprint(progress.end), "log_mtime_ns": fmt.Sprint(progress.modTimeNS), "storage_revision": fmt.Sprint(StorageRevision), "projection_version": fmt.Sprint(historyIndexVersion), "durable_sequence": fmt.Sprint(progress.sequence), "history_view_sequence": fmt.Sprint(viewSequence), "generation": generation}
+	manifest, err := readStoredManifest(filepath.Join(dir, "manifest.json"))
+	if err != nil {
+		return err
+	}
+	metadata := map[string]string{"session_id": sessionID, "log_size": fmt.Sprint(progress.end), "log_mtime_ns": fmt.Sprint(progress.modTimeNS), "storage_revision": fmt.Sprint(manifest.StorageRevision), "projection_version": fmt.Sprint(historyIndexVersion), "durable_sequence": fmt.Sprint(progress.sequence), "history_view_sequence": fmt.Sprint(viewSequence), "generation": generation}
 	for key, value := range metadata {
 		if _, err := tx.ExecContext(ctx, `INSERT INTO metadata(key,value) VALUES(?,?)`, key, value); err != nil {
 			return err

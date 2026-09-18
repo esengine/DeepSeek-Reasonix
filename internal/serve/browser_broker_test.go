@@ -176,6 +176,9 @@ func TestServerAdvertisesImmutableSessionIdentityOnlyForExclusiveV3(t *testing.T
 	if !slices.Contains(srv.capabilities(), capabilitySessionIdentityV1) || !slices.Contains(srv.capabilities(), capabilitySessionContentV1) || !slices.Contains(srv.capabilities(), capabilitySessionReadV2) || !slices.Contains(srv.capabilities(), capabilityGoalLifecycleV2) {
 		t.Fatalf("exclusive v3 capabilities = %v", srv.capabilities())
 	}
+	if slices.Contains(srv.capabilities(), capabilityAttachmentsV1) {
+		t.Fatal("serve must not advertise attachments-v1; draft staging is a local desktop host capability")
+	}
 }
 
 func TestBrowserBrokerRebindHTTP(t *testing.T) {

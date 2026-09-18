@@ -48,6 +48,7 @@ type Operation struct {
 	ReservedAt    time.Time `json:"reservedAt"`
 	SettledAt     time.Time `json:"settledAt,omitempty"`
 	Reason        string    `json:"reason,omitempty"`
+	RefusalKind   string    `json:"refusalKind,omitempty"`
 }
 
 type ledgerFile struct {
@@ -132,6 +133,10 @@ func (l *Ledger) Reserve(op Operation) error {
 
 // Settle records the outcome of a reserved operation exactly once.
 func (l *Ledger) Settle(id string, state State, reason string) error {
+	return l.SettleDetail(id, state, reason, "")
+}
+
+func (l *Ledger) SettleDetail(id string, state State, reason, refusalKind string) error {
 	if state == StateReserved {
 		return fmt.Errorf("browser operation %s: cannot settle to reserved", id)
 	}
@@ -145,7 +150,7 @@ func (l *Ledger) Settle(id string, state State, reason string) error {
 		return ErrAlreadySettled
 	}
 	previous := *op
-	op.State, op.SettledAt, op.Reason = state, l.now(), reason
+	op.State, op.SettledAt, op.Reason, op.RefusalKind = state, l.now(), reason, refusalKind
 	if err := l.persistLocked(); err != nil {
 		*op = previous
 		return err

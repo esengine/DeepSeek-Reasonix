@@ -6,6 +6,7 @@ import { historyToolStatus } from "./historyToolStatus";
 import { asArray } from "./array";
 import { historicalResultNotice } from "./completionResultState";
 import { appendNoticeItem, deliveryReadinessDetail, readinessMissingIds } from "./controllerNotices";
+import { appendHistoryAttachmentRefs } from "./historyAttachmentRefs";
 import { createUniqueItemIDAllocator } from "./historyItemIds";
 import { t } from "./i18n";
 import { upsertReadPause } from "./readPause";
@@ -118,7 +119,7 @@ export function historyMessagesToItems(messages: HistoryMessage[], idPrefix: str
     }
     if (m.role === "user") {
       if (m.content.trim() === "") continue;
-      items.push({ kind: "user", id: m.messageId ? `m:${m.messageId}` : recordItemId, messageId: m.messageId, submissionId: m.submissionId, turnId: m.turnId, text: m.content, submitText: m.submitText, createdAt: m.createdAt, checkpointTurn: m.checkpointTurn, historyTurn: m.historyTurn });
+      items.push({ kind: "user", id: m.messageId ? `m:${m.messageId}` : recordItemId, messageId: m.messageId, submissionId: m.submissionId, turnId: m.turnId, text: appendHistoryAttachmentRefs(m.content, m.attachments), submitText: m.submitText, createdAt: m.createdAt, checkpointTurn: m.checkpointTurn, historyTurn: m.historyTurn });
       seq++;
       continue;
     }

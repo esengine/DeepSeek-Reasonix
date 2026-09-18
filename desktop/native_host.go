@@ -26,6 +26,7 @@ type nativeHost interface {
 	SaveFileDialog(ctx context.Context, opts nativeDialogOptions) (string, error)
 	MessageDialog(ctx context.Context, opts nativeMessageOptions) (string, error)
 	OpenExternal(ctx context.Context, url string)
+	CloseWindow(ctx context.Context)
 	Quit(ctx context.Context)
 	OpenDevTools(ctx context.Context)
 }
@@ -89,6 +90,7 @@ func (noopNativeHost) WindowIsMinimised(context.Context) bool      { return fals
 func (noopNativeHost) SetWindowPosition(context.Context, int, int) {}
 func (noopNativeHost) SetWindowTitle(context.Context, string)      {}
 func (noopNativeHost) OpenExternal(context.Context, string)        {}
+func (noopNativeHost) CloseWindow(context.Context)                 {}
 func (noopNativeHost) Quit(context.Context)                        {}
 func (noopNativeHost) OpenDevTools(context.Context)                {}
 

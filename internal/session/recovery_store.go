@@ -25,7 +25,7 @@ import (
 
 // Version 6 retains optional submission receipts in recovery checkpoints.
 // Older projections are disposable and rebuild from the unchanged durable log.
-const recoveryProjectionVersion = 6
+const recoveryProjectionVersion = 7
 
 const (
 	recoveryFormatVersion = 1
@@ -537,6 +537,7 @@ func recentDisplayMessage(message provider.Message) (json.RawMessage, error) {
 	preview.RawContent = ""
 	preview.ProviderContent = ""
 	preview.Images = nil
+	preview.ImageInputs = nil
 	preview.ResponsesItems = nil
 	preview.ThinkingBlocks = nil
 	if runes := []rune(preview.ReasoningContent); len(runes) > 4096 {
@@ -571,7 +572,7 @@ func checkpointFromStartup(manifest Manifest, identity storageIdentity, state *s
 	}
 	checkpoint := recoveryCheckpoint{
 		Version: recoveryFormatVersion, SessionID: manifest.SessionID,
-		StorageGeneration: identity.Generation, StorageRevision: StorageRevision,
+		StorageGeneration: identity.Generation, StorageRevision: manifest.StorageRevision,
 		ProjectionVersion: recoveryProjectionVersion, Projection: projection,
 	}
 	if state != nil {
@@ -587,25 +588,25 @@ func checkpointFromStartup(manifest Manifest, identity storageIdentity, state *s
 	return checkpoint
 }
 
-func loadRecoveryStartupState(ctx context.Context, dir string, file *os.File, info os.FileInfo, recovery *recoveryStore, identity storageIdentity) (*startupSessionState, int64, bool, RecoveryOpenStats, bool) {
+func loadRecoveryStartupState(ctx context.Context, dir string, file *os.File, info os.FileInfo, recovery *recoveryStore, identity storageIdentity, storageRevision int) (*startupSessionState, int64, bool, RecoveryOpenStats, bool) {
 	stats := RecoveryOpenStats{LogBytesTotal: info.Size()}
 	checkpoints, err := recovery.loadCheckpoints()
 	if err != nil {
 		return nil, 0, false, stats, false
 	}
 	for _, checkpoint := range checkpoints {
-		if state, end, torn, attempt, ok := tryRecoveryCheckpoint(ctx, dir, file, info, identity, checkpoint); ok {
+		if state, end, torn, attempt, ok := tryRecoveryCheckpoint(ctx, dir, file, info, identity, storageRevision, checkpoint); ok {
 			return state, end, torn, attempt, true
 		}
 	}
 	return nil, 0, false, stats, false
 }
 
-func tryRecoveryCheckpoint(ctx context.Context, dir string, file *os.File, info os.FileInfo, identity storageIdentity, checkpoint recoveryCheckpoint) (*startupSessionState, int64, bool, RecoveryOpenStats, bool) {
+func tryRecoveryCheckpoint(ctx context.Context, dir string, file *os.File, info os.FileInfo, identity storageIdentity, storageRevision int, checkpoint recoveryCheckpoint) (*startupSessionState, int64, bool, RecoveryOpenStats, bool) {
 	stats := RecoveryOpenStats{LogBytesTotal: info.Size()}
 	if checkpoint.Version != recoveryFormatVersion || checkpoint.ProjectionVersion != recoveryProjectionVersion ||
 		checkpoint.SessionID != identity.SessionID || checkpoint.StorageGeneration != identity.Generation ||
-		checkpoint.StorageRevision != StorageRevision || checkpoint.LogOffset < 0 || checkpoint.LogOffset > info.Size() ||
+		checkpoint.StorageRevision < 1 || checkpoint.StorageRevision > storageRevision || checkpoint.LogOffset < 0 || checkpoint.LogOffset > info.Size() ||
 		checkpoint.Projection.CommittedSequence != checkpoint.DurableSequence {
 		return nil, 0, false, stats, false
 	}

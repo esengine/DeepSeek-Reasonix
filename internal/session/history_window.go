@@ -244,7 +244,7 @@ func resolveWindowAnchor(
 			page.Status = "stale_cursor"
 			return page, boundary, direction, nil
 		}
-		if parsed.SessionID != ref.SessionID || parsed.StorageRevision != StorageRevision ||
+		if parsed.SessionID != ref.SessionID || parsed.StorageRevision != metadata.storageRevision ||
 			parsed.Projection != historyIndexVersion || parsed.Generation != metadata.generation ||
 			(parsed.Direction != historyWindowDirOlder && parsed.Direction != historyWindowDirNewer) ||
 			parsed.Boundary <= 0 {
@@ -399,13 +399,13 @@ func (q *Query) readHistoryWindowPage(ctx context.Context, db *sql.DB, filesyste
 		page.HasOlder = boundary > 1
 		if page.HasNewer && len(page.Messages) > 0 {
 			last := page.Messages[len(page.Messages)-1]
-			page.NewerCursor, err = encodeHistoryWindowCursor(historyWindowCursor{SessionID: ref.SessionID, StorageRevision: StorageRevision, SnapshotSequence: snapshot, Boundary: last.Position + 1, Direction: historyWindowDirNewer, Projection: historyIndexVersion, Generation: metadata.generation})
+			page.NewerCursor, err = encodeHistoryWindowCursor(historyWindowCursor{SessionID: ref.SessionID, StorageRevision: metadata.storageRevision, SnapshotSequence: snapshot, Boundary: last.Position + 1, Direction: historyWindowDirNewer, Projection: historyIndexVersion, Generation: metadata.generation})
 			if err != nil {
 				return HistoryWindowPage{}, err
 			}
 		}
 		if page.HasOlder {
-			page.OlderCursor, err = encodeHistoryWindowCursor(historyWindowCursor{SessionID: ref.SessionID, StorageRevision: StorageRevision, SnapshotSequence: snapshot, Boundary: boundary, Direction: historyWindowDirOlder, Projection: historyIndexVersion, Generation: metadata.generation})
+			page.OlderCursor, err = encodeHistoryWindowCursor(historyWindowCursor{SessionID: ref.SessionID, StorageRevision: metadata.storageRevision, SnapshotSequence: snapshot, Boundary: boundary, Direction: historyWindowDirOlder, Projection: historyIndexVersion, Generation: metadata.generation})
 			if err != nil {
 				return HistoryWindowPage{}, err
 			}
@@ -418,7 +418,7 @@ func (q *Query) readHistoryWindowPage(ctx context.Context, db *sql.DB, filesyste
 	page.HasOlder = hasMoreBeyond
 	if page.HasOlder && len(page.Messages) > 0 {
 		oldest := page.Messages[len(page.Messages)-1]
-		page.OlderCursor, err = encodeHistoryWindowCursor(historyWindowCursor{SessionID: ref.SessionID, StorageRevision: StorageRevision, SnapshotSequence: snapshot, Boundary: oldest.Position, Direction: historyWindowDirOlder, Projection: historyIndexVersion, Generation: metadata.generation})
+		page.OlderCursor, err = encodeHistoryWindowCursor(historyWindowCursor{SessionID: ref.SessionID, StorageRevision: metadata.storageRevision, SnapshotSequence: snapshot, Boundary: oldest.Position, Direction: historyWindowDirOlder, Projection: historyIndexVersion, Generation: metadata.generation})
 		if err != nil {
 			return HistoryWindowPage{}, err
 		}
@@ -432,7 +432,7 @@ func (q *Query) readHistoryWindowPage(ctx context.Context, db *sql.DB, filesyste
 	}
 	page.HasNewer = newer
 	if page.HasNewer {
-		page.NewerCursor, err = encodeHistoryWindowCursor(historyWindowCursor{SessionID: ref.SessionID, StorageRevision: StorageRevision, SnapshotSequence: snapshot, Boundary: boundary, Direction: historyWindowDirNewer, Projection: historyIndexVersion, Generation: metadata.generation})
+		page.NewerCursor, err = encodeHistoryWindowCursor(historyWindowCursor{SessionID: ref.SessionID, StorageRevision: metadata.storageRevision, SnapshotSequence: snapshot, Boundary: boundary, Direction: historyWindowDirNewer, Projection: historyIndexVersion, Generation: metadata.generation})
 		if err != nil {
 			return HistoryWindowPage{}, err
 		}

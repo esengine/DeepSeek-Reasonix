@@ -6,6 +6,7 @@ import (
 	"strings"
 	"testing"
 
+	"reasonix/internal/attachment"
 	"reasonix/internal/event"
 	"reasonix/internal/provider"
 	"reasonix/internal/tool"
@@ -154,5 +155,23 @@ func TestSubagentImageCandidatesAreCopiedAndIsolated(t *testing.T) {
 	got[0] = "mutated again"
 	if again := SubagentImageCandidates(ctx); again[0] != "data:image/png;base64,AAAA" {
 		t.Fatalf("candidate accessor exposed mutable context state: %v", again)
+	}
+}
+
+func TestSubagentImageInputsAreCopiedAndPreferredOverCandidates(t *testing.T) {
+	inputs := []attachment.ImageInput{{Kind: attachment.KindURL, URL: "https://example.invalid/a.png"}}
+	ctx := WithSubagentImageInputs(context.Background(), inputs)
+	inputs[0].URL = "mutated"
+	got := SubagentImageInputs(ctx)
+	if len(got) != 1 || got[0].URL != "https://example.invalid/a.png" {
+		t.Fatalf("inputs = %+v", got)
+	}
+	ctx = WithSubagentImageCandidates(ctx, []string{"data:image/png;base64,AAAA"})
+	wired := withSubagentTurnImages(ctx)
+	if len(userImages(wired)) != 0 {
+		t.Fatalf("ImageInputs path leaked Images = %v", userImages(wired))
+	}
+	if len(userImageInputs(wired)) != 1 || userImageInputs(wired)[0].URL != "https://example.invalid/a.png" {
+		t.Fatalf("wired ImageInputs = %+v", userImageInputs(wired))
 	}
 }

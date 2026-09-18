@@ -45,7 +45,7 @@ export const IPC = {
   browserTakeover: "reasonix:browser:takeover",
 } as const;
 
-export type ServicePhase = "starting" | "ready" | "restarting" | "failed" | "exited";
+export type ServicePhase = "starting" | "ready" | "restarting" | "stopping" | "failed" | "exited";
 
 export interface ServiceState {
   phase: ServicePhase;
@@ -66,7 +66,7 @@ export interface EventFrame {
   args: unknown[];
 }
 
-export type IpcResult = { ok: true; value: unknown } | { ok: false; message: string };
+export type IpcResult = { ok: true; value: unknown } | { ok: false; message: string; code?: number; details?: unknown };
 
 export interface WindowBounds {
   x: number;

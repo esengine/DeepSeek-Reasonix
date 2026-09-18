@@ -121,7 +121,7 @@ export function applyTheme(theme: Theme, style: ThemeStyle = getThemeStyle(theme
   const host = desktopHost();
   if (host.kind !== "none") {
     syncAutoThemeBackgroundListener(theme);
-    host.native.setWindowTheme(theme === "auto" ? "system" : theme);
+    host.native.window.setTheme(theme === "auto" ? "system" : theme);
     syncNativeWindowBackground(theme);
   }
 
@@ -209,9 +209,9 @@ function syncNativeWindowBackground(theme: Theme): void {
   if (host.kind === "none") return;
   if (getResolvedTheme(theme) === "light") {
     // Light shell: matches graphite --bg (#f4f3ef).
-    host.native.setWindowBackground(244, 243, 239, 255);
+    host.native.window.setBackgroundColour(244, 243, 239, 255);
   } else {
     // Dark shell: matches :root --bg (#090a0c).
-    host.native.setWindowBackground(9, 10, 12, 255);
+    host.native.window.setBackgroundColour(9, 10, 12, 255);
   }
 }

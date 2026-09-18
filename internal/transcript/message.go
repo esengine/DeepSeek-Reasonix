@@ -54,6 +54,22 @@ type Message struct {
 	ProtocolRecovery *provider.ProtocolRecoveryAction `json:"protocolRecovery,omitempty"`
 	Diagnostic       *provider.FailureDiagnostic      `json:"diagnostic,omitempty"`
 	ServerSearch     []provider.ServerSearchCall      `json:"serverSearch,omitempty"`
+	// Attachments are display-only facts for admitted session images. They never
+	// participate in provider requests; the frontend loads bytes through a
+	// digest-only session read authorized from this session's content graph.
+	Attachments []Attachment `json:"attachments,omitempty"`
+}
+
+// Attachment is the history-card identity of one admitted image. Digest is the
+// SHA-256 of the original bytes; clients must not supply size or index fields.
+type Attachment struct {
+	Kind   string `json:"kind,omitempty"`
+	Digest string `json:"digest,omitempty"`
+	Name   string `json:"name,omitempty"`
+	MIME   string `json:"mime,omitempty"`
+	Width  int    `json:"width,omitempty"`
+	Height int    `json:"height,omitempty"`
+	Bytes  int64  `json:"bytes,omitempty"`
 }
 
 // TurnUsage is the exact sum of the usage events emitted during one UI turn.

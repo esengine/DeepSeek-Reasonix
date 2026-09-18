@@ -15,6 +15,7 @@ export interface WindowHostApi {
   setPosition(x: number, y: number): void;
   setTitle(title: string): void;
   toggleDevTools(): void;
+  close(): void;
 }
 
 export interface DialogHostApi {
@@ -116,6 +117,7 @@ export function buildHostCallTable(deps: HostCallDeps): HostCallTable {
       deps.window.setTitle(str(params, "title"));
       return {};
     },
+    "host/window.close": done(() => deps.window.close()),
     "host/screen.list": () => ({ screens: deps.screens() }),
     "host/dialog.openDirectory": (params) => deps.dialogs.openDirectory(params),
     "host/dialog.openFile": (params) => deps.dialogs.openFile(params),

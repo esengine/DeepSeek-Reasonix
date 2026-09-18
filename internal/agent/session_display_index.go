@@ -137,7 +137,7 @@ func classifyDisplayIndexMessage(m provider.Message, index int, offset, length i
 		Length:                length,
 		Role:                  m.Role,
 		AuthoredTurn:          turn,
-		HasImages:             len(m.Images) > 0,
+		HasImages:             m.HasImagePayload(),
 		HasToolCalls:          len(m.ToolCalls) > 0,
 		LocalOnly:             m.LocalOnly,
 		ToolResult:            m.Role == provider.RoleTool,

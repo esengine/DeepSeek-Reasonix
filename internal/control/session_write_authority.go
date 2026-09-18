@@ -88,16 +88,21 @@ func (c *Controller) WriteAuthorityGeneration() uint64 {
 	return c.executor.Session().WriteAuthority().Generation()
 }
 
-func (c *Controller) submitCommandOrTurn(trimmed, input, display string, scopedRefsOnly bool, editedOriginal, format string) {
+func (c *Controller) submitCommandOrTurn(trimmed, input, display string, scopedRefsOnly bool, editedOriginal, format string, admission turnAdmission) {
 	if err := c.ensureWriteAuthorityReady(); err != nil {
 		c.sink.Emit(event.Event{Kind: event.Notice, Level: event.LevelWarn, Text: "input was not accepted: this session is no longer writable — reopen it and try again"})
 		return
 	}
-	c.submitCommandOrTurnReady(trimmed, input, display, scopedRefsOnly, editedOriginal, format)
+	c.submitCommandOrTurnReady(trimmed, input, display, scopedRefsOnly, editedOriginal, format, admission)
 }
 
 // Run verifies the live write generation before synchronous headless turns.
 func (c *Controller) Run(ctx context.Context, input string) error {
+	prepared, failures := c.prepareSubmissionImagesContext(ctx, SubmissionRequest{Input: input})
+	if len(failures) > 0 {
+		return ImageReferenceFailures(failures)
+	}
+	ctx = contextWithPreparedImageReferences(ctx, prepared)
 	err := c.runSynchronousTurn(ctx, nil, func(runCtx context.Context) error {
 		return c.runReady(runCtx, input)
 	})

@@ -27,6 +27,8 @@ export interface DesktopHostStubOptions {
   browserControlCalls?: string[];
   /** Outcome of the Chrome sign-in-state import. */
   chromeImportOutcome?: ChromeImportOutcome;
+  /** Overrides for native window ownership tests. */
+  window?: Partial<ReasonixDesktopHost["native"]["window"]>;
 }
 
 function browserControlStub(options: DesktopHostStubOptions): BrowserControlApi {
@@ -145,6 +147,7 @@ export function installDesktopHostStub(commands: object, options: DesktopHostStu
         return factor;
       },
       resetAppZoom: async () => 1,
+      ...options.window,
       },
       graphics: {
         get: () => Promise.resolve({ hardwareAcceleration: true, startupEnabled: true, override: "none" as const, restartRequired: false, writable: true, warning: null }),

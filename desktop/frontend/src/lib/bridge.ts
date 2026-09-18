@@ -1,4 +1,6 @@
 import { makeMockSessionExportBindings, type SessionExportBindings } from "./sessionExportBridge";
+import type { AttachmentBindings } from "./attachmentBindings";
+import { makeMockImageRecoveryBindings, type ImageRecoveryBindings } from "./imageRecoveryBindings";
 import { makeMockSessionLifecycleBindings, type SessionLifecycleBindings } from "./sessionLifecycleBindings";
 import { makeMockModelSettingsBindings, type ModelSettingsBindings } from "./modelSettingsBridge";
 import { mockProviderTemplate, mockPreset, mockBundlePreset, mockKimiAPIModels, mockLongCatModels, mockTokenRhythmModels, mockTokenRhythmModelOverrides, mockMiMoV25Models, mockMiniMaxModels, mockGLMAPIModels, mockGLMCodingModels, mockGLMAnthropicModels, mockQwenAPIModels, mockQwenPlanModels, mockQwenPlanVisionModels, mockStepFunModels, mockOpenCodeGoModels, mockNovitaModels, mockGMIModels, mockVercelModels, mockOllamaCloudModels } from "./mockProviderTemplates";
@@ -198,7 +200,6 @@ import { browserPreviewShellSupport } from "./shellSupportPreview";
 import { desktopHost } from "./desktopHost";
 export * from "./remoteTabEvents";
 export const COMPACT_RATIO_MIN_PERCENT = 30, COMPACT_RATIO_MAX_PERCENT = 85;
-
 export interface DesktopShellStatusView {
   trayState: "probing" | "ready" | "unavailable";
   backgroundCloseAvailable: boolean;
@@ -241,9 +242,8 @@ interface DesktopWindowState {
   y: number;
   maximised: boolean;
 }
-// AppBindings is the hand-written React-to-Go contract. _CheckGeneratedBindings
-// catches generated methods missing here; update this interface and typecheck.
-export interface AppBindings extends SessionExportBindings, SessionLifecycleBindings, ForkTargetsBindings, ToolRecoveryBindings, ModelSettingsBindings, SessionCatalogBindings, ProjectTreeOrganizationBindings, HistoryCatalogBindings, TaskCatalogBindings, BlankProjectBindings, QualityFloorBindings, SessionTitleBindings, ScrollDiagnosticBindings, RemoteProjectBindings, MCPAppBindings, PinnedContextBindings, FollowupBindings, TranscriptProtocolBindings, SessionReaderBindings {
+// AppBindings is the hand-written React-to-Go contract checked against generated method names.
+export interface AppBindings extends AttachmentBindings, ImageRecoveryBindings, SessionExportBindings, SessionLifecycleBindings, ForkTargetsBindings, ToolRecoveryBindings, ModelSettingsBindings, SessionCatalogBindings, ProjectTreeOrganizationBindings, HistoryCatalogBindings, TaskCatalogBindings, BlankProjectBindings, QualityFloorBindings, SessionTitleBindings, ScrollDiagnosticBindings, RemoteProjectBindings, MCPAppBindings, PinnedContextBindings, FollowupBindings, TranscriptProtocolBindings, SessionReaderBindings {
   GetLegacyEmptySessionCleanupStatus(): Promise<LegacyEmptySessionCleanupStatus>;
   RetryLegacyEmptySessionCleanup(): Promise<LegacyEmptySessionCleanupStatus>;
   OpenSessionDraft(workspaceId: string): Promise<SessionDraftView>;
@@ -261,13 +261,13 @@ export interface AppBindings extends SessionExportBindings, SessionLifecycleBind
   BeginDraftSubmission(request: SessionDraftSubmissionRequest): Promise<SessionDraftSubmissionView>;
   GetDraftSubmission(operationId: string): Promise<SessionDraftSubmissionView>;
   CancelDraftSubmission(operationId: string): Promise<SessionDraftSubmissionView>;
-  SavePastedImageForTarget(target: ComposerTarget, dataUrl: string): Promise<string>;
-  SavePastedFileForTarget(target: ComposerTarget, name: string, dataUrl: string): Promise<string>;
-  SaveClipboardImageForTarget(target: ComposerTarget): Promise<string>;
-  AttachDroppedForTarget(target: ComposerTarget, path: string): Promise<DroppedItem>;
+  SavePastedImageForComposerTarget(target: ComposerTarget, dataUrl: string): Promise<string>;
+  SavePastedFileForComposerTarget(target: ComposerTarget, name: string, dataUrl: string): Promise<string>;
+  SaveClipboardImageForComposerTarget(target: ComposerTarget): Promise<string>;
+  AttachDroppedForComposerTarget(target: ComposerTarget, path: string): Promise<DroppedItem>;
   ListDirForTarget(target: ComposerTarget, rel: string): Promise<DirEntry[]>;
   SearchFileRefsForTarget(target: ComposerTarget, query: string): Promise<DirEntry[]>;
-  AttachmentDataURLForTarget(target: ComposerTarget, path: string): Promise<string>;
+  AttachmentDataURLForComposerTarget(target: ComposerTarget, path: string): Promise<string>;
   GetSessionActivityBaseline(selector: SessionSelector): Promise<import("../generated/desktopContract.generated").SessionActivityBaseline>;
   GetWorkspaceSnapshot(): Promise<WorkspaceSnapshot>;
   CreateSession(workspaceId: string): Promise<SessionRef>;
@@ -902,10 +902,22 @@ function hostEvents(name: string, cb: (...args: unknown[]) => void): (() => void
   const host = desktopHost();
   return host.kind === "none" ? null : host.events.on(name, cb);
 }
+type LazyMockAttachmentCommand = keyof AttachmentBindings
+  | "SavePastedImage"
+  | "SavePastedImageForComposerTarget"
+  | "SaveClipboardImage"
+  | "SaveClipboardImageForComposerTarget"
+  | "SavePastedFile"
+  | "SavePastedFileForComposerTarget"
+  | "AttachDropped"
+  | "AttachDroppedForComposerTarget"
+  | "AttachmentDataURL"
+  | "AttachmentDataURLForComposerTarget";
+type MockAppBindings = Omit<AppBindings, LazyMockAttachmentCommand>;
 
 let mockSingleton: AppBindings | null = null;
 function getMock(): AppBindings {
-  if (!mockSingleton) mockSingleton = makeMockApp();
+  if (!mockSingleton) mockSingleton = makeMockApp() as AppBindings;
   return mockSingleton;
 }
 
@@ -1128,8 +1140,10 @@ function elapsedMs(startedAt: number): number {
 
 export const app: AppBindings = new Proxy({} as AppBindings, {
   get(_t, prop) {
-    const target = desktopHost().app ?? getMock();
-    const v = (target as unknown as Record<string, unknown>)[String(prop)];
+    const host = desktopHost().app, target = host ?? getMock();
+    let v = (target as unknown as Record<string, unknown>)[String(prop)];
+    if (!host && v === undefined && typeof prop === "string") v = (...args: unknown[]) => import("./attachmentBindings").then(
+      module => module.callMockAttachment(target, prop as keyof AttachmentBindings, args));
     if (typeof v !== "function") return v;
     return (...args: unknown[]) => {
       const method = String(prop), crumb = bridgeBreadcrumb(method);
@@ -1378,14 +1392,11 @@ function cloneMockProviderTemplates(id: string, key: string): ProviderView[] | u
   }));
 }
 
-const mockPreviewImageDataURL =
-  "data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='160' height='120' viewBox='0 0 160 120'%3E%3Cdefs%3E%3ClinearGradient id='g' x1='0' y1='0' x2='1' y2='1'%3E%3Cstop offset='0' stop-color='%23f97316'/%3E%3Cstop offset='1' stop-color='%232563eb'/%3E%3C/linearGradient%3E%3C/defs%3E%3Crect width='160' height='120' rx='14' fill='url(%23g)'/%3E%3Ccircle cx='44' cy='38' r='16' fill='%23fff7ed' opacity='.9'/%3E%3Cpath d='M18 96 62 58l24 22 18-16 38 32z' fill='%23ffffff' opacity='.9'/%3E%3C/svg%3E";
-
 function mockExternalOpenerIconDataURL(color: string, label: string): string {
   const svg = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64"><rect width="64" height="64" rx="14" fill="${color}"/><text x="32" y="40" text-anchor="middle" font-family="system-ui" font-size="25" font-weight="700" fill="white">${label}</text></svg>`;
   return `data:image/svg+xml,${encodeURIComponent(svg)}`;
 }
-function makeMockApp(): AppBindings {
+function makeMockApp(): MockAppBindings {
   const credentialDiagnostics = (actions: string[] = []): CredentialDiagnosticReport => ({
     home: "/mock/.reasonix",
     credentialPath: "/mock/.reasonix/.env",
@@ -1418,7 +1429,6 @@ function makeMockApp(): AppBindings {
   const noticePreviewMock = scenario === "notice";
   const deepSeekUpgradeMock = scenario === "deepseek_upgrade";
   const benchMock = scenario === "bench";
-  const mockAttachmentDataURLs = new Map<string, string>();
   const mockDrafts = new Map<string, SessionDraftView>();
   const mockDraftOperations = new Map<string, SessionDraftSubmissionView>();
   const mockDraftForTarget = (scope: string, workspaceRoot: string): SessionDraftView => {
@@ -2384,7 +2394,7 @@ function makeMockApp(): AppBindings {
     })),
     archivedSessionIds: [...mockArchivedSessionIDs], pendingCreates: [],
   });
-  return {
+  return { ...({} as AttachmentBindings),
     async OpenSessionDraft(workspaceId: string) {
       const prior = [...mockDrafts.values()].find((draft) => draft.workspaceId === workspaceId && draft.status === "active");
       if (prior) return structuredClone(prior);
@@ -2460,7 +2470,7 @@ function makeMockApp(): AppBindings {
       mockDraftOperations.set(operationId, next);
       return structuredClone(next);
     },
-    ...makeMockSessionExportBindings(),
+		...makeMockSessionExportBindings(),
     ...makeMockSessionCatalogBindings(cloneProjectTree),
     ...makeMockBlankProjectBindings(),
     async GetWorkspaceSnapshot() { return mockWorkspaceSnapshot(); },
@@ -3209,6 +3219,7 @@ function makeMockApp(): AppBindings {
           });
           emitMockTurnDone();
         },
+        ...makeMockImageRecoveryBindings(),
         async SetRecoveryCheckpointEnabled(_enabled) {},
         async SetRecoveryCheckpointEnabledTab(_tabID, _enabled) {},
         async RecoveryCheckpointEnabled() {
@@ -4443,30 +4454,6 @@ function makeMockApp(): AppBindings {
     async RevealPath(path: string) {
       console.info("mock RevealPath", path);
     },
-    async SavePastedImage(dataUrl: string) {
-      const path = `.reasonix/attachments/mock-${mockAttachmentDataURLs.size + 1}.png`;
-      mockAttachmentDataURLs.set(path, dataUrl);
-      return path;
-    },
-    async SavePastedImageForTarget(_target: ComposerTarget, dataUrl: string) {
-      return this.SavePastedImage(dataUrl);
-    },
-    async SaveClipboardImage() {
-      const path = `.reasonix/attachments/mock-clipboard-${mockAttachmentDataURLs.size + 1}.png`;
-      mockAttachmentDataURLs.set(path, mockPreviewImageDataURL);
-      return path;
-    },
-    async SaveClipboardImageForTarget(_target: ComposerTarget) {
-      return this.SaveClipboardImage();
-    },
-    async SavePastedFile(name: string, dataUrl: string) {
-      const path = `.reasonix/attachments/mock-${name}`;
-      mockAttachmentDataURLs.set(path, dataUrl);
-      return path;
-    },
-    async SavePastedFileForTarget(_target: ComposerTarget, name: string, dataUrl: string) {
-      return this.SavePastedFile(name, dataUrl);
-    },
     async PickExportFile(defaultFilename: string, _mimeType: string) {
       return defaultFilename;
     },
@@ -4504,26 +4491,6 @@ function makeMockApp(): AppBindings {
           : path;
         await this.SaveExportFile(partPath, payloads[index], true);
       }
-    },
-    async AttachDropped(path: string) {
-      const name = path.split(/[/\\]/).filter(Boolean).pop() ?? path;
-      const hasExt = /\.\w{1,6}$/i.test(name);
-      if (!hasExt) {
-        const tokenName = name.replace(/[^\w.-]+/g, "-") || "folder";
-        return { kind: "workspace" as const, path: `__reasonix_external_folder/mock/${tokenName}`, isDir: true, displayPath: path };
-      }
-      const attachmentPath = `.reasonix/attachments/mock-${name}`;
-      mockAttachmentDataURLs.set(attachmentPath, mockPreviewImageDataURL);
-      return { kind: "attachment" as const, path: attachmentPath };
-    },
-    async AttachDroppedForTarget(_target: ComposerTarget, path: string) {
-      return this.AttachDropped(path);
-    },
-    async AttachmentDataURL(path: string) {
-      return mockAttachmentDataURLs.get(path) ?? mockPreviewImageDataURL;
-    },
-    async AttachmentDataURLForTarget(_target: ComposerTarget, path: string) {
-      return this.AttachmentDataURL(path);
     },
         async Models() {
           const active = mockTabs.find((tab) => tab.active) ?? mockTabs[0];

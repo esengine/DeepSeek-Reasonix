@@ -143,3 +143,18 @@ assert.ok(auditProcess?.kind === "process" && !auditProcess.members.includes("au
 assert.equal(auditSource.toolAudits("call").length, 1, "paired audit stays available in tool details");
 assert.ok(auditSource.getOrderSnapshot().includes("unassociated"), "unpaired audit remains available as diagnostics");
 auditSource.dispose();
+
+const imageRecoverySource = new ChatSource("image-recovery");
+imageRecoverySource.update({ ...input, running: false, items: [
+  { kind: "user", id: "image-user", text: "inspect images" },
+  { kind: "assistant", id: "image-answer", text: "", reasoning: "checking", streaming: false },
+  { kind: "notice", id: "image-recovery", level: "warn", text: "choose image", action: "isolate_images", recoveryId: "recovery", imageRecovery: { id: "recovery", reason: "invalid_image", candidates: [
+    { identity: { messageId: "image-user", imageOrdinal: 0, contentDigest: "a".repeat(64) }, label: "first" },
+    { identity: { messageId: "image-user", imageOrdinal: 1, contentDigest: "b".repeat(64) }, label: "second" },
+  ] } },
+] });
+const imageRecoveryProcess = imageRecoverySource.getNodeSnapshot("image-user:process");
+assert.ok(imageRecoveryProcess?.kind === "process" && !imageRecoveryProcess.foldable, "manual image recovery remains outside the completed process fold");
+assert.ok(!imageRecoveryProcess.members.includes("image-recovery"));
+assert.ok(imageRecoverySource.getOrderSnapshot().includes("image-recovery"));
+imageRecoverySource.dispose();

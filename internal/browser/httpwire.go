@@ -25,17 +25,25 @@ const (
 
 // Wire error codes carried in a 409 body; each maps onto one sentinel.
 const (
-	wireStaleReference = "stale_reference"
-	wireTakenOver      = "taken_over"
-	wireNoGrant        = "no_grant"
-	wireUnknownOutcome = "unknown_outcome"
+	wireStaleReference    = "stale_reference"
+	wireTakenOver         = "taken_over"
+	wireNoGrant           = "no_grant"
+	wireUnknownOutcome    = "unknown_outcome"
+	wireInvalidURL        = "invalid_url"
+	wireUnsupportedScheme = "unsupported_scheme"
+	wireTabUnavailable    = "tab_unavailable"
+	wireInvalidArguments  = "invalid_arguments"
 )
 
 var wireErrorCodes = map[string]error{
-	wireStaleReference: ErrStaleReference,
-	wireTakenOver:      ErrTakenOver,
-	wireNoGrant:        ErrNoGrant,
-	wireUnknownOutcome: ErrUnknownOutcome,
+	wireStaleReference:    ErrStaleReference,
+	wireTakenOver:         ErrTakenOver,
+	wireNoGrant:           ErrNoGrant,
+	wireUnknownOutcome:    ErrUnknownOutcome,
+	wireInvalidURL:        ErrInvalidURL,
+	wireUnsupportedScheme: ErrUnsupportedScheme,
+	wireTabUnavailable:    ErrTabUnavailable,
+	wireInvalidArguments:  ErrInvalidArguments,
 }
 
 type sessionKey struct{}

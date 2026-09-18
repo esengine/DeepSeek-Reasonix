@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"strings"
 
+	"reasonix/internal/attachment"
 	"reasonix/internal/sessioninbox"
 )
 
@@ -23,7 +24,7 @@ func (c *Controller) RunInboxTurn(ctx context.Context, id string) error {
 	if meta.State != sessioninbox.StateQueued {
 		return sessioninbox.ErrInvalidState
 	}
-	run, block, err := c.prepareInboxRun(env)
+	run, block, err := c.prepareInboxRunContext(ctx, env)
 	if err != nil {
 		return err
 	}
@@ -52,6 +53,19 @@ func (c *Controller) RunInboxTurn(ctx context.Context, id string) error {
 }
 
 func (c *Controller) prepareInboxRun(env sessioninbox.PromptEnvelope) (func(context.Context) error, string, error) {
+	return c.prepareInboxRunContext(c.attachmentContext(), env)
+}
+
+func (c *Controller) prepareInboxRunContext(ctx context.Context, env sessioninbox.PromptEnvelope) (func(context.Context) error, string, error) {
+	var sources []attachment.Source
+	for _, input := range env.ImageInputs {
+		if input.Attachment != nil {
+			sources = append(sources, attachment.Source{Existing: input.Attachment, DisplayName: input.Attachment.DisplayName})
+		}
+	}
+	if _, err := c.attachmentService().PrepareBatch(ctx, sources); err != nil {
+		return nil, ImageReferenceFailures(imageFailuresFromAttachment(err)).Error(), nil
+	}
 	submit, frozenImages, block, err := applyInboxReferences(env)
 	if err != nil || block != "" {
 		return nil, block, err
@@ -61,6 +75,7 @@ func (c *Controller) prepareInboxRun(env sessioninbox.PromptEnvelope) (func(cont
 	requests := controlInvocationsFromInbox(env)
 	if len(requests) == 0 {
 		return func(ctx context.Context) error {
+			ctx = contextWithPreparedImageReferences(ctx, preparedImageReferences{inputs: env.ImageInputs})
 			return c.runGoalLoopWithFrozenImagesRawDisplay(c.withTurnFormat(ctx, strings.TrimSpace(env.Format)), submit, raw, display, frozenImages)
 		}, "", nil
 	}
@@ -69,6 +84,7 @@ func (c *Controller) prepareInboxRun(env sessioninbox.PromptEnvelope) (func(cont
 		return nil, err.Error(), nil
 	}
 	return func(ctx context.Context) error {
+		ctx = contextWithPreparedImageReferences(ctx, preparedImageReferences{inputs: env.ImageInputs})
 		return c.runPreparedInvocationTurn(c.withTurnFormat(ctx, strings.TrimSpace(env.Format)), prepared, submit, raw, display, frozenImages)
 	}, "", nil
 }

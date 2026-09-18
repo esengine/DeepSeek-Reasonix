@@ -3,6 +3,7 @@ package browser
 import (
 	"context"
 	"errors"
+	"fmt"
 	"time"
 )
 
@@ -38,8 +39,58 @@ var (
 	ErrNoGrant = errors.New("browser: no browser grant")
 	// ErrUnknownOutcome means a write's receipt was lost: the action may or
 	// may not have run and must never be replayed.
-	ErrUnknownOutcome = errors.New("browser: operation outcome unknown")
+	ErrUnknownOutcome    = errors.New("browser: operation outcome unknown")
+	ErrInvalidURL        = errors.New("browser: invalid URL")
+	ErrUnsupportedScheme = errors.New("browser: unsupported URL scheme")
+	ErrTabUnavailable    = errors.New("browser: tab unavailable")
+	ErrInvalidArguments  = errors.New("browser: invalid arguments")
 )
+
+type RefusalKind string
+
+const (
+	RefusalInvalidURL        RefusalKind = "invalid_url"
+	RefusalUnsupportedScheme RefusalKind = "unsupported_scheme"
+	RefusalTabUnavailable    RefusalKind = "tab_unavailable"
+	RefusalInvalidArguments  RefusalKind = "invalid_arguments"
+)
+
+// RefusalError is a pre-dispatch rejection. Execution is guaranteed not to
+// have started, so callers may safely describe it as not_executed.
+type RefusalError struct {
+	Kind   RefusalKind
+	Detail string
+}
+
+func (e *RefusalError) Error() string {
+	if e == nil || e.Detail == "" {
+		return "browser request refused before execution"
+	}
+	return fmt.Sprintf("browser request refused before execution (%s): %s", e.Kind, e.Detail)
+}
+
+func (e *RefusalError) Unwrap() error {
+	if e == nil {
+		return nil
+	}
+	switch e.Kind {
+	case RefusalInvalidURL:
+		return ErrInvalidURL
+	case RefusalUnsupportedScheme:
+		return ErrUnsupportedScheme
+	case RefusalTabUnavailable:
+		return ErrTabUnavailable
+	case RefusalInvalidArguments:
+		return ErrInvalidArguments
+	default:
+		return nil
+	}
+}
+
+func IsRefusal(err error) bool {
+	var refusal *RefusalError
+	return errors.As(err, &refusal)
+}
 
 // Navigate actions.
 const (

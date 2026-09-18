@@ -276,41 +276,11 @@ type TaskTool struct {
 	// mutationObserver is shared with spawned sub-agents for checkpoint capture.
 	mutationObserver *checkpoint.MutationObserver
 	writeRoots       *sandbox.WritableRootSet
+	imageResolver    ImageRequestResolver
 	// capabilityRuntime is the session-shared MCP Host/specs substrate. Each
 	// sub-agent gets its own use_capability frontend so ledger state stays
 	// isolated while connections reuse the parent Host.
 	capabilityRuntime *MCPCapabilityRuntime
-}
-
-// NewTaskToolWithOptions is the internal standard constructor for TaskTool.
-// An empty SysPrompt still resolves to DefaultTaskSystemPrompt. No extra
-// validation or default overrides are applied beyond the historical NewTaskTool
-// behavior.
-func NewTaskToolWithOptions(opts TaskToolOptions) *TaskTool {
-	sysPrompt := opts.SysPrompt
-	if sysPrompt == "" {
-		sysPrompt = DefaultTaskSystemPrompt
-	}
-	return &TaskTool{
-		imageInput:       opts.ImageInput,
-		prov:             opts.Provider,
-		pricing:          opts.Pricing,
-		quoteContext:     opts.QuoteContext,
-		parentReg:        opts.ParentRegistry,
-		maxSteps:         opts.MaxSteps,
-		contextWindow:    opts.ContextWindow,
-		recentKeep:       opts.RecentKeep,
-		compactRatio:     opts.CompactRatio,
-		temperature:      opts.Temperature,
-		archiveDir:       opts.ArchiveDir,
-		keepPolicy:       opts.KeepPolicy,
-		sysPrompt:        sysPrompt,
-		gate:             opts.Gate,
-		subagentModel:    opts.SubagentModel,
-		subagentEffort:   opts.SubagentEffort,
-		resolveProvider:  opts.ResolveProvider,
-		maxSubagentDepth: DefaultMaxSubagentDepth,
-	}
 }
 
 // NewTaskTool wires a task tool to the parent agent's environment so its
@@ -1510,7 +1480,7 @@ func (t *TaskTool) runSubSession(ctx context.Context, prompt string, subReg *too
 	prompt = t.withWorkspaceContext(prompt) + "\n\n" + completeSubtaskContract
 	// The child provider owns the final vision decision. Text-only providers
 	// retain the attachment metadata but omit image parts during serialization.
-	ctx = WithUserImages(ctx, SubagentImageCandidates(ctx))
+	ctx = withSubagentTurnImages(ctx)
 	return RunSubAgentWithSession(ctx, prov, subReg, sess, prompt, opts, sink)
 }
 
@@ -1521,7 +1491,7 @@ func (t *TaskTool) runReadOnlySubSession(ctx context.Context, prompt string, sub
 	// intent classification must judge the task, not the wrapper.
 	opts.ClassifierTaskText = prompt
 	prompt = t.withWorkspaceContext(prompt)
-	ctx = WithUserImages(ctx, SubagentImageCandidates(ctx))
+	ctx = withSubagentTurnImages(ctx)
 	return RunReadOnlySubAgentWithSession(ctx, prov, subReg, sess, prompt, opts, sink)
 }
 

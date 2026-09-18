@@ -9,17 +9,26 @@ import "slices"
 // ModelMessages removes durable display-only records before a request is
 // handed to any provider. Healthy sessions without such records keep their
 // original backing slice, preserving the allocation and prompt-cache fast path.
-func ModelMessages(msgs []Message) []Message { return projectMessages(msgs, false, false) }
+func ModelMessages(msgs []Message) []Message { return projectMessages(msgs, false, false, false) }
 
 // ProjectionMessages is ModelMessages for a stored projection, except that
 // ToolExecution and Origin survive: a projection is also the next compaction's
 // input, and those records classify tool failures and host-authored protocol
 // messages. Stripping belongs at the provider boundary, which every request
 // path already crosses.
-func ProjectionMessages(msgs []Message) []Message { return projectMessages(msgs, true, true) }
+func ProjectionMessages(msgs []Message) []Message { return projectMessages(msgs, true, true, false) }
 
-func messagesNeedProjection(msgs []Message, keepExecution, keepOrigin bool) bool {
+// ImagePreflightMessages removes local-only provider metadata while retaining
+// image-isolation decisions until the request preflight has applied them.
+func ImagePreflightMessages(msgs []Message) []Message {
+	return projectMessages(msgs, false, false, true)
+}
+
+func messagesNeedProjection(msgs []Message, keepExecution, keepOrigin, keepImageIsolations bool) bool {
 	for _, m := range msgs {
+		if len(m.ImageIsolations) > 0 && !keepImageIsolations {
+			return true
+		}
 		if m.InterruptedTurn != nil || slices.ContainsFunc(m.ToolCalls, func(c ToolCall) bool { return c.Recovery != nil }) || m.ReadPause != nil || m.ReadCompletion != nil || len(m.ToolDiagnostic) > 0 {
 			return true
 		}
@@ -30,8 +39,8 @@ func messagesNeedProjection(msgs []Message, keepExecution, keepOrigin bool) bool
 	return false
 }
 
-func projectMessages(msgs []Message, keepExecution, keepOrigin bool) []Message {
-	if !messagesNeedProjection(msgs, keepExecution, keepOrigin) {
+func projectMessages(msgs []Message, keepExecution, keepOrigin, keepImageIsolations bool) []Message {
+	if !messagesNeedProjection(msgs, keepExecution, keepOrigin, keepImageIsolations) {
 		return msgs
 	}
 	out := make([]Message, 0, len(msgs))
@@ -52,6 +61,9 @@ func projectMessages(msgs []Message, keepExecution, keepOrigin bool) []Message {
 		candidate.InterruptedTurn = nil
 		candidate.ReadCompletion = nil
 		candidate.ToolDiagnostic = nil
+		if !keepImageIsolations {
+			candidate.ImageIsolations = nil
+		}
 		if !keepExecution && slices.ContainsFunc(candidate.ServerSearch, func(s ServerSearchCall) bool { return s.SourcesStatus != "" }) {
 			candidate.ServerSearch = append([]ServerSearchCall(nil), candidate.ServerSearch...)
 			for i := range candidate.ServerSearch {

@@ -83,6 +83,14 @@ func writeWireError(w http.ResponseWriter, status int, code, message string) {
 // anything else is a 500 the client reports as a plain error.
 func writeResult(w http.ResponseWriter, v any, err error) {
 	if err != nil {
+		var refusal *RefusalError
+		if errors.As(err, &refusal) {
+			code := string(refusal.Kind)
+			if _, ok := wireErrorCodes[code]; ok {
+				writeWireError(w, http.StatusConflict, code, refusal.Error())
+				return
+			}
+		}
 		for _, code := range []string{wireStaleReference, wireTakenOver, wireNoGrant, wireUnknownOutcome} {
 			if errors.Is(err, wireErrorCodes[code]) {
 				writeWireError(w, http.StatusConflict, code, err.Error())

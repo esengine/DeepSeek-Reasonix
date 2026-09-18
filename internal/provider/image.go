@@ -1,9 +1,12 @@
 package provider
 
 import (
+	"errors"
 	"net/url"
 	"strings"
 	"unicode/utf8"
+
+	"reasonix/internal/attachment"
 )
 
 const (
@@ -88,4 +91,24 @@ func IsImageHTTPURL(s string) bool {
 	default:
 		return false
 	}
+}
+
+func (m Message) HasImagePayload() bool {
+	return len(m.Images) > 0 || len(m.ImageInputs) > 0
+}
+
+func (m Message) ValidateImageFields() error {
+	if len(m.Images) > 0 && len(m.ImageInputs) > 0 {
+		return errors.New("message must not combine images and image_inputs")
+	}
+	for _, in := range m.ImageInputs {
+		if err := in.Validate(); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func CloneImageInputs(in []attachment.ImageInput) []attachment.ImageInput {
+	return attachment.CloneImageInputs(in)
 }

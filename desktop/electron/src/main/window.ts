@@ -19,8 +19,7 @@ export interface MainWindowDeps {
   onAppDomReady(rendererGeneration: number): void;
   onRendererLost?(reason: string): void;
   isQuitting?(): boolean;
-  onCloseRequested(): Promise<boolean>;
-  onCloseAllowed(): void;
+  onCloseRequested(): void;
   onShellAction(action: ShellAction): void;
   zoomStore: AppZoomStore;
 }
@@ -36,7 +35,6 @@ export class MainWindow {
   private content: Content = "none";
   private frameless = false;
   private rendererGeneration = 0;
-  private closing = false;
   private closeAllowed = false;
   private lastMaximised = false;
   private lastNormalBounds: WindowRect | undefined;
@@ -143,7 +141,7 @@ export class MainWindow {
     win.on("close", (event) => {
       if (this.closeAllowed) return;
       event.preventDefault();
-      void this.requestClose();
+      this.deps.onCloseRequested();
     });
     win.on("closed", () => {
       if (this.win === win) this.win = null;
@@ -339,27 +337,4 @@ export class MainWindow {
     this.browserWindow?.setBackgroundColor(`#${hex(r)}${hex(g)}${hex(b)}`);
   }
 
-  private async requestClose(): Promise<void> {
-    if (this.closing) return;
-    this.closing = true;
-    try {
-      try {
-        await this.flushSessionDraft();
-      } catch (error) {
-        this.deps.log.warn(`window close paused because draft flush failed: ${errorText(error)}`);
-        return;
-      }
-      const prevent = await this.deps.onCloseRequested();
-      if (prevent) {
-        await this.resumeSessionDraftEditing();
-        this.hide();
-      }
-      else this.deps.onCloseAllowed();
-    } catch (error) {
-      this.deps.log.warn(`beforeClose(window) failed, closing anyway: ${errorText(error)}`);
-      this.deps.onCloseAllowed();
-    } finally {
-      this.closing = false;
-    }
-  }
 }

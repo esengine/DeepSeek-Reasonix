@@ -3,7 +3,7 @@
 
 export const DESKTOP_PROTOCOL_VERSION = 10;
 
-export const DESKTOP_CONTRACT_DIGEST = "sha256:60be2ba6cd33667c18be752b94c5e91c70ae9c50cd249f01fe54a1c19f8bf1ea";
+export const DESKTOP_CONTRACT_DIGEST = "sha256:ab0edda56f4bbd3bf52e1f6f6704cabd916fc7a2390b6a1a01944c924816703a";
 
 export const DESKTOP_COMMANDS = [
   "AIRenameSession",
@@ -48,8 +48,12 @@ export const DESKTOP_COMMANDS = [
   "ArchiveCanonicalSession",
   "ArchiveSessionTarget",
   "AttachDropped",
+  "AttachDroppedForComposerTarget",
+  "AttachDroppedForTab",
   "AttachDroppedForTarget",
   "AttachmentDataURL",
+  "AttachmentDataURLForComposerTarget",
+  "AttachmentDataURLForTab",
   "AttachmentDataURLForTarget",
   "AuthenticateMCPServer",
   "AuthorizeAndConnectMCPServer",
@@ -79,6 +83,7 @@ export const DESKTOP_COMMANDS = [
   "CancelTrySubagentProfile",
   "Capabilities",
   "CapabilityDiagnostics",
+  "CaptureAttachmentTarget",
   "CaptureInboxTarget",
   "CheckRemotePlatform",
   "CheckUpdate",
@@ -149,6 +154,7 @@ export const DESKTOP_COMMANDS = [
   "EditRemoteTabGoal",
   "Effort",
   "EffortForTab",
+  "EnqueueForAttachmentTarget",
   "EnqueueInboxFollowup",
   "EnqueueInboxFollowupForTarget",
   "EnqueueInboxFollowupWithInvocations",
@@ -356,6 +362,8 @@ export const DESKTOP_COMMANDS = [
   "PurgeRecoveryCopy",
   "PurgeTrashedSession",
   "QuerySessionTakeover",
+  "ReadDraftImageForTab",
+  "ReadDraftImageForTarget",
   "ReadFile",
   "ReadFileForTab",
   "ReadInboxItem",
@@ -365,8 +373,10 @@ export const DESKTOP_COMMANDS = [
   "ReadReferenceFileForTab",
   "ReadReferenceFileSourceForTab",
   "ReadRemoteFile",
+  "ReadSessionAttachmentForTab",
   "ReadSessionExportChunk",
   "ReadSessionHistory",
+  "RebindDraftImageForTarget",
   "RebuildHistoryIndex",
   "RebuildSessionCatalog",
   "RebuildTaskCatalog",
@@ -379,6 +389,9 @@ export const DESKTOP_COMMANDS = [
   "RefreshInboxItem",
   "RefreshSkills",
   "RegisterNavigationIntent",
+  "ReleaseAttachmentTarget",
+  "ReleaseDraftImageForTab",
+  "ReleaseDraftImageForTarget",
   "ReloadCommands",
   "ReloadRuntime",
   "ReloadSettings",
@@ -448,6 +461,8 @@ export const DESKTOP_COMMANDS = [
   "ResetThemePack",
   "ResizeTerminalForTab",
   "ResolveChatFileReferencesForTab",
+  "ResolveImageRecovery",
+  "ResolveImageRecoveryForTab",
   "ResolveMarkdownImageForTab",
   "ResolvePlanDecision",
   "ResolvePlanDecisionTab",
@@ -503,6 +518,8 @@ export const DESKTOP_COMMANDS = [
   "RuntimeDoctor",
   "SanitizeMarkdownSVG",
   "SaveClipboardImage",
+  "SaveClipboardImageForComposerTarget",
+  "SaveClipboardImageForTab",
   "SaveClipboardImageForTarget",
   "SaveDoc",
   "SaveDocForTab",
@@ -512,9 +529,12 @@ export const DESKTOP_COMMANDS = [
   "SaveHooksSettingsForRoot",
   "SaveLocalPathAs",
   "SavePastedFile",
+  "SavePastedFileForComposerTarget",
+  "SavePastedFileForTab",
   "SavePastedFileForTarget",
   "SavePastedImage",
-  "SavePastedImageForTarget",
+  "SavePastedImageForComposerTarget",
+  "SavePastedImageForTab",
   "SavePresentedPathAsForTab",
   "SaveProvider",
   "SaveProviderKey",
@@ -648,9 +668,13 @@ export const DESKTOP_COMMANDS = [
   "Settings",
   "SkillsSettings",
   "SlashArgs",
+  "StageImageForTab",
+  "StageImageForTarget",
   "StartBotConnectionInstall",
   "StartTopicActivation",
+  "StartTurnForAttachmentTarget",
   "StartTurnForTab",
+  "StartTurnForTabWithDrafts",
   "Steer",
   "SteerForTab",
   "SteerInboxItem",
@@ -767,6 +791,14 @@ export interface ToolRecoveryStatistics {
   retried: number;
   rejected: number;
   blocked: number;
+}
+
+export interface AttachmentRef {
+  v: number;
+  content: Ref;
+  width?: number;
+  height?: number;
+  name?: string;
 }
 
 export interface CostQuote {
@@ -1055,6 +1087,12 @@ export interface CancelReceipt {
   recoveryRequired: boolean;
 }
 
+export interface control_InvocationRequest {
+  name: string;
+  kind: string;
+  offset: number;
+}
+
 export interface PermissionCapabilities {
   backend: string;
   enforcement: string;
@@ -1078,6 +1116,29 @@ export interface PermissionSnapshot {
 export interface SessionGrantSummary {
   scope: string;
   target: string;
+}
+
+export interface SubmissionAttachment {
+  clientAttachmentId: string;
+  draftId?: string;
+  path?: string;
+  reference?: AttachmentRef | null;
+}
+
+export interface SubmissionRequest {
+  http?: boolean;
+  input: string;
+  display?: string;
+  format?: string;
+  action?: string;
+  recoveryId?: string;
+  original?: string;
+  goal?: string;
+  toolApprovalMode?: string;
+  invocations?: control_InvocationRequest[];
+  draftIds?: string[];
+  attachmentDigests?: string[];
+  attachments?: SubmissionAttachment[];
 }
 
 export interface ToolRecoveryRequest {
@@ -1354,6 +1415,7 @@ export interface Event {
   outcome?: string;
   readiness?: eventwire_FinalReadiness | null;
   protocolRecovery?: ProtocolRecoveryAction | null;
+  imageRecovery?: ImageRecoveryAction | null;
   diagnostic?: FailureDiagnostic | null;
   receipt?: CompletionReceipt | null;
   checkpointTurn?: number | null;
@@ -1720,6 +1782,11 @@ export interface AgentView {
   compactRatioOverridden?: boolean;
 }
 
+export interface AttachmentTargetView {
+  token: string;
+  capabilities: string[];
+}
+
 export interface BackgroundRuntimeView {
   tabId: string;
   title: string;
@@ -1993,6 +2060,7 @@ export interface ComposerTarget {
   draftId?: string;
   tabId?: string;
   session?: SessionRef | null;
+  generation?: number;
 }
 
 export interface ContextBudgetInfo {
@@ -2157,6 +2225,16 @@ export interface DirEntry {
   isDir: boolean;
   displayName?: string;
   displayPath?: string;
+}
+
+export interface DraftImageView {
+  draftId: string;
+  path?: string;
+  displayName: string;
+  mime: string;
+  width: number;
+  height: number;
+  bytes: number;
 }
 
 export interface DraftWorkspaceRef {
@@ -2564,7 +2642,7 @@ export interface InstructionDiagnostic {
   message: string;
 }
 
-export interface InvocationRequest {
+export interface main_InvocationRequest {
   name: string;
   kind: string;
   offset: number;
@@ -3796,7 +3874,7 @@ export interface SessionDraftSubmissionRequest {
   kind?: string;
   display: string;
   input: string;
-  invocations: InvocationRequest[];
+  invocations: main_InvocationRequest[];
   goal?: string;
   collaborationMode?: string;
   toolApprovalMode?: string;
@@ -4752,6 +4830,23 @@ export interface FailureDiagnostic {
   requestPath?: string;
 }
 
+export interface ImageIdentity {
+  messageId: string;
+  imageOrdinal: number;
+  contentDigest: string;
+}
+
+export interface ImageRecoveryAction {
+  id: string;
+  reason: string;
+  candidates: ImageRecoveryCandidate[];
+}
+
+export interface ImageRecoveryCandidate {
+  identity: ImageIdentity;
+  label: string;
+}
+
 export interface MCPAppPresentation {
   server: string;
   tool: string;
@@ -5119,6 +5214,16 @@ export interface ActiveAttempt {
   nextIndex: number;
 }
 
+export interface Attachment {
+  kind?: string;
+  digest?: string;
+  name?: string;
+  mime?: string;
+  width?: number;
+  height?: number;
+  bytes?: number;
+}
+
 export interface Change {
   runtime?: Runtime | null;
   attemptId?: string;
@@ -5211,6 +5316,7 @@ export interface Message {
   protocolRecovery?: ProtocolRecoveryAction | null;
   diagnostic?: FailureDiagnostic | null;
   serverSearch?: ServerSearchCall[];
+  attachments?: Attachment[];
 }
 
 export interface OutlineEntry {
@@ -5459,9 +5565,13 @@ export interface GeneratedDesktopCommands {
   ArchiveCanonicalSession(arg0: SessionRef): Promise<void>;
   ArchiveSessionTarget(arg0: SessionSelector): Promise<SessionMutationResult>;
   AttachDropped(arg0: string): Promise<DroppedItem>;
-  AttachDroppedForTarget(arg0: ComposerTarget, arg1: string): Promise<DroppedItem>;
+  AttachDroppedForComposerTarget(arg0: ComposerTarget, arg1: string): Promise<DroppedItem>;
+  AttachDroppedForTab(arg0: string, arg1: string): Promise<DroppedItem>;
+  AttachDroppedForTarget(arg0: string, arg1: string): Promise<DroppedItem>;
   AttachmentDataURL(arg0: string): Promise<string>;
-  AttachmentDataURLForTarget(arg0: ComposerTarget, arg1: string): Promise<string>;
+  AttachmentDataURLForComposerTarget(arg0: ComposerTarget, arg1: string): Promise<string>;
+  AttachmentDataURLForTab(arg0: string, arg1: string): Promise<string>;
+  AttachmentDataURLForTarget(arg0: string, arg1: string): Promise<string>;
   AuthenticateMCPServer(arg0: string): Promise<void>;
   AuthorizeAndConnectMCPServer(arg0: string): Promise<void>;
   AvailableSubagentTools(): Promise<ToolView[]>;
@@ -5490,6 +5600,7 @@ export interface GeneratedDesktopCommands {
   CancelTrySubagentProfile(): Promise<void>;
   Capabilities(): Promise<CapabilitiesView>;
   CapabilityDiagnostics(arg0: boolean): Promise<Report>;
+  CaptureAttachmentTarget(arg0: ComposerTarget): Promise<AttachmentTargetView>;
   CaptureInboxTarget(arg0: string, arg1: string): Promise<InboxTargetView>;
   CheckRemotePlatform(arg0: string): Promise<void>;
   CheckUpdate(arg0: string): Promise<UpdateInfo | null>;
@@ -5560,9 +5671,10 @@ export interface GeneratedDesktopCommands {
   EditRemoteTabGoal(arg0: string, arg1: string, arg2: number | null): Promise<void>;
   Effort(): Promise<EffortInfo>;
   EffortForTab(arg0: string): Promise<EffortInfo>;
+  EnqueueForAttachmentTarget(arg0: string, arg1: string, arg2: string, arg3: string, arg4: control_InvocationRequest[], arg5: SubmissionAttachment[]): Promise<InboxReceiptView>;
   EnqueueInboxFollowup(arg0: string, arg1: string, arg2: string, arg3: string): Promise<InboxReceiptView>;
-  EnqueueInboxFollowupForTarget(arg0: InboxTargetView, arg1: string, arg2: string, arg3: InvocationRequest[], arg4: string): Promise<InboxReceiptView>;
-  EnqueueInboxFollowupWithInvocations(arg0: string, arg1: string, arg2: string, arg3: InvocationRequest[], arg4: string): Promise<InboxReceiptView>;
+  EnqueueInboxFollowupForTarget(arg0: InboxTargetView, arg1: string, arg2: string, arg3: main_InvocationRequest[], arg4: string): Promise<InboxReceiptView>;
+  EnqueueInboxFollowupWithInvocations(arg0: string, arg1: string, arg2: string, arg3: main_InvocationRequest[], arg4: string): Promise<InboxReceiptView>;
   EnqueueInboxSteer(arg0: string, arg1: string, arg2: string, arg3: string): Promise<InboxReceiptView>;
   EnqueueInboxSteerForTurn(arg0: string, arg1: string, arg2: string, arg3: string, arg4: string): Promise<InboxReceiptView>;
   EnsureBlankSurface(arg0: string, arg1: string): Promise<TabMeta>;
@@ -5767,6 +5879,8 @@ export interface GeneratedDesktopCommands {
   PurgeRecoveryCopy(arg0: string): Promise<void>;
   PurgeTrashedSession(arg0: string): Promise<void>;
   QuerySessionTakeover(arg0: string): Promise<SessionTakeoverView | null>;
+  ReadDraftImageForTab(arg0: string, arg1: string): Promise<string>;
+  ReadDraftImageForTarget(arg0: string, arg1: string): Promise<string>;
   ReadFile(arg0: string): Promise<FilePreview>;
   ReadFileForTab(arg0: string, arg1: string): Promise<FilePreview>;
   ReadInboxItem(arg0: string, arg1: string): Promise<InboxEnvelopeView>;
@@ -5776,8 +5890,10 @@ export interface GeneratedDesktopCommands {
   ReadReferenceFileForTab(arg0: string, arg1: string): Promise<FilePreview>;
   ReadReferenceFileSourceForTab(arg0: string, arg1: string): Promise<FilePreview>;
   ReadRemoteFile(arg0: string, arg1: string): Promise<RemoteFilePreview>;
+  ReadSessionAttachmentForTab(arg0: string, arg1: string, arg2: number): Promise<SessionHistoryContentChunk>;
   ReadSessionExportChunk(arg0: string, arg1: number): Promise<SessionExportChunk>;
   ReadSessionHistory(arg0: SessionRef, arg1: string, arg2: number): Promise<HistoryPage>;
+  RebindDraftImageForTarget(arg0: string, arg1: string): Promise<DraftImageView>;
   RebuildHistoryIndex(): Promise<void>;
   RebuildSessionCatalog(): Promise<void>;
   RebuildTaskCatalog(): Promise<void>;
@@ -5790,6 +5906,9 @@ export interface GeneratedDesktopCommands {
   RefreshInboxItem(arg0: string, arg1: string): Promise<void>;
   RefreshSkills(): Promise<void>;
   RegisterNavigationIntent(arg0: string): Promise<void>;
+  ReleaseAttachmentTarget(arg0: string): Promise<void>;
+  ReleaseDraftImageForTab(arg0: string, arg1: string): Promise<void>;
+  ReleaseDraftImageForTarget(arg0: string, arg1: string): Promise<void>;
   ReloadCommands(): Promise<void>;
   ReloadRuntime(arg0: string): Promise<void>;
   ReloadSettings(): Promise<void>;
@@ -5859,6 +5978,8 @@ export interface GeneratedDesktopCommands {
   ResetThemePack(): Promise<void>;
   ResizeTerminalForTab(arg0: string, arg1: string, arg2: number, arg3: number): Promise<void>;
   ResolveChatFileReferencesForTab(arg0: string, arg1: string, arg2: ChatFileReferenceRequest[]): Promise<ChatFileReferenceResult>;
+  ResolveImageRecovery(arg0: string, arg1: ImageIdentity[]): Promise<void>;
+  ResolveImageRecoveryForTab(arg0: string, arg1: string, arg2: ImageIdentity[]): Promise<void>;
   ResolveMarkdownImageForTab(arg0: string, arg1: string): Promise<MarkdownImageView>;
   ResolvePlanDecision(arg0: string, arg1: string): Promise<void>;
   ResolvePlanDecisionTab(arg0: string, arg1: string, arg2: string): Promise<void>;
@@ -5914,7 +6035,9 @@ export interface GeneratedDesktopCommands {
   RuntimeDoctor(): Promise<RuntimeDoctorReport>;
   SanitizeMarkdownSVG(arg0: string): Promise<MarkdownSVGView>;
   SaveClipboardImage(): Promise<string>;
-  SaveClipboardImageForTarget(arg0: ComposerTarget): Promise<string>;
+  SaveClipboardImageForComposerTarget(arg0: ComposerTarget): Promise<string>;
+  SaveClipboardImageForTab(arg0: string): Promise<string>;
+  SaveClipboardImageForTarget(arg0: string): Promise<string>;
   SaveDoc(arg0: string, arg1: string): Promise<string>;
   SaveDocForTab(arg0: string, arg1: string, arg2: string): Promise<string>;
   SaveExportFile(arg0: string, arg1: string, arg2: boolean): Promise<void>;
@@ -5923,9 +6046,12 @@ export interface GeneratedDesktopCommands {
   SaveHooksSettingsForRoot(arg0: string, arg1: string, arg2: HookConfigView[]): Promise<void>;
   SaveLocalPathAs(arg0: string): Promise<string>;
   SavePastedFile(arg0: string, arg1: string): Promise<string>;
-  SavePastedFileForTarget(arg0: ComposerTarget, arg1: string, arg2: string): Promise<string>;
+  SavePastedFileForComposerTarget(arg0: ComposerTarget, arg1: string, arg2: string): Promise<string>;
+  SavePastedFileForTab(arg0: string, arg1: string, arg2: string): Promise<string>;
+  SavePastedFileForTarget(arg0: string, arg1: string, arg2: string): Promise<string>;
   SavePastedImage(arg0: string): Promise<string>;
-  SavePastedImageForTarget(arg0: ComposerTarget, arg1: string): Promise<string>;
+  SavePastedImageForComposerTarget(arg0: ComposerTarget, arg1: string): Promise<string>;
+  SavePastedImageForTab(arg0: string, arg1: string): Promise<string>;
   SavePresentedPathAsForTab(arg0: string, arg1: string, arg2: string): Promise<string>;
   SaveProvider(arg0: ProviderView): Promise<void>;
   SaveProviderKey(arg0: string, arg1: string): Promise<string>;
@@ -6059,9 +6185,13 @@ export interface GeneratedDesktopCommands {
   Settings(): Promise<SettingsView>;
   SkillsSettings(): Promise<SkillsSettingsView>;
   SlashArgs(arg0: string): Promise<SlashArgsResult>;
+  StageImageForTab(arg0: string, arg1: string, arg2: string, arg3: string, arg4: string): Promise<DraftImageView>;
+  StageImageForTarget(arg0: string, arg1: string, arg2: string, arg3: string, arg4: string): Promise<DraftImageView>;
   StartBotConnectionInstall(arg0: string, arg1: string): Promise<BotInstallStartResult>;
   StartTopicActivation(arg0: TopicActivationRequest): Promise<TopicActivationTicket>;
+  StartTurnForAttachmentTarget(arg0: string, arg1: string, arg2: SubmissionRequest): Promise<TurnStartView>;
   StartTurnForTab(arg0: string, arg1: string, arg2: string): Promise<TurnStartView>;
+  StartTurnForTabWithDrafts(arg0: string, arg1: string, arg2: string, arg3: string[]): Promise<TurnStartView>;
   Steer(arg0: string): Promise<void>;
   SteerForTab(arg0: string, arg1: string): Promise<void>;
   SteerInboxItem(arg0: string, arg1: string): Promise<InboxReceiptView>;
@@ -6081,10 +6211,10 @@ export interface GeneratedDesktopCommands {
   SubmitEditedDisplayToTab(arg0: string, arg1: string, arg2: string, arg3: string): Promise<void>;
   SubmitEditedDisplayToTabWithID(arg0: string, arg1: string, arg2: string, arg3: string, arg4: string): Promise<void>;
   SubmitExtensionForm(arg0: string, arg1: string, arg2: string, arg3: Record<string, unknown>): Promise<void>;
-  SubmitInitialGoalToTab(arg0: string, arg1: string, arg2: string, arg3: string, arg4: InvocationRequest[], arg5: string, arg6: string): Promise<string[]>;
-  SubmitInitialGoalToTabWithID(arg0: string, arg1: string, arg2: string, arg3: string, arg4: InvocationRequest[], arg5: string, arg6: string, arg7: string): Promise<string[]>;
-  SubmitInvocationsToTab(arg0: string, arg1: string, arg2: string, arg3: InvocationRequest[]): Promise<void>;
-  SubmitInvocationsToTabWithID(arg0: string, arg1: string, arg2: string, arg3: InvocationRequest[], arg4: string): Promise<void>;
+  SubmitInitialGoalToTab(arg0: string, arg1: string, arg2: string, arg3: string, arg4: main_InvocationRequest[], arg5: string, arg6: string): Promise<string[]>;
+  SubmitInitialGoalToTabWithID(arg0: string, arg1: string, arg2: string, arg3: string, arg4: main_InvocationRequest[], arg5: string, arg6: string, arg7: string): Promise<string[]>;
+  SubmitInvocationsToTab(arg0: string, arg1: string, arg2: string, arg3: main_InvocationRequest[]): Promise<void>;
+  SubmitInvocationsToTabWithID(arg0: string, arg1: string, arg2: string, arg3: main_InvocationRequest[], arg4: string): Promise<void>;
   SubmitRemoteTab(arg0: string, arg1: string): Promise<void>;
   SubmitRemoteTabExtensionForm(arg0: string, arg1: string, arg2: string, arg3: Record<string, unknown>): Promise<void>;
   SubmitRemoteTabWithSubmission(arg0: string, arg1: string, arg2: string): Promise<void>;

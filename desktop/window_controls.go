@@ -25,15 +25,11 @@ func (a *App) IsMainWindowMaximised() bool {
 	return a.nativeHost().WindowIsMaximised(a.ctx)
 }
 
-// CloseMainWindow preserves Reasonix's configured close behavior for the
-// Windows frameless titlebar close button.
+// CloseMainWindow is a compatibility entry point for older renderers. The shell
+// owns the close decision and shutdown sequence for every window-close source.
 func (a *App) CloseMainWindow() {
 	if a.ctx == nil {
 		return
 	}
-	if a.beforeClose(a.ctx) {
-		return
-	}
-	a.forceQuit.Store(true)
-	a.nativeHost().Quit(a.ctx)
+	a.nativeHost().CloseWindow(a.ctx)
 }

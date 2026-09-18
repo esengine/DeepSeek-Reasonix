@@ -14,7 +14,7 @@ function deps() {
       show: record("show"), hide: record("hide"), maximise: record("maximise"), unmaximise: record("unmaximise"),
       minimise: record("minimise"), unminimise: record("unminimise"), toggleMaximise: record("toggleMaximise"),
       center: record("center"), isMaximised: () => true, isMinimised: () => false,
-      setPosition: record("setPosition"), setTitle: record("setTitle"), toggleDevTools: record("devtools"),
+      setPosition: record("setPosition"), setTitle: record("setTitle"), toggleDevTools: record("devtools"), close: record("close"),
     },
     dialogs: {
       openDirectory: async () => ({ path: "/dir" }),
@@ -37,6 +37,7 @@ test("every documented host/* method is dispatched with parsed params", async ()
   assert.deepEqual(await dispatchHostCall(table, "host/window.show", { reason: "tray" }), {});
   assert.deepEqual(await dispatchHostCall(table, "host/window.isMaximised", {}), { value: true });
   assert.deepEqual(await dispatchHostCall(table, "host/window.setPosition", { x: 10.4, y: "bad" }), {});
+  assert.deepEqual(await dispatchHostCall(table, "host/window.close", {}), {});
   assert.deepEqual(await dispatchHostCall(table, "host/screen.list", {}), { screens: [{ x: 0, y: 0, width: 1, height: 1, scale: 2, primary: true }] });
   assert.deepEqual(await dispatchHostCall(table, "host/dialog.openDirectory", { title: "t" }), { path: "/dir" });
   assert.deepEqual(await dispatchHostCall(table, "host/tray.ensure", { openTitle: "打开", quitTitle: "退出" }), { ready: true, reason: "" });
@@ -45,7 +46,7 @@ test("every documented host/* method is dispatched with parsed params", async ()
   assert.deepEqual(await dispatchHostCall(table, "host/shell.openExternal", { url: "https://e" }), {});
   assert.deepEqual(await dispatchHostCall(table, "host/app.quit", undefined), {});
   assert.deepEqual(calls, [
-    'show("tray")', "setPosition(10.4,0)", "tray(打开,退出,Reasonix)", "remoteOpen(h1)", 'relaunch(["--x"])', "open(https://e/)", "approve()",
+    'show("tray")', "setPosition(10.4,0)", "close()", "tray(打开,退出,Reasonix)", "remoteOpen(h1)", 'relaunch(["--x"])', "open(https://e/)", "approve()",
   ]);
   for (const method of ["host/window.hide", "host/window.maximise", "host/window.center", "host/devtools.toggle", "host/tray.destroy", "host/app.hide"]) {
     assert.deepEqual(await dispatchHostCall(table, method, {}), {});
@@ -77,7 +78,7 @@ test("browser host calls merge into the table when the surface is wired", async 
       window: {
         show: () => {}, hide: () => {}, maximise: () => {}, unmaximise: () => {}, minimise: () => {}, unminimise: () => {},
         toggleMaximise: () => {}, center: () => {}, isMaximised: () => false, isMinimised: () => false,
-        setPosition: () => {}, setTitle: () => {}, toggleDevTools: () => {},
+        setPosition: () => {}, setTitle: () => {}, toggleDevTools: () => {}, close: () => {},
       },
       dialogs: { openDirectory: async () => ({ path: "" }), openFile: async () => ({ paths: [] }), saveFile: async () => ({ path: "" }), message: async () => ({ button: "" }) },
       tray: { ensure: () => ({ ready: false, reason: "x" }), destroy: () => {} },

@@ -20,6 +20,7 @@ import { subjectOf, summarizeFileDiff } from "../lib/tools";
 import { classifyTool, shellDisplayName, toolPresentation } from "../lib/chatToolPresentation";
 import { RESOURCE_BUDGETS } from "../lib/resourceBudgets";
 const ChatToolBody = lazy(() => import("./ChatToolBody"));
+const ChatNotice = lazy(() => import("./ChatNotice"));
 const ToolPayload = lazy(() => import("./ChatToolBody").then(module => ({ default: module.ToolPayload })));
 const PresentedFiles = lazy(() => import("./PresentedFiles").then(module => ({ default: module.PresentedFiles })));
 const ModifiedFiles = lazy(() => import("./PresentedFiles").then(module => ({ default: module.ModifiedFiles })));
@@ -106,7 +107,7 @@ const ChatNodeSeat = memo(function ChatNodeSeat({ source, nodeKey, loader, scrol
     case "process": body = <TurnProcessNodeView node={node} onToggle={() => { scroll.beforeChange(); source.toggleProcess(node.turnKey); }} />; break;
     case "tool": body = <ChatTool node={node} loader={loader} actions={actions} scroll={scroll} />; break;
     case "phase": body = <ContextInjectionRow title={t("chat.activity")} summary={node.item.text} beforeToggle={scroll.beforeChange}>{node.item.text}</ContextInjectionRow>; break;
-    case "notice": body = <ChatNotice node={node} actions={actions} scroll={scroll} />; break;
+    case "notice": body = <Suspense fallback={<div className="chat-notice" role="status" data-level={node.item.level}>{node.item.text}</div>}><ChatNotice node={node} actions={actions} scroll={scroll} tabId={tabId} /></Suspense>; break;
     case "compaction": body = <ChatDisclosure label={t("chat.compaction")}><Markdown text={node.item.summary} /></ChatDisclosure>; break;
     case "extension": body = node.item.card.actions?.length ? <ExtensionCard item={node.item} tabId={tabId} /> :
       <ChatDisclosure label={node.item.card.title || node.item.pluginId}><ExtensionCard item={node.item} tabId={tabId} /></ChatDisclosure>; break;
@@ -115,25 +116,6 @@ const ChatNodeSeat = memo(function ChatNodeSeat({ source, nodeKey, loader, scrol
   return <div className="chat-node" data-chat-anchor-key={node.key} data-chat-turn={node.turnKey} data-chat-kind={node.kind}
     data-turn-process-answer={node.kind === "assistant" && process?.kind === "process" && process.collapsed && !process.members.includes(node.key) || undefined}>{body}</div>;
 });
-
-function ChatNotice({ node, actions, scroll }: { node: Extract<ChatNode, { kind: "notice" }>; actions: ChatActions; scroll: ChatScrollController }) {
-  const t = useT();
-  const item = node.item;
-  const summary = item.completionSummary;
-  if (item.code === "capability_proxy_audit") return <ChatDisclosure label={t("chat.details")}><pre>{item.text}{"\n"}{item.detail}</pre></ChatDisclosure>;
-  // Empty delivery accounting is not a chat result. Keep meaningful records in details.
-  if (summary && !summary.mutations && !summary.changed_files && !summary.checks_passed && !summary.checks_failed) return null;
-  if (item.level === "warn" || item.action === "recover_context") return <div className="chat-notice" role="status" data-level={item.level}>
-    {item.title && <strong>{item.title} </strong>}{item.text}
-    {summary && <details className="chat-notice__details"><summary>{t("chat.details")}</summary><pre>{JSON.stringify(summary, null, 2)}</pre></details>}
-    {item.detail && <ChatDisclosure label={t("chat.details")}><pre>{item.detail}</pre></ChatDisclosure>}
-    {item.action === "recover_context" && item.recoveryId && <button className="btn" onClick={() => actions.recover(item.recoveryId!)}>{t("notice.protocolRecoveryAction")}</button>}
-  </div>;
-  return <ContextInjectionRow title={item.title || t(item.decisionReceipt ? "chat.decision" : summary ? "chat.record" : "chat.notice")}
-    summary={item.decisionReceipt ? undefined : item.text.split("\n")[0]} beforeToggle={scroll.beforeChange}>
-    <pre>{item.text}{item.detail ? `\n${item.detail}` : ""}{summary ? `\n${JSON.stringify(summary, null, 2)}` : ""}</pre>
-  </ContextInjectionRow>;
-}
 
 function ChatTool({ node, loader, actions, scroll }: { node: Extract<ChatNode, { kind: "tool" }>; loader: ChatContentLoader; actions: ChatActions; scroll: ChatScrollController }) {
   const t = useT();

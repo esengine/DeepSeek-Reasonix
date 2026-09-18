@@ -19,8 +19,8 @@ type historyLogProgress struct {
 	modTimeNS int64
 }
 
-func (m historyIndexMetadata) canIncrement(sessionID string, revision logRevision, generation string) bool {
-	return m.sessionID == sessionID && m.storageRevision == StorageRevision && m.projection == historyIndexVersion &&
+func (m historyIndexMetadata) canIncrement(sessionID string, revision logRevision, generation string, storageRevision int) bool {
+	return m.sessionID == sessionID && m.storageRevision == storageRevision && m.projection == historyIndexVersion &&
 		m.logSize >= 0 && m.logSize < revision.Size && strings.HasPrefix(m.generation, strings.TrimSuffix(generation, ":0")+":")
 }
 

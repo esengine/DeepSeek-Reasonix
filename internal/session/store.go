@@ -34,7 +34,10 @@ const (
 	// StorageRevision distinguishes the final v4 layout from unpublished v4
 	// drafts. Physical layout changes are migration boundaries even when the
 	// logical codec remains v4.
-	StorageRevision = 2
+	StorageRevision = 3
+	// MaxStorageRevision is opt-in because revision 4 contains required image
+	// isolation events that revision-3 readers must reject before writing.
+	MaxStorageRevision = 4
 	// Codec identifies the current framed linear session format. Earlier linear
 	// and prototype stores are immutable migration inputs.
 	Codec             = V4Codec
@@ -406,7 +409,7 @@ func openExistingHandle(dir, sessionID string, opts OpenOptions) (*Store, error)
 	}
 	// Build runtime state in one streaming validation pass. A newer required
 	// event or a damaged complete batch leaves the original tail untouched.
-	startup, durableEnd, torn, stats, usedCheckpoint, err := loadStartupSessionState(context.Background(), dir, eventsPath, opts.ExternalHistory, recovery, identity)
+	startup, durableEnd, torn, stats, usedCheckpoint, err := loadStartupSessionState(context.Background(), dir, eventsPath, opts.ExternalHistory, recovery, identity, manifest.StorageRevision)
 	if opts.ObserveRecovery != nil {
 		opts.ObserveRecovery(stats)
 	}
@@ -438,8 +441,10 @@ func openExistingHandle(dir, sessionID string, opts OpenOptions) (*Store, error)
 		}
 	}
 	// Upgrade only after the exclusive writer validated the complete log. Old
-	// readers reject revision 2 before using caches or accepting new writes.
-	manifest.StorageRevision = StorageRevision
+	// readers reject a newer revision before using caches or accepting new writes.
+	if manifest.StorageRevision < StorageRevision {
+		manifest.StorageRevision = StorageRevision
+	}
 	manifest.WriterGeneration++
 	if err := writeManifestFile(manifestPath, manifest); err != nil {
 		return failRecovery(err)
@@ -468,7 +473,7 @@ func openExistingHandle(dir, sessionID string, opts OpenOptions) (*Store, error)
 	}, nil
 }
 
-func loadStartupSessionState(ctx context.Context, dir, eventsPath string, externalHistory bool, recovery *recoveryStore, identity storageIdentity) (*startupSessionState, int64, bool, RecoveryOpenStats, bool, error) {
+func loadStartupSessionState(ctx context.Context, dir, eventsPath string, externalHistory bool, recovery *recoveryStore, identity storageIdentity, storageRevision int) (*startupSessionState, int64, bool, RecoveryOpenStats, bool, error) {
 	file, err := os.Open(eventsPath)
 	if os.IsNotExist(err) {
 		projection, _ := Project(nil)
@@ -482,7 +487,7 @@ func loadStartupSessionState(ctx context.Context, dir, eventsPath string, extern
 	if err != nil {
 		return nil, 0, false, RecoveryOpenStats{}, false, err
 	}
-	if state, end, torn, stats, ok := loadRecoveryStartupState(ctx, dir, file, info, recovery, identity); ok {
+	if state, end, torn, stats, ok := loadRecoveryStartupState(ctx, dir, file, info, recovery, identity, storageRevision); ok {
 		return state, end, torn, stats, true, nil
 	}
 	stats := RecoveryOpenStats{LogBytesTotal: info.Size()}
@@ -647,7 +652,7 @@ func resolveProjectionEvent(ctx context.Context, content *sessioncontent.Store, 
 
 func modelProjectionEvent(kind string) bool {
 	switch kind {
-	case "message/complete", "message/upsert", "message/retract", "history/replace", "model/context-replace", "compaction", "legacy/import":
+	case "message/complete", "message/upsert", "message/retract", "history/replace", "model/context-replace", "model/image-isolation", "compaction", "legacy/import":
 		return true
 	default:
 		return false
@@ -720,19 +725,6 @@ func logPathForManifest(dir string, manifest Manifest) string {
 		return filepath.Join(dir, currentLogName)
 	}
 	return filepath.Join(dir, legacyLogName)
-}
-
-func supportedStoredManifest(manifest Manifest) bool {
-	if currentStoredManifest(manifest) {
-		return true
-	}
-	return manifest.SchemaVersion == 3 &&
-		(manifest.Codec == FinalV31Codec || manifest.Codec == LegacyLinearCodec || manifest.Codec == PrototypeCodec)
-}
-
-func currentStoredManifest(manifest Manifest) bool {
-	return manifest.SchemaVersion == SchemaVersion && manifest.Codec == Codec &&
-		(manifest.StorageRevision == 1 || manifest.StorageRevision == StorageRevision)
 }
 
 func readStoredManifest(path string) (Manifest, error) {

@@ -73,7 +73,7 @@ export function NoticeCard({ item, onAction, onAccept, onOpenVerification, actio
   const ActionIcon = item.action === "open_changes" ? FileSearch : CirclePlay;
   const showVerification = item.variant === "completion" && Boolean(item.completionSummary && onOpenVerification);
   const result = item.variant === "completion" ? item.completionSummary : undefined;
-  const showActions = Boolean((item.action && onAction) || onAccept || showVerification);
+  const showActions = Boolean((item.action && item.action !== "isolate_images" && onAction) || onAccept || showVerification);
   return (
     <div className={`notice-line notice-line--${item.level}${item.variant ? ` notice-line--${item.variant}` : ""}`} data-entrance={item.id} role={item.code === "incomplete_read" ? "status" : undefined}>
       {!result && <StatusIcon className="notice-line__icon" size={14} aria-hidden="true" />}
@@ -88,7 +88,7 @@ export function NoticeCard({ item, onAction, onAccept, onOpenVerification, actio
         )}
         {showActions ? (
           <div className="notice-line__actions">
-            {item.action && onAction ? (
+            {item.action && item.action !== "isolate_images" && onAction ? (
               <button className="btn btn--small" type="button" onClick={onAction} disabled={actionDisabled}>
                 <ActionIcon size={13} aria-hidden="true" />
                 <span>{item.action === "recover_context" ? t("notice.protocolRecoveryAction") : item.action === "open_changes" ? t("notice.completionViewChanges") : t("notice.deliveryIncompleteContinue")}</span>

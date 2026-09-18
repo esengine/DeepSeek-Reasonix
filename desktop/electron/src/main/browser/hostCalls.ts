@@ -1,10 +1,12 @@
+import { unlinkSync } from "node:fs";
+import { isAbsolute, relative } from "node:path";
 import type { BrowserNavigateTarget } from "../../shared/ipc.js";
 import type { HostCallTable } from "../hostCalls.js";
 import { bool, num, str, strList, type Params } from "../params.js";
 import type { ActionExecutor, ActResult } from "./actions.js";
 import type { DocumentRegistry } from "./documents.js";
 import type { DownloadTracker, HostDownload } from "./downloads.js";
-import { takenOver } from "./errors.js";
+import { staleReference, takenOver } from "./errors.js";
 import type { GrantRegistry } from "./grants.js";
 import { captureScreenshot, type ScreenshotDeps, type ScreenshotResult } from "./screenshot.js";
 import { takeSnapshot, type SnapshotResult } from "./snapshot.js";
@@ -25,7 +27,7 @@ export interface BrowserHostDeps {
   actions: ActionExecutor;
   downloads: DownloadTracker;
   snapshot?(tab: BrowserTab, selector: string): Promise<SnapshotResult>;
-  screenshot?(tab: BrowserTab, request: { ref: string; fullPage: boolean; directory: string }): Promise<ScreenshotResult>;
+  screenshot?(tab: BrowserTab, request: { ref: string; fullPage: boolean; directory: string; preferCDP?: boolean }): Promise<ScreenshotResult>;
   screenshotDeps?: ScreenshotDeps;
 }
 
@@ -114,11 +116,26 @@ export function buildBrowserHostCalls(deps: BrowserHostDeps): HostCallTable {
         () => grants.verifyTab(grantId, surfaces.get(tab.id)?.taskId),
       );
     },
-    "host/browser.screenshot": (params) => {
+    "host/browser.screenshot": async (params) => {
       const tab = agentTab(params);
+      const grantId = str(params, "grantId");
+      const epoch = tab.epoch;
+      const documentToken = documents.currentToken(tab.id);
       const directory = str(params, "directory");
       if (directory !== "") downloads.setTaskDirectory(tab.taskId, directory);
-      return screenshot(tab, { ref: str(params, "ref"), fullPage: bool(params, "fullPage"), directory });
+      const result = await screenshot(tab, { ref: str(params, "ref"), fullPage: bool(params, "fullPage"), directory, preferCDP: !surfaces.isVisible(tab.id) });
+      try {
+        grants.verifyTab(grantId, surfaces.get(tab.id)?.taskId);
+        if (surfaces.get(tab.id) !== tab || tab.epoch !== epoch || documents.currentToken(tab.id) !== documentToken) throw staleReference("page changed while the screenshot was captured");
+        if (tab.mode !== "agent") throw takenOver(`tab ${tab.id} is in human mode`);
+        return result;
+      } catch (error) {
+        if (directory !== "" && isAbsolute(result.path)) {
+          const child = relative(directory, result.path);
+          if (child !== "" && child !== ".." && !child.startsWith("../")) { try { unlinkSync(result.path); } catch { /* Only this capture's file may be removed. */ } }
+        }
+        throw error;
+      }
     },
     "host/browser.downloads": async (params): Promise<{ downloads: HostDownload[] }> => {
       const tab = boundTab(params);

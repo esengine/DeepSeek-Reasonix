@@ -25,6 +25,9 @@ func (c *Controller) prepareOrchestratedTurnImages(turn orchestratedTurn) orches
 }
 
 func (c *Controller) imagesForOrchestratedTurn(ctx context.Context, turn orchestratedTurn) (userImages, imageCandidates []string) {
+	if prepared, ok := ctx.Value(preparedImageReferencesContextKey{}).(preparedImageReferences); ok && len(prepared.inputs) > 0 {
+		return nil, nil
+	}
 	if turn.imagesResolved {
 		return turn.userImages, turn.imageCandidates
 	}
@@ -32,9 +35,25 @@ func (c *Controller) imagesForOrchestratedTurn(ctx context.Context, turn orchest
 }
 
 func (c *Controller) withTurnImages(ctx context.Context, line string) context.Context {
+	prepared, _ := ctx.Value(preparedImageReferencesContextKey{}).(preparedImageReferences)
+	if inputs := prepared.inputs; len(inputs) > 0 {
+		ctx = agent.WithUserImageInputs(ctx, inputs)
+		ctx = agent.WithSubagentImageInputs(ctx, inputs)
+		return ctx
+	}
 	userImages, imageCandidates := c.resolveTurnImages(line)
 	ctx = agent.WithUserImages(ctx, userImages)
 	return agent.WithSubagentImageCandidates(ctx, imageCandidates)
+}
+
+func withPreparedTurnImages(ctx context.Context) context.Context {
+	prepared, _ := ctx.Value(preparedImageReferencesContextKey{}).(preparedImageReferences)
+	if len(prepared.inputs) == 0 {
+		return ctx
+	}
+	ctx = agent.WithUserImages(ctx, nil)
+	ctx = agent.WithUserImageInputs(ctx, prepared.inputs)
+	return agent.WithSubagentImageInputs(ctx, prepared.inputs)
 }
 
 func (turn orchestratedTurn) imageReferenceInput() string {

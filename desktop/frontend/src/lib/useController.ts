@@ -320,7 +320,7 @@ export type Item = { turnId?: string } & (
   | { kind: "user"; id: string; messageId?: string; submissionId?: string; submissionState?: "sending" | "confirmed" | "failed" | "unknown"; text: string; submitText?: string; failed?: boolean; createdAt?: number; checkpointTurn?: number; historyTurn?: number }
   | { kind: "assistant"; id: string; text: string; reasoning: string; streaming: boolean; turnFinal?: boolean; samplingCount?: number; toolCount?: number; wasStreamed?: true; reasoningComplete?: boolean; reasoningDurationMs?: number; workDurationMs?: number; turnDurationMs?: number; turnUsage?: TurnUsage; tokensPerSecond?: number; createdAt?: number; memoryCitations?: MemoryCitation[]; searchSources?: SearchSource[] }
   | { kind: "phase"; id: string; text: string }
-  | { kind: "notice"; id: string; local?: boolean; level: "info" | "warn"; text: string; detail?: string; code?: string; title?: string; variant?: "delivery" | "completion"; action?: "continue_delivery" | "open_changes" | "recover_context"; recoveryId?: string; completionSummary?: WireCompletionSummary; decisionReceipt?: WireDecisionReceipt; missing?: string[]; inboxItemId?: string }
+  | { kind: "notice"; id: string; local?: boolean; level: "info" | "warn"; text: string; detail?: string; code?: string; title?: string; variant?: "delivery" | "completion"; action?: "continue_delivery" | "open_changes" | "recover_context" | "isolate_images"; recoveryId?: string; imageRecovery?: import("./types").WireImageRecoveryAction; completionSummary?: WireCompletionSummary; decisionReceipt?: WireDecisionReceipt; missing?: string[]; inboxItemId?: string }
   | {
       kind: "compaction";
       id: string;
@@ -1845,6 +1845,14 @@ function applyEvent(s: State, e: WireEvent, preserveToolPayloads = false): State
         }];
       } else if (e.outcome === "completion_uncertain") {
         items = [...finalized, { kind: "notice", id: `e${s.seq}`, level: "info", title: t("notice.completionUncertainTitle"), text: t("notice.completionUncertainBody") }];
+      } else if (e.imageRecovery?.id && e.imageRecovery.candidates.length > 1) {
+        items = [...finalized, {
+          kind: "notice",
+          id: `e${s.seq}-image-recovery`,
+          level: "warn", code: "image_recovery", text: "",
+          action: "isolate_images", recoveryId: e.imageRecovery.id,
+          imageRecovery: e.imageRecovery,
+        }];
       } else if (e.status === "interrupted" || e.status === "recovery_required") {
         const interruptItems: Item[] = [{
           kind: "notice",
@@ -3580,7 +3588,7 @@ export function useController() {
       throw new Error(runtime?.issue?.message || currentState.meta.startupErr || t("composer.workspaceStarting"));
     }
     const seq = currentState.seq;
-    const submissionId = createTurnSubmissionId(tabId, currentState.sessionGen, seq, runtimeEpochByTabRef.current.get(tabId) ?? runtime?.epoch);
+    const submissionId = structured?.attachmentSubmissionId ?? createTurnSubmissionId(tabId, currentState.sessionGen, seq, runtimeEpochByTabRef.current.get(tabId) ?? runtime?.epoch);
     const submissionCurrent = () => submissionBindingCurrent(statesRef.current.get(tabId), currentState);
     const promptEpoch = currentState.promptEpoch;
     const { display, submit } = normalizeTurnSubmit(displayText, submitText);
@@ -3590,45 +3598,20 @@ export function useController() {
     dispatchTo(tabId, { type: "user", text: displayText, submitText: display !== submit ? submit : undefined, seq, submissionId });
     invalidateCache();
     try {
-      const submitPromise = initialGoal
-        ? app.SubmitInitialGoalToTabWithID(
-            tabId,
-            initialGoal.goal,
-            structured?.display.trim() || display,
-            structured?.input.trim() || submit,
-            structured?.invocations ?? [],
-            initialGoal.collaborationMode,
-            initialGoal.toolApprovalMode,
-            submissionId,
-          )
-        : structured
-        ? app.SubmitInvocationsToTabWithID(tabId, structured.display.trim(), structured.input.trim(), structured.invocations, submissionId)
-        : original
-        ? app.SubmitEditedDisplayToTabWithID(tabId, display, submit, original, submissionId)
-        : display !== submit
-        ? app.SubmitDisplayToTabWithID(tabId, display, submit, submissionId)
-        : typeof app.StartTurnForTab === "function"
-        ? app.StartTurnForTab(tabId, submit, submissionId)
-        : app.SubmitToTabWithID(tabId, submit, submissionId);
-      if (initialGoal) {
-        const drained = await submitPromise;
-        if (!submissionCurrent()) return;
+      const [outcome, detail] = await import("./turnSubmit").then(module => module.submitTurn(app, tabId, submissionId, display, submit, original, structured, initialGoal));
+      if (!submissionCurrent()) return;
+      if (outcome === 1) {
         dispatchTo(tabId, { type: "send_confirmed", submissionId });
-        const ids = Array.isArray(drained) ? drained : [];
+        const ids = detail as string[];
         if (ids.length) dispatchTo(tabId, { type: "approval_drained", ids, epoch: promptEpoch });
         return;
       }
-      void submitPromise.then(
-        (receipt) => {
-          if (!submissionCurrent()) return;
-          if (receipt && typeof receipt === "object" && "disposition" in receipt && receipt.disposition === "management_handled") return void dispatchTo(tabId, { type: "management_confirmed", submissionId });
-          if (receipt && typeof receipt === "object" && "turnId" in receipt && typeof receipt.turnId === "string") {
-            dispatchTo(tabId, { type: "turn_admitted", turnId: receipt.turnId, submissionId });
-          }
-          dispatchTo(tabId, { type: "send_confirmed", submissionId });
-        },
-        (error) => { if (submissionCurrent()) rejectTurnSubmission(tabId, submissionId, error); },
-      );
+      if (outcome === 2) {
+        dispatchTo(tabId, { type: "management_confirmed", submissionId });
+        return;
+      }
+      if (outcome === 3) dispatchTo(tabId, { type: "turn_admitted", turnId: detail as string, submissionId });
+      dispatchTo(tabId, { type: "send_confirmed", submissionId });
     } catch (error) {
       if (submissionCurrent()) rejectTurnSubmission(tabId, submissionId, error);
       throw error;

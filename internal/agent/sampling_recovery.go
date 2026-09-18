@@ -2,6 +2,8 @@ package agent
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/json"
 	"errors"
 	"math/rand"
 	"time"
@@ -17,12 +19,12 @@ const defaultRecoveryWaitBudget = 10 * time.Minute
 var recoveryWaitBudget = defaultRecoveryWaitBudget
 
 type samplingRecoveryState struct {
-	frozen                             samplingRequest
-	context                            contextRecoveryBudget
-	replay                             reasoningReplayRecoveryBudget
-	output, protocol, partial, missing bool
-	billable                           *provider.Usage
-	waited                             time.Duration
+	frozen                                    samplingRequest
+	context                                   contextRecoveryBudget
+	replay                                    reasoningReplayRecoveryBudget
+	output, protocol, partial, missing, image bool
+	billable                                  *provider.Usage
+	waited                                    time.Duration
 }
 
 func (a *Agent) samplingDeadline(ctx context.Context) (context.Context, context.CancelFunc, TaskBudget) {
@@ -101,7 +103,7 @@ func (a *Agent) streamWithSamplingRecovery(parent context.Context, turn int) (te
 			return done
 		}
 		state.partial = state.partial || sawSpeculativeSamplingOutput(result) || len(result.responsesItems) > 0 || len(result.serverSearch) > 0
-		if attempt < maxSamplingAttempts && a.trySamplingRepair(ctx, &state, result, sink, attempt, id) {
+		if attempt < maxSamplingAttempts && a.trySamplingRepair(ctx, &state, &result, sink, attempt, id) {
 			continue
 		}
 		if a.waitSamplingRetry(ctx, &state, &result, sink, attempt, id) {
@@ -179,7 +181,10 @@ func (a *Agent) recordRecoveredCandidate(result streamedTurn) {
 	event.RecordProtocolRecovery(a.svc.sink, event.ProtocolRecoveryAudit{Kind: kind})
 }
 
-func (a *Agent) trySamplingRepair(ctx context.Context, s *samplingRecoveryState, result streamedTurn, sink *deferredStreamSink, attempt int, id string) bool {
+func (a *Agent) trySamplingRepair(ctx context.Context, s *samplingRecoveryState, result *streamedTurn, sink *deferredStreamSink, attempt int, id string) bool {
+	if a.tryImageIsolationRepair(ctx, s, result, sink, attempt, id) {
+		return true
+	}
 	if limit := provider.AsOutputLimitError(result.err); !s.output && limit != nil && s.frozen.req.MaxTokens > limit.MaxOutputTokens {
 		s.output = true
 		a.learnOutputBudget(limit.MaxOutputTokens)
@@ -203,6 +208,57 @@ func (a *Agent) trySamplingRepair(ctx context.Context, s *samplingRecoveryState,
 		s.frozen = next
 	}
 	return ok
+}
+
+func (a *Agent) tryImageIsolationRepair(ctx context.Context, s *samplingRecoveryState, result *streamedTurn, sink *deferredStreamSink, attempt int, id string) bool {
+	if s.image || s.partial || result == nil {
+		return false
+	}
+	imageErr := provider.AsImageRequestError(result.err)
+	if imageErr == nil {
+		return false
+	}
+	identity, unique := imageErr.UniqueIdentity()
+	if !unique {
+		return false
+	}
+	decision := provider.ImageIsolationDecision{
+		Version: 1, Identity: identity, Reason: imageErr.Reason, Scope: imageErr.Scope,
+	}
+	recorder, ok := a.svc.sessionCheckpointer.(SessionImageIsolationRecorder)
+	if !ok {
+		return false
+	}
+	if err := recorder.RecordSessionImageIsolation(ctx, decision); err != nil {
+		result.err = errors.Join(result.err, err)
+		return false
+	}
+	before, err := json.Marshal(s.frozen.req.Messages)
+	if err != nil {
+		result.err = errors.Join(result.err, err)
+		return false
+	}
+	nextMessages, changed := provider.ApplyImageIsolation(
+		s.frozen.req.Messages, []provider.ImageIsolationDecision{decision},
+		provider.ResolveImageRequestIdentity(a.svc.prov, a.modelRef),
+	)
+	if !changed {
+		return false
+	}
+	after, err := json.Marshal(nextMessages)
+	if err != nil || sha256.Sum256(before) == sha256.Sum256(after) {
+		if err != nil {
+			result.err = errors.Join(result.err, err)
+		}
+		return false
+	}
+	next := s.frozen.req
+	next.Messages = nextMessages
+	s.frozen = samplingRequest{req: freezeProviderRequest(next)}
+	s.image = true
+	sink.Discard()
+	a.emitStreamAttempt(id, event.StreamAttemptDiscard, attempt, "image_isolation", result.err)
+	return true
 }
 
 func (a *Agent) canWaitSampling(ctx context.Context, s *samplingRecoveryState, f provider.RecoveryFailure) bool {

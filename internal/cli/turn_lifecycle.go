@@ -21,7 +21,11 @@ func (m *chatTUI) startTurn(sent, displayed, restore string) tea.Cmd {
 // keeps reference-expanded model input separate from the text shown/restored by
 // the frontend.
 func (m *chatTUI) startTurnWithRaw(sent, displayed, restore, raw string) tea.Cmd {
-	return m.startControllerTurnWithQueue(displayed, restore, raw, func(ctrl control.SessionAPI) { ctrl.SendWithRaw(sent, raw) })
+	start, ok := m.prepareImageTurn(sent, raw, restore)
+	if !ok {
+		return nil
+	}
+	return m.startControllerTurnWithQueue(displayed, restore, raw, start)
 }
 
 // startControllerTurn owns the TUI-side turn setup for controller entry points.

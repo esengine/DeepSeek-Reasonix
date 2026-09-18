@@ -35,7 +35,7 @@ async function run(): Promise<void> {
       preloadPath: join(app.getPath("userData"), "unused-preload.cjs"),
       appURL: "https://example.invalid", platform: process.platform,
       log: console, zoomStore: new AppZoomStore(join(app.getPath("userData"), "zoom.json")),
-      onAppDomReady() {}, onCloseRequested: async () => true, onCloseAllowed() {}, onShellAction() {},
+      onAppDomReady() {}, onCloseRequested() {}, onShellAction() {},
     });
     main.create(input);
     return main;

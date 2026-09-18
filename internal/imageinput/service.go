@@ -33,6 +33,15 @@ func (s *Service) Understand(ctx context.Context, current string, images []strin
 	if err != nil {
 		return nil, err
 	}
+	return s.UnderstandSelected(ctx, target, images, history, sink)
+}
+
+// SelectModel fixes the destination before request images are encoded/uploaded.
+func (s *Service) SelectModel(current string, images []string) (string, error) {
+	return s.selectModel(current, images)
+}
+
+func (s *Service) UnderstandSelected(ctx context.Context, target string, images []string, history func() []provider.Message, sink event.Sink) (*provider.VisionSummary, error) {
 	if sink == nil {
 		sink = event.Discard
 	}

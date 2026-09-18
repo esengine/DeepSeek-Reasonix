@@ -2,7 +2,7 @@ import type { AppBindings } from "./bridge";
 import type { StructuredInvocationSubmit } from "./invocationDisplay";
 import { resolveActiveTurnId } from "./inboxSubmit";
 
-type InboxEnqueueBindings = Pick<AppBindings, "EnqueueInboxFollowup" | "EnqueueInboxFollowupWithInvocations" | "EnqueueInboxSteer" | "EnqueueInboxSteerForTurn">;
+type InboxEnqueueBindings = Pick<AppBindings, "EnqueueInboxFollowup" | "EnqueueInboxFollowupWithInvocations" | "EnqueueInboxSteer" | "EnqueueInboxSteerForTurn" | "EnqueueForAttachmentTarget">;
 
 export async function enqueueInboxGuidanceForActiveTurn(
   binding: InboxEnqueueBindings & Pick<AppBindings, "ListTabs">,
@@ -26,7 +26,20 @@ export function enqueueInboxGuidance(
   structured?: StructuredInvocationSubmit,
   opts?: { steer?: boolean; turnId?: string; idempotency?: string },
 ) {
-  if (structured) {
+	if (structured) {
+		if (structured.attachments?.length) {
+			if (!structured.attachmentTarget || !binding.EnqueueForAttachmentTarget) {
+				return Promise.reject(new Error("unsupported: attachments-v2"));
+			}
+			return binding.EnqueueForAttachmentTarget(
+				structured.attachmentTarget,
+				structured.attachmentSubmissionId || opts?.idempotency || `image-${crypto.randomUUID()}`,
+				structured.input.trim(),
+				structured.display.trim() || display,
+				structured.invocations,
+				structured.attachments,
+			);
+		}
     return binding.EnqueueInboxFollowupWithInvocations(
       tabId,
       structured.display.trim() || display,

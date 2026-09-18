@@ -25,7 +25,7 @@ func (s *Session) recoveryForDurable(durable uint64) (recoveryPublishState, bool
 	projection.Messages = nil
 	checkpoint := recoveryCheckpoint{
 		Version: recoveryFormatVersion, SessionID: s.id, StorageGeneration: s.storageGeneration,
-		StorageRevision: StorageRevision, DurableSequence: durable, LogOffset: tip.LogOffset,
+		StorageRevision: s.manifest.StorageRevision, DurableSequence: durable, LogOffset: tip.LogOffset,
 		AnchorOffset: tip.AnchorOffset, AnchorFirst: tip.AnchorFirst,
 		AnchorCommitID: tip.AnchorCommitID, AnchorHash: tip.AnchorHash,
 		ProjectionVersion: recoveryProjectionVersion, Projection: projection,

@@ -4,7 +4,7 @@ import { eventFrame } from "../shared/eventStream.js";
 import type { HelloResult } from "./handshake.js";
 import { errorText, type Logger } from "./log.js";
 import { RestartBudget } from "./restartBudget.js";
-import { RpcClient } from "./rpc.js";
+import { RpcClient, RpcError } from "./rpc.js";
 
 export const LIFECYCLE_TIMEOUT_MS = 10_000;
 export const EXIT_GRACE_MS = 5_000;
@@ -81,7 +81,7 @@ export class ServiceSupervisor {
   }
 
   get generation(): string {
-    return this.session?.alive && this.session.ready ? this.session.generation : "";
+    return !this.stopping && this.state.phase === "ready" && this.session?.alive && this.session.ready ? this.session.generation : "";
   }
 
   get ready(): boolean {
@@ -120,9 +120,12 @@ export class ServiceSupervisor {
   }
 
   shutdown(): Promise<void> {
-    this.stopping = true;
-    this.revision++;
-    if (!this.shutdownPending) this.shutdownPending = this.finishShutdown().finally(() => { this.shutdownPending = null; });
+    if (!this.stopping) {
+      this.stopping = true;
+      this.revision++;
+      this.setState({ phase: "stopping", generation: "" });
+    }
+    if (!this.shutdownPending) this.shutdownPending = this.finishShutdown();
     return this.shutdownPending;
   }
 
@@ -144,7 +147,11 @@ export class ServiceSupervisor {
 
   private live(): Session {
     const session = this.session;
-    if (this.stopping || !session?.alive || !session.ready) throw new Error(`desktop service is not running (${this.state.phase})`);
+    if (this.stopping || !session?.alive || !session.ready) {
+      throw new RpcError(-32002, `desktop service is not running (${this.state.phase})`, {
+        kind: "service_unavailable", phase: this.state.phase,
+      });
+    }
     return session;
   }
 

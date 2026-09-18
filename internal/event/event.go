@@ -472,6 +472,7 @@ type Event struct {
 	Outcome            string                   // TurnDone: optional machine-readable recoverable outcome
 	Readiness          *FinalReadiness          // TurnDone: structured final-readiness recovery state
 	ProtocolRecovery   *provider.ProtocolRecoveryAction
+	ImageRecovery      *provider.ImageRecoveryAction
 	Diagnostic         *provider.FailureDiagnostic
 	RecoveryCheckpoint bool                // local durable recovery checkpoint, not a notice
 	Receipt            *CompletionReceipt  // TurnDone: what the host verified, and what it could not

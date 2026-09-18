@@ -238,7 +238,7 @@ rejectAnswer = false;
 
 rejectSubmit = true;
 await act(async () => {
-  await controller?.send("continue while prompt is pending");
+  await controller?.send("continue while prompt is pending").catch(() => {});
   await flushPromises();
   await flushPromises();
 });
@@ -252,7 +252,7 @@ await act(async () => {
   desktopStub.emit("agent:event", { kind: "turn_done", tabId: "tab-send", turnId: "turn-authoritative" } as WireEvent);
   backendTab = tabMeta({ running: false, pendingPrompt: false, turnId: undefined });
   await flushPromises();
-  await controller?.send("retry against an idle backend");
+  await controller?.send("retry against an idle backend").catch(() => {});
   await flushPromises();
   await flushPromises();
 });
@@ -262,7 +262,7 @@ eq(controller?.state.pendingPrompt, false, "authoritative idle snapshot leaves n
 rejectListTabs = true;
 const beforeFailedReconcileCalls = listTabsCalls;
 await act(async () => {
-  await controller?.send("retry while runtime status is unavailable");
+  await controller?.send("retry while runtime status is unavailable").catch(() => {});
   await new Promise((resolve) => setTimeout(resolve, 1_500));
 });
 eq(listTabsCalls - beforeFailedReconcileCalls, 4, "rejected submit retries failed ListTabs reads at every bounded delay");
@@ -295,14 +295,14 @@ rejectSubmit = true;
 backendTab = tabMeta({ running: false, pendingPrompt: false, turnEventSeq: 700 });
 await act(async () => {
   desktopStub.emit("agent:event", { kind: "turn_done", tabId: "tab-send" } as WireEvent);
-  await controller?.send("seed idle status after rejected submit");
+  await controller?.send("seed idle status after rejected submit").catch(() => {});
   await flushPromises();
   await flushPromises();
 });
 eq(controller?.state.runtimeStatusSeq, 1, "baseline uses the business cut, never the old ledger sequence");
 eq(controller?.state.running, false, "first rejection settles to authoritative idle");
 await act(async () => {
-  await controller?.send("second pre-admission rejection");
+  await controller?.send("second pre-admission rejection").catch(() => {});
   await flushPromises();
   await flushPromises();
 });

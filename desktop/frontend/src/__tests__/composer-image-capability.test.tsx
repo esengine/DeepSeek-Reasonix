@@ -92,10 +92,27 @@ function installDom() {
 }
 
 function installBridgeApp(methods: Record<string, unknown>) {
-  installDesktopHostStub({
+	const legacySave = methods.SavePastedImageForTarget as ((token: string, dataURL: string) => Promise<string>) | undefined;
+	const legacyPreview = methods.AttachmentDataURLForTarget as ((token: string, path: string) => Promise<string>) | undefined;
+	const unscopedPreview = methods.AttachmentDataURL as ((path: string) => Promise<string>) | undefined;
+  return installDesktopHostStub({
     Commands: async () => [],
     Models: async () => [],
     ModelsForTab: async () => [],
+		CaptureAttachmentTarget: async () => ({ token: "test-attachment-target", capabilities: ["attachments-v2"] }),
+		ReleaseAttachmentTarget: async () => {},
+		StageImageForTarget: async (token: string, _operationID: string, displayName: string, mime: string, dataURL: string) => ({
+			draftId: "",
+			path: legacySave ? await legacySave(token, dataURL) : ".reasonix/attachments/mock.png",
+			displayName,
+			mime,
+			width: 1,
+			height: 1,
+			bytes: dataURL.length,
+		}),
+		ReadDraftImageForTarget: async () => "data:image/png;base64,iVBORw0KGgo=",
+		AttachmentDataURLForTarget: legacyPreview ?? (async () => "data:image/png;base64,iVBORw0KGgo="),
+		AttachmentDataURLForTab: async (_tabID: string, path: string) => unscopedPreview ? unscopedPreview(path) : "data:image/png;base64,iVBORw0KGgo=",
     ...methods,
   });
 }
@@ -206,6 +223,66 @@ function renderUserMessage(text: string, props: Partial<Parameters<typeof UserMe
 }
 
 console.log("\ncomposer image capability");
+
+async function verifyUnsupportedAttachmentCapability(
+  overrides: Record<string, unknown>,
+  file: File | undefined,
+  label: string,
+) {
+  const dom = installDom();
+  let unhandled = 0;
+  const onUnhandled = (event: PromiseRejectionEvent) => {
+    unhandled += 1;
+    event.preventDefault();
+  };
+  window.addEventListener("unhandledrejection", onUnhandled);
+  installBridgeApp(overrides);
+  const { root } = await renderComposer({
+    imageInputEnabled: true,
+    insertRequest: { id: 1, text: "keep this draft", mode: "replace" },
+  });
+  const event = imagePasteEvent(file ?? new File([], "", { type: "" }));
+  if (!file) {
+    Object.defineProperty(event, "clipboardData", {
+      configurable: true,
+      value: { files: [], items: [{ kind: "file", type: "image/png", getAsFile: () => null }], types: ["image/png"], getData: () => "" },
+    });
+  }
+  await act(async () => {
+    textarea().dispatchEvent(event);
+    await flushTimers();
+    await flushTimers();
+  });
+  await waitFor(() => toastText() !== "");
+  eq(textarea().value, "keep this draft", `${label} keeps draft text`);
+  eq(contextItemCount(), 0, `${label} does not add a partial attachment`);
+  ok(toastText().length > 0, `${label} reports an explicit attachment error`);
+  eq(unhandled, 0, `${label} produces no unhandled rejection`);
+  window.removeEventListener("unhandledrejection", onUnhandled);
+  await act(async () => root.unmount());
+  dom.window.close();
+}
+
+await verifyUnsupportedAttachmentCapability(
+  { CaptureAttachmentTarget: undefined },
+  new File(["img"], "photo.png", { type: "image/png", lastModified: 1 }),
+  "missing target capture",
+);
+await verifyUnsupportedAttachmentCapability(
+  { StageImageForTarget: undefined },
+  new File(["img"], "photo.png", { type: "image/png", lastModified: 1 }),
+  "missing image staging",
+);
+await verifyUnsupportedAttachmentCapability(
+  { SavePastedFileForTarget: undefined },
+  new File(["pdf"], "document.pdf", { type: "application/pdf", lastModified: 1 }),
+  "missing pasted-file save",
+);
+await verifyUnsupportedAttachmentCapability(
+  { SaveClipboardImageForTarget: undefined },
+  undefined,
+  "missing native clipboard image read",
+);
 
 {
   const dom = installDom();

@@ -31,6 +31,7 @@ const stableCases = [
   ["channel_read_only", "当前会话为只读，无法修改收件箱"],
   ["workspace_starting", "工作区还在启动，请稍后重试"],
   ["workspace_start_failed", "工作区启动失败"],
+  ["image_attachment_unreadable", "图片读取失败，请重新添加或重试"],
 ] as const;
 
 for (const [code, expected] of stableCases) {

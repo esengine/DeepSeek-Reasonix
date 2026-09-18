@@ -20,51 +20,36 @@ export interface QuitSequencerDeps {
   flushRenderer?: () => Promise<void>;
   resumeRenderer?: () => Promise<void>;
   onCloseAllowed(): void;
+  onClosePrevented?(reason: string): void;
   cleanup?: Array<{ name: string; run(): void }>;
   schedule?: (run: () => void, milliseconds: number) => void;
   log: Logger;
 }
 
-// Electron's before-quit fires on every app.quit(); this drives it through
-// beforeClose (Go may veto) and shutdown exactly once, then lets it through.
+// Every close entry point joins one decision/shutdown promise. A veto resets the
+// sequencer only after beforeClose completes; accepted shutdown remains single-owner.
 export class QuitSequencer {
   private phase: QuitPhase = "idle";
   private approved = false;
   private relaunchArgs: string[] | null = null;
   private relaunchExecPath: string | undefined;
   private attempt = "";
+  private pending: Promise<void> | null = null;
 
   constructor(private readonly deps: QuitSequencerDeps) {}
 
-  get currentPhase(): QuitPhase {
-    return this.phase;
-  }
-
+  get currentPhase(): QuitPhase { return this.phase; }
   get isQuitting(): boolean { return this.approved || this.phase === "shutting-down" || this.phase === "done"; }
 
   onBeforeQuit(): boolean {
     if (this.phase === "done") return true;
-    if (this.phase !== "idle") return false;
-    if (!this.attempt) this.attempt = randomUUID();
-    this.deps.log.info(`exit ${this.attempt}: ${this.approved ? "shutting-down" : "asking"}`);
-    if (!this.approved) {
-      this.phase = "asking";
-      void this.ask();
-      return false;
-    }
-    this.phase = "shutting-down";
-    void this.finish();
+    this.begin("quit", this.approved);
     return false;
   }
 
-  requestQuit(): void {
-    this.deps.app.quit();
-  }
-
-  approve(): void {
-    this.approved = true;
-    this.deps.app.quit();
-  }
+  requestQuit(): void { this.deps.app.quit(); }
+  requestClose(reason = "window"): void { this.begin(reason, false); }
+  approve(): void { this.approved = true; this.begin("approved", true); }
 
   relaunch(args: string[], execPath?: string): void {
     this.relaunchArgs = args;
@@ -72,7 +57,17 @@ export class QuitSequencer {
     this.approve();
   }
 
-  private async ask(): Promise<void> {
+  private begin(reason: string, approved: boolean): void {
+    if (this.phase === "done" || this.pending) return;
+    if (!this.attempt) this.attempt = randomUUID();
+    this.approved ||= approved;
+    const stage = this.approved ? "shutting-down" : "asking (" + reason + ")";
+    this.deps.log.info("exit " + this.attempt + ": " + stage);
+    this.pending = (this.approved ? this.finish() : this.ask(reason)).finally(() => { this.pending = null; });
+  }
+
+  private async ask(reason: string): Promise<void> {
+    this.phase = "asking";
     let prevent = false;
     try {
       await this.deps.flushRenderer?.();
@@ -84,22 +79,24 @@ export class QuitSequencer {
       return;
     }
     try {
-      prevent = await this.deps.service.beforeClose("quit");
+      prevent = await this.deps.service.beforeClose(reason);
     } catch (error) {
-      this.deps.log.warn(`beforeClose(quit) failed, quitting anyway: ${errorText(error)}`);
+      this.deps.log.warn("beforeClose(" + reason + ") failed, closing anyway: " + errorText(error));
     }
-    this.phase = "idle";
     if (prevent && !this.approved) {
-      this.deps.log.info(`exit ${this.attempt}: cancelled`);
+      this.deps.log.info("exit " + this.attempt + ": cancelled");
+      this.phase = "idle";
       this.attempt = "";
       await this.resumeRenderer();
+      this.deps.onClosePrevented?.(reason);
       return;
     }
     this.approved = true;
-    this.deps.app.quit();
+    await this.finish();
   }
 
   private async finish(): Promise<void> {
+    this.phase = "shutting-down";
     try {
       await this.deps.flushRenderer?.();
     } catch (error) {
@@ -111,17 +108,18 @@ export class QuitSequencer {
     try {
       await this.deps.service.shutdown();
     } catch (error) {
-      this.deps.log.warn(`exit ${this.attempt}: shutdown failed: ${errorText(error)}`);
+      this.deps.log.warn("exit " + this.attempt + ": shutdown failed: " + errorText(error));
       this.phase = "idle";
       this.approved = false;
       await this.resumeRenderer();
       return;
     }
     for (const step of [{ name: "close permission", run: () => this.deps.onCloseAllowed() }, ...(this.deps.cleanup ?? [])]) {
-      try { step.run(); this.deps.log.info(`exit ${this.attempt}: cleanup ${step.name} complete`); } catch (error) { this.deps.log.warn(`exit ${this.attempt}: cleanup ${step.name} failed: ${errorText(error)}`); }
+      try { step.run(); this.deps.log.info("exit " + this.attempt + ": cleanup " + step.name + " complete"); }
+      catch (error) { this.deps.log.warn("exit " + this.attempt + ": cleanup " + step.name + " failed: " + errorText(error)); }
     }
     this.phase = "done";
-    this.deps.log.info(`exit ${this.attempt}: resources cleaned; requesting final shell exit`);
+    this.deps.log.info("exit " + this.attempt + ": resources cleaned; requesting final shell exit");
     if (this.deps.app.exit) {
       const schedule = this.deps.schedule ?? ((run, ms) => { setTimeout(run, ms).unref(); });
       schedule(() => {
@@ -132,7 +130,7 @@ export class QuitSequencer {
     try {
       if (this.relaunchArgs) this.deps.app.relaunch(this.relaunchArgs, this.relaunchExecPath);
     } catch (error) {
-      this.deps.log.error(`relaunch failed: ${errorText(error)}`);
+      this.deps.log.error("relaunch failed: " + errorText(error));
     } finally { this.deps.app.quit(); }
   }
 

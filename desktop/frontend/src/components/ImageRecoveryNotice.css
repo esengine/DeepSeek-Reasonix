@@ -1,0 +1,2 @@
+.chat-notice--image-recovery, .chat-notice__image-options { display: grid; gap: 8px; }
+.chat-notice__image-option { display: flex; align-items: center; gap: 8px; color: var(--fg); }

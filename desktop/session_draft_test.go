@@ -293,6 +293,39 @@ func TestMissingDraftAttachmentFailsBeforeSessionReservation(t *testing.T) {
 	}
 }
 
+func TestMissingDraftImageReturnsStableErrorWithoutHostPath(t *testing.T) {
+	a := newDraftTestApp(t)
+	root := t.TempDir()
+	draft, err := a.OpenSessionDraftForTarget("project", root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	saved, err := a.SaveSessionDraft(SessionDraftSaveRequest{
+		DraftID: draft.ID, Revision: draft.Revision,
+		ContentJSON: `{"text":"inspect","attachments":[{"path":".reasonix/attachments/missing.png"}]}`,
+		Settings:    draft.Settings,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, err = a.BeginDraftSubmission(SessionDraftSubmissionRequest{
+		DraftID: draft.ID, Revision: saved.Draft.Revision,
+		Display: "inspect", Input: "inspect @.reasonix/attachments/missing.png",
+	})
+	if err == nil || err.Error() != "reasonix_error:image_attachment_unreadable" {
+		t.Fatalf("BeginDraftSubmission() error = %v, want stable image failure", err)
+	}
+	if strings.Contains(err.Error(), root) {
+		t.Fatalf("bridge error exposed workspace root: %v", err)
+	}
+	if operations, loadErr := a.draftStore().PendingOperations(a.bootContext()); loadErr != nil || len(operations) != 0 {
+		t.Fatalf("operations after image validation failure = %+v, err %v", operations, loadErr)
+	}
+	if tabs := a.ListTabs(); len(tabs) != 0 {
+		t.Fatalf("tabs after image validation failure = %+v", tabs)
+	}
+}
+
 func TestInvalidDraftModelFailsBeforeSessionReservation(t *testing.T) {
 	isolateDesktopUserDirs(t)
 	a := newDraftTestApp(t)
@@ -394,8 +427,8 @@ func TestTargetedAttachmentsDoNotFollowActiveWorkspace(t *testing.T) {
 	var errA, errB error
 	var wg sync.WaitGroup
 	wg.Add(2)
-	go func() { defer wg.Done(); pathA, errA = a.SavePastedFileForTarget(targetA, "a.txt", payloadA) }()
-	go func() { defer wg.Done(); pathB, errB = a.SavePastedFileForTarget(targetB, "b.txt", payloadB) }()
+	go func() { defer wg.Done(); pathA, errA = a.SavePastedFileForComposerTarget(targetA, "a.txt", payloadA) }()
+	go func() { defer wg.Done(); pathB, errB = a.SavePastedFileForComposerTarget(targetB, "b.txt", payloadB) }()
 	wg.Wait()
 	if errA != nil || errB != nil {
 		t.Fatalf("targeted saves = %v / %v", errA, errB)

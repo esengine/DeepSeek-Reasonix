@@ -19,6 +19,7 @@ const CODE_INDEX = {
   workspace_starting: 11,
   workspace_start_failed: 12,
   inbox_not_submitted: 16,
+  image_attachment_unreadable: 17,
 } as const;
 
 type InboxErrorCode = keyof typeof CODE_INDEX;
@@ -45,6 +46,7 @@ const ERROR_COPY: Record<Locale, readonly string[]> = {
     "The turn ended before guidance could be applied. It will remain queued for the next turn",
     "Cancel failed: {error}",
     "The message was not sent. Refresh the session and try again",
+    "The image could not be read. Re-add it or try again",
   ],
   zh: [
     "收件箱已暂停",
@@ -64,6 +66,7 @@ const ERROR_COPY: Record<Locale, readonly string[]> = {
     "引导尚未应用时当前回合已结束；它会保留在队列中，供下一回合处理",
     "取消失败：{error}",
     "消息未发送，请刷新会话后重试",
+    "图片读取失败，请重新添加或重试",
   ],
   "zh-TW": [
     "收件匣已暫停",
@@ -83,6 +86,7 @@ const ERROR_COPY: Record<Locale, readonly string[]> = {
     "引導尚未套用時目前回合已結束；它會保留在佇列中，供下一回合處理",
     "取消失敗：{error}",
     "訊息未傳送，請重新整理會話後重試",
+    "圖片讀取失敗，請重新加入或重試",
   ],
 };
 

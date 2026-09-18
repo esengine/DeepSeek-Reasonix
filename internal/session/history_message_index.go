@@ -6,10 +6,12 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"strings"
+
 	"reasonix/internal/agent"
+	"reasonix/internal/attachment"
 	"reasonix/internal/provider"
 	"reasonix/internal/sessioncontent"
-	"strings"
 )
 
 func indexOneMessage(ctx context.Context, content *sessioncontent.Store, state *historyBuildState, message provider.Message, sequence uint64, upsert bool) error {
@@ -55,6 +57,11 @@ func indexOneMessageBody(ctx context.Context, content *sessioncontent.Store, sta
 	}
 	if err := insertContentRef(ctx, state, ref); err != nil {
 		return err
+	}
+	for _, extra := range attachment.CollectContentRefs(message.ImageInputs) {
+		if err := insertContentRef(ctx, state, extra); err != nil {
+			return err
+		}
 	}
 	if message.Role == provider.RoleTool && message.ToolCallID != "" {
 		if _, err := state.tx.ExecContext(ctx, `INSERT OR IGNORE INTO tool_links(message_id,digest,call_id,is_result,state) VALUES(?,?,?,1,?)`, id, ref.Digest, message.ToolCallID, string(provider.ToolResultRunState(message))); err != nil {

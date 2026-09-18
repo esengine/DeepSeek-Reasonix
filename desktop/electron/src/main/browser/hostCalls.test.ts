@@ -1,18 +1,22 @@
 import assert from "node:assert/strict";
+import { existsSync, mkdtempSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { test } from "node:test";
 import { RpcError } from "../rpc.js";
 import { ActionExecutor } from "./actions.js";
 import { DocumentRegistry } from "./documents.js";
 import { DownloadTracker } from "./downloads.js";
 import { BROWSER_ERR_NO_GRANT, BROWSER_ERR_STALE_REFERENCE, BROWSER_ERR_TAKEN_OVER } from "./errors.js";
-import { FakeViewFactory, silentLog } from "./fakeGuestViews.js";
+import { FakeGuestView, FakeViewFactory, silentLog } from "./fakeGuestViews.js";
 import { GrantRegistry } from "./grants.js";
 import { buildBrowserHostCalls, type HostBrowserTab } from "./hostCalls.js";
-import { BrowserSurfaceManager } from "./surfaceManager.js";
+import type { ScreenshotResult } from "./screenshot.js";
+import { BrowserSurfaceManager, type BrowserTab } from "./surfaceManager.js";
 
 const code = (value: number) => (error: unknown) => error instanceof RpcError && error.code === value;
 
-async function setup() {
+async function setup(screenshot: (tab: BrowserTab, request: { ref: string; fullPage: boolean; directory: string; preferCDP?: boolean }) => Promise<ScreenshotResult> = async (tab, request) => ({ tabId: tab.id, ...request }) as never) {
   const factory = new FakeViewFactory();
   const surfaces = new BrowserSurfaceManager({ views: factory, contentSize: () => null, onTakeover() {}, onCrash() {}, log: silentLog, openWaitMs: 5 });
   const grants = new GrantRegistry({ generation: () => "gen-1" });
@@ -33,7 +37,7 @@ async function setup() {
     actions,
     downloads,
     snapshot: async (tab, selector) => ({ tabId: tab.id, selector }) as never,
-    screenshot: async (tab, request) => ({ tabId: tab.id, ...request }) as never,
+    screenshot,
   });
   const call = async (method: keyof typeof table, params: Record<string, unknown> = {}): Promise<unknown> => table[method](params);
   const setDirs = downloads.setTaskDirectory.bind(downloads);
@@ -105,6 +109,33 @@ test("act and screenshot register the scratch directory for downloads", async ()
   assert.equal(s.directories.get("task-1"), "/scratch/one");
   await s.call("host/browser.screenshot", { grantId: "g", tabId: tab.id, ref: "", directory: "" });
   assert.equal(s.directories.get("task-1"), "/scratch/one", "an empty directory keeps the previous mapping");
+});
+
+test("capture results are discarded after navigation, takeover or close", async () => {
+  for (const transition of ["navigate", "takeover", "close"] as const) {
+    let release!: () => void;
+    let started!: () => void;
+    const gate = new Promise<void>(resolve => { release = resolve; });
+    const began = new Promise<void>(resolve => { started = resolve; });
+    const directory = mkdtempSync(join(tmpdir(), "reasonix-shot-"));
+    const path = join(directory, "shot.png");
+    const s = await setup(async () => {
+      started();
+      await gate;
+      writeFileSync(path, "owned capture");
+      return { path, mime: "image/png", width: 1, height: 1 };
+    });
+    await s.call("host/browser.grant", { grantId: "g", tabId: "task-1", sessionId: "" });
+    const tab = await s.surfaces.open("https://a.test", { taskId: "task-1", temporary: false });
+    const pending = s.call("host/browser.screenshot", { grantId: "g", tabId: tab.id, ref: "", directory });
+    await began;
+    if (transition === "navigate") (tab.view as FakeGuestView).fire().onNavigate("https://a.test/next", false);
+    if (transition === "takeover") s.surfaces.takeover(tab.id, "user mousedown");
+    if (transition === "close") s.surfaces.close(tab.id);
+    release();
+    await assert.rejects(pending);
+    assert.equal(existsSync(path), false, `${transition} left the stale capture on disk`);
+  }
 });
 
 test("downloads waits are served per tab and a zero wait answers at once", async () => {

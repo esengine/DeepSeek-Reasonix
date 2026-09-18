@@ -106,7 +106,7 @@ func (q *Query) SearchHistory(ctx context.Context, ref SessionRef, textQuery, cu
 		if err != nil {
 			return SearchHistoryPage{}, err
 		}
-		if parsed.SessionID != ref.SessionID || parsed.StorageRevision != StorageRevision || parsed.Projection != searchIndexVersion || parsed.QueryDigest != digest || parsed.SnapshotSequence > snapshot || parsed.BeforePosition <= 0 || parsed.Generation != metadata.generation {
+		if parsed.SessionID != ref.SessionID || parsed.StorageRevision != metadata.storageRevision || parsed.Projection != searchIndexVersion || parsed.QueryDigest != digest || parsed.SnapshotSequence > snapshot || parsed.BeforePosition <= 0 || parsed.Generation != metadata.generation {
 			return SearchHistoryPage{Status: "stale_cursor", CoverageSequence: metadata.durableSequence}, nil
 		}
 		snapshot, before = parsed.SnapshotSequence, parsed.BeforePosition
@@ -138,7 +138,7 @@ func (q *Query) SearchHistory(ctx context.Context, ref SessionRef, textQuery, cu
 		return SearchHistoryPage{}, err
 	}
 	if page.HasMore && len(page.Hits) > 0 {
-		page.NextCursor, err = encodeSearchHistoryCursor(searchHistoryCursor{SessionID: ref.SessionID, StorageRevision: StorageRevision, SnapshotSequence: snapshot, BeforePosition: page.Hits[len(page.Hits)-1].Position, Projection: searchIndexVersion, QueryDigest: digest, Generation: metadata.generation})
+		page.NextCursor, err = encodeSearchHistoryCursor(searchHistoryCursor{SessionID: ref.SessionID, StorageRevision: metadata.storageRevision, SnapshotSequence: snapshot, BeforePosition: page.Hits[len(page.Hits)-1].Position, Projection: searchIndexVersion, QueryDigest: digest, Generation: metadata.generation})
 		if err != nil {
 			return SearchHistoryPage{}, err
 		}
@@ -212,6 +212,10 @@ func readSearchMetadata(ctx context.Context, db *sql.DB) (searchMetadata, error)
 
 func ensureSearchIndex(ctx context.Context, persistence *FilesystemPersistence, sessionID, path string) error {
 	dir := filepath.Join(persistence.Root, sessionID)
+	manifest, err := readStoredManifest(filepath.Join(dir, "manifest.json"))
+	if err != nil {
+		return err
+	}
 	revision, err := revisionOfLog(dir)
 	if err != nil {
 		return err
@@ -219,7 +223,7 @@ func ensureSearchIndex(ctx context.Context, persistence *FilesystemPersistence, 
 	if handle, err := projectiondb.Open(ctx, projectiondb.OpenOptions{Path: path, Migrations: searchMigrations, RequireDisk: true, MaxOpenConns: 1}); err == nil {
 		metadata, metaErr := readSearchMetadata(ctx, handle.DB)
 		_ = handle.DB.Close()
-		if metaErr == nil && metadata.sessionID == sessionID && metadata.storageRevision == StorageRevision && metadata.projection == searchIndexVersion {
+		if metaErr == nil && metadata.sessionID == sessionID && metadata.storageRevision == manifest.StorageRevision && metadata.projection == searchIndexVersion {
 			if metadata.logSize == revision.Size {
 				return nil
 			}
@@ -238,7 +242,11 @@ func rebuildSearchIndex(ctx context.Context, dir, path, sessionID string, revisi
 		if err := configureHistoryRebuild(ctx, db); err != nil {
 			return err
 		}
-		metadata := searchMetadata{sessionID: sessionID, storageRevision: StorageRevision, projection: searchIndexVersion, generation: randomID()}
+		manifest, err := readStoredManifest(filepath.Join(dir, "manifest.json"))
+		if err != nil {
+			return err
+		}
+		metadata := searchMetadata{sessionID: sessionID, storageRevision: manifest.StorageRevision, projection: searchIndexVersion, generation: randomID()}
 		return populateSearchIndex(ctx, dir, db, 0, 1, revision, metadata, searchBuildState{positions: map[string]int64{}, versions: map[string]int{}})
 	})
 }
@@ -318,7 +326,7 @@ func populateSearchIndex(ctx context.Context, dir string, db *sql.DB, startOffse
 	}
 	values := map[string]string{
 		"session_id": metadata.sessionID, "log_size": fmt.Sprint(progress.end),
-		"log_mtime_ns": fmt.Sprint(progress.modTimeNS), "storage_revision": fmt.Sprint(StorageRevision),
+		"log_mtime_ns": fmt.Sprint(progress.modTimeNS), "storage_revision": fmt.Sprint(metadata.storageRevision),
 		"projection_version": fmt.Sprint(searchIndexVersion), "durable_sequence": fmt.Sprint(progress.sequence),
 		"generation": metadata.generation,
 	}

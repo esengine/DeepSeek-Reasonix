@@ -60,7 +60,7 @@ export function useWindowStatePersistence() {
 
     let timer: ReturnType<typeof setInterval>;
     const save = createWindowStateSaver(
-      { getWindowBounds: () => desktopHost().native.getWindowBounds() },
+      { getWindowBounds: () => desktopHost().native.window.getBounds() },
       (state) => app.SaveWindowState(state),
     );
 

@@ -1,7 +1,8 @@
 import { noteSessionObservation } from "./sessionObservationDiagnostics";
 import { app } from "./bridge";
 import { entriesFor, registerTranscriptContentRecovery } from "./canonicalTranscriptBackend";
-import { TranscriptFollowClient } from "./transcriptFollowClient";
+import { TranscriptFollowClient, TranscriptSyncError } from "./transcriptFollowClient";
+import { desktopHost } from "./desktopHost";
 import { getTranscriptStore } from "./transcriptStore";
 import type { Action, State } from "./useController";
 import type { HistoryEntry, HistoryMessage, WireEvent } from "./types";
@@ -30,6 +31,24 @@ export class TranscriptSessionFollowerRuntime {
       const read = remote ? app.RemoteTranscriptFollowForTab : app.TranscriptFollowForTab;
       if (!read) return Promise.reject(new Error("Transcript v2 is required. Upgrade Desktop and Serve together."));
       return read(tabId, request);
+    }, remote ? {} : { waitForService: () => this.waitForLocalService() });
+  }
+
+  private waitForLocalService(): Promise<void> {
+    return new Promise(resolve => {
+      let release: (() => void) | undefined;
+      let resolved = false;
+      const finish = () => {
+        if (resolved) return;
+        resolved = true;
+        release?.();
+        resolve();
+      };
+      release = desktopHost().native.onServiceState(state => {
+        if (state.phase !== "ready") return;
+        finish();
+      });
+      if (resolved) release();
     });
   }
 
@@ -143,10 +162,10 @@ export class TranscriptSessionFollowerRuntime {
         while (true) {
           const chunk = await read(this.tabId, { ...ref, offset });
           if (generation !== this.generation) return;
-          if (chunk.stale) throw new Error("Active transcript snapshot expired; synchronize again");
+          if (chunk.stale) throw new TranscriptSyncError("snapshot_stale", "Active transcript snapshot expired; synchronize again");
           text += chunk.data;
           if (chunk.done) break;
-          if (chunk.nextOffset <= offset) throw new Error("Active transcript content did not advance");
+          if (chunk.nextOffset <= offset) throw new TranscriptSyncError("history_corruption", "Active transcript content did not advance");
           offset = chunk.nextOffset;
         }
         let target = record.message as unknown as Record<string, unknown>;

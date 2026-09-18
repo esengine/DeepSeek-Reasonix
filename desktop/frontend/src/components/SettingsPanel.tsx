@@ -252,7 +252,7 @@ export function SettingsPanel({
     void (async () => {
       try {
         const persisted = host.kind === "electron"
-          ? await host.native.getAppZoom()
+          ? await host.native.window.getAppZoom()
           : await app.GetDesktopZoomFactor();
         if (cancelled || typeof persisted !== "number" || !Number.isFinite(persisted)) return;
         const snapped = snapZoom(persisted);
@@ -372,7 +372,7 @@ export function SettingsPanel({
     setZoomPct(zoomToPercent(snapped));
     try {
       const host = desktopHost();
-      if (host.kind === "electron") await host.native.setAppZoom(snapped);
+      if (host.kind === "electron") await host.native.window.setAppZoom(snapped);
       else await app.SetDesktopZoomFactor(snapped);
       if (seq === zoomSaveSeq.current) saveRestartZoom(snapped);
     } catch (e) {

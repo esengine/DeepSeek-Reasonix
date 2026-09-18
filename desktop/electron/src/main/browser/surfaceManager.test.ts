@@ -44,6 +44,7 @@ test("open, activate, layout and overlay drive visibility of exactly one view", 
   assert.equal(first.partition, "persist:browser");
   assert.equal(second.partition, `temp:${second.id}`);
   assert.equal(viewOf(first).page.calls[0], "load:https://example.com/");
+  assert.deepEqual(viewOf(first).bounds, { x: 0, y: 0, width: 1280, height: 720 }, "a guest without layout still has a capturable viewport");
   assert.equal(manager.activeTabId, null, "opens do not select a native view without the application renderer");
   manager.activate(second.id);
   assert.equal(viewOf(second).visible, false, "no layout yet: nothing is visible");

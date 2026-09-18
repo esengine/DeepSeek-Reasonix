@@ -2,6 +2,7 @@ import type { Rectangle } from "electron";
 import type { BrowserLayoutRect, BrowserNavigateTarget, BrowserTabMode, BrowserTabView, BrowserTakeoverKind } from "../../shared/ipc.js";
 import type { Logger } from "../log.js";
 import type { GuestView, GuestViewEvents, GuestViewFactory } from "./guestView.js";
+import { browserRefusal } from "./errors.js";
 
 export const SHARED_PARTITION = "persist:browser";
 export const USER_TASK_ID = "user";
@@ -13,6 +14,7 @@ export const AGENT_INPUT_GRACE_MS = 750;
 export const MAX_CRASH_RELOADS = 3;
 export const MIN_ZOOM = 0.25;
 export const MAX_ZOOM = 5;
+export const INITIAL_GUEST_BOUNDS: Rectangle = { x: 0, y: 0, width: 1280, height: 720 };
 
 export interface BrowserTab {
   id: string;
@@ -48,15 +50,18 @@ export interface SurfaceManagerDeps {
 
 export function normaliseBrowserURL(input: string): string {
   const raw = input.trim();
-  if (raw === "") throw new Error("empty URL");
+  if (raw === "") throw browserRefusal("invalid_url", "URL is empty");
   const candidate = /^[a-z][a-z0-9+.-]*:/i.test(raw) ? raw : `https://${raw}`;
   let url: URL;
   try {
     url = new URL(candidate);
   } catch {
-    throw new Error(`invalid URL: ${raw.slice(0, 120)}`);
+    throw browserRefusal("invalid_url", `invalid URL: ${raw.slice(0, 120)}`);
   }
-  if (url.protocol !== "http:" && url.protocol !== "https:") throw new Error(`only http(s) URLs can be opened, not ${url.protocol}`);
+  if (url.protocol !== "http:" && url.protocol !== "https:") {
+    const local = url.protocol === "file:" ? "; serve local files over a local HTTP address" : "";
+    throw browserRefusal("unsupported_scheme", `only http(s) URLs can be opened, not ${url.protocol}${local}`);
+  }
   return url.href;
 }
 
@@ -95,9 +100,13 @@ export class BrowserSurfaceManager {
     return this.tabs.get(tabId);
   }
 
+  isVisible(tabId: string): boolean {
+    return !this.overlay && this.layout !== null && this.layout.width > 0 && this.layout.height > 0 && this.activeId === tabId;
+  }
+
   require(tabId: string): BrowserTab {
     const tab = this.tabs.get(tabId);
-    if (!tab) throw new Error(`unknown browser tab ${tabId || "(empty)"}`);
+    if (!tab) throw browserRefusal("tab_unavailable", `unknown browser tab ${tabId || "(empty)"}`);
     return tab;
   }
 
@@ -146,7 +155,7 @@ export class BrowserSurfaceManager {
     const partition = options.temporary ? `temp:${id}` : SHARED_PARTITION;
     const view = this.deps.views.create(partition);
     const tab = this.register(id, view, options.taskId, partition, options.temporary);
-    if (this.layout) view.setBounds(this.layout);
+    view.setBounds(this.layout ?? INITIAL_GUEST_BOUNDS);
     // The application renderer owns selection. Agent opens must not replace
     // another task's visible page while its address bar still names that task.
     this.broadcast();
@@ -202,7 +211,7 @@ export class BrowserSurfaceManager {
       default:
         break;
     }
-    if (typeof target.url !== "string") throw new Error("navigate needs a url or an action");
+    if (typeof target.url !== "string") throw browserRefusal("invalid_arguments", "navigate needs a url or an action");
     await page.loadURL(normaliseBrowserURL(target.url)).catch((error: unknown) => {
       this.deps.log.warn(`browser tab ${tab.id} navigation failed: ${String(error)}`);
     });
@@ -211,7 +220,7 @@ export class BrowserSurfaceManager {
 
   setZoom(tabId: string, factor: number): void {
     const tab = this.require(tabId);
-    if (!Number.isFinite(factor)) throw new Error("zoom factor must be a finite number");
+    if (!Number.isFinite(factor)) throw browserRefusal("invalid_arguments", "zoom factor must be a finite number");
     tab.zoom = Math.min(MAX_ZOOM, Math.max(MIN_ZOOM, factor));
     tab.view.page.setZoomFactor(tab.zoom);
     this.broadcast();

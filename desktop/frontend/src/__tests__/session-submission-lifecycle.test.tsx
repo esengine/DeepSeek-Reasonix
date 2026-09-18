@@ -16,13 +16,14 @@ function deferred() {
   return { promise, resolve, reject };
 }
 let goalGate: ReturnType<typeof deferred> | undefined, profileGate: ReturnType<typeof deferred> | undefined;
+let profileResult = true;
 const calls: unknown[][] = [];
 const ports: SubmissionPorts = {
   send: async (...args) => { calls.push(["send", ...args]); },
   clearUndo: tab => { calls.push(["undo", tab]); },
   setGoal: async (...args) => { calls.push(["goal", ...args]); await goalGate?.promise; },
   patchGoal: (...args) => { calls.push(["patch", ...args]); },
-  profile: async tab => { calls.push(["profile", tab]); await profileGate?.promise; return true; },
+  profile: async tab => { calls.push(["profile", tab]); await profileGate?.promise; return profileResult; },
 };
 let commands!: ReturnType<typeof useSessionSubmission>;
 function Probe({ tab, gen, draft, readOnly }: { tab: string; gen: number; draft: boolean; readOnly: boolean }) {
@@ -90,7 +91,10 @@ try {
   calls.length = 0; await paint("A", 1, false, true);
   await assert.rejects(commands.commitThenSend("A", "direct"), /read-only/);
   assert.deepEqual(calls, [], "read-only source preserves undo and sends nothing");
-  await paint(); profileGate = deferred();
+  await paint(); profileResult = false;
+  await assert.rejects(commands.submit("A", "retryable"), /inbox_not_submitted/);
+  assert.deepEqual(calls, [["profile", "A"]], "a profile race rejects the submit before undo or transport so the Composer retains its draft");
+  profileResult = true; calls.length = 0; profileGate = deferred();
   const disposed = commands.submit("A", "disposed");
   await act(async () => root.unmount()); profileGate.resolve(); await disposed;
   commands.commitThenSend("A", "after-unmount");

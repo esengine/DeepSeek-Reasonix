@@ -46,6 +46,7 @@ type Event struct {
 	Outcome          string                           `json:"outcome,omitempty"`
 	Readiness        *FinalReadiness                  `json:"readiness,omitempty"`
 	ProtocolRecovery *provider.ProtocolRecoveryAction `json:"protocolRecovery,omitempty"`
+	ImageRecovery    *provider.ImageRecoveryAction    `json:"imageRecovery,omitempty"`
 	Diagnostic       *provider.FailureDiagnostic      `json:"diagnostic,omitempty"`
 	Receipt          *CompletionReceipt               `json:"receipt,omitempty"`
 	CheckpointTurn   *int                             `json:"checkpointTurn,omitempty"`

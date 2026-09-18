@@ -88,8 +88,8 @@ test("renderer invokes are gated by sender identity and the contract allowlist",
   assert.deepEqual(await invoke({ sender: trustedSender, senderFrame: {} }, "OpenProjectTab", ["/p"]), { ok: false, message: "untrusted sender" });
   assert.deepEqual(await invoke(trusted, "OpenProjectTab", ["/p"]), { ok: true, value: { opened: "/p" } });
   assert.deepEqual(await invoke(trusted, "OpenProjectTab", ["/missing"]), { ok: false, message: "workspace not found" });
-  assert.deepEqual(await invoke(trusted, "DeleteEverything", []), { ok: false, message: "-32601 method not found: DeleteEverything" });
-  assert.deepEqual(await invoke(trusted, "__proto__", []), { ok: false, message: "-32601 method not found: __proto__" });
+  assert.deepEqual(await invoke(trusted, "DeleteEverything", []), { ok: false, message: "-32601 method not found: DeleteEverything", code: -32601 });
+  assert.deepEqual(await invoke(trusted, "__proto__", []), { ok: false, message: "-32601 method not found: __proto__", code: -32601 });
   assert.deepEqual(invoked.map((call) => call.method), ["OpenProjectTab", "OpenProjectTab"]);
 
   const contract = listeners.get(IPC.contract);

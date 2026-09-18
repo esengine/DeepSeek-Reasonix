@@ -10,6 +10,7 @@ import (
 	"strings"
 	"time"
 
+	"reasonix/internal/attachment"
 	"reasonix/internal/tool"
 )
 
@@ -190,7 +191,14 @@ func encodeScreenshot(tabID string, shot Screenshot) (string, []string, error) {
 	if len(data) > screenshotMaxBytes {
 		return oversizeText(shot.Path, int64(len(data))), nil, nil
 	}
-	mime := shot.MIME
+	policy := attachment.DefaultPolicy()
+	policy.MaxBytes = screenshotMaxBytes
+	mime, width, height, err := attachment.ValidateImage(data, shot.MIME, policy)
+	if err != nil {
+		return "", nil, fmt.Errorf("validate screenshot %s: %w", shot.Path, err)
+	}
+	shot.MIME, shot.Width, shot.Height = mime, width, height
+	mime = shot.MIME
 	if mime == "" {
 		mime = "image/png"
 	}

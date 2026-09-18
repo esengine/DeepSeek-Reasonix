@@ -29,6 +29,10 @@ func translate(err error, what string) error {
 		return tool.Blocked(noGrantText)
 	case errors.Is(err, ErrUnknownOutcome):
 		return unknownOutcome(what)
+	case IsRefusal(err):
+		var refusal *RefusalError
+		_ = errors.As(err, &refusal)
+		return fmt.Errorf("not_executed: %s was refused before execution (%s): %s", what, refusal.Kind, refusal.Detail)
 	}
 	return err
 }

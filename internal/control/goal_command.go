@@ -8,7 +8,7 @@ import (
 	"reasonix/internal/i18n"
 )
 
-func (c *Controller) startGoalCommandTurn(cmd GoalCommand, display string) {
+func (c *Controller) startGoalCommandTurnWithAdmission(cmd GoalCommand, display string, admission turnAdmission) {
 	if c.GoalStatus() != GoalStatusRunning {
 		return
 	}
@@ -17,13 +17,17 @@ func (c *Controller) startGoalCommandTurn(cmd GoalCommand, display string) {
 	}
 	c.notice(fmt.Sprintf(i18n.M.GoalSetFmt, ShortGoalForNotice(c.Goal())))
 	if c.runner != nil {
-		c.runGuarded(func(ctx context.Context) error {
+		c.runGuardedWithAdmission(func(ctx context.Context) error {
 			return c.runGoalLoopWithRawDisplay(ctx, "Start pursuing the active goal now.", cmd.Text, display)
-		})
+		}, admission)
 	}
 }
 
 func (c *Controller) applyGoalCommand(input, display string) bool {
+	return c.applyGoalCommandWithAdmission(input, display, turnAdmission{})
+}
+
+func (c *Controller) applyGoalCommandWithAdmission(input, display string, admission turnAdmission) bool {
 	cmd, ok := ParseGoalCommand(input)
 	if !ok {
 		return false
@@ -43,7 +47,7 @@ func (c *Controller) applyGoalCommand(input, display string) bool {
 		}
 		c.SetPlanMode(false)
 		c.GoalStrict(cmd.Strict)
-		c.startGoalCommandTurn(cmd, display)
+		c.startGoalCommandTurnWithAdmission(cmd, display, admission)
 	case GoalCommandClear:
 		if c.sessionEngineEnabled() {
 			if err := c.SetGoalDurable(""); err != nil {

@@ -53,7 +53,7 @@ test("a plain quit asks Go, shuts the service down once, then exits", async () =
   await tick();
   await tick();
   assert.deepEqual(log, ["flush", "beforeClose:quit", "flush", "shutdown", "closeAllowed"]);
-  assert.deepEqual(calls, ["quit", "quit", "quit", "exit"]);
+  assert.deepEqual(calls, ["quit", "quit", "exit"]);
   assert.equal(sequencer.currentPhase, "done");
 });
 
@@ -83,7 +83,7 @@ test("host/app.quit approval skips beforeClose and goes straight to shutdown", a
   sequencer.approve();
   await tick();
   assert.deepEqual(log, ["flush", "shutdown", "closeAllowed"]);
-  assert.deepEqual(calls, ["quit", "quit", "exit"]);
+  assert.deepEqual(calls, ["quit", "exit"]);
 });
 
 test("a failed beforeClose does not trap the user in a shell that cannot quit", async () => {
@@ -110,7 +110,7 @@ test("direct approval also withholds shutdown when renderer flush fails", async 
   sequencer.approve();
   await tick();
   assert.deepEqual(log, ["flush"]);
-  assert.deepEqual(calls, ["quit"]);
+  assert.deepEqual(calls, []);
   assert.equal(sequencer.currentPhase, "idle");
   assert.equal(sequencer.isQuitting, false);
 });
@@ -120,16 +120,64 @@ test("relaunch runs the shutdown and re-spawns with the requested args", async (
   sequencer.relaunch(["--after-update"]);
   await tick();
   assert.deepEqual(log, ["flush", "shutdown", "closeAllowed"]);
-  assert.deepEqual(calls, ["quit", "relaunch:--after-update", "quit", "exit"]);
+  assert.deepEqual(calls, ["relaunch:--after-update", "quit", "exit"]);
 });
 
 test("relaunch waits for shutdown then starts the committed stable launcher", async () => {
   const { sequencer, calls, log } = build();
   sequencer.relaunch(["--after-update"], "/opt/reasonix/reasonix-launcher");
-  assert.deepEqual(calls, ["quit"]);
+  assert.deepEqual(calls, []);
   await tick();
   assert.deepEqual(log, ["flush", "shutdown", "closeAllowed"]);
-  assert.deepEqual(calls, ["quit", "relaunch:--after-update@/opt/reasonix/reasonix-launcher", "quit", "exit"]);
+  assert.deepEqual(calls, ["relaunch:--after-update@/opt/reasonix/reasonix-launcher", "quit", "exit"]);
+});
+
+test("concurrent window and app close requests share one decision and shutdown", async () => {
+  let releaseDecision!: (prevent: boolean) => void;
+  const decision = new Promise<boolean>(resolve => { releaseDecision = resolve; });
+  const events: string[] = [];
+  let q!: QuitSequencer;
+  q = new QuitSequencer({
+    service: {
+      beforeClose: async reason => { events.push("before:" + reason); return decision; },
+      shutdown: async () => { events.push("shutdown"); },
+    },
+    app: { quit: () => { events.push("quit"); if (q.onBeforeQuit()) events.push("exit"); }, relaunch() {} },
+    onCloseAllowed: () => events.push("allowed"),
+    onClosePrevented: reason => events.push("prevented:" + reason),
+    log: silent,
+  });
+  q.requestClose("window");
+  q.requestClose("window");
+  q.requestQuit();
+  q.approve();
+  assert.deepEqual(events, ["quit"]);
+  await tick();
+  assert.deepEqual(events, ["quit", "before:window"]);
+  releaseDecision(true);
+  await tick(); await tick();
+  assert.deepEqual(events, ["quit", "before:window", "shutdown", "allowed", "quit", "exit"]);
+});
+
+test("a vetoed window close hides once and permits a later close attempt", async () => {
+  const decisions = [true, false];
+  const events: string[] = [];
+  let q!: QuitSequencer;
+  q = new QuitSequencer({
+    service: {
+      beforeClose: async reason => { events.push("before:" + reason); return decisions.shift() ?? false; },
+      shutdown: async () => { events.push("shutdown"); },
+    },
+    app: { quit: () => { events.push("quit"); if (q.onBeforeQuit()) events.push("exit"); }, relaunch() {} },
+    onCloseAllowed: () => events.push("allowed"),
+    onClosePrevented: reason => events.push("prevented:" + reason),
+    log: silent,
+  });
+  q.requestClose("window"); await tick();
+  assert.deepEqual(events, ["before:window", "prevented:window"]);
+  assert.equal(q.currentPhase, "idle");
+  q.requestClose("window"); await tick(); await tick();
+  assert.deepEqual(events, ["before:window", "prevented:window", "before:window", "shutdown", "allowed", "quit", "exit"]);
 });
 
 test("cleanup failure cannot skip later cleanup or the final quit deadline", async () => {

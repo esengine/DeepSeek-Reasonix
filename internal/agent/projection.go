@@ -9,6 +9,7 @@ import (
 	"strings"
 	"time"
 
+	"reasonix/internal/attachment"
 	"reasonix/internal/fileutil"
 	"reasonix/internal/provider"
 	"reasonix/internal/store"
@@ -421,6 +422,7 @@ func providerVisibleFingerprint(msgs []provider.Message) string {
 		Role               string                      `json:"r"`
 		Content            string                      `json:"c,omitempty"`
 		Images             []string                    `json:"img,omitempty"`
+		ImageInputs        []attachment.ImageInput     `json:"ii,omitempty"`
 		ReasoningContent   string                      `json:"rc,omitempty"`
 		ReasoningID        string                      `json:"rid,omitempty"`
 		ReasoningStatus    string                      `json:"rst,omitempty"`
@@ -438,6 +440,7 @@ func providerVisibleFingerprint(msgs []provider.Message) string {
 			Role:               string(m.Role),
 			Content:            m.Content,
 			Images:             append([]string(nil), m.Images...),
+			ImageInputs:        attachment.CloneImageInputs(m.ImageInputs),
 			ReasoningContent:   m.ReasoningContent,
 			ReasoningID:        m.ReasoningID,
 			ReasoningStatus:    m.ReasoningStatus,
@@ -574,6 +577,7 @@ func coalesceProjectionUserRuns(msgs []provider.Message) []provider.Message {
 		if len(out) == 0 || msg.Role != provider.RoleUser || out[len(out)-1].Role != provider.RoleUser {
 			clone := msg
 			clone.Images = append([]string(nil), msg.Images...)
+			clone.ImageInputs = provider.CloneImageInputs(msg.ImageInputs)
 			clone.ToolCalls = append([]provider.ToolCall(nil), msg.ToolCalls...)
 			clone.ResponsesItems = append([]json.RawMessage(nil), msg.ResponsesItems...)
 			clone.ServerSearch = append([]provider.ServerSearchCall(nil), msg.ServerSearch...)
@@ -588,6 +592,7 @@ func coalesceProjectionUserRuns(msgs []provider.Message) []provider.Message {
 			prev.Content = strings.TrimRight(prev.Content, "\n") + "\n\n" + msg.Content
 		}
 		prev.Images = append(prev.Images, msg.Images...)
+		prev.ImageInputs = append(prev.ImageInputs, provider.CloneImageInputs(msg.ImageInputs)...)
 		prev.ToolCalls = append(prev.ToolCalls, msg.ToolCalls...)
 		prev.ResponsesItems = append(prev.ResponsesItems, msg.ResponsesItems...)
 		prev.ServerSearch = append(prev.ServerSearch, msg.ServerSearch...)

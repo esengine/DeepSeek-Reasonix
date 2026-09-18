@@ -24,9 +24,13 @@ import (
 // Shell error codes for host/browser.* replies; anything else is transport
 // failure and therefore an unknown outcome for a reserved write.
 const (
-	hostBrowserErrStaleReference = -32010
-	hostBrowserErrTakenOver      = -32011
-	hostBrowserErrNoGrant        = -32012
+	hostBrowserErrStaleReference    = -32010
+	hostBrowserErrTakenOver         = -32011
+	hostBrowserErrNoGrant           = -32012
+	hostBrowserErrInvalidURL        = -32013
+	hostBrowserErrUnsupportedScheme = -32014
+	hostBrowserErrTabUnavailable    = -32015
+	hostBrowserErrInvalidArguments  = -32016
 )
 
 const hostBrowserReadTimeout = 60 * time.Second
@@ -226,6 +230,14 @@ func mapHostBrowserError(err error) error {
 			return browser.ErrTakenOver
 		case hostBrowserErrNoGrant:
 			return browser.ErrNoGrant
+		case hostBrowserErrInvalidURL:
+			return &browser.RefusalError{Kind: browser.RefusalInvalidURL, Detail: resp.Message}
+		case hostBrowserErrUnsupportedScheme:
+			return &browser.RefusalError{Kind: browser.RefusalUnsupportedScheme, Detail: resp.Message}
+		case hostBrowserErrTabUnavailable:
+			return &browser.RefusalError{Kind: browser.RefusalTabUnavailable, Detail: resp.Message}
+		case hostBrowserErrInvalidArguments:
+			return &browser.RefusalError{Kind: browser.RefusalInvalidArguments, Detail: resp.Message}
 		}
 		return fmt.Errorf("browser host: %s", resp.Message)
 	}
@@ -278,20 +290,22 @@ func (e *hostBrowserExecutor) write(ctx context.Context, id, action, tabID strin
 	}
 	if err := ledger.Reserve(browserops.Operation{ID: id, SessionID: e.browserSessionKey(), Generation: e.grantID, TabID: tabID, Action: action, Digest: digest}); err != nil {
 		if errors.Is(err, browserops.ErrDuplicateOperation) {
-			return fmt.Errorf("%w: operationId already recorded", browser.ErrUnknownOutcome)
+			return duplicateBrowserOperation(ledger, id, digest)
 		}
 		return err
 	}
 	err = e.call(ctx, method, params, out)
 	if err == nil {
-		e.settle(ledger, id, browserops.StateExecuted, "")
+		_ = e.settle(ledger, id, browserops.StateExecuted, "", "")
 		return nil
 	}
-	if errors.Is(err, browser.ErrNoGrant) || errors.Is(err, browser.ErrTakenOver) || errors.Is(err, browser.ErrStaleReference) {
-		e.settle(ledger, id, browserops.StateNotExecuted, err.Error())
+	if errors.Is(err, browser.ErrNoGrant) || errors.Is(err, browser.ErrTakenOver) || errors.Is(err, browser.ErrStaleReference) || browser.IsRefusal(err) {
+		if settleErr := e.settle(ledger, id, browserops.StateNotExecuted, err.Error(), refusalKind(err)); settleErr != nil {
+			return fmt.Errorf("%w; execution refusal confirmed but operation ledger settlement failed: %v", err, settleErr)
+		}
 		return err
 	}
-	e.settle(ledger, id, browserops.StateUnknown, err.Error())
+	_ = e.settle(ledger, id, browserops.StateUnknown, err.Error(), "")
 	return fmt.Errorf("%w: %s", browser.ErrUnknownOutcome, err.Error())
 }
 
@@ -379,14 +393,18 @@ func (e *hostBrowserExecutor) Act(ctx context.Context, req browser.ActRequest) (
 	}
 	if err := ledger.Reserve(op); err != nil {
 		if errors.Is(err, browserops.ErrDuplicateOperation) {
-			return browser.ActResult{Outcome: browser.OutcomeUnknown}, fmt.Errorf("%w: operationId already recorded", browser.ErrUnknownOutcome)
+			err = duplicateBrowserOperation(ledger, req.OperationID, digest)
+			if browser.IsRefusal(err) {
+				return browser.ActResult{Outcome: browser.OutcomeNotExecuted, Reason: err.Error()}, err
+			}
+			return browser.ActResult{Outcome: browser.OutcomeUnknown}, err
 		}
 		return browser.ActResult{}, err
 	}
 	if req.Action == browser.ActionUpload {
 		files, cleanup, err := e.prepareUploadFiles(req.Files)
 		if err != nil {
-			e.settle(ledger, req.OperationID, browserops.StateNotExecuted, err.Error())
+			_ = e.settle(ledger, req.OperationID, browserops.StateNotExecuted, err.Error(), refusalKind(err))
 			return browser.ActResult{}, err
 		}
 		defer cleanup()
@@ -407,30 +425,53 @@ func (e *hostBrowserExecutor) Act(ctx context.Context, req browser.ActRequest) (
 	callErr := e.call(ctx, "host/browser.act", params, &out)
 	switch {
 	case callErr == nil && out.Executed == nil:
-		e.settle(ledger, req.OperationID, browserops.StateUnknown, "host returned no execution receipt")
+		_ = e.settle(ledger, req.OperationID, browserops.StateUnknown, "host returned no execution receipt", "")
 		return browser.ActResult{Outcome: browser.OutcomeUnknown}, browser.ErrUnknownOutcome
 	case callErr == nil && out.Outcome == browser.OutcomeUnknown:
-		e.settle(ledger, req.OperationID, browserops.StateUnknown, out.Reason)
+		_ = e.settle(ledger, req.OperationID, browserops.StateUnknown, out.Reason, "")
 		return browser.ActResult{Outcome: browser.OutcomeUnknown}, fmt.Errorf("%w: %s", browser.ErrUnknownOutcome, out.Reason)
 	case callErr == nil && *out.Executed:
-		e.settle(ledger, req.OperationID, browserops.StateExecuted, "")
+		_ = e.settle(ledger, req.OperationID, browserops.StateExecuted, "", "")
 		return browser.ActResult{Executed: true, Outcome: browser.OutcomeExecuted, DocumentToken: out.DocumentToken}, nil
 	case callErr == nil:
-		e.settle(ledger, req.OperationID, browserops.StateNotExecuted, out.Reason)
+		_ = e.settle(ledger, req.OperationID, browserops.StateNotExecuted, out.Reason, "")
 		return browser.ActResult{Executed: false, Outcome: browser.OutcomeNotExecuted, Reason: out.Reason, DocumentToken: out.DocumentToken}, nil
-	case errors.Is(callErr, browser.ErrStaleReference), errors.Is(callErr, browser.ErrTakenOver), errors.Is(callErr, browser.ErrNoGrant):
-		e.settle(ledger, req.OperationID, browserops.StateNotExecuted, callErr.Error())
+	case errors.Is(callErr, browser.ErrStaleReference), errors.Is(callErr, browser.ErrTakenOver), errors.Is(callErr, browser.ErrNoGrant), browser.IsRefusal(callErr):
+		if settleErr := e.settle(ledger, req.OperationID, browserops.StateNotExecuted, callErr.Error(), refusalKind(callErr)); settleErr != nil {
+			return browser.ActResult{Outcome: browser.OutcomeNotExecuted}, fmt.Errorf("%w; execution refusal confirmed but operation ledger settlement failed: %v", callErr, settleErr)
+		}
 		return browser.ActResult{}, callErr
 	default:
-		e.settle(ledger, req.OperationID, browserops.StateUnknown, callErr.Error())
+		_ = e.settle(ledger, req.OperationID, browserops.StateUnknown, callErr.Error(), "")
 		return browser.ActResult{Outcome: browser.OutcomeUnknown}, fmt.Errorf("%w: %s", browser.ErrUnknownOutcome, callErr.Error())
 	}
 }
 
-func (e *hostBrowserExecutor) settle(ledger *browserops.Ledger, id string, state browserops.State, reason string) {
-	if err := ledger.Settle(id, state, reason); err != nil {
+func (e *hostBrowserExecutor) settle(ledger *browserops.Ledger, id string, state browserops.State, reason, refusal string) error {
+	if err := ledger.SettleDetail(id, state, reason, refusal); err != nil {
 		slog.Warn("desktop browser: settle operation", "operation", id, "state", state, "err", err)
+		return err
 	}
+	return nil
+}
+
+func refusalKind(err error) string {
+	var refusal *browser.RefusalError
+	if errors.As(err, &refusal) {
+		return string(refusal.Kind)
+	}
+	return ""
+}
+
+func duplicateBrowserOperation(ledger *browserops.Ledger, id, digest string) error {
+	op, ok := ledger.Lookup(id)
+	if !ok || op.Digest != digest {
+		return &browser.RefusalError{Kind: browser.RefusalInvalidArguments, Detail: "operationId already belongs to a different request"}
+	}
+	if op.State == browserops.StateNotExecuted && op.RefusalKind != "" {
+		return &browser.RefusalError{Kind: browser.RefusalKind(op.RefusalKind), Detail: op.Reason}
+	}
+	return fmt.Errorf("%w: operationId already recorded", browser.ErrUnknownOutcome)
 }
 
 func actDigest(req any) (string, error) {

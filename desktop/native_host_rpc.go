@@ -193,6 +193,8 @@ func (h rpcNativeHost) OpenExternal(ctx context.Context, url string) {
 	h.fire(ctx, "host/shell.openExternal", map[string]string{"url": url})
 }
 
+func (h rpcNativeHost) CloseWindow(ctx context.Context) { h.fire(ctx, "host/window.close", struct{}{}) }
+
 func (h rpcNativeHost) Quit(ctx context.Context) { h.fire(ctx, "host/app.quit", struct{}{}) }
 
 func (h rpcNativeHost) OpenDevTools(ctx context.Context) {

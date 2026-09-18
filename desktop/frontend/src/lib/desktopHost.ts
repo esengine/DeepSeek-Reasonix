@@ -17,7 +17,7 @@ export interface WindowBounds {
 }
 
 export interface ServiceState {
-  phase: "starting" | "ready" | "restarting" | "failed" | "exited";
+  phase: "starting" | "ready" | "restarting" | "stopping" | "failed" | "exited";
   generation: string;
   error?: string;
 }
@@ -101,12 +101,18 @@ export interface DesktopHost {
     openExternal(url: string): void;
     clipboardWriteText(text: string): Promise<boolean>;
     clipboardReadText(): Promise<string>;
-    setWindowTheme(theme: WindowTheme): void;
-    setWindowBackground(r: number, g: number, b: number, a: number): void;
-    getWindowBounds(): Promise<WindowBounds> | undefined;
-    getAppZoom(): Promise<number>;
-    setAppZoom(factor: number): Promise<number>;
-    resetAppZoom(): Promise<number>;
+    window: {
+      setTheme(theme: WindowTheme): void;
+      setBackgroundColour(r: number, g: number, b: number, a: number): void;
+      getBounds(): Promise<WindowBounds> | undefined;
+      isMaximised(): Promise<boolean>;
+      minimise(): void;
+      toggleMaximise(): void;
+      close(): void;
+      getAppZoom(): Promise<number>;
+      setAppZoom(factor: number): Promise<number>;
+      resetAppZoom(): Promise<number>;
+    };
     graphics: { get(): Promise<GraphicsSettingsState>; setHardwareAcceleration(enabled: boolean): Promise<GraphicsSettingsState> };
     browserControl: BrowserControlApi;
     onFilesDropped(cb: (paths: string[]) => void): () => void;
@@ -149,14 +155,20 @@ const serverHost: DesktopHost = {
     },
     clipboardWriteText: async () => false,
     clipboardReadText: async () => "",
-    setWindowTheme: noop,
-    setWindowBackground: noop,
-    getWindowBounds: () => undefined,
+    window: {
+      setTheme: noop,
+      setBackgroundColour: noop,
+      getBounds: () => undefined,
+      isMaximised: async () => false,
+      minimise: noop,
+      toggleMaximise: noop,
+      close: noop,
+      getAppZoom: async () => 1,
+      setAppZoom: async () => 1,
+      resetAppZoom: async () => 1,
+    },
     onFilesDropped: () => noop,
     onServiceState: () => noop,
-    getAppZoom: async () => 1,
-    setAppZoom: async () => 1,
-    resetAppZoom: async () => 1,
     graphics: { get: async () => ({ hardwareAcceleration: true, startupEnabled: true, override: "none", restartRequired: false, writable: false, warning: null }), setHardwareAcceleration: async () => { throw new Error("graphics settings unavailable"); } },
     browserControl: unavailableBrowserControl,
   },
@@ -209,12 +221,7 @@ const electronHostFrom = (host: ReasonixDesktopHost): DesktopHost => {
       openExternal: (url) => void host.native.openExternal(url).catch((err: unknown) => console.warn("openExternal failed", err)),
       clipboardWriteText: (text) => host.native.clipboard.writeText(text),
       clipboardReadText: () => host.native.clipboard.readText(),
-      setWindowTheme: (theme) => host.native.window.setTheme(theme),
-      setWindowBackground: (r, g, b, a) => host.native.window.setBackgroundColour(r, g, b, a),
-      getWindowBounds: () => host.native.window.getBounds(),
-      getAppZoom: () => host.native.window.getAppZoom(),
-      setAppZoom: (factor) => host.native.window.setAppZoom(factor),
-    resetAppZoom: () => host.native.window.resetAppZoom(),
+      window: host.native.window,
       graphics: host.native.graphics,
       ...(host.native.processDiagnostics ? { processDiagnostics: () => host.native.processDiagnostics!() } : {}),
       ...(host.native.captureRendererProfile ? { captureRendererProfile: (id?: string) => host.native.captureRendererProfile!(id) } : {}),

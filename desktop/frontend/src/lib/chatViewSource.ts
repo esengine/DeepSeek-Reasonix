@@ -184,7 +184,7 @@ export class ChatSource implements ChatViewSource {
       // Terminal failures/recovery prompts remain independent and prevent auto-fold.
       const failed = current.items.some((item, index) => item.kind === "assistant" && item.streaming
         || item.kind === "tool" && item.status === "stopped"
-        || item.kind === "notice" && (item.action === "recover_context"
+        || item.kind === "notice" && (item.action === "recover_context" || item.action === "isolate_images"
           || index > answerIndex && !item.decisionReceipt && !item.completionSummary));
       const mergedAudits = new Set(current.items.filter(item => {
         const call = proxyAuditCall(item);
@@ -192,7 +192,7 @@ export class ChatSource implements ChatViewSource {
       }).map(item => item.id));
       const members = current.items.flatMap(item => mergedAudits.has(item.id) ? [] : item.kind === "assistant"
         ? [...(item !== answer ? [item.id] : []), `${item.id}:reasoning`]
-        : item.kind === "notice" && (item.level === "warn" || item.action === "recover_context")
+        : item.kind === "notice" && (item.level === "warn" || item.action === "recover_context" || item.action === "isolate_images")
           || item.kind === "extension" && item.card.actions?.length ? [] : [item.id]);
       const processKey = `${turnKey}:process`;
       const old = this.nodes.get(processKey);

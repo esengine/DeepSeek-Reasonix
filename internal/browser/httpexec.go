@@ -152,10 +152,28 @@ func decodeWireError(method string, data []byte) error {
 		return fmt.Errorf("browser broker: %s: %s: %s", method, we.Error, we.Message)
 	}
 	detail := strings.TrimPrefix(strings.TrimPrefix(we.Message, sentinel.Error()), ": ")
+	if kind, ok := refusalKindForWire(we.Error); ok {
+		return &RefusalError{Kind: kind, Detail: detail}
+	}
 	if detail == "" {
 		return sentinel
 	}
 	return fmt.Errorf("%w: %s", sentinel, detail)
+}
+
+func refusalKindForWire(code string) (RefusalKind, bool) {
+	switch code {
+	case wireInvalidURL:
+		return RefusalInvalidURL, true
+	case wireUnsupportedScheme:
+		return RefusalUnsupportedScheme, true
+	case wireTabUnavailable:
+		return RefusalTabUnavailable, true
+	case wireInvalidArguments:
+		return RefusalInvalidArguments, true
+	default:
+		return "", false
+	}
 }
 
 func (e *httpExecutor) Tabs(ctx context.Context) ([]Tab, error) {
@@ -243,7 +261,7 @@ func (e *httpExecutor) Close(ctx context.Context, req CloseRequest) error {
 // not run. Truncated/invalid replies and HTTP failures also leave it unknown.
 func (e *httpExecutor) write(ctx context.Context, method string, in, out any) error {
 	err := e.call(ctx, method, in, out)
-	if err == nil || errors.Is(err, ErrStaleReference) || errors.Is(err, ErrTakenOver) || errors.Is(err, ErrNoGrant) || errors.Is(err, ErrUnknownOutcome) {
+	if err == nil || errors.Is(err, ErrStaleReference) || errors.Is(err, ErrTakenOver) || errors.Is(err, ErrNoGrant) || errors.Is(err, ErrUnknownOutcome) || IsRefusal(err) {
 		return err
 	}
 	return fmt.Errorf("%w: %s", ErrUnknownOutcome, err.Error())

@@ -11,6 +11,38 @@ import (
 	"reasonix/internal/tool"
 )
 
+// NewTaskToolWithOptions is the internal standard constructor for TaskTool.
+// An empty SysPrompt still resolves to DefaultTaskSystemPrompt. No extra
+// validation or default overrides are applied beyond the historical NewTaskTool
+// behavior.
+func NewTaskToolWithOptions(opts TaskToolOptions) *TaskTool {
+	sysPrompt := opts.SysPrompt
+	if sysPrompt == "" {
+		sysPrompt = DefaultTaskSystemPrompt
+	}
+	return &TaskTool{
+		imageInput:       opts.ImageInput,
+		prov:             opts.Provider,
+		pricing:          opts.Pricing,
+		quoteContext:     opts.QuoteContext,
+		parentReg:        opts.ParentRegistry,
+		maxSteps:         opts.MaxSteps,
+		contextWindow:    opts.ContextWindow,
+		recentKeep:       opts.RecentKeep,
+		compactRatio:     opts.CompactRatio,
+		temperature:      opts.Temperature,
+		archiveDir:       opts.ArchiveDir,
+		keepPolicy:       opts.KeepPolicy,
+		sysPrompt:        sysPrompt,
+		gate:             opts.Gate,
+		subagentModel:    opts.SubagentModel,
+		subagentEffort:   opts.SubagentEffort,
+		resolveProvider:  opts.ResolveProvider,
+		maxSubagentDepth: DefaultMaxSubagentDepth,
+		imageResolver:    opts.ImageRequestResolver,
+	}
+}
+
 // subagentOptions is the single construction point for the run options every
 // sub-agent spawned through this tool shares (task, read_only_task, and
 // parallel_tasks children). Compaction, language preferences, and depth limits
@@ -40,6 +72,7 @@ func (t *TaskTool) subagentOptions(ctx context.Context, maxSteps int, pricing *p
 		WriteRoots:               t.writeRoots,
 		DisableWriteAccessExpand: true,
 		WriteWorkspaceRoot:       t.workspaceRoot,
+		ImageRequestResolver:     t.imageResolver,
 	}
 	// Writer children inherit the parent turn's frozen risk and closure floors.
 	// The parent publishes its policy into the run context; a child that never
@@ -53,11 +86,20 @@ func (t *TaskTool) subagentOptions(ctx context.Context, maxSteps int, pricing *p
 	return opts
 }
 
+func (t *TaskTool) WithImageRequestResolver(resolver ImageRequestResolver) *TaskTool {
+	if t == nil {
+		return nil
+	}
+	t.imageResolver = resolver
+	return t
+}
+
 // TaskToolOptions holds the construction parameters for a TaskTool.
 // Prefer NewTaskToolWithOptions for new call sites; the positional NewTaskTool
 // remains as a compatibility wrapper for one full iteration cycle.
 type TaskToolOptions struct {
 	ImageInput                            *imageinput.Config
+	ImageRequestResolver                  ImageRequestResolver
 	Provider                              provider.Provider
 	Pricing                               *provider.Pricing
 	QuoteContext                          *event.QuoteContext

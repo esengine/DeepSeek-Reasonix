@@ -91,8 +91,8 @@ func TestStorageRevisionWriterUpgradesWithoutRewritingLog(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if manifest.StorageRevision != 2 {
-		t.Fatalf("revision=%d, want=2", manifest.StorageRevision)
+	if manifest.StorageRevision != StorageRevision {
+		t.Fatalf("revision=%d, want=%d", manifest.StorageRevision, StorageRevision)
 	}
 	got, err := os.ReadFile(filepath.Join(dir, currentLogName))
 	if err != nil {
@@ -132,6 +132,33 @@ func TestStorageRevisionExternalLeasePreventsUpgrade(t *testing.T) {
 		t.Fatalf("open while owned: %v", err)
 	}
 	assertRevisionFixtureBytes(t, dir, manifestBytes, logBytes)
+}
+
+func TestPreviousReaderRejectsStorageRevisionThree(t *testing.T) {
+	const previousMaxStorageRevision = 2
+	if StorageRevision <= previousMaxStorageRevision {
+		t.Fatalf("StorageRevision=%d is not newer than previous reader max %d", StorageRevision, previousMaxStorageRevision)
+	}
+	root, id, dir, _, _ := revisionOneFixture(t)
+	writer, err := NewFilesystemPersistence(root).Open(id, ReadWrite)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := writer.Close(t.Context()); err != nil {
+		t.Fatal(err)
+	}
+	manifest, err := readStoredManifest(filepath.Join(dir, "manifest.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if manifest.StorageRevision != StorageRevision {
+		t.Fatalf("revision=%d, want=%d", manifest.StorageRevision, StorageRevision)
+	}
+	previousAccepts := manifest.SchemaVersion == SchemaVersion && manifest.Codec == Codec &&
+		manifest.StorageRevision >= 1 && manifest.StorageRevision <= previousMaxStorageRevision
+	if previousAccepts {
+		t.Fatal("previous reader predicate accepted StorageRevision 3")
+	}
 }
 
 func TestStorageRevisionUnknownRejectedByReadersAndWriters(t *testing.T) {
@@ -214,7 +241,7 @@ func TestStorageRevisionManifestPublishFailureReleasesWriter(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if manifest.StorageRevision != 2 {
-		t.Fatalf("retry revision=%d", manifest.StorageRevision)
+	if manifest.StorageRevision != StorageRevision {
+		t.Fatalf("retry revision=%d, want=%d", manifest.StorageRevision, StorageRevision)
 	}
 }

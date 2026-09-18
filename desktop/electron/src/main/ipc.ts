@@ -108,7 +108,11 @@ export function registerRendererIpc(deps: RendererIpcDeps): void {
       try {
         return { ok: true, value: await run(...args) };
       } catch (error) {
-        return { ok: false, message: errorText(error) };
+        if (!(error instanceof RpcError)) return { ok: false, message: errorText(error) };
+        const result: IpcResult = { ok: false, message: errorText(error) };
+        if (error.code !== undefined) result.code = error.code;
+        if (error.data !== undefined) result.details = error.data;
+        return result;
       }
     });
   };

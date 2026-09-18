@@ -278,7 +278,7 @@ func (q *Query) HistoryPage(ctx context.Context, ref SessionRef, cursor string, 
 		if err != nil {
 			return MessageHistoryPage{}, err
 		}
-		if parsed.SessionID != ref.SessionID || parsed.StorageRevision != StorageRevision || parsed.Projection != historyIndexVersion || parsed.SnapshotSequence > snapshot || parsed.Generation != metadata.generation {
+		if parsed.SessionID != ref.SessionID || parsed.StorageRevision != metadata.storageRevision || parsed.Projection != historyIndexVersion || parsed.SnapshotSequence > snapshot || parsed.Generation != metadata.generation {
 			return MessageHistoryPage{Messages: []PersistentMessage{}, Status: "stale_cursor", CoverageSequence: metadata.durableSequence, Generation: metadata.generation}, nil
 		}
 		snapshot = parsed.SnapshotSequence
@@ -341,7 +341,7 @@ func (q *Query) readMessageHistoryPage(ctx context.Context, db *sql.DB, filesyst
 	}
 	if page.HasMore && len(page.Messages) > 0 {
 		oldest := page.Messages[len(page.Messages)-1]
-		page.NextCursor, err = encodeHistoryCursor(historyCursor{SessionID: ref.SessionID, StorageRevision: StorageRevision, SnapshotSequence: snapshot, BeforePosition: oldest.Position, Projection: historyIndexVersion, Generation: metadata.generation})
+		page.NextCursor, err = encodeHistoryCursor(historyCursor{SessionID: ref.SessionID, StorageRevision: metadata.storageRevision, SnapshotSequence: snapshot, BeforePosition: oldest.Position, Projection: historyIndexVersion, Generation: metadata.generation})
 		if err != nil {
 			return MessageHistoryPage{}, err
 		}
@@ -400,7 +400,7 @@ func (q *Query) LocateMessage(ctx context.Context, ref SessionRef, messageID str
 	if err != nil {
 		return MessageLocation{}, err
 	}
-	location.Cursor, err = encodeHistoryCursor(historyCursor{SessionID: ref.SessionID, StorageRevision: StorageRevision, SnapshotSequence: snapshot, BeforePosition: location.Position + 1, Projection: historyIndexVersion, Generation: metadata.generation})
+	location.Cursor, err = encodeHistoryCursor(historyCursor{SessionID: ref.SessionID, StorageRevision: metadata.storageRevision, SnapshotSequence: snapshot, BeforePosition: location.Position + 1, Projection: historyIndexVersion, Generation: metadata.generation})
 	return location, err
 }
 

@@ -20,17 +20,15 @@ function deferred<T>() {
 const bridgeCalls: string[] = [];
 let maximisedValue = false;
 let maximisedGate: ReturnType<typeof deferred<boolean>> | null = null;
-installDesktopHostStub(({
-  main: {
-    App: {
-      IsMainWindowMaximised: async () => {
-        bridgeCalls.push("query");
-        if (maximisedGate) return maximisedGate.promise;
-        return maximisedValue;
-      },
+installDesktopHostStub({}, {
+  window: {
+    isMaximised: async () => {
+      bridgeCalls.push("query");
+      if (maximisedGate) return maximisedGate.promise;
+      return maximisedValue;
     },
   },
-}).main.App);
+});
 
 function Probe({ enabled }: { enabled: boolean }) {
   useWindowsMaximisedSync(enabled);

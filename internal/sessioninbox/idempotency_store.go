@@ -2,6 +2,25 @@ package sessioninbox
 
 import "time"
 
+// LookupEnvelopeReceipt checks semantic identity before sources are read again.
+func (s *Store) LookupEnvelopeReceipt(key string, env PromptEnvelope) (InboxReceipt, bool, error) {
+	if key == "" {
+		return InboxReceipt{}, false, nil
+	}
+	hash, err := idempotencyRequestHash(env)
+	if err != nil {
+		return InboxReceipt{}, false, err
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	release, err := s.beginDiskTransactionLocked()
+	if err != nil {
+		return InboxReceipt{}, false, err
+	}
+	defer release()
+	return s.idempotentReceiptLocked(key, hash)
+}
+
 // LookupReceipt reads the existing bounded idempotency records without
 // creating or replaying a write. Used after an uncertain transport outcome.
 func (s *Store) LookupReceipt(key string) (InboxReceipt, bool) {

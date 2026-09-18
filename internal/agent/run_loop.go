@@ -138,7 +138,10 @@ func (a *Agent) beginRunTurn(ctx context.Context, input string, pinned pinnedRev
 	userMessage := provider.Message{
 		ID:   turnUserMessageID(ctx, a.sess.conversation),
 		Role: provider.RoleUser, Origin: inputMessageOrigin(ctx), Content: input, RawContent: rawContent,
-		Images: userImages(ctx), VisionSummary: VisionSummaryFromContext(ctx), CreatedAt: userCreatedAt,
+		Images: userImages(ctx), ImageInputs: userImageInputs(ctx), VisionSummary: VisionSummaryFromContext(ctx), CreatedAt: userCreatedAt,
+	}
+	if err := userMessage.ValidateImageFields(); err != nil {
+		return rawInput, nil, err
 	}
 	if err := a.appendPinnedRevisionAndUser(ctx, pinned, userMessage); err != nil {
 		return rawInput, nil, err

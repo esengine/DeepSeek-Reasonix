@@ -23,10 +23,17 @@ function isResult(value: unknown): value is IpcResult {
   return typeof value === "object" && value !== null && typeof (value as { ok?: unknown }).ok === "boolean";
 }
 
+export class DesktopIpcError extends Error {
+  constructor(message: string, readonly code?: number, readonly details?: unknown) {
+    super(message);
+    this.name = "DesktopIpcError";
+  }
+}
+
 function unwrap(value: unknown): unknown {
   if (!isResult(value)) throw new Error("malformed reply from the desktop shell");
   if (value.ok) return value.value;
-  throw new Error(value.message);
+  throw new DesktopIpcError(value.message, value.code, value.details);
 }
 
 async function call(channel: string, ...args: unknown[]): Promise<unknown> {

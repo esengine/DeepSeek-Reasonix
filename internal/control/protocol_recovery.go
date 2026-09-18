@@ -60,10 +60,10 @@ func recoveryGuidance(input string) string {
 func (c *Controller) SubmitProtocolRecovery(id, guidance string) {
 	c.submissions.mu.Lock()
 	defer c.releaseSubmissionAdmission()
-	c.submitProtocolRecoveryLocked(id, guidance)
+	c.submitProtocolRecoveryLocked(id, guidance, turnAdmission{})
 }
 
-func (c *Controller) submitProtocolRecoveryLocked(id, guidance string) {
+func (c *Controller) submitProtocolRecoveryLocked(id, guidance string, admission turnAdmission) {
 	// Bind a token before enqueueing; a later request cannot recover a different
 	// incident just because it used the tokenless CLI shortcut.
 	if id == "" && c.executor != nil {
@@ -71,7 +71,7 @@ func (c *Controller) submitProtocolRecoveryLocked(id, guidance string) {
 			id = pending.ID
 		}
 	}
-	c.runGuarded(func(ctx context.Context) error {
+	c.runGuardedWithAdmission(func(ctx context.Context) error {
 		if id == "" {
 			return agent.ErrProtocolRecoveryUnavailable
 		}
@@ -80,7 +80,7 @@ func (c *Controller) submitProtocolRecoveryLocked(id, guidance string) {
 			return err
 		}
 		return c.runTurn(recoveryCtx, protocolRecoveryPrompt+recoveryGuidance(guidance))
-	})
+	}, admission)
 }
 
 // PendingProtocolRecovery exposes the same admission token on every transport.

@@ -488,9 +488,10 @@ func (c *client) Stream(ctx context.Context, req provider.Request) (<-chan provi
 	if err := c.reasoning.Validate(c.model, req.EffortOverride); err != nil {
 		return nil, err
 	}
-	stream, err := c.openStream(ctx, c.chatURL, c.buildRequest(req), req.Tools)
+	wireRequest, imageMap := c.buildRequestWithImageMap(req)
+	stream, err := c.openStream(ctx, c.chatURL, wireRequest, req.Tools)
 	if err != nil {
-		return nil, err
+		return nil, c.classifyImageRequestError(err, imageMap)
 	}
 	if c.prefixChatURL == "" {
 		return stream, nil
@@ -695,126 +696,6 @@ func sendChunk(ctx context.Context, out chan<- provider.Chunk, chunk provider.Ch
 	case out <- chunk:
 		return true
 	}
-}
-
-func (c *client) buildRequest(req provider.Request) chatRequest {
-	// Repair tool-call pairing before sending: an interrupted/resumed history can
-	// carry an assistant tool_calls turn whose results never landed, which DeepSeek
-	// rejects with a 400 ("must be followed by tool messages …").
-	src := provider.SanitizeToolPairing(req.Messages)
-	msgs := make([]chatMessage, 0, len(src))
-	// Images returned by tool calls can't ride in the tool message itself — the
-	// OpenAI API accepts only text content parts under role "tool" — so they are
-	// carried by a synthetic user message injected after the turn's full run of
-	// tool results, before the next non-tool message (splitting a tool-result
-	// run would break the API's tool-call pairing validation).
-	var pendingToolImages []string
-	flushToolImages := func() {
-		if len(pendingToolImages) == 0 {
-			return
-		}
-		msgs = append(msgs, chatMessage{
-			Role:    "user",
-			Content: imageContentParts("Images returned by the preceding tool call(s):", pendingToolImages, c.visionDetail),
-		})
-		pendingToolImages = nil
-	}
-	for _, m := range src {
-		if m.Role != provider.RoleTool {
-			flushToolImages()
-		}
-		cm := chatMessage{
-			Role:       string(m.Role),
-			ToolCallID: m.ToolCallID,
-		}
-		if m.Role == provider.RoleTool {
-			// Always send the tool message's name, even when empty: strict
-			// backends (MiMo) 400 a tool result without the key (#4711).
-			name := m.Name
-			cm.Name = &name
-		}
-		// DeepSeek thinking mode requires provider reasoning to survive every
-		// assistant history turn when tools are in use, including plain turns.
-		// Tool turns with lost reasoning still get an explicit empty key: the API
-		// accepts it, while omitting the key produces a 400. Preserve non-empty
-		// reasoning even when the current round has since disabled thinking.
-		if m.Role == provider.RoleAssistant {
-			switch {
-			case c.kimiK3 && (m.ReasoningContent != "" || len(m.ToolCalls) > 0):
-				// Kimi K3 requires the complete assistant message on multi-turn
-				// and tool-call requests, including provider-issued reasoning.
-				cm.ReasoningContent = &m.ReasoningContent
-			case (c.deepseek || c.RequiresToolCallReasoning()) && hasReasoningOrToolCall(m):
-				if c.RequiresToolCallReasoning() || m.ReasoningContent != "" {
-					cm.ReasoningContent = &m.ReasoningContent
-				}
-			case c.zhipu && (m.ReasoningContent != "" || (c.glmThinkingEnabled() && len(m.ToolCalls) > 0)):
-				// GLM interleaved and preserved thinking require provider-issued
-				// reasoning unchanged. Coding Plan includes the field on tool turns
-				// even when empty; preserve non-empty history after disabling too.
-				cm.ReasoningContent = &m.ReasoningContent
-			}
-		}
-		for _, tc := range m.ToolCalls {
-			wire := chatToolCall{ID: tc.ID, Type: "function"}
-			wire.Function.Name = tc.Name
-			wire.Function.Arguments = tc.Arguments
-			if tc.ThoughtSignature != "" && usesGeminiThoughtSignatures(c.baseURL, c.model) {
-				// Gemini's current OpenAI compatibility schema carries the
-				// opaque signature beside the function payload. Keep the
-				// legacy function.thought_signature field decode-only below so
-				// older gateways remain readable without sending an unknown
-				// function parameter to current Google endpoints.
-				wire.ExtraContent = &chatToolCallExtraContent{}
-				wire.ExtraContent.Google.ThoughtSignature = tc.ThoughtSignature
-			}
-			cm.ToolCalls = append(cm.ToolCalls, wire)
-		}
-		switch {
-		case c.vision && m.Role == provider.RoleUser && len(m.Images) > 0:
-			cm.Content = imageContentParts(m.Content, m.Images, c.visionDetail)
-		case m.Role != provider.RoleAssistant || len(cm.ToolCalls) == 0 || m.Content != "":
-			cm.Content = m.Content
-		}
-		msgs = append(msgs, cm)
-		if c.vision && m.Role == provider.RoleTool {
-			pendingToolImages = append(pendingToolImages, m.Images...)
-		}
-	}
-	flushToolImages()
-
-	tools := encodeChatTools(req, c.mimo)
-
-	maxOutputTokens := req.MaxTokens
-	if maxOutputTokens == 0 {
-		maxOutputTokens = c.maxOutputTokens
-	}
-	if maxOutputTokens < 0 {
-		maxOutputTokens = 0
-	}
-	out := chatRequest{
-		Model:           c.model,
-		Messages:        msgs,
-		Tools:           tools,
-		Stream:          true,
-		StreamOptions:   &streamOptions{IncludeUsage: true},
-		Temperature:     req.Temperature,
-		MaxTokens:       maxOutputTokens,
-		ReasoningEffort: kimiK3ReasoningEffort(c.kimiK3, c.requestEffort(req)),
-		ExtraBody:       c.extraBody,
-	}
-	c.applyReasoning(&out, req)
-	return out
-}
-
-func (c *client) buildPrefixRequest(req provider.Request, content, reasoning string) chatRequest {
-	out := c.buildRequest(req)
-	prefix := chatMessage{Role: "assistant", Content: content, Prefix: true}
-	if c.deepseek && c.thinkingType != "disabled" {
-		prefix.ReasoningContent = &reasoning
-	}
-	out.Messages = append(out.Messages, prefix)
-	return out
 }
 
 // readStream parses one SSE response into chunks: text deltas stream live,

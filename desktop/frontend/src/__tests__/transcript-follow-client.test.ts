@@ -82,8 +82,7 @@ test("settlement pairs with the stable attempt and commit despite delivery order
 });
 
 for (const failure of ["overflow", "revision gap", "business gap", "sampling gap", "settlement mismatch"] as const) {
-  test(`follow ${failure} preserves visible content and only requests a new baseline`, async t => {
-    t.mock.timers.enable({ apis: ["setTimeout"] });
+  test(`follow ${failure} preserves visible content and only requests a new baseline`, async () => {
     const io = transport(); const view = consumer(); const starting = io.client.start(view);
     io.pending.shift()!.resolve(baseline()); await starting;
     const broken = failure === "overflow" ? suffix([], true)
@@ -93,9 +92,8 @@ for (const failure of ["overflow", "revision gap", "business gap", "sampling gap
       : suffix([{ ...frame(11, "bad"), attemptId: "missing-attempt", index: 3 }]);
     io.pending.shift()!.resolve(broken); await microtasks();
     assert.equal(view.text, "prefix"); assert.equal(view.delivered.length, 0);
-    assert.equal(view.states[view.states.length - 1], "disconnected");
+    assert.equal(view.states[view.states.length - 1], "syncing");
     assert.ok(io.requests.some(request => request.close && request.subscription === "subscription"));
-    t.mock.timers.tick(1000); await microtasks();
     assert.deepEqual(io.requests[io.requests.length - 1], {}, "recovery issues a read, never a model submission");
     assert.equal(view.text, "prefix", "content remains visible while replacement is pending");
     io.pending.shift()!.resolve(baseline("replacement", { projectionRevision: 20, coveredThroughSeq: 8 }));
@@ -104,6 +102,67 @@ for (const failure of ["overflow", "revision gap", "business gap", "sampling gap
     io.client.stop();
   });
 }
+
+
+test("the same deterministic gap at the same cursor stops after one replacement baseline", async () => {
+  const io = transport(); const view = consumer(); const starting = io.client.start(view);
+  io.pending.shift()!.resolve(baseline()); await starting;
+  io.pending.shift()!.resolve(suffix([frame(12, "bad")])); await microtasks();
+  io.pending.shift()!.resolve(baseline("replacement")); await microtasks();
+  io.pending.shift()!.resolve(suffix([frame(12, "bad again")])); await microtasks();
+  assert.equal(view.installed, 2);
+  assert.equal(view.states.at(-1), "disconnected");
+  assert.equal(io.requests.filter(request => Object.keys(request).length === 0).length, 2, "only the initial and one replacement baseline are read");
+  io.client.stop();
+});
+
+test("a consumer failure leaves the acknowledged revision unchanged", async () => {
+  const io = transport(); const view = consumer(); const starting = io.client.start(view);
+  io.pending.shift()!.resolve(baseline()); await starting;
+  let failed = false;
+  view.changes = () => { failed = true; throw new Error("install failed"); };
+  io.pending.shift()!.resolve(suffix([frame(11, "not committed")])); await microtasks();
+  assert.equal(failed, true);
+  assert.deepEqual(io.requests.at(-1), { subscription: "subscription", close: true });
+  assert.equal(view.states.at(-1), "disconnected");
+  io.client.stop();
+});
+
+test("transport retries use the bounded exponential schedule", async () => {
+  const requests: FollowRequest[] = [];
+  const delays: number[] = [];
+  const read = async (request: FollowRequest): Promise<TranscriptFollowResponse> => {
+    requests.push(request);
+    throw new Error("transport down");
+  };
+  const client = new TranscriptFollowClient(read, { random: () => 0.5, wait: async delay => { delays.push(delay); } });
+  const view = consumer();
+  const error = await client.start(view).catch(error => error);
+  assert.match(String(error), /transport down/);
+  assert.deepEqual(delays, [500, 1000, 2000, 4000, 8000]);
+  assert.equal(requests.length, 6, "initial read plus five retries");
+  assert.equal(view.states.at(-1), "disconnected");
+  client.stop();
+});
+
+test("service unavailable waits for readiness instead of spending transport retries", async () => {
+  const ready = deferred<void>();
+  let attempts = 0;
+  const following = deferred<TranscriptFollowResponse>();
+  const read = async (request: FollowRequest): Promise<TranscriptFollowResponse> => {
+    attempts++;
+    if (attempts === 1) throw Object.assign(new Error("service stopping"), { code: -32002, details: { kind: "service_unavailable" } });
+    if (request.afterRevision !== undefined) return following.promise;
+    if (request.close) return suffix([]);
+    return baseline();
+  };
+  const client = new TranscriptFollowClient(read, { waitForService: () => ready.promise });
+  const view = consumer(); const started = client.start(view);
+  await microtasks(); assert.equal(attempts, 1);
+  ready.resolve(); await started;
+  assert.equal(attempts, 3, "two baseline attempts plus the first follow read"); assert.equal(view.states.at(-1), "connected");
+  client.stop();
+});
 
 test("stopped generations ignore delayed suffixes and close their subscription", async () => {
   const io = transport(); const oldView = consumer(); const starting = io.client.start(oldView);

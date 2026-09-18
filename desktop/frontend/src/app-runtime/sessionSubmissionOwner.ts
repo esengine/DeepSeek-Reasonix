@@ -82,7 +82,7 @@ export async function executeSubmission(input: SubmissionInput, authority: Sessi
     if (input.read(input.target).ready) await send(input, { display, submit: submit.trim() }, authority);
     return;
   }
-  if (!source.ready) return;
+  if (!source.ready) throw Error(source.unavailable || "reasonix_error:workspace_starting");
   if (source.goalDraft) {
 	await send(input, buildInitialGoalSubmission(
 	  { display, submit, structured: content.structured }, source.collaboration, source.approval,
@@ -91,7 +91,10 @@ export async function executeSubmission(input: SubmissionInput, authority: Sessi
     input.ports.patchGoal(input.target.tabId, display);
     return;
   }
-  if (!await input.ports.profile(input.target.tabId, false)) return;
+  if (!await input.ports.profile(input.target.tabId, false)) {
+    authority.checkpoint();
+    throw Error("reasonix_error:inbox_not_submitted");
+  }
   authority.checkpoint();
   await send(input, { display, submit: submit.trim(), structured: content.structured }, authority);
 }

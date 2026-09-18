@@ -40,6 +40,12 @@ type SessionMessageMutationRecorder interface {
 	RecordSessionMessageUpsert(context.Context, string, provider.Message) error
 }
 
+// SessionImageIsolationRecorder publishes the revision-4 manifest before it
+// appends a required image isolation event and confirms that event is durable.
+type SessionImageIsolationRecorder interface {
+	RecordSessionImageIsolation(context.Context, provider.ImageIsolationDecision) error
+}
+
 // SessionModelContextCommit is an exact provider-visible projection produced by
 // one context-maintenance transaction. OperationID must be stable across
 // retries so the session log can deduplicate an accepted commit.

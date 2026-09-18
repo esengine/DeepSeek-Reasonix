@@ -34,17 +34,18 @@ type Projection struct {
 	// ModelMessages is the exact provider-visible projection. Canonical Messages
 	// remains the complete UI/history transcript; compaction replaces only this
 	// view and never deletes the underlying business history.
-	ModelMessages []provider.Message
-	Todos         []event.Todo
-	TodoWritten   bool
-	Interactions  map[string]string
-	ActiveTools   map[string]string
-	StartedTools  map[string]bool
-	ActiveSteps   map[string]bool
-	Recovery      *event.RecoveryStatus
-	PlanState     json.RawMessage
-	GoalState     json.RawMessage
-	Title         string
+	ModelMessages   []provider.Message
+	ImageIsolations map[string]provider.ImageIsolationDecision `json:"imageIsolations,omitempty"`
+	Todos           []event.Todo
+	TodoWritten     bool
+	Interactions    map[string]string
+	ActiveTools     map[string]string
+	StartedTools    map[string]bool
+	ActiveSteps     map[string]bool
+	Recovery        *event.RecoveryStatus
+	PlanState       json.RawMessage
+	GoalState       json.RawMessage
+	Title           string
 	// TitleSequence is the sequence of the latest accepted session/title event.
 	// It is independent from CommittedSequence so ordinary chat appends do not
 	// conflict with a delayed title mutation.
@@ -82,7 +83,8 @@ var ProjectionKinds = map[string]bool{
 	"todo/write": true, "interaction/created": true, "interaction/resolved": true,
 	"plan/state": true, "goal/state": true, "session/title": true, "session/config": true,
 	"model/context-replace": true, "history/replace": true,
-	"compaction": true, "runtime/recovery": true, "legacy/import": true,
+	"model/image-isolation": true,
+	"compaction":            true, "runtime/recovery": true, "legacy/import": true,
 	"diagnostic": true,
 }
 
@@ -121,6 +123,9 @@ func initializeProjectionMaps(projection *Projection) {
 	if projection.ActiveSteps == nil {
 		projection.ActiveSteps = map[string]bool{}
 	}
+	if projection.ImageIsolations == nil {
+		projection.ImageIsolations = map[string]provider.ImageIsolationDecision{}
+	}
 }
 
 func applyProjectionEvents(projection *Projection, commit Commit) error {
@@ -145,6 +150,8 @@ func applyProjectionEvents(projection *Projection, commit Commit) error {
 			err = projectHistoryReplace(projection, commit, ev)
 		case "model/context-replace":
 			err = projectModelContextReplace(projection, commit, ev)
+		case "model/image-isolation":
+			err = projectImageIsolation(projection, commit, ev)
 		case "session/title":
 			err = projectSessionTitle(projection, commit, ev)
 		case "session/config":
@@ -183,6 +190,7 @@ func applyProjectionEvents(projection *Projection, commit Commit) error {
 		}
 		applyTranscriptMetadata(projection, commit, ev)
 	}
+	refreshModelImageIsolations(projection)
 	// turn/end can be followed by more events in the same atomic commit. Only
 	// after the whole commit is projected do we know whether its cut leaves a
 	// turn, interaction, or tool authority open.
@@ -620,7 +628,14 @@ func cloneProjection(projection Projection) Projection {
 	projection.CurrentAttempts = maps.Clone(projection.CurrentAttempts)
 	projection.CurrentCalls = maps.Clone(projection.CurrentCalls)
 	projection.Messages = append([]provider.Message(nil), projection.Messages...)
+	for i := range projection.Messages {
+		projection.Messages[i].ImageIsolations = append([]provider.ImageIsolationDecision(nil), projection.Messages[i].ImageIsolations...)
+	}
 	projection.ModelMessages = append([]provider.Message(nil), projection.ModelMessages...)
+	for i := range projection.ModelMessages {
+		projection.ModelMessages[i].ImageIsolations = append([]provider.ImageIsolationDecision(nil), projection.ModelMessages[i].ImageIsolations...)
+	}
+	projection.ImageIsolations = maps.Clone(projection.ImageIsolations)
 	projection.Turns = append([]TurnBoundary(nil), projection.Turns...)
 	projection.Todos = append([]event.Todo(nil), projection.Todos...)
 	interactions := make(map[string]string, len(projection.Interactions))

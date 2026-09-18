@@ -104,7 +104,14 @@ globalThis.requestAnimationFrame = dom.window.requestAnimationFrame.bind(dom.win
 globalThis.cancelAnimationFrame = dom.window.cancelAnimationFrame.bind(dom.window);
 
 let backendRunning = false;
-const backendHistory: HistoryMessage[] = [{ role: "user", content: "hello", messageId: "initial-user", createdAt: 1000, checkpointTurn: 0 }];
+const backendHistory: HistoryMessage[] = [{
+  role: "user",
+  content: "hello",
+  messageId: "initial-user",
+  createdAt: 1000,
+  checkpointTurn: 0,
+  attachments: [{ kind: "image", digest: "a".repeat(64), name: "photo.png", mime: "image/png", width: 1, height: 1, bytes: 68 }],
+}];
 let cancelCalls = 0;
 let cancelInboxCalls = 0;
 let cancelInboxError: Error | null = null;

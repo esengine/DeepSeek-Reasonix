@@ -50,6 +50,7 @@ func (h *recordingNativeHost) WindowIsMaximised(context.Context) bool {
 	h.record("WindowIsMaximised")
 	return false
 }
+func (h *recordingNativeHost) CloseWindow(context.Context)  { h.record("CloseWindow") }
 func (h *recordingNativeHost) Quit(context.Context)         { h.record("Quit") }
 func (h *recordingNativeHost) OpenDevTools(context.Context) { h.record("OpenDevTools") }
 
