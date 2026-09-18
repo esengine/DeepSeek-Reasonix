@@ -2474,10 +2474,10 @@ func mergeProviderModelOverride(dst *ProviderModelOverride, src ProviderModelOve
 		dst.SupportedEfforts = append([]string(nil), src.SupportedEfforts...)
 		dst.DefaultEffort = src.DefaultEffort
 	}
-	if src.Vision != nil {
-		vision := *src.Vision
-		dst.Vision = &vision
-	}
+	// An explicit action_policy=false is a decision to keep the paragraph off,
+	// so both pointer overrides merge tri-state rather than truthy.
+	dst.Vision = overrideBool(dst.Vision, src.Vision)
+	dst.ActionPolicy = overrideBool(dst.ActionPolicy, src.ActionPolicy)
 	if src.ContextWindow > 0 {
 		dst.ContextWindow = src.ContextWindow
 	}

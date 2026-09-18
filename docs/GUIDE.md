@@ -470,6 +470,26 @@ extra_body  = { enable_thinking = true }
 fields such as `model`, `messages`, `tools`, `stream`, and `thinking` under its
 own control.
 
+### Models that describe actions instead of taking them
+
+Small and open-weight models sometimes narrate a plan instead of calling a tool,
+or report work they never performed. The per-model `action_policy` override
+appends one paragraph to the system prompt telling the model to execute with its
+permitted tools and to base completion claims on real tool results:
+
+```toml
+[[providers]]
+name     = "ollama-local"
+kind     = "openai"
+base_url = "http://localhost:11434/v1"
+models   = ["qwen3:8b", "gemma3:12b"]
+
+model_overrides = { "qwen3:8b" = { context_window = 32768, action_policy = true } }
+```
+
+It is off by default and nothing is inferred from the model id: the paragraph
+costs prompt tokens on every turn, so enabling it stays a per-model decision.
+
 ## Desktop hooks
 
 Desktop hooks run local commands at lifecycle events such as `SessionStart`,

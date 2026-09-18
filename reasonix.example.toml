@@ -75,6 +75,8 @@ context_window = 1000000
 # Optional per-model budgets. Omitted models inherit context_window and
 # max_output_tokens from the provider above.
 # model_overrides = { "deepseek-v4-flash" = { context_window = 1000000, max_output_tokens = 32768 } }
+# model_overrides = { "qwen3:8b" = { action_policy = true } }   # tell a model that
+#                        # narrates work to execute with its tools instead (off by default)
 # Official list prices are frozen per provider (billing_currency). Display
 # currency ([billing].display_currency) never rewrites these tables.
 # billing_currency = "USD"   # frozen list-price currency: CNY|USD
