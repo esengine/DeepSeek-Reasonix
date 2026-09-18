@@ -156,15 +156,19 @@ func TestCapabilityProxyRouteRenderKeepsConcreteMCPIDs(t *testing.T) {
 		}
 	}
 
-	// CapabilityProxy only replaces the MCP connector. Other configured
-	// capability kinds still use their ordinary source routing.
+	// CapabilityProxy replaces the connector for every capability kind:
+	// connect_tool_source is unregistered, so a configured skill must route
+	// through the stable proxy with its concrete id.
 	skill := Entry{ID: "skill:review", Kind: KindSkill, Name: "review", Status: StatusConfigured, ConnectSource: "skills"}
 	out := RenderTransientBlock(RouteDecision{
 		CapabilityProxy: true,
 		Candidates:      []RouteCandidate{{Entry: skill, Policy: AutoUseSuggest, Reason: "matches task"}},
 	})
-	if !strings.Contains(out, "source:skills") || !strings.Contains(out, "connect_tool_source") {
-		t.Fatalf("MCP proxy routing changed the ordinary skill connector:\n%s", out)
+	if !strings.Contains(out, "- skill:review ") || !strings.Contains(out, `use_capability(action="call", capability_id="skill:review"`) {
+		t.Fatalf("capability proxy route lost the concrete skill call instruction:\n%s", out)
+	}
+	if strings.Contains(out, "connect_tool_source") || strings.Contains(out, "source:skills") {
+		t.Fatalf("capability proxy route emitted the retired skill connector:\n%s", out)
 	}
 }
 

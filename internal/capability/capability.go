@@ -240,9 +240,12 @@ func RenderTransientBlock(d RouteDecision) string {
 	b.WriteString("Relevant capabilities for this turn:\n")
 	for _, c := range d.Candidates {
 		e := c.Entry
-		proxyMCP := d.CapabilityProxy && (e.Kind == KindMCPTool || e.Kind == KindMCPServer)
+		// proxy means use_capability is the only connector: connect_tool_source
+		// is unregistered for closed-loop routes and every boot that exposes the
+		// stable proxy. Never rewrite to an unusable source target.
+		proxy := d.ClosedLoop || d.CapabilityProxy
 		target := e.ID
-		if !d.ClosedLoop && !proxyMCP && e.Status != StatusReady && e.ConnectSource != "" {
+		if !proxy && e.Status != StatusReady && e.ConnectSource != "" {
 			target = fmt.Sprintf("source:%s", e.ConnectSource)
 			if e.ConnectName != "" {
 				target += "/" + e.ConnectName
@@ -254,9 +257,9 @@ func RenderTransientBlock(d RouteDecision) string {
 			fmt.Fprintf(&line, " (status=%s)", e.Status)
 		}
 		switch {
-		case d.ClosedLoop || proxyMCP:
+		case proxy:
 			// Closed-loop routes and dual-model Planner have no
-			// connect_tool_source for MCP; the stable proxy both connects and
+			// connect_tool_source; the stable proxy both connects and
 			// calls on demand, keeping the concrete capability id.
 			if e.Status != StatusReady {
 				switch e.Kind {
@@ -264,6 +267,8 @@ func RenderTransientBlock(d RouteDecision) string {
 					fmt.Fprintf(&line, "; call use_capability(action=\"call\", capability_id=%q, arguments={...}) — it connects the server on demand after approval", e.ID)
 				case KindMCPServer:
 					fmt.Fprintf(&line, "; call use_capability(action=\"call\", capability_id=%q) to connect it (after approval) and list its tools, then call a listed mcp-tool id", e.ID)
+				case KindSkill:
+					fmt.Fprintf(&line, "; call use_capability(action=\"call\", capability_id=%q, arguments={...}) — it runs the skill on demand", e.ID)
 				}
 			}
 		case e.ConnectSource != "":

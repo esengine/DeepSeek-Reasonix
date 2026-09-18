@@ -46,7 +46,10 @@ func (c *Controller) routeCapabilities(ctx context.Context, routeInput string) c
 	if ctx == nil {
 		ctx = context.Background()
 	}
-	tools := c.ToolContractEntries()
+	// The catalog must reflect every registered tool, not just the provider-visible
+	// surface: optional tools (skills, subagents, …) stay off that surface but are
+	// reachable through use_capability, so their readiness decides the route.
+	tools := c.AllToolContractEntries()
 	// Deterministic routing is first. The semantic router runs only when that
 	// catalog match is itself ambiguous — never as a per-turn classification.
 	var proxyTools map[string][]plugin.CachedTool

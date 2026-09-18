@@ -86,6 +86,36 @@ func TestRunInjectsCapabilityRouteForRelevantSkill(t *testing.T) {
 	}
 }
 
+func TestSkillRouteUsesProxyWhenSkillToolsHiddenFromProviderSurface(t *testing.T) {
+	// Production hides run_skill from the provider-visible surface; the
+	// capability catalog must still see it in the registry, so the skill routes
+	// as ready via the concrete id instead of the retired connect_tool_source.
+	runner := &capabilityRecordingRunner{}
+	reg := tool.NewRegistry()
+	reg.Add(capabilityTestTool{name: "run_skill"})
+	reg.Add(capabilityTestTool{name: "use_capability"})
+	reg.SetProviderVisibleTools([]string{"use_capability"})
+	c := newOwnedTestController(t, Options{
+		Runner: runner,
+		Skills: []skill.Skill{{
+			Name:        "review",
+			Description: "review code",
+			Scope:       skill.ScopeBuiltin,
+		}},
+		Registry: reg,
+	})
+
+	if err := c.Run(context.Background(), "帮我看看这段代码有没有问题"); err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+	if !strings.Contains(runner.input, "skill:review prefer") {
+		t.Fatalf("hidden skill tool should still route as ready:\n%s", runner.input)
+	}
+	if strings.Contains(runner.input, "connect_tool_source") || strings.Contains(runner.input, "source:skills") {
+		t.Fatalf("route emitted the retired skill connector:\n%s", runner.input)
+	}
+}
+
 func TestCreateSkillWritesThroughAndIsImmediatelyReadable(t *testing.T) {
 	home := t.TempDir()
 	st := skill.New(skill.Options{HomeDir: home, DisableBuiltins: true})
