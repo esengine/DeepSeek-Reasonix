@@ -3,7 +3,7 @@
     "banner": 13,
     "commented-code": 0,
     "complexity": 1878,
-    "essay": 1915,
+    "essay": 1919,
     "file-size": 100466,
     "function-size": 8031,
     "layering": 1,
@@ -1083,7 +1083,7 @@
       "essay": 1
     },
     "internal/gitcmd/gitcmd.go": {
-      "essay": 13
+      "essay": 19
     },
     "internal/guardian/guardian.go": {
       "essay": 9
@@ -1447,7 +1447,7 @@
       "essay": 1
     },
     "internal/tool/builtin/bash.go": {
-      "essay": 7
+      "essay": 9
     },
     "internal/tool/builtin/bash_env_test.go": {
       "essay": 4

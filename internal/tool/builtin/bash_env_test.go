@@ -64,7 +64,7 @@ func TestBashCommandEnvFiltersSensitiveKeysWhenEnabled(t *testing.T) {
 	// filter must never strip it or every subprocess loses its cwd context.
 	t.Setenv("PWD", "/tmp/somewhere")
 
-	env := strings.Join(bashCommandEnv(context.Background()), "\n")
+	env := strings.Join(bashCommandEnv(context.Background(), ""), "\n")
 	if strings.Contains(env, "DEEPSEEK_API_KEY") || strings.Contains(env, "GH_TOKEN") {
 		t.Fatalf("bash env leaked sensitive keys:\n%s", env)
 	}
@@ -79,9 +79,23 @@ func TestBashCommandEnvFiltersSensitiveKeysWhenEnabled(t *testing.T) {
 func TestBashCommandEnvKeepsTokensByDefault(t *testing.T) {
 	t.Setenv("GH_TOKEN", "ghp_abcdefghijklmnopqrstuvwxyz")
 
-	env := strings.Join(bashCommandEnv(context.Background()), "\n")
+	env := strings.Join(bashCommandEnv(context.Background(), ""), "\n")
 	if !strings.Contains(env, "GH_TOKEN=ghp_abcdefghijklmnopqrstuvwxyz") {
 		t.Fatalf("bash env must inherit tokens while filter_subprocess_env is off (default):\n%s", env)
+	}
+}
+
+// Agent-run git must see Reasonix's config baseline (e.g. the interactive
+// rebase todo always uses the long command words), regardless of the user's
+// ~/.gitconfig, so the rewrite the agent performs matches what it assumes.
+func TestBashCommandEnvForcesGitConfig(t *testing.T) {
+	env := strings.Join(bashCommandEnv(context.Background(), ""), "\n")
+	// Assert on the pair rather than a fixed index: a developer's own
+	// environment may already carry GIT_CONFIG_COUNT/KEY_n entries.
+	if !strings.Contains(env, "GIT_CONFIG_COUNT=") ||
+		!strings.Contains(env, "=rebase.abbreviateCommands") ||
+		!strings.Contains(env, "=false") {
+		t.Fatalf("bash env missing forced git config:\n%s", env)
 	}
 }
 
@@ -141,5 +155,24 @@ func TestRunShellPATHCommandFiltersEnvWhenEnabled(t *testing.T) {
 	out := runShellPATHCommand(context.Background(), "/bin/sh", []string{"-c", `printf 'tok=%s' "${REASONIX_TEST_SECRET_TOKEN:-none}"`})
 	if !strings.Contains(string(out), "tok=none") {
 		t.Fatalf("login-shell PATH probe leaked filtered env: %q", out)
+	}
+}
+
+// Agent-run git must be deterministic and non-localised — English messages, no
+// ANSI, no pager — regardless of the user's own environment.
+func TestBashCommandEnvStandardizesLocaleColorPager(t *testing.T) {
+	t.Setenv("LC_MESSAGES", "zh_CN.UTF-8")
+	t.Setenv("NO_COLOR", "")
+	t.Setenv("GIT_PAGER", "delta")
+	t.Setenv("PAGER", "less")
+
+	lines := map[string]bool{}
+	for _, kv := range bashCommandEnv(context.Background(), "") {
+		lines[kv] = true
+	}
+	for _, want := range []string{"LC_MESSAGES=C", "NO_COLOR=1", "TERM=dumb", "GIT_PAGER=cat", "PAGER=cat"} {
+		if !lines[want] {
+			t.Errorf("bash env missing %q", want)
+		}
 	}
 }

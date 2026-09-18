@@ -17,6 +17,7 @@ import (
 
 	"mvdan.cc/sh/v3/syntax"
 
+	"reasonix/internal/gitcmd"
 	"reasonix/internal/jobs"
 	"reasonix/internal/persistentshell"
 	"reasonix/internal/proc"
@@ -235,7 +236,7 @@ func (b bash) ExecuteDetailed(ctx context.Context, args json.RawMessage) (tool.D
 	}
 
 	argv, wrapped := prepared.Argv, prepared.Wrapped
-	cmdEnv := applyEnvOverrides(bashCommandEnv(ctx), prepared.EnvOverrides)
+	cmdEnv := applyEnvOverrides(bashCommandEnv(ctx, b.guard.stateRoot), prepared.EnvOverrides)
 	if res, err, failed := b.checkLaunch(ctx, p, sh, prepared, cmdEnv, start, ex); failed {
 		return res, err
 	}
@@ -620,16 +621,31 @@ func commandPreview(cmd string) string {
 	return cmd
 }
 
-func bashCommandEnv(ctx context.Context) []string {
+func bashCommandEnv(ctx context.Context, stateDir string) []string {
 	env := secrets.ProcessEnv()
-	if runtime.GOOS == "windows" {
-		return env
-	}
-	currentPath, _ := envValue(env, "PATH")
-	if shellPath := strings.TrimSpace(bashShellPATH(ctx)); shellPath != "" {
-		if merged := mergePathLists(shellPath, currentPath); merged != currentPath {
-			env = setEnvValue(env, "PATH", merged)
+	if runtime.GOOS != "windows" {
+		currentPath, _ := envValue(env, "PATH")
+		if shellPath := strings.TrimSpace(bashShellPATH(ctx)); shellPath != "" {
+			if merged := mergePathLists(shellPath, currentPath); merged != currentPath {
+				env = setEnvValue(env, "PATH", merged)
+			}
 		}
+	}
+	// Deterministic, non-localised output for the agent's generic scripts:
+	// English messages, no ANSI, no pager. Identity, credentials, and other
+	// user config are preserved, so the agent still commits as the user.
+	env = applyEnvOverrides(env, []string{"LC_MESSAGES=C", "NO_COLOR=1", "TERM=dumb", "GIT_PAGER=cat", "PAGER=cat"})
+	// Force the git config Reasonix relies on onto every git the command
+	// starts, and drop GIT_EXTERNAL_DIFF: it overrides diff.external, and an
+	// empty value breaks git outright.
+	env = gitcmd.StripExternalDiff(gitcmd.WithConfigEnv(env))
+	// When the user's global config selects an external diff, point git at a
+	// filtered copy so the agent's own `git diff` still uses git's internal
+	// diff (native output) instead of the external program's rendering. The
+	// copy is needed only because git 2.47.3 cannot override diff.external
+	// back to the internal diff (see gitcmd.GlobalConfigWithoutExternalDiff).
+	if cfg := gitcmd.GlobalConfigWithoutExternalDiff(stateDir); cfg != "" {
+		env = setEnvValue(env, "GIT_CONFIG_GLOBAL", cfg)
 	}
 	return env
 }
