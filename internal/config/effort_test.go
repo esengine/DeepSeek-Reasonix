@@ -5,6 +5,34 @@ import (
 	"testing"
 )
 
+func TestResolveInheritedEffortFallsBackOnlyWhenUnsupported(t *testing.T) {
+	generic := &ProviderEntry{Kind: "openai", BaseURL: "https://example.invalid/v1", Model: "some-model"}
+	supported := &ProviderEntry{
+		Kind: "openai", BaseURL: "https://example.invalid/v1", Model: "some-model",
+		SupportedEfforts: []string{"high", "max"},
+	}
+	tests := []struct {
+		name     string
+		entry    *ProviderEntry
+		raw      string
+		want     string
+		fallback bool
+	}{
+		{name: "empty", entry: generic, raw: "", want: ""},
+		{name: "unsupported", entry: generic, raw: "max", want: "", fallback: true},
+		{name: "supported", entry: supported, raw: "max", want: "max"},
+		{name: "auto", entry: supported, raw: "auto", want: ""},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got, fallback := ResolveInheritedEffort(tt.entry, tt.raw)
+			if got != tt.want || fallback != tt.fallback {
+				t.Fatalf("ResolveInheritedEffort(%q) = %q/%v, want %q/%v", tt.raw, got, fallback, tt.want, tt.fallback)
+			}
+		})
+	}
+}
+
 func TestDeepSeekV4FlashEffortCapabilityIncludesLow(t *testing.T) {
 	flash := &ProviderEntry{Kind: "openai", BaseURL: "https://api.deepseek.com", Model: "deepseek-v4-flash"}
 	cap := EffortCapabilityForEntry(flash)

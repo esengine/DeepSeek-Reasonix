@@ -1064,11 +1064,26 @@ func build(ctx context.Context, opts Options) (*BuildResult, error) {
 		}
 		return p, me.Price, me.ContextWindow, nil
 	}
+	resolveInheritedSubagentEffort := func(modelRef, raw string) string {
+		candidate := entry
+		if ref := strings.TrimSpace(modelRef); ref != "" {
+			if resolved, ok := cfg.ResolveModel(ref); ok {
+				candidate = resolved
+			} else if resolved := syntheticEntryFromResolver(effectiveResolver, ref); strings.TrimSpace(resolved.Name) != "" {
+				candidate = resolved
+			} else {
+				candidate = &config.ProviderEntry{Model: ref}
+			}
+		}
+		effective, _ := config.ResolveInheritedEffort(candidate, raw)
+		return effective
+	}
 	subagentIdentity := func(modelRef, effort string) (string, string) {
 		return subagentEffectiveIdentity(cfg, opts.ProviderResolver, modelName, entry, modelRef, effort)
 	}
 	taskModel := firstNonEmpty(cfg.Agent.SubagentModels["task"], cfg.Agent.SubagentModel)
 	taskEffort := firstNonEmpty(cfg.Agent.SubagentEfforts["task"], cfg.Agent.SubagentEffort)
+	taskEffortInherited := firstNonEmpty(cfg.Agent.SubagentEfforts["task"]) == "" && strings.TrimSpace(cfg.Agent.SubagentEffort) != ""
 	maxSubagentDepth := agent.NormalizeMaxSubagentDepth(cfg.Agent.MaxSubagentDepth)
 	maxSubagentConcurrency, maxParallelWriters := agent.NormalizeConcurrencyLimits(
 		cfg.Agent.MaxSubagentConcurrency, cfg.Agent.MaxParallelWriters,
@@ -1096,6 +1111,13 @@ func build(ctx context.Context, opts Options) (*BuildResult, error) {
 			}
 		}
 		return ""
+	}
+	subagentSkillEffort := func(sk skill.Skill) string {
+		effort, inherited := subagentEffortRefWithSource(cfg, sk)
+		if inherited {
+			return resolveInheritedSubagentEffort(subagentModelRef(cfg, sk), effort)
+		}
+		return effort
 	}
 	bashSandboxEnforced := bashSpec.Enforce
 	taskToolAdded := false
@@ -1144,27 +1166,29 @@ func build(ctx context.Context, opts Options) (*BuildResult, error) {
 	imageConfig := &imageinput.Config{Model: cfg.Agent.VisionModel, Resolve: visionProviderResolver, Select: visionModelSelector}
 	newTaskTool := func() *agent.TaskTool {
 		return agent.NewTaskToolWithOptions(agent.TaskToolOptions{
-			ImageInput:          imageConfig,
-			Provider:            execProv,
-			Pricing:             entry.Price,
-			QuoteContext:        quoteCtx,
-			ParentRegistry:      reg,
-			MaxSteps:            maxSteps,
-			ContextWindow:       entry.ContextWindow,
-			RecentKeep:          cfg.Agent.RecentKeep,
-			SoftCompactRatio:    cfg.Agent.SoftCompactRatio,
-			ToolResultSnipRatio: cfg.Agent.ToolResultSnipRatio,
-			CompactRatio:        cfg.Agent.CompactRatio,
-			CompactForceRatio:   cfg.Agent.CompactForceRatio,
-			ContextEditing:      cfg.Agent.ContextEditing,
-			Temperature:         cfg.Agent.Temperature,
-			ArchiveDir:          config.ArchiveDir(),
-			SysPrompt:           "",
-			Gate:                headlessGate,
-			KeepPolicy:          keepPolicy,
-			SubagentModel:       taskModel,
-			SubagentEffort:      taskEffort,
-			ResolveProvider:     resolveSubagentProvider,
+			ImageInput:              imageConfig,
+			Provider:                execProv,
+			Pricing:                 entry.Price,
+			QuoteContext:            quoteCtx,
+			ParentRegistry:          reg,
+			MaxSteps:                maxSteps,
+			ContextWindow:           entry.ContextWindow,
+			RecentKeep:              cfg.Agent.RecentKeep,
+			SoftCompactRatio:        cfg.Agent.SoftCompactRatio,
+			ToolResultSnipRatio:     cfg.Agent.ToolResultSnipRatio,
+			CompactRatio:            cfg.Agent.CompactRatio,
+			CompactForceRatio:       cfg.Agent.CompactForceRatio,
+			ContextEditing:          cfg.Agent.ContextEditing,
+			Temperature:             cfg.Agent.Temperature,
+			ArchiveDir:              config.ArchiveDir(),
+			SysPrompt:               "",
+			Gate:                    headlessGate,
+			KeepPolicy:              keepPolicy,
+			SubagentModel:           taskModel,
+			SubagentEffort:          taskEffort,
+			SubagentEffortInherited: taskEffortInherited,
+			ResolveInheritedEffort:  resolveInheritedSubagentEffort,
+			ResolveProvider:         resolveSubagentProvider,
 		}).
 			WithTranscripts(subagentStore, root, modelName, entry.Effort).
 			WithTranscriptIdentityResolver(subagentIdentity).
@@ -1296,7 +1320,7 @@ func build(ctx context.Context, opts Options) (*BuildResult, error) {
 		sk = skill.WithCodeGraphTools(sk, skill.CodeGraphReadTools(reg))
 		prov, price, ctxWin := execProv, entry.Price, entry.ContextWindow
 		modelRef := subagentModelRef(cfg, sk)
-		effortRef := subagentEffortRef(cfg, sk)
+		effortRef := subagentSkillEffort(sk)
 		if modelRef != "" || effortRef != "" {
 			p, pr, cw, err := resolveSubagentProvider(modelRef, effortRef)
 			if err != nil {
@@ -1365,7 +1389,7 @@ func build(ctx context.Context, opts Options) (*BuildResult, error) {
 		sk = skill.WithCodeGraphTools(sk, skill.CodeGraphReadTools(reg))
 		prov, price, ctxWin := execProv, entry.Price, entry.ContextWindow
 		modelRef := subagentModelRef(cfg, sk)
-		effortRef := subagentEffortRef(cfg, sk)
+		effortRef := subagentSkillEffort(sk)
 		if modelRef != "" || effortRef != "" {
 			p, pr, cw, err := resolveSubagentProvider(modelRef, effortRef)
 			if err != nil {
@@ -1466,7 +1490,7 @@ func build(ctx context.Context, opts Options) (*BuildResult, error) {
 		return agent.FormatSubagentRunResult(answer, run, false), nil
 	}
 	skillProfile := func(sk skill.Skill) *event.Profile {
-		model, effort := subagentModelRef(cfg, sk), subagentEffortRef(cfg, sk)
+		model, effort := subagentModelRef(cfg, sk), subagentSkillEffort(sk)
 		if model == "" && effort == "" {
 			return nil
 		}
@@ -2242,20 +2266,25 @@ func subagentModelRef(cfg *config.Config, sk skill.Skill) string {
 }
 
 func subagentEffortRef(cfg *config.Config, sk skill.Skill) string {
+	effort, _ := subagentEffortRefWithSource(cfg, sk)
+	return effort
+}
+
+func subagentEffortRefWithSource(cfg *config.Config, sk skill.Skill) (string, bool) {
 	if cfg != nil {
 		for _, key := range SubagentModelKeys(sk.Name) {
 			if e := strings.TrimSpace(cfg.Agent.SubagentEfforts[key]); e != "" {
-				return e
+				return e, false
 			}
 		}
 	}
 	if e := strings.TrimSpace(sk.Effort); e != "" {
-		return e
+		return e, false
 	}
 	if cfg == nil {
-		return ""
+		return "", false
 	}
-	return strings.TrimSpace(cfg.Agent.SubagentEffort)
+	return strings.TrimSpace(cfg.Agent.SubagentEffort), true
 }
 
 // SubagentModelKeys returns the cfg.Agent.SubagentModels/SubagentEfforts map

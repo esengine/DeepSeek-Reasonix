@@ -13,6 +13,54 @@ import (
 	"reasonix/internal/provider"
 )
 
+func TestRoleReasoningPreflightFallsBackOnlyForInheritedSubagentEffort(t *testing.T) {
+	newConfig := func(supported []string) *config.Config {
+		cfg := config.Default()
+		cfg.Agent.SubagentEffort = "max"
+		cfg.DefaultModel = "custom/some-model"
+		cfg.Providers = []config.ProviderEntry{{
+			Name:             "custom",
+			Kind:             "openai",
+			BaseURL:          "https://example.invalid/v1",
+			Model:            "some-model",
+			SupportedEfforts: supported,
+		}}
+		return cfg
+	}
+
+	for _, tc := range []struct {
+		name      string
+		supported []string
+		wantErr   bool
+	}{
+		{name: "generic provider", supported: nil},
+		{name: "declared max", supported: []string{"high", "max"}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			cfg := newConfig(tc.supported)
+			err := preflightRoleReasoning(cfg, Options{Model: "custom/some-model"}, nil, false)
+			if (err != nil) != tc.wantErr {
+				t.Fatalf("preflight error = %v, wantErr=%v", err, tc.wantErr)
+			}
+			if cfg.Agent.SubagentEffort != "max" {
+				t.Fatalf("preflight mutated stored global effort: %q", cfg.Agent.SubagentEffort)
+			}
+		})
+	}
+
+	cfg := newConfig([]string{"high"})
+	cfg.Agent.SubagentEfforts = map[string]string{"review": "max"}
+	err := preflightRoleReasoning(cfg, Options{Model: "custom/some-model"}, nil, false)
+	var role *RoleReasoningError
+	var unsupported *provider.UnsupportedReasoningEffort
+	if !errors.As(err, &role) || !errors.As(err, &unsupported) {
+		t.Fatalf("per-profile override should remain strict, got %v", err)
+	}
+	if role.Role != "subagent[review]" || role.Source != "agent.subagent_efforts.review" || role.Effort != "max" {
+		t.Fatalf("per-profile role = %+v", role)
+	}
+}
+
 func TestRoleReasoningPreflightKeepsPlannerEffortIndependent(t *testing.T) {
 	for _, model := range []string{"deepseek-v4-flash", "deepseek-v4-pro", "deepseek-v4-flash-vision-exp"} {
 		cfg := config.Default()

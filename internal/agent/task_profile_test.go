@@ -106,6 +106,39 @@ func TestTaskResolveProfilePrecedence(t *testing.T) {
 	}
 }
 
+func TestTaskInheritedEffortFallbackReachesProvider(t *testing.T) {
+	resolved := &mockProvider{name: "resolved", chunks: []provider.Chunk{
+		{Type: provider.ChunkText, Text: "resolved answer"},
+		{Type: provider.ChunkDone},
+	}}
+	var gotModel, gotEffort string
+	task := NewTaskToolWithOptions(TaskToolOptions{
+		Provider:                &mockProvider{name: "parent"},
+		ParentRegistry:          tool.NewRegistry(),
+		MaxSteps:                20,
+		SysPrompt:               "sys",
+		SubagentModel:           "custom/some-model",
+		SubagentEffort:          "max",
+		SubagentEffortInherited: true,
+		ResolveInheritedEffort:  func(model, raw string) string { return "" },
+		ResolveProvider: func(model, effort string) (provider.Provider, *provider.Pricing, int, error) {
+			gotModel, gotEffort = model, effort
+			return resolved, nil, 0, nil
+		},
+	}).WithTranscripts(NewSubagentStore(t.TempDir()), t.TempDir(), "base-model", "base-effort")
+
+	out, err := task.Execute(testTaskContext(), []byte(`{"prompt":"x"}`))
+	if err != nil {
+		t.Fatalf("Execute: %v", err)
+	}
+	if !strings.Contains(out, "resolved answer") {
+		t.Fatalf("sub-agent did not use resolved provider, got %q", out)
+	}
+	if gotModel != "custom/some-model" || gotEffort != "" {
+		t.Fatalf("resolved profile = %q/%q, want custom/some-model/empty effort", gotModel, gotEffort)
+	}
+}
+
 // captureSystemProvider records the system prompt of the first request.
 type captureSystemProvider struct {
 	onReq func(system string)

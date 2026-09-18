@@ -86,6 +86,22 @@ func NormalizeEffort(e *ProviderEntry, raw string) (string, error) {
 	return raw, nil
 }
 
+// ResolveInheritedEffort resolves a cross-model default against the current
+// model. Unlike NormalizeEffort, an unsupported stored default falls back to
+// the provider default; explicit per-model and per-request values must keep
+// using NormalizeEffort so they remain fail-closed.
+func ResolveInheritedEffort(e *ProviderEntry, raw string) (effective string, fallback bool) {
+	raw = strings.TrimSpace(raw)
+	if raw == "" {
+		return "", false
+	}
+	normalized, err := NormalizeEffort(e, raw)
+	if err != nil {
+		return "", true
+	}
+	return normalized, false
+}
+
 // EffortDisplay returns the selected /effort level, using "auto" for provider
 // default.
 func EffortDisplay(e *ProviderEntry) string {

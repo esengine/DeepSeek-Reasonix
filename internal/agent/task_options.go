@@ -75,5 +75,9 @@ type TaskToolOptions struct {
 	KeepPolicy                            KeepPolicy
 	SubagentModel                         string
 	SubagentEffort                        string
-	ResolveProvider                       func(string, string) (provider.Provider, *provider.Pricing, int, error)
+	// SubagentEffortInherited marks SubagentEffort as the cross-model global
+	// default. Explicit task/profile values must not use the fallback resolver.
+	SubagentEffortInherited bool
+	ResolveInheritedEffort  func(modelRef, raw string) string
+	ResolveProvider         func(string, string) (provider.Provider, *provider.Pricing, int, error)
 }
