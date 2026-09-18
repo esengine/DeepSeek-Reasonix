@@ -138,7 +138,7 @@ func TestPressureSummaryCappedByLearnedWindowAfterSessionReset(t *testing.T) {
 	if safeEnd <= head || safeEnd >= plannedEnd {
 		t.Fatalf("safe fold end = %d, want a non-empty prefix smaller than planned end %d", safeEnd, plannedEnd)
 	}
-	request := a.summaryRequest(msgs[head:safeEnd], "")
+	request := a.summaryRequest(msgs[:head], msgs[head:safeEnd], "")
 	if got, max := a.estimatedRequestTokens(request), a.effectiveContextWindow()-a.summaryOutputBudget()-protocolReserveTokens; got > max {
 		t.Fatalf("summary request tokens = %d, exceeds learned-window cap %d", got, max)
 	}

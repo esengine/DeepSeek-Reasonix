@@ -29,7 +29,7 @@ func TestExplicitChunkedFallbackStillRuns(t *testing.T) {
 	prov := &extractStubProvider{failFirst: 1, reply: "digest"}
 	a := New(prov, tool.NewRegistry(), extractStubSession(), Options{}, event.Discard)
 	fold := a.Session().Snapshot()
-	if _, _, err := a.foldSummaryWithChunkedFallback(context.Background(), CompactionTriggerManual, fold, "focus", 321, SummaryInputCachePrefix); err != nil {
+	if _, _, err := a.foldSummaryWithChunkedFallback(context.Background(), CompactionTriggerManual, nil, fold, "focus", 321, SummaryInputCachePrefix); err != nil {
 		t.Fatalf("explicit chunked fallback: %v", err)
 	}
 	if prov.calls < 2 {

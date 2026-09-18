@@ -2,6 +2,7 @@ package stats
 
 import (
 	"context"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -12,9 +13,9 @@ import (
 	"reasonix/internal/provider"
 )
 
-// Recorder is a passthrough event.Sink that snapshots token usage (event.Usage)
-// and completed turns (event.TurnDone) into the daily stats files. It observes
-// only; it never alters the event stream.
+// Recorder is a passthrough event.Sink that snapshots token usage
+// (event.Usage), completed turns (event.TurnDone), and compaction telemetry
+// into the daily stats files. It observes only; it never alters the stream.
 //
 // Wire it around the frontend sink at the boot layer so every entry point
 // (desktop, CLI, serve) records consistently; Source distinguishes them.
@@ -133,12 +134,138 @@ func (r *Recorder) Emit(e event.Event) {
 	if r != nil && r.inner != nil && !requestOnly {
 		r.inner.Emit(e)
 	}
-	if r != nil && r.writer != nil && e.Kind == event.Usage {
+	if r == nil || r.writer == nil {
+		return
+	}
+	switch {
+	case e.Kind == event.Usage:
 		r.recordUsage(e)
-	} else if r != nil && r.writer != nil && e.Kind == event.GuardianAssessment && e.Guardian.Usage != nil {
-		r.recordProviderUsage(e.ModelRef, e.Guardian.Usage, nil, "")
-	} else if r != nil && r.writer != nil && e.Kind == event.TurnDone {
-		r.recordTurnCompletion()
+	case e.Kind == event.GuardianAssessment && e.Guardian.Usage != nil:
+		r.recordProviderUsage(e.ModelRef, e.Guardian.Usage, nil, "", nil)
+	case e.Kind == event.TurnDone:
+		r.RecordTurnCompletion()
+	case e.Kind == event.Notice && isCompactionTelemetry(e.Text):
+		r.recordCompaction(e)
+	}
+}
+
+// isCompactionTelemetry matches the agent's compaction telemetry notices, so
+// every pass (success or failure, from any trigger) lands in the stats file
+// for post-hoc diagnosis even when the frontend swallows the notice.
+func isCompactionTelemetry(text string) bool {
+	return text == "compaction telemetry" || text == "compaction failed"
+}
+
+// recordCompaction parses the agent's compaction telemetry detail line into a
+// structured record, so a compaction problem can be pinned from the stats file
+// alone. Parsing is best-effort and never interrupts the event stream.
+func (r *Recorder) recordCompaction(e event.Event) {
+	if r == nil || r.dispatcher == nil {
+		return
+	}
+	rec := CompactionRecord{Trigger: "unknown", Mode: "unknown"}
+	for tok := range strings.FieldsSeq(e.Detail) {
+		k, v, ok := strings.Cut(tok, "=")
+		if !ok {
+			continue
+		}
+		switch k {
+		case "trigger":
+			rec.Trigger = v
+		case "mode":
+			rec.Mode = v
+		case "cache":
+			rec.Cache = v
+		case "provider_request_id":
+			rec.RequestID = v
+		case "status":
+			rec.Status = v
+		case "reason":
+			rec.Reason = v
+		case "summary_input":
+			rec.SummaryInputMode = v
+		case "view_fp":
+			rec.ViewFP = v
+		case "wire_fp":
+			rec.WireFP = v
+		case "tools_fp":
+			rec.ToolsFP = v
+		case "tools_source":
+			rec.ToolsSource = v
+		case "pref_hash":
+			rec.PrefixFP = v
+		case "wire_diff":
+			// wire_diff names the drifting field; it never contains spaces.
+			rec.WireDiff = v
+		case "tpc":
+			if f, err := strconv.ParseFloat(v, 64); err == nil {
+				rec.TokPerChar = f
+			}
+		case "err_type":
+			// err may contain spaces; the detail line puts it last, so take
+			// everything after the marker verbatim.
+			if i := strings.Index(e.Detail, "err_type="); i >= 0 {
+				rec.Error = strings.TrimSpace(e.Detail[i+len("err_type="):])
+			}
+			r.dispatcher.enqueue(record{
+				Timestamp:  time.Now(),
+				ModelRef:   e.ModelRef,
+				Source:     r.source,
+				Compaction: &rec,
+			})
+			return
+		default:
+			setCompactionInt(&rec, k, v)
+		}
+	}
+	r.dispatcher.enqueue(record{
+		Timestamp:  time.Now(),
+		ModelRef:   e.ModelRef,
+		Source:     r.source,
+		Compaction: &rec,
+	})
+}
+
+func setCompactionInt(rec *CompactionRecord, key, val string) {
+	n, err := strconv.Atoi(val)
+	if err != nil {
+		return
+	}
+	switch key {
+	case "src":
+		rec.SourceTok = n
+	case "fold":
+		rec.FoldTok = n
+	case "spans":
+		rec.Spans = n
+	case "proj":
+		rec.ProjTok = n
+	case "in":
+		rec.InputTok = n
+	case "out":
+		rec.OutTok = n
+	case "hit":
+		rec.HitTok = n
+	case "miss":
+		rec.MissTok = n
+	case "write":
+		rec.WriteTok = n
+	case "reqs":
+		rec.Reqs = n
+	case "user_kept":
+		rec.UserTurnsKept = n
+	case "user_dropped":
+		rec.UserTurnsDropped = n
+	case "results":
+		rec.Results = n
+	case "saved_chars":
+		rec.SavedChars = n
+	case "tools_count":
+		rec.ToolsCount = n
+	case "pref_len":
+		rec.PrefLen = n
+	case "wire_len":
+		rec.WireLen = n
 	}
 }
 
@@ -247,10 +374,10 @@ func (r *Recorder) RecordSubagentLifecycle(info event.SubagentLifecycleInfo) {
 }
 
 func (r *Recorder) recordUsage(e event.Event) {
-	r.recordProviderUsage(e.ModelRef, e.Usage, e.CostQuote, e.UsageSource)
+	r.recordProviderUsage(e.ModelRef, e.Usage, e.CostQuote, e.UsageSource, e.CacheDiagnostics)
 }
 
-func (r *Recorder) recordProviderUsage(modelRef string, usage *provider.Usage, quote *billing.CostQuote, usageSource string) {
+func (r *Recorder) recordProviderUsage(modelRef string, usage *provider.Usage, quote *billing.CostQuote, usageSource string, diag *event.CacheDiagnostics) {
 	if usage == nil || (usage.TotalTokens <= 0 && usage.RequestCount <= 0) {
 		return
 	}
@@ -300,6 +427,11 @@ func (r *Recorder) recordProviderUsage(modelRef string, usage *provider.Usage, q
 		if v, ok := quote.Valuations["USD"]; ok {
 			rec.ValuationUSD = v.Money.Amount
 		}
+	}
+	if diag != nil {
+		rec.PrefixHash = diag.PrefixHash
+		rec.PrefixChanged = diag.PrefixChanged
+		rec.PrefixReasons = diag.PrefixChangeReasons
 	}
 	r.dispatcher.enqueue(rec)
 }

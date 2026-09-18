@@ -31,7 +31,7 @@ func (a *Agent) maximumSafeSummaryPrefixEnd(msgs []provider.Message, head, end i
 	}
 	fits := func(candidate int) bool {
 		fold, _ := withoutPinnedContextRevisions(msgs[head:candidate])
-		request := a.summaryRequest(fold, instructions)
+		request := a.summaryRequest(msgs[:head], fold, instructions)
 		return a.estimatedRequestTokens(request) <= maxPromptTokens
 	}
 	if fits(end) {
@@ -69,14 +69,18 @@ func (a *Agent) safeSummaryPromptTokenLimit() (int, bool) {
 }
 
 // validateSafeSummaryRequest guards the final fold in the request form that
-// will actually be sent.
-func (a *Agent) validateSafeSummaryRequest(fold []provider.Message, instructions string, slim bool) error {
+// will actually be sent: the prefix rides in front of the fold, so validating
+// the fold alone lets a large frozen prefix pass here and still 400 on the
+// provider.
+func (a *Agent) validateSafeSummaryRequest(prefix, fold []provider.Message, instructions string, slim bool) error {
 	maxPromptTokens, enforce := a.safeSummaryPromptTokenLimit()
 	if !enforce {
 		return nil
 	}
-	request := a.summaryRequest(fold, instructions)
+	request := a.summaryRequest(prefix, fold, instructions)
 	if slim {
+		// The slim form sends a rendered transcript, not a prefix+fold replay,
+		// so the prefix is deliberately absent here.
 		request = a.slimSummaryRequest(fold, instructions)
 	}
 	requestTokens := a.estimatedRequestTokens(request)

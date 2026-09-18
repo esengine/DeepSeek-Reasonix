@@ -203,7 +203,7 @@ func TestSharedWindowFoldDoesNotPrivatelyShortenOversizedInput(t *testing.T) {
 		{Role: provider.RoleTool, ToolCallID: "2", Name: "read_file", Content: toolBody},
 	}
 
-	if _, err := a.foldToSummary(context.Background(), fold, ""); !errors.Is(err, ErrCompactionRequired) {
+	if _, err := a.foldToSummary(context.Background(), nil, fold, ""); !errors.Is(err, ErrCompactionRequired) {
 		t.Fatalf("foldToSummary = %v, want admission failure", err)
 	}
 	if prov.calls != 0 {
@@ -217,7 +217,7 @@ func TestSharedWindowFoldRejectsUnshortenableOverBudgetInput(t *testing.T) {
 	prov := &sharedWindowTestProvider{budget: 128 * 1024, shared: true}
 	a := &Agent{agentConfig: agentConfig{contextWindow: 100_000}, svc: agentServices{prov: prov, sink: event.Discard}, sess: sessionRuntime{output: outputBudgetState{outputBudget: prov.budget}}}
 	fold := []provider.Message{{Role: provider.RoleUser, Content: strings.Repeat("字", 200_000)}}
-	_, err := a.foldToSummary(context.Background(), fold, "")
+	_, err := a.foldToSummary(context.Background(), nil, fold, "")
 	if !errors.Is(err, ErrCompactionRequired) {
 		t.Fatalf("foldToSummary err = %v, want context admission failure", err)
 	}
@@ -453,7 +453,7 @@ func TestSummarizeClipsSharedWindowOutputBudget(t *testing.T) {
 	a.sess.output.lastUsage.Store(&provider.Usage{PromptTokens: 50_000})
 	a.setPromptTokenCalibration(50_000, requestCalibrationShapeOf(provider.Request{Messages: region}))
 
-	if _, _, err := a.summarize(context.Background(), region, ""); err != nil {
+	if _, _, err := a.summarize(context.Background(), nil, region, ""); err != nil {
 		t.Fatalf("summarize: %v", err)
 	}
 	if prov.last.MaxTokens <= 0 || prov.last.MaxTokens >= prov.budget {
@@ -465,7 +465,7 @@ func TestSummarizeRejectsLengthTruncation(t *testing.T) {
 	prov := &sharedWindowTestProvider{budget: 128 * 1024, shared: true, finish: "length"}
 	a := &Agent{agentConfig: agentConfig{contextWindow: 1_048_576}, svc: agentServices{prov: prov, sink: event.Discard}, sess: sessionRuntime{output: outputBudgetState{outputBudget: prov.budget}}}
 
-	_, _, err := a.summarizeOnce(context.Background(), []provider.Message{{
+	_, _, err := a.summarizeOnce(context.Background(), nil, []provider.Message{{
 		Role: provider.RoleUser, Content: "retain every durable fact",
 	}}, "")
 	if err == nil || !strings.Contains(err.Error(), "truncated") {
