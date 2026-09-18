@@ -40,6 +40,7 @@ type outputBudgetState struct {
 	contextUsage      atomic.Pointer[contextUsage] // gauge's memoised prompt size
 	learned           atomic.Pointer[learnedContextBudget]
 	admission         atomic.Pointer[contextAdmission]
+	truncation        atomic.Pointer[promptTruncation]
 }
 
 // learnedContextBudget is an Agent-local observation of the live provider/model
@@ -111,6 +112,13 @@ func (o *outputBudgetState) reset() {
 
 func (a *Agent) setPromptTokenCalibration(promptTokens int, shape requestCalibrationShape) {
 	if a == nil || promptTokens <= 0 || shape.requestChars <= 0 {
+		return
+	}
+	// A prompt the provider truncated describes its own ceiling, not this
+	// model's tokenizer. Learning from it shrinks every later estimate, which
+	// delays compaction and truncates more of the next prompt.
+	if ceiling := promptTruncationCeiling(promptTokens, shape, a.sess.output.promptCalibration.Load()); ceiling > 0 {
+		a.notePromptTruncation(ceiling)
 		return
 	}
 	a.sess.output.promptCalibration.Store(&promptTokenCalibration{

@@ -435,6 +435,38 @@ tokens. For example, 128K commonly means `128000`; if the provider documents
 `131072`, use that exact value. Values below 16384 show a non-blocking warning
 because they can trigger frequent compaction and reduce cache hit rates.
 
+### Self-hosted runtimes: the runtime's limit, not the model's
+
+For a local server, the number that governs the request is the **runtime's
+configured context length**, which is usually far below what the model was
+trained for. Ollama serves its own 4096-token default unless
+`OLLAMA_CONTEXT_LENGTH` is set or the Modelfile carries `PARAMETER num_ctx`, so a
+262K-context model routinely runs at 4096. Its OpenAI-compatible `/v1` surface
+has no field for `num_ctx`, so the value cannot be raised per request and has to
+be set on the server.
+
+Runtimes differ in what they do when the prompt exceeds that limit:
+
+| Runtime | Prompt over the limit |
+| --- | --- |
+| Ollama | `200 OK`, prompt **silently truncated** |
+| LM Studio | depends on its context-overflow policy; `truncateMiddle` and `rollingWindow` truncate silently, and an OpenAI-compatible client cannot select the policy per request |
+| llama.cpp server | HTTP 400, `the request exceeds the available context size` |
+| vLLM | HTTP 400, `the engine prompt length ... exceeds the max_model_len` |
+
+The last two fail loudly, so you will see them. The silent cases are the
+dangerous ones, because the symptom does not look like truncation:
+
+- the model ignores its tools, or invents tool names that do not exist — the tool
+  schemas are the largest part of the prefix and the first thing cut;
+- it answers as though it never saw the system prompt or your actual question;
+- it reads as a weak model rather than a misconfigured server.
+
+Reasonix detects a silently truncated prompt from the token counts the provider
+reports and warns once per session. Check the server first — `ollama ps` shows
+the context each loaded model is actually running with — then set **Context
+window** to that same number.
+
 Model capability mode options:
 
 | Option | Effect |
