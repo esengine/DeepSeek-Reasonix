@@ -27,6 +27,7 @@ const noticeCodeKeys: Record<string, DictKey> = {
   tool_budget: "notice.toolBudget",
   prompt_queued: "notice.promptQueued",
   loop_guard: "notice.loopGuard",
+  perseveration_loop: "notice.perseverationLoop",
   workspace_lease: "notice.workspaceLease",
   cancelled_turn_display: "notice.cancelledTurnDisplay",
   protocol_recovery: "notice.protocolRecoveryBody",

@@ -22,6 +22,7 @@ var Chinese = Messages{
 	ToolBudget:                       "工具调用轮数已达上限，已要求助手总结当前进展。",
 	TaskBudget:                       "本任务已达花费预算上限，已要求给出最终回答。",
 	LoopGuard:                        "助手没有取得有效进展，已要求它重新评估当前步骤。",
+	PerseverationLoop:                "助手陷入重复输出同一段文字，已提前截断回复。请重试、补充引导，或更换供应商/模型。",
 	ProgressGuard:                    "助手在没有新证据的情况下反复做重复工作，已要求它更换方法。",
 	OperationNeedsUser:               "同一处改动连续两次以相同原因失败，已暂停并交给你处理，不再自动重试。",
 	SoftBudgetConverge:               "正在收敛这场耗时较长的只读调查。",

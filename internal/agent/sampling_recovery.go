@@ -143,8 +143,21 @@ func (a *Agent) samplingRecoveryStop(ctx context.Context, limit TaskBudget, usag
 }
 
 func (a *Agent) handleSamplingCandidate(s *samplingRecoveryState, result streamedTurn, sink *deferredStreamSink, attempt int, id string) (bool, streamedTurn) {
+	if result.perseverationAborted {
+		// The perseveration guard cut this attempt short on purpose. Settle it as a
+		// candidate instead of retrying the truncated reasoning; the run loop
+		// decides whether to nudge-and-retry once or stop for the user.
+		a.observeMissingAssistantReasoning(result.assistantMessage(), result.reasoningComplete)
+		sink.Flush()
+		result.settledAttemptID, result.settledAttempt = id, attempt
+		result.usage = finalizeSamplingUsage(s.billable, result.usage)
+		return false, result
+	}
 	issue := a.reasoningReplayIssue(result)
 	if issue == "" {
+		// A clean, non-perseveration provider terminal proves the model can answer
+		// this conversation; the consecutive-loop count resets.
+		a.sess.perseverationStrikes = 0
 		a.observeMissingAssistantReasoning(result.assistantMessage(), result.reasoningComplete)
 		if s.missing {
 			a.recordRecoveredCandidate(result)

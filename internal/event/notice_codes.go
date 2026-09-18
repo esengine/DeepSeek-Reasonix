@@ -12,6 +12,7 @@ const (
 	NoticeCodeToolBudget                                        = "tool_budget"
 	NoticeCodePromptQueued                                      = "prompt_queued"
 	NoticeCodeLoopGuard                                         = "loop_guard"
+	NoticeCodePerseverationLoop                                 = "perseveration_loop"
 	NoticeCodeProgressGuard                                     = "progress_guard"
 	NoticeCodeOperationNeedsUser                                = "operation_needs_user"
 	NoticeCodeEvidenceNudge                                     = "evidence_nudge"

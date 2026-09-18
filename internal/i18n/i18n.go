@@ -46,6 +46,7 @@ type Messages struct {
 	ToolBudget                       string // tool_budget: tool-call round limit reached
 	TaskBudget                       string // tool_budget variant: task spend budget reached
 	LoopGuard                        string // loop_guard: no-progress tool loop
+	PerseverationLoop                string // perseveration_loop: model stuck repeating a short block
 	ProgressGuard                    string // progress_guard: repeated work without new evidence
 	OperationNeedsUser               string // operation_needs_user: host stopped retrying one operation
 	SoftBudgetConverge               string // loop_guard: converging a long read-only investigation

@@ -3172,6 +3172,7 @@ export const en = {
   "notice.toolBudget": "Tool round limit reached; asking the assistant to summarize progress.",
   "notice.promptQueued": "A question is waiting for you to answer the prompt ahead of it.",
   "notice.loopGuard": "The assistant is not making progress; asking it to reassess the current step.",
+  "notice.perseverationLoop": "The assistant got stuck repeating the same text, so the response was cut short. Try again, add guidance, or switch provider/model.",
   "notice.workspaceLease": "Another session is writing to this workspace; this session will continue automatically when it is safe.",
   "notice.cancelledTurnDisplay": "This turn was interrupted. Partial output is kept for reference; only completed tool pairs and a bounded recovery summary enter the next model turn. Inspect the workspace before continuing or reverting changes.",
   "notice.streamInterruptReason": "Last model connection failed: {reason}. If this repeats, check the provider gateway or network proxy settings.",

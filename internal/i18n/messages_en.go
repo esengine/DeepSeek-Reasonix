@@ -21,6 +21,7 @@ var English = Messages{
 	ToolBudget:                       "Tool round limit reached; asking the assistant to summarize progress.",
 	TaskBudget:                       "This task reached its spend budget; asking for a final answer.",
 	LoopGuard:                        "The assistant is not making progress; asking it to change approach.",
+	PerseverationLoop:                "The assistant got stuck repeating the same text; the response was cut short. Try again, add guidance, or switch provider/model.",
 	ProgressGuard:                    "The assistant keeps repeating work without new evidence; asking it to change approach.",
 	OperationNeedsUser:               "The same change failed the same way twice; it is paused for you instead of being retried.",
 	SoftBudgetConverge:               "Converging a long read-only investigation.",

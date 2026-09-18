@@ -181,7 +181,7 @@ func TestCompactionPausesWhenWindowTooSmall(t *testing.T) {
 // session grows but reclaims enough headroom that it never fires on consecutive
 // turns and never trips the stuck guard.
 func TestCompactionHealthyWindowNeverLoops(t *testing.T) {
-	perTurn, paused, _ := compactionsPerTurn(t, 40000, "small tool output", strings.Repeat("analysis paragraph. ", 600), 20)
+	perTurn, paused, _ := compactionsPerTurn(t, 40000, "small tool output", nonRepeatingText(11400), 20)
 
 	total := 0
 	for _, n := range perTurn {

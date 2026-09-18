@@ -435,7 +435,7 @@ func TestGLMReasoningOverflowFailsBeforeToolExecution(t *testing.T) {
 		requestNo := requests.Add(1)
 		w.Header().Set("Content-Type", "text/event-stream")
 		if requestNo == 1 {
-			_, _ = io.WriteString(w, `data: {"choices":[{"delta":{"reasoning_content":"`+strings.Repeat("reason", 16)+`"}}]}`+"\n\n")
+			_, _ = io.WriteString(w, `data: {"choices":[{"delta":{"reasoning_content":"deliberating on the next step before acting"}}]}`+"\n\n")
 			_, _ = io.WriteString(w, `data: {"choices":[{"delta":{"tool_calls":[{"index":0,"id":"c1","type":"function","function":{"name":"echo","arguments":"{\"text\":\"must not run\"}"}}]},"finish_reason":"tool_calls"}]}`+"\n\n")
 		} else {
 			_, _ = io.WriteString(w, `data: {"choices":[{"delta":{"content":"unexpected continuation"},"finish_reason":"stop"}]}`+"\n\n")

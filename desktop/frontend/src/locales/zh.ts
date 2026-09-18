@@ -3175,6 +3175,7 @@ export const zh: Record<DictKey, string> = {
   "notice.toolBudget": "工具调用轮数已达上限，已要求助手总结当前进展。",
   "notice.promptQueued": "有一个问题在等你先回答前面的提示。",
   "notice.loopGuard": "助手没有取得有效进展，已要求它重新评估当前步骤。",
+  "notice.perseverationLoop": "助手陷入重复输出同一段文字，回复已提前截断。请重试、补充引导，或更换供应商/模型。",
   "notice.workspaceLease": "另一个会话正在写入此工作区；安全后本会话会自动继续。",
   "notice.cancelledTurnDisplay": "本轮已中断。上方的部分输出会永久保留供查看；只有完整工具调用及结果和有界恢复摘要会进入模型下一轮。继续或回滚前请先检查当前工作区。",
   "notice.streamInterruptReason": "最近一次模型连接失败：{reason}。如果反复出现，请检查供应商网关或网络代理设置。",
