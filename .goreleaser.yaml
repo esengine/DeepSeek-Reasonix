@@ -57,8 +57,8 @@ homebrew_casks:
     # emit Homebrew's `postflight_steps` directly until upstream supports it.
     custom_block: |
       postflight_steps do
-        if OS.mac?
-          system_command "/usr/bin/xattr", args: ["-dr", "com.apple.quarantine", "#{staged_path}/reasonix"]
+        on_macos do
+          run "/usr/bin/xattr", args: ["-dr", "com.apple.quarantine", "{{staged_path}}/reasonix"]
         end
       end
 
