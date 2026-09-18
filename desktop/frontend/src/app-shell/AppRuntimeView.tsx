@@ -123,12 +123,19 @@ export function AppRuntimeView(props: AppRuntimeViewProps) {
   const runtimeTransitioning = core.surface.transitioning;
   const presentationTransitioning = runtimeTransitioning && core.remoteSurfaceActive;
   const browserPreviewChrome = navigation.browserPreviewChrome;
-  const workspaceContextProject = Boolean(
-    activeTab?.remote || (activeTab?.scope === "project" && activeTab.workspaceRoot),
-  );
-  const workspaceContextRoot = workspaceContextProject
-    ? activeTab?.workspaceRoot ?? state.meta?.workspaceRoot ?? state.meta?.cwd ?? ""
-    : "";
+  // The composer follows the visible surface. While a draft is one, the active
+  // tab is only the surface the draft replaces, so a remote tab must not leak
+  // its workspace into the new-session composer.
+  const workspaceContextDraft = draftActive ? draft.surface?.draft : undefined;
+  const workspaceContextTab = draftActive ? undefined : activeTab;
+  const workspaceContextProject = workspaceContextDraft
+    ? workspaceContextDraft.scope === "project" && Boolean(workspaceContextDraft.workspaceRoot)
+    : Boolean(workspaceContextTab?.remote || (workspaceContextTab?.scope === "project" && workspaceContextTab.workspaceRoot));
+  const workspaceContextRoot = workspaceContextDraft
+    ? workspaceContextDraft.workspaceRoot ?? ""
+    : workspaceContextProject
+      ? workspaceContextTab?.workspaceRoot ?? state.meta?.workspaceRoot ?? state.meta?.cwd ?? ""
+      : "";
 
   const workbenchChromeHidden = true;
   const sidebarClassName = [
@@ -445,11 +452,15 @@ export function AppRuntimeView(props: AppRuntimeViewProps) {
               workspaceContext: {
                 scope: workspaceContextProject ? "project" : "global",
                 workspaceRoot: workspaceContextRoot,
-                workspaceName: workspaceContextProject ? activeTab?.workspaceName ?? state.meta?.workspaceName : undefined,
-                gitBranch: workspaceContextProject && !activeTab?.remote ? state.meta?.gitBranch : undefined,
+                // A draft keeps its own (project) root: the label falls back to
+                // that root's basename, so no other surface's name can leak in.
+                workspaceName: workspaceContextProject && !workspaceContextDraft
+                  ? workspaceContextTab?.workspaceName ?? state.meta?.workspaceName : undefined,
+                gitBranch: workspaceContextProject && !workspaceContextDraft && !workspaceContextTab?.remote
+                  ? state.meta?.gitBranch : undefined,
                 tabId: activeTabId,
                 scopeKey: session.workspaceScopeKey,
-                remote: Boolean(activeTab?.remote),
+                remote: Boolean(workspaceContextTab?.remote),
                 onSwitchWorkspace: navigation.projectTopicCommands.onAddProject,
                 onWorkWithoutProject: () => navigationCommands.openBlankSession("global", ""),
                 onRefreshProjects: navigation.projectTopicCommands.refreshProjectsAndTabs,
@@ -492,7 +503,7 @@ export function AppRuntimeView(props: AppRuntimeViewProps) {
           surfaceOpen: !draftActive && terminalSurfaceOpen,
           contentVisible: local.terminalContentVisible,
           remote: core.remoteSurfaceActive,
-          readOnly: Boolean(activeTab?.readOnly),
+          readOnly: Boolean(activeTab?.readOnly && !activeTab.takenOver),
           tabId: activeTabId,
           meta: state.meta,
           fitEnabled: local.terminalFitEnabled,

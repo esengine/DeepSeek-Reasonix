@@ -483,6 +483,7 @@ the displayed list matches the commands the TUI accepts.
 | `/model` | Search configured models and switch the active model. |
 | `/provider` | Choose a provider, then choose one of its configured models. |
 | `/resume` | Search recent sessions and switch to one. |
+| `/takeover` | Take over the last refused session (or a listed entry) from the resident serve: this CLI becomes the writer and remote viewers become read-only spectators until they reclaim. After a desktop reclaim it re-takes the remembered session directly. |
 | `/status` | Show model, effort, cache, Git, background jobs, and balance details. |
 | `/theme [auto\|light\|dark\|style]` | View or change the CLI background mode and accent palette. |
 | `/currency [auto\|CNY\|USD]` | View or change the user-global fee display currency and refresh the runtime. |

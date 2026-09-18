@@ -49,7 +49,8 @@ ok(
 ok(
   /remoteSession: \{ hostId: node\.remote!\.hostId, workspace: node\.remote!\.workspace, name: row\.name, path: row\.path, sessionId: row\.sessionId, title: row\.title \}/.test(remoteSource) &&
     /openRemoteSessionNode\(remote, openRemoteProject\)/.test(source) &&
-    /sessionPath: remote\.path, sessionId: remote\.sessionId, sessionTitle: remote\.title/.test(remoteSource),
+    /sessionPath: remote\.path, sessionId: remote\.sessionId, sessionTitle: remote\.title/.test(remoteSource) &&
+    /remoteSessionIdentity\(row\)/.test(remoteSource),
   "session rows open the matching in-app remote session",
 );
 ok(
@@ -108,6 +109,7 @@ ok(
 );
 ok(
   /const remote = index\.get\(topicId\);[\s\S]*?if \(!remote\) return false;[\s\S]*?await action\(remote\);/.test(remoteSource) &&
+    /remote\.name \|\| remote\.sessionId/.test(remoteSource) &&
     !/if \(remote\.name\) await action\(remote\)/.test(remoteSource),
   "synthetic blank remote sessions still invoke rename, pin, and delete mutations",
 );

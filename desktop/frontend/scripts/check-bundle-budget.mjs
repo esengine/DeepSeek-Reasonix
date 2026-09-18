@@ -448,6 +448,17 @@ const rawInitialBytes = [...initialJS, ...initialCSS, ...appShellCSS]
 // measure 2488853 B. Keep the next tenth; gzip, CSS, and chunk limits unchanged.
 // Combined model-settings and read-evidence integration measures 2492541 B,
 // adding 3688 B (0.148%) over the base. Retain the next one-decimal ceiling.
+// Takeover-aware terminal access adds one startup-path predicate, measuring
+// 2492831 B. Retain only the next one-decimal ceiling.
+// Statically importing remote telemetry into useRemoteSession removes the
+// late-resolving dynamic-chunk await between the connection-generation check
+// and status application; the module moves onto the startup path and the
+// merged payload measures 2437.6 KiB. Retain the next tenth.
+// The snapshot orphan reconciliation (content fallback for id-less rebase)
+// adds 0.3 KiB raw; the merged payload measures 2437.9 KiB. Same ceiling rule.
+// The spectator status reconcile loop and its status/meta plumbing measure
+// 2438.1 KiB on the branch baseline; the merged main baseline below already
+// covers them.
 // SessionRef bridge methods, active-row identity and the mock hydration event
 // contract measure 2439.8 KiB. Extracting exact-tab mock rebinding from the
 // startup bridge measures 2439.6 KiB; retain 0.3 KiB bounded toolchain headroom.
@@ -464,6 +475,8 @@ const rawInitialBytes = [...initialJS, ...initialCSS, ...appShellCSS]
 // Reasoning capability recovery copy moves the same-toolchain local build from
 // 2064327 B to 2064614 B (+287 B, 0.014%). The stable build with a full source
 // identity measures 2064746 B; retain the next one-decimal ceiling.
-const rawInitialBudgetKiB = 2_016.4;
+// Merging the sessionid-migration branch onto main adds the dormant-tab and
+// retired-row guards (2068800 B, +4.1 KiB); keep the next ceiling.
+const rawInitialBudgetKiB = 2_020.5;
 assertBudget("initial raw JavaScript and CSS", rawInitialBytes, rawInitialBudgetKiB * 1024);
 assertBudget("largest initial JavaScript chunk raw", largestInitialJSRaw, 1_000 * 1024);

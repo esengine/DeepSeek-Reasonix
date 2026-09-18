@@ -321,6 +321,12 @@ type chatTUI struct {
 	// resumePick is the interactive "/resume" session picker overlay. Non-nil
 	// while the user browses saved sessions with ↑/↓ and confirms with Enter.
 	resumePick *resumePicker
+	// sessionReclaimed means the remote side owns the previously active session.
+	// The TUI stays alive, but input is restricted to leaving that session.
+	sessionReclaimed bool
+	// reclaimedTarget retains the session that was just yielded after its
+	// controller binding is released, so the picker can select a different row.
+	reclaimedTarget cliResumeTarget
 	// pendingTakeoverPath remembers the last /resume target refused because a
 	// resident serve on this machine holds its lease; "/takeover" force-takes
 	// that session back.
@@ -496,14 +502,15 @@ type compactDoneMsg struct{ err error }
 // quit. It is injected from the signal handler so shutdown does not snapshot a
 // stale controller captured before an in-TUI rebuild.
 type tuiShutdownMsg struct {
-	completion *tuiShutdownCompletion
+	completion    *tuiShutdownCompletion
+	userInitiated bool
 }
 
 // shutdownNow is the tea.Cmd every in-TUI quit gesture returns instead of
 // tea.Quit. Routing through tuiShutdownMsg gives all exits the same
 // finalization (Snapshot + lease follow); quitting directly would drop
 // whatever the controller holds beyond the last snapshot (#5879).
-func shutdownNow() tea.Msg { return tuiShutdownMsg{} }
+func shutdownNow() tea.Msg { return tuiShutdownMsg{userInitiated: true} }
 
 // elapsedTickMsg fires once a second while a turn runs, driving the "thinking
 // Ns" counter in the status line. generation rejects a prior turn's timer.
@@ -657,7 +664,7 @@ func newChatTUI(ctrl control.SessionAPI, missing string, eventCh chan event.Even
 
 	commitBuf := []string{}
 	nativeScrollback := detectTermuxTerminal()
-	history := ctrl.History()
+	history := chatUIDisplayHistory(ctrl)
 	nextPasteID, usedPasteIDs := pasteIDStateForHistory(history)
 	return chatTUI{
 		ctrl:                 ctrl,
@@ -1771,6 +1778,13 @@ func (m chatTUI) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			if line == "exit" || line == "quit" || line == ":q" {
 				return m, shutdownNow
 			}
+			if m.sessionReclaimed || m.takeover != nil && m.takeover.Returned() {
+				if !reclaimInputAllowed(line) {
+					m.resetComposerInput()
+					m.notice(sessionReclaimedNotice)
+					return m, finalize(m, cmds)
+				}
+			}
 			// /queue and /steer are local even when idle (never model-prompted).
 			if handled, msg := m.handleQueueSlash(line); handled {
 				m.notice(msg)
@@ -1904,7 +1918,11 @@ func (m chatTUI) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 
 	case tuiShutdownMsg:
-		return m.shutdownAndQuit(msg.completion)
+		return m.shutdownAndQuit(msg)
+
+	case tuiSessionReclaimedMsg:
+		m.handleSessionReclaimed()
+		return m, nil
 
 	case turnModelSettingsMsg:
 		return m, m.handleTurnModelSettings(msg)
@@ -4124,6 +4142,11 @@ func elapsedTick(generation uint64) tea.Cmd {
 // output to scrollback; MCP prompt / custom commands resolve to a model turn.
 func (m *chatTUI) runSlashCommand(input string) tea.Cmd {
 	typedCmd := strings.TrimSpace(strings.SplitN(input, " ", 2)[0])
+	if (m.sessionReclaimed || m.takeover != nil && m.takeover.Returned()) &&
+		typedCmd != "/resume" && typedCmd != "/takeover" && typedCmd != "/quit" && typedCmd != "/exit" {
+		m.notice(sessionReclaimedNotice)
+		return nil
+	}
 	if m.takeover != nil && m.takeover.Reclaiming() && typedCmd != "/quit" && typedCmd != "/exit" {
 		m.notice("the remote side is taking this session back; new input is disabled")
 		return nil
@@ -4463,7 +4486,7 @@ func (m *chatTUI) runCopyCommand(input string) tea.Cmd {
 	// (or a non-numeric argument) opens the interactive picker instead.
 	arg := strings.TrimSpace(strings.TrimPrefix(input, "/copy"))
 	if n, err := strconv.Atoi(arg); err == nil && n > 0 {
-		msgs := m.ctrl.History()
+		msgs := chatUIDisplayHistory(m.ctrl)
 		parts := copyAssistantParts(msgs)
 		if len(parts) == 0 {
 			m.notice(i18n.M.SlashCopyEmpty)
@@ -4500,7 +4523,7 @@ func firstLine(s string) string {
 // system messages, reasoning/thinking content, and tool calls/results.
 func (m *chatTUI) runExportCommand(input string) {
 	m.echoLocalCommand(input)
-	msgs := m.ctrl.History()
+	msgs := chatUIDisplayHistory(m.ctrl)
 	if len(msgs) == 0 {
 		m.notice(i18n.M.SlashExportEmpty)
 		return
@@ -4827,6 +4850,13 @@ func replaySectionsForWithRenderers(
 		out = append(out, searchHistorySections(m, width, renderAssistant)...)
 		switch m.Role {
 		case provider.RoleUser:
+			// Host-generated wrappers (session-context snapshots, injected
+			// preamble) are plumbing for the provider workset, not visible
+			// turns — the desktop's transcript history drops them and so does
+			// this replay.
+			if agent.IsHostGeneratedUserMessage(m) {
+				continue
+			}
 			// Steer messages are surfaced as a notice line, not a user bubble.
 			if text, handled := agent.ReplaySteerText(m.Content); handled {
 				if text != "" {
@@ -4834,7 +4864,7 @@ func replaySectionsForWithRenderers(
 				}
 				continue
 			}
-			content := control.StripComposePrefixes(m.Content)
+			content := control.StripComposePrefixes(agent.UserMessageText(m))
 			out = append(out, renderUserBubble(content, width, false)+"\n\n")
 		case provider.RoleAssistant:
 			if reasoning := strings.TrimSpace(m.ReasoningContent); reasoning != "" {

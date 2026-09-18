@@ -1,6 +1,37 @@
 package main
 
-import "fmt"
+import (
+	"fmt"
+
+	"reasonix/internal/control"
+)
+
+// activeOrSingleLocalTab resolves the workspace tab a local command should
+// target: the active tab when there is one, otherwise the dormant tab a
+// remote-only layout restores. The controller is read with the tab so a
+// runtime built in between cannot look like a replaced one.
+func (a *App) activeOrSingleLocalTab() (*WorkspaceTab, control.SessionAPI) {
+	a.mu.RLock()
+	defer a.mu.RUnlock()
+	if tab := a.tabByIDLocked(""); tab != nil {
+		return tab, tab.Ctrl
+	}
+	for _, id := range a.orderedTabIDsLocked() {
+		if tab := a.tabs[id]; tab != nil {
+			return tab, tab.Ctrl
+		}
+	}
+	return nil, nil
+}
+
+// singleLocalTab resolves the workspace tab local commands should target when no
+// tab is active. A remote-only single-surface layout restores one dormant tab
+// for exactly this purpose, so callers resolve instead of reporting that the
+// workspace is not ready.
+func (a *App) singleLocalTab() *WorkspaceTab {
+	tab, _ := a.activeOrSingleLocalTab()
+	return tab
+}
 
 // SetActiveTab switches the frontend's active tab. Restored remote shells
 // reconnect only when activated.
@@ -85,6 +116,9 @@ func (a *App) SetActiveTab(tabID string) error {
 	}
 	a.activeTabID = tabID
 	next := a.tabs[tabID]
+	// A tab restored dormant (remote-only layout) has no runtime yet: activating
+	// it is the first demand for one.
+	dormant := next != nil && next.Ctrl == nil
 	// A direct click supersedes pending publication without cancelling its
 	// build: the tab stays open, and selecting that same tab keeps it alive.
 	supersededReq, supersededTab := a.supersedePendingTopicActivationLocked(tabID, false)
@@ -97,6 +131,9 @@ func (a *App) SetActiveTab(tabID string) error {
 	// I/O outside the lock — disk writes can block for hundreds of ms on
 	// Windows when antivirus or the search indexer briefly locks the file.
 	a.saveTabsWrite(dir, entries, activeID, version)
+	if dormant {
+		a.startTabControllerBuild(next)
+	}
 	if active != nil {
 		active.clearRuntimeDisplayCurrency()
 	}

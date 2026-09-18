@@ -51,6 +51,13 @@ func (a *App) continueLegacySessionForTranscript(tab *WorkspaceTab, ctrl control
 }
 
 func (a *App) resumeCanonicalSessionForTranscript(tab *WorkspaceTab, ctrl control.SessionAPI, route string, limit int, includeHistory bool, navigationSequence ...uint64) (HistoryPage, error) {
+	if ctrl == nil {
+		// A dormant tab (restored for a remote-only layout) has no runtime when
+		// the caller resolves it, and a concurrent activation may build one
+		// before this point: adopt whatever the tab owns now instead of failing
+		// the open with a spurious runtime-changed error.
+		ctrl = a.controllerForTab(tab)
+	}
 	identity, ok := ctrl.(control.IdentityLifecycle)
 	if ctrl != nil && (!ok || !identity.UsesExclusiveSession()) {
 		return HistoryPage{}, fmt.Errorf("session identity protocol is unavailable")

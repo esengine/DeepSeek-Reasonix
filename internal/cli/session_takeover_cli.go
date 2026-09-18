@@ -50,7 +50,12 @@ type cliTakeoverGrant struct {
 }
 
 type cliTakeoverBinding struct {
-	path        string
+	path string
+	// canonical marks a final-format identity route ("session-id:<id>") as the
+	// binding's key: there is no transcript path lease to move, ownership is
+	// the session directory's writer lock and it is released explicitly when
+	// the TUI yields, with process exit remaining the crash-safety fallback.
+	canonical   bool
 	record      cliServeRecord
 	client      *http.Client
 	grant       cliTakeoverGrant
@@ -58,9 +63,16 @@ type cliTakeoverBinding struct {
 	priorMirror *cliTakeoverBinding
 }
 
+// cliServeProcessAlive is the PID probe used to prune serve state files
+// whose process is gone. Variable so tests can model dead and live records.
+var cliServeProcessAlive = webInstanceProcessAlive
+
 // discoverCLIServes enumerates resident serve processes recorded under
 // <Reasonix home>/remote. This machine is the SSH target in the takeover
 // scenario, so the bootstrap's SFTP-written state files are local files here.
+// Records whose PID no longer exists are skipped: a restarted desktop
+// respawns the serve on a new port, and dialing the stale address only
+// produces connection-refused noise that can shadow a live record's result.
 func discoverCLIServes() []cliServeRecord {
 	dir := config.RemoteStateDir()
 	if dir == "" {
@@ -81,7 +93,7 @@ func discoverCLIServes() []cliServeRecord {
 			continue
 		}
 		state, err := bootstrap.UnmarshalState(data)
-		if err != nil || state.PID <= 0 {
+		if err != nil || state.PID <= 0 || !cliServeProcessAlive(state.PID) {
 			continue
 		}
 		slug := strings.TrimSuffix(strings.TrimPrefix(name, "serve-"), ".json")
@@ -161,38 +173,71 @@ func cliTakeoverHeldSession(sessionPath string, leaseErr error, leases *control.
 	}
 	record := cliServeForPID(pid)
 	if record == nil {
-		return nil, fmt.Errorf("%w; holder pid %d is not a resident serve on this machine", agent.ErrSessionLeaseHeld, pid)
+		// The holder PID does not match any discovered serve (stale state
+		// file, serve restart). The holder is on this machine, so try every
+		// local serve: the one holding the session will accept the handoff.
+		records := discoverCLIServes()
+		if len(records) == 0 {
+			return nil, fmt.Errorf("%w; holder pid %d is not a resident serve on this machine and no local serve is running", agent.ErrSessionLeaseHeld, pid)
+		}
+		var lastErr error
+		for i := range records {
+			binding, err := cliTakeoverFromServe(sessionPath, &records[i], leases, manager)
+			if err == nil {
+				return binding, nil
+			}
+			lastErr = err
+		}
+		return nil, lastErr
 	}
+	return cliTakeoverFromServe(sessionPath, record, leases, manager)
+}
+
+// cliTakeoverFromServe executes the handoff against one specific serve.
+
+// postCLITakeoverHandoff exchanges one serve's /handoff for a grant. Both the
+// legacy path-lease flow and the final-format identity flow validate the same
+// wire contract; only the target key and post-grant reservation differ.
+func postCLITakeoverHandoff(ctx context.Context, client *http.Client, base, sessionPath, errPrefix string) (cliTakeoverGrant, error) {
+	body, _ := json.Marshal(map[string]any{
+		"sessionPath": sessionPath, "targetWriterId": agent.SessionWriterID(),
+		"force": true, "mode": "wait", "timeoutMs": cliTakeoverTimeout.Milliseconds(),
+	})
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, base+"/handoff", bytes.NewReader(body))
+	if err == nil {
+		req.Header.Set("Content-Type", "application/json")
+	}
+	if err != nil {
+		return cliTakeoverGrant{}, err
+	}
+	resp, err := client.Do(req)
+	if err != nil {
+		return cliTakeoverGrant{}, fmt.Errorf("%s: %w", errPrefix, err)
+	}
+	defer resp.Body.Close()
+	respBody, _ := io.ReadAll(io.LimitReader(resp.Body, 1<<16))
+	if resp.StatusCode != http.StatusOK {
+		return cliTakeoverGrant{}, fmt.Errorf("%s: %s", errPrefix, strings.TrimSpace(string(respBody)))
+	}
+	var grant cliTakeoverGrant
+	if json.Unmarshal(respBody, &grant) != nil || grant.MirrorID == "" || grant.HandoffID == "" ||
+		grant.ReturnHandoffID == "" || grant.SourceWriterID == "" || grant.TargetWriterID != agent.SessionWriterID() {
+		return cliTakeoverGrant{}, fmt.Errorf("%s: invalid handoff grant", errPrefix)
+	}
+	return grant, nil
+}
+
+func cliTakeoverFromServe(sessionPath string, record *cliServeRecord, leases *control.SessionLeaseKeeper, manager *cliTakeoverManager) (*cliTakeoverBinding, error) {
+	pid := record.pid
 	ctx, cancel := context.WithTimeout(context.Background(), cliTakeoverTimeout+15*time.Second)
 	defer cancel()
 	client, err := cliServeClient(ctx, *record)
 	if err != nil {
 		return nil, fmt.Errorf("takeover from local serve (pid %d): %w", pid, err)
 	}
-	body, _ := json.Marshal(map[string]any{
-		"sessionPath": sessionPath, "targetWriterId": agent.SessionWriterID(),
-		"force": true, "mode": "wait", "timeoutMs": cliTakeoverTimeout.Milliseconds(),
-	})
-	req, err := http.NewRequestWithContext(ctx, http.MethodPost, record.base+"/handoff", bytes.NewReader(body))
-	if err == nil {
-		req.Header.Set("Content-Type", "application/json")
-	}
+	grant, err := postCLITakeoverHandoff(ctx, client, record.base, sessionPath, fmt.Sprintf("takeover from local serve (pid %d)", pid))
 	if err != nil {
 		return nil, err
-	}
-	resp, err := client.Do(req)
-	if err != nil {
-		return nil, fmt.Errorf("takeover from local serve (pid %d): %w", pid, err)
-	}
-	defer resp.Body.Close()
-	respBody, _ := io.ReadAll(io.LimitReader(resp.Body, 1<<16))
-	if resp.StatusCode != http.StatusOK {
-		return nil, fmt.Errorf("takeover from local serve (pid %d): %s", pid, strings.TrimSpace(string(respBody)))
-	}
-	var grant cliTakeoverGrant
-	if json.Unmarshal(respBody, &grant) != nil || grant.MirrorID == "" || grant.HandoffID == "" ||
-		grant.ReturnHandoffID == "" || grant.SourceWriterID == "" || grant.TargetWriterID != agent.SessionWriterID() {
-		return nil, fmt.Errorf("takeover from local serve (pid %d): invalid handoff grant", pid)
 	}
 	binding := &cliTakeoverBinding{path: sessionPath, record: *record, client: client, grant: grant}
 	if manager != nil {
@@ -210,14 +255,14 @@ func cliTakeoverHeldSession(sessionPath string, leaseErr error, leases *control.
 	return binding, nil
 }
 
-// cliSessionTakeoverCandidate reports whether leaseErr points at a resident
-// serve on this machine — the case where a takeover offer makes sense.
+// cliSessionTakeoverCandidate reports whether leaseErr carries enough lease
+// info to identify the holder — the case where a takeover offer makes sense.
+// The holder does not have to be a discovered serve: the serve's state file
+// PID can drift (restart, desktop reconnect), and the takeover execution
+// falls back to trying every local serve when the PID does not match.
 func cliSessionTakeoverCandidate(leaseErr error) bool {
 	var leaseError *agent.SessionLeaseError
-	if !errors.As(leaseErr, &leaseError) || leaseError == nil || leaseError.Info == nil {
-		return false
-	}
-	return cliServeForPID(leaseError.Info.PID) != nil
+	return errors.As(leaseErr, &leaseError) && leaseError != nil && leaseError.Info != nil
 }
 
 // promptSessionTakeover asks on the terminal (pre-TUI startup) whether to take
@@ -409,6 +454,24 @@ func (m *cliTakeoverManager) SetYieldCallback(fn func()) {
 
 func (m *cliTakeoverManager) Reclaiming() bool { return m != nil && m.reclaiming.Load() }
 func (m *cliTakeoverManager) Returned() bool   { return m != nil && m.returned.Load() }
+
+// ResumeAfterYield clears the terminal-side marker after the TUI has acquired
+// a different session. Returning a mirror ends that mirror permanently; the
+// manager must not keep blocking the new session just because the process that
+// hosted the old one stayed alive.
+func (m *cliTakeoverManager) ResumeAfterYield() {
+	if m == nil {
+		return
+	}
+	m.returnMu.Lock()
+	defer m.returnMu.Unlock()
+	m.mu.Lock()
+	if m.binding == nil {
+		m.returned.Store(false)
+		m.reclaiming.Store(false)
+	}
+	m.mu.Unlock()
+}
 
 func (m *cliTakeoverManager) snapshot() (*cliTakeoverBinding, control.SessionAPI, func(), uint64) {
 	m.mu.Lock()
@@ -630,7 +693,9 @@ func (m *cliTakeoverManager) readoptLocked(binding *cliTakeoverBinding, revision
 			agent.CanonicalSessionPath(grant.SessionPath) == agent.CanonicalSessionPath(binding.path) {
 			m.mu.Lock()
 			if m.binding == binding && m.revision == revision && !m.returned.Load() {
-				m.binding = &cliTakeoverBinding{path: binding.path, record: record, client: client, grant: grant}
+				next := *binding
+				next.record, next.client, next.grant = record, client, grant
+				m.binding = &next
 				m.revision++
 				m.failures = 0
 			}
@@ -694,6 +759,11 @@ func (m *cliTakeoverManager) returnLeaseFor(expected *cliTakeoverBinding, revisi
 		expectedPath = expected.path
 	}
 	return m.returnMirrorTransaction(expectedPath, true, true, func(current *cliTakeoverBinding) error {
+		if current.canonical {
+			// The canonical writer lock is released by the live TUI handoff; the
+			// flushed snapshot above is the only durable step the reservation covered.
+			return nil
+		}
 		return m.leases.ReleaseForHandoff(current.grant.SourceWriterID, current.grant.ReturnHandoffID)
 	})
 }
@@ -710,6 +780,9 @@ func (m *cliTakeoverManager) RebindAway(path string) (bool, error) {
 		return false, nil
 	}
 	err := m.returnCurrentMirror(binding.path, func(current *cliTakeoverBinding) error {
+		if current.canonical {
+			return nil
+		}
 		return m.leases.RebindReturningCurrent(path, current.grant.SourceWriterID, current.grant.ReturnHandoffID)
 	})
 	return true, err

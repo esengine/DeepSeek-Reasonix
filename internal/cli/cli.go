@@ -42,6 +42,7 @@ import (
 	"reasonix/internal/provider/openai"
 	"reasonix/internal/sandbox"
 	"reasonix/internal/serve"
+	"reasonix/internal/session"
 	"reasonix/internal/sessiontemp"
 	"reasonix/internal/telemetry"
 
@@ -576,28 +577,34 @@ func runAgent(args []string, version string) int {
 	// Resolve the resume target up front so --copy and the session lease can be
 	// handled before any heavy assembly. --resume takes precedence over
 	// --continue, matching the Resume call below. Accept file paths, branch
-	// IDs, preview text, and opaque machine session IDs (#7429).
-	resumePath := strings.TrimSpace(*resume)
-	if resumePath != "" {
-		resolved, err := resolveSessionQuery(resolveCLISessionDir(), resumePath)
+	// IDs, preview text, opaque machine session IDs (#7429), and final-format
+	// session identities.
+	resumeTarget := cliResumeTarget{}
+	if strings.TrimSpace(*resume) != "" {
+		resolved, err := resolveSessionQuery(resolveCLISessionDir(), strings.TrimSpace(*resume))
 		if err != nil {
 			fmt.Fprintln(os.Stderr, i18n.M.ErrorPrefix, err)
 			return 1
 		}
-		resumePath = resolved
+		resumeTarget = resolved
 	}
-	if resumePath == "" && *cont {
+	if resumeTarget.empty() && *cont {
 		sessionDir := resolveCLISessionDir()
 		reclaimCLIRecoveryBranches(sessionDir)
-		session, ok := mostRecentSession(sessionDir)
+		target, ok := newestResumeTarget(sessionDir)
 		if !ok {
 			fmt.Fprintln(os.Stderr, i18n.M.NoSessionToResume)
 			return 1
 		}
-		resumePath = session.Path
+		resumeTarget = target
 	}
-	if *copySession && resumePath == "" {
+	resumePath := resumeTarget.path
+	if *copySession && resumeTarget.empty() {
 		fmt.Fprintln(os.Stderr, i18n.M.ErrorPrefix, "--copy requires --resume or --continue")
+		return 2
+	}
+	if *copySession && resumeTarget.canonical() {
+		fmt.Fprintln(os.Stderr, i18n.M.ErrorPrefix, "--copy does not support final-format sessions yet")
 		return 2
 	}
 	if *copySession {
@@ -722,8 +729,14 @@ func runAgent(args []string, version string) int {
 	// MCP/API callers that manage their own per-project session). Takes
 	// precedence over --continue.
 	// --continue: resume the most recent saved session.
-	if err := commitResumedSession(takeoverBinding, takeoverManager, ctrl, resumeSession, resumePath); err != nil {
-		return cliTakeoverFailure(takeoverBinding, leases, takeoverManager, err)
+	if err := commitResumedSession(takeoverBinding, takeoverManager, ctrl, resumeSession, resumeTarget); err != nil {
+		if resumeTarget.canonical() && errors.Is(err, session.ErrWriterOwned) && *takeover {
+			if tErr := cliStartupCanonicalTakeover(ctrl, takeoverManager, resumeTarget); tErr != nil {
+				return cliTakeoverFailure(takeoverBinding, leases, takeoverManager, tErr)
+			}
+		} else {
+			return cliTakeoverFailure(takeoverBinding, leases, takeoverManager, err)
+		}
 	}
 	ctrl.EnsureSessionPath()
 	// Fresh sessions take the lease too (defensive: the path is brand new); a
@@ -1035,7 +1048,7 @@ func chatREPL(args []string, version string) int {
 
 	// Decide whether we're starting fresh or resuming. --resume opens an
 	// interactive picker; --continue / -c jumps straight into the newest.
-	var resumePath string
+	var resumeTarget cliResumeTarget
 	resumeValue := strings.TrimSpace(*resume)
 	switch strings.ToLower(resumeValue) {
 	case "true":
@@ -1045,30 +1058,35 @@ func chatREPL(args []string, version string) int {
 	}
 	switch {
 	case resumeValue == resumePickerSentinel:
-		path, rc := pickSessionToResume()
+		target, rc := pickSessionToResume()
 		if rc != 0 {
 			return rc
 		}
-		resumePath = path
+		resumeTarget = target
 	case resumeValue != "":
-		path, err := resolveSessionQuery(resolveCLISessionDir(), resumeValue)
+		target, err := resolveSessionQuery(resolveCLISessionDir(), resumeValue)
 		if err != nil {
 			fmt.Fprintln(os.Stderr, i18n.M.ErrorPrefix, err)
 			return 1
 		}
-		resumePath = path
+		resumeTarget = target
 	case *cont:
 		sessionDir := resolveCLISessionDir()
 		reclaimCLIRecoveryBranches(sessionDir)
-		session, ok := mostRecentSession(sessionDir)
+		target, ok := newestResumeTarget(sessionDir)
 		if !ok {
 			fmt.Fprintln(os.Stderr, i18n.M.NoSessionToResume)
 			return 1
 		}
-		resumePath = session.Path
+		resumeTarget = target
 	}
-	if *copySession && resumePath == "" {
+	resumePath := resumeTarget.path
+	if *copySession && resumeTarget.empty() {
 		fmt.Fprintln(os.Stderr, i18n.M.ErrorPrefix, "--copy requires --resume or --continue")
+		return 2
+	}
+	if *copySession && resumeTarget.canonical() {
+		fmt.Fprintln(os.Stderr, i18n.M.ErrorPrefix, "--copy does not support final-format sessions yet")
 		return 2
 	}
 	if *copySession {
@@ -1178,8 +1196,15 @@ func chatREPL(args []string, version string) int {
 	// Decide where this conversation's auto-save lands. A resume reuses the
 	// file so closing/reopening keeps appending to the same history; a fresh
 	// session lands in a new file stamped with the model name.
-	if err := commitResumedSession(takeoverBinding, takeoverManager, ctrl, startupResumeSession, resumePath); err != nil {
-		return cliTakeoverFailure(takeoverBinding, leases, takeoverManager, err)
+	if err := commitResumedSession(takeoverBinding, takeoverManager, ctrl, startupResumeSession, resumeTarget); err != nil {
+		if resumeTarget.canonical() && errors.Is(err, session.ErrWriterOwned) &&
+			isInteractive() && promptSessionTakeover(err) {
+			if tErr := cliStartupCanonicalTakeover(ctrl, takeoverManager, resumeTarget); tErr != nil {
+				return cliTakeoverFailure(takeoverBinding, leases, takeoverManager, tErr)
+			}
+		} else {
+			return cliTakeoverFailure(takeoverBinding, leases, takeoverManager, err)
+		}
 	}
 	ctrl.EnsureSessionPath()
 	// Fresh sessions take the lease too (defensive: the path is brand new); a
@@ -1307,7 +1332,7 @@ func chatREPL(args []string, version string) int {
 	// keep working; finalized transcript lines are emitted via tea.Println.
 	diagnostics.Milestone("terminal_takeover_begin")
 	p := tea.NewProgram(m)
-	takeoverManager.SetYieldCallback(func() { p.Send(tuiShutdownMsg{}) })
+	takeoverManager.SetYieldCallback(func() { p.Send(tuiSessionReclaimedMsg{}) })
 	diagnostics.StartWatchdog(p)
 	// SSH drop (SIGHUP) or service stop (SIGTERM): persist the conversation
 	// before the terminal goes away, then unwind through the normal close path
@@ -1574,35 +1599,36 @@ func interactiveSetup(configPath, envPath string) int {
 	return runProviderSetupManager(session, configPath, envPath)
 }
 
-// pickSessionToResume scans the session dir, takes the 10 most recent, and
-// shows a single-choice menu with timestamp + turn count + first user
-// message so the user can pick one. Returns the chosen path and a process
-// exit code (non-zero when there's nothing to pick or the user cancelled).
-func pickSessionToResume() (string, int) {
+// pickSessionToResume scans the workspace's conversations — legacy transcripts
+// and final-format catalog rows alike — takes the 10 most recent, and shows a
+// single-choice menu with timestamp + turn count + first user message so the
+// user can pick one. Returns the chosen target and a process exit code
+// (non-zero when there's nothing to pick or the user cancelled).
+func pickSessionToResume() (cliResumeTarget, int) {
 	sessionDir := resolveCLISessionDir()
 	reclaimCLIRecoveryBranches(sessionDir)
-	sessions := recentSessions(sessionDir)
-	if len(sessions) == 0 {
+	entries := mergedResumeEntries(sessionDir, resumeListCap)
+	if len(entries) == 0 {
 		fmt.Fprintln(os.Stderr, i18n.M.NoSessionToResume)
-		return "", 1
+		return cliResumeTarget{}, 1
 	}
 	if !isInteractive() {
 		fmt.Fprintln(os.Stderr, i18n.M.ResumeRequiresTTY)
-		return "", 1
+		return cliResumeTarget{}, 1
 	}
-	items := make([]menuItem, len(sessions))
-	for i, s := range sessions {
-		when := s.ModTime.Local().Format("01-02 15:04")
+	items := make([]menuItem, len(entries))
+	for i, s := range entries {
+		when := s.session.ModTime.Local().Format("01-02 15:04")
 		items[i] = menuItem{
 			name: when,
-			desc: sessionSummary(s),
+			desc: sessionSummary(s.session),
 		}
 	}
 	idx, err := selectOne(i18n.M.PickSessionLabel, items)
 	if err != nil {
-		return "", 1
+		return cliResumeTarget{}, 1
 	}
-	return sessions[idx].Path, 0
+	return entries[idx].target, 0
 }
 
 // selectLanguage is the wizard's first prompt: it shows the two UI languages

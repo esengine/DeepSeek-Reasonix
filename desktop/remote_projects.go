@@ -107,6 +107,16 @@ type remoteTab struct {
 	// rejected request cannot restore metadata over a newer user selection.
 	selectionRevision uint64
 	pendingSelection  *remoteTabPendingOpenSelection
+	// pendingReadyBarrier defers the ownership-return re-hydration barrier
+	// while a turn is in flight: firing it mid-turn bumps the frontend's
+	// connection generation, orphans the optimistic submission, and leaves a
+	// zombie "processing" indicator beside the rendered reply.
+	pendingReadyBarrier bool
+	// reclaimRevision fences in-flight status payloads against an explicit
+	// reclaim: responses reserved before the reclaim completed can still
+	// carry the pre-reclaim takenOver=true and must never re-pin the
+	// spectator banner after ownership returned.
+	reclaimRevision uint64
 }
 
 type remoteTabRuntimeState struct {
@@ -296,6 +306,11 @@ func (a *App) commitRemoteTabOpenRegistration(registration *remoteTabOpenRegistr
 			commitRemoteTabAttachRoute(existing, "", true)
 		} else if route := remoteSessionIdentityRoute(existing.session.path, existing.session.sessionID); route != "" {
 			commitRemoteTabAttachRoute(existing, route, false)
+			// The committed route names the target session before the async
+			// /resume reaches Serve; gate commands until that resume commits
+			// or rolls back, so sends cannot fence against a session Serve
+			// is not running yet.
+			existing.routing.rehydratingPath = route
 		}
 		if existing.state == "ready" {
 			registration.selection.identityCommitted = true
@@ -469,13 +484,20 @@ func (a *App) restoreRemoteTabShells(f desktopTabsFile) {
 				}
 			}
 		}
-		title := strings.TrimSpace(entry.TopicTitle)
-		if title == "" {
-			title = remoteWorkspaceName(ws)
-		}
 		sessionName := strings.TrimSpace(entry.SessionName)
 		sessionPath := strings.TrimSpace(entry.SessionPath)
 		sessionID := strings.TrimSpace(entry.SessionID)
+		title := strings.TrimSpace(entry.TopicTitle)
+		// Older builds persisted the canonical session ID as the tab title when
+		// a blank remote session was materialized. That value is an identity
+		// token, not user-facing text; discard it during restore so the tab and
+		// sidebar keep the same localized "new session" presentation.
+		if title == sessionID || title == sessionName {
+			title = ""
+		}
+		if title == "" {
+			title = remoteWorkspaceName(ws)
+		}
 		route := remoteSessionIdentityRoute(sessionPath, sessionID)
 		restored := &remoteTab{
 			id: id, ref: RemoteTabRef{HostID: hostID, Workspace: ws},
@@ -594,7 +616,11 @@ func remoteTabTopicID(tab *remoteTab) string {
 	if tab == nil {
 		return ""
 	}
-	return tab.ref.HostID + "\x00" + tab.ref.Workspace + "\x00" + tab.session.name
+	identity := tab.session.name
+	if sessionID := strings.TrimSpace(tab.session.sessionID); sessionID != "" {
+		identity = sessionID
+	}
+	return tab.ref.HostID + "\x00" + tab.ref.Workspace + "\x00" + identity
 }
 
 func (a *App) remoteTabMetaSnapshot(tabID string) (TabMeta, bool) {

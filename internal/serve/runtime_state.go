@@ -78,7 +78,18 @@ func (s *Server) runtimeStatesSnapshot() runtimeStatesView {
 		if ctrl == nil {
 			continue
 		}
-		result.Sessions = append(result.Sessions, runtimeSessionView{SessionPath: agent.CanonicalSessionPath(ctrl.SessionPath()), Current: ctrl == current, State: runtimeStateOf(ctrl)})
+		// Identity sessions carry no legacy path; projecting their route
+		// reference keeps the desktop's path-keyed reconciliation working
+		// while hosts complete the catalog transition.
+		path := agent.CanonicalSessionPath(ctrl.SessionPath())
+		if path == "" {
+			if identity, ok := ctrl.(control.IdentityLifecycle); ok {
+				if ref, bound := identity.SessionRef(); bound {
+					path = remoteSessionIDQueryPrefix + ref.SessionID
+				}
+			}
+		}
+		result.Sessions = append(result.Sessions, runtimeSessionView{SessionPath: path, Current: ctrl == current, State: runtimeStateOf(ctrl)})
 	}
 	s.bindMu.Unlock()
 	sort.Slice(result.Sessions, func(i, j int) bool {

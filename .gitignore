@@ -79,3 +79,4 @@ site/.generated/
 
 # Committed pointer at REASONIX.md; overrides a global CLAUDE.md ignore rule.
 !/CLAUDE.md
+desktop/desktop.exe

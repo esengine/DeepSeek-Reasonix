@@ -420,6 +420,7 @@ SSH 下远端进程无法读取本机剪贴板，请使用终端粘贴快捷键�
 | `/model` | 搜索已配置模型并切换当前模型。 |
 | `/provider` | 选择 provider，再选择该 provider 下的模型。 |
 | `/resume` | 搜索最近会话并切换。 |
+| `/takeover` | 从本机常驻 serve 接管上一次被拒绝的会话（或列表项）：本 CLI 成为写入方，远端观看者变为只读旁观者直至取回。桌面端取回后可直接再次接管原会话。 |
 | `/status` | 显示模型、effort、cache、Git、后台任务和余额信息。 |
 | `/theme [auto\|light\|dark\|style]` | 查看或切换 CLI 背景模式和强调色。 |
 | `/currency [auto\|CNY\|USD]` | 查看或切换用户全局费用展示币种，并刷新当前运行时。 |

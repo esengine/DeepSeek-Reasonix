@@ -234,7 +234,10 @@ func (a *App) publishRemoteTabResumeReadyLocked(tabID string, tab *remoteTab, cl
 		for _, frame := range frames {
 			kind, path, _, _ := probeRemoteTabFrame(string(frame))
 			if path != "" && path != route.targetPath {
-				return
+				// The buffer fence only admits the target route; a foreign frame
+				// here is defensive debris. Dropping it keeps the drain alive —
+				// aborting would strand the epoch and buffer live frames forever.
+				continue
 			}
 			if !a.publishRemoteTabFrameForRouteLocked(tabID, tab, tab, client, gen, route.targetPath, true, kind, frame) {
 				return

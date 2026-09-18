@@ -596,6 +596,20 @@ type ObserveResult struct {
 	Events  EventPage        `json:"events"`
 }
 
+// SessionDir resolves the on-disk directory of a final-format identity
+// without opening it. Hosts use it to probe writer occupancy for takeover
+// flows; the writer lease itself is never taken here.
+func (s *Service) SessionDir(ctx context.Context, ref SessionRef) (string, error) {
+	if err := ref.validate(s.hostID); err != nil {
+		return "", err
+	}
+	info, err := s.persistence.Stat(ctx, ref.SessionID)
+	if err != nil {
+		return "", err
+	}
+	return info.Path, nil
+}
+
 func (s *Service) Observe(ctx context.Context, ref SessionRef, cursor uint64, limit int) (ObserveResult, error) {
 	if err := ref.validate(s.hostID); err != nil {
 		return ObserveResult{}, err

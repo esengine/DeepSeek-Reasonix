@@ -1,7 +1,10 @@
 package main
 
 import (
+	"context"
 	"encoding/json"
+	"errors"
+	"net"
 	"net/http"
 	"reflect"
 	"slices"
@@ -9,6 +12,10 @@ import (
 	"testing"
 	"time"
 )
+
+// errEnsureHealing stands in for the transient EnsureServer failures observed
+// while the SSH layer is still re-establishing a dropped tunnel.
+var errEnsureHealing = errors.New("tunnel healing")
 
 func TestRemoteTabSnapshotReplaysAndClearsPendingPrompt(t *testing.T) {
 	fs := newFakeServe(t, "s3cret", nil)
@@ -115,6 +122,10 @@ func TestRemoteTabSnapshotRehydratesAndDropsPriorSessionPromptOnStatusAdoption(t
 }
 
 func TestRemoteTabDoesNotPublishReadyWithoutEventStream(t *testing.T) {
+	previousDelays := remoteTabReattachDelays
+	remoteTabReattachDelays = nil
+	t.Cleanup(func() { remoteTabReattachDelays = previousDelays })
+
 	fs := newFakeServe(t, "s3cret", nil)
 	fs.mu.Lock()
 	fs.eventsStatus = http.StatusServiceUnavailable
@@ -130,7 +141,10 @@ func TestRemoteTabDoesNotPublishReadyWithoutEventStream(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	waitForTabState(t, a, meta.ID, "error")
+	// A refusing stream no longer parks the tab in error — it retries through
+	// the reattach loop and only then parks in serve_down. Ready must never
+	// publish without a live stream either way.
+	waitForTabState(t, a, meta.ID, "serve_down")
 	time.Sleep(50 * time.Millisecond)
 	a.remoteTabMu.Lock()
 	state := a.remoteTabs[meta.ID].state
@@ -141,6 +155,10 @@ func TestRemoteTabDoesNotPublishReadyWithoutEventStream(t *testing.T) {
 }
 
 func TestRemoteTabDoesNotPublishReadyWhenEventStreamClosesDuringAttach(t *testing.T) {
+	previousDelays := remoteTabReattachDelays
+	remoteTabReattachDelays = nil
+	t.Cleanup(func() { remoteTabReattachDelays = previousDelays })
+
 	fs := newFakeServe(t, "s3cret", nil)
 	fs.mu.Lock()
 	fs.eventsCloseEarly = true
@@ -379,6 +397,9 @@ func TestRemoteTabReplacementServeReentersLearnedSessionBeforeReady(t *testing.T
 	tab.gen++
 	tab.cancel, tab.client, tab.base, tab.token = nil, nil, "", ""
 	tab.state = "reconnecting"
+	// Restored tabs have no handshake metadata; stale capabilities from an
+	// earlier service must also be replaced, not merged into the new binding.
+	tab.capabilities = map[string]bool{"retired-capability": true}
 	a.remoteTabMu.Unlock()
 	kernel.ensureView = RemoteServerView{HostID: "box", State: "ready", LocalURL: newServe.server.URL, InstanceID: "serve-new"}
 
@@ -394,6 +415,15 @@ func TestRemoteTabReplacementServeReentersLearnedSessionBeforeReady(t *testing.T
 	a.remoteTabMu.Unlock()
 	if state != "ready" || instanceID != "serve-new" {
 		t.Fatalf("reattached state/instance = %q/%q", state, instanceID)
+	}
+	if err := a.requireRemoteExecutionProtocol(meta.ID); err != nil {
+		t.Fatalf("reconnected service lost its execution capabilities: %v", err)
+	}
+	a.remoteTabMu.Lock()
+	staleCapability := a.remoteTabs[meta.ID].capabilities["retired-capability"]
+	a.remoteTabMu.Unlock()
+	if staleCapability {
+		t.Fatal("reconnect retained a capability absent from the new handshake")
 	}
 }
 
@@ -756,5 +786,157 @@ func TestRemoteResumeListFailureKeepsCurrentAttachmentReady(t *testing.T) {
 	a.remoteTabMu.Unlock()
 	if state != "ready" || !strings.Contains(message, "Could not open remote session") {
 		t.Fatalf("list failure state/error = %q/%q, want ready non-terminal notice", state, message)
+	}
+}
+
+// The observed tunnel-drop failure: the stream dies mid-turn and the first
+// EnsureServer calls race the SSH layer's own recovery. The reattach loop
+// must keep retrying across that window instead of parking a healthy tab in
+// serve_down after half a second.
+func TestRemoteTabReattachRetriesThroughTransientEnsureServerFailure(t *testing.T) {
+	serve := newFakeServe(t, "s3cret", nil)
+	kernel := &fakeRemoteKernel{
+		statuses:   []RemoteConnectionStatusView{{HostID: "box", State: "connected"}},
+		ensureView: RemoteServerView{HostID: "box", State: "ready", LocalURL: serve.server.URL, InstanceID: "serve-1"}, ensureToken: "s3cret",
+	}
+	seedBridgeTestHost(t, "box")
+	a := &App{remoteRuntime: kernel}
+	cleanupRemoteTabPumps(t, a)
+	meta := openReadyRemoteTab(t, a, RemoteTabOpenOptions{NewSession: true})
+	// The transient failures start after the tab is open: they stand in for
+	// the tunnel dropping mid-session, not for a broken bootstrap.
+	kernel.ensureErrs = []error{errEnsureHealing, errEnsureHealing}
+
+	previousDelays := remoteTabReattachDelays
+	remoteTabReattachDelays = []time.Duration{time.Millisecond, time.Millisecond}
+	t.Cleanup(func() { remoteTabReattachDelays = previousDelays })
+
+	a.remoteTabMu.Lock()
+	tab := a.remoteTabs[meta.ID]
+	if tab.cancel != nil {
+		tab.cancel()
+	}
+	tab.gen++
+	tab.cancel, tab.client, tab.base, tab.token = nil, nil, "", ""
+	tab.state = "reconnecting"
+	a.remoteTabMu.Unlock()
+
+	a.reattachRemoteTab(meta.ID)
+	a.remoteTabMu.Lock()
+	state := a.remoteTabs[meta.ID].state
+	a.remoteTabMu.Unlock()
+	if state != "ready" {
+		t.Fatalf("transient EnsureServer failures parked the tab in %q", state)
+	}
+	if len(kernel.ensureErrs) != 0 || kernel.ensureCalls != 4 {
+		t.Fatalf("reattach did not retry through both transient failures: calls=%d remaining=%d", kernel.ensureCalls, len(kernel.ensureErrs))
+	}
+}
+
+// serve_down tabs parked by reattach exhaustion must revive when the host
+// connection recovers — the tunnel healing is exactly what they were waiting
+// for, and nothing else revisits them.
+func TestResumeRemoteTabsRevivesServeDownTabs(t *testing.T) {
+	serve := newFakeServe(t, "s3cret", nil)
+	kernel := &fakeRemoteKernel{
+		statuses:   []RemoteConnectionStatusView{{HostID: "box", State: "connected"}},
+		ensureView: RemoteServerView{HostID: "box", State: "ready", LocalURL: serve.server.URL, InstanceID: "serve-1"}, ensureToken: "s3cret",
+	}
+	seedBridgeTestHost(t, "box")
+	a := &App{remoteRuntime: kernel}
+	cleanupRemoteTabPumps(t, a)
+	meta := openReadyRemoteTab(t, a, RemoteTabOpenOptions{NewSession: true})
+
+	previousDelays := remoteTabReattachDelays
+	remoteTabReattachDelays = nil
+	t.Cleanup(func() { remoteTabReattachDelays = previousDelays })
+
+	a.remoteTabMu.Lock()
+	tab := a.remoteTabs[meta.ID]
+	if tab.cancel != nil {
+		tab.cancel()
+	}
+	tab.gen++
+	tab.cancel, tab.client, tab.base, tab.token = nil, nil, "", ""
+	tab.state = "serve_down"
+	tab.err = "Remote session reconnect failed. Retry to restart the server."
+	a.remoteTabMu.Unlock()
+
+	a.resumeRemoteTabs("box")
+	deadline := time.Now().Add(2 * time.Second)
+	for {
+		a.remoteTabMu.Lock()
+		state := a.remoteTabs[meta.ID].state
+		a.remoteTabMu.Unlock()
+		if state == "ready" {
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("host recovery left the serve_down tab in %q", state)
+		}
+		time.Sleep(5 * time.Millisecond)
+	}
+}
+
+// A pump whose /events connection is refused (tunnel just dropped, serve
+// restarting) must route through the reattach loop rather than parking the
+// tab in a terminal error state — HTTP sends still work at that point, so a
+// stranded pump means replies silently never render.
+func TestRemoteTabPumpConnectionFailureReattachesInsteadOfParking(t *testing.T) {
+	listener, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	deadBase := "http://" + listener.Addr().String()
+	listener.Close()
+
+	serve := newFakeServe(t, "s3cret", nil)
+	kernel := &fakeRemoteKernel{
+		statuses:   []RemoteConnectionStatusView{{HostID: "box", State: "connected"}},
+		ensureView: RemoteServerView{HostID: "box", State: "ready", LocalURL: serve.server.URL, InstanceID: "serve-1"}, ensureToken: "s3cret",
+	}
+	seedBridgeTestHost(t, "box")
+	a := &App{remoteRuntime: kernel}
+	cleanupRemoteTabPumps(t, a)
+	meta := openReadyRemoteTab(t, a, RemoteTabOpenOptions{NewSession: true})
+
+	previousDelays := remoteTabReattachDelays
+	remoteTabReattachDelays = nil
+	t.Cleanup(func() { remoteTabReattachDelays = previousDelays })
+
+	a.remoteTabMu.Lock()
+	tab := a.remoteTabs[meta.ID]
+	if tab.cancel != nil {
+		tab.cancel()
+	}
+	pumpCtx, cancelPump := context.WithCancel(context.Background())
+	tab.gen++
+	tab.cancel = cancelPump
+	tab.client = serve.server.Client()
+	tab.base = deadBase
+	tab.state = "connecting"
+	gen := tab.gen
+	a.remoteTabMu.Unlock()
+
+	opened := make(chan error, 1)
+	go a.remoteTabPump(pumpCtx, meta.ID, gen, opened)
+	if err := <-opened; err == nil {
+		t.Fatal("the refused stream should be reported to the opener")
+	}
+	deadline := time.Now().Add(2 * time.Second)
+	for {
+		a.remoteTabMu.Lock()
+		state := a.remoteTabs[meta.ID].state
+		a.remoteTabMu.Unlock()
+		if state == "ready" {
+			break
+		}
+		if state == "error" {
+			t.Fatal("a transiently refused stream parked the tab in error")
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("reattach loop did not recover the refused stream, state=%q", state)
+		}
+		time.Sleep(5 * time.Millisecond)
 	}
 }

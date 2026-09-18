@@ -706,7 +706,7 @@ func (a *App) openSessionWithNavigation(ref session.SessionRef, navigationSequen
 	if a.desktopSessions.navigationSeq.Load() != navigationSequence {
 		return HistoryPage{}, errSessionNavigationSuperseded
 	}
-	tab, ctrl := a.tabAndCtrlByID("")
+	tab, ctrl := a.activeOrSingleLocalTab()
 	if tab == nil {
 		return HistoryPage{}, errors.New("workspace is not ready")
 	}

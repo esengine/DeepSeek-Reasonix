@@ -43,6 +43,8 @@ export type RemoteStatus = {
   qualityFloor?: unknown;
   sessionName?: unknown;
   goalRuntime?: unknown;
+  /** Ownership flag for sessions a local runtime on the serve host holds. */
+  takenOver?: unknown;
 };
 
 export function isAuthoritativeRemoteStatus(status: unknown): status is RemoteStatus {

@@ -147,6 +147,7 @@ func (c *Controller) releaseLegacyEventStoreForImport(ctx context.Context) (func
 	release := c.turnEvents.v3Release
 	c.turnEvents.v3 = nil
 	c.turnEvents.v3Path = ""
+	c.turnEvents.v3Runtime = nil
 	c.turnEvents.v3Release = nil
 	c.turnEvents.mu.Unlock()
 	var err error

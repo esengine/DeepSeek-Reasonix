@@ -594,3 +594,98 @@ func windowShape(page canonical.HistoryWindowPage) canonical.HistoryWindowPage {
 	page.Messages = nil
 	return page
 }
+
+// TestCanonicalSessionHistoryHTTPAnswersColdIdentity keeps history-first
+// hydration possible: a stored session that is not this serve's bound
+// foreground (never activated here, or rotated away) must answer the
+// identity-addressed history endpoints from persisted data alone, while an
+// identity the store does not know keeps refusing.
+func TestCanonicalSessionHistoryHTTPAnswersColdIdentity(t *testing.T) {
+	root := filepath.Join(t.TempDir(), "sessions-v4")
+	service, err := canonical.NewService("serve", canonical.NewFilesystemPersistence(root))
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() {
+		if err := service.Shutdown(context.Background()); err != nil {
+			t.Errorf("shutdown session service: %v", err)
+		}
+	})
+	seed := func(id, text string) *canonical.Runtime {
+		runtime, createErr := service.Create(t.Context(), canonical.CreateOptions{SessionID: id})
+		if createErr != nil {
+			t.Fatal(createErr)
+		}
+		payload, _ := json.Marshal(map[string]any{"message": provider.Message{ID: "m-" + id, Role: provider.RoleUser, Content: text}})
+		if _, err := runtime.Session().AppendBatch(t.Context(), "message", []canonical.Event{{Kind: "message/complete", Payload: payload}}); err != nil {
+			t.Fatal(err)
+		}
+		if _, err := runtime.Session().Flush(t.Context()); err != nil {
+			t.Fatal(err)
+		}
+		return runtime
+	}
+	foreground := seed("foreground", "bound to the controller")
+	seed("cold", "stored but never foreground")
+	// The cold identity keeps a persisted session on disk but no live runtime.
+	if err := service.Close(t.Context(), canonical.SessionRef{HostID: "serve", SessionID: "cold"}); err != nil {
+		t.Fatal(err)
+	}
+	bc := NewBroadcaster()
+	ctrl := control.New(control.Options{SessionService: service, SessionRuntime: foreground, ExclusiveSession: true, Sink: bc})
+	defer ctrl.Close()
+	server := httptest.NewServer(New(ctrl, bc, config.ServeConfig{}).Handler())
+	defer server.Close()
+
+	var page canonical.MessageHistoryPage
+	for attempt := 0; ; attempt++ {
+		response, requestErr := http.Get(server.URL + "/session-history/page?sessionId=cold&limit=10")
+		if requestErr != nil {
+			t.Fatal(requestErr)
+		}
+		decodeErr := json.NewDecoder(response.Body).Decode(&page)
+		_ = response.Body.Close()
+		if decodeErr != nil || response.StatusCode != http.StatusOK {
+			t.Fatalf("cold history status=%d page=%+v err=%v", response.StatusCode, page, decodeErr)
+		}
+		if page.Status == "ready" {
+			break
+		}
+		if page.Status != "preparing" || attempt > 100 {
+			t.Fatalf("cold history preparation = %+v", page)
+		}
+		waitHistoryPreparation(t)
+	}
+	if len(page.Messages) != 1 || page.Messages[0].MessageID != "m-cold" {
+		t.Fatalf("cold page=%+v", page)
+	}
+	openResponse, err := http.Get(server.URL + "/session/open?sessionId=cold")
+	if err != nil {
+		t.Fatal(err)
+	}
+	var openView canonical.SessionOpenView
+	decodeErr := json.NewDecoder(openResponse.Body).Decode(&openView)
+	_ = openResponse.Body.Close()
+	if decodeErr != nil || openResponse.StatusCode != http.StatusOK {
+		t.Fatalf("cold open status=%d view=%+v err=%v", openResponse.StatusCode, openView, decodeErr)
+	}
+	// The explicit foreground identity stays answerable through the same form.
+	foregroundResponse, err := http.Get(server.URL + "/session-history/page?sessionId=foreground&limit=10")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if foregroundResponse.StatusCode != http.StatusOK {
+		_ = foregroundResponse.Body.Close()
+		t.Fatalf("foreground history status=%d", foregroundResponse.StatusCode)
+	}
+	_ = foregroundResponse.Body.Close()
+	// An identity the store does not know keeps the conflict answer.
+	unknown, err := http.Get(server.URL + "/session-history/page?sessionId=missing")
+	if err != nil {
+		t.Fatal(err)
+	}
+	_ = unknown.Body.Close()
+	if unknown.StatusCode != http.StatusConflict {
+		t.Fatalf("unknown session status=%d", unknown.StatusCode)
+	}
+}

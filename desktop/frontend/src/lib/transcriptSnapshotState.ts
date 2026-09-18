@@ -104,10 +104,28 @@ export function transcriptSnapshotState(state: State, snapshot: TranscriptSnapsh
     const next = { ...mounted, ...item, id: item.id };
     return Object.entries(next).every(([key, value]) => (mounted as unknown as Record<string, unknown>)[key] === value) ? mounted : next;
   });
+  const represented = new Set(messages.map((message) => message.submissionId).filter(Boolean));
+  if (snapshot.runtime.submissionId) represented.add(snapshot.runtime.submissionId);
   const hasLocalSubmission = Boolean(state.pendingSubmissionId && state.localSubmissions[state.pendingSubmissionId]
     && state.localSubmissions[state.pendingSubmissionId].status !== "failed");
   const active = snapshot.runtime.status === "queued" || snapshot.runtime.status === "in_progress" ||
     snapshot.runtime.status === "waiting_user" || snapshot.runtime.status === "cancelling";
+  // Older serves and history-rebased projections do not persist submission
+  // ids, so an id match alone cannot link an optimistic submission back to
+  // its journaled message: the orphaned bubble renders a duplicate turn stuck
+  // at "processing" beside the server's own copy. When no turn is in flight
+  // and the snapshot's newest user record already carries the pending
+  // submission's text, the server owns the message and the orphan must not
+  // survive the rebase.
+  let pendingRepresented = !!state.pendingSubmissionId && represented.has(state.pendingSubmissionId);
+  if (!pendingRepresented && !active && state.pendingSubmissionId && state.pendingUser !== undefined) {
+    const trailingUser = [...items].reverse().find((item) => item.kind === "user");
+    if (trailingUser && trailingUser.kind === "user" && (trailingUser.submitText ?? trailingUser.text) === state.pendingUser) {
+      pendingRepresented = true;
+    }
+  }
+  const optimistic = pendingRepresented ? [] : users.filter((user) => user.submissionId &&
+    (user.submissionId === state.pendingSubmissionId || user.submissionId === snapshot.runtime.submissionId) && !represented.has(user.submissionId));
   let next: State = {
     ...state,
     transcriptSessionId: sessionId,
@@ -117,15 +135,15 @@ export function transcriptSnapshotState(state: State, snapshot: TranscriptSnapsh
     assistantSegmentOrdinal: active ? 1 : 0,
     turnStartAt: snapshot.runtime.startedAt ?? (state.activeTurnId === snapshot.runtime.turnId ? state.turnStartAt : 0),
     resolvedPromptId: undefined,
-    items: [...items, ...users.filter(user => user.failed && !items.some(item => item.id === user.id)),
+    items: [...items, ...optimistic, ...users.filter(user => user.failed && !items.some(item => item.id === user.id)),
       ...state.items.filter(item => item.kind === "notice" && item.local)],
     offscreenItems: undefined,
     seq: Math.max(state.seq, converted.seq),
-    running: active || hasLocalSubmission,
+    running: active || optimistic.length > 0 || hasLocalSubmission,
     turnActive: active,
     pendingPrompt: false,
     cancelRequested: snapshot.runtime.status === "cancelling",
-    cancellable: active || hasLocalSubmission,
+    cancellable: active || optimistic.length > 0 || hasLocalSubmission,
     activeTurnId: active ? snapshot.runtime.turnId : undefined,
     turnPhase: active ? snapshot.runtime.phase : undefined,
     completionSummary: snapshot.runtime.completionSummary,
@@ -133,8 +151,8 @@ export function transcriptSnapshotState(state: State, snapshot: TranscriptSnapsh
     runtimeStatusSeq: snapshot.coveredThroughSeq,
     runtimeStatusSnapshotAt: clock,
     turnLifecycleObservedAt: clock,
-    pendingUser: hasLocalSubmission ? state.pendingUser : undefined,
-    pendingSubmissionId: hasLocalSubmission ? state.pendingSubmissionId : undefined,
+    pendingUser: optimistic.length > 0 || hasLocalSubmission ? state.pendingUser : undefined,
+    pendingSubmissionId: optimistic.length > 0 || hasLocalSubmission ? state.pendingSubmissionId : undefined,
     live: undefined,
     currentAssistant: undefined,
     streamAttemptJournal: undefined,

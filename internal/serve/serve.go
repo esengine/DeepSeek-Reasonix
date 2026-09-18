@@ -285,6 +285,15 @@ func (s *Server) switchModelLocked(ctx context.Context, ref string) error {
 	// this session, or re-trust Plan-mode read-only commands already trusted
 	// this session.
 	if prev, ok := cur.(*control.Controller); ok {
+		// A model switch must preserve all session axes. In particular, the
+		// remote composer reads these immediately after the rebuild; resetting
+		// them to a freshly constructed controller's defaults makes the three
+		// mode controls appear to work while the next submit uses other values.
+		newCtrl.SetToolApprovalMode(prev.ToolApprovalMode())
+		newCtrl.SetPlanMode(prev.PlanMode())
+		if goal := prev.Goal(); goal != "" && newCtrl.Goal() == "" {
+			newCtrl.SetGoal(goal)
+		}
 		newCtrl.RestoreSessionAuthorizations(prev.SessionAuthorizations())
 		if err := newCtrl.InheritLifecycleFrom(prev); err != nil {
 			s.closeTaggedController(newCtrl)
@@ -312,7 +321,11 @@ func (s *Server) switchModelLocked(ctx context.Context, ref string) error {
 		}
 	}
 	activePath := newCtrl.SessionPath()
-	tag.PrimePath(activePath)
+	activeSessionID := ""
+	if ref, ok := newCtrl.SessionRef(); ok {
+		activeSessionID = ref.SessionID
+	}
+	tag.PrimeIdentity(activePath, activeSessionID)
 	if err := s.rebindSessionLeaseFor(activePath, newCtrl); err != nil {
 		s.closeTaggedController(newCtrl)
 		if errors.Is(err, agent.ErrSessionLeaseHeld) {
@@ -707,6 +720,33 @@ func (s *Server) approve(w http.ResponseWriter, r *http.Request) {
 // if the client sends If-None-Match with the current ETag, the server returns
 // 304 Not Modified with no body, saving bandwidth on reconnects.
 func (s *Server) history(w http.ResponseWriter, r *http.Request) {
+	if raw := strings.TrimSpace(r.URL.Query().Get("session")); strings.HasPrefix(raw, remoteSessionIDQueryPrefix) {
+		// Canonical identity routes have no legacy transcript path to resolve.
+		// Select the exact foreground or detached controller so compatibility
+		// clients cannot silently render the wrong session after a resume.
+		s.bindMu.Lock()
+		ctrl := s.resolveReadControllerLocked(raw)
+		s.bindMu.Unlock()
+		if ctrl == nil {
+			// The identity is not bound here — typically handed off to a local
+			// writer. The durable event log is the shared source of truth, so
+			// serve the committed message tail cold instead of failing.
+			if msgs, ok := s.identityColdHistory(raw); ok {
+				writeJSONCached(w, r, historyMessages(msgs))
+				return
+			}
+			http.Error(w, "transcript session is not bound to this runtime", http.StatusConflict)
+			return
+		}
+		if path := agent.CanonicalSessionPath(ctrl.SessionPath()); path != "" && s.sessionMirrored(path) {
+			if msgs, ok := s.mirroredHistory(path); ok {
+				writeJSONCached(w, r, historyMessages(msgs))
+				return
+			}
+		}
+		writeJSONCached(w, r, historyMessages(ctrl.History()))
+		return
+	}
 	// A read-only surface can select a specific session a local runtime owns
 	// (spectator attach): serve the local writer's transcript from the file.
 	if raw := r.URL.Query().Get("session"); raw != "" {
@@ -1039,12 +1079,27 @@ func (s *Server) resume(w http.ResponseWriter, r *http.Request) {
 		Path      string `json:"path"`
 		HostID    string `json:"hostId"`
 		SessionID string `json:"sessionId"`
+		Name      string `json:"name"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
 		http.Error(w, "bad body", http.StatusBadRequest)
 		return
 	}
-	if strings.TrimSpace(body.SessionID) != "" {
+	body.Path = strings.TrimSpace(body.Path)
+	body.HostID = strings.TrimSpace(body.HostID)
+	body.SessionID = strings.TrimSpace(body.SessionID)
+	body.Name = strings.TrimSpace(body.Name)
+	if body.SessionID == "" && body.Path == "" && body.Name != "" {
+		// Canonical /sessions rows intentionally expose identity in sessionId and
+		// leave the legacy path empty. Accept the name as a compatibility
+		// fallback for older clients that know the row but omit sessionId.
+		if identity, ok := s.ctl().(control.IdentityLifecycle); ok && identity.UsesExclusiveSession() {
+			body.SessionID = body.Name
+		} else if filepath.Base(body.Name) == body.Name && !strings.ContainsAny(body.Name, `/\\`) {
+			body.Path = filepath.Join(s.ctl().SessionDir(), body.Name+".jsonl")
+		}
+	}
+	if body.SessionID != "" {
 		s.resumeIdentitySession(w, r, body.HostID, body.SessionID)
 		return
 	}
@@ -1100,6 +1155,16 @@ func (s *Server) resumeIdentitySession(w http.ResponseWriter, r *http.Request, h
 	}
 	ref, err := ctrl.OpenSession(r.Context(), session.SessionRef{HostID: hostID, SessionID: strings.TrimSpace(sessionID)})
 	if err != nil {
+		// A local runtime owns the writer: mount the caller as a read-only
+		// spectator instead of failing the attach — the same contract the
+		// legacy path offers for handed-off transcripts. The taken-over header
+		// lets clients distinguish this from an ordinary attach.
+		if errors.Is(err, session.ErrWriterOwned) {
+			w.Header().Set(sessionIDHeader, strings.TrimSpace(sessionID))
+			w.Header().Set(sessionTakenOverHeader, "writer")
+			w.WriteHeader(http.StatusNoContent)
+			return
+		}
 		http.Error(w, "open session: "+err.Error(), http.StatusConflict)
 		return
 	}
@@ -1291,6 +1356,18 @@ func (s *Server) models(w http.ResponseWriter, _ *http.Request) {
 // status returns a combined status snapshot. The desktop's runtime-only path
 // skips provider balance IO while retaining all reconciliation fields.
 func (s *Server) status(w http.ResponseWriter, r *http.Request) {
+	// A spectator watching a final-format identity a local runtime owns gets
+	// the read-only identity view; a foreground-bound identity falls through to
+	// the authoritative controller snapshot below — remembering the selector so
+	// the snapshot answers ownership explicitly (a spectator pin must clear the
+	// moment this serve owns the identity again, not only when it loses it).
+	identityRoute := ""
+	if raw := r.URL.Query().Get("session"); isSessionIDRoute(raw) {
+		if s.statusIdentityOverride(w, raw) {
+			return
+		}
+		identityRoute = strings.TrimSpace(raw)
+	}
 	// A spectator watching a session a local runtime owns selects it
 	// explicitly; report the file-backed read-only view instead of the
 	// foreground controller's.
@@ -1348,6 +1425,12 @@ func (s *Server) status(w http.ResponseWriter, r *http.Request) {
 			sess["hostId"] = ref.HostID
 			sess["sessionId"] = ref.SessionID
 		}
+	}
+	if identityRoute != "" {
+		// The poller selected an identity explicitly: answer ownership both
+		// ways. Without an explicit false after a reclaim, clients that only
+		// apply present fields keep a stale spectator pin forever.
+		sess["takenOver"] = s.sessionMirrored(identityRoute)
 	}
 	if sessionPath != "" && store.IsSessionTranscriptName(filepath.Base(sessionPath)) {
 		sess["sessionName"] = strings.TrimSuffix(filepath.Base(sessionPath), ".jsonl")
@@ -1489,13 +1572,18 @@ var deleteSessionBeforeOwnershipLockHookForTest func()
 // deleteSession removes a saved session by the session name returned from /sessions.
 func (s *Server) deleteSession(w http.ResponseWriter, r *http.Request) {
 	var req struct {
-		Name string `json:"name"`
+		Name      string `json:"name"`
+		SessionID string `json:"sessionId"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		http.Error(w, "bad request", http.StatusBadRequest)
 		return
 	}
 	name := strings.TrimSpace(req.Name)
+	sessionID := strings.TrimSpace(req.SessionID)
+	if name == "" {
+		name = sessionID
+	}
 	if name == "" {
 		http.Error(w, "name required", http.StatusBadRequest)
 		return
@@ -1517,6 +1605,26 @@ func (s *Server) deleteSession(w http.ResponseWriter, r *http.Request) {
 	s.bindMu.Lock()
 	defer s.bindMu.Unlock()
 	dir := s.ctl().SessionDir()
+	if sessionID != "" && s.canonicalSessionIsCurrent(sessionID) {
+		// Never let a colliding legacy basename take precedence over the active
+		// canonical identity.
+		s.deleteCanonicalSession(w, r, sessionID)
+		return
+	}
+	// A canonical session is stored as <sessions-v4>/<sessionId>/ rather than
+	// <legacy-dir>/<name>.jsonl. Prefer the legacy file when it exists so the
+	// old endpoint remains backward compatible, then use the immutable identity
+	// for canonical rows returned by /sessions.
+	legacyExists := false
+	if dir != "" {
+		_, statErr := os.Stat(filepath.Join(dir, name+".jsonl"))
+		legacyExists = statErr == nil
+	}
+	if sessionID != "" && !legacyExists {
+		if s.deleteCanonicalSession(w, r, sessionID) {
+			return
+		}
+	}
 	if dir == "" {
 		http.Error(w, "sessions disabled", http.StatusBadRequest)
 		return
@@ -1567,6 +1675,101 @@ func (s *Server) deleteSession(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	w.WriteHeader(http.StatusNoContent)
+}
+
+// deleteCanonicalSession deletes one canonical identity and reports whether
+// the request was handled. It is called with bindMu held so a concurrent
+// /resume or /new cannot change the foreground identity between the active
+// check and the filesystem tombstone.
+func (s *Server) deleteCanonicalSession(w http.ResponseWriter, r *http.Request, sessionID string) bool {
+	identity, ok := s.ctl().(control.IdentityLifecycle)
+	if !ok || !identity.UsesExclusiveSession() {
+		return false
+	}
+	service := identity.SessionService()
+	if service == nil {
+		http.Error(w, "canonical sessions disabled", http.StatusBadRequest)
+		return true
+	}
+	ref := session.SessionRef{HostID: service.HostID(), SessionID: sessionID}
+	if current, bound := identity.SessionRef(); bound && current == ref {
+		http.Error(w, "cannot delete active session", http.StatusConflict)
+		return true
+	}
+	if err := service.Delete(r.Context(), ref); err != nil {
+		switch {
+		case errors.Is(err, session.ErrSessionNotFound):
+			http.Error(w, err.Error(), http.StatusNotFound)
+		case errors.Is(err, session.ErrRuntimeBusy), errors.Is(err, session.ErrRuntimeBound):
+			http.Error(w, err.Error(), http.StatusConflict)
+		default:
+			http.Error(w, err.Error(), http.StatusInternalServerError)
+		}
+		return true
+	}
+	// The migration map is keyed by the canonical row; once the catalog row
+	// is gone the legacy source stops counting as migrated and would resurface
+	// in /sessions as a fresh legacy row. Remove the frozen source too.
+	s.removeMigratedLegacySource(service, sessionID)
+	w.WriteHeader(http.StatusNoContent)
+	return true
+}
+
+// removeMigratedLegacySource deletes the legacy transcript a canonical
+// session was migrated from, so removing the canonical row does not resurrect
+// the source in /sessions. Failures are best-effort: the canonical delete has
+// already succeeded, and a leftover source only degrades to the pre-fix
+// behavior.
+func (s *Server) removeMigratedLegacySource(service *session.Service, sessionID string) {
+	q := service.Query()
+	defer q.Close()
+	page, err := q.List(context.Background(), "", 1000)
+	if err != nil {
+		return
+	}
+	roots := make(map[string]struct{})
+	for _, info := range page.Sessions {
+		if path := strings.TrimSpace(info.Path); path != "" {
+			roots[filepath.Dir(filepath.Clean(path))] = struct{}{}
+		}
+	}
+	if source, ok := migrationSourceForTarget(roots, sessionID); ok {
+		_ = removeSessionFiles(filepath.Dir(source), source)
+	}
+}
+
+// migrationSourceForTarget reads the migration maps under roots and returns
+// the legacy source path recorded for sessionID.
+func migrationSourceForTarget(roots map[string]struct{}, sessionID string) (string, bool) {
+	for root := range roots {
+		data, err := os.ReadFile(filepath.Join(root, "migration-map.json"))
+		if err != nil {
+			continue
+		}
+		var mapping session.MigrationMapping
+		if json.Unmarshal(data, &mapping) != nil || mapping.SchemaVersion != session.SchemaVersion {
+			continue
+		}
+		for _, entry := range mapping.Entries {
+			if entry.TargetID == sessionID {
+				return entry.SourcePath, true
+			}
+		}
+	}
+	return "", false
+}
+
+func (s *Server) canonicalSessionIsCurrent(sessionID string) bool {
+	identity, ok := s.ctl().(control.IdentityLifecycle)
+	if !ok || !identity.UsesExclusiveSession() {
+		return false
+	}
+	service := identity.SessionService()
+	if service == nil {
+		return false
+	}
+	current, bound := identity.SessionRef()
+	return bound && current == (session.SessionRef{HostID: service.HostID(), SessionID: sessionID})
 }
 
 func finishSessionDestroy(destroy control.SessionDestroyHandle) jobs.TeardownResult {

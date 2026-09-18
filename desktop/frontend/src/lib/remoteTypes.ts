@@ -25,6 +25,8 @@ export type RemoteServerState =
 export interface RemoteTabRefView {
   hostId: string;
   workspace: string;
+  /** Stable identity of the active remote session, when known. */
+  sessionId?: string;
 }
 
 export interface RemoteTabMetaFields {
@@ -38,7 +40,7 @@ export interface RemoteTabMetaFields {
 
 export interface RemoteProjectNodeFields {
   remote?: RemoteTabRefView;
-  remoteSession?: { hostId: string; workspace: string; name: string; path?: string; sessionId?: string; title?: string };
+  remoteSession?: { hostId: string; workspace: string; name: string; path?: string; sessionId?: string; title?: string; current?: boolean };
 }
 
 export interface RemoteSessionMetaFields {

@@ -127,21 +127,21 @@ func normalizeOptionalResumeArg(args []string) []string {
 	return out
 }
 
-func resolveSessionQuery(dir, query string) (string, error) {
+func resolveSessionQuery(dir, query string) (cliResumeTarget, error) {
 	query = strings.TrimSpace(query)
 	if query == "" || query == resumePickerSentinel {
-		return "", nil
+		return cliResumeTarget{}, nil
 	}
 	if info, err := os.Stat(query); err == nil && !info.IsDir() {
 		abs, absErr := filepath.Abs(query)
 		if absErr != nil {
-			return "", absErr
+			return cliResumeTarget{}, absErr
 		}
-		return abs, nil
+		return cliResumeTarget{path: abs}, nil
 	}
 	sessions, err := agent.ListSessions(dir)
 	if err != nil {
-		return "", fmt.Errorf("list sessions: %w", err)
+		return cliResumeTarget{}, fmt.Errorf("list sessions: %w", err)
 	}
 	// Opaque machine session IDs (session_<hex>) are what --events-jsonl and
 	// `session show --json` expose. Match them before preview/partial search so
@@ -149,14 +149,14 @@ func resolveSessionQuery(dir, query string) (string, error) {
 	if looksLikeMachineSessionID(query) {
 		key, keyErr := loadMachineIdentityKey()
 		if keyErr != nil {
-			return "", fmt.Errorf("machine identity is unavailable: %w", keyErr)
+			return cliResumeTarget{}, fmt.Errorf("machine identity is unavailable: %w", keyErr)
 		}
 		for _, session := range sessions {
 			if machineSessionIDWithKey(agent.BranchID(session.Path), key) == query {
-				return session.Path, nil
+				return cliResumeTarget{path: session.Path}, nil
 			}
 		}
-		return "", fmt.Errorf("no session matches %q", query)
+		return cliResumeTarget{}, fmt.Errorf("no session matches %q", query)
 	}
 	lower := strings.ToLower(query)
 	var exact []string
@@ -179,11 +179,11 @@ func resolveSessionQuery(dir, query string) (string, error) {
 	}
 	switch len(matches) {
 	case 0:
-		return "", fmt.Errorf("no session matches %q", query)
+		return cliResumeTarget{}, fmt.Errorf("no session matches %q", query)
 	case 1:
-		return matches[0], nil
+		return cliResumeTarget{path: matches[0]}, nil
 	default:
-		return "", fmt.Errorf("session query %q is ambiguous (%d matches)", query, len(matches))
+		return cliResumeTarget{}, fmt.Errorf("session query %q is ambiguous (%d matches)", query, len(matches))
 	}
 }
 

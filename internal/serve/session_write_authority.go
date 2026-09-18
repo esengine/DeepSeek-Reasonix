@@ -39,7 +39,11 @@ func (s *Server) sessionTransitionHandler(ctrl *control.Controller, k *control.S
 		path := agent.CanonicalSessionPath(info.TargetPath)
 		info.OnCommit(func() {
 			if tag := s.tagFor(ctrl); tag != nil {
-				tag.PrimePath(path)
+				if ref, bound := ctrl.SessionRef(); bound {
+					tag.PrimeIdentity(path, ref.SessionID)
+				} else {
+					tag.PrimePath(path)
+				}
 			}
 			if s.publishControllerPathIfCurrent(ctrl, path) && branchTransitionNeedsRouteEvent(info.Reason) {
 				s.announceSessionChanged(path, false)
@@ -78,7 +82,11 @@ func (s *Server) sessionRecoveryHandler(ctrl *control.Controller, k *control.Ses
 
 func (s *Server) publishRecoveredControllerRoute(ctrl *control.Controller, path string) {
 	if tag := s.tagFor(ctrl); tag != nil {
-		tag.PrimePath(path)
+		if ref, bound := ctrl.SessionRef(); bound {
+			tag.PrimeIdentity(path, ref.SessionID)
+		} else {
+			tag.PrimePath(path)
+		}
 	}
 	if s.publishControllerPathIfCurrent(ctrl, path) {
 		// Recovery changes foreground identity outside the ordinary transition

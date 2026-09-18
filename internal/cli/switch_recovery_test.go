@@ -653,7 +653,7 @@ func assertLeaseHeldRecoveryPathAtBuild(t *testing.T, m *chatTUI, active, heldAt
 
 func resumeIndexForPath(t *testing.T, dir, path string) int {
 	t.Helper()
-	for i, session := range recentSessions(dir) {
+	for i, session := range mergedResumeSessions(dir) {
 		if session.Path == path {
 			return i + 1
 		}

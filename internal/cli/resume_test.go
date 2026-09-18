@@ -69,7 +69,7 @@ func TestOrderResumeSessionsGroupsRecoveryCopiesAndPrefersNewestLeaf(t *testing.
 	}
 }
 
-func TestMostRecentSessionIgnoresRecoveryPickerLeafPreference(t *testing.T) {
+func TestNewestResumeTargetIgnoresRecoveryPickerLeafPreference(t *testing.T) {
 	dir := t.TempDir()
 	rootPath := filepath.Join(dir, "root.jsonl")
 	recoveryPath := filepath.Join(dir, "recovery.jsonl")
@@ -91,16 +91,16 @@ func TestMostRecentSessionIgnoresRecoveryPickerLeafPreference(t *testing.T) {
 		t.Fatalf("save recovery meta: %v", err)
 	}
 
-	grouped := recentSessions(dir)
+	grouped := mergedResumeSessions(dir)
 	if len(grouped) != 2 || grouped[0].Path != recoveryPath {
 		t.Fatalf("interactive resume order = %+v, want recovery leaf grouped first", grouped)
 	}
-	latest, ok := mostRecentSession(dir)
+	latest, ok := newestResumeTarget(dir)
 	if !ok {
-		t.Fatal("mostRecentSession found no session")
+		t.Fatal("newestResumeTarget found no session")
 	}
-	if latest.Path != rootPath {
-		t.Fatalf("--continue session = %q, want chronologically newest %q", latest.Path, rootPath)
+	if latest.path != rootPath {
+		t.Fatalf("--continue session = %q, want chronologically newest %q", latest.path, rootPath)
 	}
 }
 
@@ -153,7 +153,7 @@ func TestRunResumeKeepsCompletedIndexStableAcrossRecoveryGC(t *testing.T) {
 	if err != nil || len(candidates) != 1 || candidates[0] != recovery.Path {
 		t.Fatalf("recovery GC precondition = %v err=%v, want %q", candidates, err, recovery.Path)
 	}
-	sessions := recentSessions(dir)
+	sessions := mergedResumeSessions(dir)
 	targetIndex := 0
 	for i, session := range sessions {
 		if session.Path == targetPath {
@@ -198,12 +198,16 @@ func TestCapResumeSessionGroupsDoesNotSplitRecoveryFamily(t *testing.T) {
 		agent.SessionInfo{Path: "/sessions/recovery-b.jsonl", ModTime: base.Add(time.Minute), Recovered: true, ParentID: "root"},
 	)
 
-	got := capResumeSessionGroups(orderResumeSessions(sessions), resumeListCap)
+	entries := make([]resumeEntry, 0, len(sessions))
+	for _, session := range orderResumeSessions(sessions) {
+		entries = append(entries, resumeEntry{session: session, target: cliResumeTarget{path: session.Path}})
+	}
+	got := capResumeEntries(entries, resumeListCap)
 	if len(got) != 9 {
 		t.Fatalf("capped sessions len = %d, want 9 complete standalone groups", len(got))
 	}
-	for _, session := range got {
-		if session.Recovered || agent.BranchID(session.Path) == "root" {
+	for _, entry := range got {
+		if entry.session.Recovered || agent.BranchID(entry.session.Path) == "root" {
 			t.Fatalf("cap split recovery family instead of omitting it: %+v", got)
 		}
 	}
@@ -316,7 +320,7 @@ func TestResumeDispatchSwitchesAndReplays(t *testing.T) {
 	m.ctrl = ctrl
 
 	target := 0
-	for i, s := range recentSessions(dir) {
+	for i, s := range mergedResumeSessions(dir) {
 		if s.Path == otherPath {
 			target = i + 1
 		}
@@ -356,7 +360,7 @@ func TestResumeWhileScrolledUpPinsViewportToBottom(t *testing.T) {
 	saveTestSession(t, otherPath, "OTHER-SESSION-PROMPT")
 
 	target := 0
-	for i, s := range recentSessions(dir) {
+	for i, s := range mergedResumeSessions(dir) {
 		if s.Path == otherPath {
 			target = i + 1
 		}
@@ -396,6 +400,18 @@ func TestResumeWhileScrolledUpPinsViewportToBottom(t *testing.T) {
 	if !cur.viewport.AtBottom() {
 		t.Fatalf("resume while scrolled up should pin to bottom, AtBottom=%v, YOffset=%d", cur.viewport.AtBottom(), cur.viewport.YOffset())
 	}
+}
+
+
+// mergedResumeSessions projects the merged picker rows onto the legacy row
+// shape the older listing tests assert against.
+func mergedResumeSessions(dir string) []agent.SessionInfo {
+	entries := mergedResumeEntries(dir, resumeListCap)
+	out := make([]agent.SessionInfo, 0, len(entries))
+	for _, entry := range entries {
+		out = append(out, entry.session)
+	}
+	return out
 }
 
 func saveTestSession(t *testing.T, path, prompt string) {
@@ -473,7 +489,7 @@ func TestRunResumeSwitchesSession(t *testing.T) {
 	m.ctrl = ctrl
 
 	target := 0
-	for i, s := range recentSessions(dir) {
+	for i, s := range mergedResumeSessions(dir) {
 		if s.Path == otherPath {
 			target = i + 1
 		}

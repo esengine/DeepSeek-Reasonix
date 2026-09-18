@@ -315,33 +315,55 @@ func (a *App) parkRemoteTabsForServer(hostID, workspace, state, errText string) 
 // resumeRemoteTabs re-attaches every suspended tab of a reconnected host.
 // The remote serve kept running through the SSH drop, so re-attachment only
 // rebuilds the tunnel client and the event pump; the serve still holds the
-// active session, so no session re-entry is needed.
+// active session, so no session re-entry is needed. serve_down tabs re-arm
+// first: their reattach exhausted while the tunnel was still healing, and a
+// regained connection is the recovery signal they were waiting for.
 func (a *App) resumeRemoteTabs(hostID string) {
 	a.remoteTabMu.Lock()
 	tabIDs := make([]string, 0, 2)
+	rearmed := make([]string, 0, 2)
 	for id, tab := range a.remoteTabs {
-		if tab.ref.HostID == hostID && tab.state == "reconnecting" {
+		if tab.ref.HostID != hostID {
+			continue
+		}
+		switch tab.state {
+		case "reconnecting":
 			tabIDs = append(tabIDs, id)
+		case "serve_down":
+			tab.state, tab.err = "reconnecting", ""
+			tabIDs = append(tabIDs, id)
+			rearmed = append(rearmed, id)
 		}
 	}
 	a.remoteTabMu.Unlock()
+	for _, tabID := range rearmed {
+		a.emitRemoteEvent(fmt.Sprintf("remote-tab:%s:state", tabID), RemoteTabStateView{State: "reconnecting"})
+	}
 	for _, tabID := range tabIDs {
 		a.goRemoteTabSafe("remoteTabReattach", func() { a.reattachRemoteTab(tabID) })
 	}
 }
 
-const remoteTabReattachAttempts = 3
+// The first EnsureServer after a tunnel drop races the SSH layer's own
+// recovery; observed drops heal within a few seconds, so retries span that
+// window instead of giving up after half a second and parking every tab that
+// lost its stream mid-drop. Tests shrink this schedule.
+var remoteTabReattachDelays = []time.Duration{
+	250 * time.Millisecond, 500 * time.Millisecond, time.Second,
+	2 * time.Second, 4 * time.Second, 8 * time.Second,
+}
 
 // reattachRemoteTab rebuilds one tab's serve client and pump after the host
 // connection came back. Transient failures retry while the same tab remains
-// reconnecting; exhaustion parks it in user-retryable serve_down.
+// reconnecting; exhaustion parks it in user-retryable serve_down until the
+// next host recovery revives it.
 func (a *App) reattachRemoteTab(tabID string) {
-	for attempt := range remoteTabReattachAttempts {
+	for i := 0; i <= len(remoteTabReattachDelays); i++ {
+		if i > 0 {
+			time.Sleep(remoteTabReattachDelays[i-1])
+		}
 		if a.reattachRemoteTabOnce(tabID) {
 			return
-		}
-		if attempt+1 < remoteTabReattachAttempts {
-			time.Sleep(time.Duration(attempt+1) * 150 * time.Millisecond)
 		}
 	}
 	a.remoteTabMu.Lock()
@@ -397,7 +419,8 @@ func (a *App) reattachRemoteTabOnce(tabID string) bool {
 	if clientErr != nil {
 		return false
 	}
-	if err := serveHandshake(callCtx, client, view.LocalURL, token); err != nil {
+	capabilities, err := serveHandshakeCapabilities(callCtx, client, view.LocalURL, token)
+	if err != nil {
 		log.Printf("[remote] reattachRemoteTab: handshake FAILED tab=%s base=%q err=%v", tabID, view.LocalURL, err)
 		return false
 	}
@@ -422,6 +445,10 @@ func (a *App) reattachRemoteTabOnce(tabID string) bool {
 		tab.cancel()
 	}
 	tab.client = client
+	tab.capabilities = make(map[string]bool, len(capabilities))
+	for _, capability := range capabilities {
+		tab.capabilities[capability] = true
+	}
 	tab.base = view.LocalURL
 	tab.token = token
 	gen := tab.gen

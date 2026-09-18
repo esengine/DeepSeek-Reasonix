@@ -491,6 +491,60 @@ func TestTerminalReadOnlyTransitionClosesAndReopensTheTabGate(t *testing.T) {
 	manager.closeAll()
 }
 
+func TestTerminalSurvivesTakeoverSpectatorTransition(t *testing.T) {
+	app := NewApp()
+	root := t.TempDir()
+	tab := &WorkspaceTab{ID: "tab", Scope: "project", WorkspaceRoot: root}
+	app.tabs[tab.ID] = tab
+	app.tabOrder = []string{tab.ID}
+	app.activeTabID = tab.ID
+
+	manager := newTerminalManager(nil)
+	app.terminals = manager
+	proc := newFakeTerminalProcess()
+	manager.start = func(terminalStartSpec) (terminalProcess, error) { return proc, nil }
+	target, err := app.terminalTargetForTab(tab.ID, true)
+	if err != nil {
+		t.Fatal(err)
+	}
+	view, err := manager.create(tab.ID, target.workspaceKey, root, terminalCommand{path: "shell", label: "shell"})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	app.setTabReadOnlyPreservingTerminals(tab.ID, true)
+	select {
+	case <-proc.closed:
+		t.Fatal("takeover read-only transition closed the terminal process")
+	default:
+	}
+	if _, err := app.terminalTargetForTab(tab.ID, true); err == nil {
+		t.Fatal("terminal became writable before the spectator transition committed")
+	}
+
+	app.markLocalTakeoverSpectator(tab)
+	workspace, err := app.TerminalWorkspaceForTab(tab.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if workspace.ReadOnly {
+		t.Fatal("takeover spectator incorrectly made the workspace terminal read-only")
+	}
+	if len(workspace.Sessions) != 1 || workspace.Sessions[0].ID != view.ID {
+		t.Fatalf("terminal sessions after takeover = %+v, want surviving session %q", workspace.Sessions, view.ID)
+	}
+	if err := app.WriteTerminalForTab(tab.ID, view.ID, "/resume\n"); err != nil {
+		t.Fatalf("write to surviving takeover terminal: %v", err)
+	}
+	proc.mu.Lock()
+	writes := string(proc.writes)
+	proc.mu.Unlock()
+	if writes != "/resume\n" {
+		t.Fatalf("terminal writes after takeover = %q", writes)
+	}
+	manager.closeAll()
+}
+
 func TestTerminalWorkspaceRebindClosesOldSessionsAndReopensTheTabGate(t *testing.T) {
 	t.Setenv("REASONIX_HOME", t.TempDir())
 	app := NewApp()

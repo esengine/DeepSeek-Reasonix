@@ -277,7 +277,9 @@ func (a *App) sampleRemoteRuntimeSessions() []RuntimeSessionState {
 				continue
 			}
 			freshness := "synced"
-			if tab.state != "ready" || tab.session.takenOver || tab.runtime.syncFailed || tab.runtimeUnknown[path] != 0 {
+			// Foreground ownership changes do not invalidate another session,
+			// but a failed observation of this background route still does.
+			if tab.runtimeUnknown[path] != 0 {
 				freshness = "unknown"
 			}
 			sessions = append(sessions, RuntimeSessionState{TabID: tab.id, Scope: "remote", HostID: tab.ref.HostID, WorkspaceRoot: tab.ref.Workspace,

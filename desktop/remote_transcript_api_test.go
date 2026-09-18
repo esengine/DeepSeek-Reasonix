@@ -152,6 +152,40 @@ func TestRemoteTranscriptRejectsLateSessionResponse(t *testing.T) {
 	}
 }
 
+func TestRemoteTranscriptRefreshesIdentityAfterConflict(t *testing.T) {
+	var snapshotReads atomic.Int32
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/transcript/snapshot":
+			if n := snapshotReads.Add(1); n == 1 {
+				if got := r.URL.Query().Get("session"); got != "/session.jsonl" {
+					t.Errorf("first session route = %q", got)
+				}
+				w.WriteHeader(http.StatusConflict)
+				_, _ = w.Write([]byte("active session changed"))
+				return
+			}
+			if got := r.URL.Query().Get("session"); got != "session-id:current" {
+				t.Errorf("refreshed session route = %q", got)
+			}
+			_ = json.NewEncoder(w).Encode(transcript.Snapshot{Boundary: transcript.Boundary{ProtocolVersion: transcript.ProtocolVersion, SnapshotID: "current"}})
+		case "/status":
+			_ = json.NewEncoder(w).Encode(map[string]any{"sessionPath": "", "sessionId": "current", "running": false})
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	defer server.Close()
+	app, tab := remoteTranscriptFixture(server)
+	result, err := app.RemoteTranscriptSnapshotForTab(tab.id, transcript.PageRequest{})
+	if err != nil || !result.Supported || result.Snapshot == nil || snapshotReads.Load() != 2 {
+		t.Fatalf("conflict retry = %+v, %v, reads=%d", result, err, snapshotReads.Load())
+	}
+	if got := tab.routing.currentPath; got != "session-id:current" {
+		t.Fatalf("refreshed tab route = %q", got)
+	}
+}
+
 func TestRemoteTabMetadataDoesNotRequestHistory(t *testing.T) {
 	var historyReads atomic.Int32
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -216,7 +250,7 @@ func TestRemoteCanonicalSessionHistoryUsesNegotiatedIdentity(t *testing.T) {
 	}))
 	defer server.Close()
 	app, tab := remoteTranscriptFixture(server)
-	tab.capabilities = map[string]bool{serveCapabilitySessionContentV1: true, serveCapabilitySessionReadV2: true}
+	tab.capabilities = map[string]bool{serveCapabilitySessions: true, serveCapabilitySessionContentV1: true, serveCapabilitySessionReadV2: true}
 	tab.session.sessionID = "canonical"
 	view, err := app.RemoteSessionOpenForTab(tab.id)
 	if err != nil || view.SnapshotSequence != 9 || len(view.Recent.Entries) != 1 {
@@ -381,5 +415,38 @@ func TestSessionHistoryWindowRequiresCanonicalBinding(t *testing.T) {
 	}
 	if _, err := app.SessionMessageFieldForTab("missing", "m1", 0, "content", 0, 64); err == nil {
 		t.Fatal("field read without a bound session")
+	}
+}
+
+func TestRemoteCanonicalSessionHistoryPageDoesNotRequireContentCapability(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/session-history/page" {
+			t.Fatalf("unexpected route %s", r.URL.Path)
+		}
+		_ = json.NewEncoder(w).Encode(session.MessageHistoryPage{SnapshotSequence: 4})
+	}))
+	defer server.Close()
+	app, tab := remoteTranscriptFixture(server)
+	tab.capabilities = map[string]bool{serveCapabilitySessions: true}
+	tab.session.sessionID = "canonical"
+	page, err := app.RemoteSessionHistoryPageForTab(tab.id, "", 0)
+	if err != nil || page.SnapshotSequence != 4 {
+		t.Fatalf("page = %+v, %v", page, err)
+	}
+}
+
+func TestRemoteCanonicalSessionHistoryContentRequiresContentCapability(t *testing.T) {
+	var reads atomic.Int32
+	server := httptest.NewServer(http.HandlerFunc(func(http.ResponseWriter, *http.Request) { reads.Add(1) }))
+	defer server.Close()
+	app, tab := remoteTranscriptFixture(server)
+	tab.capabilities = map[string]bool{serveCapabilitySessions: true}
+	tab.session.sessionID = "canonical"
+	ref := sessioncontent.Ref{Digest: strings.Repeat("b", 64), Bytes: 1, MediaType: "text/plain"}
+	if _, err := app.RemoteSessionHistoryContentForTab(tab.id, ref, 0); err == nil {
+		t.Fatal("content unexpectedly enabled without content capability")
+	}
+	if reads.Load() != 0 {
+		t.Fatalf("network reads = %d", reads.Load())
 	}
 }

@@ -44,8 +44,20 @@ func (c *tuiShutdownCompletion) claimFallback() bool {
 // shutdownAndQuit persists what the controller holds beyond the last snapshot
 // and leaves. The shutdown variant writes a recovery branch when another
 // process keeps the active session's compatibility lock for the bounded wait.
-func (m chatTUI) shutdownAndQuit(completion *tuiShutdownCompletion) (tea.Model, tea.Cmd) {
-	defer completion.complete()
+func (m chatTUI) shutdownAndQuit(msg tuiShutdownMsg) (tea.Model, tea.Cmd) {
+	if !msg.userInitiated && (m.sessionReclaimed || m.takeover != nil && (m.takeover.Reclaiming() || m.takeover.Returned())) {
+		// Reclaim releases one session, not the terminal process. A watchdog or
+		// signal message can race the handoff transaction or its callback; consume
+		// that stale exit request so it cannot close the TUI before the session
+		// picker appears.
+		if msg.completion != nil {
+			msg.completion.complete()
+		}
+		return m, nil
+	}
+	if msg.completion != nil {
+		defer msg.completion.complete()
+	}
 	// Only snapshot if we still own the session (no takeover, or takeover returned).
 	if m.ctrl != nil && (m.takeover == nil || !m.takeover.Returned()) {
 		m.shutdownErr = m.ctrl.SnapshotForShutdown()

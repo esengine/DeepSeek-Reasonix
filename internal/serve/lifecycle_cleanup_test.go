@@ -1,6 +1,8 @@
 package serve
 
 import (
+	"context"
+	"errors"
 	"testing"
 	"time"
 
@@ -26,9 +28,17 @@ func newLifecycleTestServer(t *testing.T, ctrl control.SessionAPI, bc *Broadcast
 		if service == nil || runtime == nil {
 			return
 		}
+		// The controller releases its client binding synchronously; the host
+		// retires the idle runtime on a TTL. Force it so a leaked binding
+		// (ErrRuntimeBound) still fails while normal closes settle at once.
 		deadline := time.Now().Add(5 * time.Second)
 		for time.Now().Before(deadline) {
-			if current, ok := service.Runtime(runtime.Ref()); !ok || current != runtime {
+			err := service.Close(context.Background(), runtime.Ref())
+			if err == nil || errors.Is(err, session.ErrSessionNotRunning) {
+				return
+			}
+			if !errors.Is(err, session.ErrRuntimeBound) && !errors.Is(err, session.ErrRuntimeBusy) {
+				t.Errorf("server session writer did not release after close: %v", err)
 				return
 			}
 			time.Sleep(time.Millisecond)

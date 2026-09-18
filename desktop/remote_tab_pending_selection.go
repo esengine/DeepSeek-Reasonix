@@ -9,6 +9,7 @@ import (
 // advance until Serve can accept the matching /resume or /new request.
 type remoteTabPendingOpenSelection struct {
 	name              string
+	sessionID         string
 	path              string
 	title             string
 	newSession        bool
@@ -21,7 +22,7 @@ type remoteTabPendingOpenSelection struct {
 
 func newRemoteTabPendingOpenSelection(opts RemoteTabOpenOptions) *remoteTabPendingOpenSelection {
 	return &remoteTabPendingOpenSelection{
-		name: strings.TrimSpace(opts.SessionName), path: strings.TrimSpace(opts.SessionPath),
+		name: strings.TrimSpace(opts.SessionName), sessionID: strings.TrimSpace(opts.SessionID), path: strings.TrimSpace(opts.SessionPath),
 		title: strings.TrimSpace(opts.SessionTitle), newSession: opts.NewSession,
 	}
 }
@@ -102,12 +103,13 @@ func (a *App) applyPendingRemoteTabOpenSelection(tabID string) {
 	if identityChanged {
 		current.session.newSession = false
 		current.session.name = selection.name
+		current.session.sessionID = selection.sessionID
 		current.session.path = selection.path
 		if selection.title != "" {
 			current.topicTitle = selection.title
 		}
-		if selection.path != "" {
-			commitRemoteTabAttachRoute(current, selection.path, false)
+		if route := remoteSessionIdentityRoute(selection.path, selection.sessionID); route != "" {
+			commitRemoteTabAttachRoute(current, route, false)
 		}
 	}
 	selection.deferred = false

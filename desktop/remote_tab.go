@@ -104,7 +104,13 @@ func (a *App) attachRemoteTabServe(ctx context.Context, tabID, base, token, inst
 			enterOpts.SessionName, enterOpts.SessionPath, enterOpts.SessionID, enterOpts.SessionTitle = target.Name, target.Path, target.SessionID, target.Title
 		}
 		target, err = enterRemoteSessionTarget(callCtx, client, base, enterOpts)
-		entered = err == nil
+		entered = err == nil && !target.TakenOver
+	}
+	if err == nil && target.TakenOver {
+		// The serve mounted this caller as a read-only spectator (another
+		// runtime owns the session writer). The tab stays attached to render
+		// the file/mirrored view and the take-back banner drives /reclaim.
+		log.Printf("[remote] attachRemoteTabServe: enterRemoteSession SPECTATOR (writer owned elsewhere) tab=%s session=%q", tabID, remoteSessionRoute(target))
 	}
 	if err != nil {
 		// A busy serve refuses session transitions with 409 but retains its
@@ -371,19 +377,28 @@ func (a *App) remoteTabPump(ctx context.Context, tabID string, gen uint64, opene
 	req.Header.Set("Accept", "text/event-stream")
 	resp, err := client.Do(req)
 	if err != nil {
-		signalOpened(err)
+		// Schedule recovery before signalling the opener: the reattach
+		// retirement bumps the generation first, so the opener's own retire
+		// for this error becomes a no-op instead of racing the recovery.
 		if ctx.Err() == nil {
 			log.Printf("[remote] remoteTabPump: /events DO-FAILED tab=%s err=%v", tabID, err)
-			a.emitRemoteTabStateForGeneration(tabID, gen, "error", err.Error())
+			// A tunnel that just dropped the old stream often refuses the
+			// replacement too; parking in error would strand a healthy tab.
+			// Route through the reattach loop, which re-ensures the server
+			// and retries while the transport heals.
+			a.startRemoteTabReattach(tabID, gen)
 		}
+		signalOpened(err)
 		return
 	}
 	defer resp.Body.Close()
 	if resp.StatusCode != http.StatusOK {
 		err = fmt.Errorf("serve /events: status %d", resp.StatusCode)
+		if ctx.Err() == nil {
+			log.Printf("[remote] remoteTabPump: /events BAD-STATUS tab=%s status=%d", tabID, resp.StatusCode)
+			a.startRemoteTabReattach(tabID, gen)
+		}
 		signalOpened(err)
-		log.Printf("[remote] remoteTabPump: /events BAD-STATUS tab=%s status=%d", tabID, resp.StatusCode)
-		a.emitRemoteTabStateForGeneration(tabID, gen, "error", err.Error())
 		return
 	}
 	signalOpened(nil)
@@ -432,10 +447,7 @@ func (a *App) remoteTabPump(ctx context.Context, tabID string, gen uint64, opene
 	// Only the current generation reacts to an unexpected stream death.
 	// Reattach now; the host status hook also retries on connection recovery.
 	if ctx.Err() == nil {
-		if startRetry := a.reconnectRemoteTabGeneration(tabID, gen); startRetry {
-			log.Printf("[remote] remoteTabPump: DIED tab=%s gen=%d — reattaching", tabID, gen)
-			a.goRemoteTabSafe("remoteTabReattach", func() { a.reattachRemoteTab(tabID) })
-		}
+		a.startRemoteTabReattach(tabID, gen)
 	}
 }
 
@@ -573,13 +585,17 @@ func (a *App) remoteTabCommandTarget(tabID string) (*http.Client, string, string
 	tab := a.remoteTabs[tabID]
 	var client *http.Client
 	var base, expectedPath string
-	usable := tab != nil && tab.client != nil && tab.state == "ready"
+	switching := tab != nil && tab.routing.rehydratingPath != ""
+	usable := tab != nil && tab.client != nil && tab.state == "ready" && !switching
 	if usable {
 		client, base = tab.client, tab.base
 		expectedPath = tab.routing.currentPath
 	}
 	a.remoteTabMu.Unlock()
 	if !usable {
+		if switching {
+			return nil, "", "", fmt.Errorf("remote tab %q is switching sessions; wait for it to become ready", tabID)
+		}
 		return nil, "", "", fmt.Errorf("remote tab %q is not connected", tabID)
 	}
 	return client, base, expectedPath, nil
@@ -694,12 +710,30 @@ func (a *App) ReclaimRemoteTabSession(tabID string) error {
 	// Reclaim succeeded: Serve now owns the session again. Clear the spectator
 	// pin immediately so the composer un-locks without waiting for the next
 	// status poll to observe takenOver=false.
+	observedTab.routeEventMu.Lock()
+	defer observedTab.routeEventMu.Unlock()
 	a.remoteTabMu.Lock()
 	if tab := a.remoteTabs[tabID]; stillCurrent(tab) {
 		tab.session.takenOver = false
+		// Fence status payloads reserved before this reclaim: they may still
+		// be in flight and carry the pre-reclaim takenOver=true, which would
+		// re-pin the spectator banner the moment ownership returned.
+		tab.reclaimRevision = tab.runtime.revision + 1
+		deferBarrier := tab.runtime.running || tab.runtime.pendingPrompt
+		tab.pendingReadyBarrier = deferBarrier
 		meta := remoteTabMetaLocked(tab)
 		a.remoteTabMu.Unlock()
 		a.emitRemoteEvent("remote-tab:updated", meta)
+		// The spectator era left the surface on a stale projection (frozen
+		// runtime epoch, cold history). Publish the ready barrier so the view
+		// re-hydrates and live frames from the re-owned writer are accepted —
+		// the same contract a session rotation relies on. Without it the tab
+		// renders the pre-reclaim view until the user switches away and back.
+		// Defer while a turn runs: the barrier bumps the frontend connection
+		// generation and would orphan an in-flight submission.
+		if !deferBarrier {
+			a.transitionRemoteTabStateLocked(tab, observedGen, "ready", "ready", "")
+		}
 	} else {
 		a.remoteTabMu.Unlock()
 	}
@@ -709,17 +743,22 @@ func (a *App) ReclaimRemoteTabSession(tabID string) error {
 
 // remoteSessionTakenOver reports whether a session-entry refusal means the
 // session is owned by a local runtime on the serve host. The tab then
-// attaches as a read-only spectator instead of dying with the 409. Both
-// refusal shapes match: the explicit takeover wording (mirrored session) and
-// the plain lease wording ("in use by another Reasonix process" — the holder
-// is a local window/CLI whose transcript the file-backed /history serves
-// anyway, and whose lease /reclaim can take back).
+// attaches as a read-only spectator instead of dying with the 409. All three
+// refusal shapes match: the explicit takeover wording (mirrored session), the
+// plain lease wording ("in use by another Reasonix process" — the holder is a
+// local window/CLI whose transcript the file-backed /history serves anyway,
+// and whose lease /reclaim can take back), and the final-format writer
+// wording ("session writer is owned by another runtime" — the identity's
+// writer.lock lives with a local runtime).
 func remoteSessionTakenOver(err error) bool {
 	if err == nil {
 		return false
 	}
 	msg := err.Error()
 	if strings.Contains(msg, "taken over by a local Reasonix") {
+		return true
+	}
+	if strings.Contains(msg, "writer is owned by another runtime") {
 		return true
 	}
 	return strings.Contains(msg, "in use by another Reasonix process")

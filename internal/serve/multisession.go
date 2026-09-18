@@ -70,6 +70,17 @@ func (s *sessionTagSink) PrimePath(path string) {
 	s.mu.Unlock()
 }
 
+// PrimeIdentity assigns a replacement controller's complete route without
+// publishing its buffered boot events. Canonical v3 sessions have no legacy
+// path, so PrimePath alone would drop the session ID from those events.
+func (s *sessionTagSink) PrimeIdentity(path, sessionID string) {
+	s.mu.Lock()
+	s.path = canonicalSessionPath(path)
+	s.sessionID = strings.TrimSpace(sessionID)
+	s.runtimeActive = s.bc.CurrentSession() == s.path
+	s.mu.Unlock()
+}
+
 // BufferPath retags synchronous in-place Resume events but withholds them until
 // Serve publishes the matching foreground route. Unlike PrimePath, it also
 // pauses a sink that was already active for the previous session.
@@ -233,6 +244,15 @@ func (s *Server) buildTagged(ctx context.Context, ref string, inheritTemp bool) 
 		opts.WorkspaceRoot = cur.WorkspaceRoot()
 		if inheritTemp {
 			opts.SessionTemp = cur.SessionTemp()
+			// Model/effort switches rebuild the Agent, not the logical session.
+			// Passing only SessionService creates a lazy controller with no bound
+			// runtime; its first submit then allocates a new ID while the desktop
+			// still fences the old one, producing HTTP 409.
+			if service, runtime, bound := cur.SessionBinding(); bound {
+				opts.SessionService = service
+				opts.SessionRuntime = runtime
+				opts.SessionHostID = runtime.Ref().HostID
+			}
 		}
 	}
 
@@ -464,7 +484,14 @@ func (s *Server) busyDetach(ctx context.Context, cur *control.Controller, target
 			return err
 		}
 	}
-	tag.PrimePath(targetPath)
+	// PrimeIdentity keeps the session id alive across the swap: exclusive
+	// sessions have no path, and PrimePath alone would strip the id from every
+	// frame the replacement controller emits.
+	if ref, ok := newCtrl.SessionRef(); ok {
+		tag.PrimeIdentity(targetPath, ref.SessionID)
+	} else {
+		tag.PrimePath(targetPath)
+	}
 	newCtrl.EnableInteractiveApproval()
 	newCtrl.SetOnSessionRecovered(s.sessionRecoveryHandler(newCtrl, s.leases))
 	if s.leases != nil {

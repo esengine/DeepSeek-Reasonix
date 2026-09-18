@@ -1,6 +1,7 @@
 package cli
 
 import (
+	"context"
 	"fmt"
 	"strings"
 
@@ -118,6 +119,26 @@ func (m *chatTUI) runSwitchCommand(input string) {
 	m.replayActiveBranch("switched branch")
 }
 
+// chatUIDisplayHistory returns the durable display history for the bound
+// session. Controller.History is the provider workset — session-context and
+// reasoning-language wrappers included, with Origin/RawContent stripped by the
+// provider projection — which is wrong for rendering: the replay would leak
+// host wrappers and lose the raw user text. Exclusive sessions read the
+// session service's display projection instead, the same view the desktop
+// renders through the transcript snapshot protocol.
+func chatUIDisplayHistory(ctrl control.SessionAPI) []provider.Message {
+	if identity, ok := ctrl.(control.IdentityLifecycle); ok && identity.UsesExclusiveSession() {
+		if service := identity.SessionService(); service != nil {
+			if ref, bound := identity.SessionRef(); bound {
+				if messages, err := service.Query().History(context.Background(), ref); err == nil {
+					return messages
+				}
+			}
+		}
+	}
+	return ctrl.History()
+}
+
 func (m *chatTUI) replayActiveBranch(title string) {
 	m.finalizeStreamed()
 	m.pending.Reset()
@@ -147,6 +168,6 @@ func (m *chatTUI) replayActiveBranch(title string) {
 	}
 	m.commitTranscriptSource(transcriptSource{
 		kind:    transcriptSourceReplayBundle,
-		history: append([]provider.Message(nil), m.ctrl.History()...),
+		history: append([]provider.Message(nil), chatUIDisplayHistory(m.ctrl)...),
 	})
 }

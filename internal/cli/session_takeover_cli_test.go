@@ -532,9 +532,10 @@ func TestCLITakeoverManagerReadoptsOnAuthFailureAndServerMove(t *testing.T) {
 	t.Cleanup(func() { discoverCLIServesForTakeover = originalDiscover })
 
 	m := newCLITakeoverManager(&takeoverRecordSink{}, nil)
+	prior := &cliTakeoverBinding{path: "prior.jsonl"}
 	m.binding = &cliTakeoverBinding{
 		path: "session.jsonl", record: cliServeRecord{base: oldServe.URL}, client: oldServe.Client(),
-		grant: cliTakeoverGrant{MirrorID: "mirror-old"},
+		grant: cliTakeoverGrant{MirrorID: "mirror-old"}, canonical: true, priorMirror: prior,
 	}
 	m.revision = 1
 	m.Emit(event.Event{Kind: event.Text, Text: "recover me"})
@@ -548,7 +549,7 @@ func TestCLITakeoverManagerReadoptsOnAuthFailureAndServerMove(t *testing.T) {
 		t.Fatalf("new serve received %d frame batches, want 1", delivered.Load())
 	}
 	binding, _, _, revision := m.snapshot()
-	if binding == nil || binding.grant.MirrorID != "mirror-new" || revision <= 1 {
+	if binding == nil || binding.grant.MirrorID != "mirror-new" || !binding.canonical || binding.priorMirror != prior || revision <= 1 {
 		t.Fatalf("binding after re-adopt = %+v revision=%d", binding, revision)
 	}
 }

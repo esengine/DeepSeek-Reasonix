@@ -12,6 +12,7 @@ import (
 	"testing"
 
 	"reasonix/internal/config"
+	"reasonix/internal/control"
 )
 
 func readPersistedTabsFile(t *testing.T) desktopTabsFile {
@@ -129,6 +130,7 @@ func TestRemoteTabRestoreBuildsDisconnectedShells(t *testing.T) {
 		RemoteTabs: []desktopRemoteTabEntry{
 			{ID: "r-1", HostID: "box", Workspace: "~/app", TopicTitle: "Fix bug", SessionName: "s1", SessionPath: "/remote/sessions/s1.jsonl"},
 			{ID: "r-2", HostID: "box", Workspace: "~/web", SessionPath: "/remote/sessions/blank.jsonl", SessionReset: true},
+			{ID: "r-3", HostID: "box", Workspace: "~/canonical", TopicTitle: "canonical-session-id", SessionName: "canonical-session-id", SessionID: "canonical-session-id"},
 			{ID: "", HostID: "box", Workspace: "~/skip"},
 			{ID: "local-1", HostID: "box", Workspace: "~/dup"},
 		},
@@ -139,7 +141,7 @@ func TestRemoteTabRestoreBuildsDisconnectedShells(t *testing.T) {
 
 	a.remoteTabMu.Lock()
 	defer a.remoteTabMu.Unlock()
-	if len(a.remoteTabs) != 2 || a.remoteTabs["r-1"] == nil || a.remoteTabs["r-2"] == nil {
+	if len(a.remoteTabs) != 3 || a.remoteTabs["r-1"] == nil || a.remoteTabs["r-2"] == nil || a.remoteTabs["r-3"] == nil {
 		t.Fatalf("restored shells = %+v", a.remoteTabs)
 	}
 	for id, tab := range a.remoteTabs {
@@ -153,14 +155,17 @@ func TestRemoteTabRestoreBuildsDisconnectedShells(t *testing.T) {
 	if got := a.remoteTabs["r-1"].topicTitle; got != "Fix bug" {
 		t.Fatalf("restored title = %q, want the persisted one", got)
 	}
+	if got := a.remoteTabs["r-3"].topicTitle; got != remoteWorkspaceName("~/canonical") {
+		t.Fatalf("canonical identity leaked into restored title = %q, want workspace fallback", got)
+	}
 	if tab := a.remoteTabs["r-1"]; tab.session.newSession || tab.session.name != "s1" || tab.session.path != "/remote/sessions/s1.jsonl" {
 		t.Fatalf("restored session identity = %+v", tab.session)
 	}
 	if tab := a.remoteTabs["r-2"]; !tab.session.newSession || !tab.session.reset || tab.session.path != "/remote/sessions/blank.jsonl" {
 		t.Fatalf("restored blank session identity = %+v", tab.session)
 	}
-	if got := strings.Join(a.remoteTabLayout.order, ","); got != "r-2,r-1" {
-		t.Fatalf("restored remote order = %q, want r-2,r-1", got)
+	if got := strings.Join(a.remoteTabLayout.order, ","); got != "r-2,r-1,r-3" {
+		t.Fatalf("restored remote order = %q, want r-2,r-1,r-3", got)
 	}
 	if a.remoteTabLayout.activeID != "" {
 		t.Fatalf("remoteActiveTabID = %q, want local startup surface", a.remoteTabLayout.activeID)
@@ -613,6 +618,9 @@ func TestRemoteStatusRefreshRejectsSnapshotOlderThanTurnDone(t *testing.T) {
 
 // TestSingleSurfaceTabsFileCollapsesRemote: workbench/creation layouts keep
 // exactly one surface across local and remote tabs, preferring the active one.
+// One local entry survives even when the remote surface is active: local
+// commands need a workspace tab to target, and the kept entry restores without
+// a runtime so it adds no hidden startup work.
 func TestSingleSurfaceTabsFileCollapsesRemote(t *testing.T) {
 	f := desktopTabsFile{
 		Tabs:       []desktopTabEntry{{ID: "l1"}, {ID: "l2"}},
@@ -620,11 +628,11 @@ func TestSingleSurfaceTabsFileCollapsesRemote(t *testing.T) {
 		ActiveTab:  "r1",
 	}
 	out := singleSurfaceTabsFile(f)
-	if len(out.Tabs) != 0 || len(out.RemoteTabs) != 1 || out.RemoteTabs[0].ID != "r1" {
+	if len(out.RemoteTabs) != 1 || out.RemoteTabs[0].ID != "r1" || out.ActiveTab != "r1" || !remoteSurfaceIsActiveTab(out) {
 		t.Fatalf("single-surface collapse = %+v", out)
 	}
-	if out.ActiveTab != "r1" {
-		t.Fatalf("collapsed ActiveTab = %q, want the remote r1", out.ActiveTab)
+	if len(out.Tabs) != 1 || out.Tabs[0].ID != "l1" {
+		t.Fatalf("collapsed local entries = %+v, want the dormant l1", out.Tabs)
 	}
 }
 
@@ -678,5 +686,113 @@ func TestTabsFileWithoutRemoteTabsKeepsLegacyShape(t *testing.T) {
 	}
 	if strings.Contains(string(data), "remoteTabs") || strings.Contains(string(data), "remoteTabOrder") {
 		t.Fatalf("tabs file mentions remote keys with none open:\n%s", data)
+	}
+}
+
+// TestRemoteOnlyLayoutRestoresOneDormantLocalTab: a remote-only layout must not
+// leave the app without a local workspace tab — local session opens and folder
+// drops target one — while the remote shell stays the visible surface and no
+// hidden startup work is added.
+func TestRemoteOnlyLayoutRestoresOneDormantLocalTab(t *testing.T) {
+	isolateDesktopUserDirs(t)
+	seedBridgeTestHost(t, "box")
+	dir := desktopConfigDir()
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	body := `{"tabs":null,"activeTab":"r1","remoteTabs":[{"id":"r1","hostId":"box","workspace":"~/app"}],"remoteTabOrder":["r1"],"tabOrder":["r1"]}`
+	if err := os.WriteFile(filepath.Join(dir, tabsFileName), []byte(body), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	a := NewApp()
+	a.ctx = t.Context()
+	a.remoteRuntime = &fakeRemoteKernel{}
+	t.Cleanup(func() { a.shutdown(context.Background()) })
+
+	a.restoreOrBuildTabs()
+
+	local := a.singleLocalTab()
+	a.mu.RLock()
+	tabCount, activeID := len(a.tabs), a.activeTabID
+	a.mu.RUnlock()
+	if tabCount != 1 || local == nil {
+		t.Fatalf("restored local tabs = %d, want exactly one dormant tab", tabCount)
+	}
+	if local.Ctrl != nil {
+		t.Fatal("dormant local tab built a runtime at startup")
+	}
+	if activeID != "" {
+		t.Fatalf("activeTabID = %q, want the remote surface to stay active", activeID)
+	}
+	// Activating the restored remote shell (what the frontend does once the
+	// layout is up) must keep it the visible surface: the dormant local tab
+	// never claims it.
+	a.remoteTabMu.Lock()
+	a.remoteTabLayout.activeID = "r1"
+	a.remoteTabMu.Unlock()
+	remoteSeen := false
+	for _, meta := range a.ListTabs() {
+		if meta.Remote != nil {
+			remoteSeen = true
+			if !meta.Active {
+				t.Fatalf("remote surface lost the visible surface: %+v", meta)
+			}
+			continue
+		}
+		if meta.Active {
+			t.Fatalf("dormant local tab claims the visible surface: %+v", meta)
+		}
+	}
+	if !remoteSeen {
+		t.Fatal("restored remote shell disappeared")
+	}
+}
+
+// TestOpenSessionUsesDormantLocalTabWithoutAnActiveTab: the state a remote-only
+// layout restores (no active local tab, one dormant tab) must open a local
+// canonical session instead of reporting "workspace is not ready".
+func TestOpenSessionUsesDormantLocalTabWithoutAnActiveTab(t *testing.T) {
+	app, ref := lifecycleFixture(t)
+	app.mu.Lock()
+	app.tabs = map[string]*WorkspaceTab{}
+	app.tabOrder = nil
+	app.activeTabID = ""
+	app.mu.Unlock()
+
+	release, err := app.beginProjectRuntimeAdmission("global", globalTabWorkspaceRoot())
+	if err != nil {
+		t.Fatal(err)
+	}
+	dormant := app.createTabEntry("global", globalTabWorkspaceRoot(), "")
+	dormant.sink = &tabEventSink{tabID: dormant.ID, app: app}
+	app.publishRestoredTab(dormant, release)
+
+	if _, err := app.OpenSession(ref); err != nil {
+		t.Fatalf("open session with only a dormant local tab: %v", err)
+	}
+	app.mu.RLock()
+	got := app.tabs[dormant.ID]
+	var boundCtrl control.SessionAPI
+	var boundSessionID string
+	if got != nil {
+		boundCtrl, boundSessionID = got.Ctrl, got.SessionID
+	}
+	app.mu.RUnlock()
+	if got == nil || boundCtrl == nil || boundSessionID != ref.SessionID {
+		t.Fatalf("dormant tab after open = %+v (ctrl nil=%v sessionID=%q)", got, boundCtrl == nil, boundSessionID)
+	}
+}
+
+// TestResumeAdoptsTabRuntimeWhenControllerIsNil: a caller that resolved a tab
+// before its runtime existed (a dormant tab restored for a remote-only layout)
+// must not fail the open when a concurrent activation already built one.
+func TestResumeAdoptsTabRuntimeWhenControllerIsNil(t *testing.T) {
+	app, tab, ctrl, _ := auditMigratedTab(t)
+	ref, ok := ctrl.SessionRef()
+	if !ok {
+		t.Fatal("fixture controller has no session ref")
+	}
+	if _, err := app.resumeCanonicalSessionForTranscript(tab, nil, sessionRoute(ref.SessionID), defaultHistoryPageTurns, false); err != nil {
+		t.Fatalf("resume with a nil controller: %v", err)
 	}
 }

@@ -2,6 +2,7 @@ package serve
 
 import (
 	"encoding/json"
+	"strings"
 	"sync"
 	"time"
 
@@ -303,7 +304,9 @@ func wireFrameMustReachSubscriber(data []byte) bool {
 // Serve so the remote tab keeps rendering the conversation live without any
 // change to its own pipeline.
 func (b *Broadcaster) EmitWire(wired eventwire.Event) {
-	if wired.SessionPath != "" {
+	// Identity routes are not filesystem paths: canonicalizing them would
+	// mangle the route into an absolute pseudo-path that no subscriber matches.
+	if wired.SessionPath != "" && !strings.HasPrefix(wired.SessionPath, remoteSessionIDQueryPrefix) {
 		wired.SessionPath = agent.CanonicalSessionPath(wired.SessionPath)
 	}
 	b.mu.Lock()

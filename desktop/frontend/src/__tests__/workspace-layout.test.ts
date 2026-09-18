@@ -23,6 +23,7 @@ const terminalPanelSource = readFileSync(resolve(testDir, "../components/Termina
 const terminalViewSource = readFileSync(resolve(testDir, "../components/TerminalView.tsx"), "utf8");
 const terminalRailSource = readFileSync(resolve(testDir, "../components/TerminalSessionRail.tsx"), "utf8");
 const terminalLifecycleSource = readFileSync(resolve(testDir, "../lib/useWarmTerminalPanel.ts"), "utf8");
+const appRuntimeViewSource = readFileSync(resolve(testDir, "../app-shell/AppRuntimeView.tsx"), "utf8");
 
 function eq(a: unknown, b: unknown, label: string) {
   if (a === b) {
@@ -42,6 +43,11 @@ const PREVIEW_DEFAULT_WIDTH = 660;
 const CHAT_COMFORT_MIN_WIDTH = 560;
 
 console.log("\nworkspace dock layout");
+eq(
+  /readOnly:\s*Boolean\(activeTab\?\.readOnly\s*&&\s*!activeTab\.takenOver\)/.test(appRuntimeViewSource),
+  true,
+  "takeover spectators keep the terminal interactive while ordinary read-only tabs stay locked",
+);
 eq(/\.app__dock-toggle/.test(stylesSource), false, "the workspace toggle is a bar action button, not a fixed overlay the bar must dodge");
 // Tabs size to their label and the strip to its tabs, so the add button sits
 // beside the last tab. A stretch rule (equal columns) or the removed

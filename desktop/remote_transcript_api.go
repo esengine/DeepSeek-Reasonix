@@ -22,6 +22,15 @@ type RemoteTranscriptSnapshot struct {
 }
 
 func (a *App) remoteTranscriptRead(tabID, route string, request any, destination any) (bool, error) {
+	return a.remoteTranscriptReadAttempt(tabID, route, request, destination, true)
+}
+
+// remoteTranscriptReadAttempt retries one 409 after refreshing the remote
+// identity: the serve may rotate its foreground while the desktop is reading
+// (model switch, resume, takeover), and retrying the stale route would only
+// repeat the conflict while a status refresh re-points the tab at the live
+// session.
+func (a *App) remoteTranscriptReadAttempt(tabID, route string, request, destination any, refreshOnConflict bool) (bool, error) {
 	client, base, err := a.remoteTabCommandClient(tabID)
 	if err != nil {
 		return false, err
@@ -85,6 +94,13 @@ func (a *App) remoteTranscriptRead(tabID, route string, request any, destination
 	switch response.StatusCode {
 	case http.StatusNotFound, http.StatusMethodNotAllowed, http.StatusNotImplemented:
 		return false, nil
+	case http.StatusConflict:
+		if refreshOnConflict {
+			if _, refreshErr := a.RemoteTabStatus(tabID); refreshErr == nil {
+				return a.remoteTranscriptReadAttempt(tabID, route, request, destination, false)
+			}
+		}
+		return false, fmt.Errorf("remote transcript read failed (HTTP %d)", response.StatusCode)
 	case http.StatusOK:
 	default:
 		return false, fmt.Errorf("remote transcript read failed (HTTP %d)", response.StatusCode)
@@ -197,7 +213,16 @@ func (a *App) remoteSessionHistoryRead(tabID, route string, query url.Values, de
 		a.remoteTabMu.Unlock()
 		return false, fmt.Errorf("remote session history runtime changed")
 	}
-	if !tab.capabilities[serveCapabilitySessionContentV1] {
+	requiredCapability := serveCapabilitySessions
+	switch route {
+	case "/session-history/content":
+		requiredCapability = serveCapabilitySessionContentV1
+	case "/session/open":
+		requiredCapability = serveCapabilitySessionReadV2
+	case "/session-history/window", "/session-message-field":
+		requiredCapability = serveCapabilityHistoryWindowV1
+	}
+	if !tab.capabilities[requiredCapability] {
 		a.remoteTabMu.Unlock()
 		return false, nil
 	}

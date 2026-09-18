@@ -53,7 +53,10 @@ export function useComposerProfileProjection(input: ComposerProfileProjectionInp
   const goal = composerProfile.goal;
   const collaborationMode = displayedComposerProfileCollaborationMode(composerProfile);
   const toolApprovalMode = composerProfile.toolApprovalMode;
-  const remoteComposerProfileReady = useRemoteComposerProfileSync({ activeTabId, remote,
+  const remoteSessionRoute = activeTab?.remote
+    ? (activeTab.sessionId ? `session-id:${activeTab.sessionId}` : activeTab.sessionPath ?? "")
+    : "";
+  const remoteComposerProfileReady = useRemoteComposerProfileSync({ activeTabId, sessionRoute: remoteSessionRoute, remote,
     remoteProfile: remoteSession.composerProfile, collaborationMode, toolApprovalMode, goal,
     qualityFloor: composerProfile.qualityFloor, pending: composerProfile.pending, setProfiles: setProfilesByTab });
 

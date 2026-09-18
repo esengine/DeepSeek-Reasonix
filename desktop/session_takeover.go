@@ -1106,8 +1106,10 @@ func (m *takeoverMirror) demote(interrupt bool) {
 		a.mu.RLock()
 		sink = tab.sink
 		a.mu.RUnlock()
-		// Block new submits before waiting for the current turn to drain.
-		a.setTabReadOnly(tab.ID, true)
+		// Block new submits before waiting for the current turn to drain. Keep
+		// integrated terminals alive: reclaim transfers this session's writer,
+		// not ownership of the local terminal process or workspace.
+		a.setTabReadOnlyPreservingTerminals(tab.ID, true)
 	}
 	m.emitNoticeSink(sink, event.LevelWarn, "session_taken_over_local",
 		"This session was taken back by the remote side. This window is a read-only spectator.")

@@ -425,3 +425,28 @@ func TestReplaySearchMissingSourcesIsExplicitAndKeepsSummary(t *testing.T) {
 		t.Fatal("inferred unrecorded old status")
 	}
 }
+
+// The replay must render the durable display view: host-generated
+// session-context wrappers are invisible plumbing, and the user bubble shows
+// the raw submitted text rather than the provider wrapper content.
+func TestReplayDropsHostSessionContextAndUsesRawUserText(t *testing.T) {
+	history := []provider.Message{
+		{Role: provider.RoleUser, Origin: provider.MessageOriginHost, Content: "<session-context version=\"1\">\nworkspace facts\n</session-context>"},
+		{Role: provider.RoleUser, Content: "<reasoning-language>\nuse zh\n</reasoning-language>\n回复ok就行", RawContent: "回复ok就行"},
+		{Role: provider.RoleAssistant, Content: "ok"},
+	}
+	sections := replaySectionsFor(history, 80)
+	joined := strings.Join(sections, "\n")
+	if strings.Contains(joined, "session-context") {
+		t.Fatalf("host session-context wrapper leaked into the replay: %q", joined)
+	}
+	if strings.Contains(joined, "reasoning-language") {
+		t.Fatalf("provider wrapper text leaked into the user bubble: %q", joined)
+	}
+	if !strings.Contains(joined, "回复ok就行") {
+		t.Fatalf("raw user text missing from the replay: %q", joined)
+	}
+	if !strings.Contains(joined, "ok") {
+		t.Fatalf("assistant reply missing from the replay: %q", joined)
+	}
+}

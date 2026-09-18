@@ -53,7 +53,14 @@ func setupCLIMultiSessionProfile(ctx context.Context, model string, maxSteps int
 }
 
 func newCLIMultiSessionServer(ctrl *control.Controller, bc *serve.Broadcaster, tag *serve.SessionTagSink, cfg config.ServeConfig, leases *control.SessionLeaseKeeper, buildOpts boot.Options) *serve.Server {
-	tag.SetPath(ctrl.SessionPath())
+	// Exclusive identities have no legacy path; without the session id the
+	// boot tag stamps live frames path-less and identity-routed subscribers
+	// cannot attribute them after the first rebind.
+	if ref, bound := ctrl.SessionRef(); bound {
+		tag.SetIdentity("", ref.SessionID)
+	} else {
+		tag.SetPath(ctrl.SessionPath())
+	}
 	srv := serve.New(ctrl, bc, cfg)
 	srv.SetControllerBuildOptions(buildOpts)
 	srv.RegisterSessionTag(ctrl, tag)

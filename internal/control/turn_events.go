@@ -38,6 +38,10 @@ type turnEventState struct {
 	err                        error
 	v3                         *session.Session
 	v3Path                     string
+	// v3Runtime pins the session instance the cached store belongs to. A
+	// reclaim closes the old runtime and a later takeover re-opens the same
+	// identity, so the path key alone would keep serving the closed store.
+	v3Runtime                  *session.Runtime
 	v3Release                  func(context.Context) error
 	v3Err                      error
 	projection                 *transcript.Projection
@@ -531,16 +535,22 @@ func (c *Controller) rebindTurnEvents(sessionPath string) {
 	}
 	desiredV3Path := sessionDirectory(sessionPath)
 	ledgerID := agent.BranchID(sessionPath)
+	var desiredRuntime *session.Runtime
 	if _, runtime, _ := c.v3Binding(); runtime != nil {
 		ref := runtime.Ref()
 		desiredV3Path = "session:" + ref.HostID + "/" + ref.SessionID
 		ledgerID = ref.SessionID
+		desiredRuntime = runtime
 	}
 	c.turnEvents.mu.RLock()
 	currentV3, currentV3Path := c.turnEvents.v3, c.turnEvents.v3Path
+	currentV3Runtime := c.turnEvents.v3Runtime
 	c.turnEvents.mu.RUnlock()
 	v3, releaseV3, v3Err := currentV3, (func(context.Context) error)(nil), error(nil)
-	if currentV3 == nil || currentV3Path != desiredV3Path {
+	// The runtime pin matters for exclusive sessions: a reclaim closes the
+	// old instance and the takeover re-opens the same identity, so the path
+	// alone cannot tell a live store from the closed one it replaced.
+	if currentV3 == nil || currentV3Path != desiredV3Path || currentV3Runtime != desiredRuntime {
 		v3, releaseV3, v3Err = c.openSessionEventStore(sessionPath)
 	}
 	ledger := turnevent.NewMemory(ledgerID)
@@ -558,6 +568,7 @@ func (c *Controller) rebindTurnEvents(sessionPath string) {
 		c.turnEvents.err = err
 		c.turnEvents.v3 = nil
 		c.turnEvents.v3Path = ""
+		c.turnEvents.v3Runtime = nil
 		c.turnEvents.v3Release = nil
 		c.turnEvents.v3Err = err
 		c.turnEvents.mu.Unlock()
@@ -591,6 +602,7 @@ func (c *Controller) rebindTurnEvents(sessionPath string) {
 	c.turnEvents.err = nil
 	c.turnEvents.v3 = v3
 	c.turnEvents.v3Path = desiredV3Path
+	c.turnEvents.v3Runtime = desiredRuntime
 	if releaseV3 != nil {
 		c.turnEvents.v3Release = releaseV3
 	}

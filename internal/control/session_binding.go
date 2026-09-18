@@ -29,9 +29,13 @@ func bindInitialSessionRuntime(opts Options) (*session.Runtime, *session.ClientB
 	return runtime, binding
 }
 
-// releaseSessionRuntimeBinding drops this controller's client reference. The
-// host service retains the writer until the last binding and activity exit.
-func (c *Controller) releaseSessionRuntimeBinding(service *session.Service) {
+// ReleaseSessionRuntimeBinding drops this controller's client reference without
+// tearing down the controller itself. Hosts use it when a session is handed
+// back to another runtime while keeping the current process alive.
+func (c *Controller) ReleaseSessionRuntimeBinding() error {
+	if c == nil {
+		return nil
+	}
 	c.v3BindingMu.Lock()
 	binding := c.sessionBinding
 	runtime := c.sessionRuntime
@@ -40,9 +44,17 @@ func (c *Controller) releaseSessionRuntimeBinding(service *session.Service) {
 	c.v3BindingMu.Unlock()
 	c.unbindExecutionControl(runtime)
 	if binding != nil {
-		if err := binding.Release(context.Background()); err != nil {
-			slog.Warn("controller: release exclusive v3 binding", "err", err)
-		}
+		return binding.Release(context.Background())
+	}
+	return nil
+}
+
+// releaseSessionRuntimeBinding is the final controller teardown wrapper. It
+// keeps the handoff-only release available without making normal Close paths
+// responsible for surfacing a late binding-release error.
+func (c *Controller) releaseSessionRuntimeBinding(service *session.Service) {
+	if err := c.ReleaseSessionRuntimeBinding(); err != nil {
+		slog.Warn("controller: release exclusive v3 binding", "err", err)
 	} else if service == nil {
 		slog.Warn("controller: exclusive v3 runtime has no service binding")
 	}
@@ -196,7 +208,14 @@ func (c *Controller) OpenSession(ctx context.Context, ref session.SessionRef) (s
 		return session.SessionRef{}, errors.New("v3 session service is unavailable")
 	}
 	if current != nil && current.Ref() == ref {
-		return ref, nil
+		// The controller keeps rendering a runtime it no longer owns after a
+		// reclaim released the writer: the service closed that store, so its
+		// recovery database answers "not open" to the next turn append. Only
+		// the service's still-active instance may take the fast path; a closed
+		// one must fall through and be re-opened.
+		if active, ok := service.Runtime(ref); ok && active == current {
+			return ref, nil
+		}
 	}
 	binding, err := service.Open(ctx, ref)
 	if errors.Is(err, session.ErrUnsupportedVersion) {

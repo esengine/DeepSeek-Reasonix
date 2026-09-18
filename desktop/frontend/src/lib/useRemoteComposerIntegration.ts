@@ -1,4 +1,4 @@
-import { useEffect, type Dispatch, type SetStateAction } from "react";
+import { useEffect, useRef, type Dispatch, type SetStateAction } from "react";
 import { useCommittedCommand } from "./useCommittedCommand";
 import { executeRemoteSend, executeComposerRuntime } from "../app-runtime/remoteComposerOwner";
 import type { SessionResource, useSessionOperations } from "../app-runtime/useSessionOperations";
@@ -72,6 +72,7 @@ export function useRemoteComposerSend(
 
 export function useRemoteComposerProfileSync(options: {
   activeTabId?: string;
+  sessionRoute?: string;
   remote: boolean;
   remoteProfile: RemoteProfile;
   collaborationMode: CollaborationMode;
@@ -81,11 +82,18 @@ export function useRemoteComposerProfileSync(options: {
   pending: ComposerProfile["pending"];
   setProfiles: Dispatch<SetStateAction<ComposerProfilesByTab>>;
 }): boolean {
-  const { activeTabId, remote, remoteProfile, collaborationMode, toolApprovalMode, goal, qualityFloor, pending, setProfiles } = options;
+  const { activeTabId, sessionRoute, remote, remoteProfile, collaborationMode, toolApprovalMode, goal, qualityFloor, pending, setProfiles } = options;
+  const lastRouteRef = useRef<string>("");
   useEffect(() => {
     if (!activeTabId || !remote || !remoteProfile) return;
+    // One remote tab rotates through many sessions; a cached profile belongs
+    // to the session it was read from, so a route change adopts the backend
+    // snapshot instead of reconciling over the previous session's overrides.
+    const routeKey = `${activeTabId}|${sessionRoute ?? ""}`;
+    const routeChanged = lastRouteRef.current !== routeKey;
+    lastRouteRef.current = routeKey;
     setProfiles((current) => {
-      const existing = current[activeTabId];
+      const existing = routeChanged ? undefined : current[activeTabId];
       const backend: ComposerProfile = {
         collaborationMode: remoteProfile.collaborationMode,
         goalDraftMode: false,
@@ -97,7 +105,7 @@ export function useRemoteComposerProfileSync(options: {
       const next = reconcileComposerProfile(existing, backend);
       return existing === next ? current : { ...current, [activeTabId]: next };
     });
-  }, [activeTabId, remote, remoteProfile, setProfiles]);
+  }, [activeTabId, sessionRoute, remote, remoteProfile, setProfiles]);
 
   return !remote || Boolean(remoteProfile
     && (pending.collaborationMode || collaborationMode === remoteProfile.collaborationMode)

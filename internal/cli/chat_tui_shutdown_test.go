@@ -65,6 +65,104 @@ func TestTUIShutdownUsesRecoveringSnapshotAndKeepsFailure(t *testing.T) {
 	}
 }
 
+func TestTUIShutdownSignalDoesNotQuitAfterReclaim(t *testing.T) {
+	m := newTestChatTUI()
+	m.sessionReclaimed = true
+	completion := newTUIShutdownCompletion()
+
+	next, cmd := m.update(tuiShutdownMsg{completion: completion})
+	if cmd != nil {
+		t.Fatalf("stale shutdown after reclaim returned %T, want no quit command", cmd)
+	}
+	if !next.(chatTUI).sessionReclaimed {
+		t.Fatal("reclaim marker was cleared by stale shutdown")
+	}
+	select {
+	case <-completion.done:
+	default:
+		t.Fatal("stale shutdown completion was not acknowledged")
+	}
+
+	_, cmd = m.update(tuiShutdownMsg{userInitiated: true})
+	if cmd == nil || cmd() != (tea.QuitMsg{}) {
+		t.Fatal("explicit quit after reclaim did not return tea.Quit")
+	}
+}
+
+func TestTUIShutdownSignalDoesNotQuitWhileReclaiming(t *testing.T) {
+	m := newTestChatTUI()
+	m.takeover = newCLITakeoverManager(nil, nil)
+	m.takeover.reclaiming.Store(true)
+	completion := newTUIShutdownCompletion()
+
+	next, cmd := m.update(tuiShutdownMsg{completion: completion})
+	if cmd != nil {
+		t.Fatalf("shutdown during reclaim returned %T, want no quit command", cmd)
+	}
+	if !next.(chatTUI).takeover.Reclaiming() {
+		t.Fatal("reclaim marker was cleared by shutdown race")
+	}
+	select {
+	case <-completion.done:
+	default:
+		t.Fatal("shutdown during reclaim was not acknowledged")
+	}
+}
+
+func TestBubbleTeaKeepsRunningWhenShutdownRacesReclaim(t *testing.T) {
+	m := newTestChatTUI()
+	m.takeover = newCLITakeoverManager(nil, nil)
+	m.takeover.reclaiming.Store(true)
+	p := tea.NewProgram(
+		shutdownOnlyProgramModel{chatTUI: m},
+		tea.WithInput(nil),
+		tea.WithOutput(io.Discard),
+		tea.WithoutRenderer(),
+		tea.WithoutSignals(),
+	)
+
+	type result struct {
+		model tea.Model
+		err   error
+	}
+	done := make(chan result, 1)
+	go func() {
+		model, err := p.Run()
+		done <- result{model: model, err: err}
+	}()
+	assertRunning := func(stage string) {
+		t.Helper()
+		select {
+		case result := <-done:
+			t.Fatalf("shutdown ended Bubble Tea %s: model=%T err=%v", stage, result.model, result.err)
+		case <-time.After(100 * time.Millisecond):
+		}
+	}
+
+	// Exercise every ordering window in the real program loop. The process must
+	// survive both the transaction and the gap before its UI callback arrives.
+	p.Send(tuiShutdownMsg{})
+	assertRunning("while reclaiming")
+	m.takeover.returned.Store(true)
+	m.takeover.reclaiming.Store(false)
+	p.Send(tuiShutdownMsg{})
+	assertRunning("after return and before the reclaim callback")
+	p.Send(tuiSessionReclaimedMsg{})
+	p.Send(tuiShutdownMsg{})
+	assertRunning("after the reclaim callback")
+
+	p.Send(tuiShutdownMsg{userInitiated: true})
+	select {
+	case result := <-done:
+		if result.err != nil {
+			t.Fatalf("explicit shutdown error = %v", result.err)
+		}
+	case <-time.After(time.Second):
+		p.Kill()
+		t.Fatal("Bubble Tea did not exit after explicit quit")
+	}
+}
+
 // shutdownOnlyProgramModel suppresses chatTUI's unrelated rendering and Init
 // work while delegating messages to the production shutdown handler.
 type shutdownOnlyProgramModel struct{ chatTUI }

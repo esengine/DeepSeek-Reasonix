@@ -32,6 +32,10 @@ func TestRemoteTabReconnectDoesNotLogEnsureServerSecrets(t *testing.T) {
 	log.SetOutput(&logs)
 	t.Cleanup(func() { log.SetOutput(previousWriter) })
 
+	previousDelays := remoteTabReattachDelays
+	remoteTabReattachDelays = nil
+	t.Cleanup(func() { remoteTabReattachDelays = previousDelays })
+
 	a.reattachRemoteTab("remote-1")
 	if strings.Contains(logs.String(), secret) {
 		t.Fatalf("reconnect log exposed EnsureServer error: %q", logs.String())
@@ -42,7 +46,7 @@ func TestRemoteTabReconnectDoesNotLogEnsureServerSecrets(t *testing.T) {
 	a.remoteTabMu.Lock()
 	state := a.remoteTabs["remote-1"].state
 	a.remoteTabMu.Unlock()
-	if kernel.ensureCalls != remoteTabReattachAttempts || state != "serve_down" {
+	if kernel.ensureCalls != len(remoteTabReattachDelays)+1 || state != "serve_down" {
 		t.Fatalf("reattach exhaustion calls/state = %d/%q", kernel.ensureCalls, state)
 	}
 }
