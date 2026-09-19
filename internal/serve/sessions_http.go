@@ -2,17 +2,24 @@ package serve
 
 import (
 	"context"
+	"errors"
+	"log/slog"
 	"net/http"
 	"os"
 	"path/filepath"
 	"sort"
 	"strings"
+	"time"
 
 	"reasonix/internal/agent"
 	"reasonix/internal/control"
 	"reasonix/internal/session"
 	"reasonix/internal/store"
 )
+
+// generatedTitleWriteTimeout bounds the best-effort durable write of a title
+// generated while listing; the poll must not wait on another writer's lease.
+const generatedTitleWriteTimeout = 2 * time.Second
 
 type sessionListEntry struct {
 	HostID     string `json:"hostId,omitempty"`
@@ -89,8 +96,9 @@ func (s *Server) sessions(w http.ResponseWriter, r *http.Request) {
 				for _, info := range page.Sessions {
 					row := sessionListEntry{
 						HostID: info.Ref.HostID, SessionID: info.Ref.SessionID, Name: info.SessionID,
-						Title: s.sessionDisplayTitle(r.Context(), info), Turns: info.Turns, MtimeMilli: info.UpdatedAt.UnixMilli(),
-						Current: bound && info.Ref == runtime.Ref(),
+						Title: s.sessionDisplayTitle(r.Context(), service, info), Turns: info.Turns,
+						MtimeMilli: info.UpdatedAt.UnixMilli(),
+						Current:    bound && info.Ref == runtime.Ref(),
 					}
 					if live, exists := service.Runtime(info.Ref); exists {
 						phase := live.Snapshot().Phase
@@ -106,19 +114,37 @@ func (s *Server) sessions(w http.ResponseWriter, r *http.Request) {
 }
 
 // sessionDisplayTitle resolves what the session list shows for one stored
-// session. Precedence is durable-then-derived: an explicit title recorded in
-// the session's own event log (a manual rename or the agent's title tool) wins,
-// then the generated title cache, then the first authored message as a preview.
-// sessionTitle is the cache-and-generate step; this supplies the key and source
-// a stored, non-transcript session can offer.
-func (s *Server) sessionDisplayTitle(ctx context.Context, info session.SessionInfo) string {
+// session, following docs/SESSION_TITLE_OWNERSHIP.md: an explicit title in the
+// session's own event log first, then a generated title, then the first authored
+// message. The generated title is written through to the same event log rather
+// than kept beside it, so every reader of the store sees the same name and a
+// manual rename racing this generation wins on the title revision.
+func (s *Server) sessionDisplayTitle(ctx context.Context, service *session.Service, info session.SessionInfo) string {
 	if info.Title != "" {
 		return info.Title
 	}
-	// A v4 session has no transcript path, so its store id is the cache key and
-	// its catalog preview stands in for the first user message.
+	// A v4 session has no transcript path, so its store id keys the local
+	// generation cache and its catalog preview stands in for the first message.
 	if info.Preview == "" {
 		return ""
 	}
-	return s.sessionTitle(ctx, info.SessionID, info.Preview, info.UpdatedAt.UnixNano())
+	title := s.sessionTitle(ctx, info.SessionID, info.Preview, info.UpdatedAt.UnixNano())
+	if title == "" {
+		return ""
+	}
+	s.persistGeneratedTitle(ctx, service, info, title)
+	return title
+}
+
+// persistGeneratedTitle records a generated title in the session's own event
+// log, guarded by the title revision the listing read. Best-effort: a session
+// another runtime owns, or one renamed while generation ran, simply keeps its
+// current title, and the local cache still serves this poll.
+func (s *Server) persistGeneratedTitle(ctx context.Context, service *session.Service, info session.SessionInfo, title string) {
+	writeCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), generatedTitleWriteTimeout)
+	defer cancel()
+	err := service.SetTitleIfSequence(writeCtx, info.Ref, info.TitleSequence, title)
+	if err != nil && !errors.Is(err, session.ErrSessionTitleChanged) {
+		slog.Warn("serve: persist generated title", "session", info.SessionID, "err", err)
+	}
 }

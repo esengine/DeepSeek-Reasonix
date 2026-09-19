@@ -1,6 +1,7 @@
 package serve
 
 import (
+	"context"
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
@@ -182,6 +183,114 @@ func TestSessionsGeneratesAndCachesV4Title(t *testing.T) {
 	// A warmed cache must not re-request the title on the next poll.
 	if _, again := listSessionRows(t, f.srv), len(prov.requests); again != 1 {
 		t.Fatalf("title requests after warm poll = %d, want 1", again)
+	}
+}
+
+// TestGeneratedTitleBecomesDurable proves the title a listing generates is
+// written through to the session's own event log. A second, independent service
+// over the same store - the shape of a different transport, or this one after a
+// restart - must read it without generating anything, and it must survive with
+// the local title cache deleted.
+func TestGeneratedTitleBecomesDurable(t *testing.T) {
+	f := newServeFixture(t)
+	addV4UserTurn(t, f.service, "durable", "explain the session store")
+	prov := &recordingTitleProvider{}
+	f.srv.titleProv = prov
+
+	rows := listSessionRows(t, f.srv)
+	row, ok := rowFor(rows, "durable")
+	if !ok {
+		t.Fatalf("session missing from rows %+v", rows)
+	}
+	if row.Title != "explain the session store" {
+		t.Fatalf("listed title = %q", row.Title)
+	}
+
+	// The disposable cache is gone; only the durable log can answer now.
+	if err := os.Remove(filepath.Join(f.store, ".session-titles.json")); err != nil && !os.IsNotExist(err) {
+		t.Fatal(err)
+	}
+	reader, err := session.NewService("local", session.NewFilesystemPersistence(f.store))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer reader.CloseAll(t.Context())
+	info, err := reader.Query().Stat(t.Context(), session.SessionRef{HostID: "local", SessionID: "durable"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if info.Title != "explain the session store" {
+		t.Fatalf("durable title = %q, want the generated title in the event log", info.Title)
+	}
+	if info.TitleSequence == 0 {
+		t.Fatal("durable title has no revision, so a later rename cannot fence it")
+	}
+}
+
+// TestGeneratedTitleWriteRespectsConcurrentRename fences the write-through with
+// the revision the listing read: if the session was renamed after that read, the
+// generated title must be dropped rather than overwriting the rename.
+func TestGeneratedTitleWriteRespectsConcurrentRename(t *testing.T) {
+	f := newServeFixture(t)
+	addV4UserTurn(t, f.service, "raced", "explain the session store")
+	prov := &recordingTitleProvider{}
+	f.srv.titleProv = prov
+
+	// The listing read revision N, then a manual rename landed, advancing it.
+	stale, err := f.service.Query().Stat(t.Context(), session.SessionRef{HostID: "local", SessionID: "raced"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := f.service.SetTitle(t.Context(), stale.Ref, "手动重命名"); err != nil {
+		t.Fatal(err)
+	}
+	f.srv.persistGeneratedTitle(t.Context(), f.service, stale, "explain the session store")
+
+	rows := listSessionRows(t, f.srv)
+	row, ok := rowFor(rows, "raced")
+	if !ok {
+		t.Fatalf("session missing from rows %+v", rows)
+	}
+	if row.Title != "手动重命名" {
+		t.Fatalf("title = %q, want the rename to survive the racing generation", row.Title)
+	}
+}
+
+// TestGeneratedTitleWriteFailureKeepsListing guards the best-effort contract: a
+// write-through that loses the race for the writer lease must not fail the poll,
+// and the generated title still names the session from the local cache.
+func TestGeneratedTitleWriteFailureKeepsListing(t *testing.T) {
+	f := newServeFixture(t)
+	addV4UserTurn(t, f.service, "busy", "explain the session store")
+	prov := &recordingTitleProvider{}
+	f.srv.titleProv = prov
+
+	// A second service holds the session's writer lease, so the durable write
+	// cannot land while the listing is served.
+	holder, err := session.NewService("local", session.NewFilesystemPersistence(f.store))
+	if err != nil {
+		t.Fatal(err)
+	}
+	binding, err := holder.Open(t.Context(), session.SessionRef{HostID: "local", SessionID: "busy"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() {
+		if err := binding.Release(context.Background()); err != nil {
+			t.Errorf("release holder binding: %v", err)
+		}
+		if err := holder.CloseAll(context.Background()); err != nil {
+			t.Errorf("close holder service: %v", err)
+		}
+	})
+
+	rows := listSessionRows(t, f.srv)
+	row, ok := rowFor(rows, "busy")
+	if !ok {
+		t.Fatalf("session missing from rows %+v", rows)
+	}
+	if row.Title != "explain the session store" {
+		t.Fatalf("title = %q, want the generated title despite the failed write", row.Title)
 	}
 }
 
