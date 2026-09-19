@@ -123,7 +123,7 @@ func New(ctrl control.SessionAPI, bc *Broadcaster, serveCfg config.ServeConfig) 
 	s := &Server{
 		ctrl:        ctrl,
 		bc:          bc,
-		titles:      newTitleCache(ctrl.SessionDir()),
+		titles:      newTitleCache(titleCacheDir(ctrl.SessionDir())),
 		auth:        newAuthGate(serveCfg),
 		detached:    map[string]*detachedSession{},
 		tags:        map[*control.Controller]*sessionTagSink{},
@@ -1614,10 +1614,10 @@ func removeSessionFiles(absDir, abs string) error {
 	return agent.ClearCleanupPending(abs)
 }
 
-// sessionTitle returns a title for a session: the cached flash-generated title
-// when its first user message is unchanged, otherwise a freshly generated one
-// (cached for next time), falling back to a truncated preview when generation
-// is off.
+// sessionTitle returns a cached-or-generated title for a session's first user
+// message (key identifies the session in the title cache). Callers holding an
+// explicit title recorded in the session's own log must prefer it first; see
+// sessionDisplayTitle for the stored-session resolution order.
 func (s *Server) sessionTitle(ctx context.Context, name, first string, mod int64) string {
 	source := titleSource(first)
 	if cached, ok := s.titles.get(name, source, mod); ok {

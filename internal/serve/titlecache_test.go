@@ -58,6 +58,22 @@ func TestTitleCacheReadsLegacyMtimeEntries(t *testing.T) {
 	}
 }
 
+func TestTitleCacheDirIsTheStoreRootBesideLegacySessions(t *testing.T) {
+	base := t.TempDir()
+	// SessionDir is the legacy transcript catalog; the cache belongs to the
+	// sibling store root where v4 sessions and their titles actually live.
+	cases := []struct{ sessionDir, want string }{
+		{filepath.Join(base, "projects", "proj", "sessions"), filepath.Join(base, "projects", "proj", "sessions-v4")},
+		{filepath.Join(base, "sessions"), filepath.Join(base, "sessions-v4")},
+		{"", ""},
+	}
+	for _, tc := range cases {
+		if got := titleCacheDir(tc.sessionDir); got != tc.want {
+			t.Errorf("titleCacheDir(%q) = %q, want %q", tc.sessionDir, got, tc.want)
+		}
+	}
+}
+
 func TestTitleCacheWritesRemainReadableByOlderVersions(t *testing.T) {
 	dir := t.TempDir()
 	newTitleCache(dir).put("a.jsonl", "Compatible", "first prompt", 7)
