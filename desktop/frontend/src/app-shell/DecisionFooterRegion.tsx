@@ -51,6 +51,7 @@ export type DecisionFooterRegionProps = {
     inert: boolean;
     hero: boolean;
     headline?: string;
+    hint?: string;
     props: ComposerProps;
   };
 };
@@ -104,6 +105,7 @@ export function DecisionFooterRegion({
       >
         {composer.hero && composer.headline ? <h2 className="welcome-creation__headline">{composer.headline}</h2> : null}
         <Composer {...composer.props} />
+        {composer.hero && composer.hint ? <p className="composer-decision-host__hint">{composer.hint}</p> : null}
       </div>
     </footer>
   );

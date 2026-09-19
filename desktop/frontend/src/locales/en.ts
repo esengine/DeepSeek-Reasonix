@@ -3518,6 +3518,7 @@ export const en = {
   "draft.surfaceLabel": "New session draft",
   "draft.globalWorkspace": "No project",
   "draft.saved": "Saved",
+  "draft.createOnSend": "The session will be created after you send your first message",
   "draft.saving": "Saving…",
   "draft.unsaved": "Unsaved changes",
   "draft.saveFailed": "Save failed — retrying with the next edit",

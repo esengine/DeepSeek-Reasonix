@@ -3517,6 +3517,7 @@ export const zhTW: Record<DictKey, string> = {
   "draft.surfaceLabel": "新工作階段草稿",
   "draft.globalWorkspace": "無專案工作區",
   "draft.saved": "已儲存",
+  "draft.createOnSend": "傳送第一則訊息後建立工作階段",
   "draft.saving": "正在儲存…",
   "draft.unsaved": "有未儲存修改",
   "draft.saveFailed": "儲存失敗，將在下次編輯時重試",

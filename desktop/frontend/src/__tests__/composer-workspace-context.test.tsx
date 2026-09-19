@@ -94,6 +94,25 @@ assert.equal(buildComposerSurface({ ...surfaceInput, tab: missingTab }).props.su
 assert.equal(buildComposerSurface({ ...surfaceInput, tab: { ...missingTab, modelSettingsPending: true } }).props.submitDisabled, false, "saved settings can reach backend apply-before-admission");
 assert.equal(buildComposerSurface({ ...surfaceInput, tab: { ...missingTab, modelSettingsPending: true }, view: { ...surfaceInput.view, controllerReady: false } }).props.submitDisabled, true, "pending settings never bypass controller readiness");
 assert.equal(buildComposerSurface({ ...surfaceInput, view: { ...surfaceInput.view, hero: false } }).props.workspaceContext, undefined, "established sessions use the compact follow-up composer");
+const draftSurfaceInput = {
+  ...surfaceInput,
+  view: { ...surfaceInput.view, hero: false },
+  draft: {
+    surface: {
+      kind: "draft",
+      draft: { id: "draft-a", workspaceId: "workspace-a", scope: "project", workspaceRoot: "/repo", revision: 1, contentJson: "{}", settings: {}, status: "active", updatedAt: 1 },
+      content: { text: "", invocations: [], attachments: [], workspaceRefs: [], pastedBlocks: [], openPastedLabels: [], sessionRefs: [], selectedTextRefs: [] },
+      settings: { model: "fixture/model", mode: "normal", toolApprovalMode: "ask", disabledMcp: {}, mcpOrder: [] },
+      commands: [], servers: [], generation: 1, editVersion: 0, pendingTasks: 0, preparingSubmission: false, saveState: "saved",
+    },
+    captureSubmission: noop, releasePreparation: noop, flushPreparation: noop, submitFrom: noop,
+    updateSettingsFor: noop, cancelSubmission: noop, updateContentFor: noop, patchContentFor: noop,
+    isCurrentHandle: () => true, canEditHandle: () => true, trackTask: noop, reportTaskError: noop,
+  },
+} as unknown as ComposerSurfaceInput;
+const draftContext = buildComposerSurface(draftSurfaceInput).props.workspaceContext;
+assert.equal(draftContext?.workspaceRoot, "/repo", "drafts keep workspace selection when the backing tab is not in its hero state");
+assert.equal(draftContext?.scopeKey, "draft:workspace-a", "draft workspace actions use the draft owner identity");
 
 const rootElement = document.getElementById("root");
 assert(rootElement);

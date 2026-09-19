@@ -3521,6 +3521,7 @@ export const zh: Record<DictKey, string> = {
   "draft.surfaceLabel": "新会话草稿",
   "draft.globalWorkspace": "无项目工作区",
   "draft.saved": "已保存",
+  "draft.createOnSend": "发送第一条消息后创建会话",
   "draft.saving": "正在保存…",
   "draft.unsaved": "有未保存修改",
   "draft.saveFailed": "保存失败，将在下次编辑时重试",

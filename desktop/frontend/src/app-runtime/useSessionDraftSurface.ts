@@ -148,6 +148,22 @@ export function draftSubmissionLocksEditing(operation?: SessionDraftSubmissionVi
   return Boolean(operation && !["cancelled", "terminal_failed"].includes(operation.phase));
 }
 
+const DRAFT_ATTENTION_PHASES = new Set([
+  "accepted",
+  "dispatch_unknown",
+  "dispatching_shell",
+  "resume_required",
+  "runtime_failed",
+  "terminal_failed",
+]);
+
+/** Healthy drafts use the ordinary new-session landing. Only states that need
+ *  an explicit user decision interrupt that surface with recovery controls. */
+export function draftSurfaceNeedsAttention(draft: SessionDraftSurface): boolean {
+  return draft.saveState === "conflict" || draft.saveState === "error" || Boolean(draft.taskError)
+    || Boolean(draft.operation && DRAFT_ATTENTION_PHASES.has(draft.operation.phase));
+}
+
 function projectEntry(entry: DraftEntry): SessionDraftSurface {
   return {
     kind: "draft",

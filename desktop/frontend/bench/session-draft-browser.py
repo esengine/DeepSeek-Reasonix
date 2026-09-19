@@ -23,7 +23,9 @@ with sync_playwright() as p:
     rows = page.locator('.project-tree__topic-main').count()
     page.locator('.project-tree__folder--project').first.hover()
     project_new.click()
-    expect(page.locator('.session-draft-surface')).to_be_visible()
+    expect(page.locator('.main--draft-landing')).to_have_count(1)
+    expect(page.locator('.welcome-creation__headline')).to_be_visible()
+    expect(page.locator('.session-draft-surface')).to_have_count(0)
     composer.fill('persistent draft ownership fixture')
     for _ in range(20):
         page.locator('.project-tree__folder--project').first.hover()
@@ -33,17 +35,18 @@ with sync_playwright() as p:
     page.locator('.sidebar__quick-action').first.click()
     expect(composer).to_have_value('persistent draft ownership fixture')
     history.click()
-    expect(page.locator('.session-draft-surface')).to_have_count(0)
+    expect(page.locator('.main--draft-landing')).to_have_count(0)
     page.keyboard.press('Meta+n')
-    expect(page.locator('.session-draft-surface')).to_be_visible()
+    expect(page.locator('.main--draft-landing')).to_have_count(1)
+    expect(page.locator('.welcome-creation__headline')).to_be_visible()
     expect(composer).to_have_value('persistent draft ownership fixture')
     history.click()
-    expect(page.locator('.session-draft-surface')).to_have_count(0)
+    expect(page.locator('.main--draft-landing')).to_have_count(0)
     page.locator('.project-tree__folder--project').first.click(button='right')
     page.get_by_role('menuitem', name='New session', exact=True).click()
     expect(composer).to_have_value('persistent draft ownership fixture')
     history.click()
-    expect(page.locator('.session-draft-surface')).to_have_count(0)
+    expect(page.locator('.main--draft-landing')).to_have_count(0)
     page.keyboard.press('Meta+k')
     page.locator('.palette input').fill('New session')
     page.get_by_role('option').filter(has_text='New session').first.click()
@@ -54,14 +57,14 @@ with sync_playwright() as p:
     times = []
     for _ in range(30):
         history.click()
-        expect(page.locator('.session-draft-surface')).to_have_count(0)
+        expect(page.locator('.main--draft-landing')).to_have_count(0)
         expect(page.locator('.transcript-navigation-surface[aria-busy=false]')).to_be_visible()
         elapsed = page.evaluate('''() => new Promise(resolve => {
           const start = performance.now();
           document.querySelector('.project-tree__folder-action--create').click();
           const inspect = () => {
             const input = document.querySelector('textarea.composer__input:not([aria-hidden=true])');
-            if (document.querySelector('.session-draft-surface') && input && !input.disabled && input.value === 'persistent draft ownership fixture') resolve(performance.now()-start);
+            if (document.querySelector('.main--draft-landing') && input && !input.disabled && input.value === 'persistent draft ownership fixture') resolve(performance.now()-start);
             else requestAnimationFrame(inspect);
           };
           requestAnimationFrame(inspect);
