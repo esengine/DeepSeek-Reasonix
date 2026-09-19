@@ -699,11 +699,29 @@ func newChatTUI(ctrl control.SessionAPI, missing string, eventCh chan event.Even
 	}
 }
 
-func transcriptContentWidth(termW int, nativeScrollback bool) int {
-	if !nativeScrollback {
+// transcriptContentWidth returns the columns a transcript block may occupy,
+// reserving the last column for the in-app scrollbar unless the caller reports
+// noScrollbar (Termux native scrollback, or native mouse mode where the terminal
+// owns the mouse and the scrollbar is hidden).
+func transcriptContentWidth(termW int, noScrollbar bool) int {
+	if !noScrollbar {
 		termW-- // reserve the last column for the transcript scrollbar
 	}
 	return max(termW, 1)
+}
+
+// transcriptWidth is the width a transcript block may occupy in the current
+// terminal. Block renderers must use it (not m.width) so a full row stops at the
+// scrollbar column instead of soft-wrapping its last cell.
+func (m chatTUI) transcriptWidth() int {
+	return transcriptContentWidth(m.width, m.noScrollbar())
+}
+
+// noScrollbar reports whether the transcript drops its right-hand scrollbar
+// column: Termux native scrollback never draws one, and native mouse mode hands
+// the mouse to the terminal so the in-app bar can't be dragged anyway.
+func (m chatTUI) noScrollbar() bool {
+	return m.nativeScrollback || m.mouseCaptureOff
 }
 
 func configureChatTextarea(ti *textarea.Model) {
@@ -968,7 +986,7 @@ func (m chatTUI) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 	}
 
-	contentW := transcriptContentWidth(cm.width, cm.nativeScrollback)
+	contentW := cm.transcriptWidth()
 	cm.viewport.SetWidth(contentW)
 	// Recompute the wrapped status-line count so bottomRows reserves the right
 	// height for the viewport. Use cm.width (same as boxW in View()) so the
@@ -4182,7 +4200,7 @@ func (m *chatTUI) runSlashCommand(input string) tea.Cmd {
 		m.finalizeStreamed()
 		m.clearTranscriptDisplay()
 		m.commitLine(strings.TrimRight(
-			renderTUIBanner(m.label, "", transcriptContentWidth(m.width, m.nativeScrollback)), "\n"))
+			renderTUIBanner(m.label, "", m.transcriptWidth()), "\n"))
 		m.transcriptDirty = true
 		m.forceGotoBottom = true
 		m.notice(i18n.M.SlashClsDone)
@@ -4783,7 +4801,9 @@ func (m *chatTUI) runExtensionAction(name string, args map[string]string) tea.Cm
 // results remain quiet, while interrupted-turn reasoning and tool cards replay
 // from provider-excluded LocalOnly records so restart matches the live view.
 func replaySectionsFor(history []provider.Message, width int) []string {
-	return replaySectionsForWithAssistantRenderer(history, width, renderAssistantMarkdown)
+	return replaySectionsForWithAssistantRenderer(history, width, func(raw string, w int) string {
+		return renderAssistantMarkdown(raw, w, false)
+	})
 }
 
 func replaySectionsForWithAssistantRenderer(

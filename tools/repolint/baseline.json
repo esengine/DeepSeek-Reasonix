@@ -3,7 +3,7 @@
     "banner": 13,
     "commented-code": 0,
     "complexity": 1878,
-    "essay": 1915,
+    "essay": 1916,
     "file-size": 100466,
     "function-size": 8031,
     "layering": 1,
@@ -666,7 +666,7 @@
     "internal/cli/chat_tui.go": {
       "complexity": 274,
       "essay": 77,
-      "file-size": 4112,
+      "file-size": 4132,
       "function-size": 1056
     },
     "internal/cli/chat_tui_paste.go": {
@@ -674,8 +674,8 @@
       "file-size": 6
     },
     "internal/cli/chat_tui_test.go": {
-      "essay": 7,
-      "test-file-size": 3533
+      "essay": 10,
+      "test-file-size": 3544
     },
     "internal/cli/cli.go": {
       "complexity": 90,
