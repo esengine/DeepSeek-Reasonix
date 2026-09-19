@@ -39,6 +39,11 @@ export interface TranscriptProjection {
   digest: string;
 }
 
+export interface PreparedTranscriptInstall {
+  projection: TranscriptProjection;
+  commit(): void;
+}
+
 export interface LoadOlderResult extends TranscriptProjection {
   /** "prepend": page older items; "reload": cursor went stale, full latest replace. */
   kind: "prepend" | "reload";

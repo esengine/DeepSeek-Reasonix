@@ -45,6 +45,27 @@ func TestBusinessSettlementUpdatesStreamingRowWithoutDuplicateOrPendingState(t *
 	}
 }
 
+func TestBusinessRowsWithoutCanonicalIdentityReceiveDistinctViewIdentity(t *testing.T) {
+	p, err := NewProjection(testIdentity, nil, 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	initial, err := p.Follow(t.Context(), FollowRequest{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	p.AcceptBusiness([]Message{{Role: "notice", Content: "first"}, {Role: "notice", Content: "second"}}, 1, "turn", false)
+	cut := snapshot(t, p)
+	if len(cut.Records) != 2 || cut.Records[0].ID == "" || cut.Records[0].ID == cut.Records[1].ID {
+		t.Fatalf("business identity allocation = %+v", cut.Records)
+	}
+	suffix := followChanges(t, p, FollowRequest{Subscription: initial.Subscription, AfterRevision: initial.Snapshot.ProjectionRevision})
+	if len(suffix.Changes) != 1 || len(suffix.Changes[0].Records) != 2 || suffix.Changes[0].Records[0].RecordID == "" ||
+		suffix.Changes[0].Records[0].RecordID == suffix.Changes[0].Records[1].RecordID {
+		t.Fatalf("published business identities = %+v", suffix.Changes)
+	}
+}
+
 func TestBusinessPublisherReleasesCompletedActiveRowsWithinHistoryBudget(t *testing.T) {
 	p, err := NewProjection(testIdentity, nil, 0)
 	if err != nil {

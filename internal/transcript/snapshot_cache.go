@@ -1,6 +1,8 @@
 package transcript
 
 import (
+	"errors"
+	"fmt"
 	"maps"
 	"reflect"
 )
@@ -11,6 +13,21 @@ const snapshotCacheEntries = 3
 type frozenSnapshot struct {
 	projection *Projection
 	bytes      int
+}
+
+func validateRecordIdentities(messages []*bufferedMessage) error {
+	seen := make(map[string]int, len(messages))
+	for index, row := range messages {
+		id := row.message.RecordID
+		if id == "" {
+			return errors.New("transcript snapshot record identity is missing")
+		}
+		if previous, exists := seen[id]; exists {
+			return fmt.Errorf("transcript snapshot record identity %q is duplicated at %d and %d", id, previous, index)
+		}
+		seen[id] = index
+	}
+	return nil
 }
 
 // freezeLocked retains a bounded number of immutable cuts. Strings already
@@ -41,6 +58,11 @@ func (p *Projection) freezeLocked(id string) (*Projection, error) {
 			copy.reasoning.replace(message.Reasoning)
 		}
 		frozen.buffer.messages = append(frozen.buffer.messages, copy)
+	}
+	// Reject a malformed projection before it becomes a reusable frozen cut.
+	// Empty or duplicate identities would alias pagination and content reads.
+	if err := validateRecordIdentities(frozen.buffer.messages); err != nil {
+		return nil, err
 	}
 	// The turn index is derived once per cut and shares this cut's lifetime, so
 	// paging the body never shrinks navigation and repeated outline reads reuse

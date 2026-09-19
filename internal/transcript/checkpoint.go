@@ -3,6 +3,7 @@ package transcript
 import (
 	"encoding/json"
 	"errors"
+	"fmt"
 	"os"
 	"reflect"
 
@@ -43,7 +44,8 @@ func RestoreCheckpoint(state Checkpoint, identity Identity) (*Projection, error)
 		state.Identity.HeadID != identity.HeadID || state.Identity.RewriteEpoch != identity.RewriteEpoch {
 		return nil, errors.New("transcript checkpoint identity mismatch")
 	}
-	p, err := NewProjection(identity, state.Records, state.CoveredThroughSeq)
+	records := repairCheckpointRecordIdentities(state.Records, state.CoveredThroughSeq)
+	p, err := NewProjection(identity, records, state.CoveredThroughSeq)
 	if err != nil {
 		return nil, err
 	}
@@ -70,6 +72,40 @@ func RestoreCheckpoint(state Checkpoint, identity Identity) (*Projection, error)
 	}
 	p.buffer.completion = owned.Completion
 	return p, nil
+}
+
+// Older builds could persist display-only rows without an identity when a
+// frame was published outside the active turn. Repair only that legacy shape;
+// non-empty duplicate identities remain corruption and are rejected by
+// NewProjection. The generated value is deterministic for this checkpoint so
+// repeated recovery cannot reshuffle mounted rows.
+func repairCheckpointRecordIdentities(records []Message, covered uint64) []Message {
+	repaired := append([]Message(nil), records...)
+	used := make(map[string]bool, len(repaired))
+	for _, record := range repaired {
+		if record.RecordID != "" {
+			used[record.RecordID] = true
+		}
+	}
+	for index := range repaired {
+		if repaired[index].RecordID != "" {
+			continue
+		}
+		switch {
+		case repaired[index].Role == "tool" && repaired[index].ToolCallID != "":
+			repaired[index].RecordID = "tool:" + repaired[index].ToolCallID
+		case repaired[index].MessageID != "":
+			repaired[index].RecordID = "m:" + repaired[index].MessageID
+		default:
+			base := fmt.Sprintf("view:checkpoint:%d:%d", covered, index)
+			repaired[index].RecordID = base
+			for suffix := 1; used[repaired[index].RecordID]; suffix++ {
+				repaired[index].RecordID = fmt.Sprintf("%s:%d", base, suffix)
+			}
+		}
+		used[repaired[index].RecordID] = true
+	}
+	return repaired
 }
 
 func SaveCheckpoint(sessionPath string, state Checkpoint) error {

@@ -254,6 +254,9 @@ func (p *Projection) contentCurrent(req ContentRequest) (ContentChunk, error) {
 }
 
 func boundedRecord(message Message, snapshotID string) (Record, error) {
+	if message.RecordID == "" {
+		return Record{}, errors.New("transcript snapshot record identity is missing")
+	}
 	out := Record{ID: message.RecordID, Refs: []ContentRef{}}
 	out.Message = mapContentStrings(reflect.ValueOf(message), nil, func(text string, path []string) string {
 		if len(text) <= inlineFieldBytes {

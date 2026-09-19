@@ -3,6 +3,7 @@ import type { HistoryPreparationWait } from "./historyPreparation";
 import { asArray } from "./array";
 import { canonicalHistoryContent, canonicalHistorySlice } from "./canonicalTranscriptBackend";
 import { fetchPreparedHistorySlice } from "./transcriptHistoryFetch";
+import { prepareTranscriptInstall } from "./transcriptStoreInstall";
 import { registerTranscriptCacheDiagnostics } from "./sessionDiagnostics";
 import { TranscriptMarkdownCache, type ParsedMarkdownValue } from "./transcriptMarkdownCache";
 export type { ParsedMarkdownValue } from "./transcriptMarkdownCache";
@@ -19,8 +20,8 @@ import type {
   HistorySliceRequest,
 } from "./types";
 
-import type { TranscriptBackend, TranscriptStoreOptions, TranscriptProjection, LoadOlderResult, LoadNewerResult, AppendEntriesResult, TranscriptContentChange, SessionTranscript, HistoryReadOptions } from "./transcriptStoreTypes";
-export type { TranscriptBackend, TranscriptStoreOptions, TranscriptProjection, LoadOlderResult, LoadNewerResult, AppendEntriesResult, TranscriptContentChange, SessionTranscript, HistoryReadOptions } from "./transcriptStoreTypes";
+import type { TranscriptBackend, TranscriptStoreOptions, TranscriptProjection, PreparedTranscriptInstall, LoadOlderResult, LoadNewerResult, AppendEntriesResult, TranscriptContentChange, SessionTranscript, HistoryReadOptions } from "./transcriptStoreTypes";
+export type { TranscriptBackend, TranscriptStoreOptions, TranscriptProjection, PreparedTranscriptInstall, LoadOlderResult, LoadNewerResult, AppendEntriesResult, TranscriptContentChange, SessionTranscript, HistoryReadOptions } from "./transcriptStoreTypes";
 
 const DEFAULT_MAX_RESIDENT_SESSIONS = 3;
 const DEFAULT_HISTORY_BODY_BUDGET = RESOURCE_BUDGETS.historyBodyBytes;
@@ -58,33 +59,23 @@ export class TranscriptStore {
 
   /** Install the page that belongs to a Follow cut, without another read. */
   installSlice(tabId: string, sessionPath: string, slice: HistorySlice): TranscriptProjection {
+    const prepared = this.prepareInstallSlice(tabId, sessionPath, slice);
+    prepared.commit();
+    return prepared.projection;
+  }
+
+  /** Build a complete replacement without exposing it to readers. The caller
+   * commits only after the reducer has accepted the matching snapshot. */
+  prepareInstallSlice(tabId: string, sessionPath: string, slice: HistorySlice): PreparedTranscriptInstall {
     const key = this.sessionKeyFor(tabId, sessionPath);
-    const session = this.sessions.get(key) ?? this.newSession(key, tabId, sessionPath);
-    session.generation++;
-    session.canonicalV2 = true;
-    session.latestSequence = slice.revision;
-    this.sessions.set(key, session);
-    const entries = asArray<HistoryEntry>(slice.entries);
-    this.replaceRecords(session, entries);
-    session.pages = [];
-    appendLivePageEntries(session.pages, entries.map(entry => entry.entryId), this.windowPageEntries);
-    if (session.pages.length) {
-      session.pages[0].olderCursor = slice.nextCursor ?? "";
-      session.pages[session.pages.length - 1].newerCursor = slice.newerCursor ?? "";
-    }
-    session.nextCursor = slice.nextCursor ?? "";
-    session.newerCursor = slice.newerCursor ?? "";
-    session.hasOlder = Boolean(slice.hasOlder);
-    session.hasNewer = Boolean(slice.hasNewer);
-    session.totalTurns = slice.totalTurns ?? 0;
-    session.startTurn = slice.startTurn ?? 0;
-    session.endTurn = slice.endTurn ?? 0;
-    session.revision = slice.revision ?? 0;
-    session.revisionKnown = true;
-    session.digest = slice.digest ?? "";
-    this.touch(session);
-    this.enforceBudgets();
-    return this.projectionOf(session);
+    const previous = this.sessions.get(key);
+    const session = this.newSession(key, tabId, sessionPath);
+    return prepareTranscriptInstall(previous, session, slice, this.windowPageEntries,
+      (candidate, entries) => this.replaceRecords(candidate, entries), candidate => this.projectionOf(candidate), installed => {
+        this.sessions.set(key, installed);
+        this.touch(installed);
+        this.enforceBudgets();
+      });
   }
   private readonly contentResolvers = new TranscriptContentResolverRegistry();
   registerContentResolver(tabId: string, resolve: (entryId: string, field: string) => Promise<string | undefined>, enabled: () => boolean = () => true): () => void {

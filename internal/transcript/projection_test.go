@@ -303,3 +303,58 @@ func TestProjectionConcurrentSnapshotNeverClaimsUnappliedText(t *testing.T) {
 	}
 	wg.Wait()
 }
+
+func TestProjectionAssignsIdentityToZeroSequenceDisplayFrames(t *testing.T) {
+	tests := []event.Event{
+		{Kind: event.Notice, Text: "notice"},
+		{Kind: event.Phase, Text: "phase"},
+		{Kind: event.Text, Text: "anonymous text"},
+		{Kind: event.ToolDispatch, Tool: event.Tool{ID: "call", Name: "test"}},
+		{Kind: event.ToolResult, Tool: event.Tool{Name: "test", Output: "output"}},
+		{Kind: event.TurnDone, Receipt: &event.CompletionReceipt{}},
+	}
+	for _, e := range tests {
+		wire := eventwire.ToWire(e)
+		t.Run(wire.Kind, func(t *testing.T) {
+			p, err := NewProjection(testIdentity, nil, 0)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if err := p.ApplyFrame(turnevent.Envelope{Kind: wire.Kind, Event: wire}, 0); err != nil {
+				t.Fatal(err)
+			}
+			cut := snapshot(t, p)
+			seen := make(map[string]bool)
+			for _, row := range cut.Records {
+				if row.ID == "" || row.Message.RecordID != row.ID || seen[row.ID] {
+					t.Fatalf("invalid generated identity: %+v", row)
+				}
+				seen[row.ID] = true
+			}
+			if len(seen) == 0 {
+				t.Fatal("fixture did not create a display record")
+			}
+		})
+	}
+}
+
+func TestProjectionRejectsInvalidIdentityBeforeCachingSnapshot(t *testing.T) {
+	for _, messages := range [][]Message{
+		{{Role: "notice", Content: "missing"}},
+		{{RecordID: "duplicate", Role: "notice", Content: "first"}, {RecordID: "duplicate", Role: "notice", Content: "second"}},
+	} {
+		p, err := NewProjection(testIdentity, nil, 0)
+		if err != nil {
+			t.Fatal(err)
+		}
+		for _, message := range messages {
+			p.buffer.messages = append(p.buffer.messages, &bufferedMessage{message: message})
+		}
+		if _, err := p.Snapshot(PageRequest{}); err == nil {
+			t.Fatal("invalid projection snapshot succeeded")
+		}
+		if len(p.snapshots) != 0 || len(p.snapshotOrder) != 0 {
+			t.Fatal("invalid snapshot entered the reusable cache")
+		}
+	}
+}

@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"reasonix/internal/agent"
@@ -16,6 +17,52 @@ import (
 	"reasonix/internal/tool"
 	"reasonix/internal/transcript"
 )
+
+func TestTranscriptFollowAssignsUniqueIdentityToOutsideTurnNotices(t *testing.T) {
+	for _, afterTurn := range []bool{false, true} {
+		name := "before-turn"
+		if afterTurn {
+			name = "after-turn"
+		}
+		t.Run(name, func(t *testing.T) {
+			c, _, runtime := newTranscriptBoundaryController(t, testutil.Turn{Text: "answer"}, event.Discard)
+			if afterTurn {
+				if err := c.RunTurn(t.Context(), "question"); err != nil {
+					t.Fatal(err)
+				}
+			}
+			bodies := []string{strings.Repeat("a", 70_000), strings.Repeat("b", 70_000)}
+			for _, body := range bodies {
+				c.notice(body)
+			}
+			response, err := c.TranscriptFollow(t.Context(), transcript.FollowRequest{})
+			if err != nil {
+				t.Fatal(err)
+			}
+			t.Cleanup(func() {
+				_, _ = c.TranscriptFollow(context.Background(), transcript.FollowRequest{Subscription: response.Subscription, Close: true})
+			})
+			var notices []transcript.Record
+			for _, record := range response.Snapshot.Records {
+				if record.Message.Role == "notice" && len(record.Message.Content) > 0 {
+					notices = append(notices, record)
+				}
+			}
+			if len(notices) != 2 || notices[0].ID == notices[1].ID {
+				t.Fatalf("outside-turn notice identities = %+v", notices)
+			}
+			for index, record := range notices {
+				if record.ID == "" || record.Message.RecordID != record.ID || len(record.Refs) != 1 || record.Refs[0].RecordID != record.ID {
+					t.Fatalf("notice %d identity/ref mismatch: %+v", index, record)
+				}
+				chunk, err := runtime.Transcript().Content(transcript.ContentRequest{ContentRef: record.Refs[0]})
+				if err != nil || !strings.HasPrefix(bodies[index], chunk.Data) || chunk.Data == "" {
+					t.Fatalf("notice %d content alias: chunk=%q err=%v", index, chunk.Data, err)
+				}
+			}
+		})
+	}
+}
 
 func TestTranscriptFollowMakesAcceptedBatchBeyondDisplayBudgetPageable(t *testing.T) {
 	c, _, runtime := newTranscriptBoundaryController(t, testutil.Turn{}, event.Discard)

@@ -8,6 +8,7 @@ import type { HistoryEntry, HistoryMessage, WireEvent } from "./types";
 import type { TranscriptSnapshot } from "./transcriptProtocol";
 import type { Message, TranscriptFollowResponse } from "../generated/desktopContract.generated";
 import { canonicalUserConfirmations } from "./localSubmissionState";
+import { snapshotRecords } from "./transcriptSnapshotState";
 
 export class TranscriptSessionFollowerRuntime {
   private readonly client: TranscriptFollowClient;
@@ -115,8 +116,21 @@ export class TranscriptSessionFollowerRuntime {
     });
   }
 
-  private entry(message: Message): HistoryEntry {
-    const entryId = message.messageId ? `m:${message.messageId}` : message.recordId!;
+  private entry(message: Message | HistoryMessage, outerRecordId?: string): HistoryEntry {
+    const derived = message.role === "tool" && message.toolCallId ? `tool:${message.toolCallId}`
+      : message.messageId ? `m:${message.messageId}` : undefined;
+    if (message.recordId && derived && message.recordId !== derived) {
+      throw new Error("transcript message identity mismatch");
+    }
+    if (outerRecordId && message.recordId && outerRecordId !== message.recordId) {
+      throw new Error("transcript snapshot record identity mismatch");
+    }
+    if (outerRecordId && derived && outerRecordId !== derived) {
+      throw new Error("transcript snapshot message identity mismatch");
+    }
+    const entryId = derived ?? message.recordId ?? outerRecordId;
+    if (!entryId) throw new Error("invalid transcript snapshot record identity");
+    const normalized = message.recordId === entryId ? message : { ...message, recordId: entryId };
     let order = this.orders.get(entryId);
     if (order === undefined) {
       order = this.nextOrder++; this.orders.set(entryId, order);
@@ -125,16 +139,20 @@ export class TranscriptSessionFollowerRuntime {
       // canonical positions and are owned by the bounded transcript store.
       while (this.orders.size > 192) this.orders.delete(this.orders.keys().next().value!);
     }
-    return { entryId, order, turn: message.historyTurn || this.turn, message: message as unknown as HistoryMessage, refs: [] };
+    return { entryId, order, turn: message.historyTurn || this.turn, message: normalized as unknown as HistoryMessage, refs: [] };
   }
 
   private async install(response: TranscriptFollowResponse): Promise<void> {
     const generation = this.generation;
     const snapshot = response.snapshot!;
+    // Validate the untrusted bridge cut before resolving refs, merging rows or
+    // changing the resident store. The outer record id is authoritative for
+    // older peers that did not repeat it inside the message.
+    const records = snapshotRecords(snapshot as unknown as TranscriptSnapshot);
     // A suffix must never be applied to a truncated prefix. Resolve active
     // snapshot references before publishing any part of this recovery cut.
     const activeIds = new Set(snapshot.activeAttempts.map(attempt => attempt.messageId));
-    for (const record of [...snapshot.records, ...snapshot.activeRecords]) {
+    for (const record of records) {
       if (!record.message.messageId || !activeIds.has(record.message.messageId)) continue;
       for (const ref of record.refs) {
         const read = this.remote ? app.RemoteTranscriptContentForTab : app.TranscriptContentForTab;
@@ -164,8 +182,8 @@ export class TranscriptSessionFollowerRuntime {
     for (const entry of entries) this.orders.set(entry.entryId, entry.order);
     this.nextOrder = Math.max(0, ...entries.map(entry => entry.order + 1));
     const merged = new Map(entries.map(entry => [entry.entryId, entry]));
-    for (const record of [...snapshot.records, ...snapshot.activeRecords]) {
-      const entry = this.entry(record.message);
+    for (const record of records) {
+      const entry = this.entry(record.message, record.id);
       // Durable canonical refs remain loadable after a view snapshot expires.
       const canonical = merged.get(entry.entryId);
       if (canonical && !snapshot.activeAttempts.some(attempt => attempt.messageId === record.message.messageId)) continue;
@@ -175,7 +193,7 @@ export class TranscriptSessionFollowerRuntime {
     }
     const all = [...merged.values()].sort((a, b) => a.order - b.order);
     this.metrics = { entries: all.length, inlineBytes: all.reduce((bytes, entry) => bytes + entry.message.content.length + (entry.message.reasoning?.length ?? 0), 0) };
-    const projection = getTranscriptStore().installSlice(this.tabId, this.path, {
+    const prepared = getTranscriptStore().prepareInstallSlice(this.tabId, this.path, {
       entries: all, nextCursor: page?.olderCursor ?? "", newerCursor: page?.newerCursor ?? "",
       hasOlder: Boolean(page?.hasOlder), hasNewer: false, totalTurns: this.turn,
       startTurn: Math.min(this.turn, ...all.map(entry => entry.turn)), endTurn: this.turn,
@@ -186,7 +204,8 @@ export class TranscriptSessionFollowerRuntime {
       records: all.map((entry, order) => ({ id: entry.entryId, order, message: entry.message, refs: [] })),
       activeRecords: [], totalRecords: all.length, totalTurns: this.turn,
     };
-    this.dispatch({ type: "transcript_v2_snapshot", snapshot: combined, projection, remote: this.remote });
+    this.dispatch({ type: "transcript_v2_snapshot", snapshot: combined, projection: prepared.projection, remote: this.remote });
+    prepared.commit();
     this.dispatch({ type: "transcript_runtime", runtime: snapshot.runtime });
     this.coverage = snapshot.coveredThroughSeq;
     noteSessionObservation(this.path, { action: "snapshot_installed", tabId: this.tabId, generation: this.generation, sequence: this.coverage, status: snapshot.runtime.status });

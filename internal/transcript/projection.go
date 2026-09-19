@@ -77,10 +77,36 @@ type Projection struct {
 	snapshots     map[string]frozenSnapshot
 	snapshotOrder []string
 	snapshotBytes int
+	recordSerial  uint64
 	// outline is the complete turn index of a frozen cut. It is built by
 	// freezeLocked and read only from frozen cuts, so it always describes the
 	// same revision as the records paged beside it.
 	outline []OutlineEntry
+}
+
+// ensureRecordIdentity owns the last-resort identity for display-only rows.
+// Canonical messages retain their existing m:/tool: identities; transient
+// frames without a business sequence receive an identity scoped to this
+// projection incarnation and keep it for every later snapshot.
+func (p *Projection) ensureRecordIdentity(message *Message) {
+	if message.RecordID != "" {
+		return
+	}
+	switch {
+	case message.Role == "tool" && message.ToolCallID != "":
+		message.RecordID = "tool:" + message.ToolCallID
+	case message.MessageID != "":
+		message.RecordID = "m:" + message.MessageID
+	default:
+		p.recordSerial++
+		message.RecordID = fmt.Sprintf("view:%s:%d", p.incarnation, p.recordSerial)
+	}
+}
+
+func (p *Projection) ensureBufferRecordIdentities() {
+	for _, row := range p.buffer.messages {
+		p.ensureRecordIdentity(&row.message)
+	}
 }
 
 func NewProjection(identity Identity, baseline []Message, covered uint64) (*Projection, error) {
@@ -179,6 +205,7 @@ func (p *Projection) applyLocked(envelope turnevent.Envelope, covered uint64) er
 	}
 	if e, ok := EventFromEnvelope(owned); ok {
 		p.buffer.Apply(e)
+		p.ensureBufferRecordIdentities()
 		if e.Kind == event.TurnDone {
 			p.applyTerminalNotices(e)
 		}

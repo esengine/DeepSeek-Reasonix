@@ -158,6 +158,103 @@ function initial(subscription: string): TranscriptFollowResponse {
   };
 }
 
+for (const remote of [false, true]) test(`${remote ? "remote" : "local"} follower preserves an outer snapshot identity from an older peer`, async () => {
+  const tab = `outer-record-${remote}`, path = `/session/${tab}`;
+  const response = initial(tab);
+  response.snapshot!.records = [
+    { id: "view:older:1", order: 0, message: { role: "notice", content: "outer identity" }, refs: [] },
+    { id: "tool:older-call", order: 1, message: { role: "tool", messageId: "tool-message", toolCallId: "older-call", toolName: "read_file", content: "result" }, refs: [] },
+    { id: "", order: 2, message: { role: "notice", content: "legacy empty identity" }, refs: [] },
+  ];
+  response.snapshot!.totalRecords = 3;
+  const key = remote ? "RemoteTranscriptFollowForTab" : "TranscriptFollowForTab";
+  const pending = deferred<TranscriptFollowResponse>();
+  commands[key] = (_tab: string, request: FollowRequest) => request.close
+    ? Promise.resolve({ protocolVersion: 2, subscription: tab, changes: [], resetRequired: false })
+    : request.subscription ? pending.promise : Promise.resolve(response);
+  let state = initialState;
+  const follower = new TranscriptSessionFollower(tab, path, remote, action => { state = reducer(state, action); });
+  try {
+    await follower.start();
+    assert.ok(state.items.some(item => item.kind === "notice" && item.text === "outer identity"));
+    assert.ok(getTranscriptStore().peek(tab, path)?.items.some(item => item.id === "he:view:older:1"));
+    assert.ok(state.items.some(item => item.kind === "tool" && item.id === "older-call"));
+    assert.ok(state.items.some(item => item.kind === "notice" && item.text === "legacy empty identity"));
+    assert.ok(!getTranscriptStore().peek(tab, path)?.items.some(item => item.id === "he:undefined"));
+  } finally { follower.stop(); getTranscriptStore().evictTab(tab); }
+});
+
+for (const remote of [false, true]) test(`${remote ? "remote" : "local"} malformed snapshot leaves the resident store unchanged`, async () => {
+  const tab = `invalid-record-${remote}`, path = `/session/${tab}`;
+  getTranscriptStore().installSlice(tab, path, {
+    entries: [{ entryId: "m:resident", turn: 1, order: 0, message: { role: "assistant", messageId: "resident", content: "resident" }, refs: [] }],
+    nextCursor: "", hasOlder: false, newerCursor: "", hasNewer: false, totalTurns: 1, startTurn: 1, endTurn: 1,
+    revision: 1, revisionKnown: true, digest: "resident", stale: false,
+  });
+  const response = initial(tab);
+  response.snapshot!.records = [{ id: "", order: 0, message: { role: "notice", content: "invalid" },
+    refs: [{ snapshotId: "cut", recordId: "", path: ["content"], bytes: 100 }] }];
+  response.snapshot!.totalRecords = 1;
+  const key = remote ? "RemoteTranscriptFollowForTab" : "TranscriptFollowForTab";
+  commands[key] = (_tab: string, request: FollowRequest) => Promise.resolve(request.close
+    ? { protocolVersion: 2, subscription: tab, changes: [], resetRequired: false }
+    : response);
+  const follower = new TranscriptSessionFollower(tab, path, remote, () => undefined);
+  try {
+    await assert.rejects(follower.start(), /transcript snapshot content identity missing/);
+    const resident = getTranscriptStore().peek(tab, path);
+    assert.equal(resident?.digest, "resident");
+    assert.ok(resident?.items.some(item => item.id === "m:resident"));
+    assert.ok(!resident?.items.some(item => item.id === "he:undefined"));
+  } finally { follower.stop(); getTranscriptStore().evictTab(tab); }
+});
+
+test("reducer rejection does not commit a prepared transcript replacement", async () => {
+  const tab = "reducer-reject", path = `/session/${tab}`;
+  getTranscriptStore().installSlice(tab, path, {
+    entries: [{ entryId: "m:resident", turn: 1, order: 0, message: { role: "assistant", messageId: "resident", content: "resident" }, refs: [] }],
+    nextCursor: "", hasOlder: false, newerCursor: "", hasNewer: false, totalTurns: 1, startTurn: 1, endTurn: 1,
+    revision: 1, revisionKnown: true, digest: "resident", stale: false,
+  });
+  commands.TranscriptFollowForTab = (_tab: string, request: FollowRequest) => Promise.resolve(request.close
+    ? { protocolVersion: 2, subscription: tab, changes: [], resetRequired: false }
+    : initial(tab));
+  const follower = new TranscriptSessionFollower(tab, path, false, action => {
+    if (action.type === "transcript_v2_snapshot") throw new Error("reducer rejected snapshot");
+  });
+  try {
+    await assert.rejects(follower.start(), /reducer rejected snapshot/);
+    const resident = getTranscriptStore().peek(tab, path);
+    assert.equal(resident?.digest, "resident");
+    assert.ok(resident?.items.some(item => item.id === "m:resident"));
+  } finally { follower.stop(); getTranscriptStore().evictTab(tab); }
+});
+
+test("snapshot rejects duplicate durable identities and mismatched content references", async () => {
+  const cases: Array<{ name: string; records: NonNullable<TranscriptFollowResponse["snapshot"]>["records"]; pattern: RegExp }> = [
+    { name: "duplicate", records: [
+      { id: "same", order: 0, message: { role: "notice", recordId: "same", content: "first" }, refs: [] },
+      { id: "same", order: 1, message: { role: "notice", recordId: "same", content: "second" }, refs: [] },
+    ], pattern: /duplicate transcript snapshot record identity/ },
+    { name: "content-ref", records: [{ id: "owner", order: 0, message: { role: "notice", recordId: "owner", content: "preview" },
+      refs: [{ snapshotId: "cut", recordId: "different", path: ["content"], bytes: 100 }] }], pattern: /content identity mismatch/ },
+    { name: "embedded-record", records: [{ id: "owner", order: 0, message: { role: "notice", recordId: "different", content: "preview" }, refs: [] }],
+      pattern: /record identity mismatch/ },
+  ];
+  for (const fixture of cases) {
+    const tab = `invalid-${fixture.name}`;
+    const response = initial(tab);
+    response.snapshot!.records = fixture.records;
+    response.snapshot!.totalRecords = fixture.records.length;
+    commands.TranscriptFollowForTab = (_tab: string, request: FollowRequest) => Promise.resolve(request.close
+      ? { protocolVersion: 2, subscription: tab, changes: [], resetRequired: false }
+      : response);
+    const follower = new TranscriptSessionFollower(tab, "", false, () => undefined);
+    try { await assert.rejects(follower.start(), fixture.pattern); }
+    finally { follower.stop(); getTranscriptStore().evictTab(tab); }
+  }
+});
+
 for (const remote of [false, true]) {
   test(`${remote ? "remote" : "local"} follower retains an empty canonical body reference as a loadable assistant node`, async () => {
     const tab = remote ? "follow-ref-remote" : "follow-ref-local";

@@ -76,7 +76,10 @@ func (p *Projection) acceptBusiness(rows []Message, removed []string, covered ui
 	if p.results == nil {
 		p.results = make(map[string]uint64)
 	}
+	published := make([]Message, 0, len(rows))
 	for _, message := range rows {
+		p.ensureRecordIdentity(&message)
+		published = append(published, message)
 		if message.TurnID == "" {
 			message.TurnID = turnID
 		}
@@ -115,7 +118,7 @@ func (p *Projection) acceptBusiness(rows []Message, removed []string, covered ui
 	p.covered = covered
 	p.revision++
 	p.trimSettledLocked()
-	p.publishChangeLocked(Change{FirstSeq: first, Records: rows, ResetRequired: reset})
+	p.publishChangeLocked(Change{FirstSeq: first, Records: published, ResetRequired: reset})
 }
 
 func (p *Projection) trimSettledLocked() {
