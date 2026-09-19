@@ -4,8 +4,8 @@
     "commented-code": 0,
     "complexity": 1878,
     "essay": 1915,
-    "file-size": 100466,
-    "function-size": 8031,
+    "file-size": 100473,
+    "function-size": 8032,
     "layering": 1,
     "marker": 0,
     "narrative": 63,
@@ -545,8 +545,8 @@
     "internal/boot/boot.go": {
       "complexity": 258,
       "essay": 78,
-      "file-size": 2042,
-      "function-size": 1719,
+      "file-size": 2043,
+      "function-size": 1720,
       "narrative": 3
     },
     "internal/boot/boot_test.go": {
@@ -666,7 +666,7 @@
     "internal/cli/chat_tui.go": {
       "complexity": 274,
       "essay": 77,
-      "file-size": 4112,
+      "file-size": 4114,
       "function-size": 1056
     },
     "internal/cli/chat_tui_paste.go": {
@@ -874,7 +874,7 @@
     "internal/control/controller.go": {
       "complexity": 13,
       "essay": 97,
-      "file-size": 5182,
+      "file-size": 5186,
       "function-size": 88,
       "narrative": 4,
       "struct-state": 22

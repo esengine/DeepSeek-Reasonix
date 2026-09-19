@@ -737,8 +737,11 @@ the normal host path.
 When no OS sandbox backend is available, `bash = "enforce"` refuses bash
 execution instead of running unconfined. Install the platform sandbox backend
 (bubblewrap/`bwrap` on Linux, `sandbox-exec` on macOS) or set
-`[sandbox] bash = "off"` to explicitly restore the pre-1.16 unconfined shell
-behavior.
+`[sandbox] bash = "off"` to run the shell unconfined. When Reasonix itself runs
+inside an outer sandbox such as landrun/Landlock, the inner bash must stay
+unconfined so the outer sandbox is the effective boundary — nesting `bwrap`
+inside it is redundant and can fail. On Windows the compatible value is
+always `off`.
 
 For coding-quality reports, run `reasonix doctor quality <branch-id-or-path>`
 (add `--json` for structured output). This reads the selected session but emits

@@ -1128,7 +1128,7 @@ type SandboxConfig struct {
 	ForbidRead    []string `toml:"forbid_read"`
 	// Bash is the OS-sandbox mode for the bash tool: "enforce" jails each
 	// command when an OS sandbox is available and refuses bash otherwise; "off"
-	// runs it unconfined. Empty uses the platform default.
+	// runs it unconfined — required under an outer sandbox (landrun/Landlock).
 	Bash string `toml:"bash"`
 	// Network allows network egress from inside the bash sandbox. Defaults true
 	// so module/package downloads keep working; the boundary is then writes.

@@ -1903,6 +1903,7 @@ func build(ctx context.Context, opts Options) (*BuildResult, error) {
 		Ablation:               opts.Ablation,
 		WriteRoots:             writeRootSet,
 		BashSandboxEnforced:    bashSpec.Enforce() && sandbox.Available(),
+		BashSandboxRequested:   bashSpec.Enforce(),
 		OnPersistWriteAccess:   projectWriteAccessPersister(root),
 		OnRemember: func(rule string) control.RememberResult {
 			return rememberPermissionRule(root, rule)

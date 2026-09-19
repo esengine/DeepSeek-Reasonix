@@ -4600,7 +4600,9 @@ func (m *chatTUI) showSandboxStatus() {
 	}
 	bash := m.cfg.BashMode()
 	network := m.cfg.Sandbox.Network
-	available := sandbox.Available()
+	// Only probe the backend when this session would actually use it; a bash=off
+	// session must not query (or execute) the sandbox binary just to print status.
+	available := bash == "enforce" && sandbox.Available()
 	roots := m.cfg.WriteRoots()
 
 	var b strings.Builder

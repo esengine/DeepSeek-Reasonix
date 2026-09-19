@@ -21,16 +21,18 @@ const writeAccessKind = event.ApprovalKindWriteAccess
 type PersistWriteAccessFunc func(dirs []string, permRule string) error
 
 type controllerWriteAccess struct {
-	persist             PersistWriteAccessFunc
-	roots               *sandbox.WritableRootSet
-	interactive         bool
-	bashSandboxEnforced bool
+	persist              PersistWriteAccessFunc
+	roots                *sandbox.WritableRootSet
+	interactive          bool
+	bashSandboxEnforced  bool
+	bashSandboxRequested bool
 }
 
 func newControllerWriteAccess(opts Options) controllerWriteAccess {
 	return controllerWriteAccess{
 		persist: opts.OnPersistWriteAccess, roots: opts.WriteRoots,
-		bashSandboxEnforced: opts.BashSandboxEnforced,
+		bashSandboxEnforced:  opts.BashSandboxEnforced,
+		bashSandboxRequested: opts.BashSandboxRequested,
 	}
 }
 

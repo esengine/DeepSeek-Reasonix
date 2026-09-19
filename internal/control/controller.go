@@ -699,6 +699,10 @@ type Options struct {
 	// commands in an OS sandbox. Windows and bash=off leave this false so
 	// directory prompts are not implied for unisolated shell writes.
 	BashSandboxEnforced bool
+	// BashSandboxRequested is true when the session's bash mode asks for OS
+	// sandbox enforcement (bash = "enforce"), whether or not the backend is
+	// available; it gates the capability probe so bash=off never queries it.
+	BashSandboxRequested bool
 	// SessionRecoveryMeta lets a frontend attach scope/topic/profile metadata to
 	// an automatic recovery branch before it is written.
 	SessionRecoveryMeta func(SessionRecoveryRequest) agent.BranchMeta
