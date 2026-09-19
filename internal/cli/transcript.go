@@ -92,10 +92,10 @@ func (m *chatTUI) truncateTranscriptBlocks(length int) {
 }
 
 func (m *chatTUI) renderTranscriptSource(source transcriptSource, terminalWidth int) string {
-	contentWidth := transcriptContentWidth(terminalWidth, m.nativeScrollback)
+	contentWidth := transcriptContentWidth(terminalWidth, m.noScrollbar())
 	switch source.kind {
 	case transcriptSourceMarkdown:
-		return renderAssistantMarkdown(source.raw, contentWidth)
+		return renderAssistantMarkdown(source.raw, contentWidth, m.noScrollbar())
 	case transcriptSourceUser:
 		return renderUserBubble(source.raw, terminalWidth, source.planMode)
 	case transcriptSourceReasoning:
@@ -105,7 +105,9 @@ func (m *chatTUI) renderTranscriptSource(source transcriptSource, terminalWidth 
 	case transcriptSourceBanner:
 		return strings.TrimRight(renderTUIBanner(m.label, source.raw, contentWidth), "\n")
 	case transcriptSourceReplayBundle:
-		return m.renderReplayBundle(source, contentWidth, renderAssistantMarkdown)
+		return m.renderReplayBundle(source, contentWidth, func(raw string, width int) string {
+			return renderAssistantMarkdown(raw, width, m.noScrollbar())
+		})
 	case transcriptSourceTurnReceipt:
 		return renderTurnReceiptBand(source.raw, contentWidth)
 	case transcriptSourceSubagentProgress:
@@ -154,7 +156,7 @@ func (m chatTUI) renderReplayBundleCopy(
 	return m.renderReplayBundleWithRenderers(source, contentWidth, func(raw string, width int) string {
 		messagePrefix := prefix + "-" + strconv.Itoa(assistantIndex)
 		assistantIndex++
-		return renderAssistantMarkdownCopy(raw, width, messagePrefix)
+		return renderAssistantMarkdownCopy(raw, width, messagePrefix, m.noScrollbar())
 	}, reasoningBlockCopy)
 }
 
@@ -164,7 +166,7 @@ const assistantTranscriptIndent = "  "
 // identity that user, reasoning, tool, and receipt blocks already have. The
 // body keeps a restrained two-cell gutter instead of using a heavy card, and
 // rendering at the reduced width keeps every indented row inside the viewport.
-func renderAssistantMarkdown(raw string, contentWidth int) string {
+func renderAssistantMarkdown(raw string, contentWidth int, hideQuoteRail bool) string {
 	contentWidth = max(contentWidth, 1)
 	indent := assistantTranscriptIndent
 	if contentWidth <= visibleWidth(indent) {
@@ -172,6 +174,7 @@ func renderAssistantMarkdown(raw string, contentWidth int) string {
 	}
 	bodyWidth := max(contentWidth-visibleWidth(indent), 1)
 	renderer := newMarkdownRenderer(bodyWidth)
+	renderer.hideQuoteRail = hideQuoteRail
 	rendered := renderer.Render(raw)
 	if rendered == "" {
 		rendered = raw
@@ -186,7 +189,7 @@ func renderAssistantMarkdown(raw string, contentWidth int) string {
 
 // renderAssistantMarkdownCopy mirrors renderAssistantMarkdown's visible output
 // and adds zero-width copy spans for math reconstruction and generated gutters.
-func renderAssistantMarkdownCopy(raw string, contentWidth int, prefix string) string {
+func renderAssistantMarkdownCopy(raw string, contentWidth int, prefix string, hideQuoteRail bool) string {
 	contentWidth = max(contentWidth, 1)
 	indent := assistantTranscriptIndent
 	if contentWidth <= visibleWidth(indent) {
@@ -194,6 +197,7 @@ func renderAssistantMarkdownCopy(raw string, contentWidth int, prefix string) st
 	}
 	bodyWidth := max(contentWidth-visibleWidth(indent), 1)
 	renderer := newMarkdownRenderer(bodyWidth)
+	renderer.hideQuoteRail = hideQuoteRail
 	rendered := renderer.RenderCopy(raw, prefix)
 	if rendered == "" {
 		rendered = raw
@@ -440,11 +444,9 @@ func (m chatTUI) renderTranscript() string {
 	total := len(lines)
 	yoff := m.viewport.YOffset()
 	start, end := m.sel.ordered()
-	thumbStart, thumbSize := scrollbarThumb(h, yoff, total)
 	blank := strings.Repeat(" ", cw)
 
 	rows := make([]string, h)
-	bar := make([]string, h)
 	for r := range h {
 		idx := yoff + r
 		line := blank // off-content rows fill to width
@@ -457,6 +459,15 @@ func (m chatTUI) renderTranscript() string {
 			}
 		}
 		rows[r] = line
+	}
+	// Native mouse mode hands the mouse to the terminal, so the in-app bar can't
+	// be dragged; skip it (its column is already reclaimed for content width).
+	if m.noScrollbar() {
+		return strings.Join(rows, "\n")
+	}
+	thumbStart, thumbSize := scrollbarThumb(h, yoff, total)
+	bar := make([]string, h)
+	for r := range h {
 		bar[r] = scrollbarCell(r, total, h, thumbStart, thumbSize)
 	}
 	return lipgloss.JoinHorizontal(lipgloss.Top, strings.Join(rows, "\n"), strings.Join(bar, "\n"))
@@ -522,7 +533,7 @@ func scrollbarCell(row, total, height, thumbStart, thumbSize int) string {
 }
 
 func (m chatTUI) inScrollbar(x, y int) bool {
-	if m.nativeScrollback {
+	if m.noScrollbar() {
 		return false
 	}
 	h := m.viewport.Height()

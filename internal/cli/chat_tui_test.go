@@ -89,6 +89,17 @@ func TestMain(m *testing.M) {
 	os.Setenv("LANG", "en_US.UTF-8")
 	i18n.DetectLanguage("en")
 
+	// Pin in-app mouse capture on for the whole cli test binary. Production
+	// defaults capture off over SSH and under REASONIX_DISABLE_MOUSE, which
+	// hides the transcript scrollbar and hands the mouse to the terminal; a dev
+	// machine with either set would flip the default and break the scrollbar,
+	// viewport, and markdown-width tests. Tests that need capture off set it
+	// explicitly (mouse_default_test.go, TestViewMouseModeFollowsCapture).
+	os.Unsetenv("REASONIX_DISABLE_MOUSE")
+	os.Unsetenv("SSH_CONNECTION")
+	os.Unsetenv("SSH_CLIENT")
+	os.Unsetenv("SSH_TTY")
+
 	code := m.Run()
 	detectTermuxTerminal = old
 	cleanupUserState()

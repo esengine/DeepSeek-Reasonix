@@ -46,7 +46,7 @@ func (m chatTUI) buildCopyTranscript(contentWidth int) (string, int, bool) {
 		var rendered string
 		switch source.kind {
 		case transcriptSourceMarkdown:
-			rendered = renderAssistantMarkdownCopy(source.raw, contentWidth, strconv.Itoa(i))
+			rendered = renderAssistantMarkdownCopy(source.raw, contentWidth, strconv.Itoa(i), m.noScrollbar())
 		case transcriptSourceReplayBundle:
 			rendered = m.renderReplayBundleCopy(source, contentWidth, strconv.Itoa(i))
 		case transcriptSourceReasoning:

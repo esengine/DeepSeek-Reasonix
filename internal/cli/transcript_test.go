@@ -19,7 +19,7 @@ func TestAssistantMarkdownHasIdentityAndIndentedBody(t *testing.T) {
 	activeColorProfile = colorprofile.NoTTY
 	configureCLITheme("dark")
 
-	rendered := renderAssistantMarkdown("A concise answer that wraps across the available width.", 32)
+	rendered := renderAssistantMarkdown("A concise answer that wraps across the available width.", 32, false)
 	lines := strings.Split(ansi.Strip(rendered), "\n")
 	if len(lines) < 4 {
 		t.Fatalf("assistant block should contain a header, gap, and wrapped body:\n%s", rendered)
