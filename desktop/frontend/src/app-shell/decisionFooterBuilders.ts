@@ -333,8 +333,9 @@ export function buildComposerSurface(input: ComposerSurfaceInput): DecisionFoote
       // Match the workspace launcher's ownership boundary: project/branch
       // selection configures a new empty session. Once the transcript has
       // content, the session keeps its established workspace and the composer
-      // returns to the compact follow-up layout.
-      workspaceContext: view.hero ? input.workspaceContext : undefined,
+      // returns to the compact follow-up layout. A draft surface is its own
+      // empty session, so the launcher stays available without a hero tab view.
+      workspaceContext: view.hero || input.draft?.surface ? input.workspaceContext : undefined,
       fileRefRefreshKey: input.fileRefRefreshKey,
       guidanceConsumedKey: input.guidance?.key,
       guidanceConsumedItemId: input.guidance?.itemId,

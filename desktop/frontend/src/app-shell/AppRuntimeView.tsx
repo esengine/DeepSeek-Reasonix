@@ -123,11 +123,17 @@ export function AppRuntimeView(props: AppRuntimeViewProps) {
   const runtimeTransitioning = core.surface.transitioning;
   const presentationTransitioning = runtimeTransitioning && core.remoteSurfaceActive;
   const browserPreviewChrome = navigation.browserPreviewChrome;
+  // A draft targets its own workspace, which may differ from the backing tab's;
+  // the composer context must describe the draft, or the workspace bar shows the
+  // previous project's name — or disappears when no tab backs the draft.
+  const draftWorkspace = draft.surface?.draft.scope === "project"
+    ? (draft.surface?.draft.workspaceRoot ?? "").trim()
+    : "";
   const workspaceContextProject = Boolean(
-    activeTab?.remote || (activeTab?.scope === "project" && activeTab.workspaceRoot),
+    activeTab?.remote || (activeTab?.scope === "project" && activeTab.workspaceRoot) || draftWorkspace,
   );
   const workspaceContextRoot = workspaceContextProject
-    ? activeTab?.workspaceRoot ?? state.meta?.workspaceRoot ?? state.meta?.cwd ?? ""
+    ? draftWorkspace || (activeTab?.workspaceRoot ?? state.meta?.workspaceRoot ?? state.meta?.cwd ?? "")
     : "";
 
   const workbenchChromeHidden = true;
@@ -445,7 +451,11 @@ export function AppRuntimeView(props: AppRuntimeViewProps) {
               workspaceContext: {
                 scope: workspaceContextProject ? "project" : "global",
                 workspaceRoot: workspaceContextRoot,
-                workspaceName: workspaceContextProject ? activeTab?.workspaceName ?? state.meta?.workspaceName : undefined,
+                workspaceName: workspaceContextProject
+                  ? draftWorkspace
+                    ? workspaceContextRoot.replace(/[\\/]+$/, "").split(/[\\/]/).filter(Boolean).pop()
+                    : activeTab?.workspaceName ?? state.meta?.workspaceName
+                  : undefined,
                 gitBranch: workspaceContextProject && !activeTab?.remote ? state.meta?.gitBranch : undefined,
                 tabId: activeTabId,
                 scopeKey: session.workspaceScopeKey,
