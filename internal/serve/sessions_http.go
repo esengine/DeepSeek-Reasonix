@@ -89,7 +89,7 @@ func (s *Server) sessions(w http.ResponseWriter, r *http.Request) {
 				for _, info := range page.Sessions {
 					row := sessionListEntry{
 						HostID: info.Ref.HostID, SessionID: info.Ref.SessionID, Name: info.SessionID,
-						Title: sessionDisplayTitle(r.Context(), s, info), Turns: info.Turns, MtimeMilli: info.UpdatedAt.UnixMilli(),
+						Title: s.sessionDisplayTitle(r.Context(), info), Turns: info.Turns, MtimeMilli: info.UpdatedAt.UnixMilli(),
 						Current: bound && info.Ref == runtime.Ref(),
 					}
 					if live, exists := service.Runtime(info.Ref); exists {
@@ -111,7 +111,7 @@ func (s *Server) sessions(w http.ResponseWriter, r *http.Request) {
 // then the generated title cache, then the first authored message as a preview.
 // sessionTitle is the cache-and-generate step; this supplies the key and source
 // a stored, non-transcript session can offer.
-func sessionDisplayTitle(ctx context.Context, s *Server, info session.SessionInfo) string {
+func (s *Server) sessionDisplayTitle(ctx context.Context, info session.SessionInfo) string {
 	if info.Title != "" {
 		return info.Title
 	}

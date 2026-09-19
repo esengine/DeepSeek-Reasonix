@@ -4,7 +4,9 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -16,15 +18,21 @@ import (
 	"reasonix/internal/session"
 )
 
-// newV4SessionServe publishes one v4 store and returns a Serve whose title
-// cache lives in that store root, matching the CLI's Serve wiring.
-func newV4SessionServe(t *testing.T) (*Server, *session.Service, string) {
+// serveFixture mirrors the CLI's Serve wiring: SessionDir is the legacy
+// transcript catalog, the session service owns the sibling sessions-v4 store,
+// and generated titles are cached inside that store root.
+type serveFixture struct {
+	srv       *Server
+	service   *session.Service
+	store     string
+	legacyDir string
+}
+
+func newServeFixture(t *testing.T) serveFixture {
 	t.Helper()
-	// The CLI hands Serve the legacy transcript catalog as SessionDir and the
-	// service the sibling sessions-v4 store; titles are cached in the store.
 	legacyDir := filepath.Join(t.TempDir(), "sessions")
-	root := filepath.Join(filepath.Dir(legacyDir), "sessions-v4")
-	service, err := session.NewService("local", session.NewFilesystemPersistence(root))
+	store := filepath.Join(filepath.Dir(legacyDir), "sessions-v4")
+	service, err := session.NewService("local", session.NewFilesystemPersistence(store))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -39,7 +47,10 @@ func newV4SessionServe(t *testing.T) (*Server, *session.Service, string) {
 	if _, err := ctrl.BindFreshSession(t.Context(), "current"); err != nil {
 		t.Fatal(err)
 	}
-	return New(ctrl, NewBroadcaster(), config.ServeConfig{}), service, root
+	return serveFixture{
+		srv: New(ctrl, NewBroadcaster(), config.ServeConfig{}), service: service,
+		store: store, legacyDir: legacyDir,
+	}
 }
 
 func addV4UserTurn(t *testing.T, svc *session.Service, id, content string) {
@@ -92,13 +103,13 @@ func rowFor(rows []sessionListEntry, sessionID string) (sessionListEntry, bool) 
 // instead of only a hex session id, and must fall back to the first authored
 // message (never the id) when no title exists yet.
 func TestSessionsReturnsStoredV4Title(t *testing.T) {
-	srv, svc, root := newV4SessionServe(t)
-	addV4UserTurn(t, svc, "titled", "整理一下 AI 剧场的目录")
-	addV4UserTurn(t, svc, "untitled", "second")
+	f := newServeFixture(t)
+	addV4UserTurn(t, f.service, "titled", "整理一下 AI 剧场的目录")
+	addV4UserTurn(t, f.service, "untitled", "second")
 
-	newTitleCache(root).put("titled", "AI剧场目录整理", "整理一下 AI 剧场的目录", 0)
+	newTitleCache(f.store).put("titled", "AI剧场目录整理", "整理一下 AI 剧场的目录", 0)
 
-	rows := listSessionRows(t, srv)
+	rows := listSessionRows(t, f.srv)
 	titled, ok := rowFor(rows, "titled")
 	if !ok {
 		t.Fatalf("titled session missing from rows %+v", rows)
@@ -120,12 +131,12 @@ func TestSessionsReturnsStoredV4Title(t *testing.T) {
 // TestSessionsOrdersV4SessionsByRecency pins the durable log mtime, which is
 // what the legacy branch reports and what the sidebar orders by.
 func TestSessionsOrdersV4SessionsByRecency(t *testing.T) {
-	srv, svc, _ := newV4SessionServe(t)
-	addV4UserTurn(t, svc, "older", "first session")
+	f := newServeFixture(t)
+	addV4UserTurn(t, f.service, "older", "first session")
 	time.Sleep(10 * time.Millisecond)
-	addV4UserTurn(t, svc, "newer", "second session")
+	addV4UserTurn(t, f.service, "newer", "second session")
 
-	rows := listSessionRows(t, srv)
+	rows := listSessionRows(t, f.srv)
 	older, ok := rowFor(rows, "older")
 	if !ok {
 		t.Fatalf("older session missing from rows %+v", rows)
@@ -148,12 +159,12 @@ func TestSessionsOrdersV4SessionsByRecency(t *testing.T) {
 // session with no cached title gets one generated from its first message, and
 // the generated title is persisted under the session id for later polls.
 func TestSessionsGeneratesAndCachesV4Title(t *testing.T) {
-	srv, svc, root := newV4SessionServe(t)
-	addV4UserTurn(t, svc, "cold", "explain the session store")
+	f := newServeFixture(t)
+	addV4UserTurn(t, f.service, "cold", "explain the session store")
 	prov := &recordingTitleProvider{}
-	srv.titleProv = prov
+	f.srv.titleProv = prov
 
-	rows := listSessionRows(t, srv)
+	rows := listSessionRows(t, f.srv)
 	row, ok := rowFor(rows, "cold")
 	if !ok {
 		t.Fatalf("cold session missing from rows %+v", rows)
@@ -164,12 +175,12 @@ func TestSessionsGeneratesAndCachesV4Title(t *testing.T) {
 	if len(prov.requests) != 1 {
 		t.Fatalf("title requests = %d, want 1", len(prov.requests))
 	}
-	if got, ok := newTitleCache(root).get("cold", "explain the session store", 0); !ok || got != row.Title {
+	if got, ok := newTitleCache(f.store).get("cold", "explain the session store", 0); !ok || got != row.Title {
 		t.Fatalf("persisted cache entry = %q,%v; want %q,true", got, ok, row.Title)
 	}
 
 	// A warmed cache must not re-request the title on the next poll.
-	if _, again := listSessionRows(t, srv), len(prov.requests); again != 1 {
+	if _, again := listSessionRows(t, f.srv), len(prov.requests); again != 1 {
 		t.Fatalf("title requests after warm poll = %d, want 1", again)
 	}
 }
@@ -177,16 +188,16 @@ func TestSessionsGeneratesAndCachesV4Title(t *testing.T) {
 // TestSessionsPrefersEventLogTitleOverGeneratedTitle keeps an explicit rename
 // (or the agent's own title tool) authoritative over the generated cache.
 func TestSessionsPrefersEventLogTitleOverGeneratedTitle(t *testing.T) {
-	srv, svc, root := newV4SessionServe(t)
-	addV4UserTurn(t, svc, "renamed", "rename me in the sidebar")
-	newTitleCache(root).put("renamed", "generated title", "rename me in the sidebar", 0)
+	f := newServeFixture(t)
+	addV4UserTurn(t, f.service, "renamed", "rename me in the sidebar")
+	newTitleCache(f.store).put("renamed", "generated title", "rename me in the sidebar", 0)
 
 	ref := session.SessionRef{HostID: "local", SessionID: "renamed"}
-	if err := svc.SetTitle(t.Context(), ref, "手动重命名"); err != nil {
+	if err := f.service.SetTitle(t.Context(), ref, "手动重命名"); err != nil {
 		t.Fatal(err)
 	}
 
-	rows := listSessionRows(t, srv)
+	rows := listSessionRows(t, f.srv)
 	row, ok := rowFor(rows, "renamed")
 	if !ok {
 		t.Fatalf("renamed session missing from rows %+v", rows)
@@ -194,4 +205,34 @@ func TestSessionsPrefersEventLogTitleOverGeneratedTitle(t *testing.T) {
 	if row.Title != "手动重命名" {
 		t.Fatalf("title = %q, want the durable event-log title", row.Title)
 	}
+}
+
+// TestSessionsKeepsLegacyTitlesAfterCacheMove guards the legacy .jsonl branch
+// across the cache relocation: generated titles for transcript sessions are
+// stored under the store root too, or an upgrade would silently regenerate
+// every legacy title and re-spend provider requests on the first poll.
+func TestSessionsKeepsLegacyTitlesAfterCacheMove(t *testing.T) {
+	f := newServeFixture(t)
+	if err := os.MkdirAll(f.legacyDir, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	const name = "20260901-login-loop.jsonl"
+	legacy := agent.NewSession("system")
+	legacy.Add(provider.Message{Role: provider.RoleUser, Content: "debug the login loop"})
+	if err := legacy.Save(filepath.Join(f.legacyDir, name)); err != nil {
+		t.Fatal(err)
+	}
+	newTitleCache(f.store).put(name, "Login loop debug", "debug the login loop", 0)
+
+	rows := listSessionRows(t, f.srv)
+	for _, row := range rows {
+		if row.Name != strings.TrimSuffix(name, ".jsonl") {
+			continue
+		}
+		if row.Title != "Login loop debug" {
+			t.Fatalf("legacy title = %q, want the stored title", row.Title)
+		}
+		return
+	}
+	t.Fatalf("legacy row %q missing from rows %+v", name, rows)
 }

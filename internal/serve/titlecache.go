@@ -13,10 +13,12 @@ import (
 )
 
 // titleCache persists generated session titles to <dir>/.session-titles.json.
-// Entries are keyed by file name and the first user message: appending turns
-// changes the transcript mtime without invalidating the title, while replacing
-// the first turn (for example by rewinding turn zero) produces a cache miss.
-// Persistence is best-effort: a missing or unreadable cache just regenerates.
+// Entries are keyed by the session's legacy transcript file name or, for a v4
+// session with no transcript file, its store id. Validity comes from the first
+// user message: appending turns changes mtime without invalidating the title,
+// while replacing the first turn (for example by rewinding turn zero) produces
+// a cache miss. Persistence is best-effort: a missing or unreadable cache just
+// regenerates.
 type titleCache struct {
 	mu      sync.Mutex
 	dir     string
@@ -34,16 +36,13 @@ func newTitleCache(dir string) *titleCache {
 	return &titleCache{dir: dir, entries: map[string]titleEntry{}}
 }
 
-// titleCacheDir resolves the directory holding generated session titles. A
-// controller's SessionDir is the host's legacy transcript catalog, while both
-// v4 sessions and this cache live in the sibling store root; keeping the cache
-// next to the sessions it describes is what lets a later Serve process reuse
-// titles instead of regenerating them. An already-resolved store root is left
-// alone so the conversion stays idempotent.
+// titleCacheDir maps the controller's legacy transcript catalog to the store
+// root that holds both v4 sessions and this cache. SessionDir is always that
+// catalog (a sibling "sessions-v4" store is derived from it everywhere else
+// too), and the cache must sit in the store: a Serve process that wrote titles
+// beside the legacy catalog could not read them back for the v4 sessions they
+// describe.
 func titleCacheDir(sessionDir string) string {
-	if filepath.Base(sessionDir) == "sessions-v4" {
-		return sessionDir
-	}
 	return session.RootForLegacyDir(sessionDir)
 }
 

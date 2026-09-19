@@ -60,17 +60,17 @@ func TestTitleCacheReadsLegacyMtimeEntries(t *testing.T) {
 
 func TestTitleCacheDirIsTheStoreRootBesideLegacySessions(t *testing.T) {
 	base := t.TempDir()
-	legacy := filepath.Join(base, "projects", "proj", "sessions")
-	if got, want := titleCacheDir(legacy), filepath.Join(base, "projects", "proj", "sessions-v4"); got != want {
-		t.Fatalf("titleCacheDir(%q) = %q, want %q", legacy, got, want)
+	// SessionDir is the legacy transcript catalog; the cache belongs to the
+	// sibling store root where v4 sessions and their titles actually live.
+	cases := []struct{ sessionDir, want string }{
+		{filepath.Join(base, "projects", "proj", "sessions"), filepath.Join(base, "projects", "proj", "sessions-v4")},
+		{filepath.Join(base, "sessions"), filepath.Join(base, "sessions-v4")},
+		{"", ""},
 	}
-	// An already-resolved store root must not gain a second store segment.
-	root := filepath.Join(base, "projects", "proj", "sessions-v4")
-	if got := titleCacheDir(root); got != root {
-		t.Fatalf("titleCacheDir(%q) = %q, want it unchanged", root, got)
-	}
-	if got := titleCacheDir(""); got != "" {
-		t.Fatalf("titleCacheDir(\"\") = %q, want empty", got)
+	for _, tc := range cases {
+		if got := titleCacheDir(tc.sessionDir); got != tc.want {
+			t.Errorf("titleCacheDir(%q) = %q, want %q", tc.sessionDir, got, tc.want)
+		}
 	}
 }
 
