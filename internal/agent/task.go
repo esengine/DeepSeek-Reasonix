@@ -251,6 +251,8 @@ type TaskTool struct {
 	sysPrompt                     string
 	gate                          Gate
 	subagentModel, subagentEffort string
+	subagentEffortInherited       bool
+	resolveInheritedEffort        func(modelRef, raw string) string
 	resolveProvider               func(modelRef, effort string) (provider.Provider, *provider.Pricing, int, error)
 	transcripts                   *SubagentStore
 	workspaceRoot                 string
@@ -292,24 +294,26 @@ func NewTaskToolWithOptions(opts TaskToolOptions) *TaskTool {
 		sysPrompt = DefaultTaskSystemPrompt
 	}
 	return &TaskTool{
-		imageInput:       opts.ImageInput,
-		prov:             opts.Provider,
-		pricing:          opts.Pricing,
-		quoteContext:     opts.QuoteContext,
-		parentReg:        opts.ParentRegistry,
-		maxSteps:         opts.MaxSteps,
-		contextWindow:    opts.ContextWindow,
-		recentKeep:       opts.RecentKeep,
-		compactRatio:     opts.CompactRatio,
-		temperature:      opts.Temperature,
-		archiveDir:       opts.ArchiveDir,
-		keepPolicy:       opts.KeepPolicy,
-		sysPrompt:        sysPrompt,
-		gate:             opts.Gate,
-		subagentModel:    opts.SubagentModel,
-		subagentEffort:   opts.SubagentEffort,
-		resolveProvider:  opts.ResolveProvider,
-		maxSubagentDepth: DefaultMaxSubagentDepth,
+		imageInput:              opts.ImageInput,
+		prov:                    opts.Provider,
+		pricing:                 opts.Pricing,
+		quoteContext:            opts.QuoteContext,
+		parentReg:               opts.ParentRegistry,
+		maxSteps:                opts.MaxSteps,
+		contextWindow:           opts.ContextWindow,
+		recentKeep:              opts.RecentKeep,
+		compactRatio:            opts.CompactRatio,
+		temperature:             opts.Temperature,
+		archiveDir:              opts.ArchiveDir,
+		keepPolicy:              opts.KeepPolicy,
+		sysPrompt:               sysPrompt,
+		gate:                    opts.Gate,
+		subagentModel:           opts.SubagentModel,
+		subagentEffort:          opts.SubagentEffort,
+		subagentEffortInherited: opts.SubagentEffortInherited,
+		resolveInheritedEffort:  opts.ResolveInheritedEffort,
+		resolveProvider:         opts.ResolveProvider,
+		maxSubagentDepth:        DefaultMaxSubagentDepth,
 	}
 }
 
@@ -491,6 +495,9 @@ func (t *TaskTool) ResolveProfile(args json.RawMessage) *event.Profile {
 		profileModel, profileEffort,
 		t.subagentModel, t.subagentEffort,
 	)
+	if t.subagentEffortInherited && firstNonBlank(configEffort, p.Effort, profileEffort) == "" && t.resolveInheritedEffort != nil {
+		effort = t.resolveInheritedEffort(model, effort)
+	}
 	if model == "" && effort == "" {
 		return nil
 	}
@@ -578,6 +585,9 @@ func (t *TaskTool) effectiveProfile(model, effort string) (string, string) {
 	}
 	if effort == "" {
 		effort = strings.TrimSpace(t.subagentEffort)
+		if t.subagentEffortInherited && t.resolveInheritedEffort != nil {
+			effort = t.resolveInheritedEffort(model, effort)
+		}
 	}
 	return model, effort
 }
@@ -658,6 +668,9 @@ func (t *TaskTool) buildTaskSpec(ctx context.Context, prompt, description, profi
 		profileModel, profileEffort,
 		t.subagentModel, t.subagentEffort,
 	)
+	if t.subagentEffortInherited && firstNonBlank(configEffort, effort, profileEffort) == "" && t.resolveInheritedEffort != nil {
+		spec.Worker.Effort = t.resolveInheritedEffort(spec.Worker.Model, spec.Worker.Effort)
+	}
 
 	if !readOnly {
 		// Every writer carries a claim. Omitting write_paths conservatively claims

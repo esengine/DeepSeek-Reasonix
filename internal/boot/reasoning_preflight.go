@@ -87,6 +87,7 @@ func preflightRoleReasoning(cfg *config.Config, opts Options, resolver provider.
 	type roleSelection struct {
 		role, ref, source string
 		effort            *string
+		inheritedEffort   bool
 		// optional roles are constructed lazily at use time, so an unresolvable
 		// reference keeps that fallback; only a resolvable one is validated.
 		optional bool
@@ -107,7 +108,7 @@ func preflightRoleReasoning(cfg *config.Config, opts Options, resolver provider.
 		subagentEffort = &value
 	}
 	if cfg.Agent.SubagentModel != "" || subagentEffort != nil {
-		roles = append(roles, roleSelection{role: "subagent", ref: subagentModel, source: "agent.subagent_effort", effort: subagentEffort, optional: true})
+		roles = append(roles, roleSelection{role: "subagent", ref: subagentModel, source: "agent.subagent_effort", effort: subagentEffort, inheritedEffort: subagentEffort != nil, optional: true})
 	}
 	// Seed capacity from one map only. Adding the two attacker-controlled map
 	// lengths can overflow before make validates the allocation size.
@@ -127,10 +128,11 @@ func preflightRoleReasoning(cfg *config.Config, opts Options, resolver provider.
 			ref = subagentModel
 		}
 		effort, source := subagentEffort, "agent.subagent_effort"
+		inheritedEffort := effort != nil
 		if value := cfg.Agent.SubagentEfforts[key]; value != "" {
-			effort, source = &value, "agent.subagent_efforts."+key
+			effort, source, inheritedEffort = &value, "agent.subagent_efforts."+key, false
 		}
-		roles = append(roles, roleSelection{role: "subagent[" + key + "]", ref: ref, source: source, effort: effort, optional: true})
+		roles = append(roles, roleSelection{role: "subagent[" + key + "]", ref: ref, source: source, effort: effort, inheritedEffort: inheritedEffort, optional: true})
 	}
 	for _, selection := range roles {
 		ref := strings.TrimSpace(selection.ref)
@@ -157,9 +159,16 @@ func preflightRoleReasoning(cfg *config.Config, opts Options, resolver provider.
 			}
 		}
 		if selection.effort != nil {
-			copy.Effort, source = *selection.effort, selection.source
-			if copy.Kind == "anthropic" && copy.Effort != "" && copy.Thinking == "" {
-				copy.Thinking = "adaptive"
+			value := *selection.effort
+			fallback := false
+			if selection.inheritedEffort {
+				value, fallback = config.ResolveInheritedEffort(&copy, value)
+			}
+			if !fallback {
+				copy.Effort, source = value, selection.source
+				if copy.Kind == "anthropic" && copy.Effort != "" && copy.Thinking == "" {
+					copy.Thinking = "adaptive"
+				}
 			}
 		}
 		cap := config.ReasoningCapabilityForEntry(&copy)
