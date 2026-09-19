@@ -391,6 +391,33 @@ Thinking 覆盖选项：
 | Disabled（关闭） | 对兼容 provider 发送 `thinking.type = "disabled"`。DeepSeek 风格 provider 下还会避免继续发送推理深度提示。 |
 | Adaptive（自适应） | 仅在服务文档明确支持 adaptive thinking 时使用，例如 MiniMax-M3 风格端点；语义是发送或保留 `thinking.type = "adaptive"`。 |
 
+## 按项目的用户 ID（`cachecontext`）
+
+为了让每个项目单独归属（DeepSeek 的 KV 缓存隔离 / 滥用追踪），请在项目级配置里设置顶层
+`cachecontext`，而不必重复 provider 条目。它会作为 DeepSeek `user_id` 发送（Anthropic 端点下是
+`metadata.user_id`，OpenAI 端点下是 `user`）：
+
+```toml
+cachecontext = "my-project"
+```
+
+该值必须匹配 `^[a-zA-Z0-9_-]+$`（不超过 512 个字符），否则 DeepSeek 会返回 HTTP 400。桌面端可在
+项目标签页的 **项目** 设置区里设置它，全局设置中不提供该字段。
+
+当某个工作区未设置 `cachecontext` 时，Reasonix 会从 `<unix-user>:<repo-path>` 发送一个自动推导的值
+（例如 `alice:/home/alice/my-project`），并按同样的 `^[a-zA-Z0-9_-]+$` 规则清洗，因此实际发送的 id 是
+`alice--home-alice-my-project`。超长路径会保留 `<user>-` 前缀与路径尾部，并对超出的中间部分做哈希，
+使值始终不超过 512 个字符。该自动值不会写入任何配置文件——只出现在 provider 请求中——因此只有显式
+设置 `cachecontext` 才能固定它。
+
+自动值中的用户名按以下优先级解析：仓库本地 `logname`（项目本地配置）、用户全局 `logname`（全局配置）、`user`
+（`logname` 的旧别名）、`$LOGNAME` 环境变量、系统账户。若 `logname` 与 `user` 同时设置，
+`logname` 生效并记录一条加载警告。
+
+同样的自动推导还会生成一个 `session_id`（不超过 256 个字符，即 OpenRouter 的上限），作为
+OpenAI 兼容 provider 请求中的顶层 `session_id` 发送。与 `user` id 一样按项目推导，因此同一对话的
+延续在多次运行间保持稳定；未定义该字段的网关会忽略它。
+
 ## 快捷键
 
 这里按使用端来写，因为用户通常是先知道“我现在在桌面端/CLI”，再找对应按键。
