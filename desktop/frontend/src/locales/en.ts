@@ -1305,6 +1305,7 @@ export const en = {
   "approval.deny": "Deny",
   "approval.allowOnce": "Allow once",
   "approval.writeAccessPending": "Extend write access",
+  "approval.submitFailed": "The action could not be submitted. Try again, or stop the task.",
   "approval.writeAccessOnce": "Allow once",
   "approval.writeAccessOnceDesc": "Allow this write for this call only. The next one asks again.",
   "approval.writeAccessSession": "Allow these directories this session",

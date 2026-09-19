@@ -146,6 +146,29 @@ func TestResolvePromptForSessionRejectsStaleBindingBeforeController(t *testing.T
 	}
 }
 
+func TestResolvePromptForSessionAcceptsInitialGeneration(t *testing.T) {
+	reader := &bindingRuntimeReader{}
+	// New and restored tabs start at generation zero until a rotation occurs.
+	tab := &WorkspaceTab{ID: "initial", SessionID: "session-a", Ctrl: reader}
+	a := &App{tabs: map[string]*WorkspaceTab{tab.ID: tab}}
+	target := InteractionTargetView{TabID: tab.ID, HostID: localDesktopHostID,
+		SessionID: tab.SessionID, SessionGeneration: tab.SessionGeneration,
+		PromptID: "p1", TurnID: "t1", RuntimeEpoch: "r1", Kind: "approval"}
+	if err := a.ResolvePromptForSession(target, PromptAnswerView{Allow: true}); err != nil {
+		t.Fatalf("initial generation rejected: %v", err)
+	}
+	// A delayed answer from generation zero must not authorize the rotated tab.
+	tab.SessionGeneration++
+	if err := a.ResolvePromptForSession(target, PromptAnswerView{Allow: true}); err == nil {
+		t.Fatal("initial generation authorized a rotated session")
+	}
+	reader.mu.Lock()
+	defer reader.mu.Unlock()
+	if len(reader.resolved) != 1 || reader.resolved[0].PromptID != target.PromptID {
+		t.Fatalf("initial prompt calls = %+v", reader.resolved)
+	}
+}
+
 func TestLocalBindingUsesControllerIdentityNotMutableContents(t *testing.T) {
 	first, second := &bindingRuntimeReader{}, &bindingRuntimeReader{}
 	tab := &WorkspaceTab{ID: "identity"}

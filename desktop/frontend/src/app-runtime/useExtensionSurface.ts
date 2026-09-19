@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import { app } from "../lib/bridge";
 import { useCommittedCommand } from "../lib/useCommittedCommand";
+import { hasSessionGeneration } from "../lib/sessionIdentity";
 
 export type ExtensionSurfaceView = {
   pluginId: string;
@@ -63,7 +64,7 @@ export function useExtensionSurface(input: {
     const requestKey = formKey;
     setBusyFormKey(requestKey);
     try {
-      if (!app.SubmitExtensionFormExact || !pending.formInstanceExact || !target.sessionId || !target.sessionGeneration || !target.pluginGeneration || !target.formInstanceId) {
+      if (!app.SubmitExtensionFormExact || !pending.formInstanceExact || !target.sessionId || !hasSessionGeneration(input.sessionGeneration) || !target.pluginGeneration || !target.formInstanceId) {
         throw new Error("Exact extension form submission is unavailable; refresh or upgrade Reasonix.");
       }
       await app.SubmitExtensionFormExact(target, values);
@@ -92,7 +93,7 @@ export function useExtensionSurface(input: {
     const requestKey = formKey;
     setBusyFormKey(requestKey);
     try {
-      if (app.SubmitExtensionFormExact && pending.formInstanceExact && target.tabId && target.sessionId && target.sessionGeneration && target.pluginGeneration && target.formInstanceId) {
+      if (app.SubmitExtensionFormExact && pending.formInstanceExact && target.tabId && target.sessionId && hasSessionGeneration(input.sessionGeneration) && target.pluginGeneration && target.formInstanceId) {
         await app.SubmitExtensionFormExact(target, { cancelled: true }).catch(() => {});
       }
       dismissForm(target.tabId, identity);

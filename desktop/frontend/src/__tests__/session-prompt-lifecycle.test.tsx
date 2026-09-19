@@ -5,6 +5,7 @@ import { JSDOM } from "jsdom";
 import { useSessionOperations } from "../app-runtime/useSessionOperations";
 import { useSessionPromptCommands } from "../app-runtime/useSessionPromptCommands";
 import type { PromptPorts } from "../app-runtime/sessionPromptExecutor";
+import { CommandCancelled } from "../lib/commandOutcome";
 
 const dom = new JSDOM("<div id='root'></div>");
 Object.assign(globalThis, { window: dom.window, document: dom.window.document, IS_REACT_ACT_ENVIRONMENT: true });
@@ -52,12 +53,12 @@ try {
   reset(); await paint("A");
   pending = commands.handleExitPlan(); await entered.promise;
   prompt = "replacement";
-  gate.resolve(); await pending;
+  gate.resolve(); await assert.rejects(pending, CommandCancelled);
   assert.deepEqual(calls, ["clear:A"], "replacement prompt revokes the entire continuation, including mode changes");
 
   reset(); await paint("A");
   pending = commands.handleExitPlan(); await entered.promise;
-  await paint("A", "2"); gate.resolve(); await pending;
+  await paint("A", "2"); gate.resolve(); await assert.rejects(pending, CommandCancelled);
   assert.deepEqual(calls, ["clear:A"], "same tab with a different session cannot resolve an old approval");
 
   reset(); await paint("A", "1", true);
@@ -69,14 +70,14 @@ try {
   reset(); await paint("A");
   pending = commands.handleExitPlan(); await entered.promise;
   await commands.handleApprovalAnswer(false, false, false);
-  gate.resolve(); await pending;
+  gate.resolve(); await assert.rejects(pending, CommandCancelled);
   assert.deepEqual(calls, ["clear:A", "resolve:A:approval-A"], "new decision supersedes the older mode/approval chain");
 
   reset(); await paint("A");
   pending = commands.handleExitPlan(); await entered.promise;
   await act(async () => root.unmount());
-  gate.resolve(); await pending;
-  commands.handleRecoveryAnswer("stop");
+  gate.resolve(); await assert.rejects(pending, CommandCancelled);
+  await assert.rejects(commands.handleRecoveryAnswer("stop"), CommandCancelled);
   assert.deepEqual(calls, ["clear:A"], "unmount revokes the stable entry and every in-flight continuation");
   console.log("session prompts: source, prompt identity, replacement, ABA, supersession and disposal passed");
 } finally { dom.window.close(); }

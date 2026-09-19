@@ -11,9 +11,9 @@ export type MCPInteractionAction = "accept" | "decline" | "cancel";
 
 
 export type SessionActionPorts = {
-  approveForTab: (target: SessionPromptTarget, allow: boolean, session: boolean, persist: boolean) => void;
-  resolvePlanForTab: (target: SessionPromptTarget, action: PlanDecisionAction) => void;
-  resolveRecoveryForTab: (target: SessionPromptTarget, action: RecoveryAction, feedback: string) => void;
+  approveForTab: (target: SessionPromptTarget, allow: boolean, session: boolean, persist: boolean) => void | Promise<void>;
+  resolvePlanForTab: (target: SessionPromptTarget, action: PlanDecisionAction) => void | Promise<void>;
+  resolveRecoveryForTab: (target: SessionPromptTarget, action: RecoveryAction, feedback: string) => void | Promise<void>;
   answerQuestionForTab: (target: SessionPromptTarget, answers: QuestionAnswer[]) => Promise<void>;
   answerMCPForTab: (target: SessionPromptTarget, action: MCPInteractionAction, content?: Record<string, unknown>) => void;
   setCollaborationModeForTab: (tabId: string, mode: CollaborationMode) => Promise<void>;
@@ -33,8 +33,8 @@ export function submitApproval(
   target: SessionPromptTarget,
   input: { allow: boolean; session: boolean; persist: boolean },
   ports: Pick<SessionActionPorts, "approveForTab">,
-): void {
-  ports.approveForTab(target, input.allow, input.session, input.persist);
+): void | Promise<void> {
+  return ports.approveForTab(target, input.allow, input.session, input.persist);
 }
 
 export async function submitPlanDecision(
@@ -67,7 +67,7 @@ export async function submitPlanDecision(
     ports.patchComposerProfile(target.tabId, "normal");
   }
   authority.checkpoint();
-  ports.resolvePlanForTab(target, input.action);
+  await ports.resolvePlanForTab(target, input.action);
 }
 
 export function submitRecovery(
@@ -75,8 +75,8 @@ export function submitRecovery(
   action: RecoveryAction,
   feedback: string,
   ports: Pick<SessionActionPorts, "resolveRecoveryForTab">,
-): void {
-  ports.resolveRecoveryForTab(target, action, feedback);
+): void | Promise<void> {
+  return ports.resolveRecoveryForTab(target, action, feedback);
 }
 
 export function submitQuestion(

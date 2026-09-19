@@ -264,6 +264,11 @@ function AskCardBody({ ask, onAnswer, onStop, draftKey }: AskCardProps & { draft
 
   useEffect(() => {
     const onKeyDown = (event: globalThis.KeyboardEvent) => {
+      if (event.key === "Escape" && submitting) {
+        event.preventDefault();
+        stopAsk();
+        return;
+      }
       if (submitting || !q) return;
       const target = event.target instanceof Element ? event.target : null;
       const tag = target?.tagName.toLowerCase();
@@ -348,7 +353,7 @@ function AskCardBody({ ask, onAnswer, onStop, draftKey }: AskCardProps & { draft
           >
             {collapsed ? <ChevronUp size={15} aria-hidden="true" /> : <ChevronDown size={15} aria-hidden="true" />}
           </PromptHeaderAction>
-          <PromptHeaderAction onClick={stopAsk} ariaLabel={t("decision.stopTask")} disabled={submitting}>
+          <PromptHeaderAction onClick={stopAsk} ariaLabel={t("decision.stopTask")}>
             <X size={16} aria-hidden="true" />
           </PromptHeaderAction>
         </>

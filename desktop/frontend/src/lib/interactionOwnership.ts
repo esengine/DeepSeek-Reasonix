@@ -1,4 +1,4 @@
-import { sessionIdentityStableKey } from "./sessionIdentity";
+import { hasSessionGeneration, sessionIdentityStableKey } from "./sessionIdentity";
 import { interactionInstanceKey, sameInteractionIdentity, type InteractionKind, type InteractionTarget } from "./interactionTarget";
 import type { Meta, WireApproval, WireAsk, WireMCPInteraction } from "./types";
 
@@ -19,7 +19,7 @@ export function promptForInteraction(state: InteractionState, target: Pick<Inter
 }
 
 export function stateOwnsInteraction(state: InteractionState, target: InteractionTarget): boolean {
-  if (!target.sessionId || !target.sessionGeneration || !state.meta?.session?.sessionId || !state.meta.sessionGeneration) return false;
+  if (!target.sessionId || !hasSessionGeneration(target.sessionGeneration) || !state.meta?.session?.sessionId || !hasSessionGeneration(state.meta.sessionGeneration)) return false;
   if (state.meta.session.sessionId !== target.sessionId || state.meta.sessionGeneration !== target.sessionGeneration) return false;
   if (target.hostId && state.meta.session.hostId !== target.hostId) return false;
   const currentSessionKey = sessionIdentityStableKey(state.meta);

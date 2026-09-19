@@ -1,4 +1,5 @@
 import { noteSessionObservation, sessionObservationDiagnostics } from "../lib/sessionObservationDiagnostics";
+import { notePromptSubmission } from "../lib/promptSubmissionDiagnostics";
 import assert from "node:assert/strict";
 import { JSDOM } from "jsdom";
 import { installDesktopHostStub } from "./desktopHostStub";
@@ -9,13 +10,17 @@ const dom = new JSDOM("<!doctype html><html><body></body></html>", { url: "http:
 Object.assign(globalThis, { window: dom.window, document: dom.window.document });
 const body = Buffer.from("第一条问题\n工具参数和完整输出✓\n最终回答", "utf8");
 let cancelled = 0, finished = 0;
+let exportedObservation = "";
 let blocked = false;
 let release!: () => void;
 let started!: () => void;
 const readStarted = new Promise<void>(resolve => { started = resolve; });
 const gate = new Promise<void>(resolve => { release = resolve; });
 const stub = installDesktopHostStub({
- BeginSessionExportForTarget: async () => ({ exportId: "fixed-A", format: "clipboard", snapshot: {} }),
+ BeginSessionExportForTarget: async (_selector: unknown, _tab: string, _format: string, _title: string, observation: string) => {
+  exportedObservation = observation;
+  return { exportId: "fixed-A", format: "clipboard", snapshot: {} };
+ },
  ReadSessionExportChunk: async (_id: string, offset: number) => {
   if (blocked) { started(); await gate; }
   const end = Math.min(offset + 1, body.length);
@@ -34,7 +39,11 @@ try {
  for await (const part of exportChunks({ exportId: "fixed-A" } as SessionExportHandle)) text += part;
  assert.equal(text, body.toString("utf8"), "UTF-8 characters crossing every RPC boundary survive");
  const input = { selector: { ref: { hostId: "local", sessionId: "A" } }, tabId: "tab-A", format: "clipboard", title: "A", remote: false, residentItems: 0, runningStream: false, unresolvedTools: 0 };
+ notePromptSubmission({ tabId: "tab-A", sessionId: "A", sessionGeneration: 0, promptId: "1", turnId: "turn-A", runtimeEpoch: "runtime-A", kind: "approval" }, "transport", "accepted");
  const result = await runSessionExport(input);
+ const promptEvent = JSON.parse(exportedObservation).lifecycleDiagnostics.events.find((event: { action: string }) => event.action === "prompt-transport");
+ assert.equal(promptEvent.status, "accepted", "session exports contain the actual approval transport outcome");
+ assert.equal(promptEvent.prompt.bindingGeneration, 0, "export preserves the valid initial generation");
  assert.equal(result.text, text);
  assert.equal(finished, 1);
  blocked = true;

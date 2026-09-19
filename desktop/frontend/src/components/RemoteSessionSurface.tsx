@@ -12,6 +12,7 @@ import type { RemoteSessionApi } from "../lib/useRemoteSession";
 export { hydrateRemoteTelemetry, loadRemoteStatusSnapshot } from "../lib/remoteTelemetry";
 import type { PromptKind, TabMeta, WireApproval, WireAsk, WireMCPInteraction } from "../lib/types";
 import { orderedLocalSubmissions } from "../lib/localSubmissionState";
+import { hasSessionGeneration } from "../lib/sessionIdentity";
 
 /**
  * RemoteSessionSurface renders the active remote tab's content area with
@@ -42,12 +43,12 @@ export function RemoteSessionSurface({ tab, session, surfaceCommitToken, onSurfa
   const visiblePrompt = approval || ask || mcpInteraction;
   const promptUpgradeRequired = Boolean(visiblePrompt && !tab.interactionTargetSupported);
   const promptIdentityUnavailable = Boolean(visiblePrompt && tab.interactionTargetSupported && (
-    !tab.remote?.hostId || !tab.sessionId || !tab.sessionGeneration || !visiblePrompt.turnId || !visiblePrompt.runtimeEpoch
+    !tab.remote?.hostId || !tab.sessionId || !hasSessionGeneration(tab.sessionGeneration) || !visiblePrompt.turnId || !visiblePrompt.runtimeEpoch
   ));
   const promptActionDisabled = promptUpgradeRequired || promptIdentityUnavailable;
   const formUpgradeRequired = Boolean(extensionForm && !tab.extensionFormInstanceSupported);
   const formIdentityUnavailable = Boolean(extensionForm && tab.extensionFormInstanceSupported && (
-    !tab.remote?.hostId || !(extensionForm.sessionId ?? tab.sessionId) || !tab.sessionGeneration ||
+    !tab.remote?.hostId || !(extensionForm.sessionId ?? tab.sessionId) || !hasSessionGeneration(tab.sessionGeneration) ||
     !extensionForm.generation || !extensionForm.formInstanceExact || !extensionForm.formInstanceId
   ));
   const formActionDisabled = formUpgradeRequired || formIdentityUnavailable;
@@ -175,10 +176,10 @@ export function RemoteSessionSurface({ tab, session, surfaceCommitToken, onSurfa
               ? resolvePrompt(approval, "plan", { action: allow ? "start_execution" : "revise_plan" })
               : resolvePrompt(approval, approval.kind === "recovery" ? "recovery" : "approval", {
                   allow, session: sessionScope, persist, generation: approval.generation, permissionRevision: approval.permissionRevision,
-                }))}
-            onRevisePlan={(text) => runAction(() => resolvePrompt(approval, "plan", { action: "revise_plan", feedback: text }))}
-            onExitPlan={() => runAction(() => resolvePrompt(approval, "plan", { action: "exit_plan" }))}
-            onStop={() => runAction(session.cancelTurn)}
+                }), true)}
+            onRevisePlan={(text) => runAction(() => resolvePrompt(approval, "plan", { action: "revise_plan", feedback: text }), true)}
+            onExitPlan={() => runAction(() => resolvePrompt(approval, "plan", { action: "exit_plan" }), true)}
+            onStop={() => runAction(session.cancelTurn, true)}
           />
         </div>
         </fieldset>

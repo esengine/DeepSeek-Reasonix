@@ -8,6 +8,11 @@ export type SessionIdentity = Readonly<{
   sessionGeneration?: number;
 }>;
 
+/** Zero is the initial host binding; only absent/invalid generations are unknown. */
+export function hasSessionGeneration(value: unknown): value is number {
+  return typeof value === "number" && Number.isSafeInteger(value) && value >= 0;
+}
+
 export type SessionHydrationOptions<Item, SurfacePolicy extends string> = SessionIdentity & Readonly<{
   skipHistory?: boolean;
   placeholderItems?: Item[];

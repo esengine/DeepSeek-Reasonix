@@ -91,7 +91,9 @@ func (a *App) ResolvePromptForTab(tabID, promptID, turnID, runtimeEpoch, kind st
 // ResolvePromptForSession fixes the controller and session binding before
 // dispatch. A reusable tab cannot redirect an old card to its new session.
 func (a *App) ResolvePromptForSession(target InteractionTargetView, answer PromptAnswerView) error {
-	if target.TabID == "" || target.SessionID == "" || target.SessionGeneration == 0 ||
+	// Generation zero is a valid initial binding. Equality with the live tab,
+	// together with exact session/turn/runtime identity, fences stale answers.
+	if target.TabID == "" || target.SessionID == "" ||
 		target.PromptID == "" || target.TurnID == "" || target.Kind == "" {
 		return fmt.Errorf("exact prompt and session identity is required")
 	}

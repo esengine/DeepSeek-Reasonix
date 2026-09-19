@@ -8,6 +8,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"reasonix/internal/agent"
 	"reasonix/internal/event"
@@ -15,6 +16,93 @@ import (
 	"reasonix/internal/sandbox"
 	"reasonix/internal/tool"
 )
+
+// Exercise the same exact-identity endpoint as Desktop, including a replay
+// while the first write is waiting and a subsequent write to the same root.
+func TestWriteAccessExactApprovalAcrossConsecutiveWrites(t *testing.T) {
+	for _, sessionScope := range []bool{false, true} {
+		name := "once"
+		if sessionScope {
+			name = "session"
+		}
+		t.Run(name, func(t *testing.T) {
+			workspace, outside := canonicalWriteTestDir(t), canonicalWriteTestDir(t)
+			requests := make(chan event.Event, 8)
+			results := make(chan agent.WriteAccessDecision, 2)
+			finished := make(chan error, 1)
+			c := newOwnedTestController(t, Options{
+				WorkspaceRoot: workspace, WriteRoots: sandbox.NewWritableRootSet([]string{workspace}),
+				RuntimeGeneration: 1, Policy: permission.New("allow", nil, nil, nil),
+				Sink: event.FuncSink(func(e event.Event) {
+					if e.Kind == event.ApprovalRequest {
+						requests <- e
+					}
+				}),
+			})
+			c.EnableInteractiveApproval()
+			c.SetToolApprovalMode(ToolApprovalWorkspaceWrite)
+			c.SetTurnEventRoutingMetadata("write-access-runtime", "")
+			t.Cleanup(c.Close)
+			c.runGuarded(func(ctx context.Context) error {
+				for range 2 {
+					decision, err := c.CheckWriteAccess(ctx, agent.WriteAccessCheck{
+						Tool: "write_file", Subject: filepath.Join(outside, "animation.html"), Expandable: true,
+						Args:        json.RawMessage(`{"content":"fixture"}`),
+						Declaration: tool.WriteAccessDeclaration{Directories: []string{outside}},
+					})
+					if err != nil {
+						finished <- err
+						return err
+					}
+					results <- decision
+				}
+				finished <- nil
+				return nil
+			})
+			resolve := func(request event.Event) {
+				t.Helper()
+				answer := PromptAnswer{Allow: true, Session: sessionScope,
+					Generation: request.Approval.Generation, PermissionRevision: request.Approval.PermissionRevision}
+				identity := PromptIdentity{PromptID: request.Approval.ID, TurnID: request.TurnID,
+					RuntimeEpoch: "write-access-runtime", Kind: PromptApproval}
+				if err := c.ResolvePromptExact(identity, answer); err != nil {
+					t.Fatalf("exact approval: %v", err)
+				}
+			}
+			first := awaitPromptLedgerTest(t, requests, "first write approval")
+			c.ReplayPendingPrompts()
+			replay := awaitPromptLedgerTest(t, requests, "replayed write approval")
+			if replay.Approval.ID != first.Approval.ID || replay.TurnID != first.TurnID {
+				t.Fatal("replay changed the pending write identity")
+			}
+			resolve(replay)
+			if got := awaitPromptLedgerTest(t, results, "first allowed write"); !got.Allow {
+				t.Fatal("first write denied")
+			}
+			if !sessionScope {
+				second := awaitPromptLedgerTest(t, requests, "second write approval")
+				if second.Approval.ID == first.Approval.ID {
+					t.Fatal("consecutive writes reused a prompt id")
+				}
+				resolve(second)
+			}
+			select {
+			case got := <-results:
+				if !got.Allow {
+					t.Fatal("second write denied")
+				}
+			case unexpected := <-requests:
+				t.Fatalf("session-scoped directory prompted again: %s", unexpected.Approval.ID)
+			case <-time.After(5 * time.Second):
+				t.Fatal("second write did not resume")
+			}
+			if err := awaitPromptLedgerTest(t, finished, "write completion"); err != nil {
+				t.Fatal(err)
+			}
+			waitIdle(t, c)
+		})
+	}
+}
 
 func TestResolveApprovalWriteAccessOnceDoesNotGrantSession(t *testing.T) {
 	dir := t.TempDir()

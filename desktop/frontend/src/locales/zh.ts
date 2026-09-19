@@ -1306,6 +1306,7 @@ export const zh: Record<DictKey, string> = {
   "approval.deny": "拒绝",
   "approval.allowOnce": "允许一次",
   "approval.writeAccessPending": "需要扩展写入范围",
+  "approval.submitFailed": "此次操作未能提交，请重试，也可以停止任务。",
   "approval.writeAccessOnce": "仅本次允许",
   "approval.writeAccessOnceDesc": "仅本次有效，下次仍会询问。",
   "approval.writeAccessSession": "本会话允许这些目录",

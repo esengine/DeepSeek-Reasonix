@@ -258,7 +258,7 @@ const remoteTab: TabMeta = {
   active: true,
   cwd: "~/app",
   sessionId: "remote-session-1",
-  sessionGeneration: 1,
+  sessionGeneration: 0,
   interactionTargetSupported: true,
   extensionFormInstanceSupported: true,
   remote: { hostId: "gpu-box", workspace: "~/app" },

@@ -1087,6 +1087,7 @@ export const zhTW: Record<DictKey, string> = {
   "approval.deny": "拒絕",
   "approval.allowOnce": "允許一次",
   "approval.writeAccessPending": "需要擴展寫入範圍",
+  "approval.submitFailed": "此次操作未能提交，請重試，也可以停止任務。",
   "approval.writeAccessOnce": "僅本次允許",
   "approval.writeAccessOnceDesc": "僅本次有效，下次仍會詢問。",
   "approval.writeAccessSession": "本工作階段允許這些目錄",

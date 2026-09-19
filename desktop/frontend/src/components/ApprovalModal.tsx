@@ -190,7 +190,10 @@ function planDelta(beforeRaw: string | undefined, afterRaw: string | undefined):
 export function ApprovalModal(props: ApprovalModalProps) {
   const isHistoricalRecovery = props.approval.kind === "recovery" || Boolean(props.approval.recovery);
   if (isHistoricalRecovery) return <RetiredRecoveryApproval approval={props.approval} />;
-  return <InteractiveApprovalModal {...props} />;
+  const { approval } = props;
+  const identity = JSON.stringify([props.tabId, props.workspaceScopeKey, approval.id, approval.kind,
+    approval.turnId, approval.runtimeEpoch, approval.generation, approval.permissionRevision]);
+  return <InteractiveApprovalModal key={identity} {...props} />;
 }
 
 function InteractiveApprovalModal({
@@ -251,7 +254,11 @@ function InteractiveApprovalModal({
   const [recoveryGuidanceOpen, setRecoveryGuidanceOpen] = useState(false);
   const [recoveryGuidanceText, setRecoveryGuidanceText] = useState("");
   const [grantSimilarForTask, setGrantSimilarForTask] = useState(false);
-  const [submitting, setSubmitting] = useState(false);
+  const [answerPending, setSubmitting] = useState(false);
+  const [stopping, setStopping] = useState(false);
+  const [submitFailed, setSubmitFailed] = useState(false);
+  const stopPendingRef = useRef(false);
+  const submitting = answerPending || stopping;
   const instanceId = useId();
   const cardRef = useRef<HTMLDivElement | null>(null);
   const shelfRef = useRef<HTMLDivElement | null>(null);
@@ -271,21 +278,37 @@ function InteractiveApprovalModal({
     if (closingRef.current || submitting) return;
     closingRef.current = true;
     setSubmitting(true);
+    setSubmitFailed(false);
     let result: void | Promise<void>;
     try {
       result = fn();
     } catch {
       closingRef.current = false;
       setSubmitting(false);
+      setSubmitFailed(true);
       return;
     }
     void Promise.resolve(result).catch(() => {
       closingRef.current = false;
       setSubmitting(false);
+      setSubmitFailed(true);
     });
     const el = shelfRef.current;
     if (el) animateElementExit(el, { opacity: 0, y: 8, duration: DUR_FAST, onComplete: () => undefined });
   };
+
+  // Cancellation has its own lane: an unanswered RPC cannot revoke Stop.
+  const stopTask = useCallback(() => {
+    if (stopPendingRef.current) return;
+    stopPendingRef.current = true;
+    setStopping(true);
+    setSubmitFailed(false);
+    void Promise.resolve().then(onStop).catch(() => {
+      stopPendingRef.current = false;
+      setStopping(false);
+      setSubmitFailed(true);
+    });
+  }, [onStop]);
 
   const resolveRecovery = useCallback(
     (action: "continue" | "continue_task" | "revise", feedback?: string) => {
@@ -435,16 +458,7 @@ function InteractiveApprovalModal({
     // active IME composition. Plan and recovery decisions retain focus because
     // they replace the composer interaction rather than supplement it.
     if (isPlanApproval || isRecoveryApproval) cardRef.current?.focus();
-    setRevisionOpen(false);
-    setRevisionText("");
-    setRecoveryGuidanceOpen(false);
-    setRecoveryGuidanceText("");
-    setGrantSimilarForTask(false);
-    setReasonOpen(isRecoveryApproval ? false : Boolean(reason) && reason.length <= 160);
-    setSelectedIndex(isPlanApproval || isRecoveryApproval ? -1 : 0);
-    setSubmitting(false);
-    closingRef.current = false;
-  }, [approval.id, isPlanApproval, isRecoveryApproval, reason]);
+  }, [isPlanApproval, isRecoveryApproval]);
 
   useEffect(() => {
     setExpandedDescriptionId(null);
@@ -487,6 +501,11 @@ function InteractiveApprovalModal({
 
   useEffect(() => {
     const onKeyDown = (event: globalThis.KeyboardEvent) => {
+      if (event.key === "Escape" && submitting) {
+        event.preventDefault();
+        stopTask();
+        return;
+      }
       if (submitting) return;
       if (isRecoveryApproval && recoveryGuidanceOpen && event.key === "Escape") {
         event.preventDefault();
@@ -545,12 +564,12 @@ function InteractiveApprovalModal({
         setSelectedIndex(index);
       } else if (event.key === "Escape") {
         event.preventDefault();
-        answerWithExit(onStop);
+        stopTask();
       }
     };
     document.addEventListener("keydown", onKeyDown);
     return () => document.removeEventListener("keydown", onKeyDown);
-  }, [actionCount, activateAction, confirmSelected, onStop, submitting, isPlanApproval, isRecoveryApproval, isRecoveryPlanChange, recoveryGuidanceOpen, toolActions]);
+  }, [actionCount, activateAction, confirmSelected, stopTask, submitting, isPlanApproval, isRecoveryApproval, isRecoveryPlanChange, recoveryGuidanceOpen, toolActions]);
 
   useEffect(() => {
     revisionActiveRef.current = revisionOpen;
@@ -743,9 +762,9 @@ function InteractiveApprovalModal({
             )}
             {!isPlanApproval && !isRecoveryApproval && (
               <PromptHeaderAction
-                onClick={() => answerWithExit(onStop)}
+                onClick={stopTask}
                 ariaLabel={t("decision.stopTask")}
-                disabled={submitting}
+                disabled={stopping}
               >
                 {t("decision.stopTask")}
               </PromptHeaderAction>
@@ -884,6 +903,7 @@ function InteractiveApprovalModal({
           )
         }
       >
+        {submitFailed && <p role="alert">{t("approval.submitFailed")}</p>}
         {(approvalModeRelaxed ||
           isRecoveryApproval ||
           (!isPlanApproval && !isRecoveryApproval && (subject || isWriteAccessApproval || (reasonOpen && reason))) ||

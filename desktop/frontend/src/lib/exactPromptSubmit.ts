@@ -1,5 +1,7 @@
 import type { AppBindings } from "./bridge";
 import type { InteractionTarget } from "./interactionTarget";
+import { hasSessionGeneration } from "./sessionIdentity";
+import { notePromptSubmission, promptFailureClass } from "./promptSubmissionDiagnostics";
 
 type ExactPromptBinding = Pick<AppBindings, "ResolvePromptForSession" | "ResolvePromptForTab" | "PendingPromptIdentitiesForTab">;
 
@@ -9,7 +11,7 @@ export async function resolvePromptForSession(
   answer: Record<string, unknown>,
 ): Promise<void> {
   if (!binding.ResolvePromptForSession) throw new Error("exact session prompt submission is unavailable; upgrade the host");
-  if (!target.sessionId || !target.sessionGeneration) throw new Error("prompt session identity is unavailable; refresh the card");
+  if (!target.sessionId || !hasSessionGeneration(target.sessionGeneration)) throw new Error("prompt session identity is unavailable; refresh the card");
   let turnId = target.turnId;
   let runtimeEpoch = target.runtimeEpoch;
   if (!turnId) {
@@ -22,16 +24,23 @@ export async function resolvePromptForSession(
     turnId = matches[0].turnId;
     runtimeEpoch = matches[0].runtimeEpoch;
   }
-  await binding.ResolvePromptForSession({
-    tabId: target.tabId,
-    hostId: target.hostId ?? "local",
-    sessionId: target.sessionId,
-    sessionGeneration: target.sessionGeneration,
-    promptId: target.promptId,
-    turnId,
-    runtimeEpoch: runtimeEpoch ?? "",
-    kind: target.kind,
-  }, answer);
+  notePromptSubmission(target, "transport", "sent");
+  try {
+    await binding.ResolvePromptForSession({
+      tabId: target.tabId,
+      hostId: target.hostId ?? "local",
+      sessionId: target.sessionId,
+      sessionGeneration: target.sessionGeneration,
+      promptId: target.promptId,
+      turnId,
+      runtimeEpoch: runtimeEpoch ?? "",
+      kind: target.kind,
+    }, answer);
+    notePromptSubmission(target, "transport", "accepted");
+  } catch (error) {
+    notePromptSubmission(target, "transport", `rejected:${promptFailureClass(error)}`);
+    throw error;
+  }
 }
 
 export async function resolvePromptForTab(
