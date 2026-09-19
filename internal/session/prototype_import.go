@@ -236,6 +236,7 @@ func importFrozenPreview(ctx context.Context, frozen frozenPreview, targetRoot s
 	projection := Projection{}
 	var importedCommits int
 	var lastSequence uint64
+	var lastActivity time.Time
 	var convertErr error
 	pending := make([]Commit, 0, 64)
 	flushPending := func() error {
@@ -267,6 +268,9 @@ func importFrozenPreview(ctx context.Context, frozen frozenPreview, targetRoot s
 		}
 		importedCommits++
 		lastSequence = converted.LastSequence()
+		if converted.CreatedAt.After(lastActivity) {
+			lastActivity = converted.CreatedAt
+		}
 		return ctx.Err() == nil
 	}
 	if prototype.Codec == Codec && prototype.StorageRevision == 0 {
@@ -302,35 +306,19 @@ func importFrozenPreview(ctx context.Context, frozen frozenPreview, targetRoot s
 	if err := finalLog.Close(); err != nil {
 		return PrototypeImportResult{}, err
 	}
+	createdAt, updatedAt := prototypeSourceTimes(&source, prototype, lastActivity)
 	finalManifest := Manifest{
 		SchemaVersion: SchemaVersion, Codec: Codec, StorageRevision: StorageRevision, ContentRoot: sharedContentRoot, SessionID: targetID,
-		CreatedAt: time.Now().UTC(), InheritedEvents: lastSequence, Source: &source,
+		CreatedAt: createdAt, InheritedEvents: lastSequence, Source: &source,
 	}
 	if err := writeImportedPreviewManifest(tmp, finalManifest, options); err != nil {
 		return PrototypeImportResult{}, err
 	}
-	validatedLog, err := os.Open(finalLogPath)
-	if err != nil {
+	if err := validateImportedPreview(ctx, finalLogPath, content, importedCommits, lastSequence); err != nil {
 		return PrototypeImportResult{}, err
 	}
-	validatedProjection := Projection{}
-	validatedCommits := 0
-	var validationErr error
-	replayErr := scanV4CommitFile(ctx, validatedLog, 0, 1, content, nil, func(_ int64, commit Commit) bool {
-		if err := applyProjectionCommit(&validatedProjection, commit); err != nil {
-			validationErr = err
-			return false
-		}
-		validatedCommits++
-		return true
-	})
-	closeErr := validatedLog.Close()
-	replayErr = errors.Join(replayErr, validationErr, closeErr)
-	if replayErr != nil || validatedCommits != importedCommits || validatedProjection.CommittedSequence != lastSequence {
-		if replayErr == nil {
-			replayErr = fmt.Errorf("replayed %d commits through sequence %d; want %d through %d", validatedCommits, validatedProjection.CommittedSequence, importedCommits, lastSequence)
-		}
-		return PrototypeImportResult{}, fmt.Errorf("validate prototype target: %w", replayErr)
+	if err := stampLogActivity(finalLogPath, updatedAt); err != nil {
+		return PrototypeImportResult{}, err
 	}
 	if err := os.Rename(tmp, targetDir); err != nil {
 		return PrototypeImportResult{}, fmt.Errorf("publish prototype target: %w", err)

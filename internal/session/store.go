@@ -72,14 +72,6 @@ type Manifest struct {
 
 const sharedContentRoot = "../.content-v1"
 
-type Source struct {
-	Path         string `json:"path"`
-	Size         int64  `json:"size"`
-	SHA256       string `json:"sha256"`
-	Version      string `json:"version,omitempty"`
-	LegacyHeadID string `json:"legacyHeadId,omitempty"`
-}
-
 type Event struct {
 	ID         string              `json:"id"`
 	Sequence   uint64              `json:"seq"`

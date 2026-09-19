@@ -485,9 +485,9 @@ func runAgent(args []string, version string) int {
 	ablateFlag := fs.String("ablate", "", "benchmark arm: comma-separated subsystems to switch off (evidence, planner, subagent, retrieval, compaction; none|all)")
 	dir := fs.String("dir", "", "change to this directory first (project root); config, sandbox and file tools resolve from here")
 	cont := registerContinueFlag(fs)
-	resume := fs.String("resume", "", "resume by session file path, session ID, or machine session ID (takes precedence over --continue)")
+	resume := fs.String("resume", "", "resume by session ID, title, or preview text (takes precedence over --continue)")
 	copySession := fs.Bool("copy", false, "with --resume/--continue: duplicate the session and continue in the copy (escape hatch when the original is held by another Reasonix process)")
-	takeover := fs.Bool("takeover", false, "with --resume/--continue: when a resident serve on this machine holds the session, take it over instead of refusing")
+	fs.Bool("takeover", false, "deprecated: retained for compatibility; native sessions are held through the session service")
 	effort := fs.String("effort", "", "session reasoning effort override")
 	permissionMode := fs.String("permission-mode", "workspace-write", "permission mode: read-only | workspace-write | danger-full-access")
 	autoApprove := fs.BoolP("auto", "y", false, "deprecated compatibility flag; uses workspace-write")
@@ -575,8 +575,9 @@ func runAgent(args []string, version string) int {
 
 	// Resolve the resume target up front so --copy and the session lease can be
 	// handled before any heavy assembly. --resume takes precedence over
-	// --continue, matching the Resume call below. Accept file paths, branch
-	// IDs, preview text, and opaque machine session IDs (#7429).
+	// --continue, matching the Resume call below. Resume targets are native v4
+	// session identities matched by id, title, or preview text.
+	migrateLegacySessionsOnStartup(reportLegacyMigration)
 	resumePath := strings.TrimSpace(*resume)
 	if resumePath != "" {
 		resolved, err := resolveSessionQuery(resolveCLISessionDir(), resumePath)
@@ -610,9 +611,9 @@ func runAgent(args []string, version string) int {
 		// machine-readable payload: the human copy notice goes to stderr there.
 		// Plain text runs keep it on stdout, where callers scrape the copied path.
 		if format == runOutputText && !*printOnly {
-			fmt.Printf("continuing in a session copy: %s\n", copied)
+			fmt.Printf("continuing in a session copy: %s\n", resumeTargetDisplay(copied))
 		} else {
-			fmt.Fprintf(os.Stderr, "continuing in a session copy: %s\n", copied)
+			fmt.Fprintf(os.Stderr, "continuing in a session copy: %s\n", resumeTargetDisplay(copied))
 		}
 		resumePath = copied
 	}
@@ -633,33 +634,7 @@ func runAgent(args []string, version string) int {
 			fmt.Fprintln(os.Stderr, i18n.M.ErrorPrefix, err)
 		}
 	}()
-	var resumeSession *agent.Session
 	var takeoverBinding *cliTakeoverBinding
-	if resumePath != "" {
-		var err error
-		resumeSession, err = bindAndLoadCLIResume(leases, resumePath, loadResumableSession)
-		if errors.Is(err, agent.ErrSessionLeaseHeld) && *takeover {
-			takeoverBinding, err = cliTakeoverHeldSession(resumePath, err, leases, takeoverManager)
-			if err != nil {
-				fmt.Fprintln(os.Stderr, i18n.M.ErrorPrefix, err)
-				return 1
-			}
-			resumeSession, err = cliPrepareTakeoverCandidate(takeoverBinding, leases)
-			if err != nil {
-				_ = cliReturnFailedTakeover(takeoverBinding, leases, takeoverManager)
-				fmt.Fprintln(os.Stderr, i18n.M.ErrorPrefix, err)
-				return 1
-			}
-		}
-		if err != nil {
-			if errors.Is(err, agent.ErrSessionLeaseHeld) {
-				fmt.Fprintln(os.Stderr, i18n.M.ErrorPrefix, sessionLeaseResumeRefusal(err))
-			} else {
-				fmt.Fprintln(os.Stderr, i18n.M.ErrorPrefix, err)
-			}
-			return 1
-		}
-	}
 
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM, syscall.SIGHUP)
 	defer stop()
@@ -722,7 +697,7 @@ func runAgent(args []string, version string) int {
 	// MCP/API callers that manage their own per-project session). Takes
 	// precedence over --continue.
 	// --continue: resume the most recent saved session.
-	if err := commitResumedSession(takeoverBinding, takeoverManager, ctrl, resumeSession, resumePath); err != nil {
+	if err := commitResumedSession(takeoverBinding, takeoverManager, ctrl, resumePath); err != nil {
 		return cliTakeoverFailure(takeoverBinding, leases, takeoverManager, err)
 	}
 	ctrl.EnsureSessionPath()
@@ -797,7 +772,7 @@ func runServeWithOptions(args []string, opts serveRunOptions) int {
 	model := fs.String("model", "", "provider name (default: config default_model)")
 	maxSteps := fs.Int("max-steps", 0, "one-off max tool-call rounds (0 = automatic)")
 	addr := fs.String("addr", "127.0.0.1:8787", "listen address")
-	resume := fs.String("resume", "", "resume a saved session file")
+	resume := fs.String("resume", "", "resume a saved session by ID, title, or preview text")
 	sessionIDValue := ""
 	sessionID := &sessionIDValue
 	if opts.command == "web" {
@@ -908,24 +883,17 @@ func runServeWithOptions(args []string, opts serveRunOptions) int {
 	// through the same keeper. Released after the controller closes.
 	leases := control.NewSessionLeaseKeeper()
 	defer leases.Release()
-	var resumeSession *agent.Session
-	if *resume != "" {
-		if err := leases.Rebind(*resume); err != nil {
-			if errors.Is(err, agent.ErrSessionLeaseHeld) {
-				fmt.Fprintln(os.Stderr, i18n.M.ErrorPrefix, control.SessionInUseMessage(err)+"; "+control.SessionLeaseCloseHint)
-			} else {
-				fmt.Fprintln(os.Stderr, i18n.M.ErrorPrefix, err)
-			}
-			return 1
-		}
-		var err error
-		resumeSession, err = loadResumableSession(*resume)
+	migrateLegacySessionsOnStartup(reportLegacyMigration)
+	resumeTarget := strings.TrimSpace(*resume)
+	if resumeTarget != "" {
+		resolved, err := resolveSessionQuery(resolveCLISessionDir(), resumeTarget)
 		if err != nil {
 			fmt.Fprintln(os.Stderr, i18n.M.ErrorPrefix, err)
 			return 1
 		}
+		resumeTarget = resolved
 	}
-	if err := applyResumeModel(model, *resume, cfg); err != nil {
+	if err := applyResumeModel(model, resumeTarget, cfg); err != nil {
 		return cliFailure(err)
 	}
 	// Serve always resolves an implicit model from the user-global config,
@@ -944,7 +912,7 @@ func runServeWithOptions(args []string, opts serveRunOptions) int {
 	SetTaskJobKiller(ctrlKillerAdapter{ctrl})
 
 	// Auto-save target: reuse the resumed file, else a fresh one — same as chat.
-	if err := prepareServeSessionPath(ctrl, resumeSession, *resume, *sessionID); err != nil {
+	if err := prepareServeSessionPath(ctrl, resumeTarget, *sessionID); err != nil {
 		return cliFailure(err)
 	}
 	ctrl.EnsureSessionPath()
@@ -1033,6 +1001,8 @@ func chatREPL(args []string, version string) int {
 	}
 	diagnostics.Milestone("config_load_done")
 
+	migrateLegacySessionsOnStartup(reportLegacyMigration)
+
 	// Decide whether we're starting fresh or resuming. --resume opens an
 	// interactive picker; --continue / -c jumps straight into the newest.
 	var resumePath string
@@ -1077,7 +1047,7 @@ func chatREPL(args []string, version string) int {
 			fmt.Fprintln(os.Stderr, i18n.M.ErrorPrefix, err)
 			return 1
 		}
-		fmt.Printf("continuing in a session copy: %s\n", copied)
+		fmt.Printf("continuing in a session copy: %s\n", resumeTargetDisplay(copied))
 		resumePath = copied
 	}
 	sessionMode := cliTelemetrySessionMode(*cont, resumeValue != "", *copySession)
@@ -1099,31 +1069,6 @@ func chatREPL(args []string, version string) int {
 		}
 	}()
 	var takeoverBinding *cliTakeoverBinding
-	var startupResumeSession *agent.Session
-	if resumePath != "" {
-		startupResumeSession, err = bindAndLoadCLIResume(leases, resumePath, loadResumableSession)
-		if errors.Is(err, agent.ErrSessionLeaseHeld) && cliSessionTakeoverCandidate(err) && promptSessionTakeover(err) {
-			takeoverBinding, err = cliTakeoverHeldSession(resumePath, err, leases, takeoverManager)
-			if err != nil {
-				fmt.Fprintln(os.Stderr, i18n.M.ErrorPrefix, err)
-				return 1
-			}
-			startupResumeSession, err = cliPrepareTakeoverCandidate(takeoverBinding, leases)
-			if err != nil {
-				_ = cliReturnFailedTakeover(takeoverBinding, leases, takeoverManager)
-				fmt.Fprintln(os.Stderr, i18n.M.ErrorPrefix, err)
-				return 1
-			}
-		}
-		if err != nil {
-			if errors.Is(err, agent.ErrSessionLeaseHeld) {
-				fmt.Fprintln(os.Stderr, i18n.M.ErrorPrefix, sessionLeaseResumeRefusal(err))
-			} else {
-				fmt.Fprintln(os.Stderr, i18n.M.ErrorPrefix, err)
-			}
-			return 1
-		}
-	}
 
 	ctx := context.Background()
 	if err := applyResumeModel(model, resumePath, cfg); err != nil {
@@ -1178,7 +1123,7 @@ func chatREPL(args []string, version string) int {
 	// Decide where this conversation's auto-save lands. A resume reuses the
 	// file so closing/reopening keeps appending to the same history; a fresh
 	// session lands in a new file stamped with the model name.
-	if err := commitResumedSession(takeoverBinding, takeoverManager, ctrl, startupResumeSession, resumePath); err != nil {
+	if err := commitResumedSession(takeoverBinding, takeoverManager, ctrl, resumePath); err != nil {
 		return cliTakeoverFailure(takeoverBinding, leases, takeoverManager, err)
 	}
 	ctrl.EnsureSessionPath()

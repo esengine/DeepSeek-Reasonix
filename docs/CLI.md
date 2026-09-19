@@ -41,6 +41,7 @@ authentication is incomplete.
 | `--allowed-tools RULES` | Add session-only permission allow rules. Repeatable; `--allowedTools` is an alias. |
 | `--permission-mode MODE` | Start with a specific permission posture. |
 | `--dangerously-skip-permissions` | Deprecated compatibility flag; migrates conservatively to `workspace-write`. Use `--permission-mode danger-full-access` for YOLO. |
+| `--takeover` | Deprecated compatibility flag; native sessions are held through the session service. |
 
 Flags may appear before or after the prompt where applicable.
 
@@ -370,17 +371,28 @@ reasonix --resume provider-config --copy
 
 - `--continue` resumes the newest saved session immediately.
 - Bare `--resume` opens the searchable picker in an interactive terminal.
-- `--resume QUERY` accepts an exact session ID or path, or a unique title or
-  preview substring. Missing and ambiguous matches fail with a descriptive
-  error.
+- `--resume QUERY` accepts an exact session ID, or a unique title or preview
+  substring. Missing and ambiguous matches fail with a descriptive error.
 - `--resume=true` and `--resume=false` remain accepted for compatibility.
-- `--copy` leaves the original transcript untouched and continues in a new
+- `--copy` leaves the original session untouched and continues in a new
   writable session. Use it when another Reasonix process owns the original.
 
-For one-shot runs, `reasonix run --resume QUERY "task"` accepts a session file
-path, a session ID, or an opaque machine session ID from `--events-jsonl` /
-`reasonix session show --json`. Session leases prevent the desktop app and CLI
-from writing the same transcript concurrently.
+The CLI reads and writes only the current `sessions-v4` format. On startup it
+runs a one-time, self-contained migration (`legacy_session_migration.go`) that
+converts every pre-v4 session on the machine — legacy JSONL and `sessions-v3`,
+for the current project, the global store, and every other known project — into
+`sessions-v4` and then deletes the old sources. The migration copies each source
+byte-for-byte into the v4 target's `legacy/` evidence directory before deleting
+it, and leaves a source untouched when it is still held by another process or
+cannot be imported. A migrated session keeps the source's original creation and
+last-activity times, so resume orders it by when the conversation happened, not
+when it was imported; a target published before those times were recorded is
+repaired once from its preserved `legacy/` evidence. This bridge is temporary
+and is removed once every installation has upgraded.
+
+For one-shot runs, `reasonix run --resume QUERY "task"` accepts the same session
+ID, title, or preview substring. Native sessions are held through the session
+service, so a session another process owns fails with a descriptive error.
 
 ## Permissions
 

@@ -66,9 +66,10 @@ var English = Messages{
 		"unreviewed_change":   "changed, never looked at again",
 		"declared_unverified": "declared unverified",
 	},
-	NoSessionToResume: "no saved session to resume — start a new one with `reasonix`",
-	ResumeRequiresTTY: "--resume needs an interactive terminal; pass --continue for the most recent session",
-	PickSessionLabel:  "Resume which session?",
+	MigratedLegacySessionsFmt: "migrated %d legacy session(s) into the current session format",
+	NoSessionToResume:         "no saved session to resume — start a new one with `reasonix`",
+	ResumeRequiresTTY:         "--resume needs an interactive terminal; pass --continue for the most recent session",
+	PickSessionLabel:          "Resume which session?",
 
 	ResumeBusy:          "finish or cancel the current turn before resuming",
 	ResumeBadIndexFmt:   "pick a session 1–%d (run /resume to list)",

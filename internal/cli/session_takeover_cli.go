@@ -220,31 +220,6 @@ func cliSessionTakeoverCandidate(leaseErr error) bool {
 	return cliServeForPID(leaseError.Info.PID) != nil
 }
 
-// promptSessionTakeover asks on the terminal (pre-TUI startup) whether to take
-// the held session over. Non-interactive sessions answer no.
-func promptSessionTakeover(leaseErr error) bool {
-	if !isInteractive() {
-		return false
-	}
-	fmt.Fprintf(os.Stderr, "%s\n", sessionLeaseResumeRefusal(leaseErr))
-	fmt.Fprint(os.Stderr, "take over the session from this machine's resident serve? [y/N] ")
-	answer, err := readCLITakeoverAnswer()
-	if err != nil {
-		return false
-	}
-	answer = strings.ToLower(strings.TrimSpace(answer))
-	return answer == "y" || answer == "yes"
-}
-
-func readCLITakeoverAnswer() (string, error) {
-	buf := make([]byte, 64)
-	n, err := os.Stdin.Read(buf)
-	if n > 0 {
-		return string(buf[:n]), nil
-	}
-	return "", err
-}
-
 const (
 	cliTakeoverFlushEvery = 120 * time.Millisecond
 	cliTakeoverHeartbeat  = 5 * time.Second

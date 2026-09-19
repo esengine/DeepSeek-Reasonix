@@ -2,36 +2,9 @@ package cli
 
 import (
 	"fmt"
-	"path/filepath"
-	"strings"
 
-	"reasonix/internal/agent"
 	"reasonix/internal/control"
 )
-
-func persistCLIModelSelection(ctrl control.SessionAPI) error {
-	selected, ok := ctrl.(interface {
-		ModelRef() string
-		ModelSelectionIdentity() string
-	})
-	if !ok || selected.ModelSelectionIdentity() == "" || ctrl.SessionPath() == "" {
-		return nil
-	}
-	return agent.SetBranchModelSelectionPreserveUpdated(ctrl.SessionPath(), selected.ModelRef(), selected.ModelSelectionIdentity())
-}
-
-// bindAndLoadCLIResume acquires the single-writer lease before reading the
-// transcript. Loading first leaves a race where the previous writer can append
-// and release between the read and Rebind, giving the new CLI ownership of a
-// newer file while its controller resumes an older in-memory snapshot.
-func bindAndLoadCLIResume(leases *control.SessionLeaseKeeper, path string, load func(string) (*agent.Session, error)) (*agent.Session, error) {
-	if leases != nil {
-		if err := leases.Rebind(path); err != nil {
-			return nil, err
-		}
-	}
-	return load(path)
-}
 
 func cliControllerHasActiveRuntimeWork(ctrl control.SessionAPI) bool {
 	if ctrl == nil {
@@ -76,53 +49,6 @@ func (m *chatTUI) rebindSessionLease(path string) error {
 	}
 	if err != nil {
 		return err
-	}
-	return bindChatTUIAuthority(m)
-}
-
-// commitSessionSwitch acquires the target lease before loading its transcript
-// while retaining the source keeper. This is the ordinary counterpart of
-// /takeover's targeted transaction and also lets a mirrored CLI leave for a
-// free session without dropping its source before the candidate is authorized.
-func (m *chatTUI) commitSessionSwitch(path string) error {
-	return m.commitSessionSwitchWithLoader(path, loadResumableSession)
-}
-
-func (m *chatTUI) commitSessionSwitchWithLoader(path string, load func(string) (*agent.Session, error)) error {
-	if m == nil {
-		return fmt.Errorf("resume candidate unavailable")
-	}
-	if validator, ok := m.ctrl.(interface{ ValidateSessionModel(string) error }); ok {
-		if err := validator.ValidateSessionModel(path); err != nil {
-			return err
-		}
-	}
-	binding, err := cliAcquireFreeSession(path, m.leases, m.takeover)
-	if err != nil {
-		return err
-	}
-	loaded, err := load(path)
-	if err != nil {
-		_ = cliReturnFailedTakeover(binding, m.leases, m.takeover)
-		return err
-	}
-	if m.leases != nil {
-		if err := m.leases.BindSessionAuthority(loaded); err != nil {
-			_ = cliReturnFailedTakeover(binding, m.leases, m.takeover)
-			return err
-		}
-	}
-	if err := binding.commitPrevious(m.takeover); err != nil {
-		_ = cliReturnFailedTakeover(binding, m.leases, m.takeover)
-		return err
-	}
-	m.ctrl.Resume(loaded, path)
-	if identity, ok := m.ctrl.(control.IdentityLifecycle); ok && identity.UsesExclusiveSession() && m.leases != nil {
-		// The frozen legacy file is no longer the execution store after a
-		// successful import. Release its compatibility lease immediately.
-		if err := m.leases.Rebind(""); err != nil {
-			return err
-		}
 	}
 	return bindChatTUIAuthority(m)
 }
@@ -192,55 +118,4 @@ func bindChatTUIAuthority(m *chatTUI) error {
 		return nil
 	}
 	return m.leases.BindControllerAuthority(c)
-}
-
-// copySessionForWriting duplicates the session at src into a fresh session
-// file beside it and returns the new path. It backs the --copy escape hatch:
-// when src is held by another runtime, the copy gives this process a session
-// it can own. The duplicate is written through Session.SaveIfAbsent, so it is
-// event-log aware (authoritative event log plus .jsonl checkpoint), cannot
-// replace a destination another runtime created, and starts with no
-// lease/lock sidecars of its own; src is only read. When src is being
-// written concurrently, the copy captures the transcript as of the load — an
-// append-only prefix, the same view a resume would see.
-func copySessionForWriting(src string) (string, error) {
-	loaded, err := loadResumableSession(src)
-	if err != nil {
-		return "", err
-	}
-	msgs := loaded.Snapshot()
-
-	var srcMeta agent.BranchMeta
-	if meta, ok, metaErr := agent.LoadBranchMeta(src); metaErr == nil && ok {
-		srcMeta = meta
-	}
-	label := "session"
-	if model, ok := agent.LoadSessionModel(src); ok && strings.TrimSpace(model) != "" {
-		label = model
-	}
-
-	newPath := agent.NewSessionPath(filepath.Dir(src), label)
-	copySess := agent.NewSession("")
-	copySess.Messages = msgs
-	if err := copySess.SaveIfAbsent(newPath); err != nil {
-		return "", fmt.Errorf("copy session: %w", err)
-	}
-	preview, turns := agent.SessionPreviewFromMessages(msgs)
-	meta := agent.BranchMeta{
-		ParentID:         agent.BranchID(src),
-		ForkTurn:         -1,
-		ForkMessageIndex: len(msgs),
-		Preview:          preview,
-		Turns:            turns,
-		SchemaVersion:    agent.BranchMetaCountsVersion,
-		Model:            srcMeta.Model,
-		ModelIdentity:    srcMeta.ModelIdentity,
-	}
-	if title := strings.TrimSpace(firstNonEmpty(srcMeta.CustomTitle, srcMeta.TopicTitle)); title != "" {
-		meta.CustomTitle = title + " (copy)"
-	}
-	if err := agent.SaveBranchMeta(newPath, meta); err != nil {
-		return "", fmt.Errorf("copy session meta: %w", err)
-	}
-	return newPath, nil
 }

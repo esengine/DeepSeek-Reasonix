@@ -2,12 +2,8 @@ package cli
 
 import (
 	"fmt"
-	"os"
-	"path/filepath"
 	"strings"
 	"unicode"
-
-	"reasonix/internal/agent"
 )
 
 const resumePickerSentinel = "__reasonix_resume_picker__"
@@ -132,43 +128,19 @@ func resolveSessionQuery(dir, query string) (string, error) {
 	if query == "" || query == resumePickerSentinel {
 		return "", nil
 	}
-	if info, err := os.Stat(query); err == nil && !info.IsDir() {
-		abs, absErr := filepath.Abs(query)
-		if absErr != nil {
-			return "", absErr
-		}
-		return abs, nil
-	}
-	sessions, err := agent.ListSessions(dir)
-	if err != nil {
-		return "", fmt.Errorf("list sessions: %w", err)
-	}
-	// Opaque machine session IDs (session_<hex>) are what --events-jsonl and
-	// `session show --json` expose. Match them before preview/partial search so
-	// one-shot `run --resume` can resume without scanning private paths (#7429).
-	if looksLikeMachineSessionID(query) {
-		key, keyErr := loadMachineIdentityKey()
-		if keyErr != nil {
-			return "", fmt.Errorf("machine identity is unavailable: %w", keyErr)
-		}
-		for _, session := range sessions {
-			if machineSessionIDWithKey(agent.BranchID(session.Path), key) == query {
-				return session.Path, nil
-			}
-		}
-		return "", fmt.Errorf("no session matches %q", query)
-	}
 	lower := strings.ToLower(query)
 	var exact []string
 	var partial []string
-	for _, session := range sessions {
-		id := agent.BranchID(session.Path)
-		base := filepath.Base(session.Path)
-		if query == id || query == base || query == session.Path {
+	for _, session := range resumeRows(dir) {
+		id, ok := v4ResumeID(session.Path)
+		if !ok {
+			continue
+		}
+		if query == id || query == session.Path {
 			exact = append(exact, session.Path)
 			continue
 		}
-		haystack := strings.ToLower(strings.Join([]string{id, base, session.CustomTitle, session.TopicTitle, session.Preview}, "\n"))
+		haystack := strings.ToLower(strings.Join([]string{id, session.CustomTitle, session.TopicTitle, session.Preview}, "\n"))
 		if strings.Contains(haystack, lower) {
 			partial = append(partial, session.Path)
 		}
@@ -185,24 +157,4 @@ func resolveSessionQuery(dir, query string) (string, error) {
 	default:
 		return "", fmt.Errorf("session query %q is ambiguous (%d matches)", query, len(matches))
 	}
-}
-
-// looksLikeMachineSessionID reports whether query is the opaque HMAC form
-// emitted by machineSessionIDWithKey (`session_` + 32 lowercase hex chars).
-func looksLikeMachineSessionID(query string) bool {
-	const prefix = "session_"
-	if !strings.HasPrefix(query, prefix) {
-		return false
-	}
-	hexPart := query[len(prefix):]
-	if len(hexPart) != 32 {
-		return false
-	}
-	for i := range len(hexPart) {
-		c := hexPart[i]
-		if (c < '0' || c > '9') && (c < 'a' || c > 'f') {
-			return false
-		}
-	}
-	return true
 }

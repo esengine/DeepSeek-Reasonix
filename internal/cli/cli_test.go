@@ -58,16 +58,11 @@ func TestChdirTo(t *testing.T) {
 }
 
 func TestModelForResumePathUsesStoredModelWhenAvailable(t *testing.T) {
-	dir := t.TempDir()
-	path := filepath.Join(dir, "session.jsonl")
-	session := agent.NewSession("sys")
-	session.Add(provider.Message{Role: provider.RoleUser, Content: "hello"})
-	if err := session.Save(path); err != nil {
-		t.Fatal(err)
-	}
-	if err := agent.SetBranchModelPreserveUpdated(path, "saved/model"); err != nil {
-		t.Fatal(err)
-	}
+	isolateCLIConfigHome(t)
+	dir := resolveCLISessionDir()
+	id := nextNativeTestID()
+	seedNativeSessionWithModel(t, dir, id, "hello", "saved/model", "")
+	locator := v4ResumeLocator(id)
 	cfg := &config.Config{
 		DefaultModel: "default/model",
 		Providers: []config.ProviderEntry{
@@ -76,17 +71,17 @@ func TestModelForResumePathUsesStoredModelWhenAvailable(t *testing.T) {
 		},
 	}
 
-	if got, err := modelForResumePath("", path, cfg); err != nil || got != "saved/model" {
+	if got, err := modelForResumePath("", locator, cfg); err != nil || got != "saved/model" {
 		t.Fatalf("modelForResumePath = %q, want saved/model", got)
 	}
-	if got, err := modelForResumePath("explicit/model", path, cfg); err != nil || got != "explicit/model" {
+	if got, err := modelForResumePath("explicit/model", locator, cfg); err != nil || got != "explicit/model" {
 		t.Fatalf("explicit model was overwritten: %q", got)
 	}
-	if got, err := modelForResumePath("", filepath.Join(dir, "missing.jsonl"), cfg); err != nil || got != "" {
+	if got, err := modelForResumePath("", v4ResumeLocator(nextNativeTestID()), cfg); err != nil || got != "" {
 		t.Fatalf("missing session model = %q, want empty fallback", got)
 	}
 	cfg.Providers = cfg.Providers[:1]
-	if got, err := modelForResumePath("", path, cfg); err != nil || got != "" {
+	if got, err := modelForResumePath("", locator, cfg); err != nil || got != "" {
 		t.Fatalf("unknown stored model = %q, want empty fallback", got)
 	}
 }
@@ -101,44 +96,6 @@ func TestLoadResumableSessionRejectsCleanupPending(t *testing.T) {
 
 	if _, err := loadResumableSession(path); err == nil || !strings.Contains(err.Error(), "pending cleanup") {
 		t.Fatalf("loadResumableSession cleanup-pending error = %v, want pending cleanup", err)
-	}
-}
-
-func TestRunResumeRejectsCleanupPending(t *testing.T) {
-	isolateCLIConfigHome(t)
-
-	path := filepath.Join(t.TempDir(), "pending-run.jsonl")
-	saveTestSession(t, path, "pending prompt")
-	if err := agent.MarkCleanupPending(path, "delete"); err != nil {
-		t.Fatal(err)
-	}
-
-	errOut := captureStderr(t, func() {
-		if rc := runAgent([]string{"--resume", path, "continue task"}, "dev"); rc != 1 {
-			t.Fatalf("run --resume cleanup-pending rc = %d, want 1", rc)
-		}
-	})
-	if !strings.Contains(errOut, "pending cleanup") {
-		t.Fatalf("run --resume cleanup-pending stderr = %q, want pending cleanup", errOut)
-	}
-}
-
-func TestServeResumeRejectsCleanupPending(t *testing.T) {
-	isolateCLIConfigHome(t)
-
-	path := filepath.Join(t.TempDir(), "pending-serve.jsonl")
-	saveTestSession(t, path, "pending prompt")
-	if err := agent.MarkCleanupPending(path, "delete"); err != nil {
-		t.Fatal(err)
-	}
-
-	errOut := captureStderr(t, func() {
-		if rc := runServe([]string{"--resume", path, "--addr", "127.0.0.1:0"}); rc != 1 {
-			t.Fatalf("serve --resume cleanup-pending rc = %d, want 1", rc)
-		}
-	})
-	if !strings.Contains(errOut, "pending cleanup") {
-		t.Fatalf("serve --resume cleanup-pending stderr = %q, want pending cleanup", errOut)
 	}
 }
 

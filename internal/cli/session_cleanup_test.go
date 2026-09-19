@@ -34,6 +34,8 @@ func closeTestSessionServices() {
 	cliSessionServices.byRoot = map[string]*session.Service{}
 	cliSessionServices.Unlock()
 	for _, service := range services {
-		_ = service.CloseAll(context.Background())
+		// Shutdown (not CloseAll) also joins the cold-query metadata workers,
+		// so no background catalog rebuild can race the temp-dir cleanup.
+		_ = service.Shutdown(context.Background())
 	}
 }

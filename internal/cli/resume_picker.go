@@ -31,10 +31,9 @@ func (m *chatTUI) openResumePicker() {
 		m.notice(i18n.M.NoSessionToResume)
 		return
 	}
-	active := m.ctrl.SessionPath()
 	activeIdx := -1
 	for i, entry := range entries {
-		if entry.session.Path == active {
+		if m.resumeTargetActive(entry.session.Path) {
 			activeIdx = i
 			break
 		}
@@ -114,7 +113,7 @@ func (m chatTUI) applyResumePick() (tea.Model, tea.Cmd) {
 	}
 	target := r.entries[r.sel].session
 	m.resumePick = nil
-	if target.Path == m.ctrl.SessionPath() {
+	if m.resumeTargetActive(target.Path) {
 		m.notice(i18n.M.ResumeAlreadyActive)
 		return m, nil
 	}
@@ -129,7 +128,7 @@ func (m chatTUI) applyResumePick() (tea.Model, tea.Cmd) {
 		return m, nil
 	}
 	m.followSessionLease()
-	if err := m.commitSessionSwitch(target.Path); err != nil {
+	if err := m.resumeIntoController(target.Path); err != nil {
 		m.notice("resume: " + sessionLeaseHeldNotice(err))
 		if cliSessionTakeoverCandidate(err) {
 			m.pendingTakeoverPath = target.Path

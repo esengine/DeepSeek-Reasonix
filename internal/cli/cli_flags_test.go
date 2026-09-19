@@ -1,14 +1,11 @@
 package cli
 
 import (
-	"path/filepath"
 	"reflect"
 	"strings"
 	"testing"
 
 	"github.com/spf13/pflag"
-	"reasonix/internal/agent"
-	"reasonix/internal/provider"
 )
 
 func TestSplitAllowedToolRules(t *testing.T) {
@@ -122,54 +119,20 @@ func TestStripLeadingPrintFlag(t *testing.T) {
 	}
 }
 
-func TestResolveSessionQueryByMachineSessionID(t *testing.T) {
-	identityKey := installMachineTestIdentity(t)
-	dir := t.TempDir()
-	path := saveQueryTestSession(t, dir, "opaque-branch.jsonl", "resume by machine id")
-	machineID := machineSessionIDWithKey(agent.BranchID(path), identityKey)
-	if machineID == "" || !looksLikeMachineSessionID(machineID) {
-		t.Fatalf("machine session id = %q", machineID)
-	}
-
-	got, err := resolveSessionQuery(dir, machineID)
-	if err != nil || got != path {
-		t.Fatalf("resolve by machine id = (%q, %v), want %q", got, err, path)
-	}
-	missing := "session_" + strings.Repeat("0", 32)
-	if _, err := resolveSessionQuery(dir, missing); err == nil || !strings.Contains(err.Error(), "no session") {
-		t.Fatalf("missing machine id error = %v", err)
-	}
-}
-
 func TestResolveSessionQueryByIDAndPreview(t *testing.T) {
 	dir := t.TempDir()
-	first := saveQueryTestSession(t, dir, "alpha-session.jsonl", "fix provider configuration")
-	_ = saveQueryTestSession(t, dir, "beta-session.jsonl", "improve terminal picker")
+	first := seedNativeTestSession(t, dir, "fix provider configuration")
+	seedNativeTestSession(t, dir, "improve terminal picker")
 
-	got, err := resolveSessionQuery(dir, "alpha-session")
-	if err != nil || got != first {
-		t.Fatalf("resolve by ID = (%q, %v), want %q", got, err, first)
+	got, err := resolveSessionQuery(dir, first)
+	if err != nil || got != v4ResumeLocator(first) {
+		t.Fatalf("resolve by ID = (%q, %v), want %q", got, err, v4ResumeLocator(first))
 	}
 	got, err = resolveSessionQuery(dir, "provider configuration")
-	if err != nil || got != first {
-		t.Fatalf("resolve by preview = (%q, %v), want %q", got, err, first)
-	}
-	if _, err := resolveSessionQuery(dir, "session"); err == nil || !strings.Contains(err.Error(), "ambiguous") {
-		t.Fatalf("ambiguous query error = %v", err)
+	if err != nil || got != v4ResumeLocator(first) {
+		t.Fatalf("resolve by preview = (%q, %v), want %q", got, err, v4ResumeLocator(first))
 	}
 	if _, err := resolveSessionQuery(dir, "missing"); err == nil || !strings.Contains(err.Error(), "no session") {
 		t.Fatalf("missing query error = %v", err)
 	}
-}
-
-func saveQueryTestSession(t *testing.T, dir, name, prompt string) string {
-	t.Helper()
-	path := filepath.Join(dir, name)
-	session := agent.NewSession("")
-	session.Add(provider.Message{Role: provider.RoleUser, Content: prompt})
-	session.Add(provider.Message{Role: provider.RoleAssistant, Content: "done"})
-	if err := session.Save(path); err != nil {
-		t.Fatal(err)
-	}
-	return path
 }

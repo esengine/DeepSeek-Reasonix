@@ -18,13 +18,7 @@ const resumeListCap = 10
 // larger) so the 1-based indices match /resume <n> and its completion without
 // orphaning a conflict copy from its parent. A read error yields an empty list.
 func recentSessions(dir string) []agent.SessionInfo {
-	if dir == "" {
-		return nil
-	}
-	sessions, err := agent.ListSessions(dir)
-	if err != nil {
-		return nil
-	}
+	sessions := resumeRows(dir)
 	sessions = orderResumeSessions(sessions)
 	return capResumeSessionGroups(sessions, resumeListCap)
 }
@@ -70,10 +64,13 @@ func otherProjectResumeEntries(excludeDir string) []resumeEntry {
 		if filepath.Clean(t.path) == exclude {
 			continue
 		}
-		sessions, err := agent.ListSessions(t.path)
-		if err != nil || len(sessions) == 0 {
+		sessions := resumeRows(t.path)
+		if len(sessions) == 0 {
 			continue
 		}
+		sort.SliceStable(sessions, func(i, j int) bool {
+			return sessions[i].ModTime.After(sessions[j].ModTime)
+		})
 		name := filepath.Base(strings.TrimRight(t.root, string(filepath.Separator)))
 		if name == "" || name == "." {
 			name = t.root
@@ -94,13 +91,13 @@ func otherProjectResumeEntries(excludeDir string) []resumeEntry {
 // and prefer visible leaves, but --continue promises the most recent session and
 // must not let that presentation ordering select an older recovery copy.
 func mostRecentSession(dir string) (agent.SessionInfo, bool) {
-	if dir == "" {
+	sessions := resumeRows(dir)
+	if len(sessions) == 0 {
 		return agent.SessionInfo{}, false
 	}
-	sessions, err := agent.ListSessions(dir)
-	if err != nil || len(sessions) == 0 {
-		return agent.SessionInfo{}, false
-	}
+	sort.SliceStable(sessions, func(i, j int) bool {
+		return sessions[i].ModTime.After(sessions[j].ModTime)
+	})
 	return sessions[0], true
 }
 
@@ -110,7 +107,7 @@ func capResumeSessionGroups(sessions []agent.SessionInfo, limit int) []agent.Ses
 	}
 	byID := make(map[string]agent.SessionInfo, len(sessions))
 	for _, session := range sessions {
-		byID[agent.BranchID(session.Path)] = session
+		byID[resumeRowKey(session)] = session
 	}
 	out := make([]agent.SessionInfo, 0, limit)
 	for start := 0; start < len(sessions); {
@@ -141,7 +138,7 @@ func orderResumeSessions(sessions []agent.SessionInfo) []agent.SessionInfo {
 	}
 	byID := make(map[string]agent.SessionInfo, len(sessions))
 	for _, session := range sessions {
-		byID[agent.BranchID(session.Path)] = session
+		byID[resumeRowKey(session)] = session
 	}
 	type resumeGroup struct {
 		items    []agent.SessionInfo
@@ -175,7 +172,7 @@ func orderResumeSessions(sessions []agent.SessionInfo) []agent.SessionInfo {
 		children := make(map[string]bool, len(group.items))
 		members := make(map[string]bool, len(group.items))
 		for _, session := range group.items {
-			members[agent.BranchID(session.Path)] = true
+			members[resumeRowKey(session)] = true
 		}
 		for _, session := range group.items {
 			parentID := strings.TrimSpace(session.ParentID)
@@ -184,8 +181,8 @@ func orderResumeSessions(sessions []agent.SessionInfo) []agent.SessionInfo {
 			}
 		}
 		sort.SliceStable(group.items, func(i, j int) bool {
-			iLeaf := !children[agent.BranchID(group.items[i].Path)]
-			jLeaf := !children[agent.BranchID(group.items[j].Path)]
+			iLeaf := !children[resumeRowKey(group.items[i])]
+			jLeaf := !children[resumeRowKey(group.items[j])]
 			if iLeaf != jLeaf {
 				return iLeaf
 			}
@@ -197,7 +194,7 @@ func orderResumeSessions(sessions []agent.SessionInfo) []agent.SessionInfo {
 }
 
 func recoveryResumeGroupKey(session agent.SessionInfo, byID map[string]agent.SessionInfo) string {
-	id := agent.BranchID(session.Path)
+	id := resumeRowKey(session)
 	if !session.Recovered {
 		return id
 	}
@@ -252,7 +249,7 @@ func (m *chatTUI) runResumeCommand(input string) {
 		return
 	}
 	target := entries[idx-1]
-	if target.session.Path == m.ctrl.SessionPath() {
+	if m.resumeTargetActive(target.session.Path) {
 		m.notice(i18n.M.ResumeAlreadyActive)
 		return
 	}
@@ -264,7 +261,7 @@ func (m *chatTUI) runResumeCommand(input string) {
 		return
 	}
 	m.followSessionLease()
-	if err := m.commitSessionSwitch(target.session.Path); err != nil {
+	if err := m.resumeIntoController(target.session.Path); err != nil {
 		m.notice("resume: " + sessionLeaseHeldNotice(err))
 		if cliSessionTakeoverCandidate(err) {
 			m.pendingTakeoverPath = target.session.Path
@@ -295,6 +292,10 @@ func (m *chatTUI) runTakeoverCommand(input string) {
 	}
 	if target == "" {
 		m.notice("takeover: no refused session; run /resume <n> first or pass an index")
+		return
+	}
+	if isNativeResume(target) {
+		m.notice("takeover: a native session is held by another process; close it and rerun")
 		return
 	}
 	if m.ctrl.Running() {
