@@ -19,9 +19,11 @@ func sessionRoute(id string) string {
 }
 
 func parseSessionRoute(route string) (string, bool) {
-	id, ok := strings.CutPrefix(strings.TrimSpace(route), remoteSessionIDRoutePrefix)
-	id = strings.TrimSpace(id)
-	return id, ok && id != ""
+	locator := classifySessionLocator(route)
+	if locator.kind != sessionLocatorCanonical {
+		return "", false
+	}
+	return locator.ref.SessionID, true
 }
 
 func (a *App) listCanonicalSessionsFromDir(dir, active string) []SessionMeta {

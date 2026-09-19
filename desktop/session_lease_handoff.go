@@ -16,17 +16,21 @@ func (t *WorkspaceTab) handoffSessionLease(path string) (*agent.SessionLease, er
 	if t == nil || t.ReadOnly {
 		return nil, nil
 	}
-	key := sessionRuntimeKey(path)
-	if key == "" {
+	legacyPath, ok, err := legacySessionPathForFileAccess(path)
+	if err != nil {
+		return nil, err
+	}
+	if !ok {
 		return nil, nil
 	}
+	key := sessionRuntimeKey(string(legacyPath))
 	t.sessionLeaseMu.Lock()
 	if t.sessionLease != nil && sessionRuntimeKey(t.sessionLease.Path()) == key {
 		t.storeSessionLeaseRuntimeKey(key)
 		t.sessionLeaseMu.Unlock()
 		return nil, nil
 	}
-	lease, err := agent.TryAcquireSessionLease(key)
+	lease, err := agent.TryAcquireSessionLease(string(legacyPath))
 	if err != nil {
 		t.sessionLeaseMu.Unlock()
 		return nil, err

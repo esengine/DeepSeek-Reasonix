@@ -21,7 +21,11 @@ import (
 )
 
 func desktopSourceKey(path, head string) string {
-	sum := sha256.Sum256([]byte(sessionRuntimeKey(path) + "\x00" + head))
+	// Migration sources include both transcript files and canonical prototype
+	// directories. Keep their persisted key independent from the runtime
+	// session locator, which intentionally accepts transcript paths only.
+	pathKey := agent.CanonicalSessionPath(cleanDesktopPath(path))
+	sum := sha256.Sum256([]byte(pathKey + "\x00" + head))
 	return hex.EncodeToString(sum[:])
 }
 

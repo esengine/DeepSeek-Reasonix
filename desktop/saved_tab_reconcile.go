@@ -29,9 +29,11 @@ const (
 type savedTabReconcileDecision struct {
 	outcome            savedTabReconcileOutcome
 	reason             string
+	identityKind       string
 	waitedForMigration bool
 	hadPending         bool
 	hadRecoveryOwner   bool
+	repairedIdentity   bool
 }
 
 type savedTabReconcileEvidence struct {
@@ -58,7 +60,7 @@ func (a *App) reconcileTabsBeforeRestore(ctx context.Context, file desktopTabsFi
 		}
 		if err != nil {
 			slog.Warn("desktop_saved_tab_reconcile_persist_failed", "reason", "write_failed")
-			return original, version, a.tabsSnapshotCurrent(version)
+			return blockSavedTabUnsafeRestore(original, "identity_repair_write_failed"), version, a.tabsSnapshotCurrent(version)
 		}
 	}
 	return reconciled, version, a.tabsSnapshotCurrent(version)
@@ -80,6 +82,12 @@ func (a *App) reconcileSavedTabs(ctx context.Context, file desktopTabsFile) (des
 	anyNeedsMigration := false
 	repairedIdentity := false
 	for index := range file.Tabs {
+		if candidate := savedTabRouteCandidateForPath(file.Tabs[index].SessionPath); candidate.kind != "" {
+			decisions[index].identityKind = candidate.kind
+			needsMigration[index] = true
+			anyNeedsMigration = true
+			continue
+		}
 		if sessionID, found, conflict := savedTabPendingSessionIdentity(file.Tabs[index], fast); found && !conflict {
 			file.Tabs[index].SessionID = sessionID
 			repairedIdentity = true
@@ -98,46 +106,78 @@ func (a *App) reconcileSavedTabs(ctx context.Context, file desktopTabsFile) (des
 			if !needsMigration[index] {
 				continue
 			}
+			identityKind := decisions[index].identityKind
 			if !migrationFinished {
-				decisions[index] = savedTabReconcileDecision{outcome: preserveError, reason: "migration_interrupted", waitedForMigration: true}
+				decisions[index] = savedTabReconcileDecision{outcome: preserveError, reason: "migration_interrupted", identityKind: identityKind, waitedForMigration: true}
 				continue
+			}
+			if identityKind != "" {
+				normalized, repaired, override := a.normalizeSavedTabRoute(ctx, file.Tabs[index], afterMigration)
+				if override != nil {
+					override.identityKind = identityKind
+					override.waitedForMigration = true
+					decisions[index] = *override
+					continue
+				}
+				file.Tabs[index] = normalized
+				if repaired {
+					repairedIdentity = true
+				}
 			}
 			if sessionID, found, conflict := savedTabPendingSessionIdentity(file.Tabs[index], afterMigration); found && !conflict {
 				file.Tabs[index].SessionID = sessionID
 				repairedIdentity = true
 			}
 			decision, _ := a.classifySavedTab(file.Tabs[index], afterMigration, true)
+			if identityKind != "" {
+				decision.identityKind = identityKind
+			}
+			decision.repairedIdentity = strings.TrimSpace(file.Tabs[index].SessionID) != "" && strings.TrimSpace(file.Tabs[index].SessionPath) == "" && identityKind != ""
 			decision.waitedForMigration = true
 			decisions[index] = decision
 		}
 	}
 
-	filtered := make([]desktopTabEntry, 0, len(file.Tabs))
+	var removed map[string]bool
+	file.Tabs, removed = filterReconciledSavedTabs(file.Tabs, decisions)
+	if len(removed) == 0 && !repairedIdentity {
+		return file, false
+	}
+	repairReconciledTabSelection(&file, removed)
+	return file, true
+}
+
+func filterReconciledSavedTabs(tabs []desktopTabEntry, decisions []savedTabReconcileDecision) ([]desktopTabEntry, map[string]bool) {
+	filtered := make([]desktopTabEntry, 0, len(tabs))
 	removed := map[string]bool{}
-	for index, entry := range file.Tabs {
+	for index, entry := range tabs {
 		decision := decisions[index]
 		if decision.outcome == dropStalePresentation || decision.outcome == archiveEmptyThenDrop {
 			removed[entry.ID] = true
 		} else {
+			if decision.identityKind != "" && (decision.outcome == preserveError || decision.outcome == preserveRecovery) {
+				entry.restoreBlocked = true
+				entry.restoreBlockReason = decision.reason
+			}
 			filtered = append(filtered, entry)
 		}
-		if decision.outcome != restoreTab || decision.waitedForMigration {
-			slog.Info("desktop_saved_tab_reconciled",
-				"outcome", decision.outcome,
-				"reason", decision.reason,
-				"identity_kind", savedTabIdentityKind(entry),
-				"waited_for_migration", decision.waitedForMigration,
-				"had_pending_operation", decision.hadPending,
-				"had_recovery_owner", decision.hadRecoveryOwner,
-			)
+		if decision.outcome == restoreTab && !decision.waitedForMigration && !decision.repairedIdentity {
+			continue
 		}
+		identityKind := decision.identityKind
+		if identityKind == "" {
+			identityKind = savedTabIdentityKind(entry)
+		}
+		slog.Info("desktop_saved_tab_reconciled",
+			"outcome", decision.outcome,
+			"reason", decision.reason,
+			"identity_kind", identityKind,
+			"waited_for_migration", decision.waitedForMigration,
+			"had_pending_operation", decision.hadPending,
+			"had_recovery_owner", decision.hadRecoveryOwner,
+		)
 	}
-	if len(removed) == 0 && !repairedIdentity {
-		return file, false
-	}
-	file.Tabs = filtered
-	repairReconciledTabSelection(&file, removed)
-	return file, true
+	return filtered, removed
 }
 
 func (a *App) waitForDesktopMigration(ctx context.Context) bool {
@@ -181,6 +221,9 @@ func (a *App) classifySavedTab(entry desktopTabEntry, evidence savedTabReconcile
 	if strings.TrimSpace(entry.SessionPath) != "" {
 		if !afterMigration {
 			return savedTabReconcileDecision{}, false
+		}
+		if _, ok, err := legacySessionPathForFileAccess(entry.SessionPath); err != nil || !ok {
+			return savedTabReconcileDecision{outcome: preserveError, reason: "invalid_legacy_path", identityKind: "invalid_legacy"}, true
 		}
 		return a.classifyLegacySavedTab(entry, evidence), true
 	}
@@ -404,6 +447,19 @@ func savedTabPendingSessionIdentity(entry desktopTabEntry, evidence savedTabReco
 	}
 	for _, operation := range evidence.draftOps {
 		if operation.ID == operationID && !accept(operation.SessionID) {
+			return "", false, true
+		}
+	}
+	for _, operation := range evidence.registry.PendingOperations {
+		if strings.TrimSpace(operation.ID) != operationID {
+			continue
+		}
+		for _, sessionID := range operation.SessionIDs {
+			if !accept(sessionID) {
+				return "", false, true
+			}
+		}
+		if operation.Mapping != nil && !accept(operation.Mapping.SessionID) {
 			return "", false, true
 		}
 	}

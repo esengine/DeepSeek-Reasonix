@@ -29,8 +29,10 @@ type desktopTabEntry struct {
 	ToolApprovalMode  string  `json:"toolApprovalMode,omitempty"`
 	// PinnedFiles is read-only upgrade input from the unmerged tab-scoped
 	// implementation. New writers persist pins beside the owning session.
-	PinnedFiles []string `json:"pinnedFiles,omitempty"`
-	extra       map[string]json.RawMessage
+	PinnedFiles        []string `json:"pinnedFiles,omitempty"`
+	extra              map[string]json.RawMessage
+	restoreBlocked     bool
+	restoreBlockReason string
 }
 
 type desktopTabsFile struct {

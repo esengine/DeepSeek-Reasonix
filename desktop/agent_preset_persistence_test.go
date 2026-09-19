@@ -21,7 +21,7 @@ func TestSaveTabSessionMetaFoldsDeliveryFloorToStandard(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	if err := saveTabSessionMetaSnapshot(tabSessionMetaSnapshot{path: path, qualityFloor: control.QualityFloorDelivery}); err != nil {
+	if err := saveTabSessionMetaSnapshot(tabSessionMetaSnapshot{path: legacySessionPath(path), qualityFloor: control.QualityFloorDelivery}); err != nil {
 		t.Fatal(err)
 	}
 	got, ok, err := agent.LoadBranchMeta(path)
@@ -44,7 +44,7 @@ func TestSaveTabSessionMetaStandardWritesCompatibilityValue(t *testing.T) {
 	if _, err := agent.EnsureBranchMeta(path); err != nil {
 		t.Fatal(err)
 	}
-	if err := saveTabSessionMetaSnapshot(tabSessionMetaSnapshot{path: path, qualityFloor: control.QualityFloorStandard}); err != nil {
+	if err := saveTabSessionMetaSnapshot(tabSessionMetaSnapshot{path: legacySessionPath(path), qualityFloor: control.QualityFloorStandard}); err != nil {
 		t.Fatal(err)
 	}
 	got, ok, err := agent.LoadBranchMeta(path)

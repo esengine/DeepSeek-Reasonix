@@ -631,7 +631,7 @@ func resolveMigrationTarget(ctx context.Context, query *session.Query, preferred
 			if err := json.Unmarshal(body, &manifest); err != nil {
 				return false, err
 			}
-			if manifest.Source == nil || sessionRuntimeKey(manifest.Source.Path) != sessionRuntimeKey(sourcePaths[0]) {
+			if manifest.Source == nil || !sameDesktopPath(manifest.Source.Path, sourcePaths[0]) {
 				return false, nil
 			}
 			if len(sourcePaths) > 1 && sourcePaths[1] != "" && manifest.Source.LegacyHeadID != sourcePaths[1] {

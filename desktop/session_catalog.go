@@ -519,7 +519,7 @@ func (a *App) saveTabSessionMetaSnapshotAndIndex(snap tabSessionMetaSnapshot) er
 	}
 	// Transcript saves index through the observer; enqueue again after the
 	// sidecar commit so scope and title changes are visible without a full scan.
-	a.requestSessionCatalogIndexPath(snap.scope, snap.workspaceRoot, snap.path)
+	a.requestSessionCatalogIndexPath(snap.scope, snap.workspaceRoot, string(snap.path))
 	return nil
 }
 

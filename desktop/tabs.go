@@ -384,10 +384,19 @@ func (t *WorkspaceTab) hasActiveRuntimeWork() bool {
 // every rebuild on Windows look like a foreign holder (self-lock, #5999).
 // Keys are identities only — never use them as display or file paths.
 func sessionRuntimeKey(path string) string {
-	if id, ok := strings.CutPrefix(strings.TrimSpace(path), remoteSessionIDRoutePrefix); ok {
-		return remoteSessionIDRoutePrefix + strings.TrimSpace(id)
+	locator := classifySessionLocator(path)
+	switch locator.kind {
+	case sessionLocatorCanonical:
+		return sessionRoute(locator.ref.SessionID)
+	case sessionLocatorLegacy:
+		path, ok, err := legacySessionPathForFileAccess(string(locator.legacyPath))
+		if err != nil || !ok {
+			return ""
+		}
+		return agent.CanonicalSessionPath(string(path))
+	default:
+		return ""
 	}
-	return agent.CanonicalSessionPath(canonicalTabSessionPath(path))
 }
 
 var sessionLeaseAcquireHookForTest func()
@@ -396,17 +405,21 @@ func (t *WorkspaceTab) ensureSessionLease(path string) error {
 	if t == nil || t.ReadOnly {
 		return nil
 	}
-	key := sessionRuntimeKey(path)
-	if key == "" {
+	legacyPath, ok, err := legacySessionPathForFileAccess(path)
+	if err != nil {
+		return err
+	}
+	if !ok {
 		return nil
 	}
+	key := sessionRuntimeKey(string(legacyPath))
 	t.sessionLeaseMu.Lock()
 	if t.sessionLease != nil && sessionRuntimeKey(t.sessionLease.Path()) == key {
 		t.storeSessionLeaseRuntimeKey(key)
 		t.sessionLeaseMu.Unlock()
 		return nil
 	}
-	lease, err := agent.TryAcquireSessionLease(key)
+	lease, err := agent.TryAcquireSessionLease(string(legacyPath))
 	if err != nil {
 		t.sessionLeaseMu.Unlock()
 		return err
@@ -600,13 +613,18 @@ func setTabSessionIdentity(tab *WorkspaceTab, identity string) {
 	if tab == nil {
 		return
 	}
-	if id, ok := parseSessionRoute(identity); ok {
-		tab.SessionID = id
+	locator := classifySessionLocator(identity)
+	if locator.kind == sessionLocatorCanonical {
+		tab.SessionID = locator.ref.SessionID
 		tab.SessionPath = ""
 		return
 	}
 	tab.SessionID = ""
-	tab.SessionPath = canonicalTabSessionPath(identity)
+	if locator.kind == sessionLocatorLegacy {
+		tab.SessionPath = canonicalTabSessionPath(string(locator.legacyPath))
+	} else {
+		tab.SessionPath = ""
+	}
 }
 
 // cloneDetachedRuntimeTab copies a running tab's runtime state into a fresh
@@ -628,7 +646,7 @@ func cloneDetachedRuntimeTab(tab *WorkspaceTab, key, path string) *WorkspaceTab 
 	tab.telemMu.Unlock()
 	pinnedFiles, pendingLegacyPinnedFiles := tab.pinnedFilesState()
 
-	return &WorkspaceTab{
+	detached := &WorkspaceTab{
 		ID:                       detachedRuntimeTabID(key),
 		Scope:                    tab.Scope,
 		WorkspaceRoot:            tab.WorkspaceRoot,
@@ -637,8 +655,6 @@ func cloneDetachedRuntimeTab(tab *WorkspaceTab, key, path string) *WorkspaceTab 
 		TopicID:                  tab.TopicID,
 		TopicTitle:               tab.TopicTitle,
 		topicTitleSource:         tab.topicTitleSource,
-		SessionID:                tab.SessionID,
-		SessionPath:              canonicalTabSessionPath(path),
 		Ctrl:                     tab.Ctrl,
 		Label:                    tab.Label,
 		Ready:                    tab.Ready,
@@ -664,6 +680,12 @@ func cloneDetachedRuntimeTab(tab *WorkspaceTab, key, path string) *WorkspaceTab 
 		PinnedFiles:              pinnedFiles,
 		pendingLegacyPinnedFiles: pendingLegacyPinnedFiles,
 	}
+	if tab.SessionID != "" {
+		setTabSessionIdentity(detached, sessionRoute(tab.SessionID))
+	} else {
+		setTabSessionIdentity(detached, path)
+	}
+	return detached
 }
 
 func (a *App) detachRuntimeForReplacement(tab *WorkspaceTab) bool {
@@ -760,8 +782,7 @@ func applyRuntimeTab(target, source *WorkspaceTab, path string, appCtx context.C
 		target.SessionID = source.SessionID
 		target.SessionPath = ""
 	} else {
-		target.SessionID = ""
-		target.SessionPath = canonicalTabSessionPath(path)
+		setTabSessionIdentity(target, path)
 	}
 	target.SharedHostKey = source.SharedHostKey
 	target.Label = source.Label
@@ -2170,15 +2191,18 @@ func (a *App) tabMeta(tab *WorkspaceTab, active bool) TabMeta {
 	if a.botBridge != nil {
 		m.RemoteControlled = a.botBridge.remoteControlledTabs()[tab.ID]
 	}
-	if meta, ok, err := agent.LoadBranchMeta(tab.currentSessionPath()); err == nil && ok {
-		m.VersionKind = string(meta.EffectiveVersionKind())
-		m.VersionState = string(meta.EffectiveVersionState())
-		m.ParentVersionID = meta.ParentVersionID
-		if meta.Recovered {
-			m.Recovered = true
-			m.RecoveryReason = meta.RecoveryReason
-			m.RecoveryDigest = meta.RecoveryDigest
-			m.RecoveryParentID = string(meta.ParentID)
+	legacyMetaPath, legacyMetaOK := validatedLegacySessionPathForRead(tab.currentSessionPath())
+	if legacyMetaOK {
+		if meta, ok, err := agent.LoadBranchMeta(string(legacyMetaPath)); err == nil && ok {
+			m.VersionKind = string(meta.EffectiveVersionKind())
+			m.VersionState = string(meta.EffectiveVersionState())
+			m.ParentVersionID = meta.ParentVersionID
+			if meta.Recovered {
+				m.Recovered = true
+				m.RecoveryReason = meta.RecoveryReason
+				m.RecoveryDigest = meta.RecoveryDigest
+				m.RecoveryParentID = string(meta.ParentID)
+			}
 		}
 	}
 	return m
@@ -4152,10 +4176,11 @@ func describeSessionBindingWorkspace(scope, workspaceRoot string) string {
 }
 
 func (a *App) resolveSessionBinding(sessionPath string) (sessionBinding, bool) {
-	sessionPath = strings.TrimSpace(sessionPath)
-	if sessionPath == "" {
+	legacyPath, ok := validatedLegacySessionPathForRead(sessionPath)
+	if !ok {
 		return sessionBinding{}, false
 	}
+	sessionPath = string(legacyPath)
 	for _, dir := range a.knownSessionDirs() {
 		if binding, ok := sessionBindingInDir(dir, sessionPath); ok {
 			return binding, true
@@ -4570,10 +4595,11 @@ func shouldApplyAutoTopicTitle(workspaceRoot, topicID string, proposal autoTopic
 }
 
 func sessionHasManualDisplayTitle(sessionPath string) bool {
-	sessionPath = strings.TrimSpace(sessionPath)
-	if sessionPath == "" {
+	legacyPath, ok := validatedLegacySessionPathForRead(sessionPath)
+	if !ok {
 		return false
 	}
+	sessionPath = string(legacyPath)
 	if meta, ok, err := agent.LoadBranchMeta(sessionPath); err == nil && ok {
 		if strings.TrimSpace(meta.CustomTitle) != "" {
 			return true
@@ -4588,10 +4614,11 @@ func sessionHasManualDisplayTitle(sessionPath string) bool {
 
 func topicTitleFallbackForOpen(workspaceRoot, topicID, sessionPath string) (string, string, bool) {
 	topicID = strings.TrimSpace(topicID)
-	sessionPath = strings.TrimSpace(sessionPath)
-	if topicID == "" || sessionPath == "" {
+	legacyPath, ok := validatedLegacySessionPathForRead(sessionPath)
+	if topicID == "" || !ok {
 		return "", "", false
 	}
+	sessionPath = string(legacyPath)
 	storedTitle := strings.TrimSpace(loadTopicTitle(workspaceRoot, topicID))
 	storedSource := strings.TrimSpace(loadTopicTitleSource(workspaceRoot, topicID))
 	if storedTitle != "" {
@@ -4636,10 +4663,14 @@ func topicTitleUserTurnsFromSession(path string) []string {
 }
 
 func loadTopicTitleUserTurnsFromSession(path string) ([]string, error) {
+	legacyPath, ok := validatedLegacySessionPathForRead(path)
+	if !ok {
+		return nil, &sessionLocatorError{reason: "invalid_legacy_path"}
+	}
 	// Event-log aware: decoding the .jsonl checkpoint directly would stop
 	// seeing user turns after the first save, silently disabling the ≥3-turn
 	// title upgrade.
-	msgs, err := agent.LoadSessionUserMessages(path)
+	msgs, err := agent.LoadSessionUserMessages(string(legacyPath))
 	if err != nil {
 		return nil, err
 	}
@@ -7168,107 +7199,138 @@ func pinnedTabSessionPathForBuild(scope, workspaceRoot, targetDir, sessionPath s
 // (controller reads happen off-lock) so a concurrent tab mutation can't tear
 // the persisted record.
 func (a *App) saveTabSessionMeta(tab *WorkspaceTab, path string) error {
-	if tab == nil || strings.TrimSpace(path) == "" {
+	if tab == nil {
 		return nil
 	}
-	a.mu.RLock()
-	ctrl := tab.Ctrl
-	snap := tabSessionMetaSnapshot{
-		path:             path,
-		scope:            tab.Scope,
-		workspaceRoot:    tab.WorkspaceRoot,
-		topicID:          tab.TopicID,
-		topicTitle:       tab.TopicTitle,
-		tokenMode:        currentTabTokenMode(tab),
-		mode:             normalizeTabMode(tab.mode),
-		toolApprovalMode: normalizeToolApprovalMode(tab.toolApprovalMode),
-		goal:             strings.TrimSpace(tab.goal),
-	}
-	a.mu.RUnlock()
-	if ctrl != nil {
-		snap.mode = tabModeFromAxes(ctrl.PlanMode(), ctrl.AutoApproveTools())
-		snap.toolApprovalMode = normalizeToolApprovalMode(ctrl.ToolApprovalMode())
-		if goal := strings.TrimSpace(ctrl.Goal()); goal != "" && ctrl.GoalStatus() == control.GoalStatusRunning {
-			snap.goal = goal
-		} else {
-			snap.goal = ""
-		}
-	}
-	return saveTabSessionMetaSnapshot(snap)
-}
-
-type tabSessionMetaSnapshot struct {
-	path, scope, workspaceRoot string
-	topicID, topicTitle        string
-	tokenMode, qualityFloor    string
-	mode, toolApprovalMode     string
-	goal                       string
-}
-
-func (a *App) saveTabSessionMetaForCurrentSession(tab *WorkspaceTab) error {
-	snap, ok := a.tabSessionMetaSnapshotForCurrentSession(tab)
-	if !ok {
-		return nil
+	snap, ok, err := a.tabSessionMetaSnapshot(tab, path, false)
+	if err != nil || !ok {
+		return err
 	}
 	return a.saveTabSessionMetaSnapshotAndIndex(snap)
 }
 
-func (a *App) tabSessionMetaSnapshotForCurrentSession(tab *WorkspaceTab) (tabSessionMetaSnapshot, bool) {
+type tabSessionMetaSnapshot struct {
+	path                 legacySessionPath
+	scope, workspaceRoot string
+	topicID, topicTitle  string
+	tokenMode            string
+	qualityFloor         string
+	mode                 string
+	toolApprovalMode     string
+	goal                 string
+}
+
+func (a *App) saveTabSessionMetaForCurrentSession(tab *WorkspaceTab) error {
+	snap, ok, err := a.tabSessionMetaSnapshotForCurrentSession(tab)
+	if err != nil || !ok {
+		return err
+	}
+	return a.saveTabSessionMetaSnapshotAndIndex(snap)
+}
+
+func (a *App) tabSessionMetaSnapshotForCurrentSession(tab *WorkspaceTab) (tabSessionMetaSnapshot, bool, error) {
+	return a.tabSessionMetaSnapshot(tab, "", true)
+}
+
+type tabSessionMetaSource struct {
+	snapshot              tabSessionMetaSnapshot
+	ctrl                  control.SessionAPI
+	generation            uint64
+	sessionID, storedPath string
+	readOnly              bool
+}
+
+func (a *App) captureTabSessionMetaSource(tab *WorkspaceTab) (tabSessionMetaSource, bool) {
 	if tab == nil {
-		return tabSessionMetaSnapshot{}, false
+		return tabSessionMetaSource{}, false
 	}
 	a.mu.RLock()
+	defer a.mu.RUnlock()
 	if tab.ID != "" && a.tabs[tab.ID] != tab {
-		a.mu.RUnlock()
-		return tabSessionMetaSnapshot{}, false
+		return tabSessionMetaSource{}, false
 	}
-	readOnly := tab.ReadOnly
-	ctrl := tab.Ctrl
-	storedPath := strings.TrimSpace(tab.SessionPath)
-	scope := tab.Scope
-	workspaceRoot := tab.WorkspaceRoot
-	topicID := tab.TopicID
-	topicTitle := tab.TopicTitle
-	tokenMode := currentTabTokenMode(tab)
-	qualityFloor := control.QualityFloorStandard
-	mode := normalizeTabMode(tab.mode)
-	toolApprovalMode := normalizeToolApprovalMode(tab.toolApprovalMode)
-	goal := strings.TrimSpace(tab.goal)
-	a.mu.RUnlock()
-	if readOnly {
-		return tabSessionMetaSnapshot{}, false
-	}
+	return tabSessionMetaSource{
+		ctrl:       tab.Ctrl,
+		generation: tab.SessionGeneration,
+		sessionID:  strings.TrimSpace(tab.SessionID),
+		storedPath: strings.TrimSpace(tab.SessionPath),
+		readOnly:   tab.ReadOnly,
+		snapshot: tabSessionMetaSnapshot{
+			scope: tab.Scope, workspaceRoot: tab.WorkspaceRoot,
+			topicID: tab.TopicID, topicTitle: tab.TopicTitle,
+			tokenMode: currentTabTokenMode(tab), qualityFloor: control.QualityFloorStandard,
+			mode: normalizeTabMode(tab.mode), toolApprovalMode: normalizeToolApprovalMode(tab.toolApprovalMode),
+			goal: strings.TrimSpace(tab.goal),
+		},
+	}, true
+}
 
-	ctrlPath := ""
-	ctrlDir := ""
-	activeWork := false
-	if ctrl != nil {
-		ctrlPath = strings.TrimSpace(ctrl.SessionPath())
-		if dir, ok := safeControllerSessionDir(ctrl); ok {
+func canonicalTabSessionMetaDisposition(sessionID, storedPath, requestedPath string) (bool, error) {
+	if sessionID == "" {
+		return false, nil
+	}
+	if err := session.ValidateSessionID(sessionID); err != nil {
+		return false, &sessionLocatorError{reason: "invalid_canonical_session_id"}
+	}
+	if locator := classifySessionLocator(storedPath); locator.kind != sessionLocatorEmpty {
+		if locator.kind != sessionLocatorCanonical || locator.ref.SessionID != sessionID {
+			return false, &sessionLocatorError{reason: "session_identity_conflict"}
+		}
+	}
+	if requestedPath != "" {
+		locator := classifySessionLocator(requestedPath)
+		if locator.kind == sessionLocatorInvalid || locator.kind == sessionLocatorCanonical && locator.ref.SessionID != sessionID {
+			return false, &sessionLocatorError{reason: "session_identity_conflict"}
+		}
+	}
+	// Canonical session metadata belongs to the Session Service, workspace
+	// registry, and desktop-tabs.json. Never dual-write a legacy sidecar.
+	return true, nil
+}
+
+func updateTabSessionMetaFromController(source *tabSessionMetaSource) (ctrlPath, ctrlDir string, activeWork bool) {
+	if source.ctrl != nil {
+		ctrlPath = strings.TrimSpace(source.ctrl.SessionPath())
+		if dir, ok := safeControllerSessionDir(source.ctrl); ok {
 			ctrlDir = strings.TrimSpace(dir)
 		}
-		status := ctrl.RuntimeStatus()
+		status := source.ctrl.RuntimeStatus()
 		activeWork = status.Running || status.PendingPrompt || status.BackgroundJobs > 0
-		mode = tabModeFromAxes(ctrl.PlanMode(), ctrl.AutoApproveTools())
-		toolApprovalMode = normalizeToolApprovalMode(ctrl.ToolApprovalMode())
-		if ctrl.GoalStatus() == control.GoalStatusRunning {
-			goal = strings.TrimSpace(ctrl.Goal())
+		source.snapshot.mode = tabModeFromAxes(source.ctrl.PlanMode(), source.ctrl.AutoApproveTools())
+		source.snapshot.toolApprovalMode = normalizeToolApprovalMode(source.ctrl.ToolApprovalMode())
+		if source.ctrl.GoalStatus() == control.GoalStatusRunning {
+			source.snapshot.goal = strings.TrimSpace(source.ctrl.Goal())
 		} else {
-			goal = ""
+			source.snapshot.goal = ""
 		}
 	}
+	return ctrlPath, ctrlDir, activeWork
+}
 
-	currentPath := ctrlPath
-	if currentPath == "" {
-		currentPath = storedPath
+func tabSessionMetaLegacyPath(source tabSessionMetaSource, requestedPath string, useCurrent bool, ctrlPath, ctrlDir string, activeWork bool) (legacySessionPath, bool, error) {
+	currentPath := strings.TrimSpace(requestedPath)
+	if useCurrent {
+		currentPath = ctrlPath
+		if currentPath == "" {
+			currentPath = source.storedPath
+		}
 	}
 	if currentPath == "" {
-		return tabSessionMetaSnapshot{}, false
+		return "", false, nil
+	}
+	locator := classifySessionLocator(currentPath)
+	switch locator.kind {
+	case sessionLocatorCanonical:
+		return "", false, nil
+	case sessionLocatorInvalid:
+		return "", false, &sessionLocatorError{reason: locator.reason}
+	case sessionLocatorEmpty:
+		return "", false, nil
 	}
 
 	sessionDir := desktopSessionDir("")
-	if workspaceRoot != "" {
-		sessionDir = desktopSessionDir(workspaceRoot)
+	if source.snapshot.workspaceRoot != "" {
+		sessionDir = desktopSessionDir(source.snapshot.workspaceRoot)
 	} else if ctrlDir != "" {
 		sessionDir = ctrlDir
 	}
@@ -7278,46 +7340,67 @@ func (a *App) tabSessionMetaSnapshotForCurrentSession(tab *WorkspaceTab) (tabSes
 			runtimeDir = ctrlDir
 		}
 	}
-	if topicID == "" && !activeWork && storedPath != "" && sessionPathHasNoContent(sessionDir, storedPath) {
-		return tabSessionMetaSnapshot{}, false
+	if source.snapshot.topicID == "" && !activeWork && source.storedPath != "" && classifySessionLocator(source.storedPath).kind == sessionLocatorLegacy && sessionPathHasNoContent(sessionDir, source.storedPath) {
+		return "", false, nil
 	}
-	path := tabSessionMetaPathForSession(runtimeDir, sessionDir, currentPath)
-	if path == "" {
-		return tabSessionMetaSnapshot{}, false
+	path, err := tabSessionMetaPathForSession(runtimeDir, sessionDir, currentPath)
+	if err != nil {
+		return "", false, err
 	}
-	return tabSessionMetaSnapshot{
-		path:             path,
-		scope:            scope,
-		workspaceRoot:    workspaceRoot,
-		topicID:          topicID,
-		topicTitle:       topicTitle,
-		tokenMode:        tokenMode,
-		qualityFloor:     qualityFloor,
-		mode:             mode,
-		toolApprovalMode: toolApprovalMode,
-		goal:             goal,
-	}, true
+	return path, true, nil
+}
+
+func (a *App) tabSessionMetaSourceCurrent(tab *WorkspaceTab, source tabSessionMetaSource) bool {
+	a.mu.RLock()
+	defer a.mu.RUnlock()
+	current := tab.ID == "" || a.tabs[tab.ID] == tab
+	return current && tab.Ctrl == source.ctrl && tab.SessionGeneration == source.generation &&
+		strings.TrimSpace(tab.SessionID) == source.sessionID && strings.TrimSpace(tab.SessionPath) == source.storedPath
+}
+
+func (a *App) tabSessionMetaSnapshot(tab *WorkspaceTab, requestedPath string, useCurrent bool) (tabSessionMetaSnapshot, bool, error) {
+	source, ok := a.captureTabSessionMetaSource(tab)
+	if !ok || source.readOnly {
+		return tabSessionMetaSnapshot{}, false, nil
+	}
+	canonical, err := canonicalTabSessionMetaDisposition(source.sessionID, source.storedPath, requestedPath)
+	if err != nil || canonical {
+		return tabSessionMetaSnapshot{}, false, err
+	}
+	ctrlPath, ctrlDir, activeWork := updateTabSessionMetaFromController(&source)
+	path, ok, err := tabSessionMetaLegacyPath(source, requestedPath, useCurrent, ctrlPath, ctrlDir, activeWork)
+	if err != nil || !ok {
+		return tabSessionMetaSnapshot{}, false, err
+	}
+	// Controller reads above are intentionally off App.mu. Fence the result
+	// before it can select a file target for a tab that has since switched.
+	if !a.tabSessionMetaSourceCurrent(tab, source) {
+		return tabSessionMetaSnapshot{}, false, nil
+	}
+	source.snapshot.path = path
+	return source.snapshot, true, nil
 }
 
 func saveTabSessionMetaSnapshot(snap tabSessionMetaSnapshot) error {
-	if strings.TrimSpace(snap.path) == "" {
+	path := string(snap.path)
+	if strings.TrimSpace(path) == "" {
 		return nil
 	}
 	// Read-modify-write on the branch-meta sidecar: hold the per-path meta lock
 	// so agent-side writers (autosave UpdateSessionMeta, in-flight markers)
 	// can't interleave and drop fields.
-	unlock, err := agent.LockSessionMetaPath(snap.path)
+	unlock, err := agent.LockSessionMetaPath(path)
 	if err != nil {
 		return err
 	}
 	defer unlock()
-	m, err := agent.EnsureBranchMetaLocked(snap.path)
+	m, err := agent.EnsureBranchMetaLocked(path)
 	if err != nil {
 		return err
 	}
 	scope := snap.scope
 	workspaceRoot := snap.workspaceRoot
-	if ownerScope, ownerRoot, _, ok := legacyMigrationTargetForDir(filepath.Dir(snap.path)); ok {
+	if ownerScope, ownerRoot, _, ok := legacyMigrationTargetForDir(filepath.Dir(path)); ok {
 		if ownerScope == "project" {
 			scope = ownerScope
 			workspaceRoot = ownerRoot
@@ -7337,28 +7420,15 @@ func saveTabSessionMetaSnapshot(snap tabSessionMetaSnapshot) error {
 	m.Mode = persistedTabMode(snap.mode)
 	m.ToolApprovalMode = persistedToolApprovalMode(snap.toolApprovalMode)
 	m.Goal = strings.TrimSpace(snap.goal)
-	if err := agent.SaveBranchMetaPreserveUpdatedLocked(snap.path, m); err != nil {
+	if err := agent.SaveBranchMetaPreserveUpdatedLocked(path, m); err != nil {
 		return err
 	}
-	invalidateTopicSessionIndexForPath(snap.path)
+	invalidateTopicSessionIndexForPath(path)
 	return nil
 }
 
-func tabSessionMetaPathForSession(runtimeDir, sessionDir, sessionPath string) string {
-	sessionPath = strings.TrimSpace(sessionPath)
-	if sessionPath == "" {
-		return ""
-	}
-	for _, dir := range []string{runtimeDir, sessionDir} {
-		if resolved, ok := pinnedTabSessionPath(dir, sessionPath); ok {
-			return resolved
-		}
-	}
-	path := canonicalTabSessionPath(sessionPath)
-	if filepath.IsAbs(path) {
-		return path
-	}
-	return ""
+func tabSessionMetaPathForSession(runtimeDir, sessionDir, sessionPath string) (legacySessionPath, error) {
+	return resolveLegacySessionPath(sessionPath, runtimeDir, sessionDir)
 }
 
 type tabSessionProfile struct {
@@ -7390,6 +7460,11 @@ func tabSessionProfileFromMeta(sessionPath string, meta agent.BranchMeta) tabSes
 }
 
 func loadTabSessionProfile(sessionPath string) tabSessionProfile {
+	legacyPath, valid := validatedLegacySessionPathForRead(sessionPath)
+	if !valid {
+		return defaultTabSessionProfile()
+	}
+	sessionPath = string(legacyPath)
 	meta, ok, err := agent.LoadBranchMeta(sessionPath)
 	if err != nil || !ok {
 		return defaultTabSessionProfile()
@@ -7429,6 +7504,11 @@ func runningTabSessionGoal(sessionPath, fallback string) string {
 	if fallback == "" {
 		return ""
 	}
+	legacyPath, ok := validatedLegacySessionPathForRead(sessionPath)
+	if !ok {
+		return fallback
+	}
+	sessionPath = string(legacyPath)
 	data, err := readFileUTF8(store.SessionGoalState(sessionPath))
 	if err != nil {
 		return fallback
@@ -7451,42 +7531,60 @@ func runningTabSessionGoal(sessionPath, fallback string) string {
 }
 
 func canonicalTabSessionPath(path string) string {
-	path = strings.TrimSpace(path)
-	if path == "" {
+	locator := classifySessionLocator(path)
+	if locator.kind != sessionLocatorLegacy {
 		return ""
 	}
+	path = string(locator.legacyPath)
 	if validPath, _, err := validateSessionPath(config.SessionDir(), path); err == nil {
 		return validPath
 	}
-	// Project-scope sessions live outside config.SessionDir(), so validation
-	// against it always fails. Still normalize the shape: without clean+abs,
-	// the same file spelled with a different separator or a relative prefix
-	// splits into distinct runtime keys.
-	cleaned := filepath.Clean(path)
-	if abs, err := filepath.Abs(cleaned); err == nil {
-		return abs
+	// Project-scope sessions live outside config.SessionDir(). Their absolute
+	// transcript path still has to pass the same filename and link-escape
+	// checks before it can reach runtime identity or file helpers.
+	if filepath.IsAbs(path) {
+		if validPath, _, err := validateSessionPath(filepath.Dir(path), path); err == nil {
+			return validPath
+		}
 	}
-	return cleaned
+	return ""
 }
 
 func (a *App) rememberTabSessionPath(tab *WorkspaceTab, path string) {
-	path = canonicalTabSessionPath(path)
-	if tab == nil || path == "" {
+	if tab == nil {
 		return
+	}
+	locator := classifySessionLocator(path)
+	if locator.kind == sessionLocatorInvalid || locator.kind == sessionLocatorEmpty {
+		return
+	}
+	if locator.kind == sessionLocatorLegacy {
+		path = canonicalTabSessionPath(path)
+		if path == "" {
+			return
+		}
 	}
 	a.mu.Lock()
 	if current := a.tabs[tab.ID]; current == tab {
-		tab.SessionPath = path
+		setTabSessionIdentity(tab, path)
 		a.saveTabsLocked()
 	} else {
-		tab.SessionPath = path
+		setTabSessionIdentity(tab, path)
 	}
 	a.mu.Unlock()
 }
 
 func (a *App) persistTabSessionPath(tab *WorkspaceTab, path string) {
+	locator := classifySessionLocator(path)
+	if tab == nil || locator.kind == sessionLocatorEmpty || locator.kind == sessionLocatorInvalid {
+		return
+	}
+	if locator.kind == sessionLocatorCanonical {
+		a.rememberTabSessionPath(tab, sessionRoute(locator.ref.SessionID))
+		return
+	}
 	path = canonicalTabSessionPath(path)
-	if tab == nil || path == "" {
+	if path == "" {
 		return
 	}
 	// A tab restored from the short-lived tab-scoped implementation may not

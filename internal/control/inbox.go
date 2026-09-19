@@ -307,22 +307,6 @@ func (c *Controller) rebindInbox() {
 	}
 }
 
-// detachInboxForDiscard releases the old inbox transaction lock before a
-// destructive session clear. Windows does not permit removing an open lock
-// file, while Unix silently unlinks it, so the ordering must be explicit.
-func (c *Controller) detachInboxForDiscard(sessionPath string) {
-	c.inbox.scanMu.Lock()
-	defer c.inbox.scanMu.Unlock()
-	c.inbox.mu.Lock()
-	defer c.inbox.mu.Unlock()
-	if c.inbox.store == nil || c.inbox.store.SessionPath() != sessionPath {
-		return
-	}
-	c.inbox.store.Close()
-	c.inbox.store = nil
-	c.inbox.clearActive()
-}
-
 func (c *Controller) pauseInboxOnRotate() {
 	c.inbox.mu.Lock()
 	st := c.inbox.store

@@ -373,6 +373,13 @@ func validateSessionID(id string) error {
 	return nil
 }
 
+// ValidateSessionID applies the canonical session storage identity rules.
+// Callers that accept compatibility routes must validate the extracted ID
+// before deciding whether the input names a SessionRef or a legacy path.
+func ValidateSessionID(id string) error {
+	return validateSessionID(id)
+}
+
 type readHandle struct {
 	id       string
 	dir      string

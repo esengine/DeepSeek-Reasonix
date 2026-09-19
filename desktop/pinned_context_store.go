@@ -192,7 +192,22 @@ func prepareStartupPinnedContext(tab *WorkspaceTab, startupPath, persistedPath s
 }
 
 func restoreTabPinnedContext(tab *WorkspaceTab, legacy []string) {
-	state, err := loadOrMigratePinnedContextState(tab.SessionPath, legacy)
+	// Canonical identities and rejected locators must never enter the legacy
+	// sidecar migration. Keep upgrade input until a verified binding owns it.
+	if tab.SessionID != "" {
+		tab.retainLegacyPinnedFiles(legacy)
+		return
+	}
+	path := ""
+	if tab.SessionPath != "" {
+		validated, ok := validatedLegacySessionPathForRead(tab.SessionPath)
+		if !ok {
+			tab.retainLegacyPinnedFiles(legacy)
+			return
+		}
+		path = string(validated)
+	}
+	state, err := loadOrMigratePinnedContextState(path, legacy)
 	if err != nil {
 		tab.retainLegacyPinnedFiles(legacy)
 		slog.Warn("desktop: restore pinned context", "err", err)

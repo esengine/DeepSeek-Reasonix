@@ -2782,53 +2782,6 @@ func TestTwoModelShortChoiceReplySkipsPlanner(t *testing.T) {
 	}
 }
 
-func TestSubmitClearDiscardsCurrentContextWithoutSavingTranscript(t *testing.T) {
-	dir := t.TempDir()
-	sess := agent.NewSession("sys")
-	sess.Add(provider.Message{Role: provider.RoleUser, Content: "old context"})
-	exec := agent.New(nil, nil, sess, agent.Options{}, event.Discard)
-	path := filepath.Join(dir, "session.jsonl")
-	cleared := make(chan struct{})
-	sink := event.FuncSink(func(e event.Event) {
-		if e.Kind == event.Notice && e.Text == "context cleared" {
-			close(cleared)
-		}
-	})
-	c := newOwnedTestController(t, Options{Executor: exec, SystemPrompt: "sys", SessionDir: dir, SessionPath: path, Label: "test", Sink: sink})
-	if err := c.Snapshot(); err != nil {
-		t.Fatal(err)
-	}
-	ckpt := ckptDir(path)
-	if err := os.MkdirAll(ckpt, 0o755); err != nil {
-		t.Fatal(err)
-	}
-	if err := os.WriteFile(filepath.Join(ckpt, "turn-0.json"), []byte("{}"), 0o644); err != nil {
-		t.Fatal(err)
-	}
-
-	c.submit("/clear", "", "")
-	select {
-	case <-cleared:
-	case <-time.After(30 * time.Second):
-		t.Fatal("/clear did not finish")
-	}
-	if c.SessionPath() == path {
-		t.Fatal("/clear did not rotate to a fresh session path")
-	}
-	for _, p := range []string{path, agent.BranchMetaPath(path), ckpt} {
-		if _, err := os.Stat(p); !os.IsNotExist(err) {
-			t.Fatalf("discarded artifact %s still exists or stat failed with %v", p, err)
-		}
-	}
-	if _, err := os.Stat(c.SessionPath()); !os.IsNotExist(err) {
-		t.Fatalf("fresh empty session should not be saved yet; stat err=%v", err)
-	}
-	current := exec.Session().Snapshot()
-	if len(current) != 1 || current[0].Role != provider.RoleSystem || current[0].Content != "sys" {
-		t.Fatalf("cleared context = %+v, want only system prompt", current)
-	}
-}
-
 func TestDisconnectMCPServerRemovesLazyPlaceholder(t *testing.T) {
 	reg := tool.NewRegistry()
 	reg.Add(fakeControlTool{name: "mcp__mock__connect"})
