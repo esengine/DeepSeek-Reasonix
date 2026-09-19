@@ -1,6 +1,7 @@
 package serve
 
 import (
+	"context"
 	"net/http"
 	"os"
 	"path/filepath"
@@ -9,6 +10,7 @@ import (
 
 	"reasonix/internal/agent"
 	"reasonix/internal/control"
+	"reasonix/internal/session"
 	"reasonix/internal/store"
 )
 
@@ -87,7 +89,7 @@ func (s *Server) sessions(w http.ResponseWriter, r *http.Request) {
 				for _, info := range page.Sessions {
 					row := sessionListEntry{
 						HostID: info.Ref.HostID, SessionID: info.Ref.SessionID, Name: info.SessionID,
-						Title: info.Title, Turns: info.Turns, MtimeMilli: info.CreatedAt.UnixMilli(),
+						Title: sessionDisplayTitle(r.Context(), s, info), Turns: info.Turns, MtimeMilli: info.UpdatedAt.UnixMilli(),
 						Current: bound && info.Ref == runtime.Ref(),
 					}
 					if live, exists := service.Runtime(info.Ref); exists {
@@ -101,4 +103,22 @@ func (s *Server) sessions(w http.ResponseWriter, r *http.Request) {
 	}
 	sort.SliceStable(out, func(i, j int) bool { return out[i].MtimeMilli > out[j].MtimeMilli })
 	writeJSON(w, out)
+}
+
+// sessionDisplayTitle resolves what the session list shows for one stored
+// session. Precedence is durable-then-derived: an explicit title recorded in
+// the session's own event log (a manual rename or the agent's title tool) wins,
+// then the generated title cache, then the first authored message as a preview.
+// sessionTitle is the cache-and-generate step; this supplies the key and source
+// a stored, non-transcript session can offer.
+func sessionDisplayTitle(ctx context.Context, s *Server, info session.SessionInfo) string {
+	if info.Title != "" {
+		return info.Title
+	}
+	// A v4 session has no transcript path, so its store id is the cache key and
+	// its catalog preview stands in for the first user message.
+	if info.Preview == "" {
+		return ""
+	}
+	return s.sessionTitle(ctx, info.SessionID, info.Preview, info.UpdatedAt.UnixNano())
 }

@@ -9,6 +9,7 @@ import (
 	"sync"
 
 	fileencoding "reasonix/internal/fileutil/encoding"
+	"reasonix/internal/session"
 )
 
 // titleCache persists generated session titles to <dir>/.session-titles.json.
@@ -31,6 +32,19 @@ type titleEntry struct {
 
 func newTitleCache(dir string) *titleCache {
 	return &titleCache{dir: dir, entries: map[string]titleEntry{}}
+}
+
+// titleCacheDir resolves the directory holding generated session titles. A
+// controller's SessionDir is the host's legacy transcript catalog, while both
+// v4 sessions and this cache live in the sibling store root; keeping the cache
+// next to the sessions it describes is what lets a later Serve process reuse
+// titles instead of regenerating them. An already-resolved store root is left
+// alone so the conversion stays idempotent.
+func titleCacheDir(sessionDir string) string {
+	if filepath.Base(sessionDir) == "sessions-v4" {
+		return sessionDir
+	}
+	return session.RootForLegacyDir(sessionDir)
 }
 
 func (c *titleCache) load() {

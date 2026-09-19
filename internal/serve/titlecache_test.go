@@ -58,6 +58,22 @@ func TestTitleCacheReadsLegacyMtimeEntries(t *testing.T) {
 	}
 }
 
+func TestTitleCacheDirIsTheStoreRootBesideLegacySessions(t *testing.T) {
+	base := t.TempDir()
+	legacy := filepath.Join(base, "projects", "proj", "sessions")
+	if got, want := titleCacheDir(legacy), filepath.Join(base, "projects", "proj", "sessions-v4"); got != want {
+		t.Fatalf("titleCacheDir(%q) = %q, want %q", legacy, got, want)
+	}
+	// An already-resolved store root must not gain a second store segment.
+	root := filepath.Join(base, "projects", "proj", "sessions-v4")
+	if got := titleCacheDir(root); got != root {
+		t.Fatalf("titleCacheDir(%q) = %q, want it unchanged", root, got)
+	}
+	if got := titleCacheDir(""); got != "" {
+		t.Fatalf("titleCacheDir(\"\") = %q, want empty", got)
+	}
+}
+
 func TestTitleCacheWritesRemainReadableByOlderVersions(t *testing.T) {
 	dir := t.TempDir()
 	newTitleCache(dir).put("a.jsonl", "Compatible", "first prompt", 7)
