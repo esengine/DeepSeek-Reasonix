@@ -43,7 +43,7 @@ func prepareRestrictedCapabilities(spec Spec, tempRoot string, notice io.Writer,
 		return nil, nil
 	}
 
-	writeRoots, err := canonicalWindowsDirectories(spec.WritableRoots)
+	writeRoots, err := canonicalWindowsDirectories(spec.WritableRoots, notice)
 	if err != nil {
 		return nil, err
 	}
@@ -146,13 +146,18 @@ func windowsDirectoryIdentity(root string) (windowsFileIdentity, error) {
 	}, nil
 }
 
-func canonicalWindowsDirectories(roots []string) ([]string, error) {
+// canonicalWindowsDirectories 解析可写根；单个可选根失效时跳过它，避免映射盘
+// 或临时不可见的额外目录拖垮整个 writer。若所有声明的根都失效，仍然拒绝启动。
+func canonicalWindowsDirectories(roots []string, notice io.Writer) ([]string, error) {
 	out := make([]string, 0, len(roots))
 	seen := make(map[string]bool, len(roots))
 	for _, root := range roots {
 		canonical, err := canonicalWindowsDirectory(root)
 		if err != nil {
-			return nil, fmt.Errorf("canonicalize writable root %q: %w", root, err)
+			if notice != nil {
+				fmt.Fprintf(notice, "windows sandbox: skipping unavailable writable root %q: %v\n", root, err)
+			}
+			continue
 		}
 		key := strings.ToLower(filepath.Clean(canonical))
 		if seen[key] {
@@ -160,6 +165,9 @@ func canonicalWindowsDirectories(roots []string) ([]string, error) {
 		}
 		seen[key] = true
 		out = append(out, canonical)
+	}
+	if len(roots) > 0 && len(out) == 0 {
+		return nil, fmt.Errorf("canonicalize writable roots: no usable writable root")
 	}
 	return out, nil
 }

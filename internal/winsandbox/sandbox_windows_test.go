@@ -3,6 +3,7 @@
 package winsandbox
 
 import (
+	"bytes"
 	"encoding/json"
 	"errors"
 	"net"
@@ -657,6 +658,30 @@ func TestCanonicalWindowsDirectoryResolvesSymlink(t *testing.T) {
 	}
 	if !strings.EqualFold(got, want) {
 		t.Fatalf("canonical symlink path = %q, want %q", got, want)
+	}
+}
+
+func TestCanonicalWindowsDirectoriesSkipsUnavailableOptionalRoot(t *testing.T) {
+	valid := t.TempDir()
+	missing := filepath.Join(t.TempDir(), "does-not-exist")
+	var notice bytes.Buffer
+
+	got, err := canonicalWindowsDirectories([]string{valid, missing}, &notice)
+	if err != nil {
+		t.Fatalf("canonicalize roots: %v", err)
+	}
+	if len(got) != 1 || !strings.EqualFold(got[0], valid) {
+		t.Fatalf("usable roots = %v, want only %q", got, valid)
+	}
+	if !strings.Contains(notice.String(), missing) {
+		t.Fatalf("skip notice = %q, want unavailable root %q", notice.String(), missing)
+	}
+}
+
+func TestCanonicalWindowsDirectoriesRejectsWhenAllRootsUnavailable(t *testing.T) {
+	missing := filepath.Join(t.TempDir(), "does-not-exist")
+	if _, err := canonicalWindowsDirectories([]string{missing}, nil); err == nil {
+		t.Fatal("all unavailable writable roots must fail closed")
 	}
 }
 
