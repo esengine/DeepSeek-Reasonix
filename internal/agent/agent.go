@@ -1372,7 +1372,7 @@ func (a *Agent) streamWithFrozen(ctx context.Context, turn int, sink event.Sink,
 	var partialToolStarted bool
 	var maxArgChars int
 	var lastArgProgress time.Time
-	perseveration := newPerseverationGuard()
+	perseveration := newPerseverationGuards()
 	// collect packages the stream state accumulated so far; stored is the
 	// finishReasoning output that becomes the round-tripped reasoning.
 	collect := func(stored string, err error) streamedTurn {
@@ -1533,7 +1533,7 @@ func (a *Agent) streamWithFrozen(ctx context.Context, turn int, sink event.Sink,
 			return collect(stored, chunk.Err)
 		}
 		// Cut off a degenerate generation loop before it burns the output budget.
-		if perseveration.observe(chunk.Text) {
+		if perseveration.forChunk(chunk.Type).observe(chunk.Text) {
 			return abortOnPerseveration(collect, finishReasoning)
 		}
 	}

@@ -295,3 +295,96 @@ func TestPerseverationStrikeResetsAfterSuccessfulResponse(t *testing.T) {
 		}
 	}
 }
+
+// indentedThinkingUnit is a 16-line unit whose per-line indent pushes it past the
+// old 256-byte maxPeriod — the shape that slipped through the guard in practice.
+func indentedThinkingUnit() string {
+	unit := []string{
+		"OK.", "Let me run.", "OK — issuing.", "Let me run.",
+		"OK.", "Let me run.", "OK — issuing.", "Let me run.",
+		"OK.", "Let me run.", "OK — issuing now.", "Let me run.",
+		"OK.", "Let me run.", "OK — issuing.", "Let me run.",
+	}
+	var b strings.Builder
+	for _, l := range unit {
+		b.WriteString("     " + l + "\n")
+	}
+	return b.String()
+}
+
+func TestPerseverationGuardCatchesUnitLargerThanOldMaxPeriod(t *testing.T) {
+	unit := indentedThinkingUnit()
+	if n := len(unit); n <= 256 {
+		t.Fatalf("unit = %d bytes, want > 256 to exercise the raised maxPeriod", n)
+	}
+	g := newPerseverationGuard()
+	fired := false
+	for i := 0; i < 12 && !fired; i++ {
+		fired = g.observe(unit)
+	}
+	if !fired {
+		t.Fatalf("guard never fired on a %d-byte repeated unit", len(unit))
+	}
+}
+
+func TestPerseverationGuardsRouteByChannel(t *testing.T) {
+	g := newPerseverationGuards()
+	cases := []struct {
+		t    provider.ChunkType
+		want *perseverationGuard
+	}{
+		{provider.ChunkReasoning, g.reasoning},
+		{provider.ChunkText, g.text},
+		{provider.ChunkToolCall, nil},
+		{provider.ChunkUsage, nil},
+		{provider.ChunkDone, nil},
+	}
+	for _, tc := range cases {
+		if got := g.forChunk(tc.t); got != tc.want {
+			t.Errorf("forChunk(%v) = %p, want %p", tc.t, got, tc.want)
+		}
+	}
+	if g.reasoning == g.text {
+		t.Fatal("reasoning and text must use distinct guard buffers")
+	}
+}
+
+func TestStreamAbortsOnReasoningLoop(t *testing.T) {
+	block := "Let me think.\n\nHmm.\n\nOK.\n\n"
+	var chunks []provider.Chunk
+	for i := 0; i < 40; i++ {
+		chunks = append(chunks, provider.Chunk{Type: provider.ChunkReasoning, Text: block})
+	}
+	chunks = append(chunks, provider.Chunk{Type: provider.ChunkDone})
+	prov := &mockProvider{name: "think-loop", chunks: chunks}
+	sink := event.FuncSink(func(event.Event) {})
+	a := New(prov, tool.NewRegistry(), NewSession(""), Options{ModelRef: "think-loop/model"}, sink)
+
+	st := a.stream(context.Background(), 1, sink)
+	if !st.perseverationAborted {
+		t.Fatalf("stream did not abort on a reasoning loop: err=%v", st.err)
+	}
+}
+
+// A thinking loop interleaved with distinct answer text must still abort: the
+// reasoning deltas are judged on their own buffer, so the answer text cannot
+// break their periodicity.
+func TestStreamAbortsOnReasoningLoopInterleavedWithAnswer(t *testing.T) {
+	block := "Let me think.\n\nHmm.\n\nOK.\n\n"
+	var chunks []provider.Chunk
+	for i := 0; i < 40; i++ {
+		chunks = append(chunks,
+			provider.Chunk{Type: provider.ChunkReasoning, Text: block},
+			provider.Chunk{Type: provider.ChunkText, Text: fmt.Sprintf("Distinct answer line %d.\n", i)},
+		)
+	}
+	chunks = append(chunks, provider.Chunk{Type: provider.ChunkDone})
+	prov := &mockProvider{name: "mixed-loop", chunks: chunks}
+	sink := event.FuncSink(func(event.Event) {})
+	a := New(prov, tool.NewRegistry(), NewSession(""), Options{ModelRef: "mixed-loop/model"}, sink)
+
+	st := a.stream(context.Background(), 1, sink)
+	if !st.perseverationAborted {
+		t.Fatalf("stream did not abort on an interleaved reasoning loop: err=%v", st.err)
+	}
+}

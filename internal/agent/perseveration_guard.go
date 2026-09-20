@@ -7,6 +7,7 @@ import (
 
 	"reasonix/internal/event"
 	"reasonix/internal/i18n"
+	"reasonix/internal/provider"
 )
 
 // abortOnPerseveration builds the terminal for a stream the guard cut short. It
@@ -32,6 +33,15 @@ func perseverationRetryMessage(attempt int) string {
 // defaultPerseverationRetries is the nudge-and-retry budget when the caller
 // does not set Options.MaxPerseverationRetries.
 const defaultPerseverationRetries = 1
+
+// Loop-unit detection bounds. A unit larger than maxPeriodBytes is invisible to
+// the periodicity scan, so it must comfortably exceed any plausible repeated
+// block — including an indented multi-line thinking loop, where per-line
+// whitespace alone can push a 16-line unit past 256 bytes.
+const (
+	maxPeriodBytes      = 1024
+	minRepeatsForWindow = 8
+)
 
 // resolvePerseverationRetries maps the optional option onto the effective retry
 // budget: nil keeps the default, and a negative value is clamped to 0 (no retry).
@@ -86,11 +96,38 @@ type perseverationGuard struct {
 
 func newPerseverationGuard() *perseverationGuard {
 	return &perseverationGuard{
-		window:     8192,
+		// window must hold at least minRepeats full maxPeriod blocks, else a
+		// unit near maxPeriod can never reach the repeat count; 2× leaves slack.
+		window:     minRepeatsForWindow * maxPeriodBytes * 2,
 		minPeriod:  4,
-		maxPeriod:  256,
-		minRepeats: 8,
+		maxPeriod:  maxPeriodBytes,
+		minRepeats: minRepeatsForWindow,
 		minSpan:    160,
+	}
+}
+
+// perseverationGuards holds one guard per prose channel. Reasoning and answer
+// deltas are judged on separate buffers so answer text interleaved between
+// thinking deltas cannot break their periodicity and mask a thinking loop.
+type perseverationGuards struct {
+	reasoning *perseverationGuard
+	text      *perseverationGuard
+}
+
+func newPerseverationGuards() perseverationGuards {
+	return perseverationGuards{reasoning: newPerseverationGuard(), text: newPerseverationGuard()}
+}
+
+// forChunk returns the guard watching chunk's prose channel, or nil for chunk
+// types that carry no prose (tool calls, usage, control).
+func (g perseverationGuards) forChunk(t provider.ChunkType) *perseverationGuard {
+	switch t {
+	case provider.ChunkReasoning:
+		return g.reasoning
+	case provider.ChunkText:
+		return g.text
+	default:
+		return nil
 	}
 }
 
