@@ -422,12 +422,14 @@ test("all desktop consumers verify the prepared build and reject a failed prepar
     assert.equal(condition(body, context), true);
     assert.equal(condition(body, { ...context, needs: { ...context.needs, "desktop-prepare": { result: "failure" } } }), false);
   }
-  for (const name of ["desktop-windows", "desktop-windows-package"]) {
-    const body = job(ci, name);
-    assert.match(body, /REASONIX_PACKAGE_REUSE_FRONTEND: "1"/);
-    assert.match(body, /REASONIX_FRONTEND_PNPM_VERSION="\$\(pnpm --version\)"\n\s+export REASONIX_FRONTEND_PNPM_VERSION/);
-    assert.match(body, /canary_artifact_name/);
-  }
+  const windows = job(ci, "desktop-windows");
+  assert.match(windows, /REASONIX_PACKAGE_REUSE_FRONTEND: "1"/);
+  assert.match(windows, /REASONIX_FRONTEND_PNPM_VERSION="\$\(pnpm --version\)"\n\s+export REASONIX_FRONTEND_PNPM_VERSION/);
+  assert.match(windows, /canary_artifact_name/);
+  const windowsPackage = job(ci, "desktop-windows-package");
+  assert.match(windowsPackage, /ref: ec82bb3251550b03b43b83418a716f73fe758ffd/);
+  assert.doesNotMatch(windowsPackage, /REASONIX_PACKAGE_REUSE_FRONTEND/);
+  assert.doesNotMatch(windowsPackage, /(?:stable|canary)_artifact_name/);
   assert.match(job(ci, "desktop-macos"), /REASONIX_FRONTEND_PNPM_VERSION="\$\(pnpm --version\)"\n\s+export REASONIX_FRONTEND_PNPM_VERSION/);
   const prepare = job(ci, "desktop-prepare");
   assert.match(prepare, /producer_attempt: \$\{\{ steps\.artifact-identity\.outputs\.attempt \}\}/);

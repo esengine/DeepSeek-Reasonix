@@ -1345,6 +1345,11 @@ jobs:
         working-directory: desktop
     steps:
       - uses: actions/checkout@v7
+        with:
+          # Build the requested main-v2 revision itself. The workflow is carried
+          # by this temporary PR, but its merge ref must not become the product
+          # identity embedded in the installer.
+          ref: ec82bb3251550b03b43b83418a716f73fe758ffd
 
       - uses: actions/setup-go@v7
         with:
@@ -1379,18 +1384,6 @@ jobs:
             }
           }
 
-      - uses: actions/download-artifact@v8
-        with:
-          name: ${{ needs.desktop-prepare.outputs.canary_artifact_name }}
-          path: desktop/frontend
-      - name: Verify canary frontend artifact
-        run: |
-          test -n "${{ needs.desktop-prepare.outputs.producer_attempt }}"
-          node frontend/scripts/artifact-identity.mjs verify \
-            --shell electron --channel canary \
-            --source-sha "$(git rev-parse HEAD)" --run-id "$GITHUB_RUN_ID" --attempt "${{ needs.desktop-prepare.outputs.producer_attempt }}" \
-            --pnpm-version "$(pnpm --version)"
-
       - name: Install NSIS
         run: pwsh -NoProfile -File ../scripts/install-nsis.ps1
 
@@ -1399,12 +1392,7 @@ jobs:
 
       - name: Build Windows installer and portable archive
         timeout-minutes: 20
-        env:
-          REASONIX_PACKAGE_REUSE_FRONTEND: "1"
-        run: |
-          REASONIX_FRONTEND_PNPM_VERSION="$(pnpm --version)"
-          export REASONIX_FRONTEND_PNPM_VERSION
-          ../scripts/desktop-build.sh windows/amd64 v1.38.10-3 stable
+        run: ../scripts/desktop-build.sh windows/amd64 v1.38.10-3 stable
 
       - name: Verify packaged Windows artifacts
         run: |
