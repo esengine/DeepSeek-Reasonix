@@ -34,14 +34,21 @@ func perseverationRetryMessage(attempt int) string {
 // does not set Options.MaxPerseverationRetries.
 const defaultPerseverationRetries = 1
 
-// Loop-unit detection bounds. A unit larger than maxPeriodBytes is invisible to
-// the periodicity scan, so it must comfortably exceed any plausible repeated
-// block — including an indented multi-line thinking loop, where per-line
-// whitespace alone can push a 16-line unit past 256 bytes.
+// Loop-unit detection bounds. These two plus loopRepeats fully determine
+// sensitivity: a unit larger than maxLoopPeriod is invisible to the periodicity
+// scan, and a run shorter than minLoopPeriod*loopRepeats can never clear the
+// repeat floor — so the smallest positive is 1 KiB of byte-identical repetition.
 const (
-	maxPeriodBytes      = 1024
-	minRepeatsForWindow = 8
+	minLoopPeriod = 128
+	maxLoopPeriod = 2048
+	loopRepeats   = 8
 )
+
+// scanIntervalBytes amortises the O(maxLoopPeriod) periodicity scan: observe
+// runs it at most once per this many appended bytes (trimming the tail on the
+// same cadence) instead of on every streamed delta. One minimum span, so the
+// first scan lands exactly when the smallest positive can first exist.
+const scanIntervalBytes = minLoopPeriod * loopRepeats
 
 // resolvePerseverationRetries maps the optional option onto the effective retry
 // budget: nil keeps the default, and a negative value is clamped to 0 (no retry).
@@ -80,29 +87,33 @@ func (a *Agent) handlePerseverationAbort(ctx context.Context) (cont bool, err er
 // loop looks healthy while it burns the entire output budget.
 //
 // The guard watches the rolling tail of one streamed channel and reports once
-// when a short block repeats enough times to be unmistakable. It matches only
-// byte-identical repeats: near-loops with per-iteration variation are left to
-// the provider's own finish_reason=repetition_truncation, which this keeps from
-// false-positiving on ordinary repeated structure (tables, separators, fixtures).
+// when a block repeats enough times to be unmistakable: byte-identical only, at
+// least minLoopPeriod*loopRepeats bytes of it (1 KiB with the current bounds),
+// with no block shorter than minLoopPeriod. Near-loops with per-iteration
+// variation are left to the provider's own finish_reason=repetition_truncation,
+// which keeps this from false-positiving on ordinary repeated structure
+// (tables, separators, fixtures).
 type perseverationGuard struct {
-	tail       []byte
-	window     int // bytes of history examined for periodicity
-	minPeriod  int // shortest block that can count as a loop unit
-	maxPeriod  int // longest block that can count as a loop unit
-	minRepeats int // identical repeats required before firing
-	minSpan    int // minimum total bytes covered by the repeats
-	fired      bool
+	tail         []byte
+	window       int // bytes of history examined for periodicity
+	scanInterval int // appended bytes between periodicity scans (amortisation)
+	sinceScan    int // appended bytes since the last scan
+	minPeriod    int // shortest block that can count as a loop unit
+	maxPeriod    int // longest block that can count as a loop unit
+	minRepeats   int // identical repeats required before firing
+	fired        bool
 }
 
 func newPerseverationGuard() *perseverationGuard {
 	return &perseverationGuard{
-		// window must hold at least minRepeats full maxPeriod blocks, else a
-		// unit near maxPeriod can never reach the repeat count; 2× leaves slack.
-		window:     minRepeatsForWindow * maxPeriodBytes * 2,
-		minPeriod:  4,
-		maxPeriod:  maxPeriodBytes,
-		minRepeats: minRepeatsForWindow,
-		minSpan:    160,
+		// Exactly loopRepeats full maxLoopPeriod blocks: the scan can only reach
+		// maxLoopPeriod once the tail is this long, so a smaller window would
+		// silently make the largest unit undetectable.
+		window:       maxLoopPeriod * loopRepeats,
+		scanInterval: scanIntervalBytes,
+		minPeriod:    minLoopPeriod,
+		maxPeriod:    maxLoopPeriod,
+		minRepeats:   loopRepeats,
 	}
 }
 
@@ -134,14 +145,23 @@ func (g perseverationGuards) forChunk(t provider.ChunkType) *perseverationGuard 
 // observe appends one streamed delta and reports whether the accumulated tail
 // is now a short block repeated enough times to be degenerate. It reports true
 // at most once, so a single abort decision is made per stream.
+//
+// The scan runs at most once per scanInterval appended bytes and the tail is
+// trimmed on the same cadence — letting it overshoot the window by one interval
+// so the O(window) copy is also paid per interval, not per delta.
 func (g *perseverationGuard) observe(delta string) bool {
 	if g == nil || g.fired || delta == "" {
 		return false
 	}
 	g.tail = append(g.tail, delta...)
-	if len(g.tail) > g.window {
+	if len(g.tail) > g.window+g.scanInterval {
 		g.tail = append(g.tail[:0], g.tail[len(g.tail)-g.window:]...)
 	}
+	g.sinceScan += len(delta)
+	if g.sinceScan < g.scanInterval {
+		return false
+	}
+	g.sinceScan = 0
 	if g.degenerate() {
 		g.fired = true
 		return true
@@ -150,15 +170,14 @@ func (g *perseverationGuard) observe(delta string) bool {
 }
 
 // degenerate reports whether the tail ends with the same block repeated at
-// least minRepeats times for some period in [minPeriod, maxPeriod]. The
-// smallest qualifying period wins, so a unit that is itself periodic is caught
-// at its fundamental period.
+// least minRepeats times for some period in [minPeriod, maxPeriod]. The smallest
+// qualifying period wins; a unit whose own fundamental period is below
+// minPeriod is still caught, at its smallest multiple that clears minPeriod.
 func (g *perseverationGuard) degenerate() bool {
 	n := len(g.tail)
 	limit := min(g.maxPeriod, n/g.minRepeats)
 	for period := g.minPeriod; period <= limit; period++ {
-		repeats := g.trailingRepeats(period)
-		if repeats < g.minRepeats || period*repeats < g.minSpan {
+		if g.trailingRepeats(period) < g.minRepeats {
 			continue
 		}
 		if meaningfulPerseveration(g.tail[n-period:]) {

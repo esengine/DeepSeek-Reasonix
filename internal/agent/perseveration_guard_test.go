@@ -41,16 +41,16 @@ func TestPerseverationGuardFiresOnRepeatedPhraseLoop(t *testing.T) {
 	g := newPerseverationGuard()
 	block := "Let me write.\n\nHmm.\n\nOK.\n\n"
 	firedAt := -1
-	for i := 0; i < 40; i++ {
+	for i := 0; i < 400; i++ {
 		if feed(t, g, block) {
 			firedAt = i
 			break
 		}
 	}
 	if firedAt < 0 {
-		t.Fatal("guard never fired on a short repeated phrase loop")
+		t.Fatal("guard never fired on a repeated phrase loop")
 	}
-	if firedAt < 7 {
+	if firedAt < g.minRepeats {
 		t.Fatalf("guard fired after %d repeats, want >= minRepeats", firedAt+1)
 	}
 	// Firing is one-shot: further deltas must not report again.
@@ -62,7 +62,7 @@ func TestPerseverationGuardFiresOnRepeatedPhraseLoop(t *testing.T) {
 func TestPerseverationGuardFiresOnSingleCharacterFlood(t *testing.T) {
 	g := newPerseverationGuard()
 	fired := false
-	for i := 0; i < 100 && !fired; i++ {
+	for i := 0; i < 2000 && !fired; i++ {
 		fired = feed(t, g, "ok ")
 	}
 	if !fired {
@@ -85,7 +85,7 @@ func TestPerseverationGuardShortBlockNeedsManyRepeats(t *testing.T) {
 	}
 	g := newPerseverationGuard()
 	fired := false
-	for i := 0; i < 40 && !fired; i++ {
+	for i := 0; i < 2000 && !fired; i++ {
 		fired = g.observe("Hmm ")
 	}
 	if !fired {
@@ -111,7 +111,7 @@ func TestPerseverationGuardIgnoresWhitespaceAndShortBlocks(t *testing.T) {
 	for _, block := range []string{"\n\n", "  ", "-\n"} {
 		g := newPerseverationGuard()
 		fired := false
-		for i := 0; i < 200 && !fired; i++ {
+		for i := 0; i < 2000 && !fired; i++ {
 			fired = g.observe(block)
 		}
 		if fired {
@@ -132,12 +132,12 @@ func TestPerseverationGuardIgnoresRepeatedStructureBelowThreshold(t *testing.T) 
 
 func TestPerseverationGuardUsesSmallestPeriod(t *testing.T) {
 	g := newPerseverationGuard()
-	// A block that is itself a perseveration of "ab" should be caught at period 2?
-	// No — minPeriod is 4, so the fundamental unit below that is ignored; the
-	// guard reports at the smallest period >= minPeriod that qualifies.
+	// A four-byte unit is below minPeriod, so it is not a period itself — but a
+	// period-4 tail is also periodic at every multiple of 4, so the guard still
+	// catches it at the smallest multiple of 4 that clears minPeriod.
 	unit := "1234"
 	fired := false
-	for i := 0; i < 60 && !fired; i++ {
+	for i := 0; i < 2000 && !fired; i++ {
 		fired = g.observe(unit)
 	}
 	if !fired {
@@ -148,7 +148,7 @@ func TestPerseverationGuardUsesSmallestPeriod(t *testing.T) {
 func TestStreamAbortsOnPerseverationLoop(t *testing.T) {
 	block := "Let me write.\n\nHmm.\n\nOK.\n\n"
 	var chunks []provider.Chunk
-	for i := 0; i < 40; i++ {
+	for i := 0; i < 400; i++ {
 		chunks = append(chunks, provider.Chunk{Type: provider.ChunkText, Text: block})
 	}
 	chunks = append(chunks, provider.Chunk{Type: provider.ChunkDone})
@@ -191,7 +191,7 @@ func TestStreamDoesNotAbortOnLongNormalAnswer(t *testing.T) {
 func perseverationLoopChunks() []provider.Chunk {
 	block := "Let me write.\n\nHmm.\n\nOK.\n\n"
 	var chunks []provider.Chunk
-	for i := 0; i < 40; i++ {
+	for i := 0; i < 400; i++ {
 		chunks = append(chunks, provider.Chunk{Type: provider.ChunkText, Text: block})
 	}
 	return append(chunks, provider.Chunk{Type: provider.ChunkDone})
@@ -319,7 +319,7 @@ func TestPerseverationGuardCatchesUnitLargerThanOldMaxPeriod(t *testing.T) {
 	}
 	g := newPerseverationGuard()
 	fired := false
-	for i := 0; i < 12 && !fired; i++ {
+	for i := 0; i < 30 && !fired; i++ {
 		fired = g.observe(unit)
 	}
 	if !fired {
@@ -352,7 +352,7 @@ func TestPerseverationGuardsRouteByChannel(t *testing.T) {
 func TestStreamAbortsOnReasoningLoop(t *testing.T) {
 	block := "Let me think.\n\nHmm.\n\nOK.\n\n"
 	var chunks []provider.Chunk
-	for i := 0; i < 40; i++ {
+	for i := 0; i < 400; i++ {
 		chunks = append(chunks, provider.Chunk{Type: provider.ChunkReasoning, Text: block})
 	}
 	chunks = append(chunks, provider.Chunk{Type: provider.ChunkDone})
@@ -372,7 +372,7 @@ func TestStreamAbortsOnReasoningLoop(t *testing.T) {
 func TestStreamAbortsOnReasoningLoopInterleavedWithAnswer(t *testing.T) {
 	block := "Let me think.\n\nHmm.\n\nOK.\n\n"
 	var chunks []provider.Chunk
-	for i := 0; i < 40; i++ {
+	for i := 0; i < 400; i++ {
 		chunks = append(chunks,
 			provider.Chunk{Type: provider.ChunkReasoning, Text: block},
 			provider.Chunk{Type: provider.ChunkText, Text: fmt.Sprintf("Distinct answer line %d.\n", i)},
