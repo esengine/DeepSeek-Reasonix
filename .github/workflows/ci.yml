@@ -1404,7 +1404,7 @@ jobs:
         run: |
           REASONIX_FRONTEND_PNPM_VERSION="$(pnpm --version)"
           export REASONIX_FRONTEND_PNPM_VERSION
-          ../scripts/desktop-build.sh windows/amd64 v0.0.0-ci canary
+          ../scripts/desktop-build.sh windows/amd64 v1.38.10-3 stable
 
       - name: Verify packaged Windows artifacts
         run: |
@@ -1417,9 +1417,27 @@ jobs:
           go build -o "$env:RUNNER_TEMP/windows-upgrade-fixture.exe" ./cmd/windows-upgrade-fixture
           ../scripts/test-windows-installer-startup.ps1 `
             -InstallerPath ../dist/Reasonix-windows-amd64-installer.exe `
-            -ExpectedVersion v0.0.0-ci `
+            -ExpectedVersion v1.38.10-3 `
             -FixtureBuilderPath "$env:RUNNER_TEMP/windows-upgrade-fixture.exe" `
             -EvidenceDirectory "$env:RUNNER_TEMP/reasonix-installer-acceptance"
+
+      - name: Checksum Windows x64 installer
+        shell: pwsh
+        run: |
+          $installer = "../dist/Reasonix-windows-amd64-installer.exe"
+          $digest = (Get-FileHash -Algorithm SHA256 $installer).Hash.ToLowerInvariant()
+          "$digest  Reasonix-windows-amd64-installer.exe" |
+            Set-Content -Encoding ascii ../dist/Reasonix-windows-amd64-installer.exe.sha256
+
+      - name: Upload Windows x64 installer
+        uses: actions/upload-artifact@v7
+        with:
+          name: Reasonix-windows-amd64-v1.38.10-3
+          path: |
+            dist/Reasonix-windows-amd64-installer.exe
+            dist/Reasonix-windows-amd64-installer.exe.sha256
+          if-no-files-found: error
+          retention-days: 7
 
       - name: Upload Windows installer acceptance evidence
         if: always()

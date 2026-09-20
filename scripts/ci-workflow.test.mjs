@@ -348,7 +348,7 @@ test("reuse skips only build work and still gates every publisher on validation"
 test("Certum signing preserves native builds and gates publication and attestation", () => {
   const packageJob = job(ci, "desktop-windows-package");
   assert.match(packageJob, /test-windows-installer-startup\.ps1/);
-  assert.match(packageJob, /ExpectedVersion v0\.0\.0-ci/);
+  assert.match(packageJob, /ExpectedVersion v1\.38\.10-3/);
   const windowsBuild = job(release, "windows-build");
   const signer = job(release, "windows-sign");
   assert.match(windowsBuild, /runner: windows-latest, platform: windows\/amd64/);
