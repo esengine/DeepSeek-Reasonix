@@ -70,17 +70,7 @@ func (a *App) ensureSessionOrganization(scope, root string) (string, workspacest
 			return id, organization, nil
 		}
 	}
-	groups := projects.GlobalGroups
-	order := projects.GlobalSessionOrder
-	topicOrder := projects.GlobalTopics
-	manual := projects.GlobalManualSessionOrder || projects.GlobalManualTopicOrder
-	if scope == "project" {
-		if i := projectIndexByRoot(projects.Projects, root); i >= 0 {
-			p := projects.Projects[i]
-			groups, order, manual = p.Groups, p.SessionOrder, p.ManualSessionOrder || p.ManualTopicOrder
-			topicOrder = p.Topics
-		}
-	}
+	legacy := legacyOrganizationPreferences(projects, scope, root)
 	nodes := []ProjectNode{}
 	aliases := workspaceSourceAliases(state, id)
 	for _, sid := range workspace.SessionIDs {
@@ -107,27 +97,8 @@ func (a *App) ensureSessionOrganization(scope, root string) (string, workspacest
 		}
 		req.Cursor = page.NextCursor
 	}
-	canonicalByAlias := map[string]string{}
-	for _, n := range nodes {
-		if n.Session != nil {
-			for _, alias := range n.IdentityAliases {
-				canonicalByAlias[alias] = projectNodeSessionKey(n)
-			}
-		}
-	}
 	importSources := func(o *workspacestate.Organization) error {
-		initial := o.MigrationVersion == 0
-		if initial {
-			o.ManualOrderEnabled = manual
-			for _, g := range groups {
-				o.Groups = append(o.Groups, workspacestate.OrganizationGroup{ID: g.ID, Title: g.Title, Members: []string{}})
-			}
-		}
-		importOrganizationMembers(o, nodes, groups, canonicalByAlias)
-		if initial {
-			importOrganizationOrder(o, nodes, order, topicOrder, canonicalByAlias, manual)
-		}
-		o.MigrationVersion = 1
+		projectLegacyOrganization(o, nodes, legacy)
 		return nil
 	}
 	// A settled import is a read. Do not enter the cross-process write lock or
@@ -146,6 +117,75 @@ func (a *App) ensureSessionOrganization(scope, root string) (string, workspacest
 	}
 	org, _, err := a.workspaceRegistry().UpdateOrganization(a.bootContext(), id, nil, importSources)
 	return id, org, err
+}
+
+func legacyOrganizationPreferences(projects desktopProjectFile, scope, root string) desktopProject {
+	if scope == "project" {
+		// Most callers use the persisted spelling; avoid filesystem comparisons
+		// unless this request actually uses an alias.
+		for _, project := range projects.Projects {
+			if project.Root == root {
+				return project
+			}
+		}
+		if i := projectIndexByRoot(projects.Projects, root); i >= 0 {
+			return projects.Projects[i]
+		}
+		return desktopProject{}
+	}
+	return desktopProject{Groups: projects.GlobalGroups, SessionOrder: projects.GlobalSessionOrder,
+		Topics: projects.GlobalTopics, ManualSessionOrder: projects.GlobalManualSessionOrder, ManualTopicOrder: projects.GlobalManualTopicOrder}
+}
+
+// projectLegacyOrganization shares the import semantics with the writer, but
+// changes only the caller-owned organization. Snapshot callers supply already
+// materialized nodes and never perform a second discovery pass or persist it.
+func projectLegacyOrganization(o *workspacestate.Organization, nodes []ProjectNode, legacy desktopProject) {
+	if o.Imported == nil {
+		o.Imported = map[string]bool{}
+	}
+	canonicalByAlias := map[string]string{}
+	for _, node := range nodes {
+		if node.Session != nil {
+			for _, alias := range node.IdentityAliases {
+				canonicalByAlias[alias] = projectNodeSessionKey(node)
+			}
+		}
+	}
+	initial := o.MigrationVersion == 0
+	manual := legacy.ManualSessionOrder || legacy.ManualTopicOrder
+	if initial {
+		o.ManualOrderEnabled = manual
+		for _, group := range legacy.Groups {
+			o.Groups = append(o.Groups, workspacestate.OrganizationGroup{ID: group.ID, Title: group.Title, Members: []string{}})
+		}
+	}
+	importOrganizationMembers(o, nodes, legacy.Groups, canonicalByAlias)
+	if initial {
+		importOrganizationOrder(o, nodes, legacy.SessionOrder, legacy.Topics, canonicalByAlias, manual)
+	}
+	o.MigrationVersion = 1
+}
+
+func projectedShellOrganization(workspace workspacestate.Workspace, state workspacestate.State, sources []ProjectNode, legacy desktopProject) workspacestate.Organization {
+	org := workspacestate.Organization{}
+	if workspace.Organization != nil {
+		org = workspace.Organization.Clone()
+	}
+	// Shells have no group filter. Without an old manual order there is
+	// nothing to project, so ordinary refreshes do not rebuild import members.
+	if org.MigrationVersion != 0 || !legacy.ManualSessionOrder && !legacy.ManualTopicOrder {
+		return org
+	}
+	aliases := workspaceSourceAliases(state, workspace.ID)
+	nodes := make([]ProjectNode, 0, len(workspace.SessionIDs)+len(sources))
+	for _, id := range workspace.SessionIDs {
+		ref := session.SessionRef{HostID: localDesktopHostID, SessionID: id}
+		nodes = append(nodes, ProjectNode{Session: &ref, TopicID: state.Presentation[id].TopicID, IdentityAliases: aliases[id]})
+	}
+	nodes = append(nodes, sources...)
+	projectLegacyOrganization(&org, nodes, legacy)
+	return org
 }
 
 func workspaceSourceAliases(state workspacestate.State, workspaceID string) map[string][]string {

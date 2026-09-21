@@ -39,11 +39,11 @@ type desktopProjectOrganizationFileData struct {
 }
 
 func projectsFileHasOrganization(f desktopProjectFile) bool {
-	if f.GlobalManualTopicOrder || len(f.GlobalGroups) > 0 || f.GlobalGroupsRevision > 0 {
+	if f.GlobalManualTopicOrder || f.GlobalManualSessionOrder || len(f.GlobalSessionOrder) > 0 || len(f.GlobalGroups) > 0 || f.GlobalGroupsRevision > 0 {
 		return true
 	}
 	for _, project := range f.Projects {
-		if project.ManualTopicOrder || len(project.Groups) > 0 || project.GroupsRevision > 0 {
+		if project.ManualTopicOrder || project.ManualSessionOrder || len(project.SessionOrder) > 0 || len(project.Groups) > 0 || project.GroupsRevision > 0 {
 			return true
 		}
 	}

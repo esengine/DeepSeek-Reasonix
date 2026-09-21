@@ -5155,14 +5155,16 @@ func projectRootInList(roots []string, root string) bool {
 
 func normalizeProjectsFile(f desktopProjectFile) desktopProjectFile {
 	out := desktopProjectFile{
-		GlobalTitle:            strings.TrimSpace(f.GlobalTitle),
-		GlobalColor:            normalizeProjectColor(f.GlobalColor),
-		GlobalTopics:           uniqueStrings(f.GlobalTopics),
-		GlobalPinnedTopics:     uniqueStrings(f.GlobalPinnedTopics),
-		GlobalManualTopicOrder: f.GlobalManualTopicOrder,
-		GlobalGroups:           normalizeGroups(f.GlobalGroups),
-		GlobalGroupsRevision:   f.GlobalGroupsRevision,
-		DeletedTopics:          uniqueStrings(f.DeletedTopics),
+		GlobalTitle:              strings.TrimSpace(f.GlobalTitle),
+		GlobalColor:              normalizeProjectColor(f.GlobalColor),
+		GlobalTopics:             uniqueStrings(f.GlobalTopics),
+		GlobalPinnedTopics:       uniqueStrings(f.GlobalPinnedTopics),
+		GlobalManualTopicOrder:   f.GlobalManualTopicOrder,
+		GlobalManualSessionOrder: f.GlobalManualSessionOrder,
+		GlobalSessionOrder:       uniqueStrings(f.GlobalSessionOrder),
+		GlobalGroups:             normalizeGroups(f.GlobalGroups),
+		GlobalGroupsRevision:     f.GlobalGroupsRevision,
+		DeletedTopics:            uniqueStrings(f.DeletedTopics),
 	}
 	for _, p := range f.Projects {
 		root := normalizeProjectRoot(p.Root)

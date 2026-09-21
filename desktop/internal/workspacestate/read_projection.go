@@ -19,11 +19,38 @@ type WorkspaceIndex struct {
 	exact    map[string]string
 	physical map[string]string
 	resolved map[string]string
+	paths    map[string]workspacePathResult
+}
+
+type workspacePathResult struct {
+	key string
+	err error
+}
+
+func (i *WorkspaceIndex) pathKey(root string) (string, error) {
+	root = strings.TrimSpace(root)
+	if result, ok := i.paths[root]; ok {
+		return result.key, result.err
+	}
+	identity, err := pathidentity.Resolve(root, pathidentity.Options{FollowLeaf: true})
+	i.paths[root] = workspacePathResult{identity.Key, err}
+	return identity.Key, err
+}
+
+// SameRoot compares physical roots even before either has a registry owner.
+// Unknown owners must not compare equal just because both IDs are empty.
+func (i *WorkspaceIndex) SameRoot(a, b string) bool {
+	left, err := i.pathKey(a)
+	if err != nil || left == "" {
+		return false
+	}
+	right, err := i.pathKey(b)
+	return err == nil && left == right
 }
 
 func NewWorkspaceIndex(state State) *WorkspaceIndex {
 	index := &WorkspaceIndex{
-		exact: map[string]string{}, physical: map[string]string{}, resolved: map[string]string{},
+		exact: map[string]string{}, physical: map[string]string{}, resolved: map[string]string{}, paths: map[string]workspacePathResult{},
 	}
 	groups := map[string][]string{}
 	keys := map[string]string{}
@@ -32,12 +59,12 @@ func NewWorkspaceIndex(state State) *WorkspaceIndex {
 		if root == "" {
 			continue
 		}
-		identity, err := pathidentity.Resolve(root, pathidentity.Options{FollowLeaf: true})
-		if err != nil || identity.Key == "" {
+		key, err := index.pathKey(root)
+		if err != nil || key == "" {
 			continue
 		}
-		groups[identity.Key] = append(groups[identity.Key], id)
-		keys[id] = identity.Key
+		groups[key] = append(groups[key], id)
+		keys[id] = key
 	}
 	for key, ids := range groups {
 		slices.Sort(ids)
@@ -66,11 +93,11 @@ func (i *WorkspaceIndex) Resolve(root string) (string, bool, error) {
 	if id, ok := i.resolved[clean]; ok {
 		return id, id != "", nil
 	}
-	identity, err := pathidentity.Resolve(root, pathidentity.Options{FollowLeaf: true})
+	key, err := i.pathKey(root)
 	if err != nil {
 		return "", false, err
 	}
-	id := i.physical[identity.Key]
+	id := i.physical[key]
 	i.resolved[clean] = id
 	return id, id != "", nil
 }

@@ -157,11 +157,10 @@ func readHistoricalCanonicalCatalog(ctx context.Context, sources map[string]hist
 
 func (a *App) historicalCanonicalTopics(scope, root string, state workspacestate.State) []ProjectNode {
 	index := workspacestate.NewWorkspaceIndex(state)
-	workspaceID, _, _ := index.Resolve(root)
-	return a.historicalCanonicalTopicsFromProjection(scope, root, state, index, workspaceID)
+	return a.historicalCanonicalTopicsFromProjection(scope, root, state, index)
 }
 
-func (a *App) historicalCanonicalTopicsFromProjection(scope, root string, state workspacestate.State, index *workspacestate.WorkspaceIndex, workspaceID string) []ProjectNode {
+func (a *App) historicalCanonicalTopicsFromProjection(scope, root string, state workspacestate.State, index *workspacestate.WorkspaceIndex) []ProjectNode {
 	a.requestHistoricalCatalog()
 	c := &a.historicalImports
 	c.mu.Lock()
@@ -171,11 +170,8 @@ func (a *App) historicalCanonicalTopicsFromProjection(scope, root string, state 
 		if entry.scope != scope {
 			continue
 		}
-		if scope == "project" {
-			owner, found, err := index.Resolve(entry.node.Root)
-			if err != nil || !found || owner != workspaceID {
-				continue
-			}
+		if scope == "project" && !index.SameRoot(entry.node.Root, root) {
+			continue
 		}
 		node := entry.node
 		if _, adopted := historicalMappingForSource(state, node.Source.SourceKey); adopted {
@@ -207,7 +203,7 @@ func applyHistoricalPresentations(nodes []ProjectNode, saved historicalImportQue
 
 // A shell-only read must not create workspaces or migrate organization state.
 // Sources without canonical members still need their persisted pin overlays.
-func (a *App) historicalPinnedShells(req ProjectTopicPageRequest, state workspacestate.State) ([]ProjectNode, error) {
+func (a *App) historicalPinnedShellsFromProjection(req ProjectTopicPageRequest, state workspacestate.State, index *workspacestate.WorkspaceIndex, legacy desktopProject) ([]ProjectNode, error) {
 	adopted := map[string]bool{}
 	for _, mapping := range state.SourceMappings {
 		adopted["source\x00local\x00"+mapping.SourceKey] = true
@@ -219,16 +215,18 @@ func (a *App) historicalPinnedShells(req ProjectTopicPageRequest, state workspac
 	if err != nil {
 		return nil, err
 	}
-	nodes := append(page.Items, a.historicalCanonicalTopics(req.Scope, req.WorkspaceRoot, state)...)
+	nodes := append(page.Items, a.historicalCanonicalTopicsFromProjection(req.Scope, req.WorkspaceRoot, state, index)...)
 	if saved, err := readHistoricalSidecar(); err == nil {
 		applyHistoricalPresentations(nodes, saved)
 	}
-	pins := []ProjectNode{}
-	for _, node := range nodes {
-		if node.Pinned {
-			pins = append(pins, node)
-		}
+	workspaceID, _, _ := index.Resolve(req.WorkspaceRoot)
+	if req.Scope != "project" {
+		workspaceID = workspacestate.GlobalWorkspaceID
 	}
-	sort.SliceStable(pins, func(i, j int) bool { return projectTopicLess(pins[i], pins[j], req.SortMode, false) })
+	workspace := state.Workspaces[workspaceID]
+	org := projectedShellOrganization(workspace, state, nodes, legacy)
+	req.pinnedOnly = true
+	pins := filterWorkspaceSessionNodes(req, org, state, workspaceID, nodes)
+	sort.SliceStable(pins, func(i, j int) bool { return projectTopicLess(pins[i], pins[j], req.SortMode, org.ManualOrderEnabled) })
 	return pins, nil
 }

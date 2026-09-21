@@ -28,13 +28,13 @@ func (a *App) unifiedProjectTopics(req ProjectTopicPageRequest) (ProjectTopicPag
 	if err != nil {
 		return ProjectTopicPage{Items: []ProjectNode{}}, err
 	}
-	return a.projectTopicsFromProjection(req, state, workspacestate.NewWorkspaceIndex(state), workspaceID, org, true)
+	return a.projectTopicsFromProjection(req, state, workspacestate.NewWorkspaceIndex(state), workspaceID, org, nil)
 }
 
 // projectTopicsFromProjection materializes one workspace from a caller-owned
 // registry snapshot. Project-tree reads use it without organization migration
 // or repeated registry loads, so building sidebar shells remains read-only.
-func (a *App) projectTopicsFromProjection(req ProjectTopicPageRequest, state workspacestate.State, workspaceIndex *workspacestate.WorkspaceIndex, workspaceID string, org workspacestate.Organization, verify bool) (ProjectTopicPage, error) {
+func (a *App) projectTopicsFromProjection(req ProjectTopicPageRequest, state workspacestate.State, workspaceIndex *workspacestate.WorkspaceIndex, workspaceID string, org workspacestate.Organization, shellPreferences *desktopProject) (ProjectTopicPage, error) {
 	catalogRevision := a.currentSessionCatalogStatus().Revision
 	workspace := state.Workspaces[workspaceID]
 	reader := a.desktopSessionService("").Query()
@@ -82,9 +82,12 @@ func (a *App) projectTopicsFromProjection(req ProjectTopicPageRequest, state wor
 	if err != nil {
 		return legacy, err
 	}
-	sources := append(legacy.Items, a.historicalCanonicalTopicsFromProjection(req.Scope, req.WorkspaceRoot, state, workspaceIndex, workspaceID)...)
+	sources := append(legacy.Items, a.historicalCanonicalTopicsFromProjection(req.Scope, req.WorkspaceRoot, state, workspaceIndex)...)
 	if saved, err := readHistoricalSidecar(); err == nil {
 		applyHistoricalPresentations(sources, saved)
+	}
+	if shellPreferences != nil {
+		org = projectedShellOrganization(workspace, state, sources, *shellPreferences)
 	}
 	filtered := a.indexedWorkspaceTopics(req, state, workspace, org, infos, sources)
 	// Bind to the exact materialized order and metadata, plus owner revisions.
@@ -106,7 +109,7 @@ func (a *App) projectTopicsFromProjection(req ProjectTopicPageRequest, state wor
 			return ProjectTopicPage{Items: []ProjectNode{}}, newSessionOperationError("stale_cursor", "The session list changed. Reload it.")
 		}
 	}
-	if verify {
+	if shellPreferences == nil {
 		after, err := a.workspaceRegistry().LoadProjection(a.bootContext())
 		if err != nil {
 			return ProjectTopicPage{Items: []ProjectNode{}}, err
@@ -203,6 +206,7 @@ func (a *App) mergeCanonicalWorkspaceShells(projects []ProjectNode) []ProjectNod
 }
 
 func (a *App) mergeCanonicalWorkspaceShellsFromProjection(projects []ProjectNode, state workspacestate.State) []ProjectNode {
+	preferences := loadProjectsFile()
 	workspaceIndex := workspacestate.NewWorkspaceIndex(state)
 	owner := func(scope, root string) (string, bool) {
 		if scope != "project" {
@@ -259,8 +263,9 @@ func (a *App) mergeCanonicalWorkspaceShellsFromProjection(projects []ProjectNode
 		req := ProjectTopicPageRequest{Scope: scope, WorkspaceRoot: root, Limit: 200, pinnedOnly: true}
 		workspaceID, found := owner(scope, root)
 		workspace := state.Workspaces[workspaceID]
+		legacy := legacyOrganizationPreferences(preferences, scope, root)
 		if !found || len(workspace.SessionIDs) == 0 {
-			pins, err := a.historicalPinnedShells(req, state)
+			pins, err := a.historicalPinnedShellsFromProjection(req, state, workspaceIndex, legacy)
 			if err != nil {
 				project.Health = "metadata_failed"
 			} else {
@@ -268,13 +273,9 @@ func (a *App) mergeCanonicalWorkspaceShellsFromProjection(projects []ProjectNode
 			}
 			continue
 		}
-		organization := workspacestate.Organization{}
-		if workspace.Organization != nil {
-			organization = workspace.Organization.Clone()
-		}
 		pins := []ProjectNode{}
 		for {
-			page, err := a.projectTopicsFromProjection(req, state, workspaceIndex, workspaceID, organization, false)
+			page, err := a.projectTopicsFromProjection(req, state, workspaceIndex, workspaceID, workspacestate.Organization{}, &legacy)
 			if err != nil {
 				project.Health = "metadata_failed"
 				break
