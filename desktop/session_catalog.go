@@ -621,11 +621,15 @@ func (a *App) GetProjectTreeSnapshot() ProjectTreeSnapshot {
 	if remoteNodes, err := a.remoteProjectNodes(); err == nil {
 		projects = append(projects, remoteNodes...)
 	}
-	projects = a.mergeCanonicalWorkspaceShells(projects)
+	registryGeneration := uint64(0)
+	if state, err := a.workspaceRegistry().LoadProjection(a.bootContext()); err == nil {
+		registryGeneration = state.Generation
+		projects = a.mergeCanonicalWorkspaceShellsFromProjection(projects, state)
+	}
 	projects = applyPinnedProjectOrder(applyProjectTreeOrder(projects, f.SidebarOrder), f.PinnedProjects)
 	status := a.currentSessionCatalogStatus()
 	return ProjectTreeSnapshot{
-		Revision: a.unifiedProjectRevision(status.Revision), Projects: projects, Catalog: status,
+		Revision: status.Revision + registryGeneration, Projects: projects, Catalog: status,
 		Indexed: status.Indexed, Total: status.Total,
 		IndexingDone: a.catalogIndexingDone(status),
 	}

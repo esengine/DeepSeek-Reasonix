@@ -156,14 +156,26 @@ func readHistoricalCanonicalCatalog(ctx context.Context, sources map[string]hist
 }
 
 func (a *App) historicalCanonicalTopics(scope, root string, state workspacestate.State) []ProjectNode {
+	index := workspacestate.NewWorkspaceIndex(state)
+	workspaceID, _, _ := index.Resolve(root)
+	return a.historicalCanonicalTopicsFromProjection(scope, root, state, index, workspaceID)
+}
+
+func (a *App) historicalCanonicalTopicsFromProjection(scope, root string, state workspacestate.State, index *workspacestate.WorkspaceIndex, workspaceID string) []ProjectNode {
 	a.requestHistoricalCatalog()
 	c := &a.historicalImports
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	rows := []ProjectNode{}
 	for _, entry := range c.catalog {
-		if entry.scope != scope || scope == "project" && !sameDesktopPath(entry.node.Root, root) {
+		if entry.scope != scope {
 			continue
+		}
+		if scope == "project" {
+			owner, found, err := index.Resolve(entry.node.Root)
+			if err != nil || !found || owner != workspaceID {
+				continue
+			}
 		}
 		node := entry.node
 		if _, adopted := historicalMappingForSource(state, node.Source.SourceKey); adopted {

@@ -28,6 +28,13 @@ func (a *App) unifiedProjectTopics(req ProjectTopicPageRequest) (ProjectTopicPag
 	if err != nil {
 		return ProjectTopicPage{Items: []ProjectNode{}}, err
 	}
+	return a.projectTopicsFromProjection(req, state, workspacestate.NewWorkspaceIndex(state), workspaceID, org, true)
+}
+
+// projectTopicsFromProjection materializes one workspace from a caller-owned
+// registry snapshot. Project-tree reads use it without organization migration
+// or repeated registry loads, so building sidebar shells remains read-only.
+func (a *App) projectTopicsFromProjection(req ProjectTopicPageRequest, state workspacestate.State, workspaceIndex *workspacestate.WorkspaceIndex, workspaceID string, org workspacestate.Organization, verify bool) (ProjectTopicPage, error) {
 	catalogRevision := a.currentSessionCatalogStatus().Revision
 	workspace := state.Workspaces[workspaceID]
 	reader := a.desktopSessionService("").Query()
@@ -75,7 +82,7 @@ func (a *App) unifiedProjectTopics(req ProjectTopicPageRequest) (ProjectTopicPag
 	if err != nil {
 		return legacy, err
 	}
-	sources := append(legacy.Items, a.historicalCanonicalTopics(scope, root, state)...)
+	sources := append(legacy.Items, a.historicalCanonicalTopicsFromProjection(req.Scope, req.WorkspaceRoot, state, workspaceIndex, workspaceID)...)
 	if saved, err := readHistoricalSidecar(); err == nil {
 		applyHistoricalPresentations(sources, saved)
 	}
@@ -99,12 +106,14 @@ func (a *App) unifiedProjectTopics(req ProjectTopicPageRequest) (ProjectTopicPag
 			return ProjectTopicPage{Items: []ProjectNode{}}, newSessionOperationError("stale_cursor", "The session list changed. Reload it.")
 		}
 	}
-	after, err := a.workspaceRegistry().LoadProjection(a.bootContext())
-	if err != nil {
-		return ProjectTopicPage{Items: []ProjectNode{}}, err
-	}
-	if after.Generation != state.Generation || a.currentSessionCatalogStatus().Revision != catalogRevision || !workspaceSessionInfoUnchanged(a.bootContext(), reader, workspace.SessionIDs, infos) {
-		return ProjectTopicPage{Items: []ProjectNode{}}, newSessionOperationError("stale_cursor", "The session list changed. Reload it.")
+	if verify {
+		after, err := a.workspaceRegistry().LoadProjection(a.bootContext())
+		if err != nil {
+			return ProjectTopicPage{Items: []ProjectNode{}}, err
+		}
+		if after.Generation != state.Generation || a.currentSessionCatalogStatus().Revision != catalogRevision || !workspaceSessionInfoUnchanged(a.bootContext(), reader, workspace.SessionIDs, infos) {
+			return ProjectTopicPage{Items: []ProjectNode{}}, newSessionOperationError("stale_cursor", "The session list changed. Reload it.")
+		}
 	}
 	limit := req.Limit
 	if limit <= 0 {
@@ -190,6 +199,19 @@ func (a *App) mergeCanonicalWorkspaceShells(projects []ProjectNode) []ProjectNod
 	if err != nil {
 		return projects
 	}
+	return a.mergeCanonicalWorkspaceShellsFromProjection(projects, state)
+}
+
+func (a *App) mergeCanonicalWorkspaceShellsFromProjection(projects []ProjectNode, state workspacestate.State) []ProjectNode {
+	workspaceIndex := workspacestate.NewWorkspaceIndex(state)
+	owner := func(scope, root string) (string, bool) {
+		if scope != "project" {
+			_, found := state.Workspaces[workspacestate.GlobalWorkspaceID]
+			return workspacestate.GlobalWorkspaceID, found
+		}
+		id, found, err := workspaceIndex.Resolve(root)
+		return id, found && err == nil
+	}
 	present := map[string]bool{}
 	visible := make([]ProjectNode, 0, len(projects))
 	for _, project := range projects {
@@ -201,11 +223,13 @@ func (a *App) mergeCanonicalWorkspaceShells(projects []ProjectNode) []ProjectNod
 		if project.Kind == "global_folder" {
 			scope = "global"
 		}
-		id := desktopWorkspaceOwnerID(state, scope, project.Root)
-		if workspace, ok := state.Workspaces[id]; ok && !workspace.Visible {
+		id, found := owner(scope, project.Root)
+		if workspace, ok := state.Workspaces[id]; found && ok && !workspace.Visible {
 			continue
 		}
-		present[id] = true
+		if found {
+			present[id] = true
+		}
 		visible = append(visible, project)
 	}
 	projects = visible
@@ -233,8 +257,9 @@ func (a *App) mergeCanonicalWorkspaceShells(projects []ProjectNode) []ProjectNod
 			scope, root = "global", ""
 		}
 		req := ProjectTopicPageRequest{Scope: scope, WorkspaceRoot: root, Limit: 200, pinnedOnly: true}
-		workspace := state.Workspaces[desktopWorkspaceOwnerID(state, scope, root)]
-		if len(workspace.SessionIDs) == 0 {
+		workspaceID, found := owner(scope, root)
+		workspace := state.Workspaces[workspaceID]
+		if !found || len(workspace.SessionIDs) == 0 {
 			pins, err := a.historicalPinnedShells(req, state)
 			if err != nil {
 				project.Health = "metadata_failed"
@@ -243,9 +268,13 @@ func (a *App) mergeCanonicalWorkspaceShells(projects []ProjectNode) []ProjectNod
 			}
 			continue
 		}
+		organization := workspacestate.Organization{}
+		if workspace.Organization != nil {
+			organization = workspace.Organization.Clone()
+		}
 		pins := []ProjectNode{}
 		for {
-			page, err := a.unifiedProjectTopics(req)
+			page, err := a.projectTopicsFromProjection(req, state, workspaceIndex, workspaceID, organization, false)
 			if err != nil {
 				project.Health = "metadata_failed"
 				break

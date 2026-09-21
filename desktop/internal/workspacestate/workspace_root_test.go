@@ -75,6 +75,12 @@ func TestEnsureWorkspaceResolvedRepairsAmbiguousLegacyOwners(t *testing.T) {
 	if id, found, err := ResolveWorkspaceID(state, alias); err != nil || !found || id != "old-a" {
 		t.Fatalf("read-only resolution = %q (found=%v): %v", id, found, err)
 	}
+	index := NewWorkspaceIndex(state)
+	for _, candidate := range []string{root, alias} {
+		if id, found, err := index.Resolve(candidate); err != nil || !found || id != "old-a" {
+			t.Fatalf("indexed resolution for %q = %q (found=%v): %v", candidate, id, found, err)
+		}
+	}
 	id, err := store.EnsureWorkspaceResolved(t.Context(), Workspace{ID: "candidate", Root: root})
 	if err != nil || id != "old-a" {
 		t.Fatalf("resolved id = %q, err = %v", id, err)

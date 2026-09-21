@@ -1,12 +1,84 @@
 package main
 
 import (
+	"bytes"
+	"fmt"
+	"os"
+	"path/filepath"
 	"testing"
 	"time"
 
+	"reasonix/desktop/internal/workspacestate"
 	"reasonix/internal/identitylock"
 	"reasonix/internal/sessioncatalog"
 )
+
+func TestProjectTreeSnapshotIsReadOnlyAcrossManyUnmigratedWorkspaces(t *testing.T) {
+	isolateDesktopUserDirs(t)
+	base := t.TempDir()
+	app := NewApp()
+	t.Cleanup(app.closeSessionServices)
+	app.ctx = t.Context()
+	app.desktopSessions.root = filepath.Join(base, "by-id")
+	app.desktopSessions.workspaceState = workspacestate.NewStore(filepath.Join(base, "workspace-state.json"))
+
+	pinned := true
+	for i := range 8 {
+		root := filepath.Join(base, fmt.Sprintf("workspace-%02d", i))
+		if err := os.MkdirAll(root, 0o700); err != nil {
+			t.Fatal(err)
+		}
+		if err := addProject(root, fmt.Sprintf("Workspace %02d", i)); err != nil {
+			t.Fatal(err)
+		}
+		workspaceID, err := app.ensureDesktopWorkspace(t.Context(), "project", root)
+		if err != nil {
+			t.Fatal(err)
+		}
+		sessionID := fmt.Sprintf("session-%02d", i)
+		if err := app.workspaceRegistry().AttachSession(t.Context(), "", workspaceID, sessionID, ""); err != nil {
+			t.Fatal(err)
+		}
+		if err := app.workspaceRegistry().EnsureSessionTopic(t.Context(), sessionID, "topic-"+sessionID, sessionID); err != nil {
+			t.Fatal(err)
+		}
+		if err := app.workspaceRegistry().UpdatePresentation(t.Context(), []string{sessionID}, nil, &pinned); err != nil {
+			t.Fatal(err)
+		}
+	}
+	state, err := app.workspaceRegistry().Load(t.Context())
+	if err != nil {
+		t.Fatal(err)
+	}
+	for id, workspace := range state.Workspaces {
+		if workspace.Organization != nil {
+			t.Fatalf("fixture workspace %q was already migrated", id)
+		}
+	}
+	before, err := os.ReadFile(app.workspaceRegistry().Path())
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	snapshot := app.GetProjectTreeSnapshot()
+	if len(snapshot.Projects) < 8 {
+		t.Fatalf("snapshot projects=%d, want at least 8", len(snapshot.Projects))
+	}
+	pinnedSessions := 0
+	for _, project := range snapshot.Projects {
+		pinnedSessions += len(project.Children)
+	}
+	if pinnedSessions != 8 {
+		t.Fatalf("snapshot pinned sessions=%d, want 8", pinnedSessions)
+	}
+	after, err := os.ReadFile(app.workspaceRegistry().Path())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !bytes.Equal(before, after) {
+		t.Fatal("project-tree read modified the workspace registry")
+	}
+}
 
 func TestSettledOrganizationReadDoesNotAcquireWriterLock(t *testing.T) {
 	app, root, _ := canonicalOrganizationFixture(t, "a", "b")
