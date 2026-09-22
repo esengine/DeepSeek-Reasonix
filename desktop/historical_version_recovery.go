@@ -25,7 +25,7 @@ func (a *App) resumeConflictingHistoricalVersion(ctx context.Context, state work
 			continue
 		}
 		if candidate != nil {
-			return SessionRestoreResult{}, true, workspacestate.ErrMutationConflict
+			return SessionRestoreResult{}, false, nil
 		}
 		copy := op
 		candidate = &copy
@@ -34,7 +34,7 @@ func (a *App) resumeConflictingHistoricalVersion(ctx context.Context, state work
 		return SessionRestoreResult{}, false, nil
 	}
 	if len(candidate.SessionIDs) != 1 {
-		return SessionRestoreResult{}, true, workspacestate.ErrMutationConflict
+		return SessionRestoreResult{}, false, nil
 	}
 	releaseMutation, ok := a.tryLockRuntimeMutation("recover historical version")
 	if !ok {
