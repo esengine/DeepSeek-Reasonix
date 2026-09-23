@@ -32,3 +32,13 @@ jobs:
         run: node scripts/inspect-cloudflare-download-access.mjs
       - name: Probe the shipped updater HTTP client
         run: go run scripts/inspect-cloudflare-download-access.go 1.38.11 1.38.12
+      - name: Probe the public site with headless Chromium
+        run: |
+          browser="$(command -v google-chrome || command -v google-chrome-stable || command -v chromium)"
+          for path in '?download=desktop&release-postflight=v1.38.12' 'changelog/v1.38.12/'; do
+            output="$(mktemp)"
+            "$browser" --headless=new --disable-gpu --no-sandbox --virtual-time-budget=10000 \
+              --dump-dom "https://reasonix.io/$path" >"$output" 2>/dev/null || true
+            node -e 'const fs=require("fs"); const body=fs.readFileSync(process.argv[1],"utf8"); console.log(JSON.stringify({kind:"chromium-site",hasVersion:body.includes("v1.38.12"),hasDesktopAsset:body.includes("data-desktop-asset="),looksChallenged:body.includes("Just a moment...")}))' "$output"
+            rm -f "$output"
+          done
