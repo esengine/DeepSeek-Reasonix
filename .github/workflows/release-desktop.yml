@@ -323,7 +323,8 @@ jobs:
               [[ "${{ inputs.candidate_source_run_attempt }}" =~ ^[1-9][0-9]*$ ]] || exit 1
               [[ "${{ inputs.candidate_control_sha }}" =~ ^[0-9a-f]{40}$ ]] || exit 1
               test -n "${{ inputs.candidate_signing_fingerprint }}"
-              test "$PREFLIGHT_ARTIFACT_PREFIX" = "desktop-${{ inputs.candidate_source_run_id }}-${{ inputs.candidate_source_run_attempt }}-preflight"
+              bash scripts/check-candidate-desktop-prefix.sh "$PREFLIGHT_ARTIFACT_PREFIX" \
+                "${{ inputs.candidate_source_run_id }}" "${{ inputs.candidate_source_run_attempt }}"
             else
               [[ "$PREFLIGHT_ARTIFACT_PREFIX" =~ ^desktop-${GITHUB_RUN_ID}-[1-9][0-9]*-preflight$ ]] || exit 1
             fi

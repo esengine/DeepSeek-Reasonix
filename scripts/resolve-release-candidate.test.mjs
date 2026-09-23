@@ -69,6 +69,24 @@ test("accepts a successful protected producer and exact record", () => {
   assert.equal(inspected.evidenceArtifactId, "34");
 });
 
+test("a rerun can seal Desktop artifacts built by an earlier attempt of the same producer", () => {
+  const reused = { ...record, source: { ...record.source, desktopPrefix: "desktop-11-1-preflight" } };
+  assert.equal(inspectRecord(reused, id, artifact, run).desktopPrefix, "desktop-11-1-preflight");
+  for (const desktopPrefix of ["desktop-12-1-preflight", "desktop-11-3-preflight", "desktop-11-0-preflight", "desktop-11-1-other"]) {
+    assert.throws(() => inspectRecord({ ...record, source: { ...record.source, desktopPrefix } }, id, artifact, run), /Desktop prefix/);
+  }
+});
+
+test("Desktop release contract accepts only the sealed producer's current or earlier build attempt", () => {
+  const script = fileURLToPath(new URL("./check-candidate-desktop-prefix.sh", import.meta.url));
+  for (const prefix of ["desktop-11-1-preflight", "desktop-11-2-preflight"]) {
+    assert.equal(spawnSync("bash", [script, prefix, "11", "2"]).status, 0, prefix);
+  }
+  for (const prefix of ["desktop-12-1-preflight", "desktop-11-3-preflight", "desktop-11-0-preflight", "desktop-11-1-other"]) {
+    assert.notEqual(spawnSync("bash", [script, prefix, "11", "2"]).status, 0, prefix);
+  }
+});
+
 test("rehearsal records cannot be selected or inspected for publication", () => {
   const rehearsalArtifact = { ...artifact, name: `release-candidate-rehearsal-record-${id}` };
   const rehearsalRecord = {

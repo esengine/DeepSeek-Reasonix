@@ -46,6 +46,10 @@ export function inspectRecord(record, candidateId, recordArtifact, run, now = ne
   if (record.source?.runId !== String(run.id) || record.source?.runAttempt !== String(run.run_attempt)) {
     throw new Error("candidate record producer mismatch");
   }
+  const desktopPrefix = /^desktop-([1-9][0-9]*)-([1-9][0-9]*)-preflight$/.exec(record.source?.desktopPrefix ?? "");
+  if (!desktopPrefix || desktopPrefix[1] !== record.source.runId || Number(desktopPrefix[2]) > Number(record.source.runAttempt)) {
+    throw new Error("candidate Desktop prefix does not belong to a completed producer attempt");
+  }
   if (record.control?.buildSHA !== run.head_sha) throw new Error("candidate control SHA mismatch");
   if (!/^[1-9][0-9]*$/.test(record.source?.payloadArtifactId ?? "")) throw new Error("candidate payload artifact id is invalid");
   if (record.source?.payloadArtifactName !== `${namespace}-payload-${candidateId}`) throw new Error("candidate payload artifact name mismatch");
