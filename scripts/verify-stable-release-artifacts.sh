@@ -57,9 +57,9 @@ verify_site() {
 		([.platforms[], (.native_packages // {})[], (.downloads // {})[]] |
 		 all(.url | type == "string" and startswith("https://dl.reasonix.io/desktop-" + $version + "/")))
 	' "$manifest" >/dev/null
-	curl -fsSL "https://reasonix.io/?download=desktop&release-postflight=v$version" >"$homepage"
+	go run "$script_dir/release-site-fetch/main.go" homepage "$version" "$homepage"
 	! grep -Eq 'href="[^"]*(tag|download)/desktop-v[0-9]+\.[0-9]+\.[0-9]+' "$homepage"
-	curl -fsSL "https://reasonix.io/changelog/v$version/" >"$changelog"
+	go run "$script_dir/release-site-fetch/main.go" changelog "$version" "$changelog"
 	grep -Fq "v$version" "$changelog"
 	curl -fsSL https://raw.githubusercontent.com/esengine/homebrew-reasonix/main/Casks/reasonix.rb >"$cask"
 	grep -Eq "version ['\"]$version['\"]" "$cask"
