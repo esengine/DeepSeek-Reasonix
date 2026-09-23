@@ -70,7 +70,10 @@ verify_site() {
 		done
 	fi
 	[ -n "$browser" ] || { echo "::error::a Chromium browser is required for hydrated homepage verification" >&2; return 1; }
+	# GitHub's default HeadlessChrome identity is challenged by Cloudflare. Use the
+	# ordinary Chrome browser identity proven by the protected site probe.
 	"$browser" --headless=new --disable-gpu --no-sandbox --virtual-time-budget=10000 \
+		--user-agent='Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36' \
 		--dump-dom "https://reasonix.io/?download=desktop&release-postflight=v$version" \
 		>"$tmp_dir/homepage-hydrated.html"
 	grep -Fq "data-release-version=\"desktop\">v$version<" "$tmp_dir/homepage-hydrated.html"

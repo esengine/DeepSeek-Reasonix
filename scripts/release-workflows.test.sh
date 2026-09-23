@@ -134,6 +134,7 @@ grep -Fq 'RELEASE_REVOKED_CANDIDATES' "$promote"
 grep -Fq 'run: bash scripts/verify-stable-release-artifacts.sh' "$verify"
 grep -Fq 'RELEASE_OPERATION: recover' "$verify"
 grep -Fq -- '--dump-dom' "$repo_root/scripts/verify-stable-release-artifacts.sh"
+grep -Fq -- '--user-agent=' "$repo_root/scripts/verify-stable-release-artifacts.sh"
 grep -Eq 'ALLOW_STABLE_RECOVERY:.*inputs\.allow_recovery' \
 	"$repo_root/.github/workflows/release-stable.yml"
 grep -Fq 'bash scripts/validate-stable-candidate.sh "$RELEASE_VERSION" "$RELEASE_SHA"' \
