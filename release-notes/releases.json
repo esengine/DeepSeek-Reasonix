@@ -2,6 +2,500 @@
   "schemaVersion": 1,
   "releases": [
     {
+      "version": "1.38.12",
+      "date": "2026-09-23",
+      "channel": "stable",
+      "targetingVersion": 1,
+      "title": {
+        "en": "Desktop stability, session lifecycle, and performance improvements",
+        "zh": "桌面稳定性、会话生命周期与性能改进"
+      },
+      "summary": {
+        "en": "This release focuses on fixing session creation, navigation, and lifecycle issues, improving performance, and enhancing the overall desktop experience.",
+        "zh": "此版本重点修复会话创建、导航和生命周期问题，提升性能，并改善整体桌面体验。"
+      },
+      "surfaces": [
+        "desktop",
+        "cli"
+      ],
+      "guides": [
+        {
+          "title": {
+            "en": "Browser Runtime Upgrade",
+            "zh": "浏览器运行时升级"
+          },
+          "body": {
+            "en": "Learn about the upgraded browser runtime, including new capabilities and diagnostic improvements.",
+            "zh": "了解升级后的浏览器运行时，包括新功能和诊断改进。"
+          },
+          "href": "https://github.com/esengine/DeepSeek-Reasonix/blob/ab15e65955e9031444d133e51a5a1f39b7a690ee/docs/BROWSER_RUNTIME_UPGRADE.md"
+        },
+        {
+          "title": {
+            "en": "Composer Controls",
+            "zh": "编辑器控制"
+          },
+          "body": {
+            "en": "Documentation for the composer controls, including queue editing and guidance.",
+            "zh": "编辑器控制文档，包括队列编辑和引导。"
+          },
+          "href": "https://github.com/esengine/DeepSeek-Reasonix/blob/ab15e65955e9031444d133e51a5a1f39b7a690ee/docs/COMPOSER_CONTROLS.md"
+        },
+        {
+          "title": {
+            "en": "Model Settings",
+            "zh": "模型设置"
+          },
+          "body": {
+            "en": "Details on model settings, runtime validation, and background gateway preservation.",
+            "zh": "模型设置、运行时验证和后台网关保留的详细信息。"
+          },
+          "href": "https://github.com/esengine/DeepSeek-Reasonix/blob/ab15e65955e9031444d133e51a5a1f39b7a690ee/docs/MODEL_SETTINGS.md"
+        },
+        {
+          "title": {
+            "en": "Read Snapshot Pagination",
+            "zh": "读取快照分页"
+          },
+          "body": {
+            "en": "How bounded read snapshots stabilize session list pagination.",
+            "zh": "有界读取快照如何稳定会话列表分页。"
+          },
+          "href": "https://github.com/esengine/DeepSeek-Reasonix/blob/ab15e65955e9031444d133e51a5a1f39b7a690ee/docs/READ_SNAPSHOT_PAGINATION.md"
+        },
+        {
+          "title": {
+            "en": "Windows Agent Shell",
+            "zh": "Windows Agent Shell"
+          },
+          "body": {
+            "en": "Restored Git Bash and shell settings on Windows.",
+            "zh": "在 Windows 上恢复 Git Bash 和 Shell 设置。"
+          },
+          "href": "https://github.com/esengine/DeepSeek-Reasonix/blob/ab15e65955e9031444d133e51a5a1f39b7a690ee/docs/WINDOWS_AGENT_SHELL.md"
+        },
+        {
+          "title": {
+            "en": "History Startup Loading",
+            "zh": "历史启动加载"
+          },
+          "body": {
+            "en": "Deferred historical session loading and bounded native paging.",
+            "zh": "延迟历史会话加载和有界原生分页。"
+          },
+          "href": "https://github.com/esengine/DeepSeek-Reasonix/blob/ab15e65955e9031444d133e51a5a1f39b7a690ee/docs/history-startup-loading.md"
+        }
+      ],
+      "highlights": [
+        {
+          "kind": "fixed",
+          "targets": [
+            "desktop"
+          ],
+          "title": {
+            "en": "Session creation and recovery simplified",
+            "zh": "简化会话创建与恢复"
+          },
+          "body": {
+            "en": "New Session no longer fails with target_changed, shows unrelated recovery failures, or leaves stale input visible. Creation feedback now belongs to the selected conversation.",
+            "zh": "新建会话不再出现 target_changed 错误、无关恢复失败或残留输入。创建反馈现在归属于所选会话。"
+          },
+          "refs": [
+            10697
+          ]
+        },
+        {
+          "kind": "fixed",
+          "targets": [
+            "desktop"
+          ],
+          "title": {
+            "en": "Historical session reconciliation repaired",
+            "zh": "修复历史会话协调"
+          },
+          "body": {
+            "en": "Old-format conversations open directly, and adopted sources no longer appear as duplicate unusable rows.",
+            "zh": "旧格式会话可直接打开，已采用的源不再显示为重复的不可用行。"
+          },
+          "refs": [
+            10696
+          ]
+        },
+        {
+          "kind": "improved",
+          "targets": [
+            "desktop"
+          ],
+          "title": {
+            "en": "Faster startup with deferred history loading",
+            "zh": "延迟历史加载，启动更快"
+          },
+          "body": {
+            "en": "Historical session loading is removed from the startup critical path, with bounded background discovery and native paging.",
+            "zh": "历史会话加载从启动关键路径中移除，采用有界后台发现和原生分页。"
+          },
+          "refs": [
+            10664
+          ]
+        },
+        {
+          "kind": "fixed",
+          "targets": [
+            "desktop"
+          ],
+          "title": {
+            "en": "Session lifecycle deadlocks eliminated",
+            "zh": "消除会话生命周期死锁"
+          },
+          "body": {
+            "en": "Fixed hangs caused by cleanup racing with preview operations, AI renaming, and autosave completion.",
+            "zh": "修复了清理与预览操作、AI 重命名和自动保存完成竞争导致的挂起。"
+          },
+          "refs": [
+            10690
+          ]
+        },
+        {
+          "kind": "improved",
+          "targets": [
+            "desktop"
+          ],
+          "title": {
+            "en": "Stable session list pagination",
+            "zh": "稳定的会话列表分页"
+          },
+          "body": {
+            "en": "Bounded read snapshots prevent stale cursor errors and keep pagination stable during metadata updates.",
+            "zh": "有界读取快照防止过期游标错误，并在元数据更新期间保持分页稳定。"
+          },
+          "refs": [
+            10621
+          ]
+        },
+        {
+          "kind": "fixed",
+          "targets": [
+            "desktop",
+            "cli"
+          ],
+          "title": {
+            "en": "Background gateways preserved through model changes",
+            "zh": "模型更改后保留后台网关"
+          },
+          "body": {
+            "en": "Saving model settings no longer blocks subsequent messages when background jobs are running.",
+            "zh": "保存模型设置不再在后台任务运行时阻塞后续消息。"
+          },
+          "refs": [
+            10688
+          ]
+        }
+      ],
+      "changes": {
+        "new": [
+          {
+            "targets": [
+              "desktop"
+            ],
+            "title": {
+              "en": "Edit and reorder queued guidance",
+              "zh": "编辑并调整待处理消息顺序"
+            },
+            "body": {
+              "en": "Queued messages can be edited in place and reordered with pointer or keyboard.",
+              "zh": "待处理消息可就地编辑，并可用指针或键盘调整顺序。"
+            },
+            "refs": [
+              10626
+            ]
+          },
+          {
+            "targets": [
+              "desktop"
+            ],
+            "title": {
+              "en": "Native graphics fault recovery",
+              "zh": "原生图形故障恢复"
+            },
+            "body": {
+              "en": "Desktop offers a native recovery dialog for repeated GPU failures or persistent stalls.",
+              "zh": "桌面端为重复的 GPU 故障或持续卡顿提供原生恢复对话框。"
+            },
+            "refs": [
+              10644
+            ]
+          },
+          {
+            "targets": [
+              "desktop"
+            ],
+            "title": {
+              "en": "Unified built-in HTML previews",
+              "zh": "统一内置 HTML 预览"
+            },
+            "body": {
+              "en": "Local HTML files open in a task-bound built-in browser tab with responsive workspace delivery.",
+              "zh": "本地 HTML 文件在任务绑定的内置浏览器标签页中打开，并支持响应式工作区交付。"
+            },
+            "refs": [
+              10596
+            ]
+          }
+        ],
+        "improved": [
+          {
+            "targets": [
+              "desktop"
+            ],
+            "title": {
+              "en": "Reduced transcript render fanout",
+              "zh": "减少聊天区重复渲染"
+            },
+            "body": {
+              "en": "Streaming no longer invalidates unchanged transcript rows, reducing renderer long tasks.",
+              "zh": "流式输出不再使未更改的聊天记录行失效，减少渲染器长任务。"
+            },
+            "refs": [
+              10691
+            ]
+          },
+          {
+            "targets": [
+              "desktop"
+            ],
+            "title": {
+              "en": "Quiet sidebar refreshes",
+              "zh": "侧栏刷新更安静"
+            },
+            "body": {
+              "en": "Background refreshes no longer flash loading indicators when a resident page exists.",
+              "zh": "当存在常驻页面时，后台刷新不再闪烁加载指示器。"
+            },
+            "refs": [
+              10683
+            ]
+          },
+          {
+            "targets": [
+              "desktop"
+            ],
+            "title": {
+              "en": "Simplified archived conversation management",
+              "zh": "简化归档会话管理"
+            },
+            "body": {
+              "en": "Archive page uses a responsive list/preview layout with Restore as primary action.",
+              "zh": "归档页面采用响应式列表/预览布局，恢复为主要操作。"
+            },
+            "refs": [
+              10623
+            ]
+          },
+          {
+            "targets": [
+              "desktop"
+            ],
+            "title": {
+              "en": "Restored complete transcript turn navigation",
+              "zh": "恢复完整会话轮次导航"
+            },
+            "body": {
+              "en": "Turn rail now includes all conversation turns with bounded paging.",
+              "zh": "轮次导航栏现在包含所有会话轮次，并支持有界分页。"
+            },
+            "refs": [
+              10619
+            ]
+          },
+          {
+            "targets": [
+              "desktop"
+            ],
+            "title": {
+              "en": "Reduced history and multi-session resource usage",
+              "zh": "降低历史会话与多会话资源占用"
+            },
+            "body": {
+              "en": "Caching and coalescing reduce repeated work during session switches.",
+              "zh": "缓存和合并减少会话切换期间的重复工作。"
+            },
+            "refs": [
+              10603
+            ]
+          },
+          {
+            "targets": [
+              "desktop"
+            ],
+            "title": {
+              "en": "Delayed session loading feedback",
+              "zh": "延迟会话加载提示"
+            },
+            "body": {
+              "en": "Fast conversation switches no longer flash a loading surface.",
+              "zh": "快速会话切换不再闪烁加载界面。"
+            },
+            "refs": [
+              10599
+            ]
+          }
+        ],
+        "fixed": [
+          {
+            "targets": [
+              "desktop"
+            ],
+            "title": {
+              "en": "Throughput spikes after session restoration",
+              "zh": "修复切换会话后的速率异常飙升"
+            },
+            "body": {
+              "en": "Restored sessions now measure output against matching provider-active intervals.",
+              "zh": "恢复的会话现在根据匹配的提供程序活动间隔测量输出。"
+            },
+            "refs": [
+              10684
+            ]
+          },
+          {
+            "targets": [
+              "desktop"
+            ],
+            "title": {
+              "en": "Session-scoped overview context and usage",
+              "zh": "修复概览上下文与用量串会话"
+            },
+            "body": {
+              "en": "Context usage no longer leaks from the previous session.",
+              "zh": "上下文用量不再从上一个会话泄漏。"
+            },
+            "refs": [
+              10679
+            ]
+          },
+          {
+            "targets": [
+              "desktop"
+            ],
+            "title": {
+              "en": "Purged session ghosts prevented",
+              "zh": "防止清空回收站后的幽灵会话"
+            },
+            "body": {
+              "en": "Emptying trash no longer creates ghost rows for purged sessions.",
+              "zh": "清空回收站不再为已清除的会话创建幽灵行。"
+            },
+            "refs": [
+              10677
+            ]
+          },
+          {
+            "targets": [
+              "desktop"
+            ],
+            "title": {
+              "en": "Repeated fork sidebar visibility",
+              "zh": "修复连续分叉后侧栏未显示"
+            },
+            "body": {
+              "en": "Repeated forks from the same source now appear in the sidebar without restart.",
+              "zh": "来自同一来源的连续分叉现在无需重启即可显示在侧栏中。"
+            },
+            "refs": [
+              10673
+            ]
+          },
+          {
+            "targets": [
+              "desktop"
+            ],
+            "title": {
+              "en": "Running transcript order after tab return",
+              "zh": "修复切回运行中会话时思考错序"
+            },
+            "body": {
+              "en": "Reasoning no longer appears above the user message when returning to a running conversation.",
+              "zh": "返回运行中的会话时，推理不再显示在用户消息上方。"
+            },
+            "refs": [
+              10670
+            ]
+          },
+          {
+            "targets": [
+              "desktop"
+            ],
+            "title": {
+              "en": "Duplicate tool results after completion",
+              "zh": "修复任务完成后工具结果重复显示"
+            },
+            "body": {
+              "en": "Completed tool calls no longer reappear below the final answer.",
+              "zh": "已完成的工具调用不再出现在最终答案下方。"
+            },
+            "refs": [
+              10590
+            ]
+          }
+        ]
+      },
+      "upgrade": [
+        {
+          "level": "info",
+          "targets": [
+            "desktop"
+          ],
+          "title": {
+            "en": "Legacy drafts retired",
+            "zh": "旧草稿已停用"
+          },
+          "body": {
+            "en": "The old workspace draft workflow is removed. Existing formal histories and unsent input remain intact.",
+            "zh": "旧的工作区草稿工作流已移除。现有的正式历史记录和未发送输入保持不变。"
+          },
+          "refs": [
+            10677
+          ]
+        },
+        {
+          "level": "info",
+          "targets": [
+            "desktop"
+          ],
+          "title": {
+            "en": "Eager session creation restored",
+            "zh": "恢复即时会话创建"
+          },
+          "body": {
+            "en": "New Conversation now creates an independent formal session immediately, with upgrade-safe input recovery.",
+            "zh": "新建会话现在立即创建独立的正式会话，并支持升级安全的输入恢复。"
+          },
+          "refs": [
+            10650
+          ]
+        }
+      ],
+      "risks": [],
+      "contributors": [
+        "SivanCola",
+        "goransh-walia"
+      ],
+      "links": {
+        "github": "https://github.com/esengine/DeepSeek-Reasonix/releases/tag/desktop-v1.38.12",
+        "compare": "https://github.com/esengine/DeepSeek-Reasonix/compare/desktop-v1.38.11...desktop-v1.38.12",
+        "download": "https://reasonix.io/?download=desktop&channel=stable#start"
+      },
+      "releaseId": "1.38.12",
+      "baseVersion": "1.38.12",
+      "status": "reviewed",
+      "previousRelease": "1.38.11",
+      "builds": {
+        "cli": "v1.38.12",
+        "desktop": "v1.38.12",
+        "npm": "1.38.12"
+      }
+    },
+    {
       "version": "1.38.11",
       "date": "2026-09-20",
       "channel": "stable",
