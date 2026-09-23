@@ -2,8 +2,8 @@
   "schemaVersion": 1,
   "releases": [
     {
-      "version": "1.38.12",
-      "date": "2026-09-23",
+    "version": "1.38.12",
+    "date": "2026-09-24",
       "channel": "stable",
       "targetingVersion": 1,
       "title": {
@@ -86,7 +86,14 @@
           "href": "https://github.com/esengine/DeepSeek-Reasonix/blob/ab15e65955e9031444d133e51a5a1f39b7a690ee/docs/history-startup-loading.md"
         }
       ],
-      "highlights": [
+    "highlights": [
+      {
+        "kind": "fixed",
+        "targets": ["desktop"],
+        "title": {"en": "Consistent project sidebar and session navigation", "zh": "修复项目侧栏与会话切换一致性"},
+        "body": {"en": "Removing and re-adding a workspace restores its visibility, stale sidebar reads cannot hide current conversations, and native history opens through the canonical session identity.", "zh": "移除后重新添加项目可恢复侧栏可见性，过期读取不再覆盖当前会话列表，原生历史记录可通过统一会话身份正常打开。"},
+        "refs": [10699]
+      },
         {
           "kind": "fixed",
           "targets": [
@@ -242,7 +249,19 @@
             ]
           }
         ],
-        "improved": [
+    "improved": [
+      {
+        "targets": ["desktop", "cli"],
+        "title": {"en": "Refresh DeepSeek and MiMo model choices", "zh": "更新 DeepSeek 与 MiMo 模型选项"},
+        "body": {"en": "New official DeepSeek connections use deepseek-flash. MiMo distinguishes API access from Token Plan and adds V2.6 Pro and Flash while preserving existing defaults and user choices.", "zh": "新建 DeepSeek 官方连接默认使用 deepseek-flash。MiMo 明确区分 API 与 Token Plan，并加入 V2.6 Pro、Flash，同时保留已有默认模型和用户选择。"},
+        "refs": [10624, 10655]
+      },
+      {
+        "targets": ["desktop"],
+        "title": {"en": "Upgrade the built-in browser runtime", "zh": "升级内置浏览器运行时"},
+        "body": {"en": "Browser actions retain their owning session and frame, capability status reflects the bound runtime, and diagnostic exports make browser failures easier to investigate.", "zh": "浏览器操作保留所属会话与页面框架，能力状态与实际绑定的运行时一致，并提供诊断导出以排查浏览器故障。"},
+        "refs": [10615, 10635]
+      },
           {
             "targets": [
               "desktop"
@@ -340,7 +359,37 @@
             ]
           }
         ],
-        "fixed": [
+    "fixed": [
+      {
+        "targets": ["desktop", "cli"],
+        "title": {"en": "Restore Windows shell and path compatibility", "zh": "恢复 Windows Shell 与路径兼容性"},
+        "body": {"en": "Restore Git Bash and shell settings, and normalize junction paths consistently so equivalent workspace paths do not disrupt upgrade recovery.", "zh": "恢复 Git Bash 与 Shell 设置，并统一 Junction 路径身份，避免同一项目的等价路径干扰升级恢复。"},
+        "refs": [10617, 10656]
+      },
+      {
+        "targets": ["desktop", "cli"],
+        "title": {"en": "Repair manual compaction and duplicate admission", "zh": "修复手动压缩与重复提交"},
+        "body": {"en": "Manual compaction correctly identifies compressible history, reports progress, and rejects duplicate admission without losing session-bound receipts. Cancellation does not commit a new summary projection.", "zh": "手动压缩正确识别可压缩历史并显示进度，阻止重复提交且保留所属会话回执；取消操作不再提交新的摘要投影。"},
+        "refs": [10598, 10628, 10642]
+      },
+      {
+        "targets": ["desktop"],
+        "title": {"en": "Preserve pending guidance and shutdown recovery", "zh": "保留待处理消息与关闭恢复状态"},
+        "body": {"en": "Queued guidance, completion receipts, and recovered tool results remain attached to their owning conversation. History lifecycle and shutdown recovery retain the original session records.", "zh": "待处理消息、完成回执及恢复后的工具结果保持归属于原会话；历史生命周期和关闭恢复保留原始会话记录。"},
+        "refs": [10592, 10593, 10634, 10646, 10660, 10681]
+      },
+      {
+        "targets": ["desktop"],
+        "title": {"en": "Repair retained historical archives and branches", "zh": "修复残留历史归档与分支"},
+        "body": {"en": "Historical branches and retained archives reconcile with canonical conversations, while retired sources stay out of the sidebar and session recovery avoids duplicate identities.", "zh": "历史分支与残留归档和正式会话保持一致，已退役来源不再出现在侧栏，会话恢复避免产生重复身份。"},
+        "refs": [10594, 10613, 10671, 10676, 10689, 10696]
+      },
+      {
+        "targets": ["desktop"],
+        "title": {"en": "Preserve macOS Dock icon proportions", "zh": "保持 macOS Dock 图标比例"},
+        "body": {"en": "The packaged macOS app keeps the intended icon scale in the Dock.", "zh": "macOS 安装包中的应用图标在 Dock 中保持预期缩放比例。"},
+        "refs": [10641]
+      },
           {
             "targets": [
               "desktop"
@@ -439,7 +488,14 @@
           }
         ]
       },
-      "upgrade": [
+    "upgrade": [
+      {
+        "level": "info",
+        "targets": ["desktop", "cli"],
+        "title": {"en": "Explicit compaction updates conversation context", "zh": "主动压缩会更新会话上下文"},
+        "body": {"en": "Running /compact now performs the requested fold even when automatic compaction is disabled. This explicit action can replace the cached conversation prefix; automatic thresholds are unchanged.", "zh": "即使关闭自动压缩，主动执行 /compact 也会按要求压缩历史，因此可能替换已缓存的会话前缀；自动压缩阈值保持不变。"},
+        "refs": [10642]
+      },
         {
           "level": "info",
           "targets": [
