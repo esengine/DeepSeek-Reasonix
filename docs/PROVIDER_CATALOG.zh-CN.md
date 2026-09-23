@@ -16,7 +16,8 @@ API 格式明确显示 Anthropic Messages、Chat Completions 和 Responses。
 ## 新增服务商
 
 OpenAI（Responses 和 Chat Completions）、Anthropic、Google Gemini（OpenAI
-兼容入口）、SiliconFlow、OpenRouter、Groq、Mistral AI、本地 Ollama、LM Studio。
+兼容入口）、SiliconFlow、OpenRouter、Groq、Mistral AI、Yolo-Auto、
+本地 Ollama、LM Studio。
 示例模型名可编辑，不代表账号一定有权限或本地已安装；添加后请获取或填写实际模型。
 Anthropic 预设不启用服务端原生工具。此次目录扩展不包含 Gemini 原生协议、仅支持
 OAuth 的服务、Azure 部署配置等专用接入流程。
@@ -97,3 +98,11 @@ AI 编程工具使用，其密钥和额度与普通 API 相互独立。
 连接配置使用对齐表单；模型选择、刷新和添加集中在同一区域。添加和编辑共用模型弹窗，可设置上下文窗口、最大输出 token 与图片输入能力，并恢复继承或自动识别。文本输入和输出固定勾选；视频和 PDF 在请求链路支持前置灰。应用弹窗只修改配置草稿，保存连接后持久化。连接标题与保存栏固定占位，目录与配置内容独立滚动，模型列表不再嵌套滚动。底部保存栏区分未修改、未保存和保存失败；失败不会清空草稿。密钥继续单独保存，不随模型草稿提交。
 
 本地隔离预览：启动前端后打开 `/dev/provider-layout-preview.html`。预览使用真实组件和内存数据，不操作实际连接或凭据。视觉检查见仓库根目录 `design-qa.md`。
+
+### Yolo-Auto
+
+新增独立维护的预设 `yolo-auto`，使用 OpenAI Chat Completions，地址
+`https://yolo-auto.com/v1`，密钥引用 `YOLO_AUTO_API_KEY`。`yolo` 与 `yolo-small`
+为可编辑的示例模型名，账号实际模型可通过 `GET /v1/models` 获取。未启用原生联网
+搜索，也未添加未经核实的推理参数；本次未执行需要密钥的模型获取或推理验证。
+参考：https://yolo-auto.com/docs

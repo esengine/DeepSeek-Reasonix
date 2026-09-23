@@ -32,6 +32,7 @@ var extendedProviderPresets = []ProviderPreset{
 	newCatalogPreset("mistral", "Mistral AI", "MISTRAL_API_KEY", "openai", "https://api.mistral.ai/v1", "mistral-small-latest"),
 	newCatalogPreset("ollama-local", "Ollama", "OLLAMA_LOCAL_API_KEY", "openai", "http://localhost:11434/v1", "qwen3:8b"),
 	newCatalogPreset("lmstudio", "LM Studio", "LM_STUDIO_API_KEY", "openai", "http://localhost:1234/v1", "qwen3-8b"),
+	newCatalogPreset("yolo-auto", "Yolo-Auto", "YOLO_AUTO_API_KEY", "openai", "https://yolo-auto.com/v1", "yolo", "yolo-small"),
 }
 
 func newCatalogPreset(id, label, keyEnv, kind, baseURL string, models ...string) ProviderPreset {

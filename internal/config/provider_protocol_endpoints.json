@@ -608,5 +608,12 @@
       "source": "https://docs.mistral.ai/api/endpoint/chat",
       "checkedOn": "2026-09-07"
     }
+  },
+  "yolo-auto|global|api": {
+    "openai": {
+      "baseUrl": "https://yolo-auto.com/v1",
+      "source": "https://yolo-auto.com/docs",
+      "checkedOn": "2026-09-23"
+    }
   }
 }

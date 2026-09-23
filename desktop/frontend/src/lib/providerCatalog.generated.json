@@ -1536,6 +1536,21 @@
         }
       }
     },
+    "yolo-auto": {
+      "brandId": "yolo-auto",
+      "brandLabel": "Yolo-Auto",
+      "region": "global",
+      "product": "api",
+      "format": "openai",
+      "baseUrl": "https://yolo-auto.com/v1",
+      "protocols": {
+        "openai": {
+          "baseUrl": "https://yolo-auto.com/v1",
+          "source": "https://yolo-auto.com/docs",
+          "checkedOn": "2026-09-23"
+        }
+      }
+    },
     "zai-coding-plan-global": {
       "brandId": "zai",
       "brandLabel": "智谱 / Z.AI",
@@ -2005,6 +2020,24 @@
           "qwen3-8b"
         ],
         "name": "lmstudio",
+        "webSearch": false
+      }
+    },
+    {
+      "description": "Yolo-Auto API. Fetch or edit models for your account after connecting.",
+      "id": "yolo-auto",
+      "keyEnv": "YOLO_AUTO_API_KEY",
+      "label": "Yolo-Auto",
+      "provider": {
+        "apiKeyEnv": "YOLO_AUTO_API_KEY",
+        "baseUrl": "https://yolo-auto.com/v1",
+        "default": "yolo",
+        "kind": "openai",
+        "models": [
+          "yolo",
+          "yolo-small"
+        ],
+        "name": "yolo-auto",
         "webSearch": false
       }
     }

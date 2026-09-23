@@ -20,10 +20,10 @@ Protocol changes may change request serialization and provider cache reuse.
 ## Added providers
 
 OpenAI (Responses and Chat Completions), Anthropic, Google Gemini (OpenAI
-compatibility), SiliconFlow, OpenRouter, Groq, Mistral AI, local Ollama and
-LM Studio. Example model names are editable starting points, not guarantees of
-account access or local installation. Fetch or enter the actual models after
-adding. Native Anthropic server tools are not enabled by the preset. Gemini's
+compatibility), SiliconFlow, OpenRouter, Groq, Mistral AI, Yolo-Auto, local
+Ollama and LM Studio. Example model names are editable starting points, not
+guarantees of account access or local installation. Fetch or enter the actual
+models after adding. Native Anthropic server tools are not enabled by the preset. Gemini's
 native API, OAuth-only services, Azure deployment setup and other special
 protocols are not implied by this catalog expansion.
 
@@ -41,6 +41,7 @@ Endpoint sources:
 - [Mistral API](https://docs.mistral.ai/api)
 - [Ollama OpenAI compatibility](https://docs.ollama.com/api/openai-compatibility)
 - [LM Studio OpenAI compatibility](https://lmstudio.ai/docs/developer/openai-compat)
+- [Yolo-Auto docs](https://yolo-auto.com/docs)
 
 Bundled brand icons come from LobeHub Icons under MIT. The pinned source revision
 and full license are in `desktop/frontend/public/provider-icons/`. Brands without
@@ -165,3 +166,13 @@ no unverified reasoning overrides are added. These are protocol presets, not
 certification of every model's agent/tool/reasoning capabilities. Model discovery,
 tool calls and thinking require authenticated platform verification; none was
 performed in this batch. Icons use the existing pinned LobeHub MIT source.
+
+### Yolo-Auto
+
+Added independently maintained preset `yolo-auto`, OpenAI Chat Completions,
+base URL `https://yolo-auto.com/v1` and key reference `YOLO_AUTO_API_KEY`. The
+slugs `yolo` and `yolo-small` are editable starting points; the account catalog
+is discoverable at `GET /v1/models`. Web search is off and no unverified
+reasoning overrides are added. Refresh models after connecting; no authenticated
+discovery or inference request was performed. Reference:
+https://yolo-auto.com/docs

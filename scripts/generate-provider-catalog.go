@@ -12,7 +12,7 @@ import (
 func main() {
 	catalogs := map[string]config.ProviderCatalog{}
 	templates := []map[string]any{}
-	extended := map[string]bool{"doubao-chat": true, "doubao-responses": true, "baidu-cloud": true, "ppio": true, "qiniu": true, "xai-chat": true, "xai-responses": true, "cerebras": true, "together": true, "fireworks-chat": true, "fireworks-anthropic": true, "fireworks-responses": true, "amd-gpu-cloud": true, "deepseek-chat": true, "openai-responses": true, "openai-chat": true, "anthropic": true, "gemini": true, "siliconflow": true, "openrouter": true, "groq": true, "mistral": true, "ollama-local": true, "lmstudio": true}
+	extended := map[string]bool{"doubao-chat": true, "doubao-responses": true, "baidu-cloud": true, "ppio": true, "qiniu": true, "xai-chat": true, "xai-responses": true, "cerebras": true, "together": true, "fireworks-chat": true, "fireworks-anthropic": true, "fireworks-responses": true, "amd-gpu-cloud": true, "deepseek-chat": true, "openai-responses": true, "openai-chat": true, "anthropic": true, "gemini": true, "siliconflow": true, "openrouter": true, "groq": true, "mistral": true, "ollama-local": true, "lmstudio": true, "yolo-auto": true}
 	for _, p := range config.CuratedProviderPresets() {
 		catalogs[p.ID] = config.CatalogForProviderPreset(p)
 		if !extended[p.ID] {

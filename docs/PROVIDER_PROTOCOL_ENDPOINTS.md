@@ -55,6 +55,7 @@ Base URL excludes the request suffix: Chat = /chat/completions; Responses = /res
 | token-rhythm|global|api | [https://tokenrhythm.studio/v1](https://tokenrhythm.studio/docs/api-integration) | — | [https://tokenrhythm.studio](https://tokenrhythm.studio/docs/api-integration) |
 | vercel-ai-gateway|global|api | [https://ai-gateway.vercel.sh/v1](https://vercel.com/docs/ai-gateway/sdks-and-apis) | [https://ai-gateway.vercel.sh/v1](https://vercel.com/docs/ai-gateway/sdks-and-apis) | [https://ai-gateway.vercel.sh](https://vercel.com/docs/ai-gateway/sdks-and-apis) |
 | xai|global|api | [https://api.x.ai/v1](https://docs.x.ai/developers/model-capabilities/text/comparison) | [https://api.x.ai/v1](https://docs.x.ai/developers/model-capabilities/text/comparison) | — |
+| yolo-auto|global|api | [https://yolo-auto.com/v1](https://yolo-auto.com/docs) | — | — |
 | zai|cn|api | [https://open.bigmodel.cn/api/paas/v4](https://docs.bigmodel.cn/cn/guide/develop/claude/introduction) | — | [https://open.bigmodel.cn/api/anthropic](https://docs.bigmodel.cn/cn/guide/develop/claude/introduction) |
 | zai|cn|coding | [https://open.bigmodel.cn/api/coding/paas/v4](https://docs.bigmodel.cn/cn/coding-plan/quick-start) | — | [https://open.bigmodel.cn/api/anthropic](https://docs.bigmodel.cn/cn/coding-plan/quick-start) |
 | zai|global|api | [https://api.z.ai/api/paas/v4](https://docs.z.ai/guides/overview/quick-start) | — | — |
