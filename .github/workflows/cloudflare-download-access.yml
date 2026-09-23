@@ -36,15 +36,14 @@ jobs:
         run: |
           browser="$(command -v google-chrome || command -v google-chrome-stable || command -v chromium)"
           for path in '?download=desktop&release-postflight=v1.38.12' 'changelog/v1.38.12/'; do
-            for profile in default updater browser browser-masked; do
+            for profile in default updater browser; do
               output="$(mktemp)"
               profile_dir="$(mktemp -d)"
               flags=()
               case "$profile" in
                 updater) flags+=(--user-agent='Reasonix-Updater/v1.38.12 (linux/amd64; build=stable; update=stable)') ;;
-                browser|browser-masked) flags+=(--user-agent='Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36') ;;
+                browser) flags+=(--user-agent='Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36') ;;
               esac
-              if [ "$profile" = browser-masked ]; then flags+=(--disable-blink-features=AutomationControlled); fi
               "$browser" --headless=new --disable-gpu --no-sandbox --virtual-time-budget=10000 \
                 "--user-data-dir=$profile_dir" "${flags[@]}" \
                 --dump-dom "https://reasonix.io/$path" >"$output" 2>/dev/null || true
