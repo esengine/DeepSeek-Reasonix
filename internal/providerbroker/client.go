@@ -24,28 +24,41 @@ const catalogTTL = 3 * time.Second
 // come from the machine that holds the credentials. It is what a bootstrapped
 // serve installs in place of boot's config-backed resolver.
 type Client struct {
-	base  string
-	token string
-	http  *http.Client
-	now   func() time.Time
+	endpoint Endpoint
+	http     *http.Client
+	now      func() time.Time
 
 	mu      sync.Mutex
 	catalog []provider.Descriptor
 	read    time.Time
 }
 
+// Endpoint answers where the broker is and the token it expects. It is asked
+// on every request, so a serve can follow a broker republished elsewhere
+// without being restarted. An error fails that request and nothing else.
+type Endpoint func() (baseURL, token string, err error)
+
 // NewClient points a resolver at a broker. baseURL is the loopback address the
 // -R forward publishes on this machine; hc may be nil.
 func NewClient(baseURL, token string, hc *http.Client) *Client {
+	return NewEndpointClient(func() (string, string, error) { return baseURL, token, nil }, hc)
+}
+
+// NewEndpointClient is NewClient for a broker whose address can move.
+func NewEndpointClient(endpoint Endpoint, hc *http.Client) *Client {
 	if hc == nil {
 		hc = &http.Client{}
 	}
-	return &Client{
-		base:  strings.TrimRight(strings.TrimSpace(baseURL), "/"),
-		token: strings.TrimSpace(token),
-		http:  hc,
-		now:   time.Now,
+	return &Client{endpoint: endpoint, http: hc, now: time.Now}
+}
+
+// target is the broker as the endpoint answers for it right now.
+func (c *Client) target() (base, token string, err error) {
+	base, token, err = c.endpoint()
+	if err != nil {
+		return "", "", fmt.Errorf("providerbroker: locate the broker: %w", err)
 	}
+	return strings.TrimRight(strings.TrimSpace(base), "/"), strings.TrimSpace(token), nil
 }
 
 // Catalog returns the local machine's model list. The interface has no error
@@ -74,11 +87,15 @@ func (c *Client) Catalog() []provider.Descriptor {
 }
 
 func (c *Client) fetchCatalog(ctx context.Context) ([]provider.Descriptor, error) {
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, c.base+PathCatalog, nil)
+	base, token, err := c.target()
 	if err != nil {
 		return nil, err
 	}
-	req.Header.Set(HeaderToken, c.token)
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, base+PathCatalog, nil)
+	if err != nil {
+		return nil, err
+	}
+	req.Header.Set(HeaderToken, token)
 	resp, err := c.http.Do(req)
 	if err != nil {
 		return nil, err
@@ -139,11 +156,15 @@ func (b *brokered) Stream(ctx context.Context, req provider.Request) (<-chan pro
 	if err != nil {
 		return nil, err
 	}
-	httpReq, err := http.NewRequestWithContext(ctx, http.MethodPost, b.client.base+PathStream, bytes.NewReader(body))
+	base, token, err := b.client.target()
 	if err != nil {
 		return nil, err
 	}
-	httpReq.Header.Set(HeaderToken, b.client.token)
+	httpReq, err := http.NewRequestWithContext(ctx, http.MethodPost, base+PathStream, bytes.NewReader(body))
+	if err != nil {
+		return nil, err
+	}
+	httpReq.Header.Set(HeaderToken, token)
 	httpReq.Header.Set("Content-Type", "application/json")
 	resp, err := b.client.http.Do(httpReq)
 	if err != nil {

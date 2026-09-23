@@ -94,6 +94,8 @@ type Pool struct {
 
 	mu    sync.Mutex
 	links map[string]*link
+	// follow serialises re-pointing kernels at a moved broker.
+	follow sync.Mutex
 }
 
 func NewPool(ctx context.Context, opts Options) *Pool {
@@ -156,7 +158,53 @@ func (p *Pool) broker(l *link) (string, error) {
 			l.brokerErr = fmt.Errorf("publish the provider broker on %s: %w", l.host, l.brokerErr)
 		}
 	})
-	return l.brokerAddr, l.brokerErr
+	if l.brokerErr != nil {
+		return "", l.brokerErr
+	}
+	// Where the forward is now, not where it first landed: a reconnect asks for
+	// the old port back and is given another when that one was taken.
+	if bound, ok := boundBroker(l.client); ok {
+		return bound, nil
+	}
+	return l.brokerAddr, nil
+}
+
+// boundBroker is the remote address the broker forward is listening on.
+func boundBroker(client *remote.Client) (string, bool) {
+	for _, e := range client.Forwards().List() {
+		if e.Spec.Name == brokerForwardName && e.Up && e.BoundAddr != "" {
+			return e.BoundAddr, true
+		}
+	}
+	return "", false
+}
+
+// followBroker points every kernel on l at the broker's forward after the link
+// comes back. The kernels outlive the link; the port they were told may not.
+func (p *Pool) followBroker(l *link, client *remote.Client) {
+	if !p.brokers(l) {
+		return
+	}
+	// One at a time, each reading the port as it stands when it runs: two
+	// reconnects finishing out of order must not leave the older port written.
+	p.follow.Lock()
+	defer p.follow.Unlock()
+	addr, ok := boundBroker(client)
+	if !ok {
+		return
+	}
+	p.mu.Lock()
+	workspaces := make([]string, 0, len(l.spaces))
+	for _, s := range l.spaces {
+		workspaces = append(workspaces, s.workspace)
+	}
+	p.mu.Unlock()
+	broker := bootstrap.Broker{Addr: addr, Token: p.opts.Broker.Token}
+	for _, ws := range workspaces {
+		if err := bootstrap.RepointBroker(p.ctx, client, ws, broker); err != nil {
+			p.record(l, func(st *HostState) { st.Err = err.Error() })
+		}
+	}
 }
 
 // brokers reports whether a connect to l publishes this machine's broker.
@@ -323,6 +371,9 @@ func (p *Pool) dial(l *link, call Call) (unsubscribe func()) {
 				st.Err = ev.Err.Error()
 			}
 		})
+		if ev.Status == remote.StatusConnected && ev.Attempt > 0 {
+			go p.followBroker(l, client)
+		}
 	})
 	if call.OnStatus != nil {
 		unsubscribe = client.Subscribe(call.OnStatus)

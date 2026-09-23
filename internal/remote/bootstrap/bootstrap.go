@@ -134,7 +134,7 @@ func EnsureServe(ctx context.Context, conn Conn, opts Options) (Result, error) {
 	paths := target.Paths(home, workspace)
 
 	// 2. Reuse a live process if the recorded pid is still running.
-	if st, tok, ok := tryReuse(ctx, conn, target, fs, paths, opts.MinVersion, opts.Broker.Addr, workspace); ok {
+	if st, tok, ok := tryReuse(ctx, conn, target, fs, paths, opts.MinVersion, opts.Broker, false, opts.clock(), workspace); ok {
 		opts.progress("reuse", st.Addr)
 		return Result{State: st, Token: tok, Reused: true, Workspace: target.NativePath(st.Workspace)}, nil
 	}
@@ -154,7 +154,7 @@ func EnsureServe(ctx context.Context, conn Conn, opts Options) (Result, error) {
 		return Result{}, err
 	}
 	defer lock.release()
-	if st, tok, ok := tryReuse(ctx, conn, target, fs, paths, opts.MinVersion, opts.Broker.Addr, workspace); ok {
+	if st, tok, ok := tryReuse(ctx, conn, target, fs, paths, opts.MinVersion, opts.Broker, true, opts.clock(), workspace); ok {
 		opts.progress("reuse", st.Addr)
 		return Result{State: st, Token: tok, Reused: true, Workspace: target.NativePath(st.Workspace)}, nil
 	}
@@ -171,12 +171,13 @@ func EnsureServe(ctx context.Context, conn Conn, opts Options) (Result, error) {
 	if err := fs.MkdirAll(ctx, paths.Dir); err != nil {
 		return Result{}, err
 	}
+	_ = fs.Chmod(ctx, paths.Dir, 0o700)
 	if err := fs.WriteFileAtomic(ctx, paths.TokenFile, []byte(token+"\n"), 0o600); err != nil {
 		return Result{}, fmt.Errorf("bootstrap: write token: %w", err)
 	}
 	if opts.Broker.configured() {
-		if err := fs.WriteFileAtomic(ctx, paths.BrokerTokenFile, []byte(opts.Broker.Token+"\n"), 0o600); err != nil {
-			return Result{}, fmt.Errorf("bootstrap: write broker token: %w", err)
+		if err := writeBroker(ctx, fs, paths, opts.Broker); err != nil {
+			return Result{}, err
 		}
 	}
 	opts.progress("launch", "")
@@ -204,14 +205,15 @@ func EnsureServe(ctx context.Context, conn Conn, opts Options) (Result, error) {
 	}
 
 	st := ServeState{
-		PID:       pid,
-		Addr:      addr,
-		Workspace: workspace,
-		Version:   version,
-		Broker:    opts.Broker.Addr,
-		TokenFile: paths.TokenFile,
-		LogFile:   paths.LogFile,
-		StartedAt: nowUnix(opts.clock()),
+		PID:        pid,
+		Addr:       addr,
+		Workspace:  workspace,
+		Version:    version,
+		Broker:     opts.Broker.Addr,
+		BrokerFile: opts.Broker.configured(),
+		TokenFile:  paths.TokenFile,
+		LogFile:    paths.LogFile,
+		StartedAt:  nowUnix(opts.clock()),
 	}
 	data, err := MarshalState(st)
 	if err != nil {
@@ -279,6 +281,38 @@ func Stop(ctx context.Context, conn Conn, workspace string) error {
 	return nil
 }
 
+// RepointBroker points the serve recorded for workspace at broker, when that
+// serve follows its broker file. A link that came back on a different remote
+// port calls this so the running kernel reaches the broker where it now is.
+// A serve that does not follow the file is left as it is; the next connect
+// replaces it.
+func RepointBroker(ctx context.Context, conn Conn, workspace string, broker Broker) error {
+	if !broker.configured() {
+		return nil
+	}
+	fs, err := conn.SFTP()
+	if err != nil {
+		return err
+	}
+	target, _, _, home, err := remoteFor(ctx, conn, fs)
+	if err != nil {
+		return err
+	}
+	ws, err := resolveWorkspace(ctx, fs, workspace, home)
+	if err != nil {
+		return err
+	}
+	paths := target.Paths(home, ws)
+	st, err := readState(ctx, fs, paths.StateJSON)
+	if err != nil || !st.BrokerFile {
+		return nil
+	}
+	if _, ok := rebind(ctx, fs, paths, st, broker, false, time.Now); !ok {
+		return fmt.Errorf("bootstrap: re-point the serve for %s at its broker", ws)
+	}
+	return nil
+}
+
 // Logs writes up to n tail lines of the serve log to w.
 func Logs(ctx context.Context, conn Conn, workspace string, n int, w io.Writer) error {
 	fs, err := conn.SFTP()
@@ -302,7 +336,7 @@ func Logs(ctx context.Context, conn Conn, workspace string, n int, w io.Writer) 
 	return err
 }
 
-func tryReuse(ctx context.Context, conn Conn, target remoteOS, fs *sftpfs.FS, paths StatePaths, minVersion, broker string, workspace ...string) (ServeState, string, bool) {
+func tryReuse(ctx context.Context, conn Conn, target remoteOS, fs *sftpfs.FS, paths StatePaths, minVersion string, broker Broker, held bool, clock func() time.Time, workspace ...string) (ServeState, string, bool) {
 	st, err := readState(ctx, fs, paths.StateJSON)
 	if err != nil || st.PID <= 0 || st.Addr == "" {
 		return ServeState{}, "", false
@@ -310,10 +344,10 @@ func tryReuse(ctx context.Context, conn Conn, target remoteOS, fs *sftpfs.FS, pa
 	if len(workspace) > 0 && st.Workspace != workspace[0] {
 		return ServeState{}, "", false
 	}
-	// A serve resolves providers over the address it was launched with, and
-	// this connect is about to publish a different one — reusing the process
-	// would leave every model call dialling a port that no longer exists.
-	if st.Broker != broker {
+	// A serve reading its broker from a file follows the latest connect; any
+	// other keeps dialling the address it started with, which may be gone.
+	follows := broker.configured() && st.BrokerFile
+	if st.Broker != broker.Addr && !follows {
 		return ServeState{}, "", false
 	}
 	// Alive is not the same question as usable. Handing back a kernel from a
@@ -331,7 +365,56 @@ func tryReuse(ctx context.Context, conn Conn, target remoteOS, fs *sftpfs.FS, pa
 	if err != nil {
 		return ServeState{}, "", false
 	}
+	if follows {
+		// Written on every reuse, not only when the address moved: a broker
+		// restarted on the same port holds a new token.
+		if st, ok := rebind(ctx, fs, paths, st, broker, held, clock); ok {
+			return st, tok, true
+		}
+		return ServeState{}, "", false
+	}
 	return st, tok, true
+}
+
+// writeBroker points a serve at this connect's broker. Address and token go in
+// one file replaced whole, so no read can pair one connect's token with
+// another's port; the directory is kept private for the moment the temporary
+// file exists.
+func writeBroker(ctx context.Context, fs *sftpfs.FS, paths StatePaths, broker Broker) error {
+	_ = fs.Chmod(ctx, paths.Dir, 0o700)
+	body := []byte(broker.Addr + "\n" + broker.Token + "\n")
+	if err := fs.WriteFileAtomic(ctx, paths.BrokerEndpoint, body, 0o600); err != nil {
+		return fmt.Errorf("bootstrap: write broker endpoint: %w", err)
+	}
+	return nil
+}
+
+// rebind points the recorded serve at broker under the serve lock, so it cannot
+// overwrite a record another client is replacing. held says the caller already
+// owns the lock. It re-reads the record and gives up if the pid moved.
+func rebind(ctx context.Context, fs *sftpfs.FS, paths StatePaths, st ServeState, broker Broker, held bool, clock func() time.Time) (ServeState, bool) {
+	if !held {
+		lock, err := acquireServeLock(ctx, fs, paths, clock)
+		if err != nil {
+			return ServeState{}, false
+		}
+		defer lock.release()
+		now, err := readState(ctx, fs, paths.StateJSON)
+		if err != nil || now.PID != st.PID {
+			return ServeState{}, false
+		}
+		st = now
+	}
+	if err := writeBroker(ctx, fs, paths, broker); err != nil {
+		return ServeState{}, false
+	}
+	if st.Broker != broker.Addr {
+		st.Broker = broker.Addr
+		if data, err := MarshalState(st); err == nil {
+			_ = fs.WriteFileAtomic(ctx, paths.StateJSON, data, 0o600)
+		}
+	}
+	return st, true
 }
 
 // retireReplaced stops the kernel named by the record this launch is about to
@@ -443,7 +526,7 @@ func cleanupFailedLaunch(conn Conn, target remoteOS, fs *sftpfs.FS, paths StateP
 // this machine's provider credential on the remote.
 func removeServeState(ctx context.Context, fs *sftpfs.FS, paths StatePaths) {
 	for _, p := range []string{
-		paths.StateJSON, paths.TokenFile, paths.BrokerTokenFile, paths.PortFile, paths.PidFile,
+		paths.StateJSON, paths.TokenFile, paths.BrokerTokenFile, paths.BrokerEndpoint, paths.PortFile, paths.PidFile,
 	} {
 		if p != "" {
 			_ = fs.Remove(ctx, p, false)

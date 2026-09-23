@@ -14,11 +14,14 @@ type StatePaths struct {
 	// BrokerTokenFile authenticates this serve to the provider broker on the
 	// machine that started it. Written only when one was configured.
 	BrokerTokenFile string
-	LogFile         string
-	PortFile        string
-	PidFile         string
-	LockDir         string
-	LockOwner       string
+	// BrokerEndpoint is where that broker is and the token it takes, one file
+	// rewritten whole when a connect publishes the broker elsewhere.
+	BrokerEndpoint string
+	LogFile        string
+	PortFile       string
+	PidFile        string
+	LockDir        string
+	LockOwner      string
 }
 
 // shellQuote wraps s in single quotes safe for POSIX sh, escaping embedded
@@ -74,11 +77,10 @@ func LaunchCommand(spec LaunchSpec, p StatePaths) string {
 // this launch configured none. The token rides a file for the same reason the
 // serve token does: argv is world-readable in `ps`.
 func posixBrokerArgs(spec LaunchSpec, p StatePaths) string {
-	if spec.BrokerAddr == "" || p.BrokerTokenFile == "" {
+	if spec.BrokerAddr == "" || p.BrokerEndpoint == "" {
 		return ""
 	}
-	return " --provider-broker " + shellQuote(spec.BrokerAddr) +
-		" --provider-broker-token-file " + shellQuote(p.BrokerTokenFile)
+	return " --provider-broker-file " + shellQuote(p.BrokerEndpoint)
 }
 
 // StopCommand builds a script that TERMs the pid, waits up to ~5s, then KILLs
@@ -125,7 +127,7 @@ func LogsCommand(logFile string, n int) string {
 func LaunchFlags(withBroker bool) []string {
 	flags := []string{"addr", "auth", "token-file", "port-file", "pid-file"}
 	if withBroker {
-		flags = append(flags, "provider-broker", "provider-broker-token-file")
+		flags = append(flags, "provider-broker-file")
 	}
 	return flags
 }

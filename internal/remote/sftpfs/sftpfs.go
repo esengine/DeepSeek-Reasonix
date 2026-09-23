@@ -199,6 +199,15 @@ func (f *FS) writeFileAtomic(ctx context.Context, p string, r io.Reader, perm fs
 		if oerr != nil {
 			return 0, oerr
 		}
+		// Narrowed before the first byte: a descriptor another account opened
+		// while the file carried the server's default mode keeps reading it.
+		if perm != 0 {
+			if cerr := f.client.Chmod(tmp, perm); cerr != nil {
+				_ = fh.Close()
+				_ = f.client.Remove(tmp)
+				return 0, cerr
+			}
+		}
 		n, werr := io.Copy(fh, r)
 		if werr != nil {
 			_ = fh.Close()
@@ -208,12 +217,6 @@ func (f *FS) writeFileAtomic(ctx context.Context, p string, r io.Reader, perm fs
 		if cerr := fh.Close(); cerr != nil {
 			_ = f.client.Remove(tmp)
 			return n, cerr
-		}
-		if perm != 0 {
-			if cerr := f.client.Chmod(tmp, perm); cerr != nil {
-				_ = f.client.Remove(tmp)
-				return n, cerr
-			}
 		}
 		if rerr := f.rename(tmp, p); rerr != nil {
 			_ = f.client.Remove(tmp)
@@ -245,6 +248,14 @@ func (f *FS) rename(oldPath, newPath string) error {
 func (f *FS) MkdirAll(ctx context.Context, p string) error {
 	_, err := run(ctx, func() (struct{}, error) {
 		return struct{}{}, f.client.MkdirAll(p)
+	})
+	return err
+}
+
+// Chmod sets p's permission bits.
+func (f *FS) Chmod(ctx context.Context, p string, perm fs.FileMode) error {
+	_, err := run(ctx, func() (struct{}, error) {
+		return struct{}{}, f.client.Chmod(p, perm)
 	})
 	return err
 }

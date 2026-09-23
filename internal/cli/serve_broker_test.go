@@ -1,12 +1,19 @@
 package cli
 
 import (
+	"context"
 	"flag"
+	"net/http"
+	"net/http/httptest"
 	"os"
 	"path/filepath"
 	"runtime"
 	"strings"
+	"sync/atomic"
 	"testing"
+
+	"reasonix/internal/provider"
+	"reasonix/internal/providerbroker"
 )
 
 func brokerFlagsFor(t *testing.T, args ...string) brokerFlags {
@@ -104,5 +111,118 @@ func TestBrokerTokenFileMustBePrivate(t *testing.T) {
 	}
 	if !strings.Contains(err.Error(), "chmod 600") {
 		t.Fatalf("the refusal did not name the fix: %v", err)
+	}
+}
+
+type namedProvider struct{ name string }
+
+func (p namedProvider) Name() string { return p.name }
+func (p namedProvider) Stream(context.Context, provider.Request) (<-chan provider.Chunk, error) {
+	out := make(chan provider.Chunk, 2)
+	out <- provider.Chunk{Type: provider.ChunkText, Text: p.name}
+	out <- provider.Chunk{Type: provider.ChunkDone}
+	close(out)
+	return out, nil
+}
+
+func brokerAt(t *testing.T, name, token string) string {
+	t.Helper()
+	desc := provider.Descriptor{Ref: "p/m"}
+	srv, err := providerbroker.NewServer(&provider.StaticResolver{
+		Descriptors: []provider.Descriptor{desc},
+		Providers:   map[string]provider.Provider{desc.Ref: namedProvider{name}},
+	}, token)
+	if err != nil {
+		t.Fatal(err)
+	}
+	ts := httptest.NewServer(srv.Handler())
+	t.Cleanup(ts.Close)
+	return ts.URL
+}
+
+func writePrivate(t *testing.T, path, line string) {
+	t.Helper()
+	if err := os.WriteFile(path, []byte(line+"\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+}
+
+// Another window connecting publishes the broker on a new port and token. The
+// serve reads the one file per request, so the conversation already running
+// reaches the new broker instead of being restarted to find it.
+func TestBrokerFileFollowsARepublishedBroker(t *testing.T) {
+	file := filepath.Join(t.TempDir(), "broker.endpoint")
+	first, second := brokerAt(t, "first", "one"), brokerAt(t, "second", "two")
+	writePrivate(t, file, first+"\none")
+
+	resolver, err := brokerFlagsFor(t, "--provider-broker-file", file).resolver()
+	if err != nil {
+		t.Fatal(err)
+	}
+	p, err := resolver.Resolve(provider.Selection{Ref: "p/m"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	say := func() (string, error) {
+		ch, err := p.Stream(context.Background(), provider.Request{})
+		if err != nil {
+			return "", err
+		}
+		return (<-ch).Text, nil
+	}
+	if got, err := say(); err != nil || got != "first" {
+		t.Fatalf("before = %q, %v", got, err)
+	}
+	writePrivate(t, file, second+"\ntwo")
+	if got, err := say(); err != nil || got != "second" {
+		t.Fatalf("after the rewrite = %q, %v; want the republished broker", got, err)
+	}
+
+	writePrivate(t, file, "http://10.0.0.4:8080\ntwo")
+	if _, err := say(); err == nil {
+		t.Fatal("a rewrite to a non-loopback address was followed")
+	}
+	writePrivate(t, file, second)
+	if _, err := say(); err == nil {
+		t.Fatal("a file with no token line was accepted")
+	}
+}
+
+func TestBrokerNamedTwiceIsRefused(t *testing.T) {
+	dir := t.TempDir()
+	file, tokenFile := filepath.Join(dir, "broker.endpoint"), writeTokenFile(t, "t")
+	writePrivate(t, file, "http://127.0.0.1:1\nt")
+	b := brokerFlagsFor(t, "--provider-broker", "http://127.0.0.1:1", "--provider-broker-file", file, "--provider-broker-token-file", tokenFile)
+	if _, err := b.resolver(); err == nil {
+		t.Fatal("two broker addresses were accepted")
+	}
+}
+
+// A broker answering with a redirect would send the token and the whole
+// conversation to wherever it points; the serve does not follow it.
+func TestBrokerDoesNotFollowARedirect(t *testing.T) {
+	var reached atomic.Int32
+	elsewhere := httptest.NewServer(http.HandlerFunc(func(http.ResponseWriter, *http.Request) { reached.Add(1) }))
+	defer elsewhere.Close()
+	redirecting := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		http.Redirect(w, r, elsewhere.URL+r.URL.Path, http.StatusTemporaryRedirect)
+	}))
+	defer redirecting.Close()
+	file := filepath.Join(t.TempDir(), "broker.endpoint")
+	writePrivate(t, file, redirecting.URL+"\nt")
+
+	resolver, err := brokerFlagsFor(t, "--provider-broker-file", file).resolver()
+	if err != nil {
+		t.Fatal(err)
+	}
+	p, err := resolver.Resolve(provider.Selection{Ref: "p/m"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := p.Stream(context.Background(), provider.Request{}); err == nil {
+		t.Fatal("a redirected stream was accepted")
+	}
+	if n := reached.Load(); n != 0 {
+		t.Fatalf("the redirect target was reached %d times", n)
 	}
 }

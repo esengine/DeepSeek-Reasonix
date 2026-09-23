@@ -60,6 +60,12 @@ func RemoteServeTokenName(slug string) string { return "serve-" + slug + ".token
 // serve token: the two authenticate opposite directions of the tunnel.
 func RemoteServeBrokerTokenName(slug string) string { return "serve-" + slug + ".broker" }
 
+// RemoteServeBrokerEndpointName holds the broker's loopback address and its
+// token (0600), read by serve via --provider-broker-file on every request, so
+// the broker can be republished without restarting the kernel that uses it.
+// One file, so a reader never pairs one connect's token with another's port.
+func RemoteServeBrokerEndpointName(slug string) string { return "serve-" + slug + ".broker-endpoint" }
+
 // RemoteServeLogName captures the detached serve's stdout/stderr.
 func RemoteServeLogName(slug string) string { return "serve-" + slug + ".log" }
 

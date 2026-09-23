@@ -524,15 +524,15 @@ func TestEnsureServeWritesTheBrokerTokenPrivately(t *testing.T) {
 	}); err != nil {
 		t.Fatalf("EnsureServe: %v", err)
 	}
-	data, err := os.ReadFile(paths.BrokerTokenFile)
+	data, err := os.ReadFile(paths.BrokerEndpoint)
 	if err != nil {
-		t.Fatalf("read broker token file: %v", err)
+		t.Fatalf("read broker endpoint file: %v", err)
 	}
-	if strings.TrimSpace(string(data)) != "broker-secret" {
-		t.Fatalf("broker token file holds %q", data)
+	if strings.TrimSpace(string(data)) != "127.0.0.1:40007\nbroker-secret" {
+		t.Fatalf("broker endpoint file holds %q", data)
 	}
 	if runtime.GOOS != "windows" {
-		fi, err := os.Stat(paths.BrokerTokenFile)
+		fi, err := os.Stat(paths.BrokerEndpoint)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -598,5 +598,147 @@ func TestEnsureServeStopsTheKernelABrokerMismatchDeclined(t *testing.T) {
 	}
 	if !conn.ranContaining("kill -TERM 777") {
 		t.Fatal("the kernel a broker mismatch declined was left running with nothing pointing at it")
+	}
+}
+
+// A serve that reads its broker from a file is not replaced when another
+// connect publishes the broker elsewhere: the files are rewritten and the
+// running kernel, with the conversations on it, is kept.
+func TestEnsureServeRebindsAServeThatFollowsItsBrokerFile(t *testing.T) {
+	skipOnWindows(t)
+	for name, broker := range map[string]Broker{
+		"moved":     {Addr: "127.0.0.1:40002", Token: "tok-2"},
+		"new token": {Addr: "127.0.0.1:40001", Token: "tok-2"},
+	} {
+		t.Run(name, func(t *testing.T) {
+			root := testenv.TempDir(t)
+			paths := pathsFor(root, root)
+			if err := os.MkdirAll(paths.Dir, 0o755); err != nil {
+				t.Fatal(err)
+			}
+			st := ServeState{
+				PID: 779, Addr: "127.0.0.1:5002", Workspace: root,
+				TokenFile: paths.TokenFile, Broker: "127.0.0.1:40001", BrokerFile: true,
+			}
+			data, _ := MarshalState(st)
+			for path, body := range map[string][]byte{
+				paths.StateJSON: data, paths.TokenFile: []byte("existing-token\n"),
+				paths.BrokerEndpoint: []byte("127.0.0.1:40001\ntok-1\n"),
+			} {
+				if err := os.WriteFile(path, body, 0o600); err != nil {
+					t.Fatal(err)
+				}
+			}
+			conn := newFakeConn(t, root, func(cmd string) (remote.ExecResult, error) {
+				switch {
+				case strings.Contains(cmd, "kill -0 779"):
+					return ok("1\n")
+				case strings.Contains(cmd, "uname"):
+					return ok("Linux x86_64\n")
+				}
+				return ok("")
+			})
+
+			res, err := EnsureServe(context.Background(), conn, Options{Workspace: "~", Broker: broker})
+			if err != nil {
+				t.Fatalf("EnsureServe: %v", err)
+			}
+			if !res.Reused || res.State.PID != 779 || conn.ranContaining("kill -TERM") {
+				t.Fatalf("reused=%v pid=%d: the running kernel was replaced", res.Reused, res.State.PID)
+			}
+			got, err := os.ReadFile(paths.BrokerEndpoint)
+			if want := broker.Addr + "\n" + broker.Token; err != nil || strings.TrimSpace(string(got)) != want {
+				t.Fatalf("%s = %q, want %q", filepath.Base(paths.BrokerEndpoint), got, want)
+			}
+			recorded, err := readStateFile(paths.StateJSON)
+			if err != nil || recorded.Broker != broker.Addr || !recorded.BrokerFile {
+				t.Fatalf("state = %+v, %v; want it naming the broker now in use", recorded, err)
+			}
+		})
+	}
+}
+
+// A fresh launch reads its broker from the file from the start, and says so,
+// so the next connect can rebind it rather than replace it.
+func TestEnsureServeLaunchesAServeThatFollowsItsBrokerFile(t *testing.T) {
+	skipOnWindows(t)
+	root := testenv.TempDir(t)
+	paths := pathsFor(root, root)
+	conn := newFakeConn(t, root, func(cmd string) (remote.ExecResult, error) {
+		switch {
+		case strings.Contains(cmd, "uname"):
+			return ok("Linux x86_64\n")
+		case strings.Contains(cmd, "command -v reasonix"):
+			return ok("bin /usr/bin/reasonix\nver reasonix v9.9.9\n" + allFlagsYes())
+		case strings.Contains(cmd, "nohup"):
+			_ = os.WriteFile(paths.PortFile, []byte("127.0.0.1:6002\n"), 0o600)
+			_ = os.WriteFile(paths.PidFile, []byte("992\n"), 0o600)
+			return ok("992\n")
+		case strings.Contains(cmd, "kill -0 992"):
+			return ok("1\n")
+		}
+		return ok("")
+	})
+	res, err := EnsureServe(context.Background(), conn, Options{
+		Workspace: "~", Broker: Broker{Addr: "127.0.0.1:40008", Token: "t"},
+	})
+	if err != nil {
+		t.Fatalf("EnsureServe: %v", err)
+	}
+	if !res.State.BrokerFile {
+		t.Fatal("a launch reading its broker from a file did not record that it does")
+	}
+	got, err := os.ReadFile(paths.BrokerEndpoint)
+	if err != nil || strings.TrimSpace(string(got)) != "127.0.0.1:40008\nt" {
+		t.Fatalf("broker endpoint file = %q, %v", got, err)
+	}
+	if !conn.ranContaining("--provider-broker-file") {
+		t.Fatal("the launch did not point the serve at the endpoint file")
+	}
+}
+
+func readStateFile(path string) (ServeState, error) {
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return ServeState{}, err
+	}
+	return UnmarshalState(data)
+}
+
+// A link that came back on another remote port re-points the kernel that
+// follows its broker file, and leaves one that does not alone.
+func TestRepointBrokerRewritesOnlyAServeThatFollowsItsFile(t *testing.T) {
+	skipOnWindows(t)
+	for _, follows := range []bool{true, false} {
+		root := testenv.TempDir(t)
+		paths := pathsFor(root, root)
+		if err := os.MkdirAll(paths.Dir, 0o755); err != nil {
+			t.Fatal(err)
+		}
+		data, _ := MarshalState(ServeState{PID: 780, Addr: "127.0.0.1:5003", Workspace: root,
+			TokenFile: paths.TokenFile, Broker: "127.0.0.1:40001", BrokerFile: follows})
+		if err := os.WriteFile(paths.StateJSON, data, 0o600); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(paths.BrokerEndpoint, []byte("127.0.0.1:40001\nt0\n"), 0o600); err != nil {
+			t.Fatal(err)
+		}
+		conn := newFakeConn(t, root, func(cmd string) (remote.ExecResult, error) {
+			if strings.Contains(cmd, "uname") {
+				return ok("Linux x86_64\n")
+			}
+			return ok("")
+		})
+		if err := RepointBroker(context.Background(), conn, "~", Broker{Addr: "127.0.0.1:40009", Token: "t"}); err != nil {
+			t.Fatalf("follows=%v: %v", follows, err)
+		}
+		got, _ := os.ReadFile(paths.BrokerEndpoint)
+		want := "127.0.0.1:40001\nt0"
+		if follows {
+			want = "127.0.0.1:40009\nt"
+		}
+		if strings.TrimSpace(string(got)) != want {
+			t.Fatalf("follows=%v: address file = %q, want %q", follows, got, want)
+		}
 	}
 }

@@ -190,7 +190,7 @@ func TestProbedFlagsAreExactlyTheOnesTheLaunchPasses(t *testing.T) {
 		paths := StatePaths{Dir: "/d", TokenFile: "/d/t", PortFile: "/d/p", PidFile: "/d/i", LogFile: "/d/l"}
 		if withBroker {
 			spec.BrokerAddr = "127.0.0.1:1"
-			paths.BrokerTokenFile = "/d/b"
+			paths.BrokerEndpoint = "/d/e"
 		}
 		passed := longFlagsIn(LaunchCommand(spec, paths))
 		probed := LaunchFlags(withBroker)
@@ -334,16 +334,20 @@ func TestOutdatedNamesTheNewestOneTurnedDown(t *testing.T) {
 
 // The broker token authenticates a remote kernel to the model credentials at
 // home, so it rides a file for the same reason the serve token does: argv is
-// readable by every account on the machine, through `ps`.
-func TestLaunchCarriesTheBrokerByFileNotArgv(t *testing.T) {
+// readable by every account on the machine, through `ps`. The address rides a
+// file too, because a connect publishing the broker elsewhere rewrites it.
+func TestLaunchCarriesTheBrokerByFilesNotArgv(t *testing.T) {
 	paths := StatePaths{
-		Dir: "/d", TokenFile: "/d/t", BrokerTokenFile: "/d/b",
+		Dir: "/d", TokenFile: "/d/t", BrokerEndpoint: "/d/e",
 		PortFile: "/d/p", PidFile: "/d/i", LogFile: "/d/l",
 	}
 	spec := LaunchSpec{Bin: "/usr/bin/reasonix", Workspace: "/ws", BrokerAddr: "127.0.0.1:41235"}
 	cmd := LaunchCommand(spec, paths)
+	if strings.Contains(cmd, "41235") {
+		t.Fatalf("the broker address reached argv instead of its file:\n%s", cmd)
+	}
 
-	for _, want := range []string{"--provider-broker '127.0.0.1:41235'", "--provider-broker-token-file '/d/b'"} {
+	for _, want := range []string{"--provider-broker-file '/d/e'"} {
 		if !strings.Contains(cmd, want) {
 			t.Fatalf("launch command is missing %q:\n%s", want, cmd)
 		}
@@ -366,17 +370,17 @@ func TestLaunchWithoutABrokerNamesNoBrokerFlags(t *testing.T) {
 	}
 }
 
-// The address is an operand like every other, and a hostile one must not break
-// out of its quoting.
-func TestLaunchQuotesTheBrokerAddress(t *testing.T) {
+// A hostile address has no command line to break out of: it only ever
+// reaches the file the serve reads, and the serve refuses one off loopback.
+func TestLaunchKeepsTheBrokerAddressOffTheCommandLine(t *testing.T) {
 	paths := StatePaths{
-		Dir: "/d", TokenFile: "/d/t", BrokerTokenFile: "/d/b",
+		Dir: "/d", TokenFile: "/d/t", BrokerEndpoint: "/d/e",
 		PortFile: "/d/p", PidFile: "/d/i", LogFile: "/d/l",
 	}
 	hostile := "127.0.0.1:1'; rm -rf ~; echo '"
 	cmd := LaunchCommand(LaunchSpec{Bin: "/r", Workspace: "/ws", BrokerAddr: hostile}, paths)
-	if strings.Contains(cmd, "; rm -rf ~; echo") && !strings.Contains(cmd, `'\''; rm -rf ~; echo '\''`) {
-		t.Fatalf("hostile broker address not properly escaped:\n%s", cmd)
+	if strings.Contains(cmd, "rm -rf") {
+		t.Fatalf("the broker address reached the command line:\n%s", cmd)
 	}
 }
 

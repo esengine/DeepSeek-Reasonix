@@ -17,36 +17,56 @@ import (
 // secret never appears in argv (visible via ps). The file must hold a single
 // non-empty line and, on POSIX systems, must not be group/world accessible.
 func readServeTokenFile(path string) (string, error) {
-	f, err := os.Open(path)
+	lines, err := readPrivateLines(path, 1)
 	if err != nil {
 		return "", err
+	}
+	return lines[0], nil
+}
+
+// readPrivateLines reads a file this serve's owner alone may read, holding
+// exactly want non-empty lines. A secret kept in a file is only as private as
+// the file, and a line count checked here is one no caller re-derives.
+func readPrivateLines(path string, want int) ([]string, error) {
+	f, err := os.Open(path)
+	if err != nil {
+		return nil, err
 	}
 	defer f.Close()
 	fi, err := f.Stat()
 	if err != nil {
-		return "", err
+		return nil, err
 	}
 	if !fi.Mode().IsRegular() {
-		return "", fmt.Errorf("token file %s must be a regular file", path)
+		return nil, fmt.Errorf("token file %s must be a regular file", path)
 	}
 	if runtime.GOOS != "windows" && fi.Mode().Perm()&0o077 != 0 {
-		return "", fmt.Errorf("token file %s must not be group/world accessible (chmod 600)", path)
+		return nil, fmt.Errorf("token file %s must not be group/world accessible (chmod 600)", path)
 	}
 	b, err := io.ReadAll(io.LimitReader(f, (64<<10)+1))
 	if err != nil {
-		return "", err
+		return nil, err
 	}
 	if len(b) > 64<<10 {
-		return "", fmt.Errorf("token file %s is too large", path)
+		return nil, fmt.Errorf("token file %s is too large", path)
 	}
-	tok := strings.TrimSpace(string(b))
-	if tok == "" {
-		return "", fmt.Errorf("token file %s is empty", path)
+	lines := strings.Split(strings.TrimSpace(strings.ReplaceAll(string(b), "\r\n", "\n")), "\n")
+	if len(lines) == 1 && lines[0] == "" {
+		return nil, fmt.Errorf("token file %s is empty", path)
 	}
-	if strings.ContainsAny(tok, "\r\n") {
-		return "", fmt.Errorf("token file %s must hold a single line", path)
+	if len(lines) != want {
+		if want == 1 {
+			return nil, fmt.Errorf("token file %s must hold a single line", path)
+		}
+		return nil, fmt.Errorf("token file %s must hold %d lines, has %d", path, want, len(lines))
 	}
-	return tok, nil
+	for i, line := range lines {
+		lines[i] = strings.TrimSpace(line)
+		if lines[i] == "" {
+			return nil, fmt.Errorf("token file %s has an empty line", path)
+		}
+	}
+	return lines, nil
 }
 
 // writeServeAddrFile records the actual bound listen address (host:port) so a

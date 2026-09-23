@@ -74,11 +74,10 @@ func (windowsShell) Launch(spec LaunchSpec, p StatePaths) string {
 // this launch configured none. The token rides a file rather than argv, which
 // any account on the machine can read out of the process list.
 func windowsBrokerArgs(spec LaunchSpec, p StatePaths) string {
-	if spec.BrokerAddr == "" || p.BrokerTokenFile == "" {
+	if spec.BrokerAddr == "" || p.BrokerEndpoint == "" {
 		return ""
 	}
-	return " --provider-broker " + psQuote(spec.BrokerAddr) +
-		" --provider-broker-token-file " + psQuote(toShellPath(p.BrokerTokenFile))
+	return " --provider-broker-file " + psQuote(toShellPath(p.BrokerEndpoint))
 }
 
 func (windowsShell) Fetch(d releaseasset.CLIDownload, dir, bin string) string {

@@ -17,12 +17,13 @@ type ServeState struct {
 	Workspace string `json:"workspace"`
 	Version   string `json:"version,omitempty"`
 	TokenFile string `json:"token_file"`
-	// Broker is the loopback address this serve was launched resolving
-	// providers over. A reconnect that would publish a different one cannot
-	// reuse the process: its providers still point at the retired port.
-	Broker    string `json:"broker,omitempty"`
-	LogFile   string `json:"log_file,omitempty"`
-	StartedAt int64  `json:"started_at,omitempty"` // unix seconds
+	// Broker is the loopback address this serve resolves providers over.
+	// BrokerFile marks one that reads it from a file per request: a connect
+	// publishing another broker rewrites the file rather than replacing it.
+	Broker     string `json:"broker,omitempty"`
+	BrokerFile bool   `json:"broker_file,omitempty"`
+	LogFile    string `json:"log_file,omitempty"`
+	StartedAt  int64  `json:"started_at,omitempty"` // unix seconds
 }
 
 // MarshalState renders a ServeState as indented JSON.
@@ -54,6 +55,7 @@ func pathsFor(home, workspace string) StatePaths {
 		StateJSON:       path.Join(dir, store.RemoteServeStateName(slug)),
 		TokenFile:       path.Join(dir, store.RemoteServeTokenName(slug)),
 		BrokerTokenFile: path.Join(dir, store.RemoteServeBrokerTokenName(slug)),
+		BrokerEndpoint:  path.Join(dir, store.RemoteServeBrokerEndpointName(slug)),
 		LogFile:         path.Join(dir, store.RemoteServeLogName(slug)),
 		PortFile:        path.Join(dir, store.RemoteServePortName(slug)),
 		PidFile:         path.Join(dir, store.RemoteServePidName(slug)),

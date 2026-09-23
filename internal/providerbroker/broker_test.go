@@ -433,3 +433,57 @@ func TestEachLocalMintsItsOwnToken(t *testing.T) {
 		t.Fatalf("one broker accepted another's token: %+v", got)
 	}
 }
+
+// A provider resolved before the broker moved keeps working after it: the
+// endpoint is asked per request, so a session built against the old port
+// reaches the new one without being rebuilt.
+func TestAResolvedProviderFollowsAMovedBroker(t *testing.T) {
+	desc := provider.Descriptor{Ref: "p/m"}
+	serve := func(name string) *httptest.Server {
+		fake := &fakeProvider{name: name, script: []provider.Chunk{{Type: provider.ChunkText, Text: name}, {Type: provider.ChunkDone}}}
+		srv, err := NewServer(staticResolver(fake, desc), testToken)
+		if err != nil {
+			t.Fatal(err)
+		}
+		ts := httptest.NewServer(srv.Handler())
+		t.Cleanup(ts.Close)
+		return ts
+	}
+	first, second := serve("first"), serve("second")
+	at := first.URL
+	client := NewEndpointClient(func() (string, string, error) { return at, testToken, nil }, nil)
+	p, err := client.Resolve(provider.Selection{Ref: desc.Ref})
+	if err != nil {
+		t.Fatal(err)
+	}
+	say := func() string {
+		ch, err := p.Stream(context.Background(), provider.Request{Messages: []provider.Message{{Role: provider.RoleUser, Content: "hi"}}})
+		if err != nil {
+			t.Fatalf("Stream: %v", err)
+		}
+		return drain(t, ch)[0].Text
+	}
+	if got := say(); got != "first" {
+		t.Fatalf("before the move = %q, want first", got)
+	}
+	at = second.URL
+	if got := say(); got != "second" {
+		t.Fatalf("after the move = %q, want the broker the endpoint now names", got)
+	}
+}
+
+// An endpoint that cannot answer fails that request, named as a lookup.
+func TestAnEndpointThatCannotAnswerFailsTheRequest(t *testing.T) {
+	gone := errors.New("the address file is missing")
+	client := NewEndpointClient(func() (string, string, error) { return "", "", gone }, nil)
+	p, err := client.Resolve(provider.Selection{Ref: "p/m"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := p.Stream(context.Background(), provider.Request{}); !errors.Is(err, gone) {
+		t.Fatalf("Stream err = %v, want the endpoint's error", err)
+	}
+	if got := client.Catalog(); len(got) != 0 {
+		t.Fatalf("catalog = %v, want empty when the broker cannot be located", got)
+	}
+}
