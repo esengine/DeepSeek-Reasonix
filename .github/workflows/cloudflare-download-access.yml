@@ -36,9 +36,19 @@ jobs:
         run: |
           browser="$(command -v google-chrome || command -v google-chrome-stable || command -v chromium)"
           for path in '?download=desktop&release-postflight=v1.38.12' 'changelog/v1.38.12/'; do
-            output="$(mktemp)"
-            "$browser" --headless=new --disable-gpu --no-sandbox --virtual-time-budget=10000 \
-              --dump-dom "https://reasonix.io/$path" >"$output" 2>/dev/null || true
-            node -e 'const fs=require("fs"); const body=fs.readFileSync(process.argv[1],"utf8"); console.log(JSON.stringify({kind:"chromium-site",hasVersion:body.includes("v1.38.12"),hasDesktopAsset:body.includes("data-desktop-asset="),looksChallenged:body.includes("Just a moment...")}))' "$output"
-            rm -f "$output"
+            for profile in default updater browser browser-masked; do
+              output="$(mktemp)"
+              profile_dir="$(mktemp -d)"
+              flags=()
+              case "$profile" in
+                updater) flags+=(--user-agent='Reasonix-Updater/v1.38.12 (linux/amd64; build=stable; update=stable)') ;;
+                browser|browser-masked) flags+=(--user-agent='Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36') ;;
+              esac
+              if [ "$profile" = browser-masked ]; then flags+=(--disable-blink-features=AutomationControlled); fi
+              "$browser" --headless=new --disable-gpu --no-sandbox --virtual-time-budget=10000 \
+                "--user-data-dir=$profile_dir" "${flags[@]}" \
+                --dump-dom "https://reasonix.io/$path" >"$output" 2>/dev/null || true
+              node -e 'const fs=require("fs"); const body=fs.readFileSync(process.argv[1],"utf8"); console.log(JSON.stringify({kind:"chromium-site",profile:process.argv[2],path:process.argv[3],hasHydratedDesktopVersion:body.includes("data-release-version=\"desktop\">v1.38.12<"),hasDesktopAsset:body.includes("data-desktop-asset="),looksChallenged:body.includes("Just a moment...")}))' "$output" "$profile" "$path"
+              rm -rf "$output" "$profile_dir"
+            done
           done
