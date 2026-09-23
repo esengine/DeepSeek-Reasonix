@@ -593,6 +593,23 @@ jq -n \
 ' >"$publication_release"
 [ "$(bash "$publication_decider" stable v1.2.3 esengine/DeepSeek-Reasonix \
 	"$publication_release" "$publication_checksums")" = "reuse" ]
+publication_with_compat="$test_root/cli-publication-with-compat-release.json"
+jq '.assets += [{name: "latest.json", state: "uploaded", size: 1,
+  browser_download_url: "https://github.com/esengine/DeepSeek-Reasonix/releases/download/v1.2.3/latest.json",
+  digest: "sha256:0000000000000000000000000000000000000000000000000000000000000000"}]' \
+  "$publication_release" >"$publication_with_compat"
+[ "$(bash "$publication_decider" stable v1.2.3 esengine/DeepSeek-Reasonix \
+  "$publication_with_compat" "$publication_checksums")" = "reuse" ]
+publication_unexpected_asset="$test_root/cli-publication-unexpected-asset-release.json"
+jq '.assets += [{name: "unexpected.zip", state: "uploaded", size: 1,
+  browser_download_url: "https://github.com/esengine/DeepSeek-Reasonix/releases/download/v1.2.3/unexpected.zip",
+  digest: "sha256:0000000000000000000000000000000000000000000000000000000000000000"}]' \
+  "$publication_release" >"$publication_unexpected_asset"
+if bash "$publication_decider" stable v1.2.3 esengine/DeepSeek-Reasonix \
+  "$publication_unexpected_asset" "$publication_checksums" >/dev/null 2>&1; then
+  echo "CLI publication decider accepted an unexpected asset" >&2
+  exit 1
+fi
 publication_preview="$test_root/cli-publication-preview-release.json"
 jq '.tag_name = "v1.2.3-preview.4" | .prerelease = true |
 	.html_url = "https://github.com/esengine/DeepSeek-Reasonix/releases/tag/v1.2.3-preview.4" |

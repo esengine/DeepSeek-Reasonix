@@ -76,8 +76,8 @@ jq -e \
 	end) and
 	(.html_url == ("https://github.com/" + $repository + "/releases/tag/" + $tag)) and
 	(.assets | type == "array") and
-	(.assets | length == ($required | length)) and
-	((.assets | map(.name) | sort) == ($required | sort)) and
+	((.assets | map(.name) | sort) == ($required | sort) or
+	 (.assets | map(.name) | sort) == (($required + ["latest.json"]) | sort)) and
 	(.assets | all(
 		(type == "object") and
 		(.state == "uploaded") and
@@ -97,7 +97,7 @@ trap 'rm -f "$expected_checksums" "$actual_checksums"' EXIT
 
 jq -r '
 	.assets[] |
-	select(.name != "SHA256SUMS") |
+	select(.name != "SHA256SUMS" and .name != "latest.json") |
 	((.digest | sub("^sha256:"; "")) + "  " + .name)
 ' "$release_json" | LC_ALL=C sort >"$expected_checksums"
 

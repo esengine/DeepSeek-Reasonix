@@ -273,6 +273,7 @@ jobs:
           # Validate the protected control-plane files that GitHub and SignPath
           # execute, including during recovery of an older candidate.
           ref: ${{ github.sha }}
+          fetch-depth: 0
 
       - uses: actions/setup-go@v7
         with:
@@ -338,8 +339,11 @@ jobs:
           go run ./cmd/signpath-contract validate
           fingerprint="$(go run ./cmd/signpath-contract fingerprint)"
           if [ "${{ inputs.candidate_verified }}" = "true" ] && [ "$fingerprint" != "${{ inputs.candidate_signing_fingerprint }}" ]; then
-            echo "::error::sealed candidate signing policy no longer matches the protected publisher"
-            exit 1
+            # Publication reuses the already signed candidate bytes. A protected
+            # control-only repair may change this job without changing the
+            # candidate's original signing policy or any publisher job.
+            fingerprint="$(node scripts/verify-candidate-signing-repair.mjs \
+              '${{ inputs.candidate_control_sha }}' '${{ inputs.candidate_signing_fingerprint }}')"
           fi
           if [ "${{ inputs.reuse_manual_artifacts }}" = "true" ]; then
             node scripts/verify-manual-desktop-producer.mjs
