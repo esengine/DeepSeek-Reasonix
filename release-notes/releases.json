@@ -69,8 +69,8 @@
             "zh": "更快、更清晰的供应商错误"
           },
           "body": {
-            "en": "Provider failures now return immediately instead of retrying for up to ten minutes, with localized error summaries across the app.",
-            "zh": "供应商故障现在立即返回，不再重试长达十分钟，并在整个应用中提供本地化错误摘要。"
+            "en": "Ordinary provider HTTP and network failures no longer enter long automatic retry loops; the app shows localized error summaries.",
+            "zh": "普通供应商 HTTP 和网络故障不再进入长时间自动重试；应用会显示本地化错误摘要。"
           },
           "refs": [
             10730
