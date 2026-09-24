@@ -33,6 +33,9 @@ func (s *Store) RecordSource(ctx context.Context, mapping SourceMapping, present
 	return s.mutate(ctx, func(state *State) error {
 		if old, ok := state.SourceMappings[mapping.SourceKey]; ok {
 			if old.SessionID != mapping.SessionID || old.Fingerprint != mapping.Fingerprint {
+				debugConflict("RecordSource.mapping-exists", "sourceKey", mapping.SourceKey,
+					"oldSession", old.SessionID, "newSession", mapping.SessionID,
+					"oldFingerprint", old.Fingerprint, "newFingerprint", mapping.Fingerprint)
 				return ErrMutationConflict
 			}
 			return nil

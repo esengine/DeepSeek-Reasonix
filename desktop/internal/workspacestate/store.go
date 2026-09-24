@@ -429,6 +429,9 @@ func (s *Store) mutate(ctx context.Context, change func(*State) error) error {
 		return err
 	}
 	if err := change(&state); err != nil {
+		if errors.Is(err, ErrMutationConflict) {
+			debugConflict("mutate", "raise", deepestConflictFrame())
+		}
 		return err
 	}
 	after, err := json.Marshal(state)

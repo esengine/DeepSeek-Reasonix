@@ -190,6 +190,7 @@ func (r *Registry) Commands() []Command { return slices.Clone(r.commands) }
 // its result (nil for void) or its error. Missing trailing arguments decode
 // as zero values, matching the retired shell's tolerance; extra ones are rejected.
 func (r *Registry) Invoke(ctx context.Context, name string, args []json.RawMessage) (result any, err error) {
+	defer debugRPCTiming(name)()
 	m, ok := r.methods[name]
 	if !ok {
 		return nil, &UnknownMethodError{Method: name}

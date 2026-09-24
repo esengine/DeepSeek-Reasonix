@@ -141,6 +141,7 @@ func (b bash) runPersistent(ctx context.Context, p bashParams, sh sandbox.Shell,
 		var startup *persistentshell.StartupError
 		if !errors.As(res.Err, &startup) {
 			if sh.Kind == sandbox.ShellPowerShell {
+				debugPersistentFallback(sh.Kind.String(), res.Err.Error())
 				out, ex, err := b.runForegroundDetailed(ctx, p, sh, prepared.Argv, prepared.Wrapped, cmdEnv)
 				return appendSessionDataHint(out, "Persistent PowerShell was unavailable before this command started. This call ran once in an isolated process; its directory and variable changes are not retained."), ex, err, true
 			}

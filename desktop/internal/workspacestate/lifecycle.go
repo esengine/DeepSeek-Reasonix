@@ -155,6 +155,7 @@ func (s *Store) SetLifecycle(ctx context.Context, ids []string, lifecycle string
 		}
 		for _, id := range ids {
 			if state.SessionStates[id].Lifecycle == Deleted {
+				debugConflict("SetLifecycle.deleted", "session", id)
 				return ErrMutationConflict
 			}
 			if _, ok := sessionOwner(*state, id); !ok {
@@ -195,6 +196,7 @@ func (s *Store) BeginOperation(ctx context.Context, op Operation) error {
 			return nil
 		}
 		if op.ExpectedGeneration != 0 && op.ExpectedGeneration != state.Generation {
+			debugConflict("BeginOperation.generation", "op", op.ID, "expected", op.ExpectedGeneration, "actual", state.Generation)
 			return ErrMutationConflict
 		}
 		if err := validateArchiveImportReservation(state, op); err != nil {
@@ -206,6 +208,8 @@ func (s *Store) BeginOperation(ctx context.Context, op Operation) error {
 			parent := state.PendingOperations[op.ID[:split]]
 			for _, id := range op.SessionIDs {
 				if parent.Kind == "command" && state.SessionStates[id].Generation > parent.ExpectedGeneration {
+					debugConflict("BeginOperation.parentGeneration", "op", op.ID, "session", id,
+						"sessionGen", state.SessionStates[id].Generation, "parentExpected", parent.ExpectedGeneration)
 					return ErrMutationConflict
 				}
 			}
@@ -270,6 +274,7 @@ func (s *Store) PrepareOperationContent(ctx context.Context, id string, ids []st
 func (s *Store) CommitOperation(ctx context.Context, id string) error {
 	return s.mutate(ctx, func(state *State) error {
 		if op, ok := state.PendingOperations[id]; ok && op.Kind == "archive-import" {
+			debugConflict("CommitOperation.archive-import", "op", id, "phase", op.Phase)
 			return ErrMutationConflict
 		}
 		if err := validateTopicRemovalArchive(*state, state.PendingOperations[id]); err != nil {
@@ -314,17 +319,20 @@ func commitOperation(state *State, id string, visiting map[string]bool) error {
 	defer delete(visiting, id)
 	op, ok := state.PendingOperations[id]
 	if !ok {
+		debugConflict("commitOperation.missing-op", "op", id)
 		return ErrMutationConflict
 	}
 	if op.Phase == "committed" {
 		return nil
 	}
 	if op.Phase != "content_ready" || len(op.SessionIDs) == 0 {
+		debugConflict("commitOperation.not-ready", "op", id, "phase", op.Phase, "sessions", len(op.SessionIDs))
 		return ErrMutationConflict
 	}
 	for _, dependency := range op.Dependencies {
 		child, ok := state.PendingOperations[dependency]
 		if !ok || child.Kind != "archive-import" || child.Phase != "content_ready" {
+			debugConflict("commitOperation.dependency", "op", id, "dep", dependency)
 			return ErrMutationConflict
 		}
 		for _, target := range child.SessionIDs {
@@ -341,9 +349,12 @@ func commitOperation(state *State, id string, visiting map[string]bool) error {
 			return err
 		}
 		if state.SessionStates[sessionID].Lifecycle == Deleted {
+			debugConflict("commitOperation.session-deleted", "op", id, "session", sessionID)
 			return ErrMutationConflict
 		}
 		if current, exists := state.SessionStates[sessionID]; exists && current.Generation > op.ExpectedGeneration && current.Generation != state.Generation+1 {
+			debugConflict("commitOperation.generation", "op", id, "session", sessionID,
+				"sessionGen", current.Generation, "expected", op.ExpectedGeneration, "stateGen", state.Generation)
 			return ErrMutationConflict
 		}
 		owner, attached := sessionOwner(*state, sessionID)
