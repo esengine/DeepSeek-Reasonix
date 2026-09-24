@@ -22,7 +22,14 @@ export class DiagnosticBuffer {
     const item = { ...entry, sequence: ++this.sequence, time: Date.now(), message: diagnosticText(entry.message), url: entry.url ? diagnosticURL(entry.url) : undefined };
     this.entries.push(item);
     this.bytes += Buffer.byteLength(JSON.stringify(item));
-    while (this.entries.length > 200 || this.bytes > 256 * 1024) this.bytes -= Buffer.byteLength(JSON.stringify(this.entries.shift()));
+    while (this.entries.length > 200 || this.bytes > 256 * 1024) {
+      const shifted = this.entries.shift();
+      if (!shifted) {
+        this.bytes = 0;
+        break;
+      }
+      this.bytes -= Buffer.byteLength(JSON.stringify(shifted));
+    }
     for (const listener of this.listeners) listener(item);
   }
   read(after = 0, kind = "") { return { available: true, cursor: this.sequence, truncated: after < (this.entries[0]?.sequence ?? 1) - 1, entries: this.entries.filter(entry => entry.sequence > after && (!kind || entry.kind === kind)) }; }
