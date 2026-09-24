@@ -42,7 +42,9 @@ func (c *Catalog) reconcileDirectory(ctx context.Context, target DirectoryTarget
 	lock.Lock()
 	defer lock.Unlock()
 	target.Scope, target.WorkspaceRoot = normalizeScope(target.Scope, target.WorkspaceRoot)
+	signatureDone := debugPhase("signature", target.Path)
 	signature, err := directorySignature(target.Path)
+	signatureDone()
 	if err != nil {
 		c.failDirectoryScan(ctx, target.Path, err)
 		return err
@@ -50,8 +52,11 @@ func (c *Catalog) reconcileDirectory(ctx context.Context, target DirectoryTarget
 	if unchanged, err := c.directoryScanCanSkip(ctx, target, signature); err != nil {
 		return err
 	} else if unchanged {
+		debugSkipped(target.Path)
 		return nil
 	}
+	scanDone := debugPhase("scan", target.Path)
+	defer scanDone()
 	now := c.opts.Now().UnixMilli()
 	generation, _, err := c.beginDirectoryScan(ctx, target, signature, now)
 	if err != nil {
