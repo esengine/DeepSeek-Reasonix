@@ -584,13 +584,16 @@ func (a *App) requestSessionCatalogMetadataSync() {
 }
 
 func (a *App) GetProjectTreeSnapshot() (ProjectTreeSnapshot, error) {
+	defer debugTickPhase("snapshot-rpc")()
 	// Membership/visibility and its generation come from one verified registry
 	// snapshot. Never silently replace it with legacy membership on read failure.
 	state, versions, err := a.workspaceRegistry().LoadProjectionWithVersions(a.bootContext())
 	if err != nil {
 		return ProjectTreeSnapshot{Projects: []ProjectNode{}}, err
 	}
+	projectsDone := debugTickPhase("snapshot:projects-file")
 	f := loadProjectsFile()
+	projectsDone()
 	deleted := make(map[string]bool, len(f.DeletedTopics))
 	for _, topicID := range f.DeletedTopics {
 		deleted[topicID] = true
@@ -607,6 +610,7 @@ func (a *App) GetProjectTreeSnapshot() (ProjectTreeSnapshot, error) {
 			Children: a.pinnedTopicShells("global", "", f.GlobalTopics, f.GlobalPinnedTopics, f.GlobalColor, deleted),
 		})
 	}
+	projectShellsDone := debugTickPhase("snapshot:project-shells")
 	for _, project := range f.Projects {
 		label := strings.TrimSpace(project.Title)
 		if label == "" {
@@ -619,6 +623,7 @@ func (a *App) GetProjectTreeSnapshot() (ProjectTreeSnapshot, error) {
 			Children: a.pinnedTopicShells("project", project.Root, project.Topics, project.PinnedTopics, project.Color, deleted),
 		})
 	}
+	projectShellsDone()
 	// Remote projects (pinned via the connection wizard) render as project
 	// groups too; the Remote ref swaps the folder icon for a cloud icon.
 	if remoteNodes, err := a.remoteProjectNodes(); err == nil {

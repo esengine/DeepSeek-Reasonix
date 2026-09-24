@@ -590,6 +590,7 @@ func (a *App) catalogTopicPage(catalog *sessioncatalog.Catalog, req ProjectTopic
 	// sidebar never shows an empty "no sessions" state when later pages still
 	// have ordinary topics.
 	for {
+		listDone := debugTickPhase("catalog-page:list-topics:" + req.WorkspaceRoot)
 		page, err := catalog.ListTopics(ctx, sessioncatalog.TopicPageRequest{
 			Scope: req.Scope, WorkspaceRoot: req.WorkspaceRoot, Cursor: cursor,
 			Limit: limit, Query: req.Query, TimeFilter: req.TimeFilter, SortMode: req.SortMode,
@@ -598,6 +599,7 @@ func (a *App) catalogTopicPage(catalog *sessioncatalog.Catalog, req ProjectTopic
 			PinnedOnly:    req.pinnedOnly,
 			CursorBinding: req.groupCursorBind,
 		})
+		listDone()
 		if err != nil {
 			return out, err
 		}

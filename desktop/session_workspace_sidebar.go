@@ -187,7 +187,9 @@ func (a *App) materializeProjectTopics(req ProjectTopicPageRequest, reader works
 	all.ExcludePinned = false
 	all.groupSelected = nil
 	all.groupAll = nil
+	phaseDone := debugTickPhase("legacy:" + req.WorkspaceRoot)
 	legacy, err := a.unadoptedLegacyTopics(all, adopted, adoptedTopics)
+	phaseDone()
 	if err != nil {
 		return legacy, nil, err
 	}
@@ -305,6 +307,7 @@ func (a *App) updateCanonicalTopicPresentation(topicID string, title *string, pi
 }
 
 func (a *App) mergeCanonicalWorkspaceShells(projects []ProjectNode) []ProjectNode {
+	defer debugTickPhase("merge-shells")()
 	state, versions, err := a.workspaceRegistry().LoadProjectionWithVersions(a.bootContext())
 	if err != nil {
 		return projects
@@ -437,7 +440,9 @@ func (a *App) unadoptedLegacyTopics(req ProjectTopicPageRequest, adopted, adopte
 		deleted[topicID] = true
 	}
 	for {
+		legacyPageDone := debugTickPhase("legacy-page:" + req.WorkspaceRoot)
 		page, err := a.listProjectTopics(legacyReq)
+		legacyPageDone()
 		if err != nil {
 			return page, err
 		}
