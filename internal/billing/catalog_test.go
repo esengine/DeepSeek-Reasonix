@@ -95,6 +95,54 @@ func TestDeepSeekRateBandWeekendIsAlwaysOffPeak(t *testing.T) {
 	}
 }
 
+func TestDeepSeekRateBandChinesePublicHolidaysAreOffPeak(t *testing.T) {
+	tests := []struct {
+		name string
+		at   time.Time
+	}{
+		// National Day Thursday 2026-10-01 inside the morning peak window
+		// (Beijing 10:00).
+		{"national_day_morning_window", time.Date(2026, 10, 1, 2, 0, 0, 0, time.UTC)},
+		// Mid-Autumn Friday 2026-09-25 inside the afternoon peak window
+		// (Beijing 15:00).
+		{"mid_autumn_afternoon_window", time.Date(2026, 9, 25, 7, 0, 0, 0, time.UTC)},
+		// Spring Festival Monday 2026-02-17 (正月初一) inside the morning peak
+		// window (Beijing 09:30).
+		{"spring_festival_first_day", time.Date(2026, 2, 17, 1, 30, 0, 0, time.UTC)},
+		// The Beijing evening before a holiday starts (09-24 20:00 local) is a
+		// plain Thursday night and stays off-peak through the window rule.
+		{"night_before_holiday", time.Date(2026, 9, 24, 12, 0, 0, 0, time.UTC)},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := DeepSeekRateBand(tc.at); got != RateBandOffPeak {
+				t.Fatalf("DeepSeekRateBand(%s) = %q, want %q", tc.at, got, RateBandOffPeak)
+			}
+		})
+	}
+}
+
+func TestDeepSeekRateBandMakeupWorkdayWeekendStaysOffPeak(t *testing.T) {
+	// 2026-10-10 is the National Day make-up workday (a Saturday): the pricing
+	// page keys off calendar weekends, so it still bills off-peak.
+	at := time.Date(2026, 10, 10, 2, 0, 0, 0, time.UTC)
+	if got := DeepSeekRateBand(at); got != RateBandOffPeak {
+		t.Fatalf("DeepSeekRateBand(%s) = %q, want %q", at, got, RateBandOffPeak)
+	}
+}
+
+func TestDeepSeekRateBandOrdinaryWeekdayStillPeaks(t *testing.T) {
+	// Control: a normal weekday inside both peak windows keeps billing peak.
+	for _, at := range []time.Time{
+		time.Date(2026, 9, 24, 1, 0, 0, 0, time.UTC),   // Beijing 09:00
+		time.Date(2026, 10, 13, 9, 59, 0, 0, time.UTC), // Beijing 17:59
+	} {
+		if got := DeepSeekRateBand(at); got != RateBandPeak {
+			t.Fatalf("DeepSeekRateBand(%s) = %q, want %q", at, got, RateBandPeak)
+		}
+	}
+}
+
 func TestBuildQuoteScheduledRateUsesMatchingPeerBand(t *testing.T) {
 	at := time.Date(2026, 8, 17, 0, 0, 0, 0, time.UTC)
 	q := BuildQuote(QuoteInput{

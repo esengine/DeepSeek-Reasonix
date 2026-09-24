@@ -147,10 +147,46 @@ func catalogEntryEffective(e CatalogEntry, at time.Time) bool {
 	return e.EffectiveTo.IsZero() || at.Before(e.EffectiveTo)
 }
 
+// beijingLocal anchors DeepSeek's published peak windows: PRC standard time
+// has no DST, so a fixed +8 offset stays exact year-round.
+var beijingLocal = time.FixedZone("Asia/Shanghai", 8*60*60)
+
+// chineseStatutoryHolidays lists the PRC public-holiday dates (Beijing local
+// dates) on which DeepSeek bills everything off-peak, per the pricing page
+// ("peak hours are weekdays only, excluding Chinese public holidays"). Dates
+// come from the State Council's annual notice; extend the table each year
+// when the next notice is published (the 2027 one is due around November
+// 2026). Make-up workdays (调休上班的周末) are deliberately not listed: they
+// are calendar weekends, and the same page keeps weekends off-peak in full.
+var chineseStatutoryHolidays = map[string]struct{}{
+	// 元旦 (New Year's Day): Jan 1-3.
+	"2026-01-01": {}, "2026-01-02": {}, "2026-01-03": {},
+	// 春节 (Spring Festival): Feb 15-23.
+	"2026-02-15": {}, "2026-02-16": {}, "2026-02-17": {}, "2026-02-18": {},
+	"2026-02-19": {}, "2026-02-20": {}, "2026-02-21": {}, "2026-02-22": {},
+	"2026-02-23": {},
+	// 清明节 (Qingming Festival): Apr 4-6.
+	"2026-04-04": {}, "2026-04-05": {}, "2026-04-06": {},
+	// 劳动节 (Labor Day): May 1-5.
+	"2026-05-01": {}, "2026-05-02": {}, "2026-05-03": {}, "2026-05-04": {},
+	"2026-05-05": {},
+	// 端午节 (Dragon Boat Festival): Jun 19-21.
+	"2026-06-19": {}, "2026-06-20": {}, "2026-06-21": {},
+	// 中秋节 (Mid-Autumn Festival): Sep 25-27.
+	"2026-09-25": {}, "2026-09-26": {}, "2026-09-27": {},
+	// 国庆节 (National Day): Oct 1-7.
+	"2026-10-01": {}, "2026-10-02": {}, "2026-10-03": {}, "2026-10-04": {},
+	"2026-10-05": {}, "2026-10-06": {}, "2026-10-07": {},
+}
+
 // DeepSeekRateBand selects the documented Beijing weekday peak windows by
-// their stable UTC equivalents.
+// their stable UTC equivalents. Weekends and Chinese public holidays are
+// off-peak in full.
 func DeepSeekRateBand(at time.Time) string {
 	at = at.UTC()
+	if _, holiday := chineseStatutoryHolidays[at.In(beijingLocal).Format("2006-01-02")]; holiday {
+		return RateBandOffPeak
+	}
 	if at.Weekday() == time.Saturday || at.Weekday() == time.Sunday {
 		return RateBandOffPeak
 	}
