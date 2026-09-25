@@ -1,6 +1,8 @@
 package main
 
 import (
+	"os"
+	"os/exec"
 	"strings"
 	"testing"
 
@@ -56,5 +58,51 @@ func TestRunWithCrashCapturePassesThroughExitCode(t *testing.T) {
 	}
 	if got := runWithCrashCapture([]string{"version"}, "v1.20.0"); got != 17 {
 		t.Fatalf("exit code=%d", got)
+	}
+}
+
+const fatalChildEnv = "REASONIX_TEST_FATAL_CHILD"
+
+func TestGoroutinePanicIsReportedOnNextStart(t *testing.T) {
+	if os.Getenv(fatalChildEnv) == "1" {
+		runCLI = func([]string, string) int {
+			go func() { panic("private prompt from background goroutine") }()
+			select {}
+		}
+		runWithCrashCapture([]string{"chat"}, "v1.20.0")
+		return
+	}
+
+	home := testenv.TempDir(t)
+	child := exec.Command(os.Args[0], "-test.run=^TestGoroutinePanicIsReportedOnNextStart$")
+	child.Env = append(os.Environ(), fatalChildEnv+"=1", "REASONIX_HOME="+home)
+	output, err := child.CombinedOutput()
+	if err == nil {
+		t.Fatalf("child exited cleanly; output:\n%s", output)
+	}
+	if !strings.Contains(string(output), "panic:") {
+		t.Fatalf("child did not die from the goroutine panic:\n%s", output)
+	}
+
+	t.Setenv("REASONIX_HOME", home)
+	previous := runCLI
+	t.Cleanup(func() { runCLI = previous })
+	runCLI = func([]string, string) int { return 0 }
+	runWithCrashCapture([]string{"version"}, "v1.20.0")
+
+	reports, err := crashreport.List(home)
+	if err != nil || len(reports) != 1 {
+		t.Fatalf("pending reports after restart = %d (err %v), want the goroutine panic", len(reports), err)
+	}
+	report := reports[0].Report
+	if !strings.Contains(report.Stack, "goroutine ") || !strings.Contains(report.Stack, "TestGoroutinePanicIsReportedOnNextStart") {
+		t.Fatalf("stack = %q, want the panicking goroutine", report.Stack)
+	}
+	preview, err := crashreport.Preview(report)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(string(preview), "private prompt") {
+		t.Fatalf("panic value leaked into report: %s", preview)
 	}
 }

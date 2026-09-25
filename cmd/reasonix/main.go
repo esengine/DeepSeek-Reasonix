@@ -40,9 +40,15 @@ func main() {
 }
 
 func runWithCrashCapture(args []string, buildVersion string) (exitCode int) {
+	home := config.ReasonixHomeDir()
+	crashreport.CaptureFatalDumps(home, buildVersion)
+	releaseFatalOutput := crashreport.InstallFatalOutput(home)
 	defer func() {
+		// A panic recovered here is already reported, so the runtime's copy of
+		// the re-raise must not queue a second one.
+		releaseFatalOutput()
 		if recovered := recover(); recovered != nil {
-			_ = crashreport.CapturePanic(config.ReasonixHomeDir(), buildVersion, recovered, debug.Stack())
+			_ = crashreport.CapturePanic(home, buildVersion, recovered, debug.Stack())
 			panic(recovered)
 		}
 	}()
