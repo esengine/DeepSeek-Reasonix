@@ -306,13 +306,8 @@ func routeEntry(text string, e Entry) (AutoUse, string, bool) {
 			return AutoUsePrefer, "the user is asking for review or issue inspection", true
 		}
 	}
-	if e.Kind == KindMCPTool {
-		if explicitMCP(text, e.Source) || (looksLikeGitHub(text) && strings.Contains(e.Source, "github")) {
-			return AutoUsePrefer, "the task asks for external GitHub/MCP data", true
-		}
-		if looksFreshData(text) && (strings.Contains(e.Name, "search") || strings.Contains(e.Name, "fetch") || strings.Contains(e.Name, "read")) {
-			return AutoUsePrefer, "the task appears to need fresh external data", true
-		}
+	if e.Kind == KindMCPTool && namesMCPTool(text, e) {
+		return AutoUsePrefer, "the user named this MCP tool", true
 	}
 	return "", "", false
 }
@@ -328,23 +323,18 @@ func explicitSkill(text, name string) bool {
 		strings.Contains(text, "用"+n+"技能")
 }
 
-func explicitMCP(text, server string) bool {
-	s := normalize(server)
-	return strings.Contains(text, s+" mcp") || strings.Contains(text, "mcp "+s) || strings.Contains(text, "使用 "+s+" mcp") || strings.Contains(text, "用 "+s+" mcp")
+// namesMCPTool matches the identifier the host mints for the tool. A server
+// name or a topic word selects every tool the server exposes, so it is left to
+// the semantic router, which reads the whole request.
+func namesMCPTool(text string, e Entry) bool {
+	tool := normalize(e.ToolName)
+	return tool != "" && strings.Contains(text, tool)
 }
 
 func looksLikeReview(text string) bool {
 	return containsAny(text, []string{
 		"review", "code review", "security review", "帮我看看", "有没有问题", "审查", "评审", "检查这段代码", "看看这段代码",
 	})
-}
-
-func looksLikeGitHub(text string) bool {
-	return containsAny(text, []string{"github", "issue", "issues", "pull request", " pr ", "讨论区", "仓库 issue", "github 上"})
-}
-
-func looksFreshData(text string) bool {
-	return containsAny(text, []string{"latest", "recent", "today", "现在", "最新", "最近", "查一下", "搜索", "github"})
 }
 
 func triggerMatch(text string, triggers []string) bool {

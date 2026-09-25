@@ -107,20 +107,37 @@ func TestRouteClosedLoopPromotesMatchedBuiltinSkills(t *testing.T) {
 	}
 }
 
-func TestRoutePrefersGitHubMCPForIssueLookup(t *testing.T) {
-	entries := ToolEntries([]tool.ContractEntry{{
-		Name:        "mcp__github__search_issues",
-		Description: "search GitHub issues",
-		ReadOnly:    true,
-	}})
-
-	decision := Route("查一下 GitHub issue 里有没有相关反馈", entries)
-	if len(decision.Candidates) == 0 {
-		t.Fatal("Route returned no candidates")
+// Mentioning a vendor or asking for fresh data names no tool: a prefer tells
+// the model to use it unless clearly unnecessary, so a server exposing forty
+// tools must not put forty of them in front of every GitHub question.
+func TestRouteDoesNotFloodOneMCPServer(t *testing.T) {
+	var contracts []tool.ContractEntry
+	for i := range 40 {
+		contracts = append(contracts, tool.ContractEntry{Name: fmt.Sprintf("mcp__github__tool_%d", i), ReadOnly: true})
 	}
-	got := decision.Candidates[0]
-	if got.Entry.ID != "mcp-tool:github/search_issues" || got.Policy != AutoUsePrefer {
-		t.Fatalf("candidate = %+v, want github mcp/prefer", got)
+	contracts = append(contracts,
+		tool.ContractEntry{Name: "mcp__docs__search_pages", ReadOnly: true},
+		tool.ContractEntry{Name: "mcp__web__fetch_url", ReadOnly: true},
+		tool.ContractEntry{Name: "mcp__notes__read_note", ReadOnly: true},
+	)
+	entries := ToolEntries(contracts)
+
+	for _, input := range []string{
+		"can you look at this github issue and the latest pr comments",
+		"查一下 GitHub issue 里有没有相关反馈",
+		"use the github mcp to check the recent issues",
+	} {
+		if decision := Route(input, entries); len(decision.Candidates) != 0 {
+			t.Fatalf("Route(%q) nominated %d tools nobody named, first %s", input, len(decision.Candidates), decision.Candidates[0].Entry.ID)
+		}
+	}
+
+	decision := Route("call mcp__github__tool_7 on this issue", entries)
+	if len(decision.Candidates) != 1 {
+		t.Fatalf("named tool routed %d candidates, want 1: %+v", len(decision.Candidates), decision.Candidates)
+	}
+	if got := decision.Candidates[0]; got.Entry.ID != "mcp-tool:github/tool_7" || got.Policy != AutoUsePrefer {
+		t.Fatalf("candidate = %+v, want github/tool_7 prefer", got)
 	}
 }
 
@@ -130,12 +147,13 @@ func TestRouteDoesNotPreferFailedCachedMCPTool(t *testing.T) {
 		Kind:          KindMCPTool,
 		Name:          "github/search_issues",
 		Source:        "github",
+		ToolName:      "mcp__github__search_issues",
 		Status:        StatusFailed,
 		ConnectSource: "mcp",
 		ConnectName:   "github",
 	}}
 
-	decision := Route("查一下 GitHub issue 里有没有相关反馈", entries)
+	decision := Route("用 mcp__github__search_issues 查一下相关反馈", entries)
 	if len(decision.Candidates) != 0 {
 		t.Fatalf("failed cached MCP tool was still routed: %+v", decision.Candidates)
 	}
