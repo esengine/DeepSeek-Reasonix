@@ -2092,6 +2092,7 @@ func TestSaveToExistingProjectRemovesResetSkillOverrides(t *testing.T) {
 		{name: "excluded paths", key: "excluded_paths", set: func(c *Config) { c.Skills.ExcludedPaths = []string{"project-skills"} }, reset: func(c *Config) { c.Skills.ExcludedPaths = nil }},
 		{name: "disabled skills", key: "disabled_skills", set: func(c *Config) { c.Skills.DisabledSkills = []string{"review"} }, reset: func(c *Config) { c.Skills.DisabledSkills = nil }},
 		{name: "implicit invocation", key: "disable_implicit_invocation", set: func(c *Config) { c.Skills.DisableImplicitInvocation = true }, reset: func(c *Config) { c.Skills.DisableImplicitInvocation = false }},
+		{name: "suppress warnings", key: "suppress_warnings", set: func(c *Config) { c.Skills.SuppressWarnings = true }, reset: func(c *Config) { c.Skills.SuppressWarnings = false }},
 		{name: "max depth", key: "max_depth", set: func(c *Config) { c.Skills.MaxDepth = 2 }, reset: func(c *Config) { c.Skills.MaxDepth = 0 }},
 	}
 	for _, tt := range tests {

@@ -76,7 +76,7 @@ type Config struct {
 func (c *Config) KeepProjectSkillKey(key string) error {
 	key = strings.TrimSpace(key)
 	switch key {
-	case "paths", "excluded_paths", "disabled_skills", "disable_implicit_invocation", "max_depth":
+	case "paths", "excluded_paths", "disabled_skills", "disable_implicit_invocation", "suppress_warnings", "max_depth":
 	default:
 		return fmt.Errorf("unknown project skill key %q", key)
 	}
@@ -795,6 +795,7 @@ type SkillsConfig struct {
 	ExcludedPaths             []string `toml:"excluded_paths"`
 	DisabledSkills            []string `toml:"disabled_skills"`
 	DisableImplicitInvocation bool     `toml:"disable_implicit_invocation"`
+	SuppressWarnings          bool     `toml:"suppress_warnings"`
 	MaxDepth                  int      `toml:"max_depth"`
 }
 

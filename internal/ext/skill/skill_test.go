@@ -433,6 +433,21 @@ func TestSkillLikeFlatClaudeMarkdownWithoutDescriptionWarns(t *testing.T) {
 	}
 }
 
+func TestSuppressWarningsQuietsMissingDescription(t *testing.T) {
+	home := testenv.TempDir(t)
+	writeSkill(t, home, ".claude/skills/named.md", "---\nname: renamed\n---\nbody")
+	var stderr bytes.Buffer
+	st := New(Options{HomeDir: home, DisableBuiltins: true, Stderr: &stderr, SuppressWarnings: true})
+	list := st.List()
+	sk, ok := find(list, "renamed")
+	if !ok || sk.Description != "" {
+		t.Fatalf("missing-description skill changed: %+v, found %t", sk, ok)
+	}
+	if got := stderr.String(); got != "" {
+		t.Fatalf("suppressed warning reached stderr: %q", got)
+	}
+}
+
 func TestBlankDescriptionFlatClaudeMarkdownIsSkillLike(t *testing.T) {
 	for _, tc := range []struct {
 		name    string

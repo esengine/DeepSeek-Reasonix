@@ -39,6 +39,7 @@ func buildSkillAssembly(opts Options, cfg *config.Config, root string, implicit 
 		ProjectRoot: root, ReasonixHomeDir: home, CustomPaths: cfg.SkillCustomPaths(), PluginPaths: cfg.PluginPackageSkillOwners(),
 		PluginAgentPaths: cfg.PluginPackageAgentOwners(), ExcludedPaths: cfg.SkillExcludedPaths(),
 		DisabledNames: func() []string { return disabledSkillNames(cfg, root) }, MaxDepth: cfg.SkillMaxDepth(), Stderr: opts.Stderr,
+		SuppressWarnings: cfg.Skills.SuppressWarnings,
 	})
 	a.store.ConfigureInvocationPolicy(nil)
 	a.skills = a.store.List()

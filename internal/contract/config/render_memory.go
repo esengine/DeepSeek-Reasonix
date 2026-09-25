@@ -23,6 +23,11 @@ func renderSkillsConfig(b *strings.Builder, c *Config) {
 	} else {
 		b.WriteString("# disable_implicit_invocation = false   # keep skills available for automatic model invocation\n")
 	}
+	if c.Skills.SuppressWarnings {
+		b.WriteString("suppress_warnings = true   # quiet non-fatal skill loading warnings; doctor diagnostics remain available\n")
+	} else {
+		b.WriteString("# suppress_warnings = false   # show non-fatal skill loading warnings\n")
+	}
 	if c.Skills.MaxDepth != 0 {
 		fmt.Fprintf(b, "max_depth = %d   # nested scan depth; default 3, set 1 for legacy root-only discovery\n", c.SkillMaxDepth())
 	} else {

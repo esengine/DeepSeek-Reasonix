@@ -154,6 +154,9 @@ type Options struct {
 	// DisableDiscovery returns an empty store without probing project, custom,
 	// global, plugin, or built-in skill sources. It is a test-only isolation knob.
 	DisableDiscovery bool
+	// SuppressWarnings hides non-fatal discovery warnings on stderr.
+	// Skill loading and explicit diagnostics remain unchanged.
+	SuppressWarnings bool
 	// Stderr is the writer for diagnostic warnings. When nil, defaults to
 	// os.Stderr. Set to io.Discard to suppress output (e.g. during model
 	// switch inside a bubbletea session).
@@ -173,6 +176,7 @@ type Store struct {
 	maxDepth         int
 	disableBuiltins  bool
 	disableDiscovery bool
+	suppressWarnings bool
 	stderr           io.Writer
 	requiresReady    func([]string) []string
 	toolBindings     func(Skill) []tool.MCPBinding
@@ -230,6 +234,7 @@ func New(opts Options) *Store {
 		maxDepth:         normalizeMaxDepth(opts.MaxDepth),
 		disableBuiltins:  opts.DisableBuiltins,
 		disableDiscovery: opts.DisableDiscovery,
+		suppressWarnings: opts.SuppressWarnings,
 		stderr:           stderr,
 	}
 }
@@ -749,22 +754,6 @@ func (s *Store) canScanChildDir(dir string, e os.DirEntry) bool {
 	return err == nil && info.IsDir()
 }
 
-func shouldStatEntryTarget(mode os.FileMode) bool {
-	return mode&os.ModeSymlink != 0 || mode&os.ModeIrregular != 0
-}
-
-func shouldSkipScanDir(name string) bool {
-	if strings.HasPrefix(name, ".") {
-		return true
-	}
-	switch strings.ToLower(name) {
-	case "assets", "node_modules", "references", "scripts":
-		return true
-	default:
-		return false
-	}
-}
-
 // readEntry turns one directory entry into a skill. It resolves symlink and
 // Windows reparse-style entries via os.Stat (os.ReadDir can report the link's
 // own type, not its target's), so a linked skill directory or flat <name>.md is
@@ -841,12 +830,12 @@ func (s *Store) parseSkill(path, stem string, scope Scope, requireSkillMarker bo
 		fmt.Fprintf(s.stderr, "error: skill %q at %s: %v\n", name, path, err)
 		return Skill{}, false
 	}
-	if misplaced := misplacedDeliveryField(doc); misplaced != "" {
+	if misplaced := misplacedDeliveryField(doc); misplaced != "" && !s.suppressWarnings {
 		fmt.Fprintf(s.stderr, "warning: skill %q at %s declares %q at the top level, where it means nothing. Write it under its namespace:\n  delivery:\n    %s: review\n",
 			name, path, misplaced, misplaced)
 	}
 	desc := strings.TrimSpace(fm[skillFrontmatterDescription])
-	if desc == "" {
+	if desc == "" && !s.suppressWarnings {
 		fmt.Fprintf(s.stderr, "warning: skill %q at %s has no description: — it will load but won't appear in the skills index\n", name, path)
 	}
 	sk := Skill{
