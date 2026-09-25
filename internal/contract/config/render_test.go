@@ -1027,6 +1027,51 @@ func TestRenderTOMLRoundTripsVisionModels(t *testing.T) {
 	}
 }
 
+func TestRenderTOMLRoundTripsStripChainOfThought(t *testing.T) {
+	orig := Default()
+	orig.Providers = []ProviderEntry{
+		{
+			Name:                "deepseek",
+			Kind:                "openai",
+			BaseURL:             "https://api.deepseek.com",
+			Model:               "deepseek-v4-pro",
+			APIKeyEnv:           "DEEPSEEK_API_KEY",
+			StripChainOfThought: true,
+		},
+		{
+			Name:      "replay",
+			Kind:      "openai",
+			BaseURL:   "https://api.deepseek.com",
+			Model:     "deepseek-v4-pro",
+			APIKeyEnv: "DEEPSEEK_API_KEY",
+		},
+	}
+
+	rendered := RenderTOMLForScope(orig, RenderScopeFull)
+	if !strings.Contains(rendered, "strip_chain_of_thought = true") {
+		t.Fatalf("rendered TOML missing strip_chain_of_thought:\n%s", rendered)
+	}
+
+	var got Config
+	if _, err := toml.Decode(rendered, &got); err != nil {
+		t.Fatalf("rendered TOML does not parse: %v", err)
+	}
+	p, ok := got.Provider("deepseek")
+	if !ok {
+		t.Fatal("deepseek provider missing after round trip")
+	}
+	if !p.StripChainOfThought {
+		t.Fatal("strip_chain_of_thought did not survive the round trip")
+	}
+	replay, ok := got.Provider("replay")
+	if !ok {
+		t.Fatal("replay provider missing after round trip")
+	}
+	if replay.StripChainOfThought {
+		t.Fatal("strip_chain_of_thought must default off and stay absent when unset")
+	}
+}
+
 func TestRenderTOMLRoundTripsProviderHeadersAndModelOverrides(t *testing.T) {
 	orig := Default()
 	orig.Providers = []ProviderEntry{{
