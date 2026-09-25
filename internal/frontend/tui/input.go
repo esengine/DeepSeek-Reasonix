@@ -247,18 +247,24 @@ func (m *model) send(steer bool) tea.Cmd {
 	return tea.Batch(m.commit(), m.call("send", func(ctx context.Context) error { return m.client.Submit(ctx, text) }))
 }
 
-// recall walks the composer through what was sent in this session.
+// recall walks the composer through what was sent in this session. The
+// draft the walk starts from is set aside and comes back at its end.
 func (m *model) recall(back bool) bool {
-	if len(m.history) == 0 {
+	live := m.histAt == len(m.history)
+	if len(m.history) == 0 || (live && !back) {
 		return false
+	}
+	if live {
+		m.draft = m.composer.Value()
 	}
 	if back {
 		m.histAt = max(m.histAt-1, 0)
 	} else {
-		m.histAt = min(m.histAt+1, len(m.history))
+		m.histAt++
 	}
 	if m.histAt == len(m.history) {
-		m.composer.Reset()
+		m.composer.SetValue(m.draft)
+		m.draft = ""
 	} else {
 		m.composer.SetValue(m.history[m.histAt])
 	}

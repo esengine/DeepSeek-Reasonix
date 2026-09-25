@@ -60,6 +60,7 @@ type model struct {
 	shell         bool
 	history       []string
 	histAt        int
+	draft         string // what the composer held when a history walk began
 	pastes        pasteStore
 	status        Status
 	quitArmedAt   time.Time
