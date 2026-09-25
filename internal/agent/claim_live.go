@@ -8,6 +8,9 @@ type liveClaim struct {
 	declared WritePathSet
 	realized []string
 	opaque   bool
+	// callerParentClaim is the parent claim this claim runs inside, which it
+	// does not conflict with.
+	callerParentClaim int64
 }
 
 func (c liveClaim) reservation() WritePathSet {
@@ -75,7 +78,7 @@ func mergeRealized(existing []string, add WritePathSet) []string {
 // writers. Directory claims have an empty reservation before their first write,
 // so canStartLocked alone would otherwise let a steady stream bypass it.
 func (s *SubagentScheduler) canStartIncomingLocked(req AcquireRequest) (bool, string) {
-	if req.Writer {
+	if req.Writer && !s.holdsParentClaimLocked(req.callerParentClaim) {
 		for _, waiter := range s.waiters {
 			if waiter.req.Writer && waiter.req.WritePaths.WholeWorkspace {
 				return false, "queued whole-workspace writer has priority"
@@ -83,4 +86,25 @@ func (s *SubagentScheduler) canStartIncomingLocked(req AcquireRequest) (bool, st
 		}
 	}
 	return s.canStartLocked(req)
+}
+
+// parentWriteClaim is a write claim a depth-0 tool call holds for its Execute.
+// Work that call delegates runs inside it: every queued writer that overlaps is
+// blocked by the claim until Execute returns, so the delegate may not wait on
+// the claim or queue behind such a writer.
+type parentWriteClaim struct {
+	id    int64
+	paths WritePathSet
+}
+
+func (s *SubagentScheduler) holdsParentClaimLocked(id int64) bool {
+	if id == 0 {
+		return false
+	}
+	for _, parent := range s.parentClaims {
+		if parent.id == id {
+			return true
+		}
+	}
+	return false
 }

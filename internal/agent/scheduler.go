@@ -31,6 +31,9 @@ type AcquireRequest struct {
 	Nested bool
 	// Label is optional diagnostics text.
 	Label string
+	// callerParentClaim is the parent write claim held by the tool call that
+	// issued this request, read from the Acquire context.
+	callerParentClaim int64
 }
 
 // SubagentScheduler is a session-scoped concurrency controller shared by task,
@@ -48,7 +51,7 @@ type SubagentScheduler struct {
 	// parentClaims are write paths held by the parent agent during a write-tool
 	// Execute. They block overlapping subagent claims without consuming a
 	// subagent concurrency slot (parent is not a subagent).
-	parentClaims []WritePathSet
+	parentClaims []parentWriteClaim
 
 	// waiters are FIFO waiters for non-nested acquires.
 	waiters []*schedulerWaiter
@@ -95,6 +98,7 @@ func (s *SubagentScheduler) AcquireWithID(ctx context.Context, req AcquireReques
 	if ctx == nil {
 		ctx = context.Background()
 	}
+	req.callerParentClaim = ParentWriteClaimID(ctx)
 
 	s.mu.Lock()
 	if ok, reason := s.canStartIncomingLocked(req); ok {
@@ -202,27 +206,36 @@ func (s *SubagentScheduler) MarkOpaque(id int64) error {
 // behind background jobs mid-tool-call). release must be called once when the
 // write finishes so queued subagents can proceed.
 func (s *SubagentScheduler) ReserveParentWrite(paths WritePathSet) (release func(), err error) {
+	release, _, err = s.ReserveParentWriteWithID(paths)
+	return release, err
+}
+
+// ReserveParentWriteWithID is ReserveParentWrite plus the claim id the tool
+// call carries into its Execute context (see WithParentWriteClaimID).
+func (s *SubagentScheduler) ReserveParentWriteWithID(paths WritePathSet) (release func(), claimID int64, err error) {
 	noop := func() {}
 	if s == nil || paths.Empty() {
-		return noop, nil
+		return noop, 0, nil
 	}
 	s.mu.Lock()
 	if err := s.conflictLocked(paths); err != nil {
 		s.mu.Unlock()
-		return noop, err
+		return noop, 0, err
 	}
-	s.parentClaims = append(s.parentClaims, paths)
+	s.nextClaimID++
+	id := s.nextClaimID
+	s.parentClaims = append(s.parentClaims, parentWriteClaim{id: id, paths: paths})
 	s.mu.Unlock()
 
 	var once sync.Once
 	return func() {
 		once.Do(func() {
 			s.mu.Lock()
-			s.parentClaims = removeClaim(s.parentClaims, paths)
+			s.parentClaims = removeParentClaim(s.parentClaims, id)
 			s.pumpWaitersLocked()
 			s.mu.Unlock()
 		})
-	}, nil
+	}, id, nil
 }
 
 // ActiveWriterClaims returns a snapshot of subagent + parent write claims.
@@ -246,7 +259,9 @@ func (s *SubagentScheduler) ActiveWriterClaims() []WritePathSet {
 		}
 		out = append(out, res)
 	}
-	out = append(out, s.parentClaims...)
+	for _, parent := range s.parentClaims {
+		out = append(out, parent.paths)
+	}
 	return out
 }
 
@@ -265,6 +280,10 @@ func (s *SubagentScheduler) conflictAgainstOthersLocked(skipID int64, paths Writ
 	if paths.Empty() {
 		return nil
 	}
+	var callerParent int64
+	if idx := s.liveIndexLocked(skipID); skipID != 0 && idx >= 0 {
+		callerParent = s.activeLive[idx].callerParentClaim
+	}
 	for _, live := range s.activeLive {
 		if live.id == skipID {
 			continue
@@ -274,7 +293,7 @@ func (s *SubagentScheduler) conflictAgainstOthersLocked(skipID int64, paths Writ
 		}
 	}
 	for _, active := range s.parentClaims {
-		if ScheduleOverlaps(active, paths) {
+		if active.id != callerParent && ScheduleOverlaps(active.paths, paths) {
 			return fmt.Errorf("write path is claimed by another parent write in progress")
 		}
 	}
@@ -325,7 +344,7 @@ func (s *SubagentScheduler) canStartLocked(req AcquireRequest) (bool, string) {
 		}
 	}
 	for _, active := range s.parentClaims {
-		if ScheduleOverlaps(req.WritePaths, active) {
+		if active.id != req.callerParentClaim && ScheduleOverlaps(req.WritePaths, active.paths) {
 			return false, "write path conflict with a parent write in progress"
 		}
 	}
@@ -339,7 +358,7 @@ func (s *SubagentScheduler) activateLocked(req AcquireRequest) int64 {
 	if req.Writer {
 		s.activeWriters++
 	}
-	s.activeLive = append(s.activeLive, liveClaim{id: id, writer: req.Writer, declared: req.WritePaths})
+	s.activeLive = append(s.activeLive, liveClaim{id: id, writer: req.Writer, declared: req.WritePaths, callerParentClaim: req.callerParentClaim})
 	return id
 }
 
@@ -366,7 +385,7 @@ func (s *SubagentScheduler) pumpWaitersLocked() {
 	// while read-only work may still use otherwise available capacity.
 	wholeWriterPending := false
 	for _, w := range s.waiters {
-		if wholeWriterPending && w.req.Writer {
+		if wholeWriterPending && w.req.Writer && !s.holdsParentClaimLocked(w.req.callerParentClaim) {
 			remaining = append(remaining, w)
 			continue
 		}
@@ -397,26 +416,11 @@ func (s *SubagentScheduler) removeWaiterLocked(target *schedulerWaiter) {
 	s.waiters = out
 }
 
-func removeClaim(claims []WritePathSet, target WritePathSet) []WritePathSet {
+func removeParentClaim(claims []parentWriteClaim, id int64) []parentWriteClaim {
 	for i, c := range claims {
-		if writeClaimEqual(c, target) {
+		if c.id == id {
 			return append(claims[:i], claims[i+1:]...)
 		}
 	}
 	return claims
-}
-
-func writeClaimEqual(a, b WritePathSet) bool {
-	if a.WholeWorkspace != b.WholeWorkspace || a.WorkspaceRoot != b.WorkspaceRoot {
-		return false
-	}
-	if len(a.Paths) != len(b.Paths) {
-		return false
-	}
-	for i := range a.Paths {
-		if a.Paths[i] != b.Paths[i] {
-			return false
-		}
-	}
-	return true
 }

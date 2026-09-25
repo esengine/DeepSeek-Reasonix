@@ -29,24 +29,28 @@ func (a *Agent) prepareWriteCoordination(ctx context.Context, plan *toolCallPlan
 		}
 		plan.releaseLease = release
 	}
-	release, err := a.reserveCoordinatedParentWrite(plan)
+	release, claimID, err := a.reserveCoordinatedParentWrite(plan)
 	if err != nil {
 		return writeClaimBlockedOutcome(err), true
 	}
 	plan.releaseParentWrite = release
+	plan.parentWriteClaimID = claimID
 	return a.applyLiveWriteReservation(ctx, plan)
 }
 
-func (a *Agent) reserveCoordinatedParentWrite(plan *toolCallPlan) (func(), error) {
+// reserveCoordinatedParentWrite also returns the hook claim's id: that claim
+// covers delegation tools, whose subagents run inside it.
+func (a *Agent) reserveCoordinatedParentWrite(plan *toolCallPlan) (func(), int64, error) {
 	if plan.hooksMayMutateWorkspace &&
 		a.svc.writeScheduler != nil && a.subagentDepth == 0 {
 		claim, err := WholeWorkspaceWriteClaim(a.writeWorkspaceRoot)
 		if err != nil {
-			return func() {}, err
+			return func() {}, 0, err
 		}
-		return a.svc.writeScheduler.ReserveParentWrite(claim)
+		return a.svc.writeScheduler.ReserveParentWriteWithID(claim)
 	}
-	return a.reserveParentWrite(plan.runTool, plan.runArgs, !plan.effects.WorkspaceMutation)
+	release, err := a.reserveParentWrite(plan.runTool, plan.runArgs, !plan.effects.WorkspaceMutation)
+	return release, 0, err
 }
 
 func (a *Agent) acquireWorkspaceLease(ctx context.Context, plan *toolCallPlan) (func(), error) {

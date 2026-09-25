@@ -40,6 +40,7 @@ type toolCallPlan struct {
 	mcpApp                                                 *tool.MCPAppResult
 	presentedFiles                                         func() []tool.PresentedFile
 	releaseParentWrite, releaseMutationWrite, releaseLease func()
+	parentWriteClaimID                                     int64
 	mutationPath                                           string
 	mutationObserved, mutationAfterDone, executed          bool
 	hooksMayMutateWorkspace                                bool

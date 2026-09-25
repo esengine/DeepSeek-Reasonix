@@ -117,6 +117,22 @@ func NormalizeWritePaths(workspaceRoot string, raw []string) (WritePathSet, erro
 
 type subagentWriteClaimKey struct{}
 type subagentClaimIDKey struct{}
+type parentWriteClaimIDKey struct{}
+
+// WithParentWriteClaimID marks ctx as running inside the tool call that holds
+// parent write claim id, so subagents it acquires are not refused by that claim.
+func WithParentWriteClaimID(ctx context.Context, id int64) context.Context {
+	if id == 0 {
+		return ctx
+	}
+	return context.WithValue(ctx, parentWriteClaimIDKey{}, id)
+}
+
+// ParentWriteClaimID returns the parent write claim the calling tool holds.
+func ParentWriteClaimID(ctx context.Context) int64 {
+	id, _ := ctx.Value(parentWriteClaimIDKey{}).(int64)
+	return id
+}
 
 // WithSubagentWriteClaim carries a child's declared write claim into its run so
 // the host can audit, after the fact, that every mutation it observed fell

@@ -28,6 +28,7 @@ func (a *Agent) dispatchResolvedTool(ctx context.Context, plan *toolCallPlan) (r
 
 func (a *Agent) invokeResolvedTool(ctx context.Context, plan *toolCallPlan) (result string, images []string, execution *tool.ShellExecution, err error) {
 	runTool, runArgs := plan.runTool, plan.runArgs
+	ctx = WithParentWriteClaimID(ctx, plan.parentWriteClaimID)
 	if reader, ok := runTool.(tool.ReadExecutor); ok {
 		start := time.Now()
 		var env tool.ReadResultEnvelope
