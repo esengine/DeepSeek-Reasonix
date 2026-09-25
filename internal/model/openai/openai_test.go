@@ -1001,12 +1001,12 @@ func TestNormaliseUsageMiMoShape(t *testing.T) {
 	}
 }
 
-// TestBuildRequestDropsReasoningContent guards the cache/cost fix: an assistant
-// turn's reasoning_content is a response-only signal and must never be echoed
-// back in the outgoing request. DeepSeek otherwise counts it as paid prompt
-// input (~500 tok/turn on a reasoner chain). The session keeps it for
-// display/archive; the wire request must not carry it.
-func TestBuildRequestDropsReasoningOnPlainAssistantTurn(t *testing.T) {
+// TestBuildRequestReplaysReasoningOnPlainAssistantTurn guards the DeepSeek
+// replay contract: in thinking mode the API 400s an assistant history turn
+// whose reasoning_content is absent, a plain turn that made no tool call
+// included. A reasoning-bearing turn must therefore keep its exact
+// reasoning_content in later requests.
+func TestBuildRequestReplaysReasoningOnPlainAssistantTurn(t *testing.T) {
 	c := &client{model: "deepseek-reasoner", deepseek: true}
 	req := c.buildRequest(provider.Request{
 		Messages: []provider.Message{
@@ -1019,11 +1019,11 @@ func TestBuildRequestDropsReasoningOnPlainAssistantTurn(t *testing.T) {
 	if err != nil {
 		t.Fatalf("marshal: %v", err)
 	}
-	if strings.Contains(string(b), "reasoning_content") {
-		t.Errorf("a no-tool-calls assistant turn must not carry reasoning_content: %s", b)
+	if !strings.Contains(string(b), "reasoning_content") {
+		t.Errorf("a plain assistant turn in DeepSeek thinking mode must carry reasoning_content: %s", b)
 	}
-	if strings.Contains(string(b), "SECRET-CHAIN-OF-THOUGHT") {
-		t.Errorf("the assistant chain-of-thought leaked into the request: %s", b)
+	if !strings.Contains(string(b), "SECRET-CHAIN-OF-THOUGHT") {
+		t.Errorf("the assistant chain-of-thought was dropped from the request: %s", b)
 	}
 	if !strings.Contains(string(b), "the answer") {
 		t.Errorf("assistant content was dropped along with reasoning: %s", b)
@@ -1889,11 +1889,10 @@ func TestStreamReasoningContentTakesPrecedenceOverFallback(t *testing.T) {
 
 // TestBuildRequestAlwaysSendsReasoningKeyOnDeepSeekToolCalls proves the wire
 // contract verified against the live API: DeepSeek thinking mode 400s an
-// assistant tool_calls turn whose reasoning_content KEY is missing from the
-// request JSON, but accepts an empty string. A turn whose reasoning was lost
-// upstream (gateway renamed/dropped the field, legacy session, model switch)
-// must therefore still serialize the key — while plain assistant text turns
-// keep omitting it.
+// assistant turn whose reasoning_content KEY is missing from the request JSON,
+// but accepts an empty string. A turn whose reasoning was lost upstream
+// (gateway renamed/dropped the field, legacy session, model switch) must
+// therefore still serialize the key — plain assistant text turns included.
 func TestBuildRequestAlwaysSendsReasoningKeyOnDeepSeekToolCalls(t *testing.T) {
 	p, err := New(provider.Config{
 		Name:    "deepseek-proxy",
@@ -1934,8 +1933,10 @@ func TestBuildRequestAlwaysSendsReasoningKeyOnDeepSeekToolCalls(t *testing.T) {
 	if string(rc) != `""` {
 		t.Fatalf("reasoning_content = %s, want empty string", rc)
 	}
-	if _, ok := req.Messages[3]["reasoning_content"]; ok {
-		t.Fatal("plain assistant text turn must keep omitting reasoning_content")
+	if rc, ok := req.Messages[3]["reasoning_content"]; !ok {
+		t.Fatal("plain assistant text turn must still serialize the reasoning_content key")
+	} else if string(rc) != `""` {
+		t.Fatalf("plain assistant text turn reasoning_content = %s, want empty string", rc)
 	}
 }
 
