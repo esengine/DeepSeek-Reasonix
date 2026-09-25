@@ -66,6 +66,7 @@ func (e *ContextLimitError) Unwrap() error {
 var (
 	contextLimitEnglishRe = regexp.MustCompile(`(?i)maximum context length is (\d+) tokens?\.?\s*however,\s*you requested (\d+) tokens? \((\d+) in the (?:messages|prompt), (\d+) in the completion\)`)
 	contextLimitPromptRe  = regexp.MustCompile(`(?i)prompt is too long:\s*(\d+) tokens? > (\d+) maximum`)
+	contextLimitInputRe   = regexp.MustCompile(`(?i)\binput length (\d+) exceeds the maximum length (\d+)\b`)
 	contextLimitSumRe     = regexp.MustCompile("(?i)input length and [`']?max_tokens[`']? exceed context limit:\\s*(\\d+)\\s*\\+\\s*(\\d+)\\s*>\\s*(\\d+)")
 	outputLimitRe         = regexp.MustCompile(`(?i)max_tokens\s*(?:is\s+too\s+large|too\s+large)\s*[:=]?\s*(\d+).*?(?:supports?|maximum|at\s+most)[^\d]*(\d+)`)
 )
@@ -191,11 +192,13 @@ func parseContextLimitText(text string) (window, requested, prompt, completion i
 	if m := contextLimitSumRe.FindStringSubmatch(text); len(m) == 4 {
 		return completeContextLimit(atoiStrict(m[3]), 0, atoiStrict(m[1]), atoiStrict(m[2]))
 	}
-	if m := contextLimitPromptRe.FindStringSubmatch(text); len(m) == 3 {
-		prompt = atoiStrict(m[1])
-		window = atoiStrict(m[2])
-		if prompt > 0 && window > 0 && prompt > window {
-			return window, prompt, prompt, 0, true
+	for _, re := range []*regexp.Regexp{contextLimitPromptRe, contextLimitInputRe} {
+		if m := re.FindStringSubmatch(text); len(m) == 3 {
+			prompt = atoiStrict(m[1])
+			window = atoiStrict(m[2])
+			if prompt > 0 && window > 0 && prompt > window {
+				return window, prompt, prompt, 0, true
+			}
 		}
 	}
 	return 0, 0, 0, 0, false

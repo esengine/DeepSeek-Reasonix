@@ -1,8 +1,10 @@
 package provider
 
 import (
+	"context"
 	"errors"
 	"net/http"
+	"net/http/httptest"
 	"testing"
 )
 
@@ -80,5 +82,43 @@ func TestParseOutputLimitError(t *testing.T) {
 	}
 	if ParseOutputLimitError(&APIError{Status: 401, Body: `max_tokens is too large: 384000; supports at most 131072`}) != nil {
 		t.Fatal("authorization errors must not be treated as output-limit errors")
+	}
+}
+
+const inputLengthOverflowBody = `{"error":{"code":"InvalidParameter","message":"Input length 1048826 exceeds the maximum length 1048566. Request id: 021788256632854add9fca5277b8939d33af9a0f1789d6cf09b11","param":"","type":"BadRequest"}}`
+
+func TestSendWithRetryInputLengthOverflowIsContextLimit(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusBadRequest)
+		_, _ = w.Write([]byte(inputLengthOverflowBody))
+	}))
+	defer server.Close()
+	_, err := SendWithRetry(context.Background(), server.Client(), SendOptions{Provider: "fixture"}, func(ctx context.Context) (*http.Request, error) {
+		return http.NewRequestWithContext(ctx, http.MethodPost, server.URL, nil)
+	})
+	got := AsContextLimitError(err)
+	if got == nil {
+		t.Fatalf("input-length overflow reached the caller as %T %v, want a context-limit error", err, err)
+	}
+	if got.WindowTokens != 1_048_566 || got.PromptTokens != 1_048_826 || got.RequestedTokens != 1_048_826 || got.CompletionTokens != 0 {
+		t.Fatalf("input-length overflow = %+v", got)
+	}
+	if errors.Unwrap(got) == nil {
+		t.Fatal("Unwrap must return the original APIError")
+	}
+}
+
+func TestParseContextLimitErrorInputLengthNeedsOverflow(t *testing.T) {
+	for _, body := range []string{
+		`{"error":{"code":"InvalidParameter","message":"Input length 1048566 exceeds the maximum length 1048566."}}`,
+		`{"error":{"code":"InvalidParameter","message":"Input length 1000 exceeds the maximum length 1048566."}}`,
+		`{"error":{"code":"InvalidParameter","message":"Input length 0 exceeds the maximum length 1048566."}}`,
+	} {
+		if got := ParseContextLimitError(&APIError{Status: 400, Body: body}); got != nil {
+			t.Fatalf("input within the limit parsed as overflow: %s -> %+v", body, got)
+		}
+	}
+	if ParseContextLimitError(&APIError{Status: 401, Body: inputLengthOverflowBody}) != nil {
+		t.Fatal("401 must not be treated as a context limit")
 	}
 }
