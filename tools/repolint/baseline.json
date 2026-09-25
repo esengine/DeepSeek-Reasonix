@@ -361,10 +361,10 @@
       "file-size": 219
     },
     "internal/contract/config/render.go": {
-      "complexity": 195,
+      "complexity": 196,
       "essay": 2,
-      "file-size": 571,
-      "function-size": 696
+      "file-size": 576,
+      "function-size": 701
     },
     "internal/contract/config/vision.go": {
       "essay": 1,
@@ -847,8 +847,8 @@
     "internal/model/openai/openai.go": {
       "complexity": 58,
       "essay": 32,
-      "file-size": 515,
-      "function-size": 245
+      "file-size": 518,
+      "function-size": 247
     },
     "internal/model/openai/openai_test.go": {
       "essay": 5
