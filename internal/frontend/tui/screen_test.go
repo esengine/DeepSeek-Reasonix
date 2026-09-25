@@ -61,24 +61,6 @@ func TestFullScreenScrollsAndFollowsTheTail(t *testing.T) {
 	}
 }
 
-// Shift+PgUp/PgDn page the transcript as they page a terminal's scrollback.
-func TestShiftPageKeysScrollTheTranscript(t *testing.T) {
-	m, _ := testModel(t)
-	fillTranscript(m, 60)
-	m.View()
-	press(m, "shift+pgup")
-	if m.scr.follow {
-		t.Fatalf("shift+pgup left the view on the tail at %d", m.scr.yoff)
-	}
-	press(m, "shift+pgdown")
-	if !m.scr.follow {
-		t.Fatalf("shift+pgdown did not return to the tail, view at %d", m.scr.yoff)
-	}
-	if got := m.composer.Value(); got != "" {
-		t.Fatalf("a scroll key reached the composer: %q", got)
-	}
-}
-
 // Shift+Insert pastes the clipboard's text, as it does in a Linux terminal.
 func TestShiftInsertPastesClipboardText(t *testing.T) {
 	for _, env := range []string{"SSH_CONNECTION", "SSH_CLIENT", "SSH_TTY"} {
@@ -91,6 +73,35 @@ func TestShiftInsertPastesClipboardText(t *testing.T) {
 	}
 	if _, ok := cmd().(clipTextMsg); !ok {
 		t.Fatal("shift+insert did not read the clipboard's text")
+	}
+}
+
+// Shift+PgUp/PgDn nudge the transcript by half a page and Shift+Up/Down by a
+// single line, so the reading position can be tuned without a full page jump.
+func TestShiftScrollKeysMoveTheView(t *testing.T) {
+	m, _ := testModel(t)
+	fillTranscript(m, 60)
+	m.View()
+	bottom := m.scr.yoff
+	half := max(m.viewportHeight()/2, 1)
+	if !m.scr.follow || bottom <= half {
+		t.Fatalf("transcript should start pinned to the tail: yoff=%d follow=%v", bottom, m.scr.follow)
+	}
+	press(m, "shift+pgup")
+	if got, want := m.scr.yoff, bottom-half; got != want {
+		t.Fatalf("shift+pgup yoff = %d, want %d", got, want)
+	}
+	press(m, "shift+pgdn")
+	if got := m.scr.yoff; got != bottom {
+		t.Fatalf("shift+pgdn yoff = %d, want %d", got, bottom)
+	}
+	press(m, "shift+up")
+	if got, want := m.scr.yoff, bottom-1; got != want {
+		t.Fatalf("shift+up yoff = %d, want %d", got, want)
+	}
+	press(m, "shift+down")
+	if got := m.scr.yoff; got != bottom {
+		t.Fatalf("shift+down yoff = %d, want %d", got, bottom)
 	}
 }
 

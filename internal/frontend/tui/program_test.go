@@ -123,8 +123,10 @@ func press(m *model, k string) tea.Cmd {
 		"ctrl+home":    {Code: tea.KeyHome, Mod: tea.ModCtrl},
 		"ctrl+end":     {Code: tea.KeyEnd, Mod: tea.ModCtrl},
 		"shift+pgup":   {Code: tea.KeyPgUp, Mod: tea.ModShift},
-		"shift+pgdown": {Code: tea.KeyPgDown, Mod: tea.ModShift},
+		"shift+pgdn":   {Code: tea.KeyPgDown, Mod: tea.ModShift},
 		"shift+insert": {Code: tea.KeyInsert, Mod: tea.ModShift},
+		"shift+up":     {Code: tea.KeyUp, Mod: tea.ModShift},
+		"shift+down":   {Code: tea.KeyDown, Mod: tea.ModShift},
 	}
 	_, cmd := m.Update(codes[k])
 	return cmd
