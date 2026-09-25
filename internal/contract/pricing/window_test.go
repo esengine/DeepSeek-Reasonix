@@ -37,12 +37,9 @@ func TestPeakWindowReadsTheVendorsClock(t *testing.T) {
 	}
 }
 
-// The pricing page's "weekdays only" carries a carve-out the window has to
-// honor: Chinese public holidays bill off-peak in full, while a make-up
-// workday (调休上班的周末) is still a calendar weekend and stays off-peak
-// with it. 2026-09-25 (中秋) is a Friday, 2026-02-17 (春节) a Tuesday,
-// 2026-10-01 (国庆) a Thursday; 2026-10-10 is the National Day make-up
-// workday, a Saturday.
+// Public holidays bill off-peak even on weekdays (Mid-Autumn Fri 2026-09-25,
+// Spring Festival Tue 2026-02-17, National Day Thu 2026-10-01), and a make-up
+// workday (Sat 2026-10-10) is still a weekend.
 func TestPeakWindowReadsTheHolidayTable(t *testing.T) {
 	cases := []struct {
 		name string

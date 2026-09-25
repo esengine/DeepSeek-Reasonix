@@ -18,11 +18,8 @@ type PeakWindow struct {
 	// WeekendOffPeak is the date a vendor stopped charging peak rates on
 	// Saturdays and Sundays, YYYY-MM-DD in the same zone. Empty = no such rule.
 	WeekendOffPeak string
-	// HolidayOffPeak lists dates, YYYY-MM-DD in the same zone, on which the
-	// vendor bills everything off-peak: DeepSeek's page defines peak as
-	// weekday windows "excluding Chinese public holidays". Dates come from
-	// the authority the vendor cites (for PRC holidays, the State Council's
-	// annual notice); extend the list when the next notice lands.
+	// HolidayOffPeak lists dates, YYYY-MM-DD in the same zone, billed off-peak
+	// in full, from the holiday calendar the vendor's pricing page names.
 	HolidayOffPeak []string
 }
 
