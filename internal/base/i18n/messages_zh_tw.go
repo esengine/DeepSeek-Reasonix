@@ -92,7 +92,7 @@ var ChineseTraditional = Messages{
 	ChatStatusCostLabel:             "費用",
 	ChatStatusCacheNowFmt:           "本次命中 %s",
 	ChatStatusCacheAvgFmt:           "平均 %s",
-	ChatStatusPlanApproval:          "1 開始執行 · 2 修改計畫 · 3 暫不執行並退出 · n/Esc 繼續規劃 · PgUp/PgDn/Ctrl+Home/End 捲動",
+	ChatStatusPlanApproval:          "1 開始執行 · 2 修改計畫 · 3 暫不執行並退出 · n/Esc 繼續規劃 · PgUp/PgDn/Shift+PgUp/PgDn/Shift+Up/Down/Ctrl+Home/End 捲動",
 	PlanApprovalPrompt:              "計畫已生成（見上方）— 請選擇下一步操作",
 	ApprovalChoiceHint:              "↑/↓ 選擇 · Enter 確認 · y/a/p/n 快速鍵",
 	PlanApprovalChoices:             "1. 開始執行\n2. 修改計畫（繼續規劃）\n3. 暫不執行，退出計畫模式\n選擇 [1/2/3]（y 開始執行；n/Esc 繼續規劃）",

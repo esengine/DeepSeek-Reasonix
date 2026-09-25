@@ -95,7 +95,7 @@ var English = Messages{
 	ChatStatusCostLabel:             "COST",
 	ChatStatusCacheNowFmt:           "turn hit %s",
 	ChatStatusCacheAvgFmt:           "avg %s",
-	ChatStatusPlanApproval:          "1 execute · 2 revise · 3 exit without executing · n/Esc keeps planning · PgUp/PgDn/Ctrl+Home/End scrolls",
+	ChatStatusPlanApproval:          "1 execute · 2 revise · 3 exit without executing · n/Esc keeps planning · PgUp/PgDn/Shift+PgUp/PgDn/Shift+Up/Down/Ctrl+Home/End scrolls",
 	PlanApprovalPrompt:              "Plan ready above — choose what to do next",
 	ApprovalChoiceHint:              "↑/↓ navigate · Enter select · y/a/p/n shortcuts",
 	PlanApprovalChoices:             "1. Start execution\n2. Revise plan (keep planning)\n3. Exit without executing\nChoose [1/2/3] (y starts; n/Esc keeps planning)",

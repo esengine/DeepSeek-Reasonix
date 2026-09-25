@@ -43,6 +43,35 @@ func TestFullScreenScrollsAndFollowsTheTail(t *testing.T) {
 	}
 }
 
+// Shift+PgUp/PgDn nudge the transcript by half a page and Shift+Up/Down by a
+// single line, so the reading position can be tuned without a full page jump.
+func TestShiftScrollKeysMoveTheView(t *testing.T) {
+	m, _ := testModel(t)
+	fillTranscript(m, 60)
+	m.View()
+	bottom := m.scr.yoff
+	half := max(m.viewportHeight()/2, 1)
+	if !m.scr.follow || bottom <= half {
+		t.Fatalf("transcript should start pinned to the tail: yoff=%d follow=%v", bottom, m.scr.follow)
+	}
+	press(m, "shift+pgup")
+	if got, want := m.scr.yoff, bottom-half; got != want {
+		t.Fatalf("shift+pgup yoff = %d, want %d", got, want)
+	}
+	press(m, "shift+pgdn")
+	if got := m.scr.yoff; got != bottom {
+		t.Fatalf("shift+pgdn yoff = %d, want %d", got, bottom)
+	}
+	press(m, "shift+up")
+	if got, want := m.scr.yoff, bottom-1; got != want {
+		t.Fatalf("shift+up yoff = %d, want %d", got, want)
+	}
+	press(m, "shift+down")
+	if got := m.scr.yoff; got != bottom {
+		t.Fatalf("shift+down yoff = %d, want %d", got, bottom)
+	}
+}
+
 // Dragging the thumb to the bottom of the track lands on the last page.
 func TestScrollbarDragMovesTheView(t *testing.T) {
 	m, _ := testModel(t)
