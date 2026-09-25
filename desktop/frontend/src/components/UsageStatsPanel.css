@@ -33,6 +33,10 @@
   background: var(--bg-soft);
 }
 
+:root .settings-options.usage-stats__group > button {
+  flex: 0 1 auto;
+}
+
 .usage-stats__group .provider-add-segmented__item {
   min-height: 28px;
   padding: 0 12px;

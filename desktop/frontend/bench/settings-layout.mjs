@@ -58,6 +58,51 @@ async function verifySaveBars(page, context) {
   console.log(`PASS ${context} Hooks and Network save bars`);
 }
 
+async function verifyUsageStatsLabels(browser, platform, context) {
+  const page = await browser.newPage({ locale: "zh-CN", viewport: { width: 1600, height: 1100 } });
+  try {
+    await page.goto(`http://127.0.0.1:${port}/?mock=deepseek_upgrade&bench=1&platform=${platform}`, { waitUntil: "domcontentloaded" });
+    await page.locator("textarea.composer__input:not([aria-hidden=true])").waitFor();
+    await page.locator('button:has(svg.lucide-settings)').last().click();
+    await page.locator(".settings-center__navitem:has(svg.lucide-chart-no-axes-column)").click();
+    await page.locator(".usage-stats__group > button").first().waitFor();
+    for (const width of [1600, 1100]) {
+      await page.setViewportSize({ width, height: 1100 });
+      await settle(page);
+      const clipped = await page.locator(".usage-stats__group > button").evaluateAll(buttons =>
+        buttons.filter(button => button.scrollWidth > button.clientWidth).map(button => button.textContent));
+      assert.deepEqual(clipped, [], `${context}/${width}px: usage range and source labels are shown whole`);
+    }
+    console.log(`PASS ${context} usage statistics labels`);
+  } finally { await page.close(); }
+}
+
+async function verifyFillWidthOptions(browser, platform, context) {
+  const page = await browser.newPage({ locale: "en-US", viewport: { width: 1600, height: 1100 } });
+  try {
+    await page.goto(`http://127.0.0.1:${port}/?mock=deepseek_upgrade&bench=1&platform=${platform}`, { waitUntil: "domcontentloaded" });
+    await page.locator("textarea.composer__input:not([aria-hidden=true])").waitFor();
+    await page.locator('button:has(svg.lucide-settings)').last().click();
+    await page.locator(".settings-center__navitem:has(svg.lucide-palette)").first().click();
+    await page.locator(".appearance-overview__hero-actions .btn--primary").click();
+    const groups = page.locator(".theme-gallery__preview-control .settings-options");
+    await groups.first().waitFor();
+    for (const width of [1600, 1100]) {
+      await page.setViewportSize({ width, height: 1100 });
+      await settle(page);
+      const spans = await groups.evaluateAll(gs => gs.map(group => ({
+        group: group.clientWidth,
+        buttons: [...group.querySelectorAll(":scope > button")].reduce((sum, b) => sum + b.getBoundingClientRect().width, 0),
+      })));
+      assert.ok(spans.length > 0, `${context}/${width}px: theme preview controls are present`);
+      for (const span of spans) {
+        assert.ok(Math.abs(span.buttons - span.group) <= 1, `${context}/${width}px: fill-width options span their group (${span.buttons} of ${span.group}px)`);
+      }
+    }
+    console.log(`PASS ${context} fill-width theme preview options`);
+  } finally { await page.close(); }
+}
+
 function geometry() {
   const rect = el => {
     const r = el.getBoundingClientRect();
@@ -100,6 +145,8 @@ try {
   for (const [engineName, platform] of targets) {
     const browser = await engines[engineName].launch({ headless: true });
     try {
+      await verifyUsageStatsLabels(browser, platform, `${engineName}/${platform}`);
+      await verifyFillWidthOptions(browser, platform, `${engineName}/${platform}`);
       const page = await browser.newPage({ locale: "en-US", viewport: { width: 1600, height: 1100 } });
       const errors = [];
       page.on("pageerror", error => errors.push(error.message));
