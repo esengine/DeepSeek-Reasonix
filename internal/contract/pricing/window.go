@@ -1,7 +1,10 @@
 // window.go — when a vendor charges its peak rates.
 package pricing
 
-import "time"
+import (
+	"slices"
+	"time"
+)
 
 // PeakWindow is the vendor's own peak schedule. The rule is published in the
 // vendor's timezone — DeepSeek's 09:00-12:00 and 14:00-18:00 are Beijing hours
@@ -15,6 +18,12 @@ type PeakWindow struct {
 	// WeekendOffPeak is the date a vendor stopped charging peak rates on
 	// Saturdays and Sundays, YYYY-MM-DD in the same zone. Empty = no such rule.
 	WeekendOffPeak string
+	// HolidayOffPeak lists dates, YYYY-MM-DD in the same zone, on which the
+	// vendor bills everything off-peak: DeepSeek's page defines peak as
+	// weekday windows "excluding Chinese public holidays". Dates come from
+	// the authority the vendor cites (for PRC holidays, the State Council's
+	// annual notice); extend the list when the next notice lands.
+	HolidayOffPeak []string
 }
 
 // beijing is where every rate in this catalog is published.
@@ -27,7 +36,7 @@ func (w *PeakWindow) IsPeak(t time.Time) bool {
 		return false
 	}
 	local := t.In(time.FixedZone("", w.OffsetSeconds))
-	if w.weekendOff(local) {
+	if w.weekendOff(local) || w.holidayOff(local) {
 		return false
 	}
 	hour := local.Hour()
@@ -50,4 +59,11 @@ func (w *PeakWindow) weekendOff(local time.Time) bool {
 		return false
 	}
 	return local.Format("2006-01-02") >= w.WeekendOffPeak
+}
+
+// holidayOff reports whether local lands on a published holiday the vendor
+// bills off-peak. Compared as dates in the vendor's zone, like weekendOff.
+func (w *PeakWindow) holidayOff(local time.Time) bool {
+	day := local.Format("2006-01-02")
+	return slices.Contains(w.HolidayOffPeak, day)
 }
