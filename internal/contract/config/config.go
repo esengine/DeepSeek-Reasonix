@@ -1219,7 +1219,8 @@ type ProviderEntry struct {
 	// models. Empty/auto uses the model capability registry plus endpoint
 	// heuristics. Explicit values select DeepSeek, GLM, Kimi K3, or standard
 	// OpenAI reasoning contracts; none disables automatic reasoning controls.
-	ReasoningProtocol string `toml:"reasoning_protocol"`
+	ReasoningProtocol   string `toml:"reasoning_protocol"`
+	StripChainOfThought bool   `toml:"strip_chain_of_thought"` // send the reasoning_content key empty instead of replaying the chain-of-thought
 	// SupportedEfforts lists the /effort levels this provider/model exposes.
 	// Non-empty values override built-in Kind/BaseURL defaults except for fixed
 	// Kimi K3 reasoning. "auto" is the implicit prefix — always accepted.

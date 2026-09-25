@@ -114,6 +114,31 @@ An entry installed from a curated Anthropic-compatible preset (Kimi Coding Plan,
 MiMo, GLM/Z.AI and Qwen coding plans, StepFun) needs neither: the `preset_id` it
 records carries the vetting, so it keeps the thinking mode its preset declares.
 
+## Chain-of-thought replay cost
+
+Under the DeepSeek reasoning protocol the API 400s an assistant history turn
+whose `reasoning_content` key is missing, so Reasonix replays it.
+
+Replayed reasoning is billed as ordinary prompt input (measured ~500 extra
+tokens per turn on a reasoner chain), for no cache-hit or coherence gain.
+
+Set `strip_chain_of_thought = true` to send the key with an empty value instead:
+the turn still satisfies the API's presence check, but the chain-of-thought is
+not re-uploaded or billed. Off by default, which replays the exact reasoning.
+
+```toml
+[[providers]]
+name                   = "deepseek"
+kind                   = "openai"
+base_url               = "https://api.deepseek.com"
+model                  = "deepseek-v4-pro"
+api_key_env            = "DEEPSEEK_API_KEY"
+strip_chain_of_thought = true
+```
+
+This applies to the DeepSeek reasoning protocol only; Kimi K3 and GLM replay
+their reasoning unchanged, because those contracts require the actual text.
+
 ## Everything else (standard `reasoning_effort`)
 
 Any other OpenAI-compatible backend falls through to the standard

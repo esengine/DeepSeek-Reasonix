@@ -337,6 +337,9 @@ func RenderTOMLForScope(c *Config, scope RenderScope) string {
 			if p.ReasoningProtocol != "" {
 				fmt.Fprintf(&b, "reasoning_protocol = %q   # auto|anthropic|deepseek|glm|kimi-k3|openai|none; overrides model/endpoint reasoning detection\n", p.ReasoningProtocol)
 			}
+			if p.StripChainOfThought {
+				b.WriteString("strip_chain_of_thought = true   # send an empty reasoning_content key instead of replaying the chain-of-thought\n")
+			}
 			if len(p.SupportedEfforts) > 0 {
 				fmt.Fprintf(&b, "supported_efforts = %s   # custom /effort levels exposed by this provider; overrides the built-in Kind/BaseURL default\n", renderStringArray(p.SupportedEfforts))
 			}
@@ -804,6 +807,9 @@ func RenderTOMLProjectDelta(c *Config) string {
 			}
 			if p.ReasoningProtocol != "" {
 				fmt.Fprintf(&b, "reasoning_protocol = %q\n", p.ReasoningProtocol)
+			}
+			if p.StripChainOfThought {
+				b.WriteString("strip_chain_of_thought = true\n")
 			}
 			if len(p.SupportedEfforts) > 0 {
 				fmt.Fprintf(&b, "supported_efforts = %s\n", renderStringArray(p.SupportedEfforts))

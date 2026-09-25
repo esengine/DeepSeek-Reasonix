@@ -18,11 +18,11 @@ func (c *client) toolCallReasoning(m provider.Message) (*string, bool) {
 		// DeepSeek thinking mode 400s an assistant history turn whose
 		// reasoning_content key is absent, a plain turn included; an empty
 		// value passes.
-		return &m.ReasoningContent, false
+		return c.replayedReasoning(m), false
 	case c.deepseek && m.ReasoningContent != "":
 		// Thinking off tolerates any shape, so a keyless plain turn keeps its
 		// cache prefix; reasoning the endpoint already issued still replays.
-		return &m.ReasoningContent, false
+		return c.replayedReasoning(m), false
 	case c.zhipu && m.ReasoningContent != "":
 		// GLM interleaved and preserved thinking require provider-issued reasoning
 		// returned unchanged in later history, including after thinking is turned
@@ -32,4 +32,15 @@ func (c *client) toolCallReasoning(m provider.Message) (*string, bool) {
 	// Nothing went out. A tool_calls turn that had reasoning is the one shape a
 	// thinking endpoint refuses, and the only one worth reporting.
 	return nil, len(m.ToolCalls) > 0 && m.ReasoningContent != ""
+}
+
+// replayedReasoning is the reasoning_content to send back on a DeepSeek
+// assistant turn. The key must be present, but strip_chain_of_thought sends it
+// empty so the endpoint does not bill the replayed reasoning as prompt input.
+func (c *client) replayedReasoning(m provider.Message) *string {
+	if c.stripChainOfThought {
+		empty := ""
+		return &empty
+	}
+	return &m.ReasoningContent
 }

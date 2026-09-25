@@ -109,6 +109,8 @@ effort      = "high"
 # model          = "example-reasoning-model"
 # api_key_env    = "EXAMPLE_API_KEY"
 # reasoning_protocol = "openai"   # auto|deepseek|openai|none
+# strip_chain_of_thought = true   # DeepSeek: send an empty reasoning_content key instead of
+#                                 # replaying the chain-of-thought (saves ~500 prompt tok/turn)
 # supported_efforts = ["low", "medium", "high"]
 # default_effort    = "high"
 

@@ -77,6 +77,7 @@ func New(cfg provider.Config) (provider.Provider, error) {
 	}
 	protocol, _ := cfg.Extra["reasoning_protocol"].(string)
 	protocol = normalizeReasoningProtocol(protocol)
+	stripChainOfThought, _ := cfg.Extra["strip_chain_of_thought"].(bool)
 	kimiK3 := usesKimiK3Contract(protocol, cfg.BaseURL, cfg.Model)
 	supportedEfforts, _ := cfg.Extra["supported_efforts"].([]string)
 	// A meaningful explicit list is the endpoint's declared effort vocabulary;
@@ -235,31 +236,32 @@ func New(cfg provider.Config) (provider.Provider, error) {
 		return nil, fmt.Errorf("openai: network: %w", err)
 	}
 	return &client{
-		name:               name,
-		apiKey:             cfg.APIKeyResolver(),
-		keyEnv:             keyEnv,
-		keySource:          keySource,
-		baseURL:            strings.TrimRight(cfg.BaseURL, "/"),
-		chatURL:            chatURL,
-		prefixChatURL:      prefixChatURL,
-		headers:            cleanCustomHeaders(headers),
-		extraBody:          cleanExtraBody(extraBody),
-		model:              normalizeModelID(cfg.BaseURL, cfg.Model),
-		deepseek:           deepseek,
-		minimax:            minimax,
-		zhipu:              zhipu,
-		longcat:            longcat,
-		kimiK3:             kimiK3,
-		draft202012Schemas: IsMiMo(cfg.BaseURL),
-		thinkingType:       thinkingType,
-		vision:             vision,
-		visionDetail:       visionDetail,
-		maxOutputTokens:    maxOutputTokens,
-		autoMaxOutput:      autoMaxOutput,
-		effort:             effort,
-		requestEfforts:     requestEfforts,
-		http:               httpClient,
-		idleTimeout:        defaultStreamIdleTimeout,
+		name:                name,
+		apiKey:              cfg.APIKeyResolver(),
+		keyEnv:              keyEnv,
+		keySource:           keySource,
+		baseURL:             strings.TrimRight(cfg.BaseURL, "/"),
+		chatURL:             chatURL,
+		prefixChatURL:       prefixChatURL,
+		headers:             cleanCustomHeaders(headers),
+		extraBody:           cleanExtraBody(extraBody),
+		model:               normalizeModelID(cfg.BaseURL, cfg.Model),
+		deepseek:            deepseek,
+		stripChainOfThought: stripChainOfThought,
+		minimax:             minimax,
+		zhipu:               zhipu,
+		longcat:             longcat,
+		kimiK3:              kimiK3,
+		draft202012Schemas:  IsMiMo(cfg.BaseURL),
+		thinkingType:        thinkingType,
+		vision:              vision,
+		visionDetail:        visionDetail,
+		maxOutputTokens:     maxOutputTokens,
+		autoMaxOutput:       autoMaxOutput,
+		effort:              effort,
+		requestEfforts:      requestEfforts,
+		http:                httpClient,
+		idleTimeout:         defaultStreamIdleTimeout,
 	}, nil
 }
 
@@ -274,32 +276,33 @@ func newHTTPClient(cfg provider.Config) (*http.Client, error) {
 }
 
 type client struct {
-	name               string
-	apiKey             func() string
-	keyEnv             string // api_key_env name, surfaced in auth errors
-	keySource          string // source of keyEnv, surfaced in auth errors
-	baseURL            string
-	chatURL            string
-	prefixChatURL      string // official DeepSeek Beta endpoint; empty for custom gateways
-	headers            map[string]string
-	extraBody          map[string]any
-	model              string
-	http               *http.Client
-	deepseek           bool
-	minimax            bool          // true for api.minimaxi.com — emits MiniMax-M3's thinking knob instead of reasoning_effort
-	zhipu              bool          // true for Zhipu GLM (bigmodel.cn / z.ai) — gates thinking via thinking.type, ignores reasoning_effort
-	longcat            bool          // true for LongCat — gates thinking via thinking.type, ignores reasoning_effort
-	kimiK3             bool          // true for the explicit K3 protocol or kimi-k3 on Moonshot's direct API hosts
-	draft202012Schemas bool          // the endpoint's dialect, not its vendor: rewrite pre-2020-12 tuple keywords
-	thinkingType       string        // explicit `thinking` config override (enabled|disabled); "" = no override
-	vision             bool          // model accepts image input — embed attached images as image_url parts
-	visionDetail       string        // image_url detail hint (low|high); "" = auto/omit
-	maxOutputTokens    int           // resolved total output budget; <=0 omits the optional field
-	autoMaxOutput      bool          // true when max_output_tokens=0 (automatic ladder)
-	effort             string        // reasoning_effort for OpenAI; thinking.type for MiniMax; "" = auto/provider default
-	requestEfforts     []string      // depth levels a per-request EffortOverride may take; empty = overrides ignored
-	idleTimeout        time.Duration // SSE stall watchdog window; defaultStreamIdleTimeout unless a test overrides
-	learned            endpointFacts
+	name                string
+	apiKey              func() string
+	keyEnv              string // api_key_env name, surfaced in auth errors
+	keySource           string // source of keyEnv, surfaced in auth errors
+	baseURL             string
+	chatURL             string
+	prefixChatURL       string // official DeepSeek Beta endpoint; empty for custom gateways
+	headers             map[string]string
+	extraBody           map[string]any
+	model               string
+	http                *http.Client
+	deepseek            bool
+	stripChainOfThought bool          // send the reasoning_content key empty instead of replaying the chain-of-thought
+	minimax             bool          // true for api.minimaxi.com — emits MiniMax-M3's thinking knob instead of reasoning_effort
+	zhipu               bool          // true for Zhipu GLM (bigmodel.cn / z.ai) — gates thinking via thinking.type, ignores reasoning_effort
+	longcat             bool          // true for LongCat — gates thinking via thinking.type, ignores reasoning_effort
+	kimiK3              bool          // true for the explicit K3 protocol or kimi-k3 on Moonshot's direct API hosts
+	draft202012Schemas  bool          // the endpoint's dialect, not its vendor: rewrite pre-2020-12 tuple keywords
+	thinkingType        string        // explicit `thinking` config override (enabled|disabled); "" = no override
+	vision              bool          // model accepts image input — embed attached images as image_url parts
+	visionDetail        string        // image_url detail hint (low|high); "" = auto/omit
+	maxOutputTokens     int           // resolved total output budget; <=0 omits the optional field
+	autoMaxOutput       bool          // true when max_output_tokens=0 (automatic ladder)
+	effort              string        // reasoning_effort for OpenAI; thinking.type for MiniMax; "" = auto/provider default
+	requestEfforts      []string      // depth levels a per-request EffortOverride may take; empty = overrides ignored
+	idleTimeout         time.Duration // SSE stall watchdog window; defaultStreamIdleTimeout unless a test overrides
+	learned             endpointFacts
 }
 
 func (c *client) Name() string { return c.name }
