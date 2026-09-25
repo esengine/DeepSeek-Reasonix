@@ -159,16 +159,17 @@ func (s *Session) Evaluate(ctx context.Context, evidence GoalEvidence) (Verdict,
 	defer s.mu.Unlock()
 
 	text, err := boundedllm.Call(ctx, boundedllm.Config{
-		Provider:       s.prov,
-		Pricing:        s.pricing,
-		ModelRef:       s.modelRef,
-		Sink:           s.sink,
-		UsageSource:    event.UsageSourceGoalEvaluator,
-		Timeout:        s.timeout,
-		MaxTokens:      MaxTokens,
-		MaxOutputBytes: MaxOutputBytes,
-		MaxSystemBytes: boundedllm.DefaultMaxSystemBytes,
-		MaxTotalBytes:  boundedllm.DefaultMaxTotalBytes,
+		Provider:        s.prov,
+		Pricing:         s.pricing,
+		ModelRef:        s.modelRef,
+		Sink:            s.sink,
+		UsageSource:     event.UsageSourceGoalEvaluator,
+		Timeout:         s.timeout,
+		MaxTokens:       MaxTokens,
+		MaxOutputBytes:  MaxOutputBytes,
+		MaxSystemBytes:  boundedllm.DefaultMaxSystemBytes,
+		MaxTotalBytes:   boundedllm.DefaultMaxTotalBytes,
+		ReasoningAnswer: true,
 	}, PolicyPrompt, payload)
 	if err != nil {
 		return Verdict{}, err

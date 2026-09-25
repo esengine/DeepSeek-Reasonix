@@ -158,3 +158,39 @@ func TestEvidenceIsBoundedAndUntrusted(t *testing.T) {
 		t.Fatalf("provider calls = %d, want 1", prov.calls)
 	}
 }
+
+type reasoningOnlyProvider struct {
+	reasoning string
+	finish    string
+}
+
+func (reasoningOnlyProvider) Name() string { return "reasoning-only" }
+
+func (r reasoningOnlyProvider) Stream(context.Context, provider.Request) (<-chan provider.Chunk, error) {
+	ch := make(chan provider.Chunk, 3)
+	ch <- provider.Chunk{Type: provider.ChunkReasoning, Text: r.reasoning}
+	ch <- provider.Chunk{Type: provider.ChunkUsage, Usage: &provider.Usage{FinishReason: r.finish}}
+	close(ch)
+	return ch, nil
+}
+
+func TestEvaluateReadsVerdictFromReasoningOnlyStop(t *testing.T) {
+	prov := reasoningOnlyProvider{
+		reasoning: "The contract is met.\n" + `{"outcome":"complete","reason":"all steps done"}`,
+		finish:    "stop",
+	}
+	v, err := evaluate(t, prov, GoalEvidence{GoalContract: "x"})
+	if err != nil {
+		t.Fatalf("Evaluate() error = %v, want the verdict carried in reasoning", err)
+	}
+	if v.Outcome != OutcomeComplete {
+		t.Fatalf("outcome = %q, want complete", v.Outcome)
+	}
+}
+
+func TestEvaluateIgnoresReasoningOfTruncatedStream(t *testing.T) {
+	prov := reasoningOnlyProvider{reasoning: `{"outcome":"complete","reason":"x"}`, finish: "length"}
+	if _, err := evaluate(t, prov, GoalEvidence{GoalContract: "x"}); err == nil {
+		t.Fatal("Evaluate() error = nil, want a truncated reasoning-only stream to fail closed")
+	}
+}

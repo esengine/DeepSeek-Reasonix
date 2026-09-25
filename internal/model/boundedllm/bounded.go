@@ -54,6 +54,9 @@ type Config struct {
 	MaxSystemBytes int
 	// MaxTotalBytes is the hard cap on system + evidence. Zero uses DefaultMaxTotalBytes.
 	MaxTotalBytes int
+	// ReasoningAnswer returns the reasoning stream when a stop left content empty;
+	// only for callers whose contract extracts its answer from structure.
+	ReasoningAnswer bool
 }
 
 // Call runs one bounded no-tool request: system policy + a single user evidence
@@ -132,6 +135,7 @@ func Call(ctx context.Context, cfg Config, system, evidence string) (string, err
 	}
 
 	var text strings.Builder
+	reasoning := reasoningAnswer{keep: cfg.ReasoningAnswer, limit: maxOutputBytes}
 	for chunk := range ch {
 		switch chunk.Type {
 		case provider.ChunkText:
@@ -140,6 +144,8 @@ func Call(ctx context.Context, cfg Config, system, evidence string) (string, err
 				cancel()
 				return "", fmt.Errorf("bounded reviewer output exceeded %d bytes", maxOutputBytes)
 			}
+		case provider.ChunkReasoning:
+			reasoning.add(chunk.Text)
 		case provider.ChunkUsage:
 			if chunk.Usage != nil {
 				u := *chunk.Usage
@@ -155,5 +161,41 @@ func Call(ctx context.Context, cfg Config, system, evidence string) (string, err
 	if callCtx.Err() != nil && text.Len() == 0 {
 		return "", callCtx.Err()
 	}
+	if text.Len() == 0 {
+		return reasoning.answer(usage)
+	}
 	return text.String(), nil
+}
+
+// reasoningAnswer holds the reasoning stream of a caller that accepts it as the
+// answer. It is charged against the output budget only when it becomes one, so
+// a model that reasons at length before writing content is not refused.
+type reasoningAnswer struct {
+	keep     bool
+	limit    int
+	text     strings.Builder
+	overflow bool
+}
+
+func (r *reasoningAnswer) add(s string) {
+	if !r.keep || r.overflow {
+		return
+	}
+	r.text.WriteString(s)
+	if r.text.Len() > r.limit {
+		r.overflow = true
+		r.text.Reset()
+	}
+}
+
+// answer is the reasoning when the provider reported a clean stop; a truncated
+// stream's reasoning is unfinished thought, not an answer.
+func (r *reasoningAnswer) answer(usage *provider.Usage) (string, error) {
+	if !r.keep || usage == nil || usage.FinishReason != "stop" {
+		return "", nil
+	}
+	if r.overflow {
+		return "", fmt.Errorf("bounded reviewer reasoning exceeded %d bytes", r.limit)
+	}
+	return r.text.String(), nil
 }
