@@ -53,12 +53,9 @@ func runTUI(args []string, version string) int {
 		fmt.Fprintln(os.Stderr, i18n.M.ErrorPrefix, err)
 		return 1
 	}
-	resumePath, err := tuiResumePath(workspaceRoot, *f.resume, *f.cont)
-	if err == nil && *f.copy {
-		resumePath, err = tuiCopyResume(resumePath)
-	}
+	resumePath, ambiguous, err := tuiResolveResume(workspaceRoot, *f.resume, *f.cont, *f.copy)
 	if err != nil {
-		fmt.Fprintln(os.Stderr, i18n.M.ErrorPrefix, err)
+		reportResumeQueryError(os.Stderr, err)
 		return 1
 	}
 	termrender.ConfigureThemeFromConfigForTTYOutput()
@@ -117,7 +114,8 @@ func runTUI(args []string, version string) int {
 		Client:      &tui.Client{HTTP: hub.InProcessClient(), Base: tuiBase},
 		Prompt:      strings.Join(f.fs.Args(), " "),
 		Restore:     resumed != nil,
-		PickSession: *f.resume == resumePickerSentinel,
+		PickSession: *f.resume == resumePickerSentinel || ambiguous != nil,
+		PickAmong:   ambiguousSessionPaths(ambiguous),
 		Inline:      *f.inline,
 	})
 	if err != nil {
@@ -125,6 +123,32 @@ func runTUI(args []string, version string) int {
 		return 1
 	}
 	return 0
+}
+
+// tuiResolveResume answers which session the UI starts in. A query several
+// sessions match is not an error here: the UI offers those matches in its
+// picker, unless --copy is set, since the picker resumes in place.
+func tuiResolveResume(workspaceRoot, resume string, cont, copySession bool) (string, *ambiguousSessionQueryError, error) {
+	resumePath, err := tuiResumePath(workspaceRoot, resume, cont)
+	var ambiguous *ambiguousSessionQueryError
+	if errors.As(err, &ambiguous) && !copySession {
+		return "", ambiguous, nil
+	}
+	if err == nil && copySession {
+		resumePath, err = tuiCopyResume(resumePath)
+	}
+	return resumePath, nil, err
+}
+
+func ambiguousSessionPaths(e *ambiguousSessionQueryError) []string {
+	if e == nil {
+		return nil
+	}
+	paths := make([]string, len(e.Matches))
+	for i, s := range e.Matches {
+		paths[i] = s.Path
+	}
+	return paths
 }
 
 func tuiResumePath(workspaceRoot, resume string, cont bool) (string, error) {

@@ -37,9 +37,10 @@ var Chinese = Messages{
 		"unreviewed_change":         "改动后再没看过",
 		"declared_unverified":       "自己申报未验证",
 	},
-	NoSessionToResume: "没有可恢复的会话 — 用 `reasonix` 开一个新的",
-	ResumeRequiresTTY: "--resume 需要交互式终端；用 --continue 直接恢复最近一次",
-	PickSessionLabel:  "恢复哪个会话？",
+	NoSessionToResume:   "没有可恢复的会话 — 用 `reasonix` 开一个新的",
+	ResumeRequiresTTY:   "--resume 需要交互式终端；用 --continue 直接恢复最近一次",
+	PickSessionLabel:    "恢复哪个会话？",
+	AmbiguousResumeHint: "用上面的某个 id 重新运行 `--resume <id>`",
 
 	ResumeBusy:                    "请先完成或取消当前这一轮再恢复会话",
 	ResumeBadIndexFmt:             "请选择 1–%d 的会话（用 /resume 查看列表）",

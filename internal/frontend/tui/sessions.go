@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"net/http"
+	"slices"
 	"strings"
 	"time"
 	"unicode/utf8"
@@ -63,9 +64,14 @@ func (m *model) openPicker() tea.Cmd {
 // onSessions opens the picker on the first conversation that is not the one
 // already open, since that is the one worth switching to.
 func (m *model) onSessions(msg sessionsMsg) tea.Cmd {
+	among := m.opts.PickAmong
+	m.opts.PickAmong = nil
 	if msg.err != nil {
 		m.tr.AddNotice("error", "sessions: "+msg.err.Error())
 		return m.commit()
+	}
+	if len(among) > 0 {
+		msg.list = slices.DeleteFunc(msg.list, func(s SessionInfo) bool { return !slices.Contains(among, s.Path) })
 	}
 	if len(msg.list) == 0 {
 		m.tr.AddNotice("warn", i18n.M.NoSessionToResume)

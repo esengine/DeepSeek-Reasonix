@@ -1,12 +1,16 @@
 package cli
 
 import (
+	"errors"
 	"fmt"
+	"io"
 	"os"
 	"path/filepath"
-	"reasonix/internal/state/sessionstore"
 	"strings"
 	"unicode"
+
+	"reasonix/internal/base/i18n"
+	"reasonix/internal/state/sessionstore"
 )
 
 const resumePickerSentinel = "__reasonix_resume_picker__"
@@ -158,18 +162,18 @@ func resolveSessionQuery(dir, query string) (string, error) {
 		return "", fmt.Errorf("no session matches %q", query)
 	}
 	lower := strings.ToLower(query)
-	var exact []string
-	var partial []string
+	var exact []sessionstore.SessionInfo
+	var partial []sessionstore.SessionInfo
 	for _, session := range sessions {
 		id := sessionstore.BranchID(session.Path)
 		base := filepath.Base(session.Path)
 		if query == id || query == base || query == session.Path {
-			exact = append(exact, session.Path)
+			exact = append(exact, session)
 			continue
 		}
 		haystack := strings.ToLower(strings.Join([]string{id, base, session.CustomTitle, session.TopicTitle, session.Preview}, "\n"))
 		if strings.Contains(haystack, lower) {
-			partial = append(partial, session.Path)
+			partial = append(partial, session)
 		}
 	}
 	matches := exact
@@ -180,10 +184,35 @@ func resolveSessionQuery(dir, query string) (string, error) {
 	case 0:
 		return "", fmt.Errorf("no session matches %q", query)
 	case 1:
-		return matches[0], nil
+		return matches[0].Path, nil
 	default:
-		return "", fmt.Errorf("session query %q is ambiguous (%d matches)", query, len(matches))
+		return "", &ambiguousSessionQueryError{Query: query, Matches: matches}
 	}
+}
+
+// ambiguousSessionQueryError is a --resume query more than one session
+// matches; Matches lets the caller offer them instead of only refusing.
+type ambiguousSessionQueryError struct {
+	Query   string
+	Matches []sessionstore.SessionInfo
+}
+
+func (e *ambiguousSessionQueryError) Error() string {
+	return fmt.Sprintf("session query %q is ambiguous (%d matches)", e.Query, len(e.Matches))
+}
+
+// reportResumeQueryError prints why a --resume query resolved to nothing and,
+// when several sessions matched, each one by the id --resume accepts.
+func reportResumeQueryError(w io.Writer, err error) {
+	fmt.Fprintln(w, i18n.M.ErrorPrefix, err)
+	var ambiguous *ambiguousSessionQueryError
+	if !errors.As(err, &ambiguous) {
+		return
+	}
+	for _, s := range ambiguous.Matches {
+		fmt.Fprintf(w, "  %s  %s  %s\n", s.LastActivityAt.Local().Format("2006-01-02 15:04"), sessionstore.BranchID(s.Path), sessionPickerLabel(s))
+	}
+	fmt.Fprintln(w, i18n.M.AmbiguousResumeHint)
 }
 
 // looksLikeMachineSessionID reports whether query is the opaque HMAC form

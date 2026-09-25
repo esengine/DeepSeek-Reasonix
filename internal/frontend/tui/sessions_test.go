@@ -1,6 +1,7 @@
 package tui
 
 import (
+	"errors"
 	"strings"
 	"testing"
 )
@@ -59,5 +60,34 @@ func TestLocalCommandsAreOfferedAndKeptLocal(t *testing.T) {
 	run(m, press(m, "enter"))
 	if m.picker == nil || strings.Contains(strings.Join(k.seen(), "\n"), "POST /submit") {
 		t.Fatal("/resume went to the kernel instead of opening the picker")
+	}
+}
+
+// A start that names several sessions opens the picker on those alone; a
+// later /resume offers every session again.
+func TestPickerStartsOnTheGivenSessions(t *testing.T) {
+	m, _ := testModel(t)
+	m.opts.PickAmong = []string{"/s/b.jsonl", "/s/c.jsonl"}
+	run(m, m.openPicker())
+	got := m.picker.shown()
+	if len(got) != 2 || got[0].Path != "/s/b.jsonl" || got[1].Path != "/s/c.jsonl" {
+		t.Fatalf("picker rows = %+v, want b and c only", got)
+	}
+	run(m, press(m, "esc"))
+	run(m, m.openPicker())
+	if got := m.picker.shown(); len(got) != 3 {
+		t.Fatalf("a later picker kept the start's narrowing: %+v", got)
+	}
+}
+
+// The start's narrowing belongs to its one picker: when that fetch fails, a
+// later /resume still offers every session.
+func TestPickerNarrowingEndsWithAFailedFirstFetch(t *testing.T) {
+	m, _ := testModel(t)
+	m.opts.PickAmong = []string{"/s/b.jsonl"}
+	run(m, m.onSessions(sessionsMsg{err: errors.New("kernel unavailable")}))
+	run(m, m.openPicker())
+	if got := m.picker.shown(); len(got) != 3 {
+		t.Fatalf("a later picker kept the start's narrowing: %+v", got)
 	}
 }

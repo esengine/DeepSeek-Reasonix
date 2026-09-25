@@ -443,7 +443,7 @@ func runAgent(args []string, version string) int {
 	if resumePath != "" {
 		resolved, err := resolveSessionQuery(resolveCLISessionDirFor(workspaceRoot), resumePath)
 		if err != nil {
-			fmt.Fprintln(os.Stderr, i18n.M.ErrorPrefix, err)
+			reportResumeQueryError(os.Stderr, err)
 			return 1
 		}
 		resumePath = resolved

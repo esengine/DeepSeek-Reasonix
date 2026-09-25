@@ -23,6 +23,8 @@ type Options struct {
 	Restore bool
 	// PickSession opens the saved-session picker on the first frame.
 	PickSession bool
+	// PickAmong, when set, limits that first picker to these session paths.
+	PickAmong []string
 	// Inline writes the conversation into the terminal's own scrollback
 	// instead of taking the full screen.
 	Inline bool

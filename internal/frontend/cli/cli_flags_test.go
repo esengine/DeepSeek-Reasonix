@@ -1,6 +1,8 @@
 package cli
 
 import (
+	"errors"
+	"os"
 	"path/filepath"
 	"reasonix/internal/state/sessionstore"
 	"reflect"
@@ -163,6 +165,55 @@ func TestResolveSessionQueryByIDAndPreview(t *testing.T) {
 	}
 }
 
+// A --resume query several sessions match exits without resuming any, and
+// names each of them by the id --resume accepts so the rerun can pick one.
+func TestRunAmbiguousResumeListsCandidates(t *testing.T) {
+	isolateCLIConfigHome(t)
+	ws, err := filepath.EvalSymlinks(testenv.TempDir(t))
+	if err != nil {
+		t.Fatal(err)
+	}
+	dir := resolveCLISessionDirFor(ws)
+	if err := os.MkdirAll(dir, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	alpha := saveQueryTestSession(t, dir, "alpha-session.jsonl", "fix provider configuration")
+	beta := saveQueryTestSession(t, dir, "beta-session.jsonl", "improve terminal picker")
+
+	var code int
+	stderr := captureStderr(t, func() {
+		code = runAgent([]string{"--dir", ws, "--resume", "session", "task"}, "dev")
+	})
+	if code != 1 {
+		t.Fatalf("exit = %d, want 1; stderr=%q", code, stderr)
+	}
+	for _, want := range []string{sessionstore.BranchID(alpha), "fix provider configuration", sessionstore.BranchID(beta), "improve terminal picker"} {
+		if !strings.Contains(stderr, want) {
+			t.Fatalf("stderr does not name candidate %q:\n%s", want, stderr)
+		}
+	}
+}
+
+func TestResolveSessionQueryAmbiguityCarriesMatches(t *testing.T) {
+	dir := testenv.TempDir(t)
+	alpha := saveQueryTestSession(t, dir, "alpha-session.jsonl", "fix provider configuration")
+	beta := saveQueryTestSession(t, dir, "beta-session.jsonl", "improve terminal picker")
+	_ = saveQueryTestSession(t, dir, "gamma.jsonl", "unrelated")
+
+	_, err := resolveSessionQuery(dir, "session")
+	var ambiguous *ambiguousSessionQueryError
+	if !errors.As(err, &ambiguous) {
+		t.Fatalf("error = %v, want ambiguousSessionQueryError", err)
+	}
+	got := map[string]bool{}
+	for _, m := range ambiguous.Matches {
+		got[m.Path] = true
+	}
+	if len(got) != 2 || !got[alpha] || !got[beta] {
+		t.Fatalf("matches = %+v, want %s and %s", ambiguous.Matches, alpha, beta)
+	}
+}
+
 func saveQueryTestSession(t *testing.T, dir, name, prompt string) string {
 	t.Helper()
 	path := filepath.Join(dir, name)
@@ -173,4 +224,35 @@ func saveQueryTestSession(t *testing.T, dir, name, prompt string) string {
 		t.Fatal(err)
 	}
 	return path
+}
+
+// The terminal UI offers an ambiguous query's matches in its picker, which
+// resumes in place; with --copy it refuses up front and copies nothing.
+func TestTUIAmbiguousResumeWithCopyIsRefused(t *testing.T) {
+	isolateCLIConfigHome(t)
+	ws, err := filepath.EvalSymlinks(testenv.TempDir(t))
+	if err != nil {
+		t.Fatal(err)
+	}
+	dir := resolveCLISessionDirFor(ws)
+	if err := os.MkdirAll(dir, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	saveQueryTestSession(t, dir, "alpha-session.jsonl", "fix provider configuration")
+	saveQueryTestSession(t, dir, "beta-session.jsonl", "improve terminal picker")
+	before, _ := os.ReadDir(dir)
+
+	path, ambiguous, err := tuiResolveResume(ws, "session", false, false)
+	if err != nil || path != "" || ambiguous == nil || len(ambiguous.Matches) != 2 {
+		t.Fatalf("without --copy: path=%q ambiguous=%v err=%v, want the picker's two matches", path, ambiguous, err)
+	}
+
+	path, ambiguous, err = tuiResolveResume(ws, "session", false, true)
+	var refused *ambiguousSessionQueryError
+	if !errors.As(err, &refused) || len(refused.Matches) != 2 || path != "" || ambiguous != nil {
+		t.Fatalf("with --copy: path=%q ambiguous=%v err=%v, want the typed ambiguity error", path, ambiguous, err)
+	}
+	if after, _ := os.ReadDir(dir); len(after) != len(before) {
+		t.Fatalf("an ambiguous --copy wrote %d files, want none", len(after)-len(before))
+	}
 }
