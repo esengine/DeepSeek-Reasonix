@@ -52,6 +52,10 @@ globalThis.HTMLTextAreaElement = dom.window.HTMLTextAreaElement;
 globalThis.Event = dom.window.Event;
 globalThis.MouseEvent = dom.window.MouseEvent;
 globalThis.ResizeObserver = NoopResizeObserver as unknown as typeof ResizeObserver;
+// React's legacy input-event fallback expects these IE hooks when JSDOM does
+// not advertise native InputEvent support.
+Object.defineProperty(dom.window.HTMLElement.prototype, "attachEvent", { configurable: true, value: () => {} });
+Object.defineProperty(dom.window.HTMLElement.prototype, "detachEvent", { configurable: true, value: () => {} });
 globalThis.requestAnimationFrame = dom.window.requestAnimationFrame.bind(dom.window);
 globalThis.cancelAnimationFrame = dom.window.cancelAnimationFrame.bind(dom.window);
 
@@ -167,6 +171,27 @@ await act(async () => {
 ok(button("Custom")?.classList.contains("set-seg__btn--on") === true, "lossy cron conversion keeps the Custom frequency selected");
 ok(document.querySelector<HTMLInputElement>('.heartbeat-editor__freq-input--cron')?.value === "0 9 * * 1", "lossy conversion keeps the original cron expression");
 ok(document.querySelector('.heartbeat-editor__inline-error')?.textContent?.includes("cannot be converted") === true, "lossy conversion explains why the editor did not switch");
+
+console.log("\nheartbeat editor required fields");
+
+let untitledSaves = 0;
+await act(async () => {
+  renderEditor({ id: "untitled", title: "", prompt: "Check the build", interval: "1h", enabled: false }, async () => { untitledSaves += 1; return true; }, "untitled");
+  await flush();
+});
+await act(async () => {
+  button("Save")?.click();
+  await flush();
+});
+const titleInput = document.querySelector<HTMLInputElement>('[aria-label="Title"]');
+const titleError = titleInput?.getAttribute("aria-describedby")
+  ? document.getElementById(titleInput.getAttribute("aria-describedby") ?? "")
+  : null;
+ok(untitledSaves === 0, "an untitled task is not persisted");
+ok(titleInput?.getAttribute("aria-invalid") === "true", "save marks the missing title invalid");
+ok(document.activeElement === titleInput, "save moves focus to the missing title");
+ok(titleError?.textContent?.includes("title") === true, "save explains that the task needs a title");
+ok(document.querySelector('.heartbeat-editor__textarea')?.getAttribute("aria-invalid") !== "true", "a filled prompt is not reported as missing");
 
 console.log("\nheartbeat recommendation draft");
 

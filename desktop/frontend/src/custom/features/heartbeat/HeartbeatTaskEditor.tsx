@@ -1,6 +1,6 @@
 import { useManagementT } from "../../../lib/managementLocale";
 import { automationDraftDirty, useAutomationDraftStore } from "../../../store/automationDrafts";
-import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useId, useLayoutEffect, useRef, useState } from "react";
 import { Check, ChevronsUpDown, CirclePause, Play, Trash2, X } from "lucide-react";
 import { Tooltip } from "../../../components/Tooltip";
 import { app } from "../../../lib/bridge";
@@ -52,6 +52,9 @@ export function TaskEditor({
   const saving = localSaving || (managed && Boolean(entry?.busy));
   const [saveError, setSaveError] = useState(false);
   const [frequencyError, setFrequencyError] = useState(false);
+  const [requiredShown, setRequiredShown] = useState(false);
+  const titleErrorId = useId();
+  const promptErrorId = useId();
   const projectRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
@@ -126,13 +129,21 @@ export function TaskEditor({
     if (onDiscard) onDiscard(); else setDraft(initialTaskRef.current);
   }, [onDiscard, setDraft]);
 
+  const titleMissing = requiredShown && !draft.title.trim();
+  const promptMissing = requiredShown && !draft.prompt.trim();
+
   const handleSave = useCallback(async () => {
-    if (!draft.title.trim() || !draft.prompt.trim()) return;
+    if (!draft.title.trim() || !draft.prompt.trim()) {
+      setRequiredShown(true);
+      setTab("configuration");
+      window.setTimeout(() => (draft.title.trim() ? promptRef.current : titleRef.current)?.focus(), 0);
+      return;
+    }
     setSaving(true);
     const saved = await onSave(draft);
     setSaving(false);
     setSaveError(!saved);
-  }, [draft, onSave]);
+  }, [draft, onSave, setTab]);
   const set = useCallback((field: keyof HeartbeatTask, value: string | boolean) => {
     setDraft((prev) => ({ ...prev, [field]: value }));
   }, [setDraft]);
@@ -292,7 +303,10 @@ export function TaskEditor({
         onChange={(e) => set("title", e.target.value)}
         placeholder={t("heartbeat.titlePlaceholder")}
         aria-label={t("heartbeat.fieldTitle")}
+        aria-invalid={titleMissing || undefined}
+        aria-describedby={titleMissing ? titleErrorId : undefined}
       />
+      {titleMissing && <span id={titleErrorId} className="heartbeat-editor__inline-error">{t("heartbeat.titleRequired")}</span>}
 
       {/* Scope：仅新建任务时可选项目，保存后锁定（已创建任务不显示项目字段） */}
       {isNew && (
@@ -352,7 +366,10 @@ export function TaskEditor({
           onChange={(e) => set("prompt", e.target.value)}
           placeholder={t("heartbeat.promptPlaceholder")}
           rows={5}
+          aria-invalid={promptMissing || undefined}
+          aria-describedby={promptMissing ? promptErrorId : undefined}
         />
+        {promptMissing && <span id={promptErrorId} className="heartbeat-editor__inline-error">{t("heartbeat.promptRequired")}</span>}
       </div>
 
       {/* Approval Mode（竖排） */}
@@ -624,7 +641,7 @@ export function TaskEditor({
           <button
             className="heartbeat-editor__action-btn heartbeat-editor__action-btn--primary"
             type="button"
-            disabled={saving || (!isNew && !isDirty) || Boolean(managed && (entry?.missing || entry?.conflicts.length)) || !draft.title.trim() || !draft.prompt.trim()}
+            disabled={saving || (!isNew && !isDirty) || Boolean(managed && (entry?.missing || entry?.conflicts.length))}
             onClick={() => void handleSave()}
           >
             {t("common.save")}
