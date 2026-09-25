@@ -36,27 +36,27 @@ jobs:
         # Empty means "the ref this event is about"; a scheduled run names each line.
         branch: ${{ fromJSON(github.event_name == 'schedule' && '["main-v2", "studio"]' || '[""]') }}
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
         with:
           ref: ${{ matrix.branch }}
       - id: head
         if: matrix.branch != ''
         run: echo "sha=$(git rev-parse HEAD)" >> "$GITHUB_OUTPUT"
       - name: Initialize CodeQL
-        uses: github/codeql-action/init@v4.37.4
+        uses: github/codeql-action/init@f205ea1c3313d32999d8d6a48b4f6530d4437b38 # v4.37.4
         with:
           languages: ${{ matrix.language }}
           build-mode: ${{ matrix.language == 'go' && 'autobuild' || 'none' }}
       - name: Perform CodeQL Analysis
         if: matrix.branch == ''
-        uses: github/codeql-action/analyze@v4.37.4
+        uses: github/codeql-action/analyze@f205ea1c3313d32999d8d6a48b4f6530d4437b38 # v4.37.4
         with:
           category: "/language:${{ matrix.language }}"
       # Results from a checked-out line are filed under that line's ref, not the
       # default branch the schedule happened to run from.
       - name: Perform CodeQL Analysis (${{ matrix.branch }})
         if: matrix.branch != ''
-        uses: github/codeql-action/analyze@v4.37.4
+        uses: github/codeql-action/analyze@f205ea1c3313d32999d8d6a48b4f6530d4437b38 # v4.37.4
         with:
           category: "/language:${{ matrix.language }}"
           ref: refs/heads/${{ matrix.branch }}
