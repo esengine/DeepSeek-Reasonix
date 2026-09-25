@@ -68,8 +68,9 @@ not a publication or a substitute for a later formal release's public checks.
 
 The candidate payload lasts 30 days and its record/evidence 90 days. If the
 payload expires before publication, prepare a new candidate. The release
-skill's public postflight remains the authority for tags, npm, Desktop
-updates, Homebrew, and the hydrated website after an authorized publication.
+skill's public postflight remains the authority for tags, the CLI and
+Desktop releases, Desktop updates, and the hydrated website after an
+authorized publication.
 
 ## Tag publisher identity / 标签发布身份
 

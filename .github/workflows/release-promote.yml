@@ -244,30 +244,11 @@ jobs:
           bash scripts/release-candidate-tags.sh activate "$OPERATION" "$VERSION" "$SOURCE_SHA"
 
   cli:
-    name: publish CLI and Homebrew from candidate
+    name: publish CLI from candidate
     needs: [preflight, activate]
     uses: ./.github/workflows/release.yml
     with:
       tag: v${{ needs.preflight.outputs.version }}
-      approved_cli_tag: v${{ needs.preflight.outputs.version }}
-      approved_sha: ${{ needs.preflight.outputs.source_sha }}
-      orchestrated: true
-      orchestrator: promote
-      candidate_artifact_name: ${{ needs.preflight.outputs.approved_artifact }}
-      candidate_verified: true
-    secrets: inherit
-
-  npm:
-    name: publish npm from candidate
-    needs: [preflight, activate]
-    permissions:
-      contents: read
-      id-token: write
-    uses: ./.github/workflows/release-npm.yml
-    with:
-      channel: stable
-      base_version: ${{ needs.preflight.outputs.version }}
-      tag: npm-v${{ needs.preflight.outputs.version }}
       approved_cli_tag: v${{ needs.preflight.outputs.version }}
       approved_sha: ${{ needs.preflight.outputs.source_sha }}
       orchestrated: true
@@ -300,7 +281,7 @@ jobs:
   postflight:
     name: verify every public Stable surface
     timeout-minutes: 45
-    needs: [preflight, cli, npm, desktop]
+    needs: [preflight, cli, desktop]
     if: ${{ always() && !cancelled() }}
     runs-on: ubuntu-latest
     permissions:
@@ -310,10 +291,9 @@ jobs:
       - name: Require every publisher
         env:
           CLI_RESULT: ${{ needs.cli.result }}
-          NPM_RESULT: ${{ needs.npm.result }}
           DESKTOP_RESULT: ${{ needs.desktop.result }}
         run: |
-          for result in "$CLI_RESULT" "$NPM_RESULT" "$DESKTOP_RESULT"; do test "$result" = success; done
+          for result in "$CLI_RESULT" "$DESKTOP_RESULT"; do test "$result" = success; done
       - uses: actions/checkout@v7
         with:
           ref: ${{ github.sha }}
@@ -345,7 +325,7 @@ jobs:
 
   metrics:
     name: record publication timing
-    needs: [preflight, authorize, activate, cli, npm, desktop, postflight]
+    needs: [preflight, authorize, activate, cli, desktop, postflight]
     if: ${{ always() && !cancelled() }}
     continue-on-error: true
     runs-on: ubuntu-latest

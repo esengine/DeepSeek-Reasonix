@@ -428,7 +428,7 @@ test("reuse never moves artifact verification past public mutation or trusts can
   assert.ok(!publisher.includes("merge-multiple: true"));
   const stable = workflow("release-stable");
   assert.ok(job(stable, "desktop").includes("preflight_artifact_prefix: ${{ needs.signpath-preflight.outputs.artifact_prefix }}"));
-  for (const name of ["desktop", "cli", "npm"]) assert.ok(job(stable, name).includes("needs: [authorize, signpath-preflight]"));
+  for (const name of ["desktop", "cli"]) assert.ok(job(stable, name).includes("needs: [authorize, signpath-preflight]"));
 });
 
 test("all desktop consumers verify the prepared build and reject a failed preparation", () => {

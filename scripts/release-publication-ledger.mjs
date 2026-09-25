@@ -5,16 +5,6 @@ import { pathToFileURL } from "node:url";
 const VERSION_RE = /^(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$/;
 const SHA_RE = /^[0-9a-f]{40}$/;
 
-export const npmPackageNames = [
-  "reasonix",
-  "@reasonix/cli-darwin-arm64",
-  "@reasonix/cli-darwin-x64",
-  "@reasonix/cli-linux-arm64",
-  "@reasonix/cli-linux-x64",
-  "@reasonix/cli-win32-arm64",
-  "@reasonix/cli-win32-x64",
-];
-
 function compareStable(a, b) {
   if (!VERSION_RE.test(a) || !VERSION_RE.test(b)) throw new Error("invalid stable version in publication observation");
   const aa = a.split(".").map(Number);
@@ -53,39 +43,8 @@ function releaseAssets(release, surface) {
   })).sort((a, b) => a.name.localeCompare(b.name));
 }
 
-export function createCoreLedger({ version, sourceSHA, operation, cliRelease, desktopRelease, npmPackages, observedAt = new Date().toISOString() }) {
+export function createCoreLedger({ version, sourceSHA, operation, cliRelease, desktopRelease, observedAt = new Date().toISOString() }) {
   requireIdentity(version, sourceSHA, operation);
-  if (!Array.isArray(npmPackages) || npmPackages.length !== npmPackageNames.length) {
-    throw new Error("publication ledger requires all npm packages");
-  }
-  const packages = npmPackages.map(item => {
-    if (!npmPackageNames.includes(item.name) || item.version !== version || !item.integrity) {
-      throw new Error(`invalid npm publication observation: ${item.name ?? "<unknown>"}`);
-    }
-    if ((item.reasonixCandidateSha && item.reasonixCandidateSha !== sourceSHA)
-        || (item.gitHead && item.gitHead !== sourceSHA)
-        || (!item.reasonixCandidateSha && !item.gitHead)) {
-      throw new Error(`npm package does not match the candidate: ${item.name}`);
-    }
-    const pointerComparison = compareStable(item.latest, version);
-    if (pointerComparison < 0 || (operation === "publish" && pointerComparison !== 0)) {
-      throw new Error(`npm latest is inconsistent for ${item.name}: ${item.latest}`);
-    }
-    return {
-      name: item.name,
-      version: item.version,
-      integrity: item.integrity,
-      latest: item.latest,
-      state: "identity-verified",
-      pointerState: pointerComparison === 0 ? "public-entry-updated" : "newer-entry-preserved",
-    };
-  }).sort((a, b) => a.name.localeCompare(b.name));
-  if (new Set(packages.map(item => item.name)).size !== npmPackageNames.length) {
-    throw new Error("publication ledger contains duplicate npm packages");
-  }
-  for (const name of npmPackageNames) {
-    if (!packages.some(item => item.name === name)) throw new Error(`publication ledger is missing npm package: ${name}`);
-  }
   return {
     schema: 1,
     version,
@@ -98,7 +57,6 @@ export function createCoreLedger({ version, sourceSHA, operation, cliRelease, de
         items: [`v${version}`, `npm-v${version}`, `desktop-v${version}`].map(name => ({ name, sha: sourceSHA })),
       },
       cli: { state: "identity-verified", assets: releaseAssets(cliRelease, "CLI") },
-      npm: { state: "identity-verified", packages },
       desktop: { state: "identity-verified", assets: releaseAssets(desktopRelease, "Desktop") },
     },
   };
@@ -117,7 +75,6 @@ export function createSiteLedger({ version, sourceSHA, operation, manifest, obse
       stableManifest: { state: "public-entry-updated", version: manifest.version },
       homepage: { state: "public-entry-updated", version: `v${version}` },
       changelog: { state: "public-entry-updated", version: `v${version}` },
-      homebrew: { state: "public-entry-updated", version },
     },
   };
 }
@@ -139,9 +96,9 @@ if (process.argv[1] && import.meta.url === pathToFileURL(path.resolve(process.ar
   if (command === "site-owner" && args.length === 3) {
     const [version, operation, manifestPath] = args;
     console.log(ownsPublicSite(version, operation, read(manifestPath)));
-  } else if (command === "core" && args.length === 7) {
-    const [version, sourceSHA, operation, cliPath, desktopPath, npmPath, output] = args;
-    writeFileSync(output, `${JSON.stringify(createCoreLedger({ version, sourceSHA, operation, cliRelease: read(cliPath), desktopRelease: read(desktopPath), npmPackages: read(npmPath) }), null, 2)}\n`);
+  } else if (command === "core" && args.length === 6) {
+    const [version, sourceSHA, operation, cliPath, desktopPath, output] = args;
+    writeFileSync(output, `${JSON.stringify(createCoreLedger({ version, sourceSHA, operation, cliRelease: read(cliPath), desktopRelease: read(desktopPath) }), null, 2)}\n`);
   } else if (command === "site" && args.length === 5) {
     const [version, sourceSHA, operation, manifestPath, output] = args;
     writeFileSync(output, `${JSON.stringify(createSiteLedger({ version, sourceSHA, operation, manifest: read(manifestPath) }), null, 2)}\n`);
@@ -149,6 +106,6 @@ if (process.argv[1] && import.meta.url === pathToFileURL(path.resolve(process.ar
     const [corePath, sitePath, output] = args;
     writeFileSync(output, `${JSON.stringify(mergeLedgers(read(corePath), read(sitePath)), null, 2)}\n`);
   } else {
-    throw new Error("usage: release-publication-ledger.mjs core VERSION SHA OPERATION CLI DESKTOP NPM OUTPUT | site VERSION SHA OPERATION MANIFEST OUTPUT | merge CORE SITE OUTPUT");
+    throw new Error("usage: release-publication-ledger.mjs core VERSION SHA OPERATION CLI DESKTOP OUTPUT | site VERSION SHA OPERATION MANIFEST OUTPUT | merge CORE SITE OUTPUT");
   }
 }

@@ -150,8 +150,18 @@ test -x "$repo_root/scripts/finalize-windows-signed-candidate.sh"
 for retired in release-preview.yml release-cli-trigger.yml release-desktop-trigger.yml; do
 	test ! -e "$repo_root/.github/workflows/$retired"
 done
-npm_events="$(sed -n '/^on:/,/^permissions:/p' "$repo_root/.github/workflows/release-npm.yml")"
-! grep -Eq 'push:|npm-v\*-\*' <<<"$npm_events"
+# npm, the Homebrew tap, and the CLI update pointers belong to the Studio line.
+# No workflow on this line may hold their credentials or write their locations.
+test ! -e "$repo_root/.github/workflows/release-npm.yml"
+for retired in scripts/publish-homebrew-cask.mjs scripts/finalize-npm-official-release.mjs \
+	scripts/resolve-npm-release.sh scripts/decide-cli-pointer-update.sh npm/publish-candidate.mjs; do
+	test ! -e "$repo_root/$retired"
+done
+if grep -REn 'NPM_TOKEN|HOMEBREW_TAP_TOKEN|homebrew-reasonix|npm publish|npm/build\.mjs .*--publish|npm dist-tag|cli/\$\{?channel\}?/latest\.json|cli/(stable|preview)/latest\.json' \
+	"$repo_root/.github/workflows" "$repo_root/.goreleaser.yaml"; then
+	echo "a workflow on this line still publishes the CLI to npm, Homebrew, or the CLI update pointers" >&2
+	exit 1
+fi
 grep -Eq '^name: Prepare release$' "$repo_root/.github/workflows/prepare-release-notes.yml"
 [ "$(grep -Fc 'git merge --no-edit origin/main-v2' "$repo_root/.github/workflows/prepare-release-notes.yml")" = "0" ]
 grep -Fq 'RELEASE_NOTES_SOURCE_SHA=$source_sha' "$repo_root/.github/workflows/prepare-release-notes.yml"
@@ -166,16 +176,14 @@ if grep -Eq '^  push:$' "$repo_root/.github/workflows/release-stable.yml" ||
 	echo "production workflow must be dispatched on protected main-v2, not run on a tag origin" >&2
 	exit 1
 fi
-for workflow in release.yml release-npm.yml release-desktop.yml; do
+for workflow in release.yml release-desktop.yml; do
 	grep -Eq 'github\.workflow_ref' "$repo_root/.github/workflows/$workflow"
 	grep -Eq 'github\.ref_protected' "$repo_root/.github/workflows/$workflow"
 	grep -Eq 'inputs\.approved_sha' "$repo_root/.github/workflows/$workflow"
 	grep -Eq 'verify-release-tag\.sh' "$repo_root/.github/workflows/$workflow"
 	grep -Eq 'release-\{1\}\.yml' "$repo_root/.github/workflows/$workflow"
 done
-for workflow in release.yml release-npm.yml; do
-	grep -Eq "needs\.cache-guard\.result == 'success'" "$repo_root/.github/workflows/$workflow"
-done
+grep -Eq "needs\.cache-guard\.result == 'success'" "$repo_root/.github/workflows/release.yml"
 if grep -Eq '^  cache-guard:|needs\.cache-guard' "$repo_root/.github/workflows/release-desktop.yml"; then
 	echo "Desktop must reuse the orchestrator cache/docs evidence instead of executing candidate guard scripts twice" >&2
 	exit 1
@@ -191,7 +199,6 @@ grep -Eq 'git merge-base --is-ancestor.*origin/main-v2' "$repo_root/.github/work
 grep -Eq 'CLI Preview must tag current main-v2' "$repo_root/.github/workflows/release.yml"
 grep -Fq 'ALLOW_PREVIEW_RECOVERY: ${{ inputs.allow_preview_recovery }}' "$repo_root/.github/workflows/release.yml"
 grep -Eq 'Preview recovery requires the approved Preview orchestrator' "$repo_root/.github/workflows/release.yml"
-grep -Eq "channel == 'stable'.*HOMEBREW_TAP_TOKEN" "$repo_root/.github/workflows/release.yml"
 grep -Fq 'name: Isolate release-control checkout from product git state' \
 	"$repo_root/.github/workflows/release.yml"
 grep -Fq "grep -qxF '/release-control/'" "$repo_root/.github/workflows/release.yml"
@@ -321,36 +328,6 @@ grep -Eq 'IN_PRODUCTION_SIGNING_SMOKE:.*inputs\.production_signing_smoke' \
 	"$repo_root/.github/workflows/release-desktop.yml"
 grep -Eq 'IN_SIGNING_PREFLIGHT:.*inputs\.signing_preflight' \
 	"$repo_root/.github/workflows/release-desktop.yml"
-grep -Fq "group: release-npm-\${{ inputs.channel || 'next' }}" \
-	"$repo_root/.github/workflows/release-npm.yml"
-npm_dispatch="$(sed -n '/^  workflow_dispatch:/,/^  workflow_call:/p' "$repo_root/.github/workflows/release-npm.yml")"
-grep -Eq 'default: stable' <<<"$npm_dispatch"
-if grep -Eq '^          - canary$' <<<"$npm_dispatch"; then
-	echo "Standalone npm dispatch must not expose public Canary publication" >&2
-	exit 1
-fi
-grep -Fq 'if: ${{ !inputs.orchestrated }}' "$repo_root/.github/workflows/release-npm.yml"
-grep -Fq 'Publish or recover immutable npm packages' "$repo_root/.github/workflows/release-npm.yml"
-npm_cache_guard="$(sed -n '/^  cache-guard:/,/^  npm:/p' "$repo_root/.github/workflows/release-npm.yml")"
-if grep -Fq 'RECOVERY_CONTROL_SHA' <<<"$npm_cache_guard"; then
-	echo "npm recovery control plane must load in the publisher job after candidate checkout" >&2
-	exit 1
-fi
-npm_job="$(sed -n '/^  npm:/,$p' "$repo_root/.github/workflows/release-npm.yml")"
-grep -Fq 'RECOVERY_CONTROL_SHA: ${{ github.workflow_sha }}' <<<"$npm_job"
-grep -Fq 'git restore --source="$RECOVERY_CONTROL_SHA"' <<<"$npm_job"
-for recovery_script in npm/publish.mjs scripts/finalize-npm-official-release.mjs; do
-	grep -Fq "$recovery_script" <<<"$npm_job"
-done
-# Orchestrated Stable recovery needs the same protected publisher repair as a
-# standalone run; the immutable product checkout must not select the old helper.
-npm_control_step="$(sed -n '/      - name: Load approved npm publication control plane/,/      - uses: actions\/setup-go@v7/p' "$repo_root/.github/workflows/release-npm.yml")"
-[ -n "$npm_control_step" ]
-if grep -q 'if:' <<<"$npm_control_step"; then
-	echo "npm publication control plane must load for orchestrated recovery too" >&2
-	exit 1
-fi
-grep -Fq 'publishPackages' "$repo_root/npm/build.mjs"
 grep -Fq 'thumbprint: ${{ secrets.CERTUM_KEY_ID }}' "$repo_root/.github/workflows/release-desktop.yml"
 grep -Eq 'SIGNPATH_RELEASE_SIGNING_ATTESTATION does not match' "$repo_root/.github/workflows/release-desktop.yml"
 grep -Eq '^      signing_preflight:$' "$repo_root/.github/workflows/release-desktop.yml"
@@ -441,9 +418,15 @@ grep -Eq '^  postflight:$' "$repo_root/.github/workflows/release-stable.yml"
 grep -Eq 'verify-stable-release-artifacts\.sh' "$repo_root/.github/workflows/release-stable.yml"
 grep -Eq 'name: Upload reviewed release notes' "$repo_root/.github/workflows/release-stable.yml"
 grep -Eq 'name: orchestrator-reviewed-release-notes' "$repo_root/.github/workflows/release-stable.yml"
-for channel in cli npm desktop; do
+for channel in cli desktop; do
 	grep -Eq '^      publish_'"$channel"':' "$repo_root/.github/workflows/release-stable.yml"
 	grep -Eq "inputs\.publish_$channel" "$repo_root/.github/workflows/release-stable.yml"
+done
+for workflow in release-stable.yml release-promote.yml; do
+	if grep -Eq '^  npm:$|publish_npm|needs\.npm' "$repo_root/.github/workflows/$workflow"; then
+		echo "$workflow still orchestrates an npm publisher" >&2
+		exit 1
+	fi
 done
 
 # The checked-in SignPath policy contract is the single source of truth for the
@@ -458,15 +441,12 @@ for workflow in release.yml release-desktop.yml; do
 	grep -Eq 'if: \$\{\{ !inputs\.orchestrated' "$repo_root/.github/workflows/$workflow"
 done
 
-# CLI clients and the website consume separate Stable and Preview pointers. The
-# publisher must validate every public archive before moving a pointer, retain an
-# immutable per-tag record, and leave both public pointers untouched for RCs.
+# The publisher validates every public archive before retaining an immutable
+# per-tag record. The public CLI pointers are the Studio line's and stay unwritten.
 cli_release_workflow="$repo_root/.github/workflows/release.yml"
 grep -Eq 'name: Publish CLI release metadata to R2' "$cli_release_workflow"
 grep -Fq 'cli/releases/${TAG}/latest.json' "$cli_release_workflow"
-grep -Fq 'cli/${channel}/latest.json' "$cli_release_workflow"
 grep -Fq "group: release-cli-\${{ inputs.channel || 'stable' }}" "$cli_release_workflow"
-grep -Fq 'scripts/decide-cli-pointer-update.sh' "$cli_release_workflow"
 grep -Fq 'scripts/validate-cli-release-manifest.sh' "$cli_release_workflow"
 grep -Fq 'scripts/compare-cli-release-manifests.sh' "$cli_release_workflow"
 grep -Eq 'name: Decide whether CLI artifacts need publication' "$cli_release_workflow"
@@ -481,8 +461,6 @@ fi
 grep -Fq "steps.publication.outputs.decision == 'publish' && inputs.candidate_artifact_name == ''" "$cli_release_workflow"
 grep -Fq "steps.publication.outputs.decision == 'publish' && inputs.candidate_artifact_name != ''" "$cli_release_workflow"
 grep -Fq 'immutable CLI release metadata for $TAG already exists with different content' "$cli_release_workflow"
-grep -Fq 'cmp -s /tmp/cli-release.json /tmp/cli-release.pointer.json' "$cli_release_workflow"
-grep -Eq 'internal CLI release .*Stable and Preview pointers remain unchanged' "$cli_release_workflow"
 cli_public_validation_line="$(
 	grep -n -m1 'if \[ -n "\$channel" \]' "$cli_release_workflow" | cut -d: -f1
 )"
@@ -490,49 +468,6 @@ cli_immutable_upload_line="$(
 	grep -n -m1 'cli/releases/${TAG}/latest.json' "$cli_release_workflow" | cut -d: -f1
 )"
 [ "$cli_public_validation_line" -lt "$cli_immutable_upload_line" ]
-pointer_compare="$repo_root/scripts/compare-cli-release-tags.sh"
-test -x "$pointer_compare"
-[ "$(bash "$pointer_compare" stable v1.2.4 v1.2.3)" = "update" ]
-[ "$(bash "$pointer_compare" stable v1.2.3 v1.2.3)" = "skip" ]
-[ "$(bash "$pointer_compare" stable v1.2.2 v1.2.3)" = "skip" ]
-[ "$(bash "$pointer_compare" stable v100000000000000000000.0.0 v99999999999999999999.999.999)" = "update" ]
-[ "$(bash "$pointer_compare" preview v1.2.3-preview.11 v1.2.3-preview.9)" = "update" ]
-[ "$(bash "$pointer_compare" preview v1.2.3-preview.9 v1.2.3-preview.9)" = "skip" ]
-[ "$(bash "$pointer_compare" preview v1.2.3-preview.8 v1.2.3-preview.9)" = "skip" ]
-[ "$(bash "$pointer_compare" stable v1.2.3 "")" = "update" ]
-if bash "$pointer_compare" stable v1.2.3 v1.2.3-preview.1 >/dev/null 2>&1; then
-	echo "stable comparator accepted a preview pointer" >&2
-	exit 1
-fi
-if bash "$pointer_compare" preview v1.2.3-preview.1 v1.2.3 >/dev/null 2>&1; then
-	echo "preview comparator accepted a stable pointer" >&2
-	exit 1
-fi
-if bash "$pointer_compare" stable v01.2.3 v1.2.2 >/dev/null 2>&1; then
-	echo "stable comparator accepted a non-canonical tag" >&2
-	exit 1
-fi
-cli_pointer_decider="$repo_root/scripts/decide-cli-pointer-update.sh"
-test -x "$cli_pointer_decider"
-cli_pointer_candidate="$test_root/cli-pointer-candidate.json"
-cli_pointer_older="$test_root/cli-pointer-older.json"
-cli_pointer_equal="$test_root/cli-pointer-equal.json"
-cli_pointer_equal_different="$test_root/cli-pointer-equal-different.json"
-cli_pointer_newer="$test_root/cli-pointer-newer.json"
-printf '{"tag_name":"v1.3.0","marker":"candidate"}\n' >"$cli_pointer_candidate"
-printf '{"tag_name":"v1.2.9","marker":"older"}\n' >"$cli_pointer_older"
-cp "$cli_pointer_candidate" "$cli_pointer_equal"
-printf '{"tag_name":"v1.3.0","marker":"different"}\n' >"$cli_pointer_equal_different"
-printf '{"tag_name":"v1.3.1","marker":"newer"}\n' >"$cli_pointer_newer"
-[ "$(bash "$cli_pointer_decider" stable "$cli_pointer_candidate" -)" = "update" ]
-[ "$(bash "$cli_pointer_decider" stable "$cli_pointer_candidate" "$cli_pointer_older")" = "update" ]
-[ "$(bash "$cli_pointer_decider" stable "$cli_pointer_candidate" "$cli_pointer_equal")" = "skip" ]
-[ "$(bash "$cli_pointer_decider" stable "$cli_pointer_candidate" "$cli_pointer_equal_different")" = "update" ]
-[ "$(bash "$cli_pointer_decider" stable "$cli_pointer_candidate" "$cli_pointer_newer")" = "skip" ]
-if bash "$cli_pointer_decider" stable "$cli_pointer_candidate" "$test_root/missing-cli-pointer.json" >/dev/null 2>&1; then
-	echo "CLI pointer decider accepted an unreadable manifest path" >&2
-	exit 1
-fi
 for asset in \
 	reasonix-darwin-amd64.tar.gz \
 	reasonix-darwin-arm64.tar.gz \
@@ -1734,39 +1669,6 @@ if EVENT_NAME=workflow_dispatch IN_ORCHESTRATED=false IN_CHANNEL=preview \
 fi
 grep -Eq 'manual CLI releases must run from protected main-v2' "$test_root/cli-unprotected.log"
 
-EVENT_NAME=push IN_ORCHESTRATED=false IN_CHANNEL='' IN_BASE_VERSION='' IN_TAG='' \
-	REF_NAME=npm-v1.4.0-rc.1 RUN_NUMBER=50 GITHUB_OUTPUT="$test_root/npm-rc.out" \
-	bash "$repo_root/scripts/resolve-npm-release.sh"
-grep -Eq '^arg=npm-v1\.4\.0-rc\.1$' "$test_root/npm-rc.out"
-
-EVENT_NAME=push IN_ORCHESTRATED=true IN_CHANNEL=stable IN_BASE_VERSION=1.5.0 \
-	IN_TAG=npm-v1.5.0 REF_NAME=v1.5.0 RUN_NUMBER=51 GITHUB_OUTPUT="$test_root/npm-stable.out" \
-	bash "$repo_root/scripts/resolve-npm-release.sh"
-grep -Eq '^arg=v1\.5\.0$' "$test_root/npm-stable.out"
-
-EVENT_NAME=workflow_call IN_ORCHESTRATED=true IN_CHANNEL=canary IN_BASE_VERSION=1.5.0 \
-	IN_TAG='' REF_NAME=main-v2 RUN_NUMBER=999 IN_PREVIEW_NUMBER=42 \
-	GITHUB_OUTPUT="$test_root/npm-canary.out" bash "$repo_root/scripts/resolve-npm-release.sh"
-grep -Eq '^arg=v1\.5\.0-canary\.42$' "$test_root/npm-canary.out"
-
-if EVENT_NAME=workflow_dispatch IN_ORCHESTRATED=false IN_CHANNEL=canary IN_BASE_VERSION=1.5.0 \
-	IN_TAG='' REF_NAME=main-v2 RUN_NUMBER=52 GITHUB_OUTPUT="$test_root/npm-canary-direct.out" \
-	bash "$repo_root/scripts/resolve-npm-release.sh" \
-	>"$test_root/npm-canary-direct.log" 2>&1; then
-	echo "standalone public npm Canary unexpectedly passed" >&2
-	exit 1
-fi
-grep -Eq 'public npm Canary releases must be dispatched by release-preview.yml' \
-	"$test_root/npm-canary-direct.log"
-
-if EVENT_NAME=workflow_dispatch IN_ORCHESTRATED=false IN_CHANNEL=stable IN_BASE_VERSION=1.5.0 \
-	IN_TAG=npm-v1.5.1 REF_NAME=main-v2 RUN_NUMBER=52 GITHUB_OUTPUT="$test_root/npm-mismatch.out" \
-	bash "$repo_root/scripts/resolve-npm-release.sh" >"$test_root/npm-mismatch.log" 2>&1; then
-	echo "mismatched npm stable dispatch unexpectedly passed" >&2
-	exit 1
-fi
-grep -Eq 'does not match requested version' "$test_root/npm-mismatch.log"
-
 e2e_workflow="$repo_root/.github/workflows/e2e-bot.yml"
 grep -Fq 'REASONIX_HOME: ${{ runner.temp }}/reasonix-e2e-home' "$e2e_workflow"
 grep -Fq 'cp /tmp/reasonix-e2e.toml "$REASONIX_HOME/config.toml"' "$e2e_workflow"
@@ -1781,7 +1683,6 @@ if grep -Fq 'exit 0' <<<"$e2e_missing_key"; then
 fi
 
 node --test "$repo_root/npm/publish.test.mjs"
-node --test "$repo_root/scripts/finalize-npm-official-release.test.mjs"
 node --test "$repo_root/scripts/package-desktop-dmg.test.mjs"
 node "$repo_root/scripts/check-desktop-build-contract.mjs"
 bash "$repo_root/scripts/release-stable.test.sh"
@@ -1790,19 +1691,13 @@ bash "$repo_root/scripts/check-docs-impact.test.sh"
 
 # Each build orchestrator must gate on the compiled docs identity once. The
 # Desktop child consumes the candidate evidence instead of rerunning the guard.
-for workflow in release.yml release-npm.yml release-candidate.yml; do
+for workflow in release.yml release-candidate.yml; do
 	grep -Fq 'bash scripts/verify-embedded-docs.sh "$DOCS_BUILD_VERSION"' \
 		"$repo_root/.github/workflows/$workflow"
 done
 grep -Fq 'reasonix/internal/productdocs.linkedVersion={{ .Tag }}' "$repo_root/.goreleaser.yaml"
 grep -Fq 'reasonix/internal/productdocs.linkedRevision={{ .Commit }}' "$repo_root/.goreleaser.yaml"
-# The Homebrew cask must keep stripping quarantine from the unsigned CLI, but
-# through Homebrew's current postflight_steps stanza, never the deprecated
-# `postflight do` that GoReleaser's hooks field renders.
-homebrew_config="$(sed -n '/^homebrew_casks:/,/^release:/p' "$repo_root/.goreleaser.yaml")"
-grep -Fq 'postflight_steps do' <<<"$homebrew_config"
-grep -Fq 'com.apple.quarantine' <<<"$homebrew_config"
-! grep -Eq '^\s+hooks:|^\s+post:' <<<"$homebrew_config"
+! grep -Eq '^(homebrew_casks|brews):' "$repo_root/.goreleaser.yaml"
 grep -Fq 'reasonix/internal/productdocs.linkedVersion=${binaryVersion}' "$repo_root/npm/build.mjs"
 grep -Fq 'product_docs_ldflags="-X reasonix/internal/productdocs.linkedVersion=$VERSION' \
 	"$repo_root/scripts/desktop-build.sh"

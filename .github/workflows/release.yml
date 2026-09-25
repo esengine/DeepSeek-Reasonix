@@ -3,7 +3,9 @@ name: Release
 # Native CLI binary line. Official releases are called by the protected Stable
 # orchestrator. Manual dispatch remains available only for official recovery;
 # historical Preview inputs below are workflow-call compatibility, not a public
-# publication entrypoint.
+# publication entrypoint. The GitHub release and its immutable R2 record are
+# this line's whole output: npm, the Homebrew tap, and the CLI update pointers
+# belong to the Studio line.
 on:
   workflow_dispatch:
     inputs:
@@ -66,9 +68,8 @@ permissions:
   contents: write # create the release and upload archives
 
 concurrency:
-  # A channel pointer is a monotonic public state machine. Serialize all
-  # publishers for the same channel so an older recovery run cannot pass its
-  # read-before-write window after a newer release has published.
+  # Publication reads the existing release before writing it. Serialize all
+  # publishers for the same channel so two runs cannot share that window.
   group: release-cli-${{ inputs.channel || 'stable' }}
   cancel-in-progress: false
 
@@ -208,7 +209,7 @@ jobs:
           bash scripts/verify-embedded-docs.sh "$DOCS_BUILD_VERSION" "$DOCS_SOURCE_REVISION"
 
   goreleaser:
-    name: archives + checksums + homebrew tap
+    name: archives + checksums
     needs: [resolve, cache-guard]
     if: ${{ always() && !cancelled() && needs.cache-guard.result == 'success' }}
     runs-on: ubuntu-latest
@@ -331,7 +332,6 @@ jobs:
           args: release --clean
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          HOMEBREW_TAP_TOKEN: ${{ needs.resolve.outputs.channel == 'stable' && secrets.HOMEBREW_TAP_TOKEN || '' }}
           # workflow_dispatch recovery runs have a branch-shaped GITHUB_REF even
           # though checkout is on the release tag. Pin GoReleaser explicitly, and
           # avoid ambiguity from the three release tags sharing one commit.
@@ -352,12 +352,6 @@ jobs:
             "$RUNNER_TEMP/release-candidate/cli/reasonix-windows-arm64.zip" \
             "$RUNNER_TEMP/release-candidate/cli/SHA256SUMS" \
             --title "Reasonix CLI $TAG" --notes-file /tmp/release-notes.md --latest=false
-
-      - name: Publish prepared Homebrew cask
-        if: ${{ inputs.candidate_artifact_name != '' && needs.resolve.outputs.channel == 'stable' }}
-        env:
-          HOMEBREW_TAP_TOKEN: ${{ secrets.HOMEBREW_TAP_TOKEN }}
-        run: node release-control/scripts/publish-homebrew-cask.mjs "$RUNNER_TEMP/release-candidate/cli/reasonix.rb"
 
       - name: Publish product release notes
         env:
@@ -468,52 +462,6 @@ jobs:
           bash scripts/compare-cli-release-manifests.sh \
             /tmp/cli-release.json /tmp/cli-release.immutable.json
 
-          if [ -z "$channel" ]; then
-            echo "internal CLI release $TAG; Stable and Preview pointers remain unchanged"
-            exit 0
-          fi
-
-          current_tag=""
-          pointer_error="$(mktemp)"
-          if aws s3 cp "s3://${R2_BUCKET}/cli/${channel}/latest.json" /tmp/cli-release.pointer.json \
-            --endpoint-url "$endpoint" 2>"$pointer_error"; then
-            current_tag="$(jq -er '.tag_name | strings' /tmp/cli-release.pointer.json)"
-            bash scripts/validate-cli-release-manifest.sh \
-              "legacy-${channel}" "$current_tag" "${{ github.repository }}" \
-              /tmp/cli-release.pointer.json "$current_tag"
-          elif grep -Eiq '404|NoSuchKey|Not Found' "$pointer_error"; then
-            echo "CLI $channel pointer does not exist yet"
-          else
-            cat "$pointer_error" >&2
-            exit 1
-          fi
-          rm -f "$pointer_error"
-
-          pointer_manifest=-
-          if [ -n "$current_tag" ]; then
-            pointer_manifest=/tmp/cli-release.pointer.json
-          fi
-          pointer_decision="$(
-            bash scripts/decide-cli-pointer-update.sh \
-              "$channel" /tmp/cli-release.json "$pointer_manifest"
-          )"
-          if [ "$pointer_decision" = "skip" ]; then
-            echo "CLI $channel pointer remains ${current_tag:-unset}; candidate $TAG is not newer and needs no repair"
-            exit 0
-          fi
-          aws s3 cp /tmp/cli-release.json "s3://${R2_BUCKET}/cli/${channel}/latest.json" \
-            --endpoint-url "$endpoint" \
-            --content-type "application/json; charset=utf-8" \
-            --cache-control "public, max-age=300, stale-if-error=86400"
-
-          aws s3 cp "s3://${R2_BUCKET}/cli/${channel}/latest.json" /tmp/cli-release.pointer.json \
-            --endpoint-url "$endpoint"
-          bash scripts/validate-cli-release-manifest.sh \
-            "$channel" "$TAG" "${{ github.repository }}" \
-            /tmp/cli-release.pointer.json "$NOTES_TAG"
-          cmp -s /tmp/cli-release.json /tmp/cli-release.pointer.json
-          echo "CLI $channel pointer -> $TAG"
-
       - name: Attach desktop manifest compatibility asset
         env:
           GH_TOKEN: ${{ github.token }}
@@ -585,52 +533,3 @@ jobs:
           done
           echo "::error::public compatibility manifest unreachable at $url"
           exit 1
-
-      # A stable CLI release must never leave the npm line behind: v1.17.5
-      # shipped as binaries/Homebrew while npm `latest` still pointed at 0.53.2
-      # (#5822) — every `npm update -g` user was silently downgraded to a
-      # months-old version, and nothing noticed because the npm line
-      # (release-npm.yml, `npm-vX.Y.Z` tags) is triggered independently and the
-      # stable npm tag was simply never pushed. release-npm.yml's own verify
-      # step only guards runs that happen; this guard catches the run that
-      # DIDN'T.
-      #
-      # Two distinct states, two responses (the approved orchestrator starts the
-      # CLI and npm reusable workflows concurrently, and npm dist-tags propagate
-      # asynchronously, so "tag pushed but latest not moved yet" is a NORMAL
-      # mid-release state, not a failure):
-      #   - npm-v<version> tag missing  -> hard fail. This is the #5822 gap:
-      #     nobody pushed the npm release at all.
-      #   - tag pushed, latest lagging  -> poll briefly, then WARN and pass.
-      #     The npm job may still be publishing; release-npm.yml's verify step
-      #     owns asserting the dist-tag lands.
-      - name: Check npm latest dist-tag freshness
-        env:
-          TAG: ${{ needs.resolve.outputs.tag }}
-        run: |
-          set -euo pipefail
-          case "$TAG" in
-            *-*)
-              echo "prerelease $TAG — npm latest does not move on prereleases; skipping"
-              exit 0
-              ;;
-          esac
-          version="${TAG#v}"
-          if ! git ls-remote --exit-code origin "refs/tags/npm-v$version" >/dev/null; then
-            echo "::error::the npm-v$version tag was never pushed — the npm channel is being left behind and 'npm update -g' users will be downgraded to the old 'latest'. Push it: git tag npm-v$version ${TAG} && git push origin npm-v$version (or 'npm dist-tag add reasonix@$version latest' for an already-published version)."
-            exit 1
-          fi
-          for attempt in 1 2 3 4 5 6; do
-            got="$(npm view reasonix dist-tags.latest 2>/dev/null || true)"
-            if [ -n "$got" ]; then
-              newest="$(printf '%s\n%s\n' "$got" "$version" | sort -V | tail -1)"
-              if [ "$newest" = "$got" ]; then
-                echo "npm latest -> $got (>= $version) OK"
-                exit 0
-              fi
-            fi
-            echo "npm latest -> ${got:-<unreadable>}, want >= $version (attempt $attempt)"
-            sleep 10
-          done
-          echo "::warning::npm-v$version is pushed but npm 'latest' is still ${got:-<unreadable>} — the concurrent npm publish is likely still running or propagating. Monitor the npm job; its verify step asserts the dist-tag lands."
-          exit 0

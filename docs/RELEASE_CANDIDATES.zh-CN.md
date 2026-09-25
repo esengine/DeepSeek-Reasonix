@@ -21,5 +21,5 @@ Desktop 文件、执行最终安装包的原生验收并封存记录。`Publish 
 文件可以跨 run 复用，不等于公开发布，也不能代替下一次正式发布的公开验收。
 
 候选文件保留 30 天，记录和验收证据保留 90 天。尚未发布时若文件过期，需
-重新准备候选。正式发布后的标签、npm、Desktop 更新、Homebrew 与官网
-渲染结果仍以发布 skill 的公开 postflight 验证为准。
+重新准备候选。正式发布后的标签、CLI 与 Desktop Release、Desktop 更新与
+官网渲染结果仍以发布 skill 的公开 postflight 验证为准。

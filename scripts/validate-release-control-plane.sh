@@ -10,7 +10,6 @@ required=(
 	.github/workflows/release-site-recovery.yml
 	.github/workflows/release-desktop.yml
 	.signpath/contracts/release-signing.yml
-	npm/publish-candidate.mjs
 	scripts/build-release-cli-candidate.mjs
 	scripts/desktop-release-artifacts.mjs
 	scripts/finalize-windows-signed-candidate.sh
@@ -57,7 +56,6 @@ node --check "$root/scripts/release-candidate.mjs"
 node --check "$root/scripts/verify-release-artifact-archive.mjs"
 node --check "$root/scripts/resolve-release-candidate.mjs"
 node --check "$root/scripts/build-release-cli-candidate.mjs"
-node --check "$root/npm/publish-candidate.mjs"
 bash -n "$root/scripts/finalize-windows-signed-candidate.sh"
 bash -n "$root/scripts/release-candidate-tags.sh"
 bash -n "$root/scripts/package-windows-desktop.sh"

@@ -1,5 +1,6 @@
 #!/usr/bin/env bash
-# Verify that a stable orchestration produced every public release channel.
+# Verify that a stable orchestration produced every public release channel this
+# line owns: the CLI and Desktop GitHub releases and the Desktop site surfaces.
 set -euo pipefail
 
 repository="${RELEASE_REPOSITORY:?RELEASE_REPOSITORY is required}"
@@ -7,8 +8,6 @@ version="${RELEASE_VERSION:?RELEASE_VERSION is required}"
 cli_tag="${CLI_TAG:?CLI_TAG is required}"
 desktop_tag="${DESKTOP_TAG:?DESKTOP_TAG is required}"
 script_dir="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
-attempts="${VERIFY_ATTEMPTS:-6}"
-delay="${VERIFY_DELAY_SECONDS:-10}"
 verify_homepage="${VERIFY_HOMEPAGE:-false}"
 site_only="${VERIFY_PUBLIC_SITE_ONLY:-false}"
 operation="${RELEASE_OPERATION:-publish}"
@@ -50,7 +49,6 @@ verify_site() {
 	local manifest="$tmp_dir/desktop-pointer.json"
 	local homepage="$tmp_dir/homepage.html"
 	local changelog="$tmp_dir/changelog.html"
-	local cask="$tmp_dir/reasonix.rb"
 	bash "$script_dir/fetch-stable-release-manifest.sh" "$version" "$manifest"
 	jq -e --arg version "v$version" '
 		.version == $version and
@@ -61,8 +59,6 @@ verify_site() {
 	! grep -Eq 'href="[^"]*(tag|download)/desktop-v[0-9]+\.[0-9]+\.[0-9]+' "$homepage"
 	go run "$script_dir/release-site-fetch/main.go" changelog "$version" "$changelog"
 	grep -Fq "v$version" "$changelog"
-	curl -fsSL https://raw.githubusercontent.com/esengine/homebrew-reasonix/main/Casks/reasonix.rb >"$cask"
-	grep -Eq "version ['\"]$version['\"]" "$cask"
 	local browser="${CHROME_BIN:-}"
 	if [ -z "$browser" ]; then
 		for candidate in google-chrome google-chrome-stable chromium chromium-browser; do
@@ -133,74 +129,21 @@ if [ "${DESKTOP_MANUAL_ONLY:-false}" = "true" ]; then
 	gh release view "$desktop_tag" --repo "$repository" --json body --jq .body | grep -F 'manual-download only'
 fi
 
-npm_names=(
-	"reasonix"
-	"@reasonix/cli-darwin-arm64"
-	"@reasonix/cli-darwin-x64"
-	"@reasonix/cli-linux-arm64"
-	"@reasonix/cli-linux-x64"
-	"@reasonix/cli-win32-arm64"
-	"@reasonix/cli-win32-x64"
-)
-for attempt in $(seq 1 "$attempts"); do
-	rm -rf "$tmp_dir/npm"
-	mkdir -p "$tmp_dir/npm"
-	visible=true
-	for index in "${!npm_names[@]}"; do
-		package="${npm_names[$index]}"
-		raw="$tmp_dir/npm/$index.raw.json"
-		if ! npm view "$package@$version" name version reasonixCandidateSha gitHead dist.integrity dist-tags.latest --json >"$raw" 2>/dev/null; then
-			visible=false
-			continue
-		fi
-		jq --arg name "$package" '
-			{
-				name: (.name // $name),
-				version,
-				reasonixCandidateSha,
-				gitHead,
-				integrity: (."dist.integrity" // .dist.integrity),
-				latest: (."dist-tags.latest" // ."dist-tags".latest)
-			}
-		' "$raw" >"$tmp_dir/npm/$index.json"
-		jq -e --arg name "$package" --arg version "$version" --arg sha "$cli_sha" '
-			.name == $name and .version == $version and
-			((.reasonixCandidateSha == null or .reasonixCandidateSha == $sha) and
-			 (.gitHead == null or .gitHead == $sha) and
-			 ((.reasonixCandidateSha // .gitHead) == $sha)) and
-			(.integrity | type == "string" and length > 0) and
-			(.latest | type == "string" and length > 0)
-		' "$tmp_dir/npm/$index.json" >/dev/null || {
-			echo "::error::npm package identity differs from the release candidate: $package@$version" >&2
-			exit 1
-		}
-	done
-	if [ "$visible" = "true" ]; then
-		jq -s '.' "$tmp_dir"/npm/[0-9].json >"$tmp_dir/npm.json"
-		if node "$script_dir/release-publication-ledger.mjs" core "$version" "$cli_sha" "$operation" \
-			"$tmp_dir/cli.json" "$tmp_dir/desktop.json" "$tmp_dir/npm.json" "$tmp_dir/core-ledger.json"; then
-			if [ "$verify_homepage" = "true" ]; then
-				owns_site="$(bash "$script_dir/observe-release-site.sh" "$version" "$operation")"
-				if [ "$owns_site" = true ]; then
-					verify_site
-					node "$script_dir/release-publication-ledger.mjs" site "$version" "$cli_sha" "$operation" \
-						"$tmp_dir/desktop-pointer.json" "$tmp_dir/site-ledger.json"
-					node "$script_dir/release-publication-ledger.mjs" merge "$tmp_dir/core-ledger.json" \
-						"$tmp_dir/site-ledger.json" "${ledger_output:-$tmp_dir/publication-ledger.json}"
-				else
-					echo "A verified newer Stable release owns the site; recovered immutable v$version files only."
-					[ -z "$ledger_output" ] || cp "$tmp_dir/core-ledger.json" "$ledger_output"
-				fi
-			elif [ -n "$ledger_output" ]; then
-				cp "$tmp_dir/core-ledger.json" "$ledger_output"
-			fi
-			echo "stable release postflight OK: cli=$cli_tag desktop=$desktop_tag npm-packages=${#npm_names[@]}"
-			exit 0
-		fi
+node "$script_dir/release-publication-ledger.mjs" core "$version" "$cli_sha" "$operation" \
+	"$tmp_dir/cli.json" "$tmp_dir/desktop.json" "$tmp_dir/core-ledger.json"
+if [ "$verify_homepage" = "true" ]; then
+	owns_site="$(bash "$script_dir/observe-release-site.sh" "$version" "$operation")"
+	if [ "$owns_site" = true ]; then
+		verify_site
+		node "$script_dir/release-publication-ledger.mjs" site "$version" "$cli_sha" "$operation" \
+			"$tmp_dir/desktop-pointer.json" "$tmp_dir/site-ledger.json"
+		node "$script_dir/release-publication-ledger.mjs" merge "$tmp_dir/core-ledger.json" \
+			"$tmp_dir/site-ledger.json" "${ledger_output:-$tmp_dir/publication-ledger.json}"
+	else
+		echo "A verified newer Stable release owns the site; recovered immutable v$version files only."
+		[ -z "$ledger_output" ] || cp "$tmp_dir/core-ledger.json" "$ledger_output"
 	fi
-	echo "npm publication has not converged (attempt $attempt/$attempts)"
-	if [ "$attempt" -lt "$attempts" ]; then sleep "$delay"; fi
-done
-
-echo "::error::npm package set or public pointers did not converge for $version" >&2
-exit 1
+elif [ -n "$ledger_output" ]; then
+	cp "$tmp_dir/core-ledger.json" "$ledger_output"
+fi
+echo "stable release postflight OK: cli=$cli_tag desktop=$desktop_tag"

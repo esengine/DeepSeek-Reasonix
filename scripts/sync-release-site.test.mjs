@@ -4,7 +4,7 @@ import { mkdtempSync, mkdirSync, copyFileSync, writeFileSync, readFileSync, rmSy
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { spawnSync } from "node:child_process";
-import { createCoreLedger, createSiteLedger, npmPackageNames } from "./release-publication-ledger.mjs";
+import { createCoreLedger, createSiteLedger } from "./release-publication-ledger.mjs";
 
 const sha = "a".repeat(40);
 function fixture(t) {
@@ -14,7 +14,7 @@ function fixture(t) {
   mkdirSync(scripts); mkdirSync(bin);
   for (const file of ["sync-release-site.sh", "observe-release-site.sh", "fetch-stable-release-manifest.sh", "check-release-public-access.sh", "release-publication-ledger.mjs"]) copyFileSync(`scripts/${file}`, path.join(scripts, file));
   const release = { isDraft: false, isPrerelease: false, assets: [] };
-  writeFileSync(path.join(root, "core.json"), JSON.stringify(createCoreLedger({ version: "1.2.3", sourceSHA: sha, operation: "recover", cliRelease: release, desktopRelease: release, npmPackages: npmPackageNames.map(name => ({ name, version: "1.2.3", latest: "1.2.3", gitHead: sha, integrity: "sha512-example" })) })));
+  writeFileSync(path.join(root, "core.json"), JSON.stringify(createCoreLedger({ version: "1.2.3", sourceSHA: sha, operation: "recover", cliRelease: release, desktopRelease: release })));
   writeFileSync(path.join(root, "site.json"), JSON.stringify(createSiteLedger({ version: "1.2.3", sourceSHA: sha, operation: "recover", manifest: { version: "v1.2.3" } })));
   writeFileSync(path.join(scripts, "verify-stable-release-artifacts.sh"), `#!/usr/bin/env bash
 set -euo pipefail
@@ -69,12 +69,12 @@ else process.exit(4);
   };
 }
 
-test("site recovery correlates its own Pages run and merges all eight observed surfaces", t => {
+test("site recovery correlates its own Pages run and merges all six observed surfaces", t => {
   const f = fixture(t), result = f.run({});
   assert.equal(result.status, 0, result.stderr);
   const ledger = f.ledger();
   assert.equal(ledger.completionState, "complete");
-  assert.equal(Object.keys(ledger.surfaces).length, 8);
+  assert.equal(Object.keys(ledger.surfaces).length, 6);
   assert.equal(ledger.verificationContext.pagesRunId, "901");
   assert.doesNotMatch(f.calls(), /"(?:upload|publish|push)"/);
 });
@@ -123,7 +123,7 @@ test("public access preflight accepts the previous stable version but rejects ch
   }
 });
 
-test("real public verifier rejects tag drift before inspecting any packages", t => {
+test("real public verifier rejects tag drift before inspecting any release", t => {
   const f = fixture(t);
   writeFileSync(path.join(f.root, "bin/git"), `#!/usr/bin/env node\nconsole.log('${"b".repeat(40)}\\trefs/tags/v1.2.3');`, { mode: 0o755 });
   const result = spawnSync("bash", ["scripts/verify-stable-release-artifacts.sh"], { env: { ...f.env, CLI_TAG: "v1.2.3", DESKTOP_TAG: "desktop-v1.2.3" }, encoding: "utf8" });

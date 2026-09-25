@@ -16,12 +16,7 @@ on:
         required: true
         type: string
       publish_cli:
-        description: "Recover the CLI/Homebrew channel"
-        required: false
-        default: true
-        type: boolean
-      publish_npm:
-        description: "Recover the npm channel"
+        description: "Recover the CLI GitHub release"
         required: false
         default: true
         type: boolean
@@ -51,7 +46,8 @@ concurrency:
   cancel-in-progress: false
 
 # Reusable release workflows can only reduce caller permissions, so the
-# orchestrator grants the union needed by CLI/Desktop publication.
+# orchestrator grants the union needed by CLI/Desktop publication. npm and
+# Homebrew belong to the Studio line; this line never publishes to them.
 permissions:
   actions: write
   contents: write
@@ -66,7 +62,6 @@ jobs:
     outputs:
       version: ${{ steps.release.outputs.version }}
       cli_tag: ${{ steps.release.outputs.cli_tag }}
-      npm_tag: ${{ steps.release.outputs.npm_tag }}
       desktop_tag: ${{ steps.release.outputs.desktop_tag }}
       sha: ${{ steps.release.outputs.sha }}
     steps:
@@ -135,7 +130,6 @@ jobs:
     outputs:
       version: ${{ steps.approved.outputs.version }}
       cli_tag: ${{ steps.approved.outputs.cli_tag }}
-      npm_tag: ${{ steps.approved.outputs.npm_tag }}
       desktop_tag: ${{ steps.approved.outputs.desktop_tag }}
       sha: ${{ steps.approved.outputs.sha }}
     steps:
@@ -144,44 +138,24 @@ jobs:
         env:
           VERSION: ${{ needs.preflight.outputs.version }}
           CLI_TAG: ${{ needs.preflight.outputs.cli_tag }}
-          NPM_TAG: ${{ needs.preflight.outputs.npm_tag }}
           DESKTOP_TAG: ${{ needs.preflight.outputs.desktop_tag }}
           RELEASE_SHA: ${{ needs.preflight.outputs.sha }}
         run: |
           {
             echo "version=$VERSION"
             echo "cli_tag=$CLI_TAG"
-            echo "npm_tag=$NPM_TAG"
             echo "desktop_tag=$DESKTOP_TAG"
             echo "sha=$RELEASE_SHA"
           } >> "$GITHUB_OUTPUT"
           echo "Approved stable release $VERSION at $RELEASE_SHA"
 
   cli:
-    name: publish CLI and Homebrew
+    name: publish CLI
     needs: [authorize, signpath-preflight]
     if: ${{ always() && !cancelled() && needs.authorize.result == 'success' && (needs.signpath-preflight.result == 'success' || needs.signpath-preflight.result == 'skipped') && (github.event_name != 'workflow_dispatch' || inputs.publish_cli) }}
     uses: ./.github/workflows/release.yml
     with:
       tag: ${{ needs.authorize.outputs.cli_tag }}
-      approved_cli_tag: ${{ needs.authorize.outputs.cli_tag }}
-      approved_sha: ${{ needs.authorize.outputs.sha }}
-      orchestrated: true
-    secrets: inherit
-
-  npm:
-    name: publish npm
-    needs: [authorize, signpath-preflight]
-    if: ${{ always() && !cancelled() && needs.authorize.result == 'success' && (needs.signpath-preflight.result == 'success' || needs.signpath-preflight.result == 'skipped') && (github.event_name != 'workflow_dispatch' || inputs.publish_npm) }}
-    # A reusable workflow only receives permissions the caller grants here.
-    permissions:
-      contents: read
-      id-token: write
-    uses: ./.github/workflows/release-npm.yml
-    with:
-      channel: stable
-      base_version: ${{ needs.authorize.outputs.version }}
-      tag: ${{ needs.authorize.outputs.npm_tag }}
       approved_cli_tag: ${{ needs.authorize.outputs.cli_tag }}
       approved_sha: ${{ needs.authorize.outputs.sha }}
       orchestrated: true
@@ -222,7 +196,7 @@ jobs:
 
   postflight:
     name: verify stable release artifacts
-    needs: [authorize, cli, npm, desktop]
+    needs: [authorize, cli, desktop]
     if: ${{ always() && !cancelled() }}
     runs-on: ubuntu-latest
     permissions:
@@ -232,14 +206,12 @@ jobs:
       - name: Require every publisher to succeed
         env:
           PUBLISH_CLI: ${{ github.event_name != 'workflow_dispatch' || inputs.publish_cli }}
-          PUBLISH_NPM: ${{ github.event_name != 'workflow_dispatch' || inputs.publish_npm }}
           PUBLISH_DESKTOP: ${{ github.event_name != 'workflow_dispatch' || inputs.publish_desktop }}
           CLI_RESULT: ${{ needs.cli.result }}
-          NPM_RESULT: ${{ needs.npm.result }}
           DESKTOP_RESULT: ${{ needs.desktop.result }}
         run: |
           set -euo pipefail
-          for channel in cli npm desktop; do
+          for channel in cli desktop; do
             selected_var="PUBLISH_${channel^^}"
             result_var="${channel^^}_RESULT"
             selected="${!selected_var}"
@@ -265,7 +237,7 @@ jobs:
         with:
           go-version-file: go.mod
           cache: false
-      - name: Verify public artifacts and npm latest
+      - name: Verify public artifacts
         env:
           GH_TOKEN: ${{ github.token }}
           RELEASE_REPOSITORY: ${{ github.repository }}
