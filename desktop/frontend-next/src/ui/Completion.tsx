@@ -62,6 +62,8 @@ export function useCompletion(
 ): State {
   const [completion, setCompletion] = useState<Completion>(EMPTY);
   const [loading, setLoading] = useState(false);
+  const currentCompletion = useRef(completion);
+  currentCompletion.current = completion;
   const [active, setActive] = useState(0);
   const [picked, setPicked] = useState(false);
   // The answer that was dismissed, not a flag: a reset run as an effect lands
@@ -79,22 +81,32 @@ export function useCompletion(
       setLoading(false);
       return;
     }
-    setCompletion(EMPTY);
-    setLoading(text.startsWith("/"));
+    const previous = currentCompletion.current;
+    const compatible = text.startsWith("/")
+      ? previous.kind === "slash" || previous.kind === "slash-arg"
+      : previous.kind === "ref";
+    if (!compatible) setCompletion(EMPTY);
+    setLoading(false);
+    const timer = text.startsWith("/") && !compatible
+      ? window.setTimeout(() => { if (id === asked.current) setLoading(true); }, 180)
+      : undefined;
     port
       .complete(text, caret)
       .then((r) => {
         if (id === asked.current) {
+          window.clearTimeout(timer);
           setCompletion(r.items?.length ? r : EMPTY);
           setLoading(false);
         }
       })
       .catch(() => {
         if (id === asked.current) {
+          window.clearTimeout(timer);
           setCompletion(EMPTY);
           setLoading(false);
         }
       });
+    return () => window.clearTimeout(timer);
   }, [port, text, caret]);
 
   // A keystroke changed the list under the pointer, so its claim on the

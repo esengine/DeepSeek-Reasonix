@@ -406,9 +406,11 @@ export function Composer({ port, status, running, quote, focus, onSubmit, onChan
           onHover={menu.hover}
         />
       )}
-      {menu.loading && <div className="menu slashmenu" role="status">
-        <div className="mnone">{t("正在加载命令与技能…")}</div>
-      </div>}
+      <div role="status" aria-live="polite" aria-label={t("补全")}>
+        {menu.loading && !menu.open && <div className="menu slashmenu">
+          <div className="mnone">{t("正在加载命令与技能…")}</div>
+        </div>}
+      </div>
       {/* What letting go will do, said before it happens. A drop that only
           reports afterwards is the pattern this replaces. */}
       {drag && (
