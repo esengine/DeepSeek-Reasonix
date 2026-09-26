@@ -1,10 +1,11 @@
 import type { AskReason } from "../../port/session";
 import { Sym } from "../Sym";
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { t } from "../../i18n";
 import type { Item } from "../../state/session";
 import { answerSource } from "../source";
 import { useViewer } from "../../state/viewer";
+import { useIme } from "../ime";
 
 const ADVANCE_MS = 220;
 
@@ -23,6 +24,11 @@ export function AskCard({ item, onAnswer }: Props) {
   const [other, setOther] = useState<string[]>(() => qs.map(() => ""));
   const [otherOn, setOtherOn] = useState<boolean[]>(() => qs.map(() => false));
   const [submitting, setSubmitting] = useState(false);
+  // Every request is a new object, so asking for the same pane twice still moves focus.
+  const [focusTo, setFocusTo] = useState<{ q: number } | null>(null);
+  const boxes = useRef<(HTMLInputElement | null)[]>([]);
+  const panes = useRef<(HTMLDivElement | null)[]>([]);
+  const ime = useIme();
   // Answered is read-only but still readable: the tabs keep working so you can
   // see what was chosen for each question, and the options stay on screen with
   // the unchosen ones dimmed by the sealed styling.
@@ -80,8 +86,18 @@ export function AskCard({ item, onAnswer }: Props) {
     if (sealed) return;
     const on = !otherOn[qi];
     setOtherOn((prev) => at(prev, qi, on));
+    if (on) setFocusTo({ q: qi });
     if (on && !qs[qi].multi) setPicks((prev) => at(prev, qi, []));
   };
+
+  // A pane is display:none until it is the current one, so focus moves after
+  // the render that shows it: into its open free-text box, else its first option.
+  useEffect(() => {
+    if (!focusTo) return;
+    const box = boxes.current[focusTo.q];
+    if (otherOn[focusTo.q] && box) box.focus();
+    else panes.current[focusTo.q]?.querySelector<HTMLElement>("button.opt")?.focus();
+  }, [focusTo]);
 
   const send = async (answers: string[][]) => {
     if (submitting) return;
@@ -90,6 +106,20 @@ export function AskCard({ item, onAnswer }: Props) {
       await onAnswer(item.id, item.ask.id, qs.map((q, i) => ({ questionId: q.id, selected: answers[i] })));
     } finally {
       setSubmitting(false);
+    }
+  };
+
+  // Enter in the free-text box does what the primary button would, so a typed
+  // answer never needs the mouse to go on.
+  const onEnter = () => {
+    if (submitting) return;
+    if (nextOpen(tab, tab) >= 0) {
+      if (!answered(tab)) return;
+      const next = nextOpen(tab);
+      setTab(next);
+      setFocusTo({ q: next });
+    } else if (left === 0) {
+      void send(qs.map((_, i) => selected(i)));
     }
   };
 
@@ -124,7 +154,14 @@ export function AskCard({ item, onAnswer }: Props) {
               </div>
             )}
             {qs.map((q, i) => (
-              <div className="ask-pane" key={q.id} data-on={i === tab ? "" : undefined}>
+              <div
+                className="ask-pane"
+                key={q.id}
+                data-on={i === tab ? "" : undefined}
+                ref={(el) => {
+                  panes.current[i] = el;
+                }}
+              >
                 <div className="ask-q">{q.prompt}</div>
                 <div className="ask-hint">{t(q.multi ? "可多选" : "请选择一项")}</div>
                 <div className="opts" aria-label={q.prompt}>
@@ -164,10 +201,21 @@ export function AskCard({ item, onAnswer }: Props) {
                 </div>
                 <div className="other-wrap" data-on={customChosen(i) ? "" : undefined}>
                   <input
+                    ref={(el) => {
+                      boxes.current[i] = el;
+                    }}
+                    data-action-keydown="ask.answer"
+                    aria-label={customOption(i)?.label ?? t("其他 —— 自行填写")}
                     value={freeShown(i)}
                     readOnly={sealed}
                     placeholder={t("在此填写你希望采用的方案")}
                     onChange={(e) => setOther((prev) => at(prev, i, e.target.value))}
+                    onKeyDown={(e) => {
+                      if (e.key !== "Enter" || sealed || ime.isIme(e.nativeEvent)) return;
+                      e.preventDefault();
+                      onEnter();
+                    }}
+                    {...ime.handlers}
                   />
                 </div>
               </div>
