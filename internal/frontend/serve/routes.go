@@ -57,6 +57,8 @@ func (s *Server) routes() http.Handler {
 	mux.HandleFunc("POST /auto-approve-tools", s.autoApproveTools)
 	mux.HandleFunc("POST /bypass", s.bypass)
 	mux.HandleFunc("POST /goal", s.goal)
+	mux.HandleFunc("POST /goal/resume", s.goalResume)
+	mux.HandleFunc("POST /goal/pause", s.goalPause)
 	mux.HandleFunc("POST /answer", s.answer)
 	mux.HandleFunc("POST /resume", s.resume)
 	mux.HandleFunc("POST /forget", s.forget)

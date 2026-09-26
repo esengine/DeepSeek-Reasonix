@@ -349,12 +349,12 @@ func (g *goalMachine) pauseFor(stopCause, reason string, todos []evidence.TodoIt
 	return g.buildStateLocked(todos)
 }
 
-// resume re-enters a recoverable blocked/stopped goal without resetting scope
-// or runtime history. Continuous Goals never extend a numeric quota.
+// resume re-enters a blocked/stopped goal keeping scope and runtime history. A
+// running goal is refused: bumping its epoch would drop the continuation in flight.
 func (g *goalMachine) resume(todos []evidence.TodoItem) (path string, data []byte, persist, resumed bool) {
 	g.mu.Lock()
 	defer g.mu.Unlock()
-	if strings.TrimSpace(g.goal) == "" || g.status == GoalStatusComplete {
+	if strings.TrimSpace(g.goal) == "" || g.status == GoalStatusComplete || g.status == GoalStatusRunning {
 		return "", nil, false, false
 	}
 	// A user-selected spend pause grants one fresh configured slice. Usage

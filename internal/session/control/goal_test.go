@@ -599,6 +599,17 @@ func TestGoalAdvanceResultCannotCrossGoalLifecycle(t *testing.T) {
 		}
 	})
 
+	t.Run("resuming a running goal is refused and keeps the result", func(t *testing.T) {
+		var g goalMachine
+		res := newResult(t, &g)
+		if _, _, _, resumed := g.resume(nil); resumed {
+			t.Fatal("resume accepted a goal that is already running")
+		}
+		if got, ok := g.acceptContinuation(res); !ok || got != res.intercept {
+			t.Fatalf("acceptContinuation() after a refused resume = (%q, %v), want the in-flight intercept", got, ok)
+		}
+	})
+
 	t.Run("stop and resume invalidates result", func(t *testing.T) {
 		var g goalMachine
 		res := newResult(t, &g)
@@ -897,5 +908,18 @@ func TestLegacyRunningGoalSidecarAllocatesScope(t *testing.T) {
 	}
 	if got := exec.DeliveryCheckpoint(); got.ScopeID != id {
 		t.Fatalf("legacy checkpoint scope = %q, want %q", got.ScopeID, id)
+	}
+}
+
+// Resume is for a Goal that has stopped; on a running one it would only bump
+// the continuation epoch and drop the continuation already in flight.
+func TestControllerResumeGoalRefusesARunningGoal(t *testing.T) {
+	c := New(Options{Sink: event.Discard})
+	c.SetGoal("ship the release")
+	if c.ResumeGoal() {
+		t.Fatal("ResumeGoal accepted a running goal")
+	}
+	if !c.PauseGoal() || !c.ResumeGoal() || c.GoalStatus() != GoalStatusRunning {
+		t.Fatalf("pause then resume = status %q, want running", c.GoalStatus())
 	}
 }

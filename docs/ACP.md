@@ -253,6 +253,30 @@ names rather than constructing vendor method strings.
 bodies. A recovered inbox is paused; clients should let users inspect it before
 calling `setPaused` with `false`.
 
+## Goal pause and resume extension
+
+Selecting `goal` with `session/set_mode` always drafts a **new** Goal: the next
+prompt becomes its objective and its counters start at zero. To bring back a
+Goal the session already holds, Reasonix advertises two vendor methods as keys
+of `agentCapabilities._meta`, each with `{"schemaVersion": 1}`:
+
+| Method | Params | Behavior |
+| --- | --- | --- |
+| `_reasonix.io/session/goal/resume` | `sessionId` | Re-enters a stopped, blocked, paused or cancelled Goal with its objective, counters, todos and delivery checkpoint. It does not start a turn: the next `session/prompt` continues the retained objective. Fails with `-32010` when the session has no resumable Goal (none, complete, or already running). |
+| `_reasonix.io/session/goal/pause` | `sessionId` | Pauses a running Goal so it stops at the next continuation boundary; the turn in flight is left to `session/cancel`. Fails with `-32011` when no Goal is running. |
+
+On success both methods:
+
+- return `{"goal": …}` in the shape of the `goal` field of `_reasonix.io/session/status`;
+- publish a `_reasonix.io/session/status_update` with event `goal`;
+- send `current_mode_update` when the collaboration mode changes;
+- replace a turn-outcome label the status was showing (`cancelled`, `failed`) with the Goal's own state.
+
+The status `goal.status` value `failed` labels the last turn, not the Goal:
+after a turn ends in an error the Goal is still running. A plain
+`session/prompt` continues it, `resume` returns `-32010` because there is
+nothing to resume, and `pause` stops it and reports the paused state.
+
 ## Runtime reload and extension surface
 
 Reasonix advertises two more extension points in
