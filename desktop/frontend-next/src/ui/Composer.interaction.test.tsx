@@ -4,7 +4,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import "./testkit";
 import { Composer } from "./Composer";
 import { MockPort } from "../port/mock";
-import type { AgentPort, ApprovalMode, Attachment, ModelEntry, Preset, SessionStatus } from "../port/port";
+import type { AgentPort, ApprovalMode, Attachment, Completion, ModelEntry, Preset, SessionStatus } from "../port/port";
 
 afterEach(cleanup);
 
@@ -139,6 +139,103 @@ describe("composer run controls", () => {
 });
 
 describe("composer menus", () => {
+  it("shows that slash skills are loading until the catalog answers", async () => {
+    vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
+    try {
+      const port = new MockPort();
+      const request = deferred<Completion>();
+      vi.spyOn(port, "complete").mockReturnValue(request.promise);
+      const { box } = draw({ port });
+      const status = screen.getByRole("status", { name: "补全" });
+      fireEvent.change(box, { target: { value: "/", selectionStart: 1 } });
+      expect(screen.queryByText("正在加载命令与技能…")).toBeNull();
+      act(() => vi.advanceTimersByTime(180));
+      expect(screen.getByText("正在加载命令与技能…")).toBeTruthy();
+      expect(screen.getByRole("status", { name: "补全" })).toBe(status);
+      await act(async () => request.resolve({
+        kind: "slash", from: 0, to: 1, query: "/",
+        items: [{ label: "/review", insert: "/review ", kind: "skill" }],
+      }));
+      expect(screen.queryByText("正在加载命令与技能…")).toBeNull();
+      expect(screen.getByRole("option", { name: /review/ })).toBeTruthy();
+      expect(screen.getByRole("status", { name: "补全" })).toBe(status);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("does not flash loading for a fast slash catalog answer", async () => {
+    vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
+    try {
+      const port = new MockPort();
+      const { box } = draw({ port });
+      fireEvent.change(box, { target: { value: "/", selectionStart: 1 } });
+      await act(async () => {});
+      act(() => vi.advanceTimersByTime(180));
+      expect(screen.queryByText("正在加载命令与技能…")).toBeNull();
+      expect(screen.getByRole("listbox", { name: "补全" })).toBeTruthy();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("dismisses a pending slash catalog without reopening on its late answer", async () => {
+    vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
+    try {
+      const port = new MockPort();
+      const request = deferred<Completion>();
+      vi.spyOn(port, "complete").mockReturnValue(request.promise);
+      const { box } = draw({ port });
+      fireEvent.change(box, { target: { value: "/", selectionStart: 1 } });
+      act(() => vi.advanceTimersByTime(180));
+      expect(screen.getByText("正在加载命令与技能…")).toBeTruthy();
+      fireEvent.keyDown(box, { key: "Escape" });
+      expect(screen.queryByText("正在加载命令与技能…")).toBeNull();
+      await act(async () => request.resolve({
+        kind: "slash", from: 0, to: 1, query: "/",
+        items: [{ label: "/review", insert: "/review ", kind: "skill" }],
+      }));
+      expect(screen.queryByRole("option", { name: /review/ })).toBeNull();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("keeps the completion list mounted while refining a slash query", async () => {
+    const port = new MockPort();
+    const next = deferred<Completion>();
+    const complete = vi.spyOn(port, "complete");
+    const { box } = draw({ port });
+    fireEvent.change(box, { target: { value: "/", selectionStart: 1 } });
+    const list = await screen.findByRole("listbox", { name: "补全" });
+    complete.mockReturnValueOnce(next.promise);
+    fireEvent.change(box, { target: { value: "/r", selectionStart: 2 } });
+    expect(screen.getByRole("listbox", { name: "补全" })).toBe(list);
+    expect(screen.queryByText("正在加载命令与技能…")).toBeNull();
+    await act(async () => next.resolve({
+      kind: "slash", from: 0, to: 2, query: "/r",
+      items: [{ label: "/review", insert: "/review ", kind: "skill" }],
+    }));
+    expect(screen.getByRole("listbox", { name: "补全" })).toBe(list);
+  });
+
+  it("keeps the file completion list mounted during the next lookup", async () => {
+    const port = new MockPort();
+    const next = deferred<Completion>();
+    const complete = vi.spyOn(port, "complete");
+    const { box } = draw({ port });
+    fireEvent.change(box, { target: { value: "@", selectionStart: 1 } });
+    const list = await screen.findByRole("listbox", { name: "补全" });
+    complete.mockReturnValueOnce(next.promise);
+    fireEvent.change(box, { target: { value: "@R", selectionStart: 2 } });
+    expect(screen.getByRole("listbox", { name: "补全" })).toBe(list);
+    await act(async () => next.resolve({
+      kind: "ref", from: 0, to: 2, query: "R",
+      items: [{ label: "README.md", insert: "@README.md", kind: "file" }],
+    }));
+    expect(screen.getByRole("listbox", { name: "补全" })).toBe(list);
+  });
+
   it("shows real workspace changes beside the current branch", async () => {
     draw({ changeCount: 3 });
     expect(await screen.findByText("3 个变更")).toBeTruthy();
@@ -190,7 +287,11 @@ describe("composer attachments", () => {
     const { container } = draw({ port, st: status({ vision: false, visionDeclared: false }) });
     const input = container.querySelector('input[type="file"]') as HTMLInputElement;
     fireEvent.change(input, { target: { files: [new File(["png"], "shot.png", { type: "image/png" })] } });
-    const warning = await screen.findByRole("status");
+    const warning = await waitFor(() => {
+      const element = document.querySelector<HTMLElement>(".shotwarn");
+      if (!element) throw new Error("image routing guidance not mounted");
+      return element;
+    });
     expect(warning.className).toBe("shotwarn");
     expect(warning.closest(".shots")).toBeNull();
   });

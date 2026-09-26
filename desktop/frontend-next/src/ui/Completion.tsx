@@ -36,6 +36,7 @@ interface State {
   completion: Completion;
   active: number;
   open: boolean;
+  loading: boolean;
   move: (delta: number) => void;
   hover: (i: number) => void;
   dismiss: () => void;
@@ -60,6 +61,9 @@ export function useCompletion(
   apply: (text: string, caret: number) => void,
 ): State {
   const [completion, setCompletion] = useState<Completion>(EMPTY);
+  const [loading, setLoading] = useState(false);
+  const currentCompletion = useRef(completion);
+  currentCompletion.current = completion;
   const [active, setActive] = useState(0);
   const [picked, setPicked] = useState(false);
   // The answer that was dismissed, not a flag: a reset run as an effect lands
@@ -71,19 +75,38 @@ export function useCompletion(
   const asked = useRef(0);
 
   useEffect(() => {
+    const id = ++asked.current;
     if (!mightComplete(text)) {
       setCompletion(EMPTY);
+      setLoading(false);
       return;
     }
-    const id = ++asked.current;
+    const previous = currentCompletion.current;
+    const compatible = text.startsWith("/")
+      ? previous.kind === "slash" || previous.kind === "slash-arg"
+      : previous.kind === "ref";
+    if (!compatible) setCompletion(EMPTY);
+    setLoading(false);
+    const timer = text.startsWith("/") && !compatible
+      ? window.setTimeout(() => { if (id === asked.current) setLoading(true); }, 180)
+      : undefined;
     port
       .complete(text, caret)
       .then((r) => {
-        if (id === asked.current) setCompletion(r.items?.length ? r : EMPTY);
+        if (id === asked.current) {
+          window.clearTimeout(timer);
+          setCompletion(r.items?.length ? r : EMPTY);
+          setLoading(false);
+        }
       })
       .catch(() => {
-        if (id === asked.current) setCompletion(EMPTY);
+        if (id === asked.current) {
+          window.clearTimeout(timer);
+          setCompletion(EMPTY);
+          setLoading(false);
+        }
       });
+    return () => window.clearTimeout(timer);
   }, [port, text, caret]);
 
   // A keystroke changed the list under the pointer, so its claim on the
@@ -112,6 +135,7 @@ export function useCompletion(
     completion,
     active: at,
     open,
+    loading,
     ownsEnter: open && (completion.kind !== "ref" || picked),
     kb,
     move: (delta) => {
@@ -124,7 +148,11 @@ export function useCompletion(
       setKb(false);
       setActive(i);
     },
-    dismiss: () => setDismissed(completion),
+    dismiss: () => {
+      asked.current++;
+      setDismissed(completion);
+      setLoading(false);
+    },
     accept,
   };
 }
