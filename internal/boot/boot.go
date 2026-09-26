@@ -1005,6 +1005,7 @@ func build(ctx context.Context, opts Options) (*BuildResult, error) {
 	// inherit this same gate.
 	policy := permission.New(cfg.Permissions.Mode, cfg.Permissions.Allow, cfg.Permissions.Ask, cfg.Permissions.Deny).
 		WithSessionAllow(opts.PermissionAllow)
+	emitUnmatchableRuleNotice(sink, cfg.Permissions.Allow, cfg.Permissions.Ask, cfg.Permissions.Deny)
 	headlessGate := control.NewSharedHeadlessGate(policy, opts.HeadlessApprovalMode)
 
 	var resolvedHooks []hook.ResolvedHook
