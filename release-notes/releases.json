@@ -2,6 +2,256 @@
   "schemaVersion": 1,
   "releases": [
     {
+      "version": "1.39.1",
+      "date": "2026-09-26",
+      "channel": "stable",
+      "targetingVersion": 1,
+      "title": {
+        "en": "Reasonix 1.39.1",
+        "zh": "Reasonix 1.39.1"
+      },
+      "summary": {
+        "en": "Stability and compatibility fixes for desktop and CLI, including session catalog repair, IME rename handling, and memory safety.",
+        "zh": "桌面端与 CLI 的稳定性及兼容性修复，包括会话目录修复、输入法重命名处理与记忆安全。"
+      },
+      "surfaces": [
+        "desktop",
+        "cli"
+      ],
+      "guides": [],
+      "highlights": [
+        {
+          "kind": "fixed",
+          "targets": [
+            "desktop"
+          ],
+          "title": {
+            "en": "Session catalog repair prevents stale head index",
+            "zh": "会话目录修复防止过期的头索引"
+          },
+          "body": {
+            "en": "Repair rebuilds a stale head index and lands its heads, so catalog_heads never disagrees with head_count.",
+            "zh": "修复会重建过期的头索引并落地其头，使 catalog_heads 与 head_count 不再不一致。"
+          },
+          "refs": [
+            10763
+          ]
+        },
+        {
+          "kind": "fixed",
+          "targets": [
+            "desktop"
+          ],
+          "title": {
+            "en": "IME Enter no longer closes rename inputs",
+            "zh": "输入法回车不再关闭重命名输入框"
+          },
+          "body": {
+            "en": "Session rename inputs stay open when a Chinese IME uses Enter to finish composition, preserving the saved title.",
+            "zh": "当中文输入法使用回车结束组合时，会话重命名输入框保持打开，保留已保存的标题。"
+          },
+          "refs": [
+            10836
+          ]
+        },
+        {
+          "kind": "fixed",
+          "targets": [
+            "desktop",
+            "cli"
+          ],
+          "title": {
+            "en": "Memory operations preserve index on read failure",
+            "zh": "读取失败时记忆操作保留索引"
+          },
+          "body": {
+            "en": "Unreadable MEMORY.md no longer causes save or archive to erase managed entries and hand-written notes.",
+            "zh": "不可读的 MEMORY.md 不再导致保存或归档清除受管条目和手写笔记。"
+          },
+          "refs": [
+            10833
+          ]
+        },
+        {
+          "kind": "fixed",
+          "targets": [
+            "desktop",
+            "cli"
+          ],
+          "title": {
+            "en": "Tool hooks now run in subagents",
+            "zh": "工具钩子现已在子代理中运行"
+          },
+          "body": {
+            "en": "Project and global tool hooks apply to task, read_only_task, run_skill, and read_only_skill subagents.",
+            "zh": "项目和全局工具钩子适用于 task、read_only_task、run_skill 和 read_only_skill 子代理。"
+          },
+          "refs": [
+            10843
+          ]
+        }
+      ],
+      "changes": {
+        "new": [],
+        "improved": [
+          {
+            "targets": [
+              "desktop"
+            ],
+            "title": {
+              "en": "Long provider model names fit within two lines",
+              "zh": "长提供方模型名称在两行内显示"
+            },
+            "body": {
+              "en": "Clamp displayed model names to two lines and expose the full name on hover.",
+              "zh": "将显示的模型名称限制为两行，并在悬停时显示完整名称。"
+            },
+            "refs": [
+              10830
+            ]
+          },
+          {
+            "targets": [
+              "cli"
+            ],
+            "title": {
+              "en": "Ambiguous --resume query lists matches",
+              "zh": "模糊的 --resume 查询列出匹配项"
+            },
+            "body": {
+              "en": "Headless resume with multiple matches now lists candidates and suggests using --resume <id>.",
+              "zh": "无头恢复遇到多个匹配时，现在会列出候选项并建议使用 --resume <id>。"
+            },
+            "refs": [
+              10782
+            ]
+          }
+        ],
+        "fixed": [
+          {
+            "targets": [
+              "desktop"
+            ],
+            "title": {
+              "en": "Crash overlay can restart Reasonix",
+              "zh": "崩溃覆盖层可重启 Reasonix"
+            },
+            "body": {
+              "en": "Add a Restart Reasonix action to the crash overlay, with fallback to page reload.",
+              "zh": "在崩溃覆盖层添加“重启 Reasonix”操作，并回退到页面重新加载。"
+            },
+            "refs": [
+              10775
+            ]
+          },
+          {
+            "targets": [
+              "desktop"
+            ],
+            "title": {
+              "en": "File panel shows top-level tmp/, bin/, stage/",
+              "zh": "文件面板显示顶层 tmp/、bin/、stage/"
+            },
+            "body": {
+              "en": "Workspace file panel and watcher no longer hide these directories.",
+              "zh": "工作区文件面板和监视器不再隐藏这些目录。"
+            },
+            "refs": [
+              10774
+            ]
+          },
+          {
+            "targets": [
+              "cli"
+            ],
+            "title": {
+              "en": "Fatal crash output captured for long sessions",
+              "zh": "长会话的致命崩溃输出被捕获"
+            },
+            "body": {
+              "en": "Runtime crash output goes to a per-PID file, and diagnostic logs rotate to keep the newest entries.",
+              "zh": "运行时崩溃输出写入每个 PID 的文件，诊断日志轮转以保留最新条目。"
+            },
+            "refs": [
+              10788
+            ]
+          },
+          {
+            "targets": [
+              "desktop",
+              "cli"
+            ],
+            "title": {
+              "en": "Provider error visible on interrupted turns",
+              "zh": "中断轮次显示提供方错误"
+            },
+            "body": {
+              "en": "Interrupted turns with provider errors now show the error text instead of only a generic notice.",
+              "zh": "带有提供方错误的中断轮次现在显示错误文本，而不仅仅是通用通知。"
+            },
+            "refs": [
+              10778
+            ]
+          },
+          {
+            "targets": [
+              "desktop",
+              "cli"
+            ],
+            "title": {
+              "en": "Context overflow detection for input length errors",
+              "zh": "输入长度错误的上下文溢出检测"
+            },
+            "body": {
+              "en": "Recognize 'Input length exceeds maximum' as a context overflow, triggering compaction.",
+              "zh": "将“输入长度超过最大值”识别为上下文溢出，触发压缩。"
+            },
+            "refs": [
+              10770
+            ]
+          }
+        ]
+      },
+      "upgrade": [],
+      "risks": [],
+      "contributors": [
+        "KHG420",
+        "esengine",
+        "github-actions[bot]",
+        "SivanCola",
+        "BuGlessRB",
+        "innocarpe",
+        "lightfront",
+        "XTLine",
+        "nanami-0713",
+        "boscocp",
+        "LaoGuaiGe",
+        "Linearl",
+        "glyahh",
+        "xxoingr",
+        "wilyan09007",
+        "onionviolet",
+        "chuiwenwei",
+        "Lxiny-zy",
+        "NgoQuocViet2001",
+        "ZhUyU1997"
+      ],
+      "links": {
+        "github": "https://github.com/esengine/DeepSeek-Reasonix/releases/tag/desktop-v1.39.1",
+        "compare": "https://github.com/esengine/DeepSeek-Reasonix/compare/desktop-v1.39.0...desktop-v1.39.1",
+        "download": "https://reasonix.io/?download=desktop&channel=stable#start"
+      },
+      "releaseId": "1.39.1",
+      "baseVersion": "1.39.1",
+      "status": "reviewed",
+      "previousRelease": "1.39.0",
+      "builds": {
+        "cli": "v1.39.1",
+        "desktop": "v1.39.1",
+        "npm": "1.39.1"
+      }
+    },
+    {
       "version": "1.39.0",
       "date": "2026-09-24",
       "channel": "stable",
