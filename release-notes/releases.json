@@ -26,12 +26,12 @@
             "desktop"
           ],
           "title": {
-            "en": "Session catalog repair prevents stale head index",
-            "zh": "会话目录修复防止过期的头索引"
+            "en": "Sessions missing from the list after an update are restored",
+            "zh": "更新后会话列表缺失或不完整的问题已修复"
           },
           "body": {
-            "en": "Repair rebuilds a stale head index and lands its heads, so catalog_heads never disagrees with head_count.",
-            "zh": "修复会重建过期的头索引并落地其头，使 catalog_heads 与 head_count 不再不一致。"
+            "en": "After an upgrade some sessions, especially ones with branches, could vanish from the list or show only part of their history. Startup repair now rebuilds the session catalog, so an affected list recovers on its own; the conversations themselves were never deleted.",
+            "zh": "升级后部分会话（尤其是有分支的会话）会从列表中消失或只显示一部分。启动时的修复会重建会话目录，已受影响的列表会自动恢复，会话内容本身一直都在。"
           },
           "refs": [
             10763
