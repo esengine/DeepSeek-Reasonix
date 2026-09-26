@@ -514,7 +514,7 @@ export function Settings({ hub, onError, port, networkPort, networkHost, status,
 
           {at === "providers" && (
             <Group id="providers" title={t("模型服务")}
-              hint={t("选择一个服务查看和修改；地址、密钥与模型列表保存后生效。自定义中转站的协议与模型会在连接后自动探测。")}>
+              hint={`${t("选择一个服务查看和修改；地址、密钥与模型列表保存后生效。自定义中转站的协议与模型会在连接后自动探测。")} ${t("使用上下箭头调整服务顺序；模型菜单会同步排序。这个偏好只保存在本机。")}`}>
               <Providers port={port} onChanged={() => { loadModels(); onChanged(); }} onFailed={setFailed} protocol={protocol}
                 activeKindFor={(a) => kindFor(a.key)}
                 declare={declare}

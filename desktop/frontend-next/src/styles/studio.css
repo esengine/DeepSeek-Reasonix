@@ -3670,10 +3670,13 @@ body { font-size: 14px; line-height: 1.75; }
   max-height: min(60vh, 520px);
   overflow: auto;
 }
+.svcrow-wrap { display: flex; align-items: center; min-width: 0; }
 .svcrow {
   display: flex;
+  flex: 1;
   align-items: center;
   gap: 8px;
+  min-width: 0;
   padding: 8px 10px;
   border: 1px solid transparent;
   border-radius: 8px;
@@ -3697,6 +3700,19 @@ body { font-size: 14px; line-height: 1.75; }
   color: var(--text);
 }
 .svcrow .ds { font: var(--w-reg) var(--fs-micro) var(--mono); color: var(--faint); }
+.svcrow-order { display: flex; gap: 2px; padding-inline: 2px; flex: none; }
+.svcrow-order button {
+  width: 24px;
+  height: 28px;
+  border: 0;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--muted);
+  cursor: pointer;
+}
+.svcrow-order button:hover:not(:disabled) { background: var(--overlay); color: var(--text); }
+.svcrow-order button:focus-visible { outline: 2px solid var(--focus); outline-offset: -2px; }
+.svcrow-order button:disabled { color: var(--faint); cursor: default; }
 .pstate { flex: none; width: 6px; height: 6px; border-radius: 50%; }
 .pstate[data-state="use"] { background: var(--ok); }
 .pstate[data-state="warn"] { background: var(--warn); }

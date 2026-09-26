@@ -2,6 +2,7 @@ import { useMemo } from "react";
 import { t } from "../i18n";
 import type { ModelEntry, RoleAssignments } from "../port/port";
 import { activeKind, contextLabel, groupVendors, type Vendor } from "./Models";
+import { orderAccounts, useProviderOrder } from "../state/providerorder";
 
 type RoleKey = keyof RoleAssignments;
 type Answers = "chat" | "decision";
@@ -43,7 +44,8 @@ interface Props {
 // One row per job: what it is for, which model does it, and which service that
 // model is reached through.
 export function ModelUsage({ models, roles, main, busy, protocol, onMain, onRole }: Props) {
-  const vendors = useMemo(() => groupVendors(models), [models]);
+  const order = useProviderOrder();
+  const vendors = useMemo(() => orderAccounts(groupVendors(models), order), [models, order]);
   const serviceOf = (ref?: string) => vendors.find((v) => Object.values(v.byKind).some((list) => list.some((m) => m.ref === ref)))?.label ?? "";
   const byRef = (ref?: string) => models.find((m) => m.ref === ref);
 
