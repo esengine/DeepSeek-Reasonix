@@ -2171,6 +2171,8 @@ export const zhTW: Record<DictKey, string> = {
   "settings.connections.configured": "已設定",
   "settings.connections.noResults": "沒有符合的連線",
   "settings.connections.back": "返回連線清單",
+  "settings.connections.moveUp": "上移 {name}",
+  "settings.connections.moveDown": "下移 {name}",
   "settings.catalog.search": "搜尋服務商",
   "settings.catalog.providers": "服務商",
   "settings.catalog.region": "帳號平台",

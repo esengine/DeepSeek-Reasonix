@@ -317,6 +317,11 @@ troubleshooting.
 
 ## Custom OpenAI-compatible providers
 
+In **Settings -> Model services**, use the up and down buttons beside an added
+connection to change its display order. The model switcher and model preference
+menus use the same order on this device. Models within each connection keep
+their configured order; moving a connection does not change its API key.
+
 In the desktop app, open **Settings -> Model -> Access -> Add model service ->
 Custom provider** for proxies, aggregators, or self-hosted services that speak
 the OpenAI-compatible chat API or Anthropic-compatible Messages API.

@@ -279,6 +279,10 @@ Remote-SSH 式的体验。它在远端主机上引导一个常驻的 headless `r
 
 ## 自定义 OpenAI-compatible provider
 
+在 **设置 -> 模型服务** 中，可用已添加连接旁的上移、下移按钮调整显示顺序。
+模型选择器和模型偏好菜单会在本机使用相同顺序。连接内部的模型仍按原配置排列；
+移动连接不会修改 API key。
+
 在桌面端打开 **设置 -> 模型 -> 接入 -> 添加模型服务 -> 自定义供应商**，用于接入代理、
 聚合平台或自建 OpenAI-compatible chat API / Anthropic-compatible Messages API 服务。
 

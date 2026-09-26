@@ -4,6 +4,7 @@ import { JSDOM } from "jsdom";
 import React, { act } from "react";
 import { ModelSwitcher, normalizeModelInfo } from "../components/ModelSwitcher";
 import { LocaleProvider } from "../lib/i18n";
+import { writeProviderOrder } from "../lib/providerOrder";
 import type { ModelInfo } from "../lib/types";
 import { installDesktopHostStub } from "./desktopHostStub";
 
@@ -385,6 +386,20 @@ if (favoriteOptions.length !== 1 || !favoriteOptions[0]?.textContent?.includes("
 }
 const allFilter = document.querySelector<HTMLButtonElement>('.modelsw__rail-item[aria-label="All models"]');
 await act(async () => { allFilter?.click(); });
+await act(async () => { document.querySelector<HTMLButtonElement>(".modelsw__favorite")?.click(); });
+await act(async () => { writeProviderOrder(["a", "z"]); });
+const orderedRail = Array.from(document.querySelectorAll<HTMLButtonElement>(".modelsw__rail-item"))
+  .map((item) => item.getAttribute("aria-label"));
+if (orderedRail.slice(2).join("|") !== "Second connection|First connection") {
+  throw new Error(`provider rail did not apply saved order: ${orderedRail}`);
+}
+const orderedOptions = Array.from(document.querySelectorAll<HTMLElement>("[role='option']"));
+if (!orderedOptions[0]?.textContent?.includes("Second connection") || !orderedOptions[1]?.textContent?.includes("First connection")) {
+  throw new Error(`model list did not follow provider order: ${orderedOptions.map((item) => item.textContent)}`);
+}
+if (orderedOptions[0]?.getAttribute("aria-selected") !== "true") {
+  throw new Error("reordering changed the active model");
+}
 
 // Search is catalog-wide even when the user was browsing one provider. The
 // top-level field moves back to All models before applying its keyword.

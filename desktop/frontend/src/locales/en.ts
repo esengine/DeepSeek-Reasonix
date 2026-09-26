@@ -2911,6 +2911,8 @@ export const en = {
   "settings.connections.configured": "Configured",
   "settings.connections.noResults": "No matching connections",
   "settings.connections.back": "Back to connections",
+  "settings.connections.moveUp": "Move {name} up",
+  "settings.connections.moveDown": "Move {name} down",
   "settings.catalog.search": "Search providers",
   "settings.catalog.providers": "Providers",
   "settings.catalog.region": "Account platform",

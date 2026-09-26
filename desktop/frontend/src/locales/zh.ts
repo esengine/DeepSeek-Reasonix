@@ -2914,6 +2914,8 @@ export const zh: Record<DictKey, string> = {
   "settings.connections.configured": "已配置",
   "settings.connections.noResults": "没有匹配的连接",
   "settings.connections.back": "返回连接列表",
+  "settings.connections.moveUp": "上移 {name}",
+  "settings.connections.moveDown": "下移 {name}",
   "settings.catalog.search": "搜索服务商",
   "settings.catalog.providers": "服务商",
   "settings.catalog.region": "账号平台",

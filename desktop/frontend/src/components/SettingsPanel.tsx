@@ -12,6 +12,7 @@ import { useProviderT as useT } from "../lib/providerSettingsLocale";
 import type { ModelDetailsDraft } from "./ProviderModelDialog";
 import { ConnectionTitle } from "./ConnectionTitle";
 import { ProviderConnections } from "./ProviderConnections";
+import { orderByProvider, useProviderOrder } from "../lib/providerOrder";
 import { catalogForPreset } from "../lib/providerCatalog";
 import { ProviderCatalogPicker, type CatalogChoice } from "./ProviderCatalogPicker";
 import { Eye, EyeOff, Files } from "lucide-react";
@@ -4599,6 +4600,7 @@ export function ModelPicker({
   onPick: (ref: string) => void;
 }) {
   const t = useT();
+  const savedProviderOrder = useProviderOrder();
   const emptyLabel = includeSameDefault ? t("settings.plannerNone") : emptyOptionLabel;
   const emptyHint = includeSameDefault ? t("settings.plannerNoneHint") : emptyOptionHint;
   const emptyMeta = includeSameDefault ? t("settings.plannerNoneHintShort") : emptyOptionHint;
@@ -4639,7 +4641,7 @@ export function ModelPicker({
         providerSeen.add(groupID);
       }
     }
-    return providerOrder
+    return orderByProvider(providerOrder, (id) => id, savedProviderOrder)
       .map((groupID) => {
         const providerViews = s.providers.filter((p) => p.name === groupID);
         const firstProvider = providerViews[0];
@@ -4652,7 +4654,7 @@ export function ModelPicker({
         };
       })
       .filter((group) => group.options.length > 0);
-  }, [refs, s, t]);
+  }, [refs, s, t, savedProviderOrder]);
 
   return (
     <div className="settings-model-picker">

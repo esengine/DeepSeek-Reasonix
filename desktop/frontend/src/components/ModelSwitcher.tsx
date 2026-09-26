@@ -5,6 +5,7 @@ import { asArray } from "../lib/array";
 import { app } from "../lib/bridge";
 import { useT } from "../lib/i18n";
 import { readModelFavorites, writeModelFavorites } from "../lib/modelFavorites";
+import { orderByProvider, useProviderOrder } from "../lib/providerOrder";
 import { providerBrandIcons } from "../lib/providerBrandIcons";
 import type { ModelInfo } from "../lib/types";
 import { AnchoredPopover } from "./AnchoredPopover";
@@ -47,6 +48,7 @@ export function ModelSwitcher({
   const [query, setQuery] = useState("");
   const [activeFilter, setActiveFilter] = useState("all");
   const [favorites, setFavorites] = useState<Set<string>>(() => readModelFavorites());
+  const providerOrder = useProviderOrder();
   const [triggerWidth, setTriggerWidth] = useState<number | undefined>(undefined);
   const triggerRef = useRef<HTMLButtonElement>(null);
   const inputRef = useRef<HTMLInputElement>(null);
@@ -106,9 +108,10 @@ export function ModelSwitcher({
     }
   }, [loadModels, open]);
 
+  const orderedModels = useMemo(() => orderByProvider(models, (model) => model.provider, providerOrder), [models, providerOrder]);
   const providers = useMemo(() => {
     const seen = new Set<string>();
-    return models.flatMap((model) => {
+    return orderedModels.flatMap((model) => {
       if (seen.has(model.provider)) return [];
       seen.add(model.provider);
       return [{
@@ -116,7 +119,7 @@ export function ModelSwitcher({
         label: model.displayName?.trim() || providerLabel(model.provider, t),
       }];
     });
-  }, [models, t]);
+  }, [orderedModels, t]);
 
   useEffect(() => {
     if (activeFilter !== "all" && activeFilter !== "favorites" && !providers.some((provider) => provider.id === activeFilter)) {
@@ -125,16 +128,16 @@ export function ModelSwitcher({
   }, [activeFilter, providers]);
 
   const keyword = query.trim().toLowerCase();
-  const filtered = useMemo(() => models.filter((model) => {
+  const filtered = useMemo(() => orderedModels.filter((model) => {
     if (activeFilter === "favorites" && !favorites.has(model.ref)) return false;
     if (activeFilter !== "all" && activeFilter !== "favorites" && model.provider !== activeFilter) return false;
     return !keyword
       || model.model.toLowerCase().includes(keyword)
       || model.provider.toLowerCase().includes(keyword)
       || (model.displayName ?? "").toLowerCase().includes(keyword);
-  }), [activeFilter, favorites, keyword, models]);
+  }), [activeFilter, favorites, keyword, orderedModels]);
 
-  // Preserve catalog/configuration order, including when the current model changes.
+  // Preserve each provider's model order and apply the user's provider order.
   const groups = useMemo(() => {
     if (activeFilter === "favorites") {
       return [{ id: "favorites", label: t("modelSwitcher.favorites"), items: filtered }];

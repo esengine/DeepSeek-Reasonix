@@ -3,6 +3,13 @@
 .provider-connections__nav { padding: 14px; border-right: 1px solid var(--border); display: flex; flex-direction: column; gap: 14px; min-width: 0; }
 .provider-connections__nav > input { width: 100%; min-width: 0; flex: none; box-sizing: border-box; }
 .provider-connections__list { max-height: 620px; overflow-y: auto; }
+.provider-connections__row { display: flex; align-items: center; min-width: 0; }
+.provider-connections__row > .provider-connections__item { flex: 1; min-width: 0; }
+.provider-connections__order-actions { display: flex; flex: 0 0 auto; }
+.provider-connections__order-actions button { display: grid; place-items: center; width: 26px; height: 30px; padding: 0; border: 0; border-radius: 6px; background: transparent; color: var(--fg-dim); cursor: pointer; }
+.provider-connections__order-actions button:hover:not(:disabled) { background: var(--bg-soft); color: var(--fg); }
+.provider-connections__order-actions button:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
+.provider-connections__order-actions button:disabled { opacity: .35; cursor: default; }
 .provider-connections__brand { display: flex; align-items: center; gap: 8px; padding: 14px 6px 8px; }
 .provider-connections__brand strong { flex: 1; overflow-wrap: anywhere; }
 .provider-connections__item { display: flex; align-items: baseline; gap: 9px; width: 100%; border: 1px solid transparent; border-radius: 8px; padding: 10px 12px; color: inherit; background: transparent; text-align: left; font: inherit; cursor: pointer; }
