@@ -137,7 +137,10 @@ func tuiResolveResume(workspaceRoot, resume string, cont, copySession bool) (str
 	if errors.As(err, &ambiguous) && !copySession {
 		return "", ambiguous, nil
 	}
-	if err == nil && copySession {
+	// --copy duplicates a resolved session. A --continue that found nothing
+	// starts fresh (tuiResumePath), so there is nothing to copy and --copy is
+	// skipped; --copy with no --resume/--continue stays a usage error.
+	if err == nil && copySession && (resumePath != "" || !cont) {
 		resumePath, err = tuiCopyResume(resumePath)
 	}
 	return resumePath, nil, err
