@@ -34,7 +34,7 @@ export function CopyButton({ text, iconOnly = false, className, label: what }: {
 
   // A clipboard the host denied is not the same as nothing happening, and the
   // reader is about to try again — so the failure says so instead of staying idle.
-  const label = state === "done" ? t("已复制") : state === "failed" ? t("复制不了") : t("复制回复");
+  const label = state === "done" ? t("已复制") : state === "failed" ? t("复制不了") : what ?? t("复制回复");
 
   return (
     <button
