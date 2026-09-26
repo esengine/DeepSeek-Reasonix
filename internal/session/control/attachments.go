@@ -11,6 +11,7 @@ import (
 	"sync/atomic"
 	"time"
 
+	"reasonix/internal/base/fileutil"
 	"reasonix/internal/model/visionimage"
 )
 
@@ -231,6 +232,7 @@ func createAttachmentFile(ext string) (string, *os.File, error) {
 }
 
 func createAttachmentFileIn(base, ext string) (string, *os.File, error) {
+	_ = fileutil.MarkUntracked(filepath.Join(base, ".reasonix", "attachments"))
 	for range maxAttachmentCreateAttempts {
 		rel := attachmentPath(ext)
 		f, err := os.OpenFile(filepath.Join(base, rel), os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0o644)
