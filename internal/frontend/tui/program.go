@@ -356,8 +356,8 @@ func (m *model) commit() tea.Cmd {
 			continue
 		}
 		if it.Kind == ItemSay && !it.Done {
-			if chunk := m.settledChunk(it); chunk != nil {
-				out = append(out, settledPrint{render: chunk})
+			if chunk, ok := m.settledChunk(it); ok {
+				out = append(out, chunk)
 			}
 			break
 		}
@@ -365,6 +365,7 @@ func (m *model) commit() tea.Cmd {
 			break
 		}
 		m.committed[it.ID] = true
+		m.settleThought(it)
 		out = append(out, m.settledRow(*it, m.sayShown[it.ID]))
 	}
 	return m.publish(out)
@@ -377,18 +378,24 @@ func (m *model) hidden(it *Item) bool {
 }
 
 // settledChunk draws the part of a streaming answer that has become final
-// since it was last printed, or nil when nothing new has.
-func (m *model) settledChunk(it *Item) func(int, bool) string {
+// since it was last printed; false when nothing new has. The first part keeps
+// its row, so full screen its thinking can open.
+func (m *model) settledChunk(it *Item) (settledPrint, bool) {
 	end := settledPrefix(it.Text)
 	shown := m.sayShown[it.ID]
 	if end <= shown {
-		return nil
+		return settledPrint{}, false
 	}
 	m.sayShown[it.ID] = end
 	row := *it
-	return func(w int, hideRail bool) string {
-		return withThought(&row, shown, renderSayPart(row.Text[shown:end], shown == 0, w, hideRail))
+	p := settledPrint{render: func(w int, hideRail bool) string {
+		return withThought(&row, shown, w, renderSayPart(row.Text[shown:end], shown == 0, w, hideRail))
+	}}
+	if m.scr != nil && shown == 0 && row.Reasoning != "" {
+		row.Fold = foldShut
+		p.row = &row
 	}
+	return p, true
 }
 
 func settled(it *Item) bool {

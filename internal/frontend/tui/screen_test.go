@@ -7,8 +7,11 @@ import (
 	"testing"
 
 	tea "charm.land/bubbletea/v2"
+	"github.com/charmbracelet/colorprofile"
+	"github.com/charmbracelet/x/ansi"
 
 	"reasonix/internal/contract/eventwire"
+	"reasonix/internal/frontend/termrender"
 )
 
 func fillTranscript(m *model, n int) {
@@ -211,6 +214,128 @@ func TestShellOutputOpensAndShuts(t *testing.T) {
 	m.Update(tea.MouseClickMsg{Button: tea.MouseLeft, X: 4, Y: len(rows) - 1 - m.scr.yoff})
 	if !strings.Contains(all(), "out 029") {
 		t.Fatalf("a click on the hint row did not open the output:\n%s", all())
+	}
+}
+
+// Full screen, an answer's thinking sits shut behind its marker and a click on
+// the marker opens and shuts it, whether the answer streamed in or settled whole.
+func TestThinkingOpensAndShutsOnAClick(t *testing.T) {
+	for _, streamed := range []bool{true, false} {
+		m, _ := testModel(t)
+		m.tr.AddUser("go")
+		evs := []eventwire.Event{{Kind: "turn_started"}, {Kind: "reasoning", Text: "weighing the two options"}}
+		if streamed {
+			apply(m, append(evs, eventwire.Event{Kind: "text", Text: "first block\n\nstill writ"})...)
+			apply(m, eventwire.Event{Kind: "message", Text: "first block\n\nstill writing", ThoughtMs: 2000})
+		} else {
+			apply(m, append(evs, eventwire.Event{Kind: "message", Text: "done", ThoughtMs: 2000})...)
+		}
+		all := func() string { return strings.Join(m.content(nil), "\n") }
+		if strings.Contains(all(), "weighing") {
+			t.Fatalf("streamed=%v: thinking shown before it was opened:\n%s", streamed, all())
+		}
+		marker := func() int {
+			for i, r := range m.content(nil) {
+				if strings.Contains(r, "▸") || strings.Contains(r, "▾") {
+					return i
+				}
+			}
+			t.Fatalf("streamed=%v: no thinking marker:\n%s", streamed, all())
+			return -1
+		}
+		press(m, "ctrl+home")
+		m.View()
+		m.Update(tea.MouseClickMsg{Button: tea.MouseLeft, X: 4, Y: marker() - m.scr.yoff})
+		if !strings.Contains(all(), "weighing the two options") {
+			t.Fatalf("streamed=%v: a click on the marker did not open the thinking:\n%s", streamed, all())
+		}
+		m.Update(tea.MouseClickMsg{Button: tea.MouseLeft, X: 4, Y: marker() - m.scr.yoff})
+		if strings.Contains(all(), "weighing") {
+			t.Fatalf("streamed=%v: a second click did not shut it:\n%s", streamed, all())
+		}
+	}
+}
+
+func openThinking(t *testing.T, m *model) {
+	t.Helper()
+	press(m, "ctrl+home")
+	m.View()
+	for i, r := range m.content(nil) {
+		if strings.Contains(r, "▸") {
+			m.Update(tea.MouseClickMsg{Button: tea.MouseLeft, X: 4, Y: i - m.scr.yoff})
+			return
+		}
+	}
+	t.Fatalf("no shut thinking marker:\n%s", strings.Join(m.content(nil), "\n"))
+}
+
+// Opened thinking is split into transcript rows after rendering, so each row
+// has to carry its own faint style rather than inherit one that the first row
+// opened and the scrollbar cell closed.
+func TestOpenedThinkingIsFaintOnEveryRow(t *testing.T) {
+	prev := termrender.SetColorProfile(colorprofile.ANSI256)
+	t.Cleanup(func() { termrender.SetColorProfile(prev) })
+	m, _ := testModel(t)
+	m.tr.AddUser("go")
+	apply(m, eventwire.Event{Kind: "turn_started"},
+		eventwire.Event{Kind: "reasoning", Text: strings.Repeat("weigh the options ", 30) + "\nsecond thought line"},
+		eventwire.Event{Kind: "message", Text: "done", ThoughtMs: 1000})
+	openThinking(t, m)
+	faint := termrender.Dim("x")
+	on := faint[:strings.Index(faint, "x")]
+	if on == "" {
+		t.Fatal("the faint style renders no escape in tests; the check below would prove nothing")
+	}
+	var rows int
+	for _, r := range m.content(nil) {
+		if !strings.Contains(r, "weigh") && !strings.Contains(r, "second thought") {
+			continue
+		}
+		rows++
+		if !strings.HasPrefix(r, on) {
+			t.Fatalf("an opened thinking row lost the faint style: %q", r)
+		}
+	}
+	if rows < 3 {
+		t.Fatalf("thinking wrapped to %d rows, want several", rows)
+	}
+}
+
+// The first chunk of a streamed answer is drawn before the answer settles;
+// its marker has to show the thinking and elapsed time the answer settled with.
+func TestStreamedThinkingOpensAsItSettled(t *testing.T) {
+	m, _ := testModel(t)
+	m.tr.AddUser("go")
+	apply(m, eventwire.Event{Kind: "turn_started"}, eventwire.Event{Kind: "reasoning", Text: "early "},
+		eventwire.Event{Kind: "text", Text: "first block\n\nstill writ"})
+	apply(m, eventwire.Event{Kind: "reasoning", Text: "late"})
+	apply(m, eventwire.Event{Kind: "message", Text: "first block\n\nstill writing", Reasoning: "early late", ThoughtMs: 4000})
+	openThinking(t, m)
+	all := strings.Join(m.content(nil), "\n")
+	if !strings.Contains(all, "early late") {
+		t.Fatalf("opened thinking is missing what arrived after the text started:\n%s", all)
+	}
+	if !strings.Contains(ansi.Strip(all), "▾ thought for 4s") {
+		t.Fatalf("marker does not show the settled elapsed time:\n%s", ansi.Strip(all))
+	}
+}
+
+// Ctrl+O opens the newest thinking from the keyboard, for a terminal whose
+// mouse is handed back to it.
+func TestCtrlOOpensTheLatestThinking(t *testing.T) {
+	m, _ := testModel(t)
+	m.scr.mouseOff = true
+	m.tr.AddUser("go")
+	apply(m, eventwire.Event{Kind: "turn_started"}, eventwire.Event{Kind: "reasoning", Text: "pondering"},
+		eventwire.Event{Kind: "message", Text: "done", ThoughtMs: 1000})
+	all := func() string { return strings.Join(m.content(nil), "\n") }
+	press(m, "ctrl+o")
+	if !strings.Contains(all(), "pondering") {
+		t.Fatalf("ctrl+o did not open the thinking:\n%s", all())
+	}
+	press(m, "ctrl+o")
+	if strings.Contains(all(), "pondering") {
+		t.Fatalf("a second ctrl+o did not shut it:\n%s", all())
 	}
 }
 
