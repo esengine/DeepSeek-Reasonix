@@ -25,10 +25,15 @@ export const EN_SETTINGS: Record<string, string> = {
     "The default model runs this conversation and most tasks, and every other use follows it unless you give that job a model of its own. Switching keeps the conversation and rebuilds the runtime; it cannot be done while a task runs.",
   "添加模型服务": "Add model service",
   "搜索已添加的服务": "Search added services",
+  "上移 {name}": "Move {name} up",
+  "下移 {name}": "Move {name} down",
+  "无法保存服务顺序。": "Could not save the service order.",
   "没有匹配的服务。": "No matching service.",
   "添加一个模型服务后，在这里查看和修改它。": "Add a model service to see and change it here.",
   "选择一个服务查看和修改；地址、密钥与模型列表保存后生效。自定义中转站的协议与模型会在连接后自动探测。":
     "Pick a service to see and change it; the address, key and model list take effect when saved. A custom gateway's protocol and models are detected once it connects.",
+  "使用上下箭头调整服务顺序；模型菜单会同步排序。这个偏好只保存在本机。":
+    "Use the up and down arrows to arrange services. Model menus follow this order. This preference is stored on this device.",
   "这个端点还有 {n} 个模型不在列表里：{names}。点「刷新模型目录」把它们加进来。":
     "This endpoint has {n} more models not in the list: {names}. Use Refresh model catalog to add them.",
   "添加来源": "Add source",

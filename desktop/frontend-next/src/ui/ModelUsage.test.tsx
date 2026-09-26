@@ -1,12 +1,24 @@
 // @vitest-environment jsdom
-import { afterEach, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, expect, it, vi } from "vitest";
 import { cleanup, render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import "./testkit";
 import type { ModelEntry, RoleAssignments } from "../port/port";
 import { ModelUsage } from "./ModelUsage";
+import { writeProviderOrder } from "../state/providerorder";
+import { accountKey } from "./vendors";
 
-afterEach(cleanup);
+beforeEach(() => {
+  const values = new Map<string, string>();
+  vi.stubGlobal("localStorage", {
+    getItem: (key: string) => values.get(key) ?? null,
+    setItem: (key: string, value: string) => void values.set(key, value),
+  });
+});
+afterEach(() => {
+  cleanup();
+  vi.unstubAllGlobals();
+});
 
 const MODELS: ModelEntry[] = [
   { ref: "deepseek/deepseek-flash", provider: "deepseek", vendor: "api.deepseek.com", model: "deepseek-flash", kind: "anthropic", vision: true, contextWindow: 1_000_000 },
@@ -44,4 +56,14 @@ it("writes the row that changed", async () => {
   expect(onRole).toHaveBeenCalledWith("vision", "deepseek/deepseek-flash");
   await userEvent.selectOptions(screen.getByRole("combobox", { name: "默认模型" }), "deepseek/deepseek-pro");
   expect(onMain).toHaveBeenCalledWith("deepseek/deepseek-pro");
+});
+
+it("lists services in the saved order without reordering models within one service", () => {
+  const other: ModelEntry = { ref: "other/chat", provider: "other", vendor: "other.example", model: "chat" };
+  writeProviderOrder([accountKey("other.example"), accountKey("api.deepseek.com")]);
+  render(<ModelUsage models={[...MODELS, other]} roles={ROLES} main={MODELS[0].ref} busy="" protocol={{}} onMain={() => {}} onRole={() => {}} />);
+  const groups = screen.getByRole("combobox", { name: "默认模型" }).querySelectorAll("optgroup");
+  expect([...groups].map((group) => group.label)).toEqual(["other", "deepseek"]);
+  expect([...groups[1].querySelectorAll("option")].map((option) => option.value))
+    .toEqual(["deepseek/deepseek-flash", "deepseek/deepseek-pro"]);
 });

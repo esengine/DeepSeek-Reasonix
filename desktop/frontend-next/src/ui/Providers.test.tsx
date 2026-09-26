@@ -1,12 +1,22 @@
 // @vitest-environment jsdom
-import { afterEach, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, expect, it, vi } from "vitest";
 import { cleanup, render, screen, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import "./testkit";
 import type { ProviderEntry } from "../port/port";
 import { Providers, type Port } from "./Providers";
 
-afterEach(cleanup);
+beforeEach(() => {
+  const values = new Map<string, string>();
+  vi.stubGlobal("localStorage", {
+    getItem: (key: string) => values.get(key) ?? null,
+    setItem: (key: string, value: string) => void values.set(key, value),
+  });
+});
+afterEach(() => {
+  cleanup();
+  vi.unstubAllGlobals();
+});
 
 const entry = (name: string, baseUrl: string, inUse = false): ProviderEntry => ({
   name,
@@ -54,4 +64,16 @@ it("adding a service takes the detail side and leaves the list in place", async 
   expect(screen.getByText("添加模型来源")).toBeTruthy();
   expect(rows()).toHaveLength(1);
   expect(rows()[0].getAttribute("aria-pressed")).toBe("false");
+});
+
+it("reorders connections without editing their credentials and restores the choice", async () => {
+  const list = [entry("alpha", "https://alpha.example"), entry("beta", "https://beta.example")];
+  draw(list);
+  await screen.findAllByText("beta.example");
+  await userEvent.click(screen.getByRole("button", { name: /上移 beta|Move beta up/ }));
+  expect(rows().map((row) => row.querySelector(".nm")?.textContent)).toEqual(["beta", "alpha"]);
+  cleanup();
+  draw(list);
+  await screen.findAllByText("beta.example");
+  expect(rows().map((row) => row.querySelector(".nm")?.textContent)).toEqual(["beta", "alpha"]);
 });

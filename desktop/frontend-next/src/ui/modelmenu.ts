@@ -4,13 +4,14 @@ import type { MenuItem } from "./Menu";
 import { groupVendors } from "./Models";
 import { t } from "../i18n";
 import { KIND_LABEL } from "./vendors";
+import { orderAccounts } from "../state/providerorder";
 
 // One flat list said "deepseek" four times: the provider name is the config's
 // word for an entry, not the user's for an endpoint, and two doors onto one
 // account share it. Every row keeps its source and wire format underneath the
 // model name, so the second line is useful even when there is only one account.
-export function modelMenu(models: ModelEntry[]): MenuItem[] {
-  const accounts = groupVendors(models);
+export function modelMenu(models: ModelEntry[], order: readonly string[] = []): MenuItem[] {
+  const accounts = orderAccounts(groupVendors(models), order);
   const out: MenuItem[] = [];
   for (const [i, a] of accounts.entries()) {
     const manyDoors = a.kinds.length > 1;

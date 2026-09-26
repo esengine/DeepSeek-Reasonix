@@ -14,6 +14,7 @@ import type { Dropped } from "./filedrop";
 import type { Quote } from "./cards/SayCard";
 import { StudioIcon } from "./StudioIcon";
 import { usePromptRefine } from "./PromptRefine";
+import { useProviderOrder } from "../state/providerorder";
 
 interface Props {
   port: AgentPort;
@@ -107,6 +108,7 @@ let chipSeq = 0;
 const chipId = () => `c${++chipSeq}`;
 
 export function Composer({ port, status, running, quote, focus, onSubmit, onChanged, onError, onSettings = () => {}, changeCount = 0, pulse = 0 }: Props) {
+  const providerOrder = useProviderOrder();
   const [branch, setBranch] = useState("");
   useEffect(() => {
     let alive = true;
@@ -690,7 +692,7 @@ export function Composer({ port, status, running, quote, focus, onSubmit, onChan
             place="bottom"
             title={status?.modelRef ?? modelLb}
             current={status?.modelRef}
-            items={modelMenu(models)}
+            items={modelMenu(models, providerOrder)}
             menuClassName="studio-model-menu"
             menuTitle={<><b>{t("选择模型")}</b><small>{t("用于后续任务")}</small></>}
             onOpen={loadModels}

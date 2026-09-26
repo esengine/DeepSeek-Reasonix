@@ -242,6 +242,7 @@ export const ACTIONS: UIAction[] = [
   { id: "provider.add", kind: "kernel-mutation", target: "none", proof: "authority-effect" },
   { id: "provider.add-start", kind: "view", target: "none", proof: "interaction" },
   { id: "provider.select", kind: "view", target: "entity", proof: "interaction" },
+  { id: "provider.move", kind: "view", target: "entity", proof: "interaction" },
   { id: "provider.save", kind: "kernel-mutation", target: "none", proof: "authority-effect" },
   { id: "roles.model", kind: "kernel-mutation", target: "none", proof: "authority-effect" },
   { id: "permissions.rule-level", kind: "kernel-mutation", target: "none", proof: "authority-effect" },

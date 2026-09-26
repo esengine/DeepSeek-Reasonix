@@ -7,6 +7,7 @@ import { AddProvider } from "./AddProvider";
 import { ProviderDetail } from "./ProviderDetail";
 import { accountKey, accountLabel, disambiguate, hostOf } from "./vendors";
 import { reason } from "../i18n/kernel";
+import { moveAccount, orderAccounts, useProviderOrder, writeProviderOrder } from "../state/providerorder";
 
 // A connection is an account, not a config row. One endpoint answering two
 // protocols is two rows in the file and one service to the person paying for it,
@@ -89,6 +90,7 @@ export function Providers({ port, onChanged, onFailed, protocol, onProtocol, act
   const [busy, setBusy] = useState("");
   const [picked, setPicked] = useState("");
   const [q, setQ] = useState("");
+  const order = useProviderOrder();
   // The accounts that existed when an add began: the one that is new afterwards
   // is the one just added, and it is what the detail should show.
   const before = useRef<Set<string> | null>(null);
@@ -98,7 +100,7 @@ export function Providers({ port, onChanged, onFailed, protocol, onProtocol, act
   }, [port]);
   useEffect(reload, [reload]);
 
-  const accounts = list ? groupAccounts(list) : [];
+  const accounts = list ? orderAccounts(groupAccounts(list), order) : [];
   useEffect(() => {
     if (!list || !before.current) return;
     const fresh = groupAccounts(list).find((a) => !before.current?.has(a.key));
@@ -127,6 +129,14 @@ export function Providers({ port, onChanged, onFailed, protocol, onProtocol, act
     }
   };
 
+  const move = (key: string, direction: -1 | 1) => {
+    const next = moveAccount(order, accounts.map((a) => a.key), key, direction);
+    if (!next) return;
+    if (!picked) setPicked(selected);
+    if (writeProviderOrder(next)) onFailed("");
+    else onFailed(t("无法保存服务顺序。"));
+  };
+
   if (list === null) return <p className="acct-note">{t("正在读取…")}</p>;
 
   const query = q.trim().toLowerCase();
@@ -141,21 +151,31 @@ export function Providers({ port, onChanged, onFailed, protocol, onProtocol, act
             onChange={(e) => setQ(e.target.value)} />
         )}
         <div className="plist-rows" role="group" aria-label={t("{n} 个来源", { n: accounts.length })}>
-          {shown.map((a) => {
+          {shown.map((a, index) => {
             const entries = Object.values(a.byKind);
             const inUse = entries.some((e) => e.inUse);
             const keyless = entries.every((e) => !e.hasKey);
             return (
-              <button key={a.key} className="svcrow" data-action="provider.select" data-target={a.key}
-                aria-pressed={!adding && a.key === selected}
-                onClick={() => { setAdding(false); setPicked(a.key); }}>
-                <span className="tx">
-                  <span className="nm">{a.label}</span>
-                  <Clip className="ds">{a.host}</Clip>
-                </span>
-                <i className="pstate" data-state={inUse ? "use" : keyless ? "warn" : undefined}
-                  title={t(inUse ? "正在用" : keyless ? "缺 key" : "")} />
-              </button>
+              <div className="svcrow-wrap" key={a.key}>
+                <button className="svcrow" data-action="provider.select" data-target={a.key}
+                  aria-pressed={!adding && a.key === selected}
+                  onClick={() => { setAdding(false); setPicked(a.key); }}>
+                  <span className="tx">
+                    <span className="nm">{a.label}</span>
+                    <Clip className="ds">{a.host}</Clip>
+                  </span>
+                  <i className="pstate" data-state={inUse ? "use" : keyless ? "warn" : undefined}
+                    title={t(inUse ? "正在用" : keyless ? "缺 key" : "")} />
+                </button>
+                {!query && shown.length > 1 && <span className="svcrow-order">
+                  <button data-action="provider.move" data-target={a.key} data-value="up"
+                    aria-label={t("上移 {name}", { name: a.label })} title={t("上移 {name}", { name: a.label })}
+                    disabled={index === 0} onClick={() => move(a.key, -1)}>↑</button>
+                  <button data-action="provider.move" data-target={a.key} data-value="down"
+                    aria-label={t("下移 {name}", { name: a.label })} title={t("下移 {name}", { name: a.label })}
+                    disabled={index === shown.length - 1} onClick={() => move(a.key, 1)}>↓</button>
+                </span>}
+              </div>
             );
           })}
           {accounts.length === 0 && <div className="empty">{t("尚未配置任何模型来源。")}</div>}
