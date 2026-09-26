@@ -136,6 +136,7 @@ func prepareTaskDir(root, id string) (string, error) {
 	if err := os.Chmod(root, 0o700); err != nil {
 		return "", err
 	}
+	_ = fileutil.MarkUntracked(root)
 	if err := os.MkdirAll(taskDir, 0o700); err != nil {
 		return "", err
 	}
@@ -577,6 +578,7 @@ func (s *FileStore) idempotencyPaths(projectDir, key string) (string, string, st
 	if err := os.MkdirAll(dir, 0o700); err != nil {
 		return "", "", "", err
 	}
+	_ = fileutil.MarkUntracked(root)
 	_ = os.Chmod(dir, 0o700)
 	target := filepath.Join(dir, id+".json")
 	lock := filepath.Join(dir, id+".lock")
@@ -744,6 +746,7 @@ func (s *FileStore) RecordIdempotency(ctx context.Context, projectDir string, r 
 	if err := os.MkdirAll(idemDir, 0o700); err != nil {
 		return err
 	}
+	_ = fileutil.MarkUntracked(root)
 	if err := os.Chmod(idemDir, 0o700); err != nil {
 		return err
 	}
