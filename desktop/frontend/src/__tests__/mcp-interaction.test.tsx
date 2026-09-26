@@ -51,7 +51,7 @@ type ControllerState = Parameters<typeof reducer>[0];
 const appSource = readFileSync(new URL("../AppRuntime.tsx", import.meta.url), "utf8");
 const sessionCompositionSource = readFileSync(new URL("../app-runtime/useAppSessionComposition.ts", import.meta.url), "utf8");
 ok(
-  /\[clearContextPending, pendingClose, state\.approval, state\.ask, state\.extensionForm, state\.mcpInteraction, workspaceConflict\]/.test(sessionCompositionSource),
+  /\[clearContextPending, pendingClose, remoteSurfaceActive, state\.approval, state\.ask, state\.extensionForm, state\.mcpInteraction, workspaceConflict\]/.test(sessionCompositionSource),
   "App decision surface recomputes when an MCP interaction arrives",
 );
 

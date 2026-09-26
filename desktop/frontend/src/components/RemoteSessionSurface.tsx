@@ -45,7 +45,9 @@ export function RemoteSessionSurface({ tab, session, surfaceCommitToken, onSurfa
   const visiblePrompt = approval || ask || mcpInteraction;
   const promptUpgradeRequired = Boolean(visiblePrompt && !tab.interactionTargetSupported);
   const promptIdentityUnavailable = Boolean(visiblePrompt && tab.interactionTargetSupported && (
-    !tab.remote?.hostId || !tab.sessionId || !hasSessionGeneration(tab.sessionGeneration) || !visiblePrompt.turnId || !visiblePrompt.runtimeEpoch
+    // runtimeEpoch stays optional: a serve fences on it only when it has one,
+    // and a CLI serve never binds desktop routing metadata.
+    !tab.remote?.hostId || !tab.sessionId || !hasSessionGeneration(tab.sessionGeneration) || !visiblePrompt.turnId
   ));
   const promptActionDisabled = promptUpgradeRequired || promptIdentityUnavailable;
   const formUpgradeRequired = Boolean(extensionForm && !tab.extensionFormInstanceSupported);
