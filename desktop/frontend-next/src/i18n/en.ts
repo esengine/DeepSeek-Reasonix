@@ -67,6 +67,7 @@ export const EN: Record<string, string> = {
   "复制不了": "Copy blocked",
   "复制这段回答": "Copy this answer",
   "复制这段代码": "Copy this code",
+  "复制路径": "Copy path",
   "思考 {chars}": "Thought · {chars}",
   "思考 {secs} 秒 · {chars}": "Thought for {secs}s · {chars}",
   "{n} 字": "{n} chars",

@@ -75,7 +75,7 @@ export function ConfigTrouble({ port, onRepaired }: { port: AgentPort; onRepaire
             {busy ? t("正在修复…") : t("备份原文件并修复")}
           </button>
         )}
-        <CopyButton text={problem.path} />
+        <CopyButton text={problem.path} label={t("复制路径")} />
       </div>
       {failed && <span className="why nwhy">{failed}</span>}
     </div>
