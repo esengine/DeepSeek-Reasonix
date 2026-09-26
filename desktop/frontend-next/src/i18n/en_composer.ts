@@ -10,6 +10,7 @@ export const EN_COMPOSER: Record<string, string> = {
   "描述任务、问题或要改的内容…": "Describe a task, question, or change…",
   "任务输入": "Task input",
   "命令与技能": "Commands and skills",
+  "正在加载命令与技能…": "Loading commands and skills…",
   "引用文件": "Reference files",
   "Enter 插话 · Shift+Enter 换行": "Enter to steer · Shift+Enter for a new line",
   "{n} 字 · {lines} 行": "{n} characters · {lines} lines",
