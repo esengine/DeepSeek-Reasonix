@@ -36,6 +36,7 @@ var Tokens = map[string]TokenKind{
 	"fg":          TokenColour,
 	"fgDim":       TokenColour,
 	"fgFaint":     TokenColour,
+	"fgStrong":    TokenColour,
 	"accent":      TokenColour,
 	"accentFg":    TokenColour,
 	"float":       TokenColour,

@@ -55,6 +55,19 @@ describe("a pack's inks answer to the reader's contrast", () => {
     expect(read("--accent")).toBe("#0066CC");
   });
 
+  it("paints a pack's strong-text colour and steps it with the other inks", () => {
+    const strong: ThemePack = { ...pack, tokens: { light: { ...pack.tokens.light, fgStrong: "#8A3B12" } } };
+    apply(strong, "light", false, "");
+    expect(read("--text-strong")).toBe("#8A3B12");
+    apply(strong, "light", false, "strong");
+    expect(read("--text-strong")).toMatch(/^oklch\(from #8A3B12 calc\(l - 0\.101\) c h\)$/);
+  });
+
+  it("leaves strong text on the body ink when the pack does not name it", () => {
+    apply(pack, "light", false, "strong");
+    expect(read("--text-strong")).toBe("");
+  });
+
   it("uses a gentler illustration scrim in light mode", () => {
     apply(illustrated, "light");
     expect(Number(read("--bg-overlay"))).toBeCloseTo(0.72 * 0.58);

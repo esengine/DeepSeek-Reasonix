@@ -3664,7 +3664,7 @@
   .md ul, .md ol { margin: 0 0 .7em; padding-left: 1.4em }
   .md li { margin: .18em 0 }
   .md li::marker { color: var(--ghost) }
-  .md strong { font-weight: var(--w-semi); color: var(--text) }
+  .md strong { font-weight: var(--w-semi); color: var(--text-strong, var(--text)) }
   .md em { font-style: italic }
   .md del { color: var(--faint) }
   .md hr { height: 1px; margin: 1em 0; border: 0; background: var(--hair) }

@@ -91,6 +91,28 @@ func TestShippedPacksUseOnlyRealTokens(t *testing.T) {
 	}
 }
 
+// Bold text in the transcript is the one ink a reader asks to tell apart by
+// colour rather than weight, so a pack can name it without arbitrary CSS.
+func TestDecodeAcceptsAStrongTextColour(t *testing.T) {
+	pack, err := decode([]byte(`{
+      "schemaVersion": 1,
+      "name": "Strong",
+      "tokens": {
+        "light": {"fg": "#1a1a1a", "fgStrong": "#8a3b12"},
+        "dark":  {"fg": "#f0f0f0", "fgStrong": "#f2b27a"}
+      }
+    }`), "strong")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(pack.Warnings) > 0 {
+		t.Fatalf("warnings = %v, want none", pack.Warnings)
+	}
+	if got := pack.Tokens["dark"]["fgStrong"]; got != "#f2b27a" {
+		t.Fatalf("fgStrong = %q, want it kept", got)
+	}
+}
+
 // The pack still loads when one value is wrong, and says which one. Dropping
 // the whole pack would cost the author every good token for one typo; dropping
 // the token silently would leave them with no way to find it.
@@ -124,7 +146,7 @@ func TestDecodeKeepsGoodTokensAndReportsBadOnes(t *testing.T) {
 // reads as a window that has gone wrong.
 func TestShippedPacksMeetTextContrast(t *testing.T) {
 	const aa = 4.5
-	inks := []string{"fg", "fgDim", "fgFaint"}
+	inks := []string{"fg", "fgStrong", "fgDim", "fgFaint"}
 	surfaces := []string{"bg", "bgSoft", "panel", "bgElev", "float", "floatHi", "codeBg", "sunkBg"}
 	packs := listBuiltin()
 	if len(packs) == 0 {
