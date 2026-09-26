@@ -756,6 +756,7 @@ export interface ContextPanelInfo {
   sessionEstimated?: boolean;
   requestCount?: number;
   elapsedMs?: number;
+  activeTurnStartedAt?: number;
   sessionCost?: number;
   sessionCurrency?: string;
   // Deprecated compatibility alias. Prefer sessionCost + sessionCurrency.

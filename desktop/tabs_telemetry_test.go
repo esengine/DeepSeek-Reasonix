@@ -111,6 +111,29 @@ func TestTabMetaReportsActiveTurnStartedAt(t *testing.T) {
 	}
 }
 
+func TestContextPanelSplitsRuntimeIntoCompletedAndRunningTurn(t *testing.T) {
+	tab := &WorkspaceTab{ID: "tab", WorkspaceRoot: t.TempDir()}
+	first := time.Now().Add(-time.Hour).UnixMilli()
+	tab.recordTurnStarted(first)
+	tab.recordTurnDone(first + 4_000)
+	running := time.Now().Add(-90 * time.Second).UnixMilli()
+	tab.recordTurnStarted(running)
+	app := &App{tabs: map[string]*WorkspaceTab{"tab": tab}}
+
+	panel := app.ContextPanel("tab")
+	if panel.ElapsedMs != 4_000 || panel.ActiveTurnStartedAt != running {
+		t.Fatalf("runtime = %d ms + running since %d, want 4000 ms + running since %d",
+			panel.ElapsedMs, panel.ActiveTurnStartedAt, running)
+	}
+
+	tab.recordTurnDone(running + 6_000)
+	panel = app.ContextPanel("tab")
+	if panel.ElapsedMs != 10_000 || panel.ActiveTurnStartedAt != 0 {
+		t.Fatalf("idle runtime = %d ms, running since %d; want 10000 ms and no running turn",
+			panel.ElapsedMs, panel.ActiveTurnStartedAt)
+	}
+}
+
 func TestWorkspaceTabMarksEstimatedExecutorTurn(t *testing.T) {
 	tab := &WorkspaceTab{}
 	tab.recordUsage(event.Event{

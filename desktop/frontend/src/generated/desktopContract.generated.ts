@@ -3,7 +3,7 @@
 
 export const DESKTOP_PROTOCOL_VERSION = 11;
 
-export const DESKTOP_CONTRACT_DIGEST = "sha256:3a11d9c6aa97fcd1400b8034bc5736de4cfa28fbb5fd69dfe9fab1a213259639";
+export const DESKTOP_CONTRACT_DIGEST = "sha256:857039e0868d57e1e367b080f009abd2d21baa856ae5d57e55fc8c3b1cef5734";
 
 export const DESKTOP_COMMANDS = [
   "AIRenameSession",
@@ -2292,6 +2292,7 @@ export interface ContextPanelInfo {
   sessionEstimated?: boolean;
   requestCount: number;
   elapsedMs: number;
+  activeTurnStartedAt?: number;
   sessionCost: number;
   sessionCurrency?: string;
   sessionCostUsd?: number;
