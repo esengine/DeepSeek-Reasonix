@@ -5,26 +5,6 @@ import (
 	"unicode/utf8"
 )
 
-// completePrefix drops only a final partial rune. Interior invalid bytes retain
-// their existing behavior; transport must not manufacture invalid boundary bytes.
-func completePrefix(p []byte) []byte {
-	start := len(p) - 1
-	for start >= 0 && !utf8.RuneStart(p[start]) {
-		start--
-	}
-	if start >= 0 && !utf8.FullRune(p[start:]) {
-		return p[:start]
-	}
-	return p
-}
-
-func completeTail(p []byte) []byte {
-	for len(p) > 0 && !utf8.RuneStart(p[0]) {
-		p = p[1:]
-	}
-	return completePrefix(p)
-}
-
 // Flush finishes a progress stream after the owner has drained the child,
 // including cancellation. An unfinished rune is represented once, not silently
 // lost or emitted as several invalid JSON strings.

@@ -14,6 +14,7 @@ import (
 	"sync"
 	"time"
 
+	fileenc "reasonix/internal/fileutil/encoding"
 	"reasonix/internal/proc"
 	"reasonix/internal/tool"
 )
@@ -260,7 +261,7 @@ func newOutputCollector(combinedLimit, tailLimit int) *outputCollector {
 func (c *outputCollector) tailString() string {
 	c.mu.Lock()
 	defer c.mu.Unlock()
-	return string(completeTail(c.tail.buf))
+	return string(fileenc.DecodeOutput(c.tail.buf, fileenc.Cut{Head: c.tail.cut}))
 }
 
 // boundedBuffer keeps complete output up to limit. Once output crosses the
@@ -302,17 +303,20 @@ func (b *boundedBuffer) Write(p []byte) (int, error) {
 	return len(p), nil
 }
 
+// String decodes the output in the encoding the child wrote it in; a Windows
+// console tool answers in the machine's code page, not UTF-8. Once truncated,
+// the head lost its end and the tail its start, so each is decoded on its own.
 func (b *boundedBuffer) String() string {
 	b.mu.Lock()
 	defer b.mu.Unlock()
 	if !b.truncated {
-		return b.buf.String()
+		return string(fileenc.DecodeOutput(b.buf.Bytes(), fileenc.Cut{}))
 	}
 	var out strings.Builder
 	out.Grow(b.buf.Len() + len(b.marker) + len(b.tail))
-	out.Write(completePrefix(b.buf.Bytes()))
+	out.Write(fileenc.DecodeOutput(b.buf.Bytes(), fileenc.Cut{Tail: true}))
 	out.WriteString(b.marker)
-	out.Write(completeTail(b.tail))
+	out.Write(fileenc.DecodeOutput(b.tail, fileenc.Cut{Head: true}))
 	return out.String()
 }
 
@@ -334,6 +338,7 @@ type tailWriter struct {
 	mu    *sync.Mutex
 	limit int
 	buf   []byte
+	cut   bool // bytes before buf were dropped to hold the limit
 }
 
 func (w *tailWriter) Write(p []byte) (int, error) {
@@ -342,6 +347,7 @@ func (w *tailWriter) Write(p []byte) (int, error) {
 	w.buf = append(w.buf, p...)
 	if w.limit > 0 && len(w.buf) > w.limit {
 		w.buf = append([]byte(nil), w.buf[len(w.buf)-w.limit:]...)
+		w.cut = true
 	}
 	return len(p), nil
 }
