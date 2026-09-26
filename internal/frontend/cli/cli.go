@@ -318,6 +318,35 @@ func registerContinueFlag(fs *pflag.FlagSet) *bool {
 	return fs.BoolP("continue", "c", false, "resume the most recent saved session, or start a fresh one when none exists")
 }
 
+// applyRunCopy applies --copy to a resolved resume path: it duplicates the
+// session and prints where the copy lives, returning the path to continue in
+// and a non-zero exit code to stop the run. A --continue that found no session
+// starts fresh, so there is nothing to duplicate and --copy is skipped; --copy
+// with neither --resume nor --continue is a usage error.
+func applyRunCopy(resumePath string, cont, copySession bool, format runOutputFormat, printOnly bool) (string, int) {
+	if !copySession || resumePath == "" {
+		if copySession && !cont {
+			fmt.Fprintln(os.Stderr, i18n.M.ErrorPrefix, "--copy requires --resume or --continue")
+			return "", 2
+		}
+		return resumePath, 0
+	}
+	copied, err := copySessionForWriting(resumePath)
+	if err != nil {
+		fmt.Fprintln(os.Stderr, i18n.M.ErrorPrefix, err)
+		return "", 1
+	}
+	// Keep structured (json/stream-json) and --print stdout a single
+	// machine-readable payload: the human copy notice goes to stderr there.
+	// Plain text runs keep it on stdout, where callers scrape the copied path.
+	if format == runOutputText && !printOnly {
+		fmt.Printf("continuing in a session copy: %s\n", copied)
+	} else {
+		fmt.Fprintf(os.Stderr, "continuing in a session copy: %s\n", copied)
+	}
+	return copied, 0
+}
+
 func runAgent(args []string, version string) int {
 	defer closeCLIUsageCatalogs()
 	f := newRunFlags()
@@ -425,25 +454,9 @@ func runAgent(args []string, version string) int {
 			resumePath = session.Path
 		}
 	}
-	if *f.copySession && resumePath == "" {
-		fmt.Fprintln(os.Stderr, i18n.M.ErrorPrefix, "--copy requires --resume or --continue")
-		return 2
-	}
-	if *f.copySession {
-		copied, err := copySessionForWriting(resumePath)
-		if err != nil {
-			fmt.Fprintln(os.Stderr, i18n.M.ErrorPrefix, err)
-			return 1
-		}
-		// Keep structured (json/stream-json) and --print stdout a single
-		// machine-readable payload: the human copy notice goes to stderr there.
-		// Plain text runs keep it on stdout, where callers scrape the copied path.
-		if format == runOutputText && !*f.printOnly {
-			fmt.Printf("continuing in a session copy: %s\n", copied)
-		} else {
-			fmt.Fprintf(os.Stderr, "continuing in a session copy: %s\n", copied)
-		}
-		resumePath = copied
+	resumePath, rc := applyRunCopy(resumePath, *f.cont, *f.copySession, format, *f.printOnly)
+	if rc != 0 {
+		return rc
 	}
 	sessionMode := cliTelemetrySessionMode(resumePath != "", strings.TrimSpace(*f.resume) != "", *f.copySession)
 	reporter := startCLITelemetry(cfg, telemetry.Options{

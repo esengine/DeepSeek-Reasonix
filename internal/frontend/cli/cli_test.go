@@ -244,6 +244,47 @@ func TestRunContinueWithoutSessionsStartsFresh(t *testing.T) {
 	}
 }
 
+// --continue --copy with no saved session has nothing to duplicate; it starts a
+// fresh session instead of failing on the --copy check. As above, reaching
+// provider resolution proves it advanced past both checks.
+func TestRunContinueCopyWithoutSessionsStartsFresh(t *testing.T) {
+	isolateCLIConfigHome(t)
+
+	var rc int
+	stderr := captureStderr(t, func() {
+		rc = runAgent([]string{"--continue", "--copy", "hello"}, "test-version")
+	})
+	if strings.Contains(stderr, "--copy requires") {
+		t.Fatalf("--continue --copy failed on the --copy check: %q", stderr)
+	}
+	if !strings.Contains(stderr, i18n.M.NoSessionToResumeStartingNew) {
+		t.Fatalf("--continue --copy did not report the fresh-session fallback: %q", stderr)
+	}
+	if !strings.Contains(stderr, "provider") {
+		t.Fatalf("--continue --copy did not reach provider resolution: %q", stderr)
+	}
+	if rc == 0 {
+		t.Fatalf("run rc = 0, want non-zero (the isolated home has no provider)")
+	}
+}
+
+// --copy with neither --resume nor --continue has nothing to duplicate, so it
+// stays a usage error.
+func TestRunCopyWithNoResumeIsUsageError(t *testing.T) {
+	isolateCLIConfigHome(t)
+
+	var rc int
+	stderr := captureStderr(t, func() {
+		rc = runAgent([]string{"--copy", "hello"}, "test-version")
+	})
+	if rc != 2 {
+		t.Fatalf("run --copy rc = %d, want 2", rc)
+	}
+	if !strings.Contains(stderr, "--copy requires --resume or --continue") {
+		t.Fatalf("run --copy stderr = %q", stderr)
+	}
+}
+
 func TestRunDispatchesACPLongFlagAlias(t *testing.T) {
 	out, errOut := captureCLIOutput(t, func() {
 		if rc := Run([]string{"--acp", "-h"}, "test-version"); rc != 0 {
