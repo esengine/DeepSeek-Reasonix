@@ -8,6 +8,7 @@ import (
 	"path/filepath"
 	"reasonix/internal/state/sessionstore"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -127,17 +128,15 @@ func TestTrySteerRejectedBecomesFollowup(t *testing.T) {
 	if got.Disposition != sessioninbox.DispositionQueuedFollowup {
 		t.Fatalf("disposition = %s, want queued_followup", got.Disposition)
 	}
-	select {
-	case <-runner.started:
-	case <-time.After(time.Second):
-		t.Fatal("rejected idle steer did not dispatch as a follow-up")
-	}
+	// The rejection dispatches before TrySteerInboxItem returns, so admission is
+	// already durable here; how soon the turn goroutine reaches the runner is not.
 	meta, _, err := c.ReadInboxItem(rec.ItemID)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if meta.State != sessioninbox.StateRunning || meta.Intent != sessioninbox.IntentFollowup {
-		t.Fatalf("meta = %+v", meta)
+	if meta.State != sessioninbox.StateRunning || meta.Intent != sessioninbox.IntentFollowup || !c.Running() {
+		t.Fatalf("rejected idle steer did not dispatch as a follow-up: meta = %+v, running = %v, queue = %+v",
+			meta, c.Running(), c.InboxSnapshot())
 	}
 }
 
@@ -206,7 +205,14 @@ func TestIdempotentEnqueueRejectsDifferentInput(t *testing.T) {
 type inboxSteerProvider struct {
 	started  chan struct{}
 	release  chan struct{}
+	unblock  func() // closes release once; safe from both the test body and its cleanup
 	requests []provider.Request
+}
+
+func newInboxSteerProvider() *inboxSteerProvider {
+	p := &inboxSteerProvider{started: make(chan struct{}), release: make(chan struct{})}
+	p.unblock = sync.OnceFunc(func() { close(p.release) })
+	return p
 }
 
 func (p *inboxSteerProvider) Name() string { return "inbox-steer" }
@@ -234,25 +240,7 @@ func (p *inboxSteerProvider) Stream(ctx context.Context, req provider.Request) (
 }
 
 func TestThirtySteersApplyAndAckExactlyOnce(t *testing.T) {
-	dir := testenv.TempDir(t)
-	prov := &inboxSteerProvider{started: make(chan struct{}), release: make(chan struct{})}
-	sess := sessionstore.NewSession("sys")
-	exec := agent.New(prov, tool.NewRegistry(), sess, agent.Options{}, event.Discard)
-	sink, done, _ := collectSink()
-	c := New(Options{
-		Runner:      exec,
-		Executor:    exec,
-		Sink:        sink,
-		SessionDir:  dir,
-		SessionPath: filepath.Join(dir, "s.jsonl"),
-	})
-	defer c.autosaveWG.Wait()
-	c.Submit("initial turn")
-	select {
-	case <-prov.started:
-	case <-time.After(time.Second):
-		t.Fatal("initial provider turn did not start")
-	}
+	c, _, sess, prov, done := steeringTurn(t)
 
 	const steerCount = 30
 	for i := range steerCount {
@@ -269,7 +257,7 @@ func TestThirtySteersApplyAndAckExactlyOnce(t *testing.T) {
 			t.Fatalf("steer %d disposition = %q", i, got.Disposition)
 		}
 	}
-	close(prov.release)
+	prov.unblock()
 	// Thirty durable round trips are real filesystem work; a loaded Windows
 	// runner spends most of the default five seconds before the turn is even
 	// released. This asserts exactly-once acknowledgement, not latency.

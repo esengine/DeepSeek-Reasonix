@@ -148,24 +148,15 @@ func (p *restartReviewProvider) nudgedInPhase2() bool {
 }
 
 // submitAndSettle submits input the way a window does, so goal turns carry the
-// goal's delivery scope, and waits until the goal's own continuations have
-// stopped: the controller idle and staying idle.
+// goal's delivery scope, and waits until the goal has left running and the
+// controller is idle. An idle gap between continuations is not a settled goal.
 func submitAndSettle(t *testing.T, ctrl *control.Controller, input string, rec *restartReviewProvider) {
 	t.Helper()
 	ctrl.Submit(input)
-	deadline := time.Now().Add(20 * time.Second)
-	idleSince := time.Time{}
-	for time.Now().Before(deadline) {
+	for deadline := time.Now().Add(20 * time.Second); time.Now().Before(deadline); {
 		time.Sleep(20 * time.Millisecond)
 		st := ctrl.RuntimeStatus()
-		if st.Running || st.PendingPrompt {
-			idleSince = time.Time{}
-			continue
-		}
-		if idleSince.IsZero() {
-			idleSince = time.Now()
-		}
-		if time.Since(idleSince) > 500*time.Millisecond {
+		if !st.Running && !st.PendingPrompt && ctrl.GoalStatus() != control.GoalStatusRunning {
 			return
 		}
 	}
@@ -198,12 +189,14 @@ func runReviewArm(t *testing.T, kind string, restart bool) restartArm {
 	t.Chdir(dir)
 	rec := &restartReviewProvider{}
 	provider.Register(kind, func(provider.Config) (provider.Provider, error) { return rec, nil })
+	// A reply costs 1000 tokens: 8000 buys each phase its planned calls and a few
+	// refused claims. Each extra refused turn only adds a full host turn of wall clock.
 	writeFile(t, dir, "reasonix.toml", `
 default_model = "test-model"
 
 [agent]
 system_prompt = "BASE"
-goal_token_budget = 30000
+goal_token_budget = 8000
 
 [codegraph]
 enabled = false
