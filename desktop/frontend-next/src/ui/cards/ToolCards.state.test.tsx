@@ -46,6 +46,19 @@ describe("tool outcome cards", () => {
     expect(screen.getByText("boom")).toBeTruthy();
   });
 
+  // The cause is read off the code, never off the kernel's sentence: the same
+  // English with no code says nothing more than the English does.
+  it("names a write-scope refusal as the write scope, not a sandbox", () => {
+    const err = 'write refused: "C:\\\\x.md" is outside the workspace write scope';
+    const { container } = render(<ToolCard tool={{ id: "w", name: "write_file", err, refusalCode: "workspace.write_outside_scope", readOnly: false }} running={false} />);
+    const why = container.querySelector('[data-refusal="workspace.write_outside_scope"]');
+    expect(why?.textContent).toContain("不是操作系统沙箱");
+    expect(why?.textContent).toContain("额外可写目录");
+    cleanup();
+    const bare = render(<ToolCard tool={{ id: "w", name: "write_file", err, readOnly: false }} running={false} />);
+    expect(bare.container.querySelector("[data-refusal]")).toBeNull();
+  });
+
   it("keeps a completed result compact until its row is opened", () => {
     const { container } = render(<ToolCard tool={{ id: "ok", name: "bash", args: '{"command":"npm test"}', output: "passed", readOnly: false }} running={false} />);
     const disclosure = container.querySelector("details.tool-disclosure") as HTMLDetailsElement;

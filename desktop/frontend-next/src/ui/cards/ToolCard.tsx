@@ -13,7 +13,7 @@ import { currentStep, parsePlan, stepDone } from "../../state/session";
 import { DiffView } from "./DiffView";
 import { Term, ToolOutput } from "./ToolOutput";
 import { ExtensionView } from "./ExtensionView";
-import { toolChangedFile, toolFailed, toolFailureLabel } from "./outcome";
+import { toolChangedFile, toolFailed, toolFailureLabel, toolRefusalReason } from "./outcome";
 import { StudioIcon } from "../StudioIcon";
 import { useEscape } from "../dismiss";
 
@@ -91,6 +91,7 @@ export function ToolCard({
   // The number is the actionable half; the state only says that something went
   // wrong, which the colour already says.
   const badLabel = toolFailureLabel(tool);
+  const refusal = toolRefusalReason(tool);
   // Which server answered belongs on the card, not in a panel: this is the
   // moment the user can judge whether an external service should have run.
   // The interpreter that actually ran it, or the remote tool a capability call
@@ -215,6 +216,7 @@ export function ToolCard({
       )}
       {/* The error stays outside the takeover: an extension may redraw what
           a call produced, never whether it failed. */}
+      {refusal && <div className="txt" data-refusal={tool.refusalCode}>{refusal}</div>}
       {tool.err && <div className="txt bad">{tool.err}</div>}
       {children.length > 0 && (
         <div className="nest">
@@ -328,7 +330,12 @@ function NestedCall({ tool }: { tool: Tool }) {
             {clipped && <div className="bound">{t("仅显示前 400 个字符")}</div>}
           </div>
         )}
-        {tool.err && <div className="out"><div className="txt bad">{tool.err}</div></div>}
+        {tool.err && (
+          <div className="out">
+            {toolRefusalReason(tool) && <div className="txt" data-refusal={tool.refusalCode}>{toolRefusalReason(tool)}</div>}
+            <div className="txt bad">{tool.err}</div>
+          </div>
+        )}
       </div>
     </div>
   );

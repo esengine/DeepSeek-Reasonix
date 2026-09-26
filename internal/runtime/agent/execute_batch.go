@@ -3,6 +3,7 @@ package agent
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"sync"
 	"time"
 
@@ -578,4 +579,14 @@ func markCancelledFrom(ctx context.Context, start int, calls []provider.ToolCall
 		results[j] = output
 		outcomes[j] = toolOutcome{output: output, errMsg: errMsg}
 	}
+}
+
+// refusalCodeOf is the identity a tool's own refusal carries, so a frontend
+// names the cause the tool decided rather than reading it out of the sentence.
+func refusalCodeOf(err error) string {
+	var refusal tool.Refusal
+	if errors.As(err, &refusal) {
+		return refusal.Code
+	}
+	return ""
 }
