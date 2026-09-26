@@ -2,6 +2,8 @@ package control
 
 import (
 	"errors"
+	"os"
+	"path/filepath"
 	"runtime"
 	"testing"
 
@@ -71,5 +73,36 @@ func TestSandboxSettingsSaveWhereNoSandboxExists(t *testing.T) {
 	s.Bash = "enforce"
 	if err := c.SaveSandboxSettings(s); !errors.Is(err, ErrSandboxUnavailable) {
 		t.Fatalf("switching the jail on without one: err = %v, want ErrSandboxUnavailable", err)
+	}
+}
+
+// The browser switch is its own key: it reads on when unset, a save lands in
+// the user file, and the shared [browser] enabled the 1.x line writes is
+// neither what it reads nor something a save changes.
+func TestBrowserToolsSettingsPersistWithoutTouchingTheSharedKey(t *testing.T) {
+	t.Setenv("REASONIX_HOME", testenv.TempDir(t))
+	c := &Controller{controllerDeps: controllerDeps{workspaceRoot: testenv.TempDir(t)}}
+	path := config.UserConfigPath()
+	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(path, []byte("[browser]\nenabled = false\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if s := c.BrowserToolsSettings(); !s.Enabled || !s.Effective {
+		t.Fatalf("the 1.x key turned the tools off: %+v", s)
+	}
+	if err := c.SaveBrowserToolsSettings(false); err != nil {
+		t.Fatal(err)
+	}
+	if s := c.BrowserToolsSettings(); s.Enabled || s.Effective {
+		t.Fatalf("turning it off did not read back: %+v", s)
+	}
+	saved := config.LoadForEdit(path)
+	if saved.Tools.BrowserToolsEnabled() {
+		t.Fatal("turning it off did not reach the config file")
+	}
+	if shared := saved.Browser.SharedEnabled; shared == nil || *shared {
+		t.Fatalf("the shared [browser] enabled changed on save: %v", shared)
 	}
 }

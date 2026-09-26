@@ -26,7 +26,7 @@ func SetComputerHelper(path string) {
 // bindMachineTools binds the tools that reach past the workspace into this
 // machine: its browser, and its applications when the host has a helper. They
 // replace the unbound built-ins, so they are bound after those are registered.
-func bindMachineTools(reg *tool.Registry, cfg config.BrowserConfig, root string, reused *browser.Session) *browser.Session {
+func bindMachineTools(reg *tool.Registry, cfg *config.Config, root string, reused *browser.Session) *browser.Session {
 	if computerHelper != nil {
 		for _, t := range builtin.ComputerTools(computer.NewSession(computerHelper)) {
 			reg.Add(t)

@@ -25,6 +25,7 @@ import { Rules } from "./Rules";
 import { ConfigTrouble } from "./ConfigTrouble";
 import { Compaction } from "./Compaction";
 import { Sandbox } from "./Sandbox";
+import { BrowserTools } from "./BrowserTools";
 import { Account } from "./Account";
 import { Providers } from "./Providers";
 import { activeKind, groupVendors } from "./Models";
@@ -591,6 +592,12 @@ export function Settings({ hub, onError, port, networkPort, networkHost, status,
                 hint={t("agent 的所有命令都由该程序执行，它也决定命令使用哪种语法；选择错误会导致每条命令都执行失败。下方只列出本机已安装的程序。更换需要重建运行时，任务运行期间无法修改。")}
               >
                 <ShellPicker port={port} onChanged={onChanged} />
+              </Group>
+              <Group id="browser-tools"
+                title={t("内置浏览器")}
+                hint={t("agent 用来打开和操作网页的工具。该开关单独保存，不受命令行版本浏览器设置的影响。修改会重建运行时，任务运行期间无法变更。")}
+              >
+                <BrowserTools port={port} onChanged={onChanged} />
               </Group>
             </>
           )}

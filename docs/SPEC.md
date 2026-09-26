@@ -1133,6 +1133,7 @@ offline = false  # set true when outbound network access is unavailable; prevent
 enabled = []   # omit/empty = all built-ins
 bash_timeout_seconds = 120   # foreground safety cap; set 0 for no tool-local cap
 protect_changed_files = true   # refuse a whole-file write over a change made since the agent last read or wrote the file
+browser_tools = true   # built-in browser tools; the browser starts on first use
 mcp_startup_timeout_seconds = 30   # background initialize + tools/list safety cap
 mcp_call_timeout_seconds = 300   # default MCP call safety cap; plugin/tool overrides may raise it
 

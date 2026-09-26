@@ -1539,17 +1539,18 @@ func TestEveryDesktopKeyThatCanBeSetSurvivesASave(t *testing.T) {
 func TestBrowserSettingsSurviveASave(t *testing.T) {
 	for _, scope := range []RenderScope{RenderScopeUser, RenderScopeProject} {
 		c := Default()
-		c.Browser = BrowserConfig{Enabled: false, Executable: "/opt/chromium/chrome", Headless: true}
+		shared := false
+		c.Browser = BrowserConfig{SharedEnabled: &shared, Executable: "/opt/chromium/chrome", Headless: true}
 		rendered := RenderTOMLForScope(c, scope)
 		reloaded := Default()
 		if _, err := decodeTOMLBytes([]byte(rendered), reloaded); err != nil {
 			t.Fatalf("scope %v: the config it just wrote does not parse: %v", scope, err)
 		}
-		if reloaded.Browser != c.Browser {
+		if !sameBrowserConfig(reloaded.Browser, c.Browser) {
 			t.Fatalf("scope %v: round trip = %+v, want %+v\n%s", scope, reloaded.Browser, c.Browser, rendered)
 		}
 	}
-	if d := Default(); !d.Browser.Enabled || d.Browser.Headless || d.Browser.Executable != "" {
+	if d := Default(); d.Browser.SharedEnabled != nil || d.Browser.Headless || d.Browser.Executable != "" {
 		t.Fatalf("default browser config = %+v", d.Browser)
 	}
 }

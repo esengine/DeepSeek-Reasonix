@@ -1,4 +1,4 @@
-import type { Adjudications, ConfigProblem, ConfigRepair, PermissionLists, PermissionRules, SandboxSettings } from "./port";
+import type { Adjudications, BrowserToolsSettings, ConfigProblem, ConfigRepair, PermissionLists, PermissionRules, SandboxSettings } from "./port";
 import { MockShell } from "./mock_shell";
 
 // The boundary half of the fixture: what the agent is refused outright, and how
@@ -56,6 +56,8 @@ export class MockBoundary extends MockShell {
     path: "/Users/you/.reasonix/config.toml",
   };
 
+  private browser: BrowserToolsSettings = { enabled: true, effective: true, path: "/Users/you/.reasonix/config.toml" };
+
   async permissions(): Promise<PermissionRules> {
     return { ...this.rules };
   }
@@ -84,6 +86,15 @@ export class MockBoundary extends MockShell {
     const roots = [s.workspaceRoot || "/Users/you/code/site", ...s.allowWrite.filter(Boolean)];
     this.jail = { ...this.jail, ...s, effectiveWriteRoots: roots, effectiveBash: effectiveBash(s) };
     return { ...this.jail };
+  }
+
+  async browserTools(): Promise<BrowserToolsSettings> {
+    return { ...this.browser };
+  }
+
+  async saveBrowserTools(enabled: boolean): Promise<BrowserToolsSettings> {
+    this.browser = { ...this.browser, enabled, effective: enabled };
+    return { ...this.browser };
   }
 
   // The fixture carries the broken file, because a banner nobody can reach is

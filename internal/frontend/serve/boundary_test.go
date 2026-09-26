@@ -37,7 +37,7 @@ func TestBoundaryWritesRefusedWithoutGrant(t *testing.T) {
 	srv := httptest.NewServer(s.Handler())
 	defer srv.Close()
 
-	for _, path := range []string{"/permissions", "/sandbox"} {
+	for _, path := range []string{"/permissions", "/sandbox", "/browser-tools"} {
 		resp := postProvider(t, srv.URL, path, `{}`)
 		resp.Body.Close()
 		if resp.StatusCode != http.StatusForbidden {
@@ -233,5 +233,35 @@ func TestSaveSandboxRejectsUnknownBashMode(t *testing.T) {
 	defer resp.Body.Close()
 	if resp.StatusCode != http.StatusBadRequest {
 		t.Fatalf("POST /sandbox with an unknown mode = %d, want 400", resp.StatusCode)
+	}
+}
+
+// The switch lands in the user file, not in the runtime alone, and reads back
+// from there; a body that does not say on or off changes nothing.
+func TestSaveBrowserToolsPersists(t *testing.T) {
+	s := newProviderEditServer(t)
+	s.AllowProviderEdit()
+	srv := httptest.NewServer(s.Handler())
+	defer srv.Close()
+
+	if got := readJSON[control.BrowserToolsSettings](t, srv.URL, "/browser-tools"); !got.Enabled {
+		t.Fatalf("unset switch reads %+v, want on", got)
+	}
+	empty := postProvider(t, srv.URL, "/browser-tools", `{}`)
+	empty.Body.Close()
+	if empty.StatusCode != http.StatusBadRequest {
+		t.Fatalf("POST /browser-tools without enabled = %d, want 400", empty.StatusCode)
+	}
+	resp := postProvider(t, srv.URL, "/browser-tools", `{"enabled":false}`)
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		got, _ := readAllString(resp)
+		t.Fatalf("POST /browser-tools = %d: %s", resp.StatusCode, got)
+	}
+	if config.LoadForEdit(config.UserConfigPath()).Tools.BrowserToolsEnabled() {
+		t.Fatal("turning it off did not reach the config file")
+	}
+	if got := readJSON[control.BrowserToolsSettings](t, srv.URL, "/browser-tools"); got.Enabled {
+		t.Fatalf("read back = %+v, want off", got)
 	}
 }
