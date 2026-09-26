@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from "react";
+import { useSessionRuntimeMs } from "../lib/useSessionRuntime";
 import { app } from "../lib/bridge";
 import { contextWindowPercentages } from "../lib/contextWindow";
 import { useI18n } from "../lib/i18n";
@@ -111,6 +112,7 @@ export function ContextWindowRing({ enabled = true, context, tabId, turnCost, tu
     setOpen(false);
   }, []);
 
+  const runtimeMs = useSessionRuntimeMs(open ? info : null);
   if (!enabled) return null;
 
   const turnCacheHit = cacheHitTokens ?? info?.cacheHitTokens ?? 0;
@@ -119,7 +121,7 @@ export function ContextWindowRing({ enabled = true, context, tabId, turnCost, tu
   const compactTokens = windowTokens > 0 ? Math.round(windowTokens * compactRatio) : 0;
   const tokensToCompact = compactTokens > used ? compactTokens - used : 0;
   const ringOffset = RING_C * (1 - usagePct / 100);
-  const elapsed = info?.elapsedMs && info.elapsedMs > 0 ? fmtDuration(info.elapsedMs, t) : undefined;
+  const elapsed = runtimeMs > 0 ? fmtDuration(runtimeMs, t) : undefined;
   const quoteStatus = info?.sessionCostQuote?.displayStatus;
   const sessionCostBucketed = quoteStatus === "bucketed" || info?.sessionCostQuote?.aggregateMode === "currency_buckets";
   const sessionCostFallback = quoteStatus === "fallback_original";

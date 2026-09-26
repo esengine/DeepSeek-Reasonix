@@ -6640,7 +6640,8 @@ type ContextPanelInfo struct {
 	SessionCompletionTokens int                         `json:"sessionCompletionTokens"`
 	SessionEstimated        bool                        `json:"sessionEstimated,omitempty"`
 	RequestCount            int                         `json:"requestCount"`
-	ElapsedMs               int64                       `json:"elapsedMs"`
+	ElapsedMs               int64                       `json:"elapsedMs"`                     // finished turns only
+	ActiveTurnStartedAt     int64                       `json:"activeTurnStartedAt,omitempty"` // unix ms; 0 when idle
 	SessionCost             float64                     `json:"sessionCost"`
 	SessionCurrency         string                      `json:"sessionCurrency,omitempty"`
 	SessionCostUsd          float64                     `json:"sessionCostUsd,omitempty"`
@@ -6716,7 +6717,8 @@ func (a *App) ContextPanel(tabID string) ContextPanelInfo {
 	usage := telemetry.Usage
 	info.TotalTokens = usage.TotalTokens
 	info.RequestCount = usage.RequestCount
-	info.ElapsedMs = usage.ElapsedMs
+	info.ElapsedMs = read.runtime.completedMs
+	info.ActiveTurnStartedAt = read.runtime.turnStartedAt
 	info.SessionCost = usage.SessionCost
 	info.SessionCurrency = usage.SessionCurrency
 	info.SessionCostUsd = usage.SessionCostUsd

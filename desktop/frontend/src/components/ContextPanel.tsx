@@ -3,6 +3,7 @@
 import { lazy, Suspense, useState, type ReactNode } from "react";
 import { asArray } from "../lib/array";
 import { useContextPanelSnapshot } from "../lib/useContextPanelSnapshot";
+import { useSessionRuntimeMs } from "../lib/useSessionRuntime";
 import { contextWindowPercentages } from "../lib/contextWindow";
 import { useI18n, type Locale, type Translator } from "../lib/i18n";
 import { formatMoneyLocalized } from "../lib/money";
@@ -385,6 +386,7 @@ export function ContextPanel({
 }: ContextPanelProps) {
   const { locale, t } = useI18n();
   const info = useContextPanelSnapshot(tabId, sessionGen, refreshKey, contextUsageRefreshKey(usage), usageSeq);
+  const runtimeMs = useSessionRuntimeMs(info);
   const [analysisView, setAnalysisView] = useState<UsageAnalysisView>("source");
   const usedTokens = context?.used ?? info?.usedTokens ?? 0;
   const windowTokens = context?.window ?? info?.windowTokens ?? 0;
@@ -432,7 +434,7 @@ export function ContextPanel({
     ...changedFiles.map((file) => file.latestTime ?? 0),
   ].filter((time) => time > 0);
   const derivedElapsed = eventTimes.length > 1 ? Math.max(...eventTimes) - Math.min(...eventTimes) : 0;
-  const elapsed = info?.elapsedMs && info.elapsedMs > 0 ? info.elapsedMs : derivedElapsed;
+  const elapsed = runtimeMs > 0 ? runtimeMs : derivedElapsed;
   const derivedRequestCount = Math.max(readFiles.length + changedFiles.length, 0);
   const requestCount = info?.requestCount && info.requestCount > 0 ? info.requestCount : derivedRequestCount;
   const windowStatus = contextWindowStatus(rawUsagePct, compactPct);

@@ -29651,6 +29651,13 @@
           }
         },
         {
+          "name": "activeTurnStartedAt",
+          "optional": true,
+          "type": {
+            "kind": "integer"
+          }
+        },
+        {
           "name": "sessionCost",
           "type": {
             "kind": "number"

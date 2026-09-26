@@ -18,6 +18,14 @@ type contextRead struct {
 	controllerPath string
 	workspaceRoot  string
 	telemetry      tabTelemetrySnapshot
+	runtime        sessionRuntime
+}
+
+// sessionRuntime splits runtime into finished turns and the running turn's
+// start, so a reader can keep counting between snapshots.
+type sessionRuntime struct {
+	completedMs   int64
+	turnStartedAt int64
 }
 
 func (a *App) captureContextRead(tabID string) contextRead {
@@ -35,6 +43,7 @@ func (a *App) captureContextRead(tabID string) contextRead {
 	tab.telemMu.Lock()
 	key := tab.telemetrySessionKey
 	r.telemetry = tab.displayTelemetrySnapshotLocked()
+	r.runtime = sessionRuntime{completedMs: tab.usageTelemetry.ElapsedMs, turnStartedAt: tab.usageTelemetry.activeTurnStartedAt}
 	tab.telemMu.Unlock()
 	a.mu.RUnlock()
 	if r.ctrl != nil {
@@ -43,6 +52,7 @@ func (a *App) captureContextRead(tabID string) contextRead {
 			// A legacy /new can rotate before the next event re-keys telemetry.
 			// Read its sidecar without mutating the live tab or wallet overlay.
 			r.telemetry = loadTelemetry(r.controllerPath + ".telemetry.json")
+			r.runtime = sessionRuntime{completedMs: r.telemetry.Usage.ElapsedMs}
 		}
 	}
 	return r
