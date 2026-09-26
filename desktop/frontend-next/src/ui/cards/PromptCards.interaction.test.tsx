@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { cleanup, render, screen, waitFor, within } from "@testing-library/react";
+import { cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import type { Item } from "../../state/session";
 import { ApprovalCard } from "./ApprovalCard";
@@ -105,6 +105,71 @@ describe("decision cards", () => {
     await userEvent.click(screen.getByRole("button", { name: "确认" }));
 
     expect(answer).toHaveBeenCalledWith("row", "ask", [{ questionId: "city", selected: ["深圳"] }]);
+  });
+
+  // Choosing Other puts the caret in its box and Enter answers, so a typed
+  // answer never needs the mouse; Enter that confirms an IME candidate does not.
+  it("answers a typed Other from the keyboard, and leaves an IME confirm alone", async () => {
+    const answer = vi.fn(pending);
+    const item = {
+      t: "ask", id: "row", ask: { id: "ask", questions: [
+        { id: "city", header: "城市", prompt: "选择城市", multi: false, options: [{ label: "北京" }] },
+      ] },
+    } as Extract<Item, { t: "ask" }>;
+    render(<AskCard item={item} onAnswer={answer} />);
+
+    await userEvent.click(screen.getByRole("button", { name: /其他 —— 自行填写/ }));
+    const box = screen.getByPlaceholderText("在此填写你希望采用的方案");
+    expect(document.activeElement).toBe(box);
+
+    await userEvent.keyboard("shenzhen");
+    fireEvent.compositionStart(box);
+    fireEvent.keyDown(box, { key: "Enter", isComposing: true });
+    fireEvent.compositionEnd(box);
+    expect(answer).not.toHaveBeenCalled();
+
+    const later = Date.now() + 60_000;
+    const clock = vi.spyOn(Date, "now").mockReturnValue(later);
+    try {
+      await userEvent.keyboard("{Enter}");
+    } finally {
+      clock.mockRestore();
+    }
+    expect(answer).toHaveBeenCalledWith("row", "ask", [{ questionId: "city", selected: ["shenzhen"] }]);
+  });
+
+  it("puts the caret back in the box each time Other is chosen again", async () => {
+    const item = {
+      t: "ask", id: "row", ask: { id: "ask", questions: [
+        { id: "city", header: "城市", prompt: "选择城市", multi: false, options: [{ label: "北京" }] },
+      ] },
+    } as Extract<Item, { t: "ask" }>;
+    render(<AskCard item={item} onAnswer={vi.fn(pending)} />);
+    const other = screen.getByRole("button", { name: /其他 —— 自行填写/ });
+    const box = screen.getByRole("textbox", { name: "其他 —— 自行填写" });
+
+    await userEvent.click(other);
+    expect(document.activeElement).toBe(box);
+    await userEvent.click(screen.getByRole("button", { name: /北京/ }));
+    await userEvent.click(other);
+    expect(document.activeElement).toBe(box);
+  });
+
+  // The pane Enter leaves becomes display:none, so focus has to follow the card
+  // to the next question or the keyboard is left holding nothing.
+  it("takes focus to the next question when Enter moves on", async () => {
+    const item = {
+      t: "ask", id: "row", ask: { id: "ask", questions: [
+        { id: "city", header: "城市", prompt: "选择城市", multi: false, options: [{ label: "北京" }] },
+        { id: "size", header: "规模", prompt: "选择规模", multi: false, options: [{ label: "小" }, { label: "大" }] },
+      ] },
+    } as Extract<Item, { t: "ask" }>;
+    render(<AskCard item={item} onAnswer={vi.fn(pending)} />);
+
+    await userEvent.click(screen.getAllByRole("button", { name: /其他 —— 自行填写/ })[0]);
+    await userEvent.keyboard("shenzhen{Enter}");
+    expect(screen.getByRole("tab", { name: /规模/ }).getAttribute("aria-selected")).toBe("true");
+    expect(document.activeElement).toBe(screen.getByRole("button", { name: /小/ }));
   });
 
   // Several questions are walked, not hunted for: a single-choice pick moves on
