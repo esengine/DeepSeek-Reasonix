@@ -4,6 +4,8 @@ import (
 	"errors"
 	"strings"
 	"testing"
+
+	tea "charm.land/bubbletea/v2"
 )
 
 // The picker opens on the first conversation that is not the open one, what
@@ -116,5 +118,65 @@ func TestVersionCommandShowsDevWhenVersionMissing(t *testing.T) {
 	run(m, press(m, "enter"))
 	if got := m.tr.Items[len(m.tr.Items)-1].Text; got != "reasonix dev" {
 		t.Fatalf("version notice = %q", got)
+	}
+}
+
+// In YOLO mode a bare digit picks the numbered row directly, the way the
+// approval banner's numbered shortcuts do.
+func TestPickerYoloDigitPicksTheRow(t *testing.T) {
+	m, k := testModel(t)
+	m.status.ToolApprovalMode = "yolo"
+	run(m, m.openPicker())
+	_, cmd := m.Update(tea.KeyPressMsg{Code: '2', Text: "2"})
+	run(m, cmd)
+	if m.picker != nil {
+		t.Fatal("digit 2 did not pick the second row")
+	}
+	if calls := strings.Join(k.seen(), "\n"); !strings.Contains(calls, `POST /resume {"path":"/s/b.jsonl"}`) {
+		t.Fatalf("digit pick did not resume row 2:\n%s", calls)
+	}
+}
+
+// A digit past the last row is not a pick: it filters, so nothing is committed
+// on a list shorter than the digit.
+func TestPickerYoloDigitBeyondRowsFilters(t *testing.T) {
+	m, _ := testModel(t)
+	m.status.ToolApprovalMode = "yolo"
+	run(m, m.openPicker())
+	m.Update(tea.KeyPressMsg{Code: '9', Text: "9"})
+	if m.picker == nil {
+		t.Fatal("digit 9 with three rows must not pick")
+	}
+	if m.picker.query != "9" {
+		t.Fatalf("query = %q, want 9", m.picker.query)
+	}
+}
+
+// Even in YOLO mode a digit filters once a query is active: typing a digit to
+// search a label must not pick the row it names.
+func TestPickerYoloDigitFiltersAfterSearch(t *testing.T) {
+	m, _ := testModel(t)
+	m.status.ToolApprovalMode = "yolo"
+	run(m, m.openPicker())
+	typeText(m, "b")
+	m.Update(tea.KeyPressMsg{Code: '2', Text: "2"})
+	if m.picker == nil {
+		t.Fatal("a digit while filtering must not pick a row")
+	}
+	if m.picker.query != "b2" {
+		t.Fatalf("query = %q, want b2", m.picker.query)
+	}
+}
+
+// Outside YOLO a digit only narrows the list, the behavior the picker had.
+func TestPickerNonYoloDigitFilters(t *testing.T) {
+	m, _ := testModel(t)
+	run(m, m.openPicker())
+	m.Update(tea.KeyPressMsg{Code: '2', Text: "2"})
+	if m.picker == nil {
+		t.Fatal("a non-YOLO digit must not pick a row")
+	}
+	if m.picker.query != "2" {
+		t.Fatalf("query = %q, want 2", m.picker.query)
 	}
 }

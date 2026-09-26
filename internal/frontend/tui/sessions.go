@@ -110,6 +110,12 @@ func (p *sessionPicker) shown() []SessionInfo {
 	return out
 }
 
+// pickerYolo reports whether the session's approval mode is YOLO; a picker
+// opened in that mode selects a numbered row from a bare digit.
+func (m *model) pickerYolo() bool {
+	return m.status.ToolApprovalMode == "yolo"
+}
+
 // pickerKey takes every key while the picker is open: it is modal, and what
 // is typed filters the list rather than reaching the composer.
 func (m *model) pickerKey(msg tea.KeyPressMsg) (tea.Cmd, bool) {
@@ -136,6 +142,14 @@ func (m *model) pickerKey(msg tea.KeyPressMsg) (tea.Cmd, bool) {
 		}
 	default:
 		if msg.Text != "" {
+			// In YOLO mode a bare digit picks the numbered row directly; a
+			// digit still filters once a query is active, so typing a digit
+			// to search cannot pick a row.
+			if m.pickerYolo() && p.query == "" && len(msg.Text) == 1 && msg.Text[0] >= '1' && msg.Text[0] <= '9' {
+				if n := int(msg.Text[0] - '1'); n < len(items) {
+					return m.pickSession(items[n]), true
+				}
+			}
 			p.query, p.sel = p.query+msg.Text, 0
 		}
 	}
