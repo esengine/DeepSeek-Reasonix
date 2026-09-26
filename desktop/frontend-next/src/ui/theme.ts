@@ -16,6 +16,7 @@ const SURFACE: Record<string, string[]> = {
   fg: ["--text"],
   fgDim: ["--muted"],
   fgFaint: ["--faint", "--ghost"],
+  fgStrong: ["--text-strong"],
   accent: ["--accent"],
   accentFg: ["--accent-fg"],
   float: ["--float"],
@@ -61,7 +62,7 @@ const SKY_VARS = ["--ray", "--ray-a", "--cloud-a", "--cloud-hi", "--cloud-gilt"]
 // the built-in palette's own three steps. A pack states one set of inks, which
 // is the step someone who never opened the setting sees; the stronger two are
 // derived from it so choosing a palette never costs the reader their setting.
-const STEPS: Record<string, [number, number]> = { fg: [3.0, 10.1], fgDim: [3.5, 7.5], fgFaint: [3.5, 7.0] };
+const STEPS: Record<string, [number, number]> = { fg: [3.0, 10.1], fgStrong: [3.0, 10.1], fgDim: [3.5, 7.5], fgFaint: [3.5, 7.0] };
 
 // The reader's contrast outranks the author's palette, the same way reading
 // size does: an author chose colours, not how legible they have to be for
