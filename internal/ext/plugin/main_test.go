@@ -13,7 +13,8 @@ func TestMain(m *testing.M) {
 	// MCP helper subprocesses run this same test binary under the sandbox and
 	// inherit the already-isolated parent environment. They must not try to
 	// allocate a second user home outside their allowed roots.
-	if os.Getenv("GO_WANT_HELPER_PROCESS") == "1" || os.Getenv("GO_WANT_HELPER_STDERR_EXIT") == "1" {
+	if os.Getenv("GO_WANT_HELPER_PROCESS") == "1" || os.Getenv("GO_WANT_HELPER_STDERR_EXIT") == "1" ||
+		os.Getenv("GO_WANT_HELPER_STDERR_CODEPAGE") == "1" {
 		os.Exit(m.Run())
 	}
 	cleanupUserState, err := testenv.IsolateUserState()
