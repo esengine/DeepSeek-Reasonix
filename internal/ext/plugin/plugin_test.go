@@ -16,6 +16,8 @@ import (
 	"testing"
 	"time"
 
+	"golang.org/x/text/encoding/simplifiedchinese"
+
 	"reasonix/internal/base/testenv"
 	"reasonix/internal/contract/event"
 	"reasonix/internal/contract/tool"
@@ -779,6 +781,31 @@ func TestStdioFailureCapturesStderr(t *testing.T) {
 	}
 }
 
+const codePageNotFound = "'read-only-mysql-mcp-server' 不是内部或外部命令，也不是可运行的程序"
+
+// cmd.exe on a Chinese Windows reports a missing command in the console code
+// page, not UTF-8; the failure the settings page shows must still be readable.
+func TestStdioFailureDecodesCodePageStderr(t *testing.T) {
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+
+	host, _ := StartAvailable(ctx, []Spec{{
+		Name:    "codepage",
+		Command: os.Args[0],
+		Args:    []string{"-test.run=TestHelperProcess", "--"},
+		Env:     map[string]string{"GO_WANT_HELPER_STDERR_CODEPAGE": "1"},
+	}})
+	defer host.Close()
+
+	failures := host.Failures()
+	if len(failures) != 1 {
+		t.Fatalf("failures = %+v, want one", failures)
+	}
+	if !strings.Contains(failures[0].Error, codePageNotFound) {
+		t.Fatalf("failure should carry the decoded stderr, got %q", failures[0].Error)
+	}
+}
+
 func TestStartupFailureReportsStageElapsedAndRedactedStderr(t *testing.T) {
 	lifeCtx := t.Context()
 	startupCtx, cancelStartup := context.WithTimeout(lifeCtx, 40*time.Millisecond)
@@ -1232,6 +1259,11 @@ func TestHelperProcess(t *testing.T) {
 	if os.Getenv("GO_WANT_HELPER_STDERR_EXIT") == "1" {
 		os.Stderr.WriteString("helper stderr boom\n")
 		os.Exit(2)
+	}
+	if os.Getenv("GO_WANT_HELPER_STDERR_CODEPAGE") == "1" {
+		b, _ := simplifiedchinese.GB18030.NewEncoder().Bytes([]byte(codePageNotFound))
+		os.Stderr.Write(b)
+		os.Exit(1)
 	}
 	if os.Getenv("GO_WANT_HELPER_PROCESS") != "1" {
 		return
