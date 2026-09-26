@@ -318,6 +318,71 @@ func TestAskEscDeclinesWithNothingSelected(t *testing.T) {
 	}
 }
 
+func singleChoiceAsk() eventwire.Event {
+	return eventwire.Event{Kind: "ask_request", Ask: &eventwire.Ask{ID: "ask-yolo", Questions: []eventwire.AskQuestion{
+		{ID: "q1", Prompt: "One", Options: []eventwire.AskOption{{Label: "A"}}},
+		{ID: "q2", Prompt: "Two", Options: []eventwire.AskOption{{Label: "B"}}},
+	}}}
+}
+
+// In YOLO mode answering the last question of a multi-question ask submits the
+// whole batch as soon as the Submit tab is reached, with no extra confirmation
+// Enter.
+func TestAskYoloAutoSubmitsFullyAnsweredBatch(t *testing.T) {
+	m, k := testModel(t)
+	m.status.ToolApprovalMode = "yolo"
+	apply(m, singleChoiceAsk())
+	_, cmd := m.Update(tea.KeyPressMsg{Code: '1', Text: "1"})
+	run(m, cmd)
+	if m.tr.OpenPrompt() == nil {
+		t.Fatal("answering q1 must advance to q2, not submit")
+	}
+	_, cmd = m.Update(tea.KeyPressMsg{Code: '1', Text: "1"})
+	run(m, cmd)
+	if m.tr.OpenPrompt() != nil {
+		t.Fatal("YOLO must auto-submit a fully answered batch at the Submit tab")
+	}
+	if calls := strings.Join(k.seen(), "\n"); !strings.Contains(calls, `POST /answer {"answers":[{"QuestionID":"q1","Selected":["A"]},{"QuestionID":"q2","Selected":["B"]}],"id":"ask-yolo"}`) {
+		t.Fatalf("answer call missing:\n%s", calls)
+	}
+}
+
+// YOLO auto-submit fires only when nothing is unanswered: a question skipped
+// along the way still parks on the Submit tab for review.
+func TestAskYoloWaitsOnIncompleteBatch(t *testing.T) {
+	m, _ := testModel(t)
+	m.status.ToolApprovalMode = "yolo"
+	apply(m, singleChoiceAsk())
+	_, cmd := m.Update(tea.KeyPressMsg{Code: tea.KeyRight})
+	run(m, cmd)
+	if m.tr.OpenPrompt() == nil {
+		t.Fatal("moving to q2 must not submit with q1 unanswered")
+	}
+	_, cmd = m.Update(tea.KeyPressMsg{Code: '1', Text: "1"})
+	run(m, cmd)
+	if m.tr.OpenPrompt() == nil {
+		t.Fatal("YOLO must not auto-submit an incomplete batch")
+	}
+}
+
+// Outside YOLO the Submit tab still needs its explicit Enter even when the
+// batch is fully answered.
+func TestAskNonYoloStillWaitsOnSubmit(t *testing.T) {
+	m, _ := testModel(t)
+	apply(m, singleChoiceAsk())
+	_, cmd := m.Update(tea.KeyPressMsg{Code: '1', Text: "1"})
+	run(m, cmd)
+	_, cmd = m.Update(tea.KeyPressMsg{Code: '1', Text: "1"})
+	run(m, cmd)
+	if m.tr.OpenPrompt() == nil {
+		t.Fatal("non-YOLO must stop at the Submit tab for the confirmation Enter")
+	}
+	run(m, press(m, "enter"))
+	if m.tr.OpenPrompt() != nil {
+		t.Fatal("Enter on the Submit tab must submit the batch")
+	}
+}
+
 // An @-token opens the menu as it is typed, and the chosen item replaces the
 // token the kernel named — counted in UTF-16, so a CJK line splices where the
 // kernel meant.

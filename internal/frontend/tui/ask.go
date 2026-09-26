@@ -39,6 +39,15 @@ func (st *askState) onSubmitTab(n int) bool { return n > 1 && st.tab == n }
 
 func (st *askState) answered(i int) bool { return len(st.picks[i]) > 0 || st.custom[i] != "" }
 
+func (st *askState) allAnswered(n int) bool {
+	for i := range n {
+		if !st.answered(i) {
+			return false
+		}
+	}
+	return true
+}
+
 // answerAsk takes a key while a question panel is open.
 func (m *model) answerAsk(it *Item, k string) (tea.Cmd, bool) {
 	st := m.openAsk(it)
@@ -59,7 +68,7 @@ func (m *model) answerAsk(it *Item, k string) (tea.Cmd, bool) {
 		return nil, true
 	case "right":
 		st.tab, st.cursor = min(st.tab+1, tabs-1), 0
-		return nil, true
+		return m.askAutoSubmitIfDone(it), true
 	}
 	if st.onSubmitTab(len(qs)) {
 		if k == "enter" {
@@ -152,6 +161,16 @@ func (m *model) nextQuestion(it *Item) tea.Cmd {
 		return m.sendAsk(it)
 	}
 	st.tab, st.cursor = st.tab+1, 0
+	return m.askAutoSubmitIfDone(it)
+}
+
+// askAutoSubmitIfDone commits the batch when the Submit tab is reached in YOLO
+// mode with every question answered: YOLO already skips confirmations, so the
+// Submit tab's Enter on a complete batch would be pure ceremony.
+func (m *model) askAutoSubmitIfDone(it *Item) tea.Cmd {
+	if m.status.ToolApprovalMode == "yolo" && m.ask.onSubmitTab(len(it.Ask.Questions)) && m.ask.allAnswered(len(it.Ask.Questions)) {
+		return m.sendAsk(it)
+	}
 	return nil
 }
 
