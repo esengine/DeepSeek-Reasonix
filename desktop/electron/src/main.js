@@ -13,6 +13,7 @@ const { installTray } = require("./tray");
 const { instanceID, profileFor } = require("./instance");
 const { installApplicationMenu, installContextMenu } = require("./menu");
 const { installFullScreenKey } = require("./fullscreen");
+const { installReload } = require("./reload");
 const { externalTarget } = require("./links");
 const { reveal } = require("./reveal");
 const { appIcon } = require("./appicon");
@@ -63,6 +64,7 @@ let tray = null;
 let grants = null;
 let browserViews = null;
 let browserRelay = null;
+let reload = null;
 
 async function boot() {
   // Which build this is belongs to the shell: inside the bundle the kernel's
@@ -100,6 +102,7 @@ async function boot() {
   });
   installContextMenu(win.webContents, win);
   installFullScreenKey(win.webContents, win);
+  reload = installReload(win.webContents, win);
   win.once("ready-to-show", () => win.show());
   // No icon, no backgrounding: the close button can only hide the window where
   // something is left that brings it back.
@@ -181,6 +184,7 @@ function onWindowClose(event) {
 function showWindow() {
   if (!win || win.isDestroyed()) return;
   if (win.isMinimized()) win.restore();
+  reload?.revive();
   win.show();
   win.focus();
 }
