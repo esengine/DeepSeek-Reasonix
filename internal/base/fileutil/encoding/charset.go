@@ -94,8 +94,15 @@ type Cut struct {
 // says was cut; what no charset restores is still read as GB18030, since a cut
 // can split a code-page character anywhere.
 func DecodeOutput(data []byte, cut Cut) []byte {
-	if edges := cut.trim(data); utf8.Valid(edges) {
+	edges := cut.trim(data)
+	if utf8.Valid(edges) {
 		return edges
+	}
+	// A process stopped mid-write ends inside a character no bound cut. That is
+	// still UTF-8 when it is the only invalid part and a multi-byte UTF-8
+	// character already appeared; ASCII alone proves nothing.
+	if whole := TrimPartialRune(edges); len(whole) < len(edges) && utf8.Valid(whole) && utf8.RuneCount(whole) < len(whole) {
+		return whole
 	}
 	k, _, text := sniff(data, true)
 	if text != nil {
