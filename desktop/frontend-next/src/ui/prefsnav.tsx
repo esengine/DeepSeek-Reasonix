@@ -213,6 +213,9 @@ export const SETTINGS: SettingEntry[] = [
   { section: "tools", anchor: "rules", title: "明确的规则", scope: "machine", apply: "runtime-rebuild", keywords: ["permissions", "允许", "拒绝", "配方"] },
   { section: "tools", anchor: "sandbox", title: "沙箱", scope: "machine", apply: "runtime-rebuild", keywords: ["隔离", "联网", "写权限", "ssh-agent"] },
   { section: "tools", anchor: "shell", title: "命令执行程序", scope: "machine", apply: "runtime-rebuild", keywords: ["bash", "powershell", "解释器"] },
+  // The tools are bound while a runtime is assembled, and the save rebuilds this
+  // one. The shared [browser] enabled key belongs to the 1.x command line.
+  { section: "tools", anchor: "browser-tools", title: "内置浏览器", scope: "machine", apply: "runtime-rebuild", keywords: ["browser", "网页", "chrome", "浏览器工具"] },
 
   // The four blocks below carry a scope control of their own, and the kernel
   // takes that choice as a parameter — hook.Scope, McpInstallScope, the skill

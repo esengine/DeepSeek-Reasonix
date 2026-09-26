@@ -227,7 +227,7 @@ func (b *builder) wireTools() error {
 		t.reg.Add(script.New())
 	}
 	b.wireMCP()
-	t.browser = bindMachineTools(t.reg, cfg.Browser, root, opts.BrowserSession)
+	t.browser = bindMachineTools(t.reg, cfg, root, opts.BrowserSession)
 	b.timer.mark("mcp")
 
 	t.maxSteps = max(opts.MaxSteps, 0)

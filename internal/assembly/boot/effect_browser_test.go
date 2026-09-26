@@ -124,10 +124,21 @@ executable = "/nonexistent/chrome"`, []func(string) *provider.ToolCall{
 }
 
 func TestEffectDisabledBrowserLeavesTheSchema(t *testing.T) {
-	reqs := buildBrowserEffect(t, "[browser]\nenabled = false", nil)
+	reqs := buildBrowserEffect(t, "[tools]\nbrowser_tools = false", nil)
 	for _, name := range BrowserToolNames() {
 		if toolNames(reqs[0])[name] {
 			t.Fatalf("%s is in the schema with the browser disabled", name)
+		}
+	}
+}
+
+// [browser] enabled belongs to the 1.x command line, which writes false on
+// every save of the shared file; it must not take the tools away here.
+func TestEffectSharedBrowserKeyLeavesTheToolsBound(t *testing.T) {
+	reqs := buildBrowserEffect(t, "[browser]\nenabled = false", nil)
+	for _, name := range BrowserToolNames() {
+		if !toolNames(reqs[0])[name] {
+			t.Fatalf("%s is missing from the schema: %v", name, toolSchemaNames(reqs[0].Tools))
 		}
 	}
 }

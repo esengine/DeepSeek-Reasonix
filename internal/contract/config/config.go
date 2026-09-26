@@ -1370,6 +1370,7 @@ type ToolsConfig struct {
 	Shell                    ShellConfig          `toml:"shell"`
 	SystemOne                SystemOneConfig      `toml:"system_one"`
 	ProtectChangedFiles      *bool                `toml:"protect_changed_files"`
+	BrowserTools             *bool                `toml:"browser_tools"`
 	// MCPLoad maps a server name to "always" or "deferred", overriding what
 	// the server's own declaration says.
 	MCPLoad map[string]string `toml:"mcp_load"`
@@ -1581,7 +1582,6 @@ func Default() *Config {
 		// LSP tools on by default, but dormant until a language server is on PATH;
 		// a missing server yields an install hint rather than an error.
 		LSP:       LSPConfig{Enabled: true},
-		Browser:   BrowserConfig{Enabled: true},
 		Network:   NetworkConfig{ProxyMode: netclient.ModeAuto},
 		Providers: deepSeekDefaultProviders(),
 	}

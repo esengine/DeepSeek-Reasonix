@@ -70,3 +70,11 @@ export interface ConfigRepair {
   backup: string;
   problem: ConfigProblem | null;
 }
+
+// The built-in browser tools as the user file holds them, beside what this
+// workspace will run with: a project file may set the same key and outrank it.
+export interface BrowserToolsSettings {
+  enabled: boolean;
+  effective: boolean;
+  path: string;
+}

@@ -362,7 +362,8 @@ func RenderTOMLForScope(c *Config, scope RenderScope) string {
 	fmt.Fprintf(&b, "bash_timeout_seconds = %d   # foreground safety cap; set 0 for no tool-local cap\n", c.BashTimeoutSeconds())
 	fmt.Fprintf(&b, "mcp_startup_timeout_seconds = %d   # background initialize + tools/list safety cap; per-plugin overrides may raise it\n", c.MCPStartupTimeoutSeconds())
 	fmt.Fprintf(&b, "mcp_call_timeout_seconds = %d   # default MCP call safety cap; per-plugin/tool overrides may raise it\n", c.MCPCallTimeoutSeconds())
-	fmt.Fprintf(&b, "protect_changed_files = %v   # refuse a whole-file write over a change made since the agent last saw the file\n\n", c.Tools.ChangedFilesProtected())
+	fmt.Fprintf(&b, "protect_changed_files = %v   # refuse a whole-file write over a change made since the agent last saw the file\n", c.Tools.ChangedFilesProtected())
+	fmt.Fprintf(&b, "browser_tools = %v   # built-in browser tools; the browser starts on first use\n\n", c.Tools.BrowserToolsEnabled())
 	renderMCPLoadSection(&b, c.Tools.MCPLoad)
 
 	b.WriteString("[tools.background_jobs]\n")
@@ -826,7 +827,8 @@ func RenderTOMLProjectDelta(c *Config) string {
 		(c.Tools.BashTimeoutSeconds != nil && *c.Tools.BashTimeoutSeconds != 0) ||
 		(c.Tools.MCPStartupTimeoutSeconds != nil && *c.Tools.MCPStartupTimeoutSeconds > 0) ||
 		(c.Tools.MCPCallTimeoutSeconds != nil && *c.Tools.MCPCallTimeoutSeconds > 0) ||
-		c.Tools.ProtectChangedFiles != nil {
+		c.Tools.ProtectChangedFiles != nil ||
+		c.Tools.BrowserTools != nil {
 		b.WriteString("[tools]\n")
 		if len(c.Tools.Enabled) > 0 {
 			fmt.Fprintf(&b, "enabled = %s\n", renderStringArray(c.Tools.Enabled))
@@ -842,6 +844,9 @@ func RenderTOMLProjectDelta(c *Config) string {
 		}
 		if c.Tools.ProtectChangedFiles != nil {
 			fmt.Fprintf(&b, "protect_changed_files = %v\n", *c.Tools.ProtectChangedFiles)
+		}
+		if c.Tools.BrowserTools != nil {
+			fmt.Fprintf(&b, "browser_tools = %v\n", *c.Tools.BrowserTools)
 		}
 		b.WriteString("\n")
 	}

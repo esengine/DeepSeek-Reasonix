@@ -240,8 +240,8 @@ type MCPControl interface {
 }
 
 // RuntimeSettings covers the machine-facing settings a session runs under —
-// network, shell, permissions, sandbox — plus repairing a config file that
-// failed to parse. None of it is a capability listing, so a pane that lists
+// network, shell, permissions, sandbox, browser tools — plus repairing a config
+// file that failed to parse. None of it is a capability listing, so a pane that lists
 // skills or MCP servers cannot reach a permission rule from the same port.
 type RuntimeSettings interface {
 	NetworkSettings() NetworkSettings
@@ -254,6 +254,8 @@ type RuntimeSettings interface {
 	RevokeSessionGrant(rule string) int
 	SandboxSettings() SandboxSettings
 	SaveSandboxSettings(in SandboxSettings) error
+	BrowserToolsSettings() BrowserToolsSettings
+	SaveBrowserToolsSettings(enabled bool) error
 	CompactionSettings() CompactionSettings
 	SaveCompactionSettings(softLimitTokens int) error
 	ConfigProblem() *ConfigProblem

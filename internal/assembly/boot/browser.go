@@ -15,15 +15,16 @@ import (
 // profile, and a profile admits one browser process.
 var browserPool = &browser.Pool{}
 
-// bindBrowser gives the browser tools a session when the browser is enabled:
+// bindBrowser gives the browser tools a session when [tools] browser_tools is on:
 // reused, the one the replaced runtime had, otherwise a new one. Which browser
 // runs is found at first use, so the schema answers to the config alone and a
 // machine without one hears browser.engine_missing then.
-func bindBrowser(reg *tool.Registry, cfg config.BrowserConfig, root string, reused *browser.Session) *browser.Session {
+func bindBrowser(reg *tool.Registry, conf *config.Config, root string, reused *browser.Session) *browser.Session {
 	profiles := config.BrowserProfilesDir()
-	if !cfg.Enabled || root == "" || profiles == "" {
+	if !conf.Tools.BrowserToolsEnabled() || root == "" || profiles == "" {
 		return nil
 	}
+	cfg := conf.Browser
 	session := reused
 	if session == nil {
 		session = browser.NewSession(browser.Config{

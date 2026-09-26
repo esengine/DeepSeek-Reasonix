@@ -35,7 +35,7 @@ export type { AccountState, AccountUser, ApprovalMode, ApprovalVerdict, Capabili
 import type { ExecutionGraphRead, TrajectoryRead, WireEvent } from "./wire";
 import type { PluginExport, PluginInstallRequest, PluginPackage, PluginPlan } from "./plugin";
 import type { Appearance, ThemeImport, ThemePack } from "./look";
-import type { ConfigProblem, ConfigRepair, PermissionLists, PermissionRules, SandboxSettings } from "./boundary";
+import type { BrowserToolsSettings, ConfigProblem, ConfigRepair, PermissionLists, PermissionRules, SandboxSettings } from "./boundary";
 import type { Protocol, ProviderCheck, ProviderDraft, ProviderEdit, ProviderEntry, ProviderModelCheck, ProviderModelCheckRequest, ProviderProbe, ProviderSetup } from "./provider";
 export type { Protocol, ProviderCheck, ProviderDraft, ProviderEdit, ProviderEntry, ProviderModelCheck, ProviderModelCheckRequest, ProviderProbe, ProviderSetup } from "./provider";
 import type { StoragePlan, StorageState } from "./storage";
@@ -209,6 +209,9 @@ export interface AgentPort {
   revokeSessionGrant(rule: string): Promise<PermissionRules>;
   sandbox(): Promise<SandboxSettings>;
   saveSandbox(s: SandboxSettings): Promise<SandboxSettings>;
+  browserTools(): Promise<BrowserToolsSettings>;
+  // Writes the user file, then rebuilds: the tools are bound while assembling.
+  saveBrowserTools(enabled: boolean): Promise<BrowserToolsSettings>;
   // null in a browser tab: there is no window to keep running.
   trayPrefs(): Promise<TrayPrefs | null>;
   setTrayPrefs(icon: boolean, closeToTray: boolean): Promise<TrayPrefs | null>;

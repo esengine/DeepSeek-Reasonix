@@ -229,6 +229,13 @@ export const EN_SETTINGS: Record<string, string> = {
   "关闭后安装依赖、拉取仓库等操作都会失败，这正是该选项的用途": "With this off, installing dependencies and cloning repositories will fail — which is what it is for",
   "保护被改动的文件": "Protect changed files",
   "模型读过或写过的文件若之后被你或其他程序改动，它整文件覆盖时会被拒绝，需要先重新读取": "If a file the model read or wrote is changed afterwards by you or another program, a whole-file overwrite is refused until the model reads it again",
+  "内置浏览器": "Built-in browser",
+  "agent 用来打开和操作网页的工具。该开关单独保存，不受命令行版本浏览器设置的影响。修改会重建运行时，任务运行期间无法变更。": "The tools the agent uses to open and operate web pages. This switch is stored on its own and is not affected by the command-line version's browser setting. Changing it rebuilds the runtime and cannot be done while a task is running.",
+  "无法读取内置浏览器设置。": "Could not read the built-in browser setting.",
+  "启用内置浏览器": "Enable the built-in browser",
+  "agent 可以打开网页、读取内容并操作页面；浏览器在第一次使用时才启动。关闭后这些工具不会出现在工具列表中": "The agent can open web pages, read them and operate them; the browser only starts the first time it is used. When off, these tools are not in the tool list",
+  "当前项目的配置文件开启了它，此工作区仍会提供内置浏览器。": "This project's config file turns it on, so this workspace still has the built-in browser.",
+  "当前项目的配置文件关闭了它，此工作区不会提供内置浏览器。": "This project's config file turns it off, so this workspace has no built-in browser.",
 
   "宣告做完": "Claims it is done",
   "还在做": "Still working",
