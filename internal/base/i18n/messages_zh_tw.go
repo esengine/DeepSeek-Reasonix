@@ -125,6 +125,7 @@ var ChineseTraditional = Messages{
 	ApprovalNeededFmt:               "需要核准：%s",
 	ApprovalNeededWithSubjectFmt:    "需要核准：%s %s",
 	AnswerNeededFmt:                 "需要回答：%s",
+	AnswerNeededFromFmt:             "需要回答（MCP %s）：%s",
 	ToolApprovalSourceFmt:           "來源: %s",
 	ToolApprovalBuiltIn:             "內建工具",
 	ToolApprovalImageUse:            "將讀取提供的圖片用於圖像理解。",
