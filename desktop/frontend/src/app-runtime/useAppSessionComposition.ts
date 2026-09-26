@@ -345,8 +345,8 @@ export function useAppSessionComposition(input: AppSessionCompositionInput) {
 
   const decisionSurface = useMemo((): AppDecisionSurfaceKind | null => projectDecisionSurface({
     approval: state.approval, ask: state.ask, mcpInteraction: state.mcpInteraction, extensionForm: state.extensionForm,
-    workspaceConflict, pendingClose, clearContextPending,
-  }), [clearContextPending, pendingClose, state.approval, state.ask, state.extensionForm, state.mcpInteraction, workspaceConflict]);
+    workspaceConflict, pendingClose, clearContextPending, remote: remoteSurfaceActive,
+  }), [clearContextPending, pendingClose, remoteSurfaceActive, state.approval, state.ask, state.extensionForm, state.mcpInteraction, workspaceConflict]);
   const visibleDecisionSurface = decisionSurface;
   // Navigation used to hide the entire composer until the controller/runtime
   // activation ticket and the transcript paint ticket both settled.  That made

@@ -391,6 +391,22 @@ await act(async () => {
 	ok(Boolean(document.querySelector(".prompt-shelf--ask")) && document.body.textContent?.includes("remote answer failed") === true && document.querySelector<HTMLButtonElement>(".prompt-shelf--ask .decision-confirm-bar__confirm")?.disabled === false, "a failed remote Ask answer preserves the card, surfaces the error, and re-enables retry"); failAnswer = false; await act(async () => { document.querySelector<HTMLButtonElement>(".prompt-shelf--ask .decision-confirm-bar__confirm")?.click(); await flush(); }); ok(tape.filter((entry) => entry.startsWith("answer:tab-remote-1:ask-7:")).length === 2 && !document.querySelector(".prompt-shelf--ask"), "a successful remote Ask retry resubmits the complete answer and clears the card");
 }
 
+// A CLI serve never binds desktop routing metadata, so its prompts carry no
+// runtimeEpoch; the serve fences on the epoch only when it has one.
+await act(async () => {
+  __emitMockRemoteTab("tab-remote-1", "event", { kind: "ask_request", turnId: "turn-main", ask: { id: "ask-serve", questions: [{ id: "q1", prompt: "Ship it?", options: [{ label: "ship" }, { label: "wait" }] }] } });
+  await flush();
+});
+{
+  ok(Boolean(document.querySelector(".prompt-shelf--ask")) && !document.body.textContent?.includes("exact request identity is unavailable"), "an ask without a runtime epoch is answerable, not refused as unidentified");
+  await act(async () => {
+    [...document.querySelectorAll<HTMLButtonElement>("button")].find((b) => b.textContent?.trim() === "ship")?.click();
+    await flush();
+  });
+  await act(async () => { document.querySelector<HTMLButtonElement>(".prompt-shelf--ask .decision-confirm-bar__confirm")?.click(); await flush(); });
+  ok(tape.some((entry) => entry.startsWith("answer:tab-remote-1:ask-serve:")) && !document.querySelector(".prompt-shelf--ask"), "the answer reaches the serve and the card clears");
+}
+
 await act(async () => {
   __emitMockRemoteTab("tab-remote-1", "event", { kind: "ask_request", turnId: "turn-main", runtimeEpoch: "runtime-main", ask: { id: "ask-custom", questions: [{ id: "q-custom", prompt: "Where?", options: [{ label: "staging" }] }] } });
   await flush();
