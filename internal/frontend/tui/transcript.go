@@ -49,7 +49,7 @@ type Item struct {
 	Tool     *eventwire.Tool
 	Children []eventwire.Tool
 	Running  bool
-	Fold     outputFold
+	Fold     outputFold // an ItemSay's thinking uses it too
 
 	// ItemApproval / ItemAsk. Verdict is how this screen settled it; empty
 	// while it is still open.
@@ -67,8 +67,8 @@ type Item struct {
 	Usage      *eventwire.Usage
 }
 
-// outputFold is how much of a finished shell call's output its row shows: a fixed
-// preview where the rows cannot be redrawn, else a preview that opens.
+// outputFold is how much of a finished shell call's output, or of an answer's
+// thinking, its row shows: fixed where the rows cannot be redrawn, else it opens.
 type outputFold int8
 
 const (

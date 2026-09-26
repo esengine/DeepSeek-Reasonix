@@ -116,6 +116,7 @@ func press(m *model, k string) tea.Cmd {
 		"esc":          {Code: tea.KeyEscape},
 		"ctrl+s":       {Code: 's', Mod: tea.ModCtrl},
 		"ctrl+c":       {Code: 'c', Mod: tea.ModCtrl},
+		"ctrl+o":       {Code: 'o', Mod: tea.ModCtrl},
 		"y":            {Code: 'y', Text: "y"},
 		"a":            {Code: 'a', Text: "a"},
 		"n":            {Code: 'n', Text: "n"},

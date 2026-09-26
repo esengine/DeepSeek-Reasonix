@@ -40,12 +40,12 @@ func renderItem(it *Item, width, shown int, hideRail bool) string {
 			if it.Reasoning == "" {
 				return ""
 			}
-			return "\n" + thoughtLine(it.ThoughtMs)
+			return "\n" + thought(it, width)
 		}
 		if shown >= len(it.Text) && shown > 0 {
 			return ""
 		}
-		return withThought(it, shown, renderSayPart(it.Text[shown:], shown == 0, width, hideRail))
+		return withThought(it, shown, width, renderSayPart(it.Text[shown:], shown == 0, width, hideRail))
 	case ItemTool:
 		return renderTool(it, width)
 	case ItemApproval:
@@ -84,15 +84,36 @@ func renderSayPart(text string, first bool, width int, hideRail bool) string {
 }
 
 // withThought puts the thinking marker above the first stretch of an answer.
-func withThought(it *Item, shown int, out string) string {
+func withThought(it *Item, shown, width int, out string) string {
 	if shown > 0 || it.Reasoning == "" {
 		return out
 	}
-	return "\n" + thoughtLine(it.ThoughtMs) + "\n" + out
+	return "\n" + thought(it, width) + "\n" + out
 }
 
-func thoughtLine(ms int64) string {
-	return termrender.Dim("  ▎ " + fmt.Sprintf(i18n.M.ChatThoughtForFmt, (ms+500)/1000))
+// thought is the thinking marker, and the thinking itself once a full-screen
+// row has been opened. The marker always sits on the row's second line.
+func thought(it *Item, width int) string {
+	mark := "▎"
+	switch it.Fold {
+	case foldShut:
+		mark = "▸"
+	case foldOpen:
+		mark = "▾"
+	}
+	hint := ""
+	if it.Fold != foldFixed {
+		hint = " (Ctrl+O)"
+	}
+	lines := []string{termrender.Dim("  " + mark + " " + fmt.Sprintf(i18n.M.ChatThoughtForFmt, (it.ThoughtMs+500)/1000) + hint)}
+	if it.Fold == foldOpen {
+		// Styled per row: the transcript is split into rows after rendering, and
+		// one style spanning several would reach only the first of them.
+		for l := range strings.SplitSeq(ansi.Wrap(strings.TrimSpace(it.Reasoning), max(width-6, 10), ""), "\n") {
+			lines = append(lines, termrender.Dim("    "+l))
+		}
+	}
+	return strings.Join(lines, "\n")
 }
 
 const (

@@ -111,9 +111,9 @@ type settledPrint struct {
 }
 
 // settledRow keeps a copy of the row to draw from. Full screen, a shell
-// call's output starts shut and can open later.
+// call's output and an answer's thinking start shut and can open later.
 func (m *model) settledRow(row Item, shown int) settledPrint {
-	if m.scr != nil && row.Kind == ItemTool {
+	if m.scr != nil && (row.Kind == ItemTool || row.Kind == ItemSay && row.Reasoning != "" && shown == 0) {
 		row.Fold = foldShut
 	}
 	return settledPrint{render: func(w int, hideRail bool) string { return renderItem(&row, w, shown, hideRail) }, row: &row}
@@ -162,6 +162,11 @@ func (b *block) foldable() bool {
 	return strings.Count(strings.TrimRight(r.Tool.Output, "\n"), "\n")+1 > shellPreviewLines
 }
 
+// thinks reports a block that carries an answer's thinking behind its marker.
+func (b *block) thinks() bool {
+	return b.row != nil && b.row.Kind == ItemSay && b.row.Fold != foldFixed
+}
+
 func (b *block) toggle() {
 	b.row.Fold = foldShut + foldOpen - b.row.Fold
 	b.lines = nil
@@ -178,17 +183,49 @@ func (m *model) toggleLatestShell() {
 	}
 }
 
-// blockEndingAt is the settled block whose last row is transcript row idx.
-func (m *model) blockEndingAt(idx int) *block {
+// toggleLatestThought opens or shuts the newest answer's thinking.
+func (m *model) toggleLatestThought() {
+	for i := range slices.Backward(m.scr.blocks) {
+		if b := &m.scr.blocks[i]; b.thinks() {
+			b.toggle()
+			return
+		}
+	}
+}
+
+// settleThought brings the thinking marker a streamed answer's first chunk
+// drew up to the answer as it settled: thinking can keep arriving after the
+// text starts, and the elapsed time is only known from the final frame.
+func (m *model) settleThought(it *Item) {
+	if m.scr == nil || it.Kind != ItemSay {
+		return
+	}
+	for i := range slices.Backward(m.scr.blocks) {
+		if b := &m.scr.blocks[i]; b.thinks() && b.row.ID == it.ID {
+			b.row.Reasoning, b.row.ThoughtMs, b.lines = it.Reasoning, it.ThoughtMs, nil
+			return
+		}
+	}
+}
+
+// foldAt is the settled block a click on transcript row idx opens or shuts:
+// a shell call on its last row, an answer's thinking on its marker row.
+func (m *model) foldAt(idx int) *block {
 	cw, hideRail, at := m.contentWidth(), m.scrollbarHidden(), 0
 	for i := range m.scr.blocks {
-		at += len(m.scr.blocks[i].at(cw, hideRail))
-		if at-1 == idx {
-			return &m.scr.blocks[i]
+		b := &m.scr.blocks[i]
+		start := at
+		at += len(b.at(cw, hideRail))
+		if at <= idx {
+			continue
 		}
-		if at > idx {
-			return nil
+		switch {
+		case b.foldable() && idx == at-1:
+			return b
+		case b.thinks() && idx == start+1:
+			return b
 		}
+		return nil
 	}
 	return nil
 }
@@ -386,6 +423,8 @@ func (m *model) scrollKey(k string) bool {
 		m.scr.follow = true
 	case "ctrl+b":
 		m.toggleLatestShell()
+	case "ctrl+o":
+		m.toggleLatestThought()
 	default:
 		return false
 	}
@@ -421,7 +460,7 @@ func (m *model) onMouse(msg tea.MouseMsg) tea.Cmd {
 			m.dragScrollbar(mouse.Y, h)
 			return nil
 		}
-		if b := m.blockEndingAt(s.yoff + mouse.Y); b != nil && b.foldable() {
+		if b := m.foldAt(s.yoff + mouse.Y); b != nil {
 			b.toggle()
 			return nil
 		}
