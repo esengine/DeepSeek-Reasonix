@@ -7,6 +7,10 @@ export function toolFailed(tool: Tool): boolean {
   return !!execution && ((!!execution.state && execution.state !== "completed") || (execution.exitCode ?? 0) !== 0);
 }
 
+export function toolChangedFile(tool: Tool): boolean {
+  return !!tool.diff || tool.added !== undefined || tool.removed !== undefined;
+}
+
 export function toolFailureLabel(tool: Tool): string {
   const execution = tool.execution;
   if ((execution?.exitCode ?? 0) !== 0) return `exit ${execution?.exitCode}`;

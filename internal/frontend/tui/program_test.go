@@ -112,16 +112,19 @@ func typeText(m *model, s string) {
 
 func press(m *model, k string) tea.Cmd {
 	codes := map[string]tea.KeyPressMsg{
-		"enter":     {Code: tea.KeyEnter},
-		"esc":       {Code: tea.KeyEscape},
-		"ctrl+s":    {Code: 's', Mod: tea.ModCtrl},
-		"ctrl+c":    {Code: 'c', Mod: tea.ModCtrl},
-		"y":         {Code: 'y', Text: "y"},
-		"a":         {Code: 'a', Text: "a"},
-		"n":         {Code: 'n', Text: "n"},
-		"down":      {Code: tea.KeyDown},
-		"ctrl+home": {Code: tea.KeyHome, Mod: tea.ModCtrl},
-		"ctrl+end":  {Code: tea.KeyEnd, Mod: tea.ModCtrl},
+		"enter":        {Code: tea.KeyEnter},
+		"esc":          {Code: tea.KeyEscape},
+		"ctrl+s":       {Code: 's', Mod: tea.ModCtrl},
+		"ctrl+c":       {Code: 'c', Mod: tea.ModCtrl},
+		"y":            {Code: 'y', Text: "y"},
+		"a":            {Code: 'a', Text: "a"},
+		"n":            {Code: 'n', Text: "n"},
+		"down":         {Code: tea.KeyDown},
+		"ctrl+home":    {Code: tea.KeyHome, Mod: tea.ModCtrl},
+		"ctrl+end":     {Code: tea.KeyEnd, Mod: tea.ModCtrl},
+		"shift+pgup":   {Code: tea.KeyPgUp, Mod: tea.ModShift},
+		"shift+pgdown": {Code: tea.KeyPgDown, Mod: tea.ModShift},
+		"shift+insert": {Code: tea.KeyInsert, Mod: tea.ModShift},
 	}
 	_, cmd := m.Update(codes[k])
 	return cmd
@@ -381,5 +384,25 @@ func TestPastedImageSendsItsReference(t *testing.T) {
 	run(m, press(m, "enter"))
 	if calls := strings.Join(k.seen(), "\n"); !strings.Contains(calls, `{"input":"what is this @.reasonix/attachments/shot.png"}`) {
 		t.Fatalf("submit missing the reference:\n%s", calls)
+	}
+}
+
+// ui.show_turn_usage = false keeps each request's receipt off the screen,
+// both while the answer above it still streams and once it has settled.
+func TestHiddenTurnUsageNeverReachesTheScreen(t *testing.T) {
+	usage := eventwire.Event{Kind: "usage", Usage: &eventwire.Usage{TotalTokens: 1200, PromptTokens: 1000, CompletionTokens: 200}}
+	for _, hide := range []bool{false, true} {
+		m, _ := testModel(t)
+		m.opts.HideTurnUsage = hide
+		m.tr.AddUser("go")
+		apply(m, eventwire.Event{Kind: "turn_started"}, eventwire.Event{Kind: "text", Text: "working"}, usage)
+		live := m.View().Content
+		apply(m, eventwire.Event{Kind: "message", Text: "working"}, eventwire.Event{Kind: "turn_done"})
+		settled := strings.Join(m.content(nil), "\n")
+		for when, screen := range map[string]string{"streaming": live, "settled": settled} {
+			if got := strings.Contains(screen, "1.2K tok"); got == hide {
+				t.Errorf("hide=%v %s: receipt shown = %v\n%s", hide, when, got, screen)
+			}
+		}
 	}
 }

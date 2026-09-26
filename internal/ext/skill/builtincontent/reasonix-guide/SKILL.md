@@ -94,9 +94,16 @@ CLI/Desktop Diagnostics → Commands; invoke `/name` in chat.
 
 ## Hooks
 
-### Events (11)
+### Events (14)
 
-`PreToolUse`, `PostToolUse`, `PermissionRequest`, `UserPromptSubmit`, `Stop`, `PostLLMCall`, `SessionStart`, `SessionEnd`, `SubagentStop`, `Notification`, `PreCompact`.
+`PreToolUse`, `PostToolUse`, `PostToolUseFailure`, `PermissionRequest`, `UserPromptSubmit`, `Stop`, `StopFailure`, `PostLLMCall`, `SessionStart`, `SessionEnd`, `SubagentStart`, `SubagentStop`, `Notification`, `PreCompact`.
+
+`SubagentStart` / `SubagentStop`:
+
+- Only a foreground `task` call fires them; `read_only_task`, `parallel_tasks`, `fleet`, skill sub-agents and background tasks do not.
+- Both carry `callId` to pair them. `SubagentStart` gets the task arguments in `toolArgs`.
+- `SubagentStop` fires on every end (answer, failure, cancel, refusal); `error` is set when there was no answer.
+- Neither can block: exit 2 only warns.
 
 **Blocking** (exit 2 can gate the loop): `PreToolUse`, `UserPromptSubmit`. Others warn or contribute context only.
 

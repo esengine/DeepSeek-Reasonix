@@ -572,7 +572,7 @@ func (h *Hub) routeDefault(w http.ResponseWriter, r *http.Request) {
 // prefix is stripped here so the runtime's own routes stay unprefixed.
 func (h *Hub) publish(rt *Runtime) {
 	if rt.remote != nil {
-		rt.handler = http.StripPrefix(runtimePrefix+rt.ID, remoteProxy(rt.remote.ep))
+		rt.handler = http.StripPrefix(runtimePrefix+rt.ID, refuseLocalOnly(remoteProxy(rt.remote.ep)))
 	} else {
 		// A local runtime a Hub publishes is driven by an interactive frontend,
 		// so that binding is completed here, not at whichever entry point made

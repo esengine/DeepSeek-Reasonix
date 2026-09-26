@@ -55,6 +55,10 @@ Reasonix 全局 `<Reasonix home>/.env`。项目 `.env`、home `.env`、继承的
 
 `/new` 或切换分支后，子 Agent 随父会话换到新 id。
 
+`SubagentStart` 与 `SubagentStop` 只包住前台 `task` 调用：`read_only_task`、`parallel_tasks`、
+`fleet`、skill 子 Agent 和后台任务都不会触发。两者都带调用 id（`callId`）；子 Agent
+无论回答、失败、被取消还是拒绝，`SubagentStop` 都会触发。两者都不能阻断，exit 2 只会警告。
+
 ```toml
 default_model = "deepseek-flash"   # 执行器；设 [agent].planner_model 可加规划器
 # language    = "zh"               # 界面语言；为空则按 $LANG / $REASONIX_LANG 自动检测
@@ -724,6 +728,13 @@ Reasonix 是一个 MCP 客户端。`[[plugins]]` 的 `type` 选择传输：`stdi
 程（`command`/`args`/`env`）；`http`（Streamable HTTP）连接远程 `url`，可带静态
 `headers`（`${VAR}` / `${VAR:-default}` 从环境展开，密钥不入文件）。
 `sse` 则兼容仍使用持久 GET 与 server 公布 POST endpoint 的旧版远程 server。
+
+`${REASONIX_WORKSPACE_ROOT}`（或 `${CLAUDE_PROJECT_DIR}`）展开为当前工作区的绝对路径，
+一条全局配置即可指明项目：
+
+```toml
+headers = { IJ_MCP_SERVER_PROJECT_PATH = "${REASONIX_WORKSPACE_ROOT}" }
+```
 
 远程 HTTP server 未配置静态 `Authorization` header 时，认证要求会显示为 **登录**。
 CLI 可运行 `reasonix mcp auth <name>`，桌面端则在 MCP 面板点击该 server 的 **登录**。

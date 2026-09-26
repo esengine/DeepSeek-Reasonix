@@ -23,8 +23,8 @@ type Options struct {
 	// MaxStepsKey names the explicit runtime control shown when the MaxSteps guard
 	// is hit. Empty defaults to the generic max_steps tool/runtime parameter.
 	MaxStepsKey string
-	// ReasoningByteLimit bounds a single stream's hidden reasoning bytes. Zero
-	// uses the default guard; a negative value disables only this client guard.
+	// ReasoningByteLimit bounds the hidden reasoning bytes one stream retains;
+	// it never stops generation. Zero uses the default; negative retains all.
 	// Provider output budgets are a separate protocol/model capability.
 	ReasoningByteLimit int
 	// MaxOutputTokens overrides the provider's configured/default total output

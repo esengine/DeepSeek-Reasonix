@@ -124,6 +124,109 @@ test("an unreachable kernel is an answer, not a crash", async () => {
   assert.equal(await dead.trayState(), null);
 });
 
+const { reveal } = require("../src/reveal.js");
+
+// A kernel that answers /workspace/locate as the test says, and a shell that
+// only records what it was asked to open.
+async function revealRig(answer, platform = process.platform) {
+  const asked = [];
+  const server = http.createServer((req, res) => {
+    asked.push(req.url);
+    const [status, body] = answer(new URL(req.url, "http://k"));
+    res.writeHead(status, { "content-type": "application/json" });
+    res.end(JSON.stringify(body));
+  });
+  await new Promise((r) => server.listen(0, "127.0.0.1", r));
+  const client = new StudioHost(`http://127.0.0.1:${server.address().port}`, "the-launch-credential");
+  const opened = [];
+  const shell = {
+    openPath: async (p) => (opened.push(["open", p]), ""),
+    showItemInFolder: (p) => opened.push(["select", p]),
+  };
+  return { asked, opened, run: (base, rel) => reveal(client, shell, base, rel, platform), close: () => server.close() };
+}
+
+const ROOT = path.resolve(os.tmpdir(), "rx-workspace");
+
+test("reveal opens only what the kernel located inside the pane's workspace", async () => {
+  const rig = await revealRig((url) => {
+    const rel = url.searchParams.get("path") ?? "";
+    if (url.pathname !== "/rt/r2/workspace/locate") return [404, { code: "", error: "no route" }];
+    if (rel.startsWith("..")) return [400, { code: "workspace.path_outside_tree", error: "outside" }];
+    return [200, { path: path.join(ROOT, ...rel.split("/").filter(Boolean)), dir: !rel.includes(".") }];
+  });
+  try {
+    assert.equal(await rig.run("/rt/r2", ""), null);
+    assert.equal(await rig.run("/rt/r2", "out/report 1.html"), null);
+    assert.equal(await rig.run("/rt/r2", "out/t620"), null);
+    const outside = await rig.run("/rt/r2", "../etc");
+    assert.equal(outside.code, "workspace.path_outside_tree");
+    // Every entry, the root included, is selected in its folder and never opened.
+    assert.deepEqual(rig.opened, [
+      ["select", ROOT],
+      ["select", path.join(ROOT, "out", "report 1.html")],
+      ["select", path.join(ROOT, "out", "t620")],
+    ]);
+    assert.equal(rig.asked[1], "/rt/r2/workspace/locate?path=out%2Freport%201.html");
+  } finally {
+    rig.close();
+  }
+});
+
+test("the page cannot steer reveal to a location the kernel did not name", async () => {
+  const rig = await revealRig((url) =>
+    url.searchParams.get("path") === "rel"
+      ? [200, { path: "relative/answer", dir: false }]
+      : [200, { path: path.join(ROOT, "a.exe"), dir: false }],
+  );
+  try {
+    for (const base of ["", "/etc", "http://evil.test", "/rt/r1/../../x", "/rt/r1/workspace/file?path=", "rt/r1"]) {
+      const why = await rig.run(base, "");
+      assert.ok(why && typeof why.error === "string", `accepted base ${base}`);
+    }
+    assert.deepEqual(rig.asked, [], "a refused base still reached the kernel");
+    assert.ok(await rig.run("/rt/r1", "rel"), "a relative answer was opened");
+    // A root answered as a file is still only selected: openPath would run it.
+    assert.equal(await rig.run("/rt/r1", ""), null);
+    assert.deepEqual(rig.opened, [["select", path.join(ROOT, "a.exe")]]);
+  } finally {
+    rig.close();
+  }
+});
+
+// A root that is an .app bundle, or a link to one, is a directory to stat and
+// an application to `open`: handing it to openPath would launch it.
+test("the workspace root is selected, never opened", async () => {
+  const rig = await revealRig(() => [200, { path: path.join(ROOT, "Probe.app"), dir: true }]);
+  try {
+    assert.equal(await rig.run("/rt/r1", ""), null);
+    assert.deepEqual(rig.opened, [["select", path.join(ROOT, "Probe.app")]]);
+  } finally {
+    rig.close();
+  }
+});
+
+// A remote kernel's answer can name a share or a device on this machine; on
+// Windows the shell would reach out to it just to select it.
+test("on Windows a share or device path from the kernel is refused", async () => {
+  const answers = ["\\\\attacker\\share\\x", "//attacker/share/x", "\\\\?\\C:\\x", "\\\\.\\pipe\\x", "C:relative", "\\??\\UNC\\attacker\\share\\x", "\\??\\C:\\x", "\\Windows\\x"];
+  let i = 0;
+  const rig = await revealRig(() => [200, { path: answers[i++], dir: false }], "win32");
+  try {
+    for (const answer of answers) {
+      const why = await rig.run("/rt/r1", "x");
+      assert.ok(why && typeof why.error === "string", `opened ${answer}`);
+    }
+    assert.deepEqual(rig.opened, []);
+    i = 0;
+    answers[0] = "C:\\work\\out\\x";
+    assert.equal(await rig.run("/rt/r1", "x"), null);
+    assert.deepEqual(rig.opened, [["select", "C:\\work\\out\\x"]]);
+  } finally {
+    rig.close();
+  }
+});
+
 const { hostBinary, computerHelper, pageDir } = require("../src/layout.js");
 
 // Packaged, both live in resources/ beside app.asar. Reading them from inside
@@ -695,4 +798,34 @@ test("the shell leaves for its X11 relaunch before it claims the instance lock",
     delete require.cache[main];
   }
   assert.deepEqual(calls, [["relaunch", ["--ozone-platform=x11", ...process.argv.slice(1)]], ["exit", 0]]);
+});
+
+test("F11 toggles full screen where no application menu binds it", () => {
+  const { installFullScreenKey } = require("../src/fullscreen.js");
+  const press = (over) => ({ type: "keyDown", key: "F11", control: false, alt: false, shift: false, meta: false, isAutoRepeat: false, ...over });
+  const rig = (platform) => {
+    let handler = null;
+    const state = { full: false, prevented: 0 };
+    const contents = { on: (name, fn) => { if (name === "before-input-event") handler = fn; } };
+    const window = { isFullScreen: () => state.full, setFullScreen: (v) => { state.full = v; } };
+    installFullScreenKey(contents, window, platform);
+    const send = (input) => handler?.({ preventDefault: () => { state.prevented += 1; } }, input);
+    return { state, send, bound: () => handler !== null };
+  };
+
+  for (const platform of ["linux", "win32"]) {
+    const { state, send } = rig(platform);
+    send(press());
+    assert.equal(state.full, true, `${platform}: F11 did not enter full screen`);
+    send(press({ type: "keyUp" }));
+    send(press({ isAutoRepeat: true }));
+    send(press({ control: true }));
+    send(press({ key: "F10" }));
+    assert.equal(state.full, true, `${platform}: something other than a fresh F11 press toggled`);
+    send(press());
+    assert.equal(state.full, false, `${platform}: F11 did not leave full screen`);
+    assert.equal(state.prevented, 2);
+  }
+  // macOS keeps its own full-screen control on the window menu and title bar.
+  assert.equal(rig("darwin").bound(), false);
 });

@@ -2236,6 +2236,35 @@ model = "x"
 	}
 }
 
+// The environment block names the interpreter the bash tool runs, which is not
+// the user's login shell; an unattributed "Shell:" line reads as the latter.
+func TestBuildEnvironmentBlockAttributesShellToBashTool(t *testing.T) {
+	isolateConfigHome(t)
+	t.Setenv("SHELL", "/usr/bin/fish")
+	dir := robustTempDir(t)
+	t.Chdir(dir)
+	writeFile(t, dir, "reasonix.toml", `
+default_model = "test-model"
+
+[agent]
+system_prompt = "BASE"
+
+[[providers]]
+name = "test-model"
+kind = "boot-token-profile-test"
+model = "x"
+`)
+
+	req, _ := captureTokenProfileSurface(t, "")
+	sys := systemMessage(req.Messages)
+	if !strings.Contains(sys, "\n- Shell used by the bash tool: ") {
+		t.Fatalf("environment block does not attribute the shell to the bash tool:\n%s", sys)
+	}
+	if strings.Contains(sys, "\n- Shell: ") || strings.Contains(sys, "fish") {
+		t.Fatalf("environment block states a shell the bash tool does not run:\n%s", sys)
+	}
+}
+
 func TestBuildSkipsEnvironmentBlockWhenDisabled(t *testing.T) {
 	isolateConfigHome(t)
 	dir := robustTempDir(t)

@@ -32,6 +32,12 @@ export interface HostPort {
    *  to open: the shell owns the dialog, the kernel owns which workspace runs,
    *  so the page carries one to the other. */
   pickFolder(startIn: string): Promise<string | null>;
+  /** Whether this shell can show a file in the platform's file manager. */
+  revealsFiles(): boolean;
+  /** Show an entry of the workspace behind the pane at base, "" being its
+   *  root. The shell asks the kernel where that is and selects only the answer;
+   *  null once shown, otherwise why it was not. */
+  revealPath(base: string, path: string): Promise<Refusal | null>;
   /** Whether this shell draws the agent's browser pages inside the window. */
   drawsBrowserViews(): boolean;
   /** Draw one of the agent's pages over rect, in on-screen coordinates, and
@@ -49,6 +55,13 @@ export interface HostPort {
   answerBrowserLogin(id: string, username: string, password: string): void;
   /** Proceed past the certificate this page was refused for, for this run. */
   trustBrowserCertificate(target: string): Promise<boolean>;
+}
+
+/** A kernel refusal as the shell hands it back: the code, and English fallback. */
+export interface Refusal {
+  code?: string;
+  error?: string;
+  params?: Record<string, string | number>;
 }
 
 export interface BrowserLoadFailure {
@@ -110,6 +123,7 @@ interface ElectronBridge {
   saveText(name: string, content: string): Promise<string>;
   saveBytes(name: string, bytes: Uint8Array): Promise<string>;
   pickFolder(startIn: string): Promise<string>;
+  revealPath?(base: string, path: string): Promise<Refusal | null>;
   showBrowserView?(target: string, rect: ViewRect): Promise<void>;
   hideBrowserView?(): Promise<void>;
   controlBrowserView?(target: string, action: string): Promise<void>;
@@ -167,6 +181,12 @@ class ElectronHost implements HostPort {
   pickFolder(startIn: string) {
     return this.api.pickFolder(startIn);
   }
+  revealsFiles() {
+    return typeof this.api.revealPath === "function";
+  }
+  revealPath(base: string, path: string) {
+    return this.api.revealPath?.(base, path) ?? Promise.resolve({ error: "this shell cannot show files" });
+  }
   // A shell older than the verbs has no views to draw, and says so by lacking them.
   drawsBrowserViews() {
     return typeof this.api.showBrowserView === "function";
@@ -221,6 +241,12 @@ class BrowserHost implements HostPort {
   }
   pickFolder() {
     return Promise.resolve(null);
+  }
+  revealsFiles() {
+    return false;
+  }
+  revealPath() {
+    return Promise.resolve({ error: "a browser tab cannot show files" });
   }
   drawsBrowserViews() {
     return false;

@@ -29,6 +29,9 @@ func resolveConfigAccessPathUnpinned(path string, userConfig bool) (string, erro
 		return "", fmt.Errorf("resolve config path %q: %w", path, err)
 	}
 	resolved, err := evalSymlinksAllowMissing(logical)
+	if err != nil && plainConfigEntry(logical) {
+		return logical, nil
+	}
 	if err != nil {
 		scope := "project"
 		if userConfig {
@@ -52,6 +55,20 @@ func resolveConfigAccessPathUnpinned(path string, userConfig bool) (string, erro
 	return resolved, nil
 }
 
+// plainConfigEntry reports whether path is absent or a non-link file. Such an
+// entry lives in its own directory whatever its ancestors resolve to, so a
+// cloud-drive mount that refuses canonicalization (Box Drive) need not
+// block it; a link still has to resolve before it is trusted.
+func plainConfigEntry(path string) bool {
+	info, err := os.Lstat(path)
+	if err != nil {
+		return os.IsNotExist(err)
+	}
+	return info.Mode()&os.ModeSymlink == 0 && !info.IsDir()
+}
+
+var evalSymlinks = filepath.EvalSymlinks
+
 // evalSymlinksAllowMissing canonicalizes every existing path component while
 // allowing a new file (and missing parent directories) to be created later.
 // A broken final symlink is not "missing": EvalSymlinks sees the link and
@@ -62,7 +79,7 @@ func evalSymlinksAllowMissing(path string) (string, error) {
 	var suffix []string
 	for {
 		if _, err := os.Lstat(current); err == nil {
-			resolved, err := filepath.EvalSymlinks(current)
+			resolved, err := evalSymlinks(current)
 			if err != nil {
 				return "", err
 			}

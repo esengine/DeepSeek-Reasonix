@@ -2,7 +2,9 @@ package config
 
 import (
 	"os"
+	"path/filepath"
 	"regexp"
+	"slices"
 	"strings"
 )
 
@@ -59,11 +61,47 @@ func (c *Config) expandVars(s string) string {
 	return expandVarsWithLookup(s, scopedEnvLookup(c.expansionEnv))
 }
 
-// ExpandedPlugin returns a copy of e with ${VAR} references expanded across the
-// command, args, env values, url, and header values — the fields Claude Code
-// also expands. The entry itself is left untouched.
-func (e PluginEntry) ExpandedPlugin() PluginEntry {
-	lookup := scopedEnvLookup(e.expansionEnv)
+// workspaceRootVars name the workspace a server runs for. The host owns their
+// value, so it outranks a process variable of the same name: a hook's child
+// process inherits its parent session's CLAUDE_PROJECT_DIR.
+var workspaceRootVars = []string{"REASONIX_WORKSPACE_ROOT", "CLAUDE_PROJECT_DIR"}
+
+// WorkspaceRootValue is the form of root a plugin entry sees for the workspace
+// variables: absolute and cleaned, symlinks left as the workspace was opened.
+func WorkspaceRootValue(root string) string {
+	root = strings.TrimSpace(root)
+	if root == "" {
+		return ""
+	}
+	abs, err := filepath.Abs(root)
+	if err != nil {
+		return filepath.Clean(root)
+	}
+	return abs
+}
+
+func workspaceEnvLookup(scoped map[string]string, root string) envLookup {
+	base := scopedEnvLookup(scoped)
+	root = WorkspaceRootValue(root)
+	if root == "" {
+		return base
+	}
+	return func(name string) (string, bool) {
+		if slices.Contains(workspaceRootVars, name) {
+			return root, true
+		}
+		return base(name)
+	}
+}
+
+// ExpandedPlugin is ExpandedPluginForRoot with no workspace.
+func (e PluginEntry) ExpandedPlugin() PluginEntry { return e.ExpandedPluginForRoot("") }
+
+// ExpandedPluginForRoot returns a copy of e with ${VAR} references expanded
+// across command, args, env values, url, and header values. With a root,
+// ${REASONIX_WORKSPACE_ROOT} and ${CLAUDE_PROJECT_DIR} name that workspace.
+func (e PluginEntry) ExpandedPluginForRoot(root string) PluginEntry {
+	lookup := workspaceEnvLookup(e.expansionEnv, root)
 	out := e
 	out.Command = expandVarsWithLookup(e.Command, lookup)
 	out.URL = expandVarsWithLookup(e.URL, lookup)

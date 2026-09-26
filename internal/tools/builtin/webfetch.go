@@ -58,6 +58,8 @@ func (webFetch) SnipHint() tool.SnipHint {
 	return tool.SnipHint{Head: 120, Tail: 12, HeadChars: 12000, TailChars: 2000}
 }
 
+var lookupFetchHost = net.DefaultResolver.LookupIPAddr
+
 // ssrfGuardedTransport refuses to connect to private, link-local, or unspecified
 // addresses — the SSRF surface a prompt-injected fetch would aim at (cloud
 // metadata at 169.254.169.254, RFC1918 internal services). Loopback is allowed:
@@ -67,28 +69,10 @@ func (webFetch) SnipHint() tool.SnipHint {
 func ssrfGuardedTransport(proxyURL string) *http.Transport {
 	dialer := &net.Dialer{Timeout: webFetchTimeout}
 
-	// directDialContext handles SSRF-protected direct connection (no proxy).
-	// It resolves DNS locally, checks resolved IPs against the SSRF blocklist,
-	// then dials the vetted IP directly to prevent DNS rebinding.
-	directDialContext := func(ctx context.Context, network, addr string) (net.Conn, error) {
-		host, port, err := net.SplitHostPort(addr)
-		if err != nil {
-			return nil, err
-		}
-		ips, err := net.DefaultResolver.LookupIPAddr(ctx, host)
-		if err != nil {
-			return nil, err
-		}
-		for _, ip := range ips {
-			if blockedFetchIP(ip.IP) {
-				return nil, fmt.Errorf("refusing to fetch internal address %s (resolves to %s)", host, ip.IP)
-			}
-		}
-		return dialer.DialContext(ctx, network, net.JoinHostPort(ips[0].IP.String(), port))
-	}
-
 	tr := &http.Transport{
-		DialContext: directDialContext,
+		DialContext: func(ctx context.Context, network, addr string) (net.Conn, error) {
+			return dialVettedAddress(ctx, dialer, network, addr)
+		},
 	}
 
 	if proxyURL != "" {
@@ -186,6 +170,41 @@ func ssrfGuardedTransport(proxyURL string) *http.Transport {
 	}
 
 	return tr
+}
+
+// dialVettedAddress resolves the host locally and dials a resolved address that
+// passes the SSRF blocklist, never the name, so DNS rebinding between the check
+// and the connect cannot reach an internal address.
+func dialVettedAddress(ctx context.Context, dialer *net.Dialer, network, addr string) (net.Conn, error) {
+	host, port, err := net.SplitHostPort(addr)
+	if err != nil {
+		return nil, err
+	}
+	ips, err := lookupFetchHost(ctx, host)
+	if err != nil {
+		return nil, err
+	}
+	// Each dial is pinned to one vetted address, so a blocked address in a
+	// mixed answer is skipped rather than fatal: a fake-ip resolver pairs a
+	// routable A with a unique-local AAAA for every public host.
+	var dialErr error
+	for _, ip := range ips {
+		if blockedFetchIP(ip.IP) {
+			continue
+		}
+		conn, err := dialer.DialContext(ctx, network, net.JoinHostPort(ip.IP.String(), port))
+		if err == nil {
+			return conn, nil
+		}
+		dialErr = err
+	}
+	if dialErr != nil {
+		return nil, dialErr
+	}
+	if len(ips) == 0 {
+		return nil, fmt.Errorf("no addresses for %s", host)
+	}
+	return nil, fmt.Errorf("refusing to fetch internal address %s (resolves to %s)", host, ips[0].IP)
 }
 
 type webFetchRoundTripper struct {

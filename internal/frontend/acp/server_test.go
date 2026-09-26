@@ -635,8 +635,8 @@ func TestServeLifecycle(t *testing.T) {
 		ir.AgentCapabilities.SessionCapabilities.Delete == nil {
 		t.Errorf("sessionCapabilities = %+v, want list/resume/close/delete", ir.AgentCapabilities.SessionCapabilities)
 	}
-	if ir.AgentCapabilities.PromptCapabilities.Image {
-		t.Errorf("image must not be advertised")
+	if !ir.AgentCapabilities.PromptCapabilities.Image {
+		t.Errorf("image should be advertised")
 	}
 	var extensions struct {
 		AgentCapabilities struct {

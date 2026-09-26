@@ -12,7 +12,9 @@ const { StudioHost } = require("./hostclient");
 const { installTray } = require("./tray");
 const { instanceID, profileFor } = require("./instance");
 const { installApplicationMenu, installContextMenu } = require("./menu");
+const { installFullScreenKey } = require("./fullscreen");
 const { externalTarget } = require("./links");
+const { reveal } = require("./reveal");
 const { appIcon } = require("./appicon");
 const layout = require("./layout");
 const { offerCleanup } = require("./legacy");
@@ -97,6 +99,7 @@ async function boot() {
     if (cause) dialog.showErrorBox(cause.title, cause.detail);
   });
   installContextMenu(win.webContents, win);
+  installFullScreenKey(win.webContents, win);
   win.once("ready-to-show", () => win.show());
   // No icon, no backgrounding: the close button can only hide the window where
   // something is left that brings it back.
@@ -275,6 +278,9 @@ ipcMain.handle("shell:open-external", (event, raw) => {
   const target = externalTarget(raw);
   if (target) void shell.openExternal(target);
 });
+ipcMain.handle("shell:reveal", (event, base, rel) =>
+  fromWindow(event) && client ? reveal(client, shell, String(base), String(rel)) : { code: "", error: "no window" },
+);
 
 // A dismissed dialog answers with "", which is what the page reads as "they
 // said no". Only a failure to write is an error.

@@ -31,6 +31,8 @@ type Options struct {
 	// Inline writes the conversation into the terminal's own scrollback
 	// instead of taking the full screen.
 	Inline bool
+	// HideTurnUsage keeps each request's token and cost receipt off the transcript.
+	HideTurnUsage bool
 }
 
 // Run drives the terminal until the user quits or ctx ends.
@@ -349,6 +351,10 @@ func (m *model) commit() tea.Cmd {
 		if it.Kind == ItemUser && it.Pending {
 			continue
 		}
+		if m.hidden(it) {
+			m.committed[it.ID] = true
+			continue
+		}
 		if it.Kind == ItemSay && !it.Done {
 			if chunk := m.settledChunk(it); chunk != nil {
 				out = append(out, settledPrint{render: chunk})
@@ -362,6 +368,12 @@ func (m *model) commit() tea.Cmd {
 		out = append(out, m.settledRow(*it, m.sayShown[it.ID]))
 	}
 	return m.publish(out)
+}
+
+// hidden is a row the configuration keeps off the screen. It still folds into
+// the transcript: a later frame of the same request restates it in place.
+func (m *model) hidden(it *Item) bool {
+	return it.Kind == ItemUsage && m.opts.HideTurnUsage
 }
 
 // settledChunk draws the part of a streaming answer that has become final

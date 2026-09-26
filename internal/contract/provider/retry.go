@@ -226,14 +226,14 @@ func bodyRejected(s int) bool {
 	return s == http.StatusBadRequest || s == http.StatusUnprocessableEntity
 }
 
-func transientErr(err error) bool {
-	if err == nil {
+// transientErr asks the caller's context whether it gave up, not the error: the
+// transport's own timeouts (response headers, dial) also satisfy
+// errors.Is(err, context.DeadlineExceeded) while the caller is still waiting.
+func transientErr(ctx context.Context, err error) bool {
+	if err == nil || ctx.Err() != nil {
 		return false
 	}
-	if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
-		return false
-	}
-	return true
+	return !errors.Is(err, context.Canceled)
 }
 
 func backoffDelay(attempt int, retryAfter time.Duration) time.Duration {
@@ -322,7 +322,7 @@ func SendWithRetry(ctx context.Context, httpClient *http.Client, opts SendOption
 		recordRequestAttempt(ctx)
 		resp, err := httpClient.Do(req)
 		if err != nil {
-			if !transientErr(err) {
+			if !transientErr(ctx, err) {
 				return nil, fmt.Errorf("%s: request failed: %w", opts.Provider, err)
 			}
 			lastErr = fmt.Errorf("%s: request failed: %w", opts.Provider, err)

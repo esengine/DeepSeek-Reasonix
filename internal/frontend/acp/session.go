@@ -269,7 +269,10 @@ func (s *service) sessionPrompt(ctx context.Context, raw json.RawMessage) (any, 
 	if sess == nil {
 		return nil, &RPCError{Code: ErrInvalidParams, Message: "session/prompt: unknown session " + p.SessionID}
 	}
-	text := FlattenPrompt(p.Prompt)
+	text, err := promptText(sess.cwd, p.Prompt)
+	if err != nil {
+		return nil, &RPCError{Code: ErrInvalidParams, Message: "session/prompt: " + err.Error()}
+	}
 	if text == "" {
 		return nil, &RPCError{Code: ErrInvalidParams, Message: "session/prompt: empty prompt"}
 	}
@@ -334,7 +337,10 @@ func (s *service) sessionSteer(_ context.Context, raw json.RawMessage) (any, err
 	if sess == nil {
 		return nil, &RPCError{Code: ErrInvalidParams, Message: sessionSteerMethod + ": unknown session " + p.SessionID}
 	}
-	text := FlattenPrompt(p.Prompt)
+	text, err := promptText(sess.cwd, p.Prompt)
+	if err != nil {
+		return nil, &RPCError{Code: ErrInvalidParams, Message: sessionSteerMethod + ": " + err.Error()}
+	}
 	if text == "" {
 		return nil, &RPCError{Code: ErrInvalidParams, Message: sessionSteerMethod + ": empty prompt"}
 	}

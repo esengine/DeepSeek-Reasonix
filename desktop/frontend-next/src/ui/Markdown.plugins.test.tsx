@@ -18,3 +18,13 @@ it("renders markdown on a card mounted after the highlighter arrived", async () 
   expect(container.querySelector("strong")).toBeTruthy();
   expect(container.querySelector("code")).toBeTruthy();
 });
+
+// A lone tilde is how Chinese (and plenty of English) writes a range, so two
+// ranges in one line must not strike out everything between them.
+it("reads a single tilde as a range, and only a doubled one as strikethrough", () => {
+  const { container } = render(<Markdown text={"转速 500~1000 或 2000~3000 转，~~旧值~~"} />);
+  const struck = container.querySelectorAll("del");
+  expect(struck).toHaveLength(1);
+  expect(struck[0].textContent).toBe("旧值");
+  expect(container.textContent).toContain("500~1000 或 2000~3000");
+});

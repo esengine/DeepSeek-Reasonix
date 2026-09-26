@@ -12,6 +12,7 @@ import (
 	"reasonix/internal/contract/provider"
 	"reasonix/internal/contract/tool"
 	"reasonix/internal/runtime/agent"
+	"reasonix/internal/safety/sandbox"
 )
 
 // Golden baseline for the unified extension kernel / Extension Protocol v2
@@ -195,6 +196,12 @@ func TestGoldenBaselineNoExtensions(t *testing.T) {
 	goldenDir, err := filepath.Abs(goldenBaselineDir)
 	if err != nil {
 		t.Fatalf("resolve golden dir: %v", err)
+	}
+
+	// The bash tool describes the interpreter it resolved, and the golden records
+	// the bash wording; a Windows host without bash legitimately renders another.
+	if sandbox.ResolveShell("", "", nil).Kind != sandbox.ShellBash {
+		t.Skip("golden records the bash tool's bash description; this host resolves another shell")
 	}
 
 	first := captureGoldenBaseline(t)

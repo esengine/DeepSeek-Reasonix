@@ -400,5 +400,5 @@ func grantHostCapabilities(srv *serve.Server) {
 	srv.AllowWorkspaceSwitch()
 	srv.AllowAccountAuth()
 	srv.AllowProviderEdit()
-	srv.AllowEditorOpen()
+	srv.AllowLocalDesktop()
 }

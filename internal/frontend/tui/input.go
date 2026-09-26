@@ -142,7 +142,7 @@ func (m *model) onKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 }
 
 // shortcutKey takes the keys that act without touching the composer: the
-// approval modes and the clipboard's image.
+// approval modes and the clipboard.
 func (m *model) shortcutKey(k string) (tea.Cmd, bool) {
 	switch {
 	case k == "shift+tab":
@@ -151,6 +151,8 @@ func (m *model) shortcutKey(k string) (tea.Cmd, bool) {
 		return m.toggleYolo(), true
 	case imagePasteKey(k):
 		return m.pasteClipboard(), true
+	case k == "shift+insert":
+		return m.pasteClipboardText(), true
 	}
 	return nil, false
 }

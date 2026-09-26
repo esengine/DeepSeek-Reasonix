@@ -21,7 +21,7 @@ func TestBackgroundBashWaitAndOutput(t *testing.T) {
 	defer m.Close()
 	ctx := jobs.WithManager(context.Background(), m)
 
-	start, err := bash{}.Execute(ctx, []byte(`{"command":"printf hello; sleep 0.3","run_in_background":true}`))
+	start, err := bash{}.Execute(ctx, []byte(`{"command":"echo hello; sleep 0.3","run_in_background":true}`))
 	if err != nil {
 		t.Fatalf("bash background: %v", err)
 	}

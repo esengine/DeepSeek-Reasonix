@@ -3,7 +3,7 @@ import { afterEach, expect, it, vi } from "vitest";
 import { cleanup, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import "./testkit";
-import type { ProviderEntry } from "../port/port";
+import { HttpError, type ProviderEntry } from "../port/port";
 import type { Port } from "./Providers";
 import { EditConn } from "./EditConn";
 
@@ -145,4 +145,24 @@ it("keeps the reasoning fields folded when the form was opened by hand", () => {
   };
   render(<EditConn entry={entry} port={port} busy="" setBusy={() => {}} onDone={() => {}} />);
   expect(screen.queryByRole("textbox", { name: /^推理档位/ })).toBeNull();
+});
+
+it("refreshes the list when the save landed but the conversation keeps its settings", async () => {
+  const editProvider = vi.fn(async () => {
+    throw new HttpError(409, "saved", { code: "provider.saved_while_running", error: "saved" });
+  });
+  const port = { editProvider } as unknown as Port;
+  const entry: ProviderEntry = {
+    name: "rich", kind: "openai", baseUrl: "https://gateway.invalid/v1",
+    models: ["alpha"], default: "alpha", hasKey: true, inUse: true, preset: false, canSetVision: false,
+  };
+  const onDone = vi.fn();
+  const onSaved = vi.fn();
+
+  render(<EditConn entry={entry} port={port} busy="" setBusy={() => {}} onDone={onDone} onSaved={onSaved} />);
+  await userEvent.click(screen.getByRole("button", { name: "保存" }));
+
+  await waitFor(() => expect(onSaved).toHaveBeenCalledTimes(1));
+  expect(onDone).not.toHaveBeenCalled();
+  expect(screen.getByText(/已保存。当前对话还有未结束的工作/)).toBeTruthy();
 });

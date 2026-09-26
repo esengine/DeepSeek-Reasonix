@@ -109,6 +109,7 @@ type Coordinator struct {
 	// behavior used by direct Coordinator callers.
 	plannerPolicy       agent.PlannerPolicy
 	plannerPlanApprover agent.PlannerPlanApprover
+	owed                owedOutcomes // executor runs the planner has not been shown
 }
 
 // NewCoordinator wires a planner provider (with its own session) to an executor.
@@ -193,6 +194,7 @@ func (c *Coordinator) ResetPlannerSession() {
 	}
 	next := sessionstore.NewSession(system)
 	c.plannerSess = next
+	c.owed = owedOutcomes{}
 	if c.plannerAgent != nil {
 		c.plannerAgent.SetSession(next)
 	}
@@ -325,14 +327,14 @@ func (c *Coordinator) Run(ctx context.Context, input string) error {
 	routeDetail := fmt.Sprintf("planner route=%s depth=%s reason=%s", decision.Route, decision.Depth, decision.Reason)
 	if decision.Route == agent.PlannerRouteExecutorOnly {
 		c.sink.Emit(event.Event{Kind: event.Phase, Text: c.executor.ProviderName() + " · executing", Detail: routeDetail, Source: event.UsageSourceExecutor})
-		return c.executor.Run(ctx, input)
+		return c.runExecutor(ctx, input, false)
 	}
 	c.sink.Emit(event.Event{Kind: event.Phase, Text: c.planner.Name() + " · planning", Detail: routeDetail, Source: event.UsageSourcePlanner, ModelRef: c.plannerModelRef})
 	plannerCtx := tool.WithoutGoalTurnRecorder(ctx)
 	if decision.MaxResearchRounds > 0 {
 		plannerCtx = agent.WithRunStepLimit(plannerCtx, decision.MaxResearchRounds, "planner research rounds")
 	}
-	plannerInput := plannerTurnInput(input, decision)
+	plannerInput := c.withExecutorOutcomes(plannerTurnInput(input, decision))
 	outcome, err := c.plan(plannerCtx, plannerInput)
 	if err != nil {
 		if ctx.Err() != nil {
@@ -355,7 +357,7 @@ func (c *Coordinator) Run(ctx context.Context, input string) error {
 				Source: event.UsageSourcePlanner,
 			})
 			c.sink.Emit(event.Event{Kind: event.Phase, Text: c.executor.ProviderName() + " · executing", Source: event.UsageSourceExecutor})
-			return c.executor.Run(ctx, input)
+			return c.runExecutor(ctx, input, false)
 		}
 		// Plan-only explicitly excludes execution, while plan-for-approval
 		// excludes it until the host records approval. Falling back directly
@@ -369,8 +371,9 @@ func (c *Coordinator) Run(ctx context.Context, input string) error {
 		// this turn.
 		c.sink.Emit(event.Event{Kind: event.Notice, Level: event.LevelWarn, Text: plannerFallbackNotice, Detail: "planner failed; running the executor without a plan: " + err.Error(), Source: event.UsageSourcePlanner, ModelRef: c.plannerModelRef})
 		c.sink.Emit(event.Event{Kind: event.Phase, Text: c.executor.ProviderName() + " · executing", Source: event.UsageSourceExecutor})
-		return c.executor.Run(ctx, input)
+		return c.runExecutor(ctx, input, false)
 	}
+	c.owed = owedOutcomes{}
 	return c.deliverPlan(ctx, input, outcome, decision)
 }
 
@@ -391,7 +394,7 @@ func (c *Coordinator) deliverPlan(ctx context.Context, input string, outcome pla
 			c.executor.SetPlanContract(&outcome.plan)
 		}
 		c.sink.Emit(event.Event{Kind: event.Phase, Text: c.executor.ProviderName() + " · executing", Source: event.UsageSourceExecutor})
-		return c.executor.Run(ctx, formatHandoffWithDecision(input, planText, decision, executorToolHandoffContext(c.executor)))
+		return c.runExecutor(ctx, formatHandoffWithDecision(input, planText, decision, executorToolHandoffContext(c.executor)), true)
 	}
 	runWithPlanApproval := func() error {
 		if c.plannerPlanApprover == nil {

@@ -49,12 +49,6 @@ const maxStreamRecoveries = 5
 const maxSamplingAttempts = maxStreamRecoveries + 1
 const maxExecutorHandoffNudges = 1
 
-const defaultReasoningByteLimit = 128 * 1024
-
-const finishReasonClientReasoningLimit = "client_reasoning_limit"
-
-var errReasoningByteLimitExceeded = errors.New("reasoning output exceeded client byte limit")
-
 // Renderer redraws the assistant's final-answer text as styled output. It is
 // applied only after a turn's text stream completes, so the user sees raw
 // markdown stream live, then a single redraw replaces it with formatted
@@ -238,10 +232,10 @@ type ToolHooks interface {
 	// streaming reasoning live when none is wired up.
 	PostLLMCall(ctx context.Context, reasoning string, turn int) string
 	HasPostLLMCall() bool
-	// SubagentStop fires when a `task` sub-agent finishes (foreground). PreCompact
-	// fires just before a compaction pass and returns extra summary guidance (its
-	// hooks' stdout) to fold into the summary prompt; "" when no hook contributes.
-	SubagentStop(ctx context.Context, last string)
+	// SubagentStart/Stop bracket a foreground `task`. PreCompact returns its hooks'
+	// stdout as summary guidance for the next compaction; "" when none contributes.
+	SubagentStart(ctx context.Context, callID string, args json.RawMessage)
+	SubagentStop(ctx context.Context, callID, last string, err error)
 	PreCompact(ctx context.Context, trigger string) string
 }
 
@@ -1176,6 +1170,7 @@ func (a *Agent) streamWithFrozen(ctx context.Context, turn int, sink event.Sink,
 	transformReasoning := a.svc.hooks != nil && a.svc.hooks.HasPostLLMCall()
 
 	var text, reasoning strings.Builder
+	var reasoningBytes int                  // streamed, including what the retention limit dropped
 	var signature string                    // provider-issued proof for the reasoning (Anthropic thinking)
 	var reasoningID, reasoningStatus string // Responses reasoning item id/status (meta chunk)
 	var calls []provider.ToolCall
@@ -1218,14 +1213,14 @@ func (a *Agent) streamWithFrozen(ctx context.Context, turn int, sink event.Sink,
 		select {
 		case <-ctx.Done():
 			stored, _ := finishReasoning()
-			usage = bestEffortStreamUsage(usage, text.Len(), reasoning.Len(), "interrupted")
+			usage = bestEffortStreamUsage(usage, text.Len(), reasoningBytes, "interrupted")
 			usage = provider.UsageWithRequestAttemptCount(ctx, usage)
 			return collect(stored, ctx.Err())
 		case c, ok := <-ch:
 			if !ok {
 				if err := ctx.Err(); err != nil {
 					stored, _ := finishReasoning()
-					usage = bestEffortStreamUsage(usage, text.Len(), reasoning.Len(), "interrupted")
+					usage = bestEffortStreamUsage(usage, text.Len(), reasoningBytes, "interrupted")
 					usage = provider.UsageWithRequestAttemptCount(ctx, usage)
 					return collect(stored, err)
 				}
@@ -1267,7 +1262,8 @@ func (a *Agent) streamWithFrozen(ctx context.Context, turn int, sink event.Sink,
 		thought.observe(chunk, time.Now())
 		switch chunk.Type {
 		case provider.ChunkReasoning:
-			reasoning.WriteString(chunk.Text)
+			retainReasoning(&reasoning, chunk.Text, reasoningBytes, a.reasoningByteLimit)
+			reasoningBytes += len(chunk.Text)
 			if chunk.Signature != "" {
 				signature = chunk.Signature
 			}
@@ -1281,13 +1277,6 @@ func (a *Agent) streamWithFrozen(ctx context.Context, turn int, sink event.Sink,
 			}
 			if chunk.Text != "" && !transformReasoning {
 				sink.Emit(event.Event{Kind: event.Reasoning, Text: chunk.Text})
-			}
-			if a.reasoningByteLimit > 0 && reasoning.Len() > a.reasoningByteLimit {
-				stored, _ := finishReasoning()
-				usage = bestEffortStreamUsage(usage, text.Len(), reasoning.Len(), finishReasonClientReasoningLimit)
-				usage = provider.UsageWithRequestAttemptCount(ctx, usage)
-				a.storeLatestRequestUsage(usage)
-				return collect(stored, errReasoningByteLimitExceeded)
 			}
 		case provider.ChunkText:
 			text.WriteString(chunk.Text)
@@ -1341,7 +1330,7 @@ func (a *Agent) streamWithFrozen(ctx context.Context, turn int, sink event.Sink,
 		case provider.ChunkError:
 			if provider.IsStreamInterrupted(chunk.Err) {
 				stored, _ := finishReasoning()
-				usage = bestEffortStreamUsage(usage, text.Len(), reasoning.Len(), "interrupted")
+				usage = bestEffortStreamUsage(usage, text.Len(), reasoningBytes, "interrupted")
 				usage = provider.UsageWithRequestAttemptCount(ctx, usage)
 				st := collect(stored, chunk.Err)
 				st.interrupted = true
@@ -1349,7 +1338,7 @@ func (a *Agent) streamWithFrozen(ctx context.Context, turn int, sink event.Sink,
 			}
 			stored, _ := finishReasoning()
 			if errors.Is(chunk.Err, context.Canceled) || errors.Is(chunk.Err, context.DeadlineExceeded) {
-				usage = bestEffortStreamUsage(usage, text.Len(), reasoning.Len(), "interrupted")
+				usage = bestEffortStreamUsage(usage, text.Len(), reasoningBytes, "interrupted")
 			}
 			usage = provider.UsageWithRequestAttemptCount(ctx, usage)
 			return collect(stored, chunk.Err)
@@ -1995,8 +1984,6 @@ func finishReasonMessage(u *provider.Usage) (string, bool) {
 	switch u.FinishReason {
 	case "length":
 		return "response truncated: hit max output tokens", true
-	case finishReasonClientReasoningLimit:
-		return "response stopped: hit the client reasoning safety limit", true
 	case "content_filter":
 		return "response blocked by content filter", true
 	case "repetition_truncation":

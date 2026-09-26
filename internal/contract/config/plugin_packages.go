@@ -191,6 +191,7 @@ func pluginPackageCommand(root, command string) string {
 
 func pluginPackageEnv(installed InstalledPackage, workspaceRoot string, env map[string]string) map[string]string {
 	root := installed.Root
+	workspaceRoot = WorkspaceRootValue(workspaceRoot)
 	out := pluginPackageWorkspaceMap(root, workspaceRoot, env)
 	if out == nil {
 		out = map[string]string{}
@@ -208,6 +209,7 @@ func pluginPackageEnv(installed InstalledPackage, workspaceRoot string, env map[
 
 func pluginPackageWorkspaceValue(root, workspaceRoot, value string) string {
 	value = pluginPackageValue(root, value)
+	workspaceRoot = WorkspaceRootValue(workspaceRoot)
 	value = expandPluginPathVar(value, "${CLAUDE_PROJECT_DIR}", workspaceRoot)
 	return expandPluginPathVar(value, "$CLAUDE_PROJECT_DIR", workspaceRoot)
 }

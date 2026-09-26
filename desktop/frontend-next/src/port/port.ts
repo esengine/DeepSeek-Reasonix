@@ -313,6 +313,12 @@ export interface AgentPort {
    *  one it found, so a window with several installed can say. It refuses with
    *  a code rather than doing nothing when there is none. */
   openInEditor(): Promise<{ editor: string; root: string }>;
+  /** Whether this window can show a workspace entry in the system file manager:
+   *  only a shell on the kernel's own machine can. */
+  revealsFiles(): boolean;
+  /** Show a workspace entry, "" being the root, in the system file manager.
+   *  Refuses with the kernel's code for anything outside the workspace. */
+  revealInFileManager(path: string): Promise<void>;
   sessions(): Promise<SessionEntry[]>;
   resume(path: string): Promise<void>;
   newSession(): Promise<void>;

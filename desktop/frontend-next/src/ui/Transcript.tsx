@@ -18,7 +18,7 @@ import { UserCard } from "./cards/UserCard";
 import { NoticeCard } from "./cards/NoticeCard";
 import { RememberCard } from "./cards/RememberCard";
 import { ExtensionCard } from "./cards/ExtensionCard";
-import { toolFailed } from "./cards/outcome";
+import { toolChangedFile, toolFailed } from "./cards/outcome";
 import { drawn, transcriptRows } from "./turnrows";
 import { opensTurn, useBlocks } from "./blocks";
 import { Rail, type RailMark } from "./Rail";
@@ -584,7 +584,8 @@ const ActivityGroup = memo(function ActivityGroup({
   // which unmounts it. State kept inside would be lost at exactly that moment.
   const gid = items[0]?.id ?? "";
   const live = useContext(LiveWork).has(gid);
-  const start = useStartsOpen("activity", running || live);
+  const changed = items.some((item) => item.t === "tool" && toolChangedFile(item.tool));
+  const start = useStartsOpen("activity", running || live, false, changed);
   const open = opened[gid] ?? start;
   const setOpen = useCallback(
     (next: boolean) => onOpened((all) => (all[gid] === next ? all : { ...all, [gid]: next })),

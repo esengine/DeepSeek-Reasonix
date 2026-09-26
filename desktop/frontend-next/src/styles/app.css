@@ -2965,14 +2965,14 @@
   .msearch input:focus { outline: 2px solid var(--focus); outline-offset: 1px }
   .msearch .cnt { flex: none; font: var(--w-reg) var(--fs-meta) var(--mono); color: var(--faint) }
 
-  .vway { display: flex; align-items: center; gap: 10px; padding: 2px 12px 10px;
+  .vway { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 10px; padding: 2px 12px 10px;
     border-bottom: 1px solid var(--hair) }
   .vway .lb { font: var(--w-reg) var(--fs-meta) var(--ui); color: var(--faint); flex: none }
 
   .vway .seg { flex: none; width: auto; flex-wrap: nowrap }
   .vway .seg button { flex: none; min-width: 0; padding: 4px 12px; white-space: nowrap;
     font: var(--w-reg) var(--fs-meta) var(--ui) }
-  .vway .why { font: var(--w-reg) var(--fs-meta) var(--ui); color: var(--ghost); min-width: 0 }
+  .vway .why { flex: 1 1 100%; font: var(--w-reg) var(--fs-meta) var(--ui); color: var(--ghost); min-width: 0 }
 
   .menu .mi.head {
     display: flex; align-items: baseline; gap: 8px; padding: 7px 10px 4px; cursor: default;

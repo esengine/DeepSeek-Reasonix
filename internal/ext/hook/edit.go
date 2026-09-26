@@ -145,7 +145,13 @@ func samplePayload(event Event, cwd string) Payload {
 		}
 	case UserPromptSubmit:
 		p.Prompt = "把这个仓库跑一遍测试"
-	case Stop, StopFailure, SubagentStop:
+	case SubagentStart:
+		p.CallID = "call_1"
+		p.ToolArgs = json.RawMessage(`{"prompt":"把这个仓库跑一遍测试"}`)
+	case SubagentStop:
+		p.CallID = "call_1"
+		p.LastAssistant = "测试全绿。"
+	case Stop, StopFailure:
 		p.LastAssistant = "测试全绿。"
 		p.Turn = 1
 	case PostLLMCall:

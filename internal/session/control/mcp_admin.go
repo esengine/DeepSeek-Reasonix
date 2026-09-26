@@ -312,7 +312,7 @@ func (c *Controller) ClearMCPServerOverride(name string, scope config.Activation
 // about its identity, so the schema cache — which is keyed on exactly these
 // fields — can be reached from a project the session is not pointed at.
 func mcpIdentitySpec(e config.PluginEntry, root string) plugin.Spec {
-	exp := e.ExpandedPlugin()
+	exp := e.ExpandedPluginForRoot(root)
 	spec := plugin.ApplyKnownOverrides(plugin.Spec{
 		Name:          exp.Name,
 		Type:          exp.Type,

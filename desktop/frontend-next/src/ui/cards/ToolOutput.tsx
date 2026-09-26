@@ -193,7 +193,22 @@ const SETTLED = 700;
 // worth, so the block arrives whole.
 const SPLIT_MAX = 300;
 
-export function Term({ text, one }: { text: string; one?: boolean }) {
+// A progress meter redraws by returning to column zero, and a browser draws a
+// carriage return as a space, so each line is resolved the way a terminal
+// would leave it: every frame overwrites the start of the one before.
+function overstrike(text: string): string {
+  if (!text.includes("\r")) return text;
+  return text
+    .split("\n")
+    .map((line) => {
+      const frames = (line.endsWith("\r") ? line.slice(0, -1) : line).split("\r");
+      return frames.reduce((shown, frame) => frame + shown.slice(frame.length));
+    })
+    .join("\n");
+}
+
+export function Term({ text: raw, one }: { text: string; one?: boolean }) {
+  const text = overstrike(raw);
   const lines = text.split("\n");
   if (lines.length > SPLIT_MAX) return <pre className="term">{text}</pre>;
   return (

@@ -70,6 +70,19 @@ func (m *model) pasteClipboard() tea.Cmd {
 	})
 }
 
+// pasteClipboardText is the terminal's own text paste, for the terminals
+// that hand Shift+Insert to the app instead of pasting it themselves.
+func (m *model) pasteClipboardText() tea.Cmd {
+	if termrender.RemoteClipboardSession() {
+		m.tr.AddNotice("warn", i18n.M.ClipboardTextPasteRemoteHint)
+		return m.commit()
+	}
+	return func() tea.Msg {
+		text, err := clipboard.ReadAll()
+		return clipTextMsg{text: text, err: err}
+	}
+}
+
 func (m *model) onClipImage(msg clipImageMsg) tea.Cmd {
 	m.clearFlash()
 	if msg.err != nil {

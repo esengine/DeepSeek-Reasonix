@@ -59,29 +59,31 @@ func osFor(goos string) remoteOS {
 }
 
 // detectPlatform asks the machine what it is. uname answers on everything
-// POSIX; a Windows shell has no such command and complains in its own code
-// page, so the second question is one cmd can answer. The extra round trip is
-// paid only by machines that are not POSIX.
+// POSIX; a Windows host is asked through PowerShell, the one interpreter every
+// windowsShell command already runs in, because OpenSSH there may start cmd,
+// PowerShell or Git Bash — and Git Bash answers uname with MSYS_NT.
 func detectPlatform(ctx context.Context, conn Conn) (goos, goarch string, err error) {
 	if res, execErr := conn.Exec(ctx, "uname -sm"); execErr == nil {
 		if goos, goarch, perr := ParseUname(string(res.Stdout)); perr == nil {
 			return goos, goarch, nil
 		}
 	}
-	res, execErr := conn.Exec(ctx, "echo %OS% %PROCESSOR_ARCHITECTURE%")
+	res, execErr := conn.Exec(ctx, windowsIdentity)
 	if execErr != nil {
 		return "", "", fmt.Errorf("bootstrap: identify remote: %w", execErr)
 	}
 	return ParseWindowsEnv(string(res.Stdout))
 }
 
-// ParseWindowsEnv reads `echo %OS% %PROCESSOR_ARCHITECTURE%` as cmd expands it.
-// A shell that expanded nothing answers with the literal text, which is not a
-// platform — and is exactly as unsupported as one that named the wrong OS.
+var windowsIdentity = psCommand("$env:OS + ' ' + $env:PROCESSOR_ARCHITECTURE")
+
+// ParseWindowsEnv reads the OS and PROCESSOR_ARCHITECTURE variables, space
+// separated. Anything else — including a shell that ran nothing — is not a
+// platform, and is exactly as unsupported as one that named the wrong OS.
 func ParseWindowsEnv(out string) (goos, goarch string, err error) {
 	fields := strings.Fields(strings.TrimSpace(out))
 	if len(fields) < 2 || !strings.EqualFold(fields[0], "Windows_NT") {
-		return "", "", fmt.Errorf("%w: `echo %%OS%%` answered %q", ErrUnsupportedRemote, strings.TrimSpace(out))
+		return "", "", fmt.Errorf("%w: Windows identity probe answered %q", ErrUnsupportedRemote, strings.TrimSpace(out))
 	}
 	switch strings.ToUpper(fields[1]) {
 	case "AMD64":

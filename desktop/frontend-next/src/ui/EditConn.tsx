@@ -3,7 +3,8 @@ import { t } from "../i18n";
 import type { ProviderCheck, ProviderEntry } from "../port/port";
 import { clearModelCheckFacts, ModelChoice, type ModelFact } from "./ModelChoice";
 import type { Port } from "./Providers";
-import { reason } from "../i18n/kernel";
+import { SAVED_NOT_APPLIED, reason } from "../i18n/kernel";
+import { HttpError } from "../port/port";
 import { THINKING, headerLines, parseEffortLevels, parseExtraBody, parseHeaders } from "./provider_compat";
 
 // Only what this form owns is sent: the entry keeps its prices, effort
@@ -11,10 +12,10 @@ import { THINKING, headerLines, parseEffortLevels, parseExtraBody, parseHeaders 
 // declare opens the form on the reasoning fields: the composer sends a user
 // here when the endpoint reported no effort levels.
 export function EditConn({
-  entry, initialCheck, port, busy, setBusy, onDone, declare = false,
+  entry, initialCheck, port, busy, setBusy, onDone, onSaved, declare = false,
 }: {
   entry: ProviderEntry; initialCheck?: ProviderCheck; port: Port;
-  busy: string; setBusy: (b: string) => void; onDone: () => void; declare?: boolean;
+  busy: string; setBusy: (b: string) => void; onDone: () => void; onSaved?: () => void; declare?: boolean;
 }) {
   const seededModels = [...new Set([...entry.models, ...(initialCheck?.models ?? [])])];
   const seededVision = [...new Set([...(entry.visionModels ?? []), ...(initialCheck?.vision ?? [])])];
@@ -155,6 +156,9 @@ export function EditConn({
       onDone();
     } catch (e) {
       setErr(reason(e));
+      // Saved but not yet applied: the list has to show what is on file while
+      // the form stays open to say why.
+      if (e instanceof HttpError && SAVED_NOT_APPLIED.includes(e.reason?.code ?? "")) onSaved?.();
     } finally {
       setBusy("");
     }

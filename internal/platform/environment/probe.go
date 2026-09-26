@@ -377,7 +377,7 @@ func FormatSection(results []ProbeResult, osName, shellPath string, overrides ma
 	}
 	b.WriteString("- OS: " + osName + "\n")
 	if shellPath != "" {
-		b.WriteString("- Shell: " + redactHome(shellPath) + "\n")
+		b.WriteString("- Shell used by the bash tool: " + redactHome(shellPath) + "\n")
 	}
 	if len(overrides) > 0 {
 		b.WriteString("\nConfigured tools:\n")

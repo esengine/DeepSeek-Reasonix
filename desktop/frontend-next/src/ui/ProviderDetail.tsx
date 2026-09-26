@@ -200,6 +200,7 @@ export function ProviderDetail({
           setRevision((r) => r + 1);
           onEdited();
         }}
+        onSaved={onEdited}
       />
     </section>
   );

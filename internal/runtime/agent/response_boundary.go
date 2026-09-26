@@ -71,7 +71,7 @@ func truncatedTerminal(u *provider.Usage) bool {
 		return false
 	}
 	switch u.FinishReason {
-	case "length", "repetition_truncation", finishReasonClientReasoningLimit:
+	case "length", "repetition_truncation":
 		return true
 	}
 	return false
@@ -83,8 +83,6 @@ func truncationCause(reason string) string {
 	switch reason {
 	case "repetition_truncation":
 		return "was stopped by the host's repetition guard"
-	case finishReasonClientReasoningLimit:
-		return "hit the client reasoning safety limit"
 	default:
 		return "hit the model's output-token limit"
 	}

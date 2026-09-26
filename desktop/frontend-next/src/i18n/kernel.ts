@@ -15,6 +15,8 @@ import { t } from "./index";
 // its literal keys — the kernel's parity guard reads this file as text and can
 // only see those — so kernel.test.ts holds the two spellings together.
 export const PROVIDER_EDIT_DISABLED = "provider.editing_disabled";
+// The write landed and only applying it to the open conversation did not.
+export const SAVED_NOT_APPLIED: readonly string[] = ["provider.saved_while_running", "provider.saved_model_unlisted", "runtime.rebuild_failed"];
 
 const SAID: Record<string, string> = {
   // ── 忙：不是出错，是「现在不行」 ─────────────────────────────────
@@ -92,6 +94,8 @@ const SAID: Record<string, string> = {
   "workspace.none": "还没有文件夹，会话需要在文件夹里打开。请先添加一个文件夹",
   "provider.no_current_model": "当前没有正在使用的模型，无法记录其窗口大小",
   "context.window_after_this_turn": "窗口大小已记录，将在本轮结束后生效",
+  "provider.saved_while_running": "已保存。当前对话还有未结束的工作（正在运行、等待你回答或有后台任务），仍按原设置进行；结束后再保存一次即可生效",
+  "provider.saved_model_unlisted": "已保存。当前对话使用的模型已不在该来源的列表中，切换模型后才会生效",
   "provider.extra_body_null": "额外设置中的「{path}」不能为空值（null）",
   "provider.no_websearch_wire": "该协议不支持由端点自行搜索",
 
@@ -102,6 +106,7 @@ const SAID: Record<string, string> = {
   "editor.not_installed": "这台机器上没找到 VS Code、Cursor 这类编辑器。装一个，或在配置里用 [desktop] editor 指定路径。",
   "editor.launch_failed": "编辑器没能启动：{error}",
   "editor.no_window": "这个内核没有窗口，打不开本机的编辑器。",
+  "workspace.locate_no_window": "这个内核不在本机，没法在系统文件管理器中显示它的文件。",
   "device.host_only": "这项操作只能在电脑上的窗口里做，已配对的手机做不了。",
   "device.host_rejected": "这个地址不是本机共享的地址，请重新扫码。",
   "device.origin_rejected": "请求来自其他网页，已拒绝。",

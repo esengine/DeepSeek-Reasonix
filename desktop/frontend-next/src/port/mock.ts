@@ -248,6 +248,8 @@ export class MockPort extends MockTheme implements AgentPort {
   async openInEditor() {
     return { editor: "Visual Studio Code", root: "/work/demo" };
   }
+  revealsFiles() { return true; }
+  async revealInFileManager() {}
 
   async openExternal(url: string) {
     window.open(url, "_blank", "noopener,noreferrer");

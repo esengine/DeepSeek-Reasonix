@@ -29,7 +29,8 @@ func (*typedNilHooks) PostToolUse(context.Context, string, json.RawMessage, stri
 func (*typedNilHooks) PostToolUseFailure(context.Context, string, json.RawMessage, string, error) {}
 func (*typedNilHooks) PostLLMCall(context.Context, string, int) string                            { return "" }
 func (*typedNilHooks) HasPostLLMCall() bool                                                       { return false }
-func (*typedNilHooks) SubagentStop(context.Context, string)                                       {}
+func (*typedNilHooks) SubagentStart(context.Context, string, json.RawMessage)                     {}
+func (*typedNilHooks) SubagentStop(context.Context, string, string, error)                        {}
 func (*typedNilHooks) PreCompact(context.Context, string) string                                  { return "" }
 
 func TestNewNormalizesTypedNilInterfaces(t *testing.T) {

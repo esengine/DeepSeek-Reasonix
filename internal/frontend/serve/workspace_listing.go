@@ -49,14 +49,21 @@ func listFolder(root, rel string) (workspaceListing, error) {
 		return out, err
 	}
 	for _, entry := range entries {
-		if !listedName(entry.Name(), entry.IsDir()) {
+		isDir := entry.IsDir()
+		if entry.Type()&fs.ModeSymlink != 0 {
+			var ok bool
+			if isDir, ok = linkInTree(root, filepath.Join(dir, entry.Name())); !ok {
+				continue
+			}
+		}
+		if !listedName(entry.Name(), isDir) {
 			continue
 		}
 		path := entry.Name()
 		if rel != "" {
 			path = rel + "/" + path
 		}
-		if entry.IsDir() {
+		if isDir {
 			out.Directories = append(out.Directories, path)
 		} else {
 			out.Files = append(out.Files, path)
@@ -94,6 +101,11 @@ func searchFiles(root, query string) (workspaceListing, error) {
 		if entry.IsDir() {
 			return nil
 		}
+		if entry.Type()&fs.ModeSymlink != 0 {
+			if isDir, ok := linkInTree(root, path); !ok || isDir {
+				return nil
+			}
+		}
 		rel, relErr := filepath.Rel(root, path)
 		if relErr != nil || !filepath.IsLocal(rel) {
 			return nil
@@ -106,6 +118,21 @@ func searchFiles(root, query string) (workspaceListing, error) {
 	})
 	sort.Strings(out.Files)
 	return out, err
+}
+
+// linkInTree reports whether the link at path resolves to a folder, and whether
+// it resolves inside the workspace at all: one that dangles or leaves the tree
+// names nothing the explorer can open.
+func linkInTree(root, path string) (isDir, ok bool) {
+	inside, err := insideRealRoot(root, path)
+	if err != nil || !inside {
+		return false, false
+	}
+	info, err := os.Stat(path)
+	if err != nil {
+		return false, false
+	}
+	return info.IsDir(), true
 }
 
 // insideRealRoot reports whether dir, links resolved, is still under root.

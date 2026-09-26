@@ -55,22 +55,23 @@ const (
 	// non-zero exit or empty stdout leaves the reasoning unchanged.
 	PostLLMCall Event = "PostLLMCall"
 	// SessionStart fires once when a session becomes active (fresh, resumed, or
-	// after /new). SessionEnd fires when it is closed or rotated. SubagentStop
-	// fires when a `task` sub-agent finishes. Notification fires when the agent
-	// needs the user's attention (e.g. a pending approval). PreCompact fires just
-	// before a compaction pass; its stdout is injected as extra summary guidance.
-	SessionStart Event = "SessionStart"
-	SessionEnd   Event = "SessionEnd"
-	SubagentStop Event = "SubagentStop"
-	Notification Event = "Notification"
-	PreCompact   Event = "PreCompact"
+	// after /new). SessionEnd fires when it is closed or rotated. SubagentStart
+	// and SubagentStop (non-blocking, paired by callId) bracket only a
+	// foreground `task` call. Notification fires when the agent needs the user's
+	// attention. PreCompact's stdout becomes extra compaction summary guidance.
+	SessionStart  Event = "SessionStart"
+	SessionEnd    Event = "SessionEnd"
+	SubagentStart Event = "SubagentStart"
+	SubagentStop  Event = "SubagentStop"
+	Notification  Event = "Notification"
+	PreCompact    Event = "PreCompact"
 )
 
 // Events is every event, in a stable order — drives loading and `/hooks`.
 var Events = []Event{
 	PreToolUse, PostToolUse, PostToolUseFailure, PermissionRequest, UserPromptSubmit, Stop, StopFailure,
 	PostLLMCall,
-	SessionStart, SessionEnd, SubagentStop, Notification, PreCompact,
+	SessionStart, SessionEnd, SubagentStart, SubagentStop, Notification, PreCompact,
 }
 
 // IsBlocking reports whether a non-zero/exit-2 (or timed-out) hook on this event
@@ -848,6 +849,7 @@ type Payload struct {
 	Event            Event           `json:"event"`
 	SessionID        string          `json:"sessionId,omitempty"`
 	Cwd              string          `json:"cwd"`
+	CallID           string          `json:"callId,omitempty"` // SubagentStart/Stop: pairs the two
 	ToolName         string          `json:"toolName,omitempty"`
 	ToolArgs         json.RawMessage `json:"toolArgs,omitempty"`
 	Subject          string          `json:"subject,omitempty"`
@@ -1173,6 +1175,9 @@ func marshalPayload(payload Payload, format string) string {
 			"trigger":                payload.Trigger,
 			"error":                  payload.Error,
 			"is_interrupt":           payload.IsInterrupt,
+		}
+		if payload.CallID != "" {
+			claude["tool_use_id"] = payload.CallID
 		}
 		body, _ = json.Marshal(claude)
 	} else {

@@ -80,7 +80,7 @@ async function run() {
     placed: typeof window.reasonixHost?.pathForFile(new File(['x'], 'x.txt')),
   }))()`);
 
-  const verbs = ["closeWindow", "controlBrowserView", "hideBrowserView", "isWindowMaximised", "minimiseWindow", "navigateBrowserView", "openExternal", "pathForFile", "pickFolder", "platform", "saveBytes", "saveText", "shell", "showBrowserView", "titleBar", "toggleMaximiseWindow"];
+  const verbs = ["closeWindow", "controlBrowserView", "hideBrowserView", "isWindowMaximised", "minimiseWindow", "navigateBrowserView", "openExternal", "pathForFile", "pickFolder", "platform", "revealPath", "saveBytes", "saveText", "shell", "showBrowserView", "titleBar", "toggleMaximiseWindow"];
   check("the bridge exposes verbs and nothing else", JSON.stringify(seen.bridge) === JSON.stringify(verbs), seen.bridge);
   check("the credential never reaches the page", !seen.cookie.includes("reasonix_token"), seen.cookie);
   check("the renderer has no node of its own", seen.globals.every((t) => t === "undefined"), seen.globals);

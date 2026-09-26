@@ -369,6 +369,7 @@ func RenderTOMLForScope(c *Config, scope RenderScope) string {
 	fmt.Fprintf(&b, "stalled_warning_seconds = %d   # warn once per background job after this many quiet seconds; 0 disables\n\n", c.BackgroundJobStalledWarningSeconds())
 
 	b.WriteString("[tools.shell]\n")
+	b.WriteString("# The interpreter the bash tool runs commands in; your login shell does not change it.\n")
 	if c.Tools.Shell.Prefer != "" {
 		fmt.Fprintf(&b, "prefer = %q   # auto|bash|powershell|pwsh; empty/default = auto-detect\n", c.Tools.Shell.Prefer)
 	} else {

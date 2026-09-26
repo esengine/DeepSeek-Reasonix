@@ -15,7 +15,7 @@ type turnGate struct {
 	finishing bool
 	// canceling is a cancel requested for the turn in flight.
 	canceling bool
-	// rotating is NewSession/ClearSession swapping the executor session out.
+	// rotating is a session rewrite in flight: new/clear, compact, rewind, summarize.
 	rotating bool
 	// closed is terminal teardown; it seals turn admission for good.
 	closed bool

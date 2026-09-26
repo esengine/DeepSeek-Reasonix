@@ -51,7 +51,7 @@ class StudioHost {
         headers["content-length"] = payload.length;
       }
       const req = http.request(
-        { hostname: url.hostname, port: url.port, path: url.pathname, method, headers, timeout: TIMEOUT_MS },
+        { hostname: url.hostname, port: url.port, path: url.pathname + url.search, method, headers, timeout: TIMEOUT_MS },
         (res) => {
           let text = "";
           res.setEncoding("utf8");

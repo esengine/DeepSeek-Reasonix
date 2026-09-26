@@ -59,6 +59,8 @@ type stubHooks struct {
 	postFailureSeen []string
 	preCompactOut   string   // returned from PreCompact (extra summary guidance)
 	subagentSeen    []string // last-answer text passed to each SubagentStop
+	subagentStarts  []string // task arguments passed to each SubagentStart
+	subagentStops   []subagentStop
 	hasPostLLM      bool     // whether HasPostLLMCall reports a PostLLMCall hook
 	postLLMOut      string   // replacement returned from PostLLMCall (when hasPostLLM)
 	postLLMSeen     []string // reasoning text each PostLLMCall received
@@ -81,8 +83,23 @@ func (h *stubHooks) PostToolUseFailure(_ context.Context, name string, _ json.Ra
 	h.postFailureSeen = append(h.postFailureSeen, name)
 }
 
-func (h *stubHooks) SubagentStop(_ context.Context, last string) {
+type subagentStop struct {
+	startID, stopID string
+	err             error
+	ctxErr          error
+}
+
+func (h *stubHooks) SubagentStart(_ context.Context, callID string, args json.RawMessage) {
+	h.subagentStarts = append(h.subagentStarts, string(args))
+	h.subagentStops = append(h.subagentStops, subagentStop{startID: callID})
+}
+
+func (h *stubHooks) SubagentStop(ctx context.Context, callID, last string, err error) {
 	h.subagentSeen = append(h.subagentSeen, last)
+	if n := len(h.subagentStops); n > 0 {
+		s := &h.subagentStops[n-1]
+		s.stopID, s.err, s.ctxErr = callID, err, ctx.Err()
+	}
 }
 func (h *stubHooks) PreCompact(context.Context, string) string { return h.preCompactOut }
 
@@ -114,6 +131,78 @@ func TestSubagentStopFiresForForegroundTask(t *testing.T) {
 	a.executeBatch(context.Background(), &a.turn, []provider.ToolCall{{Name: "task", Arguments: `{"run_in_background":true}`}})
 	if len(h.subagentSeen) != 1 {
 		t.Errorf("backgrounded task must not fire SubagentStop, saw %v", h.subagentSeen)
+	}
+}
+
+// scriptedTask stands in for the task tool with a chosen outcome.
+type scriptedTask struct {
+	run func(context.Context) (string, error)
+}
+
+func (scriptedTask) Name() string            { return "task" }
+func (scriptedTask) Description() string     { return "scripted sub-agent" }
+func (scriptedTask) Schema() json.RawMessage { return json.RawMessage(`{"type":"object"}`) }
+func (scriptedTask) ReadOnly() bool          { return true }
+func (s scriptedTask) Execute(ctx context.Context, _ json.RawMessage) (string, error) {
+	return s.run(ctx)
+}
+
+// TestSubagentStartPairsWithSubagentStop checks every foreground `task` call
+// that announces a start also announces a stop, whether the sub-agent answers,
+// fails, is cancelled, or refuses its own call; background tasks fire neither.
+func TestSubagentStartPairsWithSubagentStop(t *testing.T) {
+	cases := []struct {
+		name    string
+		run     func(context.Context, context.CancelFunc) (string, error)
+		wantErr bool
+	}{
+		{"answers", func(context.Context, context.CancelFunc) (string, error) { return "ok", nil }, false},
+		{"fails", func(context.Context, context.CancelFunc) (string, error) { return "", errors.New("sub-agent crashed") }, true},
+		{"cancelled", func(ctx context.Context, cancel context.CancelFunc) (string, error) {
+			cancel()
+			<-ctx.Done()
+			return "", ctx.Err()
+		}, true},
+		{"refuses", func(context.Context, context.CancelFunc) (string, error) {
+			return "", tool.Blocked("no sub-agent here")
+		}, true},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			ctx, cancel := context.WithCancel(context.Background())
+			defer cancel()
+			reg := tool.NewRegistry()
+			reg.Add(scriptedTask{run: func(c context.Context) (string, error) { return tc.run(c, cancel) }})
+			h := &stubHooks{}
+			a := New(nil, reg, sessionstore.NewSession(""), Options{Hooks: h}, event.Discard)
+
+			a.executeBatch(ctx, &a.turn, []provider.ToolCall{{ID: "call-1", Name: "task", Arguments: `{"prompt":"x"}`}})
+			if len(h.subagentStarts) != 1 || h.subagentStarts[0] != `{"prompt":"x"}` {
+				t.Fatalf("foreground task should fire SubagentStart with its arguments, saw %v", h.subagentStarts)
+			}
+			if len(h.subagentSeen) != 1 {
+				t.Fatalf("SubagentStart must be followed by exactly one SubagentStop, saw %d", len(h.subagentSeen))
+			}
+			stop := h.subagentStops[0]
+			if stop.startID != "call-1" || stop.stopID != "call-1" {
+				t.Errorf("call ids = start %q stop %q, want both call-1", stop.startID, stop.stopID)
+			}
+			if (stop.err != nil) != tc.wantErr {
+				t.Errorf("SubagentStop err = %v, want error=%v", stop.err, tc.wantErr)
+			}
+			if stop.ctxErr != nil {
+				t.Errorf("SubagentStop ran under a done context (%v); its hook would be killed", stop.ctxErr)
+			}
+		})
+	}
+
+	reg := tool.NewRegistry()
+	reg.Add(okTool{name: "task"})
+	h := &stubHooks{}
+	a := New(nil, reg, sessionstore.NewSession(""), Options{Hooks: h}, event.Discard)
+	a.executeBatch(context.Background(), &a.turn, []provider.ToolCall{{Name: "task", Arguments: `{"run_in_background":true}`}})
+	if len(h.subagentStarts) != 0 || len(h.subagentSeen) != 0 {
+		t.Errorf("backgrounded task must fire neither event, saw starts=%v stops=%v", h.subagentStarts, h.subagentSeen)
 	}
 }
 

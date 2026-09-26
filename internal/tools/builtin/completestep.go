@@ -283,7 +283,9 @@ func verifyStepEvidence(ctx context.Context, items []stepEvidence) (hostVerified
 			if len(e.Paths) == 0 {
 				return 0, 0, fmt.Errorf("evidence %d: diff evidence requires paths for host verification — cite the files you changed", i+1)
 			}
-			if !ledger.HasSuccessfulWrite(e.Paths) && !verifyPathsFromSession(ctx, e.Paths, true) {
+			if !everyCitationProven(ctx, e.Paths, func(p []string) bool {
+				return ledger.HasSuccessfulWrite(p) || verifyPathsFromSession(ctx, p, true)
+			}) {
 				return 0, 0, fmt.Errorf("evidence %d: diff paths have no matching successful writer receipt in this turn%s", i+1, receiptHint("files written this turn", ledger.TouchedPaths(8, true)))
 			}
 			hostVerified++
@@ -291,7 +293,9 @@ func verifyStepEvidence(ctx context.Context, items []stepEvidence) (hostVerified
 			if len(e.Paths) == 0 {
 				return 0, 0, fmt.Errorf("evidence %d: files evidence requires paths for host verification — cite the files you touched", i+1)
 			}
-			if !ledger.HasSuccessfulReadOrWrite(e.Paths) && !ledger.HasSuccessfulBashMentioningPaths(e.Paths) && !verifyPathsFromSession(ctx, e.Paths, false) {
+			if !everyCitationProven(ctx, e.Paths, func(p []string) bool {
+				return ledger.HasSuccessfulReadOrWrite(p) || ledger.HasSuccessfulBashMentioningPaths(p) || verifyPathsFromSession(ctx, p, false)
+			}) {
 				return 0, 0, fmt.Errorf("evidence %d: file paths have no matching successful read/write receipt in this turn%s", i+1, receiptHint("files touched this turn", ledger.TouchedPaths(8, false)))
 			}
 			hostVerified++
@@ -496,6 +500,18 @@ var builtinToolFacts = func() func(string) evidence.ToolFacts {
 		return evidence.ToolFacts{ReadOnly: true}
 	}
 }()
+
+// everyCitationProven reports whether each cited path has a receipt under one
+// of the forms that name the same workspace file.
+func everyCitationProven(ctx context.Context, cited []string, proven func([]string) bool) bool {
+	root := evidence.WorkspaceRootFromContext(ctx)
+	for _, p := range cited {
+		if !slices.ContainsFunc(evidence.CitationForms(root, p), func(form string) bool { return proven([]string{form}) }) {
+			return false
+		}
+	}
+	return true
+}
 
 // verifyPathsFromSession is the diff/files analogue of verifyCommandFromSession:
 // it lets a completion cite a file written or read in an earlier turn (the

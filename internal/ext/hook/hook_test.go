@@ -8,6 +8,7 @@ import (
 	"path/filepath"
 	"reflect"
 	"runtime"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -987,6 +988,9 @@ func TestHasCommandStringFlagParsesBashOptions(t *testing.T) {
 func TestDefaultSpawnerUsesGitBashForExplicitShOnWindows(t *testing.T) {
 	if runtime.GOOS != "windows" {
 		t.Skip("exercises Git for Windows Bash discovery")
+	}
+	if !slices.ContainsFunc(sandbox.DetectShells(), func(sh sandbox.Shell) bool { return sh.Kind == sandbox.ShellBash }) {
+		t.Skip("Git Bash is optional on Windows and absent on this host")
 	}
 	r := DefaultSpawner(context.Background(), SpawnInput{
 		Command: `sh -c 'printf "%s" "$HOOK_TEST_MARKER"'`,

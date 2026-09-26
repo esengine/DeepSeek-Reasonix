@@ -20,7 +20,7 @@ func editorServer(t *testing.T, granted bool) *Server {
 	t.Cleanup(ctrl.Close)
 	s := New(ctrl, NewBroadcaster(), config.ServeConfig{})
 	if granted {
-		s.AllowEditorOpen()
+		s.AllowLocalDesktop()
 	}
 	return s
 }

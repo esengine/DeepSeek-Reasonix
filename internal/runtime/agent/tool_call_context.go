@@ -27,6 +27,7 @@ func (a *Agent) toolCallContext(ctx context.Context, plan *toolCallPlan) context
 	if a.task.ledger != nil {
 		cctx = evidence.WithLedger(cctx, a.task.ledger)
 		cctx = evidence.WithSessionMessages(cctx, a.sess.conversation.Snapshot)
+		cctx = evidence.WithWorkspaceRoot(cctx, a.writeWorkspaceRoot)
 		if a.deliveryProfile {
 			cctx = evidence.WithDeliveryProfile(cctx)
 		}

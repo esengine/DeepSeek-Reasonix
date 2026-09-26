@@ -154,3 +154,18 @@ func TestSearchSkipsNoiseStillWorks(t *testing.T) {
 		t.Fatalf("Search should still return legitimate hit, got %v", resultPaths(got))
 	}
 }
+
+// A query whose letters appear in order but not contiguously still finds the
+// file, ranked after every contiguous hit: "proinf" reaches ProjectInfoNew.tsx.
+func TestSearchMatchesSubsequenceAfterSubstringHits(t *testing.T) {
+	root := testenv.TempDir(t)
+	writeFile(t, filepath.Join(root, "src", "project-info", "tabs", "ProjectInfoNew.tsx"))
+	writeFile(t, filepath.Join(root, "src", "proinfo.go"))
+	writeFile(t, filepath.Join(root, "src", "unrelated.go"))
+
+	got := resultPaths(Search(root, "proinf", 50))
+	want := []string{"src/proinfo.go", "src/project-info", "src/project-info/tabs/ProjectInfoNew.tsx"}
+	if !equalSlices(got, want) {
+		t.Fatalf("Search(%q):\n  want %v\n  got  %v", "proinf", want, got)
+	}
+}

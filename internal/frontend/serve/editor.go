@@ -8,11 +8,12 @@ import (
 	"reasonix/internal/platform/editor"
 )
 
-// AllowEditorOpen grants POST /workspace/editor. Off until a host asks for it:
-// the editor launches on the machine running the kernel, so a server reached
-// over the network would open a window nobody is sitting at. The desktop shell
-// asks because its only client is its own window.
-func (s *Server) AllowEditorOpen() { s.grants.editorOpen = true }
+// AllowLocalDesktop grants the routes that act on the kernel machine's desktop:
+// POST /workspace/editor and GET /workspace/locate. Off until a host asks: a
+// server reached over the network would open windows nobody is sitting at, or
+// name paths on a disk its client cannot open. The desktop shell asks because
+// its only client is its own window.
+func (s *Server) AllowLocalDesktop() { s.grants.localDesktop = true }
 
 const (
 	codeEditorMissing  = "editor.not_installed"
@@ -24,7 +25,7 @@ const (
 // the kernel already knows which directory it is driving, and taking one from
 // the request would make this a way to open anything on the machine.
 func (s *Server) openInEditor(w http.ResponseWriter, r *http.Request) {
-	if !s.grants.at(r).editorOpen {
+	if !s.grants.at(r).localDesktop {
 		refuse(w, http.StatusForbidden, codeEditorNoWindow, "this kernel has no window to open an editor from", nil)
 		return
 	}

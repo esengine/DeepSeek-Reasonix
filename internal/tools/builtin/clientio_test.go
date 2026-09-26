@@ -163,7 +163,7 @@ func TestBashRoutesToClientTerminal(t *testing.T) {
 func TestBashTerminalFallsBackWhenUnhandled(t *testing.T) {
 	term := &fakeTerminal{ok: false}
 	b := bash{workDir: testenv.TempDir(t), terminal: term}
-	out, err := b.Execute(context.Background(), json.RawMessage(`{"command":"printf local"}`))
+	out, err := b.Execute(context.Background(), json.RawMessage(`{"command":"echo local"}`))
 	if err != nil || !strings.Contains(out, "local") {
 		t.Fatalf("unhandled terminal must fall back to local execution; got %q, %v", out, err)
 	}
@@ -187,7 +187,7 @@ func TestBashTerminalSkippedWhenEnvFilteringEnabled(t *testing.T) {
 	b := bash{workDir: testenv.TempDir(t), terminal: term}
 	// The client terminal spawns with its own unfiltered environment, so an
 	// enabled [secrets].filter_subprocess_env must force local execution.
-	out, err := b.Execute(context.Background(), json.RawMessage(`{"command":"printf local"}`))
+	out, err := b.Execute(context.Background(), json.RawMessage(`{"command":"echo local"}`))
 	if err != nil || !strings.Contains(out, "local") {
 		t.Fatalf("env filtering must fall back to local execution; got %q, %v", out, err)
 	}

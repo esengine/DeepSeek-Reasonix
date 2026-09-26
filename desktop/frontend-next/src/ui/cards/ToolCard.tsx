@@ -13,7 +13,7 @@ import { currentStep, parsePlan, stepDone } from "../../state/session";
 import { DiffView } from "./DiffView";
 import { Term, ToolOutput } from "./ToolOutput";
 import { ExtensionView } from "./ExtensionView";
-import { toolFailed, toolFailureLabel } from "./outcome";
+import { toolChangedFile, toolFailed, toolFailureLabel } from "./outcome";
 import { StudioIcon } from "../StudioIcon";
 import { useEscape } from "../dismiss";
 
@@ -111,7 +111,7 @@ export function ToolCard({
   // Running is not a reason to show the arguments: the group above already says
   // the work is happening, and a call that opens itself pushes the transcript
   // around while it reads. A failure is different — that is what is being asked.
-  const start = useStartsOpen("steps", false, bad);
+  const start = useStartsOpen("steps", false, bad, toolChangedFile(tool));
   const [touched, setOpen] = useState<boolean | null>(null);
   useEffect(() => {
     if (bad) setOpen(null);
@@ -296,7 +296,7 @@ function ToolShots({ images }: { images?: string[] }) {
 }
 
 function changeCounts(tool: Tool): { added: number; removed: number } | null {
-  if (!tool.diff && tool.added === undefined && tool.removed === undefined) return null;
+  if (!toolChangedFile(tool)) return null;
   const lines = tool.diff?.split("\n") ?? [];
   const added = tool.added ?? lines.filter((line) => line.startsWith("+") && !line.startsWith("+++")).length;
   const removed = tool.removed ?? lines.filter((line) => line.startsWith("-") && !line.startsWith("---")).length;

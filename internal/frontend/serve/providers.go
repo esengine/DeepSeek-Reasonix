@@ -24,7 +24,7 @@ type hostGrants struct {
 	workspaceSwitch bool // POST /workspace; see AllowWorkspaceSwitch
 	accountAuth     bool // /account routes; see AllowAccountAuth
 	providerEdit    bool // /providers writes; see AllowProviderEdit
-	editorOpen      bool // POST /workspace/editor; see AllowEditorOpen
+	localDesktop    bool // POST /workspace/editor, GET /workspace/locate; see AllowLocalDesktop
 }
 
 // AllowProviderEdit grants the /providers routes. Off until a host asks:

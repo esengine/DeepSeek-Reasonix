@@ -455,3 +455,158 @@ func loadEntry(t *testing.T, ref string) (*config.ProviderEntry, bool) {
 	}
 	return cfg.ResolveModel(ref)
 }
+
+func gaugeWindow(t *testing.T, base string) int {
+	t.Helper()
+	resp, err := http.Get(base + "/context")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer resp.Body.Close()
+	var got struct {
+		Window int `json:"window"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&got); err != nil {
+		t.Fatal(err)
+	}
+	return got.Window
+}
+
+// The window is bound into the agent at assembly, so an edit to the source the
+// open conversation runs on has to reach that conversation too — otherwise the
+// gauge and the fold point keep counting against the number the form replaced.
+func TestEditProviderReachesTheConversationRunningOnIt(t *testing.T) {
+	srv := newRichProviderServer(t)
+
+	resp := postProvider(t, srv.URL, "/providers/edit", `{
+		"name":"rich","models":["alpha","beta"],"default":"alpha","contextWindow":1000000
+	}`)
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusNoContent {
+		b, _ := readAllString(resp)
+		t.Fatalf("POST /providers/edit = %d: %s", resp.StatusCode, b)
+	}
+	if got := gaugeWindow(t, srv.URL); got != 1000000 {
+		t.Fatalf("the open conversation's window = %d, want the saved 1000000", got)
+	}
+}
+
+// Mid-turn the write lands and only the rebuild waits, which is a different
+// answer from a failed save and from a refused one.
+func TestEditProviderMidTurnSaysTheConversationKeepsItsSettings(t *testing.T) {
+	srv := newRichProviderServerAs(t, func(c control.SessionAPI) control.SessionAPI { return midTurn{c} })
+
+	resp := postProvider(t, srv.URL, "/providers/edit", `{
+		"name":"rich","models":["alpha","beta"],"default":"alpha","contextWindow":1000000
+	}`)
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusConflict {
+		b, _ := readAllString(resp)
+		t.Fatalf("POST /providers/edit mid-turn = %d, want 409: %s", resp.StatusCode, b)
+	}
+	var got struct {
+		Code string `json:"code"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&got); err != nil {
+		t.Fatal(err)
+	}
+	if got.Code != "provider.saved_while_running" {
+		t.Fatalf("code = %q, want provider.saved_while_running", got.Code)
+	}
+	cfg, err := config.Load()
+	if err != nil {
+		t.Fatal(err)
+	}
+	entry, _ := cfg.Provider("rich")
+	if entry.ContextWindow != 1000000 {
+		t.Fatalf("window on disk = %d — the refusal said it was saved, so it has to be", entry.ContextWindow)
+	}
+}
+
+// Unticking the model the conversation runs on is a saved edit, not a failed
+// one: there is nothing on the entry left to rebuild that conversation on.
+func TestEditProviderDroppingTheRunningModelIsStillSaved(t *testing.T) {
+	srv := newRichProviderServer(t)
+
+	resp := postProvider(t, srv.URL, "/providers/edit", `{
+		"name":"rich","models":["beta"],"default":"beta"
+	}`)
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusNoContent {
+		b, _ := readAllString(resp)
+		t.Fatalf("POST /providers/edit without the running model = %d, want 204: %s", resp.StatusCode, b)
+	}
+	cfg, err := config.Load()
+	if err != nil {
+		t.Fatal(err)
+	}
+	entry, _ := cfg.Provider("rich")
+	if !slices.Equal(entry.Models, []string{"beta"}) {
+		t.Fatalf("models on disk = %v, want [beta]", entry.Models)
+	}
+}
+
+// The form sends every field, so a key rotation arrives looking like a full
+// edit. The key is read per request; mid-turn it must not be answered as a
+// change the running conversation will miss.
+func TestEditProviderKeyOnlyMidTurnNeedsNoRebuild(t *testing.T) {
+	srv := newRichProviderServerAs(t, func(c control.SessionAPI) control.SessionAPI { return midTurn{c} })
+
+	resp := postProvider(t, srv.URL, "/providers/edit", `{
+		"name":"rich","baseUrl":"https://gateway.invalid/v1","apiKey":"sk-rotated",
+		"models":["alpha","beta"],"default":"alpha","vision":[],
+		"contextWindow":131072,"maxOutputTokens":0,"reasoningProtocol":"",
+		"supportedEfforts":[],"defaultEffort":"","headers":{},"extraBody":{}
+	}`)
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusNoContent {
+		b, _ := readAllString(resp)
+		t.Fatalf("key-only edit mid-turn = %d, want 204: %s", resp.StatusCode, b)
+	}
+	cfg, err := config.Load()
+	if err != nil {
+		t.Fatal(err)
+	}
+	entry, _ := cfg.Provider("rich")
+	if got := entry.APIKey(); got != "sk-rotated" {
+		t.Fatalf("stored key = %q, want the rotated one", got)
+	}
+}
+
+// Once the running model is off the entry, a later edit the agent binds at
+// assembly cannot reach the conversation; the answer has to say why rather
+// than report a change that never applies.
+func TestEditProviderAfterDroppingTheRunningModelSaysItIsUnlisted(t *testing.T) {
+	srv := newRichProviderServer(t)
+
+	drop := postProvider(t, srv.URL, "/providers/edit", `{"name":"rich","models":["beta"],"default":"beta"}`)
+	drop.Body.Close()
+	if drop.StatusCode != http.StatusNoContent {
+		t.Fatalf("dropping the running model = %d, want 204", drop.StatusCode)
+	}
+	resp := postProvider(t, srv.URL, "/providers/edit", `{
+		"name":"rich","models":["beta"],"default":"beta","contextWindow":1000000
+	}`)
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusConflict {
+		b, _ := readAllString(resp)
+		t.Fatalf("editing the window after the drop = %d, want 409: %s", resp.StatusCode, b)
+	}
+	var got struct {
+		Code string `json:"code"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&got); err != nil {
+		t.Fatal(err)
+	}
+	if got.Code != "provider.saved_model_unlisted" {
+		t.Fatalf("code = %q, want provider.saved_model_unlisted", got.Code)
+	}
+	cfg, err := config.Load()
+	if err != nil {
+		t.Fatal(err)
+	}
+	entry, _ := cfg.Provider("rich")
+	if entry.ContextWindow != 1000000 {
+		t.Fatalf("window on disk = %d — the refusal said it was saved, so it has to be", entry.ContextWindow)
+	}
+}

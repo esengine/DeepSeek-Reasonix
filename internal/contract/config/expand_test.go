@@ -1,6 +1,7 @@
 package config
 
 import (
+	"os"
 	"path/filepath"
 	"testing"
 
@@ -105,5 +106,69 @@ func TestWriteRootsForRootExpandsMavenAllowWrite(t *testing.T) {
 		if got[i] != want[i] {
 			t.Fatalf("root %d = %q, want %q (all roots: %v)", i, got[i], want[i], got)
 		}
+	}
+}
+
+func TestLoadForRootExpandsWorkspaceRootInPluginEntries(t *testing.T) {
+	_, userConfig, _ := legacyHome(t)
+	t.Setenv("CLAUDE_PROJECT_DIR", "/inherited/from/a/parent/hook")
+	if err := os.MkdirAll(filepath.Dir(userConfig), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(userConfig, []byte(`
+[[plugins]]
+name = "idea"
+type = "http"
+url = "http://127.0.0.1:64342/stream"
+headers = { IJ_MCP_SERVER_PROJECT_PATH = "${REASONIX_WORKSPACE_ROOT}" }
+`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	for _, root := range []string{testenv.TempDir(t), testenv.TempDir(t)} {
+		if err := os.WriteFile(filepath.Join(root, mcpJSONFile), []byte(`{
+  "mcpServers": {
+    "local": { "command": "server", "args": ["--project", "${CLAUDE_PROJECT_DIR}"] }
+  }
+}`), 0o644); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(filepath.Join(root, ".env"), []byte("CLAUDE_PROJECT_DIR=/from/dotenv\n"), 0o600); err != nil {
+			t.Fatal(err)
+		}
+		want, err := filepath.Abs(root)
+		if err != nil {
+			t.Fatal(err)
+		}
+
+		cfg, err := LoadForRoot(root)
+		if err != nil {
+			t.Fatal(err)
+		}
+		idea, ok := pluginEntryByName(cfg.Plugins, "idea")
+		if !ok {
+			t.Fatalf("global plugin missing: %+v", cfg.Plugins)
+		}
+		if got := idea.ExpandedPluginForRoot(root).Headers["IJ_MCP_SERVER_PROJECT_PATH"]; got != want {
+			t.Fatalf("header = %q, want workspace root %q", got, want)
+		}
+		local, ok := pluginEntryByName(cfg.Plugins, "local")
+		if !ok {
+			t.Fatalf(".mcp.json plugin missing: %+v", cfg.Plugins)
+		}
+		if got := local.ExpandedPluginForRoot(root).Args[1]; got != want {
+			t.Fatalf("arg = %q, want workspace root %q", got, want)
+		}
+	}
+}
+
+func TestWorkspaceRootVarsStayOutOfConfigPathExpansion(t *testing.T) {
+	t.Setenv("REASONIX_WORKSPACE_ROOT", "")
+	root := testenv.TempDir(t)
+	cfg := Default()
+	cfg.Sandbox.ForbidRead = []string{"${REASONIX_WORKSPACE_ROOT}/secret"}
+	got := cfg.ForbidReadRootsForRoot(root)
+	if len(got) != 1 || got[0] == filepath.Join(root, "secret") {
+		t.Fatalf("ForbidReadRootsForRoot = %v, want the variable left to the environment", got)
 	}
 }

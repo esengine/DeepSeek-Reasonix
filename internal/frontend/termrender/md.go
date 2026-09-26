@@ -334,8 +334,13 @@ func (r *MarkdownRenderer) renderFenced(buf *strings.Builder, n ast.Node, src []
 
 func (r *MarkdownRenderer) renderBlockquote(buf *strings.Builder, n *ast.Blockquote, src []byte, indent int) {
 	var inner strings.Builder
-	r.renderBlocks(&inner, n, src, 0)
 	prefix := strings.Repeat(" ", indent) + Dim("▎ ")
+	// The quote's body is laid out at column 0 and shifted right by the rail
+	// afterwards, so it has to be wrapped to what is left beside the rail.
+	outer := r.width
+	r.width = max(outer-VisibleWidth(prefix), 8)
+	r.renderBlocks(&inner, n, src, 0)
+	r.width = outer
 	for line := range strings.SplitSeq(strings.TrimRight(inner.String(), "\n"), "\n") {
 		buf.WriteString(prefix)
 		buf.WriteString(Dim(line))

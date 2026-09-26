@@ -3,6 +3,9 @@ package builtin
 import (
 	"context"
 	"encoding/json"
+	"fmt"
+	"path/filepath"
+	"runtime"
 	"strconv"
 	"strings"
 	"testing"
@@ -922,4 +925,76 @@ func TestCompleteStepReviewEvidenceNeedsTheReviewCapability(t *testing.T) {
 			t.Fatalf("grant=%s accepted=%v want %v (err=%v)", tc.granted, accepted, tc.accepted, err)
 		}
 	}
+}
+
+func TestCompleteStepCreditsCitationsOfTheSameWorkspaceFile(t *testing.T) {
+	root := t.TempDir()
+	abs := filepath.Join(root, "frontend", "src", "core", "backend", "idb.ts")
+	cases := []struct {
+		name, written, cited string
+	}{
+		{"relative citation of an absolute write", abs, "frontend/src/core/backend/idb.ts"},
+		{"absolute citation of a relative write", "frontend/src/core/backend/idb.ts", abs},
+		{"relative citation of a relative write", "frontend/src/core/backend/idb.ts", "frontend/src/core/backend/idb.ts"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			if err := citeDiff(t, root, tc.written, tc.cited, false); err != nil {
+				t.Fatalf("ledger: %v", err)
+			}
+			if err := citeDiff(t, root, tc.written, tc.cited, true); err != nil {
+				t.Fatalf("session fallback: %v", err)
+			}
+		})
+	}
+}
+
+func TestCompleteStepCreditsNoOtherFileForACitation(t *testing.T) {
+	root := t.TempDir()
+	outside := t.TempDir()
+	cases := []struct {
+		name, written, cited string
+	}{
+		{"same tail outside the workspace", filepath.Join(outside, "src", "a.go"), "src/a.go"},
+		{"base name of a nested file", filepath.Join(root, "pkg", "sub", "main.go"), "main.go"},
+		{"base name of a relative nested write", "sub/a.go", "a.go"},
+		{"trailing components of a deeper file", filepath.Join(root, "vendor", "x", "backend", "idb.ts"), "backend/idb.ts"},
+		{"backup of the cited file", filepath.Join(root, "idb.ts.bak"), "idb.ts"},
+		{"relative citation escaping the workspace", filepath.Join(outside, "a.go"), "../" + filepath.Base(outside) + "/a.go"},
+	}
+	if runtime.GOOS != "windows" {
+		cases = append(cases, struct{ name, written, cited string }{"another case of the name", filepath.Join(root, "Foo.go"), "foo.go"})
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			if err := citeDiff(t, root, tc.written, tc.cited, false); err == nil {
+				t.Fatalf("ledger credited %q for a write of %q", tc.cited, tc.written)
+			}
+			if err := citeDiff(t, root, tc.written, tc.cited, true); err == nil {
+				t.Fatalf("session fallback credited %q for a write of %q", tc.cited, tc.written)
+			}
+		})
+	}
+}
+
+// citeDiff records one successful write_file of written, in this turn's ledger
+// or only in the transcript, and cites cited as diff evidence under root.
+func citeDiff(t *testing.T, root, written, cited string, crossTurn bool) error {
+	t.Helper()
+	ledger := evidence.NewLedger()
+	ctx := evidence.WithWorkspaceRoot(evidence.WithLedger(context.Background(), ledger), root)
+	if crossTurn {
+		msgs := []provider.Message{
+			{Role: provider.RoleAssistant, ToolCalls: []provider.ToolCall{{
+				ID: "w1", Name: "write_file", Arguments: fmt.Sprintf(`{"path":%q}`, written),
+			}}},
+			{Role: provider.RoleTool, ToolCallID: "w1", Name: "write_file", Content: "wrote 10 lines"},
+		}
+		ctx = evidence.WithSessionMessages(ctx, func() []provider.Message { return msgs })
+	} else {
+		ledger.Record(evidence.Receipt{ToolName: "write_file", Success: true, Paths: []string{written}, Write: true})
+	}
+	body := fmt.Sprintf(`{"step":"x","result":"y","evidence":[{"kind":"diff","summary":"changed","paths":[%q]}]}`, cited)
+	_, err := completeStep{}.Execute(ctx, json.RawMessage(body))
+	return err
 }

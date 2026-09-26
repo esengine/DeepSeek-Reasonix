@@ -36,7 +36,7 @@ func TestFormatSectionSortsAndRedacts(t *testing.T) {
 	for _, want := range []string{
 		"## Environment",
 		"- OS: darwin/arm64",
-		"- Shell: ~/bin/bash",
+		"- Shell used by the bash tool: ~/bin/bash",
 		"Configured tools:\n- go: /opt/homebrew/bin/go\n- python3: ~/.pyenv/shims/python3",
 		"Detected tools:\n- go: go version go1.24 darwin/arm64\n- python3: Python 3.12.0",
 		"Not found or unavailable:\n- docker: not found",

@@ -1350,6 +1350,7 @@ body { background: var(--page) !important; }
 }
 .workbench-open-editor:hover { color: var(--text); background: var(--overlay); }
 .workbench-open-editor svg { width: 13px; height: 13px; }
+.workbench-open-editor + .workbench-open-editor { margin-left: 2px; }
 .workbench-search { height: 34px; margin: 7px 8px; padding: 0 8px; flex: none; display: flex; align-items: center; gap: 6px; border: 1px solid var(--hair); border-radius: 5px; background: var(--surface); }
 .workbench-search:focus-within { border-color: var(--accent); }
 .workbench-search svg { width: 13px; height: 13px; color: var(--faint); }
@@ -3868,8 +3869,6 @@ body { font-size: 14px; line-height: 1.75; }
 @media (max-width: 760px) {
   .prefs-main { padding-top: 20px; }
   .grp { padding: 17px 15px 15px; }
-  .vway { align-items: flex-start; flex-wrap: wrap; }
-  .vway .why { flex-basis: 100%; }
 }
 
 /* The brand rail and conversation chrome are one application title bar. Keep

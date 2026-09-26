@@ -314,7 +314,10 @@ SSH connection — VS Code Remote-SSH style. It bootstraps a persistent headless
 `reasonix serve` on the remote host, forwards a local loopback port to it, and
 opens the existing serve web client through that tunnel. The agent, its tools,
 and its files all live on the remote host at full fidelity; nothing runs through
-a lossy file proxy. V1 supports Linux and macOS remote hosts.
+a lossy file proxy.
+
+Linux, macOS and Windows remote hosts are supported. A Windows host needs PowerShell and OpenSSH, whichever login shell (cmd,
+PowerShell or Git Bash) its `DefaultShell` names.
 
 Hosts live in a user-global `[remote]` section of `config.toml`. Like
 `[secrets]`, a project `reasonix.toml` cannot inject or override remote hosts —
@@ -613,6 +616,14 @@ and `PreCompact` fire in every agent a session runs. Each fires under a
 | `reasonix review` | a fresh id per run |
 
 `/new` or a branch switch moves every child to the new id along with the parent.
+
+`SubagentStart` and `SubagentStop`:
+
+- bracket a foreground `task` call only; `read_only_task`, `parallel_tasks`,
+  `fleet`, skill children and background tasks fire neither;
+- carry the call's id as `callId`, so a consumer can pair them;
+- `SubagentStop` fires on every end: answer, failure, cancel or refusal;
+- neither can block: exit 2 only warns.
 
 ## Keyboard shortcuts
 
@@ -915,6 +926,13 @@ Reasonix is an MCP client. A `[[plugins]]` entry's `type` selects the transport:
 (`${VAR}` / `${VAR:-default}` expanded from the environment, so tokens stay out
 of the file); `sse` connects to servers that still use the legacy persistent
 GET + announced POST endpoint transport.
+
+`${REASONIX_WORKSPACE_ROOT}` (or `${CLAUDE_PROJECT_DIR}`) expands to the current
+workspace's absolute path, so one global entry can name the project:
+
+```toml
+headers = { IJ_MCP_SERVER_PROJECT_PATH = "${REASONIX_WORKSPACE_ROOT}" }
+```
 
 For a remote HTTP server without a static `Authorization` header, an
 authentication challenge is shown as **Sign in**. Run

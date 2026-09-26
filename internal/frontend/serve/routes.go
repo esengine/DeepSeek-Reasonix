@@ -108,6 +108,7 @@ func (s *Server) routes() http.Handler {
 	mux.HandleFunc("GET /workspace/image", s.workspaceImage)
 	mux.HandleFunc("PUT /workspace/file", s.workspaceFileWrite)
 	mux.HandleFunc("POST /workspace/editor", s.openInEditor)
+	mux.HandleFunc("GET /workspace/locate", s.workspaceLocate)
 	mux.HandleFunc("POST /attachments", s.attachments)
 	mux.HandleFunc("POST /drop", s.drop)
 	mux.HandleFunc("POST /delete-session", s.deleteSession)

@@ -155,3 +155,16 @@ func TestPluginSpecsForRootDoesNotPinHTTPCodeGraph(t *testing.T) {
 		t.Fatalf("http codegraph WorkspaceRoot = %q, want /workspace", specs[0].WorkspaceRoot)
 	}
 }
+
+func TestPluginSpecsForRootExpandWorkspaceRoot(t *testing.T) {
+	t.Setenv("CLAUDE_PROJECT_DIR", "/inherited/from/a/parent/hook")
+	root := t.TempDir()
+	specs := ForRoot([]config.PluginEntry{{
+		Name: "idea", Type: "http", URL: "http://127.0.0.1:64342/stream",
+		Headers: map[string]string{"X-Project": "${REASONIX_WORKSPACE_ROOT}", "X-Claude": "${CLAUDE_PROJECT_DIR}"},
+	}}, root)
+	want := config.WorkspaceRootValue(root)
+	if got := specs[0].Headers; got["X-Project"] != want || got["X-Claude"] != want {
+		t.Fatalf("headers = %v, want both %q", got, want)
+	}
+}

@@ -184,6 +184,33 @@ func TestRunnerPermissionRequestPayload(t *testing.T) {
 	}
 }
 
+func TestRunnerSubagentStartPayload(t *testing.T) {
+	if !IsKnownEvent("SubagentStart") {
+		t.Fatal("SubagentStart must be a known event so settings.json rules load")
+	}
+	hooks := []ResolvedHook{{HookConfig: HookConfig{Command: "pet"}, Event: SubagentStart}}
+	var got Payload
+	spawner := func(_ context.Context, in SpawnInput) SpawnResult {
+		if err := json.Unmarshal([]byte(in.Stdin), &got); err != nil {
+			t.Fatalf("payload json: %v", err)
+		}
+		return SpawnResult{ExitCode: 0}
+	}
+	args := json.RawMessage(`{"prompt":"survey the tests"}`)
+	NewRunner(hooks, "/tmp", spawner, nil).SubagentStart(context.Background(), "call_7", args)
+
+	if got.Event != SubagentStart || got.CallID != "call_7" || string(got.ToolArgs) != string(args) {
+		t.Errorf("payload = %+v, want SubagentStart with the call id and task arguments", got)
+	}
+
+	hooks = []ResolvedHook{{HookConfig: HookConfig{Command: "pet"}, Event: SubagentStop}}
+	got = Payload{}
+	NewRunner(hooks, "/tmp", spawner, nil).SubagentStop(context.Background(), "call_7", "", errors.New("cancelled"))
+	if got.Event != SubagentStop || got.CallID != "call_7" || got.Error != "cancelled" {
+		t.Errorf("payload = %+v, want SubagentStop with the call id and error", got)
+	}
+}
+
 func TestRunnerPermissionRequestWarnOnly(t *testing.T) {
 	hooks := []ResolvedHook{
 		{HookConfig: HookConfig{Command: "warn"}, Event: PermissionRequest},

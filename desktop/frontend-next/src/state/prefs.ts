@@ -25,15 +25,16 @@ export function setShowsReceipt(on: boolean): void {
 
 // How each foldable part of the transcript starts. "live" opens while the part
 // is still being written and folds once it is done; "failed" opens only a step
-// that failed. A block the reader opened or closed keeps that choice.
+// that failed; "changed" opens only what wrote a file. A block the reader opened
+// or closed keeps that choice.
 export type Fold = "thinking" | "activity" | "steps" | "output" | "compaction";
-export type FoldMode = "folded" | "live" | "failed" | "open";
+export type FoldMode = "folded" | "live" | "failed" | "changed" | "open";
 export type FoldModes = Readonly<Record<Fold, FoldMode>>;
 
 export const FOLD_CHOICES: Readonly<Record<Fold, readonly FoldMode[]>> = {
   thinking: ["folded", "live", "open"],
-  activity: ["folded", "live", "open"],
-  steps: ["folded", "failed", "open"],
+  activity: ["folded", "live", "changed", "open"],
+  steps: ["folded", "failed", "changed", "open"],
   output: ["folded", "open"],
   compaction: ["folded", "open"],
 };

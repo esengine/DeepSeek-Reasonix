@@ -67,12 +67,11 @@ type SearchResult struct {
 	IsDir bool
 }
 
-// Search finds entries under root whose path matches query. A match is
-// recorded when the query is a substring of the file's basename (preferred
-// tier), of any slash-separated path segment (fallback tier), or of a
-// directory name (lowest tier). It is bounded by limit and skips common
-// generated/vendor directories so interactive completion stays responsive on
-// large workspaces.
+// Search finds entries under root whose path matches query: the query is a
+// substring of a directory name, the basename, or a path segment, or — ranked
+// last — its letters appear in order in a name ("proinf" → ProjectInfo.tsx).
+// It is bounded by limit and skips generated/vendor directories so interactive
+// completion stays responsive on large workspaces.
 func Search(root, query string, limit int) []SearchResult {
 	query = strings.ToLower(strings.TrimSpace(query))
 	if len(query) < minQueryLen || strings.ContainsAny(query, `/\`) || limit <= 0 {
@@ -83,6 +82,7 @@ func Search(root, query string, limit int) []SearchResult {
 	var basenameHits []SearchResult
 	var segmentHits []SearchResult
 	var dirHits []SearchResult
+	var subsequenceHits []SearchResult
 	visited := 0
 	_ = filepath.WalkDir(root, func(path string, d fs.DirEntry, err error) error {
 		if err != nil {
@@ -111,8 +111,11 @@ func Search(root, query string, limit int) []SearchResult {
 			}
 			// Allow matching directory names so the user can select a
 			// folder directly from the @-menu instead of only its contents.
-			if strings.Contains(strings.ToLower(name), query) {
+			switch nameLower := strings.ToLower(name); {
+			case strings.Contains(nameLower, query):
 				dirHits = append(dirHits, SearchResult{Path: rel, IsDir: true})
+			case subsequence(nameLower, query):
+				subsequenceHits = append(subsequenceHits, SearchResult{Path: rel, IsDir: true})
 			}
 			return nil
 		}
@@ -136,35 +139,44 @@ func Search(root, query string, limit int) []SearchResult {
 			basenameHits = append(basenameHits, SearchResult{Path: rel})
 		case pathSegmentContains(rel, query):
 			segmentHits = append(segmentHits, SearchResult{Path: rel})
+		case subsequence(nameLower, query):
+			subsequenceHits = append(subsequenceHits, SearchResult{Path: rel})
 		}
 		return nil
 	})
-	sort.Slice(basenameHits, func(i, j int) bool { return basenameHits[i].Path < basenameHits[j].Path })
-	sort.Slice(segmentHits, func(i, j int) bool { return segmentHits[i].Path < segmentHits[j].Path })
-	sort.Slice(dirHits, func(i, j int) bool { return dirHits[i].Path < dirHits[j].Path })
 	// Directories first so the user can navigate into them; then basename
-	// hits (most relevant file matches); then path-segment hits. We reserve
+	// hits; then path-segment hits; then in-order letter hits. We reserve
 	// up to dirQuota slots for directories so they are never fully crowded
 	// out by a large number of file matches.
 	const dirQuota = 5
+	byPath(dirHits)
 	out := make([]SearchResult, 0, limit)
-	nDirs := min(len(dirHits), dirQuota)
-	out = append(out, dirHits[:nDirs]...)
-	remaining := limit - len(out)
-	if remaining > 0 {
-		if len(basenameHits) > remaining {
-			basenameHits = basenameHits[:remaining]
-		}
-		out = append(out, basenameHits...)
-		remaining = limit - len(out)
-	}
-	if remaining > 0 {
-		if len(segmentHits) > remaining {
-			segmentHits = segmentHits[:remaining]
-		}
-		out = append(out, segmentHits...)
+	out = append(out, dirHits[:min(len(dirHits), dirQuota)]...)
+	for _, tier := range [][]SearchResult{basenameHits, segmentHits, subsequenceHits} {
+		byPath(tier)
+		out = append(out, tier[:max(0, min(len(tier), limit-len(out)))]...)
 	}
 	return out
+}
+
+func byPath(hits []SearchResult) {
+	sort.Slice(hits, func(i, j int) bool { return hits[i].Path < hits[j].Path })
+}
+
+// subsequence reports whether query's runes appear in target in order, not
+// necessarily adjacent. Both are already lower-cased.
+func subsequence(target, query string) bool {
+	q := []rune(query)
+	i := 0
+	for _, r := range target {
+		if r == q[i] {
+			i++
+			if i == len(q) {
+				return true
+			}
+		}
+	}
+	return false
 }
 
 // pathSegmentContains reports whether query appears in any slash-separated

@@ -255,6 +255,21 @@ func (m *model) content(live []string) []string {
 	return append(rows, wrapLines(strings.Join(live, "\n"), cw)...)
 }
 
+// copyRows is the transcript through row last as a selection copies it: the
+// code rail is drawn as blank cells of the same width, so every row and column
+// matches what is on screen and only the rail is left out.
+func (m *model) copyRows(last int) []string {
+	cw := m.contentWidth()
+	var rows []string
+	for i := range m.scr.blocks {
+		if len(rows) > last {
+			return rows
+		}
+		rows = append(rows, wrapLines(m.scr.blocks[i].render(cw, true), cw)...)
+	}
+	return append(rows, wrapLines(strings.Join(m.liveLinesRail(true), "\n"), cw)...)
+}
+
 // fullView draws the viewport over the transcript with the bottom region
 // pinned under it.
 func (m *model) fullView(bottom []string, composerAt int) tea.View {
@@ -361,9 +376,9 @@ func (m *model) scrollKey(k string) bool {
 	}
 	page := max(m.viewportHeight()-1, 1)
 	switch k {
-	case "pgup":
+	case "pgup", "shift+pgup":
 		m.scrollBy(-page)
-	case "pgdown":
+	case "pgdown", "shift+pgdown":
 		m.scrollBy(page)
 	case "ctrl+home":
 		m.scr.yoff, m.scr.follow = 0, false
@@ -473,8 +488,8 @@ func (m *model) copySelection() tea.Cmd {
 }
 
 func (m *model) selectedText() string {
-	rows := m.content(m.liveLines())
 	lo, hi := m.scr.sel.ordered()
+	rows := m.copyRows(hi.line)
 	var picked []string
 	for i := lo.line; i <= hi.line && i < len(rows); i++ {
 		a, b, ok := selSpan(i, lo, hi, m.contentWidth())

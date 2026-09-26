@@ -67,3 +67,45 @@ func TestWebFetchRefusesLinkLocal(t *testing.T) {
 		t.Fatalf("error should name the refused address, got %v", err)
 	}
 }
+
+func stubFetchLookup(t *testing.T, addrs ...string) {
+	t.Helper()
+	prev := lookupFetchHost
+	t.Cleanup(func() { lookupFetchHost = prev })
+	lookupFetchHost = func(context.Context, string) ([]net.IPAddr, error) {
+		out := make([]net.IPAddr, 0, len(addrs))
+		for _, a := range addrs {
+			out = append(out, net.IPAddr{IP: net.ParseIP(a)})
+		}
+		return out, nil
+	}
+}
+
+// A fake-ip resolver (Clash, mihomo) answers a public host with a unique-local
+// AAAA beside a routable A. The blocked address is skipped, not fatal.
+func TestWebFetchDialsAllowedAddressBesideBlockedOne(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_, _ = w.Write([]byte("reached through the allowed address"))
+	}))
+	defer srv.Close()
+	_, port, _ := net.SplitHostPort(strings.TrimPrefix(srv.URL, "http://"))
+	stubFetchLookup(t, "fdfe:dcba:9876::152", "127.0.0.1")
+
+	args, _ := json.Marshal(map[string]any{"url": "http://api-docs.example:" + port + "/"})
+	out, err := webFetch{}.Execute(context.Background(), args)
+	if err != nil {
+		t.Fatalf("fetch should use the allowed address, got %v", err)
+	}
+	if !strings.Contains(out, "reached through the allowed address") {
+		t.Fatalf("body missing: %q", out)
+	}
+}
+
+func TestWebFetchRefusesHostWithOnlyBlockedAddresses(t *testing.T) {
+	stubFetchLookup(t, "fdfe:dcba:9876::152", "10.0.0.7")
+	args, _ := json.Marshal(map[string]any{"url": "http://internal.example/"})
+	_, err := webFetch{}.Execute(context.Background(), args)
+	if err == nil || !strings.Contains(err.Error(), "refusing to fetch internal address") {
+		t.Fatalf("want SSRF refusal, got %v", err)
+	}
+}

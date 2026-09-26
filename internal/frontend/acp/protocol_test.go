@@ -10,7 +10,7 @@ import (
 	"reasonix/internal/base/testenv"
 )
 
-func TestFlattenPrompt(t *testing.T) {
+func TestPromptText(t *testing.T) {
 	tests := []struct {
 		name   string
 		blocks []ContentBlock
@@ -38,9 +38,8 @@ func TestFlattenPrompt(t *testing.T) {
 			want: "only this",
 		},
 		{
-			name: "image and audio blocks are ignored",
+			name: "audio blocks are ignored",
 			blocks: []ContentBlock{
-				{Type: "image", MimeType: "image/png", Data: "base64"},
 				{Type: "text", Text: "kept"},
 				{Type: "audio", MimeType: "audio/wav", Data: "base64"},
 			},
@@ -59,8 +58,9 @@ func TestFlattenPrompt(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			if got := FlattenPrompt(tt.blocks); got != tt.want {
-				t.Errorf("FlattenPrompt() = %q, want %q", got, tt.want)
+			got, err := promptText(t.TempDir(), tt.blocks)
+			if err != nil || got != tt.want {
+				t.Errorf("promptText() = %q, %v, want %q", got, err, tt.want)
 			}
 		})
 	}

@@ -116,3 +116,31 @@ describe("what a running call says about the wait", () => {
     expect(container.querySelector(".cost")?.textContent).toContain("3.1s");
   });
 });
+
+// curl, wget, pip and most download tools redraw their meter by returning to
+// column zero, and a browser draws a carriage return as a space: every frame
+// the command ever printed lands on one line that grows for the whole download.
+describe("a command that redraws its own line", () => {
+  const terms = (container: HTMLElement) => [...container.querySelectorAll("pre.term")].map((p) => p.textContent);
+
+  it("shows the latest frame of a progress meter, not every frame side by side", () => {
+    const output = "  % Total\n  5 10.0M    5  512k\r 50 10.0M   50 5120k\r100 10.0M  100 10.0M\nsaved";
+    const { container } = render(<ToolCard tool={{ id: "dl", name: "bash", args: '{"command":"curl -O"}', output, readOnly: false }} running />);
+    expect(terms(container)).toEqual(["  % Total\n100 10.0M  100 10.0M\nsaved"]);
+  });
+
+  it("keeps what a shorter frame does not cover, as a terminal would", () => {
+    const { container } = render(<ToolCard tool={{ id: "dl", name: "bash", output: "downloading 100%\rdone\n", readOnly: false }} running={false} />);
+    expect(terms(container)).toEqual(["doneloading 100%\n"]);
+  });
+
+  it("treats a CRLF line ending as a line ending", () => {
+    const { container } = render(<ToolCard tool={{ id: "win", name: "bash", output: "one\r\ntwo\r\n", readOnly: false }} running={false} />);
+    expect(terms(container)).toEqual(["one\ntwo\n"]);
+  });
+
+  it("holds the last frame while the next one is still arriving", () => {
+    const { container } = render(<ToolCard tool={{ id: "dl", name: "bash", output: "a\n 40%\r", readOnly: false }} running />);
+    expect(terms(container)).toEqual(["a\n 40%"]);
+  });
+});

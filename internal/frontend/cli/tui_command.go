@@ -111,13 +111,14 @@ func runTUI(args []string, version string) int {
 	adoptFirstPane(hub, ctrl, bc, bc, serveCfg, leases)
 
 	err = tui.Run(ctx, tui.Options{
-		Client:      &tui.Client{HTTP: hub.InProcessClient(), Base: tuiBase},
-		Version:     version,
-		Prompt:      strings.Join(f.fs.Args(), " "),
-		Restore:     resumed != nil,
-		PickSession: *f.resume == resumePickerSentinel || ambiguous != nil,
-		PickAmong:   ambiguousSessionPaths(ambiguous),
-		Inline:      *f.inline,
+		Client:        &tui.Client{HTTP: hub.InProcessClient(), Base: tuiBase},
+		Version:       version,
+		Prompt:        strings.Join(f.fs.Args(), " "),
+		Restore:       resumed != nil,
+		PickSession:   *f.resume == resumePickerSentinel || ambiguous != nil,
+		PickAmong:     ambiguousSessionPaths(ambiguous),
+		Inline:        *f.inline,
+		HideTurnUsage: cfg != nil && !cfg.UI.ShowTurnUsage,
 	})
 	if err != nil {
 		fmt.Fprintln(os.Stderr, i18n.M.ErrorPrefix, err)

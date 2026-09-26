@@ -2,6 +2,7 @@
 package serve
 
 import (
+	"encoding/json"
 	"fmt"
 	"net/http"
 	"slices"
@@ -52,6 +53,7 @@ func (s *Server) editProvider(w http.ResponseWriter, r *http.Request) {
 		notFound(w, "provider", name)
 		return
 	}
+	assembled, wasListed := assemblyShape(entry), s.runsListedModelOf(entry)
 	models := trimmedNonEmpty(body.Models)
 	if len(models) == 0 {
 		refuse(w, http.StatusBadRequest, "provider.no_models_picked", "pick at least one model", nil)
@@ -129,7 +131,69 @@ func (s *Server) editProvider(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, http.StatusInternalServerError, err)
 		return
 	}
+	s.applyEditedProvider(w, r, entry, assemblyShape(entry) != assembled, wasListed)
+}
+
+// applyEditedProvider answers a saved edit. What the agent binds at assembly
+// reaches the conversation running on this source only through a rebuild; the
+// key is read per request and needs none. The edit that unticks the running
+// model is itself a plain save; after it, nothing on the entry can carry a
+// later change to that conversation until it switches models.
+func (s *Server) applyEditedProvider(w http.ResponseWriter, r *http.Request, entry *config.ProviderEntry, changed, wasListed bool) {
+	running, _, _ := strings.Cut(currentModelRef(s.ctl()), "/")
+	if !changed || running != entry.Name {
+		w.WriteHeader(http.StatusNoContent)
+		return
+	}
+	if !s.runsListedModelOf(entry) {
+		if !wasListed {
+			refuse(w, http.StatusConflict, "provider.saved_model_unlisted", "the source was saved; this conversation runs on a model the source no longer lists, so switch models to apply it", nil)
+			return
+		}
+		w.WriteHeader(http.StatusNoContent)
+		return
+	}
+	if err := s.rebuildInPlace(r.Context()); err != nil {
+		if codedRefusal(err) == codeSwitchModel {
+			busy(w, "provider.saved_while_running", "the source was saved; the conversation has work in progress and keeps its current settings until it is rebuilt", nil)
+			return
+		}
+		rebuildFailed(w, err)
+		return
+	}
 	w.WriteHeader(http.StatusNoContent)
+}
+
+// runsListedModelOf reports whether the current conversation runs on one of
+// the models entry lists.
+func (s *Server) runsListedModelOf(entry *config.ProviderEntry) bool {
+	running, model, _ := strings.Cut(currentModelRef(s.ctl()), "/")
+	return running == entry.Name && slices.Contains(entry.ModelList(), model)
+}
+
+// assemblyShape is what of an entry the agent binds when it is built. Empty and
+// absent collections are one answer, because the form sends {} for a field it
+// leaves blank and the file drops it.
+func assemblyShape(e *config.ProviderEntry) string {
+	orNil := func(n int, v any) any {
+		if n == 0 {
+			return nil
+		}
+		return v
+	}
+	shape := []any{
+		e.BaseURL, orNil(len(e.Models), e.Models), e.Vision, orNil(len(e.VisionModels), e.VisionModels),
+		orNil(len(e.ModelOverrides), e.ModelOverrides), e.ContextWindow, e.MaxOutputTokens,
+		orNil(len(e.Headers), e.Headers), orNil(len(e.ExtraBody), e.ExtraBody), e.ReasoningProtocol,
+		orNil(len(e.SupportedEfforts), e.SupportedEfforts), e.DefaultEffort,
+	}
+	b, err := json.Marshal(shape)
+	if err != nil {
+		// Unencodable extra body: %#v still differs wherever the contents do,
+		// and a pointer it prints can only make an unchanged entry rebuild.
+		return fmt.Sprintf("%#v", shape)
+	}
+	return string(b)
 }
 
 // applyEffortDeclaration stores a declared effort vocabulary and its default.

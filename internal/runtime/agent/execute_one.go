@@ -678,6 +678,12 @@ func (a *Agent) finishToolExecution(ctx context.Context, plan *toolCallPlan) too
 	if a.role.plannerMCPExecution && isMCPExecutionTarget(runTool, permName) && tool.IsMCPServerAuthorized(runTool) && !tool.HasMCPDestructiveHint(runTool) {
 		cctx = tool.WithNonDestructiveMCPExecutionIntent(cctx)
 	}
+	if a.svc.hooks != nil && call.Name == "task" && !isBackgroundTaskCall(call.Arguments) {
+		a.svc.hooks.SubagentStart(ctx, call.ID, json.RawMessage(call.Arguments))
+		// Stop answers every exit after Start, including a cancelled turn, whose
+		// ctx would otherwise kill the hook before it runs.
+		defer func() { a.svc.hooks.SubagentStop(context.WithoutCancel(ctx), call.ID, result, err) }()
+	}
 	var execution *tool.ShellExecution
 	if de, ok := runTool.(tool.DetailedExecutor); ok {
 		var detailed tool.DetailedResult
@@ -748,12 +754,6 @@ func (a *Agent) finishToolExecution(ctx context.Context, plan *toolCallPlan) too
 			out.rawOutput = rawErr
 		}
 		return out
-	}
-	// A foreground `task` sub-agent just finished — its result is the final answer.
-	// (A backgrounded one returns a "Started…" string and stops later in a job, so
-	// it doesn't fire here.) SubagentStop lets a hook react to delegated work.
-	if a.svc.hooks != nil && call.Name == "task" && !isBackgroundTaskCall(call.Arguments) {
-		a.svc.hooks.SubagentStop(ctx, result)
 	}
 	result = silentSuccessDetail(evidenceName, evidenceArgs, result)
 	body, bound, truncMsg := a.boundToolOutput(result, call.Name, call.ID, call.Arguments, false)

@@ -5,7 +5,7 @@
 // function of the error and the installed catalogue.
 import { beforeEach, describe, expect, it } from "vitest";
 import { boot, STORAGE } from "./index";
-import { PROVIDER_EDIT_DISABLED, codes, reason } from "./kernel";
+import { PROVIDER_EDIT_DISABLED, SAVED_NOT_APPLIED, codes, reason } from "./kernel";
 import { HttpError } from "../port/port";
 
 // Pinned, not defaulted: with nothing stored the window follows the machine, so
@@ -92,5 +92,9 @@ describe("what a reader is told a refusal was", () => {
 describe("codes a caller branches on", () => {
   it("spells the provider refusal the same in the constant and the catalogue", () => {
     expect(codes[PROVIDER_EDIT_DISABLED]).toBeTruthy();
+  });
+
+  it("spells the saved-but-not-applied answers the same in the constant and the catalogue", () => {
+    for (const code of SAVED_NOT_APPLIED) expect(codes[code]).toBeTruthy();
   });
 });

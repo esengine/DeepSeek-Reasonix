@@ -54,7 +54,7 @@ the following capability shape (irrelevant fields omitted):
       "delete": {}
     },
     "promptCapabilities": {
-      "image": false,
+      "image": true,
       "audio": false,
       "embeddedContext": true
     },
@@ -149,8 +149,16 @@ selectors above.
 
 ## Prompts, updates, and approvals
 
-`session/prompt` accepts text blocks and embedded text resources. Images and
-audio are not advertised. During a turn, Reasonix may send:
+`session/prompt` accepts text blocks, image blocks, and embedded resources.
+Audio is not advertised.
+
+- An image block or a binary (`blob`) resource is saved under
+  `.reasonix/attachments/` in the session's workspace and referenced from the
+  prompt, the same way a pasted attachment is in the other frontends.
+- Data that is not base64, or an image that is not a supported image, fails
+  the prompt with invalid params instead of being dropped.
+
+During a turn, Reasonix may send:
 
 - agent message and thought chunks;
 - pending and completed tool-call updates;

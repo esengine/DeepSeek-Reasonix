@@ -479,9 +479,9 @@ func (s *acpSession) waitForRetiredSessionLeases() {
 }
 
 // initialize advertises the agent's capability set: persisted load plus ACP v1
-// list/resume/close/delete lifecycle helpers, prompts carrying inline resource
-// text (embeddedContext) but not image/audio, and stdio / Streamable HTTP MCP
-// (no legacy sse).
+// list/resume/close/delete lifecycle helpers, prompts carrying images and
+// embedded resources but not audio, and stdio / Streamable HTTP MCP (no legacy
+// sse).
 func (s *service) initialize(_ context.Context, raw json.RawMessage) (any, error) {
 	var p InitializeParams
 	if len(raw) > 0 && json.Unmarshal(raw, &p) == nil {
@@ -498,7 +498,7 @@ func (s *service) initialize(_ context.Context, raw json.RawMessage) (any, error
 				Delete: &EmptyCapability{},
 			},
 			PromptCapabilities: PromptCapabilities{
-				Image:           false,
+				Image:           true,
 				Audio:           false,
 				EmbeddedContext: true,
 			},

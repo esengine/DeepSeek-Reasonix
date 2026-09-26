@@ -6,13 +6,14 @@ import (
 	"strings"
 )
 
-// ParseUname maps `uname -sm` output to Go GOOS/GOARCH. V1 supports Linux and
-// macOS remotes; anything else (including Windows shells) is an error.
-// ErrUnsupportedRemote is a machine nothing can be installed onto: not a POSIX
-// system, or an architecture with no release. A caller has to tell it apart
+// ErrUnsupportedRemote is a machine nothing can be installed onto: an OS or an
+// architecture with no release. A caller has to tell it apart
 // because there is nothing to retry — the answer is a different machine.
 var ErrUnsupportedRemote = errors.New("bootstrap: unsupported remote")
 
+// ParseUname maps `uname -sm` output to Go GOOS/GOARCH for a Linux or macOS
+// remote. Windows is identified separately, so a POSIX layer running on it
+// (MSYS_NT, MINGW64_NT) is refused here rather than mistaken for either.
 func ParseUname(out string) (goos, goarch string, err error) {
 	fields := strings.Fields(strings.TrimSpace(out))
 	if len(fields) < 2 {
@@ -27,8 +28,6 @@ func ParseUname(out string) (goos, goarch string, err error) {
 	case "darwin":
 		goos = "darwin"
 	default:
-		// A Windows machine never reaches here: it has no uname, so the caller
-		// asks it a question it can answer instead.
 		return "", "", fmt.Errorf("%w: OS %q", ErrUnsupportedRemote, sys)
 	}
 	switch strings.ToLower(machine) {

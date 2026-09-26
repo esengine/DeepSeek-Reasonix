@@ -16,6 +16,7 @@ const MODE: Record<FoldMode, string> = {
   folded: "收起",
   live: "进行中展开",
   failed: "失败时展开",
+  changed: "改动时展开",
   open: "展开",
 };
 
@@ -25,6 +26,7 @@ const OUTPUT_MODE: Partial<Record<FoldMode, string>> = { folded: "截断", open:
 const PRESETS: [string, string, FoldModes][] = [
   ["compact", "精简", { thinking: "folded", activity: "folded", steps: "failed", output: "folded", compaction: "folded" }],
   ["standard", "标准", FOLD_DEFAULTS],
+  ["changes", "只看改动", { thinking: "folded", activity: "changed", steps: "changed", output: "folded", compaction: "folded" }],
   ["full", "详尽", { thinking: "open", activity: "open", steps: "open", output: "open", compaction: "open" }],
 ];
 
@@ -84,8 +86,8 @@ export function Folding() {
 // running one on demand, which no real conversation holds still for.
 function FoldPreview({ modes, hot, live, onLive }: { modes: FoldModes; hot: Fold | null; live: boolean; onLive: (v: boolean) => void }) {
   const think = startsOpen(modes.thinking, live);
-  const work = startsOpen(modes.activity, live);
-  const step = (failed: boolean) => startsOpen(modes.steps, false, failed);
+  const work = startsOpen(modes.activity, live, false, true);
+  const step = (failed: boolean, changed = false) => startsOpen(modes.steps, false, failed, changed);
   const part = (kind: Fold) => ({ "data-part": kind, "data-hot": hot === kind ? "" : undefined });
   return (
     <figure className="fold-prev" aria-hidden="true">
@@ -111,6 +113,7 @@ function FoldPreview({ modes, hot, live, onLive }: { modes: FoldModes; hot: Fold
           {work && (
             <div className="fp-steps">
               <Step name="read_file" arg="src/app.ts" open={step(false)} hot={hot} />
+              <Step name="edit_file" arg="src/app.ts" open={step(false, true)} hot={hot} />
               <Step name="bash" arg="npm test" open={step(!live)} failed={!live} long hot={hot} output={modes.output === "open"} />
             </div>
           )}

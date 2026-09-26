@@ -863,7 +863,9 @@ func (c *Controller) Running() bool {
 func (c *Controller) RuntimeStatus() RuntimeStatus {
 	c.mu.Lock()
 	running := c.gate.running
-	active := running || c.gate.finishing
+	// A rotation (compact, rewind, new session) is rewriting the history a
+	// rebuild would carry over, so it is active work to every busy guard.
+	active := running || c.gate.finishing || c.gate.rotating
 	canceling := c.gate.canceling
 	c.mu.Unlock()
 	pending := c.approval.hasPending()

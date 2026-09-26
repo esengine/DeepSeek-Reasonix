@@ -608,6 +608,7 @@ function PaneView({ port, rt, title, active, visible, sideHost, side, onFocus, o
             scheme={theme === "light" ? "light" : "dark"}
             changes={tree?.changes ?? []}
             running={s.running}
+            remote={!!rt.host}
             onCloseManual={() => onManualBrowser?.(false)}
             onExternal={(url) => void port.openExternal(url).catch(fail)}
           />

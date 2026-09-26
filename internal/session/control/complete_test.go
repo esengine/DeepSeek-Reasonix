@@ -276,3 +276,15 @@ func mustWrite(t *testing.T, p, body string) {
 		t.Fatal(err)
 	}
 }
+
+// A bare @token is typed from the name the user remembers, not its spelling:
+// the letters in order are enough to reach a file anywhere in the workspace.
+func TestCompleteRefFindsFileBySubsequence(t *testing.T) {
+	root := testenv.TempDir(t)
+	writeAt(t, root, "src/pages/project-info/tabs/ProjectInfoNew.tsx")
+
+	got := Complete("@proinf", 7, CompletionData{WorkspaceRoot: root})
+	if !hasInsert(got.Items, "@src/pages/project-info/tabs/ProjectInfoNew.tsx") {
+		t.Fatalf("items = %v, want the ProjectInfoNew.tsx reference", inserts(got.Items))
+	}
+}

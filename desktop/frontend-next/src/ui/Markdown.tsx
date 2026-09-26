@@ -24,7 +24,9 @@ const schema = {
   },
 };
 
-const BASE_REMARK = [remarkGfm, remarkMath, remarkTrimAutolink];
+// A single tilde is how "500~1000" writes a range; read as strikethrough, two
+// ranges on one line strike out everything between them. Only ~~ strikes.
+const BASE_REMARK = [[remarkGfm, { singleTilde: false }], remarkMath, remarkTrimAutolink];
 // Order is load-bearing: raw parses HTML into nodes, sanitize prunes them, and
 // katex renders afterwards so its generated markup is not pruned in turn.
 const BASE_REHYPE = [rehypeRaw, [rehypeSanitize, schema]];

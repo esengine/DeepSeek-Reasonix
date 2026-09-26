@@ -594,6 +594,8 @@ export const EN_SETTINGS: Record<string, string> = {
   "上下文压缩后，模型接下来依据的那份简报": "The brief the model works from after context is compacted",
   "进行中展开": "Open while running",
   "失败时展开": "Open on failure",
+  "改动时展开": "Open on file change",
+  "只看改动": "Changes only",
   "截断": "Clipped",
   "完整": "Full",
   "思考了 6 秒": "Thought for 6s",

@@ -80,7 +80,9 @@ func (m *model) frame() tea.View {
 	return v
 }
 
-func (m *model) liveLines() []string {
+func (m *model) liveLines() []string { return m.liveLinesRail(m.scrollbarHidden()) }
+
+func (m *model) liveLinesRail(hideRail bool) []string {
 	var out []string
 	for i := range m.tr.Items {
 		it := &m.tr.Items[i]
@@ -93,11 +95,12 @@ func (m *model) liveLines() []string {
 		case it.Kind == ItemSay:
 			shown := m.sayShown[it.ID]
 			if rest := it.Text[min(shown, len(it.Text)):]; rest != "" {
-				out = append(out, strings.Split(renderSayPart(rest, shown == 0, m.width, m.scrollbarHidden()), "\n")...)
+				out = append(out, strings.Split(renderSayPart(rest, shown == 0, m.width, hideRail), "\n")...)
 			}
 		case (it.Kind == ItemApproval || it.Kind == ItemAsk) && it.Verdict == "":
+		case m.hidden(it):
 		default:
-			if r := renderItem(it, m.width, 0, m.scrollbarHidden()); r != "" {
+			if r := renderItem(it, m.width, 0, hideRail); r != "" {
 				out = append(out, strings.Split(r, "\n")...)
 			}
 		}

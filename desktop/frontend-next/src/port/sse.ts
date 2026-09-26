@@ -350,6 +350,15 @@ export class SsePort extends SseTheme implements AgentPort {
     return this.post0<{ editor: string; root: string }>("/workspace/editor");
   }
 
+  revealsFiles() {
+    return host().revealsFiles();
+  }
+
+  async revealInFileManager(path: string) {
+    const why = await host().revealPath(this.base, path);
+    if (why) throw new HttpError(0, why.error || "not shown", why, !!(why.code || why.error));
+  }
+
   openExternal(url: string): Promise<void> {
     host().openExternal(url);
     return Promise.resolve();

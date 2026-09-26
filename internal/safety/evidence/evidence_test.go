@@ -4,6 +4,8 @@ import (
 	"context"
 	"encoding/json"
 	"reflect"
+	"runtime"
+	"slices"
 	"strings"
 	"testing"
 )
@@ -1317,5 +1319,19 @@ func TestLedgerDeliverySignoffRejectsInspectionCommandMasqueradingAsVerification
 	}`), true, ToolFacts{ReadOnly: true}))
 	if ledger.HasSuccessfulDeliverySignoffAfter(mutation) {
 		t.Fatal("inspection-only git status must not count as delivery verification")
+	}
+}
+
+func TestCitationFormsAnchorAWindowsCitationToTheWorkspace(t *testing.T) {
+	if runtime.GOOS != "windows" {
+		t.Skip("drive-letter paths are absolute only on Windows")
+	}
+	forms := CitationForms(`C:\ws`, "src/a.go")
+	if !slices.Contains(forms, NormalizePath(`C:\ws\src\a.go`)) {
+		t.Fatalf("forms %q miss the workspace path", forms)
+	}
+	forms = CitationForms(`C:\ws`, `c:\WS\src\a.go`)
+	if !slices.Contains(forms, NormalizePath("src/a.go")) {
+		t.Fatalf("forms %q miss the relative path", forms)
 	}
 }

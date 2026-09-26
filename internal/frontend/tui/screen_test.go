@@ -61,6 +61,39 @@ func TestFullScreenScrollsAndFollowsTheTail(t *testing.T) {
 	}
 }
 
+// Shift+PgUp/PgDn page the transcript as they page a terminal's scrollback.
+func TestShiftPageKeysScrollTheTranscript(t *testing.T) {
+	m, _ := testModel(t)
+	fillTranscript(m, 60)
+	m.View()
+	press(m, "shift+pgup")
+	if m.scr.follow {
+		t.Fatalf("shift+pgup left the view on the tail at %d", m.scr.yoff)
+	}
+	press(m, "shift+pgdown")
+	if !m.scr.follow {
+		t.Fatalf("shift+pgdown did not return to the tail, view at %d", m.scr.yoff)
+	}
+	if got := m.composer.Value(); got != "" {
+		t.Fatalf("a scroll key reached the composer: %q", got)
+	}
+}
+
+// Shift+Insert pastes the clipboard's text, as it does in a Linux terminal.
+func TestShiftInsertPastesClipboardText(t *testing.T) {
+	for _, env := range []string{"SSH_CONNECTION", "SSH_CLIENT", "SSH_TTY"} {
+		t.Setenv(env, "")
+	}
+	m, _ := testModel(t)
+	cmd := press(m, "shift+insert")
+	if cmd == nil {
+		t.Fatal("shift+insert did nothing")
+	}
+	if _, ok := cmd().(clipTextMsg); !ok {
+		t.Fatal("shift+insert did not read the clipboard's text")
+	}
+}
+
 // Dragging the thumb to the bottom of the track lands on the last page.
 func TestScrollbarDragMovesTheView(t *testing.T) {
 	m, _ := testModel(t)
@@ -92,6 +125,37 @@ func TestDragSelectsAndCopiesTranscriptText(t *testing.T) {
 	_, cmd := m.Update(tea.MouseReleaseMsg{Button: tea.MouseLeft, X: 30, Y: row})
 	if cmd == nil {
 		t.Fatal("release did not copy")
+	}
+}
+
+// The code rail is drawn, not written: a selection across a fenced block copies
+// the code without it, both once the answer settled and while it is live.
+func TestSelectionCopiesCodeWithoutTheRail(t *testing.T) {
+	for _, settle := range []bool{true, false} {
+		m, _ := testModel(t)
+		apply(m, eventwire.Event{Kind: "turn_started"}, eventwire.Event{Kind: "text", Text: "see\n\n```go\nfunc a() {\n\treturn\n}\n```\n\n"})
+		if settle {
+			apply(m, eventwire.Event{Kind: "message", Text: ""}, eventwire.Event{Kind: "turn_done"})
+		}
+		m.View()
+		rows := m.content(m.liveLines())
+		first, last := -1, -1
+		for i, r := range rows {
+			if strings.Contains(r, "func a()") {
+				first = i
+			}
+			if first >= 0 && strings.Contains(r, "}") {
+				last = i
+			}
+		}
+		if first < 0 || last < 0 || !strings.Contains(rows[first], "│") {
+			t.Fatalf("settle=%v: fixture drew no railed code block:\n%s", settle, strings.Join(rows, "\n"))
+		}
+		m.scr.sel = selection{active: true, anchor: selPos{first, 0}, head: selPos{last, m.contentWidth()}}
+		got := m.selectedText()
+		if strings.Contains(got, "│") || !strings.Contains(got, "func a() {") || !strings.Contains(got, "return") {
+			t.Fatalf("settle=%v: copied %q", settle, got)
+		}
 	}
 }
 

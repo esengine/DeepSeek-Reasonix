@@ -7,15 +7,15 @@ export function useFoldModes(): FoldModes {
 }
 
 /** Whether a part starts open under its mode, given whether it is still being
- *  written and whether it failed. */
-export function startsOpen(mode: FoldMode, live = false, failed = false): boolean {
-  return mode === "open" || (mode === "live" && live) || (mode === "failed" && failed);
+ *  written, whether it failed and whether it changed a file. */
+export function startsOpen(mode: FoldMode, live = false, failed = false, changed = false): boolean {
+  return mode === "open" || (mode === "live" && live) || (mode === "failed" && failed) || (mode === "changed" && changed);
 }
 
 /** How a block of this kind starts, recomputed as the part's state changes. A
  *  block the reader has opened or closed keeps that answer instead. */
-export function useStartsOpen(kind: Fold, live = false, failed = false): boolean {
-  return startsOpen(useFoldModes()[kind], live, failed);
+export function useStartsOpen(kind: Fold, live = false, failed = false, changed = false): boolean {
+  return startsOpen(useFoldModes()[kind], live, failed, changed);
 }
 
 const NONE: ReadonlySet<string> = new Set();

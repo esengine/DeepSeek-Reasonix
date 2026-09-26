@@ -343,9 +343,10 @@ func (*parentClaimProbeHooks) PostToolUseFailure(context.Context, string, json.R
 func (*parentClaimProbeHooks) PostLLMCall(_ context.Context, reasoning string, _ int) string {
 	return reasoning
 }
-func (*parentClaimProbeHooks) HasPostLLMCall() bool                      { return false }
-func (*parentClaimProbeHooks) SubagentStop(context.Context, string)      {}
-func (*parentClaimProbeHooks) PreCompact(context.Context, string) string { return "" }
+func (*parentClaimProbeHooks) HasPostLLMCall() bool                                   { return false }
+func (*parentClaimProbeHooks) SubagentStart(context.Context, string, json.RawMessage) {}
+func (*parentClaimProbeHooks) SubagentStop(context.Context, string, string, error)    {}
+func (*parentClaimProbeHooks) PreCompact(context.Context, string) string              { return "" }
 
 func (r *recordingWriter) Name() string        { return r.name }
 func (r *recordingWriter) Description() string { return r.name }

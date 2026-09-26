@@ -10,6 +10,8 @@ describe("startsOpen", () => {
     expect(startsOpen("live", false)).toBe(false);
     expect(startsOpen("failed", false, true)).toBe(true);
     expect(startsOpen("failed", true, false)).toBe(false);
+    expect(startsOpen("changed", false, false, true)).toBe(true);
+    expect(startsOpen("changed", true, true, false)).toBe(false);
   });
 });
 

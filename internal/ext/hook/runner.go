@@ -303,14 +303,29 @@ func (r *Runner) SessionEnd(ctx context.Context, reason ...string) {
 	r.handle(Run(ctx, p, r.snapshot(), r.spawner))
 }
 
-// SubagentStop fires when a `task` sub-agent finishes. It can't block; last is
-// the sub-agent's final answer.
-func (r *Runner) SubagentStop(ctx context.Context, last string) {
+// SubagentStart fires before a foreground `task` sub-agent runs. It can't block;
+// callID is the task call's id, which the matching SubagentStop carries too.
+func (r *Runner) SubagentStart(ctx context.Context, callID string, args json.RawMessage) {
+	if !r.Enabled() {
+		return
+	}
+	p := r.payload(SubagentStart)
+	p.CallID, p.ToolArgs = callID, args
+	r.handle(Run(ctx, p, r.snapshot(), r.spawner))
+}
+
+// SubagentStop fires when a foreground `task` sub-agent ends, whether it
+// answered, failed, was cancelled or refused. It can't block; err is why it
+// did not answer.
+func (r *Runner) SubagentStop(ctx context.Context, callID, last string, err error) {
 	if !r.Enabled() {
 		return
 	}
 	p := r.payload(SubagentStop)
-	p.LastAssistant = last
+	p.CallID, p.LastAssistant = callID, last
+	if err != nil {
+		p.Error = err.Error()
+	}
 	r.handle(Run(ctx, p, r.snapshot(), r.spawner))
 }
 

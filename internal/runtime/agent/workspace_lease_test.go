@@ -39,9 +39,10 @@ func (*workspaceLeaseTestHooks) PostToolUseFailure(context.Context, string, json
 func (*workspaceLeaseTestHooks) PostLLMCall(_ context.Context, reasoning string, _ int) string {
 	return reasoning
 }
-func (*workspaceLeaseTestHooks) HasPostLLMCall() bool                      { return false }
-func (*workspaceLeaseTestHooks) SubagentStop(context.Context, string)      {}
-func (*workspaceLeaseTestHooks) PreCompact(context.Context, string) string { return "" }
+func (*workspaceLeaseTestHooks) HasPostLLMCall() bool                                   { return false }
+func (*workspaceLeaseTestHooks) SubagentStart(context.Context, string, json.RawMessage) {}
+func (*workspaceLeaseTestHooks) SubagentStop(context.Context, string, string, error)    {}
+func (*workspaceLeaseTestHooks) PreCompact(context.Context, string) string              { return "" }
 
 func (t *workspaceLeaseTestTool) Name() string        { return t.name }
 func (t *workspaceLeaseTestTool) Description() string { return t.name }

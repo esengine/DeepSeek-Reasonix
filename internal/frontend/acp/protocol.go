@@ -68,8 +68,8 @@ type Implementation struct {
 }
 
 // InitializeResult advertises what this agent supports: persisted session load,
-// ACP v1 session lifecycle helpers, inline resource text (embeddedContext) but
-// not image/audio, and stdio / Streamable HTTP MCP (no legacy sse).
+// ACP v1 session lifecycle helpers, image and embedded-resource prompts but not
+// audio, and stdio / Streamable HTTP MCP (no legacy sse).
 type InitializeResult struct {
 	ProtocolVersion   int               `json:"protocolVersion"`
 	AgentCapabilities AgentCapabilities `json:"agentCapabilities"`
@@ -430,9 +430,8 @@ type SessionDeleteResult struct{}
 
 // content blocks (inbound prompt)
 
-// ContentBlock is one piece of a prompt. The agent reads text blocks and the
-// inline text of resource blocks (embeddedContext); image/audio are accepted on
-// the wire but ignored, matching the advertised capabilities.
+// ContentBlock is one piece of a prompt: text, an image, audio, or an embedded
+// resource carrying either inline text or base64 bytes.
 type ContentBlock struct {
 	Type     string            `json:"type"`
 	Text     string            `json:"text,omitempty"`
@@ -446,27 +445,7 @@ type ResourceContents struct {
 	URI      string `json:"uri"`
 	MimeType string `json:"mimeType,omitempty"`
 	Text     string `json:"text,omitempty"`
-}
-
-// FlattenPrompt extracts the user-visible prompt text out of ACP content blocks.
-// Text blocks contribute their text; resource blocks contribute their inline
-// text when present (embeddedContext). Other block kinds are dropped. Ported from
-// protocol.ts flattenPrompt.
-func FlattenPrompt(blocks []ContentBlock) string {
-	parts := make([]string, 0, len(blocks))
-	for _, b := range blocks {
-		switch b.Type {
-		case "text":
-			if b.Text != "" {
-				parts = append(parts, b.Text)
-			}
-		case "resource":
-			if b.Resource != nil && b.Resource.Text != "" {
-				parts = append(parts, b.Resource.Text)
-			}
-		}
-	}
-	return strings.TrimSpace(strings.Join(parts, "\n\n"))
+	Blob     string `json:"blob,omitempty"`
 }
 
 // session/prompt

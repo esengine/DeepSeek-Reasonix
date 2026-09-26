@@ -117,3 +117,65 @@ func TestAFolderLinkedOutOfTheTreeIsRefused(t *testing.T) {
 		t.Fatalf("err = %v, want the folder refused as outside the workspace", err)
 	}
 }
+
+// A link is listed as what it resolves to: a linked folder opens like any
+// other folder, and a link the explorer could never open is not offered.
+func TestALinkIsListedAsWhatItResolvesTo(t *testing.T) {
+	root := listingTree(t)
+	outside := testenv.TempDir(t)
+	links := map[string]string{
+		"folder-link": filepath.Join(root, "alpha"),
+		"file-link":   filepath.Join(root, "top.md"),
+		"escape":      outside,
+		"dangling":    filepath.Join(root, "gone"),
+	}
+	for name, target := range links {
+		if err := os.Symlink(target, filepath.Join(root, name)); err != nil {
+			t.Skipf("cannot create a link here: %v", err)
+		}
+	}
+	top, err := listFolder(root, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !slices.Equal(top.Directories, []string{"alpha", "folder-link", "zeta"}) {
+		t.Fatalf("directories = %v, want the linked folder beside alpha and zeta", top.Directories)
+	}
+	if !slices.Equal(top.Files, []string{"file-link", "top.md"}) {
+		t.Fatalf("files = %v, want the linked file beside top.md and no link that leaves the tree or dangles", top.Files)
+	}
+	inner, err := listFolder(root, "folder-link")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !slices.Equal(inner.Directories, []string{"folder-link/inner"}) || !slices.Equal(inner.Files, []string{"folder-link/a.txt"}) {
+		t.Fatalf("folder-link = %+v", inner)
+	}
+}
+
+// A search lists files, so a linked folder is not one of its hits, and a link
+// leaving the tree is passed over as the explorer passes it over.
+func TestASearchListsOnlyLinksToFilesInTheTree(t *testing.T) {
+	root := listingTree(t)
+	outside := testenv.TempDir(t)
+	if err := os.WriteFile(filepath.Join(outside, "far.txt"), []byte("x"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	links := map[string]string{
+		"txt-folder": filepath.Join(root, "alpha"),
+		"near.txt":   filepath.Join(root, "top.md"),
+		"far.txt":    filepath.Join(outside, "far.txt"),
+	}
+	for name, target := range links {
+		if err := os.Symlink(target, filepath.Join(root, name)); err != nil {
+			t.Skipf("cannot create a link here: %v", err)
+		}
+	}
+	got, err := searchFiles(root, "txt")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !slices.Equal(got.Files, []string{"alpha/a.txt", "near.txt", "zeta/z.txt"}) {
+		t.Fatalf("search = %v", got.Files)
+	}
+}

@@ -5,6 +5,7 @@ import (
 	"errors"
 	"io"
 	"net/http"
+	"net/http/httptest"
 	"strings"
 	"sync"
 	"testing"
@@ -41,14 +42,20 @@ func TestRetryableStatus(t *testing.T) {
 }
 
 func TestTransientErr(t *testing.T) {
-	if transientErr(nil) {
+	live := context.Background()
+	if transientErr(live, nil) {
 		t.Error("nil should not be transient")
 	}
-	if transientErr(context.Canceled) || transientErr(context.DeadlineExceeded) {
-		t.Error("ctx cancel/deadline should not be transient")
+	if transientErr(live, context.Canceled) {
+		t.Error("cancellation should not be transient")
 	}
-	if !transientErr(errors.New("connection reset")) {
+	if !transientErr(live, errors.New("connection reset")) {
 		t.Error("network-ish error should be transient")
+	}
+	done, cancel := context.WithCancel(context.Background())
+	cancel()
+	if transientErr(done, errors.New("connection reset")) {
+		t.Error("an error after the caller gave up should not be transient")
 	}
 }
 
@@ -297,5 +304,61 @@ func TestRequestAttemptCountSurvivesRetriesThenTerminalFailure(t *testing.T) {
 	usage := UsageWithRequestAttemptCount(ctx, nil)
 	if usage == nil || usage.TotalTokens != 0 || usage.RequestCount != 3 {
 		t.Fatalf("failed request usage = %+v, want tokens=0 requests=3", usage)
+	}
+}
+
+func TestSendWithRetryRetriesResponseHeaderTimeout(t *testing.T) {
+	var mu sync.Mutex
+	calls := 0
+	release := make(chan struct{})
+	defer close(release)
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		mu.Lock()
+		calls++
+		n := calls
+		mu.Unlock()
+		if n == 1 {
+			select {
+			case <-release:
+			case <-r.Context().Done():
+			}
+			return
+		}
+		w.WriteHeader(http.StatusOK)
+	}))
+	defer srv.Close()
+	cl := &http.Client{Transport: &http.Transport{ResponseHeaderTimeout: 50 * time.Millisecond}}
+	newReq := func(ctx context.Context) (*http.Request, error) {
+		return http.NewRequestWithContext(ctx, http.MethodPost, srv.URL, nil)
+	}
+
+	resp, err := SendWithRetry(context.Background(), cl, SendOptions{Provider: "p"}, newReq)
+	if err != nil {
+		t.Fatalf("a response-header timeout ended the request instead of retrying: %v", err)
+	}
+	resp.Body.Close()
+	mu.Lock()
+	defer mu.Unlock()
+	if calls != 2 {
+		t.Fatalf("calls = %d, want the timed-out attempt plus one retry", calls)
+	}
+}
+
+func TestSendWithRetryStopsWhenCallerDeadlineExpires(t *testing.T) {
+	calls := 0
+	cl := &http.Client{Transport: rtFunc(func(r *http.Request) (*http.Response, error) {
+		calls++
+		<-r.Context().Done()
+		return nil, r.Context().Err()
+	})}
+	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Millisecond)
+	defer cancel()
+
+	_, err := SendWithRetry(ctx, cl, SendOptions{Provider: "p"}, newDummyReq)
+	if !errors.Is(err, context.DeadlineExceeded) {
+		t.Fatalf("err = %v, want the caller's deadline", err)
+	}
+	if calls != 1 {
+		t.Fatalf("calls = %d, want no retry once the caller's own deadline expired", calls)
 	}
 }

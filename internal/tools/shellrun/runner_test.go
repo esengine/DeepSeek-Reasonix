@@ -86,7 +86,7 @@ func TestDisplayName(t *testing.T) {
 }
 
 func TestRunForegroundSuccess(t *testing.T) {
-	argv, sh := shellArgv(t, "printf 'ok\\n'")
+	argv, sh := shellArgv(t, "echo ok")
 	res := RunForeground(context.Background(), Request{
 		Argv:      argv,
 		ShellKind: sh.Kind.String(),
