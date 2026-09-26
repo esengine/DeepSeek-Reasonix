@@ -3,9 +3,11 @@ package control
 import (
 	"context"
 	"encoding/json"
+	"strings"
 	"sync"
 	"testing"
 	"time"
+	"unicode/utf8"
 
 	"reasonix/internal/base/testenv"
 	"reasonix/internal/contract/event"
@@ -68,11 +70,33 @@ func TestAskFiresNotificationHook(t *testing.T) {
 }
 
 func TestAskNotificationText(t *testing.T) {
-	if got := askNotificationText(nil); got != "answer needed: " {
+	if got := askNotificationText(nil, nil); got != "answer needed: " {
 		t.Fatalf("no questions = %q", got)
 	}
 	two := []event.AskQuestion{{Prompt: "Which fix?"}, {Prompt: "Which branch?"}}
-	if got := askNotificationText(two); got != "answer needed: Which fix?" {
+	if got := askNotificationText(two, nil); got != "answer needed: Which fix?" {
 		t.Fatalf("two questions = %q, want the first prompt", got)
+	}
+}
+
+// An MCP elicitation forwards a server's words to whatever channel the hook
+// feeds, so the notification names the server and keeps its text short.
+func TestAskNotificationTextNamesMCPSourceAndClipsPrompt(t *testing.T) {
+	fields := []event.AskQuestion{{Prompt: "GitHub token"}}
+	origin := &event.AskOrigin{Kind: event.AskOriginMCP, Source: "github", Message: "Sign in\nto continue"}
+	if got := askNotificationText(fields, origin); got != "answer needed (MCP github): Sign in to continue" {
+		t.Fatalf("mcp = %q, want the source named and the message on one line", got)
+	}
+
+	noMessage := &event.AskOrigin{Kind: event.AskOriginMCP, Source: "github"}
+	if got := askNotificationText(fields, noMessage); got != "answer needed (MCP github): GitHub token" {
+		t.Fatalf("mcp without message = %q, want the first field's prompt", got)
+	}
+
+	long := strings.Repeat("界", askNotificationPromptRunes+40)
+	got := askNotificationText([]event.AskQuestion{{Prompt: long}}, nil)
+	want := "answer needed: " + strings.Repeat("界", askNotificationPromptRunes) + "..."
+	if got != want {
+		t.Fatalf("long prompt = %d runes, want %d", utf8.RuneCountInString(got), utf8.RuneCountInString(want))
 	}
 }

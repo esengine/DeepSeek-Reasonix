@@ -290,7 +290,7 @@ func (c *Controller) ask(ctx context.Context, questions []event.AskQuestion, ori
 	c.sink.Emit(event.Event{Kind: event.AskRequest, Ask: event.Ask{ID: id, Questions: questions, Origin: origin}})
 	c.approval.promptEmitMu.Unlock()
 	// A question blocks the run on the user exactly like an approval prompt.
-	go c.hooks.Notification(ctx, askNotificationText(questions), "question_prompt")
+	go c.hooks.Notification(ctx, askNotificationText(questions, origin), "question_prompt")
 
 	waitCtx, cancelWait := c.approval.waitContext(ctx)
 	defer cancelWait()

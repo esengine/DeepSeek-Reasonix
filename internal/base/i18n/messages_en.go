@@ -128,6 +128,7 @@ var English = Messages{
 	ApprovalNeededFmt:               "approval needed: %s",
 	ApprovalNeededWithSubjectFmt:    "approval needed: %s %s",
 	AnswerNeededFmt:                 "answer needed: %s",
+	AnswerNeededFromFmt:             "answer needed (MCP %s): %s",
 	ToolApprovalSourceFmt:           "Source: %s",
 	ToolApprovalBuiltIn:             "built-in tool",
 	ToolApprovalImageUse:            "It will read provided image input for image understanding.",
