@@ -829,3 +829,87 @@ test("F11 toggles full screen where no application menu binds it", () => {
   // macOS keeps its own full-screen control on the window menu and title bar.
   assert.equal(rig("darwin").bound(), false);
 });
+
+function reloadRig(platform = "darwin") {
+  const { installReload } = require("../src/reload.js");
+  const handlers = {};
+  const state = { reloads: 0, prevented: 0, visible: true, destroyed: false, clock: 0 };
+  const contents = {
+    on: (name, fn) => { handlers[name] = fn; },
+    reload: () => { state.reloads += 1; state.crashed = false; },
+    isCrashed: () => !!state.crashed,
+  };
+  const window = { isVisible: () => state.visible, isDestroyed: () => state.destroyed };
+  const { revive } = installReload(contents, window, { platform, now: () => state.clock });
+  const send = (input) => handlers["before-input-event"]?.({ preventDefault: () => { state.prevented += 1; } }, input);
+  const gone = (reason) => {
+    state.crashed = reason !== "clean-exit";
+    handlers["render-process-gone"]?.({}, { reason, exitCode: 1 });
+  };
+  return { state, send, gone, revive };
+}
+
+test("the reload key brings back a window whose page stopped drawing", () => {
+  const press = (over) => ({ type: "keyDown", key: "r", code: "KeyR", control: false, alt: false, shift: false, meta: false, isAutoRepeat: false, ...over });
+  const cases = [
+    ["darwin", { meta: true }, { control: true }],
+    ["win32", { control: true }, { meta: true }],
+    ["linux", { control: true }, { meta: true }],
+  ];
+  for (const [platform, mod, other] of cases) {
+    const { state, send } = reloadRig(platform);
+    send(press(mod));
+    send(press({ ...mod, key: "R" }));
+    send(press({ ...mod, key: "к" }));
+    send(press({ key: "F5", code: "F5" }));
+    assert.equal(state.reloads, 4, `${platform}: the reload keys did not reload`);
+    send(press());
+    send(press(other));
+    send(press({ ...mod, shift: true }));
+    send(press({ ...mod, alt: true }));
+    send(press({ ...mod, type: "keyUp" }));
+    send(press({ ...mod, isAutoRepeat: true }));
+    send(press({ ...mod, key: "t", code: "KeyT" }));
+    send(press({ key: "F5", code: "F5", control: true }));
+    assert.equal(state.reloads, 4, `${platform}: something other than a fresh reload press reloaded`);
+    assert.equal(state.prevented, 4);
+  }
+});
+
+test("a renderer that dies under a visible window is reloaded, but not in a loop", () => {
+  const { CRASH_RELOADS, CRASH_WINDOW_MS } = require("../src/reload.js");
+  const { state, gone } = reloadRig();
+  gone("killed");
+  assert.equal(state.reloads, 1, "a killed renderer was not reloaded");
+  gone("clean-exit");
+  assert.equal(state.reloads, 1, "a clean exit was reloaded");
+  state.visible = false;
+  gone("crashed");
+  assert.equal(state.reloads, 1, "a hidden window was reloaded; its crash belongs to the shell's first-paint handling");
+  state.visible = true;
+  for (let i = 1; i < CRASH_RELOADS + 3; i++) gone("crashed");
+  assert.equal(state.reloads, CRASH_RELOADS, "crashes kept reloading past the guard");
+  state.clock += CRASH_WINDOW_MS;
+  gone("crashed");
+  assert.equal(state.reloads, CRASH_RELOADS + 1, "the guard never let a later crash reload again");
+  state.destroyed = true;
+  gone("crashed");
+  assert.equal(state.reloads, CRASH_RELOADS + 1, "a destroyed window was reloaded");
+});
+
+test("a renderer that died while the window was hidden is reloaded before the window shows", () => {
+  const { state, gone, revive } = reloadRig();
+  revive();
+  assert.equal(state.reloads, 0, "a live page was reloaded on show");
+  state.visible = false;
+  gone("crashed");
+  assert.equal(state.reloads, 0);
+  revive();
+  assert.equal(state.reloads, 1, "the window would show a dead page");
+  revive();
+  assert.equal(state.reloads, 1, "a page already reloaded was reloaded again");
+  state.crashed = true;
+  state.destroyed = true;
+  revive();
+  assert.equal(state.reloads, 1, "a destroyed window was reloaded");
+});
