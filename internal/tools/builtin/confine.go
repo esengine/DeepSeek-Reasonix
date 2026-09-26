@@ -2,6 +2,7 @@ package builtin
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"path/filepath"
 	"runtime"
@@ -215,10 +216,15 @@ func realRoots(roots []string) []string {
 	return out
 }
 
+// CodeWriteOutsideScope identifies a file-tool write refused for landing outside
+// workspace_root and allow_write. The file tools enforce it on every platform,
+// whether or not an OS sandbox exists, so it is never a sandbox refusal.
+const CodeWriteOutsideScope = "workspace.write_outside_scope"
+
 // confine reports an error when target resolves outside every root. An empty
 // roots slice is unconfined (returns nil) — the safe default for the built-in
-// templates before a run configures the workspace. The error text is written
-// for the model: it names the boundary and how the user can widen it.
+// templates before a run configures the workspace. The refusal carries
+// CodeWriteOutsideScope; its text names the path, the roots and the setting.
 func confine(roots []string, target string) error {
 	if len(roots) == 0 {
 		return nil
@@ -232,9 +238,12 @@ func confine(roots []string, target string) error {
 			return nil
 		}
 	}
-	return fmt.Errorf("path %q is outside the writable roots (writes are confined to %s); "+
-		"write inside the workspace or a configured allow_write root, or widen [sandbox] workspace_root / allow_write in reasonix.toml",
-		target, strings.Join(roots, ", "))
+	return tool.Refusal{Code: CodeWriteOutsideScope, Message: fmt.Sprintf(
+		"write refused: %q is outside the workspace write scope; file tools may write only under %s. "+
+			"This scope is enforced by Reasonix's file tools on every platform: it is not an OS sandbox, and it does not depend on whether shell commands are sandboxed. "+
+			"Write inside those directories, or ask the user to add the target's directory to the extra writable directories "+
+			"(Settings > Sandbox > Also writable, stored as allow_write under [sandbox] in reasonix.toml) or to move workspace_root",
+		target, strings.Join(roots, ", "))}
 }
 
 // confineWrite is the write-tool boundary check: workspace confinement first,
@@ -265,7 +274,13 @@ func withSessionTempAlternative(temp *sessiontemp.Manager, err error) error {
 	if dir == "" {
 		return err
 	}
-	return fmt.Errorf("%w; scratch files may also go under $TMPDIR (%s)", err, dir)
+	suffix := fmt.Sprintf("; scratch files may also go under $TMPDIR (%s)", dir)
+	var refusal tool.Refusal
+	if errors.As(err, &refusal) {
+		refusal.Message += suffix
+		return refusal
+	}
+	return fmt.Errorf("%w%s", err, suffix)
 }
 
 // underSessionTemp reports whether target sits in the session's own temporary
