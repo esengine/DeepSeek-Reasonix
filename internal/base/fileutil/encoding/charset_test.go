@@ -103,3 +103,35 @@ func TestDecodeOutputKeepsUncutCodePageEdges(t *testing.T) {
 		}
 	}
 }
+
+// A process stopped mid-write leaves one incomplete UTF-8 character at an end
+// nothing cut. Once a whole multi-byte UTF-8 character has appeared, that is
+// the only invalid part, and the output is still UTF-8.
+func TestDecodeOutputReadsUncutUTF8EndingInPartialRune(t *testing.T) {
+	const text = "编译成功…正在运行"
+	half := []byte("中")[:2]
+	if got := string(DecodeOutput(append([]byte(text), half...), Cut{})); got != text {
+		t.Fatalf("UTF-8 plus half a rune = %q, want %q", got, text)
+	}
+	// Nothing multi-byte came before the half rune, so no structure says UTF-8;
+	// the bytes still form a GBK pair and are read as one.
+	if got := string(DecodeOutput(append([]byte("ok "), half...), Cut{})); got != "ok 涓" {
+		t.Fatalf("ASCII plus half a rune = %q", got)
+	}
+	gb, _ := simplifiedchinese.GB18030.NewEncoder().String("参数格式不正确")
+	for _, tc := range []struct {
+		name string
+		raw  string
+		cut  Cut
+		want string
+	}{
+		{"uncut GBK", gb, Cut{}, "参数格式不正确"},
+		{"GBK cut at the end", gb[:len(gb)-1], Cut{Tail: true}, "参数格式不正"},
+		{"GBK cut at the start", gb[2:], Cut{Head: true}, "数格式不正确"},
+	} {
+		got := string(DecodeOutput([]byte(tc.raw), tc.cut))
+		if got != tc.want && !(tc.cut.Tail && strings.HasPrefix(got, tc.want)) {
+			t.Fatalf("%s = %q, want %q", tc.name, got, tc.want)
+		}
+	}
+}
