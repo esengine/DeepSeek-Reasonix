@@ -93,7 +93,7 @@ test("release tag mutation follows approval with an explicit identity and read-o
 test("cancelled CI releases workers, aggregates, and metrics without hiding live failures", () => {
   for (const name of ["test", "windows-control", "windows-isolated", "race", "sdk", "desktop-prepare",
     "desktop-frontend", "desktop-browser-group", "desktop-go", "desktop-go-race", "desktop-macos",
-    "desktop-windows", "desktop-windows-go-group", "desktop-windows-package", "lint-code", "site", "coverage", "prune-go-cache"]) {
+    "desktop-windows", "desktop-windows-go-group", "desktop-windows-package", "lint-code", "coverage", "prune-go-cache"]) {
     assert.equal(condition(job(ci, name), { cancelled: () => true }), false, name);
   }
   for (const name of ["root", "lint", "desktop", "desktop-browser", "desktop-windows-go", "ci-metrics"]) {
@@ -321,19 +321,19 @@ test("required lint aggregates code lint and the deduplicated frontend suite", (
 test("required root aggregate covers the jobs the per-OS test legs do not", () => {
   const body = job(ci, "root");
   const script = shellStep(body, "Verify root validation jobs");
-  const success = { CHANGES_RESULT: "success", CODE_REQUIRED: "true", SITE_REQUIRED: "true", COVERAGE_REQUIRED: "true",
-    CONTROL_RESULT: "success", ISOLATED_RESULT: "success", SDK_RESULT: "success", SITE_RESULT: "success", COVERAGE_RESULT: "success" };
+  const success = { CHANGES_RESULT: "success", CODE_REQUIRED: "true", COVERAGE_REQUIRED: "true",
+    CONTROL_RESULT: "success", ISOLATED_RESULT: "success", SDK_RESULT: "success", COVERAGE_RESULT: "success" };
   const run = env => spawnSync("bash", ["-e", "-c", script], { env: { ...process.env, ...env } }).status;
   assert.equal(run(success), 0);
-  for (const key of ["CHANGES_RESULT", "CONTROL_RESULT", "ISOLATED_RESULT", "SDK_RESULT", "SITE_RESULT", "COVERAGE_RESULT"])
+  for (const key of ["CHANGES_RESULT", "CONTROL_RESULT", "ISOLATED_RESULT", "SDK_RESULT", "COVERAGE_RESULT"])
     for (const value of ["failure", "cancelled", "skipped", ""]) assert.notEqual(run({ ...success, [key]: value }), 0, `${key}=${value}`);
-  // A pull request unrelated to code or site: the internally-gated jobs still
+  // A pull request unrelated to code: the internally-gated jobs still
   // report success, the skippable ones must actually be skipped.
-  assert.equal(run({ ...success, CODE_REQUIRED: "false", SITE_REQUIRED: "false", COVERAGE_REQUIRED: "false",
-    ISOLATED_RESULT: "skipped", SITE_RESULT: "skipped", COVERAGE_RESULT: "skipped" }), 0);
+  assert.equal(run({ ...success, CODE_REQUIRED: "false", COVERAGE_REQUIRED: "false",
+    ISOLATED_RESULT: "skipped", COVERAGE_RESULT: "skipped" }), 0);
   // Coverage is push-only; a pull request that ran it is a routing defect.
   assert.notEqual(run({ ...success, COVERAGE_REQUIRED: "false", COVERAGE_RESULT: "success" }), 0);
-  assert.match(body, /needs: \[changes, windows-control, windows-isolated, sdk, site, coverage\]/);
+  assert.match(body, /needs: \[changes, windows-control, windows-isolated, sdk, coverage\]/);
   // govulncheck sets continue-on-error, so needs.*.result is success even when
   // it fails; aggregating it would be a tautology that reads like coverage.
   assert.match(job(ci, "govulncheck"), /continue-on-error: true/);

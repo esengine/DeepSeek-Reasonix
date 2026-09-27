@@ -158,14 +158,6 @@ for retired in release-preview.yml release-cli-trigger.yml release-desktop-trigg
 done
 npm_events="$(sed -n '/^on:/,/^permissions:/p' "$repo_root/.github/workflows/release-npm.yml")"
 ! grep -Eq 'push:|npm-v\*-\*' <<<"$npm_events"
-grep -Eq '^name: Prepare release$' "$repo_root/.github/workflows/prepare-release-notes.yml"
-[ "$(grep -Fc 'git merge --no-edit origin/main-v2' "$repo_root/.github/workflows/prepare-release-notes.yml")" = "0" ]
-grep -Fq 'RELEASE_NOTES_SOURCE_SHA=$source_sha' "$repo_root/.github/workflows/prepare-release-notes.yml"
-grep -Fq -- '--to "$RELEASE_NOTES_SOURCE_SHA"' "$repo_root/.github/workflows/prepare-release-notes.yml"
-notes_dispatch="$(sed -n '/workflow_dispatch:/,/permissions:/p' "$repo_root/.github/workflows/prepare-release-notes.yml")"
-[ "$(grep -Ec '^      [a-z_]+:$' <<<"$notes_dispatch")" = "1" ]
-grep -Fq 'GitHub Actions could not open the PR; the reviewed branch is preserved.' \
-	"$repo_root/.github/workflows/prepare-release-notes.yml"
 if grep -Eq '^  push:$' "$repo_root/.github/workflows/release-stable.yml" ||
 	grep -Eq '^  push:$' "$repo_root/.github/workflows/release.yml" ||
 	grep -Eq '^  push:$' "$repo_root/.github/workflows/release-desktop.yml"; then
@@ -1337,21 +1329,6 @@ expect_invalid_desktop_manifest "a Preview manifest as Stable" stable "$desktop_
 	"$desktop_preview_base" "$desktop_preview_manifest"
 expect_invalid_desktop_manifest "a non-official asset base" preview "$desktop_preview_version" \
 	"https://cdn.invalid/desktop-${desktop_preview_version}/" "$desktop_preview_manifest"
-
-# Release notes use one deterministic branch per official version. Failure to
-# open the PR must preserve that branch and print an exact manual handoff.
-prepare_notes="$repo_root/.github/workflows/prepare-release-notes.yml"
-generate_notes="$repo_root/scripts/generate-release-notes.mjs"
-if grep -Eq '^      (target_pr|from_tag):$' "$prepare_notes"; then
-	echo "Prepare release must expose only the official version input" >&2
-	exit 1
-fi
-grep -Fq 'branch="release-notes/v${VERSION}"' "$prepare_notes"
-grep -Fq 'GitHub Actions could not open the PR; the reviewed branch is preserved.' "$prepare_notes"
-grep -Fq 'gh pr create --repo ${{ github.repository }} --base main-v2 --head $RELEASE_NOTES_BRANCH --fill' "$prepare_notes"
-grep -Eq 'GITHUB_STEP_SUMMARY' "$prepare_notes"
-grep -Fq 'node scripts/generate-release-notes.mjs --version "$VERSION" --to "$RELEASE_NOTES_SOURCE_SHA"' "$prepare_notes"
-grep -Fq 'thinking: { type: "disabled" }' "$generate_notes"
 
 desktop_candidate_resolver="$repo_root/scripts/resolve-desktop-candidate.sh"
 test -x "$desktop_candidate_resolver"

@@ -1825,4 +1825,4 @@ jobs:
         if: env.HAS_R2 == 'true' && needs.resolve.outputs.channel != 'preview' && needs.resolve.outputs.prerelease != 'true' && steps.mirror_r2.outputs.pointer_moved == 'true'
         env:
           GH_TOKEN: ${{ github.token }}
-        run: gh workflow run pages.yml --ref main-v2
+        run: gh workflow run pages.yml --ref website

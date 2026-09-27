@@ -67,12 +67,12 @@ test "$update" = true
 stage=pages-dispatch
 request="release-${GITHUB_RUN_ID:?}-${GITHUB_RUN_ATTEMPT:?}"
 title="Deploy site v$version [$request]"
-payload="$(jq -cn --arg version "$version" --arg request "$request" '{ref:"main-v2",inputs:{release_version:$version,release_request:$request}}')"
+payload="$(jq -cn --arg version "$version" --arg request "$request" '{ref:"website",inputs:{release_version:$version,release_request:$request}}')"
 # Dispatch once. On an uncertain response, recovery observes public state again;
 # never blindly repeat this write within the same run.
 gh api -X POST "repos/$repository/actions/workflows/pages.yml/dispatches" --input - <<< "$payload"
 for _ in $(seq 1 30); do
-	runs="$(gh run list --repo "$repository" --workflow pages.yml --event workflow_dispatch --branch main-v2 --limit 100 --json databaseId,displayTitle)"
+	runs="$(gh run list --repo "$repository" --workflow pages.yml --event workflow_dispatch --branch website --limit 100 --json databaseId,displayTitle)"
 	pages_run="$(jq -er --arg title "$title" '[.[] | select(.displayTitle == $title)] | if length == 0 then "" elif length == 1 then .[0].databaseId else error("ambiguous owned Pages deployment") end' <<< "$runs")"
 	[ -z "$pages_run" ] || break
 	sleep 2

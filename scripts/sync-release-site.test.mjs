@@ -42,7 +42,7 @@ const args=process.argv.slice(2), root=process.env.FIXTURE;
 fs.appendFileSync(path.join(root,'calls'),JSON.stringify(args)+'\\n');
 if(args[0]==='api' && args.includes('POST')) {
   const body=JSON.parse(fs.readFileSync(0,'utf8'));
-  if(body.ref!=='main-v2' || body.inputs.release_version!=='1.2.3' || body.inputs.release_request!=='release-123-2') process.exit(3);
+  if(body.ref!=='website' || body.inputs.release_version!=='1.2.3' || body.inputs.release_request!=='release-123-2') process.exit(3);
   fs.writeFileSync(path.join(root,'request'),body.inputs.release_request);
 } else if(args[0]==='api') console.log('2026-01-01T00:00:00Z');
 else if(args[0]==='release' && args[1]==='view') console.log(process.env.MISSING_EVENT==='true'?'0':'1');
@@ -132,19 +132,13 @@ test("real public verifier rejects tag drift before inspecting any packages", t 
   assert.equal(f.calls(), "");
 });
 
-test("recovery and publication share one owner and recovery cannot enter a publisher", () => {
-  const recovery = readFileSync(".github/workflows/release-site-recovery.yml", "utf8");
+test("publication delegates website deployment to the website branch", () => {
   const promote = readFileSync(".github/workflows/release-promote.yml", "utf8");
+  const sync = readFileSync("scripts/sync-release-site.sh", "utf8");
   assert.match(readFileSync(".github/workflows/release-stable.yml", "utf8"), /group: stable-release-publication/);
-  for (const workflow of [recovery, promote]) {
-    assert.match(workflow, /group: stable-release-publication/);
-    assert.match(workflow, /bash scripts\/sync-release-site.sh/);
-    assert.match(workflow, /retention-days: 90/);
-    assert.match(workflow, /bash scripts\/check-release-public-access.sh/);
-  }
-  assert.match(recovery, /RELEASE_SITE_RECOVERY_ONLY: "true"/);
-  assert.doesNotMatch(recovery, /secrets: inherit|release-candidate-tags.sh activate|contents: write|uses: .*release-(desktop|npm)\.yml/);
-  assert.equal((recovery.match(/environment: release/g) || []).length, 1);
-  const pages = readFileSync(".github/workflows/pages.yml", "utf8");
-  assert.ok(pages.indexOf("Recheck release ownership") < pages.indexOf("uses: actions/deploy-pages"));
+  assert.match(promote, /group: stable-release-publication/);
+  assert.match(promote, /bash scripts\/sync-release-site.sh/);
+  assert.match(promote, /retention-days: 90/);
+  assert.match(sync, /\{ref:"website"/);
+  assert.match(sync, /--branch website/);
 });

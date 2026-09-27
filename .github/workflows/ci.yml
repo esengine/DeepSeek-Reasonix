@@ -1636,16 +1636,13 @@ jobs:
             -ignore 'label "windows-11-arm" is unknown' \
             -ignore 'label "macos-15-intel" is unknown' \
             .github/workflows/release-stable.yml \
-            .github/workflows/prepare-release-notes.yml \
             .github/workflows/release-candidate.yml \
             .github/workflows/release-candidate-verify.yml \
             .github/workflows/release-promote.yml \
             .github/workflows/release-verify.yml \
-            .github/workflows/release-site-recovery.yml \
             .github/workflows/release.yml \
             .github/workflows/release-npm.yml \
             .github/workflows/release-desktop.yml \
-            .github/workflows/pages.yml \
             .github/workflows/apple-notary-log.yml \
             .github/workflows/macos-signing-check.yml \
             .github/workflows/release-verify-issues.yml \
@@ -1669,14 +1666,14 @@ jobs:
           node scripts/check-single-release-public-contract.mjs
 
   # `lint` is a protected check name. Keep it as the fail-closed aggregate so
-  # Required check for the root-module and site jobs the per-OS `test` legs do
+  # required checks for root-module jobs the per-OS `test` legs do
   # not cover. windows-control and sdk gate internally through RUN_STEPS and so
   # always report a result: `success` here means "did not fail", not "validated
   # this diff" — the same trade-off the required `test` legs already make. Do
   # not add govulncheck: it sets continue-on-error, so needs.*.result is
   # `success` even when its steps fail and the assertion would be a tautology.
   root:
-    needs: [changes, windows-control, windows-isolated, sdk, site, coverage]
+    needs: [changes, windows-control, windows-isolated, sdk, coverage]
     if: ${{ !cancelled() }}
     runs-on: ubuntu-latest
     steps:
@@ -1684,12 +1681,10 @@ jobs:
         env:
           CHANGES_RESULT: ${{ needs.changes.result }}
           CODE_REQUIRED: ${{ (github.event_name != 'pull_request' && needs.changes.outputs.notes_only != 'true') || needs.changes.outputs.code != 'false' }}
-          SITE_REQUIRED: ${{ (github.event_name != 'pull_request' && needs.changes.outputs.notes_only != 'true') || needs.changes.outputs.site != 'false' }}
           COVERAGE_REQUIRED: ${{ github.event_name != 'pull_request' && needs.changes.outputs.notes_only != 'true' }}
           CONTROL_RESULT: ${{ needs.windows-control.result }}
           ISOLATED_RESULT: ${{ needs.windows-isolated.result }}
           SDK_RESULT: ${{ needs.sdk.result }}
-          SITE_RESULT: ${{ needs.site.result }}
           COVERAGE_RESULT: ${{ needs.coverage.result }}
         run: |
           test "$CHANGES_RESULT" = success
@@ -1697,7 +1692,6 @@ jobs:
           test "$CONTROL_RESULT" = success
           test "$SDK_RESULT" = success
           test "$ISOLATED_RESULT" = "$(expected "$CODE_REQUIRED")"
-          test "$SITE_RESULT" = "$(expected "$SITE_REQUIRED")"
           test "$COVERAGE_RESULT" = "$(expected "$COVERAGE_REQUIRED")"
 
   # frontend unit coverage can run once in desktop-frontend without weakening
@@ -1730,31 +1724,6 @@ jobs:
           else
             test "$FRONTEND_RESULT" = skipped
           fi
-
-  # The site/ auth client has security-sensitive redirect-validation logic
-  # (safeNext) covered by node:test unit tests. Those tests use only Node
-  # builtins, so no `npm install` is needed — run them directly on every PR so
-  # a regression in redirect validation fails the build instead of shipping.
-  # The notes_only term matches every other gated job here. Without it a
-  # release-notes-only push runs this job while the root aggregate expects the
-  # house-style skip, which would leave main-v2 permanently red. A pure
-  # release-notes/** diff cannot touch site/, so skipping it loses no coverage.
-  site:
-    needs: changes
-    if: ${{ !cancelled() && ((github.event_name != 'pull_request' && needs.changes.outputs.notes_only != 'true') || needs.changes.outputs.site != 'false') }}
-    runs-on: ubuntu-latest
-    defaults:
-      run:
-        working-directory: site
-    steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
-
-      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7
-        with:
-          node-version-file: .node-version
-
-      - name: test
-        run: npm test
 
   govulncheck:
     needs: changes

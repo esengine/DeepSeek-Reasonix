@@ -7,7 +7,6 @@ required=(
 	.github/workflows/release-candidate.yml
 	.github/workflows/release-candidate-verify.yml
 	.github/workflows/release-promote.yml
-	.github/workflows/release-site-recovery.yml
 	.github/workflows/release-desktop.yml
 	.signpath/contracts/release-signing.yml
 	npm/publish-candidate.mjs

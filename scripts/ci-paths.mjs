@@ -14,7 +14,7 @@ const FRONTEND = /^desktop\/frontend\//;
 const DESKTOP_MANIFEST = /^(?:desktop\/(?:package\.json|pnpm-lock\.yaml|pnpm-workspace\.yaml|\.npmrc)|desktop\/frontend\/(?:package\.json|pnpm-lock\.yaml|vite\.config\.[cm]?[jt]s|tsconfig[^/]*\.json))$/;
 const ELECTRON = /^(?:desktop\/electron\/|desktop\/(?:package\.json|pnpm-lock\.yaml|pnpm-workspace\.yaml)$)/;
 const PACKAGING = /^(?:desktop\/(?:packaging\/|build\/|internal\/upgradefixture\/|cmd\/windows-upgrade-fixture\/)|scripts\/(?:desktop-build|package-windows-desktop|install-nsis|check-windows-uninstaller|finalize-windows-signed-candidate|test-windows-(?:installer-startup|startup-recovery|upgrade-startup)|windows-(?:upgrade-ui-evidence|acceptance-environment))\b)/;
-const RELEASE_CONTROL = /^(?:\.github\/workflows\/(?:release[^/]*|prepare-release-notes|pages)\.yml|scripts\/(?:release|resolve-release-candidate|validate-release-candidate|build-release-cli-candidate|publish-homebrew-cask|desktop-release-artifacts|finalize-windows-signed-candidate|verify-release-artifact-archive|verify-release-tag-identity|verify-stable-release-artifacts)[^/]*|npm\/publish(?:-candidate)?(?:\.test)?\.mjs)$/;
+const RELEASE_CONTROL = /^(?:\.github\/workflows\/release[^/]*\.yml|scripts\/(?:release|resolve-release-candidate|validate-release-candidate|build-release-cli-candidate|publish-homebrew-cask|desktop-release-artifacts|finalize-windows-signed-candidate|verify-release-artifact-archive|verify-release-tag-identity|verify-stable-release-artifacts)[^/]*|npm\/publish(?:-candidate)?(?:\.test)?\.mjs)$/;
 const DESKTOP_GO = /^(?:desktop\/(?:[^/]+\.go|go\.(?:mod|sum)|cmd\/|internal\/)|internal\/|cmd\/|go\.(?:mod|sum)$)/;
 const SDK = /^(?:sdk\/|internal\/extension\/)/;
 const WINDOWS_BUILTIN = /^(?:internal\/(?:tool\/builtin\/|tool\/tool\.go$|sandbox\/|permission\/|permissionpreset\/)|scripts\/windows-pr-contract-tests(?:\.test)?\.mjs$)/;
@@ -60,10 +60,6 @@ export function classifyPaths(input, { full = false } = {}) {
     if (releaseControl) {
       flags.release_control = true;
       setReason(reasons, "release_control", path, "release control plane");
-      if (path === ".github/workflows/pages.yml") {
-        flags.site = true;
-        setReason(reasons, "site", path, "site deployment control");
-      }
     }
     if (SDK.test(path)) {
       flags.sdk = true;

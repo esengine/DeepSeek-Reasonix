@@ -202,7 +202,6 @@ test("release control changes run focused contracts without selecting product su
     ".github/workflows/release-candidate.yml",
     ".github/workflows/release-candidate-verify.yml",
     ".github/workflows/release-promote.yml",
-    ".github/workflows/pages.yml",
     "scripts/release-candidate.mjs",
     "scripts/sync-release-site.sh",
     "scripts/sync-release-site.test.mjs",

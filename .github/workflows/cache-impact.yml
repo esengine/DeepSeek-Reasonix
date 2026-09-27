@@ -10,9 +10,7 @@ on:
     # conservative: when in doubt, run.
     paths-ignore:
       - 'docs/**'
-      - 'site/**'
       - 'release-notes/**'
-      - 'workers/**'
       - 'benchmarks/**'
       - 'npm/**'
       - '*.md'
