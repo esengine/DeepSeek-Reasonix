@@ -236,3 +236,18 @@ func looksLikeMachineSessionID(query string) bool {
 	}
 	return true
 }
+
+func isDefaultInteractiveFlag(arg string) bool {
+	switch arg {
+	case "--model", "--max-steps", "--continue", "-c", "--resume", "-r", "--copy", "--dangerously-skip-permissions", "--yolo", "--permission-mode", "--effort", "--dir", "--append-system-prompt-file", "--add-dir", "--allowed-tools", "--allowedTools", "--profile", "--preset":
+		return true
+	}
+	if name, _, ok := strings.Cut(arg, "="); ok && isDefaultInteractiveFlag(name) {
+		return true
+	}
+	return false
+}
+
+func isDoctorRepairCommand(args []string) bool {
+	return len(args) > 1 && args[0] == "doctor" && args[1] == "repair"
+}

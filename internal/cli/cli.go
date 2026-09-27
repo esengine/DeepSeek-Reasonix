@@ -205,21 +205,6 @@ func RunWithBuildInfo(args []string, info BuildInfo) int {
 	}
 }
 
-func isDoctorRepairCommand(args []string) bool {
-	return len(args) > 1 && args[0] == "doctor" && args[1] == "repair"
-}
-
-func isDefaultInteractiveFlag(arg string) bool {
-	switch arg {
-	case "--model", "--max-steps", "--continue", "-c", "--resume", "-r", "--copy", "--dangerously-skip-permissions", "--yolo", "--permission-mode", "--effort", "--dir", "--add-dir", "--allowed-tools", "--allowedTools", "--profile", "--preset":
-		return true
-	}
-	if name, _, ok := strings.Cut(arg, "="); ok && isDefaultInteractiveFlag(name) {
-		return true
-	}
-	return false
-}
-
 func shouldMigrateLegacyConfigForCLI(cmd string) bool {
 	switch cmd {
 	case "", "run", "chat", "code", "serve", "web", "setup", "config", "init", "acp", "mcp", "remote", "plugin", "subagent", "doctor", "bot", "upgrade", "update":
@@ -265,16 +250,17 @@ func setupProfile(ctx context.Context, modelName string, maxStepsOverride int, r
 }
 
 type cliBuildOverrides struct {
-	Preset               string
-	Effort               *string
-	EffortModel          string
-	PermissionAllow      []string
-	AdditionalDirs       []string
-	WorkspaceRoot        string
-	HeadlessApprovalMode string
-	Stderr               io.Writer
-	OnSessionRecovered   func(control.SessionRecoveryInfo) error
-	Ablation             ablation.Set
+	AppendSystemPromptFile string
+	Preset                 string
+	Effort                 *string
+	EffortModel            string
+	PermissionAllow        []string
+	AdditionalDirs         []string
+	WorkspaceRoot          string
+	HeadlessApprovalMode   string
+	Stderr                 io.Writer
+	OnSessionRecovered     func(control.SessionRecoveryInfo) error
+	Ablation               ablation.Set
 	// InteractiveHost marks human-in-the-loop entries (chat TUI); print mode
 	// and bots stay on core-v1.
 	InteractiveHost bool
@@ -307,29 +293,30 @@ func setupProfileWithOverrides(ctx context.Context, modelName string, maxStepsOv
 func cliProfileBuildOptions(modelName string, maxStepsOverride int, requireKey bool, sink event.Sink, overrides cliBuildOverrides) boot.Options {
 	sessionDir := resolveCLISessionDir()
 	opts := boot.Options{
-		Model:                modelName,
-		MaxSteps:             maxStepsOverride,
-		MaxStepsKey:          "--max-steps",
-		RequireKey:           requireKey,
-		Sink:                 sink,
-		SessionDir:           sessionDir,
-		SessionService:       cliSessionService(sessionDir),
-		NativeLegacySession:  overrides.NativeLegacySession,
-		SessionHostID:        "local",
-		AgentPreset:          overrides.Preset,
-		WorkspaceRoot:        overrides.WorkspaceRoot,
-		EffortOverride:       overrides.Effort,
-		EffortModel:          overrides.EffortModel,
-		PermissionAllow:      overrides.PermissionAllow,
-		AdditionalDirs:       overrides.AdditionalDirs,
-		HeadlessApprovalMode: overrides.HeadlessApprovalMode,
-		StatsSource:          "cli",
-		Stderr:               overrides.Stderr,
-		OnSessionRecovered:   overrides.OnSessionRecovered,
-		Ablation:             overrides.Ablation,
-		SessionTemp:          overrides.SessionTemp,
-		BackgroundScope:      overrides.BackgroundScope,
-		PersistentShell:      overrides.PersistentShell,
+		Model:                  modelName,
+		MaxSteps:               maxStepsOverride,
+		MaxStepsKey:            "--max-steps",
+		RequireKey:             requireKey,
+		Sink:                   sink,
+		SessionDir:             sessionDir,
+		SessionService:         cliSessionService(sessionDir),
+		NativeLegacySession:    overrides.NativeLegacySession,
+		SessionHostID:          "local",
+		AgentPreset:            overrides.Preset,
+		WorkspaceRoot:          overrides.WorkspaceRoot,
+		AppendSystemPromptFile: overrides.AppendSystemPromptFile,
+		EffortOverride:         overrides.Effort,
+		EffortModel:            overrides.EffortModel,
+		PermissionAllow:        overrides.PermissionAllow,
+		AdditionalDirs:         overrides.AdditionalDirs,
+		HeadlessApprovalMode:   overrides.HeadlessApprovalMode,
+		StatsSource:            "cli",
+		Stderr:                 overrides.Stderr,
+		OnSessionRecovered:     overrides.OnSessionRecovered,
+		Ablation:               overrides.Ablation,
+		SessionTemp:            overrides.SessionTemp,
+		BackgroundScope:        overrides.BackgroundScope,
+		PersistentShell:        overrides.PersistentShell,
 	}
 	opts.MCPHostProfile = plugin.HostProfileForInteractive(overrides.InteractiveHost)
 	return opts
@@ -493,6 +480,7 @@ func runAgent(args []string, version string) int {
 	trajectoryPath := fs.String("trajectory", "", "append a timestamped JSONL trajectory of the run's full event stream (tool calls, reasoning, decisions) to this path")
 	ablateFlag := fs.String("ablate", "", "benchmark arm: comma-separated subsystems to switch off (evidence, planner, subagent, retrieval, compaction; none|all)")
 	dir := fs.String("dir", "", "change to this directory first (project root); config, sandbox and file tools resolve from here")
+	appendSystemPromptFile := fs.String("append-system-prompt-file", "", "append a private UTF-8 file as process-only system guidance")
 	cont := registerContinueFlag(fs)
 	resume := fs.String("resume", "", "resume by session file path, session ID, or machine session ID (takes precedence over --continue)")
 	copySession := fs.Bool("copy", false, "with --resume/--continue: duplicate the session and continue in the copy (escape hatch when the original is held by another Reasonix process)")
@@ -556,6 +544,11 @@ func runAgent(args []string, version string) int {
 	allowedTools = uniqueStrings(append(allowedTools, permissions.allow...))
 	if rc := chdirTo(*dir); rc != 0 {
 		return rc
+	}
+	*appendSystemPromptFile, err = resolveOptionalAppendSystemPromptFile(fs, *appendSystemPromptFile)
+	if err != nil {
+		fmt.Fprintln(os.Stderr, i18n.M.ErrorPrefix, err)
+		return 2
 	}
 	workspaceRoot, err := workspaceRootForDir(*dir)
 	if err != nil {
@@ -679,15 +672,16 @@ func runAgent(args []string, version string) int {
 	// UI can answer; unattended writes require explicit --auto/-y,
 	// legacy permission aliases.
 	overrides := cliBuildOverrides{
-		Preset:               deprecatedMode,
-		Effort:               effortOverride,
-		PermissionAllow:      allowedTools,
-		AdditionalDirs:       additionalDirs,
-		WorkspaceRoot:        workspaceRoot,
-		HeadlessApprovalMode: permissions.approval,
-		OnSessionRecovered:   cliSessionRecoveredHandler(leases),
-		Ablation:             ablated,
-		NativeLegacySession:  resumePath != "",
+		AppendSystemPromptFile: *appendSystemPromptFile,
+		Preset:                 deprecatedMode,
+		Effort:                 effortOverride,
+		PermissionAllow:        allowedTools,
+		AdditionalDirs:         additionalDirs,
+		WorkspaceRoot:          workspaceRoot,
+		HeadlessApprovalMode:   permissions.approval,
+		OnSessionRecovered:     cliSessionRecoveredHandler(leases),
+		Ablation:               ablated,
+		NativeLegacySession:    resumePath != "",
 	}
 	ctrl, err := setupProfileWithOverrides(ctx, *model, *maxSteps, true, sink, overrides)
 	if err != nil {
@@ -710,8 +704,8 @@ func runAgent(args []string, version string) int {
 	// MCP/API callers that manage their own per-project session). Takes
 	// precedence over --continue.
 	// --continue: resume the most recent saved session.
-	if err := commitStartupResume(takeoverBinding, takeoverManager, ctrl, resumeSession, resumeTarget,
-		flagTakeoverApproval(*takeover)); err != nil {
+	if err := commitStartupResumeWithStandingInstructions(takeoverBinding, takeoverManager, ctrl, resumeSession, resumeTarget,
+		flagTakeoverApproval(*takeover), *appendSystemPromptFile != ""); err != nil {
 		return cliTakeoverFailure(takeoverBinding, leases, takeoverManager, err)
 	}
 	ctrl.EnsureHeadlessRunSessionPath()
@@ -976,6 +970,7 @@ func chatREPL(args []string, version string) int {
 	_ = fs.MarkHidden("dangerously-skip-permissions")
 	_ = fs.MarkHidden("yolo")
 	dir := fs.String("dir", "", "change to this directory first (project root); config, sandbox and file tools resolve from here")
+	appendSystemPromptFile := fs.String("append-system-prompt-file", "", "append a private UTF-8 file as process-only system guidance")
 	effort := fs.String("effort", "", "session reasoning effort override")
 	permissionMode := fs.String("permission-mode", "workspace-write", "permission mode: read-only | workspace-write | danger-full-access | plan")
 	var additionalDirs []string
@@ -1003,6 +998,11 @@ func chatREPL(args []string, version string) int {
 	allowedTools = uniqueStrings(append(allowedTools, permissions.allow...))
 	if rc := chdirTo(*dir); rc != 0 {
 		return rc
+	}
+	*appendSystemPromptFile, err = resolveOptionalAppendSystemPromptFile(fs, *appendSystemPromptFile)
+	if err != nil {
+		fmt.Fprintln(os.Stderr, i18n.M.ErrorPrefix, err)
+		return 2
 	}
 	workspaceRoot, err := workspaceRootForDir(*dir)
 	if err != nil {
@@ -1105,15 +1105,16 @@ func chatREPL(args []string, version string) int {
 		effortOverride = effort
 	}
 	overrides := cliBuildOverrides{
-		Preset:              deprecatedMode,
-		Effort:              effortOverride,
-		PermissionAllow:     allowedTools,
-		AdditionalDirs:      additionalDirs,
-		WorkspaceRoot:       workspaceRoot,
-		InteractiveHost:     true,
-		Stderr:              diagnostics.Writer(),
-		OnSessionRecovered:  cliSessionRecoveredHandler(leases),
-		NativeLegacySession: resumePath != "",
+		AppendSystemPromptFile: *appendSystemPromptFile,
+		Preset:                 deprecatedMode,
+		Effort:                 effortOverride,
+		PermissionAllow:        allowedTools,
+		AdditionalDirs:         additionalDirs,
+		WorkspaceRoot:          workspaceRoot,
+		InteractiveHost:        true,
+		Stderr:                 diagnostics.Writer(),
+		OnSessionRecovered:     cliSessionRecoveredHandler(leases),
+		NativeLegacySession:    resumePath != "",
 	}
 	diagnostics.Milestone("controller_build_begin")
 	ctrl, err := setupProfileWithOverrides(ctx, *model, *maxSteps, false, sink, overrides)
@@ -1138,8 +1139,8 @@ func chatREPL(args []string, version string) int {
 	// Decide where this conversation's auto-save lands. A resume reuses the
 	// file so closing/reopening keeps appending to the same history; a fresh
 	// session lands in a new file stamped with the model name.
-	if err := commitStartupResume(takeoverBinding, takeoverManager, ctrl, startupResumeSession, resumeTarget,
-		promptTakeoverApproval); err != nil {
+	if err := commitStartupResumeWithStandingInstructions(takeoverBinding, takeoverManager, ctrl, startupResumeSession, resumeTarget,
+		promptTakeoverApproval, *appendSystemPromptFile != ""); err != nil {
 		return cliTakeoverFailure(takeoverBinding, leases, takeoverManager, err)
 	}
 	ctrl.EnsureSessionPath()

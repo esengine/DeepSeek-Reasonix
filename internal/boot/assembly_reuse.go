@@ -18,6 +18,7 @@ type ReusedAssembly struct {
 	Hooks                   []hook.ResolvedHook
 	Registry                *tool.Registry
 	ImplicitSkillInvocation bool
+	externalSystemPrompt    bool
 }
 
 // shouldReuseDiscovery reports whether rediscovery of skills/commands/hooks

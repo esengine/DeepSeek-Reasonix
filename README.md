@@ -159,6 +159,17 @@ reasonix run "implement the TODOs in main.go"
 In an interactive session, run `/init` when you want Reasonix to create project
 instructions.
 
+Hosts and automation can append system-role standing instructions for a single
+process without changing configuration or project instruction files:
+
+```sh
+reasonix --append-system-prompt-file /absolute/path/host-instructions.md
+reasonix run --append-system-prompt-file /absolute/path/host-instructions.md "review the changes"
+```
+
+See the [host integration contract](./docs/CLI_HOST_INTEGRATION.md) for composition,
+resume, validation, and redacted output behavior.
+
 ### Desktop app
 
 Download the installer for your platform from the

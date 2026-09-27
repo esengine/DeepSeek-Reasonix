@@ -19,6 +19,9 @@ func RebuildFrom(ctx context.Context, previous *BuildResult, opts Options) (*Bui
 	if previous == nil || previous.Controller == nil {
 		return nil, fmt.Errorf("boot: RebuildFrom requires the BuildResult being replaced")
 	}
+	if externalPromptNeedsRebuild(opts.AppendSystemPromptFile, previous.Assembly) {
+		opts.ForceFullRebuild = true
+	}
 	if previous.Extensions != nil {
 		opts.Extensions = previous.Extensions
 	}

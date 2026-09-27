@@ -37,6 +37,9 @@ ask_request = true   # notify when a question is waiting
 [agent]
 # system_prompt = "You are ..."   # custom persona/prompt; unset or empty = built-in default
 # system_prompt_file = "prompts/system.md"   # project paths stay in <workspace>; user paths may fall back to <reasonix home>
+# Hosts can append instructions for one CLI process with --append-system-prompt-file PATH.
+# This CLI-only option has no TOML key; it preserves this prompt and project memory.
+# See docs/CLI_HOST_INTEGRATION.md for resume and validation behavior.
 temperature       = 0.0
 # recovery_model = ""               # optional reviewer for low-risk automatic recovery; empty leaves rule-only recovery
 # reasoning_language = "auto"   # visible reasoning text: auto|zh|en

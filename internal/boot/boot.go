@@ -119,6 +119,9 @@ type Options struct {
 	// --allowed-tools). They override configured ask rules but never deny rules
 	// and are not persisted.
 	PermissionAllow []string
+	// AppendSystemPromptFile supplies process-local standing instructions,
+	// re-read on each build without changing configuration or project memory.
+	AppendSystemPromptFile string
 	// AdditionalDirs grants this session's file writers and sandboxed shell
 	// access to extra directories without changing persisted sandbox config.
 	AdditionalDirs []string
@@ -251,7 +254,7 @@ func recoveryHeadlessMode(opts Options) bool {
 // assembled. The returned controller owns plugin subprocesses; call Close
 // (via Controller.Close) to release them.
 func build(ctx context.Context, opts Options) (*BuildResult, error) {
-	ctx, opts, owner, fileWriteReceipt := bindRuntimeOwner(ctx, opts)
+	ctx, opts, owner, fileWriteReceipt := bindRuntimeOwner(ctx, prepareExternalPromptBuild(opts))
 	stderr := opts.Stderr
 	if stderr == nil {
 		stderr = os.Stderr
@@ -667,6 +670,10 @@ func build(ctx context.Context, opts Options) (*BuildResult, error) {
 	}
 	mem := memory.Load(memory.Options{CWD: root, UserDir: config.MemoryUserDir()})
 	sysPrompt = memory.Compose(sysPrompt, mem)
+	sysPrompt, err = appendExternalSystemPrompt(sysPrompt, opts.AppendSystemPromptFile)
+	if err != nil {
+		return nil, err
+	}
 
 	implicitSkillInvocation := cfg.ImplicitSkillInvocationEnabled()
 	watchSkills := watchSkillsEnabled()
@@ -2073,6 +2080,7 @@ func build(ctx context.Context, opts Options) (*BuildResult, error) {
 		Hooks:                   resolvedHooks,
 		Registry:                reg,
 		ImplicitSkillInvocation: implicitSkillInvocation,
+		externalSystemPrompt:    opts.AppendSystemPromptFile != "",
 	}
 	skillsOwned = true
 	backgroundOwned = true

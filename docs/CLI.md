@@ -35,6 +35,7 @@ authentication is incomplete.
 | `--max-steps N` | Set a one-off maximum tool-call round budget; `0` uses automatic execution. |
 | `--dir PATH` | Change the workspace root before loading config and tools. |
 | `--add-dir PATH` | Add another writable tool directory; repeat for multiple directories. |
+| `--append-system-prompt-file PATH` | Append UTF-8 host instructions after the configured system prompt and project memory for this process. |
 | `-c`, `--continue` | Resume the most recent session. |
 | `-r`, `--resume [QUERY]` | Open the session picker, or resume a matching session. |
 | `--copy` | Continue in a writable copy of the resumed session. |
@@ -161,9 +162,12 @@ echo "explain this code" | reasonix run
 
 `reasonix run` keeps the normal streamed terminal presentation unless `-p` or a
 structured output format is selected. It also accepts `--model`,
-`--max-steps`, `--effort`, `--dir`, `--add-dir`,
+`--max-steps`, `--effort`, `--dir`, `--add-dir`, `--append-system-prompt-file`,
 `--continue`, `--resume QUERY`, `--copy`, `--allowed-tools`, `--permission-mode`,
 and `--auto` / `-y` (legacy aliases for `--permission-mode workspace-write`).
+
+For system-role host guidance, including exact resume and output privacy, see
+the [host integration contract](./CLI_HOST_INTEGRATION.md).
 
 ### Benchmark arms
 
