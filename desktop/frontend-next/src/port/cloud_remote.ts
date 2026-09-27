@@ -200,10 +200,10 @@ class RemoteTransport {
   }
 }
 
-class RemoteEventSource {
+export class RemoteEventSource {
   onmessage: ((event: MessageEvent<string>) => void) | null = null;
   private closed = false;
-  private after = 0;
+  private after: number | null = null;
 
   constructor(private readonly path: string) {
     queueMicrotask(() => void this.poll());
@@ -217,15 +217,23 @@ class RemoteEventSource {
     while (!this.closed) {
       let active = false;
       try {
-        const path = this.path.replace(/\/events$/, `/events/replay?lastEventId=${this.after}`);
+        const path = this.path.replace(/\/events$/, `/events/replay?lastEventId=${this.after ?? 0}`);
         const response = await fetch(path, { credentials: "same-origin" });
         if (response.ok) {
-          const body = await response.json() as { frames?: Array<Record<string, unknown>> };
+          const body = await response.json() as { frames?: Array<Record<string, unknown>>; watermark?: number };
           active = Boolean(body.frames?.length);
-          for (const frame of body.frames ?? []) {
-            const seq = typeof frame.seq === "number" ? frame.seq : 0;
-            if (seq > this.after) this.after = seq;
-            this.onmessage?.(new MessageEvent("message", { data: JSON.stringify(frame) }));
+          if (this.after === null) {
+            const frameWatermark = (body.frames ?? []).reduce(
+              (latest, frame) => typeof frame.seq === "number" ? Math.max(latest, frame.seq) : latest,
+              0,
+            );
+            this.after = typeof body.watermark === "number" ? body.watermark : frameWatermark;
+          } else {
+            for (const frame of body.frames ?? []) {
+              const seq = typeof frame.seq === "number" ? frame.seq : 0;
+              if (seq > this.after) this.after = seq;
+              this.onmessage?.(new MessageEvent("message", { data: JSON.stringify(frame) }));
+            }
           }
         }
       } catch {
