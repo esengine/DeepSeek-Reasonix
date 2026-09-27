@@ -10,6 +10,7 @@
     "migrate:firebase-crash": "node scripts/apply-firebase-crash.mjs",
     "migrate:dashboard-indexes": "wrangler d1 execute reasonix-crash --remote --file=migrate-dashboard-indexes.sql",
     "migrate:telemetry-db": "wrangler d1 execute reasonix-telemetry --remote --file=telemetry-schema.sql",
+    "migrate:split-desktop-telemetry": "node scripts/split-desktop-telemetry-export.mjs",
     "migrate:registry-indexes": "wrangler d1 execute reasonix-registry --remote --file=registry-migrate-performance-indexes.sql",
     "migrate:firebase-data": "node scripts/migrate-firebase-data.mjs",
     "capacity:telemetry": "node scripts/load-telemetry.mjs",
