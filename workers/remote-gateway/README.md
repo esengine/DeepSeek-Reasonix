@@ -22,3 +22,10 @@ controllers. The account service and this Worker share the
 Device admissions expire after 30 minutes and controller admissions after 15
 minutes. Clients reconnect with fresh credentials so account or device
 revocation takes effect without keeping a server-side revocation stream alive.
+
+## Deployment
+
+Production deployment runs from the existing `deploy-accounts-worker.yml`
+workflow on the `platform` branch. The workflow deploys the account service
+first, then this gateway, so their shared authentication contract and secret
+cannot be released in the wrong order.
