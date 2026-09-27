@@ -34,6 +34,7 @@ jobs:
           pnpm install --frozen-lockfile
           pnpm test
           pnpm typecheck
+          pnpm db:apply:remote
           npx wrangler deploy
       - name: Sync RESEND_API_KEY to the worker
         working-directory: workers/accounts

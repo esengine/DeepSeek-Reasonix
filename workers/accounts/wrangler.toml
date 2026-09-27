@@ -11,6 +11,9 @@ compatibility_date = "2026-06-01"
 
 routes = [{ pattern = "id.reasonix.io", custom_domain = true }]
 
+[triggers]
+crons = ["23 19 * * *"]
+
 [vars]
 # Where the web frontend lives — used for pages and post-action redirects.
 APP_ORIGIN = "https://reasonix.io"

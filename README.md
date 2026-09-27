@@ -22,3 +22,7 @@ Product clients live on `main-v2` and `studio`. The public website lives on
 Each service owns its package manager lockfile, tests, schema, migrations, and
 Wrangler configuration. Run validation from the service directory before using
 the matching manual production deployment workflow.
+
+The accounts worker removes expired sessions, email tokens, and device grants
+daily. Raw queued telemetry is retained in R2 for eight days; aggregated D1
+rows follow the service-specific retention windows in the crash worker.
