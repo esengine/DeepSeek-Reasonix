@@ -44,6 +44,18 @@ function msg(el, kind, text) {
 }
 function clearMsg(el) { if (el) el.hidden = true; }
 
+document.querySelectorAll("[data-password-toggle]").forEach((button) => {
+  const input = $(button.getAttribute("aria-controls"));
+  if (!input) return;
+  button.addEventListener("click", () => {
+    const show = input.type === "password";
+    input.type = show ? "text" : "password";
+    button.classList.toggle("is-visible", show);
+    button.setAttribute("aria-pressed", String(show));
+    button.setAttribute("aria-label", show ? "Hide password / 隐藏密码" : "Show password / 显示密码");
+  });
+});
+
 function busy(btn, on) {
   if (!btn) return;
   btn.disabled = on;
@@ -296,26 +308,82 @@ if (deviceView) {
   const gate = $("device-gate");
   const box = $("device-msg");
   const codeInput = $("device-code");
+  const codeStep = $("device-code-step");
   const meta = $("device-meta");
+  const expiry = $("device-expiry");
   const actions = $("device-actions");
   const preset = qp.get("code");
-  if (preset && codeInput) codeInput.value = preset;
+  let grantExpiryTimer = null;
+  if (preset && codeInput) {
+    codeInput.value = preset;
+    if (codeStep) codeStep.hidden = true;
+  }
+
+  const local = (en, zh) => document.body.dataset.lang === "zh" ? zh : en;
+  const deviceName = (agent = "") => {
+    const normalized = agent.toLowerCase();
+    if (normalized.startsWith("reasonix-studio") || normalized.startsWith("reasonix-serve")) return "Reasonix Studio";
+    if (normalized.startsWith("reasonix-cli")) return local("Reasonix CLI", "Reasonix 命令行");
+    return local("a Reasonix device", "一台 Reasonix 设备");
+  };
+
+  const stopGrantExpiry = () => {
+    if (grantExpiryTimer) clearInterval(grantExpiryTimer);
+    grantExpiryTimer = null;
+  };
+
+  const startGrantExpiry = (expiresAt) => {
+    stopGrantExpiry();
+    const deadline = Date.parse(expiresAt);
+    if (!Number.isFinite(deadline)) return;
+    const render = () => {
+      const seconds = Math.max(0, Math.ceil((deadline - Date.now()) / 1000));
+      if (seconds === 0) {
+        stopGrantExpiry();
+        if (meta) meta.hidden = true;
+        if (expiry) expiry.hidden = true;
+        if (actions) actions.hidden = true;
+        if (codeStep && !preset) codeStep.hidden = false;
+        msg(box, "error", local("This sign-in request has expired. Start sign-in again from Reasonix Studio.", "这次登录请求已过期，请回到 Reasonix Studio 重新发起登录。"));
+        return;
+      }
+      if (expiry) {
+        const minutes = Math.floor(seconds / 60);
+        const remainder = String(seconds % 60).padStart(2, "0");
+        expiry.textContent = local(`Expires in ${minutes}:${remainder}`, `将在 ${minutes}:${remainder} 后过期`);
+        expiry.hidden = false;
+      }
+    };
+    render();
+    grantExpiryTimer = setInterval(render, 1000);
+  };
 
   const showGrant = async () => {
     clearMsg(box);
+    stopGrantExpiry();
     if (meta) meta.hidden = true;
+    if (expiry) expiry.hidden = true;
     if (actions) actions.hidden = true;
     const code = codeInput.value.trim();
     if (!code) { msg(box, "error", "Enter the code shown in your terminal."); return; }
     try {
       const d = await api("/device/info?userCode=" + encodeURIComponent(code));
       if (meta) {
-        meta.textContent = `Requested by ${d.grant.userAgent || "a device"}`;
+        meta.textContent = local(`Request from ${deviceName(d.grant.userAgent)}`, `请求来自 ${deviceName(d.grant.userAgent)}`);
         meta.hidden = false;
       }
       if (actions) actions.hidden = false;
+      if (codeStep) codeStep.hidden = true;
+      startGrantExpiry(d.grant.expiresAt);
     } catch (err) {
-      msg(box, "error", err.message);
+      stopGrantExpiry();
+      if (meta) meta.hidden = true;
+      if (expiry) expiry.hidden = true;
+      if (actions) actions.hidden = true;
+      if (codeStep) codeStep.hidden = Boolean(preset);
+      msg(box, "error", err.code === "invalid_user_code"
+        ? local("This sign-in request has expired. Start sign-in again from Reasonix Studio.", "这次登录请求已过期，请回到 Reasonix Studio 重新发起登录。")
+        : err.message);
     }
   };
 
@@ -325,8 +393,10 @@ if (deviceView) {
     actions?.querySelectorAll("button").forEach((b) => (b.disabled = true));
     try {
       await api(path, { method: "POST", body: { userCode: code } });
+      stopGrantExpiry();
       msg(box, "ok", okText);
       if (meta) meta.hidden = true;
+      if (expiry) expiry.hidden = true;
       if (actions) actions.hidden = true;
       codeInput.disabled = true;
     } catch (err) {
@@ -340,8 +410,8 @@ if (deviceView) {
       deviceView.hidden = false;
       if (gate) gate.hidden = true;
       $("device-check")?.addEventListener("click", showGrant);
-      $("device-approve")?.addEventListener("click", () => decide("/device/approve", "Approved. Return to your terminal — you're signed in."));
-      $("device-deny")?.addEventListener("click", () => decide("/device/deny", "The sign-in request was rejected."));
+      $("device-approve")?.addEventListener("click", () => decide("/device/approve", local("Approved. You can return to Reasonix Studio.", "已批准，你可以返回 Reasonix Studio。")));
+      $("device-deny")?.addEventListener("click", () => decide("/device/deny", local("The sign-in request was rejected.", "已拒绝这次登录请求。")));
       if (preset) showGrant();
     })
     .catch((err) => {

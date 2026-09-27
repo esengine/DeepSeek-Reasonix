@@ -1,5 +1,6 @@
 ---
 import Account from '../layouts/Account.astro';
+import PasswordInput from '../components/PasswordInput.astro';
 const base = import.meta.env.BASE_URL.replace(/\/$/, '');
 ---
 <Account
@@ -25,7 +26,7 @@ const base = import.meta.env.BASE_URL.replace(/\/$/, '');
     </div>
     <div class="field">
       <label for="password"><span class="l-en">Password</span><span class="l-zh">密码</span></label>
-      <input id="password" name="password" type="password" autocomplete="new-password" minlength="8" required />
+      <PasswordInput id="password" name="password" autocomplete="new-password" minlength={8} required />
       <span class="hint"><span class="l-en">At least 8 characters.</span><span class="l-zh">至少 8 个字符。</span></span>
     </div>
     <button type="submit" class="btn btn-dark"><span class="l-en">Create account</span><span class="l-zh">注册</span></button>

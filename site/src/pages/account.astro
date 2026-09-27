@@ -1,5 +1,6 @@
 ---
 import Account from '../layouts/Account.astro';
+import PasswordInput from '../components/PasswordInput.astro';
 ---
 <Account
   wide
@@ -56,11 +57,11 @@ import Account from '../layouts/Account.astro';
     <form id="password-form" class="auth-form" novalidate>
       <div class="field">
         <label for="currentPassword"><span class="l-en">Current password</span><span class="l-zh">当前密码</span></label>
-        <input id="currentPassword" type="password" autocomplete="current-password" required />
+        <PasswordInput id="currentPassword" autocomplete="current-password" required />
       </div>
       <div class="field">
         <label for="newPassword"><span class="l-en">New password</span><span class="l-zh">新密码</span></label>
-        <input id="newPassword" type="password" autocomplete="new-password" minlength="8" required />
+        <PasswordInput id="newPassword" autocomplete="new-password" minlength={8} required />
       </div>
       <button type="submit" class="btn btn-ghost"><span class="l-en">Change password</span><span class="l-zh">修改密码</span></button>
     </form>

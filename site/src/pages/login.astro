@@ -1,5 +1,6 @@
 ---
 import Account from '../layouts/Account.astro';
+import PasswordInput from '../components/PasswordInput.astro';
 const base = import.meta.env.BASE_URL.replace(/\/$/, '');
 ---
 <Account
@@ -24,7 +25,7 @@ const base = import.meta.env.BASE_URL.replace(/\/$/, '');
         <label for="password"><span class="l-en">Password</span><span class="l-zh">密码</span></label>
         <a class="auth-small" href={`${base}/forgot/`}><span class="l-en">Forgot?</span><span class="l-zh">忘记密码？</span></a>
       </div>
-      <input id="password" name="password" type="password" autocomplete="current-password" required />
+      <PasswordInput id="password" name="password" autocomplete="current-password" required />
     </div>
     <button type="submit" class="btn btn-dark"><span class="l-en">Sign in</span><span class="l-zh">登录</span></button>
   </form>

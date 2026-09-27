@@ -1333,6 +1333,18 @@ footer { background: var(--bg); border-top: 1px solid var(--line); margin-top: 0
   box-shadow: 0 0 0 4px var(--accent-soft);
 }
 .field input:disabled, .field textarea:disabled { opacity: 0.55; }
+.password-input { position: relative; }
+.password-input input { padding-right: 46px; }
+.password-toggle {
+  position: absolute; top: 50%; right: 8px; transform: translateY(-50%);
+  width: 36px; height: 36px; display: grid; place-items: center;
+  color: var(--ink-3); background: transparent; border: 0; border-radius: 8px; cursor: pointer;
+}
+.password-toggle:hover { color: var(--ink); background: var(--accent-soft); }
+.password-toggle:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+.password-toggle svg { width: 19px; height: 19px; fill: none; stroke: currentColor; stroke-width: 1.8; stroke-linecap: round; stroke-linejoin: round; }
+.password-toggle .password-eye-closed, .password-toggle.is-visible .password-eye-open { display: none; }
+.password-toggle.is-visible .password-eye-closed { display: block; }
 .auth-form .btn { width: 100%; margin-top: 4px; }
 .btn[disabled], .btn.loading { opacity: 0.55; pointer-events: none; }
 .auth-row { display: flex; align-items: baseline; justify-content: space-between; gap: 12px; }
@@ -1364,7 +1376,9 @@ footer { background: var(--bg); border-top: 1px solid var(--line); margin-top: 0
 .acct-danger:hover { text-decoration: underline; }
 
 .device-code { font-family: var(--font-mono); font-size: 20px; letter-spacing: 0.16em; text-transform: uppercase; text-align: center; }
+.device-check { width: 100%; margin-top: 14px; }
 .device-meta { margin-top: 16px; text-align: center; font-size: 13.5px; color: var(--ink-2); }
+.device-expiry { margin-top: 5px; text-align: center; font-size: 12px; color: var(--ink-3); }
 .device-actions { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; margin-top: 18px; }
 .device-actions .btn { width: 100%; margin: 0; }
 
