@@ -2,6 +2,7 @@ const API = (import.meta.env.PUBLIC_ACCOUNTS_API || "https://id.reasonix.io").re
 const STUDIO = (import.meta.env.PUBLIC_STUDIO_URL || "https://studio.reasonix.io").replace(/\/$/, "");
 const $ = (id) => document.getElementById(id);
 const local = (en, zh) => document.body.dataset.lang === "zh" ? zh : en;
+const requestedDevice = new URL(location.href).searchParams.get("device")?.trim() || "";
 
 async function api(path) {
   const response = await fetch(API + path, { credentials: "include" });
@@ -78,7 +79,28 @@ async function loadDevices() {
       return;
     }
     const devices = (data.devices || []).filter((device) => !device.revokedAt && device.online === true);
+    if (requestedDevice) {
+      const target = devices.find((device) => device.id === requestedDevice);
+      if (target) {
+        gate.hidden = false;
+        gate.className = "auth-head";
+        gate.textContent = local(
+          `Connecting to ${target.name || "Studio"}…`,
+          `正在连接 ${target.name || "Studio"}…`,
+        );
+        view.hidden = true;
+        location.replace(studioUrl(target.id));
+        return;
+      }
+      box.className = "auth-msg error";
+      box.textContent = local(
+        "The computer in this QR code is offline or does not belong to this account. Keep desktop Studio open and signed in, then refresh.",
+        "二维码对应的电脑不在线，或不属于当前账号。请保持电脑端 Studio 已打开并登录同一账号，然后刷新。",
+      );
+      box.hidden = false;
+    }
     if (devices.length === 0) {
+      if (requestedDevice) return;
       box.className = "remote-empty-state";
       box.innerHTML = `
         <strong>${local("No computer is online", "当前没有在线电脑")}</strong>
@@ -94,7 +116,7 @@ async function loadDevices() {
     devices.forEach((device) => list.append(deviceCard(device)));
   } catch (error) {
     if (error.status === 401) {
-      location.href = `/login/?next=${encodeURIComponent("/remote/")}`;
+      location.href = `/login/?next=${encodeURIComponent(location.pathname + location.search)}`;
       return;
     }
     gate.className = "auth-msg error";
