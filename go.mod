@@ -22,7 +22,6 @@ require (
 	github.com/joho/godotenv v1.5.1
 	github.com/kevinburke/ssh_config v1.6.0
 	github.com/klauspost/compress v1.20.0
-	github.com/larksuite/oapi-sdk-go/v3 v3.11.0
 	github.com/mattn/go-runewidth v0.0.28
 	github.com/pkg/sftp v1.13.11
 	github.com/rivo/uniseg v0.4.7
@@ -62,7 +61,6 @@ require (
 	github.com/dlclark/regexp2/v2 v2.2.1 // indirect
 	github.com/dustin/go-humanize v1.0.1 // indirect
 	github.com/go-ole/go-ole v1.3.0 // indirect
-	github.com/gogo/protobuf v1.3.2 // indirect
 	github.com/google/uuid v1.6.0 // indirect
 	github.com/kr/fs v0.1.0 // indirect
 	github.com/lucasb-eyer/go-colorful v1.4.1 // indirect
