@@ -1,4 +1,4 @@
-import type { AuthenticatedDevice, ConsumedGrant, Env } from "./env";
+import type { AuthenticatedDevice, AuthorizedAttachment, ConsumedGrant, Env } from "./env";
 
 const TOKEN_PATTERN = /^[0-9a-f]{64}$/;
 
@@ -32,4 +32,19 @@ export function authenticateDevice(env: Env, deviceId: string, credential: strin
 
 export function consumeGrant(env: Env, ticket: string): Promise<ConsumedGrant | null> {
   return accountRequest(env, "/remote/grants/consume", { ticket });
+}
+
+export function authorizeAttachmentUpload(
+  env: Env,
+  input: { objectId: string; ticket: string; ciphertextBytes: number; ciphertextSha256: string },
+): Promise<AuthorizedAttachment | null> {
+  return accountRequest(env, "/remote/attachments/upload", input);
+}
+
+export function authorizeAttachmentDownload(
+  env: Env,
+  objectId: string,
+  ticket: string,
+): Promise<AuthorizedAttachment | null> {
+  return accountRequest(env, "/remote/attachments/download", { objectId, ticket });
 }

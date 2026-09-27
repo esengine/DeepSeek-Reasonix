@@ -2,7 +2,13 @@ import { Hono } from "hono";
 import type { AppEnv } from "../env";
 import { repos } from "../db";
 import { ApiError } from "../http/errors";
-import { parseBody, RemoteDeviceAuthenticateSchema, RemoteGrantConsumeSchema } from "../lib/validation";
+import {
+  parseBody,
+  RemoteAttachmentDownloadSchema,
+  RemoteAttachmentUploadSchema,
+  RemoteDeviceAuthenticateSchema,
+  RemoteGrantConsumeSchema,
+} from "../lib/validation";
 
 const remote = new Hono<AppEnv>();
 
@@ -37,6 +43,20 @@ remote.post("/grants/consume", async (c) => {
   const grant = await repos(c.env).remoteDevices.consumeGrant(ticket);
   if (!grant) throw new ApiError(401, "invalid_grant", "The connection grant is invalid, expired, or already used.");
   return c.json({ grant });
+});
+
+remote.post("/attachments/upload", async (c) => {
+  const input = await parseBody(c, RemoteAttachmentUploadSchema);
+  const attachment = await repos(c.env).remoteAttachments.consumeUpload(input);
+  if (!attachment) throw new ApiError(401, "invalid_attachment_grant", "The upload grant is invalid or expired.");
+  return c.json({ attachment });
+});
+
+remote.post("/attachments/download", async (c) => {
+  const { objectId, ticket } = await parseBody(c, RemoteAttachmentDownloadSchema);
+  const attachment = await repos(c.env).remoteAttachments.authorizeDownload(objectId, ticket);
+  if (!attachment) throw new ApiError(401, "invalid_attachment_grant", "The download grant is invalid or expired.");
+  return c.json({ attachment });
 });
 
 export default remote;

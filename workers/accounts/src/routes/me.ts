@@ -15,8 +15,13 @@ import {
   RemoteDeviceRegisterSchema,
   RemoteDeviceRenameSchema,
   RemoteGrantIssueSchema,
+  RemoteAttachmentIssueSchema,
 } from "../lib/validation";
-import { REMOTE_GRANT_TTL_MS } from "../config";
+import {
+  REMOTE_ATTACHMENT_MAX_BYTES,
+  REMOTE_ATTACHMENT_TTL_MS,
+  REMOTE_GRANT_TTL_MS,
+} from "../config";
 
 const me = new Hono<AppEnv>();
 
@@ -68,6 +73,21 @@ me.post("/remote-grants", async (c) => {
     ttlMs: REMOTE_GRANT_TTL_MS,
   });
   return c.json({ grant: { ...grant, targetDeviceId, scopes } }, 201);
+});
+
+me.post("/remote-attachments", async (c) => {
+  const user = currentUser(c);
+  const { targetDeviceId, ciphertextBytes } = await parseBody(c, RemoteAttachmentIssueSchema);
+  const repositories = repos(c.env);
+  const device = await repositories.remoteDevices.activeForUser(user.id, targetDeviceId);
+  if (!device) throw new ApiError(404, "device_not_found", "That device is unavailable.");
+  const attachment = await repositories.remoteAttachments.issue({
+    userId: user.id,
+    targetDeviceId,
+    maxBytes: Math.min(ciphertextBytes, REMOTE_ATTACHMENT_MAX_BYTES),
+    ttlMs: REMOTE_ATTACHMENT_TTL_MS,
+  });
+  return c.json({ attachment }, 201);
 });
 
 me.patch("/", async (c) => {

@@ -6,6 +6,11 @@ routes = [{ pattern = "remote.reasonix.io", custom_domain = true }]
 
 [vars]
 ACCOUNT_ORIGIN = "https://id.reasonix.io"
+ALLOWED_ORIGINS = "https://reasonix.io,https://www.reasonix.io"
+
+[[r2_buckets]]
+binding = "ATTACHMENTS"
+bucket_name = "reasonix-remote-attachments"
 
 [[durable_objects.bindings]]
 name = "REMOTE_SESSIONS"

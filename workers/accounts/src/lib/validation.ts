@@ -69,12 +69,29 @@ export const RemoteGrantIssueSchema = z.object({
   scopes: z.array(remoteCapability).min(1).max(5).transform((items) => [...new Set(items)]),
 }).strict();
 
+export const RemoteAttachmentIssueSchema = z.object({
+  targetDeviceId: remoteDeviceId,
+  ciphertextBytes: z.number().int().positive().max(20 * 1024 * 1024),
+}).strict();
+
 export const RemoteDeviceAuthenticateSchema = z.object({
   deviceId: remoteDeviceId,
   deviceCredential: z.string().regex(/^[0-9a-f]{64}$/),
 }).strict();
 
 export const RemoteGrantConsumeSchema = z.object({
+  ticket: z.string().regex(/^[0-9a-f]{64}$/),
+}).strict();
+
+export const RemoteAttachmentUploadSchema = z.object({
+  objectId: z.string().regex(/^[0-9a-f]{64}$/),
+  ticket: z.string().regex(/^[0-9a-f]{64}$/),
+  ciphertextBytes: z.number().int().positive().max(20 * 1024 * 1024),
+  ciphertextSha256: z.string().regex(/^[0-9a-f]{64}$/),
+}).strict();
+
+export const RemoteAttachmentDownloadSchema = z.object({
+  objectId: z.string().regex(/^[0-9a-f]{64}$/),
   ticket: z.string().regex(/^[0-9a-f]{64}$/),
 }).strict();
 

@@ -29,3 +29,8 @@ Production deployment runs from the existing `deploy-accounts-worker.yml`
 workflow on the `platform` branch. The workflow deploys the account service
 first, then this gateway, so their shared authentication contract and secret
 cannot be released in the wrong order.
+
+Encrypted attachments use the private `reasonix-remote-attachments` R2 bucket.
+Objects are always served as `application/octet-stream` with content sniffing
+disabled. The bucket has a one-day lifecycle rule; authorization expires after
+15 minutes even when physical deletion has not run yet.

@@ -7,11 +7,17 @@ interface ForwardedRequest {
   request: Request;
 }
 
-function environment(forwarded: ForwardedRequest[]): Env {
+function environment(forwarded: ForwardedRequest[], attachments?: Record<string, unknown>): Env {
   return {
     ACCOUNT_ORIGIN: "https://id.reasonix.io",
+    ALLOWED_ORIGINS: "https://reasonix.io,https://www.reasonix.io",
     REMOTE_GATEWAY_TOKEN: "gateway-secret",
     GATEWAY_LIMITER: { limit: vi.fn(async () => ({ success: true })) },
+    ATTACHMENTS: {
+      put: vi.fn(async () => ({} as R2Object)),
+      get: vi.fn(async () => null),
+      ...attachments,
+    } as unknown as R2Bucket,
     REMOTE_SESSIONS: {
       idFromName(name: string) { return name as unknown as DurableObjectId; },
       get(id: DurableObjectId) {
@@ -101,5 +107,97 @@ describe("remote gateway admission", () => {
     );
     expect(response.status).toBe(401);
     expect(accountFetch).not.toHaveBeenCalled();
+  });
+
+  it("rejects browser requests from websites outside the allowlist", async () => {
+    const accountFetch = vi.fn();
+    vi.stubGlobal("fetch", accountFetch);
+    const response = await run(new Request(`https://remote.reasonix.io/v1/attachments/${"a".repeat(64)}`, {
+      headers: {
+        authorization: `Bearer ${"b".repeat(64)}`,
+        origin: "https://attacker.example",
+      },
+    }), environment([]));
+
+    expect(response.status).toBe(403);
+    expect(accountFetch).not.toHaveBeenCalled();
+  });
+
+  it("answers attachment preflight only for an allowed website", async () => {
+    const response = await run(new Request(`https://remote.reasonix.io/v1/attachments/${"a".repeat(64)}`, {
+      method: "OPTIONS",
+      headers: { origin: "https://reasonix.io" },
+    }), environment([]));
+
+    expect(response.status).toBe(204);
+    expect(response.headers.get("access-control-allow-origin")).toBe("https://reasonix.io");
+    expect(response.headers.get("access-control-allow-methods")).toContain("PUT");
+  });
+
+  it("streams authorized ciphertext to R2 with hash enforcement", async () => {
+    const objectId = "e".repeat(64);
+    const ticket = "f".repeat(64);
+    const hash = "a".repeat(64);
+    const put = vi.fn(async (_key: string, _value: unknown, _options: R2PutOptions) => ({} as R2Object));
+    vi.stubGlobal("fetch", vi.fn(async () => Response.json({
+      attachment: {
+        objectId,
+        userId: 9,
+        targetDeviceId: "b".repeat(64),
+        maxBytes: 4,
+        ciphertextBytes: 4,
+        ciphertextSha256: hash,
+        expiresAt: "2026-09-28T00:00:00.000Z",
+      },
+    })));
+
+    const response = await run(new Request(`https://remote.reasonix.io/v1/attachments/${objectId}`, {
+      method: "PUT",
+      headers: {
+        authorization: `Bearer ${ticket}`,
+        "content-length": "4",
+        "x-reasonix-ciphertext-sha256": hash,
+      },
+      body: "data",
+    }), environment([], { put }));
+
+    expect(response.status).toBe(201);
+    expect(put).toHaveBeenCalledOnce();
+    expect(put.mock.calls[0]?.[0]).toBe(`encrypted/${objectId}`);
+    expect(put.mock.calls[0]?.[2]).toMatchObject({
+      sha256: hash,
+      httpMetadata: { contentType: "application/octet-stream" },
+    });
+  });
+
+  it("downloads only authorized opaque bytes with browser sniffing disabled", async () => {
+    const objectId = "1".repeat(64);
+    const ticket = "2".repeat(64);
+    const hash = "3".repeat(64);
+    vi.stubGlobal("fetch", vi.fn(async () => Response.json({
+      attachment: {
+        objectId,
+        userId: 9,
+        targetDeviceId: "4".repeat(64),
+        maxBytes: 6,
+        ciphertextBytes: 6,
+        ciphertextSha256: hash,
+        expiresAt: "2026-09-28T00:00:00.000Z",
+      },
+    })));
+    const get = vi.fn(async () => ({
+      body: new Blob(["cipher"]),
+      size: 6,
+    }) as unknown as R2ObjectBody);
+
+    const response = await run(new Request(`https://remote.reasonix.io/v1/attachments/${objectId}`, {
+      headers: { authorization: `Bearer ${ticket}` },
+    }), environment([], { get }));
+
+    expect(response.status).toBe(200);
+    expect(response.headers.get("content-type")).toBe("application/octet-stream");
+    expect(response.headers.get("x-content-type-options")).toBe("nosniff");
+    expect(response.headers.get("cache-control")).toContain("no-store");
+    await expect(response.text()).resolves.toBe("cipher");
   });
 });

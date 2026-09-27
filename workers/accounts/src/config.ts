@@ -10,6 +10,8 @@ export const RESET_TTL_MS = 60 * 60 * 1000; // 1 hour
 export const DEVICE_CODE_TTL_MS = 10 * 60 * 1000; // 10 minutes to approve
 export const DEVICE_POLL_INTERVAL_S = 5; // client poll cadence; faster polls get slow_down
 export const REMOTE_GRANT_TTL_MS = 60 * 1000; // one-time gateway admission window
+export const REMOTE_ATTACHMENT_TTL_MS = 15 * 60 * 1000;
+export const REMOTE_ATTACHMENT_MAX_BYTES = 20 * 1024 * 1024;
 
 // PBKDF2-HMAC-SHA256 work factor. Cloudflare Workers hard-caps PBKDF2 at 100k
 // iterations (it throws NotSupportedError above that), so this is the platform

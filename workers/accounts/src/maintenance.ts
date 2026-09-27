@@ -1,6 +1,12 @@
 import type { Bindings } from "./env";
 
-const EXPIRING_TABLES = ["device_grants", "email_tokens", "sessions", "remote_connection_grants"] as const;
+const EXPIRING_TABLES = [
+  "device_grants",
+  "email_tokens",
+  "sessions",
+  "remote_connection_grants",
+  "remote_attachment_grants",
+] as const;
 
 export async function purgeExpiredAuthState(env: Pick<Bindings, "DB">, now = new Date()): Promise<number> {
   const cutoff = now.toISOString();
