@@ -163,12 +163,13 @@ headers = { IJ_MCP_SERVER_PROJECT_PATH = "${REASONIX_WORKSPACE_ROOT}" }
 }
 
 func TestWorkspaceRootVarsStayOutOfConfigPathExpansion(t *testing.T) {
-	t.Setenv("REASONIX_WORKSPACE_ROOT", "")
+	env := testenv.TempDir(t)
+	t.Setenv("REASONIX_WORKSPACE_ROOT", env)
 	root := testenv.TempDir(t)
 	cfg := Default()
 	cfg.Sandbox.ForbidRead = []string{"${REASONIX_WORKSPACE_ROOT}/secret"}
 	got := cfg.ForbidReadRootsForRoot(root)
-	if len(got) != 1 || got[0] == filepath.Join(root, "secret") {
+	if len(got) != 1 || got[0] != filepath.Join(env, "secret") {
 		t.Fatalf("ForbidReadRootsForRoot = %v, want the variable left to the environment", got)
 	}
 }
