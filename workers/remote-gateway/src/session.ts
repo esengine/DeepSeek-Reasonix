@@ -1,5 +1,11 @@
 import type { Env, RemoteCapability } from "./env";
-import { controllerMessage, controllerPresence, parseDeviceReply } from "./protocol";
+import {
+  controllerMessage,
+  controllerPresence,
+  offeredProtocols,
+  parseDeviceReply,
+  REMOTE_WEBSOCKET_PROTOCOL,
+} from "./protocol";
 
 const MAX_MESSAGE_BYTES = 64 * 1024;
 const MAX_CONTROLLERS = 4;
@@ -80,7 +86,11 @@ export class RemoteSession {
         device.send(controllerPresence("controller_connected", attachment.connectionId, attachment.scopes));
       }
     }
-    return new Response(null, { status: 101, webSocket: client });
+    const headers = new Headers();
+    if (offeredProtocols(request).includes(REMOTE_WEBSOCKET_PROTOCOL)) {
+      headers.set("sec-websocket-protocol", REMOTE_WEBSOCKET_PROTOCOL);
+    }
+    return new Response(null, { status: 101, webSocket: client, headers });
   }
 
   async webSocketMessage(socket: WebSocket, message: string | ArrayBuffer): Promise<void> {

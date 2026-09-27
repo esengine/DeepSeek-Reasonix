@@ -42,6 +42,17 @@ function websocketRequest(path: string, token: string): Request {
   });
 }
 
+function browserWebsocketRequest(path: string, token: string): Request {
+  return new Request(`https://remote.reasonix.io${path}`, {
+    headers: {
+      origin: "https://reasonix.io",
+      upgrade: "websocket",
+      "cf-connecting-ip": "203.0.113.10",
+      "sec-websocket-protocol": `reasonix.remote.v1, reasonix.auth.${token}`,
+    },
+  });
+}
+
 function run(request: Request, env: Env): Promise<Response> {
   return Promise.resolve(worker.fetch!(request as never, env, {} as ExecutionContext));
 }
@@ -96,6 +107,40 @@ describe("remote gateway admission", () => {
     expect(forwarded[0]?.id).toBe(targetDeviceId);
     expect(forwarded[0]?.request.headers.get("x-reasonix-role")).toBe("controller");
     expect(forwarded[0]?.request.headers.get("x-reasonix-scopes")).toBe("terminal");
+  });
+
+  it("admits a browser controller without exposing its ticket to the session", async () => {
+    const forwarded: ForwardedRequest[] = [];
+    const targetDeviceId = "e".repeat(64);
+    const ticket = "f".repeat(64);
+    vi.stubGlobal("fetch", vi.fn(async () => Response.json({
+      grant: { userId: 11, targetDeviceId, scopes: ["tasks"] },
+    })));
+
+    const response = await run(
+      browserWebsocketRequest("/v1/sessions/connect", ticket),
+      environment(forwarded),
+    );
+
+    expect(response.status).toBe(200);
+    expect(forwarded[0]?.request.headers.get("authorization")).toBeNull();
+    expect(forwarded[0]?.request.headers.get("sec-websocket-protocol")).toBe("reasonix.remote.v1");
+    expect([...forwarded[0]?.request.headers.values() ?? []].join(" ")).not.toContain(ticket);
+  });
+
+  it("rejects a browser ticket without the versioned remote protocol", async () => {
+    const accountFetch = vi.fn();
+    vi.stubGlobal("fetch", accountFetch);
+    const response = await run(new Request("https://remote.reasonix.io/v1/sessions/connect", {
+      headers: {
+        origin: "https://reasonix.io",
+        upgrade: "websocket",
+        "sec-websocket-protocol": `reasonix.auth.${"a".repeat(64)}`,
+      },
+    }), environment([]));
+
+    expect(response.status).toBe(401);
+    expect(accountFetch).not.toHaveBeenCalled();
   });
 
   it("rejects malformed credentials before contacting the account service", async () => {

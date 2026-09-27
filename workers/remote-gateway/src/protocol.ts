@@ -1,5 +1,15 @@
 import type { RemoteCapability } from "./env";
 
+export const REMOTE_WEBSOCKET_PROTOCOL = "reasonix.remote.v1";
+export const REMOTE_AUTH_PROTOCOL_PREFIX = "reasonix.auth.";
+
+export function offeredProtocols(request: Request): string[] {
+  return (request.headers.get("sec-websocket-protocol") ?? "")
+    .split(",")
+    .map((value) => value.trim())
+    .filter(Boolean);
+}
+
 export interface DeviceReply {
   to: string;
   payload: string;

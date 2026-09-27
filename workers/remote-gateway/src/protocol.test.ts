@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { controllerMessage, parseDeviceReply } from "./protocol";
+import { controllerMessage, offeredProtocols, parseDeviceReply } from "./protocol";
 
 describe("remote message routing envelope", () => {
   it("carries connection scopes outside the opaque payload", () => {
@@ -18,5 +18,14 @@ describe("remote message routing envelope", () => {
     });
     expect(parseDeviceReply(JSON.stringify({ payload: "broadcast" }))).toBeNull();
     expect(parseDeviceReply("not-json")).toBeNull();
+  });
+});
+
+describe("WebSocket protocol offers", () => {
+  it("parses the browser's ordered protocol list", () => {
+    const request = new Request("https://remote.reasonix.io/v1/sessions/connect", {
+      headers: { "sec-websocket-protocol": "reasonix.remote.v1, reasonix.auth.ticket" },
+    });
+    expect(offeredProtocols(request)).toEqual(["reasonix.remote.v1", "reasonix.auth.ticket"]);
   });
 });

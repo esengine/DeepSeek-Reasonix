@@ -6,6 +6,11 @@ import {
   consumeGrant,
 } from "./accounts";
 import type { Env } from "./env";
+import {
+  offeredProtocols,
+  REMOTE_AUTH_PROTOCOL_PREFIX,
+  REMOTE_WEBSOCKET_PROTOCOL,
+} from "./protocol";
 export { RemoteSession } from "./session";
 
 const DEVICE_PATH = /^\/v1\/devices\/([0-9a-f]{64})\/connect$/;
@@ -116,7 +121,25 @@ function forwardToSession(
   headers.set("x-reasonix-scopes", scopes.join(","));
   headers.set("x-reasonix-expires-at", String(Date.now() + admissionMs));
   headers.delete("authorization");
+  const protocols = offeredProtocols(request);
+  if (protocols.includes(REMOTE_WEBSOCKET_PROTOCOL)) {
+    headers.set("sec-websocket-protocol", REMOTE_WEBSOCKET_PROTOCOL);
+  } else {
+    headers.delete("sec-websocket-protocol");
+  }
   return env.REMOTE_SESSIONS.get(id).fetch(new Request(request, { headers }));
+}
+
+function connectionToken(request: Request): string | null {
+  const headerToken = bearerToken(request);
+  if (headerToken) return headerToken;
+  const protocols = offeredProtocols(request);
+  if (!protocols.includes(REMOTE_WEBSOCKET_PROTOCOL)) return null;
+  const tickets = protocols
+    .filter((value) => value.startsWith(REMOTE_AUTH_PROTOCOL_PREFIX))
+    .map((value) => value.slice(REMOTE_AUTH_PROTOCOL_PREFIX.length));
+  if (tickets.length !== 1 || !SHA256_PATTERN.test(tickets[0] ?? "")) return null;
+  return tickets[0] ?? null;
 }
 
 const worker: ExportedHandler<Env> = {
@@ -153,7 +176,7 @@ const worker: ExportedHandler<Env> = {
     if (request.headers.get("upgrade")?.toLowerCase() !== "websocket") {
       return jsonError(426, "upgrade_required", "A WebSocket connection is required.");
     }
-    const token = bearerToken(request);
+    const token = connectionToken(request);
     if (!token) return jsonError(401, "invalid_token", "A valid connection credential is required.");
     if (!(await withinBudget(request, env, token))) {
       return jsonError(429, "rate_limited", "Too many connection attempts.");

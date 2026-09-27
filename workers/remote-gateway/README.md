@@ -13,6 +13,11 @@ the Durable Objects Hibernation API.
 - `GET /v1/devices/:deviceId/connect` with `Authorization: Bearer <deviceCredential>`
 - `GET /v1/sessions/connect` with `Authorization: Bearer <oneTimeGrant>`
 
+Browser controllers use the requested subprotocols `reasonix.remote.v1` and
+`reasonix.auth.<oneTimeGrant>` because the WebSocket browser API cannot set an
+Authorization header. The gateway selects only `reasonix.remote.v1`; the ticket
+is consumed before the request enters the device session and is never echoed.
+
 Text messages are limited to 64 KiB and each device accepts at most four
 controller connections. Each controller receives a private connection ID;
 device replies must target that ID, so responses are never broadcast to other
