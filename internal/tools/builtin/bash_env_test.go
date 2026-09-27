@@ -64,7 +64,7 @@ func TestBashCommandEnvFiltersSensitiveKeysWhenEnabled(t *testing.T) {
 	// filter must never strip it or every subprocess loses its cwd context.
 	t.Setenv("PWD", "/tmp/somewhere")
 
-	env := strings.Join(bashCommandEnv(context.Background()), "\n")
+	env := strings.Join(bashCommandEnv(context.Background(), ""), "\n")
 	if strings.Contains(env, "DEEPSEEK_API_KEY") || strings.Contains(env, "GH_TOKEN") {
 		t.Fatalf("bash env leaked sensitive keys:\n%s", env)
 	}
@@ -79,9 +79,31 @@ func TestBashCommandEnvFiltersSensitiveKeysWhenEnabled(t *testing.T) {
 func TestBashCommandEnvKeepsTokensByDefault(t *testing.T) {
 	t.Setenv("GH_TOKEN", "ghp_abcdefghijklmnopqrstuvwxyz")
 
-	env := strings.Join(bashCommandEnv(context.Background()), "\n")
+	env := strings.Join(bashCommandEnv(context.Background(), ""), "\n")
 	if !strings.Contains(env, "GH_TOKEN=ghp_abcdefghijklmnopqrstuvwxyz") {
 		t.Fatalf("bash env must inherit tokens while filter_subprocess_env is off (default):\n%s", env)
+	}
+}
+
+func TestBashCommandEnvHardensGit(t *testing.T) {
+	t.Setenv("GIT_EXTERNAL_DIFF", "difft")
+
+	env := strings.Join(bashCommandEnv(context.Background(), ""), "\n")
+	for _, want := range []string{
+		"LC_MESSAGES=C",
+		"NO_COLOR=1",
+		"TERM=dumb",
+		"GIT_PAGER=cat",
+		"PAGER=cat",
+		"GIT_CONFIG_KEY_0=rebase.abbreviateCommands",
+		"GIT_CONFIG_VALUE_0=false",
+	} {
+		if !strings.Contains(env, want) {
+			t.Errorf("bash env missing %q:\n%s", want, env)
+		}
+	}
+	if strings.Contains(env, "GIT_EXTERNAL_DIFF") {
+		t.Errorf("bash env leaked GIT_EXTERNAL_DIFF:\n%s", env)
 	}
 }
 

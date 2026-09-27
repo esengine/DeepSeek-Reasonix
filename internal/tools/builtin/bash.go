@@ -23,6 +23,7 @@ import (
 	"reasonix/internal/base/secrets"
 	"reasonix/internal/base/shellparse"
 	"reasonix/internal/contract/tool"
+	"reasonix/internal/platform/gitcmd"
 	"reasonix/internal/safety/sandbox"
 	"reasonix/internal/state/sessiontemp"
 	"reasonix/internal/tools/jobs"
@@ -253,7 +254,7 @@ func (b bash) ExecuteDetailed(ctx context.Context, args json.RawMessage) (tool.D
 	}
 
 	argv, wrapped := prepared.Argv, prepared.Wrapped
-	cmdEnv := applyEnvOverrides(bashCommandEnv(ctx), prepared.EnvOverrides)
+	cmdEnv := applyEnvOverrides(bashCommandEnv(ctx, b.guard.stateRoot), prepared.EnvOverrides)
 
 	if p.RunInBackground {
 		jm, ok := jobs.FromContext(ctx)
@@ -651,18 +652,17 @@ func commandPreview(cmd string) string {
 	return cmd
 }
 
-func bashCommandEnv(ctx context.Context) []string {
+func bashCommandEnv(ctx context.Context, stateDir string) []string {
 	env := secrets.ProcessEnv()
-	if runtime.GOOS == "windows" {
-		return env
-	}
-	currentPath, _ := envValue(env, "PATH")
-	if shellPath := strings.TrimSpace(bashShellPATH(ctx)); shellPath != "" {
-		if merged := mergePathLists(shellPath, currentPath); merged != currentPath {
-			env = setEnvValue(env, "PATH", merged)
+	if runtime.GOOS != "windows" {
+		currentPath, _ := envValue(env, "PATH")
+		if shellPath := strings.TrimSpace(bashShellPATH(ctx)); shellPath != "" {
+			if merged := mergePathLists(shellPath, currentPath); merged != currentPath {
+				env = setEnvValue(env, "PATH", merged)
+			}
 		}
 	}
-	return env
+	return gitcmd.AgentEnv(env, stateDir)
 }
 
 func defaultBashShellPATH(ctx context.Context) string {
