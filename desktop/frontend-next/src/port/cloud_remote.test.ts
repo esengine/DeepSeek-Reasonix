@@ -14,6 +14,34 @@ describe("remote Studio binary framing", () => {
     expect(joined).toEqual(source);
   });
 
+  it("allows a slow mobile handshake and closes a socket that times out", async () => {
+    vi.useFakeTimers();
+    const socket = new EventTarget() as EventTarget & { close: ReturnType<typeof vi.fn> };
+    socket.close = vi.fn();
+    const pending = remoteCodec.waitForSocketOpen(socket as unknown as WebSocket, remoteCodec.handshakeTimeoutMS)
+      .catch((error: unknown) => error);
+
+    await vi.advanceTimersByTimeAsync(10_000);
+    expect(socket.close).not.toHaveBeenCalled();
+    await vi.advanceTimersByTimeAsync(20_000);
+    expect(await pending).toBeInstanceOf(Error);
+    expect(socket.close).toHaveBeenCalledOnce();
+    vi.useRealTimers();
+  });
+
+  it("stops the handshake timer once the relay opens", async () => {
+    vi.useFakeTimers();
+    const socket = new EventTarget() as EventTarget & { close: ReturnType<typeof vi.fn> };
+    socket.close = vi.fn();
+    const pending = remoteCodec.waitForSocketOpen(socket as unknown as WebSocket);
+    socket.dispatchEvent(new Event("open"));
+
+    await expect(pending).resolves.toBeUndefined();
+    await vi.advanceTimersByTimeAsync(remoteCodec.handshakeTimeoutMS);
+    expect(socket.close).not.toHaveBeenCalled();
+    vi.useRealTimers();
+  });
+
   it("announces a relay disconnect to the Web Studio shell", () => {
     let reason = "";
     const stop = onRemoteConnectionEnded((value) => { reason = value; });
