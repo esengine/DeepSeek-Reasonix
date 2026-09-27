@@ -1,0 +1,43 @@
+name: Deploy remote gateway
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: deploy-remote-gateway
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    if: github.ref == 'refs/heads/platform'
+    runs-on: ubuntu-latest
+    environment: production
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7
+        with:
+          node-version: "22"
+          cache: npm
+          cache-dependency-path: workers/remote-gateway/package-lock.json
+      - name: Validate gateway secret
+        env:
+          REMOTE_GATEWAY_TOKEN: ${{ secrets.REMOTE_GATEWAY_TOKEN }}
+        run: test -n "$REMOTE_GATEWAY_TOKEN"
+      - name: Validate and deploy
+        working-directory: workers/remote-gateway
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+        run: |
+          npm ci
+          npm test
+          npm run typecheck
+          npx wrangler deploy
+      - name: Sync gateway secret
+        working-directory: workers/remote-gateway
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          REMOTE_GATEWAY_TOKEN: ${{ secrets.REMOTE_GATEWAY_TOKEN }}
+        run: printf '%s' "$REMOTE_GATEWAY_TOKEN" | npx wrangler secret put REMOTE_GATEWAY_TOKEN

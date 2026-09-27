@@ -47,3 +47,14 @@ jobs:
           else
             echo "RESEND_API_KEY not set in repo secrets; skipping (worker stays in stub email mode)."
           fi
+      - name: Sync remote gateway secret
+        working-directory: workers/accounts
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          REMOTE_GATEWAY_TOKEN: ${{ secrets.REMOTE_GATEWAY_TOKEN }}
+        run: |
+          if [ -z "$REMOTE_GATEWAY_TOKEN" ]; then
+            echo "REMOTE_GATEWAY_TOKEN must be configured before enabling remote access."
+            exit 1
+          fi
+          printf '%s' "$REMOTE_GATEWAY_TOKEN" | npx wrangler secret put REMOTE_GATEWAY_TOKEN

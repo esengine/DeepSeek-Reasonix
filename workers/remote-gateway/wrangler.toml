@@ -1,0 +1,22 @@
+name = "reasonix-remote-gateway"
+main = "src/index.ts"
+compatibility_date = "2026-06-01"
+
+routes = [{ pattern = "remote.reasonix.io", custom_domain = true }]
+
+[vars]
+ACCOUNT_ORIGIN = "https://id.reasonix.io"
+
+[[durable_objects.bindings]]
+name = "REMOTE_SESSIONS"
+class_name = "RemoteSession"
+
+[[migrations]]
+tag = "v1"
+new_sqlite_classes = ["RemoteSession"]
+
+[[unsafe.bindings]]
+name = "GATEWAY_LIMITER"
+type = "ratelimit"
+namespace_id = "4001"
+simple = { limit = 60, period = 60 }
