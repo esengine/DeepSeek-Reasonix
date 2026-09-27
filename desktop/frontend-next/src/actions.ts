@@ -265,6 +265,8 @@ export const ACTIONS: UIAction[] = [
   { id: "device.ask-leave", kind: "view", target: "none", proof: "interaction" },
   { id: "device.leave", kind: "destructive", target: "none", proof: "authority-effect" },
   { id: "share.copy", kind: "shell-native", target: "none", proof: "interaction" },
+  { id: "share.cloud-copy", kind: "shell-native", target: "none", proof: "interaction" },
+  { id: "share.cloud-offer", kind: "repeatable", target: "none", proof: "interaction" },
   { id: "share.toggle", kind: "kernel-mutation", target: "none", proof: "authority-effect" },
   { id: "share.address", kind: "view", target: "none", proof: "interaction" },
   { id: "share.offer", kind: "kernel-mutation", target: "none", proof: "authority-effect" },
