@@ -121,11 +121,12 @@ auth.post("/forgot", async (c) => {
 
 auth.post("/reset", async (c) => {
   const { token, password } = await parseBody(c, ResetSchema);
-  const { users, emailTokens, sessions } = repos(c.env);
+  const { users, emailTokens, sessions, remoteDevices } = repos(c.env);
   const userId = await emailTokens.consume(token, "reset");
   if (userId === null) throw new ApiError(400, "invalid_token", "This reset link is invalid or has expired.");
   await users.updatePassword(userId, await hashPassword(password));
   await sessions.deleteAllForUser(userId); // force a fresh sign-in everywhere
+  await remoteDevices.revokeAllForUser(userId);
   return c.json({ ok: true, message: "Password updated. You can now sign in." });
 });
 

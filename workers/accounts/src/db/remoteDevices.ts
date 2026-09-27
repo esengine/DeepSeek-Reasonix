@@ -1,0 +1,200 @@
+import { generateToken, hashToken } from "../auth/crypto";
+
+export const REMOTE_CAPABILITIES = ["terminal", "tasks", "logs", "files", "desktop"] as const;
+export type RemoteCapability = (typeof REMOTE_CAPABILITIES)[number];
+
+interface RemoteDeviceRow {
+  id: string;
+  user_id: number;
+  name: string;
+  platform: string;
+  public_key: string;
+  capabilities: string;
+  created_at: string;
+  updated_at: string;
+  last_seen_at: string | null;
+  revoked_at: string | null;
+}
+
+export interface RemoteDevice {
+  id: string;
+  name: string;
+  platform: string;
+  publicKey: string;
+  capabilities: RemoteCapability[];
+  createdAt: string;
+  updatedAt: string;
+  lastSeenAt: string | null;
+  revokedAt: string | null;
+}
+
+export interface ConsumedRemoteGrant {
+  userId: number;
+  targetDeviceId: string;
+  scopes: RemoteCapability[];
+}
+
+function parseCapabilities(value: string): RemoteCapability[] {
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(value);
+  } catch {
+    return [];
+  }
+  if (!Array.isArray(parsed)) return [];
+  return parsed.filter((item): item is RemoteCapability =>
+    typeof item === "string" && (REMOTE_CAPABILITIES as readonly string[]).includes(item));
+}
+
+function toDevice(row: RemoteDeviceRow): RemoteDevice {
+  return {
+    id: row.id,
+    name: row.name,
+    platform: row.platform,
+    publicKey: row.public_key,
+    capabilities: parseCapabilities(row.capabilities),
+    createdAt: row.created_at,
+    updatedAt: row.updated_at,
+    lastSeenAt: row.last_seen_at,
+    revokedAt: row.revoked_at,
+  };
+}
+
+export class RemoteDeviceRepo {
+  constructor(
+    private readonly db: D1Database,
+    private readonly pepper: string,
+  ) {}
+
+  async register(input: {
+    userId: number;
+    name: string;
+    platform: string;
+    publicKey: string;
+    capabilities: RemoteCapability[];
+  }): Promise<{ device: RemoteDevice; deviceCredential: string }> {
+    const id = generateToken();
+    const deviceCredential = generateToken();
+    const credentialHash = await hashToken(this.pepper, deviceCredential);
+    const now = new Date().toISOString();
+    const row = await this.db.prepare(
+      `INSERT INTO remote_devices (
+         id, user_id, credential_hash, name, platform, public_key, capabilities,
+         created_at, updated_at, revoked_at
+       ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?8, NULL)
+       ON CONFLICT (user_id, public_key) DO UPDATE SET
+         credential_hash = excluded.credential_hash,
+         name = excluded.name,
+         platform = excluded.platform,
+         capabilities = excluded.capabilities,
+         updated_at = excluded.updated_at,
+         revoked_at = NULL
+       RETURNING id, user_id, name, platform, public_key, capabilities,
+                 created_at, updated_at, last_seen_at, revoked_at`,
+    ).bind(
+      id, input.userId, credentialHash, input.name, input.platform,
+      input.publicKey, JSON.stringify(input.capabilities), now,
+    ).first<RemoteDeviceRow>();
+    if (!row) throw new Error("remote device registration returned no row");
+    return { device: toDevice(row), deviceCredential };
+  }
+
+  async listForUser(userId: number): Promise<RemoteDevice[]> {
+    const result = await this.db.prepare(
+      `SELECT id, user_id, name, platform, public_key, capabilities,
+              created_at, updated_at, last_seen_at, revoked_at
+       FROM remote_devices WHERE user_id = ?1
+       ORDER BY revoked_at IS NULL DESC, updated_at DESC`,
+    ).bind(userId).all<RemoteDeviceRow>();
+    return result.results.map(toDevice);
+  }
+
+  async activeForUser(userId: number, deviceId: string): Promise<RemoteDevice | null> {
+    const row = await this.db.prepare(
+      `SELECT id, user_id, name, platform, public_key, capabilities,
+              created_at, updated_at, last_seen_at, revoked_at
+       FROM remote_devices WHERE id = ?1 AND user_id = ?2 AND revoked_at IS NULL`,
+    ).bind(deviceId, userId).first<RemoteDeviceRow>();
+    return row ? toDevice(row) : null;
+  }
+
+  async rename(userId: number, deviceId: string, name: string): Promise<RemoteDevice | null> {
+    const now = new Date().toISOString();
+    const row = await this.db.prepare(
+      `UPDATE remote_devices SET name = ?1, updated_at = ?2
+       WHERE id = ?3 AND user_id = ?4 AND revoked_at IS NULL
+       RETURNING id, user_id, name, platform, public_key, capabilities,
+                 created_at, updated_at, last_seen_at, revoked_at`,
+    ).bind(name, now, deviceId, userId).first<RemoteDeviceRow>();
+    return row ? toDevice(row) : null;
+  }
+
+  async revoke(userId: number, deviceId: string): Promise<boolean> {
+    const now = new Date().toISOString();
+    const result = await this.db.prepare(
+      `UPDATE remote_devices SET revoked_at = ?1, updated_at = ?1
+       WHERE id = ?2 AND user_id = ?3 AND revoked_at IS NULL`,
+    ).bind(now, deviceId, userId).run();
+    return (result.meta.changes ?? 0) > 0;
+  }
+
+  async revokeAllForUser(userId: number): Promise<void> {
+    const now = new Date().toISOString();
+    await this.db.prepare(
+      `UPDATE remote_devices SET revoked_at = ?1, updated_at = ?1
+       WHERE user_id = ?2 AND revoked_at IS NULL`,
+    ).bind(now, userId).run();
+    await this.db.prepare("DELETE FROM remote_connection_grants WHERE user_id = ?1").bind(userId).run();
+  }
+
+  async authenticate(deviceId: string, credential: string): Promise<{ userId: number; device: RemoteDevice } | null> {
+    const credentialHash = await hashToken(this.pepper, credential);
+    const now = new Date().toISOString();
+    const row = await this.db.prepare(
+      `UPDATE remote_devices SET last_seen_at = ?1, updated_at = ?1
+       WHERE id = ?2 AND credential_hash = ?3 AND revoked_at IS NULL
+       RETURNING id, user_id, name, platform, public_key, capabilities,
+                 created_at, updated_at, last_seen_at, revoked_at`,
+    ).bind(now, deviceId, credentialHash).first<RemoteDeviceRow>();
+    return row ? { userId: row.user_id, device: toDevice(row) } : null;
+  }
+
+  async issueGrant(input: {
+    userId: number;
+    targetDeviceId: string;
+    scopes: RemoteCapability[];
+    ttlMs: number;
+  }): Promise<{ ticket: string; expiresAt: string }> {
+    const ticket = generateToken();
+    const ticketHash = await hashToken(this.pepper, ticket);
+    const now = new Date();
+    const expiresAt = new Date(now.getTime() + input.ttlMs).toISOString();
+    await this.db.prepare(
+      `INSERT INTO remote_connection_grants (
+         ticket_hash, user_id, target_device_id, scopes, created_at, expires_at
+       ) VALUES (?1, ?2, ?3, ?4, ?5, ?6)`,
+    ).bind(
+      ticketHash, input.userId, input.targetDeviceId, JSON.stringify(input.scopes),
+      now.toISOString(), expiresAt,
+    ).run();
+    return { ticket, expiresAt };
+  }
+
+  async consumeGrant(ticket: string): Promise<ConsumedRemoteGrant | null> {
+    const ticketHash = await hashToken(this.pepper, ticket);
+    const now = new Date().toISOString();
+    const row = await this.db.prepare(
+      `DELETE FROM remote_connection_grants
+       WHERE ticket_hash = ?1 AND expires_at > ?2
+         AND EXISTS (
+           SELECT 1 FROM remote_devices d
+           WHERE d.id = remote_connection_grants.target_device_id
+             AND d.user_id = remote_connection_grants.user_id
+             AND d.revoked_at IS NULL
+         )
+       RETURNING user_id, target_device_id, scopes`,
+    ).bind(ticketHash, now).first<{ user_id: number; target_device_id: string; scopes: string }>();
+    if (!row) return null;
+    return { userId: row.user_id, targetDeviceId: row.target_device_id, scopes: parseCapabilities(row.scopes) };
+  }
+}

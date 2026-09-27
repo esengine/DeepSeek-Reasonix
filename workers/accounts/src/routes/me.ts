@@ -8,7 +8,15 @@ import { ApiError } from "../http/errors";
 import { hashPassword, verifyPassword } from "../auth/crypto";
 import { setSessionCookie, clearSessionCookie } from "../auth/cookies";
 import { isValidHandle } from "../lib/handle";
-import { parseBody, ProfileSchema, PasswordChangeSchema } from "../lib/validation";
+import {
+  parseBody,
+  ProfileSchema,
+  PasswordChangeSchema,
+  RemoteDeviceRegisterSchema,
+  RemoteDeviceRenameSchema,
+  RemoteGrantIssueSchema,
+} from "../lib/validation";
+import { REMOTE_GRANT_TTL_MS } from "../config";
 
 const me = new Hono<AppEnv>();
 
@@ -16,6 +24,51 @@ const me = new Hono<AppEnv>();
 me.use("*", requireAuth);
 
 me.get("/", (c) => c.json({ user: currentUser(c) }));
+
+me.get("/devices", async (c) => {
+  const user = currentUser(c);
+  return c.json({ devices: await repos(c.env).remoteDevices.listForUser(user.id) });
+});
+
+me.post("/devices", async (c) => {
+  const user = currentUser(c);
+  const input = await parseBody(c, RemoteDeviceRegisterSchema);
+  const registered = await repos(c.env).remoteDevices.register({ userId: user.id, ...input });
+  return c.json(registered, 201);
+});
+
+me.patch("/devices/:deviceId", async (c) => {
+  const user = currentUser(c);
+  const { name } = await parseBody(c, RemoteDeviceRenameSchema);
+  const device = await repos(c.env).remoteDevices.rename(user.id, c.req.param("deviceId"), name);
+  if (!device) throw new ApiError(404, "device_not_found", "That device is unavailable.");
+  return c.json({ device });
+});
+
+me.delete("/devices/:deviceId", async (c) => {
+  const user = currentUser(c);
+  const revoked = await repos(c.env).remoteDevices.revoke(user.id, c.req.param("deviceId"));
+  if (!revoked) throw new ApiError(404, "device_not_found", "That device is unavailable.");
+  return c.json({ ok: true });
+});
+
+me.post("/remote-grants", async (c) => {
+  const user = currentUser(c);
+  const { targetDeviceId, scopes } = await parseBody(c, RemoteGrantIssueSchema);
+  const remoteDevices = repos(c.env).remoteDevices;
+  const device = await remoteDevices.activeForUser(user.id, targetDeviceId);
+  if (!device) throw new ApiError(404, "device_not_found", "That device is unavailable.");
+  if (scopes.some((scope) => !device.capabilities.includes(scope))) {
+    throw new ApiError(403, "scope_unavailable", "The device does not allow one or more requested capabilities.");
+  }
+  const grant = await remoteDevices.issueGrant({
+    userId: user.id,
+    targetDeviceId,
+    scopes,
+    ttlMs: REMOTE_GRANT_TTL_MS,
+  });
+  return c.json({ grant: { ...grant, targetDeviceId, scopes } }, 201);
+});
 
 me.patch("/", async (c) => {
   const user = currentUser(c);
@@ -44,7 +97,7 @@ me.patch("/", async (c) => {
 me.post("/password", async (c) => {
   const user = currentUser(c);
   const { currentPassword, newPassword } = await parseBody(c, PasswordChangeSchema);
-  const { users, sessions } = repos(c.env);
+  const { users, sessions, remoteDevices } = repos(c.env);
 
   const row = await users.byId(user.id);
   if (!row || !(await verifyPassword(currentPassword, row.password_hash))) {
@@ -54,15 +107,17 @@ me.post("/password", async (c) => {
 
   // Drop every session, then mint a fresh one so this device stays signed in.
   await sessions.deleteAllForUser(user.id);
+  await remoteDevices.revokeAllForUser(user.id);
   setSessionCookie(c, await sessions.create(user.id, { userAgent: c.req.header("user-agent") ?? "" }));
   return c.json({ ok: true });
 });
 
 me.delete("/", async (c) => {
   const user = currentUser(c);
-  const { users, sessions } = repos(c.env);
+  const { users, sessions, remoteDevices } = repos(c.env);
   await users.softDelete(user.id);
   await sessions.deleteAllForUser(user.id);
+  await remoteDevices.revokeAllForUser(user.id);
   clearSessionCookie(c);
   return c.json({ ok: true });
 });

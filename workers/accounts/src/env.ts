@@ -21,6 +21,7 @@ export interface Bindings {
   // Secrets (wrangler secret put ...).
   SESSION_PEPPER?: string;
   RESEND_API_KEY?: string;
+  REMOTE_GATEWAY_TOKEN?: string;
 }
 
 // Per-request values set by middleware. `user` is null until a valid session is

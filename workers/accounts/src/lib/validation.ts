@@ -50,6 +50,34 @@ export const DevicePollSchema = z.object({ deviceCode: z.string().min(10).max(25
 export const DeviceApproveSchema = z.object({ userCode });
 export const DeviceCodeQuerySchema = z.object({ userCode });
 
+const remoteCapability = z.enum(["terminal", "tasks", "logs", "files", "desktop"]);
+const remoteDeviceId = z.string().regex(/^[0-9a-f]{64}$/);
+
+export const RemoteDeviceRegisterSchema = z.object({
+  name: z.string().trim().min(1).max(64),
+  platform: z.enum(["macos", "windows", "linux"]),
+  publicKey: z.string().regex(/^[A-Za-z0-9_-]{43}$/),
+  capabilities: z.array(remoteCapability).min(1).max(5).transform((items) => [...new Set(items)]),
+}).strict();
+
+export const RemoteDeviceRenameSchema = z.object({
+  name: z.string().trim().min(1).max(64),
+}).strict();
+
+export const RemoteGrantIssueSchema = z.object({
+  targetDeviceId: remoteDeviceId,
+  scopes: z.array(remoteCapability).min(1).max(5).transform((items) => [...new Set(items)]),
+}).strict();
+
+export const RemoteDeviceAuthenticateSchema = z.object({
+  deviceId: remoteDeviceId,
+  deviceCredential: z.string().regex(/^[0-9a-f]{64}$/),
+}).strict();
+
+export const RemoteGrantConsumeSchema = z.object({
+  ticket: z.string().regex(/^[0-9a-f]{64}$/),
+}).strict();
+
 function firstIssue(error: z.ZodError): string {
   const issue = error.issues[0];
   if (!issue) return "Some fields are invalid.";

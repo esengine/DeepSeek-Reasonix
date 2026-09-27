@@ -61,6 +61,13 @@ Design notes:
 | GET    | `/me`                      | ✓    | the signed-in account (cookie or Bearer) |
 | PATCH  | `/me`                      | ✓    | `{ displayName?, bio?, avatarUrl?, handle? }` |
 | POST   | `/me/password`             | ✓    | `{ currentPassword, newPassword }`      |
+| GET    | `/me/devices`              | ✓    | registered remote devices               |
+| POST   | `/me/devices`              | ✓    | register/rotate a device credential     |
+| PATCH  | `/me/devices/:id`          | ✓    | rename an active device                 |
+| DELETE | `/me/devices/:id`          | ✓    | revoke a device                         |
+| POST   | `/me/remote-grants`        | ✓    | issue a 60-second, scoped connection ticket |
+| POST   | `/remote/devices/authenticate` | gateway | validate a device credential        |
+| POST   | `/remote/grants/consume`   | gateway | consume a connection ticket once     |
 | DELETE | `/me`                      | ✓    | soft-delete the account                 |
 | GET    | `/u/:handle`               | —    | public profile                          |
 | GET    | `/health`                  | —    | liveness                                |
@@ -74,7 +81,8 @@ Errors are `{ "error": { "code": "...", "message": "..." } }` with a matching HT
 `COOKIE_DOMAIN`, `EMAIL_PROVIDER` (`stub` | `resend`), `MAIL_FROM`, `ADMIN_EMAILS`.
 
 Secrets (`wrangler secret put NAME`): `SESSION_PEPPER` (any long random string),
-`RESEND_API_KEY` (only when `EMAIL_PROVIDER=resend`).
+`RESEND_API_KEY` (only when `EMAIL_PROVIDER=resend`), and
+`REMOTE_GATEWAY_TOKEN` (shared only with the remote gateway).
 
 When `EMAIL_PROVIDER` isn't `resend` (or no key is set) the worker logs email links
 to the console — enough to exercise every flow locally without a mail provider.
@@ -109,10 +117,10 @@ wrangler deploy
 The `id.reasonix.io` custom domain route is declared in `wrangler.toml`; point the
 DNS/custom-domain binding at this worker in the Cloudflare dashboard on first deploy.
 
-The steps above are the one-time bootstrap. After that, every merge to `main-v2`
-that touches `workers/accounts/**` redeploys via `.github/workflows/deploy-accounts-worker.yml`
-(same pattern as the crash worker). CI does **not** run migrations — apply new ones
-with `pnpm db:apply:remote` out of band.
+The steps above are the one-time bootstrap. Production deploys are manually
+triggered from the protected `platform` branch through
+`.github/workflows/deploy-accounts-worker.yml`; that workflow validates the
+service and applies pending D1 migrations before publishing the Worker.
 
 `RESEND_API_KEY` is synced to the worker on each deploy from the `RESEND_API_KEY`
 GitHub Actions repo secret (so the mail key has a single source of truth and needs

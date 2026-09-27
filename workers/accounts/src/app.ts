@@ -8,6 +8,7 @@ import auth from "./routes/auth";
 import device from "./routes/device";
 import me from "./routes/me";
 import users from "./routes/users";
+import remote from "./routes/remote";
 
 const app = new Hono<AppEnv>();
 
@@ -22,5 +23,6 @@ app.route("/auth", auth);
 app.route("/device", device);
 app.route("/me", me);
 app.route("/u", users);
+app.route("/remote", remote);
 
 export default app;
