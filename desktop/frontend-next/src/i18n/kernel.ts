@@ -119,6 +119,7 @@ const SAID: Record<string, string> = {
   "device.not_a_device": "这不是一台已配对的设备。",
   "device.misconfigured": "共享入口配置不完整，无法接受连接。",
   "share.closed": "手机访问已关闭，请先开启。",
+  "share.cloud_unavailable": "互联网连接暂时不可用，请确认电脑端 Studio 已登录并保持在线。",
   "share.address_rejected": "地址 {ip} 不是本机的局域网地址。",
   "share.listen_failed": "无法在 {ip} 上开启监听：{error}",
   "share.device_unknown": "没有这台已配对的设备，可能已被移除。",

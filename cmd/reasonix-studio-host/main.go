@@ -381,6 +381,16 @@ func startCloudRemote(ctx context.Context, cfg *config.Config, logs io.Writer, t
 	if registrar, ok := tasks.(interface{ SetCloudControllerDisconnect(func(string) error) }); ok {
 		registrar.SetCloudControllerDisconnect(host.DisconnectController)
 	}
+	if registrar, ok := tasks.(interface {
+		SetCloudRemoteStatus(func() serve.CloudRemoteStatus)
+	}); ok {
+		registrar.SetCloudRemoteStatus(func() serve.CloudRemoteStatus {
+			status := host.Status()
+			return serve.CloudRemoteStatus{
+				DeviceID: status.DeviceID, Name: status.Name, Online: status.Online, Error: status.Error,
+			}
+		})
+	}
 	go host.Run(ctx)
 }
 

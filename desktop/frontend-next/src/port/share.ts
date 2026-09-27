@@ -29,6 +29,13 @@ export interface CloudDevice {
   ordinal: number;
 }
 
+export interface CloudRemoteStatus {
+  deviceId?: string;
+  name?: string;
+  online: boolean;
+  error?: string;
+}
+
 // A paired device's answer about itself. Mirrors serve.DeviceSelf.
 export interface DeviceSelf {
   id: string;
@@ -43,6 +50,7 @@ export interface ShareStatus {
   addresses: ShareAddress[];
   devices: PairedDevice[];
   cloudDevices: CloudDevice[];
+  cloudRemote?: CloudRemoteStatus;
   offerExpires?: string;
 }
 
@@ -53,6 +61,11 @@ export interface ShareOffer {
   expires: string;
 }
 
+export interface CloudShareOffer {
+  url: string;
+  qr: string;
+}
+
 export interface SharePort {
   // Null where this kernel has no window to share from: a browser tab, or a
   // phone that is itself paired.
@@ -60,6 +73,7 @@ export interface SharePort {
   openShare(ip: string): Promise<ShareStatus>;
   closeShare(): Promise<ShareStatus>;
   offerShare(): Promise<ShareOffer>;
+  offerCloudShare(): Promise<CloudShareOffer>;
   revokeDevice(id: string): Promise<ShareStatus>;
   // What this page is to the kernel: a paired device, or null for the window
   // and for a browser on a networked serve.

@@ -64,3 +64,26 @@ it("disconnects an Internet controller after the same two-step confirmation", as
   await userEvent.click(screen.getByRole("button", { name: "确认断开" }));
   await waitFor(() => expect(revokeDevice).toHaveBeenCalledWith("cloud-a"));
 });
+
+it("shows the account-gated Internet QR before the optional LAN pairing code", async () => {
+  const remote = {
+    ...status(false),
+    cloudRemote: { deviceId: "device-a", name: "Home Mac", online: true },
+  };
+  const offerCloudShare = vi.fn(async () => ({
+    url: "https://reasonix.io/remote/?device=device-a",
+    qr: '<svg xmlns="http://www.w3.org/2000/svg"/>',
+  }));
+  const offerShare = vi.fn();
+  const hub = {
+    shareStatus: vi.fn(async () => remote),
+    offerCloudShare,
+    offerShare,
+  } as unknown as HubPort;
+  render(<PhonePop hub={hub} />);
+  await userEvent.click(await screen.findByRole("button", { name: "设备访问" }));
+  expect(await screen.findByRole("img", { name: "互联网连接二维码" })).toBeTruthy();
+  expect(screen.getByText("手机扫码 · 不在同一网络也能连接")).toBeTruthy();
+  expect(offerCloudShare).toHaveBeenCalledTimes(1);
+  expect(offerShare).not.toHaveBeenCalled();
+});

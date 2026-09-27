@@ -226,6 +226,7 @@ export class MockHub implements HubPort {
     ],
     devices: [],
     cloudDevices: [],
+    cloudRemote: { online: false },
   };
 
   shareStatus() {
@@ -247,6 +248,11 @@ export class MockHub implements HubPort {
     this.share = { ...this.share, offerExpires: expires };
     const qr = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 29 29"><rect width="29" height="29" fill="#fff"/><path fill="#000" d="M4 4h7v7h-7zM18 4h7v7h-7zM4 18h7v7h-7zM13 13h3v3h-3z"/></svg>`;
     return Promise.resolve({ url: `${this.share.origin}/#pair=mock-code`, qr, expires });
+  }
+
+  offerCloudShare() {
+    const qr = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 29 29"><rect width="29" height="29" fill="#fff"/><path fill="#000" d="M4 4h7v7h-7zM18 4h7v7h-7zM4 18h7v7h-7zM13 13h3v3h-3z"/></svg>`;
+    return Promise.resolve({ url: "https://reasonix.io/remote/?device=mock-device", qr });
   }
 
   device() {

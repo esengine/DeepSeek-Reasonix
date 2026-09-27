@@ -1,6 +1,6 @@
 import { HttpError, type AgentPort } from "./port";
 import type { RemoteAsk, RemoteHost, RemoteHostEdit, RemoteListing, RemoteProbe } from "./remote";
-import type { DeviceSelf, ShareOffer, SharePort, ShareStatus } from "./share";
+import type { CloudShareOffer, DeviceSelf, ShareOffer, SharePort, ShareStatus } from "./share";
 import { SsePort } from "./sse";
 
 // How often a client waiting on a dial looks for the question it might be
@@ -382,6 +382,10 @@ export class SseHub implements HubPort {
 
   offerShare() {
     return this.post<ShareOffer>("/share/offer", {});
+  }
+
+  offerCloudShare() {
+    return this.post<CloudShareOffer>("/share/cloud-offer", {});
   }
 
   revokeDevice(id: string) {

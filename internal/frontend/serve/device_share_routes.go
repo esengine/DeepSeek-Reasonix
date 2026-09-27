@@ -9,6 +9,7 @@ import (
 const (
 	codeShareAddress = "share.address_rejected"
 	codeShareClosed  = "share.closed"
+	codeShareCloud   = "share.cloud_unavailable"
 	codeShareListen  = "share.listen_failed"
 	codeShareUnknown = "share.device_unknown"
 )
@@ -24,7 +25,18 @@ func (h *Hub) registerShareRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("POST /share/open", h.shareOpen)
 	mux.HandleFunc("POST /share/close", h.shareClose)
 	mux.HandleFunc("POST /share/offer", h.shareOffer)
+	mux.HandleFunc("POST /share/cloud-offer", h.shareCloudOffer)
 	mux.HandleFunc("POST /share/revoke", h.shareRevoke)
+}
+
+func (h *Hub) shareCloudOffer(w http.ResponseWriter, _ *http.Request) {
+	w.Header().Set("Cache-Control", "no-store")
+	offer, err := h.opts.Share.CloudOffer()
+	if err != nil {
+		refuse(w, http.StatusConflict, codeShareCloud, err.Error(), nil)
+		return
+	}
+	writeJSON(w, offer)
 }
 
 func (h *Hub) shareStatus(w http.ResponseWriter, _ *http.Request) {

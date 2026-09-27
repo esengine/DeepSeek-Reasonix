@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useState } from "react";
 import { t } from "../i18n";
 import type { HubPort } from "../port/hub";
-import type { ShareOffer, ShareStatus } from "../port/share";
+import type { CloudShareOffer, ShareOffer, ShareStatus } from "../port/share";
 import { copyText } from "./CopyButton";
 import { ApplyNote } from "./Group";
 import { Switch } from "./Switch";
@@ -33,6 +33,7 @@ export function useShare(hub: HubPort, onError: (e: unknown) => void, watch = tr
   const [st, setSt] = useState<ShareStatus | null>(null);
   const [ip, setIp] = useState("");
   const [offer, setOffer] = useState<ShareOffer | null>(null);
+  const [cloudOffer, setCloudOffer] = useState<CloudShareOffer | null>(null);
   const [busy, setBusy] = useState(false);
   const [confirm, setConfirm] = useState("");
 
@@ -62,6 +63,10 @@ export function useShare(hub: HubPort, onError: (e: unknown) => void, watch = tr
     if (offer && st && !st.offerExpires) setOffer(null);
   }, [st, offer]);
 
+  useEffect(() => {
+    if (cloudOffer && st && !st.cloudRemote?.online) setCloudOffer(null);
+  }, [st, cloudOffer]);
+
   const run = useCallback(
     async (step: () => Promise<void>) => {
       setBusy(true);
@@ -87,6 +92,10 @@ export function useShare(hub: HubPort, onError: (e: unknown) => void, watch = tr
   }, [hub]);
 
   const newCode = useCallback(() => run(mint), [run, mint]);
+  const newCloudCode = useCallback(
+    () => run(async () => setCloudOffer(await hub.offerCloudShare())),
+    [hub, run],
+  );
 
   const toggle = () => run(async () => {
     if (st?.open) {
@@ -113,7 +122,7 @@ export function useShare(hub: HubPort, onError: (e: unknown) => void, watch = tr
     });
   };
 
-  return { st, ip, pick, offer, busy, confirm, setConfirm, newCode, toggle, revoke, refresh: read };
+  return { st, ip, pick, offer, cloudOffer, busy, confirm, setConfirm, newCode, newCloudCode, toggle, revoke, refresh: read };
 }
 
 /** The switch, the network, the code and the paired phones. */

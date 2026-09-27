@@ -4616,6 +4616,7 @@
   .phonecard > header b { color: var(--text); font: var(--w-semi) var(--fs-ui)/1.3 var(--ui) }
   .phonecard > header small { color: var(--ghost); font: var(--w-reg) var(--fs-micro)/1.45 var(--ui) }
   .pc-code { display: grid; justify-items: center; gap: 7px; padding-top: 2px }
+  .pc-code[data-cloud] { padding: 10px 8px; border-radius: 8px; background: color-mix(in srgb, var(--net) 9%, transparent) }
   .pc-code img {
     width: 148px; height: 148px; padding: 8px; box-sizing: content-box;
     border: 1px solid var(--hair); border-radius: 8px; background: #fff; image-rendering: pixelated;
@@ -4641,7 +4642,9 @@
   .pc-row select:focus-visible { outline: 2px solid var(--focus); outline-offset: -1px }
   .phonecard > section { display: grid; gap: 4px; padding-top: 10px; border-top: 1px solid var(--border) }
   .pc-hd { display: flex; align-items: baseline; justify-content: space-between; padding-bottom: 2px }
+  .pc-hd > span { display: grid; gap: 3px; min-width: 0 }
   .pc-hd b { color: var(--text); font: var(--w-semi) var(--fs-meta)/1 var(--ui) }
+  .pc-hd span small { color: var(--ghost); font: var(--w-reg) var(--fs-micro)/1.3 var(--ui) }
   .pc-hd small { color: var(--ghost); font: var(--w-reg) var(--fs-micro)/1 var(--mono) }
   .pc-dev {
     min-height: 24px; display: grid; grid-template-columns: 6px minmax(0, 1fr) auto auto; align-items: center; gap: 8px;

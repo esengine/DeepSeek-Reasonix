@@ -105,3 +105,11 @@ func (h *Hub) SetCloudControllerDisconnect(disconnect func(string) error) {
 		h.opts.Share.setCloudDisconnect(disconnect)
 	}
 }
+
+// SetCloudRemoteStatus lets the host-only device panel show a QR code for
+// this Studio's own relay identity without exposing its device credential.
+func (h *Hub) SetCloudRemoteStatus(status func() CloudRemoteStatus) {
+	if h.opts.Share != nil {
+		h.opts.Share.setCloudStatus(status)
+	}
+}

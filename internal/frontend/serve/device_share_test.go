@@ -207,6 +207,7 @@ func TestAPairedDeviceCannotReachTheWindowsOwnRoutes(t *testing.T) {
 	cookie := rig.pair(t)
 	for _, c := range []struct{ method, path string }{
 		{http.MethodPost, "/share/offer"},
+		{http.MethodPost, "/share/cloud-offer"},
 		{http.MethodGet, "/share"},
 		{http.MethodPost, "/host/pick-folder"},
 		{http.MethodGet, "/remotes"},
@@ -306,6 +307,50 @@ func TestTheWindowDrivesTheShareOverItsRoutes(t *testing.T) {
 	}
 	if code := deviceRefusal(t, resp); resp.StatusCode != http.StatusConflict || code != codeShareClosed {
 		t.Fatalf("offer on a closed share = %d %q, want 409 %s", resp.StatusCode, code, codeShareClosed)
+	}
+}
+
+func TestCloudOfferUsesOnlyTheAccountGatedDeviceIdentity(t *testing.T) {
+	share := NewDeviceShare(nil)
+	share.setCloudStatus(func() CloudRemoteStatus {
+		return CloudRemoteStatus{DeviceID: "device/with space", Name: "Home Mac", Online: true}
+	})
+	offer, err := share.CloudOffer()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if offer.URL != "https://reasonix.io/remote/?device=device%2Fwith+space" || !strings.HasPrefix(offer.QR, "<svg") {
+		t.Fatalf("CloudOffer() = %+v, want the public account-gated route and its QR", offer)
+	}
+	if strings.Contains(offer.URL, "token") || strings.Contains(offer.URL, "credential") {
+		t.Fatalf("CloudOffer() exposed a credential: %s", offer.URL)
+	}
+}
+
+func TestCloudOfferRequiresAnOnlineStudio(t *testing.T) {
+	share := NewDeviceShare(nil)
+	share.setCloudStatus(func() CloudRemoteStatus {
+		return CloudRemoteStatus{DeviceID: "offline", Online: false}
+	})
+	if _, err := share.CloudOffer(); err == nil {
+		t.Fatal("CloudOffer() succeeded for an offline Studio")
+	}
+}
+
+func TestTheWindowCanRequestACloudQR(t *testing.T) {
+	rig := newShareRig(t)
+	rig.hub.SetCloudRemoteStatus(func() CloudRemoteStatus {
+		return CloudRemoteStatus{DeviceID: "abc123", Name: "Home Mac", Online: true}
+	})
+	resp, err := http.Post(rig.window.URL+"/share/cloud-offer", "application/json", strings.NewReader("{}"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer resp.Body.Close()
+	var offer CloudShareOffer
+	_ = json.NewDecoder(resp.Body).Decode(&offer)
+	if resp.StatusCode != http.StatusOK || offer.URL != "https://reasonix.io/remote/?device=abc123" {
+		t.Fatalf("POST /share/cloud-offer = %d %+v", resp.StatusCode, offer)
 	}
 }
 

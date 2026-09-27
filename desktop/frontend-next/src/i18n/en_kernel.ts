@@ -117,6 +117,7 @@ export const EN_KERNEL: Record<string, string> = {
   "这不是一台已配对的设备。": "This is not a paired device.",
   "共享入口配置不完整，无法接受连接。": "The sharing listener is not fully configured and cannot accept connections.",
   "手机访问已关闭，请先开启。": "Phone access is off. Turn it on first.",
+  "互联网连接暂时不可用，请确认电脑端 Studio 已登录并保持在线。": "Internet access is temporarily unavailable. Make sure desktop Studio is signed in and stays online.",
   "地址 {ip} 不是本机的局域网地址。": "{ip} is not a private address on this computer.",
   "无法在 {ip} 上开启监听：{error}": "Could not listen on {ip}: {error}",
   "没有这台已配对的设备，可能已被移除。": "No paired device has that id; it may already have been removed.",

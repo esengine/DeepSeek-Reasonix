@@ -8,6 +8,7 @@ import (
 	"net"
 	"net/http"
 	"net/netip"
+	"net/url"
 	"os"
 	"slices"
 	"strings"
@@ -48,6 +49,7 @@ type DeviceShare struct {
 	handler         http.Handler
 	live            *shareListener
 	cloudDisconnect func(string) error
+	cloudStatus     func() CloudRemoteStatus
 }
 
 type shareListener struct {
@@ -87,7 +89,23 @@ type ShareStatus struct {
 	Addresses    []ShareAddress        `json:"addresses"`
 	Devices      []DeviceView          `json:"devices"`
 	CloudDevices []CloudControllerView `json:"cloudDevices"`
+	CloudRemote  CloudRemoteStatus     `json:"cloudRemote"`
 	OfferExpires *time.Time            `json:"offerExpires,omitempty"`
+}
+
+// CloudRemoteStatus is this Studio's own reachability through the encrypted
+// Internet relay. The device identity routes a connection; it is not a
+// credential, and the account service still verifies ownership before access.
+type CloudRemoteStatus struct {
+	DeviceID string `json:"deviceId,omitempty"`
+	Name     string `json:"name,omitempty"`
+	Online   bool   `json:"online"`
+	Error    string `json:"error,omitempty"`
+}
+
+type CloudShareOffer struct {
+	URL string `json:"url"`
+	QR  string `json:"qr"`
 }
 
 // ShareOffer is a pairing code as a device receives it: a link that carries the
@@ -201,12 +219,44 @@ func (s *DeviceShare) setCloudDisconnect(disconnect func(string) error) {
 	s.mu.Unlock()
 }
 
+func (s *DeviceShare) setCloudStatus(status func() CloudRemoteStatus) {
+	s.mu.Lock()
+	s.cloudStatus = status
+	s.mu.Unlock()
+}
+
+// CloudOffer draws a public, account-gated link for this Studio. The link
+// deliberately carries no token: a phone must sign in as the same owner, and
+// the platform checks that the target is currently online before connecting.
+func (s *DeviceShare) CloudOffer() (CloudShareOffer, error) {
+	s.mu.Lock()
+	status := s.cloudStatus
+	s.mu.Unlock()
+	if status == nil {
+		return CloudShareOffer{}, errors.New("Internet remote access is not ready")
+	}
+	current := status()
+	if !current.Online || strings.TrimSpace(current.DeviceID) == "" {
+		return CloudShareOffer{}, errors.New("this Studio is not online for Internet remote access")
+	}
+	link := "https://reasonix.io/remote/?device=" + url.QueryEscape(current.DeviceID)
+	svg, err := QRSVG(link)
+	if err != nil {
+		return CloudShareOffer{}, err
+	}
+	return CloudShareOffer{URL: link, QR: svg}, nil
+}
+
 // Status reports what is open, what could be, and who is paired.
 func (s *DeviceShare) Status() ShareStatus {
 	s.mu.Lock()
 	live := s.live
+	cloudStatus := s.cloudStatus
 	s.mu.Unlock()
 	st := ShareStatus{Addresses: s.addresses(), Devices: s.registry.Devices(), CloudDevices: s.cloud.views()}
+	if cloudStatus != nil {
+		st.CloudRemote = cloudStatus()
+	}
 	if live != nil {
 		st.Open, st.Origin = true, live.origin
 	}
