@@ -36,10 +36,9 @@ TELEMETRY_QUEUE_ENABLED = "true"
 # `legacy` remain available as rollback modes; the verified legacy copy is kept
 # temporarily after cutover.
 TELEMETRY_DB_MODE = "isolated"
-# Desktop migration starts with dual writes while diagnostic reads remain on
-# the legacy database. Switch to `isolated` only after the large backfill and
-# cross-database diagnostic query comparison are verified.
-DESKTOP_TELEMETRY_DB_MODE = "dual"
+# Desktop reads and writes use the isolated telemetry database. The verified
+# legacy copy remains intact as a rollback path after cutover.
+DESKTOP_TELEMETRY_DB_MODE = "isolated"
 
 [[d1_databases]]
 binding = "DB"
