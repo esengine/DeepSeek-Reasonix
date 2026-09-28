@@ -1103,6 +1103,7 @@ status_bar_items = ["cost", "balance"]
 `), 0o644); err != nil {
 		t.Fatalf("write project config: %v", err)
 	}
+	approveWorkspace(t, project)
 
 	userCfg := config.LoadForEdit(config.UserConfigPath())
 	if err := userCfg.SetDesktopLanguage("en"); err != nil {
@@ -1345,54 +1346,26 @@ func TestSettingsShowsGlobalCredentialWithoutMutatingWorkspaceEnv(t *testing.T) 
 	t.Fatalf("settings provider missing from settings: %+v", got.Providers)
 }
 
-func TestSettingsSeedsMissingUserConfigFromLegacyProjectConfig(t *testing.T) {
+// With no user config yet, Settings start from the defaults, not from the
+// checkout's reasonix.toml, and the first edit writes only the user's choice.
+func TestSettingsNeverSeedTheUserConfigFromTheProjectFile(t *testing.T) {
 	isolateDesktopUserDirs(t)
-
 	project := robustTempDir(t)
-	if err := os.WriteFile(filepath.Join(project, "reasonix.toml"), []byte(`
-default_model = "legacy-provider/legacy-model"
-
-[desktop]
-language = "zh"
-layout_style = "workbench"
-theme = "light"
-theme_style = "glacier"
-close_behavior = "quit"
-status_bar_style = "text"
-status_bar_items = ["model", "cache", "balance"]
-`), 0o644); err != nil {
+	if err := os.WriteFile(filepath.Join(project, "reasonix.toml"), []byte("[desktop]\ntheme = \"light\"\n\n[permissions]\nmode = \"allow\"\n"), 0o644); err != nil {
 		t.Fatalf("write project config: %v", err)
 	}
-
-	orig, _ := os.Getwd()
-	defer func() { _ = os.Chdir(orig) }()
-	if err := os.Chdir(project); err != nil {
-		t.Fatalf("chdir project: %v", err)
-	}
-
+	approveWorkspace(t, project)
+	t.Chdir(project)
 	app := NewApp()
-	got := app.Settings()
-	if got.ConfigPath != config.UserConfigPath() {
-		t.Fatalf("Settings configPath = %q, want user config %q", got.ConfigPath, config.UserConfigPath())
-	}
-	if got.DefaultModel != "legacy-provider/legacy-model" || got.DesktopLanguage != "zh" || got.DesktopLayoutStyle != "workbench" || got.DesktopTheme != "light" || got.DesktopThemeStyle != "glacier" || got.CloseBehavior != "quit" || got.StatusBarStyle != "icon" {
-		t.Fatalf("Settings did not seed from legacy project config: %+v", got)
-	}
-	if want := []string{"model", "cache", "balance"}; !reflect.DeepEqual(got.StatusBarItems, want) {
-		t.Fatalf("Settings did not seed status bar items from legacy project config: got %v want %v", got.StatusBarItems, want)
-	}
-	if _, err := os.Stat(config.UserConfigPath()); !os.IsNotExist(err) {
-		t.Fatalf("Settings() should not write user config before an edit, stat err = %v", err)
+	if got := app.Settings(); got.ConfigPath != config.UserConfigPath() || got.DesktopTheme == "light" {
+		t.Fatalf("Settings = path %q theme %q, want the user config's defaults", got.ConfigPath, got.DesktopTheme)
 	}
 	if err := app.SetDesktopLanguage("en"); err != nil {
 		t.Fatalf("SetDesktopLanguage: %v", err)
 	}
 	userCfg := config.LoadForEdit(config.UserConfigPath())
-	if userCfg.DesktopLanguage() != "en" || userCfg.DesktopLayoutStyle() != "workbench" || userCfg.DesktopTheme() != "light" || userCfg.DesktopThemeStyle() != "glacier" || userCfg.DesktopCloseBehavior() != "quit" || userCfg.DesktopStatusBarStyle() != "icon" {
-		t.Fatalf("saved user config did not preserve seeded desktop prefs: lang:%q layout:%q theme:%q style:%q close:%q status:%q", userCfg.DesktopLanguage(), userCfg.DesktopLayoutStyle(), userCfg.DesktopTheme(), userCfg.DesktopThemeStyle(), userCfg.DesktopCloseBehavior(), userCfg.DesktopStatusBarStyle())
-	}
-	if want := []string{"model", "cache", "balance"}; !reflect.DeepEqual(userCfg.DesktopStatusBarItems(), want) {
-		t.Fatalf("saved user config did not preserve seeded status bar items: got %v want %v", userCfg.DesktopStatusBarItems(), want)
+	if userCfg.DesktopLanguage() != "en" || userCfg.DesktopTheme() == "light" || userCfg.Permissions.Mode == "allow" {
+		t.Fatalf("user config took the checkout's values: theme %q mode %q", userCfg.DesktopTheme(), userCfg.Permissions.Mode)
 	}
 }
 
@@ -3227,6 +3200,7 @@ api_key_env = "DEEPSEEK_API_KEY"
 	if err := os.WriteFile(filepath.Join(projectRoot, "reasonix.toml"), []byte(projectConfig), 0o644); err != nil {
 		t.Fatalf("write project config: %v", err)
 	}
+	approveWorkspace(t, projectRoot)
 
 	app := NewApp()
 	tab := &WorkspaceTab{ID: "project", WorkspaceRoot: projectRoot, Ready: true}
@@ -3954,6 +3928,7 @@ default_effort = "max"
 	if err := os.WriteFile(filepath.Join(projectA, "reasonix.toml"), []byte(ownerConfig), 0o644); err != nil {
 		t.Fatal(err)
 	}
+	approveWorkspace(t, projectA)
 	staleConfig := `default_model = "stale/stale-model"
 [[providers]]
 name = "stale"
@@ -3966,6 +3941,7 @@ reasoning_protocol = "none"
 	if err := os.WriteFile(filepath.Join(projectB, "reasonix.toml"), []byte(staleConfig), 0o644); err != nil {
 		t.Fatal(err)
 	}
+	approveWorkspace(t, projectB)
 
 	topicID := "topic_effort_owner"
 	topicTitle := "Effort owner"
@@ -6973,6 +6949,7 @@ url = %q
 `, srv.URL), 0o644); err != nil {
 		t.Fatal(err)
 	}
+	approveWorkspace(t, dir)
 	enableProjectMCPForTest(t, dir)
 
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
@@ -7061,6 +7038,7 @@ args = ["-y", "@playwright/mcp"]
 `), 0o644); err != nil {
 		t.Fatal(err)
 	}
+	approveWorkspace(t, dir)
 
 	app := NewApp()
 	app.setTestCtrl(control.New(control.Options{Host: plugin.NewHost()}), "")
@@ -7084,6 +7062,7 @@ tier = "lazy"
 `), 0o644); err != nil {
 		t.Fatal(err)
 	}
+	approveWorkspace(t, dir)
 
 	app := NewApp()
 	app.setTestCtrl(control.New(control.Options{Host: plugin.NewHost()}), "")
@@ -7132,6 +7111,7 @@ url = "http://127.0.0.1:1/mcp"
 `), 0o644); err != nil {
 		t.Fatal(err)
 	}
+	approveWorkspace(t, dir)
 
 	host := plugin.NewHost()
 	defer host.Close()
@@ -7170,6 +7150,7 @@ url = %q
 `, srv.URL), 0o644); err != nil {
 		t.Fatal(err)
 	}
+	approveWorkspace(t, dir)
 
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
@@ -7320,6 +7301,7 @@ url = %q
 `, projectServer.URL), 0o644); err != nil {
 		t.Fatal(err)
 	}
+	approveWorkspace(t, dir)
 
 	host := plugin.NewHost()
 	t.Cleanup(host.Close)
@@ -7473,6 +7455,7 @@ network = true
 `, exe, singleInstanceAddr, gateConfig), 0o644); err != nil {
 		t.Fatal(err)
 	}
+	approveWorkspace(t, dir)
 
 	entry := config.PluginEntry{
 		Name: "h", Command: exe, Args: helperArgs,
@@ -8291,6 +8274,7 @@ args = ["serve"]
 `), 0o644); err != nil {
 		t.Fatal(err)
 	}
+	approveWorkspace(t, dir)
 
 	app := NewApp()
 	app.setTestCtrl(control.New(control.Options{Host: plugin.NewHost()}), "")
@@ -8402,6 +8386,7 @@ command = "reasonix-missing-mcp-binary"
 `), 0o644); err != nil {
 		t.Fatal(err)
 	}
+	approveWorkspace(t, dir)
 	enableProjectMCPForWorkspace(t, dir, "")
 
 	app := NewApp()
@@ -8930,6 +8915,7 @@ tier = "lazy"
 `), 0o644); err != nil {
 		t.Fatal(err)
 	}
+	approveWorkspace(t, dir)
 	enableProjectMCPForWorkspace(t, dir, "")
 
 	app := NewApp()
@@ -8962,6 +8948,7 @@ tier = "lazy"
 `), 0o644); err != nil {
 		t.Fatal(err)
 	}
+	approveWorkspace(t, dir)
 
 	app := NewApp()
 	app.setTestCtrl(control.New(control.Options{Host: plugin.NewHost()}), "")
@@ -8992,6 +8979,7 @@ tier = "lazy"
 `), 0o644); err != nil {
 		t.Fatal(err)
 	}
+	approveWorkspace(t, dir)
 	enableProjectMCPForWorkspace(t, dir, "")
 
 	host := plugin.NewHost()
@@ -9027,6 +9015,7 @@ tier = "lazy"
 `), 0o644); err != nil {
 		t.Fatal(err)
 	}
+	approveWorkspace(t, dir)
 	enableProjectMCPForWorkspace(t, dir, "")
 
 	host := plugin.NewHost()
@@ -9087,6 +9076,7 @@ tier = "lazy"
 `), 0o644); err != nil {
 		t.Fatal(err)
 	}
+	approveWorkspace(t, dir)
 
 	app := NewApp()
 	app.setTestCtrl(control.New(control.Options{Host: plugin.NewHost()}), "")
@@ -9164,6 +9154,7 @@ args = ["-y", "@playwright/mcp"]
 `), 0o644); err != nil {
 		t.Fatal(err)
 	}
+	approveWorkspace(t, dir)
 
 	app := NewApp()
 	app.setTestCtrl(control.New(control.Options{Host: plugin.NewHost()}), "")
@@ -9202,6 +9193,7 @@ tier = "background"
 `), 0o644); err != nil {
 		t.Fatal(err)
 	}
+	approveWorkspace(t, dir)
 	enableProjectMCPForWorkspace(t, dir, "")
 
 	app := NewApp()
@@ -9253,6 +9245,7 @@ name = "codegraph"
 `), 0o644); err != nil {
 		t.Fatal(err)
 	}
+	approveWorkspace(t, dir)
 	enableProjectMCPForWorkspace(t, dir, "")
 
 	reg := tool.NewRegistry()
@@ -9312,6 +9305,7 @@ tier = "lazy"
 `), 0o644); err != nil {
 		t.Fatal(err)
 	}
+	approveWorkspace(t, dir)
 	enableProjectMCPForWorkspace(t, dir, "")
 
 	app := NewApp()
@@ -9406,6 +9400,7 @@ tier = "eager"
 `), 0o644); err != nil {
 		t.Fatal(err)
 	}
+	approveWorkspace(t, dir)
 	enableProjectMCPForWorkspace(t, dir, "")
 
 	app := NewApp()

@@ -149,9 +149,7 @@ func loadForRoot(root string, opts loadForRootOptions) (*Config, error) {
 	globalCLI := cfg.CLI
 	globalSecrets := cfg.Secrets
 	globalRemote, globalServe := cfg.Remote.Clone(), cfg.Serve
-	globalDesktopLanguage := cfg.Desktop.Language
-	globalPricingCurrency := cfg.Desktop.Currency
-	globalBillingDisplayCurrency := cfg.Billing.DisplayCurrency
+	held := holdUserScope(cfg)
 	globalTelemetry, globalLegacyAnchorSafetyGate, globalStatusline := cfg.Telemetry, cfg.Agent.LegacyAnchorSafetyGate, cfg.Statusline
 
 	tomlSources = append(tomlSources, projectTOML)
@@ -180,11 +178,6 @@ func loadForRoot(root string, opts loadForRootOptions) (*Config, error) {
 	// must not inject hosts, jump chains, or port forwards, nor choose serve's
 	// launch token, auth mode, or trust in forwarded headers.
 	cfg.Remote, cfg.Serve = globalRemote, globalServe
-	// Desktop language and pricing currency are user-level regional preferences.
-	// A repository must not be able to alter how the user's spend is shown.
-	cfg.Desktop.Language = globalDesktopLanguage
-	cfg.Desktop.Currency = globalPricingCurrency
-	cfg.Billing.DisplayCurrency = globalBillingDisplayCurrency
 	// Telemetry is a user-global privacy choice and the statusline a command the
 	// TUI runs unprompted: project config sets neither, even with no global value.
 	cfg.Telemetry, cfg.Agent.LegacyAnchorSafetyGate, cfg.Statusline = globalTelemetry, globalLegacyAnchorSafetyGate, globalStatusline
@@ -210,6 +203,8 @@ func loadForRoot(root string, opts loadForRootOptions) (*Config, error) {
 	} else if ok {
 		cfg.Desktop.ProviderAccess = access
 	}
+	// Sandbox, permission, program and regional grants only narrow (see heldScope).
+	held.narrow(cfg, root)
 
 	// Claude Code's .mcp.json (project root) is read last and merged into
 	// [[plugins]], so a server configured for Claude works here unchanged.

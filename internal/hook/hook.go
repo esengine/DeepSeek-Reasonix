@@ -162,9 +162,10 @@ type Settings struct {
 // ResolvedHook is a loaded hook with its origin baked in.
 type ResolvedHook struct {
 	HookConfig
-	Event  Event
-	Scope  Scope
-	Source string // absolute path to the settings.json it came from
+	Event    Event
+	Scope    Scope
+	Source   string                 // absolute path to the settings.json it came from
+	approval *config.ProjectProgram // the approval a project hook runs under
 }
 
 func (h ResolvedHook) timeout() time.Duration {
@@ -222,8 +223,8 @@ type LoadOptions struct {
 	// settings and plugin hooks so Windows %APPDATA%/reasonix and REASONIX_HOME
 	// isolation stay consistent across hook/doctor/capdiag (#7411, #7331).
 	ReasonixHomeDir string
-	// Trusted is retained for source compatibility. Project hooks are enabled
-	// automatically now, so callers no longer need to set it.
+	// Trusted is retained for source compatibility and ignored: project hooks
+	// run only once approved (see ProjectHooksProgram).
 	Trusted bool
 	// SkipProject leaves out the project's settings.json, for a command that
 	// runs against a checkout it must not take commands from. Global settings
@@ -239,7 +240,7 @@ func Load(opts LoadOptions) []ResolvedHook {
 	if opts.ProjectRoot != "" && !opts.SkipProject {
 		p := ProjectSettingsPath(opts.ProjectRoot)
 		if s := readSettings(p); s != nil {
-			appendResolved(&out, s, ScopeProject, p)
+			appendApprovedProjectHooks(&out, opts, p, s)
 		}
 	}
 	reasonixHomeDir := reasonixHomeForOptions(opts)
@@ -852,6 +853,7 @@ type Outcome struct {
 	TimedOut  bool
 	Truncated bool
 	Duration  time.Duration
+	Refusal   error // why the host refused to run it, when it did
 }
 
 // Report aggregates the outcomes of running an event's hooks.
@@ -1066,6 +1068,9 @@ func Run(ctx context.Context, payload Payload, hooks []ResolvedHook, spawner Spa
 	report := Report{Event: event}
 	for _, h := range hooks {
 		if h.Event != event || !MatchesTool(h, payload.ToolName) {
+			continue
+		}
+		if refuseChangedHook(&report, h) {
 			continue
 		}
 		cwd := h.Cwd

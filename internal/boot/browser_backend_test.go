@@ -27,8 +27,10 @@ func TestConfiguredBrowserBackendStaysOffTheProviderSurface(t *testing.T) {
 	registerBootTokenProfileTestProvider()
 
 	writeFile(t, dir, "reasonix.toml", browserBootConfig)
+	approveWorkspace(t, dir)
 	without := captureBrowserSurface(t, nil)
 	writeFile(t, dir, "reasonix.toml", browserBootConfig+configuredBrowserSection)
+	approveWorkspace(t, dir)
 	with := captureBrowserSurface(t, nil)
 
 	for _, name := range browser.Names() {

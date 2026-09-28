@@ -104,7 +104,15 @@ func TestBwrapProtectedWriteArgsReallowsOnlySafeStateChild(t *testing.T) {
 }
 
 func TestBwrapWriteRootUnderTmpReopensExactDirectory(t *testing.T) {
-	root := "/tmp/project/cache"
+	project, err := os.MkdirTemp("/tmp", "project-")
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = os.RemoveAll(project) })
+	root := filepath.Join(project, "cache")
+	if err := os.Mkdir(root, 0o755); err != nil {
+		t.Fatal(err)
+	}
 	argv := bwrapBaseArgs(Spec{
 		Mode:          "enforce",
 		WriteRoots:    []string{root},
@@ -112,7 +120,7 @@ func TestBwrapWriteRootUnderTmpReopensExactDirectory(t *testing.T) {
 		MinimalWrites: true,
 	})
 	tmpMount := indexArgs(argv, "--bind", "/private/session-tmp", "/tmp")
-	parent := indexArgs(argv, "--dir", "/tmp/project")
+	parent := indexArgs(argv, "--dir", project)
 	reopen := indexArgs(argv, "--bind", root, root)
 	if tmpMount < 0 || parent < tmpMount || reopen < parent {
 		t.Fatalf("temporary write root must be recreated after the private /tmp mount: %v", argv)

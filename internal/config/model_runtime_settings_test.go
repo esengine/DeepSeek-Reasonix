@@ -29,6 +29,7 @@ api_key_env = "PROJECT_MODEL_KEY"
 	if err := os.WriteFile(filepath.Join(root, "reasonix.toml"), []byte(project), 0600); err != nil {
 		t.Fatal(err)
 	}
+	approveWorkspace(t, root)
 	bundle := &ModelRuntimeSettings{Revision: "revision", ProxyURL: "http://127.0.0.1:9876", Providers: []ProviderEntry{
 		{Name: "local-alias", Kind: "anthropic", BaseURL: "https://desktop.invalid", Model: "m"},
 		{Name: "global-alias", Kind: "openai", BaseURL: "https://global.invalid", Model: "g"},

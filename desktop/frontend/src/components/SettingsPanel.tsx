@@ -6652,6 +6652,19 @@ function HooksSection({ onChanged }: { onChanged: (settings?: SettingsView | nul
       setPathMessage(t("settings.hooksJsonClipboardUnavailable"));
     }
   };
+  const approve = async () => {
+    setBusy(true);
+    setErr(null);
+    try {
+      await app.TrustProjectHooksForRoot(view?.projectRoot?.trim() ?? "");
+      await load(scope);
+      onChanged();
+    } catch (e) {
+      setErr(String((e as Error)?.message ?? e));
+    } finally {
+      setBusy(false);
+    }
+  };
   const save = async () => {
     setBusy(true);
     setErr(null);
@@ -6694,6 +6707,12 @@ function HooksSection({ onChanged }: { onChanged: (settings?: SettingsView | nul
         title={t("settings.hooks")}
         description={scope === "project" ? t("settings.hooksProjectHint") : t("settings.hooksGlobalHint")}
       >
+        {view && scope === "project" && !view.trusted && view.hooks.length > 0 && (
+          <div className="banner banner--warning" role="status">
+            <span>{t("settings.hooksAwaitingApproval")}</span>
+            <button className="btn btn--small" disabled={busy} onClick={() => void approve()}>{t("settings.hooksApprove")}</button>
+          </div>
+        )}
         {view && (
           <div className="hooks-json-panel">
             <div className="hooks-json-panel__head">

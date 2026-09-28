@@ -49,6 +49,7 @@ base_url = "https://example.invalid"
 model = "x"
 api_key_env = "REASONIX_TEST_KEY_UNSET"
 `)
+	approveWorkspace(t, dir)
 	writeFile(t, dir, "REASONIX.md", "Project rule: keep the prompt prefix stable.")
 
 	first, err := Build(context.Background(), Options{})
@@ -94,6 +95,7 @@ base_url = "https://example.invalid"
 model = "x"
 api_key_env = "REASONIX_TEST_KEY_UNSET"
 `)
+	approveWorkspace(t, dir)
 
 	buildSystem := func() (*memory.Set, string) {
 		ctrl, err := Build(context.Background(), Options{})
@@ -162,6 +164,7 @@ name = "test-model"
 kind = "boot-token-profile-test"
 model = "x"
 `)
+	approveWorkspace(t, dir)
 	writeFile(t, dir, ".reasonix/skills/hot/SKILL.md", "---\ndescription: explicit hot skill\n---\nHOT BODY")
 
 	ctrl, err := Build(context.Background(), Options{})

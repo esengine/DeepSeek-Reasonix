@@ -983,7 +983,7 @@ func build(ctx context.Context, opts Options) (*BuildResult, error) {
 		return addTools(reg, lsp.Tools(lspMgr))
 	}
 	if cfg.LSP.Enabled {
-		lspMgr = lsp.NewManager(root, LSPSpecs(cfg.LSP))
+		lspMgr = lsp.NewManager(root, verifiedLSPSpecs(cfg))
 		addLSPTools()
 		prev := cleanup
 		cleanup = func() { prev(); lspMgr.Close() }
@@ -2095,39 +2095,28 @@ func effectivePlannerModel(cfg *config.Config, opts Options) string {
 	return strings.TrimSpace(cfg.Agent.PlannerModel)
 }
 
+// rememberPermissionRule files a workspace's "always" under the user's home:
+// the checkout's reasonix.toml cannot grant allow rules, since a clone could
+// have written them.
 func rememberPermissionRule(workspaceRoot, rule string) control.RememberResult {
-	path := rememberPermissionConfigPath(workspaceRoot)
-	result := control.RememberResult{Rule: strings.TrimSpace(rule), Path: path}
-	unlock, err := config.LockConfigFileEdits(path)
-	if err != nil {
-		slog.Warn("lock config for permission rule", "path", path, "err", err)
-		result.Err = err
-		return result
+	store := config.NewProjectGrantStore(config.ReasonixHomeDir())
+	result := control.RememberResult{Rule: strings.TrimSpace(rule), Path: store.Path()}
+	root := strings.TrimSpace(workspaceRoot)
+	if root == "" {
+		root, _ = os.Getwd()
 	}
-	defer unlock()
-
-	edit, err := config.LoadForEditReadOnlyStrict(path)
-	if err != nil {
-		slog.Warn("load config for permission rule", "path", path, "err", err)
-		result.Err = err
-		return result
+	result.Err = store.Update(root, func(g config.ProjectGrant) (config.ProjectGrant, error) {
+		if coveredBy := coveredPermissionRule(g.Allow, result.Rule); coveredBy != "" {
+			result.CoveredBy = coveredBy
+			return g, nil
+		}
+		g.Allow = append(pruneCoveredPermissionRules(g.Allow, result.Rule), result.Rule)
+		return g, nil
+	})
+	if result.Err != nil {
+		slog.Warn("persist permission rule", "rule", rule, "err", result.Err)
 	}
-	if coveredBy := coveredPermissionRule(edit.Permissions.Allow, result.Rule); coveredBy != "" {
-		result.CoveredBy = coveredBy
-		return result
-	}
-	edit.Permissions.Allow = pruneCoveredPermissionRules(edit.Permissions.Allow, result.Rule)
-	if err := edit.AddPermissionRule("allow", rule); err != nil {
-		slog.Warn("persist permission rule", "rule", rule, "err", err)
-		result.Err = err
-		return result
-	}
-	if err := config.WritePermissionsAllow(path, edit.Permissions.Allow); err != nil {
-		slog.Warn("save config after permission rule", "err", err)
-		result.Err = err
-		return result
-	}
-	result.Saved = true
+	result.Saved = result.Err == nil && result.CoveredBy == ""
 	return result
 }
 

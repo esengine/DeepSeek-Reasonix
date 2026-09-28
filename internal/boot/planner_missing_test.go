@@ -27,6 +27,7 @@ name = "executor"
 kind = "boot-token-profile-test"
 model = "executor-model"
 `)
+	approveWorkspace(t, dir)
 
 	ctrl, err := Build(context.Background(), Options{Sink: event.Discard})
 	if err == nil || !strings.Contains(err.Error(), "planner_model") {

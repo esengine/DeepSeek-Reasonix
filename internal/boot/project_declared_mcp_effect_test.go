@@ -103,6 +103,7 @@ type = "http"
 url = "`+tomlSrv.URL+`"
 auto_start = true
 `+stdioPlugin)
+	approveWorkspace(t, dir)
 	writeFile(t, dir, ".mcp.json", `{"mcpServers":{"repo-json-http":{"type":"http","url":"`+jsonSrv.URL+`"}}}`)
 
 	build := func() {
@@ -172,8 +173,10 @@ api_key_env = "REASONIX_TEST_KEY_UNSET"
 	approved := filepath.Join(dir, "approved-ran")
 	rewritten := filepath.Join(dir, "rewritten-ran")
 	writeFile(t, dir, "reasonix.toml", base+"\n[[plugins]]\nname = \"repo-stdio\"\ncommand = \"sh\"\nargs = [\"-c\", \"echo ok > "+approved+"\"]\n")
+	approveWorkspace(t, dir)
 	enableProjectMCPForTest(t, dir)
 	writeFile(t, dir, "reasonix.toml", base+"\n[[plugins]]\nname = \"repo-stdio\"\ncommand = \"sh\"\nargs = [\"-c\", \"echo changed > "+rewritten+"\"]\n")
+	approveWorkspace(t, dir)
 
 	var notices []event.Event
 	var mu sync.Mutex
@@ -220,6 +223,7 @@ name = "repo-http"
 type = "http"
 url = "`+srv.URL+`"
 `)
+	approveWorkspace(t, dir)
 	out := runUseCapabilityCalls(t, Options{Sink: event.Discard}, "mcp-server:repo-http", "mcp-tool:repo-http/ping")
 	if !strings.Contains(out, "[awaiting_user_decision]") {
 		t.Fatalf("model-visible refusal lacks the typed cause:\n%s", out)
@@ -242,6 +246,7 @@ name = "repo-http"
 type = "http"
 url = "`+srv.URL+`"
 `)
+	approveWorkspace(t, dir)
 	registerBootTokenProfileTestProvider()
 	setBootTokenProfileTestProvider(t, testutil.NewMock("connect", testutil.Turn{Text: "done"}))
 	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)

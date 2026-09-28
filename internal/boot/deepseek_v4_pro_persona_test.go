@@ -67,6 +67,7 @@ base_url = "https://api.novita.ai/openai"
 model = "deepseek-v4-pro"
 api_key_env = "`+envName+`"
 `)
+	approveWorkspace(t, dir)
 
 	ctrl, err := Build(context.Background(), Options{Sink: event.Discard})
 	if err != nil {
@@ -103,6 +104,7 @@ models = ["deepseek-v4-flash", "deepseek-v4-pro"]
 default = "deepseek-v4-flash"
 api_key_env = "`+envName+`"
 `)
+	approveWorkspace(t, dir)
 	ctrl, err := Build(context.Background(), Options{Sink: event.Discard})
 	if err != nil {
 		t.Fatalf("Build %s: %v", model, err)

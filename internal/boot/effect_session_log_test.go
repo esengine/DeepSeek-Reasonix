@@ -40,6 +40,7 @@ name = "test-model"
 kind = "boot-effect-session-log"
 model = "x"
 `)
+	approveWorkspace(t, dir)
 
 	legacyDir := filepath.Join(t.TempDir(), "sessions")
 	legacyPath := agent.NewSessionPath(legacyDir, "legacy")

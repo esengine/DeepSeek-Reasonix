@@ -11,6 +11,7 @@ import (
 	"testing"
 
 	"reasonix/internal/event"
+	"reasonix/internal/hook"
 	"reasonix/internal/provider"
 )
 
@@ -70,6 +71,7 @@ name = "planner"
 kind = "`+plannerHookProbeKind+`"
 model = "planner-model"
 `)
+	approveWorkspace(t, dir)
 	writeFile(t, dir, "marker.txt", "planner hook probe")
 	logPath := filepath.Join(dir, "hook.log")
 	writeFile(t, dir, "deny-read.sh", "#!/bin/sh\ncat >> "+shellQuoteForTest(logPath)+"\nexit 2\n")
@@ -87,6 +89,9 @@ model = "planner-model"
 		t.Fatal(err)
 	}
 	writeFile(t, dir, ".reasonix/settings.json", string(settings))
+	if err := hook.ApproveProjectHooks(hook.LoadOptions{ProjectRoot: dir}); err != nil {
+		t.Fatal(err)
+	}
 
 	ctrl, err := Build(context.Background(), withTestSession(t, Options{Sink: event.Discard}))
 	if err != nil {

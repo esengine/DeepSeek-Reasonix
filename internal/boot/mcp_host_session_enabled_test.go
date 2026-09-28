@@ -135,6 +135,7 @@ func TestBuildEnablesHostSessionMCPForCapabilityDispatch(t *testing.T) {
 	dir := robustTempDir(t)
 	t.Chdir(dir)
 	writeFile(t, dir, "reasonix.toml", mcpCapabilityTestProviderConfig)
+	approveWorkspace(t, dir)
 
 	var calls atomic.Int32
 	srv := mcpHostSessionStub(t, "acp-extra", &calls)
@@ -178,6 +179,7 @@ type = "http"
 url = "`+cfgSrv.URL+`"
 auto_start = false
 `)
+	approveWorkspace(t, dir)
 
 	out := runUseCapabilityCalls(t, Options{
 		Sink: event.Discard,
@@ -272,6 +274,7 @@ func TestBuildLeavesUnknownMCPServerUndispatchable(t *testing.T) {
 	dir := robustTempDir(t)
 	t.Chdir(dir)
 	writeFile(t, dir, "reasonix.toml", mcpCapabilityTestProviderConfig)
+	approveWorkspace(t, dir)
 
 	out := runUseCapabilityCalls(t, Options{Sink: event.Discard}, "mcp-tool:never-configured/ping")
 	if !strings.Contains(out, `MCP server "never-configured" is not registered in this session`) {

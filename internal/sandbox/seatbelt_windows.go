@@ -21,3 +21,9 @@ func Available() bool { return false }
 // writableDirsForSpec is empty: no Windows backend confines writes, so there
 // is no boundary for Git metadata protection to sit inside.
 func writableDirsForSpec(Spec) []string { return nil }
+
+func gitMetadataRoots(spec Spec) []string { return spec.WriteRoots }
+
+// HostWritableDirs is empty: Windows runs commands unjailed, so nothing here
+// narrows where a command may write.
+func HostWritableDirs() []string { return nil }

@@ -162,6 +162,7 @@ base_url = "http://localhost:12345"
 model = "m"
 web_search = true
 `)
+	approveWorkspace(t, dir)
 	ctrl, err := Build(context.Background(), Options{Stderr: io.Discard})
 	if err != nil {
 		t.Fatal(err)

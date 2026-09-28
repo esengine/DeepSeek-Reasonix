@@ -81,6 +81,7 @@ effort = "max"
 	if err := os.WriteFile(filepath.Join(projectRoot, "reasonix.toml"), []byte(configBody), 0o644); err != nil {
 		t.Fatal(err)
 	}
+	approveWorkspace(t, projectRoot)
 
 	app := NewApp()
 	tab := testTab("project", projectRoot)
@@ -110,6 +111,7 @@ api_key_env = "PROJECT_API_KEY"
 	if err := os.WriteFile(filepath.Join(projectRoot, "reasonix.toml"), []byte(configBody), 0o644); err != nil {
 		t.Fatal(err)
 	}
+	approveWorkspace(t, projectRoot)
 
 	app := NewApp()
 	tab := testTab("project", projectRoot)
@@ -181,6 +183,7 @@ api_key_env = "REASONIX_TEST_KEY_UNSET"
 	if err := os.WriteFile(filepath.Join(root, "reasonix.toml"), []byte(configBody), 0o644); err != nil {
 		t.Fatal(err)
 	}
+	approveWorkspace(t, root)
 
 	app := NewApp()
 	app.readyHook = func() {}

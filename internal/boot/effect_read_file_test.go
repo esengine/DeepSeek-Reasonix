@@ -100,6 +100,10 @@ func TestEffectTruncatedReadDoesNotBlockCommitOrFinalThroughRealBuild(t *testing
 	provider.Register("boot-read-then-mutate", func(provider.Config) (provider.Provider, error) {
 		return rec, nil
 	})
+	// This case proves the read-evidence gate releases a later commit, so git must
+	// really run. An enforced sandbox fails closed wherever the host lacks a backend
+	// (coverage runners), which is the sandbox's own contract, not this one.
+	writeUserConfig(t, "[sandbox]\nbash = \"off\"\n")
 	writeFile(t, dir, "reasonix.toml", `
 default_model = "test-model"
 
@@ -109,17 +113,12 @@ system_prompt = "BASE"
 [environment]
 enabled = false
 
-# This case proves the read-evidence gate releases a later commit, so git must
-# really run. An enforced sandbox fails closed wherever the host lacks a backend
-# (coverage runners), which is the sandbox's own contract, not this one.
-[sandbox]
-bash = "off"
-
 [[providers]]
 name = "test-model"
 kind = "boot-read-then-mutate"
 model = "x"
 `)
+	approveWorkspace(t, dir)
 
 	ctrl, err := Build(context.Background(), Options{
 		Sink:            event.Discard,

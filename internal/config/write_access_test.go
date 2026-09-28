@@ -3,58 +3,49 @@ package config
 import (
 	"os"
 	"path/filepath"
-	"strings"
+	"slices"
 	"testing"
 )
 
-func TestPersistProjectWriteAccessWritesBothSections(t *testing.T) {
-	dir := t.TempDir()
-	path := filepath.Join(dir, "reasonix.toml")
-	if err := os.WriteFile(path, []byte("# keep\n[permissions]\nallow = [\"Bash(go test:*)\"]\n\n[sandbox]\nbash = \"enforce\"\n"), 0o644); err != nil {
+// A write-access grant is the user's, so it lands under their home and never
+// in the checkout, where the project file could not have granted it anyway.
+func TestPersistWorkspaceWriteAccessRecordsBothGrants(t *testing.T) {
+	home, root, extra := t.TempDir(), t.TempDir(), t.TempDir()
+	if err := os.WriteFile(filepath.Join(root, "reasonix.toml"), []byte("# keep\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	extra := filepath.Join(dir, ".local")
-	if err := PersistProjectWriteAccess(path, []string{extra}, "Edit"); err != nil {
+	if err := PersistWorkspaceWriteAccess(home, root, []string{extra}, "Edit"); err != nil {
 		t.Fatal(err)
 	}
-	raw, err := os.ReadFile(path)
+	grant, err := NewProjectGrantStore(home).Grant(root)
 	if err != nil {
 		t.Fatal(err)
 	}
-	body := string(raw)
-	if !strings.Contains(body, "# keep") {
-		t.Fatal("comments must be preserved")
+	if !slices.Equal(grant.Allow, []string{"Edit"}) || len(grant.AllowWrite) != 1 {
+		t.Fatalf("grant = %+v, want the rule and the directory", grant)
 	}
-	if !strings.Contains(body, "Bash(go test:*)") || !strings.Contains(body, "Edit") {
-		t.Fatalf("permission rules missing: %s", body)
-	}
-	if !strings.Contains(body, "allow_write") || !strings.Contains(body, extra) && !strings.Contains(body, ".local") {
-		t.Fatalf("allow_write missing: %s", body)
+	if raw, _ := os.ReadFile(filepath.Join(root, "reasonix.toml")); string(raw) != "# keep\n" {
+		t.Fatalf("the checkout's reasonix.toml changed: %q", raw)
 	}
 }
 
-func TestPersistProjectWriteAccessDoesNotDuplicateAncestor(t *testing.T) {
-	dir := t.TempDir()
-	path := filepath.Join(dir, "reasonix.toml")
-	parent := filepath.Join(dir, "home")
+func TestPersistWorkspaceWriteAccessDoesNotDuplicateAncestor(t *testing.T) {
+	home, root := t.TempDir(), t.TempDir()
+	parent := filepath.Join(t.TempDir(), "home")
 	if err := os.MkdirAll(parent, 0o755); err != nil {
 		t.Fatal(err)
 	}
-	fixture := "[sandbox]\nallow_write = " + renderStringArray([]string{parent}) + "\n"
-	if err := os.WriteFile(path, []byte(fixture), 0o644); err != nil {
+	if err := PersistWorkspaceWriteAccess(home, root, []string{parent}, ""); err != nil {
 		t.Fatal(err)
 	}
-	if err := PersistProjectWriteAccess(path, []string{filepath.Join(parent, "bin")}, ""); err != nil {
+	if err := PersistWorkspaceWriteAccess(home, root, []string{filepath.Join(parent, "bin")}, ""); err != nil {
 		t.Fatal(err)
 	}
-	raw, err := os.ReadFile(path)
+	grant, err := NewProjectGrantStore(home).Grant(root)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if strings.Count(string(raw), "allow_write") != 1 {
-		t.Fatalf("unexpected allow_write rewrite: %s", raw)
-	}
-	if strings.Contains(string(raw), filepath.Join(parent, "bin")) {
-		t.Fatalf("child should not be persisted when ancestor exists: %s", raw)
+	if len(grant.AllowWrite) != 1 {
+		t.Fatalf("allow_write = %v, want the ancestor alone", grant.AllowWrite)
 	}
 }

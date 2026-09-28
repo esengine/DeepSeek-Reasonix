@@ -3509,6 +3509,8 @@ export const zhTW: Record<DictKey, string> = {
   "settings.hooksPathUnavailable": "沒有可用的專案設定檔案",
   "settings.hooksGlobalHint": "儲存為全域性配置。重啟 Reasonix 後載入新的 hooks。",
   "settings.hooksProjectHint": "儲存在當前工作區。重啟 Reasonix 後載入新的 hooks。",
+  "settings.hooksAwaitingApproval": "這些 hooks 隨工作區而來，在你核准目前內容之前不會執行；之後有任何變動都需要重新核准。",
+  "settings.hooksApprove": "核准",
   "settings.hooksJsonTitle": "JSON 配置",
   "settings.hooksJsonHint": "直接編輯 settings.json 中的 {\"hooks\": ...}。也支援貼上帶 event 欄位的 hook 陣列；儲存前會校驗並格式化。",
   "settings.hooksJsonCopy": "複製 JSON",

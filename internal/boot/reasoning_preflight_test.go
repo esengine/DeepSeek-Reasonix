@@ -59,6 +59,7 @@ model="deepseek-v4-pro"
 thinking="enabled"
 effort="max"
 `)
+	approveWorkspace(t, root)
 	sessionDir := filepath.Join(root, "must-not-exist")
 	disabled := "disabled"
 	ctrl, err := Build(context.Background(), Options{WorkspaceRoot: root, SessionDir: sessionDir, EffortOverride: &disabled, Sink: event.Discard})
@@ -92,6 +93,7 @@ model="model"
 thinking="enabled"
 effort="max"
 `)
+	approveWorkspace(t, root)
 	ctrl, err := Build(context.Background(), Options{WorkspaceRoot: root, ConfigSnapshot: cfg, EffortOverride: &disabled, Sink: event.Discard})
 	if err != nil {
 		t.Fatalf("assembly reloaded a different role snapshot: %v", err)
@@ -117,6 +119,7 @@ api_key_env="CUSTOM_KEY"
 models=["text","vision-pro"]
 vision_models=["vision-pro"]
 `)
+	approveWorkspace(t, root)
 	ctrl, err := Build(context.Background(), Options{WorkspaceRoot: root, Sink: event.Discard})
 	if err != nil {
 		t.Fatalf("vision_model=auto must not fail assembly: %v", err)

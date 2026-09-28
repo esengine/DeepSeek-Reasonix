@@ -20,6 +20,7 @@ name = "test-model"
 kind = "boot-token-profile-test"
 model = "x"
 `)
+	approveWorkspace(t, dir)
 	registerBootTokenProfileTestProvider()
 	setBootTokenProfileTestProvider(t, testutil.NewMock("identity", testutil.Turn{Text: "done"}))
 	ctrl, err := Build(context.Background(), Options{Sink: event.Discard})

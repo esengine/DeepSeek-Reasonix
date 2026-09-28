@@ -219,44 +219,37 @@ func writeAllowDirsForSpec(spec Spec) []string {
 		// Preserve device compatibility without granting host file writes.
 		return []string{"/dev/null"}
 	}
-	roots := spec.WriteRoots
-	dirs := append([]string{}, roots...)
-	dirs = append(dirs, "/dev")
-	if dir := strings.TrimSpace(spec.SessionTemp); dir != "" {
-		// Session-private temporary directory must be writable under Seatbelt
-		// even when MinimalWrites omits the broad host temp allowances.
-		dirs = append(dirs, dir)
+	return darwinWritePlan(spec).dirs
+}
+
+func gitMetadataRoots(spec Spec) []string {
+	if spec.ReadOnly {
+		return nil
 	}
+	return darwinWritePlan(spec).callers
+}
+
+// darwinWritePlan resolves the caller's roots and the directories Seatbelt
+// allows beside them; the session temp stays writable under MinimalWrites.
+func darwinWritePlan(spec Spec) writeRootPlan {
+	extras := []string{"/dev", spec.SessionTemp}
 	if !spec.MinimalWrites {
-		dirs = append(dirs, "/tmp", "/private/tmp", "/private/var/folders", os.TempDir())
+		extras = append(extras, hostWriteDirs()...)
 	}
-	if !spec.MinimalWrites {
-		if home, err := os.UserHomeDir(); err == nil {
-			// go build/test → Library/Caches + go; pip/etc → .cache; npm/cargo too.
-			for _, sub := range []string{"Library/Caches", ".cache", ".npm", ".cargo", "go"} {
-				dirs = append(dirs, filepath.Join(home, sub))
-			}
-		}
-	}
-	seen := map[string]bool{}
-	out := make([]string, 0, len(dirs))
-	for _, d := range dirs {
-		if d == "" {
-			continue
-		}
-		abs, err := filepath.Abs(d)
-		if err != nil {
-			continue
-		}
-		if real, err := filepath.EvalSymlinks(abs); err == nil {
-			abs = real
-		}
-		if !seen[abs] {
-			seen[abs] = true
-			out = append(out, abs)
+	return planWriteRoots(spec.WriteRoots, extras, spec.SessionTemp)
+}
+
+// hostWriteDirs are the temp and toolchain cache directories a non-minimal
+// launch may write: go build/test use Library/Caches and go, pip and others
+// .cache, and npm and cargo their own.
+func hostWriteDirs() []string {
+	dirs := []string{"/tmp", "/private/tmp", "/private/var/folders", os.TempDir()}
+	if home, err := os.UserHomeDir(); err == nil {
+		for _, sub := range []string{"Library/Caches", ".cache", ".npm", ".cargo", "go"} {
+			dirs = append(dirs, filepath.Join(home, sub))
 		}
 	}
-	return out
+	return dirs
 }
 
 // sbplString quotes a path as an SBPL string literal, escaping backslash and
@@ -290,3 +283,7 @@ func forbidReadDirs(roots []string) []string {
 	}
 	return out
 }
+
+// HostWritableDirs lists the host directories any jailed command may write
+// besides its write roots: temporary directories and toolchain caches.
+func HostWritableDirs() []string { return writeAllowDirsForSpec(Spec{}) }

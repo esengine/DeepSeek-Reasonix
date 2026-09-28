@@ -193,6 +193,7 @@ kind = "`+reviewHookProbeKind+`"
 model = "review-model"
 base_url = "http://127.0.0.1:1"
 `+extra)
+	approveWorkspace(t, dir)
 	return dir
 }
 

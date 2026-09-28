@@ -130,9 +130,11 @@ default = "model-a"
 	if err := os.WriteFile(filepath.Join(rootA, "reasonix.toml"), []byte(`default_model = "local/model-a"`), 0o644); err != nil {
 		t.Fatal(err)
 	}
+	approveWorkspace(t, rootA)
 	if err := os.WriteFile(filepath.Join(rootB, "reasonix.toml"), []byte(`default_model = "local/model-b"`), 0o644); err != nil {
 		t.Fatal(err)
 	}
+	approveWorkspace(t, rootB)
 	draftA, err := a.seedPreviousDraftForTarget("project", rootA)
 	if err != nil {
 		t.Fatal(err)
@@ -405,6 +407,7 @@ args = ["serve"]
 `), 0o644); err != nil {
 		t.Fatal(err)
 	}
+	approveWorkspace(t, root)
 	enableProjectMCPForTest(t, root)
 	draft, err := a.seedPreviousDraftForTarget("project", root)
 	if err != nil {

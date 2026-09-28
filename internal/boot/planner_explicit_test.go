@@ -24,6 +24,7 @@ name = "executor"
 kind = "boot-token-profile-test"
 model = "executor-model"
 `)
+	approveWorkspace(t, dir)
 
 	ctrl, err := Build(context.Background(), Options{Sink: event.Discard})
 	if err != nil {
@@ -58,6 +59,7 @@ name = "planner"
 kind = "boot-token-profile-test"
 model = "planner-model"
 `)
+	approveWorkspace(t, dir)
 
 	ctrl, err := Build(context.Background(), Options{Sink: event.Discard})
 	if err != nil {
@@ -87,6 +89,7 @@ name = "executor"
 kind = "boot-token-profile-test"
 model = "shared-model"
 `)
+	approveWorkspace(t, dir)
 
 	ctrl, err := Build(context.Background(), Options{Sink: event.Discard})
 	if err != nil {

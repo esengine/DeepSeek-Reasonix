@@ -9,6 +9,7 @@ import (
 	"testing"
 
 	"reasonix/internal/event"
+	"reasonix/internal/hook"
 )
 
 func TestBuildResumedSkillKeepsHookSessionID(t *testing.T) {
@@ -26,6 +27,7 @@ name = "test-model"
 kind = "boot-subagent-test"
 model = "x"
 `)
+	approveWorkspace(t, dir)
 	writeFile(t, dir, "marker.txt", "hook probe")
 	writeFile(t, dir, ".reasonix/skills/hook-probe.md", "---\ndescription: inspect a marker\nrunAs: subagent\nallowed-tools: read_file\n---\nRead the requested file.")
 	logPath := filepath.Join(dir, "hook.log")
@@ -39,6 +41,9 @@ model = "x"
 		t.Fatal(err)
 	}
 	writeFile(t, dir, ".reasonix/settings.json", string(settings))
+	if err := hook.ApproveProjectHooks(hook.LoadOptions{ProjectRoot: dir}); err != nil {
+		t.Fatal(err)
+	}
 
 	ctrl, err := Build(context.Background(), withTestSession(t, Options{Sink: event.Discard}))
 	if err != nil {

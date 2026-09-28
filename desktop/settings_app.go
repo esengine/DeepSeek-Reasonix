@@ -1503,45 +1503,23 @@ func (a *App) loadDesktopUserConfigForEdit() (*config.Config, string, error) {
 	return a.loadDesktopUserConfigForEditForRoot(a.activeWorkspaceRoot())
 }
 
-func (a *App) loadDesktopUserConfigForEditForRoot(root string) (*config.Config, string, error) {
+// loadDesktopUserConfigForEditForRoot reads the user config alone. A
+// workspace's reasonix.toml is never adopted into it: that file arrives with a
+// checkout, and copying it would turn its sandbox, permission and [bot] values
+// into the user's own.
+func (a *App) loadDesktopUserConfigForEditForRoot(_ string) (*config.Config, string, error) {
 	userPath := config.UserConfigPath()
 	if userPath == "" {
 		return nil, "", fmt.Errorf("cannot resolve user config directory")
-	}
-	if _, err := os.Stat(userPath); err == nil {
-		cfg, err := config.LoadForEditReadOnlyStrict(userPath)
-		if err != nil {
-			return nil, "", err
-		}
-		if err := normalizeLegacyDesktopProviderAccessForSettings(cfg, userPath); err != nil {
-			return nil, "", err
-		}
-		if err := a.migrateLegacyBotConfigToUserForRoot(root, cfg, userPath); err != nil {
-			return nil, "", err
-		}
-		return cfg, userPath, nil
 	}
 	cfg, err := config.LoadForEditReadOnlyStrict(userPath)
 	if err != nil {
 		return nil, "", err
 	}
-	legacyPath := config.SourcePathForRoot(root)
-	if legacyPath == "" || sameConfigPath(legacyPath, userPath) {
-		if err := normalizeLegacyDesktopProviderAccessForSettings(cfg, userPath); err != nil {
-			return nil, "", err
-		}
-		return cfg, userPath, nil
-	}
-	legacyCfg, err := config.LoadForEditReadOnlyStrict(legacyPath)
-	if err != nil {
+	if err := normalizeLegacyDesktopProviderAccessForSettings(cfg, userPath); err != nil {
 		return nil, "", err
 	}
-	normalizeLegacyDesktopProviderAccessInMemory(legacyCfg, legacyPath)
-	legacyCfg.ConfigVersion = config.Default().ConfigVersion
-	if err := migrateLegacyBotConfigToUser(cfg, legacyCfg, userPath); err != nil {
-		return nil, "", err
-	}
-	return legacyCfg, userPath, nil
+	return cfg, userPath, nil
 }
 
 // loadDesktopUserConfigForView loads the user config for read-only callers.
@@ -1575,94 +1553,18 @@ func (a *App) loadDesktopUserConfigForViewWithCredentialsForRoot(root string) (*
 }
 
 // loadDesktopUserConfigReadOnlyForRoot is the shared pure-read loader behind
-// the View variants: same shape as loadDesktopUserConfigForEdit, but every
-// legacy migration stays in memory (zero SaveTo) and resolves from root.
-func (a *App) loadDesktopUserConfigReadOnlyForRoot(root string, load func(string) (*config.Config, error)) (*config.Config, string, error) {
+// the View variants: the user config alone, never written to.
+func (a *App) loadDesktopUserConfigReadOnlyForRoot(_ string, load func(string) (*config.Config, error)) (*config.Config, string, error) {
 	userPath := config.UserConfigPath()
 	if userPath == "" {
 		return nil, "", fmt.Errorf("cannot resolve user config directory")
-	}
-	if _, err := os.Stat(userPath); err == nil {
-		cfg, err := load(userPath)
-		if err != nil {
-			return nil, "", err
-		}
-		normalizeLegacyDesktopProviderAccessInMemory(cfg, userPath)
-		legacyPath := config.SourcePathForRoot(root)
-		if legacyPath != "" && !sameConfigPath(legacyPath, userPath) {
-			legacyCfg, err := load(legacyPath)
-			if err != nil {
-				return nil, "", err
-			}
-			mergeLegacyBotConfigInMemory(cfg, legacyCfg)
-		}
-		return cfg, userPath, nil
 	}
 	cfg, err := load(userPath)
 	if err != nil {
 		return nil, "", err
 	}
-	legacyPath := config.SourcePathForRoot(root)
-	if legacyPath == "" || sameConfigPath(legacyPath, userPath) {
-		normalizeLegacyDesktopProviderAccessInMemory(cfg, userPath)
-		return cfg, userPath, nil
-	}
-	// The user config does not exist yet: serve the legacy config as the view.
-	// It already carries any legacy bot config, so no merge is needed; the
-	// write path creates the migrated user file later.
-	legacyCfg, err := load(legacyPath)
-	if err != nil {
-		return nil, "", err
-	}
-	normalizeLegacyDesktopProviderAccessInMemory(legacyCfg, legacyPath)
-	legacyCfg.ConfigVersion = config.Default().ConfigVersion
-	return legacyCfg, userPath, nil
-}
-
-// migrateLegacyBotConfigToUserForRoot is the write-path legacy bot-config
-// migration against an explicit workspace's legacy config file. Callers must
-// hold config.LockUserConfigEdits() (see loadDesktopUserConfigForEdit).
-func (a *App) migrateLegacyBotConfigToUserForRoot(root string, userCfg *config.Config, userPath string) error {
-	if userCfg == nil {
-		return nil
-	}
-	legacyPath := config.SourcePathForRoot(root)
-	if legacyPath == "" || sameConfigPath(legacyPath, userPath) {
-		return nil
-	}
-	legacyCfg, err := config.LoadForEditReadOnlyStrict(legacyPath)
-	if err != nil {
-		return err
-	}
-	return migrateLegacyBotConfigToUser(userCfg, legacyCfg, userPath)
-}
-
-// migrateLegacyBotConfigToUser is the write-path variant: it merges the legacy
-// bot config in memory and persists the result to userPath. Callers must hold
-// config.LockUserConfigEdits() (see loadDesktopUserConfigForEdit). Read paths
-// use mergeLegacyBotConfigInMemory instead.
-func migrateLegacyBotConfigToUser(userCfg, legacyCfg *config.Config, userPath string) error {
-	if !mergeLegacyBotConfigInMemory(userCfg, legacyCfg) {
-		return nil
-	}
-	if err := userCfg.SaveTo(userPath); err != nil {
-		return fmt.Errorf("migrate legacy bot config: %w", err)
-	}
-	return nil
-}
-
-// mergeLegacyBotConfigInMemory copies the legacy bot config onto userCfg when
-// the user config has none of its own. It never touches disk; it reports
-// whether userCfg changed (i.e. whether a write path should persist it).
-func mergeLegacyBotConfigInMemory(userCfg, legacyCfg *config.Config) bool {
-	if userCfg == nil || legacyCfg == nil || desktopBotConfigConfigured(userCfg.Bot) {
-		return false
-	}
-	if !desktopBotConfigConfigured(legacyCfg.Bot) {
-		return false
-	}
-	userCfg.Bot = legacyCfg.Bot
-	return true
+	normalizeLegacyDesktopProviderAccessInMemory(cfg, userPath)
+	return cfg, userPath, nil
 }
 
 func desktopBotConfigConfigured(bot config.BotConfig) bool {
@@ -1795,20 +1697,6 @@ func (a *App) activeWorkspaceRoot() string {
 
 func providerCredentialSourceNotice(apiKeyEnv, value string) string {
 	return ""
-}
-
-func sameConfigPath(a, b string) bool {
-	a = strings.TrimSpace(a)
-	b = strings.TrimSpace(b)
-	if a == "" || b == "" {
-		return false
-	}
-	aAbs, aErr := filepath.Abs(a)
-	bAbs, bErr := filepath.Abs(b)
-	if aErr == nil && bErr == nil {
-		return filepath.Clean(aAbs) == filepath.Clean(bAbs)
-	}
-	return filepath.Clean(a) == filepath.Clean(b)
 }
 
 // rebuild builds a replacement controller from the (just-changed) config and

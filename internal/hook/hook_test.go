@@ -90,21 +90,6 @@ func hookSettingsWithCommand(t *testing.T, event Event, command string) string {
 	return string(body)
 }
 
-func TestLoadProjectHooksByDefault(t *testing.T) {
-	home := t.TempDir()
-	proj := t.TempDir()
-	writeSettings(t, proj, sampleSettings)
-	writeSettings(t, home, `{"hooks":{"PostToolUse":[{"command":"echo g"}]}}`)
-
-	got := Load(LoadOptions{ProjectRoot: proj, HomeDir: home})
-	if len(got) != 3 {
-		t.Fatalf("default load should include project + global, got %d", len(got))
-	}
-	if got[0].Scope != ScopeProject {
-		t.Errorf("project hooks should sort first, got %s", got[0].Scope)
-	}
-}
-
 func TestLoadDecodesGB18030GlobalSettings(t *testing.T) {
 	home := t.TempDir()
 	body := `{"hooks":{"Stop":[{"command":"echo 中文","description":"全局"}]}}`
@@ -125,7 +110,8 @@ func TestLoadDecodesUTF8BOMProjectSettings(t *testing.T) {
 	body := `{"hooks":{"PreToolUse":[{"match":"bash","command":"echo pre"}]}}`
 	writeHookTestBytes(t, ProjectSettingsPath(proj), fileencoding.MustEncode(body, fileencoding.UTF8BOM))
 
-	got := Load(LoadOptions{HomeDir: home, ProjectRoot: proj, Trusted: true})
+	approveProjectHooks(t, LoadOptions{HomeDir: home, ProjectRoot: proj})
+	got := Load(LoadOptions{HomeDir: home, ProjectRoot: proj})
 	if len(got) != 1 {
 		t.Fatalf("Load hooks = %+v, want one decoded project hook", got)
 	}
@@ -150,7 +136,8 @@ func TestLoadNormalizesQuotedNodeEvalHooksPerProject(t *testing.T) {
 	writeSettings(t, projB, hookSettingsWithCommand(t, PreToolUse, bad))
 
 	for _, project := range []string{projA, projB, projB} {
-		hooks := Load(LoadOptions{HomeDir: home, ProjectRoot: project, Trusted: true})
+		approveProjectHooks(t, LoadOptions{HomeDir: home, ProjectRoot: project})
+		hooks := Load(LoadOptions{HomeDir: home, ProjectRoot: project})
 		if len(hooks) != 1 {
 			t.Fatalf("Load(%q) hooks = %+v, want one", project, hooks)
 		}

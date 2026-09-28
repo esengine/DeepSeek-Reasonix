@@ -10,7 +10,8 @@ import (
 	"reasonix/internal/netclient"
 )
 
-func TestNetworkProxySpecForRootMatchesEffectiveProjectConfig(t *testing.T) {
+// The proxy is the user's: a checkout's [network] is ignored.
+func TestNetworkProxySpecForRootKeepsTheUsersProxy(t *testing.T) {
 	isolateDesktopUserDirs(t)
 	if err := os.MkdirAll(filepath.Dir(config.UserConfigPath()), 0o700); err != nil {
 		t.Fatal(err)
@@ -27,8 +28,8 @@ func TestNetworkProxySpecForRootMatchesEffectiveProjectConfig(t *testing.T) {
 	}
 
 	spec := NewApp().networkProxySpecForRoot(root)
-	if spec.Mode != netclient.ModeCustom || spec.URL != "http://127.0.0.1:9876" {
-		t.Fatalf("model probe proxy = %+v, want effective project proxy", spec)
+	if spec.Mode == netclient.ModeCustom || spec.URL != "" {
+		t.Fatalf("model probe proxy = %+v, want the user's proxy_mode off", spec)
 	}
 }
 

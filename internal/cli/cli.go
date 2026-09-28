@@ -173,6 +173,8 @@ func RunWithBuildInfo(args []string, info BuildInfo) int {
 	case "hook", "hooks":
 		configureCLIThemeFromConfig()
 		return hookCommand(rest)
+	case "trust":
+		return trustCommand(rest)
 	case "task":
 		configureCLIThemeFromConfig()
 		return taskCommand(rest)

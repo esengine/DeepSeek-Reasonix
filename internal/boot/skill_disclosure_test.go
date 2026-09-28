@@ -25,6 +25,7 @@ name = "test-model"
 kind = "boot-token-profile-test"
 model = "x"
 `)
+	approveWorkspace(t, dir)
 	for i := range 100 {
 		name := fmt.Sprintf("a-%03d-%s", i, strings.Repeat("x", 45))
 		writeFile(t, dir, ".agents/skills/"+name+"/SKILL.md",

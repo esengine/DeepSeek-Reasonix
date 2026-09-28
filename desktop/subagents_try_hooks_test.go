@@ -43,11 +43,15 @@ base_url = "http://127.0.0.1:1"
 `), 0o644); err != nil {
 		t.Fatal(err)
 	}
+	approveWorkspace(t, root)
 	scripts := t.TempDir()
 	projectLog := filepath.Join(scripts, "project.log")
 	globalLog := filepath.Join(scripts, "global.log")
 	writeTryHookSettings(t, hook.ProjectSettingsPath(root), writeTryHookScript(t, scripts, "project-log.sh", projectLog, 0))
 	writeTryHookSettings(t, hook.GlobalSettingsPath(""), writeTryHookScript(t, scripts, "global-deny.sh", globalLog, 2))
+	if err := hook.ApproveProjectHooks(hook.LoadOptions{ProjectRoot: root}); err != nil {
+		t.Fatal(err)
+	}
 
 	a := NewApp()
 	a.tabs = map[string]*WorkspaceTab{"test": {ID: "test", Scope: "project", WorkspaceRoot: root, Ready: true}}

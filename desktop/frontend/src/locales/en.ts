@@ -3022,6 +3022,8 @@ export const en = {
   "settings.hooksPathUnavailable": "No project settings file is available",
   "settings.hooksGlobalHint": "Saved globally. Restart Reasonix to load new hooks.",
   "settings.hooksProjectHint": "Saved in this workspace. Restart Reasonix to load new hooks.",
+  "settings.hooksAwaitingApproval": "These hooks came with this workspace and stay off until you approve them as they are now. Any later change needs approval again.",
+  "settings.hooksApprove": "Approve",
   "settings.hooksJsonTitle": "JSON config",
   "settings.hooksJsonHint": "Edit the {\"hooks\": ...} block from settings.json directly. Arrays with event fields are also accepted; saving validates and formats the JSON.",
   "settings.hooksJsonCopy": "Copy JSON",

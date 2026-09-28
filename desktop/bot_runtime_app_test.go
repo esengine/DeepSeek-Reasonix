@@ -265,19 +265,18 @@ func TestDesktopBotRuntimeConfigLoadsAllSavedCredentialsAfterRestart(t *testing.
 	}
 }
 
-func TestDesktopBotRuntimeMigratesLegacyProjectBotSettings(t *testing.T) {
-	isolateDesktopUserDirs(t)
-
-	userCfg := config.Default()
-	if err := userCfg.SetDesktopAppearance("dark", "graphite"); err != nil {
-		t.Fatalf("set desktop appearance: %v", err)
-	}
-	if err := userCfg.SaveTo(config.UserConfigPath()); err != nil {
-		t.Fatalf("save user config: %v", err)
-	}
-
-	project := robustTempDir(t)
-	if err := os.WriteFile(filepath.Join(project, "reasonix.toml"), []byte(`
+// A checkout's [bot] never reaches the bot runtime or the user's config, with
+// or without a user config of its own.
+func TestDesktopBotRuntimeIgnoresProjectBotSettings(t *testing.T) {
+	for _, withUser := range []bool{false, true} {
+		isolateDesktopUserDirs(t)
+		if withUser {
+			if err := config.Default().SaveTo(config.UserConfigPath()); err != nil {
+				t.Fatalf("save user config: %v", err)
+			}
+		}
+		project := robustTempDir(t)
+		if err := os.WriteFile(filepath.Join(project, "reasonix.toml"), []byte(`
 [bot]
 enabled = true
 
@@ -289,154 +288,30 @@ feishu_users = ["ou-legacy"]
 id = "feishu-lark"
 provider = "feishu"
 domain = "lark"
-label = "Lark"
 enabled = true
 status = "connected"
 `), 0o644); err != nil {
-		t.Fatalf("write project config: %v", err)
-	}
-
-	orig, _ := os.Getwd()
-	defer func() { _ = os.Chdir(orig) }()
-	if err := os.Chdir(project); err != nil {
-		t.Fatalf("chdir project: %v", err)
-	}
-
-	app := NewApp()
-	got, err := app.loadDesktopBotConfig()
-	if err != nil {
-		t.Fatalf("load desktop bot config: %v", err)
-	}
-	if !got.Bot.Enabled || len(got.Bot.Connections) != 1 || got.Bot.Connections[0].ID != "feishu-lark" {
-		t.Fatalf("desktop bot config = %+v, want migrated legacy Lark connection", got.Bot)
-	}
-
-	// The bot-runtime load is a pure read: the merge above stays in memory and
-	// the user config file is not rewritten.
-	preWrite := config.LoadForEdit(config.UserConfigPath())
-	if preWrite.Bot.Enabled || len(preWrite.Bot.Connections) != 0 {
-		t.Fatalf("read path persisted bot config = %+v, want disk untouched until a locked write", preWrite.Bot)
-	}
-
-	// The first locked write path performs the on-disk migration.
-	if err := app.applyConfigOnly(func(*config.Config) error { return nil }); err != nil {
-		t.Fatalf("applyConfigOnly: %v", err)
-	}
-	persisted := config.LoadForEdit(config.UserConfigPath())
-	if !persisted.Bot.Enabled || len(persisted.Bot.Connections) != 1 || persisted.Bot.Connections[0].ID != "feishu-lark" {
-		t.Fatalf("persisted bot config = %+v, want migrated legacy Lark connection", persisted.Bot)
-	}
-	if persisted.DesktopTheme() != "dark" {
-		t.Fatalf("desktop theme = %q, want preserved user preference", persisted.DesktopTheme())
+			t.Fatalf("write project config: %v", err)
+		}
+		t.Chdir(project)
+		app := NewApp()
+		got, err := app.loadDesktopBotConfig()
+		if err != nil {
+			t.Fatalf("load desktop bot config: %v", err)
+		}
+		if got.Bot.Enabled || len(got.Bot.Connections) != 0 {
+			t.Fatalf("desktop bot config = %+v, want the checkout's [bot] ignored", got.Bot)
+		}
+		if err := app.applyConfigOnly(func(*config.Config) error { return nil }); err != nil {
+			t.Fatalf("applyConfigOnly: %v", err)
+		}
+		if persisted := config.LoadForEdit(config.UserConfigPath()); persisted.Bot.Enabled || len(persisted.Bot.Connections) != 0 {
+			t.Fatalf("user config took the checkout's [bot]: %+v", persisted.Bot)
+		}
 	}
 }
 
-func TestDesktopBotRuntimePersistsLegacyProjectBotWhenUserConfigMissing(t *testing.T) {
-	isolateDesktopUserDirs(t)
-
-	project := robustTempDir(t)
-	if err := os.WriteFile(filepath.Join(project, "reasonix.toml"), []byte(`
-[desktop]
-theme = "dark"
-
-[bot]
-enabled = true
-
-[bot.allowlist]
-enabled = true
-feishu_users = ["ou-legacy"]
-
-[[bot.connections]]
-id = "feishu-lark"
-provider = "feishu"
-domain = "lark"
-label = "Lark"
-enabled = true
-status = "connected"
-`), 0o644); err != nil {
-		t.Fatalf("write project config: %v", err)
-	}
-
-	orig, _ := os.Getwd()
-	defer func() { _ = os.Chdir(orig) }()
-	if err := os.Chdir(project); err != nil {
-		t.Fatalf("chdir project: %v", err)
-	}
-
-	app := NewApp()
-	got, err := app.loadDesktopBotConfig()
-	if err != nil {
-		t.Fatalf("load desktop bot config: %v", err)
-	}
-	if !got.Bot.Enabled || len(got.Bot.Connections) != 1 || got.Bot.Connections[0].ID != "feishu-lark" {
-		t.Fatalf("desktop bot config = %+v, want migrated legacy Lark connection", got.Bot)
-	}
-
-	// The bot-runtime load is a pure read: it serves the legacy config from
-	// memory and must not create the user config file.
-	if _, err := os.Stat(config.UserConfigPath()); !os.IsNotExist(err) {
-		t.Fatalf("read path must not create the user config, stat err = %v", err)
-	}
-
-	// The first locked write path creates the user config with the migrated
-	// bot settings (adopting the legacy config, ConfigVersion-bumped).
-	if err := app.applyConfigOnly(func(*config.Config) error { return nil }); err != nil {
-		t.Fatalf("applyConfigOnly: %v", err)
-	}
-	persisted := config.LoadForEdit(config.UserConfigPath())
-	if !persisted.Bot.Enabled || len(persisted.Bot.Connections) != 1 || persisted.Bot.Connections[0].ID != "feishu-lark" {
-		t.Fatalf("persisted bot config = %+v, want migrated legacy Lark connection", persisted.Bot)
-	}
-}
-
-func TestDesktopSettingsBotMigrationPersistsOnlyBotBeforeFirstEdit(t *testing.T) {
-	isolateDesktopUserDirs(t)
-
-	project := robustTempDir(t)
-	if err := os.WriteFile(filepath.Join(project, "reasonix.toml"), []byte(`
-[desktop]
-theme = "dark"
-close_behavior = "quit"
-
-[bot]
-enabled = true
-
-[bot.allowlist]
-enabled = true
-feishu_users = ["ou-legacy"]
-
-[[bot.connections]]
-id = "feishu-lark"
-provider = "feishu"
-domain = "lark"
-label = "Lark"
-enabled = true
-status = "connected"
-`), 0o644); err != nil {
-		t.Fatalf("write project config: %v", err)
-	}
-
-	orig, _ := os.Getwd()
-	defer func() { _ = os.Chdir(orig) }()
-	if err := os.Chdir(project); err != nil {
-		t.Fatalf("chdir project: %v", err)
-	}
-
-	settings := NewApp().Settings()
-	if !settings.Bot.Enabled || len(settings.Bot.Connections) != 1 || settings.Bot.Connections[0].ID != "feishu-lark" {
-		t.Fatalf("settings bot = %+v, want migrated legacy Lark connection", settings.Bot)
-	}
-	if settings.DesktopTheme != "dark" || settings.CloseBehavior != "quit" {
-		t.Fatalf("settings desktop prefs = theme:%q close:%q, want legacy seed visible before first edit", settings.DesktopTheme, settings.CloseBehavior)
-	}
-
-	persisted := config.LoadForEdit(config.UserConfigPath())
-	if persisted.DesktopTheme() == "dark" || persisted.DesktopCloseBehavior() == "quit" {
-		t.Fatalf("persisted desktop prefs = theme:%q close:%q, want bot-only migration", persisted.DesktopTheme(), persisted.DesktopCloseBehavior())
-	}
-}
-
-func TestDesktopBotRuntimeMigrationDoesNotOverwriteUserBotSettings(t *testing.T) {
+func TestDesktopBotRuntimeKeepsUserBotSettingsBesideAProjectBot(t *testing.T) {
 	isolateDesktopUserDirs(t)
 
 	userCfg := config.Default()

@@ -84,6 +84,7 @@ name = "test-model"
 kind = "boot-pinned-context-test"
 model = "x"
 `)
+	approveWorkspace(t, dir)
 
 	loaderCalls := 0
 	ctrl, err := Build(context.Background(), Options{

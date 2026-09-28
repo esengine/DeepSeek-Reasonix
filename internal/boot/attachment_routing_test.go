@@ -50,6 +50,7 @@ base_url = "https://vision.example.invalid"
 model = "x"
 vision = true
 `)
+	approveWorkspace(t, dir)
 	png, err := base64.StdEncoding.DecodeString("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg==")
 	if err != nil {
 		t.Fatalf("decode test png: %v", err)

@@ -3000,6 +3000,7 @@ command = "project-shared"
 `), 0o644); err != nil {
 		t.Fatal(err)
 	}
+	approveWorkspace(t, workspace)
 	ctrl := newOwnedTestController(t, Options{Host: plugin.NewHost(), WorkspaceRoot: workspace})
 	defer ctrl.Close()
 	if _, err := ctrl.AddMCPServer(config.PluginEntry{Name: "shared", Command: "global-shared"}); err == nil || !strings.Contains(err.Error(), "already configured") {
@@ -3058,6 +3059,7 @@ url = %q
 `, server.URL), 0o644); err != nil {
 		t.Fatal(err)
 	}
+	approveWorkspace(t, workspace)
 
 	host := plugin.NewHost()
 	defer host.Close()
@@ -3276,6 +3278,7 @@ command = "workspace-mcp"
 `), 0o644); err != nil {
 		t.Fatal(err)
 	}
+	approveWorkspace(t, workspace)
 
 	c := newOwnedTestController(t, Options{WorkspaceRoot: workspace, Host: plugin.NewHost()})
 	defer c.Close()

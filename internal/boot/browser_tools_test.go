@@ -100,6 +100,7 @@ func TestBrowserToolsStayOffTheProviderSurface(t *testing.T) {
 	dir := robustTempDir(t)
 	t.Chdir(dir)
 	writeFile(t, dir, "reasonix.toml", browserBootConfig)
+	approveWorkspace(t, dir)
 	registerBootTokenProfileTestProvider()
 
 	without := captureBrowserSurface(t, nil)
@@ -129,6 +130,7 @@ func TestUseCapabilityListsAndCallsBrowserTools(t *testing.T) {
 	dir := robustTempDir(t)
 	t.Chdir(dir)
 	writeFile(t, dir, "reasonix.toml", browserBootConfig)
+	approveWorkspace(t, dir)
 	registerBootTokenProfileTestProvider()
 	listArgs, _ := json.Marshal(map[string]any{"action": "list"})
 	callArgs, _ := json.Marshal(map[string]any{"action": "call", "capability_id": "tool:browser_tabs", "arguments": map[string]any{}})

@@ -1392,113 +1392,6 @@ func TestSaveToScopesUserAndProjectFiles(t *testing.T) {
 	}
 }
 
-func TestLoadForRootKeepsOfficialProviderAliasesDistinct(t *testing.T) {
-	isolateUserConfigHome(t)
-	root := t.TempDir()
-	userPath := UserConfigPath()
-	if err := os.MkdirAll(filepath.Dir(userPath), 0o755); err != nil {
-		t.Fatal(err)
-	}
-	if err := os.WriteFile(userPath, []byte(`
-config_version = 2
-default_model = "deepseek/deepseek-v4-flash"
-
-[desktop]
-provider_access = ["deepseek"]
-
-[[providers]]
-name = "deepseek"
-kind = "openai"
-base_url = "https://api.deepseek.com"
-models = ["deepseek-v4-flash", "deepseek-v4-pro"]
-default = "deepseek-v4-flash"
-api_key_env = "USER_DEEPSEEK_KEY"
-`), 0o644); err != nil {
-		t.Fatal(err)
-	}
-	if err := os.WriteFile(filepath.Join(root, "reasonix.toml"), []byte(`
-[[providers]]
-name = "deepseek-flash"
-kind = "openai"
-base_url = "https://api.deepseek.com"
-model = "deepseek-v4-flash"
-api_key_env = "PROJECT_DEEPSEEK_KEY"
-effort = "max"
-`), 0o644); err != nil {
-		t.Fatal(err)
-	}
-
-	cfg, err := LoadForRoot(root)
-	if err != nil {
-		t.Fatalf("LoadForRoot: %v", err)
-	}
-	userProvider, ok := cfg.Provider("deepseek")
-	if !ok {
-		t.Fatalf("user deepseek provider missing: %+v", cfg.Providers)
-	}
-	if userProvider.APIKeyEnv != "USER_DEEPSEEK_KEY" {
-		t.Fatalf("deepseek provider = %+v, want user provider preserved", userProvider)
-	}
-	projectProvider, ok := cfg.Provider("deepseek-flash")
-	if !ok {
-		t.Fatalf("project deepseek-flash provider missing: %+v", cfg.Providers)
-	}
-	if projectProvider.APIKeyEnv != "PROJECT_DEEPSEEK_KEY" || projectProvider.Effort != "max" {
-		t.Fatalf("deepseek-flash provider = %+v, want project provider preserved", projectProvider)
-	}
-}
-
-func TestLoadForRootKeepsUserProviderOverSameNamedProjectProvider(t *testing.T) {
-	isolateUserConfigHome(t)
-	root := t.TempDir()
-	userPath := UserConfigPath()
-	if err := os.MkdirAll(filepath.Dir(userPath), 0o755); err != nil {
-		t.Fatal(err)
-	}
-	if err := os.WriteFile(userPath, []byte(`
-[[providers]]
-name = "shared"
-kind = "openai"
-base_url = "https://global.example/v1"
-model = "global-model"
-api_key_env = "GLOBAL_SHARED_KEY"
-`), 0o644); err != nil {
-		t.Fatal(err)
-	}
-	if err := os.WriteFile(filepath.Join(root, "reasonix.toml"), []byte(`
-[[providers]]
-name = "shared"
-kind = "openai"
-base_url = "https://project.example/v1"
-model = "project-model"
-api_key_env = "PROJECT_SHARED_KEY"
-
-[[providers]]
-name = "project-only"
-kind = "openai"
-base_url = "https://project.example/v1"
-model = "project-only-model"
-api_key_env = "PROJECT_ONLY_KEY"
-`), 0o644); err != nil {
-		t.Fatal(err)
-	}
-
-	cfg, err := LoadForRoot(root)
-	if err != nil {
-		t.Fatalf("LoadForRoot: %v", err)
-	}
-	shared, ok := cfg.Provider("shared")
-	if !ok {
-		t.Fatalf("shared provider missing: %+v", cfg.Providers)
-	}
-	if shared.BaseURL != "https://global.example/v1" || shared.APIKeyEnv != "GLOBAL_SHARED_KEY" || shared.Model != "global-model" {
-		t.Fatalf("shared provider = %+v, want global provider to win over project provider", shared)
-	}
-	if _, ok := cfg.Provider("project-only"); !ok {
-		t.Fatalf("project-only provider missing: %+v", cfg.Providers)
-	}
-}
-
 func TestMigrateDeprecatedAgentStepLimitsForRootRunsOnce(t *testing.T) {
 	isolateUserConfigHome(t)
 	root := t.TempDir()
@@ -1527,6 +1420,7 @@ temperature = 0.8
 `), 0o644); err != nil {
 		t.Fatal(err)
 	}
+	approveWorkspace(t, root)
 
 	changed, err := MigrateLegacyAgentStepLimitsForRoot(root)
 	if err != nil {
@@ -1991,6 +1885,7 @@ api_key_env = "PROJECT_KEY"
 		t.Fatal(err)
 	}
 
+	approveWorkspace(t, root)
 	cfg, err := LoadForRoot(root)
 	if err != nil {
 		t.Fatalf("LoadForRoot: %v", err)
@@ -3164,6 +3059,7 @@ func TestProjectConfigSymlinkWithinRootLoadsAndSavesTarget(t *testing.T) {
 	if err := os.Symlink(filepath.Join("config", "reasonix.toml"), link); err != nil {
 		t.Skipf("symlinks are unavailable: %v", err)
 	}
+	approveWorkspace(t, "config")
 
 	loaded, err := LoadForRootReadOnly(project)
 	if err != nil {
@@ -3198,6 +3094,7 @@ func TestBrokenProjectConfigSymlinkFailsLoadAndSave(t *testing.T) {
 	if err := os.Symlink(filepath.Join("missing", "reasonix.toml"), link); err != nil {
 		t.Skipf("symlinks are unavailable: %v", err)
 	}
+	approveWorkspace(t, "missing")
 
 	if _, err := LoadForRootReadOnly(project); err == nil {
 		t.Fatal("LoadForRootReadOnly accepted a broken project config symlink")

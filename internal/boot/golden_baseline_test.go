@@ -12,6 +12,7 @@ import (
 	"testing"
 
 	"reasonix/internal/agent"
+	"reasonix/internal/config"
 	"reasonix/internal/provider"
 	"reasonix/internal/tool"
 )
@@ -85,14 +86,18 @@ api_key_env = "REASONIX_TEST_KEY_UNSET"
 			// A configured PowerShell path is enough to compose the Windows tool
 			// contract; Build does not execute it. This lets POSIX CI guard the
 			// Windows provider snapshot without Wine.
-			fake := filepath.Join(dir, "powershell")
+			fake := filepath.Join(t.TempDir(), "powershell")
 			if err := os.WriteFile(fake, []byte("#!/bin/sh\nexit 0\n"), 0o755); err != nil {
 				t.Fatalf("write fake PowerShell: %v", err)
 			}
-			fixture = strings.Replace(fixture, `prefer = "powershell"`, "prefer = \"powershell\"\npath = "+strconv.Quote(fake), 1)
+			// The user's own shell choice: a checkout may not name one where
+			// sandboxed commands write.
+			userConfig := config.UserConfigPath()
+			writeFile(t, filepath.Dir(userConfig), filepath.Base(userConfig), "[tools.shell]\nprefer = \"powershell\"\npath = "+strconv.Quote(fake)+"\n")
 		}
 	}
 	writeFile(t, dir, "reasonix.toml", fixture)
+	approveWorkspace(t, dir)
 
 	ctrl, err := Build(context.Background(), Options{})
 	if err != nil {

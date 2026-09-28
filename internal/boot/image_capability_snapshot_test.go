@@ -20,6 +20,7 @@ base_url = "http://localhost:1"
 model = "x"
 `
 	writeFile(t, dir, "reasonix.toml", base)
+	approveWorkspace(t, dir)
 	old, err := Build(context.Background(), Options{Sink: event.Discard})
 	if err != nil {
 		t.Fatal(err)
@@ -29,6 +30,7 @@ model = "x"
 		t.Fatal("fresh unknown snapshot should be disabled and current")
 	}
 	writeFile(t, dir, "reasonix.toml", base+"[providers.model_overrides.x]\nvision = true\n")
+	approveWorkspace(t, dir)
 	if old.ImageInputEnabled() || !old.ImageCapabilityChanged() {
 		t.Fatal("saved setting must invalidate, not mutate old runtime")
 	}
@@ -41,6 +43,7 @@ model = "x"
 		t.Fatal("rebuilt snapshot should be enabled and current")
 	}
 	writeFile(t, dir, "reasonix.toml", base+"[providers.model_overrides.x]\nvision = false\n")
+	approveWorkspace(t, dir)
 	if !next.ImageInputEnabled() || !next.ImageCapabilityChanged() {
 		t.Fatal("running snapshot switched before rebuild")
 	}

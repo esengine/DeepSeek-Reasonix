@@ -52,6 +52,7 @@ name = "test-model"
 kind = "boot-effect-skill-invocation"
 model = "x"
 `)
+			approveWorkspace(t, dir)
 			writeFile(t, dir, ".reasonix/skills/probe/SKILL.md", "---\ndescription: probe skill\ntriggers: probe, tidy\nauto-use: require\n---\nPROBE BODY\nthen run /other")
 			writeFile(t, dir, ".reasonix/skills/other/SKILL.md", "---\ndescription: other skill\ntriggers: other\nauto-use: require\n---\nOTHER BODY")
 			ctrl, err := Build(context.Background(), Options{Sink: event.Discard})

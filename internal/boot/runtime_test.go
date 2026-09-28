@@ -116,6 +116,7 @@ base_url = "https://example.invalid"
 model = "x"
 api_key_env = "REASONIX_TEST_KEY_UNSET"
 `)
+	approveWorkspace(t, dir)
 }
 
 // buildRuntimeFixture builds one runtime against the fixture and registers

@@ -139,6 +139,7 @@ func appendRuntimeFixture(t *testing.T, dir, extra string) {
 	if err := os.WriteFile(path, append(existing, []byte(extra)...), 0o644); err != nil {
 		t.Fatalf("WriteFile: %v", err)
 	}
+	approveWorkspace(t, dir)
 }
 
 func TestBootFailsOnUnclaimedExtensionProviderConflict(t *testing.T) {

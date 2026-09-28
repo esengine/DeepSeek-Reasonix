@@ -225,6 +225,7 @@ func TestProviderEditPathRespectsProjectOverrideOfBuiltins(t *testing.T) {
 	if err := os.WriteFile(path, []byte("[[providers]]\nname='deepseek'\nkind='openai'\nmodel='project-chat'\nbase_url='https://project.invalid/v1'\n"), 0600); err != nil {
 		t.Fatal(err)
 	}
+	approveWorkspace(t, root)
 	c, err := LoadForRootReadOnly(root)
 	if err != nil {
 		t.Fatal(err)

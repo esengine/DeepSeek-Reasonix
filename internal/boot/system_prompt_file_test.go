@@ -15,6 +15,7 @@ func TestBuildMissingSystemPromptFileFallsBackToInlinePrompt(t *testing.T) {
 	root := robustTempDir(t)
 	t.Setenv("REASONIX_HOME", robustTempDir(t))
 	writeFile(t, root, "reasonix.toml", systemPromptFileTestConfig("prompts/missing.md"))
+	approveWorkspace(t, root)
 
 	var notices []event.Event
 	ctrl, err := Build(context.Background(), Options{
@@ -45,6 +46,7 @@ func TestBuildNonMissingSystemPromptReadFailureStaysFatal(t *testing.T) {
 	root := robustTempDir(t)
 	t.Setenv("REASONIX_HOME", robustTempDir(t))
 	writeFile(t, root, "reasonix.toml", systemPromptFileTestConfig("prompts"))
+	approveWorkspace(t, root)
 	if err := os.MkdirAll(filepath.Join(root, "prompts"), 0o755); err != nil {
 		t.Fatal(err)
 	}

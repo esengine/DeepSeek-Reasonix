@@ -1568,6 +1568,7 @@ system_prompt_file = "/outside-workspace/system.md"
 `), 0o600); err != nil {
 		t.Fatal(err)
 	}
+	approveWorkspace(t, brokenRoot)
 	workingRoot := t.TempDir()
 	sessionDir := config.SessionDir()
 	if err := os.MkdirAll(sessionDir, 0o700); err != nil {
@@ -1805,6 +1806,7 @@ api_key_env = "DEEPSEEK_API_KEY"
 	if err := os.WriteFile(filepath.Join(project, "reasonix.toml"), []byte("# project config\n"), 0o600); err != nil {
 		t.Fatal(err)
 	}
+	approveWorkspace(t, project)
 	if !config.CanUpgradeDeepSeekProviderProtocolUserConfig("deepseek") {
 		t.Fatal("project config must not hide an available legacy global upgrade source")
 	}
@@ -1953,6 +1955,7 @@ func TestSetDesktopLanguagePersistsResponseLanguageAndUpdatesLiveTabs(t *testing
 	if err := os.WriteFile(filepath.Join(projectRoot, "reasonix.toml"), []byte("language = \"zh\"\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
+	approveWorkspace(t, projectRoot)
 
 	app := NewApp()
 	userCtrl := control.New(control.Options{})
@@ -2022,6 +2025,7 @@ func TestSetReasoningLanguageUpdatesLiveTabControllers(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(projectRoot, "reasonix.toml"), []byte("[agent]\nreasoning_language = \"en\"\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
+	approveWorkspace(t, projectRoot)
 
 	app := NewApp()
 	userCtrl := control.New(control.Options{ReasoningLanguage: "auto"})
@@ -2342,7 +2346,7 @@ func TestSaveHooksSettingsNormalizesQuotedNodeEvalHookCommand(t *testing.T) {
 	}
 }
 
-func TestProjectHooksSettingsUseActiveWorkspaceRootAndLoadByDefault(t *testing.T) {
+func TestProjectHooksSettingsUseActiveWorkspaceRootAndLoadOnceSaved(t *testing.T) {
 	isolateDesktopUserDirs(t)
 	project := t.TempDir()
 	app := NewApp()
@@ -2370,18 +2374,7 @@ func TestProjectHooksSettingsUseActiveWorkspaceRootAndLoadByDefault(t *testing.T
 	}
 	loaded := hook.Load(hook.LoadOptions{ProjectRoot: project})
 	if len(loaded) != 1 || loaded[0].Scope != hook.ScopeProject || loaded[0].Event != hook.Stop {
-		t.Fatalf("project hooks should load by default: %+v", loaded)
-	}
-}
-
-func TestLegacyTrustProjectHooksMethodsAreNoOps(t *testing.T) {
-	isolateDesktopUserDirs(t)
-	app := NewApp()
-	if err := app.TrustProjectHooks(); err != nil {
-		t.Fatalf("TrustProjectHooks compatibility call: %v", err)
-	}
-	if err := app.TrustProjectHooksForRoot(t.TempDir()); err != nil {
-		t.Fatalf("TrustProjectHooksForRoot compatibility call: %v", err)
+		t.Fatalf("project hooks saved from the editor should load: %+v", loaded)
 	}
 }
 
@@ -2460,128 +2453,41 @@ func TestLoadDesktopUserConfigForViewDoesNotPersistLegacyProviderAccess(t *testi
 	}
 }
 
-// TestLoadDesktopUserConfigViewKeepsLegacyBotConfigMigrationInMemory locks the
-// same contract for the legacy bot-config migration: read paths (including the
-// bot runtime's credential-loading view) see the merged bot config in memory
-// without any file being written; the locked write path performs the on-disk
-// migration.
-func TestLoadDesktopUserConfigViewKeepsLegacyBotConfigMigrationInMemory(t *testing.T) {
-	isolateDesktopUserDirs(t)
-	userPath := config.UserConfigPath()
-	if err := os.MkdirAll(filepath.Dir(userPath), 0o755); err != nil {
-		t.Fatal(err)
-	}
-	userBody := "default_model = \"local/m1\"\n"
-	if err := os.WriteFile(userPath, []byte(userBody), 0o644); err != nil {
-		t.Fatal(err)
-	}
-	legacyRoot := t.TempDir()
-	legacyPath := filepath.Join(legacyRoot, "reasonix.toml")
-	legacyBody := "[bot]\nenabled = true\nmodel = \"local/m1\"\n"
-	if err := os.WriteFile(legacyPath, []byte(legacyBody), 0o644); err != nil {
-		t.Fatal(err)
-	}
-
-	app := NewApp()
-	app.tabs = map[string]*WorkspaceTab{
-		"t": {ID: "t", Scope: "project", WorkspaceRoot: legacyRoot, Ready: true},
-	}
-	app.activeTabID = "t"
-
-	assertFilesUntouched := func(step string) {
-		t.Helper()
-		rawUser, err := os.ReadFile(userPath)
-		if err != nil {
-			t.Fatal(err)
-		}
-		if string(rawUser) != userBody {
-			t.Fatalf("%s must not rewrite the user config, got:\n%s", step, rawUser)
-		}
-		rawLegacy, err := os.ReadFile(legacyPath)
-		if err != nil {
-			t.Fatal(err)
-		}
-		if string(rawLegacy) != legacyBody {
-			t.Fatalf("%s must not rewrite the legacy config, got:\n%s", step, rawLegacy)
-		}
-	}
-
-	cfg, _, err := app.loadDesktopUserConfigForView()
-	if err != nil {
-		t.Fatalf("loadDesktopUserConfigForView: %v", err)
-	}
-	if !cfg.Bot.Enabled {
-		t.Fatal("view load should merge the legacy bot config in memory")
-	}
-	assertFilesUntouched("loadDesktopUserConfigForView")
-
-	botCfg, err := app.loadDesktopBotConfig()
-	if err != nil {
-		t.Fatalf("loadDesktopBotConfig: %v", err)
-	}
-	if !botCfg.Bot.Enabled {
-		t.Fatal("bot runtime load should see the merged legacy bot config")
-	}
-	assertFilesUntouched("loadDesktopBotConfig")
-
-	// The first locked write path migrates the bot config into the user file.
-	if err := app.applyConfigOnly(func(*config.Config) error { return nil }); err != nil {
-		t.Fatalf("applyConfigOnly: %v", err)
-	}
-	migrated := config.LoadForEditWithoutCredentials(userPath)
-	if !migrated.Bot.Enabled {
-		t.Fatal("locked write path should persist the legacy bot config migration")
-	}
-	rawLegacy, err := os.ReadFile(legacyPath)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if string(rawLegacy) != legacyBody {
-		t.Fatalf("migration must not rewrite the legacy config, got:\n%s", rawLegacy)
-	}
-}
-
-func TestLoadDesktopUserConfigForRootDoesNotFollowActiveTab(t *testing.T) {
-	isolateDesktopUserDirs(t)
-	userPath := config.UserConfigPath()
-	if err := os.MkdirAll(filepath.Dir(userPath), 0o755); err != nil {
-		t.Fatal(err)
-	}
-	if err := os.WriteFile(userPath, []byte("default_model = \"local/m1\"\n"), 0o644); err != nil {
-		t.Fatal(err)
-	}
-	targetRoot := t.TempDir()
-	activeRoot := t.TempDir()
-	if err := os.WriteFile(filepath.Join(targetRoot, "reasonix.toml"), []byte("[bot]\nenabled = true\nmodel = \"target\"\n"), 0o644); err != nil {
-		t.Fatal(err)
-	}
-	if err := os.WriteFile(filepath.Join(activeRoot, "reasonix.toml"), []byte("[bot]\nenabled = true\nmodel = \"active\"\n"), 0o644); err != nil {
-		t.Fatal(err)
-	}
-
-	app := NewApp()
-	app.tabs = map[string]*WorkspaceTab{
-		"active": {ID: "active", Scope: "project", WorkspaceRoot: activeRoot, Ready: true},
-	}
-	app.activeTabID = "active"
-
-	cfg, _, err := app.loadDesktopUserConfigForViewForRoot(targetRoot)
-	if err != nil {
-		t.Fatalf("loadDesktopUserConfigForViewForRoot: %v", err)
-	}
-	if !cfg.Bot.Enabled || cfg.Bot.Model != "target" {
-		t.Fatalf("root-specific view followed active tab: bot = %+v", cfg.Bot)
-	}
-
-	unlock := config.LockUserConfigEdits()
-	_, _, err = app.loadDesktopUserConfigForEditForRoot(targetRoot)
-	unlock()
-	if err != nil {
-		t.Fatalf("loadDesktopUserConfigForEditForRoot: %v", err)
-	}
-	migrated := config.LoadForEditWithoutCredentials(userPath)
-	if !migrated.Bot.Enabled || migrated.Bot.Model != "target" {
-		t.Fatalf("root-specific edit migrated the active tab instead: bot = %+v", migrated.Bot)
+// A checkout's reasonix.toml never becomes the user's config: not its [bot]
+// connections, not its sandbox, whether or not the user has a config yet.
+func TestDesktopUserConfigNeverAdoptsTheWorkspaceFile(t *testing.T) {
+	for name, userBody := range map[string]string{"no user config": "", "user config": "default_model = \"local/m1\"\n"} {
+		t.Run(name, func(t *testing.T) {
+			isolateDesktopUserDirs(t)
+			userPath := config.UserConfigPath()
+			if userBody != "" {
+				if err := os.MkdirAll(filepath.Dir(userPath), 0o755); err != nil {
+					t.Fatal(err)
+				}
+				if err := os.WriteFile(userPath, []byte(userBody), 0o644); err != nil {
+					t.Fatal(err)
+				}
+			}
+			root := t.TempDir()
+			project := "[bot]\nenabled = true\nmodel = \"local/m1\"\n[permissions]\nmode = \"allow\"\n"
+			if err := os.WriteFile(filepath.Join(root, "reasonix.toml"), []byte(project), 0o644); err != nil {
+				t.Fatal(err)
+			}
+			approveWorkspace(t, root)
+			app := NewApp()
+			app.tabs = map[string]*WorkspaceTab{"t": {ID: "t", Scope: "project", WorkspaceRoot: root, Ready: true}}
+			app.activeTabID = "t"
+			if cfg, _, err := app.loadDesktopUserConfigForView(); err != nil || cfg.Bot.Enabled {
+				t.Fatalf("view = %+v, %v; want the workspace's [bot] left out", cfg.Bot, err)
+			}
+			if err := app.applyConfigOnly(func(*config.Config) error { return nil }); err != nil {
+				t.Fatalf("applyConfigOnly: %v", err)
+			}
+			saved := config.LoadForEditWithoutCredentials(userPath)
+			if saved.Bot.Enabled || saved.Permissions.Mode == "allow" {
+				t.Fatalf("user config took the workspace's values: bot = %+v permissions = %+v", saved.Bot, saved.Permissions)
+			}
+		})
 	}
 }
 

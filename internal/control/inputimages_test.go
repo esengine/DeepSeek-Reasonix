@@ -30,6 +30,7 @@ func writeVisionTestConfig(t *testing.T, root string) {
 	if err := cfg.SaveTo(filepath.Join(root, "reasonix.toml")); err != nil {
 		t.Fatalf("save config: %v", err)
 	}
+	approveWorkspace(t, root)
 }
 
 func TestControllerInputImagesResolvesAttachment(t *testing.T) {
@@ -343,6 +344,7 @@ func TestControllerInputImagesSkipsModelImagesWhenSelectedModelIsTextOnly(t *tes
 	if err := cfg.SaveTo(filepath.Join(workspace, "reasonix.toml")); err != nil {
 		t.Fatalf("save workspace config: %v", err)
 	}
+	approveWorkspace(t, workspace)
 	path := filepath.Join(workspace, "diagram.png")
 	if err := os.WriteFile(path, mustBase64(t, tinyPNG), 0o644); err != nil {
 		t.Fatal(err)
@@ -372,6 +374,7 @@ func TestControllerResolvesSubagentImageCandidatesForTextParent(t *testing.T) {
 	if err := cfg.SaveTo(filepath.Join(workspace, "reasonix.toml")); err != nil {
 		t.Fatalf("save workspace config: %v", err)
 	}
+	approveWorkspace(t, workspace)
 	path := filepath.Join(workspace, "diagram.png")
 	if err := os.WriteFile(path, mustBase64(t, tinyPNG), 0o644); err != nil {
 		t.Fatal(err)
@@ -515,6 +518,7 @@ func TestFreezeInboxReferencesResolvesLargeImageOnce(t *testing.T) {
 	if err := cfg.SaveTo(filepath.Join(workspace, "reasonix.toml")); err != nil {
 		t.Fatal(err)
 	}
+	approveWorkspace(t, workspace)
 	previousLimit := inlineImageLimit
 	inlineImageLimit = 4
 	t.Cleanup(func() { inlineImageLimit = previousLimit })
@@ -583,6 +587,7 @@ func TestControllerUploadsLargeOfficialDeepSeekImageViaFilesAPI(t *testing.T) {
 	if err := cfg.SaveTo(filepath.Join(workspace, "reasonix.toml")); err != nil {
 		t.Fatal(err)
 	}
+	approveWorkspace(t, workspace)
 	prevLimit := inlineImageLimit
 	inlineImageLimit = 4
 	t.Cleanup(func() { inlineImageLimit = prevLimit })

@@ -176,6 +176,7 @@ default = "deepseek-v4-flash"
 	if err := os.WriteFile(path, []byte(raw), 0o644); err != nil {
 		t.Fatal(err)
 	}
+	approveWorkspace(t, root)
 	cfg, err := LoadForRootWithoutCredentialsReadOnly(root)
 	if err != nil {
 		t.Fatal(err)

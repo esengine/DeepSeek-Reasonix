@@ -4672,10 +4672,10 @@ function makeMockApp(): MockAppBindings {
       hookSettings[key].hooks = JSON.parse(JSON.stringify(hooks)) as HookConfigView[];
     },
     async TrustProjectHooks() {
-      // Compatibility no-op: project hooks are enabled automatically.
+      hookSettings.project.trusted = true;
     },
     async TrustProjectHooksForRoot(_projectRoot: string) {
-      // Compatibility no-op: project hooks are enabled automatically.
+      hookSettings.project.trusted = true;
     },
     async SetDefaultModel(ref: string) {
       settings.defaultModel = ref;

@@ -37,6 +37,7 @@ base_url = "https://example.invalid"
 model = "deepseek-v4-flash"
 api_key_env = "REASONIX_TEST_KEY_UNSET"
 `)
+	approveWorkspace(t, dir)
 
 	_, err := Build(context.Background(), Options{Sink: event.Discard})
 	if err == nil {
@@ -70,6 +71,7 @@ api_key_env = "REASONIX_TEST_KEY_UNSET"
 	writeFile(t, dir, "reasonix.toml", `
 default_model = "deepseek-flash"
 `)
+	approveWorkspace(t, dir)
 
 	var notices []event.Event
 	ctrl, err := Build(context.Background(), Options{
@@ -109,6 +111,7 @@ base_url = "https://example.invalid"
 model = "deepseek-v4-flash"
 api_key_env = "REASONIX_TEST_KEY_UNSET"
 `)
+	approveWorkspace(t, dir)
 
 	ctrl, err := Build(context.Background(), Options{Sink: event.Discard, Model: "mimo-v2.5-pro"})
 	if err != nil {
@@ -138,6 +141,7 @@ base_url = "https://example.invalid"
 model = "m"
 api_key_env = "`+keyEnv+`"
 `)
+	approveWorkspace(t, dir)
 
 	var notices []event.Event
 	ctrl, err := Build(context.Background(), Options{
@@ -215,6 +219,7 @@ base_url = "http://127.0.0.1:23333/v1"
 models = ["model-a"]
 api_key_env = "`+keyEnv+`"
 `)
+	approveWorkspace(t, dir)
 
 	var notices []string
 	ctrl, err := Build(context.Background(), Options{
@@ -280,6 +285,7 @@ base_url = "https://api.MiniMax.chat/v1"
 model = "MiniMax-M3"
 api_key_env = "`+configuredEnv+`"
 `)
+	approveWorkspace(t, dir)
 
 	ctrl, err := Build(context.Background(), Options{Sink: event.Discard})
 	if err != nil {
@@ -326,6 +332,7 @@ base_url = "https://api.MiniMax.chat/v1"
 model = "MiniMax-M3"
 api_key_env = "`+configuredEnv+`"
 `)
+	approveWorkspace(t, dir)
 
 	_, err := Build(context.Background(), Options{
 		Sink:       event.Discard,

@@ -25,6 +25,7 @@ base_url = "https://example.invalid"
 model = "x"
 api_key_env = "REASONIX_TEST_KEY_UNSET"
 `)
+	approveWorkspace(t, dir)
 
 	ctrl, err := Build(context.Background(), Options{})
 	if err != nil {
@@ -71,6 +72,7 @@ name = "test-model"
 kind = "boot-token-profile-test"
 model = "x"
 `+environmentSection)
+		approveWorkspace(t, dir)
 
 		ctrl, err := Build(context.Background(), Options{})
 		if err != nil {

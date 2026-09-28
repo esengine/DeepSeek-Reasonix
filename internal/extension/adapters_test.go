@@ -174,6 +174,9 @@ func TestHooksContributor(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(settingsDir, hook.SettingsFilename), []byte(settings), 0o644); err != nil {
 		t.Fatal(err)
 	}
+	if err := hook.ApproveProjectHooks(hook.LoadOptions{ProjectRoot: projectRoot, HomeDir: home}); err != nil {
+		t.Fatal(err)
+	}
 	contribs := contribute(t, HooksContributor(hook.LoadOptions{ProjectRoot: projectRoot, HomeDir: home}))
 	if len(contribs) != 3 {
 		t.Fatalf("contributed %d hooks, want 3: %+v", len(contribs), contribs)

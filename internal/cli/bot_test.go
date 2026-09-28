@@ -324,62 +324,30 @@ enabled = false
 	}
 }
 
-func TestBotDoctorUsesProjectBotConfigWhenUserBotIsUnconfigured(t *testing.T) {
-	isolateBotUserConfig(t)
-	projectCfg := config.Default()
-	projectCfg.Bot.Enabled = true
-	projectCfg.Bot.Allowlist.AllowAll = true
-	projectCfg.Bot.Connections = []config.BotConnectionConfig{
-		{ID: "weixin-weixin", Provider: "weixin", Domain: "weixin", Label: "微信", Enabled: true, Status: "connected"},
-	}
-	if err := projectCfg.SaveTo("reasonix.toml"); err != nil {
-		t.Fatalf("save project config: %v", err)
-	}
-
-	out := captureStdout(t, func() {
-		if rc := botDoctor([]string{"--json"}); rc != 0 {
-			t.Fatalf("botDoctor rc = %d, want 0", rc)
+// The bot gateway answers to the user's config alone: a checkout's [bot],
+// with or without a user config beside it, is not what the doctor reports on.
+func TestBotDoctorIgnoresProjectBotConfig(t *testing.T) {
+	for _, withUser := range []bool{false, true} {
+		isolateBotUserConfig(t)
+		if withUser {
+			if err := config.Default().SaveTo(config.UserConfigPath()); err != nil {
+				t.Fatalf("save user config: %v", err)
+			}
 		}
-	})
-	for _, want := range []string{
-		`"name":"bot.enabled","status":"ok"`,
-		`"name":"bot.connections","status":"ok","detail":"enabled=1 total=1"`,
-		`"name":"bot.allowlist","status":"open"`,
-	} {
-		if !strings.Contains(out, want) {
-			t.Fatalf("bot doctor output missing %s:\n%s", want, out)
+		projectCfg := config.Default()
+		projectCfg.Bot.Enabled = true
+		projectCfg.Bot.Allowlist.AllowAll = true
+		projectCfg.Bot.Connections = []config.BotConnectionConfig{
+			{ID: "weixin-weixin", Provider: "weixin", Domain: "weixin", Label: "微信", Enabled: true, Status: "connected"},
 		}
-	}
-}
-
-func TestBotDoctorUsesProjectBotConfigWhenUserConfigOnlyHasBotDefaults(t *testing.T) {
-	isolateBotUserConfig(t)
-	userCfg := config.Default()
-	if err := userCfg.SaveTo(config.UserConfigPath()); err != nil {
-		t.Fatalf("save user config: %v", err)
-	}
-	projectCfg := config.Default()
-	projectCfg.Bot.Enabled = true
-	projectCfg.Bot.Allowlist.AllowAll = true
-	projectCfg.Bot.Connections = []config.BotConnectionConfig{
-		{ID: "feishu-lark", Provider: "feishu", Domain: "lark", Label: "Lark", Enabled: true, Status: "connected"},
-	}
-	if err := projectCfg.SaveTo("reasonix.toml"); err != nil {
-		t.Fatalf("save project config: %v", err)
-	}
-
-	out := captureStdout(t, func() {
-		if rc := botDoctor([]string{"--json"}); rc != 0 {
-			t.Fatalf("botDoctor rc = %d, want 0", rc)
+		if err := projectCfg.SaveTo("reasonix.toml"); err != nil {
+			t.Fatalf("save project config: %v", err)
 		}
-	})
-	for _, want := range []string{
-		`"name":"bot.enabled","status":"ok"`,
-		`"name":"bot.connections","status":"ok","detail":"enabled=1 total=1"`,
-		`"name":"bot.allowlist","status":"open"`,
-	} {
-		if !strings.Contains(out, want) {
-			t.Fatalf("bot doctor output missing %s:\n%s", want, out)
+		out := captureStdout(t, func() { _ = botDoctor([]string{"--json"}) })
+		for _, unwanted := range []string{`"name":"bot.allowlist","status":"open"`, `"detail":"enabled=1 total=1"`} {
+			if strings.Contains(out, unwanted) {
+				t.Fatalf("bot doctor reported the checkout's [bot] (%s):\n%s", unwanted, out)
+			}
 		}
 	}
 }

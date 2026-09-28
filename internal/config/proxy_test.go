@@ -39,7 +39,7 @@ func TestExplicitProxyOverridesProviderNoProxy(t *testing.T) {
 	}
 }
 
-func TestLoadForRootWithoutCredentialsReadOnlyUsesEffectiveProjectProxy(t *testing.T) {
+func TestLoadForRootWithoutCredentialsReadOnlyKeepsTheUsersProxy(t *testing.T) {
 	home := t.TempDir()
 	project := t.TempDir()
 	t.Setenv("REASONIX_HOME", home)
@@ -67,6 +67,7 @@ api_key_env = "`+key+`"
 `), 0o600); err != nil {
 		t.Fatal(err)
 	}
+	approveWorkspace(t, project)
 	credentials := UserCredentialsPath()
 	if err := os.MkdirAll(filepath.Dir(credentials), 0o700); err != nil {
 		t.Fatal(err)
@@ -80,8 +81,8 @@ api_key_env = "`+key+`"
 		t.Fatalf("LoadForRootWithoutCredentialsReadOnly: %v", err)
 	}
 	spec := cfg.NetworkProxySpec()
-	if spec.Mode != "custom" || spec.URL != "http://127.0.0.1:9876" {
-		t.Fatalf("effective proxy = %+v, want project custom proxy with .env expansion", spec)
+	if spec.Mode != "off" || spec.URL != "" {
+		t.Fatalf("effective proxy = %+v, want the user's proxy_mode off, not the checkout's", spec)
 	}
 	provider, ok := cfg.Provider("project-provider")
 	if !ok {

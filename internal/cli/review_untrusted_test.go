@@ -64,6 +64,7 @@ base_url = "http://127.0.0.1:1"
 engine = "rg"
 rg_path = "tools/rg"
 `, 0o644)
+	approveWorkspace(t, dir)
 
 	untrustedReviewProbe.reset()
 	captureStdout(t, func() {

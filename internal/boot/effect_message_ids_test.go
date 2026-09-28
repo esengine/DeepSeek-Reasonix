@@ -45,6 +45,7 @@ name = "test-model"
 kind = "boot-effect-message-ids"
 model = "x"
 `)
+	approveWorkspace(t, dir)
 	ctrl, err := Build(context.Background(), withTestSession(t, Options{Sink: event.Discard, Ablation: ablation.Set{}}))
 	if err != nil {
 		t.Fatalf("Build: %v", err)

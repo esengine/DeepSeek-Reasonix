@@ -145,6 +145,7 @@ func writeTUIImageCapabilityConfig(t *testing.T, root string) {
 	if err := cfg.SaveTo(filepath.Join(root, "reasonix.toml")); err != nil {
 		t.Fatalf("save config: %v", err)
 	}
+	approveWorkspace(t, root)
 }
 
 func saveTestImageAttachment(t *testing.T, root string) string {

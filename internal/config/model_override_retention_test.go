@@ -13,6 +13,7 @@ func loadSingleProvider(t *testing.T, providerBody string) *ProviderEntry {
 	if err := os.WriteFile(filepath.Join(dir, "reasonix.toml"), []byte(body), 0o644); err != nil {
 		t.Fatalf("write config: %v", err)
 	}
+	approveWorkspace(t, dir)
 	c, err := LoadForRootReadOnly(dir)
 	if err != nil {
 		t.Fatalf("load config: %v", err)
