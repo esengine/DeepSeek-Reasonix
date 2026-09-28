@@ -26,6 +26,7 @@ import { EventRepo, pinSummary } from "./registry/db/events";
 import { repinReviewedDigest } from "./registry/pin";
 import { renderCommunity } from "./community";
 import { CONTENT_DIGEST } from "./registry/lib/validation";
+import { maintainRegistry } from "./registry/maintenance";
 import {
   cliReleaseChannel,
   desktopReleaseChannel,
@@ -1587,11 +1588,12 @@ function registryBindings(env: Env): RegistryBindings {
 
 function communityStatus(url: URL): string {
   const s = url.searchParams.get("status") ?? "pending";
-  return ["pending", "active", "hidden", "rejected", "private"].includes(s) ? s : "pending";
+  return ["pending", "active", "hidden", "rejected", "private", "flagged"].includes(s) ? s : "pending";
 }
 
 async function handleCommunityList(env: Env, admin: User, status: string): Promise<Response> {
-  const rows = await new PackageRepo(env.REGISTRY_DB).listForReview(status, 200);
+  const repo = new PackageRepo(env.REGISTRY_DB);
+  const rows = status === "flagged" ? await repo.listFlagged(200) : await repo.listForReview(status, 200);
   return html(renderCommunity(admin, rows, status));
 }
 
@@ -1605,7 +1607,7 @@ async function handleCommunityAction(
 ): Promise<Response> {
   if (!sameOrigin(request)) return new Response("forbidden", { status: 403 });
   const form = await formObject(request);
-  const backStatus = ["pending", "active", "hidden", "rejected", "private"].includes(form.status) ? form.status : "pending";
+  const backStatus = ["pending", "active", "hidden", "rejected", "private", "flagged"].includes(form.status) ? form.status : "pending";
   const back = redirect(`/community?status=${backStatus}`);
   const slug = `${handle}/${name}`;
   const repo = new PackageRepo(env.REGISTRY_DB);
@@ -2003,11 +2005,13 @@ export default {
       ctx.waitUntil(Promise.all([
         runIngestSentinel(env),
         drainFirebaseCrashOutbox(env),
+        maintainRegistry(env.REGISTRY_DB, new Date()),
       ]).then(() => undefined));
       return;
     }
     ctx.waitUntil(Promise.all([
       purgeExpiredStatsRows(env),
+      maintainRegistry(env.REGISTRY_DB, new Date()),
       crashStorageMode(env) === "d1" ? Promise.resolve() : purgeFirebaseDeliveryState(env),
       drainFirebaseCrashOutbox(env),
       crashStorageMode(env) === "d1" ? Promise.resolve() : runFirebaseCrashLifecycle(env),

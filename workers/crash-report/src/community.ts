@@ -3,10 +3,12 @@
 import { esc, page } from "./shell";
 import { type User, userNav } from "./auth";
 import type { PackageRow, ReviewRow } from "./registry/types";
+import { FLAG_MAX_APPROVAL, FLAG_MIN_DOWN, approvalRate, needsReview } from "./registry/lib/ranking";
 
 const STATUS_TABS = [
   { key: "pending", label: "Pending" },
   { key: "active", label: "Active" },
+  { key: "flagged", label: "Flagged" },
   { key: "hidden", label: "Hidden" },
   { key: "rejected", label: "Rejected" },
   { key: "private", label: "Private" },
@@ -61,6 +63,13 @@ function rowActions(pkg: ReviewRow, backStatus: string): string {
   return `${approve}${reject}`;
 }
 
+function votesCell(pkg: PackageRow): string {
+  const rate = approvalRate(pkg.up_count, pkg.down_count);
+  const pct = rate === null ? "—" : `${Math.round(rate * 100)}%`;
+  const flag = needsReview(pkg.up_count, pkg.down_count) ? ` <span class="badge">review</span>` : "";
+  return `▲${pkg.up_count} ▼${pkg.down_count} · ${pct}${flag}`;
+}
+
 function sourceLinks(pkg: PackageRow): string {
   const links: string[] = [];
   if (pkg.repo_url) links.push(`<a class="navlink" href="${esc(pkg.repo_url)}" target="_blank" rel="noopener">repo</a>`);
@@ -108,7 +117,7 @@ export function renderCommunity(viewer: User, packages: ReviewRow[], status: str
 <td><div class="crash-summary"><span>${esc(p.slug)}${verified}</span><small>${esc(p.summary || "—")}</small>${digestLine(p)}</div></td>
 <td><span class="pill">${esc(p.kind)}</span></td>
 <td>@${esc(p.scope_handle)}</td>
-<td class="n">${esc(p.latest_version || "—")} · ${p.install_count} inst · ${p.star_count}★</td>
+<td class="n">${esc(p.latest_version || "—")} · ${p.install_count} inst · ${votesCell(p)}</td>
 <td class="n">${esc(p.created_at.slice(0, 10))}</td>
 <td><div class="actions">${rowActions(p, status)}</div><div class="rowlinks">${copyButton(p)}${links ? `<span class="muted">${links}</span>` : ""}</div></td>
 </tr>`;
@@ -118,9 +127,9 @@ export function renderCommunity(viewer: User, packages: ReviewRow[], status: str
   return page(
     "Reasonix · Community",
     "community",
-    `<h1>Community</h1><p class="sub">Review user-published skills, plugins, and MCP servers — approve to publish, verify to badge, hide to take down</p>
+    `<h1>Community</h1><p class="sub">Review user-published skills, plugins, and MCP servers — approve to publish, verify to badge, hide to take down. Flagged lists live packages with at least ${FLAG_MIN_DOWN} down-votes and under ${Math.round(FLAG_MAX_APPROVAL * 100)}% approval; nothing is hidden automatically</p>
 <div class="filter-tabs">${tabs}</div>
-<div class="card full"><table class="reg-table"><colgroup><col class="c-pkg"><col class="c-kind"><col class="c-pub"><col class="c-ver"><col class="c-sub"><col class="c-act"></colgroup><thead><tr><th>package</th><th>kind</th><th>publisher</th><th>version · installs · stars</th><th>submitted</th><th></th></tr></thead>
+<div class="card full"><table class="reg-table"><colgroup><col class="c-pkg"><col class="c-kind"><col class="c-pub"><col class="c-ver"><col class="c-sub"><col class="c-act"></colgroup><thead><tr><th>package</th><th>kind</th><th>publisher</th><th>version · installs · votes</th><th>submitted</th><th></th></tr></thead>
 <tbody>${rows}</tbody></table></div>`,
     userNav(viewer),
   );

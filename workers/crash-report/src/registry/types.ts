@@ -1,3 +1,5 @@
+import { approvalRate } from "./lib/ranking";
+
 // The subset of an account the registry needs: identity + namespace + trust.
 export interface RegistryUser {
   id: number;
@@ -33,6 +35,9 @@ export interface PackageRow {
   latest_version: string;
   install_count: number;
   star_count: number;
+  up_count: number;
+  down_count: number;
+  rec_score: number;
   verified: number;
   status: string;
   publisher_id: number;
@@ -57,7 +62,14 @@ export interface PackageDTO {
   tags: string[];
   latestVersion: string;
   installCount: number;
+  // Deprecated alias of upCount, kept for clients that still read stars.
   starCount: number;
+  upCount: number;
+  downCount: number;
+  // up / (up + down); null while nobody has voted.
+  approvalRate: number | null;
+  // The materialized recommended score, 0..1 (lib/ranking.ts).
+  score: number;
   verified: boolean;
   status: string;
   createdAt: string;
@@ -118,7 +130,11 @@ export function toPackageDTO(row: PackageRow): PackageDTO {
     tags: splitTags(row.tags),
     latestVersion: row.latest_version,
     installCount: row.install_count,
-    starCount: row.star_count,
+    starCount: row.up_count,
+    upCount: row.up_count,
+    downCount: row.down_count,
+    approvalRate: approvalRate(row.up_count, row.down_count),
+    score: row.rec_score,
     verified: row.verified === 1,
     status: row.status,
     createdAt: row.created_at,

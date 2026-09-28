@@ -28,6 +28,14 @@ export class EventRepo {
       .run();
   }
 
+  async announced(type: EventType, packageId: number, actorHandle: string): Promise<boolean> {
+    const row = await this.db
+      .prepare("SELECT 1 AS hit FROM events WHERE type = ?1 AND package_id = ?2 AND actor_handle = ?3 LIMIT 1")
+      .bind(type, packageId, actorHandle)
+      .first<{ hit: number }>();
+    return row !== null;
+  }
+
   // Most-recent social activity, joined to the package slug so the feed can link
   // back. Raw 'install' pings are excluded — they exist only to feed the trending
   // rank; the feed surfaces publish/update/star and install-milestone events.

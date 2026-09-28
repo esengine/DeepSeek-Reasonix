@@ -1,11 +1,12 @@
 import type { PackageKind, PackageRow, ReviewRow, VersionRow, RegistryUser } from "../types";
 import type { PublishInput } from "../lib/validation";
 import { ApiError } from "../http/errors";
+import { FLAG_MAX_APPROVAL, FLAG_MIN_DOWN } from "../lib/ranking";
 
 export interface ListParams {
   kind: PackageKind | "all";
   q: string;
-  sort: "new" | "trending" | "installs";
+  sort: "recommended" | "new" | "trending" | "installs";
   pinned: boolean;
   limit: number;
   offset: number;
@@ -16,12 +17,6 @@ export interface PublishResult {
   row: PackageRow;
   created: boolean;
   version: string;
-}
-
-export interface InstallResult {
-  count: number;
-  packageId: number;
-  scopeHandle: string;
 }
 
 export interface VersionListParams {
@@ -80,6 +75,8 @@ export class PackageRepo {
         ) e ON e.package_id = p.id`;
       binds.push(p.now);
       order = "ORDER BY trend DESC, p.install_count DESC, p.created_at DESC";
+    } else if (p.sort === "recommended") {
+      order = "ORDER BY p.rec_score DESC, p.install_count DESC, p.created_at DESC, p.id DESC";
     } else if (p.sort === "installs") {
       order = "ORDER BY p.install_count DESC, p.created_at DESC";
     } else {
@@ -222,54 +219,6 @@ export class PackageRepo {
     }
   }
 
-  // Best-effort install tally. Returns the new count, or null when no active
-  // package matches the slug.
-  async recordInstall(slug: string, now: string): Promise<InstallResult | null> {
-    const [updated] = await this.db.batch([
-      this.db
-        .prepare(
-          `UPDATE packages SET install_count = install_count + 1
-           WHERE slug = ?1 AND status = 'active'
-           RETURNING id, install_count, scope_handle`,
-        )
-        .bind(slug),
-      this.db
-        .prepare(
-          `INSERT INTO package_install_daily (date, package_id, count)
-           SELECT substr(?2, 1, 10), id, 1 FROM packages
-           WHERE slug = ?1 AND status = 'active'
-           ON CONFLICT (date, package_id) DO UPDATE
-           SET count = package_install_daily.count + excluded.count`,
-        )
-        .bind(slug, now),
-    ]);
-    const row = updated?.results?.[0] as { id?: number; install_count?: number; scope_handle?: string } | undefined;
-    if (!row?.id || typeof row.install_count !== "number" || !row.scope_handle) return null;
-    return { count: row.install_count, packageId: row.id, scopeHandle: row.scope_handle };
-  }
-
-  // Toggle a star. Returns the resulting state, or null when the slug is unknown.
-  async toggleStar(slug: string, userId: number, now: string): Promise<{ starred: boolean; count: number } | null> {
-    const pkg = await this.bySlug(slug);
-    if (!pkg || pkg.status !== "active") return null;
-
-    const added = await this.db
-      .prepare("INSERT OR IGNORE INTO stars (package_id, user_id, created_at) VALUES (?1, ?2, ?3)")
-      .bind(pkg.id, userId, now)
-      .run();
-
-    if ((added.meta.changes ?? 0) > 0) {
-      await this.db.prepare("UPDATE packages SET star_count = star_count + 1 WHERE id = ?1").bind(pkg.id).run();
-      return { starred: true, count: pkg.star_count + 1 };
-    }
-    await this.db.prepare("DELETE FROM stars WHERE package_id = ?1 AND user_id = ?2").bind(pkg.id, userId).run();
-    await this.db
-      .prepare("UPDATE packages SET star_count = MAX(0, star_count - 1) WHERE id = ?1")
-      .bind(pkg.id)
-      .run();
-    return { starred: false, count: Math.max(0, pkg.star_count - 1) };
-  }
-
   // Everything one publisher has submitted, in every review state, newest first.
   async listByPublisher(publisherId: number, limit: number): Promise<PackageRow[]> {
     const res = await this.db
@@ -306,6 +255,22 @@ export class PackageRepo {
       .prepare("SELECT * FROM packages WHERE status = ?1 ORDER BY created_at DESC LIMIT ?2")
       .bind(status, limit)
       .all<PackageRow>();
+    return res.results ?? [];
+  }
+
+  // Admin: live packages the vote rules flag for another look (lib/ranking.ts
+  // needsReview). Derived from the counts, so a recovering package drops out.
+  async listFlagged(limit: number): Promise<ReviewRow[]> {
+    const res = await this.db
+      .prepare(
+        `SELECT p.*, COALESCE(v.content_hash, '') AS content_hash FROM packages p
+         LEFT JOIN package_versions v ON v.package_id = p.id AND v.version = p.latest_version
+         WHERE p.status = 'active' AND p.down_count >= ?1
+           AND CAST(p.up_count AS REAL) / (p.up_count + p.down_count) < ?2
+         ORDER BY p.down_count DESC, p.created_at DESC LIMIT ?3`,
+      )
+      .bind(FLAG_MIN_DOWN, FLAG_MAX_APPROVAL, limit)
+      .all<ReviewRow>();
     return res.results ?? [];
   }
 

@@ -226,10 +226,21 @@ export type PublishInput = z.infer<typeof PublishSchema>;
 export const ListQuerySchema = z.object({
   kind: z.enum(["skill", "plugin", "mcp", "theme", "all"]).default("all"),
   q: z.string().trim().max(100).default(""),
-  sort: z.enum(["new", "trending", "installs"]).default("new"),
+  sort: z.enum(["recommended", "new", "trending", "installs"]).default("recommended"),
   pinned: z.enum(["0", "1"]).default("0").transform((v) => v === "1"),
   limit: z.coerce.number().int().min(1).max(100).default(24),
   offset: z.coerce.number().int().min(0).max(10000).default(0),
+});
+
+// +1 up, -1 down, 0 withdraws the caller's vote.
+export const VoteSchema = z.object({
+  value: z.union([z.literal(1), z.literal(0), z.literal(-1)]),
+});
+
+// An anonymous install key: 32 lowercase hex characters the client derives on
+// its own side. It is never an IP address and never an account id.
+export const InstallPingSchema = z.object({
+  installId: z.string().regex(/^[0-9a-f]{32}$/),
 });
 
 // Package version history is keyset-paginated by (created_at, id). The id tie

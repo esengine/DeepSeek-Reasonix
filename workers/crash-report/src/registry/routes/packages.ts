@@ -11,10 +11,6 @@ const packages = new Hono<AppEnv>();
 
 const now = () => new Date().toISOString();
 
-// Install-count thresholds worth announcing in the activity feed.
-const MILESTONES = new Set([10, 50, 100, 500, 1000]);
-const isMilestone = (n: number) => MILESTONES.has(n) || (n >= 1000 && n % 1000 === 0);
-
 packages.get("/", async (c) => {
   const q = parseQuery(c, ListQuerySchema);
   const rows = await repos(c.env).packages.list({ ...q, now: now() });
@@ -51,35 +47,6 @@ packages.post("/", writeRateLimit, requireAuth, async (c) => {
     });
   }
   return c.json({ package: toPackageDTO(row), created, version }, created ? 201 : 200);
-});
-
-packages.post("/:handle/:name/installed", writeRateLimit, async (c) => {
-  const slug = `${c.req.param("handle")}/${c.req.param("name")}`;
-  const { packages: repo, events } = repos(c.env);
-  const result = await repo.recordInstall(slug, now());
-  if (result === null) throw new ApiError(404, "not_found", "No such package.");
-  if (isMilestone(result.count)) {
-    await events.log({
-      type: "milestone",
-      packageId: result.packageId,
-      actorHandle: result.scopeHandle,
-      summary: `${slug} reached ${result.count} installs`,
-      now: now(),
-    });
-  }
-  return c.json({ ok: true, installCount: result.count });
-});
-
-packages.post("/:handle/:name/star", writeRateLimit, requireAuth, async (c) => {
-  const slug = `${c.req.param("handle")}/${c.req.param("name")}`;
-  const user = currentUser(c);
-  const { packages: repo, events } = repos(c.env);
-  const result = await repo.toggleStar(slug, user.id, now());
-  if (result === null) throw new ApiError(404, "not_found", "No such package.");
-  if (result.starred) {
-    await events.log({ type: "star", packageId: null, actorHandle: user.handle, summary: `starred ${slug}`, now: now() });
-  }
-  return c.json(result);
 });
 
 export default packages;

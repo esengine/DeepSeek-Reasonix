@@ -20,10 +20,7 @@ CREATE TABLE IF NOT EXISTS packages (
   tags           TEXT    NOT NULL DEFAULT '',         -- comma-separated
   latest_version TEXT    NOT NULL DEFAULT '',
   install_count  INTEGER NOT NULL DEFAULT 0,
-  star_count     INTEGER NOT NULL DEFAULT 0,          -- legacy; the API serves up_count in its place
-  up_count       INTEGER NOT NULL DEFAULT 0,          -- recounted from votes in the vote's own batch
-  down_count     INTEGER NOT NULL DEFAULT 0,
-  rec_score      REAL    NOT NULL DEFAULT 0,          -- materialized recommended score (lib/ranking.ts)
+  star_count     INTEGER NOT NULL DEFAULT 0,
   verified       INTEGER NOT NULL DEFAULT 0,          -- owner/admin trust badge
   status         TEXT    NOT NULL DEFAULT 'active',   -- active | hidden | removed
   publisher_id   INTEGER NOT NULL,                    -- accounts user id (owner)
@@ -42,9 +39,6 @@ CREATE INDEX IF NOT EXISTS packages_active_kind_created
   WHERE status = 'active';
 CREATE INDEX IF NOT EXISTS packages_active_installs
   ON packages (install_count DESC, created_at DESC)
-  WHERE status = 'active';
-CREATE INDEX IF NOT EXISTS packages_active_recommended
-  ON packages (rec_score DESC, install_count DESC, created_at DESC)
   WHERE status = 'active';
 
 -- Immutable version history: one row per published version, carrying the source
@@ -70,27 +64,6 @@ CREATE TABLE IF NOT EXISTS stars (
   PRIMARY KEY (package_id, user_id)
 );
 
--- One vote per account per package: +1 or -1; withdrawing deletes the row.
--- packages.up_count/down_count are recounted from here in the same batch.
-CREATE TABLE IF NOT EXISTS votes (
-  package_id INTEGER NOT NULL,
-  user_id    INTEGER NOT NULL,
-  value      INTEGER NOT NULL CHECK (value IN (-1, 1)),
-  created_at TEXT    NOT NULL,
-  updated_at TEXT    NOT NULL,
-  PRIMARY KEY (package_id, user_id)
-);
--- Install de-duplication: one counted install per (anonymous install, package,
--- UTC day). install_key is a client-derived one-way id, never an IP. fresh is 1
--- only between the insert and the counters it feeds, inside one batch.
-CREATE TABLE IF NOT EXISTS package_install_seen (
-  install_key TEXT    NOT NULL,
-  package_id  INTEGER NOT NULL,
-  date        TEXT    NOT NULL,
-  fresh       INTEGER NOT NULL DEFAULT 1,
-  PRIMARY KEY (install_key, package_id, date)
-);
-CREATE INDEX IF NOT EXISTS install_seen_date ON package_install_seen (date);
 -- Activity log: powers the homepage live feed and the 7-day "trending" ranking.
 CREATE TABLE IF NOT EXISTS events (
   id           INTEGER PRIMARY KEY AUTOINCREMENT,

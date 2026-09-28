@@ -8,6 +8,7 @@ import { ApiError } from "../http/errors";
 import { z } from "zod";
 import { CONTENT_DIGEST } from "../lib/validation";
 import { repinReviewedDigest } from "../pin";
+import { rescore } from "../db/ranking";
 
 const admin = new Hono<AppEnv>();
 
@@ -29,11 +30,20 @@ const PinRevisionSchema = z.object({
 
 admin.use("*", requireAdmin);
 
-// Review queue. ?status defaults to pending; also accepts rejected/hidden/active.
+// Review queue. ?status defaults to pending; also accepts rejected/hidden/active,
+// and flagged: live packages the vote rules send back for another look.
 admin.get("/packages", async (c) => {
   const status = new URL(c.req.url).searchParams.get("status") || "pending";
-  const rows = await repos(c.env).packages.listByStatus(status, 200);
+  const { packages: repo } = repos(c.env);
+  const rows = status === "flagged" ? await repo.listFlagged(200) : await repo.listByStatus(status, 200);
   return c.json({ packages: rows.map(toPackageDTO) });
+});
+
+// Recompute every recommended score now instead of at the next cron run — the
+// step that follows the votes migration.
+admin.post("/rescore", writeRateLimit, async (c) => {
+  const updated = await rescore(c.env.DB, now().slice(0, 10));
+  return c.json({ updated });
 });
 
 // Approve a pending package → live. Its publish event is emitted here (on first

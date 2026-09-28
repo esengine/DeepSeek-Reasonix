@@ -34,6 +34,9 @@ const existing: PackageRow = {
   publisher_id: 7,
   install_count: 0,
   star_count: 0,
+  up_count: 0,
+  down_count: 0,
+  rec_score: 0,
   created_at: now,
   updated_at: now,
 };
@@ -329,6 +332,22 @@ describe("PackageRepo.versions", () => {
 });
 
 describe("PackageRepo.list", () => {
+  it("orders recommended by the materialized score", async () => {
+    let sql = "";
+    const db = {
+      prepare(query: string) {
+        sql = query;
+        const statement = {
+          bind() { return statement; },
+          async all() { return { results: [] }; },
+        };
+        return statement;
+      },
+    } as unknown as D1Database;
+    await new PackageRepo(db).list({ kind: "all", q: "", sort: "recommended", pinned: false, limit: 24, offset: 0, now });
+    expect(sql).toContain("ORDER BY p.rec_score DESC, p.install_count DESC, p.created_at DESC, p.id DESC");
+  });
+
   it("uses the daily install rollup for trending", async () => {
     let sql = "";
     const db = {
@@ -395,55 +414,12 @@ describe("PackageRepo.list pinned", () => {
   it("filters in the query so a page holds only pinned packages", async () => {
     const { sqlite, repo } = seeded();
     try {
-      for (const sort of ["new", "installs", "trending"] as const) {
+      for (const sort of ["recommended", "new", "installs", "trending"] as const) {
         const rows = await repo.list({ kind: "all", q: "", sort, pinned: true, limit: 1, offset: 0, now });
         expect(rows.map((r) => r.name)).toEqual(["pinned"]);
       }
       const next = await repo.list({ kind: "all", q: "", sort: "new", pinned: true, limit: 1, offset: 1, now });
       expect(next).toEqual([]);
-    } finally {
-      sqlite.close();
-    }
-  });
-});
-
-describe("PackageRepo.recordInstall", () => {
-  it("increments the package and a daily rollup without writing a raw install event", async () => {
-    const sqlite = new DatabaseSync(":memory:");
-    sqlite.exec(registrySchema);
-    sqlite.prepare(
-      `INSERT INTO packages (kind, scope_handle, name, slug, source, latest_version, status, publisher_id, created_at, updated_at)
-       VALUES ('skill', 'publisher', 'devkit', 'publisher/devkit', 'https://github.com/o/r', '0.1.0', 'active', 7, ?1, ?1)`,
-    ).run(now);
-    const db = {
-      prepare(sql: string) {
-        const statement = sqlite.prepare(sql);
-        const wrapper: any = {
-          bind(...values: unknown[]) { wrapper.values = values; return wrapper; },
-          values: [] as unknown[],
-          async first() { return statement.get(...wrapper.values); },
-          async all() { return { results: statement.all(...wrapper.values) }; },
-          async run() { return { meta: { changes: Number(statement.run(...wrapper.values).changes) } }; },
-        };
-        return wrapper;
-      },
-      async batch(statements: Array<{ values?: unknown[]; first?: () => Promise<unknown>; run?: () => Promise<unknown> }>) {
-        const results = [] as Array<{ results: unknown[] }>;
-        for (const statement of statements) {
-          if (statement.first) results.push({ results: [await statement.first()] });
-          else {
-            await statement.run?.();
-            results.push({ results: [] });
-          }
-        }
-        return results;
-      },
-    } as unknown as D1Database;
-    try {
-      const result = await new PackageRepo(db).recordInstall("publisher/devkit", now);
-      expect(result).toMatchObject({ count: 1, scopeHandle: "publisher" });
-      expect(sqlite.prepare("SELECT count FROM package_install_daily").get()).toEqual({ count: 1 });
-      expect(sqlite.prepare("SELECT COUNT(*) AS count FROM events WHERE type = 'install'").get()).toEqual({ count: 0 });
     } finally {
       sqlite.close();
     }
