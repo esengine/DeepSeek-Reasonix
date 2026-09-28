@@ -34,26 +34,9 @@ func Save(scope Scope, projectRoot string, settings Settings) error {
 	if path == "" {
 		return fmt.Errorf("no project workspace to save project hooks into")
 	}
-	hooks := map[Event][]HookConfig{}
-	for event, list := range settings.Hooks {
-		if !validEvent(event) {
-			return fmt.Errorf("unknown hook event %q", event)
-		}
-		for _, cfg := range list {
-			cmd := strings.TrimSpace(cfg.Command)
-			if cmd == "" {
-				// An empty command is a half-finished row, not a hook. Writing it
-				// would produce a file Load silently skips and Inspect flags.
-				continue
-			}
-			hooks[event] = append(hooks[event], HookConfig{
-				Match:       strings.TrimSpace(cfg.Match),
-				Command:     NormalizeCommand(cmd),
-				Description: strings.TrimSpace(cfg.Description),
-				Timeout:     cfg.Timeout,
-				Cwd:         strings.TrimSpace(cfg.Cwd),
-			})
-		}
+	hooks, err := normalizedHooks(settings)
+	if err != nil {
+		return err
 	}
 	raw := map[string]json.RawMessage{}
 	if body, err := fileencoding.ReadFileUTF8(path); err == nil {
@@ -75,6 +58,32 @@ func Save(scope Scope, projectRoot string, settings Settings) error {
 		return err
 	}
 	return fileutil.AtomicWriteFile(path, body, 0o644)
+}
+
+// normalizedHooks is the hooks block Save writes for settings.
+func normalizedHooks(settings Settings) (map[Event][]HookConfig, error) {
+	hooks := map[Event][]HookConfig{}
+	for event, list := range settings.Hooks {
+		if !validEvent(event) {
+			return nil, fmt.Errorf("unknown hook event %q", event)
+		}
+		for _, cfg := range list {
+			cmd := strings.TrimSpace(cfg.Command)
+			if cmd == "" {
+				// An empty command is a half-finished row, not a hook. Writing it
+				// would produce a file Load silently skips and Inspect flags.
+				continue
+			}
+			hooks[event] = append(hooks[event], HookConfig{
+				Match:       strings.TrimSpace(cfg.Match),
+				Command:     NormalizeCommand(cmd),
+				Description: strings.TrimSpace(cfg.Description),
+				Timeout:     cfg.Timeout,
+				Cwd:         strings.TrimSpace(cfg.Cwd),
+			})
+		}
+	}
+	return hooks, nil
 }
 
 // DryRunResult is one trial invocation, in the terms the user asked the question

@@ -63,6 +63,7 @@ func inProcessKernel(t *testing.T) *tui.Client {
 	for _, k := range []string{"HOME", "USERPROFILE", "XDG_CONFIG_HOME"} {
 		t.Setenv(k, home)
 	}
+	t.Setenv("AppData", filepath.Join(home, "AppData"))
 	t.Setenv("REASONIX_CREDENTIALS_STORE", "file")
 	t.Cleanup(func() {
 		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
@@ -79,9 +80,6 @@ tool_approval = "ask"
 [agent]
 system_prompt = "BASE"
 
-[sandbox]
-bash = "off"
-
 [codegraph]
 enabled = false
 
@@ -91,6 +89,18 @@ kind = "` + kind + `"
 model = "x"
 `
 	if err := os.WriteFile(filepath.Join(dir, "reasonix.toml"), []byte(cfg), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	// Unjailed so the run does not depend on the host having an OS sandbox;
+	// only the user's own config may say so.
+	userConfig := config.UserConfigPath()
+	if err := os.MkdirAll(filepath.Dir(userConfig), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := (config.Roots{}).ApproveWorkspacePrograms(dir); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(userConfig, []byte("[sandbox]\nbash = \"off\"\n"), 0o600); err != nil {
 		t.Fatal(err)
 	}
 	bc := serve.NewBroadcaster()

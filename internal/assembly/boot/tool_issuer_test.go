@@ -87,6 +87,7 @@ name = "test-model"
 kind = %q
 model = "x"
 `, name))
+	approveWorkspace(t, dir)
 	sink := &issuerSink{}
 	ctrl, err := Build(context.Background(), Options{Sink: sink})
 	if err != nil {

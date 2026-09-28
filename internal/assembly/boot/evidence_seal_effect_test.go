@@ -84,6 +84,7 @@ name = "test-model"
 kind = "boot-evidence-seal"
 model = "x"
 `)
+	approveWorkspace(t, dir)
 	sink := &bundleAuditSink{}
 	ctrl, err := Build(context.Background(), Options{Sink: sink, HeadlessApprovalMode: control.ToolApprovalAuto})
 	if err != nil {
@@ -231,6 +232,7 @@ name = "test-model"
 kind = "boot-claim-only"
 model = "x"
 `)
+	approveWorkspace(t, dir)
 	sink := &bundleAuditSink{}
 	ctrl, err := Build(context.Background(), Options{Sink: sink, HeadlessApprovalMode: control.ToolApprovalAuto})
 	if err != nil {

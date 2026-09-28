@@ -51,6 +51,7 @@ name = "test-model"
 kind = "boot-thinking"
 model = "x"
 `)
+	approveWorkspace(t, dir)
 	var mu sync.Mutex
 	var framed int64
 	ctrl, err := Build(context.Background(), Options{Sink: event.FuncSink(func(e event.Event) {

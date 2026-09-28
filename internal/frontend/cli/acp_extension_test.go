@@ -164,6 +164,7 @@ api_key_env = "REASONIX_TEST_KEY"
 `), 0o644); err != nil {
 		t.Fatal(err)
 	}
+	approveWorkspace(t, dir)
 }
 
 func runACPTurnAssistant(t *testing.T, ctrl interface {

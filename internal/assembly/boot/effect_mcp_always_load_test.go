@@ -61,6 +61,7 @@ func TestEffectAlwaysLoadedMCPToolsReachTheProviderSchema(t *testing.T) {
 		t.Chdir(dir)
 		server := deployMCPServer(t, "")
 		writeFile(t, dir, "reasonix.toml", alwaysLoadConfig(server.URL, alwaysLoad))
+		approveWorkspace(t, dir)
 		approveProjectServer(t, dir, "ops")
 
 		// The first session has no cached schema: nothing to show yet, so the

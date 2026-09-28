@@ -50,6 +50,7 @@ responses_mode = "stateless"
 api_key_env = %q
 `, e.Name, e.Name, kind, e.BaseURL, srv.URL, srv.URL, tomlList(e.Models), tomlList(e.VisionModels),
 		e.Default, e.ContextWindow, tomlList(e.SupportedEfforts), e.DefaultEffort, e.PresetID, e.PresetVersion, e.APIKeyEnv))
+	approveWorkspace(t, dir)
 	ctrl, err := Build(context.Background(), Options{Sink: event.Discard})
 	if err != nil {
 		t.Fatalf("Build: %v", err)

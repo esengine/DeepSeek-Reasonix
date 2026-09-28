@@ -77,6 +77,7 @@ name = "test-model"
 kind = "boot-mcp-mutation"
 model = "x"
 `)
+		approveWorkspace(t, dir)
 		target := ""
 		if writes {
 			target = filepath.Join(dir, "deploy.log")

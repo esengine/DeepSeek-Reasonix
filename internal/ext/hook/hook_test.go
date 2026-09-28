@@ -16,6 +16,7 @@ import (
 	fileencoding "reasonix/internal/base/fileutil/encoding"
 	"reasonix/internal/base/fileutil/encoding/encodingtest"
 	"reasonix/internal/base/testenv"
+	"reasonix/internal/contract/config"
 	"reasonix/internal/ext/pluginpkg"
 	"reasonix/internal/safety/sandbox"
 )
@@ -93,12 +94,27 @@ func hookSettingsWithCommand(t *testing.T, event Event, command string) string {
 	return string(body)
 }
 
-func TestLoadProjectHooksByDefault(t *testing.T) {
+func approveProjectHooks(t *testing.T, opts LoadOptions) {
+	t.Helper()
+	program, ok := ProjectHooksProgram(opts.ProjectRoot)
+	if !ok {
+		return
+	}
+	if err := config.NewProjectProgramStore(reasonixHomeForOptions(opts)).Approve(opts.ProjectRoot, program); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestLoadProjectHooksOnceApproved(t *testing.T) {
 	home := testenv.TempDir(t)
 	proj := testenv.TempDir(t)
 	writeSettings(t, proj, sampleSettings)
 	writeSettings(t, home, `{"hooks":{"PostToolUse":[{"command":"echo g"}]}}`)
 
+	if got := Load(LoadOptions{ProjectRoot: proj, HomeDir: home}); len(got) != 1 || got[0].Scope != ScopeGlobal {
+		t.Fatalf("unapproved project hooks loaded: %+v", got)
+	}
+	approveProjectHooks(t, LoadOptions{ProjectRoot: proj, HomeDir: home})
 	got := Load(LoadOptions{ProjectRoot: proj, HomeDir: home})
 	if len(got) != 3 {
 		t.Fatalf("default load should include project + global, got %d", len(got))
@@ -114,6 +130,7 @@ func TestLoadUserScopesSkipProjectHooks(t *testing.T) {
 	writeSettings(t, proj, sampleSettings)
 	writeSettings(t, home, `{"hooks":{"PostToolUse":[{"command":"echo g"}]}}`)
 
+	approveProjectHooks(t, LoadOptions{ProjectRoot: proj, HomeDir: home})
 	got := Load(LoadOptions{ProjectRoot: proj, HomeDir: home, Scopes: UserScopes})
 	if len(got) != 1 || got[0].Scope != ScopeGlobal || got[0].Command != "echo g" {
 		t.Fatalf("user-scope load = %+v, want only the global hook", got)
@@ -143,7 +160,8 @@ func TestLoadDecodesUTF8BOMProjectSettings(t *testing.T) {
 	body := `{"hooks":{"PreToolUse":[{"match":"bash","command":"echo pre"}]}}`
 	writeHookTestBytes(t, ProjectSettingsPath(proj), encodingtest.MustEncode(body, fileencoding.UTF8BOM))
 
-	got := Load(LoadOptions{HomeDir: home, ProjectRoot: proj, Trusted: true})
+	approveProjectHooks(t, LoadOptions{HomeDir: home, ProjectRoot: proj})
+	got := Load(LoadOptions{HomeDir: home, ProjectRoot: proj})
 	if len(got) != 1 {
 		t.Fatalf("Load hooks = %+v, want one decoded project hook", got)
 	}
@@ -168,7 +186,8 @@ func TestLoadNormalizesQuotedNodeEvalHooksPerProject(t *testing.T) {
 	writeSettings(t, projB, hookSettingsWithCommand(t, PreToolUse, bad))
 
 	for _, project := range []string{projA, projB, projB} {
-		hooks := Load(LoadOptions{HomeDir: home, ProjectRoot: project, Trusted: true})
+		approveProjectHooks(t, LoadOptions{HomeDir: home, ProjectRoot: project})
+		hooks := Load(LoadOptions{HomeDir: home, ProjectRoot: project})
 		if len(hooks) != 1 {
 			t.Fatalf("Load(%q) hooks = %+v, want one", project, hooks)
 		}

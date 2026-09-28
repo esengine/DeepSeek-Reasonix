@@ -14,6 +14,7 @@ import (
 	"time"
 
 	"reasonix/internal/base/fileutil"
+	"reasonix/internal/base/hostwrite"
 )
 
 var bwrapUsability sync.Map // resolved executable path -> bool
@@ -127,13 +128,8 @@ func bwrapBaseArgs(spec Spec) []string {
 		// Re-allow network by removing the network namespace.
 		args = args[1:] // drop --unshare-net
 	}
-	for _, root := range spec.WriteRoots {
+	for _, root := range bwrapWriteBinds(spec) {
 		args = append(args, "--bind", root, root)
-	}
-	if !spec.MinimalWrites {
-		for _, root := range linuxWriteDirs() {
-			args = append(args, "--bind", root, root)
-		}
 	}
 	args = append(args, bwrapGitMetadataArgs(spec)...)
 	args = append(args, bwrapForbidReadArgs(spec.ForbidReadRoots)...)
@@ -272,31 +268,54 @@ func bwrapExecutableMountArgs(args []string) []string {
 	return append(out, "--ro-bind", source, destination)
 }
 
-func linuxWriteDirs() []string {
-	dirs := []string{}
-	if td := os.TempDir(); td != "" && td != "/tmp" {
-		dirs = append(dirs, td)
-	}
-	if home, err := os.UserHomeDir(); err == nil {
-		for _, sub := range []string{".cache", ".cargo", ".npm", "go"} {
-			dirs = append(dirs, filepath.Join(home, sub))
+// bwrapWriteBinds are the resolved directories bound writable. Only outermost
+// ones are bound, and only ones that exist: bwrap refuses a missing source, and
+// host /tmp is replaced by the tmp mount rather than re-exposed.
+func bwrapWriteBinds(spec Spec) []string {
+	var dirs []string
+	for _, d := range planWriteRoots(spec, backendWriteDirs(spec)).dirs {
+		if d != "/tmp" && dirExists(d) {
+			dirs = append(dirs, d)
 		}
 	}
-	seen := map[string]bool{}
+	return collapseNested(dirs)
+}
+
+// collapseNested drops every directory inside another one in dirs, keeping
+// the order of the rest. A bind of a nested root adds nothing its ancestor
+// does not grant, and its path runs through a directory a confined command
+// can rewrite between the check and the mount.
+func collapseNested(dirs []string) []string {
 	out := make([]string, 0, len(dirs))
-	for _, d := range dirs {
-		abs, err := filepath.Abs(d)
-		if err != nil {
-			continue
+	for i, d := range dirs {
+		nested := false
+		for j, other := range dirs {
+			if i != j && fold(other) != fold(d) && pathWithin(fold(other), fold(d)) {
+				nested = true
+				break
+			}
 		}
-		if real, err := filepath.EvalSymlinks(abs); err == nil {
-			abs = real
+		if !nested {
+			out = append(out, d)
 		}
-		if abs == "/tmp" || seen[abs] || !dirExists(abs) {
-			continue
+	}
+	return out
+}
+
+// backendWriteDirs are the toolchain caches bound beside the caller's roots.
+func backendWriteDirs(spec Spec) []string {
+	if spec.MinimalWrites {
+		return nil
+	}
+	return linuxWriteDirs()
+}
+
+func linuxWriteDirs() []string {
+	var out []string
+	for _, d := range hostwrite.Dirs() {
+		if dirExists(d) {
+			out = append(out, d)
 		}
-		seen[abs] = true
-		out = append(out, abs)
 	}
 	return out
 }

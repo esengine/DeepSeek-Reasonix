@@ -147,6 +147,7 @@ func buildReviewSubagentRegistry(reviewSk skill.Skill, cfg *config.Config, root 
 	bashSpec := sandbox.Spec{
 		Mode:            cfg.BashMode(),
 		WriteRoots:      writeRoots,
+		Pins:            sandbox.PinWriteRoots(writeRoots),
 		ForbidReadRoots: forbidReadRoots,
 		Network:         cfg.Sandbox.Network,
 		HostAuthorities: sandbox.ParseAuthorities(cfg.Sandbox.HostAuthorities),

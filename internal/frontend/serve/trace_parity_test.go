@@ -94,6 +94,10 @@ func runTrace(t *testing.T, tc traceCase) traceReading {
 	if err := os.WriteFile(filepath.Join(dir, "reasonix.toml"), []byte(toml), 0o600); err != nil {
 		t.Fatalf("write config: %v", err)
 	}
+	// The home this run states is where the person's approval would be.
+	if _, err := config.RootsForHome(dir).ApproveWorkspacePrograms(dir); err != nil {
+		t.Fatal(err)
+	}
 
 	bc := NewBroadcaster()
 	// Subscribed before the turn and before the server: a client that connected

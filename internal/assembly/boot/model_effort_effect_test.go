@@ -65,6 +65,7 @@ func effortsSentFor(t *testing.T, model, level string) []any {
 	srv := httptest.NewServer(endpoint)
 	t.Cleanup(srv.Close)
 	writeFile(t, dir, "reasonix.toml", fmt.Sprintf(perModelRelayTOML, model, srv.URL, level))
+	approveWorkspace(t, dir)
 
 	ctrl, err := Build(context.Background(), Options{Sink: event.Discard})
 	if err != nil {

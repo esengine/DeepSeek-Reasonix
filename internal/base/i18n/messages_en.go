@@ -629,6 +629,7 @@ Usage:
   reasonix session show|status <machine-session-id> --json [--dir PATH]  query one redacted session
   reasonix session recovery [<machine-session-id>] --json [--dir PATH]  query redacted recovery state
   reasonix hook list|status --json [--dir PATH]         inspect redacted hook state
+  reasonix trust [--dir PATH] [--yes|--revoke]          review and approve programs this project runs
   reasonix task list|show|status|events|stop|cancel|monitor|tmux --json [--dir PATH]
                                                          inspect or control redacted tasks
   reasonix upgrade [--check] [--force]                   update to the latest official release (also: reasonix update)

@@ -15,10 +15,7 @@ func TestRebuildKeepsTheBrowserSession(t *testing.T) {
 	isolateConfigHome(t)
 	workspace := robustTempDir(t)
 	t.Chdir(workspace)
-	writeFile(t, workspace, "reasonix.toml", `
-[browser]
-executable = "/nonexistent/chrome"
-`)
+	writeUserConfig(t, "[browser]\nexecutable = \"/nonexistent/chrome\"\n")
 	fenceBootTestHistoryCatalog(t)
 	old, err := Build(context.Background(), Options{WorkspaceRoot: workspace, Sink: event.Discard, Stderr: os.Stderr})
 	if err != nil {

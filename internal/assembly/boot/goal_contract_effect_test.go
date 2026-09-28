@@ -48,6 +48,7 @@ kind = "boot-goal-contract-effect"
 model = "x"
 context_window = 32000
 `)
+	approveWorkspace(t, dir)
 
 	ctrl, err := Build(context.Background(), Options{Sink: event.Discard})
 	if err != nil {
@@ -133,6 +134,7 @@ kind = "boot-goal-accum-effect"
 model = "x"
 context_window = 32000
 `)
+	approveWorkspace(t, dir)
 
 	ctrl, err := Build(context.Background(), Options{Sink: event.Discard})
 	if err != nil {

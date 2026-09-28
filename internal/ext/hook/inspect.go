@@ -65,6 +65,11 @@ func Inspect(opts LoadOptions) Inspection {
 		if s := readSettingsRaw(p); s != nil {
 			appendInspectEntries(&out, s, ScopeProject, p)
 		}
+		if _, pending := PendingProjectHooks(opts); pending {
+			for i := range out.Entries {
+				out.Entries[i].Issues = append(out.Entries[i].Issues, IssueAwaitingApproval)
+			}
+		}
 	}
 
 	// Plugin hooks (enabled packages only — same as Load).

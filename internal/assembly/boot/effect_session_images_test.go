@@ -98,6 +98,7 @@ model = "x"
 api_key = "test-key"
 vision = true
 `)
+	approveWorkspace(t, dir)
 	server := screenshotMCPServer(t)
 	t.Cleanup(server.Close)
 	build := func() *control.Controller {

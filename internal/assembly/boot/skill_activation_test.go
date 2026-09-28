@@ -104,6 +104,7 @@ name = "test-model"
 kind = "activation-inflight"
 model = "x"
 `)
+	approveWorkspace(t, dir)
 
 	ctrl, err := Build(context.Background(), Options{Sink: event.Discard})
 	if err != nil {

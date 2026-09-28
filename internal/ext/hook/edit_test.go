@@ -41,7 +41,9 @@ func TestSaveKeepsUnrelatedSettings(t *testing.T) {
 	if string(doc["theme"]) != `"dark"` {
 		t.Errorf("an unrelated setting was dropped: theme = %s", doc["theme"])
 	}
-	loaded := Load(LoadOptions{ProjectRoot: root, HomeDir: testenv.TempDir(t)})
+	home := testenv.TempDir(t)
+	approveProjectHooks(t, LoadOptions{ProjectRoot: root, HomeDir: home})
+	loaded := Load(LoadOptions{ProjectRoot: root, HomeDir: home})
 	var events []Event
 	for _, h := range loaded {
 		if h.Scope == ScopeProject {

@@ -2,6 +2,10 @@
 package boot
 
 import (
+	"errors"
+	"fmt"
+
+	"reasonix/internal/contract/config"
 	"reasonix/internal/contract/event"
 	"reasonix/internal/ext/hook"
 )
@@ -14,19 +18,33 @@ func hookNoticeEvent(n hook.Notice) event.Event {
 	return event.Event{
 		Kind:   event.Notice,
 		Level:  event.LevelWarn,
-		Code:   hookNoticeCode(n.Decision),
+		Code:   hookNoticeCode(n),
 		Text:   n.Text,
 		Detail: n.Detail,
 	}
 }
 
-func hookNoticeCode(decision hook.Decision) string {
-	switch decision {
+func hookNoticeCode(n hook.Notice) string {
+	if errors.Is(n.Refusal, config.ErrProjectProgramChanged) {
+		return event.NoticeCodeProjectProgramChanged
+	}
+	switch n.Decision {
 	case hook.DecisionBlock:
 		return event.NoticeCodeHookBlocked
 	case hook.DecisionError:
 		return event.NoticeCodeHookFailed
 	default:
 		return event.NoticeCodeHookWarned
+	}
+}
+
+// projectHooksHeldEvent says which project hooks did not load and how to let them.
+func projectHooksHeldEvent(p config.ProjectProgram) event.Event {
+	return event.Event{
+		Kind:   event.Notice,
+		Level:  event.LevelWarn,
+		Code:   event.NoticeCodeProjectProgramsAwaitingApproval,
+		Text:   "This project's hooks are off until you approve them.",
+		Detail: fmt.Sprintf("%s declares: %s\nRun `reasonix trust` in this workspace to review and approve them; any later change needs approval again.", p.Name, p.Detail),
 	}
 }

@@ -55,6 +55,9 @@ func systemPromptFromBuild(t *testing.T, home, ws, kind string) string {
 	t.Helper()
 	rec := &effectRecordingProvider{}
 	provider.Register(kind, func(provider.Config) (provider.Provider, error) { return rec, nil })
+	if _, err := config.RootsForHome(home).ApproveWorkspacePrograms(ws); err != nil {
+		t.Fatal(err)
+	}
 
 	ctrl, err := Build(context.Background(), Options{
 		Sink:          event.Discard,

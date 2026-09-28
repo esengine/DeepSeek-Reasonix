@@ -27,6 +27,7 @@ name = "executor"
 kind = "boot-token-profile-test"
 model = "executor-model"
 `)
+	approveWorkspace(t, dir)
 
 	var notices []string
 	sink := event.FuncSink(func(e event.Event) {

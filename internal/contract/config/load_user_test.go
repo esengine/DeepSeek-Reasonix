@@ -20,7 +20,7 @@ func TestLoadUserConfigReadOnlyIgnoresTheWorkingDirectoryProject(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if merged.Tools.Search.RgPath != "tools/rg" {
+	if merged.Tools.Search.Engine != "rg" {
 		t.Fatalf("precondition: merged load should read the project file, got %+v", merged.Tools.Search)
 	}
 

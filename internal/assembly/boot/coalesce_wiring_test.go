@@ -64,6 +64,7 @@ name = "test-model"
 kind = "boot-coalesce-test"
 model = "x"
 `)
+	approveWorkspace(t, dir)
 
 	sink := &coalesceRecordSink{}
 	ctrl, err := Build(context.Background(), Options{Sink: sink})

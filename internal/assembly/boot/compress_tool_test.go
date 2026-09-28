@@ -23,6 +23,7 @@ name = "test-model"
 kind = "boot-token-profile-test"
 model = "x"
 `)
+	approveWorkspace(t, dir)
 	registerBootTokenProfileTestProvider()
 	for _, mode := range []string{"", "light", "economy", "balanced", "full", "delivery"} {
 		t.Run(firstNonEmpty(mode, "default"), func(t *testing.T) {

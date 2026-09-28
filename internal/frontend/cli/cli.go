@@ -137,6 +137,8 @@ func RunWithBuildInfo(args []string, info BuildInfo) int {
 	case "hook", "hooks":
 		termrender.ConfigureThemeFromConfig()
 		return hookCommand(rest)
+	case "trust":
+		return trustCommand(rest)
 	case "task":
 		termrender.ConfigureThemeFromConfig()
 		return taskCommand(rest)

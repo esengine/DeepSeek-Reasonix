@@ -40,6 +40,9 @@ func (r Roots) userConfigPath() string {
 
 func (r Roots) userConfigDir() string { return r.Home() }
 
+// UserConfigPath is this binding's user config.toml.
+func (r Roots) UserConfigPath() string { return r.userConfigPath() }
+
 // Home is the Reasonix home this binding resolves to.
 func (r Roots) Home() string { return r.Dir(RootHome) }
 

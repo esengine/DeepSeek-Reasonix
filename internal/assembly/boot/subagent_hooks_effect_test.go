@@ -118,12 +118,16 @@ name = "test-model"
 kind = "`+subagentHookProviderKind+`"
 model = "x"
 `)
+			approveWorkspace(t, dir)
 			writeFile(t, dir, "secret.txt", roleHookSecret+"\n")
 			if strings.HasSuffix(delegationTool, "skill") {
 				writeFile(t, dir, ".reasonix/skills/hook-probe.md", "---\ndescription: inspect a file\nrunAs: subagent\nallowed-tools: read_file\n---\nRead the requested file.")
 			}
 			settings, logPath := denyReadSettings(t, dir)
 			if err := hook.Save(hook.ScopeProject, dir, settings); err != nil {
+				t.Fatal(err)
+			}
+			if err := hook.ApproveSavedProjectHooks(hook.LoadOptions{ProjectRoot: dir}, settings); err != nil {
 				t.Fatal(err)
 			}
 

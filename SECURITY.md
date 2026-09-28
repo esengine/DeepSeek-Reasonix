@@ -68,10 +68,10 @@ The following are normally treated as trusted local/operator-controlled inputs
 unless another bug lets an untrusted actor supply them:
 
 - CLI arguments and text typed directly by the local user.
-- Project configuration files intentionally loaded from the current workspace.
+- The user's own configuration under the Reasonix home directory.
 - Explicit `@path` references supplied by the local user to attach local files.
-- MCP servers, language servers, hooks, and slash commands installed or enabled
-  by the local user.
+- MCP servers, language servers, hooks, and slash commands installed, enabled,
+  or approved by the local user.
 - Provider base URLs and model names configured by the local user.
 
 The following can be security issues when reachable by an untrusted actor or
@@ -89,6 +89,56 @@ when they bypass the intended boundary:
   tools, or access a project workspace.
 - Trusting unverified update artifacts, plugin definitions, or downloaded
   binaries.
+
+## Project Configuration
+
+Files that arrive with a workspace are untrusted input: `reasonix.toml`,
+`.reasonix/settings.json`, `.mcp.json` and the project `.env`. Cloning a
+repository is not a decision to trust its author, so these files may narrow
+what the user configured and never widen it.
+
+| Setting | What a workspace file may do |
+| --- | --- |
+| `sandbox.bash` | Move `off` to `enforce`, never back |
+| `sandbox.network` | Move `true` to `false`, never back |
+| `sandbox.forbid_read`, `sandbox.denied_domains` | Add to the user's lists |
+| `sandbox.allow_write`, `sandbox.workspace_root` | Apply only when they resolve inside the workspace, symlinks followed; `${VAR}` in any sandbox path expands from the process environment only |
+| `sandbox.host_authorities`, a user's `sandbox.allowed_domains` | Nothing |
+| `permissions.deny`, `permissions.ask` | Add to the user's rules |
+| `permissions.mode`, `permissions.allow`, `permissions.allow_dynamic_bash` | Nothing |
+| `desktop.default_tool_approval_mode` | Nothing |
+| `[network]` proxy settings | Nothing |
+| `[[providers]]`, `tools.system_one` endpoints | Declare them; they stay out of use until approved, and model settings naming them fall back to the user's |
+
+An "always allow" answer, or extra write access, granted in a workspace is
+stored under the Reasonix home, not in the workspace.
+
+Programs a workspace names for the host to run stay off until the user
+approves them for that workspace:
+
+- Hooks, language server commands, `tools.search.rg_path`,
+  `tools.shell.path`, `[browser]` and `tools.system_one.laya.python` are
+  approved with `reasonix trust`, or for hooks by saving them from the hooks
+  editor.
+- An approval is stored under the Reasonix home with a digest of the
+  declaration and of the workspace files it names; any change needs approval
+  again. Approvals and grants belong to one workspace folder.
+- Hooks and language servers are checked against their approval again before
+  each start, and refused if a file they name changed, appeared or now
+  resolves elsewhere.
+- A single program path (`tools.shell.path`, `tools.search.rg_path`,
+  `[browser]`, `laya.python`) may not point into the workspace, an
+  `allow_write` root, a temporary directory or a toolchain cache the bash jail
+  leaves writable, and may not climb with `..`; its approval covers the
+  program file's content.
+- `tools.system_one.laya.local` is read from the user's configuration only.
+- Without an interactive frontend they stay off.
+- MCP servers a workspace declares stay off until the user enables them for
+  that workspace.
+
+A project value that is not applied is reported as a load warning with the
+reason. A way for workspace files to widen any of the above without the
+user's approval is a security issue.
 
 ## `@` File References
 

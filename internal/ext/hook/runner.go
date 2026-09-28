@@ -459,6 +459,7 @@ type Notice struct {
 	Decision Decision
 	Text     string
 	Detail   string
+	Refusal  error // the host's reason for not running the hook, when it had one
 }
 
 // DescribeOutcome turns a non-pass outcome into what a person needs: which hook,
@@ -466,7 +467,7 @@ type Notice struct {
 // headline — the reader wrote it, and sixty clipped characters of their own
 // script identify it worse than the event and the label they gave it do.
 func DescribeOutcome(o Outcome) Notice {
-	return Notice{Decision: o.Decision, Text: outcomeHeadline(o), Detail: outcomeDetail(o)}
+	return Notice{Decision: o.Decision, Text: outcomeHeadline(o), Detail: outcomeDetail(o), Refusal: o.Refusal}
 }
 
 // outcomeHeadline is English by contract: frontends localize by Code and fall

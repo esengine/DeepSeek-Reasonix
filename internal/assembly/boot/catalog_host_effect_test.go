@@ -54,6 +54,7 @@ model = "deepseek-v4-pro"
 base_url = "`+baseURL+`"
 price = { cache_hit = 0.15, input = 4.5, output = 13.5, currency = "¥" }
 `)
+	approveWorkspace(t, dir)
 
 	var mu sync.Mutex
 	var seen *pricing.CostQuote

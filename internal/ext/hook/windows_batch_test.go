@@ -161,6 +161,7 @@ func TestProjectAndGlobalExtensionlessHooksUseAutoResolvedBash(t *testing.T) {
 	reasonixHome := filepath.Join(home, ".reasonix")
 	writeHookTestFile(t, filepath.Join(reasonixHome, "settings.json"), `{"hooks":{"SessionStart":[{"command":"hooks/global-start"}]}}`)
 
+	approveProjectHooks(t, LoadOptions{HomeDir: home, ProjectRoot: workspace})
 	hooks := Load(LoadOptions{HomeDir: home, ProjectRoot: workspace})
 	if len(hooks) != 2 {
 		t.Fatalf("hooks = %+v, want project and global hooks", hooks)

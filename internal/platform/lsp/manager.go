@@ -24,6 +24,8 @@ type ServerSpec struct {
 	LanguageID  string
 	Extensions  []string
 	InstallHint string
+	// Verify, when set, runs before each start; an error refuses the start.
+	Verify func() error
 }
 
 // Manager owns the lazily-spawned language servers for a session. Servers start
@@ -155,6 +157,11 @@ func (m *Manager) resolve(path string) (*client, error) {
 }
 
 func (m *Manager) spawn(_ string, spec ServerSpec) (*client, error) {
+	if spec.Verify != nil {
+		if err := spec.Verify(); err != nil {
+			return nil, err
+		}
+	}
 	bin, err := exec.LookPath(spec.Command)
 	if err != nil {
 		return nil, &notInstalledError{command: spec.Command, hint: spec.InstallHint}

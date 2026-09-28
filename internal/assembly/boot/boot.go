@@ -72,7 +72,10 @@ func effectivePlannerModel(cfg *config.Config, opts Options) string {
 }
 
 func rememberPermissionRule(roots config.Roots, workspaceRoot, rule string) control.RememberResult {
-	path := rememberPermissionConfigPath(roots, workspaceRoot)
+	if strings.TrimSpace(workspaceRoot) != "" {
+		return rememberProjectPermissionRule(roots, workspaceRoot, rule)
+	}
+	path := roots.UserConfigPath()
 	result := control.RememberResult{Rule: strings.TrimSpace(rule), Path: path}
 	unlock, err := config.LockConfigFileEdits(path)
 	if err != nil {
@@ -107,16 +110,25 @@ func rememberPermissionRule(roots config.Roots, workspaceRoot, rule string) cont
 	return result
 }
 
-func rememberPermissionConfigPath(roots config.Roots, workspaceRoot string) string {
-	workspaceRoot = strings.TrimSpace(workspaceRoot)
-	if workspaceRoot != "" {
-		return config.ProjectConfigPath(workspaceRoot)
+// rememberProjectPermissionRule files a workspace's "always" under the user's
+// home: the checkout's reasonix.toml cannot grant allow rules, since a clone
+// could have written them.
+func rememberProjectPermissionRule(roots config.Roots, workspaceRoot, rule string) control.RememberResult {
+	store := config.NewProjectGrantStore(roots.Home())
+	result := control.RememberResult{Rule: strings.TrimSpace(rule), Path: store.Path()}
+	result.Err = store.Update(workspaceRoot, func(g config.ProjectGrant) (config.ProjectGrant, error) {
+		if coveredBy := coveredPermissionRule(g.Allow, result.Rule); coveredBy != "" {
+			result.CoveredBy = coveredBy
+			return g, nil
+		}
+		g.Allow = append(pruneCoveredPermissionRules(g.Allow, result.Rule), result.Rule)
+		return g, nil
+	})
+	if result.Err != nil {
+		slog.Warn("persist project permission rule", "rule", rule, "err", result.Err)
 	}
-	path := roots.SourcePathForRoot(".")
-	if path == "" {
-		path = config.ProjectConfigPath(".") // match Config.Save() fallback
-	}
-	return path
+	result.Saved = result.Err == nil && result.CoveredBy == ""
+	return result
 }
 
 func coveredPermissionRule(rules []string, rule string) string {

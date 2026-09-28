@@ -53,6 +53,7 @@ name = "strong"
 kind = "boot-advisor-strong"
 model = "pro"
 `)
+	approveWorkspace(t, dir)
 }
 
 // advisor_model puts advise on the provider-visible surface; the call reaches

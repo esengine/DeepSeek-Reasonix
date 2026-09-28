@@ -29,6 +29,9 @@ type Spec struct {
 	// plus any configured extras). Platforms may add command-scoped temp/cache
 	// roots so builds and package managers keep working without broad writes.
 	WriteRoots []string
+	// Pins are the identities WriteRoots had when the session established
+	// them; a root that no longer has its identity is not made writable.
+	Pins *WriteRootPins
 	// ReadRoots are explicit host paths a Windows AppContainer may read. The
 	// macOS/Linux profiles already mount the host read-only by default.
 	ReadRoots []string

@@ -37,6 +37,7 @@ name = "model-b"
 kind = "switch-effect-b"
 model = "y"
 `)
+	approveWorkspace(t, dir)
 
 	ctx := context.Background()
 	serving, err := BuildRuntime(ctx, Options{Sink: event.Discard})

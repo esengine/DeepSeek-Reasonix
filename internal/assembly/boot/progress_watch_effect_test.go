@@ -180,6 +180,7 @@ kind = "`+kind+`"
 model = "x"
 `+window+`
 `)
+	approveWorkspace(t, dir)
 	sink := &watchSink{}
 	ctrl, err := Build(context.Background(), Options{Sink: sink})
 	if err != nil {

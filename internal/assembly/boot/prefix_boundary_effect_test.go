@@ -37,6 +37,7 @@ model = "x"
 			t.Fatalf("make repository marker: %v", err)
 		}
 	}
+	approveWorkspace(t, dir)
 	skillDir := filepath.Join(dir, ".reasonix", "skills", skillName)
 	if err := os.MkdirAll(skillDir, 0o755); err != nil {
 		t.Fatalf("make skill dir: %v", err)

@@ -77,11 +77,9 @@ func TestEffectWriteOutsideWorkspaceNamesTheWriteScope(t *testing.T) {
 			writeScopeMu.Lock()
 			writeScopeCurrent = rec
 			writeScopeMu.Unlock()
+			writeUserConfig(t, "[sandbox]\nbash = \""+bash+"\"\n")
 			writeFile(t, dir, "reasonix.toml", `
 default_model = "test-model"
-
-[sandbox]
-bash = "`+bash+`"
 
 [codegraph]
 enabled = false
@@ -91,6 +89,7 @@ name = "test-model"
 kind = "boot-write-scope"
 model = "x"
 `)
+			approveWorkspace(t, dir)
 			var mu sync.Mutex
 			var results []event.Tool
 			sink := event.FuncSink(func(e event.Event) {

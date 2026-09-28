@@ -64,7 +64,7 @@ func gitMetadataForSpec(spec Spec) gitMetadata {
 	if len(writable) == 0 {
 		return gitMetadata{}
 	}
-	return gitMetadataWithin(spec.WriteRoots, writable)
+	return gitMetadataWithin(planWriteRoots(spec, backendWriteDirs(spec)).callers, writable)
 }
 
 // gitMetadataWithin resolves the repository git itself would discover from

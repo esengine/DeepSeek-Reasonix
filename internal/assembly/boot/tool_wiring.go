@@ -32,6 +32,9 @@ func loadHooks(opts Options, roots config.Roots, root string, shell sandbox.Shel
 		resolved = opts.ReuseAssembly.Hooks
 	} else {
 		resolved = hook.Load(hook.LoadOptions{ProjectRoot: root, ReasonixHomeDir: roots.Home()})
+		if held, pending := hook.PendingProjectHooks(hook.LoadOptions{ProjectRoot: root, ReasonixHomeDir: roots.Home()}); pending {
+			sink.Emit(projectHooksHeldEvent(held))
+		}
 	}
 	return resolved, hook.NewRunner(resolved, root, hook.NewDefaultSpawner(hookRuntime(shell)), func(n hook.Notice) { sink.Emit(hookNoticeEvent(n)) })
 }

@@ -38,6 +38,7 @@ name = "test-model"
 kind = "boot-token-profile-test"
 model = "x"
 `)
+			approveWorkspace(t, dir)
 
 			ctrl, err := Build(context.Background(), Options{
 				Sink:                 event.Discard,

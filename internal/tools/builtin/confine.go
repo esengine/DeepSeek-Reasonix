@@ -90,6 +90,7 @@ func RebindBashWriteRoots(tl tool.Tool, roots []string) (tool.Tool, bool) {
 	}
 	spec := b.sb
 	spec.WriteRoots = rs
+	spec.Pins = spec.Pins.With(rs)
 	// Sub-agent claims are strict capability boundaries. Do not add the normal
 	// build-cache and temporary-directory allowances outside the claimed roots.
 	spec.MinimalWrites = true

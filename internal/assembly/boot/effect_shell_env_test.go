@@ -9,6 +9,7 @@ import (
 	"sync"
 	"testing"
 
+	"reasonix/internal/contract/config"
 	"reasonix/internal/contract/provider"
 	"reasonix/internal/session/control"
 )
@@ -57,6 +58,9 @@ func TestEffectShellEnvReachesTheBashTool(t *testing.T) {
 	home := robustTempDir(t)
 	dir := robustTempDir(t)
 	writeFile(t, home, "config.toml", `
+[sandbox]
+bash = "off"
+
 [tools.shell.env]
 REASONIX_SHELL_ENV_PROBE = "from-config"
 `)
@@ -74,9 +78,6 @@ REASONIX_SHELL_ENV_PROBE = "from-config"
 	writeFile(t, dir, "reasonix.toml", `
 default_model = "test-model"
 
-[sandbox]
-bash = "off"
-
 [codegraph]
 enabled = false
 
@@ -85,6 +86,7 @@ name = "test-model"
 kind = "boot-shell-env"
 model = "x"
 `)
+	_, _ = config.RootsForHome(home).ApproveWorkspacePrograms(dir)
 	ctrl, err := Build(context.Background(), Options{Home: home, WorkspaceRoot: dir})
 	if err != nil {
 		t.Fatalf("Build: %v", err)

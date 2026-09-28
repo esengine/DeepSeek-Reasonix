@@ -127,6 +127,7 @@ name = "`+role+`"
 kind = "boot-role-hooks"
 model = "`+role+`-model"
 `)
+	approveWorkspace(t, dir)
 }
 
 // assertRoleReadBlocked holds the effect at both boundaries: the hook process
@@ -174,6 +175,9 @@ func TestEffectPreToolUseCoversPlannerReads(t *testing.T) {
 				if err := hook.Save(hook.ScopeProject, dir, settings); err != nil {
 					t.Fatal(err)
 				}
+				if err := hook.ApproveSavedProjectHooks(hook.LoadOptions{ProjectRoot: dir}, settings); err != nil {
+					t.Fatal(err)
+				}
 			}
 
 			ctrl, err := Build(context.Background(), Options{Sink: event.Discard, SessionDir: filepath.Join(dir, "sessions")})
@@ -206,6 +210,9 @@ func TestEffectPreToolUseCoversGuardianReads(t *testing.T) {
 	writeRoleHookConfig(t, dir, `guardian_model = "guardian"`, "guardian")
 	settings, logPath := denyReadSettings(t, dir)
 	if err := hook.Save(hook.ScopeProject, dir, settings); err != nil {
+		t.Fatal(err)
+	}
+	if err := hook.ApproveSavedProjectHooks(hook.LoadOptions{ProjectRoot: dir}, settings); err != nil {
 		t.Fatal(err)
 	}
 
@@ -246,6 +253,9 @@ func TestEffectPlannerHookSessionFollowsRotation(t *testing.T) {
 	writeRoleHookConfig(t, dir, `planner_model = "planner"`, "planner")
 	settings, logPath := denyReadSettings(t, dir)
 	if err := hook.Save(hook.ScopeProject, dir, settings); err != nil {
+		t.Fatal(err)
+	}
+	if err := hook.ApproveSavedProjectHooks(hook.LoadOptions{ProjectRoot: dir}, settings); err != nil {
 		t.Fatal(err)
 	}
 	ctrl, err := Build(context.Background(), Options{Sink: event.Discard, SessionDir: filepath.Join(dir, "sessions")})

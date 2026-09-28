@@ -106,7 +106,12 @@ func registerLSP(reg *tool.Registry, cfg *config.Config, root string) *lsp.Manag
 	if !cfg.LSP.Enabled {
 		return nil
 	}
-	mgr := lsp.NewManager(root, LSPSpecs(cfg.LSP))
+	specs := LSPSpecs(cfg.LSP)
+	for lang, spec := range specs {
+		spec.Verify = cfg.ProjectProgramVerifier(config.ProjectProgramLSP, lang)
+		specs[lang] = spec
+	}
+	mgr := lsp.NewManager(root, specs)
 	for _, t := range lsp.Tools(mgr) {
 		if t != nil {
 			reg.Add(t)

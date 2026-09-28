@@ -147,6 +147,7 @@ kind = "boot-screenshot"
 model = "x"
 vision = true
 `)
+	approveWorkspace(t, dir)
 	server := screenshotMCPServer(t)
 	defer server.Close()
 

@@ -77,6 +77,7 @@ kind = "`+kind+`"
 model = "x"
 `+providerConfig+`
 `)
+	approveWorkspace(t, dir)
 	h := &projectionHarness{t: t, dir: dir, kind: kind, rec: rec, events: &projectionEventLog{}}
 	h.build()
 	t.Cleanup(func() {

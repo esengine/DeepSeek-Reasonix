@@ -27,6 +27,7 @@ name = "test-model"
 kind = "boot-token-profile-test"
 model = "x"
 `)
+	approveWorkspace(t, dir)
 
 	req, _ := captureTokenProfileSurface(t, "")
 	visible := toolSchemaNames(req.Tools)

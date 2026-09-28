@@ -208,6 +208,7 @@ model = "x"
 `)
 	writeFile(t, dir, "REASONIX.md", "## Reasonix host checks\n\n- verify: git diff --check\n- sensitive: auth/**\n")
 	gitInDir(t, dir, "init", "-q")
+	approveWorkspace(t, dir)
 
 	build := func() *control.Controller {
 		ctrl, err := Build(context.Background(), Options{Sink: event.Discard, AgentPreset: AgentPresetDelivery})

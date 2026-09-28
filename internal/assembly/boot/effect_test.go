@@ -91,6 +91,7 @@ name = "test-model"
 kind = "`+kind+`"
 model = "x"
 `)
+	approveWorkspace(t, dir)
 
 	ctrl, err := Build(context.Background(), Options{Sink: event.Discard, TokenMode: tokenMode, Ablation: arm})
 	if err != nil {
@@ -229,6 +230,7 @@ name = "test-model"
 kind = "boot-budget-gate"
 model = "x"
 `)
+	approveWorkspace(t, dir)
 
 	ctrl, err := Build(context.Background(), Options{Sink: event.Discard})
 	if err != nil {
@@ -277,6 +279,7 @@ name = "test-model"
 kind = "boot-token-budget-gate"
 model = "x"
 `)
+	approveWorkspace(t, dir)
 
 	ctrl, err := Build(context.Background(), Options{Sink: event.Discard})
 	if err != nil {
@@ -397,6 +400,10 @@ func TestEffectSpilledOutputSurvivesTheReadBack(t *testing.T) {
 	provider.Register("boot-spill-follow", func(provider.Config) (provider.Provider, error) {
 		return rec, nil
 	})
+	// The subject is the pointer, not the jail: a host without an OS sandbox
+	// refuses bash fail-closed, and the parked output this test follows never
+	// exists. CI runners vary on whether bwrap is installed.
+	writeUserConfig(t, "[sandbox]\nbash = \"off\"\n")
 	writeFile(t, dir, "reasonix.toml", `
 default_model = "test-model"
 
@@ -406,17 +413,12 @@ system_prompt = "BASE"
 [codegraph]
 enabled = false
 
-# The subject is the pointer, not the jail: a host without an OS sandbox
-# refuses bash fail-closed, and the parked output this test follows never
-# exists. CI runners vary on whether bwrap is installed.
-[sandbox]
-bash = "off"
-
 [[providers]]
 name = "test-model"
 kind = "boot-spill-follow"
 model = "x"
 `)
+	approveWorkspace(t, dir)
 
 	ctrl, err := Build(context.Background(), Options{Sink: event.Discard})
 	if err != nil {
@@ -573,6 +575,7 @@ func TestEffectRememberDoesNotMoveTheCachedPrefix(t *testing.T) {
 	dir := robustTempDir(t)
 	t.Chdir(dir)
 	writeFile(t, dir, "reasonix.toml", effectProbeConfig)
+	approveWorkspace(t, dir)
 	writeFile(t, dir, "REASONIX.md", "Project rule: keep the prefix stable.")
 
 	indexPath := filepath.Join(memory.StoreFor(config.MemoryUserDir(), dir).Dir, "MEMORY.md")
@@ -648,11 +651,9 @@ func TestEffectDesktopOpensInTheConfiguredApprovalMode(t *testing.T) {
 			t.Setenv("XDG_CONFIG_HOME", filepath.Join(home, ".config"))
 			t.Setenv("REASONIX_HOME", filepath.Join(home, ".reasonix"))
 			t.Chdir(dir)
+			writeFile(t, filepath.Join(home, ".reasonix"), "config.toml", "[desktop]\ndefault_tool_approval_mode = \"yolo\"\n")
 			writeFile(t, dir, "reasonix.toml", `
 default_model = "test-model"
-
-[desktop]
-default_tool_approval_mode = "yolo"
 
 [[providers]]
 name = "test-model"
@@ -661,6 +662,7 @@ base_url = "https://example.invalid"
 model = "x"
 api_key_env = "REASONIX_TEST_KEY_UNSET"
 `)
+			approveWorkspace(t, dir)
 			ctrl, err := Build(context.Background(), Options{StatsSource: tc.source})
 			if err != nil {
 				t.Fatal(err)

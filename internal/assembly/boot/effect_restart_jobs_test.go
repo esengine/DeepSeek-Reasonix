@@ -75,15 +75,13 @@ func runJobsArm(t *testing.T, kind string, restart bool) string {
 	t.Chdir(dir)
 	rec := &restartJobsProvider{}
 	provider.Register(kind, func(provider.Config) (provider.Provider, error) { return rec, nil })
+	// What is measured is how a job's end is attributed, not where it runs.
+	writeUserConfig(t, "[sandbox]\nbash = \"off\"\n")
 	writeFile(t, dir, "reasonix.toml", `
 default_model = "test-model"
 
 [agent]
 system_prompt = "BASE"
-
-# What is measured is how a job's end is attributed, not where it runs.
-[sandbox]
-bash = "off"
 
 [codegraph]
 enabled = false
@@ -93,6 +91,7 @@ name = "test-model"
 kind = "`+kind+`"
 model = "x"
 `)
+	approveWorkspace(t, dir)
 	build := func() *control.Controller {
 		ctrl, err := Build(context.Background(), Options{Sink: event.Discard})
 		if err != nil {

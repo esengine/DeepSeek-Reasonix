@@ -565,6 +565,7 @@ var ChineseTraditional = Messages{
   reasonix session show|status <machine-session-id> --json [--dir PATH]  查詢單一脫敏會話
   reasonix session recovery [<machine-session-id>] --json [--dir PATH]  查詢脫敏復原狀態
   reasonix hook list|status --json [--dir PATH]         檢視脫敏 Hook 狀態
+  reasonix trust [--dir PATH] [--yes|--revoke]          審閱並核准本專案要執行的程式
   reasonix task list|show|status|events|stop|cancel|monitor|tmux --json [--dir PATH]
                                                          檢視或控制脫敏 Task
   reasonix upgrade [--check] [--force]                   更新到最新正式版（別名：reasonix update）

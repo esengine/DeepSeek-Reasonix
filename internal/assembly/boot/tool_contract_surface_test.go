@@ -92,6 +92,7 @@ name = "test-model"
 kind = "boot-token-profile-test"
 model = "x"
 `)
+			approveWorkspace(t, dir)
 
 			req, entries := captureTokenProfileSurface(t, tc.tokenMode)
 			assertSegmentedSurface(t, tc.name, toolSchemaNames(req.Tools))

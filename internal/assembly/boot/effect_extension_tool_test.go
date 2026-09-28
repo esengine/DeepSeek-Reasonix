@@ -50,6 +50,7 @@ name = "test-model"
 kind = "`+kind+`"
 model = "x"
 `)
+	approveWorkspace(t, dir)
 	ctrl, err := Build(context.Background(), Options{Sink: event.Discard})
 	if err != nil {
 		t.Fatalf("Build: %v", err)

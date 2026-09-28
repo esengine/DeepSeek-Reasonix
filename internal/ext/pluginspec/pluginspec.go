@@ -110,7 +110,7 @@ func ApplyIsolation(spec *plugin.Spec, workspaceRoot string, opts Options) {
 		readerRoots = appendUniquePaths(readerRoots, home)
 	}
 	spec.Sandbox = sandbox.Spec{
-		Mode: "enforce", WriteRoots: writerRoots,
+		Mode: "enforce", WriteRoots: writerRoots, Pins: sandbox.PinWriteRoots(writerRoots),
 		ReadRoots:              readerRoots,
 		AppContainerWriteRoots: append([]string(nil), writerRoots...),
 		ForbidReadRoots:        append([]string(nil), opts.ForbidReadRoots...),

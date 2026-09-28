@@ -27,6 +27,7 @@ name = "test-model"
 kind = "boot-token-profile-test"
 model = "x"
 `)
+	approveWorkspace(t, dir)
 	registerBootTokenProfileTestProvider()
 
 	var surfaces [][]string
@@ -93,6 +94,7 @@ name = "test-model"
 kind = "boot-token-profile-test"
 model = "x"
 `)
+	approveWorkspace(t, dir)
 	registerBootTokenProfileTestProvider()
 	args, _ := json.Marshal(map[string]any{
 		"action":        "call",

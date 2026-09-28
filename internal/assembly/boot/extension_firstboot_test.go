@@ -47,6 +47,7 @@ base_url = "https://example.invalid"
 model = "x"
 api_key_env = "REASONIX_TEST_KEY_UNSET"
 `, pluginRef))
+	approveWorkspace(t, dir)
 }
 
 // installProviderFake installs the fake sidecar in provider mode under name.

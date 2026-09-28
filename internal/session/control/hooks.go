@@ -29,6 +29,12 @@ func (c *Controller) SaveHooks(scope hook.Scope, settings hook.Settings) error {
 	if err := hook.Save(scope, c.workspaceRoot, settings); err != nil {
 		return err
 	}
+	// Saving from the editor is the person choosing these hooks as written.
+	if scope == hook.ScopeProject {
+		if err := hook.ApproveSavedProjectHooks(hook.LoadOptions{ProjectRoot: c.workspaceRoot}, settings); err != nil {
+			return err
+		}
+	}
 	c.hooks.Replace(hook.Load(hook.LoadOptions{ProjectRoot: c.workspaceRoot}))
 	return nil
 }

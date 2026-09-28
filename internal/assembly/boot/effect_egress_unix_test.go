@@ -76,6 +76,7 @@ name = "test-model"
 kind = "boot-egress"
 model = "x"
 `)
+	approveWorkspace(t, dir)
 	ctrl, err := Build(context.Background(), Options{Sink: event.Discard})
 	if err != nil {
 		t.Fatalf("Build: %v", err)
@@ -136,6 +137,7 @@ name = "test-model"
 kind = "boot-egress-ask"
 model = "x"
 `)
+	approveWorkspace(t, dir)
 	var ctrlRef atomic.Pointer[control.Controller]
 	asked := make(chan event.Approval, 4)
 	sink := event.FuncSink(func(e event.Event) {

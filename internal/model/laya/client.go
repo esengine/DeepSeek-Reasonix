@@ -52,8 +52,13 @@ func (c LocalClient) Evaluate(ctx context.Context, request typesafe.Request) (ty
 	return result, nil
 }
 
+// localBridge drops the working directory `python -c` puts first on sys.path,
+// so `import laya` never resolves to a module a checkout or a jailed command
+// placed where the host happens to run.
 const localBridge = `
 import json, sys
+if sys.path and sys.path[0] == "":
+    del sys.path[0]
 from laya import Router
 
 request = json.load(sys.stdin)

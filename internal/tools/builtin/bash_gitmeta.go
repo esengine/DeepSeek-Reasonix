@@ -22,9 +22,10 @@ func refuseLinkedGitMetadata(wrapped bool, spec sandbox.Spec, lease *sessiontemp
 }
 
 // confinementNotes appends the host's account of what the sandbox refused a
-// foreground command: protected Git metadata, then egress.
+// foreground command: protected Git metadata, dropped write roots, then egress.
 func (b bash) confinementNotes(out string, wrapped bool, egressToken string) string {
 	out = appendSessionDataHint(out, b.gitMetadataNote(out, wrapped))
+	out = appendSessionDataHint(out, b.writeRootNote(wrapped))
 	return appendSessionDataHint(out, b.egressNote(egressToken))
 }
 

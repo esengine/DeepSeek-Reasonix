@@ -67,6 +67,8 @@ func buildBrowserEffect(t *testing.T, browserSection string, rounds []func(strin
 	rec := &browserScriptProvider{rounds: rounds}
 	kind := "boot-browser-" + strings.ToLower(t.Name())
 	provider.Register(kind, func(provider.Config) (provider.Provider, error) { return rec, nil })
+	// The browser a run launches is the user's to name, never a checkout's.
+	writeUserConfig(t, browserSection+"\n")
 	writeFile(t, dir, "reasonix.toml", `
 default_model = "test-model"
 tool_approval = "yolo"
@@ -77,13 +79,12 @@ system_prompt = "BASE"
 [codegraph]
 enabled = false
 
-`+browserSection+`
-
 [[providers]]
 name = "test-model"
 kind = "`+kind+`"
 model = "x"
 `)
+	approveWorkspace(t, dir)
 	ctrl, err := Build(context.Background(), Options{Sink: event.Discard})
 	if err != nil {
 		t.Fatalf("Build: %v", err)

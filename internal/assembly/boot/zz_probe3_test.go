@@ -42,6 +42,7 @@ func TestZZDebtOnFailedTurn(t *testing.T) {
 	prov := &failingOnceProvider{}
 	provider.Register("fail-once", func(provider.Config) (provider.Provider, error) { return prov, nil })
 	writeFile(t, dir, "reasonix.toml", "\ndefault_model = \"test-model\"\n\n[agent]\nsystem_prompt = \"BASE\"\n\n[[providers]]\nname = \"test-model\"\nkind = \"fail-once\"\nmodel = \"x\"\n")
+	approveWorkspace(t, dir)
 	ctrl, err := Build(context.Background(), Options{Sink: event.Discard})
 	if err != nil {
 		t.Fatal(err)

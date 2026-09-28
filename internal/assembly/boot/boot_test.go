@@ -84,6 +84,7 @@ base_url = "https://example.invalid"
 model = "x"
 api_key_env = "REASONIX_TEST_KEY_UNSET"
 `)
+	approveWorkspace(t, dir)
 	writeFile(t, dir, "REASONIX.md", "Project rule: always run go vet before committing.")
 
 	ctrl, err := Build(context.Background(), Options{}) // RequireKey false: no network/key needed
@@ -137,6 +138,7 @@ base_url = "https://example.invalid"
 model = "x"
 api_key_env = "REASONIX_TEST_KEY_UNSET"
 `)
+	approveWorkspace(t, dir)
 	sessionDir := filepath.Join(robustTempDir(t), "sessions")
 	called := false
 	ctrl, err := Build(context.Background(), Options{
@@ -199,6 +201,7 @@ name = "test-model"
 kind = "boot-retrieval-tool-test"
 model = "x"
 `)
+	approveWorkspace(t, dir)
 
 	sessionDir := filepath.Join(robustTempDir(t), "sessions")
 	if err := os.MkdirAll(sessionDir, 0o755); err != nil {
@@ -492,6 +495,7 @@ name = "test-model"
 kind = "boot-subagent-test"
 model = "x"
 `)
+	approveWorkspace(t, dir)
 
 	ctrl, err := Build(context.Background(), Options{Sink: event.Discard})
 	if err != nil {
@@ -551,6 +555,7 @@ name = "test-model"
 kind = "boot-subagent-test"
 model = "x"
 `)
+	approveWorkspace(t, dir)
 
 	sessionDir := filepath.Join(robustTempDir(t), "desktop-workspace-sessions")
 	ctrl, err := Build(context.Background(), Options{Sink: event.Discard, SessionDir: sessionDir})
@@ -599,6 +604,7 @@ name = "test-model"
 kind = "boot-subagent-test"
 model = "x"
 `)
+	approveWorkspace(t, dir)
 
 	ctrl, err := Build(context.Background(), Options{Sink: event.Discard})
 	if err != nil {
@@ -654,6 +660,7 @@ base_url = "https://vision.example.invalid"
 model = "x"
 vision = true
 `)
+	approveWorkspace(t, dir)
 	png, err := base64.StdEncoding.DecodeString("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg==")
 	if err != nil {
 		t.Fatalf("decode test png: %v", err)
@@ -809,6 +816,7 @@ name = "test-model"
 kind = "boot-subagent-test"
 model = "x"
 `)
+	approveWorkspace(t, dir)
 
 	ctrl, err := Build(context.Background(), Options{Sink: event.Discard})
 	if err != nil {
@@ -851,6 +859,7 @@ name = "test-model"
 kind = "boot-subagent-test"
 model = "x"
 `)
+	approveWorkspace(t, dir)
 
 	ctrl, err := Build(context.Background(), Options{Sink: event.Discard})
 	if err != nil {
@@ -945,6 +954,7 @@ name = "test-model"
 kind = "boot-token-profile-test"
 model = "x"
 `)
+	approveWorkspace(t, dir)
 	writeFile(t, dir, ".reasonix/skills/wskill.md",
 		"---\ndescription: writer skill\nrunAs: subagent\nallowed-tools: bash, read_file, write_file\n---\nwriter body")
 	writeFile(t, dir, ".reasonix/skills/roskill.md",
@@ -1178,6 +1188,7 @@ name = "test-model"
 kind = "boot-headless-test"
 model = "x"
 `)
+	approveWorkspace(t, dir)
 
 	ctrl, err := Build(context.Background(), Options{Sink: event.Discard})
 	if err != nil {
@@ -1306,6 +1317,7 @@ name = "test-model"
 kind = "boot-headless-write-test"
 model = "x"
 `)
+		approveWorkspace(t, dir)
 
 		ctrl, err := Build(context.Background(), Options{Sink: event.Discard, HeadlessApprovalMode: mode})
 		if err != nil {
@@ -1375,6 +1387,7 @@ base_url = "https://example.invalid"
 model = "x"
 api_key_env = "REASONIX_TEST_KEY_UNSET"
 `)
+	approveWorkspace(t, dir)
 
 	ctrl, err := Build(context.Background(), Options{WorkspaceRoot: dir, Sink: event.Discard})
 	if err != nil {
@@ -1436,6 +1449,7 @@ name = "test-model"
 kind = "boot-headless-write-test"
 model = "x"
 `)
+	approveWorkspace(t, dir)
 
 	ctrl, err := Build(context.Background(), Options{Sink: event.Discard})
 	if err != nil {
@@ -1822,6 +1836,7 @@ base_url = "https://example.invalid"
 model = "x"
 api_key_env = "REASONIX_TEST_KEY_UNSET"
 `)
+	approveWorkspace(t, dir)
 
 	sessionDir := filepath.Join(robustTempDir(t), "desktop-workspace-sessions")
 	ctrl, err := Build(context.Background(), Options{SessionDir: sessionDir})
@@ -1857,6 +1872,7 @@ base_url = "https://example.invalid"
 model = "x"
 api_key_env = "REASONIX_TEST_KEY_UNSET"
 `)
+	approveWorkspace(t, dir)
 	writeFile(t, dir, ".reasonix/skills/projskill.md", "---\ndescription: a project skill\n---\nplaybook")
 
 	ctrl, err := Build(context.Background(), Options{})
@@ -1935,6 +1951,7 @@ base_url = "https://example.invalid"
 model = "x"
 api_key_env = "REASONIX_TEST_KEY_UNSET"
 `)
+	approveWorkspace(t, dir)
 	pluginRoot := filepath.Join(reasonixHome, "plugins", "superpowers")
 	writeFile(t, pluginRoot, pluginpkg.CodexManifest, `{"name":"superpowers","skills":"skills"}`)
 	writeFile(t, pluginRoot, "skills/plan/SKILL.md", "---\ndescription: Plugin plan\n---\nPlugin body")
@@ -2011,6 +2028,7 @@ name = "test-model"
 kind = "boot-token-profile-test"
 model = "x"
 `)
+	approveWorkspace(t, dir)
 	writeFile(t, dir, ".reasonix/skills/projskill.md", "---\ndescription: a project skill\n---\nplaybook")
 
 	defaultReq := firstTokenProfileRequest(t, "")
@@ -2052,6 +2070,7 @@ name = "test-model"
 kind = "boot-token-profile-test"
 model = "x"
 `)
+	approveWorkspace(t, dir)
 
 	defaultReq := firstTokenProfileRequest(t, "")
 	balancedReq := firstTokenProfileRequest(t, "balanced")
@@ -2110,6 +2129,7 @@ name = "test-model"
 kind = "boot-token-profile-test"
 model = "x"
 `)
+	approveWorkspace(t, dir)
 
 	fullReq := firstTokenProfileRequest(t, TokenModeFull)
 	deliveryReq := firstTokenProfileRequest(t, TokenModeDelivery)
@@ -2175,6 +2195,7 @@ name = "executor"
 kind = "boot-token-profile-test"
 model = "executor-model"%s
 `, plannerLine, plannerProvider))
+		approveWorkspace(t, dir)
 	}
 
 	writeConfig(false)
@@ -2223,6 +2244,7 @@ name = "test-model"
 kind = "boot-token-profile-test"
 model = "x"
 `)
+			approveWorkspace(t, dir)
 
 			req, _ := captureTokenProfileSurface(t, tokenMode)
 			sys := systemMessage(req.Messages)
@@ -2254,6 +2276,7 @@ name = "test-model"
 kind = "boot-token-profile-test"
 model = "x"
 `)
+	approveWorkspace(t, dir)
 
 	req, _ := captureTokenProfileSurface(t, "")
 	sys := systemMessage(req.Messages)
@@ -2283,6 +2306,7 @@ name = "test-model"
 kind = "boot-token-profile-test"
 model = "x"
 `)
+	approveWorkspace(t, dir)
 
 	req, _ := captureTokenProfileSurface(t, "")
 	if sys := systemMessage(req.Messages); strings.Contains(sys, "## Environment") {
@@ -2318,6 +2342,7 @@ name = "test-model"
 kind = "boot-token-profile-test"
 model = "x"
 `)
+	approveWorkspace(t, dir)
 
 	req, _ := captureTokenProfileSurface(t, "")
 	if _, err := os.Stat(ranPath); !os.IsNotExist(err) {
@@ -2347,6 +2372,7 @@ name = "test-model"
 kind = "boot-token-profile-test"
 model = "x"
 `)
+	approveWorkspace(t, dir)
 
 	fullReq, _ := captureTokenProfileSurface(t, TokenModeFull)
 	economyReq, _ := captureTokenProfileSurface(t, TokenModeEconomy)
@@ -2404,6 +2430,7 @@ model = "x"
 name = "mockmcp"
 command = "reasonix-missing-mockmcp"
 `)
+	approveWorkspace(t, dir)
 	writeFile(t, dir, ".reasonix/skills/projskill.md", "---\ndescription: a project skill\n---\nplaybook")
 
 	ctrl, err := Build(context.Background(), Options{Sink: event.Discard, TokenMode: TokenModeEconomy})
@@ -2463,6 +2490,7 @@ name = "test-model"
 kind = "boot-token-profile-test"
 model = "x"
 `)
+	approveWorkspace(t, dir)
 	registerBootTokenProfileTestProvider()
 
 	cases := []struct {
@@ -2543,6 +2571,7 @@ name = "test-model"
 kind = "boot-token-profile-test"
 model = "x"
 `)
+	approveWorkspace(t, dir)
 	registerBootTokenProfileTestProvider()
 	var base []string
 	for _, mode := range []string{TokenModeEconomy, TokenModeFull, TokenModeDelivery, "light", "balanced"} {
@@ -2602,6 +2631,7 @@ name = "test-model"
 kind = "boot-token-profile-test"
 model = "x"
 `)
+	approveWorkspace(t, dir)
 	registerBootTokenProfileTestProvider()
 	raw, _ := json.Marshal(map[string]any{
 		"action":        "call",
@@ -2656,6 +2686,7 @@ name = "test-model"
 kind = "boot-token-profile-test"
 model = "x"
 `)
+	approveWorkspace(t, dir)
 
 	var notices []event.Event
 	sink := event.FuncSink(func(e event.Event) {
@@ -2758,6 +2789,7 @@ base_url = "https://example.invalid"
 model = "x"
 api_key_env = "REASONIX_TEST_KEY_UNSET"
 `)
+	approveWorkspace(t, dir)
 	writeFile(t, dir, ".reasonix/skills/projskill.md", "---\ndescription: a project skill\n---\nplaybook")
 
 	ctrl, err := Build(context.Background(), Options{})
@@ -2811,6 +2843,7 @@ base_url = "https://example.invalid"
 model = "x"
 api_key_env = "REASONIX_TEST_KEY_UNSET"
 `, excluded))
+	approveWorkspace(t, dir)
 
 	ctrl, err := Build(context.Background(), Options{})
 	if err != nil {
@@ -2855,6 +2888,7 @@ base_url = "https://example.invalid"
 model = "x"
 api_key_env = "REASONIX_TEST_KEY_UNSET"
 `)
+	approveWorkspace(t, dir)
 
 	ctrl, err := Build(context.Background(), Options{})
 	if err != nil {
@@ -2899,6 +2933,7 @@ base_url = "https://example.invalid"
 model = "x"
 api_key_env = "REASONIX_TEST_KEY_UNSET"
 `)
+	approveWorkspace(t, dir)
 
 	ctrl, err := Build(context.Background(), Options{})
 	if err != nil {
@@ -2928,6 +2963,7 @@ base_url = "https://example.invalid"
 model = "x"
 api_key_env = "REASONIX_TEST_KEY_UNSET"
 `)
+	approveWorkspace(t, dir)
 
 	ctrl, err := Build(context.Background(), Options{})
 	if err != nil {
@@ -2991,41 +3027,59 @@ func shellQuoteForTest(s string) string {
 	return "'" + strings.ReplaceAll(s, "'", "'\\''") + "'"
 }
 
-func TestRememberPermissionRuleUsesWorkspaceRoot(t *testing.T) {
+// rememberHome isolates the Reasonix home the project allow record lives in.
+func rememberHome(t *testing.T) string {
+	t.Helper()
 	home := robustTempDir(t)
-	t.Setenv("HOME", home)
-	t.Setenv("USERPROFILE", home)
-	t.Setenv("XDG_CONFIG_HOME", filepath.Join(home, ".config"))
-	t.Setenv("AppData", filepath.Join(home, "AppData"))
+	t.Setenv("REASONIX_HOME", home)
+	return home
+}
 
+func projectAllowRules(t *testing.T, workspace string) []string {
+	t.Helper()
+	grant, err := config.NewProjectGrantStore(config.Roots{}.Home()).Grant(workspace)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return grant.Allow
+}
+
+// A workspace's "always" is the user's decision, so it lands under their home
+// and never in a reasonix.toml a checkout ships.
+func TestRememberPermissionRuleUsesWorkspaceRoot(t *testing.T) {
+	rememberHome(t)
 	cwd := robustTempDir(t)
 	workspace := robustTempDir(t)
 	t.Chdir(cwd)
-	writeFile(t, cwd, "reasonix.toml", `
-[permissions]
-allow = ["Bash(cwd*)"]
-`)
-	writeFile(t, workspace, "reasonix.toml", `
-[permissions]
-allow = ["Bash(workspace*)"]
-`)
+	writeFile(t, workspace, "reasonix.toml", "[permissions]\nallow = [\"Bash(workspace*)\"]\n")
+	approveWorkspace(t, workspace)
 
 	const rule = "Bash(go test ./...)"
-	rememberPermissionRule(config.Roots{}, workspace, rule)
-
-	cwdCfg := config.LoadForEdit(filepath.Join(cwd, "reasonix.toml"))
-	if hasPermissionRule(cwdCfg.Permissions.Allow, rule) {
-		t.Fatalf("remembered rule was written to cwd config: %v", cwdCfg.Permissions.Allow)
+	res := rememberPermissionRule(config.Roots{}, workspace, rule)
+	if !res.Saved || res.Err != nil {
+		t.Fatalf("remember result = %+v, want saved", res)
 	}
-	workspaceCfg := config.LoadForEdit(filepath.Join(workspace, "reasonix.toml"))
-	if !hasPermissionRule(workspaceCfg.Permissions.Allow, rule) {
-		t.Fatalf("remembered rule missing from workspace config: %v", workspaceCfg.Permissions.Allow)
+	if !hasPermissionRule(projectAllowRules(t, workspace), rule) {
+		t.Fatalf("remembered rule missing from the workspace record: %v", projectAllowRules(t, workspace))
+	}
+	if hasPermissionRule(projectAllowRules(t, cwd), rule) {
+		t.Fatal("remembered rule was filed under the process cwd")
+	}
+	if got := config.LoadForEdit(filepath.Join(workspace, "reasonix.toml")); hasPermissionRule(got.Permissions.Allow, rule) {
+		t.Fatalf("remembered rule was written into the checkout: %v", got.Permissions.Allow)
+	}
+	cfg, err := config.LoadForRootReadOnly(workspace)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !hasPermissionRule(cfg.Permissions.Allow, rule) || hasPermissionRule(cfg.Permissions.Allow, "Bash(workspace*)") {
+		t.Fatalf("effective allow = %v, want the remembered rule and not the checkout's", cfg.Permissions.Allow)
 	}
 }
 
 func TestRememberPermissionRulePreservesPermissionPolicyAndComments(t *testing.T) {
-	workspace := robustTempDir(t)
-	writeFile(t, workspace, "reasonix.toml", `
+	home := rememberHome(t)
+	writeFile(t, home, "config.toml", `
 [permissions]
 # Keep this rationale with the policy.
 mode = "deny"
@@ -3039,12 +3093,12 @@ legacy_preference = "keep"
 `)
 
 	const rule = "Edit(src/app.go)"
-	result := rememberPermissionRule(config.Roots{}, workspace, rule)
+	result := rememberPermissionRule(config.Roots{}, "", rule)
 	if result.Err != nil || !result.Saved {
 		t.Fatalf("remember result = %+v, want saved without error", result)
 	}
 
-	path := filepath.Join(workspace, "reasonix.toml")
+	path := filepath.Join(home, "config.toml")
 	got := config.LoadForEdit(path)
 	if got.Permissions.Mode != "deny" {
 		t.Errorf("permissions.mode = %q, want deny", got.Permissions.Mode)
@@ -3079,8 +3133,8 @@ legacy_preference = "keep"
 }
 
 func TestRememberPermissionRuleIgnoresTOMLExampleInMultilineSystemPrompt(t *testing.T) {
-	workspace := robustTempDir(t)
-	writeFile(t, workspace, "reasonix.toml", `[agent]
+	home := rememberHome(t)
+	writeFile(t, home, "config.toml", `[agent]
 system_prompt = """
 Example only:
 [permissions]
@@ -3094,13 +3148,12 @@ deny = ["Bash(rm:*)"]
 `)
 
 	const rule = "Edit(src/app.go)"
-	result := rememberPermissionRule(config.Roots{}, workspace, rule)
+	result := rememberPermissionRule(config.Roots{}, "", rule)
 	if result.Err != nil || !result.Saved {
 		t.Fatalf("remember result = %+v, want saved without error", result)
 	}
 
-	path := filepath.Join(workspace, "reasonix.toml")
-	got, err := config.LoadForEditReadOnlyStrict(path)
+	got, err := config.LoadForEditReadOnlyStrict(filepath.Join(home, "config.toml"))
 	if err != nil {
 		t.Fatalf("updated config does not parse: %v", err)
 	}
@@ -3113,14 +3166,14 @@ deny = ["Bash(rm:*)"]
 }
 
 func TestRememberPermissionRuleRejectsMalformedConfigWithoutWriting(t *testing.T) {
-	workspace := robustTempDir(t)
-	path := filepath.Join(workspace, "reasonix.toml")
+	home := rememberHome(t)
+	path := filepath.Join(home, "config.toml")
 	original := []byte("[permissions]\nmode = \"deny\"\nallow = [\n")
 	if err := os.WriteFile(path, original, 0o644); err != nil {
 		t.Fatal(err)
 	}
 
-	result := rememberPermissionRule(config.Roots{}, workspace, "Edit(src/app.go)")
+	result := rememberPermissionRule(config.Roots{}, "", "Edit(src/app.go)")
 	if result.Err == nil || result.Saved {
 		t.Fatalf("remember result = %+v, want parse error without save", result)
 	}
@@ -3133,9 +3186,26 @@ func TestRememberPermissionRuleRejectsMalformedConfigWithoutWriting(t *testing.T
 	}
 }
 
-func TestRememberPermissionRuleSerializesConcurrentWriters(t *testing.T) {
+func TestRememberPermissionRuleRejectsAnUnreadableRecordWithoutWriting(t *testing.T) {
+	home := rememberHome(t)
 	workspace := robustTempDir(t)
-	writeFile(t, workspace, "reasonix.toml", "[permissions]\nallow = []\n")
+	path := filepath.Join(home, "project-grants.json")
+	original := []byte("{")
+	if err := os.WriteFile(path, original, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	result := rememberPermissionRule(config.Roots{}, workspace, "Edit(src/app.go)")
+	if !errors.Is(result.Err, config.ErrProjectGrantsUnavailable) || result.Saved {
+		t.Fatalf("remember result = %+v, want ErrProjectGrantsUnavailable without save", result)
+	}
+	if got, _ := os.ReadFile(path); !bytes.Equal(got, original) {
+		t.Fatalf("unreadable record changed: %s", got)
+	}
+}
+
+func TestRememberPermissionRuleSerializesConcurrentWriters(t *testing.T) {
+	rememberHome(t)
+	workspace := robustTempDir(t)
 
 	const writers = 32
 	start := make(chan struct{})
@@ -3158,18 +3228,18 @@ func TestRememberPermissionRuleSerializesConcurrentWriters(t *testing.T) {
 		}
 	}
 
-	got := config.LoadForEdit(filepath.Join(workspace, "reasonix.toml"))
+	got := projectAllowRules(t, workspace)
 	for i := range writers {
 		rule := fmt.Sprintf("Edit(file-%02d)", i)
-		if !hasPermissionRule(got.Permissions.Allow, rule) {
-			t.Errorf("permissions.allow missing %q: %v", rule, got.Permissions.Allow)
+		if !hasPermissionRule(got, rule) {
+			t.Errorf("remembered rules missing %q: %v", rule, got)
 		}
 	}
 }
 
 func TestRememberPermissionRuleSerializesCrossProcessWriters(t *testing.T) {
+	home := rememberHome(t)
 	workspace := robustTempDir(t)
-	writeFile(t, workspace, "reasonix.toml", "[permissions]\nallow = []\n")
 	readyDir := robustTempDir(t)
 	startPath := filepath.Join(readyDir, "start")
 
@@ -3182,6 +3252,7 @@ func TestRememberPermissionRuleSerializesCrossProcessWriters(t *testing.T) {
 		cmd.Stdout = &outputs[worker]
 		cmd.Stderr = &outputs[worker]
 		cmd.Env = append(os.Environ(),
+			"REASONIX_PERMISSION_HOME="+home,
 			"REASONIX_PERMISSION_HELPER=1",
 			"REASONIX_PERMISSION_WORKSPACE="+workspace,
 			"REASONIX_PERMISSION_READY_DIR="+readyDir,
@@ -3223,12 +3294,12 @@ func TestRememberPermissionRuleSerializesCrossProcessWriters(t *testing.T) {
 		}
 	}
 
-	got := config.LoadForEdit(filepath.Join(workspace, "reasonix.toml"))
+	got := projectAllowRules(t, workspace)
 	for worker := range workers {
 		for n := range rulesPerWorker {
 			rule := fmt.Sprintf("Edit(process-%d-file-%02d)", worker, n)
-			if !hasPermissionRule(got.Permissions.Allow, rule) {
-				t.Errorf("permissions.allow missing %q: %v", rule, got.Permissions.Allow)
+			if !hasPermissionRule(got, rule) {
+				t.Errorf("remembered rules missing %q: %v", rule, got)
 			}
 		}
 	}
@@ -3242,6 +3313,7 @@ func TestRememberPermissionRuleProcessHelper(t *testing.T) {
 	readyDir := os.Getenv("REASONIX_PERMISSION_READY_DIR")
 	startPath := os.Getenv("REASONIX_PERMISSION_START")
 	t.Setenv("REASONIX_CACHE_HOME", readyDir)
+	t.Setenv("REASONIX_HOME", os.Getenv("REASONIX_PERMISSION_HOME"))
 	worker, err := strconv.Atoi(os.Getenv("REASONIX_PERMISSION_WORKER"))
 	if err != nil {
 		t.Fatal(err)
@@ -3272,133 +3344,114 @@ func TestRememberPermissionRuleProcessHelper(t *testing.T) {
 	}
 }
 
-func TestRememberPermissionRuleCreatesWorkspaceConfigOverUserConfig(t *testing.T) {
-	home := robustTempDir(t)
-	t.Setenv("HOME", home)
-	t.Setenv("USERPROFILE", home)
-	t.Setenv("XDG_CONFIG_HOME", filepath.Join(home, ".config"))
-	t.Setenv("AppData", filepath.Join(home, "AppData"))
-
+func TestRememberPermissionRuleKeepsWorkspaceRulesOutOfUserConfig(t *testing.T) {
+	home := rememberHome(t)
 	workspace := robustTempDir(t)
-	userConfig := config.UserConfigPath()
-	writeFile(t, filepath.Dir(userConfig), filepath.Base(userConfig), `
-[permissions]
-allow = ["Bash(user)"]
-`)
+	writeFile(t, home, "config.toml", "[permissions]\nallow = [\"Bash(user)\"]\n")
 
 	const rule = "Edit(src/app.go)"
 	res := rememberPermissionRule(config.Roots{}, workspace, rule)
-	if !res.Saved || res.Path != filepath.Join(workspace, "reasonix.toml") {
-		t.Fatalf("remember result = %+v, want saved to workspace config", res)
+	if !res.Saved || res.Path != filepath.Join(home, "project-grants.json") {
+		t.Fatalf("remember result = %+v, want saved to the project allow record", res)
 	}
-
-	userCfg := config.LoadForEdit(userConfig)
-	if hasPermissionRule(userCfg.Permissions.Allow, rule) {
+	if userCfg := config.LoadForEdit(filepath.Join(home, "config.toml")); hasPermissionRule(userCfg.Permissions.Allow, rule) {
 		t.Fatalf("workspace rule was written to user config: %v", userCfg.Permissions.Allow)
 	}
-	workspaceCfg := config.LoadForEdit(filepath.Join(workspace, "reasonix.toml"))
-	if !hasPermissionRule(workspaceCfg.Permissions.Allow, rule) {
-		t.Fatalf("workspace rule missing from project config: %v", workspaceCfg.Permissions.Allow)
+	if _, err := os.Stat(filepath.Join(workspace, "reasonix.toml")); !os.IsNotExist(err) {
+		t.Fatalf("remembering created a reasonix.toml in the checkout, err=%v", err)
 	}
 }
 
-func TestRememberPermissionRuleEmptyRootUsesSourcePath(t *testing.T) {
-	home := robustTempDir(t)
-	t.Setenv("HOME", home)
-	t.Setenv("USERPROFILE", home)
-	t.Setenv("XDG_CONFIG_HOME", filepath.Join(home, ".config"))
-	t.Setenv("AppData", filepath.Join(home, "AppData"))
-
+func TestRememberPermissionRuleEmptyRootUsesUserConfig(t *testing.T) {
+	home := rememberHome(t)
 	cwd := robustTempDir(t)
 	t.Chdir(cwd)
-	userConfig := config.UserConfigPath()
-	writeFile(t, filepath.Dir(userConfig), filepath.Base(userConfig), `
-[permissions]
-allow = ["Bash(user*)"]
-`)
+	writeFile(t, cwd, "reasonix.toml", "[permissions]\nallow = [\"Bash(cwd*)\"]\n")
+	approveWorkspace(t, cwd)
+	writeFile(t, home, "config.toml", "[permissions]\nallow = [\"Bash(user*)\"]\n")
 
 	const rule = "Bash(go env)"
 	res := rememberPermissionRule(config.Roots{}, "", rule)
+	userConfig := filepath.Join(home, "config.toml")
 	if !res.Saved || res.Path != userConfig {
-		t.Fatalf("remember result = %+v, want saved to user source config", res)
+		t.Fatalf("remember result = %+v, want saved to the user config", res)
 	}
+	if userCfg := config.LoadForEdit(userConfig); !hasPermissionRule(userCfg.Permissions.Allow, rule) {
+		t.Fatalf("empty root should remember into the user config: %v", userCfg.Permissions.Allow)
+	}
+	if cwdCfg := config.LoadForEdit(filepath.Join(cwd, "reasonix.toml")); hasPermissionRule(cwdCfg.Permissions.Allow, rule) {
+		t.Fatalf("empty root wrote into the cwd project file: %v", cwdCfg.Permissions.Allow)
+	}
+}
 
-	userCfg := config.LoadForEdit(userConfig)
-	if !hasPermissionRule(userCfg.Permissions.Allow, rule) {
-		t.Fatalf("empty root should remember into SourcePath config: %v", userCfg.Permissions.Allow)
-	}
-	if _, err := os.Stat(filepath.Join(cwd, "reasonix.toml")); !os.IsNotExist(err) {
-		t.Fatalf("empty root should not create cwd config when SourcePath exists, err=%v", err)
+func seedProjectGrant(t *testing.T, workspace string, rules ...string) {
+	t.Helper()
+	if err := config.NewProjectGrantStore(config.Roots{}.Home()).Update(workspace, func(g config.ProjectGrant) (config.ProjectGrant, error) {
+		g.Allow = rules
+		return g, nil
+	}); err != nil {
+		t.Fatal(err)
 	}
 }
 
 func TestRememberPermissionRuleSkipsRuleCoveredByExistingAllow(t *testing.T) {
+	rememberHome(t)
 	workspace := robustTempDir(t)
-	writeFile(t, workspace, "reasonix.toml", `
-[permissions]
-allow = ["Bash(go test:*)"]
-`)
+	seedProjectGrant(t, workspace, "Bash(go test:*)")
 
 	res := rememberPermissionRule(config.Roots{}, workspace, "Bash(go test ./...)")
 	if res.Saved || res.CoveredBy != "Bash(go test:*)" {
 		t.Fatalf("remember result = %+v, want already covered", res)
 	}
-	cfg := config.LoadForEdit(filepath.Join(workspace, "reasonix.toml"))
-	if len(cfg.Permissions.Allow) != 1 || cfg.Permissions.Allow[0] != "Bash(go test:*)" {
-		t.Fatalf("allow rules = %v, want only existing prefix", cfg.Permissions.Allow)
+	if got := projectAllowRules(t, workspace); len(got) != 1 || got[0] != "Bash(go test:*)" {
+		t.Fatalf("allow rules = %v, want only existing prefix", got)
 	}
 }
 
 func TestRememberDynamicBashLiteralIsNotCoveredByBroadRule(t *testing.T) {
+	rememberHome(t)
 	workspace := robustTempDir(t)
-	writeFile(t, workspace, "reasonix.toml", `
-[permissions]
-allow = ["Bash(git*)"]
-`)
+	seedProjectGrant(t, workspace, "Bash(git*)")
 
 	const literal = "Bash=git status $(touch /tmp/reasonix-dynamic-approval)"
 	res := rememberPermissionRule(config.Roots{}, workspace, literal)
 	if !res.Saved || res.CoveredBy != "" || res.Err != nil {
 		t.Fatalf("remember dynamic literal = %+v, want newly saved rule", res)
 	}
-	cfg := config.LoadForEdit(filepath.Join(workspace, "reasonix.toml"))
-	if !hasPermissionRule(cfg.Permissions.Allow, "Bash(git*)") || !hasPermissionRule(cfg.Permissions.Allow, literal) {
-		t.Fatalf("allow rules = %v, want broad rule and dynamic literal", cfg.Permissions.Allow)
+	if got := projectAllowRules(t, workspace); !hasPermissionRule(got, "Bash(git*)") || !hasPermissionRule(got, literal) {
+		t.Fatalf("allow rules = %v, want broad rule and dynamic literal", got)
 	}
 
 	res = rememberPermissionRule(config.Roots{}, workspace, literal)
 	if res.Saved || res.CoveredBy != literal || res.Err != nil {
 		t.Fatalf("remember duplicate dynamic literal = %+v, want exact deduplication", res)
 	}
-	cfg = config.LoadForEdit(filepath.Join(workspace, "reasonix.toml"))
 	count := 0
-	for _, rule := range cfg.Permissions.Allow {
+	for _, rule := range projectAllowRules(t, workspace) {
 		if rule == literal {
 			count++
 		}
 	}
 	if count != 1 {
-		t.Fatalf("dynamic literal count = %d in %v, want 1", count, cfg.Permissions.Allow)
+		t.Fatalf("dynamic literal count = %d, want 1", count)
 	}
 }
 
 func TestRememberPermissionRulePrunesNarrowRulesWhenSavingBroaderRule(t *testing.T) {
+	rememberHome(t)
 	workspace := robustTempDir(t)
-	writeFile(t, workspace, "reasonix.toml", `
-[permissions]
-allow = ["Bash(go test ./...)", "Bash(go build ./...)"]
-`)
+	seedProjectGrant(t, workspace, "Bash(go test ./...)", "Bash(go build ./...)")
 
 	res := rememberPermissionRule(config.Roots{}, workspace, "Bash(go test:*)")
 	if !res.Saved || res.CoveredBy != "" {
 		t.Fatalf("remember result = %+v, want saved broader rule", res)
 	}
-	cfg := config.LoadForEdit(filepath.Join(workspace, "reasonix.toml"))
-	if hasPermissionRule(cfg.Permissions.Allow, "Bash(go test ./...)") {
-		t.Fatalf("narrow go test rule should be pruned: %v", cfg.Permissions.Allow)
+	got := projectAllowRules(t, workspace)
+	if hasPermissionRule(got, "Bash(go test ./...)") {
+		t.Fatalf("narrow go test rule should be pruned: %v", got)
 	}
-	if !hasPermissionRule(cfg.Permissions.Allow, "Bash(go build ./...)") || !hasPermissionRule(cfg.Permissions.Allow, "Bash(go test:*)") {
-		t.Fatalf("allow rules = %v, want unrelated exact plus prefix", cfg.Permissions.Allow)
+	if !hasPermissionRule(got, "Bash(go build ./...)") || !hasPermissionRule(got, "Bash(go test:*)") {
+		t.Fatalf("allow rules = %v, want unrelated exact plus prefix", got)
 	}
 }
 
@@ -3423,6 +3476,7 @@ func TestBuildMigratesLegacyConfigEndToEnd(t *testing.T) {
 	// Project config merges over the migrated user config without dropping the
 	// migrated plugins.
 	writeFile(t, proj, "reasonix.toml", "")
+	approveWorkspace(t, proj)
 	writeFile(t, filepath.Join(home, ".reasonix"), "config.json",
 		`{"apiKey":"sk-e2e","lang":"zh","mcpServers":{"fs":{"command":"npx","args":["-y","server-fs"]}}}`)
 	writeFile(t, filepath.Join(home, ".reasonix", "sessions"), "chat-1.events.jsonl",
@@ -3572,6 +3626,7 @@ base_url = "https://example.invalid"
 model = "x"
 api_key_env = "REASONIX_TEST_KEY_UNSET"
 `)
+	approveWorkspace(t, project)
 
 	var notices []event.Event
 	sink := event.FuncSink(func(e event.Event) {
@@ -3636,6 +3691,7 @@ base_url = "https://example.invalid"
 model = "x"
 api_key_env = "REASONIX_TEST_KEY_UNSET"
 `)
+	approveWorkspace(t, project)
 
 	var notices []event.Event
 	sink := event.FuncSink(func(e event.Event) {
@@ -3691,6 +3747,7 @@ func TestBuildMigratesLegacySessionsFromConfigSessionDir(t *testing.T) {
 
 	proj := robustTempDir(t)
 	writeFile(t, proj, "reasonix.toml", "")
+	approveWorkspace(t, proj)
 
 	legacyConfig := config.LegacyUserConfigPath()
 	if legacyConfig == "" {
@@ -3754,6 +3811,7 @@ func TestBuildSkipsLegacySessionMigrationWhenIsolated(t *testing.T) {
 
 	proj := robustTempDir(t)
 	writeFile(t, proj, "reasonix.toml", "[codegraph]\nenabled = false\n")
+	approveWorkspace(t, proj)
 
 	legacyRoot := filepath.Join(xdg, "reasonix")
 	writeFile(t, filepath.Join(legacyRoot, "sessions"), "xdg-flat.events.jsonl",
@@ -3849,6 +3907,7 @@ name = "legacy-eager"
 command = "reasonix-missing-legacy-eager-mcp"
 tier = "eager"
 `)
+	approveWorkspace(t, dir)
 
 	approveProjectServer(t, dir, "legacy-eager")
 
@@ -3896,6 +3955,7 @@ name = "legacy-lazy"
 command = "reasonix-missing-legacy-lazy-mcp"
 tier = "lazy"
 `)
+	approveWorkspace(t, dir)
 
 	approveProjectServer(t, dir, "legacy-lazy")
 
@@ -3943,6 +4003,7 @@ base_url = "https://example.invalid"
 model = "x"
 api_key_env = "REASONIX_TEST_KEY_UNSET"
 `)
+	approveWorkspace(t, root)
 	t.Chdir(subdir)
 
 	ctrl, err := Build(context.Background(), Options{Model: "root-model"})
@@ -4085,6 +4146,7 @@ name = "test-model"
 kind = "boot-token-profile-test"
 model = "x"
 `)
+	approveWorkspace(t, root)
 	registerBootTokenProfileTestProvider()
 
 	captureSchemas := func(opts Options) []byte {
@@ -4165,6 +4227,7 @@ name = "test-model"
 kind = "boot-token-profile-test"
 model = "x"
 `)
+	approveWorkspace(t, root)
 	registerBootTokenProfileTestProvider()
 	target := filepath.Join(extra, "sandboxed.txt")
 	command := "printf ok > " + strconv.Quote(target)

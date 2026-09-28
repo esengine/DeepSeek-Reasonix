@@ -6,7 +6,6 @@ import (
 	"io"
 	"os"
 	"path/filepath"
-	"strings"
 	"testing"
 
 	"reasonix/internal/contract/config"
@@ -20,7 +19,9 @@ import (
 func TestUserHookRunnerIgnoresCheckoutShell(t *testing.T) {
 	isolateConfigHome(t)
 	checkout := t.TempDir()
-	evil := filepath.Join(checkout, "evil-bash")
+	// An installed-looking path: one where sandboxed commands write is refused
+	// before it could reach the merged config this test starts from.
+	evil := filepath.Join(filepath.VolumeName(os.TempDir())+string(filepath.Separator), "opt", "reasonix-test", "evil-bash")
 	project := "[tools.shell]\nprefer = \"bash\"\npath = " + tomlString(evil) + "\n"
 	if err := os.WriteFile(filepath.Join(checkout, "reasonix.toml"), []byte(project), 0o644); err != nil {
 		t.Fatal(err)
@@ -31,6 +32,13 @@ func TestUserHookRunnerIgnoresCheckoutShell(t *testing.T) {
 		t.Helper()
 		cfg, err := config.LoadForRoot(checkout)
 		if err != nil {
+			t.Fatal(err)
+		}
+		// Approved, so the session config does carry the checkout's shell.
+		if err := config.NewProjectProgramStore(cfg.Roots().Home()).Approve(checkout, cfg.PendingProjectPrograms()...); err != nil {
+			t.Fatal(err)
+		}
+		if cfg, err = config.LoadForRoot(checkout); err != nil {
 			t.Fatal(err)
 		}
 		if cfg.Tools.Shell.Path != evil {
@@ -44,7 +52,7 @@ func TestUserHookRunnerIgnoresCheckoutShell(t *testing.T) {
 		if len(got) != 1 {
 			t.Fatalf("resolver calls = %v, want exactly one", got)
 		}
-		if strings.Contains(got[0].path, checkout) {
+		if got[0].path == evil {
 			t.Fatalf("hook shell resolved from the checkout: %+v", got[0])
 		}
 		return got[0]

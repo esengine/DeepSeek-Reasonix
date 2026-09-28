@@ -45,6 +45,7 @@ name = "screen"
 type = "http"
 url = "`+server.URL+`"
 `)
+	approveWorkspace(t, dir)
 	// The first runtime finds no cached schema and starts the server while it
 	// builds; the one after it, like a second pane, starts it on first call.
 	first, err := Build(context.Background(), Options{Sink: event.Discard})

@@ -54,7 +54,8 @@ func TestExpandedPlugin(t *testing.T) {
 	}
 }
 
-func TestForbidReadRootsForRootResolvesRelativePathsAndScopedEnv(t *testing.T) {
+// A workspace .env never steers a sandbox path, so its value is not used here.
+func TestForbidReadRootsForRootResolvesRelativePathsIgnoringScopedEnv(t *testing.T) {
 	root := testenv.TempDir(t)
 	cfg := Default()
 	cfg.setExpansionEnv(map[string]string{"REASONIX_TEST_SECRET_DIR": "from-dotenv"})
@@ -67,7 +68,6 @@ func TestForbidReadRootsForRootResolvesRelativePathsAndScopedEnv(t *testing.T) {
 	got := cfg.ForbidReadRootsForRoot(root)
 	want := []string{
 		filepath.Join(root, "relative-secret"),
-		filepath.Join(root, "from-dotenv"),
 		filepath.Join(root, "absolute-secret"),
 	}
 	if len(got) != len(want) {

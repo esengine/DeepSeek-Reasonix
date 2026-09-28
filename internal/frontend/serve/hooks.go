@@ -48,7 +48,13 @@ func (s *Server) hooks(w http.ResponseWriter, r *http.Request) {
 	insp := ctl.InspectHooks()
 	entries := make([]hookEntry, 0, len(insp.Entries))
 	for _, e := range insp.Entries {
-		issues := append([]string(nil), e.Issues...)
+		issues := make([]string, 0, len(e.Issues))
+		for _, issue := range e.Issues {
+			if issue == hook.IssueAwaitingApproval {
+				issue = "这个项目的钩子还没有被批准，不会运行；核对内容后点「保存」即批准当前内容"
+			}
+			issues = append(issues, issue)
+		}
 		if msg := hook.ValidateMatcher(e.Match); msg != "" && hook.UsesToolMatcher(e.Event) {
 			issues = append(issues, msg)
 		}

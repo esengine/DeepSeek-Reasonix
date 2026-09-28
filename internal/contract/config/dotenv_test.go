@@ -407,10 +407,7 @@ api_key_env = "`+key+`"
 		t.Fatal(err)
 	}
 
-	cfg, err := LoadForRoot(project)
-	if err != nil {
-		t.Fatalf("LoadForRoot: %v", err)
-	}
+	cfg := approveWorkspacePrograms(t, project)
 	provider, ok := cfg.Provider("custom")
 	if !ok {
 		t.Fatalf("provider missing: %+v", cfg.Providers)
@@ -450,10 +447,7 @@ api_key_env = "`+key+`"
 		t.Fatal(err)
 	}
 
-	cfg, err := LoadForRoot(project)
-	if err != nil {
-		t.Fatalf("LoadForRoot: %v", err)
-	}
+	cfg := approveWorkspacePrograms(t, project)
 	provider, ok := cfg.Provider("custom")
 	if !ok {
 		t.Fatalf("provider missing: %+v", cfg.Providers)

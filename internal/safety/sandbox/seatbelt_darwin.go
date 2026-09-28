@@ -3,13 +3,14 @@ package sandbox
 import (
 	"context"
 	"fmt"
-	"os"
 	"os/exec"
 	"path/filepath"
 	"slices"
 	"strings"
 	"sync"
 	"time"
+
+	"reasonix/internal/base/hostwrite"
 )
 
 // Command returns the argv to run `command` through sh, wrapped in sandbox-exec
@@ -223,51 +224,27 @@ func EgressNeedsSocket() bool { return false }
 
 // writeAllowDirs is the deduplicated, symlink-resolved set of directories the
 // sandbox permits writes to: the caller's roots plus temp dirs, /dev, and the
-// common toolchain caches under $HOME. Symlinks are resolved because macOS's
-// /tmp and $TMPDIR live under /private, which is the path Seatbelt matches.
+// common toolchain caches under $HOME. Paths are resolved because macOS's /tmp
+// and $TMPDIR live under /private, which is the path Seatbelt matches.
 func writeAllowDirs(roots []string) []string {
 	return writeAllowDirsForSpec(Spec{WriteRoots: roots})
 }
 
 func writeAllowDirsForSpec(spec Spec) []string {
-	roots := spec.WriteRoots
-	dirs := append([]string{}, roots...)
-	dirs = append(dirs, "/dev")
+	return planWriteRoots(spec, backendWriteDirs(spec)).dirs
+}
+
+// backendWriteDirs are the directories Seatbelt allows beside the caller's
+// roots. The session temp stays writable even under MinimalWrites.
+func backendWriteDirs(spec Spec) []string {
+	dirs := []string{"/dev"}
 	if dir := strings.TrimSpace(spec.SessionTemp); dir != "" {
-		// Session-private temporary directory must be writable under Seatbelt
-		// even when MinimalWrites omits the broad host temp allowances.
 		dirs = append(dirs, dir)
 	}
 	if !spec.MinimalWrites {
-		dirs = append(dirs, "/tmp", "/private/tmp", "/private/var/folders", os.TempDir())
+		dirs = append(dirs, hostwrite.Dirs()...)
 	}
-	if !spec.MinimalWrites {
-		if home, err := os.UserHomeDir(); err == nil {
-			// go build/test → Library/Caches + go; pip/etc → .cache; npm/cargo too.
-			for _, sub := range []string{"Library/Caches", ".cache", ".npm", ".cargo", "go"} {
-				dirs = append(dirs, filepath.Join(home, sub))
-			}
-		}
-	}
-	seen := map[string]bool{}
-	out := make([]string, 0, len(dirs))
-	for _, d := range dirs {
-		if d == "" {
-			continue
-		}
-		abs, err := filepath.Abs(d)
-		if err != nil {
-			continue
-		}
-		if real, err := filepath.EvalSymlinks(abs); err == nil {
-			abs = real
-		}
-		if !seen[abs] {
-			seen[abs] = true
-			out = append(out, abs)
-		}
-	}
-	return out
+	return dirs
 }
 
 // sbplString quotes a path as an SBPL string literal, escaping backslash and

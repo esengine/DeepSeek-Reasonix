@@ -50,6 +50,7 @@ name = "test-model"
 kind = "`+kind+`"
 model = "x"
 `)
+	approveWorkspace(t, dir)
 	var mu sync.Mutex
 	var diags []*event.CacheDiagnostics
 	ctrl, err := Build(context.Background(), Options{Sink: event.FuncSink(func(e event.Event) {

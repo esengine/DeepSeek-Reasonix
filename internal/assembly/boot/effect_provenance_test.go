@@ -37,6 +37,7 @@ name = "test-model"
 kind = "boot-provenance"
 model = "x"
 `)
+	approveWorkspace(t, dir)
 	server := screenshotMCPServer(t)
 	defer server.Close()
 	ctrl, err := Build(context.Background(), Options{
@@ -163,6 +164,7 @@ name = "test-model"
 kind = "boot-screen"
 model = "x"
 `)
+	approveWorkspace(t, dir)
 	server := textMCPServer(t, "Release notes. PLANTED-INSTRUCTION")
 	defer server.Close()
 	sink := &noticeRecorder{}

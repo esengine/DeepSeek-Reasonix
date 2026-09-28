@@ -115,6 +115,9 @@ kind = "`+kind+`"
 model = "x"
 `)
 	gitInDir(t, dir, "init", "-q")
+	// Attempts run in worktrees, each a folder of its own: the model is the
+	// user's, so an approval of this folder is not what makes them run.
+	mirrorToUserConfig(t, dir)
 	gitInDir(t, dir, "add", "-A")
 	gitInDir(t, dir, "commit", "-q", "-m", "init")
 

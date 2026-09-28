@@ -98,6 +98,7 @@ name = "test-model"
 kind = "skill-scale"
 model = "x"
 `)
+	approveWorkspace(t, dir)
 	ctrl, err := Build(context.Background(), Options{})
 	if err != nil {
 		t.Fatalf("Build: %v", err)

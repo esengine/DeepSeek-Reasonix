@@ -33,6 +33,7 @@ base_url = "https://example.invalid"
 model = "x"
 api_key_env = "REASONIX_TEST_KEY_UNSET"
 `)
+	approveWorkspace(t, dir)
 	writeFile(t, dir, "REASONIX.md", "Project rule: keep the prompt prefix stable.")
 
 	first, err := Build(context.Background(), Options{})

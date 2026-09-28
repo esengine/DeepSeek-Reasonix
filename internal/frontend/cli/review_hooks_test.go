@@ -115,9 +115,15 @@ base_url = "http://127.0.0.1:1"
 	projectLog := filepath.Join(home, "project-hook.log")
 	projectScript := filepath.Join(dir, "checkout-hook.sh")
 	write(projectScript, "#!/bin/sh\ncat >> '"+projectLog+"'\nexit 0\n")
-	if err := hook.Save(hook.ScopeProject, dir, hook.Settings{Hooks: map[hook.Event][]hook.HookConfig{
+	projectHooks := hook.Settings{Hooks: map[hook.Event][]hook.HookConfig{
 		hook.PreToolUse: {{Match: "*", Command: projectScript}},
-	}}); err != nil {
+	}}
+	if err := hook.Save(hook.ScopeProject, dir, projectHooks); err != nil {
+		t.Fatal(err)
+	}
+	// Approved, so what keeps it out of the review is the review, not the gate.
+	approveWorkspace(t, dir)
+	if err := hook.ApproveSavedProjectHooks(hook.LoadOptions{ProjectRoot: dir}, projectHooks); err != nil {
 		t.Fatal(err)
 	}
 

@@ -53,6 +53,7 @@ name = "test-model"
 kind = "`+kind+`"
 model = "x"
 `)
+	approveWorkspace(t, dir)
 	sink := &noticeRecorder{}
 	ctrl, err := Build(context.Background(), Options{Sink: sink})
 	if err != nil {

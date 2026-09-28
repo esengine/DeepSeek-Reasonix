@@ -1476,10 +1476,7 @@ effort = "max"
 		t.Fatal(err)
 	}
 
-	cfg, err := LoadForRoot(root)
-	if err != nil {
-		t.Fatalf("LoadForRoot: %v", err)
-	}
+	cfg := approveWorkspacePrograms(t, root)
 	userProvider, ok := cfg.Provider("deepseek")
 	if !ok {
 		t.Fatalf("user deepseek provider missing: %+v", cfg.Providers)
@@ -1531,10 +1528,7 @@ api_key_env = "PROJECT_ONLY_KEY"
 		t.Fatal(err)
 	}
 
-	cfg, err := LoadForRoot(root)
-	if err != nil {
-		t.Fatalf("LoadForRoot: %v", err)
-	}
+	cfg := approveWorkspacePrograms(t, root)
 	shared, ok := cfg.Provider("shared")
 	if !ok {
 		t.Fatalf("shared provider missing: %+v", cfg.Providers)
@@ -2039,10 +2033,7 @@ api_key_env = "PROJECT_KEY"
 		t.Fatal(err)
 	}
 
-	cfg, err := LoadForRoot(root)
-	if err != nil {
-		t.Fatalf("LoadForRoot: %v", err)
-	}
+	cfg := approveWorkspacePrograms(t, root)
 	if _, ok := cfg.Provider("global"); !ok {
 		t.Fatal("runtime config should include user provider before saving")
 	}

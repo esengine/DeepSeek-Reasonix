@@ -24,6 +24,7 @@ base_url = "https://example.invalid"
 model = "x"
 api_key_env = "REASONIX_TEST_KEY_UNSET"
 `)
+	approveWorkspace(t, dir)
 
 	ctrl, err := Build(context.Background(), Options{})
 	if err != nil {
@@ -69,6 +70,7 @@ base_url = "https://example.invalid"
 model = "x"
 api_key_env = "REASONIX_TEST_KEY_UNSET"
 `+environmentSection)
+		approveWorkspace(t, dir)
 
 		ctrl, err := Build(context.Background(), Options{})
 		if err != nil {

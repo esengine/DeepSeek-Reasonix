@@ -97,6 +97,7 @@ allow_write = ["../outside"]
 `), 0o644); err != nil {
 		t.Fatal(err)
 	}
+	approveWorkspace(t, project)
 	off := false
 	factory := &acpFactory{
 		plannerOff: true, networkOverride: &off, bashOverride: "enforce", workspaceOnly: true,
@@ -121,6 +122,7 @@ func TestACPSupervisorRuntimeStateDegradesWhenSandboxIsUnavailable(t *testing.T)
 	if err := os.WriteFile(filepath.Join(project, "reasonix.toml"), []byte("[sandbox]\nbash = \"enforce\"\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
+	approveWorkspace(t, project)
 	unavailable := func() bool { return false }
 	params := acp.SessionRuntimeStateParams{Cwd: project, RuntimeProfile: "balanced"}
 
@@ -179,6 +181,7 @@ api_key_env = "REASONIX_TEST_KEY"
 `), 0o644); err != nil {
 		t.Fatal(err)
 	}
+	approveWorkspace(t, project)
 	cmdDir := filepath.Join(project, ".reasonix", "commands")
 	if err := os.MkdirAll(cmdDir, 0o755); err != nil {
 		t.Fatal(err)
@@ -231,6 +234,7 @@ effort = "high"
 `), 0o644); err != nil {
 		t.Fatal(err)
 	}
+	approveWorkspace(t, project)
 
 	high := "high"
 	state, err := (&acpFactory{}).SessionConfigState(context.Background(), acp.SessionConfigStateParams{
@@ -279,6 +283,7 @@ api_key_env = "REASONIX_TEST_KEY"
 `), 0o644); err != nil {
 		t.Fatal(err)
 	}
+	approveWorkspace(t, project)
 
 	state, err := (&acpFactory{profile: "full"}).SessionConfigState(context.Background(), acp.SessionConfigStateParams{
 		Cwd:            project,
