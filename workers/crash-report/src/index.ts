@@ -276,6 +276,10 @@ export function ensureDesktopTelemetrySchema(
   )).then(() => undefined);
 }
 
+// The current 1.x desktop renders with Chromium (Electron); installs still on
+// the older shells report webview2 or webkitgtk.
+const RuntimeEngine = z.enum(["webview2", "webkitgtk", "chromium", "unknown"]);
+
 export const Ping = z.object({
   installId: z.string().regex(/^[0-9a-f]{32}$/),
   version: z.string().min(1).max(64),
@@ -289,7 +293,7 @@ export const Ping = z.object({
   distroVersion: z.string().max(64).optional(),
   kernelVersion: z.string().max(128).optional(),
   sessionType: z.enum(["wayland", "x11", "remote", "unknown"]).optional(),
-  runtimeEngine: z.enum(["webview2", "webkitgtk", "unknown"]).optional(),
+  runtimeEngine: RuntimeEngine.optional(),
   runtimeVersion: z.string().max(128).optional(),
   gpuMode: z.enum(["enabled", "disabled", "always", "on_demand", "unknown"]).optional(),
   surface: ClientSurface.default("desktop"),
@@ -410,7 +414,7 @@ export const Metrics = z.object({
   distroVersion: z.string().max(64).optional(),
   kernelVersion: z.string().max(128).optional(),
   sessionType: z.enum(["wayland", "x11", "remote", "unknown"]).optional(),
-  runtimeEngine: z.enum(["webview2", "webkitgtk", "unknown"]).optional(),
+  runtimeEngine: RuntimeEngine.optional(),
   runtimeVersion: z.string().max(128).optional(),
   gpuMode: z.enum(["enabled", "disabled", "always", "on_demand", "unknown"]).optional(),
   surface: ClientSurface.default("desktop"),

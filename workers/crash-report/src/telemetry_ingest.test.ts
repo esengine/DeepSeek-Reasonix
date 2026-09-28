@@ -46,6 +46,24 @@ describe("telemetry admission result", () => {
     expect(bindings.TELEMETRY_QUEUE?.send).toHaveBeenCalledOnce();
   });
 
+  it("accepts the Chromium renderer the 1.x desktop reports", async () => {
+    for (const path of ["/v1/ping", "/v1/metrics"]) {
+      const bindings = env();
+      const response = await worker.fetch(post(path, {
+        installId: "c".repeat(32),
+        version: "v1.39.4",
+        os: "windows",
+        arch: "amd64",
+        surface: "desktop",
+        runtimeEngine: "chromium",
+        counters: [{ signal: "turns", bucket: "1", count: 1 }],
+      }), bindings);
+
+      expect(response.status, path).toBe(202);
+      expect(bindings.TELEMETRY_QUEUE?.send, path).toHaveBeenCalledOnce();
+    }
+  });
+
   it("makes global budget sampling observable without enqueueing", async () => {
     const bindings = env({ TELEMETRY_BUDGET_LIMITER: limiter(false) });
     const response = await worker.fetch(post("/v1/ping", {

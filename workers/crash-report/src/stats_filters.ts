@@ -47,7 +47,7 @@ export function statsFilters(url: URL): StatsFilters {
     arch: limited(url, "arch", 32),
     channel: limited(url, "channel", 32),
     runtimeVersion: limited(url, "runtime", 128),
-    runtimeEngine: oneOf(limited(url, "engine", 16), ["webview2", "webkitgtk"]),
+    runtimeEngine: oneOf(limited(url, "engine", 16), ["webview2", "webkitgtk", "chromium"]),
     failureKind: limited(url, "failureKind", 64),
     failureReason: limited(url, "reason", 64),
     exitCode: exitCodeParam === "unknown" || /^-?\d+$/.test(exitCodeParam) ? exitCodeParam : "",
