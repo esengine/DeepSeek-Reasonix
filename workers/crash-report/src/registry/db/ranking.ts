@@ -5,10 +5,11 @@ const UPDATE_CHUNK = 50;
 // Recomputes packages.rec_score from the vote counts and the distinct install
 // ids of the window, each counted once on the latest day it was seen. Called for one package after a vote or a counted install, and for
 // every package by the cron, because decay moves scores with no write at all.
+// A private package is never ranked: it takes no votes and no counted installs.
 export async function rescore(db: D1Database, today: string, packageId?: number): Promise<number> {
   const one = packageId !== undefined;
   const pkgs = await db
-    .prepare(`SELECT id, up_count, down_count, rec_score FROM packages${one ? " WHERE id = ?1" : ""}`)
+    .prepare(`SELECT id, up_count, down_count, rec_score FROM packages WHERE status != 'private'${one ? " AND id = ?1" : ""}`)
     .bind(...(one ? [packageId] : []))
     .all<{ id: number; up_count: number; down_count: number; rec_score: number }>();
   const days = await db

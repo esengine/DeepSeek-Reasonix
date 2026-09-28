@@ -303,3 +303,45 @@ describe("maintenance", () => {
     }
   });
 });
+
+describe("private packages", () => {
+  it("take no votes, no counted installs, no feed and no score", async () => {
+    stubAccounts();
+    const t = setup();
+    try {
+      t.sqlite.prepare(
+        `INSERT INTO packages (kind, scope_handle, name, slug, source, install_kind, latest_version, status, publisher_id, created_at, updated_at, rec_score)
+         VALUES ('skill', 'alice', 'secret', 'alice/secret', 'https://github.com/o/r', 'skill', '0.1.0', 'private', 7, 't', 't', 0)`,
+      ).run();
+      expect((await t.vote("alice/secret", "bob", 1)).status).toBe(404);
+      expect((await t.call("/v1/packages/alice/secret/vote", { as: "bob" })).status).toBe(404);
+      expect((await t.call("/v1/packages/alice/secret/star", { method: "POST", as: "bob" })).status).toBe(404);
+      const ping = await t.call("/v1/packages/alice/secret/installed", { method: "POST", body: { installId: "c".repeat(32) } });
+      expect(ping.status).toBe(404);
+      const id = (t.sqlite.prepare("SELECT id FROM packages WHERE slug = 'alice/secret'").get() as { id: number }).id;
+      t.sqlite.prepare("INSERT INTO package_install_seen (install_key, package_id, date, fresh) VALUES (?1, ?2, ?3, 0)").run("d".repeat(32), id, new Date().toISOString().slice(0, 10));
+      await rescore(t.db, new Date().toISOString().slice(0, 10));
+      const row = t.sqlite.prepare("SELECT up_count, install_count, rec_score FROM packages WHERE id = ?1").get(id);
+      expect(row).toEqual({ up_count: 0, install_count: 0, rec_score: 0 });
+      expect((t.sqlite.prepare("SELECT COUNT(*) AS n FROM events").get() as { n: number }).n).toBe(0);
+      const list = (await (await t.call("/v1/packages")).json()) as { packages: { slug: string }[] };
+      expect(list.packages.map((p) => p.slug)).not.toContain("alice/secret");
+    } finally {
+      t.close();
+    }
+  });
+
+  it("lists pinned alongside the vote fields", async () => {
+    stubAccounts();
+    const t = setup();
+    try {
+      await t.vote("alice/review", "bob", 1);
+      const list = (await (await t.call("/v1/packages")).json()) as { packages: Record<string, unknown>[] };
+      const row = list.packages.find((p) => p.slug === "alice/review")!;
+      expect(row).toMatchObject({ pinned: false, upCount: 1, downCount: 0, approvalRate: 1 });
+      expect(typeof row.score).toBe("number");
+    } finally {
+      t.close();
+    }
+  });
+});
