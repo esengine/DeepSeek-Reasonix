@@ -36,7 +36,8 @@ const desc = "Browse, publish, and install community skills, plugins, and MCP se
           <button data-kind="theme" role="tab">Themes</button>
         </div>
         <div class="reg-tabs" data-group="sort" role="tablist">
-          <button class="active" data-sort="new" role="tab"><span class="l-en">New</span><span class="l-zh">最新</span></button>
+          <button class="active" data-sort="recommended" role="tab" title="0.6 × Wilson lower bound of the vote ratio + 0.4 × decayed 30-day installs"><span class="l-en">Recommended</span><span class="l-zh">推荐</span></button>
+          <button data-sort="new" role="tab"><span class="l-en">New</span><span class="l-zh">最新</span></button>
           <button data-sort="trending" role="tab"><span class="l-en">Trending</span><span class="l-zh">趋势</span></button>
           <button data-sort="installs" role="tab"><span class="l-en">Top</span><span class="l-zh">最热</span></button>
         </div>
@@ -302,7 +303,7 @@ const desc = "Browse, publish, and install community skills, plugins, and MCP se
   <script>
     import { accountSession } from '../scripts/account-nav.js';
     const REGISTRY = import.meta.env.PUBLIC_REGISTRY_ORIGIN || 'https://crash.reasonix.io';
-    const state = { kind: 'all', sort: 'new', q: '' };
+    const state = { kind: 'all', sort: 'recommended', q: '' };
     let currentUser = null;
 
     const grid = document.getElementById('pkg-grid');
@@ -322,12 +323,29 @@ const desc = "Browse, publish, and install community skills, plugins, and MCP se
 
     function show(el, on) { if (el) el.hidden = !on; }
 
+    function browserInstallId() {
+      const fresh = () => Array.from(crypto.getRandomValues(new Uint8Array(16)), (b) => b.toString(16).padStart(2, '0')).join('');
+      try {
+        let id = localStorage.getItem('reasonix-install-id');
+        if (!/^[0-9a-f]{32}$/.test(id || '')) {
+          id = fresh();
+          localStorage.setItem('reasonix-install-id', id);
+        }
+        return id;
+      } catch {
+        return fresh();
+      }
+    }
+
     function card(p) {
       const badge = p.verified
         ? '<span class="pkg-badge verified">✓ verified</span>'
         : '<span class="pkg-badge community">community</span>';
       const tags = (p.tags || []).slice(0, 4).map((t) => `<span>${esc(t)}</span>`).join('');
-      const stars = p.starCount > 0 ? `<span class="pkg-stars">★ ${p.starCount}</span>` : '';
+      const votes = (p.upCount || 0) + (p.downCount || 0);
+      const stars = votes > 0 && typeof p.approvalRate === 'number'
+        ? `<span class="pkg-stars" title="▲ ${p.upCount || 0} · ▼ ${p.downCount || 0}">▲ ${Math.round(p.approvalRate * 100)}% · ${votes}</span>`
+        : '';
       const repo = p.repoUrl ? ` · <a href="${esc(p.repoUrl)}" target="_blank" rel="noreferrer">repo</a>` : '';
       return `<article class="pkg-card">
         <div class="pkg-top"><span class="${kindClass(p.kind)}">${esc(p.kind)}</span>${badge}${stars}</div>
@@ -367,8 +385,8 @@ const desc = "Browse, publish, and install community skills, plugins, and MCP se
     function feedLine(e) {
       const who = e.actor ? `<b>@${esc(e.actor)}</b> ` : '';
       const link = e.slug ? `<a href="#" data-slug="${esc(e.slug)}">${esc(e.slug)}</a>` : '';
-      const verb = { publish: 'published', update: 'updated', star: 'starred', milestone: '' };
-      const ico = { publish: '↑', update: '↻', star: '★', milestone: '◎' }[e.type] || '•';
+      const verb = { publish: 'published', update: 'updated', star: 'upvoted', milestone: '' };
+      const ico = { publish: '↑', update: '↻', star: '▲', milestone: '◎' }[e.type] || '•';
       const text = e.type === 'milestone' ? esc(e.summary) : `${who}${verb[e.type] || e.type} ${link}`;
       return `<li class="feed-item"><span class="fx"><span class="ico">${ico}</span> ${text}</span><span class="ft">${rel(e.createdAt)}</span></li>`;
     }
@@ -404,8 +422,13 @@ const desc = "Browse, publish, and install community skills, plugins, and MCP se
       btn.classList.add('copied');
       btn.textContent = '✓';
       setTimeout(() => { btn.classList.remove('copied'); btn.textContent = 'Copy'; }, 1400);
-      // Best-effort install ping — powers the trending rank.
-      fetch(`${REGISTRY}/v1/packages/${btn.dataset.slug}/installed`, { method: 'POST' }).catch(() => {});
+      // Best-effort install ping. The registry counts one per (browser id,
+      // package, day); the id is random and lives only in this browser.
+      fetch(`${REGISTRY}/v1/packages/${btn.dataset.slug}/installed`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ installId: browserInstallId() }),
+      }).catch(() => {});
     });
 
     // Toolbar
