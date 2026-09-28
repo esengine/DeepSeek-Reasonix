@@ -3,16 +3,18 @@
 //
 //   reputation = Wilson 95% lower bound of up / (up + down)
 //   heat       = min(1, ln(1 + decayed) / ln(1 + HEAT_CAP))
-//   decayed    = Σ over the last WINDOW_DAYS of deduped daily installs × 0.5^(age / HALF_LIFE_DAYS)
+//   decayed    = Σ over distinct anonymous install ids seen in the last WINDOW_DAYS
+//                of 0.5^(age of that id's latest install / HALF_LIFE_DAYS)
 //   score      = REPUTATION_WEIGHT × reputation + HEAT_WEIGHT × heat
-export const REPUTATION_WEIGHT = 0.6;
-export const HEAT_WEIGHT = 0.4;
+// Heat rests on anonymous ids anyone can mint, so it carries the smaller weight.
+export const REPUTATION_WEIGHT = 0.75;
+export const HEAT_WEIGHT = 0.25;
 export const WILSON_Z = 1.96;
 export const WINDOW_DAYS = 30;
 export const HALF_LIFE_DAYS = 14;
 // A fixed ceiling rather than the listing's own maximum, so a package's score
 // does not depend on which page, filter or search it was read under.
-export const HEAT_CAP = 1000;
+export const HEAT_CAP = 5000;
 
 // Review flag: heavily and mostly down-voted packages go to the moderation
 // console. Nothing is hidden automatically.

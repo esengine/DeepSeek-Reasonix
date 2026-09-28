@@ -56,7 +56,7 @@ export class InstallRepo {
     return { counted, count, packageId: pkg.id, scopeHandle: pkg.scope_handle };
   }
 
-  // Dedupe keys only matter for the day they name; older rows are dead weight.
+  // Rows older than the heat window no longer feed any count.
   async purgeBefore(date: string): Promise<void> {
     await this.db.prepare("DELETE FROM package_install_seen WHERE date < ?1").bind(date).run();
   }

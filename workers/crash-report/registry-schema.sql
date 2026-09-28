@@ -81,8 +81,9 @@ CREATE TABLE IF NOT EXISTS votes (
   PRIMARY KEY (package_id, user_id)
 );
 -- Install de-duplication: one counted install per (anonymous install, package,
--- UTC day). install_key is a client-derived one-way id, never an IP. fresh is 1
--- only between the insert and the counters it feeds, inside one batch.
+-- UTC day), kept for the 30-day heat window, which counts distinct keys.
+-- install_key is a client-chosen anonymous id, never an IP. fresh is 1 only
+-- between the insert and the counters it feeds, inside one batch.
 CREATE TABLE IF NOT EXISTS package_install_seen (
   install_key TEXT    NOT NULL,
   package_id  INTEGER NOT NULL,

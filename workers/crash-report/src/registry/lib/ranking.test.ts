@@ -54,9 +54,19 @@ describe("recommendScore", () => {
     expect(REPUTATION_WEIGHT + HEAT_WEIGHT).toBeCloseTo(1, 12);
     const today = "2026-09-27";
     const s = recommendScore(10, 0, [{ date: today, count: 10 }], today);
-    expect(s).toBeCloseTo(0.6 * wilsonLowerBound(10, 0) + 0.4 * heat(10), 5);
+    expect(REPUTATION_WEIGHT).toBe(0.75);
+    expect(HEAT_WEIGHT).toBe(0.25);
+    expect(HEAT_CAP).toBe(5000);
+    expect(s).toBeCloseTo(0.75 * wilsonLowerBound(10, 0) + 0.25 * heat(10), 5);
     expect(recommendScore(10, 0, [{ date: today, count: 10 }], today)).toBe(s);
     expect(recommendScore(0, 0, [], today)).toBe(0);
+  });
+
+  it("keeps any number of minted install ids below a solid vote record", () => {
+    const today = "2026-09-27";
+    const flooded = recommendScore(0, 0, [{ date: today, count: 1_000_000 }], today);
+    expect(flooded).toBeCloseTo(HEAT_WEIGHT, 6);
+    expect(recommendScore(50, 2, [], today)).toBeGreaterThan(flooded);
   });
 });
 

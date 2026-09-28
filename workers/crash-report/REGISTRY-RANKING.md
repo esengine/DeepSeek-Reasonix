@@ -26,24 +26,30 @@ that file must say the same thing.
   counts at most once per (install id, package, UTC day). `install_count` and
   the daily rollup move only on that first count.
 - The install id is anonymous and chosen by the client. Reasonix Studio sends a
-  one-way hash of its local install id and never its telemetry id itself, and
-  sends nothing when anonymous usage statistics are switched off. The registry
-  stores no IP address; dedupe rows are deleted by the cron once the following
-  UTC day has also passed (kept at most about two days).
+  random id it keeps only for the market, unrelated to its usage-statistics id,
+  and sends nothing when anonymous usage statistics are switched off. The registry
+  stores no IP address; dedupe rows are kept for the 30-day heat window and
+  then deleted by the cron.
 - A ping without a well-formed `installId` is acknowledged and not counted.
 
 ## Recommended order (the default sort)
 
 ```
 reputation = Wilson score lower bound (z = 1.96, 95%) of up / (up + down); 0 with no votes
-decayed    = Σ over the last 30 UTC days of deduped installs that day × 0.5^(age_days / 14)
-heat       = min(1, ln(1 + decayed) / ln(1 + 1000))
-score      = 0.6 × reputation + 0.4 × heat
+decayed    = Σ over distinct install ids seen in the last 30 UTC days of 0.5^(age_days / 14),
+             age_days measured to that id's latest install of the package
+heat       = min(1, ln(1 + decayed) / ln(1 + 5000))
+score      = 0.75 × reputation + 0.25 × heat
 ```
 
-- `heat` is normalized against a fixed cap (1000 decayed installs), not the
+- `heat` is normalized against a fixed cap (5000 decayed distinct ids), not the
   largest value in the current page, so a package's score does not change with
   the filter or search it was listed under.
+- Install ids are anonymous and anyone can mint new ones, bounded only by the
+  per-IP write limit (30 a minute), so heat carries the smaller weight: however
+  many ids are minted, heat adds at most 0.25, which is below the reputation
+  alone of a package with a solid vote record (50 up / 2 down gives 0.65). An
+  id returning on several days counts once.
 - The score is materialized in `packages.rec_score`: recomputed for a package
   when it receives a vote or a counted install, and for every package by the
   Worker's cron (decay changes scores with no write). It is computed in the

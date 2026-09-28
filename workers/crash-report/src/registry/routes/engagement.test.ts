@@ -189,6 +189,23 @@ describe("install pings", () => {
     }
   });
 
+  it("feeds heat with distinct ids, once each on their latest day", async () => {
+    const t = setup();
+    const { InstallRepo } = await import("../db/installs");
+    try {
+      const repo = new InstallRepo(t.db);
+      await repo.record("alice/review", key(7), "2026-09-20T10:00:00.000Z");
+      await repo.record("alice/review", key(7), "2026-09-26T10:00:00.000Z");
+      await repo.record("alice/review", key(8), "2026-09-26T11:00:00.000Z");
+      await rescore(t.db, "2026-09-27");
+      const row = t.sqlite.prepare("SELECT rec_score, install_count FROM packages WHERE slug = 'alice/review'").get() as { rec_score: number; install_count: number };
+      expect(row.install_count).toBe(3);
+      expect(row.rec_score).toBe(recommendScore(0, 0, [{ date: "2026-09-26", count: 2 }], "2026-09-27"));
+    } finally {
+      t.close();
+    }
+  });
+
   it("counts the same id again on a later day", async () => {
     const t = setup();
     const { InstallRepo } = await import("../db/installs");
@@ -264,6 +281,23 @@ describe("activity feed", () => {
       await t.vote("alice/review", "carol", 1);
       const events = t.sqlite.prepare("SELECT actor_handle FROM events WHERE type = 'star'").all() as { actor_handle: string }[];
       expect(events.map((e) => e.actor_handle)).toEqual(["bob", "carol"]);
+    } finally {
+      t.close();
+    }
+  });
+});
+
+describe("maintenance", () => {
+  it("keeps install ids for the whole heat window and drops older ones", async () => {
+    const t = setup();
+    const { maintainRegistry } = await import("../maintenance");
+    try {
+      const add = t.sqlite.prepare("INSERT INTO package_install_seen (install_key, package_id, date, fresh) VALUES (?1, 1, ?2, 0)");
+      add.run("a".repeat(32), "2026-08-29");
+      add.run("b".repeat(32), "2026-08-28");
+      await maintainRegistry(t.db, new Date("2026-09-27T12:00:00.000Z"));
+      const left = t.sqlite.prepare("SELECT date FROM package_install_seen").all() as { date: string }[];
+      expect(left.map((r) => r.date)).toEqual(["2026-08-29"]);
     } finally {
       t.close();
     }

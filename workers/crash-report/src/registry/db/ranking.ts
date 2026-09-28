@@ -2,8 +2,8 @@ import { WINDOW_DAYS, recommendScore, type DailyInstalls } from "../lib/ranking"
 
 const UPDATE_CHUNK = 50;
 
-// Recomputes packages.rec_score from the vote counts and the deduped daily
-// installs. Called for one package after a vote or a counted install, and for
+// Recomputes packages.rec_score from the vote counts and the distinct install
+// ids of the window, each counted once on the latest day it was seen. Called for one package after a vote or a counted install, and for
 // every package by the cron, because decay moves scores with no write at all.
 export async function rescore(db: D1Database, today: string, packageId?: number): Promise<number> {
   const one = packageId !== undefined;
@@ -13,8 +13,11 @@ export async function rescore(db: D1Database, today: string, packageId?: number)
     .all<{ id: number; up_count: number; down_count: number; rec_score: number }>();
   const days = await db
     .prepare(
-      `SELECT package_id, date, count FROM package_install_daily
-       WHERE date >= date(?1, '-${WINDOW_DAYS - 1} day')${one ? " AND package_id = ?2" : ""}`,
+      `SELECT package_id, latest AS date, COUNT(*) AS count FROM (
+         SELECT package_id, install_key, MAX(date) AS latest FROM package_install_seen
+         WHERE date >= date(?1, '-${WINDOW_DAYS - 1} day')${one ? " AND package_id = ?2" : ""}
+         GROUP BY package_id, install_key
+       ) GROUP BY package_id, latest`,
     )
     .bind(...(one ? [today, packageId] : [today]))
     .all<{ package_id: number; date: string; count: number }>();
