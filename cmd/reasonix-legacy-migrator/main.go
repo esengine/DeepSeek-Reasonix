@@ -190,8 +190,8 @@ func migrateWithRelaunch(installRoot, activeVersion string, relaunch bool) error
 		}
 	}
 	shellMembers, err := installlayout.ShellMembers(installRoot, runtime.GOOS)
-	if err != nil {
-		return fmt.Errorf("migrate shell: %w", err)
+	if err != nil || len(shellMembers) == 0 {
+		return refuseShellMissing(installRoot, activeVersion, relaunch, err)
 	}
 	for _, member := range shellMembers {
 		members = append(members, member)
@@ -431,24 +431,34 @@ func ensureLauncherEntry(installRoot string) error {
 	return nil
 }
 
-func finalizeLegacyPendingUpdate(installRoot, activeVersion string) error {
+// readLegacyPendingUpdate returns the transaction an old file updater left for
+// this install and version, or nil when there is none.
+func readLegacyPendingUpdate(installRoot, activeVersion string) (*repair.UpdateTransaction, error) {
 	tx, err := repair.ReadPendingUpdate()
 	if os.IsNotExist(err) {
-		return nil
+		return nil, nil
 	}
 	if err != nil {
-		return fmt.Errorf("migrate: read legacy pending update: %w", err)
+		return nil, fmt.Errorf("migrate: read legacy pending update: %w", err)
 	}
 	if tx.TargetKind != "file" {
-		return fmt.Errorf("migrate: legacy pending update target kind %q is not supported", tx.TargetKind)
+		return nil, fmt.Errorf("migrate: legacy pending update target kind %q is not supported", tx.TargetKind)
 	}
 	if strings.TrimSpace(tx.ToVersion) != strings.TrimSpace(activeVersion) {
-		return fmt.Errorf("migrate: pending update targets %s, not %s", tx.ToVersion, activeVersion)
+		return nil, fmt.Errorf("migrate: pending update targets %s, not %s", tx.ToVersion, activeVersion)
 	}
 	for _, target := range append([]repair.UpdateTransactionFile{{TargetPath: tx.TargetPath}}, tx.Files...) {
 		if !pathWithinInstallRoot(installRoot, target.TargetPath) {
-			return fmt.Errorf("migrate: pending update target escapes install root")
+			return nil, fmt.Errorf("migrate: pending update target escapes install root")
 		}
+	}
+	return tx, nil
+}
+
+func finalizeLegacyPendingUpdate(installRoot, activeVersion string) error {
+	tx, err := readLegacyPendingUpdate(installRoot, activeVersion)
+	if err != nil || tx == nil {
+		return err
 	}
 	id := repair.UpdateTransactionID(tx)
 	if err := repair.MarkUpdateHealthyExact(activeVersion, tx.CreatedAt, id); err != nil {

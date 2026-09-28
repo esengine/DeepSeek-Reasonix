@@ -11,6 +11,10 @@ import (
 )
 
 func TestMain(m *testing.M) {
+	// A legacy-updater child keeps the home its parent test chose.
+	if mode := os.Getenv(legacyChildModeEnv); mode != "" {
+		os.Exit(runLegacyChild(mode))
+	}
 	testenv.RunWithIsolatedUserState(m)
 }
 
@@ -69,6 +73,7 @@ func writeInstallerStaging(t *testing.T, root, label string, includeLauncher boo
 func TestMigrateFlatInstallToVersioned(t *testing.T) {
 	root := t.TempDir()
 	writeFlatUnit(t, root, "flat")
+	writeShellTree(t, root, "flat")
 	// Thin launcher entry must already exist (packaging places it). Use a
 	// non-executable marker so startLauncher fails closed without hanging.
 	_ = os.WriteFile(filepath.Join(root, "reasonix-launcher"), []byte("launcher"), 0o644)
