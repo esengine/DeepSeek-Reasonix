@@ -54,6 +54,40 @@ func TestBashMergesLoginShellPath(t *testing.T) {
 	}
 }
 
+func TestBashInjectsConfiguredShellEnv(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("preset shell env test uses a POSIX shell")
+	}
+	// An inherited value the preset must override, so precedence is exercised.
+	t.Setenv("REASONIX_PRESET_ENV", "ambient")
+
+	b := bash{
+		shell: sandbox.Shell{Kind: sandbox.ShellBash, Path: "/bin/sh"},
+		sb:    sandbox.Spec{ShellEnv: map[string]string{"REASONIX_PRESET_ENV": "from-config"}},
+	}
+	args, _ := json.Marshal(map[string]string{"command": `printf '%s' "$REASONIX_PRESET_ENV"`})
+	out, err := b.Execute(context.Background(), args)
+	if err != nil {
+		t.Fatalf("bash failed: %v (out=%q)", err, out)
+	}
+	if !strings.Contains(out, "from-config") {
+		t.Fatalf("configured shell env not applied: out=%q", out)
+	}
+}
+
+func TestShellEnvOverridesSortsAndDropsInvalidKeys(t *testing.T) {
+	got := shellEnvOverrides(map[string]string{"B": "2", "A": "1", "BAD=KEY": "x", "": "y"})
+	want := []string{"A=1", "B=2"}
+	if len(got) != len(want) {
+		t.Fatalf("shellEnvOverrides = %v, want %v", got, want)
+	}
+	for i := range want {
+		if got[i] != want[i] {
+			t.Fatalf("shellEnvOverrides = %v, want %v", got, want)
+		}
+	}
+}
+
 func TestBashCommandEnvFiltersSensitiveKeysWhenEnabled(t *testing.T) {
 	secrets.SetFilterSubprocessEnv(true)
 	t.Cleanup(func() { secrets.SetFilterSubprocessEnv(false) })
@@ -141,5 +175,33 @@ func TestRunShellPATHCommandFiltersEnvWhenEnabled(t *testing.T) {
 	out := runShellPATHCommand(context.Background(), "/bin/sh", []string{"-c", `printf 'tok=%s' "${REASONIX_TEST_SECRET_TOKEN:-none}"`})
 	if !strings.Contains(string(out), "tok=none") {
 		t.Fatalf("login-shell PATH probe leaked filtered env: %q", out)
+	}
+}
+
+// A Windows environment block is case-insensitive, so the session's TMPDIR must
+// displace a preset tmpdir rather than leave two entries the child cannot keep.
+func TestShellEnvMapFoldsKeysCaseInsensitivelyOnWindows(t *testing.T) {
+	prev := shellEnvKeyEqual
+	shellEnvKeyEqual = func(a, b string) bool { return strings.EqualFold(a, b) }
+	t.Cleanup(func() { shellEnvKeyEqual = prev })
+
+	got := shellEnvMap(map[string]string{"tmpdir": "/preset", "CI": "1"}, map[string]string{"TMPDIR": "/session"})
+	if _, ok := got["tmpdir"]; ok {
+		t.Fatalf("the preset casing survived the fold: %v", got)
+	}
+	if got["TMPDIR"] != "/session" || got["CI"] != "1" || len(got) != 2 {
+		t.Fatalf("shellEnvMap = %v, want TMPDIR=/session and CI=1", got)
+	}
+}
+
+// Where key identity is case-sensitive the two casings are different variables,
+// so the session's value displaces only its own key.
+func TestShellEnvMapKeepsDistinctCasingOnCaseSensitivePlatforms(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("case-sensitive key identity is POSIX-only")
+	}
+	got := shellEnvMap(map[string]string{"tmpdir": "/preset"}, map[string]string{"TMPDIR": "/session"})
+	if len(got) != 2 || got["tmpdir"] != "/preset" || got["TMPDIR"] != "/session" {
+		t.Fatalf("shellEnvMap = %v, want both casings kept", got)
 	}
 }

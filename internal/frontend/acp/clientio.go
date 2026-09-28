@@ -97,9 +97,9 @@ const terminalOutputByteLimit = 1 << 20
 // capability or creation fails — the bash tool then executes locally. A
 // timeout kills the terminal and returns what it printed.
 //
-// envOverrides are standard temporary-directory variables (TMPDIR/TMP/TEMP)
-// for the session-private temp directory. They are serialized as ACP v1
-// EnvVariable[] and never include the full host environment.
+// envOverrides are the temporary-directory variables (TMPDIR/TMP/TEMP) for the
+// session-private temp directory, plus the user's [tools.shell] env. They never
+// carry the full host environment.
 func (c *clientIO) RunCommand(ctx context.Context, command, cwd string, timeout time.Duration, envOverrides map[string]string) (string, bool, error) {
 	if !c.caps.Terminal {
 		return "", false, nil

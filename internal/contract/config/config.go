@@ -1445,15 +1445,6 @@ type SearchConfig struct {
 	RgPath string `toml:"rg_path"`
 }
 
-// ShellConfig chooses the interpreter the bash tool runs commands under. Prefer
-// is "auto" (default — real bash when present, else PowerShell on Windows),
-// "bash", or "powershell"/"pwsh" (force it; warn at startup and fall back to
-// auto if absent). Path optionally points at a specific shell executable.
-type ShellConfig struct {
-	Prefer string `toml:"prefer"`
-	Path   string `toml:"path"`
-}
-
 // PermissionsConfig declares the per-call permission policy (see
 // internal/safety/permission). Mode is the fallback decision for writer tools when no
 // rule matches ("ask" | "allow" | "deny"; default "ask"); read-only tools always

@@ -153,13 +153,13 @@ func TestGrantedDaemonIsReachable(t *testing.T) {
 
 func TestAuthorityEndpointsFollowTheClientsResolution(t *testing.T) {
 	t.Setenv("DOCKER_HOST", "tcp://10.0.0.1:2375")
-	for _, p := range authorityEndpoints(Docker) {
+	for _, p := range authorityEndpoints(Docker, os.Getenv) {
 		if strings.Contains(p, "10.0.0.1") {
 			t.Error("a tcp:// daemon was treated as a socket to mask; it belongs to the network axis")
 		}
 	}
 	t.Setenv("SSH_AUTH_SOCK", filepath.Join(t.TempDir(), "missing.sock"))
-	if got := existingSockets(authorityEndpoints(SSHAgent)); len(got) != 0 {
+	if got := existingSockets(authorityEndpoints(SSHAgent, os.Getenv)); len(got) != 0 {
 		t.Errorf("a missing endpoint was kept (%v); masking it would fail the sandbox closed", got)
 	}
 }
@@ -171,7 +171,7 @@ func TestAuthorityEndpointsFollowTheClientsResolution(t *testing.T) {
 func TestAuthorityEndpointsCoverEveryGovernedClient(t *testing.T) {
 	t.Setenv("CONTAINER_HOST", "")
 	t.Setenv("XDG_RUNTIME_DIR", "/run/user/4242")
-	got := authorityEndpoints(Podman)
+	got := authorityEndpoints(Podman, os.Getenv)
 	want := filepath.Join("/run/user/4242", "podman", "podman.sock")
 	if !slices.Contains(got, want) {
 		t.Fatalf("podman endpoints = %v, want the per-user socket %s", got, want)
@@ -179,7 +179,53 @@ func TestAuthorityEndpointsCoverEveryGovernedClient(t *testing.T) {
 
 	// An authority nothing governs has no endpoints. Returning a default here
 	// would mask a path on the strength of a name this table never resolved.
-	if got := authorityEndpoints(HostAuthority("nothing-governs-this")); got != nil {
+	if got := authorityEndpoints(HostAuthority("nothing-governs-this"), os.Getenv); got != nil {
 		t.Fatalf("ungoverned authority resolved to %v, want nothing", got)
+	}
+}
+
+// TestAuthorityEndpointsFollowTheShellEnvOverride: [tools.shell] env reaches the
+// confined command, so the client there reads the preset value and the preset
+// socket is the one the backend has to name.
+func TestAuthorityEndpointsFollowTheShellEnvOverride(t *testing.T) {
+	host := filepath.Join(t.TempDir(), "host-agent.sock")
+	preset := filepath.Join(t.TempDir(), "preset-agent.sock")
+	t.Setenv("SSH_AUTH_SOCK", host)
+
+	got := authorityEndpoints(SSHAgent, effectiveGetenv(map[string]string{"SSH_AUTH_SOCK": preset}))
+	if len(got) != 1 || got[0] != preset {
+		t.Fatalf("ssh-agent endpoint = %v, want the preset %s", got, preset)
+	}
+	if got := authorityEndpoints(SSHAgent, effectiveGetenv(nil)); len(got) != 1 || got[0] != host {
+		t.Fatalf("ssh-agent endpoint = %v, want the host's %s", got, host)
+	}
+}
+
+// TestPresetAuthorityEndpointIsMasked is the acceptance test for the bypass the
+// preset would otherwise open: the host names a socket that does not exist, so
+// only the preset path can make the agent reachable, and a resolution reading
+// the host environment alone leaves that socket unmasked.
+func TestPresetAuthorityEndpointIsMasked(t *testing.T) {
+	f := newAuthorityFixture(t)
+	t.Setenv("SSH_AUTH_SOCK", filepath.Join(t.TempDir(), "host-agent.sock"))
+
+	spec := f.spec(false)
+	spec.ShellEnv = map[string]string{"SSH_AUTH_SOCK": f.sock}
+
+	script := `import os,socket
+try:
+    s=socket.socket(socket.AF_UNIX); s.connect(os.environ["SSH_AUTH_SOCK"]); print(s.recv(16).decode())
+except Exception as e: print("agent unreachable:", e)`
+	argv, wrapped := CommandArgs(spec, []string{"python3", "-c", script})
+	if !wrapped {
+		t.Fatal("spec did not wrap; the test would measure nothing")
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+	cmd := exec.CommandContext(ctx, argv[0], argv[1:]...)
+	cmd.Env = append(os.Environ(), "SSH_AUTH_SOCK="+f.sock)
+	out, _ := cmd.CombinedOutput()
+	if strings.Contains(string(out), "AGENT-OK") {
+		t.Errorf("the preset ssh-agent socket stayed reachable: %s", out)
 	}
 }

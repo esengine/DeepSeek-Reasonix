@@ -126,7 +126,7 @@ func (r Roots) loadForRoot(root string, migrateOnDisk bool) (*Config, error) {
 	userDefaultModel := cfg.DefaultModel
 	globalCLI := cfg.CLI
 	globalSecrets := cfg.Secrets
-	globalSandbox := holdUserSandbox(cfg.Sandbox)
+	globalSandbox := holdUserGlobals(cfg.Sandbox, cfg.Tools.Shell.Env)
 	globalRemote, globalStorage, globalServe := cfg.Remote.Clone(), maps.Clone(cfg.Storage), cfg.Serve
 	globalDesktopLanguage := cfg.Desktop.Language
 	globalPricingCurrency := cfg.Desktop.Currency
@@ -155,8 +155,8 @@ func (r Roots) loadForRoot(root string, migrateOnDisk bool) (*Config, error) {
 	// reasonix.toml must not be able to flip on the workflow-breaking env/path
 	// protections.
 	cfg.Secrets = globalSecrets
-	// Sandbox grants are the same kind of control (see heldSandbox).
-	globalSandbox.restore(&cfg.Sandbox)
+	// Sandbox grants are the same kind of control (see heldUserGlobals).
+	globalSandbox.restore(cfg, projectMeta)
 	// Remote hosts, storage locations and serve authentication are user-global:
 	// a repo must not inject hosts or forwards, redirect where transcripts live,
 	// or choose serve's launch token, auth mode, or trust in forwarded headers.

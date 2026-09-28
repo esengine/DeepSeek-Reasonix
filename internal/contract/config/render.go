@@ -369,18 +369,7 @@ func RenderTOMLForScope(c *Config, scope RenderScope) string {
 	b.WriteString("[tools.background_jobs]\n")
 	fmt.Fprintf(&b, "stalled_warning_seconds = %d   # warn once per background job after this many quiet seconds; 0 disables\n\n", c.BackgroundJobStalledWarningSeconds())
 
-	b.WriteString("[tools.shell]\n")
-	b.WriteString("# The interpreter the bash tool runs commands in; your login shell does not change it.\n")
-	if c.Tools.Shell.Prefer != "" {
-		fmt.Fprintf(&b, "prefer = %q   # auto|bash|powershell|pwsh; empty/default = auto-detect\n", c.Tools.Shell.Prefer)
-	} else {
-		b.WriteString("# prefer = \"auto\"   # auto|bash|powershell|pwsh; empty/default = auto-detect\n")
-	}
-	if c.Tools.Shell.Path != "" {
-		fmt.Fprintf(&b, "path   = %q   # absolute path to the shell executable; empty = PATH lookup\n\n", c.Tools.Shell.Path)
-	} else {
-		b.WriteString("# path   = \"/opt/homebrew/bin/bash\"   # absolute path to the shell executable; empty = PATH lookup\n\n")
-	}
+	renderToolsShell(&b, c.Tools.Shell, scope)
 
 	renderLSPConfig(&b, c.LSP)
 
@@ -865,7 +854,9 @@ func RenderTOMLProjectDelta(c *Config) string {
 	}
 
 	// [tools.shell]
-	if !reflect.DeepEqual(c.Tools.Shell, d.Tools.Shell) {
+	// Env is user-global, so it is never part of a project delta; comparing the
+	// whole struct would write an empty [tools.shell] header on every save.
+	if c.Tools.Shell.Prefer != d.Tools.Shell.Prefer || c.Tools.Shell.Path != d.Tools.Shell.Path {
 		b.WriteString("[tools.shell]\n")
 		if c.Tools.Shell.Prefer != d.Tools.Shell.Prefer {
 			fmt.Fprintf(&b, "prefer = %q\n", c.Tools.Shell.Prefer)

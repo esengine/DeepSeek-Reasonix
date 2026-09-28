@@ -66,7 +66,7 @@ func resolveToolEnvironment(opts Options, cfg *config.Config, roots config.Roots
 	// tools, never raw shell writes, so the bash write roots stay unwidened.
 	env.managedConfig = builtin.NewManagedConfigPaths(config.ReasonixManagedConfigPaths())
 	env.bash = sandbox.Spec{Mode: bashMode, WriteRoots: env.writeRoots, ForbidReadRoots: env.forbidReadRoots, Network: env.network,
-		HostAuthorities: sandbox.ParseAuthorities(cfg.Sandbox.HostAuthorities), Shell: shell}
+		HostAuthorities: sandbox.ParseAuthorities(cfg.Sandbox.HostAuthorities), Shell: shell, ShellEnv: cfg.Tools.Shell.Env}
 	// Agent writes into Reasonix's own session stores race the app's saves;
 	// an explicit allow_write entry stays the sanctioned escape hatch.
 	allowWriteRoots := cfg.AllowWriteRoots()

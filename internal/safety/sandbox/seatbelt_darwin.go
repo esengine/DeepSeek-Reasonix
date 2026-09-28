@@ -305,10 +305,11 @@ func forbidReadDirs(roots []string) []string {
 // grantedAuthorityEndpoints are the sockets that must survive a blanket network
 // denial, so revoking external egress does not silently revoke local signing.
 func grantedAuthorityEndpoints(s Spec) []string {
+	getenv := effectiveGetenv(s.ShellEnv)
 	var out []string
 	for _, a := range GovernedAuthorities() {
 		if s.Granted(a) {
-			out = append(out, existingSockets(authorityEndpoints(a))...)
+			out = append(out, existingSockets(authorityEndpoints(a, getenv))...)
 		}
 	}
 	return out
