@@ -162,6 +162,12 @@ described above. The variables below are process-level advanced switches; set
 them before launching Reasonix. Project `.env` files are not a runtime source for
 Reasonix control variables.
 
+To hand extra variables to every command the `bash` tool runs, set the
+user-global `[tools.shell.env]` table in `config.toml` (for example
+`BASH_ENV`). It is applied over the inherited environment; a project
+`reasonix.toml` cannot set it, so a cloned repository cannot inject variables
+into your commands.
+
 ### CLI telemetry
 
 The CLI can send a once-per-day anonymous active-install ping and bounded,

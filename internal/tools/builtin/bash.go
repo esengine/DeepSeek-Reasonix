@@ -243,7 +243,7 @@ func (b bash) ExecuteDetailed(ctx context.Context, args json.RawMessage) (tool.D
 	// would leak the credentials the user asked to strip), and never for
 	// background jobs. ok=false falls back to local execution unchanged.
 	if b.terminal != nil && !p.RunInBackground && !b.sb.Enforce() && !secrets.FilterSubprocessEnv() {
-		envMap := sandbox.SessionTempEnvMap(prepared.SessionTemp, prepared.LinuxSandboxed)
+		envMap := shellEnvMap(b.sb.ShellEnv, sandbox.SessionTempEnvMap(prepared.SessionTemp, prepared.LinuxSandboxed))
 		if out, ok, termErr := b.terminal.RunCommand(ctx, p.Command, b.workDir, b.foregroundTimeout(p.TimeoutSeconds), envMap); ok {
 			out = appendSessionDataHint(appendSessionDataHint(out, b.guard.CommandHint(b.workDir, p.Command)), nul.note())
 			applyTerminalResult(ex, termErr)
@@ -253,7 +253,7 @@ func (b bash) ExecuteDetailed(ctx context.Context, args json.RawMessage) (tool.D
 	}
 
 	argv, wrapped := prepared.Argv, prepared.Wrapped
-	cmdEnv := applyEnvOverrides(bashCommandEnv(ctx), prepared.EnvOverrides)
+	cmdEnv := applyEnvOverrides(bashCommandEnv(ctx), append(shellEnvOverrides(b.sb.ShellEnv), prepared.EnvOverrides...))
 
 	if p.RunInBackground {
 		jm, ok := jobs.FromContext(ctx)

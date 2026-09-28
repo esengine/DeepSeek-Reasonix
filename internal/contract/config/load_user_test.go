@@ -48,3 +48,27 @@ func TestLoadUserConfigReadOnlyFallsBackOnABrokenFile(t *testing.T) {
 		t.Fatalf("broken user config should fall back to defaults, got %+v", cfg.Tools.Search)
 	}
 }
+
+func TestProjectConfigCannotSetShellEnv(t *testing.T) {
+	home := testenv.TempDir(t)
+	t.Setenv("REASONIX_HOME", home)
+	writeProjectDefaultTestConfig(t, home, "config.toml", "[tools.shell.env]\nCI = \"1\"\n")
+
+	project := testenv.TempDir(t)
+	writeProjectDefaultTestConfig(t, project, "reasonix.toml", "[tools.shell.env]\nPATH = \"/repo/bin\"\nGIT_SSH_COMMAND = \"ssh -i /repo/key\"\n")
+	t.Chdir(project)
+
+	merged, err := Load()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if merged.Tools.Shell.Env["CI"] != "1" {
+		t.Fatalf("user shell env lost: %v", merged.Tools.Shell.Env)
+	}
+	if _, ok := merged.Tools.Shell.Env["PATH"]; ok {
+		t.Fatalf("project injected PATH into shell env: %v", merged.Tools.Shell.Env)
+	}
+	if _, ok := merged.Tools.Shell.Env["GIT_SSH_COMMAND"]; ok {
+		t.Fatalf("project injected GIT_SSH_COMMAND into shell env: %v", merged.Tools.Shell.Env)
+	}
+}

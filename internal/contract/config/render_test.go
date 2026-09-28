@@ -258,6 +258,7 @@ func TestRenderTOMLRoundTrips(t *testing.T) {
 	orig.Tools.BackgroundJobs.StalledWarningSeconds = new(30)
 	orig.Tools.Shell.Prefer = "bash"
 	orig.Tools.Shell.Path = "/usr/local/bin/bash"
+	orig.Tools.Shell.Env = map[string]string{"CI": "1", "GIT_SSH_COMMAND": "ssh -i ~/.ssh/deploy"}
 	orig.Permissions = PermissionsConfig{
 		Mode:             "deny",
 		Deny:             []string{"Bash(rm -rf*)"},
@@ -451,6 +452,9 @@ func TestRenderTOMLRoundTrips(t *testing.T) {
 	}
 	if got.Tools.Shell.Path != "/usr/local/bin/bash" {
 		t.Errorf("tools.shell.path = %q, want /usr/local/bin/bash", got.Tools.Shell.Path)
+	}
+	if got.Tools.Shell.Env["CI"] != "1" || got.Tools.Shell.Env["GIT_SSH_COMMAND"] != "ssh -i ~/.ssh/deploy" {
+		t.Errorf("tools.shell.env = %v, want CI=1 and GIT_SSH_COMMAND", got.Tools.Shell.Env)
 	}
 	if g, _ := got.Provider("mimo-pro"); g == nil || g.BaseURL != "http://localhost:8000/v1" || g.ChatURL != "http://localhost:8000/v1/chat/completions" || g.RequestURL != "http://localhost:8000/custom/chat/completions/?token=1" || g.ModelsURL != "http://localhost:8000/v1/models" || g.ReasoningProtocol != "openai" {
 		t.Errorf("mimo-pro endpoint fields not preserved: %+v", g)
@@ -857,6 +861,20 @@ func TestProjectDeltaRendersToolsShellOverrides(t *testing.T) {
 	}
 	if got.Tools.Shell.Prefer != "bash" || got.Tools.Shell.Path != "/usr/local/bin/bash" {
 		t.Fatalf("tools.shell = %+v, want bash with path", got.Tools.Shell)
+	}
+}
+
+func TestShellEnvRendersForUserButNotProject(t *testing.T) {
+	c := Default()
+	c.Tools.Shell.Env = map[string]string{"CI": "1"}
+
+	user := RenderTOMLForScope(c, RenderScopeUser)
+	if !strings.Contains(user, "[tools.shell.env]") || !strings.Contains(user, `CI = "1"`) {
+		t.Fatalf("user render should carry shell env:\n%s", user)
+	}
+	project := RenderTOMLForScope(c, RenderScopeProject)
+	if strings.Contains(project, "[tools.shell.env]") {
+		t.Fatalf("project render must not carry the user-global shell env:\n%s", project)
 	}
 }
 

@@ -165,6 +165,10 @@ bash allowlist 或信任提示。Plan 与常规模式使用相同的 Permissions
 多数日常设置应写在 `config.toml` 或前文提到的 Reasonix 全局 `.env` 中。下面这些变量是进程级高级开关；
 需要在启动 Reasonix 之前设置。项目 `.env` 不是 Reasonix 控制变量的运行时来源。
 
+要让 `bash` 工具运行的每条命令都额外继承环境变量，可在 `config.toml` 里设置用户全局的
+`[tools.shell.env]` 表（例如 `BASH_ENV`）。它叠加在继承的环境之上；项目
+`reasonix.toml` 无法设置它，因此克隆来的仓库无法向你的命令注入变量。
+
 ### CLI 上报统计
 
 CLI 可以向 `https://crash.reasonix.io` 发送每日最多一次的匿名活跃安装 ping，

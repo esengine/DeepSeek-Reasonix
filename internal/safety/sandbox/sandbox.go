@@ -66,6 +66,9 @@ type Spec struct {
 	// Path) means the tool resolves one itself; the composition root sets it from
 	// [tools.shell] so the configured choice rides along with the spec.
 	Shell Shell
+	// ShellEnv are extra environment variables every bash command inherits, from
+	// [tools.shell] env; host-owned session/egress overrides still win.
+	ShellEnv map[string]string
 	// SessionTemp is the absolute path of the logical-session private temporary
 	// directory for this command. When set, Linux bubblewrap binds it at /tmp
 	// (instead of a fresh tmpfs), and all platforms export TMPDIR/TMP/TEMP so

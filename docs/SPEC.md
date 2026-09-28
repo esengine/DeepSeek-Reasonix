@@ -1143,6 +1143,8 @@ mcp_call_timeout_seconds = 300   # default MCP call safety cap; plugin/tool over
 [tools.shell]
 prefer = "auto"   # auto (default) | bash | powershell | pwsh — force the shell tool's interpreter
 # path = "C:\\Program Files\\PowerShell\\7\\pwsh.exe"   # explicit executable for the chosen shell
+# [tools.shell.env]   # extra variables every bash command inherits (user-global; a project reasonix.toml cannot set this)
+# BASH_ENV = "~/.reasonix/bashsandbox.rc"
 
 [skills]
 # paths = ["~/my-skills", "../shared/skills"]   # extra custom skill roots

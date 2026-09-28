@@ -54,6 +54,40 @@ func TestBashMergesLoginShellPath(t *testing.T) {
 	}
 }
 
+func TestBashInjectsConfiguredShellEnv(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("preset shell env test uses a POSIX shell")
+	}
+	// An inherited value the preset must override, so precedence is exercised.
+	t.Setenv("REASONIX_PRESET_ENV", "ambient")
+
+	b := bash{
+		shell: sandbox.Shell{Kind: sandbox.ShellBash, Path: "/bin/sh"},
+		sb:    sandbox.Spec{ShellEnv: map[string]string{"REASONIX_PRESET_ENV": "from-config"}},
+	}
+	args, _ := json.Marshal(map[string]string{"command": `printf '%s' "$REASONIX_PRESET_ENV"`})
+	out, err := b.Execute(context.Background(), args)
+	if err != nil {
+		t.Fatalf("bash failed: %v (out=%q)", err, out)
+	}
+	if !strings.Contains(out, "from-config") {
+		t.Fatalf("configured shell env not applied: out=%q", out)
+	}
+}
+
+func TestShellEnvOverridesSortsAndDropsInvalidKeys(t *testing.T) {
+	got := shellEnvOverrides(map[string]string{"B": "2", "A": "1", "BAD=KEY": "x", "": "y"})
+	want := []string{"A=1", "B=2"}
+	if len(got) != len(want) {
+		t.Fatalf("shellEnvOverrides = %v, want %v", got, want)
+	}
+	for i := range want {
+		if got[i] != want[i] {
+			t.Fatalf("shellEnvOverrides = %v, want %v", got, want)
+		}
+	}
+}
+
 func TestBashCommandEnvFiltersSensitiveKeysWhenEnabled(t *testing.T) {
 	secrets.SetFilterSubprocessEnv(true)
 	t.Cleanup(func() { secrets.SetFilterSubprocessEnv(false) })
