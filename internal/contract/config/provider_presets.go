@@ -185,7 +185,7 @@ func kimiK3DirectOverride() ProviderModelOverride {
 	}
 }
 
-var curatedProviderPresets = []ProviderPreset{
+var curatedProviderPresets = append([]ProviderPreset{
 	deepSeekAnthropicPreset(),
 	deepSeekResponsesPreset(),
 	{
@@ -922,7 +922,7 @@ var curatedProviderPresets = []ProviderPreset{
 			APIKeyEnv: "OLLAMA_API_KEY",
 		}},
 	},
-}
+}, tsubasaPreset())
 
 func cloneProviderPreset(p ProviderPreset) ProviderPreset {
 	p.Entries = cloneProviderEntries(p.Entries)

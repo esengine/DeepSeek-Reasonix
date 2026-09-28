@@ -177,6 +177,10 @@ webview dependencies and Linux build tags.
 Install and launch Studio, then connect a provider and model in the app. No CLI
 setup is needed.
 
+Choose the **Tsubasa** provider preset to use `tsubasa-pro` or `tsubasa-fast`.
+Save your API key during setup; the preset uses the dedicated `TSUBASA_API_KEY`
+credential and a 32,768-token context window with an 8,192-token output budget.
+
 ### CLI / TUI
 
 ```sh
