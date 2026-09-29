@@ -1,6 +1,7 @@
 package plugin
 
 import (
+	"errors"
 	"sync"
 	"testing"
 
@@ -46,4 +47,21 @@ func TestAnnounceReportsWithoutPromptsOrResources(t *testing.T) {
 // must not take the connection down with it.
 func TestAnnounceToleratesNoSink(t *testing.T) {
 	NewHost().announce("x: connected")
+}
+
+func TestConnectionStateChangesAnnounceStatus(t *testing.T) {
+	h := NewHost()
+	sink := &capturedSink{}
+	h.SetStatusSink(sink)
+	_, owner := h.beginSpawn("tools", "tools")
+	if !owner || len(h.ConnectingServers()) != 1 {
+		t.Fatal("server did not enter connecting state")
+	}
+	h.endSpawn("tools", nil, errors.New("connection refused"))
+	h.RecordFailure(Spec{Name: "tools", Type: "http"}, errors.New("connection refused"))
+	sink.mu.Lock()
+	defer sink.mu.Unlock()
+	if len(sink.text) != 2 || sink.text[0] != "tools: connecting" || sink.text[1] != "tools: connection failed" {
+		t.Fatalf("status announcements = %v", sink.text)
+	}
 }

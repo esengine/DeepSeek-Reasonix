@@ -306,88 +306,45 @@ func (s *Server) mcp(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	ctl := s.ctl()
-	out := []mcpEntry{}
 	configured := ctl.ConfiguredMCPServers()
 	declared := make(map[string]control.MCPServerState, len(configured))
 	for _, st := range configured {
 		declared[st.Entry.Name] = st
 	}
-	// A runtime-only server has no configured declaration; it is live, so it is
-	// on by definition.
-	on := func(name string) bool {
-		st, ok := declared[name]
-		return st.Enabled || !ok
-	}
 	host := ctl.Host()
-	seen := map[string]bool{}
+	live := map[string]plugin.ServerStatus{}
+	failures := map[string]plugin.Failure{}
 	if host != nil {
 		for _, srv := range host.Servers() {
-			seen[srv.Name] = true
-			out = append(out, mcpEntry{
-				Name: srv.Name, State: "ready", Enabled: on(srv.Name), LocalOverride: declared[srv.Name].LocalOverride,
-				Transport: srv.Transport, Source: srv.ConfigSource,
-				Description: displayText(srv.Description, mcpServerTextLimit),
-				Tools:       srv.Tools, Prompts: srv.Prompts, Resources: srv.Resources,
-				ToolList: mcpToolViews(srv.ToolList),
-			})
-		}
-		for _, name := range host.ConnectingServers() {
-			if !seen[name] {
-				seen[name] = true
-				out = append(out, remembered(declared[name], mcpEntry{
-					Name: name, State: "connecting", Enabled: on(name),
-					Source: string(declared[name].Entry.Source), LocalOverride: declared[name].LocalOverride,
-				}))
-			}
+			live[srv.Name] = srv
 		}
 		for _, f := range host.Failures() {
-			if seen[f.Name] {
-				continue
+			failures[f.Name] = f
+		}
+	}
+	out := make([]mcpEntry, 0, len(configured))
+	for _, health := range ctl.MCPServerHealth() {
+		st, configured := declared[health.Name]
+		row := mcpEntry{
+			Name: health.Name, State: health.Status, Enabled: st.Enabled || !configured,
+			LocalOverride: st.LocalOverride, Transport: st.Entry.Type,
+			Source: string(st.Entry.Source), Error: health.Error, HTTPStatus: health.HTTPStatus,
+			Tools: health.Tools, AlwaysLoad: st.AlwaysLoad, InSchema: st.InSchema,
+		}
+		if srv, ok := live[health.Name]; ok && health.Status == "ready" {
+			row.Transport, row.Source = srv.Transport, srv.ConfigSource
+			row.Description = displayText(srv.Description, mcpServerTextLimit)
+			row.Prompts, row.Resources = srv.Prompts, srv.Resources
+			row.ToolList = mcpToolViews(srv.ToolList)
+		} else {
+			if f, ok := failures[health.Name]; ok && health.Status == "failed" {
+				row.Transport = f.Transport
 			}
-			seen[f.Name] = true
-			out = append(out, remembered(declared[f.Name], mcpEntry{
-				Name: f.Name, State: "failed", Enabled: on(f.Name), LocalOverride: declared[f.Name].LocalOverride,
-				Transport: f.Transport, Source: string(declared[f.Name].Entry.Source), Error: f.Error,
-				HTTPStatus: f.HTTPStatus,
-			}))
+			row = remembered(st, row)
 		}
-	}
-	// Configured with no process running, which is three different things —
-	// the catalog tells the last two apart, not the host. configuredState below
-	// carries the reasoning.
-	inCatalog := ctl.MCPCatalogTools()
-	for _, st := range configured {
-		if seen[st.Entry.Name] {
-			continue
-		}
-		out = append(out, remembered(st, mcpEntry{
-			Name: st.Entry.Name, State: configuredState(st, inCatalog[st.Entry.Name]),
-			Enabled: st.Enabled, LocalOverride: st.LocalOverride,
-			Transport: st.Entry.Type, Source: string(st.Entry.Source),
-		}))
-	}
-	for i := range out {
-		if st, ok := declared[out[i].Name]; ok {
-			out[i].AlwaysLoad, out[i].InSchema = st.AlwaysLoad, st.InSchema
-		}
+		out = append(out, row)
 	}
 	writeJSON(w, map[string]any{"servers": out, "scope": scopeView(ctl)})
-}
-
-// configuredState is what a server with no process running is. Three answers,
-// not two: switched off, standing by with its tools already in the catalog and
-// the process due to start on the first call, or holding nothing to offer yet.
-// The middle one is the steady state of every working cache-hit server, and
-// reporting it as a failed connection is what sent people looking for a fault.
-func configuredState(st control.MCPServerState, inCatalog int) string {
-	switch {
-	case !st.Enabled:
-		return "disabled"
-	case inCatalog == 0:
-		return "idle"
-	default:
-		return "standby"
-	}
 }
 
 // remembered fills a row that has no live connection to ask with what the last

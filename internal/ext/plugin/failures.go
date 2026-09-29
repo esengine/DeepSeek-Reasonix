@@ -42,7 +42,6 @@ func requiresLaunchApproval(err error) bool {
 // RecordFailure stores a failed MCP connection attempt for status UIs.
 func (h *Host) RecordFailure(s Spec, err error) {
 	h.mu.Lock()
-	defer h.mu.Unlock()
 	tt := strings.ToLower(strings.TrimSpace(s.Type))
 	if tt == "" {
 		tt = "stdio"
@@ -56,10 +55,14 @@ func (h *Host) RecordFailure(s Spec, err error) {
 	for i := range h.failures {
 		if h.failures[i].Name == s.Name {
 			h.failures[i] = f
+			h.mu.Unlock()
+			h.announce("%s: connection failed", s.Name)
 			return
 		}
 	}
 	h.failures = append(h.failures, f)
+	h.mu.Unlock()
+	h.announce("%s: connection failed", s.Name)
 }
 
 // RecordLaunchApprovalRequired keeps an intentionally disconnected project MCP

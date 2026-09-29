@@ -738,36 +738,6 @@ func (h *Host) EnsureConnectedInBackground(lifeCtx context.Context, s Spec) <-ch
 	return result
 }
 
-// beginSpawn atomically claims the sole right to spawn the named server.
-// Returns owner=true if the caller should proceed. When another caller is
-// already spawning the same server, owner=false and done is closed when that
-// spawn finishes.
-func (h *Host) beginSpawn(key, server string) (*spawnAttempt, bool) {
-	h.spawningMu.Lock()
-	defer h.spawningMu.Unlock()
-	if h.spawning == nil {
-		h.spawning = make(map[string]*spawnAttempt)
-	}
-	if attempt, ok := h.spawning[key]; ok {
-		return attempt, false
-	}
-	attempt := &spawnAttempt{server: server, done: make(chan struct{})}
-	h.spawning[key] = attempt
-	return attempt, true
-}
-
-// endSpawn releases the spawn claim for the named server.
-func (h *Host) endSpawn(name string, tools []tool.Tool, err error) {
-	h.spawningMu.Lock()
-	if attempt, ok := h.spawning[name]; ok {
-		attempt.tools = append([]tool.Tool(nil), tools...)
-		attempt.err = err
-		delete(h.spawning, name)
-		close(attempt.done)
-	}
-	h.spawningMu.Unlock()
-}
-
 // has reports whether a server with this name is already connected.
 func (h *Host) has(name string) bool {
 	h.mu.RLock()
