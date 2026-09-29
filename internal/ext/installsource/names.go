@@ -16,6 +16,13 @@ import (
 // packages like @5/test are rare but valid).
 var packageNameRe = regexp.MustCompile(`^[a-zA-Z0-9._-]+$`)
 
+// isPackageSegment reports whether s is a valid npm name segment. A segment
+// made only of dots ("." or "..") matches packageNameRe but is a path
+// component, not a name.
+func isPackageSegment(s string) bool {
+	return packageNameRe.MatchString(s) && strings.Trim(s, ".") != ""
+}
+
 func isURL(s string) bool {
 	u, err := url.Parse(s)
 	return err == nil && (u.Scheme == "http" || u.Scheme == "https") && u.Host != ""
@@ -88,9 +95,9 @@ func SplitPackageSpec(s string) (name, version string, ok bool) {
 	}
 	if strings.HasPrefix(name, "@") {
 		parts := strings.Split(name, "/")
-		ok = len(parts) == 2 && packageNameRe.MatchString(parts[0][1:]) && packageNameRe.MatchString(parts[1])
+		ok = len(parts) == 2 && isPackageSegment(parts[0][1:]) && isPackageSegment(parts[1])
 	} else {
-		ok = packageNameRe.MatchString(name)
+		ok = isPackageSegment(name)
 	}
 	return name, version, ok
 }

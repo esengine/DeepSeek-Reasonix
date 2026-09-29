@@ -116,3 +116,16 @@ func TestPackageMCPActionPinnedVersion(t *testing.T) {
 		}
 	}
 }
+
+func TestLooksLikePackageRejectsDotOnlySegments(t *testing.T) {
+	for _, s := range []string{"@a/..", "@../b", "@./b", "@a/.", "@../..", "@a/..@1.2.3"} {
+		if LooksLikePackage(s) {
+			t.Errorf("LooksLikePackage(%q) = true, want false", s)
+		}
+	}
+	for _, s := range []string{"@a/b.c", "@a.b/c", "@a/b..c", "@a/..b", "@a/b.."} {
+		if !LooksLikePackage(s) {
+			t.Errorf("LooksLikePackage(%q) = false, want true", s)
+		}
+	}
+}
