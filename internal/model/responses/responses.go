@@ -49,19 +49,26 @@ func newFromConfig(cfg provider.Config) (provider.Provider, error) {
 	maxOutputTokens, _ := cfg.Extra["max_output_tokens"].(int)
 	requestURL, _ := cfg.Extra["request_url"].(string)
 	reasoningModes, _ := cfg.Extra["reasoning_modes"].(map[string]string)
-	return New(Config{
-		Name: cfg.Name, APIKey: cfg.APIKey, APIKeyFunc: cfg.APIKeyFunc, BaseURL: cfg.BaseURL, Model: cfg.Model,
+	built := New(Config{
+		HTTP1Only: cfg.HTTP1Only,
+		Name:      cfg.Name, APIKey: cfg.APIKey, APIKeyFunc: cfg.APIKeyFunc, BaseURL: cfg.BaseURL, Model: cfg.Model,
 		Effort: effort, Mode: mode, Stateful: stateful, WebSearch: webSearch, Proxy: proxy,
 		KeyEnv: keyEnv, KeySource: keySource, MaxOutputTokens: maxOutputTokens, RequestURL: requestURL,
 		ReasoningModes: reasoningModes,
 		// Extra 原样透传：vision 等能力开关由调用方（boot/CLI）写入
 		// cfg.Extra，factory 若丢弃则 New() 读不到（评审 #7234 第 3 点）。
 		Extra: cfg.Extra,
-	}), nil
+	}).(*client)
+	if built.initErr != nil {
+		return nil, built.initErr
+	}
+	return built, nil
 }
 
 // Config holds Responses API provider settings.
 type Config struct {
+	// HTTP1Only disables HTTP/2 negotiation for this Responses connection.
+	HTTP1Only         bool
 	Name              string
 	APIKey            string
 	APIKeyFunc        func() string // asked per request; an empty answer falls back to APIKey
@@ -110,6 +117,7 @@ func (c Config) mode() string {
 // deepseek (incl. eu.deepseek.com) / mimo via exact-host matching.
 
 type client struct {
+	initErr                            error
 	name, keyEnv, keySource            string
 	apiKey                             func() string
 	baseURL, requestURL, model, effort string
@@ -162,13 +170,11 @@ func New(cfg Config) provider.Provider {
 	if vendor == "deepseek" {
 		vision = vision && provideropenai.DeepSeekTakesImages(cfg.Model)
 	}
-	httpClient := &http.Client{Timeout: 300 * time.Second}
-	if built, err := netclient.NewHTTPClient(cfg.Proxy, netclient.TransportOptions{
+	httpClient, initErr := netclient.NewHTTPClient(cfg.Proxy, netclient.TransportOptions{
+		HTTP1Only:   cfg.HTTP1Only,
 		DialTimeout: 30 * time.Second, KeepAlive: 30 * time.Second,
 		TLSHandshakeTimeout: 15 * time.Second, ResponseHeaderTimeout: provider.StreamIdleTimeout,
-	}); err == nil {
-		httpClient = built
-	}
+	})
 	baseURL := strings.TrimRight(strings.TrimSpace(cfg.BaseURL), "/")
 	requestURL := strings.TrimSpace(cfg.RequestURL)
 	if requestURL == "" || provider.EndpointOverrideRepeatsBase(requestURL, baseURL) {
@@ -179,7 +185,7 @@ func New(cfg Config) provider.Provider {
 		baseURL: baseURL, requestURL: requestURL, model: cfg.Model, effort: cfg.Effort,
 		vendor: vendor, caps: cap, mode: cfg.mode(), session: sessionHeaders{dashScopeCache: sessionCache, openCode: provider.NewOpenCodeSessionID()}, webSearch: cfg.WebSearch, maxOutputTokens: maxOutputTokens,
 		vision: vision, reasoningModes: cfg.ReasoningModes,
-		http: httpClient, idleTimeout: defaultStreamIdleTimeout,
+		http: httpClient, initErr: initErr, idleTimeout: defaultStreamIdleTimeout,
 	}
 }
 
@@ -261,6 +267,9 @@ func (c *client) ResetContext() {
 }
 
 func (c *client) Stream(ctx context.Context, req provider.Request) (<-chan provider.Chunk, error) {
+	if c.initErr != nil {
+		return nil, c.initErr
+	}
 	requestCtx := provider.WithRequestAttemptCounter(ctx)
 	body, usedPrevious, wireMessages := c.buildRequestBody(req)
 	resp, err := c.send(requestCtx, body)

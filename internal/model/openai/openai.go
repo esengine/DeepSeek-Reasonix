@@ -34,7 +34,6 @@ import (
 	"sync/atomic"
 	"time"
 
-	"reasonix/internal/base/netclient"
 	"reasonix/internal/contract/provider"
 )
 
@@ -257,16 +256,6 @@ func New(cfg provider.Config) (provider.Provider, error) {
 		idleTimeout:        defaultStreamIdleTimeout,
 		openCodeSession:    provider.NewOpenCodeSessionID(),
 	}, nil
-}
-
-func newHTTPClient(cfg provider.Config) (*http.Client, error) {
-	spec, _ := cfg.Extra["proxy_spec"].(netclient.ProxySpec)
-	return netclient.NewHTTPClient(spec, netclient.TransportOptions{
-		DialTimeout:           30 * time.Second,
-		KeepAlive:             30 * time.Second,
-		TLSHandshakeTimeout:   15 * time.Second,
-		ResponseHeaderTimeout: provider.StreamIdleTimeout,
-	})
 }
 
 type client struct {

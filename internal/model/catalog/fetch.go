@@ -5,9 +5,11 @@ import (
 	"context"
 	"fmt"
 	"net/http"
+	"reasonix/internal/base/netclient"
 	"reasonix/internal/contract/config"
 	"slices"
 	"strings"
+	"time"
 
 	"reasonix/internal/model/openai"
 )
@@ -52,6 +54,15 @@ func FetchModelsVia(ctx context.Context, e *config.ProviderEntry, client *http.C
 func FetchModelListingVia(ctx context.Context, e *config.ProviderEntry, client *http.Client) ([]openai.ListedModel, error) {
 	if e.BaseURL == "" {
 		return nil, fmt.Errorf("fetch models: provider %q has no base_url", e.Name)
+	}
+	if client == nil && e.HTTP1Only {
+		var err error
+		client, err = netclient.NewHTTPClient(netclient.ProxySpec{Mode: netclient.ModeAuto}, netclient.TransportOptions{HTTP1Only: true})
+		if err != nil {
+			return nil, err
+		}
+		client.Timeout = 10 * time.Second
+		defer client.CloseIdleConnections()
 	}
 	key := e.APIKey()
 	if e.RequiresAPIKey() && key == "" {

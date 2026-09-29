@@ -5,6 +5,7 @@ package netclient
 
 import (
 	"context"
+	"crypto/tls"
 	"fmt"
 	"net"
 	"net/http"
@@ -45,6 +46,8 @@ type ProxySpec struct {
 // sharing proxy behavior. ForceIPv4 pins the dialer to tcp4 — the desktop updater
 // uses it to retry over IPv4 when an IPv6 route (CN → Cloudflare) resets mid-transfer.
 type TransportOptions struct {
+	// HTTP1Only disables HTTP/2 negotiation without changing proxy or TLS trust settings.
+	HTTP1Only             bool
 	DialTimeout           time.Duration
 	KeepAlive             time.Duration
 	TLSHandshakeTimeout   time.Duration
@@ -98,6 +101,20 @@ func NewTransport(spec ProxySpec, opts TransportOptions) (*http.Transport, error
 		return nil, err
 	}
 	tr.Proxy = proxy
+	if opts.HTTP1Only {
+		tr.Protocols = new(http.Protocols)
+		tr.Protocols.SetHTTP1(true)
+		tr.ForceAttemptHTTP2 = false
+		// A cloned, already-initialized default transport can retain h2 ALPN
+		// and TLS handlers. Clear both before use, including custom trust roots.
+		tr.TLSNextProto = map[string]func(string, *tls.Conn) http.RoundTripper{}
+		if tr.TLSClientConfig == nil {
+			tr.TLSClientConfig = &tls.Config{}
+		} else {
+			tr.TLSClientConfig = tr.TLSClientConfig.Clone()
+		}
+		tr.TLSClientConfig.NextProtos = []string{"http/1.1"}
+	}
 	if opts.DialTimeout != 0 || opts.KeepAlive != 0 || opts.ForceIPv4 {
 		d := &net.Dialer{Timeout: opts.DialTimeout, KeepAlive: opts.KeepAlive}
 		if opts.ForceIPv4 {

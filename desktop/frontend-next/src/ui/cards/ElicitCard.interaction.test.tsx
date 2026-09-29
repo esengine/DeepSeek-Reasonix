@@ -1,13 +1,19 @@
 // @vitest-environment jsdom
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { cleanup, render, screen } from "@testing-library/react";
+import { act, cleanup, render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import type { Item } from "../../state/session";
 import { ElicitCard } from "./ElicitCard";
 
-afterEach(cleanup);
-
-const pending = () => new Promise<void>((resolve) => setTimeout(resolve, 20));
+const pendingCalls: (() => void)[] = [];
+const pending = () => new Promise<void>((resolve) => pendingCalls.push(resolve));
+const settle = () => act(async () => {
+  for (const resolve of pendingCalls.splice(0)) resolve();
+});
+afterEach(async () => {
+  await settle();
+  cleanup();
+});
 
 const form = (extra: Partial<Extract<Item, { t: "ask" }>> = {}) => ({
   t: "ask", id: "row", ...extra, ask: { id: "ask", origin: { kind: "mcp", source: "deployer", message: "Deploy settings", note: "Email is required" }, questions: [
@@ -34,6 +40,10 @@ describe("a server's form", () => {
       { questionId: "email", selected: ["ada@example.com"] },
       { questionId: "env", selected: ["dev"] },
     ]);
+    expect((screen.getByRole("button", { name: "正在提交…" }) as HTMLButtonElement).disabled).toBe(true);
+    expect((screen.getByRole("button", { name: "拒绝提供" }) as HTMLButtonElement).disabled).toBe(true);
+    await settle();
+    expect((screen.getByRole("button", { name: "提交" }) as HTMLButtonElement).disabled).toBe(false);
   });
 
   it("declines with nothing given", async () => {

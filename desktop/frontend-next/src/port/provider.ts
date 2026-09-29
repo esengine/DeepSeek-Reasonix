@@ -2,6 +2,7 @@
 // probed, what was confirmed, and the few fields no probe can answer.
 
 export interface ProviderEntry {
+  http1Only?: boolean;
   name: string;
   // The label a person gave this source. Only ever shown: every ref, the
   // default model and saved sessions keep pointing at name.
@@ -142,6 +143,7 @@ export interface ProviderModelCheck {
 }
 
 export interface ProviderModelCheckRequest {
+  http1Only?: boolean;
   name?: string;
   model: string;
   baseUrl?: string;
@@ -153,6 +155,7 @@ export interface ProviderModelCheckRequest {
 
 // Changing a source that already exists: everything else on the entry stays.
 export interface ProviderEdit {
+  http1Only?: boolean;
   name: string;
   baseUrl?: string;
   // Empty keeps the stored key.
@@ -187,6 +190,7 @@ export interface ModelEffort {
 
 // What the panel sends back after the user has looked at the probe.
 export interface ProviderDraft {
+  http1Only?: boolean;
   name: string;
   kind: string;
   baseUrl: string;

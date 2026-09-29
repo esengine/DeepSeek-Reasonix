@@ -14,11 +14,11 @@ export class SseProvider extends SseBoundary {
   // A refused key, a path the endpoint does not serve and an embedding-only
   // gateway are three different fixes. post0 keeps the kernel's coded refusal
   // on HttpError; a bare Error would flatten it back to one string.
-  probeProvider(baseUrl: string, apiKey: string): Promise<ProviderProbe> {
-    return this.post0<ProviderProbe>("/providers/probe", { baseUrl, apiKey });
+  probeProvider(baseUrl: string, apiKey: string, http1Only?: boolean): Promise<ProviderProbe> {
+    return this.post0<ProviderProbe>("/providers/probe", { baseUrl, apiKey, http1Only });
   }
-  checkProvider(name: string): Promise<ProviderCheck> {
-    return this.post0<ProviderCheck>("/providers/check", { name });
+  checkProvider(name: string, http1Only?: boolean): Promise<ProviderCheck> {
+    return this.post0<ProviderCheck>("/providers/check", { name, http1Only });
   }
   checkProviderModel(request: ProviderModelCheckRequest): Promise<ProviderModelCheck> {
     return this.post0<ProviderModelCheck>("/providers/check/model", request);

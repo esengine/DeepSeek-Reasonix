@@ -1,3 +1,4 @@
+import { HTTPCompatibility } from "./HTTPCompatibility";
 import { useEffect, useRef, useState } from "react";
 import { t } from "../i18n";
 import type { ProviderCheck, ProviderEntry } from "../port/port";
@@ -22,6 +23,7 @@ export function EditConn({
   const seededModels = [...new Set([...entry.models, ...(initialCheck?.models ?? [])])];
   const seededVision = [...new Set([...(entry.visionModels ?? []), ...(initialCheck?.vision ?? [])])];
   const [baseUrl, setBaseUrl] = useState(entry.baseUrl);
+  const [http1Only, setHTTP1Only] = useState(entry.http1Only ?? false);
   const [apiKey, setApiKey] = useState("");
   const [models, setModels] = useState<string[]>(seededModels);
   const [picked, setPicked] = useState<string[]>(entry.models);
@@ -85,8 +87,8 @@ export function EditConn({
     setErr("");
     try {
       const refreshed = apiKey.trim()
-        ? await port.probeProvider(baseUrl.trim(), apiKey.trim())
-        : await port.checkProvider(entry.name);
+        ? await port.probeProvider(baseUrl.trim(), apiKey.trim(), http1Only)
+        : await port.checkProvider(entry.name, http1Only);
       const found = refreshed.models ?? [];
       if (found.length === 0) throw new Error("这个端点没报出任何聊天模型");
       const readers = refreshed.vision ?? [];
@@ -114,6 +116,7 @@ export function EditConn({
     try {
       const got = await port.checkProviderModel({
         name: entry.name,
+        http1Only,
         model,
         baseUrl: baseUrl.trim(),
         apiKey: apiKey.trim(),
@@ -155,6 +158,7 @@ export function EditConn({
     try {
       await port.editProvider({
         name: entry.name,
+        http1Only,
         baseUrl: baseUrl.trim(),
         apiKey: apiKey.trim(),
         models: picked,
@@ -258,7 +262,7 @@ export function EditConn({
       <details className="addp-options" open={more} onToggle={(e) => setMore(e.currentTarget.open)}>
         <summary data-action="provider.draft" data-value="compat">
           <span className="tx">
-            <strong>{t("思考参数与推理档位")}</strong>
+            <strong>{t("连接兼容与推理设置")}</strong>
             <small>{t("以及额外请求头、请求体。中转站的推理强度在这里声明")}</small>
           </span>
           <span className="summary-value">
@@ -267,6 +271,7 @@ export function EditConn({
         </summary>
         {more && (
           <div className="fields compat addp-options-body">
+            <HTTPCompatibility kind={entry.kind} value={http1Only} onChange={value => { setHTTP1Only(value); setFacts(clearModelCheckFacts); }} disabled={Boolean(busy) || checkingModel !== ""} />
             <label className="grow full">
               <span>{t("思考参数")}</span>
               <select ref={reasoning} value={think} onChange={(e) => setThink(e.target.value)}>

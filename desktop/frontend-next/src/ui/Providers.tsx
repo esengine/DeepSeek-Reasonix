@@ -20,10 +20,10 @@ import { StudioIcon } from "./StudioIcon";
 export type Port = {
   providers(): Promise<ProviderEntry[]>;
   protocols(): Promise<Protocol[]>;
-  probeProvider(baseUrl: string, apiKey: string): Promise<ProviderProbe>;
+  probeProvider(baseUrl: string, apiKey: string, http1Only?: boolean): Promise<ProviderProbe>;
   saveProvider(draft: ProviderDraft): Promise<void>;
   removeProvider(name: string): Promise<void>;
-  checkProvider(name: string): Promise<ProviderCheck>;
+  checkProvider(name: string, http1Only?: boolean): Promise<ProviderCheck>;
   checkProviderModel(request: ProviderModelCheckRequest): Promise<ProviderModelCheck>;
   editProvider(edit: ProviderEdit): Promise<void>;
   setProviderWebSearch(name: string, on: boolean): Promise<void>;

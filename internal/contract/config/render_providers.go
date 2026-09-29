@@ -112,6 +112,9 @@ func renderProviderEntryAnnotatedTuning(b *strings.Builder, p ProviderEntry) {
 	if len(p.ModelOverrides) > 0 {
 		fmt.Fprintf(b, "model_overrides   = %s   # per-model context/output/reasoning/vision overrides for mixed gateways\n", renderModelOverrides(p.ModelOverrides))
 	}
+	if p.HTTP1Only {
+		b.WriteString("http1_only = true\n")
+	}
 	if p.NoProxy {
 		b.WriteString("no_proxy    = true   # reach this base_url directly, never via the proxy\n")
 	}
@@ -217,6 +220,9 @@ func renderProviderEntryPlainTuning(b *strings.Builder, p ProviderEntry) {
 	}
 	if len(p.ModelOverrides) > 0 {
 		fmt.Fprintf(b, "model_overrides   = %s\n", renderModelOverrides(p.ModelOverrides))
+	}
+	if p.HTTP1Only {
+		b.WriteString("http1_only = true\n")
 	}
 	if p.NoProxy {
 		b.WriteString("no_proxy    = true\n")

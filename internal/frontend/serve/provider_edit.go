@@ -24,13 +24,15 @@ func (s *Server) editProvider(w http.ResponseWriter, r *http.Request) {
 	// empty" stay different answers: a client that does not show them must not
 	// silently clear the headers a gateway needs.
 	var body struct {
-		Name            string             `json:"name"`
-		BaseURL         string             `json:"baseUrl"`
-		APIKey          string             `json:"apiKey"`
-		Models          []string           `json:"models"`
-		Default         string             `json:"default"`
-		Vision          []string           `json:"vision"`
-		ContextWindow   *int               `json:"contextWindow"`
+		Name          string   `json:"name"`
+		BaseURL       string   `json:"baseUrl"`
+		APIKey        string   `json:"apiKey"`
+		Models        []string `json:"models"`
+		Default       string   `json:"default"`
+		Vision        []string `json:"vision"`
+		ContextWindow *int     `json:"contextWindow"`
+		// HTTP1Only changes transport policy when present; nil preserves the saved choice.
+		HTTP1Only       *bool              `json:"http1Only"`
 		MaxOutputTokens *int               `json:"maxOutputTokens"`
 		Headers         *map[string]string `json:"headers"`
 		ExtraBody       *map[string]any    `json:"extraBody"`
@@ -90,6 +92,9 @@ func (s *Server) editProvider(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		entry.MaxOutputTokens = *body.MaxOutputTokens
+	}
+	if body.HTTP1Only != nil {
+		entry.HTTP1Only = *body.HTTP1Only
 	}
 	if body.Headers != nil {
 		entry.Headers = trimmedHeaders(*body.Headers)
@@ -173,7 +178,7 @@ func assemblyShape(e *config.ProviderEntry) string {
 		return v
 	}
 	shape := []any{
-		e.BaseURL, orNil(len(e.Models), e.Models), e.Vision, orNil(len(e.VisionModels), e.VisionModels),
+		e.BaseURL, e.HTTP1Only, orNil(len(e.Models), e.Models), e.Vision, orNil(len(e.VisionModels), e.VisionModels),
 		orNil(len(e.ModelOverrides), e.ModelOverrides), e.ContextWindow, e.MaxOutputTokens,
 		orNil(len(e.Headers), e.Headers), orNil(len(e.ExtraBody), e.ExtraBody), e.ReasoningProtocol,
 		orNil(len(e.SupportedEfforts), e.SupportedEfforts), e.DefaultEffort,

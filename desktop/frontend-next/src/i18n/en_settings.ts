@@ -2,6 +2,10 @@
 // alone — one catalogue is still the model, and this file is read as its
 // continuation: same keying by Chinese source text, same grouping by screen.
 export const EN_SETTINGS: Record<string, string> = {
+  "HTTP 连接协议": "HTTP connection protocol",
+  "连接兼容与推理设置": "Connection compatibility and reasoning",
+  "自动协商（默认）": "Automatic negotiation (default)",
+  "遇到 HTTP/2 协议兼容问题时可尝试 HTTP/1.1。保存不会重发失败请求；正在运行的对话可能需要重新加载连接。": "Try HTTP/1.1 for HTTP/2 compatibility problems. Saving does not resend failed requests; a running conversation may need its connection reloaded.",
   "步骤 1 · 连接服务": "Step 1 · Connect service",
   "先连接服务，再选择这个来源要启用的模型。": "Connect the service, then choose which models to enable from it.",
   "来源名称": "Source name",

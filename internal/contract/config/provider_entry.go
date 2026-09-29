@@ -94,6 +94,8 @@ type ProviderEntry struct {
 	// NoProxy reaches this provider's base_url directly, never through the proxy.
 	// For China-only endpoints a foreign-exit proxy resets the TLS handshake (#2803).
 	NoProxy bool `toml:"no_proxy"`
+	// HTTP1Only disables HTTP/2 negotiation for this provider; false preserves automatic negotiation.
+	HTTP1Only bool `toml:"http1_only,omitempty"`
 	// CacheTTLMinutes overrides the vendor-default prefix-cache retention used by
 	// cold-resume prune. Zero uses the vendor default (DeepSeek/unknown 24h, DashScope/Anthropic 5m).
 	CacheTTLMinutes int `toml:"cache_ttl_minutes"`

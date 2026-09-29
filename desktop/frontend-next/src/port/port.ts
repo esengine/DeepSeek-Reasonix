@@ -299,10 +299,10 @@ export interface AgentPort {
   // Asks an endpoint what it is. Writes nothing — the answer is shown for
   // confirmation, because only the person holding the key knows what they
   // bought.
-  probeProvider(baseUrl: string, apiKey: string): Promise<ProviderProbe>;
+  probeProvider(baseUrl: string, apiKey: string, http1Only?: boolean): Promise<ProviderProbe>;
   // Re-probes what is already saved, so "is the key still good, and is this
   // still the protocol we recorded" is one button rather than a re-add.
-  checkProvider(name: string): Promise<ProviderCheck>;
+  checkProvider(name: string, http1Only?: boolean): Promise<ProviderCheck>;
   checkProviderModel(request: ProviderModelCheckRequest): Promise<ProviderModelCheck>;
   saveProvider(draft: ProviderDraft): Promise<void>;
   // Changes only the fields the form owns. Saving a whole entry instead would

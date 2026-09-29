@@ -140,7 +140,7 @@ export class MockProvider extends MockBoundary {
     this.sources = this.sources.map((p) =>
       p.name === edit.name
         ? {
-            ...p, models: edit.models, default: edit.default, visionModels: edit.vision,
+            ...p, http1Only: edit.http1Only ?? p.http1Only, models: edit.models, default: edit.default, visionModels: edit.vision,
             contextWindow: edit.contextWindow, maxOutputTokens: edit.maxOutputTokens,
             headers: edit.headers, extraBody: edit.extraBody,
             reasoningProtocol: edit.reasoningProtocol, supportedEfforts: edit.supportedEfforts,
