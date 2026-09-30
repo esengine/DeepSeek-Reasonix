@@ -3,6 +3,7 @@ package config
 import (
 	"bytes"
 	"context"
+	"errors"
 	"fmt"
 	"os"
 	"os/exec"
@@ -544,5 +545,72 @@ func TestLoadForEditMalformedConfigCannotBeSaved(t *testing.T) {
 	}
 	if string(got) != malformed {
 		t.Fatalf("malformed config was overwritten: %q", got)
+	}
+}
+
+// TestAcquireConfigEditLockPathRefusesLockDirOwnedBySomeoneElse: the lock directory
+// lives at a fixed path under /tmp, so another user or sandbox identity may have
+// created it first. chmod on it can only fail with EPERM, and that raw error is all
+// the caller saw. The directory is now checked for ownership before anything is
+// changed on it, and a foreign one is reported as ErrLockDirWrongOwner.
+func TestAcquireConfigEditLockPathRefusesLockDirOwnedBySomeoneElse(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("directory ownership is not checked on Windows")
+	}
+	dir := filepath.Join(t.TempDir(), "locks")
+	if err := os.Mkdir(dir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Chmod(dir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	previous := lockDirCurrentUID
+	lockDirCurrentUID = func() int { return os.Getuid() + 1 }
+	t.Cleanup(func() { lockDirCurrentUID = previous })
+
+	release, err := acquireConfigEditLockPath(context.Background(), filepath.Join(dir, "x.lock"))
+	if err == nil {
+		release()
+		t.Fatal("acquire succeeded on a lock directory owned by another user")
+	}
+	if !errors.Is(err, ErrLockDirWrongOwner) {
+		t.Fatalf("err = %v, want ErrLockDirWrongOwner", err)
+	}
+	if !strings.Contains(err.Error(), dir) {
+		t.Fatalf("err = %v, want it to name %s", err, dir)
+	}
+	info, statErr := os.Stat(dir)
+	if statErr != nil {
+		t.Fatal(statErr)
+	}
+	if got := info.Mode().Perm(); got != 0o755 {
+		t.Fatalf("mode of a directory we do not own = %o, want it left at 755", got)
+	}
+}
+
+// TestAcquireConfigEditLockPathTightensOwnLockDir keeps the existing behaviour for a
+// directory this process owns: a looser mode is corrected to 0700.
+func TestAcquireConfigEditLockPathTightensOwnLockDir(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("POSIX modes are not enforced on Windows")
+	}
+	dir := filepath.Join(t.TempDir(), "locks")
+	if err := os.Mkdir(dir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Chmod(dir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	release, err := acquireConfigEditLockPath(context.Background(), filepath.Join(dir, "x.lock"))
+	if err != nil {
+		t.Fatalf("acquire: %v", err)
+	}
+	release()
+	info, err := os.Stat(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := info.Mode().Perm(); got != 0o700 {
+		t.Fatalf("mode = %o, want 700", got)
 	}
 }
