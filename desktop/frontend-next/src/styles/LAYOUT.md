@@ -667,6 +667,12 @@ what exists.
 
 ## Onboarding
 
+- The stage is bounded by the dynamic viewport divided by interface zoom.
+  Content scrolls inside it because the body does not scroll.
+- The brand bar, card shell and footer keep their natural height. Shrinking the
+  shell clips the Start button rather than making it reachable.
+- `perf/onboarding.mjs` checks pointer reachability and completing setup across
+  short, narrow, zoomed and resized windows.
 - The connect card grows inside the opening scene rather than starting a second
   screen, so the introduction above it stays present and the palette follows the
   scene (a dark ground) rather than the app theme.

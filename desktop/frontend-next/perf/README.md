@@ -44,6 +44,7 @@ node perf/panels.mjs     # 两侧栏：收起补间、拖动改宽、上下限�
 node perf/look.mjs       # 外观验证：字号、界面缩放、自定义字体、壁纸上传与调节（含焦点）
 node perf/pick.mjs       # 补全菜单：/ 和 @ 的选中态，深浅两色下各走一遍
 node perf/models.mjs     # 连接面板：网关报出一百多个模型时，这一屏还能不能用
+node perf/onboarding.mjs # First-run setup: short/narrow windows, zoom, resize, and a reachable Start button
 node perf/side.mjs       # 右栏：端点自己写的一句话有多长，都不该改变栏宽
 node perf/queue.mjs      # 待送达：正文读不回来时，「改」不许开出一个空编辑器
 node perf/running.mjs    # 执行过程：在跑的步骤自己在动、收起后由标题接着动，步骤行没有空栏

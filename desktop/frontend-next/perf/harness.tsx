@@ -45,11 +45,11 @@ class BenchPort extends MockPort {
   }
 
   async providerSetup() {
-    return null;
+    return ONBOARDING ? super.providerSetup() : null;
   }
 
   async appearance() {
-    const look = await super.appearance();
+    const look = { ...await super.appearance(), zoom: Number(query.get("zoom") ?? 1) };
     return PREF === null ? look : { ...look, language: PREF };
   }
 
@@ -145,6 +145,7 @@ function storedHistory(): HistoryMessage[] {
 // through a call so the first paint already has the tree under measurement —
 // how a window opens onto a machine with hundreds of sessions is the question.
 const query = new URLSearchParams(location.search);
+const ONBOARDING = query.get("onboarding") === "1";
 const WORKSPACES = Number(query.get("ws") ?? 0);
 // ?pref= 是「内核记着的语言」。真机上它来自 config；这里由地址给，好让
 // 一次验证能把两侧摆成同一个值——否则 adopt 会认为本地缓存过期。

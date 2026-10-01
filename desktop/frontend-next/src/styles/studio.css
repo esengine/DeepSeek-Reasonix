@@ -326,7 +326,7 @@ body { background: var(--page); }
 
 /* First-run connection */
 .onb-stage {
-  min-height: 100vh;
+  height: calc(100dvh / var(--zoom, 1));
   display: flex;
   flex-direction: column;
   background:
@@ -334,6 +334,7 @@ body { background: var(--page); }
     var(--page);
   color: var(--text);
 }
+.onb-brandbar, .onb-shell, .onb-foot { flex-shrink: 0; }
 .onb-brandbar {
   height: 64px;
   display: flex;
