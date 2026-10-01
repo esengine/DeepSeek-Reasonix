@@ -291,11 +291,14 @@ The first is a request with `{"sessionId": "…"}`. It returns a snapshot:
 The second is a notification with the same shape:
 
 - Reasonix sends an initial snapshot after `session/new`, `session/load`, or
-  `session/resume`, then another when a server connects or fails.
+  `session/resume`, then another when a server starts connecting, connects,
+  fails, or starts awaiting launch approval.
 - Clients can request a fresh snapshot after reattaching.
 - Status values are `ready`, `connecting`, `failed`, `pending`, `disabled`,
   `standby`, and `idle`. `standby` means cached tools are callable but the
-  server has not connected yet.
+  server has not connected yet. `pending` means project-server authorization
+  is required, including after launch approval is revoked; it is not a
+  connection failure.
 - A status read does not start a server or probe its endpoint.
 - Failed entries can include a sanitized `error` and an `httpStatus`; both
   fields are omitted when absent.

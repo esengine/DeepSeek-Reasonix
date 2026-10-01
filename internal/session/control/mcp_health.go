@@ -1,5 +1,15 @@
 package control
 
+const (
+	mcpHealthReady      = "ready"
+	mcpHealthConnecting = "connecting"
+	mcpHealthFailed     = "failed"
+	mcpHealthPending    = "pending"
+	mcpHealthDisabled   = "disabled"
+	mcpHealthStandby    = "standby"
+	mcpHealthIdle       = "idle"
+)
+
 // MCPHealth is the observable state of one server in this session. A cached
 // tool surface can be callable before its process starts, so standby is distinct
 // from both ready and idle.
@@ -21,18 +31,22 @@ func (c *Controller) MCPServerHealth() []MCPHealth {
 	if host := c.Host(); host != nil {
 		for _, srv := range host.Servers() {
 			seen[srv.Name] = true
-			out = append(out, MCPHealth{Name: srv.Name, Status: "ready", Tools: srv.Tools})
+			out = append(out, MCPHealth{Name: srv.Name, Status: mcpHealthReady, Tools: srv.Tools})
 		}
 		for _, name := range host.ConnectingServers() {
 			if !seen[name] {
 				seen[name] = true
-				out = append(out, MCPHealth{Name: name, Status: "connecting"})
+				out = append(out, MCPHealth{Name: name, Status: mcpHealthConnecting})
 			}
 		}
 		for _, f := range host.Failures() {
 			if !seen[f.Name] {
 				seen[f.Name] = true
-				out = append(out, MCPHealth{Name: f.Name, Status: "failed", Error: f.Error, HTTPStatus: f.HTTPStatus})
+				status := mcpHealthFailed
+				if f.RequiresLaunchApproval {
+					status = mcpHealthPending
+				}
+				out = append(out, MCPHealth{Name: f.Name, Status: status, Error: f.Error, HTTPStatus: f.HTTPStatus})
 			}
 		}
 	}
@@ -53,12 +67,12 @@ func (c *Controller) MCPServerHealth() []MCPHealth {
 func configuredMCPStatus(st MCPServerState, tools int) string {
 	switch {
 	case st.Pending:
-		return "pending"
+		return mcpHealthPending
 	case !st.Enabled:
-		return "disabled"
+		return mcpHealthDisabled
 	case tools > 0:
-		return "standby"
+		return mcpHealthStandby
 	default:
-		return "idle"
+		return mcpHealthIdle
 	}
 }

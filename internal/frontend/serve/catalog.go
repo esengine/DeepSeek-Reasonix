@@ -326,7 +326,7 @@ func (s *Server) mcp(w http.ResponseWriter, r *http.Request) {
 	for _, health := range ctl.MCPServerHealth() {
 		st, configured := declared[health.Name]
 		row := mcpEntry{
-			Name: health.Name, State: health.Status, Enabled: st.Enabled || !configured,
+			Name: health.Name, State: health.Status, Enabled: health.Status != "pending" && (st.Enabled || !configured),
 			LocalOverride: st.LocalOverride, Transport: st.Entry.Type,
 			Source: string(st.Entry.Source), Error: health.Error, HTTPStatus: health.HTTPStatus,
 			Tools: health.Tools, AlwaysLoad: st.AlwaysLoad, InSchema: st.InSchema,
@@ -337,7 +337,7 @@ func (s *Server) mcp(w http.ResponseWriter, r *http.Request) {
 			row.Prompts, row.Resources = srv.Prompts, srv.Resources
 			row.ToolList = mcpToolViews(srv.ToolList)
 		} else {
-			if f, ok := failures[health.Name]; ok && health.Status == "failed" {
+			if f, ok := failures[health.Name]; ok && (health.Status == "failed" || health.Status == "pending") {
 				row.Transport = f.Transport
 			}
 			row = remembered(st, row)

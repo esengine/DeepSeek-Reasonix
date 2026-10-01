@@ -74,7 +74,7 @@ export function ServerRow({
 
   const actions = (
     <span className="acts">
-      {live && m.enabled && m.state !== "ready" && (
+      {live && m.enabled && m.state !== "ready" && m.state !== "pending" && (
         <button className="act" data-action="mcp.retry" data-target={m.name} disabled={!!busy} onClick={() => void run("retry", () => port.reconnectMcp(m.name))}>
           {t(busy === "retry" ? "连接中…" : m.state === "standby" ? "立即连接" : "重连")}
         </button>

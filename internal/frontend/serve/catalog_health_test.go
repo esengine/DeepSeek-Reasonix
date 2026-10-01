@@ -1,7 +1,6 @@
 package serve
 
 import (
-	"context"
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
@@ -23,8 +22,7 @@ import (
 func TestMcpEndpointAnswersEveryRowFromItsOwnSource(t *testing.T) {
 	t.Setenv("REASONIX_HOME", testenv.TempDir(t))
 	root := testenv.TempDir(t)
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
+	ctx := t.Context()
 
 	// A server that answers a handshake, so the row has a live connection to
 	// read transport, source, description and tools from.
@@ -208,4 +206,32 @@ func newMCPHTTPServer(t *testing.T, tools func() any) *httptest.Server {
 			t.Errorf("write response: %v", err)
 		}
 	}))
+}
+
+func TestMcpEndpointReportsLaunchApprovalAsPending(t *testing.T) {
+	t.Setenv("REASONIX_HOME", testenv.TempDir(t))
+	host := plugin.NewHost()
+	host.RecordLaunchApprovalRequired(plugin.Spec{Name: "project-tools", Type: "stdio"})
+	ctrl := control.New(control.Options{Host: host, WorkspaceRoot: testenv.TempDir(t)})
+	defer ctrl.Close()
+	srv := httptest.NewServer(operatorHandler(New(ctrl, NewBroadcaster(), config.ServeConfig{})))
+	defer srv.Close()
+	resp, err := http.Get(srv.URL + "/mcp")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer resp.Body.Close()
+	var got struct {
+		Servers []mcpEntry `json:"servers"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&got); err != nil {
+		t.Fatal(err)
+	}
+	if len(got.Servers) != 1 {
+		t.Fatalf("MCP rows = %+v", got.Servers)
+	}
+	row := got.Servers[0]
+	if row.Name != "project-tools" || row.State != "pending" || row.Enabled || row.Transport != "stdio" || row.Error == "" {
+		t.Fatalf("pending authorization row = %+v", row)
+	}
 }

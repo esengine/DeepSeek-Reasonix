@@ -9,9 +9,9 @@ import { EN } from "../i18n/en";
 // read the table itself.
 const SOURCES = import.meta.glob("./ServerRow.tsx", { query: "?raw", import: "default", eager: true }) as Record<string, string>;
 
-// The states /mcp can report for one server. The host's own vocabulary, not the
-// table's: a state added here without a row renders as the raw string.
-const HOST_STATES = ["ready", "connecting", "failed", "disabled", "standby", "idle", "pending"];
+const HEALTH_SOURCES = import.meta.glob("../../../../internal/session/control/mcp_health.go", { query: "?raw", import: "default", eager: true }) as Record<string, string>;
+const HEALTH_SOURCE = Object.values(HEALTH_SOURCES)[0] ?? "";
+const HOST_STATES = [...HEALTH_SOURCE.matchAll(/^\s*mcpHealth\w+\s*=\s*"(\w+)"/gm)].map((m) => m[1]);
 
 function stateBlock(): string {
   const src = Object.values(SOURCES)[0] ?? "";
@@ -22,6 +22,7 @@ function stateBlock(): string {
 
 describe("MCP state labels", () => {
   it("has a label for every state the host can report", () => {
+    expect(HOST_STATES.length, "No host MCP health declarations were read").toBeGreaterThan(0);
     const block = stateBlock();
     const labelled = [...block.matchAll(/^\s{2}(\w+):/gm)].map((m) => m[1]);
     for (const state of HOST_STATES) {

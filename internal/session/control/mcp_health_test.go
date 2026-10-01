@@ -36,3 +36,20 @@ func TestMCPServerHealthIncludesSessionOnlyFailure(t *testing.T) {
 		t.Fatalf("session-only server health = %+v", rows)
 	}
 }
+
+func TestMCPServerHealthReportsLaunchApprovalAsPending(t *testing.T) {
+	t.Setenv("REASONIX_HOME", testenv.TempDir(t))
+	host := plugin.NewHost()
+	c := New(Options{Host: host, WorkspaceRoot: testenv.TempDir(t)})
+	defer c.Close()
+	host.RecordLaunchApprovalRequired(plugin.Spec{Name: "project-tools", Type: "stdio"})
+	rows := c.MCPServerHealth()
+	if len(rows) != 1 || rows[0].Name != "project-tools" || rows[0].Status != "pending" || rows[0].Error == "" {
+		t.Fatalf("launch approval health = %+v", rows)
+	}
+	host.RecordFailure(plugin.Spec{Name: "project-tools", Type: "stdio"}, errors.New("process exited"))
+	rows = c.MCPServerHealth()
+	if len(rows) != 1 || rows[0].Status != "failed" {
+		t.Fatalf("a real connection failure was hidden as pending: %+v", rows)
+	}
+}
