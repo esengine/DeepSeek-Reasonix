@@ -211,6 +211,14 @@ export class MockHub implements HubPort {
     return Promise.resolve();
   }
 
+  pinSession(_path: string, _pinned: boolean) {
+    return Promise.resolve();
+  }
+
+  syncPins(_paths: string[]) {
+    return Promise.resolve();
+  }
+
   renameSession(_path: string, _title: string) {
     return Promise.resolve();
   }

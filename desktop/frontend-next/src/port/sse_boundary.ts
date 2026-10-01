@@ -1,6 +1,6 @@
 import { SseShell } from "./sse_shell";
 import type { Adjudications, BrowserToolsSettings, ConfigProblem, ConfigRepair, PermissionLists, PermissionRules, SandboxSettings } from "./port";
-import type { ProgressWatchSettings } from "./boundary";
+import type { AutoArchiveSettings, ProgressWatchSettings } from "./boundary";
 
 // Where the agent may reach: the permission rules a call is matched against and
 // the sandbox the shell runs in.
@@ -37,6 +37,12 @@ export class SseBoundary extends SseShell {
   }
   saveProgressWatch(s: Pick<ProgressWatchSettings, "pause" | "rounds" | "tokenMultiple">) {
     return this.post0<ProgressWatchSettings>("/progress-watch", s);
+  }
+  autoArchive() {
+    return this.get<AutoArchiveSettings>("/auto-archive");
+  }
+  saveAutoArchive(s: Pick<AutoArchiveSettings, "enabled" | "days">) {
+    return this.post0<AutoArchiveSettings>("/auto-archive", s);
   }
   configProblem() {
     return this.get<ConfigProblem | null>("/config/problem");

@@ -4507,6 +4507,12 @@
 
   .sessrow:hover .sessmeta, .sessrow[data-on] .sessmeta { color: var(--faint) }
 
+  .sessarch { flex: none; margin-left: 6px; font: var(--w-med) var(--fs-micro) var(--ui); font-style: normal; color: var(--ghost) }
+  .errbar[data-kind="note"] { border-color: var(--border); background: var(--surface); color: var(--text) }
+  .errbar[data-kind="note"] button { color: var(--text) }
+  .cmpalert > .errbar[data-kind="note"],
+  .composenotes > .errbar[data-kind="note"],
+  .main > .errbar[data-kind="note"] { top: 106px; bottom: auto }
   .sesscopies {
     flex: none; padding: 0 5px; height: 15px;
     border: 1px solid var(--border); border-radius: var(--r-xs);

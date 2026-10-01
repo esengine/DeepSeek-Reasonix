@@ -29,6 +29,7 @@ import { Compaction } from "./Compaction";
 import { Sandbox } from "./Sandbox";
 import { BrowserTools } from "./BrowserTools";
 import { ProgressWatch } from "./ProgressWatch";
+import { AutoArchive } from "./AutoArchive";
 import { Account } from "./Account";
 import { Backup } from "./Backup";
 import { Providers } from "./Providers";
@@ -415,9 +416,7 @@ export function Settings({ hub, onError, port, networkPort, networkHost, status,
           </div>
         )}
       </div>
-
       <ConfigTrouble port={port} onRepaired={onChanged} />
-
       <div className="prefs-body">
         <nav className="prefs-nav" role="tablist" aria-label={t("设置分类")} onKeyDown={arrowTabs}>
           {NAV.map(([group, items]) => {
@@ -496,6 +495,7 @@ export function Settings({ hub, onError, port, networkPort, networkHost, status,
                 </div>
               </Group>
               <ProgressWatch port={port} />
+              <AutoArchive port={port} />
               <Group id="session-dir" title={t("会话写入位置")}>
                 <div className="kv">
                   <span className="k">{t("工作目录")}</span>

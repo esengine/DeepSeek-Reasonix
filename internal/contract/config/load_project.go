@@ -18,6 +18,7 @@ type userGlobals struct {
 	telemetry                                 TelemetryConfig
 	statusline                                StatuslineConfig
 	progressWatch                             ProgressWatchConfig
+	autoArchive                               AutoArchiveConfig
 	commandMode                               string
 }
 
@@ -26,7 +27,7 @@ func holdUserGlobals(c *Config) userGlobals {
 		cli: c.CLI, secrets: c.Secrets,
 		remote: c.Remote.Clone(), storage: maps.Clone(c.Storage), serve: c.Serve,
 		desktopLanguage: c.Desktop.Language, currency: c.Desktop.Currency, billingDisplay: c.Billing.DisplayCurrency,
-		telemetry: c.Telemetry, statusline: c.Statusline, progressWatch: c.ProgressWatch, commandMode: c.UI.CommandMode,
+		telemetry: c.Telemetry, statusline: c.Statusline, progressWatch: c.ProgressWatch, autoArchive: c.AutoArchive, commandMode: c.UI.CommandMode,
 	}
 }
 
@@ -38,6 +39,7 @@ func (g userGlobals) restore(c *Config) {
 	c.Remote, c.Storage, c.Serve = g.remote, g.storage, g.serve
 	c.Desktop.Language, c.Desktop.Currency, c.Billing.DisplayCurrency = g.desktopLanguage, g.currency, g.billingDisplay
 	c.Telemetry, c.Statusline, c.ProgressWatch, c.UI.CommandMode = g.telemetry, g.statusline, g.progressWatch, g.commandMode
+	c.AutoArchive = g.autoArchive
 }
 
 // mergeProjectTOML merges the workspace's reasonix.toml over cfg and restores

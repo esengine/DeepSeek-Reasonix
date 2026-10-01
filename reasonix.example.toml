@@ -46,6 +46,12 @@ ask_request = true   # notify when a question is waiting
 # rounds = 20           # tool rounds without a file change, check moving, task step, new read or delegated result
 # token_multiple = 8    # also when input spent since the last observable effect reaches this many context windows
 
+# User config only. Archives conversations idle for `days`; reversible, and never touches
+# pinned, running or mid-turn ones. Off by default.
+# [auto_archive]
+# enabled = false
+# days = 30
+
 [agent]
 # system_prompt = "You are ..."   # custom persona/prompt; unset or empty = built-in default
 # system_prompt_file = "prompts/system.md"   # project paths stay in <workspace>; user paths may fall back to <reasonix home>

@@ -41,6 +41,10 @@ export interface TreeSession {
   // pane rather than opening a second writer for one file.
   runtimeId?: string;
   archived?: boolean;
+  // The kernel is the authority for pins; the window only unions its own in.
+  pinned?: boolean;
+  // Unix ms of an automatic archive, absent for a manual one.
+  autoArchivedAt?: number;
   // Conflict-recovery copies of this same conversation. A save that keeps
   // conflicting writes one per turn, all under one title.
   copies?: TreeSession[];
@@ -77,6 +81,10 @@ export interface HubPort extends SharePort {
   moveWorkspace(path: string, direction: -1 | 1): Promise<void>;
   removeSession(path: string): Promise<void>;
   archiveSession(path: string, archived: boolean): Promise<void>;
+  // Tells the kernel which conversations automatic archiving must leave alone.
+  pinSession(path: string, pinned: boolean): Promise<void>;
+  // Sends the whole pin set once per kernel run; until it arrives the kernel archives nothing on its own.
+  syncPins(paths: string[]): Promise<void>;
   renameSession(path: string, title: string): Promise<void>;
   exportSession(path: string): Promise<{ name: string; content: string }>;
   importLegacySessions(path: string, workspace: string): Promise<{ summary: string; imported: number; warnings: number }>;
@@ -223,6 +231,14 @@ export class SseHub implements HubPort {
 
   async archiveSession(path: string, archived: boolean) {
     await this.post<void>("/tree/sessions/archive", { path, archived });
+  }
+
+  async pinSession(path: string, pinned: boolean) {
+    await this.post<void>("/tree/sessions/pin", { path, pinned });
+  }
+
+  async syncPins(paths: string[]) {
+    await this.post<void>("/tree/sessions/pins", { paths });
   }
 
   async renameSession(path: string, title: string) {

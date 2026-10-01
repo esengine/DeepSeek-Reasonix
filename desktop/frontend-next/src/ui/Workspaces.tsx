@@ -1,3 +1,4 @@
+import { inScope } from "./sessionScope";
 import { Fragment, type ReactNode, memo, useEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { t } from "../i18n";
@@ -265,13 +266,8 @@ function WorkspacesView({ hub, tree, treeRead, runtimes, active, folded, reload,
   const shownTree = searchedTree
     .map((ws) => ({
       ...ws,
-      sessions: ws.sessions.filter((session) => {
-        if (scope === "archived") return !!session.archived;
-        if (session.archived) return false;
-        if (scope === "live") return !!session.runtimeId && liveIds([session.runtimeId]).length > 0;
-        if (scope === "pinned") return pinned.has(session.path);
-        return true;
-      }),
+      sessions: ws.sessions.filter((session) =>
+        inScope(session, scope, !!needle, !!session.runtimeId && liveIds([session.runtimeId]).length > 0, pinned.has(session.path))),
     }))
     .filter((ws) => scope === "all" || ws.sessions.length > 0);
   // A fold is a resting-state preference: while a word is being typed it would
@@ -504,7 +500,7 @@ function WorkspacesView({ hub, tree, treeRead, runtimes, active, folded, reload,
                             }}
                           />
                         ) : (
-                          <span className="sesstitle" title={rowLabel(session)}><span>{rowLabel(session)}</span></span>
+                          <span className="sesstitle" title={rowLabel(session)}><span>{rowLabel(session)}</span>{session.archived && <em className="sessarch">{t("已归档")}</em>}</span>
                         )}
                         {kept.length > 0 && (
                           <button

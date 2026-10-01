@@ -454,6 +454,9 @@ export const ACTIONS: UIAction[] = [
   { id: "browser-tools.enabled", kind: "kernel-mutation", target: "none", proof: "authority-effect" },
   // Read by the running turn at its next round, so no rebuild stands between the
   // click and the canonical change.
+  { id: "auto-archive.notice-dismiss", kind: "view", target: "none", proof: "interaction" },
+  { id: "auto-archive.enabled", kind: "kernel-mutation", target: "none", proof: "authority-effect" },
+  { id: "auto-archive.days", kind: "kernel-mutation", target: "none", proof: "authority-effect" },
   { id: "progress-watch.pause", kind: "kernel-mutation", target: "none", proof: "authority-effect" },
   { id: "progress-watch.rounds", kind: "kernel-mutation", target: "none", proof: "authority-effect" },
   { id: "progress-watch.token-multiple", kind: "kernel-mutation", target: "none", proof: "authority-effect" },

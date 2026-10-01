@@ -84,6 +84,13 @@ export interface BrowserToolsSettings {
 
 // When a run reads as no longer moving. Only the user file holds it: a
 // project file cannot pause the user's runs.
+export interface AutoArchiveSettings {
+  enabled: boolean;
+  days: number;
+  defaultDays: number;
+  path: string;
+}
+
 export interface ProgressWatchSettings {
   pause: boolean;
   rounds: number;

@@ -81,6 +81,7 @@ func RenderTOMLForScope(c *Config, scope RenderScope) string {
 		}
 
 		renderProgressWatchSection(&b, c)
+		renderAutoArchiveSection(&b, c)
 		b.WriteString("[notifications]\n")
 		fmt.Fprintf(&b, "enabled = %v   # system notifications for CLI and desktop turns; default off\n", c.Notifications.Enabled)
 		fmt.Fprintf(&b, "turn_done = %v   # notify when a turn finishes\n", c.Notifications.TurnDone)

@@ -268,6 +268,9 @@ type RuntimeSettings interface {
 	SaveCompactionSettings(softLimitTokens int) error
 	ProgressWatchSettings() ProgressWatchSettings
 	SaveProgressWatchSettings(in ProgressWatchSettings) error
+	AutoArchiveSettings() AutoArchiveSettings
+	SaveAutoArchiveSettings(in AutoArchiveSettings) error
+	ArchiveInactiveSessions() int
 	ConfigProblem() *ConfigProblem
 	RepairConfigFile() (string, error)
 }

@@ -1,3 +1,5 @@
+import { usePinnedSessions } from "./usePinnedSessions";
+import { AutoArchiveNotice } from "./AutoArchiveNotice";
 import { lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState, type CSSProperties } from "react";
 import { reason } from "../i18n/kernel";
 import { t } from "../i18n";
@@ -55,20 +57,10 @@ const NO_REPORT: PaneReport = {
   mcp: [],
   wallet: "",
 };
-const PINNED_SESSIONS_KEY = "reasonix:pinned-sessions";
 // Keep a small warm set for instant back-and-forth switching. Older settled
 // panes are cheap to restore from disk and expensive to leave mounted: every
 // hidden pane retains a transcript, observers and markdown tree.
 const WARM_PANES = 4;
-
-function savedPins(): Set<string> {
-  try {
-    const raw = JSON.parse(localStorage.getItem(PINNED_SESSIONS_KEY) ?? "[]");
-    return new Set(Array.isArray(raw) ? raw.filter((x): x is string => typeof x === "string") : []);
-  } catch {
-    return new Set();
-  }
-}
 
 // App is the window around the panes, not a session itself: the workspace tree,
 // the chrome, the settings sheet and the theme are the window's, while every
@@ -96,7 +88,7 @@ export function App({ hub }: { hub: HubPort }) {
   // 窄到放不下工作区栏时它是收起的，而不是消失的：栏一旦从 DOM 里拿掉，把手也
   // 跟着没了，剩下的入口只有一个没人知道的快捷键。
   const [rail, setRail] = useState(() => !roomGaveUp("rail"));
-  const [pinnedSessions, setPinnedSessions] = useState<Set<string>>(savedPins);
+  const [pinnedSessions, togglePinnedSession, unpinSession] = usePinnedSessions(hub, tree, treeRead);
   const [railW, setRailW] = useState(() => widthOf(RAIL));
   const [dockW, setDockW] = useState(() => widthOf(DOCK));
   const [dockLimit, setDockLimit] = useState(() => dockMax(document.body.clientWidth));
@@ -483,6 +475,7 @@ export function App({ hub }: { hub: HubPort }) {
       <button onClick={() => setError("")}>{t("知道了")}</button>
     </div>
   ) : null;
+  const bar = errorBar ?? <AutoArchiveNotice tree={tree} />;
   const activeWorkspace = tree.find((ws) => ws.root === activeRuntime?.root) ?? tree[0];
   // The folder a new session opens in is the one the switcher above names —
   // the window's, not whichever project happens to sit first in the tree.
@@ -529,29 +522,11 @@ export function App({ hub }: { hub: HubPort }) {
       if (runtimeId) await closePanes([runtimeId]);
       await hub.archiveSession(path, archived);
       if (archived) clearDraftForSession("", path);
-      if (archived) {
-        setPinnedSessions((current) => {
-          if (!current.has(path)) return current;
-          const next = new Set(current);
-          next.delete(path);
-          localStorage.setItem(PINNED_SESSIONS_KEY, JSON.stringify([...next]));
-          return next;
-        });
-      }
+      if (archived) unpinSession(path);
       await reloadTree();
     },
-    [closePanes, hub, reloadTree],
+    [closePanes, hub, reloadTree, unpinSession],
   );
-
-  const togglePinnedSession = useCallback((path: string) => {
-    setPinnedSessions((current) => {
-      const next = new Set(current);
-      if (next.has(path)) next.delete(path);
-      else next.add(path);
-      localStorage.setItem(PINNED_SESSIONS_KEY, JSON.stringify([...next]));
-      return next;
-    });
-  }, []);
 
   if (setup === undefined || welcomed === undefined) return <div className="app" data-run="idle" />;
   if (setup?.required && activePort) {
@@ -706,7 +681,7 @@ export function App({ hub }: { hub: HubPort }) {
                   onSessionChanged={reloadPanes}
                   pulse={settingsPulse}
                   findPulse={findPulse}
-                  alert={rt.id === active ? (errorBar ?? undefined) : undefined}
+                  alert={rt.id === active ? bar : undefined}
                   needsProject={needsProject}
                   onOpenProject={() => {
                     setRail(true);
@@ -749,7 +724,7 @@ export function App({ hub }: { hub: HubPort }) {
             )}
           </div>
 
-          {errorBar && !activePaneShown && errorBar}
+          {!activePaneShown && bar}
         </div>
 
       </div>

@@ -1,5 +1,5 @@
 import type { Adjudications, BrowserToolsSettings, ConfigProblem, ConfigRepair, PermissionLists, PermissionRules, SandboxSettings } from "./port";
-import type { ProgressWatchSettings } from "./boundary";
+import type { AutoArchiveSettings, ProgressWatchSettings } from "./boundary";
 import { MockShell } from "./mock_shell";
 
 // The boundary half of the fixture: what the agent is refused outright, and how
@@ -102,6 +102,18 @@ export class MockBoundary extends MockShell {
   async saveBrowserTools(enabled: boolean): Promise<BrowserToolsSettings> {
     this.browser = { ...this.browser, enabled, effective: enabled };
     return { ...this.browser };
+  }
+
+  private archive: AutoArchiveSettings = { enabled: false, days: 30, defaultDays: 30, path: "/Users/you/.reasonix/config.toml" };
+
+  async autoArchive(): Promise<AutoArchiveSettings> {
+    return { ...this.archive };
+  }
+
+  async saveAutoArchive(s: Pick<AutoArchiveSettings, "enabled" | "days">): Promise<AutoArchiveSettings> {
+    if (s.days < 1 || s.days > 3650) throw new Error("auto archive setting out of range");
+    this.archive = { ...this.archive, ...s };
+    return { ...this.archive };
   }
 
   private watch: ProgressWatchSettings = {
