@@ -743,3 +743,26 @@ func TestCuratedProviderPresetDeepSeekReasoningProtocolScope(t *testing.T) {
 		})
 	}
 }
+
+func TestGlmPresetsDeclareTheOfficialContextWindow(t *testing.T) {
+	// Zhipu documents a 1M-token context for GLM-5.2 and GLM-5.3, declared at
+	// the entry level so the added GLM-5.3 models resolve to it.
+	// https://docs.z.ai/guides/llm/glm-5.3
+	for _, id := range []string{"glm-cn", "zai-global", "glm-coding-plan-cn", "zai-coding-plan-global"} {
+		preset, ok := CuratedProviderPreset(id)
+		if !ok || len(preset.Entries) != 1 {
+			t.Fatalf("missing preset %q", id)
+		}
+		entry := preset.Entries[0]
+		for _, model := range []string{"glm-5.2", "glm-5.3", "glm-5.3-flash"} {
+			if !entry.HasModel(model) {
+				t.Fatalf("preset %q is missing %s", id, model)
+			}
+			resolved := entry
+			resolved.Model = model
+			if window, ok := ResolvedContextWindow(&resolved); !ok || window != 1_000_000 {
+				t.Fatalf("preset %q %s window = %d/%v, want 1000000", id, model, window, ok)
+			}
+		}
+	}
+}

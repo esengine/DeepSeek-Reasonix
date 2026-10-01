@@ -372,7 +372,7 @@ func (f *acpFactory) SessionConfigState(_ context.Context, p acp.SessionConfigSt
 			Category:     "thought_level",
 			Type:         "select",
 			CurrentValue: currentEffort,
-			Options:      acpEffortOptions(cap.Levels),
+			Options:      acpEffortOptions(cap, &effortEntry),
 		})
 	} else if hadEffortOverride {
 		cleared := ""
@@ -490,12 +490,26 @@ func hasModelOption(options []acp.SessionConfigSelectOption, ref string) bool {
 	return false
 }
 
-func acpEffortOptions(levels []string) []acp.SessionConfigSelectOption {
-	out := make([]acp.SessionConfigSelectOption, 0, len(levels))
-	for _, level := range levels {
-		out = append(out, acp.SessionConfigSelectOption{Value: level, Name: effortOptionName(level)})
+func acpEffortOptions(cap config.EffortCapability, e *config.ProviderEntry) []acp.SessionConfigSelectOption {
+	out := make([]acp.SessionConfigSelectOption, 0, len(cap.Levels))
+	for _, level := range cap.Levels {
+		out = append(out, acp.SessionConfigSelectOption{
+			Value:       level,
+			Name:        effortOptionName(level),
+			Description: effortOptionDescription(e, level),
+		})
 	}
 	return out
+}
+
+// effortOptionDescription explains a level where the model changes what it
+// means. GLM-5.3 cannot disable thinking, so its cheapest level still reasons:
+// a stored `disabled` choice lands there, and the menu says so.
+func effortOptionDescription(e *config.ProviderEntry, level string) string {
+	if level == "low" && config.EffortForcesThinking(e) {
+		return "Thinking stays on — this model cannot disable it"
+	}
+	return ""
 }
 
 func effortOptionName(level string) string {

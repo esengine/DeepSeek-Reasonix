@@ -7,7 +7,8 @@
 //   - api.minimaxi.com → emits thinking.type=adaptive|disabled (M3's binary
 //     knob) instead of reasoning_effort, since M3 has no level scale.
 //   - open.bigmodel.cn / api.z.ai (Zhipu GLM) → emits thinking.type; the
-//     documented GLM-5.2+ models also accept reasoning_effort.
+//     documented depth models also accept reasoning_effort
+//     (provider.ZhipuEffortContract). Older GLM keeps thinking.type only.
 //   - api.longcat.chat → emits thinking.type=enabled|disabled and omits
 //     reasoning_effort, matching LongCat's OpenAI-compatible API.
 //   - ollama.com → accepts hosted Ollama Cloud's reasoning_effort scale,

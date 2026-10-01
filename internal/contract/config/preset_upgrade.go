@@ -34,6 +34,13 @@ type shippedPreset struct {
 	ByName bool
 }
 
+// The GLM catalogs before GLM-5.3: the shapes an install still holds until the
+// entries below move them forward.
+var (
+	legacyGlmAPIModels    = []string{"glm-5.2", "glm-5.1", "glm-5", "glm-5-turbo", "glm-5v-turbo", "glm-4.7", "glm-4.7-flash", "glm-4.7-flashx", "glm-4.6", "glm-4.5", "glm-4.5-air", "glm-4.5-flash"}
+	legacyGlmCodingModels = []string{"glm-5.2", "glm-5.1", "glm-5", "glm-4.7"}
+)
+
 // shippedPresets is every shape a curated preset has had. Adding one is how a
 // preset change reaches the installs that already have the old shape — the
 // alternative is a migration function per vendor per change, which is what this
@@ -42,6 +49,12 @@ type shippedPreset struct {
 var shippedPresets = []shippedPreset{
 	{PresetID: "kimi-cn", Models: legacyKimiAPIModels, Vision: legacyKimiAPIModels, ByName: true},
 	{PresetID: "kimi-global", Models: legacyKimiAPIModels, Vision: legacyKimiAPIModels, ByName: true},
+	// The GLM catalogs before GLM-5.3, on both hosts. Four presets shipped one
+	// of these two lists; the Anthropic-dialect GLM presets never held them.
+	{PresetID: "glm-cn", Models: legacyGlmAPIModels, ByName: true},
+	{PresetID: "zai-global", Models: legacyGlmAPIModels, ByName: true},
+	{PresetID: "glm-coding-plan-cn", Models: legacyGlmCodingModels, ByName: true},
+	{PresetID: "zai-coding-plan-global", Models: legacyGlmCodingModels, ByName: true},
 	{PresetID: "opencode-go", Models: legacyOpenCodeGoModels, ByName: true},
 	{PresetID: "longcat-openai", Models: longCat20Models, Window: new(legacyLongCat20ContextWindow), Default: longCat20Models[0]},
 	{PresetID: "longcat-anthropic", Models: longCat20Models, Window: new(legacyLongCat20ContextWindow), Default: longCat20Models[0]},

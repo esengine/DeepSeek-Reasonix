@@ -42,18 +42,14 @@ type effortEndpoint struct {
 // configured effort for this endpoint. Binary thinking knobs and disabled
 // thinking yield nil — an override adjusts depth, never whether thinking runs.
 func requestEffortVocabulary(e effortEndpoint) []string {
-	if e.thinkingType == "disabled" || e.protocol == "none" || e.minimax || (e.zhipu && e.zhipuDepth == "") || e.longcat {
+	if e.thinkingType == "disabled" || e.protocol == "none" || e.minimax || e.longcat {
 		return nil
+	}
+	if e.zhipu {
+		return zhipuRequestEffortVocabulary(e.zhipuDepth, e.effort)
 	}
 	var levels []string
 	switch {
-	case e.zhipuDepth == "glm-5.2":
-		if e.effort == "none" || e.effort == "minimal" {
-			return nil
-		}
-		levels = []string{"low", "medium", "high", "xhigh", "max"}
-	case e.zhipuDepth != "":
-		levels = []string{"low", "high", "max"}
 	case e.explicit:
 		levels = e.supported
 	case e.deepseek:
@@ -67,6 +63,28 @@ func requestEffortVocabulary(e effortEndpoint) []string {
 		levels = []string{"low", "medium", "high"}
 	}
 	return depthOnly(levels)
+}
+
+// zhipuRequestEffortVocabulary is the depth vocabulary a Zhipu request may
+// carry, read from the one contract table (see provider.ZhipuEffortContract).
+// Levels that switch thinking off ride thinking.type instead, so they are not
+// depths. A model with no contract takes no reasoning_effort at all, and a
+// configured thinking-off level wins over any per-request override.
+func zhipuRequestEffortVocabulary(depth, effort string) []string {
+	contract, ok := provider.ZhipuEffortContract(depth)
+	if !ok {
+		return nil
+	}
+	if supportsEffort(contract.ThinkingOff, effort) {
+		return nil
+	}
+	out := make([]string, 0, len(contract.Levels))
+	for _, level := range contract.Levels {
+		if !supportsEffort(contract.ThinkingOff, level) {
+			out = append(out, level)
+		}
+	}
+	return depthOnly(out)
 }
 
 // depthOnly strips thinking on/off toggles from an effort vocabulary.

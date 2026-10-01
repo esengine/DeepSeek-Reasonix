@@ -16,9 +16,35 @@ get a tailored request shape automatically — no extra config needed.
 | DeepSeek V4 Flash | `api.deepseek.com`, `*.deepseek.com` | `thinking.type` + `reasoning_effort` (depth) | `auto`, `disabled`, `low`, `high`, `max` | Thinking on by default; `disabled` turns it off via `thinking.type=disabled`. Compatibility input `medium` normalizes to `high`, while `xhigh` normalizes to `high`. |
 | DeepSeek V4 Pro | `api.deepseek.com`, `*.deepseek.com` | `thinking.type` + `reasoning_effort` (depth) | `auto`, `disabled`, `high`, `max` | Thinking on by default; `disabled` turns it off via `thinking.type=disabled`. Compatibility inputs `low`/`medium` normalize to `high`, while `xhigh` normalizes to `max`. |
 | MiniMax M3 | `api.minimaxi.com`, `*.minimaxi.com` | `thinking.type` (`adaptive`\|`disabled`) | `auto`, `adaptive`, `disabled` | No depth scale; `reasoning_effort` is omitted. |
-| Zhipu GLM-5.2 | `open.bigmodel.cn` / `*.bigmodel.cn`, `api.z.ai` / `*.z.ai` | `thinking.type` + `reasoning_effort` | `auto`, `none`, `minimal`, `low`, `medium`, `high`, `xhigh`, `max` | `none`/`minimal` disable thinking; the direct API maps `low`/`medium` to `high` and `xhigh` to `max`. Defaults to `max`. |
-| Zhipu GLM-5.3 / 5.3-Flash | Same Zhipu hosts | `thinking.type=enabled` + `reasoning_effort` | `auto`, `low`, `high`, `max` | Thinking cannot be disabled. Defaults to `max`; a saved legacy `disabled` choice becomes `low`. |
+| Zhipu GLM-5.2 | `open.bigmodel.cn` / `*.bigmodel.cn`, `api.z.ai` / `*.z.ai` | `thinking.type` + `reasoning_effort` | `auto`, `none`, `minimal`, `low`, `medium`, `high`, `xhigh`, `max` | `none`/`minimal` disable thinking; the API maps `low`/`medium` to `high` and `xhigh` to `max`. Defaults to `max`. |
+| Zhipu GLM-5.3 / 5.3-Flash | Same Zhipu hosts | `thinking.type=enabled` + `reasoning_effort` | `auto`, `low`, `high`, `max` | Thinking cannot be disabled. Defaults to `max`; a saved legacy `disabled` choice becomes `low`, and thinking stays on (and billed). |
 | Older Zhipu GLM | Same Zhipu hosts | `thinking.type` (`enabled`\|`disabled`) | `auto`, `enabled`, `disabled` | The binary setting remains for models without a documented depth scale. |
+
+Source: Zhipu's Core Parameters reference,
+<https://docs.z.ai/guides/overview/concept-param>, and the GLM-5.3 page,
+<https://docs.z.ai/guides/llm/glm-5.3>.
+
+Levels are declared once in `provider.ZhipuEffortContract`, shared by the
+`/effort` menu and the request builder. `auto` omits `reasoning_effort`,
+so the API uses its documented default `max`.
+
+Zhipu's [Deep Thinking reference](https://docs.z.ai/guides/capabilities/thinking)
+explicitly documents Coding Plan requests:
+
+| Model | Coding Plan mapping |
+|-------|---------------------|
+| GLM-5.2 | `none`/`minimal` disable thinking; `low`/`medium` map to `high`; `xhigh` maps to `max`. |
+| GLM-5.3 / 5.3-Flash | `none`/`minimal`/`low` map to `low`; `medium`/`high` to `high`; `xhigh`/`max` to `max`. |
+
+Reasonix offers the canonical GLM-5.3 levels on both endpoint types.
+This is verified against documentation; no authenticated endpoint call was made.
+
+For GLM-5.2, configured `none`/`minimal` wins over `EffortOverride` and keeps
+thinking disabled. Overrides adjust depth only; they do not re-enable
+thinking. Thinking-enabled configurations still accept depth overrides.
+
+The presets declare the 1M context window Zhipu documents for GLM-5.2 and
+GLM-5.3, so the models added to the catalog reuse it.
 
 ## Explicit per-model scales
 

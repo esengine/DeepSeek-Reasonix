@@ -80,21 +80,11 @@ func IsMiniMaxEndpoint(baseURL string) bool {
 
 // IsZhipuEndpoint reports whether baseURL is Zhipu's endpoint for GLM models,
 // the China host (*.bigmodel.cn) or the international one (*.z.ai). Both gate
-// thinking with thinking.type; GLM-5.2 and later also accept reasoning_effort.
+// thinking with thinking.type; GLM-5.2 and later also accept reasoning_effort
+// (see ZhipuEffortContract for the per-model ladder).
 func IsZhipuEndpoint(baseURL string) bool {
 	return matchVendorHost(baseURL, "bigmodel.cn", "open.bigmodel.cn") ||
 		matchVendorHost(baseURL, "z.ai", "api.z.ai")
-}
-
-// ZhipuDepthModel recognizes only model IDs whose direct API effort contract is
-// documented. A gateway or an unrelated GLM variant must not inherit it by name.
-func ZhipuDepthModel(model string) string {
-	switch strings.ToLower(strings.TrimSpace(model)) {
-	case "glm-5.2", "glm-5.3", "glm-5.3-flash":
-		return strings.ToLower(strings.TrimSpace(model))
-	default:
-		return ""
-	}
 }
 
 // IsTokenRhythmEndpoint reports whether baseURL points at Token Rhythm's official

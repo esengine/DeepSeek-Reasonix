@@ -1557,6 +1557,32 @@ func TestZhipuDepthRequestByModel(t *testing.T) {
 	}
 }
 
+func TestZhipuThinkingOffLevelIgnoresDepthOverride(t *testing.T) {
+	for _, off := range []string{"none", "minimal"} {
+		cfg := provider.Config{Name: "glm", BaseURL: "https://api.z.ai/api/paas/v4", Model: "glm-5.2", APIKey: "k", Extra: map[string]any{"effort": off}}
+		p, err := New(cfg)
+		if err != nil {
+			t.Fatal(err)
+		}
+		c := p.(*client)
+		if len(c.requestEfforts) != 0 {
+			t.Fatalf("effort=%q: requestEfforts = %v, want none", off, c.requestEfforts)
+		}
+		req := c.buildRequest(provider.Request{EffortOverride: "high"})
+		if req.Thinking == nil || req.Thinking.Type != "disabled" || req.ReasoningEffort != "" {
+			t.Fatalf("effort=%q let an override through: thinking %+v, reasoning_effort %q", off, req.Thinking, req.ReasoningEffort)
+		}
+	}
+	cfg := provider.Config{Name: "glm", BaseURL: "https://api.z.ai/api/paas/v4", Model: "glm-5.2", APIKey: "k", Extra: map[string]any{"effort": "high"}}
+	p, err := New(cfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := p.(*client).buildRequest(provider.Request{EffortOverride: "max"}).ReasoningEffort; got != "max" {
+		t.Fatalf("depth level refused an override: reasoning_effort = %q", got)
+	}
+}
+
 // TestNewZhipuSetsFlag is a smoke test for base-URL detection across both the
 // China (bigmodel.cn) and international (z.ai) GLM endpoints.
 func TestNewZhipuSetsFlag(t *testing.T) {

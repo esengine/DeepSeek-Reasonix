@@ -461,39 +461,55 @@ func binaryThinkingEffortCapability(def string) EffortCapability {
 	return EffortCapability{Supported: true, Levels: []string{"auto", "enabled", "disabled"}, Default: def}
 }
 
+// zhipuEffortCapability is the /effort menu for a Zhipu GLM entry. The depth
+// models (GLM-5.2, GLM-5.3, GLM-5.3-Flash) take their levels from the one
+// contract table in the provider package; every other GLM keeps the binary
+// thinking knob. Zhipu documents the levels per model at
+// https://docs.z.ai/guides/overview/concept-param.
 func zhipuEffortCapability(e *ProviderEntry) EffortCapability {
-	if !isZhipuEntry(e) {
+	contract, ok := zhipuDepthContract(e)
+	if !ok {
 		return binaryThinkingEffortCapability("enabled")
 	}
-	switch provider.ZhipuDepthModel(e.Model) {
-	case "glm-5.2":
-		return EffortCapability{Supported: true, Levels: []string{"auto", "none", "minimal", "low", "medium", "high", "xhigh", "max"}, Default: "max"}
-	case "glm-5.3", "glm-5.3-flash":
-		return EffortCapability{Supported: true, Levels: []string{"auto", "low", "high", "max"}, Default: "max"}
-	default:
-		return binaryThinkingEffortCapability("enabled")
-	}
+	levels := make([]string, 0, len(contract.Levels)+1)
+	levels = append(levels, "auto")
+	levels = append(levels, contract.Levels...)
+	return EffortCapability{Supported: true, Levels: levels, Default: contract.Default}
 }
 
-func zhipuLegacyStoredEffort(e *ProviderEntry, effort string) string {
+// zhipuDepthContract resolves the documented depth contract for the entry, or
+// false when the entry is not a Zhipu GLM depth model.
+func zhipuDepthContract(e *ProviderEntry) (provider.ZhipuEffort, bool) {
 	if !isZhipuEntry(e) {
+		return provider.ZhipuEffort{}, false
+	}
+	return provider.ZhipuEffortContract(e.Model)
+}
+
+// EffortForcesThinking reports whether the entry's model always runs thinking,
+// so even its lowest level reasons (and is billed). True for GLM-5.3 and
+// GLM-5.3-Flash, which cannot disable thinking; a saved `disabled` choice lands
+// on their cheapest level instead. The /effort menu says so where it offers the
+// level.
+func EffortForcesThinking(e *ProviderEntry) bool {
+	contract, ok := zhipuDepthContract(e)
+	return ok && contract.ForcesThinking()
+}
+
+// zhipuLegacyStoredEffort translates a choice saved under the old binary knob
+// onto the depth contract. `enabled` becomes the model's documented default;
+// `disabled` becomes the contract's DisabledTo — which is `none` where thinking
+// can be switched off, and `low` where it cannot (GLM-5.3).
+func zhipuLegacyStoredEffort(e *ProviderEntry, effort string) string {
+	contract, ok := zhipuDepthContract(e)
+	if !ok {
 		return effort
 	}
-	switch provider.ZhipuDepthModel(e.Model) {
-	case "glm-5.2":
-		if effort == "enabled" {
-			return "max"
-		}
-		if effort == "disabled" {
-			return "none"
-		}
-	case "glm-5.3", "glm-5.3-flash":
-		if effort == "enabled" {
-			return "max"
-		}
-		if effort == "disabled" {
-			return "low" // 5.3 rejects disabled thinking; preserve the cheapest intent.
-		}
+	switch effort {
+	case "enabled":
+		return contract.Default
+	case "disabled":
+		return contract.DisabledTo
 	}
 	return effort
 }
@@ -503,18 +519,14 @@ func normalizeZhipuEffort(e *ProviderEntry, level string) (string, error) {
 	if containsString(cap.Levels, level) {
 		return level, nil
 	}
-	switch provider.ZhipuDepthModel(e.Model) {
-	case "glm-5.2":
+	if contract, ok := zhipuDepthContract(e); ok {
 		switch level {
 		case "enabled":
-			return "max", nil
+			return contract.Default, nil
 		case "disabled", "off":
-			return "none", nil
+			return contract.DisabledTo, nil
 		}
-	case "glm-5.3", "glm-5.3-flash":
-		if level == "enabled" {
-			return "max", nil
-		}
+		return "", fmt.Errorf("usage: /effort %s", strings.Join(cap.Levels, "|"))
 	}
 	if cap.Default == "enabled" {
 		return normalizeBinaryThinkingEffort(level)

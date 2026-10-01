@@ -54,6 +54,8 @@ export interface ModelEntry {
   answers?: "chat" | "decision";
   efforts?: string[];
   effort?: string;
+  // Even the lowest effort still reasons and is billed.
+  forcesThinking?: boolean;
   contextWindow?: number;
   price?: ModelPrice;
   // The credential this route spends; pairs with vendor to name the account.

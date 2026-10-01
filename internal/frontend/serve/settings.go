@@ -256,6 +256,8 @@ type modelEntry struct {
 	Effort        string      `json:"effort,omitempty"`
 	ContextWindow int         `json:"contextWindow,omitempty"`
 	Price         *modelPrice `json:"price,omitempty"`
+	// ForcesThinking tells frontends that even the lowest effort still reasons.
+	ForcesThinking bool `json:"forcesThinking,omitempty"`
 }
 
 type modelRoute struct {

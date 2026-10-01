@@ -2,35 +2,19 @@ package openai
 
 import (
 	"fmt"
+	"strings"
 
 	"reasonix/internal/contract/provider"
 )
 
+// resolveZhipuEffort validates the configured effort against the model's
+// documented contract (provider.ZhipuEffortContract,
+// https://docs.z.ai/guides/overview/concept-param) and folds the legacy binary
+// spellings onto it: `enabled` becomes the contract default, `disabled` the
+// level the model still accepts when thinking cannot be turned off.
 func resolveZhipuEffort(name, model, effort string) (string, error) {
-	switch model {
-	case "glm-5.2":
-		switch effort {
-		case "enabled":
-			return "max", nil
-		case "disabled":
-			return "none", nil
-		case "", "none", "minimal", "low", "medium", "high", "xhigh", "max":
-			return effort, nil
-		default:
-			return "", fmt.Errorf("openai: provider %q: GLM-5.2 effort must be none, minimal, low, medium, high, xhigh, or max", name)
-		}
-	case "glm-5.3", "glm-5.3-flash":
-		switch effort {
-		case "enabled":
-			return "max", nil
-		case "disabled":
-			return "low", nil // persisted off switch cannot be sent to a forced-thinking model
-		case "", "low", "high", "max":
-			return effort, nil
-		default:
-			return "", fmt.Errorf("openai: provider %q: GLM-5.3 effort must be low, high, or max", name)
-		}
-	default:
+	contract, ok := provider.ZhipuEffortContract(model)
+	if !ok {
 		switch effort {
 		case "", "enabled", "disabled":
 			return effort, nil
@@ -38,16 +22,33 @@ func resolveZhipuEffort(name, model, effort string) (string, error) {
 			return "", fmt.Errorf("openai: provider %q uses Zhipu thinking; effort must be enabled or disabled", name)
 		}
 	}
+	switch effort {
+	case "":
+		return effort, nil
+	case "enabled":
+		return contract.Default, nil
+	case "disabled":
+		return contract.DisabledTo, nil
+	}
+	if supportsEffort(contract.Levels, effort) {
+		return effort, nil
+	}
+	return "", fmt.Errorf("openai: provider %q: effort must be %s", name, strings.Join(contract.Levels, ", "))
 }
 
+// glmThinkingEnabled reports whether this GLM request runs with thinking on.
+// GLM-5.3 always thinks (the model cannot disable it); GLM-5.2 keeps thinking
+// off when the configured effort is one of the contract's thinking-off levels
+// or an explicit `thinking = "disabled"` was set.
 func (c *client) glmThinkingEnabled() bool {
 	if c == nil || !c.zhipu {
 		return false
 	}
-	if c.zhipuDepth == "glm-5.3" || c.zhipuDepth == "glm-5.3-flash" {
+	contract, ok := provider.ZhipuEffortContract(c.zhipuDepth)
+	if ok && contract.ForcesThinking() {
 		return true
 	}
-	if c.zhipuDepth == "glm-5.2" && (c.effort == "none" || c.effort == "minimal") {
+	if ok && supportsEffort(contract.ThinkingOff, c.effort) {
 		return false
 	}
 	t := c.effort
@@ -57,8 +58,13 @@ func (c *client) glmThinkingEnabled() bool {
 	return t != "disabled"
 }
 
+// applyZhipuEffort writes the Zhipu thinking knob and reasoning depth onto the
+// request. A model with a depth contract drives thinking.type and
+// reasoning_effort together; the rest keep the binary thinking.type and omit
+// reasoning_effort entirely.
 func (c *client) applyZhipuEffort(out *chatRequest, req provider.Request) {
-	if c.zhipuDepth == "" {
+	contract, ok := provider.ZhipuEffortContract(c.zhipuDepth)
+	if !ok {
 		t := c.effort
 		if t == "" {
 			t = "enabled"
@@ -71,15 +77,18 @@ func (c *client) applyZhipuEffort(out *chatRequest, req provider.Request) {
 		return
 	}
 	depth := c.requestEffort(req)
-	if c.zhipuDepth == "glm-5.3" || c.zhipuDepth == "glm-5.3-flash" {
+	switch {
+	case contract.ForcesThinking():
+		// GLM-5.3 cannot disable thinking, so a persisted off switch becomes
+		// the cheapest level the model does accept.
 		out.Thinking = &thinkingMode{Type: "enabled"}
 		if c.thinkingType == "disabled" {
-			depth = "low"
+			depth = contract.DisabledTo
 		}
-	} else if c.thinkingType == "disabled" || depth == "none" || depth == "minimal" {
+	case c.thinkingType == "disabled" || supportsEffort(contract.ThinkingOff, depth):
 		out.Thinking = &thinkingMode{Type: "disabled"}
 		depth = ""
-	} else {
+	default:
 		out.Thinking = &thinkingMode{Type: "enabled"}
 	}
 	out.ReasoningEffort = depth

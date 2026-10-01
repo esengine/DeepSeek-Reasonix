@@ -55,8 +55,12 @@ func (c *Controller) effortStatusText() string {
 	if !capability.Supported {
 		return fmt.Sprintf("effort is not configurable for %s", entry.Name)
 	}
-	return fmt.Sprintf("effort for %s: %s (default: %s; options: %s)",
+	text := fmt.Sprintf("effort for %s: %s (default: %s; options: %s)",
 		entry.Name, config.EffortDisplay(entry), capability.Default, strings.Join(capability.Levels, "|"))
+	if config.EffortForcesThinking(entry) {
+		text += "\n" + i18n.M.ArgEffortForcedOn
+	}
+	return text
 }
 
 func (c *Controller) forgetNotice(name string) {
