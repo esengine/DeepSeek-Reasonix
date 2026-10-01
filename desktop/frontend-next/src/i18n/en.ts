@@ -821,6 +821,7 @@ export const EN: Record<string, string> = {
   "已关闭": "Disabled",
   "未连接": "Not connected",
   "待命 · 首次调用时启动": "Standby · starts on first call",
+  "待授权 · 来自项目声明": "Awaiting approval · declared by the project",
   "本地构建": "Local build",
   "只在这台机器上": "This machine only",
   "这个项目": "This project",
