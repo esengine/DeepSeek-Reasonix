@@ -102,6 +102,8 @@ export function mergeRemoteSessionsIntoTree(
       topicId: `${node.remote!.hostId}\u0000${node.remote!.workspace}\u0000${identity}`,
       sessionPath: row.path,
       turns: row.turns,
+      resultSequence: row.resultSequence,
+      turnsState: row.resultSequence === undefined ? undefined : row.metadataReady ? "ready" : "pending",
       running: state.known ? state.unknown ? false : Boolean(state.running || session!.state.pendingPrompt || session!.state.backgroundJobs) : row.running,
       status: status as ProjectNode["status"],
       lastActivityAt: row.lastActivityAt,
@@ -297,9 +299,7 @@ export function useRemoteProjectGroups(
 
   useEffect(() => onRemoteTabOpened(() => setRevision((current) => current + 1)), []);
 
-  useEffect(() => onRemoteTabUpdated((meta) => {
-    if (!meta.remote) return;
-    if (runtimeStateStore.getSnapshot()?.sessions.some(session => session.tabId === meta.id && session.state.schemaVersion === 1)) return;
+  const refreshRemoteGroup = useCallback((meta: { remote: RemoteTabRefView }) => {
     const key = remoteProjectKey(meta.remote);
     if (!groupKeys.includes(key) || !eligibleSessionKeys.current.has(key)) return;
     const load = ++nextLoad.current;
@@ -319,7 +319,74 @@ export function useRemoteProjectGroups(
       .finally(() => {
         if (sessionLoads.current.get(key) === load) sessionLoads.current.delete(key);
       });
-  }), [acceptRemoteSessionRows, groupKeys, recordRemoteSessionLoadError]);
+  }, [acceptRemoteSessionRows, groupKeys, recordRemoteSessionLoadError]);
+
+  useEffect(() => onRemoteTabUpdated((meta) => {
+    if (!meta.remote) return;
+    // V1 runtimes invalidate their own session below, independently of the
+    // tab's foreground running flag. Older services retain metadata refreshes.
+    if (runtimeStateStore.getSnapshot()?.sessions.some(session => session.tabId === meta.id && session.state.schemaVersion === 1)) return;
+    refreshRemoteGroup({ remote: meta.remote });
+  }), [refreshRemoteGroup]);
+
+  useEffect(() => {
+    let previous = runtimeStateStore.getSnapshot();
+    let disposed = false;
+    let queued = false;
+    const pending = new Map<string, RemoteTabRefView>();
+    const index = (snapshot: RuntimeProjection | undefined) => new Map(snapshot?.sessions
+      .filter(session => session.remote && session.hostId && session.state.schemaVersion === 1)
+      .map(session => [`${session.hostId}\0${session.workspaceRoot}\0${session.sessionId || session.sessionPath}`, session]));
+    const off = runtimeStateStore.subscribe(() => {
+      const next = runtimeStateStore.getSnapshot();
+      if (next === previous || runtimeStateStore.getFailed()) return;
+      const before = index(previous), after = index(next);
+      previous = next;
+      const invalidate = (session: NonNullable<RuntimeProjection>["sessions"][number]) => {
+        const ref = { hostId: session.hostId!, workspace: session.workspaceRoot };
+        pending.set(remoteProjectKey(ref), ref);
+      };
+      for (const [key, session] of after) {
+        const old = before.get(key);
+        if (selectRuntime(session).kind === "idle" && (!old || selectRuntime(old).kind !== "idle"
+          || old.state.runtimeEpoch !== session.state.runtimeEpoch
+          || old.state.turnEventSeq !== session.state.turnEventSeq
+          || old.state.durableEventSeq !== session.state.durableEventSeq)) invalidate(session);
+      }
+      // A detached runtime can retire before its terminal SSE arrives. Its
+      // catalog result remains authoritative after the runtime disappears.
+      for (const [key, session] of before) if (!after.has(key)) invalidate(session);
+      if (pending.size === 0 || queued) return;
+      queued = true;
+      queueMicrotask(() => {
+        queued = false;
+        if (disposed) return;
+        for (const remote of pending.values()) refreshRemoteGroup({ remote });
+        pending.clear();
+      });
+    });
+    return () => { disposed = true; off(); };
+  }, [refreshRemoteGroup]);
+
+  // A cold catalog may need a rebuild after the terminal event. Retry that
+  // metadata briefly without turning an incomplete zero into a read baseline.
+  const metadataRetries = useRef(new Map<string, number>());
+  useEffect(() => {
+    const timers: ReturnType<typeof setTimeout>[] = [];
+    for (const [key, rows] of Object.entries(sessions)) {
+      if (!rows.some(row => row.resultSequence !== undefined && !row.metadataReady)) {
+        metadataRetries.current.delete(key);
+        continue;
+      }
+      if (!eligibleSessionKeys.current.has(key) || (metadataRetries.current.get(key) ?? 0) >= 5) continue;
+      timers.push(setTimeout(() => {
+        metadataRetries.current.set(key, (metadataRetries.current.get(key) ?? 0) + 1);
+        const [hostId, workspace] = key.split("\0");
+        refreshRemoteGroup({ remote: { hostId, workspace } });
+      }, 1000));
+    }
+    return () => timers.forEach(clearTimeout);
+  }, [sessions, refreshRemoteGroup]);
 
   useEffect(() => {
     const seeded: Record<string, RemoteSessionView[]> = {};

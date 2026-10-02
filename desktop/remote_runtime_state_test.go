@@ -428,3 +428,40 @@ func TestRemoteRuntimeStatePublicationOrdersGenerationRetirement(t *testing.T) {
 		t.Fatal("generation retirement did not finish")
 	}
 }
+
+func TestRemoteRuntimeIdentityFrameWithoutEnvelopeRoute(t *testing.T) {
+	a, tab := remoteRuntimeTestApp(nil)
+	foreground := remoteRuntimeTestSnapshot("foreground", 1, "executing")
+	background := remoteRuntimeTestSnapshot("background", 1, "executing")
+	background.SessionID = "background"
+	acceptRemoteRuntimeStateLocked(tab, runtimeRemoteTestPath, foreground, true)
+	acceptRemoteRuntimeStateLocked(tab, "session-id:background", background, true)
+	background.Revision++
+	background.Phase, background.Running = "idle", false
+	frame := json.RawMessage(remoteRuntimeTestJSON(t, map[string]any{"runtimeState": background}))
+	a.acceptRemoteRuntimeFrame(tab.id, tab.gen, "", frame)
+	if got := tab.runtimeStates["session-id:background"]; got.Phase != "idle" {
+		t.Fatalf("background completion did not reach own session: %+v", got)
+	}
+	if got := tab.runtimeStates[runtimeRemoteTestPath]; !reflect.DeepEqual(got, foreground) {
+		t.Fatalf("background completion changed foreground: %+v", got)
+	}
+}
+
+func TestRemoteRuntimeSyncIdentityWithoutLegacyPath(t *testing.T) {
+	state := remoteRuntimeTestSnapshot("identity", 2, "idle")
+	state.SessionID = "identity"
+	client := &http.Client{Transport: roundTripFunc(func(req *http.Request) (*http.Response, error) {
+		return remoteRuntimeTestResponse(req, 200, remoteRuntimeTestJSON(t, map[string]any{"schemaVersion": 1, "sessions": []any{map[string]any{"sessionPath": "", "state": state}}})), nil
+	})}
+	a, tab := remoteRuntimeTestApp(client)
+	tab.routing.currentPath = "session-id:identity"
+	tab.session.sessionID = "identity"
+	if _, err := a.SyncRuntimeState(); err != nil {
+		t.Fatal(err)
+	}
+	views := a.GetRuntimeStateSnapshot().Sessions
+	if len(views) != 1 || views[0].Freshness != "synced" || views[0].State.RuntimeEpoch != "identity" {
+		t.Fatalf("identity runtime with no legacy path became unknown: %+v", views)
+	}
+}

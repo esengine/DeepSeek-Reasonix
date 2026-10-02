@@ -381,3 +381,25 @@ func TestRuntimeStateInboxReceiptRetainsRichFollowupAndSessionFence(t *testing.T
 		t.Fatalf("receipt lookup crossed session fence: status=%d", wrong.StatusCode)
 	}
 }
+
+func TestRuntimeStateIdentityFrameKeepsBackgroundRoute(t *testing.T) {
+	bc := NewBroadcaster()
+	bc.SetCurrentSession("session-id:foreground")
+	frames, unsubscribe := bc.SubscribeAll()
+	defer unsubscribe()
+	tag := newSessionTagSink(bc)
+	tag.SetIdentity("", "background")
+	tag.RuntimeStateChanged(event.RuntimeStateSnapshot{SchemaVersion: 1, RuntimeEpoch: "background-runtime", Revision: 2, SessionID: "background", Phase: "idle"})
+	select {
+	case raw := <-frames:
+		var frame eventwire.Event
+		if err := json.Unmarshal(raw, &frame); err != nil {
+			t.Fatal(err)
+		}
+		if frame.SessionID != "background" || frame.SessionCurrent || frame.SessionPath != "session-id:background" {
+			t.Fatalf("background runtime lost identity: %s", raw)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("background runtime was not published")
+	}
+}

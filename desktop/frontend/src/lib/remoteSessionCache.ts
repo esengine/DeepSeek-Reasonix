@@ -26,6 +26,8 @@ function parseRows(value: unknown): RemoteSessionView[] | undefined {
       && (candidate.path === undefined || typeof candidate.path === "string")
       && (candidate.current === undefined || typeof candidate.current === "boolean")
       && (candidate.running === undefined || typeof candidate.running === "boolean")
+      && (candidate.resultSequence === undefined || Number.isSafeInteger(candidate.resultSequence) && candidate.resultSequence >= 0)
+      && (candidate.metadataReady === undefined || typeof candidate.metadataReady === "boolean")
       && (candidate.lastActivityAt === undefined
         || typeof candidate.lastActivityAt === "number" && Number.isFinite(candidate.lastActivityAt))
       && (candidate.pinned === undefined || typeof candidate.pinned === "boolean");

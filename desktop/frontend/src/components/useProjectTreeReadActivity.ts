@@ -64,7 +64,7 @@ function verifyBaseline(node: ProjectNode, key: string) {
 export function useProjectTreeReadActivity(nodes: readonly ProjectNode[]) {
   const [store, setStore] = useState<ReadStore>(loadStore);
   const [verificationEpoch, setVerificationEpoch] = useState(0);
-  const readActivity = useMemo(() => readActivityValues(store), [store]);
+  const readActivity = useMemo(() => readActivityValues(store, nodes), [store, nodes]);
   const markNodeRead = useCallback((node: ProjectNode) => {
     setStore(current => {
       const next = markSessionRead(current, node);

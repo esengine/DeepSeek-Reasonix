@@ -1153,7 +1153,7 @@ export function ProjectTree({
       },
       projectNodeKey,
       isActive: (node) => topicIsActive(node, activeScope, activeWorkspaceRoot, activeTopicId, activeSessionPath, activeRemote),
-      isUnread: (node) => projectTreeTopicHasUnreadActivity(node, readActivity, activeScope, activeWorkspaceRoot, activeTopicId, activeSessionPath, readBaselineAt),
+      isUnread: (node) => projectTreeTopicHasUnreadActivity(node, readActivity, activeScope, activeWorkspaceRoot, activeTopicId, activeSessionPath, readBaselineAt, activeRemote),
     });
     return {
       ...sessionSummary,
@@ -1214,7 +1214,7 @@ export function ProjectTree({
       const showStatusInSide = status === "thinking" || status === "streaming" || status === "waiting_confirmation" || status === "background_job";
       const showWaitingPill = waitingConfirmation || status === "finishing" || status === "cancelling" || status === "unknown";
       const showSideTime = sideTimeVisible && !showWaitingPill;
-      const unread = projectTreeTopicHasUnreadActivity(node, readActivity, activeScope, activeWorkspaceRoot, activeTopicId, activeSessionPath, readBaselineAt);
+      const unread = projectTreeTopicHasUnreadActivity(node, readActivity, activeScope, activeWorkspaceRoot, activeTopicId, activeSessionPath, readBaselineAt, activeRemote);
       const topicId = node.topicId ?? "";
       const aiRenameTarget = sessionTitleTarget(node);
       const topicTrashing = trashingTopics.has(topicId);

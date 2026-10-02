@@ -39,8 +39,9 @@ type serveSessionEntry struct {
 	TakenOver  bool   `json:"takenOver,omitempty"`
 	MtimeMilli int64  `json:"mtimeMilli"`
 
-	Preview       string `json:"preview,omitempty"`
-	MetadataReady bool   `json:"metadataReady,omitempty"`
+	Preview        string  `json:"preview,omitempty"`
+	MetadataReady  bool    `json:"metadataReady,omitempty"`
+	ResultSequence *uint64 `json:"resultSequence,omitempty"`
 }
 
 type serveHTTPStatusError struct {
@@ -61,16 +62,18 @@ func (e *serveHTTPStatusError) Error() string {
 
 // RemoteSessionView mirrors one serve /sessions entry on the frontend side.
 type RemoteSessionView struct {
-	HostID         string `json:"hostId,omitempty"`
-	SessionID      string `json:"sessionId,omitempty"`
-	Name           string `json:"name"`
-	Path           string `json:"path,omitempty"`
-	Title          string `json:"title,omitempty"`
-	Turns          int    `json:"turns,omitempty"`
-	Current        bool   `json:"current,omitempty"`
-	Running        bool   `json:"running,omitempty"`
-	LastActivityAt int64  `json:"lastActivityAt,omitempty"`
-	Pinned         bool   `json:"pinned,omitempty"`
+	HostID         string  `json:"hostId,omitempty"`
+	SessionID      string  `json:"sessionId,omitempty"`
+	Name           string  `json:"name"`
+	Path           string  `json:"path,omitempty"`
+	Title          string  `json:"title,omitempty"`
+	Turns          int     `json:"turns,omitempty"`
+	Current        bool    `json:"current,omitempty"`
+	Running        bool    `json:"running,omitempty"`
+	LastActivityAt int64   `json:"lastActivityAt,omitempty"`
+	ResultSequence *uint64 `json:"resultSequence,omitempty"`
+	MetadataReady  bool    `json:"metadataReady,omitempty"`
+	Pinned         bool    `json:"pinned,omitempty"`
 }
 
 // serveURL joins a serve base URL and an API path.
@@ -477,6 +480,8 @@ func (a *App) remoteProjectSessions(ctx context.Context, client *http.Client, ba
 			HostID: e.HostID, SessionID: e.SessionID, Name: e.Name, Path: e.Path, Title: title, Turns: e.Turns, Current: current,
 			Running:        remoteSessionRunning(e.Running, liveRunning, route, preferLiveCurrent),
 			LastActivityAt: e.MtimeMilli,
+			ResultSequence: e.ResultSequence,
+			MetadataReady:  e.MetadataReady,
 			Pinned:         pinnedRow,
 		}
 		hasCurrent = hasCurrent || view.Current

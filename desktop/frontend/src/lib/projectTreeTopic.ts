@@ -431,8 +431,14 @@ export function topicActivityAt(node: ProjectNode): number {
 }
 
 export function topicReadRevision(node: ProjectNode): number {
-  if (node.session) return node.resultSequence ?? 0;
+  if (topicUsesResultSequence(node)) return node.resultSequence ?? 0;
   return topicActivityAt(node);
+}
+
+// Read activity is shared without changing the remote node's action routing.
+// Missing sequence means an older Serve; zero is a valid supported baseline.
+export function topicUsesResultSequence(node: ProjectNode): boolean {
+  return Boolean(node.session || node.remoteSession && node.resultSequence !== undefined);
 }
 
 export function projectTreeReadActivityKey(node: ProjectNode): string | null {
@@ -465,7 +471,7 @@ export function projectTreeSeedReadActivity(nodes: readonly ProjectNode[], curre
       // metadata and resultSequence 0 while its durable log is rebuilt. Do not
       // persist that placeholder as the read baseline: once the real sequence
       // arrives it would make every historical result look newly unread.
-      if (node.session && node.turnsState === "ready" && key
+      if (topicUsesResultSequence(node) && node.turnsState === "ready" && key
         && next[key] === undefined) {
         if (next === current) next = { ...current };
         next[key] = topicReadRevision(node);
@@ -485,14 +491,16 @@ export function projectTreeTopicHasUnreadActivity(
   activeTopicId?: string,
   activeSessionPath?: string,
   baselineAt = 0,
+  activeRemote?: ActiveRemoteSessionIdentity,
 ): boolean {
   if (!isTopicNode(node) && !isRuntimeSessionNode(node)) return false;
-  if (topicIsActive(node, activeScope, activeWorkspaceRoot, activeTopicId, activeSessionPath)) return false;
+  if (topicIsActive(node, activeScope, activeWorkspaceRoot, activeTopicId, activeSessionPath, activeRemote)) return false;
   if (topicStatus(node) !== "") return false;
+  if (node.remoteSession && topicUsesResultSequence(node) && node.turnsState !== "ready") return false;
   const key = projectTreeReadActivityKey(node);
   const revision = topicReadRevision(node);
   if (!key || revision <= 0) return false;
-  if (node.session) return readActivity[key] !== undefined && readActivity[key] < revision;
+  if (topicUsesResultSequence(node)) return readActivity[key] !== undefined && readActivity[key] < revision;
   return Math.max(readActivity[key] ?? 0, baselineAt) < revision;
 }
 

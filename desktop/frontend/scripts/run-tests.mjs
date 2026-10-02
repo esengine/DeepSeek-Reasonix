@@ -50,6 +50,8 @@ const OWNED_ELSEWHERE = new Map(Object.entries({
   "remote-session-surface.test.tsx": "test:remote (needs the svg stub register)",
   "remote-running-reconcile.test.ts": "test:remote",
   "remote-project-tree.test.tsx": "test:remote",
+  "remote-session-read-activity.test.tsx": "test:remote",
+  "remote-session-badges.test.tsx": "test:remote",
   "statusbar-workspace.test.tsx": "test:remote",
   "updater-shared-state.test.tsx": "test:updater",
   "window-state-ordering.test.ts": "test:window-state",

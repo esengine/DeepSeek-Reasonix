@@ -37963,6 +37963,23 @@
           }
         },
         {
+          "name": "resultSequence",
+          "optional": true,
+          "type": {
+            "elem": {
+              "kind": "integer"
+            },
+            "kind": "nullable"
+          }
+        },
+        {
+          "name": "metadataReady",
+          "optional": true,
+          "type": {
+            "kind": "boolean"
+          }
+        },
+        {
           "name": "pinned",
           "optional": true,
           "type": {

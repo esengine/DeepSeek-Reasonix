@@ -114,18 +114,23 @@ func (b *Broadcaster) RuntimeStateChanged(snapshot event.RuntimeStateSnapshot) {
 	b.publishRuntimeState(b.CurrentSession(), snapshot)
 }
 func (b *Broadcaster) publishRuntimeState(path string, snapshot event.RuntimeStateSnapshot) {
-	path = agent.CanonicalSessionPath(path)
+	// Runtime frames need the same identity route as content frames and GET.
+	// Canonical sessions have no legacy transcript path.
+	if snapshot.SessionID != "" {
+		path = remoteSessionIDQueryPrefix + snapshot.SessionID
+	}
+	path = sessionRouteKey(path)
 	b.mu.Lock()
 	defer b.mu.Unlock()
 	if b.modelApplicationChanged != nil {
 		b.modelApplicationChanged()
 	}
-	frame, err := json.Marshal(eventwire.Event{Kind: "runtime_state", SessionPath: path, SessionCurrent: path == b.current, RuntimeState: &snapshot})
+	frame, err := json.Marshal(eventwire.Event{Kind: "runtime_state", SessionID: snapshot.SessionID, SessionPath: path, SessionCurrent: path == b.current, RuntimeState: &snapshot})
 	if err != nil {
 		return
 	}
 	for ch, sub := range b.subs {
-		if !sub.all && path != "" && path != b.current {
+		if !sub.all && hiddenFromCurrentOnly(path, b.current) {
 			continue
 		}
 		enqueueSubscriberWireFrame(ch, frame, "runtime_state")

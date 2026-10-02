@@ -65,6 +65,8 @@ export interface RemoteSessionView {
   current?: boolean;
   running?: boolean;
   lastActivityAt?: number;
+  resultSequence?: number;
+  metadataReady?: boolean;
   pinned?: boolean;
 }
 

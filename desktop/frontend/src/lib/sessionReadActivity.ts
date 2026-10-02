@@ -1,5 +1,5 @@
 import type { ProjectNode } from "./types";
-import { projectTreeReadActivityKey, topicReadRevision, type ProjectTreeReadActivity } from "./projectTreeTopic";
+import { projectTreeReadActivityKey, topicReadRevision, topicUsesResultSequence, type ProjectTreeReadActivity } from "./projectTreeTopic";
 
 export type ReadRecord = {
   metric: "result" | "time";
@@ -10,25 +10,38 @@ export type ReadRecord = {
   repairVersion?: number;
   readFloor?: number;
   needsBaseline?: boolean;
+  migratedFromTime?: boolean;
 };
 export type ReadStore = { version: 3; baselineAt: number; records: Record<string, ReadRecord> };
 export type BaselineObservation = { complete: boolean; resultSequence: number; eventVersion: string };
 
-export function readActivityValues(store: ReadStore): ProjectTreeReadActivity {
-  return Object.fromEntries(Object.entries(store.records).map(([key, record]) => [key, record.needsBaseline ? Number.MAX_SAFE_INTEGER : record.value]));
+export function readActivityValues(store: ReadStore, nodes: readonly ProjectNode[] = []): ProjectTreeReadActivity {
+  const values = Object.fromEntries(Object.entries(store.records).map(([key, record]) => [key, record.needsBaseline ? Number.MAX_SAFE_INTEGER : record.value]));
+  const visit = (node: ProjectNode) => {
+    const key = projectTreeReadActivityKey(node);
+    // A downgrade/cached old row cannot compare a timestamp with a result count.
+    if (key && store.records[key]?.metric === "result" && !topicUsesResultSequence(node)) values[key] = Number.MAX_SAFE_INTEGER;
+    node.children?.forEach(visit);
+  };
+  nodes.forEach(visit);
+  return values;
 }
 
 export function markSessionRead(store: ReadStore, node: ProjectNode, now = Date.now()): ReadStore {
   const key = projectTreeReadActivityKey(node);
   if (!key) return store;
-  const metric = node.session ? "result" : "time";
-  const value = node.session ? topicReadRevision(node) : Math.max(topicReadRevision(node), now);
+  const metric = topicUsesResultSequence(node) ? "result" : "time";
+  if (node.remoteSession && metric === "result" && node.turnsState !== "ready") return store;
+  const value = metric === "result" ? topicReadRevision(node) : Math.max(topicReadRevision(node), now);
   const previous = store.records[key];
-  if (value <= 0 || (previous?.metric === metric && previous.value >= value && !previous.needsBaseline && (!previous.imported || (previous.readFloor ?? 0) >= value))) return store;
+  if (previous?.metric === "result" && metric === "time") return store;
+  if (value < 0 || (value === 0 && (metric === "time" || node.turnsState !== "ready")) || (previous?.metric === metric && previous.value >= value && !previous.needsBaseline && (!previous.imported || (previous.readFloor ?? 0) >= value))) return store;
   return { ...store, records: { ...store.records, [key]: { metric,
     value: previous?.metric === metric ? Math.max(previous.value, value) : value,
     revision: (previous?.revision ?? 0) + 1, repairVersion: previous?.repairVersion,
-    imported: previous?.imported, readFloor: previous?.imported ? Math.max(previous.readFloor ?? 0,value) : undefined } } };
+    imported: previous?.metric === metric ? previous.imported : undefined,
+    migratedFromTime: previous?.migratedFromTime || previous?.metric === "time" && metric === "result",
+    readFloor: previous?.metric === metric && previous.imported ? Math.max(previous.readFloor ?? 0,value) : undefined } } };
 }
 
 export function repairReadBaseline(store: ReadStore, key: string, captured: ReadRecord, observation: BaselineObservation): ReadStore {
@@ -60,10 +73,11 @@ export function mergeReadStores(current: ReadStore, incoming: ReadStore): ReadSt
       }
       continue;
     }
-    if (old?.metric !== undefined && old.metric !== next.metric) continue;
+    const metricMigration = old?.metric === "time" && next.metric === "result" && next.migratedFromTime;
+    if (old?.metric !== undefined && old.metric !== next.metric && !metricMigration) continue;
     const repair = old?.imported && !old.repairVersion && next.repairVersion === 1
       && next.verifiedVersion && next.revision === old.revision + 1;
-    if (!old || repair || next.value > old.value
+    if (!old || metricMigration || repair || next.value > old.value
       || next.value === old.value && next.revision > old.revision) {
       if (records === current.records) records = { ...records };
       records[key] = next;
@@ -76,10 +90,13 @@ export function seedSessionReads(store: ReadStore, nodes: readonly ProjectNode[]
   let next = store;
   const visit = (node: ProjectNode) => {
     const key = projectTreeReadActivityKey(node);
-    if (key && node.session && node.turnsState === "ready" && !next.records[key]) {
+    const previous = key ? next.records[key] : undefined;
+    if (key && topicUsesResultSequence(node) && node.turnsState === "ready"
+      && (!previous || node.remoteSession && previous.metric === "time")) {
       // Source time values must never become canonical result sequences.
-      const needsBaseline = node.identityAliases?.some(alias => next.records[alias]?.metric === "time") ?? false;
-      next = { ...next, records: { ...next.records, [key]: { metric: "result", value: needsBaseline ? 0 : topicReadRevision(node), revision: 1, needsBaseline } } };
+      const needsBaseline = !node.remoteSession && (node.identityAliases?.some(alias => next.records[alias]?.metric === "time") ?? false);
+      next = { ...next, records: { ...next.records, [key]: { metric: "result", value: needsBaseline ? 0 : topicReadRevision(node),
+        revision: (previous?.revision ?? 0) + 1, needsBaseline, migratedFromTime: previous?.metric === "time" } } };
     }
     node.children?.forEach(visit);
   };

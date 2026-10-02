@@ -28,6 +28,8 @@ type sessionListEntry struct {
 
 	Preview       string `json:"preview,omitempty"`
 	MetadataReady bool   `json:"metadataReady,omitempty"`
+	// A pointer distinguishes a supported zero baseline from legacy listings.
+	ResultSequence *uint64 `json:"resultSequence,omitempty"`
 }
 
 // sessions lists saved sessions with event-log-aware titles and turn counts.
@@ -140,13 +142,15 @@ func (s *Server) canonicalSessionRows(r *http.Request, ctrl control.SessionAPI) 
 			rows = make([]canonicalSessionRow, 0, len(page.Sessions))
 		}
 		for _, info := range page.Sessions {
+			resultSequence := info.ResultSequence
 			row := sessionListEntry{
 				HostID: info.Ref.HostID, SessionID: info.Ref.SessionID, Name: info.SessionID,
 				Title: info.Title, Turns: info.Turns, MtimeMilli: info.CreatedAt.UnixMilli(),
-				Current:       bound && info.Ref == runtime.Ref(),
-				Preview:       info.Preview,
-				MetadataReady: info.MetadataStatus == session.MetadataReady,
-				TakenOver:     s.sessionMirrored(remoteSessionIDQueryPrefix + info.Ref.SessionID),
+				Current:        bound && info.Ref == runtime.Ref(),
+				Preview:        info.Preview,
+				MetadataReady:  info.MetadataStatus == session.MetadataReady,
+				ResultSequence: &resultSequence,
+				TakenOver:      s.sessionMirrored(remoteSessionIDQueryPrefix + info.Ref.SessionID),
 			}
 			// Canonical rows carry no legacy preview fallback, so a chatted
 			// session would list as untitled until the model renames it.
