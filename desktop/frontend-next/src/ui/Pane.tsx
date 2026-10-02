@@ -491,7 +491,8 @@ function PaneView({ port, rt, title, active, visible, sideHost, side, onFocus, o
   );
   const find = useFind(s.items, findPulse, active, useCallback(() => showView("flow"), [showView]));
 
-  const { quote, reply, onResend } = useReplyActions({ port, items: s.items, checkpoints, running, model: status?.label, submit, reloadSession, onSettings, onRunDetail: () => showView("analysis"), onError: fail });
+  const openAnalysis = useCallback(() => showView("analysis"), [showView]);
+  const { quote, reply, onResend } = useReplyActions({ port, items: s.items, revision: s.revision, checkpoints, running, model: status?.label, submit, reloadSession, onSettings, onRunDetail: openAnalysis, onError: fail });
 
   // Where the bottom is moves as blocks mount under it, so this only asks the
   // transcript to follow again and lets it scroll itself into place.

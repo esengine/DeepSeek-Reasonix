@@ -129,7 +129,13 @@ const SETTLE_CAP_MS = 6000;
 // later decides; until then the wordmark holds under its glint.
 function arrive(shown: Promise<unknown>) {
   const root = document.documentElement;
-  const cap = new Promise((done) => setTimeout(done, SETTLE_CAP_MS));
+  // Whether the cap is what uncovered the window. When it is, the app had
+  // nothing of its own yet, and what arrives afterwards lands as a single
+  // unannounced frame — the one thing the handover exists to prevent. The mark
+  // is spent by App on its first content, which then enters the way it would
+  // have under the boot screen.
+  let capped = false;
+  const cap = new Promise((done) => setTimeout(() => { capped = true; done(undefined); }, SETTLE_CAP_MS));
   void Promise.all([intro.held, Promise.race([shown, cap])])
     .then(() => new Promise(requestAnimationFrame))
     .then(() => {
@@ -140,6 +146,9 @@ function arrive(shown: Promise<unknown>) {
       return intro.leave();
     })
     .then(() => document.getElementById("boot")?.remove());
+  void shown.then(() => {
+    if (capped) root.dataset.late = "";
+  });
 }
 
 const root = createRoot(document.getElementById("root")!);

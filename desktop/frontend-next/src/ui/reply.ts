@@ -8,6 +8,16 @@ import type { Quote, ReplyActions } from "./cards/SayCard";
 interface Inputs {
   port: AgentPort;
   items: Item[];
+  // Bumped when the transcript's composition moves; a streamed chunk lands on
+  // the card being written and touches none of what this reads — see
+  // state/session's reduce. Keying on it keeps `reply` identical across a
+  // stream, which is what the transcript's memoised rows lean on: keying on
+  // `items` handed every card a fresh reply object per chunk, and all of them
+  // re-rendered each time. Optional because a caller that cannot supply it —
+  // a fixture — still works: it then falls back to the items' own identity,
+  // correct but re-computed per chunk, which is what the revision exists to
+  // spare a live session.
+  revision?: number;
   checkpoints: Checkpoint[];
   running: boolean;
   model?: string;
@@ -21,7 +31,7 @@ interface Inputs {
 /** What a finished reply can be acted on with, and the draft signal a quote
  *  travels to the composer on. The transcript owns neither: the pane holds the
  *  session these read from, and the composer is where a quote has to land. */
-export function useReplyActions({ port, items, checkpoints, running, model, submit, reloadSession, onSettings, onRunDetail, onError }: Inputs) {
+export function useReplyActions({ port, items, revision, checkpoints, running, model, submit, reloadSession, onSettings, onRunDetail, onError }: Inputs) {
   const [quote, setQuote] = useState<Quote>({ text: "", n: 0 });
 
   // Re-running a turn is a conversation rewind and then the same words again:
@@ -47,6 +57,15 @@ export function useReplyActions({ port, items, checkpoints, running, model, subm
   // A reply belongs to the most recent user turn, including when that turn
   // produced several replies. A turn without a paired checkpoint must not
   // inherit the preceding turn's rewind target.
+  //
+  // Both read only the user and say rows, which move with the revision: a
+  // streamed chunk rewrites the card being written and mints no pairing, and
+  // the action row a pairing serves renders only once the card is done — which
+  // always bumps the revision (the message frame or turn_done carrying it).
+  // eslint would want `items` in the deps; `revision` is the narrower truth,
+  // the same trade Pane makes for the rail. Without it `reply` changed identity
+  // per chunk and the transcript's memoised rows re-rendered all turn.
+  /* eslint-disable react-hooks/exhaustive-deps */
   const replyTurns = useMemo(() => {
     const paired = pairCheckpoints(items, checkpoints);
     const turns = new Map<string, { turn: number; text: string; hasLaterTurns: boolean }>();
@@ -61,7 +80,7 @@ export function useReplyActions({ port, items, checkpoints, running, model, subm
       }
     }
     return turns;
-  }, [items, checkpoints]);
+  }, [checkpoints, revision ?? items]);
 
   // Which reply is being quoted is the kernel's to say, so the turn its
   // checkpoint named travels with the text. A transcript rebuilt without
@@ -77,8 +96,9 @@ export function useReplyActions({ port, items, checkpoints, running, model, subm
       }
       return undefined;
     },
-    [items, checkpoints],
+    [checkpoints, revision ?? items],
   );
+  /* eslint-enable react-hooks/exhaustive-deps */
 
   const reply = useMemo<ReplyActions>(
     () => ({

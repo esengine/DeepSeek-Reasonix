@@ -47,8 +47,10 @@ export interface HostPort {
    *  hide every other; hideBrowserView puts them all away again. */
   showBrowserView(target: string, rect: ViewRect): void;
   hideBrowserView(): void;
-  /** Put the page on screen away the way hideBrowserView does, answering with
-   *  a picture of what it showed at that moment, or "" when none was taken. */
+  /** Answer with a picture of what the shown page displays at that moment, or
+   *  "" when none was taken. Taking the page down afterwards is the caller's:
+   *  the picture drawn in its place has to be in the tree first, or the slot
+   *  shows bare for a frame. */
   freezeBrowserView(): Promise<string>;
   controlBrowserView(target: string, action: BrowserControl): void;
   /** Load what the person typed. false when the shell refused the address. */

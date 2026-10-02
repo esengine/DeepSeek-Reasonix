@@ -298,7 +298,19 @@ function apply(s: SessionState, ev: SessionEvent): SessionState {
     // How the restored turns ended is not in the record; a live turn that
     // vanished mid-flight leaves null, which is a different answer.
     const terminal: TurnTerminal = ev.items.length ? { kind: "unread" } : s.terminal;
-    return { ...s, executions: ev.executions, terminal, items: [...ev.items, ...s.items.filter(promptOpen)], plan: ev.plan ? livePlan(ev.plan) : s.plan };
+    // The turn still running is not in the record either: the kernel commits a
+    // message only when its attempt ends, so /history taken mid-turn holds
+    // everything but the cards being written. Dropping those threw away a live
+    // answer and let the next delta mint it anew — new identity, the entrance
+    // replayed over half a reply, the text before the gap gone until the
+    // message frame. A running tail is not history, it is happening: it stays
+    // after the record, where the next delta lands on the card it was already
+    // landing on. sealTurn retires both shapes at turn end, so the predicate
+    // keeps nothing once the turn is over.
+    const keep = s.running
+      ? (it: Item) => promptOpen(it) || (it.t === "say" && !it.done) || (it.t === "tool" && it.running)
+      : promptOpen;
+    return { ...s, executions: ev.executions, terminal, items: [...ev.items, ...s.items.filter(keep)], plan: ev.plan ? livePlan(ev.plan) : s.plan };
   }
   // The kernel's canonical task list, asked for rather than re-derived: the
   // advances are not todo_write calls, and the refused writes are.
@@ -347,7 +359,13 @@ function apply(s: SessionState, ev: SessionEvent): SessionState {
       // turn in front of you, not a record that one ever finished — without
       // this it would be the latter, and the tick from an hour ago would still
       // be on screen over work that is running now.
-      return nameTurnStart({ ...s, running: true, doing: "运行中", terminal: null, outLive: 0, turnModel: ev.modelRef || s.turnModel, waiting: { ttftSince: Date.now() } }, ev);
+      // A turn still open here is one whose end never arrived — a kernel lost
+      // mid-answer. Nothing of it can be arriving any more, and leaving it open
+      // hands the first delta of this turn to that card, appending the new
+      // answer onto the abandoned one. Its end is spent here instead: the same
+      // seal a turn_done would have given it, so the corpse does not spin
+      // through a turn that has nothing to do with it.
+      return nameTurnStart({ ...s, running: true, doing: "运行中", terminal: null, outLive: 0, turnModel: ev.modelRef || s.turnModel, waiting: { ttftSince: Date.now() }, items: sealTurn(sealSay(s.items, true)) }, ev);
 
     case "reasoning":
       return {
@@ -376,7 +394,12 @@ function apply(s: SessionState, ev: SessionEvent): SessionState {
         : s;
 
     case "tool_progress":
-      return ev.tool
+      // A progress frame carries no identity of its own to fold onto when the
+      // call has no id: foldTool would append a fresh card per frame, and a
+      // provider that streams calls by index (its dispatch does the same) piled
+      // up one identical card per progress tick. The dispatch already drew the
+      // call; its result still lands by the wire rule it arrived by.
+      return ev.tool?.id
         ? { ...s, executions: noteTool(s.executions, ev.tool, false), items: foldTool(s.items, ev.tool, true) }
         : s;
 

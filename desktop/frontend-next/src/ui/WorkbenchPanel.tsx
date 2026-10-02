@@ -210,6 +210,12 @@ export function WorkbenchPanel({
   useEffect(() => {
     if (!shown) return;
     let live = true;
+    // The reader's own folds as the reload starts. `collapsed` is read here
+    // rather than listed as a dep: it changes on every toggle, and re-reading
+    // the whole tree per click is the opposite of what the fold is for. What
+    // the reader does while the read is in flight wins at the merge below,
+    // which sees it through the functional update.
+    const wasCollapsed = collapsed;
     void (async () => {
       try {
         const top = await port.workspaceFiles("", query, hidden);
@@ -236,7 +242,21 @@ export function WorkbenchPanel({
         if (!live) return;
         setFiles([...new Set(files)]);
         setDirectories([...new Set(dirs)]);
-        setCollapsed(query ? new Set() : new Set(dirs.filter((path) => !open.has(path))));
+        // Settled against the reader's folds as they are now, not as the
+        // snapshot saw them: one opened or closed while the read ran keeps what
+        // they did, a new folder starts closed, and only one the read proved
+        // gone or unreadable closes. Rewriting the set wholesale was what
+        // bounced a mid-flight toggle straight back.
+        setCollapsed((prev) => {
+          if (query) return new Set<string>();
+          const next = new Set<string>();
+          for (const path of dirs) {
+            if (prev.has(path)) next.add(path);
+            else if (open.has(path) || wasCollapsed.has(path)) continue;
+            else next.add(path);
+          }
+          return next;
+        });
         setListFailed("");
       } catch (e) {
         if (live) setListFailed(reason(e));
@@ -245,6 +265,7 @@ export function WorkbenchPanel({
     return () => {
       live = false;
     };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [port, shown, changeKey, query, hidden, glance, running, wrote]);
   // The button in the chrome says "show me the browser", not "show me this one
   // browser". When the agent has a page, that page is the browser; the start

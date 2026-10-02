@@ -34,11 +34,29 @@ function download(source: string, lang: string) {
   window.setTimeout(() => URL.revokeObjectURL(url), 0);
 }
 
+// A block the reader watched arrive keeps that memory. Settling re-mounts every
+// block of the answer — the streamed parts re-parse as one document — and a
+// block that folds in the same breath yanks the whole transcript up by the
+// difference between its height and the clamp. Keyed by source and capped,
+// because the streamed tail re-parses per chunk: every intermediate fence would
+// otherwise be kept for the life of the page.
+const streamed = new Map<string, true>();
+const STREAMED_CAP = 64;
+
 /** A fenced block in rendered markdown. `live` is a block still arriving, which
  *  never folds: its height changing under the reader is the stream, not a choice. */
 export function CodeBlock({ lang, source, live, children }: { lang: string; source: string; live?: boolean; children: ReactNode }) {
+  if (live) {
+    if (streamed.size >= STREAMED_CAP) streamed.delete(streamed.keys().next().value!);
+    streamed.set(source, true);
+  }
   const lines = source.replace(/\n+$/, "").split("\n").length;
-  const foldable = !live && lines > FOLD_OVER;
+  // One that just streamed does not fold either: it was at full height a frame
+  // ago, and folding it there is not the design, it is the remount. The fold
+  // still does its job wherever the block is met settled — a restored or
+  // reopened transcript mounts folded as it always did.
+  const justStreamed = !live && streamed.has(source);
+  const foldable = !live && !justStreamed && lines > FOLD_OVER;
   const [open, setOpen] = useState(false);
   const folded = foldable && !open;
   return (

@@ -1,12 +1,15 @@
 import { useEffect, useLayoutEffect, useMemo, useRef, useState, type FormEvent, type KeyboardEvent } from "react";
 import { t } from "../i18n";
 import type { AgentPort, BrowserTab } from "../port/port";
-import { host, type BrowserControl, type BrowserLoadFailure } from "../port/host";
+import { host, type BrowserControl, type BrowserLoadFailure, type ViewRect } from "../port/host";
 import { SWAP_MARK } from "./swap";
 import { occluded, visibleBox } from "./occlusion";
 import { BrowserFailure } from "./BrowserFailure";
 
 const START = "reasonix://start";
+
+const sameBox = (a: ViewRect | null, b: ViewRect) =>
+  !!a && a.x === b.x && a.y === b.y && a.width === b.width && a.height === b.height;
 
 function normalise(value: string): string | null {
   const raw = value.trim();
@@ -201,20 +204,34 @@ export function AgentBrowserPanel({ tabs, shown, showTabs = true }: { tabs: Brow
       shell.hideBrowserView();
       return;
     }
-    let timer = 0;
+    let raf = 0;
     let live = true;
     // Which freeze is current: a picture answering an older one is stale.
     let frozen = 0;
     let freezes = 0;
+    // The rectangle the view was last placed at, so the hot path — the overlay
+    // watchers fire on every streamed chunk — can tell "nothing moved" from a
+    // layout worth a probe.
+    let placed: ViewRect | null = null;
+    // Set by the events that can change what covers the slot, as against the
+    // ones that can only move the slot itself: the occlusion probe is real
+    // work, and a stream needs it none of.
+    let covers = true;
     const place = () => {
-      timer = 0;
+      raf = 0;
       const box = visibleBox(el);
       if (!box) {
         frozen = 0;
+        placed = null;
         shell.hideBrowserView();
         return;
       }
-      if (document.documentElement.hasAttribute(SWAP_MARK) || occluded(el, box)) {
+      const moved = !sameBox(placed, box);
+      placed = box;
+      const swapping = document.documentElement.hasAttribute(SWAP_MARK);
+      if (!moved && !covers && !swapping && !frozen) return;
+      covers = false;
+      if (swapping || occluded(el, box)) {
         if (frozen) return;
         const turn = (frozen = ++freezes);
         void shell.freezeBrowserView().then((picture) => {
@@ -226,32 +243,47 @@ export function AgentBrowserPanel({ tabs, shown, showTabs = true }: { tabs: Brow
       frozen = 0;
       shell.showBrowserView(target, box);
     };
-    const schedule = () => { if (!timer) timer = window.setTimeout(place, 48); };
+    // One placement per frame, not one per event and not one per 48ms tail:
+    // through a drag, a window resize or a column's transition the slot moves
+    // every frame, and a trailing timeout let the native view catch up in steps
+    // — the page chasing its hole and jumping level at the end. The main side
+    // drops a placement whose rectangle has not changed, so a quiet stream
+    // costs no IPC at all.
+    const schedule = () => { if (!raf) raf = requestAnimationFrame(place); };
+    const scheduleCover = () => { covers = true; schedule(); };
     place();
     const resize = new ResizeObserver(schedule);
     resize.observe(el);
-    const overlays = new MutationObserver(schedule);
+    const overlays = new MutationObserver(scheduleCover);
     overlays.observe(document.body, { childList: true, subtree: true, attributes: true });
     overlays.observe(document.documentElement, { attributes: true, attributeFilter: [SWAP_MARK, "style", "class"] });
     // A layer can leave without touching the DOM: a transition or an animation
     // ending, a hover, a scroll. The two events catch most of it; the poll is what
     // makes a page that is no longer covered come back whatever moved.
-    document.addEventListener("transitionend", schedule, true);
-    document.addEventListener("animationend", schedule, true);
+    document.addEventListener("transitionend", scheduleCover, true);
+    document.addEventListener("animationend", scheduleCover, true);
     addEventListener("resize", schedule);
-    const poll = window.setInterval(schedule, 400);
+    const poll = window.setInterval(scheduleCover, 400);
     return () => {
       live = false;
-      if (timer) clearTimeout(timer);
+      if (raf) cancelAnimationFrame(raf);
       clearInterval(poll);
       resize.disconnect();
       overlays.disconnect();
-      document.removeEventListener("transitionend", schedule, true);
-      document.removeEventListener("animationend", schedule, true);
+      document.removeEventListener("transitionend", scheduleCover, true);
+      document.removeEventListener("animationend", scheduleCover, true);
       removeEventListener("resize", schedule);
       shell.hideBrowserView();
     };
   }, [shown, target, failure]);
+
+  // The picture stands in for the page, so the page comes down only once it is
+  // in the tree. Freezing used to take the view down itself, before the JPEG
+  // had crossed back over the bridge — one frame of bare slot every time, and
+  // the overlay that caused it a beat later with it.
+  useLayoutEffect(() => {
+    if (frame) host().hideBrowserView();
+  }, [frame]);
 
   const control = (action: BrowserControl) => target && host().controlBrowserView(target, action);
   const open = (to: string) => {

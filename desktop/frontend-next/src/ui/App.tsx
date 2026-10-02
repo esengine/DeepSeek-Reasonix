@@ -304,6 +304,28 @@ export function App({ hub }: { hub: HubPort }) {
     if (setup !== undefined && welcomed !== undefined) markSettled();
   }, [setup, welcomed]);
 
+  // Late arrivals get the entrance the handover would have given them. The
+  // boot screen's cap uncovers the window after six seconds whatever the
+  // kernel has answered; content that lands after that used to snap in as one
+  // bare frame. main marks that case on the root, and the first render that
+  // replaces the empty shell spends the mark on one entrance animation.
+  const [reveal, setReveal] = useState(false);
+  const wasShell = useRef(true);
+  useEffect(() => {
+    if (!wasShell.current || setup === undefined || welcomed === undefined) return;
+    wasShell.current = false;
+    const root = document.documentElement;
+    // markSettled above resolved the settled gate within this same flush; main
+    // stamps data-late from that resolution's .then — a microtask that cannot
+    // run until this flush ends. Reading the mark here would always see it
+    // unset, so read it one microtask later, once it has landed.
+    void Promise.resolve().then(() => {
+      if (root.dataset.late === undefined) return;
+      delete root.dataset.late;
+      setReveal(true);
+    });
+  }, [setup, welcomed]);
+
   const running = report.run === "running";
   const { theme, setTheme, scheme, contrast, setContrast, weight, setWeight, look, onLook, pack, reloadThemes } =
     usePaint(hub, runtimes, running, fail);
@@ -586,6 +608,7 @@ export function App({ hub }: { hub: HubPort }) {
   return (
     <div
       className="app"
+      data-reveal={reveal ? "" : undefined}
       data-run={report.run}
       data-rail={rail ? "on" : "off"}
       data-browser={browser ? "on" : "off"}

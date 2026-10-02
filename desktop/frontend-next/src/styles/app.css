@@ -120,6 +120,10 @@
   :root[data-boot] .app { animation: appin 1.2s cubic-bezier(.4, 0, .2, 1) both }
   @keyframes appin { from { opacity: 0; transform: scale(.99) } to { opacity: 1; transform: none } }
 
+  /* Content that arrived after the boot cap uncovered an empty shell: the same
+     entrance the handover would have played, spent once on its first render. */
+  .app[data-reveal] { animation: appin 1.2s cubic-bezier(.4, 0, .2, 1) both }
+
   :root[data-boot] .chrome::after {
     content: ""; position: absolute; inset: 0; z-index: 2; pointer-events: none;
     background: linear-gradient(105deg, transparent 34%,
@@ -1320,6 +1324,13 @@
     position: relative; z-index: 1;
     margin-top: 5px; padding: 2px 7px; border: 0; border-radius: var(--r-xs); background: var(--overlay);
     font: var(--w-reg) var(--fs-meta) var(--ui); color: var(--faint); cursor: pointer;
+  }
+  /* Folded, the button sits on the fade the clip already draws at its foot
+     instead of taking a row of its own: measured off the commit and onto the
+     next frame, it used to land one beat late and push everything under it
+     down by its own height — twice per card while pinned to the bottom. */
+  .out-clip:not([data-open]) > .out-more {
+    position: absolute; inset-inline-start: 0; bottom: 8px; margin: 0;
   }
   .out-more:hover { color: var(--text) }
   .out-more:focus-visible { outline: 2px solid var(--focus); outline-offset: 2px }

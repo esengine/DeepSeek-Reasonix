@@ -74,6 +74,11 @@ let logs = null;
 let handshaken = false;
 
 let starting = null;
+// Whether the main window has anything to draw. ready-to-show is the one gate
+// that shows it without a flash, and showWindow must not step around it: a
+// second launch, the tray, or an activate during page load would put an
+// unpainted white window up and take focus doing it.
+let painted = false;
 function closeStarting() {
   const win = starting;
   starting = null;
@@ -160,17 +165,24 @@ async function boot() {
   client = new StudioHost(ready.origin, ready.token);
   await armCredential(ready);
   win = createWindow();
-  closeStarting();
   guard(win.webContents);
   win.webContents.once("render-process-gone", (_event, details) => {
     if (win.isVisible() || details.reason !== "crashed") return;
+    closeStarting();
     const cause = unpaintedWindowCause(grants, app.getLocale());
     if (cause) dialog.showErrorBox(cause.title, cause.detail);
   });
   installContextMenu(win.webContents, win, uiLang);
   installFullScreenKey(win.webContents, win);
   reload = installReload(win.webContents, win);
-  win.once("ready-to-show", () => win.show());
+  // The starting window's job ends here, not at the handshake: closed there it
+  // left the screen with no window of the application's own for the whole of
+  // the page load — the exact state it exists to cover.
+  win.once("ready-to-show", () => {
+    painted = true;
+    closeStarting();
+    win.show();
+  });
   // No icon, no backgrounding: the close button can only hide the window where
   // something is left that brings it back.
   tray = installTray(client, { onOpen: showWindow, onQuit: () => app.quit() });
@@ -254,6 +266,9 @@ function onWindowClose(event) {
 function showWindow() {
   if (starting && !starting.isDestroyed()) starting.focus();
   if (quitting || !win || win.isDestroyed()) return;
+  // Not drawn yet is not a window yet: the page is still loading, and showing
+  // it now is Electron's default white for as long as that takes.
+  if (!painted) return;
   if (win.isMinimized()) win.restore();
   reload?.revive();
   win.show();
@@ -438,6 +453,9 @@ app.whenReady().then(() => {
   installApplicationMenu(uiLang);
   boot().catch((err) => {
     console.error("reasonix-studio:", err.message);
+    // A launch that fails after the handshake dies with the starting window
+    // still up — its close now waits on a ready-to-show that never comes.
+    closeStarting();
     if (quitting) {
       logs.shell.line(`startup ended by quit: ${err.message}`);
       return;

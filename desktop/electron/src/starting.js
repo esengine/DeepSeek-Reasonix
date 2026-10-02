@@ -1,5 +1,5 @@
 "use strict";
-const { BrowserWindow } = require("electron");
+const { BrowserWindow, nativeTheme } = require("electron");
 
 const TEXT = {
   en: ["Reasonix Studio is starting", "The first start after installing or rebooting can take a minute."],
@@ -31,6 +31,10 @@ function showStarting(locale) {
     frame: true,
     title: "Reasonix Studio",
     autoHideMenuBar: true,
+    // The page's own scheme only applies after its first paint, and the
+    // default is white: on a dark system the window showed white for a beat
+    // before turning over. These are the two --bg values the page styles.
+    backgroundColor: nativeTheme.shouldUseDarkColors ? "#1b1b1d" : "#fafafa",
     webPreferences: { sandbox: true, contextIsolation: true, nodeIntegration: false },
   });
   win.removeMenu();

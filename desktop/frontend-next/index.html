@@ -7,6 +7,11 @@
     <link rel="preconnect" href="https://remote.reasonix.io" crossorigin />
     <link rel="dns-prefetch" href="//id.reasonix.io" />
     <link rel="dns-prefetch" href="//remote.reasonix.io" />
+    <!-- The CJK face is 7.8MB and swap-loaded, so left to its own it is
+         discovered only after the first render and the whole window reflows
+         when it lands — visible past the boot screen on a cold cache. From
+         here it races the bundle instead of following it. -->
+    <link rel="preload" href="/fonts/noto-studio.woff2" as="font" type="font/woff2" crossorigin />
     <title>Reasonix Studio</title>
     <script>
       // The boot screen below is painted by this file, before the bundle that

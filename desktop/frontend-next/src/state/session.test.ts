@@ -53,6 +53,19 @@ describe("sealing a turn", () => {
     expect(notices(s)).toHaveLength(0);
   });
 
+  // A turn whose end never arrived — a kernel lost mid-answer — is closed when
+  // the next one starts, the way its own end would have closed it: the
+  // dispatched call reports, the never-sent batch is counted, nothing keeps
+  // spinning through a turn that has nothing to do with it.
+  it("seals a lost turn's open calls when the next turn starts", () => {
+    const start = (n: number) => ({ kind: "turn_started", authoredTurn: n, msgIndex: n }) as SessionEvent;
+    const s = run([start(1), partial("c1"), full("c2"), start(2)]);
+    expect(s.running).toBe(true);
+    expect(tools(s).filter((i) => i.running)).toHaveLength(0);
+    expect(tools(s).find((i) => i.tool.id === "c2")?.tool.err).toContain("没有回报结果");
+    expect(notices(s)[0]).toContain("1 个调用");
+  });
+
   // The turn was interrupted while the model was still writing the arguments:
   // nothing was dispatched, nothing ran, and no file moved. Saying each of them
   // "reported no result" claims the opposite, and one line per abandoned call
