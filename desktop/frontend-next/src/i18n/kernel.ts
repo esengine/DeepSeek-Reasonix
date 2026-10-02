@@ -86,6 +86,7 @@ const SAID: Record<string, string> = {
   "shell.unavailable_over_http": "HTTP 上不提供 shell 命令",
   "roles.unknown": "不存在「{role}」这个角色",
   "roles.model_unknown": "没有已配置的模型匹配「{model}」",
+  "roles.search_model_unavailable": "搜索模型「{model}」不可用；请检查连接、凭据和搜索开关",
   "shell.editing_disabled": "这台服务器未开放 shell 设置",
   "account.signin_disabled": "这台服务器未开放账号登录",
   "backup.signed_out": "登录账号后才能使用云备份",

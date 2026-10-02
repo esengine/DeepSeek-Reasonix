@@ -24,7 +24,7 @@ const MODELS: ModelEntry[] = [
   { ref: "deepseek/deepseek-flash", provider: "deepseek", vendor: "api.deepseek.com", model: "deepseek-flash", kind: "anthropic", vision: true, contextWindow: 1_000_000 },
   { ref: "deepseek/deepseek-pro", provider: "deepseek", vendor: "api.deepseek.com", model: "deepseek-pro", kind: "anthropic" },
 ];
-const ROLES: RoleAssignments = { planner: "", subagent: "deepseek/deepseek-pro", vision: "", guardian: "", decision: "" };
+const ROLES: RoleAssignments = { planner: "", subagent: "deepseek/deepseek-pro", vision: "", guardian: "", decision: "", web_search: "" };
 
 function draw() {
   const onMain = vi.fn();

@@ -39,7 +39,7 @@ func providerConfig(e *config.ProviderEntry, proxy netclient.ProxySpec) provider
 			"proxy_spec":           proxy,
 			"vision":               config.EffectiveVision(e),
 			"vision_detail":        e.VisionDetail,
-			"web_search":           config.EffectiveWebSearch(e),
+			"web_search":           false,
 			"mode":                 e.ResponsesMode,
 			// Keep nil as nil so the responses provider can vendor-detect its
 			// default instead of accidentally treating every endpoint as stateful.

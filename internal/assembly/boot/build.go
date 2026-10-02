@@ -262,6 +262,7 @@ func (b *builder) wireTools() error {
 	bindFileViews(t.reg, cfg.Tools.ChangedFilesProtected())
 	addSystemOne(t.reg, cfg.Tools.Enabled, cfg, b.balanceClient)
 	addAdvisor(t.reg, cfg, b.proxy, b.sink)
+	addWebSearch(t.reg, cfg, b.model.entry, b.proxy, b.sink)
 	b.addBestOf()
 	if cfg.Agent.CodeMode {
 		t.reg.Add(script.New())

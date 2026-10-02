@@ -4,11 +4,13 @@ package serve
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net/http"
 	"strings"
 
 	"reasonix/internal/contract/config"
+	"reasonix/internal/session/control"
 )
 
 // roleFields maps a wire name onto the AgentConfig field that already decides
@@ -27,8 +29,6 @@ func (s *Server) registerRoleRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("POST /roles", s.setRole)
 }
 
-// An empty ref is the default and means "this job rides the main model". It is
-// a real value rather than a missing one, so clearing a role sends "".
 func (s *Server) roles(w http.ResponseWriter, _ *http.Request) {
 	cfg, err := config.Load()
 	if err != nil {
@@ -39,6 +39,13 @@ func (s *Server) roles(w http.ResponseWriter, _ *http.Request) {
 	for name, field := range roleFields {
 		out[name] = strings.TrimSpace(*field(cfg))
 	}
+	search, err := s.ctl().WebSearchModel()
+	if err != nil {
+		writeErr(w, http.StatusInternalServerError, err)
+		return
+	}
+	out["web_search"] = search.Stored
+	out["web_search_effective"] = search.Effective
 	writeJSON(w, out)
 }
 
@@ -57,6 +64,10 @@ func (s *Server) setRole(w http.ResponseWriter, r *http.Request) {
 	}
 	if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, 8<<10)).Decode(&body); err != nil {
 		badBody(w)
+		return
+	}
+	if strings.TrimSpace(body.Role) == "web_search" {
+		s.setWebSearchRole(w, r, body.Ref)
 		return
 	}
 	field, ok := roleFields[strings.TrimSpace(body.Role)]
@@ -82,6 +93,24 @@ func (s *Server) setRole(w http.ResponseWriter, r *http.Request) {
 	*field(edit) = ref
 	if err := edit.SaveTo(config.UserConfigPath()); err != nil {
 		writeErr(w, http.StatusInternalServerError, err)
+		return
+	}
+	if err := s.rebuildInPlace(r.Context()); err != nil {
+		writeErr(w, http.StatusConflict, err)
+		return
+	}
+	w.WriteHeader(http.StatusNoContent)
+}
+
+func (s *Server) setWebSearchRole(w http.ResponseWriter, r *http.Request, ref string) {
+	if err := s.ctl().SaveWebSearchModel(ref); err != nil {
+		if errors.Is(err, control.ErrTurnRunning) {
+			refuse(w, http.StatusConflict, codeSwitchModel, "a turn is running", nil)
+		} else if errors.Is(err, config.ErrWebSearchModelUnavailable) {
+			refuse(w, http.StatusBadRequest, "roles.search_model_unavailable", "search model is unavailable", map[string]any{"model": ref})
+		} else {
+			writeErr(w, http.StatusInternalServerError, err)
+		}
 		return
 	}
 	if err := s.rebuildInPlace(r.Context()); err != nil {

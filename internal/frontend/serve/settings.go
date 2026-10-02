@@ -252,6 +252,7 @@ type modelEntry struct {
 	// The capability face; see describeModel. Omitted fields mean "nothing
 	// declares this", never "no".
 	Vision        bool        `json:"vision,omitempty"`
+	WebSearch     bool        `json:"webSearch,omitempty"`
 	Efforts       []string    `json:"efforts,omitempty"`
 	Effort        string      `json:"effort,omitempty"`
 	ContextWindow int         `json:"contextWindow,omitempty"`

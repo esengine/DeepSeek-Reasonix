@@ -29,6 +29,7 @@ func describeModel(e *config.ProviderEntry, into *modelEntry) {
 	into.DisplayName = strings.TrimSpace(e.DisplayName)
 	into.Preset = strings.TrimSpace(e.PresetID) != ""
 	into.Vision = config.EffectiveVision(e)
+	into.WebSearch = config.EffectiveIndependentWebSearch(e) && e.Configured()
 	if capability := config.EffortCapabilityForEntry(e); capability.Supported {
 		into.Efforts = capability.Levels
 		into.Effort = capability.Default

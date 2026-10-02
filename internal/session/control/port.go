@@ -251,6 +251,8 @@ type MCPControl interface {
 // file that failed to parse. None of it is a capability listing, so a pane that lists
 // skills or MCP servers cannot reach a permission rule from the same port.
 type RuntimeSettings interface {
+	WebSearchModel() (WebSearchModelSetting, error)
+	SaveWebSearchModel(ref string) error
 	NetworkSettings() NetworkSettings
 	SaveNetworkSettings(in NetworkSettings, password string, clearPassword bool) error
 	DiagnoseNetwork(ctx context.Context) []NetworkProbe

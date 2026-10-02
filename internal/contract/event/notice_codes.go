@@ -60,5 +60,6 @@ const (
 	// A saved language choice is overridden by the project config; Detail is the language in effect.
 	NoticeCodeLanguageOverridden = "language_overridden"
 	// default_model names nothing configured, so the window opened on a fallback; the file is unchanged.
-	NoticeCodeDefaultModelUnavailable = "default_model_unavailable"
+	NoticeCodeDefaultModelUnavailable   = "default_model_unavailable"
+	NoticeCodeWebSearchModelUnavailable = "web_search_model_unavailable"
 )

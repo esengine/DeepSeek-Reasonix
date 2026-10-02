@@ -64,8 +64,8 @@ export class MockPort extends MockFeedback implements AgentPort {
     this.machine.configured = true;
   }
 
-  // The subagent runs somewhere cheaper; everything else rides the main model.
   private assigned: RoleAssignments = {
+    web_search: "",
     planner: "",
     subagent: "deepseek/deepseek-flash",
     guardian: "",
@@ -88,7 +88,7 @@ export class MockPort extends MockFeedback implements AgentPort {
     return [
       {
         ref: "deepseek/deepseek-v4-pro", provider: "deepseek", model: "deepseek-v4-pro",
-        kind: "openai", vendor: "api.deepseek.com", keyEnv: "DEEPSEEK_API_KEY", active: true, efforts, effort: "high",
+        kind: "openai", vendor: "api.deepseek.com", keyEnv: "DEEPSEEK_API_KEY", active: true, efforts, effort: "high", webSearch: true,
         contextWindow: 131072, price: { input: 2, output: 8, currency: "CNY" },
       },
       {

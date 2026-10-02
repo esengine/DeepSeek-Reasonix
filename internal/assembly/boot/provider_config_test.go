@@ -10,6 +10,14 @@ import (
 	"reasonix/internal/contract/provider"
 )
 
+func TestChatProviderDoesNotRunNativeSearchBesideSearchAssignment(t *testing.T) {
+	on := true
+	e := &config.ProviderEntry{Kind: "anthropic", WebSearch: &on}
+	if enabled, _ := providerConfig(e, netclient.ProxySpec{}).Extra["web_search"].(bool); enabled {
+		t.Fatal("chat request can bypass the search model assignment")
+	}
+}
+
 // A hand-edited idle_timeout_seconds never passes UpsertProvider's validation,
 // so the bound has to hold where the value is read: an unbounded
 // time.Duration(v)*time.Second wraps int64 negative and the pre-header deadline

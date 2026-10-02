@@ -1037,11 +1037,11 @@ type AgentConfig struct {
 	RecoveryTemperature float64           `toml:"recovery_temperature"`
 	SubagentModel       string            `toml:"subagent_model"`
 	SubagentModels      map[string]string `toml:"subagent_models"`
-	// VisionModel reads the images a text-only main model cannot. Empty leaves
-	// them with whatever model the receiving sub-agent already runs, which is
-	// chosen for other reasons — a cheap worker is usually text-only, and the
-	// attachment is then dropped during serialization with nothing to show why.
-	VisionModel string `toml:"vision_model"`
+	// A text-only worker can drop images during serialization. A dedicated
+	// reader keeps those attachments available independently of the main model.
+	// Empty retains the receiving sub-agent's model.
+	VisionModel    string `toml:"vision_model"`
+	WebSearchModel string `toml:"web_search_model"`
 	// TriageModel answers the small classifications the static tables come up
 	// short on (is this unrecognized command read-only?). Empty falls back to
 	// subagent_model, then the main model — set it to point them somewhere cheap.

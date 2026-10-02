@@ -13,6 +13,12 @@ export const EN_SETTINGS: Record<string, string> = {
   "{n} 个来源": "{n} sources",
   "模型服务": "Model services",
   "模型偏好": "Model preferences",
+  "独立搜索请求使用的模型": "Model for independent search requests",
+  "项目配置覆盖：实际使用 {model}；此处保存的是全局设置。": "Project override: {model} is used; this saves the global preference.",
+  "自动选择可用搜索连接": "Automatically select an available search connection",
+  "尚无可用搜索模型": "No search models available",
+  "所选搜索模型不可用；请重新选择或恢复自动。": "The selected search model is unavailable. Choose another or restore automatic selection.",
+  "{model}（不可用）": "{model} (unavailable)",
   "模型用途": "Model uses",
   "用途": "Use",
   "使用模型": "Model",
@@ -21,8 +27,8 @@ export const EN_SETTINGS: Record<string, string> = {
   "随主模型": "Follows the default",
   "在「模型服务」添加决策来源": "Add a decision source under Model services",
   "按用途选择模型": "Models by use",
-  "默认模型用于当前对话和大多数任务，其他用途默认跟随它；只有要为某件事换一个模型时才改。切换会保留对话并重建运行时，任务执行期间无法修改。":
-    "The default model runs this conversation and most tasks, and every other use follows it unless you give that job a model of its own. Switching keeps the conversation and rebuilds the runtime; it cannot be done while a task runs.",
+  "默认模型用于当前对话和大多数任务。网页搜索自动选择可用搜索连接，也可指定独立模型。切换会保留对话并重建运行时，任务执行期间无法修改。":
+    "The default model runs this conversation and most tasks. Web search selects an available search connection automatically, or uses a model you assign. Switching keeps the conversation and rebuilds the runtime; it cannot be done while a task runs.",
   "添加模型服务": "Add model service",
   "搜索已添加的服务": "Search added services",
   "上移 {name}（Alt+上方向键）": "Move {name} up (Alt+Up Arrow)",

@@ -3,6 +3,7 @@
 // code adds one here. i18n.test.ts is what stops one from being forgotten.
 
 export const EN_KERNEL: Record<string, string> = {
+  "搜索模型「{model}」不可用；请检查连接、凭据和搜索开关": "Search model “{model}” is unavailable; check the connection, credentials and search setting",
   "反馈通道今日已满，请明天再试": "Feedback is at capacity for today - try again tomorrow",
   "这份反馈的回复次数已到上限，或回复太频繁了，请稍后再试": "This report has reached its reply limit, or you replied too often - try again later",
   "这份反馈现在不接收回复": "This report takes no reply right now",
