@@ -98,6 +98,9 @@ func (chunk ProviderChunk) Validate() error {
 	if chunk.ArgChars < 0 {
 		return validationError("argChars must be non-negative")
 	}
+	if call := chunk.ToolCall; call != nil && (strings.TrimSpace(call.ID) == "" || strings.TrimSpace(call.Name) == "") {
+		return validationError("tool call id and name must be non-empty")
+	}
 	if chunk.Type == ChunkError && chunk.Error == nil {
 		return validationError("error chunks require error")
 	}
