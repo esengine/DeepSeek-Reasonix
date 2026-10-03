@@ -765,6 +765,14 @@ func (s *Store) canScanChildDir(dir string, e os.DirEntry) bool {
 // own type, not its target's), so a linked skill directory or flat <name>.md is
 // discovered like a real one; a broken link fails Stat and is skipped.
 func (s *Store) readEntry(dir string, scope Scope, requireFlatMarker bool, e os.DirEntry) (Skill, bool) {
+	file, stem, flat, ok := profileEntry(dir, e)
+	if !ok {
+		return Skill{}, false
+	}
+	return s.parseSkill(file, stem, scope, flat && requireFlatMarker)
+}
+
+func profileEntry(dir string, e os.DirEntry) (path, stem string, flat, ok bool) {
 	name := e.Name()
 	full := filepath.Join(dir, name)
 
@@ -773,7 +781,7 @@ func (s *Store) readEntry(dir string, scope Scope, requireFlatMarker bool, e os.
 	if !isDir && !isFile && shouldStatEntryTarget(e.Type()) {
 		info, err := os.Stat(full) // follows the link
 		if err != nil {
-			return Skill{}, false // broken link
+			return "", "", false, false
 		}
 		isDir = info.IsDir()
 		isFile = info.Mode().IsRegular()
@@ -781,36 +789,22 @@ func (s *Store) readEntry(dir string, scope Scope, requireFlatMarker bool, e os.
 
 	if isDir {
 		if !IsValidName(name) {
-			return Skill{}, false
+			return "", "", false, false
 		}
 		file := filepath.Join(full, SkillFile)
 		if _, err := os.Stat(file); err != nil {
-			return Skill{}, false // a directory without a SKILL.md is not a skill
+			return "", "", false, false
 		}
-		return s.parse(file, name, scope)
+		return file, name, false, true
 	}
 	if isFile && strings.EqualFold(filepath.Ext(name), ".md") {
 		stem := strings.TrimSuffix(name, filepath.Ext(name))
 		if !IsValidName(stem) {
-			return Skill{}, false
+			return "", "", false, false
 		}
-		return s.parseFlat(full, stem, scope, requireFlatMarker)
+		return full, stem, true, true
 	}
-	return Skill{}, false
-}
-
-// parse reads and decodes one skill file. The frontmatter `name:` overrides the
-// filename stem when valid; a missing `description:` is a warning, not a failure
-// (the skill loads but won't appear in the model's index).
-func (s *Store) parse(path, stem string, scope Scope) (Skill, bool) {
-	return s.parseSkill(path, stem, scope, false)
-}
-
-// parseFlat reads a flat <name>.md skill candidate. Claude skill roots can also
-// contain ordinary documentation, so those flat files need explicit skill
-// frontmatter before they are treated as skills.
-func (s *Store) parseFlat(path, stem string, scope Scope, requireSkillMarker bool) (Skill, bool) {
-	return s.parseSkill(path, stem, scope, requireSkillMarker)
+	return "", "", false, false
 }
 
 func (s *Store) parseSkill(path, stem string, scope Scope, requireSkillMarker bool) (Skill, bool) {

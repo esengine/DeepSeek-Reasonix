@@ -13,6 +13,7 @@ import (
 	"reasonix/internal/ext/hook"
 	"reasonix/internal/ext/installsource"
 	"reasonix/internal/ext/pluginpkg"
+	"reasonix/internal/ext/skill"
 	"reasonix/internal/ext/theme"
 )
 
@@ -122,6 +123,7 @@ func pluginViewFor(home, workspaceRoot string, p pluginpkg.InstalledPlugin) plug
 	}
 	view.Warnings = append(warnings, theme.PluginWarnings(pkg)...)
 	view.Warnings = append(view.Warnings, hook.PackageWarnings(pkg)...)
+	view.Warnings = append(view.Warnings, skill.PluginWarnings(pkg)...)
 	view.Compatibility = pkg.Compatibility.Status
 	view.Skipped = pkg.Compatibility.Skipped
 
