@@ -107,6 +107,13 @@ func (chunk ProviderChunk) Validate() error {
 	if chunk.Type == ChunkUsage && chunk.Usage == nil {
 		return validationError("usage chunks require usage")
 	}
+	if usage := chunk.Usage; usage != nil {
+		for _, tokens := range []int{usage.PromptTokens, usage.CompletionTokens, usage.TotalTokens, usage.CacheHitTokens, usage.CacheMissTokens, usage.ReasoningTokens} {
+			if tokens < 0 {
+				return validationError("usage token counts must be non-negative")
+			}
+		}
+	}
 	return nil
 }
 
