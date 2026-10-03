@@ -250,10 +250,10 @@ func TestCorpusGradersPassTheReferenceSolution(t *testing.T) {
 					t.Parallel()
 					work := stageSeed(t, task.dir)
 					if !stageSolved(t, task.dir, work) {
-						if dir == trainCorpusDir {
-							t.Fatal("no solution/: a generated task must prove its grader can pass")
+						if dir == trainCorpusDir || dir == verificationStressDir {
+							t.Fatal("no solution/: a corpus task must prove its grader can pass")
 						}
-						t.Skip("no solution/ to check this grader against")
+						t.Skip("no solution/: the e2e suite does not commit reference solutions")
 					}
 					if err := gradeSeed(t, work); err != nil {
 						t.Fatalf("the reference solution does not grade clean, so no attempt can: %v", err)
