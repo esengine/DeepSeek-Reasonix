@@ -74,10 +74,20 @@ func descriptorFor(e *config.ProviderEntry, ref string) provider.Descriptor {
 		d.InputPerMillion = price.Input
 		d.OutputPerMillion = price.Output
 	}
-	if len(e.SupportedEfforts) > 0 {
+	// The catalog must expose the same model-specific ladder as /effort.
+	capability := config.EffortCapabilityForEntry(e)
+	switch {
+	case len(e.SupportedEfforts) > 0:
 		d.Efforts = append([]string(nil), e.SupportedEfforts...)
 		d.Reasoning = true
+	case capability.Supported:
+		d.Efforts = capability.Levels
+		d.Reasoning = true
 	}
+	if d.DefaultEffort == "" {
+		d.DefaultEffort = capability.Default
+	}
+	d.ForcesThinking = config.EffortForcesThinking(e)
 	if config.ReasoningProtocolForEntry(e) == config.ReasoningProtocolDeepSeek {
 		d.ToolCallReasoning = true
 		d.Reasoning = true

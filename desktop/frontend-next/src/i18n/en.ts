@@ -1052,6 +1052,7 @@ export const EN: Record<string, string> = {
   "兼顾响应速度与可靠性，适合大多数任务": "Balance speed and reliability for most tasks",
   "投入更多时间分析复杂上下文与执行方案": "Spend more time analyzing complex context and execution plans",
   "用于最复杂的问题，等待时间与消耗最高": "For the hardest problems, with the longest wait and highest usage",
+  "思考仍开启并计费，该模型无法关闭思考": "Thinking stays on and is billed; this model cannot turn it off",
   "仅显示当前模型实际支持的档位。": "Only levels actually supported by this model are shown.",
   "按模型生效": "Per model",
   "查看上下文与压缩": "View context and compaction",

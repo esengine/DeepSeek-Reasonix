@@ -80,7 +80,8 @@ func IsMiniMaxEndpoint(baseURL string) bool {
 
 // IsZhipuEndpoint reports whether baseURL is Zhipu's endpoint for GLM models,
 // the China host (*.bigmodel.cn) or the international one (*.z.ai). Both gate
-// thinking with thinking.type and ignore reasoning_effort.
+// thinking with thinking.type; GLM-5.2 and later also accept reasoning_effort
+// (see ZhipuEffortContract for the per-model ladder).
 func IsZhipuEndpoint(baseURL string) bool {
 	return matchVendorHost(baseURL, "bigmodel.cn", "open.bigmodel.cn") ||
 		matchVendorHost(baseURL, "z.ai", "api.z.ai")

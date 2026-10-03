@@ -392,6 +392,7 @@ var Chinese = Messages{
 	ArgEffortHigh:        "较深推理",
 	ArgEffortXHigh:       "超高推理",
 	ArgEffortMax:         "最高推理",
+	ArgEffortForcedOn:    "思考仍开启并计费，该模型无法关闭思考",
 	ArgThemeCurrent:      "当前",
 	ArgLanguageAuto:      "从 REASONIX_LANG / 系统 locale 自动检测",
 	ArgLanguageEn:        "English",

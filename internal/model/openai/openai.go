@@ -6,8 +6,9 @@
 //     reasoning_effort as a depth hint.
 //   - api.minimaxi.com → emits thinking.type=adaptive|disabled (M3's binary
 //     knob) instead of reasoning_effort, since M3 has no level scale.
-//   - open.bigmodel.cn / api.z.ai (Zhipu GLM) → emits thinking.type=enabled|
-//     disabled instead of reasoning_effort, which Zhipu silently ignores.
+//   - open.bigmodel.cn / api.z.ai (Zhipu GLM) → emits thinking.type; the
+//     documented depth models also accept reasoning_effort
+//     (provider.ZhipuEffortContract). Older GLM keeps thinking.type only.
 //   - api.longcat.chat → emits thinking.type=enabled|disabled and omits
 //     reasoning_effort, matching LongCat's OpenAI-compatible API.
 //   - ollama.com → accepts hosted Ollama Cloud's reasoning_effort scale,
@@ -104,6 +105,10 @@ func New(cfg provider.Config) (provider.Provider, error) {
 	deepseekV4Flash := strings.EqualFold(strings.TrimSpace(cfg.Model), "deepseek-v4-flash")
 	minimax := protocol == "" && IsMiniMax(cfg.BaseURL)
 	zhipu := protocol == "glm" || (protocol == "" && IsZhipu(cfg.BaseURL))
+	zhipuDepth := ""
+	if zhipu && IsZhipu(cfg.BaseURL) {
+		zhipuDepth = provider.ZhipuDepthModel(cfg.Model)
+	}
 	longcat := protocol == "" && IsLongCat(cfg.BaseURL)
 	ollamaCloud := protocol == "" && IsOllamaCloud(cfg.BaseURL)
 	thinkingType := configuredThinkingType(cfg)
@@ -160,15 +165,11 @@ func New(cfg provider.Config) (provider.Provider, error) {
 			return nil, fmt.Errorf("openai: provider %q uses MiniMax thinking; effort must be adaptive or disabled", name)
 		}
 	case zhipu:
-		// Zhipu GLM gates chain-of-thought through `thinking.type`
-		// (enabled|disabled) and silently ignores reasoning_effort, so /effort
-		// mirrors that binary knob. The config effort layer normalises depth
-		// levels onto one of these; "" means auto == the GLM default (thinking on).
-		switch effort {
-		case "", "enabled", "disabled":
-		default:
-			return nil, fmt.Errorf("openai: provider %q uses Zhipu thinking; effort must be enabled or disabled", name)
+		resolved, err := resolveZhipuEffort(name, zhipuDepth, effort)
+		if err != nil {
+			return nil, err
 		}
+		effort = resolved
 	case longcat:
 		// LongCat exposes a binary thinking knob on its OpenAI-compatible endpoint:
 		// thinking.type=enabled|disabled. It documents reasoning text via
@@ -215,7 +216,8 @@ func New(cfg provider.Config) (provider.Provider, error) {
 	requestEfforts := requestEffortVocabulary(effortEndpoint{protocol: protocol,
 		thinkingType: thinkingType, effort: effort, deepseek: deepseek, flash: deepseekV4Flash,
 		minimax: minimax, zhipu: zhipu, longcat: longcat, ollamaCloud: ollamaCloud,
-		explicit: hasExplicitEfforts, supported: supportedEfforts})
+		zhipuDepth: zhipuDepth,
+		explicit:   hasExplicitEfforts, supported: supportedEfforts})
 	// max_output_tokens=0 means automatic (not unlimited). DeepSeek reasoning
 	// uses 32K / high-max 64K; thinking-disabled stays ordinary 16K. 128K is
 	// never automatic — users must set it explicitly after length truncations.
@@ -243,6 +245,7 @@ func New(cfg provider.Config) (provider.Provider, error) {
 		deepseek:           deepseek,
 		minimax:            minimax,
 		zhipu:              zhipu,
+		zhipuDepth:         zhipuDepth,
 		longcat:            longcat,
 		kimiK3:             kimiK3,
 		draft202012Schemas: IsMiMo(cfg.BaseURL),
@@ -283,7 +286,8 @@ type client struct {
 	http               *http.Client
 	deepseek           bool
 	minimax            bool          // true for api.minimaxi.com — emits MiniMax-M3's thinking knob instead of reasoning_effort
-	zhipu              bool          // true for Zhipu GLM (bigmodel.cn / z.ai) — gates thinking via thinking.type, ignores reasoning_effort
+	zhipu              bool          // true for Zhipu GLM (bigmodel.cn / z.ai)
+	zhipuDepth         string        // documented direct-API reasoning_effort model, if any
 	longcat            bool          // true for LongCat — gates thinking via thinking.type, ignores reasoning_effort
 	kimiK3             bool          // true for the explicit K3 protocol or kimi-k3 on Moonshot's direct API hosts
 	draft202012Schemas bool          // the endpoint's dialect, not its vendor: rewrite pre-2020-12 tuple keywords
@@ -311,17 +315,6 @@ func (c *client) RequiresReasoningRoundTrip() bool {
 
 func (c *client) WarnOnMissingToolCallReasoning() bool {
 	return c.RequiresToolCallReasoning() && expectsDeepSeekToolCallReasoning(c.model, c.thinkingType)
-}
-
-func (c *client) glmThinkingEnabled() bool {
-	if c == nil || !c.zhipu {
-		return false
-	}
-	t := c.effort
-	if c.thinkingType != "" {
-		t = c.thinkingType
-	}
-	return t != "disabled"
 }
 
 func expectsDeepSeekToolCallReasoning(model, thinkingType string) bool {
@@ -797,18 +790,7 @@ func (c *client) buildRequest(req provider.Request) chatRequest {
 		out.Thinking = &thinkingMode{Type: t}
 		out.ReasoningEffort = ""
 	case c.zhipu:
-		// Zhipu GLM's binary thinking knob: "enabled" (default, thinking on) or
-		// "disabled". reasoning_effort is silently ignored by the endpoint, so we
-		// omit it and drive chain-of-thought purely through thinking.type.
-		t := c.effort
-		if t == "" {
-			t = "enabled" // auto == the GLM default (thinking on)
-		}
-		if c.thinkingType != "" {
-			t = c.thinkingType // explicit `thinking` config overrides the effort knob
-		}
-		out.Thinking = &thinkingMode{Type: t}
-		out.ReasoningEffort = ""
+		c.applyZhipuEffort(&out, req)
 	case c.longcat:
 		// LongCat's binary thinking knob: "enabled" (default, thinking on) or
 		// "disabled". The API documents reasoning_content in OpenAI responses but
