@@ -12,6 +12,8 @@ import (
 	"sort"
 	"strings"
 
+	"golang.org/x/text/unicode/norm"
+
 	fileencoding "reasonix/internal/base/fileutil/encoding"
 	"reasonix/internal/base/frontmatter"
 	"reasonix/internal/contract/config"
@@ -507,12 +509,14 @@ func loadAgentRefs(dir string) []AgentRef {
 		}
 		fm, _ := frontmatter.SplitLegacy(string(body))
 		name := strings.TrimSuffix(entry.Name(), filepath.Ext(entry.Name()))
-		if declared := strings.TrimSpace(fm["name"]); IsValidName(declared) {
-			name = declared
-		}
-		if !IsValidName(name) {
+		if !config.IsValidSkillName(name) {
 			continue
 		}
+		if declared := fm["name"]; config.IsValidSkillName(declared) &&
+			(config.IsValidMCPServerName(declared) || !config.IsValidMCPServerName(name)) {
+			name = declared
+		}
+		name = norm.NFC.String(name)
 		out = append(out, AgentRef{
 			Name:         name,
 			Description:  strings.TrimSpace(fm["description"]),
