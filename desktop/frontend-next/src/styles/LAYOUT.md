@@ -241,6 +241,19 @@ rules are written in.
 
 ## Columns and the seam
 
+- Browser wide mode changes the existing pane's grid tracks, keeping the
+  workbench, pages, transcript and composer in place. The conversation takes
+  34% of the pane up to 380px; the browser takes the remaining width.
+- The saved split width is untouched, and its divider is absent while wide so dragging
+  cannot silently overwrite a width that is not being drawn.
+- The compact composer's metrics row wraps inside the composer. Absolute
+  positioning below the box lets balance and task controls cross the browser seam.
+- Under the side fold, wide mode stacks the browser above the conversation and
+  composer. Two columns at phone width cannot keep either surface usable.
+- The workbench toggle and Ctrl/Cmd+Shift+B share `browser.wide`. Escape returns
+  to split before the window can close the browser or stop the run. Closing the
+  dock or leaving the conversation resets wide mode; mounting never expands it.
+
 - Column widths change on `.app`, so the tween belongs there and `.cols` only
   reads the result into a track. The tween must be cut during a drag: a .34s
   tween makes the column chase the pointer.

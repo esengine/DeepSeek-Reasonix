@@ -41,6 +41,7 @@ import { RunAnalysis } from "./RunAnalysis";
 import { useBrowserTabs } from "./BrowserPanel";
 import { useRevealAgentPages, useRevealBrowserOpen } from "./browserreveal";
 import { WorkbenchPanel } from "./WorkbenchPanel";
+import { useBrowserWide } from "./browserwide";
 import { refreshTodos } from "../state/restore";
 import { RMark } from "./RMark";
 import { speedOf } from "./speed";
@@ -140,6 +141,7 @@ function PaneView({ port, rt, title, active, visible, sideHost, side, onFocus, o
   // are useful while talking to the agent, but both compete with the timeline
   // for exactly the horizontal/vertical space the analysis view explains.
   const docked = manualBrowser && tab === "flow";
+  const browserSize = useBrowserWide(docked, active && visible);
   const workbench = docked || tab === "browser";
   const [meterOpen, setMeterOpen] = useState(false);
   const meterRef = useRef<HTMLDivElement>(null);
@@ -527,6 +529,7 @@ function PaneView({ port, rt, title, active, visible, sideHost, side, onFocus, o
   return (
     <section
       className="pane"
+      data-browser-size={browserSize.size}
       data-run={run}
       data-off={visible ? undefined : ""}
       aria-hidden={visible ? undefined : true}
@@ -594,13 +597,9 @@ function PaneView({ port, rt, title, active, visible, sideHost, side, onFocus, o
       </div>
       </div>
       </div>
-      {/* Kept mounted rather than switched on: the open files, the browsers and
-          where each had got to are what a glance at the conversation must not
-          cost. */}
-      {/* Mounted shut as well as open: shut is where it becomes the tab that
-          brings the browser back, which is the only affordance left once the
-          column has no width. */}
-      {tab === "flow" && (
+      {/* The workbench keeps pages and open files mounted across view changes;
+          the divider remains reachable when the split column is closed. */}
+      {tab === "flow" && browserSize.size === "split" && (
         <Gutter edge="r" span={DOCK} width={dockW} max={dockMax} label={t("调整浏览器宽度")} open={docked}
           onWidth={onDockW} onOpen={(on) => onManualBrowser?.(on)} />
       )}
@@ -608,6 +607,7 @@ function PaneView({ port, rt, title, active, visible, sideHost, side, onFocus, o
           <WorkbenchPanel
             port={port}
             tabs={pages}
+            wide={browserSize.size === "wide"} onToggleWide={docked ? browserSize.toggle : undefined}
             manual={manualBrowser}
             shown={visible && workbench}
             onSurfaces={setSurfaces}

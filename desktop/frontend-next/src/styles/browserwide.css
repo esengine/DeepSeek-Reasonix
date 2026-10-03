@@ -1,0 +1,18 @@
+.pane[data-browser-size="wide"]:has(> .pbody[data-dock]) {
+  grid-template-columns: minmax(0, min(34%, 380px)) minmax(0, 1fr);
+}
+
+.pane[data-browser-size="wide"] .studio-meterrail {
+  position: static;
+  flex-wrap: wrap;
+  margin-top: 8px;
+  padding-inline: 0;
+}
+
+[data-fold~="side"] .app[data-browser="on"] .pane[data-browser-size="wide"]:has(> .pbody[data-dock]) {
+  grid-template: "nav" auto "find" auto "side" minmax(0, 1.2fr) "body" minmax(0, 1fr) "compose" auto / minmax(0, 1fr);
+}
+
+[data-fold~="side"] .app[data-browser="on"] .pane[data-browser-size="wide"]:has(> .pbody[data-dock]) > :is(.pbody, .compose) {
+  display: flex;
+}

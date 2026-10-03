@@ -20,6 +20,7 @@ import { useMarkdownPoll } from "./useMarkdownPoll";
 import { pinToViewport } from "./place";
 import { WorkbenchExplorerHead } from "./WorkbenchExplorerHead";
 import { setShowsHiddenFiles, showsHiddenFiles } from "../state/prefs";
+import { ariaChord, chord } from "./keys";
 
 // The editor and its grammars load with the first file opened, not with Studio.
 const CodeEditor = lazy(() => import("./CodeEditor"));
@@ -115,6 +116,8 @@ export function WorkbenchPanel({
   onCloseManual,
   onSurfaces,
   onExternal,
+  wide = false,
+  onToggleWide,
 }: {
   port: AgentPort;
   tabs: BrowserTab[];
@@ -133,6 +136,8 @@ export function WorkbenchPanel({
   // How many surfaces the strip holds, for the pane's own tab to count.
   onSurfaces: (n: number) => void;
   onExternal: (url: string) => void;
+  wide?: boolean;
+  onToggleWide?: () => void;
 }) {
   const [files, setFiles] = useState<string[]>([]),
     [directories, setDirectories] = useState<string[]>([]),
@@ -527,6 +532,15 @@ export function WorkbenchPanel({
           </div>
         ))}
         </div>
+        {onToggleWide && (
+          <button className="workbench-files" data-action="browser.wide" aria-pressed={wide}
+            aria-label={wide ? t("恢复浏览器分栏") : t("加宽浏览器")}
+            aria-keyshortcuts={`${ariaChord("B")}+Shift`}
+            title={`${wide ? t("恢复浏览器分栏") : t("加宽浏览器")} (${chord("Shift+B")})`}
+            onClick={onToggleWide}>
+            <StudioIcon name="panel" />
+          </button>
+        )}
         <button
           className="workbench-files"
           data-action="workbench.files"

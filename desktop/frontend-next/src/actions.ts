@@ -59,6 +59,7 @@ export const ACTIONS: UIAction[] = [
   { id: "session.filter", kind: "view", target: "none", proof: "interaction" },
   { id: "chrome.settings", kind: "navigation", target: "none", proof: "interaction" },
   { id: "browser.open", kind: "view", target: "none", proof: "interaction" },
+  { id: "browser.wide", kind: "view", target: "none", proof: "interaction" },
   { id: "browser.back", kind: "navigation", target: "none", proof: "interaction" },
   { id: "browser.reload", kind: "repeatable", target: "none", proof: "interaction" },
   { id: "browser.address", kind: "view", target: "none", proof: "static" },
