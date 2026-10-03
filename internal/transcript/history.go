@@ -27,6 +27,9 @@ func History(messages []provider.Message, opts HistoryOptions) []Message {
 	canonicalMessages := canonicalMessageIDs(messages)
 	suppressCanonical := false
 	todoArgs := completedTodoArguments(messages)
+	// Generated identities must stay unique across the whole history, the same
+	// way repairCheckpointRecordIdentities keeps its generated values apart.
+	used := make(map[string]bool, len(messages))
 	for messageIndex, m := range messages {
 		if suppressCanonical && m.DecisionReceipt == nil && !independentLocalMessage(m) {
 			if !agent.IsUserAuthoredTurnMessage(m) {
@@ -35,7 +38,7 @@ func History(messages []provider.Message, opts HistoryOptions) []Message {
 			suppressCanonical = false
 		}
 		rows := historyRows(m, messageIndex, opts, todoArgs)
-		stampHistoryRows(rows, m)
+		stampHistoryRows(rows, m, used)
 		out = append(out, rows...)
 		if m.Role == provider.RoleUser && !m.LocalOnly && agent.IsUserAuthoredTurnMessage(m) {
 			if appendLegacyTurnRows(&out, byUser, canonicalMessages, m) {
@@ -184,7 +187,14 @@ func applyAssistantHistoryFields(row *Message, m provider.Message, opts HistoryO
 	}
 }
 
-func stampHistoryRows(rows []Message, m provider.Message) {
+// used carries the identities already stamped in this history. Canonical
+// addresses are left exactly as they are, so a transcript that really does
+// hold two records with one identity is still rejected by NewProjection.
+// Only the derived last-resort address is disambiguated: it is keyed by the
+// owning message id, which interrupted-attempt records are persisted without,
+// so two of them would otherwise claim the same row and fail the whole
+// projection.
+func stampHistoryRows(rows []Message, m provider.Message, used map[string]bool) {
 	for i := range rows {
 		row := &rows[i]
 		switch {
@@ -197,8 +207,13 @@ func stampHistoryRows(rows []Message, m provider.Message) {
 		case row.MessageID != "":
 			row.RecordID = "m:" + row.MessageID
 		default:
-			row.RecordID = fmt.Sprintf("m:%s:notice:%d", m.ID, i)
+			base := fmt.Sprintf("m:%s:notice:%d", m.ID, i)
+			row.RecordID = base
+			for suffix := 1; used[row.RecordID]; suffix++ {
+				row.RecordID = fmt.Sprintf("%s:%d", base, suffix)
+			}
 		}
+		used[row.RecordID] = true
 		if row.CreatedAt == 0 {
 			row.CreatedAt = m.CreatedAt
 		}
