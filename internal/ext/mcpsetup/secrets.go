@@ -20,7 +20,7 @@ func Redact(key, value string) string {
 // SensitiveKey reports whether a config key names a credential.
 func SensitiveKey(key string) bool {
 	lower := strings.ToLower(strings.TrimSpace(key))
-	for _, needle := range []string{"auth", "token", "secret", "credential", "api_key", "api-key", "apikey", "cookie"} {
+	for _, needle := range []string{"auth", "token", "secret", "credential", "api_key", "api-key", "apikey", "cookie", "password", "passwd"} {
 		if strings.Contains(lower, needle) {
 			return true
 		}
@@ -46,8 +46,8 @@ func SensitiveValue(value string) bool {
 	return false
 }
 
-// RedactURL masks credential-bearing query parameters while keeping the endpoint
-// readable — the host is the part the user needs to recognise.
+// RedactURL masks userinfo, credential query values and credential fragments.
+// Malformed endpoints, queries or fragments are fully masked.
 func RedactURL(raw string) string {
 	trimmed := strings.TrimSpace(raw)
 	if trimmed == "" {
@@ -55,12 +55,12 @@ func RedactURL(raw string) string {
 	}
 	u, err := url.Parse(trimmed)
 	if err != nil || u == nil {
-		if SensitiveValue(raw) {
-			return "<redacted>"
-		}
-		return raw
+		return "<redacted>"
 	}
-	q := u.Query()
+	q, err := url.ParseQuery(u.RawQuery)
+	if err != nil {
+		return "<redacted>"
+	}
 	changed := false
 	for key := range q {
 		if SensitiveQueryKey(key) {
@@ -68,10 +68,28 @@ func RedactURL(raw string) string {
 			changed = true
 		}
 	}
+	if changed {
+		u.RawQuery = q.Encode()
+	}
+	if u.User != nil {
+		u.User = url.User("<redacted>")
+		changed = true
+	}
+	fragment, err := url.ParseQuery(u.Fragment)
+	if err != nil {
+		return "<redacted>"
+	}
+	for key := range fragment {
+		if SensitiveQueryKey(key) {
+			u.Fragment = "<redacted>"
+			u.RawFragment = ""
+			changed = true
+			break
+		}
+	}
 	if !changed {
 		return raw
 	}
-	u.RawQuery = q.Encode()
 	return u.String()
 }
 

@@ -334,7 +334,7 @@ func mcpList() int {
 			line := strings.TrimSpace(p.Command + " " + strings.Join(p.Args, " "))
 			fmt.Printf("%-16s (stdio)%s  %s\n", p.Name, auto, line)
 		} else {
-			fmt.Printf("%-16s (%s)%s  %s\n", p.Name, typ, auto, p.URL)
+			fmt.Printf("%-16s (%s)%s  %s\n", p.Name, typ, auto, mcpsetup.RedactURL(p.URL))
 		}
 		listed++
 	}
