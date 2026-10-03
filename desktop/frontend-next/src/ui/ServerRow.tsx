@@ -18,6 +18,10 @@ const MCP_STATE: Record<string, string> = {
   disabled: "已关闭",
   standby: "待命 · 首次调用时启动",
   idle: "未连接",
+  // A repository-declared server nobody has answered for. It is off, but not
+  // because the user switched it off — calling it 已关闭 beside the switch reads
+  // as something they did, or worse as a project's MCP that vanished.
+  pending: "待授权 · 来自项目声明",
 };
 
 // A tag only when the schema carries the server's tools or config asks it to:
@@ -70,7 +74,7 @@ export function ServerRow({
 
   const actions = (
     <span className="acts">
-      {live && m.enabled && m.state !== "ready" && (
+      {live && m.enabled && m.state !== "ready" && m.state !== "pending" && (
         <button className="act" data-action="mcp.retry" data-target={m.name} disabled={!!busy} onClick={() => void run("retry", () => port.reconnectMcp(m.name))}>
           {t(busy === "retry" ? "连接中…" : m.state === "standby" ? "立即连接" : "重连")}
         </button>

@@ -568,6 +568,37 @@ func requireAvailableCommandsFrame(t *testing.T, f frame) {
 	}
 }
 
+// awaitResponse reads frames until the response with the given id arrives,
+// skipping the session-open notifications published by a request's after-hook.
+// session/new, session/load and session/resume write their MCP status snapshot
+// after their own response, so it can land ahead of a later request's response.
+// Any other notification is still a failure.
+func awaitResponse(t *testing.T, c *orderedRPCClient, id int) frame {
+	t.Helper()
+	for {
+		f := c.next(t)
+		if f.Method == "" {
+			return f
+		}
+		if f.Method != sessionMCPStatusUpdateMethod {
+			t.Fatalf("awaiting response %d: unexpected notification %q", id, f.Method)
+		}
+	}
+}
+
+// awaitAvailableCommands reads frames until the session-open command
+// advertisement arrives, skipping the MCP status snapshot the same after-hook
+// publishes alongside it.
+func awaitAvailableCommands(t *testing.T, c *orderedRPCClient) frame {
+	t.Helper()
+	for {
+		f := c.next(t)
+		if f.Method != sessionMCPStatusUpdateMethod {
+			return f
+		}
+	}
+}
+
 // drainPrompt collects session/update notifications until the prompt's response
 // arrives, then sweeps any notifications still buffered.
 func drainPrompt(t *testing.T, c *rpcClient, promptCh chan frame) ([]frame, frame) {
@@ -884,16 +915,16 @@ func TestServeAdvertisesCommandsAfterEverySessionOpenResponse(t *testing.T) {
 	requireResponseFrame(t, client.next(t), 1)
 
 	client.send(t, 2, "session/new", SessionNewParams{Cwd: testenv.TempDir(t)})
-	newResponse := client.next(t)
+	newResponse := awaitResponse(t, client, 2)
 	requireResponseFrame(t, newResponse, 2)
-	requireAvailableCommandsFrame(t, client.next(t))
+	requireAvailableCommandsFrame(t, awaitAvailableCommands(t, client))
 	var created SessionNewResult
 	if err := json.Unmarshal(newResponse.Result, &created); err != nil || created.SessionID == "" {
 		t.Fatalf("session/new result: %v (%q)", err, created.SessionID)
 	}
 
 	client.send(t, 3, "session/close", SessionCloseParams{SessionID: created.SessionID})
-	requireResponseFrame(t, client.next(t), 3)
+	requireResponseFrame(t, awaitResponse(t, client, 3), 3)
 
 	persistedID := "ordered-session-open"
 	path := transcriptPath(sessionDir, persistedID)
@@ -911,15 +942,15 @@ func TestServeAdvertisesCommandsAfterEverySessionOpenResponse(t *testing.T) {
 	}
 
 	client.send(t, 4, "session/load", SessionLoadParams{SessionID: persistedID, Cwd: sessionDir})
-	requireResponseFrame(t, client.next(t), 4)
-	requireAvailableCommandsFrame(t, client.next(t))
+	requireResponseFrame(t, awaitResponse(t, client, 4), 4)
+	requireAvailableCommandsFrame(t, awaitAvailableCommands(t, client))
 
 	client.send(t, 5, "session/close", SessionCloseParams{SessionID: persistedID})
-	requireResponseFrame(t, client.next(t), 5)
+	requireResponseFrame(t, awaitResponse(t, client, 5), 5)
 
 	client.send(t, 6, "session/resume", SessionResumeParams{SessionID: persistedID, Cwd: sessionDir})
-	requireResponseFrame(t, client.next(t), 6)
-	requireAvailableCommandsFrame(t, client.next(t))
+	requireResponseFrame(t, awaitResponse(t, client, 6), 6)
+	requireAvailableCommandsFrame(t, awaitAvailableCommands(t, client))
 }
 
 func TestServeSessionConfigSwitchesModelAndEffort(t *testing.T) {

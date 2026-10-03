@@ -54,6 +54,7 @@ func registerHostSessionServer(ctx context.Context, host *plugin.Host, reg *tool
 			return
 		}
 	}
+	host.RecordFailure(s, err)
 	cs, _ := plugin.LoadCachedSchemaForSpec(s)
 	addTools(reg, plugin.LazyToolset(s, cs, host, reg, ctx, false))
 	report(sink, event.Event{Level: event.LevelWarn,

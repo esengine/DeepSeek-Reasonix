@@ -45,3 +45,13 @@ describe("what a failed server's row claims", () => {
     expect(html).not.toContain("HTTP");
   });
 });
+
+describe("a server awaiting launch approval", () => {
+ it.each([false, true])("does not offer reconnect when enabled=%s", (enabled) => {
+  const html = draw(entry({ state: "pending", enabled, source: "project_config" }));
+  expect(html).toContain('data-st="pending"');
+  expect(html).toContain("待授权 · 来自项目声明");
+  expect(html).not.toContain('data-action="mcp.retry"');
+  expect(html).toContain('data-action="mcp.enabled"');
+ });
+});

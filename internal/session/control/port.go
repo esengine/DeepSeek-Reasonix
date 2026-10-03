@@ -240,6 +240,7 @@ type MCPControl interface {
 	RemoveMCPServer(name string) (disconnected bool, err error)
 	ConfiguredMCPNames() []string
 	ConfiguredMCPServers() []MCPServerState
+	MCPServerHealth() []MCPHealth
 	MCPCatalogTools() map[string]int
 	DisconnectedMCPNames() []string
 	UnregisterMCPServerTools(name string) bool

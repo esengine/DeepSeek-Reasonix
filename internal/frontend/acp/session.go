@@ -106,7 +106,7 @@ func (s *service) sessionNew(ctx context.Context, raw json.RawMessage) (any, err
 		createdAt:        now,
 		updatedAt:        now,
 	}
-	s.bindStatusEvents(sess)
+	s.bindSessionHealthEvents(sess)
 	// Pin a transcript file keyed by session id when the controller has a session
 	// dir, so every turn auto-saves there, session/prompt can hand the path back,
 	// and session/load can find it again by id across process restarts. The
@@ -141,7 +141,10 @@ func (s *service) sessionNew(ctx context.Context, raw json.RawMessage) (any, err
 			Modes:         sessionModesState(sessionModeNormal),
 			ConfigOptions: cfgState.ConfigOptions,
 		},
-		after: func() { s.sendAvailableCommands(sess) },
+		after: func() {
+			s.sendAvailableCommands(sess)
+			s.publishMCPStatus(sess)
+		},
 	}, nil
 }
 
@@ -229,6 +232,7 @@ func (s *service) sessionLoad(ctx context.Context, raw json.RawMessage) (any, er
 			sess := s.session(p.SessionID)
 			s.sendAvailableCommands(sess)
 			s.sendUsageUpdate(sess)
+			s.publishMCPStatus(sess)
 		},
 	}, nil
 }
@@ -260,6 +264,7 @@ func (s *service) sessionResume(ctx context.Context, raw json.RawMessage) (any, 
 			sess := s.session(p.SessionID)
 			s.sendAvailableCommands(sess)
 			s.sendUsageUpdate(sess)
+			s.publishMCPStatus(sess)
 		},
 	}, nil
 }

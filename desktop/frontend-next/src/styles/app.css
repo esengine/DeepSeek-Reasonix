@@ -2755,6 +2755,7 @@
   .srv[data-st="ready"] .pip { background: var(--ok) }
   .srv[data-st="connecting"] .pip { background: var(--net); animation: tick 1.6s ease-in-out infinite }
   .srv[data-st="failed"] .pip { background: var(--err) }
+  .srv[data-st="pending"] .pip { background: var(--warn-ink) }
   .srv[data-st="disabled"] .pip { background: var(--ghost) }
   .srv[data-st="disabled"] .nm, .srv[data-st="disabled"] .meta { color: var(--faint) }
 

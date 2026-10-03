@@ -277,6 +277,32 @@ after a turn ends in an error the Goal is still running. A plain
 `session/prompt` continues it, `resume` returns `-32010` because there is
 nothing to resume, and `pause` stops it and reports the paused state.
 
+## MCP server health extension
+
+Reasonix advertises two versioned methods in `agentCapabilities._meta`:
+`_reasonix.io/session/mcpStatus` and
+`_reasonix.io/session/mcpStatus_update`, each with `{"schemaVersion": 1}`.
+The first is a request with `{"sessionId": "…"}`. It returns a snapshot:
+
+```json
+{"schemaVersion":1,"sessionId":"…","servers":[{"name":"tools","status":"ready","tools":3}]}
+```
+
+The second is a notification with the same shape:
+
+- Reasonix sends an initial snapshot after `session/new`, `session/load`, or
+  `session/resume`, then another when a server starts connecting, connects,
+  fails, or starts awaiting launch approval.
+- Clients can request a fresh snapshot after reattaching.
+- Status values are `ready`, `connecting`, `failed`, `pending`, `disabled`,
+  `standby`, and `idle`. `standby` means cached tools are callable but the
+  server has not connected yet. `pending` means project-server authorization
+  is required, including after launch approval is revoked; it is not a
+  connection failure.
+- A status read does not start a server or probe its endpoint.
+- Failed entries can include a sanitized `error` and an `httpStatus`; both
+  fields are omitted when absent.
+
 ## Runtime reload and extension surface
 
 Reasonix advertises two more extension points in
