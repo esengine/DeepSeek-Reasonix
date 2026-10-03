@@ -3,6 +3,8 @@ package installsource
 import (
 	"errors"
 	"fmt"
+
+	"reasonix/internal/contract/tool"
 )
 
 // RiskLevel classifies how dangerous an action is. The install-capability skill
@@ -40,9 +42,9 @@ var (
 	// that escapes the expected skill roots — typically an attempt to
 	// read arbitrary host files.
 	ErrUnsafeLinkTarget = errors.New("install_source: link target escapes skill roots")
-	// ErrSourceUnreadable: a URL did not respond, returned non-2xx, or a
-	// local path was not readable.
-	ErrSourceUnreadable = errors.New("install_source: source is not readable")
+	// ErrSourceUnreadable: a URL could not supply a complete bounded response,
+	// or a local path was not readable.
+	ErrSourceUnreadable = tool.Refusal{Code: "install.source_unreadable", Message: "install_source: source is not readable"}
 	// ErrManifestMissing: a path was reachable but contained no installable
 	// artifact (no SKILL.md, no .mcp.json, no executable, etc.).
 	ErrManifestMissing = errors.New("install_source: no installable manifest")
