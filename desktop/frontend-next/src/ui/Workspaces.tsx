@@ -43,7 +43,7 @@ interface Props {
   onPin?: (path: string) => void;
   onPause?: (runtimeId: string) => void;
   onArchive?: (path: string, archived: boolean, runtimeId?: string) => Promise<void>;
-  onRename: (path: string, title: string) => void;
+  onRename: (path: string, title: string, mode?: "inline" | "dialog") => void;
   onError: (e: unknown) => void;
   // 打开项目这个动作归 App —— 首启那条横幅按的是同一个它。
   adder: Adder;
@@ -57,7 +57,7 @@ interface Props {
 // The list is newest-first, so this is the recent end. A machine that has been
 // worked on for months holds thousands of these, and drawing them all put 98k
 // nodes in the sidebar — more than the transcript at 20000 turns.
-const SHOWN = 30;
+const SHOWN = 5;
 
 // A conversation a pane holds before its first turn is written has only a file
 // name; calling it that would show a timestamp where every other row shows words.
@@ -75,8 +75,6 @@ function WorkspacesView({ hub, tree, treeRead, runtimes, active, folded, reload,
   const askedByKey = useRef("");
   const needle = useRailQuery();
   const treeKeys = useTreeKeys();
-  // Renaming is a pencil, not a double-click: a single click already opens the
-  // session, so a double one would open it twice on the way to the edit.
   const [editing, setEditing] = useState("");
   const [sessionMenu, setSessionMenu] = useState("");
   const [sessionMenuAt, setSessionMenuAt] = useState({ x: 0, y: 0 });
@@ -96,9 +94,6 @@ function WorkspacesView({ hub, tree, treeRead, runtimes, active, folded, reload,
   useLayoutEffect(() => {
     if (sessionMenuPortal.current) pinToViewport(sessionMenuPortal.current, sessionMenuAt.x, sessionMenuAt.y, 12);
   }, [sessionMenu, sessionMenuAt]);
-  // What was already sent for this session, so Enter's commit and the blur it
-  // causes do not both reach the host with the same name.
-  const renamed = useRef<Record<string, string>>({});
   // Finishing is a transition this run witnessed, not a state a row can hold: a
   // persisted done replays nothing when the window opens or the scope changes.
   const priorRun = useRef<Record<string, string>>({});
@@ -120,15 +115,7 @@ function WorkspacesView({ hub, tree, treeRead, runtimes, active, folded, reload,
       });
     }, 1200);
   }, [runs]);
-  const rename = (session: { path: string; title?: string; name: string }, raw: string) => {
-    const next = raw.trim();
-    const was = session.title || session.name;
-    if (!next || next === was || renamed.current[session.path] === next) return;
-    renamed.current[session.path] = next;
-    onRename(session.path, next);
-  };
-  // Folders the reader asked to see in full.
-  const [whole, setWhole] = useState<Set<string>>(new Set());
+  const [shownCounts, setShownCounts] = useState<Record<string, number>>({});
   // Conversations whose conflict copies the reader asked to see.
   const [spread, setSpread] = useState<Set<string>>(new Set());
   // Two folders can share a name — a worktree copy carries the project's own.
@@ -324,6 +311,7 @@ function WorkspacesView({ hub, tree, treeRead, runtimes, active, folded, reload,
             // A fold is a resting-state preference; while a query is on it would hide
             // the very rows the query just found.
             const shut = needle ? false : folded.has(ws.root);
+            const limit = shownCounts[ws.root] ?? SHOWN;
             // Only while the question is on screen: panesOf walks every runtime.
             const doomed = confirm === ws.root ? panesOf(ws.root) : [];
             const busyPanes = liveIds(doomed).length;
@@ -344,7 +332,16 @@ function WorkspacesView({ hub, tree, treeRead, runtimes, active, folded, reload,
                     className="wsrow"
                     role="treeitem"
                     aria-expanded={!shut}
-                    onClick={() => onFold(ws.root, !shut)}
+                    onClick={() => {
+                      if (!shut) {
+                        setShownCounts((prev) => {
+                          const next = { ...prev };
+                          delete next[ws.root];
+                          return next;
+                        });
+                      }
+                      onFold(ws.root, !shut);
+                    }}
                   >
                     <button className="twist" tabIndex={-1} aria-hidden="true">
                       <svg viewBox="0 0 10 10">
@@ -426,7 +423,7 @@ function WorkspacesView({ hub, tree, treeRead, runtimes, active, folded, reload,
                     两级差 18px，扫一眼只读得出“有点错位”。 */}
                 {!shut && (
                   <div className="kids">
-                {(whole.has(ws.root) ? ws.sessions : ws.sessions.slice(0, SHOWN)).map((session) => {
+                {ws.sessions.slice(0, limit).map((session) => {
                     const on = session.runtimeId === active;
                     const run = session.runtimeId ? runs[session.runtimeId]?.run : undefined;
                     if (confirm === session.path) {
@@ -463,7 +460,7 @@ function WorkspacesView({ hub, tree, treeRead, runtimes, active, folded, reload,
                         data-run={run === "idle" ? undefined : run}
                         data-just-done={session.runtimeId && justDone.has(session.runtimeId) ? "" : undefined}
                         data-busy={busy === session.path ? "" : undefined}
-                        onClick={() => void pick(ws, session)}
+                        onClick={(ev) => { if (ev.detail < 2) void pick(ws, session); }}
                         onContextMenu={(ev) => {
                           if ((ev.target as HTMLElement).closest("input, textarea, [role='menu']")) return;
                           ev.preventDefault();
@@ -475,7 +472,6 @@ function WorkspacesView({ hub, tree, treeRead, runtimes, active, folded, reload,
                         tabIndex={0}
                         onKeyDown={(ev) => {
                           if (ev.target !== ev.currentTarget) return;
-                          if (editing === session.path) return;
                           if (ev.key === "Enter" || ev.key === " ") {
                             ev.preventDefault();
                             void pick(ws, session);
@@ -487,35 +483,32 @@ function WorkspacesView({ hub, tree, treeRead, runtimes, active, folded, reload,
                       >
                         <i className="pip" />
                         {editing === session.path ? (
-                          <input
-                            className="sessedit"
-                            aria-label={t("重命名该会话")}
-                            autoFocus
+                          <input className="sessedit" aria-label={t("重命名该会话")} placeholder={t("留空以恢复自动标题")} autoFocus
                             defaultValue={session.title || session.name}
                             onClick={(ev) => ev.stopPropagation()}
+                            data-action-blur="session.rename" data-action-keydown="session.rename" data-target={session.path}
                             onBlur={(ev) => {
+                              const next = ev.currentTarget.value.trim();
                               setEditing("");
-                              rename(session, ev.currentTarget.value);
+                              if (next !== (session.title || session.name).trim()) onRename(session.path, next, "inline");
                             }}
-                            data-action-keydown="session.rename"
-                            data-target={session.path}
                             onKeyDown={(ev) => {
                               if (ev.key === "Enter") {
-                                // The aimed-at commit. Blur saves too, and its
-                                // own guard keeps that from sending twice.
-                                rename(session, ev.currentTarget.value);
+                                ev.preventDefault();
                                 ev.currentTarget.blur();
-                              }
-                              if (ev.key === "Escape") {
-                                // Abandoning a rename is not stopping the run behind it.
+                              } else if (ev.key === "Escape") {
+                                ev.preventDefault();
                                 ev.stopPropagation();
                                 ev.currentTarget.value = session.title || session.name;
                                 ev.currentTarget.blur();
                               }
-                            }}
-                          />
+                            }} />
                         ) : (
-                          <span className="sesstitle" title={rowLabel(session)}><span>{rowLabel(session)}</span></span>
+                          <span className="sesstitle" title={rowLabel(session)}
+                            data-action-doubleclick="session.rename-start" data-target={session.path}
+                            onDoubleClick={(ev) => { ev.stopPropagation(); setEditing(session.path); }}>
+                            <span>{rowLabel(session)}</span>
+                          </span>
                         )}
                         {kept.length > 0 && (
                           <button
@@ -551,7 +544,7 @@ function WorkspacesView({ hub, tree, treeRead, runtimes, active, folded, reload,
                               <button role="menuitem" data-action="session.pin" data-target={session.path} onClick={() => { onPin(session.path); setSessionMenu(""); }}>
                                 <StudioIcon name="pin" /><span>{pinned.has(session.path) ? t("取消置顶") : t("置顶会话")}</span>
                               </button>
-                              <button role="menuitem" data-action="session.rename" data-target={session.path} onClick={() => { setEditing(session.path); setSessionMenu(""); }}>
+                              <button role="menuitem" data-action="session.rename-start" data-target={session.path} onClick={() => { setSessionMenu(""); onRename(session.path, session.title || session.name); }}>
                                 <StudioIcon name="edit" /><span>{t("重命名")}</span>
                               </button>
                               {session.runtimeId && liveIds([session.runtimeId]).length > 0 && (
@@ -663,12 +656,14 @@ function WorkspacesView({ hub, tree, treeRead, runtimes, active, folded, reload,
                     );
                   })}
 
-                {!whole.has(ws.root) && ws.sessions.length > SHOWN && (
+                {ws.sessions.length > limit && (
                   <button
                     className="sessmore"
-                    onClick={() => setWhole((prev) => new Set(prev).add(ws.root))}
+                    data-action="workspace.sessions-more"
+                    data-target={ws.root}
+                    onClick={() => setShownCounts((prev) => ({ ...prev, [ws.root]: (prev[ws.root] ?? SHOWN) + SHOWN }))}
                   >
-                    {t("还有 {n} 个 · 全部显示", { n: ws.sessions.length - SHOWN })}
+                    {t("展开显示")}
                   </button>
                 )}
                   </div>

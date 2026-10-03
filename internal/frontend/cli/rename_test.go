@@ -26,7 +26,7 @@ func TestRenameSessionUpdatesCustomTitle(t *testing.T) {
 	}); err != nil {
 		t.Fatalf("seed meta: %v", err)
 	}
-	if err := sessionstore.RenameSession(sessionPath, "My Test Title"); err != nil {
+	if err := sessionstore.UpdateBranchMeta(sessionPath, false, func(meta *sessionstore.BranchMeta) error { meta.CustomTitle = "My Test Title"; return nil }); err != nil {
 		t.Fatalf("RenameSession failed: %v", err)
 	}
 	metaPath := sessionPath + ".meta"
@@ -54,7 +54,7 @@ func TestRenameSessionUpdatesCustomTitle(t *testing.T) {
 	if !stored.UpdatedAt.Equal(updatedAt) {
 		t.Errorf("updated_at changed after rename: got %s want %s", stored.UpdatedAt, updatedAt)
 	}
-	if err := sessionstore.RenameSession(sessionPath, "Updated Title"); err != nil {
+	if err := sessionstore.UpdateBranchMeta(sessionPath, false, func(meta *sessionstore.BranchMeta) error { meta.CustomTitle = "Updated Title"; return nil }); err != nil {
 		t.Fatalf("second rename failed: %v", err)
 	}
 	raw, _ = os.ReadFile(metaPath)

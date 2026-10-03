@@ -1397,3 +1397,24 @@ what exists.
 - The reduced-motion block is deliberately the last motion rule in the file, so a
   new component inherits the user's request instead of depending on a selector
   written before it.
+
+## Session rename dialog
+
+- Double-clicking a sidebar session title or a tab starts inline editing.
+  Enter or blur saves; Escape cancels.
+- The rename menu on either surface opens the modal with the current title. Its
+  footer keeps automatic naming on the left and Cancel/Save on the right.
+- Saving an empty name clears the fixed cache entry and metadata title. A cached
+  automatic title is reused; otherwise the preview stands in during generation.
+  Escape and Cancel leave the title unchanged.
+- Automatic naming joins all user messages and uses the last 300 characters.
+  The result fills the input without saving or closing the modal. Save commits
+  the edited title; pending requests disable all editing and dismissal.
+- The native dialog owns focus containment and the backdrop. Its colours follow
+  the active light or dark palette.
+
+## Session row density
+
+- Both the row and its title use a 34px minimum height; reducing title padding
+  alone leaves the row at its former minimum. Title padding is 3px vertically.
+- The menu button stays vertically centered as a wrapped title grows the row.

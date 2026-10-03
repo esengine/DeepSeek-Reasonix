@@ -297,7 +297,7 @@ func TestSessionMetaConcurrentWritersKeepRevisionMonotonic(t *testing.T) {
 	if err := s.SaveSnapshot(path); err != nil {
 		t.Fatalf("SaveSnapshot seed: %v", err)
 	}
-	if err := RenameSession(path, "seed-title"); err != nil {
+	if err := UpdateBranchMeta(path, false, func(meta *BranchMeta) error { meta.CustomTitle = "seed-title"; return nil }); err != nil {
 		t.Fatalf("RenameSession seed: %v", err)
 	}
 	if err := SetBranchModelPreserveUpdated(path, "prov/model-seed"); err != nil {
@@ -323,7 +323,7 @@ func TestSessionMetaConcurrentWritersKeepRevisionMonotonic(t *testing.T) {
 				return
 			default:
 			}
-			if err := RenameSession(path, fmt.Sprintf("title-%d", i)); err != nil {
+			if err := UpdateBranchMeta(path, false, func(meta *BranchMeta) error { meta.CustomTitle = fmt.Sprintf("title-%d", i); return nil }); err != nil {
 				select {
 				case metaErrCh <- err:
 				default:

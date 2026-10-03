@@ -4,57 +4,54 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"os"
 	"path/filepath"
+	"strings"
 	"sync"
 
+	"reasonix/internal/base/fileutil"
 	fileencoding "reasonix/internal/base/fileutil/encoding"
+	"reasonix/internal/state/sessionstore"
 )
 
-// titleCache persists generated session titles to <dir>/.session-titles.json.
-// Entries are keyed by file name and the first user message: appending turns
-// changes the transcript mtime without invalidating the title, while replacing
-// the first turn (for example by rewinding turn zero) produces a cache miss.
-// Persistence is best-effort: a missing or unreadable cache just regenerates.
-type titleCache struct {
-	mu      sync.Mutex
-	dir     string
-	loaded  bool
-	entries map[string]titleEntry
-}
+// Every reader reloads under the same lock: panes and the tree have separate
+// cache handles, and a stale writer must not undo an explicit rename.
+var titleCacheMu sync.Mutex
+
+type titleCache struct{ dir string }
 
 type titleEntry struct {
 	Title      string `json:"title"`
 	Mod        int64  `json:"mod"`
 	SourceHash string `json:"source_hash,omitempty"`
+	Explicit   bool   `json:"explicit,omitempty"`
 }
 
-func newTitleCache(dir string) *titleCache {
-	return &titleCache{dir: dir, entries: map[string]titleEntry{}}
-}
+func newTitleCache(dir string) *titleCache { return &titleCache{dir: dir} }
 
-// setDir repoints the cache at another session directory and drops what was
-// loaded from the previous one: entries are keyed by file name, which is unique
-// within a project and not across them.
 func (c *titleCache) setDir(dir string) {
-	c.mu.Lock()
-	defer c.mu.Unlock()
-	if c.dir == dir {
-		return
-	}
+	titleCacheMu.Lock()
+	defer titleCacheMu.Unlock()
 	c.dir = dir
-	c.loaded = false
-	c.entries = map[string]titleEntry{}
 }
 
-func (c *titleCache) load() {
-	if c.loaded {
-		return
+func (c *titleCache) load() (map[string]titleEntry, error) {
+	entries := map[string]titleEntry{}
+	data, err := fileencoding.ReadFileUTF8(filepath.Join(c.dir, ".session-titles.json"))
+	if errors.Is(err, os.ErrNotExist) {
+		return entries, nil
 	}
-	c.loaded = true
-	if data, err := fileencoding.ReadFileUTF8(filepath.Join(c.dir, ".session-titles.json")); err == nil {
-		_ = json.Unmarshal(data, &c.entries)
+	if err != nil {
+		return nil, err
 	}
+	if err := json.Unmarshal(data, &entries); err != nil {
+		return map[string]titleEntry{}, nil
+	}
+	if entries == nil {
+		entries = map[string]titleEntry{}
+	}
+	return entries, nil
 }
 
 func titleSourceHash(source string) string {
@@ -63,34 +60,131 @@ func titleSourceHash(source string) string {
 }
 
 func (c *titleCache) get(name, source string, mod int64) (string, bool) {
-	c.mu.Lock()
-	defer c.mu.Unlock()
-	c.load()
-	e, ok := c.entries[name]
-	if !ok {
-		return "", false
+	title := c.display(name, source, mod, "")
+	return title, title != ""
+}
+
+type titleSnapshot map[string]titleEntry
+
+func (c *titleCache) snapshot() titleSnapshot {
+	titleCacheMu.Lock()
+	defer titleCacheMu.Unlock()
+	entries, _ := c.load()
+	return titleSnapshot(entries)
+}
+
+func (c *titleCache) display(name, source string, mod int64, custom string) string {
+	return c.snapshot().display(name, source, mod, custom)
+}
+
+func (snapshot titleSnapshot) display(name, source string, mod int64, custom string) string {
+	entry := snapshot[name]
+	if entry.Explicit {
+		return entry.Title
 	}
-	if e.SourceHash == "" {
-		// Legacy entries used only mtime. Accept a still-current entry without
-		// rewriting the cache; the next transcript append regenerates once and
-		// upgrades it to source_hash automatically.
-		if e.Mod == mod {
-			return e.Title, true
+	if custom = strings.TrimSpace(custom); custom != "" {
+		return custom
+	}
+	if entry.SourceHash != "" {
+		if entry.SourceHash == titleSourceHash(source) {
+			return entry.Title
 		}
-		return "", false
+	} else if entry.Mod == mod {
+		return entry.Title
 	}
-	if e.SourceHash == titleSourceHash(source) {
-		return e.Title, true
-	}
-	return "", false
+	return ""
 }
 
 func (c *titleCache) put(name, title, source string, mod int64) {
-	c.mu.Lock()
-	defer c.mu.Unlock()
-	c.load()
-	c.entries[name] = titleEntry{Title: title, Mod: mod, SourceHash: titleSourceHash(source)}
-	if data, err := json.Marshal(c.entries); err == nil {
-		_ = os.WriteFile(filepath.Join(c.dir, ".session-titles.json"), data, 0o644)
+	_ = c.store(name, titleEntry{Title: title, Mod: mod, SourceHash: titleSourceHash(source)})
+}
+
+func (c *titleCache) putExplicit(name, title string) error {
+	return c.store(name, titleEntry{Title: title, Explicit: true})
+}
+
+func (c *titleCache) clearExplicit(name string) error {
+	titleCacheMu.Lock()
+	defer titleCacheMu.Unlock()
+	entries, err := c.load()
+	if err != nil {
+		return err
 	}
+	if entries[name].Explicit {
+		delete(entries, name)
+	}
+	data, err := json.Marshal(entries)
+	if err != nil {
+		return err
+	}
+	return writeSessionTitle(filepath.Join(c.dir, name), "", func() error {
+		return fileutil.AtomicWriteFile(filepath.Join(c.dir, ".session-titles.json"), data, 0o644)
+	})
+}
+
+func (c *titleCache) store(name string, entry titleEntry) error {
+	titleCacheMu.Lock()
+	defer titleCacheMu.Unlock()
+	entries, err := c.load()
+	if err != nil {
+		return err
+	}
+	if entries[name].Explicit && !entry.Explicit {
+		return nil
+	}
+	entries[name] = entry
+	data, err := json.Marshal(entries)
+	if err != nil {
+		return err
+	}
+	writeCache := func() error {
+		return fileutil.AtomicWriteFile(filepath.Join(c.dir, ".session-titles.json"), data, 0o644)
+	}
+	if entry.Explicit {
+		return writeSessionTitle(filepath.Join(c.dir, name), entry.Title, writeCache)
+	}
+	return writeCache()
+}
+
+// Hold the metadata lock through both writes and rollback so a failed cache
+// write cannot undo metadata saved by another runtime.
+func writeSessionTitle(path, title string, writeCache func() error) error {
+	unlock, err := sessionstore.LockSessionMetaPath(path)
+	if err != nil {
+		return err
+	}
+	defer unlock()
+
+	metaPath := sessionstore.BranchMetaPath(path)
+	original, readErr := os.ReadFile(metaPath)
+	if readErr != nil && !errors.Is(readErr, os.ErrNotExist) {
+		return readErr
+	}
+	originalMode := os.FileMode(0o600)
+	if readErr == nil {
+		info, err := os.Stat(metaPath)
+		if err != nil {
+			return err
+		}
+		originalMode = info.Mode().Perm()
+	}
+	meta, _, err := sessionstore.LoadBranchMeta(path)
+	if err != nil {
+		return err
+	}
+	meta.CustomTitle = title
+	if err := sessionstore.SaveBranchMetaPreserveUpdatedLocked(path, meta); err != nil {
+		return err
+	}
+	if err = writeCache(); err == nil {
+		return nil
+	}
+
+	var rollbackErr error
+	if errors.Is(readErr, os.ErrNotExist) {
+		rollbackErr = os.Remove(metaPath)
+	} else {
+		rollbackErr = fileutil.AtomicWriteFile(metaPath, original, originalMode)
+	}
+	return errors.Join(err, rollbackErr)
 }

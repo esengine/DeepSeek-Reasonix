@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { cleanup, fireEvent, render, screen, within } from "@testing-library/react";
+import { cleanup, render, screen, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import "./testkit";
 import { Workspaces } from "./Workspaces";
@@ -29,6 +29,7 @@ function draw(over: { runtimes?: RuntimeView[]; workspaces?: TreeWorkspace[] } =
   const onOpen = vi.fn().mockResolvedValue(undefined);
   const reload = vi.fn().mockResolvedValue(undefined);
   const onError = vi.fn();
+  const onRename = vi.fn();
   const view = (workspaces: TreeWorkspace[]) => (
     <Workspaces
       hub={hub}
@@ -44,7 +45,7 @@ function draw(over: { runtimes?: RuntimeView[]; workspaces?: TreeWorkspace[] } =
       onClose={onClose}
       liveIds={() => []}
       runs={{}}
-      onRename={() => {}}
+      onRename={onRename}
       onError={onError}
       adder={{ add: () => {}, close: () => {}, at: null } as never}
     />
@@ -52,7 +53,7 @@ function draw(over: { runtimes?: RuntimeView[]; workspaces?: TreeWorkspace[] } =
   const { rerender } = render(view(over.workspaces ?? tree()));
   // What the kernel lists after a write: the tree the next reload brings back.
   const relist = (workspaces: TreeWorkspace[]) => rerender(view(workspaces));
-  return { removeSession, onClose, onOpen, reload, onError, relist };
+  return { removeSession, onClose, reload, onError, onRename, onOpen, relist };
 }
 
 it("projects each open session's run state onto its own row", () => {
@@ -233,14 +234,41 @@ describe("the Delete key on a focused conversation", () => {
     expect(document.activeElement).toBe(screen.getByRole("treeitem", { name: /the next one/ }));
   });
 
-  it("leaves a rename field's Delete to the field", async () => {
-    draw();
+  it("double-clicks a sidebar title into inline editing without opening twice", async () => {
+    const { onRename, removeSession, onOpen } = draw();
+    await userEvent.dblClick(screen.getByText("the one to delete"));
+    const input = screen.getByRole("textbox", { name: "重命名该会话" });
+    await userEvent.clear(input);
+    await userEvent.type(input, "  renamed inline  {Enter}");
+    expect(onRename).toHaveBeenCalledExactlyOnceWith(SESSION, "renamed inline", "inline");
+    expect(onOpen).toHaveBeenCalledTimes(1);
+    expect(removeSession).not.toHaveBeenCalled();
+    expect(screen.queryByRole("textbox")).toBeNull();
+  });
+
+  it("cancels sidebar title double-click renaming with Escape", async () => {
+    const { onRename } = draw();
+    await userEvent.dblClick(screen.getByText("the one to delete"));
+    const input = screen.getByRole("textbox", { name: "重命名该会话" });
+    await userEvent.clear(input);
+    await userEvent.keyboard("{Escape}");
+    expect(onRename).not.toHaveBeenCalled();
+    expect(screen.queryByRole("textbox")).toBeNull();
+  });
+
+  it("resets a cleared sidebar title on Enter", async () => {
+    const { onRename } = draw();
+    await userEvent.dblClick(screen.getByText("the one to delete"));
+    await userEvent.clear(screen.getByRole("textbox", { name: "重命名该会话" }));
+    await userEvent.keyboard("{Enter}");
+    expect(onRename).toHaveBeenCalledExactlyOnceWith(SESSION, "", "inline");
+  });
+
+  it("opens the rename dialog from the sidebar rename menu", async () => {
+    const { onRename } = draw();
     await userEvent.pointer({ keys: "[MouseRight]", target: screen.getByRole("treeitem", { name: /the one to delete/ }) });
-    await userEvent.click(screen.getByRole("menuitem", { name: /重命名/ }));
-    const field = screen.getByRole("textbox", { name: "重命名该会话" });
-    expect(fireEvent.contextMenu(field)).toBe(true);
-    field.focus();
-    await userEvent.keyboard("{Delete}");
-    expect(screen.queryByRole("alertdialog")).toBeNull();
+    await userEvent.click(screen.getByRole("menuitem", { name: "重命名" }));
+    expect(onRename).toHaveBeenCalledExactlyOnceWith(SESSION, "the one to delete");
+    expect(screen.queryByRole("textbox")).toBeNull();
   });
 });

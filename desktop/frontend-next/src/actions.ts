@@ -74,6 +74,7 @@ export const ACTIONS: UIAction[] = [
   { id: "metrics.details", kind: "view", target: "optional", proof: "interaction" },
   { id: "metrics.hide-amounts", kind: "view", target: "none", proof: "interaction" },
   { id: "session.menu", kind: "view", target: "entity", proof: "interaction" },
+  { id: "workspace.sessions-more", kind: "view", target: "entity", proof: "interaction" },
   { id: "workspace.menu", kind: "view", target: "entity", proof: "interaction" },
   { id: "session.pin", kind: "view", target: "entity", proof: "interaction" },
   { id: "session.pause", kind: "kernel-mutation", target: "entity", proof: "interaction" },
@@ -117,6 +118,8 @@ export const ACTIONS: UIAction[] = [
   { id: "queue.edit", kind: "kernel-mutation", target: "entity", proof: "interaction" },
   // Giving a session a name of your own. The sidebar's tree and the pane tabs
   // rename the same session through the same host call, so it is one id.
+  { id: "session.rename-start", kind: "navigation", target: "entity", proof: "interaction" },
+  { id: "session.auto-name", kind: "kernel-mutation", target: "entity", proof: "authority-effect" },
   { id: "session.rename", kind: "kernel-mutation", target: "entity", proof: "authority-effect" },
   { id: "queue.cancel", kind: "kernel-mutation", target: "entity", proof: "interaction" },
   { id: "queue.send-now", kind: "kernel-mutation", target: "entity", proof: "interaction" },

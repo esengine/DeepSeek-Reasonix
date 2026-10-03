@@ -36,6 +36,7 @@ func (s *Server) sessions(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	current := sessionstore.CanonicalSessionPath(s.ctl().SessionPath())
+	titles := s.titles.snapshot()
 	out := make([]sessionEntry, 0, len(listed))
 	for _, si := range listed {
 		base := filepath.Base(si.Path)
@@ -53,7 +54,7 @@ func (s *Server) sessions(w http.ResponseWriter, r *http.Request) {
 			Name:     strings.TrimSuffix(base, ".jsonl"),
 			Path:     si.Path,
 			Turns:    si.Turns,
-			Title:    s.sessionTitle(base, si.Preview, modified.UnixNano()),
+			Title:    s.sessionTitleFrom(titles, base, si.Preview, modified.UnixNano(), si.CustomTitle),
 			Current:  sessionstore.CanonicalSessionPath(si.Path) == current,
 			Modified: modified,
 		})

@@ -12,6 +12,11 @@ export const EN_KERNEL: Record<string, string> = {
   "主机命令解析器不可用；请在主机恢复后重试": "The host shell parser is unavailable; retry after the host parser is restored",
   "主机命令解析超时或被取消；请重试": "The host shell parser timed out or was canceled; retry the call",
   "命令超过主机长度限制；请拆分命令或从文件读取长文本": "The command exceeds the host length limit; split it or read long text from a file",
+  "请输入聊天标题": "Enter a chat title",
+  "该会话还没有可用于命名的用户消息": "This chat has no user message to name it from",
+  "未配置可用于自动命名的模型，请先配置模型": "Configure a model before using automatic naming",
+  "自动命名失败，原标题未更改，请重试": "Automatic naming failed. The original title is unchanged. Please try again",
+
   "反馈通道今日已满，请明天再试": "Feedback is at capacity for today - try again tomorrow",
   "这份反馈的回复次数已到上限，或回复太频繁了，请稍后再试": "This report has reached its reply limit, or you replied too often - try again later",
   "这份反馈现在不接收回复": "This report takes no reply right now",

@@ -215,6 +215,10 @@ export class MockHub implements HubPort {
     return Promise.resolve();
   }
 
+  autoNameSession(_path: string) {
+    return Promise.resolve({ title: "最近的聊天话题" });
+  }
+
   exportSession(path: string) {
     const name = path.split(/[/\\]/).at(-1)?.replace(/\.jsonl$/i, "") || "session";
     return Promise.resolve({ name, content: '{"role":"user","content":"mock session"}\n' });

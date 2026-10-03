@@ -91,19 +91,19 @@ func TestSessionTitleCachesByFirstMessageAcrossMtimeChanges(t *testing.T) {
 	prov := &recordingTitleProvider{}
 	s := &Server{titleProv: prov, titles: newTitleCache(dir), fill: newTitleFiller()}
 
-	if got := s.sessionTitle("a.jsonl", "first prompt", 100); got != "first prompt" {
+	if got := s.sessionTitle("a.jsonl", "first prompt", 100, ""); got != "first prompt" {
 		t.Fatalf("first title = %q", got)
 	}
 	waitTitle(t, s, "a.jsonl", "first prompt", 100)
 
-	if got := s.sessionTitle("a.jsonl", "first prompt", 200); got != "first prompt" {
+	if got := s.sessionTitle("a.jsonl", "first prompt", 200, ""); got != "first prompt" {
 		t.Fatalf("title after append = %q", got)
 	}
 	if prov.count() != 1 {
 		t.Fatalf("requests after mtime-only change = %d, want 1", prov.count())
 	}
 
-	if got := s.sessionTitle("a.jsonl", "replacement prompt", 300); got != "replacement prompt" {
+	if got := s.sessionTitle("a.jsonl", "replacement prompt", 300, ""); got != "replacement prompt" {
 		t.Fatalf("title after replacing first turn = %q", got)
 	}
 	waitTitle(t, s, "a.jsonl", "replacement prompt", 300)
@@ -113,7 +113,7 @@ func TestSessionTitleCachesByFirstMessageAcrossMtimeChanges(t *testing.T) {
 
 	freshProv := &recordingTitleProvider{}
 	fresh := &Server{titleProv: freshProv, titles: newTitleCache(dir), fill: newTitleFiller()}
-	if got := fresh.sessionTitle("a.jsonl", "replacement prompt", 400); got != "replacement prompt" {
+	if got := fresh.sessionTitle("a.jsonl", "replacement prompt", 400, ""); got != "replacement prompt" {
 		t.Fatalf("persisted title = %q", got)
 	}
 	if freshProv.count() != 0 {
@@ -129,7 +129,7 @@ func TestSessionTitleDoesNotBlockOnGeneration(t *testing.T) {
 	s := &Server{titleProv: prov, titles: newTitleCache(testenv.TempDir(t)), fill: newTitleFiller()}
 
 	done := make(chan string, 1)
-	go func() { done <- s.sessionTitle("a.jsonl", "slow prompt", 100) }()
+	go func() { done <- s.sessionTitle("a.jsonl", "slow prompt", 100, "") }()
 
 	select {
 	case got := <-done:

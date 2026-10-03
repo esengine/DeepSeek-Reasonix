@@ -1,0 +1,53 @@
+.session-rename-dialog {
+  width: min(524px, calc(100vw - 32px));
+  box-sizing: border-box;
+  margin: auto;
+  padding: 24px;
+  border: 1px solid var(--border);
+  border-radius: 24px;
+  background: var(--surface);
+  color: var(--text);
+  box-shadow: var(--shadow-float);
+  font-family: var(--ui);
+}
+.session-rename-dialog::backdrop { background: rgb(0 0 0 / .28); }
+.session-rename-dialog header { display: flex; align-items: center; justify-content: space-between; gap: 16px; }
+.session-rename-dialog h2 { margin: 0; font-size: 24px; font-weight: 650; line-height: 1.3; }
+.session-rename-dialog p { margin: 5px 0 18px; color: var(--muted); font-size: 16px; }
+.session-rename-dialog input {
+  display: block;
+  box-sizing: border-box;
+  width: 100%;
+  height: 44px;
+  padding: 0 12px;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  background: var(--raised);
+  color: var(--text);
+  font: inherit;
+  font-size: 16px;
+}
+.session-rename-dialog footer { display: flex; align-items: center; gap: 12px; margin-top: 16px; }
+.session-rename-dialog button {
+  min-height: 40px;
+  padding: 0 18px;
+  border: 1px solid var(--hair);
+  border-radius: 12px;
+  background: var(--raised);
+  color: var(--text);
+  font: inherit;
+  font-size: 16px;
+  cursor: pointer;
+}
+.session-rename-dialog .session-rename-auto { margin-right: auto; }
+.session-rename-dialog .session-rename-save { border-color: var(--text); background: var(--text); color: var(--surface); }
+.session-rename-dialog .session-rename-close { display: grid; place-items: center; min-height: 28px; width: 28px; padding: 0; border: 0; background: transparent; }
+.session-rename-dialog .session-rename-close svg { width: 16px; height: 16px; }
+.session-rename-dialog .session-rename-error { margin: 12px 0 0; color: var(--err); font-size: 14px; }
+.session-rename-dialog button:disabled { opacity: .5; cursor: default; }
+.session-rename-dialog :focus-visible { outline: 2px solid var(--focus); outline-offset: 2px; }
+@media (max-width: 400px) {
+  .session-rename-dialog { padding: 20px; }
+  .session-rename-dialog footer { gap: 8px; }
+  .session-rename-dialog button { padding: 0 12px; font-size: 14px; }
+}

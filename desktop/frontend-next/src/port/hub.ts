@@ -87,6 +87,7 @@ export interface HubPort extends SharePort {
   removeSession(path: string): Promise<void>;
   archiveSession(path: string, archived: boolean): Promise<void>;
   renameSession(path: string, title: string): Promise<void>;
+  autoNameSession(path: string): Promise<{ title: string }>;
   exportSession(path: string): Promise<{ name: string; content: string }>;
   importLegacySessions(path: string, workspace: string): Promise<{ summary: string; imported: number; warnings: number }>;
   // The host book with each link's state, or null where this kernel refuses
@@ -240,6 +241,10 @@ export class SseHub implements HubPort {
 
   async renameSession(path: string, title: string) {
     await this.post<void>("/tree/sessions/rename", { path, title });
+  }
+
+  autoNameSession(path: string) {
+    return this.post<{ title: string }>("/tree/sessions/auto-name", { path });
   }
 
   exportSession(path: string) {

@@ -1885,7 +1885,7 @@ body { font-size: 14px; line-height: 1.75; }
 .rail .wsnode { padding-left: 0; }
 .rail .kids { margin-left: 19px; padding-left: 0; border-left: 1px solid var(--hair); }
 .rail .sessrow {
-  min-height: 42px;
+  min-height: 34px;
   margin: 1px 16px 1px 22px;
   padding: 0;
   gap: 0;
@@ -1901,7 +1901,7 @@ body { font-size: 14px; line-height: 1.75; }
 }
 .rail .sesstitle {
   flex: 1; min-width: 0; align-self: stretch; box-sizing: border-box;
-  min-height: 42px; padding: 5px 34px 5px 9px;
+  min-height: 34px; padding: 3px 34px 3px 9px;
   display: flex; align-items: center; overflow: hidden;
   font: 400 11px/1.45 var(--ui); letter-spacing: -.01em;
 }
@@ -1950,7 +1950,8 @@ body { font-size: 14px; line-height: 1.75; }
 @keyframes studio-session-done { from { background: color-mix(in srgb, var(--ok) 18%, transparent); } }
 .rail .sessrow > .wsdel { display: none; }
 .rail .session-more {
-  position: absolute; top: 7px; right: 4px;
+  position: absolute; top: 50%; right: 4px;
+  transform: translateY(-50%);
   width: 27px;
   height: 27px;
   display: grid;
