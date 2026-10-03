@@ -7,7 +7,6 @@ package serve
 
 import (
 	"context"
-	"crypto/sha256"
 	_ "embed"
 	"encoding/json"
 	"errors"
@@ -41,14 +40,9 @@ var logoWordmarkSVG []byte
 // reach the Broadcaster — directly, or through the host's SetPaneSink wrapper.
 type Server struct {
 	mu sync.RWMutex // guards ctrl and paneSink, which rebuild paths swap and read
-	// bindMu serializes every entry point that changes the active session
-	// path or controller generation — /resume, /new, /fork, switchModel, and
-	// extension reload. net/http runs handlers
-	// concurrently and serve serves multiple browser tabs, so without this
-	// two interleaved rebinds can leave the controller writing one session
-	// while the lease keeper guards another (the exact split this feature
-	// exists to prevent). It also keeps switchModel's Snapshot/Build/Close
-	// off s.mu, as the narrower switchMu did before it was widened.
+	// bindMu serializes session-path and controller-generation changes.
+	// It keeps replacement Snapshot/Build/Close outside s.mu while preventing
+	// a controller/lease mismatch during concurrent requests.
 	bindMu sync.Mutex
 	// The built page this kernel serves, or nil when it serves its API alone.
 	// The hub owns it, so the hub says; the root has to hand back its shell.
@@ -584,44 +578,6 @@ func (s *Server) context(w http.ResponseWriter, r *http.Request) {
 	writeJSONCached(w, r, s.contextView())
 }
 
-func writeJSON(w http.ResponseWriter, v any) {
-	w.Header().Set("Content-Type", "application/json")
-	if err := json.NewEncoder(w).Encode(v); err != nil {
-		slog.Warn("serve: writeJSON encode failed", "err", err)
-	}
-}
-
-// writeJSONStatus is writeJSON for a failure the client has to act on: the body
-// carries the diagnosis, so a bare http.Error would throw it away.
-func writeJSONStatus(w http.ResponseWriter, status int, v any) {
-	w.Header().Set("Content-Type", "application/json")
-	w.WriteHeader(status)
-	if err := json.NewEncoder(w).Encode(v); err != nil {
-		slog.Warn("serve: writeJSONStatus encode failed", "err", err)
-	}
-}
-
-// writeJSONCached encodes v as JSON, computes a weak ETag from the body, and
-// returns 304 Not Modified if the client's If-None-Match matches. This avoids
-// re-sending unchanged history/context payloads on every reconnect.
-func writeJSONCached(w http.ResponseWriter, r *http.Request, v any) {
-	body, err := json.Marshal(v)
-	if err != nil {
-		slog.Warn("serve: writeJSONCached marshal failed", "err", err)
-		refuse(w, http.StatusInternalServerError, "internal.failed", "something went wrong on this side", nil)
-		return
-	}
-	etag := fmt.Sprintf(`"%x"`, sha256.Sum256(body))
-	if match := r.Header.Get("If-None-Match"); match == etag {
-		w.WriteHeader(http.StatusNotModified)
-		return
-	}
-	w.Header().Set("Content-Type", "application/json")
-	w.Header().Set("ETag", etag)
-	w.Header().Set("Cache-Control", "private, max-age=0, must-revalidate")
-	_, _ = w.Write(body)
-}
-
 // logMiddleware logs each request's method, path, and status.
 func logMiddleware(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -760,11 +716,14 @@ func (s *Server) checkpoints(w http.ResponseWriter, _ *http.Request) {
 		Prompt   string `json:"prompt"`
 		Files    int    `json:"files"`
 		MsgIndex int    `json:"msgIndex"`
+		Stamp    string `json:"stamp"`
+		CanFork  bool   `json:"canFork"`
 	}
 	raw := s.ctl().Checkpoints()
+	forks := s.ctl().ForkableTurns()
 	out := make([]cp, len(raw))
 	for i, c := range raw {
-		out[i] = cp{Turn: c.Turn, Prompt: c.Prompt, Files: len(c.Paths), MsgIndex: c.MsgIndex}
+		out[i] = cp{Turn: c.Turn, Prompt: c.Prompt, Files: len(c.Paths), MsgIndex: c.MsgIndex, Stamp: c.Time.Format(time.RFC3339Nano), CanFork: forks[c.Turn]}
 	}
 	writeJSON(w, out)
 }

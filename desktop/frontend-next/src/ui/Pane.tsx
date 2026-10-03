@@ -4,16 +4,17 @@ import { reason } from "../i18n/kernel";
 import { t } from "../i18n";
 import { hasPendingDecision, posture, runState } from "./decisions";
 import { createPortal } from "react-dom";
-import { HttpError, type AgentPort, type Checkpoint, type ChipCall, type ContextBreakdown, type JobEntry, type McpEntry, type SessionStatus, type WorkspaceChanges } from "../port/port";
+import { type AgentPort, type Checkpoint, type ContextBreakdown, type JobEntry, type McpEntry, type SessionStatus, type WorkspaceChanges } from "../port/port";
 import type { RuntimeView } from "../port/hub";
 import type { TrajectoryRead } from "../port/wire";
-import { currentStep, fromHistory, initialState, localId, quoteAmount, reduce, stepDone, stepLabel } from "../state/session";
+import { currentStep, fromHistory, initialState, quoteAmount, reduce, stepDone, stepLabel } from "../state/session";
 import { pairCheckpoints } from "../state/checkpoints";
 import { DeckChips, type Deck } from "./DeckChips";
 import { Plan } from "./Plan";
 import { useReplyActions } from "./reply";
 import { useGateActions } from "./gates";
 import { useQueueActions } from "./queueactions";
+import { useSubmitActions } from "./submit";
 import { RunTokens } from "./RunTokens";
 import { useRewindActions } from "./rewind";
 import { initialTraj, reduceTraj } from "../state/trajectory";
@@ -95,6 +96,7 @@ interface Props {
   // position are exactly what a tab switch must not throw away.
   visible: boolean;
   onSessionChanged: () => void;
+  onFork?: (checkpoint: Checkpoint) => Promise<void>;
   // Bumped when something outside this pane changed a setting that belongs to
   // its session. /status is polled only while a turn runs, so without this the
   // pane keeps reporting the posture it had when it opened.
@@ -118,7 +120,7 @@ interface Props {
   alert?: ReactNode;
 }
 
-function PaneView({ port, rt, title, active, visible, sideHost, side, onFocus, onReport, onSessionChanged, pulse, findPulse, onSettings, needsProject, onOpenProject, onKeepHere, theme, dockW, dockMax, onDockW, manualBrowser = false, onManualBrowser, alert }: Props) {
+function PaneView({ port, rt, title, active, visible, sideHost, side, onFocus, onReport, onSessionChanged, onFork, pulse, findPulse, onSettings, needsProject, onOpenProject, onKeepHere, theme, dockW, dockMax, onDockW, manualBrowser = false, onManualBrowser, alert }: Props) {
   const [s, dispatch] = useReducer(reduce, initialState);
   const [traj, trajDispatch] = useReducer(reduceTraj, initialTraj);
   const [status, setStatus] = useState<SessionStatus | null>(null);
@@ -305,11 +307,8 @@ function PaneView({ port, rt, title, active, visible, sideHost, side, onFocus, o
 
   const { onPrepareRewind, onCommitRewind, onUndoRewind, onPrepareFileRevert, onCommitFileRevert } = useRewindActions(port, reloadSession);
 
-  // Both of these read only the user and tool cards, so they key off the
-  // revision rather than the items array: a streamed answer leaves every card
-  // they look at untouched, and recomputing them per chunk is the whole reason
-  // a long session used to slow down. eslint would want `s.items` in the deps;
-  // `s.revision` is the narrower truth. Same for the rail's two panels below.
+  // User/tool projections follow revision, not per-chunk reply updates.
+  // Streamed replies cannot change checkpoint pairing or the rail panels.
   /* eslint-disable react-hooks/exhaustive-deps */
   const paired = useMemo(() => pairCheckpoints(s.items, checkpoints), [s.revision, checkpoints]);
   const rail = useMemo(() => railOf(s.items, s.executions, s.subagentPhase), [s.revision, s.executions, s.subagentPhase]);
@@ -404,34 +403,7 @@ function PaneView({ port, rt, title, active, visible, sideHost, side, onFocus, o
     return [at, rail];
   }, [s.views, slots]);
 
-  // The wire never echoes what was typed, so the row is the client's to add —
-  // and its to take back when the line did not leave. Reporting the refusal is
-  // not enough on its own: the transcript would keep showing a turn that never
-  // happened, and the composer was emptied on the way in.
-  const submit = useCallback(
-    async (text: string, chips?: ChipCall) => {
-      const steering = running;
-      const id = localId();
-      dispatch({ kind: "__user", text, pending: steering, id } as never);
-      trajDispatch({ kind: "__user", text });
-      try {
-        if (steering) {
-          // The row is already on screen; the receipt is what gives it a name
-          // to be taken back by while it waits at the tool boundary.
-          const queued = chips ? await port.queueFollowup(text, chips) : await port.steer(text);
-          if (queued?.itemId) dispatch({ kind: "__queued", id, itemId: queued.itemId, queued: chips ? "followup" : "steer" } as never);
-        } else {
-          await submitOrQueue(text, id, chips);
-        }
-        return true;
-      } catch (e) {
-        dispatch({ kind: "__unsent", id } as never);
-        fail(e);
-        return false;
-      }
-    },
-    [port, running, refreshStatus, fail],
-  );
+  const { submit } = useSubmitActions({ port, running, dispatch, trajDispatch, refreshStatus, fail });
 
   const { queue, restored, onQueueEdit, onQueueMove, onQueueRetry, onQueueRefresh, onQueuePause, onQueueRead, onQueueSendNow, onQueueCancel } = useQueueActions({
     port,
@@ -440,25 +412,6 @@ function PaneView({ port, rt, title, active, visible, sideHost, side, onFocus, o
     moved: s.queueMoved,
     sessionPath: status?.sessionPath,
   });
-
-  // The kernel refuses a submit it cannot start with a code, not a sentence:
-  // the words are fine, the timing is not. Queueing them is what that code
-  // asks for, and showing anyone the refusal instead is how a race between
-  // "the turn is done" on screen and the turn actually landing became an error
-  // nobody could act on.
-  const submitOrQueue = useCallback(
-    async (text: string, id: string, chips?: ChipCall) => {
-      try {
-        await port.submit(text, chips);
-        refreshStatus();
-      } catch (e) {
-        if (!(e instanceof HttpError) || e.reason?.code !== "busy.session_running") throw e;
-        const queued = await port.queueFollowup(text, chips);
-        if (queued?.itemId) dispatch({ kind: "__queued", id, itemId: queued.itemId, queued: "followup" } as never);
-      }
-    },
-    [port, refreshStatus],
-  );
 
   const { onApprove, onFullAccess, onPlan, onForget, onExtInvoke, onExtSubmit, onAnswer } = useGateActions({
     port,
@@ -489,7 +442,7 @@ function PaneView({ port, rt, title, active, visible, sideHost, side, onFocus, o
   );
   const find = useFind(s.items, findPulse, active, useCallback(() => showView("flow"), [showView]));
 
-  const { quote, reply, onResend } = useReplyActions({ port, items: s.items, checkpoints, running, model: status?.label, submit, reloadSession, onSettings, onRunDetail: () => showView("analysis"), onError: fail });
+  const { quote, reply, onResend } = useReplyActions({ port, items: s.items, checkpoints, running, model: status?.label, submit, reloadSession, onSettings, onRunDetail: () => showView("analysis"), onError: fail, onFork });
 
   // Where the bottom is moves as blocks mount under it, so this only asks the
   // transcript to follow again and lets it scroll itself into place.

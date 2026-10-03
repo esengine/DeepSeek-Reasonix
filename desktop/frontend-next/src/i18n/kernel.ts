@@ -30,6 +30,11 @@ const SAID: Record<string, string> = {
   "shell.parser_unavailable": "主机命令解析器不可用；请在主机恢复后重试",
   "shell.parser_timeout": "主机命令解析超时或被取消；请重试",
   "shell.command_line_too_long": "命令超过主机长度限制；请拆分命令或从文件读取长文本",
+  "fork.local_only": "目前只能从本机对话创建分支",
+  "fork.busy": "请等待当前任务完成后再创建对话分支",
+  "fork.stale": "这轮对话已发生变化，请刷新后重新选择最终答复",
+  "fork.failed": "创建对话分支失败",
+  "fork.open_failed": "分支已创建，但暂时无法打开，请重试。",
   // ── 忙：不是出错，是「现在不行」 ─────────────────────────────────
   "plan.decision_stale": "该决定已不符合当前状态：计划在你回答前已发生变更",
   "busy.switch_model": "任务正在运行，请先停止再切换模型",

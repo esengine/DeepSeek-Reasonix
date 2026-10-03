@@ -22,6 +22,7 @@ import { Boundary } from "./Boundary";
 import { SettingsUnavailable } from "./SettingsUnavailable";
 import { useMachineBooks } from "./machinebooks";
 import { usePaint } from "./paint";
+import { useForkPane } from "./forkpane";
 import { rememberActivePane, savedActivePane } from "./activepane";
 import { Sidebar } from "./Sidebar";
 import { Sky } from "./Sky";import { useAddWorkspace } from "./addws";
@@ -31,9 +32,7 @@ import { Onboarding } from "./Onboarding";
 import { Welcome } from "./Welcome";
 import { markSettled } from "../boot/gate";
 
-// Start fetching the settings chunk with the shell instead of waiting for the
-// first click. It remains a separate chunk (and keeps its failure boundary),
-// but opening settings no longer produces a veil while the module catches up.
+// Prefetch the separate settings chunk; a load failure stays inside its boundary.
 const settingsModule = import("./Settings").then(
   (module) => ({ module, error: null as unknown }),
   (error: unknown) => ({ module: null, error }),
@@ -472,6 +471,8 @@ export function App({ hub }: { hub: HubPort }) {
     () => runtimes.map((rt, i) => ({ rt, title: titleFor(rt, i), run: runs[rt.id]?.run ?? "idle", live: runs[rt.id]?.live ?? false })),
     [runtimes, titleFor, runs],
   );
+  const forkPane = useForkPane({ hub, runtimes, setRuntimes, focusPane, reloadPanes });
+
   // The folder only earns tab space when the panes actually span more than one.
   const manyRoots = useMemo(() => new Set(runtimes.map((rt) => rt.root)).size > 1, [runtimes]);
   const activeRuntime = runtimes.find((rt) => rt.id === active);
@@ -705,6 +706,7 @@ export function App({ hub }: { hub: HubPort }) {
                   // session path, and until /runtimes reports it the pane still
                   // looks blank — the next history row would take it over.
                   onSessionChanged={reloadPanes}
+                  onFork={!rt.host && !rt.readOnly ? (checkpoint) => forkPane(rt.id, checkpoint) : undefined}
                   pulse={settingsPulse}
                   findPulse={findPulse}
                   alert={rt.id === active ? (errorBar ?? undefined) : undefined}
