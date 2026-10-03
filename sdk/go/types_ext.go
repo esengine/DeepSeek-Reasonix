@@ -92,6 +92,11 @@ func (request ProviderRequest) Validate() error {
 
 // Validate enforces chunk invariants the tags cannot express.
 func (chunk ProviderChunk) Validate() error {
+	switch chunk.Type {
+	case ChunkText, ChunkReasoning, ChunkToolCallStart, ChunkToolCallDelta, ChunkToolCall, ChunkUsage, ChunkDone, ChunkError:
+	default:
+		return validationError("chunk type must be a registered provider chunk type")
+	}
 	if chunk.ArgChars < 0 {
 		return validationError("argChars must be non-negative")
 	}
