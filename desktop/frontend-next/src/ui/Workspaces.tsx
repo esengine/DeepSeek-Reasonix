@@ -8,6 +8,8 @@ import { pinToViewport } from "./place";
 import { useRailQuery } from "./railsearch";
 import { StudioIcon } from "./StudioIcon";
 import { Cross } from "./glyphs";
+import { copyText } from "./CopyButton";
+import { sessionInfoText } from "./sessionInfo";
 import { download } from "../port/download";
 import { host } from "../port/host";
 import { useTreeKeys } from "./tree";
@@ -591,6 +593,9 @@ function WorkspacesView({ hub, tree, treeRead, runtimes, active, folded, reload,
                             </div>
                             <div className="session-pop-divider" />
                             <div className="session-pop-group">
+                              <button role="menuitem" data-action="session.copy-info" data-target={session.path} onClick={() => { void copyText(sessionInfoText(session, ws.root)).catch(onError); setSessionMenu(""); }}>
+                                <StudioIcon name="copy" /><span>{t("复制会话信息")}</span>
+                              </button>
                               <button role="menuitem" data-action="session.export" data-target={session.path} disabled={busy === "export:" + session.path} onClick={() => void saveSession(session)}>
                                 <StudioIcon name="download" /><span>{t("导出会话")}</span><small>JSON</small>
                               </button>
