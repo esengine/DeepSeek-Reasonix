@@ -448,49 +448,6 @@ func (s *server) handleInitialized(context.Context, json.RawMessage) {
 
 // Intercept and observation
 
-func (s *server) handleIntercept(ctx context.Context, raw json.RawMessage) (any, error) {
-	var p InterceptParams
-	if err := strictDecode(raw, &p); err != nil {
-		return nil, MustProtocolError(ErrInvalidParams)
-	}
-	if !validInterceptEvent(p.Event) || p.Seq < 1 || p.TimeoutMillis < 0 || !jsonKeyPresent(raw, "payload") {
-		return nil, MustProtocolError(ErrInvalidParams)
-	}
-	payload, err := s.rehydrate(ctx, p.Payload, p.Externalized, "/payload")
-	if err != nil {
-		return nil, err
-	}
-	fn := s.opts.Interceptors[string(p.Event)]
-	if fn == nil {
-		fn = s.opts.Interceptors["*"]
-	}
-	if fn == nil {
-		return Continue(), nil
-	}
-	if p.TimeoutMillis > 0 {
-		var cancel context.CancelFunc
-		ctx, cancel = context.WithTimeout(ctx, time.Duration(p.TimeoutMillis)*time.Millisecond)
-		defer cancel()
-	}
-	result, err := fn(ctx, string(p.Event), payload)
-	if err != nil {
-		// The callback's advertised intercept budget expired. Return the
-		// frozen timeout reason rather than racing the host's identical timer
-		// with a generic internal error response.
-		if errors.Is(err, context.DeadlineExceeded) && errors.Is(ctx.Err(), context.DeadlineExceeded) {
-			return nil, MustProtocolError(ErrInterceptTimeout)
-		}
-		return nil, err
-	}
-	if result == nil {
-		return Continue(), nil
-	}
-	if !validInterceptDecision(result.Decision) {
-		return nil, fmt.Errorf("extension: interceptor for %q returned invalid decision %q", p.Event, result.Decision)
-	}
-	return result, nil
-}
-
 func (s *server) handleEvent(ctx context.Context, raw json.RawMessage) {
 	var p EventParams
 	if err := strictDecode(raw, &p); err != nil || !validInterceptEvent(p.Event) || !jsonKeyPresent(raw, "payload") {
