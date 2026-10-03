@@ -119,6 +119,11 @@ input-rewrite check.
 tool-serving package: manifest declarations, `Options.Tools`, catalog
 discovery, and an observable word-count result through the real host.
 
+[`examples/providerextension`](examples/providerextension/README.md) is a
+text-only offline provider: manifest identity, `Options.Provider`, catalog,
+cancellable streaming, and a first controller turn with no API key or tool
+calls. It echoes the last provider-visible user message.
+
 [`examples/fullsidecar`](examples/fullsidecar/README.md) is the reference
 extension: protocol-level input rewriting, tool interception
 (block + argument rewrite), system-prompt strategy replacement, a fake
