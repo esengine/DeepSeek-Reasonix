@@ -79,6 +79,8 @@ export interface ModelMode {
 // kernel appear here; image routing joins once it can name its own model
 // instead of borrowing whatever the subagent runs.
 export interface RoleAssignments {
+  title: string;
+  efforts: Record<string, string>;
   planner: string;
   subagent: string;
   guardian: string;

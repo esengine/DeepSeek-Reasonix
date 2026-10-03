@@ -114,9 +114,8 @@ describe("the settings catalogue", () => {
   it("does not let the section a block sits on decide who owns it", () => {
     const bySection = new Map<string, Set<SettingScope>>();
     for (const e of SETTINGS) bySection.set(e.section, (bySection.get(e.section) ?? new Set()).add(e.scope));
-    // The model page alone holds three different owners: one per-provider
-    // value, three machine-wide ones, and nothing session-local.
-    expect(bySection.get("model")?.size, "the model page's scopes collapsed to one — was scope derived from the section?")
+    // Session controls and persisted machine preferences share a page.
+    expect(bySection.get("session")?.size, "the session page's scopes collapsed to one — was scope derived from the section?")
       .toBeGreaterThan(1);
     // And two pages that look alike disagree: preset is not persisted at all,
     // approval is persisted machine-wide, and they render identically.

@@ -29,7 +29,6 @@ import (
 	"reasonix/internal/contract/surface"
 	"reasonix/internal/runtime/delegation"
 	"reasonix/internal/session/control"
-	"reasonix/internal/state/stats"
 	"reasonix/internal/state/store"
 	"reasonix/internal/tools/jobs"
 )
@@ -69,10 +68,7 @@ type Server struct {
 	lastBuild                *boot.BuildResult // serving generation, guarded by bindMu; see reuseFromLastBuild
 	grants                   hostGrants        // what the embedding host has opened up
 	moves                    moveTracker       // the one storage relocation this server may be running
-	titleProv                provider.Provider // best-effort provider for session titles
-	titlePrice               *provider.Pricing
-	titleModelRef            string
-	titleUsageSink           event.Sink
+	titleModel               titleProviderState
 	titles                   *titleCache
 	fill                     *titleFiller
 	wire                     *wireLog
@@ -110,7 +106,9 @@ func New(ctrl control.SessionAPI, bc *Broadcaster, serveCfg config.ServeConfig) 
 	if cfg, err := config.Load(); err == nil {
 		bc.SetDisplayCurrency(cfg.ExplicitDisplayCurrency())
 	}
-	s.initTitleProvider()
+	if err := s.initTitleProvider(); err != nil {
+		slog.Warn("title provider could not start", "err", err)
+	}
 	s.nameWorkspaceHolder(ctrl)
 	s.attachWireLog()
 	return s
@@ -148,48 +146,6 @@ func (s *Server) AuthMode() string {
 		return "none"
 	}
 	return s.auth.Mode()
-}
-
-// initTitleProvider builds the provider used solely to generate short session
-// titles. It follows the same model a new session would open with, so titles
-// work for whichever provider the user configured. Errors are silently
-// swallowed — title generation is best-effort, and the server works fine
-// without it.
-func (s *Server) initTitleProvider() {
-	cfg, err := config.Load()
-	if err != nil {
-		return
-	}
-	ref, _, ok := cfg.ResolveStartupChatModel()
-	if !ok {
-		return
-	}
-	entry, ok := cfg.ResolveModel(ref)
-	if !ok || !entry.Configured() {
-		return
-	}
-	prov, err := provider.New(entry.Kind, titleProviderConfig(entry))
-	if err != nil {
-		return
-	}
-	s.titleProv = prov
-	s.titlePrice = entry.Price
-	s.titleModelRef = entry.Name + "/" + entry.Model
-	// Title generation is accounting-only; do not inject its usage event into
-	// the shared chat SSE stream.
-	s.titleUsageSink = stats.NewRecorder(event.Discard, config.StatsDir(), "serve")
-}
-
-func titleProviderConfig(entry *config.ProviderEntry) provider.Config {
-	return provider.Config{
-		Name:    entry.Name,
-		BaseURL: entry.BaseURL,
-		Model:   entry.Model,
-		APIKey:  entry.APIKey(), APIKeyFunc: entry.APIKey,
-		// Title generation needs a short visible answer, not chain-of-thought.
-		// "off" is a retired DeepSeek effort value and now falls back to high.
-		Extra: map[string]any{"effort": "disabled"},
-	}
 }
 
 // switchModel rebuilds the controller with a new model, carrying over the
@@ -299,6 +255,9 @@ func (s *Server) switchModelLocked(ctx context.Context, ref string) error {
 	s.mu.Unlock()
 	s.nameWorkspaceHolder(newCtrl)
 	s.refreshProviderSetup(currentModelRef(newCtrl))
+	if err := s.initTitleProvider(); err != nil {
+		slog.Warn("title provider could not refresh", "err", err)
+	}
 
 	// Off-lock: tear down the old controller. Close can block up to 15s.
 	cur.Close()
@@ -898,7 +857,8 @@ func titleSource(first string) string {
 // Returns empty string on any error — callers should fall back to a preview.
 func (s *Server) generateTitle(ctx context.Context, firstMsg string) string {
 	firstMsg = titleSource(firstMsg)
-	if nilutil.IsNil(s.titleProv) || firstMsg == "" {
+	model := s.currentTitleProvider()
+	if nilutil.IsNil(model.prov) || firstMsg == "" {
 		return ""
 	}
 	if r := []rune(firstMsg); len(r) > 300 {
@@ -908,17 +868,15 @@ func (s *Server) generateTitle(ctx context.Context, firstMsg string) string {
 	var usage *provider.Usage
 	defer func() {
 		usage = provider.UsageWithRequestAttemptCount(ctx, usage)
-		if usage != nil && !nilutil.IsNil(s.titleUsageSink) {
-			s.titleUsageSink.Emit(event.Event{Kind: event.Usage, ModelRef: s.titleModelRef, Usage: usage, Pricing: s.titlePrice, UsageSource: event.UsageSourceTitle})
+		if usage != nil && !nilutil.IsNil(model.sink) {
+			model.sink.Emit(event.Event{Kind: event.Usage, ModelRef: model.ref, Usage: usage, Pricing: model.price, UsageSource: event.UsageSourceTitle})
 		}
 	}()
-	ch, err := s.titleProv.Stream(ctx, provider.Request{
+	ch, err := model.prov.Stream(ctx, provider.Request{
 		Messages: []provider.Message{
 			{Role: provider.RoleSystem, Content: titlePrompt},
 			{Role: provider.RoleUser, Content: firstMsg},
 		},
-		Temperature: provider.TemperaturePtr(0),
-		MaxTokens:   60,
 	})
 	if err != nil {
 		return ""

@@ -7,7 +7,6 @@ import (
 	"time"
 
 	"reasonix/internal/base/testenv"
-	"reasonix/internal/contract/config"
 	"reasonix/internal/contract/provider"
 )
 
@@ -55,21 +54,9 @@ func waitTitle(t *testing.T, s *Server, name, source string, mod int64) string {
 	return ""
 }
 
-func TestTitleProviderDisablesReasoning(t *testing.T) {
-	cfg := titleProviderConfig(&config.ProviderEntry{
-		Name:    "deepseek-flash",
-		Kind:    "openai",
-		BaseURL: "https://api.deepseek.com",
-		Model:   "deepseek-v4-flash",
-	})
-	if got := cfg.Extra["effort"]; got != "disabled" {
-		t.Fatalf("title provider effort = %v, want disabled", got)
-	}
-}
-
-func TestGenerateTitleStripsPasteLabelAndUsesShortBudget(t *testing.T) {
+func TestGenerateTitleStripsPasteLabelAndUsesModelBudget(t *testing.T) {
 	prov := &recordingTitleProvider{}
-	s := &Server{titleProv: prov}
+	s := &Server{titleModel: titleProviderState{prov: prov}}
 	got := s.generateTitle(context.Background(), "[已粘贴文本 #1 · 20 行]\nfix the login loop")
 	if got != "fix the login loop" {
 		t.Fatalf("title = %q, want pasted label removed", got)
@@ -78,8 +65,8 @@ func TestGenerateTitleStripsPasteLabelAndUsesShortBudget(t *testing.T) {
 		t.Fatalf("requests = %d, want 1", prov.count())
 	}
 	req := prov.at(0)
-	if req.MaxTokens != 60 {
-		t.Fatalf("MaxTokens = %d, want 60", req.MaxTokens)
+	if req.MaxTokens != 0 {
+		t.Fatalf("MaxTokens = %d, want model default", req.MaxTokens)
 	}
 	if req.Messages[0].Content != titlePrompt || req.Messages[1].Content != "fix the login loop" {
 		t.Fatalf("title messages = %+v", req.Messages)
@@ -89,7 +76,7 @@ func TestGenerateTitleStripsPasteLabelAndUsesShortBudget(t *testing.T) {
 func TestSessionTitleCachesByFirstMessageAcrossMtimeChanges(t *testing.T) {
 	dir := testenv.TempDir(t)
 	prov := &recordingTitleProvider{}
-	s := &Server{titleProv: prov, titles: newTitleCache(dir), fill: newTitleFiller()}
+	s := &Server{titleModel: titleProviderState{prov: prov}, titles: newTitleCache(dir), fill: newTitleFiller()}
 
 	if got := s.sessionTitle("a.jsonl", "first prompt", 100); got != "first prompt" {
 		t.Fatalf("first title = %q", got)
@@ -112,7 +99,7 @@ func TestSessionTitleCachesByFirstMessageAcrossMtimeChanges(t *testing.T) {
 	}
 
 	freshProv := &recordingTitleProvider{}
-	fresh := &Server{titleProv: freshProv, titles: newTitleCache(dir), fill: newTitleFiller()}
+	fresh := &Server{titleModel: titleProviderState{prov: freshProv}, titles: newTitleCache(dir), fill: newTitleFiller()}
 	if got := fresh.sessionTitle("a.jsonl", "replacement prompt", 400); got != "replacement prompt" {
 		t.Fatalf("persisted title = %q", got)
 	}
@@ -126,7 +113,7 @@ func TestSessionTitleCachesByFirstMessageAcrossMtimeChanges(t *testing.T) {
 func TestSessionTitleDoesNotBlockOnGeneration(t *testing.T) {
 	release := make(chan struct{})
 	prov := &blockingTitleProvider{release: release}
-	s := &Server{titleProv: prov, titles: newTitleCache(testenv.TempDir(t)), fill: newTitleFiller()}
+	s := &Server{titleModel: titleProviderState{prov: prov}, titles: newTitleCache(testenv.TempDir(t)), fill: newTitleFiller()}
 
 	done := make(chan string, 1)
 	go func() { done <- s.sessionTitle("a.jsonl", "slow prompt", 100) }()

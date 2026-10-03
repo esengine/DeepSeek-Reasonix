@@ -4,7 +4,7 @@ import type { ModelEntry, RoleAssignments } from "../port/port";
 import { activeKind, contextLabel, groupVendors, type Vendor } from "./Models";
 import { orderAccounts, useProviderOrder } from "../state/providerorder";
 
-type RoleKey = keyof RoleAssignments;
+type RoleKey = Exclude<keyof RoleAssignments, "efforts">;
 type Answers = "chat" | "decision";
 
 // Decision is the one job that cannot follow the main model: it asks a question
@@ -15,6 +15,7 @@ const ROLES: [RoleKey, string, string, Answers][] = [
   ["subagent", "子代理", "派发的子任务", "chat"],
   ["vision", "看图", "处理主模型无法识别的图片", "chat"],
   ["guardian", "复核", "独立复核本轮", "chat"],
+  ["title", "自动命名", "为会话生成简短标题", "chat"],
   ["decision", "决策", "system_one 询问的后端", "decision"],
 ];
 
@@ -38,12 +39,14 @@ interface Props {
   // Which protocol each account is showing, as chosen on the services page.
   protocol: Record<string, string>;
   onMain: (ref: string) => void;
-  onRole: (role: string, ref: string) => void;
+  effort?: string;
+  onEffort?: (effort: string) => void;
+  onRole: (role: string, ref: string, effort?: string) => void;
 }
 
 // One row per job: what it is for, which model does it, and which service that
 // model is reached through.
-export function ModelUsage({ models, roles, main, busy, protocol, onMain, onRole }: Props) {
+export function ModelUsage({ models, roles, main, busy, protocol, effort = "auto", onEffort, onMain, onRole }: Props) {
   const order = useProviderOrder();
   const vendors = useMemo(() => orderAccounts(groupVendors(models), order), [models, order]);
   const serviceOf = (ref?: string) => vendors.find((v) => Object.values(v.byKind).some((list) => list.some((m) => m.ref === ref)))?.label ?? "";
@@ -63,6 +66,7 @@ export function ModelUsage({ models, roles, main, busy, protocol, onMain, onRole
         <div className="usage-row usage-hd" role="row">
           <span role="columnheader">{t("用途")}</span>
           <span role="columnheader">{t("使用模型")}</span>
+          <span role="columnheader">{t("思考强度")}</span>
           <span role="columnheader">{t("连接")}</span>
         </div>
         <div className="usage-row" role="row">
@@ -71,10 +75,14 @@ export function ModelUsage({ models, roles, main, busy, protocol, onMain, onRole
             <Choices vendors={vendors} protocol={protocol} main={main} value={main ?? ""} answers="chat"
               label={t("默认模型")} disabled={busy !== ""} onPick={onMain} />
           </span>
+          <span className="usage-effort" role="cell"><span className="usage-effort-label">{t("思考强度")}</span><Efforts model={current} value={effort} label={t("默认模型的思考强度")}
+            action="reasoning.effort" disabled={busy !== "" || !onEffort} onPick={(level) => onEffort?.(level)} /></span>
           <span className="usage-conn" role="cell">{serviceOf(main)}<small>{traits(current)}</small></span>
         </div>
         {roles && ROLES.map(([key, name, tag, answers]) => {
           const set = roles[key];
+          const roleModel = byRef(set || (key === "title" || answers === "decision" ? "" : main));
+          const roleEffort = roles.efforts?.[key] || "auto";
           const offered = models.filter((m) => answersOf(m) === answers);
           const none = answers === "decision" && offered.length === 0;
           return (
@@ -83,11 +91,14 @@ export function ModelUsage({ models, roles, main, busy, protocol, onMain, onRole
               <span role="cell">
                 <Choices vendors={vendors} protocol={protocol} main={main} value={set} answers={answers}
                   label={t(name)} role disabled={busy !== "" || none}
-                  empty={t(answers === "chat" ? "跟随主模型" : none ? "尚无可用来源" : "不使用")}
-                  onPick={(ref) => onRole(key, ref)} />
+                  empty={t(key === "title" ? "不使用" : answers === "chat" ? "跟随主模型" : none ? "尚无可用来源" : "不使用")}
+                  onPick={(ref) => onRole(key, ref, "auto")} />
               </span>
-              <span className="usage-conn" role="cell" data-follow={!set && answers === "chat" ? "" : undefined}>
-                {set ? serviceOf(set) : answers === "chat" ? t("随主模型") : none ? t("在「模型服务」添加决策来源") : ""}
+              <span className="usage-effort" role="cell"><span className="usage-effort-label">{t("思考强度")}</span><Efforts model={roleModel} value={roleEffort} label={t("{name}的思考强度", { name: t(name) })}
+                action="roles.effort" disabled={busy !== "" || answers === "decision" || (key === "title" && !set)}
+                onPick={(level) => onRole(key, set || main || "", level)} /></span>
+              <span className="usage-conn" role="cell" data-follow={!set && answers === "chat" && key !== "title" ? "" : undefined}>
+                {set ? serviceOf(set) : key === "title" ? t("使用消息预览") : answers === "chat" ? t("随主模型") : none ? t("在「模型服务」添加决策来源") : ""}
               </span>
             </div>
           );
@@ -100,6 +111,20 @@ export function ModelUsage({ models, roles, main, busy, protocol, onMain, onRole
           : t("主模型无法识别的图片当前无人处理 —— 会在发送前被丢弃。为「看图」指定一个带「读图」标签的模型即可接管。")}
       </p>
     </>
+  );
+}
+
+function Efforts({ model, value, label, action, disabled, onPick }: {
+  model?: ModelEntry; value: string; label: string; action: "roles.effort" | "reasoning.effort"; disabled: boolean; onPick: (level: string) => void;
+}) {
+  const levels = [...new Set(["auto", ...(model?.efforts ?? [])])];
+  const supported = !!model?.efforts?.some((level) => level !== "auto");
+  return (
+    <select className="usage-pick" aria-label={label} data-action={action} value={levels.includes(value) ? value : "auto"}
+      disabled={disabled || !supported} onChange={(e) => onPick(e.target.value)}>
+      {!supported ? <option value="auto">{t("不适用")}</option>
+        : levels.map((level) => <option key={level} value={level}>{level === "auto" ? t("自动") : level}</option>)}
+    </select>
   );
 }
 

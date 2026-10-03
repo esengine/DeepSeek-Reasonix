@@ -107,7 +107,7 @@ func (c *Controller) withVisionRouting(ctx context.Context) context.Context {
 	if err != nil || cfg == nil || strings.TrimSpace(cfg.Agent.VisionModel) == "" {
 		return ctx
 	}
-	return agent.WithVisionRouting(ctx, cfg.Agent.VisionModel, func(child string) bool {
+	return agent.WithVisionRouting(ctx, cfg.Agent.VisionModel, cfg.Agent.RoleEfforts["vision"], func(child string) bool {
 		if strings.TrimSpace(child) == "" {
 			child = c.modelRef
 		}

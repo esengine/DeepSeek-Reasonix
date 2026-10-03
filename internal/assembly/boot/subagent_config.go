@@ -84,7 +84,7 @@ func newSubagentConfig(opts Options, cfg *config.Config, entry *config.ProviderE
 		profileEffort: func(profile string) string { return firstConfigured(cfg.Agent.SubagentEfforts, profile) },
 		scheduler:     writeclaim.NewSubagentScheduler(maxConcurrency, maxWriters),
 		taskModel:     firstNonEmpty(cfg.Agent.SubagentModels["task"], cfg.Agent.SubagentModel),
-		taskEffort:    firstNonEmpty(cfg.Agent.SubagentEfforts["task"], cfg.Agent.SubagentEffort),
+		taskEffort:    firstNonEmpty(cfg.Agent.RoleEfforts["subagent"], cfg.Agent.SubagentEfforts["task"], cfg.Agent.SubagentEffort, "auto"),
 		maxDepth:      agent.NormalizeMaxSubagentDepth(cfg.Agent.MaxSubagentDepth),
 	}
 }

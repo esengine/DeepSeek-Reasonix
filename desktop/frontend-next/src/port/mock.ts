@@ -10,7 +10,6 @@ import { MEMORIES } from "./mock_memory";
 import { mockUsage } from "./mock_usage";
 
 
-
 export class MockPort extends MockFeedback implements AgentPort {
   private listeners = new Set<(ev: WireEvent) => void>();
   private log: WireEvent[] = [];
@@ -66,6 +65,7 @@ export class MockPort extends MockFeedback implements AgentPort {
 
   // The subagent runs somewhere cheaper; everything else rides the main model.
   private assigned: RoleAssignments = {
+    title: "", efforts: {},
     planner: "",
     subagent: "deepseek/deepseek-flash",
     guardian: "",
@@ -77,8 +77,8 @@ export class MockPort extends MockFeedback implements AgentPort {
     return this.assigned;
   }
 
-  async setRole(role: string, ref: string) {
-    this.assigned = { ...this.assigned, [role]: ref };
+  async setRole(role: string, ref: string, effort?: string) {
+    this.assigned = { ...this.assigned, [role]: ref, efforts: { ...this.assigned.efforts, [role]: effort ?? "auto" } };
   }
 
   // Two protocols onto one host, plus a second vendor carrying the only model

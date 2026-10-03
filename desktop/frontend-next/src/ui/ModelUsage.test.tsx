@@ -24,7 +24,7 @@ const MODELS: ModelEntry[] = [
   { ref: "deepseek/deepseek-flash", provider: "deepseek", vendor: "api.deepseek.com", model: "deepseek-flash", kind: "anthropic", vision: true, contextWindow: 1_000_000 },
   { ref: "deepseek/deepseek-pro", provider: "deepseek", vendor: "api.deepseek.com", model: "deepseek-pro", kind: "anthropic" },
 ];
-const ROLES: RoleAssignments = { planner: "", subagent: "deepseek/deepseek-pro", vision: "", guardian: "", decision: "" };
+const ROLES: RoleAssignments = { title: "", efforts: {}, planner: "", subagent: "deepseek/deepseek-pro", vision: "", guardian: "", decision: "" };
 
 function draw() {
   const onMain = vi.fn();
@@ -53,7 +53,7 @@ it("says decision has no source instead of offering the chat models", () => {
 it("writes the row that changed", async () => {
   const { onMain, onRole } = draw();
   await userEvent.selectOptions(screen.getByRole("combobox", { name: "看图" }), "deepseek/deepseek-flash");
-  expect(onRole).toHaveBeenCalledWith("vision", "deepseek/deepseek-flash");
+  expect(onRole).toHaveBeenCalledWith("vision", "deepseek/deepseek-flash", "auto");
   await userEvent.selectOptions(screen.getByRole("combobox", { name: "默认模型" }), "deepseek/deepseek-pro");
   expect(onMain).toHaveBeenCalledWith("deepseek/deepseek-pro");
 });
@@ -66,4 +66,17 @@ it("lists services in the saved order without reordering models within one servi
   expect([...groups].map((group) => group.label)).toEqual(["other", "deepseek"]);
   expect([...groups[1].querySelectorAll("option")].map((option) => option.value))
     .toEqual(["deepseek/deepseek-flash", "deepseek/deepseek-pro"]);
+});
+
+it("offers a naming model and independent declared effort levels", async () => {
+  const onRole = vi.fn();
+  const onEffort = vi.fn();
+  const models = MODELS.map((m) => ({ ...m, efforts: ["auto", "disabled", "high", "max"] }));
+  render(<ModelUsage models={models} roles={{ ...ROLES, title: models[1].ref, efforts: { title: "disabled", subagent: "high" } }}
+    main={models[0].ref} effort="max" busy="" protocol={{}} onMain={() => {}} onRole={onRole} onEffort={onEffort} />);
+  expect((screen.getByRole("combobox", { name: "默认模型的思考强度" }) as HTMLSelectElement).value).toBe("max");
+  expect((screen.getByRole("combobox", { name: "自动命名的思考强度" }) as HTMLSelectElement).value).toBe("disabled");
+  await userEvent.selectOptions(screen.getByRole("combobox", { name: "自动命名的思考强度" }), "high");
+  expect(onRole).toHaveBeenCalledWith("title", models[1].ref, "high");
+  expect(onEffort).not.toHaveBeenCalled();
 });

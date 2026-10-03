@@ -41,7 +41,7 @@ func newTitleFiller() *titleFiller {
 // scheduleTitle queues one generation, deduplicated by session name so a burst
 // of list requests cannot stack N copies of the same call.
 func (s *Server) scheduleTitle(name, source string, mod int64) {
-	if nilutil.IsNil(s.titleProv) || source == "" {
+	if nilutil.IsNil(s.currentTitleProvider().prov) || source == "" {
 		return
 	}
 	f := s.fill
@@ -88,7 +88,7 @@ func (s *Server) drainTitles() {
 	}
 }
 
-// sessionTitle returns a title for a session: the cached flash-generated title
+// sessionTitle returns a title for a session: the cached generated title
 // when its first user message is unchanged, otherwise a freshly generated one
 // (cached for next time), falling back to a truncated preview when generation
 // is off.

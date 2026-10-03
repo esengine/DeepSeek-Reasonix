@@ -9,7 +9,7 @@ import (
 	"reasonix/internal/contract/config"
 )
 
-func readRoles(t *testing.T, base string) map[string]string {
+func readRoles(t *testing.T, base string) map[string]any {
 	t.Helper()
 	resp, err := http.Get(base + "/roles")
 	if err != nil {
@@ -19,7 +19,7 @@ func readRoles(t *testing.T, base string) map[string]string {
 	if resp.StatusCode != http.StatusOK {
 		t.Fatalf("GET /roles = %d", resp.StatusCode)
 	}
-	var out map[string]string
+	var out map[string]any
 	if err := json.NewDecoder(resp.Body).Decode(&out); err != nil {
 		t.Fatal(err)
 	}
@@ -34,7 +34,7 @@ func TestRolesDefaultToTheMainModel(t *testing.T) {
 	defer srv.Close()
 
 	roles := readRoles(t, srv.URL)
-	for _, name := range []string{"planner", "subagent", "guardian", "vision"} {
+	for _, name := range []string{"planner", "subagent", "guardian", "vision", "title"} {
 		if got, ok := roles[name]; !ok || got != "" {
 			t.Fatalf("role %q = %q (present %v), want an empty default", name, got, ok)
 		}
@@ -46,9 +46,12 @@ func TestRolesDefaultToTheMainModel(t *testing.T) {
 // hand-rolled TOML and the renderer had no line for it. A test that exercised
 // only subagent could not see that.
 func TestEveryRoleTheUIOffersSurvivesARoundTrip(t *testing.T) {
-	for _, role := range []string{"planner", "subagent", "guardian", "vision"} {
+	for _, role := range []string{"planner", "subagent", "guardian", "vision", "title"} {
 		t.Run(role, func(t *testing.T) {
 			s := newProviderEditServer(t)
+			if _, err := config.SetCredential("EXISTING_API_KEY", "test-key"); err != nil {
+				t.Fatal(err)
+			}
 			s.AllowProviderEdit()
 			srv := httptest.NewServer(operatorHandler(s))
 			defer srv.Close()

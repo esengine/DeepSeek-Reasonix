@@ -549,7 +549,7 @@ func (t *TaskTool) RunProfileSpec(ctx context.Context, spec ProfileExecSpec) (re
 	if err != nil {
 		return "", err
 	}
-	modelRef, effortRef := agent.VisionRefFor(ctx, spec.Worker.Model), spec.Worker.Effort
+	modelRef, effortRef := agent.VisionRefFor(ctx, spec.Worker.Model), agent.VisionEffortFor(ctx, spec.Worker.Model, spec.Worker.Effort)
 	usageModelRef := t.usageModelRef(modelRef, effortRef)
 	parentID, _, _, _ := agent.CallContext(ctx)
 	prov, pricing, ctxWin, err := t.resolveSubSessionRuntime(modelRef, effortRef)

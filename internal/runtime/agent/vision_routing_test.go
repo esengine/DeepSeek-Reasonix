@@ -18,14 +18,14 @@ func withImage(ctx context.Context) context.Context {
 // Without a configured role an attachment keeps its current fate, so nothing
 // silently moves off the model it was chosen for.
 func TestVisionRefLeavesTheChildAloneWhenNoRoleIsSet(t *testing.T) {
-	ctx := withImage(WithVisionRouting(context.Background(), "", readsOnly("gw/looker")))
+	ctx := withImage(WithVisionRouting(context.Background(), "", "", readsOnly("gw/looker")))
 	if got := VisionRefFor(ctx, "gw/worker"); got != "gw/worker" {
 		t.Fatalf("model ref = %q, want the child's own model", got)
 	}
 }
 
 func TestVisionRefMovesOnlyTheChildThatWouldDropTheImage(t *testing.T) {
-	ctx := withImage(WithVisionRouting(context.Background(), "gw/looker", readsOnly("gw/looker")))
+	ctx := withImage(WithVisionRouting(context.Background(), "gw/looker", "", readsOnly("gw/looker")))
 
 	// A text-only child would drop the attachment during serialization.
 	if got := VisionRefFor(ctx, "gw/worker"); got != "gw/looker" {
@@ -45,7 +45,7 @@ func TestVisionRefMovesOnlyTheChildThatWouldDropTheImage(t *testing.T) {
 // this, a review sub-agent would be moved onto the vision model for every task
 // in a session that once had an image.
 func TestVisionRefIgnoresTurnsWithoutImages(t *testing.T) {
-	ctx := WithVisionRouting(context.Background(), "gw/looker", readsOnly("gw/looker"))
+	ctx := WithVisionRouting(context.Background(), "gw/looker", "", readsOnly("gw/looker"))
 	if got := VisionRefFor(ctx, "gw/worker"); got != "gw/worker" {
 		t.Fatalf("model ref = %q on an image-free turn, want the child's own model", got)
 	}

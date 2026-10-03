@@ -292,7 +292,7 @@ export interface AgentPort {
   roles(): Promise<RoleAssignments>;
   // Persisted, then the runtime is rebuilt: boot reads every role model while
   // assembling, so an assignment cannot reach a runtime that is already up.
-  setRole(role: string, ref: string): Promise<void>;
+  setRole(role: string, ref: string, effort?: string): Promise<void>;
   storage(query?: StorageQuery): Promise<StorageState>;
   planStorageMove(root: string, dir: string): Promise<StoragePlan>;
   moveStorage(root: string, dir: string): Promise<StoragePlan>;

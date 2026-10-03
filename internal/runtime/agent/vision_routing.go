@@ -12,15 +12,14 @@ type visionRoutingKey struct{}
 // visionRouting travels with the image candidates because it answers the same
 // question they raise: the parent could not read this, so who can.
 type visionRouting struct {
-	model string
-	reads func(modelRef string) bool
+	model  string
+	effort string
+	reads  func(modelRef string) bool
 }
 
-// WithVisionRouting names the model that reads image candidates a child would
-// otherwise drop on the wire, and the predicate deciding whether a ref reads
-// images at all. Without it an attachment keeps its current fate, which is to
-// reach whichever model the sub-agent already runs.
-func WithVisionRouting(ctx context.Context, model string, reads func(modelRef string) bool) context.Context {
+// WithVisionRouting binds the image-reading model and its effort. The predicate
+// keeps a child that already reads images on its own model and effort.
+func WithVisionRouting(ctx context.Context, model, effort string, reads func(modelRef string) bool) context.Context {
 	if ctx == nil {
 		ctx = context.Background()
 	}
@@ -28,14 +27,11 @@ func WithVisionRouting(ctx context.Context, model string, reads func(modelRef st
 	if model == "" {
 		return ctx
 	}
-	return context.WithValue(ctx, visionRoutingKey{}, visionRouting{model: model, reads: reads})
+	return context.WithValue(ctx, visionRoutingKey{}, visionRouting{model: model, effort: effort, reads: reads})
 }
 
-// VisionRefFor swaps in the vision role when this turn carries images the child
-// would drop during serialization. It answers with the ref it was given whenever
-// nothing is configured, no image is in play, or the child already reads images —
-// so a review sub-agent spawned in a turn that happened to carry an attachment
-// keeps the model it was chosen for.
+// VisionRefFor selects the vision role only when a child cannot read this turn's
+// images. A child that already reads them keeps its own model.
 func VisionRefFor(ctx context.Context, childRef string) string {
 	if ctx == nil || len(SubagentImageCandidates(ctx)) == 0 {
 		return childRef
@@ -48,6 +44,17 @@ func VisionRefFor(ctx context.Context, childRef string) string {
 		return childRef
 	}
 	return routing.model
+}
+
+func VisionEffortFor(ctx context.Context, childRef, childEffort string) string {
+	if VisionRefFor(ctx, childRef) == childRef {
+		return childEffort
+	}
+	routing, _ := ctx.Value(visionRoutingKey{}).(visionRouting)
+	if routing.effort != "" {
+		return routing.effort
+	}
+	return "auto"
 }
 
 // SubagentImageNote tells a delegate that the pictures ride the message it is

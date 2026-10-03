@@ -191,7 +191,7 @@ func subagentEffortRef(cfg *config.Config, sk skill.Skill) string {
 	if cfg == nil {
 		return ""
 	}
-	return strings.TrimSpace(cfg.Agent.SubagentEffort)
+	return firstNonEmpty(cfg.Agent.RoleEfforts["subagent"], cfg.Agent.SubagentEffort, "auto")
 }
 
 // SubagentModelKeys returns the cfg.Agent.SubagentModels/SubagentEfforts map
