@@ -107,12 +107,12 @@ type Meta struct {
 	Time               time.Time
 	Prompt             string
 	Paths              []string
+	RewindFiles        int
 	Coverage           Coverage
 	CoverageGaps       []CoverageGap
 	ExpiredFilePayload bool
 	ActiveWriters      []ActiveWriter
 	Legacy             bool
-	CanUndoFiles       bool
 	DisabledReason     string
 }
 

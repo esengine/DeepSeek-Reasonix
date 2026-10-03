@@ -441,7 +441,7 @@ export class MockPort extends MockFeedback implements AgentPort {
   // Mock mode has to be able to show the rewind entry, so every prompt it has
   // seen becomes a checkpoint the way the kernel opens one per user turn.
   async checkpoints(): Promise<Checkpoint[]> {
-    return this.prompts.map((prompt, i) => ({ turn: i, prompt, files: i === 0 ? 0 : 3, msgIndex: mockMsgIndex(i + 1) }));
+    return this.prompts.map((prompt, i) => ({ turn: i, prompt, files: this.prompts.length > 1 ? 3 : 0, msgIndex: mockMsgIndex(i + 1) }));
   }
 
   // The second prompt onwards is scripted to have run bash, so mock mode can
@@ -457,17 +457,17 @@ export class MockPort extends MockFeedback implements AgentPort {
         : undefined,
       canFiles: true,
       canConversation: true,
-      files: ["note.txt"],
-      fileCount: turn > 0 ? 3 : 0,
+      files: this.prompts.length > 1 ? ["note.txt", "main.ts", "style.css"] : [],
+      fileCount: this.prompts.length > 1 ? 3 : 0,
       requiresConfirmation: partial,
     };
   }
 
   async commitRewind(planId: string): Promise<RewindResult> {
-    const turn = Number(planId.split("-")[2] ?? 0);
+    const turn = Number(planId.split("-")[2] ?? 0), files = !planId.endsWith("conversation") && this.prompts.length > 1;
     this.undone = this.prompts.slice();
     this.prompts = this.prompts.slice(0, turn);
-    return { ok: true, transactionId: `mock-tx-${turn}`, undoAvailable: true, deleted: ["note.txt"] };
+    return { ok: true, transactionId: `mock-tx-${turn}`, undoAvailable: true, written: files ? ["main.ts", "style.css"] : [], deleted: files ? ["note.txt"] : [] };
   }
 
   async undoRewind(_transactionId: string): Promise<void> {

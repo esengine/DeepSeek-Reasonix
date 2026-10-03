@@ -73,6 +73,7 @@ export interface HostTodo {
 export interface Checkpoint {
   turn: number;
   prompt: string;
+  // Distinct files in this checkpoint and every later checkpoint.
   files: number;
   // The session index of the user message this snapshot was taken for, and the
   // point a conversation rewind truncates at. turn numbers the snapshots, not

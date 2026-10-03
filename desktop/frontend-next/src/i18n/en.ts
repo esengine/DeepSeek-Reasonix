@@ -692,7 +692,7 @@ export const EN: Record<string, string> = {
   "撤销这次还原": "Undo this restore",
   "仍还原其余部分": "Restore the rest anyway",
   "还原失败": "Could not restore",
-  "本轮未修改任何文件": "This turn changed no files",
+  "回退范围内未修改任何文件": "No files changed in this rewind range",
   "本轮有改动无法还原": "Some of this turn's changes cannot be restored",
   "部分改动不在快照内": "Some of the changes are outside the snapshot",
   "已还原 {n} 个文件": "{n} files restored",

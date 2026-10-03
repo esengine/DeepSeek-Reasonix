@@ -323,7 +323,7 @@ func TestExpiredV2PayloadRemainsSafeForLegacyReader(t *testing.T) {
 
 	reloaded := New(dir, root)
 	metas := reloaded.List()
-	if len(metas) != 1 || !metas[0].ExpiredFilePayload || metas[0].CanUndoFiles {
+	if len(metas) != 1 || !metas[0].ExpiredFilePayload {
 		t.Fatalf("expired metadata was not preserved for the new reader: %+v", metas)
 	}
 }
