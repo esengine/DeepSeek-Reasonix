@@ -479,18 +479,30 @@ func compatibilityFor(pkg Package, issues []CompatibilityIssue) Compatibility {
 	return Compatibility{Status: status, Mapped: mapped, Skipped: issues}
 }
 
-func dirContainsAgentMd(dir string) bool { return len(loadAgentRefs(dir)) > 0 }
+func dirContainsAgentMd(dir string) bool { return len(loadAgentRefs(filepath.Dir(dir), dir)) > 0 }
 
 func (p Package) agentRefs() []AgentRef {
 	var out []AgentRef
 	for _, root := range p.AgentRoots() {
-		out = append(out, loadAgentRefs(root)...)
+		out = append(out, loadAgentRefs(p.Root, root)...)
 	}
 	sort.SliceStable(out, func(i, j int) bool { return out[i].Name < out[j].Name })
 	return out
 }
 
-func loadAgentRefs(dir string) []AgentRef {
+func loadAgentRefs(root, dir string) []AgentRef {
+	root, err := filepath.Abs(root)
+	if err != nil {
+		return nil
+	}
+	resolvedRoot, err := filepath.EvalSymlinks(root)
+	if err != nil {
+		return nil
+	}
+	info, _ := agentPathInfo(resolvedRoot, dir)
+	if info == nil || !info.IsDir() {
+		return nil
+	}
 	entries, err := os.ReadDir(dir)
 	if err != nil {
 		return nil
@@ -501,7 +513,11 @@ func loadAgentRefs(dir string) []AgentRef {
 			continue
 		}
 		path := filepath.Join(dir, entry.Name())
-		body, err := fileencoding.ReadFileUTF8(path)
+		info, resolved := agentPathInfo(resolvedRoot, path)
+		if info == nil || !info.Mode().IsRegular() {
+			continue
+		}
+		body, err := fileencoding.ReadFileUTF8(resolved)
 		if err != nil {
 			continue
 		}
