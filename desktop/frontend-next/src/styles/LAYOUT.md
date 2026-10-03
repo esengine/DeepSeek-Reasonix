@@ -1156,6 +1156,11 @@ what exists.
 
 ## Panes
 
+- The sidebar is the default session switcher. Settings > Appearance offers
+  session tabs as an opt-in, off by default and saved on this machine. The strip
+  only mounts when the choice is on and more than one pane is open; changing the
+  choice does not close or stop any session.
+
 - Panes are stacked, one visible at a time. Side by side they squeeze each other
   and a glance cannot tell which composer belongs to which run; as tabs the
   background one keeps running.

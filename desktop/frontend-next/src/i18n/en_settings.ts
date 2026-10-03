@@ -2,6 +2,9 @@
 // alone — one catalogue is still the model, and this file is read as its
 // continuation: same keying by Chinese source text, same grouping by screen.
 export const EN_SETTINGS: Record<string, string> = {
+  "会话标签栏": "Session tabs",
+  "显示会话标签栏": "Show session tabs",
+  "打开多个会话时，在顶部显示标签，方便切换会话。": "Show tabs at the top when multiple sessions are open, for quick switching.",
   "步骤 1 · 连接服务": "Step 1 · Connect service",
   "先连接服务，再选择这个来源要启用的模型。": "Connect the service, then choose which models to enable from it.",
   "来源名称": "Source name",

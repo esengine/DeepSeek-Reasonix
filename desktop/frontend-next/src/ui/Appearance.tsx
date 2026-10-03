@@ -1,5 +1,5 @@
 import { ApplyNote } from "./Group";
-import { useCallback, useEffect, useMemo, useRef, useState, type CSSProperties } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore, type CSSProperties } from "react";
 import type { TrayPrefs, AgentPort, Appearance as Look, ThemePack } from "../port/port";
 import { MONO_FAMILIES, UI_FAMILIES, installed, readSizeOf, readSteps } from "./look";
 import { STORAGE as LANG_KEY, t } from "../i18n";
@@ -10,6 +10,7 @@ import { Folding } from "./Folding";
 import { Switch } from "./Switch";
 import { ThemeImport } from "./ThemeImport";
 import { setShowsReceipt, showsReceipt } from "../state/session";
+import { onShowsSessionTabsChange, setShowsSessionTabs, showsSessionTabs } from "../state/prefs";
 
 // "" follows the machine; the rest are explicit, the same shape the light/dark
 // control uses.
@@ -126,6 +127,7 @@ export function Appearance({ port, theme, onTheme, contrast, onContrast, weight,
   // icon to bring one back. The whole section goes with it.
   const [tray, setTray] = useState<TrayPrefs | null>(null);
   const [receipt, setReceipt] = useState(showsReceipt);
+  const sessionTabs = useSyncExternalStore(onShowsSessionTabsChange, showsSessionTabs, showsSessionTabs);
 
   useEffect(() => {
     let live = true;
@@ -612,6 +614,23 @@ export function Appearance({ port, theme, onTheme, contrast, onContrast, weight,
           <ApplyNote id="window" />
         </section>
       )}
+
+      <section className="grp" id="set-session-tabs" data-setting="session-tabs">
+        <div className="grp-hd">
+          <h3>{t("会话标签栏")}</h3>
+        </div>
+        <div className="grp-items">
+          <div className="lrow">
+            <span className="tx">
+              <span className="lb">{t("显示会话标签栏")}</span>
+              <span className="ds">{t("打开多个会话时，在顶部显示标签，方便切换会话。")}</span>
+            </span>
+            <Switch data-action="appearance.session-tabs" on={sessionTabs} label={t("显示会话标签栏")}
+              onClick={() => setShowsSessionTabs(!sessionTabs)} />
+          </div>
+        </div>
+        <ApplyNote id="session-tabs" />
+      </section>
 
       <Folding />
       <Notifications port={port} />
