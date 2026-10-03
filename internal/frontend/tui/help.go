@@ -56,6 +56,13 @@ func (m *model) onHelp(msg helpMsg) tea.Cmd {
 		}
 	}
 	builtin = append(builtin, m.localCommands("/")...)
+	filtered := builtin[:0]
+	for _, item := range builtin {
+		if item.Label != "/paste-image" {
+			filtered = append(filtered, item)
+		}
+	}
+	builtin = filtered
 	return m.emit(func(width int, _ bool) string {
 		var b strings.Builder
 		b.WriteString(termrender.Accent("commands") + "\n")

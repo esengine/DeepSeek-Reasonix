@@ -433,6 +433,10 @@ func (c *Controller) managementNotice(trimmed string) bool {
 		return false
 	}
 	switch fields[0] {
+	case "/remote":
+		c.notice(remoteHostsText())
+	case "/preset", "/work-mode", "/profile":
+		c.notice("Execution modes have been retired. Recognized legacy values are accepted for compatibility and use standard execution.")
 	case "/model":
 		c.notice(c.modelListText())
 	case "/provider":

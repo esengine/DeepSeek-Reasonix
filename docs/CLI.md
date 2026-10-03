@@ -121,7 +121,7 @@ reasonix config compact-ratio 75           # set the user-global default
 reasonix config compact-ratio --local 75   # override in ./reasonix.toml
 ```
 
-The editable range is 65–85%, with 85% as the built-in default. Lower values
+The editable range is 30–85%, with 85% as the built-in default. Lower values
 compact earlier and may reduce prompt-prefix cache reuse; higher values retain
 more context before compaction. Project `reasonix.toml` takes precedence over
 the user config. Changes apply to new CLI sessions; an already-running session

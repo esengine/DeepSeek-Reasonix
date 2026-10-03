@@ -111,6 +111,7 @@ type model struct {
 	copying       *copyPicker
 	clearing      *clearConfirm
 	setup         *connectionSetup
+	catalog       *catalogPicker
 	lastEsc       time.Time // an idle Esc on an empty composer, arming the second
 	// frameRows is how tall the last inline frame was: a print has only the
 	// rows above it to land in.
@@ -385,6 +386,12 @@ func (m *model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 // clipboard, the session list, the mouse and its timers.
 func (m *model) onScreenMsg(msg tea.Msg) (tea.Cmd, bool) {
 	switch msg := msg.(type) {
+	case mcpParsedMsg:
+		return m.onMCPParsed(msg), true
+	case catalogMsg:
+		return m.onCatalog(msg), true
+	case catalogSavedMsg:
+		return m.onCatalogSaved(msg), true
 	case urlAnswerMsg:
 		return m.onURLAnswer(msg), true
 	case clipImageMsg:

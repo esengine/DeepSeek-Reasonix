@@ -28,7 +28,9 @@ type Connection struct {
 // SetupState is whether the session still owes a key, so the panel can open
 // itself on a first run.
 type SetupState struct {
-	Required bool `json:"required"`
+	Required bool   `json:"required"`
+	Provider string `json:"provider,omitempty"`
+	KeyEnv   string `json:"keyEnv,omitempty"`
 }
 
 func (c *Client) SetupState(ctx context.Context) (SetupState, error) {
@@ -113,7 +115,11 @@ func (m *model) onSetupState(msg setupStateMsg) tea.Cmd {
 	if msg.err != nil || !msg.state.Required || m.setup != nil {
 		return nil
 	}
-	return m.openSetup()
+	if msg.state.Provider != "" && msg.state.KeyEnv != "" {
+		m.tr.AddNotice("warn", fmt.Sprintf("provider %s missing env %s", msg.state.Provider, msg.state.KeyEnv))
+		m.tr.AddNotice("warn", "Selected model is missing its API key.")
+	}
+	return tea.Batch(m.commit(), m.openSetup())
 }
 
 func (m *model) onConnections(msg connectionsMsg) tea.Cmd {

@@ -115,6 +115,7 @@ func (m *model) localCommands(line string) []CompletionItem {
 		return nil
 	}
 	cmds := []CompletionItem{{Label: "/resume", Insert: "/resume", Hint: i18n.M.CmdResume}}
+	cmds = append(cmds, CompletionItem{Label: "/paste-image", Insert: "/paste-image", Hint: i18n.M.CmdPasteImage})
 	for _, c := range []struct{ name, hint string }{
 		{"/queue", i18n.M.CmdQueue}, {"/steer", i18n.M.CmdSteer}, {"/takeover", i18n.M.CmdTakeover},
 		{"/status", i18n.M.CmdStatus}, {"/export", i18n.M.CmdExport}, {"/copy", i18n.M.CmdCopy},

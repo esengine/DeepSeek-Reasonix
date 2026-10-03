@@ -147,6 +147,10 @@ func (m *model) stateText() string {
 		tag = " · " + termrender.Dim(i18n.M.MouseCaptureTag)
 	}
 	switch {
+	case m.setup != nil:
+		return footerValue(i18n.M.SetupTitle)
+	case m.catalog != nil:
+		return footerValue(m.catalog.kind + " picker")
 	case m.flashText() != "":
 		return termrender.Green(m.flashText()) + tag
 	case open != nil && open.Kind == ItemAsk:

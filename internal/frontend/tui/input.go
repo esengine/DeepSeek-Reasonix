@@ -98,6 +98,12 @@ func (p *pasteStore) expand(s string) string {
 // insertPaste puts pasted text in the composer, folded unless a panel is
 // taking the keys: what is typed into one is an answer, not a message.
 func (m *model) insertPaste(text string) {
+	if m.catalog != nil {
+		if s := m.catalog.add; s != nil && s.draft == nil && !s.busy && !m.catalog.saving {
+			s.input += text
+		}
+		return
+	}
 	if m.setup != nil {
 		m.pasteIntoSetup(text)
 		return
@@ -194,6 +200,9 @@ func (m *model) shortcutKey(k string) (tea.Cmd, bool) {
 // screenKey takes what a key means before it reaches the composer: copying a
 // selection, moving the transcript, answering an open panel.
 func (m *model) screenKey(msg tea.KeyPressMsg) (tea.Cmd, bool) {
+	if cmd, handled := m.catalogKey(msg); handled {
+		return cmd, true
+	}
 	if cmd, handled := m.selectionKey(msg.String()); handled {
 		return cmd, true
 	}
@@ -264,6 +273,9 @@ func (m *model) send(steer bool) tea.Cmd {
 	if display == "" {
 		return nil
 	}
+	if cmd, ok := m.catalogSlash(display); ok {
+		return cmd
+	}
 	if cmd, ok := m.queueSlash(display); ok {
 		return cmd
 	}
@@ -298,6 +310,10 @@ func (m *model) send(steer bool) tea.Cmd {
 		}
 		m.tr.AddNotice("info", "reasonix "+version)
 		return m.commit()
+	case display == "/paste-image":
+		m.composer.Reset()
+		m.menu = nil
+		return m.pasteClipboard()
 	}
 	if cmd, ok := m.miscSlash(display); ok {
 		return cmd
