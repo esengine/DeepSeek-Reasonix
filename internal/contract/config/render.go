@@ -43,20 +43,7 @@ func RenderTOMLForScope(c *Config, scope RenderScope) string {
 	b.WriteString("# Fields marked user/global only are not overridden by ./reasonix.toml.\n")
 	b.WriteString("# Secrets are named via api_key_env and stored in Reasonix's global .env; never put keys here.\n\n")
 
-	fmt.Fprintf(&b, "config_version = %d   # schema marker for diagnostics; old versions may ignore it\n", configVersion(c))
-	fmt.Fprintf(&b, "default_model = %q\n", c.DefaultModel)
-	if c.Language != "" {
-		fmt.Fprintf(&b, "language      = %q   # ui/model language; empty = auto-detect from $LANG / $REASONIX_LANG\n", c.Language)
-	} else {
-		b.WriteString("# language      = \"zh\"   # ui/model language; empty = auto-detect from $LANG / $REASONIX_LANG\n")
-	}
-	if scope != RenderScopeProject {
-		if c.AutoSubmit {
-			b.WriteString("auto_submit = true   # CLI ask: commit a multi-question batch once its last question is answered; user/global only\n")
-		}
-		fmt.Fprintf(&b, "credentials_store = %q   # legacy compatibility; provider keys are saved in Reasonix's global .env\n", normalizeCredentialsStore(c.CredentialsStore))
-	}
-	b.WriteString("\n")
+	renderTopLevelScalars(&b, c, scope)
 
 	if shouldRenderUI(c, defaults, scope) {
 		renderUISection(&b, c, scope)
@@ -432,15 +419,7 @@ func RenderTOMLProjectDelta(c *Config) string {
 	d := Default()
 	var b strings.Builder
 
-	if v := configVersion(c); v != d.ConfigVersion {
-		fmt.Fprintf(&b, "config_version = %d\n", v)
-	}
-	if c.DefaultModel != d.DefaultModel {
-		fmt.Fprintf(&b, "default_model = %q\n", c.DefaultModel)
-	}
-	if c.Language != "" && c.Language != d.Language {
-		fmt.Fprintf(&b, "language = %q\n", c.Language)
-	}
+	renderScalarDeltas(&b, c, d)
 
 	// [ui] section — whole-section comparison
 	if !reflect.DeepEqual(c.UI, d.UI) {

@@ -86,6 +86,7 @@ default_model = "deepseek/deepseek-flash"
 language = "zh"
 auto_submit = false          # commit a multi-question ask once its last question is answered; user/global only
 credentials_store = "auto"   # legacy compatibility; provider keys are in .env
+# cachecontext = "my-project"  # per-workspace attribution id for OpenAI/Anthropic-compatible providers; see below
 
 [ui]
 theme = "auto"
@@ -174,6 +175,38 @@ If a gateway requires vendor-specific top-level request body fields, set
 `extra_body`, for example `extra_body = { enable_thinking = true }`. These values
 are merged into the OpenAI-compatible chat JSON request body without allowing
 core fields such as `model`, `messages`, `tools`, or `stream` to be overridden.
+
+## `cachecontext` (per-project user id)
+
+`cachecontext` is a top-level scalar (not a provider field). It reaches every
+OpenAI- or Anthropic-compatible provider: as `user` and `session_id` on the
+OpenAI wire, and as `metadata.user_id` on the Anthropic wire. It is sent only
+when you set it; nothing is derived or sent by default.
+
+Both the user config and a project's `reasonix.toml` can set it; a project value
+wins. Because it lives outside the provider config, one shared provider entry
+works across all projects.
+
+```toml
+cachecontext = "my-project"
+```
+
+The value is sanitized to `^[a-zA-Z0-9_-]+$` (characters outside that set become
+`-`) and capped at 512 characters; an over-long value keeps its leading
+characters and gains a hash suffix.
+
+### `cachecontext = "auto"` (derived id)
+
+The literal `"auto"` derives the id from the workspace key instead:
+`repo-<sha256>` inside a Git repository (shared across its linked worktrees),
+else `path-<sha256>`.
+
+That key is stable across runs and not reversible to your path or account, and is
+never derived from the local username. `"auto"` is reserved, so a literal id of
+`auto` is not available.
+
+On the OpenAI wire the same id is also sent as the top-level `session_id`
+(capped at 256 characters), so a project keeps one stable key per provider.
 
 ## Global `.env`
 

@@ -6,6 +6,7 @@
 
 default_model = "deepseek"   # a provider name (→ its default model) or "provider/model"
 # language      = "zh"   # ui language; empty = auto-detect from $LANG / $REASONIX_LANG
+# cachecontext = "my-project"   # per-workspace attribution id sent to every OpenAI/Anthropic-compatible provider (user + session_id on the OpenAI wire, metadata.user_id on the Anthropic wire). "auto" derives it from the workspace key; a project's reasonix.toml may also set it.
 # auto_submit   = true   # commit a multi-question ask once its last question is answered; user/global only
 
 [ui]

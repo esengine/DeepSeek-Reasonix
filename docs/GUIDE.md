@@ -21,6 +21,7 @@
 - [Task contracts and pause policy](./TASK_CONTRACT.md)
 - [Custom OpenAI-compatible providers](#custom-openai-compatible-providers)
 - [Hooks](#hooks)
+- [Per-project user id (`cachecontext`)](#per-project-user-id-cachecontext)
 - [Desktop hooks](#desktop-hooks)
 - [Keyboard shortcuts](#keyboard-shortcuts)
 - [Permissions & sandbox](#permissions--sandbox)
@@ -738,6 +739,27 @@ needs code (inspect arguments, consult a file, log, or react to a prompt).
   to every session that loads them.
 - Native hooks cannot answer an approval prompt; only a `PreToolUse` block
   refuses a call.
+
+## Per-project user id (`cachecontext`)
+
+Set the top-level `cachecontext` to give each project/repository its own id for
+provider-side attribution.
+
+It reaches every OpenAI- or Anthropic-compatible provider: as `user` and
+`session_id` on the OpenAI wire, and as `metadata.user_id` on the Anthropic
+wire.
+
+```toml
+cachecontext = "my-project"
+```
+
+Both the user config and a project's `reasonix.toml` can set it; a project value
+wins. Setting `cachecontext = "auto"` at the user level derives a stable but
+distinct id per project/repository from the workspace key, so one shared value
+still yields a per-project id without repeating it in every project.
+
+See [Configuration paths](./CONFIG_PATHS.md#cachecontext-per-project-user-id) for
+the value rules and the derived-id format.
 
 ## Desktop hooks
 

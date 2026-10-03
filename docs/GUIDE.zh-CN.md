@@ -21,6 +21,7 @@
 - [任务合约与暂停策略](./TASK_CONTRACT.md)
 - [自定义 OpenAI-compatible provider](#自定义-openai-compatible-provider)
 - [Hooks](#hooks)
+- [按项目设置 user id（`cachecontext`）](#按项目设置-user-idcachecontext)
 - [快捷键](#快捷键)
 - [权限与沙盒](#权限与沙盒)
 - [能力诊断](#能力诊断)
@@ -611,6 +612,23 @@ deny = ["Bash(git push*)"]
 - hook 无法强制模型的措辞：阻断对模型表现为一次被拒绝的调用，接下来说什么、试什么由模型决定。
 - 不存在“仅本次会话”的作用域：hooks 来自设置文件，对每个加载它们的会话生效。
 - 原生 hook 不能替用户回答审批提示；只有 `PreToolUse` 的阻断会拒绝一次调用。
+
+## 按项目设置 user id（`cachecontext`）
+
+设置顶层 `cachecontext`，为每个项目/仓库分配独立的服务商侧标识 id。它会发送给所有
+OpenAI 或 Anthropic 协议兼容的服务商：在 OpenAI 协议上作为 `user` 与 `session_id`
+发送，在 Anthropic 协议上作为 `metadata.user_id` 发送。
+
+```toml
+cachecontext = "my-project"
+```
+
+用户配置与项目的 `reasonix.toml` 都可以设置它，项目值优先。在用户级设置
+`cachecontext = "auto"` 会根据工作区 key 为每个项目/仓库派生一个稳定且互不相同的
+id，因此共享一个取值也能得到逐项目的 id，无需在每个项目中重复填写。
+
+取值规则与派生 id 的格式见
+[配置路径](./CONFIG_PATHS.md#cachecontext-per-project-user-id)。
 
 ## 快捷键
 

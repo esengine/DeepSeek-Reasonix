@@ -86,19 +86,9 @@ func New(cfg provider.Config) (provider.Provider, error) {
 	prefixChatURL := deepSeekPrefixChatURL(chatURL)
 	headers, _ := cfg.Extra["headers"].(map[string]string)
 	extraBody, _ := cfg.Extra["extra_body"].(map[string]any)
-	vision, _ := cfg.Extra["vision"].(bool)
+	visionRaw, _ := cfg.Extra["vision"].(bool)
 	officialDeepSeek := IsDeepSeek(cfg.BaseURL)
-	// DeepSeek's official chat API takes image parts only on the models that
-	// declare them, and the parts need no new serializer: DeepSeek documents the
-	// OpenAI image_url shape verbatim. Keep the guard here anyway — no persisted
-	// or extension-supplied capability flag may put pixels on a wire that will
-	// reject them, whatever config resolution decided upstream.
-	vision = vision && visionReachesModel(officialDeepSeek, cfg.Model)
-	visionDetail, _ := cfg.Extra["vision_detail"].(string)
-	visionDetail = strings.ToLower(strings.TrimSpace(visionDetail))
-	if !detailAccepted(visionDetail, officialDeepSeek) {
-		visionDetail = "" // auto — omit the field
-	}
+	vision, visionDetail := resolveVision(cfg, officialDeepSeek, visionRaw)
 	deepseek := protocol == "deepseek" || (protocol == "" && officialDeepSeek)
 	maxOutputTokens, _ := cfg.Extra["max_output_tokens"].(int)
 	deepseekV4Flash := strings.EqualFold(strings.TrimSpace(cfg.Model), "deepseek-v4-flash")
@@ -239,6 +229,7 @@ func New(cfg provider.Config) (provider.Provider, error) {
 		prefixChatURL:      prefixChatURL,
 		headers:            cleanCustomHeaders(headers),
 		extraBody:          cleanExtraBody(extraBody),
+		attribution:        provider.AttributionFromExtra(cfg.Extra),
 		model:              normalizeModelID(cfg.BaseURL, cfg.Model),
 		deepseek:           deepseek,
 		minimax:            minimax,
@@ -279,6 +270,7 @@ type client struct {
 	prefixChatURL      string // official DeepSeek Beta endpoint; empty for custom gateways
 	headers            map[string]string
 	extraBody          map[string]any
+	attribution        provider.Attribution // workspace id pair; sent as the `user` and `session_id` body fields
 	model              string
 	http               *http.Client
 	deepseek           bool
@@ -759,75 +751,12 @@ func (c *client) buildRequest(req provider.Request) chatRequest {
 		Temperature:     req.Temperature,
 		MaxTokens:       maxOutputTokens,
 		ReasoningEffort: kimiK3ReasoningEffort(c.kimiK3, c.requestEffort(req)),
+		User:            c.attribution.UserID,
+		SessionID:       c.attribution.SessionID,
 		ExtraBody:       c.extraBody,
 		reasoningHint:   reasoningHint,
 	}
-	switch {
-	case c.kimiK3:
-		// K3 fixes its sampling values and recommends omitting them. It also
-		// names the output budget max_completion_tokens rather than max_tokens.
-		out.Temperature = nil
-		out.MaxTokens = 0
-		out.MaxCompletionTokens = maxOutputTokens
-		out.ExtraBody = omitExtraBodyFields(out.ExtraBody,
-			"temperature", "top_p", "n", "presence_penalty", "frequency_penalty", "max_completion_tokens")
-	case IsOpenAI(c.baseURL):
-		// OpenAI's current Chat Completions contract replaces max_tokens with
-		// max_completion_tokens, which includes visible and reasoning tokens and
-		// is required by o-series models. Compatible gateways retain max_tokens.
-		out.MaxTokens = 0
-		out.MaxCompletionTokens = maxOutputTokens
-	case c.deepseek:
-		// DeepSeek's CoT is controlled by `thinking` plus `reasoning_effort` for
-		// depth. Thinking is on by default but can be turned off via
-		// effort=disabled / thinking=disabled (credit @eghrhegpe, #5063).
-		if c.thinkingType == "disabled" {
-			out.Thinking = &thinkingMode{Type: "disabled"}
-		} else {
-			out.Thinking = &thinkingMode{Type: "enabled"}
-		}
-	case c.minimax:
-		// M3 uses a single `thinking.type` field with two valid values:
-		// "adaptive" (default, thinking on) and "disabled" (off). Reasoning
-		// depth is not a knob on M3, so reasoning_effort is omitted entirely.
-		t := c.effort
-		if t == "" {
-			t = "adaptive" // /effort auto == the M3 model default
-		}
-		out.Thinking = &thinkingMode{Type: t}
-		out.ReasoningEffort = ""
-	case c.zhipu:
-		// Zhipu GLM's binary thinking knob: "enabled" (default, thinking on) or
-		// "disabled". reasoning_effort is silently ignored by the endpoint, so we
-		// omit it and drive chain-of-thought purely through thinking.type.
-		t := c.effort
-		if t == "" {
-			t = "enabled" // auto == the GLM default (thinking on)
-		}
-		if c.thinkingType != "" {
-			t = c.thinkingType // explicit `thinking` config overrides the effort knob
-		}
-		out.Thinking = &thinkingMode{Type: t}
-		out.ReasoningEffort = ""
-	case c.longcat:
-		// LongCat's binary thinking knob: "enabled" (default, thinking on) or
-		// "disabled". The API documents reasoning_content in OpenAI responses but
-		// not reasoning_effort, so keep depth out of the request.
-		t := c.effort
-		if t == "" {
-			t = c.thinkingType
-		}
-		if t == "" {
-			t = "enabled"
-		}
-		out.Thinking = &thinkingMode{Type: t}
-		out.ReasoningEffort = ""
-	case c.thinkingType != "":
-		// Generic OpenAI-compatible provider with an explicit `thinking` config
-		// field (e.g. opencode.ai) — emit thinking.type; reasoning_effort, if any,
-		// is left untouched for backends that also honour it.
-		out.Thinking = &thinkingMode{Type: c.thinkingType}
-	}
+	c.applyThinkingProfile(&out, maxOutputTokens)
 	return out
 }
 
@@ -1138,6 +1067,8 @@ type chatRequest struct {
 	MaxCompletionTokens int                  `json:"max_completion_tokens,omitempty"`
 	ReasoningEffort     string               `json:"reasoning_effort,omitempty"`
 	Thinking            *thinkingMode        `json:"thinking,omitempty"`
+	User                string               `json:"user,omitempty"`
+	SessionID           string               `json:"session_id,omitempty"`
 	ExtraBody           map[string]any       `json:"-"`
 	reasoningHint       provider.RequestHint // host-side, never serialized: what this body left out
 }

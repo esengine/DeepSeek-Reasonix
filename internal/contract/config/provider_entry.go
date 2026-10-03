@@ -37,8 +37,9 @@ type ProviderEntry struct {
 	resolvedAPIKey    string
 	resolvedSource    CredentialSource
 	roots             Roots
-	BalanceURL        string `toml:"balance_url"` // optional; a provider-specific wallet-balance endpoint (DeepSeek: https://api.deepseek.com/user/balance). Empty = no balance readout.
-	ContextWindow     int    `toml:"context_window"`
+	attribution       cacheAttribution // workspace id pair stamped at load; sent as user_id / session_id
+	BalanceURL        string           `toml:"balance_url"` // optional; a provider-specific wallet-balance endpoint (DeepSeek: https://api.deepseek.com/user/balance). Empty = no balance readout.
+	ContextWindow     int              `toml:"context_window"`
 	// MaxOutputTokens is a protocol-neutral total output budget for one turn.
 	// Zero means automatic (ordinary 16K, reasoning 32K, high/max 64K); 32768
 	// suits cost control and 65536 heavy reasoning. Negative omits wire limits.

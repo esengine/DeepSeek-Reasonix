@@ -5,16 +5,16 @@
     "claude-dialect": 1,
     "codeowners": 0,
     "commented-code": 0,
-    "complexity": 759,
+    "complexity": 746,
     "doc-language": 0,
     "doc-owner": 27,
     "doc-prose": 2147,
     "error-text": 9,
     "essay": 2737,
-    "file-size": 20867,
+    "file-size": 20613,
     "flat-view": 0,
     "frontend-parity": 28,
-    "function-size": 2946,
+    "function-size": 2875,
     "layer-order": 0,
     "layering": 0,
     "marker": 0,
@@ -238,11 +238,10 @@
     },
     "internal/contract/config/config.go": {
       "essay": 30,
-      "file-size": 938
+      "file-size": 879
     },
     "internal/contract/config/credentials.go": {
-      "essay": 1,
-      "file-size": 47
+      "essay": 1
     },
     "internal/contract/config/credentials_keyring_unix.go": {
       "essay": 7
@@ -305,10 +304,10 @@
       "file-size": 219
     },
     "internal/contract/config/render.go": {
-      "complexity": 91,
+      "complexity": 89,
       "essay": 2,
-      "file-size": 296,
-      "function-size": 404
+      "file-size": 286,
+      "function-size": 394
     },
     "internal/contract/config/vision.go": {
       "essay": 1,
@@ -756,8 +755,7 @@
     "internal/model/anthropic/anthropic.go": {
       "complexity": 39,
       "essay": 31,
-      "file-size": 73,
-      "function-size": 142,
+      "function-size": 141,
       "struct-state": 5
     },
     "internal/model/anthropic/anthropic_test.go": {
@@ -767,10 +765,10 @@
       "essay": 1
     },
     "internal/model/openai/openai.go": {
-      "complexity": 58,
+      "complexity": 47,
       "essay": 30,
-      "file-size": 506,
-      "function-size": 242
+      "file-size": 441,
+      "function-size": 182
     },
     "internal/model/openai/openai_test.go": {
       "essay": 5
