@@ -30,6 +30,13 @@ jobs:
   changes:
     runs-on: ubuntu-latest
     outputs:
+      # Gate for the self-hosted Windows runner (label win-gpu). The repository
+      # is public, so code from a fork must never reach it: only pushes to the
+      # long-lived branches and pull requests whose head lives in this
+      # repository qualify. Bot-authored PRs are excluded because their payload
+      # is third-party code. Anything else, or a failed job, runs on hosted
+      # runners.
+      trusted: ${{ (github.event_name == 'push' && contains(fromJSON('["refs/heads/studio","refs/heads/main-v2","refs/heads/platform"]'), github.ref)) || (github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository && !endsWith(github.actor, '[bot]')) }}
       code: ${{ steps.filter.outputs.code }}
       desktop: ${{ steps.filter.outputs.desktop }}
       sdk: ${{ steps.filter.outputs.sdk }}
@@ -96,10 +103,26 @@ jobs:
       fail-fast: false
       matrix:
         os: [ubuntu-latest, macos-latest, windows-latest]
-    runs-on: ${{ matrix.os }}
+    # The Windows leg moves to the self-hosted box only once the repository
+    # variable WIN_GPU_TEST is 'true': the runner's service account must be
+    # able to create symlinks (internal/platform/repair tests need it).
+    runs-on: ${{ matrix.os == 'windows-latest' && needs.changes.outputs.trusted == 'true' && vars.WIN_GPU_TEST == 'true' && fromJSON('["win-gpu"]') || matrix.os }}
+    timeout-minutes: 45
     env:
       RUN_STEPS: ${{ github.event_name != 'pull_request' || needs.changes.outputs.code != 'false' }}
+    defaults:
+      run:
+        shell: bash
     steps:
+      # On the self-hosted box PATH finds WSL's bash before Git's and its
+      # execution policy refuses powershell steps, so Windows legs use Git
+      # Bash for every run step.
+      - name: Put Git Bash first on PATH
+        if: runner.os == 'Windows' && runner.environment == 'self-hosted'
+        shell: cmd
+        working-directory: ${{ github.workspace }}
+        run: '>>"%GITHUB_PATH%" echo C:\Program Files\Git\bin'
+
       - if: env.RUN_STEPS == 'true'
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
 
@@ -107,7 +130,13 @@ jobs:
         uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7
         with:
           go-version-file: go.mod
-          cache: true
+          cache: ${{ runner.environment != 'self-hosted' }}
+
+      # proxy.golang.org drops connections from the intranet; the module cache
+      # persists between runs, so a retry resumes where it stopped.
+      - name: go mod download (retry)
+        if: env.RUN_STEPS == 'true' && runner.environment == 'self-hosted'
+        run: for _ in 1 2 3 4 5; do go mod download && exit 0; sleep 5; done; exit 1
 
       - name: Install and verify Linux sandbox backend
         if: env.RUN_STEPS == 'true' && runner.os == 'Linux'
@@ -156,8 +185,7 @@ jobs:
       # mixes hosts, so a runtime crash is only attributable with the CPU on record.
       - name: runner CPU
         if: env.RUN_STEPS == 'true' && runner.os == 'Windows'
-        shell: pwsh
-        run: Get-CimInstance Win32_Processor | Select-Object -ExpandProperty Name
+        run: reg query 'HKLM\HARDWARE\DESCRIPTION\System\CentralProcessor\0' //v ProcessorNameString
 
       - name: test
         if: env.RUN_STEPS == 'true' && runner.os != 'Windows'
@@ -231,6 +259,10 @@ jobs:
           # launch cannot pin the Actions step after Go's package timeout fires.
           WINDOWS_SANDBOX_WAIT_MS: "20000"
         run: go test -count=1 -p 4 -timeout=12m ./...
+
+      - name: Clean workspace
+        if: always() && runner.environment == 'self-hosted'
+        run: rm -rf "${GITHUB_WORKSPACE:?}"/* "${GITHUB_WORKSPACE:?}"/.[!.]* 2>/dev/null || true
 
   race:
     needs: changes
