@@ -123,7 +123,7 @@ func putPair(dst *map[string]string, flag, pair string) error {
 }
 
 func looksLikeRemoteURL(raw string) bool {
-	raw = strings.TrimSpace(raw)
+	raw = strings.ToLower(strings.TrimSpace(raw))
 	return strings.HasPrefix(raw, "http://") || strings.HasPrefix(raw, "https://")
 }
 
@@ -146,37 +146,22 @@ func NameFromURL(raw string) string {
 // NameFromArgv derives a server name from the command that starts it, looking
 // through the runner (npx/uvx/python -m/…) to the package it actually launches.
 func NameFromArgv(command string, args []string) string {
-	runner := strings.ToLower(strings.TrimSuffix(strings.TrimSuffix(strings.TrimSuffix(filepath.Base(command), ".exe"), ".cmd"), ".bat"))
+	runner := strings.TrimSuffix(strings.TrimSuffix(strings.TrimSuffix(strings.ToLower(filepath.Base(strings.ReplaceAll(command, "\\", "/"))), ".exe"), ".cmd"), ".bat")
 	candidate := command
-	switch runner {
-	case "npx", "bunx", "uvx":
-		if operand := firstCommandOperand(args); operand != "" {
-			candidate = operand
-		}
-	case "python", "python3", "py":
-		for i, arg := range args {
-			if arg == "-m" && i+1 < len(args) {
-				candidate = args[i+1]
-				break
-			}
-		}
-		if candidate == command {
-			if operand := firstCommandOperand(args); operand != "" {
-				candidate = operand
-			}
-		}
-	case "node":
-		if operand := firstCommandOperand(args); operand != "" {
-			candidate = operand
-		}
-	case "uv":
-		if len(args) > 0 && args[0] == "run" {
-			if operand := firstCommandOperand(args[1:]); operand != "" {
-				candidate = operand
-			}
+	launcher, known := commandLaunchers[runner]
+	if known {
+		candidate = launcherCommandOperand(args, launcher)
+		if candidate == "" {
+			return "mcp-server"
 		}
 	}
-	base := filepath.Base(candidate)
+	base := filepath.Base(strings.ReplaceAll(candidate, "\\", "/"))
+	if known && launcher.image {
+		base, _, _ = strings.Cut(base, ":")
+	}
+	if runner == "uvx" {
+		base, _, _ = strings.Cut(base, "==")
+	}
 	if at := strings.Index(base, "@"); at > 0 {
 		base = base[:at]
 	}
@@ -187,38 +172,7 @@ func NameFromArgv(command string, args []string) string {
 	if name == "" {
 		return "mcp-server"
 	}
-	if candidate == command {
-		switch runner {
-		case "npx", "bunx", "uvx", "uv", "node", "python", "python3", "py":
-			return "mcp-server"
-		}
-	}
 	return name
-}
-
-func firstCommandOperand(args []string) string {
-	valueFlags := map[string]bool{
-		"-p": true, "--package": true, "-c": true, "--call": true,
-		"--node-options": true, "--python": true,
-	}
-	options := true
-	for i := 0; i < len(args); i++ {
-		arg := strings.TrimSpace(args[i])
-		if options && arg == "--" {
-			options = false
-			continue
-		}
-		if options && strings.HasPrefix(arg, "-") {
-			if valueFlags[arg] {
-				i++
-			}
-			continue
-		}
-		if arg != "" {
-			return arg
-		}
-	}
-	return ""
 }
 
 // SanitizeName reduces a derived name to the lowercase-and-dashes form config
@@ -249,7 +203,19 @@ func Tokenize(s string) []string {
 	var cur strings.Builder
 	inWord := false
 	var quote rune
-	for _, r := range s {
+	chars := []rune(s)
+	for i := 0; i < len(chars); i++ {
+		r := chars[i]
+		if r == '\\' && quote != '\'' && i+1 < len(chars) && chars[i+1] == '\n' {
+			start := i
+			for start > 0 && chars[start-1] == '\\' {
+				start--
+			}
+			if (i-start)%2 == 0 {
+				i++
+				continue
+			}
+		}
 		switch {
 		case quote != 0:
 			if r == quote {

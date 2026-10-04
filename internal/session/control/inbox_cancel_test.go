@@ -39,7 +39,7 @@ func steeringTurn(t *testing.T) (*Controller, *agent.Agent, *sessionstore.Sessio
 	case <-prov.started:
 	case e := <-done:
 		t.Fatalf("the turn ended before it reached the provider: %+v", e)
-	case <-time.After(10 * time.Second):
+	case <-time.After(testenv.Budget(t)):
 		t.Fatal("the turn never started")
 	}
 	return c, exec, sess, prov, done

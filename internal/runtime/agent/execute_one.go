@@ -17,6 +17,11 @@ import (
 	"reasonix/internal/tools/shellrun"
 )
 
+// CodeMCPToolDisabled identifies a call refused by an explicit disabled_tools
+// entry. The tool is absent from the registry, so this code keeps the reason
+// visible when the model calls it from stale context.
+const CodeMCPToolDisabled = tool.CodeMCPToolDisabled
+
 // toolCallPlan holds the resolved, policy-checked state for one tool call.
 // Package-private; not shared across goroutines beyond the single executeOne
 // invocation that owns it.
@@ -156,6 +161,10 @@ func (a *Agent) parseToolCall(ctx context.Context, plan *toolCallPlan) (toolOutc
 				output: fmt.Sprintf("MCP server %q is connected; its real tools are now available", server),
 			}, true
 		}
+		if refusal, ok := a.svc.tools.DisabledMCPRefusal(plan.call.Name); ok {
+			msg := refusal.String()
+			return toolOutcome{output: msg, blocked: true, errMsg: firstLine(msg), refusalCode: refusal.Code}, true
+		}
 		if a.svc.postureLocked.Load() {
 			msg := fmt.Sprintf("blocked: tool %q is not available: this run is read-only and offers only %s. Nothing else can be enabled from inside the run.", plan.call.Name, strings.Join(a.svc.tools.AllNames(), ", "))
 			return toolOutcome{output: msg, blocked: true, errMsg: firstLine(msg), refusalCode: CodePostureToolNotAllowed}, true
@@ -243,23 +252,6 @@ func contextualToolGateOutcome(ctx context.Context, target tool.Tool, name strin
 	refusal := unavailableReason(ctx, target, name)
 	msg := refusal.String()
 	return toolOutcome{output: msg, blocked: true, errMsg: firstLine(msg), refusalCode: refusal.Code}, true
-}
-
-// What the model is told when a contextual tool is out of context. The tool
-// answers it, because the tool is what knows; a table here keyed by name would
-// go stale the first time one is added. A contextual tool that says nothing is
-// a fact about the registry rather than about the call, so the host names it
-// under its own code instead of leaving the reader a bare sentence.
-func unavailableReason(ctx context.Context, target tool.Tool, name string) tool.Refusal {
-	if r, ok := target.(tool.ContextualReasoner); ok {
-		if refusal := r.Unavailable(ctx); !refusal.Empty() {
-			return refusal
-		}
-	}
-	return tool.Refusal{
-		Code:    "tool.unavailable_unspecified",
-		Message: fmt.Sprintf("blocked: tool %q is unavailable in the current workflow context", name),
-	}
 }
 
 // applyMutationDependencyBarrier blocks later mutations and verifications in the
@@ -352,6 +344,9 @@ func (a *Agent) applyPlanModeAndProxy(ctx context.Context, plan *toolCallPlan) (
 		if rc.Target != nil {
 			plan.execTool = rc.Target
 		}
+		if outcome, blocked := a.typedUnavailableOutcome(rc, call.Name, json.RawMessage(call.Arguments)); blocked {
+			return outcome, true
+		}
 		if outcome, blocked := contextualToolGateOutcome(ctx, plan.execTool, plan.permName); blocked {
 			return outcome, true
 		}
@@ -385,7 +380,12 @@ func (a *Agent) applyPlanModeAndProxy(ctx context.Context, plan *toolCallPlan) (
 				a.task.ledger.Record(rec)
 			}
 			if rc.Unavailable {
-				return toolOutcome{output: result, errMsg: firstLine(rc.UnavailableReason)}, true
+				return toolOutcome{
+					output:      result,
+					errMsg:      firstLine(rc.UnavailableReason),
+					blocked:     rc.RefusalCode != "",
+					refusalCode: rc.RefusalCode,
+				}, true
 			}
 			body, bound, truncMsg := a.boundToolOutput(result, plan.call.Name, plan.call.ID, plan.call.Arguments, false)
 			out := toolOutcome{output: body, bound: bound, truncMsg: truncMsg}
@@ -539,20 +539,6 @@ func (a *Agent) prepareToolExecution(ctx context.Context, plan *toolCallPlan) (t
 	if outcome, blocked := a.assertPlanPhaseAdmitted(plan); blocked {
 		return outcome, true
 	}
-	// Acquire after permission is granted but before PreToolUse: hooks are user
-	// shell code and can themselves change the workspace. This keeps readers
-	// concurrent and avoids holding the workspace during an approval prompt while
-	// still covering every write-side action that follows authorization.
-	// Lazy workspace lease on the first real writer for every role setting.
-	if plan.mutates && a.svc.workspaceLease != nil {
-		if err := a.svc.workspaceLease.AcquireWrite(ctx); err != nil {
-			return toolOutcome{
-				output:  fmt.Sprintf("blocked: the workspace did not become available for writing: %v", err),
-				blocked: true,
-				errMsg:  "blocked: workspace write lease unavailable",
-			}, true
-		}
-	}
 	// Resolve the concrete execution target before hooks. A proxy may carry a
 	// different target/name/argument set than the provider-visible call.
 	plan.runTool = plan.execTool
@@ -562,6 +548,19 @@ func (a *Agent) prepareToolExecution(ctx context.Context, plan *toolCallPlan) (t
 		plan.runArgs = plan.resolved.Args
 		if len(plan.runArgs) == 0 {
 			plan.runArgs = json.RawMessage(`{}`)
+		}
+	}
+	// Hooks can write beyond a tool's paths, so permission precedes lease
+	// acquisition and hooks follow it under a conservative workspace claim.
+	if plan.mutates && a.svc.workspaceLease != nil {
+		if err := a.svc.workspaceLease.AcquirePaths(ctx, a.workspaceWritePaths(plan)); err != nil {
+			return toolOutcome{
+				output:         fmt.Sprintf("blocked: %v", err),
+				blocked:        true,
+				errMsg:         "blocked: workspace write lease unavailable",
+				refusalCode:    workspaceLeaseRefusalCode(err),
+				workspaceLease: workspaceLeaseConflictScope(err),
+			}, true
 		}
 	}
 	// Hold the parent claim before PreToolUse: hooks are user shell code and may

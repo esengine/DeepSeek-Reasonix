@@ -51,6 +51,7 @@ func (w roleWiring) delegation(in delegationInputs) (*delegation.TaskTool, *skil
 		maxSteps:        in.maxSteps,
 		resolveProvider: in.sub.resolveProvider,
 		identity:        in.sub.identity,
+		inheritedEffort: in.sub.inheritedEffort,
 		runOptions:      w.skillRunOptions(in),
 	}
 }
@@ -128,9 +129,9 @@ func skillSubagentRole(ctx context.Context) string {
 
 // skillProfile names the model and effort a skill's sub-agent overrides, or
 // nil when it inherits both.
-func skillProfile(cfg *config.Config) skill.ProfileResolver {
+func skillProfile(cfg *config.Config, inheritedEffort string) skill.ProfileResolver {
 	return func(sk skill.Skill) *event.Profile {
-		model, effort := subagentModelRef(cfg, sk), subagentEffortRef(cfg, sk)
+		model, effort := subagentModelRef(cfg, sk), subagentEffortRefWithInheritedDefault(cfg, sk, inheritedEffort)
 		if model == "" && effort == "" {
 			return nil
 		}

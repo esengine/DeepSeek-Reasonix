@@ -18,6 +18,8 @@ interface Inputs {
  *  another window's lines in front of this one. */
 export function useQueueActions({ port, dispatch, fail, moved, sessionPath }: Inputs) {
   const [queue, setQueue] = useState<QueueSnapshot | null>(null);
+  // The last line taken back, numbered so the same text twice is two requests.
+  const [restored, setRestored] = useState({ n: 0, text: "" });
   // The queue as the kernel holds it. The frame says only that it moved, so the
   // answer is read back whole — which is also what puts another window's lines,
   // and the CLI's, in front of this one. The optimistic rows say only what was
@@ -57,16 +59,21 @@ export function useQueueActions({ port, dispatch, fail, moved, sessionPath }: In
     [port, fail],
   );
   // The panel knows the entry, never the row the composer minted for it, so
-  // taking one back here has to name it the way the kernel does. __unsent takes
-  // either name, and the queue is now the only place a waiting line is shown.
+  // taking one back here has to name it the way the kernel does. The body is
+  // read before the entry is given up: once it is cancelled nothing else holds
+  // the text, and a line that cannot be read stays queued rather than lost.
   const onQueueCancel = useCallback(
-    (itemId: string) => {
-      port
-        .cancelQueued(itemId)
-        .then(() => dispatch({ kind: "__unsent", id: itemId } as never))
-        .catch(fail);
+    async (itemId: string) => {
+      try {
+        const text = await port.readQueued(itemId);
+        await port.cancelQueued(itemId);
+        dispatch({ kind: "__unsent", id: itemId } as never);
+        setRestored((r) => ({ n: r.n + 1, text }));
+      } catch (e) {
+        fail(e);
+      }
     },
-    [port, fail],
+    [port, fail, dispatch],
   );
-  return { queue, onQueueEdit, onQueueMove, onQueueRetry, onQueueRefresh, onQueuePause, onQueueRead, onQueueSendNow, onQueueCancel };
+  return { queue, restored, onQueueEdit, onQueueMove, onQueueRetry, onQueueRefresh, onQueuePause, onQueueRead, onQueueSendNow, onQueueCancel };
 }

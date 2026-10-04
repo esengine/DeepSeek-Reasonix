@@ -303,3 +303,72 @@ func TestStreamRequestPassedThrough(t *testing.T) {
 		t.Fatalf("messages = %+v", req.Request.Messages)
 	}
 }
+func TestProviderStreamResponseFormat(t *testing.T) {
+	for _, tc := range []struct {
+		name   string
+		format string
+		valid  bool
+	}{
+		{name: "omitted", valid: true},
+		{name: "null", format: `null`, valid: true},
+		{name: "missing type", format: `{}`},
+		{name: "null type", format: `{"type":null}`},
+		{name: "empty type", format: `{"type":""}`},
+		{name: "whitespace type", format: `{"type":" \t\n"}`},
+		{name: "scalar", format: `"json_object"`},
+		{name: "json object", format: `{"type":"json_object"}`, valid: true},
+		{name: "custom type", format: `{"type":"custom"}`, valid: true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			provider := &scriptProvider{makeChannel: func(StreamRequest) <-chan StreamChunk {
+				chunks := make(chan StreamChunk)
+				close(chunks)
+				return chunks
+			}}
+			host, _ := startFakeHost(t, providerHandler(), Options{Provider: provider})
+			host.handshake(t)
+			request := map[string]any{"messages": []ProviderMessage{}, "tools": []ProviderToolSchema{}, "maxTokens": 32}
+			if tc.format != "" {
+				request["responseFormat"] = json.RawMessage(tc.format)
+			}
+			resp := host.request(MethodExtensionProviderStreamOpen, map[string]any{
+				"streamId": "stream-format", "providerRef": "plugin/provider-ext/echo", "request": request, "seqBase": 1,
+			})
+			if !tc.valid {
+				if resp.Err == nil || resp.Err.Code != CodeInvalidParams {
+					t.Errorf("invalid response format returned %+v", resp)
+				} else if data, ok := resp.Err.Data.(ProtocolErrorData); !ok || data.Reason != ErrInvalidParams {
+					t.Errorf("invalid response format reason = %+v", resp.Err.Data)
+				}
+				provider.mu.Lock()
+				defer provider.mu.Unlock()
+				if len(provider.requests) != 0 {
+					t.Errorf("invalid response format reached provider: %+v", provider.requests)
+				}
+				return
+			}
+			var opened StreamOpenResult
+			if resp.Err != nil || json.Unmarshal(resp.Result, &opened) != nil || !opened.Accepted {
+				t.Fatalf("valid response format open = %+v", resp)
+			}
+			if end := host.waitStreamEnd(); end.StreamID != "stream-format" || end.LastSeq != 0 || end.Error != "" || end.Interrupted {
+				t.Fatalf("valid response format end = %+v", end)
+			}
+			provider.mu.Lock()
+			defer provider.mu.Unlock()
+			if len(provider.requests) != 1 {
+				t.Fatalf("provider calls = %d", len(provider.requests))
+			}
+			got := provider.requests[0].Request.ResponseFormat
+			var want *ProviderResponseFormat
+			if tc.format != "" {
+				if err := json.Unmarshal([]byte(tc.format), &want); err != nil {
+					t.Fatal(err)
+				}
+			}
+			if (got == nil) != (want == nil) || got != nil && got.Type != want.Type {
+				t.Fatalf("provider response format = %+v, want %+v", got, want)
+			}
+		})
+	}
+}

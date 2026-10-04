@@ -125,6 +125,9 @@ type Options struct {
 	// the workspace before and after it. Set it only for an agent no other
 	// foreground writer runs beside; empty falls back to WriteWorkspaceRoot.
 	ObserveRoot string
+	// WorkspaceScanLimit is a test seam: it can only lower the walk bound.
+	// Zero is the production limit.
+	WorkspaceScanLimit int
 	// RenderRoot is the workspace a written page or image is opened from to look
 	// at it. Empty when this agent has no browser or its model cannot see one.
 	RenderRoot string

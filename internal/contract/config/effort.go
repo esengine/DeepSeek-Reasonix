@@ -119,6 +119,54 @@ func EffortCapabilityForEntry(e *ProviderEntry) EffortCapability {
 	}
 }
 
+// NormalizeInheritedEffort accepts an inherited effort only when the entry's own
+// contract can use it, never through NormalizeEffort's cross-provider mappings.
+// A false result means the caller omits the override and the model's default applies.
+func NormalizeInheritedEffort(e *ProviderEntry, raw string) (string, bool) {
+	level := normalizeEffortLevel(raw)
+	if level == "" {
+		return "", false
+	}
+	if level == "auto" {
+		return "", true
+	}
+
+	cap := EffortCapabilityForEntry(e)
+	if !cap.Supported {
+		return "", false
+	}
+	if containsString(cap.Levels, level) {
+		return level, true
+	}
+
+	// An explicit supported_efforts list is the whole vocabulary; no aliases.
+	if len(normalizedSupportedEfforts(e)) > 0 {
+		return "", false
+	}
+
+	// Model-declared aliases only; a relay's synthesized ladder aliases are remaps.
+	if modelCap, ok := resolvedModelReasoningCapability(e); ok {
+		explicit := explicitReasoningProtocol(e)
+		if explicit == "" || explicit == modelCap.Protocol {
+			if normalized, ok := modelCap.Aliases[level]; ok && containsString(cap.Levels, normalized) {
+				return normalized, true
+			}
+		}
+	}
+
+	// DeepSeek keeps legacy spellings (off, medium, xhigh); max -> high is a remap.
+	if ReasoningProtocolForEntry(e) == ReasoningProtocolDeepSeek {
+		if normalized, err := normalizeDeepSeekReasoningEffort(e, level); err == nil && normalized != level && containsString(cap.Levels, normalized) {
+			if level == "max" {
+				return "", false
+			}
+			return normalized, true
+		}
+	}
+
+	return "", false
+}
+
 // NormalizeEffort maps a user-supplied /effort level into the value stored in
 // config. Empty means auto/provider default.
 func NormalizeEffort(e *ProviderEntry, raw string) (string, error) {

@@ -34,7 +34,8 @@ func (n *nestedInvoker) Invoke(ctx context.Context, name string, args json.RawMe
 	n.a.svc.sink.Emit(event.Event{Kind: event.ToolResult, Tool: event.Tool{
 		ID: call.ID, Name: name, Args: call.Arguments, Output: out.output, Err: out.errMsg,
 		RefusalCode: out.refusalCode, Bound: out.bound, DurationMs: elapsed,
-		StartedAt: started.UnixMilli(), EndedAt: started.UnixMilli() + elapsed, Issuer: event.IssuedByModel,
+		WorkspaceLease: out.workspaceLease,
+		StartedAt:      started.UnixMilli(), EndedAt: started.UnixMilli() + elapsed, Issuer: event.IssuedByModel,
 		Executed: out.executed,
 	}})
 	if out.provenance.External() && !n.parent.nestedOrigin.External() {

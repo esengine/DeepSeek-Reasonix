@@ -440,9 +440,20 @@ func pluginDoctorCommand(args []string) int {
 			fmt.Printf("  %s/%s/%s@%s\n", c.Namespace, c.Kind, c.ID, c.Version)
 		}
 	}
+	warnings = append(warnings, theme.PluginWarnings(pkg)...)
+	warnings = append(warnings, hook.PackageWarnings(pkg)...)
+	for _, warning := range warnings {
+		fmt.Println("warning:", warning)
+	}
 	for _, skillRoot := range pkg.SkillRoots() {
 		if st, err := os.Stat(skillRoot); err != nil || !st.IsDir() {
 			fmt.Fprintf(os.Stderr, "missing skill root: %s\n", skillRoot)
+			return 1
+		}
+	}
+	for _, agentRoot := range pkg.AgentRoots() {
+		if st, err := os.Stat(agentRoot); err != nil || !st.IsDir() {
+			fmt.Fprintf(os.Stderr, "missing agent root: %s\n", agentRoot)
 			return 1
 		}
 	}
@@ -464,11 +475,6 @@ func pluginDoctorCommand(args []string) int {
 			fmt.Fprintln(os.Stderr, err)
 			return 1
 		}
-	}
-	warnings = append(warnings, theme.PluginWarnings(pkg)...)
-	warnings = append(warnings, hook.PackageWarnings(pkg)...)
-	for _, warning := range warnings {
-		fmt.Println("warning:", warning)
 	}
 	workspaceRoot, _ := os.Getwd()
 	cfg, _ := config.LoadForRootReadOnly(workspaceRoot)

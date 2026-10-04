@@ -292,6 +292,8 @@ func (h *Hub) Open(ctx context.Context, req OpenRequest) (*Runtime, error) {
 		StatsSource:     h.surface(),
 		FeedbackSurface: feedbackSurface(h.surface()),
 		BalanceStore:    h.wallets,
+		// A pane opened without a model must open even on a stale default_model.
+		OpenOnFallbackModel: true,
 
 		ProviderResolver:         h.opts.ProviderResolver,
 		CleanupPendingReconciler: BackgroundCleanupReconciler,

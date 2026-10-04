@@ -13,7 +13,7 @@ import (
 
 func waitAsk(t *testing.T, sink *askProbeSink) event.Ask {
 	t.Helper()
-	deadline := time.After(2 * time.Second)
+	deadline := time.After(testenv.Budget(t))
 	for {
 		sink.mu.Lock()
 		if len(sink.asks) > 0 {
@@ -75,7 +75,7 @@ func TestAFormRefusedGoesToTheServerAndTheTurnGoesOn(t *testing.T) {
 				if !reply.Declined {
 					t.Fatalf("reply = %+v, want declined", reply)
 				}
-			case <-time.After(2 * time.Second):
+			case <-time.After(testenv.Budget(t)):
 				stop()
 				t.Fatal("refusing a server's form never answered the server")
 			}

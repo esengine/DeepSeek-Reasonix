@@ -4,6 +4,7 @@ import { t } from "../i18n";
 import { seconds } from "../i18n/format";
 import type { HubPort, RuntimeView, TreeSession, TreeWorkspace } from "../port/hub";
 import type { Adder } from "./addws";
+import { pinToViewport } from "./place";
 import { useRailQuery } from "./railsearch";
 import { StudioIcon } from "./StudioIcon";
 import { Cross } from "./glyphs";
@@ -78,7 +79,7 @@ function WorkspacesView({ hub, tree, treeRead, runtimes, active, folded, reload,
   // session, so a double one would open it twice on the way to the edit.
   const [editing, setEditing] = useState("");
   const [sessionMenu, setSessionMenu] = useState("");
-  const [sessionMenuAt, setSessionMenuAt] = useState({ left: 0, top: 0 });
+  const [sessionMenuAt, setSessionMenuAt] = useState({ x: 0, y: 0 });
   const sessionMenuBox = useRef<HTMLDivElement>(null);
   const sessionMenuPortal = useRef<HTMLDivElement>(null);
   const menuTrigger = useRef<HTMLElement | null>(null);
@@ -93,12 +94,7 @@ function WorkspacesView({ hub, tree, treeRead, runtimes, active, folded, reload,
     }
   }, [sessionMenu]);
   useLayoutEffect(() => {
-    const menu = sessionMenuPortal.current;
-    if (!menu || menuTrigger.current?.getAttribute("role") !== "treeitem") return;
-    const { width, height } = menu.getBoundingClientRect();
-    const left = Math.max(12, Math.min(sessionMenuAt.left, window.innerWidth - width - 12));
-    const top = Math.max(12, Math.min(sessionMenuAt.top, window.innerHeight - height - 12));
-    if (left !== sessionMenuAt.left || top !== sessionMenuAt.top) setSessionMenuAt({ left, top });
+    if (sessionMenuPortal.current) pinToViewport(sessionMenuPortal.current, sessionMenuAt.x, sessionMenuAt.y, 12);
   }, [sessionMenu, sessionMenuAt]);
   // What was already sent for this session, so Enter's commit and the blur it
   // causes do not both reach the host with the same name.
@@ -398,10 +394,7 @@ function WorkspacesView({ hub, tree, treeRead, runtimes, active, folded, reload,
                           if (opening) {
                             menuTrigger.current = ev.currentTarget;
                             const anchor = ev.currentTarget.getBoundingClientRect();
-                            setSessionMenuAt({
-                              left: Math.min(window.innerWidth - 240, anchor.right + 8),
-                              top: Math.max(12, Math.min(window.innerHeight - 140, anchor.top - 7)),
-                            });
+                            setSessionMenuAt({ x: anchor.right + 8, y: anchor.top - 7 });
                           }
                           setSessionMenu(opening ? ws.root : "");
                         }}
@@ -410,7 +403,7 @@ function WorkspacesView({ hub, tree, treeRead, runtimes, active, folded, reload,
                       </button>
                     </span>
                     {sessionMenu === ws.root && createPortal(
-                      <div ref={sessionMenuPortal} className="session-pop" role="menu" aria-label={t("项目操作")} style={sessionMenuAt} data-action-keydown="workspace.menu" data-target={ws.root} onKeyDown={workspaceMenuKeys} onClick={(ev) => ev.stopPropagation()}>
+                      <div ref={sessionMenuPortal} className="session-pop" role="menu" aria-label={t("项目操作")} data-action-keydown="workspace.menu" data-target={ws.root} onKeyDown={workspaceMenuKeys} onClick={(ev) => ev.stopPropagation()}>
                         <div className="session-pop-head">
                           <b>{ws.name}</b>
                           <small className="session-pop-path" title={ws.root}>{ws.root}</small>
@@ -476,7 +469,7 @@ function WorkspacesView({ hub, tree, treeRead, runtimes, active, folded, reload,
                           ev.preventDefault();
                           ev.stopPropagation();
                           menuTrigger.current = ev.currentTarget;
-                          setSessionMenuAt({ left: ev.clientX, top: ev.clientY });
+                          setSessionMenuAt({ x: ev.clientX, y: ev.clientY });
                           setSessionMenu(session.path);
                         }}
                         tabIndex={0}
@@ -549,7 +542,7 @@ function WorkspacesView({ hub, tree, treeRead, runtimes, active, folded, reload,
                           </button>
                         )}
                         {sessionMenu === session.path && createPortal(
-                          <div ref={sessionMenuPortal} className="session-pop" role="menu" aria-label={t("会话操作")} style={{ ...sessionMenuAt, maxHeight: "calc(100vh - 24px)", overflowY: "auto" }} onClick={(ev) => ev.stopPropagation()}>
+                          <div ref={sessionMenuPortal} className="session-pop" role="menu" aria-label={t("会话操作")} style={{ maxHeight: "calc(100vh / var(--zoom, 1) - 24px)", overflowY: "auto" }} onClick={(ev) => ev.stopPropagation()}>
                             <div className="session-pop-head">
                               <b>{rowLabel(session)}</b>
                               <small>{session.runtimeId && liveIds([session.runtimeId]).length ? t("执行中") : t("已完成")} · {t("本地工作区")}</small>

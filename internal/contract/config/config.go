@@ -677,6 +677,9 @@ type ServeConfig struct {
 	// rate-limiting and Secure-cookie decisions. When false (default), they
 	// are ignored — an attacker can otherwise forge them.
 	BehindProxy bool `toml:"behind_proxy"`
+	// SharePort fixes the port of the phone-access LAN link; zero picks a free
+	// one each time the door opens. User-global like the rest of [serve].
+	SharePort int `toml:"share_port"`
 }
 
 // NetworkConfig controls ordinary outbound HTTP traffic such as model providers,

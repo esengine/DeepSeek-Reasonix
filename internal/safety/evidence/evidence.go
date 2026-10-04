@@ -117,6 +117,11 @@ func (l *Ledger) Record(r Receipt) {
 	}
 	r.Command = strings.TrimSpace(r.Command)
 	r.Step = strings.TrimSpace(r.Step)
+	if r.MutationPaths == nil {
+		r.MutationPaths = append(append([]string{}, r.Paths...), r.Created...)
+	} else {
+		r.MutationPaths = append(append(append([]string{}, r.MutationPaths...), r.Paths...), r.Created...)
+	}
 	// Every field that names a file shares one identity. Folding only Paths made
 	// the matchers compare a folded path against an unfolded one, so on Windows
 	// output that carried a change never counted as review of it.

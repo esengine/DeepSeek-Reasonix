@@ -243,5 +243,8 @@ func (windowsShell) NativePath(p string) string { return toShellPath(p) }
 
 // toShellPath is the reverse, for a path going into a script.
 func toShellPath(p string) string {
+	if after, ok := strings.CutPrefix(p, "//"); ok {
+		return `\\` + strings.ReplaceAll(after, "/", `\`)
+	}
 	return strings.ReplaceAll(strings.TrimPrefix(p, "/"), "/", `\`)
 }

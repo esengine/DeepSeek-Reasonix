@@ -103,7 +103,7 @@ func TestAvailableHeadIsWhatAutoPicks(t *testing.T) {
 		if len(list) == 0 {
 			t.Fatalf("host %+v offered nothing", h.goos)
 		}
-		if got := h.auto(); got != list[0] {
+		if got := h.auto(nil); got != list[0] {
 			t.Fatalf("auto = %+v, want the first offered %+v", got, list[0])
 		}
 	}
@@ -210,7 +210,7 @@ func TestStoreAliasBashIsNeverOfferedOrChosen(t *testing.T) {
 	if sh, ok := h.bash(); ok {
 		t.Fatalf("bash() chose %v", sh)
 	}
-	if got := h.auto(); got.Path != "bash" {
+	if got := h.auto(nil); got.Path != "bash" {
 		t.Fatalf("auto = %v", got)
 	}
 }
@@ -239,5 +239,80 @@ func TestBashCandidatesDropRelativePathAndDuplicates(t *testing.T) {
 	}
 	if seen[`d:\x\bash.exe`] != 1 {
 		t.Errorf("absolute PATH entry lost: %v", seen)
+	}
+}
+
+// A found PowerShell that will not start must not win; Windows PowerShell 5.1
+// is the fallback when it starts. The launch probe is injected so the decision
+// table is testable on hosts without pwsh.
+func TestResolveShellFallsBackFromUnusablePowerShell(t *testing.T) {
+	no := func(string) bool { return false }
+	pwsh := `C:\fake\PowerShell\7\pwsh.exe`
+	ps51 := `C:\fake\System32\WindowsPowerShell\v1.0\powershell.exe`
+	winPS := []string{pwsh, ps51}
+	// pwsh is not on PATH either way; Windows keeps 5.1 where the probe finds it.
+	onPath := fakePath("powershell")
+	starts := func(p string) bool { return strings.EqualFold(pathBase(p), "powershell.exe") }
+
+	t.Run("pwsh installed but will not start", func(t *testing.T) {
+		got := resolveShell("", "", nil, "windows", onPath, func(string) bool { return true }, nil, winPS, no, no, starts)
+		if got.Kind != ShellPowerShell || got.Path != ps51 {
+			t.Fatalf("auto = %+v, want Windows PowerShell 5.1 at %s", got, ps51)
+		}
+	})
+
+	t.Run("pwsh not installed at all", func(t *testing.T) {
+		exists := func(p string) bool { return p != pwsh }
+		got := resolveShell("", "", nil, "windows", onPath, exists, nil, winPS, no, no, starts)
+		if got.Kind != ShellPowerShell || got.Path != ps51 {
+			t.Fatalf("auto = %+v, want Windows PowerShell 5.1 at %s", got, ps51)
+		}
+	})
+}
+
+// With nothing left to pick, the resolver returns bare bash and warns: no
+// candidate was proven usable, so callers must not silently treat the fallback
+// as a confirmed host shell.
+func TestResolveShellSaysWhenNothingIsUsable(t *testing.T) {
+	no := func(string) bool { return false }
+	winPS := []string{`C:\fake\PowerShell\7\pwsh.exe`}
+	var warn strings.Builder
+	got := resolveShell("", "", &warn, "windows", fakePath("pwsh", "powershell"), func(string) bool { return true }, nil, winPS, no, no, no)
+	if got.Kind != ShellBash || got.Path != "bash" {
+		t.Fatalf("auto = %+v, want the bare bash fallback", got)
+	}
+	if !strings.Contains(warn.String(), "no usable shell") {
+		t.Fatalf("an unusable host went unreported: %q", warn.String())
+	}
+}
+
+// A pinned path is proven before it is trusted, the same bar the bash arm has
+// always set for its own: existing is not the same as starting.
+func TestResolveShellRefusesPinnedPowerShellThatWillNotStart(t *testing.T) {
+	no := func(string) bool { return false }
+	pwsh := `C:\fake\PowerShell\7\pwsh.exe`
+	ps51 := `C:\fake\System32\WindowsPowerShell\v1.0\powershell.exe`
+	starts := func(p string) bool { return strings.EqualFold(pathBase(p), "powershell.exe") }
+	var warn strings.Builder
+	got := resolveShell("pwsh", pwsh, &warn, "windows", fakePath("powershell"), func(string) bool { return true }, nil, []string{pwsh, ps51}, no, no, starts)
+	if got.Kind != ShellPowerShell || got.Path != ps51 {
+		t.Fatalf("pinned pwsh = %+v, want the fallback to 5.1 at %s", got, ps51)
+	}
+	if !strings.Contains(warn.String(), "not a usable PowerShell") {
+		t.Fatalf("the ignored pin went unreported: %q", warn.String())
+	}
+}
+
+// VerifyShell proves the PowerShell path launches: an existing Store alias can
+// fail to start and must not be accepted at the settings boundary.
+func TestVerifyShellRejectsPowerShellThatWillNotStart(t *testing.T) {
+	const path = `C:\fake\WindowsApps\pwsh.exe`
+	exists := func(string) bool { return true }
+	probe := func(string) bool { return true }
+	if err := verifyShell("pwsh", path, exists, probe, func(string) bool { return false }); err == nil || !strings.Contains(err.Error(), "did not start") {
+		t.Fatalf("unstartable PowerShell error = %v, want did not start", err)
+	}
+	if err := verifyShell("pwsh", path, exists, probe, func(string) bool { return true }); err != nil {
+		t.Fatalf("working PowerShell refused: %v", err)
 	}
 }

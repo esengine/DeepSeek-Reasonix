@@ -81,6 +81,9 @@ func (request ProviderRequest) Validate() error {
 	if request.MaxTokens < 0 {
 		return validationError("maxTokens must be non-negative")
 	}
+	if request.ResponseFormat != nil && strings.TrimSpace(request.ResponseFormat.Type) == "" {
+		return validationError("responseFormat.type must be non-empty")
+	}
 	for _, tool := range request.Tools {
 		parameters := bytes.TrimSpace(tool.Parameters)
 		if len(parameters) == 0 || parameters[0] != '{' || !json.Valid(parameters) {

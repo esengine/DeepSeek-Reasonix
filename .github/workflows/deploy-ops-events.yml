@@ -1,0 +1,44 @@
+name: Deploy ops events relay
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: deploy-ops-events
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    if: github.ref == 'refs/heads/platform'
+    runs-on: ubuntu-latest
+    environment: production
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7
+        with:
+          node-version: '22'
+          cache: npm
+          cache-dependency-path: workers/ops-events/package-lock.json
+      - name: Validate
+        working-directory: workers/ops-events
+        run: |
+          npm ci
+          npm run typecheck
+          npm test
+      - name: Deploy
+        working-directory: workers/ops-events
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+        run: npx wrangler deploy
+      - name: Sync secrets
+        working-directory: workers/ops-events
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          GITHUB_WEBHOOK_SECRET: ${{ secrets.OPS_GITHUB_WEBHOOK_SECRET }}
+          OPS_LISTEN_TOKEN: ${{ secrets.OPS_LISTEN_TOKEN }}
+          OPS_EMIT_TOKEN: ${{ secrets.OPS_EMIT_TOKEN }}
+        run: |
+          node -e 'process.stdout.write(JSON.stringify({GITHUB_WEBHOOK_SECRET:process.env.GITHUB_WEBHOOK_SECRET||null,OPS_LISTEN_TOKEN:process.env.OPS_LISTEN_TOKEN||null,OPS_EMIT_TOKEN:process.env.OPS_EMIT_TOKEN||null}))' | npx wrangler secret bulk

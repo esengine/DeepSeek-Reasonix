@@ -26,6 +26,7 @@ func PlannerToolRegistry(parent *tool.Registry) *tool.Registry {
 	exclude := append(SubagentMetaTools(), plannerNonResearchTools...)
 	base := FilterReadOnlyRegistry(parent, exclude...)
 	sub := tool.NewRegistry()
+	sub.CopyDisabledMCPFrom(parent)
 	sub.Add(NewSubmitPlanTool())
 	sub.Add(NewConcludeNoChangesTool())
 	if base != nil {

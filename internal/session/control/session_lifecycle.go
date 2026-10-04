@@ -578,6 +578,7 @@ func (c *Controller) close(fireSessionEnd bool, jobsMode closeJobsMode) {
 // generation — the private temporary directory and the browser — reusing what a
 // hot rebuild hands over, so ReleaseResources/Close never race a replacement.
 func (c *Controller) adoptSessionResources(opts Options) {
+	c.workspaceLease.SetSessionID(func() string { return sessionstore.BranchID(c.SessionPath()) })
 	c.sessionTemp = opts.SessionTemp
 	if c.sessionTemp == nil {
 		c.sessionTemp = sessiontemp.New()

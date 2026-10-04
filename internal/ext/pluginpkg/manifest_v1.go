@@ -505,6 +505,11 @@ func validateV1Paths(root string, m *Manifest) ([]string, error) {
 		if !pathWithinRoot(resolvedRoot, resolved) {
 			return fmt.Errorf("%s path %q escapes the plugin root through a symlink", kind, rel)
 		}
+		if info, err := os.Stat(abs); err != nil {
+			warnings = append(warnings, fmt.Sprintf("%s path %q is not readable: %v", kind, rel, err))
+		} else if !info.IsDir() {
+			warnings = append(warnings, fmt.Sprintf("%s path %q is not a directory; declare the containing directory instead", kind, rel))
+		}
 		return nil
 	}
 	for _, rel := range m.Skills {

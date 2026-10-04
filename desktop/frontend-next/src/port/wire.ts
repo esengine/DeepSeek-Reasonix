@@ -113,6 +113,7 @@ export interface Tool {
   err?: string;
   // The host's dotted identity for a refusal. err is only its wording.
   refusalCode?: string;
+  workspaceLease?: WorkspaceLease;
   // outputDiff marks a shell result whose whole output is a unified diff, so the
   // transcript renders it as a diff instead of flat text.
   outputDiff?: boolean;
@@ -440,6 +441,10 @@ export interface WorkspaceLease {
   waitedMs?: number;
   heldMs: number;
   idleMs: number;
+  holder?: string;
+  holderSessionId?: string;
+  paths?: string[];
+  requestedPaths?: string[];
 }
 
 // One context-maintenance transaction. status "noop" carries code: the attempt
@@ -481,6 +486,8 @@ export interface Compaction {
   // window is exactly the one that needs saying.
   boundary?: string;
   triggerTokens?: number;
+  // Why a fold that installed nothing did not; the host's class, not a sentence.
+  code?: string;
 }
 
 export interface StreamAttempt {

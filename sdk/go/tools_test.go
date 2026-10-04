@@ -18,6 +18,7 @@ func TestToolsAreDeclaredAndServed(t *testing.T) {
 		"broken": func(context.Context, json.RawMessage) (string, error) {
 			return "", errors.New("the index is not built yet")
 		},
+		"disabled": nil,
 	}
 	host, _ := startFakeHost(t, basicHandler(), Options{Tools: tools})
 	init := host.handshake(t)
@@ -37,5 +38,23 @@ func TestToolsAreDeclaredAndServed(t *testing.T) {
 	resp = host.request(MethodExtensionToolCall, ToolCallParams{Name: "absent", Arguments: json.RawMessage(`{}`)})
 	if resp.Err == nil || resp.Err.Code != CodeMethodNotFound {
 		t.Fatalf("an unserved tool = %+v, want unknown_method", resp.Err)
+	}
+	resp = host.request(MethodExtensionToolCall, ToolCallParams{Name: "disabled", Arguments: json.RawMessage(`{}`)})
+	if resp.Err == nil || resp.Err.Code != CodeMethodNotFound {
+		t.Fatalf("a nil tool handler = %+v, want unknown_method", resp.Err)
+	}
+}
+
+func TestNilToolHandlersDoNotDeclareTools(t *testing.T) {
+	for _, tools := range []map[string]ToolFunc{nil, {}, {"disabled": nil}} {
+		host, _ := startFakeHost(t, basicHandler(), Options{Tools: tools})
+		init := host.handshake(t)
+		if len(init.Tools) != 0 {
+			t.Fatalf("nil or empty handlers declared tools: %v", init.Tools)
+		}
+		resp := host.request(MethodExtensionToolCall, ToolCallParams{Name: "disabled", Arguments: json.RawMessage(`{}`)})
+		if resp.Err == nil || resp.Err.Code != CodeMethodNotFound {
+			t.Fatalf("a nil tool handler = %+v, want unknown_method", resp.Err)
+		}
 	}
 }

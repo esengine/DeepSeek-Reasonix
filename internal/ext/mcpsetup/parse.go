@@ -2,6 +2,7 @@ package mcpsetup
 
 import (
 	"fmt"
+	"path/filepath"
 	"strings"
 
 	"reasonix/internal/contract/config"
@@ -62,7 +63,10 @@ func parseCommandLine(line string) ([]config.PluginEntry, error) {
 	}
 	// A README's command is an argv, not a name followed by an argv. Prefixing
 	// "--" is what tells ParseArgs so, and it derives the name from the package.
-	if args[0] != "--" && !looksLikeRemoteURL(args[0]) {
+	launcher := strings.TrimSuffix(strings.ToLower(filepath.Base(args[0])), ".exe")
+	if len(args) >= 3 && launcher == "reasonix" && args[1] == "mcp" && args[2] == "add" {
+		args = args[3:]
+	} else if args[0] != "--" && !looksLikeRemoteURL(args[0]) {
 		args = append([]string{"--"}, args...)
 	}
 	entry, err := ParseArgs(args)

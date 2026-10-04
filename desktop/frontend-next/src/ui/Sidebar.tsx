@@ -195,10 +195,10 @@ export function Sidebar({
           data-action="session.new"
           onClick={() => void onOpen({ root: newSessionRoot }).catch(onError)}
         >
-          <span aria-hidden="true"><StudioIcon name="plus" /></span>{t("新建会话")}<kbd>Alt N</kbd>
+          <span aria-hidden="true"><StudioIcon name="plus" /></span><b className="studio-label">{t("新建会话")}</b><kbd>Alt N</kbd>
         </button>
         <button className="studio-search" data-action="workspace.search" onClick={() => setPalette(true)}>
-          <span aria-hidden="true"><StudioIcon name="search" /></span>{t("搜索与快捷操作")}<kbd>Ctrl K</kbd>
+          <span aria-hidden="true"><StudioIcon name="search" /></span><b className="studio-label">{t("搜索与快捷操作")}</b><kbd>Ctrl K</kbd>
         </button>
         <div className="studio-quicknav">
           <button data-action="settings.section" data-value="storage" onClick={() => onSettings("storage")}><span aria-hidden="true"><StudioIcon name="file" /></span><b>{t("文件")}</b></button>

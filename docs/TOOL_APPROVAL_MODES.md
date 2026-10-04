@@ -104,6 +104,36 @@ requirement. It still does not bypass explicit `deny` rules or the sandbox.
 - Select Ask or Auto directly to leave Yolo.
 - When entered via shortcut, Reasonix remembers the previous Ask/Auto baseline and restores it on the next toggle.
 
+## Recursive shell deletes
+
+The shell launch guard refuses recursive deletes of a home directory, filesystem root, workspace ancestor, or target outside the workspace, explicitly granted write roots, and the host's session-private temporary directory. Targets must be strictly below an allowed root, never the root itself.
+
+Workspace-root cleanups such as `rm -rf .` and `rm -rf *` are refused. The model should name a specific subdirectory, for example `rm -rf build`, instead of clearing the workspace root.
+
+These are hard refusals in every approval mode, including Ask after human approval, Auto, and Yolo. A dynamic executable name alone and a non-recursive delete do not trigger this guard.
+
+Literal bounded cleanup can be followed by other commands. Before a recursive delete, only literal directory changes are accepted; assignments are never propagated into a claim of safety. The guard checks possible directories even if a directory change fails.
+
+Output redirections and known PowerShell common parameters are accepted. A literal `Test-Path` conditional cleanup and literal pipeline paths are supported; unknown pipeline input is refused.
+
+| Code | Cause and remedy |
+| --- | --- |
+| `shell.delete_sequence` | Split the call; earlier statements cannot establish a safe current directory. |
+| `shell.delete_nonliteral` | Use a literal path inside a granted root. |
+| `shell.destructive_target` | Choose an in-scope target below a root; protected targets remain refused. |
+| `shell.delete_option` | Use known options and supply common parameter values. |
+| `shell.syntax_error` | Correct the supplied command's syntax. |
+| `shell.parser_unavailable` | Restore the host parser and retry. |
+| `shell.parser_timeout` | Host parsing timed out or was canceled; retry. |
+| `shell.analysis_unknown` | Use a literal executable or payload for recursive-delete arguments. |
+| `shell.command_line_too_long` | Preflight length refusal; split the command or read text from a file. |
+
+The guard recursively parses literal interpreter payloads and recognizes delete aliases, default-parameter injection, recursive pipeline deletes, .NET directory deletion, `find -delete`/recursive `-exec`, `xargs`, and `cmd /c` recursive deletion. PowerShell parsing reuses a non-evaluating parser process.
+
+This guard inspects shell syntax before execution; it is not an OS sandbox. `Start-Process`, scripts on disk, `robocopy`, `git clean`, arbitrary programs, and filesystem races remain outside its scope.
+
+A workspace at a drive/filesystem root permits literal child directories such as `C:\Windows`; a workspace equal to home permits literal children such as `.ssh` and `Documents`. The root/home itself remains protected.
+
 ## Combining with collaboration modes
 
 | Combination | Behavior |

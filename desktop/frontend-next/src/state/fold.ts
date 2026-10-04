@@ -12,6 +12,19 @@ import { nextId } from "./ids";
 // sealTurn tell the two apart.
 const merge = (prev: Tool, next: Tool): Tool => ({ ...prev, ...next, partial: next.partial ?? false });
 
+// The kernel's reserved ToolProgress channels for a child's live preview. They
+// describe the child, never the call that spawned it, so they are kept apart
+// from the call's card: folding one in renames it and reopens it.
+export const SUBAGENT_PROGRESS_PREFIX = "reasonix.subagent.";
+export const isSubagentProgress = (name: string | undefined): boolean => !!name?.startsWith(SUBAGENT_PROGRESS_PREFIX);
+const TERMINAL = new Set(["completed", "failed", "cancelled"]);
+export function notePhase(phases: Record<string, string>, tool: Tool): Record<string, string> {
+  if (tool.name !== SUBAGENT_PROGRESS_PREFIX + "status" || !tool.id) return phases;
+  return { ...phases, [tool.id]: tool.output ?? "" };
+}
+/** A child is working until its tracker says otherwise. */
+export const subagentLive = (phase: string | undefined): boolean => !!phase && !TERMINAL.has(phase);
+
 export function foldTool(items: Item[], tool: Tool, running: boolean): Item[] {
   // A subagent's calls carry parentId; they belong inside the task that spawned
   // them, not as siblings in the main flow. A fleet worker's parent is itself a

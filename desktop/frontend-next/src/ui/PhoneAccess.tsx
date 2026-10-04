@@ -122,13 +122,27 @@ export function useShare(hub: HubPort, onError: (e: unknown) => void, watch = tr
     });
   };
 
-  return { st, ip, pick, offer, cloudOffer, busy, confirm, setConfirm, newCode, newCloudCode, toggle, revoke, refresh: read };
+  // A fixed port is read at the next open, so an open door is moved to it the
+  // way a network change moves it: the old origin stops answering.
+  const savePort = (port: number) =>
+    run(async () => {
+      const next = await hub.setSharePort(port);
+      setSt(next);
+      if (!next.open) return;
+      const at = ip || next.origin?.replace(/^https?:\/\//, "").replace(/:\d+$/, "") || next.addresses[0]?.ip || "";
+      setOffer(null);
+      await hub.openShare(at);
+      await mint();
+    });
+
+  return { st, ip, pick, savePort, offer, cloudOffer, busy, confirm, setConfirm, newCode, newCloudCode, toggle, revoke, refresh: read };
 }
 
 /** The switch, the network, the code and the paired phones. */
 export function ShareBody({ share }: { share: Share }) {
-  const { st, ip, pick, offer, busy, confirm, setConfirm, newCode, toggle, revoke } = share;
+  const { st, ip, pick, savePort, offer, busy, confirm, setConfirm, newCode, toggle, revoke } = share;
   const [copied, setCopied] = useState<"" | "done" | "failed">("");
+  const [portDraft, setPortDraft] = useState<string | null>(null);
   if (!st) return null;
   // The link the code draws, for a device that cannot scan: the same one-time
   // credential, so it is copied on request and never shown as text.
@@ -139,6 +153,12 @@ export function ShareBody({ share }: { share: Share }) {
       .finally(() => window.setTimeout(() => setCopied(""), 1600));
   const chosen = ip || (st.open ? st.origin?.replace(/^https?:\/\//, "").replace(/:\d+$/, "") : "") || st.addresses[0]?.ip || "";
   const noNetwork = st.addresses.length === 0;
+  const commitPort = () => {
+    if (portDraft === null) return;
+    const next = portDraft === "" ? 0 : Number(portDraft);
+    setPortDraft(null);
+    if (next !== (st.port ?? 0)) void savePort(next);
+  };
 
   return (
     <>
@@ -174,6 +194,24 @@ export function ShareBody({ share }: { share: Share }) {
       {st.addresses.length > 1 && st.open && st.devices.length > 0 && (
         <p className="rmthint">{t("换网络会断开已连接的手机，它们需要扫新的二维码。")}</p>
       )}
+
+      <label className="rmtf">
+        <span>{t("端口")}</span>
+        <input
+          data-action="share.port"
+          inputMode="numeric"
+          maxLength={5}
+          value={portDraft ?? (st.port ? String(st.port) : "")}
+          placeholder={t("自动")}
+          disabled={busy}
+          onChange={(e) => setPortDraft(e.target.value.replace(/\D/g, ""))}
+          onBlur={commitPort}
+        />
+      </label>
+      <p className="rmthint">
+        {t("留空则每次开启时由系统随机选择，范围 1024–65535。更改端口后，手机需要重新扫码配对。")}
+      </p>
+      {st.open && st.devices.length > 0 && <p className="rmthint">{t("改端口会断开已连接的手机，它们需要扫新的二维码。")}</p>}
 
       {st.open && (
         <div className="shareopen">

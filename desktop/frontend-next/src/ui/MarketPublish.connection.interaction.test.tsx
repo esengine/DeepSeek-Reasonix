@@ -1,15 +1,45 @@
 // @vitest-environment jsdom
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { act, cleanup, render, screen } from "@testing-library/react";
+import { act, cleanup, render, screen, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import "./testkit";
 import { MyPackages } from "./MarketPublish";
 import { MockPort } from "../port/mock";
+import { boot, STORAGE, t } from "../i18n";
 import type { AgentPort, MarketPackage, MarketPlan } from "../port/port";
 
-afterEach(cleanup);
+afterEach(() => { cleanup(); localStorage.setItem(STORAGE, "zh"); boot(); });
 
 describe("my packages connection lifetime", () => {
+  it.each(["zh", "en"])("announces review failures on their own row and clears them for retry and host changes (%s)", async (lang) => {
+    localStorage.setItem(STORAGE, lang); boot();
+    const port = new MockPort() as unknown as AgentPort;
+    const next = new MockPort() as unknown as AgentPort;
+    const first = { ...(await port.myMarket()).find((p) => p.slug === "demo/ship-notes")!, status: "private" };
+    const second = { ...first, slug: "demo/other-notes", name: "other-notes" };
+    vi.spyOn(port, "myMarket").mockResolvedValue([first, second]);
+    vi.spyOn(next, "myMarket").mockResolvedValue([first, second]);
+    let fail!: (error: Error) => void;
+    const submit = vi.spyOn(port, "submitMarket").mockRejectedValueOnce(new Error("review unavailable"))
+      .mockImplementationOnce(() => new Promise((_, reject) => { fail = reject; }));
+    const view = render(<MyPackages port={port} onInstalled={() => {}} />);
+    const row = (await screen.findByText(first.name)).closest("li")!;
+    const other = screen.getByText(second.name).closest("li")!;
+    await userEvent.click(within(row).getByRole("button", { name: t("提交审核") }));
+    expect((await within(row).findByRole("alert")).textContent).toBe("review unavailable");
+    expect(within(other).queryByRole("alert")).toBeNull();
+    await userEvent.click(within(row).getByRole("button", { name: t("提交审核") }));
+    expect(screen.queryByRole("alert")).toBeNull();
+    expect(within(row).getByRole<HTMLButtonElement>("button", { name: t("提交中…") }).disabled).toBe(true);
+    await act(async () => fail(new Error("retry unavailable")));
+    expect(within(row).getByRole("alert").textContent).toBe("retry unavailable");
+    view.rerender(<MyPackages port={next} onInstalled={() => {}} />);
+    await screen.findByText(first.name);
+    expect(screen.queryByRole("alert")).toBeNull();
+    expect(submit).toHaveBeenNthCalledWith(1, first.slug);
+    expect(submit).toHaveBeenNthCalledWith(2, first.slug);
+  });
+
   it("refreshes the parent's inventory after a blocked Back during installation", async () => {
     const port = new MockPort() as unknown as AgentPort;
     const pkg = (await port.myMarket()).find((p) => p.slug === "demo/ship-notes")!;

@@ -80,14 +80,13 @@ func ParseMCPServersJSON(body []byte) ([]PluginEntry, error) {
 		if err := json.Unmarshal(body, &bare); err != nil {
 			return nil, err
 		}
-		// A bare map only counts when its values actually describe servers; an
-		// arbitrary JSON object decodes into empty specs without erroring.
-		for name, spec := range bare {
-			if spec.Command == "" && spec.URL == "" {
-				delete(bare, name)
-			}
-		}
 		specs = bare
+	}
+	// Either shape needs a command or URL to describe an installable server.
+	for name, spec := range specs {
+		if spec.Command == "" && spec.URL == "" {
+			delete(specs, name)
+		}
 	}
 	if len(specs) == 0 {
 		return nil, fmt.Errorf("no MCP server found in this JSON")
@@ -278,11 +277,14 @@ func (c *Config) mergeMCPJSON(entries []PluginEntry) {
 	}
 	for _, e := range entries {
 		if i, exists := index[e.Name]; exists {
-			// Project configuration always wins over user-global configuration.
-			// Within one project, reasonix.toml remains more specific than the
-			// Claude-compatible .mcp.json file.
+			// Project configuration wins; within one project, reasonix.toml
+			// remains more specific than .mcp.json. Keep the union of
+			// disabled_tools so a later source cannot re-enable a restriction.
+			e.DisabledTools = mergeDisabledToolPolicies(c.Plugins[i].DisabledTools, e.DisabledTools)
 			if e.Source == MCPSourceProjectMCPJSON && !c.Plugins[i].Source.ProjectScoped() {
 				c.Plugins[i] = e
+			} else {
+				c.Plugins[i].DisabledTools = e.DisabledTools
 			}
 			continue
 		}

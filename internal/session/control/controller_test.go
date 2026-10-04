@@ -1738,7 +1738,7 @@ func TestSessionSwapWaitsForRecoveryHandoff(t *testing.T) {
 			}
 			select {
 			case <-done:
-			case <-time.After(10 * time.Second):
+			case <-time.After(testenv.Budget(t)):
 				t.Fatal("session state move did not finish after the handoff completed")
 			}
 			if got := h.c.SessionPath(); got != wantPath {
@@ -2840,7 +2840,7 @@ func TestRegisterMCPServerOnDemandDefersConnectionUntilFirstUse(t *testing.T) {
 	if _, err := connect.Execute(context.Background(), json.RawMessage(`{}`)); err == nil || !strings.Contains(err.Error(), "initializing on first use") {
 		t.Fatalf("first-use connect result = %v, want initializing guidance", err)
 	}
-	deadline := time.Now().Add(5 * time.Second)
+	deadline := time.Now().Add(testenv.Budget(t))
 	for !host.HasClient("on-demand") && time.Now().Before(deadline) {
 		time.Sleep(10 * time.Millisecond)
 	}
@@ -4527,7 +4527,7 @@ func TestSendWhileRunningDoesNotInterleaveTurns(t *testing.T) {
 
 func waitForRunning(t *testing.T, c *Controller) {
 	t.Helper()
-	deadline := time.Now().Add(2 * time.Second)
+	deadline := time.Now().Add(testenv.Budget(t))
 	for time.Now().Before(deadline) {
 		if c.Running() {
 			return
@@ -4555,7 +4555,7 @@ func TestMidTurnAutosavePersistsDuringLongTurn(t *testing.T) {
 
 	c.Send("hello mid-turn persistence")
 
-	deadline := time.Now().Add(3 * time.Second)
+	deadline := time.Now().Add(testenv.Budget(t))
 	for time.Now().Before(deadline) {
 		if b, err := os.ReadFile(path); err == nil && strings.Contains(string(b), "hello mid-turn persistence") {
 			return

@@ -19,7 +19,8 @@ import { nameTurnStart, othersSteer } from "./turn_start";
 import { appendText, foldMessage, sealSay } from "./say";
 import { nextId } from "./ids";
 import { foldStall } from "./stall";
-import { dropTool, foldLastRead, foldTool, mergeReads } from "./fold";
+import { nameQueued } from "./queued";
+import { dropTool, foldLastRead, foldTool, isSubagentProgress, mergeReads, notePhase } from "./fold";
 export { quoteAmount };
 export { setShowsReceipt, showsReceipt };
 
@@ -51,7 +52,7 @@ export const initialState: SessionState = {
   waiting: {},
   running: false,
   doing: "空闲",
-  steerQueue: [],
+  steerQueue: [], subagentPhase: {},
   awaitingTurnStart: [],
   queueMoved: 0,
   browserTabsMoved: 0,
@@ -233,17 +234,7 @@ function apply(s: SessionState, ev: SessionEvent): SessionState {
       items: [...s.items, { t: "user", id, text: ev.text, pending: ev.pending }],
     };
   }
-  // The kernel answers a queued line with the id it queued it under. The row
-  // is already on screen by then — this is what gives it a name to be taken
-  // back by, and losing that name is the same as losing the button.
-  if (ev.kind === "__queued") {
-    return {
-      ...s,
-      items: s.items.map((i) =>
-        i.t === "user" && i.id === ev.id ? { ...i, itemId: ev.itemId, queued: ev.queued, pending: true } : i,
-      ),
-    };
-  }
+  if (ev.kind === "__queued") return nameQueued(s, ev.id, ev.itemId, ev.queued);
   // A line the kernel never took is not part of what happened, so it leaves the
   // transcript rather than sitting there looking sent. Either name identifies
   // it: the row the composer minted, or the entry the kernel queued it as —
@@ -376,6 +367,7 @@ function apply(s: SessionState, ev: SessionEvent): SessionState {
         : s;
 
     case "tool_progress":
+      if (ev.tool && isSubagentProgress(ev.tool.name)) return { ...s, subagentPhase: notePhase(s.subagentPhase, ev.tool) };
       return ev.tool
         ? { ...s, executions: noteTool(s.executions, ev.tool, false), items: foldTool(s.items, ev.tool, true) }
         : s;
@@ -557,7 +549,7 @@ function apply(s: SessionState, ev: SessionEvent): SessionState {
       // pair used to be one line that stayed on screen saying "waiting" long
       // after the wait was over.
       if (ev.code === "workspace_lease") {
-        const waiting: Item = { t: "notice", id: nextId(), level, text: ev.text ?? "", detail: ev.detail, code: ev.code };
+        const waiting: Item = { t: "notice", id: nextId(), level, text: ev.text ?? "", detail: ev.detail, code: ev.code, workspaceLease: ev.workspaceLease };
         return { ...s, doing: WAITING_WORKSPACE, items: [...s.items, waiting] };
       }
       if (ev.code === "workspace_lease_resumed" || ev.code === "workspace_lease_abandoned") {
@@ -566,13 +558,13 @@ function apply(s: SessionState, ev: SessionEvent): SessionState {
         for (let i = items.length - 1; i >= 0; i--) {
           const it = items[i];
           if (it.t === "notice" && it.code === "workspace_lease") {
-            items[i] = { t: "notice", id: it.id, level, text: ev.text ?? "", detail: ev.detail, code: ev.code };
+            items[i] = { t: "notice", id: it.id, level, text: ev.text ?? "", detail: ev.detail, code: ev.code, workspaceLease: ev.workspaceLease };
             closed = true;
             break;
           }
         }
         if (!closed) {
-          items.push({ t: "notice", id: nextId(), level, text: ev.text ?? "", detail: ev.detail, code: ev.code });
+          items.push({ t: "notice", id: nextId(), level, text: ev.text ?? "", detail: ev.detail, code: ev.code, workspaceLease: ev.workspaceLease });
         }
         return { ...s, doing: s.doing === WAITING_WORKSPACE ? RUNNING : s.doing, items };
       }
@@ -589,7 +581,7 @@ function apply(s: SessionState, ev: SessionEvent): SessionState {
         ...s,
         items: [
           ...s.items,
-          { t: "notice", id: nextId(), level, text: ev.text ?? "", detail: ev.detail, code: ev.code },
+          { t: "notice", id: nextId(), level, text: ev.text ?? "", detail: ev.detail, code: ev.code, workspaceLease: ev.workspaceLease },
         ],
       };
     }

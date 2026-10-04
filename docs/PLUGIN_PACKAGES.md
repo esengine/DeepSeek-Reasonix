@@ -24,6 +24,16 @@ see the [local interface example](../examples/frontend-page-kit/README.md).
 The [API documentation example](../examples/api-notes-kit/README.md) adds local
 OpenAPI inputs, a reference checker, and a source-linked guide format.
 
+The [stdio MCP example](../examples/mcp-line-counter-kit/README.md) bundles a
+local Go server with build, connection, tool-call, and lifecycle checks.
+
+The [Studio theme author guide](THEME_AUTHOR_GUIDE.md) uses a copyable pure-theme
+package, the current token vocabulary, and Appearance activation and cleanup.
+
+The [compatible command example](../examples/command-notes-kit/README.md) shows
+a copied Claude- or Codex-format package, qualified command names, argument
+substitution, and the disable, re-enable and removal checks.
+
 ## CLI Mode
 
 Use `reasonix plugin` when installing or managing plugin packages from a
@@ -274,6 +284,22 @@ Reasonix plugins can declare `reasonix-plugin.json` at the plugin root:
 
 Relative paths are resolved inside the plugin root. Reasonix does not run
 third-party install scripts during plugin installation.
+
+A `SessionStart` hook can load packaged text without launching a command:
+
+```json
+"hooks": {
+  "SessionStart": [{"contextFile": "context/startup.md"}]
+}
+```
+
+Put this block inside `contributes` and include the referenced file in the
+package. Reasonix reads the installed copy and adds its text to the first user
+turn as hook context. It keeps that text out of the cached system prompt.
+
+Disabling or removing the package stops this context in newly built sessions.
+Use the existing reload flow to refresh an already running session's hooks;
+earlier conversation messages keep context that was already sent.
 
 Plugin hook execution is explicit:
 

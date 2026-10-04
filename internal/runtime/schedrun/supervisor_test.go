@@ -307,17 +307,24 @@ func TestChildLeavesWhenTheSupervisorCrashesAndTheRunIsReaped(t *testing.T) {
 		t.Fatal(err)
 	}
 	parent := exec.Command(exe)
-	parent.Env = append(os.Environ(), fakeEnv+"=parent", "SCHEDRUN_STORE="+f.dir, "SCHEDRUN_ID="+f.run.TriggerID, "SCHEDRUN_CHILD_MODE=hold")
+	mark := filepath.Join(t.TempDir(), "child-started")
+	parent.Env = append(os.Environ(), fakeEnv+"=parent", "SCHEDRUN_STORE="+f.dir, "SCHEDRUN_ID="+f.run.TriggerID, "SCHEDRUN_CHILD_MODE=hold", "SCHEDRUN_MARK="+mark)
 	if err := parent.Start(); err != nil {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { _ = parent.Process.Kill(); _ = parent.Wait() })
 	deadline := time.Now().Add(20 * time.Second)
-	for !f.store.RunHeld(f.run) {
+	for {
+		if body, err := os.ReadFile(mark); err == nil && strings.HasPrefix(string(body), "ran ") {
+			break
+		}
 		if time.Now().After(deadline) {
-			t.Fatal("the child never took its lease")
+			t.Fatal("the child never received its release line")
 		}
 		time.Sleep(20 * time.Millisecond)
+	}
+	if got := f.settled(t); got.State != schedule.RunRunning || !f.store.RunHeld(got) {
+		t.Fatalf("child started with state=%s held=%v", got.State, f.store.RunHeld(got))
 	}
 	if err := parent.Process.Kill(); err != nil {
 		t.Fatal(err)

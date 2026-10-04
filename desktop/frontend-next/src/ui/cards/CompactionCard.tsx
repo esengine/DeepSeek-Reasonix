@@ -3,6 +3,7 @@ import type { Compaction } from "../../port/wire";
 import { useStartsOpen } from "../../state/foldpref";
 import { Sym } from "../Sym";
 import { t } from "../../i18n";
+import { FOLD_WHY } from "../../i18n/compaction_why";
 import { tokens } from "../../i18n/format";
 import { tx } from "../../i18n/rich";
 
@@ -68,6 +69,8 @@ export function CompactionCard({ c, done }: { c: Compaction; done: boolean }) {
   const before = c.sourceTokens ?? 0;
   const after = c.projectionTokens ?? 0;
   const shrank = before > 0 && after > 0 && after < before;
+  const aborted = done && !c.messages;
+  const cause = aborted && c.code ? FOLD_WHY[c.code] : undefined;
   return (
     <div className="call" data-k="host">
       <div className="g">
@@ -76,7 +79,7 @@ export function CompactionCard({ c, done }: { c: Compaction; done: boolean }) {
       </div>
       <div className="c">
         <div className="hl">
-          <span className={done ? "nm" : "nm shim"}>{t(done ? "压缩完成" : "正在压缩…")}</span>
+          <span className={done ? "nm" : "nm shim"}>{t(!done ? "正在压缩…" : cause ? "压缩未完成" : "压缩完成")}</span>
           <span className="tag">{t("主机")}</span>
           {c.trigger && <span className="arg">{why(c)}</span>}
         </div>
@@ -125,6 +128,7 @@ export function CompactionCard({ c, done }: { c: Compaction; done: boolean }) {
                 ) : (
                   t("本次未折叠任何内容")
                 )}
+                {cause && <>{" · "}{t(cause)}</>}
                 {shrank && (
                   <>
                     {" · "}

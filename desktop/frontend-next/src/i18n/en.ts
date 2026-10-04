@@ -811,6 +811,7 @@ export const EN: Record<string, string> = {
   "已导入「{name}」。": "Imported “{name}”.",
   "立即使用": "Use now",
   "未读取：{names}": "Not read: {names}",
+  "请单独选择一个 .zip，或选择不含压缩包的 theme.json 和图片。": "Choose a single .zip on its own, or select a theme folder’s theme.json and images without a ZIP.",
   "尚未安装主题。选择一个 .zip，或同时选中主题文件夹里的 theme.json 和图片。": "No themes installed. Choose a .zip, or select a theme folder’s theme.json and images together.",
   "选择一个 .zip，或同时选中主题文件夹里的 theme.json 和图片。": "Choose a .zip, or select a theme folder’s theme.json and images together.",
 

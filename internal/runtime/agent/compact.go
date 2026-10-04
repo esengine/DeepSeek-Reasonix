@@ -615,9 +615,11 @@ func charsOfMessages(msgs []provider.Message) int {
 // into a briefing. instructions is optional /compact focus + PreCompact text.
 // Named returns so defer can attach RequestCount and still return usage.
 func (a *contextWindow) summarize(ctx context.Context, region []provider.Message, instructions string) (summary string, usage *provider.Usage, err error) {
+	parent := ctx
 	ctx, cancel := context.WithTimeout(ctx, summaryTimeout)
 	defer cancel()
 	ctx = provider.WithRequestAttemptCounter(ctx)
+	defer func() { err = classifySummaryError(parent, err) }()
 	sys := summarySystemPrompt
 	if strings.TrimSpace(instructions) != "" {
 		sys += "\n\nAdditional focus for this compaction (prioritize keeping this):\n" + strings.TrimSpace(instructions)

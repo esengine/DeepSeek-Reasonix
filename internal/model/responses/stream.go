@@ -348,8 +348,10 @@ func (t *turn) finish(ctx context.Context, requestMessages []provider.Message) {
 	if t.responseID != "" {
 		expected := append(append([]provider.Message(nil), requestMessages...), t.assistant())
 		t.c.mu.Lock()
-		t.c.lastResponseID = t.responseID
-		t.c.expectedPrefixDigest = t.c.conversationDigest(expected)
+		if t.c.effectiveModeLocked() == "stateful" {
+			t.c.lastResponseID = t.responseID
+			t.c.expectedPrefixDigest = t.c.conversationDigest(expected)
+		}
 		t.c.mu.Unlock()
 	} else {
 		t.c.ResetContext()
@@ -367,7 +369,7 @@ func (t *turn) finish(ctx context.Context, requestMessages []provider.Message) {
 	_ = t.send(ctx, provider.Chunk{Type: provider.ChunkDone})
 }
 
-func (c *client) readStream(ctx context.Context, resp *http.Response, out chan<- provider.Chunk, requestMessages []provider.Message) {
+func (c *client) readStream(ctx context.Context, resp *http.Response, out chan<- provider.Chunk, requestMessages []provider.Message, downgrade bool) {
 	defer resp.Body.Close()
 	defer close(out)
 
@@ -384,6 +386,7 @@ func (c *client) readStream(ctx context.Context, resp *http.Response, out chan<-
 	defer close(watchDone)
 
 	t := newTurn(c, out)
+	completed := false
 	for scanner.Scan() {
 		select {
 		case activity <- struct{}{}:
@@ -404,6 +407,7 @@ func (c *client) readStream(ctx context.Context, resp *http.Response, out chan<-
 		if !t.apply(ctx, event) {
 			return
 		}
+		completed = event.Type == "response.completed" && event.Response != nil
 		if t.terminal {
 			break
 		}
@@ -422,6 +426,9 @@ func (c *client) readStream(ctx context.Context, resp *http.Response, out chan<-
 	if !t.terminal {
 		_ = sendChunk(ctx, out, provider.Chunk{Type: provider.ChunkError, Err: provider.StreamInterrupt(io.ErrUnexpectedEOF, provider.StreamInterruptPrematureEOF)})
 		return
+	}
+	if downgrade && completed && !t.failed {
+		c.disableContinuation()
 	}
 	t.finish(ctx, requestMessages)
 }

@@ -15,7 +15,7 @@ func (s *Server) interceptSlash(w http.ResponseWriter, r *http.Request, trimmed 
 	var err error
 	switch {
 	case strings.HasPrefix(trimmed, "/model ") && strings.TrimSpace(strings.TrimPrefix(trimmed, "/model")) != "":
-		err = s.switchModel(r.Context(), strings.TrimSpace(strings.TrimPrefix(trimmed, "/model")))
+		err = s.switchModelRequested(r.Context(), strings.TrimSpace(strings.TrimPrefix(trimmed, "/model")))
 	case strings.HasPrefix(trimmed, "/effort ") && strings.TrimSpace(strings.TrimPrefix(trimmed, "/effort")) != "":
 		err = s.switchEffort(r.Context(), strings.TrimSpace(strings.TrimPrefix(trimmed, "/effort")))
 	case trimmed == "/reload":

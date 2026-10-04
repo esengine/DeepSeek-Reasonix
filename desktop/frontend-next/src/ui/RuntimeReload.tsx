@@ -58,6 +58,11 @@ export function useRuntimeReload(port: AgentPort, onDone: () => void) {
   }, [state]);
 
   return {
+    applied: () => {
+      attempts.current++;
+      setState("ok");
+      setNote(t("已生效，下一轮开始用新的扩展"));
+    },
     report: (message: string) => {
       attempts.current++;
       setState("bad");

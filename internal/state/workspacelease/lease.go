@@ -1,27 +1,23 @@
-// Package workspacelease serializes writers in different sessions that target
-// the same workspace, so one session's verification is not invalidated by
-// another's writes mid-turn. Readers never take one, and it is re-entrant
-// within a session: parallel tool calls and concurrent subagents share one
-// lease, so an agent team is never serialized here — scheduling those is
-// writeclaim.SubagentScheduler's, and it claims write paths, not the workspace.
-// A writer holds from its first mutation until every participating run ends,
-// and never past them: an exclusion nobody can outwait is worse than none.
+// Package workspacelease excludes overlapping write extents across sessions.
+// Readers remain concurrent; unknown extents claim the whole workspace.
+// Claims remain held until every participating run ends so another session
+// cannot overwrite a turn's earlier mutations during its verification.
 package workspacelease
 
 import (
 	"context"
+	"crypto/rand"
 	"crypto/sha256"
 	"encoding/hex"
 	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
+	"reasonix/internal/base/fileutil"
 	"runtime"
 	"strings"
 	"sync"
 	"time"
-
-	"reasonix/internal/base/fileutil"
 )
 
 const retryInterval = 75 * time.Millisecond
@@ -54,7 +50,10 @@ type Wait struct {
 	Elapsed time.Duration
 	// Holder names the session writing when the wait began, as that session
 	// named itself; empty when it named nothing or could not be read.
-	Holder string
+	Holder          string
+	HolderSessionID string
+	Paths           []string
+	RequestedPaths  []string
 }
 
 // WaitNotice receives both ends of a reported wait. It must return quickly and
@@ -83,6 +82,7 @@ type Owner struct {
 	stats         Stats
 	acquiredAt    time.Time
 	lastAsk       time.Time
+	scope         pathLeaseState
 }
 
 // State is a sanitized process-local snapshot used by Desktop to explain a
@@ -104,21 +104,6 @@ func (o *Owner) State() State {
 
 type localLock struct {
 	token chan struct{}
-
-	mu     sync.Mutex
-	holder string
-}
-
-func (l *localLock) setHolder(name string) {
-	l.mu.Lock()
-	l.holder = name
-	l.mu.Unlock()
-}
-
-func (l *localLock) currentHolder() string {
-	l.mu.Lock()
-	defer l.mu.Unlock()
-	return l.holder
 }
 
 var localRegistry = struct {
@@ -157,6 +142,7 @@ func New(workspaceRoot, lockDir string, onWait WaitNotice) (*Owner, error) {
 		lockPath: filepath.Join(lockDir, key+".lock"),
 		onWait:   onWait,
 		local:    local,
+		scope:    pathLeaseState{root: canonical, identity: rand.Text()},
 	}, nil
 }
 
@@ -173,7 +159,7 @@ func CanonicalWorkspace(root string) (string, error) {
 		return "", fmt.Errorf("resolve workspace root: %w", err)
 	}
 	abs = filepath.Clean(abs)
-	if resolved, resolveErr := filepath.EvalSymlinks(abs); resolveErr == nil {
+	if resolved, resolveErr := fileutil.ResolveExistingPath(abs); resolveErr == nil {
 		abs = filepath.Clean(resolved)
 	} else if !os.IsNotExist(resolveErr) {
 		return "", fmt.Errorf("canonicalize workspace root: %w", resolveErr)
@@ -261,16 +247,23 @@ func (o *Owner) EndRun() {
 // AcquireWrite lazily acquires this session's exclusive write lease. It is
 // re-entrant across parallel tool calls and shared subagents.
 func (o *Owner) AcquireWrite(ctx context.Context) error {
+	return o.AcquirePaths(ctx, nil)
+}
+
+// AcquirePaths retains the complete write extent until the last run ends.
+// Missing or unresolvable extents conservatively claim the whole workspace.
+func (o *Owner) AcquirePaths(ctx context.Context, paths []string) error {
 	if o == nil {
 		return nil
 	}
 	if ctx == nil {
 		ctx = context.Background()
 	}
+	claim := o.normalizePaths(paths)
 	for {
 		o.mu.Lock()
 		o.askedLocked(time.Now())
-		if o.acquired {
+		if o.acquired && coversPaths(o.scope.paths, claim) {
 			o.mu.Unlock()
 			return nil
 		}
@@ -287,16 +280,23 @@ func (o *Owner) AcquireWrite(ctx context.Context) error {
 		o.acquiring = true
 		o.acquireDone = make(chan struct{})
 		done := o.acquireDone
-		o.mu.Unlock()
 
-		release, err := o.acquire(ctx)
+		wasAcquired := o.acquired
+		if wasAcquired {
+			claim = mergePaths(o.scope.paths, claim)
+		}
+		o.mu.Unlock()
+		release, err := o.acquirePaths(ctx, claim, wasAcquired)
 		o.mu.Lock()
 		o.acquiring = false
 		o.waiting = false
 		if err == nil {
 			o.acquired = true
-			o.acquiredAt = time.Now()
-			o.releaseSystem = release
+			o.scope.paths = claim
+			if !wasAcquired {
+				o.acquiredAt = time.Now()
+				o.releaseSystem = release
+			}
 		}
 		close(done)
 		releaseIfIdle := o.releaseIfIdleLocked()
@@ -315,6 +315,7 @@ func (o *Owner) releaseIfIdleLocked() func() {
 	release := o.releaseSystem
 	o.acquired = false
 	o.releaseSystem = nil
+	o.scope.paths = nil
 	closed, report := o.closeStatsLocked(time.Now())
 	notice := o.onRelease
 	return func() {
@@ -341,10 +342,12 @@ func (o *Owner) markWaiting() {
 // that clears inside the grace never becomes a line someone has to read, and
 // one that does not is always closed by the report that ends it.
 type waitClock struct {
-	owner   *Owner
-	started time.Time
-	began   bool
-	holder  string
+	owner     *Owner
+	started   time.Time
+	began     bool
+	holder    string
+	conflict  *ConflictError
+	requested []string
 }
 
 func (w *waitClock) contend() {
@@ -359,20 +362,38 @@ func (w *waitClock) report() {
 		return
 	}
 	w.began = true
-	w.owner.notify(Wait{Outcome: WaitBegan, Elapsed: time.Since(w.started), Holder: w.holder})
+	w.owner.notify(w.notice(WaitBegan, time.Since(w.started)))
 }
 
 func (w *waitClock) close(outcome WaitOutcome) {
 	if w.started.IsZero() {
 		return
 	}
+	w.report()
 	waited := time.Since(w.started)
 	w.owner.mu.Lock()
 	w.owner.contendedLocked(waited, w.began)
 	w.owner.mu.Unlock()
 	if w.began {
-		w.owner.notify(Wait{Outcome: outcome, Elapsed: waited})
+		w.owner.notify(w.notice(outcome, waited))
 	}
+}
+
+func (w *waitClock) notice(outcome WaitOutcome, elapsed time.Duration) Wait {
+	n := Wait{Outcome: outcome, Elapsed: elapsed, Holder: w.holder, RequestedPaths: w.requested}
+	if c := w.conflict; c != nil {
+		n.Holder, n.HolderSessionID, n.Paths = c.Holder, c.SessionID, c.Paths
+	}
+	return n
+}
+
+func (w *waitClock) failure(err error) error {
+	if w.conflict == nil {
+		return err
+	}
+	c := *w.conflict
+	c.Cause = err
+	return &c
 }
 
 func (w *waitClock) remainingGrace() time.Duration {
@@ -380,81 +401,6 @@ func (w *waitClock) remainingGrace() time.Duration {
 		return left
 	}
 	return time.Nanosecond
-}
-
-// awaitToken waits for the in-process token. The grace timer is dropped once
-// the report is out, so a long wait stops waking to re-decide it.
-func (o *Owner) awaitToken(ctx context.Context, w *waitClock) error {
-	w.contend()
-	w.holder = o.local.currentHolder()
-	timer := time.NewTimer(w.remainingGrace())
-	defer timer.Stop()
-	grace := timer.C
-	for {
-		select {
-		case <-o.local.token:
-			return nil
-		case <-ctx.Done():
-			return ctx.Err()
-		case <-grace:
-			w.report()
-			grace = nil
-		}
-	}
-}
-
-func (o *Owner) acquire(ctx context.Context) (func(), error) {
-	w := &waitClock{owner: o}
-	select {
-	case <-o.local.token:
-	case <-ctx.Done():
-		return nil, ctx.Err()
-	default:
-		if err := o.awaitToken(ctx, w); err != nil {
-			w.close(WaitAbandoned)
-			return nil, err
-		}
-	}
-
-	releaseLocal := func() { o.local.token <- struct{}{} }
-	for {
-		releaseFile, err := tryLockFile(o.lockPath)
-		if err == nil {
-			w.close(WaitAcquired)
-			name := o.holderName()
-			o.local.setHolder(name)
-			if name != "" {
-				_ = fileutil.AtomicWriteFile(o.holderPath(), []byte(name+"\n"), 0o600)
-			}
-			return func() {
-				_ = os.Remove(o.holderPath())
-				o.local.setHolder("")
-				releaseFile()
-				releaseLocal()
-			}, nil
-		}
-		if !errors.Is(err, errHeld) {
-			releaseLocal()
-			w.close(WaitAbandoned)
-			return nil, fmt.Errorf("acquire workspace write lease: %w", err)
-		}
-		w.contend()
-		if w.holder == "" {
-			w.holder = readHolder(o.holderPath())
-		}
-		w.report()
-		timer := time.NewTimer(retryInterval)
-		select {
-		case <-timer.C:
-		case <-ctx.Done():
-			if !timer.Stop() {
-				<-timer.C
-			}
-			releaseLocal()
-			w.close(WaitAbandoned)
-			return nil, ctx.Err()
-		}
-	}
 }
 
 // readHolder reads the name a holder in another process left beside the lock.

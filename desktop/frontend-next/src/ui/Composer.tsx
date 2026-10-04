@@ -10,6 +10,7 @@ import { CompletionMenu, useCompletion } from "./Completion";
 import { ChipMirror, useSkillChips } from "./ChipMirror";
 import { useIme } from "./ime";
 import { countLines, pasteIsLong, planTone, planVerb } from "./intake";
+import { kindOf, nameOf, previewURL } from "./chipfile";
 import { useIntake } from "./useIntake";
 import type { Dropped } from "./filedrop";
 import type { Quote } from "./cards/SayCard";
@@ -27,6 +28,9 @@ interface Props {
   // twice two requests. Quoting the same reply again is an ordinary thing to
   // do, and comparing the string alone would drop the second one.
   quote?: Quote;
+  // A line taken back from the queue. The counter makes the same text twice
+  // two requests, as it does for a quote.
+  restore?: { n: number; text: string };
   // Resolves false when the line never left, so what was typed comes back
   // rather than being lost to a refusal the user could not have prevented.
   // Bumped when something outside asks for the cursor — answering a plan card
@@ -59,30 +63,6 @@ type Chip =
   | { k: "paste"; id: string; body: string; lines: number; name?: string }
   | { k: "quote"; id: string; body: string; turn?: number; lines: number };
 
-// Two screenshots pasted in a row are one filename apart, which is the one
-// thing the chip has to tell them by. The preview comes off the blob that was
-// just attached — the kernel keeps the bytes, this keeps a handle to look at.
-function previewURL(blob: Blob): string | undefined {
-  try {
-    return URL.createObjectURL(blob);
-  } catch {
-    return undefined;
-  }
-}
-
-// A dropped file has no preview to stand behind: the host named it, it was
-// never read. Its kind fills the square, because a blank one reads as an image
-// that failed to load.
-function kindOf(path: string): string {
-  const name = nameOf(path);
-  const dot = name.lastIndexOf(".");
-  return dot > 0 ? name.slice(dot + 1).toUpperCase().slice(0, 4) : "FILE";
-}
-
-function nameOf(path: string): string {
-  return path.split(/[\\/]/).pop() ?? path;
-}
-
 function chipName(c: Chip): string {
   if (c.k === "quote") return c.turn === undefined ? t("引用回复") : t("引用第 {n} 轮回复", { n: c.turn });
   return c.k === "paste" ? c.name ?? t("粘贴的文本") : c.name;
@@ -111,7 +91,7 @@ function releaseChip(c: Chip) {
 let chipSeq = 0;
 const chipId = () => `c${++chipSeq}`;
 
-export function Composer({ port, status, running, quote, focus, onSubmit, onChanged, onError, onSettings = () => {}, changeCount = 0, pulse = 0, draftKey = "" }: Props) {
+export function Composer({ port, status, running, quote, restore, focus, onSubmit, onChanged, onError, onSettings = () => {}, changeCount = 0, pulse = 0, draftKey = "" }: Props) {
   const touch = touchKeyboard();
   const providerOrder = useProviderOrder();
   const [branch, setBranch] = useState("");
@@ -173,6 +153,16 @@ export function Composer({ port, status, running, quote, focus, onSubmit, onChan
     ]);
     queueMicrotask(() => box.current?.focus());
   }, [quote?.n]);
+
+  useEffect(() => {
+    if (!restore?.n) return;
+    setText((prev) => {
+      const next = prev.trim() ? `${prev.replace(/\s+$/, "")}\n${restore.text}` : restore.text;
+      pending.current = next.length;
+      return next;
+    });
+    queueMicrotask(() => box.current?.focus());
+  }, [restore?.n]);
 
   const moveTo = useCallback((next: string, at: number) => {
     pending.current = at;

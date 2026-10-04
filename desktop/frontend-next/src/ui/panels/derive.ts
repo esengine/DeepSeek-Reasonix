@@ -1,4 +1,5 @@
 import type { Item } from "../../state/session";
+import { subagentLive } from "../../state/fold";
 import { categoryOf } from "../icons";
 import { agentsOf, isDelegation } from "../delegation";
 import { argOf, shortArgs } from "../args";
@@ -47,7 +48,7 @@ export function toolFacts(execs: Executions): Omit<Stats, "waiting"> {
 /** One walk for everything else the rail reads. It was three — one per panel
  *  that wanted a number — and a walk apiece is a walk apiece over a transcript
  *  that only grows, repeated on every revision while an answer streams. */
-export function railOf(items: Item[], execs: Executions): Rail {
+export function railOf(items: Item[], execs: Executions, phases: Record<string, string> = {}): Rail {
   const stats: Stats = { ...toolFacts(execs), waiting: 0 };
   const tasks: Task[] = [];
   const by = new Map<string, Change>();
@@ -70,7 +71,10 @@ export function railOf(items: Item[], execs: Executions): Rail {
     const call = i.tool;
     // A profile is the kernel's mark that the work left this context; matching
     // the tool name instead misses every delegation reached through a proxy.
-    if (isDelegation(call)) tasks.push(i);
+    if (isDelegation(call)) {
+      const working = subagentLive(phases[call.id ?? ""]) || i.children.some((c) => subagentLive(phases[c.id ?? ""]));
+      tasks.push(working && !i.running ? { ...i, running: true } : i);
+    }
 
     if (call.added == null && call.removed == null) continue;
     // Falling back to the tool's own name printed "edit_file" where a path

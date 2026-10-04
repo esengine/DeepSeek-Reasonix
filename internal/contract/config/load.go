@@ -421,6 +421,7 @@ func mergeTOMLPlugins(paths []string) ([]PluginEntry, error) {
 				p.Source = MCPSourceProjectConfig
 			}
 			if i, ok := index[p.Name]; ok {
+				p.DisabledTools = mergeDisabledToolPolicies(merged[i].DisabledTools, p.DisabledTools)
 				merged[i] = p
 				continue
 			}

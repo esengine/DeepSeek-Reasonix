@@ -52,7 +52,7 @@
 > **加入社区 · Community** — 双语 Discord，提供安装答疑（`#help` / `#求助`）、工作流展示与功能想法。→ **<https://discord.gg/XF78rEME2D>**
 >
 > QQ 群 **DeepSeek-Reasonix官方群**（群号 `1093562660`）→ **<https://qm.qq.com/q/i59b0z2R8s>**（[二维码](./docs/assets/qq-group.svg)）
->
+
 > 抖音：**做游戏的小鱼**（抖音号 `22703872788`）· [二维码](./docs/assets/douyin.png)
 
 ## 版本
@@ -252,9 +252,10 @@ CLI 进阶用法和详细配置见 **[CLI 命令参考](./docs/CLI.zh-CN.md)**�
 如果 Reasonix 帮你省了时间或 token，欢迎请杯咖啡。捐助不会换来 feature
 优先级，也不会影响 issue 的处理顺序——就是「谢谢」。
 
-- **国内** — 微信支付（扫下方二维码）
+- **国内** — 微信支付 / 支付宝（扫下方二维码）
 - **海外** — PayPal: [paypal.me/yuhuahui](https://paypal.me/yuhuahui)
 
 <p align="center">
   <img src=".github/sponsor/wechat-pay.jpg" alt="微信支付收款码" width="180"/>
+  <img src=".github/sponsor/alipay.jpg" alt="支付宝收款码" width="180"/>
 </p>

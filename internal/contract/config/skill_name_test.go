@@ -21,3 +21,26 @@ func TestSkillNameRejectsDefaultIgnorableCharacters(t *testing.T) {
 		t.Fatal("ordinary Unicode skill names should remain valid")
 	}
 }
+
+func TestResolveSkillName(t *testing.T) {
+	for _, tc := range []struct{ stem, declared, want string }{
+		{"review", "", "review"},
+		{"review", "inspect", "inspect"},
+		{"review", "审查", "review"},
+		{"审查", "点検", "点検"},
+		{"审查", "inspect", "inspect"},
+		{"cafe\u0301", "", "café"},
+		{"审查", "re\u0301vision", "révision"},
+		{"review", "bad/name", "review"},
+		{"review", " inspect ", "review"},
+		{"review", "rev\u200diew", "review"},
+		{"审查", "审\ufe0f", "审查"},
+		{"审查", "\u0301review", "审查"},
+	} {
+		t.Run(tc.stem+"/"+tc.declared, func(t *testing.T) {
+			if got := ResolveSkillName(tc.stem, tc.declared); got != tc.want {
+				t.Fatalf("ResolveSkillName(%q, %q) = %q, want %q", tc.stem, tc.declared, got, tc.want)
+			}
+		})
+	}
+}

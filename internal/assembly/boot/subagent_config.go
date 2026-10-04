@@ -17,15 +17,39 @@ import (
 // runs: which provider a named model or profile lands on, the depth and
 // concurrency ceilings, and the profile lookups the task tool consults.
 type subagentConfig struct {
-	resolveProvider func(modelRef, effort string) (provider.Provider, *provider.Pricing, int, error)
-	identity        func(modelRef, effort string) (string, string)
-	profileLookup   func(name string) (delegation.ProfileDefinition, bool)
-	profileModel    func(profile string) string
-	profileEffort   func(profile string) string
-	scheduler       *writeclaim.SubagentScheduler
-	taskModel       string
-	taskEffort      string
-	maxDepth        int
+	resolveProvider        func(modelRef, effort string) (provider.Provider, *provider.Pricing, int, error)
+	identity               func(modelRef, effort string) (string, string)
+	profileLookup          func(name string) (delegation.ProfileDefinition, bool)
+	profileModel           func(profile string) string
+	profileEffort          func(profile string) string
+	scheduler              *writeclaim.SubagentScheduler
+	inheritedEffort        string
+	inheritedEffortDropped bool
+	taskModel              string
+	taskEffort             string
+	maxDepth               int
+}
+
+type inheritedSubagentEffort struct {
+	value   string
+	dropped bool
+}
+
+func resolveInheritedSubagentEffort(cfg *config.Config, entry *config.ProviderEntry) inheritedSubagentEffort {
+	if cfg == nil {
+		return inheritedSubagentEffort{}
+	}
+	raw := strings.TrimSpace(cfg.Agent.SubagentEffort)
+	if raw == "" {
+		return inheritedSubagentEffort{}
+	}
+	if strings.TrimSpace(cfg.Agent.SubagentModel) != "" {
+		return inheritedSubagentEffort{value: raw}
+	}
+	if normalized, ok := config.NormalizeInheritedEffort(entry, raw); ok {
+		return inheritedSubagentEffort{value: normalized}
+	}
+	return inheritedSubagentEffort{dropped: true}
 }
 
 func newSubagentConfig(opts Options, cfg *config.Config, entry *config.ProviderEntry, modelName string,
@@ -33,23 +57,17 @@ func newSubagentConfig(opts Options, cfg *config.Config, entry *config.ProviderE
 	maxConcurrency, maxWriters := writeclaim.NormalizeConcurrencyLimits(
 		cfg.Agent.MaxSubagentConcurrency, cfg.Agent.MaxParallelWriters,
 	)
+	inherited := resolveInheritedSubagentEffort(cfg, entry)
 	return subagentConfig{
 		resolveProvider: func(modelRef, effort string) (provider.Provider, *provider.Pricing, int, error) {
-			me := *entry
-			selectedRef := modelRefFromEntry(entry)
-			if strings.TrimSpace(modelRef) != "" {
-				modelRef = childModelRef(cfg, entry, modelRef)
-				if resolved, ok := cfg.ResolveModel(modelRef); ok {
-					me = *resolved
-					selectedRef = modelRefFromEntry(resolved)
-				} else if resolver != nil {
-					me = *syntheticEntryFromResolver(resolver, modelRef)
-					selectedRef = modelRef
-				} else {
-					return nil, nil, 0, fmt.Errorf("unknown model %q", modelRef)
-				}
+			me, selectedRef, err := subagentModelEntry(cfg, resolver, entry, modelRef)
+			if err != nil {
+				return nil, nil, 0, err
 			}
 			var effortOverride *string
+			if selectedRef == modelRefFromEntry(entry) {
+				effortOverride = &me.Effort
+			}
 			if strings.TrimSpace(effort) != "" {
 				normalized, err := config.NormalizeEffort(&me, effort)
 				if err != nil {
@@ -80,13 +98,31 @@ func newSubagentConfig(opts Options, cfg *config.Config, entry *config.ProviderE
 			}
 			return delegation.ProfileFromSkill(skills.Prepare(sk)), true
 		},
-		profileModel:  func(profile string) string { return firstConfigured(cfg.Agent.SubagentModels, profile) },
-		profileEffort: func(profile string) string { return firstConfigured(cfg.Agent.SubagentEfforts, profile) },
-		scheduler:     writeclaim.NewSubagentScheduler(maxConcurrency, maxWriters),
-		taskModel:     firstNonEmpty(cfg.Agent.SubagentModels["task"], cfg.Agent.SubagentModel),
-		taskEffort:    firstNonEmpty(cfg.Agent.SubagentEfforts["task"], cfg.Agent.SubagentEffort),
-		maxDepth:      agent.NormalizeMaxSubagentDepth(cfg.Agent.MaxSubagentDepth),
+		profileModel:           func(profile string) string { return firstConfigured(cfg.Agent.SubagentModels, profile) },
+		profileEffort:          func(profile string) string { return firstConfigured(cfg.Agent.SubagentEfforts, profile) },
+		scheduler:              writeclaim.NewSubagentScheduler(maxConcurrency, maxWriters),
+		inheritedEffort:        inherited.value,
+		inheritedEffortDropped: inherited.dropped,
+		taskModel:              firstNonEmpty(cfg.Agent.SubagentModels["task"], cfg.Agent.SubagentModel),
+		taskEffort:             firstNonEmpty(cfg.Agent.SubagentEfforts["task"], inherited.value),
+		maxDepth:               agent.NormalizeMaxSubagentDepth(cfg.Agent.MaxSubagentDepth),
 	}
+}
+
+func subagentModelEntry(cfg *config.Config, resolver provider.Resolver, parent *config.ProviderEntry, ref string) (config.ProviderEntry, string, error) {
+	ref = childModelRef(cfg, parent, ref)
+	if parent != nil && (ref == "" || ref == modelRefFromEntry(parent)) {
+		return *parent, modelRefFromEntry(parent), nil
+	}
+	if cfg != nil {
+		if resolved, ok := cfg.ResolveModel(ref); ok {
+			return *resolved, modelRefFromEntry(resolved), nil
+		}
+	}
+	if resolver != nil {
+		return *syntheticEntryFromResolver(resolver, ref), ref, nil
+	}
+	return config.ProviderEntry{}, ref, fmt.Errorf("unknown model %q", ref)
 }
 
 // childModelRef qualifies a bare model name with the parent's provider when

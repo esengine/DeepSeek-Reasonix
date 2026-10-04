@@ -94,6 +94,7 @@ async function launchKernel(args) {
     const began = Date.now();
     logs.shell.line(`host: starting ${hostBinary} (attempt ${attempt})`);
     kernel = start(hostBinary, args, {
+      systemLanguage: app.getPreferredSystemLanguages()[0] ?? app.getLocale(),
       timeoutMs: handshakeTimeout(),
       onSlow: () => {
         logs.shell.line("host: no handshake yet; showing the starting window");

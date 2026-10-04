@@ -513,3 +513,31 @@ describe("a model mode switch", () => {
     await waitFor(() => expect(set).toHaveBeenCalledWith(""));
   });
 });
+
+describe("a line taken back from the queue", () => {
+  const props = () => ({ port: new MockPort() as unknown as AgentPort, status: status(), running: false, onSubmit: async () => true, onChanged: vi.fn(), onError: vi.fn() });
+
+  it("lands in the box", () => {
+    const view = render(<Composer {...props()} />);
+    view.rerender(<Composer {...props()} restore={{ n: 1, text: "取回的这一句" }} />);
+    expect((view.container.querySelector("textarea") as HTMLTextAreaElement).value).toBe("取回的这一句");
+  });
+
+  it("goes under what was typed meanwhile instead of replacing it", () => {
+    const p = props();
+    const view = render(<Composer {...p} />);
+    const box = view.container.querySelector("textarea") as HTMLTextAreaElement;
+    fireEvent.change(box, { target: { value: "正在写的", selectionStart: 4 } });
+    view.rerender(<Composer {...p} restore={{ n: 1, text: "取回的这一句" }} />);
+    expect(box.value).toBe("正在写的\n取回的这一句");
+  });
+
+  it("restores the same text twice when it is taken back twice", () => {
+    const p = props();
+    const view = render(<Composer {...p} restore={{ n: 1, text: "甲" }} />);
+    const box = view.container.querySelector("textarea") as HTMLTextAreaElement;
+    fireEvent.change(box, { target: { value: "", selectionStart: 0 } });
+    view.rerender(<Composer {...p} restore={{ n: 2, text: "甲" }} />);
+    expect(box.value).toBe("甲");
+  });
+});

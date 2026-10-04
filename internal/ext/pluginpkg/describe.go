@@ -29,7 +29,7 @@ func InstalledListText(reasonixHome string) (string, error) {
 		return "", err
 	}
 	if len(st.Plugins) == 0 {
-		return "plugins: none installed\ninstall: reasonix plugin install <source> --yes, or use Settings -> Plugins", nil
+		return "plugins: none installed\ninstall: reasonix plugin install <source> --yes\nStudio: Settings -> Extension -> Installed -> Plugin packages -> Add", nil
 	}
 	var b strings.Builder
 	fmt.Fprintf(&b, "plugins (%d):\n", len(st.Plugins))

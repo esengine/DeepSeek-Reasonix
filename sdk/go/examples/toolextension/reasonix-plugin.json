@@ -1,0 +1,31 @@
+{
+  "apiVersion": "reasonix.io/plugin/v2",
+  "name": "word-counter",
+  "version": "0.1.0",
+  "description": "Minimal SDK tool: count whitespace-separated words",
+  "provides": [
+    {
+      "namespace": "plugin/word-counter",
+      "kind": "tools",
+      "id": "default",
+      "version": "1.0.0"
+    }
+  ],
+  "contributes": {},
+  "runtime": {
+    "command": "${REASONIX_PLUGIN_ROOT}/bin/word-counter.exe",
+    "capabilities": ["tools"],
+    "tools": [
+      {
+        "name": "count_words",
+        "description": "Count whitespace-separated words in supplied text; does not read files or contact services",
+        "inputSchema": {
+          "type": "object",
+          "properties": { "text": { "type": "string" } },
+          "required": ["text"]
+        },
+        "readOnly": true
+      }
+    ]
+  }
+}

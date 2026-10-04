@@ -6,7 +6,7 @@ import os from "node:os";
 import fs from "node:fs";
 
 const require = createRequire(import.meta.url);
-const { parse, readActs } = require("../src/host.js");
+const { parse, readActs, start } = require("../src/host.js");
 const { contextTemplate, editMenuTemplate, applicationMenuTemplate, menuInstaller } = require("../src/editmenu.js");
 const { uiLanguage } = require("../src/uilang.js");
 const { externalTarget } = require("../src/links.js");
@@ -16,6 +16,23 @@ const { pick, loadPrefs, savePrefs, registerPrefs } = require("../src/prefs.js")
 
 const TOKEN = "a".repeat(64);
 const line = (over) => JSON.stringify({ version: 1, origin: "http://127.0.0.1:8080", token: TOKEN, ...over });
+
+test("the spawned host receives the system language and inherits explicit locale overrides", async () => {
+  const script = `console.log(${JSON.stringify(line())});
+    console.log(JSON.stringify({act: JSON.stringify({system: process.env.REASONIX_SYSTEM_LANG,
+      explicit: process.env.REASONIX_LANG})}));`;
+  const before = process.env.REASONIX_SYSTEM_LANG;
+  const explicit = process.env.REASONIX_LANG;
+  const state = new Promise((resolve) => {
+    const host = start(process.execPath, ["-e", script], {
+      systemLanguage: "zh-Hant-TW",
+      onAct: (act) => resolve(JSON.parse(act)),
+    });
+    host.ready.catch(resolve);
+  });
+  assert.deepEqual(await state, { system: "zh-Hant-TW", ...(explicit === undefined ? {} : { explicit }) });
+  assert.equal(process.env.REASONIX_SYSTEM_LANG, before);
+});
 
 test("the handshake is accepted only when every field accounts for itself", () => {
   assert.deepEqual(parse(line()), { origin: "http://127.0.0.1:8080", token: TOKEN });

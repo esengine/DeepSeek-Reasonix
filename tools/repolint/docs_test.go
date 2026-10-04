@@ -144,6 +144,19 @@ func TestAWrappedParagraphIsOneBlock(t *testing.T) {
 	}
 }
 
+func TestQuotedParagraphsAreSeparateProseBlocks(t *testing.T) {
+	line := "> " + strings.Repeat("word ", 20)
+	lines := []string{line, line, ">", line, line, "> ", "> " + strings.Repeat("word ", 70)}
+	blocks := proseBlocks(lines)
+	if len(blocks) != 3 || blocks[0].width != 199 || blocks[1].width != 199 || blocks[2].line != 7 {
+		t.Fatalf("blocks = %+v, want three quoted paragraphs with wrapped lines kept together", blocks)
+	}
+	got := checkProse("x.md", lines, docProseWidth)
+	if len(got) != 1 || got[0].Line != 7 {
+		t.Fatalf("findings = %+v, want only the final overlong quoted paragraph", got)
+	}
+}
+
 func TestOnlyOnboardingPagesKeepAChineseCopy(t *testing.T) {
 	root := docRepo(t, map[string]string{
 		".github/CODEOWNERS":    "* @a @b\n",
@@ -180,5 +193,11 @@ func TestAReleaseNoteIsGroupedReferencedAndShort(t *testing.T) {
 	}
 	if byRule[ruleReleaseNote] != 4 || byRule[ruleDocProse] != 1 {
 		t.Fatalf("findings = %+v, want sub-heading, unknown group, unreferenced item, second paragraph, and one long item", got)
+	}
+}
+
+func TestClassifyDocSkipsMigrationBackup(t *testing.T) {
+	if _, ok := classifyDoc(".migration-backup/legacy-fact.md"); ok {
+		t.Fatal("a store-owned memory backup is not an authored doc")
 	}
 }

@@ -4,15 +4,29 @@
 package config
 
 import (
+	"errors"
 	"fmt"
-	"math"
 )
+
+const (
+	CompactRatioMin = 0.0
+	CompactRatioMax = 1.0
+)
+
+var ErrCompactRatioRange = errors.New("compact ratio outside the open window fraction range")
+
+func ValidateCompactRatio(ratio float64) error {
+	if !(ratio > CompactRatioMin && ratio < CompactRatioMax) {
+		return fmt.Errorf("%w: %v must be above %g and below %g", ErrCompactRatioRange, ratio, CompactRatioMin, CompactRatioMax)
+	}
+	return nil
+}
 
 // SetCompactRatio updates the sole automatic compaction threshold. Presets are
 // 0.70 / 0.80 / 0.85; any fraction of the window is allowed.
 func (c *Config) SetCompactRatio(ratio float64) error {
-	if math.IsNaN(ratio) || math.IsInf(ratio, 0) || ratio <= 0 || ratio >= 1 {
-		return fmt.Errorf("compact ratio %v: must be a fraction of the window, above 0 and below 1", ratio)
+	if err := ValidateCompactRatio(ratio); err != nil {
+		return err
 	}
 	c.Agent.CompactRatio = ratio
 	return nil

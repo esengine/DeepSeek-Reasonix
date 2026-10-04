@@ -2,6 +2,7 @@ package control
 
 import (
 	"context"
+	"reasonix/internal/base/testenv"
 	"testing"
 	"time"
 
@@ -11,7 +12,7 @@ import (
 
 func waitForDecisions(t *testing.T, c *Controller, want int) []Decision {
 	t.Helper()
-	deadline := time.Now().Add(5 * time.Second)
+	deadline := time.Now().Add(testenv.Budget(t))
 	for {
 		got := c.Decisions()
 		if len(got) == want {

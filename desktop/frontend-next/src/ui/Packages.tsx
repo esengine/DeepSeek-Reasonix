@@ -9,13 +9,14 @@ interface Props {
   packages: PluginPackage[];
   onChanged: () => void;
   onReloadError?: (message: string) => void;
+  onReloaded?: () => void;
   // Only one package can be mid-update: the confirmation is a full pane, and
   // two of them open at once would be two plans competing for one answer.
   updating: string;
   onUpdate: (name: string) => void;
 }
 
-export function Packages({ port, packages, onChanged, onReloadError, updating, onUpdate }: Props) {
+export function Packages({ port, packages, onChanged, onReloadError, onReloaded, updating, onUpdate }: Props) {
   const [connection, setConnection] = useState({ port, generation: 0 });
   const currentConnection = useRef(connection);
   currentConnection.current = connection;
@@ -32,6 +33,9 @@ export function Packages({ port, packages, onChanged, onReloadError, updating, o
           }}
           onReloadError={(message) => {
             if (currentConnection.current === connection) onReloadError?.(message);
+          }}
+          onReloaded={() => {
+            if (currentConnection.current === connection) onReloaded?.();
           }}
           updating={updating}
           onUpdate={() => onUpdate(p.name)}
@@ -63,10 +67,11 @@ function summary(p: PluginPackage): string {
 }
 
 function Package({
-  p, port, onDone, onReloadError, updating, onUpdate,
+  p, port, onDone, onReloadError, onReloaded, updating, onUpdate,
 }: {
   p: PluginPackage; port: AgentPort; onDone: () => void; updating: string; onUpdate: () => void;
   onReloadError: (message: string) => void;
+  onReloaded: () => void;
 }) {
   const [busy, setBusy] = useState("");
   const [failed, setFailed] = useState("");
@@ -121,7 +126,11 @@ function Package({
         on={p.enabled}
         busy={locked}
         label={`${t(p.enabled ? "关闭" : "启用")} ${p.name}`}
-        onClick={() => void run("toggle", () => port.setPluginEnabled(p.name, !p.enabled))}
+        onClick={() => void run("toggle", async () => {
+          const out = await port.setPluginEnabled(p.name, !p.enabled);
+          if (out.reloadError) onReloadError(out.reloadError);
+          else onReloaded();
+        })}
       />
     </span>
   );
@@ -228,8 +237,8 @@ function Package({
         <Contributions items={p.agents} />
         <Contributions items={p.prompts} />
         <Contributions items={p.themes} />
-        {p.skipped?.map((s) => (
-          <div className="row" key={s.capability + s.reason}>
+        {p.skipped?.map((s, index) => (
+          <div className="row" key={index}>
             <span className="d">·</span>
             <span>{s.capability}</span>
             <span className="sc">{t("用不了：{why}", { why: s.reason })}</span>
@@ -244,8 +253,8 @@ function Contributions({ items }: { items?: PluginItem[] }) {
   if (!items?.length) return null;
   return (
     <>
-      {items.map((it) => (
-        <div className="row" key={it.invocation || it.name}>
+      {items.map((it, index) => (
+        <div className="row" key={index}>
           <span className="d">·</span>
           <span>{it.invocation || it.name}</span>
           <span className="sc">{it.description}</span>

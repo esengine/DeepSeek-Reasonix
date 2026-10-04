@@ -269,6 +269,19 @@ rules are written in.
   was read, stored, written inline and then overridden every time.
 - `.gutter-l` outranks the rail because the rail is `position: fixed` at 12: a
   seam painted under the panel it divides cannot be grabbed where it matters.
+- The rail's floor is 232px (`RAIL.min`); a narrower saved width is raised on
+  read.
+- Under 232px the session filter row cannot hold four labels in either
+  language.
+- The rail head is a size container, and its threshold is a content-box width,
+  not a rail width.
+- The threshold is 220px: the content box of the default 264px rail, which has
+  22px side padding. The default and anything wider show counts and shortcut
+  hints.
+- At 219px or less counts and hints are dropped, the filter cells may shrink
+  and labels ellipsize.
+- Inside a window of 860px or less the padding is 16px, so the cutoff falls at
+  a 252px rail.
 - The rail lists every mounted workspace, each folding over its own sessions.
   The studio layer had hidden all but the focused one and relabelled its
   children 「最近」, so a count of six sat above a list of one. The switcher above

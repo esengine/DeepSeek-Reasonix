@@ -9,6 +9,7 @@ import (
 
 	"reasonix/internal/state/history"
 	"reasonix/internal/state/historycatalog"
+	"reasonix/internal/state/stats"
 )
 
 // isolateConfigHome redirects user config and cache paths to a per-test temp
@@ -35,6 +36,9 @@ func closeBootTestHistoryCatalog(t *testing.T) {
 	defer cancel()
 	if err := history.CloseSharedCatalog(ctx); err != nil {
 		t.Fatalf("close shared history catalog: %v", err)
+	}
+	if err := stats.CloseUsageCatalogs(ctx); err != nil {
+		t.Fatalf("close usage catalogs: %v", err)
 	}
 }
 

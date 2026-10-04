@@ -9,6 +9,7 @@ import (
 	"path/filepath"
 	"runtime"
 	"strings"
+	"sync"
 	"time"
 
 	"reasonix/internal/base/proc"
@@ -58,14 +59,11 @@ type Shell struct {
 	Path string
 }
 
-// ResolveShell picks the interpreter the shell tool runs commands under. With
-// prefer "auto"/"" it favours a real bash so the model's POSIX habits work and
-// only falls back to PowerShell on Windows when bash is absent. prefer "bash" or
-// "powershell"/"pwsh" forces that interpreter (path overrides the PATH lookup),
-// warning to warn and falling back to auto-detection if the forced one is
-// missing — so a typo or an uninstalled shell can never leave the tool broken.
+// ResolveShell picks the interpreter the shell tool runs commands under: auto
+// favours bash; a forced kind overrides the PATH lookup with path and falls back
+// to auto if unusable, so a typo cannot leave the tool broken.
 func ResolveShell(prefer, path string, warn io.Writer) Shell {
-	return resolveShell(prefer, path, warn, runtime.GOOS, exec.LookPath, fileExists, windowsBashCandidates(), windowsPowerShellCandidates(), probeBash, isWindowsWSLBash)
+	return resolveShell(prefer, path, warn, runtime.GOOS, exec.LookPath, fileExists, windowsBashCandidates(), windowsPowerShellCandidates(), probeBash, isWindowsWSLBash, powerShellLaunches)
 }
 
 // shellHost holds the lookups shell discovery needs. Resolution and enumeration
@@ -116,7 +114,7 @@ func (h shellHost) powerShell(order []string) (Shell, bool) {
 	return Shell{}, false
 }
 
-func (h shellHost) auto() Shell {
+func (h shellHost) auto(warn io.Writer) Shell {
 	if sh, ok := h.bash(); ok {
 		return sh
 	}
@@ -124,6 +122,12 @@ func (h shellHost) auto() Shell {
 		if sh, ok := h.powerShell([]string{"pwsh", "powershell"}); ok {
 			return sh
 		}
+	}
+	// Detection found nothing, so the bare name is all that is left to try. Say
+	// so rather than hand the session an interpreter no probe confirmed: a shell
+	// the host may not have is the failure this resolver exists to prevent.
+	if warn != nil {
+		fmt.Fprintf(warn, "warning: [tools.shell] no usable shell was found; falling back to %q, which may fail to start\n", "bash")
 	}
 	return Shell{Kind: ShellBash, Path: "bash"}
 }
@@ -166,6 +170,10 @@ func DetectShells() []Shell { return currentHost().available() }
 // surface calls it before persisting, so a typo is refused where it was typed
 // instead of failing every later command far from the screen that caused it.
 func VerifyShell(prefer, path string) error {
+	return verifyShell(prefer, path, fileExists, probeBash, powerShellLaunches)
+}
+
+func verifyShell(prefer, path string, exists, probe, launches func(string) bool) error {
 	kind := ShellBash
 	switch strings.ToLower(strings.TrimSpace(prefer)) {
 	case "", "auto", "bash":
@@ -178,36 +186,49 @@ func VerifyShell(prefer, path string) error {
 	if path == "" {
 		return nil
 	}
-	if !fileExists(path) {
+	if !exists(path) {
 		return fmt.Errorf("%s: no such executable", path)
 	}
-	if kind == ShellBash && !probeBash(path) {
+	if kind == ShellBash && !probe(path) {
 		return fmt.Errorf("%s: did not run a command", path)
+	}
+	// A pinned PowerShell is launch-probed too: an existing executable that
+	// cannot start is not a usable shell.
+	if kind == ShellPowerShell && !launches(path) {
+		return fmt.Errorf("%s: did not start", path)
 	}
 	return nil
 }
 
-// resolveShell is ResolveShell with its environment lookups injected — including
-// the Git-for-Windows bash candidates, which derive from %ProgramFiles% and so
-// are empty off Windows — so the decision table is deterministically testable on
-// any host.
-func resolveShell(prefer, path string, warn io.Writer, goos string, lookPath func(string) (string, error), exists func(string) bool, winBashCandidates []string, winPowerShellCandidates []string, probe func(string) bool, isWSL func(string) bool) Shell {
-	h := shellHost{goos, lookPath, exists, winBashCandidates, winPowerShellCandidates, probe, isWSL, powerShellLaunches}
+// resolveShell is ResolveShell with its environment lookups injected, including
+// Git-for-Windows candidates whose %ProgramFiles% values are empty off Windows.
+// launches is injected too, so any host can test "pwsh will not start, 5.1 will".
+func resolveShell(prefer, path string, warn io.Writer, goos string, lookPath func(string) (string, error), exists func(string) bool, winBashCandidates []string, winPowerShellCandidates []string, probe func(string) bool, isWSL func(string) bool, launches func(string) bool) Shell {
+	h := shellHost{goos, lookPath, exists, winBashCandidates, winPowerShellCandidates, probe, isWSL, launches}
 	switch strings.ToLower(strings.TrimSpace(prefer)) {
 	case "", "auto":
-		return h.auto()
+		return h.auto(warn)
 	case "bash":
 		if path != "" && exists(path) && probe(path) {
 			return Shell{Kind: ShellBash, Path: path}
+		}
+		if path != "" {
+			warnUnusablePath(warn, path, "bash")
 		}
 		if sh, ok := h.bash(); ok {
 			return sh
 		}
 		warnMissingShell(warn, prefer)
-		return h.auto()
+		return h.auto(warn)
 	case "powershell", "pwsh":
-		if path != "" && exists(path) {
+		// A pinned path is proven the same way the bash arm proves its own. A Store
+		// alias that will not start is exactly the failure this resolver keeps out
+		// of a session, so existence alone must not win.
+		if path != "" && exists(path) && launches(path) {
 			return Shell{Kind: ShellPowerShell, Path: path}
+		}
+		if path != "" {
+			warnUnusablePath(warn, path, "PowerShell")
 		}
 		order := []string{"pwsh", "powershell"}
 		if strings.EqualFold(strings.TrimSpace(prefer), "powershell") {
@@ -217,18 +238,27 @@ func resolveShell(prefer, path string, warn io.Writer, goos string, lookPath fun
 			return sh
 		}
 		warnMissingShell(warn, prefer)
-		return h.auto()
+		return h.auto(warn)
 	default:
 		if warn != nil {
 			fmt.Fprintf(warn, "warning: [tools.shell] prefer=%q is not recognised (use auto/bash/powershell); using auto-detection\n", prefer)
 		}
-		return h.auto()
+		return h.auto(warn)
 	}
 }
 
 func warnMissingShell(warn io.Writer, prefer string) {
 	if warn != nil {
 		fmt.Fprintf(warn, "warning: [tools.shell] prefer=%q but that shell was not found; using auto-detection\n", prefer)
+	}
+}
+
+// warnUnusablePath reports a pinned interpreter that detection will ignore.
+// Detection answers in its place so the session still has a shell, while the
+// warning tells the user their pin was dropped.
+func warnUnusablePath(warn io.Writer, path, what string) {
+	if warn != nil {
+		fmt.Fprintf(warn, "warning: [tools.shell] path %q is not a usable %s; using auto-detection instead\n", path, what)
 	}
 }
 
@@ -274,12 +304,44 @@ func probeBash(path string) bool {
 	if runtime.GOOS != "windows" {
 		return true
 	}
+	return probeBashMemo(path, runBashProbe)
+}
+
+func runBashProbe(path string) bool {
 	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
 	defer cancel()
 	cmd := exec.CommandContext(ctx, path, "-c", "true")
 	cmd.Env = secrets.ProcessEnv()
 	proc.HideWindow(cmd)
 	return cmd.Run() == nil
+}
+
+// bashProbeIdentity is the file a successful probe vouched for. The same path
+// with the same size and mtime is the same executable, so it is not launched
+// again; a failure is never kept, because a timeout may be transient.
+type bashProbeIdentity struct {
+	path    string
+	size    int64
+	modTime int64
+}
+
+// provenBash lives for the process and holds successes only.
+var provenBash sync.Map
+
+func probeBashMemo(path string, run func(string) bool) bool {
+	fi, err := os.Stat(path)
+	if err != nil {
+		return run(path)
+	}
+	id := bashProbeIdentity{path: path, size: fi.Size(), modTime: fi.ModTime().UnixNano()}
+	if _, ok := provenBash.Load(id); ok {
+		return true
+	}
+	if !run(path) {
+		return false
+	}
+	provenBash.Store(id, struct{}{})
+	return true
 }
 
 func fileExists(p string) bool {

@@ -26,6 +26,21 @@ const draw = (over: Partial<Notice> = {}) => render(<NoticeCard item={notice(ove
 // speaking, then the body. Both the headline and the gutter are new, and both
 // are the difference between a warning and a paragraph a healthy runtime wrote.
 describe("a notice card", () => {
+  it("shows the holder and claimed path from structured lease data", () => {
+    const box = draw({ code: "workspace_lease", detail: undefined,
+      workspaceLease: { contended: 0, heldMs: 0, idleMs: 0, holder: "Fixture A", holderSessionId: "session-a", paths: ["src/a.go"], requestedPaths: ["src/a.go"] },
+    } as Partial<Notice>);
+    expect(box.textContent).toContain("Fixture A");
+    expect(box.textContent).toContain("session-a");
+    expect(box.textContent).toContain("src/a.go");
+  });
+
+  it("shows the granted extent when a wait closes", () => {
+    const box = draw({ code: "workspace_lease_resumed", detail: undefined,
+      workspaceLease: { contended: 0, heldMs: 0, idleMs: 0, requestedPaths: ["src/b.go"] },
+    } as Partial<Notice>);
+    expect(box.textContent).toContain("src/b.go");
+  });
   it("names its speaker rather than opening as a bare paragraph", () => {
     const box = draw();
     expect(box.querySelector(".hl .nm")?.textContent).toBe(t("警告"));

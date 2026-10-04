@@ -831,14 +831,7 @@ func (s *Store) parseSkill(path, stem string, scope Scope, requireSkillMarker bo
 		return Skill{}, false
 	}
 
-	name := stem
-	if v := fm[skillFrontmatterName]; v != "" && IsValidName(v) &&
-		(config.IsValidMCPServerName(v) || !config.IsValidMCPServerName(stem)) {
-		// Before Unicode names were supported, a Unicode frontmatter name was
-		// ignored. Keep that existing ASCII stem as the skill ID on upgrade.
-		name = v
-	}
-	name = norm.NFC.String(name)
+	name := config.ResolveSkillName(stem, fm[skillFrontmatterName])
 	// Read from the document, never from the flat view: flattening drops the
 	// key a field was written under, which is the whole of what a namespace is.
 	delivery, err := deliveryFromDocument(doc)

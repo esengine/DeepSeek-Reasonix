@@ -21,6 +21,10 @@ func explainError(err error) error {
 	if err == nil {
 		return nil
 	}
+	var recoveryErr *provider.ContinuationRecoveryError
+	if errors.As(err, &recoveryErr) {
+		return &provider.ContinuationRecoveryError{Err: explainError(recoveryErr.Err)}
+	}
 	if provider.IsStreamInterrupted(err) {
 		return fmt.Errorf("model stream interrupted after recovery attempts: %s. The partial response was kept; retry or ask Reasonix to continue", err.Error())
 	}

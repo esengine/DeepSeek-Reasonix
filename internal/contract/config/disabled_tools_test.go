@@ -54,3 +54,15 @@ func TestDisabledToolsSurviveMCPJSONEdits(t *testing.T) {
 		}
 	}
 }
+
+func TestValidatePluginRejectsEmptyDisabledToolNames(t *testing.T) {
+	for _, name := range []string{"", "  "} {
+		entry := PluginEntry{Name: "server", Command: "mcp", DisabledTools: []string{name}}
+		if err := validatePlugin(entry); err == nil {
+			t.Fatalf("disabled_tools entry %q was accepted", name)
+		}
+	}
+	if err := validatePlugin(PluginEntry{Name: "server", Command: "mcp", DisabledTools: []string{"write"}}); err != nil {
+		t.Fatalf("valid disabled_tools entry was rejected: %v", err)
+	}
+}

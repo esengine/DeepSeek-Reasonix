@@ -146,6 +146,7 @@ export class MockExtensions extends MockMarket {
   async setPluginEnabled(name: string, enabled: boolean) {
     const p = this.packages.find((x) => x.name === name);
     if (p) p.enabled = enabled;
+    return {};
   }
 
   async removePlugin(name: string): Promise<PluginPlan> {

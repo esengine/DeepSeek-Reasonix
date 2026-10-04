@@ -1,0 +1,14 @@
+{
+  "apiVersion": "reasonix.io/plugin/v2",
+  "name": "mcp-line-counter-kit",
+  "version": "0.1.0",
+  "description": "A local stdio MCP example that counts lines in supplied text.",
+  "contributes": {
+    "mcpServers": {
+      "line_counter": {
+        "type": "stdio",
+        "command": "${REASONIX_PLUGIN_ROOT}/bin/line-counter.exe"
+      }
+    }
+  }
+}

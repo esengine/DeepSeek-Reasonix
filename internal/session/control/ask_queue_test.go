@@ -69,7 +69,7 @@ func TestAskQueuedBehindAnotherPromptIsVisibleAndAnnounced(t *testing.T) {
 		returned.Store(true)
 	}()
 
-	deadline := time.After(2 * time.Second)
+	deadline := time.After(testenv.Budget(t))
 	for {
 		if _, notices := sink.counts(); notices == 1 {
 			break
@@ -136,7 +136,7 @@ func TestPromptQueueNoticeStaysQuietWhenNothingWaits(t *testing.T) {
 
 	go func() { _, _ = c.Ask(t.Context(), askProbeQuestions()) }()
 
-	deadline := time.After(2 * time.Second)
+	deadline := time.After(testenv.Budget(t))
 	for asks, _ := sink.counts(); asks != 1; asks, _ = sink.counts() {
 		select {
 		case <-deadline:
@@ -166,7 +166,7 @@ func TestAskCancelledWhileQueuedLeavesNothingBehind(t *testing.T) {
 		errc <- err
 	}()
 
-	deadline := time.After(2 * time.Second)
+	deadline := time.After(testenv.Budget(t))
 	for c.approval.queuedAsks() != 1 {
 		select {
 		case <-deadline:
@@ -182,7 +182,7 @@ func TestAskCancelledWhileQueuedLeavesNothingBehind(t *testing.T) {
 		if err == nil {
 			t.Fatal("cancelled Ask returned a nil error")
 		}
-	case <-time.After(2 * time.Second):
+	case <-time.After(testenv.Budget(t)):
 		t.Fatal("Ask did not unblock on cancellation while queued")
 	}
 	if got := c.approval.queuedAsks(); got != 0 {
@@ -232,7 +232,7 @@ func TestAskWithoutTimeoutBlocksUntilCancelled(t *testing.T) {
 		if err == nil {
 			t.Fatal("cancelled Ask returned a nil error")
 		}
-	case <-time.After(2 * time.Second):
+	case <-time.After(testenv.Budget(t)):
 		t.Fatal("Ask did not unblock after cancellation")
 	}
 }

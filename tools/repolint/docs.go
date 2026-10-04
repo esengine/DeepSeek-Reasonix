@@ -216,7 +216,7 @@ func proseBlocks(lines []string) []proseBlock {
 			continue
 		case inFence:
 			continue
-		case t == "" || strings.HasPrefix(t, "#") || strings.HasPrefix(t, "|") || strings.HasPrefix(t, "<"):
+		case t == "" || t == ">" || strings.HasPrefix(t, "#") || strings.HasPrefix(t, "|") || strings.HasPrefix(t, "<"):
 			flush()
 			continue
 		}

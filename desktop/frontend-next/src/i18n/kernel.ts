@@ -21,6 +21,16 @@ export const ACCOUNT_SIGNIN_DISABLED = "account.signin_disabled";
 export const SAVED_NOT_APPLIED: readonly string[] = ["provider.saved_while_running", "provider.saved_model_unlisted", "runtime.rebuild_failed"];
 
 const SAID: Record<string, string> = {
+  "shell.destructive_target": "递归删除目标受保护或超出授权范围；请使用工作区或授权目录内的字面路径",
+  "shell.analysis_unknown": "无法确定递归删除范围；请使用字面命令名、路径和解释器内容",
+  "shell.delete_sequence": "请拆分命令；递归删除前只能使用字面路径切换目录，不能依赖变量赋值",
+  "shell.delete_nonliteral": "请使用授权目录内的字面删除路径，不要使用变量、展开、通配符或未知管道输入",
+  "shell.delete_option": "删除选项无法识别；请使用已知选项并提供公共参数的值",
+  "shell.syntax_error": "命令语法有误；请修正后重试",
+  "shell.parser_unavailable": "主机命令解析器不可用；请在主机恢复后重试",
+  "shell.parser_timeout": "主机命令解析超时或被取消；请重试",
+  "shell.command_line_too_long": "命令超过主机长度限制；请拆分命令或从文件读取长文本",
+  "workspace.write_conflict": "另一个会话持有所需的写入范围。本次操作未执行；请结束当前轮次，待该范围释放后再重试",
   // ── 忙：不是出错，是「现在不行」 ─────────────────────────────────
   "plan.decision_stale": "该决定已不符合当前状态：计划在你回答前已发生变更",
   "busy.switch_model": "任务正在运行，请先停止再切换模型",
@@ -151,6 +161,9 @@ const SAID: Record<string, string> = {
   "share.cloud_unavailable": "互联网连接暂时不可用，请确认电脑端 Studio 已登录并保持在线。",
   "share.address_rejected": "地址 {ip} 不是本机的局域网地址。",
   "share.listen_failed": "无法在 {ip} 上开启监听：{error}",
+  "share.port_in_use": "端口 {port} 已被其他程序占用，请换一个端口，或清空后让系统自动选择。",
+  "share.port_out_of_range": "端口需要在 {min}–{max} 之间，或清空后让系统自动选择。",
+  "share.port_save_failed": "无法保存端口设置：{error}",
   "share.device_unknown": "没有这台已配对的设备，可能已被移除。",
   "picker.unsupported": "这个系统没有可用的文件夹选择框，请直接填写路径。",
   "picker.failed": "打不开文件夹选择框：{error}",

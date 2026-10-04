@@ -6,6 +6,7 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"os"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -64,6 +65,17 @@ func TestRunUnverifiedFinishExitsZeroUnlessAsked(t *testing.T) {
 	code, result, _ = runCLIJSONResult(t, "run", "-y", "--fail-on-unverified", "--output-format", "json", "write it")
 	if code != runExitUnverified || result["readiness"] == nil {
 		t.Fatalf("--fail-on-unverified exited %d with %v, want %d and the same verdict", code, result, runExitUnverified)
+	}
+}
+
+func TestRunProseOnlyFinishHasNoReadinessDebt(t *testing.T) {
+	dir := runToolCallFixture(t, "write_file", `{"path":"notes.md","content":"A neutral note."}`)
+	if err := os.Remove(filepath.Join(dir, "note.txt")); err != nil {
+		t.Fatal(err)
+	}
+	code, result, stderr := runCLIJSONResult(t, "run", "-y", "--fail-on-unverified", "--output-format", "json", "write a note")
+	if code != 0 || result["is_error"] != false || result["readiness"] != nil {
+		t.Fatalf("prose finish exited %d with %v; stderr: %s", code, result, stderr)
 	}
 }
 

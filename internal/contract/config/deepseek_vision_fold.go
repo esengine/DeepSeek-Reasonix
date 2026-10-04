@@ -97,7 +97,12 @@ func migrateRetiredDeepSeekModelRefs(c *Config) bool {
 	changed := false
 	retargetModelRefs(c, func(ref string) string {
 		prov, model, hasModel := strings.Cut(ref, "/")
-		if !hasModel || !slices.Contains(retiredDeepSeekFlashModels, strings.TrimSpace(model)) {
+		if !hasModel {
+			bare := bareRetiredDeepSeekRef(c, ref)
+			changed = changed || bare != ref
+			return bare
+		}
+		if !slices.Contains(retiredDeepSeekFlashModels, strings.TrimSpace(model)) {
 			return ref
 		}
 		if p, ok := c.Provider(prov); !ok || officialProviderHost(p.BaseURL) != "api.deepseek.com" {
@@ -107,6 +112,25 @@ func migrateRetiredDeepSeekModelRefs(c *Config) bool {
 		return prov + "/" + DeepSeekFlashModel
 	})
 	return changed
+}
+
+// bareRetiredDeepSeekRef names the official entry that now lists the flash
+// model, for a bare retired name nothing else still serves. A bare name has no
+// provider to stay with, and the official list stopped offering it.
+func bareRetiredDeepSeekRef(c *Config, ref string) string {
+	if !slices.Contains(retiredDeepSeekFlashModels, ref) {
+		return ref
+	}
+	if _, served := c.ResolveModel(ref); served {
+		return ref
+	}
+	for i := range c.Providers {
+		p := &c.Providers[i]
+		if officialProviderHost(p.BaseURL) == "api.deepseek.com" && p.HasModel(DeepSeekFlashModel) {
+			return p.Name + "/" + DeepSeekFlashModel
+		}
+	}
+	return ref
 }
 
 // retargetModelRefs applies rewrite to every field holding a provider/model ref.

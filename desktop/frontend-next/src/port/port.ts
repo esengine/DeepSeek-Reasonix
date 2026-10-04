@@ -179,7 +179,7 @@ export interface AgentPort {
   // did not have, and that is exactly what the second look is for.
   planPlugin(req: PluginInstallRequest): Promise<PluginPlan>;
   installPlugin(req: PluginInstallRequest): Promise<PluginPlan>;
-  setPluginEnabled(name: string, enabled: boolean): Promise<void>;
+  setPluginEnabled(name: string, enabled: boolean): Promise<{ reloadError?: string }>;
   removePlugin(name: string): Promise<PluginPlan>;
   // Hands the packed package to the user and reports what was stripped out of
   // it on the way. Installing is the same door: a folder, a link, or this

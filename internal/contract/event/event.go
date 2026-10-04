@@ -253,9 +253,10 @@ type Tool struct {
 	// Images are what the call showed the model, as data URLs. The result text
 	// only names them, so a window with nothing else to go on shows a person a
 	// placeholder where the agent had a picture.
-	Images      []string
-	Err         string // ToolResult: non-empty when the call failed or was blocked
-	RefusalCode string // ToolResult: dotted identity of a host refusal; Err is only its wording
+	Images         []string
+	Err            string // ToolResult: non-empty when the call failed or was blocked
+	RefusalCode    string // ToolResult: dotted identity of a host refusal; Err is only its wording
+	WorkspaceLease *WorkspaceLease
 	// OutputDiff marks a ToolResult whose whole output is a unified diff (e.g. a
 	// shell running `git diff`), set only when [agent].embedded_diff_detection is
 	// on. A frontend renders it as a diff instead of flat text.
@@ -448,6 +449,7 @@ type Compaction struct {
 	CoverageBackstopped bool   // the host wrote the dropped facts in itself
 	Boundary            string // "capacity" | "economic": which threshold sent this fold
 	TriggerTokens       int    // ...and its size, so a card need not say only "a threshold"
+	Code                string // Done with nothing folded: the class of refusal or failure, empty when none applies
 }
 
 // ContextMaintenance is the typed wire-safe receipt for snip/prune/noop/

@@ -1,6 +1,7 @@
 import type { Item } from "../../state/session";
 import { t } from "../../i18n";
 import { NOTICE_TEXT } from "../../i18n/notices";
+import { workspaceLeaseDetail } from "../../i18n/workspace_lease";
 import { Sym } from "../Sym";
 import { LazyMarkdown } from "../LazyMarkdown";
 
@@ -33,6 +34,10 @@ export function NoticeCard({ item }: { item: Extract<Item, { t: "notice" }> }) {
   // same notice in the reader's language, that is the one to show.
   const vars = item.code && FIGURES.has(item.code) ? figures(item.detail) : undefined;
   const wording = item.code && (!FIGURES.has(item.code) || vars) ? NOTICE_TEXT[item.code] : undefined;
+  const claim = item.workspaceLease;
+  const detail = claim
+    ? workspaceLeaseDetail(claim, item.code !== "workspace_lease_resumed") || item.detail
+    : item.detail;
   return (
     <div className="call" data-k="host" data-lvl={lvl}>
       <div className="g">
@@ -53,11 +58,11 @@ export function NoticeCard({ item }: { item: Extract<Item, { t: "notice" }> }) {
                   before them. */}
               {item.count && item.count > 1 ? <b className="ntimes">×{item.count}</b> : null}
             </span>
-            {item.detail && !vars && (PERMISSION.has(item.code ?? "")
+            {detail && !vars && (PERMISSION.has(item.code ?? "")
               ? <code className="nrule" title={item.text}>{item.detail}</code>
               : AUTHORED.has(item.code ?? "")
-                ? <div className="nmd"><LazyMarkdown text={item.detail} /></div>
-                : <span className="why nwhy">{item.detail}</span>)}
+                ? <div className="nmd"><LazyMarkdown text={detail} /></div>
+                : <span className="why nwhy">{detail}</span>)}
           </div>
         </div>
       </div>

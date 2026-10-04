@@ -214,6 +214,7 @@ export const ACTIONS: UIAction[] = [
   { id: "memory.forget", kind: "destructive", target: "entity", proof: "interaction" },
   { id: "config.repair", kind: "kernel-mutation", target: "none", proof: "interaction" },
   { id: "extensions.reload", kind: "kernel-mutation", target: "none", proof: "interaction" },
+  { id: "extensions.refresh", kind: "repeatable", target: "none", proof: "interaction" },
   { id: "extensions.inspect", kind: "kernel-mutation", target: "none", proof: "interaction" },
   { id: "extensions.install", kind: "kernel-mutation", target: "none", proof: "authority-effect" },
   { id: "extensions.update", kind: "kernel-mutation", target: "none", proof: "authority-effect" },
@@ -250,6 +251,7 @@ export const ACTIONS: UIAction[] = [
   { id: "market.signin", kind: "navigation", target: "none", proof: "interaction" },
   { id: "market.draft", kind: "view", target: "none", proof: "interaction" },
   { id: "market.publish", kind: "kernel-mutation", target: "none", proof: "interaction" },
+  { id: "market.prepare-version", kind: "view", target: "none", proof: "interaction" },
   { id: "market.publish-again", kind: "view", target: "none", proof: "interaction" },
   // The account's own packages: a preview, an install pinned to that preview's
   // digest, and sending a private one to review.
@@ -348,6 +350,7 @@ export const ACTIONS: UIAction[] = [
   { id: "context.window-tokens", kind: "kernel-mutation", target: "none", proof: "authority-effect" },
   { id: "mcp.add", kind: "kernel-mutation", target: "none", proof: "authority-effect" },
   { id: "mcp.inspect", kind: "repeatable", target: "none", proof: "interaction" },
+  { id: "mcp.scope", kind: "interaction", target: "none", proof: "interaction" },
   { id: "remotes.add", kind: "kernel-mutation", target: "none", proof: "authority-effect" },
   { id: "remotes.save", kind: "kernel-mutation", target: "none", proof: "authority-effect" },
   { id: "remotes.remove", kind: "destructive", target: "entity", proof: "authority-effect" },
@@ -359,6 +362,7 @@ export const ACTIONS: UIAction[] = [
   { id: "share.cloud-offer", kind: "repeatable", target: "none", proof: "interaction" },
   { id: "share.toggle", kind: "kernel-mutation", target: "none", proof: "authority-effect" },
   { id: "share.address", kind: "view", target: "none", proof: "interaction" },
+  { id: "share.port", kind: "kernel-mutation", target: "none", proof: "authority-effect" },
   { id: "share.offer", kind: "kernel-mutation", target: "none", proof: "authority-effect" },
   { id: "share.ask-revoke", kind: "view", target: "entity", proof: "interaction" },
   { id: "share.keep", kind: "view", target: "entity", proof: "interaction" },

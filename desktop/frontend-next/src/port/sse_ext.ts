@@ -33,8 +33,8 @@ export class SseExtensions extends SseLook {
   installPlugin(req: PluginInstallRequest) {
     return this.post0<PluginPlan>("/plugins/install", req);
   }
-  async setPluginEnabled(name: string, enabled: boolean) {
-    await this.post0<{ reloadError?: string }>("/plugins/enabled", { name, enabled });
+  setPluginEnabled(name: string, enabled: boolean) {
+    return this.post0<{ reloadError?: string }>("/plugins/enabled", { name, enabled });
   }
   removePlugin(name: string): Promise<PluginPlan> {
     return this.del0<PluginPlan>("/plugins/" + encodeURIComponent(name));

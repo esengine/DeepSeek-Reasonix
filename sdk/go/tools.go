@@ -19,15 +19,17 @@ func (s *server) declareTools(result *InitializeResult) {
 	if len(result.Tools) > 0 || len(s.opts.Tools) == 0 {
 		return
 	}
-	for name := range s.opts.Tools {
-		result.Tools = append(result.Tools, name)
+	for name, run := range s.opts.Tools {
+		if run != nil {
+			result.Tools = append(result.Tools, name)
+		}
 	}
 	slices.Sort(result.Tools)
 }
 
 func (s *server) handleToolCall(ctx context.Context, raw json.RawMessage) (any, error) {
 	var p ToolCallParams
-	if err := strictDecode(raw, &p); err != nil || strings.TrimSpace(p.Name) == "" || p.TimeoutMillis < 0 {
+	if err := strictDecode(raw, &p); err != nil || strings.TrimSpace(p.Name) == "" || p.TimeoutMillis < 0 || !jsonKeyPresent(raw, "arguments") {
 		return nil, MustProtocolError(ErrInvalidParams)
 	}
 	run, ok := s.opts.Tools[p.Name]

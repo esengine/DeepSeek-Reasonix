@@ -3,6 +3,7 @@ package control
 import (
 	"context"
 	"errors"
+	"reasonix/internal/base/testenv"
 	"testing"
 	"time"
 
@@ -31,7 +32,7 @@ func TestHeadlessRunTakesTheTurnGate(t *testing.T) {
 	}
 
 	close(inFlight)
-	deadline := time.After(10 * time.Second)
+	deadline := time.After(testenv.Budget(t))
 	for len(sess.Snapshot()) < 2 {
 		select {
 		case <-deadline:

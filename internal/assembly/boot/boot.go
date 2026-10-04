@@ -178,6 +178,13 @@ func subagentModelRef(cfg *config.Config, sk skill.Skill) string {
 }
 
 func subagentEffortRef(cfg *config.Config, sk skill.Skill) string {
+	if cfg == nil {
+		return strings.TrimSpace(sk.Effort)
+	}
+	return subagentEffortRefWithInheritedDefault(cfg, sk, cfg.Agent.SubagentEffort)
+}
+
+func subagentEffortRefWithInheritedDefault(cfg *config.Config, sk skill.Skill, inherited string) string {
 	if cfg != nil {
 		for _, key := range SubagentModelKeys(sk.Name) {
 			if e := strings.TrimSpace(cfg.Agent.SubagentEfforts[key]); e != "" {
@@ -188,10 +195,7 @@ func subagentEffortRef(cfg *config.Config, sk skill.Skill) string {
 	if e := strings.TrimSpace(sk.Effort); e != "" {
 		return e
 	}
-	if cfg == nil {
-		return ""
-	}
-	return strings.TrimSpace(cfg.Agent.SubagentEffort)
+	return strings.TrimSpace(inherited)
 }
 
 // SubagentModelKeys returns the cfg.Agent.SubagentModels/SubagentEfforts map
@@ -391,27 +395,11 @@ func subagentEffectiveIdentity(cfg *config.Config, resolver provider.Resolver, b
 	} else {
 		ref = strings.TrimSpace(baseModelRef)
 	}
-	if explicit && cfg != nil && ref != "" {
-		if resolved, ok := cfg.ResolveModel(ref); ok {
-			entry = *resolved
-		} else if resolved := syntheticEntryFromResolver(resolver, ref); strings.TrimSpace(resolved.Name) != "" {
-			entry = *resolved
+	if explicit || base == nil {
+		if resolved, _, err := subagentModelEntry(cfg, resolver, base, ref); err == nil {
+			entry = resolved
 		} else {
 			entry.Model = ref
-		}
-	} else if explicit {
-		if resolved := syntheticEntryFromResolver(resolver, ref); strings.TrimSpace(resolved.Name) != "" {
-			entry = *resolved
-		} else {
-			entry.Model = ref
-		}
-	} else if base == nil && ref != "" {
-		if resolved := syntheticEntryFromResolver(resolver, ref); strings.TrimSpace(resolved.Name) != "" {
-			entry = *resolved
-		} else if cfg != nil {
-			if resolved, ok := cfg.ResolveModel(ref); ok {
-				entry = *resolved
-			}
 		}
 	}
 	if rawEffort := strings.TrimSpace(effort); rawEffort != "" {

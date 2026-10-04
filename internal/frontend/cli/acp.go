@@ -407,16 +407,26 @@ func (f *acpFactory) SessionConfigState(_ context.Context, p acp.SessionConfigSt
 		},
 	})
 
+	return acpSessionConfigState(cfg, entry, ok, currentModel, effortOverride, runtimeProfile, modelInfos, options), nil
+}
+
+func acpSessionConfigState(cfg *config.Config, entry *config.ProviderEntry, resolved bool, currentModel string, effortOverride *string, runtimeProfile string, modelInfos []acp.ModelInfo, options []acp.SessionConfigOption) acp.SessionConfigState {
+	identity := boot.ProviderBuildIdentity{}
+	if resolved {
+		identity = boot.ResolveProviderBuildIdentity(entry, cfg.NetworkProxySpec(), effortOverride)
+	}
 	return acp.SessionConfigState{
-		Model:          currentModel,
-		EffortOverride: effortOverride,
-		RuntimeProfile: runtimeProfile,
+		Model:               currentModel,
+		EffortOverride:      effortOverride,
+		RuntimeProfile:      runtimeProfile,
+		ResolvedEffort:      identity.Effort,
+		ProviderFingerprint: identity.Fingerprint,
 		Models: &acp.SessionModelState{
 			AvailableModels: modelInfos,
 			CurrentModelID:  currentModel,
 		},
 		ConfigOptions: options,
-	}, nil
+	}
 }
 
 func acpRuntimeProfile(value string) string {

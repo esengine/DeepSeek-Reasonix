@@ -2,6 +2,7 @@ package control
 
 import (
 	"context"
+	"reasonix/internal/base/testenv"
 	"reasonix/internal/state/sessionstore"
 	"strings"
 	"testing"
@@ -87,7 +88,7 @@ func TestSubagentSkillGoalRejectsStaleWorkDuration(t *testing.T) {
 	)
 	select {
 	case <-started:
-	case <-time.After(5 * time.Second):
+	case <-time.After(testenv.Budget(t)):
 		t.Fatal("subagent skill did not start")
 	}
 

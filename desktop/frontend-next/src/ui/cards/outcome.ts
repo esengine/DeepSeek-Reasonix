@@ -1,6 +1,7 @@
 import type { Tool } from "../../port/wire";
 import { t } from "../../i18n";
 import { say } from "../../i18n/kernel";
+import { workspaceLeaseDetail } from "../../i18n/workspace_lease";
 
 export function toolFailed(tool: Tool): boolean {
   if (tool.err) return true;
@@ -24,5 +25,6 @@ export function toolFailureLabel(tool: Tool): string {
 // What the host's refusal code means, in the reader's language; empty when the
 // code has no wording here and the kernel's own sentence is all there is.
 export function toolRefusalReason(tool: Tool): string {
-  return tool.refusalCode ? say({ code: tool.refusalCode }, "") : "";
+  const reason = tool.refusalCode ? say({ code: tool.refusalCode }, "") : "";
+  return tool.workspaceLease ? [reason, workspaceLeaseDetail(tool.workspaceLease)].filter(Boolean).join(" · ") : reason;
 }

@@ -22,6 +22,7 @@ import (
 	"reasonix/internal/base/fileutil"
 	fileencoding "reasonix/internal/base/fileutil/encoding"
 	"reasonix/internal/base/frontmatter"
+	"reasonix/internal/contract/config"
 	"reasonix/internal/ext/command"
 )
 
@@ -396,17 +397,17 @@ func ParseDir(root string) (Package, []string, error) {
 	// error (a v1 typo names its field path); only a missing file falls
 	// through to the next manifest kind.
 	if pkg, warnings, err := parseNative(filepath.Join(root, NativeManifest), root); err == nil {
-		return pkg, warnings, nil
+		return pkg, append(warnings, pkg.skillNameWarnings()...), nil
 	} else if !errors.Is(err, os.ErrNotExist) {
 		return Package{}, nil, err
 	}
 	if pkg, warnings, err := parseCodex(filepath.Join(root, CodexManifest), root); err == nil {
-		return pkg, warnings, nil
+		return pkg, append(warnings, pkg.skillNameWarnings()...), nil
 	} else if !errors.Is(err, os.ErrNotExist) {
 		return Package{}, nil, err
 	}
 	if pkg, warnings, err := parseClaudePlugin(filepath.Join(root, ClaudeManifest), root); err == nil {
-		return pkg, warnings, nil
+		return pkg, append(warnings, pkg.skillNameWarnings()...), nil
 	} else if !errors.Is(err, os.ErrNotExist) {
 		return Package{}, nil, err
 	}
@@ -1021,28 +1022,8 @@ func (p Package) ThemeFiles() []ThemeRef {
 }
 
 func (p Package) skillRefs() []SkillRef {
-	var out []SkillRef
-	seen := map[string]bool{}
-	for _, rel := range p.Manifest.Skills {
-		root := filepath.Join(p.Root, filepath.FromSlash(rel))
-		p.scanSkillPath(root, 1, map[string]bool{}, &out)
-	}
-	filtered := out[:0]
-	for _, sk := range out {
-		key := sk.Path
-		if key == "" {
-			key = sk.Name
-		}
-		if seen[key] {
-			continue
-		}
-		seen[key] = true
-		filtered = append(filtered, sk)
-	}
-	slices.SortStableFunc(filtered, func(a, b SkillRef) int {
-		return cmp.Or(cmp.Compare(a.Name, b.Name), cmp.Compare(a.Path, b.Path))
-	})
-	return filtered
+	refs, _ := p.skillRefsWithWarnings()
+	return refs
 }
 
 func (p Package) scanSkillPath(path string, depth int, seen map[string]bool, out *[]SkillRef) {
@@ -1110,7 +1091,7 @@ func shouldSkipSkillScanDir(name string) bool {
 }
 
 func parseSkillRef(path, stem string) (SkillRef, bool) {
-	if !IsValidName(stem) {
+	if !config.IsValidSkillName(stem) {
 		return SkillRef{}, false
 	}
 	b, err := fileencoding.ReadFileUTF8(path)
@@ -1119,10 +1100,7 @@ func parseSkillRef(path, stem string) (SkillRef, bool) {
 	}
 	content := strings.TrimPrefix(strings.ReplaceAll(string(b), "\r\n", "\n"), "\uFEFF")
 	fm, _ := frontmatter.SplitLegacy(content)
-	name := stem
-	if v := strings.TrimSpace(fm["name"]); IsValidName(v) {
-		name = v
-	}
+	name := config.ResolveSkillName(stem, fm["name"])
 	return SkillRef{
 		Name:        name,
 		Description: strings.TrimSpace(fm["description"]),

@@ -272,8 +272,7 @@ type externalFolderToolRefs interface {
 }
 
 // Options carries the already-built pieces setup assembles. Lifecycle metadata
-// lets the controller mint and rotate session files; Host/Commands are surfaced
-// to frontends that resolve MCP prompts and slash commands.
+// lets it mint/rotate session files; Host/Commands surface MCP prompts and slash commands.
 type Options struct {
 	Runner   agent.Runner
 	Executor *agent.Agent
@@ -303,17 +302,19 @@ type Options struct {
 	SubagentGate *SharedHeadlessGate
 	Label        string
 	ModelRef     string
-	// ModelModes are the optional modes the session's model declares.
-	ModelModes    []config.ModelMode
-	SystemPrompt  string
-	SessionDir    string
-	SessionPath   string
-	Host          *plugin.Host
-	Commands      []command.Command
-	Skills        []skill.Skill
-	AllSkills     []skill.Skill
-	SkillStore    *skill.Store
-	AllSkillStore *skill.Store
+	Effort       string             // resolved effective provider effort; not a request-scoped override
+	ModelModes   []config.ModelMode // optional modes the session's model declares
+	// ProviderFingerprint identifies resolved provider build inputs; empty fails closed.
+	ProviderFingerprint string
+	SystemPrompt        string
+	SessionDir          string
+	SessionPath         string
+	Host                *plugin.Host
+	Commands            []command.Command
+	Skills              []skill.Skill
+	AllSkills           []skill.Skill
+	SkillStore          *skill.Store
+	AllSkillStore       *skill.Store
 	// DisableImplicitSkillInvocation controls model-facing discovery only;
 	// explicit /skill commands and management remain host-side capabilities.
 	DisableImplicitSkillInvocation bool

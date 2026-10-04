@@ -1,7 +1,7 @@
 // @vitest-environment jsdom
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { cleanup, fireEvent, render } from "@testing-library/react";
-import { DOCK, Gutter, dockMax } from "./Gutter";
+import { DOCK, Gutter, RAIL, dockMax, widthOf } from "./Gutter";
 
 afterEach(cleanup);
 
@@ -31,5 +31,13 @@ describe("workbench width on wide displays", () => {
     fireEvent.keyDown(separator, { key: "ArrowLeft", shiftKey: true });
     expect(onWidth).not.toHaveBeenCalled();
     expect(separator.getAttribute("aria-valuemax")).toBe("880");
+  });
+});
+
+describe("workspace column floor", () => {
+  it("raises a width saved below the floor, where the session filters no longer fit", () => {
+    localStorage.setItem(RAIL.key, "176");
+    expect(widthOf(RAIL)).toBe(RAIL.min);
+    expect(RAIL.min).toBeGreaterThanOrEqual(232);
   });
 });

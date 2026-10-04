@@ -8,6 +8,16 @@ import { ToolCard } from "./ToolCard";
 afterEach(cleanup);
 
 describe("tool outcome cards", () => {
+  it("identifies the session and path that refused a write", () => {
+    const tool = { id: "conflict", name: "write_file", err: "claim unavailable", refusalCode: "workspace.write_conflict", readOnly: false,
+      workspaceLease: { contended: 0, heldMs: 0, idleMs: 0, holder: "Fixture A", holderSessionId: "session-a", paths: ["src/a.go"], requestedPaths: ["src/a.go"] },
+    } as Parameters<typeof ToolCard>[0]["tool"];
+    const { container } = render(<ToolCard tool={tool} running={false} />);
+    const why = container.querySelector('[data-refusal="workspace.write_conflict"]');
+    expect(why?.textContent).toContain("Fixture A");
+    expect(why?.textContent).toContain("session-a");
+    expect(why?.textContent).toContain("src/a.go");
+  });
   it("keeps a failed read visible after reads are folded", () => {
     const { container } = render(<ReadsCard tools={[
       { id: "ok", name: "read_file", args: '{"path":"a.ts"}', output: "1→ok", readOnly: true },

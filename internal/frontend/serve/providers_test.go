@@ -291,6 +291,40 @@ func TestRemoveProviderInUseMovesTheConversation(t *testing.T) {
 	}
 }
 
+// A saved default nothing serves is not where the conversation goes: it moves
+// to what remains, as a window opening on that config would.
+func TestRemoveProviderInUseSkipsAStaleDefault(t *testing.T) {
+	s := newProviderEditServer(t)
+	s.AllowProviderEdit()
+	srv := httptest.NewServer(operatorHandler(s))
+	defer srv.Close()
+
+	add := postProvider(t, srv.URL, "/providers", `{"name":"spare","kind":"openai","baseUrl":"https://x.invalid","apiKey":"sk-spare","models":["m"]}`)
+	add.Body.Close()
+	path := config.UserConfigPath()
+	body, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	stale := strings.Replace(string(body), `default_model = "existing/model-a"`, `default_model = "deepseek-v4-flash"`, 1)
+	if stale == string(body) {
+		t.Fatalf("fixture has no default_model line to make stale:\n%s", body)
+	}
+	if err := os.WriteFile(path, []byte(stale), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	resp := postProvider(t, srv.URL, "/providers/remove", `{"name":"existing"}`)
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusNoContent {
+		b, _ := readAllString(resp)
+		t.Fatalf("remove = %d: %s", resp.StatusCode, b)
+	}
+	if got, _, _ := strings.Cut(currentModelRef(s.ctl()), "/"); got != "spare" {
+		t.Fatalf("conversation is on %q, want it moved to spare", currentModelRef(s.ctl()))
+	}
+}
+
 func TestRemoveProviderDropsAnUnusedOne(t *testing.T) {
 	s := newProviderEditServer(t)
 	s.AllowProviderEdit()

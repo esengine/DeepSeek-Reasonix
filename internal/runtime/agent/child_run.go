@@ -165,6 +165,7 @@ func plannerExecutionRegistry(reg *tool.Registry) *tool.Registry {
 	if reg == nil {
 		return filtered
 	}
+	filtered.CopyDisabledMCPFrom(reg)
 	for _, name := range reg.Names() {
 		target, ok := reg.Get(name)
 		if !ok {
@@ -209,6 +210,7 @@ func strictReadOnlyExecutionRegistry(reg *tool.Registry) *tool.Registry {
 	if reg == nil {
 		return filtered
 	}
+	filtered.CopyDisabledMCPFrom(reg)
 	for _, name := range reg.Names() {
 		target, ok := reg.Get(name)
 		if !ok || !target.ReadOnly() || tool.HasMCPDestructiveHint(target) {

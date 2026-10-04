@@ -186,11 +186,11 @@ func (a *contextWindow) compressVisibleRange(
 	})})
 	prepared, reason, err := a.prepareVisibleCompression(ctx, trigger, plan.fold, instructions)
 	if err != nil {
-		a.emitCompactionAborted(trigger)
+		a.emitCompactionAborted(trigger, compactionFailureCode(err))
 		return tool.CompressResult{}, err
 	}
 	if reason != "" {
-		a.emitCompactionAborted(trigger)
+		a.emitCompactionAborted(trigger, "")
 		result.Reason = reason
 		return result, nil
 	}
@@ -201,14 +201,14 @@ func (a *contextWindow) compressVisibleRange(
 	if err != nil {
 		tele.Error = err.Error()
 		a.emitCompactionTelemetry(tele)
-		a.emitCompactionAborted(trigger)
+		a.emitCompactionAborted(trigger, compactionFailureCode(err))
 		return tool.CompressResult{}, err
 	}
 	summary, err = a.interceptCompactionComplete(ctx, summary)
 	if err != nil {
 		tele.Error = err.Error()
 		a.emitCompactionTelemetry(tele)
-		a.emitCompactionAborted(trigger)
+		a.emitCompactionAborted(trigger, compactionFailureCode(err))
 		return tool.CompressResult{}, err
 	}
 
@@ -223,7 +223,7 @@ func (a *contextWindow) compressVisibleRange(
 	if projectionTokens >= result.SourceTokens {
 		result.Reason = "compressed context would not be smaller"
 		a.emitCompactionTelemetry(tele)
-		a.emitCompactionAborted(trigger)
+		a.emitCompactionAborted(trigger, NoopCandidateNotSmaller)
 		return result, nil
 	}
 
@@ -244,7 +244,7 @@ func (a *contextWindow) compressVisibleRange(
 			tele.Error = err.Error()
 			a.emitCompactionTelemetry(tele)
 		}
-		a.emitCompactionAborted(trigger)
+		a.emitCompactionAborted(trigger, compactionFailureCode(err))
 		return tool.CompressResult{}, err
 	}
 	a.emitCompactionTelemetry(tele)
@@ -447,7 +447,7 @@ func (a *contextWindow) compactToProjection(ctx context.Context, trigger, instru
 		a.canonicalOriginFor(stateSnapshot, canonical, msgs, head))
 	fixedPrefixTokens := a.estimatedPromptTokens(a.providerProjectionMessages(msgs[:head]))
 	if a.effectiveContextWindow() > 0 && fixedPrefixTokens >= a.compactTrigger() {
-		return CompactionNoop, NoopFixedPrefixAboveTrigger, rejectCheckpoint("fixed prefix (%d tokens) already exceeds trigger (%d)", fixedPrefixTokens, a.compactTrigger())
+		return CompactionNoop, NoopFixedPrefixAboveTrigger, rejectCheckpoint(NoopFixedPrefixAboveTrigger, "fixed prefix (%d tokens) already exceeds trigger (%d)", fixedPrefixTokens, a.compactTrigger())
 	}
 
 	sourceTokens := a.announceCompaction(trigger, len(fold), msgs)
@@ -465,18 +465,18 @@ func (a *contextWindow) compactToProjection(ctx context.Context, trigger, instru
 	var err error
 	fold, instructions, err = a.interceptCompactionPrepare(ctx, fold, instructions)
 	if err != nil {
-		a.emitCompactionAborted(trigger)
+		a.emitCompactionAborted(trigger, compactionFailureCode(err))
 		return CompactionNoop, "", err
 	}
 	if len(fold) == 0 {
-		a.emitCompactionAborted(trigger)
+		a.emitCompactionAborted(trigger, NoopFoldEmptyAfterHooks)
 		return CompactionNoop, NoopFoldEmptyAfterHooks, nil
 	}
 
 	res, tele, err := a.foldOrDegrade(ctx, trigger, mustFree, fold, instructions, sourceTokens)
 	if err != nil {
 		a.emitCompactionTelemetry(tele)
-		a.emitCompactionAborted(trigger)
+		a.emitCompactionAborted(trigger, compactionFailureCode(err))
 		return CompactionNoop, "", err
 	}
 	res.Text = a.attachFoldIndex(res.Text, priorIndex, foldIndex)
@@ -484,7 +484,7 @@ func (a *contextWindow) compactToProjection(ctx context.Context, trigger, instru
 	if err != nil {
 		tele.Error = err.Error()
 		a.emitCompactionTelemetry(tele)
-		a.emitCompactionAborted(trigger)
+		a.emitCompactionAborted(trigger, compactionFailureCode(err))
 		return CompactionNoop, "", err
 	}
 
@@ -496,7 +496,7 @@ func (a *contextWindow) compactToProjection(ctx context.Context, trigger, instru
 	tele.UserTurnsKept, tele.UserTurnsDropped = retention.Kept, retention.Dropped
 	a.emitCompactionTelemetry(tele)
 	if err := a.acceptCheckpointCandidate(trigger, scope, sourceTokens, projTokens, fixedPrefixTokens); err != nil {
-		a.emitCompactionAborted(trigger)
+		a.emitCompactionAborted(trigger, compactionFailureCode(err))
 		return CompactionNoop, "", err
 	}
 	viewOutputHash := sessionstore.ProviderVisibleFingerprint(provider.ModelMessages(candidate))
@@ -508,7 +508,7 @@ func (a *contextWindow) compactToProjection(ctx context.Context, trigger, instru
 		sourceTokens: sourceTokens, projectionTokens: projTokens, summaryUsage: tele.SummaryUsage,
 	})
 	if err != nil {
-		a.emitCompactionAborted(trigger)
+		a.emitCompactionAborted(trigger, compactionFailureCode(err))
 		return CompactionNoop, "", err
 	}
 	a.svc.sink.Emit(event.Event{Kind: event.CompactionDone, Compaction: a.compactionFrame(event.Compaction{
@@ -569,7 +569,7 @@ func (a *contextWindow) foldedProjection(state sessionstore.CompactionState, pro
 // savings, since below the trigger the ceiling has nothing to protect.
 func (a *contextWindow) acceptCheckpointCandidate(trigger string, scope compactionScope, sourceTokens, candidateTokens, fixedPrefixTokens int) error {
 	if candidateTokens >= sourceTokens {
-		return rejectCheckpoint("candidate would not reduce tokens (%d >= %d)", candidateTokens, sourceTokens)
+		return rejectCheckpoint(NoopCandidateNotSmaller, "candidate would not reduce tokens (%d >= %d)", candidateTokens, sourceTokens)
 	}
 	triggerTokens := a.compactTrigger()
 	ceiling := a.checkpointCeiling()
@@ -583,13 +583,13 @@ func (a *contextWindow) acceptCheckpointCandidate(trigger string, scope compacti
 		// Exceptional path: fixed prefix alone already exceeds 50%.
 		savings := sourceTokens - candidateTokens
 		if savings < a.exceptionalMinimumSavings() {
-			return rejectCheckpoint("fixed-prefix exception requires ≥%d token savings, got %d", a.exceptionalMinimumSavings(), savings)
+			return rejectCheckpoint(NoopSavingsBelowMinimum, "fixed-prefix exception requires ≥%d token savings, got %d", a.exceptionalMinimumSavings(), savings)
 		}
 		if triggerTokens > 0 && candidateTokens >= triggerTokens {
-			return rejectCheckpoint("candidate %d still at or above trigger %d", candidateTokens, triggerTokens)
+			return rejectCheckpoint(NoopCandidateAboveTrigger, "candidate %d still at or above trigger %d", candidateTokens, triggerTokens)
 		}
 		if hard > 0 && candidateTokens >= hard {
-			return rejectCheckpoint("candidate %d still at or above physical ceiling %d", candidateTokens, hard)
+			return rejectCheckpoint(NoopCandidateAbovePhysical, "candidate %d still at or above physical ceiling %d", candidateTokens, hard)
 		}
 		return nil
 	}
@@ -598,13 +598,13 @@ func (a *contextWindow) acceptCheckpointCandidate(trigger string, scope compacti
 		// this is not a fixed-prefix exception. Force/overflow may still land
 		// a strictly smaller view below the trigger when the ceiling cannot.
 		if !scope.ignoreEconomics {
-			return rejectCheckpoint("candidate %d exceeds checkpoint ceiling %d (protected content too large)", candidateTokens, ceiling)
+			return rejectCheckpoint(NoopCandidateAboveCeiling, "candidate %d exceeds checkpoint ceiling %d (protected content too large)", candidateTokens, ceiling)
 		}
 	}
 	// Not an exception anyone may waive: a checkpoint that lands back at the
 	// trigger has bought the next fold rather than avoided it.
 	if triggerTokens > 0 && candidateTokens >= triggerTokens {
-		return rejectCheckpoint("candidate %d still at or above trigger %d", candidateTokens, triggerTokens)
+		return rejectCheckpoint(NoopCandidateAboveTrigger, "candidate %d still at or above trigger %d", candidateTokens, triggerTokens)
 	}
 	return nil
 }

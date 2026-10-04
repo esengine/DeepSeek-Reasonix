@@ -171,7 +171,7 @@ export function ServerRow({
       )}
     </div>
   );
-  const why = m.error || failed;
+  const why = failed || m.error;
   if (!tools.length) {
     return (
       <div className="srv" data-st={m.state} data-local={m.localOverride ? "" : undefined} aria-busy={!!busy}>
