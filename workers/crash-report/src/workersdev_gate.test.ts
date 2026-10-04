@@ -36,6 +36,7 @@ const denied: [string, string][] = [
   ["POST", `/v1/admin/feedback/${R}/ask`],
   ["POST", `/v1/admin/feedback/${R}/reply`],
   ["POST", `/v1/admin/feedback/${R}/takedown`],
+  ["POST", `/v1/admin/feedback/${R}/link`],
   ["GET", `/v1/admin/feedback/${R}/attachments/abcdefghijklmnop`],
   ["POST", "/v1/admin/feedback/pending"],
   ["GET", `/v1/admin/feedback/${R}/recorded`],

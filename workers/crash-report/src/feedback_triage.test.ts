@@ -339,6 +339,77 @@ describe("global cap fairness", () => {
   });
 });
 
+describe("linking an existing issue", () => {
+  const issue = (n: number) => ({ issueNumber: n });
+  const url = (n: number) => `https://github.com/esengine/DeepSeek-Reasonix/issues/${n}`;
+
+  it.each(["held", "needs_info", "answered", "received"])("moves %s to recorded with the issue visible to the reporter", async (from) => {
+    const r = await receiptOf();
+    if (from === "needs_info") await act(r, "ask", { body: "which os?" });
+    if (from === "answered") await act(r, "answer", { body: "see the issue" });
+    if (from === "received") await act(r, "release");
+    expect(statusOf(r)).toBe(from);
+    expect((await act(r, "link", issue(42))).status).toBe(200);
+    expect(rowOf(r)).toMatchObject({ status: "recorded", issue_number: 42, issue_url: url(42) });
+    expect((await mine(ids.a)).find((i) => i.receipt === r)).toMatchObject({ status: "recorded", issueNumber: 42 });
+  });
+
+  it("is a no-op for the same issue and conflicts for another", async () => {
+    const r = await receiptOf();
+    await act(r, "answer", { body: "x" });
+    await act(r, "link", issue(42));
+    const before = rowOf(r).updated_at;
+    expect((await act(r, "link", issue(42))).status).toBe(200);
+    expect(rowOf(r).updated_at).toBe(before);
+    const res = await act(r, "link", issue(43));
+    expect(res.status).toBe(409);
+    expect(await errCode(res)).toBe("feedback.issue_conflict");
+    expect(rowOf(r).issue_number).toBe(42);
+  });
+
+  it("agrees with the converter on an already recorded item and leaves later statuses alone", async () => {
+    const r = await receiptOf();
+    await act(r, "release");
+    await act(r, "recorded", { issueNumber: 5, issueUrl: url(5) });
+    expect((await act(r, "link", issue(5))).status).toBe(200);
+    expect(await errCode(await act(r, "link", issue(6)))).toBe("feedback.issue_conflict");
+    await post(`/v1/admin/feedback/${r}/status`, { status: "in_progress" }, admin);
+    expect((await act(r, "link", issue(5))).status).toBe(200);
+    expect(statusOf(r)).toBe("in_progress");
+  });
+
+  it("refuses rejected items, unknown receipts and bodies whose url and number disagree", async () => {
+    const r = await receiptOf();
+    await act(r, "reject", { reason: "spam" });
+    expect(await errCode(await act(r, "link", issue(1)))).toBe("feedback.bad_transition");
+    expect(statusOf(r)).toBe("rejected");
+    expect(await errCode(await act("FB-ZZZZ-ZZZZ", "link", issue(1)))).toBe("feedback.not_found");
+    const h = await receiptOf();
+    const bad = [{}, { issueNumber: 0 }, { issueNumber: -1 }, { issueNumber: 1.5 }, { issueNumber: "1" }];
+    const hostile = ["https://evil.com/issues/1", "javascript:x//issues/1", "https://github.com/o/r/issues/1", "https://github.com/esengine/DeepSeek-Reasonix/issues/1/x", "https://github.com/esengine/DeepSeek-Reasonix/issues/1?a=b", "https://github.com/esengine/DeepSeek-Reasonix/issues/1#f", "https://github.com/esengine/DeepSeek-Reasonix/issues/2"];
+    for (const body of [...bad, ...hostile.map((issueUrl) => ({ issueNumber: 1, issueUrl }))]) {
+      expect(await errCode(await act(h, "link", body))).toBe("feedback.invalid");
+    }
+    expect(statusOf(h)).toBe("held");
+  });
+
+  it("leaves a linked report replyable by the reporter and closed to answer/ask", async () => {
+    const r = await receiptOf();
+    await act(r, "answer", { body: "x" });
+    await act(r, "link", issue(7));
+    expect((await post(`/v1/feedback/${r}/reply`, { body: "thanks" }, as(ids.a))).status).toBe(201);
+    expect((await act(r, "reply", { body: "welcome" })).status).toBe(200);
+    for (const action of ["answer", "ask", "release"]) expect(await errCode(await act(r, action, { body: "q" }))).toBe("feedback.bad_transition");
+    expect(statusOf(r)).toBe("recorded");
+  });
+
+  it("leaves the converter endpoint strict about triage statuses", async () => {
+    const r = await receiptOf();
+    await act(r, "answer", { body: "x" });
+    expect(await errCode(await act(r, "recorded", { issueNumber: 1, issueUrl: url(1) }))).toBe("feedback.bad_transition");
+  });
+});
+
 describe("triage transitions", () => {
   it("lists held and needs_info items oldest first with trust and install hash", async () => {
     const a = await receiptOf();
@@ -409,6 +480,7 @@ describe("triage transitions", () => {
       ["POST", `/v1/admin/feedback/${r}/ask`],
       ["POST", `/v1/admin/feedback/${r}/reply`],
       ["POST", `/v1/admin/feedback/${r}/takedown`],
+      ["POST", `/v1/admin/feedback/${r}/link`],
       ["GET", "/v1/admin/feedback/replies/pending"],
       ["POST", "/v1/admin/feedback/replies/1/ack"],
       ["POST", "/v1/admin/feedback/block"],

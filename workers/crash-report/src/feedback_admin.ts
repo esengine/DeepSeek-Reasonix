@@ -6,7 +6,7 @@ import { requireAdmin } from "./feedback_auth";
 import { jsonResponse, refuse } from "./feedback_http";
 import { pendingItem, releasedKeys } from "./feedback_read";
 import { announce, type OpsWaiter } from "./ops_emit";
-import { RecordedBody, StatusBody } from "./feedback_schema";
+import { LinkBody, RecordedBody, StatusBody } from "./feedback_schema";
 import { adminAttachment, adminReply, answer, ask, detail, held, reject, release, takedown } from "./feedback_triage";
 import { statusRank, type FeedbackRow } from "./feedback_types";
 
@@ -14,6 +14,8 @@ import { statusRank, type FeedbackRow } from "./feedback_types";
 export const PUBLIC_ORIGIN = "https://crash.reasonix.io";
 const OPEN_LIMIT = 200;
 const CONCRETE_VERSION = /^v\d+\.\d+\.\d+$/;
+const ISSUE_BASE = "https://github.com/esengine/DeepSeek-Reasonix/issues/";
+const LINKABLE = ["held", "needs_info", "answered", "received"];
 const ACTIVE = ["recorded", "in_progress"];
 
 async function pending(env: Env, url: URL): Promise<Response> {
@@ -46,6 +48,25 @@ async function recorded(request: Request, env: Env, receipt: string, ctx?: OpsWa
   if (!ok) return refuse("feedback.bad_transition", "status changed concurrently");
   announce(ctx, env, { t: "status", receipt, category: row.category, status: "recorded" });
   return jsonResponse({ receipt, status: "recorded", issueNumber: body.data.issueNumber, issueUrl: body.data.issueUrl });
+}
+
+// A maintainer attaches an issue filed by hand to a report the converter never saw.
+async function link(request: Request, env: Env, receipt: string, ctx?: OpsWaiter): Promise<Response> {
+  const body = LinkBody.safeParse(await readJson(request));
+  if (!body.success) return refuse("feedback.invalid", "issueNumber is required");
+  const { issueNumber } = body.data;
+  const issueUrl = `${ISSUE_BASE}${issueNumber}`;
+  const row = await load(env, receipt);
+  if (!row) return refuse("feedback.not_found", "unknown receipt");
+  if (statusRank(row.status) >= 1) {
+    if (row.issue_number !== issueNumber) return refuse("feedback.issue_conflict", "feedback is already linked to a different issue");
+    return jsonResponse({ receipt, status: row.status, issueNumber: row.issue_number, issueUrl: row.issue_url });
+  }
+  if (!LINKABLE.includes(row.status)) return refuse("feedback.bad_transition", "only held, needs_info, answered or received feedback can be linked");
+  const ok = await setState(env, receipt, row.status, "status = 'recorded', issue_number = ?, issue_url = ?", [issueNumber, issueUrl]);
+  if (!ok) return refuse("feedback.bad_transition", "status changed concurrently");
+  announce(ctx, env, { t: "status", receipt, category: row.category, status: "recorded" });
+  return jsonResponse({ receipt, status: "recorded", issueNumber, issueUrl });
 }
 
 async function status(request: Request, env: Env, receipt: string, ctx?: OpsWaiter): Promise<Response> {
@@ -81,7 +102,7 @@ const NOT_ALLOWED = () => refuse("feedback.method_not_allowed", "method not allo
 
 export async function handleAdmin(request: Request, env: Env, url: URL, ctx?: OpsWaiter): Promise<Response | null> {
   const path = url.pathname;
-  const m = path.match(/^\/v1\/admin\/feedback\/(?:(pending|open|held|list|blocks?|cap)|(replies)\/(pending|triage)|replies\/([A-Za-z0-9_-]{1,64})\/ack|(FB-[0-9A-Z]{4}-[0-9A-Z]{4})(?:\/(recorded|status|release|reject|answer|ask|reply|takedown|trust)|\/attachments\/([A-Za-z0-9_-]{16,64}))?)$/);
+  const m = path.match(/^\/v1\/admin\/feedback\/(?:(pending|open|held|list|blocks?|cap)|(replies)\/(pending|triage)|replies\/([A-Za-z0-9_-]{1,64})\/ack|(FB-[0-9A-Z]{4}-[0-9A-Z]{4})(?:\/(recorded|link|status|release|reject|answer|ask|reply|takedown|trust)|\/attachments\/([A-Za-z0-9_-]{16,64}))?)$/);
   if (!m) return null;
   const denied = await requireAdmin(request, env);
   if (denied) return denied;
@@ -112,6 +133,8 @@ export async function handleAdmin(request: Request, env: Env, url: URL, ctx?: Op
   switch (action) {
     case "recorded":
       return recorded(request, env, receipt, ctx);
+    case "link":
+      return link(request, env, receipt, ctx);
     case "status":
       return status(request, env, receipt, ctx);
     case "release":

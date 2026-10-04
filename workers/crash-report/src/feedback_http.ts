@@ -8,6 +8,7 @@ export type FeedbackCode =
   | "feedback.unauthorized"
   | "feedback.not_found"
   | "feedback.bad_transition"
+  | "feedback.issue_conflict"
   | "feedback.method_not_allowed"
   | "feedback.busy"
   | "feedback.image_metadata"
@@ -25,6 +26,7 @@ const STATUS: Record<FeedbackCode, number> = {
   "feedback.unauthorized": 401,
   "feedback.not_found": 404,
   "feedback.bad_transition": 409,
+  "feedback.issue_conflict": 409,
   "feedback.method_not_allowed": 405,
   "feedback.busy": 503,
   "feedback.image_metadata": 400,
