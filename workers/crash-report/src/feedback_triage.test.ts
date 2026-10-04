@@ -197,6 +197,32 @@ describe("images stay private until released", () => {
     expect((await act(r, "takedown")).status).toBe(200);
   });
 
+  it("keeps an answered report's image for the operator, never public, and purges it with the report", async () => {
+    const r = await receiptOf(withImage);
+    const key = keyOf();
+    await act(r, "answer", { body: "see the issue" });
+    expect(objects.size).toBe(1);
+    expect(JSON.parse(rowOf(r).attachments_json)).toHaveLength(1);
+    expect((await get(`/v1/admin/feedback/${r}/attachments/${key}`)).status).toBe(200);
+    expect((await get(`/v1/admin/feedback/${r}/attachments/${key}`, {})).status).toBe(401);
+    expect((await call(`/v1/feedback/attachments/${key}`)).status).toBe(404);
+    expect(raw.prepare("SELECT COUNT(*) AS n FROM feedback_public_images").get()).toEqual({ n: 0 });
+    expect((await mine(ids.a)).find((i) => i.receipt === r)?.attachments ?? []).toEqual([]);
+    expect(await errCode(await act(r, "release", { publishImages: true }))).toBe("feedback.bad_transition");
+    expect((await json(await get(`/v1/admin/feedback/${r}`))).attachments).toHaveLength(1);
+    const old = new Date(Date.now() - 40 * 86_400_000).toISOString();
+    raw.prepare("UPDATE feedback SET created_at = ?, updated_at = ?").run(old, old);
+    await purgeStaleFeedback(env);
+    expect(objects.size).toBe(0);
+  });
+
+  it("still deletes an answered report's image through delete-screenshots", async () => {
+    const r = await receiptOf(withImage);
+    await act(r, "answer", { body: "x" });
+    expect(await json(await act(r, "takedown"))).toMatchObject({ attachmentsRemoved: true, removed: 1 });
+    expect(objects.size).toBe(0);
+  });
+
   it("deletes the image when feedback is rejected", async () => {
     const r = await receiptOf(withImage);
     await act(r, "reject", { reason: "spam" });

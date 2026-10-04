@@ -155,8 +155,6 @@ async function respond(request: Request, env: Env, receipt: string, to: "answere
     ...replyStatements(env, receipt, scrubSensitiveText(body.data.body), to),
   ]);
   if (row.status !== to && (res[0].meta?.changes ?? 0) === 0) return refuse("feedback.bad_transition", "status changed concurrently");
-  // An answer ends the report without an issue, so its images are never published.
-  if (to === "answered") await dropAttachments(env, row);
   if (row.status !== to) announce(ctx, env, { t: "status", receipt, category: row.category, status: to });
   return jsonResponse({ receipt, status: to });
 }
