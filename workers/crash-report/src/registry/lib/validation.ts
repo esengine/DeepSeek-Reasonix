@@ -20,6 +20,10 @@ const httpUrl = z.string().trim().url().max(500);
 // (isURL || git: shorthand || looksLikePackage); a bare local path is refused
 // because it resolves on the publisher's machine, never the installer's.
 const pkgSegment = /^[a-zA-Z0-9._-]+$/;
+// A segment made only of dots ("." or "..") matches pkgSegment but is a path component, not a name.
+function isPackageSegment(segment: string): boolean {
+  return pkgSegment.test(segment) && !/^\.+$/.test(segment);
+}
 const unsafeSourceCharacter = /[\s\u0000-\u001f\u007f-\u009f]/u;
 
 function hasUnsafeSourceCharacters(source: string): boolean {
@@ -43,9 +47,9 @@ function looksLikePackage(source: string): boolean {
   }
   if (name.startsWith("@")) {
     const parts = name.split("/");
-    return parts.length === 2 && pkgSegment.test(parts[0].slice(1)) && pkgSegment.test(parts[1]);
+    return parts.length === 2 && isPackageSegment(parts[0].slice(1)) && isPackageSegment(parts[1]);
   }
-  return pkgSegment.test(name);
+  return isPackageSegment(name);
 }
 
 function isHttpUrl(source: string): boolean {

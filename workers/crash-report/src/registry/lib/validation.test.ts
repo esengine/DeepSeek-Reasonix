@@ -76,6 +76,15 @@ describe("PublishSchema source", () => {
     }
   });
 
+  it("rejects package scopes and names made only of dots", () => {
+    for (const source of ["@a/..", "@../b", "@./b", "@a/.", "@../..", "@a/..@1.2.3"]) {
+      expect(parse({ kind: "mcp", source }).success, source).toBe(false);
+    }
+    for (const source of ["@a/b.c", "@a/..b", "@a/b.."]) {
+      expect(parse({ kind: "mcp", source }).success, source).toBe(true);
+    }
+  });
+
   it("still refuses a pinned package for kind=skill", () => {
     expect(parse({ kind: "skill", source: "@scope/pkg@1.2.3" }).success).toBe(false);
   });
