@@ -79,7 +79,7 @@
     "hast-util-to-jsx-runtime": "2.3.6",
     "highlight.js": "^11.12.0",
     "html-url-attributes": "3.0.1",
-    "katex": "^0.18.9",
+    "katex": "^0.18.10",
     "lucide-react": "^1.41.0",
     "mermaid": "^11.17.2",
     "qrcode.react": "^4.2.0",
