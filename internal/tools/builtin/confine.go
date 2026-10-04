@@ -187,15 +187,8 @@ func confineResolved(forbidRoots []string, abs string, protect bool) bool {
 
 func sensitiveReadPath(abs string) bool {
 	clean := filepath.Clean(abs)
-	name := strings.ToLower(filepath.Base(clean))
-	switch name {
-	case ".env", ".git-credentials", ".netrc":
+	if secrets.SensitiveFileName(filepath.Base(clean)) {
 		return true
-	}
-	for _, ext := range []string{".pem", ".key", ".p12", ".pfx"} {
-		if strings.HasSuffix(name, ext) {
-			return true
-		}
 	}
 	for _, dir := range secrets.SensitiveHomeDirs() {
 		if withinFold(dir, clean) {

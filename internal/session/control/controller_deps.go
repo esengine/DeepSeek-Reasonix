@@ -3,6 +3,7 @@ package control
 import (
 	"context"
 	"reasonix/internal/state/sessionstore"
+	"sync"
 
 	"reasonix/internal/contract/ablation"
 	"reasonix/internal/contract/config"
@@ -14,6 +15,7 @@ import (
 	"reasonix/internal/model/billing"
 	"reasonix/internal/platform/gitcmd"
 	"reasonix/internal/runtime/agent"
+	"reasonix/internal/runtime/commitmsg"
 	"reasonix/internal/runtime/goaleval"
 	"reasonix/internal/runtime/guardian"
 	"reasonix/internal/runtime/promptrefine"
@@ -45,6 +47,9 @@ type controllerDeps struct {
 	// pauses instead of defaulting to continue.
 	evaluator goaleval.Evaluator
 	refiner   *promptrefine.Refiner
+	committer *commitmsg.Generator
+	// commitMu serialises commits so two confirmations cannot interleave.
+	commitMu sync.Mutex
 	// goalUsageTee accounts billable usage events into the active goal turn's
 	// observational token total. It wraps the public sink when the caller didn't provide one.
 	goalUsageTee *goalUsageTee
@@ -138,6 +143,7 @@ func newControllerDeps(opts Options, sink event.Sink, usageTee *goalUsageTee, ru
 		guardianSess:           opts.Guardian,
 		evaluator:              opts.GoalEvaluator,
 		refiner:                opts.PromptRefiner,
+		committer:              opts.CommitMessenger,
 		goalUsageTee:           usageTee,
 		sink:                   sink,
 		policy:                 opts.Policy,

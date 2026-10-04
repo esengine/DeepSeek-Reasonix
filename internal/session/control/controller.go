@@ -43,6 +43,7 @@ import (
 	"reasonix/internal/platform/gitcmd"
 	"reasonix/internal/runtime/agent"
 	"reasonix/internal/runtime/capability"
+	"reasonix/internal/runtime/commitmsg"
 	"reasonix/internal/runtime/goaleval"
 	"reasonix/internal/runtime/guardian"
 	"reasonix/internal/runtime/promptrefine"
@@ -291,11 +292,11 @@ type Options struct {
 	// GoalEvaluator is the optional bounded Goal completion evaluator consulted
 	// when the working model submits no update_goal report. nil fails closed:
 	// the goal pauses instead of defaulting to continue.
-	GoalEvaluator goaleval.Evaluator
-	// PromptRefiner rewrites a draft before it is sent; nil refuses the ask.
-	PromptRefiner *promptrefine.Refiner
-	Sink          event.Sink
-	Policy        permission.Policy
+	GoalEvaluator   goaleval.Evaluator
+	PromptRefiner   *promptrefine.Refiner // rewrites a draft before it is sent; nil refuses the ask
+	CommitMessenger *commitmsg.Generator  // drafts commit messages; nil refuses the ask
+	Sink            event.Sink
+	Policy          permission.Policy
 	// SubagentGate is the shared gate every headless-only sub-agent surface
 	// reads; nil disables gating there. The approval-mode setters Update it so
 	// a runtime switch reaches sub-agents, not only the executor's own gate.

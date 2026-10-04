@@ -332,7 +332,6 @@ function PaneView({ port, rt, title, active, visible, sideHost, side, onFocus, o
     return { steps, wrote };
   }, [s.revision]);
   /* eslint-enable react-hooks/exhaustive-deps */
-
   // An MCP server connects lazily and fails at first use, so a turn boundary is
   // also when its status can have changed — no timer of its own needed.
   useEffect(() => {
@@ -341,7 +340,8 @@ function PaneView({ port, rt, title, active, visible, sideHost, side, onFocus, o
     port.checkpoints().then(setCheckpoints).catch(() => {});
   }, [reloadMcp, port, status?.sessionPath, running]);
   // A call that may write can have moved the tree before the turn ends.
-  useEffect(() => void port.changes().then(setTree).catch(() => setTree(null)), [port, status?.sessionPath, running, counts.wrote]);
+  const refreshTree = useCallback(() => void port.changes().then(setTree).catch(() => setTree(null)), [port]);
+  useEffect(refreshTree, [refreshTree, status?.sessionPath, running, counts.wrote]);
 
   // One turn can be dozens of model round trips — the session this was measured
   // on ran thirty, from 9k tokens to 57k. Reading the gauge only at the turn
@@ -612,7 +612,7 @@ function PaneView({ port, rt, title, active, visible, sideHost, side, onFocus, o
             shown={visible && workbench}
             onSurfaces={setSurfaces}
             scheme={theme === "light" ? "light" : "dark"}
-            changes={tree?.changes ?? []}
+            changes={tree?.changes ?? []} onTreeChanged={refreshTree}
             running={running}
             wrote={counts.wrote}
             remote={!!rt.host}

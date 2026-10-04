@@ -1,5 +1,5 @@
 import { HttpError } from "./http_error";
-import { MockBackup } from "./mock_backup";
+import { MockCommit } from "./mock_commit";
 import { FEEDBACK_CODE, type FeedbackEnv, type FeedbackItem, type FeedbackMine, type FeedbackReceipt, type FeedbackReply, type FeedbackReplyReceipt, type FeedbackRequest } from "./feedback";
 
 const LIMITS = { bodyBytes: 8192, nameChars: 40, contactChars: 120, images: 3, imageBytes: 2 << 20, uploadBytes: 10 << 20, replyBytes: 4096 };
@@ -59,7 +59,7 @@ function refusal(code: string): HttpError {
   return new HttpError(STATUS[code] ?? 500, code, { code, error: code, params: code === FEEDBACK_CODE.rateLimited ? { retryAfterSeconds: 90 } : {} });
 }
 
-export class MockFeedback extends MockBackup {
+export class MockFeedback extends MockCommit {
   private filed: FeedbackItem[] = [];
   private name = "";
   private rows: FeedbackItem[] = SEEDED.map((i) => ({ ...i, replies: [...i.replies] }));

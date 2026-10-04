@@ -74,6 +74,8 @@ func (s *Server) routes() http.Handler {
 	mux.HandleFunc("POST /resume", s.resume)
 	mux.HandleFunc("POST /forget", s.forget)
 	mux.HandleFunc("POST /prompt/refine", s.refinePrompt)
+	mux.HandleFunc("POST /commit/propose", s.commitPropose)
+	mux.HandleFunc("POST /commit", s.commitStaged)
 	mux.HandleFunc("GET /checkpoints", s.checkpoints)
 	mux.HandleFunc("GET /branches", s.branches)
 	mux.HandleFunc("GET /models", s.models)

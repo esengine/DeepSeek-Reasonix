@@ -552,6 +552,7 @@ func (b *builder) controllerOptions(runner agent.Runner, executor *agent.Agent, 
 		RecoveryHeadless: recoveryHeadlessMode(opts),
 		GoalEvaluator:    goalEvaluator(cfg, b.model.ref, b.proxy, b.sink),
 		PromptRefiner:    promptRefiner(entry, b.proxy, b.sink),
+		CommitMessenger:  commitMessenger(entry, b.proxy, b.sink),
 	}
 }
 

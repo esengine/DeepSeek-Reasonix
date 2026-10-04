@@ -1416,6 +1416,8 @@ body { background: var(--page) !important; }
 .workbench-changes { flex: none; max-height: 34%; min-height: 0; overflow-y: auto; display: flex; flex-direction: column; border-bottom: 1px solid var(--hair); scrollbar-gutter: stable; }
 .workbench-changes .workbench-explorer-head { position: sticky; top: 0; z-index: 1; border-bottom: 0; background: var(--page); }
 .workbench-changes > button { flex: none; }
+.workbench-changes:has(.commit-card:not([data-phase="idle"])) { max-height: 80%; }
+.workbench-changes .commit-card { margin: 6px 10px 8px; }
 .workbench-change-row {
   width: 100%; min-height: 26px; padding: 0 10px 0 8px; display: flex; align-items: center; gap: 7px;
   border: 0; background: none; color: var(--muted); font: 450 11.5px/1.35 var(--ui);
@@ -4041,7 +4043,45 @@ body { font-size: 14px; line-height: 1.75; }
 .refine-wait { margin: 0; color: var(--faint); font: 400 12px/1.5 var(--ui); }
 .refine-error { margin: 0; color: var(--err); font: 400 12px/1.5 var(--ui); }
 .refine-card footer { display: flex; justify-content: flex-end; gap: 6px; }
-:root[data-theme="light"] .refine-card { background: var(--page); }
+.commit-card { display: grid; gap: 8px; margin: 8px 0 0; }
+.commit-open { margin-left: auto; }
+.workbench-explorer-head .commit-open { height: 20px; padding: 0 8px; font-size: 11px; }
+.commit-files li i { margin-left: auto; font-style: normal; }
+.commit-files li i[data-io="up"] { color: var(--ok); }
+.commit-files li i[data-io="down"] { color: var(--err); }
+.commit-card:not([data-phase="idle"]) {
+  padding: 10px 12px;
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  background: var(--hair);
+}
+.commit-card header { display: flex; align-items: center; gap: 6px; color: var(--muted); font: 600 11px/1.4 var(--ui); }
+.commit-card header b { color: var(--text); font-weight: 600; }
+.commit-card header small { margin-left: auto; }
+.commit-card small { color: var(--ghost); font: 400 10px/1.4 var(--ui); }
+.commit-card footer { display: flex; flex-wrap: wrap; justify-content: flex-end; gap: 6px; }
+.commit-done { margin: 0; color: var(--text); font: 400 12px/1.5 var(--ui); overflow-wrap: anywhere; }
+.commit-files { display: grid; gap: 2px; max-height: 120px; margin: 0; padding: 0; overflow: auto; list-style: none; font: 400 11px/1.5 var(--mono); }
+.commit-files li { display: flex; gap: 6px; min-width: 0; color: var(--muted); }
+.commit-files li span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.commit-files li[data-sensitive] { color: var(--err); }
+.commit-warn { display: grid; gap: 4px; padding: 6px 8px; border: 1px solid var(--err); border-radius: 8px; color: var(--err); font: 400 11px/1.5 var(--ui); }
+.commit-warn p { margin: 0; overflow-wrap: anywhere; }
+.commit-warn label { display: flex; align-items: center; gap: 6px; color: var(--text); }
+.commit-message {
+  width: 100%;
+  box-sizing: border-box;
+  resize: vertical;
+  padding: 8px 10px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--page);
+  color: var(--text);
+  font: 400 12px/1.5 var(--mono);
+}
+:root[data-theme="light"] .refine-card,
+:root[data-theme="light"] .commit-card:not([data-phase="idle"]) { background: var(--page); }
+:root[data-theme="light"] .commit-message { background: var(--bg); }
 @media (hover: none) {
   .flow .user-acts,
   .wsdel,

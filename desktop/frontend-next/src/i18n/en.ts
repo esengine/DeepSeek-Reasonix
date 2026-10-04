@@ -1213,6 +1213,64 @@ export const EN: Record<string, string> = {
     "The model returned nothing; try again",
   "优化请求格式不正确":
     "The refine request was malformed",
+  "提交…":
+    "Commit…",
+  "起草提交说明":
+    "Draft commit message",
+  "读取暂存区，起草提交说明…":
+    "Reading the staged changes and drafting a message…",
+  "重新起草":
+    "Redraft",
+  "提交说明":
+    "Commit message",
+  "暂存的文件":
+    "Staged files",
+  "{n} 个文件已暂存":
+    "{n} files staged",
+  "可能含有密钥：{files}":
+    "May contain secrets: {files}",
+  "新增的内容里有形似密钥的值":
+    "Added lines contain values shaped like credentials",
+  "我确认这些内容可以提交":
+    "I confirm these can be committed",
+  "提交到本地":
+    "Commit locally",
+  "只在本地提交，不会推送":
+    "Recorded locally only; nothing is pushed",
+  "已提交 {hash}：{subject}":
+    "Committed {hash}: {subject}",
+  "改过暂存区后请重新起草":
+    "Draft again after changing what is staged",
+  "暂存区内容过长，只按前面一部分起草":
+    "The staged diff is long; the draft reads only its first part",
+  "这个工作区不是 git 仓库，无法提交":
+    "This workspace is not a git repository, so there is nothing to commit",
+  "暂存区是空的，先用 git add 暂存要提交的文件":
+    "Nothing is staged; stage the files to commit with git add first",
+  "暂存区在你确认之后又变了，请重新起草":
+    "The staged changes changed after you reviewed them; draft again",
+  "暂存的内容里有疑似密钥的文件，需要你确认后才能提交":
+    "The staged changes include likely secrets; confirm them before committing",
+  "提交说明是空的":
+    "The commit message is empty",
+  "提交说明含有无法记录的字符":
+    "The commit message contains characters git cannot record",
+  "提交说明超过 {max_bytes} 字节":
+    "The commit message is over {max_bytes} bytes",
+  "git 没有配置提交者姓名和邮箱（user.name、user.email）":
+    "git has no author name and email configured (user.name, user.email)",
+  "git 没能记录这次提交":
+    "git could not record the commit",
+  "当前会话没有可用的模型，无法起草提交说明":
+    "This session has no model to draft a commit message with",
+  "起草提交说明超时，请重试":
+    "Drafting the commit message timed out; try again",
+  "模型没有给出提交说明，请重试":
+    "The model returned no commit message; try again",
+  "读取暂存区失败":
+    "Reading the staged changes failed",
+  "提交请求格式不正确":
+    "The commit request was malformed",
   "新增工具":
     "New tools",
   "agent 可以调用，每次调用照常经过权限确认":

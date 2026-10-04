@@ -13,17 +13,18 @@ import (
 
 // Where the desktop re-declares the kernel's wire types by hand.
 const (
-	tsWireFile     = "desktop/frontend-next/src/port/wire.ts"
-	tsBoundaryFile = "desktop/frontend-next/src/port/boundary.ts"
-	tsRemoteFile   = "desktop/frontend-next/src/port/remote.ts"
-	tsSessionFile  = "desktop/frontend-next/src/port/session.ts"
-	tsVersionFile  = "desktop/frontend-next/src/port/version.ts"
-	tsModelFile    = "desktop/frontend-next/src/port/model.ts"
-	tsMcpFile      = "desktop/frontend-next/src/port/mcp.ts"
-	tsShellFile    = "desktop/frontend-next/src/port/shell.ts"
-	tsShareFile    = "desktop/frontend-next/src/port/share.ts"
-	tsProviderFile = "desktop/frontend-next/src/port/provider.ts"
-	tsFeedbackFile = "desktop/frontend-next/src/port/feedback.ts"
+	tsWireFile      = "desktop/frontend-next/src/port/wire.ts"
+	tsBoundaryFile  = "desktop/frontend-next/src/port/boundary.ts"
+	tsRemoteFile    = "desktop/frontend-next/src/port/remote.ts"
+	tsSessionFile   = "desktop/frontend-next/src/port/session.ts"
+	tsVersionFile   = "desktop/frontend-next/src/port/version.ts"
+	tsModelFile     = "desktop/frontend-next/src/port/model.ts"
+	tsMcpFile       = "desktop/frontend-next/src/port/mcp.ts"
+	tsShellFile     = "desktop/frontend-next/src/port/shell.ts"
+	tsShareFile     = "desktop/frontend-next/src/port/share.ts"
+	tsProviderFile  = "desktop/frontend-next/src/port/provider.ts"
+	tsFeedbackFile  = "desktop/frontend-next/src/port/feedback.ts"
+	tsWorkspaceFile = "desktop/frontend-next/src/port/workspace.ts"
 )
 
 // mirroredWireTypes are the Go types the desktop keeps a second, hand-written
@@ -136,6 +137,13 @@ var mirroredWireTypes = []wireMirror{
 	{"internal/frontend/serve/feedback.go", "feedbackEnvView", tsFeedbackFile, "FeedbackEnv"},
 	{"internal/frontend/serve/feedback.go", "feedbackSubmitBody", tsFeedbackFile, "FeedbackRequest"},
 	{"internal/frontend/serve/feedback.go", "feedbackImageBody", tsFeedbackFile, "FeedbackImage"},
+	// The staged set a commit message was drafted for. The fingerprint is what
+	// the confirmation is checked against, so a page that cannot read it cannot
+	// confirm anything.
+	{"internal/session/control/commit.go", "CommitProposal", tsWorkspaceFile, "CommitProposal"},
+	{"internal/session/control/commit.go", "CommitRequest", tsWorkspaceFile, "CommitRequest"},
+	{"internal/session/control/commit.go", "CommitResult", tsWorkspaceFile, "CommitResult"},
+	{"internal/platform/gitcommit/gitcommit.go", "File", tsWorkspaceFile, "CommitFile"},
 }
 
 type wireMirror struct {

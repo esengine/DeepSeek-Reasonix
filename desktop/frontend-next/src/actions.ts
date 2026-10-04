@@ -113,6 +113,15 @@ export const ACTIONS: UIAction[] = [
   { id: "prompt.adopt", kind: "view", target: "none", proof: "interaction" },
   { id: "prompt.discard", kind: "view", target: "none", proof: "interaction" },
 
+  // ── Committing what is staged ────────────────────────────────────────────
+  // Drafting reads the index and asks the model; only confirm records a commit,
+  // and only locally.
+  { id: "commit.draft", kind: "repeatable", target: "none", proof: "interaction" },
+  { id: "commit.edit", kind: "view", target: "none", proof: "interaction" },
+  { id: "commit.acknowledge", kind: "view", target: "none", proof: "interaction" },
+  { id: "commit.confirm", kind: "kernel-mutation", target: "none", proof: "authority-effect" },
+  { id: "commit.close", kind: "view", target: "none", proof: "interaction" },
+
   // ── What is waiting to be sent ───────────────────────────────────────────
   { id: "queue.edit", kind: "kernel-mutation", target: "entity", proof: "interaction" },
   // Giving a session a name of your own. The sidebar's tree and the pane tabs

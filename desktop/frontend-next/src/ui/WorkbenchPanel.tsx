@@ -20,6 +20,7 @@ import { useMarkdownPoll } from "./useMarkdownPoll";
 import { pinToViewport } from "./place";
 import { WorkbenchExplorerHead } from "./WorkbenchExplorerHead";
 import { setShowsHiddenFiles, showsHiddenFiles } from "../state/prefs";
+import { useCommitCard } from "./CommitCard";
 
 // The editor and its grammars load with the first file opened, not with Studio.
 const CodeEditor = lazy(() => import("./CodeEditor"));
@@ -109,6 +110,7 @@ export function WorkbenchPanel({
   shown,
   scheme,
   changes,
+  onTreeChanged,
   running = false,
   wrote = 0,
   remote = false,
@@ -122,6 +124,8 @@ export function WorkbenchPanel({
   shown: boolean;
   scheme: "light" | "dark";
   changes: WorkspaceChange[];
+  /** Called after the panel committed, so the list is read again. */
+  onTreeChanged?: () => void;
   /** Whether a turn is in flight: one that settles can have written files git
    *  does not list, so the change set alone does not say the tree moved. */
   running?: boolean;
@@ -141,6 +145,7 @@ export function WorkbenchPanel({
   // — and the workbench is always docked now, which left the files with no way
   // in at all. The toggle is that way in, at any width.
   const [showFiles, setShowFiles] = useState(false);
+  const commit = useCommitCard(port, () => onTreeChanged?.());
   const [query, setQuery] = useState(""),
     [selected, setSelected] = useState("");
   // Docked, the file list hides the canvas a page is drawn in, so choosing any
@@ -682,7 +687,9 @@ export function WorkbenchPanel({
               <div className="workbench-explorer-head">
                 <span>{t("改动")}</span>
                 <small>{changes.length}</small>
+                {onTreeChanged && commit.button}
               </div>
+              {commit.card}
               {changes.map((item) => (
                 <button
                   className="workbench-change-row"

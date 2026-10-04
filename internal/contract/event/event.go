@@ -526,6 +526,7 @@ const (
 	UsageSourceRecoveryReviewer = "recovery-reviewer"
 	UsageSourceGoalEvaluator    = "goal-evaluator"
 	UsageSourcePromptRefine     = "prompt-refine"
+	UsageSourceCommitMessage    = "commit-message"
 	UsageSourceInjectionScreen  = "injection-screen"
 	UsageSourceAdvisor          = "advisor"
 	UsageSourceBestOf           = "best-of"

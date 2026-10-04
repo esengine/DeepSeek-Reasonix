@@ -214,6 +214,21 @@ const SAID: Record<string, string> = {
   "prompt_refine.failed": "优化失败，请重试",
   "prompt_refine.bad_request": "优化请求格式不正确",
 
+  "commit.no_repository": "这个工作区不是 git 仓库，无法提交",
+  "commit.nothing_staged": "暂存区是空的，先用 git add 暂存要提交的文件",
+  "commit.staged_changed": "暂存区在你确认之后又变了，请重新起草",
+  "commit.secrets_staged": "暂存的内容里有疑似密钥的文件，需要你确认后才能提交",
+  "commit.empty_message": "提交说明是空的",
+  "commit.message_invalid": "提交说明含有无法记录的字符",
+  "commit.message_too_long": "提交说明超过 {max_bytes} 字节",
+  "commit.identity_missing": "git 没有配置提交者姓名和邮箱（user.name、user.email）",
+  "commit.failed": "git 没能记录这次提交",
+  "commit.no_model": "当前会话没有可用的模型，无法起草提交说明",
+  "commit.timeout": "起草提交说明超时，请重试",
+  "commit.no_answer": "模型没有给出提交说明，请重试",
+  "commit.git_failed": "读取暂存区失败",
+  "commit.bad_request": "提交请求格式不正确",
+
   // ── 会话 ─────────────────────────────────────────────────────────
   "session.disabled": "这台服务器已关闭会话切换",
   "session.pending_cleanup": "该会话正在清理，请稍后再打开",

@@ -8,6 +8,7 @@ import (
 	"reasonix/internal/contract/config"
 	"reasonix/internal/contract/event"
 	"reasonix/internal/contract/provider"
+	"reasonix/internal/runtime/commitmsg"
 	"reasonix/internal/runtime/goaleval"
 	"reasonix/internal/runtime/promptrefine"
 )
@@ -54,4 +55,20 @@ func promptRefiner(e *config.ProviderEntry, proxy netclient.ProxySpec, sink even
 		return nil
 	}
 	return promptrefine.New(prov, e.Price, modelRefFromEntry(e), sink)
+}
+
+// commitMessenger writes commit messages with the entry the session resolved,
+// reasoning off, as promptRefiner does.
+func commitMessenger(e *config.ProviderEntry, proxy netclient.ProxySpec, sink event.Sink) *commitmsg.Generator {
+	if e == nil || !e.Configured() {
+		return nil
+	}
+	pc := providerConfig(e, proxy)
+	pc.Extra["effort"] = "disabled"
+	prov, err := provider.New(e.Kind, pc)
+	if err != nil {
+		slog.Debug("commit messenger provider construction failed", "model", modelRefFromEntry(e), "err", err)
+		return nil
+	}
+	return commitmsg.New(prov, e.Price, modelRefFromEntry(e), sink)
 }
