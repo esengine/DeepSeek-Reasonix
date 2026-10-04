@@ -1,14 +1,49 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useState, type CSSProperties } from "react";
 import { t } from "../i18n";
-import { money, tokens as fmtTokens } from "../i18n/format";
+import { count, money, tokens as fmtTokens } from "../i18n/format";
 import { reason } from "../i18n/kernel";
-import type { AgentPort, Money, UsageDay, UsageReport } from "../port/port";
+import { DEFAULT_USAGE_DAYS, type AgentPort, type Money, type UsageDay, type UsageQuery, type UsageReport } from "../port/port";
+import { hostOf } from "./vendors";
 
 const RANGES: [number, string][] = [[7, "7 天"], [30, "30 天"], [365, "全部"]];
 
+type UsageWindow =
+  | { kind: "days"; days: number }
+  | { kind: "custom"; from: string; to: string }
+  | { kind: "month"; month: string };
+
+function currentMonth(): string {
+  const now = new Date();
+  return `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}`;
+}
+
+function monthBounds(month: string): { from: string; to: string } | null {
+  const match = /^(\d{4})-(\d{2})$/.exec(month);
+  if (!match) return null;
+  const year = Number(match[1]);
+  const monthNumber = Number(match[2]);
+  if (monthNumber < 1 || monthNumber > 12) return null;
+  const last = new Date(year, monthNumber, 0).getDate();
+  return { from: `${month}-01`, to: `${month}-${String(last).padStart(2, "0")}` };
+}
+
+// Sources are not a nominal category like models: two custom relays have no
+// natural order a reader can remember, so a stable hue gives the bar a second
+// channel beside its label. Lightness and chroma come from --chart so the
+// source cards keep the model cards' contrast in either theme.
+function sourceColor(source: string): string {
+  let hue = 216;
+  for (const ch of source) hue = (hue * 31 + (ch.codePointAt(0) ?? 0)) % 360;
+  return `oklch(from var(--chart) l c ${hue})`;
+}
+
+function providerFallback(kind?: string, host?: string): string {
+  return [kind?.trim(), host?.trim()].filter(Boolean).join(" · ");
+}
+
 /** The window this panel opens on. Exported because the settings contents list
  *  reports the same total beside "用量", and two windows would be two numbers. */
-export const DEFAULT_DAYS = 30;
+export const DEFAULT_DAYS = DEFAULT_USAGE_DAYS;
 
 // Money and token counts go through i18n/format: its whole reason for existing
 // is that five files each grew their own rule. Intl also spells CNY as CN¥ in
@@ -108,39 +143,123 @@ function Plot({ days, pick, label, aria }: PlotProps) {
   );
 }
 
-// Nominal rows all take the same hue — the bar's length already carries the
-// value, so spending the colour channel on it says nothing new.
-function Bars({ rows }: { rows: [string, number, string][] }) {
-  const top = Math.max(...rows.map((r) => r[1]), 1);
+type BarRow = [key: string, name: string, value: number, note: string, color?: string];
+
+// Model rows stay nominal and share the chart hue. A provider row may carry a
+// stable colour because two custom relays otherwise read as the same source.
+function Bars({ rows }: { rows: BarRow[] }) {
+  const top = Math.max(...rows.map((r) => r[2]), 1);
   return (
     <div className="urows">
-      {rows.map(([name, value, note]) => (
-        <div className="urow" key={name}>
+      {rows.map(([key, name, value, note, color]) => (
+        <div className="urow" key={key}>
           <div className="urow-t">
             <span className="n" title={name}>{name}</span>
             <span className="v">{note}</span>
           </div>
-          <div className="utrack"><i className="ufill" style={{ width: `${(value / top) * 100}%` }} /></div>
+          <div className="utrack">
+            <i
+              className="ufill"
+              style={{ width: `${(value / top) * 100}%`, ...(color ? { "--row-color": color } : {}) } as CSSProperties}
+            />
+          </div>
         </div>
       ))}
     </div>
   );
 }
 
+// A chart is an overview; a phone cannot hover it precisely. This list is the
+// exact record underneath the same data, and it stays available on every input.
+function DailyTable({ days }: { days: UsageDay[] }) {
+  return (
+    <section className="ucard udaily">
+      <div className="ucard-h"><h3>{t("每日明细")}</h3><span className="hint">{t("精确到每天")} <span className="utable-scroll-hint">{t("左右滚动查看")}</span></span></div>
+      <div className="utable-wrap" role="region" aria-label={t("每日明细")} tabIndex={0}>
+        <table className="utable" aria-label={t("每日明细")}>
+          <thead>
+            <tr><th>{t("日期")}</th><th>Tokens</th><th>{t("支出")}</th><th>{t("请求")}</th></tr>
+          </thead>
+          <tbody>
+            {days.map((d) => (
+              <tr key={d.day} data-day={d.day}>
+                <td className="ud">{d.day}</td>
+                <td>{count(d.total)}</td>
+                <td>{moneyList(d.cost)}</td>
+                <td>{count(d.requests)}</td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+    </section>
+  );
+}
+
 export function Usage({ port }: { port: AgentPort }) {
-  const [days, setDays] = useState(DEFAULT_DAYS);
+  const [range, setRange] = useState<UsageWindow>({ kind: "days", days: DEFAULT_DAYS });
+  const [customFrom, setCustomFrom] = useState("");
+  const [customTo, setCustomTo] = useState("");
+  const [month, setMonth] = useState("");
+  const [providerLabels, setProviderLabels] = useState<Record<string, string>>({});
   const [report, setReport] = useState<UsageReport | null>(null);
   const [err, setErr] = useState("");
+
+  const query = useMemo<UsageQuery>(() => {
+    if (range.kind === "days") return { days: range.days };
+    if (range.kind === "custom") return { from: range.from, to: range.to };
+    return monthBounds(range.month) ?? { days: DEFAULT_DAYS };
+  }, [range]);
 
   useEffect(() => {
     let live = true;
     setErr("");
-    port.usage(days).then(
+    port.usage(query).then(
       (r) => live && setReport(r),
       (e) => live && setErr(reason(e)),
     );
     return () => { live = false; };
-  }, [port, days]);
+  }, [port, query]);
+
+  useEffect(() => {
+    let live = true;
+    Promise.all([
+      port.providers().catch(() => []),
+      port.models().catch(() => []),
+    ]).then(([providers, models]) => {
+      if (!live) return;
+      const labels: Record<string, string> = {};
+      // A source can be absent from providers() while still being reachable
+      // through the model catalog. Fill those first, then let providers()
+      // override them with the connection panel's canonical metadata.
+      for (const m of models) {
+        const label = m.displayName?.trim() || providerFallback(m.kind, m.vendor);
+        if (label) labels[m.provider] = label;
+      }
+      for (const p of providers) {
+        const label = p.displayName?.trim() || providerFallback(p.kind, hostOf(p.baseUrl));
+        if (label) labels[p.name] = label;
+      }
+      setProviderLabels(labels);
+    });
+    return () => { live = false; };
+  }, [port]);
+
+  const openCustom = () => {
+    const from = customFrom || report?.from || "";
+    const to = customTo || report?.to || "";
+    setCustomFrom(from);
+    setCustomTo(to);
+    if (from && to) setRange({ kind: "custom", from, to });
+  };
+
+  const openMonth = () => {
+    const picked = month || report?.from.slice(0, 7) || currentMonth();
+    setMonth(picked);
+    setRange({ kind: "month", month: picked });
+  };
+
+  const customValid = customFrom !== "" && customTo !== "" && customFrom <= customTo;
 
   // The first day that carries a cost. Records older than the cost field have
   // tokens and no price, and showing them as free would understate the bill.
@@ -169,20 +288,50 @@ export function Usage({ port }: { port: AgentPort }) {
   const input = report ? report.cache_hit + report.cache_miss : 0;
   const hitRate = input > 0 ? (report!.cache_hit / input) * 100 : 0;
 
-  if (err) return <div className="uerr">{err}</div>;
-  if (!report) return <div className="uwait">{t("正在读取记录…")}</div>;
-
   return (
     <div className="usage">
       <div className="uhead">
         <div className="uranges" role="group" aria-label={t("时间范围")}>
           {RANGES.map(([n, lbl]) => (
-            <button key={n} type="button" aria-pressed={days === n} onClick={() => setDays(n)}>{t(lbl)}</button>
+            <button key={n} type="button" aria-pressed={range.kind === "days" && range.days === n} onClick={() => setRange({ kind: "days", days: n })}>{t(lbl)}</button>
           ))}
+          <button type="button" aria-pressed={range.kind === "custom"} onClick={openCustom}>{t("自定义")}</button>
+          <button type="button" aria-pressed={range.kind === "month"} onClick={openMonth}>{t("自然月")}</button>
         </div>
-        <span className="uspan">{report.from} → {report.to}</span>
+        {report && <span className="uspan">{report.from} → {report.to}</span>}
       </div>
 
+      {range.kind === "custom" && (
+        <form
+          className="udates"
+          onSubmit={(e) => {
+            e.preventDefault();
+            if (customValid) setRange({ kind: "custom", from: customFrom, to: customTo });
+          }}
+        >
+          <label>{t("开始日期")}<input type="date" value={customFrom} max={customTo || undefined} onChange={(e) => setCustomFrom(e.target.value)} required /></label>
+          <label>{t("结束日期")}<input type="date" value={customTo} min={customFrom || undefined} onChange={(e) => setCustomTo(e.target.value)} required /></label>
+          <button type="submit" disabled={!customValid}>{t("应用")}</button>
+        </form>
+      )}
+
+      {range.kind === "month" && (
+        <label className="umonth">
+          {t("选择月份")}
+          <input
+            type="month"
+            value={month}
+            onChange={(e) => {
+              setMonth(e.target.value);
+              if (monthBounds(e.target.value)) setRange({ kind: "month", month: e.target.value });
+            }}
+          />
+        </label>
+      )}
+
+      {err && <div className="uerr" role="alert">{err}</div>}
+      {!report && !err && <div className="uwait">{t("正在读取记录…")}</div>}
+      {report && <>
       <section className="uhero">
         {/* "Paid" is only honest while every folded quote came from the
             provider. One fallback-priced row and the label needs the caveat. */}
@@ -215,6 +364,8 @@ export function Usage({ port }: { port: AgentPort }) {
         <Plot days={report.daily} pick={(d) => d.total} label={(v) => fmtTokens(Math.round(v))} aria={t("每日 tokens")} />
       </section>
 
+      <DailyTable days={report.daily} />
+
       {/* One chart per currency, for the same reason tokens and money get their
           own: two currencies do not share an axis either, and the panel keeping
           them apart everywhere else would be undone by one merged plot. */}
@@ -239,13 +390,14 @@ export function Usage({ port }: { port: AgentPort }) {
       <div className="utwo">
         <section className="ucard">
           <div className="ucard-h"><h3>{t("按模型")}</h3></div>
-          <Bars rows={report.models.map((m) => [m.model, m.tokens, `${fmtTokens(m.tokens)}  ${m.percent.toFixed(1)}%`])} />
+          <Bars rows={report.models.map((m) => [m.model, m.model, m.tokens, `${fmtTokens(m.tokens)}  ${m.percent.toFixed(1)}%`])} />
         </section>
         <section className="ucard">
           <div className="ucard-h"><h3>{t("按来源")}</h3></div>
-          <Bars rows={report.providers.map((p) => [p.provider, p.tokens, `${fmtTokens(p.tokens)}  ${p.percent.toFixed(1)}%`])} />
+          <Bars rows={report.providers.map((p) => [p.provider, providerLabels[p.provider] ?? t("未知来源"), p.tokens, `${fmtTokens(p.tokens)}  ${p.percent.toFixed(1)}%`, sourceColor(p.provider)])} />
         </section>
       </div>
+      </>}
     </div>
   );
 }

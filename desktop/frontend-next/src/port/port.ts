@@ -11,9 +11,10 @@ export type { AdjudicationEntry, AdjudicationState, Adjudications } from "./adju
 import type { HookCatalog, HookDryRun, HookEntry, HookEventInfo, HookSource } from "./hook";
 import type { CapabilityScope, McpCatalog, McpDraft, McpDraftServer, McpEntry, McpInstallResult, McpInstallScope, McpLoad, McpRisk, McpTool, ScopeLayer } from "./mcp";
 import type { MemoryCatalog, MemoryEdit, MemoryEntry } from "./memory";
-import type { UsageReport } from "./usage";
+import type { UsageQuery, UsageReport } from "./usage";
+export { DEFAULT_USAGE_DAYS } from "./usage";
 export type { MemoryEdit } from "./memory";
-export type { Money, UsageDay, UsageModel, UsageProvider, UsageReport } from "./usage";
+export type { Money, UsageDay, UsageModel, UsageProvider, UsageQuery, UsageReport } from "./usage";
 import type { CompactionSettings, Completion, CompletionItem, ModelEntry, ModelMode, ModelPrice, RoleAssignments } from "./model";
 import type { NetworkProbe, NetworkSettings } from "./network";
 import type { ApprovalDefault, ApprovalMode, WorkspaceTrust, ApprovalVerdict, BrowserTab, Checkpoint, HistoryMessage, HostTodo, JobEntry, Preset, RewindPlan, RewindResult, RewindScope, SessionEntry, SessionStatus, WalletLine, WalletReading, PlanAction } from "./session";
@@ -218,6 +219,7 @@ export interface AgentPort {
   dryRunHook(h: HookEntry): Promise<HookDryRun>;
   memories(): Promise<MemoryCatalog>;
   usage(days: number, source?: string): Promise<UsageReport>;
+  usage(query: UsageQuery): Promise<UsageReport>;
   // Archives rather than deletes: a fact dropped by mistake stays recoverable.
   forgetMemory(name: string): Promise<void>;
   saveMemory(edit: MemoryEdit): Promise<void>;

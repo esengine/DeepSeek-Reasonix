@@ -1,5 +1,5 @@
 import { PLAN_ACTIONS, type PlanAction } from "./session";
-import type { AccountState, AgentPort, Appearance, ChipCall, CompactionSettings, Completion, DeviceGrant, ProviderProbe, UpdateProgress, VersionHub, ApprovalMode, ApprovalVerdict, Checkpoint, RewindPlan, RewindResult, RewindScope, HistoryMessage, HostTodo, BrowserTab, ModelEntry, Preset, ProviderSetup, RoleAssignments, SessionEntry, SessionStatus, WalletReading, HookDryRun, HookEntry, MemoryCatalog, MemoryEdit, MemoryEntry, UsageReport, McpDraft, PluginExport, Queue, Queued, NotifyPrefs, TrayPrefs, WorkspaceInfo } from "./port";
+import type { AccountState, AgentPort, Appearance, ChipCall, CompactionSettings, Completion, DeviceGrant, ProviderProbe, UpdateProgress, VersionHub, ApprovalMode, ApprovalVerdict, Checkpoint, RewindPlan, RewindResult, RewindScope, HistoryMessage, HostTodo, BrowserTab, ModelEntry, Preset, ProviderSetup, RoleAssignments, SessionEntry, SessionStatus, WalletReading, HookDryRun, HookEntry, MemoryCatalog, MemoryEdit, MemoryEntry, UsageQuery, UsageReport, McpDraft, PluginExport, Queue, Queued, NotifyPrefs, TrayPrefs, WorkspaceInfo } from "./port";
 import { HttpError, type Attachment, type ChangeDiff, type DroppedRef, type WorkspaceFile, type WorkspaceFiles, type WorkspaceChanges } from "./port";
 import { SseFeedback } from "./sse_feedback";
 import type { StoragePlan, StorageQuery, StorageState } from "./storage";
@@ -97,9 +97,21 @@ export class SsePort extends SseFeedback implements AgentPort {
     return body;
   }
 
-  usage(days: number, source?: string) {
-    const q = new URLSearchParams({ days: String(days) });
-    if (source && source !== "all") q.set("source", source);
+  usage(days: number, source?: string): Promise<UsageReport>;
+  usage(query: UsageQuery): Promise<UsageReport>;
+  usage(query: number | UsageQuery, source?: string) {
+    const q = new URLSearchParams();
+    if (typeof query === "number") {
+      q.set("days", String(query));
+      if (source && source !== "all") q.set("source", source);
+    } else if ("days" in query) {
+      q.set("days", String(query.days));
+      if (query.source && query.source !== "all") q.set("source", query.source);
+    } else {
+      q.set("from", query.from);
+      q.set("to", query.to);
+      if (query.source && query.source !== "all") q.set("source", query.source);
+    }
     return this.get<UsageReport>("/usage?" + q);
   }
   memories() {
