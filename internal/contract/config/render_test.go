@@ -719,14 +719,14 @@ func TestNotificationsDefaultsKeepEventSwitchesEnabled(t *testing.T) {
 	if cfg.Notifications.Enabled {
 		t.Fatal("notifications.enabled default = true, want false")
 	}
-	if !cfg.Notifications.TurnDone || !cfg.Notifications.ApprovalRequest || !cfg.Notifications.AskRequest {
+	if !cfg.Notifications.TurnDone || !cfg.Notifications.ApprovalRequest || !cfg.Notifications.AskRequest || !cfg.Notifications.FeedbackReply {
 		t.Fatalf("notification event switches default off: %+v", cfg.Notifications)
 	}
 
 	if _, err := toml.Decode("[notifications]\nenabled = true\n", cfg); err != nil {
 		t.Fatalf("decode notifications: %v", err)
 	}
-	if !cfg.Notifications.Enabled || !cfg.Notifications.TurnDone || !cfg.Notifications.ApprovalRequest || !cfg.Notifications.AskRequest {
+	if !cfg.Notifications.Enabled || !cfg.Notifications.TurnDone || !cfg.Notifications.ApprovalRequest || !cfg.Notifications.AskRequest || !cfg.Notifications.FeedbackReply {
 		t.Fatalf("enabled-only config should keep event switches on: %+v", cfg.Notifications)
 	}
 }

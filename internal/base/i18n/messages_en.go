@@ -153,6 +153,7 @@ var English = Messages{
 	NotifyTurnFailed:                "The turn failed",
 	NotifyApproval:                  "Waiting for your approval",
 	NotifyAsk:                       "The model asked you something",
+	NotifyFeedbackReply:             "Your feedback has a new reply",
 	ApprovalNeededFmt:               "approval needed: %s",
 	ApprovalNeededWithSubjectFmt:    "approval needed: %s %s",
 	AnswerNeededFmt:                 "answer needed: %s",

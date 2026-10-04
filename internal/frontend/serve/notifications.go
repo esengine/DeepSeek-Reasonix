@@ -4,17 +4,20 @@ import (
 	"encoding/json"
 	"net/http"
 
+	"reasonix/internal/base/i18n"
 	"reasonix/internal/contract/config"
+	"reasonix/internal/platform/notify"
 )
 
 // NotifyPrefs is what a window can be asked about the desktop notifications it
 // sends on this machine's behalf. Enabled gates the other three, which are what
 // is worth being interrupted for.
 type NotifyPrefs struct {
-	Enabled  bool `json:"enabled"`
-	TurnDone bool `json:"turnDone"`
-	Approval bool `json:"approval"`
-	Ask      bool `json:"ask"`
+	Enabled       bool `json:"enabled"`
+	TurnDone      bool `json:"turnDone"`
+	Approval      bool `json:"approval"`
+	Ask           bool `json:"ask"`
+	FeedbackReply bool `json:"feedbackReply"`
 }
 
 const codeNotifyRejected = "notifications.rejected"
@@ -28,6 +31,9 @@ func (h *Hub) registerNotifyRoutes(mux *http.ServeMux) {
 	}
 	mux.HandleFunc("GET /notifications", h.readNotifyPrefs)
 	mux.HandleFunc("PUT /notifications", h.writeNotifyPrefs)
+	if h.opts.NotifySender != nil {
+		mux.HandleFunc("POST /notifications/feedback-reply", h.announceFeedbackReply)
+	}
 }
 
 func (h *Hub) readNotifyPrefs(w http.ResponseWriter, _ *http.Request) {
@@ -42,7 +48,7 @@ func (h *Hub) NotifyPrefs() NotifyPrefs {
 		return NotifyPrefs{}
 	}
 	cfg := config.LoadForEdit(config.UserConfigPath()).Notifications
-	return NotifyPrefs{Enabled: cfg.Enabled, TurnDone: cfg.TurnDone, Approval: cfg.ApprovalRequest, Ask: cfg.AskRequest}
+	return NotifyPrefs{Enabled: cfg.Enabled, TurnDone: cfg.TurnDone, Approval: cfg.ApprovalRequest, Ask: cfg.AskRequest, FeedbackReply: cfg.FeedbackReply}
 }
 
 // SetNotifyPrefs persists the switches and hands the holder the same answer, so
@@ -54,6 +60,7 @@ func (h *Hub) SetNotifyPrefs(next NotifyPrefs) (NotifyPrefs, error) {
 		TurnDone:        next.TurnDone,
 		ApprovalRequest: next.Approval,
 		AskRequest:      next.Ask,
+		FeedbackReply:   next.FeedbackReply,
 	}
 	path := config.UserConfigPath()
 	edit := config.LoadForEdit(path)
@@ -79,4 +86,13 @@ func (h *Hub) writeNotifyPrefs(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, got)
+}
+
+// announceFeedbackReply says a reply arrived. The window decides when that is
+// worth saying, because only it knows whether anyone is looking; whether the
+// person allowed it is answered here, from the durable setting.
+func (h *Hub) announceFeedbackReply(w http.ResponseWriter, _ *http.Request) {
+	cfg := config.LoadForEdit(config.UserConfigPath())
+	notify.SendFeedbackReply(h.opts.NotifySender, i18n.CatalogFor(cfg.DesktopLanguage()), cfg.Notifications)
+	w.WriteHeader(http.StatusNoContent)
 }

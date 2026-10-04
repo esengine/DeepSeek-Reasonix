@@ -15,6 +15,7 @@ import { folded as roomGaveUp, onRoomWidth } from "./viewport";
 import { useFoldAway } from "./foldaway";
 import { useDrawerCloses } from "./drawer";
 import { RemoteAsk } from "./RemoteAsk";
+import { useFeedbackUnread } from "./useFeedbackUnread";
 import { Feedback, type FeedbackTab } from "./Feedback";
 import { BrowserLogin } from "./BrowserLogin";
 import type { RemoteAsk as RemoteAskT, RemoteHost } from "../port/remote";
@@ -258,19 +259,9 @@ export function App({ hub }: { hub: HubPort }) {
 
   useLaunchHealth(activePort, setup, welcomed);
 
-  // Asked once when the app opens and again each time the page is opened,
-  // never on a timer: there is no push channel to keep honest.
-  const feedbackPort = networkPort ?? activePort;
-  const feedbackAsk = useRef(feedbackPort);
-  feedbackAsk.current = feedbackPort;
-  const feedbackReady = feedbackPort !== null;
-  useEffect(() => {
-    let alive = true;
-    feedbackAsk.current?.myFeedback().then((m) => alive && setFeedbackUnread(m.unread)).catch(() => {});
-    return () => {
-      alive = false;
-    };
-  }, [feedbackReady]);
+  // Asked on open, on focus (at most every 30 s) and every 10 min while a report
+  // is unsettled, never otherwise; a failed refresh stays silent and backs off.
+  useFeedbackUnread(networkPort ?? activePort, networkHost, feedbackUnread, setFeedbackUnread, feedback !== null);
 
   useEffect(() => {
     if (!activePort) return;

@@ -382,6 +382,7 @@ export const ACTIONS: UIAction[] = [
   { id: "notify.turn-done", kind: "kernel-mutation", target: "none", proof: "authority-effect" },
   { id: "notify.approval", kind: "kernel-mutation", target: "none", proof: "authority-effect" },
   { id: "notify.ask", kind: "kernel-mutation", target: "none", proof: "authority-effect" },
+  { id: "notify.feedback-reply", kind: "kernel-mutation", target: "none", proof: "authority-effect" },
   { id: "workspace.editor", kind: "repeatable", target: "none", proof: "authority-effect" },
   { id: "wallpaper.remove", kind: "kernel-mutation", target: "none", proof: "authority-effect" },
   { id: "wallpaper.change", kind: "kernel-mutation", target: "none", proof: "authority-effect" },

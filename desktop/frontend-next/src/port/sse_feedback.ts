@@ -14,6 +14,9 @@ export class SseFeedback extends SseBackup {
   replyFeedback(receipt: string, body: string) {
     return this.post0<FeedbackReplyReceipt>("/feedback/" + encodeURIComponent(receipt) + "/reply", { body });
   }
+  announceFeedbackReply() {
+    return this.post("/notifications/feedback-reply", {});
+  }
   feedbackSeen(receipt: string, upTo: number) {
     return this.post("/feedback/" + encodeURIComponent(receipt) + "/seen", { upTo });
   }

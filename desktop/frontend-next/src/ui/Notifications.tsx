@@ -35,7 +35,7 @@ export function Notifications({ port }: { port: AgentPort }) {
       <div className="grp-hd">
         <h3>{t("通知")}</h3>
       </div>
-      <p className="hint">{t("只在你没盯着窗口的时候有用：一轮跑完、停下来等批准、或者模型反过来问你，都可以让系统提醒一次。")}</p>
+      <p className="hint">{t("只在你没盯着窗口的时候有用：一轮跑完、停下来等批准、模型反过来问你、反馈有了回复，都可以让系统提醒一次。")}</p>
       <div className="grp-items">
         <div className="lrow">
           <span className="tx">
@@ -66,6 +66,13 @@ export function Notifications({ port }: { port: AgentPort }) {
             <span className="ds">{t("模型停下来问你一个问题，没有答案它就不会往下走")}</span>
           </span>
           <Switch data-action="notify.ask" on={prefs.ask} busy={!prefs.enabled} label={t("模型提问时")} onClick={() => flip({ ask: !prefs.ask })} />
+        </div>
+        <div className="lrow subrow" data-off={prefs.enabled ? undefined : ""}>
+          <span className="tx">
+            <span className="lb">{t("反馈有新回复时")}</span>
+            <span className="ds">{t("你提交的反馈收到回复、或需要你补充信息时提醒一次，不带回复内容")}</span>
+          </span>
+          <Switch data-action="notify.feedback-reply" on={prefs.feedbackReply} busy={!prefs.enabled} label={t("反馈有新回复时")} onClick={() => flip({ feedbackReply: !prefs.feedbackReply })} />
         </div>
       </div>
       <ApplyNote id="notify" />

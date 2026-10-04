@@ -150,6 +150,7 @@ var ChineseTraditional = Messages{
 	NotifyTurnFailed:                "這一輪失敗了",
 	NotifyApproval:                  "有操作在等你核准",
 	NotifyAsk:                       "模型問了你一個問題",
+	NotifyFeedbackReply:             "你的回饋有新回覆",
 	ApprovalNeededFmt:               "需要核准：%s",
 	ApprovalNeededWithSubjectFmt:    "需要核准：%s %s",
 	AnswerNeededFmt:                 "需要回答：%s",
