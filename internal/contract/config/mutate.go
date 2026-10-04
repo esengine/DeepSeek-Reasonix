@@ -3,6 +3,7 @@ package config
 import (
 	"context"
 	"crypto/sha256"
+	"errors"
 	"fmt"
 	"os"
 	osuser "os/user"
@@ -202,6 +203,10 @@ func acquireConfigEditLockPathWithTimeout(lockPath string, timeout time.Duration
 	return acquireConfigEditLockPath(ctx, lockPath)
 }
 
+// ErrLockDirWrongOwner reports that the config edit lock directory belongs to
+// another user, so it cannot be secured and is not used.
+var ErrLockDirWrongOwner = errors.New("lock directory is owned by another user")
+
 func acquireConfigEditLockPath(ctx context.Context, lockPath string) (func(), error) {
 	lockDir := filepath.Dir(lockPath)
 	if err := os.MkdirAll(lockDir, 0o700); err != nil {
@@ -213,6 +218,9 @@ func acquireConfigEditLockPath(ctx context.Context, lockPath string) (func(), er
 	}
 	if info.Mode()&os.ModeSymlink != 0 || !info.IsDir() {
 		return nil, fmt.Errorf("lock config edits: unsafe lock directory")
+	}
+	if owner, foreign := lockDirForeignOwner(info); foreign {
+		return nil, fmt.Errorf("lock config edits: lock directory %s is owned by uid %d, not the current user: %w", lockDir, owner, ErrLockDirWrongOwner)
 	}
 	if err := os.Chmod(lockDir, 0o700); err != nil {
 		return nil, fmt.Errorf("lock config edits: secure lock directory: %w", err)
