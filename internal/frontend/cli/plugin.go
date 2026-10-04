@@ -13,6 +13,7 @@ import (
 	"reasonix/internal/contract/config"
 	"reasonix/internal/ext/hook"
 	"reasonix/internal/ext/installsource"
+	"reasonix/internal/ext/mcpsetup"
 	"reasonix/internal/ext/pluginpkg"
 	"reasonix/internal/ext/theme"
 )
@@ -329,7 +330,7 @@ func printPluginInventory(pluginName string, inv pluginpkg.Inventory) {
 		for _, server := range inv.MCPServers {
 			target := server.Command
 			if target == "" {
-				target = server.URL
+				target = mcpsetup.RedactURL(server.URL)
 			}
 			fmt.Printf("  %s\t%s\t%s\n", server.Name, server.Transport, target)
 		}
