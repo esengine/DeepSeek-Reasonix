@@ -118,6 +118,7 @@ var mirroredWireTypes = []wireMirror{
 	// the long pause after the last byte is indistinguishable from a hang.
 	{"internal/platform/update/progress.go", "Progress", tsVersionFile, "UpdateProgress"},
 	{"internal/state/checkpoint/types.go", "RewindResult", tsSessionFile, "RewindResult"},
+	{"internal/state/checkpoint/types.go", "RewindUndo", tsSessionFile, "RewindUndo"},
 	{"internal/contract/eventwire/wire.go", "ShellExecution", tsWireFile, "Execution"},
 	{"internal/contract/eventwire/workspace_lease.go", "WorkspaceLease", tsWireFile, "WorkspaceLease"},
 	// A source and a model as the pickers name them. A label the page cannot

@@ -185,6 +185,27 @@ func (c *Controller) CommitRewind(planID string) (checkpoint.RewindResult, error
 	return result, nil
 }
 
+func (c *Controller) AvailableUndo() (*checkpoint.RewindUndo, error) {
+	if !c.checkpoints.enabled() || c.executor == nil {
+		return nil, nil
+	}
+	if err := c.beginRotation(); err != nil {
+		if errors.Is(err, errTurnRunningRotation) {
+			return nil, nil
+		}
+		return nil, err
+	}
+	defer c.endRotation()
+	store := c.checkpoints.storeRef()
+	if store == nil {
+		return nil, nil
+	}
+	if obs := c.mutationObserver; obs != nil {
+		store.SetActiveWriters(obs.ActiveWriters())
+	}
+	return store.AvailableUndo()
+}
+
 // UndoRewind reverses the last committed rewind transaction when still available.
 func (c *Controller) UndoRewind(transactionID string) (checkpoint.RewindResult, error) {
 	if !c.checkpoints.enabled() || c.executor == nil {

@@ -60,6 +60,7 @@ func (s *Server) routes() http.Handler {
 	mux.HandleFunc("POST /rewind/prepare", s.rewindPrepare)
 	mux.HandleFunc("POST /rewind/commit", s.rewindCommit)
 	mux.HandleFunc("POST /rewind/undo", s.rewindUndo)
+	mux.HandleFunc("GET /rewind/undo", s.rewindAvailableUndo)
 	mux.HandleFunc("POST /rewind/file/prepare", s.fileRevertPrepare)
 	mux.HandleFunc("POST /rewind/file/commit", s.fileRevertCommit)
 	mux.HandleFunc("POST /summarize", s.summarize)

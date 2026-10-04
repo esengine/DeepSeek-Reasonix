@@ -224,29 +224,6 @@ func (s *Store) activeWriterConflicts() []RewindConflict {
 	return conflicts
 }
 
-// LastUndoTransactionID returns the committed transaction id available for undo.
-func (s *Store) LastUndoTransactionID() string {
-	if s == nil {
-		return ""
-	}
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	if s.lastUndo == nil || s.lastUndo.State != TxCommitted {
-		return ""
-	}
-	return s.lastUndo.ID
-}
-
-// InvalidateUndo clears the last undo slot (new turn / new mutation / new rewind).
-func (s *Store) InvalidateUndo() {
-	if s == nil {
-		return
-	}
-	s.mu.Lock()
-	s.lastUndo = nil
-	s.mu.Unlock()
-}
-
 func (s *Store) load() {
 	seen := map[int]bool{}
 	loadDir := func(dir string, expired bool) {
@@ -324,7 +301,7 @@ func (s *Store) Begin(turn int, prompt string, msgIndex int) {
 		Coverage:      CoverageNone,
 	}
 	s.seen = map[string]bool{}
-	s.lastUndo = nil // new turn invalidates undo
+	s.invalidateUndoLocked()
 	s.persistBestEffort(s.cur)
 	s.gcLocked()
 }
@@ -502,6 +479,7 @@ func (s *Store) CaptureAfter(path string, opts CaptureAfterOpts) {
 
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	s.invalidateUndoLocked()
 	s.mutationSeq = opts.Seq
 	if s.cur != nil {
 		s.cur.LastMutationSeq = opts.Seq
@@ -522,7 +500,6 @@ func (s *Store) CaptureAfter(path string, opts CaptureAfterOpts) {
 		if updated {
 			s.recomputeCoverageLocked(s.cur)
 			s.persistBestEffort(s.cur)
-			s.lastUndo = nil // mutation invalidates undo
 			return
 		}
 	}
@@ -540,7 +517,6 @@ func (s *Store) CaptureAfter(path string, opts CaptureAfterOpts) {
 			c.Files[j].AfterSHA256 = fp.SHA256
 			c.Files[j].AfterMode = fp.Mode
 			s.persistBestEffort(c)
-			s.lastUndo = nil
 			return
 		}
 	}

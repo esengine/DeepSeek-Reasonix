@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from "react";
-import type { Checkpoint, RewindPlan, RewindResult, RewindScope } from "../../port/port";
+import type { Checkpoint, RewindPlan, RewindResult, RewindUndo, RewindScope } from "../../port/port";
 import type { Item } from "../../state/session";
 import { RewindControl } from "./RewindControl";
 import { CopyButton } from "../CopyButton";
@@ -15,6 +15,7 @@ export function UserCard({
   onResend,
   onPrepareRewind,
   onCommitRewind,
+  onReadUndo,
   onUndoRewind,
 }: {
   item: Extract<Item, { t: "user" }>;
@@ -22,6 +23,7 @@ export function UserCard({
   onResend?: (turn: number, text: string) => Promise<void>;
   onPrepareRewind?: (turn: number, scope: RewindScope) => Promise<RewindPlan>;
   onCommitRewind?: (planId: string) => Promise<RewindResult>;
+  onReadUndo?: () => Promise<RewindUndo | null>;
   onUndoRewind?: (transactionId: string) => Promise<void>;
 }) {
   // A rewind needs a turn the kernel claimed, and a queued line has not
@@ -33,7 +35,7 @@ export function UserCard({
   const box = useRef<HTMLTextAreaElement>(null);
   const source = messageSource(item.via, useViewer());
   const reopen = editable && draft === null;
-  const rewind = !!(cp && onPrepareRewind && onCommitRewind && onUndoRewind);
+  const rewind = !!(cp && onPrepareRewind && onCommitRewind && onReadUndo && onUndoRewind);
 
   useEffect(() => {
     const el = box.current;
@@ -121,7 +123,7 @@ export function UserCard({
             </button>
           )}
           {rewind && (
-            <RewindControl cp={cp!} compact onPrepare={onPrepareRewind!} onCommit={onCommitRewind!} onUndo={onUndoRewind!} />
+            <RewindControl cp={cp!} compact onReadUndo={onReadUndo!} onPrepare={onPrepareRewind!} onCommit={onCommitRewind!} onUndo={onUndoRewind!} />
           )}
         </div>
       </div>

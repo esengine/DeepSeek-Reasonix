@@ -303,7 +303,7 @@ function PaneView({ port, rt, title, active, visible, sideHost, side, onFocus, o
     return history;
   }, [port, applyStatus, refreshWallet, onSessionChanged, replayTrajectory]);
 
-  const { onPrepareRewind, onCommitRewind, onUndoRewind, onPrepareFileRevert, onCommitFileRevert } = useRewindActions(port, reloadSession);
+  const { onReadUndo, onPrepareRewind, onCommitRewind, onUndoRewind, onPrepareFileRevert, onCommitFileRevert } = useRewindActions(port, reloadSession);
 
   // Both of these read only the user and tool cards, so they key off the
   // revision rather than the items array: a streamed answer leaves every card
@@ -574,7 +574,7 @@ function PaneView({ port, rt, title, active, visible, sideHost, side, onFocus, o
         checkpoints={paired}
         onPrepareRewind={onPrepareRewind}
         onCommitRewind={onCommitRewind}
-        onUndoRewind={onUndoRewind}
+        onReadUndo={onReadUndo} onUndoRewind={onUndoRewind}
         onPrepareFileRevert={onPrepareFileRevert}
         onCommitFileRevert={onCommitFileRevert}
         needsProject={needsProject}

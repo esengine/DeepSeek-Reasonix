@@ -256,28 +256,12 @@ func (s *Store) UndoRewind(transactionID string, applier ConversationApplier) (R
 		return RewindResult{OK: false, Error: err.Error(), Conflicts: conflicts}, err
 	}
 
-	// Precheck that current disk still matches what we published (targets' restore state).
-	for _, t := range last.Targets {
-		fp, err := FingerprintPath(s.root, t.AbsPath)
-		if err != nil && !os.IsNotExist(err) {
-			return RewindResult{OK: false, Error: err.Error()}, fmt.Errorf("fingerprint %s before undo: %w", t.Path, err)
-		}
-		// After commit, disk should match restore image. If it doesn't, refuse.
-		if t.Action == "delete" {
-			if fp.Existed {
-				return RewindResult{OK: false, Error: "file changed since rewind", Conflicts: []RewindConflict{{
-					Path: t.Path, Reason: ConflictManualEdit, CurrentSHA: fp.SHA256,
-				}}}, fmt.Errorf("file changed since rewind: %s", t.Path)
-			}
-		} else {
-			if !fingerprintMatches(fp, t.RestoreExisted, t.RestoreSHA, t.RestoreMode) {
-				restoreExisted := t.RestoreExisted
-				return RewindResult{OK: false, Error: "file changed since rewind", Conflicts: []RewindConflict{{
-					Path: t.Path, Reason: CompareIdentity(fp, t.RestoreSHA, &restoreExisted, t.RestoreMode),
-					CurrentSHA: fp.SHA256, LastOwnedSHA: t.RestoreSHA, CurrentMode: fp.Mode, CheckpointMode: t.RestoreMode,
-				}}}, fmt.Errorf("file changed since rewind: %s", t.Path)
-			}
-		}
+	conflicts, err := s.undoFileConflicts(last)
+	if err != nil {
+		return RewindResult{OK: false, Error: err.Error()}, err
+	}
+	if len(conflicts) > 0 {
+		return RewindResult{OK: false, Error: "file changed since rewind", Conflicts: conflicts}, fmt.Errorf("file changed since rewind: %s", conflicts[0].Path)
 	}
 
 	// Build inverse transaction: restore forward images.
@@ -813,6 +797,7 @@ func (s *Store) commitTransaction(tx *TransactionManifest, applier ConversationA
 	}
 	s.cleanupCommittedBackups(tx.Targets)
 	s.mu.Lock()
+	s.invalidateUndoLocked()
 	s.lastUndo = tx
 	s.mu.Unlock()
 
@@ -1194,6 +1179,7 @@ func (s *Store) recoverTransactions(applier ConversationApplier) []string {
 			undoneParents[tx.ParentTransaction] = true
 		}
 	}
+	var latest *TransactionManifest
 	var notes []string
 	for _, e := range ents {
 		if e.IsDir() || !strings.HasSuffix(e.Name(), ".json") {
@@ -1259,19 +1245,18 @@ func (s *Store) recoverTransactions(applier ConversationApplier) []string {
 				tx.UpdatedAt = time.Now()
 				_ = s.persistTransaction(&tx)
 			}
-		case TxCommitted:
-			if tx.Kind == "undo" || undoneParents[tx.ID] {
+		case TxCommitted, TxInvalidated, TxUndone:
+			// A terminal operation must not expose an older undo slot.
+			if tx.Kind == "undo" {
 				continue
 			}
-			// Keep as last undo if newer.
-			s.mu.Lock()
-			if s.lastUndo == nil || s.lastUndo.UpdatedAt.Before(tx.UpdatedAt) {
+			if latest == nil || latest.CreatedAt.Before(tx.CreatedAt) {
 				cp := tx
-				s.lastUndo = &cp
+				latest = &cp
 			}
-			s.mu.Unlock()
 		}
 	}
+	s.restoreUndoSlot(latest, undoneParents)
 	return notes
 }
 

@@ -154,6 +154,7 @@ type SessionHistory interface {
 	Rewind(turn int, scope RewindScope) error
 	PrepareRewind(turn int, scope RewindScope) (checkpoint.RewindPlan, error)
 	CommitRewind(planID string) (checkpoint.RewindResult, error)
+	AvailableUndo() (*checkpoint.RewindUndo, error)
 	UndoRewind(transactionID string) (checkpoint.RewindResult, error)
 	PrepareFileRevert(path string) (checkpoint.RewindPlan, error)
 	CommitFileRevert(planID string, resolution checkpoint.ConflictResolution) (checkpoint.RewindResult, error)

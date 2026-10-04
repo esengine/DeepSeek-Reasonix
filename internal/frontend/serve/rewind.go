@@ -68,6 +68,15 @@ func (s *Server) rewindCommit(w http.ResponseWriter, r *http.Request) {
 // rewindUndo reverses a committed rewind. The commit result carries the
 // transaction id and whether this is available, so a frontend can offer it while
 // the id is still in hand.
+func (s *Server) rewindAvailableUndo(w http.ResponseWriter, _ *http.Request) {
+	undo, err := s.ctl().AvailableUndo()
+	if err != nil {
+		writeErr(w, http.StatusInternalServerError, err)
+		return
+	}
+	writeJSON(w, undo)
+}
+
 func (s *Server) rewindUndo(w http.ResponseWriter, r *http.Request) {
 	var body struct {
 		TransactionID string `json:"transactionId"`
