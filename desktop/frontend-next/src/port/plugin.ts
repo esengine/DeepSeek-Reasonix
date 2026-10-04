@@ -108,6 +108,7 @@ export interface PluginAction {
   warnings?: string[];
   error?: string;
   next?: string;
+  errorCode?: string;
 }
 
 // The same object answers a preview and an apply; status says which happened —

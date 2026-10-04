@@ -37,7 +37,7 @@ func Crash(op, path string) {
 // copy on Windows filter-driver EXDEV; callers that cannot tolerate that must
 // use AtomicWriteFileStrict.
 func AtomicWriteFile(path string, data []byte, perm os.FileMode) error {
-	return atomicWriteFile(path, data, perm, true)
+	return atomicWriteFile(path, data, perm, true, nil)
 }
 
 // AtomicWriteFileStrict publishes only via atomic rename (no EXDEV copy).
@@ -47,7 +47,13 @@ func AtomicWriteFile(path string, data []byte, perm os.FileMode) error {
 // (callers that roll back in-memory state on error would otherwise fork from
 // the on-disk pointer).
 func AtomicWriteFileStrict(path string, data []byte, perm os.FileMode) error {
-	return atomicWriteFile(path, data, perm, false)
+	return AtomicWriteFileStrictValidated(path, data, perm, nil)
+}
+
+// AtomicWriteFileStrictValidated checks dependent material after preparing the
+// durable pointer and immediately before its atomic publication.
+func AtomicWriteFileStrictValidated(path string, data []byte, perm os.FileMode, validate func() error) error {
+	return atomicWriteFile(path, data, perm, false, validate)
 }
 
 // syncParentDirFn is the post-publish parent-dir fsync implementation.
@@ -66,11 +72,17 @@ func SetSyncParentDirForTest(fn func(path string) error) (restore func()) {
 	return func() { syncParentDirFn = prev }
 }
 
-func atomicWriteFile(path string, data []byte, perm os.FileMode, allowCrossDeviceCopy bool) error {
+func atomicWriteFile(path string, data []byte, perm os.FileMode, allowCrossDeviceCopy bool, validate func() error) error {
 	Crash("atomic-write", path)
 	tmpPath, err := writeAtomicTemp(path, data, perm)
 	if err != nil {
 		return err
+	}
+	if validate != nil {
+		if err := validate(); err != nil {
+			os.Remove(tmpPath)
+			return err
+		}
 	}
 	if err := replaceFile(tmpPath, path, allowCrossDeviceCopy); err != nil {
 		os.Remove(tmpPath)

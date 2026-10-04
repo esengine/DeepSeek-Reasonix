@@ -19,7 +19,6 @@ import (
 	"strings"
 	"sync"
 
-	"reasonix/internal/base/fileutil"
 	fileencoding "reasonix/internal/base/fileutil/encoding"
 	"reasonix/internal/base/frontmatter"
 	"reasonix/internal/contract/config"
@@ -304,19 +303,6 @@ func LoadState(reasonixHome string) (State, error) {
 	return st, nil
 }
 
-func SaveState(reasonixHome string, st State) error {
-	if st.Version == 0 {
-		st.Version = 1
-	}
-	slices.SortStableFunc(st.Plugins, func(a, b InstalledPlugin) int { return cmp.Compare(a.Name, b.Name) })
-	b, err := json.MarshalIndent(st, "", "  ")
-	if err != nil {
-		return err
-	}
-	b = append(b, '\n')
-	return fileutil.AtomicWriteFile(StatePath(reasonixHome), b, 0o644)
-}
-
 // stateMu serialises the read-modify-write of the state file within this
 // process. SaveState writes atomically (tmpfile + rename), so concurrent
 // callers never see a half-written file; this lock additionally prevents two
@@ -325,23 +311,7 @@ func SaveState(reasonixHome string, st State) error {
 var stateMu sync.Mutex
 
 func Upsert(reasonixHome string, p InstalledPlugin) error {
-	if !IsValidName(p.Name) {
-		return fmt.Errorf("invalid plugin name %q", p.Name)
-	}
-	stateMu.Lock()
-	defer stateMu.Unlock()
-	st, err := LoadState(reasonixHome)
-	if err != nil {
-		return err
-	}
-	for i := range st.Plugins {
-		if st.Plugins[i].Name == p.Name {
-			st.Plugins[i] = p
-			return SaveState(reasonixHome, st)
-		}
-	}
-	st.Plugins = append(st.Plugins, p)
-	return SaveState(reasonixHome, st)
+	return UpsertValidated(reasonixHome, p, nil)
 }
 
 func Remove(reasonixHome, name string) (InstalledPlugin, bool, error) {

@@ -2552,7 +2552,11 @@ func TestBackupPathCannotCollideWithSiblingPlugin(t *testing.T) {
 	if _, ok, _ := pluginpkg.FindInstalled(filepath.Join(home, ".reasonix"), "foo.pre-replace"); !ok {
 		t.Fatal("sibling plugin must stay registered")
 	}
-	pkg, _, err := pluginpkg.ParseDir(filepath.Join(home, ".reasonix", "plugins", "foo"))
+	installed, found, err := pluginpkg.FindInstalled(filepath.Join(home, ".reasonix"), "foo")
+	if err != nil || !found {
+		t.Fatalf("updated foo registration = %+v, found=%t, error=%v", installed, found, err)
+	}
+	pkg, _, err := pluginpkg.ParseDir(pluginpkg.ResolveRoot(filepath.Join(home, ".reasonix"), installed.Root))
 	if err != nil {
 		t.Fatalf("ParseDir foo: %v", err)
 	}

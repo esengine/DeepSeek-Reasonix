@@ -299,6 +299,7 @@ func (t *Tool) executeApply(ctx context.Context, req request, actions []action, 
 			ok = false
 			actions[i].Status = "failed"
 			actions[i].Error = err.Error()
+			actions[i].ErrorCode = ErrorCode(err)
 			if actions[i].Next == "" {
 				actions[i].Next = nextForError(err)
 			}
@@ -643,6 +644,7 @@ func computePlanID(req request, actions []action) string {
 		Replace   bool              `json:"replace"`
 		Strict    bool              `json:"strict"`
 		Actions   []action          `json:"actions"`
+		Digest    string            `json:"contentDigest,omitempty"`
 	}{
 		Op:        req.Op,
 		Source:    req.Source,
@@ -659,6 +661,7 @@ func computePlanID(req request, actions []action) string {
 		Replace:   req.Replace,
 		Strict:    req.strict(),
 		Actions:   public,
+		Digest:    contentDigest(actions),
 	}
 	body, _ := json.Marshal(payload)
 	h := sha256.New()
