@@ -7,12 +7,13 @@ import { jsonResponse, refuse } from "./feedback_http";
 import { admit, refund, replyRefusal } from "./feedback_quota";
 import { ReplyBody } from "./feedback_schema";
 import { MAX_REPLIES_PER_ITEM, MAX_REPLY_BYTES, REPLIES_PER_INSTALL_HOURLY, TRUSTED_REPLIES_PER_INSTALL_HOURLY } from "./feedback_types";
+import { announce, type OpsWaiter } from "./ops_emit";
 import { scrubSensitiveText } from "./scrub";
 
 const REPLYABLE = ["needs_info", "answered", "recorded", "in_progress"];
 const REPLYABLE_SQL = `(${REPLYABLE.map((s) => `'${s}'`).join(",")})`;
 
-export async function handleUserReply(request: Request, env: Env, receipt: string): Promise<Response> {
+export async function handleUserReply(request: Request, env: Env, receipt: string, ctx?: OpsWaiter): Promise<Response> {
   const who = await verifyInstall(request, env);
   if (who instanceof Response) return who;
   const secret = env.FEEDBACK_TOKEN_SECRET ?? "";
@@ -62,5 +63,6 @@ export async function handleUserReply(request: Request, env: Env, receipt: strin
     return (await replyRefusal(env, who.installHash, policy, now)) ?? refuse("feedback.not_replyable", "this report cannot take replies");
   }
   const replyId = res.meta?.last_row_id ?? 0;
+  announce(ctx, env, { t: "replied", receipt });
   return jsonResponse({ replyId }, 201);
 }

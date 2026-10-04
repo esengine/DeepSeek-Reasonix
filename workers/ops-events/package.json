@@ -1,0 +1,19 @@
+{
+  "name": "reasonix-ops-events",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "deploy": "wrangler deploy",
+    "test": "vitest run",
+    "typecheck": "tsc --noEmit"
+  },
+  "devDependencies": {
+    "@cloudflare/workers-types": "^5.20260724.1",
+    "typescript": "^5.8.0",
+    "vitest": "^5.0.0",
+    "wrangler": "^4.139.0"
+  },
+  "overrides": {
+    "esbuild": "0.28.1"
+  }
+}

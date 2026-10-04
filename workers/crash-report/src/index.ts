@@ -1886,7 +1886,7 @@ async function purgeExpiredRows(db: D1Database, retention: readonly RetentionRul
 export { scrubSensitiveText };
 
 export default {
-  async fetch(request: Request, env: Env): Promise<Response> {
+  async fetch(request: Request, env: Env, ctx?: ExecutionContext): Promise<Response> {
     const gated = workersDevGate(request);
     if (gated) return gated;
     const url = new URL(request.url);
@@ -1903,7 +1903,7 @@ export default {
       return handleReleaseGatewayRequest(method, () => handleCLIRelease(cliRelease));
     }
 
-    const feedback = await handleFeedbackRoute(request, env);
+    const feedback = await handleFeedbackRoute(request, env, ctx);
     if (feedback) return feedback;
 
     if (path === "/v1/report" && method === "POST") return handleReport(request, env);

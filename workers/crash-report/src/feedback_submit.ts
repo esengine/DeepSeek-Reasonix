@@ -22,6 +22,7 @@ import {
   type FeedbackRow,
   type StoredAttachment,
 } from "./feedback_types";
+import { announce, type OpsWaiter } from "./ops_emit";
 import { scrubSensitiveText } from "./scrub";
 
 const RECEIPT_ATTEMPTS = 5;
@@ -83,7 +84,7 @@ async function storeAll(env: Env, decoded: ReturnType<typeof decodeAttachment>[]
   return stored;
 }
 
-export async function handleSubmit(request: Request, env: Env): Promise<Response> {
+export async function handleSubmit(request: Request, env: Env, ctx?: OpsWaiter): Promise<Response> {
   const secret = env.FEEDBACK_TOKEN_SECRET;
   if (!feedbackEnabled(env) || !secret) return refuse("feedback.disabled", "feedback is unavailable");
   const text = await readCappedText(request, MAX_REQUEST_BYTES);
@@ -177,5 +178,6 @@ export async function handleSubmit(request: Request, env: Env): Promise<Response
     if (!outcome) return refuse("feedback.disabled", "could not allocate a receipt");
     return jsonResponse(receiptBody(outcome.replay, token), 200);
   }
+  announce(ctx, env, { t: "submitted", receipt: outcome.receipt, category: outcome.category, status: outcome.status });
   return jsonResponse(receiptBody(outcome, token), 201);
 }

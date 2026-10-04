@@ -28,6 +28,9 @@ export interface Env {
   FEEDBACK_ENABLED?: string;
   FEEDBACK_TOKEN_SECRET?: string;
   FEEDBACK_ADMIN_TOKEN?: string;
+  // Ops-events relay; feedback emits compact events only when both are set.
+  OPS_EVENTS_URL?: string;
+  OPS_EMIT_TOKEN?: string;
   // When set, submissions must carry a valid Turnstile token (feedback.challenge_required).
   FEEDBACK_TURNSTILE_SECRET?: string;
   // Comma-separated hostnames a Turnstile token may come from; unset skips the hostname check.

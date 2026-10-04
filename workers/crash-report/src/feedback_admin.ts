@@ -5,6 +5,7 @@ import { listFeedback } from "./feedback_admin_list";
 import { requireAdmin } from "./feedback_auth";
 import { jsonResponse, refuse } from "./feedback_http";
 import { pendingItem, releasedKeys } from "./feedback_read";
+import { announce, type OpsWaiter } from "./ops_emit";
 import { RecordedBody, StatusBody } from "./feedback_schema";
 import { adminAttachment, adminReply, answer, ask, detail, held, reject, release, takedown } from "./feedback_triage";
 import { statusRank, type FeedbackRow } from "./feedback_types";
@@ -34,7 +35,7 @@ async function open(env: Env): Promise<Response> {
   });
 }
 
-async function recorded(request: Request, env: Env, receipt: string): Promise<Response> {
+async function recorded(request: Request, env: Env, receipt: string, ctx?: OpsWaiter): Promise<Response> {
   const body = RecordedBody.safeParse(await readJson(request));
   if (!body.success) return refuse("feedback.invalid", "issueNumber and issueUrl are required");
   const row = await load(env, receipt);
@@ -43,10 +44,11 @@ async function recorded(request: Request, env: Env, receipt: string): Promise<Re
   if (row.status !== "received") return refuse("feedback.bad_transition", "feedback is not releasable to the converter");
   const ok = await setState(env, receipt, "received", "status = 'recorded', issue_number = ?, issue_url = ?", [body.data.issueNumber, body.data.issueUrl]);
   if (!ok) return refuse("feedback.bad_transition", "status changed concurrently");
+  announce(ctx, env, { t: "status", receipt, category: row.category, status: "recorded" });
   return jsonResponse({ receipt, status: "recorded", issueNumber: body.data.issueNumber, issueUrl: body.data.issueUrl });
 }
 
-async function status(request: Request, env: Env, receipt: string): Promise<Response> {
+async function status(request: Request, env: Env, receipt: string, ctx?: OpsWaiter): Promise<Response> {
   const body = StatusBody.safeParse(await readJson(request));
   if (!body.success) return refuse("feedback.invalid", "unknown or malformed status update");
   const { status: next, resolvedVersion, duplicateOf } = body.data;
@@ -71,12 +73,13 @@ async function status(request: Request, env: Env, receipt: string): Promise<Resp
     next === "duplicate" ? (duplicateOf ?? null) : null,
   ]);
   if (!ok) return refuse("feedback.bad_transition", "status changed concurrently");
+  announce(ctx, env, { t: "status", receipt, category: row.category, status: next });
   return jsonResponse({ receipt, status: next });
 }
 
 const NOT_ALLOWED = () => refuse("feedback.method_not_allowed", "method not allowed");
 
-export async function handleAdmin(request: Request, env: Env, url: URL): Promise<Response | null> {
+export async function handleAdmin(request: Request, env: Env, url: URL, ctx?: OpsWaiter): Promise<Response | null> {
   const path = url.pathname;
   const m = path.match(/^\/v1\/admin\/feedback\/(?:(pending|open|held|list|blocks?|cap)|(replies)\/(pending|triage)|replies\/([A-Za-z0-9_-]{1,64})\/ack|(FB-[0-9A-Z]{4}-[0-9A-Z]{4})(?:\/(recorded|status|release|reject|answer|ask|reply|takedown|trust)|\/attachments\/([A-Za-z0-9_-]{16,64}))?)$/);
   if (!m) return null;
@@ -108,17 +111,17 @@ export async function handleAdmin(request: Request, env: Env, url: URL): Promise
   if (method !== "POST") return NOT_ALLOWED();
   switch (action) {
     case "recorded":
-      return recorded(request, env, receipt);
+      return recorded(request, env, receipt, ctx);
     case "status":
-      return status(request, env, receipt);
+      return status(request, env, receipt, ctx);
     case "release":
-      return release(request, env, receipt);
+      return release(request, env, receipt, ctx);
     case "reject":
-      return reject(request, env, receipt);
+      return reject(request, env, receipt, ctx);
     case "answer":
-      return answer(request, env, receipt);
+      return answer(request, env, receipt, ctx);
     case "ask":
-      return ask(request, env, receipt);
+      return ask(request, env, receipt, ctx);
     case "reply":
       return adminReply(request, env, receipt);
     default:

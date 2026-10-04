@@ -6,6 +6,7 @@ import { jsonResponse, refuse } from "./feedback_http";
 import { releasedKeys, repliesFor } from "./feedback_read";
 import { RejectBody, ReleaseBody, ReplyBody } from "./feedback_schema";
 import type { FeedbackRow, StoredAttachment } from "./feedback_types";
+import { announce, type OpsWaiter } from "./ops_emit";
 import { scrubSensitiveText } from "./scrub";
 
 const TRIAGE = ["held", "needs_info"] as const;
@@ -91,7 +92,7 @@ export async function detail(env: Env, receipt: string): Promise<Response> {
   });
 }
 
-export async function release(request: Request, env: Env, receipt: string): Promise<Response> {
+export async function release(request: Request, env: Env, receipt: string, ctx?: OpsWaiter): Promise<Response> {
   const body = ReleaseBody.safeParse((await readJson(request)) ?? {});
   if (!body.success) return refuse("feedback.invalid", "publishImages must be a boolean");
   const row = await load(env, receipt);
@@ -111,10 +112,11 @@ export async function release(request: Request, env: Env, receipt: string): Prom
   ];
   const res = await env.DB.batch(steps);
   if (row.status === "held" && (res[0].meta?.changes ?? 0) === 0) return refuse("feedback.bad_transition", "status changed concurrently");
+  if (row.status === "held") announce(ctx, env, { t: "status", receipt, category: row.category, status: "received" });
   return jsonResponse({ receipt, status: "received", imagesPublished: body.data.publishImages });
 }
 
-export async function reject(request: Request, env: Env, receipt: string): Promise<Response> {
+export async function reject(request: Request, env: Env, receipt: string, ctx?: OpsWaiter): Promise<Response> {
   const body = RejectBody.safeParse(await readJson(request));
   if (!body.success) return refuse("feedback.invalid", "reason is required (1-200 characters)");
   const row = await load(env, receipt);
@@ -135,10 +137,11 @@ export async function reject(request: Request, env: Env, receipt: string): Promi
   }
   await dropAttachments(env, row);
   const blocked = await isBlocked(env, [`install:${row.install_hash}`], new Date());
+  if (row.status !== "rejected") announce(ctx, env, { t: "status", receipt, category: row.category, status: "rejected" });
   return jsonResponse({ receipt, status: "rejected", installBlocked: blocked });
 }
 
-async function respond(request: Request, env: Env, receipt: string, to: "answered" | "needs_info", from: readonly string[]): Promise<Response> {
+async function respond(request: Request, env: Env, receipt: string, to: "answered" | "needs_info", from: readonly string[], ctx?: OpsWaiter): Promise<Response> {
   const body = ReplyBody.safeParse(await readJson(request));
   if (!body.success) return refuse("feedback.invalid", "body must be 1-4096 bytes of text");
   const row = await load(env, receipt);
@@ -154,11 +157,12 @@ async function respond(request: Request, env: Env, receipt: string, to: "answere
   if (row.status !== to && (res[0].meta?.changes ?? 0) === 0) return refuse("feedback.bad_transition", "status changed concurrently");
   // An answer ends the report without an issue, so its images are never published.
   if (to === "answered") await dropAttachments(env, row);
+  if (row.status !== to) announce(ctx, env, { t: "status", receipt, category: row.category, status: to });
   return jsonResponse({ receipt, status: to });
 }
 
-export const answer = (request: Request, env: Env, receipt: string) => respond(request, env, receipt, "answered", TRIAGE);
-export const ask = (request: Request, env: Env, receipt: string) => respond(request, env, receipt, "needs_info", ["held"]);
+export const answer = (request: Request, env: Env, receipt: string, ctx?: OpsWaiter) => respond(request, env, receipt, "answered", TRIAGE, ctx);
+export const ask = (request: Request, env: Env, receipt: string, ctx?: OpsWaiter) => respond(request, env, receipt, "needs_info", ["held"], ctx);
 
 export async function adminReply(request: Request, env: Env, receipt: string): Promise<Response> {
   const body = ReplyBody.safeParse(await readJson(request));

@@ -1,0 +1,26 @@
+name = "reasonix-ops-events"
+main = "src/index.ts"
+compatibility_date = "2026-06-01"
+
+# Maintainer-only event relay: GitHub webhooks and our own workers push compact
+# metadata events; one local listener holds a WebSocket and is woken by them.
+# Secrets (set by deploy-ops-events.yml from repo secrets, never in this file):
+#   GITHUB_WEBHOOK_SECRET  HMAC key GitHub signs deliveries with
+#   OPS_LISTEN_TOKEN       read access to the event stream (/ws)
+#   OPS_EMIT_TOKEN         write access for our own services (/emit)
+workers_dev = true
+preview_urls = false
+
+[vars]
+# Comma list of logins whose comments are not events (our own automation and the owner).
+OPS_IGNORE_LOGINS = "github-actions[bot],esengine"
+# Workflow names whose completion is an event (one per push, not one per workflow).
+OPS_CI_WORKFLOWS = "CI"
+
+[[durable_objects.bindings]]
+name = "HUB"
+class_name = "EventHub"
+
+[[migrations]]
+tag = "v1"
+new_sqlite_classes = ["EventHub"]

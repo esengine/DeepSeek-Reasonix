@@ -25,6 +25,7 @@ crons = ["47 19 * * *", "17 1,7,13,19 * * *"]
 # and service-account secrets have been installed; use `firebase` after the
 # seven-day shadow comparison completes.
 CRASH_STORAGE_MODE = "d1"
+OPS_EVENTS_URL = "https://reasonix-ops-events.reasonix.workers.dev"
 # Emails force-promoted to dashboard admin — the owner is never locked out even
 # if the role migration misses them.
 ADMIN_EMAILS = "359807859@qq.com"

@@ -132,8 +132,9 @@ jobs:
           CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
           FEEDBACK_TOKEN_SECRET: ${{ secrets.FEEDBACK_TOKEN_SECRET }}
           FEEDBACK_ADMIN_TOKEN: ${{ secrets.FEEDBACK_ADMIN_TOKEN }}
+          OPS_EMIT_TOKEN: ${{ secrets.OPS_EMIT_TOKEN }}
         run: |
-          node -e 'process.stdout.write(JSON.stringify({FEEDBACK_TOKEN_SECRET:process.env.FEEDBACK_TOKEN_SECRET||null,FEEDBACK_ADMIN_TOKEN:process.env.FEEDBACK_ADMIN_TOKEN||null}))' | npx wrangler secret bulk
+          node -e 'process.stdout.write(JSON.stringify({FEEDBACK_TOKEN_SECRET:process.env.FEEDBACK_TOKEN_SECRET||null,FEEDBACK_ADMIN_TOKEN:process.env.FEEDBACK_ADMIN_TOKEN||null,OPS_EMIT_TOKEN:process.env.OPS_EMIT_TOKEN||null}))' | npx wrangler secret bulk
       # Mirrors the ALERT_WEBHOOK repo secret into the worker so the ingest
       # sentinel can push alerts (see runIngestSentinel). Managed here so
       # nobody needs local Cloudflare credentials; when the repo secret is
