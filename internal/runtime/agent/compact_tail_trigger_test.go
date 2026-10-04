@@ -59,7 +59,7 @@ func TestTailBudgetYieldsToLowTrigger(t *testing.T) {
 			srv := httptest.NewServer(http.HandlerFunc(mock.handler))
 			defer srv.Close()
 			reg := tool.NewRegistry()
-			reg.Add(fatTool{blob: strings.Repeat("FILE CONTENTS LINE. ", 200)})
+			reg.Add(fatTool{blob: strings.Repeat("FILE CONTENTS LINE. ", 1000)})
 			prov, err := openai.New(provider.Config{
 				Name: "deepseek", BaseURL: srv.URL, Model: "deepseek-reasoner", APIKey: "test",
 				Extra: map[string]any{"api_key_env": "DEEPSEEK_API_KEY"},

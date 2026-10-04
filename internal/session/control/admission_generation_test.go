@@ -3,6 +3,7 @@ package control
 import (
 	"context"
 	"errors"
+	"reasonix/internal/base/testenv"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -72,7 +73,7 @@ func TestAdmitGuardedTurnAllowsPublishedGeneration(t *testing.T) {
 	}
 	select {
 	case <-done:
-	case <-time.After(2 * time.Second):
+	case <-time.After(testenv.Budget(t)):
 		t.Fatal("turn body did not run")
 	}
 }

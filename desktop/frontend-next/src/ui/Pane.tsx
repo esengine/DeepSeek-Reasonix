@@ -20,7 +20,7 @@ import { initialTraj, reduceTraj } from "../state/trajectory";
 import { Transcript } from "./Transcript";
 import { Composer } from "./Composer";
 import { draftKey } from "./drafts";
-import { Queue } from "./Queue";
+import { Queue, waiting } from "./Queue";
 import { SlottedView } from "./SlottedView";
 import { key as slotKey, placement } from "./slots";
 import { Metrics } from "./Metrics";
@@ -312,7 +312,7 @@ function PaneView({ port, rt, title, active, visible, sideHost, side, onFocus, o
   // `s.revision` is the narrower truth. Same for the rail's two panels below.
   /* eslint-disable react-hooks/exhaustive-deps */
   const paired = useMemo(() => pairCheckpoints(s.items, checkpoints), [s.revision, checkpoints]);
-  const rail = useMemo(() => railOf(s.items, s.executions), [s.revision, s.executions]);
+  const rail = useMemo(() => railOf(s.items, s.executions, s.subagentPhase), [s.revision, s.executions, s.subagentPhase]);
 
   // Sub-agents and background processes: built as panels, never drawn.
   const [deck, setDeck] = useState<Deck>("");
@@ -324,14 +324,12 @@ function PaneView({ port, rt, title, active, visible, sideHost, side, onFocus, o
   const jobs = status?.jobs ?? NO_JOBS;
   const counts = useMemo(() => {
     let steps = 0;
-    let steer = 0;
     let wrote = 0;
     for (const i of s.items) {
       if (i.t === "tool" && !i.running && !i.tool.readOnly) wrote++;
       if (i.t === "tool") steps++;
-      else if (i.t === "user" && i.pending) steer++;
     }
-    return { steps, steer, wrote };
+    return { steps, wrote };
   }, [s.revision]);
   /* eslint-enable react-hooks/exhaustive-deps */
   // An MCP server connects lazily and fails at first use, so a turn boundary is
@@ -435,7 +433,7 @@ function PaneView({ port, rt, title, active, visible, sideHost, side, onFocus, o
     [port, running, refreshStatus, fail],
   );
 
-  const { queue, onQueueEdit, onQueueMove, onQueueRetry, onQueueRefresh, onQueuePause, onQueueRead, onQueueSendNow, onQueueCancel } = useQueueActions({
+  const { queue, restored, onQueueEdit, onQueueMove, onQueueRetry, onQueueRefresh, onQueuePause, onQueueRead, onQueueSendNow, onQueueCancel } = useQueueActions({
     port,
     dispatch,
     fail,
@@ -515,7 +513,7 @@ function PaneView({ port, rt, title, active, visible, sideHost, side, onFocus, o
     onReport(rt.id, {
       status,
       title,
-      steer: counts.steer,
+      steer: waiting(queue).filter((it) => it.intent === "steer").length,
       run,
       live: running || blocked,
       cost,
@@ -524,7 +522,7 @@ function PaneView({ port, rt, title, active, visible, sideHost, side, onFocus, o
       mcp,
       wallet: walletDisplay,
     });
-  }, [rt.id, onReport, status, title, counts.steer, run, running, blocked, cost, contextPercent, ctx, mcp, walletDisplay]);
+  }, [rt.id, onReport, status, title, queue, run, running, blocked, cost, contextPercent, ctx, mcp, walletDisplay]);
 
   return (
     <section
@@ -701,7 +699,7 @@ function PaneView({ port, rt, title, active, visible, sideHost, side, onFocus, o
           )}
         </div>
         {alert && <div className="cmpalert">{alert}</div>}
-        <Composer port={port} status={status} running={running} quote={quote} focus={askFocus} onSubmit={submit} onChanged={refreshStatus} onError={fail} onSettings={onSettings} changeCount={tree?.repo ? tree.changes.length : 0} pulse={pulse} draftKey={draftKey(rt.host ?? "", rt.root, rt.sessionPath || status?.sessionPath || "")} />
+        <Composer port={port} status={status} running={running} quote={quote} restore={restored} focus={askFocus} onSubmit={submit} onChanged={refreshStatus} onError={fail} onSettings={onSettings} changeCount={tree?.repo ? tree.changes.length : 0} pulse={pulse} draftKey={draftKey(rt.host ?? "", rt.root, rt.sessionPath || status?.sessionPath || "")} />
         <div className="studio-meterrail" ref={meterRef} aria-label={t("运行统计")}>
           <div className="studio-speed-anchor">
             <button

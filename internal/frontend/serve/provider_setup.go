@@ -18,6 +18,7 @@ const providerSetupMaxBody = 20 << 10
 
 type providerSetupState struct {
 	Enabled            bool   `json:"-"`
+	InProcess          bool   `json:"-"`
 	Required           bool   `json:"required"`
 	ActivationPending  bool   `json:"activationPending,omitempty"`
 	Provider           string `json:"provider,omitempty"`
@@ -37,7 +38,7 @@ func (s *Server) EnableProviderSetup() {
 		return
 	}
 	s.providerSetupMu.Lock()
-	s.providerSetup.Enabled = true
+	s.providerSetup.Enabled, s.providerSetup.InProcess = true, true
 	s.providerSetupMu.Unlock()
 	s.refreshProviderSetup(currentModelRef(s.ctl()))
 }
@@ -58,13 +59,13 @@ func (s *Server) EnableProviderSetupForListener(addr string) bool {
 
 func (s *Server) refreshProviderSetup(ref string) {
 	s.providerSetupMu.RLock()
-	enabled := s.providerSetup.Enabled
+	enabled, inProcess := s.providerSetup.Enabled, s.providerSetup.InProcess
 	s.providerSetupMu.RUnlock()
 	if !enabled {
 		return
 	}
 
-	next := providerSetupState{Enabled: true}
+	next := providerSetupState{Enabled: true, InProcess: inProcess}
 	// Resolve the missing-key state and its credential-file revision under the
 	// same cross-process lock used by every writer. This prevents capturing a
 	// stale "missing" snapshot paired with a newer revision.

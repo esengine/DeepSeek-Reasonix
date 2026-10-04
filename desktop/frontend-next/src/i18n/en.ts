@@ -17,11 +17,13 @@ import { EN_USAGE } from "./en_usage";
 import { EN_COMPOSER } from "./en_composer";
 import { EN_BACKUP } from "./en_backup";
 import { EN_FEEDBACK } from "./en_feedback";
+import { EN_COMMUNITY } from "./en_community";
 
 export const EN: Record<string, string> = {
   "工作台": "Workbench",
   "从右侧选择文件，或打开浏览器": "Choose a file on the right, or open a browser",
   ...EN_SETTINGS,
+  ...EN_COMMUNITY,
   ...EN_METRICS,
   ...EN_STORAGE,
   ...EN_USAGE,
@@ -69,6 +71,7 @@ export const EN: Record<string, string> = {
   "复制": "Copy",
   "已复制": "Copied",
   "复制不了": "Copy blocked",
+  "复制失败，请重试": "Copy failed. Try again.",
   "复制这段回答": "Copy this answer",
   "复制这段代码": "Copy this code",
   "复制路径": "Copy path",
@@ -278,6 +281,10 @@ export const EN: Record<string, string> = {
   "尚无文件夹": "No folders yet",
   "正在读取文件夹…": "Reading folders…",
   "打开项目…": "Open a project…",
+  "添加工作区": "Add a workspace",
+  "无法打开文件夹选择器。请输入内核所在机器上的路径。": "The folder picker cannot open. Enter a path on the machine running the kernel.",
+  "工作区路径": "Workspace path",
+  "此内核不支持添加工作区。": "This kernel does not support adding workspaces.",
   "先打开一个项目": "Open a project first",
   "读取代码、运行测试与修改文件均只在你选定的文件夹内进行。": "Reading code, running tests and editing files all happen inside the folder you choose.",
   "使用当前位置": "Stay where I am",
@@ -333,6 +340,11 @@ export const EN: Record<string, string> = {
   "正在运行，暂停后才能关闭": "Running; pause it before closing",
   "受阻": "blocked",
   "状态不明": "uncertain",
+  "这条插话在本轮结束前没来得及送达，没有发给模型": "This guidance was not delivered before the turn ended, so the model never saw it",
+  "本轮已结束，但对话记录没能保存": "The turn ended, but the transcript could not be saved",
+  "本轮已结束，但队列没能确认这一条": "The turn ended, but the queue could not acknowledge this item",
+  "运行这一条的会话已不在了": "The session that was running this item is gone",
+  "队列记录损坏，这一条是从残留文件里找回的": "The queue record was corrupt; this item was salvaged from leftover files",
   "冻结 {n} 文件": "{n} frozen",
   "无法读取该条的正文，未打开编辑：{why}":
     "Could not read this entry back, so it was not opened for editing: {why}",
@@ -797,6 +809,7 @@ export const EN: Record<string, string> = {
   "已导入「{name}」。": "Imported “{name}”.",
   "立即使用": "Use now",
   "未读取：{names}": "Not read: {names}",
+  "请单独选择一个 .zip，或选择不含压缩包的 theme.json 和图片。": "Choose a single .zip on its own, or select a theme folder’s theme.json and images without a ZIP.",
   "尚未安装主题。选择一个 .zip，或同时选中主题文件夹里的 theme.json 和图片。": "No themes installed. Choose a .zip, or select a theme folder’s theme.json and images together.",
   "选择一个 .zip，或同时选中主题文件夹里的 theme.json 和图片。": "Choose a .zip, or select a theme folder’s theme.json and images together.",
 
@@ -1092,6 +1105,8 @@ export const EN: Record<string, string> = {
   "项目操作：{name}": "Project actions: {name}",
   "项目操作": "Project actions",
   "不删除文件": "Keeps files",
+  "在文件管理器中显示": "Show in file manager",
+  "文件夹已不在磁盘上": "Folder is gone",
   "删除会话：{title}": "Delete session: {title}",
   "会话在文件夹里打开，先添加一个": "A session opens in a folder; add one first",
   "添加文件夹": "Add folder",
@@ -1273,5 +1288,7 @@ export const EN: Record<string, string> = {
   "同一段内容被逐字重复": "The same block is being repeated verbatim",
   "任务已按设置暂停：模型卡在重复输出同一段文字": "Paused by your setting: the model is stuck repeating the same text",
   "等待你的输入": "Waiting for you",
+  "引导没有生效：这一轮在处理它之前就结束了。如果仍然需要，请再发送一次：": "Guidance was not applied because the turn ended before it could be processed. Send it again if it is still needed:",
+  "上下文已用到压缩阈值的 {percent}%，已告知模型约剩 {remaining} 个词元的空间。": "Context at {percent}% of the compaction threshold — the model was told it has about {remaining} tokens of room left.",
   "模型卡在重复输出同一段文字，这一轮已停止；可以重试、补充引导，或换一个供应商/模型": "The model is stuck repeating the same text; this turn was stopped. Try again, add guidance, or switch provider/model.",
 };

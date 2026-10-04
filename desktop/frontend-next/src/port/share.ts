@@ -46,6 +46,8 @@ export interface DeviceSelf {
 
 export interface ShareStatus {
   open: boolean;
+  // The fixed port the user chose; absent means the system picks one each time.
+  port?: number;
   origin?: string;
   addresses: ShareAddress[];
   devices: PairedDevice[];
@@ -72,6 +74,8 @@ export interface SharePort {
   shareStatus(): Promise<ShareStatus | null>;
   openShare(ip: string): Promise<ShareStatus>;
   closeShare(): Promise<ShareStatus>;
+  // Zero clears the choice. Used the next time the door opens.
+  setSharePort(port: number): Promise<ShareStatus>;
   offerShare(): Promise<ShareOffer>;
   offerCloudShare(): Promise<CloudShareOffer>;
   revokeDevice(id: string): Promise<ShareStatus>;

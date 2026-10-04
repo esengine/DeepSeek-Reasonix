@@ -2,14 +2,17 @@ import { useEffect, useState } from "react";
 import { t } from "../i18n";
 import type { Protocol, ProviderEntry, ProviderProbe } from "../port/port";
 import { clearModelCheckFacts, ModelChoice, type ModelFact } from "./ModelChoice";
-import { KIND_LABEL, hostOf, nameFrom, vendorLabel } from "./vendors";
+import { KIND_LABEL, hostOf, nameFrom, sourceNameUsable, vendorLabel } from "./vendors";
 import type { Port } from "./Providers";
 import { reason } from "../i18n/kernel";
+import { HttpError } from "../port/http_error";
 import { THINKING, parseExtraBody, parseHeaders } from "./provider_compat";
 
 // Detection is assistance, not authority. Compatible relays often expose one
 // model-list shape while expecting another request protocol, so every durable
 // value remains editable and a failed probe never blocks manual setup.
+const NAME_CODES = new Set(["provider.name_required", "provider.name_invalid", "provider.name_taken"]);
+
 export function AddProvider({
   port, taken, known, onDone, onCancel,
 }: {
@@ -20,6 +23,9 @@ export function AddProvider({
   const [probe, setProbe] = useState<ProviderProbe | null>(null);
   const [catalog, setCatalog] = useState<Protocol[]>([]);
   const [err, setErr] = useState("");
+  const [errOnSave, setErrOnSave] = useState(false);
+  const [nameErr, setNameErr] = useState("");
+  const [composing, setComposing] = useState(false);
   const [busy, setBusy] = useState(false);
 
   // The endpoint says which wires are on the table and the kernel says what
@@ -52,6 +58,7 @@ export function AddProvider({
   const [heads, setHeads] = useState("");
   const [extra, setExtra] = useState("");
   const [noProxy, setNoProxy] = useState(false);
+  const nameBad = !composing && name.trim() !== "" && !sourceNameUsable(name);
   const extraBad = extra.trim() !== "" && parseExtraBody(extra) === null;
   const protocolCanThink = catalog.find((p) => p.kind === kind)?.reasoningParams ?? false;
   // A wire with no listing shape has nothing to read: the model id is declared
@@ -66,6 +73,7 @@ export function AddProvider({
   const connect = async () => {
     setBusy(true);
     setErr("");
+    setErrOnSave(false);
     try {
       const got = await port.probeProvider(baseUrl.trim(), apiKey.trim());
       setProbe(got);
@@ -87,6 +95,8 @@ export function AddProvider({
   const save = async () => {
     setBusy(true);
     setErr("");
+    setNameErr("");
+    setErrOnSave(true);
     try {
       await port.saveProvider({
         name: name.trim(),
@@ -107,7 +117,8 @@ export function AddProvider({
       });
       onDone();
     } catch (e) {
-      setErr(reason(e));
+      if (e instanceof HttpError && e.reason?.code && NAME_CODES.has(e.reason.code)) setNameErr(reason(e));
+      else setErr(reason(e));
     } finally {
       setBusy(false);
     }
@@ -167,18 +178,27 @@ export function AddProvider({
         <button className="addp-close" onClick={onCancel} disabled={busy || checkingModel !== ""} aria-label={t("取消")}>×</button>
       </div>
       <div className="fields">
-        <label className="grow">
+        <div className="grow name-cell">
+        <label>
           <span>{t("来源名称")}</span>
           <input
             aria-label={t("来源名称")}
             data-action="provider.draft" data-value="name"
             value={name}
             placeholder={t("例如：公司中转站")}
-            onChange={(e) => setName(e.target.value)}
+            onChange={(e) => { setName(e.target.value); setNameErr(""); }}
             disabled={busy || checkingModel !== ""}
             spellCheck={false}
+            aria-invalid={nameBad || nameErr !== "" || undefined}
+            aria-describedby="addp-name-rule"
+            onCompositionStart={() => setComposing(true)}
+            onCompositionEnd={() => setComposing(false)}
           />
         </label>
+        <p id="addp-name-rule" className="name-rule" data-bad={nameBad || nameErr !== "" || undefined} aria-live="polite">
+          {nameErr !== "" ? nameErr : t("名称只能用字母、数字、点、连字符和下划线，以字母或数字开头，最长 64 个字符")}
+        </p>
+        </div>
         <label className="grow">
           <span>{t("接口协议")}</span>
           <select aria-label={t("接口协议")} data-action="provider.draft" data-value="protocol" value={kind} onChange={(e) => {
@@ -333,7 +353,7 @@ export function AddProvider({
       </div>
 
       <div className="acts addp-footer">
-        <button className="act" data-action="provider.add" data-primary onClick={save} disabled={busy || checkingModel !== "" || picked.length === 0 || name.trim() === "" || kind === "" || baseUrl.trim() === "" || extraBad}>
+        <button className="act" data-action="provider.add" data-primary onClick={save} aria-describedby={nameBad ? "addp-name-rule" : undefined} disabled={busy || composing || checkingModel !== "" || picked.length === 0 || name.trim() === "" || nameBad || kind === "" || baseUrl.trim() === "" || extraBad}>
           {t(busy ? "保存中…" : "添加来源")}
         </button>
         <button className="act" onClick={onCancel} disabled={busy || checkingModel !== ""}>{t("取消")}</button>
@@ -341,7 +361,7 @@ export function AddProvider({
 
       {err && (
         <div className="find" data-lvl="warn">
-          <span className="t">{t("无法连接")}</span>
+          <span className="t">{errOnSave ? t("无法保存") : t("无法连接")}</span>
           <span className="why">{err}</span>
         </div>
       )}

@@ -108,7 +108,7 @@ func TestAutoInstallPreservesNPMFailureWhenNoUploadBinaryExists(t *testing.T) {
 			return ok("")
 		}
 	})
-	_, _, err := ensureBinary(context.Background(), conn, posixShell{}, conn.fs, Options{Install: InstallAuto}, root, "linux", "amd64", pathsFor(root, root))
+	_, _, err := ensureBinary(context.Background(), conn, loginEnv{}, posixShell{}, conn.fs, Options{Install: InstallAuto}, root, "linux", "amd64", pathsFor(root, root))
 	if err == nil {
 		t.Fatal("auto install unexpectedly succeeded")
 	}
@@ -145,7 +145,7 @@ func TestAutoInstallDownloadsVerifiedCrossPlatformBinaryAfterNPMFailure(t *testi
 		}
 	})
 	fetched := false
-	bin, _, err := ensureBinary(context.Background(), conn, posixShell{}, conn.fs, Options{
+	bin, _, err := ensureBinary(context.Background(), conn, loginEnv{}, posixShell{}, conn.fs, Options{
 		Install: InstallAuto, LocalBinary: "/local/reasonix", LocalGOOS: "darwin", LocalGOARCH: "arm64",
 		ProductVersion: "v1.2.3",
 		FetchBinary: func(_ context.Context, version, goos, goarch string) ([]byte, error) {

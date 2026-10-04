@@ -59,3 +59,20 @@ func TestCatalogToolsAnswersNothingWithoutARegistry(t *testing.T) {
 		t.Fatalf("catalog = %v with no registry, want nil", got)
 	}
 }
+
+func TestDisconnectClearsDisabledMCPPolicy(t *testing.T) {
+	reg := tool.NewRegistry()
+	reg.ReplaceDisabledMCP("mock", []tool.MCPBinding{{
+		Server:       "mock",
+		RawName:      "write",
+		VisibleName:  "write",
+		CallableName: "mcp__mock__write",
+		CapabilityID: "mcp-tool:mock/write",
+	}})
+	m := newMcpManager(nil, reg, context.Background(), 0)
+
+	m.disconnect("mock")
+	if reg.DisabledMCP("mcp__mock__write") || reg.DisabledMCP("mcp-tool:mock/write") {
+		t.Fatal("disconnect left the server's disabled-tool aliases behind")
+	}
+}

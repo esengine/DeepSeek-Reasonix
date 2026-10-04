@@ -8,6 +8,8 @@ import { RemoteHosts } from "./RemoteHosts";
 import type { RemoteHost } from "../port/remote";
 import type { HubPort, RuntimeView, TreeWorkspace } from "../port/hub";
 
+vi.mock("../port/host", () => ({ host: () => ({ revealsFiles: () => true }) }));
+
 afterEach(cleanup);
 
 const host: RemoteHost = { name: "gpu", target: "ada@10.0.0.4", status: "connected", workspaces: ["/home/ada/training"] };
@@ -42,6 +44,14 @@ function draw(runtimes: RuntimeView[] = [], live: string[] = []) {
   );
   return { removeRemoteSession, readTree, onClose, order };
 }
+
+describe("a project on another machine", () => {
+  it("offers no way to show it in this machine's file manager", () => {
+    draw();
+    expect(document.querySelector('[data-action="workspace.reveal"]')).toBeNull();
+    expect(screen.queryByRole("menuitem", { name: /在文件管理器中显示/ })).toBeNull();
+  });
+});
 
 describe("a conversation on another machine", () => {
   it("is deleted on that machine after a confirmation, and its list is read again", async () => {

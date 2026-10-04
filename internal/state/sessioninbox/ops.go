@@ -214,6 +214,11 @@ func (s *Store) SetPaused(paused bool) error {
 
 // SetState transitions one item's durable state.
 func (s *Store) SetState(id string, state InboxState, blockReason string) error {
+	return s.SetStateCoded(id, state, "", blockReason)
+}
+
+// SetStateCoded is SetState for a stop whose cause has a stable identity.
+func (s *Store) SetStateCoded(id string, state InboxState, code BlockCode, blockReason string) error {
 	if s == nil {
 		return ErrClosed
 	}
@@ -235,6 +240,7 @@ func (s *Store) SetState(id string, state InboxState, blockReason string) error 
 	}
 	next.Items[i].State = state
 	next.Items[i].BlockReason = blockReason
+	next.Items[i].BlockCode = code
 	next.Items[i].UpdatedAt = time.Now().UTC()
 	if err := s.commitManifestLocked(next); err != nil {
 		return err
@@ -273,6 +279,7 @@ func (s *Store) ClaimItem(id string) error {
 	}
 	next.Items[i].State = StateRunning
 	next.Items[i].BlockReason = ""
+	next.Items[i].BlockCode = ""
 	next.Items[i].UpdatedAt = time.Now().UTC()
 	if err := s.commitManifestLocked(next); err != nil {
 		return err
@@ -377,6 +384,7 @@ func (s *Store) RetryItem(id string) error {
 	case StateUncertain, StateBlocked:
 		next.Items[i].State = StateQueued
 		next.Items[i].BlockReason = ""
+		next.Items[i].BlockCode = ""
 		next.Items[i].UpdatedAt = time.Now().UTC()
 	default:
 		return ErrInvalidState

@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"io"
 	"os"
 	"path/filepath"
 	"sort"
@@ -58,8 +59,8 @@ type node struct {
 	Ref   string `json:"r,omitempty"`
 }
 
-// Observer takes snapshots under one policy and remembers which nodes it has
-// already stored, so an unchanged directory is never written twice.
+// Observer takes snapshots under one policy and caches recently stored nodes
+// to avoid repeated object-store work.
 type Observer struct {
 	store  Store
 	policy Policy
@@ -74,14 +75,14 @@ func NewObserver(store Store, policy Policy) *Observer {
 	return &Observer{store: store, policy: policy, digest: policy.Digest(), known: map[trustedstate.Digest]bool{}}
 }
 
-// readers bounds concurrent directory reads, as the mutation scan does.
+// readers bounds live walk workers, including metadata reads and object writes.
 const readers = 16
 
 type walk struct {
 	o       *Observer
 	ctx     context.Context
 	entries atomic.Int64
-	sem     chan struct{}
+	jobs    chan func()
 	mu      sync.Mutex
 	reason  string
 }
@@ -103,8 +104,18 @@ func (w *walk) failed() bool {
 // Take observes root. A snapshot that fell short says why and is never
 // Complete; it still carries a digest so the shortfall itself is recorded.
 func (o *Observer) Take(ctx context.Context, root string) Snapshot {
-	w := &walk{o: o, ctx: ctx, sem: make(chan struct{}, readers)}
+	w := &walk{o: o, ctx: ctx, jobs: make(chan func())}
+	var workers sync.WaitGroup
+	for range readers - 1 {
+		workers.Go(func() {
+			for job := range w.jobs {
+				job()
+			}
+		})
+	}
 	ref := w.dir(root)
+	close(w.jobs)
+	workers.Wait()
 	if ctx.Err() != nil {
 		w.fail(IncompleteCancelled)
 	}
@@ -124,60 +135,99 @@ func (w *walk) dir(path string) string {
 	if w.failed() || w.ctx.Err() != nil {
 		return ""
 	}
-	w.sem <- struct{}{}
-	entries, err := os.ReadDir(path)
-	nodes := make([]node, 0, len(entries))
-	var subdirs []int
-	for _, e := range entries {
-		if w.entries.Add(1) > int64(w.o.policy.MaxEntries) {
-			w.fail(IncompleteEntryLimit)
-			break
-		}
-		info, ierr := e.Info()
-		if ierr != nil {
-			w.fail(IncompleteWalkError)
-			continue
-		}
-		n := node{Name: e.Name(), Mode: uint32(info.Mode().Perm())}
-		switch mode := info.Mode(); {
-		case mode.IsDir():
-			if w.o.policy.excludes(e.Name(), filepath.Clean(filepath.Join(path, e.Name()))) {
-				w.entries.Add(-1)
-				continue
-			}
-			n.Kind = "d"
-			subdirs = append(subdirs, len(nodes))
-		case mode&os.ModeSymlink != 0:
-			n.Kind = "l"
-			target, lerr := os.Readlink(filepath.Join(path, e.Name()))
-			if lerr != nil {
-				w.fail(IncompleteWalkError)
-			}
-			n.Ref = string(trustedstate.DigestOf([]byte(target)))
-		case mode.IsRegular():
-			n.Kind = "f"
-			st := stampOf(info)
-			n.Stamp = &st
-		default:
-			n.Kind = "o"
-			n.Mode = uint32(mode)
-		}
-		nodes = append(nodes, n)
-	}
-	<-w.sem
-	if err != nil {
-		w.fail(IncompleteWalkError)
-	}
+	nodes, subdirs := w.readNodes(path)
 	var wg sync.WaitGroup
 	for _, i := range subdirs {
-		wg.Go(func() { nodes[i].Ref = w.dir(filepath.Join(path, nodes[i].Name)) })
+		if w.failed() || w.ctx.Err() != nil {
+			break
+		}
+		wg.Add(1)
+		job := func() {
+			defer wg.Done()
+			nodes[i].Ref = w.dir(filepath.Join(path, nodes[i].Name))
+		}
+		select {
+		case w.jobs <- job:
+		default:
+			// Busy workers may be waiting on descendants, so dispatch cannot block.
+			job()
+		}
 	}
 	wg.Wait()
+	if w.failed() || w.ctx.Err() != nil {
+		return ""
+	}
 	sort.Slice(nodes, func(i, j int) bool { return nodes[i].Name < nodes[j].Name })
 	return w.o.put(w, nodes)
 }
 
+func (w *walk) readNodes(path string) ([]node, []int) {
+	nodes := make([]node, 0)
+	var subdirs []int
+	f, err := os.Open(path)
+	if err != nil {
+		w.fail(IncompleteWalkError)
+		return nodes, subdirs
+	}
+	defer f.Close()
+	for {
+		if w.failed() || w.ctx.Err() != nil {
+			return nodes, subdirs
+		}
+		entries, err := f.ReadDir(256)
+		for _, e := range entries {
+			if w.failed() || w.ctx.Err() != nil {
+				return nodes, subdirs
+			}
+			if w.entries.Add(1) > int64(w.o.policy.MaxEntries) {
+				w.fail(IncompleteEntryLimit)
+				return nodes, subdirs
+			}
+			info, ierr := e.Info()
+			if ierr != nil {
+				w.fail(IncompleteWalkError)
+				continue
+			}
+			n := node{Name: e.Name(), Mode: uint32(info.Mode().Perm())}
+			switch mode := info.Mode(); {
+			case mode.IsDir():
+				if w.o.policy.excludes(e.Name(), filepath.Clean(filepath.Join(path, e.Name()))) {
+					w.entries.Add(-1)
+					continue
+				}
+				n.Kind = "d"
+				subdirs = append(subdirs, len(nodes))
+			case mode&os.ModeSymlink != 0:
+				n.Kind = "l"
+				target, lerr := os.Readlink(filepath.Join(path, e.Name()))
+				if lerr != nil {
+					w.fail(IncompleteWalkError)
+				}
+				n.Ref = string(trustedstate.DigestOf([]byte(target)))
+			case mode.IsRegular():
+				n.Kind = "f"
+				st := stampOf(info)
+				n.Stamp = &st
+			default:
+				n.Kind = "o"
+				n.Mode = uint32(mode)
+			}
+			nodes = append(nodes, n)
+		}
+		if errors.Is(err, io.EOF) {
+			return nodes, subdirs
+		}
+		if err != nil {
+			w.fail(IncompleteWalkError)
+			return nodes, subdirs
+		}
+	}
+}
+
 func (o *Observer) put(w *walk, nodes []node) string {
+	if w.failed() || w.ctx.Err() != nil {
+		return ""
+	}
 	b, err := json.Marshal(nodes)
 	if err != nil {
 		w.fail(IncompleteStore)
@@ -195,6 +245,9 @@ func (o *Observer) put(w *walk, nodes []node) string {
 		return string(d)
 	}
 	o.mu.Lock()
+	if len(o.known) >= max(o.policy.MaxEntries, 1) {
+		clear(o.known)
+	}
 	o.known[d] = true
 	o.mu.Unlock()
 	return string(d)

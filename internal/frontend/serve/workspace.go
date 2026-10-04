@@ -16,11 +16,10 @@ import (
 	"reasonix/internal/contract/surface"
 	"reasonix/internal/platform/worktree"
 	"reasonix/internal/session/control"
+	"reasonix/internal/state/workspacelist"
 )
 
-// workspaceRecentMax bounds the remembered list. It is the sidebar's tree, not
-// a recents menu, so it holds more than a dropdown would.
-const workspaceRecentMax = 32
+const workspaceRecentMax = workspacelist.MaxPaths
 
 // AllowWorkspaceSwitch grants POST /workspace. It is off until a host asks for
 // it, and no config file can turn it on: a server reachable over the network
@@ -190,7 +189,7 @@ func (s *Server) statsSurface() surface.Surface { return s.surface.Or(surface.Se
 // process working directory and sessions fall back to the global dir, so the
 // switch would quietly serve another project's conversations.
 func (s *Server) rebuildOptions(cur control.SessionAPI, ref string) boot.Options {
-	opts := boot.Options{Model: ref, Sink: s.rebuildSink(), Stderr: os.Stderr, StatsSource: s.statsSurface(), FeedbackSurface: feedbackSurface(s.statsSurface()), ProviderResolver: s.resolver}
+	opts := boot.Options{Model: ref, Sink: s.rebuildSink(), Stderr: os.Stderr, StatsSource: s.statsSurface(), FeedbackSurface: feedbackSurface(s.statsSurface()), ProviderResolver: s.resolver, CleanupPendingReconciler: BackgroundCleanupReconciler}
 	if cur == nil {
 		return opts
 	}
@@ -306,6 +305,7 @@ func (s *Server) workspaceOptions(dir, ref string) boot.Options {
 		StatsSource:     s.statsSurface(),
 		FeedbackSurface: feedbackSurface(s.statsSurface()),
 
-		ProviderResolver: s.resolver,
+		ProviderResolver:         s.resolver,
+		CleanupPendingReconciler: BackgroundCleanupReconciler,
 	}
 }

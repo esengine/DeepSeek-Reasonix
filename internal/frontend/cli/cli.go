@@ -12,14 +12,12 @@ import (
 	"flag"
 	"fmt"
 	"io"
-	"math"
 	"net/url"
 	"os"
 	"os/signal"
 	"path/filepath"
 	"reasonix/internal/state/sessionstore"
 	"slices"
-	"strconv"
 	"strings"
 	"syscall"
 	"time"
@@ -1602,12 +1600,11 @@ func configCompactRatioCommand(args []string) int {
 		fmt.Printf("compact_ratio = %s (%s)\n", formatCompactRatioPercent(cfg.Agent.CompactRatio), compactRatioSource())
 		return 0
 	}
-	percent, err := strconv.ParseFloat(strings.TrimSpace(rest[0]), 64)
-	if err != nil || math.IsNaN(percent) || math.IsInf(percent, 0) || percent < 65 || percent > 85 {
-		fmt.Fprintln(os.Stderr, i18n.M.ErrorPrefix, "compact ratio must be a percentage between 65 and 85")
+	ratio, err := parseCLICompactRatio(rest[0])
+	if err != nil {
+		fmt.Fprintln(os.Stderr, i18n.M.ErrorPrefix, err)
 		return 2
 	}
-	ratio := percent / 100
 	path := config.UserConfigPath()
 	scope := "user"
 	if *local {
@@ -1671,12 +1668,12 @@ func formatCompactRatioPercent(ratio float64) string {
 }
 
 func configUsage() {
-	fmt.Print(`Usage:
+	fmt.Printf(`Usage:
   reasonix config reasoning-language [--local] [auto|zh|en]
-  reasonix config compact-ratio [--local] [65..85]
+  reasonix config compact-ratio [--local] [PERCENT] (%s)
   reasonix config currency [auto|CNY|USD]
   reasonix config telemetry [auto|on|off]
-`)
+`, compactRatioPercentageRequirement())
 }
 
 func configTelemetryUsage() {
@@ -1686,9 +1683,7 @@ func configTelemetryUsage() {
 }
 
 func configCompactRatioUsage() {
-	fmt.Print(`Usage:
-  reasonix config compact-ratio [--local] [65..85]
-`)
+	fmt.Printf("Usage:\n  reasonix config compact-ratio [--local] [PERCENT] (%s)\n", compactRatioPercentageRequirement())
 }
 
 func startCLITelemetry(cfg *config.Config, opts telemetry.Options) *telemetry.Reporter {

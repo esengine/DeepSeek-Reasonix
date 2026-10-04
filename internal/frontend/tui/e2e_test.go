@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strconv"
 	"strings"
@@ -57,7 +58,11 @@ func (p *scriptedModel) Stream(_ context.Context, req provider.Request) (<-chan 
 
 // inProcessKernel assembles a real controller behind a hub the way the tui
 // command does, and hands back the client the TUI drives it through.
-func inProcessKernel(t *testing.T) *tui.Client {
+func inProcessKernel(t *testing.T) *tui.Client { return inProcessKernelIn(t, nil) }
+
+// inProcessKernelIn is inProcessKernel with prepare run on the workspace
+// before the session opens, so it resolves whatever prepare set up.
+func inProcessKernelIn(t *testing.T, prepare func(dir string)) *tui.Client {
 	t.Helper()
 	home := testenv.TempDir(t)
 	for _, k := range []string{"HOME", "USERPROFILE", "XDG_CONFIG_HOME"} {
@@ -90,6 +95,9 @@ model = "x"
 `
 	if err := os.WriteFile(filepath.Join(dir, "reasonix.toml"), []byte(cfg), 0o644); err != nil {
 		t.Fatal(err)
+	}
+	if prepare != nil {
+		prepare(dir)
 	}
 	// Unjailed so the run does not depend on the host having an OS sandbox;
 	// only the user's own config may say so.
@@ -175,6 +183,32 @@ func TestATurnThroughTheInProcessKernel(t *testing.T) {
 	history, err := c.History(ctx)
 	if err != nil || len(history) == 0 {
 		t.Fatalf("History = %d, %v", len(history), err)
+	}
+}
+
+// The footer's workspace@branch comes from the real kernel's session repo, and
+// a workspace with no git reports so instead of an empty identity.
+func TestWorkspaceGitThroughTheInProcessKernel(t *testing.T) {
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+	if g, err := inProcessKernel(t).WorkspaceGit(ctx); err != nil || g.Repo {
+		t.Fatalf("a folder with no git: %+v, %v", g, err)
+	}
+	c := inProcessKernelIn(t, func(dir string) {
+		for _, args := range [][]string{{"init", "-q", "-b", "wip"}, {"-c", "user.email=t@t", "-c", "user.name=t", "commit", "-qm", "base", "--allow-empty"}} {
+			cmd := exec.Command("git", args...)
+			cmd.Dir = dir
+			if out, err := cmd.CombinedOutput(); err != nil {
+				t.Skipf("git unavailable: %v\n%s", err, out)
+			}
+		}
+	})
+	g, err := c.WorkspaceGit(ctx)
+	if err != nil || !g.Repo || g.Branch != "wip" || g.Name == "" {
+		t.Fatalf("WorkspaceGit = %+v, %v", g, err)
+	}
+	if g.Untracked != 1 {
+		t.Fatalf("reasonix.toml is the one untracked file, got %+v", g)
 	}
 }
 

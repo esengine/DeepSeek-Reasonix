@@ -18,13 +18,17 @@ const ACCEPT = ".zip,.json,.webp,.png,.jpg,.jpeg";
  *  so authoring one never starts with guessing a directory. */
 export function ThemeImport({ port, empty, onImported, onUse }: Props) {
   const file = useRef<HTMLInputElement>(null);
+  const pending = useRef(false);
+  const folderRequest = useRef(0);
   const [busy, setBusy] = useState(false);
   const [note, setNote] = useState("");
   const [landed, setLanded] = useState("");
   const [failed, setFailed] = useState("");
 
   const take = async (files: File[]) => {
-    if (files.length === 0) return;
+    if (files.length === 0 || pending.current) return;
+    pending.current = true;
+    folderRequest.current += 1;
     setBusy(true);
     setFailed("");
     setNote("");
@@ -38,17 +42,24 @@ export function ThemeImport({ port, empty, onImported, onUse }: Props) {
     } catch (e) {
       setFailed(reason(e));
     } finally {
+      pending.current = false;
       setBusy(false);
     }
   };
 
   const reveal = () => {
+    if (pending.current) return;
+    const request = ++folderRequest.current;
     setFailed("");
     setLanded("");
     port
       .openThemeFolder()
-      .then((dir) => setNote(t("主题目录：{path}", { path: dir })))
-      .catch((e) => setFailed(reason(e)));
+      .then((dir) => {
+        if (request === folderRequest.current) setNote(t("主题目录：{path}", { path: dir }));
+      })
+      .catch((e) => {
+        if (request === folderRequest.current) setFailed(reason(e));
+      });
   };
 
   return (
@@ -58,6 +69,7 @@ export function ThemeImport({ port, empty, onImported, onUse }: Props) {
         type="file"
         multiple
         accept={ACCEPT}
+        disabled={busy}
         hidden
         data-action="theme.import"
         onChange={(e) => {
@@ -65,7 +77,7 @@ export function ThemeImport({ port, empty, onImported, onUse }: Props) {
           e.target.value = "";
         }}
       />
-      <button className="paperpick" data-action="theme.import" data-busy={busy ? "" : undefined} onClick={() => file.current?.click()}>
+      <button className="paperpick" data-action="theme.import" data-busy={busy ? "" : undefined} disabled={busy} onClick={() => file.current?.click()}>
         <span className="plus" aria-hidden="true">
           <svg viewBox="0 0 16 16">
             <path d="M8 3.7v8.6M3.7 8h8.6" />
@@ -74,7 +86,7 @@ export function ThemeImport({ port, empty, onImported, onUse }: Props) {
         {t(busy ? "正在导入…" : "导入主题…")}
       </button>
       <div className="themeacts">
-        <p className="note">
+        <p className="note" role="status" aria-atomic="true">
           {note || t(empty ? "尚未安装主题。选择一个 .zip，或同时选中主题文件夹里的 theme.json 和图片。" : "选择一个 .zip，或同时选中主题文件夹里的 theme.json 和图片。")}
         </p>
         {landed && (
@@ -89,7 +101,7 @@ export function ThemeImport({ port, empty, onImported, onUse }: Props) {
             {t("立即使用")}
           </button>
         )}
-        <button className="btn sm" data-action="theme.folder" onClick={reveal}>
+        <button className="btn sm" data-action="theme.folder" disabled={busy} onClick={reveal}>
           {t("打开主题目录")}
         </button>
       </div>

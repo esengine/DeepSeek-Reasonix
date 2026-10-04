@@ -72,6 +72,29 @@ func TestCompletedMCPConnectIsNotReportedAsUnknown(t *testing.T) {
 	}
 }
 
+func TestDisabledMCPToolRefusalIsTyped(t *testing.T) {
+	reg := tool.NewRegistry()
+	binding := tool.MCPBinding{
+		Server:       "mock",
+		RawName:      "write",
+		VisibleName:  "write",
+		CallableName: "mcp__mock__write",
+	}
+	reg.MarkDisabledMCP(binding)
+	a := New(nil, reg, sessionstore.NewSession(""), Options{}, event.Discard)
+
+	out := a.executeOne(context.Background(), &a.turn, provider.ToolCall{Name: binding.CallableName, Arguments: `{}`})
+	if !out.blocked || out.refusalCode != CodeMCPToolDisabled {
+		t.Fatalf("disabled MCP refusal = %+v, want blocked/%s", out, CodeMCPToolDisabled)
+	}
+	if !strings.Contains(out.output, "disabled by configuration") || !strings.Contains(out.output, CodeMCPToolDisabled) {
+		t.Fatalf("disabled MCP output lacks typed reason: %q", out.output)
+	}
+	if out := a.executeOne(context.Background(), &a.turn, provider.ToolCall{Name: "write", Arguments: `{}`}); out.blocked || out.refusalCode != "" {
+		t.Fatalf("bare alias must remain ambiguous/unknown, got %+v", out)
+	}
+}
+
 func TestPortableMCPCallUsesCanonicalSecurityIdentity(t *testing.T) {
 	reg := tool.NewRegistry()
 	reg.Add(mcpAliasTool{

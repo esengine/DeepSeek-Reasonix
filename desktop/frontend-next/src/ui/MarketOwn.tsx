@@ -83,6 +83,7 @@ export function OwnInstall({ port, pkg, onBack, onInstalled, onViewInstalled, on
         {installed.length > 0 && <ul className="mkt-installed">{installed.map((action, i) => <li key={`${action.kind}:${action.name}:${i}`}>{action.name}</li>)}</ul>}
         <div className="acts">
           {back}
+          {!done.ok && <button className="act" data-action="market.own-retry" onClick={() => setAttempt((n) => n + 1)}>{t("重试")}</button>}
           {location && onViewInstalled && (
             <button className="act" data-action="market.view-installed" onClick={() => onViewInstalled(location.kind, location.name!)}>{t("查看已安装能力")}</button>
           )}

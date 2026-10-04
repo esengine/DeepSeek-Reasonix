@@ -278,7 +278,7 @@ func (a *Agent) runToolLoop(ctx context.Context, state *turnRuntime) error {
 		// is near can restate what the summary would drop.
 		if notice := a.window().contextBudgetNotice(); notice != "" {
 			a.sess.conversation.Add(provider.Message{Role: provider.RoleUser, Content: sessionstore.MidTurnSteerMessage(notice, true)})
-			a.svc.sink.Emit(event.Event{Kind: event.Notice, Level: event.LevelWarn, Text: contextBudgetNoticeSummary(a.ContextBudget())})
+			a.svc.sink.Emit(contextBudgetNoticeEvent(a.ContextBudget()))
 		}
 
 		schemas := a.svc.tools.ProviderSchemas(ctx)

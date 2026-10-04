@@ -31,8 +31,8 @@ type Config struct {
 	Base  string
 	Proxy netclient.ProxySpec
 	HTTP  *http.Client
-	// Backoff is the wait before each retry of an unanswered request; nil takes
-	// the default, an empty non-nil slice disables retrying.
+	// Backoff sets retry waits; a transient submit response uses the first wait.
+	// Nil takes the default, an empty non-nil slice disables retrying.
 	Backoff []time.Duration
 }
 

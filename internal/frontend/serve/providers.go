@@ -396,13 +396,23 @@ func (s *Server) removeProvider(w http.ResponseWriter, r *http.Request) {
 	}
 	// With nothing left there is no model to move to; the window finds the
 	// empty config and asks for a connection, as it does on a first launch.
-	if inUse && cfg.DefaultModel != "" {
-		if err := s.switchModel(r.Context(), cfg.DefaultModel); err != nil {
+	if target := removalSuccessor(cfg); inUse && target != "" {
+		if err := s.switchModel(r.Context(), target); err != nil {
 			writeErr(w, http.StatusInternalServerError, err)
 			return
 		}
 	}
 	w.WriteHeader(http.StatusNoContent)
+}
+
+// removalSuccessor is where a conversation on a removed provider goes: the saved
+// default, or what a window would open on when that default names nothing.
+func removalSuccessor(cfg *config.Config) string {
+	target := cfg.DefaultModel
+	if _, found := cfg.ResolveModel(target); !found && target != "" {
+		target, _, _ = cfg.ResolveStartupChatModel()
+	}
+	return target
 }
 
 // providerEntryFrom validates what the panel sent and builds the config entry.

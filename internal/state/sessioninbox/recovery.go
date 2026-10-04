@@ -65,6 +65,7 @@ func (s *Store) RecoverOrphanedInFlightOwnedBy(ownedBy func(string) bool) (int, 
 		case StateRunning, StateSteerAccepted, StateSteerConsumed:
 			next.Items[i].State = StateUncertain
 			next.Items[i].BlockReason = "in-flight owner is no longer active"
+			next.Items[i].BlockCode = BlockOwnerInactive
 			next.Items[i].UpdatedAt = now
 			recovered++
 		}

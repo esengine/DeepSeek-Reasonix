@@ -2,6 +2,8 @@ import { describe, expect, it } from "vitest";
 import { renderToStaticMarkup } from "react-dom/server";
 import { CompactionCard } from "./CompactionCard";
 import type { Compaction } from "../../port/wire";
+import { FOLD_WHY } from "../../i18n/compaction_why";
+import { EN } from "../../i18n/en";
 
 const draw = (c: Compaction) => renderToStaticMarkup(<CompactionCard c={c} done />);
 
@@ -36,5 +38,25 @@ describe("what the card says sent a fold", () => {
     const html = draw({ trigger: "manual", boundary: "economic", triggerTokens: 160_000, messages: 40 });
     expect(html).toContain("手动触发");
     expect(html).not.toContain("160k");
+  });
+});
+
+describe("what the card says when a fold installed nothing", () => {
+  it("names the cause the host settled", () => {
+    const html = draw({ trigger: "auto", code: "digest_lost_every_change" });
+    expect(html).toContain("压缩未完成");
+    expect(html).toContain("摘要没有记下");
+    expect(html).not.toContain("压缩完成");
+  });
+
+  it("still says only that nothing folded for a code it has no sentence for", () => {
+    const html = draw({ trigger: "auto", code: "future_code" });
+    expect(html).toContain("本次未折叠任何内容");
+    expect(html).not.toContain("future_code");
+  });
+
+  it.each(Object.entries(FOLD_WHY))("%s has an English sentence", (code, zh) => {
+    expect(EN[zh], `no English for ${code}`).toBeTruthy();
+    expect(EN[zh]).not.toBe(zh);
   });
 });

@@ -42,7 +42,7 @@ func collectSink() (event.Sink, chan event.Event, func() []event.Event) {
 
 func waitForDone(t *testing.T, done chan event.Event) event.Event {
 	t.Helper()
-	return waitForDoneWithin(t, done, 5*time.Second)
+	return waitForDoneWithin(t, done, testenv.Budget(t))
 }
 
 func waitForDoneWithin(t *testing.T, done chan event.Event, d time.Duration) event.Event {

@@ -47,10 +47,14 @@ func (s *Server) skillsForProject(w http.ResponseWriter, root string) {
 		if row.HasOverride {
 			switchScope = string(row.SwitchScope)
 		}
+		slashName := row.Skill.SlashName()
+		if row.Skill.DisableUserInvocation {
+			slashName = ""
+		}
 		entries = append(entries, skillEntry{
 			SwitchScope: switchScope,
 			Name:        row.Skill.Name,
-			SlashName:   row.Skill.SlashName(),
+			SlashName:   slashName,
 			Description: row.Skill.Description,
 			Scope:       string(row.Skill.Scope),
 			Plugin:      row.Skill.Plugin,
@@ -60,7 +64,7 @@ func (s *Server) skillsForProject(w http.ResponseWriter, root string) {
 			Model:       row.Skill.Model,
 			Effort:      row.Skill.Effort,
 			AllowedURI:  row.Skill.AllowedTools,
-			Manual:      strings.EqualFold(strings.TrimSpace(row.Skill.Invocation), "manual"),
+			Manual:      row.Skill.DisableModelInvocation || strings.EqualFold(strings.TrimSpace(row.Skill.Invocation), "manual"),
 			Enabled:     row.Enabled,
 		})
 	}

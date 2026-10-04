@@ -174,6 +174,8 @@ export const EN_REMOTE: Record<string, string> = {
   "手机和这台电脑在同一个网络里，扫码后就能看会话、发消息、批准操作。关闭或退出 Studio 会断开所有手机。": "A phone on the same network as this computer can scan a code to follow sessions, send messages and approve actions. Turning this off or quitting Studio disconnects every phone.",
   "虚拟网卡": "virtual adapter",
   "换网络会断开已连接的手机，它们需要扫新的二维码。": "Switching networks disconnects the connected phones; they will need to scan the new code.",
+  "留空则每次开启时由系统随机选择，范围 1024–65535。更改端口后，手机需要重新扫码配对。": "Leave empty to let the system pick a port each time, or choose one from 1024 to 65535. After changing the port, phones need to scan a new code to pair again.",
+  "改端口会断开已连接的手机，它们需要扫新的二维码。": "Changing the port disconnects the connected phones; they will need to scan the new code.",
   "配对二维码": "Pairing QR code",
   "复制配对链接": "Copy pairing link",
   "设备 {n}": "Device {n}",

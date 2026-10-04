@@ -93,6 +93,22 @@ describe("sealing a turn", () => {
   });
 });
 
+// The kernel flags a turn the user's own action ended. Its err is the sentinel's
+// wording, which says nothing the flag does not, so it is not a failure card.
+describe("a turn the user cancelled", () => {
+  it("does not draw the cancellation as an error card", () => {
+    const s = run([partial("c1"), { kind: "turn_done", cancelled: true, err: "context canceled" } as SessionEvent]);
+    expect(s.items.filter((i) => i.t === "notice" && i.level === "error")).toHaveLength(0);
+    expect(s.terminal).toEqual({ kind: "cancelled" });
+    expect(s.doing).toBe("已取消");
+  });
+
+  it("still draws a genuine failure", () => {
+    const s = run([{ kind: "turn_done", err: "provider down" } as SessionEvent]);
+    expect(notices(s)).toEqual(["provider down"]);
+  });
+});
+
 describe("rebuilding a reopened transcript", () => {
   const users = (msgs: HistoryMessage[]) =>
     fromHistory(msgs).items.filter((i): i is Extract<Item, { t: "user" }> => i.t === "user");
@@ -262,6 +278,19 @@ describe("waiting for another session to finish writing", () => {
   const lease = (code: string, level: string, text: string): SessionEvent =>
     ({ kind: "notice", code, level, text }) as SessionEvent;
   const cards = (st: SessionState) => st.items.filter((i): i is Extract<Item, { t: "notice" }> => i.t === "notice");
+
+  it("preserves holder and claim scope through close and event replay", () => {
+    const scope = { contended: 0, heldMs: 0, idleMs: 0, holder: "Fixture A", holderSessionId: "session-a", paths: ["src/a.go"], requestedPaths: ["src/a.go"] };
+    const opened = { ...lease("workspace_lease", "warn", "Waiting"), workspaceLease: scope } as SessionEvent;
+    const closed = { ...lease("workspace_lease_resumed", "info", "Claim granted"), workspaceLease: scope } as SessionEvent;
+    const waiting = run([opened]);
+    expect(cards(waiting)[0]).toMatchObject({ workspaceLease: scope });
+    const done = reduce(waiting, closed);
+    expect(cards(done)).toHaveLength(1);
+    expect(cards(done)[0]).toMatchObject({ id: cards(waiting)[0].id, workspaceLease: scope });
+    expect(cards(run([opened, closed]))[0]).toMatchObject({ workspaceLease: scope });
+    expect(cards(reduce(waiting, { ...closed, code: "workspace_lease_abandoned" } as SessionEvent))[0]).toMatchObject({ workspaceLease: scope });
+  });
 
   // The open used to be the whole surface: one card saying the session would
   // continue "when it is safe", still saying it long after it had.
@@ -566,5 +595,23 @@ describe("which model wrote a reply", () => {
       { kind: "text", text: "planning", source: "planner", modelRef: "deepseek/deepseek-pro" },
     ] as SessionEvent[]);
     expect(says(st)[0].model).toBe("deepseek/deepseek-pro");
+  });
+});
+
+describe("a receipt that arrives after the delivery it is for", () => {
+  const sent = { kind: "__user", text: "换个思路", pending: true, id: "row-1" } as SessionEvent;
+  const delivered = { kind: "steer", text: "换个思路", itemId: "it1" } as SessionEvent;
+  const receipt = { kind: "__queued", id: "row-1", itemId: "it1", queued: "steer" } as SessionEvent;
+  const users = (st: SessionState) => st.items.filter((i): i is Extract<Item, { t: "user" }> => i.t === "user");
+
+  it("leaves one delivered line and nothing waiting", () => {
+    const rows = users(run([sent, delivered, receipt]));
+    expect(rows).toHaveLength(1);
+    expect(rows[0]).toMatchObject({ steer: true, itemId: "it1" });
+    expect(rows.some((r) => r.pending)).toBe(false);
+  });
+
+  it("still names a line the kernel has not delivered yet", () => {
+    expect(users(run([sent, receipt]))[0]).toMatchObject({ pending: true, itemId: "it1" });
   });
 });

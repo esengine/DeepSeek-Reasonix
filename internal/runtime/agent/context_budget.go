@@ -3,6 +3,7 @@ package agent
 import (
 	"fmt"
 
+	"reasonix/internal/contract/event"
 	"reasonix/internal/contract/tool"
 )
 
@@ -98,26 +99,45 @@ func contextBudgetRung(budget tool.ContextBudget) int {
 	return rung
 }
 
+// budgetContinuationClause is the half of the notice that is not a figure: the
+// fold is routine and the task goes on across it. Without it a model reads
+// "room remaining" as the end of the window and hands the work back.
+const budgetContinuationClause = `Compaction is automatic and this same task continues after it. Keep working; do not stop, hand the work back, or suggest a new session because of this notice.`
+
 func contextBudgetNoticeText(budget tool.ContextBudget, rung int) string {
 	if rung >= len(contextBudgetNoticeRatios) {
 		return fmt.Sprintf(`<context-budget>
-About %d tokens of room remain before this conversation is automatically compacted.
-Land what you know now: state the current result, the exact next step, and any path, identifier, or number the summary would otherwise have to carry for you.
-</context-budget>`, budget.TokensRemaining)
+About %d tokens remain before this conversation is automatically compacted (not before the %d-token window ends).
+%s
+Meanwhile write down what a summary would lose: the current result, the next step, any path or identifier held only in your replies.
+</context-budget>`, budget.TokensRemaining, budget.Window, budgetContinuationClause)
 	}
 	return fmt.Sprintf(`<context-budget>
-About %d tokens of room remain before this conversation is automatically compacted (%d used of a %d-token window; the fold triggers at %d).
-Compaction folds earlier assistant and tool messages into a summary. The user's own turns stay verbatim, but anything you are holding only in your own earlier replies — exact paths, line numbers, a half-finished plan — survives only if you restate it or put it in the todo list.
-Work narrower from here: scope searches, read ranges rather than whole files, and do not start work whose output you cannot finish reading. Call context_budget when you need the current figure.
-</context-budget>`, budget.TokensRemaining, budget.TokensUsed, budget.Window, budget.CompactAt)
+About %d tokens remain before this conversation is automatically compacted (%d used of a %d-token window; the fold triggers at %d).
+%s
+The user's turns stay verbatim; anything held only in your earlier replies — exact paths, line numbers, a half-finished plan — survives only if you restate it or put it in the todo list. Prefer scoped searches and ranged reads. Call context_budget for the current figure.
+</context-budget>`, budget.TokensRemaining, budget.TokensUsed, budget.Window, budget.CompactAt, budgetContinuationClause)
 }
 
-// contextBudgetNoticeSummary is the user-facing one-liner for the same event.
-// The model gets the instructions; the user gets to see that it was told.
-func contextBudgetNoticeSummary(budget tool.ContextBudget) string {
+// contextBudgetNoticeEvent is the user-facing record of the same event. The
+// model gets the instructions; the user gets to see that it was told. Frontends
+// localize by Code and read the figures from Detail; Text is the English
+// fallback for sinks that know no code.
+func contextBudgetNoticeEvent(budget tool.ContextBudget) event.Event {
 	if !budget.Known() {
-		return "Context budget unmeasured; the model was not notified."
+		return event.Event{Kind: event.Notice, Level: event.LevelWarn,
+			Text: "Context budget unmeasured; the model was not notified."}
 	}
-	return fmt.Sprintf("Context at %d%% of the compaction threshold — the model was told it has about %d tokens of room left.",
-		int(float64(budget.TokensUsed)/float64(budget.CompactAt)*100), budget.TokensRemaining)
+	figures := event.ContextBudgetFigures{
+		Percent:   int(float64(budget.TokensUsed) / float64(budget.CompactAt) * 100),
+		Remaining: budget.TokensRemaining,
+	}
+	return event.Event{
+		Kind:   event.Notice,
+		Level:  event.LevelWarn,
+		Code:   event.NoticeCodeContextBudget,
+		Detail: figures.Encode(),
+		Text: fmt.Sprintf("Context at %d%% of the compaction threshold — the model was told it has about %d tokens of room left.",
+			figures.Percent, figures.Remaining),
+	}
 }

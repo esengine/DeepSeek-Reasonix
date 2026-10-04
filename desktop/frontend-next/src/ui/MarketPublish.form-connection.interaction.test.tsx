@@ -63,10 +63,13 @@ it.each(["connection", "account"])("discards a completed submission when the pub
   fill("old-kit");
   await userEvent.click(screen.getByRole("button", { name: "提交审核" }));
   await screen.findByText("已提交 demo/old-kit 0.1.0");
+  expect(screen.getByRole("status").textContent).toContain("已提交 demo/old-kit 0.1.0");
   view.rerender(draw(owner === "connection" ? next : port, owner === "account" ? "other" : "demo"));
   expect(screen.queryByText("已提交 demo/old-kit 0.1.0")).toBeNull();
   expect(screen.queryByRole("button", { name: "查看我的发布" })).toBeNull();
   expect(field("名称").value).toBe("");
+  expect(screen.queryByRole("status")).toBeNull();
+  expect(screen.queryByRole("alert")).toBeNull();
 });
 
 it("discards a previous connection's submission error", async () => {
@@ -78,9 +81,11 @@ it("discards a previous connection's submission error", async () => {
   fill("old-kit");
   await userEvent.click(screen.getByRole("button", { name: "提交审核" }));
   await screen.findByText("old submission refused");
+  expect(screen.getByRole("alert").textContent).toContain("old submission refused");
   view.rerender(draw(next));
   expect(screen.queryByText("old submission refused")).toBeNull();
   expect(screen.queryByText("没有提交成功")).toBeNull();
+  expect(screen.queryByRole("alert")).toBeNull();
 });
 
 it.each([
@@ -109,8 +114,11 @@ it.each([
   });
   expect(screen.queryByText("已提交 demo/old-kit 0.1.0")).toBeNull();
   expect(screen.queryByText("old late refusal")).toBeNull();
+  expect(screen.queryByRole("alert")).toBeNull();
+  expect(screen.queryByRole("status")).toBeNull();
   expect(field("名称").value).toBe("new-kit");
   expect(applying.disabled).toBe(true);
   await act(async () => fresh.resolve({ ...out, package: { ...out.package, name: "new-kit", slug: "demo/new-kit" } }));
   await screen.findByText("已提交 demo/new-kit 0.1.0");
+  expect(screen.getByRole("status").textContent).toContain("已提交 demo/new-kit 0.1.0");
 });

@@ -234,13 +234,13 @@ func TestCacheHitSurvivesTooSmallWindow(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(mock.handler))
 	defer srv.Close()
 
-	a, sink := newAgent(t, srv.URL, mock.tools(), 900 /*window tok*/, 4 /*recentKeep*/)
+	a, sink := newAgent(t, srv.URL, mock.tools(), 1000 /*window tok*/, 4 /*recentKeep*/)
 
 	if err := a.Run(context.Background(), strings.Repeat("please consider this requirement. ", 6)); err != nil {
 		t.Fatalf("Run: %v", err)
 	}
 
-	t.Logf("==== hit-rate curve, too-small window (900 tok) ====")
+	t.Logf("==== hit-rate curve, too-small window (1000 tok) ====")
 	collapses := 0
 	for i, u := range sink.usages {
 		r := hitRate(u)

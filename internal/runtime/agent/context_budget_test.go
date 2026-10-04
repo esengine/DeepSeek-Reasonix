@@ -4,6 +4,7 @@ import (
 	"strings"
 	"testing"
 
+	"reasonix/internal/contract/event"
 	"reasonix/internal/contract/tool"
 )
 
@@ -105,5 +106,40 @@ func TestContextBudgetUnmeasuredWithoutWindow(t *testing.T) {
 	}
 	if budget.Status != "unmeasured" || budget.Reason == "" {
 		t.Fatalf("unmeasured budget must name a reason: %+v", budget)
+	}
+}
+
+func TestContextBudgetNoticeEventCarriesTypedFigures(t *testing.T) {
+	ev := contextBudgetNoticeEvent(budgetAt(83, 100, 200))
+	if ev.Kind != event.Notice || ev.Level != event.LevelWarn || ev.Code != event.NoticeCodeContextBudget {
+		t.Fatalf("want a warn notice coded context_budget, got kind=%v level=%v code=%q", ev.Kind, ev.Level, ev.Code)
+	}
+	figures, ok := event.DecodeContextBudgetFigures(ev.Detail)
+	if !ok || figures.Percent != 83 || figures.Remaining != 17 {
+		t.Fatalf("Detail must decode to the percent and remaining tokens, got %+v ok=%v from %q", figures, ok, ev.Detail)
+	}
+}
+
+func TestContextBudgetNoticeEventForUnmeasuredBudgetHasNoCode(t *testing.T) {
+	ev := contextBudgetNoticeEvent(unmeasuredContextBudget("no window"))
+	if ev.Code != "" || ev.Text == "" {
+		t.Fatalf("an unmeasured budget has no figures to localize, got code=%q text=%q", ev.Code, ev.Text)
+	}
+}
+
+// Both rungs must say that the fold is automatic and the task goes on: a notice
+// that only reports shrinking room reads as the end of the window, and the model
+// hands the work back to the user.
+func TestBudgetNoticeStatesCompactionContinuesTheTask(t *testing.T) {
+	for rung := 1; rung <= len(contextBudgetNoticeRatios); rung++ {
+		text := contextBudgetNoticeText(budgetAt(9_500, 10_000, 12_000), rung)
+		if !strings.Contains(text, budgetContinuationClause) {
+			t.Fatalf("rung %d omits the continuation clause:\n%s", rung, text)
+		}
+		for _, figure := range []string{"500 tokens", "12000"} {
+			if !strings.Contains(text, figure) {
+				t.Fatalf("rung %d omits %q:\n%s", rung, figure, text)
+			}
+		}
 	}
 }

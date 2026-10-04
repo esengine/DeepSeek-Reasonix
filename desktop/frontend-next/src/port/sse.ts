@@ -69,7 +69,7 @@ export class SsePort extends SseFeedback implements AgentPort {
     const res = await fetch(this.base + "/plugins/" + encodeURIComponent(name) + "/export", {
       credentials: "same-origin",
     });
-    if (!res.ok) throw new Error(`/plugins/${name}/export: ${res.status}`);
+    if (!res.ok) await SsePort.fail(`/plugins/${encodeURIComponent(name)}/export`, res);
     const required = (res.headers.get("X-Reasonix-Required-Env") ?? "").split(",").filter(Boolean);
     const blob = await res.blob();
     // A shell with a save dialog puts the archive where it is asked to; the

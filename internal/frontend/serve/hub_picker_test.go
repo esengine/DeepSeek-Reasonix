@@ -49,3 +49,35 @@ func TestPickLocalFolderHTTPReportsUnsupported(t *testing.T) {
 		t.Fatalf("status = %d", rec.Code)
 	}
 }
+
+func TestHostCapabilitiesReportTheHeadlessFallbackPath(t *testing.T) {
+	old := folderPickerAvailable
+	folderPickerAvailable = func() bool { return false }
+	t.Cleanup(func() { folderPickerAvailable = old })
+	t.Setenv("REASONIX_HOME", t.TempDir())
+
+	srv := httptest.NewServer(operatorHandler(NewHub(HubOptions{})))
+	t.Cleanup(srv.Close)
+
+	resp, err := http.Get(srv.URL + "/host/capabilities")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("GET /host/capabilities = %d", resp.StatusCode)
+	}
+	var got struct {
+		PickFolder   bool `json:"pickFolder"`
+		AddWorkspace bool `json:"addWorkspace"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&got); err != nil {
+		t.Fatal(err)
+	}
+	if got.PickFolder {
+		t.Fatal("headless kernel reported a native picker")
+	}
+	if !got.AddWorkspace {
+		t.Fatal("kernel refused the path-based workspace API")
+	}
+}

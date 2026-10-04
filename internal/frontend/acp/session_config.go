@@ -144,6 +144,41 @@ func (s *service) resolveSessionConfigDeltas(ctx context.Context, sess *acpSessi
 	return withToolApprovalConfig(cfgState, sess.currentToolApprovalMode()), nil
 }
 
+// sessionConfigMatchesRuntime reports whether cfgState names the running
+// controller generation, then drops older queued deltas for the same axes:
+// a later request that restores the running value is their last write.
+func sessionConfigMatchesRuntime(sess *acpSession, cfgState SessionConfigState, deltas []sessionConfigDelta) bool {
+	if sess == nil {
+		return false
+	}
+	sess.mu.Lock()
+	if sess.deleted || sess.maintenanceDone != nil {
+		sess.mu.Unlock()
+		return false
+	}
+	ctrl := sess.ctrl
+	sess.mu.Unlock()
+	matcher, ok := ctrl.(control.RuntimeSelectionMatcher)
+	if !ok {
+		return false
+	}
+	if !matcher.MatchesRuntimeSelection(control.RuntimeSelection{
+		ModelRef:            cfgState.Model,
+		Effort:              cfgState.ResolvedEffort,
+		ProviderFingerprint: cfgState.ProviderFingerprint,
+	}) {
+		return false
+	}
+	sess.mu.Lock()
+	if sess.deleted || sess.maintenanceDone != nil {
+		sess.mu.Unlock()
+		return false
+	}
+	sess.pendingConfig = removePendingAxes(sess.pendingConfig, deltas)
+	sess.mu.Unlock()
+	return true
+}
+
 func (s *service) switchSessionModel(ctx context.Context, sess *acpSession, modelID string) (SessionConfigState, error) {
 	deltas := []sessionConfigDelta{{axis: "model", model: modelID}}
 	return s.switchSessionConfig(ctx, sess, deltas)
@@ -269,6 +304,11 @@ func (s *service) switchSessionConfig(ctx context.Context, sess *acpSession, del
 	if err != nil {
 		sess.stateChangeMu.Unlock()
 		return SessionConfigState{}, err
+	}
+	if sessionConfigMatchesRuntime(sess, cfgState, deltas) {
+		sess.storeConfigState(cfgState)
+		sess.stateChangeMu.Unlock()
+		return cfgState, nil
 	}
 	didMaintenance := false
 	err = s.rebuildSessionLocked(ctx, sess, cfgState, deltas, &didMaintenance)
@@ -419,6 +459,15 @@ func (s *acpSession) configStateParams() SessionConfigStateParams {
 		EffortOverride: cloneStringPtr(s.effortOverride),
 		RuntimeProfile: s.runtimeProfile,
 	}
+}
+
+func (s *acpSession) storeConfigState(cfgState SessionConfigState) {
+	s.mu.Lock()
+	s.model = cfgState.Model
+	s.effortOverride = cloneStringPtr(cfgState.EffortOverride)
+	s.runtimeProfile = cfgState.RuntimeProfile
+	s.mu.Unlock()
+	s.saveMetaIfPresent()
 }
 
 func (s *acpSession) currentToolApprovalMode() string {

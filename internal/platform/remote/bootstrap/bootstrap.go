@@ -127,10 +127,7 @@ func EnsureServe(ctx context.Context, conn Conn, opts Options) (Result, error) {
 	if err != nil {
 		return Result{}, err
 	}
-	workspace, err := resolveWorkspace(ctx, fs, opts.Workspace, home)
-	if err != nil {
-		return Result{}, err
-	}
+	workspace := resolveWorkspace(target, opts.Workspace, home)
 	paths := target.Paths(home, workspace)
 
 	// 2. Reuse a live process if the recorded pid is still running.
@@ -139,8 +136,10 @@ func EnsureServe(ctx context.Context, conn Conn, opts Options) (Result, error) {
 		return Result{State: st, Token: tok, Reused: true, Workspace: target.NativePath(st.Workspace)}, nil
 	}
 
-	// 3. Locate or install a usable reasonix.
-	bin, version, err := ensureBinary(ctx, conn, target, fs, opts, home, goos, goarch, paths)
+	// 3. Locate or install a usable reasonix. A reattach never gets here, so
+	// it never pays for the login-shell capture.
+	conn, env := connWithLoginEnv(ctx, conn, target)
+	bin, version, err := ensureBinary(ctx, conn, env, target, fs, opts, home, goos, goarch, paths)
 	if err != nil {
 		return Result{}, err
 	}
@@ -238,10 +237,7 @@ func Status(ctx context.Context, conn Conn, workspace string) (ServeState, bool,
 	if err != nil {
 		return ServeState{}, false, err
 	}
-	ws, err := resolveWorkspace(ctx, fs, workspace, home)
-	if err != nil {
-		return ServeState{}, false, err
-	}
+	ws := resolveWorkspace(target, workspace, home)
 	paths := target.Paths(home, ws)
 	st, err := readState(ctx, fs, paths.StateJSON)
 	if err != nil {
@@ -261,10 +257,7 @@ func Stop(ctx context.Context, conn Conn, workspace string) error {
 	if err != nil {
 		return err
 	}
-	ws, err := resolveWorkspace(ctx, fs, workspace, home)
-	if err != nil {
-		return err
-	}
+	ws := resolveWorkspace(target, workspace, home)
 	paths := target.Paths(home, ws)
 	st, err := readState(ctx, fs, paths.StateJSON)
 	if err != nil {
@@ -298,10 +291,7 @@ func RepointBroker(ctx context.Context, conn Conn, workspace string, broker Brok
 	if err != nil {
 		return err
 	}
-	ws, err := resolveWorkspace(ctx, fs, workspace, home)
-	if err != nil {
-		return err
-	}
+	ws := resolveWorkspace(target, workspace, home)
 	paths := target.Paths(home, ws)
 	st, err := readState(ctx, fs, paths.StateJSON)
 	if err != nil || !st.BrokerFile {
@@ -323,10 +313,7 @@ func Logs(ctx context.Context, conn Conn, workspace string, n int, w io.Writer) 
 	if err != nil {
 		return err
 	}
-	ws, err := resolveWorkspace(ctx, fs, workspace, home)
-	if err != nil {
-		return err
-	}
+	ws := resolveWorkspace(target, workspace, home)
 	paths := target.Paths(home, ws)
 	res, err := conn.Exec(ctx, target.Logs(paths.LogFile, n))
 	if err != nil {
@@ -534,22 +521,21 @@ func removeServeState(ctx context.Context, fs *sftpfs.FS, paths StatePaths) {
 	}
 }
 
-func resolveWorkspace(ctx context.Context, fs *sftpfs.FS, workspace, home string) (string, error) {
+// resolveWorkspace spells a workspace the way the file layer addresses it.
+// Only the target machine can say what an absolute path looks like there.
+func resolveWorkspace(target remoteOS, workspace, home string) string {
 	workspace = strings.TrimSpace(workspace)
-	if workspace == "" {
-		return home, nil
+	if workspace == "" || workspace == "~" {
+		return home
 	}
-	if workspace == "~" {
-		return home, nil
+	root := strings.TrimRight(home, "/")
+	if rest, ok := target.HomeRelative(workspace); ok {
+		return root + "/" + rest
 	}
-	if after, ok0 := strings.CutPrefix(workspace, "~/"); ok0 {
-		return strings.TrimRight(home, "/") + "/" + after, nil
+	if abs, ok := target.Absolute(workspace); ok {
+		return abs
 	}
-	if strings.HasPrefix(workspace, "/") {
-		return workspace, nil
-	}
-	// Relative to home.
-	return strings.TrimRight(home, "/") + "/" + workspace, nil
+	return root + "/" + workspace
 }
 
 func generateToken() (string, error) {

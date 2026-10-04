@@ -38,6 +38,9 @@ export interface HostPort {
    *  root. The shell asks the kernel where that is and selects only the answer;
    *  null once shown, otherwise why it was not. */
   revealPath(base: string, path: string): Promise<Refusal | null>;
+  /** Show a project the sidebar lists, which needs no pane. The hub answers
+   *  where it is and refuses any folder it does not list. */
+  revealWorkspace(root: string): Promise<Refusal | null>;
   /** Whether this shell draws the agent's browser pages inside the window. */
   drawsBrowserViews(): boolean;
   /** Draw one of the agent's pages over rect, in on-screen coordinates, and
@@ -127,6 +130,7 @@ interface ElectronBridge {
   saveBytes(name: string, bytes: Uint8Array): Promise<string>;
   pickFolder(startIn: string): Promise<string>;
   revealPath?(base: string, path: string): Promise<Refusal | null>;
+  revealWorkspace?(root: string): Promise<Refusal | null>;
   showBrowserView?(target: string, rect: ViewRect): Promise<void>;
   hideBrowserView?(): Promise<void>;
   freezeBrowserView?(): Promise<string>;
@@ -186,10 +190,13 @@ class ElectronHost implements HostPort {
     return this.api.pickFolder(startIn);
   }
   revealsFiles() {
-    return typeof this.api.revealPath === "function";
+    return typeof this.api.revealPath === "function" && typeof this.api.revealWorkspace === "function";
   }
   revealPath(base: string, path: string) {
     return this.api.revealPath?.(base, path) ?? Promise.resolve({ error: "this shell cannot show files" });
+  }
+  revealWorkspace(root: string) {
+    return this.api.revealWorkspace?.(root) ?? Promise.resolve({ error: "this shell cannot show files" });
   }
   // A shell older than the verbs has no views to draw, and says so by lacking them.
   drawsBrowserViews() {
@@ -255,6 +262,9 @@ class BrowserHost implements HostPort {
     return false;
   }
   revealPath() {
+    return Promise.resolve({ error: "a browser tab cannot show files" });
+  }
+  revealWorkspace() {
     return Promise.resolve({ error: "a browser tab cannot show files" });
   }
   drawsBrowserViews() {

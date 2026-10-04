@@ -13,6 +13,7 @@ import (
 // runs under.
 type modelSelection struct {
 	name     string
+	skipped  string // a default_model nothing configured serves, passed over
 	ref      string
 	entry    *config.ProviderEntry
 	preset   string
@@ -29,7 +30,7 @@ func selectModel(opts Options, cfg *config.Config, extensionResolver provider.Re
 	// (#6996); an explicit opts.Model still fails loudly.
 	m.name = opts.Model
 	if m.name == "" {
-		m.name = newSessionModel(opts.ProviderResolver, cfg)
+		m.name, m.skipped = newSessionModel(opts.ProviderResolver, cfg, opts.OpenOnFallbackModel)
 	}
 	config.NormalizeLegacyMimoCustomProvidersForRefs(cfg, m.name)
 	m.preset = strings.TrimSpace(opts.AgentPreset)

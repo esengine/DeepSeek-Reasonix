@@ -836,7 +836,7 @@ func TestLostTokenOnSubmitRegistersANewIdentity(t *testing.T) {
 	}
 }
 
-func TestOnlyAnUnansweredRequestIsRetried(t *testing.T) {
+func TestTransientSubmitResponseRetryIsBounded(t *testing.T) {
 	for name, fn := range map[string]func(int, http.ResponseWriter, *http.Request) bool{
 		"uncoded 502": func(_ int, w http.ResponseWriter, _ *http.Request) bool {
 			w.WriteHeader(http.StatusBadGateway)
@@ -850,8 +850,12 @@ func TestOnlyAnUnansweredRequestIsRetried(t *testing.T) {
 		svc, _ := New(Config{Home: t.TempDir(), Base: srv.URL, HTTP: srv.Client(), Backoff: []time.Duration{time.Millisecond, time.Millisecond}})
 		_, _ = svc.Submit(context.Background(), draft())
 		srv.Close()
-		if len(st.posts) != 1 {
-			t.Errorf("%s: %d posts, want 1", name, len(st.posts))
+		want := 1
+		if name == "uncoded 502" {
+			want = 2
+		}
+		if len(st.posts) != want {
+			t.Errorf("%s: %d posts, want %d", name, len(st.posts), want)
 		}
 	}
 }

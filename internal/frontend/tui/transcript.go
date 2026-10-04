@@ -73,12 +73,14 @@ type Item struct {
 
 // outputFold is how much of a finished shell call's output, or of an answer's
 // thinking, its row shows: fixed where the rows cannot be redrawn, else it opens.
+// Pinned is open with no key to shut it, for rows /verbose keeps expanded.
 type outputFold int8
 
 const (
 	foldFixed outputFold = iota
 	foldShut
 	foldOpen
+	foldPinned
 )
 
 // Terminal is how the last turn ended.
@@ -501,6 +503,7 @@ func (t *Transcript) foldNotice(ev eventwire.Event) {
 			((last.Code != "" && last.Code == ev.Code) || (last.Code == "" && ev.Code == "" && last.Text == ev.Text))
 		if same {
 			last.Count = max(last.Count, 1) + 1
+			last.Text, last.Detail = ev.Text, ev.Detail
 			return
 		}
 	}

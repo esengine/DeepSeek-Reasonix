@@ -727,7 +727,7 @@ func nextForError(err error) string {
 	case errors.Is(err, ErrBinaryMissing):
 		return "Install the missing local runtime or use an absolute command path, then retry."
 	case errors.Is(err, ErrAlreadyExists):
-		return "Choose another name, remove the existing entry, or retry MCP installs with replace=true."
+		return "Choose another name, remove the existing entry, or retry MCP or plugin installs with replace=true."
 	case errors.Is(err, ErrUnsafeLinkTarget):
 		return "The link target escapes the project/home root. Pick a source path inside the workspace or home directory."
 	case errors.Is(err, ErrApprovalDenied):

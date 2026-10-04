@@ -379,7 +379,7 @@ export function FeedbackForm({ port, onMine, onClose, onFile }: Props) {
             {failure.code === FEEDBACK_CODE.duplicate && (
               <button type="button" className="btn sm" data-action="feedback.mine" onClick={onMine}>{t("查看我的反馈")}</button>
             )}
-            {failure.code === FEEDBACK_CODE.disabled && (
+            {(failure.code === FEEDBACK_CODE.disabled || failure.code === FEEDBACK_CODE.unavailable) && (
               <button type="button" className="btn sm" data-action="feedback.link" onClick={() => onFile(FEEDBACK_REPO_ISSUES + "new/choose")}>
                 {t("去 GitHub")}
               </button>

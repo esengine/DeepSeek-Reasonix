@@ -7,7 +7,7 @@ import { MockPort } from "../port/mock";
 import type { AgentPort, ApprovalMode, Attachment, Completion, ModelEntry, Preset, SessionStatus } from "../port/port";
 import { draftKey } from "./drafts";
 
-afterEach(() => { cleanup(); localStorage.clear(); });
+afterEach(() => { cleanup(); localStorage.clear(); vi.restoreAllMocks(); });
 
 const status = (over: Partial<SessionStatus> = {}) =>
   ({
@@ -25,6 +25,19 @@ function deferred<T>() {
     resolve = done;
   });
   return { promise, resolve };
+}
+
+function touchPointer() {
+  vi.spyOn(window, "matchMedia").mockImplementation((query: string) => ({
+    matches: query === "(pointer: coarse)",
+    media: query,
+    onchange: null,
+    addListener() {},
+    removeListener() {},
+    addEventListener() {},
+    removeEventListener() {},
+    dispatchEvent: () => false,
+  }) as MediaQueryList);
 }
 
 function draw(
@@ -56,6 +69,35 @@ describe("composer submission", () => {
     expect((screen.getByRole("button", { name: "发送" }) as HTMLButtonElement).disabled).toBe(true);
     fireEvent.change(box, { target: { value: "检查这次改动", selectionStart: 6 } });
     expect((screen.getByRole("button", { name: "发送" }) as HTMLButtonElement).disabled).toBe(false);
+  });
+
+  it("keeps Enter in the textarea when a touch-first pointer has focus", () => {
+    touchPointer();
+    const { box, onSubmit } = draw();
+    fireEvent.change(box, { target: { value: "两行输入", selectionStart: 4 } });
+    expect(fireEvent.keyDown(box, { key: "Enter" })).toBe(true);
+    expect(onSubmit).not.toHaveBeenCalled();
+    expect(screen.getByText("点按发送 · 回车换行")).toBeTruthy();
+    expect(box.hasAttribute("aria-keyshortcuts")).toBe(false);
+  });
+
+  it("still submits through the Send button on a touch-first pointer", async () => {
+    touchPointer();
+    const { box, onSubmit } = draw();
+    fireEvent.change(box, { target: { value: "点按发送", selectionStart: 4 } });
+    fireEvent.keyDown(box, { key: "Enter" });
+    expect(onSubmit).not.toHaveBeenCalled();
+    fireEvent.click(screen.getByRole("button", { name: "发送" }));
+    await waitFor(() => expect(onSubmit).toHaveBeenCalledWith("点按发送"));
+  });
+
+  it("shows the tap-to-steer hint on a touch-first pointer during a live turn", () => {
+    touchPointer();
+    const { box, onSubmit } = draw({ running: true });
+    fireEvent.change(box, { target: { value: "补充一句", selectionStart: 4 } });
+    expect(fireEvent.keyDown(box, { key: "Enter" })).toBe(true);
+    expect(onSubmit).not.toHaveBeenCalled();
+    expect(screen.getByText("点按插话 · 回车换行")).toBeTruthy();
   });
 
   it("locks repeated Enter presses until the first submit settles", async () => {
@@ -469,5 +511,33 @@ describe("a model mode switch", () => {
     expect(row.getAttribute("aria-checked")).toBe("true");
     fireEvent.click(row);
     await waitFor(() => expect(set).toHaveBeenCalledWith(""));
+  });
+});
+
+describe("a line taken back from the queue", () => {
+  const props = () => ({ port: new MockPort() as unknown as AgentPort, status: status(), running: false, onSubmit: async () => true, onChanged: vi.fn(), onError: vi.fn() });
+
+  it("lands in the box", () => {
+    const view = render(<Composer {...props()} />);
+    view.rerender(<Composer {...props()} restore={{ n: 1, text: "取回的这一句" }} />);
+    expect((view.container.querySelector("textarea") as HTMLTextAreaElement).value).toBe("取回的这一句");
+  });
+
+  it("goes under what was typed meanwhile instead of replacing it", () => {
+    const p = props();
+    const view = render(<Composer {...p} />);
+    const box = view.container.querySelector("textarea") as HTMLTextAreaElement;
+    fireEvent.change(box, { target: { value: "正在写的", selectionStart: 4 } });
+    view.rerender(<Composer {...p} restore={{ n: 1, text: "取回的这一句" }} />);
+    expect(box.value).toBe("正在写的\n取回的这一句");
+  });
+
+  it("restores the same text twice when it is taken back twice", () => {
+    const p = props();
+    const view = render(<Composer {...p} restore={{ n: 1, text: "甲" }} />);
+    const box = view.container.querySelector("textarea") as HTMLTextAreaElement;
+    fireEvent.change(box, { target: { value: "", selectionStart: 0 } });
+    view.rerender(<Composer {...p} restore={{ n: 2, text: "甲" }} />);
+    expect(box.value).toBe("甲");
   });
 });

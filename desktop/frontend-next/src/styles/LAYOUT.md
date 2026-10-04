@@ -269,6 +269,19 @@ rules are written in.
   was read, stored, written inline and then overridden every time.
 - `.gutter-l` outranks the rail because the rail is `position: fixed` at 12: a
   seam painted under the panel it divides cannot be grabbed where it matters.
+- The rail's floor is 232px (`RAIL.min`); a narrower saved width is raised on
+  read.
+- Under 232px the session filter row cannot hold four labels in either
+  language.
+- The rail head is a size container, and its threshold is a content-box width,
+  not a rail width.
+- The threshold is 220px: the content box of the default 264px rail, which has
+  22px side padding. The default and anything wider show counts and shortcut
+  hints.
+- At 219px or less counts and hints are dropped, the filter cells may shrink
+  and labels ellipsize.
+- Inside a window of 860px or less the padding is 16px, so the cutoff falls at
+  a 252px rail.
 - The rail lists every mounted workspace, each folding over its own sessions.
   The studio layer had hidden all but the focused one and relabelled its
   children 「最近」, so a count of six sat above a list of one. The switcher above
@@ -404,14 +417,11 @@ rules are written in.
 - `[data-k="me"]` opens a turn. Scrolling back, it is the only anchor, and it
   used to be as light as a tool call's header. The turn number is deliberately
   absent: the rewind entry is on the card, so there is no number to match by eye.
-- The bubble sizes the card; the controls row above it does not.
-  `contain: inline-size` keeps the row out of the card's width, and
-  `margin-inline-start: auto` holds the bubble's right edge on the column's.
-- When the labels need more room than the bubble, the controls drop to icons
-  and keep their names, hints and focus. Fit is measured (`labelfit.ts`).
-- No container-query breakpoint decides it: the labels' width moves with the
-  language and the marks beside them, so any fixed width is wrong for a row.
-- Icons wider than the bubble overflow to the left, where the free space is.
+- User message controls sit below the bubble, ordered copy, edit, rewind.
+  They stay icon-only with names, hints and keyboard focus. Inline-size
+  containment keeps the row from widening the bubble; wider rows extend left.
+- The row appears on message hover, keyboard focus, or an open rewind menu.
+  Devices without hover keep the controls visible.
 - `[data-k="host"]` is what the host did itself. A transcript has three authors —
   you, the model, the host — and `data-k` only knows tool names, so the host's
   cards landed on the default grey beside an uncategorised tool. A dashed line is
@@ -670,9 +680,36 @@ what exists.
 
 ## Onboarding
 
+- The stage is the named inline-size container `onboarding`. The card folds at
+  760px of that container, so interface zoom changes its columns and spacing.
+- The fold follows available CSS width, not the unscaled viewport measured by
+  a media query. Form controls must fit inside the shell's clipping boundary.
+- `perf/onboarding.mjs` checks card bounds, the 760/761px boundary, saved zoom
+  and resizing, alongside scrolling, focus clearance and completing setup.
 - The connect card grows inside the opening scene rather than starting a second
   screen, so the introduction above it stays present and the palette follows the
   scene (a dark ground) rather than the app theme.
+- The stage is exactly the window's height and is the scroll container, because
+  the body clips.
+- That height is `100dvh / var(--zoom)`, as on the body: `vh` does not scale
+  with the zoom setting, so a bare `100dvh` stage would be taller than the
+  zoomed window.
+- The title bar is `position: sticky; top: 0` inside the stage: it holds the
+  drag region and the window buttons, which must stay on screen however far
+  the card is scrolled.
+- A stage with only a `min-height` grows with its content and never overflows
+  itself, so the connected state pushed the start button below a short window
+  with nothing to scroll.
+- The ambient glow is `position: fixed`: absolutely positioned inside a scroll
+  container it counts as scrollable overflow, and at a wide window (38vw tall)
+  it let the stage scroll far past the card.
+- The shell is `flex: none`: a shrinkable shell is cut off instead of making
+  the stage scroll.
+- The stage's `scroll-padding-top` equals the title bar's 64px, so focus moving
+  up the form scrolls the field below the sticky bar rather than under it.
+- The title bar and footer are `flex: none` too; as shrinkable flex items they
+  were squeezed to half height once the card overflowed.
+- The shell clips with `overflow: clip`, so it is not a scroll container.
 - Its labels are not uppercased: tracking pulls apart the Chinese particles in
   mixed text. The "get a key" entry sits at the label's right end with tracking
   zeroed, because the label's .06em is for Latin small labels.
@@ -778,6 +815,14 @@ what exists.
   says the state, with the accent left for things that actually need you.
 - Remove is the one irreversible action in a row, so it does not look like the
   other buttons and appears only on hover.
+
+## Community
+
+- The QR code sits on a white plate in both themes: a scanner needs dark modules
+  on a light field with a quiet zone, and an inverted code in the dark theme
+  does not scan. The plate is the image's own quiet zone, not a card behind it.
+- The image is drawn at 5 CSS pixels per module (185px for 37 modules) so the
+  squares land on whole pixels; `image-rendering: pixelated` keeps them hard.
 
 ## Version list
 

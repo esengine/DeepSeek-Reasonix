@@ -206,8 +206,9 @@ func (h *Hub) unlistedOpenSessions(root string, listed []treeSession) []treeSess
 }
 
 // archiveSession changes catalog visibility without moving or deleting data.
-// An idle pane on the session is closed first; one that is running is refused,
-// since archiving would hide a conversation still being written.
+// An idle pane on the session is closed first; one that is running is refused.
+// Recovery siblings with another live pane stay active while the rest of the
+// lineage is archived.
 func (h *Hub) archiveSession(w http.ResponseWriter, r *http.Request) {
 	var body struct {
 		Path     string `json:"path"`
@@ -231,7 +232,12 @@ func (h *Hub) archiveSession(w http.ResponseWriter, r *http.Request) {
 		refuse(w, http.StatusForbidden, "session.outside_workspace", "path outside a known workspace", nil)
 		return
 	}
-	if err := sessionstore.SetSessionArchived(path, body.Archived); err != nil {
+	open := h.openSessions()
+	excluded := make([]string, 0, len(open))
+	for openPath := range open {
+		excluded = append(excluded, openPath)
+	}
+	if err := sessionstore.SetSessionLineageArchived(path, body.Archived, excluded...); err != nil {
 		writeErr(w, http.StatusInternalServerError, err)
 		return
 	}

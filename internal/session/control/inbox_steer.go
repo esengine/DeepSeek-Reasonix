@@ -291,3 +291,35 @@ func askAnswersHaveSelection(answers []event.AskAnswer) bool {
 	}
 	return false
 }
+
+// onInboxUnappliedSteer keeps accepted-but-unapplied steers for inspection.
+func (c *Controller) onInboxUnappliedSteer(itemID string) {
+	if itemID == "" {
+		return
+	}
+	st, err := c.ensureInbox()
+	if err != nil {
+		return
+	}
+	c.mu.Lock()
+	skipped := c.gate.skippedAsk()
+	c.mu.Unlock()
+	if skipped {
+		// The user declined the question, so guidance they queued into it runs
+		// next; an item whose body cannot be read back stays held.
+		if _, _, readErr := st.ReadItem(itemID); readErr == nil {
+			if _, err := st.RequeueUnappliedSteer(itemID); err == nil {
+				c.inbox.mu.Lock()
+				c.inbox.untrackActive(itemID)
+				c.inbox.mu.Unlock()
+				return
+			}
+		}
+	}
+	_ = st.SetStateCoded(itemID, sessioninbox.StateUncertain, sessioninbox.BlockSteerUnapplied, "steer accepted but unapplied before turn exit")
+	_ = st.SetPaused(true)
+	c.inbox.mu.Lock()
+	c.inbox.untrackActive(itemID)
+	c.inbox.mu.Unlock()
+	sessioninbox.NoteUncertain()
+}

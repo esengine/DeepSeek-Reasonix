@@ -29,6 +29,8 @@ type agentConfig struct {
 	writeWorkspaceRoot string
 	// observeRoot is the workspace an unclassified call's effect is observed in.
 	observeRoot string
+	// workspaceScanLimit bounds the observation walk; zero means workspaceScanLimit.
+	workspaceScanLimit int
 	// renderRoot opens written pages for a look; empty owes no look.
 	renderRoot string
 	// workspaceVCS rides the turn block; in the prefix it would diverge it.

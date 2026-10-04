@@ -162,7 +162,7 @@ func (m ContextManager) foldContext(ctx context.Context, prepared PreparedContex
 			// Transcript changed during the summary call: discard the candidate
 			// and block this generation so we do not pay for a second summary.
 			reason := "context changed during summary; automatic retry blocked for this generation"
-			a.recordContextMaintenanceBlocked(inputHash, policy.Trigger, "summary", "", reason)
+			a.recordContextMaintenanceBlocked(inputHash, policy.Trigger, "summary", FailContextChanged, reason)
 			if policy.Trigger == CompactionTriggerOverflow || est >= hard {
 				return PreparedContext{}, fmt.Errorf("%w: %s", ErrCompactionRequired, reason)
 			}
@@ -173,7 +173,7 @@ func (m ContextManager) foldContext(ctx context.Context, prepared PreparedContex
 			status = "blocked"
 		}
 		reason := fmt.Sprintf("context summary failed: %v", err)
-		a.recordContextMaintenanceOutcome(inputHash, policy.Trigger, "summary", status, "", reason)
+		a.recordContextMaintenanceOutcome(inputHash, policy.Trigger, "summary", status, compactionFailureCode(err), reason)
 		if policy.Trigger == CompactionTriggerManual {
 			return PreparedContext{}, err
 		}
@@ -222,7 +222,7 @@ func (m ContextManager) foldContext(ctx context.Context, prepared PreparedContex
 	}
 	if result.InputTokens >= fold {
 		reason := fmt.Sprintf("summary result remains above fold trigger (%d >= %d)", result.InputTokens, fold)
-		a.recordContextMaintenanceBlocked(a.contextMaintenanceInputHash(result.Messages), policy.Trigger, "summary", "", reason)
+		a.recordContextMaintenanceBlocked(a.contextMaintenanceInputHash(result.Messages), policy.Trigger, "summary", FailResultAboveTrigger, reason)
 		a.sess.win.compaction.stuck = true
 		// Only a provider that already refused ends the turn here. Our ceiling
 		// is an estimate, and refusing on it turns a window too small to

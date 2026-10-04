@@ -344,7 +344,7 @@ func (c *Controller) AnswerQuestionFrom(id string, answers []event.AskAnswer, vi
 			activeTurn := c.gate.cancel != nil
 			c.mu.Unlock()
 			if activeTurn {
-				c.Cancel()
+				c.cancelTurn(causeAskSkipped)
 				return
 			}
 		}

@@ -62,7 +62,7 @@ func TestPluginShowRendersRuntimeFullTrust(t *testing.T) {
 		"replaces: system_prompt",
 		"capabilities: interceptors, ui",
 		"bypass permissions",
-		"prompts:\n  plan",
+		"prompts:\n  /example:plan",
 		"themes:\n  neon",
 	} {
 		if !strings.Contains(out, want) {

@@ -487,7 +487,7 @@ func TestAssembleAppliesTheStartupUpgrades(t *testing.T) {
 		t.Fatal(err)
 	}
 	t.Chdir(testenv.TempDir(t))
-	hub, err := assemble(t.Context(), io.Discard, io.Discard, shellIdentity{}, nil)
+	hub, err := assemble(t.Context(), io.Discard, io.Discard, shellIdentity{}, nil, newStartupPhases(io.Discard, time.Now))
 	if err != nil {
 		t.Fatalf("assemble: %v", err)
 	}

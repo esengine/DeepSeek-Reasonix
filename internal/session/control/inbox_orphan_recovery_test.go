@@ -11,7 +11,11 @@ import (
 	"reasonix/internal/base/filelock"
 	"reasonix/internal/base/testenv"
 	"reasonix/internal/contract/event"
+	"reasonix/internal/contract/provider"
+	"reasonix/internal/runtime/agent"
 	"reasonix/internal/state/sessioninbox"
+	"reasonix/internal/state/sessionstore"
+	"reasonix/internal/state/store"
 )
 
 func TestInboxSnapshotRecoversUnownedInFlightItem(t *testing.T) {
@@ -382,5 +386,105 @@ func TestInboxCompletionOwnsItemWithoutHoldingAdmissionDuringDurableAck(t *testi
 	snap := c.InboxSnapshot()
 	if snap.Paused || len(snap.Items) != 0 {
 		t.Fatalf("completed item survived durable acknowledgement: %+v", snap)
+	}
+}
+
+// Each way an item ends up uncertain names itself with a stable code, so a
+// frontend can word it without reading the English diagnostic.
+func TestInboxCompletionFailuresCarryTypedBlockCodes(t *testing.T) {
+	setup := func(t *testing.T, withContent bool) (*Controller, string, string) {
+		dir := testenv.TempDir(t)
+		session := filepath.Join(dir, "s.jsonl")
+		if err := os.WriteFile(session, []byte("{}\n"), 0o644); err != nil {
+			t.Fatal(err)
+		}
+		opts := Options{SessionPath: session, SessionDir: dir, Sink: event.Discard}
+		if withContent {
+			sess := sessionstore.NewSession("system prompt")
+			sess.Messages = append(sess.Messages, provider.Message{Role: provider.RoleUser, Content: "hello"})
+			ex := agent.New(nil, nil, sess, agent.Options{}, event.Discard)
+			opts.Runner, opts.Executor = ex, ex
+		}
+		c := New(opts)
+		rec, err := c.EnqueueInbox(InboxRequest{Intent: sessioninbox.IntentFollowup, Submit: "work"})
+		if err != nil {
+			t.Fatal(err)
+		}
+		c.inbox.mu.Lock()
+		c.inbox.trackActive(rec.ItemID)
+		c.inbox.mu.Unlock()
+		return c, session, rec.ItemID
+	}
+	held := func(t *testing.T, c *Controller, id string, want sessioninbox.BlockCode) {
+		t.Helper()
+		snap := c.InboxSnapshot()
+		if !snap.Paused || len(snap.Items) != 1 || snap.Items[0].ID != id ||
+			snap.Items[0].State != sessioninbox.StateUncertain || snap.Items[0].BlockCode != want {
+			t.Fatalf("want %s held uncertain with code %q, got %+v", id, want, snap)
+		}
+	}
+
+	t.Run("acknowledgement fails", func(t *testing.T) {
+		c, _, id := setup(t, false) // still queued, so the durable ack refuses it
+		c.onInboxTurnDone()
+		held(t, c, id, sessioninbox.BlockAckFailed)
+	})
+
+	t.Run("transcript snapshot fails", func(t *testing.T) {
+		c, session, id := setup(t, true)
+		if err := os.Remove(session); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.Mkdir(session, 0o755); err != nil {
+			t.Fatal(err)
+		}
+		c.onInboxTurnDone()
+		held(t, c, id, sessioninbox.BlockSnapshotFailed)
+	})
+}
+
+// After a skip, an item whose body can no longer be read is not requeued: the
+// queue never re-runs what it cannot re-read, so it stays held for inspection.
+func TestSkippedAskKeepsAnUnreadableItemHeld(t *testing.T) {
+	dir := testenv.TempDir(t)
+	session := filepath.Join(dir, "s.jsonl")
+	if err := os.WriteFile(session, []byte("{}\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	c := New(Options{SessionPath: session, SessionDir: dir, Sink: event.Discard})
+	rec, err := c.EnqueueInbox(InboxRequest{Intent: sessioninbox.IntentSteer, Submit: "body that will vanish"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	st, err := c.ensureInbox()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := st.SetState(rec.ItemID, sessioninbox.StateSteerAccepted, ""); err != nil {
+		t.Fatal(err)
+	}
+	blobs := filepath.Join(store.SessionInboxDir(session), "blobs")
+	entries, err := os.ReadDir(blobs)
+	if err != nil || len(entries) == 0 {
+		t.Fatalf("expected a blob to remove: %v %v", entries, err)
+	}
+	for _, e := range entries {
+		if err := os.Remove(filepath.Join(blobs, e.Name())); err != nil {
+			t.Fatal(err)
+		}
+	}
+	c.mu.Lock()
+	c.gate.running, c.gate.canceling, c.gate.cause = true, true, causeAskSkipped
+	c.mu.Unlock()
+	c.inbox.mu.Lock()
+	c.inbox.trackActive(rec.ItemID)
+	c.inbox.mu.Unlock()
+
+	c.onInboxUnappliedSteer(rec.ItemID)
+
+	snap := c.InboxSnapshot()
+	if !snap.Paused || len(snap.Items) != 1 || snap.Items[0].State != sessioninbox.StateUncertain ||
+		snap.Items[0].BlockCode != sessioninbox.BlockSteerUnapplied {
+		t.Fatalf("an unreadable item must stay uncertain and paused, got %+v", snap)
 	}
 }

@@ -514,14 +514,14 @@ func TestManifestV2DescribeRendersPromptsThemesRuntime(t *testing.T) {
 		t.Fatal(err)
 	}
 	for _, want := range []string{
-		"capabilities: 1 skills, 1 commands, 1 prompts, 0 hooks, 0 MCP servers, 1 themes",
+		"capabilities: 1 skills, 1 agents, 1 commands, 1 prompts, 0 hooks, 0 MCP servers, 1 themes",
 		"runtime: FULL TRUST",
 		"command: ${REASONIX_PLUGIN_ROOT}/bin/example --serve",
 		"intercepts: input.receive, tool.before",
 		"replaces: system_prompt",
 		"capabilities: interceptors, strategies, providers, ui",
 		"bypass permissions",
-		"prompts:\n  plan - plan",
+		"prompts:\n  /example:plan - plan",
 		"themes:\n  neon - ",
 	} {
 		if !strings.Contains(show, want) {

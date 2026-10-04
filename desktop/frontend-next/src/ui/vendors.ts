@@ -42,6 +42,11 @@ export function derivedName(host: string): string {
   return vendorLabel(host).replace(/[^a-zA-Z0-9._-]/g, "-") || "custom";
 }
 
+// Mirrors providerNameRE in internal/frontend/serve/providers.go: the name is a
+// config table name and the head of every "<provider>/<model>" ref.
+const SOURCE_NAME = /^[a-zA-Z0-9][a-zA-Z0-9._-]{0,63}$/;
+export const sourceNameUsable = (name: string): boolean => SOURCE_NAME.test(name.trim());
+
 export function nameFrom(baseUrl: string): string {
   try {
     return derivedName(new URL(baseUrl).hostname.toLowerCase());

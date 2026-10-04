@@ -69,7 +69,7 @@ func newFeedbackRig(t *testing.T, surface feedback.Surface, withService bool) *f
 
 func (r *feedbackRig) last(t *testing.T, contains string) string {
 	t.Helper()
-	deadline := time.Now().Add(5 * time.Second)
+	deadline := time.Now().Add(testenv.Budget(t))
 	for time.Now().Before(deadline) {
 		r.mu.Lock()
 		for _, s := range r.texts {

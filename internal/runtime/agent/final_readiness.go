@@ -397,7 +397,8 @@ func (a *Agent) mutationEpoch() uint64 {
 // re-reading them is how a rewritten declaration would come to speak for the
 // requirement it replaced.
 func (a *Agent) checkContract() evidence.CheckContract {
-	return evidence.CaptureCheckContract(a.task.checkpoint.BaselineChecks, a.declaredChecks())
+	return evidence.CaptureCheckContract(a.task.checkpoint.BaselineChecks, a.declaredChecks()).
+		WithCapturedTests(len(a.task.baselineCriteria)).WithWorkspaceProseOnly(a.workspaceIsProseOnly(), a.deliveryProfile).WithObserveRoot(a.observeRoot)
 }
 
 // DeclaredProjectChecks is the declaration this process loaded, for a host that
@@ -484,7 +485,8 @@ func (a *Agent) appendUnseenRenderGap(out *finalReadinessCheck, missing []string
 // ran, it declines to judge rather than guessing.
 func (a *Agent) appendVerificationGap(out *finalReadinessCheck, missing []string, writer int, blockedWithCheck, verified bool) []string {
 	if a.deliveryProfile || !a.turn.policySet || a.turn.policy.Verification < taskpolicy.VerifyTargeted ||
-		!toolPresent(a.svc.tools, "bash") || blockedWithCheck || a.checkEstablished(writer, verified) {
+		!toolPresent(a.svc.tools, "bash") || blockedWithCheck || a.checkEstablished(writer, verified) ||
+		a.task.ledger.ProseOnlyWithoutChecks(a.checkContract()) {
 		return missing
 	}
 	gap, owed := a.verificationGap(writer)

@@ -160,7 +160,7 @@ func (s *Server) initTitleProvider() {
 	if err != nil {
 		return
 	}
-	ref, _, ok := cfg.ResolveNewSessionChatModel()
+	ref, _, ok := cfg.ResolveStartupChatModel()
 	if !ok {
 		return
 	}
@@ -374,79 +374,12 @@ func (s *Server) reloadExtensions(ctx context.Context) error {
 	return nil
 }
 
-// switchEffort persists a new reasoning-effort level for the active provider and
-// rebuilds via switchModel (which serializes on bindMu).
-func (s *Server) switchEffort(ctx context.Context, level string) error {
-	cur := s.ctl()
-	if controllerHasActiveRuntimeWork(cur) {
-		return busyErr("busy.change_effort", "cannot change effort while active work or background jobs are running")
-	}
-	cfg, err := config.Load()
-	if err != nil {
-		return fmt.Errorf("load config: %w", err)
-	}
-	ref := currentModelRef(cur)
-	entry, ok := cfg.ResolveModel(ref)
-	if !ok {
-		return refusal(http.StatusConflict, "effort.no_provider",
-			fmt.Errorf("cannot resolve current provider %q", ref), nil)
-	}
-	// Refusals, not failures: an endpoint with no effort vocabulary and a level
-	// outside the one it has are both answers about this request. Reporting
-	// them as 500 told a user their machine had broken instead of what to do.
-	capability := config.EffortCapabilityForEntry(entry)
-	if !capability.Supported {
-		return refusal(http.StatusBadRequest, "effort.not_configurable",
-			fmt.Errorf("%s declares no reasoning-effort levels; give it one with reasoning_protocol or supported_efforts in the provider's config block", entry.Name),
-			map[string]any{"provider": entry.Name})
-	}
-	effort, err := config.NormalizeEffort(entry, level)
-	if err != nil {
-		return refusal(http.StatusBadRequest, "effort.unsupported_level", err,
-			map[string]any{"provider": entry.Name, "level": level, "levels": strings.Join(capability.Levels, " | ")})
-	}
-	editPath := config.UserConfigPath()
-	if editPath == "" {
-		return fmt.Errorf("no config file found")
-	}
-	// Lock only the load-modify-save cycle; switchModel below rebuilds the
-	// controller and must not hold the config edit lock.
-	if err := func() error {
-		unlock := config.LockUserConfigEdits()
-		defer unlock()
-		edit := config.LoadForEdit(editPath)
-		if err := applyEffortEdit(edit, entry, effort); err != nil {
-			return err
-		}
-		if err := edit.SaveTo(editPath); err != nil {
-			return fmt.Errorf("save config: %w", err)
-		}
-		return nil
-	}(); err != nil {
-		return err
-	}
-	return s.switchModel(ctx, entry.Name+"/"+entry.Model)
-}
-
 func controllerHasActiveRuntimeWork(ctrl control.SessionAPI) bool {
 	if ctrl == nil {
 		return false
 	}
 	status := ctrl.RuntimeStatus()
 	return status.Running || status.PendingPrompt || status.BackgroundJobs > 0
-}
-
-// applyEffortEdit writes effort onto entry within edit, mirroring CLI/desktop
-// SetEffort: upsert the provider when the user config has no block for it yet.
-// It writes nothing else — which request fields an endpoint accepts is the
-// provider contract's call, not a side effect of selecting a level.
-func applyEffortEdit(edit *config.Config, entry *config.ProviderEntry, effort string) error {
-	if _, ok := edit.Provider(entry.Name); !ok {
-		if err := edit.UpsertProvider(*entry); err != nil {
-			return err
-		}
-	}
-	return edit.SetProviderEffort(entry.Name, effort)
 }
 
 // Handler returns the HTTP routes: GET / (a minimal browser client), GET /events
@@ -548,30 +481,8 @@ func (s *Server) submit(w http.ResponseWriter, r *http.Request) {
 	if refuseNetworkShell(w, r, trimmed) {
 		return
 	}
-	// Intercept /model <ref> for runtime model switching (the controller's
-	// Submit path only lists models — switching is frontend-specific).
-	if strings.HasPrefix(trimmed, "/model ") {
-		ref := strings.TrimSpace(strings.TrimPrefix(trimmed, "/model"))
-		if ref != "" {
-			if err := s.switchModel(r.Context(), ref); err != nil {
-				writeErr(w, http.StatusInternalServerError, err)
-				return
-			}
-			w.WriteHeader(http.StatusNoContent)
-			return
-		}
-	}
-	// Intercept /effort <level> for reasoning effort switching.
-	if strings.HasPrefix(trimmed, "/effort ") {
-		level := strings.TrimSpace(strings.TrimPrefix(trimmed, "/effort"))
-		if level != "" {
-			if err := s.switchEffort(r.Context(), level); err != nil {
-				writeErr(w, http.StatusInternalServerError, err)
-				return
-			}
-			w.WriteHeader(http.StatusNoContent)
-			return
-		}
+	if s.interceptSlash(w, r, trimmed) {
+		return
 	}
 	// Serialize turn admission with controller-generation rebuilds. Admission
 	// marks an ordinary turn running synchronously, so a reload that follows

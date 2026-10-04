@@ -39,7 +39,7 @@ func (s *Server) model(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	ref := strings.TrimSpace(body.Ref)
-	if err := s.switchModel(r.Context(), ref); err != nil {
+	if err := s.switchModelRequested(r.Context(), ref); err != nil {
 		writeErr(w, http.StatusInternalServerError, err)
 		return
 	}

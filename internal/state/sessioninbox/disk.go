@@ -266,6 +266,7 @@ func (s *Store) salvageOrphanBlobsLocked() []InboxItemMeta {
 			Checksum:    sha256Hex(data),
 			RunID:       s.runID,
 			BlockReason: "salvaged after corrupt manifest",
+			BlockCode:   BlockManifestSalvaged,
 		})
 	}
 	return out

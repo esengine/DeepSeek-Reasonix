@@ -20,6 +20,7 @@
 - [思考语言](./REASONING_LANGUAGE.md)
 - [任务合约与暂停策略](./TASK_CONTRACT.md)
 - [自定义 OpenAI-compatible provider](#自定义-openai-compatible-provider)
+- [Hooks](#hooks)
 - [快捷键](#快捷键)
 - [权限与沙盒](#权限与沙盒)
 - [能力诊断](#能力诊断)
@@ -507,6 +508,109 @@ Thinking 覆盖选项：
 | Enabled（开启） | 对兼容 provider 发送 `thinking.type = "enabled"`。 |
 | Disabled（关闭） | 对兼容 provider 发送 `thinking.type = "disabled"`。DeepSeek 风格 provider 下还会避免继续发送推理深度提示。 |
 | Adaptive（自适应） | 仅在服务文档明确支持 adaptive thinking 时使用，例如 MiniMax-M3 风格端点；语义是发送或保留 `thinking.type = "adaptive"`。 |
+
+## Hooks
+
+Reasonix 有 hooks：在智能体循环的固定节点运行的 shell 命令，可以观察、注入上下文，
+并在两个事件上否决即将发生的动作。它与权限是两回事：`[permissions]` 规则决定一次
+工具调用是放行还是询问，hook 则运行你自己的代码。
+
+| 事件 | 触发时机 | 能否阻断 |
+| --- | --- | --- |
+| `PreToolUse` | 工具调用前，经 `match` 匹配；payload 含 `toolName`、`toolArgs` | 能 |
+| `PostToolUse` | 工具调用后（成功或失败） | 否 |
+| `PostToolUseFailure` | 工具调用返回错误后 | 否 |
+| `PermissionRequest` | 显示审批提示前 | 否 |
+| `UserPromptSubmit` | 用户输入开启一轮之前 | 能 |
+| `Stop` / `StopFailure` | 一轮结束 / 失败时 | 否 |
+| `SessionStart` / `SessionEnd` | 会话激活 / 被关闭或被 `/new` 轮换时 | 否 |
+| `SubagentStart` / `SubagentStop` | 包住前台 `task` 调用 | 否 |
+| `Notification` | 智能体需要用户关注时 | 否 |
+| `PreCompact` | 压缩前；stdout 成为额外的摘要指引 | 否 |
+| `PostLLMCall` | 每个模型轮次后；exit 0 且 stdout 非空时替换已存储的推理文本 | 否 |
+
+Hooks 配置在 `<Reasonix home>/settings.json`（全局）或 `<root>/.reasonix/settings.json`
+（项目）。每个事件对应一个 hook 列表：
+
+```json
+{
+  "hooks": {
+    "PreToolUse": [
+      {
+        "match": "bash",
+        "command": "sh ~/.reasonix/hooks/no-git-push.sh",
+        "description": "block git push",
+        "timeout": 3000
+      }
+    ],
+    "SessionStart": [
+      { "command": "echo 'Team rule: run make lint before every commit.'" }
+    ]
+  }
+}
+```
+
+字段：
+
+- `command`（必填）：由平台 shell 执行。
+- `match`：仅工具事件；对工具名的锚定正则，所以 `file` 不会匹配 `read_file`。空或 `*` 表示所有工具。
+- `description`：`/hooks` 与阻断通知里显示的标签。
+- `timeout`：毫秒；`PreToolUse`、`PermissionRequest`、`UserPromptSubmit` 默认 5000，其余 30000。
+- `cwd`、`env`：工作目录与额外环境变量。
+
+文件格式错误时不加载任何 hook，也不会让 Reasonix 启动失败。
+
+**约定。**事件 payload 以一行 JSON 从 stdin 传入（`event`、`sessionId`、`cwd`，以及按
+事件而定的 `toolName`、`toolArgs`、`prompt`、`toolResult`、`error` 等）。退出码就是裁决：
+
+- `0` 放行。`SessionStart` 上，stdout（纯文本，或带 `hookSpecificOutput.additionalContext`
+  的 JSON）会一次性注入下一轮真实用户输入。
+- `2` 阻断，但仅限 `PreToolUse` 与 `UserPromptSubmit`。被阻断的工具调用不会执行，模型
+  收到 `blocked: <hook> hook (<scope>) stopped this call — <stderr，为空则 stdout> · command: ... · source: ...`，所以原因要写给模型看。
+- 其他退出码，或非阻断事件上的 exit 2，只向用户给出警告。
+- 超时在 `PreToolUse` 与 `UserPromptSubmit` 上算阻断，其他事件只警告。无法启动的 hook
+  不阻断，脚本崩溃（exit 1，或文件缺失的 127）同样放行：只有明确的 exit 2 才否决。
+
+**示例：禁止 bash 里的 `git push`。**`bash` 的 `toolArgs` 就是工具的参数对象，命令在
+`toolArgs.command`。保存为 `~/.reasonix/hooks/no-git-push.sh`（需要 `jq`）：
+
+```sh
+#!/bin/sh
+cmd=$(jq -r '.toolArgs.command // empty')
+case "$cmd" in
+  *"git push"*)
+    echo "git push is disabled in this setup; ask the user to push." >&2
+    exit 2 ;;
+esac
+exit 0
+```
+
+不写 hook 时，更简单的办法是权限规则：无需脚本，任何模式下都生效：
+
+```toml
+[permissions]
+deny = ["Bash(git push*)"]
+```
+
+命令模式足够时优先用规则；决定需要代码（检查参数、查文件、记日志、响应提示）时再用 hook。
+
+**作用域。**
+
+- 全局 hooks（`<Reasonix home>/settings.json`）与已安装插件包的 hooks 会生效，
+  但只读的 observe 模式完全不加载任何 hook。
+- 项目 hooks（`<root>/.reasonix/settings.json`）只有在用户按当前内容批准后才运行
+  （`reasonix trust`）；批准前被扣下并有通知说明。改动该文件或其中命令引用的工作区脚本
+  会使批准失效。
+- `reasonix review` 从不运行项目 hooks（无论是否已批准）：被审查的 checkout 属于不可信
+  输入，只有全局与插件 hooks 生效。
+- 只有工具 hooks（`PreToolUse`、`PostToolUse`、`PermissionRequest`）、`PostLLMCall` 与
+  `PreCompact` 会在会话运行的每个 Agent（含子 Agent）中触发，见配置一节的 `session_id` 表。
+
+**限制。**
+
+- hook 无法强制模型的措辞：阻断对模型表现为一次被拒绝的调用，接下来说什么、试什么由模型决定。
+- 不存在“仅本次会话”的作用域：hooks 来自设置文件，对每个加载它们的会话生效。
+- 原生 hook 不能替用户回答审批提示；只有 `PreToolUse` 的阻断会拒绝一次调用。
 
 ## 快捷键
 

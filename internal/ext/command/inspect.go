@@ -153,5 +153,5 @@ func guessName(root, path string) string {
 	if err != nil {
 		rel = filepath.Base(path)
 	}
-	return strings.ReplaceAll(strings.TrimSuffix(filepath.ToSlash(rel), ".md"), "/", ":")
+	return strings.ReplaceAll(strings.TrimSuffix(filepath.ToSlash(rel), filepath.Ext(rel)), "/", ":")
 }

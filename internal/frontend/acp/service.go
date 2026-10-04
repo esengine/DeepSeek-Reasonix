@@ -78,15 +78,15 @@ type SessionConfigStateParams struct {
 
 // SessionConfigState is the complete ACP-visible config state for a session.
 type SessionConfigState struct {
-	Model          string
-	EffortOverride *string
-	RuntimeProfile string
-	Models         *SessionModelState
-	ConfigOptions  []SessionConfigOption
+	Model                               string
+	EffortOverride                      *string
+	RuntimeProfile                      string
+	ResolvedEffort, ProviderFingerprint string
+	Models                              *SessionModelState
+	ConfigOptions                       []SessionConfigOption
 }
 
-// SessionConfigStateProvider lets a Factory expose model, effort, and work-mode
-// selectors without making the ACP transport depend on a concrete config backend.
+// SessionConfigStateProvider exposes model, effort, and work-mode selectors.
 type SessionConfigStateProvider interface {
 	SessionConfigState(ctx context.Context, p SessionConfigStateParams) (SessionConfigState, error)
 }

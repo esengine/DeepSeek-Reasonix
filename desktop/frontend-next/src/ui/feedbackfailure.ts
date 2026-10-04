@@ -71,7 +71,7 @@ export function feedbackFailure(e: unknown): FeedbackFailure {
     case FEEDBACK_CODE.offline:
       return { code, retry: "same", message: t("没能连上反馈服务。已填的内容都还在，网络恢复后可以直接重试，不会重复提交。") };
     case FEEDBACK_CODE.unavailable:
-      return { code, retry: "later", message: t("反馈服务暂时出了问题，不是你的操作有误。稍后再试即可。") };
+      return { code, retry: "later", message: t("反馈服务暂时出了问题。已填的内容都还在，请稍等片刻再试，也可以直接到 GitHub 提交问题。") };
     case FEEDBACK_CODE.internal:
       return { code, retry: "later", message: t("本机保存反馈记录时出错，请重试。") };
     default:
@@ -113,7 +113,7 @@ export function replyFailure(e: unknown): FeedbackFailure {
     case FEEDBACK_CODE.internal:
       return { code, retry: "later", message: t("本机保存反馈记录时出错，请重试。") };
     case FEEDBACK_CODE.unavailable:
-      return { code, retry: "later", message: t("反馈服务暂时出了问题，不是你的操作有误。稍后再试即可。") };
+      return { code, retry: "later", message: t("反馈服务暂时出了问题。你写的回复还在，请稍等片刻；重发前先刷新列表确认是否送达，也可以直接到 GitHub 提交问题。") };
     default:
       return { code, retry: "later", message: t("回复没有发出去，请稍后重试。") };
   }

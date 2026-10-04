@@ -11,6 +11,7 @@
 // level it was written under.
 //
 // Objects are immutable and named by the SHA-256 of their bytes. A record is an
-// object too; the head is the only file ever replaced, and it is replaced by
+// object too; objects are published by a non-replacing hard link, so competing
+// writers verify the winner. The head is the only file ever replaced, by
 // rename so a crash leaves either the old head or the new one.
 package trustedstate

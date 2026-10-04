@@ -125,6 +125,9 @@ func (m *model) settledRow(row Item, shown int) settledPrint {
 	if m.scr != nil && (row.Kind == ItemTool || row.Kind == ItemSay && row.Reasoning != "" && shown == 0) {
 		row.Fold = foldShut
 	}
+	if m.verbose && row.Kind == ItemSay && row.Reasoning != "" && shown == 0 {
+		row.Fold = m.verboseFold()
+	}
 	return settledPrint{render: func(w int, hideRail bool) string { return renderItem(&row, w, shown, hideRail) }, row: &row}
 }
 
@@ -194,7 +197,7 @@ func (b *block) foldable() bool {
 
 // thinks reports a block that carries an answer's thinking behind its marker.
 func (b *block) thinks() bool {
-	return b.row != nil && b.row.Kind == ItemSay && b.row.Fold != foldFixed
+	return b.row != nil && b.row.Kind == ItemSay && (b.row.Fold == foldShut || b.row.Fold == foldOpen)
 }
 
 func (b *block) toggle() {
@@ -345,9 +348,21 @@ func (m *model) fullView(bottom []string, composerAt int) tea.View {
 	rows := m.content(m.liveLines())
 	total := len(rows)
 	if s.follow {
-		s.yoff = total - h
+		// Follow the newest rows, but never scroll back up when the live rows
+		// shrink (a settled diff collapsing to fewer lines): hold the position,
+		// leave the freed rows blank, and let later rows fill the gap.
+		if next := total - h; next > s.yoff {
+			s.yoff = next
+		}
+		s.yoff = max(s.yoff, 0)
+		// A shrink larger than the viewport holds the position past the
+		// content and blanks the whole transcript, so re-anchor to its tail.
+		if s.yoff > total-1 {
+			s.yoff = max(total-h, 0)
+		}
+	} else {
+		s.yoff = max(min(s.yoff, total-h), 0)
 	}
-	s.yoff = max(min(s.yoff, total-h), 0)
 	cw := m.contentWidth()
 	blank := strings.Repeat(" ", cw)
 	showBar := !m.scrollbarHidden()
@@ -450,7 +465,7 @@ func (m *model) scrollKey(k string) bool {
 	case "ctrl+home":
 		m.scr.yoff, m.scr.follow = 0, false
 	case "ctrl+end":
-		m.scr.follow = true
+		m.scr.yoff, m.scr.follow = 0, true
 	case "ctrl+b":
 		m.toggleLatestShell()
 	case "ctrl+o":

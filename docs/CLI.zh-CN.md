@@ -108,7 +108,10 @@ reasonix config compact-ratio 75           # 设置用户全局默认值
 reasonix config compact-ratio --local 75   # 写入 ./reasonix.toml 项目覆盖
 ```
 
-可设置范围为 65–85%，内置默认值为 85%。数值越低越早压缩，可能降低 prompt prefix
+可设置范围为大于 0% 且小于 100%（不含端点），内置默认值为 85%。边界由
+`internal/contract/config` 的 `CompactRatioMin` 和 `CompactRatioMax` 定义；TOML 保存对应的小数比例。
+
+数值越低越早压缩，可能降低 prompt prefix
 缓存复用率；数值越高则会在压缩前保留更多上下文。项目 `reasonix.toml` 的优先级高于
 用户全局配置。修改会应用于新启动的 CLI 会话；已经运行的会话继续使用启动时加载的阈值。
 
@@ -119,7 +122,11 @@ reasonix config compact-ratio --local 75   # 写入 ./reasonix.toml 项目覆盖
 
 它**默认关闭**：模型经常写出没有文件头的 diff 围栏，普通代码栏才是无损的默认。
 
-没有 `--- `/`+++ ` 文件头的分段会回退到普通代码栏，不会丢行。与
+流式输出的围栏会逐 hunk 着色：每个 `@@` 头会将其之前的行确定下来并着色渲染，尚未完成的
+hunk 仍留在普通代码栏上。
+
+没有 `--- `/`+++ ` 文件头的分段会把其中的 diff 内容留在普通代码栏上，不会丢行；
+只含前导（例如 `git show` 的 commit 头）而没有 diff 内容的分段会被省略。与
 `[cli].diff_formatter` 一样，它仅属于用户/全局配置，项目内的 `reasonix.toml`
 无法设置。
 
@@ -133,8 +140,8 @@ diff 卡片，以及整段输出就是 diff 的 shell 结果（见下方
 整个 diff 写入该命令的 stdin，其 stdout 在去掉非 SGR 控制序列后回写，因此格式化器的
 颜色得以保留，而光标或剪贴板转义无法生效。
 
-全屏 TUI 中它在渲染路径之外运行：先画内置行，待其输出就绪后再替换，因此慢格式化器不会
-卡住界面。
+全屏 TUI 中它在渲染路径之外运行：格式化输出尚未就绪的那部分先画在普通代码栏上，就绪后再
+替换；更早的 hunk 已经格式化好的行保持彩色，因此慢格式化器不会卡住界面。
 
 命令失败、超时、输出为空或 diff 超过 1 MiB 时保留内置渲染器。与
 `[cli].update_channel` 一样，它仅属于用户/全局配置，项目内的 `reasonix.toml`
@@ -430,7 +437,7 @@ reasonix --allowed-tools "Bash(go test ./...)" --allowed-tools read_file
 - 信任跟着文件夹路径走，不看内容：以后在同一路径检出的任何东西也被信任。
 - 无头运行从不询问；`ask` 下写入被拒，并列在 `permission_denials` 中。
 
-终端界面里 Shift+Tab 按 只读 → 询问 → 自动 → YOLO → 计划 循环（YOLO 确认过后才进入循环）；
+终端界面里 Shift+Tab 按 只读 → 询问 → 自动 → YOLO → 计划 循环；
 Ctrl+Y 切换 YOLO，再按回到进入前的档位。
 
 无人值守执行需要放行普通 writer fallback 时，使用 `reasonix run --auto ...`

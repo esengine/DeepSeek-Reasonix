@@ -1,0 +1,9 @@
+{
+  "apiVersion": "reasonix.io/plugin/v2",
+  "name": "repo-map-kit",
+  "version": "1.0.0",
+  "description": "A read-only repository orientation profile with a local exercise",
+  "contributes": {
+    "agents": ["agents"]
+  }
+}

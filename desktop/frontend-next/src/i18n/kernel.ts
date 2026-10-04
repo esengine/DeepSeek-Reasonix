@@ -21,6 +21,16 @@ export const ACCOUNT_SIGNIN_DISABLED = "account.signin_disabled";
 export const SAVED_NOT_APPLIED: readonly string[] = ["provider.saved_while_running", "provider.saved_model_unlisted", "runtime.rebuild_failed"];
 
 const SAID: Record<string, string> = {
+  "shell.destructive_target": "递归删除目标受保护或超出授权范围；请使用工作区或授权目录内的字面路径",
+  "shell.analysis_unknown": "无法确定递归删除范围；请使用字面命令名、路径和解释器内容",
+  "shell.delete_sequence": "请拆分命令；递归删除前只能使用字面路径切换目录，不能依赖变量赋值",
+  "shell.delete_nonliteral": "请使用授权目录内的字面删除路径，不要使用变量、展开、通配符或未知管道输入",
+  "shell.delete_option": "删除选项无法识别；请使用已知选项并提供公共参数的值",
+  "shell.syntax_error": "命令语法有误；请修正后重试",
+  "shell.parser_unavailable": "主机命令解析器不可用；请在主机恢复后重试",
+  "shell.parser_timeout": "主机命令解析超时或被取消；请重试",
+  "shell.command_line_too_long": "命令超过主机长度限制；请拆分命令或从文件读取长文本",
+  "workspace.write_conflict": "另一个会话持有所需的写入范围。本次操作未执行；请结束当前轮次，待该范围释放后再重试",
   // ── 忙：不是出错，是「现在不行」 ─────────────────────────────────
   "plan.decision_stale": "该决定已不符合当前状态：计划在你回答前已发生变更",
   "busy.switch_model": "任务正在运行，请先停止再切换模型",
@@ -42,7 +52,7 @@ const SAID: Record<string, string> = {
 
   // ── 来源：填错了什么 ─────────────────────────────────────────────
   "provider.name_required": "请为该来源填写名称",
-  "provider.name_invalid": "名称只能包含字母、数字、点、连字符和下划线",
+  "provider.name_invalid": "名称只能用字母、数字、点、连字符和下划线，以字母或数字开头，最长 64 个字符",
   "provider.name_taken": "已经有名为「{name}」的连接了，换一个名称",
   "provider.config_unreadable": "读不到配置文件，没法安全地选择密钥存放位置，请检查配置后重试",
   "provider.endpoint_required": "请填写接口地址",
@@ -137,6 +147,8 @@ const SAID: Record<string, string> = {
   "editor.not_installed": "这台机器上没找到 VS Code、Cursor 这类编辑器。装一个，或在配置里用 [desktop] editor 指定路径。",
   "editor.launch_failed": "编辑器没能启动：{error}",
   "editor.no_window": "这个内核没有窗口，打不开本机的编辑器。",
+  "workspace.not_listed": "这个文件夹不在当前窗口的项目列表里。",
+  "workspace.folder_missing": "项目文件夹已不在磁盘上。",
   "workspace.locate_no_window": "这个内核不在本机，没法在系统文件管理器中显示它的文件。",
   "device.host_only": "这项操作只能在电脑上的窗口里做，已配对的手机做不了。",
   "device.host_rejected": "这个地址不是本机共享的地址，请重新扫码。",
@@ -149,6 +161,9 @@ const SAID: Record<string, string> = {
   "share.cloud_unavailable": "互联网连接暂时不可用，请确认电脑端 Studio 已登录并保持在线。",
   "share.address_rejected": "地址 {ip} 不是本机的局域网地址。",
   "share.listen_failed": "无法在 {ip} 上开启监听：{error}",
+  "share.port_in_use": "端口 {port} 已被其他程序占用，请换一个端口，或清空后让系统自动选择。",
+  "share.port_out_of_range": "端口需要在 {min}–{max} 之间，或清空后让系统自动选择。",
+  "share.port_save_failed": "无法保存端口设置：{error}",
   "share.device_unknown": "没有这台已配对的设备，可能已被移除。",
   "picker.unsupported": "这个系统没有可用的文件夹选择框，请直接填写路径。",
   "picker.failed": "打不开文件夹选择框：{error}",
@@ -158,6 +173,16 @@ const SAID: Record<string, string> = {
   "provider.key_too_large": "该 key 长度异常，可能粘贴了错误内容",
   "provider.setup_done": "已连接，无需重复配置",
   "provider.setup_failed": "远端配置未完成，请稍后重试",
+  "provider.unknown": "没有这个模型连接",
+  "provider.no_key_slot": "该连接没有可存放密钥的变量，请先在配置中为它指定 api_key_env",
+  "provider.key_invalid": "该 key 超长或含换行，请重新复制",
+  "provider.credentials_changed": "已保存的密钥在此期间被改动，请重新打开配置再试",
+  "provider.activation_failed": "密钥已保存，但连接尚未生效，请重试",
+  "provider.test_auth": "服务商拒绝了该 key，请检查是否复制完整",
+  "provider.test_timeout": "服务商没有及时应答，请稍后重试",
+  "provider.test_unreachable": "连不上服务商，请检查网络或服务地址",
+  "provider.test_upstream": "服务商返回了错误，请稍后重试",
+  "provider.test_failed": "连接测试未通过",
 
   "memory.unavailable": "该会话未启用记忆",
 

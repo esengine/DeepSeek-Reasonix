@@ -8,7 +8,7 @@ import { Group } from "./Group";
 import { PlanConfirm } from "./MarketConfirm";
 import { MyPackages, PublishForm } from "./MarketPublish";
 import { MarketVote, approvalLabel } from "./MarketVote";
-import { arrowTabs } from "./tablist";
+import { arrowRadios, arrowTabs } from "./tablist";
 
 const KINDS: [MarketKind | "", string][] = [["", "全部"], ["skill", "技能"], ["plugin", "插件"], ["mcp", "MCP 服务"], ["theme", "主题"]];
 type Sort = "recommended" | "trending" | "installs" | "new";
@@ -121,16 +121,16 @@ export function Market({ port, onInstalled, onViewInstalled, onSignIn }: Props) 
           aria-label={t("搜索社区市场")}
           onChange={(e) => setQ(e.target.value)}
         />
-        <div className="seg" data-text role="radiogroup" aria-label={t("类型")}>
+        <div className="seg" data-text role="radiogroup" aria-label={t("类型")} data-action-keydown="market.kind" onKeyDown={arrowRadios}>
           {KINDS.map(([id, name]) => (
-            <button key={id || "all"} role="radio" aria-checked={kind === id} data-action="market.kind" data-value={id || "all"} onClick={() => setKind(id)}>
+            <button key={id || "all"} role="radio" aria-checked={kind === id} tabIndex={kind === id ? 0 : -1} data-action="market.kind" data-value={id || "all"} onClick={() => setKind(id)}>
               {t(name)}
             </button>
           ))}
         </div>
-        <div className="seg" data-text role="radiogroup" aria-label={t("排序")}>
+        <div className="seg" data-text role="radiogroup" aria-label={t("排序")} data-action-keydown="market.sort" onKeyDown={arrowRadios}>
           {SORTS.map(([id, name]) => (
-            <button key={id} role="radio" aria-checked={sort === id} data-action="market.sort" data-value={id} onClick={() => setSort(id)}>
+            <button key={id} role="radio" aria-checked={sort === id} tabIndex={sort === id ? 0 : -1} data-action="market.sort" data-value={id} onClick={() => setSort(id)}>
               {t(name)}
             </button>
           ))}
@@ -192,7 +192,7 @@ export function Market({ port, onInstalled, onViewInstalled, onSignIn }: Props) 
 function Entry({ port, slug, onBack, onInstalled, onViewInstalled, onSignIn }: { port: AgentPort; slug: string; onBack: () => void; onInstalled: () => void; onViewInstalled?: (kind: string, name: string) => void; onSignIn?: () => void }) {
   const [d, setD] = useState<MarketDetail | null>(null);
   const [plan, setPlan] = useState<MarketPlan | null>(null);
-  const [done, setDone] = useState<MarketPlan | null>(null);
+  const [result, setResult] = useState<{ plan: MarketPlan; stage: "done" | "retry" } | null>(null);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
   const [attempt, setAttempt] = useState(0);
@@ -229,7 +229,7 @@ function Entry({ port, slug, onBack, onInstalled, onViewInstalled, onSignIn }: {
     try {
       const pin = plan.unreviewed ? { trust: true, digest: plan.contentDigest } : {};
       const out = await port.installMarket({ slug, version: plan.version, planId: plan.planId, replace: update, ...pin });
-      setDone(out);
+      setResult({ plan: out, stage: "done" });
       if (out.applied) onInstalled();
     } catch (e) {
       setError(reason(e));
@@ -244,16 +244,18 @@ function Entry({ port, slug, onBack, onInstalled, onViewInstalled, onSignIn }: {
     </button>
   );
 
+  const done = result?.stage === "done" ? result.plan : null;
   if (done) {
     const installed = done.applied ? done.actions?.filter((action) => action.status === "done" && action.name) ?? [] : [];
     const location = d?.package.kind === "plugin" || d?.package.kind === "theme"
       ? installed.find((action) => action.kind === "plugin") : installed[0];
     return (
-      <div className="mkt addpkg" data-stage="done">
+      <div className="mkt addpkg" data-stage="done" ref={panel} role="region" aria-label={slug} tabIndex={-1}>
         <Outcome plan={done} />
         {installed.length > 0 && <ul className="mkt-installed">{installed.map((action, i) => <li key={`${action.kind}:${action.name}:${i}`}>{action.name}</li>)}</ul>}
         <div className="acts">
           {back}
+          {!done.ok && <button className="act" data-action="market.detail-retry" onClick={() => { panel.current?.focus(); setResult(done.applied ? { plan: done, stage: "retry" } : null); setPlan(null); setD(null); setAttempt((n) => n + 1); }}>{t("重试")}</button>}
           {location && onViewInstalled && (
             <button className="act" data-action="market.view-installed" onClick={() => onViewInstalled(location.kind, location.name!)}>{t("查看已安装能力")}</button>
           )}
@@ -287,7 +289,7 @@ function Entry({ port, slug, onBack, onInstalled, onViewInstalled, onSignIn }: {
 
   const p = d.package;
   const v = d.approved;
-  const current = !!d.installed && !update;
+  const current = !!d.installed && !update && result?.stage !== "retry";
   // A copied skill is never overwritten in place, so an update has to start
   // from its removal rather than fail at the last step.
   const stuck = update && p.kind === "skill";
@@ -329,6 +331,7 @@ function Entry({ port, slug, onBack, onInstalled, onViewInstalled, onSignIn }: {
         )}
       </dl>
       <MarketVote port={port} pkg={p} onSignIn={onSignIn} />
+      {result?.stage === "retry" && <Outcome plan={result.plan} />}
       <div className="acts">
         <span className="note">
           {current
@@ -368,14 +371,16 @@ export function MarketGroup({ port, onInstalled, onViewInstalled, account, onSig
   const [applying, setApplying] = useState(false);
   const applyingChanged = useCallback((busy: boolean) => { setApplying(busy); onApplying?.(busy); }, [onApplying]);
   const handle = account?.signedIn ? account.user?.handle : undefined;
+  const [draft, setDraft] = useState<{ port: AgentPort; handle: string; pkg: MarketPackage } | null>(null);
+  if (draft && (draft.port !== port || draft.handle !== handle)) setDraft(null);
   const at = handle ? view : "browse";
   return (
     <Group id="market" title={t("社区市场")}
       hint={t("社区发布、经过审核的技能、插件、MCP 服务与主题。固定了审核内容的版本按审核时的内容安装，未固定的需要你信任发布者；安装前都会列出将写入的全部内容，与粘贴地址安装走同一套确认。")}>
       {handle ? (
-        <div className="seg mkt-views" data-text role="radiogroup" aria-label={t("社区市场")}>
+        <div className="seg mkt-views" data-text role="radiogroup" aria-label={t("社区市场")} data-action-keydown="market.view" onKeyDown={arrowRadios}>
           {VIEWS.map(([id, name]) => (
-            <button key={id} role="radio" aria-checked={at === id} disabled={applying} data-action="market.view" data-value={id} onClick={() => setView(id)}>
+            <button key={id} role="radio" aria-checked={at === id} tabIndex={at === id ? 0 : -1} disabled={applying} data-action="market.view" data-value={id} onClick={() => { if (id === "publish" && at !== "publish") setDraft(null); setView(id); }}>
               {t(name)}
             </button>
           ))}
@@ -391,10 +396,13 @@ export function MarketGroup({ port, onInstalled, onViewInstalled, account, onSig
         )
       )}
       {at === "browse" && <Market port={port} onInstalled={onInstalled} onViewInstalled={onViewInstalled} onSignIn={onSignIn} />}
-      {at === "mine" && <MyPackages port={port} onInstalled={() => {
+      {at === "mine" && <MyPackages key={handle} port={port} onInstalled={() => {
         if (connection.current === owner) onInstalled();
-      }} onViewInstalled={onViewInstalled} onApplying={applyingChanged} />}
-      {at === "publish" && handle && <PublishForm port={port} handle={handle} onMine={() => setView("mine")} />}
+      }} onViewInstalled={onViewInstalled} onApplying={applyingChanged} onPublish={(pkg) => {
+        if (!handle) return;
+        setDraft({ port, handle, pkg }); setView("publish");
+      }} />}
+      {at === "publish" && handle && <PublishForm port={port} handle={handle} initial={draft?.pkg} onMine={() => { setDraft(null); setView("mine"); }} />}
     </Group>
   );
 }

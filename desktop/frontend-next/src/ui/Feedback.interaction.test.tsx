@@ -225,7 +225,7 @@ const CODES: [string, number, Record<string, string | number> | undefined, RegEx
   [FEEDBACK_CODE.duplicate, 409, undefined, /刚刚已经提交过/],
   [FEEDBACK_CODE.badToken, 409, undefined, /没有认出这台电脑/],
   [FEEDBACK_CODE.offline, 502, undefined, /没能连上反馈服务/],
-  [FEEDBACK_CODE.unavailable, 502, undefined, /暂时出了问题/],
+  [FEEDBACK_CODE.unavailable, 502, undefined, /已填的内容都还在/],
   [FEEDBACK_CODE.internal, 500, undefined, /本机保存反馈记录时出错/],
   [FEEDBACK_CODE.imageMetadata, 400, undefined, /隐藏信息/],
   [FEEDBACK_CODE.badBody, 400, undefined, /没能被解析/],
@@ -311,6 +311,17 @@ describe("refusals", () => {
     await userEvent.click(send());
     expect((await screen.findByRole("alert")).getAttribute("data-code")).toBe(FEEDBACK_CODE.offline);
     expect(screen.getByRole("button", { name: "重试发送" })).toBeTruthy();
+  });
+
+  it("keeps an unavailable report and offers the existing GitHub destination", async () => {
+    const { port } = setup();
+    sessionStorage.setItem("rx-mock-feedback-fault", FEEDBACK_CODE.unavailable);
+    await fill("Neutral report fixture", "tester");
+    await userEvent.click(send());
+    expect((await screen.findByRole("alert")).textContent).toContain("稍等片刻再试，也可以直接到 GitHub 提交问题");
+    expect(body().value).toBe("Neutral report fixture");
+    await userEvent.click(screen.getByRole("button", { name: "去 GitHub" }));
+    expect(port.openExternal).toHaveBeenCalledWith("https://github.com/esengine/DeepSeek-Reasonix/issues/new/choose");
   });
 
   it("points a duplicate at My feedback and a disabled channel at GitHub", async () => {

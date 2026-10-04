@@ -512,7 +512,7 @@ func (c *Controller) managementNotice(trimmed string) bool {
 		}
 		c.notice(c.mcpListText())
 	default:
-		return false
+		return c.settingsNotice(fields, trimmed)
 	}
 	return true
 }

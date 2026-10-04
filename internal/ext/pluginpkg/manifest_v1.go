@@ -505,6 +505,11 @@ func validateV1Paths(root string, m *Manifest) ([]string, error) {
 		if !pathWithinRoot(resolvedRoot, resolved) {
 			return fmt.Errorf("%s path %q escapes the plugin root through a symlink", kind, rel)
 		}
+		if info, err := os.Stat(abs); err != nil {
+			warnings = append(warnings, fmt.Sprintf("%s path %q is not readable: %v", kind, rel, err))
+		} else if !info.IsDir() {
+			warnings = append(warnings, fmt.Sprintf("%s path %q is not a directory; declare the containing directory instead", kind, rel))
+		}
 		return nil
 	}
 	for _, rel := range m.Skills {
@@ -601,7 +606,7 @@ func globThemePattern(root, pattern string) ([]string, error) {
 		}
 	}
 	matches := []string{filepath.Clean(root)}
-	for _, seg := range segs {
+	for i, seg := range segs {
 		var next []string
 		if !hasGlobMeta(seg) {
 			for _, base := range matches {
@@ -615,7 +620,13 @@ func globThemePattern(root, pattern string) ([]string, error) {
 				}
 				for _, entry := range entries {
 					if ok, _ := path.Match(seg, entry.Name()); ok {
-						next = append(next, filepath.Join(base, entry.Name()))
+						candidate := filepath.Join(base, entry.Name())
+						if i < len(segs)-1 {
+							if info, err := os.Stat(candidate); err == nil && !info.IsDir() {
+								continue
+							}
+						}
+						next = append(next, candidate)
 					}
 				}
 			}

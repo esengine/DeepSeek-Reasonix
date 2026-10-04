@@ -5,6 +5,7 @@ import (
 	"strings"
 
 	"reasonix/internal/base/i18n"
+	"reasonix/internal/base/textutil"
 	"reasonix/internal/contract/event"
 	"reasonix/internal/contract/eventwire"
 	"reasonix/internal/contract/pricing"
@@ -15,6 +16,10 @@ const (
 	toolPreviewLines = 4
 	diffPreviewLines = 24
 )
+
+// diffFoldLines is the fold limit new diffs are drawn with; /diff-fold sets it
+// to 0, which shows every line.
+var diffFoldLines = diffPreviewLines
 
 // renderItem is a settled row as it goes into the scrollback. shown is how much
 // of an answer's text an earlier print already carried.
@@ -96,15 +101,15 @@ func thought(it *Item, width int) string {
 	switch it.Fold {
 	case foldShut:
 		mark = "▸"
-	case foldOpen:
+	case foldOpen, foldPinned:
 		mark = "▾"
 	}
 	hint := ""
-	if it.Fold != foldFixed {
+	if it.Fold == foldShut || it.Fold == foldOpen {
 		hint = " (Ctrl+O)"
 	}
 	lines := []string{termrender.Dim("  " + mark + " " + fmt.Sprintf(i18n.M.ChatThoughtForFmt, (it.ThoughtMs+500)/1000) + hint)}
-	if it.Fold == foldOpen {
+	if it.Fold == foldOpen || it.Fold == foldPinned {
 		// Styled per row: the transcript is split into rows after rendering, and
 		// one style spanning several would reach only the first of them.
 		for l := range strings.SplitSeq(termrender.Cells().Wrap(strings.TrimSpace(it.Reasoning), max(width-6, 10), ""), "\n") {
@@ -123,7 +128,7 @@ const (
 func renderTool(it *Item, width int) string {
 	t := it.Tool
 	if t.Diff != "" {
-		return "\n" + strings.Join(termrender.DiffBlock(t.Name, t.Args, event.FileDiff{Diff: t.Diff, Added: t.Added, Removed: t.Removed}, width, diffPreviewLines), "\n")
+		return "\n" + strings.Join(termrender.DiffBlock(t.Name, t.Args, event.FileDiff{Diff: t.Diff, Added: t.Added, Removed: t.Removed}, width, diffFoldLines), "\n")
 	}
 	lines := []string{termrender.ToolCard(t.Name, t.Args, width)}
 	avail := width - len([]rune(connector))
@@ -192,7 +197,7 @@ func outputSummary(name, out string, width int, f outputFold) []string {
 // fold to show more of it. The rows carry the card's "⎿" connector on the first
 // line and an aligned gutter after, matching every other tool card's body.
 func diffRows(out string, width int, f outputFold) []string {
-	maxLines := diffPreviewLines
+	maxLines := diffFoldLines
 	if f == foldOpen {
 		maxLines = shellExpandLines
 	}
@@ -281,6 +286,26 @@ func renderCompaction(it *Item, width int) string {
 	return "\n" + strings.Join(lines, "\n")
 }
 
+// codedNoticeText words a coded notice in the UI language from its typed payload; a
+// code with no wording here, or a payload that does not decode, keeps the
+// kernel's English.
+const unappliedSteerCap = 400
+
+func codedNoticeText(it *Item) string {
+	switch it.Code {
+	case event.NoticeCodeContextBudget:
+		if f, ok := event.DecodeContextBudgetFigures(it.Detail); ok {
+			return fmt.Sprintf(i18n.M.NoticeContextBudgetFmt, f.Percent, f.Remaining)
+		}
+	case event.NoticeCodeUnappliedSteer:
+		if it.Detail != "" {
+			return fmt.Sprintf(i18n.M.NoticeUnappliedSteerFmt, textutil.TruncateGraphemes(textutil.SanitizeDisplay(it.Detail), unappliedSteerCap, "…"))
+		}
+		return textutil.TruncateGraphemes(textutil.SanitizeDisplay(it.Text), unappliedSteerCap, "…")
+	}
+	return it.Text
+}
+
 func renderNotice(it *Item) string {
 	mark := termrender.Dim("  · ")
 	switch it.Level {
@@ -289,7 +314,7 @@ func renderNotice(it *Item) string {
 	case "warn", "warning":
 		mark = termrender.Yellow("  ! ")
 	}
-	text := it.Text
+	text := codedNoticeText(it)
 	if it.Count > 1 {
 		text += termrender.Dim(fmt.Sprintf(" (×%d)", it.Count))
 	}

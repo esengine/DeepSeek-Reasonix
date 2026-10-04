@@ -145,6 +145,8 @@ The published body is rendered, not copied:
 | `#N`, an issue fixed by a direct push; a commit; a bot author | as written |
 | `#N`, a discussion or no such number | as written, with a warning |
 
+The repository owner and any login in `RELEASE_CREDIT_EXCLUDE` (comma separated) are treated like bots: never named in an item or in the list.
+
 A `## 贡献者` list of the credited authors closes the notes. A `#N` counts only at a line start or after whitespace, `(`, `（`, `、`, `，` or `,`, and never in code, an HTML comment or a link target. Write colours such as `#333` in a code span.
 
 A lookup GitHub refuses, or cannot answer after retries, fails `publish` with a `release_credits.*` code. Preview with `node scripts/studio-release-notes.mjs release-notes/studio/X.Y.Z.md /tmp/notes.md`; it reads `GH_TOKEN`, else `gh auth token`.

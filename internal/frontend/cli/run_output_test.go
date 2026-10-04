@@ -10,6 +10,7 @@ import (
 
 	"reasonix/internal/contract/event"
 	"reasonix/internal/contract/provider"
+	"reasonix/internal/runtime/agent"
 )
 
 func TestRunOutputTextPrintsOnlyFinalMessage(t *testing.T) {
@@ -273,5 +274,25 @@ func TestClassifyRunCompletion(t *testing.T) {
 	}
 	if got := classifyRunCompletion(nil); got.outcome != "" || got.isError || got.exitCode != 0 {
 		t.Fatalf("success completion = %+v", got)
+	}
+}
+
+// A coded notice's Detail is the payload its sentence is worded from; the
+// diagnostic stream prints the sentence once and never appends the payload.
+func TestRunDiagnosticDoesNotAppendATypedPayload(t *testing.T) {
+	var out, errOut bytes.Buffer
+	sink := newRunOutputSink(&out, runOutputText)
+	sink.errOut = &errOut
+	figures := event.ContextBudgetFigures{Percent: 83, Remaining: 21000}
+	sink.Emit(event.Event{Kind: event.Notice, Level: event.LevelWarn, Code: event.NoticeCodeContextBudget,
+		Text: "Context at 83% of the compaction threshold.", Detail: figures.Encode()})
+	sink.Emit(event.Event{Kind: event.Notice, Level: event.LevelWarn, Code: event.NoticeCodeUnappliedSteer,
+		Text: agent.UnappliedSteerNotice("use plan B"), Detail: "use plan B"})
+	got := errOut.String()
+	if strings.Contains(got, `{"percent"`) {
+		t.Fatalf("the typed payload leaked into the diagnostic: %q", got)
+	}
+	if n := strings.Count(got, "use plan B"); n != 1 {
+		t.Fatalf("the guidance must appear once, got %d in %q", n, got)
 	}
 }

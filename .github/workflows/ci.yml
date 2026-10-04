@@ -80,7 +80,7 @@ jobs:
       - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7
         with:
           node-version: "22"
-      - run: node --test scripts/release-credits.test.mjs scripts/markdown-refs.test.mjs scripts/studio-release-notes.test.mjs scripts/publish-cli-pointer.test.mjs scripts/feedback-sync.test.mjs npm/publish.test.mjs
+      - run: node --test scripts/release-credits.test.mjs scripts/update-contributors.test.mjs scripts/markdown-refs.test.mjs scripts/studio-release-notes.test.mjs scripts/publish-cli-pointer.test.mjs scripts/feedback-sync.test.mjs npm/publish.test.mjs
 
   # The ruleset requires the per-OS check names (test (ubuntu-latest) etc.).
   # A matrix job skipped at job level reports no per-leg checks at all, so
@@ -175,12 +175,12 @@ jobs:
       # budget above normal 7-9 minute runner variance; each package test binary
       # remains independently bounded by Go's per-package timeout below.
       #
-      # That timeout is 8m, not 3m: across four consecutive runs of the same
+      # That timeout is 12m, not 3m: across four consecutive runs of the same
       # code, internal/assembly/boot measured 133s, 146s, 162s and then hit 180s, and
       # internal/runtime/agent 82s, 92s, 144s and 180s — a 2.2x spread from runner
-      # variance alone, with four heavy packages sharing four vCPUs. At 3m the
-      # step failed on slow runners without a code change; a hang still trips
-      # the 15 minute job budget above.
+      # variance alone, with four heavy packages sharing four vCPUs. The boot package
+      # has since grown to 422s and then ran past 480s on two consecutive runs of the
+      # same code, so 8m no longer leaves room. A hang still trips the job budget.
       #
       # Every root-module `go test` that runs on Windows passes -count=1. With
       # the result cache on, go test records each file and environment access
@@ -191,11 +191,11 @@ jobs:
       # internal/base/testenv holds every such step to it.
       - name: test (Windows smoke)
         if: env.RUN_STEPS == 'true' && runner.os == 'Windows' && github.event_name == 'pull_request'
-        timeout-minutes: 15
+        timeout-minutes: 20
         env:
           REASONIX_RELEASE_CACHE_GUARD: "1"
           WINDOWS_SANDBOX_WAIT_MS: "20000"
-        run: go test -count=1 -p 4 -timeout=8m ./internal/runtime/agent/... ./internal/platform/appidentity/... ./internal/assembly/boot/... ./internal/state/checkpoint/... ./internal/frontend/cli/... ./internal/session/control/... ./internal/base/filelock/... ./internal/base/fileutil/... ./internal/ext/hook/... ./internal/state/instruction/... ./internal/ext/mcplaunch/... ./internal/platform/notify/... ./internal/base/proc/... ./internal/platform/remote/... ./internal/platform/repair/... ./internal/safety/sandbox/... ./internal/base/sysproxy/... ./internal/state/workspacelease/... ./cmd/...
+        run: go test -count=1 -p 4 -timeout=12m ./internal/runtime/agent/... ./internal/platform/appidentity/... ./internal/assembly/boot/... ./internal/state/checkpoint/... ./internal/frontend/cli/... ./internal/session/control/... ./internal/base/filelock/... ./internal/base/fileutil/... ./internal/ext/hook/... ./internal/state/instruction/... ./internal/ext/mcplaunch/... ./internal/platform/notify/... ./internal/base/proc/... ./internal/platform/remote/... ./internal/platform/repair/... ./internal/safety/sandbox/... ./internal/base/sysproxy/... ./internal/state/workspacelease/... ./cmd/...
 
       # The general Windows PR smoke list intentionally omits internal/contract/tool.
       # Keep the session-temp portability contract covered without widening the
@@ -214,7 +214,7 @@ jobs:
         timeout-minutes: 5
         run: go test -count=1 -timeout=3m -run '^TestBashPowerShellExecuteDetailedContract$|^TestBashPowerShell51PreflightRejectsAndAndDetailed$|^TestBashPowerShellOutputIsUTF8$|^TestBashPowerShellSurfacesNonZeroExit$|^TestBashPowerShellRejectsChaining$' ./internal/tools/builtin
 
-      # Full push suite still uses the same 8m package budget as Windows smoke:
+      # Full push suite still uses the same 12m package budget as Windows smoke:
       # agent/boot/control already hit 180s package timeouts under runner load,
       # so 3m fails on slow machines without a code regression. It runs with
       # -count=1 for the reason given at the smoke step. A hang still dies here
@@ -230,7 +230,7 @@ jobs:
           # Bound sandbox helper children in Windows tests so a failed OS-level
           # launch cannot pin the Actions step after Go's package timeout fires.
           WINDOWS_SANDBOX_WAIT_MS: "20000"
-        run: go test -count=1 -p 4 -timeout=8m ./...
+        run: go test -count=1 -p 4 -timeout=12m ./...
 
   race:
     needs: changes

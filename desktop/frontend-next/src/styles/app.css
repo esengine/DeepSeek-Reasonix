@@ -2492,7 +2492,7 @@
     display: flex; align-items: baseline; gap: 9px; padding: 7px 9px;
     border: 0; border-radius: var(--r-xs); background: none; text-align: left; cursor: pointer;
   }
-  .prefs-found button:hover { background: var(--float-hi) }
+  .prefs-found button:not(:disabled):hover { background: var(--float-hi) }
   .prefs-found button:focus-visible { outline: 2px solid var(--focus); outline-offset: -1px }
   .prefs-found .where { flex: none; font: var(--w-reg) var(--fs-micro) var(--ui); letter-spacing: var(--track-cap); text-transform: uppercase; color: var(--faint) }
   .prefs-found .what { flex: 1; min-width: 0; font: var(--w-med) var(--fs-ui) var(--ui); color: var(--text) }
@@ -2554,8 +2554,9 @@
     border-radius: 0 2px 2px 0; background: var(--muted); transform: translateY(-50%);
     transition: height var(--t-card) var(--ease-spring);
   }
-  .prefs-nav button:hover { background: var(--overlay); color: var(--text) }
-  .prefs-nav button:hover svg { color: var(--muted) }
+  .prefs-nav button:not(:disabled):hover { background: var(--overlay); color: var(--text) }
+  .prefs-nav button:not(:disabled):hover svg { color: var(--muted) }
+  .prefs-nav button:disabled, .prefs-found button:disabled { opacity: .45; cursor: default }
   .prefs-nav button[aria-selected="true"] {
     background: var(--overlay); color: var(--text); font-weight: var(--w-med);
     box-shadow: inset 0 0 0 1px var(--border);
@@ -2766,6 +2767,7 @@
     font: var(--w-reg) var(--fs-meta) var(--mono); color: var(--faint) }
   .srv .acts { flex: none }
   .srv .why { margin: 4px 0 0 15px; font: var(--w-reg) var(--fs-ui)/1.55 var(--ui); color: var(--err) }
+  .srv .why[role="status"] { color: var(--muted) }
   .srv .peek { margin: 7px 0 1px 15px }
 
   .srv .srv-ab { display: flex; align-items: baseline; gap: 8px; margin: 5px 0 0 15px }
@@ -2861,6 +2863,7 @@
     background: var(--raised); color: var(--text); font: var(--w-reg) var(--fs-ui)/1.7 var(--mono); resize: vertical;
   }
   .addsrv .paste::placeholder, .addpkg .paste::placeholder { color: var(--ghost); white-space: pre-line }
+  .addpkg .paste:disabled { background: var(--overlay); cursor: default }
   .addsrv .paste:focus, .addpkg .paste:focus { outline: 2px solid var(--focus); outline-offset: 1px }
   .addsrv .acts, .addpkg .acts { display: flex; align-items: center; gap: 8px; margin-top: 10px }
   .addsrv .acts .note, .addpkg .acts .note { flex: 1; font: var(--w-reg) var(--fs-meta) var(--ui); color: var(--ghost) }
@@ -3099,6 +3102,12 @@
   .addp .fields label { display: flex; flex-direction: column; gap: 4px }
   .addp .fields label.grow { flex: 1; min-width: 150px }
   .addp .fields label.full { flex-basis: 100% }
+  .addp .fields input[aria-invalid="true"] { border-color: var(--err) }
+  .addp .fields .name-cell { flex: 1; min-width: 150px; display: flex; flex-direction: column; gap: 4px }
+  .addp .fields .name-cell label { display: flex; flex-direction: column; gap: 4px }
+  .addp .fields input[aria-invalid="true"]:focus { outline-color: var(--err) }
+  .addp .fields .name-rule { margin: 0; font: var(--w-reg) var(--fs-micro)/1.45 var(--ui); color: var(--ghost) }
+  .addp .fields .name-rule[data-bad] { color: var(--err) }
   .addp .fields .tip { font: var(--w-reg) var(--fs-micro)/1.45 var(--ui); font-style: normal; color: var(--ghost) }
   .addp-section { margin-top: 16px; padding-top: 14px; border-top: 1px solid var(--hair) }
   .addp-section.compact { margin-top: 12px }
@@ -3273,6 +3282,8 @@
   }
   .mkt-fields .mono { font: var(--w-reg) var(--fs-meta)/1.5 var(--mono) }
   .mkt-fields textarea { resize: vertical }
+  .mkt-pub .mkt-fields :is(input, textarea):disabled,
+  .mkt-pub .mkt-seen:has(:disabled) { opacity: .5; cursor: default }
   .mkt-fields input:focus, .mkt-fields textarea:focus { outline: 2px solid var(--focus); outline-offset: 1px }
   .mkt-fields input::placeholder { color: var(--ghost) }
   .mkt-vote { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; margin: 6px 0 0 }
@@ -4854,6 +4865,7 @@
   .pc-note { margin: 0; padding-top: 10px; border-top: 1px solid var(--border); color: var(--ghost); font: var(--w-reg) var(--fs-micro)/1.5 var(--ui) }
   [data-fold~="scene"] .phonecard { position: fixed; top: calc(var(--chrome-h, 45px) + 6px); right: 12px; left: 12px; width: auto }
   .share .rmtf { margin-top: 10px }
+  .share .rmtf input { background: var(--raised); border-radius: var(--r-sm) }
   .shareopen { display: grid; grid-template-columns: minmax(0, 1fr); gap: 12px; margin-top: 12px }
   .shareopen .rmtadd { margin-top: 0; justify-self: start }
   .shareqr { display: flex; align-items: flex-start; gap: 16px; flex-wrap: wrap }

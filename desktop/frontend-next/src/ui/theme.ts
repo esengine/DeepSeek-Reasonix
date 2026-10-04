@@ -143,9 +143,8 @@ export function apply(pack: ThemePack | null, scheme: "light" | "dark", busy = f
 
   const bg = pack.background;
   if (!bg?.image) return;
-  // The id is the address; the bytes are immutable for it, so the URL needs no
-  // cache buster. encodeURIComponent is what keeps a pack id out of the CSS
-  // url() grammar.
+  // The server owns freshness for this mutable URL. encodeURIComponent keeps
+  // a pack id out of the CSS url() grammar.
   root.style.setProperty("--bg-image", `url("/themes/${encodeURIComponent(pack.id)}/background")`);
   root.style.setProperty("--bg-x", `${pct(bg.focusX)}%`);
   root.style.setProperty("--bg-y", `${pct(bg.focusY)}%`);

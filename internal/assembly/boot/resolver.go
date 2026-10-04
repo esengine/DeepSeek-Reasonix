@@ -31,7 +31,7 @@ func (r *LocalProviderResolver) Catalog() []provider.Descriptor {
 		return nil
 	}
 	defaultRef := ""
-	if def, _, ok := r.cfg.ResolveNewSessionChatModel(); ok {
+	if def, _, ok := startupChatModel(r.cfg); ok {
 		if e, found := r.cfg.ResolveModel(def); found {
 			defaultRef = modelRefFromEntry(e)
 		}
@@ -89,16 +89,35 @@ func descriptorFor(e *config.ProviderEntry, ref string) provider.Descriptor {
 // A caller-owned resolver answers first: its models are the only ones this
 // session reaches, and a default read from this machine's config can name one
 // it cannot run. A resolver that marks none leaves the config to answer.
-func newSessionModel(resolver provider.Resolver, cfg *config.Config) string {
+func newSessionModel(resolver provider.Resolver, cfg *config.Config, fallback bool) (ref, skippedDefault string) {
 	if resolver != nil {
 		if ref := provider.DefaultRef(resolver.Catalog()); ref != "" {
-			return ref
+			return ref, ""
 		}
 	}
-	if resolved, _, ok := cfg.ResolveNewSessionChatModel(); ok {
-		return resolved
+	if !fallback {
+		if resolved, _, ok := cfg.ResolveNewSessionChatModel(); ok {
+			return resolved, ""
+		}
+		return "", ""
 	}
-	return ""
+	if resolved, skipped, ok := startupChatModel(cfg); ok {
+		return resolved, skipped
+	}
+	return "", ""
+}
+
+// startupChatModel is what a build nobody named a model for opens on. A
+// plugin-owned default is the extension resolver's to answer, so it is kept.
+func startupChatModel(cfg *config.Config) (ref, skippedDefault string, ok bool) {
+	if cfg == nil {
+		return "", "", false
+	}
+	if providerext.PluginRefOwner(strings.TrimSpace(cfg.DefaultModel)) != "" {
+		ref, _, ok = cfg.ResolveNewSessionChatModel()
+		return ref, "", ok
+	}
+	return cfg.ResolveStartupChatModel()
 }
 
 func (r *LocalProviderResolver) Resolve(selection provider.Selection) (provider.Provider, error) {

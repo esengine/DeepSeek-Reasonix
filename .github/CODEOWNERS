@@ -10,6 +10,7 @@
 
 # User-facing guides and references.
 /docs/                                    @SivanCola @esengine
+/docs/THEME_AUTHOR_GUIDE.md                @esengine @SivanCola
 /sdk/                                     @SivanCola @esengine
 /README.md                                @SivanCola @esengine
 /README.zh-CN.md                          @SivanCola @esengine

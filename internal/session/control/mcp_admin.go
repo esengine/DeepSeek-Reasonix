@@ -64,6 +64,10 @@ func (c *Controller) InstallMCPServer(e config.PluginEntry, scope MCPScope) (plu
 		if err := c.persistMCPServer(e); err != nil {
 			return plugin.MCPInstallResult{}, err
 		}
+		if err := c.confineMCPToThisProject(e, scope); err != nil {
+			c.DisconnectMCPServer(e.Name)
+			return plugin.MCPInstallResult{}, errors.Join(err, c.rollbackMCPServer(e.Name))
+		}
 		return result, nil
 	}
 	if err := c.persistMCPServer(e); err != nil {

@@ -249,7 +249,7 @@ export function FeedbackMine({ port, onFile, onUnread }: Props) {
                 ))}
               </ol>}
               <FeedbackThread item={item} fresh={fresh[item.receipt] ?? 0} onShowAll={unfolded} />
-              <FeedbackReplyBox port={port} item={item} limit={replyBytes} offline={mine.offline} onSent={sent} onStale={load} />
+              <FeedbackReplyBox port={port} item={item} limit={replyBytes} offline={mine.offline} onSent={sent} onFile={onFile} onStale={load} />
             </li>
           ))}
         </ul>

@@ -5,6 +5,7 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -433,6 +434,53 @@ func TestLoadMergesPluginsAcrossTOMLSources(t *testing.T) {
 	}
 }
 
+func TestProjectTOMLCannotReenableUserDisabledTools(t *testing.T) {
+	root := testenv.TempDir(t)
+	t.Setenv("HOME", root)
+	t.Setenv("XDG_CONFIG_HOME", filepath.Join(root, "xdg"))
+	t.Setenv("AppData", filepath.Join(root, "AppData"))
+	t.Chdir(testenv.TempDir(t))
+
+	gpath := UserConfigPath()
+	if gpath == "" {
+		t.Fatal("UserConfigPath empty under isolated env")
+	}
+	if err := os.MkdirAll(filepath.Dir(gpath), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(gpath, []byte(`
+[[plugins]]
+name = "shared"
+command = "global-bin"
+disabled_tools = ["write", "delete"]
+`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile("reasonix.toml", []byte(`
+[[plugins]]
+name = "shared"
+command = "project-bin"
+disabled_tools = ["delete", "publish"]
+`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	cfg, err := Load()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(cfg.Plugins) != 1 {
+		t.Fatalf("plugins = %+v", cfg.Plugins)
+	}
+	got := cfg.Plugins[0]
+	if got.Command != "project-bin" {
+		t.Fatalf("command = %q, want project-bin", got.Command)
+	}
+	if want := []string{"write", "delete", "publish"}; !slices.Equal(got.DisabledTools, want) {
+		t.Fatalf("disabled_tools = %v, want %v", got.DisabledTools, want)
+	}
+}
+
 func TestLoadProjectMCPPriorityIsReasonixThenMCPJSONThenGlobal(t *testing.T) {
 	_, userConfig, _ := legacyHome(t)
 	root := testenv.TempDir(t)
@@ -631,6 +679,58 @@ func TestMergeMCPJSONPrecedence(t *testing.T) {
 	}
 	if cfg.Plugins[1].Name != "extra" || cfg.Plugins[1].Command != "extra-bin" {
 		t.Errorf("non-colliding entry not appended: %+v", cfg.Plugins[1])
+	}
+}
+
+func TestMergeMCPJSONPreservesUserDisabledTools(t *testing.T) {
+	cfg := &Config{Plugins: []PluginEntry{{
+		Name:          "shared",
+		Command:       "user-bin",
+		Source:        MCPSourceUserConfig,
+		DisabledTools: []string{"write", "delete"},
+	}}}
+	cfg.mergeMCPJSON([]PluginEntry{{
+		Name:          "shared",
+		Command:       "project-bin",
+		Source:        MCPSourceProjectMCPJSON,
+		DisabledTools: []string{"delete", "publish"},
+	}})
+
+	if len(cfg.Plugins) != 1 {
+		t.Fatalf("plugins = %+v", cfg.Plugins)
+	}
+	got := cfg.Plugins[0]
+	if got.Command != "project-bin" || got.Source != MCPSourceProjectMCPJSON {
+		t.Fatalf("project entry did not win: %+v", got)
+	}
+	if want := []string{"write", "delete", "publish"}; !slices.Equal(got.DisabledTools, want) {
+		t.Fatalf("disabled_tools = %v, want %v", got.DisabledTools, want)
+	}
+}
+
+func TestMergeMCPJSONUserCollisionKeepsProjectDisabledTools(t *testing.T) {
+	cfg := &Config{Plugins: []PluginEntry{{
+		Name:          "shared",
+		Command:       "project-bin",
+		Source:        MCPSourceProjectConfig,
+		DisabledTools: []string{"publish", "delete"},
+	}}}
+	cfg.mergeMCPJSON([]PluginEntry{{
+		Name:          "shared",
+		Command:       "user-bin",
+		Source:        MCPSourceClaudeUser,
+		DisabledTools: []string{"write"},
+	}})
+
+	if len(cfg.Plugins) != 1 {
+		t.Fatalf("plugins = %+v", cfg.Plugins)
+	}
+	got := cfg.Plugins[0]
+	if got.Command != "project-bin" || got.Source != MCPSourceProjectConfig {
+		t.Fatalf("project entry did not remain authoritative: %+v", got)
+	}
+	if want := []string{"publish", "delete", "write"}; !slices.Equal(got.DisabledTools, want) {
+		t.Fatalf("disabled_tools = %v, want %v", got.DisabledTools, want)
 	}
 }
 

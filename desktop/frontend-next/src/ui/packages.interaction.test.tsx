@@ -10,6 +10,27 @@ import type { AgentPort, PluginExport, PluginPlan } from "../port/port";
 afterEach(cleanup);
 
 describe("installed package operations", () => {
+  it.each(["skills", "agents"] as const)("replaces duplicate %s contribution rows with the current inventory", async (kind) => {
+    const port = new MockPort() as unknown as AgentPort;
+    const [pkg] = await port.plugins();
+    const prefix = kind === "agents" ? "/review-kit:agent:" : "/review-kit:";
+    const original = ["First source", "Second source", "Third source"].map((description) => ({
+      name: "shared", invocation: prefix + "shared", description,
+    }));
+    const current = [{ name: "current", invocation: prefix + "current", description: "Current source" }];
+    const props = { port, onChanged: vi.fn(), updating: "", onUpdate: vi.fn() };
+    const view = render(<Packages {...props} packages={[{ ...pkg, [kind]: original }]} />);
+    const row = within(document.querySelector('[data-extension-name="review-kit"]') as HTMLElement);
+    for (const items of [current, original, []]) {
+      view.rerender(<Packages {...props} packages={[{ ...pkg, [kind]: items }]} />);
+      for (const item of [...original, ...current]) {
+        expect(row.queryAllByText(item.description)).toHaveLength(items.includes(item) ? 1 : 0);
+      }
+      expect(row.queryAllByText(prefix + "shared")).toHaveLength(items === original ? 3 : 0);
+      expect(row.queryAllByText(prefix + "current")).toHaveLength(items === current ? 1 : 0);
+    }
+  });
+
   it.each(["remove", "export"])("blocks conflicting row actions during %s and recovers after failure", async (operation) => {
     const port = new MockPort() as unknown as AgentPort;
     const packages = await port.plugins();

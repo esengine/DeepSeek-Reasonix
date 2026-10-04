@@ -1,19 +1,15 @@
 // Command starterextension is the smallest installable Reasonix code
-// extension. It rewrites inputs beginning with "starter: " so developers can
-// verify the complete manifest -> sidecar -> intercept path before adding more
-// capabilities.
+// extension. It preserves and annotates the composed input so developers can
+// verify the manifest -> sidecar -> intercept path before adding capabilities.
 package main
 
 import (
 	"context"
 	"encoding/json"
 	"os"
-	"strings"
 
 	extension "github.com/esengine/DeepSeek-Reasonix/sdk/go"
 )
-
-const inputPrefix = "starter: "
 
 type starter struct{}
 
@@ -27,11 +23,11 @@ func interceptInput(_ context.Context, _ string, payload json.RawMessage) (*exte
 	var input struct {
 		Text string `json:"text"`
 	}
-	if err := json.Unmarshal(payload, &input); err != nil || !strings.HasPrefix(input.Text, inputPrefix) {
+	if err := json.Unmarshal(payload, &input); err != nil || input.Text == "" {
 		return extension.Continue(), nil
 	}
 	return extension.Replace(map[string]string{
-		"text": strings.TrimPrefix(input.Text, inputPrefix) + " [rewritten by starter-extension]",
+		"text": input.Text + " [rewritten by starter-extension]",
 	})
 }
 

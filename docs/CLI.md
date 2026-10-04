@@ -121,9 +121,14 @@ reasonix config compact-ratio 75           # set the user-global default
 reasonix config compact-ratio --local 75   # override in ./reasonix.toml
 ```
 
-The editable range is 65–85%, with 85% as the built-in default. Lower values
-compact earlier and may reduce prompt-prefix cache reuse; higher values retain
-more context before compaction. Project `reasonix.toml` takes precedence over
+The CLI accepts a percentage above 0 and below 100 (exclusive), with 85% as the
+built-in default. These bounds follow `CompactRatioMin` and `CompactRatioMax` in
+`internal/contract/config`; TOML stores the corresponding fraction.
+
+Lower values compact earlier and may reduce prompt-prefix cache reuse; higher
+values retain more context before compaction.
+
+Project `reasonix.toml` takes precedence over
 the user config. Changes apply to new CLI sessions; an already-running session
 keeps the threshold it loaded at startup.
 
@@ -136,9 +141,14 @@ line numbers) instead of the plain code rail.
 It is **off by default**: a model writes headerless diff fences often, and the
 plain rail is the lossless default.
 
-A fence section with no `--- `/`+++ ` file header falls back to the plain rail so
-no line is dropped. Like `[cli].diff_formatter` it is user/global only — a
-project-local `reasonix.toml` cannot set it.
+A streaming fence colours in hunk by hunk: each `@@` header settles the rows
+before it, which are drawn coloured while the in-progress hunk stays on the plain
+rail.
+
+A fence section with no `--- `/`+++ ` file header keeps its diff content on the
+plain rail; one that is only a preamble — a `git show` commit header, say —
+carries no diff and is omitted. Like `[cli].diff_formatter` it is user/global
+only — a project-local `reasonix.toml` cannot set it.
 
 `[cli].diff_formatter` names an optional external command that formats a diff
 for the CLI/TUI to render — a fenced ` ```diff ` / ` ```patch ` block, a writer
@@ -151,9 +161,10 @@ The whole diff is written to the command's stdin; its stdout is re-emitted with
 non-SGR control sequences stripped, so the formatter's colours survive but a
 cursor or clipboard escape cannot.
 
-In the full-screen TUI it runs off the render path: the built-in rows are drawn
-first and replaced once its output is ready, so a slow formatter cannot freeze
-the UI.
+In the full-screen TUI it runs off the render path: a part of the fence whose run
+is still pending is drawn on the plain rail and replaced once the output is ready
+— a hunk an earlier run already formatted stays coloured — so a slow formatter
+cannot freeze the UI.
 
 On any failure, timeout, empty output, or a diff larger than 1 MiB, the
 built-in renderer is kept. Like `[cli].update_channel` it is user/global only —
@@ -491,8 +502,7 @@ folder alone:
   `permission_denials`.
 
 In the terminal UI, Shift+Tab cycles read-only → ask → auto → YOLO → plan
-(YOLO joins once confirmed). Ctrl+Y toggles YOLO and returns to the posture it
-left.
+Ctrl+Y toggles YOLO at once and returns to the posture it left.
 
 For unattended execution with ordinary writer fallback enabled, use
 `reasonix run --auto ...` (or `-y`). Neither it nor `--yolo` can be combined

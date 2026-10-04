@@ -6,6 +6,9 @@ import { toolFailed } from "../cards/outcome";
 
 import { agentsIn } from "./derive";
 import { Grp, Row } from "./kit";
+import { StudioIcon } from "../StudioIcon";
+
+export const agentName = (x: Task) => x.tool.profile?.name || shortArgs(x.tool.args ?? "") || "task";
 
 export type Task = Extract<Item, { t: "tool" }>;
 
@@ -13,7 +16,7 @@ export type Task = Extract<Item, { t: "tool" }>;
 // enumerate. Running delegates come first — a finished one is history.
 const SHOWN = 40;
 
-export function Agents({ tasks }: { tasks: Task[] }) {
+export function Agents({ tasks, onOpen }: { tasks: Task[]; onOpen?: (taskId: string) => void }) {
   const live = agentsIn(tasks.filter((x) => x.running));
   const shown = tasks.length > SHOWN ? tasks.slice(-SHOWN) : tasks;
   // A session that has delegated nothing has nothing to say about delegates.
@@ -27,7 +30,7 @@ export function Agents({ tasks }: { tasks: Task[] }) {
       />
       <div className="agents">
         {shown.map((x) => (
-          <div className="ag" key={x.id}>
+          <div className="ag" key={x.id} data-status={x.running ? "running" : toolFailed(x.tool) ? "failed" : "done"}>
             <i
               className="pip"
               data-settled={x.running || toolFailed(x.tool) ? undefined : ""}
@@ -35,12 +38,25 @@ export function Agents({ tasks }: { tasks: Task[] }) {
               style={x.running ? { background: "var(--net)", animation: "tick 1.6s ease-in-out infinite" } : undefined}
             />
             <span className="nm">
-              {x.tool.profile?.name || shortArgs(x.tool.args ?? "") || "task"}
+              {agentName(x)}
               {(x.tool.profile?.count ?? 1) > 1 && <b className="mult">×{x.tool.profile?.count}</b>}
             </span>
             <span className="rt">
               {x.running ? t("运行中") : toolFailed(x.tool) ? t("已中断") : x.tool.durationMs ? seconds(x.tool.durationMs, 0) : t("已交付")}
             </span>
+            {onOpen && (
+              <button
+                type="button"
+                className="ag-open"
+                data-action="agent.open"
+                data-target={x.id}
+                title={t("查看完整记录")}
+                aria-label={t("查看完整记录：{name}", { name: agentName(x) })}
+                onClick={() => onOpen(x.id)}
+              >
+                <StudioIcon name="chevron" />
+              </button>
+            )}
           </div>
         ))}
       </div>

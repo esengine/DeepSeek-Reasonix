@@ -1,10 +1,44 @@
 package boot
 
 import (
+	"crypto/sha256"
+	"encoding/hex"
+	"encoding/json"
+	"maps"
+	"strings"
+
 	"reasonix/internal/base/netclient"
 	"reasonix/internal/contract/config"
 	"reasonix/internal/contract/provider"
 )
+
+// ProviderBuildIdentity is the resolved identity a controller was built with.
+// A changed fingerprint requires a rebuild; Effort is compared separately so
+// persistence can change without changing the request-level level.
+type ProviderBuildIdentity struct {
+	Fingerprint string
+	Effort      string
+}
+
+// ResolveProviderBuildIdentity fingerprints the resolved provider inputs
+// selectModel gives boot, excluding effort, which is compared separately.
+// A non-nil override follows the ACP path, including adaptive thinking.
+func ResolveProviderBuildIdentity(e *config.ProviderEntry, proxy netclient.ProxySpec, effortOverride *string) ProviderBuildIdentity {
+	if e == nil {
+		return ProviderBuildIdentity{}
+	}
+	entry := *e
+	if effortOverride != nil {
+		entry.Effort = strings.TrimSpace(*effortOverride)
+		if entry.Kind == "anthropic" && entry.Effort != "" && strings.TrimSpace(entry.Thinking) == "" {
+			entry.Thinking = "adaptive"
+		}
+	}
+	return ProviderBuildIdentity{
+		Fingerprint: providerFingerprint(&entry, proxy),
+		Effort:      config.EffectiveEffort(&entry),
+	}
+}
 
 // NewProviderWithProxy builds a provider.Provider with the configured ordinary
 // network proxy settings.
@@ -46,4 +80,32 @@ func providerConfig(e *config.ProviderEntry, proxy netclient.ProxySpec) provider
 			"stateful": e.ResponsesStateful,
 		},
 	}
+}
+
+// providerFingerprint hashes the resolved entry and constructor payload,
+// excluding request-level effort. APIKeyFunc is omitted because its value is
+// already in APIKey; Extra carries resolved endpoint/key/vision/proxy inputs.
+func providerFingerprint(e *config.ProviderEntry, proxy netclient.ProxySpec) string {
+	cfg := providerConfig(e, proxy)
+	extra := maps.Clone(cfg.Extra)
+	delete(extra, "effort")
+	entry := *e
+	entry.Effort = ""
+	payload := struct {
+		Entry  config.ProviderEntry
+		APIKey string
+		Extra  map[string]any
+	}{
+		Entry:  entry,
+		APIKey: cfg.APIKey,
+		Extra:  extra,
+	}
+	raw, err := json.Marshal(payload)
+	if err != nil {
+		// Fail closed: without a stable identity callers must rebuild rather
+		// than risk serving a stale provider.
+		return ""
+	}
+	sum := sha256.Sum256(raw)
+	return "sha256:" + hex.EncodeToString(sum[:])
 }

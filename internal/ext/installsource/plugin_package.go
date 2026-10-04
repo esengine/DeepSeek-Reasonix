@@ -428,6 +428,13 @@ func (t *Tool) applyInstallPluginPackage(ctx context.Context, req request, act *
 			return newErr(ErrApprovalDenied, "plugin source changed since the approved plan (approved commit %s, found %s) and the approved snapshot could not be restored: %v; re-run without apply to review the new plan", act.Commit, commit, err)
 		}
 	}
+	if act.Mode == "link" {
+		resolved, err := filepath.EvalSymlinks(sourceRoot)
+		if err != nil {
+			return newErr(ErrSourceUnreadable, "%v", err)
+		}
+		sourceRoot = resolved
+	}
 	pkg, warnings, err := pluginpkg.ParseDir(sourceRoot)
 	if err != nil {
 		return newErr(ErrInvalidManifest, "%v", err)
@@ -716,6 +723,9 @@ func (t *Tool) applyRemovePluginPackage(_ request, act *action) error {
 			}
 		}
 	}
+	if filepath.IsAbs(installed.Root) {
+		return removePluginSymlink(pluginpkg.InstallRoot(t.reasonixHome, installed.Name), root)
+	}
 	pluginsDir := pluginpkg.PluginsDir(t.reasonixHome)
 	if rel, err := filepath.Rel(pluginsDir, root); err == nil && rel != "." && !strings.HasPrefix(rel, ".."+string(filepath.Separator)) && rel != ".." {
 		if err := os.RemoveAll(root); err != nil {
@@ -723,4 +733,25 @@ func (t *Tool) applyRemovePluginPackage(_ request, act *action) error {
 		}
 	}
 	return nil
+}
+
+func removePluginSymlink(target, source string) error {
+	info, err := os.Lstat(target)
+	if os.IsNotExist(err) {
+		return nil
+	}
+	if err != nil {
+		return err
+	}
+	if info.Mode()&os.ModeSymlink == 0 {
+		return nil
+	}
+	linked, err := os.Readlink(target)
+	if err != nil {
+		return err
+	}
+	if filepath.Clean(linked) != filepath.Clean(source) {
+		return nil
+	}
+	return os.Remove(target)
 }

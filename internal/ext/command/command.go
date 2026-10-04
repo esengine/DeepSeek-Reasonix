@@ -194,7 +194,7 @@ func parseFile(root, path string) (Command, error) {
 	if err != nil {
 		rel = filepath.Base(path)
 	}
-	name := strings.ReplaceAll(strings.TrimSuffix(filepath.ToSlash(rel), ".md"), "/", ":")
+	name := strings.ReplaceAll(strings.TrimSuffix(filepath.ToSlash(rel), filepath.Ext(rel)), "/", ":")
 
 	// Normalise line endings and strip a leading UTF-8 BOM if present.
 	content := strings.TrimPrefix(strings.ReplaceAll(string(b), "\r\n", "\n"), string(rune(0xFEFF)))

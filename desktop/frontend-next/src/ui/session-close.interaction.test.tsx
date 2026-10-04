@@ -43,14 +43,14 @@ function draw(live: boolean, held: string | null = "r1") {
 
 it("closes an idle open conversation from its row", async () => {
   const { onClose } = draw(false);
-  await userEvent.click(screen.getByRole("button", { name: /会话操作：/ }));
+  await userEvent.pointer({ keys: "[MouseRight]", target: screen.getByRole("treeitem", { name: /open here/ }) });
   await userEvent.click(screen.getByRole("menuitem", { name: "关闭会话" }));
   expect(onClose).toHaveBeenCalledWith(["r1"]);
 });
 
 it("will not close a conversation mid-turn", async () => {
   const { onClose } = draw(true);
-  await userEvent.click(screen.getByRole("button", { name: /会话操作：/ }));
+  await userEvent.pointer({ keys: "[MouseRight]", target: screen.getByRole("treeitem", { name: /open here/ }) });
   const close = screen.getByRole("menuitem", { name: "关闭会话" }) as HTMLButtonElement;
   expect(close.disabled).toBe(true);
   expect(onClose).not.toHaveBeenCalled();
@@ -58,6 +58,6 @@ it("will not close a conversation mid-turn", async () => {
 
 it("offers no close for a conversation no pane holds", async () => {
   draw(false, null);
-  await userEvent.click(screen.getByRole("button", { name: /会话操作：/ }));
+  await userEvent.pointer({ keys: "[MouseRight]", target: screen.getByRole("treeitem", { name: /open here/ }) });
   expect(screen.queryByRole("menuitem", { name: "关闭会话" })).toBeNull();
 });

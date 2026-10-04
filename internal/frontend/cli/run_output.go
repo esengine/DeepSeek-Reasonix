@@ -291,7 +291,7 @@ func (s *runOutputSink) writeDiagnostic(e event.Event) {
 		return
 	}
 	text := strings.TrimSpace(e.Text)
-	if detail := strings.TrimSpace(e.Detail); detail != "" && detail != text {
+	if detail := strings.TrimSpace(e.Detail); detail != "" && detail != text && !event.DetailIsPayload(e.Code) {
 		text = strings.TrimSpace(text + " " + detail)
 	}
 	if text == "" {

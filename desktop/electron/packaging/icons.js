@@ -7,9 +7,10 @@ const { chromium } = require("playwright");
 
 const ASSETS = path.join(__dirname, "..", "assets");
 const ICO_SIZES = [16, 20, 24, 32, 40, 48, 64, 256];
-// The tray is drawn at 16 logical pixels; nativeImage picks the @Nx file that
-// matches the display, so a scaled screen never enlarges the 16px one.
-const TRAY_SCALES = [[1, ""], [1.25, "@1.25x"], [1.5, "@1.5x"], [2, "@2x"], [3, "@3x"]];
+// The tray is drawn at 16 logical pixels. Windows asks for exactly 16*scale
+// pixels and resizes whatever it is handed, so every Windows scale has its own
+// file (src/trayimage.js picks it).
+const TRAY_SCALES = [[1, ""], [1.25, "@1.25x"], [1.5, "@1.5x"], [1.75, "@1.75x"], [2, "@2x"], [2.5, "@2.5x"], [3, "@3x"]];
 // The app icon's margin is the platform's to keep; a tray slot has none to spare.
 const TRAY_VIEWBOX = 'viewBox="103 103 818 818"';
 // PNG payloads for every type modern macOS reads; ic11–ic14 are the @2x slots.

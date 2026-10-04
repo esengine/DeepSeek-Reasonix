@@ -62,6 +62,7 @@ var leaves = []string{
 	"internal/model/visionimage",
 	"internal/base/workspaceid",
 	"internal/state/workspacelease",
+	"internal/state/workspacelist",
 }
 
 // A host adapter implements a frontend's driven port and is shared by the hosts

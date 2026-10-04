@@ -1,34 +1,25 @@
 package serve
 
 import (
-	"bytes"
 	"context"
-	"encoding/json"
 	"errors"
 	"log/slog"
 	"net/http"
-	"os"
 	"path/filepath"
 	"slices"
-	"strings"
-	"time"
 
-	"reasonix/internal/base/filelock"
-	"reasonix/internal/base/fileutil"
 	"reasonix/internal/contract/config"
+	"reasonix/internal/state/workspacelist"
 )
 
-type workspaceList struct {
-	Paths  []string `json:"paths"`
-	Launch string   `json:"launch,omitempty"`
-}
+type workspaceList = workspacelist.List
 
 var errWorkspaceNotRemembered = errors.New("workspace is not remembered")
 var errWorkspaceListFull = errors.New("the project list already contains 32 projects; remove one before adding another")
 
 func workspacesPath() string {
 	if dir := config.MemoryUserDir(); dir != "" {
-		return filepath.Join(dir, "serve-workspaces.json")
+		return filepath.Join(dir, workspacelist.FileName)
 	}
 	return ""
 }
@@ -54,89 +45,10 @@ func LaunchWorkspaces() []string {
 	return paths
 }
 
-func readWorkspaceList(path string) (workspaceList, error) {
-	var list workspaceList
-	data, err := os.ReadFile(path)
-	if os.IsNotExist(err) || path == "" {
-		return list, nil
-	}
-	if err != nil {
-		return list, err
-	}
-	data = bytes.TrimSpace(data)
-	if len(data) > 0 && data[0] == '[' {
-		err = json.Unmarshal(data, &list.Paths)
-	} else {
-		err = json.Unmarshal(data, &list)
-	}
-	if err != nil {
-		return workspaceList{}, err
-	}
-	paths := make([]string, 0, len(list.Paths))
-	for _, dir := range list.Paths {
-		dir = strings.TrimSpace(dir)
-		if dir != "" && !slices.Contains(paths, dir) {
-			paths = append(paths, dir)
-		}
-	}
-	list.Paths = paths
-	if !slices.Contains(paths, list.Launch) {
-		list.Launch = ""
-		if len(paths) > 0 {
-			list.Launch = paths[0]
-		}
-	}
-	return list, nil
-}
+func readWorkspaceList(path string) (workspaceList, error) { return workspacelist.Read(path) }
 
 func updateWorkspaceList(ctx context.Context, repair bool, mutate func(*workspaceList) error) error {
-	path := workspacesPath()
-	if path == "" {
-		return errors.New("no workspace list directory")
-	}
-	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
-		return err
-	}
-	ctx, cancel := context.WithTimeout(ctx, 5*time.Second)
-	defer cancel()
-	unlock, err := filelock.Acquire(ctx, path+".lock")
-	if err != nil {
-		return err
-	}
-	defer unlock()
-	list, err := readWorkspaceList(path)
-	if err != nil {
-		var syntax *json.SyntaxError
-		var shape *json.UnmarshalTypeError
-		if !repair || (!errors.As(err, &syntax) && !errors.As(err, &shape)) {
-			return err
-		}
-		if err := backupWorkspaceList(path); err != nil {
-			return err
-		}
-		list = workspaceList{}
-	}
-	if err := mutate(&list); err != nil {
-		return err
-	}
-	data, err := json.MarshalIndent(list, "", "  ")
-	if err != nil {
-		return err
-	}
-	return fileutil.AtomicWriteFile(path, data, 0o644)
-}
-
-func backupWorkspaceList(path string) error {
-	data, err := os.ReadFile(path)
-	if err != nil {
-		return err
-	}
-	f, err := os.CreateTemp(filepath.Dir(path), filepath.Base(path)+".bak-*")
-	if err != nil {
-		return err
-	}
-	_, writeErr := f.Write(data)
-	return errors.Join(writeErr, f.Close())
+	return workspacelist.Update(ctx, workspacesPath(), repair, mutate)
 }
 
 func rememberWorkspace(dir string) {

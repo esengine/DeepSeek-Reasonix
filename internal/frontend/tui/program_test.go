@@ -22,6 +22,7 @@ import (
 type recordingKernel struct {
 	mu    sync.Mutex
 	calls []string
+	git   bool
 }
 
 func (k *recordingKernel) ServeHTTP(w http.ResponseWriter, r *http.Request) {
@@ -43,6 +44,12 @@ func (k *recordingKernel) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		// "看 @no": the token starts after one CJK rune and a space, two UTF-16 units.
 		_ = json.NewEncoder(w).Encode(map[string]any{"kind": "ref", "from": 2, "to": 5,
 			"items": []map[string]any{{"label": "notes.md", "insert": "@notes.md "}, {"label": "notes/", "insert": "@notes/"}}})
+	case "/workspace/git":
+		if k.git {
+			_ = json.NewEncoder(w).Encode(k.gitReply())
+			return
+		}
+		_ = json.NewEncoder(w).Encode(map[string]any{"repo": false})
 	case "/todos":
 		_ = json.NewEncoder(w).Encode([]map[string]any{
 			{"content": "read the code", "status": "completed"},
@@ -59,6 +66,13 @@ func (k *recordingKernel) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		_ = json.NewEncoder(w).Encode([]map[string]any{{"role": "user", "content": "write the docs"}})
 	case "/inbox/items":
 		_ = json.NewEncoder(w).Encode(map[string]string{"itemId": "q-7"})
+	case "/provider-setup":
+		_ = json.NewEncoder(w).Encode(map[string]any{"required": true})
+	case "/provider-setup/connections":
+		_ = json.NewEncoder(w).Encode(map[string]any{"revision": "r1", "connections": []map[string]any{
+			{"name": "alpha", "kind": "openai", "models": 2, "keyRequired": true},
+			{"name": "beta", "kind": "anthropic", "models": 1, "active": true},
+		}})
 	case "/checkpoints":
 		_ = json.NewEncoder(w).Encode([]map[string]any{
 			{"turn": 0, "prompt": "read the code"}, {"turn": 1, "prompt": "fix the bug", "files": 2},
@@ -263,15 +277,87 @@ func TestApprovalPanelAnswersTheRowUnderTheCursor(t *testing.T) {
 
 func TestLargePasteFoldsAndExpandsOnSend(t *testing.T) {
 	m, k := testModel(t)
-	big := strings.Repeat("line\n", 10)
+	big := strings.Repeat("line\n", 12) + "line"
 	m.Update(tea.PasteMsg{Content: big})
-	if v := m.composer.Value(); v != "[Pasted text #1 +11 lines]" {
+	if v := m.composer.Value(); v != "[Pasted text #1 · 13 lines] " {
 		t.Fatalf("composer = %q", v)
 	}
 	run(m, press(m, "enter"))
-	raw, _ := json.Marshal(map[string]string{"input": big})
+	label := "[Pasted text #1 · 13 lines]"
+	want := label + "\n\n--- Begin " + label + " ---\n" + big + "\n--- End " + label + " ---"
+	raw, _ := json.Marshal(map[string]string{"input": want})
 	if calls := strings.Join(k.seen(), "\n"); !strings.Contains(calls, strings.TrimSuffix(string(raw), "}")) {
-		t.Fatalf("the paste did not go whole:\n%s", calls)
+		t.Fatalf("the paste did not go as the block 1.x sends:\n%s", calls)
+	}
+	var shown string
+	for _, it := range m.tr.Items {
+		if it.Kind == ItemUser {
+			shown = it.Text
+		}
+	}
+	if shown != "[Pasted text #1 · 13 lines]" {
+		t.Fatalf("the transcript keeps the label the person saw, got %q", shown)
+	}
+}
+
+// A terminal that ends rows with a bare carriage return still pastes lines.
+func TestPasteCountsLinesWhateverTheTerminalEndsThemWith(t *testing.T) {
+	for name, sep := range map[string]string{"cr": "\r", "crlf": "\r\n", "lf": "\n"} {
+		m, _ := testModel(t)
+		m.Update(tea.PasteMsg{Content: strings.Join([]string{"a", "b", "c", "d", "e", "f"}, sep)})
+		if v := m.composer.Value(); v != "[Pasted text #1 · 6 lines] " {
+			t.Errorf("%s: composer = %q", name, v)
+		}
+	}
+}
+
+// Four short lines stay as typed; five fold, as does one very long line.
+func TestPasteFoldsAtFiveLinesOrAThousandCharacters(t *testing.T) {
+	cases := []struct {
+		text string
+		want string
+	}{
+		{"a\nb\nc\nd", "a\nb\nc\nd"},
+		{"a\nb\nc\nd\ne", "[Pasted text #1 · 5 lines] "},
+		{strings.Repeat("x", 999), strings.Repeat("x", 999)},
+		{strings.Repeat("x", 1000), "[Pasted text #1 · 1 lines] "},
+	}
+	for _, c := range cases {
+		m, _ := testModel(t)
+		m.Update(tea.PasteMsg{Content: c.text})
+		if v := m.composer.Value(); v != c.want {
+			t.Errorf("paste of %d bytes: composer = %q, want %q", len(c.text), v, c.want)
+		}
+	}
+}
+
+// Labels count up through the session, and one the person edited is no longer
+// the paste, so it goes as typed.
+func TestPasteLabelsCountUpAndAnEditedLabelStaysLiteral(t *testing.T) {
+	m, k := testModel(t)
+	five := "1\n2\n3\n4\n5"
+	m.Update(tea.PasteMsg{Content: five})
+	m.Update(tea.PasteMsg{Content: "6\n7\n8\n9\n10"})
+	if v := m.composer.Value(); v != "[Pasted text #1 · 5 lines] [Pasted text #2 · 5 lines] " {
+		t.Fatalf("composer = %q", v)
+	}
+	m.composer.SetValue("[Pasted text #2 · 9 lines]")
+	run(m, press(m, "enter"))
+	if calls := strings.Join(k.seen(), "\n"); strings.Contains(calls, "--- Begin") {
+		t.Fatalf("a label nothing stands behind must go literally:\n%s", calls)
+	}
+}
+
+// Over an open panel the paste is the answer being typed, so it lands as text.
+func TestPasteOverAnOpenPanelIsNotFolded(t *testing.T) {
+	m, _ := testModel(t)
+	apply(m, eventwire.Event{Kind: "approval_request", Approval: &eventwire.Approval{ID: "ap1", Tool: "bash", Subject: "rm x"}})
+	if m.tr.OpenPrompt() == nil {
+		t.Fatal("the approval did not open")
+	}
+	m.Update(tea.PasteMsg{Content: "a\nb\nc\nd\ne\nf"})
+	if strings.Contains(m.composer.Value(), "Pasted text") {
+		t.Fatalf("composer = %q", m.composer.Value())
 	}
 }
 
@@ -599,7 +685,7 @@ func TestUTF16Offsets(t *testing.T) {
 // while it still has work in it.
 func TestTodosFollowTheKernel(t *testing.T) {
 	m, _ := testModel(t)
-	_, cmd := m.Update(updateMsg{u: Update{Event: eventwire.Event{Kind: "todo_progress"}}, ok: true})
+	_, cmd := m.Update(updateMsg{us: []Update{{Event: eventwire.Event{Kind: "todo_progress"}}}, ok: true})
 	run(m, cmd)
 	v := m.View().Content
 	for _, want := range []string{"✔ read the code", "▶ fix the bug", "○ run tests"} {
@@ -660,5 +746,80 @@ func TestShellModeRunsTheCommandLocally(t *testing.T) {
 	}
 	if len(m.tr.awaiting) != 0 {
 		t.Fatalf("the command waits to be named by a turn: %v", m.tr.awaiting)
+	}
+}
+
+// TestWaitUpdateCoalescesQueuedFrames proves a burst of queued stream frames is
+// handed to the model as one message, so a burst costs one render rather than
+// one render per frame — the view re-parses the whole growing answer each draw.
+func TestWaitUpdateCoalescesQueuedFrames(t *testing.T) {
+	m, _ := testModel(t)
+	ch := make(chan Update, 8)
+	m.updates = ch
+	for range 5 {
+		ch <- Update{Event: eventwire.Event{Kind: "text", Text: "x"}}
+	}
+	msg, ok := m.waitUpdate()().(updateMsg)
+	if !ok {
+		t.Fatalf("waitUpdate returned %T, want updateMsg", msg)
+	}
+	if len(msg.us) != 5 || !msg.ok {
+		t.Fatalf("coalesced %d frames (ok=%v), want 5 frames and ok", len(msg.us), msg.ok)
+	}
+}
+
+// TestWaitUpdateReportsAClosedStream proves the wait ends rather than spinning
+// once the stream is gone.
+func TestWaitUpdateReportsAClosedStream(t *testing.T) {
+	m, _ := testModel(t) // testModel wires a closed updates channel
+	msg, ok := m.waitUpdate()().(updateMsg)
+	if !ok {
+		t.Fatalf("waitUpdate returned %T, want updateMsg", msg)
+	}
+	if msg.ok {
+		t.Fatal("a closed stream should report ok=false")
+	}
+}
+
+// TestViewportHoldsOnShrink proves the transcript does not scroll back up when
+// the content shrinks under a following viewport and the freed rows still fit
+// inside it — a settled diff collapsing its raw preamble to one formatted line,
+// say. A shrink larger than the viewport cannot hold (it would blank the
+// transcript) and re-anchors instead: TestCollapsedDiffReanchorsTheTranscript.
+func TestViewportHoldsOnShrink(t *testing.T) {
+	m, _ := testModel(t)
+	m.Update(tea.WindowSizeMsg{Width: 80, Height: 12})
+	rows := func(n int) func(int, bool) string {
+		return func(int, bool) string { return strings.Repeat("row\n", n) }
+	}
+	m.scr.blocks = append(m.scr.blocks, block{render: rows(40)})
+	m.View()
+	held := m.scr.yoff
+	if held == 0 {
+		t.Fatalf("viewport did not follow the tail: yoff=%d", held)
+	}
+
+	m.scr.blocks[0].render, m.scr.blocks[0].lines = rows(37), nil
+	m.View()
+	if m.scr.yoff != held {
+		t.Fatalf("viewport moved on shrink: yoff %d -> %d", held, m.scr.yoff)
+	}
+
+	m.scr.blocks[0].render, m.scr.blocks[0].lines = rows(60), nil
+	m.View()
+	if m.scr.yoff <= held {
+		t.Fatalf("viewport did not scroll on growth: yoff %d -> %d", held, m.scr.yoff)
+	}
+}
+
+// A resumed conversation already holds labels; the next paste must not reuse one.
+func TestPasteNumberingContinuesPastWhatTheResumedSessionHolds(t *testing.T) {
+	m, _ := testModel(t)
+	run(m, func() tea.Msg {
+		return historyMsg{msgs: []HistoryMessage{{Role: "user", Content: "[Pasted text #4 · 9 lines]\n\n--- Begin [Pasted text #4 · 9 lines] ---\nx\n--- End [Pasted text #4 · 9 lines] ---"}}, reprint: true}
+	})
+	m.Update(tea.PasteMsg{Content: "1\n2\n3\n4\n5"})
+	if v := m.composer.Value(); v != "[Pasted text #5 · 5 lines] " {
+		t.Fatalf("composer = %q", v)
 	}
 }

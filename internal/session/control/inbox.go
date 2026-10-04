@@ -686,7 +686,7 @@ func (c *Controller) onInboxTurnDone() {
 	if err := c.SnapshotActivity(); err != nil {
 		slog.Warn("controller: inbox turn snapshot", "err", err)
 		for _, id := range ids {
-			_ = st.SetState(id, sessioninbox.StateUncertain, "turn completed but transcript snapshot failed")
+			_ = st.SetStateCoded(id, sessioninbox.StateUncertain, sessioninbox.BlockSnapshotFailed, "turn completed but transcript snapshot failed")
 		}
 		_ = st.SetPaused(true)
 		c.inbox.mu.Lock()
@@ -708,7 +708,7 @@ func (c *Controller) onInboxTurnDone() {
 				continue
 			}
 			slog.Warn("controller: inbox ack dequeue", "err", err, "id", id)
-			_ = st.SetState(id, sessioninbox.StateUncertain, "turn completed but inbox acknowledgement failed")
+			_ = st.SetStateCoded(id, sessioninbox.StateUncertain, sessioninbox.BlockAckFailed, "turn completed but inbox acknowledgement failed")
 			ackFailed = true
 		}
 	}
@@ -719,23 +719,6 @@ func (c *Controller) onInboxTurnDone() {
 	c.inbox.mu.Lock()
 	c.inbox.untrackActiveSet(ids)
 	c.inbox.mu.Unlock()
-}
-
-// onInboxUnappliedSteer keeps accepted-but-unapplied steers for inspection.
-func (c *Controller) onInboxUnappliedSteer(itemID string) {
-	if itemID == "" {
-		return
-	}
-	st, err := c.ensureInbox()
-	if err != nil {
-		return
-	}
-	_ = st.SetState(itemID, sessioninbox.StateUncertain, "steer accepted but unapplied before turn exit")
-	_ = st.SetPaused(true)
-	c.inbox.mu.Lock()
-	c.inbox.untrackActive(itemID)
-	c.inbox.mu.Unlock()
-	sessioninbox.NoteUncertain()
 }
 
 // onInboxSteerConsumed marks steer_accepted → steer_consumed.

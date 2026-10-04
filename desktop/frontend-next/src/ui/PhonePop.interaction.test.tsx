@@ -87,3 +87,15 @@ it("shows the account-gated Internet QR before the optional LAN pairing code", a
   expect(offerCloudShare).toHaveBeenCalledTimes(1);
   expect(offerShare).not.toHaveBeenCalled();
 });
+
+it("labels Internet controllers by their ordinal, not their list position", async () => {
+  const now = new Date().toISOString();
+  const cloud = (id: string, ordinal: number) => ({ id, name: "Web Studio", connectedAt: now, lastSeen: now, ordinal });
+  const remote = { ...status(false), cloudDevices: [cloud("b", 2), cloud("c", 3)] };
+  const hub = { shareStatus: vi.fn(async () => remote), offerShare: vi.fn(), revokeDevice: vi.fn() } as unknown as HubPort;
+  render(<PhonePop hub={hub} />);
+  await userEvent.click(await screen.findByRole("button", { name: "设备访问" }));
+  await screen.findByText("设备 2");
+  expect(screen.getByText("设备 3")).toBeTruthy();
+  expect(screen.queryByText("设备 1")).toBeNull();
+});

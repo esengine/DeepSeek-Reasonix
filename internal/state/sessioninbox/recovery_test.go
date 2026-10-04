@@ -55,6 +55,12 @@ func TestRecoverOrphanedInFlightPreservesOwnedAndPendingItems(t *testing.T) {
 		t.Fatalf("recovered states = %+v", states)
 	}
 
+	for _, item := range snap.Items {
+		if item.State == StateUncertain && item.BlockCode != BlockOwnerInactive {
+			t.Fatalf("recovered item %s has BlockCode %q, want %q", item.ID, item.BlockCode, BlockOwnerInactive)
+		}
+	}
+
 	if again, err := s.RecoverOrphanedInFlight([]string{owned}); err != nil || again != 0 {
 		t.Fatalf("idempotent recovery = %d, err=%v", again, err)
 	}

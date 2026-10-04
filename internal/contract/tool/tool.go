@@ -62,6 +62,12 @@ type Previewer interface {
 	Preview(ctx context.Context, args json.RawMessage) (diff.Change, error)
 }
 
+// WritePathResolver owns writer path resolution. Any error requires a whole
+// workspace lease; ErrAmbiguousPath may also carry resolved targets for grants.
+type WritePathResolver interface {
+	WritePaths(json.RawMessage) ([]string, error)
+}
+
 // PreviewChange returns the change a writer tool would make for args, or ok=false
 // when there's nothing renderable: t is read-only, doesn't implement Previewer,
 // the preview errored (the edit will likely fail too), or the file is binary.
@@ -203,18 +209,6 @@ type MCPPackageMetadata interface {
 	MCPPackageName() string
 }
 
-// MCPBinding describes one stable MCP capability and the exact provider-visible
-// name currently bound to it. Bindings are host metadata only: they never add
-// aliases to provider schemas or alter schema ordering.
-type MCPBinding struct {
-	Package      string
-	Server       string
-	RawName      string
-	VisibleName  string
-	CallableName string
-	CapabilityID string
-}
-
 // readerExecutionIntentKey carries a per-call, immutable authorization basis:
 // the call was approved as a non-destructive reader. The MCP dispatcher makes
 // the final, linearizable check against live security state and must never
@@ -352,11 +346,14 @@ func LookupBuiltin(name string) (Tool, bool) {
 
 // Registry is a per-run set of tools: enabled built-ins plus plugin tools.
 type Registry struct {
-	mu        sync.RWMutex
-	tools     map[string]Tool
-	order     []string
-	canon     map[string]json.RawMessage
-	suspended map[string]bool
+	mu          sync.RWMutex
+	tools       map[string]Tool
+	order       []string
+	canon       map[string]json.RawMessage
+	suspended   map[string]bool
+	disabledMCP map[string]bool
+	// disabledMCPByServer keeps per-server policy so aliases can be replaced or cleared.
+	disabledMCPByServer map[string]map[string]bool
 	// providerVisible, when non-nil, restricts Schemas/ContractEntries to the
 	// listed tool names. Get/Execute still resolve every registered tool so
 	// use_capability can dispatch tool:<name> without changing the provider
@@ -371,7 +368,13 @@ type Registry struct {
 
 // NewRegistry returns an empty registry.
 func NewRegistry() *Registry {
-	return &Registry{tools: map[string]Tool{}, canon: map[string]json.RawMessage{}, suspended: map[string]bool{}}
+	return &Registry{
+		tools:               map[string]Tool{},
+		canon:               map[string]json.RawMessage{},
+		suspended:           map[string]bool{},
+		disabledMCP:         map[string]bool{},
+		disabledMCPByServer: map[string]map[string]bool{},
+	}
 }
 
 // SetProviderVisibleTools restricts the provider-visible schema surface to the
@@ -594,71 +597,6 @@ func (r *Registry) ResolveCall(name string) (resolved Tool, canonical string, ca
 		slices.Sort(candidates)
 	}
 	return nil, "", candidates
-}
-
-func mcpBinding(t Tool) (MCPBinding, bool) {
-	meta, ok := t.(MCPMetadata)
-	if !ok {
-		return MCPBinding{}, false
-	}
-	server := strings.TrimSpace(meta.MCPServerName())
-	raw := strings.TrimSpace(meta.MCPRawToolName())
-	if server == "" || raw == "" {
-		return MCPBinding{}, false
-	}
-	visible := raw
-	if v, ok := t.(MCPVisibleMetadata); ok && strings.TrimSpace(v.MCPVisibleToolName()) != "" {
-		visible = strings.TrimSpace(v.MCPVisibleToolName())
-	}
-	pkg := ""
-	if p, ok := t.(MCPPackageMetadata); ok {
-		pkg = strings.TrimSpace(p.MCPPackageName())
-	}
-	return MCPBinding{
-		Package:      pkg,
-		Server:       server,
-		RawName:      raw,
-		VisibleName:  visible,
-		CallableName: t.Name(),
-		CapabilityID: "mcp-tool:" + server + "/" + raw,
-	}, true
-}
-
-func mcpBindingAliases(b MCPBinding) []string {
-	aliases := []string{
-		b.RawName,
-		b.VisibleName,
-		b.Server + "/" + b.RawName,
-		b.Server + "/" + b.VisibleName,
-		b.CapabilityID,
-		"mcp-tool:" + b.Server + "/" + b.VisibleName,
-		"mcp__" + portableMCPPart(b.Server) + "__" + portableMCPPart(b.RawName),
-		"mcp__" + portableMCPPart(b.Server) + "__" + portableMCPPart(b.VisibleName),
-	}
-	if b.Package != "" {
-		prefix := "mcp__plugin_" + portableMCPPart(b.Package) + "_" + portableMCPPart(b.Server) + "__"
-		aliases = append(aliases, prefix+portableMCPPart(b.RawName), prefix+portableMCPPart(b.VisibleName))
-	}
-	return aliases
-}
-
-// MCPBindingAliases returns accepted portable references for a binding. The
-// canonical provider-visible name remains MCPBinding.CallableName.
-func MCPBindingAliases(b MCPBinding) []string {
-	return append([]string(nil), mcpBindingAliases(b)...)
-}
-
-func portableMCPPart(s string) string {
-	var b strings.Builder
-	for _, r := range s {
-		switch {
-		case r >= 'a' && r <= 'z', r >= 'A' && r <= 'Z', r >= '0' && r <= '9', r == '_', r == '-':
-			b.WriteRune(r)
-		default:
-			b.WriteByte('_')
-		}
-	}
-	return b.String()
 }
 
 // Len returns the number of registered tools.

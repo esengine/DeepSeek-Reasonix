@@ -1,6 +1,8 @@
 import { describe, expect, it } from "vitest";
 import { renderToStaticMarkup } from "react-dom/server";
 import { Queue } from "./Queue";
+import { BLOCK_WHY } from "../i18n/queue_why";
+import { EN } from "../i18n/en";
 import type { Queue as QueueSnapshot, QueueItem } from "../port/port";
 
 const item = (over: Partial<QueueItem> = {}): QueueItem => ({
@@ -38,6 +40,34 @@ const paint = (q: QueueSnapshot, running: boolean) =>
 
 const draw = (q: QueueSnapshot) => paint(q, true);
 const drawIdle = (q: QueueSnapshot) => paint(q, false);
+
+describe("why a held entry stopped", () => {
+  const held = (over: Partial<QueueItem>) => draw(snapshot({ paused: true, items: [item({ state: "uncertain", ...over })] }));
+
+  it("words a coded stop in this build's language, not the kernel's English", () => {
+    const html = held({ blockCode: "steer_unapplied", blockReason: "steer accepted but unapplied before turn exit" });
+    expect(html).toContain("没来得及送达");
+    expect(html).not.toContain("unapplied before turn exit");
+  });
+
+  it.each(Object.entries(BLOCK_WHY))("%s reads in Chinese and has an English sentence", (code, zh) => {
+    const html = held({ blockCode: code, blockReason: "kernel diagnostic" });
+    expect(html).toContain(zh);
+    expect(html).not.toContain("kernel diagnostic");
+    expect(EN[zh], `no English for ${code}`).toBeTruthy();
+    expect(EN[zh]).not.toBe(zh);
+  });
+
+  it("covers exactly the codes the kernel sends", () => {
+    expect(Object.keys(BLOCK_WHY).sort()).toEqual(
+      ["manifest_salvaged", "owner_inactive", "steer_unapplied", "turn_ack_failed", "turn_snapshot_failed"],
+    );
+  });
+
+  it("keeps the kernel's text for a code this build has no sentence for", () => {
+    expect(held({ blockCode: "future_code", blockReason: "something new" })).toContain("something new");
+  });
+});
 
 // Typing at a working turn does reach the model — the report was that nobody
 // could tell. Every assertion here is on what the strip says back, because a

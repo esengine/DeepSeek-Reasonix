@@ -88,6 +88,7 @@ describe("market list", () => {
     const port = new MockPort() as unknown as AgentPort;
     let finish!: (value: MarketDetail) => void;
     port.marketList = async () => ({ packages: [row("a/kit", true)], limit: 24, offset: 0 });
+    port.marketMyVote = async () => ({ signedIn: false, value: 0 });
     port.marketDetail = vi.fn()
       .mockRejectedValueOnce(new Error("offline"))
       .mockImplementationOnce(() => new Promise<MarketDetail>((resolve) => { finish = resolve; }));

@@ -87,21 +87,25 @@ func TestADocumentNamesItsOwnersAsCodeOwnersDoes(t *testing.T) {
 		return "---\nowner: " + owner + "\nbackup: " + backup + "\nstatus: active\nreviewed: 2026-09-17\n---\n# T\n"
 	}
 	root := docRepo(t, map[string]string{
-		".github/CODEOWNERS": "* @a @b\n/docs/ @b @a\n",
-		"docs/good.md":       header("@b", "@a"),
-		"docs/swapped.md":    header("@a", "@b"),
-		"docs/bare.md":       "# No header\n",
-		"top.md":             header("@a", "@b"),
-		"README.md":          "# Landing page, owned through CODEOWNERS only\n",
-		"REASONIX.md":        "# Read by a model verbatim\n",
+		".github/CODEOWNERS":  "* @a @b\n/docs/ @b @a\n",
+		"docs/good.md":        header("@b", "@a"),
+		"docs/double.md":      header(`"@b"`, `"@a"`),
+		"docs/single.md":      header("'@b'", "'@a'"),
+		"docs/swapped.md":     header("@a", "@b"),
+		"docs/quoted-swap.md": header(`"@a"`, `"@b"`),
+		"docs/broken.md":      header(`"@b`, `"@a"`),
+		"docs/bare.md":        "# No header\n",
+		"top.md":              header("@a", "@b"),
+		"README.md":           "# Landing page, owned through CODEOWNERS only\n",
+		"REASONIX.md":         "# Read by a model verbatim\n",
 	})
 	got := ruleFindings(checkDocs(root), ruleDocOwner)
 	flagged := map[string]string{}
 	for _, f := range got {
 		flagged[f.File] = f.Msg
 	}
-	if len(flagged) != 2 || flagged["docs/swapped.md"] == "" || flagged["docs/bare.md"] == "" {
-		t.Fatalf("flagged = %v, want exactly the swapped owners and the missing header", flagged)
+	if len(flagged) != 4 || flagged["docs/swapped.md"] == "" || flagged["docs/quoted-swap.md"] == "" || flagged["docs/broken.md"] == "" || flagged["docs/bare.md"] == "" {
+		t.Fatalf("flagged = %v, want swapped owners, malformed quotes and the missing header", flagged)
 	}
 	if !strings.Contains(flagged["docs/swapped.md"], "CODEOWNERS line 2") {
 		t.Fatalf("the finding must point at the rule it disagrees with: %s", flagged["docs/swapped.md"])
@@ -137,6 +141,19 @@ func TestAWrappedParagraphIsOneBlock(t *testing.T) {
 	blocks := proseBlocks([]string{line, line, line, line, "", "- item", "  continued " + line})
 	if len(blocks) != 2 || blocks[0].width != 399 || !blocks[1].item || !strings.Contains(blocks[1].text, "continued") {
 		t.Fatalf("blocks = %+v, want one wrapped paragraph and one item with its continuation", blocks)
+	}
+}
+
+func TestQuotedParagraphsAreSeparateProseBlocks(t *testing.T) {
+	line := "> " + strings.Repeat("word ", 20)
+	lines := []string{line, line, ">", line, line, "> ", "> " + strings.Repeat("word ", 70)}
+	blocks := proseBlocks(lines)
+	if len(blocks) != 3 || blocks[0].width != 199 || blocks[1].width != 199 || blocks[2].line != 7 {
+		t.Fatalf("blocks = %+v, want three quoted paragraphs with wrapped lines kept together", blocks)
+	}
+	got := checkProse("x.md", lines, docProseWidth)
+	if len(got) != 1 || got[0].Line != 7 {
+		t.Fatalf("findings = %+v, want only the final overlong quoted paragraph", got)
 	}
 }
 
@@ -176,5 +193,11 @@ func TestAReleaseNoteIsGroupedReferencedAndShort(t *testing.T) {
 	}
 	if byRule[ruleReleaseNote] != 4 || byRule[ruleDocProse] != 1 {
 		t.Fatalf("findings = %+v, want sub-heading, unknown group, unreferenced item, second paragraph, and one long item", got)
+	}
+}
+
+func TestClassifyDocSkipsMigrationBackup(t *testing.T) {
+	if _, ok := classifyDoc(".migration-backup/legacy-fact.md"); ok {
+		t.Fatal("a store-owned memory backup is not an authored doc")
 	}
 }

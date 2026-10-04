@@ -13,10 +13,11 @@ const { StudioHost } = require("./hostclient");
 const { installTray } = require("./tray");
 const { instanceID, profileFor } = require("./instance");
 const { installApplicationMenu, installContextMenu } = require("./menu");
+const { uiLanguage } = require("./uilang");
 const { installFullScreenKey } = require("./fullscreen");
 const { installReload } = require("./reload");
 const { externalTarget } = require("./links");
-const { reveal } = require("./reveal");
+const { reveal, revealWorkspace } = require("./reveal");
 const { appIcon } = require("./appicon");
 const layout = require("./layout");
 const { offerCleanup } = require("./legacy");
@@ -24,7 +25,7 @@ const { stripPackageGrants, unpaintedWindowCause } = require("./packagegrants");
 const { BrowserProtocol } = require("./browserprotocol");
 const { BrowserViews } = require("./browserviews");
 const { startBrowserRelay } = require("./browserrelay");
-const { prefsFile, registerPrefs } = require("./prefs");
+const { loadPrefs, prefsFile, registerPrefs } = require("./prefs");
 const { openLogs, redactArgv, failStartup } = require("./shelllog");
 
 // A page in a minimized or fully covered window counts as hidden, and a hidden
@@ -93,6 +94,7 @@ async function launchKernel(args) {
     const began = Date.now();
     logs.shell.line(`host: starting ${hostBinary} (attempt ${attempt})`);
     kernel = start(hostBinary, args, {
+      systemLanguage: app.getPreferredSystemLanguages()[0] ?? app.getLocale(),
       timeoutMs: handshakeTimeout(),
       onSlow: () => {
         logs.shell.line("host: no handshake yet; showing the starting window");
@@ -166,7 +168,7 @@ async function boot() {
     const cause = unpaintedWindowCause(grants, app.getLocale());
     if (cause) dialog.showErrorBox(cause.title, cause.detail);
   });
-  installContextMenu(win.webContents, win);
+  installContextMenu(win.webContents, win, uiLang);
   installFullScreenKey(win.webContents, win);
   reload = installReload(win.webContents, win);
   win.once("ready-to-show", () => win.show());
@@ -314,7 +316,10 @@ function fromWindow(event) {
   return win && !win.isDestroyed() && event.sender === win.webContents ? win : null;
 }
 
-registerPrefs(ipcMain, () => prefsFile(app.getPath("userData")), fromWindow);
+// The page reads navigator.languages[0], which is the first preferred system
+// language; app.getLocale() is the locale Chromium resolved, which can differ.
+const uiLang = () => uiLanguage(loadPrefs(prefsFile(app.getPath("userData"))), app.getPreferredSystemLanguages()[0] ?? app.getLocale());
+registerPrefs(ipcMain, () => prefsFile(app.getPath("userData")), fromWindow, () => installApplicationMenu(uiLang));
 
 ipcMain.handle("window:minimise", (event) => {
   fromWindow(event)?.minimize();
@@ -353,6 +358,9 @@ ipcMain.handle("shell:open-external", (event, raw) => {
   const target = externalTarget(raw);
   if (target) return shell.openExternal(target);
 });
+ipcMain.handle("shell:reveal-workspace", (event, root) =>
+  fromWindow(event) && client ? revealWorkspace(client, shell, String(root)) : { code: "", error: "no window" },
+);
 ipcMain.handle("shell:reveal", (event, base, rel) =>
   fromWindow(event) && client ? reveal(client, shell, String(base), String(rel)) : { code: "", error: "no window" },
 );
@@ -428,7 +436,7 @@ if (!primary) {
 
 app.whenReady().then(() => {
   if (!primary) return;
-  installApplicationMenu();
+  installApplicationMenu(uiLang);
   boot().catch((err) => {
     console.error("reasonix-studio:", err.message);
     if (quitting) {

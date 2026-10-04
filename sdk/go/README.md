@@ -82,6 +82,32 @@ callbacks and stream producers must honor their contexts.
 The SDK serializes protocol writes itself; extensions must not write directly
 to stdout. stderr remains available for diagnostics.
 
+## Local tests and custom hosts
+
+This SDK is a separate Go module. Run its tests from `sdk/go`, rather than
+relying on `go test ./...` at the repository root:
+
+```sh
+go test ./...
+go test -race ./...
+go vet ./...
+```
+
+The [fake host](fakehost_test.go) shows the handshake and host callbacks for
+in-process tests. A custom subprocess host follows the native host's
+[lifecycle](../../docs/EXTENSION_PROTOCOL.md):
+
+1. Await the `extension/initialize` response, then send
+   `extension/initialized`.
+2. Answer any extension-to-host requests while exercising the sidecar.
+3. Read the accepted `extension/shutdown` response, close the sidecar's
+   stdin, then wait for exit code 0.
+
+An acknowledgement alone does not prove the process exited. Keeping stdin
+open can leave the default `os.Stdin` read blocked even after shutdown.
+Keep stderr separate from the NDJSON stream, and reap the child after any
+test failure too.
+
 ## Runnable example
 
 [`examples/starterextension`](examples/starterextension/README.md) is the
@@ -89,8 +115,12 @@ copyable first extension: it includes a Manifest v2 file, a minimal sidecar,
 cross-platform build commands, linked installation, `/reload`, and a visible
 input-rewrite check.
 
-[`examples/fullsidecar`](examples/fullsidecar/main.go) is the reference
-extension: input rewriting (try the `/fs ` trigger), tool interception
+[`examples/toolextension`](examples/toolextension/README.md) is the smallest
+tool-serving package: manifest declarations, `Options.Tools`, catalog
+discovery, and an observable word-count result through the real host.
+
+[`examples/fullsidecar`](examples/fullsidecar/README.md) is the reference
+extension: protocol-level input rewriting, tool interception
 (block + argument rewrite), system-prompt strategy replacement, a fake
 streaming provider (text chunks, a tool call, usage), structured UI (status +
 card on session start, a form prompt behind the `demo` action), and a clean
@@ -102,12 +132,12 @@ cp ./examples/fullsidecar/reasonix-plugin.json /tmp/full-sidecar/
 go build -o /tmp/full-sidecar/bin/full-sidecar ./examples/fullsidecar
 ```
 
-The resulting directory is a complete Manifest v2 plugin package. The binary
-speaks the protocol on stdin/stdout, so install the directory as a plugin
-package (or point the host-side conformance suite at it) rather than running
-the binary interactively. It is installed into a temporary Reasonix home and
-driven end-to-end against the real host by `internal/ext/extension/conformance` in
-the Reasonix repository.
+The resulting directory is a complete Manifest v2 plugin package. Follow the
+example's [installation and host checks](examples/fullsidecar/README.md) to
+install it and exercise its declared demo action. The binary speaks the
+protocol on stdin/stdout, so do not run it interactively. The repository's
+conformance suite checks its wire behavior; the boot effect test checks its
+installed strategy, provider catalog, and UI round trip at the host boundary.
 
 ## Generated wire types
 

@@ -148,7 +148,7 @@ func TestSharedWindowFoldRejectsUnshortenableOverBudgetInput(t *testing.T) {
 	a := &Agent{agentConfig: agentConfig{contextWindow: 100_000}, svc: agentServices{prov: prov, sink: event.Discard}, sess: sessionRuntime{output: outputBudgetState{outputBudget: prov.budget}}}
 	fold := []provider.Message{{Role: provider.RoleUser, Content: strings.Repeat("字", 200_000)}}
 	_, err := a.window().foldToSummary(context.Background(), fold, "")
-	if err == nil || !strings.Contains(err.Error(), "exceeds single-request budget") {
+	if !errors.Is(err, errSummaryInputTooLarge) {
 		t.Fatalf("foldToSummary err = %v, want single-request budget failure", err)
 	}
 	if prov.calls != 0 {

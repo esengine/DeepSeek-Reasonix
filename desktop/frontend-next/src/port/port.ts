@@ -115,6 +115,8 @@ export interface QueueItem {
   createdAt: string;
   // Why a blocked entry stopped, from the kernel that stopped it.
   blockReason?: string;
+  // The stable identity of that stop; the sentence is worded from it here.
+  blockCode?: string;
   // Files this entry froze at the moment it was queued. Their presence is what
   // makes re-freezing meaningful; the entry quotes them as they were.
   refs?: { path?: string }[];
@@ -177,7 +179,7 @@ export interface AgentPort {
   // did not have, and that is exactly what the second look is for.
   planPlugin(req: PluginInstallRequest): Promise<PluginPlan>;
   installPlugin(req: PluginInstallRequest): Promise<PluginPlan>;
-  setPluginEnabled(name: string, enabled: boolean): Promise<void>;
+  setPluginEnabled(name: string, enabled: boolean): Promise<{ reloadError?: string }>;
   removePlugin(name: string): Promise<PluginPlan>;
   // Hands the packed package to the user and reports what was stripped out of
   // it on the way. Installing is the same door: a folder, a link, or this

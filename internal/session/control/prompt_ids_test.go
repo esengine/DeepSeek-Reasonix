@@ -2,6 +2,7 @@ package control
 
 import (
 	"context"
+	"reasonix/internal/base/testenv"
 	"strings"
 	"testing"
 	"time"
@@ -30,7 +31,7 @@ func TestARebuiltControllerNeverReissuesAPromptID(t *testing.T) {
 		case id := <-ids:
 			c.AnswerQuestion(id, []event.AskAnswer{{QuestionID: "q1", Selected: []string{"a"}}})
 			return id
-		case <-time.After(5 * time.Second):
+		case <-time.After(testenv.Budget(t)):
 			t.Fatal("no ask_request emitted")
 			return ""
 		}

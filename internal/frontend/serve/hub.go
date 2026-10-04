@@ -292,8 +292,11 @@ func (h *Hub) Open(ctx context.Context, req OpenRequest) (*Runtime, error) {
 		StatsSource:     h.surface(),
 		FeedbackSurface: feedbackSurface(h.surface()),
 		BalanceStore:    h.wallets,
+		// A pane opened without a model must open even on a stale default_model.
+		OpenOnFallbackModel: true,
 
-		ProviderResolver: h.opts.ProviderResolver,
+		ProviderResolver:         h.opts.ProviderResolver,
+		CleanupPendingReconciler: BackgroundCleanupReconciler,
 	})
 	if err != nil {
 		return nil, fmt.Errorf("open %s: %w", root, err)
@@ -495,7 +498,9 @@ func (h *Hub) Handler() http.Handler {
 	// What acts on the machine behind the window, or dials onward from it,
 	// stays the window's: a paired device reaches the rest.
 	hostMux := http.NewServeMux()
+	hostMux.HandleFunc("GET /host/capabilities", h.hostCapabilities)
 	hostMux.HandleFunc("POST /host/pick-folder", h.pickLocalFolderHTTP)
+	hostMux.HandleFunc("GET /host/workspaces/locate", h.locateWorkspace)
 	hostMux.HandleFunc("GET /remotes", h.listRemoteHosts)
 	hostMux.HandleFunc("POST /remotes", h.saveRemoteHost)
 	hostMux.HandleFunc("GET /remotes/candidates", h.remoteCandidates)

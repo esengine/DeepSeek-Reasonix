@@ -40,10 +40,12 @@ describe("the deck readings", () => {
     expect(settled.querySelector('[data-action="deck.jobs"]')?.hasAttribute("data-live")).toBe(false);
   });
 
-  // Delegates that stopped are history the transcript keeps; a reading left on
-  // the rail after they stopped reads as work still going.
-  it("shows the delegates only while one is running", () => {
+  // Finished delegates stay reachable (their transcript opens from here), but
+  // only a running one animates the reading.
+  it("keeps finished delegates listed and animates only while one is running", () => {
     expect(draw([task(true)], []).querySelector('[data-action="deck.agents"]')?.hasAttribute("data-live")).toBe(true);
-    expect(draw([task(false)], []).querySelector('[data-action="deck.agents"]')).toBeNull();
+    const done = draw([task(false)], []).querySelector('[data-action="deck.agents"]');
+    expect(done).not.toBeNull();
+    expect(done?.hasAttribute("data-live")).toBe(false);
   });
 });

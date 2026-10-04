@@ -1,6 +1,7 @@
 package migration
 
 import (
+	"errors"
 	"fmt"
 	"io"
 	"io/fs"
@@ -360,17 +361,30 @@ func copyFileIfMissing(src, dst string) (int, error) {
 	if err := os.MkdirAll(filepath.Dir(dst), 0o755); err != nil {
 		return 0, err
 	}
-	out, err := os.OpenFile(dst, os.O_WRONLY|os.O_CREATE|os.O_EXCL, info.Mode().Perm())
+	tmp, err := os.CreateTemp(filepath.Dir(dst), filepath.Base(dst)+".tmp-*")
 	if err != nil {
-		if os.IsExist(err) {
-			return 0, nil
-		}
 		return 0, err
 	}
-	defer out.Close()
-	if _, err := io.Copy(out, in); err != nil {
-		_ = os.Remove(dst)
+	defer os.Remove(tmp.Name())
+	if _, err := io.Copy(tmp, in); err != nil {
+		_ = tmp.Close()
 		return 0, err
+	}
+	if err := errors.Join(tmp.Chmod(info.Mode().Perm()), tmp.Close()); err != nil {
+		return 0, err
+	}
+	// A hard link publishes the finished file under its name and refuses to
+	// replace one that is already there, so a reader never sees half a file
+	// and a concurrent writer's file is never overwritten.
+	if err := os.Link(tmp.Name(), dst); err != nil {
+		if _, statErr := os.Lstat(dst); statErr == nil {
+			return 0, nil
+		}
+		// A volume without hard links (exFAT) falls back to a rename, which
+		// is still whole-file for any reader.
+		if err := os.Rename(tmp.Name(), dst); err != nil {
+			return 0, err
+		}
 	}
 	return 1, nil
 }

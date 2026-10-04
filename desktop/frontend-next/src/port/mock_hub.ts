@@ -182,6 +182,8 @@ export class MockHub implements HubPort {
     return Promise.resolve<TreeWorkspace>({ root: path, name: path.split("/").pop() ?? path, remembered: true, sessions: [] });
   }
 
+  async revealWorkspace() {}
+
   removeWorkspace(path: string) {
     const at = this.roots.indexOf(path);
     if (at >= 0) this.roots.splice(at, 1);
@@ -222,6 +224,10 @@ export class MockHub implements HubPort {
     return Promise.resolve({ summary: "mock migration complete", imported: 0, warnings: 0 });
   }
 
+  hostCapabilities() {
+    return Promise.resolve({ pickFolder: true, addWorkspace: true });
+  }
+
   pickFolder() {
     return Promise.resolve<string | null>("~/projects/mock-workspace");
   }
@@ -243,7 +249,12 @@ export class MockHub implements HubPort {
   }
 
   openShare(ip: string) {
-    this.share = { ...this.share, open: true, origin: `http://${ip}:41234`, devices: [] };
+    this.share = { ...this.share, open: true, origin: `http://${ip}:${this.share.port ?? 41234}`, devices: [] };
+    return Promise.resolve({ ...this.share });
+  }
+
+  setSharePort(port: number) {
+    this.share = { ...this.share, port: port || undefined };
     return Promise.resolve({ ...this.share });
   }
 

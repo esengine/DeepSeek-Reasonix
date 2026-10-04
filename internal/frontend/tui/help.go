@@ -18,6 +18,9 @@ type helpMsg struct {
 	err   error
 }
 
+// isSetup is the command /setup and its 1.x alias.
+func isSetup(line string) bool { return line == "/setup" || line == "/auth" }
+
 // isHelp is the command /help and its 1.x alias.
 func isHelp(line string) bool { return line == "/help" || line == "/?" }
 

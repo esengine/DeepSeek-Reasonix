@@ -2,12 +2,12 @@ import { useEffect, useRef, useState } from "react";
 import type { Checkpoint, RewindPlan, RewindResult, RewindScope } from "../../port/port";
 import type { Item } from "../../state/session";
 import { RewindControl } from "./RewindControl";
+import { CopyButton } from "../CopyButton";
 import { reason } from "../../i18n/kernel";
 import { t } from "../../i18n";
 import { StudioIcon } from "../StudioIcon";
 import { messageSource } from "../source";
 import { useViewer } from "../../state/viewer";
-import { useLabelFit } from "../labelfit";
 
 export function UserCard({
   item,
@@ -32,10 +32,8 @@ export function UserCard({
   const [failed, setFailed] = useState("");
   const box = useRef<HTMLTextAreaElement>(null);
   const source = messageSource(item.via, useViewer());
-  const row = useRef<HTMLDivElement>(null);
   const reopen = editable && draft === null;
   const rewind = !!(cp && onPrepareRewind && onCommitRewind && onUndoRewind);
-  const compact = useLabelFit(row, [item.steer ? t("插话") : "", source, reopen ? t("改写") : "", rewind ? t("回到这里") : ""].join("\n"));
 
   useEffect(() => {
     const el = box.current;
@@ -62,29 +60,12 @@ export function UserCard({
         <span className="line" />
       </div>
       <div className="c">
-        <div className="hl user-hl" ref={row}>
+        {(item.steer || source) && <div className="hl user-hl">
           {/* It reached the model inside a turn already running, which is why
               there is no checkpoint on this row to rewind to. */}
           {item.steer && <span className="steermark">{t("插话")}</span>}
           {source && <span className="viamark">{source}</span>}
-          {/* The entry point lives on the turn it returns to, so there is no
-              list to read and no turn number to match up by eye. */}
-          {reopen && (
-            <button
-              className="reask-open"
-              data-action="turn.edit"
-              data-target={item.id}
-              title={t("改写这条消息并重新发送")}
-              aria-label={compact ? t("改写") : undefined}
-              onClick={() => setDraft(item.text)}
-            >
-              <StudioIcon name="edit" />{!compact && t("改写")}
-            </button>
-          )}
-          {rewind && (
-            <RewindControl cp={cp!} compact={compact} onPrepare={onPrepareRewind!} onCommit={onCommitRewind!} onUndo={onUndoRewind!} />
-          )}
-        </div>
+        </div>}
         <div className="out">
           {draft === null ? (
             <div className="txt">{item.text}</div>
@@ -128,6 +109,19 @@ export function UserCard({
                 <span className="hint">{t("这一轮之后的记录会被丢弃")}</span>
               </div>
             </div>
+          )}
+        </div>
+        <div className="user-acts">
+          <CopyButton text={item.text} iconOnly showFeedback label={t("复制")} />
+          {reopen && (
+            <button type="button" className="reask-open" data-action="turn.edit" data-target={item.id}
+              title={t("改写这条消息并重新发送")} aria-label={t("改写")}
+              onClick={() => setDraft(item.text)}>
+              <StudioIcon name="edit" />
+            </button>
+          )}
+          {rewind && (
+            <RewindControl cp={cp!} compact onPrepare={onPrepareRewind!} onCommit={onCommitRewind!} onUndo={onUndoRewind!} />
           )}
         </div>
       </div>

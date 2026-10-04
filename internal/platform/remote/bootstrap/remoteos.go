@@ -20,6 +20,11 @@ type remoteOS interface {
 	// it — which on Windows is not how its own shell spells it.
 	Home(ctx context.Context, conn Conn, fs *sftpfs.FS) (string, error)
 	Paths(home, workspace string) StatePaths
+	// Absolute reports whether p is rooted on that machine, and if so returns
+	// it in the file layer's spelling.
+	// HomeRelative strips a leading ~ separator, reporting whether there was one.
+	HomeRelative(p string) (string, bool)
+	Absolute(p string) (string, bool)
 	Launch(spec LaunchSpec, p StatePaths) string
 	Fetch(d releaseasset.CLIDownload, dir, bin string) string
 	Downloader() string

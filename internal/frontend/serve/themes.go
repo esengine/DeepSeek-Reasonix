@@ -2,9 +2,13 @@
 package serve
 
 import (
+	"bytes"
+	"crypto/sha256"
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"strings"
+	"time"
 
 	"reasonix/internal/contract/config"
 	"reasonix/internal/ext/theme"
@@ -82,9 +86,8 @@ func (s *Server) activateTheme(w http.ResponseWriter, r *http.Request) {
 	w.WriteHeader(http.StatusNoContent)
 }
 
-// themeAsset serves a pack's background or preview. The bytes are immutable
-// for a given pack id — a user replacing their own image changes the file, not
-// the address — so this is cached hard and the frontend never has to bust it.
+// themeAsset serves a pack's background or preview. Imported packs can replace
+// images at the same URL, so clients must revalidate cached bytes.
 func (s *Server) themeAsset(w http.ResponseWriter, r *http.Request) {
 	kind, ok := theme.KindOf(r.PathValue("asset"))
 	if !ok {
@@ -97,6 +100,7 @@ func (s *Server) themeAsset(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	w.Header().Set("Content-Type", contentType)
-	w.Header().Set("Cache-Control", "private, max-age=3600")
-	_, _ = w.Write(raw)
+	w.Header().Set("Cache-Control", "private, no-cache")
+	w.Header().Set("ETag", fmt.Sprintf(`"%x"`, sha256.Sum256(raw)))
+	http.ServeContent(w, r, "", time.Time{}, bytes.NewReader(raw))
 }

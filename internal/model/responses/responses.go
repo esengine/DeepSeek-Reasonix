@@ -125,6 +125,7 @@ type client struct {
 	authed                             atomic.Bool
 
 	mu                   sync.Mutex
+	continuation         continuationState
 	lastResponseID       string
 	expectedPrefixDigest string
 }
@@ -264,19 +265,23 @@ func (c *client) Stream(ctx context.Context, req provider.Request) (<-chan provi
 	requestCtx := provider.WithRequestAttemptCounter(ctx)
 	body, usedPrevious, wireMessages := c.buildRequestBody(req)
 	resp, err := c.send(requestCtx, body)
-	if err != nil && usedPrevious && isStalePreviousResponseError(err) {
-		// A stateful response ID may expire server-side. Retrying once with full
-		// history is safe because no response body has started streaming.
+	downgrade := false
+	var apiErr *provider.APIError
+	if usedPrevious && errors.As(err, &apiErr) && apiErr.Status == http.StatusBadRequest {
+		downgrade = !isStalePreviousResponseError(err)
 		c.ResetContext()
-		body, _, wireMessages = c.buildRequestBody(req)
+		body, _, wireMessages = c.buildRequestBodyWithContinuation(req, false)
 		resp, err = c.send(requestCtx, body)
+		if err != nil {
+			return nil, &provider.ContinuationRecoveryError{Err: err}
+		}
 	}
 	if err != nil {
 		return nil, err
 	}
 	c.authed.Store(true)
 	out := make(chan provider.Chunk, 64)
-	go c.readStream(requestCtx, resp, out, wireMessages)
+	go c.readStream(requestCtx, resp, out, wireMessages, downgrade)
 	return out, nil
 }
 
@@ -303,8 +308,8 @@ func (c *client) send(ctx context.Context, body map[string]any) (*http.Response,
 }
 
 // isStalePreviousResponseError reads the error object, not its prose: the
-// protocol names the field it rejected in `param`, and a server that names
-// nothing is not telling us the id expired.
+// protocol names the field it rejected in `param`. An id that merely expired
+// leaves continuation usable for the next turn; any other 400 does not.
 func isStalePreviousResponseError(err error) bool {
 	var apiErr *provider.APIError
 	if !errors.As(err, &apiErr) || apiErr.Status != http.StatusBadRequest {
@@ -323,6 +328,10 @@ func isStalePreviousResponseError(err error) bool {
 }
 
 func (c *client) buildRequestBody(req provider.Request) (map[string]any, bool, []provider.Message) {
+	return c.buildRequestBodyWithContinuation(req, true)
+}
+
+func (c *client) buildRequestBodyWithContinuation(req provider.Request, allowPrevious bool) (map[string]any, bool, []provider.Message) {
 	messages := provider.SanitizeToolPairing(provider.ModelMessages(req.Messages))
 	body := map[string]any{"model": c.model, "stream": true}
 
@@ -394,8 +403,9 @@ func (c *client) buildRequestBody(req provider.Request) (map[string]any, bool, [
 
 	c.mu.Lock()
 	previousID, expectedDigest := c.lastResponseID, c.expectedPrefixDigest
+	mode := c.effectiveModeLocked()
 	c.mu.Unlock()
-	if c.mode == "stateful" && previousID != "" && len(messages) > 0 &&
+	if allowPrevious && mode == "stateful" && previousID != "" && len(messages) > 0 &&
 		messages[len(messages)-1].Role == provider.RoleUser &&
 		c.conversationDigest(messages[:len(messages)-1]) == expectedDigest {
 		body["input"] = messages[len(messages)-1].Content

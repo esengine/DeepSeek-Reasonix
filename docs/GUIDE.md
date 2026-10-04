@@ -20,6 +20,7 @@
 - [Reasoning language](./REASONING_LANGUAGE.md)
 - [Task contracts and pause policy](./TASK_CONTRACT.md)
 - [Custom OpenAI-compatible providers](#custom-openai-compatible-providers)
+- [Hooks](#hooks)
 - [Desktop hooks](#desktop-hooks)
 - [Keyboard shortcuts](#keyboard-shortcuts)
 - [Permissions & sandbox](#permissions--sandbox)
@@ -617,6 +618,126 @@ extra_body  = { enable_thinking = true }
 `extra_body` is merged into the chat JSON request body. Reasonix keeps core
 fields such as `model`, `messages`, `tools`, `stream`, and `thinking` under its
 own control.
+
+## Hooks
+
+Reasonix has hooks: shell commands that run at fixed points of the agent loop
+and can observe, inject context, or (on two events) veto what is about to
+happen. They are separate from permissions: `[permissions]` rules decide
+whether a tool call is allowed or prompted, a hook runs your own code.
+
+| Event | Fires | Can block |
+| --- | --- | --- |
+| `PreToolUse` | before a tool call, after matching; `toolName` and `toolArgs` are in the payload | yes |
+| `PostToolUse` | after a tool call (success or failure) | no |
+| `PostToolUseFailure` | after a tool call returned an error | no |
+| `PermissionRequest` | before an approval prompt is shown | no |
+| `UserPromptSubmit` | before a user prompt starts a turn | yes |
+| `Stop` / `StopFailure` | when a turn ends / fails | no |
+| `SessionStart` / `SessionEnd` | when a session becomes active / is closed or rotated by `/new` | no |
+| `SubagentStart` / `SubagentStop` | around a foreground `task` call | no |
+| `Notification` | when the agent needs the user's attention | no |
+| `PreCompact` | before compaction; stdout becomes extra summary guidance | no |
+| `PostLLMCall` | after each model turn; non-empty stdout on exit 0 replaces the stored reasoning text | no |
+
+Hooks are configured in `<Reasonix home>/settings.json` (global) or
+`<root>/.reasonix/settings.json` (project). Each event maps to a list of hooks:
+
+```json
+{
+  "hooks": {
+    "PreToolUse": [
+      {
+        "match": "bash",
+        "command": "sh ~/.reasonix/hooks/no-git-push.sh",
+        "description": "block git push",
+        "timeout": 3000
+      }
+    ],
+    "SessionStart": [
+      { "command": "echo 'Team rule: run make lint before every commit.'" }
+    ]
+  }
+}
+```
+
+Fields:
+
+- `command` (required): run by the platform shell.
+- `match`: tool events only; an anchored regex over the tool name, so `file`
+  does not match `read_file`. Empty or `*` means every tool.
+- `description`: the label shown in `/hooks` and in block notices.
+- `timeout`: milliseconds; default 5000 for `PreToolUse`, `PermissionRequest`
+  and `UserPromptSubmit`, 30000 otherwise.
+- `cwd` and `env`: working directory and extra environment.
+
+A malformed file loads no hooks and does not stop Reasonix.
+
+**Contract.** The event payload arrives as one line of JSON on stdin
+(`event`, `sessionId`, `cwd`, and by event `toolName`, `toolArgs`, `prompt`,
+`toolResult`, `error`, ...). The exit code is the verdict:
+
+- `0` passes. On `SessionStart`, stdout (plain text, or JSON with
+  `hookSpecificOutput.additionalContext`) is injected once into the next real
+  user turn, as described under [Desktop hooks](#desktop-hooks).
+- `2` blocks, but only on `PreToolUse` and `UserPromptSubmit`. A blocked tool
+  call is not run and the model receives `blocked: <hook> hook (<scope>) stopped
+  this call — <stderr, or stdout if empty> · command: ... · source: ...`, so write
+  the reason for the model to read.
+- Any other code, or exit 2 on a non-blocking event, only warns the user.
+- A timeout blocks on `PreToolUse` and `UserPromptSubmit` and warns elsewhere.
+  A hook that cannot be spawned does not block, and neither does a script that
+  crashes (exit 1, or 127 for a missing file): only an explicit exit 2 vetoes.
+
+**Example: refuse `git push` in bash.** The payload's `toolArgs` for `bash` is
+the tool's argument object, so the command is `toolArgs.command`. Save as
+`~/.reasonix/hooks/no-git-push.sh` (needs `jq`):
+
+```sh
+#!/bin/sh
+cmd=$(jq -r '.toolArgs.command // empty')
+case "$cmd" in
+  *"git push"*)
+    echo "git push is disabled in this setup; ask the user to push." >&2
+    exit 2 ;;
+esac
+exit 0
+```
+
+Without a hook, the simpler tool is a permission rule, which needs no script
+and holds in every mode:
+
+```toml
+[permissions]
+deny = ["Bash(git push*)"]
+```
+
+Prefer the rule when a command pattern is enough; use a hook when the decision
+needs code (inspect arguments, consult a file, log, or react to a prompt).
+
+**Scope.**
+
+- Global hooks (`<Reasonix home>/settings.json`) and hooks from installed
+  plugin packages apply, except in the read-only observe posture, which loads
+  no hooks at all.
+- Project hooks (`<root>/.reasonix/settings.json`) run only after the user
+  approves them as they stand (`reasonix trust`); until then they are held back
+  and a notice says so. Editing the file or a workspace script it names
+  withdraws the approval.
+- `reasonix review` never runs project hooks, approved or not: the checkout is
+  untrusted input, so only global and plugin hooks apply.
+- Only tool hooks (`PreToolUse`, `PostToolUse`, `PermissionRequest`),
+  `PostLLMCall` and `PreCompact` fire in every agent a session runs, subagents
+  included (see the `session_id` table below).
+
+**Limits.**
+
+- A hook cannot force the model's wording: a block reaches the model as a
+  refused call, and the model decides what to say or try next.
+- There is no per-session scope: hooks come from the settings files and apply
+  to every session that loads them.
+- Native hooks cannot answer an approval prompt; only a `PreToolUse` block
+  refuses a call.
 
 ## Desktop hooks
 

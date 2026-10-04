@@ -48,8 +48,8 @@ export function usePaint(hub: HubPort, runtimes: RuntimeView[], running: boolean
     lookPort
       ?.themes()
       .then((list) => setPack(list.find((p) => p.active) ?? null))
-      .catch(() => setPack(null));
-  }, [lookPort]);
+      .catch(onError);
+  }, [lookPort, onError]);
   useEffect(reloadThemes, [reloadThemes]);
 
   useEffect(() => {

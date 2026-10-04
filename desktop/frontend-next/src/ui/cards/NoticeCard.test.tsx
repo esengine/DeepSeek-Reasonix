@@ -26,6 +26,21 @@ const draw = (over: Partial<Notice> = {}) => render(<NoticeCard item={notice(ove
 // speaking, then the body. Both the headline and the gutter are new, and both
 // are the difference between a warning and a paragraph a healthy runtime wrote.
 describe("a notice card", () => {
+  it("shows the holder and claimed path from structured lease data", () => {
+    const box = draw({ code: "workspace_lease", detail: undefined,
+      workspaceLease: { contended: 0, heldMs: 0, idleMs: 0, holder: "Fixture A", holderSessionId: "session-a", paths: ["src/a.go"], requestedPaths: ["src/a.go"] },
+    } as Partial<Notice>);
+    expect(box.textContent).toContain("Fixture A");
+    expect(box.textContent).toContain("session-a");
+    expect(box.textContent).toContain("src/a.go");
+  });
+
+  it("shows the granted extent when a wait closes", () => {
+    const box = draw({ code: "workspace_lease_resumed", detail: undefined,
+      workspaceLease: { contended: 0, heldMs: 0, idleMs: 0, requestedPaths: ["src/b.go"] },
+    } as Partial<Notice>);
+    expect(box.textContent).toContain("src/b.go");
+  });
   it("names its speaker rather than opening as a bare paragraph", () => {
     const box = draw();
     expect(box.querySelector(".hl .nm")?.textContent).toBe(t("警告"));
@@ -83,5 +98,39 @@ describe("a hand-back notice", () => {
     await waitFor(() => expect(box.querySelector(".nmd a")).not.toBeNull(), LOADED);
     expect(box.querySelector(".nmd a")?.getAttribute("rel")).toContain("noopener");
     expect(box.querySelector(".nmd img[onerror]")).toBeNull();
+  });
+});
+
+// A notice whose sentence carries figures or the user's own words is drawn from
+// the typed payload, so the reader's language owns the whole line.
+describe("a coded notice with a payload", () => {
+  it("words the context-budget notice from its figures, not from the kernel's English", () => {
+    const box = draw({
+      level: "warn",
+      code: "context_budget",
+      text: "Context at 83% of the compaction threshold — the model was told it has about 135785 tokens of room left.",
+      detail: '{"percent":83,"remaining":135785}',
+    });
+    const said = box.querySelector(".find .t")?.textContent ?? "";
+    expect(said).toBe(t("上下文已用到压缩阈值的 {percent}%，已告知模型约剩 {remaining} 个词元的空间。", { percent: 83, remaining: 135785 }));
+    expect(said).not.toContain("compaction threshold");
+    expect(box.querySelector(".find .why")).toBeNull();
+  });
+
+  it("falls back to the kernel's text when the figures do not decode", () => {
+    const box = draw({ code: "context_budget", text: "kernel english", detail: "not json" });
+    expect(box.querySelector(".find .t")?.textContent).toContain("kernel english");
+  });
+
+  it("wraps the user's unapplied guidance in this build's sentence and keeps their words verbatim", () => {
+    const box = draw({
+      code: "unapplied_steer",
+      text: "Guidance was not applied because the turn ended before it could be processed. Send it again if it is still needed:\n同步最新的个人开发管理",
+      detail: "同步最新的个人开发管理",
+    });
+    const said = box.querySelector(".find .t")?.textContent ?? "";
+    expect(said).toContain(t("引导没有生效：这一轮在处理它之前就结束了。如果仍然需要，请再发送一次："));
+    expect(said).not.toContain("Guidance was not applied");
+    expect(box.querySelector(".find .why")?.textContent).toBe("同步最新的个人开发管理");
   });
 });

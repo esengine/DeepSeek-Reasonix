@@ -108,10 +108,14 @@ func (s *Server) skills(w http.ResponseWriter, r *http.Request) {
 		if scope, found := ctl.SkillOverrideScope(sk.Name); found {
 			switchScope = string(scope)
 		}
+		slashName := sk.SlashName()
+		if sk.DisableUserInvocation {
+			slashName = ""
+		}
 		entries = append(entries, skillEntry{
 			SwitchScope: switchScope,
 			Name:        sk.Name,
-			SlashName:   sk.SlashName(),
+			SlashName:   slashName,
 			Description: sk.Description,
 			Scope:       string(sk.Scope),
 			Plugin:      sk.Plugin,
@@ -121,7 +125,7 @@ func (s *Server) skills(w http.ResponseWriter, r *http.Request) {
 			Model:       sk.Model,
 			Effort:      sk.Effort,
 			AllowedURI:  sk.AllowedTools,
-			Manual:      strings.EqualFold(strings.TrimSpace(sk.Invocation), "manual"),
+			Manual:      sk.DisableModelInvocation || strings.EqualFold(strings.TrimSpace(sk.Invocation), "manual"),
 			Enabled:     ctl.SkillEnabled(sk.Name),
 		})
 	}

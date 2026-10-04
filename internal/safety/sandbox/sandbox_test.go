@@ -153,7 +153,7 @@ func TestResolveShellDecisionTable(t *testing.T) {
 		{"wsl bash on PATH, no git → powershell not wsl", "windows", onPath("bash", "powershell"), gitBash, never, always, wslIsPathBash, ShellPowerShell, ""},
 	}
 	for _, c := range cases {
-		got := resolveShell("", "", nil, c.goos, c.lookPath, c.exists, c.candidates, nil, c.probe, c.isWSL)
+		got := resolveShell("", "", nil, c.goos, c.lookPath, c.exists, c.candidates, nil, c.probe, c.isWSL, always)
 		if got.Kind != c.wantKind {
 			t.Errorf("%s: kind = %s, want %s (path=%s)", c.name, got.Kind, c.wantKind, got.Path)
 		}
@@ -182,19 +182,19 @@ func TestResolveShellPrefer(t *testing.T) {
 	noWSL := func(string) bool { return false }
 
 	// prefer=powershell forces PowerShell even when bash is present and probes ok.
-	got := resolveShell("powershell", "", nil, "windows", onPath("bash", "powershell", "pwsh"), never, gitBash, nil, always, noWSL)
+	got := resolveShell("powershell", "", nil, "windows", onPath("bash", "powershell", "pwsh"), never, gitBash, nil, always, noWSL, always)
 	if got.Kind != ShellPowerShell {
 		t.Errorf(`prefer="powershell": kind = %s, want powershell`, got.Kind)
 	}
 
 	// prefer=bash forces bash even on a host where PowerShell exists.
-	got = resolveShell("bash", "", nil, "windows", onPath("bash", "powershell"), never, gitBash, nil, always, noWSL)
+	got = resolveShell("bash", "", nil, "windows", onPath("bash", "powershell"), never, gitBash, nil, always, noWSL, never)
 	if got.Kind != ShellBash {
 		t.Errorf(`prefer="bash": kind = %s, want bash`, got.Kind)
 	}
 
 	// An explicit path is honoured for the forced kind.
-	got = resolveShell("pwsh", `C:\custom\pwsh.exe`, nil, "windows", onPath(), always, gitBash, nil, never, noWSL)
+	got = resolveShell("pwsh", `C:\custom\pwsh.exe`, nil, "windows", onPath(), always, gitBash, nil, never, noWSL, always)
 	if got.Kind != ShellPowerShell || got.Path != `C:\custom\pwsh.exe` {
 		t.Errorf(`prefer="pwsh" path: got {%s %q}, want {powershell "C:\custom\pwsh.exe"}`, got.Kind, got.Path)
 	}
@@ -203,14 +203,14 @@ func TestResolveShellPrefer(t *testing.T) {
 	// directory has not been added to PATH.
 	got = resolveShell("pwsh", "", nil, "windows", onPath("powershell"), func(p string) bool {
 		return p == `C:/Program Files/PowerShell/7/pwsh.exe`
-	}, gitBash, []string{`C:/Program Files/PowerShell/7/pwsh.exe`}, never, noWSL)
+	}, gitBash, []string{`C:/Program Files/PowerShell/7/pwsh.exe`}, never, noWSL, always)
 	if got.Kind != ShellPowerShell || got.Path != `C:/Program Files/PowerShell/7/pwsh.exe` {
 		t.Errorf(`prefer="pwsh" standard path: got {%s %q}, want {powershell "C:/Program Files/PowerShell/7/pwsh.exe"}`, got.Kind, got.Path)
 	}
 
 	// A forced shell that isn't installed warns and falls back to auto-detection.
 	var warn strings.Builder
-	got = resolveShell("powershell", "", &warn, "linux", onPath("bash"), never, gitBash, nil, always, noWSL)
+	got = resolveShell("powershell", "", &warn, "linux", onPath("bash"), never, gitBash, nil, always, noWSL, never)
 	if got.Kind != ShellBash {
 		t.Errorf("missing forced powershell should fall back to bash, got %s", got.Kind)
 	}
@@ -219,7 +219,7 @@ func TestResolveShellPrefer(t *testing.T) {
 	}
 
 	// An unrecognised value is treated as auto, not an error.
-	got = resolveShell("fish", "", nil, "windows", onPath("bash"), never, gitBash, nil, always, noWSL)
+	got = resolveShell("fish", "", nil, "windows", onPath("bash"), never, gitBash, nil, always, noWSL, never)
 	if got.Kind != ShellBash {
 		t.Errorf("unknown prefer should auto-detect, got %s", got.Kind)
 	}

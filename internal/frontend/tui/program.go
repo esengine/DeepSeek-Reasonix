@@ -43,10 +43,6 @@ type Options struct {
 	// Statusline, when set, turns the footer's context JSON into one line
 	// that replaces the telemetry row; "" keeps the built-in row.
 	Statusline func(ctx context.Context, stdin string) string
-	// YoloConfirmed says the one-time YOLO notice was already accepted, and
-	// ConfirmYolo records it when a second Ctrl+Y accepts it here.
-	YoloConfirmed bool
-	ConfirmYolo   func() error
 }
 
 // Run drives the terminal until the user quits or ctx ends.
@@ -59,8 +55,8 @@ func Run(ctx context.Context, opts Options) error {
 		go p.Send(clusterReport)
 	}
 	// Full screen repaints every frame, so the diff formatter runs off the render
-	// path: built-in rows now, formatted ones when the run lands. Inline writes to
-	// the scrollback, where a row cannot be repainted, so it stays inline.
+	// path: placeholder rows now, formatted ones when the run lands. Inline writes
+	// to the scrollback, where a row cannot be repainted, so it stays inline.
 	if !opts.Inline {
 		termrender.SetDiffFormatNotify(func(k termrender.DiffKey) { p.Send(diffFormattedMsg{key: k}) })
 		defer termrender.SetDiffFormatNotify(nil)
@@ -108,24 +104,27 @@ type model struct {
 	balance       string
 	statusline    string
 	compaction    Compaction
+	git           GitInfo
 	scr           *screen
 	picker        *sessionPicker
 	rewind        *rewindPicker
+	copying       *copyPicker
 	clearing      *clearConfirm
+	setup         *connectionSetup
 	lastEsc       time.Time // an idle Esc on an empty composer, arming the second
 	// frameRows is how tall the last inline frame was: a print has only the
 	// rows above it to land in.
 	frameRows int
 	glyphs    *glyphFit // console-measured stand-ins for runes drawn wider than counted
-	// yoloRestore is the posture Ctrl+Y leaves YOLO for; yoloArmedAt is a
-	// first, unconfirmed Ctrl+Y waiting for the second.
+	// yoloRestore is the posture Ctrl+Y leaves YOLO for.
 	yoloRestore string
-	yoloArmedAt time.Time
+	// verbose keeps an answer's thinking open as it settles; /verbose toggles it.
+	verbose bool
 }
 
 type (
 	updateMsg struct {
-		u  Update
+		us []Update
 		ok bool
 	}
 	actionMsg struct {
@@ -151,7 +150,7 @@ type (
 	statusTickMsg struct{}
 	// diffFormattedMsg is the diff formatter's background run reporting a
 	// result; the model repaints the rows that asked for that key so the
-	// formatted rows replace the built-in ones drawn while the run was in flight.
+	// formatted rows replace the placeholder drawn while the run was in flight.
 	diffFormattedMsg struct {
 		key termrender.DiffKey
 	}
@@ -175,6 +174,7 @@ func newModel(ctx context.Context, opts Options) *model {
 		glyphs: newConsoleGlyphFit(os.Stdout),
 	}
 	termrender.SetCells(ansi.WcWidth)
+	m.verbose = storedVerbose()
 	if !opts.Inline {
 		m.scr = &screen{follow: true, mouseOff: mouseCaptureOffByDefault()}
 	}
@@ -183,7 +183,7 @@ func newModel(ctx context.Context, opts Options) *model {
 
 func (m *model) Init() tea.Cmd {
 	m.updates = m.client.Subscribe(m.ctx)
-	cmds := []tea.Cmd{m.waitUpdate(), m.fetchStatus(), tickStatus(), m.fetchMeters()}
+	cmds := []tea.Cmd{m.waitUpdate(), m.fetchStatus(), tickStatus(), m.fetchMeters(), m.checkSetup()}
 	if m.opts.Restore {
 		cmds = append(cmds, m.fetchHistory(true))
 	}
@@ -197,10 +197,39 @@ func (m *model) Init() tea.Cmd {
 	return tea.Sequence(m.greet(), tea.Batch(cmds...))
 }
 
+// resize records the new terminal size and drops any held viewport position: the
+// rows re-wrap, so a held position no longer means what it did.
+func (m *model) resize(msg tea.WindowSizeMsg) {
+	m.width, m.height = msg.Width, msg.Height
+	m.composer.SetWidth(max(msg.Width-4, 10))
+	if m.scr != nil && m.scr.follow {
+		m.scr.yoff = 0
+	}
+}
+
+// waitUpdate hands the model the next stream frames. It coalesces everything
+// already queued into one message so a burst of deltas costs one render rather
+// than one per delta: the view re-parses the whole growing answer each time it
+// is drawn, so drawing a token at a time is quadratic in the stream length.
+// Order is kept, and a slow stream still delivers each frame as it arrives.
 func (m *model) waitUpdate() tea.Cmd {
 	return func() tea.Msg {
 		u, ok := <-m.updates
-		return updateMsg{u: u, ok: ok}
+		if !ok {
+			return updateMsg{ok: false}
+		}
+		us := []Update{u}
+		for {
+			select {
+			case v, ok := <-m.updates:
+				if !ok {
+					return updateMsg{us: us, ok: true}
+				}
+				us = append(us, v)
+			default:
+				return updateMsg{us: us, ok: true}
+			}
+		}
 	}
 }
 
@@ -226,16 +255,20 @@ type metersMsg struct {
 	balance    string
 	compaction *Compaction
 	statusline *string
+	git        *GitInfo
 }
 
 // fetchMeters reads what the footer shows that changes only between turns:
-// the wallet and where the session folds.
+// the wallet, where the session folds and the work tree's branch.
 func (m *model) fetchMeters() tea.Cmd {
 	return func() tea.Msg {
 		var out metersMsg
 		out.balance, _, _ = m.client.Balance(m.ctx)
 		if c, err := m.client.Compaction(m.ctx); err == nil {
 			out.compaction = &c
+		}
+		if g, err := m.client.WorkspaceGit(m.ctx); err == nil {
+			out.git = &g
 		}
 		if run := m.opts.Statusline; run != nil {
 			if s, err := m.client.Status(m.ctx); err == nil {
@@ -254,8 +287,7 @@ func tickStatus() tea.Cmd {
 func (m *model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	switch msg := msg.(type) {
 	case tea.WindowSizeMsg:
-		m.width, m.height = msg.Width, msg.Height
-		m.composer.SetWidth(max(msg.Width-4, 10))
+		m.resize(msg)
 		return m, nil
 	case tea.ModeReportMsg:
 		noteCells(msg)
@@ -264,13 +296,22 @@ func (m *model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if !msg.ok {
 			return m, nil
 		}
-		if msg.u.Gap {
-			return m, tea.Batch(m.fetchHistory(false), m.waitUpdate())
-		}
 		was := m.tr.Running
-		m.tr.Apply(msg.u.Event)
-		cmds := []tea.Cmd{m.commit(), m.waitUpdate(), m.noteRunning(was)}
-		if msg.u.Event.Kind == "turn_done" {
+		rearm := m.waitUpdate()
+		turnDone := false
+		for _, u := range msg.us {
+			if u.Gap {
+				// Frames between two points are gone: reload the record rather
+				// than apply a frame that follows a hole.
+				return m, tea.Batch(m.fetchHistory(false), rearm)
+			}
+			m.tr.Apply(u.Event)
+			if u.Event.Kind == "turn_done" {
+				turnDone = true
+			}
+		}
+		cmds := []tea.Cmd{m.commit(), rearm, m.noteRunning(was)}
+		if turnDone {
 			m.noteTurnEnd()
 			cmds = append(cmds, m.commit(), m.fetchMeters())
 		}
@@ -293,6 +334,9 @@ func (m *model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		if msg.statusline != nil {
 			m.statusline = *msg.statusline
+		}
+		if msg.git != nil {
+			m.git = *msg.git
 		}
 		return m, nil
 	case spinMsg:
@@ -324,7 +368,7 @@ func (m *model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.onCompletion(msg)
 		return m, nil
 	case tea.PasteMsg:
-		m.composer.InsertString(m.pastes.fold(msg.Content))
+		m.insertPaste(msg.Content)
 		return m, nil
 	case tea.KeyPressMsg:
 		return m.onKey(msg)
@@ -349,6 +393,14 @@ func (m *model) onScreenMsg(msg tea.Msg) (tea.Cmd, bool) {
 		return m.onClipText(msg), true
 	case helpMsg:
 		return m.onHelp(msg), true
+	case setupStateMsg:
+		return m.onSetupState(msg), true
+	case connectionsMsg:
+		return m.onConnections(msg), true
+	case connectionTestedMsg:
+		return m.onConnectionTested(msg), true
+	case connectionSavedMsg:
+		return m.onConnectionSaved(msg), true
 	case sessionsMsg:
 		return m.onSessions(msg), true
 	case resumedMsg:
@@ -370,7 +422,7 @@ func (m *model) onScreenMsg(msg tea.Msg) (tea.Cmd, bool) {
 	case edgeMsg:
 		return m.onEdge(), true
 	}
-	return nil, false
+	return m.onQueueMsg(msg)
 }
 
 // noteTurnEnd says how a turn that did not finish ended; a finished one says
@@ -393,6 +445,7 @@ func (m *model) restore(msg historyMsg) tea.Cmd {
 		return m.commit()
 	}
 	m.tr.Restore(msg.msgs)
+	m.pastes.seed(msg.msgs)
 	m.sayShown = map[int]int{}
 	if !msg.reprint {
 		m.committed = map[int]bool{}
@@ -463,6 +516,9 @@ func (m *model) settledChunk(it *Item) (settledPrint, bool) {
 	if m.scr != nil && shown == 0 && row.Reasoning != "" {
 		row.Fold = foldShut
 		p.row = &row
+	}
+	if m.verbose && shown == 0 && row.Reasoning != "" {
+		row.Fold = m.verboseFold()
 	}
 	return p, true
 }

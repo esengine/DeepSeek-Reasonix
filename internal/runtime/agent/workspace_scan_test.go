@@ -42,7 +42,7 @@ func walkReference(ctx context.Context, root string, limit int) workspaceScan {
 			complete = false
 			return nil
 		}
-		state[path] = pathState{exists: true, size: info.Size(), modTime: info.ModTime().UnixNano()}
+		state[path] = pathState{exists: true, size: info.Size(), modTime: info.ModTime().UnixNano(), mode: info.Mode()}
 		return nil
 	})
 	if err != nil {
@@ -96,5 +96,24 @@ func TestParallelScanAnswersAsTheSequentialWalk(t *testing.T) {
 	missing := filepath.Join(root, "nope")
 	if got := scanWorkspaceTo(t.Context(), missing, 10); got.complete {
 		t.Fatal("a root that does not exist was reported complete")
+	}
+}
+
+func TestWorkspaceScanLimitIsTheDocumentedBoundary(t *testing.T) {
+	if workspaceScanLimit != 50_000 {
+		t.Fatalf("workspaceScanLimit = %d; REASONIX.md documents completeness below 50k files", workspaceScanLimit)
+	}
+}
+
+func TestScanLimitOnlyTightens(t *testing.T) {
+	for _, tc := range []struct{ set, want int }{
+		{0, workspaceScanLimit},
+		{64, 64},
+		{workspaceScanLimit * 10, workspaceScanLimit},
+	} {
+		a := &Agent{agentConfig: agentConfig{workspaceScanLimit: tc.set}}
+		if got := a.scanLimit(); got != tc.want {
+			t.Errorf("set %d: scanLimit = %d, want %d", tc.set, got, tc.want)
+		}
 	}
 }

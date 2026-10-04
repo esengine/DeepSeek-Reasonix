@@ -8,6 +8,9 @@ archives. What Reasonix Studio reads instead:
 - plugin themes are packs of that shape, listed as
   `plugin:<plugin>:<directory>` (see `docs/PLUGIN_PACKAGES.md`).
 
+For the current format, a directly installable starter, and its management
+lifecycle, use the [Studio theme author guide](THEME_AUTHOR_GUIDE.md).
+
 Native theme packs for the Reasonix desktop app. Packs are controlled skins:
 semantic color tokens, density/corner recipes, and optional local images for
 the home and task/workspace scenes. They **cannot** run CSS, JavaScript, fonts,

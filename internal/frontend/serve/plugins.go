@@ -13,6 +13,7 @@ import (
 	"reasonix/internal/ext/hook"
 	"reasonix/internal/ext/installsource"
 	"reasonix/internal/ext/pluginpkg"
+	"reasonix/internal/ext/theme"
 )
 
 // A package's capabilities are assembled at boot, so every write here ends
@@ -119,7 +120,8 @@ func pluginViewFor(home, workspaceRoot string, p pluginpkg.InstalledPlugin) plug
 		view.Error = err.Error()
 		return view
 	}
-	view.Warnings = warnings
+	view.Warnings = append(warnings, theme.PluginWarnings(pkg)...)
+	view.Warnings = append(view.Warnings, hook.PackageWarnings(pkg)...)
 	view.Compatibility = pkg.Compatibility.Status
 	view.Skipped = pkg.Compatibility.Skipped
 
@@ -140,7 +142,9 @@ func pluginViewFor(home, workspaceRoot string, p pluginpkg.InstalledPlugin) plug
 		})
 	}
 	for _, pr := range inv.Prompts {
-		view.Prompts = append(view.Prompts, pluginItem{Name: pr.Name, Description: pr.Description})
+		view.Prompts = append(view.Prompts, pluginItem{
+			Name: pr.Name, Description: pr.Description, Invocation: "/" + p.Name + ":" + pr.Name,
+		})
 	}
 	for _, th := range inv.Themes {
 		view.Themes = append(view.Themes, pluginItem{Name: th.Name})

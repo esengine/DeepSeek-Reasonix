@@ -39,7 +39,16 @@ type taskRuntime struct {
 	// criteriaEpoch is the workspace state the broad-scope criteria capture last
 	// ran against, plus one so zero reads as never. A pointer for the same
 	// reason overScanLimit is one.
-	criteriaEpoch *atomic.Uint64
+	criteriaEpoch  *atomic.Uint64
+	workspaceProse *workspaceProseCache
+}
+
+func newTaskRuntime(limit TaskBudget) taskRuntime {
+	return taskRuntime{
+		ledger:         evidence.NewLedger(),
+		workspaceProse: new(workspaceProseCache),
+		budget:         runBudget{limit: normalizeTaskBudget(limit)},
+	}
 }
 
 // Nil-safe: a zero taskRuntime has no memo, which costs the walk it would have
@@ -80,13 +89,14 @@ type todoRevisions struct {
 // are named because each answers to its own condition in beginRunTurn.
 func (t *taskRuntime) restartLedger() {
 	*t = taskRuntime{
-		scopeID:       t.scopeID,
-		checkpoint:    t.checkpoint,
-		ledger:        t.ledger,
-		outcome:       evidence.NewOutcomeTracker(),
-		budget:        runBudget{limit: t.budget.limit},
-		overScanLimit: new(atomic.Bool),
-		criteriaEpoch: new(atomic.Uint64),
+		scopeID:        t.scopeID,
+		checkpoint:     t.checkpoint,
+		ledger:         t.ledger,
+		outcome:        evidence.NewOutcomeTracker(),
+		budget:         runBudget{limit: t.budget.limit},
+		overScanLimit:  new(atomic.Bool),
+		criteriaEpoch:  new(atomic.Uint64),
+		workspaceProse: new(workspaceProseCache),
 	}
 	// A new task is accepted under a new contract; a resumed one is not
 	// restarted, so the revision its checkpoint names stays in force.

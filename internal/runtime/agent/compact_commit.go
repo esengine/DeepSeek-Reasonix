@@ -53,7 +53,7 @@ func (a *contextWindow) commitSummaryProjection(commit summaryProjectionCommit) 
 		if errors.Is(err, errCompressStaleContext) {
 			return sessionstore.CompactionState{}, err
 		}
-		return sessionstore.CompactionState{}, fmt.Errorf("persist projection: %w", err)
+		return sessionstore.CompactionState{}, fmt.Errorf("persist projection: %w: %w", errProjectionNotPersisted, err)
 	}
 	a.sess.win.checkpointState = "applied"
 	receipt := state.LastReceipt

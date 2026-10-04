@@ -25,6 +25,7 @@ import { usePaint } from "./paint";
 import { rememberActivePane, savedActivePane } from "./activepane";
 import { Sidebar } from "./Sidebar";
 import { Sky } from "./Sky";import { useAddWorkspace } from "./addws";
+import { AddWorkspacePrompt } from "./AddWorkspacePrompt";
 import { PaneTabs } from "./PaneTabs";
 import { Onboarding } from "./Onboarding";
 import { Welcome } from "./Welcome";
@@ -753,6 +754,8 @@ export function App({ hub }: { hub: HubPort }) {
         </div>
 
       </div>
+
+      {adder.pathOpen && <AddWorkspacePrompt busy={adder.busy} onSubmit={adder.addPath} onClose={adder.closePath} />}
 
       {feedback && (networkPort ?? activePort) && (
         <Feedback port={(networkPort ?? activePort)!} tab={feedback} onClose={() => setFeedback(null)} onError={setError} onUnread={setFeedbackUnread} />

@@ -172,13 +172,14 @@ func TestSessionLeaseKeeperRecoveryRebindsControllerBeforeReturning(t *testing.T
 }
 
 func TestSessionInUseMessageNamesHolder(t *testing.T) {
+	otherPID := os.Getpid() + 1
 	acquired := time.Date(2026, 7, 6, 3, 4, 0, 0, time.UTC)
 	err := &sessionstore.SessionLeaseError{
 		Path: "/tmp/x.jsonl",
 		Info: &sessionstore.SessionLeaseInfo{
 			SessionPath: "/tmp/x.jsonl",
 			WriterID:    "writer-nonce-should-not-appear",
-			PID:         12345,
+			PID:         otherPID,
 			Hostname:    "devbox",
 			AcquiredAt:  acquired,
 		},
@@ -187,7 +188,7 @@ func TestSessionInUseMessageNamesHolder(t *testing.T) {
 	if !strings.Contains(msg, "another Reasonix process") {
 		t.Fatalf("message %q missing holder wording", msg)
 	}
-	if !strings.Contains(msg, "pid 12345") || !strings.Contains(msg, "on devbox") {
+	if !strings.Contains(msg, "pid "+strconv.Itoa(otherPID)) || !strings.Contains(msg, "on devbox") {
 		t.Fatalf("message %q missing pid/host", msg)
 	}
 	if !strings.Contains(msg, "since "+acquired.Local().Format("15:04")) {

@@ -186,6 +186,9 @@ func (a *contextWindow) emitCompactionTelemetry(t CompactionTelemetry) {
 	a.svc.sink.Emit(event.Event{Kind: event.Notice, Level: event.LevelInfo, Text: "compaction telemetry", Detail: detail})
 }
 
-func (a *contextWindow) emitCompactionAborted(trigger string) {
-	a.svc.sink.Emit(event.Event{Kind: event.CompactionDone, Compaction: event.Compaction{Trigger: trigger}})
+// emitCompactionAborted closes the card of a fold that installed nothing. code
+// is the class the host settled on, so the card can say why rather than only
+// that nothing folded; it is empty where no class applies.
+func (a *contextWindow) emitCompactionAborted(trigger string, code CompactionNoopReason) {
+	a.svc.sink.Emit(event.Event{Kind: event.CompactionDone, Compaction: event.Compaction{Trigger: trigger, Code: string(code)}})
 }

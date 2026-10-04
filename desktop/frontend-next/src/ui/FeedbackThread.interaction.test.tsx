@@ -109,20 +109,26 @@ describe("a question waiting for the reporter", () => {
     [FEEDBACK_CODE.rateLimited, /提交得太频繁/],
     [FEEDBACK_CODE.badToken, /身份已经变了/],
     [FEEDBACK_CODE.offline, /你写的回复还在/],
-    [FEEDBACK_CODE.unavailable, /暂时出了问题/],
+    [FEEDBACK_CODE.unavailable, /你写的回复还在/],
     [FEEDBACK_CODE.disabled, /暂时关闭/],
   ])("says what %s means and keeps the text", async (code, words) => {
     const port = portWith(asking);
     port.replyFeedback = vi.fn(async () => {
       throw new HttpError(409, code, { code, error: code });
     });
-    render(<FeedbackMine port={port} onFile={() => {}} />);
+    const onFile = vi.fn();
+    render(<FeedbackMine port={port} onFile={onFile} />);
     await screen.findByText("FB-AAAA-0001");
     await userEvent.type(box(), "macOS 15");
     await userEvent.click(sendButton());
     const alert = await screen.findByRole("alert");
     expect(alert.textContent).toMatch(words);
     expect(box().value).toBe("macOS 15");
+    if (code === FEEDBACK_CODE.unavailable) {
+      expect(alert.textContent).toContain("重发前先刷新列表确认是否送达");
+      await userEvent.click(screen.getByRole("button", { name: "去 GitHub" }));
+      expect(onFile).toHaveBeenCalledWith("https://github.com/esengine/DeepSeek-Reasonix/issues/new/choose");
+    }
     await waitFor(() => expect(port.myFeedback).toHaveBeenCalledTimes(code === FEEDBACK_CODE.notReplyable ? 2 : 1));
   });
 
