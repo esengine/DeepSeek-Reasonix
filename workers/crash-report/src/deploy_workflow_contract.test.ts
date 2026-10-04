@@ -50,7 +50,7 @@ describe("feedback triage migration workflow", () => {
     expect(step).toBeLessThan(workflow.indexOf("npx wrangler deploy"));
     const body = workflow.slice(step, workflow.indexOf("- name: Apply Studio telemetry schema"));
     expect(body).toContain("--file=migrate-feedback-triage.sql");
-    for (const name of ["feedback_replies", "feedback_blocks", "feedback_trust", "feedback_public_images", "feedback_install_status_updated", "feedback_replies_unhandled"]) {
+    for (const name of ["feedback_releases", "feedback_releases_install", "feedback_replies", "feedback_blocks", "feedback_trust", "feedback_public_images", "feedback_install_status_updated", "feedback_replies_unhandled"]) {
       expect(body).toContain(name);
     }
     expect(body).toContain("missing $name after migration");

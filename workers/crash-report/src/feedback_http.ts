@@ -40,6 +40,23 @@ export function jsonResponse(body: unknown, status = 200, headers: Record<string
   });
 }
 
-export function refuse(code: FeedbackCode, message: string): Response {
-  return jsonResponse({ error: { code, message } }, STATUS[code]);
+export type FeedbackLimit = "ip_hourly" | "install_hourly" | "install_daily" | "reply_hourly" | "reply_item" | "admin_attempts" | "global_daily" | "global_burst";
+
+export interface LimitDetails {
+  limit: FeedbackLimit;
+  resetsAt: string | null;
+  retryAfterSeconds: number | null;
+}
+
+export function windowDetails(limit: FeedbackLimit, now: Date): LimitDetails {
+  const span = limit === "global_daily" || limit === "install_daily" ? 86_400_000 : limit === "admin_attempts" ? 900_000 : limit === "global_burst" ? 60_000 : 3_600_000;
+  const reset = limit === "reply_item" ? null : limit === "global_burst" ? now.getTime() + span : (Math.floor(now.getTime() / span) + 1) * span;
+  return { limit, resetsAt: reset === null ? null : new Date(reset).toISOString(), retryAfterSeconds: reset === null ? null : Math.ceil((reset - now.getTime()) / 1000) };
+}
+
+export function refuse(code: "feedback.rate_limited" | "feedback.reply_limit", message: string, params: LimitDetails): Response;
+export function refuse(code: Exclude<FeedbackCode, "feedback.rate_limited" | "feedback.reply_limit">, message: string, params?: LimitDetails): Response;
+export function refuse(code: FeedbackCode, message: string, params?: LimitDetails): Response {
+  const headers: Record<string, string> = params?.retryAfterSeconds === null || params?.retryAfterSeconds === undefined ? {} : { "retry-after": String(params.retryAfterSeconds) };
+  return jsonResponse({ error: { code, message, ...(params ? { params } : {}) } }, STATUS[code], headers);
 }

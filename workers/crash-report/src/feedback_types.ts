@@ -21,6 +21,12 @@ export const AUTO_BLOCK_REJECTIONS = 3;
 export const AUTO_BLOCK_WINDOW_DAYS = 7;
 export const AUTO_BLOCK_HOURS = 168;
 export const TRUST_DAYS = 30;
+export const TRUST_ESTABLISHED_DAYS = 90;
+export const TRUST_ESTABLISHED_RELEASES = 5;
+export const MANUAL_TRUST_DAYS = 365;
+export const TRUSTED_PER_INSTALL_HOURLY = 12;
+export const TRUSTED_PER_INSTALL_DAILY = 60;
+export const TRUSTED_REPLIES_PER_INSTALL_HOURLY = 10;
 export const RESERVED_SHARE = 0.1;
 export const MAX_CAP = 5000;
 

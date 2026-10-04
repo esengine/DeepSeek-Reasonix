@@ -1,12 +1,27 @@
 import type { Env } from "./env";
-import { listLimit, readJson } from "./feedback_admin_store";
-import { audit, blockKey, capOverride, putBlock, setCapOverride } from "./feedback_blocks";
+import { listLimit, load, readJson } from "./feedback_admin_store";
+import { audit, auditStatement, blockKey, capOverride, putBlock, revokeTrustStatement, setCapOverride } from "./feedback_blocks";
 import { jsonResponse, refuse } from "./feedback_http";
 import { BlockBody, CapBody, UnblockBody } from "./feedback_schema";
-import { GLOBAL_DAILY } from "./feedback_types";
+import { GLOBAL_DAILY, MANUAL_TRUST_DAYS } from "./feedback_types";
 import { scrubSensitiveText } from "./scrub";
 
 const BLOCKS_LIMIT = 200;
+
+export async function setReceiptTrust(env: Env, receipt: string, grant: boolean): Promise<Response> {
+  const row = await load(env, receipt);
+  if (!row) return refuse("feedback.not_found", "unknown receipt");
+  const now = new Date();
+  const expiry = new Date(now.getTime() + MANUAL_TRUST_DAYS * 86_400_000).toISOString();
+  await env.DB.batch([
+    grant ? env.DB.prepare(
+      `INSERT INTO feedback_trust (install_hash, created_at, expires_at) VALUES (?,?,?)
+       ON CONFLICT (install_hash) DO UPDATE SET expires_at = MAX(feedback_trust.expires_at, excluded.expires_at)`,
+    ).bind(row.install_hash, now.toISOString(), expiry) : revokeTrustStatement(env, row.install_hash),
+    auditStatement(env, grant ? "trust" : "untrust", `${receipt} install:${row.install_hash}`),
+  ]);
+  return jsonResponse({ receipt, installTrusted: grant });
+}
 
 // handled = 0 replies belong to the converter and always have an issue; issue-less
 // ones carry handled = 2 and are the maintainer's queue, so neither starves the other.

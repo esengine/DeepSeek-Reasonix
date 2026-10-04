@@ -31,6 +31,14 @@ CREATE TABLE IF NOT EXISTS feedback_public_images (
   created_at TEXT NOT NULL
 );
 
+CREATE TABLE IF NOT EXISTS feedback_releases (
+  receipt TEXT PRIMARY KEY,
+  install_hash TEXT NOT NULL,
+  released_at TEXT NOT NULL
+);
+
+CREATE INDEX IF NOT EXISTS feedback_releases_install ON feedback_releases (install_hash);
+
 CREATE INDEX IF NOT EXISTS feedback_public_images_receipt ON feedback_public_images (receipt);
 
 CREATE TABLE IF NOT EXISTS feedback_config (

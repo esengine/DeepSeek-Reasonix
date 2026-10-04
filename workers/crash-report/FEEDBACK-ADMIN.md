@@ -1,4 +1,82 @@
-# Feedback admin page
+# Feedback administration
+
+## Trusted feedback limits
+
+Trust is derived only from server records, never from submission fields. Active
+trusted installs may submit 12/hour and 60/day and reply 10/hour; untrusted
+installs retain 3/hour, 10/day and 3 replies/hour. The 10 user replies per report
+cap is unchanged. Trusted installs bypass both the IP binding and D1 IP quota
+because unrelated installs can share a NAT. Install/IP blocks and global daily
+and burst ceilings still apply. Untrusted submissions stop at 90% of the daily
+global budget; trusted submissions may consume the remaining share.
+
+An explicit maintainer release grants 30 days from release, or 90 days after
+five distinct released receipts. Automatic received status alone does not count.
+Renewals never shorten an existing expiry. Reject and takedown revoke trust;
+automatic and explicit blocks always override grants.
+
+The external CLI can map `trust <receipt>` to authenticated
+`POST /v1/admin/feedback/<receipt>/trust` (empty body), and `untrust <receipt>` to
+`DELETE` on that path. POST grants 365 days; DELETE revokes. Both commit an audit
+entry with the mutation. Neither changes blocks. The CLI itself and browser
+controls are outside this change. Missing receipts return 404, unsupported
+methods 405, and all routes use the existing admin bearer/lockout gate.
+
+## Refusal contract
+
+Every feedback 429 carries `error.params` with exactly `limit`, `resetsAt`
+(UTC ISO timestamp or null), and `retryAfterSeconds` (integer or null).
+`Retry-After` matches the integer when a wait applies. Limit identifiers are
+`ip_hourly`, `install_hourly`, `install_daily`, `reply_hourly`, `reply_item`, and
+`admin_attempts`. The permanent item cap uses null reset/retry values and no
+Retry-After. Existing `feedback.rate_limited` and `feedback.reply_limit` codes
+remain. Global refusals retain HTTP 503/`feedback.busy` and include the same
+params shape with `global_daily` or `global_burst`.
+
+Hourly/daily limits reset on UTC boundaries; admin attempts use 15-minute
+windows. The Cloudflare IP binding does not expose its reset time: public IP
+refusals conservatively use the ordinary hourly IP boundary, for blocked and
+ordinary callers alike. Global burst refuses for a conservative 60 seconds.
+These are retry hints, not promises of admission.
+
+Blocked responses use the same admission decision as ordinary callers: IP
+binding first, then submission burst budget, caller counters and daily budget;
+replies check hourly quota before ownership/status and the per-report cap.
+Only if these gates allow admission is a block concealed behind the first
+ordinary hourly window (IP for untrusted, install/reply for trusted). No block
+status or expiry is included in body or headers; temporary and permanent blocks
+use the same code path. Invalid attachments and reply bodies are validated
+before admission for every caller. Submission replay still recovers the
+original receipt/token before new-admission gates. Late concurrent replays and
+failed storage refund their D1 admission counters; external limiter bindings
+cannot be refunded. Refunds are not crash-atomic with report persistence.
+
+New submissions require the install token when any report, trust grant or release
+ledger entry identifies the install, including after report retention. A release
+entry alone proves prior registration, not active trust. Existing receipt/key
+replays still recover a lost token. When Turnstile is enabled, new submissions
+must pass the same challenge gate before either ordinary or blocked admission;
+blocked callers also perform verification when supplying a challenge token.
+
+## Deployment and client follow-up
+
+A schema addition is required in `migrate-feedback-triage.sql`:
+`feedback_releases(receipt PRIMARY KEY, install_hash, released_at)` and
+`feedback_releases_install`. The manual platform deploy workflow applies that
+idempotent migration remotely, then checks both names in sqlite_master before
+deploying the worker. The ledger is not deleted by feedback or audit retention;
+it holds identifiers and timestamps only. Historical automatic/converted statuses
+are not inferred as releases. Existing clean-install trust backfill remains
+one-time and does not populate the ledger. Manual grants can recognize established
+contributors while new releases accumulate.
+
+Studio and TUI follow-up belongs on studio: decode typed params alongside existing
+sentinels, preserve them through the server projection, and localize hourly/daily,
+IP, global and item-cap presentation. Clients must never infer block status or
+describe a retry hint as guaranteed admission. Add transport, wire/frontend parity
+and adjacent submit/reply/replay interaction tests there.
+
+## Feedback admin page
 
 Read and triage in-app feedback in a browser instead of the `feedback-admin` CLI.
 

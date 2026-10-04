@@ -1,7 +1,7 @@
 import type { Env } from "./env";
 import { deleteAttachments, withdrawAttachments, ATTACHMENT_PREFIX } from "./feedback_attachments";
 import { load, listLimit, readJson } from "./feedback_admin_store";
-import { auditStatement, autoBlockStatement, grantTrustStatement, isBlocked, isTrusted, revokeTrustStatement } from "./feedback_blocks";
+import { auditStatement, autoBlockStatement, grantTrustStatement, isBlocked, isTrusted, releaseLedgerStatement, revokeTrustStatement } from "./feedback_blocks";
 import { jsonResponse, refuse } from "./feedback_http";
 import { releasedKeys, repliesFor } from "./feedback_read";
 import { RejectBody, ReleaseBody, ReplyBody } from "./feedback_schema";
@@ -44,7 +44,7 @@ export async function held(env: Env, url: URL): Promise<Response> {
   const trusted = new Set<string>();
   if (hashes.length > 0) {
     const marks = hashes.map(() => "?").join(",");
-    const { results } = await env.DB.prepare(`SELECT install_hash FROM feedback_trust WHERE install_hash IN (${marks})`).bind(...hashes).all<{ install_hash: string }>();
+    const { results } = await env.DB.prepare(`SELECT install_hash FROM feedback_trust WHERE install_hash IN (${marks}) AND expires_at > ?`).bind(...hashes, new Date().toISOString()).all<{ install_hash: string }>();
     for (const r of results) trusted.add(r.install_hash);
   }
   const replies = await repliesFor(env, rows.map((r) => r.receipt), 500);
@@ -99,9 +99,10 @@ export async function release(request: Request, env: Env, receipt: string, ctx?:
   if (!row) return refuse("feedback.not_found", "unknown receipt");
   if (row.status !== "held" && row.status !== "received") return refuse("feedback.bad_transition", "only held feedback can be released");
   const at = new Date().toISOString();
-  // One transaction: status, trust and image publication land together or not at all.
+  // One transaction keeps release accounting, trust and image publication together.
   const steps = [
     env.DB.prepare("UPDATE feedback SET status = 'received', updated_at = ? WHERE receipt = ? AND status = 'held'").bind(at, receipt),
+    releaseLedgerStatement(env, row.install_hash, receipt, at),
     grantTrustStatement(env, row.install_hash, receipt),
     ...(body.data.publishImages
       ? attachmentsOf(row).map((a) =>

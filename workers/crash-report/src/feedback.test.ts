@@ -283,6 +283,7 @@ describe("attachment hygiene", () => {
     const real = env.DB;
     const s = submission({ attachments: [{ name: "a.png", contentType: "image/png", dataBase64: PNG_B64 }] });
     env.DB = {
+      batch: real.batch,
       prepare: (sql: string) => {
         const st = real.prepare(sql);
         if (!sql.startsWith("INSERT INTO feedback (")) return st;
@@ -299,6 +300,8 @@ describe("attachment hygiene", () => {
     const res = await submit(s);
     expect(res.status).toBe(200);
     expect(objects.size).toBe(0);
+    const spent = await real.prepare("SELECT n FROM feedback_quota WHERE n > 0").first();
+    expect(spent).toBeNull();
   });
 
   it("accepts clean images and rejects a type mismatch", async () => {

@@ -80,7 +80,7 @@ jobs:
           CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
         run: |
           npx wrangler d1 execute reasonix-crash --remote --file=migrate-feedback-triage.sql
-          names="feedback_replies feedback_blocks feedback_trust feedback_public_images feedback_config feedback_audit feedback_replies_receipt feedback_replies_unhandled feedback_blocks_expires feedback_public_images_receipt feedback_audit_at feedback_install_status_updated"
+          names="feedback_releases feedback_releases_install feedback_replies feedback_blocks feedback_trust feedback_public_images feedback_config feedback_audit feedback_replies_receipt feedback_replies_unhandled feedback_blocks_expires feedback_public_images_receipt feedback_audit_at feedback_install_status_updated"
           list=$(for n in $names; do printf "'%s'," "$n"; done | sed 's/,$//')
           out=$(npx wrangler d1 execute reasonix-crash --remote --json --command "SELECT name FROM sqlite_master WHERE name IN ($list)")
           for name in $names; do
