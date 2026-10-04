@@ -1,6 +1,6 @@
 const R2_BASE = "https://dl.reasonix.io";
 const GITHUB_RELEASES_API = "https://api.github.com/repos/esengine/DeepSeek-Reasonix/releases?per_page=100";
-const GITHUB_LATEST_RELEASE_API = "https://api.github.com/repos/esengine/DeepSeek-Reasonix/releases/latest";
+const DESKTOP_TAG = /^desktop-(v((?:0|[1-9]\d*)\.(?:0|[1-9]\d*)\.(?:0|[1-9]\d*)))$/;
 const RELEASE_METHODS = "GET, HEAD, OPTIONS";
 const DESKTOP_DOWNLOAD_PAGE = "https://reasonix.io/?download=desktop#start";
 const DESKTOP_UPDATER_ASSETS = [
@@ -386,41 +386,66 @@ async function fetchManifestText(
   }
 }
 
-async function fetchLatestDesktopManifestFromGitHub(): Promise<Response | null> {
+function desktopManifestAsset(release: GitHubRelease): { url: string; version: string; order: string[] } | null {
+  const tag = typeof release.tag_name === "string" ? release.tag_name : "";
+  const match = tag.match(DESKTOP_TAG);
+  if (!match || release.draft !== false || release.prerelease !== false) return null;
+
+  const expectedManifestURL =
+    `https://github.com/esengine/DeepSeek-Reasonix/releases/download/${tag}/latest.json`;
+  const manifest = Array.isArray(release.assets)
+    ? release.assets.find((asset) =>
+        asset?.name === "latest.json" &&
+        asset.browser_download_url === expectedManifestURL &&
+        safeHTTPSURL(asset.browser_download_url) === expectedManifestURL &&
+        Number.isSafeInteger(asset.size) &&
+        (asset.size as number) > 0 &&
+        (asset.size as number) <= MAX_RELEASE_ASSET_SIZE)
+    : undefined;
+  if (!manifest?.browser_download_url) return null;
+  return { url: manifest.browser_download_url, version: match[1], order: match[2].split(".") };
+}
+
+function selectDesktopRelease(releases: GitHubRelease[]): { url: string; version: string } | null {
+  let selected: ReturnType<typeof desktopManifestAsset> = null;
+  for (const release of releases) {
+    const candidate = desktopManifestAsset(release);
+    if (candidate && (!selected || compareOrder(candidate.order, selected.order) > 0)) selected = candidate;
+  }
+  return selected;
+}
+
+const DESKTOP_LISTING_PAGE_SIZE = 100;
+export const DESKTOP_LISTING_MAX_PAGES = 10;
+
+type DesktopFallback =
+  | { kind: "found"; response: Response }
+  | { kind: "none" }
+  | { kind: "error" };
+
+async function fetchLatestDesktopManifestFromGitHub(): Promise<DesktopFallback> {
   try {
-    const latest = await fetch(GITHUB_LATEST_RELEASE_API, {
-      headers: {
-        accept: "application/vnd.github+json",
-        "user-agent": "reasonix-release-gateway",
-      },
-    });
-    if (!latest.ok) return null;
+    for (let page = 1; page <= DESKTOP_LISTING_MAX_PAGES; page += 1) {
+      const listing = await fetch(page === 1 ? GITHUB_RELEASES_API : `${GITHUB_RELEASES_API}&page=${page}`, {
+        headers: {
+          accept: "application/vnd.github+json",
+          "user-agent": "reasonix-release-gateway",
+        },
+      });
+      if (!listing.ok) return { kind: "error" };
 
-    const release = (await latest.json()) as GitHubRelease;
-    const tag = typeof release.tag_name === "string" ? release.tag_name : "";
-    const match = tag.match(/^desktop-(v(?:0|[1-9]\d*)\.(?:0|[1-9]\d*)\.(?:0|[1-9]\d*))$/);
-    if (!match || release.draft !== false || release.prerelease !== false) return null;
-
-    const expectedManifestURL =
-      `https://github.com/esengine/DeepSeek-Reasonix/releases/download/${tag}/latest.json`;
-    const manifest = Array.isArray(release.assets)
-      ? release.assets.find((asset) =>
-          asset?.name === "latest.json" &&
-          asset.browser_download_url === expectedManifestURL &&
-          safeHTTPSURL(asset.browser_download_url) === expectedManifestURL &&
-          Number.isSafeInteger(asset.size) &&
-          (asset.size as number) > 0 &&
-          (asset.size as number) <= MAX_RELEASE_ASSET_SIZE)
-      : undefined;
-    if (!manifest?.browser_download_url) return null;
-    return fetchManifestText(
-      manifest.browser_download_url,
-      "github-desktop-release",
-      "stable",
-      match[1],
-    );
+      const releases = (await listing.json()) as GitHubRelease[];
+      if (!Array.isArray(releases)) return { kind: "error" };
+      const selected = selectDesktopRelease(releases);
+      if (selected) {
+        const response = await fetchManifestText(selected.url, "github-desktop-release", "stable", selected.version);
+        return response ? { kind: "found", response } : { kind: "error" };
+      }
+      if (releases.length < DESKTOP_LISTING_PAGE_SIZE) return { kind: "none" };
+    }
+    return { kind: "none" };
   } catch {
-    return null;
+    return { kind: "error" };
   }
 }
 
@@ -446,7 +471,15 @@ async function loadDesktopReleaseManifest(channel: ReleaseChannel): Promise<Resp
 
   if (channel === "stable") {
     const github = await fetchLatestDesktopManifestFromGitHub();
-    if (github) return github;
+    if (github.kind === "found") return github.response;
+    return new Response(
+      JSON.stringify({
+        error: "desktop release manifest unavailable",
+        channel,
+        reason: github.kind === "none" ? "no-desktop-release-found" : "upstream-error",
+      }) + "\n",
+      { status: 502, headers: gatewayHeaders("unavailable") },
+    );
   }
 
   return new Response(JSON.stringify({ error: "desktop release manifest unavailable", channel }) + "\n", {

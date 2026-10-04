@@ -1,5 +1,6 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import {
+  DESKTOP_LISTING_MAX_PAGES,
   cliReleaseChannel,
   desktopReleaseChannel,
   handleCLIRelease,
@@ -293,7 +294,7 @@ describe("desktop Stable GitHub fallback", () => {
     expect(emptyFetch).toHaveBeenCalledTimes(2);
   });
 
-  it("uses /releases/latest and requires the release tag to match the manifest version", async () => {
+  it("lists releases and requires the release tag to match the manifest version", async () => {
     const githubBase =
       "https://github.com/esengine/DeepSeek-Reasonix/releases/download/desktop-v1.18.0/";
     const invalidR2 = desktopManifest("v1.19.0");
@@ -301,7 +302,7 @@ describe("desktop Stable GitHub fallback", () => {
     const fetchMock = vi
       .fn()
       .mockResolvedValueOnce(new Response(JSON.stringify(invalidR2), { status: 200 }))
-      .mockResolvedValueOnce(new Response(JSON.stringify(githubDesktopRelease("v1.18.0")), { status: 200 }))
+      .mockResolvedValueOnce(new Response(JSON.stringify([githubDesktopRelease("v1.18.0")]), { status: 200 }))
       .mockResolvedValueOnce(new Response(desktopManifestText("v1.18.0", githubBase), { status: 200 }));
     vi.stubGlobal("fetch", fetchMock);
 
@@ -313,18 +314,18 @@ describe("desktop Stable GitHub fallback", () => {
     expect(response.headers.get("x-reasonix-release-source")).toBe("github-desktop-release");
     expect(fetchMock.mock.calls.map((call) => call[0])).toEqual([
       "https://dl.reasonix.io/latest/latest.json",
-      "https://api.github.com/repos/esengine/DeepSeek-Reasonix/releases/latest",
+      "https://api.github.com/repos/esengine/DeepSeek-Reasonix/releases?per_page=100",
       `${githubBase}latest.json`,
     ]);
   });
 
-  it("rejects a GitHub manifest whose version disagrees with the latest release tag", async () => {
+  it("rejects a GitHub manifest whose version disagrees with the selected release tag", async () => {
     const manifestBase =
       "https://github.com/esengine/DeepSeek-Reasonix/releases/download/desktop-v1.17.9/";
     const fetchMock = vi
       .fn()
       .mockResolvedValueOnce(new Response("missing", { status: 404 }))
-      .mockResolvedValueOnce(new Response(JSON.stringify(githubDesktopRelease("v1.18.0")), { status: 200 }))
+      .mockResolvedValueOnce(new Response(JSON.stringify([githubDesktopRelease("v1.18.0")]), { status: 200 }))
       .mockResolvedValueOnce(new Response(desktopManifestText("v1.17.9", manifestBase), { status: 200 }));
     vi.stubGlobal("fetch", fetchMock);
 
@@ -332,6 +333,153 @@ describe("desktop Stable GitHub fallback", () => {
 
     expect(response.status).toBe(502);
     expect(fetchMock).toHaveBeenCalledTimes(3);
+  });
+
+  it("selects the newest desktop-v* among mixed release lines without using repo-wide latest", async () => {
+    const base = "https://github.com/esengine/DeepSeek-Reasonix/releases/download/desktop-v1.39.7/";
+    const releases = [
+      githubDesktopRelease("v2.30.0", { tag_name: "studio-v2.30.0" }),
+      githubDesktopRelease("v1.40.0", { tag_name: "v1.40.0" }),
+      githubDesktopRelease("v1.39.9", { draft: true }),
+      githubDesktopRelease("v1.39.8", { prerelease: true }),
+      githubDesktopRelease("v1.40.0-rc.1"),
+      githubDesktopRelease("v01.50.0"),
+      githubDesktopRelease("v1.39.7"),
+      githubDesktopRelease("v1.39.10", { assets: [] }),
+      githubDesktopRelease("v1.9.12"),
+    ];
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce(new Response("missing", { status: 404 }))
+      .mockResolvedValueOnce(new Response(JSON.stringify(releases), { status: 200 }))
+      .mockResolvedValueOnce(new Response(desktopManifestText("v1.39.7", base), { status: 200 }));
+    vi.stubGlobal("fetch", fetchMock);
+
+    const response = await handleDesktopReleaseManifest("stable");
+    const body = await response.json() as { version?: string };
+
+    expect(response.status).toBe(200);
+    expect(body.version).toBe("v1.39.7");
+    expect(fetchMock.mock.calls.map((call) => call[0])).toEqual([
+      "https://dl.reasonix.io/latest/latest.json",
+      "https://api.github.com/repos/esengine/DeepSeek-Reasonix/releases?per_page=100",
+      `${base}latest.json`,
+    ]);
+  });
+
+  it("compares desktop versions numerically, not lexically", async () => {
+    const base = "https://github.com/esengine/DeepSeek-Reasonix/releases/download/desktop-v1.10.0/";
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce(new Response("missing", { status: 404 }))
+      .mockResolvedValueOnce(
+        new Response(
+          JSON.stringify([githubDesktopRelease("v1.9.12"), githubDesktopRelease("v1.10.0")]),
+          { status: 200 },
+        ),
+      )
+      .mockResolvedValueOnce(new Response(desktopManifestText("v1.10.0", base), { status: 200 }));
+    vi.stubGlobal("fetch", fetchMock);
+
+    const response = await handleDesktopReleaseManifest("stable");
+
+    expect((await response.json() as { version?: string }).version).toBe("v1.10.0");
+  });
+
+  it("answers 502 when the listing holds no desktop release", async () => {
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce(new Response("missing", { status: 404 }))
+      .mockResolvedValueOnce(
+        new Response(JSON.stringify([githubDesktopRelease("v2.1.0", { tag_name: "studio-v2.1.0" })]), {
+          status: 200,
+        }),
+      );
+    vi.stubGlobal("fetch", fetchMock);
+
+    expect((await handleDesktopReleaseManifest("stable")).status).toBe(502);
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+  });
+
+  const otherRelease = (i: number) => ({ tag_name: i % 2 ? `studio-v2.${i}.0` : `v1.${i}.0`, draft: false, prerelease: false, assets: [] });
+  const fullPage = (from: number) => Array.from({ length: 100 }, (_, i) => otherRelease(from + i));
+  const listUrl = (page: number) =>
+    `https://api.github.com/repos/esengine/DeepSeek-Reasonix/releases?per_page=100${page > 1 ? `&page=${page}` : ""}`;
+
+  it("pages past 150 studio/v* releases to find a desktop release on page 3", async () => {
+    const base = "https://github.com/esengine/DeepSeek-Reasonix/releases/download/desktop-v1.39.7/";
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce(new Response("missing", { status: 404 }))
+      .mockResolvedValueOnce(new Response(JSON.stringify(fullPage(0)), { status: 200 }))
+      .mockResolvedValueOnce(new Response(JSON.stringify(fullPage(100)), { status: 200 }))
+      .mockResolvedValueOnce(
+        new Response(JSON.stringify([otherRelease(300), githubDesktopRelease("v1.39.6"), githubDesktopRelease("v1.39.7")]), { status: 200 }),
+      )
+      .mockResolvedValueOnce(new Response(desktopManifestText("v1.39.7", base), { status: 200 }));
+    vi.stubGlobal("fetch", fetchMock);
+
+    const response = await handleDesktopReleaseManifest("stable");
+
+    expect((await response.json() as { version?: string }).version).toBe("v1.39.7");
+    expect(fetchMock.mock.calls.map((call) => call[0])).toEqual([
+      "https://dl.reasonix.io/latest/latest.json",
+      listUrl(1),
+      listUrl(2),
+      listUrl(3),
+      `${base}latest.json`,
+    ]);
+  });
+
+  it("stops at the page cap and reports none found, not an error or a wrong release", async () => {
+    const fetchMock = vi.fn(async (url: string) =>
+      url.startsWith("https://api.github.com/")
+        ? new Response(JSON.stringify(fullPage(0)), { status: 200 })
+        : new Response("missing", { status: 404 }),
+    );
+    vi.stubGlobal("fetch", fetchMock);
+
+    const response = await handleDesktopReleaseManifest("stable");
+    const body = await response.json() as { reason?: string };
+
+    expect(response.status).toBe(502);
+    expect(body.reason).toBe("no-desktop-release-found");
+    expect(fetchMock).toHaveBeenCalledTimes(1 + DESKTOP_LISTING_MAX_PAGES);
+  });
+
+  it("reports an upstream error when a later page fails", async () => {
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce(new Response("missing", { status: 404 }))
+      .mockResolvedValueOnce(new Response(JSON.stringify(fullPage(0)), { status: 200 }))
+      .mockResolvedValueOnce(new Response("rate limited", { status: 403 }));
+    vi.stubGlobal("fetch", fetchMock);
+
+    const response = await handleDesktopReleaseManifest("stable");
+
+    expect(response.status).toBe(502);
+    expect((await response.json() as { reason?: string }).reason).toBe("upstream-error");
+    expect(fetchMock).toHaveBeenCalledTimes(3);
+  });
+
+  it("orders by strict semver within the found page, not listing order", async () => {
+    const base = "https://github.com/esengine/DeepSeek-Reasonix/releases/download/desktop-v1.39.12/";
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce(new Response("missing", { status: 404 }))
+      .mockResolvedValueOnce(new Response(JSON.stringify(fullPage(0)), { status: 200 }))
+      .mockResolvedValueOnce(
+        new Response(
+          JSON.stringify([githubDesktopRelease("v1.39.12"), githubDesktopRelease("v1.39.9"), githubDesktopRelease("v1.39.2")]),
+          { status: 200 },
+        ),
+      )
+      .mockResolvedValueOnce(new Response(desktopManifestText("v1.39.12", base), { status: 200 }));
+    vi.stubGlobal("fetch", fetchMock);
+
+    const response = await handleDesktopReleaseManifest("stable");
+
+    expect((await response.json() as { version?: string }).version).toBe("v1.39.12");
   });
 
   it("rejects a non-canonical or zero-byte latest.json release asset", async () => {
@@ -353,7 +501,7 @@ describe("desktop Stable GitHub fallback", () => {
       const fetchMock = vi
         .fn()
         .mockResolvedValueOnce(new Response("missing", { status: 404 }))
-        .mockResolvedValueOnce(new Response(JSON.stringify(release), { status: 200 }));
+        .mockResolvedValueOnce(new Response(JSON.stringify([release]), { status: 200 }));
       vi.stubGlobal("fetch", fetchMock);
 
       const response = await handleDesktopReleaseManifest("stable");
