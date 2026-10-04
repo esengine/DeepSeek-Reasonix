@@ -82,6 +82,15 @@ export interface BrowserToolsSettings {
   path: string;
 }
 
+// The write-serialization switch as the user file holds it, beside what this
+// workspace will run with: a project file may set the same key and outrank it.
+// On means writers that declare no write_paths take the whole-workspace lock.
+export interface OpaqueWriterSerializationSettings {
+  enabled: boolean;
+  effective: boolean;
+  path: string;
+}
+
 // When a run reads as no longer moving. Only the user file holds it: a
 // project file cannot pause the user's runs.
 export type DisplayCurrencyMode = "auto" | "CNY" | "USD";

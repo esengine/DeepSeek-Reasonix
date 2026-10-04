@@ -28,6 +28,7 @@ import { ConfigTrouble } from "./ConfigTrouble";
 import { Compaction } from "./Compaction";
 import { Sandbox } from "./Sandbox";
 import { BrowserTools } from "./BrowserTools";
+import { OpaqueWriters } from "./OpaqueWriters";
 import { ProgressWatch } from "./ProgressWatch";
 import { Account } from "./Account";
 import { Backup } from "./Backup";
@@ -608,6 +609,12 @@ export function Settings({ hub, onError, port, networkPort, networkHost, status,
                 hint={t("agent 用来打开和操作网页的工具。该开关单独保存，不受命令行版本浏览器设置的影响。修改会重建运行时，任务运行期间无法变更。")}
               >
                 <BrowserTools port={port} onChanged={onChanged} />
+              </Group>
+              <Group id="opaque-writers"
+                title={t("写锁串行")}
+                hint={t("无法声明写入范围的工具会占用整个工作区，同一项目的会话因此排队。关闭后这类工具不再互相阻塞，多个会话可以同时跑构建。修改会重建运行时，任务运行期间无法变更。")}
+              >
+                <OpaqueWriters port={port} onChanged={onChanged} />
               </Group>
             </>
           )}

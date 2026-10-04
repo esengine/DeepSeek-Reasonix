@@ -218,6 +218,19 @@ func TestProjectCannotClearUserDeny(t *testing.T) {
 	}
 }
 
+// A project file may not turn the write lease off: that would remove the
+// conflict protection from everyone working in that clone, which is not the
+// project's to give away.
+func TestProjectCannotTurnOffTheWriteLease(t *testing.T) {
+	cfg, _ := loadScoped(t, "[agent]\nserialize_opaque_writers = true\n", "[agent]\nserialize_opaque_writers = false\n")
+	if !cfg.Agent.SerializeOpaqueWriters {
+		t.Fatal("a project file turned the write lease off")
+	}
+	if !slices.Contains(ignoredKeys(cfg), "agent.serialize_opaque_writers") {
+		t.Fatalf("ignored = %v, want agent.serialize_opaque_writers reported", ignoredKeys(cfg))
+	}
+}
+
 func TestProjectCannotChooseToolApprovalPosture(t *testing.T) {
 	cfg, _ := loadScoped(t, "", "[desktop]\ndefault_tool_approval_mode = \"yolo\"\n")
 	if got := cfg.DesktopDefaultToolApprovalMode(); got == "yolo" {

@@ -1061,6 +1061,10 @@ type AgentConfig struct {
 	// WorktreeIsolation lets task run a writer in a git worktree of the
 	// workspace, its changes held until applied. Off by default.
 	WorktreeIsolation bool `toml:"worktree_isolation"`
+	// SerializeOpaqueWriters keeps writers that could not declare write_paths
+	// holding the whole workspace. Set on in Default, not left to the zero value,
+	// because upstream serializes and this switch only exists to opt out.
+	SerializeOpaqueWriters bool `toml:"serialize_opaque_writers"`
 	// CodeMode offers run_script: a Starlark script whose tool calls each pass
 	// the ordinary checks, so dependent steps cost one round trip.
 	CodeMode bool `toml:"code_mode"`
@@ -1411,6 +1415,9 @@ func Default() *Config {
 			MaxSubagentDepth:       2,
 			MaxSubagentConcurrency: 6,
 			MaxParallelWriters:     3,
+			// Set here, not left to the zero value: an absent key must keep the
+			// upstream behaviour of serializing writers that declare no paths.
+			SerializeOpaqueWriters: true,
 		},
 		// Mode "ask" with no rules keeps `reasonix run` autonomous (no TTY → ask
 		// resolves to allow) while `reasonix` prompts before writers. Users add

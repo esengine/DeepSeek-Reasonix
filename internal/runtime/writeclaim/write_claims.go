@@ -7,6 +7,7 @@ import (
 	"path/filepath"
 	"runtime"
 	"strings"
+	"sync/atomic"
 )
 
 // DefaultMaxSubagentConcurrency is the session-wide sub-agent concurrency
@@ -118,6 +119,18 @@ func SubagentWriteClaim(ctx context.Context) WritePathSet {
 	return SubagentWriteGrant(ctx).Scope()
 }
 
+// serializeWholeWorkspace gates whether a writer that could not declare write
+// paths claims the whole workspace for exclusive use. It ships on, which is
+// upstream behaviour; boot sets it once from the user config. It is atomic so a
+// build that sets it cannot race a session already asking Overlaps.
+var serializeWholeWorkspace atomic.Bool
+
+func init() { serializeWholeWorkspace.Store(true) }
+
+// SetSerializeWholeWorkspace sets the boot-time value of the gate above. Left
+// untouched, whole-workspace claims keep serializing writers as upstream does.
+func SetSerializeWholeWorkspace(on bool) { serializeWholeWorkspace.Store(on) }
+
 // WholeWorkspaceWriteClaim claims the entire workspace for a writer that did
 // not declare write_paths. Such tasks may only run serially among writers.
 func WholeWorkspaceWriteClaim(workspaceRoot string) (WritePathSet, error) {
@@ -132,6 +145,12 @@ func WholeWorkspaceWriteClaim(workspaceRoot string) (WritePathSet, error) {
 // or case-equivalent on case-insensitive filesystems).
 func (s WritePathSet) Overlaps(other WritePathSet) bool {
 	if s.Empty() || other.Empty() {
+		return false
+	}
+	if !serializeWholeWorkspace.Load() && (s.WholeWorkspace || other.WholeWorkspace) {
+		// Serialization turned off: an opaque writer's whole-workspace claim
+		// stops conflicting with anything, so one session's `go build` no
+		// longer blocks another's. Every caller of Overlaps sees this.
 		return false
 	}
 	if s.WholeWorkspace || other.WholeWorkspace {

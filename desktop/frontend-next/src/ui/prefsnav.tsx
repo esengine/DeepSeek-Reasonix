@@ -218,6 +218,9 @@ export const SETTINGS: SettingEntry[] = [
   // The tools are bound while a runtime is assembled, and the save rebuilds this
   // one. The shared [browser] enabled key belongs to the 1.x command line.
   { section: "tools", anchor: "browser-tools", title: "内置浏览器", scope: "machine", apply: "runtime-rebuild", keywords: ["browser", "网页", "chrome", "浏览器工具"] },
+  // The lease is bound while a runtime is assembled, so its save rebuilds this
+  // one. Off is the only state that differs from upstream, and it is a saved key.
+  { section: "tools", anchor: "opaque-writers", title: "写锁串行", scope: "machine", apply: "runtime-rebuild", keywords: ["锁", "串行", "并行", "队列", "bash", "mcp", "写声明", "工作区锁"] },
 
   // The four blocks below carry a scope control of their own, and the kernel
   // takes that choice as a parameter — hook.Scope, McpInstallScope, the skill

@@ -1,4 +1,4 @@
-import type { Adjudications, BrowserToolsSettings, ConfigProblem, ConfigRepair, PermissionLists, PermissionRules, SandboxSettings } from "./port";
+import type { Adjudications, BrowserToolsSettings, ConfigProblem, ConfigRepair, OpaqueWriterSerializationSettings, PermissionLists, PermissionRules, SandboxSettings } from "./port";
 import type { DisplayCurrencyMode, DisplayCurrencySettings, ProgressWatchSettings } from "./boundary";
 import { MockShell } from "./mock_shell";
 
@@ -113,6 +113,17 @@ export class MockBoundary extends MockShell {
   async saveDisplayCurrency(mode: DisplayCurrencyMode): Promise<DisplayCurrencySettings> {
     this.currency = { ...this.currency, mode };
     return { ...this.currency };
+  }
+
+  private opaque: OpaqueWriterSerializationSettings = { enabled: true, effective: true, path: "/Users/you/.reasonix/config.toml" };
+
+  async opaqueWriters(): Promise<OpaqueWriterSerializationSettings> {
+    return { ...this.opaque };
+  }
+
+  async saveOpaqueWriters(enabled: boolean): Promise<OpaqueWriterSerializationSettings> {
+    this.opaque = { ...this.opaque, enabled, effective: enabled };
+    return { ...this.opaque };
   }
 
   private watch: ProgressWatchSettings = {

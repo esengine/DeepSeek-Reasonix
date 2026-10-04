@@ -29,6 +29,10 @@ type heldScope struct {
 	endpoints    heldEndpoints
 	layaPython   string
 	layaLocal    bool
+	// serializeOpaque is the user's serialize_opaque_writers. A project file may
+	// not turn the write lease off: that would remove conflict protection from
+	// everyone working in that clone, which is not the project's to give away.
+	serializeOpaque bool
 }
 
 func holdUserScope(c *Config) heldScope {
@@ -39,18 +43,19 @@ func holdUserScope(c *Config) heldScope {
 	shell := c.Tools.Shell
 	shell.Env = maps.Clone(shell.Env)
 	return heldScope{
-		sandbox:      s,
-		permissions:  p,
-		approvalMode: c.Desktop.DefaultToolApprovalMode,
-		autoSubmit:   c.AutoSubmit,
-		shell:        shell,
-		rgPath:       c.Tools.Search.RgPath,
-		lsp:          maps.Clone(c.LSP.Servers),
-		browser:      c.Browser,
-		network:      c.Network,
-		endpoints:    holdUserEndpoints(c),
-		layaPython:   c.Tools.SystemOne.Laya.Python,
-		layaLocal:    c.Tools.SystemOne.Laya.Local,
+		sandbox:         s,
+		permissions:     p,
+		approvalMode:    c.Desktop.DefaultToolApprovalMode,
+		autoSubmit:      c.AutoSubmit,
+		shell:           shell,
+		rgPath:          c.Tools.Search.RgPath,
+		lsp:             maps.Clone(c.LSP.Servers),
+		browser:         c.Browser,
+		network:         c.Network,
+		endpoints:       holdUserEndpoints(c),
+		layaPython:      c.Tools.SystemOne.Laya.Python,
+		layaLocal:       c.Tools.SystemOne.Laya.Local,
+		serializeOpaque: c.Agent.SerializeOpaqueWriters,
 	}
 }
 
@@ -120,6 +125,12 @@ func (h heldScope) narrow(c *Config, r Roots, root string, projectMeta toml.Meta
 		c.ignoreProject("auto_submit", fmt.Sprintf("%t", c.AutoSubmit), ProjectUserOnly)
 		c.AutoSubmit = h.autoSubmit
 	}
+	// Turning the write lease off is the user's alone: a cloned repo must not be
+	// able to remove the conflict protection from everyone working in it.
+	if c.Agent.SerializeOpaqueWriters != h.serializeOpaque {
+		c.ignoreProject("agent.serialize_opaque_writers", fmt.Sprintf("%t", c.Agent.SerializeOpaqueWriters), ProjectUserOnly)
+	}
+	c.Agent.SerializeOpaqueWriters = h.serializeOpaque
 	h.narrowSandbox(c, ws)
 	h.narrowPermissions(c)
 	if NormalizeToolApprovalMode(c.Desktop.DefaultToolApprovalMode) != NormalizeToolApprovalMode(h.approvalMode) {

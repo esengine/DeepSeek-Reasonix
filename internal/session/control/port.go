@@ -265,6 +265,8 @@ type RuntimeSettings interface {
 	SaveSandboxSettings(in SandboxSettings) error
 	BrowserToolsSettings() BrowserToolsSettings
 	SaveBrowserToolsSettings(enabled bool) error
+	OpaqueWriterSerializationSettings() OpaqueWriterSerialization
+	SaveOpaqueWriterSerialization(enabled bool) error
 	CompactionSettings() CompactionSettings
 	SaveCompactionSettings(softLimitTokens int) error
 	DisplayCurrencySettings() DisplayCurrencySettings

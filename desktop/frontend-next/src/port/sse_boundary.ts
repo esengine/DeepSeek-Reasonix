@@ -1,5 +1,5 @@
 import { SseShell } from "./sse_shell";
-import type { Adjudications, BrowserToolsSettings, ConfigProblem, ConfigRepair, PermissionLists, PermissionRules, SandboxSettings } from "./port";
+import type { Adjudications, BrowserToolsSettings, ConfigProblem, ConfigRepair, OpaqueWriterSerializationSettings, PermissionLists, PermissionRules, SandboxSettings } from "./port";
 import type { DisplayCurrencyMode, DisplayCurrencySettings, ProgressWatchSettings } from "./boundary";
 
 // Where the agent may reach: the permission rules a call is matched against and
@@ -37,6 +37,12 @@ export class SseBoundary extends SseShell {
   }
   saveDisplayCurrency(mode: DisplayCurrencyMode) {
     return this.post0<DisplayCurrencySettings>("/display-currency", { mode });
+  }
+  opaqueWriters() {
+    return this.get<OpaqueWriterSerializationSettings>("/opaque-writers");
+  }
+  saveOpaqueWriters(enabled: boolean) {
+    return this.post0<OpaqueWriterSerializationSettings>("/opaque-writers", { enabled });
   }
   progressWatch() {
     return this.get<ProgressWatchSettings>("/progress-watch");

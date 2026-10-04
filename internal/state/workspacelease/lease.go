@@ -70,6 +70,10 @@ type Owner struct {
 	// holder names this session to a session waiting on it. Read when the
 	// lease is taken, so a rename mid-hold shows on the next hold.
 	holder func() string
+	// skipWriteSerialization drops this session's cross-session write lease
+	// entirely: no call takes the workspace lock, so opaque writers stop
+	// blocking other sessions. The zero value keeps upstream behaviour.
+	skipWriteSerialization bool
 
 	mu            sync.Mutex
 	activeRuns    int
@@ -111,10 +115,20 @@ var localRegistry = struct {
 	locks map[string]*localLock
 }{locks: map[string]*localLock{}}
 
+// Option configures a lease Owner at construction.
+type Option func(*Owner)
+
+// WithoutWriteSerialization lets writers that could not declare write paths run
+// without the workspace write lease. Callers get it from the user config; the
+// default (not passing this option) keeps upstream serialization.
+func WithoutWriteSerialization() Option {
+	return func(o *Owner) { o.skipWriteSerialization = true }
+}
+
 // New returns a Delivery-session lease owner for workspaceRoot. lockDir must be
 // shared by Reasonix processes for cross-process protection; it is kept outside
 // the workspace so acquiring a lease never dirties user files.
-func New(workspaceRoot, lockDir string, onWait WaitNotice) (*Owner, error) {
+func New(workspaceRoot, lockDir string, onWait WaitNotice, opts ...Option) (*Owner, error) {
 	canonical, err := CanonicalWorkspace(workspaceRoot)
 	if err != nil {
 		return nil, err
@@ -138,12 +152,18 @@ func New(workspaceRoot, lockDir string, onWait WaitNotice) (*Owner, error) {
 	}
 	localRegistry.Unlock()
 
-	return &Owner{
+	o := &Owner{
 		lockPath: filepath.Join(lockDir, key+".lock"),
 		onWait:   onWait,
 		local:    local,
 		scope:    pathLeaseState{root: canonical, identity: rand.Text()},
-	}, nil
+	}
+	for _, opt := range opts {
+		if opt != nil {
+			opt(o)
+		}
+	}
+	return o, nil
 }
 
 // CanonicalWorkspace returns the stable identity used to key a workspace. It
@@ -254,6 +274,11 @@ func (o *Owner) AcquireWrite(ctx context.Context) error {
 // Missing or unresolvable extents conservatively claim the whole workspace.
 func (o *Owner) AcquirePaths(ctx context.Context, paths []string) error {
 	if o == nil {
+		return nil
+	}
+	if o.skipWriteSerialization {
+		// Serialization turned off: report the write as granted without taking
+		// the cross-session lease, so opaque writers stop blocking each other.
 		return nil
 	}
 	if ctx == nil {

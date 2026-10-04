@@ -263,6 +263,12 @@ export const EN_SETTINGS: Record<string, string> = {
   "agent 可以打开网页、读取内容并操作页面；浏览器在第一次使用时才启动。关闭后这些工具不会出现在工具列表中": "The agent can open web pages, read them and operate them; the browser only starts the first time it is used. When off, these tools are not in the tool list",
   "当前项目的配置文件开启了它，此工作区仍会提供内置浏览器。": "This project's config file turns it on, so this workspace still has the built-in browser.",
   "当前项目的配置文件关闭了它，此工作区不会提供内置浏览器。": "This project's config file turns it off, so this workspace has no built-in browser.",
+    "写锁串行": "Serialize writers that declare no paths",
+    "无法声明写入范围的工具（bash、MCP）会占用整个工作区，同一项目的多个会话因此排队等待。关闭后这类工具可以并行，代价是并行写入不再被拦住": "Tools that cannot declare a write scope (bash, MCP) hold the whole workspace, so sessions on one project queue behind them. Turning this off lets them run in parallel, at the cost of no longer blocking concurrent writes",
+    "无法声明写入范围的工具会占用整个工作区，同一项目的会话因此排队。关闭后这类工具不再互相阻塞，多个会话可以同时跑构建。修改会重建运行时，任务运行期间无法变更。": "Tools that cannot declare a write scope hold the whole workspace, so sessions on one project queue behind them. Turning this off stops them blocking each other and lets several sessions build at once. Changing it rebuilds the runtime and cannot be done while a task is running.",
+    "无法读取写锁串行设置。": "Could not read the write-serialization setting.",
+    "当前项目的配置文件开启了它，此工作区仍会串行这类工具。": "This project's config file turns it on, so this workspace still serializes these tools.",
+    "当前项目的配置文件关闭了它，此工作区不会串行这类工具。": "This project's config file turns it off, so this workspace does not serialize these tools.",
 
   "宣告做完": "Claims it is done",
   "还在做": "Still working",

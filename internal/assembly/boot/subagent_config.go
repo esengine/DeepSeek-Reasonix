@@ -57,6 +57,9 @@ func newSubagentConfig(opts Options, cfg *config.Config, entry *config.ProviderE
 	maxConcurrency, maxWriters := writeclaim.NormalizeConcurrencyLimits(
 		cfg.Agent.MaxSubagentConcurrency, cfg.Agent.MaxParallelWriters,
 	)
+	// The whole-workspace gate is a user setting. It ships on, so leaving the
+	// package default untouched is exactly upstream behaviour.
+	writeclaim.SetSerializeWholeWorkspace(cfg.Agent.SerializeOpaqueWriters)
 	inherited := resolveInheritedSubagentEffort(cfg, entry)
 	return subagentConfig{
 		resolveProvider: func(modelRef, effort string) (provider.Provider, *provider.Pricing, int, error) {
