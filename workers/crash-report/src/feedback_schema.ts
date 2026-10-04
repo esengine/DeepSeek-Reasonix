@@ -33,6 +33,8 @@ export type FeedbackSubmitInput = z.infer<typeof FeedbackSubmit>;
 
 export const RecordedBody = z.object({ issueNumber: z.number().int().positive(), issueUrl: z.string().url().max(300) });
 
+export const LinkBody = z.object({ issueNumber: z.number().int().positive() }).strict();
+
 export const StatusBody = z.object({
   status: z.enum(["in_progress", "fixed", "wontfix", "duplicate"]),
   resolvedVersion: z.string().max(40).optional(),
