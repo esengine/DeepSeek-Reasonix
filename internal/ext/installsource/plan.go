@@ -50,15 +50,18 @@ func (t *Tool) planURL(ctx context.Context, req request) ([]action, []string, er
 			return nil, warnings, err
 		}
 	}
-	if req.Kind == "mcp" && !looksLikeMarkdownURL(rawURL) && !looksLikeMCPJSONURL(rawURL) {
+	manifestURL := looksLikeMarkdownURL(rawURL) || looksLikeMCPJSONURL(rawURL)
+	if req.Kind == "mcp" && !manifestURL {
 		return []action{t.remoteMCPAction(req, rawURL)}, nil, nil
 	}
-	if looksLikeMarkdownURL(rawURL) || looksLikeMCPJSONURL(rawURL) || rawURL != req.Source {
+	if manifestURL || rawURL != req.Source {
 		actions, warnings, err := t.planDownloadedURL(ctx, req, rawURL)
 		if err == nil && len(actions) > 0 {
 			return actions, warnings, nil
 		}
-		if req.Kind != "auto" {
+		// A GitHub tree may name a directory ending in .md or .mcp.json.
+		_, repoURL := parseGitHubRepoSource(req.Source)
+		if req.Kind != "auto" || (manifestURL && !repoURL) {
 			return nil, warnings, err
 		}
 	}
