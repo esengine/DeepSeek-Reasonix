@@ -18,12 +18,14 @@ import { EN_COMPOSER } from "./en_composer";
 import { EN_BACKUP } from "./en_backup";
 import { EN_FEEDBACK } from "./en_feedback";
 import { EN_COMMUNITY } from "./en_community";
+import { EN_SPONSOR } from "./en_sponsor";
 
 export const EN: Record<string, string> = {
   "工作台": "Workbench",
   "从右侧选择文件，或打开浏览器": "Choose a file on the right, or open a browser",
   ...EN_SETTINGS,
   ...EN_COMMUNITY,
+  ...EN_SPONSOR,
   ...EN_METRICS,
   ...EN_STORAGE,
   ...EN_USAGE,

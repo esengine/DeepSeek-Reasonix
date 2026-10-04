@@ -163,6 +163,8 @@ export const ACTIONS: UIAction[] = [
   { id: "community.douyin-qr", kind: "view", target: "none", proof: "interaction" },
   { id: "community.author", kind: "shell-native", target: "none", proof: "interaction" },
   { id: "community.more", kind: "view", target: "none", proof: "interaction" },
+  { id: "sponsor.paypal", kind: "shell-native", target: "none", proof: "interaction" },
+  { id: "sponsor.qr", kind: "view", target: "none", proof: "interaction" },
   { id: "feedback.open", kind: "view", target: "none", proof: "interaction" },
   { id: "feedback.tab", kind: "view", target: "none", proof: "interaction" },
   { id: "feedback.category", kind: "view", target: "none", proof: "interaction" },

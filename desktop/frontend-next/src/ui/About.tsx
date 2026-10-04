@@ -3,6 +3,7 @@ import type { AgentPort } from "../port/port";
 import { AuthorLine } from "./AuthorLine";
 import { Community } from "./Community";
 import { Group } from "./Group";
+import { Sponsor } from "./Sponsor";
 import { Versions } from "./Versions";
 
 export function About({ port }: { port: AgentPort }) {
@@ -20,6 +21,9 @@ export function About({ port }: { port: AgentPort }) {
         hint={t("遇到问题、想交流用法或想参与进来，可以加入社区；下面是为 Reasonix 提交过代码的人。")}
       >
         <Community port={port} />
+      </Group>
+      <Group id="sponsor" title={t("赞助")}>
+        <Sponsor port={port} />
       </Group>
     </>
   );
