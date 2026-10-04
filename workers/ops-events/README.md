@@ -5,7 +5,7 @@ metadata events to this worker; one local listener holds a WebSocket and is woke
 only when something happens, instead of polling.
 
 - `GET /ws?since=auto|<id>&token=...` WebSocket, one JSON text frame per event (replays what no listener has received yet when `since` is `auto`). At most 4 listeners.
-- `POST /github` GitHub webhook (`X-Hub-Signature-256` is verified before the body is parsed; deliveries are deduplicated). Mapped events: issues opened/reopened/closed, comments (not bots or the owner), pull requests (opened, reopened, synchronize, ready, merged, closed), reviews, the `CI` workflow result, discussions, releases.
+- `POST /github` GitHub webhook (`X-Hub-Signature-256` is verified before the body is parsed; deliveries are deduplicated). Mapped events: issues opened/reopened/closed, comments (not bots or the owner), pull requests (opened, reopened, synchronize, ready, merged, closed), reviews, the `CI` workflow result, discussions, releases, repository security advisories (published, reported; GHSA id, severity and state only).
 - `POST /emit` bearer `OPS_EMIT_TOKEN`: `{t, src, n?, title?, by?, url?, extra?}` (60 per minute).
 - Events never contain issue, comment or feedback bodies; the only free text is a title (120 characters, control characters removed).
 

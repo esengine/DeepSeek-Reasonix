@@ -65,6 +65,17 @@ describe("mapping", () => {
     expect(run("CI")).toMatchObject({ t: "ci.failure", n: 9 });
     expect(run("CodeQL")).toBeNull();
   });
+  it("maps repository advisories to ids only, never the summary or description", () => {
+    const adv = { ghsa_id: "GHSA-aaaa-bbbb-cccc", severity: "high", state: "draft", summary: "SECRET SUMMARY", description: "SECRET DETAIL", html_url: "https://github.com/o/r/security/advisories/GHSA-aaaa-bbbb-cccc" };
+    const mk = (action: string) => mapGithubEvent("repository_advisory", { action, repository: repo, sender: user, repository_advisory: adv }, opts);
+    const e = mk("reported")!;
+    expect(e).toMatchObject({ t: "advisory.reported", repo: "o/r", url: adv.html_url, extra: { ghsa: "GHSA-aaaa-bbbb-cccc", severity: "high", state: "draft" } });
+    expect(e.title).toBeUndefined();
+    expect(JSON.stringify(e)).not.toContain("SECRET");
+    expect(mk("published")?.t).toBe("advisory.published");
+    expect(mk("withdrawn")).toBeNull();
+    expect(mapGithubEvent("repository_advisory", { action: "reported", repository: repo, sender: user }, opts)?.extra).toMatchObject({ ghsa: "", severity: "" });
+  });
   it("ignores unlisted events and actions", () => {
     expect(mapGithubEvent("push", { repository: repo }, opts)).toBeNull();
     expect(mapGithubEvent("issues", { action: "labeled", repository: repo, sender: user, issue: {} }, opts)).toBeNull();
