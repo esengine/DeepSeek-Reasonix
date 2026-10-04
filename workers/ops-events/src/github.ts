@@ -34,7 +34,8 @@ function base(payload: Json, t: string): NewEvent {
 }
 
 // Maps a webhook delivery to one compact event, or null when it is not one we
-// act on. Only the title is free text; bodies and comments are never copied.
+// act on. Only the title is free text; bodies and comments are never copied, and
+// advisories carry no summary or description at all.
 export function mapGithubEvent(name: string, payload: Json, opts: MapOptions): NewEvent | null {
   const action = str(payload.action) ?? "";
   const sender = obj(payload.sender);
@@ -94,6 +95,15 @@ export function mapGithubEvent(name: string, payload: Json, opts: MapOptions): N
     case "release":
       if (action !== "published") return null;
       return { ...base(payload, "release.published"), title: cleanTitle(obj(payload.release).name ?? obj(payload.release).tag_name), url: str(obj(payload.release).html_url) };
+    case "repository_advisory": {
+      if (!["published", "reported"].includes(action)) return null;
+      const adv = obj(payload.repository_advisory);
+      return {
+        ...base(payload, `advisory.${action}`),
+        url: str(adv.html_url),
+        extra: { ghsa: str(adv.ghsa_id) ?? "", severity: str(adv.severity) ?? "", state: str(adv.state) ?? "" },
+      };
+    }
     default:
       return null;
   }
