@@ -215,7 +215,9 @@ function Entry({ port, slug, onBack, onInstalled, onViewInstalled, onSignIn }: {
     setBusy(true);
     setError("");
     try {
-      setPlan(await port.planMarket({ slug, replace: update, ...(trust ? { trust } : {}) }));
+      const p = await port.planMarket({ slug, replace: update, ...(trust ? { trust } : {}) });
+      if (!p.ok) setError(p.error || p.next || t("该来源中没有可安装的内容"));
+      else setPlan(p);
     } catch (e) {
       setError(reason(e));
     } finally {
@@ -352,7 +354,7 @@ function Entry({ port, slug, onBack, onInstalled, onViewInstalled, onSignIn }: {
           </button>
         )}
       </div>
-      {error && <div className="why">{error}</div>}
+      {error && <div className="why" role="alert">{error}</div>}
     </div>
   );
 }
