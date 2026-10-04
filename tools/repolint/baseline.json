@@ -24,7 +24,8 @@
     "release-note": 661,
     "struct-state": 31,
     "window-state": 0,
-    "wire-parity": 0
+    "wire-parity": 0,
+    "type-span": 1746
   },
   "files": {
     ".github/pull_request_template.md": {
@@ -1608,6 +1609,54 @@
     },
     "workers/crash-report/src/index.ts": {
       "file-size": 686
+    },
+    "internal/contract/config": {
+      "type-span": 178
+    },
+    "internal/ext/extension/sidecar": {
+      "type-span": 5
+    },
+    "internal/ext/installsource": {
+      "type-span": 19
+    },
+    "internal/ext/plugin": {
+      "type-span": 18
+    },
+    "internal/frontend/acp": {
+      "type-span": 30
+    },
+    "internal/frontend/serve": {
+      "type-span": 316
+    },
+    "internal/frontend/tui": {
+      "type-span": 64
+    },
+    "internal/platform/browser": {
+      "type-span": 10
+    },
+    "internal/runtime/agent": {
+      "type-span": 403
+    },
+    "internal/runtime/delegation": {
+      "type-span": 22
+    },
+    "internal/safety/evidence": {
+      "type-span": 55
+    },
+    "internal/session/control": {
+      "type-span": 541
+    },
+    "internal/state/checkpoint": {
+      "type-span": 35
+    },
+    "internal/state/sessioninbox": {
+      "type-span": 3
+    },
+    "internal/state/sessionstore": {
+      "type-span": 28
+    },
+    "internal/tools/jobs": {
+      "type-span": 19
     }
   }
 }

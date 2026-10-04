@@ -46,6 +46,7 @@ const (
 	ruleDocProse       = "doc-prose"
 	ruleDocLanguage    = "doc-language"
 	ruleReleaseNote    = "release-note"
+	ruleTypeSpan       = "type-span"
 )
 
 var allRules = []string{
@@ -55,6 +56,7 @@ var allRules = []string{
 	ruleClaudeDialect, ruleWireParity, ruleOrphan,
 	ruleFrontendParity, ruleFlatView, ruleBuildArtifact,
 	ruleCodeOwners, ruleDocOwner, ruleDocProse, ruleDocLanguage, ruleReleaseNote,
+	ruleTypeSpan,
 }
 
 func main() {
@@ -169,6 +171,7 @@ func run(root string) ([]Finding, error) {
 	modelVars := map[string][]string{}
 	orphans := newOrphanScan()
 	wires := newWireScan()
+	typeSpans := newTypeSpanScan()
 	for _, rel := range paths {
 		src, err := parseSource(root, rel)
 		if err != nil {
@@ -190,12 +193,14 @@ func run(root string) ([]Finding, error) {
 		findings = append(findings, checkWindowState(src)...)
 		orphans.observe(src)
 		wires.observe(src)
+		typeSpans.observe(src)
 		entries, vars := dialectRefs(src)
 		dialects = append(dialects, entries...)
 		maps.Copy(modelVars, vars)
 		imports[rel] = src.importRefs()
 	}
 	findings = append(findings, orphans.findings()...)
+	findings = append(findings, typeSpans.findings()...)
 	findings = append(findings, checkLayering(imports)...)
 	findings = append(findings, checkLayerOrder(imports)...)
 	findings = append(findings, checkBuildArtifacts(root)...)
