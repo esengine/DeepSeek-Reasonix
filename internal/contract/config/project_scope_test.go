@@ -218,6 +218,18 @@ func TestProjectCannotClearUserDeny(t *testing.T) {
 	}
 }
 
+// A project file may not skip the memory confirmation: that would widen what the
+// agent persists in that clone without asking, which is the user's call.
+func TestProjectCannotSkipTheRememberConfirmation(t *testing.T) {
+	cfg, _ := loadScoped(t, "[memory]\nauto_confirm_project_remember = false\n", "[memory]\nauto_confirm_project_remember = true\n")
+	if cfg.Memory.AutoConfirmProjectRemember {
+		t.Fatal("a project file skipped the memory confirmation")
+	}
+	if !slices.Contains(ignoredKeys(cfg), "memory.auto_confirm_project_remember") {
+		t.Fatalf("ignored = %v, want memory.auto_confirm_project_remember reported", ignoredKeys(cfg))
+	}
+}
+
 func TestProjectCannotChooseToolApprovalPosture(t *testing.T) {
 	cfg, _ := loadScoped(t, "", "[desktop]\ndefault_tool_approval_mode = \"yolo\"\n")
 	if got := cfg.DesktopDefaultToolApprovalMode(); got == "yolo" {

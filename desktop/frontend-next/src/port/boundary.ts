@@ -92,6 +92,16 @@ export interface DisplayCurrencySettings {
   path: string;
 }
 
+// The remember-confirmation switch as the user file holds it: it covers a
+// project-scoped write only, because a global fact reaches every project.
+export interface RememberApprovalSettings {
+  projectAutoConfirm: boolean;
+  projectEffective: boolean;
+  path: string;
+}
+
+// When a run reads as no longer moving. Only the user file holds it: a
+// project file cannot pause the user's runs.
 export interface ProgressWatchSettings {
   pause: boolean;
   rounds: number;

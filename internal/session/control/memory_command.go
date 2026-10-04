@@ -509,6 +509,9 @@ func (c *Controller) SaveDoc(path, body string) (string, error) {
 // snapshot. It is the explicit user-confirmed counterpart to the model-owned
 // remember tool, used by management surfaces that preview a candidate first.
 func (c *Controller) SaveMemory(m memory.Memory) (string, error) {
+	// A save this path takes is the user's own, so it answers its own dialog
+	// and must not collect a receipt left by the model's write.
+	c.memory.clearReceipt()
 	return c.memory.saveMemory(m)
 }
 
@@ -524,6 +527,11 @@ func (c *Controller) ForgetMemory(name string) error {
 // refreshes the snapshot a memory panel reads.
 func (c *Controller) QueueMemory(note string) {
 	c.memory.queue(note)
+	// A write the switch let through reports itself here, once it has happened;
+	// the name comes from the assessment that let it through.
+	if name, ok := c.memory.takeReceipt(note); ok {
+		c.noticeRememberSavedUnasked(name)
+	}
 }
 
 // ClaimAutoMemoryWrite consumes the one-shot create-only authorization issued

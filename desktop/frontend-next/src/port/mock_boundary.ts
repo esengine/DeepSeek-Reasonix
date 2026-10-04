@@ -1,4 +1,4 @@
-import type { Adjudications, BrowserToolsSettings, ConfigProblem, ConfigRepair, PermissionLists, PermissionRules, SandboxSettings } from "./port";
+import type { Adjudications, BrowserToolsSettings, ConfigProblem, ConfigRepair, PermissionLists, PermissionRules, RememberApprovalSettings, SandboxSettings } from "./port";
 import type { DisplayCurrencyMode, DisplayCurrencySettings, ProgressWatchSettings } from "./boundary";
 import { MockShell } from "./mock_shell";
 
@@ -113,6 +113,23 @@ export class MockBoundary extends MockShell {
   async saveDisplayCurrency(mode: DisplayCurrencyMode): Promise<DisplayCurrencySettings> {
     this.currency = { ...this.currency, mode };
     return { ...this.currency };
+  }
+
+  private remember: RememberApprovalSettings = {
+    projectAutoConfirm: false, projectEffective: false,
+    path: "/Users/you/.reasonix/config.toml",
+  };
+
+  async rememberApproval(): Promise<RememberApprovalSettings> {
+    return { ...this.remember };
+  }
+
+  async saveRememberApproval(s: Pick<RememberApprovalSettings, "projectAutoConfirm">): Promise<RememberApprovalSettings> {
+    this.remember = {
+      ...this.remember,
+      projectAutoConfirm: s.projectAutoConfirm, projectEffective: s.projectAutoConfirm,
+    };
+    return { ...this.remember };
   }
 
   private watch: ProgressWatchSettings = {

@@ -29,6 +29,10 @@ type heldScope struct {
 	endpoints    heldEndpoints
 	layaPython   string
 	layaLocal    bool
+	// rememberProject is the user's [memory] auto_confirm_project_remember. A
+	// project file may not set it: skipping a memory confirmation is the user's
+	// call, not the clone's, and it widens what the agent may persist.
+	rememberProject bool
 }
 
 func holdUserScope(c *Config) heldScope {
@@ -39,18 +43,19 @@ func holdUserScope(c *Config) heldScope {
 	shell := c.Tools.Shell
 	shell.Env = maps.Clone(shell.Env)
 	return heldScope{
-		sandbox:      s,
-		permissions:  p,
-		approvalMode: c.Desktop.DefaultToolApprovalMode,
-		autoSubmit:   c.AutoSubmit,
-		shell:        shell,
-		rgPath:       c.Tools.Search.RgPath,
-		lsp:          maps.Clone(c.LSP.Servers),
-		browser:      c.Browser,
-		network:      c.Network,
-		endpoints:    holdUserEndpoints(c),
-		layaPython:   c.Tools.SystemOne.Laya.Python,
-		layaLocal:    c.Tools.SystemOne.Laya.Local,
+		sandbox:         s,
+		permissions:     p,
+		approvalMode:    c.Desktop.DefaultToolApprovalMode,
+		autoSubmit:      c.AutoSubmit,
+		shell:           shell,
+		rgPath:          c.Tools.Search.RgPath,
+		lsp:             maps.Clone(c.LSP.Servers),
+		browser:         c.Browser,
+		network:         c.Network,
+		endpoints:       holdUserEndpoints(c),
+		layaPython:      c.Tools.SystemOne.Laya.Python,
+		layaLocal:       c.Tools.SystemOne.Laya.Local,
+		rememberProject: c.Memory.AutoConfirmProjectRemember,
 	}
 }
 
@@ -120,6 +125,12 @@ func (h heldScope) narrow(c *Config, r Roots, root string, projectMeta toml.Meta
 		c.ignoreProject("auto_submit", fmt.Sprintf("%t", c.AutoSubmit), ProjectUserOnly)
 		c.AutoSubmit = h.autoSubmit
 	}
+	// Skipping a memory confirmation is the user's call: a cloned repo must not
+	// widen what the agent persists without asking.
+	if c.Memory.AutoConfirmProjectRemember != h.rememberProject {
+		c.ignoreProject("memory.auto_confirm_project_remember", fmt.Sprintf("%t", c.Memory.AutoConfirmProjectRemember), ProjectUserOnly)
+	}
+	c.Memory.AutoConfirmProjectRemember = h.rememberProject
 	h.narrowSandbox(c, ws)
 	h.narrowPermissions(c)
 	if NormalizeToolApprovalMode(c.Desktop.DefaultToolApprovalMode) != NormalizeToolApprovalMode(h.approvalMode) {

@@ -328,7 +328,9 @@ type Options struct {
 	SkillProfile        skill.ProfileResolver
 	Hooks               *hook.Runner
 	Memory              *memory.Set
-	Cleanup             func()
+	// AutoConfirmProjectRemember comes from [memory] auto_confirm_project_remember.
+	AutoConfirmProjectRemember bool
+	Cleanup                    func()
 	// Balance reads the active provider's optional wallet endpoint. Nil, or a
 	// cache built on an empty URL, means the provider declares none. Hosts that
 	// build several runtimes hand every pane the same cache.

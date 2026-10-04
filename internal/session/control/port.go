@@ -269,6 +269,8 @@ type RuntimeSettings interface {
 	SaveSandboxSettings(in SandboxSettings) error
 	BrowserToolsSettings() BrowserToolsSettings
 	SaveBrowserToolsSettings(enabled bool) error
+	RememberApprovalSettings() RememberApproval
+	SaveRememberApproval(projectAutoConfirm bool) error
 	CompactionSettings() CompactionSettings
 	SaveCompactionSettings(softLimitTokens int) error
 	DisplayCurrencySettings() DisplayCurrencySettings

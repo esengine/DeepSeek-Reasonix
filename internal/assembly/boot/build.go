@@ -501,6 +501,7 @@ func (b *builder) controllerOptions(runner agent.Runner, executor *agent.Agent, 
 		SkillProfile:                   t.runners.profile,
 		Hooks:                          t.hookRunner,
 		Memory:                         b.prompt.memory,
+		AutoConfirmProjectRemember:     cfg.Memory.AutoConfirmProjectRemember,
 		// Read at Close time: freeze chains the extension runtime set onto it.
 		Cleanup:               func() { b.cleanup() },
 		Balance:               opts.BalanceStore.Cache(b.balanceClient, entry.BalanceURL, entry.APIKey()),

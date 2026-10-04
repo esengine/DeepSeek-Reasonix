@@ -2,7 +2,9 @@ import { useEffect, useRef, useState } from "react";
 import { t } from "../i18n";
 import { tx } from "../i18n/rich";
 import { reason } from "../i18n/kernel";
-import type { AgentPort, MemoryEdit, MemoryEntry } from "../port/port";
+import { Group } from "./Group";
+import { Switch } from "./Switch";
+import type { AgentPort, MemoryEdit, MemoryEntry, RememberApprovalSettings } from "../port/port";
 
 // Memory is the only thing here that changes how the agent behaves without the
 // user ever configuring it — the agent writes it. So the grouping answers the
@@ -297,4 +299,75 @@ function clip2(s: string | undefined): string {
 function clip(s: string): string {
   const t = s.trim();
   return t.length > 24 ? t.slice(0, 24) + "…" : t;
+}
+
+// One answer: a project write may stop asking when the user says so, while a
+// global fact keeps asking — it reaches every project. forget keeps asking
+// either way.
+export function RememberApproval({ port, onChanged }: { port: AgentPort; onChanged: () => void }) {
+  const [state, setState] = useState<RememberApprovalSettings | null>(null);
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState("");
+
+  useEffect(() => {
+    port
+      .rememberApproval()
+      .then(setState)
+      .catch(() => setState(null));
+  }, [port]);
+
+  if (!state) return <div className="empty">{t("无法读取记忆写入设置。")}</div>;
+
+  const flip = async () => {
+    setBusy(true);
+    setError("");
+    try {
+      setState(await port.saveRememberApproval({ projectAutoConfirm: !state.projectAutoConfirm }));
+      onChanged();
+    } catch (e) {
+      setError(reason(e));
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  return (
+    <div className="box">
+      <div className="lrow">
+        <span className="tx">
+          <span className="lb">{t("记忆写入免确认")}</span>
+          <span className="ds">{t("开启后，agent 保存项目记忆时不再逐次询问。全局记忆会进入每个项目，因此仍然每次询问；忘记（forget）也一样。修改会重建运行时，任务运行期间无法变更。")}</span>
+        </span>
+      </div>
+      <div className="lrow">
+        <span className="tx">
+          <span className="lb">{t("项目记忆")}</span>
+        </span>
+        <Switch
+          data-action="remember-approval.project"
+          on={state.projectAutoConfirm}
+          busy={busy}
+          label={t("项目记忆写入免确认")}
+          onClick={() => void flip()}
+        />
+      </div>
+      {error && <div className="why">{error}</div>}
+    </div>
+  );
+}
+
+// The block ships whole so the settings page keeps one line for it: this file
+// already owns the memory panel, and the page that held the frame sits at its
+// line ceiling.
+export function MemoryGroup({ port, onChanged }: { port: AgentPort; onChanged: () => void }) {
+  return (
+    <Group
+      id="memory"
+      title={t("记忆")}
+      hint={t("agent 自动记录的内容：未经配置，但会据此执行。此处按触发时机分组，并标出上一轮实际使用的条目。")}
+    >
+      <RememberApproval port={port} onChanged={onChanged} />
+      <Memory port={port} />
+    </Group>
+  );
 }

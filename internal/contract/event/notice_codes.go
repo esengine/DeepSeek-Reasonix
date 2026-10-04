@@ -38,6 +38,9 @@ const (
 	NoticeCodeWorkspaceLeaseResumed, NoticeCodeWorkspaceLeaseAbandoned = "workspace_lease_resumed", "workspace_lease_abandoned"
 	// A remembered approval: Detail carries what it allows, the rule's subject.
 	NoticeCodePermissionSaved, NoticeCodePermissionCovered, NoticeCodePermissionSaveFailed = "permission_saved", "permission_covered", "permission_save_failed"
+	// A memory write the user's own switch let through without asking: Detail is
+	// the fact's name, which /forget takes back.
+	NoticeCodeMemorySavedUnasked = "memory_saved_unasked"
 	// An external tool result a screening model judged to address the agent.
 	NoticeCodeSuspectedInjection = "suspected_injection"
 	// /context's report; Detail is the breakdown under its one-line summary.

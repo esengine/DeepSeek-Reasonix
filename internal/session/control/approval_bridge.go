@@ -209,8 +209,16 @@ func combineApprovalReasons(reasons ...string) string {
 }
 
 func (g gateApprover) approveWithPolicyReason(ctx context.Context, tool, subject string, args json.RawMessage, policyReason string) (bool, bool, string, error) {
-	if tool == memoryRememberTool && g.c.allowLowRiskRemember(args) {
-		return true, false, "", nil
+	if tool == memoryRememberTool {
+		// The low-risk create path is upstream's own and leaves no receipt; the
+		// user's switch is ours, so it says what it let through.
+		if g.c.allowLowRiskRemember(args) {
+			return true, false, "", nil
+		}
+		if assessment := g.c.allowRememberByScope(args); assessment.AutoAllow {
+			g.c.memory.markReceipt(assessment.Name)
+			return true, false, "", nil
+		}
 	}
 	subject = approvalDisplaySubject(tool, subject, args)
 	humanReason := explicitApprovalReason(tool, subject)

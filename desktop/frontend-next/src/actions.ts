@@ -222,6 +222,7 @@ export const ACTIONS: UIAction[] = [
   { id: "memory.save", kind: "kernel-mutation", target: "entity", proof: "interaction" },
   { id: "memory.restore", kind: "kernel-mutation", target: "entity", proof: "interaction" },
   { id: "memory.forget", kind: "destructive", target: "entity", proof: "interaction" },
+  { id: "remember-approval.project", kind: "kernel-mutation", target: "none", proof: "authority-effect" },
   { id: "config.repair", kind: "kernel-mutation", target: "none", proof: "interaction" },
   { id: "extensions.reload", kind: "kernel-mutation", target: "none", proof: "interaction" },
   { id: "extensions.refresh", kind: "repeatable", target: "none", proof: "interaction" },

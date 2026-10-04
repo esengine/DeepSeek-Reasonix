@@ -55,8 +55,13 @@ func renderMemoryConfig(b *strings.Builder, m MemoryConfig) {
 		b.WriteString("# recall_limit = 4   # facts automatic recall may inject per turn\n")
 	}
 	if m.RecallMaxChars > 0 {
-		fmt.Fprintf(b, "recall_max_chars = %d   # total size of that injection\n\n", m.RecallMaxChars)
+		fmt.Fprintf(b, "recall_max_chars = %d   # total size of that injection\n", m.RecallMaxChars)
 	} else {
-		b.WriteString("# recall_max_chars = 2400   # total size of that injection\n\n")
+		b.WriteString("# recall_max_chars = 2400   # total size of that injection\n")
+	}
+	if m.AutoConfirmProjectRemember {
+		b.WriteString("auto_confirm_project_remember = true   # save project memories without asking; forget still asks\n")
+	} else {
+		b.WriteString("# auto_confirm_project_remember = false   # ask before saving a project memory\n")
 	}
 }
