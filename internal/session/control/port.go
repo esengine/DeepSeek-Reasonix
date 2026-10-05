@@ -319,6 +319,7 @@ type Status interface {
 	// One browser, one list of tabs: what the window opens the agent can drive,
 	// and what the agent opens the window can show.
 	BrowserOpen(ctx context.Context, rawURL, tabID string, newTab bool) (browser.TabInfo, error)
+	BrowserClose(ctx context.Context, tabID string) error
 }
 
 // BackgroundJobs stops work a session left running outside any turn.

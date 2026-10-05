@@ -495,6 +495,7 @@ export interface AgentPort {
   // the agent can read and drive; the window keeping its own would be a page
   // neither could hand to the other.
   browserOpen(url: string, newTab: boolean): Promise<BrowserTab>;
+  browserClose(tab: string): Promise<void>;
   // The entry's full text. preview is cut to a manifest-sized line, so editing
   // against it would silently shorten what the user actually said.
   readQueued(itemId: string): Promise<string>;

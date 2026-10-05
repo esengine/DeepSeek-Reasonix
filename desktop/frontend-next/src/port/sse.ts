@@ -671,6 +671,9 @@ export class SsePort extends SseFeedback implements AgentPort {
   browserOpen(url: string, newTab: boolean) {
     return this.post0<BrowserTab>("/browser/open", { url, newTab });
   }
+  browserClose(tab: string) {
+    return this.post0<void>("/browser/close", { tab });
+  }
   async readQueued(itemId: string) {
     const r = await this.get<{ envelope?: { displayText?: string } }>("/inbox/items/" + encodeURIComponent(itemId));
     // Every stored entry has a body — the kernel refuses an empty one at

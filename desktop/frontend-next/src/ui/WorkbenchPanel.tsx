@@ -19,6 +19,9 @@ import { docRef } from "./docrefs";
 import { useGlance } from "./glance";
 import { useMarkdownPoll } from "./useMarkdownPoll";
 import { pinToViewport } from "./place";
+import { keyOf, labelOf, type Surface } from "./workbench_tabs";
+import { useTabClose } from "./useTabClose";
+import { BrowserTabMenu } from "./BrowserTabMenu";
 import { WorkbenchExplorerHead } from "./WorkbenchExplorerHead";
 import { setShowsHiddenFiles, showsHiddenFiles } from "../state/prefs";
 import { useCommitCard } from "./CommitCard";
@@ -26,27 +29,12 @@ import { useCommitCard } from "./CommitCard";
 // The editor and its grammars load with the first file opened, not with Studio.
 const CodeEditor = lazy(() => import("./CodeEditor"));
 
-type Surface =
-  | { kind: "manual"; id: string }
-  | { kind: "browser"; tab: BrowserTab }
-  | { kind: "file"; path: string };
 type TreeRow = {
   kind: "folder" | "file";
   path: string;
   name: string;
   depth: number;
 };
-
-function keyOf(s: Surface) {
-  return `${s.kind}:${s.kind === "manual" ? s.id : s.kind === "browser" ? s.tab.target : s.path}`;
-}
-function labelOf(s: Surface, hosts: Record<string, string>) {
-  return s.kind === "manual"
-    ? hosts[s.id] || t("浏览器")
-    : s.kind === "browser"
-      ? s.tab.title || s.tab.url || t("空白页")
-      : s.path.split("/").at(-1) || s.path;
-}
 
 /** Folders first at every level, with the tree still reading as a tree. Sorting
  *  flat paths as text interleaves `bin/` with `boot.test.exe`, because text is
@@ -461,21 +449,9 @@ export function WorkbenchPanel({
       setFailed(reason(e));
     }
   };
-  // The column folds only when its last tab goes, whatever kind that tab is: a
-  // page opened with + or a file still open is a reason to keep it, and so is
-  // an explorer someone has open.
-  const close = (surface: Surface) => {
-    const key = keyOf(surface);
-    if (surface.kind === "manual") setBrowsers((v) => v.filter((id) => id !== surface.id));
-    else if (surface.kind === "file")
-      setOpenFiles((v) => v.filter((p) => p !== surface.path));
-    else setDismissed((v) => new Set(v).add(key));
-    if (selected === key) {
-      setSelected("");
-      setFailed("");
-    }
-    if (!showFiles && surfaces.every((s) => keyOf(s) === key)) onCloseManual();
-  };
+  const { close, closing, closeFailure } = useTabClose({ port, surfaces, selected, showFiles, setBrowsers, setOpenFiles, setDismissed, setSelected, onCloseManual, onCloseSelected: () => setFailed("") });
+  const dismissTabMenu = useCallback(() => setTabMenu(null), []);
+  const [tabMenu, setTabMenu] = useState<{ surface: Surface; x: number; y: number; anchor: HTMLElement } | null>(null);
   const save = async () => {
     if (!file || draft === file.content) return;
     setBusy(true);
@@ -507,6 +483,14 @@ export function WorkbenchPanel({
             role="tab"
             aria-selected={surface === active}
             data-live={surface.kind === "browser" && surface.tab.active ? "" : undefined}
+            data-action-contextmenu="workbench.browser-menu" data-target={keyOf(surface)}
+            onContextMenu={(e) => {
+              if (surface.kind === "file" || closing) return;
+              e.preventDefault();
+              const anchor = e.currentTarget.querySelector<HTMLElement>(".workbench-tab-pick")!;
+              const rect = anchor.getBoundingClientRect();
+              setTabMenu({ surface, x: e.clientX || rect.left, y: e.clientY || rect.bottom, anchor });
+            }}
           >
             <button
               className="workbench-tab-pick"
@@ -529,7 +513,8 @@ export function WorkbenchPanel({
               data-target={keyOf(surface)}
               aria-label={t("关闭 {name}", { name: labelOf(surface, hosts) })}
               title={t("关闭")}
-              onClick={() => close(surface)}
+              disabled={closing}
+              onClick={() => void close([surface])}
             >
               <StudioIcon name="close" />
             </button>
@@ -792,6 +777,12 @@ export function WorkbenchPanel({
           )}
         </aside>
       </div>
+      {closeFailure && <p className="workbench-no-files" role="alert">{closeFailure}</p>}
+      {tabMenu && <BrowserTabMenu menu={tabMenu} others={surfaces.some((s) => s.kind !== "file" && keyOf(s) !== keyOf(tabMenu.surface))} onDismiss={dismissTabMenu} onClose={(mode) => {
+        const target = tabMenu.surface;
+        setTabMenu(null);
+        void close(mode === "one" ? [target] : surfaces.filter((s) => s.kind !== "file" && (mode === "all" || keyOf(s) !== keyOf(target))));
+      }} />}
     </section>
   );
 }

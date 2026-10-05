@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"slices"
 	"sync"
 	"time"
 )
@@ -317,18 +318,6 @@ func (s *Session) Switch(tabID string) (TabInfo, error) {
 	return t.info(true), nil
 }
 
-// CloseTab closes one tab; the most recently opened remaining tab becomes active.
-func (s *Session) CloseTab(ctx context.Context, tabID string) error {
-	t, err := s.tab(tabID)
-	if err != nil {
-		return err
-	}
-	// Removed first, so the destruction it causes is not read as someone else's.
-	s.removeTab(t)
-	_ = t.eng.conn.call(ctx, "", "Target.closeTarget", map[string]any{"targetId": t.targetID}, nil)
-	return nil
-}
-
 func (s *Session) createTab(ctx context.Context, eng *engine) (*tab, error) {
 	var created struct {
 		TargetID string `json:"targetId"`
@@ -434,7 +423,9 @@ func (s *Session) onBrowserEvent(ev event) {
 		}
 		if t := s.tabByTarget(p.TargetID); t != nil {
 			s.mu.Lock()
-			s.lost[t.id] = true
+			if slices.Contains(s.tabs, t) {
+				s.lost[t.id] = true
+			}
 			s.mu.Unlock()
 			s.removeTab(t)
 		}
