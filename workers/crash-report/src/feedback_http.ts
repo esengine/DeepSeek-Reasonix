@@ -14,7 +14,8 @@ export type FeedbackCode =
   | "feedback.image_metadata"
   | "feedback.reply_limit"
   | "feedback.not_replyable"
-  | "feedback.challenge_required";
+  | "feedback.challenge_required"
+  | "feedback.adoption_tombstoned";
 
 const STATUS: Record<FeedbackCode, number> = {
   "feedback.too_large": 413,
@@ -33,6 +34,7 @@ const STATUS: Record<FeedbackCode, number> = {
   "feedback.reply_limit": 429,
   "feedback.not_replyable": 409,
   "feedback.challenge_required": 403,
+  "feedback.adoption_tombstoned": 409,
 };
 
 export function jsonResponse(body: unknown, status = 200, headers: Record<string, string> = {}): Response {

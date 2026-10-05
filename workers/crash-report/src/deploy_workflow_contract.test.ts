@@ -57,3 +57,17 @@ describe("feedback triage migration workflow", () => {
     expect(body).toContain("substr(install_hash,1,8)");
   });
 });
+
+describe("feedback adoption migration workflow", () => {
+  it("applies and verifies the adoption schema after triage and before the Worker deploys", () => {
+    const step = workflow.indexOf("Apply and verify feedback adoption D1 migration");
+    expect(step).toBeGreaterThan(workflow.indexOf("Apply and verify feedback triage D1 migration"));
+    expect(step).toBeLessThan(workflow.indexOf("npx wrangler deploy"));
+    const body = workflow.slice(step, workflow.indexOf("- name: Apply Studio telemetry schema"));
+    expect(body).toContain("--file=migrate-feedback-adoptions.sql");
+    for (const name of ["feedback_adoptions", "feedback_adoptions_install", "feedback_adoptions_item", "feedback_level_state"]) {
+      expect(body).toContain(name);
+    }
+    expect(body).toContain("missing $name after migration");
+  });
+});

@@ -7,18 +7,15 @@ import { installHash, installToken, ipHash, newReceipt } from "./feedback_crypto
 import { jsonResponse, refuse } from "./feedback_http";
 import { publicStatus } from "./feedback_read";
 import { admit, firstBusyOfDay, refund } from "./feedback_quota";
-import { capOverride, isBlocked, isTrusted } from "./feedback_blocks";
+import { capOverride, isBlocked } from "./feedback_blocks";
+import { installLevel } from "./feedback_level";
 import { challengePassed } from "./feedback_turnstile";
 import { FeedbackSubmit, type FeedbackSubmitInput } from "./feedback_schema";
 import {
   GLOBAL_DAILY,
   MAX_BODY_BYTES,
   MAX_REQUEST_BYTES,
-  PER_INSTALL_DAILY,
-  PER_INSTALL_HOURLY,
   PER_IP_HOURLY,
-  TRUSTED_PER_INSTALL_HOURLY,
-  TRUSTED_PER_INSTALL_DAILY,
   type FeedbackRow,
   type StoredAttachment,
 } from "./feedback_types";
@@ -114,13 +111,13 @@ export async function handleSubmit(request: Request, env: Env, ctx?: OpsWaiter):
   // Only a new submission meets the block, after the replay and token answers a
   // blocked install gets exactly as an unblocked one would.
   const now = new Date();
-  const trusted = await isTrusted(env, hash, now);
+  const level = await installLevel(env, hash, now);
   const limits = {
-    trusted,
+    trusted: level.trusted,
     globalDaily: (await capOverride(env)) ?? GLOBAL_DAILY,
     ipHourly: PER_IP_HOURLY,
-    installHourly: trusted ? TRUSTED_PER_INSTALL_HOURLY : PER_INSTALL_HOURLY,
-    installDaily: trusted ? TRUSTED_PER_INSTALL_DAILY : PER_INSTALL_DAILY,
+    installHourly: level.limits.hourly,
+    installDaily: level.limits.daily,
   };
   const blocked = await isBlocked(env, [`install:${hash}`, `ip:${ipKey}`], now);
   if (!(await challengePassed(env, input.turnstileToken, ip))) return refuse("feedback.challenge_required", "verification required");
@@ -157,7 +154,7 @@ export async function handleSubmit(request: Request, env: Env, ctx?: OpsWaiter):
         contact: input.contact ?? "",
         env_json: JSON.stringify(scrubEnv(input.env)),
         attachments_json: JSON.stringify(stored),
-        status: trusted && stored.length === 0 && !tripsSpamGate(body) ? "received" : "held",
+        status: level.heldEligible && stored.length === 0 && !tripsSpamGate(body) ? "received" : "held",
         issue_number: null,
         issue_url: null,
         resolved_version: null,

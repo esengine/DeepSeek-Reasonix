@@ -14,10 +14,12 @@ export async function readJson(request: Request): Promise<unknown> {
 }
 
 // Compare-and-set on the status the caller read, so two writers cannot both win.
+export function setStateStatement(env: Env, receipt: string, from: Status, sets: string, binds: unknown[]): D1PreparedStatement {
+  return env.DB.prepare(`UPDATE feedback SET ${sets}, updated_at = ? WHERE receipt = ? AND status = ?`).bind(...binds, new Date().toISOString(), receipt, from);
+}
+
 export async function setState(env: Env, receipt: string, from: Status, sets: string, binds: unknown[]): Promise<boolean> {
-  const res = await env.DB.prepare(`UPDATE feedback SET ${sets}, updated_at = ? WHERE receipt = ? AND status = ?`)
-    .bind(...binds, new Date().toISOString(), receipt, from)
-    .run();
+  const res = await setStateStatement(env, receipt, from, sets, binds).run();
   return (res.meta?.changes ?? 0) > 0;
 }
 

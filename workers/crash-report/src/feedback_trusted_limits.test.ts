@@ -7,6 +7,7 @@ import { handleFeedbackRoute } from "./feedback_routes";
 import { purgeStaleFeedback } from "./feedback_retention";
 import migration from "../migrate-feedback.sql?raw";
 import triage from "../migrate-feedback-triage.sql?raw";
+import adoptionsMigrationSQL from "../migrate-feedback-adoptions.sql?raw";
 
 const NOW = "2026-10-03T12:34:56.000Z";
 const HOUR = "2026-10-03T13:00:00.000Z";
@@ -43,6 +44,7 @@ beforeEach(async () => {
   db = new DatabaseSync(":memory:");
   db.exec(migration);
   db.exec(triage);
+  db.exec(adoptionsMigrationSQL);
   ipAllowed = true;
   env = { DB: d1(db), FEEDBACK_ENABLED: "true", FEEDBACK_TOKEN_SECRET: "fixture-secret", FEEDBACK_ADMIN_TOKEN: "fixture-admin",
     FEEDBACK_LIMITER: { limit: async () => ({ success: ipAllowed }) } } as unknown as Env;

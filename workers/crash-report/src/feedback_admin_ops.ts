@@ -1,9 +1,10 @@
 import type { Env } from "./env";
 import { listLimit, load, readJson } from "./feedback_admin_store";
+import { adoptionStatements, clearRevokedStatement, itemKeyOf, markRevokedStatement, tombstoneStatements } from "./feedback_adoptions";
 import { audit, auditStatement, blockKey, capOverride, putBlock, revokeTrustStatement, setCapOverride } from "./feedback_blocks";
 import { jsonResponse, refuse } from "./feedback_http";
-import { BlockBody, CapBody, UnblockBody } from "./feedback_schema";
-import { GLOBAL_DAILY, MANUAL_TRUST_DAYS } from "./feedback_types";
+import { AdoptionBody, BlockBody, CapBody, UnblockBody } from "./feedback_schema";
+import { CONCRETE_VERSION, GLOBAL_DAILY, MANUAL_TRUST_DAYS } from "./feedback_types";
 import { scrubSensitiveText } from "./scrub";
 
 const BLOCKS_LIMIT = 200;
@@ -18,9 +19,39 @@ export async function setReceiptTrust(env: Env, receipt: string, grant: boolean)
       `INSERT INTO feedback_trust (install_hash, created_at, expires_at) VALUES (?,?,?)
        ON CONFLICT (install_hash) DO UPDATE SET expires_at = MAX(feedback_trust.expires_at, excluded.expires_at)`,
     ).bind(row.install_hash, now.toISOString(), expiry) : revokeTrustStatement(env, row.install_hash),
+    grant ? clearRevokedStatement(env, row.install_hash) : markRevokedStatement(env, row.install_hash),
     auditStatement(env, grant ? "trust" : "untrust", `${receipt} install:${row.install_hash}`),
   ]);
   return jsonResponse({ receipt, installTrusted: grant });
+}
+
+// A maintainer records an outcome the automatic path cannot: an already fixed
+// report, or an independent outcome of a duplicate reporter.
+export async function recordAdoption(request: Request, env: Env, receipt: string): Promise<Response> {
+  const body = AdoptionBody.safeParse(await readJson(request));
+  if (!body.success || !CONCRETE_VERSION.test(body.data.version)) return refuse("feedback.invalid", "version must be a concrete published version such as v1.2.3");
+  const row = await load(env, receipt);
+  if (!row) return refuse("feedback.not_found", "unknown receipt");
+  const { version } = body.data;
+  const key = itemKeyOf(row);
+  if (!key || !(row.status === "duplicate" || (row.status === "fixed" && row.resolved_version === version))) {
+    return refuse("feedback.bad_transition", "only a linked report fixed in that version, or a linked duplicate, can be recorded");
+  }
+  if ((await ownAdoption(env, receipt))?.tombstoned_at) return refuse("feedback.adoption_tombstoned", "this adoption was tombstoned");
+  const res = await env.DB.batch(adoptionStatements(env, row, key, version, "explicit", new Date().toISOString()));
+  return jsonResponse({ receipt, adopted: (await ownAdoption(env, receipt))?.tombstoned_at === null, credited: (res[0].meta?.changes ?? 0) > 0 });
+}
+
+async function ownAdoption(env: Env, receipt: string) {
+  return env.DB.prepare("SELECT install_hash, item_key, tombstoned_at FROM feedback_adoptions WHERE receipt = ?").bind(receipt).first<{ install_hash: string; item_key: string; tombstoned_at: string | null }>();
+}
+
+// A correction keeps the row, so replay can never credit the same item again.
+export async function tombstoneAdoption(env: Env, receipt: string): Promise<Response> {
+  const own = await ownAdoption(env, receipt);
+  if (!own) return refuse("feedback.not_found", "no adoption recorded for this receipt");
+  if (own.tombstoned_at === null) await env.DB.batch(tombstoneStatements(env, receipt, own.install_hash, own.item_key));
+  return jsonResponse({ receipt, adopted: false, tombstoned: true });
 }
 
 // handled = 0 replies belong to the converter and always have an issue; issue-less

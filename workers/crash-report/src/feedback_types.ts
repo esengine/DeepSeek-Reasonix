@@ -27,6 +27,7 @@ export const MANUAL_TRUST_DAYS = 365;
 export const TRUSTED_PER_INSTALL_HOURLY = 12;
 export const TRUSTED_PER_INSTALL_DAILY = 60;
 export const TRUSTED_REPLIES_PER_INSTALL_HOURLY = 10;
+export const CONCRETE_VERSION = /^v\d+\.\d+\.\d+$/;
 export const RESERVED_SHARE = 0.1;
 export const MAX_CAP = 5000;
 

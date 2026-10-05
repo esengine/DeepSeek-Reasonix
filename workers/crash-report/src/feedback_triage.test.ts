@@ -7,6 +7,7 @@ import { purgeStaleFeedback } from "./feedback_retention";
 import { handleFeedbackRoute } from "./feedback_routes";
 import feedbackMigrationSQL from "../migrate-feedback.sql?raw";
 import triageMigrationSQL from "../migrate-feedback-triage.sql?raw";
+import adoptionsMigrationSQL from "../migrate-feedback-adoptions.sql?raw";
 
 const ADMIN = "admin-secret";
 const admin = { authorization: `Bearer ${ADMIN}` };
@@ -24,6 +25,7 @@ beforeEach(() => {
   raw = new DatabaseSync(":memory:");
   raw.exec(feedbackMigrationSQL);
   raw.exec(triageMigrationSQL);
+  raw.exec(adoptionsMigrationSQL);
   const r2 = fakeR2();
   objects = r2.objects;
   ipAllowed = true;

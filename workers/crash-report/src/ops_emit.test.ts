@@ -6,6 +6,7 @@ import { d1 } from "./feedback_testkit";
 import { handleFeedbackRoute } from "./feedback_routes";
 import feedbackMigrationSQL from "../migrate-feedback.sql?raw";
 import triageMigrationSQL from "../migrate-feedback-triage.sql?raw";
+import adoptionsMigrationSQL from "../migrate-feedback-adoptions.sql?raw";
 
 const ADMIN = "admin-secret";
 const SECRET_TEXT = "my-private-bug-text-xyz";
@@ -18,6 +19,7 @@ beforeEach(() => {
   const db = new DatabaseSync(":memory:");
   db.exec(feedbackMigrationSQL);
   db.exec(triageMigrationSQL);
+  db.exec(adoptionsMigrationSQL);
   pending = [];
   ctx = { waitUntil: (p: Promise<unknown>) => void pending.push(p) } as unknown as ExecutionContext;
   fetchMock = vi.fn(async () => new Response(null, { status: 202 }));
