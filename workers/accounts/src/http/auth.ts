@@ -6,6 +6,7 @@ import { repos } from "../db";
 import type { SessionRef } from "../db/sessions";
 import { readSessionToken } from "../auth/cookies";
 import { ApiError } from "./errors";
+import { REMOTE_REAUTH_MS } from "../config";
 
 // Non-browser clients (CLI/desktop) and cross-service callers carry the session
 // in an Authorization header instead of the cookie.
@@ -44,4 +45,21 @@ export function currentUser(c: Context<AppEnv>): AccountUser {
   const user = c.get("user");
   if (!user) throw new ApiError(401, "unauthorized", "Sign in to continue.");
   return user;
+}
+
+// Remote-control identity is issued only to a browser sign-in made within the
+// reauth window: a device-flow session says nothing about when a password was
+// last entered. Returns the signed-in user and the session that proved it.
+export function requireRemoteWebSession(c: Context<AppEnv>): { user: AccountUser; session: SessionRef; reauthAt: number } {
+  const user = currentUser(c);
+  const session = c.get("session");
+  if (!session) throw new ApiError(401, "unauthorized", "Sign in to continue.");
+  if (session.kind !== "web") {
+    throw new ApiError(403, "remote_reauth_required", "Sign in on this browser to control a computer remotely.");
+  }
+  const reauthAt = Date.parse(session.createdAt) + REMOTE_REAUTH_MS;
+  if (!(reauthAt > Date.now())) {
+    throw new ApiError(403, "remote_reauth_required", "Sign in again to control this computer remotely.");
+  }
+  return { user, session, reauthAt };
 }

@@ -83,6 +83,47 @@ export const RemoteGrantConsumeSchema = z.object({
   ticket: z.string().regex(/^[0-9a-f]{64}$/),
 }).strict();
 
+const base64urlCoordinate = z.string().regex(/^[A-Za-z0-9_-]{43}$/);
+const controllerId = z.string().regex(/^rc_[A-Za-z0-9_-]{43}$/);
+
+// Exactly the public members of an RFC 7638 canonical P-256 key. A private
+// member, ext, key_ops or any extra member is refused rather than ignored.
+export const ControllerJwkSchema = z.object({
+  kty: z.literal("EC"),
+  crv: z.literal("P-256"),
+  x: base64urlCoordinate,
+  y: base64urlCoordinate,
+}).strict();
+
+export const ControllerChallengeSchema = z.object({
+  host: remoteDeviceId,
+  purpose: z.enum(["enroll"]).default("enroll"),
+}).strict();
+
+export const ControllerEnrollSchema = z.object({
+  host: remoteDeviceId,
+  nonce: z.string().regex(/^[0-9a-f]{64}$/),
+  publicKey: ControllerJwkSchema,
+  signature: z.string().regex(/^[A-Za-z0-9_-]{86}$/),
+  uaClass: z.string().max(32).default("other"),
+  claimsId: controllerId.optional(),
+  controllerId: controllerId.optional(),
+}).strict();
+
+export const ControllerResolveSchema = z.object({
+  action: z.enum(["add", "replace", "reject"]),
+  replaceId: controllerId.optional(),
+}).strict().refine((body) => body.action !== "replace" || body.replaceId !== undefined, {
+  message: "replaceId: required for replace",
+  path: ["replaceId"],
+});
+
+export const ControllerIdParam = controllerId;
+export const ControllerListQuerySchema = z.object({ host: remoteDeviceId }).strict();
+export const HostControllerListQuerySchema = z.object({
+  state: z.enum(["pending", "active", "revoked", "all"]).default("pending"),
+}).strict();
+
 export const RemoteLeaseCheckSchema = z.object({
   leases: z.array(z.object({
     userId: z.number().int().positive(),
