@@ -10,6 +10,7 @@ compatibility_date = "2026-06-01"
 #   OPS_EMIT_TOKEN         write access for our own services (/emit)
 workers_dev = true
 preview_urls = false
+routes = [{ pattern = "ops-events.reasonix.io", custom_domain = true }]
 
 [vars]
 # Comma list of logins whose comments are not events (our own automation and the owner).
