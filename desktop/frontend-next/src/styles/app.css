@@ -4576,7 +4576,7 @@
     flex: none; display: inline-flex; align-items: center;
     padding: 0 4px; height: 15px; border: 1px solid var(--border); border-radius: var(--r-xs);
     color: var(--ghost);
-    font: var(--w-reg) var(--fs-micro) var(--mono);
+    font: var(--w-reg) var(--fs-micro) var(--ui);
   }
   .sessrow.sesscopy { padding-left: 34px }
   .sessrow.sesscopy .sesstitle { color: var(--ghost); font-style: italic }
