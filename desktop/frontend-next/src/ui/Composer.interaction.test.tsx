@@ -691,3 +691,69 @@ describe("a line taken back from the queue", () => {
     expect(box.value).toBe("甲");
   });
 });
+
+
+describe("send shortcut preference", () => {
+  it("keeps Enter for multiline drafting and sends with Control+Enter", async () => {
+    localStorage.setItem("rx-send-shortcut", "modifier_enter");
+    const { box, onSubmit } = draw();
+    fireEvent.change(box, { target: { value: "第一行\n第二行", selectionStart: 7 } });
+    expect(fireEvent.keyDown(box, { key: "Enter" })).toBe(true);
+    expect(onSubmit).not.toHaveBeenCalled();
+    expect(box.getAttribute("aria-keyshortcuts")).toBe("Control+ENTER");
+    expect(screen.getByText("Ctrl Enter 发送 · Enter 换行")).toBeTruthy();
+    fireEvent.keyDown(box, { key: "Enter", ctrlKey: true });
+    await waitFor(() => expect(onSubmit).toHaveBeenCalledWith("第一行\n第二行"));
+  });
+
+  it("never sends an IME confirmation in modifier mode", async () => {
+    localStorage.setItem("rx-send-shortcut", "modifier_enter");
+    const { box, onSubmit } = draw();
+    fireEvent.change(box, { target: { value: "中文候选", selectionStart: 4 } });
+    fireEvent.compositionStart(box);
+    fireEvent.keyDown(box, { key: "Enter", ctrlKey: true, isComposing: true });
+    fireEvent.compositionEnd(box);
+    fireEvent.keyDown(box, { key: "Enter", ctrlKey: true });
+    expect(onSubmit).not.toHaveBeenCalled();
+    await act(async () => { await new Promise((resolve) => setTimeout(resolve, 120)); });
+    fireEvent.keyDown(box, { key: "Enter" });
+    expect(onSubmit).not.toHaveBeenCalled();
+    fireEvent.keyDown(box, { key: "Enter", ctrlKey: true });
+    await waitFor(() => expect(onSubmit).toHaveBeenCalledWith("中文候选"));
+  });
+
+  it("preserves Alt+Enter submission in Enter mode", async () => {
+    const { box, onSubmit } = draw();
+    fireEvent.change(box, { target: { value: "兼容已有快捷键", selectionStart: 7 } });
+    fireEvent.keyDown(box, { key: "Enter", altKey: true });
+    await waitFor(() => expect(onSubmit).toHaveBeenCalledWith("兼容已有快捷键"));
+  });
+
+  it.each([false, true])("uses tap hints on touch screens in modifier mode (running=%s)", (running) => {
+    localStorage.setItem("rx-send-shortcut", "modifier_enter");
+    touchPointer();
+    draw({ running });
+    expect(screen.getByText(running ? "点按插话 · 回车换行" : "点按发送 · 回车换行")).toBeTruthy();
+  });
+
+  it.each(["Enter", "Tab", "Control+Enter"])("routes %s correctly while a slash completion owns Enter", async (key) => {
+    localStorage.setItem("rx-send-shortcut", "modifier_enter");
+    const port = new MockPort();
+    vi.spyOn(port, "complete").mockResolvedValue({ kind: "slash", from: 0, to: 4, query: "/rev", items: [{ label: "/review", insert: "/review ", kind: "skill" }] });
+    const { box, onSubmit } = draw({ port });
+    fireEvent.change(box, { target: { value: "/rev", selectionStart: 4 } });
+    await screen.findByRole("option", { name: /review/ });
+    fireEvent.keyDown(box, { key: key === "Tab" ? "Tab" : "Enter", ctrlKey: key === "Control+Enter" });
+    if (key === "Control+Enter") await waitFor(() => expect(onSubmit).toHaveBeenCalledWith("/rev"));
+    else { expect(box.value).toBe("/review "); expect(onSubmit).not.toHaveBeenCalled(); }
+  });
+
+  it("keeps the modifier-to-steer hint while a turn runs", () => {
+    localStorage.setItem("rx-send-shortcut", "modifier_enter");
+    const { box, onSubmit } = draw({ running: true });
+    fireEvent.change(box, { target: { value: "补充一句", selectionStart: 4 } });
+    fireEvent.keyDown(box, { key: "Enter" });
+    expect(onSubmit).not.toHaveBeenCalled();
+    expect(screen.getByText("Ctrl Enter 插话 · Enter 换行")).toBeTruthy();
+  });
+});

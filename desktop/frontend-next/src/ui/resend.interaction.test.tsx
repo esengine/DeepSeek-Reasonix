@@ -1,13 +1,13 @@
 // @vitest-environment jsdom
 import "./testkit";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { cleanup, render, screen, waitFor } from "@testing-library/react";
+import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import type { Item } from "../state/session";
 import type { Checkpoint } from "../port/port";
 import { UserCard } from "./cards/UserCard";
 
-afterEach(cleanup);
+afterEach(() => { cleanup(); localStorage.clear(); vi.restoreAllMocks(); });
 
 const item = { t: "user", id: "row", text: "把重试次数从 1 改成 3" } as Extract<Item, { t: "user" }>;
 const cp: Checkpoint = { turn: 4, prompt: "把重试次数从 1 改成 3", files: 2, msgIndex: 7 };
@@ -77,4 +77,40 @@ describe("editing a message and sending it again", () => {
     expect(screen.queryByRole("textbox")).toBeNull();
     expect(screen.getByText("把重试次数从 1 改成 3")).toBeTruthy();
   });
+});
+
+it("uses the send preference for multiline resend edits and protects IME", async () => {
+  localStorage.setItem("rx-send-shortcut", "modifier_enter");
+  const resend = vi.fn(async () => {});
+  render(<UserCard item={item} cp={cp} onResend={resend} />);
+  await userEvent.click(screen.getByRole("button", { name: /改写/ }));
+  const box = screen.getByRole("textbox");
+  fireEvent.keyDown(box, { key: "Enter", code: "Enter" });
+  expect(resend).not.toHaveBeenCalled();
+  fireEvent.compositionStart(box);
+  fireEvent.keyDown(box, { key: "Enter", code: "Enter", ctrlKey: true });
+  expect(resend).not.toHaveBeenCalled();
+  fireEvent.compositionEnd(box);
+  fireEvent.keyDown(box, { key: "Enter", code: "Enter", ctrlKey: true });
+  expect(resend).not.toHaveBeenCalled();
+  await new Promise((resolve) => setTimeout(resolve, 120));
+  fireEvent.keyDown(box, { key: "Enter", code: "Enter", ctrlKey: true });
+  await waitFor(() => expect(resend).toHaveBeenCalledWith(cp.turn, item.text));
+});
+
+it.each(["enter", "modifier_enter"])("keeps touch Enter in the resend editor (%s)", async (mode) => {
+  const media = window.matchMedia("(pointer: coarse)");
+  vi.spyOn(window, "matchMedia").mockReturnValue({ ...media, matches: true });
+  localStorage.setItem("rx-send-shortcut", mode);
+  const resend = vi.fn(async () => {});
+  render(<UserCard item={item} cp={cp} onResend={resend} />);
+  await userEvent.click(screen.getByRole("button", { name: /改写/ }));
+  const box = screen.getByRole("textbox");
+  fireEvent.keyDown(box, { key: "Enter", code: "Enter" });
+  expect(resend).not.toHaveBeenCalled();
+  expect(box.getAttribute("title")).toBe("点按发送 · 回车换行");
+  if (mode === "enter") expect(box.hasAttribute("aria-keyshortcuts")).toBe(false);
+  if (mode === "modifier_enter") fireEvent.keyDown(box, { key: "Enter", code: "Enter", ctrlKey: true });
+  else await userEvent.click(screen.getByRole("button", { name: "改完重发" }));
+  expect(resend).toHaveBeenCalledWith(cp.turn, item.text);
 });

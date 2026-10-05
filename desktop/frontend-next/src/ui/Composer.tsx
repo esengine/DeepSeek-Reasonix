@@ -11,6 +11,8 @@ import { CompletionMenu, useCompletion } from "./Completion";
 import { ChipMirror, useSkillChips } from "./ChipMirror";
 import { useIme } from "./ime";
 import { useFitHeight } from "./fitHeight";
+import { useSendShortcut } from "../state/prefs";
+import { sendAria, sendHint, sendsOnKey } from "./sendkey";
 import { countLines, pasteIsLong, planTone, planVerb } from "./intake";
 import { kindOf, nameOf, previewURL } from "./chipfile";
 import { useIntake } from "./useIntake";
@@ -177,6 +179,7 @@ export function Composer({ port, status, running, quote, restore, focus, onSubmi
     box.current?.focus();
   }, chips);
   const ime = useIme();
+  const sendShortcut = useSendShortcut();
 
   // A counter, not a boolean: asking twice in a row has to move the cursor twice.
   useEffect(() => {
@@ -497,7 +500,7 @@ export function Composer({ port, status, running, quote, restore, focus, onSubmi
           role="combobox"
           aria-label={t("任务输入")}
           aria-describedby={guide}
-          aria-keyshortcuts={touch ? undefined : "Enter Shift+Enter"}
+          aria-keyshortcuts={sendAria(sendShortcut, touch)}
           aria-busy={submitting}
           readOnly={submitting}
           aria-expanded={menu.open}
@@ -549,15 +552,15 @@ export function Composer({ port, status, running, quote, restore, focus, onSubmi
               if (e.key === "Enter") e.preventDefault();
               return;
             }
+            const sendKey = sendsOnKey(e, sendShortcut, touch);
             if (menu.open && (e.key === "ArrowDown" || e.key === "ArrowUp")) {
               e.preventDefault();
               menu.move(e.key === "ArrowDown" ? 1 : -1);
               return;
             }
-            // Tab completes, always. Enter belongs to the menu only where the
-            // line is not yet a message — a half-typed command — or where the
-            // user went looking through the list themselves.
-            if (menu.open && (e.key === "Tab" || (e.key === "Enter" && menu.ownsEnter)) && !e.shiftKey) {
+            // Tab completes; Enter completes a partial command or an explicitly selected item.
+            // The configured modifier chord sends the draft even with a menu open.
+            if (menu.open && (e.key === "Tab" || (e.key === "Enter" && menu.ownsEnter && !(sendShortcut === "modifier_enter" && sendKey))) && !e.shiftKey) {
               e.preventDefault();
               menu.accept();
               return;
@@ -570,7 +573,7 @@ export function Composer({ port, status, running, quote, restore, focus, onSubmi
               menu.dismiss();
               return;
             }
-            if (e.key === "Enter" && !e.shiftKey && !touch) {
+            if (sendKey) {
               e.preventDefault();
               send();
             }
@@ -592,9 +595,7 @@ export function Composer({ port, status, running, quote, restore, focus, onSubmi
               ? t("正在添加附件…")
               : failed
                 ? t("有附件添加失败，请重试或移除")
-                : t(touch
-                  ? running ? "点按插话 · 回车换行" : "点按发送 · 回车换行"
-                  : running ? "Enter 插话 · Shift+Enter 换行" : "Enter 发送 · Shift+Enter 换行")}
+                : sendHint(sendShortcut, running, touch)}
         </span>
         {showCount && <span className="fcount">{t("{n} 字 · {lines} 行", { n: text.length, lines })}</span>}
       </div>
