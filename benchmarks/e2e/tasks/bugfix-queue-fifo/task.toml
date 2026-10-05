@@ -1,0 +1,3 @@
+prompt = "Fifo.pop in fifo.py returns the newest item instead of the oldest. Fix the FIFO order."
+class = "atomic-bugfix"
+timeout_sec = 180

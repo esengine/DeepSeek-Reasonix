@@ -1,0 +1,578 @@
+package builtin
+
+import (
+	"fmt"
+	"os"
+	"slices"
+	"strings"
+
+	"reasonix/internal/base/fileutil"
+	fileenc "reasonix/internal/base/fileutil/encoding"
+)
+
+// readFileEncoded reads a file and decodes its encoding to UTF-8.
+// Returns the decoded content and the detected encoding kind so callers
+// can re-encode on write to preserve the original charset.
+func readFileEncoded(path string) (content string, enc fileenc.Kind, err error) {
+	b, err := os.ReadFile(path)
+	if err != nil {
+		return "", 0, err
+	}
+	enc, text := fileenc.DetectAndDecode(b)
+	return string(text), enc, nil
+}
+
+// writeFileEncoded encodes content back to the given encoding and writes it.
+// The write is atomic: a truncating write that fails midway (a Windows filter
+// driver holding a transient lock, a full disk) would leave the user's source
+// file empty or half-written.
+func writeFileEncoded(path string, content string, enc fileenc.Kind) error {
+	data, err := fileenc.Encode(content, enc)
+	if err != nil {
+		return err
+	}
+	return fileutil.AtomicOverwriteFile(path, data, 0o644)
+}
+
+// matchLineEndings adapts an edit's old/new text to a CRLF file when the literal
+// old_string isn't present but its CRLF form is. read_file strips '\r' (bufio
+// ScanLines), so a model's multi-line old_string arrives LF-only while a
+// Windows/CJK source stores '\r\n'; rewriting search and replacement to the
+// file's ending fixes the match without rewriting the file's other line endings.
+func matchLineEndings(content, old, new string) (string, string) {
+	if strings.Contains(content, old) || !strings.Contains(content, "\r\n") {
+		return old, new
+	}
+	if strings.Contains(content, toCRLF(old)) {
+		return toCRLF(old), toCRLF(new)
+	}
+	return old, new
+}
+
+func toCRLF(s string) string {
+	return strings.ReplaceAll(strings.ReplaceAll(s, "\r\n", "\n"), "\n", "\r\n")
+}
+
+func matchReplacementLineEndings(content, replacement string) string {
+	if strings.Contains(content, "\r\n") {
+		return toCRLF(replacement)
+	}
+	return replacement
+}
+
+type editApplyResult struct {
+	updated string
+	applied int
+	matches int
+	fuzzy   bool
+	receipt editReplacementReceipt
+}
+
+type editRange struct {
+	start int
+	end   int
+}
+
+// editReplacementReceipt records only the span the tool actually matched and
+// the span it wrote in its place. It deliberately excludes surrounding file
+// content so a successful edit can ground the next model turn without widening
+// provider-visible workspace data.
+type editReplacementReceipt struct {
+	matched     string
+	replacement string
+	occurrences int
+	fuzzy       bool
+}
+
+// applyOldStringEdit is the shared edit_file/multi_edit/Preview contract. It
+// preserves the exact-match rule first, then falls back to a narrow fuzzy match
+// for the mismatches read_file introduces or hides: trailing whitespace,
+// tab-vs-spaces indentation, read_file line prefixes, and a blank-line run of a
+// different length. Non-replace_all edits still require exactly one match.
+func applyOldStringEdit(content, oldString, newString string, replaceAll bool) editApplyResult {
+	old, newStr := matchLineEndings(content, oldString, newString)
+	if replaceAll {
+		if count := strings.Count(content, old); count > 0 {
+			return editApplyResult{
+				updated: strings.ReplaceAll(content, old, newStr),
+				applied: count,
+				matches: count,
+				receipt: editReplacementReceipt{
+					matched:     old,
+					replacement: newStr,
+					occurrences: count,
+				},
+			}
+		}
+		ranges := fuzzyEditRanges(content, old)
+		if len(ranges) == 0 {
+			return editApplyResult{updated: content}
+		}
+		replacement := matchReplacementLineEndings(content, newStr)
+		return editApplyResult{
+			updated: replaceEditRanges(content, ranges, replacement),
+			applied: len(ranges),
+			matches: len(ranges),
+			fuzzy:   true,
+			receipt: editReplacementReceipt{
+				matched:     matchedRangeSample(content, old, ranges),
+				replacement: replacement,
+				occurrences: len(ranges),
+				fuzzy:       true,
+			},
+		}
+	}
+
+	switch count := strings.Count(content, old); count {
+	case 0:
+		ranges := fuzzyEditRanges(content, old)
+		if len(ranges) != 1 {
+			return editApplyResult{updated: content, matches: len(ranges)}
+		}
+		return editApplyResult{
+			updated: replaceEditRanges(content, ranges, matchReplacementLineEndings(content, newStr)),
+			applied: 1,
+			matches: 1,
+			fuzzy:   true,
+			receipt: editReplacementReceipt{
+				matched:     matchedRangeSample(content, old, ranges),
+				replacement: matchReplacementLineEndings(content, newStr),
+				occurrences: 1,
+				fuzzy:       true,
+			},
+		}
+	case 1:
+		return editApplyResult{
+			updated: strings.Replace(content, old, newStr, 1),
+			applied: 1,
+			matches: 1,
+			receipt: editReplacementReceipt{
+				matched:     old,
+				replacement: newStr,
+				occurrences: 1,
+			},
+		}
+	default:
+		return editApplyResult{updated: content, matches: count}
+	}
+}
+
+func matchedRangeSample(content, fallback string, ranges []editRange) string {
+	if len(ranges) == 0 {
+		return fallback
+	}
+	r := ranges[0]
+	if r.start < 0 || r.end < r.start || r.end > len(content) {
+		return fallback
+	}
+	actual := content[r.start:r.end]
+	sample := clipPostWriteSpan(actual, maxCapturedReceiptSpanBytes)
+	if len(sample) == len(actual) {
+		// Do not let a short substring keep an otherwise-dead large intermediate
+		// multi_edit buffer alive until all later steps finish.
+		return strings.Clone(sample)
+	}
+	return sample
+}
+
+func oldStringNotFoundError(path, oldString, content string) error {
+	if first, last, ok := blankLinePresenceSpan(oldString, content); ok {
+		return fmt.Errorf("old_string not found in %s: lines %d-%d match it only when blank lines are ignored, so its blank lines differ from the file's there. Copy that span again with every blank line exactly as the file has it.", path, first, last)
+	}
+	hint := oldStringNotFoundHint(oldString, content)
+	if line, text, ok := nearestContentLine(oldString, content); ok {
+		return fmt.Errorf("old_string not found in %s (nearest line %d: %q).%s", path, line, text, hint)
+	}
+	return fmt.Errorf("old_string not found in %s.%s", path, hint)
+}
+
+// blankLinePresenceSpan finds the one span old_string names once blank lines
+// are dropped on both sides. The matcher never accepts it, because a blank
+// line's presence is not free, but it is the cause the caller has to be told:
+// "re-read the file" sends it back to reproduce the same span the same way.
+func blankLinePresenceSpan(oldString, content string) (first, last int, ok bool) {
+	old := nonBlankLines(splitLineSegments(oldString))
+	if len(old) < 2 {
+		return 0, 0, false
+	}
+	lines := nonBlankLines(splitLineSegments(content))
+	matches, at := 0, 0
+	for i := 0; i+len(old) <= len(lines); i++ {
+		if slices.EqualFunc(lines[i:i+len(old)], old, func(a, b numberedLine) bool { return a.text == b.text }) {
+			matches, at = matches+1, i
+		}
+	}
+	if matches != 1 {
+		return 0, 0, false
+	}
+	span := lines[at : at+len(old)]
+	for k := range old {
+		// Same layout means the blank lines agree and the miss lies elsewhere.
+		if span[k].line-span[0].line != old[k].line-old[0].line {
+			return span[0].line, span[len(span)-1].line, true
+		}
+	}
+	return 0, 0, false
+}
+
+type numberedLine struct {
+	line int
+	text string
+}
+
+func nonBlankLines(lines []lineSegment) []numberedLine {
+	var out []numberedLine
+	for i, line := range lines {
+		text := strings.TrimRight(strings.TrimSuffix(line.raw, "\n"), " \t\r")
+		if strings.TrimSpace(text) != "" {
+			out = append(out, numberedLine{line: i + 1, text: text})
+		}
+	}
+	return out
+}
+
+func oldStringNotFoundHint(oldString, content string) string {
+	base := " Re-read the current file before retrying; if several related edits target the same area, combine the final replacements in one multi_edit call."
+	if !strings.Contains(content, "\r\n") {
+		return base
+	}
+	normalizedContent := strings.ReplaceAll(content, "\r\n", "\n")
+	normalizedOld := strings.ReplaceAll(oldString, "\r\n", "\n")
+	if strings.Contains(normalizedContent, normalizedOld) {
+		return " The target file uses CRLF line endings; edit_file/multi_edit normally normalize LF-only old_string for CRLF files, so this is likely stale context. Re-read the current file before retrying."
+	}
+	return " The target file uses CRLF line endings, but edit_file/multi_edit already tolerate LF-only old_string for CRLF files; check for stale, incomplete, or non-unique context before retrying."
+}
+
+func oldStringNotUniqueError(path, oldString, content string, matches int, replaceAllHint bool) error {
+	lineHint := oldStringMatchLineSummary(oldString, content, 5)
+	if replaceAllHint {
+		return fmt.Errorf("old_string is not unique in %s (%d matches)%s; add nearby unique code, not just repeated separator lines, or set replace_all if every match should change", path, matches, lineHint)
+	}
+	return fmt.Errorf("old_string is not unique in %s (%d matches)%s; add nearby unique code, not just repeated separator lines", path, matches, lineHint)
+}
+
+type lineSegment struct {
+	raw   string
+	start int
+	end   int
+}
+
+type fuzzyMode struct {
+	stripOldReadPrefixes bool
+	trimTrailing         bool
+	expandTabs           bool
+	trimLeading          bool
+}
+
+func fuzzyEditRanges(content, old string) []editRange {
+	if old == "" || content == "" {
+		return nil
+	}
+	contentLines := splitLineSegments(content)
+	oldLines := splitLineSegments(old)
+	if len(oldLines) == 0 {
+		return nil
+	}
+	if len(oldLines) > len(contentLines) {
+		// Equal-length window modes cannot match here, but a blank-line run
+		// reproduced longer than the file's still can.
+		return blankRunRanges(contentLines, oldLines)
+	}
+
+	oldHasReadPrefixes := allLinesHaveReadFilePrefix(oldLines)
+	modes := []fuzzyMode{
+		{trimTrailing: true},
+		{trimTrailing: true, expandTabs: true},
+	}
+	if oldHasReadPrefixes {
+		modes = append(modes,
+			fuzzyMode{stripOldReadPrefixes: true, trimTrailing: true},
+			fuzzyMode{stripOldReadPrefixes: true, trimTrailing: true, expandTabs: true},
+		)
+	}
+
+	for _, mode := range modes {
+		normOld := make([]string, len(oldLines))
+		for i, line := range oldLines {
+			normOld[i] = normalizeFuzzyLine(line.raw, lineHasNewline(line.raw), mode, mode.stripOldReadPrefixes)
+		}
+		var ranges []editRange
+		for i := 0; i <= len(contentLines)-len(oldLines); {
+			if fuzzyWindowMatches(contentLines[i:i+len(oldLines)], oldLines, normOld, mode) {
+				ranges = append(ranges, editRange{
+					start: contentLines[i].start,
+					end:   fuzzyWindowEnd(contentLines[i+len(oldLines)-1], oldLines[len(oldLines)-1]),
+				})
+				i += len(oldLines)
+				continue
+			}
+			i++
+		}
+		if len(ranges) > 0 {
+			return ranges
+		}
+	}
+	return blankRunRanges(contentLines, oldLines)
+}
+
+// blankRunRanges collapses each run of consecutive blank lines into one token,
+// so only a run's length is free, never its presence: a blank line the caller
+// invented still never matches. It is a standalone last resort rather than a
+// fuzzyMode so that it cannot compose with tab expansion or prefix stripping —
+// a span that drifted in two dimensions at once must still fail.
+func blankRunRanges(contentLines, oldLines []lineSegment) []editRange {
+	c := blankRunTokens(contentLines)
+	o := blankRunTokens(oldLines)
+	if len(o) == 0 || len(o) > len(c) {
+		return nil
+	}
+	// Only a run bounded by non-blank lines on both sides may drift in length.
+	// A window that starts or ends blank has no anchoring text on that side, so
+	// an all-blank old_string would otherwise name every blank run in the file.
+	if o[0].blank || o[len(o)-1].blank {
+		return nil
+	}
+	var ranges []editRange
+	for i := 0; i+len(o) <= len(c); {
+		if blankRunWindowMatches(c[i:i+len(o)], o) {
+			last := c[i+len(o)-1]
+			ranges = append(ranges, editRange{
+				start: c[i].start,
+				end:   fuzzyWindowEnd(last.lastLine, o[len(o)-1].lastLine),
+			})
+			i += len(o)
+			continue
+		}
+		i++
+	}
+	return ranges
+}
+
+func blankRunWindowMatches(window, old []blankRunToken) bool {
+	for i, tok := range window {
+		if tok.blank != old[i].blank || (!old[i].blank && tok.text != old[i].text) {
+			return false
+		}
+		// Same trailing-newline rule the other fuzzy modes apply: an old_string
+		// that ends in a newline must not match a final line that lacks one,
+		// or the write would append a newline the file never had.
+		if lineHasNewline(old[i].lastLine.raw) && !lineHasNewline(tok.lastLine.raw) {
+			return false
+		}
+	}
+	return true
+}
+
+// blankRunToken is one non-blank line, or one whole run of consecutive blank
+// lines collapsed into a single token spanning the run.
+type blankRunToken struct {
+	text     string
+	blank    bool
+	start    int
+	lastLine lineSegment
+}
+
+func blankRunTokens(lines []lineSegment) []blankRunToken {
+	var out []blankRunToken
+	for _, line := range lines {
+		body := strings.TrimSuffix(line.raw, "\n")
+		if strings.TrimSpace(body) == "" {
+			if n := len(out); n > 0 && out[n-1].blank {
+				out[n-1].lastLine = line
+				continue
+			}
+			out = append(out, blankRunToken{blank: true, start: line.start, lastLine: line})
+			continue
+		}
+		out = append(out, blankRunToken{text: strings.TrimRight(body, " \t\r"), start: line.start, lastLine: line})
+	}
+	return out
+}
+
+func fuzzyWindowMatches(contentWindow, oldLines []lineSegment, normOld []string, mode fuzzyMode) bool {
+	for i, contentLine := range contentWindow {
+		oldHasNewline := lineHasNewline(oldLines[i].raw)
+		if oldHasNewline && !lineHasNewline(contentLine.raw) {
+			return false
+		}
+		got := normalizeFuzzyLine(contentLine.raw, oldHasNewline, mode, false)
+		if got != normOld[i] {
+			return false
+		}
+	}
+	return true
+}
+
+func splitLineSegments(s string) []lineSegment {
+	if s == "" {
+		return nil
+	}
+	var lines []lineSegment
+	start := 0
+	for i, r := range s {
+		if r == '\n' {
+			end := i + 1
+			lines = append(lines, lineSegment{raw: s[start:end], start: start, end: end})
+			start = end
+		}
+	}
+	if start < len(s) {
+		lines = append(lines, lineSegment{raw: s[start:], start: start, end: len(s)})
+	}
+	return lines
+}
+
+func lineHasNewline(line string) bool {
+	return strings.HasSuffix(line, "\n")
+}
+
+func fuzzyWindowEnd(contentLast, oldLast lineSegment) int {
+	if lineHasNewline(oldLast.raw) || !lineHasNewline(contentLast.raw) {
+		return contentLast.end
+	}
+	end := contentLast.end - 1
+	if end > contentLast.start && contentLast.raw[len(contentLast.raw)-2] == '\r' {
+		end--
+	}
+	return end
+}
+
+func normalizeFuzzyLine(line string, includeNewline bool, mode fuzzyMode, stripReadPrefix bool) string {
+	body := strings.TrimSuffix(line, "\n")
+	if stripReadPrefix {
+		body, _ = stripReadFileLinePrefix(body)
+	}
+	if mode.trimTrailing {
+		body = strings.TrimRight(body, " \t\r")
+	}
+	if mode.expandTabs {
+		body = strings.ReplaceAll(body, "\t", "    ")
+	}
+	if mode.trimLeading {
+		body = strings.TrimLeft(body, " \t")
+	}
+	if includeNewline {
+		return body + "\n"
+	}
+	return body
+}
+
+func allLinesHaveReadFilePrefix(lines []lineSegment) bool {
+	if len(lines) == 0 {
+		return false
+	}
+	for _, line := range lines {
+		body := strings.TrimSuffix(line.raw, "\n")
+		if _, ok := stripReadFileLinePrefix(body); !ok {
+			return false
+		}
+	}
+	return true
+}
+
+func stripReadFileLinePrefix(line string) (string, bool) {
+	i := 0
+	for i < len(line) && (line[i] == ' ' || line[i] == '\t') {
+		i++
+	}
+	j := i
+	for j < len(line) && line[j] >= '0' && line[j] <= '9' {
+		j++
+	}
+	if j == i || !strings.HasPrefix(line[j:], "\u2192") {
+		return line, false
+	}
+	return line[j+len("\u2192"):], true
+}
+
+func replaceEditRanges(content string, ranges []editRange, replacement string) string {
+	updated := content
+	for _, v := range slices.Backward(ranges) {
+		r := v
+		updated = updated[:r.start] + replacement + updated[r.end:]
+	}
+	return updated
+}
+
+func nearestContentLine(oldString, content string) (int, string, bool) {
+	oldLines := splitLineSegments(oldString)
+	if len(oldLines) == 0 {
+		return 0, "", false
+	}
+	target := strings.TrimSpace(normalizeFuzzyLine(oldLines[0].raw, false, fuzzyMode{trimTrailing: true, expandTabs: true}, true))
+	if target == "" {
+		return 0, "", false
+	}
+	bestLine := 0
+	bestScore := 0
+	bestText := ""
+	for i, line := range splitLineSegments(content) {
+		text := strings.TrimSuffix(line.raw, "\n")
+		score := commonPrefixLen(strings.TrimSpace(strings.ReplaceAll(text, "\t", "    ")), target)
+		if score > bestScore {
+			bestLine = i + 1
+			bestScore = score
+			bestText = text
+		}
+	}
+	if bestScore < 3 {
+		return 0, "", false
+	}
+	return bestLine, bestText, true
+}
+
+func oldStringMatchLineSummary(oldString, content string, limit int) string {
+	if limit <= 0 {
+		return ""
+	}
+	target := firstNonEmptyLine(oldString)
+	if target == "" {
+		return ""
+	}
+	var matches []int
+	for i, line := range splitLineSegments(content) {
+		text := strings.TrimSuffix(line.raw, "\n")
+		text = strings.TrimSuffix(text, "\r")
+		if strings.Contains(text, target) {
+			matches = append(matches, i+1)
+		}
+	}
+	if len(matches) == 0 {
+		return ""
+	}
+	var b strings.Builder
+	b.WriteString("; matching lines include ")
+	for i, line := range matches {
+		if i >= limit {
+			b.WriteString(", ...")
+			break
+		}
+		if i > 0 {
+			b.WriteString(", ")
+		}
+		fmt.Fprint(&b, line)
+	}
+	return b.String()
+}
+
+func firstNonEmptyLine(s string) string {
+	for _, line := range splitLineSegments(s) {
+		text := strings.TrimSpace(strings.TrimSuffix(line.raw, "\n"))
+		text = strings.TrimSuffix(text, "\r")
+		if text != "" {
+			return text
+		}
+	}
+	return ""
+}
+
+func commonPrefixLen(a, b string) int {
+	n := min(len(b), len(a))
+	for i := range n {
+		if a[i] != b[i] {
+			return i
+		}
+	}
+	return n
+}

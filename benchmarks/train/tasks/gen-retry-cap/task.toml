@@ -1,0 +1,3 @@
+prompt = "The retry helper in retry.py backs off exponentially between retries, but its backoff overruns the configured cap: backoff_delay() returns values above max_delay, and retry_call() actually sleeps longer than max_delay between tries. Diagnose the bug and fix retry.py — keeping the public API (retry_call, backoff_delay, RetryExhausted) unchanged — so that delays grow exponentially with each consecutive failure and every delay is clamped at max_delay. Make `python3 -m unittest test_retry` pass."
+class = "failing-test-diagnosis"
+timeout_sec = 300

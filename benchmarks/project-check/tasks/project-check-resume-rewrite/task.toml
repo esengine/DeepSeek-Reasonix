@@ -1,0 +1,3 @@
+prompt = """Make `total` in calc.py ignore negative values. Then replace the `- verify:` line in REASONIX.md so it names `python3 check_b.py` instead of check_a.py. Finally run `python3 check_a.py` to confirm the change, and finish."""
+class = "project-check"
+timeout_sec = 600

@@ -1,0 +1,9 @@
+{
+  "apiVersion": "reasonix.io/plugin/v2",
+  "name": "issue-fix-kit",
+  "version": "0.1.0",
+  "description": "Reproduce a repository issue, make a focused fix, and draft an evidence-based pull request",
+  "contributes": {
+    "skills": ["skills"]
+  }
+}

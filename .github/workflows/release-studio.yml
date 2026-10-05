@@ -1,0 +1,1335 @@
+name: Release Studio
+run-name: Release Studio ${{ inputs.tag || github.ref_name }}
+
+# The only release line this branch publishes. It has its own tag namespace
+# (studio-v*), its own environment gate, and its own rollback catalog at
+# dl.reasonix.io/studio/versions.json.
+#
+# What it must never touch: the root dl.reasonix.io/versions.json, which is the
+# desktop line's catalog. Studio artifacts land under the tag prefix, which
+# cannot collide because the tag name itself differs. The highest stable tag
+# is the repository's GitHub latest and a candidate is a prerelease; the GitHub
+# release carries no root latest.json, because the 1.x updaters' last-resort
+# URL is releases/latest/download/latest.json and must keep answering 404.
+#
+# Windows artifacts are Authenticode-signed with a Certum SimplySign cloud
+# certificate in two stages: every PE file in the application tree, then the
+# installer built around them. Signing only the container leaves them unsigned on disk
+# after installation, which is what reputation heuristics quarantine. The
+# repository variable STUDIO_SIGNING_ENABLED=true turns it on; once on, a
+# release that cannot sign does not publish.
+#
+# Windows and macOS both package in two steps because both need something done
+# to the bundle in between — a signature there, notarization here.
+on:
+  push:
+    tags: ['studio-v*']
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "Existing studio tag to recover (for example studio-v0.1.0)"
+        required: true
+        type: string
+
+permissions:
+  contents: write # create the release and upload artifacts
+
+concurrency:
+  group: release-studio-${{ inputs.tag || github.ref_name }}
+  cancel-in-progress: false
+
+jobs:
+  resolve:
+    name: resolve Studio release
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    outputs:
+      tag: ${{ steps.release.outputs.tag }}
+      version: ${{ steps.release.outputs.version }}
+      sha: ${{ steps.release.outputs.sha }}
+      candidate: ${{ steps.release.outputs.candidate }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          fetch-depth: 0
+
+      - name: Resolve tag and version
+        id: release
+        env:
+          IN_TAG: ${{ inputs.tag }}
+          REF_NAME: ${{ github.ref_name }}
+        run: |
+          tag="${IN_TAG:-$REF_NAME}"
+          semver='^(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)(-([0-9A-Za-z-]+)(\.[0-9A-Za-z-]+)*)?$'
+          if [[ ! "$tag" =~ ^studio-v(.+)$ ]] || [[ ! "${BASH_REMATCH[1]}" =~ $semver ]]; then
+            echo "::error::studio release tag must be studio-vMAJOR.MINOR.PATCH[-PRERELEASE], got: $tag"
+            exit 1
+          fi
+          # A dispatch recovers an existing tag; it must not invent one.
+          sha="$(git rev-parse --verify "refs/tags/$tag^{commit}")"
+          # The tag has to be on the studio line. Publishing a main-v2 commit
+          # from here would produce a Studio build without Studio in it.
+          if ! git merge-base --is-ancestor "$sha" origin/studio; then
+            echo "::error::$tag is not on studio history"
+            exit 1
+          fi
+          version="${tag#studio-}"
+          # Semver's prerelease segment, group 4, read from the grammar rather
+          # than the spelling.
+          candidate=false
+          if [[ "${version#v}" =~ $semver ]] && [ -n "${BASH_REMATCH[4]}" ]; then
+            candidate=true
+          fi
+          { echo "tag=$tag"; echo "version=$version"; echo "sha=$sha"
+            echo "candidate=$candidate"; } >> "$GITHUB_OUTPUT"
+          echo "resolved $tag -> $version at $sha (candidate=$candidate)"
+
+      - name: Require versioned release notes
+        env:
+          SHA: ${{ steps.release.outputs.sha }}
+          VERSION: ${{ steps.release.outputs.version }}
+        run: |
+          notes="release-notes/studio/${VERSION#v}.md"
+          if ! git cat-file -e "$SHA:$notes"; then
+            echo "::error::$notes must exist in the tagged commit before a Studio release can build"
+            exit 1
+          fi
+
+  # The contract names which branch and which workflows may reach the release
+  # certificate. The call graph is read from the workflows themselves, so a
+  # second workflow that learns to use the credentials fails here before
+  # anything is built, and the fingerprint pins the files the signing runs.
+  # Both trees are checked: the tag's, which is built, and the workflow's,
+  # whose scripts do the signing.
+  signing-contract:
+    name: validate release signing contract
+    needs: resolve
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          ref: ${{ needs.resolve.outputs.sha }}
+          persist-credentials: false
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          ref: ${{ github.workflow_sha }}
+          path: release-control
+          persist-credentials: false
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7
+        with:
+          go-version-file: go.mod
+          cache: true
+      - name: Validate and fingerprint the contract
+        run: |
+          go run ./cmd/signpath-contract validate
+          echo "release fingerprint=$(go run ./cmd/signpath-contract fingerprint)" >> "$GITHUB_STEP_SUMMARY"
+          cd release-control
+          go run ./cmd/signpath-contract validate
+          echo "workflow fingerprint=$(go run ./cmd/signpath-contract fingerprint)" >> "$GITHUB_STEP_SUMMARY"
+
+  build:
+    name: build (${{ matrix.platform }})
+    needs: [resolve, signing-contract]
+    runs-on: ${{ matrix.runner }}
+    permissions:
+      contents: read
+    env:
+      # The switch alone decides the path, never the presence of credentials:
+      # with it on, the Windows leg hands its bundle to windows-sign-payload,
+      # and a missing secret fails there instead of shipping an unsigned build.
+      SIGN_WINDOWS: ${{ vars.STUDIO_SIGNING_ENABLED == 'true' }}
+    strategy:
+      fail-fast: false
+      matrix:
+        # ebarch is electron-builder's spelling of the same architecture, stated
+        # beside the release one rather than mapped in a step: the two
+        # vocabularies disagree (x64 / amd64) and a reviewer has to see both.
+        # Absent means the runner's own, which is what Windows and Linux build.
+        # artifact is the exact name publish downloads this leg's packages by.
+        include:
+          - platform: windows/amd64
+            runner: windows-latest
+            artifact: studio-build-windows-amd64
+          - platform: darwin/amd64
+            runner: macos-latest
+            ebarch: x64
+            artifact: studio-build-darwin-amd64
+          - platform: darwin/arm64
+            runner: macos-latest
+            ebarch: arm64
+            artifact: studio-build-darwin-arm64
+          - platform: linux/amd64
+            runner: ubuntu-22.04
+            artifact: studio-build-linux-amd64
+    steps:
+      # Real-time scanning inspects every file the job writes, and packaging
+      # writes a quarter of a gigabyte twice. The runner is thrown away after
+      # the job; if the image refuses the switch the build is only slower.
+      - name: Stop Defender scanning the build
+        if: runner.os == 'Windows'
+        continue-on-error: true
+        shell: pwsh
+        run: Set-MpPreference -DisableRealtimeMonitoring $true
+
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          ref: ${{ needs.resolve.outputs.sha }}
+
+      # The kernel this shell ships is a main-module binary now; the desktop
+      # module is not on this job's path at all.
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7
+        with:
+          go-version-file: go.mod
+          cache: true
+          cache-dependency-path: go.sum
+
+      - uses: pnpm/action-setup@ea17c68df8912ef543352723c149a84f56e3d413 # v6.1.0
+        with:
+          version: 10
+          run_install: false
+
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7
+        with:
+          node-version: "24"
+          cache: pnpm
+          cache-dependency-path: |
+            desktop/frontend-next/pnpm-lock.yaml
+            desktop/electron/pnpm-lock.yaml
+
+      # electron-builder shells out to dpkg-deb through fakeroot for the .deb,
+      # and carries its own NSIS -- the toolchain the Wails line installed by
+      # hand (GTK, WebKitGTK, nfpm, a pinned NSIS) is not this shell's.
+      - name: Install Linux packaging deps
+        if: runner.os == 'Linux'
+        run: sudo apt-get update && sudo apt-get install -y fakeroot
+
+      # The same Developer ID and notary credentials the desktop line uses: one
+      # certificate signs any bundle identifier its team owns, so Studio does not
+      # need a second one. electron-builder discovers the identity in the
+      # keychain, and ad-hoc signs when it finds none — which is what Gatekeeper
+      # refuses to open.
+      - name: Import Apple signing certificate
+        if: runner.os == 'macOS'
+        env:
+          APPLE_CERT_P12: ${{ secrets.APPLE_CERT_P12 }}
+          APPLE_CERT_PASSWORD: ${{ secrets.APPLE_CERT_PASSWORD }}
+          APPLE_API_KEY_P8: ${{ secrets.APPLE_API_KEY_P8 }}
+        run: |
+          if [ -z "$APPLE_CERT_P12" ]; then
+            echo "APPLE_CERT_P12 unset — Studio will ad-hoc sign (un-notarized)"
+            exit 0
+          fi
+          KEYCHAIN="$RUNNER_TEMP/signing.keychain-db"
+          KEYCHAIN_PASS="$(uuidgen)"
+          security create-keychain -p "$KEYCHAIN_PASS" "$KEYCHAIN"
+          security set-keychain-settings -lut 21600 "$KEYCHAIN"
+          security unlock-keychain -p "$KEYCHAIN_PASS" "$KEYCHAIN"
+          echo "$APPLE_CERT_P12" | base64 --decode > "$RUNNER_TEMP/cert.p12"
+          security import "$RUNNER_TEMP/cert.p12" -k "$KEYCHAIN" -P "$APPLE_CERT_PASSWORD" -T /usr/bin/codesign
+          security set-key-partition-list -S apple-tool:,apple:,codesign: -s -k "$KEYCHAIN_PASS" "$KEYCHAIN" >/dev/null
+          # Prepend the signing keychain to the search list so codesign / find-identity see it.
+          existing_keychains=()
+          while IFS= read -r keychain; do
+            [ -n "$keychain" ] && existing_keychains+=("$keychain")
+          done < <(security list-keychains -d user | sed -E 's/^[[:space:]]*"//; s/"[[:space:]]*$//')
+          security list-keychains -d user -s "$KEYCHAIN" "${existing_keychains[@]}"
+          echo "$APPLE_API_KEY_P8" | base64 --decode > "$RUNNER_TEMP/notary.p8"
+          rm -f "$RUNNER_TEMP/cert.p12"
+
+      # Studio declares SelfUpdate: true, which promises a replacement bundle
+      # Gatekeeper still opens. An official build that reached the users without
+      # a Developer ID would break the next update rather than the first launch,
+      # so this fails closed the way the desktop line's Authenticode gate does.
+      - name: Require Apple signing
+        if: runner.os == 'macOS' && github.repository == 'esengine/DeepSeek-Reasonix'
+        env:
+          HAS_APPLE: ${{ secrets.APPLE_CERT_P12 != '' && secrets.APPLE_CERT_PASSWORD != '' && secrets.APPLE_API_KEY_P8 != '' && secrets.APPLE_API_KEY_ID != '' && secrets.APPLE_API_ISSUER_ID != '' }}
+        run: |
+          if [ "$HAS_APPLE" != "true" ]; then
+            echo "::error::all five APPLE_* secrets are required to publish Studio for macOS"
+            exit 1
+          fi
+
+      - name: Build the SPA
+        working-directory: desktop/frontend-next
+        shell: bash
+        run: pnpm install --frozen-lockfile && pnpm build
+
+      # The kernel the shell speaks to. It is a main-module binary and stays
+      # CGO-free, so no platform needs a toolchain for it.
+      - name: Build the kernel
+        working-directory: desktop/electron
+        shell: bash
+        # The kernel states its own version: it is the side that installs a
+        # kernel on a remote machine, and those routes name a release by it.
+        env:
+          REASONIX_VERSION: ${{ needs.resolve.outputs.version }}
+        run: pnpm install --frozen-lockfile && pnpm run build:host
+
+      # The helper the Linux self-update runs under pkexec, staged where the
+      # .deb's fpm arguments look for it. A no-op off Linux.
+      - name: Stage the Linux package payload
+        working-directory: desktop/electron
+        shell: bash
+        run: pnpm run build:linux-payload
+
+      # The bundle, before anything is packaged around it. The version has to be
+      # injected: app.getVersion() reads package.json, which carries 0.0.0 in the
+      # tree, and a shell that states 0.0.0 ranks behind every published release
+      # and offers itself an update on every launch.
+      - name: Build the bundle
+        working-directory: desktop/electron
+        shell: bash
+        run: |
+          version="${{ needs.resolve.outputs.version }}"
+          arch=""
+          if [ -n "${{ matrix.ebarch }}" ]; then arch="--${{ matrix.ebarch }}"; fi
+          pnpm exec electron-builder --dir $arch -c.extraMetadata.version="${version#v}"
+
+      # Notarization happens to the bundle, so it sits between the two packaging
+      # steps the way Authenticode does on Windows. Stapling here is what lets a
+      # first launch work offline; a ticket Apple has but the bundle does not is
+      # a Gatekeeper prompt on a machine that cannot reach the notary.
+      - name: Notarize and staple the macOS bundle
+        if: runner.os == 'macOS'
+        shell: bash
+        env:
+          APPLE_API_KEY_PATH: ${{ runner.temp }}/notary.p8
+          APPLE_API_KEY_ID: ${{ secrets.APPLE_API_KEY_ID }}
+          APPLE_API_ISSUER_ID: ${{ secrets.APPLE_API_ISSUER_ID }}
+        run: |
+          # One architecture per job, so one bundle: dist/mac for x64 and
+          # dist/mac-arm64 for the other, and a job that produced neither has
+          # nothing to staple rather than the wrong thing.
+          app="$(find dist -maxdepth 2 -name '*.app' | sort | head -1)"
+          test -n "$app" || { echo "::error::no .app in dist to notarize"; exit 1; }
+          if [ -z "${APPLE_API_KEY_ID:-}" ]; then
+            echo "::warning::no notarytool credentials; the bundle is signed but not notarized"
+            exit 0
+          fi
+          # notarytool takes an archive, not a bundle, so the app is zipped only
+          # to be submitted; what ships is the stapled bundle itself.
+          ditto -c -k --keepParent "$app" "$RUNNER_TEMP/notarize.zip"
+          xcrun notarytool submit "$RUNNER_TEMP/notarize.zip" \
+            --key "$APPLE_API_KEY_PATH" \
+            --key-id "$APPLE_API_KEY_ID" \
+            --issuer "$APPLE_API_ISSUER_ID" \
+            --wait
+          xcrun stapler staple "$app"
+          xcrun stapler validate "$app"
+
+      # Windows packages after its signature instead, so it is packaged below.
+      - name: Package
+        if: runner.os != 'Windows'
+        working-directory: desktop/electron
+        shell: bash
+        run: |
+          version="${{ needs.resolve.outputs.version }}"
+          arch=""
+          # The flag has to be repeated here. --prepackaged builds targets and
+          # never reads what is inside the bundle, so without it they are named
+          # for the runner's own architecture: 2.11.0 shipped an x64 build as
+          # ReasonixStudio-darwin-arm64.zip, which studio-manifest keys as the
+          # platform it is not.
+          if [ -n "${{ matrix.ebarch }}" ]; then arch="--${{ matrix.ebarch }}"; fi
+          app="$(cd ../.. && find dist -maxdepth 2 \( -name '*.app' -o -name '*-unpacked' \) | sort | head -1)"
+          pnpm exec electron-builder --prepackaged "../../$app" $arch \
+            -c.extraMetadata.version="${version#v}"
+
+      # With signing on, this leg only hands the bundle on: the signing jobs
+      # run nothing but the signer, and windows-package packages in between.
+      - name: Upload the unsigned Windows bundle for signing
+        if: runner.os == 'Windows' && env.SIGN_WINDOWS == 'true'
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: unsigned-studio-windows-bundle
+          path: dist/win-unpacked
+          if-no-files-found: error
+          retention-days: 1
+
+      # The installer and the portable archive are built at once, the zip from
+      # its own copy: NSIS writes elevate.exe into the tree it packs, and a zip
+      # read beside that would hold it or not by timing.
+      - name: Package Windows from the bundle
+        if: runner.os == 'Windows' && env.SIGN_WINDOWS != 'true'
+        working-directory: desktop/electron
+        shell: bash
+        run: |
+          version="${{ needs.resolve.outputs.version }}"
+          rm -rf ../../zip-src ../../dist-zip
+          cp -r ../../dist/win-unpacked ../../zip-src
+          pnpm exec electron-builder --prepackaged ../../zip-src --win zip \
+            -c.extraMetadata.version="${version#v}" -c.directories.output=../../dist-zip &
+          zip_pid=$!
+          pnpm exec electron-builder --prepackaged ../../dist/win-unpacked --win nsis \
+            -c.extraMetadata.version="${version#v}"
+          wait "$zip_pid"
+          mv ../../dist-zip/ReasonixStudio-windows-amd64.zip ../../dist/
+
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        if: runner.os != 'Windows' || env.SIGN_WINDOWS != 'true'
+        with:
+          name: ${{ matrix.artifact }}
+          path: dist/ReasonixStudio-*
+          if-no-files-found: error
+          retention-days: 7
+
+  # Windows signing is four jobs so the SimplySign session is never up while
+  # third-party code runs or untrusted archives are parsed: the two signing jobs
+  # install no toolchain and run only the signer, while packaging and the
+  # package check run between them on their own runners with no secrets. Both
+  # signing jobs share one group with the Studio smoke test, so no two runs
+  # drive the same SimplySign account at once.
+  windows-sign-payload:
+    name: sign the Windows PE files (Certum)
+    needs: [resolve, signing-contract, build]
+    if: vars.STUDIO_SIGNING_ENABLED == 'true'
+    runs-on: windows-2022
+    timeout-minutes: 30
+    environment: studio-release
+    permissions:
+      contents: read
+    concurrency:
+      group: certum-signing
+      cancel-in-progress: false
+    # Recorded here because no later job can write this job's outputs: the
+    # installer signing job refuses a payload artifact that no longer hashes to it.
+    outputs:
+      payload-digest: ${{ steps.verify.outputs.digest }}
+    steps:
+      # Only the workflow's own commit is checked out: these jobs run the signer
+      # and its checks, never anything the release tag builds.
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          ref: ${{ github.workflow_sha }}
+          persist-credentials: false
+
+      # The switch is on, so nothing below may fall back to an unsigned build.
+      # Every missing value is reported under its own code before any fails.
+      - name: Require Certum configuration
+        shell: pwsh
+        env:
+          CERTUM_USERNAME: ${{ secrets.CERTUM_USERNAME }}
+          CERTUM_OTP_URI: ${{ secrets.CERTUM_OTP_URI }}
+          CERTUM_KEY_ID: ${{ secrets.CERTUM_KEY_ID }}
+          EXPECTED_SUBJECT: ${{ vars.STUDIO_SIGNING_SUBJECT }}
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $failed = $false
+          function Refuse([string]$code, [string]$message) {
+            Write-Output "::error title=$code::$message"
+            Set-Variable -Scope Script -Name failed -Value $true
+          }
+          if ([string]::IsNullOrWhiteSpace($env:CERTUM_USERNAME)) {
+            Refuse 'studio-signing.missing-username' 'Secret CERTUM_USERNAME is not set'
+          }
+          if ($env:CERTUM_OTP_URI -notmatch '^otpauth://totp/') {
+            Refuse 'studio-signing.invalid-otp-uri' 'Secret CERTUM_OTP_URI must be a complete otpauth://totp/ URI'
+          }
+          if ($env:CERTUM_KEY_ID -notmatch '^[0-9a-fA-F]{40}$') {
+            Refuse 'studio-signing.invalid-key-id' 'Secret CERTUM_KEY_ID must be the 40-character SHA-1 certificate thumbprint'
+          }
+          if ([string]::IsNullOrWhiteSpace($env:EXPECTED_SUBJECT)) {
+            Refuse 'studio-signing.subject-unset' 'Variable STUDIO_SIGNING_SUBJECT is empty; run the Studio Certum signing smoke test and copy the subject it reports'
+          }
+          if ($failed) { exit 1 }
+
+      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: unsigned-studio-windows-bundle
+          path: signing/app
+
+      # Stage one: every PE file in the application tree that Microsoft has
+      # not signed, Electron's DLLs included. Windows loads each of them, and
+      # Smart App Control judges an unsigned one on its own reputation. The
+      # tree has to hold exactly the PE files the signing library declares.
+      - name: List the PE files to sign
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          . ./scripts/windows-signing-lib.ps1
+          Assert-DeclaredPeSet -Root signing/app
+          $script:ReleaseSignedPe | ForEach-Object { "app/$_" } | Set-Content signing/signing-files.txt
+          Get-Content signing/signing-files.txt
+
+      - name: Connect to Certum
+        uses: ./.github/actions/setup-certum
+        with:
+          username: ${{ secrets.CERTUM_USERNAME }}
+          otp-uri: ${{ secrets.CERTUM_OTP_URI }}
+          thumbprint: ${{ secrets.CERTUM_KEY_ID }}
+
+      - name: Sign the PE files
+        shell: pwsh
+        env:
+          CERTUM_KEY_ID: ${{ secrets.CERTUM_KEY_ID }}
+        run: ./scripts/sign-certum.ps1 -PayloadDirectory signing
+
+      # The session signs for any process on the runner while it is up.
+      - name: Disconnect from Certum
+        if: always()
+        shell: pwsh
+        run: Get-Process -Name '*SimplySign*' -ErrorAction SilentlyContinue | Stop-Process -Force
+
+      # Enumerates the tree again rather than reading the list it signed from,
+      # so a PE file the list missed fails here unsigned.
+      - name: Verify the signed tree
+        id: verify
+        shell: pwsh
+        env:
+          CERTUM_KEY_ID: ${{ secrets.CERTUM_KEY_ID }}
+          EXPECTED_SUBJECT: ${{ vars.STUDIO_SIGNING_SUBJECT }}
+        run: |
+          $ErrorActionPreference = 'Stop'
+          ./scripts/verify-windows-authenticode.ps1 `
+            -PayloadDirectory signing/app `
+            -DigestPath "$env:RUNNER_TEMP/payload-digest" `
+            -ExpectedThumbprint $env:CERTUM_KEY_ID `
+            -ExpectedSubject $env:EXPECTED_SUBJECT
+          "digest=$(Get-Content -Raw "$env:RUNNER_TEMP/payload-digest")" >> $env:GITHUB_OUTPUT
+
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: signed-studio-windows-payload
+          path: signing/app
+          if-no-files-found: error
+          retention-days: 1
+
+  # No environment and no secrets: electron-builder and its dependencies run
+  # here, on a runner that never held a signing session.
+  windows-package:
+    name: package Windows from the signed tree
+    needs: [resolve, windows-sign-payload]
+    runs-on: windows-latest
+    timeout-minutes: 30
+    permissions:
+      contents: read
+    steps:
+      - name: Stop Defender scanning the build
+        continue-on-error: true
+        shell: pwsh
+        run: Set-MpPreference -DisableRealtimeMonitoring $true
+
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          ref: ${{ needs.resolve.outputs.sha }}
+          persist-credentials: false
+
+      - uses: pnpm/action-setup@ea17c68df8912ef543352723c149a84f56e3d413 # v6.1.0
+        with:
+          version: 10
+          run_install: false
+
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7
+        with:
+          node-version: "24"
+          cache: pnpm
+          cache-dependency-path: desktop/electron/pnpm-lock.yaml
+
+      - name: Install the packager
+        working-directory: desktop/electron
+        shell: bash
+        run: pnpm install --frozen-lockfile
+
+      # The signed payload is the whole bundle, so it is packaged as it came.
+      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: signed-studio-windows-payload
+          path: dist/win-unpacked
+
+      # Both packages come from the signed tree, so the archive carries the
+      # signed files too rather than a second unsigned copy. The zip is packed
+      # from its own copy for the reason the build job gives.
+      - name: Package Windows from the signed bundle
+        working-directory: desktop/electron
+        shell: bash
+        run: |
+          version="${{ needs.resolve.outputs.version }}"
+          rm -rf ../../zip-src ../../dist-zip
+          cp -r ../../dist/win-unpacked ../../zip-src
+          pnpm exec electron-builder --prepackaged ../../zip-src --win zip \
+            -c.extraMetadata.version="${version#v}" -c.directories.output=../../dist-zip &
+          zip_pid=$!
+          pnpm exec electron-builder --prepackaged ../../dist/win-unpacked --win nsis \
+            -c.extraMetadata.version="${version#v}"
+          wait "$zip_pid"
+          mv ../../dist-zip/ReasonixStudio-windows-amd64.zip ../../dist/
+
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: packaged-studio-windows
+          path: |
+            dist/ReasonixStudio-windows-amd64-installer.exe
+            dist/ReasonixStudio-windows-amd64.zip
+          if-no-files-found: error
+          retention-days: 1
+
+  # Unpacks what windows-package built and compares it with the signed payload.
+  # Archive parsing happens here, on a runner with no environment and no
+  # secrets, never in a job that holds the Certum credentials. Its outputs are
+  # the hashes of the two files it checked, which the signing job requires.
+  windows-verify-package:
+    name: check the Windows packages against the signed tree
+    needs: [resolve, windows-sign-payload, windows-package]
+    runs-on: windows-2022
+    timeout-minutes: 30
+    permissions:
+      contents: read
+    outputs:
+      installer-sha256: ${{ steps.check.outputs.installer-sha256 }}
+      archive-sha256: ${{ steps.check.outputs.archive-sha256 }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          ref: ${{ github.workflow_sha }}
+          persist-credentials: false
+
+      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: signed-studio-windows-payload
+          path: payload
+
+      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: packaged-studio-windows
+          path: dist
+
+      # 7-Zip is the runner image's, not the tag's.
+      - name: Compare both packages with the signed payload
+        id: check
+        shell: pwsh
+        env:
+          PAYLOAD_DIGEST: ${{ needs.windows-sign-payload.outputs.payload-digest }}
+        run: |
+          ./scripts/verify-windows-package.ps1 `
+            -PayloadDirectory payload `
+            -ExpectedPayloadDigest $env:PAYLOAD_DIGEST `
+            -InstallerPath "dist/ReasonixStudio-windows-amd64-installer.exe" `
+            -PortableArchivePath "dist/ReasonixStudio-windows-amd64.zip" `
+            -OutputPath $env:GITHUB_OUTPUT
+
+  windows-sign-installer:
+    name: sign the Windows installer (Certum)
+    needs: [resolve, windows-package, windows-verify-package]
+    runs-on: windows-2022
+    timeout-minutes: 30
+    environment: studio-release
+    permissions:
+      contents: read
+    concurrency:
+      group: certum-signing
+      cancel-in-progress: false
+    # The signed installer's hash, which publish requires of what it downloads.
+    outputs:
+      installer-sha256: ${{ steps.signed.outputs.installer-sha256 }}
+    steps:
+      # Only the workflow's own commit is checked out: these jobs run the signer
+      # and its checks, never anything the release tag builds.
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          ref: ${{ github.workflow_sha }}
+          persist-credentials: false
+
+      # The switch is on, so nothing below may fall back to an unsigned build.
+      # Every missing value is reported under its own code before any fails.
+      - name: Require Certum configuration
+        shell: pwsh
+        env:
+          CERTUM_USERNAME: ${{ secrets.CERTUM_USERNAME }}
+          CERTUM_OTP_URI: ${{ secrets.CERTUM_OTP_URI }}
+          CERTUM_KEY_ID: ${{ secrets.CERTUM_KEY_ID }}
+          EXPECTED_SUBJECT: ${{ vars.STUDIO_SIGNING_SUBJECT }}
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $failed = $false
+          function Refuse([string]$code, [string]$message) {
+            Write-Output "::error title=$code::$message"
+            Set-Variable -Scope Script -Name failed -Value $true
+          }
+          if ([string]::IsNullOrWhiteSpace($env:CERTUM_USERNAME)) {
+            Refuse 'studio-signing.missing-username' 'Secret CERTUM_USERNAME is not set'
+          }
+          if ($env:CERTUM_OTP_URI -notmatch '^otpauth://totp/') {
+            Refuse 'studio-signing.invalid-otp-uri' 'Secret CERTUM_OTP_URI must be a complete otpauth://totp/ URI'
+          }
+          if ($env:CERTUM_KEY_ID -notmatch '^[0-9a-fA-F]{40}$') {
+            Refuse 'studio-signing.invalid-key-id' 'Secret CERTUM_KEY_ID must be the 40-character SHA-1 certificate thumbprint'
+          }
+          if ([string]::IsNullOrWhiteSpace($env:EXPECTED_SUBJECT)) {
+            Refuse 'studio-signing.subject-unset' 'Variable STUDIO_SIGNING_SUBJECT is empty; run the Studio Certum signing smoke test and copy the subject it reports'
+          }
+          if ($failed) { exit 1 }
+
+      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: packaged-studio-windows
+          path: dist
+
+      # Only the two files windows-verify-package checked, byte for byte. This
+      # job opens no archive: what is inside was settled on a runner without
+      # the credentials, so Certum never signs an installer that did not match.
+      - name: Require the checked packages
+        shell: pwsh
+        env:
+          INSTALLER_SHA256: ${{ needs.windows-verify-package.outputs.installer-sha256 }}
+          ARCHIVE_SHA256: ${{ needs.windows-verify-package.outputs.archive-sha256 }}
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $expected = [ordered]@{
+            'ReasonixStudio-windows-amd64-installer.exe' = $env:INSTALLER_SHA256
+            'ReasonixStudio-windows-amd64.zip'           = $env:ARCHIVE_SHA256
+          }
+          $present = @(Get-ChildItem -LiteralPath dist -Recurse -Force | ForEach-Object { $_.Name })
+          if (Compare-Object -CaseSensitive @($expected.Keys) $present) { throw "dist holds $($present -join ', ')" }
+          foreach ($entry in $expected.GetEnumerator()) {
+            if ($entry.Value -notmatch '^[0-9a-f]{64}$') { throw "No checked hash for $($entry.Key)" }
+            $hash = (Get-FileHash -Algorithm SHA256 -LiteralPath (Join-Path dist $entry.Key)).Hash.ToLowerInvariant()
+            if ($hash -cne $entry.Value) { throw "$($entry.Key) is not the file windows-verify-package checked" }
+          }
+
+      - name: Connect to Certum
+        uses: ./.github/actions/setup-certum
+        with:
+          username: ${{ secrets.CERTUM_USERNAME }}
+          otp-uri: ${{ secrets.CERTUM_OTP_URI }}
+          thumbprint: ${{ secrets.CERTUM_KEY_ID }}
+
+      # Stage two: the NSIS container, only once the payload inside it is signed.
+      - name: Sign the installer
+        shell: pwsh
+        env:
+          CERTUM_KEY_ID: ${{ secrets.CERTUM_KEY_ID }}
+        run: ./scripts/sign-certum.ps1 -FilePath dist/ReasonixStudio-windows-amd64-installer.exe
+
+      # The session signs for any process on the runner while it is up.
+      - name: Disconnect from Certum
+        if: always()
+        shell: pwsh
+        run: Get-Process -Name '*SimplySign*' -ErrorAction SilentlyContinue | Stop-Process -Force
+
+      - name: Verify the installer signature
+        id: signed
+        shell: pwsh
+        env:
+          CERTUM_KEY_ID: ${{ secrets.CERTUM_KEY_ID }}
+          EXPECTED_SUBJECT: ${{ vars.STUDIO_SIGNING_SUBJECT }}
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $installer = 'dist/ReasonixStudio-windows-amd64-installer.exe'
+          ./scripts/verify-windows-authenticode.ps1 `
+            -FilePath $installer `
+            -ExpectedThumbprint $env:CERTUM_KEY_ID `
+            -ExpectedSubject $env:EXPECTED_SUBJECT
+          $hash = (Get-FileHash -Algorithm SHA256 -LiteralPath $installer).Hash.ToLowerInvariant()
+          "installer-sha256=$hash" >> $env:GITHUB_OUTPUT
+
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: studio-windows-signed
+          path: dist/ReasonixStudio-*
+          if-no-files-found: error
+          retention-days: 7
+
+  # The kernel a Studio installs on another machine. This line publishes it
+  # under its own tag, because the install routes name a release by the version
+  # the local build reports — and a line that ships no archive leaves every one
+  # of them with nothing to name but npm's, which is another line's.
+  cli:
+    name: build the CLI archives
+    needs: resolve
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          ref: ${{ needs.resolve.outputs.sha }}
+
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7
+        with:
+          go-version-file: go.mod
+          cache: true
+
+      # Every target the release line claims to support, from one runner: the
+      # CLI is CGO-free, so none of them needs a toolchain of its own.
+      - name: Cross-compile and archive
+        env:
+          VERSION: ${{ needs.resolve.outputs.version }}
+          SHA: ${{ needs.resolve.outputs.sha }}
+        run: |
+          set -euo pipefail
+          mkdir -p dist
+          built="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+          pkg=reasonix/internal/tools/productdocs
+          for target in darwin/amd64 darwin/arm64 linux/amd64 linux/arm64 windows/amd64 windows/arm64; do
+            os="${target%/*}"; arch="${target#*/}"; ext=""
+            [ "$os" = windows ] && ext=".exe"
+            CGO_ENABLED=0 GOOS="$os" GOARCH="$arch" go build -trimpath \
+              -ldflags "-s -w -X main.version=$VERSION -X main.gitCommit=${SHA:0:12} -X main.buildTimeUTC=$built -X $pkg.linkedVersion=$VERSION -X $pkg.linkedRevision=$SHA" \
+              -o "reasonix$ext" ./cmd/reasonix
+            if [ "$os" = windows ]; then
+              zip -qj "dist/reasonix-$os-$arch.zip" "reasonix$ext"
+            else
+              tar czf "dist/reasonix-$os-$arch.tar.gz" "reasonix$ext"
+            fi
+            rm -f "reasonix$ext"
+          done
+          # The digest list the remote verifies against. Resolved on the
+          # installing machine and handed to the remote with the URL, so the
+          # host fetching the archive never also supplies its own checksum.
+          (cd dist && sha256sum reasonix-* > SHA256SUMS)
+          ls -la dist
+
+      # A release that published the archives without the digest list is worse
+      # than one that published neither: the routes resolve SHA256SUMS first.
+      - name: Check the set is complete
+        run: |
+          set -euo pipefail
+          for want in reasonix-darwin-amd64.tar.gz reasonix-darwin-arm64.tar.gz \
+            reasonix-linux-amd64.tar.gz reasonix-linux-arm64.tar.gz \
+            reasonix-windows-amd64.zip reasonix-windows-arm64.zip SHA256SUMS; do
+            [ -f "dist/$want" ] || { echo "::error::no dist/$want"; exit 1; }
+          done
+
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: cli-archives
+          path: dist/*
+          if-no-files-found: error
+          retention-days: 7
+
+  publish:
+    name: sign, publish and mirror
+    needs: [resolve, build, cli, windows-sign-payload, windows-package, windows-verify-package, windows-sign-installer]
+    # The Windows signing jobs may be skipped only while the switch is off; with
+    # it on, any of them failing, cancelled or absent blocks the release.
+    if: >-
+      ${{ !cancelled() && needs.resolve.result == 'success' && needs.build.result == 'success' &&
+      needs.cli.result == 'success' && ((needs.windows-sign-payload.result == 'success' &&
+      needs.windows-package.result == 'success' && needs.windows-verify-package.result == 'success' &&
+      needs.windows-sign-installer.result == 'success') ||
+      (vars.STUDIO_SIGNING_ENABLED != 'true' && needs.windows-sign-payload.result == 'skipped' &&
+      needs.windows-package.result == 'skipped' && needs.windows-verify-package.result == 'skipped' &&
+      needs.windows-sign-installer.result == 'skipped')) }}
+    runs-on: ubuntu-latest
+    # Owner approval for the whole line. The gate sits here rather than before
+    # build so the approval is given with the artifacts already proven to build.
+    environment: studio-release
+    permissions:
+      contents: write
+      issues: read # release-notes credits read PR and issue authors
+      pull-requests: read
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          ref: ${{ needs.resolve.outputs.sha }}
+          fetch-depth: 0
+
+      # Before signing, so a credit lookup GitHub cannot answer stops the
+      # release while nothing has been published.
+      - name: Render version notes
+        env:
+          GH_TOKEN: ${{ github.token }}
+          VERSION: ${{ needs.resolve.outputs.version }}
+        run: |
+          version_notes="release-notes/studio/${VERSION#v}.md"
+          if [ -f "$version_notes" ]; then
+            node scripts/studio-release-notes.mjs "$version_notes" "$RUNNER_TEMP/version-notes.md"
+          fi
+
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7
+        with:
+          go-version-file: desktop/go.mod
+          cache: true
+          cache-dependency-path: desktop/go.sum
+
+      # One directory per artifact, because both sets below are taken from the
+      # job that produced them. Merging them flattens that away, and the name
+      # alone cannot tell a package apart from an input to signing it.
+      # Every package by its exact name, never a pattern: any job without
+      # secrets can upload an artifact, and a pattern would publish it. Windows
+      # comes from the installer signing job when it ran, else the build leg.
+      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: studio-build-darwin-amd64
+          path: staging/studio-build-darwin-amd64
+
+      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: studio-build-darwin-arm64
+          path: staging/studio-build-darwin-arm64
+
+      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: studio-build-linux-amd64
+          path: staging/studio-build-linux-amd64
+
+      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        if: needs.windows-sign-installer.result == 'success'
+        with:
+          name: studio-windows-signed
+          path: staging/studio-windows
+
+      # Any job can upload an artifact, so the signed Windows packages are
+      # taken only if they are the bytes the signing jobs recorded: the
+      # installer as signed, the zip as windows-verify-package checked it.
+      - name: Require the recorded Windows packages
+        if: needs.windows-sign-installer.result == 'success'
+        env:
+          INSTALLER_SHA256: ${{ needs.windows-sign-installer.outputs.installer-sha256 }}
+          ARCHIVE_SHA256: ${{ needs.windows-verify-package.outputs.archive-sha256 }}
+        run: |
+          check() {
+            local file="staging/studio-windows/$1" want="$2" got
+            if [[ ! "$want" =~ ^[0-9a-f]{64}$ ]]; then
+              echo "::error title=studio-signing.package-hash-missing::no recorded SHA-256 for $1"
+              return 1
+            fi
+            got="$(sha256sum "$file" | awk '{print $1}')" || return 1
+            if [ "$got" != "$want" ]; then
+              echo "::error title=studio-signing.package-hash-mismatch::$1 is $got, the signing jobs recorded $want"
+              return 1
+            fi
+          }
+          files="$(cd staging/studio-windows && find . -type f | sed 's|^\./||' | LC_ALL=C sort | tr '\n' ' ')"
+          if [ "$files" != "ReasonixStudio-windows-amd64-installer.exe ReasonixStudio-windows-amd64.zip " ]; then
+            echo "::error title=studio-signing.package-set-mismatch::studio-windows-signed holds: $files"
+            exit 1
+          fi
+          check ReasonixStudio-windows-amd64-installer.exe "$INSTALLER_SHA256"
+          check ReasonixStudio-windows-amd64.zip "$ARCHIVE_SHA256"
+
+      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        if: needs.windows-sign-installer.result != 'success'
+        with:
+          name: studio-build-windows-amd64
+          path: staging/studio-windows
+
+      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: cli-archives
+          path: staging/cli-archives
+
+      - name: Collect artifacts
+        run: |
+          mkdir -p dist
+          # The packages, from the build and signing jobs, then the CLI archives
+          # and their digest list. Two artifacts carrying one file name fail the
+          # release rather than letting move order pick.
+          while IFS= read -r -d '' f; do
+            name="$(basename "$f")"
+            if [ -e "dist/$name" ]; then
+              echo "::error::$name arrived in more than one artifact"
+              exit 1
+            fi
+            mv "$f" "dist/$name"
+          done < <(find staging/studio-* -type f -name 'ReasonixStudio-*' -print0
+            find staging/cli-archives -type f -print0)
+          ls -la dist
+          # Two Windows artifacts (installer, portable zip), two per macOS
+          # architecture (dmg, zip) and the Linux .deb. Fewer means an artifact
+          # was lost between jobs, and a partial release is worse than a failed
+          # one.
+          count=$(find dist -type f -name 'ReasonixStudio-*' | wc -l)
+          if [ "$count" -lt 7 ]; then
+            echo "::error::expected 7 artifacts (Windows installer + zip, macOS dmg + zip per architecture, Linux .deb), found $count"
+            exit 1
+          fi
+          # Each platform's update channel, and there is exactly one per
+          # platform: dpkg on Linux, the next installer on Windows, and the
+          # bundle swapped out of the archive on macOS. Missing one degrades the
+          # release silently instead of failing it — it strands that platform on
+          # the version it is running.
+          # Each macOS architecture by name, not darwin-*: a glob passes on
+          # whichever one shipped, and the missing one is a platform left on
+          # the version it is running with nothing saying so.
+          for required in 'ReasonixStudio-linux-*.deb' 'ReasonixStudio-windows-*-installer.exe' \
+            'ReasonixStudio-darwin-amd64.zip' 'ReasonixStudio-darwin-arm64.zip'; do
+            find dist -type f -name "$required" | grep -q . || {
+              echo "::error::no $required in the release; its packager did not run"
+              exit 1
+            }
+          done
+
+      # The same minisign key the desktop line uses, because the public key that
+      # verifies it is compiled into the client (update.PublicKey).
+      - name: Sign
+        working-directory: desktop
+        env:
+          MINISIGN_PRIVATE_KEY: ${{ secrets.MINISIGN_PRIVATE_KEY }}
+          MINISIGN_PASSWORD: ${{ secrets.MINISIGN_PASSWORD }}
+        run: |
+          go run ./cmd/sign sign ../dist/ReasonixStudio-*
+          for f in ../dist/ReasonixStudio-*; do
+            case "$f" in *.minisig) continue ;; esac
+            go run ./cmd/sign verify "$f"
+          done
+
+      # A chunked update beside the installer: the index of the signed portable
+      # tree and the chunks it is made of. It stays out of dist, which is what
+      # is counted and published as the release's artifacts.
+      - name: Build the Windows delta
+        env:
+          VERSION: ${{ needs.resolve.outputs.version }}
+          MINISIGN_PRIVATE_KEY: ${{ secrets.MINISIGN_PRIVATE_KEY }}
+          MINISIGN_PASSWORD: ${{ secrets.MINISIGN_PASSWORD }}
+        run: |
+          go run ./cmd/studio-delta build dist/ReasonixStudio-windows-amd64.zip "$VERSION" windows-amd64 delta
+          cd desktop
+          go run ./cmd/sign sign ../delta/windows-amd64/index.json.zst
+          go run ./cmd/sign verify ../delta/windows-amd64/index.json.zst
+
+      # Deltas are served from the mirror only, so a release that cannot reach
+      # it does not offer one: a client would fetch an index nobody uploaded.
+      # The same gate puts the mirror ahead of GitHub for every full artifact.
+      - name: Generate manifest
+        working-directory: desktop
+        env:
+          GITHUB_REPOSITORY: ${{ github.repository }}
+          HAS_R2: ${{ secrets.R2_ACCESS_KEY_ID != '' && secrets.R2_SECRET_ACCESS_KEY != '' && secrets.R2_ACCOUNT_ID != '' && secrets.R2_BUCKET != '' }}
+        run: |
+          delta_dir=""
+          if [ "$HAS_R2" = "true" ]; then delta_dir=../delta; fi
+          go run ./cmd/studio-manifest ../dist "${{ needs.resolve.outputs.version }}" "${{ needs.resolve.outputs.tag }}" $delta_dir
+
+      # The manifest stays out of the GitHub release (it is mirrored to R2
+      # under <tag>/ below), and a stable release takes the repository's latest
+      # only when it is the highest stable studio tag.
+      - name: Publish GitHub release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ needs.resolve.outputs.tag }}
+          CANDIDATE: ${{ needs.resolve.outputs.candidate }}
+          VERSION: ${{ needs.resolve.outputs.version }}
+          SIGNED_WINDOWS: ${{ needs.windows-sign-installer.result == 'success' }}
+        run: |
+          # A version's own notes live in release-notes/studio/<semver>.md, named
+          # without the v the tag carries, and were rendered with their authors
+          # above. The release still publishes without one, carrying only the
+          # standing text.
+          version_notes="release-notes/studio/${VERSION#v}.md"
+          notes="$RUNNER_TEMP/release-notes.md"
+          : > "$notes"
+          if [ -f "$version_notes" ]; then
+            cat "$RUNNER_TEMP/version-notes.md" >> "$notes"
+            printf '\n' >> "$notes"
+          else
+            echo "::error::no $version_notes; every Studio release requires user-visible notes"
+            exit 1
+          fi
+          previous_tag="$(git tag --merged "${{ needs.resolve.outputs.sha }}" --sort=-version:refname 'studio-v*' | grep -Fxv "$TAG" | head -n 1)"
+          if [ -z "$previous_tag" ]; then
+            echo "::error::cannot resolve the previous Studio tag for $TAG"
+            exit 1
+          fi
+          gh api -X POST "repos/${{ github.repository }}/releases/generate-notes" \
+            -f tag_name="$TAG" \
+            -f previous_tag_name="$previous_tag" \
+            --jq '.body' >> "$notes"
+          printf '\n\n' >> "$notes"
+          # The Windows sentence follows the job that signed, not the switch
+          # that asked for it: a constant here tells users to click through
+          # SmartScreen for a signed package, or the reverse.
+          if [ "$SIGNED_WINDOWS" = "true" ]; then
+            windows='**Windows** 的窗口、内核与安装器都经 Certum 代码签名证书做了 Authenticode 签名。'
+          else
+            windows='**Windows 包未签名**，SmartScreen 会告警：选「更多信息」，再选「仍要运行」。'
+          fi
+          {
+            printf '%s\n\n' '---'
+            printf "**macOS** 已用 Developer ID 签名并公证，打开时不需要清除隔离属性。%s**Linux** 从 \`.deb\` 安装。\n\n" "$windows"
+            printf '%s\n' '三个平台都能自更新：Linux 走自己的包，Windows 运行下一个安装器，macOS 替换自身 bundle。'
+          } >> "$notes"
+          assets=()
+          for f in dist/*; do
+            [ "$(basename "$f")" = latest.json ] || assets+=("$f")
+          done
+          if gh release view "$TAG" >/dev/null 2>&1; then
+            gh release edit "$TAG" --notes-file "$notes"
+            gh release upload "$TAG" "${assets[@]}" --clobber
+          else
+            decided="$(git tag -l 'studio-v*' | bash scripts/studio-release-flags.sh "$TAG" "$CANDIDATE")"
+            mapfile -t flags <<<"$decided"
+            gh release create "$TAG" "${assets[@]}" \
+              --title "Reasonix Studio $VERSION" \
+              --notes-file "$notes" \
+              "${flags[@]}"
+          fi
+
+      - name: Mirror to R2 and update the Studio catalog
+        env:
+          R2_BUCKET: ${{ secrets.R2_BUCKET }}
+          TAG: ${{ needs.resolve.outputs.tag }}
+          VERSION: ${{ needs.resolve.outputs.version }}
+          CANDIDATE: ${{ needs.resolve.outputs.candidate }}
+          HAS_R2: ${{ secrets.R2_ACCESS_KEY_ID != '' && secrets.R2_SECRET_ACCESS_KEY != '' && secrets.R2_ACCOUNT_ID != '' && secrets.R2_BUCKET != '' }}
+        run: |
+          if [ "$HAS_R2" != "true" ]; then
+            echo "::warning::R2 credentials are not configured; the GitHub release is published but the Studio catalog was not updated, so running builds will not see this version"
+            exit 0
+          fi
+          aws configure set aws_access_key_id "${{ secrets.R2_ACCESS_KEY_ID }}"
+          aws configure set aws_secret_access_key "${{ secrets.R2_SECRET_ACCESS_KEY }}"
+          aws configure set default.region auto
+          # A release's delta is tens of thousands of chunks of about 10 KB, so
+          # the sync is bound by request round trips, not bandwidth.
+          aws configure set default.s3.max_concurrent_requests 64
+          endpoint="https://${{ secrets.R2_ACCOUNT_ID }}.r2.cloudflarestorage.com"
+
+          # Chunks before anything that names them: they are named by their
+          # content and never change, so the sync only sends the new ones, and an
+          # index published ahead of its chunks is one no client can apply.
+          aws s3 sync delta/chunks "s3://${R2_BUCKET}/studio/chunks/" --size-only \
+            --endpoint-url "$endpoint" \
+            --content-type application/zstd \
+            --cache-control "public, max-age=31536000, immutable"
+          aws s3 cp delta/ "s3://${R2_BUCKET}/${TAG}/delta/" --recursive --exclude "chunks/*" --endpoint-url "$endpoint"
+
+          # Immutable per-tag objects. The tag prefix cannot collide with the
+          # desktop line's because the tag names differ (studio-v* vs desktop-v*).
+          aws s3 cp dist/ "s3://${R2_BUCKET}/${TAG}/" --recursive --endpoint-url "$endpoint"
+
+          # A candidate is mirrored so it can be installed from its own manifest
+          # and tested, but it never enters the catalog: the catalog is what a
+          # running install reads to decide its next version.
+          if [ "$CANDIDATE" = "true" ]; then
+            echo "$TAG mirrored; the Studio catalog stays at its released version"
+            exit 0
+          fi
+
+          # Studio's own catalog. Writing the ROOT versions.json here would hand
+          # desktop users Studio releases, so the prefix is not optional.
+          current=/tmp/studio-versions-current.json
+          next=/tmp/studio-versions-next.json
+          source=-
+          if aws s3 cp "s3://${R2_BUCKET}/studio/versions.json" "$current" --endpoint-url "$endpoint" 2>/dev/null; then
+            source="$current"
+          else
+            echo "no existing Studio catalog; starting a new one"
+          fi
+          bash scripts/update-versions-index.sh "$source" "$VERSION" "$TAG" studio \
+            "$(date -u +%Y-%m-%dT%H:%M:%SZ)" > "$next"
+          jq -e --arg v "$VERSION" '.versions | map(select(.version == $v)) | length == 1' "$next" >/dev/null
+          aws s3 cp "$next" "s3://${R2_BUCKET}/studio/versions.json" \
+            --endpoint-url "$endpoint" \
+            --content-type "application/json; charset=utf-8" \
+            --cache-control "public, max-age=300, stale-if-error=86400"
+          echo "Studio catalog -> $VERSION"
+
+  # A CLI channel that moves while 1.x still publishes would have two lines
+  # writing it, so every CLI job waits for this check. It runs no repository code.
+  cli-gate:
+    name: require the 1.x line to be frozen
+    needs: resolve
+    if: vars.STUDIO_PUBLISHES_CLI == 'true'
+    runs-on: ubuntu-latest
+    permissions: {}
+    steps:
+      - name: Require CLI_PUBLISH_FROZEN
+        env:
+          CLI_PUBLISH_FROZEN: ${{ vars.CLI_PUBLISH_FROZEN }}
+        run: |
+          if [ "$CLI_PUBLISH_FROZEN" != true ]; then
+            echo "::error::STUDIO_PUBLISHES_CLI is on but CLI_PUBLISH_FROZEN is not: freeze the 1.x line first, or two lines would write the CLI channels"
+            exit 1
+          fi
+
+  # The v<version> tag the update pointer needs is created here, by the release
+  # identity the 1.x line also uses, because only that identity may create v*
+  # tags. This job checks out nothing and runs no repository code; the one step
+  # that reads RELEASE_TAG_TOKEN is written inline and only runs on the studio
+  # tag or branch, through the studio-release environment's ref policy.
+  cli-tag:
+    name: create the CLI tag
+    needs: [resolve, publish, cli-gate]
+    if: vars.STUDIO_PUBLISHES_CLI == 'true'
+    runs-on: ubuntu-latest
+    environment: studio-release
+    permissions:
+      contents: read
+    steps:
+      - name: Create v<version> on the studio commit
+        env:
+          TAG_TOKEN: ${{ secrets.RELEASE_TAG_TOKEN }}
+          RELEASE_TAG_ACTOR: ${{ vars.RELEASE_TAG_ACTOR }}
+          READ_TOKEN: ${{ github.token }}
+          CLI_PUBLISH_FROZEN: ${{ vars.CLI_PUBLISH_FROZEN }}
+          STUDIO_TAG: ${{ needs.resolve.outputs.tag }}
+          CLI_VERSION: ${{ needs.resolve.outputs.version }}
+          APPROVED_SHA: ${{ needs.resolve.outputs.sha }}
+        run: |
+          set -euo pipefail
+          repo=esengine/DeepSeek-Reasonix
+          stable_re='^v(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$'
+          preview_re='^v(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)-preview\.(0|[1-9][0-9]*)$'
+          tag="v${CLI_VERSION#v}"
+          if [[ ! "$tag" =~ $stable_re && ! "$tag" =~ $preview_re ]]; then
+            echo "$tag publishes no CLI pointer; no tag is created"
+            exit 0
+          fi
+          [ "$CLI_PUBLISH_FROZEN" = true ] || { echo "::error::CLI_PUBLISH_FROZEN must be true"; exit 1; }
+          [ "$GITHUB_REPOSITORY" = "$repo" ] || { echo "::error::the release tag identity is only used in $repo"; exit 1; }
+          case "$GITHUB_REF" in
+            refs/tags/studio-v* | refs/heads/studio) ;;
+            *) echo "::error::the release tag identity is only used on a studio tag or the studio branch, not $GITHUB_REF"; exit 1 ;;
+          esac
+          [[ "$APPROVED_SHA" =~ ^[0-9a-f]{40}$ ]] || { echo "::error::approved SHA is not a full commit SHA"; exit 1; }
+          [[ "$STUDIO_TAG" == "studio-$CLI_VERSION" ]] || { echo "::error::studio tag does not match the version"; exit 1; }
+          [ -n "$TAG_TOKEN" ] || { echo "::error::RELEASE_TAG_TOKEN is not configured; the default Actions token cannot create v* tags"; exit 1; }
+          [[ "$RELEASE_TAG_ACTOR" =~ ^[A-Za-z0-9][A-Za-z0-9-]*$ ]] || { echo "::error::configure RELEASE_TAG_ACTOR with the tag publisher's login"; exit 1; }
+          read_api() { GH_TOKEN="$READ_TOKEN" gh api "$@"; }
+          write_api() { GH_TOKEN="$TAG_TOKEN" gh api "$@"; }
+          actor="$(write_api user)"
+          jq -e --arg login "$RELEASE_TAG_ACTOR" '.type == "User" and (.login | ascii_downcase) == ($login | ascii_downcase)' <<<"$actor" >/dev/null ||
+            { echo "::error::the release tag credential does not identify RELEASE_TAG_ACTOR"; exit 1; }
+          [ "$(write_api "repos/$repo" --jq .permissions.push)" = true ] ||
+            { echo "::error::the release tag identity cannot push to $repo"; exit 1; }
+          [ "$(read_api "repos/$repo/commits/$STUDIO_TAG" --jq .sha)" = "$APPROVED_SHA" ] ||
+            { echo "::error::$STUDIO_TAG does not resolve to $APPROVED_SHA"; exit 1; }
+          case "$(read_api "repos/$repo/compare/studio...$APPROVED_SHA" --jq .status)" in
+            behind | identical) ;;
+            *) echo "::error::$APPROVED_SHA is not on studio history"; exit 1 ;;
+          esac
+          # Prints the commit the tag points at; status 1 only when the tag does not exist.
+          tag_commit() {
+            local ref kind sha
+            ref="$(read_api "repos/$repo/git/ref/tags/$tag" --jq '.object.type + " " + .object.sha' 2>"$RUNNER_TEMP/tag.error")" || {
+              grep -Eiq '404|Not Found' "$RUNNER_TEMP/tag.error" && return 1
+              cat "$RUNNER_TEMP/tag.error" >&2
+              exit 1
+            }
+            read -r kind sha <<<"$ref"
+            [ "$kind" != tag ] || sha="$(read_api "repos/$repo/git/tags/$sha" --jq .object.sha)"
+            echo "$sha"
+          }
+          if existing="$(tag_commit)"; then
+            [ "$existing" = "$APPROVED_SHA" ] || { echo "::error::$tag already exists on $existing, not $APPROVED_SHA"; exit 1; }
+            echo "$tag already points at $APPROVED_SHA"
+            exit 0
+          fi
+          if ! write_api "repos/$repo/git/refs" -f "ref=refs/tags/$tag" -f "sha=$APPROVED_SHA" >/dev/null 2>"$RUNNER_TEMP/create.error"; then
+            # A concurrent run may have created the same tag in the meantime.
+            if existing="$(tag_commit)" && [ "$existing" = "$APPROVED_SHA" ]; then
+              echo "$tag already points at $APPROVED_SHA"
+              exit 0
+            fi
+            cat "$RUNNER_TEMP/create.error" >&2
+            exit 1
+          fi
+          echo "created $tag at $APPROVED_SHA"
+
+  # The CLI's install channels, npm's `reasonix` and the Homebrew tap. The 1.x
+  # line owns them until this one takes the CLI over; the repository variable
+  # STUDIO_PUBLISHES_CLI=true hands them here. They run once cli-pointer has
+  # created the CLI release, because the cask points at its archives. A candidate
+  # goes to npm's `next` tag and leaves the tap alone: brew has no prerelease
+  # channel, so a candidate cask would become the default install.
+  cli-channels:
+    name: publish the CLI to npm and Homebrew
+    needs: [resolve, publish, cli-gate, cli-tag, cli-pointer]
+    if: vars.STUDIO_PUBLISHES_CLI == 'true'
+    runs-on: ubuntu-latest
+    # id-token lets npm publish --provenance attach a Sigstore attestation; the
+    # registry token still authenticates the publish itself.
+    permissions:
+      contents: read
+      id-token: write
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          ref: ${{ needs.resolve.outputs.sha }}
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7
+        with:
+          go-version-file: go.mod
+          cache: true
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7
+        with:
+          node-version: "24"
+          registry-url: https://registry.npmjs.org
+      - name: Publish to npm
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+          VERSION: ${{ needs.resolve.outputs.version }}
+        run: node npm/build.mjs "$VERSION" --publish
+      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        if: needs.resolve.outputs.candidate != 'true'
+        with:
+          name: cli-archives
+          path: cli-archives
+      - name: Update the Homebrew cask
+        if: needs.resolve.outputs.candidate != 'true'
+        env:
+          TAP_TOKEN: ${{ secrets.HOMEBREW_TAP_TOKEN }}
+          VERSION: ${{ needs.resolve.outputs.version }}
+          TAG: ${{ needs.resolve.outputs.tag }}
+        run: |
+          set -euo pipefail
+          git clone --depth 1 "https://x-access-token:${TAP_TOKEN}@github.com/esengine/homebrew-reasonix.git" tap
+          decision="$(node scripts/brew-cask-guard.mjs tap/Casks/reasonix.rb "${VERSION#v}")"
+          case "$decision" in
+            write) ;;
+            skip)
+              echo "the tap's cask is newer than ${VERSION#v}; leaving it"
+              exit 0
+              ;;
+            *)
+              echo "::error::unexpected cask guard decision: '$decision'"
+              exit 1
+              ;;
+          esac
+          bash scripts/render-brew-cask.sh "${VERSION#v}" "$TAG" cli-archives/SHA256SUMS > tap/Casks/reasonix.rb
+          cd tap
+          git add Casks/reasonix.rb
+          if git diff --cached --quiet; then
+            echo "cask already at ${VERSION#v}"
+            exit 0
+          fi
+          git -c user.name=reasonix -c user.email=reasonix@deepseek.com commit -m "reasonix ${VERSION#v}"
+          git push origin HEAD:main
+
+  # The 1.x updater accepts only a release tagged vMAJOR.MINOR.PATCH whose assets
+  # sit under that tag, so the archives go to a v<version> release. Only a
+  # -preview.N version moves preview; other prereleases publish nothing.
+  cli-pointer:
+    name: publish the CLI update pointer
+    needs: [resolve, publish, cli-gate, cli-tag]
+    if: vars.STUDIO_PUBLISHES_CLI == 'true'
+    runs-on: ubuntu-latest
+    concurrency:
+      group: studio-cli-pointer-${{ contains(needs.resolve.outputs.version, '-') && 'preview' || 'stable' }}
+      cancel-in-progress: false
+    permissions:
+      contents: write # create the CLI release; cli-tag has already made its tag
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          ref: ${{ needs.resolve.outputs.sha }}
+          persist-credentials: false
+      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: cli-archives
+          path: cli-archives
+      - name: Publish the release, its record and the pointer
+        env:
+          GH_TOKEN: ${{ github.token }}
+          CLI_VERSION: ${{ needs.resolve.outputs.version }}
+          CLI_PUBLISH_FROZEN: ${{ vars.CLI_PUBLISH_FROZEN }}
+          APPROVED_SHA: ${{ needs.resolve.outputs.sha }}
+          STUDIO_TAG: ${{ needs.resolve.outputs.tag }}
+          REPOSITORY: ${{ github.repository }}
+          ARCHIVES_DIR: cli-archives
+          AWS_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
+          AWS_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
+          AWS_DEFAULT_REGION: auto
+          R2_ACCOUNT_ID: ${{ secrets.R2_ACCOUNT_ID }}
+          R2_BUCKET: ${{ secrets.R2_BUCKET }}
+          HAS_R2: ${{ secrets.R2_ACCESS_KEY_ID != '' && secrets.R2_SECRET_ACCESS_KEY != '' && secrets.R2_ACCOUNT_ID != '' && secrets.R2_BUCKET != '' }}
+        run: |
+          if [ "$HAS_R2" != "true" ]; then
+            echo "::error::R2 credentials are not configured; the CLI pointer was not written"
+            exit 1
+          fi
+          bash scripts/publish-cli-pointer.sh

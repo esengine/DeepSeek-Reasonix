@@ -1,0 +1,213 @@
+package control
+
+import (
+	"errors"
+	"fmt"
+	"io"
+	"net"
+	"net/url"
+	"strings"
+	"syscall"
+	"testing"
+
+	"reasonix/internal/base/i18n"
+	"reasonix/internal/contract/provider"
+)
+
+func TestExplainError(t *testing.T) {
+	if explainError(nil) != nil {
+		t.Error("nil should stay nil")
+	}
+
+	bal := explainError(&provider.APIError{Provider: "deepseek", Status: 402, Body: "Insufficient Balance"})
+	if !strings.Contains(bal.Error(), i18n.M.ProviderErrInsufficientBalance) || !strings.Contains(bal.Error(), "Insufficient Balance") {
+		t.Errorf("402 = %q, want the insufficient-balance message plus the provider body", bal.Error())
+	}
+
+	auth := explainError(&provider.AuthError{Provider: "deepseek", KeyEnv: "DEEPSEEK_API_KEY", Status: 401})
+	if !strings.Contains(auth.Error(), "DEEPSEEK_API_KEY") {
+		t.Errorf("401 should name the key env: %q", auth.Error())
+	}
+	if !strings.Contains(auth.Error(), i18n.M.ProviderErrAuth) {
+		t.Errorf("401 without a key should use the missing-key message: %q", auth.Error())
+	}
+
+	rejected := explainError(&provider.AuthError{Provider: "mimo", KeyEnv: "MIMO_API_KEY", Status: 401, HasKey: true})
+	if !strings.Contains(rejected.Error(), i18n.M.ProviderErrAuthRejected) {
+		t.Errorf("401 with a key present should use the server-rejected message: %q", rejected.Error())
+	}
+	if !strings.Contains(rejected.Error(), "MIMO_API_KEY") {
+		t.Errorf("401 should still name the key env: %q", rejected.Error())
+	}
+
+	sourced := explainError(&provider.AuthError{Provider: "deepseek", KeyEnv: "DEEPSEEK_API_KEY", KeySource: "project .env", Status: 401, HasKey: true})
+	if !strings.Contains(sourced.Error(), "DEEPSEEK_API_KEY from project .env") {
+		t.Errorf("401 should name the key source: %q", sourced.Error())
+	}
+
+	authBody := explainError(&provider.AuthError{Provider: "relay", KeyEnv: "RELAY_API_KEY", Status: 401, HasKey: true, Body: `{"error":{"message":"令牌已过期","type":"new_api_error"}}`})
+	for _, want := range []string{i18n.M.ProviderErrAuthRejected, "RELAY_API_KEY", "令牌已过期"} {
+		if !strings.Contains(authBody.Error(), want) {
+			t.Errorf("401 with a body = %q, want it to contain %q", authBody.Error(), want)
+		}
+	}
+
+	authEcho := explainError(&provider.AuthError{Provider: "deepseek", KeyEnv: "DEEPSEEK_API_KEY", Status: 401, HasKey: true, Body: `{"error":{"message":"Authentication Fails, Your api key: ****ae54 is invalid"}}`})
+	if !strings.Contains(authEcho.Error(), "Authentication Fails") {
+		t.Errorf("401 should keep the readable reason, got %q", authEcho.Error())
+	}
+	if strings.Contains(authEcho.Error(), "ae54") {
+		t.Errorf("401 must not surface the masked key tail, got %q", authEcho.Error())
+	}
+
+	for _, status := range []int{400, 422, 429, 500, 503} {
+		got := explainError(&provider.APIError{Provider: "p", Status: status})
+		if got.Error() == "" || got.Error() == (&provider.APIError{Provider: "p", Status: status}).Error() {
+			t.Errorf("status %d should map to a localized message, got %q", status, got.Error())
+		}
+	}
+
+	jsonBody := explainError(&provider.APIError{Provider: "deepseek", Status: 400, Body: `{"error":{"message":"This model's maximum context length is 65536 tokens.","type":"invalid_request_error"}}`})
+	if !strings.Contains(jsonBody.Error(), i18n.M.ProviderErrBadRequest) || !strings.Contains(jsonBody.Error(), "maximum context length") {
+		t.Errorf("400 should append the provider reason from a JSON body, got %q", jsonBody.Error())
+	}
+
+	toolSchema := explainError(&provider.APIError{
+		Provider:    "mimo",
+		Status:      400,
+		Body:        `{"error":{"message":"Tool 197 function has invalid 'parameters' schema"}}`,
+		ToolContext: `Provider tool 197 maps to Reasonix tool "mcp__files__search" (MCP server "files", tool "search").`,
+	})
+	for _, want := range []string{"invalid 'parameters' schema", `MCP server "files"`} {
+		if !strings.Contains(toolSchema.Error(), want) {
+			t.Errorf("400 tool schema error = %q, want %q", toolSchema.Error(), want)
+		}
+	}
+
+	rawBody := explainError(&provider.APIError{Provider: "deepseek", Status: 422, Body: "some unparseable detail"})
+	if !strings.Contains(rawBody.Error(), "some unparseable detail") {
+		t.Errorf("422 should fall back to the raw body, got %q", rawBody.Error())
+	}
+
+	miniMaxInput := explainError(&provider.APIError{
+		Provider: "custom-m3",
+		Status:   422,
+		Body:     `{"error":{"message":"input new_sensitive (1026)","code":"1026"}}`,
+		TraceID:  "minimax-trace-123",
+	})
+	for _, want := range []string{i18n.M.ProviderErrInputSensitive, "input new_sensitive", "Trace ID: minimax-trace-123"} {
+		if !strings.Contains(miniMaxInput.Error(), want) {
+			t.Errorf("MiniMax 1026 = %q, want %q", miniMaxInput.Error(), want)
+		}
+	}
+	if strings.Contains(miniMaxInput.Error(), i18n.M.ProviderErrUnprocessable) {
+		t.Errorf("MiniMax 1026 must not use the generic 422 message: %q", miniMaxInput.Error())
+	}
+
+	miniMaxOutput := explainError(&provider.APIError{
+		Provider: "minimax-cn-api",
+		Status:   422,
+		Body:     `{"base_resp":{"status_code":1027,"status_msg":"output new_sensitive"}}`,
+	})
+	for _, want := range []string{i18n.M.ProviderErrOutputSensitive, "output new_sensitive"} {
+		if !strings.Contains(miniMaxOutput.Error(), want) {
+			t.Errorf("MiniMax 1027 = %q, want %q", miniMaxOutput.Error(), want)
+		}
+	}
+
+	unrelated1026 := explainError(&provider.APIError{Provider: "other", Status: 422, Body: `{"code":1026,"message":"other meaning"}`})
+	if !strings.Contains(unrelated1026.Error(), i18n.M.ProviderErrUnprocessable) {
+		t.Errorf("another provider's numeric code 1026 must remain generic: %q", unrelated1026.Error())
+	}
+
+	rate := explainError(&provider.APIError{Provider: "deepseek", Status: 429, Body: `{"error":{"message":"slow down"}}`})
+	if !strings.Contains(rate.Error(), i18n.M.ProviderErrRateLimited) || !strings.Contains(rate.Error(), "slow down") {
+		t.Errorf("429 should append the provider reason, got %q", rate.Error())
+	}
+
+	// Relay gateways (one-api/new-api style) wrap the real failure — dead
+	// upstream channel, unsupported tools, exhausted quota — in a 5xx JSON
+	// body; the category line alone made those undiagnosable.
+	relay := explainError(&provider.APIError{Provider: "relay", Status: 500, Body: `{"error":{"message":"no available channel for model claude-fable-5 in group default","type":"new_api_error"}}`})
+	if !strings.Contains(relay.Error(), i18n.M.ProviderErrServer) || !strings.Contains(relay.Error(), "no available channel") {
+		t.Errorf("500 should append the provider reason from a JSON body, got %q", relay.Error())
+	}
+
+	busy := explainError(&provider.APIError{Provider: "relay", Status: 503, Body: "upstream unavailable"})
+	if !strings.Contains(busy.Error(), i18n.M.ProviderErrServerBusy) || !strings.Contains(busy.Error(), "upstream unavailable") {
+		t.Errorf("503 should fall back to the raw body, got %q", busy.Error())
+	}
+
+	bare := explainError(&provider.APIError{Provider: "relay", Status: 500})
+	if bare.Error() != i18n.M.ProviderErrServer {
+		t.Errorf("500 without a body = %q, want exactly the localized message", bare.Error())
+	}
+
+	interrupted := explainError(&provider.StreamInterruptedError{Err: io.ErrUnexpectedEOF})
+	if !strings.Contains(interrupted.Error(), "model stream interrupted") || !strings.Contains(interrupted.Error(), "continue") {
+		t.Errorf("stream interruption should be actionable, got %q", interrupted.Error())
+	}
+
+	disconnected := explainError(io.ErrUnexpectedEOF)
+	if !strings.Contains(disconnected.Error(), "model stream disconnected") || !strings.Contains(disconnected.Error(), "retry") {
+		t.Errorf("connection reset should be actionable, got %q", disconnected.Error())
+	}
+
+	plain := errors.New("some other failure")
+	//nolint:errorlint // identity check: explainError must return the same error, unwrapped.
+	if explainError(plain) != plain {
+		t.Error("unknown errors should pass through unchanged")
+	}
+}
+
+func TestRedactAuthReason(t *testing.T) {
+	cases := []struct{ name, in, want string }{
+		{"masked tail", "Your api key: ****ae54 is invalid", "Your api key: **** is invalid"},
+		{"masked prefix form", "key sk-ab**** was rejected", "key **** was rejected"},
+		{"full key echoed by a relay", "Invalid key sk-proj-abc123def456ghi789 provided", "Invalid key **** provided"},
+		{"digit-free sk key via secrets.Redact", "api key: sk-proj-abcdefghijklmnop is invalid", "api key: **** is invalid"},
+		{"digit-free value after credential word", "api key: relaykey_abcdefghijklmn rejected", "api key: **** rejected"},
+		{"bearer value collapses fully", "Bearer abc.def-ghijklmnopqrs rejected", "Bearer **** rejected"},
+		{"mixed-case token without context", "rejected AbCdEfGhIjKlMnOpQr", "rejected ****"},
+		{"digit-free identifier survives", "code: invalid_authentication_token", "code: invalid_authentication_token"},
+		{"all-caps code survives", "code INVALID_AUTHENTICATION_TOKEN", "code INVALID_AUTHENTICATION_TOKEN"},
+		{"short tokens survive", "token expired at gateway", "token expired at gateway"},
+		{"empty", "", ""},
+	}
+	for _, c := range cases {
+		if got := redactAuthReason(c.in); got != c.want {
+			t.Errorf("%s: redactAuthReason(%q) = %q, want %q", c.name, c.in, got, c.want)
+		}
+	}
+}
+
+func TestExplainErrorDNSFailureIsNotConnReset(t *testing.T) {
+	wrap := func(dns *net.DNSError) error {
+		return fmt.Errorf("deepseek: %w", &url.Error{Op: "Post", URL: "https://api.deepseek.com/chat/completions", Err: &net.OpError{Op: "dial", Net: "tcp", Err: dns}})
+	}
+	cases := []struct {
+		name string
+		dns  *net.DNSError
+		want string
+	}{
+		{"not found", &net.DNSError{Err: "no such host", Name: "api.deepseek.com", IsNotFound: true}, i18n.M.ProviderErrDNSNotFound},
+		{"temporary", &net.DNSError{Err: "i/o timeout", Name: "api.deepseek.com", IsTimeout: true, IsTemporary: true}, i18n.M.ProviderErrDNSTemporary},
+	}
+	for _, tc := range cases {
+		got := explainError(wrap(tc.dns)).Error()
+		if want := fmt.Sprintf(tc.want, "api.deepseek.com"); !strings.Contains(got, want) {
+			t.Errorf("%s: %q lacks %q", tc.name, got, want)
+		}
+		if strings.Contains(got, "after retry attempts") || strings.Contains(got, "disconnected") {
+			t.Errorf("%s: DNS failure reported as a reset: %q", tc.name, got)
+		}
+		if !strings.Contains(got, "api.deepseek.com") {
+			t.Errorf("%s: host name dropped: %q", tc.name, got)
+		}
+	}
+
+	reset := fmt.Errorf("read: %w", &net.OpError{Op: "read", Err: syscall.ECONNRESET})
+	if got := explainError(reset).Error(); !strings.Contains(got, "disconnected before completion") {
+		t.Errorf("ECONNRESET changed: %q", got)
+	}
+}

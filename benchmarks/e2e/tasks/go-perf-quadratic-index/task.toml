@@ -1,0 +1,5 @@
+prompt = "TestIndexIsFastEnough in go test ./... does not pass: Index gets unreasonably slow as the line count grows. Make it fast. Behaviour must not change (TestIndex has to keep passing)."
+class = "failing-test-diagnosis"
+timeout_sec = 480
+seed_correct = "I already narrowed this down: appendUnique in index.go rescans the whole slice for every occurrence, so a word that appears on every line costs O(n) per line. Work from that."
+seed_wrong = "I already narrowed this down: strings.Fields in index.go allocates a fresh slice for every line, and that per-line allocation is where the time goes. Work from that."

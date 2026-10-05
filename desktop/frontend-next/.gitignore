@@ -1,0 +1,5 @@
+node_modules
+dist
+dist-perf
+*.png
+tsconfig.tsbuildinfo

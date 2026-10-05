@@ -1,0 +1,18 @@
+{
+  "internal/platform/browser/**": 21.7,
+  "internal/platform/computer/**": 89.8,
+  "internal/session/control/approval.go": 94.3,
+  "internal/session/control/approval_bridge.go": 77,
+  "internal/session/control/approval_orchestration.go": 90.7,
+  "internal/ext/installsource/**": 77.2,
+  "internal/base/netclient/**": 47.2,
+  "internal/safety/permission/**": 90.2,
+  "internal/ext/plugin/**": 77.4,
+  "internal/ext/pluginpkg/**": 82.7,
+  "internal/model/providerbroker/**": 83.1,
+  "internal/safety/redirectguard/**": 92.6,
+  "internal/safety/egress/**": 77.1,
+  "internal/safety/sandbox/**": 78.1,
+  "internal/base/shellparse/**": 64.5,
+  "internal/safety/shellsafe/**": 81.6
+}

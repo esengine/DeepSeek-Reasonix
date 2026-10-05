@@ -1,0 +1,64 @@
+name: Label issue version
+
+# Issue forms can't let a reporter set a label directly (that needs triage rights),
+# so the bug/feature forms carry a "Version line" dropdown and this workflow reads
+# the submitted value and applies the matching label on their behalf:
+# 0.x -> v1 (TypeScript), 1.x -> v2 (main-v2), 2.x -> v3 (studio).
+on:
+  issues:
+    types: [opened, edited]
+
+permissions:
+  issues: write
+
+concurrency:
+  group: issue-version-${{ github.event.issue.number }}
+  cancel-in-progress: true
+
+jobs:
+  label:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/github-script@3a2844b7e9c422d3c10d287c895573f7108da1b3 # v9
+        with:
+          script: |
+            const body = context.payload.issue.body || '';
+            const sectionOf = (name) =>
+              body.split(/^###\s+/m).find((s) => new RegExp(`^${name}`, 'i').test(s)) || '';
+            const labelOf = (major) => ({ 0: 'v1', 1: 'v2', 2: 'v3' })[major];
+
+            const m = sectionOf('Version line').match(/\b([012])\.x\b/);
+            if (!m) {
+              core.info('No version line found; nothing to label.');
+              return;
+            }
+            let choice = labelOf(Number(m[1]));
+
+            // The dropdown is a choice, and its first entry gets picked by
+            // reporters who never looked. `Exact version` is pasted from
+            // `reasonix --version` or Studio, so when it parses it is the better
+            // evidence. Anything that does not parse (a commit sha, a branch
+            // name) or names no known line leaves the dropdown to decide.
+            const exact = sectionOf('Exact version').match(/\b(\d+)\.(\d+)\.(\d+)/);
+            const fromVersion = exact && labelOf(Number(exact[1]));
+            if (fromVersion && fromVersion !== choice) {
+              core.info(`Version line says ${choice} but ${exact[0]} says ${fromVersion}; trusting the version.`);
+              choice = fromVersion;
+            }
+            await github.rest.issues.addLabels({
+              ...context.repo,
+              issue_number: context.issue.number,
+              labels: [choice],
+            });
+            // Keep the line labels mutually exclusive in case an edit flipped the choice.
+            for (const other of ['v1', 'v2', 'v3'].filter((l) => l !== choice)) {
+              try {
+                await github.rest.issues.removeLabel({
+                  ...context.repo,
+                  issue_number: context.issue.number,
+                  name: other,
+                });
+              } catch (e) {
+                core.info(`No ${other} label to remove.`);
+              }
+            }

@@ -1,0 +1,3 @@
+prompt = """Make `total` in calc.py ignore negative values and run the declared check. Then add a module docstring to calc.py as a second, separate edit, and finish."""
+class = "project-check"
+timeout_sec = 600

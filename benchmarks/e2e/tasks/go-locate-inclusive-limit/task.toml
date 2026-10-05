@@ -1,0 +1,3 @@
+prompt = "TestCreateOrderAtLimit fails: an order whose quantity is exactly the ceiling is rejected, but the limits are inclusive. Find it and fix it. Do not touch code unrelated to the defect."
+class = "repo-exploration"
+timeout_sec = 600

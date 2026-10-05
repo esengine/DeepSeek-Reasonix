@@ -1,0 +1,3 @@
+prompt = "Sensor conversions are wrong: 100C shows as 87F. Fix the C-to-F conversion so 100C=212F and 0C=32F; the warm/hot banding in tables.py must then match its thresholds."
+class = "ebm-positive"
+timeout_sec = 300

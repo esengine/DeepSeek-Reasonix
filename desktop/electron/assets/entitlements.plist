@@ -1,0 +1,24 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<!--
+  Hardened runtime entitlements for Studio. Notarization requires the hardened
+  runtime, and under it V8 cannot map executable memory unless it is granted
+  here — the window would render nothing.
+
+  Nothing wider. com.apple.security.cs.disable-library-validation is absent on
+  purpose: it governs loading third-party frameworks and plug-ins into this
+  process, which this shell does not do. It was carried over from the Wails
+  bundle with the wrong reason attached — that the kernel binary in Resources
+  is not covered by the app's signature. That is a nested-code signing
+  question, and the answer is to sign it, not to widen what the main process
+  will load. Re-add it only against evidence: a launch failure naming library
+  validation, not a spawn failure.
+-->
+<plist version="1.0">
+<dict>
+  <key>com.apple.security.cs.allow-jit</key>
+  <true/>
+  <key>com.apple.security.cs.allow-unsigned-executable-memory</key>
+  <true/>
+</dict>
+</plist>

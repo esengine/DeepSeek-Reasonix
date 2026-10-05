@@ -1,0 +1,117 @@
+name: Studio Certum signing smoke test
+
+# Signs two throwaway probes with the certificate release-studio.yml would use,
+# and publishes nothing. It reports the signer's subject, which is the value
+# STUDIO_SIGNING_SUBJECT must hold.
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: certum-signing
+  cancel-in-progress: false
+
+jobs:
+  sign:
+    if: github.repository == 'esengine/DeepSeek-Reasonix' && github.ref == 'refs/heads/studio'
+    runs-on: windows-2022
+    environment: studio-release
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          persist-credentials: false
+
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7
+        with:
+          go-version-file: go.mod
+          cache: false
+
+      - name: Check signing configuration
+        shell: pwsh
+        env:
+          CERTUM_USERNAME: ${{ secrets.CERTUM_USERNAME }}
+          CERTUM_OTP_URI: ${{ secrets.CERTUM_OTP_URI }}
+          CERTUM_KEY_ID: ${{ secrets.CERTUM_KEY_ID }}
+        run: |
+          $ErrorActionPreference = 'Stop'
+          if ([string]::IsNullOrWhiteSpace($env:CERTUM_USERNAME)) { throw 'Missing secret CERTUM_USERNAME' }
+          if ($env:CERTUM_OTP_URI -notmatch '^otpauth://totp/') { throw 'Secret CERTUM_OTP_URI must be a complete TOTP URI' }
+          if ($env:CERTUM_KEY_ID -notmatch '^[0-9a-fA-F]{40}$') { throw 'Secret CERTUM_KEY_ID must be the 40-character SHA-1 certificate thumbprint' }
+
+      - name: Build open-source signing probes
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          # This minimal probe is covered by the repository's MIT license.
+          New-Item -ItemType Directory payload | Out-Null
+          'package main; func main() { println("Reasonix Studio Certum signing probe") }' | Set-Content probe.go
+          $env:GOOS = 'windows'
+          $env:GOARCH = 'amd64'
+          $env:CGO_ENABLED = '0'
+          go build -trimpath -o payload/probe.exe probe.go
+          if ($LASTEXITCODE -ne 0) { throw 'Probe compilation failed' }
+          'probe.exe' | Set-Content payload/signing-files.txt
+          Copy-Item payload/probe.exe installer-probe.exe
+
+      - name: Connect to SimplySign cloud certificate
+        uses: ./.github/actions/setup-certum
+        with:
+          username: ${{ secrets.CERTUM_USERNAME }}
+          otp-uri: ${{ secrets.CERTUM_OTP_URI }}
+          thumbprint: ${{ secrets.CERTUM_KEY_ID }}
+
+      - name: Sign and verify payload and installer probes
+        shell: pwsh
+        env:
+          CERTUM_KEY_ID: ${{ secrets.CERTUM_KEY_ID }}
+        run: |
+          ./scripts/sign-certum.ps1 -PayloadDirectory payload
+          ./scripts/sign-certum.ps1 -FilePath installer-probe.exe
+
+      # The session signs for any process on the runner while it is up.
+      - name: Disconnect from Certum
+        if: always()
+        shell: pwsh
+        run: Get-Process -Name '*SimplySign*' -ErrorAction SilentlyContinue | Stop-Process -Force
+
+      # With the switch on, an unset subject fails here as it would in a
+      # release; with it off, the value is reported so it can be recorded.
+      - name: Report and check the signer
+        shell: pwsh
+        env:
+          SIGNING_ENABLED: ${{ vars.STUDIO_SIGNING_ENABLED }}
+          EXPECTED_SUBJECT: ${{ vars.STUDIO_SIGNING_SUBJECT }}
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $failed = $false
+          foreach ($file in @('payload/probe.exe', 'installer-probe.exe')) {
+            $signature = Get-AuthenticodeSignature -LiteralPath $file
+            $certificate = $signature.SignerCertificate
+            $stamp = if ($signature.TimeStamperCertificate) { $signature.TimeStamperCertificate.Subject } else { '(none)' }
+            @("### $file", '', "- subject: ``$($certificate.Subject)``", "- issuer: ``$($certificate.Issuer)``",
+              "- thumbprint: ``$($certificate.Thumbprint)``", "- timestamp: ``$stamp``", '') >> $env:GITHUB_STEP_SUMMARY
+            if (-not $signature.TimeStamperCertificate) {
+              Write-Output "::error title=studio-signing.timestamp-missing::$file carries no timestamp"
+              $failed = $true
+            }
+            if ([string]::IsNullOrWhiteSpace($certificate.Issuer)) {
+              Write-Output "::error title=studio-signing.issuer-missing::$file has a signer certificate without an issuer"
+              $failed = $true
+            }
+            if ([string]::IsNullOrWhiteSpace($env:EXPECTED_SUBJECT)) {
+              if ($env:SIGNING_ENABLED -eq 'true') {
+                Write-Output "::error title=studio-signing.subject-unset::STUDIO_SIGNING_SUBJECT is empty while STUDIO_SIGNING_ENABLED=true"
+                $failed = $true
+              } else {
+                Write-Output "::warning::STUDIO_SIGNING_SUBJECT is not set; record '$($certificate.Subject)'"
+              }
+            } elseif ($certificate.Subject -cne $env:EXPECTED_SUBJECT) {
+              Write-Output "::error title=studio-signing.unexpected-signer::STUDIO_SIGNING_SUBJECT is '$($env:EXPECTED_SUBJECT)' but $file is signed by '$($certificate.Subject)'"
+              $failed = $true
+            }
+          }
+          if ($failed) { exit 1 }
+          'Certum payload and installer signing, signer, trust and timestamps passed.' >> $env:GITHUB_STEP_SUMMARY

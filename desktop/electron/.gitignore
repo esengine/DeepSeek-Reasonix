@@ -1,0 +1,5 @@
+node_modules/
+# The kernel this shell spawns, built by `pnpm build:host`.
+bin/
+# Staged by packaging/linux-payload.js for the .deb fpm arguments.
+linux/

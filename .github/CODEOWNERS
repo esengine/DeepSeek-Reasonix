@@ -1,0 +1,43 @@
+# Ownership for the studio line. Standard: docs/DOCS_STANDARD.md.
+#
+# Each rule lists exactly two owners: primary first, backup second.
+# GitHub requests review from both. The last matching rule wins.
+# repolint (codeowners, doc-owner) fails a rule for a missing path, a rule
+# without a backup, and a document header that names different owners.
+
+# Default: kernel, Studio shell, tooling, standing instructions.
+*                                         @esengine @SivanCola
+
+# User-facing guides and references.
+/docs/                                    @SivanCola @esengine
+/docs/THEME_AUTHOR_GUIDE.md                @esengine @SivanCola
+/sdk/                                     @SivanCola @esengine
+/README.md                                @SivanCola @esengine
+/README.zh-CN.md                          @SivanCola @esengine
+/SECURITY.md                              @SivanCola @esengine
+
+# Contracts and processes the Studio line runs on.
+/docs/DOCS_STANDARD.md                    @esengine @SivanCola
+/docs/STUDIO_*.md                         @esengine @SivanCola
+/docs/SESSION_MEMORY_RETRIEVAL.md         @esengine @SivanCola
+/docs/*_CONTRACT.md                       @esengine @SivanCola
+/docs/TOOL_APPROVAL_MODES.md              @esengine @SivanCola
+/docs/CAPABILITY_DIAGNOSTICS.md           @esengine @SivanCola
+/docs/CHECKPOINTS.md                      @esengine @SivanCola
+/docs/EXTENSION_*.md                      @esengine @SivanCola
+/docs/SUBAGENT_*.md                       @esengine @SivanCola
+/docs/ROADMAP.md                          @esengine @SivanCola
+/docs/MIGRATING.md                        @esengine @SivanCola
+/docs/design/                             @esengine @SivanCola
+/release-notes/                           @esengine @SivanCola
+
+# Release signing: provider policy, its contract and the workflow that uses it.
+/.signpath/                               @esengine @SivanCola
+/.github/workflows/release-studio.yml     @esengine @SivanCola
+/.github/workflows/studio-certum-signing-smoke.yml @esengine @SivanCola
+/.github/actions/setup-certum/            @esengine @SivanCola
+/cmd/signpath-contract/                   @esengine @SivanCola
+/scripts/sign-certum.ps1                  @esengine @SivanCola
+/scripts/verify-windows-authenticode.ps1  @esengine @SivanCola
+/scripts/verify-windows-package.ps1       @esengine @SivanCola
+/scripts/windows-signing-lib.ps1          @esengine @SivanCola

@@ -1,0 +1,8 @@
+{
+  "exported": "2026-08-30T00:00:00.000Z",
+  "span": 10.0,
+  "rows": [
+    {"seq": 1, "at": 0.0, "kind": "model_round", "text": "model_round · hit 0 · miss 1k · out 1 · src=executor"},
+    {"seq": 2, "at": 1.0, "kind": "outcome_progress", "text": "todo advance (renamed fields)"}
+  ]
+}

@@ -1,0 +1,62 @@
+name: Bug report
+description: Report a bug in DeepSeek-Reasonix
+title: "[Bug]: "
+labels: ["bug"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for filing a bug. Pick which version line you're on below — it gets
+        labeled automatically, no maintainer action needed. Not sure which line
+        you run? See the [version roadmap](https://github.com/esengine/DeepSeek-Reasonix/discussions/10748).
+  - type: dropdown
+    id: version-line
+    attributes:
+      label: Version line
+      description: Which line are you running?
+      options:
+        - "2.x — Reasonix Studio, studio branch (active development)"
+        - "1.x — main-v2 branch (maintenance / stable)"
+        - "0.x — legacy TypeScript (maintenance only)"
+    validations:
+      required: true
+  - type: input
+    id: version
+    attributes:
+      label: Exact version
+      description: Output of `reasonix --version`, or the version shown in Studio's settings.
+      placeholder: e.g. 2.20.0 or 1.39.0
+    validations:
+      required: true
+  - type: textarea
+    id: what-happened
+    attributes:
+      label: What happened?
+      description: A clear description of the bug, and what you expected instead.
+    validations:
+      required: true
+  - type: textarea
+    id: repro
+    attributes:
+      label: Steps to reproduce
+      placeholder: |
+        1. ...
+        2. ...
+        3. ...
+    validations:
+      required: true
+  - type: input
+    id: os
+    attributes:
+      label: OS / platform
+      placeholder: e.g. macOS 15.3 (arm64), Ubuntu 24.04, Windows 11
+    validations:
+      required: true
+  - type: textarea
+    id: logs
+    attributes:
+      label: Relevant logs or output
+      description: Paste any error output. Automatically formatted as code.
+      render: shell
+    validations:
+      required: false

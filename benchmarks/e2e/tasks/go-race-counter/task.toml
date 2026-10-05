@@ -1,0 +1,3 @@
+prompt = "go test -race ./... fails. Fix it. The counting semantics must not change."
+class = "atomic-bugfix"
+timeout_sec = 420

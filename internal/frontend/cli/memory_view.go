@@ -1,0 +1,12 @@
+package cli
+
+import (
+	"time"
+
+	"reasonix/internal/session/control"
+	"reasonix/internal/state/memory"
+)
+
+func renderMemory(width int, set *memory.Set) string {
+	return viewProtectLines(control.RenderMemorySummary(set, time.Now().UTC()), width)
+}

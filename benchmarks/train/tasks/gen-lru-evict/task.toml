@@ -1,0 +1,3 @@
+prompt = "A fixed-capacity LRU cache lives in `lru_cache.py`. Its public interface is `LRUCache(capacity)`, `get(key)` (returns the cached value, or -1 when the key is absent), and `put(key, value)` (inserts or updates a key; once the cache is full, inserting a new key evicts one entry). The cache currently evicts the wrong entry: a key that was just read via `get` can still be the one removed when the cache fills, while entries that were not read recently survive. Fix the cache so that a key is evicted only when it is the least recently used entry — reading a key must make it the most recently used. Do not change the public interface; only fix the behavior."
+class = "atomic-bugfix"
+timeout_sec = 300

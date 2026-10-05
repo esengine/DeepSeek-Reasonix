@@ -1,0 +1,31 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE policyconfig PUBLIC
+ "-//freedesktop//DTD PolicyKit Policy Configuration 1.0//EN"
+ "http://www.freedesktop.org/standards/PolicyKit/1/policyconfig.dtd">
+<!--
+  Polkit policy for Reasonix Studio in-app .deb upgrades. Studio's action and
+  helper path are its own: the desktop package owns io.reasonix.desktop.update
+  and /usr/lib/reasonix/, so two installs side by side never authorize each
+  other's binary. The action only authorizes the fixed root-owned helper with
+  argv1=install. Active sessions require auth_admin every time.
+-->
+<policyconfig>
+  <vendor>Reasonix</vendor>
+  <vendor_url>https://reasonix.io</vendor_url>
+
+  <action id="io.reasonix.studio.update">
+    <description gettext-domain="reasonix-studio">Install a Reasonix Studio update</description>
+    <description xml:lang="zh_CN" gettext-domain="reasonix-studio">安装 Reasonix Studio 更新</description>
+    <description xml:lang="zh_TW" gettext-domain="reasonix-studio">安裝 Reasonix Studio 更新</description>
+    <message gettext-domain="reasonix-studio">Authentication is required to install a Reasonix Studio update</message>
+    <message xml:lang="zh_CN" gettext-domain="reasonix-studio">安装 Reasonix Studio 更新需要管理员授权</message>
+    <message xml:lang="zh_TW" gettext-domain="reasonix-studio">安裝 Reasonix Studio 更新需要管理員授權</message>
+    <defaults>
+      <allow_any>no</allow_any>
+      <allow_inactive>no</allow_inactive>
+      <allow_active>auth_admin</allow_active>
+    </defaults>
+    <annotate key="org.freedesktop.policykit.exec.path">/usr/lib/reasonix-studio/reasonix-studio-update-helper</annotate>
+    <annotate key="org.freedesktop.policykit.exec.argv1">install</annotate>
+  </action>
+</policyconfig>

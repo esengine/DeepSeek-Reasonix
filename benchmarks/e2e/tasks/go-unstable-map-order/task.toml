@@ -1,0 +1,3 @@
+prompt = "Summary produces its lines in an unstable order — the same input sometimes gives a different result. Fix it so the output is deterministic."
+class = "atomic-bugfix"
+timeout_sec = 420

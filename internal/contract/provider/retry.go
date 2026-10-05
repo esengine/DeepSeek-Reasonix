@@ -1,0 +1,421 @@
+package provider
+
+import (
+	"context"
+	"errors"
+	"fmt"
+	"io"
+	"math/rand/v2"
+	"net"
+	"net/http"
+	"strconv"
+	"strings"
+	"sync/atomic"
+	"time"
+)
+
+// MaxRetries is the number of times SendWithRetry re-attempts the connection +
+// header phase after the initial try (so up to MaxRetries+1 total attempts).
+const MaxRetries = 10
+
+const maxBackoff = 15 * time.Second
+
+// maxRetryAfter bounds a server-supplied Retry-After. Rate-limit windows are
+// routinely longer than our own backoff cap, and clamping to it just spends
+// attempts re-hitting the same closed window; the sleep is cancellable, so a
+// longer honest wait costs nothing the user can't interrupt.
+const maxRetryAfter = 60 * time.Second
+
+// errorBodyReadTimeout bounds how long draining a non-OK response body may
+// block. Proxies and gateways under load (502/524 storms) can send headers and
+// then stall the body on a half-open connection; http.Client has no Timeout
+// and ResponseHeaderTimeout no longer applies once headers arrive, so without
+// this deadline the retry loop blocks in io.ReadAll indefinitely with no
+// user-visible progress — the turn looks frozen until the process is killed
+// (#6607). A var, not a const, so tests can shrink it.
+var errorBodyReadTimeout = 10 * time.Second
+
+// maxAuthRetries bounds how many times a 401/403 is retried for a key that has
+// authenticated before: a transient server-side rejection (quota/gateway/rate)
+// usually clears in a couple of attempts, whereas a key that never worked is a
+// real config error and fails fast.
+const maxAuthRetries = 2
+
+// maxTimeoutRetries bounds how many times a transport timeout is retried. A
+// model that is still prefilling times out identically on every attempt and
+// each retry restarts that work, so the full budget would multiply one
+// StreamIdleTimeout window by MaxRetries+1 before the user heard anything.
+const maxTimeoutRetries = 1
+
+// SendOptions carries the per-request context SendWithRetry needs to label
+// errors and decide whether a 401 is worth retrying.
+type SendOptions struct {
+	Provider   string // provider instance name, surfaced in errors
+	KeyEnv     string // api_key_env the key is read from, when known
+	KeySource  string // human-readable source of KeyEnv, when known
+	KeyPresent bool   // a non-empty key is being sent — separates "rejected" from "missing"
+	RetryAuth  bool   // the key has authenticated before — retry transient 401s instead of failing fast
+	// BadRequestHint names what this request left out, for the statuses that
+	// mean the body itself was refused. Only the client that built the body
+	// knows it, and it is lost by the time a reader sees the response.
+	BadRequestHint RequestHint
+	// HeaderTimeout is how long one attempt waits for response headers before
+	// the transport gives up on it; zero when the caller did not configure one.
+	HeaderTimeout time.Duration
+}
+
+// RetryCause says why the attempt that just failed is being retried. It is an
+// identity, never a sentence: the producer is the only layer that saw the
+// failure, and a reader must not re-derive it from error text.
+type RetryCause string
+
+const (
+	// RetryCauseConnectionClosed: the connection was reset or ended before an answer.
+	RetryCauseConnectionClosed RetryCause = "connection_closed"
+	// RetryCauseTimeout: the endpoint did not answer within the transport's deadline.
+	RetryCauseTimeout RetryCause = "timeout"
+	// RetryCauseUpstreamStatus: the endpoint answered with a retryable HTTP status.
+	RetryCauseUpstreamStatus RetryCause = "upstream_status"
+	// RetryCauseStreamIdle: an established stream went silent past its idle timeout.
+	RetryCauseStreamIdle RetryCause = "stream_idle"
+	// RetryCauseUpstreamError: the endpoint reported an error inside an established stream.
+	RetryCauseUpstreamError RetryCause = "upstream_error"
+)
+
+// RequestHint identifies a host-side fact about a request the endpoint refused.
+// It is an identity, never a sentence: the display layer owns the wording, so a
+// reader is never left matching prose to tell one refusal from another.
+type RequestHint string
+
+// HintDroppedToolCallReasoning marks a request that left an assistant
+// tool_calls turn's reasoning behind because the endpoint's reasoning protocol
+// was never declared. Relayed thinking models refuse exactly that shape.
+const HintDroppedToolCallReasoning RequestHint = "dropped_tool_call_reasoning"
+
+// RetryInfo describes a backoff about to happen: Attempt is the 1-based retry
+// number (of Max) and Delay is how long SendWithRetry will wait before it.
+// Cause and Status describe the failure being retried; Timeout is how long the
+// coming attempt waits for response headers.
+type RetryInfo struct {
+	Attempt int
+	Max     int
+	Delay   time.Duration
+	Err     error
+	Cause   RetryCause
+	Status  int
+	Timeout time.Duration
+}
+
+type RetryNotify func(RetryInfo)
+
+type retryNotifyKey struct{}
+
+type requestAttemptCounterKey struct{}
+
+type retryLimitKey struct{}
+
+type requestAttemptCounter struct {
+	count atomic.Int64
+}
+
+// WithRetryNotify attaches a callback that SendWithRetry invokes before each
+// backoff sleep, so the agent can surface a transient "retrying (n/m)" status.
+func WithRetryNotify(ctx context.Context, fn RetryNotify) context.Context {
+	if fn == nil {
+		return ctx
+	}
+	return context.WithValue(ctx, retryNotifyKey{}, fn)
+}
+
+func retryNotifyFromContext(ctx context.Context) RetryNotify {
+	fn, _ := ctx.Value(retryNotifyKey{}).(RetryNotify)
+	return fn
+}
+
+// WithRetryLimit caps connection/header retries for a single logical request.
+// A zero limit makes an explicit diagnostic perform exactly one HTTP attempt.
+func WithRetryLimit(ctx context.Context, retries int) context.Context {
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	return context.WithValue(ctx, retryLimitKey{}, max(0, min(retries, MaxRetries)))
+}
+
+func retryLimitFromContext(ctx context.Context) int {
+	if ctx != nil {
+		if retries, ok := ctx.Value(retryLimitKey{}).(int); ok {
+			return retries
+		}
+	}
+	return MaxRetries
+}
+
+// WithRequestAttemptCounter returns a context that counts every HTTP request
+// SendWithRetry starts. An existing counter is reused so a caller can observe
+// attempts even when the provider returns before producing a Usage chunk.
+// Provider implementations use one counter for a logical stream (including
+// header retries and safe reconnects), then attach the final count to the
+// stream's Usage record.
+func WithRequestAttemptCounter(ctx context.Context) context.Context {
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	if counter, _ := ctx.Value(requestAttemptCounterKey{}).(*requestAttemptCounter); counter != nil {
+		return ctx
+	}
+	return context.WithValue(ctx, requestAttemptCounterKey{}, &requestAttemptCounter{})
+}
+
+// RequestAttemptCount returns the number of HTTP requests started through
+// SendWithRetry for the counter attached to ctx.
+func RequestAttemptCount(ctx context.Context) int {
+	if ctx == nil {
+		return 0
+	}
+	counter, _ := ctx.Value(requestAttemptCounterKey{}).(*requestAttemptCounter)
+	if counter == nil {
+		return 0
+	}
+	return int(counter.count.Load())
+}
+
+// ApplyRequestAttemptCount copies the stream's exact HTTP request count into a
+// Usage record. Contexts without a counter leave the record unchanged so custom
+// providers keep the zero-means-one compatibility contract.
+func ApplyRequestAttemptCount(ctx context.Context, usage *Usage) {
+	if usage == nil {
+		return
+	}
+	if count := RequestAttemptCount(ctx); count > 0 {
+		usage.RequestCount = count
+	}
+}
+
+// UsageWithRequestAttemptCount returns a copy of usage carrying the exact
+// number of HTTP requests observed through ctx. When a provider request fails
+// before producing token usage, it returns a request-only Usage record so
+// callers can still account for the API calls. If neither usage nor attempts
+// exist, it returns nil.
+func UsageWithRequestAttemptCount(ctx context.Context, usage *Usage) *Usage {
+	count := RequestAttemptCount(ctx)
+	if usage == nil {
+		if count <= 0 {
+			return nil
+		}
+		return &Usage{RequestCount: count}
+	}
+	result := *usage
+	if count > 0 {
+		result.RequestCount = count
+	}
+	return &result
+}
+
+func recordRequestAttempt(ctx context.Context) {
+	if ctx == nil {
+		return
+	}
+	counter, _ := ctx.Value(requestAttemptCounterKey{}).(*requestAttemptCounter)
+	if counter != nil {
+		counter.count.Add(1)
+	}
+}
+
+// APIError reports a non-OK HTTP status that isn't an auth failure. Status
+// carries the code so the display layer can map it to an actionable, localized
+// message; Body is a trimmed snippet of the response.
+type APIError struct {
+	Provider    string
+	Status      int
+	Body        string
+	TraceID     string      // provider trace identifier from the response headers, when present
+	ToolContext string      // resolved Reasonix/MCP identity for provider-indexed tool schema errors
+	Hint        RequestHint // what the built request left out; empty when nothing is known
+}
+
+func (e *APIError) Error() string {
+	var base string
+	if e.Body == "" {
+		base = fmt.Sprintf("%s: status %d", e.Provider, e.Status)
+	} else {
+		base = fmt.Sprintf("%s: status %d: %s", e.Provider, e.Status, e.Body)
+	}
+	if e.ToolContext != "" {
+		return base + "\n" + e.ToolContext
+	}
+	return base
+}
+
+// RetryableStatus reports whether a backoff can plausibly recover from status s:
+// 408 (request timeout), 429 (rate limit) and 5xx (incl. Anthropic's 529). Other
+// 4xx (400/401/402/422, …) are caller/config problems retrying can't fix.
+func RetryableStatus(s int) bool {
+	return s == http.StatusRequestTimeout || s == http.StatusTooManyRequests || (s >= 500 && s <= 599)
+}
+
+// bodyRejected reports the statuses that mean the request body was refused, as
+// opposed to the caller's credentials, its quota, or the server's own state.
+func bodyRejected(s int) bool {
+	return s == http.StatusBadRequest || s == http.StatusUnprocessableEntity
+}
+
+// transientErr asks the caller's context whether it gave up, not the error: the
+// transport's own timeouts (response headers, dial) also satisfy
+// errors.Is(err, context.DeadlineExceeded) while the caller is still waiting.
+func transientErr(ctx context.Context, err error) bool {
+	if err == nil || ctx.Err() != nil {
+		return false
+	}
+	return !errors.Is(err, context.Canceled)
+}
+
+func transportTimeout(err error) bool {
+	var netErr net.Error
+	return errors.As(err, &netErr) && netErr.Timeout()
+}
+
+func backoffDelay(attempt int, retryAfter time.Duration) time.Duration {
+	if retryAfter > 0 {
+		if retryAfter > maxRetryAfter {
+			return maxRetryAfter
+		}
+		return retryAfter
+	}
+	d := min(time.Duration(1<<(attempt-1))*500*time.Millisecond, maxBackoff)
+	return d + time.Duration(rand.IntN(250))*time.Millisecond
+}
+
+func parseRetryAfter(resp *http.Response) time.Duration {
+	v := strings.TrimSpace(resp.Header.Get("Retry-After"))
+	if v == "" {
+		return 0
+	}
+	if secs, err := strconv.Atoi(v); err == nil && secs >= 0 {
+		return time.Duration(secs) * time.Second
+	}
+	// RFC 9110 also allows an HTTP-date; gateways in front of rate-limited
+	// backends use it more often than the delta-seconds form.
+	if when, err := http.ParseTime(v); err == nil {
+		if d := time.Until(when); d > 0 {
+			return d
+		}
+	}
+	return 0
+}
+
+// readErrorBody drains a non-OK response body under a hard deadline and
+// returns up to the first 4 KiB for the error message. Context cancellation
+// already unblocks the read (the transport aborts body reads when the request
+// context is canceled); the timer covers the case nobody cancels — a half-open
+// upstream that sent headers and then went silent. Closing the body from the
+// timer goroutine is the documented way to unblock an in-flight Read; it
+// tears down the connection, which is the right call for a stalled peer.
+func readErrorBody(resp *http.Response) []byte {
+	timer := time.AfterFunc(errorBodyReadTimeout, func() { resp.Body.Close() })
+	msg, _ := io.ReadAll(io.LimitReader(resp.Body, 4096))
+	// Drain the rest so a healthy connection can be reused; the timer still
+	// arms this read, so a body that stalls after the first 4 KiB cannot
+	// wedge the retry loop either.
+	_, _ = io.Copy(io.Discard, resp.Body)
+	timer.Stop()
+	resp.Body.Close()
+	return msg
+}
+
+// SendWithRetry POSTs a streaming request built by newReq and returns the OK
+// response. It retries the connection+header phase up to MaxRetries times on
+// transient network errors and retryable statuses with capped exponential
+// backoff + jitter, honoring Retry-After. A 401/403 becomes *AuthError: it
+// fails fast for a key that has never authenticated (opts.RetryAuth false), but
+// for a previously-good key it backs off and retries up to maxAuthRetries —
+// MiMo and similar gateways return a transient 401 under load. Other non-OK
+// statuses become *APIError. A RetryNotify in ctx fires before each sleep.
+// Retries cover only the header phase — once the body streams, mid-stream
+// failures are not retried (the model has already emitted tokens).
+func SendWithRetry(ctx context.Context, httpClient *http.Client, opts SendOptions, newReq func(context.Context) (*http.Request, error)) (*http.Response, error) {
+	notify := retryNotifyFromContext(ctx)
+	retryLimit := retryLimitFromContext(ctx)
+	var lastErr error
+	var retryAfter time.Duration
+	var cause RetryCause
+	var status int
+	authRetries := 0
+	timeoutRetries := 0
+
+	for attempt := 0; attempt <= retryLimit; attempt++ {
+		if attempt > 0 {
+			delay := backoffDelay(attempt, retryAfter)
+			if notify != nil {
+				notify(RetryInfo{Attempt: attempt, Max: retryLimit, Delay: delay, Err: lastErr, Cause: cause, Status: status, Timeout: opts.HeaderTimeout})
+			}
+			select {
+			case <-ctx.Done():
+				return nil, ctx.Err()
+			case <-time.After(delay):
+			}
+		}
+		retryAfter = 0
+
+		req, err := newReq(ctx)
+		if err != nil {
+			return nil, fmt.Errorf("%s: build request: %w", opts.Provider, err)
+		}
+		recordRequestAttempt(ctx)
+		resp, err := httpClient.Do(req)
+		if err != nil {
+			lastErr = fmt.Errorf("%s: request failed: %w", opts.Provider, err)
+			if !transientErr(ctx, err) || permanentTransportErr(err) {
+				return nil, lastErr
+			}
+			cause, status = RetryCauseConnectionClosed, 0
+			if transportTimeout(err) {
+				if timeoutRetries >= maxTimeoutRetries {
+					return nil, lastErr
+				}
+				timeoutRetries++
+				cause = RetryCauseTimeout
+			}
+			continue
+		}
+		if resp.StatusCode == http.StatusOK {
+			return resp, nil
+		}
+
+		msg := readErrorBody(resp)
+		retryAfter = parseRetryAfter(resp)
+		cause, status = RetryCauseUpstreamStatus, resp.StatusCode
+
+		if resp.StatusCode == http.StatusUnauthorized || resp.StatusCode == http.StatusForbidden {
+			authErr := &AuthError{Provider: opts.Provider, KeyEnv: opts.KeyEnv, KeySource: opts.KeySource, Status: resp.StatusCode, HasKey: opts.KeyPresent, Body: strings.TrimSpace(string(msg))}
+			if opts.RetryAuth && authRetries < maxAuthRetries {
+				authRetries++
+				lastErr = authErr
+				continue
+			}
+			return nil, authErr
+		}
+		apiErr := &APIError{
+			Provider: opts.Provider,
+			Status:   resp.StatusCode,
+			Body:     strings.TrimSpace(string(msg)),
+			TraceID:  responseTraceID(resp.Header),
+		}
+		if bodyRejected(resp.StatusCode) {
+			apiErr.Hint = opts.BadRequestHint
+		}
+		if !RetryableStatus(resp.StatusCode) {
+			return nil, apiErr
+		}
+		lastErr = apiErr
+	}
+	return nil, lastErr
+}
+
+func responseTraceID(header http.Header) string {
+	for _, name := range []string{"trace_id", "trace-id", "x-trace-id"} {
+		if value := strings.TrimSpace(header.Get(name)); value != "" {
+			return value
+		}
+	}
+	return ""
+}

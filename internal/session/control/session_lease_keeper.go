@@ -1,0 +1,295 @@
+package control
+
+import (
+	"errors"
+	"fmt"
+	"log/slog"
+	"os"
+	"reasonix/internal/state/sessionstore"
+	"strings"
+	"sync"
+)
+
+// SessionLeaseKeeper owns at most one session lease on behalf of a frontend
+// that binds session files for writing (the CLI chat/run commands, `reasonix
+// serve`, one ACP session). Desktop tabs keep their own per-tab lease
+// management; this keeper is the equivalent for the single-session surfaces:
+// it follows the active session path across resumes, forks, and fresh-session
+// rotations, holding exactly one lease at a time.
+//
+// The zero value is not ready for use; construct with NewSessionLeaseKeeper.
+type SessionLeaseKeeper struct {
+	mu         sync.Mutex
+	lease      *sessionstore.SessionLease
+	controller *Controller
+	retired    []<-chan struct{}
+}
+
+func NewSessionLeaseKeeper() *SessionLeaseKeeper {
+	return &SessionLeaseKeeper{}
+}
+
+// Rebind points the keeper at path: it acquires path's session lease and only
+// then releases the previously held one, so the outgoing session stays
+// protected until the new one is secured. Rebinding to the path already held
+// is a no-op; an empty path (session persistence disabled) just releases.
+// On failure the keeper is unchanged — the caller still holds its previous
+// lease and must not bind path for writing. A held path surfaces as an error
+// wrapping sessionstore.ErrSessionLeaseHeld; format it with SessionInUseMessage.
+func (k *SessionLeaseKeeper) Rebind(path string) error {
+	if k == nil {
+		return nil
+	}
+	k.mu.Lock()
+	defer k.mu.Unlock()
+	if strings.TrimSpace(path) == "" {
+		k.releaseLocked()
+		return nil
+	}
+	if k.lease != nil && k.lease.Path() == sessionstore.CanonicalSessionPath(path) {
+		return nil
+	}
+	lease, err := sessionstore.TryAcquireSessionLease(path)
+	if err != nil {
+		reclaimed, reclaimErr := reclaimOwnSessionLease(path, err)
+		if reclaimErr != nil {
+			return err
+		}
+		lease = reclaimed
+	}
+	k.releaseLocked()
+	k.lease = lease
+	return nil
+}
+
+// Attach points the keeper at path and reports whether it may write. A session
+// another runtime holds attaches read-only rather than being refused: the lease
+// protects the write-back, not the reading, and an attachment carrying no lease
+// binds no authority — which turn admission and every save already refuse
+// without. Callers about to write want Rebind, where read-only is no answer.
+func (k *SessionLeaseKeeper) Attach(path string) (writable bool, err error) {
+	if k == nil {
+		return false, nil
+	}
+	k.mu.Lock()
+	defer k.mu.Unlock()
+	if strings.TrimSpace(path) == "" {
+		k.releaseLocked()
+		return true, nil
+	}
+	if k.lease != nil && k.lease.Path() == sessionstore.CanonicalSessionPath(path) {
+		return true, nil
+	}
+	lease, err := sessionstore.TryAcquireSessionLease(path)
+	if err != nil {
+		reclaimed, reclaimErr := reclaimOwnSessionLease(path, err)
+		if reclaimErr != nil {
+			if !errors.Is(err, sessionstore.ErrSessionLeaseHeld) {
+				return false, err
+			}
+			// Held by a live runtime. Drop whatever this keeper held so the
+			// controller's authority is cleared with it: read-only here means
+			// no authority, which is what makes every save fail closed.
+			k.releaseLocked()
+			return false, nil
+		}
+		lease = reclaimed
+	}
+	k.releaseLocked()
+	k.lease = lease
+	return true, nil
+}
+
+// reclaimOwnSessionLease recovers a lease this process dropped without
+// releasing, whose stranded owner entry then refuses every later bind while
+// naming this very process as the holder. Only our own leftover is taken: a
+// readable info naming someone else is respected, and the OS lock refuses a
+// live holder anyway — damaged info with a free lock is a leftover, not one.
+func reclaimOwnSessionLease(path string, cause error) (*sessionstore.SessionLease, error) {
+	if !errors.Is(cause, sessionstore.ErrSessionLeaseHeld) {
+		return nil, cause
+	}
+	var leaseErr *sessionstore.SessionLeaseError
+	if errors.As(cause, &leaseErr) && leaseErr != nil && leaseErr.Info != nil &&
+		(leaseErr.Info.PID != os.Getpid() || leaseErr.Info.WriterID != sessionstore.SessionWriterID()) {
+		return nil, cause
+	}
+	return sessionstore.TryReclaimCurrentProcessSessionLease(path)
+}
+
+// HandleSessionRecovered moves the single-session frontend lease before a
+// controller commits to a recovery branch. It is suitable for
+// Options.OnSessionRecovered in CLI chat/run/serve surfaces. Rebind acquires the
+// recovery path before releasing the original lease, so a failed handoff keeps
+// the previous session protected.
+func (k *SessionLeaseKeeper) HandleSessionRecovered(info SessionRecoveryInfo) error {
+	recoveryPath := strings.TrimSpace(info.RecoveryPath)
+	if k == nil || recoveryPath == "" {
+		return nil
+	}
+	k.mu.Lock()
+	if k.lease != nil && k.lease.Path() == sessionstore.CanonicalSessionPath(recoveryPath) {
+		k.mu.Unlock()
+		return nil
+	}
+	lease, err := sessionstore.TryAcquireSessionLease(recoveryPath)
+	if err != nil {
+		if reclaimed, reclaimErr := reclaimOwnSessionLease(recoveryPath, err); reclaimErr == nil {
+			lease, err = reclaimed, nil
+		}
+	}
+	if err == nil && k.controller != nil {
+		err = k.controller.BindSessionWriteAuthority(lease)
+	}
+	if err != nil {
+		if lease != nil {
+			lease.Release()
+		}
+		k.mu.Unlock()
+		if errors.Is(err, sessionstore.ErrSessionLeaseHeld) {
+			return fmt.Errorf("bind recovery session: %s; %s",
+				SessionInUseMessage(err), SessionLeaseCloseHint)
+		}
+		// The detailed error can contain a machine-local path. Keep it in
+		// diagnostics and return path-free text to every frontend.
+		slog.Error("control: bind recovery session lease", "err", err)
+		return fmt.Errorf("bind recovery session: unable to secure recovered transcript")
+	}
+	old := k.lease
+	k.lease = lease
+	var retired chan struct{}
+	if old != nil {
+		retired = make(chan struct{})
+		k.retired = append(k.retired, retired)
+	}
+	k.mu.Unlock()
+	// Recovery callbacks run inside the authority-guarded save that still owns
+	// old. Releasing synchronously here would wait on that same save forever.
+	// Retirement is bounded to one goroutine per committed path handoff.
+	if old != nil {
+		go func() {
+			old.Release()
+			close(retired)
+		}()
+	}
+	return nil
+}
+
+// Release drops the held lease, if any. Idempotent; call it on frontend
+// teardown after the controller has finished its final writes.
+func (k *SessionLeaseKeeper) Release() {
+	if k == nil {
+		return
+	}
+	k.mu.Lock()
+	k.releaseLocked()
+	retired := append([]<-chan struct{}(nil), k.retired...)
+	k.mu.Unlock()
+	for _, done := range retired {
+		<-done
+	}
+}
+
+// WaitForRetiredLeases waits until the most recent recovery handoff has
+// released its outgoing lease. Runtime paths do not need to call it; tests and
+// shutdown use it when they require deterministic cleanup observation.
+func (k *SessionLeaseKeeper) WaitForRetiredLeases() {
+	if k == nil {
+		return
+	}
+	k.mu.Lock()
+	retired := append([]<-chan struct{}(nil), k.retired...)
+	k.mu.Unlock()
+	for _, done := range retired {
+		<-done
+	}
+}
+
+// HeldPath reports the canonical session path the keeper currently guards,
+// or "" when it holds nothing.
+func (k *SessionLeaseKeeper) HeldPath() string {
+	if k == nil {
+		return ""
+	}
+	k.mu.Lock()
+	defer k.mu.Unlock()
+	if k.lease == nil {
+		return ""
+	}
+	return k.lease.Path()
+}
+
+// Lease returns the held lease for authority issuance. Callers must not
+// Release it; use Release/Rebind on the keeper instead.
+func (k *SessionLeaseKeeper) Lease() *sessionstore.SessionLease {
+	if k == nil {
+		return nil
+	}
+	k.mu.Lock()
+	defer k.mu.Unlock()
+	return k.lease
+}
+
+// BindControllerAuthority issues a fresh write authority from the held lease
+// onto c. Safe no-op when the keeper holds nothing.
+func (k *SessionLeaseKeeper) BindControllerAuthority(c *Controller) error {
+	if k == nil || c == nil {
+		return nil
+	}
+	k.mu.Lock()
+	defer k.mu.Unlock()
+	if err := c.BindSessionWriteAuthority(k.lease); err != nil {
+		return err
+	}
+	k.controller = c
+	return nil
+}
+
+func (k *SessionLeaseKeeper) releaseLocked() {
+	if k.lease != nil {
+		k.lease.Release()
+		k.lease = nil
+	}
+	if k.controller != nil {
+		_ = k.controller.BindSessionWriteAuthority(nil)
+		k.controller = nil
+	}
+}
+
+// SessionLeaseCloseHint is the universal way out of a lease refusal, appended
+// by surfaces that have no copy escape hatch (in-TUI switches, serve, ACP).
+const SessionLeaseCloseHint = "close the other Reasonix window or process first"
+
+// SessionInUseMessage renders a lease-acquisition failure as the shared
+// operator-facing "who is holding this" line used by the CLI, serve, and ACP.
+// It names the holder from the lease info when available and degrades to a
+// generic line otherwise. The session file path is deliberately omitted — the
+// caller already knows which session it asked for.
+func SessionInUseMessage(err error) string {
+	const fallback = "this session is in use by another Reasonix window or process"
+	var leaseErr *sessionstore.SessionLeaseError
+	if !errors.As(err, &leaseErr) || leaseErr == nil || leaseErr.Info == nil || leaseErr.Info.PID <= 0 {
+		return fallback
+	}
+	info := leaseErr.Info
+	var b strings.Builder
+	// Naming our own pid as "another process" sends the reader looking for a
+	// second window that does not exist; the holder is this Reasonix, on
+	// another session binding.
+	if info.PID == os.Getpid() {
+		b.WriteString("this session is already open elsewhere in this Reasonix")
+		if !info.AcquiredAt.IsZero() {
+			b.WriteString(" (since " + info.AcquiredAt.Local().Format("15:04") + ")")
+		}
+		return b.String()
+	}
+	fmt.Fprintf(&b, "this session is in use by another Reasonix process (pid %d", info.PID)
+	if host := strings.TrimSpace(info.Hostname); host != "" {
+		b.WriteString(" on " + host)
+	}
+	if !info.AcquiredAt.IsZero() {
+		b.WriteString(", since " + info.AcquiredAt.Local().Format("15:04"))
+	}
+	b.WriteString(")")
+	return b.String()
+}

@@ -1,0 +1,30 @@
+[
+  {
+    "id": "DEMO-101",
+    "title": "Restore the draft after closing its preview",
+    "summary": "Fictional request: keep a locally typed draft available when returning from its preview.",
+    "priority": "high",
+    "complete": false
+  },
+  {
+    "id": "DEMO-102",
+    "title": "Show the current connection beside the queue",
+    "summary": "Fictional request: make the selected workspace easy to identify before starting a task.",
+    "priority": "normal",
+    "complete": false
+  },
+  {
+    "id": "DEMO-103",
+    "title": "Keep a long request title readable when the desktop window is narrowed during a review",
+    "summary": "Fictional request: the full title and summary should wrap cleanly while the actions remain reachable by keyboard.",
+    "priority": "normal",
+    "complete": false
+  },
+  {
+    "id": "DEMO-104",
+    "title": "Link the local delivery record",
+    "summary": "Fictional completed request: provide the evidence file beside the generated page.",
+    "priority": "low",
+    "complete": true
+  }
+]

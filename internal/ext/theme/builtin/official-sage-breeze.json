@@ -1,0 +1,67 @@
+{
+  "schemaVersion": 1,
+  "id": "official-sage-breeze",
+  "name": "Sage Breeze",
+  "author": "Reasonix Contributors",
+  "description": "Cream paper, sage sprigs and an original illustrated reader on the right.",
+  "license": "MIT",
+  "baseStyle": "slate",
+  "tokens": {
+    "light": {
+      "bg": "#F7F7EF",
+      "bgSoft": "#EFEFE2",
+      "bgElev": "#FCFCF6",
+      "panel": "#FCFCF6",
+      "border": "#BFC095",
+      "borderSoft": "#E8E8D8",
+      "fg": "#26332D",
+      "fgDim": "#4E6157",
+      "fgFaint": "#5D6F64",
+      "accent": "#47735F",
+      "accentFg": "#F7F7EF",
+      "float": "#FCFCF6",
+      "floatHi": "#FCFCF6",
+      "codeBg": "#F3F3E8",
+      "sunkBg": "#F7F7EF",
+      "synKeyword": "#47735F",
+      "synString": "#662C96",
+      "synNumber": "#2C5C96",
+      "synFunction": "#776C22"
+    },
+    "dark": {
+      "bg": "#101814",
+      "bgSoft": "#17211C",
+      "bgElev": "#1E2922",
+      "panel": "#19231D",
+      "border": "#32443A",
+      "borderSoft": "#25322B",
+      "fg": "#EEF6F0",
+      "fgDim": "#B7CDBF",
+      "fgFaint": "#7E968A",
+      "accent": "#84CBA7",
+      "accentFg": "#0E1A13",
+      "float": "#19231D",
+      "floatHi": "#1E2922",
+      "codeBg": "#141C18",
+      "sunkBg": "#101814",
+      "synKeyword": "#84CBA7",
+      "synString": "#B790DF",
+      "synNumber": "#90B8DF",
+      "synFunction": "#DFD190"
+    }
+  },
+  "recipes": {
+    "density": "comfortable",
+    "corners": "soft"
+  },
+  "background": {
+    "image": "background.webp",
+    "focusX": 0.73,
+    "focusY": 0.44,
+    "safeArea": "left",
+    "homeOpacity": 1.0,
+    "taskOpacity": 0.2,
+    "overlayStrength": 0.68,
+    "paneOpacity": 0.5
+  }
+}

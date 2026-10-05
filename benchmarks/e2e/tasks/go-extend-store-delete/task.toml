@@ -1,0 +1,3 @@
+prompt = "Add a Delete(key string) error method to the store package, with semantics consistent with the methods already there. Deleting a key that is absent must behave the same way Get does in that situation. Add tests in the style the package already uses."
+class = "codegen"
+timeout_sec = 480

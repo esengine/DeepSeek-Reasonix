@@ -1,0 +1,38 @@
+{
+  "openapi": "3.0.3",
+  "info": { "title": "Fixture Notes API", "version": "1.0.0" },
+  "security": [{ "apiKeyAuth": [] }],
+  "paths": {
+    "/notes": {
+      "get": {
+        "summary": "List notes",
+        "parameters": [
+          { "name": "offset", "in": "query", "required": false, "schema": { "type": "integer", "minimum": 0, "default": 0 } },
+          { "name": "limit", "in": "query", "required": false, "schema": { "type": "integer", "minimum": 1, "maximum": 50, "default": 10 } }
+        ],
+        "responses": {
+          "200": { "description": "A page of notes", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/Notes" } } } }
+        }
+      },
+      "post": {
+        "summary": "Create a note",
+        "requestBody": { "required": true, "content": { "application/json": { "schema": {
+          "type": "object", "required": ["title"], "properties": { "title": { "type": "string" }, "body": { "type": "string" } }
+        } } } },
+        "responses": {
+          "201": { "description": "The created note", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/Note" } } } }
+        }
+      }
+    }
+  },
+  "components": {
+    "securitySchemes": { "apiKeyAuth": { "type": "apiKey", "in": "header", "name": "X-Api-Key" } },
+    "schemas": {
+      "Note": {
+        "type": "object", "required": ["id", "title"],
+        "properties": { "id": { "type": "string" }, "title": { "type": "string" }, "body": { "type": "string" } }
+      },
+      "Notes": { "type": "array", "items": { "$ref": "#/components/schemas/Note" } }
+    }
+  }
+}

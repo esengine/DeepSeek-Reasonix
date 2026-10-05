@@ -1,0 +1,414 @@
+package sessionstore
+
+import (
+	"encoding/json"
+	"errors"
+	"fmt"
+	"log/slog"
+	"os"
+	"path/filepath"
+	"runtime"
+	"strings"
+	"sync"
+	"sync/atomic"
+	"time"
+
+	"reasonix/internal/base/fileutil"
+	fileencoding "reasonix/internal/base/fileutil/encoding"
+	"reasonix/internal/state/store"
+)
+
+var ErrSessionLeaseHeld = errors.New("session lease held by another runtime")
+
+// sessionLeaseOwners reserves a canonical session path for one in-process
+// acquisition attempt or live lease. sessionLeaseActiveOwners contains only
+// generations that have acquired the cross-process lock and written their
+// lease metadata. Keeping the two states separate prevents ownership-sensitive
+// repair from treating a pending or failed acquisition as proof of ownership.
+// Storing identities instead of bare sentinels lets release and reclaim use
+// CompareAndDelete without an old generation evicting a newer one.
+var (
+	sessionLeaseOwners       sync.Map
+	sessionLeaseActiveOwners sync.Map
+	sessionLeaseSeq          atomic.Uint64
+)
+
+type SessionLeaseInfo struct {
+	SessionPath string    `json:"session_path"`
+	WriterID    string    `json:"writer_id"`
+	PID         int       `json:"pid"`
+	Hostname    string    `json:"hostname,omitempty"`
+	AcquiredAt  time.Time `json:"acquired_at"`
+}
+
+type SessionLeaseError struct {
+	Path string
+	Info *SessionLeaseInfo
+}
+
+func (e *SessionLeaseError) Error() string {
+	if e == nil {
+		return ErrSessionLeaseHeld.Error()
+	}
+	if e.Info != nil && e.Info.WriterID != "" {
+		return fmt.Sprintf("%s: %s is held by %s", ErrSessionLeaseHeld, e.Path, e.Info.WriterID)
+	}
+	return fmt.Sprintf("%s: %s", ErrSessionLeaseHeld, e.Path)
+}
+
+func (e *SessionLeaseError) Unwrap() error {
+	return ErrSessionLeaseHeld
+}
+
+type SessionLease struct {
+	path            string
+	ownerID         uint64
+	mu              sync.Mutex
+	leaseLock       *sessionLockFile
+	released        bool
+	writeGeneration uint64
+	// activeSaves counts authority-guarded save cycles still inside path/file
+	// locks. Release waits for this to reach zero so a rebind cannot revoke
+	// mid-write and create an ABA ownership hole.
+	activeSaves int
+	// releaseWait is closed when activeSaves drains to zero while a Release
+	// is waiting. At most one waiter is parked.
+	releaseWait chan struct{}
+	// beforeReleaseLock is a test hook for the registry-before-unlock invariant.
+	beforeReleaseLock func()
+	// beforeReleaseWait is a test hook reached only after Release observes an
+	// in-flight authority-guarded save and before it parks.
+	beforeReleaseWait func()
+}
+
+func TryAcquireSessionLease(path string) (*SessionLease, error) {
+	if strings.TrimSpace(path) == "" {
+		return nil, fmt.Errorf("empty session path")
+	}
+	path = canonicalSessionSavePath(path)
+	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+		return nil, err
+	}
+	ownerID := sessionLeaseSeq.Add(1)
+	if _, loaded := sessionLeaseOwners.LoadOrStore(path, ownerID); loaded {
+		info, _ := LoadSessionLeaseInfo(path)
+		return nil, &SessionLeaseError{Path: path, Info: info}
+	}
+	leaseLock, err := tryTakeSessionLeaseLock(path)
+	if err != nil {
+		sessionLeaseOwners.CompareAndDelete(path, ownerID)
+		if errors.Is(err, ErrSessionLeaseHeld) {
+			info, _ := LoadSessionLeaseInfo(path)
+			return nil, &SessionLeaseError{Path: path, Info: info}
+		}
+		return nil, err
+	}
+	// The OS lock proves any active-registry entry left without its reservation
+	// is stale. Clear it before publishing this generation.
+	sessionLeaseActiveOwners.Delete(path)
+	lease := &SessionLease{path: path, ownerID: ownerID, leaseLock: leaseLock}
+	if err := SaveSessionLeaseInfo(path, newSessionLeaseInfo(path)); err != nil {
+		lease.Release()
+		return nil, err
+	}
+	sessionLeaseActiveOwners.Store(path, ownerID)
+	return lease, nil
+}
+
+// TryReclaimCurrentProcessSessionLease re-acquires a lease whose in-process
+// owner entry was orphaned (a lease dropped without Release). The OS lease
+// lock is the arbiter: an active holder keeps its lock file locked for the
+// whole hold, so reclaiming from one fails with ErrSessionLeaseHeld without
+// touching the holder's entry. Holding the lock proves nobody does, which
+// also covers metadata-damage states — a missing or unreadable lease info
+// (deleted by the user, quarantined by AV, torn by a crash) with a free lock
+// is a leftover, not a holder, and must not wedge the session as busy.
+func TryReclaimCurrentProcessSessionLease(path string) (*SessionLease, error) {
+	path = canonicalSessionSavePath(path)
+	info, err := LoadSessionLeaseInfo(path)
+	switch {
+	case err == nil:
+		if info == nil || info.PID != os.Getpid() || info.WriterID != SessionWriterID() {
+			// A readable info naming another live runtime: never steal it.
+			// (A crashed foreign leftover is separated from a live holder by
+			// the lock probe in SessionLeaseHeldByOtherRuntime; reclaim is
+			// only for leases this process lost track of.)
+			return nil, &SessionLeaseError{Path: path, Info: info}
+		}
+	case os.IsNotExist(err):
+		// The holder finished releasing (info removed first) or the sidecar
+		// was deleted out from under an orphaned entry. Either way the lock
+		// probe below decides; info identity has nothing left to say.
+		info = nil
+	default:
+		// Unreadable info hides the holder's identity, but the lock still
+		// tells the truth: a live holder keeps it locked. Fall through to the
+		// probe instead of wedging on metadata damage.
+		info = nil
+	}
+	leaseLock, err := tryTakeSessionLeaseLock(path)
+	if err != nil {
+		if errors.Is(err, ErrSessionLeaseHeld) {
+			return nil, &SessionLeaseError{Path: path, Info: info}
+		}
+		return nil, err
+	}
+	// Holding the OS lock proves no live lease owns this path right now, so
+	// overwriting the stale owner entry is safe; concurrent reclaimers fail
+	// the lock above and never reach this store, and a stale lease released
+	// later misses its CompareAndDelete against the new owner id.
+	ownerID := sessionLeaseSeq.Add(1)
+	lease := &SessionLease{path: path, ownerID: ownerID, leaseLock: leaseLock}
+	sessionLeaseActiveOwners.Delete(path)
+	sessionLeaseOwners.Store(path, ownerID)
+	if err := SaveSessionLeaseInfo(path, newSessionLeaseInfo(path)); err != nil {
+		lease.Release()
+		return nil, err
+	}
+	sessionLeaseActiveOwners.Store(path, ownerID)
+	return lease, nil
+}
+
+// SessionLeaseHeldByOtherRuntime reports whether path's session lease is held
+// by a live runtime other than the calling process. Callers use it to keep
+// destructive operations away from sessions another process may be writing;
+// leases held by this process report false because callers tear their own
+// runtimes down before acting. The lock file is only probed when a foreign
+// lease info file exists, so the common uncontended case never touches the
+// lock; a probe cannot steal a live lease because holders keep the lock held
+// for their whole lifetime.
+func SessionLeaseHeldByOtherRuntime(path string) bool {
+	if strings.TrimSpace(path) == "" {
+		return false
+	}
+	path = canonicalSessionSavePath(path)
+	if _, ok := sessionLeaseActiveOwners.Load(path); ok {
+		// Held by this process; no need to touch the lock file.
+		return false
+	}
+	info, err := LoadSessionLeaseInfo(path)
+	if err != nil {
+		if os.IsNotExist(err) {
+			// No info file means no holder: live holders keep it present for
+			// their whole hold.
+			return false
+		}
+		unlock, lockErr := tryLockSessionLeaseFile(path)
+		if lockErr == nil {
+			// Corrupt/empty info with a free lock is a crash leftover. Remove the
+			// bad metadata so future probes do not keep reporting a ghost owner.
+			_ = os.Remove(sessionLeaseInfoPath(path))
+			unlock()
+			return false
+		}
+		// An unreadable info file with a live lock still hides the holder's
+		// identity, so err on the side of treating the session as busy.
+		return true
+	}
+	if info != nil && info.PID == os.Getpid() && info.WriterID == SessionWriterID() {
+		return false
+	}
+	unlock, err := tryLockSessionLeaseFile(path)
+	if err == nil {
+		// Foreign info but a free lock: leftover from a crashed process.
+		_ = os.Remove(sessionLeaseInfoPath(path))
+		unlock()
+		return false
+	}
+	return true
+}
+
+// SessionLeaseHeldByCurrentRuntime reports whether this process has completed
+// acquisition of path's session lease. Pending reservations and generations
+// already retiring report false, so callers cannot authorize destructive repair
+// before the OS lock is held or after release has begun.
+func SessionLeaseHeldByCurrentRuntime(path string) bool {
+	if strings.TrimSpace(path) == "" {
+		return false
+	}
+	_, ok := sessionLeaseActiveOwners.Load(canonicalSessionSavePath(path))
+	return ok
+}
+
+func (l *SessionLease) Path() string {
+	if l == nil {
+		return ""
+	}
+	return l.path
+}
+
+func (l *SessionLease) Release() {
+	if l == nil {
+		return
+	}
+	// Wait for authority-guarded saves to finish before revoking ownership.
+	// Without this, a concurrent save that already passed Valid() can finish
+	// after a successor lease is issued for the same path (ABA).
+	for {
+		l.mu.Lock()
+		if l.released {
+			l.mu.Unlock()
+			return
+		}
+		if l.activeSaves == 0 {
+			break
+		}
+		if l.releaseWait == nil {
+			l.releaseWait = make(chan struct{})
+		}
+		wait := l.releaseWait
+		beforeReleaseWait := l.beforeReleaseWait
+		l.mu.Unlock()
+		if beforeReleaseWait != nil {
+			beforeReleaseWait()
+		}
+		<-wait
+	}
+	l.released = true
+	leaseLock := l.leaseLock
+	l.leaseLock = nil
+	beforeReleaseLock := l.beforeReleaseLock
+	l.mu.Unlock()
+
+	// Revoke ownership-sensitive repair before the OS lock becomes available
+	// to a successor. CompareAndDelete keeps a stale generation from
+	// deauthorizing a newer reclaimed lease.
+	sessionLeaseActiveOwners.CompareAndDelete(l.path, l.ownerID)
+	_ = os.Remove(sessionLeaseInfoPath(l.path))
+	// Only remove the entry this lease owns: after a reclaim the map may
+	// already point at a newer lease for the same path.
+	sessionLeaseOwners.CompareAndDelete(l.path, l.ownerID)
+	if beforeReleaseLock != nil {
+		beforeReleaseLock()
+	}
+	if leaseLock != nil {
+		// Delete the exact lock file while its lock is still held. Besides
+		// retiring the sidecar, retaining the lock object enables an atomic
+		// handoff to SessionRemovalGuard without an unlock/reacquire window.
+		_ = leaseLock.RemoveAndUnlock()
+	}
+	_ = removeStaleSessionLockSidecar(l.path, store.SessionLockFile(l.path))
+}
+
+func newSessionLeaseInfo(path string) SessionLeaseInfo {
+	host, _ := os.Hostname()
+	return SessionLeaseInfo{
+		SessionPath: path,
+		WriterID:    SessionWriterID(),
+		PID:         os.Getpid(),
+		Hostname:    host,
+		AcquiredAt:  time.Now().UTC(),
+	}
+}
+
+func LoadSessionLeaseInfo(path string) (*SessionLeaseInfo, error) {
+	b, err := fileencoding.ReadFileUTF8(sessionLeaseInfoPath(path))
+	if err != nil {
+		return nil, err
+	}
+	var info SessionLeaseInfo
+	if err := json.Unmarshal(b, &info); err != nil {
+		return nil, err
+	}
+	return &info, nil
+}
+
+func SaveSessionLeaseInfo(path string, info SessionLeaseInfo) error {
+	leasePath := sessionLeaseInfoPath(path)
+	if err := os.MkdirAll(filepath.Dir(leasePath), 0o755); err != nil {
+		return err
+	}
+	b, err := json.MarshalIndent(info, "", "  ")
+	if err != nil {
+		return err
+	}
+	b = append(b, '\n')
+	tmp, err := os.CreateTemp(filepath.Dir(leasePath), ".lease.*.tmp")
+	if err != nil {
+		return err
+	}
+	tmpPath := tmp.Name()
+	if _, err := tmp.Write(b); err != nil {
+		tmp.Close()
+		os.Remove(tmpPath)
+		return err
+	}
+	if err := tmp.Close(); err != nil {
+		os.Remove(tmpPath)
+		return err
+	}
+	if err := fileutil.ReplaceFile(tmpPath, leasePath); err != nil {
+		os.Remove(tmpPath)
+		return err
+	}
+	return nil
+}
+
+func sessionLeaseInfoPath(path string) string {
+	return store.SessionLeaseInfo(canonicalSessionSavePath(path))
+}
+
+// unleasedWriteObserved dedupes the write-authority probe below to one report
+// per canonical path per process.
+var unleasedWriteObserved sync.Map
+
+// observeUnleasedSessionWrite is the store-P2 write-authority probe: the target
+// model is "the lease holder is the only writer of a session's content", but
+// enforcement can't land before we know every writer that currently saves
+// without holding the lease (fresh-session creation saves before the first
+// Rebind, headless runs, recovery tooling, ...). Until then this only records
+// evidence: one structured warning per path per process, never a failure. The
+// snapshot-conflict machinery stays the safety net for the writers this
+// surfaces.
+func observeUnleasedSessionWrite(path string, mode sessionSaveMode) {
+	canonical := canonicalSessionSavePath(path)
+	if _, ok := sessionLeaseOwners.Load(canonical); ok {
+		return
+	}
+	if _, seen := unleasedWriteObserved.LoadOrStore(canonical, struct{}{}); seen {
+		return
+	}
+	slog.Warn("session: save without a held lease (write-authority probe, store P2)",
+		"path", filepath.Base(path),
+		"mode", int(mode),
+		"writer", SessionWriterID(),
+		"origin", unleasedWriteOrigin(),
+	)
+}
+
+// unleasedWriteOrigin names the first caller outside this package: the writer
+// the probe exists to enumerate. Reading it off the stack keeps the label out
+// of every save signature, where a new writer would have to remember to pass
+// one — and the writer that forgets is the one being hunted.
+func unleasedWriteOrigin() string {
+	var pcs [24]uintptr
+	frames := runtime.CallersFrames(pcs[:runtime.Callers(2, pcs[:])])
+	for {
+		frame, more := frames.Next()
+		if frame.Function == "" && !more {
+			break
+		}
+		if frame.Function != "" && !strings.HasPrefix(frame.Function, sessionPackageFramePrefix()) {
+			return fmt.Sprintf("%s (%s:%d)", frame.Function, filepath.Base(frame.File), frame.Line)
+		}
+		if !more {
+			break
+		}
+	}
+	return "unknown"
+}
+
+// sessionPackageFramePrefix reads this package's own frame prefix off a local
+// function, so moving the package cannot quietly turn the filter above into a
+// no-op the way a written-out import path would.
+func sessionPackageFramePrefix() string {
+	pc, _, _, ok := runtime.Caller(0)
+	if !ok {
+		return ""
+	}
+	name := runtime.FuncForPC(pc).Name()
+	if cut := strings.LastIndex(name, "."); cut > 0 {
+		return name[:cut+1]
+	}
+	return ""
+}

@@ -1,0 +1,12 @@
+{
+  "openapi": "3.0.3",
+  "info": { "title": "Unresolved reference fixture", "version": "1.0.0" },
+  "paths": {
+    "/notes": { "get": { "responses": {
+      "200": { "description": "Unresolved response", "content": { "application/json": {
+        "schema": { "$ref": "#/components/schemas/MissingNote" }
+      } } }
+    } } }
+  },
+  "components": { "schemas": {} }
+}

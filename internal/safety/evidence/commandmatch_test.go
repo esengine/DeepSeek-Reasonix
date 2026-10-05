@@ -1,0 +1,53 @@
+package evidence
+
+import "testing"
+
+func TestCommandMatches(t *testing.T) {
+	cases := []struct {
+		name  string
+		cited string
+		ran   string
+		want  bool
+	}{
+		{"exact", "go test ./...", "go test ./...", true},
+		{"cd prefix dropped", "git merge upstream/main-v2 --ff-only",
+			"cd /repo && git merge upstream/main-v2 --ff-only", true},
+		{"flag drift inside compound", "rm -v scripts/test_lines.txt && ls scripts/test_lines.txt 2>&1",
+			"rm -v scripts/test_lines.txt && ls -la scripts/test_lines.txt 2>&1 || true", true},
+		{"quote style drift", `test -f test-tools.md && echo 'still exists' || echo 'deleted'`,
+			`test -f test-tools.md && echo "still exists" || echo "deleted"`, true},
+		{"quoted pipe is not a segment separator", `printf "%s\n" "a | b"`,
+			`printf '%s\n' 'a | b'`, true},
+		{"pipe tail dropped", "go test ./internal/contract/tool/... -count=1 -timeout 60s",
+			"cd /f/Reasonix && go test ./internal/contract/tool/... -count=1 -timeout 60s 2>&1 | tail -10", true},
+		{"whitespace collapse", "go  test   ./...", "go test ./...", true},
+		{"different command rejected", "go test ./...", "go vet ./...", false},
+		{"extra cited token rejected", "go test ./a/... ./b/...", "go test ./a/...", false},
+		{"bare token needs exact", "ls", "ls -la scripts", false},
+		{"bare token exact ok", "ls", "ls", true},
+		{"empty cited", "", "go test ./...", false},
+		{"comment lines ignored", "shuf -i 1-30 -n 10",
+			"# pick lines to delete\nshuf -i 1-30 -n 10 | sort -rn", true},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := CommandMatches(tc.cited, tc.ran); got != tc.want {
+				t.Fatalf("CommandMatches(%q, %q) = %v, want %v", tc.cited, tc.ran, got, tc.want)
+			}
+		})
+	}
+}
+
+// A here-doc body is a file being written. Reading its lines as commands let a
+// declared project check be satisfied by text the agent had just written, with
+// nothing having run — a gate answered by its own subject.
+func TestCommandMatchesIgnoresAHereDocBody(t *testing.T) {
+	body := "cat > notes.md <<'EOF'\ngo test ./...\nEOF"
+	if CommandMatches("go test ./...", body) {
+		t.Fatal("a check ran only inside a here-doc body satisfied the citation")
+	}
+	beside := "cat > notes.md <<'EOF'\nnothing here\nEOF\ngo test ./..."
+	if !CommandMatches("go test ./...", beside) {
+		t.Fatal("a check that really ran beside a here-doc did not satisfy the citation")
+	}
+}

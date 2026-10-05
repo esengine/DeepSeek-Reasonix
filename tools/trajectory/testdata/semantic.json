@@ -1,0 +1,16 @@
+{
+  "exported": "2026-08-30T00:00:00.000Z",
+  "span": 600.0,
+  "rows": [
+    {"seq": 1, "at": 0.0, "kind": "event", "text": "user_message · do the work"},
+    {"seq": 2, "at": 1.0, "kind": "model_round", "text": "model_round · hit 0 · miss 500k · out 100 · src=executor"},
+    {"seq": 3, "at": 2.0, "kind": "outcome_progress", "text": "todo replan · content 1 · plan 1 · progress 0"},
+    {"seq": 4, "at": 10.0, "kind": "model_round", "text": "model_round · hit 400k · miss 100k · out 100 · src=executor"},
+    {"seq": 5, "at": 11.0, "kind": "tool", "tool": "complete_step", "text": "tool complete_step"},
+    {"seq": 6, "at": 12.0, "kind": "outcome_progress", "text": "todo advance · content 2 · plan 1 · progress 1"},
+    {"seq": 7, "at": 20.0, "kind": "model_round", "text": "model_round · hit 900k · miss 100k · out 100 · src=executor"},
+    {"seq": 8, "at": 21.0, "kind": "outcome_progress", "text": "todo rewrite · content 3 · plan 1 · progress 1"},
+    {"seq": 9, "at": 300.0, "kind": "model_round", "text": "model_round · hit 9m · miss 1m · out 100 · src=executor"},
+    {"seq": 10, "at": 320.0, "kind": "outcome_progress", "text": "todo terminal · content 4 · plan 1 · progress 2"}
+  ]
+}

@@ -1,0 +1,3 @@
+prompt = "config.py silently accepts broken config files and the app then crashes much later somewhere else. Make loading fail fast with clear errors instead."
+class = "ambiguous"
+timeout_sec = 300

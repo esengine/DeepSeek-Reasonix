@@ -1,0 +1,241 @@
+package control
+
+import (
+	"context"
+	"fmt"
+	"slices"
+	"sync"
+	"time"
+
+	"reasonix/internal/contract/tool"
+	"reasonix/internal/ext/plugin"
+)
+
+// mcpManager owns the session's live tool/plugin surface: the MCP plugin Host
+// (live server connections), the tool Registry the executor reads each turn, and
+// the session-scoped context a hot-added stdio server binds its subprocess to.
+// Like approvalManager it holds the live plumbing behind its own lock, off c.mu —
+// the Controller keeps the config-facing orchestration (persisting reasonix.toml
+// on add/remove, building specs from entries).
+//
+// mu guards the lazy host creation and host-pointer reads. The registry is
+// internally thread-safe (its own RWMutex) and pluginCtx is write-once, so the
+// lock is held only briefly — never across the host's network/subprocess I/O.
+// host is either injected at construction (the desktop shared-host path) or
+// created lazily on the first connect; once set it never reverts to nil.
+type mcpManager struct {
+	mu        sync.Mutex
+	host      *plugin.Host
+	reg       *tool.Registry
+	pluginCtx context.Context
+	// defaultCallTimeout is what a spec gets when it declares none. Read once
+	// while building a spec, so it needs no lock.
+	defaultCallTimeout time.Duration
+	// sealed, once set, refuses every connection. It is written before the
+	// controller is handed to a caller and only read after.
+	sealed error
+}
+
+// seal makes the manager refuse to connect or register any server.
+func (m *mcpManager) seal(reason error) { m.sealed = reason }
+
+func newMcpManager(host *plugin.Host, reg *tool.Registry, pluginCtx context.Context, defaultCallTimeout time.Duration) mcpManager {
+	return mcpManager{host: host, reg: reg, pluginCtx: pluginCtx, defaultCallTimeout: defaultCallTimeout}
+}
+
+// hostRef returns the live plugin host (nil until one is injected or lazily
+// created), for the SessionAPI Host() accessor and the nil-safe read wrappers.
+func (m *mcpManager) hostRef() *plugin.Host {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	return m.host
+}
+
+// connectSpec connects (or attaches to an already-connected) MCP server and
+// registers its tools, replacing any prior tools under the same prefix. Returns
+// the tool count. The host's network/subprocess I/O runs off mu.
+func (m *mcpManager) connectSpec(s plugin.Spec) (int, error) {
+	if m.sealed != nil {
+		return 0, m.sealed
+	}
+	m.mu.Lock()
+	if m.host == nil {
+		m.host = plugin.NewHost()
+	}
+	host, ctx, reg := m.host, m.pluginCtx, m.reg
+	m.mu.Unlock()
+	plugin.ApplyDisabledMCPPolicy(reg, s)
+
+	tools, err := host.Add(ctx, s)
+	if err != nil {
+		if !plugin.IsServerAlreadyConnected(err) {
+			return 0, err
+		}
+		toolsCtx, cancel := context.WithTimeout(ctx, 5*time.Second)
+		defer cancel()
+		tools, err = host.ToolsForSpec(toolsCtx, s)
+		if err != nil {
+			return 0, err
+		}
+	}
+	if reg != nil {
+		reg.ResumePrefix(plugin.ToolPrefix(s.Name))
+		reg.RemovePrefix(plugin.ToolPrefix(s.Name))
+		for _, t := range tools {
+			reg.Add(t)
+		}
+	}
+	return len(tools), nil
+}
+
+// registerSpecOnDemand restores one enabled server into this session's tool
+// registry without starting a disconnected process. A live shared-host client
+// is reused immediately; otherwise cached lazy tools (or one connect stub on a
+// cache miss) start the server only when the model makes the first real call.
+func (m *mcpManager) registerSpecOnDemand(s plugin.Spec) (int, error) {
+	if m.sealed != nil {
+		return 0, m.sealed
+	}
+	m.mu.Lock()
+	if m.host == nil {
+		m.host = plugin.NewHost()
+	}
+	host, ctx, reg := m.host, m.pluginCtx, m.reg
+	m.mu.Unlock()
+	plugin.ApplyDisabledMCPPolicy(reg, s)
+
+	var tools []tool.Tool
+	if host.HasClient(s.Name) {
+		toolsCtx, cancel := context.WithTimeout(ctx, 5*time.Second)
+		defer cancel()
+		var err error
+		tools, err = host.ToolsForSpec(toolsCtx, s)
+		if err != nil {
+			return 0, err
+		}
+	} else {
+		cached, _ := plugin.LoadCachedSchemaForSpec(s)
+		tools = plugin.LazyToolset(s, cached, host, reg, ctx, false)
+	}
+	if reg != nil {
+		prefix := plugin.ToolPrefix(s.Name)
+		reg.ResumePrefix(prefix)
+		reg.RemovePrefix(prefix)
+		for _, t := range tools {
+			reg.Add(t)
+		}
+	}
+	return len(tools), nil
+}
+
+// disconnect drops a live server and its tools from the registry. Reports whether
+// a live server was removed.
+func (m *mcpManager) disconnect(name string) bool {
+	if reg := m.registry(); reg != nil {
+		reg.ClearDisabledMCP(name)
+	}
+	host := m.hostRef()
+	if host == nil {
+		return false
+	}
+	prefix, ok := host.Remove(name)
+	if ok {
+		if reg := m.registry(); reg != nil {
+			reg.RemovePrefix(prefix)
+		}
+	}
+	return ok
+}
+
+// removeToolPrefix drops a server's tools from the registry without touching the
+// host — the placeholder / not-connected path. Returns the number removed.
+func (m *mcpManager) removeToolPrefix(name string) int {
+	reg := m.registry()
+	if reg == nil {
+		return 0
+	}
+	reg.ClearDisabledMCP(name)
+	return reg.RemovePrefix(plugin.ToolPrefix(name))
+}
+
+// suspendToolPrefix hides a server's tools from this session's registry while a
+// shared host keeps the client alive for sibling sessions.
+func (m *mcpManager) suspendToolPrefix(name string) bool {
+	reg := m.registry()
+	if reg == nil {
+		return false
+	}
+	reg.SuspendPrefix(plugin.ToolPrefix(name))
+	return true
+}
+
+// registerTool adds a built-in tool to the live registry (e.g. the slash-command
+// tool rebuilt by ReloadCommands). No-op when no registry is bound.
+func (m *mcpManager) registerTool(t tool.Tool) {
+	if reg := m.registry(); reg != nil {
+		reg.Add(t)
+	}
+}
+
+// registry returns the shared tool registry under mu (write-once, but read under
+// the lock for consistency with the host pointer).
+func (m *mcpManager) registry() *tool.Registry {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	return m.reg
+}
+
+// catalogTools counts, per server, the tools that server has in this session's
+// registry. A lazily registered server has its whole cached toolset there while
+// its process is not running, which is the difference between a server waiting
+// to be called and one that is simply not there. One pass, because a caller
+// listing every configured server would otherwise walk the registry per row.
+func (m *mcpManager) catalogTools() map[string]int {
+	reg := m.registry()
+	if reg == nil {
+		return nil
+	}
+	out := map[string]int{}
+	for _, b := range reg.MCPBindings() {
+		out[b.Server]++
+	}
+	return out
+}
+
+// serverNames lists the live server names (nil when no host is connected).
+func (m *mcpManager) serverNames() []string {
+	if h := m.hostRef(); h != nil {
+		return h.ServerNames()
+	}
+	return nil
+}
+
+// hasServer reports whether a server is live.
+func (m *mcpManager) hasServer(name string) bool {
+	return slices.Contains(m.serverNames(), name)
+}
+
+// prompts lists the live MCP prompts (nil when no host is connected).
+func (m *mcpManager) prompts() []plugin.Prompt {
+	if h := m.hostRef(); h != nil {
+		return h.Prompts()
+	}
+	return nil
+}
+
+// failures lists the recorded MCP startup failures (nil when no host).
+func (m *mcpManager) failures() []plugin.Failure {
+	if h := m.hostRef(); h != nil {
+		return h.Failures()
+	}
+	return nil
+}
+
+// readResource reads an MCP resource. Errors when no host is connected.
+func (m *mcpManager) readResource(ctx context.Context, server, uri string) (string, error) {
+	h := m.hostRef()
+	if h == nil {
+		return "", fmt.Errorf("no MCP servers connected")
+	}
+	return h.ReadResource(ctx, server, uri)
+}

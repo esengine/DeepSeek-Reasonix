@@ -1,0 +1,481 @@
+package control
+
+import (
+	"context"
+	"fmt"
+	"reasonix/internal/state/sessionstore"
+	"strings"
+	"unicode"
+
+	"reasonix/internal/contract/planmode"
+	"reasonix/internal/ext/skill"
+	"reasonix/internal/runtime/langpref"
+	"reasonix/internal/state/memory"
+)
+
+// InvocationRequest is an explicit user-selected Skill or Subagent entity.
+// Offset is used only to preserve the visual order chosen in the composer.
+type InvocationRequest struct {
+	Name   string `json:"name"`
+	Kind   string `json:"kind"`
+	Offset int    `json:"offset"`
+}
+
+// PlanModeMarker is prepended to every user turn while plan mode is on. It rides
+// in the user message (not the system prompt or tools), so the cache-stable
+// prompt prefix is left untouched and the toggle costs nothing in cache hits.
+const PlanModeMarker = planmode.Marker
+
+// PlannerRouteMarker asks the host to route this turn through the two-model
+// planner. It is host syntax rather than a phrase because the leading
+// directives it replaced read "plan first-class support for windows paths" and
+// "make a plan.md file" as requests to plan. Frontends prepend it the way plan
+// mode prepends its own marker; it never reaches the model.
+const PlannerRouteMarker = "[Reasonix: plan-first]"
+
+const (
+	activeGoalOpen = "<active-goal>"
+	// activeGoalFullOpen marks the turn carrying the whole task contract.
+	activeGoalFullOpen = `<active-goal contract="full">`
+	activeGoalClose    = "</active-goal>"
+	hookContextTag     = "hook-context"
+)
+
+const (
+	maxHookContextChars      = 10000
+	maxTotalHookContextChars = 20000
+)
+
+const (
+	GoalStatusRunning  = "running"
+	GoalStatusComplete = "complete"
+	GoalStatusBlocked  = "blocked"
+	GoalStatusStopped  = "stopped"
+)
+
+type GoalResearchMode int
+
+const (
+	GoalResearchAuto GoalResearchMode = iota
+	GoalResearchOn
+	GoalResearchOff
+)
+
+// StripComposePrefixes removes controller-injected prefixes from a composed
+// user message so that the display text matches what the user actually typed.
+// It strips the PlanModeMarker plus transient XML blocks such as
+// <reasoning-language>, <memory-update>, and <background-jobs> that Compose
+// prepends to user turns. This is used as a fallback when no .display.json
+// sidecar recording exists (e.g. sessions created before the display-recording
+// feature, or synthetic user messages injected by the controller).
+func StripComposePrefixes(content string) string {
+	s := sessionstore.StripTransientUserBlocks(content)
+	s = stripComposeMarker(s, PlanModeMarker)
+	s = stripComposeMarker(s, PlannerRouteMarker)
+	for _, superseded := range planmode.Superseded {
+		s = stripComposeMarker(s, superseded)
+	}
+	s = strings.TrimSpace(s)
+	return s
+}
+
+func stripComposeMarker(s, marker string) string {
+	s = strings.TrimPrefix(s, marker+"\n\n")
+	return strings.TrimPrefix(s, marker)
+}
+
+// IsSyntheticUserMessage returns true if the content matches one of the known
+// synthetic user messages injected by the controller or agent loop (plan
+// approval, stream recovery, readiness retry, etc.). These should not be shown
+// in the chat UI.
+func IsSyntheticUserMessage(content string) bool {
+	if trimmed := strings.TrimSpace(sessionstore.StripTransientUserBlocks(content)); trimmed == planApprovedMessage {
+		return true
+	}
+	// The prefix list lives in internal/runtime/agent (sessionstore.SyntheticUserPrefixes) so
+	// preview/title/turn-count derivations there share the exact same filter
+	// (#3653).
+	return sessionstore.IsSyntheticUserText(content)
+}
+
+// Compose applies the plan-mode marker to a turn's text when plan mode is on,
+// returning the message to actually send to the model. The frontend keeps
+// showing the raw text as the user bubble.
+func (c *Controller) Compose(text string) string {
+	return c.compose(text, text, true)
+}
+
+func (c *Controller) compose(text, source string, includeHookContext bool) string {
+	goal, goalStatus := c.goals.snapshot()
+	return c.composeWithGoal(
+		text,
+		source,
+		includeHookContext,
+		goal,
+		goalStatus,
+	)
+}
+
+func (c *Controller) composeWithGoal(
+	text, source string,
+	includeHookContext bool,
+	goal, goalStatus string,
+) string {
+	c.mu.Lock()
+	plan := c.PlanMode()
+	responseLanguage := c.display.responseLanguage
+	reasoningLanguage := c.display.reasoningLanguage
+	c.mu.Unlock()
+	notes := c.memory.drainPending()
+
+	blocks := c.turnBlocksFor(source, includeHookContext, notes, plan, goal, goalStatus, responseLanguage, reasoningLanguage)
+	var tail string
+	if includeHookContext {
+		tail = c.recallTail(source, len(notes) > 0)
+	}
+	return projectTurn(blocks, text, tail)
+}
+
+// LastMemoryRecall returns the last real turn's automatic-recall decision for
+// diagnostics and context-management surfaces.
+func (c *Controller) LastMemoryRecall() memory.RecallResult {
+	return c.memory.lastRecallResult()
+}
+
+func (c *Controller) enqueueHookContexts(contexts []string) {
+	if len(contexts) == 0 {
+		return
+	}
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	for _, context := range contexts {
+		context = strings.TrimSpace(context)
+		if context == "" {
+			continue
+		}
+		c.hookContexts = append(c.hookContexts, context)
+	}
+}
+
+func (c *Controller) drainHookContextBlock() string {
+	c.mu.Lock()
+	contexts := c.hookContexts
+	c.hookContexts = nil
+	c.mu.Unlock()
+	if len(contexts) == 0 {
+		return ""
+	}
+	var b strings.Builder
+	b.WriteString(`<hook-context event="SessionStart">`)
+	b.WriteString("\n")
+	total := 0
+	for i, context := range contexts {
+		text, truncated := clipHookContext(context, maxHookContextChars)
+		remaining := maxTotalHookContextChars - total
+		if remaining <= 0 {
+			fmt.Fprintf(&b, "[truncated: omitted %d additional hook context item(s)]\n", len(contexts)-i)
+			break
+		}
+		text, totalTruncated := clipHookContext(text, remaining)
+		total += len([]rune(text))
+		if i > 0 {
+			b.WriteString("\n---\n")
+		}
+		b.WriteString(escapeHookContext(text))
+		b.WriteString("\n")
+		if truncated || totalTruncated {
+			b.WriteString("[truncated]\n")
+		}
+	}
+	b.WriteString(`</hook-context>`)
+	return b.String()
+}
+
+func clipHookContext(s string, max int) (string, bool) {
+	r := []rune(s)
+	if len(r) <= max {
+		return s, false
+	}
+	if max < 0 {
+		max = 0
+	}
+	return string(r[:max]), true
+}
+
+func escapeHookContext(s string) string {
+	return strings.ReplaceAll(s, "</"+hookContextTag+">", "<\\/"+hookContextTag+">")
+}
+
+func reasoningLanguageBlock(lang string) string {
+	return langpref.ReasoningLanguageBlock(lang)
+}
+
+func (c *Controller) ComposeSynthetic(text string) string {
+	c.mu.Lock()
+	responseLang := c.display.responseLanguage
+	lang := c.display.reasoningLanguage
+	c.mu.Unlock()
+	text = langpref.WithResponseLanguage(text, responseLang)
+	return langpref.WithReasoningLanguageForSource(text, lang, text)
+}
+
+// activeGoalBlockForTurn states the full task contract when the model cannot see
+// one and a short reminder when it can. The condition is read off the transcript
+// rather than latched: a fold, a rewind, or a resumed session all change whether
+// the contract is still there, and none of them tell the controller.
+func (c *Controller) activeGoalBlockForTurn(goal string) string {
+	return activeGoalBlock(goal, c.needsFullGoalContract(goal))
+}
+
+// needsFullGoalContract is true while the model has no full statement of THIS
+// goal in view. A reminder pointing at a contract that is gone - or at the
+// contract of a goal the user replaced - is worse than restating it.
+func (c *Controller) needsFullGoalContract(goal string) bool {
+	if c == nil || c.executor == nil {
+		return true
+	}
+	if !c.executor.SeesStandingBlock(activeGoalFullOpen) {
+		return true
+	}
+	return !c.executor.SeesStandingBlock(goalContractIdentity(goal))
+}
+
+// goalTextForBlock is how the goal reads inside the block. goalContractIdentity
+// reuses it so the identity check cannot drift from what the renderer writes.
+func goalTextForBlock(goal string) string {
+	goal = strings.TrimSpace(goal)
+	goal = strings.ReplaceAll(goal, activeGoalClose, "<\\/active-goal>")
+	return goal
+}
+
+// goalContractIdentity is the exact opening a full statement of this goal
+// renders: the variant tag and the goal text it governs.
+func goalContractIdentity(goal string) string {
+	return activeGoalFullOpen + "\n" + goalTextForBlock(goal)
+}
+func activeGoalBlock(goal string, full bool) string {
+	goal = goalTextForBlock(goal)
+	var b strings.Builder
+	// The full statement is its own variant so a fold supersedes reminders
+	// against reminders and never lets one displace the contract it points at.
+	if full {
+		b.WriteString(activeGoalFullOpen)
+	} else {
+		b.WriteString(activeGoalOpen)
+	}
+	b.WriteString("\n")
+	b.WriteString(goal)
+	b.WriteString("\n\n")
+	if full {
+		b.WriteString(goalTaskContractInstructions)
+	} else {
+		b.WriteString(goalContractReminder)
+	}
+	b.WriteString("\n")
+	b.WriteString(activeGoalClose)
+	return b.String()
+}
+
+// goalContractReminder carries only what a turn must act on: the operative
+// call and the standing instruction not to stop at a plan. The judgement rules
+// stay in the full contract, which is restated whenever a fold removed it.
+const goalContractReminder = `Goal mode: keep working autonomously toward this goal under the task contract stated earlier in this conversation. Do not stop after describing a plan; execute the next useful step. End this turn by calling the update_goal tool with your disposition: continue (give the next concrete step in next_action), complete (only when fully done and verified), or blocked (only when the user can unblock).`
+
+const goalTaskContractInstructions = `Goal mode: pursue this goal autonomously. Treat the user's goal as a task contract:
+- Honor Context, Request, Output format, Constraints, and Checkpoint/Pause policy sections when present; otherwise infer a lightweight contract from the conversation and workspace.
+- Preserve scope and output format. Do not invent requirements or hide uncertainty; state assumptions when sensible defaults are enough to proceed.
+- Pause only when the next step involves an irreversible or externally visible operation, the requested scope has changed, or progress requires information only the user can provide. Otherwise keep working and report assumptions at the end.
+- Complete only when the concrete request is done, the output format and constraints are satisfied, and relevant verification was attempted or reported unavailable.
+
+Do not stop after describing a plan; execute the next useful step. End every goal-mode turn by calling the update_goal tool with your disposition: continue (work is ongoing — give the next concrete step in next_action), complete (only when fully done and verified), or blocked (only when the user can unblock). The host validates your claim and decides whether to continue automatically.`
+
+// MemoryQuickAddNote parses the "# <note>" memory shortcut. The space after
+// "#" is intentional: "#7", "#issue", and "#标题" are ordinary user prompts,
+// not memory writes. Multi-line input starting with "# " is NOT treated as a
+// quick-add note — it is almost certainly a Markdown heading in a structured
+// prompt (e.g. "# Context\n\n- file.go\n# Objective"). Only single-line input
+// may be a quick-add note.
+func MemoryQuickAddNote(input string) (note string, ok bool) {
+	trimmed := strings.TrimSpace(input)
+	if strings.Contains(trimmed, "\n") {
+		return "", false
+	}
+	if strings.HasPrefix(trimmed, "# ") || strings.HasPrefix(trimmed, "#\t") {
+		return strings.TrimSpace(trimmed[1:]), true
+	}
+	return "", false
+}
+
+// RememberCommandNote parses the explicit "/remember <note>" memory command.
+func RememberCommandNote(input string) (note string, ok bool) {
+	trimmed := strings.TrimSpace(input)
+	switch {
+	case trimmed == "/remember":
+		return "", true
+	case strings.HasPrefix(trimmed, "/remember ") || strings.HasPrefix(trimmed, "/remember\t"):
+		return strings.TrimSpace(trimmed[len("/remember"):]), true
+	default:
+		return "", false
+	}
+}
+
+type GoalCommandAction int
+
+const (
+	GoalCommandStatus GoalCommandAction = iota + 1
+	GoalCommandSet
+	GoalCommandClear
+	GoalCommandPause
+	GoalCommandResume
+)
+
+type GoalCommand struct {
+	Action               GoalCommandAction
+	Text                 string
+	Strict               bool
+	ResearchMode         GoalResearchMode
+	DeprecatedBudgetFlag bool
+}
+
+const GoalBudgetFlagDeprecatedNotice = "This /goal budget flag is deprecated and no longer changes the execution limit; Goal now runs continuously by default."
+
+func ParseGoalCommand(input string) (GoalCommand, bool) {
+	trimmed := strings.TrimSpace(input)
+	if trimmed != "/goal" && !strings.HasPrefix(trimmed, "/goal ") && !strings.HasPrefix(trimmed, "/goal\t") {
+		return GoalCommand{}, false
+	}
+	args := strings.TrimSpace(trimmed[len("/goal"):])
+	strict, researchMode, actionArgs := parseLeadingGoalFlags(args)
+	deprecatedBudgetFlag := researchMode != GoalResearchAuto
+
+	switch strings.ToLower(actionArgs) {
+	case "", "status":
+		return GoalCommand{Action: GoalCommandStatus, Strict: strict, ResearchMode: researchMode, DeprecatedBudgetFlag: deprecatedBudgetFlag}, true
+	case "clear", "off", "stop", "done":
+		return GoalCommand{Action: GoalCommandClear, Strict: strict, ResearchMode: researchMode, DeprecatedBudgetFlag: deprecatedBudgetFlag}, true
+	case "pause":
+		return GoalCommand{Action: GoalCommandPause, Strict: strict, ResearchMode: researchMode, DeprecatedBudgetFlag: deprecatedBudgetFlag}, true
+	case "resume":
+		return GoalCommand{Action: GoalCommandResume, Strict: strict, ResearchMode: researchMode, DeprecatedBudgetFlag: deprecatedBudgetFlag}, true
+	default:
+		return GoalCommand{Action: GoalCommandSet, Text: actionArgs, Strict: strict, ResearchMode: researchMode, DeprecatedBudgetFlag: deprecatedBudgetFlag}, true
+	}
+}
+
+func parseLeadingGoalFlags(args string) (bool, GoalResearchMode, string) {
+	strict := false
+	mode := GoalResearchAuto
+	rest := strings.TrimLeftFunc(args, unicode.IsSpace)
+	for rest != "" {
+		token, after := leadingGoalToken(rest)
+		switch strings.ToLower(token) {
+		case "--strict":
+			strict = true
+		case "--research", "--auto-research", "--deep":
+			mode = GoalResearchOn
+		case "--simple", "--no-research":
+			mode = GoalResearchOff
+		default:
+			return strict, mode, strings.TrimSpace(rest)
+		}
+		rest = strings.TrimLeftFunc(after, unicode.IsSpace)
+	}
+	return strict, mode, ""
+}
+
+func leadingGoalToken(s string) (string, string) {
+	for i, r := range s {
+		if unicode.IsSpace(r) {
+			return s[:i], s[i:]
+		}
+	}
+	return s, ""
+}
+
+// CustomCommand resolves a "/name args…" line against the loaded custom slash
+// commands, returning the rendered prompt to send (found=false when no command
+// matches). It does not apply the plan-mode marker — call Compose for that.
+func (c *Controller) CustomCommand(input string) (sent string, found bool) {
+	fields := strings.Fields(input)
+	if len(fields) == 0 {
+		return "", false
+	}
+	name := strings.TrimPrefix(fields[0], "/")
+	for _, cmd := range c.Commands() {
+		if cmd.Name == name {
+			return cmd.Render(fields[1:]), true
+		}
+	}
+	return "", false
+}
+
+// resolveSkillInvocation resolves a "/<name> args…" line to its live Skill and
+// task text. Submit uses RunAs to choose inline main-loop execution or isolated
+// subagent execution; RunSkill remains the compatibility renderer used by
+// management/existence checks and callers that explicitly need the body.
+func (c *Controller) resolveSkillInvocation(input string) (skill.Skill, string, bool) {
+	fields := strings.Fields(input)
+	if len(fields) == 0 {
+		return skill.Skill{}, "", false
+	}
+	name := strings.TrimPrefix(fields[0], "/")
+	sk, ok := c.skills.bySlashName(name)
+	if !ok {
+		return skill.Skill{}, "", false
+	}
+	return sk, strings.Join(fields[1:], " "), true
+}
+
+// RunSkill resolves a "/<name> args…" line against the loaded skills and
+// renders its body. Controller.Submit does not use this renderer for
+// runAs=subagent skills: direct slash invocation executes those through the
+// isolated SkillRunner instead.
+func (c *Controller) RunSkill(input string) (sent string, found bool) {
+	sent, _, found = c.RunSkillWithName(input)
+	return sent, found
+}
+
+// RunSkillWithName returns the resolved skill name with its rendered invocation.
+func (c *Controller) RunSkillWithName(input string) (sent, name string, found bool) {
+	sk, task, ok := c.resolveSkillInvocation(input)
+	if !ok {
+		return "", "", false
+	}
+	return c.skills.renderInvocation(sk, task), sk.Name, true
+}
+
+// MCPPrompt resolves a "/mcp__server__prompt args…" line: it maps the positional
+// args onto the prompt's declared arguments and fetches the rendered prompt from
+// the MCP server (an async prompts/get). found is false when no such prompt
+// exists; err carries a fetch failure. Honours ctx.
+func (c *Controller) MCPPrompt(ctx context.Context, input string) (sent string, found bool, err error) {
+	fields := strings.Fields(input)
+	if len(fields) == 0 {
+		return "", false, nil
+	}
+	name := strings.TrimPrefix(fields[0], "/")
+
+	prompts := c.mcp.prompts()
+	idx := -1
+	for i := range prompts {
+		if prompts[i].Name == name {
+			idx = i
+			break
+		}
+	}
+	if idx < 0 {
+		return "", false, nil
+	}
+
+	args := map[string]string{}
+	for i, a := range prompts[idx].Args {
+		if i+1 < len(fields) {
+			args[a.Name] = fields[i+1]
+		}
+	}
+	text, err := prompts[idx].Get(ctx, args)
+	if err != nil {
+		return "", true, err
+	}
+	return text, true, nil
+}

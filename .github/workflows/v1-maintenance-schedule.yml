@@ -1,0 +1,29 @@
+name: 1.x nightly monitoring
+
+# A schedule runs only from the default branch. These monitors measure the 1.x
+# desktop app, which lives on main-v2 alone, so their nightly runs are started
+# from here on that branch. Their push and pull_request gates run on main-v2 as
+# before.
+on:
+  schedule:
+    - cron: "17 3 * * *"
+    - cron: "43 4 * * *"
+  workflow_dispatch:
+
+permissions:
+  actions: write
+
+jobs:
+  dispatch:
+    runs-on: ubuntu-latest
+    steps:
+      - name: App memory screening
+        if: github.event_name == 'workflow_dispatch' || github.event.schedule == '17 3 * * *'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh workflow run app-memory.yml --repo "$GITHUB_REPOSITORY" --ref main-v2
+      - name: Diagnostic overhead monitoring
+        if: github.event_name == 'workflow_dispatch' || github.event.schedule == '43 4 * * *'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh workflow run diagnostic-overhead.yml --repo "$GITHUB_REPOSITORY" --ref main-v2

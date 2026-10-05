@@ -1,0 +1,3 @@
+prompt = "timings.py stores durations in milliseconds today; migrate the whole package to seconds as floats — budget.py and alerts.py consume the same constants and must move in the same change."
+class = "ebm-neutral"
+timeout_sec = 300

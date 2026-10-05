@@ -1,0 +1,5 @@
+example: chinese-symbol
+repeated unit: "嗯" (3 bytes)
+repetitions generated before the guard tripped: 649
+repeated block before tripping/stripping: 1947 bytes
+wasted tokens (ceil(bytes/4)): 487

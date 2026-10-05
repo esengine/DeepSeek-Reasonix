@@ -1,0 +1,30 @@
+name: Feature request
+description: Suggest an idea or improvement
+title: "[Feature]: "
+labels: ["enhancement"]
+body:
+  - type: dropdown
+    id: version-line
+    attributes:
+      label: Version line
+      description: Which line is this for?
+      options:
+        - "2.x — Reasonix Studio, studio branch (active development)"
+        - "1.x — main-v2 branch (maintenance / stable)"
+        - "0.x — legacy TypeScript (maintenance only)"
+    validations:
+      required: true
+  - type: textarea
+    id: problem
+    attributes:
+      label: What problem does this solve?
+      description: What are you trying to do, and what gets in the way today?
+    validations:
+      required: true
+  - type: textarea
+    id: proposal
+    attributes:
+      label: Proposed solution
+      description: How would you like it to work?
+    validations:
+      required: false

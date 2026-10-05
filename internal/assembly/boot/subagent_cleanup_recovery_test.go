@@ -1,0 +1,93 @@
+package boot
+
+import (
+	"os"
+	"path/filepath"
+	"reasonix/internal/state/sessionstore"
+	"testing"
+
+	"reasonix/internal/contract/tool"
+	"reasonix/internal/runtime/delegation"
+)
+
+func prepareRunningSubagent(t *testing.T, sessionDir string) string {
+	t.Helper()
+	store := delegation.NewSubagentStore(filepath.Join(sessionDir, "subagents"))
+	spec := delegation.SubagentSpec{ExecutionID: "exec-test",
+		Kind:          "task",
+		Name:          "task",
+		WorkspaceRoot: robustTempDir(t),
+		ParentSession: "parent-session",
+		SystemPrompt:  "sys",
+		Registry:      tool.NewRegistry(),
+		Model:         "base-model",
+	}
+	run, err := store.PrepareFresh(spec)
+	if err != nil {
+		t.Fatalf("PrepareFresh: %v", err)
+	}
+	if err := store.MarkRunning(run); err != nil {
+		t.Fatalf("MarkRunning: %v", err)
+	}
+	ref := run.Ref
+	run.Release()
+	return ref
+}
+
+func requireSubagentStatus(t *testing.T, sessionDir, ref string, want sessionstore.SubagentStatus) {
+	t.Helper()
+	meta, err := delegation.NewSubagentStore(filepath.Join(sessionDir, "subagents")).LoadMeta(ref)
+	if err != nil {
+		t.Fatalf("LoadMeta(%s): %v", ref, err)
+	}
+	if meta.Status != want {
+		t.Fatalf("status = %q, want %q", meta.Status, want)
+	}
+}
+
+func TestNewSubagentStoreCleansStaleRunningOnEveryBuild(t *testing.T) {
+	sessionDir := robustTempDir(t)
+
+	firstRef := prepareRunningSubagent(t, sessionDir)
+	if _, err := newSubagentStore(sessionDir, nil); err != nil {
+		t.Fatalf("newSubagentStore (first): %v", err)
+	}
+	requireSubagentStatus(t, sessionDir, firstRef, sessionstore.SubagentInterrupted)
+
+	secondRef := prepareRunningSubagent(t, sessionDir)
+	if _, err := newSubagentStore(sessionDir, nil); err != nil {
+		t.Fatalf("newSubagentStore (second): %v", err)
+	}
+	requireSubagentStatus(t, sessionDir, secondRef, sessionstore.SubagentInterrupted)
+}
+
+func TestNewSubagentStoreParentProbeDefersThenRecovers(t *testing.T) {
+	sessionDir := robustTempDir(t)
+	ref := prepareRunningSubagent(t, sessionDir)
+	parentPath := filepath.Join(sessionDir, "parent-session.jsonl")
+
+	if _, err := newSubagentStore(sessionDir, func(path string) bool {
+		return filepath.Clean(path) == filepath.Clean(parentPath)
+	}); err != nil {
+		t.Fatalf("newSubagentStore (live parent): %v", err)
+	}
+	requireSubagentStatus(t, sessionDir, ref, sessionstore.SubagentRunning)
+
+	if _, err := newSubagentStore(sessionDir, func(string) bool { return false }); err != nil {
+		t.Fatalf("newSubagentStore (dead parent): %v", err)
+	}
+	requireSubagentStatus(t, sessionDir, ref, sessionstore.SubagentInterrupted)
+}
+
+func TestNewSubagentStoreNeverCachesCleanupError(t *testing.T) {
+	sessionDir := robustTempDir(t)
+	if err := os.WriteFile(filepath.Join(sessionDir, "subagents"), []byte("not a directory"), 0o600); err != nil {
+		t.Fatalf("WriteFile: %v", err)
+	}
+
+	for attempt := 1; attempt <= 2; attempt++ {
+		if _, err := newSubagentStore(sessionDir, nil); err == nil {
+			t.Fatalf("newSubagentStore attempt %d unexpectedly succeeded", attempt)
+		}
+	}
+}

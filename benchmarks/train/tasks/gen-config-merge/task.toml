@@ -1,0 +1,25 @@
+prompt = '''
+merger.py contains three public functions — merge_config, merge_settings, and
+merge_profile — that are near-identical copies of the same nested-dict merge.
+The copies have drifted, so callers can get different results depending on
+which function they call.
+
+Refactor merger.py so the three public functions share ONE implementation:
+extract the recursive deep-merge logic into a single private helper and make
+each public function delegate to it.
+
+Keep the behaviour documented in the module docstring for every function:
+
+- nested dicts are merged recursively when both the base value and the
+  override value are dicts;
+- on conflict the override wins, including when the override value is
+  None or 0;
+- a non-dict override replaces the base value entirely;
+- a key present only in the override is added;
+- neither the base nor the override input is mutated.
+
+Do not change the public function names or their signatures, and do not add
+new dependencies or files.
+'''
+class = "refactor"
+timeout_sec = 300

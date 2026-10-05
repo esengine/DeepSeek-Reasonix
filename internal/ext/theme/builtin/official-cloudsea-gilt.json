@@ -1,0 +1,60 @@
+{
+  "schemaVersion": 1,
+  "id": "official-cloudsea-gilt",
+  "name": "Cloudsea Gilt",
+  "author": "Reasonix Contributors",
+  "description": "A line of gilt above the cloud sea: cool blue stone with warm gold accents, sunlit cloudtops by day and a night flight's window by dark.",
+  "license": "MIT",
+  "baseStyle": "cloudsea",
+  "tokens": {
+    "light": {
+      "bg": "#E6EBF3",
+      "bgSoft": "#F2F5FA",
+      "bgElev": "#FFFFFF",
+      "panel": "#FFFFFF",
+      "border": "#BFC9D9",
+      "borderSoft": "#D7DFEA",
+      "fg": "#151B24",
+      "fgDim": "#4E5766",
+      "fgFaint": "#616976",
+      "accent": "#9C6D0C",
+      "accentFg": "#FFFFFF",
+      "float": "#FFFFFF",
+      "floatHi": "#FFFFFF",
+      "codeBg": "#ECF0F6",
+      "sunkBg": "#E6EBF3",
+      "synKeyword": "#8E630B",
+      "synString": "#22775B",
+      "synNumber": "#3E7722",
+      "synFunction": "#962C95"
+    },
+    "dark": {
+      "bg": "#080B12",
+      "bgSoft": "#111620",
+      "bgElev": "#171D28",
+      "panel": "#1B2230",
+      "border": "#333D4D",
+      "borderSoft": "#252E3C",
+      "fg": "#E8EEF6",
+      "fgDim": "#9BA6B6",
+      "fgFaint": "#808B98",
+      "accent": "#E5BA72",
+      "accentFg": "#241A08",
+      "float": "#1B2230",
+      "floatHi": "#171D28",
+      "codeBg": "#0C1019",
+      "sunkBg": "#080B12",
+      "synKeyword": "#E5BA72",
+      "synString": "#90DFC2",
+      "synNumber": "#AEDF90",
+      "synFunction": "#DC90DF"
+    }
+  },
+  "sky": {
+    "ray": "rgba(255,216,142,.55)",
+    "cloud": "255,240,212",
+    "cloudLit": "242,206,140",
+    "rayAlpha": 0.85,
+    "cloudAlpha": 0.4
+  }
+}

@@ -1,0 +1,3 @@
+prompt = "Write a Go command-line tool called wordfreq in this directory. It reads the text file named by its argument, counts words split on whitespace, case-insensitively. By default it prints the top 10 by descending count, one `word count` per line separated by a single space. Support -n N to change how many, and -json to emit a JSON array whose elements look like {\"word\":\"the\",\"count\":5}. Put package main at the repository root and use the module name example.com/wordfreq. `go build ./...` and `go test ./...` must both pass, and write your own tests covering the counting logic."
+class = "codegen"
+timeout_sec = 600

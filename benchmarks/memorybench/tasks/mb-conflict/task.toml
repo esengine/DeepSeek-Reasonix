@@ -1,0 +1,5 @@
+prompt = "Write the deploy region for this project (just the region string) into answer.txt."
+class = "conflict"
+max_steps = 8
+timeout_sec = 180
+memory_markers = ["MEMKEY-CONF2P"]

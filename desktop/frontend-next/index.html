@@ -1,0 +1,197 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <link rel="preconnect" href="https://id.reasonix.io" crossorigin />
+    <link rel="preconnect" href="https://remote.reasonix.io" crossorigin />
+    <link rel="dns-prefetch" href="//id.reasonix.io" />
+    <link rel="dns-prefetch" href="//remote.reasonix.io" />
+    <title>Reasonix Studio</title>
+    <script>
+      // The boot screen below is painted by this file, before the bundle that
+      // would otherwise decide these two exists. Mirrors App.tsx's "rx-theme"
+      // and i18n.resolve — a wrong guess here only mis-tints one frame.
+      (function () {
+        try {
+          var t = localStorage.getItem("rx-theme");
+          if (t === "dark" || t === "light") document.documentElement.dataset.theme = t;
+          var p = (localStorage.getItem("rx-lang") || "").trim().toLowerCase();
+          var zh = p === "zh" || (p !== "en" && /^(zh|yue|cmn)/i.test(navigator.language || ""));
+          document.documentElement.lang = zh ? "zh-CN" : "en";
+        } catch (e) {}
+      })();
+
+      // A shared serve link carries its credential in the fragment, which the
+      // browser never sends. Trading it for the cookie has to happen before the
+      // bundle makes its first request, and the fragment is wiped from the
+      // address bar and history on the way past so it cannot be copied on.
+      // A scanned pairing link carries a one-time code the same way.
+      window.__rxAuth = (function () {
+        try {
+          var f = new URLSearchParams(window.location.hash.slice(1));
+          var token = f.get("token");
+          var pair = f.get("pair");
+          if (!token && !pair) return Promise.resolve();
+          f.delete("token");
+          f.delete("pair");
+          var rest = f.toString();
+          window.history.replaceState(null, "", window.location.pathname + window.location.search + (rest ? "#" + rest : ""));
+          return fetch(pair ? "/pair" : "/auth/token", {
+            method: "POST",
+            headers: { "content-type": "application/json" },
+            body: JSON.stringify(pair ? { code: pair } : { token: token }),
+          }).then(function () {});
+        } catch (e) {
+          return Promise.resolve();
+        }
+      })();
+      if (window.__rxAuth) {
+        var native = window.fetch.bind(window);
+        window.fetch = function () {
+          var args = arguments;
+          return window.__rxAuth.then(function () { return native.apply(null, args); });
+        };
+      }
+
+      // A cloud connection otherwise waits for the whole application bundle
+      // before its first cross-origin round trip. Start the one-time grant as
+      // soon as the HTML is parsed so it overlaps JS/CSS download and parse.
+      window.__rxRemoteBootstrap = (function () {
+        try {
+          var device = new URLSearchParams(window.location.search).get("device");
+          if (!device) return null;
+          performance.mark("reasonix:remote:start");
+          return fetch("https://id.reasonix.io/me/remote-grants", {
+            method: "POST",
+            credentials: "include",
+            headers: { "content-type": "application/json" },
+            body: JSON.stringify({ targetDeviceId: device, scopes: ["desktop"] }),
+          });
+        } catch (e) {
+          return null;
+        }
+      })();
+    </script>
+    <style>
+      /* The boot screen owns the window from the first paint until the kernel
+         answers, so it carries its own palette: tokens.css is a bundled import
+         and in dev it does not exist yet. It is a night sky in either theme,
+         because a meteor is only legible against one. */
+      :root { --boot-bg: #07080c; --boot-ink: #ece6da; --boot-dim: #8a857b; --boot-gilt: #e9b456 }
+      /* The app's own page, ink and accent for each theme: leaving settles onto
+         them, so the last step changes almost no light. */
+      :root { --land: oklch(95.8% .0092 85); --land-ink: oklch(30.5% .023 85); --land-gilt: #a6680c }
+      @media (prefers-color-scheme: dark) {
+        :root:not([data-theme="light"]) { --land: oklch(14.4% .015 255); --land-ink: #ece6da; --land-gilt: #dda144 }
+      }
+      :root[data-theme="dark"] { --land: oklch(14.4% .015 255); --land-ink: #ece6da; --land-gilt: #dda144 }
+      /* No background on the root: with html bare, the body's background is the
+         one promoted to the canvas, and the canvas is what a theme's picture
+         (body::before, z-index -2) is painted over. */
+      html, body { margin: 0 }
+      .boot {
+        position: fixed; inset: 0; z-index: 90; overflow: hidden;
+        background: var(--boot-bg);
+        background-image: radial-gradient(120% 90% at 50% 46%, #12141d 0%, var(--boot-bg) 64%);
+      }
+      /* Leaving settles in two steps: the app's page floods the sky while the
+         wordmark takes the app's ink, then the wordmark and the page lift off
+         together onto an app of the same colour. */
+      .boot[data-leave] { pointer-events: none; opacity: 0; transition: opacity .5s ease 1.05s }
+      .bstage::before {
+        content: ""; position: absolute; inset: 0; z-index: 1; pointer-events: none;
+        background: var(--land); opacity: 0;
+      }
+      .boot[data-leave] .bstage::before { opacity: 1; transition: opacity .9s cubic-bezier(.45, 0, .55, 1) }
+      .boot::after {
+        content: ""; position: absolute; inset: 0; pointer-events: none;
+        background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='120' height='120'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='.9' numOctaves='3' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='120' height='120' filter='url(%23n)'/%3E%3C/svg%3E");
+        opacity: .04; mix-blend-mode: overlay;
+      }
+      .bstage { position: absolute; inset: 0; display: grid; place-items: center }
+      .bfx { position: absolute; inset: 0; width: 100%; height: 100% }
+      .boot[data-skipped] .bfx { opacity: 0; transition: opacity .3s }
+      .bmid { position: relative; display: grid; justify-items: center; gap: 22px; margin-top: -4vh; z-index: 2 }
+      .boot[data-leave] .bmid {
+        opacity: 0; transform: scale(1.03);
+        transition: opacity .5s ease .9s, transform 1.4s cubic-bezier(.4, 0, .2, 1);
+      }
+      /* The R is legible on both grounds and holds still; the other letters dip
+         while the ground passes through grey and come back in the app's ink. */
+      .boot[data-leave] .bmark .bl:not(.br) { animation: bootink .9s linear both }
+      @keyframes bootink {
+        0% { opacity: 1; fill: var(--boot-ink) }
+        40%, 55% { opacity: .15; fill: var(--boot-ink) }
+        56% { opacity: .15; fill: var(--land-ink) }
+        100% { opacity: 1; fill: var(--land-ink) }
+      }
+      .boot[data-leave] .bmark .br { fill: var(--land-gilt); transition: fill .9s cubic-bezier(.45, 0, .55, 1) }
+      .boot[data-leave] .bshine, .boot[data-leave] .bline, .boot[data-leave] .bsteps { opacity: 0; transition: opacity .3s ease }
+      .bmark { width: min(480px, 64vw); height: auto; color: var(--boot-ink); overflow: visible }
+      /* Hidden until the intro script takes them. The late fallback is for a
+         bundle that never runs: the window still says what it is. */
+      .bmark .bl {
+        fill: currentColor; opacity: 0; transform-box: fill-box; transform-origin: center;
+        animation: bootfallback .5s ease 3.2s both;
+      }
+      .bmark .br { fill: var(--boot-gilt) }
+      .boot[data-intro] .bmark .bl { animation: none }
+      @keyframes bootfallback { to { opacity: 1 } }
+      .bshards { fill: var(--boot-gilt) }
+      .bshards > g { transform-box: fill-box; transform-origin: center }
+      .bshine { pointer-events: none }
+      .bline {
+        margin: 0; color: var(--boot-dim); letter-spacing: .05em;
+        font: 400 11.5px/1 var(--ui, system-ui, -apple-system, "Segoe UI", "Microsoft YaHei UI", sans-serif);
+        opacity: 0; transition: opacity .6s ease;
+      }
+      .boot[data-slow] .bline { opacity: .85 }
+      .bsteps { display: flex; gap: 20px; margin-top: 6px; opacity: 0; transition: opacity .6s ease }
+      .boot[data-wait] .bsteps { opacity: 1 }
+      .bsteps i {
+        width: 7px; height: 7px; transform: rotate(45deg); box-sizing: border-box;
+        border: 1px solid var(--boot-dim); opacity: .55;
+        transition: background-color .5s ease, border-color .5s ease, box-shadow .5s ease, opacity .5s ease;
+      }
+      .bsteps i[data-lit] {
+        background: var(--boot-gilt); border-color: var(--boot-gilt); opacity: 1;
+        box-shadow: 0 0 10px rgb(233 180 86 / .55);
+      }
+      .bsteps i[data-now] { animation: bstep 1.6s ease-in-out infinite }
+      @keyframes bstep { 0%, 100% { opacity: .35 } 50% { opacity: 1; border-color: var(--boot-gilt) } }
+      .bline [data-en] { display: none }
+      .bline [data-at] { display: none }
+      .boot:not([data-step="2"]) .bline [data-at="1"], .boot[data-step="2"] .bline [data-at="2"] { display: inline }
+      .bline [data-zh] { letter-spacing: 0 }
+      :root:lang(en) .bline [data-en] { display: inline }
+      :root:lang(en) .bline [data-zh] { display: none }
+      @media (prefers-reduced-motion: reduce) {
+        .boot[data-leave] { transition: opacity .3s }
+        .boot[data-leave] .bstage::before { opacity: 0; transition: none }
+        .boot[data-leave] .bmark .bl:not(.br) { animation: none }
+        .bsteps i[data-now] { animation: none }
+        .boot[data-leave] .bmid { transform: none; filter: none }
+      }
+    </style>
+  </head>
+  <body>
+    <div id="boot" class="boot">
+      <div class="bstage">
+        <canvas class="bfx" aria-hidden="true"></canvas>
+        <div class="bmid">
+          <svg class="bmark" viewBox="262 70 1178 252" role="img" aria-label="Reasonix"><defs><linearGradient id="bsh" gradientUnits="userSpaceOnUse" x1="0" y1="60" x2="220" y2="330"><stop offset="0" stop-color="#fff6de" stop-opacity="0"/><stop offset=".5" stop-color="#fff6de" stop-opacity=".85"/><stop offset="1" stop-color="#fff6de" stop-opacity="0"/><animateTransform class="bsweep" attributeName="gradientTransform" type="translate" values="-300 0;1500 0;1500 0" keyTimes="0;.62;1" dur="3.2s" begin="indefinite" repeatCount="indefinite"/></linearGradient></defs><g class="bl br" style="--i:0">
+    <path d="M369.75,185.3c2.09,1.76,4.98,2.41,7.95,1.06,1.18-.54,1.96-1.91,1.47-3.25-3.92-10.71-14.97-18.54-19.38-12.48-.54.74-.52,1.7-.11,2.29.32.47.97.57,1.82.4,2.68-.56,6.02,1.31,5.7,4.3-.33,3.12.3,5.79,2.56,7.69Z"/>
+    <path d="M434.28,204.78c10.12-11.32,16.46-25.01,18.67-40.07,5.04-32.93-11.31-63.01-42.11-75.75-10.83-4.35-21.95-6.2-33.76-6.09l-114.5.03v219.42s56.29-.04,56.29-.04v-77.17c-1.86-.69-3.15-1.27-3.15-1.27-12.24-5.59-21.6-15.29-26.74-27.44-6.56-15.51-4.54-32.9,5.78-46.12,10.28-12.84,24.31-16.92,40.41-14.67,5.95.83,12.3-6.15,24.4-4.81.81.09,1.63.7,1.71,1.18.28,1.65-4.4,2.54-4.4,7.05,0,1.9.85,4.1,2.65,5.36,6.17,4.33,11.51,9.19,17.1,14.22,2.72,2.44,11.93,9.31,14.27,3.72,1.37-3.26,2.27-6.68,3.18-10.15.45-1.72-.5-2.74-1.89-3.56-9.5-5.63-13.08-17.35-9.37-27.74.36-1,1.29-1.49,2.08-1.52,3.19-.14,1.49,5.78,9.38,8.21,7.49,2.31,7.71,8.53,11.35,6.05,8.48-5.78,11.54-1.05,19.41-8.46.81-.76,2.2-.82,3.04-.23.52.36.97,1.29.93,2.38-.23,6.26-2.67,12.24-6.95,16.84-8.09,8.69-14.89,4.53-15.33,10.62-1.29,17.86-7.13,35.69-19.81,48.66-.41.42-.65,1.01-.58,1.41.07.42.57.83,1.12,1.01l10.68,3.63c1.51.51,2.6,1.87,2.41,3.31-.17,1.26-1.17,2.37-2.61,2.85-7.84,2.59-16.26,2.14-24.24-.27-10.56,8.89-23.54,13.48-37.68,12.93l20.53,28.34,33.49,45.73,66.85-.09-56.68-76.53c13.19-3.89,24.78-10.87,34.07-20.94Z"/>
+    <circle cx="362.14" cy="177.19" r="1.58"/>
+    <path d="M300.31,167.85c-3.53.43-5.65,2.96-5.31,6.74,2.39,26.35,26.7,47.92,53.94,42.72,5.8-1.11,11.08-3.41,15.36-7.74-9.27-7.98-13.79-16.12-21.41-24.13-10.91-11.47-26.43-19.54-42.58-17.59Z"/>
+  </g><path class="bl" style="--i:1" d="M573.23,258.02c11.08,4.99,20.6,11.87,31.28,18.31-14.54,22.26-39.3,32.78-65.14,31.91-42.29-1.42-73.12-35.5-70.7-77.31,2.1-36.29,28.66-64.56,65.17-67.92,26.31-2.42,52.01,8.19,66.02,30.99,9.52,15.5,11.55,33.39,9.76,50.92l-101,.13c1.4,14.77,13.51,25.01,25.92,27.74,14.72,3.24,29.02-.82,38.69-14.77ZM572.56,219.47c-4.12-16.52-17.68-24.4-32.5-24.13-13.74.25-27.5,9.07-30.5,24.11l63,.02Z"/><path class="bl" style="--i:2" d="M767.26,303.68c-12.37,1.71-24.96.46-38.13.63l-1.23-16.27c-12.87,14.9-29.84,21.97-49.07,19.87-24.58-2.69-44.41-19.38-53.2-42.6-7.32-19.32-6.99-40.86.81-60.12,9.5-23.46,30.72-40.21,55.73-42.02,18.41-1.33,34.33,4.84,45.96,18.54l1.13-15.37,37.63-.22.36,137.56ZM729.95,235.53c0-19.82-16.06-35.88-35.88-35.88s-35.88,16.06-35.88,35.88,16.06,35.88,35.88,35.88,35.88-16.06,35.88-35.88Z"/><path class="bl" style="--i:3" d="M873.65,302.86c-30.01,11.52-78.69,6.96-94.37-27.63l29.88-14.4c4.49,1.96,5.5,6.8,9.44,9.49,16.43,11.17,43.99,9.75,44.36-4.61.12-4.72-3.46-8.89-8.58-10.29l-36.51-9.95c-11.77-3.21-22.59-9.81-28.13-21.2-10.25-21.06.12-45.53,21.63-54.96,29.01-12.72,77.53-8.27,89.7,25.13l-29.06,12.62c-10.47-12.8-27.66-16.84-42.64-10.42-3.51,1.5-5.54,6.03-5.28,8.81.35,3.7,3.39,7.71,7.59,8.86l40.46,11.09c9.77,2.68,19.02,7.82,24.29,16.77,13.52,22.96,2.31,51.05-22.78,60.69Z"/><path class="bl" style="--i:4" d="M1058.84,235.62c0,40.74-33.02,73.76-73.76,73.76s-73.76-33.02-73.76-73.76,33.02-73.76,73.76-73.76,73.76,33.02,73.76,73.76ZM1021.17,235.57c0-19.97-16.19-36.16-36.16-36.16s-36.16,16.19-36.16,36.16,16.19,36.16,36.16,36.16,36.16-16.19,36.16-36.16Z"/><path class="bl" style="--i:5" d="M1144.36,198.98c-16.4-.48-30.2,10.42-30.32,26.41l-.59,78.88-38.91-.18.06-137.83,38.15.35c.41,5.66-1.03,9.97,1.45,15.75,19.54-26.51,63.34-25.07,82.95-1.16,9.2,11.23,13.46,25.62,13.45,40.38l-.06,82.62-38.94.14-.69-79.28c-.13-14.92-10.82-25.64-26.54-26.1Z"/><rect class="bl" style="--i:6" x="1230.35" y="165.94" width="38.82" height="138.32"/><circle class="bl" style="--i:6" cx="1250.95" cy="124.55" r="23.88"/><path class="bl" style="--i:7" d="M1430.09,303.82l-44.84.51-29.9-41.82-30.52,41.81-43.29-.52,50.71-70.03-48.12-67.06c16.29-1.81,30.31-.14,45.42-.02l26.06,38.81,27.14-39.29c14.85-.38,28.79-.61,44.5.69l-47.96,66.65,50.79,70.28Z"/><g class="bshine" fill="url(#bsh)"></g></svg>
+          <div class="bsteps" aria-hidden="true"><i></i><i></i><i></i></div>
+          <p class="bline" role="status"><span data-at="1"><span data-zh>正在连接内核…</span><span data-en>Connecting to the kernel…</span></span><span data-at="2"><span data-zh>正在准备工作区…</span><span data-en>Preparing the workspace…</span></span></p>
+        </div>
+      </div>
+    </div>
+    <div id="root"></div>
+    <script type="module" src="/src/main.tsx"></script>
+  </body>
+</html>

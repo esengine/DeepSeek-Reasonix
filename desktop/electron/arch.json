@@ -1,0 +1,8 @@
+{
+  "_": "electron-builder's arch vocabulary on the left, the release vocabulary on the right. The right-hand side is GOARCH because the updater runs inside a Go binary and asks runtime.GOARCH who it is: a manifest keyed any other way describes a platform that never comes asking. An arch missing here fails the build rather than shipping a name the manifest cannot resolve.",
+  "map": {
+    "x64": "amd64",
+    "arm64": "arm64",
+    "universal": "universal"
+  }
+}

@@ -1,0 +1,35 @@
+name: Close linked issues
+
+# GitHub closes an issue named by "Fixes #N" only when the pull request merges
+# into the default branch. This does the same for the 1.x line. It reads the
+# merged pull request's description and never checks out its code.
+on:
+  pull_request_target:
+    types: [closed]
+    branches: [main-v2]
+
+permissions:
+  issues: write
+
+jobs:
+  close:
+    if: github.event.pull_request.merged == true
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/github-script@3a2844b7e9c422d3c10d287c895573f7108da1b3 # v9
+        with:
+          script: |
+            const pr = context.payload.pull_request;
+            const { owner, repo } = context.repo;
+            // GitHub's own closing-keyword grammar, applied to this repository's issues only.
+            const keyword = /\b(?:close[sd]?|fix(?:e[sd])?|resolve[sd]?)\s*:?\s+#(\d+)\b/gi;
+            const numbers = [...new Set([...(pr.body ?? '').matchAll(keyword)].map((m) => Number(m[1])))];
+            const sha = (pr.merge_commit_sha ?? '').slice(0, 9);
+            for (const issue_number of numbers) {
+              const { data } = await github.rest.issues.get({ owner, repo, issue_number });
+              if (data.pull_request || data.state !== 'open') continue;
+              await github.rest.issues.createComment({ owner, repo, issue_number,
+                body: `Fixed on the 1.x line by #${pr.number} (${sha}). It ships in the next 1.x release.` });
+              await github.rest.issues.update({ owner, repo, issue_number, state: 'closed', state_reason: 'completed' });
+              core.info(`closed #${issue_number}`);
+            }

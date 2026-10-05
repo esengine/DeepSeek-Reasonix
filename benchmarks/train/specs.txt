@@ -1,0 +1,12 @@
+gen-interval-merge|atomic-bugfix|merging overlapping half-open intervals
+gen-lru-evict|atomic-bugfix|an LRU cache that evicts the wrong entry
+gen-csv-quotes|multi-file-bugfix|a CSV reader mishandling quoted fields that contain the separator
+gen-money-round|multi-file-bugfix|half-even rounding applied inconsistently across two modules
+gen-retry-cap|failing-test-diagnosis|a retry helper whose exponential backoff overruns its cap
+gen-topo-cycle|failing-test-diagnosis|a topological sort that loops on a cycle instead of reporting it
+gen-semver-cmp|codegen|a semantic-version comparator including pre-release ordering
+gen-path-normalize|codegen|a POSIX path normalizer handling dot, dot-dot and redundant separators
+gen-config-merge|refactor|three copies of nested-dict merging collapsed into one helper
+gen-validator-split|refactor|separating validation from I/O in a record loader
+gen-ratelimit-window|api-integration|a sliding-window rate limiter driven by an injected clock
+gen-audit-imports|read-only-output|reporting which modules import which, changing nothing

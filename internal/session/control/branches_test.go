@@ -1,0 +1,308 @@
+package control
+
+import (
+	"context"
+	"path/filepath"
+	"reasonix/internal/state/sessionstore"
+	"strings"
+	"testing"
+
+	"reasonix/internal/base/testenv"
+	"reasonix/internal/contract/event"
+	"reasonix/internal/contract/provider"
+	"reasonix/internal/contract/tool"
+	"reasonix/internal/runtime/agent"
+	"reasonix/internal/runtime/coordinator"
+)
+
+func TestBranchAndSwitch(t *testing.T) {
+	dir := testenv.TempDir(t)
+	exec := agent.New(nil, nil, sessionstore.NewSession("sys"), agent.Options{}, event.Discard)
+	exec.Session().Add(provider.Message{Role: provider.RoleUser, Content: "root prompt"})
+	c := New(Options{Executor: exec, SessionDir: dir, Label: "test"})
+	c.SetSessionPath(sessionstore.NewSessionPath(dir, "test"))
+	if err := c.Snapshot(); err != nil {
+		t.Fatal(err)
+	}
+	rootPath := c.SessionPath()
+	rootID := sessionstore.BranchID(rootPath)
+
+	if _, err := c.Branch("try something"); err != nil {
+		t.Fatal(err)
+	}
+	childPath := c.SessionPath()
+	if childPath == rootPath {
+		t.Fatal("branch should switch to a new session path")
+	}
+	meta, ok, err := sessionstore.LoadBranchMeta(childPath)
+	if err != nil || !ok {
+		t.Fatalf("load child meta ok=%v err=%v", ok, err)
+	}
+	if meta.ParentID != rootID || meta.Name != "try something" {
+		t.Fatalf("child meta = %+v, want parent %q and name", meta, rootID)
+	}
+	// Branch must seed the listing-only sidecar fields at creation, so the
+	// sidebar never has to decode the new .jsonl to show its turn count/preview.
+	if meta.Turns != 1 || meta.Preview != "root prompt" {
+		t.Fatalf("child meta should carry turns/preview from creation: turns=%d preview=%q", meta.Turns, meta.Preview)
+	}
+
+	if _, err := c.SwitchBranch(rootID); err != nil {
+		t.Fatal(err)
+	}
+	if c.SessionPath() != rootPath {
+		t.Fatalf("session path = %q, want %q", c.SessionPath(), rootPath)
+	}
+
+	tree := c.BranchTreeText()
+	if !strings.Contains(tree, shortBranchID(rootID)) || !strings.Contains(tree, "try something") {
+		t.Fatalf("tree missing expected branches:\n%s", tree)
+	}
+}
+
+func TestSwitchBranchRejectsCleanupPending(t *testing.T) {
+	dir := testenv.TempDir(t)
+	exec := agent.New(nil, nil, sessionstore.NewSession("sys"), agent.Options{}, event.Discard)
+	exec.Session().Add(provider.Message{Role: provider.RoleUser, Content: "root prompt"})
+	c := New(Options{Executor: exec, SessionDir: dir, Label: "test"})
+	c.SetSessionPath(filepath.Join(dir, "root.jsonl"))
+	if err := c.Snapshot(); err != nil {
+		t.Fatal(err)
+	}
+	rootPath := c.SessionPath()
+	rootID := sessionstore.BranchID(rootPath)
+
+	if _, err := c.Branch("pending experiment"); err != nil {
+		t.Fatal(err)
+	}
+	pendingPath := c.SessionPath()
+	pendingID := sessionstore.BranchID(pendingPath)
+	if _, err := c.SwitchBranch(rootID); err != nil {
+		t.Fatal(err)
+	}
+	if err := sessionstore.MarkCleanupPending(pendingPath, "delete"); err != nil {
+		t.Fatal(err)
+	}
+
+	tree := c.BranchTreeText()
+	if strings.Contains(tree, "pending experiment") || strings.Contains(tree, shortBranchID(pendingID)) {
+		t.Fatalf("tree leaked cleanup-pending branch:\n%s", tree)
+	}
+	if _, err := c.SwitchBranch(pendingID); err == nil {
+		t.Fatal("SwitchBranch cleanup-pending id error = nil, want not found")
+	}
+	if c.SessionPath() != rootPath {
+		t.Fatalf("session path changed to %q, want %q", c.SessionPath(), rootPath)
+	}
+	if _, err := c.SwitchBranch(pendingPath); err == nil {
+		t.Fatal("SwitchBranch cleanup-pending path error = nil, want not found")
+	}
+	if c.SessionPath() != rootPath {
+		t.Fatalf("session path changed to %q, want %q", c.SessionPath(), rootPath)
+	}
+}
+
+func TestBranchResetsTwoModelPlannerContext(t *testing.T) {
+	dir := testenv.TempDir(t)
+	planner := &recordingProvider{name: "planner", streams: [][]provider.Chunk{
+		textTurn("OLD PLAN: inspect alpha.go"),
+		textTurn("BRANCH PLAN: inspect beta.go"),
+	}}
+	execProv := &recordingProvider{name: "executor", streams: [][]provider.Chunk{
+		textTurn("old done"),
+		textTurn("branch done"),
+	}}
+	exec := agent.New(execProv, tool.NewRegistry(), sessionstore.NewSession("exec sys"), agent.Options{}, event.Discard)
+	coord := coordinator.NewCoordinator(planner, sessionstore.NewSession("planner sys"), nil, tool.NewRegistry(), agent.Options{}, exec, 0, event.Discard, nil)
+	c := New(Options{Runner: coord, Executor: exec, SystemPrompt: "exec sys", SessionDir: dir, SessionPath: filepath.Join(dir, "root.jsonl"), Label: "test"})
+
+	if err := c.Run(context.Background(), "old task alpha"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := c.Branch("child"); err != nil {
+		t.Fatal(err)
+	}
+	if err := c.Run(context.Background(), "branch task beta"); err != nil {
+		t.Fatal(err)
+	}
+
+	if len(planner.requests) != 2 {
+		t.Fatalf("planner requests = %d, want 2", len(planner.requests))
+	}
+	second := requestMessagesText(planner.requests[1].Messages)
+	if strings.Contains(second, "old task alpha") || strings.Contains(second, "OLD PLAN") {
+		t.Fatalf("branch planner request leaked previous session context:\n%s", second)
+	}
+	if !strings.Contains(second, "branch task beta") {
+		t.Fatalf("branch planner request missing current task:\n%s", second)
+	}
+}
+
+func TestSwitchBranchResetsTwoModelPlannerContext(t *testing.T) {
+	dir := testenv.TempDir(t)
+	planner := &recordingProvider{name: "planner", streams: [][]provider.Chunk{
+		textTurn("ROOT PLAN: inspect alpha.go"),
+		textTurn("CHILD PLAN: inspect beta.go"),
+		textTurn("ROOT AGAIN PLAN: inspect gamma.go"),
+	}}
+	execProv := &recordingProvider{name: "executor", streams: [][]provider.Chunk{
+		textTurn("root done"),
+		textTurn("child done"),
+		textTurn("root again done"),
+	}}
+	exec := agent.New(execProv, tool.NewRegistry(), sessionstore.NewSession("exec sys"), agent.Options{}, event.Discard)
+	coord := coordinator.NewCoordinator(planner, sessionstore.NewSession("planner sys"), nil, tool.NewRegistry(), agent.Options{}, exec, 0, event.Discard, nil)
+	rootPath := filepath.Join(dir, "root.jsonl")
+	c := New(Options{Runner: coord, Executor: exec, SystemPrompt: "exec sys", SessionDir: dir, SessionPath: rootPath, Label: "test"})
+
+	if err := c.Run(context.Background(), "root task alpha"); err != nil {
+		t.Fatal(err)
+	}
+	rootID := sessionstore.BranchID(c.SessionPath())
+	if _, err := c.Branch("child"); err != nil {
+		t.Fatal(err)
+	}
+	if err := c.Run(context.Background(), "child task beta"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := c.SwitchBranch(rootID); err != nil {
+		t.Fatal(err)
+	}
+	if err := c.Run(context.Background(), "root task gamma"); err != nil {
+		t.Fatal(err)
+	}
+
+	if len(planner.requests) != 3 {
+		t.Fatalf("planner requests = %d, want 3", len(planner.requests))
+	}
+	third := requestMessagesText(planner.requests[2].Messages)
+	if strings.Contains(third, "child task beta") || strings.Contains(third, "CHILD PLAN") {
+		t.Fatalf("switched planner request leaked previous branch context:\n%s", third)
+	}
+	if !strings.Contains(third, "root task gamma") {
+		t.Fatalf("switched planner request missing current task:\n%s", third)
+	}
+}
+
+func TestSubmitSwitchEmitsErrorNotice(t *testing.T) {
+	var notices []string
+	sess := sessionstore.NewSession("sys")
+	sess.Add(provider.Message{Role: provider.RoleUser, Content: "hi"})
+	exec := agent.New(nil, nil, sess, agent.Options{}, event.Discard)
+	c := New(Options{
+		Executor: exec,
+		Sink: event.FuncSink(func(e event.Event) {
+			if e.Kind == event.Notice {
+				notices = append(notices, e.Text)
+			}
+		}),
+	})
+
+	c.Submit("/switch")
+	if len(notices) == 0 {
+		t.Fatal("/switch with empty ref should emit an error notice")
+	}
+	if !strings.Contains(notices[len(notices)-1], "usage") {
+		t.Fatalf("notice = %q, want usage hint", notices[len(notices)-1])
+	}
+
+	notices = notices[:0]
+	c.Submit("/switch nonexistent")
+	if len(notices) == 0 {
+		t.Fatal("/switch with unknown ref should emit an error notice")
+	}
+}
+
+func TestSubmitBranchEmitsErrorNoticeWhileRunning(t *testing.T) {
+	var notices []string
+	sess := sessionstore.NewSession("sys")
+	sess.Add(provider.Message{Role: provider.RoleUser, Content: "hi"})
+	exec := agent.New(nil, nil, sess, agent.Options{}, event.Discard)
+	c := New(Options{
+		Executor:   exec,
+		SessionDir: testenv.TempDir(t),
+		Label:      "test",
+		Sink: event.FuncSink(func(e event.Event) {
+			if e.Kind == event.Notice {
+				notices = append(notices, e.Text)
+			}
+		}),
+	})
+	c.SetSessionPath(sessionstore.NewSessionPath(c.sessionDir, "test"))
+
+	c.mu.Lock()
+	c.gate.running = true
+	c.mu.Unlock()
+
+	c.Submit("/branch experiment")
+	if len(notices) == 0 {
+		t.Fatal("/branch while running should emit an error notice")
+	}
+	if !strings.Contains(notices[len(notices)-1], "cannot branch") {
+		t.Fatalf("notice = %q, want 'cannot branch' error", notices[len(notices)-1])
+	}
+}
+
+func TestFormatBranchTreeMarksCurrent(t *testing.T) {
+	branches := []sessionstore.BranchInfo{
+		{BranchMeta: sessionstore.BranchMeta{ID: "root"}, Preview: "root", Turns: 1},
+		{BranchMeta: sessionstore.BranchMeta{ID: "child", ParentID: "root", Name: "child branch"}, Turns: 2},
+	}
+	got := FormatBranchTree(branches, "child")
+	if !strings.Contains(got, "child branch  2 turns  current") {
+		t.Fatalf("tree should mark current branch:\n%s", got)
+	}
+	if strings.Contains(got, "*") {
+		t.Fatalf("tree should not use duplicate current markers:\n%s", got)
+	}
+}
+
+func TestFormatBranchTreeUsesCompactVisualRows(t *testing.T) {
+	branches := []sessionstore.BranchInfo{
+		{
+			BranchMeta: sessionstore.BranchMeta{ID: "20260601-033830.928433000-deepseek-v4-flash"},
+			Preview:    "你是谁",
+			Turns:      3,
+		},
+		{
+			BranchMeta: sessionstore.BranchMeta{
+				ID:       "20260601-033937.165828000-deepseek-v4-flash",
+				ParentID: "20260601-033830.928433000-deepseek-v4-flash",
+			},
+			Preview: `{ "code": 0, "msg": "success", "data": { "rows": [] } }`,
+			Turns:   1,
+		},
+	}
+	got := FormatBranchTree(branches, "20260601-033937.165828000-deepseek-v4-flash")
+	checks := []string{
+		"└─",
+		"0601-033937.165",
+		"JSON response: success",
+		"1 turn",
+		"current",
+	}
+	for _, want := range checks {
+		if !strings.Contains(got, want) {
+			t.Fatalf("tree missing %q:\n%s", want, got)
+		}
+	}
+	if strings.Contains(got, "20260601-033937.165828000-deepseek-v4-flash") {
+		t.Fatalf("tree should use compact branch IDs:\n%s", got)
+	}
+	if strings.Contains(got, `"data"`) {
+		t.Fatalf("tree should summarize JSON-like previews:\n%s", got)
+	}
+}
+
+func TestResolveBranchAcceptsDisplayedShortID(t *testing.T) {
+	branches := []sessionstore.BranchInfo{
+		{BranchMeta: sessionstore.BranchMeta{ID: "20260601-033937.165828000-deepseek-v4-flash"}},
+	}
+	got, err := resolveBranch(branches, "0601-033937.165")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.ID != branches[0].ID {
+		t.Fatalf("branch = %q, want %q", got.ID, branches[0].ID)
+	}
+}

@@ -1,0 +1,9 @@
+{
+  "apiVersion": "reasonix.io/plugin/v2",
+  "name": "api-notes-kit",
+  "version": "0.1.0",
+  "description": "Write a source-linked API guide from a local OpenAPI JSON document",
+  "contributes": {
+    "skills": ["skills"]
+  }
+}

@@ -1,0 +1,1032 @@
+{
+ "approval_inside_call": {
+  "name": "approval_inside_call",
+  "live": [
+   {
+    "kind": "turn_started",
+    "text": "go",
+    "authoredTurn": 1,
+    "msgIndex": 1,
+    "modelRef": "test-model/x"
+   },
+   {
+    "kind": "turn_phase",
+    "text": "working",
+    "source": "executor",
+    "phase": "working"
+   },
+   {
+    "kind": "stream_attempt",
+    "source": "executor",
+    "streamAttempt": {
+     "id": "r1",
+     "action": "begin",
+     "attempt": 1,
+     "max": 6
+    }
+   },
+   {
+    "kind": "text",
+    "text": "writing"
+   },
+   {
+    "kind": "message",
+    "text": "writing",
+    "source": "executor"
+   },
+   {
+    "kind": "stream_attempt",
+    "source": "executor",
+    "streamAttempt": {
+     "id": "r1",
+     "action": "commit",
+     "attempt": 1,
+     "max": 6
+    }
+   },
+   {
+    "kind": "tool_dispatch",
+    "tool": {
+     "id": "call-write",
+     "name": "write_file",
+     "readOnly": false,
+     "issuer": "model"
+    },
+    "source": "executor"
+   },
+   {
+    "kind": "approval_request",
+    "approval": {
+     "id": "b1",
+     "tool": "write_file",
+     "subject": "",
+     "allowsSession": true,
+     "allowsPersist": true
+    }
+   },
+   {
+    "kind": "notice",
+    "text": "Decision recorded: allow_once",
+    "code": "decision_receipt",
+    "level": "info",
+    "decisionReceipt": {
+     "id": "b1",
+     "kind": "tool",
+     "tool": "write_file",
+     "subject": "note.txt",
+     "outcome": "allow_once"
+    }
+   },
+   {
+    "kind": "tool_result",
+    "tool": {
+     "id": "call-write",
+     "name": "write_file",
+     "readOnly": false,
+     "issuer": "model"
+    },
+    "source": "executor"
+   },
+   {
+    "kind": "stream_attempt",
+    "source": "executor",
+    "streamAttempt": {
+     "id": "r2",
+     "action": "begin",
+     "attempt": 1,
+     "max": 6
+    }
+   },
+   {
+    "kind": "text",
+    "text": "done"
+   },
+   {
+    "kind": "message",
+    "text": "done",
+    "source": "executor"
+   },
+   {
+    "kind": "stream_attempt",
+    "source": "executor",
+    "streamAttempt": {
+     "id": "r2",
+     "action": "commit",
+     "attempt": 1,
+     "max": 6
+    }
+   },
+   {
+    "kind": "workspace_lease",
+    "workspaceLease": {
+     "contended": 0,
+     "heldMs": 0,
+     "idleMs": 0
+    }
+   },
+   {
+    "kind": "notice",
+    "text": "finishing what this turn still owes",
+    "detail": "This turn ended with work still outstanding:\n- run a relevant verification command after the latest write for the current role setting\nDo the remaining work, then verify it. Mark each finished item with complete_step — that is what advances the list; a todo_write that flips an item to completed is rejected. If an item should no longer be done — the request changed, or it was superseded — send a todo_write without it. If one turns on a decision only the user can make, put it to them with ask; not having heard back is not an answer to assume one from. If one cannot go on until the user says something only they can say, call await_user naming it — the list is kept and this message stops. If one cannot be done as specified, call conclude_blocked with the evidence for why.",
+    "level": "info"
+   },
+   {
+    "kind": "turn_phase",
+    "text": "working",
+    "source": "executor",
+    "phase": "working"
+   },
+   {
+    "kind": "stream_attempt",
+    "source": "executor",
+    "streamAttempt": {
+     "id": "r3",
+     "action": "begin",
+     "attempt": 1,
+     "max": 6
+    }
+   },
+   {
+    "kind": "text",
+    "text": "done"
+   },
+   {
+    "kind": "message",
+    "text": "done",
+    "source": "executor"
+   },
+   {
+    "kind": "stream_attempt",
+    "source": "executor",
+    "streamAttempt": {
+     "id": "r3",
+     "action": "commit",
+     "attempt": 1,
+     "max": 6
+    }
+   },
+   {
+    "kind": "notice",
+    "text": "finishing what this turn still owes",
+    "detail": "This turn ended with work still outstanding:\n- run a relevant verification command after the latest write for the current role setting\nDo the remaining work, then verify it. Mark each finished item with complete_step — that is what advances the list; a todo_write that flips an item to completed is rejected. If an item should no longer be done — the request changed, or it was superseded — send a todo_write without it. If one turns on a decision only the user can make, put it to them with ask; not having heard back is not an answer to assume one from. If one cannot go on until the user says something only they can say, call await_user naming it — the list is kept and this message stops. If one cannot be done as specified, call conclude_blocked with the evidence for why.",
+    "level": "info"
+   },
+   {
+    "kind": "turn_phase",
+    "text": "working",
+    "source": "executor",
+    "phase": "working"
+   },
+   {
+    "kind": "stream_attempt",
+    "source": "executor",
+    "streamAttempt": {
+     "id": "r4",
+     "action": "begin",
+     "attempt": 1,
+     "max": 6
+    }
+   },
+   {
+    "kind": "text",
+    "text": "done"
+   },
+   {
+    "kind": "message",
+    "text": "done",
+    "source": "executor"
+   },
+   {
+    "kind": "stream_attempt",
+    "source": "executor",
+    "streamAttempt": {
+     "id": "r4",
+     "action": "commit",
+     "attempt": 1,
+     "max": 6
+    }
+   }
+  ],
+  "replay": [
+   {
+    "kind": "turn_started",
+    "text": "go",
+    "authoredTurn": 1,
+    "msgIndex": 1,
+    "modelRef": "test-model/x"
+   },
+   {
+    "kind": "stream_attempt",
+    "source": "executor",
+    "streamAttempt": {
+     "id": "r1",
+     "action": "begin",
+     "attempt": 1,
+     "max": 6
+    }
+   },
+   {
+    "kind": "message",
+    "text": "writing",
+    "source": "executor"
+   },
+   {
+    "kind": "stream_attempt",
+    "source": "executor",
+    "streamAttempt": {
+     "id": "r1",
+     "action": "commit",
+     "attempt": 1,
+     "max": 6
+    }
+   },
+   {
+    "kind": "tool_dispatch",
+    "tool": {
+     "id": "call-write",
+     "name": "write_file",
+     "readOnly": false,
+     "issuer": "model"
+    },
+    "source": "executor"
+   },
+   {
+    "kind": "approval_request",
+    "approval": {
+     "id": "b1",
+     "tool": "write_file",
+     "subject": "",
+     "allowsSession": true,
+     "allowsPersist": true
+    }
+   },
+   {
+    "kind": "notice",
+    "text": "Decision recorded: allow_once",
+    "code": "decision_receipt",
+    "level": "info",
+    "decisionReceipt": {
+     "id": "b1",
+     "kind": "tool",
+     "tool": "write_file",
+     "subject": "note.txt",
+     "outcome": "allow_once"
+    }
+   },
+   {
+    "kind": "tool_result",
+    "tool": {
+     "id": "call-write",
+     "name": "write_file",
+     "readOnly": false,
+     "issuer": "model"
+    },
+    "source": "executor"
+   },
+   {
+    "kind": "stream_attempt",
+    "source": "executor",
+    "streamAttempt": {
+     "id": "r2",
+     "action": "begin",
+     "attempt": 1,
+     "max": 6
+    }
+   },
+   {
+    "kind": "message",
+    "text": "done",
+    "source": "executor"
+   },
+   {
+    "kind": "stream_attempt",
+    "source": "executor",
+    "streamAttempt": {
+     "id": "r2",
+     "action": "commit",
+     "attempt": 1,
+     "max": 6
+    }
+   },
+   {
+    "kind": "workspace_lease",
+    "workspaceLease": {
+     "contended": 0,
+     "heldMs": 0,
+     "idleMs": 0
+    }
+   },
+   {
+    "kind": "notice",
+    "text": "finishing what this turn still owes",
+    "detail": "This turn ended with work still outstanding:\n- run a relevant verification command after the latest write for the current role setting\nDo the remaining work, then verify it. Mark each finished item with complete_step — that is what advances the list; a todo_write that flips an item to completed is rejected. If an item should no longer be done — the request changed, or it was superseded — send a todo_write without it. If one turns on a decision only the user can make, put it to them with ask; not having heard back is not an answer to assume one from. If one cannot go on until the user says something only they can say, call await_user naming it — the list is kept and this message stops. If one cannot be done as specified, call conclude_blocked with the evidence for why.",
+    "level": "info"
+   },
+   {
+    "kind": "stream_attempt",
+    "source": "executor",
+    "streamAttempt": {
+     "id": "r3",
+     "action": "begin",
+     "attempt": 1,
+     "max": 6
+    }
+   },
+   {
+    "kind": "message",
+    "text": "done",
+    "source": "executor"
+   },
+   {
+    "kind": "stream_attempt",
+    "source": "executor",
+    "streamAttempt": {
+     "id": "r3",
+     "action": "commit",
+     "attempt": 1,
+     "max": 6
+    }
+   },
+   {
+    "kind": "notice",
+    "text": "finishing what this turn still owes",
+    "detail": "This turn ended with work still outstanding:\n- run a relevant verification command after the latest write for the current role setting\nDo the remaining work, then verify it. Mark each finished item with complete_step — that is what advances the list; a todo_write that flips an item to completed is rejected. If an item should no longer be done — the request changed, or it was superseded — send a todo_write without it. If one turns on a decision only the user can make, put it to them with ask; not having heard back is not an answer to assume one from. If one cannot go on until the user says something only they can say, call await_user naming it — the list is kept and this message stops. If one cannot be done as specified, call conclude_blocked with the evidence for why.",
+    "level": "info"
+   },
+   {
+    "kind": "stream_attempt",
+    "source": "executor",
+    "streamAttempt": {
+     "id": "r4",
+     "action": "begin",
+     "attempt": 1,
+     "max": 6
+    }
+   },
+   {
+    "kind": "message",
+    "text": "done",
+    "source": "executor"
+   },
+   {
+    "kind": "stream_attempt",
+    "source": "executor",
+    "streamAttempt": {
+     "id": "r4",
+     "action": "commit",
+     "attempt": 1,
+     "max": 6
+    }
+   }
+  ]
+ },
+ "dual_model": {
+  "name": "dual_model",
+  "live": [
+   {
+    "kind": "turn_started",
+    "text": "[Reasonix: plan-first] build it",
+    "authoredTurn": 1,
+    "msgIndex": 1,
+    "modelRef": "test-model/x"
+   },
+   {
+    "kind": "phase",
+    "text": "trace-script · planning",
+    "detail": "planner route=plan_and_execute depth=full reason=user_plan_and_execute",
+    "source": "planner"
+   },
+   {
+    "kind": "turn_phase",
+    "text": "working",
+    "source": "planner",
+    "phase": "working"
+   },
+   {
+    "kind": "stream_attempt",
+    "source": "planner",
+    "streamAttempt": {
+     "id": "r1",
+     "action": "begin",
+     "attempt": 1,
+     "max": 6
+    }
+   },
+   {
+    "kind": "text",
+    "text": "here is the plan",
+    "source": "planner"
+   },
+   {
+    "kind": "message",
+    "text": "here is the plan",
+    "source": "planner"
+   },
+   {
+    "kind": "stream_attempt",
+    "source": "planner",
+    "streamAttempt": {
+     "id": "r1",
+     "action": "commit",
+     "attempt": 1,
+     "max": 6
+    }
+   },
+   {
+    "kind": "phase",
+    "text": "trace-script · executing",
+    "source": "executor"
+   },
+   {
+    "kind": "turn_phase",
+    "text": "working",
+    "source": "executor",
+    "phase": "working"
+   },
+   {
+    "kind": "stream_attempt",
+    "source": "executor",
+    "streamAttempt": {
+     "id": "r2",
+     "action": "begin",
+     "attempt": 1,
+     "max": 6
+    }
+   },
+   {
+    "kind": "text",
+    "text": "running it"
+   },
+   {
+    "kind": "message",
+    "text": "running it",
+    "source": "executor"
+   },
+   {
+    "kind": "stream_attempt",
+    "source": "executor",
+    "streamAttempt": {
+     "id": "r2",
+     "action": "commit",
+     "attempt": 1,
+     "max": 6
+    }
+   },
+   {
+    "kind": "tool_dispatch",
+    "tool": {
+     "id": "call-x",
+     "name": "todo_write",
+     "readOnly": true,
+     "issuer": "model"
+    },
+    "source": "executor"
+   },
+   {
+    "kind": "tool_result",
+    "tool": {
+     "id": "call-x",
+     "name": "todo_write",
+     "readOnly": true,
+     "issuer": "model"
+    },
+    "source": "executor"
+   },
+   {
+    "kind": "stream_attempt",
+    "source": "executor",
+    "streamAttempt": {
+     "id": "r3",
+     "action": "begin",
+     "attempt": 1,
+     "max": 6
+    }
+   },
+   {
+    "kind": "text",
+    "text": "done"
+   },
+   {
+    "kind": "message",
+    "text": "done",
+    "source": "executor"
+   },
+   {
+    "kind": "stream_attempt",
+    "source": "executor",
+    "streamAttempt": {
+     "id": "r3",
+     "action": "commit",
+     "attempt": 1,
+     "max": 6
+    }
+   },
+   {
+    "kind": "turn_done",
+    "checkpointTurn": 0
+   }
+  ],
+  "replay": [
+   {
+    "kind": "turn_started",
+    "text": "[Reasonix: plan-first] build it",
+    "authoredTurn": 1,
+    "msgIndex": 1,
+    "modelRef": "test-model/x"
+   },
+   {
+    "kind": "stream_attempt",
+    "source": "planner",
+    "streamAttempt": {
+     "id": "r1",
+     "action": "begin",
+     "attempt": 1,
+     "max": 6
+    }
+   },
+   {
+    "kind": "message",
+    "text": "here is the plan",
+    "source": "planner"
+   },
+   {
+    "kind": "stream_attempt",
+    "source": "planner",
+    "streamAttempt": {
+     "id": "r1",
+     "action": "commit",
+     "attempt": 1,
+     "max": 6
+    }
+   },
+   {
+    "kind": "stream_attempt",
+    "source": "executor",
+    "streamAttempt": {
+     "id": "r2",
+     "action": "begin",
+     "attempt": 1,
+     "max": 6
+    }
+   },
+   {
+    "kind": "message",
+    "text": "running it",
+    "source": "executor"
+   },
+   {
+    "kind": "stream_attempt",
+    "source": "executor",
+    "streamAttempt": {
+     "id": "r2",
+     "action": "commit",
+     "attempt": 1,
+     "max": 6
+    }
+   },
+   {
+    "kind": "tool_dispatch",
+    "tool": {
+     "id": "call-x",
+     "name": "todo_write",
+     "readOnly": true,
+     "issuer": "model"
+    },
+    "source": "executor"
+   },
+   {
+    "kind": "tool_result",
+    "tool": {
+     "id": "call-x",
+     "name": "todo_write",
+     "readOnly": true,
+     "issuer": "model"
+    },
+    "source": "executor"
+   },
+   {
+    "kind": "stream_attempt",
+    "source": "executor",
+    "streamAttempt": {
+     "id": "r3",
+     "action": "begin",
+     "attempt": 1,
+     "max": 6
+    }
+   },
+   {
+    "kind": "message",
+    "text": "done",
+    "source": "executor"
+   },
+   {
+    "kind": "stream_attempt",
+    "source": "executor",
+    "streamAttempt": {
+     "id": "r3",
+     "action": "commit",
+     "attempt": 1,
+     "max": 6
+    }
+   },
+   {
+    "kind": "turn_done",
+    "checkpointTurn": 0
+   }
+  ]
+ },
+ "provider_result_only": {
+  "name": "provider_result_only",
+  "live": [
+   {
+    "kind": "turn_started",
+    "text": "go",
+    "authoredTurn": 1,
+    "msgIndex": 1,
+    "modelRef": "test-model/x"
+   },
+   {
+    "kind": "turn_phase",
+    "text": "working",
+    "source": "executor",
+    "phase": "working"
+   },
+   {
+    "kind": "stream_attempt",
+    "source": "executor",
+    "streamAttempt": {
+     "id": "r1",
+     "action": "begin",
+     "attempt": 1,
+     "max": 6
+    }
+   },
+   {
+    "kind": "tool_result",
+    "tool": {
+     "id": "srv-1",
+     "name": "web_search",
+     "readOnly": true,
+     "issuer": "provider",
+     "attemptId": "r1"
+    },
+    "source": "executor"
+   },
+   {
+    "kind": "text",
+    "text": "summarised"
+   },
+   {
+    "kind": "message",
+    "text": "two resultssummarised",
+    "source": "executor"
+   },
+   {
+    "kind": "stream_attempt",
+    "source": "executor",
+    "streamAttempt": {
+     "id": "r1",
+     "action": "commit",
+     "attempt": 1,
+     "max": 6
+    }
+   },
+   {
+    "kind": "turn_done",
+    "checkpointTurn": 0
+   }
+  ],
+  "replay": [
+   {
+    "kind": "turn_started",
+    "text": "go",
+    "authoredTurn": 1,
+    "msgIndex": 1,
+    "modelRef": "test-model/x"
+   },
+   {
+    "kind": "stream_attempt",
+    "source": "executor",
+    "streamAttempt": {
+     "id": "r1",
+     "action": "begin",
+     "attempt": 1,
+     "max": 6
+    }
+   },
+   {
+    "kind": "tool_result",
+    "tool": {
+     "id": "srv-1",
+     "name": "web_search",
+     "readOnly": true,
+     "issuer": "provider",
+     "attemptId": "r1"
+    },
+    "source": "executor"
+   },
+   {
+    "kind": "message",
+    "text": "two resultssummarised",
+    "source": "executor"
+   },
+   {
+    "kind": "stream_attempt",
+    "source": "executor",
+    "streamAttempt": {
+     "id": "r1",
+     "action": "commit",
+     "attempt": 1,
+     "max": 6
+    }
+   },
+   {
+    "kind": "turn_done",
+    "checkpointTurn": 0
+   }
+  ]
+ },
+ "single_model": {
+  "name": "single_model",
+  "live": [
+   {
+    "kind": "turn_started",
+    "text": "go",
+    "authoredTurn": 1,
+    "msgIndex": 1,
+    "modelRef": "test-model/x"
+   },
+   {
+    "kind": "turn_phase",
+    "text": "working",
+    "source": "executor",
+    "phase": "working"
+   },
+   {
+    "kind": "stream_attempt",
+    "source": "executor",
+    "streamAttempt": {
+     "id": "r1",
+     "action": "begin",
+     "attempt": 1,
+     "max": 6
+    }
+   },
+   {
+    "kind": "reasoning",
+    "text": "weighing it"
+   },
+   {
+    "kind": "text",
+    "text": "first"
+   },
+   {
+    "kind": "message",
+    "text": "first",
+    "reasoning": "weighing it",
+    "source": "executor"
+   },
+   {
+    "kind": "stream_attempt",
+    "source": "executor",
+    "streamAttempt": {
+     "id": "r1",
+     "action": "commit",
+     "attempt": 1,
+     "max": 6
+    }
+   },
+   {
+    "kind": "tool_dispatch",
+    "tool": {
+     "id": "call-a",
+     "name": "todo_write",
+     "readOnly": true,
+     "issuer": "model"
+    },
+    "source": "executor"
+   },
+   {
+    "kind": "tool_result",
+    "tool": {
+     "id": "call-a",
+     "name": "todo_write",
+     "readOnly": true,
+     "issuer": "model"
+    },
+    "source": "executor"
+   },
+   {
+    "kind": "stream_attempt",
+    "source": "executor",
+    "streamAttempt": {
+     "id": "r2",
+     "action": "begin",
+     "attempt": 1,
+     "max": 6
+    }
+   },
+   {
+    "kind": "text",
+    "text": "second"
+   },
+   {
+    "kind": "message",
+    "text": "second",
+    "source": "executor"
+   },
+   {
+    "kind": "stream_attempt",
+    "source": "executor",
+    "streamAttempt": {
+     "id": "r2",
+     "action": "commit",
+     "attempt": 1,
+     "max": 6
+    }
+   },
+   {
+    "kind": "tool_dispatch",
+    "tool": {
+     "id": "call-b",
+     "name": "todo_write",
+     "readOnly": true,
+     "issuer": "model"
+    },
+    "source": "executor"
+   },
+   {
+    "kind": "tool_result",
+    "tool": {
+     "id": "call-b",
+     "name": "todo_write",
+     "readOnly": true,
+     "issuer": "model"
+    },
+    "source": "executor"
+   },
+   {
+    "kind": "stream_attempt",
+    "source": "executor",
+    "streamAttempt": {
+     "id": "r3",
+     "action": "begin",
+     "attempt": 1,
+     "max": 6
+    }
+   },
+   {
+    "kind": "text",
+    "text": "third"
+   },
+   {
+    "kind": "message",
+    "text": "third",
+    "source": "executor"
+   },
+   {
+    "kind": "stream_attempt",
+    "source": "executor",
+    "streamAttempt": {
+     "id": "r3",
+     "action": "commit",
+     "attempt": 1,
+     "max": 6
+    }
+   },
+   {
+    "kind": "turn_done",
+    "checkpointTurn": 0
+   }
+  ],
+  "replay": [
+   {
+    "kind": "turn_started",
+    "text": "go",
+    "authoredTurn": 1,
+    "msgIndex": 1,
+    "modelRef": "test-model/x"
+   },
+   {
+    "kind": "stream_attempt",
+    "source": "executor",
+    "streamAttempt": {
+     "id": "r1",
+     "action": "begin",
+     "attempt": 1,
+     "max": 6
+    }
+   },
+   {
+    "kind": "message",
+    "text": "first",
+    "reasoning": "weighing it",
+    "source": "executor"
+   },
+   {
+    "kind": "stream_attempt",
+    "source": "executor",
+    "streamAttempt": {
+     "id": "r1",
+     "action": "commit",
+     "attempt": 1,
+     "max": 6
+    }
+   },
+   {
+    "kind": "tool_dispatch",
+    "tool": {
+     "id": "call-a",
+     "name": "todo_write",
+     "readOnly": true,
+     "issuer": "model"
+    },
+    "source": "executor"
+   },
+   {
+    "kind": "tool_result",
+    "tool": {
+     "id": "call-a",
+     "name": "todo_write",
+     "readOnly": true,
+     "issuer": "model"
+    },
+    "source": "executor"
+   },
+   {
+    "kind": "stream_attempt",
+    "source": "executor",
+    "streamAttempt": {
+     "id": "r2",
+     "action": "begin",
+     "attempt": 1,
+     "max": 6
+    }
+   },
+   {
+    "kind": "message",
+    "text": "second",
+    "source": "executor"
+   },
+   {
+    "kind": "stream_attempt",
+    "source": "executor",
+    "streamAttempt": {
+     "id": "r2",
+     "action": "commit",
+     "attempt": 1,
+     "max": 6
+    }
+   },
+   {
+    "kind": "tool_dispatch",
+    "tool": {
+     "id": "call-b",
+     "name": "todo_write",
+     "readOnly": true,
+     "issuer": "model"
+    },
+    "source": "executor"
+   },
+   {
+    "kind": "tool_result",
+    "tool": {
+     "id": "call-b",
+     "name": "todo_write",
+     "readOnly": true,
+     "issuer": "model"
+    },
+    "source": "executor"
+   },
+   {
+    "kind": "stream_attempt",
+    "source": "executor",
+    "streamAttempt": {
+     "id": "r3",
+     "action": "begin",
+     "attempt": 1,
+     "max": 6
+    }
+   },
+   {
+    "kind": "message",
+    "text": "third",
+    "source": "executor"
+   },
+   {
+    "kind": "stream_attempt",
+    "source": "executor",
+    "streamAttempt": {
+     "id": "r3",
+     "action": "commit",
+     "attempt": 1,
+     "max": 6
+    }
+   },
+   {
+    "kind": "turn_done",
+    "checkpointTurn": 0
+   }
+  ]
+ }
+}

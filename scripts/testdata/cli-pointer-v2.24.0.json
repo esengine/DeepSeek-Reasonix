@@ -1,0 +1,44 @@
+{
+  "tag_name": "v2.24.0",
+  "prerelease": false,
+  "html_url": "https://github.com/esengine/DeepSeek-Reasonix/releases/tag/v2.24.0",
+  "release_notes_url": null,
+  "assets": [
+    {
+      "name": "reasonix-darwin-amd64.tar.gz",
+      "browser_download_url": "https://github.com/esengine/DeepSeek-Reasonix/releases/download/v2.24.0/reasonix-darwin-amd64.tar.gz",
+      "size": 36
+    },
+    {
+      "name": "reasonix-darwin-arm64.tar.gz",
+      "browser_download_url": "https://github.com/esengine/DeepSeek-Reasonix/releases/download/v2.24.0/reasonix-darwin-arm64.tar.gz",
+      "size": 36
+    },
+    {
+      "name": "reasonix-linux-amd64.tar.gz",
+      "browser_download_url": "https://github.com/esengine/DeepSeek-Reasonix/releases/download/v2.24.0/reasonix-linux-amd64.tar.gz",
+      "size": 35
+    },
+    {
+      "name": "reasonix-linux-arm64.tar.gz",
+      "browser_download_url": "https://github.com/esengine/DeepSeek-Reasonix/releases/download/v2.24.0/reasonix-linux-arm64.tar.gz",
+      "size": 35
+    },
+    {
+      "name": "reasonix-windows-amd64.zip",
+      "browser_download_url": "https://github.com/esengine/DeepSeek-Reasonix/releases/download/v2.24.0/reasonix-windows-amd64.zip",
+      "size": 34
+    },
+    {
+      "name": "reasonix-windows-arm64.zip",
+      "browser_download_url": "https://github.com/esengine/DeepSeek-Reasonix/releases/download/v2.24.0/reasonix-windows-arm64.zip",
+      "size": 34
+    },
+    {
+      "name": "SHA256SUMS",
+      "browser_download_url": "https://github.com/esengine/DeepSeek-Reasonix/releases/download/v2.24.0/SHA256SUMS",
+      "size": 564
+    }
+  ]
+}
+

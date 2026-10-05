@@ -1,0 +1,7 @@
+prompt = """`interval_merge.py` defines `merge_intervals(intervals)`, which must merge overlapping half-open intervals into a minimal list of disjoint intervals, sorted by start.
+
+Intervals are half-open: `[start, end)` includes `start` but excludes `end`. Two intervals overlap if and only if they share at least one real number. For example, `[0, 5)` and `[3, 8)` overlap, while `[0, 5)` and `[5, 9)` are adjacent but disjoint and must NOT be merged — they must stay separate intervals in the output.
+
+The current implementation contains a bug: for some inputs it merges intervals that do not overlap. Fix `merge_intervals` so that it returns the correct merged list for every input. Inputs are always `(start, end)` pairs with `start < end`; keep the function's name and signature unchanged."""
+class = "atomic-bugfix"
+timeout_sec = 300

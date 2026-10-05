@@ -1,0 +1,303 @@
+name: Studio
+
+# Studio's own surface — desktop/frontend-next (the SPA) and the Electron shell
+# that serves it — exists only on the studio branch, so it cannot live in ci.yml
+# without failing on main-v2 where neither directory is present. ci.yml covers
+# the kernel; this file covers the frontend build, the desktop module's Go side,
+# and the packaging contract on real artifacts.
+on:
+  push:
+    branches: [studio]
+  pull_request:
+    branches: [studio]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: studio-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  frontend:
+    name: frontend-next
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: desktop/frontend-next
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+
+      - uses: pnpm/action-setup@ea17c68df8912ef543352723c149a84f56e3d413 # v6.1.0
+        with:
+          version: 10
+          run_install: false
+
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7
+        with:
+          node-version: "24"
+          cache: pnpm
+          cache-dependency-path: desktop/frontend-next/pnpm-lock.yaml
+
+      - name: Install
+        run: pnpm install --frozen-lockfile
+
+      - name: typecheck
+        run: pnpm typecheck
+
+      # The reducer and the event port carry the two pieces of logic a type
+      # error cannot reach: what a card means when a turn is interrupted, and
+      # what the client does about a frame that never arrived.
+      - name: test
+        run: pnpm test
+
+      # What the UI census holds. The gate reads structure — which inputs reach
+      # a mutating endpoint, and which of those the product names an action for
+      # — so UNDECLARED_MUTATION == 0 is a fact about the tree, not a lint over
+      # how anything is spelled.
+      - name: census invariants
+        run: pnpm census > /dev/null
+
+      # And that the analyzer still judges the way it did. _fx is a corpus
+      # written to exercise the rules, so its reports move only when a judgement
+      # moves; the product's name every root by file and line and are stale the
+      # moment a button moves, which is why they are not frozen.
+      - name: census fixture reports have not drifted
+        run: pnpm census:verify
+
+      # `build` runs tsc -b before vite, so this also proves the project
+      # references resolve — typecheck alone uses --noEmit and does not.
+      - name: build
+        run: pnpm build
+
+      # The published bundle must not carry MockPort's scripted fixtures: a
+      # release that cannot reach the kernel has to say so, not act out a fake
+      # session. main.tsx guards the import behind import.meta.env.DEV, and this
+      # is what proves the guard still holds.
+      - name: no fixtures in the bundle
+        run: |
+          if grep -rl 网关瞬时态 dist/ 2>/dev/null; then
+            echo "::error::MockPort fixtures reached the production bundle - check the import.meta.env.DEV guard in main.tsx"
+            exit 1
+          fi
+
+  desktop:
+    name: desktop (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-22.04, windows-latest, macos-latest]
+    defaults:
+      run:
+        working-directory: desktop
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7
+        with:
+          go-version-file: desktop/go.mod
+          cache: true
+          cache-dependency-path: desktop/go.sum
+
+      # The desktop module's Go tests: the elevated update helper, the
+      # release-side tools and the Windows uninstall planner. The code this
+      # gate covers is what replaces a running application on a user's disk.
+      # The module is CGO-free since the Wails shell retired, so no platform
+      # carries build dependencies of its own.
+      # Same command as `make studio-test`; this job is already in desktop/.
+      - name: go test
+        run: go test ./...
+
+      # The host sits in the main module and nothing else builds it, so its
+      # dependency closure is checked here: it must stay CGO-free and
+      # platform-neutral or the Electron bundle cannot ship it. Cross-compiling
+      # is host-independent, so once is enough.
+      - name: host stays pure Go and platform-neutral
+        if: runner.os == 'Linux'
+        working-directory: .
+        run: |
+          for os in windows linux darwin; do
+            CGO_ENABLED=0 GOOS=$os GOARCH=amd64 go build -o /dev/null ./cmd/reasonix-studio-host
+          done
+
+  # The packaging contract, on real artifacts rather than on the config that
+  # describes them. Unsigned on purpose: signing and notarization are a
+  # distribution concern and belong to the release workflow, and treating their
+  # absence as "packaging unverified" is what left macOS and Linux resting on a
+  # cross-compile while only Windows had ever produced a package.
+  package:
+    name: package (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: macos-latest
+            arch: arm64
+            platform: darwin
+          - os: ubuntu-22.04
+            arch: amd64
+            platform: linux
+          - os: windows-latest
+            arch: amd64
+            platform: windows
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7
+        with:
+          go-version-file: desktop/go.mod
+          cache: true
+          cache-dependency-path: desktop/go.sum
+
+      - uses: pnpm/action-setup@ea17c68df8912ef543352723c149a84f56e3d413 # v6.1.0
+        with:
+          version: 10
+          run_install: false
+
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7
+        with:
+          node-version: "24"
+          cache: pnpm
+          cache-dependency-path: desktop/electron/pnpm-lock.yaml
+
+      # electron-builder shells out to dpkg-deb through fakeroot for the .deb.
+      - name: Install Linux packaging deps
+        if: runner.os == 'Linux'
+        run: sudo apt-get update && sudo apt-get install -y fakeroot
+
+      - name: Build the SPA
+        working-directory: desktop/frontend-next
+        run: pnpm install --frozen-lockfile && pnpm build
+
+      - name: Build the kernel the shell speaks to
+        working-directory: desktop/electron
+        run: pnpm install --frozen-lockfile && pnpm run build:host
+
+      # The .deb's absolute-path payload. A no-op off Linux, so it is not
+      # guarded here: the one place it must not be forgotten is the one place
+      # it does anything.
+      - name: Stage the Linux package payload
+        working-directory: desktop/electron
+        run: pnpm run build:linux-payload
+
+      # No identity on a runner, and none wanted here: auto-discovery would make
+      # this job fail for the one reason it is not testing.
+      - name: Package
+        working-directory: desktop/electron
+        env:
+          CSC_IDENTITY_AUTO_DISCOVERY: "false"
+        run: pnpm run build:dist
+
+      # The release vocabulary is GOARCH. electron-builder's own is not, and the
+      # rename that reconciles them runs here rather than in the manifest.
+      - name: Artifacts carry the release architecture
+        run: |
+          ls -la dist
+          if ls dist | grep -q -- '-x64'; then
+            echo "::error::an artifact still names x64; studio-manifest reads names as GOARCH"
+            exit 1
+          fi
+          if ! ls dist | grep -q -- "-${{ matrix.platform }}-${{ matrix.arch }}"; then
+            echo "::error::no artifact named for ${{ matrix.platform }}-${{ matrix.arch }}"
+            exit 1
+          fi
+
+      # The update channel is the signed manifest. A second answer to which
+      # version is current is not a convenience. The .blockmap is the same
+      # channel's differential index and carries the release prefix, so it also
+      # inflates the count the release uses to refuse a partial publish.
+      - name: No electron-updater metadata
+        run: |
+          if ls dist | grep -qiE '^(latest|beta|alpha).*\.yml$'; then
+            echo "::error::electron-updater metadata was published beside the manifest channel"
+            exit 1
+          fi
+          if ls dist | grep -q '\.blockmap$'; then
+            echo "::error::a .blockmap ships under the release prefix; set differentialPackage: false"
+            exit 1
+          fi
+
+      # A binary inside app.asar cannot be spawned and the kernel serves the SPA
+      # off disk, so both have to be resources. Found rather than asserted at a
+      # path, because the unpacked directory is named by the builder.
+      - name: The kernel and the page are resources, not archive members
+        run: |
+          host=$(find dist -type f -path '*/bin/reasonix-studio-host*' ! -path '*app.asar*' | head -1)
+          page=$(find dist -type f -path '*/frontend-next/dist/index.html' ! -path '*app.asar*' | head -1)
+          echo "kernel: ${host:-<missing>}"
+          echo "page:   ${page:-<missing>}"
+          test -n "$host" -a -n "$page"
+
+      # Read off the package rather than off the config that describes it. Both
+      # of these went wrong the same way once: electron-builder names a package
+      # after package.json unless told, and fpm records the owner it finds on
+      # disk. Either one leaves a Studio that cannot update itself on Linux and
+      # says nothing about it until a user asks.
+      - name: The .deb is Studio's own package and carries what updates it
+        if: runner.os == 'Linux'
+        run: |
+          deb=$(ls dist/ReasonixStudio-linux-*.deb)
+          name=$(dpkg-deb -f "$deb" Package)
+          if [ "$name" != "reasonix-studio" ]; then
+            echo "::error::the package is $name; dpkg holds that beside the installed reasonix-studio instead of upgrading it, and update.StudioLine asks for it by name"
+            exit 1
+          fi
+          dpkg-deb -c "$deb" > contents.txt
+          # The path is the polkit action's exec.path annotation, so it is the
+          # only one authorization is granted for; root because polkit will not
+          # run a helper the invoking user could have written. Either spelling
+          # of root: dpkg-deb prints the numeric ids it cannot map, and which
+          # one it prints is a property of the machine reading the package
+          # rather than of the package.
+          if ! grep -qE '^-rwxr-xr-x (root/root|0/0) +[0-9]+ .* \./usr/lib/reasonix-studio/reasonix-studio-update-helper$' contents.txt; then
+            echo "::error::no root-owned executable update helper at the path the polkit action names"
+            grep reasonix-studio-update-helper contents.txt || echo "(not in the package at all)"
+            exit 1
+          fi
+          if ! grep -q './usr/share/polkit-1/actions/io.reasonix.studio.update.policy$' contents.txt; then
+            echo "::error::the polkit action is not in the package, so pkexec has nothing to authorize against"
+            exit 1
+          fi
+
+      # The Electron shell sets the package's glibc floor; a Go binary linked
+      # with cgo would raise it to the runner's own.
+      - name: The .deb's Go binaries are statically linked
+        if: runner.os == 'Linux'
+        run: |
+          deb=$(ls dist/ReasonixStudio-linux-*.deb)
+          dpkg-deb -x "$deb" "$RUNNER_TEMP/deb"
+          host=$(find "$RUNNER_TEMP/deb" -type f -path '*/resources/bin/reasonix-studio-host')
+          test -n "$host"
+          node desktop/electron/packaging/elf.js "$host" "$RUNNER_TEMP/deb/usr/lib/reasonix-studio/reasonix-studio-update-helper"
+
+      # Recorded, not asserted: the real bundle layout, so later work argues
+      # from what electron-builder produced rather than from its documentation.
+      - name: Record the macOS bundle layout
+        if: runner.os == 'macOS'
+        run: |
+          app=$(find dist -maxdepth 2 -name '*.app' | head -1)
+          echo "app: $app"
+          ls "$app/Contents"
+          ls "$app/Contents/Resources" | head -20
+          ls "$app/Contents/Frameworks" | head -20
+
+      # The end of the contract: not that the name parses, but that the manifest
+      # keys the artifact under the platform this runner actually is. The tool
+      # writes latest.json into the directory and logs to stdout, so the check
+      # reads the file -- captured output would match its own progress line.
+      - name: studio-manifest resolves the platform this runner is
+        working-directory: desktop
+        env:
+          GITHUB_REPOSITORY: ${{ github.repository }}
+        run: |
+          go run ./cmd/studio-manifest ../dist v0.0.0-ci v0.0.0-ci
+          cat ../dist/latest.json
+          if ! grep -q '"${{ matrix.platform }}-${{ matrix.arch }}"' ../dist/latest.json; then
+            echo "::error::the manifest has no entry for ${{ matrix.platform }}-${{ matrix.arch }}"
+            exit 1
+          fi

@@ -1,0 +1,31 @@
+{
+  "name": "reasonix-studio-electron",
+  "version": "0.0.0",
+  "private": true,
+  "description": "Electron shell for Reasonix Studio over the loopback host",
+  "homepage": "https://github.com/esengine/DeepSeek-Reasonix",
+  "author": "esengine <esengine@users.noreply.github.com>",
+  "main": "src/main.js",
+  "scripts": {
+    "start": "electron .",
+    "build:host": "node packaging/build-host.js",
+    "build:linux-payload": "node packaging/linux-payload.js",
+    "test": "node --test test/unit.mjs",
+    "build:app": "electron-builder --dir",
+    "build:dist": "electron-builder",
+    "smoke": "electron test/smoke.js",
+    "browser-live": "electron test/browser_live.js",
+    "freeze-live": "electron test/freeze_live.js",
+    "computer-live": "electron test/computer_live.js"
+  },
+  "devDependencies": {
+    "electron": "44.5.1",
+    "electron-builder": "^26.15.3",
+    "playwright": "1.63.0"
+  },
+  "pnpm": {
+    "onlyBuiltDependencies": [
+      "electron"
+    ]
+  }
+}

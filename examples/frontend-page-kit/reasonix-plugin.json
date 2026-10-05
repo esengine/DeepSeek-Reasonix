@@ -1,0 +1,9 @@
+{
+  "apiVersion": "reasonix.io/plugin/v2",
+  "name": "frontend-page-kit",
+  "version": "0.1.0",
+  "description": "Build a local interface from a selected brief and report observed browser acceptance",
+  "contributes": {
+    "skills": ["skills"]
+  }
+}

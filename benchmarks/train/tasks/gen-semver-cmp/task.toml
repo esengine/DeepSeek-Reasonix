@@ -1,0 +1,26 @@
+prompt = """The module `semver_cmp.py` in your working directory exposes a function
+`compare(a, b)` that compares two semantic version strings and returns -1 if
+`a` sorts before `b`, 0 if they are equal, and 1 if `a` sorts after `b`.
+The current implementation does not follow the SemVer 2.0.0 precedence rules
+correctly. Fix it so that:
+
+- MAJOR, MINOR and PATCH are compared as numbers, from left to right, so
+  `2.0.0 > 1.9.9` and `10.2.3 > 9.9.9`.
+- A version without a pre-release is greater than the same core version with
+  one: `1.0.0 > 1.0.0-alpha`.
+- When both versions have a pre-release, their dot-separated identifiers are
+  compared field by field:
+  - numeric identifiers compare as numbers (`1.0.0-beta.11 > 1.0.0-beta.2`);
+  - a numeric identifier has lower precedence than an alphanumeric one
+    (`1.0.0-alpha.1 < 1.0.0-alpha.beta`);
+  - alphanumeric identifiers compare in ASCII lexicographic order
+    (`1.0.0-alpha < 1.0.0-beta`);
+  - when all shared identifiers are equal, the version with more fields is
+    greater (`1.0.0-alpha.1 < 1.0.0-alpha.1.1`).
+
+Keep the signature `compare(a, b)`, keep the module importable as
+`semver_cmp`, and only use the Python standard library. Inputs are
+well-formed semver strings."""
+
+class = "codegen"
+timeout_sec = 300

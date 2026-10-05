@@ -1,0 +1,3 @@
+prompt = "slugify in slug.py leaves stray hyphens at the ends of some slugs. Fix it."
+class = "atomic-bugfix"
+timeout_sec = 180

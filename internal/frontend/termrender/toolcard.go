@@ -1,0 +1,167 @@
+// Formats a tool call as a Claude-style card line: a "● Verb(primary arg)"
+// header instead of the raw "-> name {json}", plus the "⎿" continuation gutter.
+package termrender
+
+import (
+	"encoding/json"
+	"strconv"
+	"strings"
+
+	"reasonix/internal/contract/tool"
+)
+
+// toolVerb maps a tool's snake_case id to the verb shown in its card.
+var toolVerb = map[string]string{
+	"bash":           "Bash",
+	"bash_output":    "Output",
+	"kill_shell":     "Kill",
+	"wait":           "Wait",
+	"read_file":      "Read",
+	"write_file":     "Write",
+	"edit_file":      "Update",
+	"multi_edit":     "Update",
+	"move_file":      "Move",
+	"delete_range":   "Update",
+	"delete_symbol":  "Update",
+	"notebook_edit":  "Update",
+	"glob":           "Glob",
+	"grep":           "Search",
+	"ls":             "List",
+	"web_fetch":      "Fetch",
+	"web_search":     "Search",
+	"complete_step":  "Step",
+	"task":           "Task",
+	"use_capability": "MCP",
+}
+
+// toolArgKey is the JSON field shown in parentheses for each tool (wait is
+// special-cased — it carries a job_ids array, not a scalar).
+var toolArgKey = map[string]string{
+	"bash":          "command",
+	"bash_output":   "job_id",
+	"kill_shell":    "job_id",
+	"read_file":     "path",
+	"write_file":    "path",
+	"edit_file":     "path",
+	"multi_edit":    "path",
+	"move_file":     "source_path",
+	"delete_range":  "path",
+	"delete_symbol": "name",
+	"notebook_edit": "path",
+	"glob":          "pattern",
+	"grep":          "pattern",
+	"ls":            "path",
+	"web_fetch":     "url",
+	"web_search":    "query",
+	"complete_step": "summary",
+	"task":          "description",
+}
+
+// ToolDot returns the "●" status glyph coloured by the tool's category so the eye
+// can tell reads (cyan) from writes (green), shell (yellow), process control
+// (magenta), and everything else (copper) at a glance.
+func ToolDot(name string) string {
+	var c Color
+	switch toolCategory[name] {
+	case "read":
+		c = activeTheme.ToolRead
+	case "write":
+		c = activeTheme.Success
+	case "exec":
+		c = activeTheme.Warn
+	case "proc":
+		c = activeTheme.ToolProc
+	default:
+		c = activeTheme.Accent
+	}
+	return ThemeFg(c, "●")
+}
+
+var toolCategory = map[string]string{
+	"read_file": "read", "ls": "read", "glob": "read", "grep": "read",
+	"web_fetch": "read", "web_search": "read", "bash_output": "read",
+	"write_file": "write", "edit_file": "write", "multi_edit": "write",
+	"move_file": "write", "delete_range": "write", "delete_symbol": "write", "notebook_edit": "write",
+	"bash": "exec",
+	"wait": "proc", "kill_shell": "proc",
+}
+
+// IsShellTool reports a tool that runs a shell command.
+func IsShellTool(name string) bool { return tool.IsShellTool(name) }
+
+// ToolDisplayName returns the card verb for a tool: a mapped builtin verb, the
+// short name for an MCP tool (mcp__server__tool), or the raw id as a fallback.
+func ToolDisplayName(name string) string {
+	if _, short, ok := tool.SplitMCPName(name); ok {
+		return short
+	}
+	if v, ok := toolVerb[name]; ok {
+		return v
+	}
+	return name
+}
+
+// ToolArg pulls the primary argument shown in the card's parentheses.
+func ToolArg(name, args string) string {
+	var m map[string]any
+	if json.Unmarshal([]byte(args), &m) != nil {
+		return ""
+	}
+	if name == "wait" {
+		return argList(m["job_ids"])
+	}
+	if name == "use_capability" {
+		if id, ok := m["capability_id"].(string); ok && strings.TrimSpace(id) != "" {
+			return strings.TrimSpace(id)
+		}
+		if action, ok := m["action"].(string); ok {
+			return strings.TrimSpace(action)
+		}
+		return ""
+	}
+	v, ok := m[toolArgKey[name]]
+	if !ok {
+		return ""
+	}
+	switch x := v.(type) {
+	case string:
+		return strings.TrimSpace(x)
+	case []any:
+		return argList(x)
+	case float64:
+		return strconv.Itoa(int(x))
+	default:
+		return ""
+	}
+}
+
+func argList(v any) string {
+	arr, ok := v.([]any)
+	if !ok {
+		return ""
+	}
+	parts := make([]string, 0, len(arr))
+	for _, e := range arr {
+		if s, ok := e.(string); ok {
+			parts = append(parts, s)
+		}
+	}
+	return strings.Join(parts, ", ")
+}
+
+// ToolCard renders the dispatch line: "  ⏺ Verb(arg)", arg clamped to width.
+func ToolCard(name, args string, width int) string {
+	return "  " + ToolDot(name) + " " + ToolHead(name, ToolArg(name, args), width)
+}
+
+// ToolHead builds "Verb(arg)" with the verb bold and the arg clamped to fit the
+// remaining width; shared by toolCard and the diff block header.
+func ToolHead(name, arg string, width int) string {
+	label := ToolDisplayName(name)
+	head := Bold(label)
+	if arg != "" {
+		avail := width - 4 - len([]rune(label)) - 2
+		head += Dim("(") + clampPlain(arg, avail) + Dim(")")
+	}
+	return head
+}

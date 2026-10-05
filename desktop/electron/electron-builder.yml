@@ -1,0 +1,131 @@
+# Packaging for Reasonix Studio. Artifact names, bundle identity and the macOS
+# floor match what the Wails line shipped, because the update manifest and the
+# release workflow read them: a rename here is a version nobody is offered.
+appId: io.reasonix.studio
+productName: Reasonix Studio
+copyright: Copyright © esengine
+
+directories:
+  output: ../../dist
+  buildResources: assets
+
+# electron-builder names artifacts x64 where the release vocabulary is GOARCH.
+# The first hook is where the architecture is still a value; the second renames
+# and refuses to hand back a name studio-manifest could not resolve.
+# No electron-updater metadata: the update channel is the signed manifest
+# studio-manifest writes, and a second one would be a second answer to which
+# version is current.
+publish: null
+
+# Chromium ships 220 locale bundles and the interface draws two languages, so
+# the rest are 46MB nothing reads. Traditional stays because a system set to it
+# would otherwise fall back to English inside Chromium's own surfaces.
+#
+# Both spellings, because the match is against the file name and the platforms
+# disagree: macOS names them zh_CN.lproj, Windows and Linux zh-CN.pak. Listing
+# one spelling deletes the other platform's Chinese and says nothing.
+electronLanguages:
+  - en-US
+  - zh-CN
+  - zh_CN
+  - zh-TW
+  - zh_TW
+
+artifactBuildCompleted: ./packaging/record-artifact-arch.js
+afterAllArtifactBuild: ./packaging/canonical-artifact-names.js
+
+# The shell only. The kernel and the SPA are resources rather than app files:
+# a binary inside app.asar cannot be spawned, and the SPA is read off disk.
+files:
+  - src/**/*
+  - assets/**/*
+  - package.json
+extraResources:
+  - from: bin
+    to: bin
+    filter:
+      - reasonix-studio-host
+      - reasonix-studio-host.exe
+      - reasonix-computer-helper
+      - reasonix-computer-helper.exe
+  - from: ../frontend-next/dist
+    to: frontend-next/dist
+
+win:
+  target:
+    # The portable zip stays alongside the installer: it is what a machine
+    # without administrator rights can still run.
+    - nsis
+    - zip
+  icon: assets/icon.ico
+  artifactName: ReasonixStudio-windows-${arch}.${ext}
+
+nsis:
+  oneClick: false
+  perMachine: false
+  allowToChangeInstallationDirectory: true
+  # The .blockmap beside the installer is electron-updater's differential
+  # download index, and it is named ReasonixStudio-* like everything else: the
+  # release counts artifacts by that prefix to refuse a partial publish, so one
+  # more file there hides a missing one. macOS has no equivalent option and its
+  # zip writes one regardless, which canonical-artifact-names.js deletes —
+  # refused at the source here, swept there.
+  differentialPackage: false
+  # studio-manifest reads the installer channel off this exact suffix.
+  artifactName: ReasonixStudio-windows-${arch}-installer.${ext}
+
+mac:
+  target:
+    # The zip is what the updater downloads; the dmg is what a person drags.
+    - dmg
+    - zip
+  icon: assets/icon.icns
+  category: public.app-category.developer-tools
+  # Electron 44's own floor. The 10.13 this inherited from the Wails packaging
+  # was what WebKit linked against and is not a claim this shell can make.
+  minimumSystemVersion: "13.0"
+  # Notarization requires the hardened runtime, and under it V8's JIT is refused
+  # unless it is granted. Nothing wider: the kernel beside the app is a spawned
+  # executable, which is a nested-code signing question, not a library-validation
+  # one — see docs/STUDIO_RELEASE.md.
+  hardenedRuntime: true
+  entitlements: assets/entitlements.plist
+  entitlementsInherit: assets/entitlements.plist
+  artifactName: ReasonixStudio-darwin-${arch}.${ext}
+
+linux:
+  target:
+    - deb
+  icon: assets/icon.png
+  category: Development
+  maintainer: esengine <esengine@users.noreply.github.com>
+  artifactName: ReasonixStudio-linux-${arch}.${ext}
+
+deb:
+  # Named, not defaulted. electron-builder takes the package name from
+  # package.json's `name` unless told otherwise, which would publish
+  # reasonix-studio-electron: dpkg would then hold it beside the installed
+  # reasonix-studio rather than upgrading it, and update.StudioLine asks dpkg
+  # which package owns this install by that exact name -- a mismatch sends the
+  # Linux self-update down the portable-archive path, behind the package
+  # manager's back.
+  packageName: reasonix-studio
+  # The two files the self-update needs at absolute system paths, which nothing
+  # but an fpm argument places. Their destinations are fixed by the policy
+  # itself: it annotates exec.path with the helper's, so a helper anywhere else
+  # is refused. They are also the paths the Wails package owned, which is what
+  # keeps a dpkg upgrade from removing what the new package still needs.
+  #
+  # root is stated rather than left to fpm's default, because the owner it
+  # records is a property of whoever ran the build, and polkit will not execute
+  # a helper the invoking user could have written.
+  #
+  # Paths are relative to this directory, which is where pnpm runs the script
+  # and therefore fpm; packaging/linux-payload.js stages the helper into it.
+  fpm:
+    - --deb-user
+    - root
+    - --deb-group
+    - root
+    - linux/reasonix-studio-update-helper=/usr/lib/reasonix-studio/reasonix-studio-update-helper
+    - ../packaging/linux/io.reasonix.studio.update.policy=/usr/share/polkit-1/actions/io.reasonix.studio.update.policy

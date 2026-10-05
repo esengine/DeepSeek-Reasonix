@@ -1,0 +1,5 @@
+example: two-char-B-newline
+repeated unit: "B\n" (2 bytes)
+repetitions generated before the guard tripped: 965
+repeated block before tripping/stripping: 1930 bytes
+wasted tokens (ceil(bytes/4)): 483

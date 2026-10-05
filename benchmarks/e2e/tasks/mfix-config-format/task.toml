@@ -1,0 +1,3 @@
+prompt = "Configs written by confwriter.py cannot be read back by confreader.py — the two files disagree about the line format. Make write/read round-trip correctly."
+class = "multi-file-bugfix"
+timeout_sec = 240

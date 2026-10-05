@@ -1,0 +1,116 @@
+name: Issue replies
+
+# Posts maintainer replies as github-actions[bot], so a batch of triage answers
+# spends the repository's quota instead of a person's content-creation limit.
+on:
+  workflow_dispatch:
+    inputs:
+      replies:
+        description: 'JSON array of {"issue": 123, "body": "...", "close": true | "not_planned"} or {"discussion": 123, "body": "...", "close": "resolved" | "outdated" | "duplicate"}'
+        required: true
+        type: string
+      interval:
+        description: Seconds between entries
+        required: false
+        default: '20'
+        type: string
+
+permissions:
+  issues: write
+  pull-requests: write
+  discussions: write
+
+concurrency:
+  group: issue-replies
+  cancel-in-progress: false
+
+jobs:
+  reply:
+    runs-on: win-gpu
+    timeout-minutes: 180
+    steps:
+      - uses: actions/github-script@3a2844b7e9c422d3c10d287c895573f7108da1b3 # v9
+        env:
+          REPLIES: ${{ inputs.replies }}
+          INTERVAL: ${{ inputs.interval }}
+        with:
+          script: |
+            const replies = JSON.parse(process.env.REPLIES);
+            if (!Array.isArray(replies)) throw new Error('replies must be a JSON array');
+            const { owner, repo } = context.repo;
+            const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
+            const failed = [];
+            // Only a rate limit is worth waiting out; any other refusal is final.
+            const rateLimited = (error) => {
+              const headers = error.response?.headers ?? {};
+              return error.status === 429 ||
+                (error.status === 403 && (headers['retry-after'] !== undefined || headers['x-ratelimit-remaining'] === '0'));
+            };
+            // Discussions have no REST comment API; they are addressed by node id.
+            const replyToDiscussion = async (number, body) => {
+              const q = await github.graphql(
+                `query($owner:String!,$repo:String!,$n:Int!){repository(owner:$owner,name:$repo){discussion(number:$n){id comments(last:100){nodes{body author{login}}}}}}`,
+                { owner, repo, n: number });
+              const d = q.repository.discussion;
+              if (!d) throw new Error('no such discussion');
+              if (d.comments.nodes.some((c) => c.author?.login === 'github-actions' && c.body === body)) return false;
+              await github.graphql(`mutation($id:ID!,$body:String!){addDiscussionComment(input:{discussionId:$id,body:$body}){comment{id}}}`, { id: d.id, body });
+              return true;
+            };
+            const closeReasons = { resolved: 'RESOLVED', outdated: 'OUTDATED', duplicate: 'DUPLICATE' };
+            const closeDiscussion = async (number, reason) => {
+              const q = await github.graphql(
+                `query($owner:String!,$repo:String!,$n:Int!){repository(owner:$owner,name:$repo){discussion(number:$n){id closed}}}`,
+                { owner, repo, n: number });
+              const d = q.repository.discussion;
+              if (d.closed) return;
+              await github.graphql(`mutation($id:ID!,$r:DiscussionCloseReason!){closeDiscussion(input:{discussionId:$id,reason:$r}){discussion{id}}}`, { id: d.id, r: reason });
+            };
+            for (const { issue, discussion, body, close } of replies) {
+              if (Number.isInteger(discussion) && typeof body === 'string' && body.trim() !== '') {
+                try {
+                  const posted = await replyToDiscussion(discussion, body);
+                  if (close !== undefined && close !== false) {
+                    const reason = closeReasons[close];
+                    if (!reason) throw new Error(`unknown close reason ${close}`);
+                    await closeDiscussion(discussion, reason);
+                  }
+                  core.info(`discussion #${discussion}: ${posted ? 'replied' : 'already replied'}${close ? ', closed' : ''}`);
+                } catch (error) {
+                  failed.push(`discussion ${discussion}: ${error.message}`);
+                }
+                await sleep(Math.max(1, Number(process.env.INTERVAL) || 20) * 1000);
+                continue;
+              }
+              if (!Number.isInteger(issue) || typeof body !== 'string' || body.trim() === '') {
+                failed.push(`${issue}: malformed entry`);
+                continue;
+              }
+              try {
+                const comments = await github.paginate(github.rest.issues.listComments, { owner, repo, issue_number: issue, per_page: 100 });
+                const posted = comments.some((c) => c.user?.type === 'Bot' && c.body === body);
+                if (!posted) {
+                  for (let attempt = 0; ; attempt++) {
+                    try {
+                      await github.rest.issues.createComment({ owner, repo, issue_number: issue, body });
+                      break;
+                    } catch (error) {
+                      if (attempt >= 5 || !rateLimited(error)) throw error;
+                      core.warning(`#${issue}: ${error.message}; retrying in 2 minutes`);
+                      await sleep(120_000);
+                    }
+                  }
+                }
+                if (close === true || close === 'not_planned') {
+                  const { data } = await github.rest.issues.get({ owner, repo, issue_number: issue });
+                  if (data.state === 'open') {
+                    await github.rest.issues.update({ owner, repo, issue_number: issue, state: 'closed', state_reason: close === 'not_planned' ? 'not_planned' : 'completed' });
+                  }
+                }
+                core.info(`#${issue}: ${posted ? 'already replied' : 'replied'}${close ? ', closed' : ''}`);
+              } catch (error) {
+                failed.push(`${issue}: ${error.message}`);
+              }
+              await sleep(Math.max(1, Number(process.env.INTERVAL) || 20) * 1000);
+            }
+            if (failed.length) core.setFailed(`not done:\n${failed.join('\n')}`);

@@ -1,0 +1,67 @@
+{
+  "schemaVersion": 1,
+  "id": "official-violet-starlight",
+  "name": "Violet Starlight",
+  "author": "Reasonix Contributors",
+  "description": "Blue-violet starfield with glowing butterflies and an original celestial muse.",
+  "license": "MIT",
+  "baseStyle": "nocturne",
+  "tokens": {
+    "light": {
+      "bg": "#F7F4FF",
+      "bgSoft": "#EFEBFB",
+      "bgElev": "#FCFAFF",
+      "panel": "#FCFAFF",
+      "border": "#CABDEC",
+      "borderSoft": "#E8E3F7",
+      "fg": "#251F3C",
+      "fgDim": "#544B74",
+      "fgFaint": "#6D658D",
+      "accent": "#6242C7",
+      "accentFg": "#F7F4FF",
+      "float": "#FCFAFF",
+      "floatHi": "#FCFAFF",
+      "codeBg": "#F3F0FD",
+      "sunkBg": "#F7F4FF",
+      "synKeyword": "#6242C7",
+      "synString": "#96452C",
+      "synNumber": "#962C7D",
+      "synFunction": "#247B55"
+    },
+    "dark": {
+      "bg": "#0C1022",
+      "bgSoft": "#131834",
+      "bgElev": "#1A2140",
+      "panel": "#151B36",
+      "border": "#2E3A66",
+      "borderSoft": "#222B4E",
+      "fg": "#F4F2FF",
+      "fgDim": "#C2BDE8",
+      "fgFaint": "#8985BD",
+      "accent": "#9B86FF",
+      "accentFg": "#14102E",
+      "float": "#151B36",
+      "floatHi": "#1A2140",
+      "codeBg": "#10142B",
+      "sunkBg": "#0C1022",
+      "synKeyword": "#9B86FF",
+      "synString": "#DF9E90",
+      "synNumber": "#DF90D1",
+      "synFunction": "#90DFB8"
+    }
+  },
+  "recipes": {
+    "density": "comfortable",
+    "corners": "round"
+  },
+  "background": {
+    "image": "background.webp",
+    "focusX": 0.73,
+    "focusY": 0.44,
+    "safeArea": "left",
+    "homeOpacity": 0.96,
+    "taskOpacity": 0.18,
+    "overlayStrength": 0.72,
+    "paneOpacity": 0.5
+  }
+}

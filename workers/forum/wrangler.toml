@@ -1,0 +1,32 @@
+# Reasonix Community forum API. Identity from id.reasonix.io; content + anti-abuse
+# state in its own D1. First deploy:
+#   wrangler d1 create reasonix-forum        # paste database_id below
+#   wrangler d1 execute reasonix-forum --remote --file=schema.sql
+#   wrangler d1 execute reasonix-forum --remote --file=seed.sql
+#   wrangler deploy
+name = "reasonix-forum"
+main = "src/index.ts"
+compatibility_date = "2026-06-01"
+
+routes = [{ pattern = "forum.reasonix.io", custom_domain = true }]
+
+[vars]
+# Where the forum web app lives (for CORS + login redirects).
+APP_ORIGIN = "https://reasonix.io"
+ALLOWED_ORIGINS = "https://reasonix.io,https://www.reasonix.io"
+# Shared identity service that resolves the session.
+ID_ORIGIN = "https://id.reasonix.io"
+# Emails minted as forum admins/moderators on first sign-in.
+ADMIN_EMAILS = "359807859@qq.com"
+
+[[d1_databases]]
+binding = "DB"
+database_name = "reasonix-forum"
+database_id = "294f6daa-6ee5-4c2d-a98f-54b38a1b3ac0"
+
+# Per-IP throttle for content creation (topics/replies/flags).
+[[unsafe.bindings]]
+name = "POST_LIMITER"
+type = "ratelimit"
+namespace_id = "3001"
+simple = { limit = 10, period = 60 }

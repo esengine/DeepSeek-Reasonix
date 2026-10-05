@@ -1,0 +1,289 @@
+# Reasonix configuration.
+# Resolution order: flag > ./reasonix.toml > ~/config.toml > built-in defaults.
+# Fields marked user/global only are not overridden by ./reasonix.toml.
+# Secrets are named via api_key_env and stored in Reasonix's global .env; never put keys here.
+
+config_version = 12   # schema marker for diagnostics; old versions may ignore it
+default_model = "deepseek-flash"
+# language      = "zh"   # ui/model language; empty = auto-detect from $LANG / $REASONIX_LANG
+credentials_store = "auto"   # legacy compatibility; provider keys are saved in Reasonix's global .env
+
+[ui]
+theme = "auto"   # auto|dark|light; CLI colors only; REASONIX_THEME can override per run
+# theme_style = "graphite"   # graphite|aurora|slate|carbon|nocturne|amber and legacy aliases
+# shortcut_layout = "desktop"   # classic|desktop; compatibility setting; Shift+Tab cycles read-only/workspace/YOLO/plan; Ctrl+Y toggles YOLO
+# cursor_shape = "bar"   # block|underline|bar; text input cursor shape
+# show_reasoning = true   # CLI: show thinking text by default; false = collapsed (toggle with Ctrl+O)
+show_turn_usage = true   # CLI/TUI: show per-request token and cost receipts in the transcript
+
+[desktop]
+# language = "zh"   # desktop UI language; empty/auto = browser/OS auto-detect
+layout_style = "workbench"   # desktop layout: workbench|creation; legacy classic migrates to workbench
+theme = "auto"   # desktop only: auto|dark|light
+terminal_theme = "auto"   # integrated terminal: auto|dark|light; auto follows the desktop app
+# theme_style = "graphite"   # graphite|aurora|slate|carbon|nocturne|amber and legacy aliases
+# external_opener = "vscode"   # desktop Open control: installed application id
+close_behavior = "background"   # desktop: quit|background when the window close button is clicked
+status_bar_style = "icon"   # desktop: icon|text metric labels in the bottom status bar
+status_bar_style_initialized = true   # icon default upgrade applied; preserve later user choices
+status_bar_items = ["model", "workspace", "git_branch", "cache", "cache_avg", "session_tokens", "turn_tokens", "turn_tps", "turn_output_tokens", "turn_cache_tokens", "turn_cost", "session_turns", "context", "compact", "cost", "balance"]   # desktop: ordered visible bottom status bar items
+default_tool_approval_mode = "danger-full-access"   # desktop: read-only/workspace-write/danger-full-access default for new sessions
+check_updates = true   # desktop: check for new versions on startup
+telemetry = true   # desktop: anonymous launch ping + scrubbed next-launch native crash diagnostics; never content
+metrics = true   # desktop: aggregate quality/lifecycle metrics (anonymous signal/bucket counts); never content
+expand_thinking = false   # desktop: legacy reasoning display alias; use reasoning_display_mode
+display_mode = "standard"   # desktop: standard|compact transcript display mode
+
+[billing]
+# display_currency = "auto"   # auto|CNY|USD; display only — does not rewrite provider list prices
+
+[notifications]
+enabled = false   # system notifications for CLI and desktop turns; default off
+turn_done = true   # notify when a turn finishes
+approval_request = true   # notify when a tool approval is waiting
+ask_request = true   # notify when a question is waiting
+
+[network]
+proxy_mode = "auto"   # auto|env|custom|off; auto currently uses env proxy
+# proxy_url  = "socks5://127.0.0.1:7890"   # optional custom override
+# no_proxy   = "localhost,127.0.0.1,.local"   # honored for proxy_mode = "custom"
+
+[network.proxy]
+type = "socks5"   # http|https|socks5|socks5h
+# server = "127.0.0.1"
+# port = 7890
+# username = ""
+# password = "${REASONIX_PROXY_PASSWORD}"   # optional; supports ${VAR} expansion
+
+[environment]
+enabled = true   # inject a stable startup environment summary into the model prompt
+offline = false   # declare that outbound network access is unavailable; prevents futile retries
+# [environment.tools]
+# go = "/opt/homebrew/bin/go"   # trusted executable path; workspace-local paths are not auto-executed
+
+[agent]
+# system_prompt = """..."""   # omit to use the built-in prompt for this version
+# system_prompt_file = "prompts/system.md"   # project paths stay in <workspace>; user paths may fall back to <reasonix home>
+temperature       = 0.0
+# reasoning_language = "zh"   # visible reasoning language: auto|zh|en
+compact_ratio       = 0.8   # sole auto trigger; presets 0.70/0.80/0.85 (default 0.80)
+# keep                = ["errors"]   # deprecated compatibility field; ignored at runtime
+# recent_keep         = 2   # deprecated compatibility field; ignored at runtime
+# plan_mode_read_only_commands = ["gh issue view"]   # legacy compatibility only; Plan bash uses Permissions
+# planner_model = "deepseek-pro"   # optional: enable two-model collaboration
+web_search_model = "deepseek-flash"
+# vision_model = "auto"   # optional: summarize images for text-only models
+# subagent_model = "deepseek-pro"   # optional default for runAs=subagent skills
+# subagent_models = { review = "deepseek-pro", security_review = "deepseek-pro" }   # per-skill overrides
+# subagent_effort = "high"   # optional default effort for subagents
+# subagent_efforts = { review = "max", task = "high" }   # per-tool/skill effort overrides
+# max_subagent_depth = 2   # nested subagent delegation depth; set 1 to disable nested delegation
+# max_subagent_concurrency = 6   # session-wide sub-agent concurrency (task/fleet/skills)
+# max_parallel_writers = 3   # concurrent writers with non-overlapping write_paths
+# output_style = "explanatory"   # explanatory | learning | concise | custom; empty = default
+
+[[providers]]
+name        = "deepseek-flash"
+kind        = "openai"
+base_url    = "https://api.deepseek.com"
+model       = "deepseek-flash"
+api_key_env = "DEEPSEEK_API_KEY"
+balance_url = "https://api.deepseek.com/user/balance"   # optional; wallet-balance endpoint shown in the status bar
+context_window = 1000000   # tokens; compaction triggers near this limit
+# max_output_tokens = 0       # recommended: official DeepSeek omits the field (server 384K ceiling)
+# max_output_tokens = 32768   # optional cost cap
+# max_output_tokens = 65536   # optional cost cap
+# max_output_tokens = 131072  # optional cost cap
+price       = { cache_hit = 0.006, input = 0.3, output = 1.2, currency = "$" }   # provider-wide fallback, per 1M tokens
+billing_currency = "USD"   # frozen list-price currency; independent of display_currency
+thinking    = "enabled"
+web_search  = true   # independent web_search tool; omitted defaults on for supported official DeepSeek APIs
+supported_efforts = ["disabled", "low", "high", "max"]   # custom /effort levels exposed by this provider; overrides the built-in Kind/BaseURL default
+default_effort    = "high"   # used when /effort is auto or unset; must be one of supported_efforts
+
+[[providers]]
+name        = "deepseek-pro"
+kind        = "openai"
+base_url    = "https://api.deepseek.com"
+model       = "deepseek-v4-pro"
+api_key_env = "DEEPSEEK_API_KEY"
+display_name = "My DeepSeek"
+balance_url = "https://api.deepseek.com/user/balance"   # optional; wallet-balance endpoint shown in the status bar
+context_window = 1000000   # tokens; compaction triggers near this limit
+# max_output_tokens = 0       # recommended: official DeepSeek omits the field (server 384K ceiling)
+# max_output_tokens = 32768   # optional cost cap
+# max_output_tokens = 65536   # optional cost cap
+# max_output_tokens = 131072  # optional cost cap
+price       = { cache_hit = 0.044, input = 1.32, output = 3.96, currency = "$" }   # provider-wide fallback, per 1M tokens
+billing_currency = "USD"   # frozen list-price currency; independent of display_currency
+thinking    = "enabled"
+web_search  = true   # independent web_search tool; omitted defaults on for supported official DeepSeek APIs
+supported_efforts = ["disabled", "low", "high", "max"]   # custom /effort levels exposed by this provider; overrides the built-in Kind/BaseURL default
+default_effort    = "high"   # used when /effort is auto or unset; must be one of supported_efforts
+
+[checkpoints]
+retain_turns = 7
+blob_quota_bytes = 536870912
+
+[tools]
+enabled = []   # empty = all built-in tools
+bash_timeout_seconds = 120   # foreground safety cap; set 0 for no tool-local cap
+mcp_startup_timeout_seconds = 30   # background initialize + tools/list safety cap; per-plugin overrides may raise it
+mcp_call_timeout_seconds = 300   # default MCP call safety cap; per-plugin/tool overrides may raise it
+
+[tools.background_jobs]
+stalled_warning_seconds = 900   # heads-up once per background job after this many quiet seconds; a quiet job is not necessarily stuck; 0 disables
+
+[tools.shell]
+# prefer = "auto"   # auto|bash|powershell|pwsh; empty/default = auto-detect
+# path   = "/opt/homebrew/bin/bash"   # absolute path to the shell executable; empty = PATH lookup
+
+[lsp]
+enabled = true   # language server tools; servers launch lazily when used
+# [lsp.servers.go]
+# command = "gopls"
+# args = []
+# extensions = [".go"]
+
+[browser]
+enabled = false   # browser tools for CLI/Serve sessions; the browser attaches on first use
+chrome_path = "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome"
+
+[skills]
+# paths = ["~/my-skills", "../shared/skills"]   # extra custom skill roots
+# excluded_paths = ["~/.agents/skills"]   # hide convention roots without deleting folders
+# disable_implicit_invocation = false   # keep skills available for automatic model invocation
+# max_depth = 3   # nested scan depth; set 1 for legacy root-only discovery
+# disabled_skills = ["review"]   # hide noisy or unwanted skills
+
+[permissions]
+# Per-call gating. mode = writer fallback when no rule matches: ask|allow|deny.
+# Readers always default to allow. Precedence: deny > ask > allow > fallback.
+# Rules are "Tool" or "Tool(specifier)"; e.g. Bash(go test:*), Edit(src/**).
+mode  = "ask"
+# deny = ["Bash(rm -rf*)", "Bash(git push*)"]   # hard-blocked in every mode
+# allow = ["Bash(go test:*)", "Bash(git status:*)"]   # never prompted
+# ask = ["Edit(src/**)"]   # force a prompt even if otherwise allowed
+
+[sandbox]
+# Confine tool blast radius. File-writers (write_file/edit_file/multi_edit/move_file)
+# may only write under workspace_root (empty = current dir) and allow_write extras.
+# bash = "enforce" jails each command in an OS sandbox when available;
+# without one, restricted permission modes refuse bash execution. Empty defaults to enforce.
+# macOS uses Seatbelt, Linux uses bubblewrap, and Windows uses a restricted token/AppContainer.
+# network allows sandboxed bash egress.
+# workspace_root = ""            # default: current working directory
+# allow_write = ["/tmp"]          # extra dirs writers may also modify
+# forbid_read = []                  # dirs the agent cannot read or list
+bash    = "enforce"
+network = true
+
+[statusline]   # user/global only, ./reasonix.toml cannot set it
+# A custom status line: a command whose first stdout line replaces the built-in
+# data row. It receives {"model","contextUsed","contextWindow","cwd"} as JSON on stdin.
+# command = "my-statusline.sh"
+
+# Bot gateway: multi-channel IM bot for QQ, Feishu/Lark, and WeChat.
+[bot]
+enabled = true
+# model = ""   # empty = default_model
+tool_approval_mode = "workspace-write"   # read-only|workspace-write|danger-full-access
+max_steps = 0
+debounce_ms = 1500
+queue_mode = "steer"   # steer|followup|collect|interrupt
+queue_cap = 20
+queue_drop = "summarize"   # summarize|old|new
+ignore_self_messages = true   # ignore bot echo by returned message_id and configured self user ids
+
+[bot.self_user_ids]
+qq = []
+feishu = []
+weixin = []
+dingtalk = []
+
+[bot.control]
+enabled = false   # local loopback HTTP API for status/send; requires Bearer token
+addr = "127.0.0.1:37913"
+token_env = "REASONIX_BOT_CONTROL_TOKEN"
+
+[bot.pairing]
+enabled = true
+request_ttl_minutes = 60
+max_pending_per_platform = 3
+
+[bot.allowlist]
+enabled = true
+allow_all = false
+qq_users = []
+feishu_users = []
+weixin_users = []
+dingtalk_users = []
+qq_approvers = []
+feishu_approvers = []
+weixin_approvers = []
+dingtalk_approvers = []
+qq_admins = []
+feishu_admins = []
+weixin_admins = []
+dingtalk_admins = []
+qq_groups = []
+feishu_groups = []
+weixin_groups = []
+dingtalk_groups = []
+
+[bot.qq]
+enabled = false
+app_id = "123"
+app_secret_env = "QQ_BOT_APP_SECRET"
+sandbox = false
+
+[bot.feishu]
+enabled = false
+app_id = ""
+domain = "feishu"
+app_secret_env = "FEISHU_BOT_APP_SECRET"
+verification_token = ""
+mode = "webhook"
+webhook_port = 8080
+require_mention = true
+
+[bot.weixin]
+enabled = false
+account_id = "default"
+token_env = "WEIXIN_BOT_TOKEN"
+api_base = "https://ilinkai.weixin.qq.com"
+
+[bot.dingtalk]
+enabled = false
+client_id = ""
+client_secret = ""
+client_id_env = ""
+secret_env = ""
+bot_name = ""
+require_mention = true
+
+[secrets]   # credential protection; user/global only, ./reasonix.toml cannot override
+# filter_subprocess_env = false   # opt-in; stripping tokens breaks gh, HTTPS git push, npm publish
+# protect_sensitive_files = false   # opt-in; hiding credential files can break legitimate edit workflows
+
+[remote]   # SSH remote hosts; user/global only, ./reasonix.toml cannot override
+
+[[remote.hosts]]
+name = "box"
+host = "10.0.0.1"
+user = "dev"
+credential_mode = "remote"   # remote (key on the host) | local-proxy (desktop holds the key; calls tunnel back)
+
+# External MCP servers. type: "stdio" (default, a subprocess) | "http" | "sse".
+# ${VAR} / ${VAR:-default} are expanded from the environment in command/args/env/url/headers.
+# [[plugins]]
+# name    = "example"
+# command = "reasonix-plugin-example"
+# startup_timeout_seconds = 60    # optional initialize + tools/list cap
+# call_timeout_seconds = 600       # optional per-server MCP call timeout
+# tool_timeout_seconds = { "generate_video" = 1800 }   # raw MCP tool names
+# [[plugins]]                                  # a remote server over Streamable HTTP
+# name    = "stripe"
+# type    = "http"
+# url     = "https://mcp.stripe.com"
+# headers = { Authorization = "Bearer ${STRIPE_KEY}" }

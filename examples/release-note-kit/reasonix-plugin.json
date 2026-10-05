@@ -1,0 +1,9 @@
+{
+  "apiVersion": "reasonix.io/plugin/v2",
+  "name": "release-note-kit",
+  "version": "0.1.0",
+  "description": "Draft release notes from a selected set of verified changes",
+  "contributes": {
+    "skills": ["skills"]
+  }
+}

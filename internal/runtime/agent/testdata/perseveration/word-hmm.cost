@@ -1,0 +1,5 @@
+example: word-hmm
+repeated unit: "hmm " (4 bytes)
+repetitions generated before the guard tripped: 483
+repeated block before tripping/stripping: 1932 bytes
+wasted tokens (ceil(bytes/4)): 483

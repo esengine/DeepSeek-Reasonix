@@ -1,0 +1,41 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<meta name="color-scheme" content="light"><title>Reasonix — 工作，由此展开</title>
+<link rel="stylesheet" href="workspace.css">
+</head>
+<body>
+<div class="studio" id="studio">
+<aside class="sidebar" aria-label="工作空间导航">
+  <button class="wordmark" data-action="home"><span class="brand-symbol">r<span></span></span><span>Reasonix<small>PERSONAL WORKSPACE</small></span></button>
+  <button class="new-task" data-action="new"><i data-icon="plus"></i> 新任务 <kbd>Ctrl N</kbd></button>
+  <button class="nav-item" data-action="search"><i data-icon="search"></i> 搜索工作空间 <kbd>⌘ K</kbd></button>
+  <div class="nav-group">
+    <button class="nav-item" data-route="home"><i data-icon="grid"></i> 工作台</button>
+    <button class="nav-item" data-route="inbox"><i data-icon="inbox"></i> 待我处理 <span class="count" id="attentionCount">2</span></button>
+    <button class="nav-item" data-route="library"><i data-icon="files"></i> 我的成果</button>
+  </div>
+  <div class="sidebar-label">项目 <button aria-label="创建项目" data-action="project"><i data-icon="plus"></i></button></div>
+  <button class="project-nav" data-action="project-info"><span class="project-avatar">A</span><span>Atelier 品牌工作室<small>策略 · 产品 · 内容</small></span><i data-icon="chevron"></i></button>
+  <div class="sidebar-label">最近任务 <span id="taskCount"></span></div>
+  <div class="task-list" id="taskList"></div>
+  <div class="sidebar-bottom">
+    <button class="nav-item" data-route="automation"><i data-icon="clock"></i> 定时任务</button>
+    <button class="nav-item" data-route="capabilities"><i data-icon="puzzle"></i> 能力与连接</button>
+    <div class="profile"><span class="profile-avatar">L</span><span>我的工作空间<small><span class="dot green"></span> 本地交互原型</small></span><button class="icon-button" data-action="settings" aria-label="界面设置"><i data-icon="settings"></i></button></div>
+  </div>
+</aside>
+<div class="body-shell">
+<header class="topbar"><div class="breadcrumb"><button class="icon-button" data-action="sidebar" aria-label="切换导航"><i data-icon="panel"></i></button><span>工作空间</span><span class="slash">/</span><strong id="pageTitle">秋季新品发布策略</strong></div><div class="top-actions"><span class="prototype-label">DESIGN PROTOTYPE</span><button class="icon-button" data-action="search" aria-label="搜索"><i data-icon="search"></i></button><button class="icon-button" data-action="notifications" aria-label="通知"><i data-icon="bell"></i><b id="notificationDot"></b></button><span class="top-avatar">L</span></div></header>
+<section id="page" class="page"></section>
+<footer class="statusbar"><span><i class="dot green"></i> Reasonix Studio <span class="statusbar-muted">/ 概念交互版</span></span><span id="bottomStatus">模型与工具调用均为模拟，不访问真实服务</span><span class="statusbar-muted">所有交互仅在本次页面中保留</span></footer>
+</div>
+</div>
+<dialog id="modal" class="modal"><header><div><span class="eyebrow" id="modalEyebrow">WORKSPACE</span><h2 id="modalTitle"></h2></div><button class="icon-button" data-action="close-modal" aria-label="关闭弹窗"><i data-icon="close"></i></button></header><div id="modalBody" class="modal-body"></div><footer id="modalFooter"></footer></dialog>
+<input type="file" id="attachmentInput" hidden multiple>
+<div class="toast" id="toast" role="status" hidden></div>
+<div id="announcer" class="sr-only" aria-live="polite"></div>
+<script src="workspace.js"></script>
+</body>
+</html>

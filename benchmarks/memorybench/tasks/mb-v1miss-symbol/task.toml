@@ -1,0 +1,5 @@
+prompt = "Set the max idle connection seconds to 30 in this project's configuration."
+class = "v1miss"
+max_steps = 8
+timeout_sec = 180
+memory_markers = ["MEMKEY-VM1SYM"]

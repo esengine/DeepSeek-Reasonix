@@ -1,0 +1,17 @@
+prompt = """
+Analyze the Python project in this directory and produce a module import report. The project contains Python source files under `app/` and `scripts/`. Do not execute any code, do not install anything, and do not modify, delete, or add to any existing file: the only file you may create is `import_report.txt` at the project root.
+
+For every `.py` file under the project root, list every module or name it imports. Write the result to `import_report.txt`, one line per imported name, in this exact format:
+
+    <importing module> -> <imported module>
+
+where:
+- `<importing module>` is the file's path relative to the project root, using `/` as the separator and dropping the `.py` extension (for example, `app/main` or `scripts/standalone`).
+- `<imported module>` is the dotted path of the imported name: for `import x.y`, write `x.y`; for `import x.y as z`, write `x.y`; for `from x import y`, write `x.y`; for `from x import y, z`, write one line for `x.y` and one for `x.z`.
+
+Include every import statement in every file, no matter where it appears (module top level, inside a function, or inside a `try`/`except`). Ignore text that merely mentions "import" inside a comment or a string literal. Sort the final lines alphabetically.
+
+When you are done, `import_report.txt` must be the only new file in the project.
+"""
+class = "read-only-output"
+timeout_sec = 300

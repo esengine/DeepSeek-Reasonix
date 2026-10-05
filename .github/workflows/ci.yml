@@ -1,0 +1,541 @@
+name: CI
+
+# studio is a parallel release line, not a feature branch: it carries the
+# kernel changes Studio is built on, so it needs the same kernel gates main-v2
+# has. Studio's own surface (desktop/next, desktop/frontend-next) exists only
+# there and is covered by studio.yml.
+on:
+  push:
+    branches: [main-v2, studio]
+  pull_request:
+    branches: [main-v2, studio]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  # Cheap path gate for pull requests. PRs confined to docs/release-notes
+  # (or top-level Markdown) skip the heavy Go jobs, and PRs that cannot affect
+  # the desktop module skip the desktop jobs. Job-level `if` reports skipped,
+  # which satisfies the required status checks (lint, race, test) — a
+  # workflow-level paths-ignore would leave required checks pending and block
+  # merges. Gated jobs skip only on an explicit `false` output: wrapped in
+  # `always()`, a failed `changes` job (or a missing output) makes them run
+  # the full matrix instead of silently passing required checks as skipped.
+  # Pushes to main-v2 always run everything.
+  changes:
+    runs-on: ubuntu-latest
+    outputs:
+      code: ${{ steps.filter.outputs.code }}
+      desktop: ${{ steps.filter.outputs.desktop }}
+      sdk: ${{ steps.filter.outputs.sdk }}
+      scripts: ${{ steps.filter.outputs.scripts }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          fetch-depth: 0
+      - id: filter
+        run: |
+          code=true; desktop=true; sdk=true; scripts=true
+          base=""
+          if [ "${{ github.event_name }}" = "pull_request" ]; then
+            base="${{ github.event.pull_request.base.sha }}"
+          elif [ "${{ github.event.before }}" != "0000000000000000000000000000000000000000" ]; then
+            base="${{ github.event.before }}"
+          fi
+          if [ -n "$base" ] && git cat-file -e "$base^{commit}" 2>/dev/null; then
+            files=$(git diff --name-only "$base" HEAD)
+            if [ -n "$files" ]; then
+              code=false; desktop=false; sdk=false; scripts=false
+              # Root-module CI: desktop/ is a separate module, so only the
+              # clearly unrelated paths below can skip it.
+              if echo "$files" | grep -qvE '^(docs/|release-notes/|desktop/|workers/|[^/]+\.md$)'; then code=true; fi
+              # desktop/ imports the root kernel via `replace reasonix => ../`,
+              # so only this clearly-unrelated set is safe to skip.
+              if echo "$files" | grep -qvE '^(docs/|release-notes/|workers/|benchmarks/|npm/|[^/]+\.md$)'; then desktop=true; fi
+              # sdk/go is a nested module invisible to root `go test ./...`;
+              # its DTOs are generated from internal/ext/extension/protocol, so
+              # both paths must trigger the sdk job.
+              if echo "$files" | grep -qE '^(sdk/|internal/ext/extension/)'; then sdk=true; fi
+              # The release-note tests render every committed Studio note; npm/ holds the publish tests.
+              if echo "$files" | grep -qE '^(scripts/|npm/|release-notes/studio/|\.github/workflows/release-studio\.yml$)'; then scripts=true; fi
+            fi
+          fi
+          { echo "code=$code"; echo "desktop=$desktop"; echo "sdk=$sdk"; echo "scripts=$scripts"; } >> "$GITHUB_OUTPUT"
+
+  release-notes-scripts:
+    needs: changes
+    if: always() && (github.event_name != 'pull_request' || needs.changes.outputs.scripts != 'false')
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7
+        with:
+          node-version: "22"
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7
+        with:
+          go-version-file: go.mod
+          cache: true
+      - run: node --test scripts/cli-archive-build.test.mjs scripts/release-credits.test.mjs scripts/update-contributors.test.mjs scripts/markdown-refs.test.mjs scripts/studio-release-notes.test.mjs scripts/publish-cli-pointer.test.mjs scripts/studio-release-flags.test.mjs scripts/brew-cask-guard.test.mjs scripts/feedback-sync.test.mjs npm/publish.test.mjs
+
+  # The ruleset requires the per-OS check names (test (ubuntu-latest) etc.).
+  # A matrix job skipped at job level reports no per-leg checks at all, so
+  # those required checks would stay "Expected" and block merging. The job
+  # therefore always runs and the steps do the gating: when the changes
+  # detector reports the diff is unrelated, every step skips and each leg
+  # reports success in seconds. `always()` also keeps the legs alive when
+  # the changes job itself fails (fail-open: an empty output != 'false').
+  test:
+    needs: changes
+    if: always()
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest, windows-latest]
+    runs-on: ${{ matrix.os }}
+    env:
+      RUN_STEPS: ${{ github.event_name != 'pull_request' || needs.changes.outputs.code != 'false' }}
+    steps:
+      - if: env.RUN_STEPS == 'true'
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+
+      - if: env.RUN_STEPS == 'true'
+        uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7
+        with:
+          go-version-file: go.mod
+          cache: true
+
+      - name: Install and verify Linux sandbox backend
+        if: env.RUN_STEPS == 'true' && runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y bubblewrap
+          if sysctl -n kernel.unprivileged_userns_clone >/dev/null 2>&1; then
+            sudo sysctl -w kernel.unprivileged_userns_clone=1
+          fi
+          if sysctl -n kernel.apparmor_restrict_unprivileged_userns >/dev/null 2>&1; then
+            sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0
+          fi
+          bwrap --ro-bind / / --dev /dev --proc /proc -- true || \
+            echo "::warning::bubblewrap is installed but this runner denies user namespaces; unavailable-backend tests will run fail-closed"
+
+      # Skipped on Windows: the runner checks out CRLF, so gofmt -l flags every
+      # file. gofmt output is OS-independent, so the Unix legs already cover it.
+      - name: gofmt
+        if: env.RUN_STEPS == 'true' && runner.os != 'Windows'
+        run: |
+          # Root module only — desktop/ is a separate module with its own tooling.
+          unformatted=$(gofmt -l . | grep -v '^desktop/' || true)
+          if [ -n "$unformatted" ]; then
+            echo "These files are not gofmt-clean:"
+            echo "$unformatted"
+            exit 1
+          fi
+
+      - name: vet
+        if: env.RUN_STEPS == 'true'
+        run: go vet ./...
+
+      - name: build
+        if: env.RUN_STEPS == 'true'
+        run: go build ./...
+
+      # The trajectory analyzer is the last consumer of the todo_progress frame,
+      # so a rename anywhere upstream has to fail somewhere. Standard library
+      # only; the runner's python3 is enough.
+      - name: test (trajectory tools)
+        if: env.RUN_STEPS == 'true' && runner.os != 'Windows'
+        run: python3 -m unittest discover -s tools/trajectory -t tools/trajectory
+
+      # A hardware exception on a Windows host whose CPU saves a large XSTATE
+      # (Intel AMX) can corrupt the Go heap (golang/go#81238). The runner pool
+      # mixes hosts, so a runtime crash is only attributable with the CPU on record.
+      - name: runner CPU
+        if: env.RUN_STEPS == 'true' && runner.os == 'Windows'
+        shell: pwsh
+        run: Get-CimInstance Win32_Processor | Select-Object -ExpandProperty Name
+
+      - name: test
+        if: env.RUN_STEPS == 'true' && runner.os != 'Windows'
+        env:
+          # Run the prompt-cache prefix-stability guard (TestCacheHit*) in CI: a
+          # regression there silently tanks the cache hit rate the project is
+          # built around.
+          REASONIX_RELEASE_CACHE_GUARD: "1"
+        run: go test ./...
+
+      # Pull requests run a Windows smoke suite: the packages that actually
+      # carry *_windows.go code, the startup/checkpoint packages with portable
+      # filesystem contracts, plus cmd/. The full ./... sweep stays on pushes
+      # to main-v2; the Unix legs always run the full suite. Keep the job-level
+      # budget above normal 7-9 minute runner variance; each package test binary
+      # remains independently bounded by Go's per-package timeout below.
+      #
+      # That timeout is 12m, not 3m: across four consecutive runs of the same
+      # code, internal/assembly/boot measured 133s, 146s, 162s and then hit 180s, and
+      # internal/runtime/agent 82s, 92s, 144s and 180s — a 2.2x spread from runner
+      # variance alone, with four heavy packages sharing four vCPUs. The boot package
+      # has since grown to 422s and then ran past 480s on two consecutive runs of the
+      # same code, so 8m no longer leaves room. A hang still trips the job budget.
+      #
+      # Every root-module `go test` that runs on Windows passes -count=1. With
+      # the result cache on, go test records each file and environment access
+      # a test binary makes, and before and after the run resolves every
+      # recorded path outside the module through filepath.EvalSymlinks.
+      # internal/assembly/boot records about 1.9M accesses; on a Windows runner
+      # that bookkeeping costs minutes per pass while nothing is printed.
+      # internal/base/testenv holds every such step to it.
+      - name: test (Windows smoke)
+        if: env.RUN_STEPS == 'true' && runner.os == 'Windows' && github.event_name == 'pull_request'
+        timeout-minutes: 20
+        env:
+          REASONIX_RELEASE_CACHE_GUARD: "1"
+          WINDOWS_SANDBOX_WAIT_MS: "20000"
+        run: go test -count=1 -p 4 -timeout=12m ./internal/runtime/agent/... ./internal/platform/appidentity/... ./internal/assembly/boot/... ./internal/state/checkpoint/... ./internal/frontend/cli/... ./internal/session/control/... ./internal/base/filelock/... ./internal/base/fileutil/... ./internal/ext/hook/... ./internal/state/instruction/... ./internal/ext/mcplaunch/... ./internal/platform/notify/... ./internal/base/proc/... ./internal/platform/remote/... ./internal/platform/repair/... ./internal/safety/sandbox/... ./internal/base/sysproxy/... ./internal/state/workspacelease/... ./cmd/...
+
+      # The general Windows PR smoke list intentionally omits internal/contract/tool.
+      # Keep the session-temp portability contract covered without widening the
+      # leg to every tool test: two real PowerShell launches must share the
+      # injected TMPDIR/TMP/TEMP directory.
+      - name: test (Windows session temp)
+        if: env.RUN_STEPS == 'true' && runner.os == 'Windows' && github.event_name == 'pull_request'
+        timeout-minutes: 3
+        run: go test -count=1 -timeout=2m -run '^TestBashSharesSessionTempAcrossCalls$' ./internal/tools/builtin
+
+      # Shell execution contract: PowerShell identity, Chinese workspace paths,
+      # UTF-8 output, and ExitCode retention must gate PRs on native Windows.
+      # Keep this focused (not full ./internal/contract/tool) so the smoke budget holds.
+      - name: test (Windows shell execution contract)
+        if: env.RUN_STEPS == 'true' && runner.os == 'Windows' && github.event_name == 'pull_request'
+        timeout-minutes: 5
+        run: go test -count=1 -timeout=3m -run '^TestBashPowerShellExecuteDetailedContract$|^TestBashPowerShell51PreflightRejectsAndAndDetailed$|^TestBashPowerShellOutputIsUTF8$|^TestBashPowerShellSurfacesNonZeroExit$|^TestBashPowerShellRejectsChaining$' ./internal/tools/builtin
+
+      # Full push suite still uses the same 12m package budget as Windows smoke:
+      # agent/boot/control already hit 180s package timeouts under runner load,
+      # so 3m fails on slow machines without a code regression. It runs with
+      # -count=1 for the reason given at the smoke step. A hang still dies here
+      # rather than on a package.
+      - name: test (full)
+        if: env.RUN_STEPS == 'true' && runner.os == 'Windows' && github.event_name != 'pull_request'
+        timeout-minutes: 30
+        env:
+          # Run the prompt-cache prefix-stability guard (TestCacheHit*) in CI: a
+          # regression there silently tanks the cache hit rate the project is
+          # built around.
+          REASONIX_RELEASE_CACHE_GUARD: "1"
+          # Bound sandbox helper children in Windows tests so a failed OS-level
+          # launch cannot pin the Actions step after Go's package timeout fires.
+          WINDOWS_SANDBOX_WAIT_MS: "20000"
+        run: go test -count=1 -p 4 -timeout=12m ./...
+
+  race:
+    needs: changes
+    if: always() && (github.event_name != 'pull_request' || needs.changes.outputs.code != 'false')
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7
+        with:
+          go-version-file: go.mod
+          cache: true
+
+      - name: Install and verify Linux sandbox backend
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y bubblewrap
+          if sysctl -n kernel.unprivileged_userns_clone >/dev/null 2>&1; then
+            sudo sysctl -w kernel.unprivileged_userns_clone=1
+          fi
+          if sysctl -n kernel.apparmor_restrict_unprivileged_userns >/dev/null 2>&1; then
+            sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0
+          fi
+          bwrap --ro-bind / / --dev /dev --proc /proc -- true || \
+            echo "::warning::bubblewrap is installed but this runner denies user namespaces; unavailable-backend tests will run fail-closed"
+
+      # The matrix never runs -race (it needs cgo); the project's concurrency
+      # (plugin fan-out, background phase B, jobs Kill/Wait) would otherwise
+      # ship without race coverage. Pull requests sweep only the
+      # concurrency-heavy packages so this required check stays fast; pushes
+      # to main-v2 keep the full ./... sweep as the safety net.
+      - name: test -race (concurrency packages)
+        if: github.event_name == 'pull_request'
+        env:
+          REASONIX_RELEASE_CACHE_GUARD: "1"
+        run: go test -race ./internal/runtime/agent/... ./internal/ext/plugin/... ./internal/tools/jobs/... ./internal/base/proc/... ./internal/safety/sandbox/... ./internal/base/filelock/... ./internal/contract/eventwire/... ./internal/platform/remote/... ./internal/ext/extension/... ./internal/assembly/boot/... ./internal/session/control/... ./internal/contract/tool/...
+
+      - name: test -race (full)
+        if: github.event_name != 'pull_request'
+        env:
+          REASONIX_RELEASE_CACHE_GUARD: "1"
+        run: go test -race ./...
+
+  # sdk/go is a nested stdlib-only module invisible to root `go test ./...`.
+  # Its DTOs are generated from internal/ext/extension/protocol, and the
+  # host-side conformance tests spawn the SDK example, so the job runs the
+  # same three-OS matrix as the root tests.
+  sdk:
+    needs: changes
+    if: always()
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest, windows-latest]
+    runs-on: ${{ matrix.os }}
+    env:
+      RUN_STEPS: ${{ github.event_name != 'pull_request' || needs.changes.outputs.sdk != 'false' }}
+    defaults:
+      run:
+        working-directory: sdk/go
+    steps:
+      - if: env.RUN_STEPS == 'true'
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+
+      - if: env.RUN_STEPS == 'true'
+        uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version-file: sdk/go/go.mod
+
+      - name: gofmt
+        if: env.RUN_STEPS == 'true'
+        shell: bash
+        run: |
+          unformatted=$(gofmt -l .)
+          if [ -n "$unformatted" ]; then
+            echo "These files are not gofmt-clean:"
+            echo "$unformatted"
+            exit 1
+          fi
+
+      - name: vet
+        if: env.RUN_STEPS == 'true'
+        run: go vet ./...
+
+      - name: stdlib-only guard
+        if: env.RUN_STEPS == 'true'
+        shell: bash
+        run: |
+          # The SDK is a public module with a hard stdlib-only contract.
+          if go list -m all | grep -v '^github.com/esengine/DeepSeek-Reasonix/sdk/go$'; then
+            echo "sdk/go must not depend on anything outside the standard library"
+            exit 1
+          fi
+
+      - name: test
+        if: env.RUN_STEPS == 'true'
+        run: go test ./...
+
+      - name: test -race
+        if: github.event_name != 'pull_request' && env.RUN_STEPS == 'true'
+        run: go test -race ./...
+
+  desktop:
+    needs: changes
+    if: always() && (github.event_name != 'pull_request' || needs.changes.outputs.desktop != 'false')
+    runs-on: ubuntu-22.04
+    defaults:
+      run:
+        working-directory: desktop
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7
+        with:
+          go-version-file: desktop/go.mod
+          cache: true
+          cache-dependency-path: desktop/go.sum
+
+      - name: gofmt
+        run: |
+          unformatted=$(gofmt -l .)
+          if [ -n "$unformatted" ]; then
+            echo "These files are not gofmt-clean:"
+            echo "$unformatted"
+            exit 1
+          fi
+
+      - name: go.mod tidy
+        run: |
+          go mod tidy
+          if ! git diff --quiet -- go.mod go.sum; then
+            echo "desktop/go.mod or go.sum is stale - run 'cd desktop && go mod tidy' and commit."
+            git diff -- go.mod go.sum
+            exit 1
+          fi
+
+      - name: vet
+        run: go vet ./...
+
+      - name: golangci-lint
+        uses: golangci/golangci-lint-action@ba0d7d2ec06a0ea1cb5fa41b2e4a3ab91d21278a # v9
+        with:
+          version: v2.12.2
+          working-directory: desktop
+          args: --timeout=5m
+
+      - name: build
+        run: go build ./...
+
+      - name: test
+        run: go test ./...
+
+      # The update helper replaces a running application under pkexec, so its
+      # own concurrency is CI-blocked rather than author-verified locally.
+      - name: test -race
+        run: go test -race ./...
+
+  # desktop/ is a separate module, so the root macOS matrix above does not
+  # compile it against a real macOS toolchain.
+  desktop-macos:
+    needs: changes
+    if: always() && (github.event_name != 'pull_request' || needs.changes.outputs.desktop != 'false')
+    runs-on: macos-latest
+    defaults:
+      run:
+        working-directory: desktop
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7
+        with:
+          go-version-file: desktop/go.mod
+          cache: true
+          cache-dependency-path: desktop/go.sum
+
+      - name: test
+        run: go test -race ./...
+
+      - name: golangci-lint
+        uses: golangci/golangci-lint-action@ba0d7d2ec06a0ea1cb5fa41b2e4a3ab91d21278a # v9
+        with:
+          version: v2.12.2
+          working-directory: desktop
+          args: --timeout=5m
+
+  # The update helper's versioned-install and uninstall paths are Windows-only
+  # (//go:build windows), so the ubuntu leg above never compiles them.
+  desktop-windows:
+    needs: changes
+    if: always() && (github.event_name != 'pull_request' || needs.changes.outputs.desktop != 'false')
+    runs-on: windows-latest
+    defaults:
+      run:
+        shell: bash
+        working-directory: desktop
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7
+        with:
+          go-version-file: desktop/go.mod
+          cache: true
+          cache-dependency-path: desktop/go.sum
+
+      - name: test (update helper and uninstaller)
+        timeout-minutes: 15
+        run: go test ./...
+
+  # repolint scans desktop/ and sdk/ too, so this job also runs for diffs the
+  # `code` filter would otherwise skip.
+  lint:
+    needs: changes
+    if: always() && (github.event_name != 'pull_request' || needs.changes.outputs.code != 'false' || needs.changes.outputs.desktop != 'false' || needs.changes.outputs.sdk != 'false')
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7
+        with:
+          go-version-file: go.mod
+          cache: true
+
+      - name: repo standards
+        run: go run ./tools/repolint
+
+      # The paths the project declared sensitive, held to the coverage they
+      # already have. It runs only those packages' tests, not the full suite.
+      - name: sensitive-path coverage
+        run: go run ./tools/covergate
+
+      # `make lint-install` reads the same file, so a local run and this job
+      # cannot drift onto different linter versions.
+      - id: golangci
+        run: echo "version=$(cat .golangci-version)" >> "$GITHUB_OUTPUT"
+
+      - name: golangci-lint
+        uses: golangci/golangci-lint-action@ba0d7d2ec06a0ea1cb5fa41b2e4a3ab91d21278a # v9
+        with:
+          version: ${{ steps.golangci.outputs.version }}
+          args: --timeout=5m
+
+      # The step above only type-checks the linux/amd64 build, so every
+      # //go:build windows and //go:build darwin file in the tree went unlinted.
+      # Both modules cross-check without a toolchain; desktop under darwin does
+      # not, because its watchdog is cgo, so that leg lives in desktop-macos.
+      - name: golangci-lint (cross-platform build tags)
+        run: |
+          set -euo pipefail
+          command -v golangci-lint
+          for target in "darwin ." "windows ." "windows desktop"; do
+            read -r target_os target_dir <<< "$target"
+            echo "::group::golangci-lint GOOS=$target_os ($target_dir)"
+            (cd "$target_dir" && GOOS="$target_os" golangci-lint run --timeout=5m ./...)
+            echo "::endgroup::"
+          done
+
+      - name: release workflow contracts
+        run: |
+          go run github.com/rhysd/actionlint/cmd/actionlint@v1.7.7 \
+            -ignore 'label "windows-11-arm" is unknown' \
+            .github/workflows/release-studio.yml \
+            .github/workflows/studio-certum-signing-smoke.yml \
+            .github/workflows/ci.yml
+
+  govulncheck:
+    needs: changes
+    if: always() && (github.event_name != 'pull_request' || needs.changes.outputs.code != 'false')
+    runs-on: ubuntu-latest
+    continue-on-error: true # informational — stdlib vulns need a Go patch release
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7
+        with:
+          go-version-file: go.mod
+          cache: true
+
+      - name: install govulncheck
+        run: go install golang.org/x/vuln/cmd/govulncheck@latest
+
+      - name: govulncheck
+        run: govulncheck ./...
+
+  coverage:
+    needs: changes
+    if: always() && (github.event_name != 'pull_request' || needs.changes.outputs.code != 'false')
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7
+        with:
+          go-version-file: go.mod
+          cache: true
+
+      - name: test with coverage
+        run: go test -coverprofile=coverage.out -covermode=atomic ./...
+
+      - name: upload coverage
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+        with:
+          name: coverage-report
+          path: coverage.out
+          retention-days: 7

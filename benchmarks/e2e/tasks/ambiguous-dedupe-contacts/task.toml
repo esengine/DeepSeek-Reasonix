@@ -1,0 +1,3 @@
+prompt = "contacts.txt is full of duplicate entries and users keep complaining. Clean it up and write the result to contacts_clean.txt."
+class = "ambiguous"
+timeout_sec = 300

@@ -1,0 +1,9 @@
+prompt = """Your working directory contains topo.py (a topological sort) and test_topo.py (its tests). The test suite is failing: the cycle test does not finish, because topological_sort in topo.py keeps looping forever on a graph that contains a cycle instead of reporting it.
+
+Diagnose the root cause and fix topo.py so that the tests pass. The required public behaviour:
+- For an acyclic graph, topological_sort(n, edges) returns a list of all nodes 0..n-1 in a valid topological order (every edge (u, v) has u before v).
+- For a graph that contains a cycle, topological_sort raises ValueError promptly instead of looping.
+
+Do not change the signature topological_sort(n, edges). Run 'python3 test_topo.py' to confirm all tests pass before you finish."""
+class = "failing-test-diagnosis"
+timeout_sec = 300

@@ -1,0 +1,7 @@
+prompt = """Answer using the fleet tool with exactly two items, and do not read any project files yourself.
+
+Item one: id "research", read_only true. Prompt it to inspect every handler in handlers/ and identify the single handler that skips the payload validation call the others all make, reporting only that handler's file name and the name of the function it fails to call.
+
+Item two: id "apply", depends_on ["research"], write_paths ["ANSWER.md"]. Prompt it to write ANSWER.md in the workspace root with exactly two lines, `handler=<file>` then `missing=<function>`, naming the handler that skips validation and the function it should have called."""
+class = "delegation"
+timeout_sec = 600

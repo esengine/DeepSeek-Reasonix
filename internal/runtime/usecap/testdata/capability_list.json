@@ -1,0 +1,362 @@
+{
+  "capabilities": [
+    {
+      "id": "skill:explore",
+      "kind": "skill",
+      "name": "explore",
+      "status": "ready",
+      "description": "Explore the codebase in an isolated subagent — wide-net read-only investigation that returns one distilled answer. Best for: 'find all places that...', 'how does X work across the project', 'survey the code for Y'."
+    },
+    {
+      "id": "skill:init",
+      "kind": "skill",
+      "name": "init",
+      "status": "ready",
+      "description": "Bootstrap or refresh this project's AGENTS.md — analyze the codebase (structure, build/test commands, architecture, conventions) and write a concise memory file loaded into every future session. Inlined — runs in the main loop so you see and approve the write."
+    },
+    {
+      "id": "skill:install-capability",
+      "kind": "skill",
+      "name": "install-capability",
+      "status": "ready",
+      "description": "Install or uninstall Reasonix MCP servers and skills from a URL, GitHub/raw file, local path/folder, .mcp.json, executable, or package name. Plans with install_source (op=install or op=uninstall) before applying, surfacing per-action riskLevel."
+    },
+    {
+      "id": "skill:reasonix-guide",
+      "kind": "skill",
+      "name": "reasonix-guide",
+      "status": "ready",
+      "description": "Troubleshoot and configure Reasonix capabilities: Skills (project/custom/global/builtin priority, discovery dirs), Commands (override order, /dir:file naming), Hooks (11 events, automatic project loading, matchers, timeouts), MCP (reasonix.toml + .mcp.json + plugin packages, auto_start), plugin packages (native/Codex/Claude manifests), and AGENTS.md / instruction docs. Use when the user asks how to configure, debug missing skills/commands/hooks/MCP/plugins, or diagnose capability loading."
+    },
+    {
+      "id": "skill:research",
+      "kind": "skill",
+      "name": "research",
+      "status": "ready",
+      "description": "Research a question by combining web_fetch + code reading in an isolated subagent. Best for: 'is X supported by lib Y', 'what's the canonical way to do Z', 'compare our impl against the spec'."
+    },
+    {
+      "id": "skill:review",
+      "kind": "skill",
+      "name": "review",
+      "status": "ready",
+      "description": "Review the pending changes (current branch diff by default) in an isolated subagent — flags correctness, security, missing tests, hidden behavior changes; reports a verdict + per-issue file:line. Read-only."
+    },
+    {
+      "id": "skill:security-review",
+      "kind": "skill",
+      "name": "security-review",
+      "status": "ready",
+      "description": "Security-focused review of the current branch diff in an isolated subagent — flags injection/authz/secrets/deserialization/path-traversal/crypto issues, severity-tagged. Read-only."
+    },
+    {
+      "id": "skill:test",
+      "kind": "skill",
+      "name": "test",
+      "status": "ready",
+      "description": "Run the project's test suite, diagnose failures, propose+apply fixes, re-run until green (or stop after 2 attempts on the same failure). Inlined — runs in the parent loop. Detects go/npm/pnpm/yarn/pytest/cargo."
+    },
+    {
+      "id": "tool:code_index",
+      "kind": "tool",
+      "name": "code_index",
+      "status": "ready",
+      "read_only": true,
+      "description": "Lightweight built-in code symbol index. Prefer lsp_* for language semantics and installed code graph MCP tools for call graph, impact, and architecture relationships; use this as the local fallback for file outlines and symbol definition candidates, then verify with read_file or grep."
+    },
+    {
+      "id": "tool:conclude_blocked",
+      "kind": "tool",
+      "name": "conclude_blocked",
+      "status": "ready",
+      "read_only": true,
+      "description": "Declare that part of the task cannot be completed as specified, after you have established why. Use it when the work is genuinely impossible or needs a decision only the user can make — mutually exclusive requirements, a missing credential, an external service that is down — never as an exit from work that is merely hard, and never before you have done the part that is possible. Cite `evidence` the host can check against what you ran or read this turn; a claim with nothing behind it is rejected. Name the `criterion_id` when a specific acceptance criterion is the one that cannot be met. The turn ends reported as blocked, and `blocker` is what the user is told."
+    },
+    {
+      "id": "tool:delete_range",
+      "kind": "tool",
+      "name": "delete_range",
+      "status": "ready",
+      "description": "Delete a contiguous text range from a file using exact start/end text anchors. Each anchor must match exactly one line. Returns unified diff on success. Use for large deletions — smaller changes should use edit_file."
+    },
+    {
+      "id": "tool:delete_symbol",
+      "kind": "tool",
+      "name": "delete_symbol",
+      "status": "ready",
+      "description": "Delete a named symbol (function, method, type, interface, const, var) from a Go source file using AST parsing. For non-Go files, use delete_range with manual anchors."
+    },
+    {
+      "id": "tool:docs",
+      "kind": "tool",
+      "name": "docs",
+      "status": "ready",
+      "read_only": true,
+      "description": "Search and read the official documentation embedded in this exact Reasonix build. Use it before web search or assumptions for Reasonix setup, CLI, Desktop, configuration, permissions, MCP, memory, recovery, provider behavior, and maintainer workflows. Search first, then read the returned section_id when the full section is needed."
+    },
+    {
+      "id": "tool:explore",
+      "kind": "tool",
+      "name": "explore",
+      "status": "ready",
+      "description": "Run a focused read-only codebase investigation in an isolated subagent. Use for broad survey questions across many files — 'find all places that X', 'how does Y work across the project', 'audit Z'. Returns one distilled answer with file:line citations. Its reads + reasoning never enter your context, unlike chained read_file."
+    },
+    {
+      "id": "tool:fleet",
+      "aliases": [
+        "task:fleet"
+      ],
+      "kind": "tool",
+      "name": "fleet",
+      "status": "ready",
+      "description": "Dispatch 2–64 sub-agent tasks as a small dependency graph and return bounded previews plus stable Subagent references for full-result retrieval from completed persisted children with read_subagent_result. Each item may select a profile, model, effort, tools, write_paths, or read_only, and may declare depends_on to run after other items and start from their final answers (research → implement → review). Tasks with no dependency between them run in parallel and must declare non-overlapping write_paths; ordered tasks may share paths. Omitted write_paths claim the whole workspace, so two or more concurrent writers without paths fail preflight before any task starts. A failed task's dependents are skipped; independent branches keep going unless fail_fast is set. An item may pass adopt_ref instead of a prompt to stand in for running it with an already-completed child's answer, which is how a fleet a restart interrupted is re-issued without paying twice for the items that finished. Background mode returns a fleet job id collectable with wait."
+    },
+    {
+      "id": "tool:forget",
+      "kind": "tool",
+      "name": "forget",
+      "status": "ready",
+      "description": "Delete a saved memory by name when it is wrong, stale, or superseded, so it stops loading into future sessions. Use the stable project/\u003cname\u003e.md or global/\u003cname\u003e.md reference returned by memory search/read/list. Prefer updating a memory with `remember` (reuse its name) over forget-then-recreate; reach for forget only when the fact should no longer exist at all."
+    },
+    {
+      "id": "tool:glob",
+      "kind": "tool",
+      "name": "glob",
+      "status": "ready",
+      "read_only": true,
+      "description": "Find files matching a glob pattern (e.g. \"*.go\", \"internal/*/*.go\", \"**/*.test.ts\"). Supports shell metacharacters * ? [] and the recursive ** pattern."
+    },
+    {
+      "id": "tool:grep",
+      "kind": "tool",
+      "name": "grep",
+      "status": "ready",
+      "read_only": true,
+      "description": "Search for a regular expression in a file, or recursively under a directory (skips hidden files and files matched by .gitignore). Returns matching lines as path:line:text, capped at 200 matches. Ignored paths are searched only when nothing else matched; such matches say so, so an empty answer means absent rather than filtered."
+    },
+    {
+      "id": "tool:history",
+      "kind": "tool",
+      "name": "history",
+      "status": "ready",
+      "read_only": true,
+      "description": "Search saved local session history with lightweight BM25 retrieval, then read messages around a hit. Use search when past decisions, failed attempts, commands, or tool inputs may help the current task; use around with a returned session_path and message_index to inspect the nearby transcript. By default it searches user text, assistant text, tool inputs, and tool errors; normal tool outputs are excluded unless kind includes tool_output."
+    },
+    {
+      "id": "tool:install_skill",
+      "kind": "tool",
+      "name": "install_skill",
+      "status": "ready",
+      "description": "Author and save a new skill — a reusable playbook future turns invoke via run_skill (or /\u003cname\u003e). Runnable immediately this turn; appears in the pinned Skills index on the next launch. 'project' (default) writes to \u003crepo\u003e/.reasonix/skills/ (this workspace only); 'global' writes to the Reasonix home skills directory (every project)."
+    },
+    {
+      "id": "tool:install_source",
+      "kind": "tool",
+      "name": "install_source",
+      "status": "ready",
+      "description": "Plan, install, or uninstall a Reasonix skill, MCP server, or plugin package from a URL, local file/folder, .mcp.json, executable, or package name. Two-phase: with apply=false (default) returns a deterministic plan with per-action risk level and a planId; with apply=true, passing back that planId, it copies/registers skills, connects/persists MCP servers, or installs plugin packages. An apply without the planId of a plan you have read installs nothing and returns the plan instead. op='uninstall' removes a previously installed skill, MCP server, or plugin package by name."
+    },
+    {
+      "id": "tool:list_sessions",
+      "kind": "tool",
+      "name": "list_sessions",
+      "status": "ready",
+      "read_only": true,
+      "description": "List saved AI conversation sessions. Returns timestamp, model, turn count, preview, and file for each visible session, newest first. Uses session metadata (branch sidecar timestamps). Use read_session to view a session's conversation."
+    },
+    {
+      "id": "tool:list_subagents",
+      "kind": "tool",
+      "name": "list_subagents",
+      "status": "ready",
+      "read_only": true,
+      "description": "List the sub-agents this conversation owns, newest first, with the Subagent reference that read_subagent_result needs to page each full answer. Use it to recover work whose aggregate never arrived: a background task or fleet interrupted by a restart leaves its completed children persisted, and re-running them spends again what they already cost. Each row reports the child's state, its worker name, and the tool call that started it, so a fleet's items stay identifiable by position."
+    },
+    {
+      "id": "tool:ls",
+      "kind": "tool",
+      "name": "ls",
+      "status": "ready",
+      "read_only": true,
+      "description": "List the entries of a directory. Directories are shown with a trailing slash; files show their byte size. Set recursive=true to list all nested files depth-first (skips .git/node_modules)."
+    },
+    {
+      "id": "tool:lsp_definition",
+      "kind": "tool",
+      "name": "lsp_definition",
+      "status": "ready",
+      "read_only": true,
+      "description": "Jump to where a symbol is defined. Give the file, the 1-based line the symbol appears on, and the symbol text itself."
+    },
+    {
+      "id": "tool:lsp_diagnostics",
+      "kind": "tool",
+      "name": "lsp_diagnostics",
+      "status": "ready",
+      "read_only": true,
+      "description": "Report compiler/linter diagnostics (errors, warnings) for a file from its language server. Use after editing to check the change compiles."
+    },
+    {
+      "id": "tool:lsp_hover",
+      "kind": "tool",
+      "name": "lsp_hover",
+      "status": "ready",
+      "read_only": true,
+      "description": "Show the type signature and documentation for a symbol. Give the file, the 1-based line, and the symbol text."
+    },
+    {
+      "id": "tool:lsp_references",
+      "kind": "tool",
+      "name": "lsp_references",
+      "status": "ready",
+      "read_only": true,
+      "description": "List every reference to a symbol across the workspace. Give the file, the 1-based line, and the symbol text."
+    },
+    {
+      "id": "tool:memory",
+      "kind": "tool",
+      "name": "memory",
+      "status": "ready",
+      "read_only": true,
+      "description": "Search, list, and read saved background memories for this project, including explicitly global facts. Use this before saving a new memory to avoid duplicates, and when a saved memory from the index looks relevant but needs its full body. This tool is read-only; use remember to save or update a memory, and forget to archive one."
+    },
+    {
+      "id": "tool:move_file",
+      "kind": "tool",
+      "name": "move_file",
+      "status": "ready",
+      "description": "Move or rename a file from source_path to destination_path. Creates the destination parent directory as needed. Use instead of shell mv, Move-Item, or ren for file moves so workspace confinement and file-edit permissions apply."
+    },
+    {
+      "id": "tool:multi_edit",
+      "kind": "tool",
+      "name": "multi_edit",
+      "status": "ready",
+      "description": "Apply a list of edits to a single file atomically: each edit runs against the result of the previous one, all in memory; the file is rewritten only if every edit succeeds. Cheaper and safer than chaining edit_file calls — a failure in step 3 leaves the file untouched instead of half-edited."
+    },
+    {
+      "id": "tool:notebook_edit",
+      "kind": "tool",
+      "name": "notebook_edit",
+      "status": "ready",
+      "description": "Edit one cell of a Jupyter notebook (.ipynb). Target a cell by 0-based cell_number (or cell_id). edit_mode: \"replace\" (default) swaps the cell's source; \"insert\" adds a new cell after cell_number (use -1 to prepend at the top), taking cell_type and new_source; \"delete\" removes the cell. cell_type is \"code\" or \"markdown\" (required for insert). Editing a code cell clears its outputs. Prefer this over edit_file for notebooks — it keeps the JSON valid."
+    },
+    {
+      "id": "tool:parallel_tasks",
+      "aliases": [
+        "task:parallel"
+      ],
+      "kind": "tool",
+      "name": "parallel_tasks",
+      "status": "ready",
+      "read_only": true,
+      "description": "Dispatch multiple read-only sub-agent tasks concurrently. Blocks until all complete, then returns a bounded preview and a stable Subagent reference for every completed persisted child; use read_subagent_result to page through any full answer without combined-result truncation."
+    },
+    {
+      "id": "tool:read_only_skill",
+      "kind": "tool",
+      "name": "read_only_skill",
+      "status": "ready",
+      "read_only": true,
+      "description": "Invoke a skill in read-only mode. Inline skills are loaded into context like read_skill. `[🧬 subagent]` skills run in an isolated ephemeral read-only subagent with only read-only research tools and safe foreground bash; no writes, installers, memory mutation, continuation/fork, background jobs, or writer-capable delegation are available. Read-only nested delegation may be available until max_subagent_depth is reached. Pass `name` as the bare skill identifier and `arguments` as the concrete task."
+    },
+    {
+      "id": "tool:read_only_task",
+      "aliases": [
+        "task:read_only_subagent"
+      ],
+      "kind": "tool",
+      "name": "read_only_task",
+      "status": "ready",
+      "read_only": true,
+      "description": "Spawn a read-only research sub-agent for a focused investigation. The sub-agent runs in an isolated, ephemeral session with read-only tools only; bash is wrapped to allow only permission-classified foreground read-only commands. It cannot write files, install capabilities, mutate memory, run background jobs, continue/fork transcripts, or delegate to writer-capable agents. Read-only nested delegation may be available until max_subagent_depth is reached. Only its final answer is returned."
+    },
+    {
+      "id": "tool:read_session",
+      "kind": "tool",
+      "name": "read_session",
+      "status": "ready",
+      "read_only": true,
+      "description": "Read a saved AI conversation session by file name (e.g. \"20260618-231556.000000000-gpt-4.jsonl\"). Returns a bounded, privacy-safe view: each message truncated to 2000 runes, no reasoning content, no system prompts, no tool result content (opt-in via show_tool_results). Use list_sessions to discover available sessions."
+    },
+    {
+      "id": "tool:read_skill",
+      "kind": "tool",
+      "name": "read_skill",
+      "status": "ready",
+      "read_only": true,
+      "description": "Load an inline playbook from the Skills index into your context WITHOUT running anything — the skill body returns as a tool result you read and follow. This is the read-only alternative when no subagent execution is needed. Pass `name` as the BARE identifier (e.g. 'commit'), NOT the `[🧬 subagent]` tag. Subagent-tagged skills are rejected: use run_skill (or the dedicated tool) for those, since they execute work."
+    },
+    {
+      "id": "tool:read_subagent_result",
+      "kind": "tool",
+      "name": "read_subagent_result",
+      "status": "ready",
+      "read_only": true,
+      "description": "Read a completed sub-agent's full final answer by the Subagent reference returned from task, parallel_tasks, or fleet. Results are scoped to the current conversation lineage and paged by UTF-8 byte offset so large answers remain lossless without overflowing one tool result."
+    },
+    {
+      "id": "tool:remember",
+      "kind": "tool",
+      "name": "remember",
+      "status": "ready",
+      "description": "Save a durable background fact so it survives across sessions. Use for things worth remembering long-term: who the user is and their preferences (type \"user\"); guidance on how to work, including the why (type \"feedback\"); ongoing goals or constraints not derivable from the code (type \"project\"); or pointers to external resources (type \"reference\"). For feedback/project, structure the body with a \"**Why:**\" line and a \"**How to apply:**\" line so the fact is actionable later; link related memories inline with [[their-name]]. Do NOT save what the repo already records (code structure, git history) or facts that only matter to the current conversation; if asked to remember one of those, save instead the non-obvious point behind it. Choose scope \"project\" for the current workspace (the safe default) or \"global\" only when the fact should affect every project. Standing rules that must always be followed belong in project or global REASONIX.md/AGENTS.md instructions, not background memory. Before saving, search the store with the `memory` tool for an entry that already covers this — reuse that name to update it rather than create a near-duplicate, and use `forget` to drop one that is now wrong. Saved facts are not listed in the prompt: relevant ones are retrieved onto a later turn, and the `memory` tool reaches the rest."
+    },
+    {
+      "id": "tool:research",
+      "kind": "tool",
+      "name": "research",
+      "status": "ready",
+      "description": "Combine web_fetch + code reading in an isolated subagent. Use when the answer needs both an external reference and local verification — 'is X supported by lib Y', 'compare our impl against the spec'. Returns one synthesis citing code (file:line) and web (URL)."
+    },
+    {
+      "id": "tool:review",
+      "kind": "tool",
+      "name": "review",
+      "status": "ready",
+      "description": "Review the pending changes (current branch diff) in an isolated subagent — flags correctness / security / missing-tests / hidden behavior per file:line. Read-only; you decide what to act on. Use before suggesting a PR-shaped change or after finishing a multi-step edit."
+    },
+    {
+      "id": "tool:run_skill",
+      "kind": "tool",
+      "name": "run_skill",
+      "status": "ready",
+      "description": "Invoke a playbook from the Skills index pinned in the system prompt. For the built-in subagent skills (explore / research / review / security_review), prefer the dedicated top-level tools of the same name — they're easier to pick and do the same thing. Pass `name` as the BARE identifier (e.g. 'explore'), NOT the `[🧬 subagent]` tag that follows it in the index. `[🧬 subagent]` skills spawn an isolated subagent — only the final distilled answer returns; supply `arguments` describing the concrete task since the subagent has no other context. Untagged skills are inlined: the body becomes a tool result you read and follow."
+    },
+    {
+      "id": "tool:security_review",
+      "kind": "tool",
+      "name": "security_review",
+      "status": "ready",
+      "description": "Security-focused review of the current branch diff in an isolated subagent — injection / authz / secrets / deserialization / path-traversal / crypto, severity-tagged. Read-only. Use when shipping changes that touch auth, input parsing, file IO, or external requests."
+    },
+    {
+      "id": "tool:slash_command",
+      "kind": "tool",
+      "name": "slash_command",
+      "status": "ready",
+      "read_only": true,
+      "description": "Invoke a project slash command (a reusable prompt template or skill) by name. Returns the command's expanded prompt text for you to act on in this turn — it does not run on its own. Call with an empty command (or \"list\") to see what is available."
+    },
+    {
+      "id": "tool:task",
+      "aliases": [
+        "task:subagent"
+      ],
+      "kind": "tool",
+      "name": "task",
+      "status": "ready",
+      "description": "Spawn a sub-agent for a focused sub-task. Optional profile selects a runAs=subagent Skill whose body becomes the full system prompt (no implicit concise default). Optional write_paths declare non-overlapping write targets so background writers may run in parallel; omitting write_paths on a writer claims the whole workspace and serializes writers. The sub-agent runs in its own session with a filtered tool list (defaults to every parent tool, then applies the subagent boundary: Recursive agent/skill tools are exposed only while max_subagent_depth leaves another delegation layer; unsupported background job tools (parallel_tasks, wait, bash_output, kill_shell) are excluded; bash is exposed as foreground-only inside subagents.). Only its final answer is returned."
+    },
+    {
+      "id": "tool:web_fetch",
+      "kind": "tool",
+      "name": "web_fetch",
+      "status": "ready",
+      "read_only": true,
+      "description": "Fetch a URL over HTTPS/HTTP and return its text content. HTML pages are reduced to readable text (scripts, styles, tags stripped, whitespace collapsed); JSON / plain text / markdown bodies come back verbatim. Use to read documentation pages, API responses, or source files hosted somewhere the local filesystem can't reach."
+    }
+  ],
+  "note": "Call action=call with a capability_id to invoke a non-core tool, skill, MCP tool, or other catalog entry without changing the provider tool schema. list does not start MCP servers. Call action=call on mcp-server:\u003cname\u003e to connect after authorization, or mcp-tool:\u003cserver\u003e/\u003ctool\u003e for a concrete tool.",
+  "servers": []
+}

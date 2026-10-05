@@ -1,0 +1,12 @@
+prompt = """The CSV reader in this project mishandles quoted fields that contain the separator.
+
+`parse_csv(text)` in `csv_reader.py` currently splits each line on `,` and then strips outer double quotes, so a quoted field containing a comma (e.g. `"b,c"`) is broken into several fields, escaped quotes (`""`) inside quoted fields are left as-is, and quoted fields that span a newline are mangled.
+
+Fix `parse_csv` (and any helpers it relies on) so that CSV is parsed correctly:
+- a field wrapped in double quotes may contain commas and newlines;
+- a `""` inside a quoted field represents a literal `"`;
+- the surrounding quotes are not part of the field value.
+
+Keep the public API unchanged: `parse_csv(text)` returns a list of rows, each row a list of strings, and `read_csv_file(path)` returns the same for the contents of a file. Do not change `cli.py`. The behavioural tests in `tests/` express the expected behaviour and should pass once the bug is fixed."""
+class = "multi-file-bugfix"
+timeout_sec = 300

@@ -1,0 +1,13 @@
+prompt = """Answer using the fleet tool with exactly four items, and do not read any project files yourself.
+
+Item one: id "alpha", read_only true. Prompt it to report the marker string the alpha subsystem actually uses at runtime. Ten markers are present in alpha/ and only the live module's is the answer.
+
+Item two: id "beta", read_only true. Prompt it to report the marker string the beta subsystem actually uses at runtime, under the same rule.
+
+Item three: id "gamma", read_only true. Prompt it to report the marker string the gamma subsystem actually uses at runtime, under the same rule.
+
+Item four: id "report", depends_on ["alpha", "beta", "gamma"], write_paths ["ANSWER.md"]. Prompt it to write ANSWER.md in the workspace root with exactly three lines, `alpha=<marker>`, `beta=<marker>` then `gamma=<marker>`.
+
+The first three items must not declare depends_on: nothing one of them finds decides anything another needs."""
+class = "delegation"
+timeout_sec = 900

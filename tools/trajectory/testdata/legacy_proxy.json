@@ -1,0 +1,11 @@
+{
+  "exported": "2026-08-29T00:00:00.000Z",
+  "span": 100.0,
+  "rows": [
+    {"seq": 1, "at": 0.0, "kind": "model_round", "text": "model_round · hit 0 · miss 1m · out 0 · src=executor"},
+    {"seq": 2, "at": 1.0, "kind": "tool", "tool": "todo_write", "text": "tool todo_write"},
+    {"seq": 3, "at": 2.0, "kind": "tool", "tool": "complete_step", "text": "tool complete_step"},
+    {"seq": 4, "at": 50.0, "kind": "model_round", "text": "model_round · hit 0 · miss 10m · out 0 · src=executor"},
+    {"seq": 5, "at": 60.0, "kind": "tool", "tool": "complete_step", "text": "tool complete_step"}
+  ]
+}

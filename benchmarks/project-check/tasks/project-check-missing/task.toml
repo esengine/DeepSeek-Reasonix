@@ -1,0 +1,3 @@
+prompt = """Make `total` in calc.py ignore negative values. Do not run check_a.py — report the change without it."""
+class = "project-check"
+timeout_sec = 600

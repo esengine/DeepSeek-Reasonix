@@ -1,0 +1,7 @@
+prompt = """Answer using the fleet tool with exactly two items, and do not read any project files yourself.
+
+Item one: id "research", read_only true. Prompt it to find the retry budget this service actually uses at runtime and the exact path of the file defining it, then report just the number and the path. Other retry numbers appear in the tree and are not the answer.
+
+Item two: id "apply", depends_on ["research"], write_paths ["ANSWER.md"]. Prompt it to write ANSWER.md in the workspace root with exactly two lines, `value=<N>` then `file=<path>`, naming the retry budget the service uses at runtime and the file that defines it."""
+class = "delegation"
+timeout_sec = 600

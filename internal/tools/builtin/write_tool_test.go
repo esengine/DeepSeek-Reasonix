@@ -1,0 +1,615 @@
+package builtin
+
+import (
+	"context"
+	"encoding/json"
+	"os"
+	"path/filepath"
+	"strings"
+	"testing"
+
+	"reasonix/internal/base/testenv"
+)
+
+// write_file extended tests
+
+func TestWriteFileCreatesParentDirs(t *testing.T) {
+	dir := testenv.TempDir(t)
+	f := filepath.Join(dir, "a", "b", "c", "file.txt")
+	runTool(t, writeFile{}, map[string]any{"path": f, "content": "nested"})
+	got, _ := os.ReadFile(f)
+	if string(got) != "nested" {
+		t.Errorf("content = %q", got)
+	}
+}
+
+func TestWriteFileOverwrites(t *testing.T) {
+	f := filepath.Join(testenv.TempDir(t), "x.txt")
+	os.WriteFile(f, []byte("old"), 0o644)
+	runTool(t, writeFile{}, map[string]any{"path": f, "content": "new"})
+	got, _ := os.ReadFile(f)
+	if string(got) != "new" {
+		t.Errorf("after overwrite = %q", got)
+	}
+}
+
+func TestWriteFileRecordsLocalPrior(t *testing.T) {
+	f := filepath.Join(testenv.TempDir(t), "receipt.txt")
+	if err := os.WriteFile(f, []byte("old"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	var gotPath string
+	var gotPrior []byte
+	var gotHadPrior bool
+	w := writeFile{receipt: func(path string, hadPrior bool, prior []byte) {
+		gotPath = path
+		gotHadPrior = hadPrior
+		gotPrior = append([]byte(nil), prior...)
+	}}
+	if _, err := w.Execute(context.Background(), argsJSON(t, map[string]any{"path": f, "content": "new"})); err != nil {
+		t.Fatal(err)
+	}
+	if gotPath != f || !gotHadPrior || string(gotPrior) != "old" {
+		t.Fatalf("receipt = path:%q hadPrior:%v prior:%q", gotPath, gotHadPrior, gotPrior)
+	}
+}
+
+func TestWriteFileSameContentNoOp(t *testing.T) {
+	f := filepath.Join(testenv.TempDir(t), "x.txt")
+	os.WriteFile(f, []byte("same"), 0o644)
+	out, err := writeFile{}.Execute(context.Background(), argsJSON(t, map[string]any{"path": f, "content": "same"}))
+	if err != nil {
+		t.Fatalf("Execute: %v", err)
+	}
+	if !strings.Contains(out, "already contains the exact content") {
+		t.Fatalf("same-content write should return a no-op signal, got %q", out)
+	}
+	got, _ := os.ReadFile(f)
+	if string(got) != "same" {
+		t.Errorf("content changed = %q", got)
+	}
+}
+
+func TestWriteFileEmptyContent(t *testing.T) {
+	f := filepath.Join(testenv.TempDir(t), "empty.txt")
+	runTool(t, writeFile{}, map[string]any{"path": f, "content": ""})
+	got, _ := os.ReadFile(f)
+	if len(got) != 0 {
+		t.Errorf("expected empty file, got %d bytes", len(got))
+	}
+}
+
+func TestWriteFileMissingPath(t *testing.T) {
+	_, err := writeFile{}.Execute(context.Background(), argsJSON(t, map[string]any{"content": "x"}))
+	if err == nil {
+		t.Fatal("expected error for missing path")
+	}
+}
+
+func TestWriteFileMissingContent(t *testing.T) {
+	f := filepath.Join(testenv.TempDir(t), "x.txt")
+	// Missing content field should write empty file (content defaults to "").
+	runTool(t, writeFile{}, map[string]any{"path": f})
+	got, _ := os.ReadFile(f)
+	if len(got) != 0 {
+		t.Errorf("missing content should write empty file, got %d bytes", len(got))
+	}
+}
+
+func TestWriteFileInvalidArgs(t *testing.T) {
+	_, err := writeFile{}.Execute(context.Background(), json.RawMessage(`{invalid`))
+	if err == nil {
+		t.Fatal("expected error for invalid JSON")
+	}
+}
+
+// move_file tests
+
+func TestMoveFileMovesIntoParentDir(t *testing.T) {
+	dir := testenv.TempDir(t)
+	src := filepath.Join(dir, "a.md")
+	dst := filepath.Join(dir, "docs", "a.md")
+	if err := os.WriteFile(src, []byte("hello"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	out := runTool(t, moveFile{}, map[string]any{"source_path": src, "destination_path": dst})
+	if !strings.Contains(out, "moved") {
+		t.Fatalf("move_file output = %q, want moved", out)
+	}
+	if _, err := os.Stat(src); !os.IsNotExist(err) {
+		t.Fatalf("source still exists or stat failed: %v", err)
+	}
+	got, err := os.ReadFile(dst)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(got) != "hello" {
+		t.Fatalf("destination content = %q, want hello", got)
+	}
+}
+
+func TestMoveFileRejectsDestinationExists(t *testing.T) {
+	dir := testenv.TempDir(t)
+	src := filepath.Join(dir, "a.md")
+	dst := filepath.Join(dir, "b.md")
+	os.WriteFile(src, []byte("a"), 0o644)
+	os.WriteFile(dst, []byte("b"), 0o644)
+
+	if _, err := (moveFile{}).Execute(context.Background(), argsJSON(t, map[string]any{"source_path": src, "destination_path": dst})); err == nil {
+		t.Fatal("expected error for existing destination")
+	}
+}
+
+func TestMoveFileRejectsEscape(t *testing.T) {
+	dir := testenv.TempDir(t)
+	outside := testenv.TempDir(t)
+	src := filepath.Join(dir, "a.md")
+	if err := os.WriteFile(src, []byte("hello"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	if _, err := (moveFile{roots: []string{dir}}).Execute(context.Background(), argsJSON(t, map[string]any{
+		"source_path":      src,
+		"destination_path": filepath.Join(outside, "a.md"),
+	})); err == nil {
+		t.Fatal("expected error for destination outside workspace")
+	}
+	if _, err := os.Stat(src); err != nil {
+		t.Fatalf("source should remain after refused move: %v", err)
+	}
+}
+
+func TestMoveFileSamePathRequiresExistingFile(t *testing.T) {
+	missing := filepath.Join(testenv.TempDir(t), "missing.md")
+	_, err := (moveFile{}).Execute(context.Background(), argsJSON(t, map[string]any{
+		"source_path":      missing,
+		"destination_path": missing,
+	}))
+	if err == nil {
+		t.Fatal("expected error for missing source even when source and destination match")
+	}
+}
+
+func TestMoveFileAllowsCaseOnlyRename(t *testing.T) {
+	dir := testenv.TempDir(t)
+	src := filepath.Join(dir, "caseonly.txt")
+	dst := filepath.Join(dir, "CASEONLY.txt")
+	if err := os.WriteFile(src, []byte("hello"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	srcInfo, err := os.Stat(src)
+	if err != nil {
+		t.Fatal(err)
+	}
+	dstInfo, err := os.Stat(dst)
+	if os.IsNotExist(err) {
+		t.Skip("filesystem is case-sensitive")
+	}
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !os.SameFile(srcInfo, dstInfo) {
+		t.Skip("source and destination do not resolve to the same file")
+	}
+
+	runTool(t, moveFile{}, map[string]any{"source_path": src, "destination_path": dst})
+	got, err := os.ReadFile(dst)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(got) != "hello" {
+		t.Fatalf("destination content = %q, want hello", got)
+	}
+}
+
+func TestMoveFileFallsBackWhenSameFileDestinationRenameFails(t *testing.T) {
+	dir := testenv.TempDir(t)
+	src := filepath.Join(dir, "a.md")
+	dst := filepath.Join(dir, "same-file.md")
+	if err := os.WriteFile(src, []byte("hello"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Link(src, dst); err != nil {
+		t.Skipf("hard links unavailable: %v", err)
+	}
+
+	oldRename := renameFile
+	renameFile = func(oldpath, newpath string) error {
+		if oldpath == src && newpath == dst {
+			return &os.LinkError{Op: "rename", Old: oldpath, New: newpath, Err: os.ErrExist}
+		}
+		return oldRename(oldpath, newpath)
+	}
+	t.Cleanup(func() { renameFile = oldRename })
+
+	runTool(t, moveFile{}, map[string]any{"source_path": src, "destination_path": dst})
+	if _, err := os.Stat(src); !os.IsNotExist(err) {
+		t.Fatalf("source still exists or stat failed: %v", err)
+	}
+	got, err := os.ReadFile(dst)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(got) != "hello" {
+		t.Fatalf("destination content = %q, want hello", got)
+	}
+}
+
+func TestMoveFileFallsBackForCrossDeviceRename(t *testing.T) {
+	dir := testenv.TempDir(t)
+	src := filepath.Join(dir, "a.md")
+	dst := filepath.Join(dir, "docs", "a.md")
+	if err := os.WriteFile(src, []byte("hello"), 0o640); err != nil {
+		t.Fatal(err)
+	}
+
+	oldRename := renameFile
+	renameFile = func(oldpath, newpath string) error {
+		return &os.LinkError{Op: "rename", Old: oldpath, New: newpath, Err: crossDeviceErrno}
+	}
+	t.Cleanup(func() { renameFile = oldRename })
+
+	out := runTool(t, moveFile{}, map[string]any{"source_path": src, "destination_path": dst})
+	if !strings.Contains(out, "moved") {
+		t.Fatalf("move_file output = %q, want moved", out)
+	}
+	if _, err := os.Stat(src); !os.IsNotExist(err) {
+		t.Fatalf("source still exists or stat failed: %v", err)
+	}
+	got, err := os.ReadFile(dst)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(got) != "hello" {
+		t.Fatalf("destination content = %q, want hello", got)
+	}
+}
+
+// edit_file extended tests
+
+func TestEditFileNotFound(t *testing.T) {
+	f := filepath.Join(testenv.TempDir(t), "missing.txt")
+	_, err := editFile{}.Execute(context.Background(), argsJSON(t, map[string]any{
+		"path": f, "old_string": "x", "new_string": "y",
+	}))
+	if err == nil {
+		t.Fatal("expected error for missing file")
+	}
+}
+
+func TestEditFileOldStringNotFound(t *testing.T) {
+	f := filepath.Join(testenv.TempDir(t), "a.txt")
+	os.WriteFile(f, []byte("hello world"), 0o644)
+	_, err := editFile{}.Execute(context.Background(), argsJSON(t, map[string]any{
+		"path": f, "old_string": "nonexistent", "new_string": "x",
+	}))
+	if err == nil {
+		t.Fatal("expected error for old_string not found")
+	}
+	if !strings.Contains(err.Error(), "Re-read the current file") {
+		t.Fatalf("not-found error should include recovery hint, got: %v", err)
+	}
+	// File should be unchanged.
+	got, _ := os.ReadFile(f)
+	if string(got) != "hello world" {
+		t.Errorf("file modified despite error: %q", got)
+	}
+}
+
+func TestEditFileNotUniqueReportsMatchingLines(t *testing.T) {
+	f := filepath.Join(testenv.TempDir(t), "map.html")
+	separator := "    // ═══════════════════════════════════════"
+	body := strings.Join([]string{
+		separator,
+		"const a = 1;",
+		separator,
+		"const b = 2;",
+		separator,
+		"",
+	}, "\n")
+	os.WriteFile(f, []byte(body), 0o644)
+
+	_, err := editFile{}.Execute(context.Background(), argsJSON(t, map[string]any{
+		"path": f, "old_string": separator, "new_string": "// section",
+	}))
+	if err == nil {
+		t.Fatal("expected not-unique error")
+	}
+	for _, want := range []string{"not unique", "matching lines include 1, 3, 5", "repeated separator lines"} {
+		if !strings.Contains(err.Error(), want) {
+			t.Errorf("error should mention %q: %v", want, err)
+		}
+	}
+}
+
+func TestEditFileDelete(t *testing.T) {
+	f := filepath.Join(testenv.TempDir(t), "a.txt")
+	os.WriteFile(f, []byte("remove this line\nkeep this\n"), 0o644)
+	out := runTool(t, editFile{}, map[string]any{
+		"path": f, "old_string": "remove this line\n", "new_string": "",
+	})
+	for _, want := range []string{"Actual replacement receipt after write:", "-remove this line", "+<empty>"} {
+		if !strings.Contains(out, want) {
+			t.Fatalf("delete result should contain %q in actual post-write receipt:\n%s", want, out)
+		}
+	}
+	if strings.Contains(out, " keep this") {
+		t.Fatalf("actual receipt should not auto-upload unchanged neighboring lines:\n%s", out)
+	}
+	got, _ := os.ReadFile(f)
+	if string(got) != "keep this\n" {
+		t.Errorf("after delete = %q", got)
+	}
+}
+
+func TestEditFileActualDiffIsBounded(t *testing.T) {
+	f := filepath.Join(testenv.TempDir(t), "large.txt")
+	old := strings.Repeat("old line with enough content to grow the diff\n", 300)
+	newText := strings.Repeat("new line with enough content to grow the diff\n", 300)
+	os.WriteFile(f, []byte(old), 0o644)
+
+	out := runTool(t, editFile{}, map[string]any{
+		"path": f, "old_string": old, "new_string": newText,
+	})
+	if len(out) > maxPostWriteReceiptBytes+1024 {
+		t.Fatalf("bounded edit result is too large: %d bytes", len(out))
+	}
+	if !strings.Contains(out, postWriteSpanTruncated) {
+		t.Fatalf("bounded edit result should disclose truncation:\n%s", out)
+	}
+}
+
+func TestEditFileReceiptDoesNotExposeUnchangedSameLineContent(t *testing.T) {
+	f := filepath.Join(testenv.TempDir(t), "private.txt")
+	const privateMarker = "PRIVATE_SAME_LINE_CONTEXT_6504"
+	seed := "customer_note=" + privateMarker + " enabled=false\n"
+	os.WriteFile(f, []byte(seed), 0o600)
+
+	out := runTool(t, editFile{}, map[string]any{
+		"path": f, "old_string": "false", "new_string": "true",
+	})
+	if strings.Contains(out, privateMarker) || strings.Contains(out, "customer_note") || strings.Contains(out, "enabled=") {
+		t.Fatalf("replacement receipt exposed unchanged same-line content:\n%s", out)
+	}
+	for _, want := range []string{"-false", "+true"} {
+		if !strings.Contains(out, want) {
+			t.Fatalf("replacement receipt should contain %q:\n%s", want, out)
+		}
+	}
+	got, err := os.ReadFile(f)
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := "customer_note=" + privateMarker + " enabled=true\n"
+	if string(got) != want {
+		t.Fatalf("file = %q, want %q", got, want)
+	}
+}
+
+func TestEditFileMissingOldString(t *testing.T) {
+	f := filepath.Join(testenv.TempDir(t), "a.txt")
+	os.WriteFile(f, []byte("content"), 0o644)
+	_, err := editFile{}.Execute(context.Background(), argsJSON(t, map[string]any{
+		"path": f, "new_string": "x",
+	}))
+	if err == nil {
+		t.Fatal("expected error for missing old_string")
+	}
+}
+
+func TestEditFileMissingPath(t *testing.T) {
+	_, err := editFile{}.Execute(context.Background(), argsJSON(t, map[string]any{
+		"old_string": "x", "new_string": "y",
+	}))
+	if err == nil {
+		t.Fatal("expected error for missing path")
+	}
+}
+
+func TestEditFileInvalidArgs(t *testing.T) {
+	_, err := editFile{}.Execute(context.Background(), json.RawMessage(`{invalid`))
+	if err == nil {
+		t.Fatal("expected error for invalid JSON")
+	}
+}
+
+// multi_edit extended tests
+
+func TestMultiEditEmptyEdits(t *testing.T) {
+	f := filepath.Join(testenv.TempDir(t), "a.txt")
+	os.WriteFile(f, []byte("content"), 0o644)
+	_, err := multiEdit{}.Execute(context.Background(), argsJSON(t, map[string]any{
+		"path": f, "edits": []map[string]any{},
+	}))
+	if err == nil {
+		t.Fatal("expected error for empty edits")
+	}
+}
+
+func TestMultiEditMissingPath(t *testing.T) {
+	_, err := multiEdit{}.Execute(context.Background(), argsJSON(t, map[string]any{
+		"edits": []map[string]any{{"old_string": "x", "new_string": "y"}},
+	}))
+	if err == nil {
+		t.Fatal("expected error for missing path")
+	}
+}
+
+func TestMultiEditStepNotFound(t *testing.T) {
+	f := filepath.Join(testenv.TempDir(t), "a.txt")
+	os.WriteFile(f, []byte("alpha\nbeta\n"), 0o644)
+	_, err := multiEdit{}.Execute(context.Background(), argsJSON(t, map[string]any{
+		"path": f,
+		"edits": []map[string]any{
+			{"old_string": "alpha", "new_string": "ALPHA"},
+			{"old_string": "nonexistent", "new_string": "x"},
+		},
+	}))
+	if err == nil {
+		t.Fatal("expected error for missing edit step")
+	}
+	for _, want := range []string{"edit 2", "Re-read the current file"} {
+		if !strings.Contains(err.Error(), want) {
+			t.Fatalf("multi_edit error should mention %q, got: %v", want, err)
+		}
+	}
+	// File should be unchanged (atomicity).
+	got, _ := os.ReadFile(f)
+	if string(got) != "alpha\nbeta\n" {
+		t.Errorf("file modified despite error: %q", got)
+	}
+}
+
+func TestMultiEditReportsEveryFailedStep(t *testing.T) {
+	f := filepath.Join(testenv.TempDir(t), "a.txt")
+	original := "alpha\nbeta\nreturn nil\nreturn nil\ngamma\n"
+	os.WriteFile(f, []byte(original), 0o644)
+	_, err := multiEdit{}.Execute(context.Background(), argsJSON(t, map[string]any{
+		"path": f,
+		"edits": []map[string]any{
+			{"old_string": "alpha", "new_string": "ALPHA"},
+			{"old_string": "nonexistent", "new_string": "x"},
+			{"old_string": "gamma", "new_string": "GAMMA"},
+			{"old_string": "return nil", "new_string": "return err"},
+			{"new_string": "x"},
+		},
+	}))
+	if err == nil {
+		t.Fatal("expected error for failed edit steps")
+	}
+	msg := err.Error()
+	for _, want := range []string{"3 of 5 edits failed", "edit 2: old_string not found", "edit 4: old_string is not unique", "edit 5: old_string is required"} {
+		if !strings.Contains(msg, want) {
+			t.Errorf("multi_edit error should mention %q, got:\n%s", want, msg)
+		}
+	}
+	for _, unwanted := range []string{"edit 1:", "edit 3:"} {
+		if strings.Contains(msg, unwanted) {
+			t.Errorf("multi_edit error should not report succeeding step %q, got:\n%s", unwanted, msg)
+		}
+	}
+	got, _ := os.ReadFile(f)
+	if string(got) != original {
+		t.Errorf("file modified despite error: %q", got)
+	}
+}
+
+func TestMultiEditReplaceAll(t *testing.T) {
+	f := filepath.Join(testenv.TempDir(t), "a.txt")
+	os.WriteFile(f, []byte("foo bar foo baz foo"), 0o644)
+	runTool(t, multiEdit{}, map[string]any{
+		"path": f,
+		"edits": []map[string]any{
+			{"old_string": "foo", "new_string": "qux", "replace_all": true},
+		},
+	})
+	got, _ := os.ReadFile(f)
+	if string(got) != "qux bar qux baz qux" {
+		t.Errorf("after replace_all = %q", got)
+	}
+}
+
+func TestMultiEditReplaceAllNotFound(t *testing.T) {
+	f := filepath.Join(testenv.TempDir(t), "a.txt")
+	os.WriteFile(f, []byte("hello"), 0o644)
+	_, err := multiEdit{}.Execute(context.Background(), argsJSON(t, map[string]any{
+		"path": f,
+		"edits": []map[string]any{
+			{"old_string": "nonexistent", "new_string": "x", "replace_all": true},
+		},
+	}))
+	if err == nil {
+		t.Fatal("expected error for replace_all with no matches")
+	}
+}
+
+func TestMultiEditMissingOldString(t *testing.T) {
+	f := filepath.Join(testenv.TempDir(t), "a.txt")
+	os.WriteFile(f, []byte("content"), 0o644)
+	_, err := multiEdit{}.Execute(context.Background(), argsJSON(t, map[string]any{
+		"path": f,
+		"edits": []map[string]any{
+			{"new_string": "x"},
+		},
+	}))
+	if err == nil {
+		t.Fatal("expected error for missing old_string in edit step")
+	}
+}
+
+func TestMultiEditInvalidArgs(t *testing.T) {
+	_, err := multiEdit{}.Execute(context.Background(), json.RawMessage(`{invalid`))
+	if err == nil {
+		t.Fatal("expected error for invalid JSON")
+	}
+}
+
+func TestMultiEditChained(t *testing.T) {
+	f := filepath.Join(testenv.TempDir(t), "code.go")
+	os.WriteFile(f, []byte("package old\n\nfunc Old() {\n\tOld()\n}\n"), 0o644)
+	runTool(t, multiEdit{}, map[string]any{
+		"path": f,
+		"edits": []map[string]any{
+			{"old_string": "package old", "new_string": "package new"},
+			{"old_string": "Old", "new_string": "New", "replace_all": true},
+		},
+	})
+	got, _ := os.ReadFile(f)
+	want := "package new\n\nfunc New() {\n\tNew()\n}\n"
+	if string(got) != want {
+		t.Errorf("after chained edits = %q\nwant %q", got, want)
+	}
+}
+
+// confine tests
+
+func TestConfineRejectsEscape(t *testing.T) {
+	dir := testenv.TempDir(t)
+	err := confine([]string{dir}, filepath.Join(dir, "..", "outside", "file.txt"))
+	if err == nil {
+		t.Fatal("expected error for path escaping workspace")
+	}
+}
+
+func TestConfineAllowsInside(t *testing.T) {
+	dir := testenv.TempDir(t)
+	// confine uses realPath which resolves symlinks, so we need to resolve too.
+	real, _ := filepath.EvalSymlinks(dir)
+	target := filepath.Join(real, "inside", "file.txt")
+	err := confine([]string{real}, target)
+	if err != nil {
+		t.Errorf("should allow path inside workspace: %v", err)
+	}
+}
+
+func TestConfineEmptyRootsAllowsAll(t *testing.T) {
+	err := confine(nil, "/any/path")
+	if err != nil {
+		t.Errorf("empty roots should allow all: %v", err)
+	}
+}
+
+// resolveIn tests
+
+func TestResolveInAbsolute(t *testing.T) {
+	abs := filepath.Join(testenv.TempDir(t), "absolute", "path")
+	got := resolveIn("/workdir", abs)
+	if got != abs {
+		t.Errorf("resolveIn absolute = %q, want %q", got, abs)
+	}
+}
+
+func TestResolveInRelative(t *testing.T) {
+	got := resolveIn("/workdir", "relative/path")
+	if got != filepath.Join("/workdir", "relative/path") {
+		t.Errorf("resolveIn relative = %q", got)
+	}
+}
+
+func TestResolveInEmptyWorkDir(t *testing.T) {
+	got := resolveIn("", "relative/path")
+	if got != "relative/path" {
+		t.Errorf("resolveIn empty workdir = %q", got)
+	}
+}

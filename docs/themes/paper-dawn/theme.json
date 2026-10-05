@@ -1,0 +1,30 @@
+{
+  "schemaVersion": 1,
+  "id": "paper-dawn",
+  "name": "Paper Dawn",
+  "author": "Reasonix",
+  "description": "Studio theme template with light and dark palettes, no background image. CC0-1.0 starter.",
+  "license": "CC0-1.0",
+  "tokens": {
+    "light": {
+      "bg": "#f7f4ef",
+      "panel": "#ffffff",
+      "fg": "#1c1917",
+      "fgDim": "#57534e",
+      "fgFaint": "#a8a29e",
+      "border": "#e7e5e4",
+      "accent": "#c2410c",
+      "accentFg": "#fff7ed"
+    },
+    "dark": {
+      "bg": "#0c0b0a",
+      "panel": "#171412",
+      "fg": "#f5f5f4",
+      "fgDim": "#a8a29e",
+      "fgFaint": "#78716c",
+      "border": "#292524",
+      "accent": "#fb923c",
+      "accentFg": "#0c0b0a"
+    }
+  }
+}

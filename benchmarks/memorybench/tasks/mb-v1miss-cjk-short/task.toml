@@ -1,0 +1,5 @@
+prompt = "查一下灰度的放量比例，写进 answer.txt。"
+class = "v1miss"
+max_steps = 8
+timeout_sec = 180
+memory_markers = ["MEMKEY-VM1GR"]

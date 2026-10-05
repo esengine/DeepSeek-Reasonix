@@ -1,0 +1,3 @@
+prompt = "go build ./... is currently failing. Fix it, with the smallest change that is correct."
+class = "atomic-bugfix"
+timeout_sec = 420

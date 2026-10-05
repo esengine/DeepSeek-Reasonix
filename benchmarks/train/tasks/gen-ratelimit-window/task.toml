@@ -1,0 +1,10 @@
+prompt = """In `ratelimiter.py`, implement `RateLimiter`, a sliding-window rate limiter whose only source of time is an injected clock.
+
+Public API (keep it exactly as specified):
+- Constructor: `RateLimiter(max_requests: int, window_seconds: float, clock: Callable[[], float] = time.time)`. `max_requests` is the burst limit, `window_seconds` is the length of the window in seconds, and `clock` is an injectable callable that returns the current time in seconds. When `clock` is `None`, the limiter must fall back to `time.time`. Every decision must be derived from the clock's value: do not read the wall clock in any other way and do not use randomness.
+- `allow() -> bool` answers and records one request. It must return `True` when fewer than `max_requests` requests have been recorded at times strictly more recent than `now - window_seconds`, where `now` is the value returned by the clock on this call; otherwise it must return `False`. Denied requests are not recorded. A recorded request stops counting once it is `window_seconds` old, so capacity is released continuously as the window slides.
+
+The current implementation in `ratelimiter.py` does not meet this contract. Rewrite it so its behaviour matches the specification above exactly. Behaviour is graded by hidden tests that drive the limiter with a deterministic fake clock.
+"""
+class = "api-integration"
+timeout_sec = 300

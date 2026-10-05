@@ -1,0 +1,19 @@
+prompt = """Write a function `normalize(path: str) -> str` in `pathutil.py` that returns the canonical POSIX form of the given path. Do not touch the filesystem: normalization is purely lexical.
+
+Rules:
+- Treat one or more consecutive `/` as a single `/`, including at the start of the path (`//x` -> `/x`, `///` -> `/`).
+- Remove `.` components.
+- Resolve `..` components: each `..` removes the nearest preceding component that is not itself `..`. In a relative path, a leading `..` with nothing left to remove is kept (`a/../../b` -> `../b`, `../..` stays `../..`). In an absolute path, `..` at the root is discarded (`/a/../../b` -> `/b`, `/..` -> `/`).
+- The result never ends in `/`, except for the root path `/` itself.
+- The empty string normalizes to `.`; a relative path that reduces to nothing gives `.` (`a/..` -> `.`); an absolute path that reduces to nothing gives `/` (`/a/..` -> `/`).
+- Components that merely contain dots (`a.b`, `..b`, `...`) are ordinary components and are left untouched.
+
+Examples:
+  normalize("a//b/./c/")  -> "a/b/c"
+  normalize("a/b/../c")   -> "a/c"
+  normalize("../../a/..") -> "../.."
+  normalize("/a/./b/..")  -> "/a"
+
+The grader imports `pathutil` and calls `pathutil.normalize(path)`; `normalize` must be a callable taking a single `str` argument and returning a `str`."""
+class = "codegen"
+timeout_sec = 300

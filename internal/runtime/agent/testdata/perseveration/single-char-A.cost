@@ -1,0 +1,5 @@
+example: single-char-A
+repeated unit: "A" (1 bytes)
+repetitions generated before the guard tripped: 1929
+repeated block before tripping/stripping: 1929 bytes
+wasted tokens (ceil(bytes/4)): 483

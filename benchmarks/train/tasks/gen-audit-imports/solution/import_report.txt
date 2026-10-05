@@ -1,0 +1,10 @@
+app/config -> os
+app/main -> app.config
+app/main -> app.models
+app/main -> app.utils
+app/models -> dataclasses.dataclass
+app/utils -> app.models.Item
+app/utils -> json
+app/utils -> zoneinfo
+scripts/standalone -> app.main.run
+scripts/standalone -> sys

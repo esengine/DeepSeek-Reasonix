@@ -1,0 +1,5 @@
+example: two-sentences
+repeated unit: "Let me reconsider the approach once more before I write any code at all.\nI will verify the result against the existing test suite afterwards.\n" (142 bytes)
+repetitions generated before the guard tripped: 15
+repeated block before tripping/stripping: 2130 bytes
+wasted tokens (ceil(bytes/4)): 533

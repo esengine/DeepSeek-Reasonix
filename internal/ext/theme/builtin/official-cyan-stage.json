@@ -1,0 +1,67 @@
+{
+  "schemaVersion": 1,
+  "id": "official-cyan-stage",
+  "name": "Cyan Stage",
+  "author": "Reasonix Contributors",
+  "description": "Airy cyan future stage with light rings and an original digital performer.",
+  "license": "MIT",
+  "baseStyle": "carbon",
+  "tokens": {
+    "light": {
+      "bg": "#F1FCFD",
+      "bgSoft": "#E4F5F7",
+      "bgElev": "#FAFEFE",
+      "panel": "#FAFEFE",
+      "border": "#9CCFD7",
+      "borderSoft": "#DAEDF0",
+      "fg": "#173238",
+      "fgDim": "#43606A",
+      "fgFaint": "#51727C",
+      "accent": "#007C92",
+      "accentFg": "#F1FCFD",
+      "float": "#FAFEFE",
+      "floatHi": "#FAFEFE",
+      "codeBg": "#EBF9FA",
+      "sunkBg": "#F1FCFD",
+      "synKeyword": "#00788D",
+      "synString": "#962C86",
+      "synNumber": "#3C2C96",
+      "synFunction": "#507B24"
+    },
+    "dark": {
+      "bg": "#07181D",
+      "bgSoft": "#0C2229",
+      "bgElev": "#112C34",
+      "panel": "#0E252D",
+      "border": "#1F4550",
+      "borderSoft": "#16333C",
+      "fg": "#E9FCFF",
+      "fgDim": "#AEDBE2",
+      "fgFaint": "#6FA5AF",
+      "accent": "#37D7E4",
+      "accentFg": "#04222a",
+      "float": "#0E252D",
+      "floatHi": "#112C34",
+      "codeBg": "#0A1D23",
+      "sunkBg": "#07181D",
+      "synKeyword": "#37D7E4",
+      "synString": "#DF90D9",
+      "synNumber": "#9690DF",
+      "synFunction": "#BFDF90"
+    }
+  },
+  "recipes": {
+    "density": "comfortable",
+    "corners": "round"
+  },
+  "background": {
+    "image": "background.webp",
+    "focusX": 0.74,
+    "focusY": 0.45,
+    "safeArea": "left",
+    "homeOpacity": 0.96,
+    "taskOpacity": 0.18,
+    "overlayStrength": 0.72,
+    "paneOpacity": 0.5
+  }
+}

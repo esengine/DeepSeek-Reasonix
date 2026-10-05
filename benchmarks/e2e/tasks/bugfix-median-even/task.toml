@@ -1,0 +1,3 @@
+prompt = "median(values) in stats.py is wrong for even-length lists. Fix it to return the average of the two middle values."
+class = "atomic-bugfix"
+timeout_sec = 180

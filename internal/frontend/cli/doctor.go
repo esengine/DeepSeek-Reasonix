@@ -1,0 +1,314 @@
+package cli
+
+import (
+	"encoding/json"
+	"flag"
+	"fmt"
+	"os"
+	"strings"
+
+	"reasonix/internal/contract/config"
+	"reasonix/internal/frontend/doctor"
+	"reasonix/internal/platform/repair"
+)
+
+func doctorBillingCommand(args []string) int {
+	fs := flag.NewFlagSet("doctor billing", flag.ContinueOnError)
+	jsonOut := fs.Bool("json", false, "print billing diagnostics as JSON")
+	root := fs.String("root", ".", "project root for config resolution")
+	if code, ok := parseCommandFlags(fs, args); !ok {
+		return code
+	}
+	cfg, err := config.LoadForRoot(*root)
+	if err != nil {
+		// Still report with defaults so doctor stays useful offline.
+		cfg = config.Default()
+	}
+	report := doctor.CollectBilling(cfg)
+	if *jsonOut {
+		enc := json.NewEncoder(os.Stdout)
+		enc.SetIndent("", "  ")
+		if err := enc.Encode(report); err != nil {
+			fmt.Fprintln(os.Stderr, err)
+			return 1
+		}
+		return 0
+	}
+	fmt.Print(doctor.RenderBillingText(report))
+	return 0
+}
+
+func doctorCommand(args []string, version string) int {
+	if len(args) > 0 && args[0] == "catalogs" {
+		return doctorCatalogsCommand(args[1:])
+	}
+	if len(args) > 0 && args[0] == "quality" {
+		return doctorQualityCommand(args[1:], version)
+	}
+	if len(args) > 0 && args[0] == "session" {
+		return doctorSessionCommand(args[1:], version)
+	}
+	if len(args) > 0 && args[0] == "redact-sessions" {
+		return doctorRedactSessionsCommand(args[1:])
+	}
+	if len(args) > 0 && args[0] == "capabilities" {
+		return doctorCapabilitiesCommand(args[1:])
+	}
+	if len(args) > 0 && args[0] == "runtime" {
+		return doctorRuntimeCommand(args[1:])
+	}
+	if len(args) > 0 && args[0] == "billing" {
+		return doctorBillingCommand(args[1:])
+	}
+	if len(args) > 0 && args[0] == "repair" {
+		return doctorRepairCommand(args[1:])
+	}
+	fs := flag.NewFlagSet("doctor", flag.ContinueOnError)
+	jsonOut := fs.Bool("json", false, "print diagnostics as JSON")
+	if code, ok := parseCommandFlags(fs, args); !ok {
+		return code
+	}
+
+	report := doctor.Collect(doctor.Options{Version: version})
+	if *jsonOut {
+		enc := json.NewEncoder(os.Stdout)
+		enc.SetIndent("", "  ")
+		if err := enc.Encode(report); err != nil {
+			fmt.Fprintln(os.Stderr, err)
+			return 1
+		}
+		return 0
+	}
+	fmt.Print(doctor.RenderText(report))
+	return 0
+}
+
+func doctorRepairCommand(args []string) int {
+	fs := flag.NewFlagSet("doctor repair", flag.ContinueOnError)
+	root := fs.String("root", ".", "project root to inspect")
+	apply := fs.Bool("apply", false, "quarantine invalid config and restore the last-known-good global snapshot")
+	includeProject := fs.Bool("project", false, "allow --apply to quarantine an invalid project reasonix.toml")
+	jsonOut := fs.Bool("json", false, "print result as JSON")
+	if code, ok := parseCommandFlags(fs, args); !ok {
+		return code
+	}
+	if fs.NArg() != 0 {
+		fmt.Fprintln(os.Stderr, "usage: reasonix doctor repair [--root PATH] [--apply] [--project] [--json]")
+		return 2
+	}
+	report, err := repair.InspectAndRepairConfig(repair.ConfigOptions{
+		Root:           *root,
+		Apply:          *apply,
+		IncludeProject: *includeProject,
+	})
+	if err != nil {
+		fmt.Fprintln(os.Stderr, "error:", err)
+		return 1
+	}
+	if *jsonOut {
+		enc := json.NewEncoder(os.Stdout)
+		enc.SetIndent("", "  ")
+		if err := enc.Encode(report); err != nil {
+			fmt.Fprintln(os.Stderr, err)
+			return 1
+		}
+	} else {
+		fmt.Println("Reasonix repair report")
+		for _, check := range report.Checks {
+			status := "ok"
+			if !check.Exists {
+				status = "missing (defaults apply)"
+			} else if !check.Valid {
+				status = "invalid: " + check.Error
+			}
+			fmt.Printf("  %-8s %s\n             %s\n", check.Scope, status, check.Path)
+			if check.SnapshotAge != "" {
+				fmt.Printf("             snapshot %s (%s old)\n", check.SnapshotRecordedAt, check.SnapshotAge)
+			}
+		}
+		for _, action := range report.Applied {
+			fmt.Println("  applied:", action)
+		}
+		if !*apply {
+			// Name the age here: --apply reinstates the snapshot over the
+			// user's file, reverting every setting changed since it was taken.
+			fmt.Println("  dry run; pass --apply to repair the global config")
+			for _, check := range report.Checks {
+				if check.Scope == "global" && check.Exists && !check.Valid && check.SnapshotAge != "" {
+					fmt.Printf("  --apply would restore a snapshot %s old, discarding config changes made since\n", check.SnapshotAge)
+				}
+			}
+		}
+	}
+	for _, check := range report.Checks {
+		if check.Exists && !check.Valid {
+			return 1
+		}
+	}
+	return 0
+}
+
+func doctorQualityCommand(args []string, version string) int {
+	ref := ""
+	jsonOut := false
+	for _, arg := range args {
+		switch arg {
+		case "-h", "--help":
+			fmt.Fprintln(os.Stdout, "usage: reasonix doctor quality <branch-id-or-path> [--json]")
+			fmt.Fprintln(os.Stdout, "Prints a public-safe, content-free coding-quality summary for one session.")
+			return 0
+		case "--json":
+			jsonOut = true
+		default:
+			if strings.HasPrefix(arg, "-") || ref != "" {
+				fmt.Fprintln(os.Stderr, "usage: reasonix doctor quality <branch-id-or-path> [--json]")
+				return 2
+			}
+			ref = arg
+		}
+	}
+	if ref == "" {
+		fmt.Fprintln(os.Stderr, "usage: reasonix doctor quality <branch-id-or-path> [--json]")
+		return 2
+	}
+	report, err := doctor.CollectQuality(doctor.QualityOptions{Version: version, SessionRef: ref})
+	if err != nil {
+		fmt.Fprintln(os.Stderr, "error:", err)
+		return 1
+	}
+	if jsonOut {
+		enc := json.NewEncoder(os.Stdout)
+		enc.SetIndent("", "  ")
+		if err := enc.Encode(report); err != nil {
+			fmt.Fprintln(os.Stderr, err)
+			return 1
+		}
+		return 0
+	}
+	fmt.Print(doctor.RenderQualityText(report))
+	return 0
+}
+
+type stringListFlag []string
+
+func (f *stringListFlag) String() string {
+	if f == nil {
+		return ""
+	}
+	return strings.Join(*f, string(os.PathListSeparator))
+}
+
+func (f *stringListFlag) Set(value string) error {
+	value = strings.TrimSpace(value)
+	if value == "" {
+		return fmt.Errorf("empty path")
+	}
+	*f = append(*f, value)
+	return nil
+}
+
+func doctorRedactSessionsCommand(args []string) int {
+	fs := flag.NewFlagSet("doctor redact-sessions", flag.ContinueOnError)
+	var dirs stringListFlag
+	dryRun := fs.Bool("dry-run", false, "show how many session files would be redacted without writing")
+	jsonOut := fs.Bool("json", false, "print result as JSON")
+	fs.Var(&dirs, "dir", "session directory to scan; repeat to scan multiple directories")
+	if code, ok := parseCommandFlags(fs, args); !ok {
+		return code
+	}
+	if fs.NArg() != 0 {
+		fmt.Fprintln(os.Stderr, "usage: reasonix doctor redact-sessions [--dry-run] [--json] [--dir PATH]")
+		return 2
+	}
+	res := doctor.RedactSessions(doctor.RedactSessionsOptions{
+		Dirs:   []string(dirs),
+		DryRun: *dryRun,
+	})
+	if *jsonOut {
+		enc := json.NewEncoder(os.Stdout)
+		enc.SetIndent("", "  ")
+		if err := enc.Encode(res); err != nil {
+			fmt.Fprintln(os.Stderr, err)
+			return 1
+		}
+	} else {
+		action := "redacted"
+		if *dryRun {
+			action = "would redact"
+		}
+		fmt.Fprintf(os.Stdout, "session secret cleanup %s %d/%d files", action, res.FilesChanged, res.FilesScanned)
+		if res.FilesSkipped > 0 {
+			fmt.Fprintf(os.Stdout, " (%d skipped: active lease held)", res.FilesSkipped)
+		}
+		fmt.Fprintln(os.Stdout)
+	}
+	for _, msg := range res.Errors {
+		fmt.Fprintln(os.Stderr, "warning:", msg)
+	}
+	if len(res.Errors) > 0 {
+		return 1
+	}
+	return 0
+}
+
+func doctorSessionCommand(args []string, version string) int {
+	ref := ""
+	outPath := ""
+	for i := 0; i < len(args); i++ {
+		arg := args[i]
+		switch arg {
+		case "-h", "--help":
+			fmt.Fprintln(os.Stdout, "usage: reasonix doctor session <branch-id-or-path> [--zip] [--out PATH]")
+			fmt.Fprintln(os.Stdout, "")
+			fmt.Fprintln(os.Stdout, "Bundles the session transcript, persistence sidecars, conflict diagnostics,")
+			fmt.Fprintln(os.Stdout, "and the recovery parent chain into a zip for support. Unlike `reasonix doctor`,")
+			fmt.Fprintln(os.Stdout, "bundled transcripts are NOT redacted; share only with a trusted support channel.")
+			return 0
+		case "--zip":
+			// The subcommand currently writes a zip by default. Keep --zip as an
+			// explicit, script-friendly marker so support replies can say exactly
+			// what to run.
+		case "--out":
+			i++
+			if i >= len(args) {
+				fmt.Fprintln(os.Stderr, "error: --out requires a path")
+				return 2
+			}
+			outPath = args[i]
+		default:
+			if v, ok := strings.CutPrefix(arg, "--out="); ok {
+				if v == "" {
+					fmt.Fprintln(os.Stderr, "error: --out requires a path")
+					return 2
+				}
+				outPath = v
+				continue
+			}
+			if strings.HasPrefix(arg, "-") {
+				fmt.Fprintf(os.Stderr, "error: unknown doctor session flag %s\n", arg)
+				return 2
+			}
+			if ref != "" {
+				fmt.Fprintln(os.Stderr, "usage: reasonix doctor session <branch-id-or-path> [--zip] [--out PATH]")
+				return 2
+			}
+			ref = arg
+		}
+	}
+	if ref == "" {
+		fmt.Fprintln(os.Stderr, "usage: reasonix doctor session <branch-id-or-path> [--zip] [--out PATH]")
+		return 2
+	}
+	result, err := doctor.WriteSessionBundle(doctor.SessionBundleOptions{
+		Version:    version,
+		SessionRef: ref,
+		OutputPath: outPath,
+	})
+	if err != nil {
+		fmt.Fprintln(os.Stderr, "error:", err)
+		return 1
+	}
+	fmt.Println(result.Path)
+	fmt.Fprintln(os.Stderr, "note: the bundle contains full session transcripts without redaction; share it only with a trusted support channel")
+	return 0
+}

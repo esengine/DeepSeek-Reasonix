@@ -1,0 +1,95 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="760" height="170" viewBox="0 0 760 170" role="img" aria-label="Reasonix — DeepSeek-native agent framework">
+  <title>Reasonix</title>
+  <defs>
+    <!-- Signature cyan → violet → fuchsia gradient used across the TUI wordmark
+         and the brand mark. Renders well on both GitHub dark and light bg. -->
+    <linearGradient id="rx-grad" x1="0%" y1="0%" x2="100%" y2="0%">
+      <stop offset="0%" stop-color="#5eead4"/>
+      <stop offset="15%" stop-color="#67e8f9"/>
+      <stop offset="30%" stop-color="#7dd3fc"/>
+      <stop offset="45%" stop-color="#93c5fd"/>
+      <stop offset="60%" stop-color="#a5b4fc"/>
+      <stop offset="75%" stop-color="#c4b5fd"/>
+      <stop offset="90%" stop-color="#d8b4fe"/>
+      <stop offset="100%" stop-color="#f0abfc"/>
+    </linearGradient>
+    <linearGradient id="rx-grad-mark" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#5eead4"/>
+      <stop offset="50%" stop-color="#93c5fd"/>
+      <stop offset="100%" stop-color="#c4b5fd"/>
+    </linearGradient>
+    <filter id="glow" x="-50%" y="-50%" width="200%" height="200%">
+      <feGaussianBlur stdDeviation="3" result="blur"/>
+      <feMerge>
+        <feMergeNode in="blur"/>
+        <feMergeNode in="SourceGraphic"/>
+      </feMerge>
+    </filter>
+  </defs>
+
+  <!-- ◈ brand mark: concentric diamonds. Outer stroke pulses,
+       inner fill breathes, whole group rotates slowly. The rotation
+       is subtle (12s / full turn) so it feels like a heartbeat, not a
+       spinner. -->
+  <g transform="translate(90, 85)" filter="url(#glow)">
+    <g>
+      <animateTransform attributeName="transform" type="rotate"
+                        from="0" to="360" dur="18s" repeatCount="indefinite"/>
+      <!-- Outer hollow diamond -->
+      <path d="M 0,-46 L 46,0 L 0,46 L -46,0 Z"
+            fill="none"
+            stroke="url(#rx-grad-mark)"
+            stroke-width="3.5"
+            stroke-linejoin="round">
+        <animate attributeName="stroke-width"
+                 values="3.5;5.5;3.5"
+                 dur="2.4s"
+                 repeatCount="indefinite"/>
+      </path>
+      <!-- Middle hollow diamond -->
+      <path d="M 0,-26 L 26,0 L 0,26 L -26,0 Z"
+            fill="none"
+            stroke="url(#rx-grad-mark)"
+            stroke-width="2"
+            stroke-linejoin="round"
+            opacity="0.7">
+        <animate attributeName="opacity"
+                 values="0.4;0.9;0.4"
+                 dur="2.4s"
+                 begin="0.8s"
+                 repeatCount="indefinite"/>
+      </path>
+      <!-- Inner solid diamond -->
+      <path d="M 0,-11 L 11,0 L 0,11 L -11,0 Z"
+            fill="url(#rx-grad-mark)">
+        <animate attributeName="opacity"
+                 values="0.75;1;0.75"
+                 dur="2.4s"
+                 repeatCount="indefinite"/>
+      </path>
+    </g>
+  </g>
+
+  <!-- REASONIX wordmark with shifting gradient. The x1 offset animates
+       so the gradient crawls left-to-right across the letters — a
+       slow rainbow sweep that gives the logo life without being noisy. -->
+  <text x="170" y="102"
+        font-family="ui-monospace, SFMono-Regular, 'Cascadia Code', Menlo, Consolas, 'DejaVu Sans Mono', monospace"
+        font-size="68"
+        font-weight="800"
+        fill="url(#rx-grad)"
+        letter-spacing="6">REASONIX
+    <animate attributeName="opacity"
+             values="0.9;1;0.9"
+             dur="3.2s"
+             repeatCount="indefinite"/>
+  </text>
+
+  <!-- Tagline sits just below the wordmark. Slate-500 reads well on
+       both GitHub dark and light themes (~4.5:1 contrast either way). -->
+  <text x="172" y="136"
+        font-family="ui-monospace, SFMono-Regular, 'Cascadia Code', Menlo, Consolas, 'DejaVu Sans Mono', monospace"
+        font-size="15"
+        fill="#64748b"
+        letter-spacing="0.5">DeepSeek-native agent framework  ·  cache-first loop  ·  Ink TUI</text>
+</svg>

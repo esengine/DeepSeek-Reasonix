@@ -1,0 +1,168 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Reasonix Approval Mock 1</title>
+  <style>
+    :root {
+      color-scheme: dark;
+      --bg: #101113;
+      --panel: #1b1e22;
+      --panel-2: #242930;
+      --border: #3b424b;
+      --muted: #a8b0ba;
+      --text: #f5f7fa;
+      --mono: "SFMono-Regular", Menlo, Consolas, monospace;
+      --sans: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+    }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      min-height: 100vh;
+      display: grid;
+      place-items: center;
+      padding: 36px;
+      background:
+        radial-gradient(circle at 20% 20%, rgba(244, 168, 75, .12), transparent 32%),
+        linear-gradient(135deg, #101113, #171a1d);
+      color: var(--text);
+      font-family: var(--sans);
+    }
+    .mock {
+      width: min(880px, 100%);
+      border: 1px solid var(--border);
+      border-radius: 18px;
+      background: linear-gradient(#202327, #1a1d20);
+      box-shadow: 0 28px 80px rgba(0,0,0,.42);
+      overflow: hidden;
+    }
+    .mock__head {
+      padding: 22px 28px;
+      background: var(--panel-2);
+      border-bottom: 1px solid var(--border);
+    }
+    .mock__title {
+      margin: 0;
+      font-size: 25px;
+      font-weight: 750;
+      letter-spacing: 0;
+    }
+    .mock__body { padding: 30px 28px 28px; }
+    .eyebrow {
+      margin: 0 0 14px;
+      color: var(--muted);
+      font-size: 15px;
+    }
+    .subject {
+      margin-bottom: 28px;
+      padding: 17px 18px;
+      border: 1px solid #333942;
+      border-radius: 10px;
+      background: #15181b;
+      font: 500 16px/1.5 var(--mono);
+      color: #dbe3ea;
+    }
+    .actions {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 16px;
+    }
+    .action {
+      display: inline-flex;
+      align-items: center;
+      gap: 13px;
+      min-height: 64px;
+      padding: 12px 17px;
+      border: 1px solid #4a5360;
+      border-radius: 10px;
+      background: #20252b;
+      color: #f6f8fa;
+    }
+    .action--once {
+      background: #5f4630;
+      border-color: #ca8b45;
+    }
+    .action--prefix {
+      background: #263328;
+      border-color: #62a66e;
+    }
+    .action--deny {
+      min-height: 54px;
+      background: #302328;
+      border-color: #8a4c58;
+    }
+    .key {
+      display: grid;
+      place-items: center;
+      flex: 0 0 auto;
+      width: 28px;
+      height: 28px;
+      border-radius: 999px;
+      background: #aeb7c2;
+      color: #141516;
+      font: 800 13px/1 var(--mono);
+    }
+    .action--once .key { background: #f4a84b; }
+    .action--prefix .key { background: #76d083; }
+    .action--deny .key { background: #ef6b7c; }
+    .copy {
+      display: grid;
+      gap: 5px;
+      min-width: 0;
+    }
+    .label {
+      font-size: 15px;
+      font-weight: 700;
+      line-height: 1.25;
+    }
+    code {
+      font: 600 13px/1.35 var(--mono);
+      color: #fff;
+      overflow-wrap: anywhere;
+    }
+    .note {
+      margin: 26px 0 0;
+      color: var(--muted);
+      font-size: 14px;
+      line-height: 1.6;
+    }
+  </style>
+</head>
+<body>
+  <main class="mock" aria-label="Reasonix approval mock 1">
+    <header class="mock__head">
+      <h1 class="mock__title">1. Bash：精简为前缀授权</h1>
+    </header>
+    <section class="mock__body">
+      <p class="eyebrow">Allow tool call</p>
+      <div class="subject">bash - go test ./...</div>
+      <div class="actions">
+        <button class="action action--once">
+          <span class="key">1</span>
+          <span class="copy"><span class="label">允许一次</span></span>
+        </button>
+        <button class="action">
+          <span class="key">2</span>
+          <span class="copy">
+            <span class="label">本会话允许</span>
+            <code>Bash(go test:*)</code>
+          </span>
+        </button>
+        <button class="action action--prefix">
+          <span class="key">3</span>
+          <span class="copy">
+            <span class="label">总是允许（保存）</span>
+            <code>Bash(go test:*)</code>
+          </span>
+        </button>
+        <button class="action action--deny">
+          <span class="key">4</span>
+          <span class="copy"><span class="label">拒绝</span></span>
+        </button>
+      </div>
+      <p class="note">效果：选择 2/3 后，后续 <code>go test ./internal/control</code> 这类相似命令不再重复弹审批；选择 1 只允许本次。</p>
+    </section>
+  </main>
+</body>
+</html>

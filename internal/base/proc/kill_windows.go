@@ -1,0 +1,258 @@
+//go:build windows
+
+package proc
+
+import (
+	"errors"
+	"fmt"
+	"os"
+	"os/exec"
+	"strconv"
+	"syscall"
+	"unsafe"
+
+	"golang.org/x/sys/windows"
+)
+
+// SetProcessGroupKill is a no-op on Windows: the Job Object that StartTracked
+// assigns reaps the whole tree on close, so Setpgid (which doesn't exist here)
+// is unnecessary. It exists so non-Windows callers can request group kill
+// uniformly.
+func SetProcessGroupKill(*exec.Cmd) {}
+
+// KillTree terminates cmd and every descendant it spawned. Process.Kill only
+// signals the direct child, so a launcher (cmd.exe → node.exe) leaves the
+// grandchild alive holding the inherited stdout/stderr pipes — which makes
+// cmd.Wait block forever. taskkill /T walks the live tree and kills it all.
+func KillTree(cmd *exec.Cmd) {
+	if cmd == nil || cmd.Process == nil {
+		return
+	}
+	kill := exec.Command("taskkill", "/F", "/T", "/PID", strconv.Itoa(cmd.Process.Pid))
+	HideWindow(kill)
+	_ = kill.Run()
+	_ = cmd.Process.Kill()
+}
+
+// StartTracked starts cmd inside a new Job Object whose KILL_ON_JOB_CLOSE flag
+// fells the whole tree — including a launcher's detached grandchild (cmd.exe →
+// node.exe, as the CodeGraph daemon re-parents itself off the launcher) — when
+// the handle closes via TrackedJob.Kill or an abrupt reasonix exit. The child is
+// created suspended and assigned to the job before it runs, so a fast shim can
+// no longer exec its grandchild and exit before assignment, orphaning a node
+// the job never captured (#3747). It is always resumed before returning, even
+// when job assignment fails, so a child is never left wedged suspended. Returns
+// the job handle, 0 if it could not be created — then killTracked relies on
+// KillTree alone.
+func StartTracked(cmd *exec.Cmd) (*TrackedJob, error) {
+	job, err := startTracked(cmd, false)
+	return &TrackedJob{h: job}, err
+}
+
+// StartTrackedRequired is StartTracked for a caller that must not run the child
+// unless a Job Object holds its whole tree: without one the only way to end the
+// tree is walking live parent ids, which a broken chain defeats. It returns
+// ErrProcessTrackingUnavailable, with the child already ended, when the job
+// cannot be made.
+func StartTrackedRequired(cmd *exec.Cmd) (*TrackedJob, error) {
+	job, err := startTracked(cmd, true)
+	if err != nil {
+		return nil, err
+	}
+	return &TrackedJob{h: job}, nil
+}
+
+func startTracked(cmd *exec.Cmd, requireJob bool) (uintptr, error) {
+	if cmd.SysProcAttr == nil {
+		cmd.SysProcAttr = &syscall.SysProcAttr{}
+	}
+	cmd.SysProcAttr.CreationFlags |= windows.CREATE_SUSPENDED
+	if err := cmd.Start(); err != nil {
+		return 0, err
+	}
+	job := assignJob(cmd)
+	if requireJob && job == 0 {
+		return 0, errors.Join(ErrProcessTrackingUnavailable, terminateAndReapStartedProcess(cmd, 0))
+	}
+	if err := resumeProcess(uint32(cmd.Process.Pid)); err != nil {
+		resumeErr := fmt.Errorf("resume suspended process %d: %w", cmd.Process.Pid, err)
+		cleanupErr := terminateAndReapStartedProcess(cmd, job)
+		if requireJob {
+			return 0, errors.Join(ErrProcessTrackingUnavailable, resumeErr, cleanupErr)
+		}
+		return 0, errors.Join(resumeErr, cleanupErr)
+	}
+	return job, nil
+}
+
+func terminateAndReapStartedProcess(cmd *exec.Cmd, job uintptr) error {
+	var cleanupErrors []error
+	if job != 0 {
+		handle := windows.Handle(job)
+		if err := windows.TerminateJobObject(handle, 1); err != nil {
+			cleanupErrors = append(cleanupErrors, fmt.Errorf("terminate job object: %w", err))
+		}
+		if err := windows.CloseHandle(handle); err != nil {
+			cleanupErrors = append(cleanupErrors, fmt.Errorf("close job object: %w", err))
+		}
+	}
+	if cmd == nil || cmd.Process == nil {
+		cleanupErrors = append(cleanupErrors, errors.New("started process is unavailable for termination"))
+		return errors.Join(cleanupErrors...)
+	}
+	if err := cmd.Process.Kill(); err != nil && !errors.Is(err, os.ErrProcessDone) {
+		cleanupErrors = append(cleanupErrors, fmt.Errorf("terminate suspended process: %w", err))
+	}
+	waitErr := cmd.Wait()
+	var exitErr *exec.ExitError
+	if waitErr != nil && !errors.As(waitErr, &exitErr) && !errors.Is(waitErr, os.ErrProcessDone) {
+		cleanupErrors = append(cleanupErrors, fmt.Errorf("reap suspended process: %w", waitErr))
+	}
+	if cmd.ProcessState == nil {
+		cleanupErrors = append(cleanupErrors, errors.New("suspended process was not reaped"))
+	}
+	return errors.Join(cleanupErrors...)
+}
+
+func assignJob(cmd *exec.Cmd) uintptr {
+	if cmd == nil || cmd.Process == nil {
+		return 0
+	}
+	job, err := windows.CreateJobObject(nil, nil)
+	if err != nil {
+		return 0
+	}
+	info := windows.JOBOBJECT_EXTENDED_LIMIT_INFORMATION{
+		BasicLimitInformation: windows.JOBOBJECT_BASIC_LIMIT_INFORMATION{
+			LimitFlags: windows.JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE,
+		},
+	}
+	if _, err := windows.SetInformationJobObject(job, windows.JobObjectExtendedLimitInformation,
+		uintptr(unsafe.Pointer(&info)), uint32(unsafe.Sizeof(info))); err != nil {
+		_ = windows.CloseHandle(job)
+		return 0
+	}
+	h, err := windows.OpenProcess(windows.PROCESS_SET_QUOTA|windows.PROCESS_TERMINATE, false, uint32(cmd.Process.Pid))
+	if err != nil {
+		_ = windows.CloseHandle(job)
+		return 0
+	}
+	defer func() { _ = windows.CloseHandle(h) }()
+	if err := windows.AssignProcessToJobObject(job, h); err != nil {
+		_ = windows.CloseHandle(job)
+		return 0
+	}
+	return uintptr(job)
+}
+
+// resumeProcess resumes the primary thread. Before it runs, a CREATE_SUSPENDED
+// process cannot create another thread; absence or duplication is fail-closed.
+func resumeProcess(pid uint32) error {
+	th, found, err := soleThreadOf(pid)
+	if err != nil {
+		return err
+	}
+	if !found {
+		return resumeBySnapshot(pid)
+	}
+	defer func() { _ = windows.CloseHandle(th) }()
+	return resumeSuspendedThread(th)
+}
+
+var procNtGetNextThread = windows.NewLazySystemDLL("ntdll.dll").NewProc("NtGetNextThread")
+
+const statusNoMoreEntries = 0x8000001A
+
+// soleThreadOf opens the one thread of pid by walking that process's threads
+// alone; a system-wide thread snapshot costs tens of milliseconds per launch.
+// found is false when the walk is unavailable, and the snapshot answers.
+func soleThreadOf(pid uint32) (th windows.Handle, found bool, err error) {
+	if procNtGetNextThread.Find() != nil {
+		return 0, false, nil
+	}
+	process, err := windows.OpenProcess(windows.PROCESS_QUERY_INFORMATION, false, pid)
+	if err != nil {
+		return 0, false, nil
+	}
+	defer func() { _ = windows.CloseHandle(process) }()
+	var first, second windows.Handle
+	if st, _, _ := procNtGetNextThread.Call(uintptr(process), 0, windows.THREAD_SUSPEND_RESUME, 0, 0, uintptr(unsafe.Pointer(&first))); st != 0 {
+		return 0, false, nil
+	}
+	st, _, _ := procNtGetNextThread.Call(uintptr(process), uintptr(first), windows.THREAD_SUSPEND_RESUME, 0, 0, uintptr(unsafe.Pointer(&second)))
+	switch st {
+	case statusNoMoreEntries:
+		return first, true, nil
+	case 0:
+		_ = windows.CloseHandle(second)
+		_ = windows.CloseHandle(first)
+		return 0, true, fmt.Errorf("multiple threads found for suspended process %d", pid)
+	}
+	_ = windows.CloseHandle(first)
+	return 0, false, nil
+}
+
+func resumeBySnapshot(pid uint32) error {
+	snap, err := windows.CreateToolhelp32Snapshot(windows.TH32CS_SNAPTHREAD, 0)
+	if err != nil {
+		return err
+	}
+	defer func() { _ = windows.CloseHandle(snap) }()
+	var te windows.ThreadEntry32
+	te.Size = uint32(unsafe.Sizeof(te))
+	var threadID uint32
+	for err := windows.Thread32First(snap, &te); err == nil; err = windows.Thread32Next(snap, &te) {
+		if te.OwnerProcessID != pid {
+			continue
+		}
+		if threadID != 0 {
+			return fmt.Errorf("multiple threads found for suspended process %d", pid)
+		}
+		threadID = te.ThreadID
+	}
+	if threadID == 0 {
+		return fmt.Errorf("no thread found for suspended process %d", pid)
+	}
+	th, err := windows.OpenThread(windows.THREAD_SUSPEND_RESUME, false, threadID)
+	if err != nil {
+		return err
+	}
+	defer func() { _ = windows.CloseHandle(th) }()
+	return resumeSuspendedThread(th)
+}
+
+func resumeSuspendedThread(th windows.Handle) error {
+	previous, err := windows.ResumeThread(th)
+	if err != nil {
+		return err
+	}
+	if previous > 1 {
+		return fmt.Errorf("thread remains suspended (previous count %d)", previous)
+	}
+	return nil
+}
+
+// killTracked terminates cmd's whole process tree. When job (from StartTracked)
+// is non-zero, terminating it kills even detached descendants; the KillTree pass
+// then catches anything spawned in the gap before the job was assigned.
+func killTracked(cmd *exec.Cmd, job uintptr) {
+	if job == 0 {
+		KillTree(cmd)
+		return
+	}
+	finishTracked(job)
+	if cmd != nil && cmd.Process != nil {
+		_ = cmd.Process.Kill()
+	}
+}
+
+// finishTracked releases a completed command's Job Object. Closing a job with
+// KILL_ON_JOB_CLOSE also terminates descendants without a PID-reuse-prone
+// taskkill fallback after cmd.Wait.
+func finishTracked(job uintptr) {
+	if job == 0 {
+		return
+	}
+	_ = windows.TerminateJobObject(windows.Handle(job), 1)
+	_ = windows.CloseHandle(windows.Handle(job))
+}

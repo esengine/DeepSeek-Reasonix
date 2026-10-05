@@ -1,0 +1,98 @@
+package memory
+
+import (
+	"context"
+	"encoding/json"
+	"strings"
+	"testing"
+
+	"reasonix/internal/base/testenv"
+)
+
+// TestForgetToolDeletes drives the tool with raw JSON args and verifies the fact
+// is removed from the store.
+func TestForgetToolDeletes(t *testing.T) {
+	store := Store{Dir: testenv.TempDir(t)}
+	if _, err := store.Save(Memory{Name: "stale-fact", Description: "d", Type: TypeProject, Body: "b"}); err != nil {
+		t.Fatal(err)
+	}
+
+	tl := NewForgetTool(store)
+	if tl.Name() != "forget" || tl.ReadOnly() {
+		t.Fatalf("unexpected tool identity: name=%q readonly=%v", tl.Name(), tl.ReadOnly())
+	}
+	if !json.Valid(tl.Schema()) {
+		t.Fatal("forget schema is not valid JSON")
+	}
+
+	out, err := tl.Execute(context.Background(), []byte(`{"name":"stale-fact"}`))
+	if err != nil {
+		t.Fatalf("Execute: %v", err)
+	}
+	if !strings.Contains(out, "Forgot memory") || !strings.Contains(out, "archived from project/stale-fact.md") {
+		t.Fatalf("unexpected tool output: %q", out)
+	}
+	if strings.Contains(out, store.Dir) {
+		t.Fatalf("forget output exposed the absolute store path: %q", out)
+	}
+	if len(store.List()) != 0 {
+		t.Fatalf("memory not deleted: %+v", store.List())
+	}
+}
+
+func TestForgetToolArchivesOnlyQualifiedScope(t *testing.T) {
+	root := testenv.TempDir(t)
+	store := Store{Dir: root + "/project", GlobalDir: root + "/global"}
+	if _, err := store.SaveWithOptions(Memory{Name: "project/shared.md", Description: "project", Body: "project body"}, SaveOptions{}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := store.SaveWithOptions(Memory{Name: "global/shared.md", Description: "global", Body: "global body"}, SaveOptions{}); err != nil {
+		t.Fatal(err)
+	}
+
+	out, err := NewForgetTool(store).Execute(context.Background(), []byte(`{"name":"global/shared.md"}`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(out, "archived from global/shared.md") || strings.Contains(out, root) {
+		t.Fatalf("qualified forget output = %q", out)
+	}
+	if _, ok := store.Read("global/shared.md"); ok {
+		t.Fatal("global fact remained active")
+	}
+	if project, ok := store.Read("project/shared.md"); !ok || project.Body != "project body" {
+		t.Fatalf("project fact was disturbed: %+v, ok=%v", project, ok)
+	}
+}
+
+// TestForgetToolValidates rejects an empty name rather than deleting nothing
+// silently.
+func TestForgetToolValidates(t *testing.T) {
+	tl := NewForgetTool(Store{Dir: testenv.TempDir(t)})
+	if _, err := tl.Execute(context.Background(), []byte(`{}`)); err == nil {
+		t.Fatal("expected error when name is missing")
+	}
+}
+
+// fakeQueue records the turn-tail notes the remember/forget tools queue.
+type fakeQueue struct{ notes []string }
+
+func (f *fakeQueue) QueueMemory(note string) { f.notes = append(f.notes, note) }
+
+// TestForgetToolQueuesDisregardNote verifies a forget injects a turn-tail note so
+// the model stops trusting the still-cached index line this session.
+func TestForgetToolQueuesDisregardNote(t *testing.T) {
+	store := Store{Dir: testenv.TempDir(t)}
+	if _, err := store.Save(Memory{Name: "old-fact", Description: "d", Type: TypeProject, Body: "b"}); err != nil {
+		t.Fatal(err)
+	}
+	q := &fakeQueue{}
+	ctx := WithQueue(context.Background(), q)
+	if _, err := NewForgetTool(store).Execute(ctx, []byte(`{"name":"old-fact"}`)); err != nil {
+		t.Fatal(err)
+	}
+	if len(q.notes) != 1 || !strings.Contains(q.notes[0], "old-fact") ||
+		!strings.Contains(q.notes[0], "disregard its loaded guidance") {
+		t.Fatalf("expected one queued note revoking the deleted memory, got %v", q.notes)
+	}
+}

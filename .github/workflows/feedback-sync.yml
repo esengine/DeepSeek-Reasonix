@@ -1,0 +1,77 @@
+name: Sync in-app feedback
+
+# Turns feedback submitted from Reasonix Studio into issues and reports issue
+# state (in progress, fixed in a tag, won't fix, duplicate) back to the worker,
+# and mirrors the reporter's replies onto their issue as bot comments.
+# Text from the public reaches the script only through the worker's JSON and
+# the GitHub API, never through a shell command line or an expression.
+
+on:
+  schedule:
+    - cron: '*/10 * * * *'
+    - cron: '5 3 * * *'
+  workflow_dispatch:
+    inputs:
+      dry_run:
+        description: Print what would happen without creating issues or writing back
+        required: false
+        default: false
+        type: boolean
+      full:
+        description: Re-read every open entry instead of only recently changed issues
+        required: false
+        default: false
+        type: boolean
+
+permissions:
+  contents: read
+  issues: write
+
+concurrency:
+  group: feedback-sync
+  cancel-in-progress: false
+
+jobs:
+  sync:
+    if: github.repository == 'esengine/DeepSeek-Reasonix'
+    runs-on: ubuntu-latest
+    timeout-minutes: 8
+    steps:
+      - name: Check secret
+        id: gate
+        env:
+          FEEDBACK_ADMIN_TOKEN: ${{ secrets.FEEDBACK_ADMIN_TOKEN }}
+        run: |
+          if [ -z "$FEEDBACK_ADMIN_TOKEN" ]; then
+            echo "::notice::FEEDBACK_ADMIN_TOKEN is not set; feedback sync skipped"
+            echo "run=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "run=true" >> "$GITHUB_OUTPUT"
+          fi
+      - if: steps.gate.outputs.run == 'true'
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          # git tag --contains needs full history; the tag API would cost a request per entry.
+          fetch-depth: 0
+          persist-credentials: false
+      - if: steps.gate.outputs.run == 'true'
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7
+        with:
+          node-version: '22'
+      - name: Sync
+        if: steps.gate.outputs.run == 'true'
+        env:
+          FEEDBACK_ADMIN_TOKEN: ${{ secrets.FEEDBACK_ADMIN_TOKEN }}
+          # crash.reasonix.io answers runner IPs with a managed challenge; workers.dev serves only the converter's admin paths.
+          FEEDBACK_BASE_URL: https://reasonix-crash-report.reasonix.workers.dev
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          DRY_RUN: ${{ github.event.inputs.dry_run || 'false' }}
+          FULL: ${{ github.event.inputs.full || 'false' }}
+          SCHEDULE: ${{ github.event.schedule }}
+        run: |
+          set -euo pipefail
+          args=()
+          if [ "$DRY_RUN" = "true" ]; then args+=(--dry-run); fi
+          # The daily schedule sweeps everything the change window could have missed.
+          if [ "$FULL" = "true" ] || [ "$SCHEDULE" = "5 3 * * *" ]; then args+=(--full); fi
+          node scripts/feedback-sync.mjs "${args[@]}"

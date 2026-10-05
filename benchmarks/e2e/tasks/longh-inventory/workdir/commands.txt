@@ -1,0 +1,10 @@
+stock crates 10
+reserve crates 4
+ship crates 2
+release crates 5
+reserve crates 7
+release crates 1
+stock barrels 3
+ship barrels 1
+reserve barrels 3
+ship barrels 3

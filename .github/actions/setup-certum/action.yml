@@ -1,0 +1,35 @@
+name: Connect to Certum cloud signing
+description: Verify the pinned SimplySign installer and connect to the configured certificate.
+inputs:
+  username:
+    required: true
+    description: SimplySign account
+  otp-uri:
+    required: true
+    description: TOTP provisioning URI
+  thumbprint:
+    required: true
+    description: Expected SHA-1 certificate thumbprint
+runs:
+  using: composite
+  steps:
+    - name: Verify SimplySign installer
+      shell: pwsh
+      run: |
+        $ErrorActionPreference = 'Stop'
+        Invoke-WebRequest 'https://files.certum.eu/software/SimplySignDesktop/Windows/9.4.3.90/SimplySignDesktop-9.4.3.90-64-bit-en.msi' -OutFile SimplySignDesktop.msi
+        $hash = (Get-FileHash -Algorithm SHA256 SimplySignDesktop.msi).Hash
+        if ($hash -ne 'CE2B38EF0124A574BC08E5558726099CAAC79A7C58B8D3D712F629371FE1BCB7') {
+          throw "SimplySign installer SHA-256 $hash does not match the pinned 9.4.3.90 build"
+        }
+        $signature = Get-AuthenticodeSignature SimplySignDesktop.msi
+        if ($signature.Status -ne 'Valid' -or $signature.SignerCertificate.Subject -notmatch 'Asseco Data Systems') {
+          throw 'SimplySign installer signature or publisher verification failed'
+        }
+    - name: Authenticate cloud certificate
+      uses: dismine/windows-app-signing-setup-action@89ae3b032d4bc7a5b98d1a42a34e61ecb6faad64
+      with:
+        certum-username: ${{ inputs.username }}
+        certum-otp-uri: ${{ inputs.otp-uri }}
+        certum-key-id: ${{ inputs.thumbprint }}
+        capture-diagnostics: 'false'

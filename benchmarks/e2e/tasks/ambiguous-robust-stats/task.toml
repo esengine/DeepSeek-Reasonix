@@ -1,0 +1,3 @@
+prompt = "Users report that stats.py keeps crashing on real-world input files. Make it robust enough for production use. Sample inputs are in samples/."
+class = "ambiguous"
+timeout_sec = 300

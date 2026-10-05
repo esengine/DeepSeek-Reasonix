@@ -1,0 +1,63 @@
+name: CodeQL
+
+on:
+  # Docs/release-notes/root-Markdown changes carry no analyzable code; the
+  # weekly cron keeps the full scan cadence regardless.
+  push:
+    branches: ["main-v2", "studio"]
+    paths-ignore:
+      - 'docs/**'
+      - 'release-notes/**'
+      - '*.md'
+  pull_request:
+    branches: ["main-v2", "studio"]
+    paths-ignore:
+      - 'docs/**'
+      - 'release-notes/**'
+      - '*.md'
+  # A schedule runs only from the default branch, so the weekly scan checks out
+  # both lines itself: 1.x is in maintenance, and security is part of it.
+  schedule:
+    - cron: "27 3 * * 1"
+
+jobs:
+  analyze:
+    name: Analyze (${{ matrix.language }}${{ matrix.branch && format(', {0}', matrix.branch) || '' }})
+    runs-on: ubuntu-latest
+    permissions:
+      security-events: write
+      packages: read
+      actions: read
+      contents: read
+    strategy:
+      fail-fast: false
+      matrix:
+        language: [go, javascript-typescript, actions]
+        # Empty means "the ref this event is about"; a scheduled run names each line.
+        branch: ${{ fromJSON(github.event_name == 'schedule' && '["main-v2", "studio"]' || '[""]') }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          ref: ${{ matrix.branch }}
+      - id: head
+        if: matrix.branch != ''
+        run: echo "sha=$(git rev-parse HEAD)" >> "$GITHUB_OUTPUT"
+      - name: Initialize CodeQL
+        uses: github/codeql-action/init@2892aa5e19bbd11bc0cff5427e3b750a04d9e3c2 # v4.38.2
+        with:
+          languages: ${{ matrix.language }}
+          build-mode: ${{ matrix.language == 'go' && 'autobuild' || 'none' }}
+      - name: Perform CodeQL Analysis
+        if: matrix.branch == ''
+        uses: github/codeql-action/analyze@2892aa5e19bbd11bc0cff5427e3b750a04d9e3c2 # v4.38.2
+        with:
+          category: "/language:${{ matrix.language }}"
+      # Results from a checked-out line are filed under that line's ref, not the
+      # default branch the schedule happened to run from.
+      - name: Perform CodeQL Analysis (${{ matrix.branch }})
+        if: matrix.branch != ''
+        uses: github/codeql-action/analyze@2892aa5e19bbd11bc0cff5427e3b750a04d9e3c2 # v4.38.2
+        with:
+          category: "/language:${{ matrix.language }}"
+          ref: refs/heads/${{ matrix.branch }}
+          sha: ${{ steps.head.outputs.sha }}

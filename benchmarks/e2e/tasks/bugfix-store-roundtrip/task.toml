@@ -1,0 +1,3 @@
+prompt = "store.py: values saved with set() sometimes cannot be read back with get(). Fix the bug."
+class = "atomic-bugfix"
+timeout_sec = 180

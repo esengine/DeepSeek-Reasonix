@@ -1,0 +1,3 @@
+prompt = "tail(lst, n) in utils.py drops the last element. Fix it so it returns the last n items of the list."
+class = "atomic-bugfix"
+timeout_sec = 180
