@@ -7,6 +7,7 @@ import { d1, fakeR2 } from "./feedback_testkit";
 import { handleFeedbackRoute } from "./feedback_routes";
 import feedbackMigrationSQL from "../migrate-feedback.sql?raw";
 import triageMigrationSQL from "../migrate-feedback-triage.sql?raw";
+import adoptionsMigrationSQL from "../migrate-feedback-adoptions.sql?raw";
 
 const ADMIN = "admin-secret-value";
 const admin = { authorization: `Bearer ${ADMIN}` };
@@ -21,6 +22,7 @@ beforeEach(() => {
   raw = new DatabaseSync(":memory:");
   raw.exec(feedbackMigrationSQL);
   raw.exec(triageMigrationSQL);
+  raw.exec(adoptionsMigrationSQL);
   tokens = new Map();
   env = {
     DB: d1(raw),

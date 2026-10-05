@@ -21,8 +21,9 @@ export async function isKnownInstall(env: Env, hash: string): Promise<boolean> {
   return (await env.DB.prepare(
     `SELECT 1 AS x WHERE EXISTS (SELECT 1 FROM feedback WHERE install_hash = ?)
        OR EXISTS (SELECT 1 FROM feedback_trust WHERE install_hash = ?)
-       OR EXISTS (SELECT 1 FROM feedback_releases WHERE install_hash = ?)`,
-  ).bind(hash, hash, hash).first()) !== null;
+       OR EXISTS (SELECT 1 FROM feedback_releases WHERE install_hash = ?)
+       OR EXISTS (SELECT 1 FROM feedback_adoptions WHERE install_hash = ?)`,
+  ).bind(hash, hash, hash, hash).first()) !== null;
 }
 
 export async function verifyInstall(request: Request, env: Env): Promise<{ installHash: string } | Response> {

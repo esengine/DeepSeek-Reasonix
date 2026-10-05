@@ -1,6 +1,7 @@
 import type { Env } from "./env";
 import { deleteAttachments, withdrawAttachments, ATTACHMENT_PREFIX } from "./feedback_attachments";
 import { load, listLimit, readJson } from "./feedback_admin_store";
+import { clearRevokedStatement, markRevokedStatement } from "./feedback_adoptions";
 import { auditStatement, autoBlockStatement, grantTrustStatement, isBlocked, isTrusted, releaseLedgerStatement, revokeTrustStatement } from "./feedback_blocks";
 import { jsonResponse, refuse } from "./feedback_http";
 import { releasedKeys, repliesFor } from "./feedback_read";
@@ -104,6 +105,7 @@ export async function release(request: Request, env: Env, receipt: string, ctx?:
     env.DB.prepare("UPDATE feedback SET status = 'received', updated_at = ? WHERE receipt = ? AND status = 'held'").bind(at, receipt),
     releaseLedgerStatement(env, row.install_hash, receipt, at),
     grantTrustStatement(env, row.install_hash, receipt),
+    clearRevokedStatement(env, row.install_hash, receipt),
     ...(body.data.publishImages
       ? attachmentsOf(row).map((a) =>
           env.DB.prepare("INSERT OR IGNORE INTO feedback_public_images (key, receipt, created_at) SELECT ?, ?, ? WHERE EXISTS (SELECT 1 FROM feedback WHERE receipt = ? AND status = 'received')").bind(a.key, receipt, at, receipt),
@@ -128,6 +130,7 @@ export async function reject(request: Request, env: Env, receipt: string, ctx?: 
   const res = await env.DB.batch([
     env.DB.prepare("UPDATE feedback SET status = 'rejected', contact = '', updated_at = ? WHERE receipt = ? AND status IN ('held','needs_info')").bind(at, receipt),
     env.DB.prepare("DELETE FROM feedback_trust WHERE install_hash = ? AND EXISTS (SELECT 1 FROM feedback WHERE receipt = ? AND status = 'rejected')").bind(row.install_hash, receipt),
+    markRevokedStatement(env, row.install_hash, receipt),
     env.DB.prepare("INSERT INTO feedback_audit (at, action, detail) SELECT ?, 'reject', ? WHERE EXISTS (SELECT 1 FROM feedback WHERE receipt = ? AND status = 'rejected')")
       .bind(at, `${receipt} ${scrubSensitiveText(body.data.reason)}`.slice(0, 300), receipt),
     autoBlockStatement(env, row.install_hash),
@@ -181,6 +184,7 @@ export async function takedown(env: Env, receipt: string): Promise<Response> {
     env.DB.prepare("UPDATE feedback SET attachments_json = '[]', updated_at = ? WHERE receipt = ?").bind(new Date().toISOString(), receipt),
     env.DB.prepare("DELETE FROM feedback_public_images WHERE receipt = ?").bind(receipt),
     revokeTrustStatement(env, row.install_hash),
+    markRevokedStatement(env, row.install_hash),
     auditStatement(env, "takedown", `${receipt} removed=${stored.length}`),
   ]);
   return jsonResponse({ receipt, attachmentsRemoved: true, removed: stored.length });

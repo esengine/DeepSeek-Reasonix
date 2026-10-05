@@ -1,6 +1,7 @@
 import type { Env } from "./env";
-import { ackReply, blockTarget, getCap, listBlocks, pendingReplies, setCap, setReceiptTrust, triageReplies, unblockTarget } from "./feedback_admin_ops";
-import { listLimit, load, readJson, setState } from "./feedback_admin_store";
+import { ackReply, blockTarget, getCap, listBlocks, pendingReplies, recordAdoption, setCap, setReceiptTrust, tombstoneAdoption, triageReplies, unblockTarget } from "./feedback_admin_ops";
+import { listLimit, load, readJson, setState, setStateStatement } from "./feedback_admin_store";
+import { adoptionHolder, adoptionStatements, itemKeyOf, type AdoptionOutcome } from "./feedback_adoptions";
 import { listFeedback } from "./feedback_admin_list";
 import { requireAdmin } from "./feedback_auth";
 import { jsonResponse, refuse } from "./feedback_http";
@@ -8,12 +9,11 @@ import { pendingItem, releasedKeys } from "./feedback_read";
 import { announce, type OpsWaiter } from "./ops_emit";
 import { LinkBody, RecordedBody, StatusBody } from "./feedback_schema";
 import { adminAttachment, adminReply, answer, ask, detail, held, reject, release, takedown } from "./feedback_triage";
-import { statusRank, type FeedbackRow } from "./feedback_types";
+import { CONCRETE_VERSION, statusRank, type FeedbackRow } from "./feedback_types";
 
 // Attachment URLs are public links, so they never follow the origin the admin request arrived on.
 export const PUBLIC_ORIGIN = "https://crash.reasonix.io";
 const OPEN_LIMIT = 200;
-const CONCRETE_VERSION = /^v\d+\.\d+\.\d+$/;
 const ISSUE_BASE = "https://github.com/esengine/DeepSeek-Reasonix/issues/";
 const LINKABLE = ["held", "needs_info", "answered", "received"];
 const ACTIVE = ["recorded", "in_progress"];
@@ -69,6 +69,19 @@ async function link(request: Request, env: Env, receipt: string, ctx?: OpsWaiter
   return jsonResponse({ receipt, status: "recorded", issueNumber, issueUrl });
 }
 
+type Shipped = { applied: false } | { applied: true; adoption: AdoptionOutcome };
+
+// A concrete published version is the only event that ships an outcome, so the
+// credit commits with the status change or not at all.
+async function shipFix(env: Env, row: FeedbackRow, sets: string, binds: unknown[], version: string): Promise<Shipped> {
+  const state = setStateStatement(env, row.receipt, row.status, sets, binds);
+  const key = itemKeyOf(row);
+  if (!key) return (await state.run()).meta?.changes ? { applied: true, adoption: "no_item_key" } : { applied: false };
+  const res = await env.DB.batch([state, ...adoptionStatements(env, row, key, version, "shipped", new Date().toISOString())]);
+  if (!res[0].meta?.changes) return { applied: false };
+  return { applied: true, adoption: res[1].meta?.changes ? "credited" : await adoptionHolder(env, row.receipt, key) };
+}
+
 async function status(request: Request, env: Env, receipt: string, ctx?: OpsWaiter): Promise<Response> {
   const body = StatusBody.safeParse(await readJson(request));
   if (!body.success) return refuse("feedback.invalid", "unknown or malformed status update");
@@ -81,19 +94,23 @@ async function status(request: Request, env: Env, receipt: string, ctx?: OpsWait
     if (row.resolved_version !== "next" || !resolvedVersion || !CONCRETE_VERSION.test(resolvedVersion)) {
       return refuse("feedback.bad_transition", "a fixed report can only move from \"next\" to a concrete version");
     }
-    if (!(await setState(env, receipt, "fixed", "resolved_version = ?", [resolvedVersion]))) return refuse("feedback.bad_transition", "status changed concurrently");
-    return jsonResponse({ receipt, status: "fixed" });
+    const shipped = await shipFix(env, row, "resolved_version = ?", [resolvedVersion], resolvedVersion);
+    if (!shipped.applied) return refuse("feedback.bad_transition", "status changed concurrently");
+    return jsonResponse({ receipt, status: "fixed", adoption: shipped.adoption });
   }
   if (row.status === next) return jsonResponse({ receipt, status: row.status });
   if (!ACTIVE.includes(row.status) || statusRank(next) <= statusRank(row.status)) {
     return refuse("feedback.bad_transition", "only forward transitions from a recorded report are allowed");
   }
-  const ok = await setState(env, receipt, row.status, `status = ?, resolved_version = ?, duplicate_of = ?${next === "in_progress" ? "" : ", contact = ''"}`, [
-    next,
-    next === "fixed" ? (resolvedVersion ?? null) : null,
-    next === "duplicate" ? (duplicateOf ?? null) : null,
-  ]);
-  if (!ok) return refuse("feedback.bad_transition", "status changed concurrently");
+  const sets = `status = ?, resolved_version = ?, duplicate_of = ?${next === "in_progress" ? "" : ", contact = ''"}`;
+  const binds = [next, next === "fixed" ? (resolvedVersion ?? null) : null, next === "duplicate" ? (duplicateOf ?? null) : null];
+  if (next === "fixed" && resolvedVersion && CONCRETE_VERSION.test(resolvedVersion)) {
+    const shipped = await shipFix(env, row, sets, binds, resolvedVersion);
+    if (!shipped.applied) return refuse("feedback.bad_transition", "status changed concurrently");
+    announce(ctx, env, { t: "status", receipt, category: row.category, status: next });
+    return jsonResponse({ receipt, status: next, adoption: shipped.adoption });
+  }
+  if (!(await setState(env, receipt, row.status, sets, binds))) return refuse("feedback.bad_transition", "status changed concurrently");
   announce(ctx, env, { t: "status", receipt, category: row.category, status: next });
   return jsonResponse({ receipt, status: next });
 }
@@ -102,7 +119,7 @@ const NOT_ALLOWED = () => refuse("feedback.method_not_allowed", "method not allo
 
 export async function handleAdmin(request: Request, env: Env, url: URL, ctx?: OpsWaiter): Promise<Response | null> {
   const path = url.pathname;
-  const m = path.match(/^\/v1\/admin\/feedback\/(?:(pending|open|held|list|blocks?|cap)|(replies)\/(pending|triage)|replies\/([A-Za-z0-9_-]{1,64})\/ack|(FB-[0-9A-Z]{4}-[0-9A-Z]{4})(?:\/(recorded|link|status|release|reject|answer|ask|reply|takedown|trust)|\/attachments\/([A-Za-z0-9_-]{16,64}))?)$/);
+  const m = path.match(/^\/v1\/admin\/feedback\/(?:(pending|open|held|list|blocks?|cap)|(replies)\/(pending|triage)|replies\/([A-Za-z0-9_-]{1,64})\/ack|(FB-[0-9A-Z]{4}-[0-9A-Z]{4})(?:\/(recorded|link|status|release|reject|answer|ask|reply|takedown|trust|adoption)|\/attachments\/([A-Za-z0-9_-]{16,64}))?)$/);
   if (!m) return null;
   const denied = await requireAdmin(request, env);
   if (denied) return denied;
@@ -128,6 +145,7 @@ export async function handleAdmin(request: Request, env: Env, url: URL, ctx?: Op
   }
   if (attachmentKey) return method === "GET" ? adminAttachment(env, receipt, attachmentKey) : NOT_ALLOWED();
   if (!action) return method === "GET" ? detail(env, receipt) : NOT_ALLOWED();
+  if (action === "adoption") return method === "POST" ? recordAdoption(request, env, receipt) : method === "DELETE" ? tombstoneAdoption(env, receipt) : NOT_ALLOWED();
   if (action === "trust") return method === "POST" || method === "DELETE" ? setReceiptTrust(env, receipt, method === "POST") : NOT_ALLOWED();
   if (method !== "POST") return NOT_ALLOWED();
   switch (action) {

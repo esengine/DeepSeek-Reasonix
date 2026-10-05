@@ -35,6 +35,8 @@ export const RecordedBody = z.object({ issueNumber: z.number().int().positive(),
 
 export const LinkBody = z.object({ issueNumber: z.number().int().positive() }).strict();
 
+export const AdoptionBody = z.object({ version: z.string().max(40) }).strict();
+
 export const StatusBody = z.object({
   status: z.enum(["in_progress", "fixed", "wontfix", "duplicate"]),
   resolvedVersion: z.string().max(40).optional(),

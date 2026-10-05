@@ -2,6 +2,7 @@ import type { Env } from "./env";
 import { attachmentUrl } from "./feedback_attachments";
 import { verifyInstall } from "./feedback_auth";
 import { jsonResponse } from "./feedback_http";
+import { installLevel, levelProfile } from "./feedback_level";
 import type { FeedbackRow, StoredAttachment } from "./feedback_types";
 
 const MINE_LIMIT = 50;
@@ -50,6 +51,7 @@ export async function replyCounts(env: Env, receipts: string[]): Promise<Map<str
 export async function handleMine(request: Request, env: Env): Promise<Response> {
   const who = await verifyInstall(request, env);
   if (who instanceof Response) return who;
+  const now = new Date();
   const { results } = await env.DB.prepare("SELECT * FROM feedback WHERE install_hash = ? ORDER BY created_at DESC LIMIT ?")
     .bind(who.installHash, MINE_LIMIT)
     .all<FeedbackRow>();
@@ -57,6 +59,7 @@ export async function handleMine(request: Request, env: Env): Promise<Response> 
   const replies = await repliesFor(env, receipts, REPLIES_FETCH);
   const counts = await replyCounts(env, receipts);
   return jsonResponse({
+    profile: levelProfile(await installLevel(env, who.installHash, now), now),
     items: results.map((r) => {
       const thread = (replies.get(r.receipt) ?? []).slice(-REPLIES_SHOWN);
       return {

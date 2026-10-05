@@ -1,12 +1,13 @@
 import type { Env } from "./env";
 import { verifyInstall } from "./feedback_auth";
-import { isBlocked, isTrusted } from "./feedback_blocks";
+import { isBlocked } from "./feedback_blocks";
 import { readCappedText } from "./feedback_body";
 import { ipHash } from "./feedback_crypto";
 import { jsonResponse, refuse } from "./feedback_http";
+import { installLevel } from "./feedback_level";
 import { admit, refund, replyRefusal } from "./feedback_quota";
 import { ReplyBody } from "./feedback_schema";
-import { MAX_REPLIES_PER_ITEM, MAX_REPLY_BYTES, REPLIES_PER_INSTALL_HOURLY, TRUSTED_REPLIES_PER_INSTALL_HOURLY } from "./feedback_types";
+import { MAX_REPLIES_PER_ITEM, MAX_REPLY_BYTES } from "./feedback_types";
 import { announce, type OpsWaiter } from "./ops_emit";
 import { scrubSensitiveText } from "./scrub";
 
@@ -19,8 +20,7 @@ export async function handleUserReply(request: Request, env: Env, receipt: strin
   const secret = env.FEEDBACK_TOKEN_SECRET ?? "";
   const ip = request.headers.get("cf-connecting-ip") ?? "unknown";
   const now = new Date();
-  const trusted = await isTrusted(env, who.installHash, now);
-  const limit = trusted ? TRUSTED_REPLIES_PER_INSTALL_HOURLY : REPLIES_PER_INSTALL_HOURLY;
+  const level = await installLevel(env, who.installHash, now);
   const ipKey = await ipHash(secret, ip);
   const blocked = await isBlocked(env, [`install:${who.installHash}`, `ip:${ipKey}`], now);
   const text = await readCappedText(request, MAX_REPLY_BYTES * 2 + 512);
@@ -34,7 +34,7 @@ export async function handleUserReply(request: Request, env: Env, receipt: strin
   const parsed = ReplyBody.safeParse(raw);
   if (!parsed.success) return refuse("feedback.invalid", "reply must be 1-4096 bytes of text");
 
-  const policy = { kind: "reply" as const, trusted, hourly: limit, receipt, replyable: REPLYABLE };
+  const policy = { kind: "reply" as const, trusted: level.trusted, hourly: level.limits.replies, receipt, replyable: REPLYABLE };
   const admission = await admit(env, { ipKey, installHash: who.installHash }, now, policy, blocked, ip);
   if (admission.kind === "refused") return admission.response;
   // One transaction decides ownership, status and the per-item cap, stores the
