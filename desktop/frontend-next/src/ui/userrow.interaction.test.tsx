@@ -94,3 +94,12 @@ describe("the controls below a message", () => {
     expect(screen.getByRole("menu")).toBeTruthy();
   });
 });
+
+// A message typed in Persian or Arabic reads right to left; the browser takes
+// the direction from the text itself, in the row and in its edit box alike.
+it("lets the message and its edit box take their direction from the text", async () => {
+  row("سلام، `npm install` را اجرا کن");
+  expect(screen.getByText(/سلام/).getAttribute("dir")).toBe("auto");
+  await userEvent.click(screen.getByRole("button", { name: "改写" }));
+  expect(screen.getByRole("textbox", { name: "改写这条消息" }).getAttribute("dir")).toBe("auto");
+});

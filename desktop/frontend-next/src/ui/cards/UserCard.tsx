@@ -86,12 +86,13 @@ export function UserCard({
                 const src = port.workspaceImageURL(path);
                 return <SavedImage key={src} path={path} src={src} />;
               })}</div>}
-              <div className="txt">{item.text}</div>
+              <div className="txt" dir="auto">{item.text}</div>
             </>
           ) : (
             <div className="reask">
               <textarea
                 ref={box}
+                dir="auto"
                 data-action-change="turn.edit"
                 data-action-keydown="turn.resend"
                 data-target={item.id}

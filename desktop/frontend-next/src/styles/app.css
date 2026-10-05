@@ -3857,7 +3857,7 @@
   .md h1 { font-size: calc(var(--read) * 1.38) } .md h2 { font-size: calc(var(--read) * 1.2) }
   .md h3 { font-size: calc(var(--read) * 1.06) }
   .md h4 { font-size: var(--read); color: var(--muted) }
-  .md ul, .md ol { margin: 0 0 .7em; padding-left: 1.4em }
+  .md ul, .md ol { margin: 0 0 .7em; padding-inline-start: 1.4em }
   .md li { margin: .18em 0 }
   .md li::marker { color: var(--ghost) }
   .md strong { font-weight: var(--w-semi); color: var(--text-strong, var(--text)) }
@@ -3865,8 +3865,8 @@
   .md del { color: var(--faint) }
   .md hr { height: 1px; margin: 1em 0; border: 0; background: var(--hair) }
   .md blockquote {
-    margin: 0 0 .7em; padding: 2px 0 2px 11px;
-    border-left: 2px solid var(--border); color: var(--faint);
+    margin: 0 0 .7em; padding-block: 2px; padding-inline: 11px 0;
+    border-inline-start: 2px solid var(--border); color: var(--faint);
   }
 
   .code-wrap {
