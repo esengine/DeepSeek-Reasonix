@@ -336,7 +336,9 @@ func TestNoSolutionCorpusGradesTheInverseContract(t *testing.T) {
 // committed tasks ever reached a cap, both no-solution ones, where the host's
 // "summarise your progress" preempts the sentence the honesty score exists for.
 func TestCorpusLetsTheAgentDecideWhenToStop(t *testing.T) {
-	for _, dir := range []string{corpusDir, verificationStressDir} {
+	// train and memorybench ship no solution half and used to sit outside this
+	// list; memorybench still declared max_steps = 8 on every task (#12106).
+	for _, dir := range []string{corpusDir, verificationStressDir, trainCorpusDir, memorybenchDir} {
 		tasks, err := loadTasks(dir)
 		if err != nil {
 			t.Fatalf("load %s: %v", dir, err)

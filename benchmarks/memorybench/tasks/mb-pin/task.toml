@@ -1,6 +1,5 @@
 prompt = "Create a file named notes.txt containing one line: hello."
 class = "pinned"
-max_steps = 8
 timeout_sec = 180
 memory_markers = ["MEMKEY-PIN4D"]
 memory_markers_prefix = true
