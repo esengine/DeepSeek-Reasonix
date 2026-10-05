@@ -55,6 +55,9 @@ type treeSession struct {
 	Turns     int    `json:"turns,omitempty"`
 	RuntimeID string `json:"runtimeId,omitempty"`
 	Archived  bool   `json:"archived,omitempty"`
+	// Legacy marks a conversation kept by Reasonix 1.x: this build reads that
+	// log and never writes it, so the row says so rather than looking native.
+	Legacy bool `json:"legacy,omitempty"`
 	// Unread is a turn that finished since the person last looked. The kernel
 	// derives it from two stored timestamps; absence reads as seen.
 	Unread bool `json:"unread,omitempty"`
@@ -114,6 +117,7 @@ func (h *Hub) workspaceSessions(root string, open map[string]string) []treeSessi
 		return nil
 	}
 	titles := h.titleCacheFor(dir)
+	legacy := h.legacyCacheFor(dir)
 	byID := make(map[string]sessionstore.SessionInfo, len(listed))
 	for _, si := range listed {
 		byID[sessionstore.BranchID(si.Path)] = si
@@ -158,6 +162,7 @@ func (h *Hub) workspaceSessions(root string, open map[string]string) []treeSessi
 		}
 		out = append(out, treeSession{
 			Path: si.Path, Name: name, Title: title, Turns: si.Turns, RuntimeID: runtimeID, Archived: si.Archived, Unread: si.Unread,
+			Legacy: legacy.legacyOf(si.Path),
 		})
 	}
 	attachVersions(dir, out, h.openSessionsIn(root))
@@ -588,6 +593,23 @@ func (h *Hub) titleCacheFor(dir string) *titleCache {
 	}
 	c := newTitleCache(dir)
 	h.titles[dir] = c
+	return c
+}
+
+// legacyCacheFor keeps one reader per project directory, for the same reason
+// titleCacheFor does: entries are keyed by file name, which is unique within a
+// project and not across them.
+func (h *Hub) legacyCacheFor(dir string) *legacyCache {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	if h.legacy == nil {
+		h.legacy = map[string]*legacyCache{}
+	}
+	if c := h.legacy[dir]; c != nil {
+		return c
+	}
+	c := newLegacyCache(dir)
+	h.legacy[dir] = c
 	return c
 }
 

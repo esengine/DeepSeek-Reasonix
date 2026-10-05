@@ -60,6 +60,9 @@ type Hub struct {
 	gcCtx     context.Context
 	// titles reads each project's cached session titles for the sidebar tree.
 	titles map[string]*titleCache
+	// legacy remembers which conversations Reasonix 1.x kept. It is read the
+	// same way titles is: per project, and only when the sidebar asks.
+	legacy map[string]*legacyCache
 	// wallets is shared by every pane: opening a conversation builds a runtime,
 	// and a per-runtime cache would be cold on exactly the read a switch waits on.
 	wallets *billing.Store

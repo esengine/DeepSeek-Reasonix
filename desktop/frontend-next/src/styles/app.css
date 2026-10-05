@@ -4572,6 +4572,12 @@
   }
   .sesscopies:hover { border-color: var(--warn); color: var(--warn-ink) }
   .sesscopies[aria-expanded="true"] { border-color: var(--warn); color: var(--warn-ink) }
+  .sesslegacy {
+    flex: none; display: inline-flex; align-items: center;
+    padding: 0 4px; height: 15px; border: 1px solid var(--border); border-radius: var(--r-xs);
+    color: var(--ghost);
+    font: var(--w-reg) var(--fs-micro) var(--mono);
+  }
   .sessrow.sesscopy { padding-left: 34px }
   .sessrow.sesscopy .sesstitle { color: var(--ghost); font-style: italic }
 .sessrow .wsdel { opacity: .45 }
