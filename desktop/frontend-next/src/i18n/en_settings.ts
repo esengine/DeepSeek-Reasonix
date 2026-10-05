@@ -2,6 +2,10 @@
 // alone — one catalogue is still the model, and this file is read as its
 // continuation: same keying by Chinese source text, same grouping by screen.
 export const EN_SETTINGS: Record<string, string> = {
+  "浏览器标签": "Browser tabs",
+  "关闭其他浏览器标签": "Close other browser tabs",
+  "关闭全部浏览器标签": "Close all browser tabs",
+  "无法关闭 {name}：{why}": "Could not close {name}: {why}",
   "步骤 1 · 连接服务": "Step 1 · Connect service",
   "先连接服务，再选择这个来源要启用的模型。": "Connect the service, then choose which models to enable from it.",
   "来源名称": "Source name",

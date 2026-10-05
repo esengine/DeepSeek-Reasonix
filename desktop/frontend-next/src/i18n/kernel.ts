@@ -157,6 +157,7 @@ const SAID: Record<string, string> = {
 
   // ── 来源：连接与授权 ─────────────────────────────────────────────
   "provider.editing_disabled": "这台服务器不允许修改模型来源",
+  "browser.close_failed": "无法关闭这个网页：{error}",
   "browser.open_failed": "打不开这个网页：{error}",
   "browser.network_path": "内置浏览器不会打开指向网络上另一台机器的路径，只按路径写法拒绝，不会去访问",
   "browser.engine_missing": "没有找到可用的浏览器。请安装 Chrome、Edge 或 Chromium，或在配置里用 [browser] executable 指定路径，新会话才会读到",
