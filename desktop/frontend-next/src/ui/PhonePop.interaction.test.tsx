@@ -99,3 +99,25 @@ it("labels Internet controllers by their ordinal, not their list position", asyn
   expect(screen.getByText("设备 3")).toBeTruthy();
   expect(screen.queryByText("设备 1")).toBeNull();
 });
+
+// A signed-in Studio whose relay cannot connect is told why, not to sign in;
+// the line follows the host's typed reason and never the error's wording.
+it("says why the Internet link is offline from the host's typed reason", async () => {
+  const signIn = "登录 Reasonix 账号后，可生成在外网也能使用的连接二维码。";
+  const cases: { cloud: ShareStatus["cloudRemote"]; line: string }[] = [
+    { cloud: { online: false, reason: "unreachable", error: "dial tcp: connection refused" }, line: "连不上 Reasonix 中继服务，请检查网络或代理设置；Studio 会自动重试。" },
+    { cloud: { online: false, reason: "refused", error: "websocket: bad handshake" }, line: "Reasonix 中继服务拒绝了这台电脑的连接；Studio 会自动重试，持续失败请重新登录。" },
+    { cloud: { online: false, reason: "unavailable", error: "account: request failed (503 )" }, line: "Reasonix 服务暂时不可用，Studio 会自动重试。" },
+    { cloud: { online: false, reason: "signed_out" }, line: signIn },
+    { cloud: { online: false, error: "not signed in" }, line: "互联网连接暂时不可用，Studio 会自动重试。" },
+    { cloud: undefined, line: signIn },
+  ];
+  for (const { cloud, line } of cases) {
+    const hub = { shareStatus: vi.fn(async () => ({ ...status(false), cloudRemote: cloud })), offerShare: vi.fn() } as unknown as HubPort;
+    render(<PhonePop hub={hub} />);
+    await userEvent.click(await screen.findByRole("button", { name: "设备访问" }));
+    expect(await screen.findByText(line)).toBeTruthy();
+    if (line !== signIn) expect(screen.queryByText(signIn)).toBeNull();
+    cleanup();
+  }
+});

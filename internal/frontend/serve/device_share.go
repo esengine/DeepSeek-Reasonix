@@ -105,6 +105,7 @@ type CloudRemoteStatus struct {
 	Name     string `json:"name,omitempty"`
 	Online   bool   `json:"online"`
 	Error    string `json:"error,omitempty"`
+	Reason   string `json:"reason,omitempty"` // signed_out | unreachable | refused | unavailable, set by the relay host
 }
 
 type CloudShareOffer struct {

@@ -2,7 +2,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { t } from "../i18n";
 import { reason } from "../i18n/kernel";
 import type { HubPort } from "../port/hub";
-import type { CloudDevice, PairedDevice } from "../port/share";
+import type { CloudDevice, CloudRemoteStatus, PairedDevice } from "../port/share";
 import { copyText } from "./CopyButton";
 import { useDismiss } from "./dismiss";
 import { clock, deviceLabel, type Share, useShare } from "./PhoneAccess";
@@ -308,8 +308,25 @@ function PhoneCard({ share, failure }: { share: Share; failure: string }) {
       <p className="pc-note">
         {st.cloudRemote?.online
           ? t("互联网连接需要登录同一账号，内容端到端加密；局域网直连只在可信网络中开启。")
-          : t("登录 Reasonix 账号后，可生成在外网也能使用的连接二维码。")}
+          : cloudOfflineNote(st.cloudRemote)}
       </p>
     </div>
   );
+}
+
+// The relay host classifies why it is offline; the note follows that class and
+// never reads the error's wording.
+function cloudOfflineNote(cloud: CloudRemoteStatus | undefined): string {
+  switch (cloud?.reason) {
+    case "unreachable":
+      return t("连不上 Reasonix 中继服务，请检查网络或代理设置；Studio 会自动重试。");
+    case "refused":
+      return t("Reasonix 中继服务拒绝了这台电脑的连接；Studio 会自动重试，持续失败请重新登录。");
+    case "unavailable":
+      return t("Reasonix 服务暂时不可用，Studio 会自动重试。");
+    case "signed_out":
+      return t("登录 Reasonix 账号后，可生成在外网也能使用的连接二维码。");
+  }
+  if (cloud?.error) return t("互联网连接暂时不可用，Studio 会自动重试。");
+  return t("登录 Reasonix 账号后，可生成在外网也能使用的连接二维码。");
 }

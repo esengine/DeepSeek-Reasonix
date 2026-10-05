@@ -36,6 +36,7 @@ type Status struct {
 	Name     string `json:"name,omitempty"`
 	Online   bool   `json:"online"`
 	Error    string `json:"error,omitempty"`
+	Reason   string `json:"reason,omitempty"` // one of the Reason constants
 }
 
 type hostState struct {
@@ -176,7 +177,7 @@ func (h *Host) Run(ctx context.Context) {
 		token := strings.TrimSpace(h.token())
 		if token == "" {
 			h.dropControllers()
-			h.publish(Status{})
+			h.publish(Status{Reason: ReasonSignedOut})
 			if !wait(ctx, time.Second) {
 				return
 			}
@@ -198,6 +199,7 @@ func (h *Host) Run(ctx context.Context) {
 		wasOnline := status.Online
 		status.Online = false
 		status.Error = err.Error()
+		status.Reason = offlineReason(err)
 		h.publish(status)
 		if wasOnline {
 			backoff = time.Second
@@ -310,7 +312,7 @@ func (h *Host) connect(ctx context.Context, token string, saved *identity, priva
 		if response != nil && response.StatusCode == http.StatusUnauthorized {
 			_ = clearIdentity()
 		}
-		return err
+		return handshakeError(response, err)
 	}
 	defer conn.Close()
 	conn.SetReadLimit(64 << 10)

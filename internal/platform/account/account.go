@@ -50,6 +50,12 @@ func (e *Error) Error() string {
 	return fmt.Sprintf("account: request failed (%d %s)", e.Status, e.Code)
 }
 
+// Unavailable reports that the service throttled or failed rather than turned
+// the request down, so the same request can succeed later.
+func (e *Error) Unavailable() bool {
+	return e.Status == http.StatusTooManyRequests || e.Status >= http.StatusInternalServerError
+}
+
 // User is the signed-in identity. Role and Status are the dashboard's gate,
 // not a product concept — hosts show the handle and email, nothing else.
 type User struct {

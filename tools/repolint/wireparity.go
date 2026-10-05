@@ -67,6 +67,7 @@ var mirroredWireTypes = []wireMirror{
 	{"internal/frontend/serve/device_share.go", "ShareStatus", tsShareFile, "ShareStatus"},
 	{"internal/frontend/serve/device_share.go", "ShareAddress", tsShareFile, "ShareAddress"},
 	{"internal/frontend/serve/device_share.go", "ShareOffer", tsShareFile, "ShareOffer"},
+	{"internal/frontend/serve/device_share.go", "CloudRemoteStatus", tsShareFile, "CloudRemoteStatus"},
 	{"internal/frontend/serve/device_registry.go", "DeviceView", tsShareFile, "PairedDevice"},
 	{"internal/frontend/serve/device_gate.go", "DeviceSelf", tsShareFile, "DeviceSelf"},
 	{"internal/session/control/boundary.go", "SandboxSettings", tsBoundaryFile, "SandboxSettings"},

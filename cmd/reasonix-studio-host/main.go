@@ -416,7 +416,7 @@ func startCloudRemote(ctx context.Context, cfg *config.Config, logs io.Writer, t
 		registrar.SetCloudRemoteStatus(func() serve.CloudRemoteStatus {
 			status := host.Status()
 			return serve.CloudRemoteStatus{
-				DeviceID: status.DeviceID, Name: status.Name, Online: status.Online, Error: status.Error,
+				DeviceID: status.DeviceID, Name: status.Name, Online: status.Online, Error: status.Error, Reason: status.Reason,
 			}
 		})
 	}

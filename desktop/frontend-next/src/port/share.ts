@@ -34,6 +34,8 @@ export interface CloudRemoteStatus {
   name?: string;
   online: boolean;
   error?: string;
+  /** Why it is not online, classified by the relay host. Absent while online or connecting. */
+  reason?: "signed_out" | "unreachable" | "refused" | "unavailable";
 }
 
 // A paired device's answer about itself. Mirrors serve.DeviceSelf.
