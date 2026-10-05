@@ -84,7 +84,8 @@ func TestLegacyCacheTrustsOnlyAStampIdenticalEntry(t *testing.T) {
 
 	// An entry matching the log's stamp is the answer: the log itself says
 	// otherwise, so a re-read would have flipped it.
-	if err := os.WriteFile(cacheFile, []byte(fmt.Sprintf(`{"native.jsonl":{"legacy":true,"size":%d,"mod":%d}}`, size, mod)), 0o600); err != nil {
+	entry := fmt.Appendf(nil, `{"native.jsonl":{"legacy":true,"size":%d,"mod":%d}}`, size, mod)
+	if err := os.WriteFile(cacheFile, entry, 0o600); err != nil {
 		t.Fatal(err)
 	}
 	if !newLegacyCache(dir).legacyOf(path) {
