@@ -155,15 +155,24 @@ export class RemoteDeviceRepo {
     return (result.meta.changes ?? 0) > 0;
   }
 
+  // One batch: host registrations, their pending grants and every controller
+  // enrollment of the user (pending included) change together, so a failure
+  // cannot leave phones enrolled against revoked computers or the reverse.
   async revokeAllForUser(userId: number): Promise<string[]> {
     const now = new Date().toISOString();
-    const revoked = await this.db.prepare(
-      `UPDATE remote_devices SET revoked_at = ?1, updated_at = ?1
-       WHERE user_id = ?2 AND revoked_at IS NULL
-       RETURNING id`,
-    ).bind(now, userId).all<{ id: string }>();
-    await this.db.prepare("DELETE FROM remote_connection_grants WHERE user_id = ?1").bind(userId).run();
-    return revoked.results.map((row) => row.id);
+    const [revoked] = await this.db.batch<{ id: string }>([
+      this.db.prepare(
+        `UPDATE remote_devices SET revoked_at = ?1, updated_at = ?1
+         WHERE user_id = ?2 AND revoked_at IS NULL
+         RETURNING id`,
+      ).bind(now, userId),
+      this.db.prepare("DELETE FROM remote_connection_grants WHERE user_id = ?1").bind(userId),
+      this.db.prepare(
+        `UPDATE remote_controllers SET state = 'revoked', revoked_at = ?1
+         WHERE user_id = ?2 AND state != 'revoked'`,
+      ).bind(now, userId),
+    ]);
+    return (revoked?.results ?? []).map((row) => row.id);
   }
 
   async authenticate(deviceId: string, credential: string): Promise<{ userId: number; device: RemoteDevice } | null> {

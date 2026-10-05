@@ -28,3 +28,25 @@ export const MAX_PASSWORD = 200;
 // Encrypted configuration backups, per account.
 export const CONFIG_BACKUP_MAX_BYTES = 4 * 1024 * 1024;
 export const CONFIG_BACKUP_MAX_COUNT = 10;
+
+// Controller enrollment bookkeeping.
+export const REMOTE_CHALLENGE_TTL_MS = 60 * 1000;
+export const REMOTE_PENDING_TTL_MS = 10 * 60 * 1000;
+export const REMOTE_CONTROLLER_ACTIVE_CAP = 8;
+export const REMOTE_CONTROLLER_PENDING_CAP = 3;
+// An active controller unseen for this long stops counting toward the cap; it
+// stays active and keeps its enrollment.
+export const REMOTE_CONTROLLER_IDLE_MS = 30 * 24 * 60 * 60 * 1000;
+export const REMOTE_PENDING_REJECT_LIMIT = 3;
+export const REMOTE_PENDING_LOCK_MS = 60 * 60 * 1000;
+
+// Per-route limits for controller enrollment, counted in D1 (see
+// http/d1RateLimit.ts): the per-IP binding cannot express hour windows and is
+// skipped when absent.
+export const REMOTE_RATE_RULES = {
+  challenge: { name: "challenge", limit: 30, windowMs: 60 * 1000 },
+  enroll: { name: "enroll", limit: 5, windowMs: 60 * 60 * 1000 },
+  revoke: { name: "revoke", limit: 30, windowMs: 60 * 1000 },
+  hostControllers: { name: "host-controllers", limit: 60, windowMs: 60 * 1000 },
+  pendingRejects: { name: "pending-rejects", limit: REMOTE_PENDING_REJECT_LIMIT, windowMs: REMOTE_PENDING_LOCK_MS },
+} as const;

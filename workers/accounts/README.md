@@ -132,3 +132,28 @@ service and applies pending D1 migrations before publishing the Worker.
 GitHub Actions repo secret (so the mail key has a single source of truth and needs
 no local wrangler auth). `SESSION_PEPPER` is not in CI — set it once with
 `wrangler secret put SESSION_PEPPER`.
+
+## Controller enrollment (bookkeeping only)
+
+`remote_controllers` records which browser keys proved possession of a P-256 key
+for a registered computer. Nothing consumes it yet: grants, the relay and the
+desktop do not read these rows, so it adds no protection to remote access.
+
+| Method | Path                                   | Auth                 | Notes |
+| ------ | -------------------------------------- | -------------------- | ----- |
+| POST   | `/me/remote-controllers/challenge`     | web session          | `{ host }` → `{ nonce, expiresAt }`, single use, 60 s |
+| POST   | `/me/remote-controllers/enroll`        | web session          | `{ host, nonce, publicKey, signature, uaClass, claimsId? }` |
+| GET    | `/me/remote-controllers?host=`         | session              | the owner's rows for one computer |
+| POST   | `/me/remote-controllers/:id/revoke`    | session              | terminal |
+| GET    | `/host/controllers?state=`             | device credential    | pending requests with the key to verify |
+| POST   | `/host/controllers/:id/resolve`        | device credential    | `{ action: add \| replace \| reject, replaceId? }` |
+| POST   | `/host/controllers/:id/revoke`         | device credential    | terminal |
+
+The device credential travels in `x-reasonix-device-id` and `x-reasonix-device-credential`.
+The signature is ECDSA P-256 over SHA-256 in IEEE P1363 form over the message built by
+`auth/controllerProof.ts`; its test vector is in `auth/controllerProof.vectors.ts`.
+Limits are D1 counters (`http/d1RateLimit.ts`) and refuse the request when the counter
+cannot be written. Error codes: `challenge_invalid`, `challenge_expired`, `invalid_proof`,
+`invalid_key`, `controller_id_mismatch`, `controller_unconfirmed`, `controller_revoked`,
+`controller_not_pending`, `pending_expired`, `controller_cap_reached`, `replace_target_invalid`,
+`pending_limit`, `pending_locked`, `rate_limited`, `rate_limit_unavailable`.

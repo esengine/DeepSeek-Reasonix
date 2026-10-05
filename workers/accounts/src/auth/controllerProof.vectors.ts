@@ -1,0 +1,19 @@
+// Fixed inputs and outputs of the controller proof encoding. The same values
+// must reproduce byte for byte in every implementation that signs or verifies
+// it; the signature was produced by WebCrypto and is in IEEE P1363 form.
+export const ENROLL_PROOF_VECTOR = {
+  jwk: {
+    kty: "EC",
+    crv: "P-256",
+    x: "FelvUaklSvIURZzOclLu5BBoKwDzjYHqf1O4quuqWCA",
+    y: "bhFRUDuvHP0ARL9G26uoySCYF_YUSmmVfgJPkqJkaFQ",
+  },
+  thumbprint: "6z6kTwo2bbB7TA7xu8RgrZusCXrW5vWsXINpYlQLYOQ",
+  controllerId: "rc_jYC8UQU0VMlnqQuN8s_bqulPqAchjxNYSm2fRkQSiGc",
+  hostDeviceId: "ab".repeat(32),
+  nonce: "cd".repeat(32),
+  userId: 7,
+  messageHex:
+    "726561736f6e69782d636f6e74726f6c6c65722d76310006656e726f6c6c004063646364636463646364636463646364636463646364636463646364636463646364636463646364636463646364636463646364636463646364636463646364000137004061626162616261626162616261626162616261626162616261626162616261626162616261626162616261626162616261626162616261626162616261626162002b367a366b54776f32626242375441377875385267725a7573435872573576577358494e70596c514c594f51",
+  signature: "CGP4TsOSCxKrRY6WAN7NnA1-a05DNGduZokdcn69E5D5DTlIxVzZm6dFJNlaDW-3Y-wy2VYCZoCoMNH7NZjB2w",
+} as const;

@@ -3,7 +3,7 @@ import type { AppEnv } from "../env";
 import { toAccountUser } from "../types";
 import { repos } from "../db";
 import type { ProfilePatch } from "../db/users";
-import { requireAuth, currentUser } from "../http/auth";
+import { requireAuth, currentUser, requireRemoteWebSession } from "../http/auth";
 import { ApiError } from "../http/errors";
 import { hashPassword, verifyPassword } from "../auth/crypto";
 import { setSessionCookie, clearSessionCookie } from "../auth/cookies";
@@ -21,10 +21,10 @@ import {
   REMOTE_ATTACHMENT_MAX_BYTES,
   REMOTE_ATTACHMENT_TTL_MS,
   REMOTE_GRANT_TTL_MS,
-  REMOTE_REAUTH_MS,
 } from "../config";
 import { disconnectRemote, remoteDevicePresence } from "../remoteGateway";
 import backups from "./backups";
+import remoteControllers from "./remoteControllers";
 import { ConfigBackupRepo } from "../db/configBackups";
 
 const me = new Hono<AppEnv>();
@@ -35,6 +35,7 @@ me.use("*", requireAuth);
 me.get("/", (c) => c.json({ user: currentUser(c) }));
 
 me.route("/backups", backups);
+me.route("/remote-controllers", remoteControllers);
 
 me.get("/devices", async (c) => {
   const user = currentUser(c);
@@ -73,18 +74,8 @@ me.delete("/devices/:deviceId", async (c) => {
 
 me.post("/remote-grants", async (c) => {
   const user = currentUser(c);
-  const session = c.get("session");
   const { targetDeviceId, scopes } = await parseBody(c, RemoteGrantIssueSchema);
-  if (!session) throw new ApiError(401, "unauthorized", "Sign in to continue.");
-  // A device-flow session is minted by approving from another session, so its
-  // age says nothing about when a password was last entered.
-  if (session.kind !== "web") {
-    throw new ApiError(403, "remote_reauth_required", "Sign in on this browser to control a computer remotely.");
-  }
-  const reauthAt = Date.parse(session.createdAt) + REMOTE_REAUTH_MS;
-  if (!(reauthAt > Date.now())) {
-    throw new ApiError(403, "remote_reauth_required", "Sign in again to control this computer remotely.");
-  }
+  const { session, reauthAt } = requireRemoteWebSession(c);
   const remoteDevices = repos(c.env).remoteDevices;
   const device = await remoteDevices.activeForUser(user.id, targetDeviceId);
   if (!device) throw new ApiError(404, "device_not_found", "That device is unavailable.");

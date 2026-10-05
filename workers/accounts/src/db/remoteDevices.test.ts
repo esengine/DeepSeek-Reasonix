@@ -125,21 +125,22 @@ describe("RemoteDeviceRepo", () => {
     expect(verdicts).toEqual(["active", "reauth_required", "reauth_required", "revoked", "active"]);
   });
 
-  it("returns the devices it revoked so their live connections can be closed", async () => {
+  it("returns the devices it revoked and revokes controller enrollments in the same batch", async () => {
     const statements: string[] = [];
     const db = {
       prepare(sql: string) {
         statements.push(sql);
-        return {
-          bind() { return this; },
-          async all() { return { results: [{ id: "a".repeat(64) }, { id: "b".repeat(64) }] }; },
-          async run() { return { meta: { changes: 1 } }; },
-        };
+        return { bind() { return this; } };
+      },
+      async batch() {
+        return [{ results: [{ id: "a".repeat(64) }, { id: "b".repeat(64) }] }, { results: [] }, { results: [] }];
       },
     } as unknown as D1Database;
     const revoked = await new RemoteDeviceRepo(db, "pepper").revokeAllForUser(7);
     expect(revoked).toEqual(["a".repeat(64), "b".repeat(64)]);
     expect(statements[0]).toContain("RETURNING id");
+    expect(statements[1]).toContain("DELETE FROM remote_connection_grants");
+    expect(statements[2]).toContain("UPDATE remote_controllers SET state = 'revoked'");
   });
 
   it("keeps the migration additive and indexes bounded state", () => {
