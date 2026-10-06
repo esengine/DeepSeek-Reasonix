@@ -35,18 +35,27 @@ export function cleanTitle(value: unknown): string | undefined {
 
 const encoder = new TextEncoder();
 
-// Serialises one frame and shrinks the title until it fits; a frame never
-// exceeds MAX_FRAME_BYTES, so a flood of long titles cannot grow the buffer.
+const bytesOf = (text: string) => encoder.encode(text).length;
+
+// Serialises one frame within MAX_FRAME_BYTES in a bounded number of steps:
+// drop extra, then cut the title by bytes, then drop the title and the optional
+// routing fields. A frame never exceeds the limit, so a flood of long events
+// cannot grow the buffer.
 export function frame(event: OpsEvent): string {
-  let current = { ...event };
-  let text = JSON.stringify(current);
-  while (encoder.encode(text).length > MAX_FRAME_BYTES && current.title && current.title.length > 8) {
-    current = { ...current, title: `${current.title.slice(0, Math.max(8, current.title.length - 20))}…` };
-    text = JSON.stringify(current);
+  const whole = JSON.stringify(event);
+  if (bytesOf(whole) <= MAX_FRAME_BYTES) return whole;
+  const { extra: _extra, title, ...noExtra } = event;
+  if (title) {
+    const withTitle = (t: string) => JSON.stringify({ ...noExtra, title: t });
+    const chars = Array.from(title);
+    for (let keep = chars.length; keep >= 1; keep--) {
+      const cut = keep === chars.length ? title : `${chars.slice(0, keep - 1).join("")}…`;
+      const text = withTitle(cut);
+      if (bytesOf(text) <= MAX_FRAME_BYTES) return text;
+    }
   }
-  if (encoder.encode(text).length > MAX_FRAME_BYTES) {
-    const { title: _title, extra: _extra, ...rest } = current;
-    text = JSON.stringify(rest);
-  }
-  return text;
+  const bare = JSON.stringify(noExtra);
+  if (bytesOf(bare) <= MAX_FRAME_BYTES) return bare;
+  const { id, ts, src, t } = event;
+  return JSON.stringify({ id, ts, src, t });
 }
