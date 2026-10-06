@@ -237,3 +237,31 @@ describe("private packages", () => {
     expect(res.status).toBe(422);
   });
 });
+
+// The feed is public and cacheable, so it names only packages the public can
+// open: not one taken back down, back in review after an update, or rejected.
+describe("the activity feed", () => {
+  const slugs = async () => (await call("/v1/activity")).body.events.map((e: { slug: string }) => e.slug);
+  const approve = (slug: string, published: { body: any }) =>
+    call(`/v1/admin/packages/${slug}/approve`, {
+      method: "POST",
+      as: "root",
+      body: { expectedVersion: published.body.version, expectedUpdatedAt: published.body.package.updatedAt, expectedStatus: "pending" },
+    });
+  const goLive = async (as: string, name: string) => {
+    expect((await approve(`${as}/${name}`, await publish(as, name))).status).toBe(200);
+  };
+
+  it("names only packages the public can open", async () => {
+    await publish("root", "tool");
+    await publish("root", "gone");
+    expect((await call("/v1/admin/packages/root/gone/hide", { method: "POST", as: "root" })).status).toBe(200);
+    await goLive("alice", "queued");
+    expect((await publish("alice", "queued", { version: "0.2.0" })).body.package.status).toBe("pending");
+    await goLive("bob", "refused");
+    await publish("bob", "refused", { version: "0.2.0" });
+    expect((await call("/v1/admin/packages/bob/refused/reject", { method: "POST", as: "root" })).status).toBe(200);
+
+    expect(await slugs()).toEqual(["root/tool"]);
+  });
+});

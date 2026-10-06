@@ -38,7 +38,8 @@ export class EventRepo {
 
   // Most-recent social activity, joined to the package slug so the feed can link
   // back. Raw 'install' pings are excluded — they exist only to feed the trending
-  // rank; the feed surfaces publish/update/star and install-milestone events.
+  // rank; the feed surfaces publish/update/star and install-milestone events, and
+  // only for packages the public can open.
   async recent(limit: number): Promise<EventRow[]> {
     const res = await this.db
       .prepare(
@@ -47,7 +48,7 @@ export class EventRepo {
          FROM events e
          LEFT JOIN packages p ON p.id = e.package_id
          WHERE e.type IN ('publish', 'update', 'star', 'milestone')
-           AND (p.id IS NULL OR p.status != 'private')
+           AND (p.id IS NULL OR p.status = 'active')
          ORDER BY e.created_at DESC
          LIMIT ?1`,
       )
