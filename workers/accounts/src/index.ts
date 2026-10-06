@@ -2,6 +2,7 @@
 // for reasonix.io, plus bounded retention for its expiring authorization state.
 import app from "./app";
 import type { Bindings } from "./env";
+import { retryFeedbackErasures } from "./feedbackLink";
 import { purgeExpiredAuthState } from "./maintenance";
 
 export default {
@@ -14,6 +15,11 @@ export default {
       purgeExpiredAuthState(env).then((purged) => {
         console.log(`auth retention: purged ${purged} expired rows`);
       }),
+    );
+    ctx.waitUntil(
+      retryFeedbackErasures(env)
+        .then((delivered) => console.log(`feedback erasure: delivered ${delivered} pending requests`))
+        .catch(() => console.warn("feedback erasure retry failed")),
     );
   },
 };

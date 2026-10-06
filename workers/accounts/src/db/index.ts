@@ -8,6 +8,7 @@ import { RemoteAttachmentRepo } from "./remoteAttachments";
 import { RemoteControllerRepo } from "./remoteControllers";
 import { RemoteChallengeRepo } from "./remoteChallenges";
 import { RateCounterRepo } from "./rateCounters";
+import { FeedbackErasureRepo } from "./feedbackErasures";
 
 export interface Repos {
   users: UserRepo;
@@ -19,6 +20,7 @@ export interface Repos {
   remoteControllers: RemoteControllerRepo;
   remoteChallenges: RemoteChallengeRepo;
   rateCounters: RateCounterRepo;
+  feedbackErasures: FeedbackErasureRepo;
 }
 
 // Builds the repository layer from request bindings. The session pepper is a
@@ -35,10 +37,11 @@ export function repos(env: Bindings): Repos {
     remoteControllers: new RemoteControllerRepo(env.DB),
     remoteChallenges: new RemoteChallengeRepo(env.DB, pepper),
     rateCounters: new RateCounterRepo(env.DB),
+    feedbackErasures: new FeedbackErasureRepo(env.DB),
   };
 }
 
 export {
   UserRepo, SessionRepo, EmailTokenRepo, DeviceGrantRepo, RemoteDeviceRepo, RemoteAttachmentRepo,
-  RemoteControllerRepo, RemoteChallengeRepo, RateCounterRepo,
+  RemoteControllerRepo, RemoteChallengeRepo, RateCounterRepo, FeedbackErasureRepo,
 };

@@ -23,6 +23,8 @@ import {
   REMOTE_GRANT_TTL_MS,
 } from "../config";
 import { disconnectRemote, remoteDevicePresence } from "../remoteGateway";
+import { enforceRateLimit } from "../http/d1RateLimit";
+import { mintFeedbackAssertion, notifyFeedbackErasure } from "../feedbackLink";
 import backups from "./backups";
 import remoteControllers from "./remoteControllers";
 import { ConfigBackupRepo } from "../db/configBackups";
@@ -33,6 +35,13 @@ const me = new Hono<AppEnv>();
 me.use("*", requireAuth);
 
 me.get("/", (c) => c.json({ user: currentUser(c) }));
+
+me.post("/feedback-assertion", async (c) => {
+  const user = currentUser(c);
+  if (!c.env.FEEDBACK_ACCOUNT_SECRET) throw new ApiError(503, "feedback_unavailable", "Feedback account linking is unavailable.");
+  await enforceRateLimit(c.env, { name: "feedback-assertion", limit: 30, windowMs: 60_000 }, String(user.id));
+  return c.json(await mintFeedbackAssertion(c.env.FEEDBACK_ACCOUNT_SECRET, user.id, new Date()));
+});
 
 me.route("/backups", backups);
 me.route("/remote-controllers", remoteControllers);
@@ -159,6 +168,7 @@ me.delete("/", async (c) => {
   await sessions.deleteAllForUser(user.id);
   await disconnectRemote(c.env, await remoteDevices.revokeAllForUser(user.id));
   if (c.env.BACKUPS) await new ConfigBackupRepo(c.env.DB, c.env.BACKUPS).removeAllForUser(user.id);
+  await notifyFeedbackErasure(c.env, user.id);
   clearSessionCookie(c);
   return c.json({ ok: true });
 });
