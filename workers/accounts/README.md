@@ -87,7 +87,14 @@ Errors are `{ "error": { "code": "...", "message": "..." } }` with a matching HT
 
 Secrets (`wrangler secret put NAME`): `SESSION_PEPPER` (any long random string),
 `RESEND_API_KEY` (only when `EMAIL_PROVIDER=resend`), and
-`REMOTE_GATEWAY_TOKEN` (shared only with the remote gateway).
+`REMOTE_GATEWAY_TOKEN` (shared only with the remote gateway), and
+`FEEDBACK_ACCOUNT_SECRET` (shared only with the feedback worker; without it
+`POST /me/feedback-assertion` answers 503 and deleted accounts queue their erase request).
+
+`POST /me/feedback-assertion` returns a five minute, feedback-audience assertion for the signed-in
+account. `DELETE /me` records a `feedback_erasures` row and tells the feedback worker; failures never
+block the deletion. The row is kept past the six minute window in which an earlier assertion could
+still create a link, and the daily cron sends once more after it; only that later success removes it.
 
 When `EMAIL_PROVIDER` isn't `resend` (or no key is set) the worker logs email links
 to the console — enough to exercise every flow locally without a mail provider.

@@ -17,6 +17,8 @@ export interface Bindings {
   APP_ORIGIN: string;
   ACCOUNT_ORIGIN: string;
   REMOTE_GATEWAY_ORIGIN: string;
+  // Feedback worker origin for the account-deleted call; defaults to crash.reasonix.io.
+  FEEDBACK_ORIGIN?: string;
   ALLOWED_ORIGINS: string;
   COOKIE_DOMAIN: string;
   EMAIL_PROVIDER: string;
@@ -27,6 +29,8 @@ export interface Bindings {
   SESSION_PEPPER?: string;
   RESEND_API_KEY?: string;
   REMOTE_GATEWAY_TOKEN?: string;
+  // Shared with the feedback worker: signs feedback assertions and erase calls.
+  FEEDBACK_ACCOUNT_SECRET?: string;
 }
 
 // Per-request values set by middleware. `user` is null until a valid session is

@@ -21,6 +21,9 @@ APP_ORIGIN = "https://reasonix.io"
 # Override with http://localhost:8787 in .dev.vars when exercising email flows locally.
 ACCOUNT_ORIGIN = "https://id.reasonix.io"
 REMOTE_GATEWAY_ORIGIN = "https://remote.reasonix.io"
+# Feedback worker that is told when an account is deleted. Secret FEEDBACK_ACCOUNT_SECRET
+# (shared with it) signs feedback assertions and that call.
+FEEDBACK_ORIGIN = "https://crash.reasonix.io"
 # Browsers that may call this API with credentials (comma-separated).
 ALLOWED_ORIGINS = "https://reasonix.io,https://www.reasonix.io,https://studio.reasonix.io"
 # Cookie scope. ".reasonix.io" lets the apex + any subdomain (and the future CLI)

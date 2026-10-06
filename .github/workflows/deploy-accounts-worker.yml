@@ -58,6 +58,17 @@ jobs:
             exit 1
           fi
           printf '%s' "$REMOTE_GATEWAY_TOKEN" | npx wrangler secret put REMOTE_GATEWAY_TOKEN
+      - name: Sync feedback account secret
+        working-directory: workers/accounts
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          FEEDBACK_ACCOUNT_SECRET: ${{ secrets.FEEDBACK_ACCOUNT_SECRET }}
+        run: |
+          if [ -n "$FEEDBACK_ACCOUNT_SECRET" ]; then
+            printf '%s' "$FEEDBACK_ACCOUNT_SECRET" | npx wrangler secret put FEEDBACK_ACCOUNT_SECRET
+          else
+            echo "FEEDBACK_ACCOUNT_SECRET not set in repo secrets; feedback account linking stays unavailable."
+          fi
 
   deploy-remote-gateway:
     needs: deploy-accounts
