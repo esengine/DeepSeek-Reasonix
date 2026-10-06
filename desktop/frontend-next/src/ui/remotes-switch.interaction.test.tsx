@@ -23,10 +23,10 @@ function draw(saveRemoteHost = vi.fn(async (_entry: RemoteHostEdit): Promise<Rem
   return saveRemoteHost;
 }
 
-// The switch beside a row decides whether the machine is dialed at all. It is the
-// row's only switch: whether the rail lists it is a separate preference, and a
-// separate row action, because that one commits on click while a control inside
-// the edit form would only commit on Save.
+// The switch beside a row decides whether the machine is dialed at all. Whether the
+// rail lists it is this window's preference rather than the machine's own setting, so
+// it sits in the edit panel with the row's other details — the same toggle the row
+// would call, and it still acts on click rather than on Save.
 describe("the switch that turns a machine off", () => {
   it("saves the whole row with the flag flipped", async () => {
     const save = draw();
@@ -37,9 +37,11 @@ describe("the switch that turns a machine off", () => {
     expect(entry.disabled).toBe(true);
   });
 
-  it("keeps the hide preference to one control, out of the edit form", async () => {
+  it("keeps the hide preference in the edit panel, not beside the dial switch", async () => {
     draw();
     await screen.findByRole("switch", { name: "停用这台主机" });
+    expect(document.querySelectorAll('[data-action="remote.hide"]')).toHaveLength(0);
+    await userEvent.click(await screen.findByRole("button", { name: "编辑" }));
     expect(document.querySelectorAll('[data-action="remote.hide"]')).toHaveLength(1);
   });
 });
