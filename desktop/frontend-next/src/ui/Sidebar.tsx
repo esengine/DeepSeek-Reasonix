@@ -108,7 +108,7 @@ export function Sidebar({
   // The rail shows the machines this window was not asked to keep out; a hidden
   // one is still in the book and still listed in settings.
   const shownRemotes = useMemo(
-    () => (remotes ?? []).filter((host) => !hiddenHosts.includes(host.name)),
+    () => (remotes ?? []).filter((host) => !hiddenHosts.includes(host.name) && !host.disabled),
     [remotes, hiddenHosts],
   );
   const newSessionRoot = activeWorkspace?.root;
