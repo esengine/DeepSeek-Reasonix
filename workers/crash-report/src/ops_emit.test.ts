@@ -66,6 +66,17 @@ describe("feedback ops emission", () => {
     for (const leak of [SECRET_TEXT, "alice@example.com", "Alice", "install-"]) expect(raw).not.toContain(leak);
   });
 
+  it("sends the feedback payload byte for byte", async () => {
+    const res = await post("/v1/feedback", submission());
+    const { receipt } = (await res.json()) as { receipt: string };
+    await flush();
+    const [call1] = sent();
+    const status = call1!.body.extra.status as string;
+    expect(String((call1!.init as RequestInit).body)).toBe(
+      `{"src":"feedback","t":"submitted","title":"feedback submitted","extra":{"receipt":"${receipt}","category":"bug","status":"${status}"}}`,
+    );
+  });
+
   it("emits on an admin status change", async () => {
     const created = await post("/v1/feedback", submission());
     const { receipt } = (await created.json()) as { receipt: string };

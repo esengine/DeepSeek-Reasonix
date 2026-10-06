@@ -17,24 +17,30 @@ const LABEL: Record<OpsEvent["t"], string> = {
   status: "feedback status changed",
 };
 
-export async function emitOps(env: Env, event: OpsEvent): Promise<void> {
-  const base = env.OPS_EVENTS_URL;
-  const token = env.OPS_EMIT_TOKEN;
+export type OpsRelay = Pick<Env, "OPS_EVENTS_URL" | "OPS_EMIT_TOKEN">;
+
+export async function post(relay: OpsRelay, body: unknown): Promise<void> {
+  const base = relay.OPS_EVENTS_URL;
+  const token = relay.OPS_EMIT_TOKEN;
   if (!base || !token || !base.startsWith("https://")) return;
-  const extra: Record<string, string> = { receipt: event.receipt };
-  if (event.category) extra.category = event.category;
-  if (event.status) extra.status = event.status;
   try {
     const res = await fetch(`${base.replace(/\/+$/, "")}/emit`, {
       method: "POST",
       headers: { authorization: `Bearer ${token}`, "content-type": "application/json" },
-      body: JSON.stringify({ src: "feedback", t: event.t, title: LABEL[event.t], extra }),
+      body: JSON.stringify(body),
       signal: AbortSignal.timeout(TIMEOUT_MS),
     });
     await res.body?.cancel();
   } catch {
-    // best effort: the relay being down must never reach the feedback caller
+    // best effort: the relay being down must never reach the caller
   }
+}
+
+export async function emitOps(env: Env, event: OpsEvent): Promise<void> {
+  const extra: Record<string, string> = { receipt: event.receipt };
+  if (event.category) extra.category = event.category;
+  if (event.status) extra.status = event.status;
+  await post(env, { src: "feedback", t: event.t, title: LABEL[event.t], extra });
 }
 
 export function announce(ctx: OpsWaiter | undefined, env: Env, event: OpsEvent): void {

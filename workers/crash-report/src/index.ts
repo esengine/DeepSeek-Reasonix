@@ -1572,6 +1572,8 @@ function registryBindings(env: Env): RegistryBindings {
   return {
     DB: env.REGISTRY_DB,
     WRITE_LIMITER: env.WRITE_LIMITER,
+    OPS_EVENTS_URL: env.OPS_EVENTS_URL,
+    OPS_EMIT_TOKEN: env.OPS_EMIT_TOKEN,
     ACCOUNTS_ORIGIN: env.ID_ORIGIN ?? "https://id.reasonix.io",
     APP_ORIGIN: env.APP_ORIGIN ?? "https://reasonix.io",
     ALLOWED_ORIGINS: env.ALLOWED_ORIGINS ?? "https://reasonix.io,https://www.reasonix.io",
@@ -1919,7 +1921,7 @@ export default {
       path.startsWith("/v1/admin") ||
       path.startsWith("/v1/me/")
     ) {
-      return registryApp.fetch(request, registryBindings(env));
+      return registryApp.fetch(request, registryBindings(env), ctx);
     }
 
     const login = loginUrl(env, request);
