@@ -1,13 +1,24 @@
-import { Hono } from "hono";
+import { Hono, type Context } from "hono";
 import type { AppEnv } from "../env";
 import { toListedPackageDTO, toPackageDTO } from "../types";
 import { repos } from "../db";
 import { requireAuth, currentUser } from "../http/auth";
 import { writeRateLimit } from "../http/ratelimit";
+import type { OpsWaiter } from "../../ops_emit";
+import { announceRegistryPending } from "../../ops_registry";
 import { ApiError } from "../http/errors";
 import { parseBody, parseQuery, PublishSchema, ListQuerySchema, VersionQuerySchema } from "../lib/validation";
 
 const packages = new Hono<AppEnv>();
+
+// executionCtx throws when the app is driven without one.
+function waiter(c: Context<AppEnv>): OpsWaiter | undefined {
+  try {
+    return c.executionCtx;
+  } catch {
+    return undefined;
+  }
+}
 
 const now = () => new Date().toISOString();
 
@@ -45,6 +56,9 @@ packages.post("/", writeRateLimit, requireAuth, async (c) => {
       summary: `${created ? "published" : "updated"} ${row.slug}@${version}`,
       now: now(),
     });
+  }
+  if (row.status === "pending") {
+    announceRegistryPending(waiter(c), c.env, { slug: row.slug, version, kind: row.kind, source: row.source, summary: row.summary });
   }
   return c.json({ package: toPackageDTO(row), created, version }, created ? 201 : 200);
 });

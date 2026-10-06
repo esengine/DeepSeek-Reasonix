@@ -8,6 +8,8 @@ export interface RateLimiter {
 export interface Bindings {
   DB: D1Database;
   WRITE_LIMITER?: RateLimiter;
+  OPS_EVENTS_URL?: string;
+  OPS_EMIT_TOKEN?: string;
 
   // Plain vars (wrangler.toml [vars]).
   ACCOUNTS_ORIGIN: string;
