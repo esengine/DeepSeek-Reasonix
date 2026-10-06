@@ -1,6 +1,7 @@
 import { Hono } from "hono";
 import type { AppEnv } from "./env";
 import { corsMiddleware } from "./http/cors";
+import { noStoreByDefault } from "./http/cache";
 import { errorHandler, notFoundHandler } from "./http/errors";
 import health from "./routes/health";
 import packages from "./routes/packages";
@@ -15,6 +16,7 @@ app.onError(errorHandler);
 app.notFound(notFoundHandler);
 
 app.use("*", corsMiddleware);
+app.use("*", noStoreByDefault);
 
 app.route("/", health);
 app.route("/v1/packages", packages);
