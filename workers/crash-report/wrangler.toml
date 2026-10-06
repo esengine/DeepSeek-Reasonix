@@ -44,6 +44,10 @@ ALLOWED_ORIGINS = "https://reasonix.io,https://www.reasonix.io"
 #   FEEDBACK_TURNSTILE_SECRET  optional; when set, submissions need a Turnstile token
 #                          with action "feedback" (hostname list: FEEDBACK_TURNSTILE_HOSTNAMES)
 FEEDBACK_ENABLED = "true"
+# Account link kill switch: "true" turns on the /v1/feedback/link routes, the union
+# read and replies from linked sibling installs; anything else leaves them absent.
+# Needs the FEEDBACK_ACCOUNT_SECRET secret, shared with the accounts worker.
+FEEDBACK_ACCOUNT_LINK = "false"
 TELEMETRY_QUEUE_ENABLED = "true"
 # CLI/Studio reads and writes use the isolated telemetry database. `dual` and
 # `legacy` remain available as rollback modes; the verified legacy copy is kept

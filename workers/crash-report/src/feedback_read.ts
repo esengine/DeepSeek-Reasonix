@@ -5,7 +5,7 @@ import { jsonResponse } from "./feedback_http";
 import { installLevel, levelProfile } from "./feedback_level";
 import type { FeedbackRow, StoredAttachment } from "./feedback_types";
 
-const MINE_LIMIT = 50;
+export const MINE_LIMIT = 50;
 const SNIPPET_CHARS = 80;
 const REPLIES_SHOWN = 20;
 const REPLIES_FETCH = MINE_LIMIT * REPLIES_SHOWN;
@@ -48,6 +48,30 @@ export async function replyCounts(env: Env, receipts: string[]): Promise<Map<str
   return out;
 }
 
+export async function mineItems(env: Env, results: FeedbackRow[]) {
+  const receipts = results.map((r) => r.receipt);
+  const replies = await repliesFor(env, receipts, REPLIES_FETCH);
+  const counts = await replyCounts(env, receipts);
+  return results.map((r) => {
+    const thread = (replies.get(r.receipt) ?? []).slice(-REPLIES_SHOWN);
+    return {
+      receipt: r.receipt,
+      category: r.category,
+      titleSnippet: [...r.body].slice(0, SNIPPET_CHARS).join(""),
+      status: publicStatus(r),
+      needsInput: r.status === "needs_info",
+      replyCount: counts.get(r.receipt) ?? 0,
+      replies: thread.map((t) => ({ id: t.id, author: t.author === "user" ? "user" : "maintainer", body: t.body, createdAt: t.created_at })),
+      issueNumber: r.issue_number,
+      issueUrl: r.issue_url,
+      resolvedVersion: r.resolved_version,
+      duplicateOf: r.duplicate_of,
+      createdAt: r.created_at,
+      updatedAt: r.updated_at,
+    };
+  });
+}
+
 export async function handleMine(request: Request, env: Env): Promise<Response> {
   const who = await verifyInstall(request, env);
   if (who instanceof Response) return who;
@@ -55,29 +79,9 @@ export async function handleMine(request: Request, env: Env): Promise<Response> 
   const { results } = await env.DB.prepare("SELECT * FROM feedback WHERE install_hash = ? ORDER BY created_at DESC LIMIT ?")
     .bind(who.installHash, MINE_LIMIT)
     .all<FeedbackRow>();
-  const receipts = results.map((r) => r.receipt);
-  const replies = await repliesFor(env, receipts, REPLIES_FETCH);
-  const counts = await replyCounts(env, receipts);
   return jsonResponse({
     profile: levelProfile(await installLevel(env, who.installHash, now), now),
-    items: results.map((r) => {
-      const thread = (replies.get(r.receipt) ?? []).slice(-REPLIES_SHOWN);
-      return {
-        receipt: r.receipt,
-        category: r.category,
-        titleSnippet: [...r.body].slice(0, SNIPPET_CHARS).join(""),
-        status: publicStatus(r),
-        needsInput: r.status === "needs_info",
-        replyCount: counts.get(r.receipt) ?? 0,
-        replies: thread.map((t) => ({ id: t.id, author: t.author === "user" ? "user" : "maintainer", body: t.body, createdAt: t.created_at })),
-        issueNumber: r.issue_number,
-        issueUrl: r.issue_url,
-        resolvedVersion: r.resolved_version,
-        duplicateOf: r.duplicate_of,
-        createdAt: r.created_at,
-        updatedAt: r.updated_at,
-      };
-    }),
+    items: await mineItems(env, results),
   });
 }
 

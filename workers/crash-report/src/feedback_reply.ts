@@ -3,6 +3,7 @@ import { verifyInstall } from "./feedback_auth";
 import { isBlocked } from "./feedback_blocks";
 import { readCappedText } from "./feedback_body";
 import { ipHash } from "./feedback_crypto";
+import { ownedByCaller } from "./feedback_ownership";
 import { jsonResponse, refuse } from "./feedback_http";
 import { installLevel } from "./feedback_level";
 import { admit, refund, replyRefusal } from "./feedback_quota";
@@ -40,19 +41,20 @@ export async function handleUserReply(request: Request, env: Env, receipt: strin
   // One transaction decides ownership, status and the per-item cap, stores the
   // reply and moves needs_info back to held, so none of it can land half-done.
   const at = now.toISOString();
+  const owner = ownedByCaller(env, who.installHash, now);
   let res: D1Result;
   try {
     [res] = await env.DB.batch([
       env.DB.prepare(
         `INSERT INTO feedback_replies (receipt, author, body, handled, created_at)
          SELECT receipt, 'user', ?, CASE status WHEN 'needs_info' THEN 1 WHEN 'answered' THEN 2 ELSE 0 END, ? FROM feedback
-         WHERE receipt = ? AND install_hash = ? AND status IN ${REPLYABLE_SQL}
+         WHERE receipt = ? AND ${owner.sql} AND status IN ${REPLYABLE_SQL}
            AND (SELECT COUNT(*) FROM feedback_replies WHERE receipt = ? AND author = 'user') < ?`,
-      ).bind(scrubSensitiveText(parsed.data.body), at, receipt, who.installHash, receipt, MAX_REPLIES_PER_ITEM),
+      ).bind(scrubSensitiveText(parsed.data.body), at, receipt, ...owner.binds, receipt, MAX_REPLIES_PER_ITEM),
       env.DB.prepare(
         `UPDATE feedback SET status = CASE WHEN status = 'needs_info' THEN 'held' ELSE status END, updated_at = ?
-         WHERE receipt = ? AND install_hash = ? AND changes() > 0`,
-      ).bind(at, receipt, who.installHash),
+         WHERE receipt = ? AND ${owner.sql} AND changes() > 0`,
+      ).bind(at, receipt, ...owner.binds),
     ]);
   } catch (err) {
     await refund(env, admission.buckets);

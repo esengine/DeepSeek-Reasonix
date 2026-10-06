@@ -16,10 +16,18 @@ async function hmac(secret: string, label: string, value: string): Promise<Uint8
   return new Uint8Array(await crypto.subtle.sign("HMAC", key, enc.encode(`${label}:${value}`)));
 }
 
-// Labels keep the three uses of one secret apart, so an install hash can never be
+// Labels keep the uses of one secret apart, so an install hash can never be
 // replayed as a token and none of them correlates with telemetry's plain hashes.
 export async function installHash(secret: string, installId: string): Promise<string> {
   return hex(await hmac(secret, "feedback-install", installId));
+}
+
+export async function accountHash(secret: string, userId: string): Promise<string> {
+  return hex(await hmac(secret, "feedback-account", userId));
+}
+
+export async function sign(secret: string, label: string, value: string): Promise<string> {
+  return base64url(await hmac(secret, label, value));
 }
 
 export async function installToken(secret: string, installId: string): Promise<string> {

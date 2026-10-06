@@ -2,6 +2,7 @@ import type { Env } from "./env";
 import { handleAdmin } from "./feedback_admin";
 import { ATTACHMENT_ROUTE, serveAttachment } from "./feedback_attachments";
 import { refuse } from "./feedback_http";
+import { handleLinkRoute } from "./feedback_link";
 import { handleMine } from "./feedback_read";
 import { handleUserReply } from "./feedback_reply";
 import { servePage } from "./feedback_admin_page";
@@ -17,6 +18,8 @@ export async function handleFeedbackRoute(request: Request, env: Env, ctx?: OpsW
   if (page) return page;
   if (path === "/v1/feedback") return method === "POST" ? handleSubmit(request, env, ctx) : refuse("feedback.method_not_allowed", "method not allowed");
   if (path === "/v1/feedback/mine") return method === "GET" ? handleMine(request, env) : refuse("feedback.method_not_allowed", "method not allowed");
+  const linked = await handleLinkRoute(request, env, path);
+  if (linked) return linked;
   const reply = path.match(/^\/v1\/feedback\/(FB-[0-9A-Z]{4}-[0-9A-Z]{4})\/reply$/);
   if (reply) return method === "POST" ? handleUserReply(request, env, reply[1], ctx) : refuse("feedback.method_not_allowed", "method not allowed");
   if (path.startsWith(ATTACHMENT_ROUTE)) {

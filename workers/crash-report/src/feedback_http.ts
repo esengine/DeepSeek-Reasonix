@@ -15,7 +15,11 @@ export type FeedbackCode =
   | "feedback.reply_limit"
   | "feedback.not_replyable"
   | "feedback.challenge_required"
-  | "feedback.adoption_tombstoned";
+  | "feedback.adoption_tombstoned"
+  | "feedback.account_required"
+  | "feedback.account_unavailable"
+  | "feedback.link_conflict"
+  | "feedback.link_limit";
 
 const STATUS: Record<FeedbackCode, number> = {
   "feedback.too_large": 413,
@@ -35,6 +39,10 @@ const STATUS: Record<FeedbackCode, number> = {
   "feedback.not_replyable": 409,
   "feedback.challenge_required": 403,
   "feedback.adoption_tombstoned": 409,
+  "feedback.account_required": 401,
+  "feedback.account_unavailable": 503,
+  "feedback.link_conflict": 409,
+  "feedback.link_limit": 409,
 };
 
 export function jsonResponse(body: unknown, status = 200, headers: Record<string, string> = {}): Response {
@@ -44,7 +52,7 @@ export function jsonResponse(body: unknown, status = 200, headers: Record<string
   });
 }
 
-export type FeedbackLimit = "ip_hourly" | "install_hourly" | "install_daily" | "reply_hourly" | "reply_item" | "admin_attempts" | "global_daily" | "global_burst";
+export type FeedbackLimit = "ip_hourly" | "install_hourly" | "install_daily" | "reply_hourly" | "reply_item" | "admin_attempts" | "global_daily" | "global_burst" | "link_daily" | "link_install_hourly" | "link_read_hourly";
 
 export interface LimitDetails {
   limit: FeedbackLimit;
@@ -53,7 +61,7 @@ export interface LimitDetails {
 }
 
 export function windowDetails(limit: FeedbackLimit, now: Date): LimitDetails {
-  const span = limit === "global_daily" || limit === "install_daily" ? 86_400_000 : limit === "admin_attempts" ? 900_000 : limit === "global_burst" ? 60_000 : 3_600_000;
+  const span = limit === "global_daily" || limit === "install_daily" || limit === "link_daily" ? 86_400_000 : limit === "admin_attempts" ? 900_000 : limit === "global_burst" ? 60_000 : 3_600_000;
   const reset = limit === "reply_item" ? null : limit === "global_burst" ? now.getTime() + span : (Math.floor(now.getTime() / span) + 1) * span;
   return { limit, resetsAt: reset === null ? null : new Date(reset).toISOString(), retryAfterSeconds: reset === null ? null : Math.ceil((reset - now.getTime()) / 1000) };
 }
