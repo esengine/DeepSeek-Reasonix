@@ -118,6 +118,44 @@ verifies it before the Worker deploys. It also marks, once (`revocation_backfill
 ledger survives report and audit retention. To roll back, redeploy the previous
 Worker; the tables can stay.
 
+## Account links
+
+Off by default (`FEEDBACK_ACCOUNT_LINK = "false"` in `wrangler.toml`). While off, the
+`/v1/feedback/link*` and `/v1/feedback/account/mine` routes do not exist, `mine` and
+replies stay install-keyed, and nothing reads `feedback_account_links`. The same
+holds while the `FEEDBACK_ACCOUNT_SECRET` secret is unset.
+
+- A link is `(install_hash, account_hash)`: one account per install (refused with
+  `feedback.link_conflict`, never moved), at most 10 installs per account
+  (`feedback.link_limit`). Creating one needs the install proof and an account
+  assertion minted by `id.reasonix.io` (audience `feedback`, canonical numeric user id,
+  five minutes minted and at most six accepted, signed with `FEEDBACK_ACCOUNT_SECRET`).
+- `account_hash` is `HMAC(FEEDBACK_TOKEN_SECRET, "feedback-account:" + user id)`. Anyone
+  holding the database and that secret can recompute it, so the claim is "not shown to
+  maintainers", not "unknowable". Admin, triage, list and converter code never read the
+  table; a test enforces it.
+- Reports are not deleted by unlinking or by account deletion. Linking does not revive
+  items a client already marked unavailable.
+- Quotas, levels, adoption credit and trust stay keyed by install. So do blocks, and they
+  follow the report: a sibling cannot reply on a blocked install's report, and a blocked
+  install cannot be linked (answered like a rate limit).
+- A reply from a linked sibling install is charged to the calling install's reply bucket.
+  That path authenticates with the install token alone, so it works until the link is
+  removed, even if the account is suspended; account deletion removes the links through
+  `POST /v1/feedback/account/erase` (signed with the same secret, idempotent).
+- An assertion minted just before an account is deleted can still create a link for up
+  to six minutes. The accounts worker therefore keeps its erase request queued past that
+  window and sends it once more; only that later delivery clears the request, so such a
+  link is removed within about a day (the daily job), not left behind.
+- `POST /v1/feedback/account/erase` answers (401 without a valid signature) as soon as the
+  secret is set, independent of the link flag, so links can still be cleaned after the
+  flag is turned off.
+- Key rotation: set the new `FEEDBACK_ACCOUNT_SECRET` repo secret and redeploy both
+  workers; assertions in flight (at most five minutes) fail closed with 401, and queued
+  erase requests are signed at send time, so none is lost.
+- Rollback: set the flag to `false`; `migrate-feedback-account-links.down.sql` drops the
+  table once nothing needs it.
+
 ## Feedback admin page
 
 Read and triage in-app feedback in a browser instead of the `feedback-admin` CLI.

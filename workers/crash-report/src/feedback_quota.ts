@@ -2,6 +2,7 @@ import type { Env } from "./env";
 import { MAX_REPLIES_PER_ITEM, RESERVED_SHARE } from "./feedback_types";
 import { refuse, windowDetails, type FeedbackLimit } from "./feedback_http";
 import { ipPrefix } from "./feedback_crypto";
+import { ownedByCaller } from "./feedback_ownership";
 
 export async function ipLimited(env: Env, ip: string, trusted: boolean): Promise<boolean> {
   return !trusted && !!env.FEEDBACK_LIMITER && !(await env.FEEDBACK_LIMITER.limit({ key: ipPrefix(ip) })).success;
@@ -52,9 +53,10 @@ export async function refund(env: Env, buckets: readonly string[]): Promise<void
 }
 
 export async function replyRefusal(env: Env, installHash: string, policy: ReplyPolicy, now: Date): Promise<Response | null> {
+  const owner = ownedByCaller(env, installHash, now);
   const row = await env.DB.prepare(
-    "SELECT status, (SELECT COUNT(*) FROM feedback_replies WHERE receipt = ? AND author = 'user') AS replies FROM feedback WHERE receipt = ? AND install_hash = ?",
-  ).bind(policy.receipt, policy.receipt, installHash).first<{ status: string; replies: number }>();
+    `SELECT status, (SELECT COUNT(*) FROM feedback_replies WHERE receipt = ? AND author = 'user') AS replies FROM feedback WHERE receipt = ? AND ${owner.sql}`,
+  ).bind(policy.receipt, policy.receipt, ...owner.binds).first<{ status: string; replies: number }>();
   if (!row || !policy.replyable.includes(row.status)) return refuse("feedback.not_replyable", "this report cannot take replies");
   return row.replies >= MAX_REPLIES_PER_ITEM ? refuse("feedback.reply_limit", "reply limit reached for this report", windowDetails("reply_item", now)) : null;
 }

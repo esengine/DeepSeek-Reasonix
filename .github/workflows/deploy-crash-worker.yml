@@ -100,6 +100,18 @@ jobs:
           for name in $names; do
             printf '%s' "$out" | grep -q "\"$name\"" || { echo "missing $name after migration"; exit 1; }
           done
+      - name: Apply and verify feedback account link D1 migration
+        working-directory: workers/crash-report
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+        run: |
+          npx wrangler d1 execute reasonix-crash --remote --file=migrate-feedback-account-links.sql
+          names="feedback_account_links feedback_account_links_account"
+          list=$(for n in $names; do printf "'%s'," "$n"; done | sed 's/,$//')
+          out=$(npx wrangler d1 execute reasonix-crash --remote --json --command "SELECT name FROM sqlite_master WHERE name IN ($list)")
+          for name in $names; do
+            printf '%s' "$out" | grep -q "\"$name\"" || { echo "missing $name after migration"; exit 1; }
+          done
       - name: Apply Studio telemetry schema
         working-directory: workers/crash-report
         env:
@@ -145,8 +157,9 @@ jobs:
           FEEDBACK_TOKEN_SECRET: ${{ secrets.FEEDBACK_TOKEN_SECRET }}
           FEEDBACK_ADMIN_TOKEN: ${{ secrets.FEEDBACK_ADMIN_TOKEN }}
           OPS_EMIT_TOKEN: ${{ secrets.OPS_EMIT_TOKEN }}
+          FEEDBACK_ACCOUNT_SECRET: ${{ secrets.FEEDBACK_ACCOUNT_SECRET }}
         run: |
-          node -e 'process.stdout.write(JSON.stringify({FEEDBACK_TOKEN_SECRET:process.env.FEEDBACK_TOKEN_SECRET||null,FEEDBACK_ADMIN_TOKEN:process.env.FEEDBACK_ADMIN_TOKEN||null,OPS_EMIT_TOKEN:process.env.OPS_EMIT_TOKEN||null}))' | npx wrangler secret bulk
+          node -e 'process.stdout.write(JSON.stringify({FEEDBACK_TOKEN_SECRET:process.env.FEEDBACK_TOKEN_SECRET||null,FEEDBACK_ADMIN_TOKEN:process.env.FEEDBACK_ADMIN_TOKEN||null,OPS_EMIT_TOKEN:process.env.OPS_EMIT_TOKEN||null,FEEDBACK_ACCOUNT_SECRET:process.env.FEEDBACK_ACCOUNT_SECRET||null}))' | npx wrangler secret bulk
       # Mirrors the ALERT_WEBHOOK repo secret into the worker so the ingest
       # sentinel can push alerts (see runIngestSentinel). Managed here so
       # nobody needs local Cloudflare credentials; when the repo secret is

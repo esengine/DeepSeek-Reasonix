@@ -28,6 +28,10 @@ export interface Env {
   FEEDBACK_ENABLED?: string;
   FEEDBACK_TOKEN_SECRET?: string;
   FEEDBACK_ADMIN_TOKEN?: string;
+  // Account link kill switch: only "true" enables the link routes, the union read
+  // and sibling replies. The shared secret verifies account assertions and erasure calls.
+  FEEDBACK_ACCOUNT_LINK?: string;
+  FEEDBACK_ACCOUNT_SECRET?: string;
   // Ops-events relay; feedback emits compact events only when both are set.
   OPS_EVENTS_URL?: string;
   OPS_EMIT_TOKEN?: string;
