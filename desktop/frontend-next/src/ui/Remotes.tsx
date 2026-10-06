@@ -167,9 +167,6 @@ export function Remotes({ hub, onError }: Props) {
             >
               {t("编辑")}
             </button>
-            <button className="rmtlnk" data-action="remote.hide" data-target={host.name} onClick={() => toggleHiddenHost(host.name)}>
-              {t(hidden.includes(host.name) ? "在侧栏显示" : "在侧栏隐藏")}
-            </button>
             {host.disabled ? <span className="st">{t("已停用")}</span> : null}
             <Switch
               data-action="remote.enable"
@@ -326,6 +323,20 @@ export function Remotes({ hub, onError }: Props) {
               <option value="never">{t("不安装，已自行安装")}</option>
             </select>
           </label>
+          {/* Whether a machine is listed is this window's preference, not the
+              machine's own setting: it sits with the row's other details rather
+              than beside the switch that decides whether it is dialed at all. */}
+          {editing ? (
+            <label className="rmtf">
+              <span>{t("在侧栏显示")}</span>
+              <Switch
+                data-action="remote.hide"
+                on={!hidden.includes(editing)}
+                label={t(hidden.includes(editing) ? "在侧栏显示" : "在侧栏隐藏")}
+                onClick={() => toggleHiddenHost(editing)}
+              />
+            </label>
+          ) : null}
           {/* Which machine's key the far-side kernel answers to. This one's by
               default, tunnelled back, so the other machine needs no key of its
               own and no route to the model API. */}
