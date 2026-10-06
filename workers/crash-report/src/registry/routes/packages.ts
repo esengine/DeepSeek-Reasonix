@@ -3,6 +3,7 @@ import type { AppEnv } from "../env";
 import { toListedPackageDTO, toPackageDTO } from "../types";
 import { repos } from "../db";
 import { requireAuth, currentUser } from "../http/auth";
+import { DETAIL_CACHE_CONTROL, publicRead } from "../http/cache";
 import { writeRateLimit } from "../http/ratelimit";
 import type { OpsWaiter } from "../../ops_emit";
 import { announceRegistryPending } from "../../ops_registry";
@@ -22,13 +23,13 @@ function waiter(c: Context<AppEnv>): OpsWaiter | undefined {
 
 const now = () => new Date().toISOString();
 
-packages.get("/", async (c) => {
+packages.get("/", publicRead(ListQuerySchema), async (c) => {
   const q = parseQuery(c, ListQuerySchema);
   const rows = await repos(c.env).packages.list({ ...q, now: now() });
   return c.json({ packages: rows.map(toListedPackageDTO), limit: q.limit, offset: q.offset });
 });
 
-packages.get("/:handle/:name", async (c) => {
+packages.get("/:handle/:name", publicRead(VersionQuerySchema, DETAIL_CACHE_CONTROL), async (c) => {
   const slug = `${c.req.param("handle")}/${c.req.param("name")}`;
   const page = parseQuery(c, VersionQuerySchema);
   const { packages: repo } = repos(c.env);
