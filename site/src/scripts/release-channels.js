@@ -162,9 +162,10 @@ export function cliReleaseModel(releases, requestedChannel) {
   if (!assets) return null;
   const releaseURL = `https://github.com/esengine/DeepSeek-Reasonix/releases/tag/${parsed.tag}`;
   const exactChangelogURL = `https://reasonix.io/changelog/${parsed.tag}/`;
+  const legacyLine = Number(parsed.order[0]) < 2;
   const changelogURL = release.release_notes_url === exactChangelogURL
     ? exactChangelogURL
-    : "https://reasonix.io/changelog/cli/";
+    : legacyLine ? "https://reasonix.io/changelog/cli/" : "https://reasonix.io/changelog/";
   return {
     channel,
     version: parsed.tag,

@@ -103,7 +103,7 @@ const goVer = 'latest';
         </a>
       </div>
 
-      <h2 id="install"><span class="l-en">Command line (1.x)</span><span class="l-zh">命令行（1.x）</span></h2>
+      <h2 id="install"><span class="l-en">Command line (2.x)</span><span class="l-zh">命令行（2.x）</span></h2>
       <p><span class="l-en">Prefer the terminal, or need scripting? Install the CLI / TUI app with one command on macOS, Linux, Windows, or WSL. <code>reasonix</code> opens the interactive TUI; <code>reasonix run</code> is the headless automation entry.</span><span class="l-zh">更喜欢终端，或需要脚本化？一条命令安装终端应用,支持 macOS、Linux、Windows 或 WSL。<code>reasonix</code> 打开交互式 TUI；<code>reasonix run</code> 用于无界面自动执行。</span></p>
       <div class="codeblock codeblock--copy"><button data-copy="npm i -g reasonix">Copy</button><span class="c"># npm (recommended · 推荐)</span>
 npm i -g reasonix
@@ -123,13 +123,13 @@ brew install esengine/reasonix/reasonix</div>
       <div class="tui-panel">
         <span class="desktop-kicker"><span class="l-en">Terminal-first workflow</span><span class="l-zh">终端优先工作流</span></span>
         <ul class="desktop-feature-list">
-          <li><span class="l-en">Interactive TUI with Plan, three permission presets, transcript scrolling, and compact tool approval prompts.</span><span class="l-zh">交互式 TUI 支持计划模式、三种权限边界、对话滚动与紧凑工具审批提示。</span></li>
+          <li><span class="l-en">Interactive TUI with Plan, selectable permission modes, transcript scrolling, and compact tool approval prompts.</span><span class="l-zh">交互式 TUI 支持计划模式、可切换的权限模式、对话滚动与紧凑工具审批提示。</span></li>
           <li><span class="l-en">Drag-select transcript text to copy through the verified local system clipboard; SSH uses a clearly labelled OSC 52 fallback. Run <code>/mouse</code> to use your terminal's native selection instead.</span><span class="l-zh">拖选对话文本会通过可验证的本地系统剪贴板复制；SSH 使用明确标记的 OSC 52 回退。也可用 <code>/mouse</code> 切回终端原生选择。</span></li>
           <li><span class="l-en">Text paste stays terminal-native. Image paste is explicit: <code>Ctrl+V</code> on macOS/Linux, <code>Alt+V</code> on Windows, or <code>/paste-image</code>, with a live <code>Pasting image…</code> footer state.</span><span class="l-zh">文本粘贴保持终端原生；图片粘贴使用独立入口：macOS/Linux 按 <code>Ctrl+V</code>，Windows 按 <code>Alt+V</code>，或运行 <code>/paste-image</code>，读取时底栏显示“正在粘贴图片…”。</span></li>
           <li><span class="l-en">Scriptable runs through <code>reasonix run</code>, including piped input and explicit model selection.</span><span class="l-zh">可脚本化的 <code>reasonix run</code>,支持管道输入和显式模型选择。</span></li>
         </ul>
       </div>
-      <div class="callout"><span class="ico">!</span><span><span class="l-en">To install the legacy <strong>0.x</strong> version, pin it explicitly with <code>npm i -g reasonix@0.53.2</code>. The commands above and Homebrew install the Reasonix 1.x command line.</span><span class="l-zh">如需安装 legacy <strong>0.x</strong> 版本,请显式 pin: <code>npm i -g reasonix@0.53.2</code>。上方命令与 Homebrew 安装的是 Reasonix 1.x 命令行。</span></span></div>
+      <div class="callout"><span class="ico">!</span><span><span class="l-en">To install the legacy <strong>0.x</strong> version, pin it explicitly with <code>npm i -g reasonix@0.53.2</code>. The commands above and Homebrew install the Reasonix 2.x command line. Coming from 1.x? See <a href={`${repo}/blob/studio/docs/MIGRATING.md`}>Moving from 1.x to 2.x</a>.</span><span class="l-zh">如需安装 legacy <strong>0.x</strong> 版本,请显式 pin: <code>npm i -g reasonix@0.53.2</code>。上方命令与 Homebrew 安装的是 Reasonix 2.x 命令行。从 1.x 迁移请见 <a href={`${repo}/blob/studio/docs/MIGRATING.md`}>Moving from 1.x to 2.x</a>。</span></span></div>
 
       <h2 id="desktop"><span class="l-en">Desktop app (1.x)</span><span class="l-zh">桌面端（1.x）</span></h2>
       <div class="desktop-panel">
@@ -304,6 +304,7 @@ reasonix acp --model &lt;name&gt; <span class="c"># choose the startup model</sp
       <p><span class="l-en">Rewind is snapshot-based, not git-based. Press double <code>Esc</code> in the CLI, use <code>/rewind</code>, or use the desktop hover control to restore code, conversation, or both from an earlier turn without touching <code>.git</code>.</span><span class="l-zh">回退基于文件快照,不是 git。CLI 中双击 <code>Esc</code>、使用 <code>/rewind</code>,或在桌面端用户消息上使用 hover 控件,即可从较早 turn 恢复代码、对话或两者,不会触碰 <code>.git</code>。</span></p>
 
       <h2 id="cli"><span class="l-en">CLI &amp; slash commands</span><span class="l-zh">命令行与斜杠命令</span></h2>
+      <div class="callout"><span class="ico">i</span><span><span class="l-en">Parts of this reference still describe the 1.x line, for example <code>reasonix bot</code>, which 2.x does not have, and the permission preset names. For the 2.x command line see the <a href={`${repo}/blob/studio/docs/CLI.md`}>CLI reference</a> and <a href={`${repo}/blob/studio/docs/MIGRATING.md`}>Moving from 1.x to 2.x</a>.</span><span class="l-zh">本节部分内容仍按 1.x 版本线撰写，例如 2.x 没有的 <code>reasonix bot</code>，以及权限预设的名称。2.x 命令行请见 <a href={`${repo}/blob/studio/docs/CLI.md`}>CLI reference</a> 与 <a href={`${repo}/blob/studio/docs/MIGRATING.md`}>Moving from 1.x to 2.x</a>。</span></span></div>
       <div class="codeblock">reasonix setup            <span class="c"># first-run: pick provider + keys</span>
 reasonix                  <span class="c"># interactive session; workspace write by default</span>
 reasonix run "&lt;task&gt;"     <span class="c"># headless workspace-write session</span>
