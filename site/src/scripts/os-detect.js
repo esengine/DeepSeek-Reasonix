@@ -2,7 +2,8 @@
 // only when a shipped build matches; otherwise it is "" and `reason` says why
 // (the page then shows every build with a note instead of recommending one).
 // Shipped builds: macOS arm64/amd64, Windows x64 (also runs on Windows ARM
-// through emulation), Linux amd64.
+// through emulation, or natively on ARM64 when the release carries that build),
+// Linux amd64.
 export function detectPlatform(ua, maxTouchPoints = 0) {
   const value = typeof ua === "string" ? ua : "";
   if (/Android|iPhone|iPad|iPod|Mobile/i.test(value)) return { os: "", reason: "mobile" };
@@ -22,4 +23,18 @@ export function detectPlatform(ua, maxTouchPoints = 0) {
 
 export function detectDesktopOS(ua, maxTouchPoints = 0) {
   return detectPlatform(ua, maxTouchPoints).os;
+}
+
+// The Windows UA string is frozen and never says ARM, so only Chromium's
+// User-Agent Client Hints can tell. Anything else (Firefox, Safari, hints
+// blocked or failing) answers false and the visitor picks the build by hand.
+export async function detectWindowsArm64(uaData) {
+  if (!uaData || typeof uaData.getHighEntropyValues !== "function") return false;
+  if (uaData.platform && uaData.platform !== "Windows") return false;
+  try {
+    const hints = await uaData.getHighEntropyValues(["architecture", "bitness"]);
+    return hints?.architecture === "arm" && hints?.bitness === "64";
+  } catch {
+    return false;
+  }
 }

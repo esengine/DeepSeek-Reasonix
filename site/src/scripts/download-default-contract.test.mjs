@@ -41,6 +41,16 @@ test("the Studio pane offers every build the release model attests", () => {
   assert.doesNotMatch(home + docs, /dl\.reasonix\.io\/studio-v\d/);
 });
 
+test("the Windows ARM64 build is optional markup: hidden until a release attests it", () => {
+  const name = "ReasonixStudio-windows-arm64-installer.exe";
+  for (const page of [home, docs]) {
+    const link = page.match(new RegExp(`<a[^>]*data-studio-asset="${name.replace(/\./g, "\\.")}"[^>]*>`))?.[0] ?? "";
+    assert.match(link, /data-studio-optional/);
+    assert.match(link, /\bhidden\b/);
+  }
+  assert.match(home, /data-arm-pending hidden/);
+});
+
 test("the CLI stays reachable from the Studio pane", () => {
   const studio = home.slice(home.indexOf('id="download-pane-studio"'), home.indexOf('id="download-pane-desktop"'));
   assert.match(studio, /npm i -g reasonix/);
