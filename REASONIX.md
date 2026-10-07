@@ -219,7 +219,9 @@ otherwise the block the model already has goes on reading as current.
 - `#<note>` in chat quick-adds an always-on instruction. The `remember` tool
   instead saves a fallible background fact (frontmatter file + `MEMORY.md`
   index). Fact `type` classifies content; independent `scope` controls whether it
-  is project-only (the default) or explicitly global. The index stays out of
+  is project-only (the default) or explicitly global.
+
+- The index stays out of
   the stable prefix and is reached through the `memory` tool; pinned bodies and
   global user/feedback bodies load into it, the latter as
   lower-priority compatibility guidance. The current turn receives a tail note.

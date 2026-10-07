@@ -760,15 +760,19 @@ func (s *Server) forget(w http.ResponseWriter, r *http.Request) {
 // checkpoints returns the session's checkpoint list for the rewind picker.
 func (s *Server) checkpoints(w http.ResponseWriter, _ *http.Request) {
 	type cp struct {
-		Turn     int    `json:"turn"`
-		Prompt   string `json:"prompt"`
-		Files    int    `json:"files"`
-		MsgIndex int    `json:"msgIndex"`
+		Turn       int    `json:"turn"`
+		Prompt     string `json:"prompt"`
+		Files      int    `json:"files"`
+		MsgIndex   int    `json:"msgIndex"`
+		Stamp      string `json:"stamp"`
+		CanFork    bool   `json:"canFork"`
+		ForkCopied bool   `json:"forkCopied,omitempty"`
 	}
 	raw := s.ctl().Checkpoints()
+	forks := s.ctl().ForkableTurns()
 	out := make([]cp, len(raw))
 	for i, c := range raw {
-		out[i] = cp{Turn: c.Turn, Prompt: c.Prompt, Files: len(c.Paths), MsgIndex: c.MsgIndex}
+		out[i] = cp{Turn: c.Turn, Prompt: c.Prompt, Files: len(c.Paths), MsgIndex: c.MsgIndex, Stamp: c.Time.Format(time.RFC3339Nano), CanFork: forks[c.Turn], ForkCopied: c.ForkCopied}
 	}
 	writeJSON(w, out)
 }

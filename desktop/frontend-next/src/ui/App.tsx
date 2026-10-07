@@ -23,7 +23,9 @@ import { Boundary } from "./Boundary";
 import { SettingsUnavailable } from "./SettingsUnavailable";
 import { useMachineBooks } from "./machinebooks";
 import { usePaint } from "./paint";
+import { useForkPane } from "./forkpane";
 import { rememberActivePane, savedActivePane } from "./activepane";
+import { persistPins, savedPins } from "./pinnedSessions";
 import { Sidebar } from "./Sidebar";
 import { Sky } from "./Sky";import { useAddWorkspace } from "./addws";
 import { AddWorkspacePrompt } from "./AddWorkspacePrompt";
@@ -61,16 +63,7 @@ const NO_REPORT: PaneReport = {
   mcp: [],
   wallet: "",
 };
-const PINNED_SESSIONS_KEY = "reasonix:pinned-sessions";
 
-function savedPins(): Set<string> {
-  try {
-    const raw = JSON.parse(localStorage.getItem(PINNED_SESSIONS_KEY) ?? "[]");
-    return new Set(Array.isArray(raw) ? raw.filter((x): x is string => typeof x === "string") : []);
-  } catch {
-    return new Set();
-  }
-}
 
 // App is the window around the panes, not a session itself: the workspace tree,
 // the chrome, the settings sheet and the theme are the window's, while every
@@ -435,6 +428,8 @@ export function App({ hub }: { hub: HubPort }) {
       })),
     [runtimes, titleFor, runs, viewed.tree, viewed.remote],
   );
+  const forkPane = useForkPane({ hub, runtimes, setRuntimes, focusPane, reloadPanes });
+
   // The folder only earns tab space when the panes actually span more than one.
   const manyRoots = useMemo(() => new Set(runtimes.map((rt) => rt.root)).size > 1, [runtimes]);
   const activeRuntime = runtimes.find((rt) => rt.id === active);
@@ -496,7 +491,7 @@ export function App({ hub }: { hub: HubPort }) {
           if (!current.has(path)) return current;
           const next = new Set(current);
           next.delete(path);
-          localStorage.setItem(PINNED_SESSIONS_KEY, JSON.stringify([...next]));
+          persistPins(next);
           return next;
         });
       }
@@ -510,7 +505,7 @@ export function App({ hub }: { hub: HubPort }) {
       const next = new Set(current);
       if (next.has(path)) next.delete(path);
       else next.add(path);
-      localStorage.setItem(PINNED_SESSIONS_KEY, JSON.stringify([...next]));
+      persistPins(next);
       return next;
     });
   }, []);
@@ -668,6 +663,7 @@ export function App({ hub }: { hub: HubPort }) {
                   // session path, and until /runtimes reports it the pane still
                   // looks blank — the next history row would take it over.
                   onSessionChanged={refreshPanes}
+                  onFork={!rt.host && !rt.readOnly ? (checkpoint) => forkPane(rt.id, checkpoint) : undefined}
                   pulse={settingsPulse}
                   findPulse={findPulse}
                   alert={rt.id === active ? (errorBar ?? undefined) : undefined}

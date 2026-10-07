@@ -112,6 +112,7 @@ type Meta struct {
 	ExpiredFilePayload bool
 	ActiveWriters      []ActiveWriter
 	Legacy             bool
+	ForkCopied         bool
 	CanUndoFiles       bool
 	DisabledReason     string
 }

@@ -79,6 +79,7 @@ export interface TreeWorkspace {
 export interface HubPort extends SharePort {
   runtimes(): Promise<RuntimeView[]>;
   open(req: { root?: string; sessionPath?: string }): Promise<RuntimeView>;
+  fork(id: string, req: { sessionPath: string; turn: number; msgIndex: number; stamp: string }): Promise<RuntimeView>;
   close(id: string): Promise<void>;
   tree(): Promise<TreeWorkspace[]>;
   addWorkspace(path: string): Promise<TreeWorkspace>;
@@ -204,6 +205,10 @@ export class SseHub implements HubPort {
 
   open(req: { root?: string; sessionPath?: string }) {
     return this.post<RuntimeView>("/runtimes", { root: req.root ?? "", sessionPath: req.sessionPath ?? "" });
+  }
+
+  fork(id: string, req: { sessionPath: string; turn: number; msgIndex: number; stamp: string }) {
+    return this.post<RuntimeView>(`/runtimes/${encodeURIComponent(id)}/fork`, req);
   }
 
   async close(id: string) {

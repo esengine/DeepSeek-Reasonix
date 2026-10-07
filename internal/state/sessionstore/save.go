@@ -1575,7 +1575,7 @@ func ReconcileCleanupPending(dir string, cleanup func(CleanupPendingInfo) error)
 		return errors.Join(errs...)
 	}
 	for _, item := range pending {
-		handled, err := reconcileRecoveryTrashPending(item)
+		handled, err := reconcilePending(dir, item, cleanup)
 		if !handled {
 			if cleanup == nil {
 				continue

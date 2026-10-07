@@ -65,6 +65,8 @@ export interface ReplyActions {
   model?: string;
   onConfigureModel?: () => void;
   onRunDetail?: () => void;
+  forkable?: ReadonlySet<string>;
+  onFork?: (id: string) => Promise<void>;
 }
 
 // Quoting a whole answer to ask about one sentence of it is not quoting. What
@@ -89,6 +91,7 @@ function download(text: string) {
 }
 
 export function SayCard({ item, afterAnswer, reply }: { item: Extract<Item, { t: "say" }>; afterAnswer?: ReactNode; reply?: ReplyActions }) {
+  const [forking, setForking] = useState(false);
   const start = useStartsOpen("thinking", !item.done && !item.text);
   const [touched, setOpen] = useState<boolean | null>(null);
   const open = touched ?? start;
@@ -138,6 +141,13 @@ export function SayCard({ item, afterAnswer, reply }: { item: Extract<Item, { t:
           {item.done && item.text.trim() && (
             <div className="acts">
               <CopyButton text={item.text} iconOnly />
+              {reply?.onFork && reply.forkable?.has(item.id) && (
+                <button type="button" data-action="reply.fork" title={t("从此回复创建对话分支")}
+                  aria-label={t("从此回复创建对话分支")} disabled={forking}
+                  onClick={() => { setForking(true); void reply.onFork!(item.id).finally(() => setForking(false)); }}>
+                  <StudioIcon name={forking ? "clock" : "fork"} />
+                </button>
+              )}
               {reply && (
                 <button type="button" data-action="reply.quote" title={t("引用到输入框")} aria-label={t("引用到输入框")} onClick={(e) => reply.onQuote(selectedIn(e.currentTarget.closest(".call")) || item.text, item.id)}>
                   <StudioIcon name="quote" />

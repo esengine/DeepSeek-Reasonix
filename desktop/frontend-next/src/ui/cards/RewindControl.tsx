@@ -139,7 +139,7 @@ export function RewindControl({
                 <div className="mi plain">
                   <span className="dot" />
                   <span className="tx">
-                    <span className="lb">{t("本轮未修改任何文件")}</span>
+                    <span className="lb">{t(cp.forkCopied ? "此检查点不包含文件快照" : "此轮没有修改任何文件")}</span>
                   </span>
                 </div>
               )}

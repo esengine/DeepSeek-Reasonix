@@ -20,6 +20,10 @@ export class MockHub implements HubPort {
     return Promise.resolve([...this.views]);
   }
 
+  async fork(): Promise<RuntimeView> {
+    throw new Error("The preview has no persisted conversation to fork.");
+  }
+
   open(req: { root?: string; sessionPath?: string }) {
     const held = req.sessionPath ? this.views.find((v) => v.sessionPath === req.sessionPath) : undefined;
     if (held) return Promise.resolve(held);

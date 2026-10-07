@@ -274,6 +274,10 @@ func (h *Hub) ownSession(srv *Server) (keeper *control.SessionLeaseKeeper, err e
 // Open builds a runtime for req, or returns the one already driving that
 // session. The caller gets a runtime it can address immediately.
 func (h *Hub) Open(ctx context.Context, req OpenRequest) (*Runtime, error) {
+	return h.openWithSettings(ctx, req, nil)
+}
+
+func (h *Hub) openWithSettings(ctx context.Context, req OpenRequest, settings *sessionstore.BranchMeta) (*Runtime, error) {
 	if rt := h.findSession(req.SessionPath); rt != nil {
 		return rt, nil
 	}
@@ -281,10 +285,19 @@ func (h *Hub) Open(ctx context.Context, req OpenRequest) (*Runtime, error) {
 	if err != nil {
 		return nil, err
 	}
+	preset := ""
+	if settings != nil {
+		req.Model = strings.TrimSpace(settings.Model)
+		if req.Model == "" {
+			return nil, fmt.Errorf("fork model setting unavailable")
+		}
+		preset = settings.AgentPreset
+	}
 	bc := NewBroadcaster()
 	paneSink := h.decorateSink(bc)
 	built, err := boot.BuildRuntime(ctx, boot.Options{
 		Model:           strings.TrimSpace(req.Model),
+		AgentPreset:     preset,
 		WorkspaceRoot:   root,
 		SessionDir:      SessionDirFor(root),
 		Sink:            paneSink,
@@ -331,6 +344,9 @@ func (h *Hub) Open(ctx context.Context, req OpenRequest) (*Runtime, error) {
 			leases.Release()
 			return nil, keepRefusalStatus(status, err)
 		}
+	}
+	if settings != nil {
+		built.Controller.SetPlanMode(settings.Mode == "plan")
 	}
 	if err := addRememberedWorkspace(ctx, root); err != nil {
 		built.Controller.Close()
@@ -489,6 +505,7 @@ func (h *Hub) Handler() http.Handler {
 	mux.HandleFunc("GET /runtimes", h.listRuntimes)
 	mux.HandleFunc("POST /runtimes", h.openRuntime)
 	mux.HandleFunc("POST /runtimes/{id}/close", h.closeRuntime)
+	mux.HandleFunc("POST /runtimes/{id}/fork", h.forkRuntime)
 	h.registerTreeRoutes(mux)
 	h.registerStudioVersionRoutes(mux)
 	mux.HandleFunc("GET /device", notADevice)

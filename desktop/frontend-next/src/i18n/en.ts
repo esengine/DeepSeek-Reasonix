@@ -20,6 +20,8 @@ import { EN_FEEDBACK } from "./en_feedback";
 import { EN_COMMUNITY } from "./en_community";
 
 export const EN: Record<string, string> = {
+  "从此回复创建对话分支": "Fork conversation from this response",
+  "这轮对话已发生变化，请刷新后重试": "This turn has changed. Refresh and try again.",
   "工作台": "Workbench",
   "从右侧选择文件，或打开浏览器": "Choose a file on the right, or open a browser",
   ...EN_SETTINGS,
@@ -709,7 +711,8 @@ export const EN: Record<string, string> = {
   "撤销这次还原": "Undo this restore",
   "仍还原其余部分": "Restore the rest anyway",
   "还原失败": "Could not restore",
-  "本轮未修改任何文件": "This turn changed no files",
+  "此轮没有修改任何文件": "This turn did not change any file",
+  "此检查点不包含文件快照": "This checkpoint contains no file snapshots",
   "本轮有改动无法还原": "Some of this turn's changes cannot be restored",
   "部分改动不在快照内": "Some of the changes are outside the snapshot",
   "已还原 {n} 个文件": "{n} files restored",

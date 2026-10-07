@@ -72,6 +72,10 @@ export interface HostTodo {
 // compose prefixes already stripped kernel-side.
 export interface Checkpoint {
   turn: number;
+  stamp?: string;
+  canFork?: boolean;
+  // True only for a checkpoint copied into a fork without file snapshots.
+  forkCopied?: boolean;
   prompt: string;
   files: number;
   // The session index of the user message this snapshot was taken for, and the

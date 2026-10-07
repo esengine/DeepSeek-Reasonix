@@ -11,6 +11,21 @@ afterEach(() => {
   vi.restoreAllMocks();
 });
 
+it("forks only an eligible final reply and blocks repeated clicks while opening", async () => {
+  let finish = () => {};
+  const onFork = vi.fn(() => new Promise<void>((resolve) => { finish = resolve; }));
+  const reply = { onQuote: vi.fn(), canRegenerate: () => false, hasLaterTurns: () => false, onRegenerate: vi.fn(), onFork, forkable: new Set(["final"]) };
+  const { rerender } = render(<SayCard item={{ t: "say", id: "middle", text: "checking", done: true }} reply={reply} />);
+  expect(screen.queryByRole("button", { name: "从此回复创建对话分支" })).toBeNull();
+  rerender(<SayCard item={{ t: "say", id: "final", text: "answer", done: true }} reply={reply} />);
+  const button = screen.getByRole("button", { name: "从此回复创建对话分支" }) as HTMLButtonElement;
+  await userEvent.click(button);
+  await userEvent.click(button);
+  expect(onFork).toHaveBeenCalledExactlyOnceWith("final");
+  expect(button.disabled).toBe(true);
+  await act(async () => finish());
+});
+
 describe("completed reasoning", () => {
   it("starts folded and opens on click", async () => {
     const { container } = render(<SayCard item={{ t: "say", id: "s", text: "answer", reasoning: "reason", done: true }} />);
