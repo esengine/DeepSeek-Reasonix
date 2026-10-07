@@ -155,7 +155,7 @@ export async function handleSubmit(request: Request, env: Env, ctx?: OpsWaiter):
         contact: input.contact ?? "",
         env_json: JSON.stringify(scrubEnv(input.env)),
         attachments_json: JSON.stringify(stored),
-        status: level.heldEligible && stored.length === 0 && !tripsSpamGate(body) ? "received" : "held",
+        status: level.heldEligible && !tripsSpamGate(body) ? "received" : "held",
         issue_number: null,
         issue_url: null,
         resolved_version: null,

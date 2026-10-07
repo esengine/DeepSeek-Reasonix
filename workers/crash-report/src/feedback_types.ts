@@ -12,6 +12,7 @@ export const PER_INSTALL_HOURLY = 3;
 export const PER_IP_HOURLY = 10;
 export const GLOBAL_DAILY = 300;
 export const UNCONVERTED_RETENTION_DAYS = 30;
+export const HELD_OVERDUE_DAYS = Math.floor(UNCONVERTED_RETENTION_DAYS / 3);
 export const MAX_IMAGE_PIXELS = 40_000_000;
 export const PER_INSTALL_DAILY = 10;
 export const MAX_REPLY_BYTES = 4096;

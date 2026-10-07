@@ -97,9 +97,19 @@ describe("submit gate and trust", () => {
     expect(statusOf(await receiptOf({ installId: ids.b }))).toBe("held");
   });
 
-  it("holds a trusted submission that carries an image or is mostly links", async () => {
+  it("receives a trusted submission that carries an image, without publishing the image", async () => {
     await act(await receiptOf(), "release");
+    const r = await receiptOf(withImage);
+    expect(statusOf(r)).toBe("received");
+    expect((await mine(ids.a)).find((i) => i.receipt === r)).toMatchObject({ status: "received", underReview: false });
+    expect((await pendingItems()).find((i) => i.receipt === r).attachments).toEqual([]);
+    expect(objects.size).toBe(1);
+    expect(raw.prepare("SELECT COUNT(*) AS n FROM feedback_public_images").get()).toEqual({ n: 0 });
+  });
+
+  it("holds an untrusted install's image and a trusted install's link flood", async () => {
     expect(statusOf(await receiptOf(withImage))).toBe("held");
+    await act(await receiptOf({ installId: ids.b }), "release");
     const links = Array.from({ length: 5 }, (_, i) => `https://spam${i}.test`).join(" ");
     expect(statusOf(await receiptOf({ body: links }))).toBe("held");
   });
@@ -141,7 +151,8 @@ describe("submit gate and trust", () => {
     const r = await receiptOf();
     await act(r, "release");
     expect(statusOf(await receiptOf())).toBe("received");
-    const held = await receiptOf(withImage);
+    const held = await receiptOf({ body: Array.from({ length: 5 }, (_, i) => `https://spam${i}.test`).join(" ") });
+    expect(statusOf(held)).toBe("held");
     await act(held, "reject", { reason: "spam" });
     expect(statusOf(await receiptOf())).toBe("held");
   });
@@ -447,6 +458,21 @@ describe("triage transitions", () => {
     expect(items.map((i: any) => [i.receipt, i.status])).toEqual([[a, "held"], [b, "needs_info"]]);
     expect(items[0]).toMatchObject({ installHash: hashOf(a), installTrusted: false });
     expect(items[1].replies).toEqual([expect.objectContaining({ author: "maintainer", body: "which os?" })]);
+  });
+
+  it("reports how old each held item is and when retention would drop it", async () => {
+    const a = await receiptOf();
+    const b = await receiptOf({ installId: ids.b });
+    const day = 86_400_000;
+    const at = (d: number) => new Date(Date.now() - d * day).toISOString();
+    raw.prepare("UPDATE feedback SET created_at = ?, updated_at = ? WHERE receipt = ?").run(at(12), at(12), a);
+    raw.prepare("UPDATE feedback SET created_at = ?, updated_at = ? WHERE receipt = ?").run(at(20), at(3), b);
+    const { items } = await json(await get("/v1/admin/feedback/held"));
+    expect(items.map((i: any) => i.receipt)).toEqual([b, a]);
+    expect(items[0]).toMatchObject({ ageDays: 20, purgeInDays: 27, overdue: true });
+    expect(items[1]).toMatchObject({ ageDays: 12, purgeInDays: 18, overdue: true });
+    const fresh = await receiptOf({ installId: ids.c });
+    expect((await json(await get("/v1/admin/feedback/held"))).items.find((i: any) => i.receipt === fresh)).toMatchObject({ ageDays: 0, purgeInDays: 30, overdue: false });
   });
 
   it("moves held to answered, needs_info, rejected only and never backwards", async () => {

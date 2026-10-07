@@ -6,11 +6,12 @@ import { auditStatement, autoBlockStatement, grantTrustStatement, isBlocked, isT
 import { jsonResponse, refuse } from "./feedback_http";
 import { releasedKeys, repliesFor } from "./feedback_read";
 import { RejectBody, ReleaseBody, ReplyBody } from "./feedback_schema";
-import type { FeedbackRow, StoredAttachment } from "./feedback_types";
+import { HELD_OVERDUE_DAYS, UNCONVERTED_RETENTION_DAYS, type FeedbackRow, type StoredAttachment } from "./feedback_types";
 import { announce, type OpsWaiter } from "./ops_emit";
 import { scrubSensitiveText } from "./scrub";
 
 const TRIAGE = ["held", "needs_info"] as const;
+const DAY_MS = 86_400_000;
 
 // `status` guards the insert so a reply never lands on a report that moved elsewhere.
 function replyStatements(env: Env, receipt: string, body: string, status?: string): D1PreparedStatement[] {
@@ -49,21 +50,29 @@ export async function held(env: Env, url: URL): Promise<Response> {
     for (const r of results) trusted.add(r.install_hash);
   }
   const replies = await repliesFor(env, rows.map((r) => r.receipt), 500);
+  const now = Date.now();
   return jsonResponse({
-    items: rows.map((r) => ({
-      receipt: r.receipt,
-      status: r.status,
-      category: r.category,
-      body: r.body,
-      displayName: r.display_name,
-      contact: r.contact,
-      env: JSON.parse(r.env_json) as Record<string, string>,
-      attachments: attachmentsOf(r).map((a) => ({ key: a.key, name: a.name, contentType: a.contentType, size: a.size })),
-      installHash: r.install_hash,
-      installTrusted: trusted.has(r.install_hash),
-      replies: (replies.get(r.receipt) ?? []).map((t) => ({ id: t.id, author: t.author, body: t.body, createdAt: t.created_at })),
-      createdAt: r.created_at,
-    })),
+    items: rows.map((r) => {
+      const ageDays = Math.floor((now - Date.parse(r.created_at)) / DAY_MS);
+      const idleDays = Math.floor((now - Date.parse(r.updated_at)) / DAY_MS);
+      return {
+        receipt: r.receipt,
+        status: r.status,
+        category: r.category,
+        body: r.body,
+        displayName: r.display_name,
+        contact: r.contact,
+        env: JSON.parse(r.env_json) as Record<string, string>,
+        attachments: attachmentsOf(r).map((a) => ({ key: a.key, name: a.name, contentType: a.contentType, size: a.size })),
+        installHash: r.install_hash,
+        installTrusted: trusted.has(r.install_hash),
+        replies: (replies.get(r.receipt) ?? []).map((t) => ({ id: t.id, author: t.author, body: t.body, createdAt: t.created_at })),
+        createdAt: r.created_at,
+        ageDays,
+        purgeInDays: Math.max(0, UNCONVERTED_RETENTION_DAYS - Math.min(ageDays, idleDays)),
+        overdue: ageDays >= HELD_OVERDUE_DAYS,
+      };
+    }),
   });
 }
 
