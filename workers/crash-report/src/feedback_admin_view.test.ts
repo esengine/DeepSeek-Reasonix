@@ -71,7 +71,7 @@ describe("admin list endpoint", () => {
     const { items, nextBefore } = await list();
     expect(items.map((i) => i.receipt)).toEqual([b, a]);
     expect(nextBefore).toBeNull();
-    expect(items[0]).toMatchObject({ status: "held", category: "bug", displayName: "Ada", version: "v2.24.0", device: "darwin 15.1 arm64", hasImages: true, imageCount: 1, replyCount: 1, snippet: "second report" });
+    expect(items[0]).toMatchObject({ status: "needs_info", category: "bug", displayName: "Ada", version: "v2.24.0", device: "darwin 15.1 arm64", hasImages: true, imageCount: 1, replyCount: 1, snippet: "second report" });
     expect(items[1]).toMatchObject({ hasImages: false, replyCount: 0 });
     expect(items[0].createdAt).toBeTruthy();
     expect(JSON.stringify(items)).not.toContain("ada@example.com");

@@ -78,9 +78,9 @@ describe("submit gate and trust", () => {
     const r = await receiptOf();
     expect(statusOf(r)).toBe("held");
     expect(await pendingItems()).toHaveLength(0);
-    expect((await mine(ids.a))[0].status).toBe("received");
+    expect((await mine(ids.a))[0]).toMatchObject({ status: "received", underReview: true });
     const reply = await json(await submit());
-    expect(reply.status).toBe("received");
+    expect(reply).toMatchObject({ status: "received", underReview: true });
   });
 
   it("auto-releases a text-only submission from an install with a released item", async () => {
@@ -474,10 +474,10 @@ describe("triage transitions", () => {
     expect(await errCode(await act("FB-ZZZZ-ZZZZ", "ask", { body: "q" }))).toBe("feedback.not_found");
   });
 
-  it("lets the maintainer reply without changing state, but not on rejected feedback", async () => {
+  it("lets the maintainer reply on held feedback by asking, and not on rejected feedback", async () => {
     const a = await receiptOf();
     expect((await act(a, "reply", { body: "noted" })).status).toBe(200);
-    expect(statusOf(a)).toBe("held");
+    expect(statusOf(a)).toBe("needs_info");
     await act(a, "reject", { reason: "x" });
     expect(await errCode(await act(a, "reply", { body: "noted" }))).toBe("feedback.not_replyable");
   });
@@ -542,6 +542,33 @@ describe("user replies", () => {
     expect(item.replies.map((t: any) => [t.author, t.body])).toEqual([["maintainer", "which os?"], ["user", "windows 11"]]);
     expect((await json(await get("/v1/admin/feedback/held"))).items[0].replies).toHaveLength(2);
     expect(await json(await get("/v1/admin/feedback/replies/pending"))).toEqual({ items: [] });
+  });
+
+  it("turns a maintainer reply on held feedback into a question the user can answer", async () => {
+    const r = await receiptOf();
+    expect((await act(r, "reply", { body: "which os?" })).status).toBe(200);
+    expect(statusOf(r)).toBe("needs_info");
+    expect((await mine(ids.a))[0]).toMatchObject({ status: "needs_info", needsInput: true, underReview: false });
+    expect((await reply(r, { body: "windows 11" })).status).toBe(201);
+    expect(statusOf(r)).toBe("held");
+    expect((await act(r, "reply", { body: "thanks, one more thing" })).status).toBe(200);
+    expect(statusOf(r)).toBe("needs_info");
+    expect(raw.prepare("SELECT author FROM feedback_replies WHERE receipt = ? ORDER BY id").all(r).map((x: any) => x.author)).toEqual(["maintainer", "user", "maintainer"]);
+  });
+
+  it("leaves the status of non-held feedback alone on a maintainer reply", async () => {
+    const q = await receiptOf();
+    await act(q, "ask", { body: "?" });
+    await act(q, "reply", { body: "more" });
+    expect(statusOf(q)).toBe("needs_info");
+    const a = await receiptOf();
+    await act(a, "release");
+    await act(a, "reply", { body: "note" });
+    expect(statusOf(a)).toBe("received");
+    const x = await receiptOf({ installId: ids.c });
+    await act(x, "reject", { reason: "spam" });
+    expect(await errCode(await act(x, "reply", { body: "hi" }))).toBe("feedback.not_replyable");
+    expect(statusOf(x)).toBe("rejected");
   });
 
   it("refuses replies on held, received, rejected, closed or someone else's feedback", async () => {
@@ -635,7 +662,9 @@ describe("user-visible status names", () => {
     const b = await receiptOf();
     await act(b, "reject", { reason: "obvious spam" });
     const items = await mine(ids.a);
-    expect(items.find((i) => i.receipt === a).status).toBe("received");
+    expect(items.find((i) => i.receipt === a)).toMatchObject({ status: "received", underReview: true });
+    await act(a, "release");
+    expect((await mine(ids.a)).find((i) => i.receipt === a)).toMatchObject({ status: "received", underReview: false });
     const closed = items.find((i) => i.receipt === b);
     expect(closed.status).toBe("closed");
     expect(JSON.stringify(closed)).not.toContain("spam");

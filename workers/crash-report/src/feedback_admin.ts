@@ -164,7 +164,7 @@ export async function handleAdmin(request: Request, env: Env, url: URL, ctx?: Op
     case "ask":
       return ask(request, env, receipt, ctx);
     case "reply":
-      return adminReply(request, env, receipt);
+      return adminReply(request, env, receipt, ctx);
     default:
       return takedown(env, receipt);
   }

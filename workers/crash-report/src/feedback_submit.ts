@@ -5,7 +5,7 @@ import { feedbackEnabled, isKnownInstall, tokenMatches } from "./feedback_auth";
 import { readCappedText } from "./feedback_body";
 import { installHash, installToken, ipHash, newReceipt } from "./feedback_crypto";
 import { jsonResponse, refuse } from "./feedback_http";
-import { publicStatus } from "./feedback_read";
+import { publicStatus, underReview } from "./feedback_read";
 import { admit, firstBusyOfDay, refund } from "./feedback_quota";
 import { capOverride, isBlocked } from "./feedback_blocks";
 import { installLevel } from "./feedback_level";
@@ -45,6 +45,7 @@ function receiptBody(row: FeedbackRow, token: string) {
   return {
     receipt: row.receipt,
     status: publicStatus(row),
+    underReview: underReview(row),
     installToken: token,
     createdAt: row.created_at,
   };
