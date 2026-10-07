@@ -271,7 +271,7 @@ import { initMobileNav } from "./mobile-nav.js";
     if (!model) return;
     document.querySelectorAll(".rxv").forEach((element) => { element.textContent = releaseVersionLabel(model); });
     document.querySelectorAll("a.rxnotes").forEach((link) => {
-      link.href = new URL("changelog/v" + model.displayVersion + "/", window.location.origin + "/").href;
+      link.href = new URL(new URL(model.changelogURL).pathname, window.location.origin + "/").href;
     });
   };
 

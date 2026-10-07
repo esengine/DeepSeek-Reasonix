@@ -20,12 +20,12 @@ test("Studio is the first, selected and only visible download pane", () => {
   assert.equal((home.match(/dl-pane active/g) ?? []).length, 1);
 });
 
-test("the hero primary action is Studio and 1.x is labelled as the command line", () => {
+test("the hero primary action is Studio and the command line is labelled 2.x", () => {
   const primary = home.match(/<a class="btn btn-dark" data-os-dl[^>]*>/)[0];
   assert.match(primary, /data-goto="studio"/);
   assert.doesNotMatch(home, /Download stable 1\.x/);
-  assert.match(home, /Command line \(1\.x\)/);
-  assert.match(home, /命令行（1\.x）/);
+  assert.match(home, /Command line \(<span class="keep-case">2\.x<\/span>\)/);
+  assert.match(home, /命令行（<span class="keep-case">2\.x<\/span>）/);
 });
 
 test("the Studio pane offers every build the release model attests", () => {
@@ -41,7 +41,7 @@ test("the Studio pane offers every build the release model attests", () => {
   assert.doesNotMatch(home + docs, /dl\.reasonix\.io\/studio-v\d/);
 });
 
-test("the 1.x CLI stays reachable from the Studio pane", () => {
+test("the CLI stays reachable from the Studio pane", () => {
   const studio = home.slice(home.indexOf('id="download-pane-studio"'), home.indexOf('id="download-pane-desktop"'));
   assert.match(studio, /npm i -g reasonix/);
   assert.match(studio, /data-goto="cli"/);
@@ -57,16 +57,17 @@ test("the hero label has no dangling 'for' without JavaScript", () => {
   assert.doesNotMatch(hero.replace(/<span class="os-for"[\s\S]*?<\/span><\/span>/g, ""), / for /);
 });
 
-test("copy does not promise shared sessions or one engine across 1.x and Studio", () => {
+test("the command line is never called 1.x or stable 1.x", () => {
+  assert.doesNotMatch(home + docs, /Command line (?:&amp; stable )?1\.x|命令行(?:与稳定版)? ?1\.x|命令行（1\.x）|Command line \((?:<span[^>]*>)?1\.x|stable 1\.x|稳定的 1\.x|Terminal · 1\.x|终端 · 1\.x|one binary · no Node/);
   assert.doesNotMatch(home, /waiting for you in the desktop app|one local engine|same local engine/i);
-  assert.match(home, /do not share sessions/);
+  assert.match(home, /both on the 2\.x line/);
 });
 
 test("platform line names the shipped builds", () => {
   assert.match(home, /macOS \(Apple Silicon, Intel\) · Windows x64 · Linux amd64 \(\.deb\)/);
 });
 
-test("docs Studio cards use a 2x2 grid and the 1.x kicker keeps its case", () => {
+test("docs Studio cards use a 2x2 grid and the 2.x kicker keeps its case", () => {
   assert.match(docs, /desktop-downloads desktop-downloads--two/);
-  assert.match(home, /<span class="keep-case">1\.x<\/span>/);
+  assert.match(home, /<span class="keep-case">2\.x<\/span>/);
 });

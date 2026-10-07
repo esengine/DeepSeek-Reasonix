@@ -409,6 +409,13 @@ test("CLI release links are derived from the validated canonical tag", () => {
   assert.equal(cliReleaseModel([release], "stable")?.changelogURL, release.release_notes_url);
 });
 
+test("a 2.x CLI release points at the Studio release notes of the same line", () => {
+  const release = { tag_name: "v2.30.0", prerelease: false, assets: cliAssets("v2.30.0") };
+  assert.equal(cliReleaseModel([release], "stable")?.changelogURL, "https://reasonix.io/changelog/");
+  release.release_notes_url = "https://reasonix.io/changelog/v2.30.0/";
+  assert.equal(cliReleaseModel([release], "stable")?.changelogURL, release.release_notes_url);
+});
+
 test("CLI assets reject spoofed hosts and cross-tag URLs", () => {
   const valid = {
     tag_name: "v1.18.0",
