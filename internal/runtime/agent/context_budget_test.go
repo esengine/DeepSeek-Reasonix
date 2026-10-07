@@ -5,7 +5,10 @@ import (
 	"testing"
 
 	"reasonix/internal/contract/event"
+	"reasonix/internal/contract/provider"
 	"reasonix/internal/contract/tool"
+	"reasonix/internal/model/openai"
+	"reasonix/internal/state/sessionstore"
 )
 
 // gen names one model-visible history build; a fold moves the projection.
@@ -141,5 +144,49 @@ func TestBudgetNoticeStatesCompactionContinuesTheTask(t *testing.T) {
 				t.Fatalf("rung %d omits %q:\n%s", rung, figure, text)
 			}
 		}
+	}
+}
+
+// Local bookkeeping (a tool call's diff, a decision receipt) bumps the session's
+// rewrite counter without changing a byte the provider sees. The notice must not
+// re-arm on it: that repeated the same warning on every tool round.
+func TestBudgetNoticeIgnoresBookkeepingRewrites(t *testing.T) {
+	prov, err := openai.New(provider.Config{
+		Name: "deepseek", BaseURL: "http://127.0.0.1:1", Model: "deepseek-reasoner", APIKey: "test",
+		Extra: map[string]any{"api_key_env": "DEEPSEEK_API_KEY"},
+	})
+	if err != nil {
+		t.Fatalf("provider: %v", err)
+	}
+	sess := sessionstore.NewSession(systemPrompt)
+	a := New(prov, tool.NewRegistry(), sess, Options{ContextWindow: 20000, CompactRatio: 0.5, MaxSteps: 4}, &collectSink{})
+	for rung := 0; rung < 1; {
+		sess.Add(provider.Message{Role: provider.RoleUser, Content: strings.Repeat("filler words here. ", 100)})
+		rung = contextBudgetRung(a.ContextBudget())
+		if sess.Len() > 400 {
+			t.Fatal("never reached the first rung")
+		}
+	}
+	if a.window().contextBudgetNotice() == "" {
+		t.Fatal("first crossing produced no notice")
+	}
+	for range 3 {
+		sess.IncrementRewrite()
+		if again := a.window().contextBudgetNotice(); again != "" {
+			t.Fatalf("bookkeeping rewrite re-armed the notice: %q", again)
+		}
+	}
+}
+
+// Usage falling back under a rung (a rewind) re-arms it.
+func TestBudgetNoticeReArmsWhenUsageFallsBelowRung(t *testing.T) {
+	var latch budgetNoticeLatch
+	_, latch = advanceBudgetNotice(latch, budgetAt(9_500, 10_000, 12_000), gen(1))
+	_, latch = advanceBudgetNotice(latch, budgetAt(3_000, 10_000, 12_000), gen(1))
+	if latch.rung != 0 {
+		t.Fatalf("latch.rung = %d, want 0 after usage fell", latch.rung)
+	}
+	if notice, _ := advanceBudgetNotice(latch, budgetAt(7_600, 10_000, 12_000), gen(1)); notice == "" {
+		t.Fatal("rung 1 stayed silent after a rewind")
 	}
 }

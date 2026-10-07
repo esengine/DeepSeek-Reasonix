@@ -45,10 +45,8 @@ func unmeasuredContextBudget(reason string) tool.ContextBudget {
 }
 
 // budgetNoticeLatch remembers how far up the notice ladder this conversation has
-// already been told, under the history build that makes it true. A fold drops
-// usage and starts a new build, which re-arms every rung: the model about to be
-// compacted and the model that just was need different things, and only the
-// generation tells them apart.
+// been told, under the history build that makes it true. A fold starts a new
+// build, and usage falling under a rung (a rewind) also re-arms it.
 type budgetNoticeLatch struct {
 	rung       int
 	generation ContextGeneration
@@ -80,6 +78,9 @@ func advanceBudgetNotice(latch budgetNoticeLatch, budget tool.ContextBudget, gen
 		latch = budgetNoticeLatch{generation: generation}
 	}
 	rung := contextBudgetRung(budget)
+	// Usage that fell below a rung (a rewind, an import) re-arms it; a fold the
+	// generation missed shows up the same way.
+	latch.rung = min(latch.rung, rung)
 	if rung <= latch.rung {
 		return "", latch
 	}
