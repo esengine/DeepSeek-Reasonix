@@ -10,13 +10,15 @@ const SNIPPET_CHARS = 80;
 const REPLIES_SHOWN = 20;
 const REPLIES_FETCH = MINE_LIMIT * REPLIES_SHOWN;
 
-// The gate and its outcomes stay private: a held report reads as received and a
-// rejected one as closed, with no reason.
+// The gate's outcome stays private: a rejected report reads as closed with no
+// reason. A held one keeps the received status and says so through underReview.
 export function publicStatus(row: FeedbackRow): string {
   if (row.status === "held") return "received";
   if (row.status === "rejected") return "closed";
   return row.status;
 }
+
+export const underReview = (row: FeedbackRow): boolean => row.status === "held";
 
 export interface ReplyRow {
   id: number;
@@ -59,6 +61,7 @@ export async function mineItems(env: Env, results: FeedbackRow[]) {
       category: r.category,
       titleSnippet: [...r.body].slice(0, SNIPPET_CHARS).join(""),
       status: publicStatus(r),
+      underReview: underReview(r),
       needsInput: r.status === "needs_info",
       replyCount: counts.get(r.receipt) ?? 0,
       replies: thread.map((t) => ({ id: t.id, author: t.author === "user" ? "user" : "maintainer", body: t.body, createdAt: t.created_at })),

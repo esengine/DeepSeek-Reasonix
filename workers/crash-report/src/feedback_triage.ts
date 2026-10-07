@@ -144,34 +144,41 @@ export async function reject(request: Request, env: Env, receipt: string, ctx?: 
   return jsonResponse({ receipt, status: "rejected", installBlocked: blocked });
 }
 
-async function respond(request: Request, env: Env, receipt: string, to: "answered" | "needs_info", from: readonly string[], ctx?: OpsWaiter): Promise<Response> {
-  const body = ReplyBody.safeParse(await readJson(request));
-  if (!body.success) return refuse("feedback.invalid", "body must be 1-4096 bytes of text");
-  const row = await load(env, receipt);
-  if (!row) return refuse("feedback.not_found", "unknown receipt");
+async function applyResponse(env: Env, row: FeedbackRow, to: "answered" | "needs_info", from: readonly string[], text: string, ctx?: OpsWaiter): Promise<Response> {
+  const receipt = row.receipt;
   if (row.status !== to && !from.includes(row.status)) return refuse("feedback.bad_transition", `feedback cannot move to ${to} from ${row.status}`);
   const clear = to === "answered" ? ", contact = ''" : "";
   const fromMarks = from.map(() => "?").join(",");
   // The reply commits with the state change; a repeat on the applied state only adds what is missing.
   const res = await env.DB.batch([
     env.DB.prepare(`UPDATE feedback SET status = '${to}'${clear}, updated_at = ? WHERE receipt = ? AND status IN (${fromMarks})`).bind(new Date().toISOString(), receipt, ...from),
-    ...replyStatements(env, receipt, scrubSensitiveText(body.data.body), to),
+    ...replyStatements(env, receipt, text, to),
   ]);
   if (row.status !== to && (res[0].meta?.changes ?? 0) === 0) return refuse("feedback.bad_transition", "status changed concurrently");
   if (row.status !== to) announce(ctx, env, { t: "status", receipt, category: row.category, status: to });
   return jsonResponse({ receipt, status: to });
 }
 
+async function respond(request: Request, env: Env, receipt: string, to: "answered" | "needs_info", from: readonly string[], ctx?: OpsWaiter): Promise<Response> {
+  const body = ReplyBody.safeParse(await readJson(request));
+  if (!body.success) return refuse("feedback.invalid", "body must be 1-4096 bytes of text");
+  const row = await load(env, receipt);
+  if (!row) return refuse("feedback.not_found", "unknown receipt");
+  return applyResponse(env, row, to, from, scrubSensitiveText(body.data.body), ctx);
+}
+
 export const answer = (request: Request, env: Env, receipt: string, ctx?: OpsWaiter) => respond(request, env, receipt, "answered", TRIAGE, ctx);
 export const ask = (request: Request, env: Env, receipt: string, ctx?: OpsWaiter) => respond(request, env, receipt, "needs_info", ["held"], ctx);
 
-export async function adminReply(request: Request, env: Env, receipt: string): Promise<Response> {
+export async function adminReply(request: Request, env: Env, receipt: string, ctx?: OpsWaiter): Promise<Response> {
   const body = ReplyBody.safeParse(await readJson(request));
   if (!body.success) return refuse("feedback.invalid", "body must be 1-4096 bytes of text");
   const row = await load(env, receipt);
   if (!row) return refuse("feedback.not_found", "unknown receipt");
   if (row.status === "rejected") return refuse("feedback.not_replyable", "rejected feedback cannot take replies");
-  await env.DB.batch(replyStatements(env, receipt, scrubSensitiveText(body.data.body)));
+  const text = scrubSensitiveText(body.data.body);
+  if (row.status === "held") return applyResponse(env, row, "needs_info", ["held"], text, ctx);
+  await env.DB.batch(replyStatements(env, receipt, text));
   return jsonResponse({ receipt, status: row.status });
 }
 
