@@ -1,8 +1,9 @@
 import type { PlanAction } from "./session";
 import { HttpError } from "./port";
-import type { AccountState, AgentPort, ChangeDiff, Completion, CompletionItem, DeviceGrant, VersionHub, VersionNotes, ApprovalMode, ApprovalVerdict, Checkpoint, RewindPlan, RewindResult, RewindScope, HistoryMessage, HostTodo, BrowserTab, ModelEntry, Preset, ProviderSetup, RoleAssignments, RoleOverride, SessionEntry, SessionStatus, WalletReading, MemoryCatalog, MemoryEdit, UsageReport, MemoryEntry, WorkspaceInfo, WorkspaceChanges, Attachment, DroppedRef, Queue, QueueItem, Queued, ChipCall, NotifyPrefs, TrayPrefs, UsageQuery } from "./port";
+import type { AccountState, AgentPort, ChangeDiff, Completion, CompletionItem, DeviceGrant, VersionHub, VersionNotes, ApprovalMode, ApprovalVerdict, Checkpoint, RewindPlan, RewindResult, RewindUndo, RewindScope, HistoryMessage, HostTodo, BrowserTab, ModelEntry, Preset, ProviderSetup, RoleAssignments, RoleOverride, SessionEntry, SessionStatus, WalletReading, MemoryCatalog, MemoryEdit, UsageReport, MemoryEntry, WorkspaceInfo, WorkspaceChanges, Attachment, DroppedRef, Queue, QueueItem, Queued, ChipCall, NotifyPrefs, TrayPrefs, UsageQuery } from "./port";
 import type { ExecutionGraphRead, TrajectoryRead, WireEvent } from "./wire";
 import { MockFeedback } from "./mock_feedback";
+import { MockRewind } from "./mock_rewind";
 import { SCRIPT, mockMsgIndex, mockTurnStart } from "./fixture";
 import { MockExecutionHold, mockExecutionGraph } from "./mock_graph";
 import { mockStorage, mockStoragePlan } from "./mock_storage";
@@ -17,7 +18,7 @@ export class MockPort extends MockFeedback implements AgentPort {
   private log: WireEvent[] = [];
   // What the user has sent, so checkpoints() can mirror one per turn.
   private prompts: string[] = [];
-  private undone: string[] | null = null;
+  private rewind = new MockRewind();
   private at = 0;
   // The kernel numbers every frame a client cannot afford to miss, and a
   // bootstrap cut is read against those numbers.
@@ -430,34 +431,22 @@ export class MockPort extends MockFeedback implements AgentPort {
     return this.prompts.map((prompt, i) => ({ turn: i, prompt, files: i === 0 ? 0 : 3, msgIndex: mockMsgIndex(i + 1) }));
   }
 
-  // The second prompt onwards is scripted to have run bash, so mock mode can
-  // show the consent stage the real kernel demands on partial coverage.
   async prepareRewind(turn: number, scope: RewindScope): Promise<RewindPlan> {
-    const partial = turn > 0;
-    return {
-      planId: `mock-plan-${turn}-${scope}`,
-      turn,
-      coverage: partial ? "partial" : "full",
-      coverageGaps: partial
-        ? [{ reason: "bash_side_effect", detail: "bash side effects are not path-tracked", tool: "bash" }]
-        : undefined,
-      canFiles: true,
-      canConversation: true,
-      files: ["note.txt"],
-      fileCount: turn > 0 ? 3 : 0,
-      requiresConfirmation: partial,
-    };
+    return this.rewind.prepare(turn, scope);
   }
 
   async commitRewind(planId: string): Promise<RewindResult> {
-    const turn = Number(planId.split("-")[2] ?? 0);
-    this.undone = this.prompts.slice();
-    this.prompts = this.prompts.slice(0, turn);
-    return { ok: true, transactionId: `mock-tx-${turn}`, undoAvailable: true, deleted: ["note.txt"] };
+    const { prompts, result } = this.rewind.commit(planId, this.prompts);
+    this.prompts = prompts;
+    return result;
+  }
+
+  async availableUndo(): Promise<RewindUndo | null> {
+    return this.rewind.available();
   }
 
   async undoRewind(_transactionId: string): Promise<void> {
-    if (this.undone) this.prompts = this.undone;
+    this.prompts = this.rewind.undo() ?? this.prompts;
   }
 
   subscribe(onEvent: (ev: WireEvent) => void, _onGap?: () => void, bootstrap?: () => Promise<number>) {
@@ -686,6 +675,7 @@ export class MockPort extends MockFeedback implements AgentPort {
       this.emit({ kind: "steer", text });
       return;
     }
+    this.rewind.invalidate();
     this.prompts.push(text);
     // The first turn is what puts the session on disk. serve answers with a
     // truncated first message straight away and swaps in the generated title

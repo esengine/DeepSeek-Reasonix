@@ -108,6 +108,9 @@ func (s *Store) CommitFileRevert(planID string, resolution ConflictResolution) (
 			Conflicts: []RewindConflict{{Path: pp.plan.Path, Reason: ConflictBusyWriter}}}, err
 	}
 	defer s.barrier.ExitExclusive()
+	if err := s.requireUndoRecoveryComplete(); err != nil {
+		return RewindResult{OK: false, Error: err.Error()}, err
+	}
 	if res, err := s.verifyWorkspaceUnchanged(pp); res != nil {
 		return *res, err
 	}

@@ -21,7 +21,7 @@ describe("a transcript row", () => {
     render(
       <Transcript items={items} entering={[]} onEntered={() => {}} revision={1} waiting={{}} scroll={{ current: null }} hidden={false}
         onPinned={() => {}} jump={0} focus={null} onApprove={noop} onFullAccess={noop} onPlan={noop} onAnswer={noop} onForget={noop}
-        onExtInvoke={() => {}} onExtSubmit={noop} checkpoints={new Map()} onPrepareRewind={noop} onCommitRewind={noop} onUndoRewind={noop}
+        onExtInvoke={() => {}} onExtSubmit={noop} checkpoints={new Map()} onPrepareRewind={noop} onCommitRewind={noop} onReadUndo={async () => null} onUndoRewind={noop}
         onPrepareFileRevert={noop} onCommitFileRevert={noop} needsProject={false} onOpenProject={() => {}} onKeepHere={() => {}} />,
     );
     for (const id of ["u1", "s1", "t1"]) expect(document.querySelector(`[data-item="${id}"]`), id).not.toBeNull();

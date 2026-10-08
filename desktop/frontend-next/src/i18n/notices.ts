@@ -3,6 +3,7 @@
 // so a code with no entry here still reads, just untranslated. That is what
 // makes adding them one at a time safe.
 export const NOTICE_TEXT: Record<string, string> = {
+  checkpoint_recording_failed: "检查点记录失败，工具执行结果未改变",
   empty_final: "这一轮模型没有给出回答，正在让它重说一次",
   executor_handoff: "模型直接给了答案却没动手，正在要求它先用工具",
   verification_stalled: "同一个检查连着几轮都报同样的结果，是否继续由你定",

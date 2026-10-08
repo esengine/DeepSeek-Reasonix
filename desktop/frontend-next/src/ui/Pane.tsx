@@ -12,6 +12,7 @@ import { useReplyActions } from "./reply";
 import { useGateActions } from "./gates";
 import { useQueueActions } from "./queueactions";
 import { useRewindActions } from "./rewind";
+import { RewindNotice } from "./RewindNotice";
 import { initialTraj, reduceTraj } from "../state/trajectory";
 import { Transcript } from "./Transcript";
 import { useBackgroundDeltas } from "./deltas";
@@ -227,9 +228,7 @@ function PaneView({ port, rt, title, active, visible, sideHost, side, onFocus, o
     dispatch({ kind: "__error", text: reason(e) } as never);
   }, []);
 
-  // Everything on screen belongs to one session; when the kernel moves this
-  // pane to another one — a switch, a new session, a rewind — all of it has to
-  // be re-read rather than patched.
+  // History, checkpoints and status belong to one session and must be reloaded together.
   const reloadSession = useCallback(() => {
     trajDispatch({ kind: "__clear" } as never);
     port.trajectory().then(replayTrajectory).catch(() => {});
@@ -319,7 +318,7 @@ function PaneView({ port, rt, title, active, visible, sideHost, side, onFocus, o
     sessionState: sessionRead.kind,
     sessionPath: status?.sessionPath,
   });
-  const { onPrepareRewind, onCommitRewind, onUndoRewind, onPrepareFileRevert, onCommitFileRevert } = useRewindActions(port, reloadSession, onRestoreText);
+  const { onReadUndo, onPrepareRewind, onCommitRewind, onUndoRewind, onPrepareFileRevert, onCommitFileRevert } = useRewindActions(port, reloadSession, onRestoreText);
 
   const { onApprove, onFullAccess, onPlan, onForget, onExtInvoke, onExtSubmit, onAnswer } = useGateActions({
     port,
@@ -386,6 +385,7 @@ function PaneView({ port, rt, title, active, visible, sideHost, side, onFocus, o
       <Find find={find} />
 
       <div className="pbody" data-dock={tab === "flow" ? "" : undefined} data-full={tab === "browser" ? "" : undefined}>
+      <RewindNotice key={`${rt.id}:${rt.sessionPath || status?.sessionPath || ""}`} readUndo={onReadUndo} onUndo={onUndoRewind} refreshKey={checkpoints} running={running} shown={visible && tab === "flow" && !rt.readOnly} />
       <div className="pviews">
 
       <PaneShown.Provider value={shown}>
@@ -416,7 +416,7 @@ function PaneView({ port, rt, title, active, visible, sideHost, side, onFocus, o
         checkpoints={paired}
         onPrepareRewind={onPrepareRewind}
         onCommitRewind={onCommitRewind}
-        onUndoRewind={onUndoRewind}
+        onReadUndo={onReadUndo} onUndoRewind={onUndoRewind}
         onPrepareFileRevert={onPrepareFileRevert}
         onCommitFileRevert={onCommitFileRevert}
         needsProject={needsProject}

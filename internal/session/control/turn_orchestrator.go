@@ -129,7 +129,9 @@ func (o *turnOrchestrator) runSubagentSkillTurns(ctx context.Context, skills []s
 	// prefilled into the composer after a conversation rewind), so it must be
 	// the user's own text — never the composed provider input with its
 	// transient <response-language>/<reasoning-language>/memory/hook blocks.
-	c.beginCheckpoint(ctx, firstNonEmpty(raw, task))
+	if err := c.beginCheckpoint(ctx, firstNonEmpty(raw, task)); err != nil {
+		return err
+	}
 	if c.hooks.Enabled() {
 		c.mu.Lock()
 		c.turn++
@@ -225,16 +227,8 @@ func (o *turnOrchestrator) runOrchestratedTurn(ctx context.Context, turn orchest
 	if turn.editedOriginal != "" {
 		defer c.markEditedForNewUser(startMessages, turn.editedOriginal)
 	}
-	// Open a checkpoint only for visible user turns before the user message is
-	// appended, so the recorded message boundary precedes it and pre-edit
-	// snapshots land here. Synthetic continuations stay attached to the visible
-	// turn that spawned them; otherwise hidden user-role messages would advance
-	// backend checkpoint turns without a matching frontend turn. The label is
-	// the user's own text (raw, falling back to the expanded input) — the
-	// composed provider input carries transient prefab blocks that must never
-	// surface in the rewind picker or be prefilled into the composer.
-	if !turn.synthetic {
-		c.beginCheckpoint(ctx, firstNonEmpty(turn.raw, turn.input))
+	if err := c.beginOrchestratedCheckpoint(ctx, turn); err != nil {
+		return err
 	}
 	// UserPromptSubmit / Stop hooks bracket the whole turn (incl. the plan
 	// research + approved-execution sub-turns below): a gating UserPromptSubmit

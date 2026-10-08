@@ -240,8 +240,12 @@ func (s *Store) UndoRewind(transactionID string, applier ConversationApplier) (R
 		return RewindResult{}, fmt.Errorf("checkpoints unavailable")
 	}
 	s.mu.Lock()
-	last := s.lastUndo
+	last := s.undo.current
+	pending := s.undo.pending != nil
 	s.mu.Unlock()
+	if pending {
+		return RewindResult{OK: false, Error: ErrUndoRecoveryPending.Error()}, ErrUndoRecoveryPending
+	}
 	if last == nil || last.ID != transactionID || last.State != TxCommitted {
 		return RewindResult{OK: false, Error: "undo not available"}, fmt.Errorf("undo not available for %q", transactionID)
 	}
@@ -256,28 +260,12 @@ func (s *Store) UndoRewind(transactionID string, applier ConversationApplier) (R
 		return RewindResult{OK: false, Error: err.Error(), Conflicts: conflicts}, err
 	}
 
-	// Precheck that current disk still matches what we published (targets' restore state).
-	for _, t := range last.Targets {
-		fp, err := FingerprintPath(s.root, t.AbsPath)
-		if err != nil && !os.IsNotExist(err) {
-			return RewindResult{OK: false, Error: err.Error()}, fmt.Errorf("fingerprint %s before undo: %w", t.Path, err)
-		}
-		// After commit, disk should match restore image. If it doesn't, refuse.
-		if t.Action == "delete" {
-			if fp.Existed {
-				return RewindResult{OK: false, Error: "file changed since rewind", Conflicts: []RewindConflict{{
-					Path: t.Path, Reason: ConflictManualEdit, CurrentSHA: fp.SHA256,
-				}}}, fmt.Errorf("file changed since rewind: %s", t.Path)
-			}
-		} else {
-			if !fingerprintMatches(fp, t.RestoreExisted, t.RestoreSHA, t.RestoreMode) {
-				restoreExisted := t.RestoreExisted
-				return RewindResult{OK: false, Error: "file changed since rewind", Conflicts: []RewindConflict{{
-					Path: t.Path, Reason: CompareIdentity(fp, t.RestoreSHA, &restoreExisted, t.RestoreMode),
-					CurrentSHA: fp.SHA256, LastOwnedSHA: t.RestoreSHA, CurrentMode: fp.Mode, CheckpointMode: t.RestoreMode,
-				}}}, fmt.Errorf("file changed since rewind: %s", t.Path)
-			}
-		}
+	conflicts, err := s.undoFileConflicts(last)
+	if err != nil {
+		return RewindResult{OK: false, Error: err.Error()}, err
+	}
+	if len(conflicts) > 0 {
+		return RewindResult{OK: false, Error: "file changed since rewind", Conflicts: conflicts}, fmt.Errorf("file changed since rewind: %s", conflicts[0].Path)
 	}
 
 	// Build inverse transaction: restore forward images.
@@ -365,6 +353,15 @@ func (s *Store) UndoRewind(transactionID string, applier ConversationApplier) (R
 }
 
 func (s *Store) commitUndoTransaction(undo, original *TransactionManifest, applier ConversationApplier) (RewindResult, error) {
+	finish, err := s.trackUndoTransaction(undo)
+	if err != nil {
+		return RewindResult{OK: false, Error: err.Error()}, err
+	}
+	defer finish()
+	return s.publishUndoTransaction(undo, original, applier)
+}
+
+func (s *Store) publishUndoTransaction(undo, original *TransactionManifest, applier ConversationApplier) (RewindResult, error) {
 	undo.State = TxCommitting
 	undo.UpdatedAt = time.Now()
 	if err := s.persistTransaction(undo); err != nil {
@@ -468,7 +465,7 @@ func (s *Store) commitUndoTransaction(undo, original *TransactionManifest, appli
 
 	s.cleanupCommittedBackups(undo.Targets)
 
-	// Mark original as undone; clear lastUndo.
+	// Mark original as undone; retire the undo offer.
 	original.State = TxUndone
 	original.UpdatedAt = time.Now()
 	if err := s.persistTransaction(original); err != nil {
@@ -477,7 +474,7 @@ func (s *Store) commitUndoTransaction(undo, original *TransactionManifest, appli
 		slog.Warn("checkpoint: persist original transaction as undone", "err", err)
 	}
 	s.mu.Lock()
-	s.lastUndo = nil
+	s.undo.current = nil
 	s.mu.Unlock()
 
 	result.OK = true
@@ -502,6 +499,9 @@ func (s *Store) restoreOriginalRewind(original *TransactionManifest, applier Con
 }
 
 func (s *Store) prepareTransaction(plan RewindPlan, applier ConversationApplier) (*TransactionManifest, error) {
+	if err := s.requireUndoRecoveryComplete(); err != nil {
+		return nil, err
+	}
 	tx := &TransactionManifest{
 		SchemaVersion:   SchemaV2,
 		ID:              newID("tx"),
@@ -647,6 +647,15 @@ func (s *Store) writePublishTemp(path string, data []byte, mode os.FileMode) err
 }
 
 func (s *Store) commitTransaction(tx *TransactionManifest, applier ConversationApplier, inject *InjectFail) (RewindResult, error) {
+	finish, err := s.trackUndoTransaction(tx)
+	if err != nil {
+		return RewindResult{OK: false, Error: err.Error()}, err
+	}
+	defer finish()
+	return s.publishTransaction(tx, applier, inject)
+}
+
+func (s *Store) publishTransaction(tx *TransactionManifest, applier ConversationApplier, inject *InjectFail) (RewindResult, error) {
 	tx.State = TxCommitting
 	tx.UpdatedAt = time.Now()
 	if err := s.persistTransaction(tx); err != nil {
@@ -813,7 +822,8 @@ func (s *Store) commitTransaction(tx *TransactionManifest, applier ConversationA
 	}
 	s.cleanupCommittedBackups(tx.Targets)
 	s.mu.Lock()
-	s.lastUndo = tx
+	// The committed manifest supersedes older undo records on recovery.
+	s.undo.current = tx
 	s.mu.Unlock()
 
 	result.OK = true
@@ -1129,6 +1139,7 @@ func (s *Store) failTransactionAfterStateCompensation(tx *TransactionManifest, t
 		return combined
 	}
 	if abortErr := s.abortTransaction(tx, combined); abortErr != nil {
+		tx.State = TxCommitting
 		combined = errors.Join(combined, fmt.Errorf("persist aborted transaction: %w", abortErr))
 	}
 	return combined
@@ -1176,13 +1187,24 @@ func (s *Store) RecoverTransactionsWithApplier(applier ConversationApplier) []st
 }
 
 func (s *Store) recoverTransactions(applier ConversationApplier) []string {
-	if s == nil || s.dir == "" {
+	if s == nil {
 		return nil
+	}
+	if s.dir == "" {
+		return s.recoverInMemoryUndo(applier)
 	}
 	dir := s.txDir()
 	ents, err := os.ReadDir(dir)
 	if err != nil {
-		return nil
+		if _, statErr := os.Lstat(dir); os.IsNotExist(statErr) {
+			return nil
+		}
+		s.mu.Lock()
+		if s.undo.pending == nil {
+			s.undo.pending = &TransactionManifest{State: TxCommitting, Error: err.Error()}
+		}
+		s.mu.Unlock()
+		return []string{fmt.Sprintf("read transaction recovery directory: %v", err)}
 	}
 	undoneParents := map[string]bool{}
 	for _, entry := range ents {
@@ -1194,6 +1216,8 @@ func (s *Store) recoverTransactions(applier ConversationApplier) []string {
 			undoneParents[tx.ParentTransaction] = true
 		}
 	}
+	var latest *TransactionManifest
+	var recovering []*TransactionManifest
 	var notes []string
 	for _, e := range ents {
 		if e.IsDir() || !strings.HasSuffix(e.Name(), ".json") {
@@ -1201,6 +1225,8 @@ func (s *Store) recoverTransactions(applier ConversationApplier) []string {
 		}
 		var tx TransactionManifest
 		if err := readJSONFile(filepath.Join(dir, e.Name()), &tx); err != nil {
+			notes = append(notes, fmt.Sprintf("read transaction %s: %v", e.Name(), err))
+			recovering = append(recovering, &TransactionManifest{ID: e.Name(), State: TxCommitting, Error: err.Error()})
 			continue
 		}
 		switch tx.State {
@@ -1217,61 +1243,20 @@ func (s *Store) recoverTransactions(applier ConversationApplier) []string {
 			_ = s.persistTransaction(&tx)
 			notes = append(notes, fmt.Sprintf("aborted prepared %s", tx.ID))
 		case TxCommitting:
-			needsConversation := tx.Scope == RewindConversation || tx.Scope == RewindBoth
-			if needsConversation && applier == nil {
-				notes = append(notes, fmt.Sprintf("deferred conversation recovery %s", tx.ID))
+			notes = append(notes, s.recoverCommittingTransaction(&tx, applier)...)
+			recovering = append(recovering, &tx)
+		case TxCommitted, TxInvalidated, TxUndone:
+			// A terminal operation must not expose an older undo slot.
+			if tx.Kind == "undo" {
 				continue
 			}
-			if needsConversation {
-				var restoreErr error
-				if tx.Kind != "undo" && tx.HasBoundary && len(tx.ConversationForward) == 0 {
-					restoreErr = fmt.Errorf("missing forward conversation payload")
-				} else if tx.Kind == "undo" {
-					if tx.HasBoundary {
-						restoreErr = errors.Join(restoreErr, applier.ApplyConversationTruncate(tx.BoundaryIndex, tx.ConversationForward))
-					}
-					restoreErr = errors.Join(restoreErr, applier.TruncateCheckpoints(tx.TruncateFrom))
-				} else {
-					restoreErr = s.restoreTransactionConversation(&tx, applier)
-				}
-				if restoreErr != nil {
-					notes = append(notes, fmt.Sprintf("conversation recovery %s pending: %v", tx.ID, restoreErr))
-					tx.Error = fmt.Sprintf("crash recovery conversation compensation pending: %v", restoreErr)
-					tx.UpdatedAt = time.Now()
-					_ = s.persistTransaction(&tx)
-					continue
-				}
-			}
-			// Compensate published files back to forward images.
-			stages := make([]FileStage, len(tx.Targets))
-			for i, t := range tx.Targets {
-				stages[i] = FileStage{Path: t.Path, Phase: "compensate"}
-			}
-			if err := s.compensatePublished(tx.Targets, stages); err != nil {
-				notes = append(notes, fmt.Sprintf("compensate %s: %v", tx.ID, err))
-				tx.Error = fmt.Sprintf("crash recovery compensation pending: %v", err)
-				tx.UpdatedAt = time.Now()
-				_ = s.persistTransaction(&tx)
-			} else {
-				notes = append(notes, fmt.Sprintf("compensated committing %s", tx.ID))
-				tx.State = TxAborted
-				tx.Error = "compensated after crash during commit"
-				tx.UpdatedAt = time.Now()
-				_ = s.persistTransaction(&tx)
-			}
-		case TxCommitted:
-			if tx.Kind == "undo" || undoneParents[tx.ID] {
-				continue
-			}
-			// Keep as last undo if newer.
-			s.mu.Lock()
-			if s.lastUndo == nil || s.lastUndo.UpdatedAt.Before(tx.UpdatedAt) {
+			if latest == nil || latest.CreatedAt.Before(tx.CreatedAt) {
 				cp := tx
-				s.lastUndo = &cp
+				latest = &cp
 			}
-			s.mu.Unlock()
 		}
 	}
+	s.restoreUndoSlot(latest, undoneParents, recovering)
 	return notes
 }
 

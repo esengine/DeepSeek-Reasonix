@@ -246,7 +246,9 @@ func (c *Controller) runReady(ctx context.Context, input string) (err error) {
 	startMessages := c.messageCount()
 	var marker sessionstore.InFlightTurnMeta
 	defer func() { c.finishInFlightTurn(startMessages, marker) }()
-	c.beginCheckpoint(ctx, input)
+	if err := c.beginCheckpoint(ctx, input); err != nil {
+		return err
+	}
 	if c.hooks.Enabled() {
 		c.mu.Lock()
 		c.turn++

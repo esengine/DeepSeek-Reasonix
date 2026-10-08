@@ -189,7 +189,7 @@ func TestTurnDoneRejectsSameSessionCheckpointStoreCollision(t *testing.T) {
 	controller.beginCheckpoint(ctx, "original prompt")
 	session.Add(provider.Message{Role: provider.RoleUser, Content: "original prompt", CreatedAt: time.Now().UnixMilli()})
 	controller.checkpoints.rebind("", "")
-	if turn, _, ok := controller.checkpoints.beginWithObserver("collision", 1, nil); !ok || turn != 0 {
+	if turn, _, ok, err := controller.checkpoints.beginWithObserver("collision", 1, nil); err != nil || !ok || turn != 0 {
 		t.Fatalf("replacement checkpoint = (%d, %v), want colliding turn zero", turn, ok)
 	}
 	if got := controller.validatedCheckpointTurn(completion); got != nil {

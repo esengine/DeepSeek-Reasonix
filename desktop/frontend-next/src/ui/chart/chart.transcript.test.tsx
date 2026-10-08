@@ -14,7 +14,7 @@ function draw(items: Item[]) {
   return render(
     <Transcript items={items} entering={[]} onEntered={() => {}} revision={1} waiting={{}} scroll={{ current: null }} hidden={false}
       onPinned={() => {}} jump={0} focus={null} onApprove={noop} onFullAccess={noop} onPlan={noop} onAnswer={noop} onForget={noop}
-      onExtInvoke={() => {}} onExtSubmit={noop} checkpoints={new Map()} onPrepareRewind={noop} onCommitRewind={noop} onUndoRewind={noop}
+      onExtInvoke={() => {}} onExtSubmit={noop} checkpoints={new Map()} onPrepareRewind={noop} onCommitRewind={noop} onReadUndo={async () => null} onUndoRewind={noop}
       onPrepareFileRevert={noop} onCommitFileRevert={noop} needsProject={false} onOpenProject={() => {}} onKeepHere={() => {}} />,
   ).container;
 }

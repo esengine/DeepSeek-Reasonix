@@ -49,7 +49,7 @@ async function open(result: RewindResult = { ok: true, conversationOk: true }, o
 
 async function rewind(label = "只回退对话") {
   fireEvent.click(screen.getAllByRole("button", { name: "回到这里" }).at(-1)!);
-  fireEvent.click(screen.getByRole("menuitem", { name: new RegExp(label) }));
+  fireEvent.click(await screen.findByRole("menuitem", { name: new RegExp(label) }));
 }
 
 describe("restoring a rewound prompt to the composer", () => {

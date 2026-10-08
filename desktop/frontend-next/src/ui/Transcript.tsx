@@ -2,7 +2,7 @@ import { Fragment, memo, useCallback, useContext, useEffect, useId, useLayoutEff
 import { t } from "../i18n";
 import type { Item, Waiting } from "../state/session";
 import type { ExtensionSurface } from "../port/wire";
-import type { ApprovalVerdict, Checkpoint, RewindPlan, RewindResult, RewindScope } from "../port/port";
+import type { ApprovalVerdict, Checkpoint, RewindPlan, RewindResult, RewindUndo, RewindScope } from "../port/port";
 import { RMark } from "./RMark";
 import { Await } from "./Await";
 import { ToolCard } from "./cards/ToolCard";
@@ -73,6 +73,7 @@ interface Props {
   onPrepareFileRevert: (path: string) => Promise<RewindPlan>;
   onCommitFileRevert: (planId: string, resolution?: string) => Promise<RewindResult>;
   onCommitRewind: (planId: string, text?: string) => Promise<RewindResult>;
+  onReadUndo: () => Promise<RewindUndo | null>;
   onUndoRewind: (transactionId: string) => Promise<void>;
   /** Cards that have not had their one entrance yet. Owed by the projection,
    *  spent by the first render that draws them — never by the animation, which
@@ -81,7 +82,7 @@ interface Props {
   onEntered: (ids: string[]) => void;
 }
 
-export function Transcript({ items, entering, onEntered, revision, waiting, scroll, hidden, onPinned, jump, focus, find, query, onApprove, onFullAccess, onPlan, onAnswer, onForget, onExtInvoke, onExtSubmit, reply, onResend, takeovers = {}, checkpoints, onPrepareRewind, onCommitRewind, onUndoRewind, onPrepareFileRevert, onCommitFileRevert, needsProject, onOpenProject, onKeepHere }: Props) {
+export function Transcript({ items, entering, onEntered, revision, waiting, scroll, hidden, onPinned, jump, focus, find, query, onApprove, onFullAccess, onPlan, onAnswer, onForget, onExtInvoke, onExtSubmit, reply, onResend, takeovers = {}, checkpoints, onPrepareRewind, onCommitRewind, onReadUndo, onUndoRewind, onPrepareFileRevert, onCommitFileRevert, needsProject, onOpenProject, onKeepHere }: Props) {
   // A block the selection touches must not leave the DOM. Unmounting the node a
   // selection is anchored to makes the browser remap that selection onto
   // whatever is still mounted — which reads as "I selected up there and the
@@ -434,7 +435,7 @@ export function Transcript({ items, entering, onEntered, revision, waiting, scro
   }, [entering, onEntered]);
   const owed = useMemo(() => new Set(entering), [entering]);
 
-  const rowProps = { owed, onApprove, onFullAccess, onPlan, onAnswer, onForget, onExtInvoke, takeovers, onExtSubmit, onPrepareRewind, onCommitRewind, onUndoRewind, onPrepareFileRevert, onCommitFileRevert, reply, onResend };
+  const rowProps = { owed, onApprove, onFullAccess, onPlan, onAnswer, onForget, onExtInvoke, takeovers, onExtSubmit, onPrepareRewind, onCommitRewind, onReadUndo, onUndoRewind, onPrepareFileRevert, onCommitFileRevert, reply, onResend };
 
   // What you said, and where it sits. Derived from the same blocks the
   // transcript renders, so a mark always knows which block holds it — that is
@@ -568,6 +569,7 @@ interface RowHandlers {
   onExtSubmit: Props["onExtSubmit"];
   onPrepareRewind: Props["onPrepareRewind"];
   onCommitRewind: Props["onCommitRewind"];
+  onReadUndo: Props["onReadUndo"];
   onUndoRewind: Props["onUndoRewind"];
   onPrepareFileRevert: Props["onPrepareFileRevert"];
   reply: Props["reply"];
@@ -645,6 +647,7 @@ const Row = memo(function Row({
   cp,
   onPrepareRewind,
   onCommitRewind,
+  onReadUndo,
   onUndoRewind,
   onPrepareFileRevert,
   onCommitFileRevert,
@@ -670,6 +673,7 @@ const Row = memo(function Row({
           onResend={onResend}
           onPrepareRewind={onPrepareRewind}
           onCommitRewind={onCommitRewind}
+          onReadUndo={onReadUndo}
           onUndoRewind={onUndoRewind}
         />
       );

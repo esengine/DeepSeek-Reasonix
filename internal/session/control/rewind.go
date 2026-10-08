@@ -185,6 +185,21 @@ func (c *Controller) CommitRewind(planID string) (checkpoint.RewindResult, error
 	return result, nil
 }
 
+// AvailableUndo reads an offer without reserving the session for mutation.
+func (c *Controller) AvailableUndo() (*checkpoint.RewindUndo, error) {
+	c.mu.Lock()
+	busy := c.gate.busy()
+	c.mu.Unlock()
+	if busy || c.executor == nil {
+		return nil, nil
+	}
+	store := c.checkpoints.storeRef()
+	if store == nil {
+		return nil, nil
+	}
+	return store.AvailableUndo()
+}
+
 // UndoRewind reverses the last committed rewind transaction when still available.
 func (c *Controller) UndoRewind(transactionID string) (checkpoint.RewindResult, error) {
 	if !c.checkpoints.enabled() || c.executor == nil {

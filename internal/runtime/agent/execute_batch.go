@@ -56,8 +56,9 @@ type toolOutcome struct {
 	blocked   bool
 	// endsRound marks a call whose result is a user decision. The pre-scheduling
 	// scan cannot see one an extension substituted in, so the call reports it.
-	endsRound bool
-	errMsg    string
+	endsRound     bool
+	errMsg        string
+	checkpointErr error
 	// refusalCode is the identity of a host refusal, carried beside the words
 	// rather than recovered from them. Empty when the call was not refused.
 	refusalCode    string
@@ -333,6 +334,7 @@ func (a *Agent) executeBatch(ctx context.Context, turn *turnRuntime, calls []pro
 			}
 		}
 		a.emitToolCard(ctx, c, tr, o.todoEcho)
+		a.emitCheckpointWarning(o.checkpointErr)
 		if o.truncMsg != "" {
 			a.svc.sink.Emit(event.Event{Kind: event.Notice, Level: event.LevelInfo, Text: o.truncMsg})
 		}

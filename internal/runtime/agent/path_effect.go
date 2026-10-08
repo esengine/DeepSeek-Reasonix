@@ -2,6 +2,7 @@ package agent
 
 import (
 	"context"
+	"errors"
 	"os"
 	"path/filepath"
 	"reasonix/internal/runtime/writeclaim"
@@ -281,20 +282,22 @@ func (a *Agent) observeBeforeMutation(ctx context.Context, plan *toolCallPlan) {
 
 // observeAfterMutation records the after fingerprint when a concrete path was
 // known before execution, regardless of tool success or failure.
-func (a *Agent) observeAfterMutation(plan *toolCallPlan) {
+func (a *Agent) observeAfterMutation(plan *toolCallPlan) error {
 	if a == nil || plan == nil || a.svc.mutationObserver == nil {
-		return
+		return nil
 	}
+	var err error
 	toolName := plan.evidenceName
 	if toolName == "" {
 		toolName = plan.call.Name
 	}
 	if plan.mutationPath != "" {
-		a.svc.mutationObserver.AfterMutation(plan.mutationPath, toolName)
+		err = errors.Join(err, a.svc.mutationObserver.AfterMutation(plan.mutationPath, toolName))
 	}
 	for _, p := range plan.declaredPaths {
-		a.svc.mutationObserver.AfterMutation(p, toolName)
+		err = errors.Join(err, a.svc.mutationObserver.AfterMutation(p, toolName))
 	}
+	return err
 }
 
 // workspaceScanLimit bounds the walk. Past it the scan reports itself

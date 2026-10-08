@@ -58,12 +58,7 @@ func (s *Server) routes() http.Handler {
 	s.registerProgressWatchRoutes(mux)
 	s.registerDisplayCurrencyRoutes(mux)
 	mux.HandleFunc("POST /new", s.newSession)
-	mux.HandleFunc("POST /rewind", s.rewind)
-	mux.HandleFunc("POST /rewind/prepare", s.rewindPrepare)
-	mux.HandleFunc("POST /rewind/commit", s.rewindCommit)
-	mux.HandleFunc("POST /rewind/undo", s.rewindUndo)
-	mux.HandleFunc("POST /rewind/file/prepare", s.fileRevertPrepare)
-	mux.HandleFunc("POST /rewind/file/commit", s.fileRevertCommit)
+	s.registerRewindRoutes(mux)
 	mux.HandleFunc("POST /summarize", s.summarize)
 	mux.HandleFunc("POST /tool-approval-mode", s.toolApprovalMode)
 	mux.HandleFunc("POST /workspace-trust", s.workspaceTrust)
@@ -127,4 +122,14 @@ func (s *Server) routes() http.Handler {
 	mux.HandleFunc("POST /drop", s.drop)
 	mux.HandleFunc("POST /delete-session", s.deleteSession)
 	return mux
+}
+
+func (s *Server) registerRewindRoutes(mux *http.ServeMux) {
+	mux.HandleFunc("POST /rewind", s.rewind)
+	mux.HandleFunc("POST /rewind/prepare", s.rewindPrepare)
+	mux.HandleFunc("POST /rewind/commit", s.rewindCommit)
+	mux.HandleFunc("POST /rewind/undo", s.rewindUndo)
+	mux.HandleFunc("GET /rewind/undo", s.rewindAvailableUndo)
+	mux.HandleFunc("POST /rewind/file/prepare", s.fileRevertPrepare)
+	mux.HandleFunc("POST /rewind/file/commit", s.fileRevertCommit)
 }

@@ -191,6 +191,13 @@ type RewindPlan struct {
 	ConflictResolution string `json:"conflictResolution,omitempty"`
 }
 
+// RewindUndo describes the rewind currently available for undo.
+type RewindUndo struct {
+	TransactionID string `json:"transactionId"`
+	Turn          int    `json:"turn"`
+	Files         int    `json:"files"`
+}
+
 // RewindResult is returned after commit or undo.
 type RewindResult struct {
 	OK             bool             `json:"ok"`
@@ -221,11 +228,12 @@ const (
 type TransactionState string
 
 const (
-	TxPrepared   TransactionState = "prepared"
-	TxCommitting TransactionState = "committing"
-	TxCommitted  TransactionState = "committed"
-	TxAborted    TransactionState = "aborted"
-	TxUndone     TransactionState = "undone"
+	TxPrepared    TransactionState = "prepared"
+	TxCommitting  TransactionState = "committing"
+	TxCommitted   TransactionState = "committed"
+	TxAborted     TransactionState = "aborted"
+	TxUndone      TransactionState = "undone"
+	TxInvalidated TransactionState = "invalidated"
 )
 
 // TransactionTarget is one file's forward/restore payload inside a transaction.

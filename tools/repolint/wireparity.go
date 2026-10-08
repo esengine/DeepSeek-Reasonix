@@ -130,6 +130,7 @@ var mirroredWireTypes = []wireMirror{
 	{"internal/platform/update/hub.go", "VersionHub", tsVersionFile, "VersionHub"},
 	{"internal/platform/update/notes.go", "VersionNotes", tsVersionFile, "VersionNotes"},
 	{"internal/state/checkpoint/types.go", "RewindResult", tsSessionFile, "RewindResult"},
+	{"internal/state/checkpoint/types.go", "RewindUndo", tsSessionFile, "RewindUndo"},
 	{"internal/contract/eventwire/wire.go", "ShellExecution", tsWireFile, "Execution"},
 	{"internal/contract/eventwire/workspace_lease.go", "WorkspaceLease", tsWireFile, "WorkspaceLease"},
 	// A source and a model as the pickers name them. A label the page cannot

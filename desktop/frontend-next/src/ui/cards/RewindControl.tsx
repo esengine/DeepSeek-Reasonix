@@ -1,7 +1,7 @@
-import { useCallback, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { t } from "../../i18n";
-import type { Checkpoint, RewindPlan, RewindResult, RewindScope } from "../../port/port";
+import type { Checkpoint, RewindPlan, RewindResult, RewindUndo, RewindScope } from "../../port/port";
 import { useDismiss } from "../dismiss";
 import { pinToViewport, useFollow } from "../place";
 import { StudioIcon } from "../StudioIcon";
@@ -29,8 +29,6 @@ type Stage =
   | { at: "menu" }
   | { at: "working" }
   | { at: "confirm"; plan: RewindPlan }
-  // The undo is only reachable while this stage holds the transaction id, which
-  // is why the menu stays open after a commit instead of closing on success.
   | { at: "done"; tx: string; files: number }
   | { at: "failed"; why: string };
 
@@ -40,19 +38,28 @@ export function RewindControl({
   onPrepare,
   onCommit,
   onUndo,
+  onReadUndo,
 }: {
   cp: Checkpoint;
   compact?: boolean;
   onPrepare: (turn: number, scope: RewindScope) => Promise<RewindPlan>;
   onCommit: (planId: string) => Promise<RewindResult>;
+  onReadUndo: () => Promise<RewindUndo | null>;
   onUndo: (transactionId: string) => Promise<void>;
 }) {
   const [stage, setStage] = useState<Stage>({ at: "closed" });
+  const readSeq = useRef(0);
+  const close = () => {
+    readSeq.current++;
+    setStage({ at: "closed" });
+  };
+  useEffect(() => () => { readSeq.current++; }, [cp.turn, onReadUndo]);
   const wrap = useRef<HTMLDivElement>(null);
   const btn = useRef<HTMLButtonElement>(null);
   const menu = useRef<HTMLDivElement>(null);
   const open = stage.at !== "closed";
-  useDismiss(open, wrap, () => setStage({ at: "closed" }), menu);
+  // Backend state survives menu remounts, so reopening can recover undo.
+  useDismiss(open, wrap, close, menu);
 
   // Below the trigger, right edges flush, and above it when the bottom of the
   // window is closer than the menu is tall.
@@ -70,6 +77,21 @@ export function RewindControl({
   useFollow(open, place, stage);
 
   const fail = (e: unknown) => setStage({ at: "failed", why: e instanceof Error ? e.message : String(e) });
+
+  const toggle = () => {
+    if (open) return close();
+    const seq = ++readSeq.current;
+    setStage({ at: "working" });
+    onReadUndo().then((undo) => {
+      if (seq !== readSeq.current) return;
+      setStage(undo?.turn === cp.turn
+        ? { at: "done", tx: undo.transactionId, files: undo.files }
+        : { at: "menu" });
+    }).catch(() => {
+      // Undo lookup is optional; a read failure must not disable rewind.
+      if (seq === readSeq.current) setStage({ at: "menu" });
+    });
+  };
 
   const pick = (scope: RewindScope) => {
     setStage({ at: "working" });
@@ -112,7 +134,7 @@ export function RewindControl({
           aria-expanded={open}
           title={t("将工作区与对话回退至该消息之前")}
           aria-label={compact ? t("回到这里") : undefined}
-          onClick={() => setStage(stage.at === "closed" ? { at: "menu" } : { at: "closed" })}
+          onClick={toggle}
         >
           <StudioIcon name="rewind" />{!compact && t("回到这里")}
         </button>
