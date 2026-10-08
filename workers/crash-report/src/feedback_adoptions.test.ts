@@ -372,6 +372,94 @@ describe("level read on mine", () => {
   });
 });
 
+describe("grandfathered trust", () => {
+  const BEFORE = "2026-09-01T00:00:00.000Z";
+  const trustSince = (id: string, created: string, days = 30) =>
+    db.prepare("INSERT OR REPLACE INTO feedback_trust VALUES (?,?,?)").run(hashes.get(id), created, new Date(Date.parse(NOW) + days * 86400000).toISOString());
+  const shown = async (id = IDS[0]) => (await mine(id)).profile;
+  const TOP = { reportsPerHour: 12, reportsPerDay: 60, repliesPerHour: 10 };
+
+  it.each([0, 1, 5, 24, 48])("shows %i credits on an install trusted before any credit with the level and the trusted limits", async (n) => {
+    trustSince(IDS[0], BEFORE);
+    credit(IDS[0], n);
+    const p = await shown();
+    expect(p.effectiveLimits).toEqual(TOP);
+    expect(p.level).toBe([0, 1, 3, 6, 12, 24, 48].filter((t) => n >= t).length - 1);
+    expect(p.adoptedCount).toBe(n);
+  });
+
+  it("keeps 12/60/10 through the real credit path and shows the earned level", async () => {
+    trustSince(IDS[0], BEFORE);
+    await shipped(IDS[0], 800);
+    expect(await shown()).toMatchObject({ level: 1, adoptedCount: 1, trustState: "active", effectiveLimits: TOP });
+    expect(row<any>("SELECT created_at FROM feedback_trust").created_at).toBe(BEFORE);
+  });
+
+  it("keeps the same limits after the credit is voided", async () => {
+    trustSince(IDS[0], BEFORE);
+    const receipt = await shipped(IDS[0], 801);
+    await act(receipt, "adoption", {}, "DELETE");
+    expect(await shown()).toMatchObject({ level: 0, adoptedCount: 0, trustState: "active", effectiveLimits: TOP });
+  });
+
+  it("gives an install that earned its trust through credit its own level row", async () => {
+    await shipped(IDS[0], 802);
+    expect((await shown()).effectiveLimits).toEqual({ reportsPerHour: 5, reportsPerDay: 15, repliesPerHour: 4 });
+    credit(IDS[0], 24);
+    expect((await shown()).effectiveLimits).toEqual({ reportsPerHour: 12, reportsPerDay: 40, repliesPerHour: 10 });
+  });
+
+  it("does not grandfather trust granted after the first credit", async () => {
+    credit(IDS[0], 1);
+    trustSince(IDS[0], "2026-10-03T12:40:00.000Z");
+    expect((await shown()).effectiveLimits).toEqual({ reportsPerHour: 5, reportsPerDay: 15, repliesPerHour: 4 });
+  });
+
+  it("does not grandfather trust created at the instant of the first credit", async () => {
+    credit(IDS[0], 1);
+    trustSince(IDS[0], NOW);
+    expect((await shown()).effectiveLimits).toEqual({ reportsPerHour: 5, reportsPerDay: 15, repliesPerHour: 4 });
+  });
+
+  it("drops to the base tier on lapse and on revocation, even when grandfathered", async () => {
+    trustSince(IDS[0], BEFORE, -1);
+    credit(IDS[0], 5);
+    expect(await shown()).toMatchObject({ trustState: "lapsed", effectiveLimits: { reportsPerHour: 3, reportsPerDay: 10, repliesPerHour: 3 } });
+    trustSince(IDS[0], BEFORE);
+    const receipt = (await json(await submit(IDS[0]))).receipt as string;
+    expect((await act(receipt, "trust", {}, "DELETE")).status).toBe(200);
+    expect(await shown()).toMatchObject({ level: 2, trustState: "revoked", effectiveLimits: { reportsPerHour: 3, reportsPerDay: 10, repliesPerHour: 3 } });
+  });
+
+  it("admits submissions at the trusted tier and refuses beyond it", async () => {
+    trustSince(IDS[0], BEFORE);
+    credit(IDS[0], 1);
+    bucket("ih", IDS[0], 11);
+    expect((await send(IDS[0], `gf-ok-${++seq}`)).status).toBe(201);
+    expect((await json(await send(IDS[0], `gf-hour-${++seq}`))).error.params.limit).toBe("install_hourly");
+    db.exec("DELETE FROM feedback_quota");
+    bucket("id", IDS[0], 59);
+    expect((await send(IDS[0], `gf-d-ok-${++seq}`)).status).toBe(201);
+    expect((await json(await send(IDS[0], `gf-day-${++seq}`))).error.params.limit).toBe("install_daily");
+  });
+
+  it("admits replies at 10 per hour and skips the IP limiter, while a block still refuses", async () => {
+    trustSince(IDS[0], BEFORE);
+    credit(IDS[0], 1);
+    const receipt = await recorded(IDS[0], 803);
+    const reply = () => call(`/v1/feedback/${receipt}/reply`, { headers: as(IDS[0]), body: { body: "fixture reply" } });
+    bucket("rh", IDS[0], 9);
+    expect((await reply()).status).toBe(201);
+    bucket("rh", IDS[0], 10);
+    expect((await json(await reply())).error.params.limit).toBe("reply_hourly");
+    db.exec("DELETE FROM feedback_quota");
+    ipAllowed = false;
+    expect((await submit(IDS[0])).status).toBe(201);
+    block(IDS[0]);
+    expect((await submit(IDS[0])).status).toBe(429);
+  });
+});
+
 describe("admission by level", () => {
   const LEVELS: [number, number, number, number][] = [[1, 5, 15, 4], [3, 6, 20, 5], [6, 8, 25, 6], [12, 10, 30, 8], [24, 12, 40, 10], [48, 12, 60, 10]];
 

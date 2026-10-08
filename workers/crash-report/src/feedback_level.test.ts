@@ -7,7 +7,7 @@ const FUTURE = "2026-10-20T00:00:00.000Z";
 const PAST = "2026-10-01T00:00:00.000Z";
 const H = "a".repeat(64);
 const snap = (over: Partial<LevelSnapshot> = {}): LevelSnapshot => ({
-  installHash: H, adopted: 0, ledgerRows: over.adopted ?? 0, highWater: 0, trustExpiresAt: null, revoked: false, blocked: false, ...over,
+  installHash: H, adopted: 0, ledgerRows: over.adopted ?? 0, highWater: 0, trustExpiresAt: null, revoked: false, blocked: false, grandfathered: false, ...over,
 });
 const resolve = (over: Partial<LevelSnapshot> = {}) => resolveFeedbackLevel(H, snap(over), NOW);
 
@@ -87,6 +87,42 @@ describe("resolveFeedbackLevel", () => {
 
   it("reads trust expiry at the boundary as lapsed", () => {
     expect(resolve({ adopted: 1, trustExpiresAt: NOW.toISOString() }).trustState).toBe("lapsed");
+  });
+
+  it.each([0, 1, 5, 24, 48])("never drops a grandfathered trusted install below the trusted tier at %i credits", (n) => {
+    const r = resolve({ adopted: n, ledgerRows: Math.max(n, 1), trustExpiresAt: FUTURE, grandfathered: true });
+    expect(r.limits).toEqual({ hourly: 12, daily: 60, replies: 10 });
+    expect(r.trusted).toBe(true);
+    expect(r.level).toBe(FEEDBACK_LEVELS.filter((l) => n >= l.threshold).length - 1);
+    if (n > 0) expect(r.trustState).toBe("active");
+  });
+
+  it("applies the field-wise maximum, so no limit exceeds the trusted ceiling", () => {
+    for (const row of FEEDBACK_LEVELS) {
+      const r = resolve({ adopted: row.threshold, ledgerRows: 1, trustExpiresAt: FUTURE, grandfathered: true });
+      expect(r.limits.hourly).toBeLessThanOrEqual(TRUSTED_PER_INSTALL_HOURLY);
+      expect(r.limits.daily).toBeLessThanOrEqual(TRUSTED_PER_INSTALL_DAILY);
+      expect(r.limits.replies).toBeLessThanOrEqual(TRUSTED_REPLIES_PER_INSTALL_HOURLY);
+    }
+  });
+
+  it("keeps a non-grandfathered install on its own level row", () => {
+    expect(resolve({ adopted: 1, trustExpiresAt: FUTURE }).limits).toEqual({ hourly: 5, daily: 15, replies: 4 });
+    expect(resolve({ adopted: 24, trustExpiresAt: FUTURE }).limits).toEqual({ hourly: 12, daily: 40, replies: 10 });
+  });
+
+  it.each([
+    ["lapsed", { trustExpiresAt: PAST }],
+    ["lapsed without expiry row", {}],
+    ["revoked", { revoked: true }],
+  ])("gives a grandfathered install the base tier when trust is %s", (_n, over) => {
+    const r = resolve({ adopted: 7, ledgerRows: 7, grandfathered: true, ...over });
+    expect(r).toMatchObject({ trusted: false, limits: { hourly: 3, daily: 10, replies: 3 } });
+  });
+
+  it("never gives an untrusted install the ceiling, and keeps a voided ledger grandfathered", () => {
+    expect(resolve({ adopted: 0, ledgerRows: 0, grandfathered: true }).limits).toEqual({ hourly: 3, daily: 10, replies: 3 });
+    expect(resolve({ adopted: 0, ledgerRows: 2, trustExpiresAt: FUTURE, grandfathered: true })).toMatchObject({ level: 0, trustState: "active", limits: { hourly: 12, daily: 60, replies: 10 } });
   });
 
   it("refuses a snapshot that belongs to another install", () => {
