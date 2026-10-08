@@ -337,6 +337,33 @@ describe("composer stop under a starved window", () => {
 });
 
 describe("composer menus", () => {
+  it("shows the session's current model first and refreshes that position with canonical status", async () => {
+    const port = new MockPort();
+    const models: ModelEntry[] = [
+      { ref: "alpha/first", provider: "alpha", model: "first", vendor: "alpha.example" },
+      { ref: "alpha/second", provider: "alpha", model: "second", vendor: "alpha.example" },
+      { ref: "beta/third", provider: "beta", model: "third", vendor: "beta.example" },
+    ];
+    vi.spyOn(port, "models").mockResolvedValue(models);
+    const setModel = vi.spyOn(port, "setModel").mockResolvedValue(undefined);
+    const onChanged = vi.fn();
+    const props = { port, status: status({ modelRef: "beta/third" }), running: false,
+      onSubmit: async () => true, onChanged, onError: vi.fn() };
+    const view = render(<Composer {...props} />);
+    fireEvent.click(view.container.querySelector('button.model-picker')!);
+    await waitFor(() => expect(screen.getAllByRole("menuitem")).toHaveLength(4));
+    expect(screen.getAllByRole("menuitem")[0].getAttribute("data-value")).toBe("beta/third");
+    expect(screen.getAllByRole("menuitem")[0].hasAttribute("data-on")).toBe(true);
+    fireEvent.click(screen.getAllByRole("menuitem").find((el) => el.getAttribute("data-value") === "alpha/second")!);
+    await waitFor(() => expect(onChanged).toHaveBeenCalledOnce());
+    expect(setModel).toHaveBeenCalledExactlyOnceWith("alpha/second");
+    view.rerender(<Composer {...props} status={status({ modelRef: "alpha/second" })} />);
+    fireEvent.click(view.container.querySelector('button.model-picker')!);
+    expect(screen.getAllByRole("menuitem")[0].getAttribute("data-value")).toBe("alpha/second");
+    expect(screen.getAllByRole("menuitem")[0].hasAttribute("data-on")).toBe(true);
+    expect(screen.getAllByRole("menuitem").filter((el) => el.getAttribute("data-value") === "alpha/second")).toHaveLength(1);
+  });
+
   it("shows that slash skills are loading until the catalog answers", async () => {
     vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
     try {
